@@ -4,19 +4,20 @@ import vue from "@vitejs/plugin-vue";
 
 // @ts-expect-error process 是 Node.js 全局对象
 const host = process.env.TAURI_DEV_HOST;
+// @ts-expect-error process 是 Node.js 全局对象
+const port = Number(process.env.PORT) || 1420;
 
 export default defineConfig(async () => ({
   plugins: [vue()],
   clearScreen: false,
   server: {
-    port: 1420,
+    port,
     strictPort: true,
     host: host || false,
     hmr: host
       ? {
           protocol: "ws",
           host,
-          port: 1421,
         }
       : undefined,
     watch: {
