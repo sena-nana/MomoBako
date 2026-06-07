@@ -30,6 +30,8 @@ const createFileName = ref("");
 const renameValue = ref("");
 const renameTargetPath = ref<string | null>(null);
 const isDraggingFiles = ref(false);
+const isDraggingRepositoryFolder = ref(false);
+const emptyRepositoryError = ref("");
 const previewFilePath = ref<string | null>(null);
 const extensionKeyword = ref("");
 
@@ -54,6 +56,7 @@ const {
   selectAsset,
   loadFileBrowserForDirectory,
   createFileInWorkspace,
+  createNewRepository,
   importEntriesToWorkspace,
   renameWorkspaceEntry,
   deleteWorkspaceEntry,
@@ -201,6 +204,22 @@ function getDroppedSourcePaths(event: DragEvent) {
     .filter((path) => path.trim().length > 0);
 }
 
+function inferRepositoryNameFromPath(path: string) {
+  const segments = path.split(/[\\/]/).filter(Boolean);
+  return segments[segments.length - 1] ?? "新资源库";
+}
+
+async function createRepositoryFromFolder(path: string) {
+  const nextPath = path.trim();
+  if (!nextPath) return;
+  emptyRepositoryError.value = "";
+  try {
+    await createNewRepository(inferRepositoryNameFromPath(nextPath), nextPath, "builtin.local-filesystem");
+  } catch (cause) {
+    emptyRepositoryError.value = cause instanceof Error ? cause.message : String(cause);
+  }
+}
+
 function handleDragOver(event: DragEvent) {
   if (!hasRepository.value || !isFilesPanel.value) return;
   event.preventDefault();
@@ -223,6 +242,31 @@ async function handleDrop(event: DragEvent) {
   const sourcePaths = getDroppedSourcePaths(event);
   if (!sourcePaths.length) return;
   await importEntriesToWorkspace(sourcePaths);
+}
+
+function handleEmptyRepositoryDragOver(event: DragEvent) {
+  if (hasRepository.value) return;
+  event.preventDefault();
+  if (event.dataTransfer) {
+    event.dataTransfer.dropEffect = "copy";
+  }
+  isDraggingRepositoryFolder.value = true;
+}
+
+function handleEmptyRepositoryDragLeave(event: DragEvent) {
+  const currentTarget = event.currentTarget as HTMLElement | null;
+  const relatedTarget = event.relatedTarget as Node | null;
+  if (currentTarget && relatedTarget && currentTarget.contains(relatedTarget)) return;
+  isDraggingRepositoryFolder.value = false;
+}
+
+async function handleEmptyRepositoryDrop(event: DragEvent) {
+  event.preventDefault();
+  isDraggingRepositoryFolder.value = false;
+  const [path] = getDroppedSourcePaths(event);
+  if (path) {
+    await createRepositoryFromFolder(path);
+  }
 }
 
 async function handleCreateFile() {
@@ -336,8 +380,23 @@ function formatRepositoryStatus(status: string) {
   }
 }
 
-function requestAddRepository() {
-  window.dispatchEvent(new Event("momo:add-repository"));
+function getAnchorFromElement(element: EventTarget | null) {
+  if (!(element instanceof HTMLElement)) return null;
+  const rect = element.getBoundingClientRect();
+  return {
+    left: rect.left,
+    top: rect.top,
+    right: rect.right,
+    bottom: rect.bottom,
+  };
+}
+
+function requestAddRepository(event?: MouseEvent) {
+  window.dispatchEvent(new CustomEvent("momo:add-repository", {
+    detail: {
+      anchor: getAnchorFromElement(event?.currentTarget ?? null),
+    },
+  }));
 }
 
 const searchSummary = computed(() => {
@@ -352,6 +411,21 @@ onMounted(() => {
   try {
     const currentWindow = getCurrentWindow();
     currentWindow.onDragDropEvent(({ payload }) => {
+      if (!hasRepository.value) {
+        if (payload.type === "enter" || payload.type === "over") {
+          isDraggingRepositoryFolder.value = true;
+          return;
+        }
+        if (payload.type === "leave") {
+          isDraggingRepositoryFolder.value = false;
+          return;
+        }
+        isDraggingRepositoryFolder.value = false;
+        if (payload.paths.length) {
+          void createRepositoryFromFolder(payload.paths[0]);
+        }
+        return;
+      }
       if (!hasRepository.value || !isFilesPanel.value) return;
       if (payload.type === "enter" || payload.type === "over") {
         isDraggingFiles.value = true;
@@ -388,7 +462,7 @@ onUnmounted(() => {
       <header class="library-overview__header">
         <div>
           <p class="asset-browser__eyebrow">当前资源库</p>
-          <h1>{{ activeSnapshot?.repository.name ?? "资源库" }}</h1>
+          <h1>{{ activeSnapshot?.repository.name ?? "正在加载" }}</h1>
           <p class="library-overview__subline">
             {{ activeSnapshot?.repository.path }}
           </p>
@@ -821,8 +895,20 @@ onUnmounted(() => {
     </div>
   </section>
 
-  <section v-else class="empty-state-page">
-    <h1>还没有可用资源库</h1>
-    <p>请先添加资源库。</p>
+  <section
+    v-else
+    class="empty-state-page"
+    :class="{ 'is-dragging': isDraggingRepositoryFolder }"
+    @dragover="handleEmptyRepositoryDragOver"
+    @dragleave="handleEmptyRepositoryDragLeave"
+    @drop="handleEmptyRepositoryDrop"
+  >
+    <div class="empty-state-page__panel">
+      <h1>还没有可用资源库</h1>
+      <p>拖入一个本地文件夹创建资源库。</p>
+      <p v-if="emptyRepositoryError" class="empty-state-page__error">
+        {{ emptyRepositoryError }}
+      </p>
+    </div>
   </section>
 </template>
