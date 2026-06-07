@@ -34,12 +34,12 @@ describe("单应用模板工具链", () => {
     expect(deps.zod).toBeUndefined();
   });
 
-  it("Rust 端只新增通用窗口状态 store 插件", () => {
+  it("Rust 端包含仓库服务所需依赖", () => {
     const cargo = readFileSync(resolve("src-tauri/Cargo.toml"), "utf-8");
 
     expect(cargo).toContain('tauri-plugin-store = "2"');
-    expect(cargo).not.toContain("rusqlite");
-    expect(cargo).not.toContain("r2d2");
+    expect(cargo).toContain("rusqlite");
+    expect(cargo).toContain("time");
     expect(cargo).not.toContain("reqwest");
   });
 });

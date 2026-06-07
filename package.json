@@ -15,11 +15,13 @@
   },
   "dependencies": {
     "@tauri-apps/api": "^2",
+    "@tauri-apps/plugin-dialog": "^2",
     "@tauri-apps/plugin-opener": "^2",
     "@tauri-apps/plugin-store": "^2",
     "lucide-vue-next": "^1.0.0",
     "vue": "^3.5.34",
-    "vue-router": "^5.0.7"
+    "vue-router": "^5.0.7",
+    "vue3-markdown-it": "^1.0.10"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2",
