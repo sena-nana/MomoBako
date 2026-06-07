@@ -60,7 +60,7 @@ const {
   activeRepoId,
   activeSnapshot,
   currentDirectoryPath,
-  fileBrowser,
+  fileTree,
   searchResults,
   isBusy,
   isLoadingFileBrowser,
@@ -69,6 +69,7 @@ const {
   error,
   ensureRepositoryWorkspace,
   refreshRepositoryWorkspace,
+  refreshFileBrowserTree,
   selectRepository,
   selectAsset,
   setActivePanel,
@@ -114,7 +115,7 @@ const shortcuts = computed(() => {
 
 const isEmptyWorkspace = computed(() => repositories.value.length === 0);
 const expandedFolderPathSet = computed(() => new Set(expandedFolderPaths.value));
-const fileTreeNodes = computed(() => fileBrowser.value?.tree ?? []);
+const fileTreeNodes = computed(() => fileTree.value);
 const backendOptions = computed(() => repositoryBackendOptions.value.map((item) => ({
   value: item.pluginId,
   label: item.name,
@@ -583,7 +584,7 @@ onMounted(() => {
                 :disabled="!activeRepoId || isLoadingFileBrowser"
                 title="刷新文件夹树"
                 aria-label="刷新文件夹树"
-                @click="loadFileBrowserForDirectory(currentDirectoryPath)"
+                @click="refreshFileBrowserTree"
               >
                 <RefreshCw v-if="!isLoadingFileBrowser" :size="13" aria-hidden="true" />
                 <LoaderCircle v-else class="spin" :size="13" aria-hidden="true" />
