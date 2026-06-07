@@ -13,23 +13,36 @@ import {
   Settings,
   Tag,
   Trash2,
+  X,
 } from "lucide-vue-next";
 import FolderTreeNode from "../components/FolderTreeNode.vue";
-import Dropdown from "../components/Dropdown.vue";
 import { useRepositoryWorkspace, type WorkspacePanelKey } from "../composables/useRepositoryWorkspace";
 import type { FileDeleteMode } from "../types/repository";
 
 type PanelKey = Exclude<WorkspacePanelKey, "files" | "search">;
 
-const showBackendDialog = ref(false);
+type AddRepositoryPopoverMode = "closed" | "menu" | "form";
+type AddRepositoryAnchor = {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+};
+type AddRepositoryRequestDetail = {
+  anchor?: AddRepositoryAnchor;
+};
+
+const addRepositoryPopoverMode = ref<AddRepositoryPopoverMode>("closed");
+const addRepositoryPopoverPosition = ref({ left: 0, top: 0 });
+const addRepositoryPopoverRef = ref<HTMLElement | null>(null);
 const backendPluginId = ref("builtin.local-filesystem");
 const backendName = ref("");
-const backendPath = ref("");
 const backendUrl = ref("");
 const backendUsername = ref("");
 const backendPassword = ref("");
 const backendRoot = ref("");
 const isSubmittingBackend = ref(false);
+const addRepositoryError = ref("");
 const expandedFolderPaths = ref<string[]>([]);
 const showFolderDialog = ref(false);
 const folderDialogMode = ref<"create" | "rename">("create");
@@ -84,20 +97,16 @@ const fileTreeNodes = computed(() => fileTree.value);
 const backendOptions = computed(() => repositoryBackendOptions.value.map((item) => ({
   value: item.pluginId,
   label: item.name,
-  hint: item.enabled ? item.description : `${item.description}（未启用）`,
+  enabled: item.enabled,
 })));
 const selectedBackend = computed(() => (
   repositoryBackendOptions.value.find((item) => item.pluginId === backendPluginId.value)
   ?? repositoryBackendOptions.value[0]
   ?? null
 ));
-const isLocalBackend = computed(() => backendPluginId.value === "builtin.local-filesystem");
 const backendSubmitDisabled = computed(() => {
   if (!selectedBackend.value?.enabled) {
     return true;
-  }
-  if (isLocalBackend.value) {
-    return !backendPath.value.trim();
   }
   return !backendUrl.value.trim();
 });
@@ -163,20 +172,70 @@ function repositoryInitial(name: string) {
   return name.trim().slice(0, 2).toUpperCase() || "库";
 }
 
-function openBackendDialog() {
-  backendPluginId.value = repositoryBackendOptions.value[0]?.pluginId ?? "builtin.local-filesystem";
+function resetBackendForm(pluginId = repositoryBackendOptions.value[0]?.pluginId ?? "builtin.local-filesystem") {
+  backendPluginId.value = pluginId;
   backendName.value = "";
-  backendPath.value = "";
   backendUrl.value = "";
   backendUsername.value = "";
   backendPassword.value = "";
   backendRoot.value = "";
-  showBackendDialog.value = true;
+  addRepositoryError.value = "";
 }
 
-function closeBackendDialog() {
+function getAnchorFromElement(element: EventTarget | null): AddRepositoryAnchor | null {
+  if (!(element instanceof HTMLElement)) return null;
+  const rect = element.getBoundingClientRect();
+  return {
+    left: rect.left,
+    top: rect.top,
+    right: rect.right,
+    bottom: rect.bottom,
+  };
+}
+
+function getPopoverPosition(anchor?: AddRepositoryAnchor | null) {
+  const fallback = {
+    left: 16,
+    top: 44,
+    right: 16,
+    bottom: 44,
+  };
+  const current = anchor ?? fallback;
+  const width = 320;
+  const maxLeft = Math.max(8, window.innerWidth - width - 8);
+  const left = Math.max(8, Math.min(current.left, maxLeft));
+  const top = Math.max(8, Math.min(current.bottom + 6, window.innerHeight - 80));
+  return { left, top };
+}
+
+function openAddRepositoryMenu(anchor?: AddRepositoryAnchor | null) {
+  if (!isSubmittingBackend.value) {
+    resetBackendForm();
+  }
+  addRepositoryPopoverPosition.value = getPopoverPosition(anchor);
+  addRepositoryPopoverMode.value = "menu";
+}
+
+function openAddRepositoryMenuFromEvent(event: MouseEvent) {
+  openAddRepositoryMenu(getAnchorFromElement(event.currentTarget));
+}
+
+function closeAddRepositoryPopover() {
   if (isSubmittingBackend.value) return;
-  showBackendDialog.value = false;
+  addRepositoryPopoverMode.value = "closed";
+}
+
+async function selectBackend(pluginId: string) {
+  if (isSubmittingBackend.value) return;
+  const backend = repositoryBackendOptions.value.find((item) => item.pluginId === pluginId);
+  if (!backend?.enabled) return;
+  resetBackendForm(pluginId);
+  if (pluginId === "builtin.local-filesystem") {
+    await chooseLocalFolderAndCreate();
+    return;
+  }
+  backendPluginId.value = pluginId;
+  addRepositoryPopoverMode.value = "form";
 }
 
 function toggleFolderExpansion(path: string) {
@@ -258,60 +317,98 @@ async function confirmDeleteFolder(mode: FileDeleteMode) {
   }
 }
 
-async function chooseLocalFolder() {
+async function chooseLocalFolderAndCreate() {
+  addRepositoryError.value = "";
+  const previousPosition = addRepositoryPopoverPosition.value;
+  addRepositoryPopoverMode.value = "closed";
   const selected = await open({
     directory: true,
     multiple: false,
     title: "选择资源库文件夹",
   });
   if (typeof selected === "string" && selected.trim()) {
-    backendPath.value = selected;
-    if (!backendName.value.trim()) {
-      const segments = selected.split(/[\\/]/).filter(Boolean);
-      backendName.value = segments[segments.length - 1] ?? "";
-    }
+    await createLocalRepositoryFromPath(selected, previousPosition);
   }
 }
 
-async function submitBackendDialog() {
-  if (backendSubmitDisabled.value) return;
+function inferRepositoryNameFromPath(path: string) {
+  const segments = path.split(/[\\/]/).filter(Boolean);
+  return segments[segments.length - 1] ?? "";
+}
+
+async function createLocalRepositoryFromPath(path: string, fallbackPosition = addRepositoryPopoverPosition.value) {
+  const nextPath = path.trim();
+  if (!nextPath) return false;
+  backendPluginId.value = "builtin.local-filesystem";
+  const name = backendName.value.trim() || inferRepositoryNameFromPath(nextPath) || "新资源库";
+  addRepositoryError.value = "";
   isSubmittingBackend.value = true;
   try {
-    if (isLocalBackend.value) {
-      const path = backendPath.value.trim();
-      const segments = path.split(/[\\/]/).filter(Boolean);
-      const inferredName = segments[segments.length - 1] ?? "";
-      const name = backendName.value.trim() || inferredName || "新资源库";
-      await createNewRepository(name, path, backendPluginId.value);
-    } else {
-      const name = backendName.value.trim() || selectedBackend.value.name;
-      const path = backendUrl.value.trim();
-      await createNewRepository(name, path, backendPluginId.value, {
-        baseUrl: backendUrl.value.trim(),
-        username: backendUsername.value.trim() || undefined,
-        password: backendPassword.value.trim() || undefined,
-        rootPath: backendRoot.value.trim() || "",
-      });
-    }
-    showBackendDialog.value = false;
+    await createNewRepository(name, nextPath, "builtin.local-filesystem");
+    addRepositoryPopoverMode.value = "closed";
+    return true;
   } catch (cause) {
+    addRepositoryError.value = cause instanceof Error ? cause.message : String(cause);
+    addRepositoryPopoverPosition.value = fallbackPosition;
+    addRepositoryPopoverMode.value = "menu";
+    console.error("failed to create repository backend", cause);
+    return false;
+  } finally {
+    isSubmittingBackend.value = false;
+  }
+}
+
+async function submitAddRepositoryForm() {
+  if (backendSubmitDisabled.value) return;
+  isSubmittingBackend.value = true;
+  addRepositoryError.value = "";
+  try {
+    const name = backendName.value.trim() || selectedBackend.value?.name || "新资源库";
+    const path = backendUrl.value.trim();
+    await createNewRepository(name, path, backendPluginId.value, {
+      baseUrl: path,
+      username: backendUsername.value.trim() || undefined,
+      password: backendPassword.value.trim() || undefined,
+      rootPath: backendRoot.value.trim() || "",
+    });
+    addRepositoryPopoverMode.value = "closed";
+  } catch (cause) {
+    addRepositoryError.value = cause instanceof Error ? cause.message : String(cause);
     console.error("failed to create repository backend", cause);
   } finally {
     isSubmittingBackend.value = false;
   }
 }
 
-function handleAddRepositoryRequest() {
-  openBackendDialog();
+function handleAddRepositoryRequest(event: Event) {
+  const detail = (event as CustomEvent<AddRepositoryRequestDetail>).detail;
+  openAddRepositoryMenu(detail?.anchor);
+}
+
+function handleDocumentKeydown(event: KeyboardEvent) {
+  if (event.key === "Escape" && addRepositoryPopoverMode.value !== "closed") {
+    closeAddRepositoryPopover();
+  }
+}
+
+function handleDocumentPointerDown(event: PointerEvent) {
+  if (addRepositoryPopoverMode.value === "closed" || isSubmittingBackend.value) return;
+  const target = event.target as Node | null;
+  if (target && addRepositoryPopoverRef.value?.contains(target)) return;
+  closeAddRepositoryPopover();
 }
 
 onMounted(() => {
   void ensureRepositoryWorkspace();
   window.addEventListener("momo:add-repository", handleAddRepositoryRequest);
+  document.addEventListener("keydown", handleDocumentKeydown);
+  document.addEventListener("pointerdown", handleDocumentPointerDown, true);
 });
 
 onBeforeUnmount(() => {
   window.removeEventListener("momo:add-repository", handleAddRepositoryRequest);
+  document.removeEventListener("keydown", handleDocumentKeydown);
+  document.removeEventListener("pointerdown", handleDocumentPointerDown, true);
 });
 </script>
 
@@ -334,7 +431,7 @@ onBeforeUnmount(() => {
             class="workspace-panel__refresh"
             aria-label="添加资源库"
             title="添加资源库"
-            @click="openBackendDialog"
+            @click="openAddRepositoryMenuFromEvent"
           >
             <Plus :size="14" aria-hidden="true" />
           </button>
@@ -354,7 +451,6 @@ onBeforeUnmount(() => {
             <span>{{ repositoryInitial(library.name) }}</span>
           </button>
         </div>
-
       </section>
 
       <section class="workspace-sidebar__files" aria-label="文件管理">
@@ -483,87 +579,101 @@ onBeforeUnmount(() => {
   </aside>
 
   <Teleport to="body">
-    <Transition name="modal">
-      <div
-        v-if="showBackendDialog"
-        class="modal-overlay"
-        role="dialog"
-        aria-modal="true"
+    <Transition name="panel">
+      <section
+        v-if="addRepositoryPopoverMode !== 'closed'"
+        ref="addRepositoryPopoverRef"
+        class="repository-add-popover"
+        :class="{ 'ctx-menu': addRepositoryPopoverMode === 'menu' }"
+        :style="{ left: `${addRepositoryPopoverPosition.left}px`, top: `${addRepositoryPopoverPosition.top}px` }"
         aria-label="添加资源库"
-        @click.self="closeBackendDialog"
       >
-        <div class="modal-card dialog-card backend-dialog">
-          <div class="dialog-card__header">
-            <span>添加资源库</span>
-          </div>
-          <div class="dialog-card__body backend-dialog__body">
-            <p class="backend-dialog__summary">
-              {{ selectedBackend?.description ?? "选择文件系统后端并填写配置。" }}
+        <template v-if="addRepositoryPopoverMode === 'menu'">
+          <button
+            v-for="option in backendOptions"
+            :key="option.value"
+            type="button"
+            class="ctx-menu__item"
+            :disabled="isSubmittingBackend || !option.enabled"
+            @click="selectBackend(String(option.value))"
+          >
+            {{ option.label }}
+          </button>
+
+          <p v-if="addRepositoryError" class="repository-add-popover__error">
+            {{ addRepositoryError }}
+          </p>
+        </template>
+
+        <template v-else>
+          <header class="repository-add-popover__header">
+            <span>{{ selectedBackend?.name ?? "添加资源库" }}</span>
+            <button
+              type="button"
+              class="repository-add-popover__close"
+              title="关闭"
+              aria-label="关闭添加资源库"
+              :disabled="isSubmittingBackend"
+              @click="closeAddRepositoryPopover"
+            >
+              <X :size="13" aria-hidden="true" />
+            </button>
+          </header>
+
+          <div class="repository-add-popover__body">
+            <p class="repository-add-popover__summary">
+              {{ selectedBackend?.description ?? "填写资源库配置。" }}
             </p>
 
-            <label class="backend-dialog__field">
-              <span>文件系统后端</span>
-              <Dropdown
-                v-model="backendPluginId"
-                :options="backendOptions"
-                placement="bottom"
-              />
-            </label>
-
-            <label class="backend-dialog__field">
+            <label class="repository-add-popover__field">
               <span>资源库名称</span>
-              <input v-model="backendName" type="text" placeholder="可选，默认使用路径或后端名称" />
+              <input v-model="backendName" type="text" placeholder="可选，默认使用后端名称" :disabled="isSubmittingBackend" />
             </label>
 
-            <template v-if="isLocalBackend">
-              <label class="backend-dialog__field">
-                <span>本地路径</span>
-                <div class="backend-dialog__path-row">
-                  <input v-model="backendPath" type="text" placeholder="选择本地文件夹" />
-                  <button type="button" class="ghost" @click="chooseLocalFolder">选择</button>
-                </div>
-              </label>
-            </template>
+            <label class="repository-add-popover__field">
+              <span>服务地址</span>
+              <input v-model="backendUrl" type="url" placeholder="https://example.com/dav/" :disabled="isSubmittingBackend" />
+            </label>
+            <label class="repository-add-popover__field">
+              <span>根目录</span>
+              <input v-model="backendRoot" type="text" placeholder="/assets/anime" :disabled="isSubmittingBackend" />
+            </label>
+            <label class="repository-add-popover__field">
+              <span>用户名</span>
+              <input v-model="backendUsername" type="text" placeholder="可选" :disabled="isSubmittingBackend" />
+            </label>
+            <label class="repository-add-popover__field">
+              <span>密码 / Token</span>
+              <input v-model="backendPassword" type="password" placeholder="可选" :disabled="isSubmittingBackend" />
+            </label>
+            <p class="repository-add-popover__note">
+              当前仅完成后端配置入口与服务端抽象。远端适配器尚未实现，请先用于配置演进与契约联调。
+            </p>
 
-            <template v-else>
-              <label class="backend-dialog__field">
-                <span>服务地址</span>
-                <input v-model="backendUrl" type="url" placeholder="https://example.com/dav/" />
-              </label>
-              <label class="backend-dialog__field">
-                <span>根目录</span>
-                <input v-model="backendRoot" type="text" placeholder="/assets/anime" />
-              </label>
-              <div class="backend-dialog__grid">
-                <label class="backend-dialog__field">
-                  <span>用户名</span>
-                  <input v-model="backendUsername" type="text" placeholder="可选" />
-                </label>
-                <label class="backend-dialog__field">
-                  <span>密码 / Token</span>
-                  <input v-model="backendPassword" type="password" placeholder="可选" />
-                </label>
-              </div>
-              <p class="backend-dialog__note">
-                当前仅完成后端配置入口与服务端抽象。远端适配器尚未实现，请先用于配置演进与契约联调。
-              </p>
-            </template>
+            <p v-if="addRepositoryError" class="repository-add-popover__error">
+              {{ addRepositoryError }}
+            </p>
           </div>
-          <div class="dialog-card__actions">
-            <button type="button" class="ghost" :disabled="isSubmittingBackend" @click="closeBackendDialog">
+
+          <div class="repository-add-popover__actions">
+            <button type="button" class="ghost" :disabled="isSubmittingBackend" @click="addRepositoryPopoverMode = 'menu'">
+              返回
+            </button>
+            <button type="button" class="ghost" :disabled="isSubmittingBackend" @click="closeAddRepositoryPopover">
               取消
             </button>
             <button
               type="button"
               class="primary"
               :disabled="isSubmittingBackend || backendSubmitDisabled"
-              @click="submitBackendDialog"
+              @click="submitAddRepositoryForm"
             >
-              {{ isSubmittingBackend ? "正在创建..." : "创建" }}
+              <LoaderCircle v-if="isSubmittingBackend" class="spin" :size="13" aria-hidden="true" />
+              {{ isSubmittingBackend ? "创建中" : "创建" }}
             </button>
           </div>
-        </div>
-      </div>
+        </template>
+      </section>
     </Transition>
   </Teleport>
 
@@ -589,7 +699,7 @@ onBeforeUnmount(() => {
                   : `正在重命名 ${folderDialogLabel}。`
               }}
             </p>
-            <label class="backend-dialog__field">
+            <label class="dialog-field">
               <span>文件夹名称</span>
               <input
                 v-model="folderDialogValue"

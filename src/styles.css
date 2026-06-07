@@ -666,68 +666,141 @@ kbd {
   line-height: 1.5;
 }
 
-.backend-dialog {
-  width: min(560px, calc(100vw - 32px));
-}
-
-.backend-dialog__body {
+.repository-add-popover {
+  position: fixed;
+  z-index: 1900;
+  width: min(320px, calc(100vw - 16px));
+  max-height: min(560px, calc(100vh - 16px));
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 10px;
+  padding: 10px;
+  overflow: auto;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--bg-elev);
+  box-shadow: 0 12px 32px -12px rgba(0, 0, 0, 0.62);
 }
 
-.backend-dialog__summary {
+.repository-add-popover__header,
+.repository-add-popover__actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.repository-add-popover__header {
+  min-height: 24px;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.repository-add-popover__close {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-faint);
+}
+
+.repository-add-popover__close:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text);
+  filter: none;
+}
+
+.repository-add-popover__body,
+.dialog-field {
+  display: flex;
+  flex-direction: column;
+}
+
+.repository-add-popover__body {
+  gap: 10px;
+}
+
+.repository-add-popover__summary {
   margin: 0;
   color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.45;
 }
 
-.backend-dialog__field {
+.repository-add-popover__field,
+.dialog-field {
   display: flex;
   flex-direction: column;
   gap: 6px;
 }
 
-.backend-dialog__field > span {
+.repository-add-popover__field > span,
+.dialog-field > span {
   color: var(--text-muted);
   font-size: 12px;
   font-weight: 600;
 }
 
-.backend-dialog__field input {
+.repository-add-popover__field input,
+.dialog-field input {
   width: 100%;
-  min-height: 36px;
-  padding: 8px 10px;
-  border-radius: 8px;
+  min-height: 32px;
+  padding: 6px 8px;
+  border-radius: 6px;
   border: 1px solid var(--border);
   background: var(--bg);
   color: var(--text);
 }
 
-.backend-dialog__field input:focus {
+.repository-add-popover__field input:focus,
+.dialog-field input:focus {
   outline: none;
   border-color: var(--accent);
   box-shadow: 0 0 0 1px var(--accent);
 }
 
-.backend-dialog__path-row {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 8px;
-}
-
-.backend-dialog__grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-}
-
-.backend-dialog__note {
+.repository-add-popover__note,
+.repository-add-popover__error {
   margin: 0;
-  padding: 10px 12px;
-  border-radius: 8px;
+  padding: 8px 10px;
+  border-radius: 7px;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.repository-add-popover__note {
   background: var(--warn-soft);
   color: var(--warn);
-  font-size: 12px;
+}
+
+.repository-add-popover__error {
+  background: var(--err-soft);
+  color: var(--err);
+}
+
+.repository-add-popover__actions {
+  justify-content: flex-end;
+  padding-top: 2px;
+  flex-wrap: wrap;
+}
+
+.repository-add-popover__actions button {
+  height: 30px;
+  padding: 0 10px;
+}
+
+.panel-enter-active,
+.panel-leave-active {
+  transition: opacity 0.14s ease, transform 0.16s ease;
+}
+
+.panel-enter-from,
+.panel-leave-to {
+  opacity: 0;
+  transform: translateY(-4px);
 }
 
 .asset-workbench {
@@ -1512,6 +1585,23 @@ kbd {
   text-align: center;
 }
 
+.empty-state-page__panel {
+  width: min(520px, 100%);
+  min-height: 220px;
+  padding: 28px 16px;
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  transition: background-color 0.12s ease, box-shadow 0.12s ease;
+}
+
+.empty-state-page.is-dragging .empty-state-page__panel {
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
 .empty-state-page h1 {
   margin: 0;
   font-size: 18px;
@@ -1522,6 +1612,16 @@ kbd {
   margin: 10px 0 0;
   color: var(--text-muted);
   font-size: 13px;
+}
+
+.empty-state-page__error {
+  width: 100%;
+  max-width: 420px;
+  padding: 8px 10px;
+  border-radius: 7px;
+  background: var(--err-soft);
+  color: var(--err) !important;
+  line-height: 1.45;
 }
 
 .asset-browser,
