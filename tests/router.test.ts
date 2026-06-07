@@ -22,6 +22,21 @@ async function renderApp() {
   });
 }
 
+function shellElement() {
+  const shell = document.querySelector(".shell");
+  expect(shell).toBeInstanceOf(HTMLElement);
+  return shell as HTMLElement;
+}
+
+function pointerEvent(type: string, clientX: number) {
+  return new PointerEvent(type, {
+    bubbles: true,
+    button: 0,
+    clientX,
+    pointerId: 1,
+  });
+}
+
 describe("文件管理冒烟", () => {
   it("保留目录按需加载，并在结构变化后刷新文件夹树", async () => {
     seedMockRepository();
@@ -96,5 +111,48 @@ describe("文件管理冒烟", () => {
 
     await fireEvent.click(settingsButton);
     expect(await screen.findByRole("heading", { name: "设置" })).toBeInTheDocument();
+  });
+
+  it("支持折叠、拖拽调整和重置侧边栏宽度", async () => {
+    seedMockRepository();
+    const workspace = useRepositoryWorkspace();
+    workspace.setActivePanel("files");
+    await renderApp();
+
+    const shell = shellElement();
+    const toggleButton = screen.getByRole("button", { name: "折叠侧边栏" });
+    const resizer = screen.getByRole("separator", { name: "拖动调整侧边栏宽度（双击恢复默认）" });
+
+    expect(shell).not.toHaveClass("is-sidebar-collapsed");
+    expect(shell.style.getPropertyValue("--sidebar-width")).toBe("276px");
+
+    await fireEvent.click(toggleButton);
+    expect(shell).toHaveClass("is-sidebar-collapsed");
+    expect(localStorage.getItem("momobako.sidebarCollapsed")).toBe("1");
+    expect(screen.getByRole("button", { name: "展开侧边栏" })).toBeInTheDocument();
+
+    await fireEvent.click(screen.getByRole("button", { name: "展开侧边栏" }));
+    expect(shell).not.toHaveClass("is-sidebar-collapsed");
+    expect(localStorage.getItem("momobako.sidebarCollapsed")).toBe("0");
+
+    resizer.dispatchEvent(pointerEvent("pointerdown", 276));
+    window.dispatchEvent(pointerEvent("pointermove", 420));
+    window.dispatchEvent(pointerEvent("pointerup", 420));
+    await waitFor(() => {
+      expect(shell.style.getPropertyValue("--sidebar-width")).toBe("420px");
+    });
+    expect(localStorage.getItem("momobako.sidebarWidth")).toBe("420");
+
+    resizer.dispatchEvent(pointerEvent("pointerdown", 420));
+    window.dispatchEvent(pointerEvent("pointermove", 1000));
+    window.dispatchEvent(pointerEvent("pointerup", 1000));
+    await waitFor(() => {
+      expect(shell.style.getPropertyValue("--sidebar-width")).toBe("480px");
+    });
+    expect(localStorage.getItem("momobako.sidebarWidth")).toBe("480");
+
+    await fireEvent.dblClick(resizer);
+    expect(shell.style.getPropertyValue("--sidebar-width")).toBe("276px");
+    expect(localStorage.getItem("momobako.sidebarWidth")).toBe("276");
   });
 });
