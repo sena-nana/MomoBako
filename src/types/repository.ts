@@ -166,6 +166,11 @@ export type FileBrowserRequest = {
   includeTree?: boolean;
 };
 
+export type FileReadRequest = {
+  repoId: string;
+  path: string;
+};
+
 export type FileCreateRequest = {
   repoId: string;
   parentPath?: string;

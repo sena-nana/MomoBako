@@ -1,7 +1,7 @@
 use crate::repository_service::{
-    FileBrowserRequest, FileCreateRequest, FileDeleteRequest, FileImportRequest, FileRenameRequest,
-    MetadataUpdateRequest, RepositoryFolderRequest, RepositoryMutationRequest, RepositoryState,
-    RevisionActionRequest, SearchRequest, SyncRequest,
+    FileBrowserRequest, FileCreateRequest, FileDeleteRequest, FileImportRequest, FileReadRequest,
+    FileRenameRequest, MetadataUpdateRequest, RepositoryFolderRequest, RepositoryMutationRequest,
+    RepositoryState, RevisionActionRequest, SearchRequest, SyncRequest,
 };
 use notify::{Config, Event, RecommendedWatcher, RecursiveMode, Watcher};
 use serde::{Deserialize, Serialize};
@@ -53,6 +53,9 @@ enum ServiceRequest {
     },
     GetFileBrowser {
         request: FileBrowserRequest,
+    },
+    ReadFile {
+        request: FileReadRequest,
     },
     CreateDirectory {
         request: FileCreateRequest,
@@ -170,12 +173,9 @@ impl ServiceBridge {
             .read_to_string(&mut response_raw)
             .map_err(|error| error.to_string())?;
 
-        let body = response_raw
-            .split("\r\n\r\n")
-            .nth(1)
-            .ok_or_else(|| "invalid service response".to_string())?;
+        let body = decode_http_response_body(&response_raw)?;
         let response: ServiceResponse<T> =
-            serde_json::from_str(body).map_err(|error| error.to_string())?;
+            serde_json::from_slice(&body).map_err(|error| error.to_string())?;
         if response.ok {
             response
                 .data
@@ -343,6 +343,12 @@ fn dispatch_request(
                 .lock()
                 .map_err(|_| "service state lock poisoned".to_string())?;
             to_value(state.load_file_browser(request)?)
+        }
+        ServiceRequest::ReadFile { request } => {
+            let state = repository_state
+                .lock()
+                .map_err(|_| "service state lock poisoned".to_string())?;
+            to_value(state.read_file(request)?)
         }
         ServiceRequest::CreateDirectory { request } => {
             let response = {
@@ -520,6 +526,68 @@ fn json_response<T: Serialize>(payload: &T) -> Response<std::io::Cursor<Vec<u8>>
     Response::from_data(body).with_status_code(StatusCode(200))
 }
 
+fn decode_http_response_body(response_raw: &str) -> Result<Vec<u8>, String> {
+    let (headers, body) = response_raw
+        .split_once("\r\n\r\n")
+        .ok_or_else(|| "invalid service response".to_string())?;
+
+    if headers.lines().any(|line| {
+        let line = line.trim();
+        line.len() >= "Transfer-Encoding:".len()
+            && line[.."Transfer-Encoding:".len()].eq_ignore_ascii_case("Transfer-Encoding:")
+            && line["Transfer-Encoding:".len()..]
+                .split(',')
+                .any(|encoding| encoding.trim().eq_ignore_ascii_case("chunked"))
+    }) {
+        decode_chunked_body(body)
+    } else {
+        Ok(body.as_bytes().to_vec())
+    }
+}
+
+fn decode_chunked_body(body: &str) -> Result<Vec<u8>, String> {
+    let bytes = body.as_bytes();
+    let mut cursor = 0usize;
+    let mut decoded = Vec::new();
+
+    loop {
+        let size_end = find_crlf(bytes, cursor)
+            .ok_or_else(|| "invalid chunked service response".to_string())?;
+        let size_text = std::str::from_utf8(&bytes[cursor..size_end])
+            .map_err(|error| error.to_string())?
+            .split(';')
+            .next()
+            .unwrap_or_default()
+            .trim();
+        let size = usize::from_str_radix(size_text, 16)
+            .map_err(|error| format!("invalid chunk size: {error}"))?;
+        cursor = size_end + 2;
+
+        if size == 0 {
+            break;
+        }
+
+        let chunk_end = cursor
+            .checked_add(size)
+            .ok_or_else(|| "chunked service response is too large".to_string())?;
+        if chunk_end + 2 > bytes.len() || &bytes[chunk_end..chunk_end + 2] != b"\r\n" {
+            return Err("invalid chunked service response".to_string());
+        }
+        decoded.extend_from_slice(&bytes[cursor..chunk_end]);
+        cursor = chunk_end + 2;
+    }
+
+    Ok(decoded)
+}
+
+fn find_crlf(bytes: &[u8], start: usize) -> Option<usize> {
+    bytes
+        .get(start..)?
+        .windows(2)
+        .position(|window| window == b"\r\n")
+        .map(|position| start + position)
+}
+
 fn ping_service(addr: &str) -> Result<(), String> {
     let bridge = ServiceBridge {
         addr: addr.to_string(),
@@ -555,4 +623,54 @@ fn handle_fs_event(repository_state: &Arc<Mutex<RepositoryState>>, event: Event)
 
 fn normalize_path(path: &Path) -> String {
     path.to_string_lossy().replace('\\', "/")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn decodes_plain_http_response_body() {
+        let raw = "HTTP/1.1 200 OK\r\nContent-Length: 31\r\n\r\n{\"ok\":true,\"data\":\"pong\"}";
+
+        let body = decode_http_response_body(raw).expect("plain body should decode");
+
+        assert_eq!(body, br#"{"ok":true,"data":"pong"}"#);
+    }
+
+    #[test]
+    fn decodes_chunked_http_response_body() {
+        let raw = concat!(
+            "HTTP/1.1 200 OK\r\n",
+            "Transfer-Encoding: chunked\r\n",
+            "\r\n",
+            "5\r\n",
+            "{\"ok\"",
+            "\r\n",
+            "14\r\n",
+            ":true,\"data\":\"pong\"}",
+            "\r\n",
+            "0\r\n",
+            "\r\n"
+        );
+
+        let body = decode_http_response_body(raw).expect("chunked body should decode");
+
+        assert_eq!(body, br#"{"ok":true,"data":"pong"}"#);
+    }
+
+    #[test]
+    fn rejects_invalid_chunked_http_response_body() {
+        let raw = concat!(
+            "HTTP/1.1 200 OK\r\n",
+            "Transfer-Encoding: chunked\r\n",
+            "\r\n",
+            "5\r\n",
+            "{\"ok\""
+        );
+
+        let error = decode_http_response_body(raw).expect_err("truncated chunk should fail");
+
+        assert!(error.contains("invalid chunked service response"));
+    }
 }

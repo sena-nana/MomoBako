@@ -8,8 +8,8 @@ pub mod service_process;
 mod window_state;
 
 use repository_service::{
-    FileBrowserRequest, FileCreateRequest, FileDeleteRequest, FileImportRequest, FileRenameRequest,
-    MetadataUpdateRequest, RepositoryFolderRequest, RepositoryMutationRequest,
+    FileBrowserRequest, FileCreateRequest, FileDeleteRequest, FileImportRequest, FileReadRequest,
+    FileRenameRequest, MetadataUpdateRequest, RepositoryFolderRequest, RepositoryMutationRequest,
     RevisionActionRequest, SearchRequest, SyncRequest,
 };
 use service_process::ServiceBridge;
@@ -67,6 +67,14 @@ fn get_file_browser(
     bridge: tauri::State<'_, ServiceBridge>,
 ) -> Result<serde_json::Value, String> {
     bridge.invoke(&serde_json::json!({ "command": "getFileBrowser", "request": request }))
+}
+
+#[tauri::command]
+fn read_file(
+    request: FileReadRequest,
+    bridge: tauri::State<'_, ServiceBridge>,
+) -> Result<Vec<u8>, String> {
+    bridge.invoke(&serde_json::json!({ "command": "readFile", "request": request }))
 }
 
 #[tauri::command]
@@ -234,6 +242,7 @@ pub fn run() {
             search_assets,
             update_asset_metadata,
             get_file_browser,
+            read_file,
             create_directory,
             create_file,
             import_entries,
