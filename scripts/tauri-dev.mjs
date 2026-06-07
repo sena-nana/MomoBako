@@ -1,8 +1,12 @@
 import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
 import { createServer } from "node:net";
+import { delimiter, dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const DEFAULT_PORT = 1420;
 const MAX_PORT_ATTEMPTS = 100;
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 function canListen(port) {
   return new Promise((resolve) => {
@@ -42,20 +46,62 @@ const config = JSON.stringify({
     beforeDevCommand,
   },
 });
-const yarn = process.platform === "win32" ? "yarn.cmd" : "yarn";
-const args = ["tauri", "dev", "--config", config, ...process.argv.slice(2)];
+
+function yarnCommand() {
+  const searchDirs = [
+    dirname(process.execPath),
+    ...(process.env.PATH ?? "").split(delimiter),
+  ];
+
+  for (const dir of searchDirs) {
+    const corepackYarn = join(
+      dir,
+      "node_modules",
+      "corepack",
+      "dist",
+      "yarn.js",
+    );
+    if (existsSync(corepackYarn)) {
+      return {
+        command: process.execPath,
+        args: [corepackYarn],
+      };
+    }
+  }
+
+  return {
+    command: process.platform === "win32" ? "yarn.cmd" : "yarn",
+    args: [],
+  };
+}
+
+const yarn = yarnCommand();
+const args = [
+  ...yarn.args,
+  "tauri",
+  "dev",
+  "--config",
+  config,
+  ...process.argv.slice(2),
+];
 
 console.log(`[tauri-dev] frontend dev server: ${devUrl}`);
 
-const child = spawn(yarn, args, {
-  stdio: "inherit",
-});
+try {
+  const child = spawn(yarn.command, args, {
+    stdio: "inherit",
+    cwd: join(__dirname, ".."),
+  });
 
-child.on("exit", (code) => {
-  process.exit(code ?? 1);
-});
+  child.on("exit", (code) => {
+    process.exit(code ?? 1);
+  });
 
-child.on("error", (error) => {
+  child.on("error", (error) => {
+    console.error(`[tauri-dev] failed to start Tauri dev: ${error.message}`);
+    process.exit(1);
+  });
+} catch (error) {
   console.error(`[tauri-dev] failed to start Tauri dev: ${error.message}`);
   process.exit(1);
-});
+}
