@@ -13,7 +13,7 @@ describe("单应用模板工具链", () => {
       build: "vue-tsc --noEmit && vite build",
       test: "vitest run",
       tauri: "tauri",
-      "tauri:dev": "tauri dev",
+      "tauri:dev": "node scripts/tauri-dev.mjs",
       "tauri:build": "tauri build",
       verify: "yarn test && yarn build && cargo check --manifest-path src-tauri/Cargo.toml",
     });

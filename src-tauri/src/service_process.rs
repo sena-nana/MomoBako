@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeSet,
     io::Read,
+    net::TcpListener,
     path::{Path, PathBuf},
     process::Command,
     sync::{mpsc::channel, Arc, Mutex},
@@ -16,7 +17,8 @@ use std::{
 use tauri::{AppHandle, Manager};
 use tiny_http::{Method, Response, Server, StatusCode};
 
-const DEFAULT_SERVICE_ADDR: &str = "127.0.0.1:49321";
+const SERVICE_HOST: &str = "127.0.0.1";
+const SERVICE_START_ATTEMPTS: usize = 3;
 
 #[derive(Debug, Clone)]
 pub struct ServiceBridge {
@@ -108,42 +110,41 @@ struct ServiceResponse<T> {
 
 impl ServiceBridge {
     pub fn start(app: &AppHandle) -> Result<Self, String> {
-        let addr = DEFAULT_SERVICE_ADDR.to_string();
-        if ping_service(&addr).is_ok() {
-            return Ok(Self { addr });
-        }
-
         let thumbnail_dir = app
             .path()
             .app_data_dir()
             .map_err(|error| error.to_string())?
             .join("thumbnails");
         let executable = std::env::current_exe().map_err(|error| error.to_string())?;
-        let mut command = Command::new(executable);
-        command
-            .arg("--service-mode")
-            .arg(&addr)
-            .arg("--thumbnail-dir")
-            .arg(thumbnail_dir);
 
-        #[cfg(target_os = "windows")]
-        {
-            use std::os::windows::process::CommandExt;
-            command.creation_flags(0x08000000);
-        }
+        for _ in 0..SERVICE_START_ATTEMPTS {
+            let addr = reserve_service_addr()?;
+            let mut command = Command::new(&executable);
+            command
+                .arg("--service-mode")
+                .arg(&addr)
+                .arg("--thumbnail-dir")
+                .arg(&thumbnail_dir);
 
-        command
-            .spawn()
-            .map_err(|error| format!("failed to start service process: {error}"))?;
-
-        for _ in 0..40 {
-            if ping_service(&addr).is_ok() {
-                return Ok(Self { addr });
+            #[cfg(target_os = "windows")]
+            {
+                use std::os::windows::process::CommandExt;
+                command.creation_flags(0x08000000);
             }
-            std::thread::sleep(std::time::Duration::from_millis(100));
+
+            command
+                .spawn()
+                .map_err(|error| format!("failed to start service process: {error}"))?;
+
+            for _ in 0..40 {
+                if ping_service(&addr).is_ok() {
+                    return Ok(Self { addr });
+                }
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
         }
 
-        Err("service process did not become ready".to_string())
+        Err("service process did not become ready on a dynamic port".to_string())
     }
 
     pub fn invoke<T, S>(&self, request: &S) -> Result<T, String>
@@ -185,6 +186,12 @@ impl ServiceBridge {
                 .unwrap_or_else(|| "service request failed".to_string()))
         }
     }
+}
+
+fn reserve_service_addr() -> Result<String, String> {
+    let listener = TcpListener::bind((SERVICE_HOST, 0)).map_err(|error| error.to_string())?;
+    let addr = listener.local_addr().map_err(|error| error.to_string())?;
+    Ok(addr.to_string())
 }
 
 impl RepositoryWatcher {
