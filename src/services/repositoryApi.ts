@@ -7,6 +7,7 @@ import type {
   FileBrowserRequest,
   FileBrowserSnapshot,
   FileCreateRequest,
+  FileImportRequest,
   FileDeleteRequest,
   FileRenameRequest,
   MetadataUpdateRequest,
@@ -55,6 +56,10 @@ export function createDirectory(request: FileCreateRequest) {
 
 export function createFile(request: FileCreateRequest) {
   return invoke<FileBrowserSnapshot>("create_file", { request });
+}
+
+export function importEntries(request: FileImportRequest) {
+  return invoke<FileBrowserSnapshot>("import_entries", { request });
 }
 
 export function renameEntry(request: FileRenameRequest) {

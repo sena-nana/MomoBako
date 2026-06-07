@@ -16,6 +16,7 @@ const LEGACY_REPO_META_DIR: &str = ".meta";
 const REPO_METADATA_FILE_NAME: &str = "repository.json";
 const REPO_DB_FILE_NAME: &str = "metadata.db";
 const REPO_SCHEMA_VERSION: i64 = 1;
+const THUMBNAIL_SIZE: u32 = 256;
 
 const REGISTRY_SCHEMA_SQL: &str = r#"
 CREATE TABLE IF NOT EXISTS repositories (
@@ -69,6 +70,7 @@ CREATE TABLE IF NOT EXISTS assets (
   status TEXT NOT NULL,
   version INTEGER NOT NULL DEFAULT 1,
   updated_at TEXT NOT NULL,
+  thumbnail_path TEXT,
   FOREIGN KEY(repo_id) REFERENCES repositories(repo_id)
 );
 
@@ -172,6 +174,7 @@ pub struct AssetSummary {
     pub modified_at: String,
     pub version: i64,
     pub tags: Vec<String>,
+    pub thumbnail_path: Option<String>,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -274,6 +277,7 @@ pub struct FileBrowserEntry {
     pub modified_at: Option<String>,
     pub asset_id: Option<String>,
     pub status: Option<String>,
+    pub thumbnail_path: Option<String>,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -284,7 +288,8 @@ pub struct FileBrowserSnapshot {
     pub backend_plugin_id: String,
     pub backend_kind: String,
     pub current_path: String,
-    pub tree: Vec<FileTreeNode>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tree: Option<Vec<FileTreeNode>>,
     pub entries: Vec<FileBrowserEntry>,
 }
 
@@ -347,6 +352,7 @@ pub struct RepositoryFolderRequest {
 pub struct FileBrowserRequest {
     pub repo_id: String,
     pub directory_path: Option<String>,
+    pub include_tree: Option<bool>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -355,6 +361,14 @@ pub struct FileCreateRequest {
     pub repo_id: String,
     pub parent_path: Option<String>,
     pub name: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileImportRequest {
+    pub repo_id: String,
+    pub parent_path: Option<String>,
+    pub source_paths: Vec<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -521,13 +535,26 @@ struct FileSystemPluginDescriptor {
 }
 
 trait FileSystemBackendAdapter {
-    fn ensure_attachable(&self, repo_root: &Path, config: &serde_json::Value) -> Result<(), String>;
+    fn ensure_attachable(&self, repo_root: &Path, config: &serde_json::Value)
+        -> Result<(), String>;
 
-    fn prepare_repository_root(&self, repo_root: &Path, config: &serde_json::Value) -> Result<(), String>;
+    fn prepare_repository_root(
+        &self,
+        repo_root: &Path,
+        config: &serde_json::Value,
+    ) -> Result<(), String>;
 
-    fn list_files(&self, repo_root: &Path, config: &serde_json::Value) -> Result<Vec<DiscoveredFile>, String>;
+    fn list_files(
+        &self,
+        repo_root: &Path,
+        config: &serde_json::Value,
+    ) -> Result<Vec<DiscoveredFile>, String>;
 
-    fn list_tree(&self, repo_root: &Path, config: &serde_json::Value) -> Result<Vec<FileTreeNode>, String>;
+    fn list_tree(
+        &self,
+        repo_root: &Path,
+        config: &serde_json::Value,
+    ) -> Result<Vec<FileTreeNode>, String>;
 
     fn list_directory_entries(
         &self,
@@ -599,15 +626,17 @@ struct UnsupportedFileSystemBackend {
 
 pub struct RepositoryState {
     root: PathBuf,
+    thumbnail_root: PathBuf,
     registry_path: PathBuf,
     initialized: Mutex<bool>,
 }
 
 impl RepositoryState {
-    pub fn from_root(root: PathBuf) -> Self {
+    pub fn from_roots(root: PathBuf, thumbnail_root: PathBuf) -> Self {
         let registry_path = root.join(REGISTRY_FILE_NAME);
         Self {
             root,
+            thumbnail_root,
             registry_path,
             initialized: Mutex::new(false),
         }
@@ -624,7 +653,9 @@ impl RepositoryState {
 
         fs::create_dir_all(&self.root).map_err(io_error)?;
         let registry = Connection::open(&self.registry_path).map_err(db_error)?;
-        registry.execute_batch(REGISTRY_SCHEMA_SQL).map_err(db_error)?;
+        registry
+            .execute_batch(REGISTRY_SCHEMA_SQL)
+            .map_err(db_error)?;
         migrate_registry_schema(&registry).map_err(db_error)?;
 
         *initialized = true;
@@ -650,7 +681,8 @@ impl RepositoryState {
                 let repo_id: String = row.get(0)?;
                 let path: String = row.get(2)?;
                 let backend_plugin_id: String = row.get(3)?;
-                let asset_count = load_asset_count(&self.root, &repo_id, &path, &backend_plugin_id).unwrap_or(0);
+                let asset_count =
+                    load_asset_count(&self.root, &repo_id, &path, &backend_plugin_id).unwrap_or(0);
 
                 Ok(RepositorySummary {
                     repo_id,
@@ -737,7 +769,9 @@ impl RepositoryState {
             assets: &[],
         };
 
-        if !repository_meta_dir(&repo_root).exists() && !legacy_repository_meta_dir(&repo_root).exists() {
+        if !repository_meta_dir(&repo_root).exists()
+            && !legacy_repository_meta_dir(&repo_root).exists()
+        {
             initialize_repository_directory(&self.root, &repo_root, &seed, &backend)?;
         }
 
@@ -812,11 +846,17 @@ impl RepositoryState {
 
         let repo = self.load_repository_record(repo_id)?;
         let repo_root = PathBuf::from(&repo.summary.path);
-        let connection = self.open_repository_connection(&repo.summary.repo_id, &repo.summary.path, &repo.backend_record)?;
+        let connection = self.open_repository_connection(
+            &repo.summary.repo_id,
+            &repo.summary.path,
+            &repo.backend_record,
+        )?;
         let asset_count: i64 = connection
-            .query_row("SELECT COUNT(*) FROM assets WHERE status != 'deleted'", [], |row| {
-                row.get(0)
-            })
+            .query_row(
+                "SELECT COUNT(*) FROM assets WHERE status != 'deleted'",
+                [],
+                |row| row.get(0),
+            )
             .map_err(db_error)?;
 
         let folders = load_folder_summaries(&connection, repo_id).map_err(db_error)?;
@@ -844,19 +884,35 @@ impl RepositoryState {
     pub fn load_asset_detail(&self, repo_id: &str, asset_id: &str) -> Result<AssetDetail, String> {
         self.ensure_initialized()?;
         let repo = self.load_repository_record(repo_id)?;
-        let connection = self.open_repository_connection(&repo.summary.repo_id, &repo.summary.path, &repo.backend_record)?;
+        let connection = self.open_repository_connection(
+            &repo.summary.repo_id,
+            &repo.summary.path,
+            &repo.backend_record,
+        )?;
         load_asset_detail_from_connection(&connection, repo_id, asset_id).map_err(db_error)
     }
 
-    pub fn load_file_browser(&self, request: FileBrowserRequest) -> Result<FileBrowserSnapshot, String> {
+    pub fn load_file_browser(
+        &self,
+        request: FileBrowserRequest,
+    ) -> Result<FileBrowserSnapshot, String> {
         self.ensure_initialized()?;
 
         let repo = self.load_repository_record(&request.repo_id)?;
         let repo_root = PathBuf::from(&repo.summary.path);
-        let current_path = normalize_directory_path(request.directory_path.as_deref().unwrap_or_default())?;
-        let connection = self.open_repository_connection(&repo.summary.repo_id, &repo.summary.path, &repo.backend_record)?;
+        let current_path =
+            normalize_directory_path(request.directory_path.as_deref().unwrap_or_default())?;
+        let connection = self.open_repository_connection(
+            &repo.summary.repo_id,
+            &repo.summary.path,
+            &repo.backend_record,
+        )?;
         let asset_map = load_asset_path_map(&connection, &request.repo_id).map_err(db_error)?;
-        let tree = list_backend_tree(&repo, &repo_root)?;
+        let tree = if request.include_tree.unwrap_or(true) {
+            Some(list_backend_tree(&repo, &repo_root)?)
+        } else {
+            None
+        };
         let entries = list_backend_directory_entries(&repo, &repo_root, &current_path, &asset_map)?;
 
         Ok(FileBrowserSnapshot {
@@ -894,9 +950,14 @@ impl RepositoryState {
                     continue;
                 }
             }
-            let connection = self.open_repository_connection(&repo.summary.repo_id, &repo.summary.path, &repo.backend_record)?;
+            let connection = self.open_repository_connection(
+                &repo.summary.repo_id,
+                &repo.summary.path,
+                &repo.backend_record,
+            )?;
             let repo_results =
-                search_repository_assets(&connection, &repo.summary, &normalized_query, &request).map_err(db_error)?;
+                search_repository_assets(&connection, &repo.summary, &normalized_query, &request)
+                    .map_err(db_error)?;
             results.extend(repo_results);
         }
 
@@ -912,7 +973,11 @@ impl RepositoryState {
     ) -> Result<MetadataUpdateResponse, String> {
         self.ensure_initialized()?;
         let repo = self.load_repository_record(&request.repo_id)?;
-        let mut connection = self.open_repository_connection(&repo.summary.repo_id, &repo.summary.path, &repo.backend_record)?;
+        let mut connection = self.open_repository_connection(
+            &repo.summary.repo_id,
+            &repo.summary.path,
+            &repo.backend_record,
+        )?;
         let tx = connection.transaction().map_err(db_error)?;
 
         let current_version: i64 = tx
@@ -926,14 +991,17 @@ impl RepositoryState {
             .ok_or_else(|| format!("asset not found: {}", request.asset_id))?;
 
         if current_version != request.expected_version {
-            let asset = load_asset_detail_from_transaction(&tx, &request.repo_id, &request.asset_id).map_err(db_error)?;
+            let asset =
+                load_asset_detail_from_transaction(&tx, &request.repo_id, &request.asset_id)
+                    .map_err(db_error)?;
             return Ok(MetadataUpdateResponse {
                 outcome: "conflict".to_string(),
                 asset,
             });
         }
 
-        let before_map = load_metadata_map_from_transaction(&tx, &request.asset_id).map_err(db_error)?;
+        let before_map =
+            load_metadata_map_from_transaction(&tx, &request.asset_id).map_err(db_error)?;
         let now = now_rfc3339();
         let next_version = current_version + 1;
 
@@ -950,13 +1018,7 @@ impl RepositoryState {
                   version = metadata.version + 1,
                   updated_at = excluded.updated_at
                 "#,
-                params![
-                    request.asset_id,
-                    key,
-                    value_type,
-                    value.to_string(),
-                    now
-                ],
+                params![request.asset_id, key, value_type, value.to_string(), now],
             )
             .map_err(db_error)?;
         }
@@ -971,7 +1033,8 @@ impl RepositoryState {
         )
         .map_err(db_error)?;
 
-        let after_map = load_metadata_map_from_transaction(&tx, &request.asset_id).map_err(db_error)?;
+        let after_map =
+            load_metadata_map_from_transaction(&tx, &request.asset_id).map_err(db_error)?;
         tx.execute(
             r#"
             INSERT INTO revisions (
@@ -1003,24 +1066,33 @@ impl RepositoryState {
     pub fn sync_repository(&self, request: SyncRequest) -> Result<SyncResult, String> {
         self.ensure_initialized()?;
         let repo = self.load_repository_record(&request.repo_id)?;
-        let mut connection = self.open_repository_connection(&repo.summary.repo_id, &repo.summary.path, &repo.backend_record)?;
+        let mut connection = self.open_repository_connection(
+            &repo.summary.repo_id,
+            &repo.summary.path,
+            &repo.backend_record,
+        )?;
         let tx = connection.transaction().map_err(db_error)?;
 
-        let scan = sync_repository_files(&tx, &repo).map_err(db_error)?;
+        let scan = sync_repository_files(&tx, &repo, &self.thumbnail_root).map_err(db_error)?;
         tx.commit().map_err(db_error)?;
         Ok(scan)
     }
 
-    pub fn create_directory(&self, request: FileCreateRequest) -> Result<FileBrowserSnapshot, String> {
+    pub fn create_directory(
+        &self,
+        request: FileCreateRequest,
+    ) -> Result<FileBrowserSnapshot, String> {
         self.ensure_initialized()?;
         let repo = self.load_repository_record(&request.repo_id)?;
         let repo_root = PathBuf::from(&repo.summary.path);
-        let parent_path = normalize_directory_path(request.parent_path.as_deref().unwrap_or_default())?;
+        let parent_path =
+            normalize_directory_path(request.parent_path.as_deref().unwrap_or_default())?;
         let name = validate_new_entry_name(&request.name)?;
         create_backend_directory(&repo, &repo_root, &parent_path, &name)?;
         self.load_file_browser(FileBrowserRequest {
             repo_id: request.repo_id,
             directory_path: Some(parent_path),
+            include_tree: Some(true),
         })
     }
 
@@ -1028,7 +1100,8 @@ impl RepositoryState {
         self.ensure_initialized()?;
         let repo = self.load_repository_record(&request.repo_id)?;
         let repo_root = PathBuf::from(&repo.summary.path);
-        let parent_path = normalize_directory_path(request.parent_path.as_deref().unwrap_or_default())?;
+        let parent_path =
+            normalize_directory_path(request.parent_path.as_deref().unwrap_or_default())?;
         let name = validate_new_entry_name(&request.name)?;
         create_backend_file(&repo, &repo_root, &parent_path, &name)?;
         let _ = self.sync_repository(SyncRequest {
@@ -1038,6 +1111,48 @@ impl RepositoryState {
         self.load_file_browser(FileBrowserRequest {
             repo_id: request.repo_id,
             directory_path: Some(parent_path),
+            include_tree: Some(false),
+        })
+    }
+
+    pub fn import_entries(
+        &self,
+        request: FileImportRequest,
+    ) -> Result<FileBrowserSnapshot, String> {
+        self.ensure_initialized()?;
+        let repo = self.load_repository_record(&request.repo_id)?;
+        if repo.backend_record.plugin_id != LOCAL_FILESYSTEM_PLUGIN_ID {
+            return Err("importing files is only supported for local filesystem repositories".to_string());
+        }
+
+        let repo_root = PathBuf::from(&repo.summary.path);
+        let parent_path =
+            normalize_directory_path(request.parent_path.as_deref().unwrap_or_default())?;
+        let target_dir = resolve_repository_relative_path(&repo_root, &parent_path)?;
+        if !target_dir.exists() || !target_dir.is_dir() {
+            return Err(format!("directory not found: {parent_path}"));
+        }
+        if request.source_paths.is_empty() {
+            return Err("no source files were provided".to_string());
+        }
+
+        let mut imported_directory = false;
+        for source_path in &request.source_paths {
+            let source = PathBuf::from(source_path);
+            copy_external_entry_into_directory(&source, &repo_root, &target_dir)?;
+            if source.is_dir() {
+                imported_directory = true;
+            }
+        }
+
+        let _ = self.sync_repository(SyncRequest {
+            repo_id: request.repo_id.clone(),
+        })?;
+
+        self.load_file_browser(FileBrowserRequest {
+            repo_id: request.repo_id,
+            directory_path: Some(parent_path),
+            include_tree: Some(imported_directory),
         })
     }
 
@@ -1051,10 +1166,15 @@ impl RepositoryState {
         let target_path = join_relative_path(&parent_path, &new_name);
         let renamed = rename_backend_entry(&repo, &repo_root, &source_path, &new_name)?;
 
-        if matches!(renamed.kind, FileSystemEntryKind::File) {
+        let is_directory = matches!(renamed.kind, FileSystemEntryKind::Directory);
+        if !is_directory {
             let extension = renamed.extension.unwrap_or_default();
             let modified_at = renamed.modified_at.unwrap_or_else(now_rfc3339);
-            let mut connection = self.open_repository_connection(&repo.summary.repo_id, &repo.summary.path, &repo.backend_record)?;
+            let mut connection = self.open_repository_connection(
+                &repo.summary.repo_id,
+                &repo.summary.path,
+                &repo.backend_record,
+            )?;
             let tx = connection.transaction().map_err(db_error)?;
             rename_file_asset_record(
                 &tx,
@@ -1068,15 +1188,21 @@ impl RepositoryState {
             .map_err(db_error)?;
             tx.commit().map_err(db_error)?;
         } else {
-            let mut connection = self.open_repository_connection(&repo.summary.repo_id, &repo.summary.path, &repo.backend_record)?;
+            let mut connection = self.open_repository_connection(
+                &repo.summary.repo_id,
+                &repo.summary.path,
+                &repo.backend_record,
+            )?;
             let tx = connection.transaction().map_err(db_error)?;
-            rename_directory_asset_records(&tx, &request.repo_id, &source_path, &target_path).map_err(db_error)?;
+            rename_directory_asset_records(&tx, &request.repo_id, &source_path, &target_path)
+                .map_err(db_error)?;
             tx.commit().map_err(db_error)?;
         }
 
         self.load_file_browser(FileBrowserRequest {
             repo_id: request.repo_id,
             directory_path: Some(parent_path),
+            include_tree: Some(is_directory),
         })
     }
 
@@ -1088,20 +1214,36 @@ impl RepositoryState {
         let parent_path = parent_relative_path(&entry_path);
         let entry = stat_backend_entry(&repo, &repo_root, &entry_path)?;
 
-        if matches!(entry.kind, FileSystemEntryKind::Directory) {
+        let is_directory = matches!(entry.kind, FileSystemEntryKind::Directory);
+        if is_directory {
             let delete_mode = request.mode.as_deref().unwrap_or("delete");
             if delete_mode == "moveToParent" {
-                move_directory_contents_to_parent(&self.root, &repo, &repo_root, &request.repo_id, &entry_path)?;
+                move_directory_contents_to_parent(
+                    &self.root,
+                    &repo,
+                    &repo_root,
+                    &request.repo_id,
+                    &entry_path,
+                )?;
             } else {
                 delete_backend_entry(&repo, &repo_root, &entry_path, true)?;
-                let mut connection = self.open_repository_connection(&repo.summary.repo_id, &repo.summary.path, &repo.backend_record)?;
+                let mut connection = self.open_repository_connection(
+                    &repo.summary.repo_id,
+                    &repo.summary.path,
+                    &repo.backend_record,
+                )?;
                 let tx = connection.transaction().map_err(db_error)?;
-                mark_directory_assets_deleted(&tx, &request.repo_id, &entry_path).map_err(db_error)?;
+                mark_directory_assets_deleted(&tx, &request.repo_id, &entry_path)
+                    .map_err(db_error)?;
                 tx.commit().map_err(db_error)?;
             }
         } else {
             delete_backend_entry(&repo, &repo_root, &entry_path, false)?;
-            let mut connection = self.open_repository_connection(&repo.summary.repo_id, &repo.summary.path, &repo.backend_record)?;
+            let mut connection = self.open_repository_connection(
+                &repo.summary.repo_id,
+                &repo.summary.path,
+                &repo.backend_record,
+            )?;
             let tx = connection.transaction().map_err(db_error)?;
             mark_file_asset_deleted(&tx, &request.repo_id, &entry_path).map_err(db_error)?;
             tx.commit().map_err(db_error)?;
@@ -1110,16 +1252,25 @@ impl RepositoryState {
         self.load_file_browser(FileBrowserRequest {
             repo_id: request.repo_id,
             directory_path: Some(parent_path),
+            include_tree: Some(is_directory),
         })
     }
 
-    pub fn undo_last_revision(&self, request: RevisionActionRequest) -> Result<RevisionActionResponse, String> {
+    pub fn undo_last_revision(
+        &self,
+        request: RevisionActionRequest,
+    ) -> Result<RevisionActionResponse, String> {
         self.ensure_initialized()?;
         let repo = self.load_repository_record(&request.repo_id)?;
-        let mut connection = self.open_repository_connection(&repo.summary.repo_id, &repo.summary.path, &repo.backend_record)?;
+        let mut connection = self.open_repository_connection(
+            &repo.summary.repo_id,
+            &repo.summary.path,
+            &repo.backend_record,
+        )?;
         let tx = connection.transaction().map_err(db_error)?;
 
-        let revision = load_latest_revision(&tx, &request.asset_id).map_err(db_error)?
+        let revision = load_latest_revision(&tx, &request.asset_id)
+            .map_err(db_error)?
             .ok_or_else(|| format!("no revision found for asset: {}", request.asset_id))?;
         apply_revision_state(
             &tx,
@@ -1139,13 +1290,21 @@ impl RepositoryState {
         })
     }
 
-    pub fn redo_last_revision(&self, request: RevisionActionRequest) -> Result<RevisionActionResponse, String> {
+    pub fn redo_last_revision(
+        &self,
+        request: RevisionActionRequest,
+    ) -> Result<RevisionActionResponse, String> {
         self.ensure_initialized()?;
         let repo = self.load_repository_record(&request.repo_id)?;
-        let mut connection = self.open_repository_connection(&repo.summary.repo_id, &repo.summary.path, &repo.backend_record)?;
+        let mut connection = self.open_repository_connection(
+            &repo.summary.repo_id,
+            &repo.summary.path,
+            &repo.backend_record,
+        )?;
         let tx = connection.transaction().map_err(db_error)?;
 
-        let revision = load_latest_revision(&tx, &request.asset_id).map_err(db_error)?
+        let revision = load_latest_revision(&tx, &request.asset_id)
+            .map_err(db_error)?
             .ok_or_else(|| format!("no revision found for asset: {}", request.asset_id))?;
         apply_revision_state(
             &tx,
@@ -1242,7 +1401,8 @@ impl RepositoryState {
             .query_map([], |row| {
                 let backend_plugin_id: String = row.get(3)?;
                 let backend_config_json: String = row.get(4)?;
-                let backend_config = parse_backend_config_json(&backend_config_json).map_err(to_from_sql_error)?;
+                let backend_config =
+                    parse_backend_config_json(&backend_config_json).map_err(to_from_sql_error)?;
                 Ok(RepositoryRecord {
                     summary: RepositorySummary {
                         repo_id: row.get(0)?,
@@ -1271,12 +1431,17 @@ impl RepositoryState {
         backend_record: &RepositoryBackendRecord,
     ) -> Result<Connection, String> {
         let repo_root = Path::new(repo_path);
-        let storage_paths =
-            ensure_repository_storage_paths(&self.root, repo_id, repo_root, &backend_record.plugin_id)?;
+        let storage_paths = ensure_repository_storage_paths(
+            &self.root,
+            repo_id,
+            repo_root,
+            &backend_record.plugin_id,
+        )?;
         let connection = Connection::open(storage_paths.database_path).map_err(db_error)?;
         connection
             .pragma_update(None, "journal_mode", "WAL")
             .map_err(db_error)?;
+        migrate_repository_schema(&connection).map_err(db_error)?;
         Ok(connection)
     }
 }
@@ -1341,10 +1506,10 @@ fn load_asset_count(
 fn load_asset_path_map(
     connection: &Connection,
     repo_id: &str,
-) -> Result<BTreeMap<String, (String, String)>, rusqlite::Error> {
+) -> Result<BTreeMap<String, (String, String, Option<String>)>, rusqlite::Error> {
     let mut stmt = connection.prepare(
         r#"
-        SELECT path, asset_id, status
+        SELECT path, asset_id, status, thumbnail_path
         FROM assets
         WHERE repo_id = ?1
         "#,
@@ -1355,13 +1520,14 @@ fn load_asset_path_map(
             row.get::<_, String>(0)?,
             row.get::<_, String>(1)?,
             row.get::<_, String>(2)?,
+            row.get::<_, Option<String>>(3)?,
         ))
     })?;
 
     let mut map = BTreeMap::new();
     for row in rows {
-        let (path, asset_id, status) = row?;
-        map.insert(path, (asset_id, status));
+        let (path, asset_id, status, thumbnail_path) = row?;
+        map.insert(path, (asset_id, status, thumbnail_path));
     }
     Ok(map)
 }
@@ -1397,10 +1563,13 @@ fn load_folder_summaries(
     rows.collect::<Result<Vec<_>, _>>()
 }
 
-fn load_assets(connection: &Connection, repo_id: &str) -> Result<Vec<AssetSummary>, rusqlite::Error> {
+fn load_assets(
+    connection: &Connection,
+    repo_id: &str,
+) -> Result<Vec<AssetSummary>, rusqlite::Error> {
     let mut stmt = connection.prepare(
         r#"
-        SELECT asset_id, repo_id, path, filename, extension, size_bytes, status, modified_at, version
+        SELECT asset_id, repo_id, path, filename, extension, size_bytes, status, modified_at, version, thumbnail_path
         FROM assets
         WHERE repo_id = ?1 AND status != 'deleted'
         ORDER BY modified_at DESC, filename COLLATE NOCASE
@@ -1418,6 +1587,7 @@ fn load_assets(connection: &Connection, repo_id: &str) -> Result<Vec<AssetSummar
             row.get::<_, String>(6)?,
             row.get::<_, String>(7)?,
             row.get::<_, i64>(8)?,
+            row.get::<_, Option<String>>(9)?,
         ))
     })?;
 
@@ -1436,6 +1606,7 @@ fn load_assets(connection: &Connection, repo_id: &str) -> Result<Vec<AssetSummar
                 status,
                 modified_at,
                 version,
+                thumbnail_path,
             )| {
                 let tags = load_tags(connection, &asset_id)?;
 
@@ -1451,6 +1622,7 @@ fn load_assets(connection: &Connection, repo_id: &str) -> Result<Vec<AssetSummar
                     modified_at,
                     version,
                     tags,
+                    thumbnail_path,
                 })
             },
         )
@@ -1499,7 +1671,10 @@ fn load_metadata_entries(
     rows.collect::<Result<Vec<_>, _>>()
 }
 
-fn load_metadata_map(connection: &Connection, asset_id: &str) -> Result<BTreeMap<String, serde_json::Value>, rusqlite::Error> {
+fn load_metadata_map(
+    connection: &Connection,
+    asset_id: &str,
+) -> Result<BTreeMap<String, serde_json::Value>, rusqlite::Error> {
     let entries = load_metadata_entries(connection, asset_id)?;
     Ok(entries
         .into_iter()
@@ -1659,7 +1834,7 @@ fn load_asset_summary(
     connection
         .query_row(
             r#"
-            SELECT asset_id, repo_id, path, filename, extension, size_bytes, status, modified_at, version
+            SELECT asset_id, repo_id, path, filename, extension, size_bytes, status, modified_at, version, thumbnail_path
             FROM assets
             WHERE repo_id = ?1 AND asset_id = ?2
             "#,
@@ -1675,12 +1850,13 @@ fn load_asset_summary(
                     row.get::<_, String>(6)?,
                     row.get::<_, String>(7)?,
                     row.get::<_, i64>(8)?,
+                    row.get::<_, Option<String>>(9)?,
                 ))
             },
         )
         .optional()?
         .map(
-            |(asset_id, repo_id, path, filename, extension, size_bytes, status, modified_at, version)| {
+            |(asset_id, repo_id, path, filename, extension, size_bytes, status, modified_at, version, thumbnail_path)| {
                 let tags = load_tags(connection, &asset_id)?;
                 Ok(AssetSummary {
                     asset_id,
@@ -1694,6 +1870,7 @@ fn load_asset_summary(
                     modified_at,
                     version,
                     tags,
+                    thumbnail_path,
                 })
             },
         )
@@ -1708,7 +1885,7 @@ fn load_asset_summary_from_transaction(
     let base = tx
         .query_row(
             r#"
-            SELECT asset_id, repo_id, path, filename, extension, size_bytes, status, modified_at, version
+            SELECT asset_id, repo_id, path, filename, extension, size_bytes, status, modified_at, version, thumbnail_path
             FROM assets
             WHERE repo_id = ?1 AND asset_id = ?2
             "#,
@@ -1724,12 +1901,25 @@ fn load_asset_summary_from_transaction(
                     row.get::<_, String>(6)?,
                     row.get::<_, String>(7)?,
                     row.get::<_, i64>(8)?,
+                    row.get::<_, Option<String>>(9)?,
                 ))
             },
         )
         .optional()?;
 
-    let Some((asset_id, repo_id, path, filename, extension, size_bytes, status, modified_at, version)) = base else {
+    let Some((
+        asset_id,
+        repo_id,
+        path,
+        filename,
+        extension,
+        size_bytes,
+        status,
+        modified_at,
+        version,
+        thumbnail_path,
+    )) = base
+    else {
         return Ok(None);
     };
 
@@ -1756,6 +1946,7 @@ fn load_asset_summary_from_transaction(
         modified_at,
         version,
         tags,
+        thumbnail_path,
     }))
 }
 
@@ -1775,7 +1966,11 @@ fn search_repository_assets(
             continue;
         }
         if let Some(tag) = &request.tag {
-            if !asset.tags.iter().any(|item| item.to_lowercase().contains(&tag.to_lowercase())) {
+            if !asset
+                .tags
+                .iter()
+                .any(|item| item.to_lowercase().contains(&tag.to_lowercase()))
+            {
                 continue;
             }
         }
@@ -1784,7 +1979,10 @@ fn search_repository_assets(
                 continue;
             };
             if let Some(expected) = &request.metadata_value {
-                if !json_value_to_search_text(value).to_lowercase().contains(&expected.to_lowercase()) {
+                if !json_value_to_search_text(value)
+                    .to_lowercase()
+                    .contains(&expected.to_lowercase())
+                {
                     continue;
                 }
             }
@@ -1861,7 +2059,9 @@ fn parse_json_column(value_json: &str) -> Result<serde_json::Value, rusqlite::Er
         .map_err(|error| rusqlite::Error::FromSqlConversionFailure(0, Type::Text, Box::new(error)))
 }
 
-fn parse_json_column_optional(value_json: Option<String>) -> Result<serde_json::Value, rusqlite::Error> {
+fn parse_json_column_optional(
+    value_json: Option<String>,
+) -> Result<serde_json::Value, rusqlite::Error> {
     match value_json {
         Some(value) => parse_json_column(&value),
         None => Ok(serde_json::json!({})),
@@ -1871,6 +2071,7 @@ fn parse_json_column_optional(value_json: Option<String>) -> Result<serde_json::
 fn sync_repository_files(
     tx: &Transaction<'_>,
     repo: &RepositoryRecord,
+    thumbnail_root: &Path,
 ) -> Result<SyncResult, rusqlite::Error> {
     let repo_root = PathBuf::from(&repo.summary.path);
     let files = list_backend_files(repo, &repo_root).map_err(|error| {
@@ -1882,7 +2083,7 @@ fn sync_repository_files(
 
     let mut existing_stmt = tx.prepare(
         r#"
-        SELECT asset_id, path, status
+        SELECT asset_id, path, status, thumbnail_path
         FROM assets
         WHERE repo_id = ?1
         "#,
@@ -1892,12 +2093,13 @@ fn sync_repository_files(
             row.get::<_, String>(0)?,
             row.get::<_, String>(1)?,
             row.get::<_, String>(2)?,
+            row.get::<_, Option<String>>(3)?,
         ))
     })?;
     let existing = existing_rows.collect::<Result<Vec<_>, _>>()?;
     let mut existing_by_path = existing
         .into_iter()
-        .map(|(asset_id, path, status)| (path, (asset_id, status)))
+        .map(|(asset_id, path, status, thumbnail_path)| (path, (asset_id, status, thumbnail_path)))
         .collect::<BTreeMap<_, _>>();
 
     let now = now_rfc3339();
@@ -1907,11 +2109,22 @@ fn sync_repository_files(
     let mut created_events = 0_i64;
 
     for file in &files {
-        if let Some((asset_id, previous_status)) = existing_by_path.remove(&file.relative_path) {
+        if let Some((asset_id, previous_status, existing_thumbnail_path)) =
+            existing_by_path.remove(&file.relative_path)
+        {
+            let thumbnail_path = ensure_thumbnail_for_file(
+                repo,
+                &repo_root,
+                thumbnail_root,
+                &asset_id,
+                file,
+                existing_thumbnail_path,
+            )
+            .map_err(string_to_sql_error)?;
             tx.execute(
                 r#"
                 UPDATE assets
-                SET filename = ?3, extension = ?4, size_bytes = ?5, modified_at = ?6, status = 'synced', updated_at = ?7
+                SET filename = ?3, extension = ?4, size_bytes = ?5, modified_at = ?6, status = 'synced', updated_at = ?7, thumbnail_path = ?8
                 WHERE repo_id = ?1 AND asset_id = ?2
                 "#,
                 params![
@@ -1921,27 +2134,41 @@ fn sync_repository_files(
                     file.extension,
                     file.size_bytes,
                     file.modified_at,
-                    now
+                    now,
+                    thumbnail_path
                 ],
             )?;
             if previous_status == "deleted" {
                 created_events += 1;
             }
             updated_assets += 1;
-            insert_event(tx, &repo.summary, &asset_id, "asset.scanned", &file.relative_path, serde_json::json!({
-                "sizeBytes": file.size_bytes,
-                "modifiedAt": file.modified_at
-            }))?;
+            insert_event(
+                tx,
+                &repo.summary,
+                &asset_id,
+                "asset.scanned",
+                &file.relative_path,
+                serde_json::json!({
+                    "sizeBytes": file.size_bytes,
+                    "modifiedAt": file.modified_at
+                }),
+            )?;
             created_events += 1;
         } else {
-            let asset_id = format!("asset-{}", slugify_repo_id(&file.filename, &file.relative_path));
+            let asset_id = format!(
+                "asset-{}",
+                slugify_repo_id(&file.filename, &file.relative_path)
+            );
+            let thumbnail_path =
+                generate_thumbnail_for_file(repo, &repo_root, thumbnail_root, &asset_id, file)
+                    .map_err(string_to_sql_error)?;
             tx.execute(
                 r#"
                 INSERT INTO assets (
                   asset_id, repo_id, path, filename, extension, size_bytes,
-                  created_at, modified_at, hash, status, version, updated_at
+                  created_at, modified_at, hash, status, version, updated_at, thumbnail_path
                 )
-                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 'synced', 1, ?10)
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 'synced', 1, ?10, ?11)
                 "#,
                 params![
                     asset_id,
@@ -1953,19 +2180,33 @@ fn sync_repository_files(
                     now,
                     file.modified_at,
                     format!("sha256:{}", safe_prefix(&asset_id, 18)),
-                    now
+                    now,
+                    thumbnail_path
                 ],
             )?;
-            insert_default_metadata(tx, &asset_id, &file.filename, &file.extension, &file.modified_at)?;
-            insert_event(tx, &repo.summary, &asset_id, "asset.created", &file.relative_path, serde_json::json!({
-                "origin": "scan"
-            }))?;
+            insert_default_metadata(
+                tx,
+                &asset_id,
+                &file.filename,
+                &file.extension,
+                &file.modified_at,
+            )?;
+            insert_event(
+                tx,
+                &repo.summary,
+                &asset_id,
+                "asset.created",
+                &file.relative_path,
+                serde_json::json!({
+                    "origin": "scan"
+                }),
+            )?;
             created_assets += 1;
             created_events += 1;
         }
     }
 
-    for (path, (asset_id, status)) in existing_by_path {
+    for (path, (asset_id, status, _thumbnail_path)) in existing_by_path {
         if status == "deleted" {
             continue;
         }
@@ -1977,9 +2218,16 @@ fn sync_repository_files(
             "#,
             params![repo.summary.repo_id, asset_id, now],
         )?;
-        insert_event(tx, &repo.summary, &asset_id, "asset.deleted", &path, serde_json::json!({
-            "origin": "scan"
-        }))?;
+        insert_event(
+            tx,
+            &repo.summary,
+            &asset_id,
+            "asset.deleted",
+            &path,
+            serde_json::json!({
+                "origin": "scan"
+            }),
+        )?;
         deleted_assets += 1;
         created_events += 1;
     }
@@ -2018,7 +2266,13 @@ fn apply_revision_state(
             INSERT INTO metadata (asset_id, key, value_type, value_json, version, updated_at)
             VALUES (?1, ?2, ?3, ?4, 1, ?5)
             "#,
-            params![asset_id, key, infer_value_type(value), value.to_string(), now],
+            params![
+                asset_id,
+                key,
+                infer_value_type(value),
+                value.to_string(),
+                now
+            ],
         )?;
     }
 
@@ -2045,8 +2299,10 @@ fn apply_revision_state(
             asset_id,
             now,
             operation,
-            serde_json::to_string(&before).map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?,
-            serde_json::to_string(&target_map).map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?,
+            serde_json::to_string(&before)
+                .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?,
+            serde_json::to_string(&target_map)
+                .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?,
             source
         ],
     )?;
@@ -2092,7 +2348,11 @@ fn insert_event(
     path: &str,
     payload: serde_json::Value,
 ) -> Result<(), rusqlite::Error> {
-    let event_id = format!("evt-{}-{}", event_type.replace('.', "-"), slugify_repo_id(asset_id, path));
+    let event_id = format!(
+        "evt-{}-{}",
+        event_type.replace('.', "-"),
+        slugify_repo_id(asset_id, path)
+    );
     tx.execute(
         r#"
         INSERT OR REPLACE INTO events (event_id, repo_id, asset_id, event_type, path, payload_json, created_at)
@@ -2229,6 +2489,112 @@ fn collect_repository_files_recursive(
     Ok(())
 }
 
+fn generate_thumbnail_for_file(
+    repo: &RepositoryRecord,
+    repo_root: &Path,
+    thumbnail_root: &Path,
+    asset_id: &str,
+    file: &DiscoveredFile,
+) -> Result<Option<String>, String> {
+    if repo.backend_record.plugin_id != LOCAL_FILESYSTEM_PLUGIN_ID {
+        return Ok(None);
+    }
+
+    let extension = file.extension.to_lowercase();
+    if !is_image_extension(&extension) && !is_video_extension(&extension) {
+        return Ok(None);
+    }
+
+    let source_path = resolve_repository_relative_path(repo_root, &file.relative_path)?;
+    let thumbnail_dir =
+        thumbnail_root.join(slugify_repo_id(&repo.summary.repo_id, &repo.summary.path));
+    fs::create_dir_all(&thumbnail_dir).map_err(io_error)?;
+    let thumbnail_path = thumbnail_dir.join(format!(
+        "{}.jpg",
+        slugify_repo_id(asset_id, &file.relative_path)
+    ));
+
+    let generated = if is_image_extension(&extension) {
+        generate_image_thumbnail(&source_path, &thumbnail_path)
+    } else {
+        generate_video_thumbnail(&source_path, &thumbnail_path)
+    };
+
+    match generated {
+        Ok(()) => Ok(Some(thumbnail_path.to_string_lossy().to_string())),
+        Err(error) => {
+            let _ = fs::remove_file(&thumbnail_path);
+            eprintln!(
+                "thumbnail generation skipped for {}: {}",
+                file.relative_path, error
+            );
+            Ok(None)
+        }
+    }
+}
+
+fn ensure_thumbnail_for_file(
+    repo: &RepositoryRecord,
+    repo_root: &Path,
+    thumbnail_root: &Path,
+    asset_id: &str,
+    file: &DiscoveredFile,
+    existing_thumbnail_path: Option<String>,
+) -> Result<Option<String>, String> {
+    if let Some(path) = existing_thumbnail_path {
+        let expected_dir =
+            thumbnail_root.join(slugify_repo_id(&repo.summary.repo_id, &repo.summary.path));
+        let thumbnail_path = Path::new(&path);
+        if thumbnail_path.starts_with(&expected_dir) && thumbnail_path.is_file() {
+            return Ok(Some(path));
+        }
+    }
+
+    generate_thumbnail_for_file(repo, repo_root, thumbnail_root, asset_id, file)
+}
+
+fn generate_image_thumbnail(source_path: &Path, thumbnail_path: &Path) -> Result<(), String> {
+    let image =
+        image::open(source_path).map_err(|error| format!("image thumbnail error: {error}"))?;
+    let thumbnail = image.thumbnail(THUMBNAIL_SIZE, THUMBNAIL_SIZE);
+    thumbnail
+        .save_with_format(thumbnail_path, image::ImageFormat::Jpeg)
+        .map_err(|error| format!("image thumbnail error: {error}"))
+}
+
+fn generate_video_thumbnail(source_path: &Path, thumbnail_path: &Path) -> Result<(), String> {
+    let status = Command::new("ffmpeg")
+        .arg("-y")
+        .arg("-ss")
+        .arg("00:00:01")
+        .arg("-i")
+        .arg(source_path)
+        .arg("-frames:v")
+        .arg("1")
+        .arg("-vf")
+        .arg(format!("scale='min({THUMBNAIL_SIZE},iw)':-1"))
+        .arg(thumbnail_path)
+        .status()
+        .map_err(|error| format!("ffmpeg unavailable: {error}"))?;
+
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("ffmpeg exited with status: {status}"))
+    }
+}
+
+fn is_image_extension(extension: &str) -> bool {
+    matches!(
+        extension,
+        "jpg" | "jpeg" | "png" | "webp" | "gif" | "bmp" | "tif" | "tiff"
+    )
+}
+
+fn is_video_extension(extension: &str) -> bool {
+    matches!(extension, "mp4" | "mov" | "mkv" | "webm" | "avi" | "m4v")
+}
+
 #[derive(Debug)]
 struct DiscoveredFile {
     relative_path: String,
@@ -2271,7 +2637,11 @@ fn default_plugins() -> Vec<PluginManifest> {
                 CLOUD_DRIVE_PLUGIN_ID => "预留云盘文件系统接入点，如对象存储或网盘。".to_string(),
                 _ => "文件系统后端插件。".to_string(),
             },
-            capabilities: descriptor.capabilities.iter().map(|item| (*item).to_string()).collect(),
+            capabilities: descriptor
+                .capabilities
+                .iter()
+                .map(|item| (*item).to_string())
+                .collect(),
             enabled: descriptor.plugin_id == LOCAL_FILESYSTEM_PLUGIN_ID,
         })
         .collect::<Vec<_>>();
@@ -2282,7 +2652,11 @@ fn default_plugins() -> Vec<PluginManifest> {
             version: "1.0.0".to_string(),
             kind: "watcher".to_string(),
             description: "监听仓库目录，记录新增、删除、修改与重命名事件。".to_string(),
-            capabilities: vec!["watch".to_string(), "events".to_string(), "sync".to_string()],
+            capabilities: vec![
+                "watch".to_string(),
+                "events".to_string(),
+                "sync".to_string(),
+            ],
             enabled: true,
         },
         PluginManifest {
@@ -2291,7 +2665,11 @@ fn default_plugins() -> Vec<PluginManifest> {
             version: "1.0.0".to_string(),
             kind: "metadata".to_string(),
             description: "提供可扩展的元数据生成与写入能力。".to_string(),
-            capabilities: vec!["metadata".to_string(), "tags".to_string(), "ocr".to_string()],
+            capabilities: vec![
+                "metadata".to_string(),
+                "tags".to_string(),
+                "ocr".to_string(),
+            ],
             enabled: false,
         },
         PluginManifest {
@@ -2411,11 +2789,17 @@ fn backend_summary(plugin_id: &str) -> RepositoryBackendSummary {
         plugin_id: descriptor.plugin_id.to_string(),
         kind: descriptor.kind.to_string(),
         name: descriptor.name.to_string(),
-        capabilities: descriptor.capabilities.iter().map(|value| (*value).to_string()).collect(),
+        capabilities: descriptor
+            .capabilities
+            .iter()
+            .map(|value| (*value).to_string())
+            .collect(),
     }
 }
 
-fn parse_backend_request(request: &RepositoryMutationRequest) -> Result<RepositoryBackendRecord, String> {
+fn parse_backend_request(
+    request: &RepositoryMutationRequest,
+) -> Result<RepositoryBackendRecord, String> {
     let plugin_id = request
         .backend_plugin_id
         .as_deref()
@@ -2436,7 +2820,9 @@ fn parse_backend_request(request: &RepositoryMutationRequest) -> Result<Reposito
     })
 }
 
-fn import_backend_record(metadata: &RepositoryMetadataFileImport) -> Option<RepositoryBackendRecord> {
+fn import_backend_record(
+    metadata: &RepositoryMetadataFileImport,
+) -> Option<RepositoryBackendRecord> {
     let plugin_id = metadata
         .backend_plugin_id
         .as_deref()
@@ -2463,6 +2849,13 @@ fn to_from_sql_error(error: serde_json::Error) -> rusqlite::Error {
     rusqlite::Error::FromSqlConversionFailure(0, Type::Text, Box::new(error))
 }
 
+fn string_to_sql_error(error: String) -> rusqlite::Error {
+    rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::new(
+        std::io::ErrorKind::Other,
+        error,
+    )))
+}
+
 fn migrate_registry_schema(registry: &Connection) -> Result<(), rusqlite::Error> {
     let mut stmt = registry.prepare("PRAGMA table_info(repositories)")?;
     let columns = stmt
@@ -2483,12 +2876,28 @@ fn migrate_registry_schema(registry: &Connection) -> Result<(), rusqlite::Error>
     Ok(())
 }
 
+fn migrate_repository_schema(connection: &Connection) -> Result<(), rusqlite::Error> {
+    connection.execute_batch(REPOSITORY_SCHEMA_SQL)?;
+    let mut stmt = connection.prepare("PRAGMA table_info(assets)")?;
+    let columns = stmt
+        .query_map([], |row| row.get::<_, String>(1))?
+        .collect::<Result<Vec<_>, _>>()?;
+    if !columns.iter().any(|column| column == "thumbnail_path") {
+        connection.execute("ALTER TABLE assets ADD COLUMN thumbnail_path TEXT", [])?;
+    }
+    Ok(())
+}
+
 fn ensure_backend_path_is_attachable(
     backend: &RepositoryBackendRecord,
     repo_root: &Path,
 ) -> Result<(), String> {
-    let descriptor = file_system_plugin_descriptor(&backend.plugin_id)
-        .ok_or_else(|| format!("unsupported filesystem backend plugin: {}", backend.plugin_id))?;
+    let descriptor = file_system_plugin_descriptor(&backend.plugin_id).ok_or_else(|| {
+        format!(
+            "unsupported filesystem backend plugin: {}",
+            backend.plugin_id
+        )
+    })?;
     let adapter: Box<dyn FileSystemBackendAdapter> = match backend.plugin_id.as_str() {
         LOCAL_FILESYSTEM_PLUGIN_ID => Box::new(LocalFileSystemBackend),
         _ => Box::new(UnsupportedFileSystemBackend { descriptor }),
@@ -2502,8 +2911,12 @@ fn initialize_repository_directory(
     seed: &RepositorySeed<'_>,
     backend: &RepositoryBackendRecord,
 ) -> Result<(), String> {
-    let descriptor = file_system_plugin_descriptor(&backend.plugin_id)
-        .ok_or_else(|| format!("unsupported filesystem backend plugin: {}", backend.plugin_id))?;
+    let descriptor = file_system_plugin_descriptor(&backend.plugin_id).ok_or_else(|| {
+        format!(
+            "unsupported filesystem backend plugin: {}",
+            backend.plugin_id
+        )
+    })?;
     let adapter: Box<dyn FileSystemBackendAdapter> = match backend.plugin_id.as_str() {
         LOCAL_FILESYSTEM_PLUGIN_ID => Box::new(LocalFileSystemBackend),
         _ => Box::new(UnsupportedFileSystemBackend { descriptor }),
@@ -2528,7 +2941,7 @@ fn initialize_repository_directory(
     fs::write(meta_dir.join(REPO_METADATA_FILE_NAME), metadata_json).map_err(io_error)?;
 
     let connection = Connection::open(storage_paths.database_path).map_err(db_error)?;
-    connection.execute_batch(REPOSITORY_SCHEMA_SQL).map_err(db_error)?;
+    migrate_repository_schema(&connection).map_err(db_error)?;
     seed_repository_data(&connection, seed, &now)?;
 
     Ok(())
@@ -2606,7 +3019,8 @@ fn seed_repository_data(
                     params![asset.asset_id, key, value_type, value_json, asset.modified_at],
                 )
                 .map_err(db_error)?;
-            let parsed_value: serde_json::Value = serde_json::from_str(value_json).map_err(json_error)?;
+            let parsed_value: serde_json::Value =
+                serde_json::from_str(value_json).map_err(json_error)?;
             after_map.insert((*key).to_string(), parsed_value);
         }
 
@@ -2735,7 +3149,10 @@ fn is_internal_repository_dir(name: &str) -> bool {
     name == REPO_META_DIR || name == LEGACY_REPO_META_DIR
 }
 
-fn migrate_legacy_meta_dir_if_needed(repo_root: &Path, _backend_plugin_id: &str) -> Result<(), String> {
+fn migrate_legacy_meta_dir_if_needed(
+    repo_root: &Path,
+    _backend_plugin_id: &str,
+) -> Result<(), String> {
     let current_dir = repository_meta_dir(repo_root);
     if current_dir.exists() {
         hide_repository_meta_dir(&current_dir);
@@ -2804,7 +3221,10 @@ fn normalize_relative_path(path: &str, allow_empty: bool) -> Result<String, Stri
     }
 }
 
-fn resolve_repository_relative_path(repo_root: &Path, relative_path: &str) -> Result<PathBuf, String> {
+fn resolve_repository_relative_path(
+    repo_root: &Path,
+    relative_path: &str,
+) -> Result<PathBuf, String> {
     if relative_path.is_empty() {
         return Ok(repo_root.to_path_buf());
     }
@@ -2817,6 +3237,70 @@ fn resolve_repository_relative_path(repo_root: &Path, relative_path: &str) -> Re
         }
     }
     Ok(path)
+}
+
+fn copy_external_entry_into_directory(
+    source: &Path,
+    repo_root: &Path,
+    target_dir: &Path,
+) -> Result<(), String> {
+    if !source.exists() {
+        return Err(format!("source path does not exist: {}", source.to_string_lossy()));
+    }
+
+    let name = source
+        .file_name()
+        .map(|value| value.to_string_lossy().to_string())
+        .ok_or_else(|| format!("invalid source path: {}", source.to_string_lossy()))?;
+    let name = validate_new_entry_name(&name)?;
+    let target = target_dir.join(&name);
+    if target.exists() {
+        return Err(format!("entry already exists: {name}"));
+    }
+
+    if source.is_dir() {
+        let source_canonical = source.canonicalize().map_err(io_error)?;
+        let repo_canonical = repo_root.canonicalize().map_err(io_error)?;
+        let target_canonical_parent = target_dir.canonicalize().map_err(io_error)?;
+        if source_canonical == repo_canonical || repo_canonical.starts_with(&source_canonical) {
+            return Err("cannot import a repository folder into itself".to_string());
+        }
+        if target_canonical_parent.starts_with(&source_canonical) {
+            return Err("cannot import a folder into one of its descendants".to_string());
+        }
+        copy_directory_recursive(&source_canonical, &target)?;
+    } else if source.is_file() {
+        fs::copy(source, target).map_err(io_error)?;
+    } else {
+        return Err(format!(
+            "unsupported source path type: {}",
+            source.to_string_lossy()
+        ));
+    }
+
+    Ok(())
+}
+
+fn copy_directory_recursive(source: &Path, target: &Path) -> Result<(), String> {
+    fs::create_dir(target).map_err(io_error)?;
+    for entry in fs::read_dir(source).map_err(io_error)? {
+        let entry = entry.map_err(io_error)?;
+        let name = entry.file_name().to_string_lossy().to_string();
+        if is_internal_repository_dir(&name) {
+            continue;
+        }
+
+        let child_source = entry.path();
+        let child_target = target.join(&name);
+        let metadata = entry.metadata().map_err(io_error)?;
+        if metadata.is_dir() {
+            copy_directory_recursive(&child_source, &child_target)?;
+        } else if metadata.is_file() {
+            fs::copy(&child_source, &child_target).map_err(io_error)?;
+        }
+    }
+
+    Ok(())
 }
 
 fn validate_new_entry_name(name: &str) -> Result<String, String> {
@@ -2863,11 +3347,17 @@ fn backend_adapter<'a>(repo: &'a RepositoryRecord) -> Box<dyn FileSystemBackendA
     }
 }
 
-fn list_backend_files(repo: &RepositoryRecord, repo_root: &Path) -> Result<Vec<DiscoveredFile>, String> {
+fn list_backend_files(
+    repo: &RepositoryRecord,
+    repo_root: &Path,
+) -> Result<Vec<DiscoveredFile>, String> {
     backend_adapter(repo).list_files(repo_root, &repo.backend_record.config)
 }
 
-fn list_backend_tree(repo: &RepositoryRecord, repo_root: &Path) -> Result<Vec<FileTreeNode>, String> {
+fn list_backend_tree(
+    repo: &RepositoryRecord,
+    repo_root: &Path,
+) -> Result<Vec<FileTreeNode>, String> {
     backend_adapter(repo).list_tree(repo_root, &repo.backend_record.config)
 }
 
@@ -2875,7 +3365,7 @@ fn list_backend_directory_entries(
     repo: &RepositoryRecord,
     repo_root: &Path,
     current_path: &str,
-    asset_map: &BTreeMap<String, (String, String)>,
+    asset_map: &BTreeMap<String, (String, String, Option<String>)>,
 ) -> Result<Vec<FileBrowserEntry>, String> {
     let entries = backend_adapter(repo).list_directory_entries(
         repo_root,
@@ -2891,7 +3381,12 @@ fn create_backend_directory(
     parent_path: &str,
     name: &str,
 ) -> Result<(), String> {
-    backend_adapter(repo).create_directory(repo_root, parent_path, name, &repo.backend_record.config)
+    backend_adapter(repo).create_directory(
+        repo_root,
+        parent_path,
+        name,
+        &repo.backend_record.config,
+    )
 }
 
 fn create_backend_file(
@@ -2917,7 +3412,12 @@ fn rename_backend_entry(
     source_path: &str,
     new_name: &str,
 ) -> Result<FileSystemEntry, String> {
-    backend_adapter(repo).rename_entry(repo_root, source_path, new_name, &repo.backend_record.config)
+    backend_adapter(repo).rename_entry(
+        repo_root,
+        source_path,
+        new_name,
+        &repo.backend_record.config,
+    )
 }
 
 fn delete_backend_entry(
@@ -2926,7 +3426,12 @@ fn delete_backend_entry(
     entry_path: &str,
     recursive: bool,
 ) -> Result<(), String> {
-    backend_adapter(repo).delete_entry(repo_root, entry_path, recursive, &repo.backend_record.config)
+    backend_adapter(repo).delete_entry(
+        repo_root,
+        entry_path,
+        recursive,
+        &repo.backend_record.config,
+    )
 }
 
 fn build_directory_tree(repo_root: &Path) -> Result<Vec<FileTreeNode>, String> {
@@ -2985,7 +3490,7 @@ fn build_directory_node(repo_root: &Path, relative_path: &str) -> Result<FileTre
 
 fn map_file_browser_entries(
     mut entries: Vec<FileSystemEntry>,
-    asset_map: &BTreeMap<String, (String, String)>,
+    asset_map: &BTreeMap<String, (String, String, Option<String>)>,
 ) -> Vec<FileBrowserEntry> {
     entries.sort_by(|left, right| match (&left.kind, &right.kind) {
         (FileSystemEntryKind::Directory, FileSystemEntryKind::File) => std::cmp::Ordering::Less,
@@ -2996,10 +3501,16 @@ fn map_file_browser_entries(
     entries
         .into_iter()
         .map(|entry| {
-            let (asset_id, status) = asset_map
+            let (asset_id, status, thumbnail_path) = asset_map
                 .get(&entry.path)
-                .map(|(id, entry_status)| (Some(id.clone()), Some(entry_status.clone())))
-                .unwrap_or((None, None));
+                .map(|(id, entry_status, thumbnail)| {
+                    (
+                        Some(id.clone()),
+                        Some(entry_status.clone()),
+                        thumbnail.clone(),
+                    )
+                })
+                .unwrap_or((None, None, None));
             let size_bytes = entry.size_bytes;
             FileBrowserEntry {
                 path: entry.path.clone(),
@@ -3014,12 +3525,16 @@ fn map_file_browser_entries(
                 modified_at: entry.modified_at,
                 asset_id,
                 status,
+                thumbnail_path,
             }
         })
         .collect()
 }
 
-fn local_directory_entries(repo_root: &Path, current_dir: &Path) -> Result<Vec<FileSystemEntry>, String> {
+fn local_directory_entries(
+    repo_root: &Path,
+    current_dir: &Path,
+) -> Result<Vec<FileSystemEntry>, String> {
     let mut entries = Vec::new();
 
     for entry in fs::read_dir(current_dir).map_err(io_error)? {
@@ -3046,7 +3561,8 @@ fn local_directory_entries(repo_root: &Path, current_dir: &Path) -> Result<Vec<F
                 FileSystemEntryKind::File
             },
             extension: if metadata.is_file() {
-                path.extension().map(|value| value.to_string_lossy().to_string())
+                path.extension()
+                    .map(|value| value.to_string_lossy().to_string())
             } else {
                 None
             },
@@ -3068,25 +3584,47 @@ fn local_directory_entries(repo_root: &Path, current_dir: &Path) -> Result<Vec<F
 }
 
 impl FileSystemBackendAdapter for LocalFileSystemBackend {
-    fn ensure_attachable(&self, repo_root: &Path, _config: &serde_json::Value) -> Result<(), String> {
+    fn ensure_attachable(
+        &self,
+        repo_root: &Path,
+        _config: &serde_json::Value,
+    ) -> Result<(), String> {
         if !repo_root.exists() {
-            return Err(format!("repository folder does not exist: {}", repo_root.to_string_lossy()));
+            return Err(format!(
+                "repository folder does not exist: {}",
+                repo_root.to_string_lossy()
+            ));
         }
         if !repo_root.is_dir() {
-            return Err(format!("repository path is not a folder: {}", repo_root.to_string_lossy()));
+            return Err(format!(
+                "repository path is not a folder: {}",
+                repo_root.to_string_lossy()
+            ));
         }
         Ok(())
     }
 
-    fn prepare_repository_root(&self, repo_root: &Path, _config: &serde_json::Value) -> Result<(), String> {
+    fn prepare_repository_root(
+        &self,
+        repo_root: &Path,
+        _config: &serde_json::Value,
+    ) -> Result<(), String> {
         fs::create_dir_all(repo_root).map_err(io_error)
     }
 
-    fn list_files(&self, repo_root: &Path, _config: &serde_json::Value) -> Result<Vec<DiscoveredFile>, String> {
+    fn list_files(
+        &self,
+        repo_root: &Path,
+        _config: &serde_json::Value,
+    ) -> Result<Vec<DiscoveredFile>, String> {
         collect_repository_files(repo_root).map_err(io_error)
     }
 
-    fn list_tree(&self, repo_root: &Path, _config: &serde_json::Value) -> Result<Vec<FileTreeNode>, String> {
+    fn list_tree(
+        &self,
+        repo_root: &Path,
+        _config: &serde_json::Value,
+    ) -> Result<Vec<FileTreeNode>, String> {
         build_directory_tree(repo_root)
     }
 
@@ -3161,7 +3699,9 @@ impl FileSystemBackendAdapter for LocalFileSystemBackend {
                 FileSystemEntryKind::File
             },
             extension: if metadata.is_file() {
-                entry_abs.extension().map(|value| value.to_string_lossy().to_string())
+                entry_abs
+                    .extension()
+                    .map(|value| value.to_string_lossy().to_string())
             } else {
                 None
             },
@@ -3223,25 +3763,41 @@ impl FileSystemBackendAdapter for LocalFileSystemBackend {
 }
 
 impl FileSystemBackendAdapter for UnsupportedFileSystemBackend {
-    fn ensure_attachable(&self, _repo_root: &Path, _config: &serde_json::Value) -> Result<(), String> {
+    fn ensure_attachable(
+        &self,
+        _repo_root: &Path,
+        _config: &serde_json::Value,
+    ) -> Result<(), String> {
         Err(format!(
             "filesystem backend is registered but not implemented yet: {}",
             self.descriptor.plugin_id
         ))
     }
 
-    fn prepare_repository_root(&self, _repo_root: &Path, _config: &serde_json::Value) -> Result<(), String> {
+    fn prepare_repository_root(
+        &self,
+        _repo_root: &Path,
+        _config: &serde_json::Value,
+    ) -> Result<(), String> {
         Ok(())
     }
 
-    fn list_files(&self, _repo_root: &Path, _config: &serde_json::Value) -> Result<Vec<DiscoveredFile>, String> {
+    fn list_files(
+        &self,
+        _repo_root: &Path,
+        _config: &serde_json::Value,
+    ) -> Result<Vec<DiscoveredFile>, String> {
         Err(format!(
             "filesystem backend is registered but not implemented yet: {}",
             self.descriptor.plugin_id
         ))
     }
 
-    fn list_tree(&self, _repo_root: &Path, _config: &serde_json::Value) -> Result<Vec<FileTreeNode>, String> {
+    fn list_tree(
+        &self,
+        _repo_root: &Path,
+        _config: &serde_json::Value,
+    ) -> Result<Vec<FileTreeNode>, String> {
         Err(format!(
             "filesystem backend is registered but not implemented yet: {}",
             self.descriptor.plugin_id
@@ -3340,7 +3896,14 @@ fn rename_file_asset_record(
         SET path = ?3, filename = ?4, extension = ?5, modified_at = ?6, updated_at = ?6
         WHERE repo_id = ?1 AND path = ?2
         "#,
-        params![repo_id, source_path, target_path, new_name, new_extension, modified_at],
+        params![
+            repo_id,
+            source_path,
+            target_path,
+            new_name,
+            new_extension,
+            modified_at
+        ],
     )?;
 
     if updated == 0 {
@@ -3394,9 +3957,7 @@ fn rename_directory_asset_records(
     let now = now_rfc3339();
 
     for (asset_id, old_path) in assets {
-        let suffix = old_path
-            .strip_prefix(source_path)
-            .unwrap_or("");
+        let suffix = old_path.strip_prefix(source_path).unwrap_or("");
         let new_path = format!("{target_path}{suffix}");
         let filename = Path::new(&new_path)
             .file_name()
@@ -3472,15 +4033,20 @@ fn move_directory_contents_to_parent(
     }
     fs::remove_dir(&source_abs).map_err(io_error)?;
 
-    let storage_paths =
-        ensure_repository_storage_paths(service_root, repo_id, repo_root, &repo.backend_record.plugin_id)?;
+    let storage_paths = ensure_repository_storage_paths(
+        service_root,
+        repo_id,
+        repo_root,
+        &repo.backend_record.plugin_id,
+    )?;
     let mut connection = Connection::open(storage_paths.database_path).map_err(db_error)?;
     connection
         .pragma_update(None, "journal_mode", "WAL")
         .map_err(db_error)?;
     let tx = connection.transaction().map_err(db_error)?;
     for (_, child_source_path, child_target_path) in &children {
-        rename_directory_move_asset_records(&tx, repo_id, child_source_path, child_target_path).map_err(db_error)?;
+        rename_directory_move_asset_records(&tx, repo_id, child_source_path, child_target_path)
+            .map_err(db_error)?;
     }
     tx.commit().map_err(db_error)?;
 

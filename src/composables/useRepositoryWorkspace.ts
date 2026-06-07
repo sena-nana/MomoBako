@@ -11,6 +11,7 @@ import {
   getAssetDetail,
   getCacheSnapshot,
   getFileBrowser,
+  importEntries,
   getRepositorySnapshot,
   importRepository,
   listPlugins,
@@ -29,6 +30,7 @@ import type {
   AssetDetail,
   CacheSnapshot,
   FileBrowserSnapshot,
+  FileTreeNode,
   FileDeleteMode,
   PluginManifest,
   RepositoryBackendOption,
@@ -49,6 +51,7 @@ const activeAssetDetail = ref<AssetDetail | null>(null);
 const activePanel = ref<WorkspacePanelKey>("libraries");
 const currentDirectoryPath = ref("");
 const fileBrowser = ref<FileBrowserSnapshot | null>(null);
+const fileTree = ref<FileTreeNode[]>([]);
 const selectedFilePath = ref<string | null>(null);
 const searchQuery = ref("");
 const searchResults = ref<SearchHit[]>([]);
@@ -95,6 +98,7 @@ async function loadRepositories() {
       activeAssetId.value = null;
       activeAssetDetail.value = null;
       fileBrowser.value = null;
+      fileTree.value = [];
       currentDirectoryPath.value = "";
       selectedFilePath.value = null;
       return;
@@ -135,7 +139,7 @@ export async function selectRepository(repoId: string) {
     }
 
     currentDirectoryPath.value = "";
-    await loadFileBrowserForDirectory("");
+    await loadFileBrowserForDirectory("", { includeTree: true });
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : String(cause);
   } finally {
@@ -159,17 +163,26 @@ export async function selectAsset(assetId: string) {
   }
 }
 
-export async function loadFileBrowserForDirectory(directoryPath = "") {
+type FileBrowserLoadOptions = {
+  includeTree?: boolean;
+};
+
+export async function loadFileBrowserForDirectory(directoryPath = "", options: FileBrowserLoadOptions = {}) {
   if (!activeRepoId.value) return null;
 
+  const includeTree = options.includeTree ?? false;
   isLoadingFileBrowser.value = true;
   error.value = null;
   try {
     const snapshot = await getFileBrowser({
       repoId: activeRepoId.value,
       directoryPath,
+      includeTree,
     });
     fileBrowser.value = snapshot;
+    if (snapshot.tree) {
+      fileTree.value = snapshot.tree;
+    }
     currentDirectoryPath.value = snapshot.currentPath;
 
     const hasCurrentSelection = selectedFilePath.value
@@ -198,6 +211,9 @@ export async function createDirectoryInWorkspace(name: string, parentPath = curr
       name,
     });
     fileBrowser.value = snapshot;
+    if (snapshot.tree) {
+      fileTree.value = snapshot.tree;
+    }
     currentDirectoryPath.value = snapshot.currentPath;
     await refreshRepositorySnapshot(activeRepoId.value);
     return snapshot;
@@ -220,8 +236,39 @@ export async function createFileInWorkspace(name: string, parentPath = currentDi
       name,
     });
     fileBrowser.value = snapshot;
+    if (snapshot.tree) {
+      fileTree.value = snapshot.tree;
+    }
     currentDirectoryPath.value = snapshot.currentPath;
     selectedFilePath.value = snapshot.entries.find((entry) => entry.name === name)?.path ?? selectedFilePath.value;
+    await refreshRepositorySnapshot(activeRepoId.value);
+    return snapshot;
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : String(cause);
+    return null;
+  } finally {
+    isMutatingFiles.value = false;
+  }
+}
+
+export async function importEntriesToWorkspace(sourcePaths: string[], parentPath = currentDirectoryPath.value) {
+  if (!activeRepoId.value || !sourcePaths.length) return null;
+  isMutatingFiles.value = true;
+  error.value = null;
+  try {
+    const snapshot = await importEntries({
+      repoId: activeRepoId.value,
+      parentPath,
+      sourcePaths,
+    });
+    fileBrowser.value = snapshot;
+    if (snapshot.tree) {
+      fileTree.value = snapshot.tree;
+    }
+    currentDirectoryPath.value = snapshot.currentPath;
+    selectedFilePath.value = snapshot.entries.find((entry) => sourcePaths.some((sourcePath) => (
+      sourcePath.replace(/\\/g, "/").endsWith(`/${entry.name}`) || sourcePath.replace(/\\/g, "/") === entry.name
+    )))?.path ?? selectedFilePath.value;
     await refreshRepositorySnapshot(activeRepoId.value);
     return snapshot;
   } catch (cause) {
@@ -243,6 +290,9 @@ export async function renameWorkspaceEntry(path: string, newName: string) {
       newName,
     });
     fileBrowser.value = snapshot;
+    if (snapshot.tree) {
+      fileTree.value = snapshot.tree;
+    }
     currentDirectoryPath.value = snapshot.currentPath;
     selectedFilePath.value = snapshot.entries.find((entry) => entry.name === newName)?.path ?? selectedFilePath.value;
     await refreshRepositorySnapshot(activeRepoId.value);
@@ -266,6 +316,9 @@ export async function deleteWorkspaceEntry(path: string, mode?: FileDeleteMode) 
       mode,
     });
     fileBrowser.value = snapshot;
+    if (snapshot.tree) {
+      fileTree.value = snapshot.tree;
+    }
     currentDirectoryPath.value = snapshot.currentPath;
     if (selectedFilePath.value === path) {
       selectedFilePath.value = snapshot.entries.find((entry) => entry.kind === "file")?.path
@@ -366,6 +419,24 @@ export async function syncActiveRepository() {
     return null;
   } finally {
     isSyncing.value = false;
+  }
+}
+
+export async function refreshFileBrowserTree() {
+  if (!activeRepoId.value) return null;
+
+  isLoadingFileBrowser.value = true;
+  error.value = null;
+  try {
+    const result = await syncRepository({ repoId: activeRepoId.value });
+    lastSyncResult.value = result;
+    await refreshRepositorySnapshot(activeRepoId.value);
+    return await loadFileBrowserForDirectory(currentDirectoryPath.value, { includeTree: true });
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : String(cause);
+    return null;
+  } finally {
+    isLoadingFileBrowser.value = false;
   }
 }
 
@@ -500,6 +571,7 @@ export function useRepositoryWorkspace() {
     activePanel: computed(() => activePanel.value),
     currentDirectoryPath: computed(() => currentDirectoryPath.value),
     fileBrowser: computed(() => fileBrowser.value),
+    fileTree: computed(() => fileTree.value),
     selectedFilePath: computed(() => selectedFilePath.value),
     searchQuery: computed(() => searchQuery.value),
     searchResults: computed(() => searchResults.value),
@@ -528,8 +600,10 @@ export function useRepositoryWorkspace() {
     selectRepository,
     selectAsset,
     loadFileBrowserForDirectory,
+    refreshFileBrowserTree,
     createDirectoryInWorkspace,
     createFileInWorkspace,
+    importEntriesToWorkspace,
     renameWorkspaceEntry,
     deleteWorkspaceEntry,
     openWorkspaceEntry,

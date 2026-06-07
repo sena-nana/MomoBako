@@ -32,6 +32,7 @@ export type AssetSummary = {
   modifiedAt: string;
   version: number;
   tags: string[];
+  thumbnailPath?: string | null;
 };
 
 export type FolderSummary = {
@@ -72,6 +73,7 @@ export type FileBrowserEntry = {
   modifiedAt?: string | null;
   assetId?: string | null;
   status?: string | null;
+  thumbnailPath?: string | null;
 };
 
 export type FileBrowserSnapshot = {
@@ -80,7 +82,7 @@ export type FileBrowserSnapshot = {
   backendPluginId: string;
   backendKind: string;
   currentPath: string;
-  tree: FileTreeNode[];
+  tree?: FileTreeNode[];
   entries: FileBrowserEntry[];
 };
 
@@ -161,12 +163,19 @@ export type RepositoryFolderRequest = {
 export type FileBrowserRequest = {
   repoId: string;
   directoryPath?: string;
+  includeTree?: boolean;
 };
 
 export type FileCreateRequest = {
   repoId: string;
   parentPath?: string;
   name: string;
+};
+
+export type FileImportRequest = {
+  repoId: string;
+  parentPath?: string;
+  sourcePaths: string[];
 };
 
 export type FileRenameRequest = {

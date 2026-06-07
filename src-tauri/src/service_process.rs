@@ -1,5 +1,5 @@
 use crate::repository_service::{
-    FileBrowserRequest, FileCreateRequest, FileDeleteRequest, FileRenameRequest,
+    FileBrowserRequest, FileCreateRequest, FileDeleteRequest, FileImportRequest, FileRenameRequest,
     MetadataUpdateRequest, RepositoryFolderRequest, RepositoryMutationRequest, RepositoryState,
     RevisionActionRequest, SearchRequest, SyncRequest,
 };
@@ -13,7 +13,7 @@ use std::{
     sync::{mpsc::channel, Arc, Mutex},
     thread,
 };
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager};
 use tiny_http::{Method, Response, Server, StatusCode};
 
 const DEFAULT_SERVICE_ADDR: &str = "127.0.0.1:49321";
@@ -43,16 +43,39 @@ enum ServiceRequest {
         #[serde(rename = "assetId", alias = "asset_id")]
         asset_id: String,
     },
-    SearchAssets { request: SearchRequest },
-    UpdateAssetMetadata { request: MetadataUpdateRequest },
-    GetFileBrowser { request: FileBrowserRequest },
-    CreateDirectory { request: FileCreateRequest },
-    CreateFile { request: FileCreateRequest },
-    RenameEntry { request: FileRenameRequest },
-    DeleteEntry { request: FileDeleteRequest },
-    CreateRepository { request: RepositoryMutationRequest },
-    ImportRepository { request: RepositoryMutationRequest },
-    AttachRepositoryFolder { request: RepositoryFolderRequest },
+    SearchAssets {
+        request: SearchRequest,
+    },
+    UpdateAssetMetadata {
+        request: MetadataUpdateRequest,
+    },
+    GetFileBrowser {
+        request: FileBrowserRequest,
+    },
+    CreateDirectory {
+        request: FileCreateRequest,
+    },
+    CreateFile {
+        request: FileCreateRequest,
+    },
+    ImportEntries {
+        request: FileImportRequest,
+    },
+    RenameEntry {
+        request: FileRenameRequest,
+    },
+    DeleteEntry {
+        request: FileDeleteRequest,
+    },
+    CreateRepository {
+        request: RepositoryMutationRequest,
+    },
+    ImportRepository {
+        request: RepositoryMutationRequest,
+    },
+    AttachRepositoryFolder {
+        request: RepositoryFolderRequest,
+    },
     DeleteRepository {
         #[serde(rename = "repoId", alias = "repo_id")]
         repo_id: String,
@@ -61,9 +84,15 @@ enum ServiceRequest {
         #[serde(rename = "repoId", alias = "repo_id")]
         repo_id: String,
     },
-    SyncRepository { request: SyncRequest },
-    UndoLastRevision { request: RevisionActionRequest },
-    RedoLastRevision { request: RevisionActionRequest },
+    SyncRepository {
+        request: SyncRequest,
+    },
+    UndoLastRevision {
+        request: RevisionActionRequest,
+    },
+    RedoLastRevision {
+        request: RevisionActionRequest,
+    },
     ListPlugins,
     GetCacheSnapshot,
     GetApiDesignSnapshot,
@@ -78,15 +107,24 @@ struct ServiceResponse<T> {
 }
 
 impl ServiceBridge {
-    pub fn start(_app: &AppHandle) -> Result<Self, String> {
+    pub fn start(app: &AppHandle) -> Result<Self, String> {
         let addr = DEFAULT_SERVICE_ADDR.to_string();
         if ping_service(&addr).is_ok() {
             return Ok(Self { addr });
         }
 
+        let thumbnail_dir = app
+            .path()
+            .app_data_dir()
+            .map_err(|error| error.to_string())?
+            .join("thumbnails");
         let executable = std::env::current_exe().map_err(|error| error.to_string())?;
         let mut command = Command::new(executable);
-        command.arg("--service-mode").arg(&addr);
+        command
+            .arg("--service-mode")
+            .arg(&addr)
+            .arg("--thumbnail-dir")
+            .arg(thumbnail_dir);
 
         #[cfg(target_os = "windows")]
         {
@@ -94,7 +132,9 @@ impl ServiceBridge {
             command.creation_flags(0x08000000);
         }
 
-        command.spawn().map_err(|error| format!("failed to start service process: {error}"))?;
+        command
+            .spawn()
+            .map_err(|error| format!("failed to start service process: {error}"))?;
 
         for _ in 0..40 {
             if ping_service(&addr).is_ok() {
@@ -120,20 +160,29 @@ impl ServiceBridge {
             request_json
         );
         use std::io::Write;
-        (&client).write_all(http_request.as_bytes()).map_err(|error| error.to_string())?;
+        (&client)
+            .write_all(http_request.as_bytes())
+            .map_err(|error| error.to_string())?;
         let mut response_raw = String::new();
         let mut reader = std::io::BufReader::new(client);
-        reader.read_to_string(&mut response_raw).map_err(|error| error.to_string())?;
+        reader
+            .read_to_string(&mut response_raw)
+            .map_err(|error| error.to_string())?;
 
         let body = response_raw
             .split("\r\n\r\n")
             .nth(1)
             .ok_or_else(|| "invalid service response".to_string())?;
-        let response: ServiceResponse<T> = serde_json::from_str(body).map_err(|error| error.to_string())?;
+        let response: ServiceResponse<T> =
+            serde_json::from_str(body).map_err(|error| error.to_string())?;
         if response.ok {
-            response.data.ok_or_else(|| "missing service payload".to_string())
+            response
+                .data
+                .ok_or_else(|| "missing service payload".to_string())
         } else {
-            Err(response.error.unwrap_or_else(|| "service request failed".to_string()))
+            Err(response
+                .error
+                .unwrap_or_else(|| "service request failed".to_string()))
         }
     }
 }
@@ -172,7 +221,12 @@ pub fn run_service_process(addr: &str) -> Result<(), String> {
     let root = std::env::current_dir()
         .map_err(|error| error.to_string())?
         .join(".service-data");
-    let repository_state = Arc::new(Mutex::new(RepositoryState::from_root(root)));
+    let thumbnail_root =
+        service_thumbnail_dir_from_args()?.unwrap_or_else(|| root.join("thumbnails"));
+    let repository_state = Arc::new(Mutex::new(RepositoryState::from_roots(
+        root,
+        thumbnail_root,
+    )));
     repository_state
         .lock()
         .map_err(|_| "service state lock poisoned".to_string())?
@@ -201,6 +255,20 @@ pub fn run_service_process(addr: &str) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+fn service_thumbnail_dir_from_args() -> Result<Option<PathBuf>, String> {
+    let mut args = std::env::args().skip(3);
+    while let Some(arg) = args.next() {
+        if arg == "--thumbnail-dir" {
+            return args
+                .next()
+                .map(PathBuf::from)
+                .map(Some)
+                .ok_or_else(|| "missing --thumbnail-dir value".to_string());
+        }
+    }
+    Ok(None)
 }
 
 fn handle_service_request(
@@ -284,6 +352,15 @@ fn dispatch_request(
                     .lock()
                     .map_err(|_| "service state lock poisoned".to_string())?;
                 state.create_file(request)?
+            };
+            to_value(response)
+        }
+        ServiceRequest::ImportEntries { request } => {
+            let response = {
+                let state = repository_state
+                    .lock()
+                    .map_err(|_| "service state lock poisoned".to_string())?;
+                state.import_entries(request)?
             };
             to_value(response)
         }
@@ -458,7 +535,10 @@ fn handle_fs_event(repository_state: &Arc<Mutex<RepositoryState>>, event: Event)
 
     for path in event.paths {
         let normalized_path = normalize_path(&path);
-        if let Some(repository) = repositories.iter().find(|repo| normalized_path.starts_with(&normalize_path(Path::new(&repo.path)))) {
+        if let Some(repository) = repositories
+            .iter()
+            .find(|repo| normalized_path.starts_with(&normalize_path(Path::new(&repo.path))))
+        {
             let _ = state.sync_repository(SyncRequest {
                 repo_id: repository.repo_id.clone(),
             });

@@ -8,8 +8,9 @@ pub mod service_process;
 mod window_state;
 
 use repository_service::{
-    FileBrowserRequest, FileCreateRequest, FileDeleteRequest, FileRenameRequest, MetadataUpdateRequest,
-    RepositoryFolderRequest, RepositoryMutationRequest, RevisionActionRequest, SearchRequest, SyncRequest,
+    FileBrowserRequest, FileCreateRequest, FileDeleteRequest, FileImportRequest, FileRenameRequest,
+    MetadataUpdateRequest, RepositoryFolderRequest, RepositoryMutationRequest,
+    RevisionActionRequest, SearchRequest, SyncRequest,
 };
 use service_process::ServiceBridge;
 
@@ -82,6 +83,14 @@ fn create_file(
     bridge: tauri::State<'_, ServiceBridge>,
 ) -> Result<serde_json::Value, String> {
     bridge.invoke(&serde_json::json!({ "command": "createFile", "request": request }))
+}
+
+#[tauri::command]
+fn import_entries(
+    request: FileImportRequest,
+    bridge: tauri::State<'_, ServiceBridge>,
+) -> Result<serde_json::Value, String> {
+    bridge.invoke(&serde_json::json!({ "command": "importEntries", "request": request }))
 }
 
 #[tauri::command]
@@ -172,7 +181,9 @@ fn list_plugins(bridge: tauri::State<'_, ServiceBridge>) -> Result<serde_json::V
 }
 
 #[tauri::command]
-fn get_cache_snapshot(bridge: tauri::State<'_, ServiceBridge>) -> Result<serde_json::Value, String> {
+fn get_cache_snapshot(
+    bridge: tauri::State<'_, ServiceBridge>,
+) -> Result<serde_json::Value, String> {
     bridge.invoke(&serde_json::json!({ "command": "getCacheSnapshot" }))
 }
 
@@ -206,7 +217,10 @@ pub fn run() {
             if window.label() != MAIN_WINDOW_LABEL {
                 return;
             }
-            if matches!(event, WindowEvent::CloseRequested { .. } | WindowEvent::Destroyed) {
+            if matches!(
+                event,
+                WindowEvent::CloseRequested { .. } | WindowEvent::Destroyed
+            ) {
                 if let Some(webview_window) = window.get_webview_window(MAIN_WINDOW_LABEL) {
                     window_state::persist_main_window_state(&window.app_handle(), &webview_window);
                 }
@@ -222,6 +236,7 @@ pub fn run() {
             get_file_browser,
             create_directory,
             create_file,
+            import_entries,
             rename_entry,
             delete_entry,
             create_repository,

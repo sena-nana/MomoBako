@@ -27,10 +27,12 @@ type MockEntry = {
   modifiedAt: string | null;
   assetId: string | null;
   status: string | null;
+  thumbnailPath?: string | null;
 };
 
 let mockRepositories: MockRepository[] = [];
 let mockSelectedFolder: string | null = null;
+const invokeCalls: Array<{ command: string; args?: Record<string, unknown> }> = [];
 
 const initialEntries = (): MockEntry[] => [
   {
@@ -133,16 +135,27 @@ function getEntriesForDirectory(directoryPath: string) {
     });
 }
 
-function getMockFileBrowser(directoryPath = "") {
-  return {
+function getMockFileBrowser(directoryPath = "", includeTree = true) {
+  const snapshot: {
+    repoId: string;
+    rootPath: string;
+    backendPluginId: string;
+    backendKind: string;
+    currentPath: string;
+    tree?: ReturnType<typeof buildTree>;
+    entries: ReturnType<typeof getEntriesForDirectory>;
+  } = {
     repoId: "repo-main-001",
     rootPath: "C:/Mock/AnimeAssets",
     backendPluginId: "builtin.local-filesystem",
     backendKind: "filesystem",
     currentPath: directoryPath,
-    tree: buildTree(),
     entries: getEntriesForDirectory(directoryPath),
   };
+  if (includeTree) {
+    snapshot.tree = buildTree();
+  }
+  return snapshot;
 }
 
 const mockSnapshot = {
@@ -227,7 +240,9 @@ const mockAssetDetail = {
 };
 
 vi.mock("@tauri-apps/api/core", () => ({
+  convertFileSrc: (path: string) => `asset://${path}`,
   invoke: async (command: string, args?: Record<string, unknown>) => {
+    invokeCalls.push({ command, args });
     if (command === "list_repositories") return mockRepositories;
     if (command === "get_repository_snapshot") {
       const repoId = typeof args?.repoId === "string" ? args.repoId : mockSnapshot.repository.repoId;
@@ -280,8 +295,8 @@ vi.mock("@tauri-apps/api/core", () => ({
       };
     }
     if (command === "get_file_browser") {
-      const request = args?.request as { directoryPath?: string } | undefined;
-      return getMockFileBrowser(request?.directoryPath ?? "");
+      const request = args?.request as { directoryPath?: string; includeTree?: boolean } | undefined;
+      return getMockFileBrowser(request?.directoryPath ?? "", request?.includeTree ?? true);
     }
     if (command === "create_directory") {
       const request = args?.request as { name?: string; parentPath?: string } | undefined;
@@ -302,7 +317,7 @@ vi.mock("@tauri-apps/api/core", () => ({
           status: null,
         },
       ];
-      return getMockFileBrowser(parentPath);
+      return getMockFileBrowser(parentPath, true);
     }
     if (command === "create_file") {
       const request = args?.request as { name?: string; parentPath?: string } | undefined;
@@ -323,7 +338,7 @@ vi.mock("@tauri-apps/api/core", () => ({
           status: null,
         },
       ];
-      return getMockFileBrowser(parentPath);
+      return getMockFileBrowser(parentPath, false);
     }
     if (command === "rename_entry") {
       const request = args?.request as { path?: string; newName?: string } | undefined;
@@ -341,7 +356,7 @@ vi.mock("@tauri-apps/api/core", () => ({
         }
         return entry;
       });
-      return getMockFileBrowser(parentPath);
+      return getMockFileBrowser(parentPath, mockEntries.some((entry) => entry.path === targetPath && entry.kind === "directory"));
     }
     if (command === "delete_entry") {
       const request = args?.request as { path?: string; mode?: "delete" | "moveToParent" } | undefined;
@@ -368,13 +383,13 @@ vi.mock("@tauri-apps/api/core", () => ({
               name: getEntryName(nextPath),
             };
           });
-        return getMockFileBrowser(parentPath);
+        return getMockFileBrowser(parentPath, true);
       }
 
       mockEntries = mockEntries.filter((entry) => (
         entry.path !== targetPath && !entry.path.startsWith(`${targetPath}/`)
       ));
-      return getMockFileBrowser(parentPath);
+      return getMockFileBrowser(parentPath, targetEntry.kind === "directory");
     }
     if (command === "create_repository" || command === "import_repository") {
       const request = args?.request as {
@@ -541,4 +556,13 @@ afterEach(() => {
   mockSelectedFolder = null;
   mockRepositories = [];
   mockEntries = initialEntries();
+  invokeCalls.length = 0;
 });
+
+export function getInvokeCalls(command?: string) {
+  return command ? invokeCalls.filter((call) => call.command === command) : [...invokeCalls];
+}
+
+export function seedMockRepository() {
+  mockRepositories = [mockSnapshot.repository];
+}

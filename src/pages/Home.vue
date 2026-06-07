@@ -1,9 +1,14 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
+import { convertFileSrc } from "@tauri-apps/api/core";
+import { getCurrentWindow } from "@tauri-apps/api/window";
+import type { UnlistenFn } from "@tauri-apps/api/event";
 import {
+  ArrowLeft,
   Eye,
   File,
   FileImage,
+  FileVideo,
   Folder,
   FolderOpen,
   LoaderCircle,
@@ -11,14 +16,18 @@ import {
   Plus,
   HardDrive,
   Files,
+  Trash2,
 } from "lucide-vue-next";
 import Markdown from "vue3-markdown-it";
 import { useRepositoryWorkspace } from "../composables/useRepositoryWorkspace";
+import { vContextMenu } from "../directives/contextMenu";
 import type { FileBrowserEntry } from "../types/repository";
 
 const createFileName = ref("");
 const renameValue = ref("");
 const renameTargetPath = ref<string | null>(null);
+const isDraggingFiles = ref(false);
+const previewFilePath = ref<string | null>(null);
 
 const {
   activePanel,
@@ -39,6 +48,7 @@ const {
   selectAsset,
   loadFileBrowserForDirectory,
   createFileInWorkspace,
+  importEntriesToWorkspace,
   renameWorkspaceEntry,
   deleteWorkspaceEntry,
   openWorkspaceEntry,
@@ -69,6 +79,13 @@ const canRenameSelected = computed(() => Boolean(currentFileEntry.value));
 const canPreviewSelected = computed(() => currentFileEntry.value?.kind === "file");
 const canDeleteSelected = computed(() => currentFileEntry.value?.kind === "file");
 const libraryOverview = computed(() => activeSnapshot.value?.overview ?? null);
+const directoryEntries = computed(() => (fileBrowser.value?.entries ?? []).filter((entry) => entry.kind === "directory"));
+const fileEntries = computed(() => (fileBrowser.value?.entries ?? []).filter((entry) => entry.kind === "file"));
+const previewFileEntry = computed(() => (
+  (fileBrowser.value?.entries ?? []).find((entry) => entry.path === previewFilePath.value && entry.kind === "file")
+  ?? null
+));
+const hasSplitFileGroups = computed(() => directoryEntries.value.length > 0 && fileEntries.value.length > 0);
 
 watch(currentFileEntry, (entry) => {
   if (renameTargetPath.value && renameTargetPath.value !== entry?.path) {
@@ -81,10 +98,16 @@ watch(
   () => isFilesPanel.value,
   (enabled) => {
     if (enabled && activeRepoId.value && !fileBrowser.value) {
-      void loadFileBrowserForDirectory("");
+      void loadFileBrowserForDirectory("", { includeTree: true });
     }
   },
 );
+
+watch(selectedFilePath, (path) => {
+  if (previewFilePath.value && previewFilePath.value !== path) {
+    previewFilePath.value = null;
+  }
+});
 
 function statusLabel(status: string) {
   switch (status) {
@@ -124,6 +147,14 @@ function fileTone(entry: FileBrowserEntry) {
   return assetTone(entry.extension ?? "");
 }
 
+function isVideoEntry(entry: FileBrowserEntry) {
+  return ["mp4", "mov", "mkv", "webm", "avi", "m4v"].includes((entry.extension ?? "").toLowerCase());
+}
+
+function thumbnailSrc(entry: FileBrowserEntry) {
+  return entry.thumbnailPath ? convertFileSrc(entry.thumbnailPath) : null;
+}
+
 function openDirectory(path: string) {
   void loadFileBrowserForDirectory(path);
 }
@@ -134,6 +165,46 @@ function selectFileEntry(entry: FileBrowserEntry) {
     return;
   }
   selectWorkspaceEntry(entry.path);
+}
+
+function previewFileEntryByDoubleClick(entry: FileBrowserEntry) {
+  if (entry.kind !== "file") return;
+  selectWorkspaceEntry(entry.path);
+  previewFilePath.value = entry.path;
+}
+
+function exitPreview() {
+  previewFilePath.value = null;
+}
+
+function getDroppedSourcePaths(event: DragEvent) {
+  return Array.from(event.dataTransfer?.files ?? [])
+    .map((file) => (file as File & { path?: string }).path ?? "")
+    .filter((path) => path.trim().length > 0);
+}
+
+function handleDragOver(event: DragEvent) {
+  if (!hasRepository.value || !isFilesPanel.value) return;
+  event.preventDefault();
+  if (event.dataTransfer) {
+    event.dataTransfer.dropEffect = "copy";
+  }
+  isDraggingFiles.value = true;
+}
+
+function handleDragLeave(event: DragEvent) {
+  const currentTarget = event.currentTarget as HTMLElement | null;
+  const relatedTarget = event.relatedTarget as Node | null;
+  if (currentTarget && relatedTarget && currentTarget.contains(relatedTarget)) return;
+  isDraggingFiles.value = false;
+}
+
+async function handleDrop(event: DragEvent) {
+  event.preventDefault();
+  isDraggingFiles.value = false;
+  const sourcePaths = getDroppedSourcePaths(event);
+  if (!sourcePaths.length) return;
+  await importEntriesToWorkspace(sourcePaths);
 }
 
 async function handleCreateFile() {
@@ -164,6 +235,10 @@ async function deleteSelectedEntry() {
   await deleteWorkspaceEntry(currentFileEntry.value.path);
 }
 
+async function deleteEntry(entry: FileBrowserEntry) {
+  await deleteWorkspaceEntry(entry.path);
+}
+
 async function openSelectedEntry() {
   if (!currentFileEntry.value) return;
   await openWorkspaceEntry(currentFileEntry.value.path);
@@ -172,6 +247,54 @@ async function openSelectedEntry() {
 async function revealSelectedEntry() {
   if (!currentFileEntry.value) return;
   await revealWorkspaceEntry(currentFileEntry.value.path);
+}
+
+function fileEntryContextMenu(entry: FileBrowserEntry) {
+  selectWorkspaceEntry(entry.path);
+  return [
+    {
+      id: "preview",
+      label: "预览",
+      icon: Eye,
+      disabled: entry.kind !== "file",
+      onSelect: () => {
+        if (entry.kind === "file") {
+          previewFilePath.value = entry.path;
+        }
+      },
+    },
+    {
+      id: "open",
+      label: "打开",
+      icon: Eye,
+      disabled: entry.kind !== "file",
+      onSelect: () => openWorkspaceEntry(entry.path),
+    },
+    {
+      id: "reveal",
+      label: "定位",
+      icon: FolderOpen,
+      onSelect: () => revealWorkspaceEntry(entry.path),
+    },
+    {
+      id: "rename",
+      label: "重命名",
+      icon: PencilLine,
+      onSelect: () => {
+        renameTargetPath.value = entry.path;
+        renameValue.value = entry.name;
+      },
+    },
+    {
+      id: "delete",
+      label: "删除",
+      icon: Trash2,
+      danger: true,
+      disabled: entry.kind !== "file" || isMutatingFiles.value,
+      confirmLabel: "确认删除？再点一次",
+      onSelect: () => deleteEntry(entry),
+    },
+  ];
 }
 
 function openSearchHit(repoId: string, assetId: string) {
@@ -191,6 +314,36 @@ const searchSummary = computed(() => {
 
 onMounted(() => {
   void ensureRepositoryWorkspace();
+  try {
+    const currentWindow = getCurrentWindow();
+    currentWindow.onDragDropEvent(({ payload }) => {
+      if (!hasRepository.value || !isFilesPanel.value) return;
+      if (payload.type === "enter" || payload.type === "over") {
+        isDraggingFiles.value = true;
+        return;
+      }
+      if (payload.type === "leave") {
+        isDraggingFiles.value = false;
+        return;
+      }
+      isDraggingFiles.value = false;
+      if (payload.paths.length) {
+        void importEntriesToWorkspace(payload.paths);
+      }
+    }).then((unlisten) => {
+      dragDropUnlisten = unlisten;
+    }).catch(() => {
+      dragDropUnlisten = null;
+    });
+  } catch {
+    dragDropUnlisten = null;
+  }
+});
+
+let dragDropUnlisten: UnlistenFn | null = null;
+
+onUnmounted(() => {
+  dragDropUnlisten?.();
 });
 </script>
 
@@ -268,8 +421,65 @@ onMounted(() => {
     </div>
   </section>
 
-  <section v-else-if="hasRepository && isFilesPanel" class="files-workbench">
-    <div class="files-browser">
+  <section v-else-if="hasRepository && isFilesPanel" :class="previewFileEntry ? 'files-preview-page' : 'files-workbench'">
+    <template v-if="previewFileEntry">
+      <header class="files-preview-page__header">
+        <button type="button" class="ghost files-preview-page__back" @click="exitPreview">
+          <ArrowLeft :size="15" aria-hidden="true" />
+          返回
+        </button>
+        <div>
+          <p class="asset-browser__eyebrow">文件预览</p>
+          <h1>{{ previewFileEntry.name }}</h1>
+          <p class="files-preview-page__subline">{{ previewFileEntry.path }}</p>
+        </div>
+        <div class="files-preview-page__actions">
+          <button type="button" class="ghost" @click="openWorkspaceEntry(previewFileEntry.path)">
+            <Eye :size="14" aria-hidden="true" />
+            打开
+          </button>
+          <button type="button" class="ghost" @click="revealWorkspaceEntry(previewFileEntry.path)">
+            <FolderOpen :size="14" aria-hidden="true" />
+            定位
+          </button>
+        </div>
+      </header>
+
+      <div class="files-preview-page__body">
+        <div class="files-preview-page__preview" :style="{ background: previewFileEntry.thumbnailPath ? undefined : fileTone(previewFileEntry) }">
+          <img v-if="thumbnailSrc(previewFileEntry)" :src="thumbnailSrc(previewFileEntry) ?? undefined" alt="" />
+          <FileVideo v-else-if="isVideoEntry(previewFileEntry)" :size="54" aria-hidden="true" />
+          <FileImage v-else :size="54" aria-hidden="true" />
+        </div>
+        <div class="files-detail__stats files-preview-page__stats">
+          <div class="asset-meta__row">
+            <span>类型</span>
+            <span class="asset-meta__value">{{ previewFileEntry.extension || '文件' }}</span>
+          </div>
+          <div class="asset-meta__row">
+            <span>大小</span>
+            <span class="asset-meta__value">{{ previewFileEntry.sizeLabel || "未知" }}</span>
+          </div>
+          <div class="asset-meta__row">
+            <span>状态</span>
+            <span class="asset-meta__value">{{ previewFileEntry.status ? statusLabel(previewFileEntry.status) : "未索引" }}</span>
+          </div>
+          <div class="asset-meta__row">
+            <span>修改时间</span>
+            <span class="asset-meta__value">{{ previewFileEntry.modifiedAt ? new Date(previewFileEntry.modifiedAt).toLocaleString("zh-CN") : "未记录" }}</span>
+          </div>
+        </div>
+      </div>
+    </template>
+
+    <template v-else>
+    <div
+      class="files-browser"
+      :class="{ 'is-dragging': isDraggingFiles }"
+      @dragover="handleDragOver"
+      @dragleave="handleDragLeave"
+      @drop="handleDrop"
+    >
       <header class="files-browser__header">
         <div>
           <p class="asset-browser__eyebrow">当前目录</p>
@@ -305,24 +515,41 @@ onMounted(() => {
       <template v-else>
         <div class="files-list">
           <button
-            v-for="entry in fileBrowser?.entries ?? []"
+            v-for="entry in directoryEntries"
             :key="entry.path"
+            v-context-menu="() => fileEntryContextMenu(entry)"
             type="button"
             class="files-list__item"
             :class="{ 'is-active': selectedFilePath === entry.path }"
             @click="selectFileEntry(entry)"
           >
-            <div class="files-list__icon" :style="{ background: fileTone(entry) }">
-              <Folder v-if="entry.kind === 'directory'" :size="18" aria-hidden="true" />
-              <FileImage v-else :size="18" aria-hidden="true" />
+            <div class="files-list__preview" :style="{ background: entry.thumbnailPath ? undefined : fileTone(entry) }">
+              <Folder :size="24" aria-hidden="true" />
             </div>
             <div class="files-list__body">
               <strong>{{ entry.name }}</strong>
-              <span>{{ entry.kind === 'directory' ? '文件夹' : entry.sizeLabel || '文件' }}</span>
             </div>
-            <div class="files-list__meta">
-              <span v-if="entry.status" class="asset-card__pill asset-card__pill--ghost">{{ statusLabel(entry.status) }}</span>
-              <span>{{ entry.modifiedAt ? new Date(entry.modifiedAt).toLocaleString("zh-CN") : "未记录" }}</span>
+          </button>
+
+          <div v-if="hasSplitFileGroups" class="files-list__divider" aria-hidden="true"></div>
+
+          <button
+            v-for="entry in fileEntries"
+            :key="entry.path"
+            v-context-menu="() => fileEntryContextMenu(entry)"
+            type="button"
+            class="files-list__item"
+            :class="{ 'is-active': selectedFilePath === entry.path }"
+            @click="selectFileEntry(entry)"
+            @dblclick="previewFileEntryByDoubleClick(entry)"
+          >
+            <div class="files-list__preview" :style="{ background: entry.thumbnailPath ? undefined : fileTone(entry) }">
+              <img v-if="thumbnailSrc(entry)" :src="thumbnailSrc(entry) ?? undefined" alt="" loading="lazy" />
+              <FileVideo v-else-if="isVideoEntry(entry)" :size="24" aria-hidden="true" />
+              <FileImage v-else :size="24" aria-hidden="true" />
+            </div>
+            <div class="files-list__body">
+              <strong>{{ entry.name }}</strong>
             </div>
           </button>
         </div>
@@ -331,8 +558,10 @@ onMounted(() => {
 
     <aside class="files-detail">
       <div v-if="currentFileEntry" class="files-detail__card">
-        <div class="files-detail__preview" :style="{ background: fileTone(currentFileEntry) }">
-          <Folder v-if="currentFileEntry.kind === 'directory'" :size="34" aria-hidden="true" />
+        <div class="files-detail__preview" :style="{ background: currentFileEntry.thumbnailPath ? undefined : fileTone(currentFileEntry) }">
+          <img v-if="thumbnailSrc(currentFileEntry)" :src="thumbnailSrc(currentFileEntry) ?? undefined" alt="" />
+          <Folder v-else-if="currentFileEntry.kind === 'directory'" :size="34" aria-hidden="true" />
+          <FileVideo v-else-if="isVideoEntry(currentFileEntry)" :size="34" aria-hidden="true" />
           <FileImage v-else :size="34" aria-hidden="true" />
         </div>
 
@@ -403,6 +632,7 @@ onMounted(() => {
         <p>在中间列表中选择目标，然后可执行查看、定位、重命名和删除。</p>
       </div>
     </aside>
+    </template>
   </section>
 
   <section v-else-if="isSearchPanel" class="search-workbench">
