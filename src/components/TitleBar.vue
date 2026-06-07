@@ -5,7 +5,6 @@ import {
   Minus,
   PanelLeftClose,
   PanelLeftOpen,
-  Search,
   Square,
   X,
 } from "lucide-vue-next";
@@ -13,12 +12,9 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useRoute, useRouter } from "vue-router";
 import { useRepositoryWorkspace } from "../composables/useRepositoryWorkspace";
 
-interface Props {
+defineProps<{
   leftSidebarCollapsed?: boolean;
-  title?: string;
-}
-
-withDefaults(defineProps<Props>(), { title: "Tauri Template" });
+}>();
 
 defineEmits<{
   toggleLeftSidebar: [];
@@ -112,10 +108,8 @@ async function onClose() {
           aria-hidden="true"
         />
       </button>
-      <span class="titlebar__brand-text" data-tauri-drag-region>{{ title }}</span>
     </div>
     <label class="titlebar__search" aria-label="全局搜索">
-      <Search :size="14" aria-hidden="true" />
       <input
         :value="searchQuery"
         type="search"
