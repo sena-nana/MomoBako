@@ -317,6 +317,9 @@ vi.mock("@tauri-apps/api/core", () => ({
       const request = args?.request as { directoryPath?: string; includeTree?: boolean } | undefined;
       return getMockFileBrowser(request?.directoryPath ?? "", request?.includeTree ?? true);
     }
+    if (command === "read_file") {
+      return [35, 32, 77, 111, 99, 107, 32, 102, 105, 108, 101];
+    }
     if (command === "create_directory") {
       const request = args?.request as { name?: string; parentPath?: string } | undefined;
       const name = request?.name ?? "NewFolder";
@@ -506,6 +509,15 @@ vi.mock("@tauri-apps/api/core", () => ({
           description: "预留云盘文件系统接入点，如对象存储或网盘。",
           capabilities: ["browse", "read", "write", "sync"],
           enabled: false,
+        },
+        {
+          pluginId: "builtin.three-model-preview",
+          name: "3D Model Preview",
+          version: "1.0.0",
+          kind: "preview",
+          description: "为 FBX、OBJ、GLB 与 glTF 模型提供可旋转缩放的 3D 文件预览。",
+          capabilities: ["preview", "3d-model", "fbx", "obj", "gltf"],
+          enabled: true,
         },
         {
           pluginId: "builtin.filesystem-watcher",

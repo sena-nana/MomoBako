@@ -24,6 +24,7 @@ import {
 import Markdown from "vue3-markdown-it";
 import { useRepositoryWorkspace } from "../composables/useRepositoryWorkspace";
 import { vContextMenu } from "../directives/contextMenu";
+import { getPreviewPluginForEntry } from "../plugins/previewPlugins";
 import type { FileBrowserEntry } from "../types/repository";
 
 const createFileName = ref("");
@@ -96,6 +97,7 @@ const previewFileEntry = computed(() => (
   (fileBrowser.value?.entries ?? []).find((entry) => entry.path === previewFilePath.value && entry.kind === "file")
   ?? null
 ));
+const previewPlugin = computed(() => getPreviewPluginForEntry(previewFileEntry.value));
 const hasSplitFileGroups = computed(() => directoryEntries.value.length > 0 && fileEntries.value.length > 0);
 const filteredPlugins = computed(() => {
   const keyword = extensionKeyword.value.trim().toLowerCase();
@@ -156,6 +158,10 @@ function assetTone(extension: string) {
     mp4: "linear-gradient(135deg, #b76e5d 0%, #4f2b26 100%)",
     tif: "linear-gradient(135deg, #92958d 0%, #464840 100%)",
     jpg: "linear-gradient(135deg, #8ba8b6 0%, #35525f 100%)",
+    fbx: "linear-gradient(135deg, #6c95a8 0%, #34424a 100%)",
+    obj: "linear-gradient(135deg, #87916d 0%, #404738 100%)",
+    glb: "linear-gradient(135deg, #a58f73 0%, #4c3d2f 100%)",
+    gltf: "linear-gradient(135deg, #a58f73 0%, #4c3d2f 100%)",
   };
 
   return palette[extension.toLowerCase()] ?? "linear-gradient(135deg, #6f7788 0%, #2b313e 100%)";
@@ -170,6 +176,10 @@ function fileTone(entry: FileBrowserEntry) {
 
 function isVideoEntry(entry: FileBrowserEntry) {
   return ["mp4", "mov", "mkv", "webm", "avi", "m4v"].includes((entry.extension ?? "").toLowerCase());
+}
+
+function isModelEntry(entry: FileBrowserEntry) {
+  return Boolean(getPreviewPluginForEntry(entry));
 }
 
 function thumbnailSrc(entry: FileBrowserEntry) {
@@ -615,8 +625,14 @@ onUnmounted(() => {
       </header>
 
       <div class="files-preview-page__body">
-        <div class="files-preview-page__preview" :style="{ background: previewFileEntry.thumbnailPath ? undefined : fileTone(previewFileEntry) }">
-          <img v-if="thumbnailSrc(previewFileEntry)" :src="thumbnailSrc(previewFileEntry) ?? undefined" alt="" />
+        <div class="files-preview-page__preview" :class="{ 'files-preview-page__preview--plugin': previewPlugin }" :style="{ background: previewFileEntry.thumbnailPath || previewPlugin ? undefined : fileTone(previewFileEntry) }">
+          <component
+            :is="previewPlugin.component"
+            v-if="previewPlugin"
+            :entry="previewFileEntry"
+            :repo-id="activeRepoId ?? ''"
+          />
+          <img v-else-if="thumbnailSrc(previewFileEntry)" :src="thumbnailSrc(previewFileEntry) ?? undefined" alt="" />
           <FileVideo v-else-if="isVideoEntry(previewFileEntry)" :size="54" aria-hidden="true" />
           <FileImage v-else :size="54" aria-hidden="true" />
         </div>
@@ -715,6 +731,7 @@ onUnmounted(() => {
             <div class="files-list__preview" :style="{ background: entry.thumbnailPath ? undefined : fileTone(entry) }">
               <img v-if="thumbnailSrc(entry)" :src="thumbnailSrc(entry) ?? undefined" alt="" loading="lazy" />
               <FileVideo v-else-if="isVideoEntry(entry)" :size="24" aria-hidden="true" />
+              <File v-else-if="isModelEntry(entry)" :size="24" aria-hidden="true" />
               <FileImage v-else :size="24" aria-hidden="true" />
             </div>
             <div class="files-list__body">
@@ -731,6 +748,7 @@ onUnmounted(() => {
           <img v-if="thumbnailSrc(currentFileEntry)" :src="thumbnailSrc(currentFileEntry) ?? undefined" alt="" />
           <Folder v-else-if="currentFileEntry.kind === 'directory'" :size="34" aria-hidden="true" />
           <FileVideo v-else-if="isVideoEntry(currentFileEntry)" :size="34" aria-hidden="true" />
+          <File v-else-if="isModelEntry(currentFileEntry)" :size="34" aria-hidden="true" />
           <FileImage v-else :size="34" aria-hidden="true" />
         </div>
 

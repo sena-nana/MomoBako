@@ -9,6 +9,7 @@ import type {
   FileCreateRequest,
   FileImportRequest,
   FileDeleteRequest,
+  FileReadRequest,
   FileRenameRequest,
   MetadataUpdateRequest,
   MetadataUpdateResponse,
@@ -48,6 +49,10 @@ export function updateAssetMetadata(request: MetadataUpdateRequest) {
 
 export function getFileBrowser(request: FileBrowserRequest) {
   return invoke<FileBrowserSnapshot>("get_file_browser", { request });
+}
+
+export function readFile(request: FileReadRequest) {
+  return invoke<number[]>("read_file", { request });
 }
 
 export function createDirectory(request: FileCreateRequest) {

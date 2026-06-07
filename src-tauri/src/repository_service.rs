@@ -357,6 +357,13 @@ pub struct FileBrowserRequest {
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct FileReadRequest {
+    pub repo_id: String,
+    pub path: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct FileCreateRequest {
     pub repo_id: String,
     pub parent_path: Option<String>,
@@ -924,6 +931,30 @@ impl RepositoryState {
             tree,
             entries,
         })
+    }
+
+    pub fn read_file(&self, request: FileReadRequest) -> Result<Vec<u8>, String> {
+        self.ensure_initialized()?;
+
+        let repo = self.load_repository_record(&request.repo_id)?;
+        if repo.backend_record.plugin_id != LOCAL_FILESYSTEM_PLUGIN_ID {
+            return Err(format!(
+                "file preview read is not available for backend: {}",
+                repo.backend_record.plugin_id
+            ));
+        }
+
+        let entry_path = normalize_entry_path(&request.path)?;
+        let repo_root = PathBuf::from(&repo.summary.path);
+        let file_path = resolve_repository_relative_path(&repo_root, &entry_path)?;
+        if !file_path.exists() {
+            return Err(format!("file not found: {entry_path}"));
+        }
+        if !file_path.is_file() {
+            return Err(format!("path is not a file: {entry_path}"));
+        }
+
+        fs::read(file_path).map_err(io_error)
     }
 
     pub fn search_assets(&self, request: SearchRequest) -> Result<SearchResponse, String> {
@@ -2646,6 +2677,21 @@ fn default_plugins() -> Vec<PluginManifest> {
         })
         .collect::<Vec<_>>();
     plugins.extend([
+        PluginManifest {
+            plugin_id: "builtin.three-model-preview".to_string(),
+            name: "3D Model Preview".to_string(),
+            version: "1.0.0".to_string(),
+            kind: "preview".to_string(),
+            description: "为 FBX、OBJ、GLB 与 glTF 模型提供可旋转缩放的 3D 文件预览。".to_string(),
+            capabilities: vec![
+                "preview".to_string(),
+                "3d-model".to_string(),
+                "fbx".to_string(),
+                "obj".to_string(),
+                "gltf".to_string(),
+            ],
+            enabled: true,
+        },
         PluginManifest {
             plugin_id: "builtin.filesystem-watcher".to_string(),
             name: "Filesystem Watcher".to_string(),
