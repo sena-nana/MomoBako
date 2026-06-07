@@ -116,6 +116,11 @@ async function loadRepositories() {
   }
 }
 
+async function refreshRepositorySummaries() {
+  const items = await listRepositories();
+  repositories.value = items;
+}
+
 export async function selectRepository(repoId: string) {
   if (!repoId) return;
 
@@ -167,6 +172,24 @@ type FileBrowserLoadOptions = {
   includeTree?: boolean;
 };
 
+function getDefaultFileBrowserSelection(snapshot: FileBrowserSnapshot) {
+  return snapshot.entries.find((entry) => entry.kind === "file")?.path
+    ?? snapshot.entries[0]?.path
+    ?? null;
+}
+
+function applyFileBrowserSnapshot(snapshot: FileBrowserSnapshot) {
+  fileBrowser.value = snapshot;
+  if (snapshot.tree) {
+    fileTree.value = snapshot.tree;
+  }
+  currentDirectoryPath.value = snapshot.currentPath;
+
+  const hasCurrentSelection = selectedFilePath.value
+    && snapshot.entries.some((entry) => entry.path === selectedFilePath.value);
+  selectedFilePath.value = hasCurrentSelection ? selectedFilePath.value : getDefaultFileBrowserSelection(snapshot);
+}
+
 export async function loadFileBrowserForDirectory(directoryPath = "", options: FileBrowserLoadOptions = {}) {
   if (!activeRepoId.value) return null;
 
@@ -179,18 +202,7 @@ export async function loadFileBrowserForDirectory(directoryPath = "", options: F
       directoryPath,
       includeTree,
     });
-    fileBrowser.value = snapshot;
-    if (snapshot.tree) {
-      fileTree.value = snapshot.tree;
-    }
-    currentDirectoryPath.value = snapshot.currentPath;
-
-    const hasCurrentSelection = selectedFilePath.value
-      && snapshot.entries.some((entry) => entry.path === selectedFilePath.value);
-    const defaultSelection = snapshot.entries.find((entry) => entry.kind === "file")?.path
-      ?? snapshot.entries[0]?.path
-      ?? null;
-    selectedFilePath.value = hasCurrentSelection ? selectedFilePath.value : defaultSelection;
+    applyFileBrowserSnapshot(snapshot);
     return snapshot;
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : String(cause);
@@ -210,11 +222,7 @@ export async function createDirectoryInWorkspace(name: string, parentPath = curr
       parentPath,
       name,
     });
-    fileBrowser.value = snapshot;
-    if (snapshot.tree) {
-      fileTree.value = snapshot.tree;
-    }
-    currentDirectoryPath.value = snapshot.currentPath;
+    applyFileBrowserSnapshot(snapshot);
     await refreshRepositorySnapshot(activeRepoId.value);
     return snapshot;
   } catch (cause) {
@@ -235,11 +243,7 @@ export async function createFileInWorkspace(name: string, parentPath = currentDi
       parentPath,
       name,
     });
-    fileBrowser.value = snapshot;
-    if (snapshot.tree) {
-      fileTree.value = snapshot.tree;
-    }
-    currentDirectoryPath.value = snapshot.currentPath;
+    applyFileBrowserSnapshot(snapshot);
     selectedFilePath.value = snapshot.entries.find((entry) => entry.name === name)?.path ?? selectedFilePath.value;
     await refreshRepositorySnapshot(activeRepoId.value);
     return snapshot;
@@ -261,11 +265,7 @@ export async function importEntriesToWorkspace(sourcePaths: string[], parentPath
       parentPath,
       sourcePaths,
     });
-    fileBrowser.value = snapshot;
-    if (snapshot.tree) {
-      fileTree.value = snapshot.tree;
-    }
-    currentDirectoryPath.value = snapshot.currentPath;
+    applyFileBrowserSnapshot(snapshot);
     selectedFilePath.value = snapshot.entries.find((entry) => sourcePaths.some((sourcePath) => (
       sourcePath.replace(/\\/g, "/").endsWith(`/${entry.name}`) || sourcePath.replace(/\\/g, "/") === entry.name
     )))?.path ?? selectedFilePath.value;
@@ -289,11 +289,7 @@ export async function renameWorkspaceEntry(path: string, newName: string) {
       path,
       newName,
     });
-    fileBrowser.value = snapshot;
-    if (snapshot.tree) {
-      fileTree.value = snapshot.tree;
-    }
-    currentDirectoryPath.value = snapshot.currentPath;
+    applyFileBrowserSnapshot(snapshot);
     selectedFilePath.value = snapshot.entries.find((entry) => entry.name === newName)?.path ?? selectedFilePath.value;
     await refreshRepositorySnapshot(activeRepoId.value);
     return snapshot;
@@ -315,15 +311,10 @@ export async function deleteWorkspaceEntry(path: string, mode?: FileDeleteMode) 
       path,
       mode,
     });
-    fileBrowser.value = snapshot;
-    if (snapshot.tree) {
-      fileTree.value = snapshot.tree;
-    }
-    currentDirectoryPath.value = snapshot.currentPath;
-    if (selectedFilePath.value === path) {
-      selectedFilePath.value = snapshot.entries.find((entry) => entry.kind === "file")?.path
-        ?? snapshot.entries[0]?.path
-        ?? null;
+    const shouldSelectDefault = selectedFilePath.value === path;
+    applyFileBrowserSnapshot(snapshot);
+    if (shouldSelectDefault) {
+      selectedFilePath.value = getDefaultFileBrowserSelection(snapshot);
     }
     await refreshRepositorySnapshot(activeRepoId.value);
     return snapshot;
@@ -407,11 +398,13 @@ export async function syncActiveRepository() {
   error.value = null;
 
   try {
+    const previousDirectoryPath = currentDirectoryPath.value;
     const result = await syncRepository({ repoId: activeRepoId.value });
     lastSyncResult.value = result;
-    await loadRepositories();
+    await refreshRepositorySnapshot(activeRepoId.value);
+    await refreshRepositorySummaries();
     if (activePanel.value === "files") {
-      await loadFileBrowserForDirectory(currentDirectoryPath.value);
+      await loadFileBrowserForDirectory(previousDirectoryPath, { includeTree: true });
     }
     return result;
   } catch (cause) {

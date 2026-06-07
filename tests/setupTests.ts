@@ -32,6 +32,7 @@ type MockEntry = {
 
 let mockRepositories: MockRepository[] = [];
 let mockSelectedFolder: string | null = null;
+let mockDirectoryCreatedOnNextSync: string | null = null;
 const invokeCalls: Array<{ command: string; args?: Record<string, unknown> }> = [];
 
 const initialEntries = (): MockEntry[] => [
@@ -91,6 +92,24 @@ function getParentPath(path: string) {
 function getEntryName(path: string) {
   const parts = path.split("/").filter(Boolean);
   return parts[parts.length - 1] ?? path;
+}
+
+function addMockEntry(path: string, kind: "directory" | "file") {
+  const name = getEntryName(path);
+  mockEntries = [
+    ...mockEntries,
+    {
+      path,
+      name,
+      kind,
+      extension: kind === "file" && name.includes(".") ? name.split(".").at(-1) ?? "txt" : null,
+      sizeBytes: kind === "file" ? 0 : null,
+      sizeLabel: kind === "file" ? "0 B" : null,
+      modifiedAt: "2026-06-05T00:18:00Z",
+      assetId: null,
+      status: kind === "file" ? "synced" : null,
+    },
+  ];
 }
 
 function buildTree() {
@@ -303,20 +322,7 @@ vi.mock("@tauri-apps/api/core", () => ({
       const name = request?.name ?? "NewFolder";
       const parentPath = request?.parentPath ?? "";
       const path = parentPath ? `${parentPath}/${name}` : name;
-      mockEntries = [
-        ...mockEntries,
-        {
-          path,
-          name,
-          kind: "directory",
-          extension: null,
-          sizeBytes: null,
-          sizeLabel: null,
-          modifiedAt: "2026-06-05T00:18:00Z",
-          assetId: null,
-          status: null,
-        },
-      ];
+      addMockEntry(path, "directory");
       return getMockFileBrowser(parentPath, true);
     }
     if (command === "create_file") {
@@ -324,21 +330,22 @@ vi.mock("@tauri-apps/api/core", () => ({
       const name = request?.name ?? "note.txt";
       const parentPath = request?.parentPath ?? "";
       const path = parentPath ? `${parentPath}/${name}` : name;
-      mockEntries = [
-        ...mockEntries,
-        {
-          path,
-          name,
-          kind: "file",
-          extension: name.includes(".") ? name.split(".").at(-1) ?? "txt" : "txt",
-          sizeBytes: 0,
-          sizeLabel: "0 B",
-          modifiedAt: "2026-06-05T00:18:00Z",
-          assetId: null,
-          status: null,
-        },
-      ];
+      addMockEntry(path, "file");
       return getMockFileBrowser(parentPath, false);
+    }
+    if (command === "import_entries") {
+      const request = args?.request as { parentPath?: string; sourcePaths?: string[] } | undefined;
+      const parentPath = request?.parentPath ?? "";
+      let importedDirectory = false;
+      for (const sourcePath of request?.sourcePaths ?? []) {
+        const normalizedSourcePath = sourcePath.replace(/\\/g, "/").replace(/\/+$/, "");
+        const name = getEntryName(normalizedSourcePath);
+        const kind = name.includes(".") ? "file" : "directory";
+        const path = parentPath ? `${parentPath}/${name}` : name;
+        addMockEntry(path, kind);
+        importedDirectory ||= kind === "directory";
+      }
+      return getMockFileBrowser(parentPath, importedDirectory);
     }
     if (command === "rename_entry") {
       const request = args?.request as { path?: string; newName?: string } | undefined;
@@ -452,6 +459,10 @@ vi.mock("@tauri-apps/api/core", () => ({
     }
     if (command === "delete_repository") return undefined;
     if (command === "sync_repository") {
+      if (mockDirectoryCreatedOnNextSync) {
+        addMockEntry(mockDirectoryCreatedOnNextSync, "directory");
+        mockDirectoryCreatedOnNextSync = null;
+      }
       return {
         repoId: "repo-main-001",
         scannedFiles: 6,
@@ -554,6 +565,7 @@ afterEach(() => {
   localStorage.clear();
   document.documentElement.removeAttribute("data-theme");
   mockSelectedFolder = null;
+  mockDirectoryCreatedOnNextSync = null;
   mockRepositories = [];
   mockEntries = initialEntries();
   invokeCalls.length = 0;
@@ -565,4 +577,8 @@ export function getInvokeCalls(command?: string) {
 
 export function seedMockRepository() {
   mockRepositories = [mockSnapshot.repository];
+}
+
+export function createDirectoryOnNextSync(path: string) {
+  mockDirectoryCreatedOnNextSync = path;
 }
