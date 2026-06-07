@@ -16,6 +16,9 @@ import {
   Plus,
   HardDrive,
   Files,
+  Download,
+  RefreshCw,
+  Search,
   Trash2,
 } from "lucide-vue-next";
 import Markdown from "vue3-markdown-it";
@@ -28,6 +31,8 @@ const renameValue = ref("");
 const renameTargetPath = ref<string | null>(null);
 const isDraggingFiles = ref(false);
 const previewFilePath = ref<string | null>(null);
+const searchKeyword = ref("");
+const extensionKeyword = ref("");
 
 const {
   activePanel,
@@ -41,9 +46,11 @@ const {
   searchResults,
   isBusy,
   isLoadingFileBrowser,
+  isSearching,
   isMutatingFiles,
   error,
   ensureRepositoryWorkspace,
+  refreshRepositoryWorkspace,
   selectRepository,
   selectAsset,
   loadFileBrowserForDirectory,
@@ -54,6 +61,9 @@ const {
   openWorkspaceEntry,
   revealWorkspaceEntry,
   selectWorkspaceEntry,
+  runSearch,
+  removeRepository,
+  exportCurrentRepository,
 } = useRepositoryWorkspace();
 
 const hasRepository = computed(() => Boolean(activeSnapshot.value));
@@ -86,6 +96,16 @@ const previewFileEntry = computed(() => (
   ?? null
 ));
 const hasSplitFileGroups = computed(() => directoryEntries.value.length > 0 && fileEntries.value.length > 0);
+const filteredPlugins = computed(() => {
+  const keyword = extensionKeyword.value.trim().toLowerCase();
+  if (!keyword) return plugins.value;
+  return plugins.value.filter((plugin) => (
+    plugin.name.toLowerCase().includes(keyword) ||
+    plugin.description.toLowerCase().includes(keyword) ||
+    plugin.kind.toLowerCase().includes(keyword) ||
+    plugin.capabilities.some((capability) => capability.toLowerCase().includes(keyword))
+  ));
+});
 
 watch(currentFileEntry, (entry) => {
   if (renameTargetPath.value && renameTargetPath.value !== entry?.path) {
@@ -108,6 +128,14 @@ watch(selectedFilePath, (path) => {
     previewFilePath.value = null;
   }
 });
+
+watch(
+  searchQuery,
+  (query) => {
+    searchKeyword.value = query;
+  },
+  { immediate: true },
+);
 
 function statusLabel(status: string) {
   switch (status) {
@@ -305,11 +333,32 @@ function openSearchHit(repoId: string, assetId: string) {
   void selectAsset(assetId);
 }
 
+function formatRepositoryStatus(status: string) {
+  switch (status) {
+    case "ready":
+      return "已同步";
+    case "readonly":
+      return "只读";
+    case "indexing":
+      return "处理中";
+    default:
+      return status;
+  }
+}
+
+function requestAddRepository() {
+  window.dispatchEvent(new Event("momo:add-repository"));
+}
+
+function onSearchInput() {
+  void runSearch({ query: searchKeyword.value });
+}
+
 const searchSummary = computed(() => {
   if (searchQuery.value.trim()) {
     return `当前查询: ${searchQuery.value}`;
   }
-  return "在左侧输入关键词、标签或评分条件后，这里会展示跨仓库结果。";
+  return "输入关键词、标签或评分条件后，这里会展示跨仓库结果。";
 });
 
 onMounted(() => {
@@ -357,6 +406,16 @@ onUnmounted(() => {
           <p class="library-overview__subline">
             {{ activeSnapshot?.repository.path }}
           </p>
+        </div>
+        <div class="library-overview__actions">
+          <button type="button" class="ghost" @click="refreshRepositoryWorkspace">
+            <RefreshCw :size="14" aria-hidden="true" />
+            刷新资源库
+          </button>
+          <button type="button" class="primary" @click="requestAddRepository">
+            <Plus :size="14" aria-hidden="true" />
+            添加资源库
+          </button>
         </div>
       </header>
 
@@ -415,6 +474,56 @@ onUnmounted(() => {
           <div v-else class="library-overview__empty">
             <h2>未发现 `readme.md`</h2>
             <p>如果资源库根目录存在 `readme.md` 或 `README.md`，这里会直接展示其内容。</p>
+          </div>
+        </section>
+
+        <section class="library-manager">
+          <div class="library-overview__section-head">
+            <div>
+              <p class="asset-browser__eyebrow">Repositories</p>
+              <h2>资源库管理</h2>
+            </div>
+          </div>
+
+          <div class="library-manager__list">
+            <article
+              v-for="library in repositories"
+              :key="library.repoId"
+              class="library-manager__item"
+              :class="{ 'is-active': activeRepoId === library.repoId }"
+            >
+              <button
+                type="button"
+                class="library-manager__summary"
+                @click="selectRepository(library.repoId)"
+              >
+                <div class="library-manager__title">
+                  <strong>{{ library.name }}</strong>
+                  <span>{{ library.assetCount }} 个资源</span>
+                </div>
+                <span class="library-manager__meta">{{ formatRepositoryStatus(library.status) }}</span>
+                <span class="library-manager__path">{{ library.path }}</span>
+              </button>
+
+              <div class="library-manager__actions">
+                <button
+                  type="button"
+                  class="ghost"
+                  @click="activeRepoId === library.repoId ? exportCurrentRepository() : selectRepository(library.repoId).then(exportCurrentRepository)"
+                >
+                  <Download :size="14" aria-hidden="true" />
+                  导出
+                </button>
+                <button
+                  type="button"
+                  class="ghost danger"
+                  @click="removeRepository(library.repoId)"
+                >
+                  <Trash2 :size="14" aria-hidden="true" />
+                  删除
+                </button>
+              </div>
+            </article>
           </div>
         </section>
       </template>
@@ -649,14 +758,29 @@ onUnmounted(() => {
         </div>
       </header>
 
-      <div v-if="!repositories.length" class="search-workbench__empty">
-        <h2>还没有可搜索的资源库</h2>
-        <p>先在左侧“资源库列表”添加一个仓库，再执行跨仓库搜索。</p>
+      <label class="search-workbench__field">
+        <Search :size="15" aria-hidden="true" />
+        <input
+          v-model="searchKeyword"
+          type="search"
+          placeholder="搜索文件名、标签、元数据"
+          @input="onSearchInput"
+        />
+      </label>
+
+      <div v-if="isSearching" class="asset-browser__state">
+        <LoaderCircle class="spin" :size="16" aria-hidden="true" />
+        正在执行全局搜索
       </div>
 
-      <div v-else-if="!searchResults.length" class="search-workbench__empty">
+      <div v-if="!repositories.length" class="search-workbench__empty">
+        <h2>还没有可搜索的资源库</h2>
+        <p>先在资源库页面添加一个仓库，再执行跨仓库搜索。</p>
+      </div>
+
+      <div v-else-if="!isSearching && !searchResults.length" class="search-workbench__empty">
         <h2>等待搜索条件</h2>
-        <p>在左侧搜索面板输入关键词、标签或评分条件，主界面会同步展示结果。</p>
+        <p>输入关键词、标签或评分条件后，这里会展示结果。</p>
       </div>
 
       <div v-else class="search-workbench__results">
@@ -685,15 +809,24 @@ onUnmounted(() => {
         <div>
           <p class="asset-browser__eyebrow">拓展能力</p>
           <h1>文件系统与插件</h1>
-          <p class="search-workbench__subline">侧栏切换会同步切主界面，这里集中展示当前插件和后端能力。</p>
+          <p class="search-workbench__subline">这里集中展示当前插件和后端能力。</p>
         </div>
         <div class="search-workbench__stats">
-          <span class="asset-stat">{{ plugins.length }} 个插件</span>
+          <span class="asset-stat">{{ filteredPlugins.length }} 个插件</span>
         </div>
       </header>
 
+      <label class="search-workbench__field">
+        <Search :size="15" aria-hidden="true" />
+        <input
+          v-model="extensionKeyword"
+          type="search"
+          placeholder="筛选导入器、脚本或元数据拓展"
+        />
+      </label>
+
       <div class="extensions-workbench__list">
-        <article v-for="plugin in plugins" :key="plugin.pluginId" class="extensions-workbench__card">
+        <article v-for="plugin in filteredPlugins" :key="plugin.pluginId" class="extensions-workbench__card">
           <div class="extensions-workbench__card-head">
             <strong>{{ plugin.name }}</strong>
             <span class="asset-card__pill" :class="{ 'asset-card__pill--ghost': !plugin.enabled }">
@@ -726,9 +859,13 @@ onUnmounted(() => {
               : "还没有可用资源库"
         }}
       </h1>
-      <p v-if="isSearchPanel">先在左侧“资源库列表”添加资源库，再执行跨仓库搜索。</p>
+      <p v-if="isSearchPanel">先在资源库页面添加资源库，再执行跨仓库搜索。</p>
       <p v-else-if="isExtensionsPanel">先加载插件与文件系统后端，主界面会展示当前拓展能力。</p>
-      <p v-else>在左侧“资源库列表”点击 `+` 选择文件夹。包含 `.momo` 的文件夹会自动导入，否则会原地初始化为新资源库。</p>
+      <p v-else>点击“添加资源库”选择文件夹。包含 `.momo` 的文件夹会自动导入，否则会原地初始化为新资源库。</p>
+      <button v-if="!hasRepository" type="button" class="primary empty-state-card__action" @click="requestAddRepository">
+        <Plus :size="14" aria-hidden="true" />
+        添加资源库
+      </button>
     </div>
   </section>
 </template>

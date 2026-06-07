@@ -26,24 +26,23 @@ describe("文件管理冒烟", () => {
   it("保留目录按需加载，并在结构变化后刷新文件夹树", async () => {
     seedMockRepository();
     const workspace = useRepositoryWorkspace();
-    workspace.setActivePanel("libraries");
+    workspace.setActivePanel("files");
     await renderApp();
 
-    await fireEvent.click(screen.getByRole("button", { name: "刷新资源库" }));
-    await fireEvent.click(await screen.findByRole("button", { name: "文件管理" }));
-
-    let browserCalls = getInvokeCalls("get_file_browser");
-    expect(browserCalls.at(-1)?.args).toMatchObject({
-      request: {
-        directoryPath: "",
-        includeTree: true,
-      },
+    await waitFor(() => {
+      const browserCalls = getInvokeCalls("get_file_browser");
+      expect(browserCalls.at(-1)?.args).toMatchObject({
+        request: {
+          directoryPath: "",
+          includeTree: true,
+        },
+      });
     });
 
     await screen.findAllByText("Campaigns");
     await fireEvent.click(screen.getAllByText("Campaigns")[0]);
     expect((await screen.findAllByText("Summer")).length).toBeGreaterThan(0);
-    browserCalls = getInvokeCalls("get_file_browser");
+    let browserCalls = getInvokeCalls("get_file_browser");
     expect(browserCalls.at(-1)?.args).toMatchObject({
       request: {
         directoryPath: "Campaigns",

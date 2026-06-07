@@ -1,13 +1,9 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { open } from "@tauri-apps/plugin-dialog";
 import { RouterLink, useRoute, useRouter } from "vue-router";
 import {
   Archive,
-  ChevronDown,
-  ChevronLeft,
-  ChevronRight,
-  Download,
   FolderOpen,
   FolderTree,
   Library,
@@ -22,15 +18,11 @@ import {
 } from "lucide-vue-next";
 import FolderTreeNode from "../components/FolderTreeNode.vue";
 import Dropdown from "../components/Dropdown.vue";
-import { useRepositoryWorkspace } from "../composables/useRepositoryWorkspace";
+import { useRepositoryWorkspace, type WorkspacePanelKey } from "../composables/useRepositoryWorkspace";
 import type { FileDeleteMode } from "../types/repository";
 
-type PanelKey = "libraries" | "files" | "search" | "extensions";
+type PanelKey = Exclude<WorkspacePanelKey, "files">;
 
-const isPanelCollapsed = ref(false);
-const searchKeyword = ref("");
-const expandedRepoId = ref<string | null>(null);
-const pendingRepoActionId = ref<string | null>(null);
 const showBackendDialog = ref(false);
 const backendPluginId = ref("builtin.local-filesystem");
 const backendName = ref("");
@@ -61,47 +53,26 @@ const {
   activeSnapshot,
   currentDirectoryPath,
   fileTree,
-  searchResults,
   isBusy,
   isLoadingFileBrowser,
-  isSearching,
   isMutatingFiles,
   error,
   ensureRepositoryWorkspace,
-  refreshRepositoryWorkspace,
   refreshFileBrowserTree,
   selectRepository,
-  selectAsset,
   setActivePanel,
-  runSearch,
   loadFileBrowserForDirectory,
   createDirectoryInWorkspace,
   renameWorkspaceEntry,
   deleteWorkspaceEntry,
   createNewRepository,
-  removeRepository,
-  exportCurrentRepository,
 } = useRepositoryWorkspace();
 
 const primaryNav = [
   { key: "libraries" as const, label: "资源库", icon: Library },
-  { key: "files" as const, label: "文件管理", icon: FolderTree },
   { key: "search" as const, label: "搜索", icon: Search },
   { key: "extensions" as const, label: "拓展", icon: Puzzle },
 ];
-
-const activeTitle = computed(() => {
-  switch (activePanel.value) {
-    case "libraries":
-      return "资源库列表";
-    case "files":
-      return "文件管理";
-    case "search":
-      return "搜索";
-    case "extensions":
-      return "拓展搜索";
-  }
-});
 
 const shortcuts = computed(() => {
   const assets = activeSnapshot.value?.assets ?? [];
@@ -113,7 +84,9 @@ const shortcuts = computed(() => {
   ];
 });
 
-const isEmptyWorkspace = computed(() => repositories.value.length === 0);
+const activeRepository = computed(() => (
+  repositories.value.find((item) => item.repoId === activeRepoId.value) ?? null
+));
 const expandedFolderPathSet = computed(() => new Set(expandedFolderPaths.value));
 const fileTreeNodes = computed(() => fileTree.value);
 const backendOptions = computed(() => repositoryBackendOptions.value.map((item) => ({
@@ -180,49 +153,22 @@ watch(
 );
 
 function selectPanel(next: PanelKey) {
-  if (activePanel.value === next) {
-    isPanelCollapsed.value = !isPanelCollapsed.value;
-    return;
-  }
-
   setActivePanel(next);
   if (route.path === "/settings") {
     void router.push("/");
   }
-  isPanelCollapsed.value = false;
-}
-
-function toggleCollapsed() {
-  isPanelCollapsed.value = !isPanelCollapsed.value;
-}
-
-function formatStatus(status: string) {
-  switch (status) {
-    case "ready":
-      return "已同步";
-    case "readonly":
-      return "只读";
-    case "indexing":
-      return "处理中";
-    default:
-      return status;
-  }
 }
 
 function selectRepositoryFromList(repoId: string) {
-  void selectRepository(repoId);
+  void selectRepository(repoId).then(() => {
+    if (route.path === "/settings") {
+      void router.push("/");
+    }
+  });
 }
 
-function onSearchInput() {
-  void runSearch({ query: searchKeyword.value });
-}
-
-function openSearchResult(repoId: string, assetId: string) {
-  void selectRepository(repoId).then(() => selectAsset(assetId));
-}
-
-function toggleRepositoryDetails(repoId: string) {
-  expandedRepoId.value = expandedRepoId.value === repoId ? null : repoId;
+function repositoryInitial(name: string) {
+  return name.trim().slice(0, 2).toUpperCase() || "库";
 }
 
 function openBackendDialog() {
@@ -252,6 +198,7 @@ function toggleFolderExpansion(path: string) {
 }
 
 function openFolder(path: string) {
+  setActivePanel("files");
   void loadFileBrowserForDirectory(path);
 }
 
@@ -362,83 +309,35 @@ async function submitBackendDialog() {
   }
 }
 
-async function exportRepositoryById(repoId: string) {
-  pendingRepoActionId.value = repoId;
-  try {
-    if (activeRepoId.value !== repoId) {
-      await selectRepository(repoId);
-    }
-    await exportCurrentRepository();
-  } catch (cause) {
-    console.error("failed to export repository", cause);
-  } finally {
-    pendingRepoActionId.value = null;
-  }
-}
-
-async function deleteRepositoryById(repoId: string) {
-  pendingRepoActionId.value = repoId;
-  try {
-    await removeRepository(repoId);
-    if (expandedRepoId.value === repoId) {
-      expandedRepoId.value = null;
-    }
-  } catch (cause) {
-    console.error("failed to delete repository", cause);
-  } finally {
-    pendingRepoActionId.value = null;
-  }
-}
-
-function isRepoActionPending(repoId: string) {
-  return pendingRepoActionId.value === repoId;
+function handleAddRepositoryRequest() {
+  openBackendDialog();
 }
 
 onMounted(() => {
   void ensureRepositoryWorkspace();
+  window.addEventListener("momo:add-repository", handleAddRepositoryRequest);
+});
+
+onBeforeUnmount(() => {
+  window.removeEventListener("momo:add-repository", handleAddRepositoryRequest);
 });
 </script>
 
 <template>
   <aside class="secondary-panel secondary-panel--workspace">
-    <nav class="workspace-nav" aria-label="工作区导航">
-      <button
-        v-for="item in primaryNav"
-        :key="item.key"
-        type="button"
-        class="workspace-nav__btn"
-        :class="{ 'is-active': activePanel === item.key }"
-        :title="item.label"
-        :aria-label="item.label"
-        @click="selectPanel(item.key)"
-      >
-        <component :is="item.icon" :size="18" aria-hidden="true" />
-      </button>
-
-      <RouterLink
-        to="/settings"
-        class="workspace-nav__btn workspace-nav__btn--bottom"
-        active-class="is-active"
-        title="设置"
-        aria-label="设置"
-      >
-        <Settings :size="18" aria-hidden="true" />
-      </RouterLink>
-    </nav>
-
-    <section
-      v-show="!isPanelCollapsed"
-      class="workspace-panel"
-      :aria-label="activeTitle"
-    >
-      <header class="workspace-panel__header">
-        <div>
-          <p class="workspace-panel__eyebrow">导航</p>
-          <h2>{{ activeTitle }}</h2>
-        </div>
-        <div class="workspace-panel__header-actions">
+    <div class="workspace-sidebar">
+      <section class="workspace-sidebar__top" aria-label="资源库与视图">
+        <div class="workspace-sidebar__repo-head">
           <button
-            v-if="activePanel === 'libraries'"
+            type="button"
+            class="workspace-sidebar__repo-current"
+            :title="activeRepository?.path ?? '添加资源库'"
+            aria-label="资源库"
+            @click="selectPanel('libraries')"
+          >
+            <span>{{ activeRepository?.name ?? "无资源库" }}</span>
+          </button>
+          <button
             type="button"
             class="workspace-panel__refresh"
             aria-label="添加资源库"
@@ -447,103 +346,49 @@ onMounted(() => {
           >
             <Plus :size="14" aria-hidden="true" />
           </button>
-          <button
-            type="button"
-            class="workspace-panel__refresh"
-            aria-label="刷新资源库"
-            title="刷新资源库"
-            @click="refreshRepositoryWorkspace"
-          >
-            <RefreshCw :size="14" aria-hidden="true" />
-          </button>
-          <button
-            type="button"
-            class="workspace-panel__collapse"
-            :aria-label="isPanelCollapsed ? '展开列表栏' : '折叠列表栏'"
-            @click="toggleCollapsed"
-          >
-            <component
-              :is="isPanelCollapsed ? ChevronRight : ChevronLeft"
-              :size="16"
-              aria-hidden="true"
-            />
-          </button>
-        </div>
-      </header>
-
-      <div v-if="error" class="workspace-state workspace-state--error">
-        {{ error }}
-      </div>
-
-      <div v-else-if="isBusy" class="workspace-state">
-        <LoaderCircle class="spin" :size="16" aria-hidden="true" />
-        正在同步仓库状态
-      </div>
-
-      <div v-else-if="activePanel === 'libraries'" class="workspace-panel__body">
-        <div v-if="isEmptyWorkspace" class="workspace-empty">
-          <p class="workspace-empty__title">还没有资源库</p>
-          <p class="workspace-empty__text">点击右上角 `+` 选择文件系统后端并填写配置。本地文件夹会初始化 `.momo`，远端后端会使用服务侧索引存储。</p>
         </div>
 
-        <article
-          v-for="library in repositories"
-          :key="library.repoId"
-          class="workspace-repo-card"
-          :class="{ 'is-active': activeRepoId === library.repoId }"
-        >
+        <div class="workspace-sidebar__repo-list" aria-label="切换资源库">
           <button
+            v-for="library in repositories"
+            :key="library.repoId"
             type="button"
-            class="workspace-repo-card__summary"
+            class="workspace-sidebar__repo-btn"
+            :class="{ 'is-active': activeRepoId === library.repoId }"
+            :title="`${library.name}\n${library.path}`"
+            :aria-label="`切换资源库 ${library.name}`"
             @click="selectRepositoryFromList(library.repoId)"
           >
-            <div class="workspace-list__title">
-              <span>{{ library.name }}</span>
-              <span class="workspace-list__count">{{ library.assetCount }}</span>
-            </div>
-            <span class="workspace-list__meta">{{ formatStatus(library.status) }}</span>
-            <span class="workspace-repo-card__path">{{ library.path }}</span>
+            <span>{{ repositoryInitial(library.name) }}</span>
           </button>
+        </div>
 
+        <nav class="workspace-sidebar__nav" aria-label="工作区导航">
           <button
+            v-for="item in primaryNav"
+            :key="item.key"
             type="button"
-            class="workspace-repo-card__toggle"
-            :aria-expanded="expandedRepoId === library.repoId"
-            :aria-label="expandedRepoId === library.repoId ? '收起仓库操作' : '展开仓库操作'"
-            @click="toggleRepositoryDetails(library.repoId)"
+            class="workspace-nav__btn"
+            :class="{ 'is-active': activePanel === item.key }"
+            :title="item.label"
+            :aria-label="item.label"
+            @click="selectPanel(item.key)"
           >
-            <span>操作</span>
-            <ChevronDown
-              :size="14"
-              aria-hidden="true"
-              :class="{ 'workspace-repo-card__toggle-icon--open': expandedRepoId === library.repoId }"
-            />
+            <component :is="item.icon" :size="17" aria-hidden="true" />
           </button>
+        </nav>
+      </section>
 
-          <div v-if="expandedRepoId === library.repoId" class="workspace-repo-card__actions">
-            <button
-              type="button"
-              class="workspace-action-btn ghost"
-              :disabled="isRepoActionPending(library.repoId)"
-              @click="exportRepositoryById(library.repoId)"
-            >
-              <Download :size="14" aria-hidden="true" />
-              导出
-            </button>
-            <button
-              type="button"
-              class="workspace-action-btn ghost danger"
-              :disabled="isRepoActionPending(library.repoId)"
-              @click="deleteRepositoryById(library.repoId)"
-            >
-              <Trash2 :size="14" aria-hidden="true" />
-              删除
-            </button>
-          </div>
-        </article>
-      </div>
+      <section class="workspace-sidebar__files" aria-label="文件管理">
+        <div v-if="error" class="workspace-state workspace-state--error">
+          {{ error }}
+        </div>
 
-      <div v-else-if="activePanel === 'files'" class="workspace-panel__body workspace-panel__body--stacked">
+        <div v-else-if="isBusy" class="workspace-state">
+          <LoaderCircle class="spin" :size="16" aria-hidden="true" />
+          正在同步仓库状态
+        </div>
+
         <section class="workspace-group">
           <div class="workspace-group__header">
             <span>快捷方式</span>
@@ -564,7 +409,7 @@ onMounted(() => {
           </div>
         </section>
 
-        <section class="workspace-group">
+        <section class="workspace-group workspace-group--tree">
           <div class="workspace-group__header">
             <span>文件夹</span>
             <div class="workspace-group__actions">
@@ -592,7 +437,7 @@ onMounted(() => {
             </div>
           </div>
           <div v-if="!activeRepoId" class="workspace-empty workspace-empty--compact">
-            <p class="workspace-empty__text">先选择一个资源库，再浏览和管理目录树。</p>
+            <p class="workspace-empty__text">先选择或添加一个资源库。</p>
           </div>
           <div v-else class="workspace-folder-tree">
             <div class="workspace-folder-tree__branch">
@@ -633,70 +478,21 @@ onMounted(() => {
             />
           </div>
           <div v-if="activeRepoId && !fileTreeNodes.length && !isLoadingFileBrowser" class="workspace-empty workspace-empty--compact">
-            <p class="workspace-empty__text">当前仓库还没有子文件夹，可在这里直接创建。</p>
+            <p class="workspace-empty__text">当前仓库还没有子文件夹。</p>
           </div>
         </section>
-      </div>
+      </section>
 
-      <div v-else-if="activePanel === 'search'" class="workspace-panel__body">
-        <label class="workspace-search">
-          <span class="workspace-search__label">搜索资源</span>
-          <input
-            v-model="searchKeyword"
-            type="search"
-            placeholder="跨仓库搜索文件名、标签、元数据"
-            @input="onSearchInput"
-          />
-        </label>
-        <div v-if="isSearching" class="workspace-state">
-          <LoaderCircle class="spin" :size="16" aria-hidden="true" />
-          正在执行全局搜索
-        </div>
-        <div v-else class="workspace-hints">
-          <span class="workspace-hints__chip">{{ searchResults.length }} 个结果</span>
-          <span class="workspace-hints__chip">{{ activeSnapshot?.metadataFields.length ?? 0 }} 个字段</span>
-          <span class="workspace-hints__chip">{{ activeSnapshot?.recentRevisionCount ?? 0 }} 条修订</span>
-        </div>
-        <div class="workspace-extension-list">
-          <button
-            v-for="result in searchResults"
-            :key="`${result.repoId}:${result.assetId}`"
-            type="button"
-            class="workspace-list__item"
-            @click="openSearchResult(result.repoId, result.assetId)"
-          >
-            <div class="workspace-list__title">
-              <span>{{ result.filename }}</span>
-              <span class="workspace-list__count">{{ result.repoName }}</span>
-            </div>
-            <span class="workspace-list__meta">{{ result.path }}</span>
-          </button>
-        </div>
-      </div>
-
-      <div v-else class="workspace-panel__body">
-        <label class="workspace-search">
-          <span class="workspace-search__label">搜索拓展</span>
-          <input type="search" placeholder="筛选导入器、脚本或元数据拓展" />
-        </label>
-        <div class="workspace-extension-list">
-          <button type="button" class="workspace-list__item">
-            <div class="workspace-list__title">
-              <span>文件监听器</span>
-              <span class="workspace-list__count">内置</span>
-            </div>
-            <span class="workspace-list__meta">统一接入仓库事件与自动同步。</span>
-          </button>
-          <button type="button" class="workspace-list__item">
-            <div class="workspace-list__title">
-              <span>Metadata Provider</span>
-              <span class="workspace-list__count">预留</span>
-            </div>
-            <span class="workspace-list__meta">后续可扩展 AI 标注、OCR 与索引插件。</span>
-          </button>
-        </div>
-      </div>
-    </section>
+      <RouterLink
+        to="/settings"
+        class="workspace-sidebar__settings"
+        active-class="is-active"
+        title="设置"
+        aria-label="设置"
+      >
+        <Settings :size="18" aria-hidden="true" />
+      </RouterLink>
+    </div>
   </aside>
 
   <Teleport to="body">
