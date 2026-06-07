@@ -119,6 +119,7 @@ kbd {
 }
 
 .shell {
+  --sidebar-easing: cubic-bezier(0.4, 0, 0.2, 1);
   --sidebar-width: 276px;
   display: grid;
   grid-template-columns: var(--sidebar-width) 1fr;
@@ -129,6 +130,7 @@ kbd {
   height: 100%;
   background: var(--bg-elev);
   position: relative;
+  transition: grid-template-columns 0.24s var(--sidebar-easing);
 }
 
 .shell > .titlebar {
@@ -143,6 +145,49 @@ kbd {
   border-top-left-radius: 10px;
 }
 
+.shell__resizer {
+  position: absolute;
+  top: 36px;
+  bottom: 0;
+  left: var(--sidebar-width);
+  width: 1px;
+  margin-left: -0.5px;
+  background: transparent;
+  cursor: col-resize;
+  z-index: 5;
+  touch-action: none;
+  user-select: none;
+  transition:
+    left 0.24s var(--sidebar-easing),
+    visibility 0s linear 0s;
+}
+
+.shell__resizer::before {
+  content: "";
+  position: absolute;
+  inset: 0 -4px;
+}
+
+.shell.is-resizing {
+  cursor: col-resize;
+  user-select: none;
+  transition: none;
+}
+
+.shell.is-resizing .shell__resizer {
+  transition: none;
+}
+
+.shell.is-resizing .shell__main,
+.shell.is-resizing .secondary-panel {
+  pointer-events: none;
+}
+
+.shell.is-sidebar-collapsed .shell__resizer {
+  pointer-events: none;
+  visibility: hidden;
+}
+
 .secondary-panel {
   grid-area: secondary;
   background: var(--bg-elev);
@@ -152,6 +197,18 @@ kbd {
   gap: 0;
   min-height: 0;
   overflow: hidden;
+  transition:
+    opacity 0.2s var(--sidebar-easing),
+    transform 0.24s var(--sidebar-easing),
+    visibility 0s linear 0s;
+}
+
+.shell.is-sidebar-collapsed .secondary-panel {
+  opacity: 0;
+  visibility: hidden;
+  transform: translateX(-12px);
+  pointer-events: none;
+  transition-delay: 0s, 0s, 0.22s;
 }
 
 .secondary-panel--workspace {
@@ -2164,15 +2221,25 @@ kbd {
   display: flex;
   align-items: center;
   justify-content: flex-start;
-  padding: 0 14px;
+  gap: 6px;
+  padding: 0 8px 0 6px;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   font-size: 13px;
   font-weight: 600;
   letter-spacing: 0.2px;
   color: var(--text);
+}
+
+.titlebar__brand-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.titlebar__left-sidebar-btn {
+  flex-shrink: 0;
+  -webkit-app-region: no-drag;
 }
 
 .titlebar__search {
@@ -2905,6 +2972,17 @@ button.ghost.danger:hover {
       "secondary"
       "main";
     grid-template-rows: 36px auto 1fr;
+  }
+
+  .shell__resizer {
+    display: none;
+  }
+
+  .shell.is-sidebar-collapsed .secondary-panel {
+    opacity: 1;
+    visibility: visible;
+    transform: none;
+    pointer-events: auto;
   }
 
   .shell__main {
