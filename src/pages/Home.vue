@@ -822,26 +822,7 @@ onUnmounted(() => {
   </section>
 
   <section v-else class="empty-state-page">
-    <div class="empty-state-card">
-      <p class="asset-browser__eyebrow">
-        {{ isExtensionsPanel ? "拓展能力" : isSearchPanel ? "全局搜索" : "资源仓库" }}
-      </p>
-      <h1>
-        {{
-          isExtensionsPanel
-            ? "当前没有可展示的拓展能力"
-            : isSearchPanel
-              ? "还没有可搜索的资源库"
-              : "还没有可用资源库"
-        }}
-      </h1>
-      <p v-if="isSearchPanel">先在资源库页面添加资源库，再执行跨仓库搜索。</p>
-      <p v-else-if="isExtensionsPanel">先加载插件与文件系统后端，主界面会展示当前拓展能力。</p>
-      <p v-else>点击“添加资源库”选择文件夹。包含 `.momo` 的文件夹会自动导入，否则会原地初始化为新资源库。</p>
-      <button v-if="!hasRepository" type="button" class="primary empty-state-card__action" @click="requestAddRepository">
-        <Plus :size="14" aria-hidden="true" />
-        添加资源库
-      </button>
-    </div>
+    <h1>还没有可用资源库</h1>
+    <p>请先添加资源库。</p>
   </section>
 </template>
