@@ -31,7 +31,6 @@ const renameValue = ref("");
 const renameTargetPath = ref<string | null>(null);
 const isDraggingFiles = ref(false);
 const previewFilePath = ref<string | null>(null);
-const searchKeyword = ref("");
 const extensionKeyword = ref("");
 
 const {
@@ -61,7 +60,6 @@ const {
   openWorkspaceEntry,
   revealWorkspaceEntry,
   selectWorkspaceEntry,
-  runSearch,
   removeRepository,
   exportCurrentRepository,
 } = useRepositoryWorkspace();
@@ -128,14 +126,6 @@ watch(selectedFilePath, (path) => {
     previewFilePath.value = null;
   }
 });
-
-watch(
-  searchQuery,
-  (query) => {
-    searchKeyword.value = query;
-  },
-  { immediate: true },
-);
 
 function statusLabel(status: string) {
   switch (status) {
@@ -348,10 +338,6 @@ function formatRepositoryStatus(status: string) {
 
 function requestAddRepository() {
   window.dispatchEvent(new Event("momo:add-repository"));
-}
-
-function onSearchInput() {
-  void runSearch({ query: searchKeyword.value });
 }
 
 const searchSummary = computed(() => {
@@ -757,16 +743,6 @@ onUnmounted(() => {
           <span class="asset-stat">{{ searchResults.length }} 条结果</span>
         </div>
       </header>
-
-      <label class="search-workbench__field">
-        <Search :size="15" aria-hidden="true" />
-        <input
-          v-model="searchKeyword"
-          type="search"
-          placeholder="搜索文件名、标签、元数据"
-          @input="onSearchInput"
-        />
-      </label>
 
       <div v-if="isSearching" class="asset-browser__state">
         <LoaderCircle class="spin" :size="16" aria-hidden="true" />

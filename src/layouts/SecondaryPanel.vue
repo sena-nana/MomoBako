@@ -6,12 +6,10 @@ import {
   Archive,
   FolderOpen,
   FolderTree,
-  Library,
   LoaderCircle,
   Plus,
   Puzzle,
   RefreshCw,
-  Search,
   Settings,
   Tag,
   Trash2,
@@ -21,7 +19,7 @@ import Dropdown from "../components/Dropdown.vue";
 import { useRepositoryWorkspace, type WorkspacePanelKey } from "../composables/useRepositoryWorkspace";
 import type { FileDeleteMode } from "../types/repository";
 
-type PanelKey = Exclude<WorkspacePanelKey, "files">;
+type PanelKey = Exclude<WorkspacePanelKey, "files" | "search">;
 
 const showBackendDialog = ref(false);
 const backendPluginId = ref("builtin.local-filesystem");
@@ -67,12 +65,6 @@ const {
   deleteWorkspaceEntry,
   createNewRepository,
 } = useRepositoryWorkspace();
-
-const primaryNav = [
-  { key: "libraries" as const, label: "资源库", icon: Library },
-  { key: "search" as const, label: "搜索", icon: Search },
-  { key: "extensions" as const, label: "拓展", icon: Puzzle },
-];
 
 const shortcuts = computed(() => {
   const assets = activeSnapshot.value?.assets ?? [];
@@ -363,20 +355,6 @@ onBeforeUnmount(() => {
           </button>
         </div>
 
-        <nav class="workspace-sidebar__nav" aria-label="工作区导航">
-          <button
-            v-for="item in primaryNav"
-            :key="item.key"
-            type="button"
-            class="workspace-nav__btn"
-            :class="{ 'is-active': activePanel === item.key }"
-            :title="item.label"
-            :aria-label="item.label"
-            @click="selectPanel(item.key)"
-          >
-            <component :is="item.icon" :size="17" aria-hidden="true" />
-          </button>
-        </nav>
       </section>
 
       <section class="workspace-sidebar__files" aria-label="文件管理">
@@ -390,9 +368,6 @@ onBeforeUnmount(() => {
         </div>
 
         <section class="workspace-group">
-          <div class="workspace-group__header">
-            <span>快捷方式</span>
-          </div>
           <div class="workspace-shortcuts">
             <button
               v-for="item in shortcuts"
@@ -483,15 +458,27 @@ onBeforeUnmount(() => {
         </section>
       </section>
 
-      <RouterLink
-        to="/settings"
-        class="workspace-sidebar__settings"
-        active-class="is-active"
-        title="设置"
-        aria-label="设置"
-      >
-        <Settings :size="18" aria-hidden="true" />
-      </RouterLink>
+      <footer class="workspace-sidebar__footer" aria-label="辅助入口">
+        <RouterLink
+          to="/settings"
+          class="workspace-footer__btn"
+          active-class="is-active"
+          title="设置"
+          aria-label="设置"
+        >
+          <Settings :size="14" aria-hidden="true" />
+        </RouterLink>
+        <button
+          type="button"
+          class="workspace-footer__btn"
+          :class="{ 'is-active': activePanel === 'extensions' && route.path !== '/settings' }"
+          title="拓展"
+          aria-label="拓展"
+          @click="selectPanel('extensions')"
+        >
+          <Puzzle :size="14" aria-hidden="true" />
+        </button>
+      </footer>
     </div>
   </aside>
 

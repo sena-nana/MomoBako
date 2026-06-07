@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref } from "vue";
-import { Copy, Minus, Square, X } from "lucide-vue-next";
+import { Copy, Minus, Search, Square, X } from "lucide-vue-next";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { useRoute, useRouter } from "vue-router";
+import { useRepositoryWorkspace } from "../composables/useRepositoryWorkspace";
 
 interface Props {
   title?: string;
@@ -11,6 +13,13 @@ withDefaults(defineProps<Props>(), { title: "Tauri Template" });
 
 const isMaximized = ref(false);
 const appWindow = safeCurrentWindow();
+const route = useRoute();
+const router = useRouter();
+const {
+  searchQuery,
+  runSearch,
+  setActivePanel,
+} = useRepositoryWorkspace();
 let unlisten: (() => void) | null = null;
 
 function safeCurrentWindow(): ReturnType<typeof getCurrentWindow> | null {
@@ -42,6 +51,15 @@ onUnmounted(() => {
   unlisten?.();
 });
 
+function onSearchInput(event: Event) {
+  const query = event.target instanceof HTMLInputElement ? event.target.value : "";
+  setActivePanel("search");
+  if (route.path !== "/") {
+    void router.push("/");
+  }
+  void runSearch({ query });
+}
+
 async function onMinimize() {
   if (!appWindow) return;
   await appWindow.minimize();
@@ -61,8 +79,17 @@ async function onClose() {
 
 <template>
   <header class="titlebar" data-tauri-drag-region>
-    <div class="titlebar__spacer" data-tauri-drag-region></div>
     <div class="titlebar__brand" data-tauri-drag-region>{{ title }}</div>
+    <label class="titlebar__search" aria-label="全局搜索">
+      <Search :size="14" aria-hidden="true" />
+      <input
+        :value="searchQuery"
+        type="search"
+        aria-label="全局搜索"
+        placeholder="搜索文件名、标签、元数据"
+        @input="onSearchInput"
+      />
+    </label>
     <div class="titlebar__controls">
       <button
         type="button"
