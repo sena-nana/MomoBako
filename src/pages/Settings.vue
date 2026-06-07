@@ -1,8 +1,42 @@
 <script setup lang="ts">
-import { Moon, Sun } from "lucide-vue-next";
+import { computed, onMounted } from "vue";
+import { Database, Moon, PlugZap, ServerCog, Sun } from "lucide-vue-next";
 import { useTheme } from "../composables/useTheme";
+import { useRepositoryWorkspace } from "../composables/useRepositoryWorkspace";
 
 const { theme, setTheme } = useTheme();
+const {
+  repositories,
+  plugins,
+  cacheSnapshot,
+  apiDesign,
+  isLoadingSettingsData,
+  ensureRepositoryWorkspace,
+  loadSettingsData,
+} = useRepositoryWorkspace();
+
+const repositoryCount = computed(() => repositories.value.length);
+const repositoryBackends = computed(() => {
+  const backendMap = new Map<string, { name: string; kind: string; count: number }>();
+  for (const repository of repositories.value) {
+    const current = backendMap.get(repository.backend.pluginId);
+    if (current) {
+      current.count += 1;
+      continue;
+    }
+    backendMap.set(repository.backend.pluginId, {
+      name: repository.backend.name,
+      kind: repository.backend.kind,
+      count: 1,
+    });
+  }
+  return Array.from(backendMap.values());
+});
+
+onMounted(() => {
+  void ensureRepositoryWorkspace();
+  void loadSettingsData();
+});
 </script>
 
 <template>
@@ -10,7 +44,7 @@ const { theme, setTheme } = useTheme();
     <div class="page-header">
       <div>
         <h1>设置</h1>
-        <p>这里只保留模板级偏好，业务配置由具体项目添加。</p>
+        <p>管理仓库服务、插件、缓存与 API 契约。</p>
       </div>
     </div>
 
@@ -44,21 +78,87 @@ const { theme, setTheme } = useTheme();
           </button>
         </div>
       </div>
-      <div class="settings-row">
-        <div class="settings-row__label">
-          <div>语言</div>
-          <div class="settings-row__hint">模板默认使用简体中文界面文案。</div>
-        </div>
-        <span class="muted">简体中文</span>
-      </div>
     </div>
 
     <div class="card">
-      <h2>关于</h2>
+      <h2>仓库服务</h2>
       <ul class="kv">
-        <li><span>名称</span><span>Tauri Template</span></li>
-        <li><span>版本</span><span>0.1.0</span></li>
-        <li><span>框架</span><span>Tauri 2 + Vue 3</span></li>
+        <li><span>已注册仓库</span><span>{{ repositoryCount }}</span></li>
+        <li><span>并发模型</span><span>SQLite WAL + 乐观锁</span></li>
+        <li><span>同步方式</span><span>全量扫描 + 事件表</span></li>
+        <li>
+          <span>已接入后端</span>
+          <span>{{ repositoryBackends.map((item) => `${item.name} (${item.count})`).join(" / ") || "无" }}</span>
+        </li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <h2>插件系统</h2>
+      <div v-if="isLoadingSettingsData" class="workspace-state">正在加载插件信息</div>
+      <ul v-else class="settings-list">
+        <li v-for="plugin in plugins" :key="plugin.pluginId" class="settings-list__item">
+          <div class="settings-list__title">
+            <PlugZap :size="15" aria-hidden="true" />
+            <strong>{{ plugin.name }}</strong>
+            <span class="muted">{{ plugin.version }}</span>
+          </div>
+          <div class="settings-list__desc">{{ plugin.description }}</div>
+          <div class="settings-list__chips">
+            <span class="workspace-hints__chip">{{ plugin.kind }}</span>
+            <span class="workspace-hints__chip">{{ plugin.enabled ? "已启用" : "未启用" }}</span>
+            <span v-for="capability in plugin.capabilities" :key="capability" class="workspace-hints__chip">
+              {{ capability }}
+            </span>
+          </div>
+        </li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <h2>缓存</h2>
+      <div class="settings-grid">
+        <div class="settings-metric">
+          <Database :size="16" aria-hidden="true" />
+          <div>
+            <strong>{{ cacheSnapshot?.config.metadataCapacity ?? 0 }}</strong>
+            <span>Metadata LRU</span>
+          </div>
+        </div>
+        <div class="settings-metric">
+          <Database :size="16" aria-hidden="true" />
+          <div>
+            <strong>{{ cacheSnapshot?.config.thumbnailCapacity ?? 0 }}</strong>
+            <span>Thumbnail LRU</span>
+          </div>
+        </div>
+        <div class="settings-metric">
+          <Database :size="16" aria-hidden="true" />
+          <div>
+            <strong>{{ cacheSnapshot?.config.queryCapacity ?? 0 }}</strong>
+            <span>Query LRU</span>
+          </div>
+        </div>
+      </div>
+      <ul class="kv">
+        <li v-for="entry in cacheSnapshot?.entries ?? []" :key="`${entry.cacheType}:${entry.key}`">
+          <span>{{ entry.cacheType }} / {{ entry.key }}</span>
+          <span>{{ entry.lastAccessedAt }}</span>
+        </li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <h2>API 设计</h2>
+      <p class="muted">
+        <ServerCog :size="13" aria-hidden="true" />
+        {{ apiDesign?.transport ?? "本地服务契约未加载" }}
+      </p>
+      <ul class="kv">
+        <li v-for="endpoint in apiDesign?.endpoints ?? []" :key="`${endpoint.method}:${endpoint.path}`">
+          <span>{{ endpoint.group }} / {{ endpoint.method }} {{ endpoint.path }}</span>
+          <span>{{ endpoint.summary }}</span>
+        </li>
       </ul>
     </div>
   </section>
