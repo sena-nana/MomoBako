@@ -2,8 +2,8 @@
 
 ## Transport
 
-- Primary transport: local REST-style service boundary exposed through Tauri commands
-- Compatibility target: gRPC-ready contracts with stable request/response models
+- Primary transport: Tauri commands backed by an in-process repository runtime
+- Runtime execution: blocking repository work runs on Tauri's blocking task pool
 
 ## Repository API
 
@@ -42,7 +42,7 @@
   - Response fields: `repoId`, `path`, `assetId`, `kind`, `thumbnailPath`, `thumbnailCustom`
 - `POST /repositories/{repoId}/files:preparePreviewSource`
   - Request body includes repository-relative `path`
-  - Response returns a session-scoped local preview `sourceUrl` for streaming local files into preview loaders
+  - Response returns a session-scoped local preview `sourceUrl` backed by the in-process repository runtime
   - 3D previews use this source instead of returning full file bytes through the desktop command bridge
 
 ## Desktop Runtime State
