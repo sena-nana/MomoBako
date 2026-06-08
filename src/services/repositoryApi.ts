@@ -13,6 +13,8 @@ import type {
   FileRenameRequest,
   MetadataUpdateRequest,
   MetadataUpdateResponse,
+  RepositoryExportRequest,
+  RepositoryExportResponse,
   RepositoryFolderRequest,
   PluginManifest,
   RepositoryMutationRequest,
@@ -91,8 +93,8 @@ export function deleteRepository(repoId: string) {
   return invoke<void>("delete_repository", { repoId });
 }
 
-export function exportRepository(repoId: string) {
-  return invoke<RepositoryMutationResponse>("export_repository", { repoId });
+export function exportRepository(request: RepositoryExportRequest) {
+  return invoke<RepositoryExportResponse>("export_repository", { request });
 }
 
 export function syncRepository(request: SyncRequest) {

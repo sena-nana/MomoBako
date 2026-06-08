@@ -1,7 +1,7 @@
 use crate::repository_service::{
     FileBrowserRequest, FileCreateRequest, FileDeleteRequest, FileImportRequest, FileReadRequest,
-    FileRenameRequest, MetadataUpdateRequest, RepositoryFolderRequest, RepositoryMutationRequest,
-    RepositoryState, RevisionActionRequest, SearchRequest, SyncRequest,
+    FileRenameRequest, MetadataUpdateRequest, RepositoryExportRequest, RepositoryFolderRequest,
+    RepositoryMutationRequest, RepositoryState, RevisionActionRequest, SearchRequest, SyncRequest,
 };
 use notify::{Config, Event, RecommendedWatcher, RecursiveMode, Watcher};
 use serde::{Deserialize, Serialize};
@@ -10,19 +10,29 @@ use std::{
     io::Read,
     net::TcpListener,
     path::{Path, PathBuf},
-    process::Command,
+    process::{Child, Command},
     sync::{mpsc::channel, Arc, Mutex},
     thread,
 };
+#[cfg(test)]
+use std::sync::atomic::{AtomicUsize, Ordering};
 use tauri::{AppHandle, Manager};
 use tiny_http::{Method, Response, Server, StatusCode};
 
 const SERVICE_HOST: &str = "127.0.0.1";
 const SERVICE_START_ATTEMPTS: usize = 3;
+#[cfg(test)]
+static SERVICE_HANDLE_SHUTDOWN_COUNT: AtomicUsize = AtomicUsize::new(0);
 
 #[derive(Debug, Clone)]
 pub struct ServiceBridge {
     addr: String,
+    child: Arc<ServiceProcessHandle>,
+}
+
+#[derive(Debug)]
+struct ServiceProcessHandle {
+    child: Mutex<Option<Child>>,
 }
 
 struct RepositoryWatcher {
@@ -85,10 +95,7 @@ enum ServiceRequest {
         #[serde(rename = "repoId", alias = "repo_id")]
         repo_id: String,
     },
-    ExportRepository {
-        #[serde(rename = "repoId", alias = "repo_id")]
-        repo_id: String,
-    },
+    ExportRepository { request: RepositoryExportRequest },
     SyncRepository {
         request: SyncRequest,
     },
@@ -135,16 +142,22 @@ impl ServiceBridge {
                 command.creation_flags(0x08000000);
             }
 
-            command
+            let mut child = command
                 .spawn()
                 .map_err(|error| format!("failed to start service process: {error}"))?;
 
             for _ in 0..40 {
                 if ping_service(&addr).is_ok() {
-                    return Ok(Self { addr });
+                    return Ok(Self {
+                        addr,
+                        child: Arc::new(ServiceProcessHandle::new(Some(child))),
+                    });
                 }
                 std::thread::sleep(std::time::Duration::from_millis(100));
             }
+
+            let _ = child.kill();
+            let _ = child.wait();
         }
 
         Err("service process did not become ready on a dynamic port".to_string())
@@ -186,6 +199,37 @@ impl ServiceBridge {
                 .unwrap_or_else(|| "service request failed".to_string()))
         }
     }
+
+    pub fn shutdown(&self) {
+        self.child.shutdown();
+    }
+}
+
+impl ServiceProcessHandle {
+    fn new(child: Option<Child>) -> Self {
+        Self {
+            child: Mutex::new(child),
+        }
+    }
+
+    fn shutdown(&self) {
+        #[cfg(test)]
+        SERVICE_HANDLE_SHUTDOWN_COUNT.fetch_add(1, Ordering::SeqCst);
+
+        let Ok(mut child) = self.child.lock() else {
+            return;
+        };
+        if let Some(mut child) = child.take() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+    }
+}
+
+impl Drop for ServiceProcessHandle {
+    fn drop(&mut self) {
+        self.shutdown();
+    }
 }
 
 fn reserve_service_addr() -> Result<String, String> {
@@ -195,7 +239,10 @@ fn reserve_service_addr() -> Result<String, String> {
 }
 
 impl RepositoryWatcher {
-    fn start(repository_state: Arc<Mutex<RepositoryState>>) -> Result<Arc<Mutex<Self>>, String> {
+    fn start(
+        repository_state: Arc<RepositoryState>,
+        write_lock: Arc<Mutex<()>>,
+    ) -> Result<Arc<Mutex<Self>>, String> {
         let (tx, rx) = channel::<notify::Result<Event>>();
         let watcher = RecommendedWatcher::new(
             move |result| {
@@ -214,7 +261,7 @@ impl RepositoryWatcher {
         thread::spawn(move || {
             while let Ok(event) = rx.recv() {
                 if let Ok(event) = event {
-                    handle_fs_event(&repository_state_for_thread, event);
+                    handle_fs_event(&repository_state_for_thread, &write_lock, event);
                 }
             }
         });
@@ -230,15 +277,10 @@ pub fn run_service_process(addr: &str) -> Result<(), String> {
         .join(".service-data");
     let thumbnail_root =
         service_thumbnail_dir_from_args()?.unwrap_or_else(|| root.join("thumbnails"));
-    let repository_state = Arc::new(Mutex::new(RepositoryState::from_roots(
-        root,
-        thumbnail_root,
-    )));
-    repository_state
-        .lock()
-        .map_err(|_| "service state lock poisoned".to_string())?
-        .ensure_initialized()?;
-    let watcher_handle = RepositoryWatcher::start(repository_state.clone())?;
+    let repository_state = Arc::new(RepositoryState::from_roots(root, thumbnail_root));
+    let write_lock = Arc::new(Mutex::new(()));
+    repository_state.ensure_initialized()?;
+    let watcher_handle = RepositoryWatcher::start(repository_state.clone(), write_lock.clone())?;
 
     let server = Server::http(addr).map_err(|error| error.to_string())?;
     for mut request in server.incoming_requests() {
@@ -257,8 +299,14 @@ pub fn run_service_process(addr: &str) -> Result<(), String> {
             continue;
         }
 
-        let response = handle_service_request(&repository_state, &watcher_handle, &body);
-        let _ = request.respond(response);
+        let repository_state = repository_state.clone();
+        let watcher_handle = watcher_handle.clone();
+        let write_lock = write_lock.clone();
+        thread::spawn(move || {
+            let response =
+                handle_service_request(&repository_state, &watcher_handle, &write_lock, &body);
+            let _ = request.respond(response);
+        });
     }
 
     Ok(())
@@ -279,13 +327,16 @@ fn service_thumbnail_dir_from_args() -> Result<Option<PathBuf>, String> {
 }
 
 fn handle_service_request(
-    repository_state: &Arc<Mutex<RepositoryState>>,
+    repository_state: &Arc<RepositoryState>,
     watcher_handle: &Arc<Mutex<RepositoryWatcher>>,
+    write_lock: &Arc<Mutex<()>>,
     body: &str,
 ) -> Response<std::io::Cursor<Vec<u8>>> {
     let result = serde_json::from_str::<ServiceRequest>(body)
         .map_err(|error| error.to_string())
-        .and_then(|request| dispatch_request(repository_state, watcher_handle, request));
+        .and_then(|request| {
+            dispatch_request(repository_state, watcher_handle, write_lock, request)
+        });
 
     match result {
         Ok(payload) => json_response(&ServiceResponse {
@@ -302,192 +353,132 @@ fn handle_service_request(
 }
 
 fn dispatch_request(
-    repository_state: &Arc<Mutex<RepositoryState>>,
+    repository_state: &Arc<RepositoryState>,
     watcher_handle: &Arc<Mutex<RepositoryWatcher>>,
+    write_lock: &Arc<Mutex<()>>,
     request: ServiceRequest,
 ) -> Result<serde_json::Value, String> {
     match request {
         ServiceRequest::Ping => Ok(serde_json::json!("pong")),
-        ServiceRequest::ListRepositories => {
-            let state = repository_state
-                .lock()
-                .map_err(|_| "service state lock poisoned".to_string())?;
-            to_value(state.list_repositories()?)
-        }
+        ServiceRequest::ListRepositories => to_value(repository_state.list_repositories()?),
         ServiceRequest::GetRepositorySnapshot { repo_id } => {
-            let state = repository_state
-                .lock()
-                .map_err(|_| "service state lock poisoned".to_string())?;
-            to_value(state.load_snapshot(&repo_id)?)
+            to_value(repository_state.load_snapshot(&repo_id)?)
         }
         ServiceRequest::GetAssetDetail { repo_id, asset_id } => {
-            let state = repository_state
-                .lock()
-                .map_err(|_| "service state lock poisoned".to_string())?;
-            to_value(state.load_asset_detail(&repo_id, &asset_id)?)
+            to_value(repository_state.load_asset_detail(&repo_id, &asset_id)?)
         }
         ServiceRequest::SearchAssets { request } => {
-            let state = repository_state
-                .lock()
-                .map_err(|_| "service state lock poisoned".to_string())?;
-            to_value(state.search_assets(request)?)
+            to_value(repository_state.search_assets(request)?)
         }
         ServiceRequest::UpdateAssetMetadata { request } => {
-            let state = repository_state
+            let _guard = write_lock
                 .lock()
-                .map_err(|_| "service state lock poisoned".to_string())?;
-            to_value(state.update_asset_metadata(request)?)
+                .map_err(|_| "service write lock poisoned".to_string())?;
+            to_value(repository_state.update_asset_metadata(request)?)
         }
         ServiceRequest::GetFileBrowser { request } => {
-            let state = repository_state
-                .lock()
-                .map_err(|_| "service state lock poisoned".to_string())?;
-            to_value(state.load_file_browser(request)?)
+            to_value(repository_state.load_file_browser(request)?)
         }
-        ServiceRequest::ReadFile { request } => {
-            let state = repository_state
-                .lock()
-                .map_err(|_| "service state lock poisoned".to_string())?;
-            to_value(state.read_file(request)?)
-        }
+        ServiceRequest::ReadFile { request } => to_value(repository_state.read_file(request)?),
         ServiceRequest::CreateDirectory { request } => {
-            let response = {
-                let state = repository_state
-                    .lock()
-                    .map_err(|_| "service state lock poisoned".to_string())?;
-                state.create_directory(request)?
-            };
-            to_value(response)
+            let _guard = write_lock
+                .lock()
+                .map_err(|_| "service write lock poisoned".to_string())?;
+            to_value(repository_state.create_directory(request)?)
         }
         ServiceRequest::CreateFile { request } => {
-            let response = {
-                let state = repository_state
-                    .lock()
-                    .map_err(|_| "service state lock poisoned".to_string())?;
-                state.create_file(request)?
-            };
-            to_value(response)
+            let _guard = write_lock
+                .lock()
+                .map_err(|_| "service write lock poisoned".to_string())?;
+            to_value(repository_state.create_file(request)?)
         }
         ServiceRequest::ImportEntries { request } => {
-            let response = {
-                let state = repository_state
-                    .lock()
-                    .map_err(|_| "service state lock poisoned".to_string())?;
-                state.import_entries(request)?
-            };
-            to_value(response)
+            let _guard = write_lock
+                .lock()
+                .map_err(|_| "service write lock poisoned".to_string())?;
+            to_value(repository_state.import_entries(request)?)
         }
         ServiceRequest::RenameEntry { request } => {
-            let response = {
-                let state = repository_state
-                    .lock()
-                    .map_err(|_| "service state lock poisoned".to_string())?;
-                state.rename_entry(request)?
-            };
-            to_value(response)
+            let _guard = write_lock
+                .lock()
+                .map_err(|_| "service write lock poisoned".to_string())?;
+            to_value(repository_state.rename_entry(request)?)
         }
         ServiceRequest::DeleteEntry { request } => {
-            let response = {
-                let state = repository_state
-                    .lock()
-                    .map_err(|_| "service state lock poisoned".to_string())?;
-                state.delete_entry(request)?
-            };
-            to_value(response)
+            let _guard = write_lock
+                .lock()
+                .map_err(|_| "service write lock poisoned".to_string())?;
+            to_value(repository_state.delete_entry(request)?)
         }
         ServiceRequest::CreateRepository { request } => {
-            let response = {
-                let state = repository_state
-                    .lock()
-                    .map_err(|_| "service state lock poisoned".to_string())?;
-                state.create_repository(request)?
-            };
+            let _guard = write_lock
+                .lock()
+                .map_err(|_| "service write lock poisoned".to_string())?;
+            let response = repository_state.create_repository(request)?;
             sync_watched_paths(repository_state, watcher_handle)?;
             to_value(response)
         }
         ServiceRequest::ImportRepository { request } => {
-            let response = {
-                let state = repository_state
-                    .lock()
-                    .map_err(|_| "service state lock poisoned".to_string())?;
-                state.import_repository(request)?
-            };
+            let _guard = write_lock
+                .lock()
+                .map_err(|_| "service write lock poisoned".to_string())?;
+            let response = repository_state.import_repository(request)?;
             sync_watched_paths(repository_state, watcher_handle)?;
             to_value(response)
         }
         ServiceRequest::AttachRepositoryFolder { request } => {
-            let response = {
-                let state = repository_state
-                    .lock()
-                    .map_err(|_| "service state lock poisoned".to_string())?;
-                state.attach_repository_folder(request)?
-            };
+            let _guard = write_lock
+                .lock()
+                .map_err(|_| "service write lock poisoned".to_string())?;
+            let response = repository_state.attach_repository_folder(request)?;
             sync_watched_paths(repository_state, watcher_handle)?;
             to_value(response)
         }
         ServiceRequest::DeleteRepository { repo_id } => {
-            {
-                let state = repository_state
-                    .lock()
-                    .map_err(|_| "service state lock poisoned".to_string())?;
-                state.delete_repository(&repo_id)?;
-            }
+            let _guard = write_lock
+                .lock()
+                .map_err(|_| "service write lock poisoned".to_string())?;
+            repository_state.delete_repository(&repo_id)?;
             sync_watched_paths(repository_state, watcher_handle)?;
             Ok(serde_json::json!(null))
         }
-        ServiceRequest::ExportRepository { repo_id } => {
-            let state = repository_state
+        ServiceRequest::ExportRepository { request } => {
+            let _guard = write_lock
                 .lock()
-                .map_err(|_| "service state lock poisoned".to_string())?;
-            to_value(state.export_repository(&repo_id)?)
+                .map_err(|_| "service write lock poisoned".to_string())?;
+            to_value(repository_state.export_repository(request)?)
         }
         ServiceRequest::SyncRepository { request } => {
-            let state = repository_state
+            let _guard = write_lock
                 .lock()
-                .map_err(|_| "service state lock poisoned".to_string())?;
-            to_value(state.sync_repository(request)?)
+                .map_err(|_| "service write lock poisoned".to_string())?;
+            to_value(repository_state.sync_repository(request)?)
         }
         ServiceRequest::UndoLastRevision { request } => {
-            let state = repository_state
+            let _guard = write_lock
                 .lock()
-                .map_err(|_| "service state lock poisoned".to_string())?;
-            to_value(state.undo_last_revision(request)?)
+                .map_err(|_| "service write lock poisoned".to_string())?;
+            to_value(repository_state.undo_last_revision(request)?)
         }
         ServiceRequest::RedoLastRevision { request } => {
-            let state = repository_state
+            let _guard = write_lock
                 .lock()
-                .map_err(|_| "service state lock poisoned".to_string())?;
-            to_value(state.redo_last_revision(request)?)
+                .map_err(|_| "service write lock poisoned".to_string())?;
+            to_value(repository_state.redo_last_revision(request)?)
         }
-        ServiceRequest::ListPlugins => {
-            let state = repository_state
-                .lock()
-                .map_err(|_| "service state lock poisoned".to_string())?;
-            to_value(state.list_plugins()?)
-        }
-        ServiceRequest::GetCacheSnapshot => {
-            let state = repository_state
-                .lock()
-                .map_err(|_| "service state lock poisoned".to_string())?;
-            to_value(state.get_cache_snapshot()?)
-        }
+        ServiceRequest::ListPlugins => to_value(repository_state.list_plugins()?),
+        ServiceRequest::GetCacheSnapshot => to_value(repository_state.get_cache_snapshot()?),
         ServiceRequest::GetApiDesignSnapshot => {
-            let state = repository_state
-                .lock()
-                .map_err(|_| "service state lock poisoned".to_string())?;
-            to_value(state.get_api_design_snapshot()?)
+            to_value(repository_state.get_api_design_snapshot()?)
         }
     }
 }
 
 fn sync_watched_paths(
-    repository_state: &Arc<Mutex<RepositoryState>>,
+    repository_state: &Arc<RepositoryState>,
     watcher_handle: &Arc<Mutex<RepositoryWatcher>>,
 ) -> Result<(), String> {
-    let repositories = repository_state
-        .lock()
-        .map_err(|_| "service state lock poisoned".to_string())?
-        .list_repositories()?;
+    let repositories = repository_state.list_repositories()?;
     let desired_paths = repositories
         .into_iter()
         .filter(|repository| repository.backend.plugin_id == "builtin.local-filesystem")
@@ -591,6 +582,7 @@ fn find_crlf(bytes: &[u8], start: usize) -> Option<usize> {
 fn ping_service(addr: &str) -> Result<(), String> {
     let bridge = ServiceBridge {
         addr: addr.to_string(),
+        child: Arc::new(ServiceProcessHandle::new(None)),
     };
     let value: String = bridge.invoke(&serde_json::json!({ "command": "ping" }))?;
     if value == "pong" {
@@ -600,11 +592,12 @@ fn ping_service(addr: &str) -> Result<(), String> {
     }
 }
 
-fn handle_fs_event(repository_state: &Arc<Mutex<RepositoryState>>, event: Event) {
-    let Ok(state) = repository_state.lock() else {
-        return;
-    };
-    let Ok(repositories) = state.list_repositories() else {
+fn handle_fs_event(
+    repository_state: &Arc<RepositoryState>,
+    write_lock: &Arc<Mutex<()>>,
+    event: Event,
+) {
+    let Ok(repositories) = repository_state.list_repositories() else {
         return;
     };
 
@@ -614,7 +607,10 @@ fn handle_fs_event(repository_state: &Arc<Mutex<RepositoryState>>, event: Event)
             .iter()
             .find(|repo| normalized_path.starts_with(&normalize_path(Path::new(&repo.path))))
         {
-            let _ = state.sync_repository(SyncRequest {
+            let Ok(_guard) = write_lock.lock() else {
+                return;
+            };
+            let _ = repository_state.sync_repository(SyncRequest {
                 repo_id: repository.repo_id.clone(),
             });
         }
@@ -628,6 +624,23 @@ fn normalize_path(path: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cloned_bridge_drop_keeps_shared_service_handle_alive() {
+        SERVICE_HANDLE_SHUTDOWN_COUNT.store(0, Ordering::SeqCst);
+        let handle = Arc::new(ServiceProcessHandle::new(None));
+        let bridge = ServiceBridge {
+            addr: "127.0.0.1:0".to_string(),
+            child: handle.clone(),
+        };
+
+        let clone = bridge.clone();
+        drop(clone);
+
+        assert_eq!(Arc::strong_count(&handle), 2);
+        assert_eq!(SERVICE_HANDLE_SHUTDOWN_COUNT.load(Ordering::SeqCst), 0);
+        assert!(bridge.child.child.lock().expect("child lock should be healthy").is_none());
+    }
 
     #[test]
     fn decodes_plain_http_response_body() {

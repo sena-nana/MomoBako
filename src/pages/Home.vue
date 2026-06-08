@@ -1,16 +1,19 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { convertFileSrc } from "@tauri-apps/api/core";
+import { save } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import {
   ArrowLeft,
+  Archive,
   Eye,
   File,
   FileImage,
   FileVideo,
   Folder,
   FolderOpen,
+  GitBranch,
   LoaderCircle,
   PencilLine,
   Plus,
@@ -20,12 +23,18 @@ import {
   RefreshCw,
   Search,
   Trash2,
+  X,
 } from "lucide-vue-next";
 import Markdown from "vue3-markdown-it";
 import { useRepositoryWorkspace } from "../composables/useRepositoryWorkspace";
 import { vContextMenu } from "../directives/contextMenu";
 import { getPreviewPluginForEntry } from "../plugins/previewPlugins";
-import type { FileBrowserEntry } from "../types/repository";
+import type {
+  FileBrowserEntry,
+  RepositoryArchiveFormat,
+  RepositoryCompressionLevel,
+  RepositorySummary,
+} from "../types/repository";
 
 const createFileName = ref("");
 const renameValue = ref("");
@@ -35,6 +44,17 @@ const isDraggingRepositoryFolder = ref(false);
 const emptyRepositoryError = ref("");
 const previewFilePath = ref<string | null>(null);
 const extensionKeyword = ref("");
+const exportDialogRepository = ref<RepositorySummary | null>(null);
+const exportTarget = ref<"archive" | "git">("archive");
+const exportArchiveFormat = ref<RepositoryArchiveFormat>("zip");
+const exportCompression = ref<RepositoryCompressionLevel>("balanced");
+const exportEncrypt = ref(false);
+const exportPassword = ref("");
+const exportGitRemote = ref("origin");
+const exportGitBranch = ref("");
+const exportGitMessage = ref("");
+const exportDialogError = ref("");
+const isExporting = ref(false);
 
 const {
   activePanel,
@@ -109,6 +129,18 @@ const filteredPlugins = computed(() => {
     plugin.capabilities.some((capability) => capability.toLowerCase().includes(keyword))
   ));
 });
+const exportArchiveExtension = computed(() => {
+  if (exportArchiveFormat.value === "tar" && exportCompression.value !== "none") {
+    return "tar.gz";
+  }
+  return exportArchiveFormat.value === "7z" ? "7z" : exportArchiveFormat.value;
+});
+const exportArchiveFilterExtension = computed(() => (
+  exportArchiveFormat.value === "tar" && exportCompression.value !== "none"
+    ? "gz"
+    : exportArchiveExtension.value
+));
+const exportActionLabel = computed(() => exportTarget.value === "git" ? "上传到 Git" : "导出压缩包");
 
 watch(currentFileEntry, (entry) => {
   if (renameTargetPath.value && renameTargetPath.value !== entry?.path) {
@@ -251,7 +283,7 @@ async function handleDrop(event: DragEvent) {
   isDraggingFiles.value = false;
   const sourcePaths = getDroppedSourcePaths(event);
   if (!sourcePaths.length) return;
-  await importEntriesToWorkspace(sourcePaths);
+  void importEntriesToWorkspace(sourcePaths);
 }
 
 function handleEmptyRepositoryDragOver(event: DragEvent) {
@@ -390,6 +422,93 @@ function formatRepositoryStatus(status: string) {
   }
 }
 
+function sanitizeExportName(value: string) {
+  return value.trim().replace(/[<>:"/\\|?*\u0000-\u001F]/g, "-") || "momobako-repository";
+}
+
+function closeExportDialog(force = false) {
+  if (isExporting.value && !force) return;
+  exportDialogRepository.value = null;
+  exportDialogError.value = "";
+  exportPassword.value = "";
+}
+
+async function requestRepositoryExport(library: RepositorySummary) {
+  exportDialogError.value = "";
+  if (activeRepoId.value !== library.repoId) {
+    await selectRepository(library.repoId);
+  }
+  if (activeRepoId.value !== library.repoId) return;
+  exportDialogRepository.value = repositories.value.find((item) => item.repoId === library.repoId) ?? library;
+}
+
+async function chooseArchiveOutputPath(repository: RepositorySummary) {
+  const extension = exportArchiveExtension.value;
+  return save({
+    title: "导出资源库",
+    defaultPath: `${sanitizeExportName(repository.name)}.${extension}`,
+    filters: [
+      {
+        name: extension.toUpperCase(),
+        extensions: [exportArchiveFilterExtension.value],
+      },
+    ],
+  });
+}
+
+async function submitExportDialog() {
+  const repository = exportDialogRepository.value;
+  if (!repository) return;
+
+  exportDialogError.value = "";
+  isExporting.value = true;
+
+  try {
+    if (exportTarget.value === "archive") {
+      if (exportEncrypt.value && !exportPassword.value.trim()) {
+        exportDialogError.value = "请输入加密密码。";
+        return;
+      }
+
+      const outputPath = await chooseArchiveOutputPath(repository);
+      if (!outputPath) return;
+
+      const response = await exportCurrentRepository({
+        target: "archive",
+        archive: {
+          format: exportArchiveFormat.value,
+          outputPath,
+          compression: exportCompression.value,
+          encrypt: exportEncrypt.value,
+          password: exportEncrypt.value ? exportPassword.value : undefined,
+        },
+      });
+      if (response) {
+        closeExportDialog(true);
+      } else {
+        exportDialogError.value = error.value ?? "资源库导出失败。";
+      }
+      return;
+    }
+
+    const response = await exportCurrentRepository({
+      target: "git",
+      git: {
+        remote: exportGitRemote.value.trim() || undefined,
+        branch: exportGitBranch.value.trim() || undefined,
+        message: exportGitMessage.value.trim() || undefined,
+      },
+    });
+    if (response) {
+      closeExportDialog(true);
+    } else {
+      exportDialogError.value = error.value ?? "Git 上传失败。";
+    }
+  } finally {
+    isExporting.value = false;
+  }
+}
+
 function getAnchorFromElement(element: EventTarget | null) {
   if (!(element instanceof HTMLElement)) return null;
   const rect = element.getBoundingClientRect();
@@ -495,7 +614,7 @@ onUnmounted(() => {
 
       <div v-else-if="isBusy" class="asset-browser__state">
         <LoaderCircle class="spin" :size="16" aria-hidden="true" />
-        正在加载资源库摘要
+        正在加载资源库
       </div>
 
       <template v-else>
@@ -579,7 +698,7 @@ onUnmounted(() => {
                 <button
                   type="button"
                   class="ghost"
-                  @click="activeRepoId === library.repoId ? exportCurrentRepository() : selectRepository(library.repoId).then(exportCurrentRepository)"
+                  @click="requestRepositoryExport(library)"
                 >
                   <Download :size="14" aria-hidden="true" />
                   导出
@@ -695,6 +814,11 @@ onUnmounted(() => {
       <div v-else-if="isLoadingFileBrowser" class="asset-browser__state">
         <LoaderCircle class="spin" :size="16" aria-hidden="true" />
         正在读取目录
+      </div>
+
+      <div v-else-if="isMutatingFiles" class="asset-browser__state">
+        <LoaderCircle class="spin" :size="16" aria-hidden="true" />
+        正在处理文件
       </div>
 
       <template v-else>
@@ -929,4 +1053,150 @@ onUnmounted(() => {
       </p>
     </div>
   </section>
+
+  <Teleport to="body">
+    <Transition name="modal">
+      <div
+        v-if="exportDialogRepository"
+        class="modal-overlay"
+        role="dialog"
+        aria-modal="true"
+        aria-label="导出资源库"
+        @click.self="closeExportDialog()"
+      >
+        <div class="modal-card dialog-card repository-export-dialog">
+          <div class="dialog-card__header">
+            <Download :size="14" aria-hidden="true" />
+            <span>导出资源库</span>
+            <button
+              type="button"
+              class="repository-export-dialog__close"
+              title="关闭"
+              aria-label="关闭导出配置"
+              :disabled="isExporting"
+              @click="closeExportDialog()"
+            >
+              <X :size="13" aria-hidden="true" />
+            </button>
+          </div>
+
+          <div class="dialog-card__body repository-export-dialog__body">
+            <div class="repository-export-dialog__repo">
+              <strong>{{ exportDialogRepository.name }}</strong>
+              <span>{{ exportDialogRepository.path }}</span>
+            </div>
+
+            <div class="segmented repository-export-dialog__tabs">
+              <button
+                type="button"
+                :class="{ 'is-active': exportTarget === 'archive' }"
+                :disabled="isExporting"
+                @click="exportTarget = 'archive'"
+              >
+                <Archive :size="13" aria-hidden="true" />
+                压缩包
+              </button>
+              <button
+                type="button"
+                :class="{ 'is-active': exportTarget === 'git' }"
+                :disabled="isExporting"
+                @click="exportTarget = 'git'"
+              >
+                <GitBranch :size="13" aria-hidden="true" />
+                Git
+              </button>
+            </div>
+
+            <template v-if="exportTarget === 'archive'">
+              <div class="repository-export-dialog__grid">
+                <label class="dialog-field">
+                  <span>格式</span>
+                  <select v-model="exportArchiveFormat" :disabled="isExporting">
+                    <option value="zip">zip</option>
+                    <option value="7z">7z</option>
+                    <option value="tar">tar</option>
+                  </select>
+                </label>
+
+                <label class="dialog-field">
+                  <span>压缩</span>
+                  <select v-model="exportCompression" :disabled="isExporting">
+                    <option value="none">不压缩</option>
+                    <option value="fast">快速</option>
+                    <option value="balanced">均衡</option>
+                    <option value="maximum">最大</option>
+                  </select>
+                </label>
+              </div>
+
+              <label class="repository-export-dialog__toggle">
+                <input v-model="exportEncrypt" type="checkbox" :disabled="isExporting" />
+                <span>加密压缩包</span>
+              </label>
+
+              <label v-if="exportEncrypt" class="dialog-field">
+                <span>密码</span>
+                <input
+                  v-model="exportPassword"
+                  type="password"
+                  placeholder="用于压缩包加密"
+                  :disabled="isExporting"
+                  @keydown.enter.prevent="submitExportDialog"
+                />
+              </label>
+            </template>
+
+            <template v-else>
+              <div class="repository-export-dialog__grid">
+                <label class="dialog-field">
+                  <span>远端</span>
+                  <input
+                    v-model="exportGitRemote"
+                    type="text"
+                    placeholder="origin"
+                    :disabled="isExporting"
+                  />
+                </label>
+
+                <label class="dialog-field">
+                  <span>分支</span>
+                  <input
+                    v-model="exportGitBranch"
+                    type="text"
+                    placeholder="默认当前分支"
+                    :disabled="isExporting"
+                  />
+                </label>
+              </div>
+
+              <label class="dialog-field">
+                <span>提交信息</span>
+                <input
+                  v-model="exportGitMessage"
+                  type="text"
+                  placeholder="导出资源库"
+                  :disabled="isExporting"
+                  @keydown.enter.prevent="submitExportDialog"
+                />
+              </label>
+            </template>
+
+            <p v-if="exportDialogError" class="repository-add-popover__error">
+              {{ exportDialogError }}
+            </p>
+          </div>
+
+          <div class="dialog-card__actions">
+            <button type="button" class="ghost" :disabled="isExporting" @click="closeExportDialog()">
+              取消
+            </button>
+            <button type="button" class="primary" :disabled="isExporting" @click="submitExportDialog">
+              <LoaderCircle v-if="isExporting" class="spin" :size="13" aria-hidden="true" />
+              {{ isExporting ? "处理中" : exportActionLabel }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </Transition>
+  </Teleport>
 </template>

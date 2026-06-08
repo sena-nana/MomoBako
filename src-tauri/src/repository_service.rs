@@ -5,7 +5,8 @@ use std::{
     fs::{self, OpenOptions},
     path::{Path, PathBuf},
     process::Command,
-    sync::Mutex,
+    sync::{Arc, Mutex},
+    thread,
     time::SystemTime,
 };
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
@@ -43,6 +44,7 @@ ON CONFLICT(component) DO UPDATE SET version = excluded.version;
 const LOCAL_FILESYSTEM_PLUGIN_ID: &str = "builtin.local-filesystem";
 const WEBDAV_PLUGIN_ID: &str = "builtin.webdav";
 const CLOUD_DRIVE_PLUGIN_ID: &str = "builtin.cloud-drive";
+const MAX_PARALLEL_IMPORTS: usize = 4;
 
 const REPOSITORY_SCHEMA_SQL: &str = r#"
 PRAGMA journal_mode = WAL;
@@ -345,6 +347,51 @@ pub struct RepositoryMutationRequest {
 #[serde(rename_all = "camelCase")]
 pub struct RepositoryFolderRequest {
     pub path: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RepositoryArchiveExportOptions {
+    pub format: String,
+    pub output_path: String,
+    pub compression: String,
+    pub encrypt: bool,
+    pub password: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RepositoryGitExportOptions {
+    pub remote: Option<String>,
+    pub branch: Option<String>,
+    pub message: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RepositoryExportRequest {
+    pub repo_id: String,
+    pub target: String,
+    pub archive: Option<RepositoryArchiveExportOptions>,
+    pub git: Option<RepositoryGitExportOptions>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RepositoryExportResponse {
+    pub repository: RepositorySummary,
+    pub target: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub format: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub encrypted: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub remote: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
+    pub message: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -842,10 +889,51 @@ impl RepositoryState {
         Ok(())
     }
 
-    pub fn export_repository(&self, repo_id: &str) -> Result<RepositoryMutationResponse, String> {
+    pub fn export_repository(
+        &self,
+        request: RepositoryExportRequest,
+    ) -> Result<RepositoryExportResponse, String> {
         self.ensure_initialized()?;
-        let repository = self.load_repository_record(repo_id)?.summary;
-        Ok(RepositoryMutationResponse { repository })
+        let repository = self.load_repository_record(&request.repo_id)?.summary;
+        let repo_root = PathBuf::from(&repository.path);
+
+        match request.target.as_str() {
+            "archive" => {
+                let archive = request
+                    .archive
+                    .ok_or_else(|| "archive export options are required".to_string())?;
+                export_repository_archive(&repo_root, &archive)?;
+                Ok(RepositoryExportResponse {
+                    repository,
+                    target: "archive".to_string(),
+                    output_path: Some(archive.output_path),
+                    format: Some(archive.format),
+                    encrypted: Some(archive.encrypt),
+                    remote: None,
+                    branch: None,
+                    message: "资源库压缩包已导出".to_string(),
+                })
+            }
+            "git" => {
+                let git = request.git.unwrap_or(RepositoryGitExportOptions {
+                    remote: None,
+                    branch: None,
+                    message: None,
+                });
+                let result = export_repository_to_git(&repo_root, &git)?;
+                Ok(RepositoryExportResponse {
+                    repository,
+                    target: "git".to_string(),
+                    output_path: None,
+                    format: None,
+                    encrypted: None,
+                    remote: Some(result.remote),
+                    branch: Some(result.branch),
+                    message: result.message,
+                })
+            }
+            value => Err(format!("unsupported repository export target: {value}")),
+        }
     }
 
     pub fn load_snapshot(&self, repo_id: &str) -> Result<RepositorySnapshot, String> {
@@ -1153,7 +1241,9 @@ impl RepositoryState {
         self.ensure_initialized()?;
         let repo = self.load_repository_record(&request.repo_id)?;
         if repo.backend_record.plugin_id != LOCAL_FILESYSTEM_PLUGIN_ID {
-            return Err("importing files is only supported for local filesystem repositories".to_string());
+            return Err(
+                "importing files is only supported for local filesystem repositories".to_string(),
+            );
         }
 
         let repo_root = PathBuf::from(&repo.summary.path);
@@ -1167,14 +1257,10 @@ impl RepositoryState {
             return Err("no source files were provided".to_string());
         }
 
-        let mut imported_directory = false;
-        for source_path in &request.source_paths {
-            let source = PathBuf::from(source_path);
-            copy_external_entry_into_directory(&source, &repo_root, &target_dir)?;
-            if source.is_dir() {
-                imported_directory = true;
-            }
-        }
+        let import_plan =
+            validate_external_import_entries(&request.source_paths, &repo_root, &target_dir)?;
+        let imported_directory = import_plan.iter().any(|entry| entry.is_directory);
+        copy_external_entries_parallel(import_plan)?;
 
         let _ = self.sync_repository(SyncRequest {
             repo_id: request.repo_id.clone(),
@@ -3158,21 +3244,31 @@ fn ensure_repository_storage_paths(
 ) -> Result<RepositoryStoragePaths, String> {
     let metadata_dir = if backend_plugin_id == LOCAL_FILESYSTEM_PLUGIN_ID {
         migrate_legacy_meta_dir_if_needed(repo_root, backend_plugin_id)?;
-        repository_meta_dir(repo_root)
+        let metadata_dir = repository_meta_dir(repo_root);
+        if repo_root.exists() {
+            ensure_repository_metadata_dirs(&metadata_dir)?;
+            hide_repository_meta_dir(&metadata_dir);
+        }
+        metadata_dir
     } else {
         let service_repo_dir = repository_state_storage_dir(service_root, repo_id);
         fs::create_dir_all(&service_repo_dir).map_err(io_error)?;
         let metadata_dir = service_repo_dir.join(REPO_META_DIR);
-        fs::create_dir_all(metadata_dir.join("cache")).map_err(io_error)?;
-        fs::create_dir_all(metadata_dir.join("thumbnails")).map_err(io_error)?;
-        fs::create_dir_all(metadata_dir.join("logs")).map_err(io_error)?;
-        fs::create_dir_all(metadata_dir.join("indexes")).map_err(io_error)?;
+        ensure_repository_metadata_dirs(&metadata_dir)?;
         metadata_dir
     };
     Ok(RepositoryStoragePaths {
         database_path: metadata_dir.join(REPO_DB_FILE_NAME),
         metadata_dir,
     })
+}
+
+fn ensure_repository_metadata_dirs(metadata_dir: &Path) -> Result<(), String> {
+    fs::create_dir_all(metadata_dir).map_err(io_error)?;
+    for subdir in ["cache", "thumbnails", "logs", "indexes"] {
+        fs::create_dir_all(metadata_dir.join(subdir)).map_err(io_error)?;
+    }
+    Ok(())
 }
 
 fn infer_repository_name(repo_root: &Path) -> String {
@@ -3285,46 +3381,411 @@ fn resolve_repository_relative_path(
     Ok(path)
 }
 
-fn copy_external_entry_into_directory(
-    source: &Path,
+#[derive(Debug, Clone)]
+struct FileImportPlanEntry {
+    source: PathBuf,
+    target: PathBuf,
+    is_directory: bool,
+}
+
+fn validate_external_import_entries(
+    source_paths: &[String],
     repo_root: &Path,
     target_dir: &Path,
-) -> Result<(), String> {
-    if !source.exists() {
-        return Err(format!("source path does not exist: {}", source.to_string_lossy()));
+) -> Result<Vec<FileImportPlanEntry>, String> {
+    let repo_canonical = repo_root.canonicalize().map_err(io_error)?;
+    let target_canonical_parent = target_dir.canonicalize().map_err(io_error)?;
+    let mut planned_targets = Vec::<PathBuf>::new();
+    let mut plan = Vec::with_capacity(source_paths.len());
+
+    for source_path in source_paths {
+        let source = PathBuf::from(source_path);
+        if !source.exists() {
+            return Err(format!(
+                "source path does not exist: {}",
+                source.to_string_lossy()
+            ));
+        }
+
+        let name = source
+            .file_name()
+            .map(|value| value.to_string_lossy().to_string())
+            .ok_or_else(|| format!("invalid source path: {}", source.to_string_lossy()))?;
+        let name = validate_new_entry_name(&name)?;
+        let target = target_dir.join(&name);
+        if target.exists() || planned_targets.iter().any(|planned| planned == &target) {
+            return Err(format!("entry already exists: {name}"));
+        }
+
+        if source.is_dir() {
+            let source_canonical = source.canonicalize().map_err(io_error)?;
+            if source_canonical == repo_canonical || repo_canonical.starts_with(&source_canonical) {
+                return Err("cannot import a repository folder into itself".to_string());
+            }
+            if target_canonical_parent.starts_with(&source_canonical) {
+                return Err("cannot import a folder into one of its descendants".to_string());
+            }
+            plan.push(FileImportPlanEntry {
+                source: source_canonical,
+                target: target.clone(),
+                is_directory: true,
+            });
+        } else if source.is_file() {
+            plan.push(FileImportPlanEntry {
+                source,
+                target: target.clone(),
+                is_directory: false,
+            });
+        } else {
+            return Err(format!(
+                "unsupported source path type: {}",
+                source.to_string_lossy()
+            ));
+        }
+        planned_targets.push(target);
     }
 
-    let name = source
-        .file_name()
-        .map(|value| value.to_string_lossy().to_string())
-        .ok_or_else(|| format!("invalid source path: {}", source.to_string_lossy()))?;
-    let name = validate_new_entry_name(&name)?;
-    let target = target_dir.join(&name);
-    if target.exists() {
-        return Err(format!("entry already exists: {name}"));
+    Ok(plan)
+}
+
+fn copy_external_entries_parallel(plan: Vec<FileImportPlanEntry>) -> Result<(), String> {
+    if plan.is_empty() {
+        return Ok(());
     }
 
-    if source.is_dir() {
-        let source_canonical = source.canonicalize().map_err(io_error)?;
-        let repo_canonical = repo_root.canonicalize().map_err(io_error)?;
-        let target_canonical_parent = target_dir.canonicalize().map_err(io_error)?;
-        if source_canonical == repo_canonical || repo_canonical.starts_with(&source_canonical) {
-            return Err("cannot import a repository folder into itself".to_string());
+    let worker_count = plan.len().min(MAX_PARALLEL_IMPORTS);
+    let queue = Arc::new(Mutex::new(plan.into_iter()));
+    let mut handles = Vec::with_capacity(worker_count);
+
+    for _ in 0..worker_count {
+        let queue = queue.clone();
+        handles.push(thread::spawn(move || loop {
+            let Some(entry) = ({
+                let mut entries = queue
+                    .lock()
+                    .map_err(|_| "import queue lock poisoned".to_string())?;
+                entries.next()
+            }) else {
+                return Ok(());
+            };
+
+            if entry.is_directory {
+                copy_directory_recursive(&entry.source, &entry.target)?;
+            } else {
+                fs::copy(&entry.source, &entry.target).map_err(io_error)?;
+            }
+        }));
+    }
+
+    for handle in handles {
+        match handle.join() {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => return Err(error),
+            Err(_) => return Err("file import worker panicked".to_string()),
         }
-        if target_canonical_parent.starts_with(&source_canonical) {
-            return Err("cannot import a folder into one of its descendants".to_string());
-        }
-        copy_directory_recursive(&source_canonical, &target)?;
-    } else if source.is_file() {
-        fs::copy(source, target).map_err(io_error)?;
-    } else {
-        return Err(format!(
-            "unsupported source path type: {}",
-            source.to_string_lossy()
-        ));
     }
 
     Ok(())
+}
+
+fn export_repository_archive(
+    repo_root: &Path,
+    options: &RepositoryArchiveExportOptions,
+) -> Result<(), String> {
+    if !repo_root.is_dir() {
+        return Err("repository path is not a directory".to_string());
+    }
+
+    let output_path = normalize_archive_output_path(options)?;
+    if output_path.as_os_str().is_empty() {
+        return Err("archive output path cannot be empty".to_string());
+    }
+
+    if let Some(parent) = output_path.parent() {
+        if !parent.as_os_str().is_empty() {
+            fs::create_dir_all(parent).map_err(io_error)?;
+        }
+    }
+    validate_archive_output_path(repo_root, &output_path)?;
+    if output_path.exists() {
+        if !output_path.is_file() {
+            return Err("archive output path must be a file".to_string());
+        }
+        fs::remove_file(&output_path).map_err(io_error)?;
+    }
+
+    match options.format.as_str() {
+        "zip" => export_zip_archive(repo_root, &output_path, options),
+        "7z" => export_7z_archive(repo_root, &output_path, options),
+        "tar" => export_tar_archive(repo_root, &output_path, options),
+        value => Err(format!("unsupported archive format: {value}")),
+    }
+}
+
+fn normalize_archive_output_path(
+    options: &RepositoryArchiveExportOptions,
+) -> Result<PathBuf, String> {
+    let trimmed = options.output_path.trim();
+    if trimmed.is_empty() {
+        return Err("archive output path cannot be empty".to_string());
+    }
+
+    let output_path = PathBuf::from(trimmed);
+    if output_path.extension().is_some() {
+        return Ok(output_path);
+    }
+
+    Ok(output_path.with_extension(match options.format.as_str() {
+        "7z" => "7z",
+        "tar" if options.compression == "none" => "tar",
+        "tar" => "tar.gz",
+        _ => "zip",
+    }))
+}
+
+fn validate_archive_output_path(repo_root: &Path, output_path: &Path) -> Result<(), String> {
+    let repo_canonical = repo_root.canonicalize().map_err(io_error)?;
+    let parent = output_path
+        .parent()
+        .filter(|path| !path.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    let parent_canonical = parent.canonicalize().map_err(io_error)?;
+    if parent_canonical.starts_with(&repo_canonical) {
+        return Err("archive output path cannot be inside the repository".to_string());
+    }
+    Ok(())
+}
+
+fn export_zip_archive(
+    repo_root: &Path,
+    output_path: &Path,
+    options: &RepositoryArchiveExportOptions,
+) -> Result<(), String> {
+    if let Some(binary) = find_7z_binary() {
+        run_7z_archive(&binary, "zip", repo_root, output_path, options)
+    } else if options.encrypt {
+        Err("zip encryption requires 7z/7zz/7za in PATH".to_string())
+    } else {
+        run_powershell_compress_archive(repo_root, output_path, &options.compression)
+    }
+}
+
+fn export_7z_archive(
+    repo_root: &Path,
+    output_path: &Path,
+    options: &RepositoryArchiveExportOptions,
+) -> Result<(), String> {
+    let binary =
+        find_7z_binary().ok_or_else(|| "7z export requires 7z/7zz/7za in PATH".to_string())?;
+    run_7z_archive(&binary, "7z", repo_root, output_path, options)
+}
+
+fn export_tar_archive(
+    repo_root: &Path,
+    output_path: &Path,
+    options: &RepositoryArchiveExportOptions,
+) -> Result<(), String> {
+    if options.encrypt {
+        return Err("tar export does not support encryption; use zip or 7z".to_string());
+    }
+
+    let mut command = Command::new("tar");
+    command
+        .current_dir(repo_root)
+        .arg(if options.compression == "none" { "-cf" } else { "-czf" })
+        .arg(output_path)
+        .arg(".");
+
+    run_command(command, "tar export")
+}
+
+fn run_7z_archive(
+    binary: &str,
+    archive_type: &str,
+    repo_root: &Path,
+    output_path: &Path,
+    options: &RepositoryArchiveExportOptions,
+) -> Result<(), String> {
+    let mut command = Command::new(binary);
+    command
+        .current_dir(repo_root)
+        .arg("a")
+        .arg("-y")
+        .arg(format!("-t{archive_type}"))
+        .arg(compression_flag(&options.compression))
+        .arg(output_path)
+        .arg(".");
+
+    if options.encrypt {
+        let password = options
+            .password
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| "archive password cannot be empty".to_string())?;
+        command.arg(format!("-p{password}"));
+        if archive_type == "7z" {
+            command.arg("-mhe=on");
+        }
+    }
+
+    run_command(command, "7z export")
+}
+
+fn run_powershell_compress_archive(
+    repo_root: &Path,
+    output_path: &Path,
+    compression: &str,
+) -> Result<(), String> {
+    let script = format!(
+        "Add-Type -AssemblyName System.IO.Compression.FileSystem; [System.IO.Compression.ZipFile]::CreateFromDirectory('{}', '{}', [System.IO.Compression.CompressionLevel]::{}, $true)",
+        escape_powershell_single_quoted_path(repo_root),
+        escape_powershell_single_quoted_path(output_path),
+        powershell_compression_level(compression),
+    );
+    let mut command = Command::new("powershell");
+    command.arg("-NoProfile").arg("-Command").arg(script);
+    run_command(command, "zip export")
+}
+
+fn export_repository_to_git(
+    repo_root: &Path,
+    options: &RepositoryGitExportOptions,
+) -> Result<GitExportResult, String> {
+    if !repo_root.join(".git").is_dir() {
+        return Err("repository folder is not a Git repository".to_string());
+    }
+
+    run_git(repo_root, &["add", "-A"])?;
+
+    if has_git_changes(repo_root)? {
+        let message = options
+            .message
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or("导出资源库");
+        run_git(repo_root, &["commit", "-m", message])?;
+    }
+
+    let remote = options
+        .remote
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("origin")
+        .to_string();
+    let branch = options
+        .branch
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| current_git_branch(repo_root).unwrap_or_else(|_| "HEAD".to_string()));
+    if branch == "HEAD" {
+        return Err("cannot infer Git branch; specify a branch before uploading".to_string());
+    }
+
+    run_git(repo_root, &["push", &remote, &branch])?;
+    Ok(GitExportResult {
+        remote: remote.clone(),
+        branch: branch.clone(),
+        message: format!("资源库已上传到 {remote}/{branch}"),
+    })
+}
+
+struct GitExportResult {
+    remote: String,
+    branch: String,
+    message: String,
+}
+
+fn has_git_changes(repo_root: &Path) -> Result<bool, String> {
+    let output = Command::new("git")
+        .current_dir(repo_root)
+        .arg("status")
+        .arg("--porcelain")
+        .output()
+        .map_err(|error| format!("git unavailable: {error}"))?;
+    if !output.status.success() {
+        return Err(command_error("git status", &output));
+    }
+    Ok(!String::from_utf8_lossy(&output.stdout).trim().is_empty())
+}
+
+fn current_git_branch(repo_root: &Path) -> Result<String, String> {
+    let output = Command::new("git")
+        .current_dir(repo_root)
+        .arg("branch")
+        .arg("--show-current")
+        .output()
+        .map_err(|error| format!("git unavailable: {error}"))?;
+    if !output.status.success() {
+        return Err(command_error("git branch", &output));
+    }
+    let branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if branch.is_empty() {
+        Ok("HEAD".to_string())
+    } else {
+        Ok(branch)
+    }
+}
+
+fn run_git(repo_root: &Path, args: &[&str]) -> Result<(), String> {
+    let mut command = Command::new("git");
+    command.current_dir(repo_root).args(args);
+    run_command(command, &format!("git {}", args.join(" ")))
+}
+
+fn find_7z_binary() -> Option<&'static str> {
+    ["7z", "7zz", "7za"]
+        .into_iter()
+        .find(|binary| Command::new(binary).arg("--help").output().is_ok())
+}
+
+fn compression_flag(value: &str) -> &'static str {
+    match value {
+        "none" => "-mx=0",
+        "fast" => "-mx=3",
+        "maximum" => "-mx=9",
+        _ => "-mx=5",
+    }
+}
+
+fn powershell_compression_level(value: &str) -> &'static str {
+    match value {
+        "none" => "NoCompression",
+        "fast" => "Fastest",
+        _ => "Optimal",
+    }
+}
+
+fn escape_powershell_single_quoted_path(path: &Path) -> String {
+    path.to_string_lossy().replace('\'', "''")
+}
+
+fn run_command(mut command: Command, label: &str) -> Result<(), String> {
+    let output = command
+        .output()
+        .map_err(|error| format!("{label} failed to start: {error}"))?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(command_error(label, &output))
+    }
+}
+
+fn command_error(label: &str, output: &std::process::Output) -> String {
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let detail = if !stderr.is_empty() {
+        stderr
+    } else if !stdout.is_empty() {
+        stdout
+    } else {
+        output.status.to_string()
+    };
+    format!("{label} failed: {detail}")
 }
 
 fn copy_directory_recursive(source: &Path, target: &Path) -> Result<(), String> {
@@ -4231,4 +4692,64 @@ fn safe_prefix(value: &str, max_chars: usize) -> &str {
         .map(|(index, _)| index)
         .unwrap_or(value.len());
     &value[..end]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    struct TestWorkspace {
+        root: PathBuf,
+    }
+
+    impl TestWorkspace {
+        fn new(name: &str) -> Self {
+            let unique = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("system clock must be after unix epoch")
+                .as_nanos();
+            let root = std::env::temp_dir().join(format!(
+                "momobako-{name}-{}-{unique}",
+                std::process::id()
+            ));
+            Self { root }
+        }
+
+        fn path(&self, child: &str) -> PathBuf {
+            self.root.join(child)
+        }
+    }
+
+    impl Drop for TestWorkspace {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.root);
+        }
+    }
+
+    #[test]
+    fn create_local_repository_creates_metadata_storage_dirs() {
+        let workspace = TestWorkspace::new("local-repository-create");
+        let service_root = workspace.path("service");
+        let repo_root = workspace.path("repo");
+        let state = RepositoryState::from_roots(service_root, workspace.path("thumbnails"));
+
+        state
+            .create_repository(RepositoryMutationRequest {
+                repo_id: Some("repo-test".to_string()),
+                name: "测试资源库".to_string(),
+                path: repo_root.to_string_lossy().to_string(),
+                backend_plugin_id: Some(LOCAL_FILESYSTEM_PLUGIN_ID.to_string()),
+                backend_config: None,
+            })
+            .expect("local repository should be created");
+
+        let metadata_dir = repo_root.join(REPO_META_DIR);
+        assert!(metadata_dir.is_dir());
+        assert!(metadata_dir.join(REPO_METADATA_FILE_NAME).is_file());
+        assert!(metadata_dir.join(REPO_DB_FILE_NAME).is_file());
+        for subdir in ["cache", "thumbnails", "logs", "indexes"] {
+            assert!(metadata_dir.join(subdir).is_dir());
+        }
+    }
 }

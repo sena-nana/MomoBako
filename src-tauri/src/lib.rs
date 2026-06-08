@@ -1,6 +1,14 @@
-use tauri::{utils::config::Color, Manager, WindowEvent};
+use serde::{de::DeserializeOwned, Serialize};
+use tauri::{
+    menu::{Menu, MenuItem},
+    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
+    utils::config::Color,
+    AppHandle, Manager, WindowEvent,
+};
 
 const MAIN_WINDOW_LABEL: &str = "main";
+const TRAY_OPEN_ID: &str = "tray-open";
+const TRAY_QUIT_ID: &str = "tray-quit";
 const BG: Color = Color(0x18, 0x18, 0x18, 0xFF);
 
 mod repository_service;
@@ -9,197 +17,350 @@ mod window_state;
 
 use repository_service::{
     FileBrowserRequest, FileCreateRequest, FileDeleteRequest, FileImportRequest, FileReadRequest,
-    FileRenameRequest, MetadataUpdateRequest, RepositoryFolderRequest, RepositoryMutationRequest,
-    RevisionActionRequest, SearchRequest, SyncRequest,
+    FileRenameRequest, MetadataUpdateRequest, RepositoryExportRequest, RepositoryFolderRequest,
+    RepositoryMutationRequest, RevisionActionRequest, SearchRequest, SyncRequest,
 };
 use service_process::ServiceBridge;
 
-#[tauri::command]
-fn ping(bridge: tauri::State<'_, ServiceBridge>) -> Result<String, String> {
-    bridge.invoke(&serde_json::json!({ "command": "ping" }))
+async fn invoke_service<T, S>(
+    bridge: tauri::State<'_, ServiceBridge>,
+    request: S,
+) -> Result<T, String>
+where
+    T: DeserializeOwned + Send + 'static,
+    S: Serialize + Send + 'static,
+{
+    let bridge = bridge.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || bridge.invoke(&request))
+        .await
+        .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
-fn list_repositories(bridge: tauri::State<'_, ServiceBridge>) -> Result<serde_json::Value, String> {
-    bridge.invoke(&serde_json::json!({ "command": "listRepositories" }))
+async fn ping(bridge: tauri::State<'_, ServiceBridge>) -> Result<String, String> {
+    invoke_service(bridge, serde_json::json!({ "command": "ping" })).await
 }
 
 #[tauri::command]
-fn get_repository_snapshot(
+async fn list_repositories(
+    bridge: tauri::State<'_, ServiceBridge>,
+) -> Result<serde_json::Value, String> {
+    invoke_service(bridge, serde_json::json!({ "command": "listRepositories" })).await
+}
+
+#[tauri::command]
+async fn get_repository_snapshot(
     repo_id: String,
     bridge: tauri::State<'_, ServiceBridge>,
 ) -> Result<serde_json::Value, String> {
-    bridge.invoke(&serde_json::json!({ "command": "getRepositorySnapshot", "repoId": repo_id }))
+    invoke_service(
+        bridge,
+        serde_json::json!({ "command": "getRepositorySnapshot", "repoId": repo_id }),
+    )
+    .await
 }
 
 #[tauri::command]
-fn get_asset_detail(
+async fn get_asset_detail(
     repo_id: String,
     asset_id: String,
     bridge: tauri::State<'_, ServiceBridge>,
 ) -> Result<serde_json::Value, String> {
-    bridge.invoke(&serde_json::json!({
-        "command": "getAssetDetail",
-        "repoId": repo_id,
-        "assetId": asset_id
-    }))
+    invoke_service(
+        bridge,
+        serde_json::json!({
+            "command": "getAssetDetail",
+            "repoId": repo_id,
+            "assetId": asset_id
+        }),
+    )
+    .await
 }
 
 #[tauri::command]
-fn search_assets(
+async fn search_assets(
     request: SearchRequest,
     bridge: tauri::State<'_, ServiceBridge>,
 ) -> Result<serde_json::Value, String> {
-    bridge.invoke(&serde_json::json!({ "command": "searchAssets", "request": request }))
+    invoke_service(
+        bridge,
+        serde_json::json!({ "command": "searchAssets", "request": request }),
+    )
+    .await
 }
 
 #[tauri::command]
-fn update_asset_metadata(
+async fn update_asset_metadata(
     request: MetadataUpdateRequest,
     bridge: tauri::State<'_, ServiceBridge>,
 ) -> Result<serde_json::Value, String> {
-    bridge.invoke(&serde_json::json!({ "command": "updateAssetMetadata", "request": request }))
+    invoke_service(
+        bridge,
+        serde_json::json!({ "command": "updateAssetMetadata", "request": request }),
+    )
+    .await
 }
 
 #[tauri::command]
-fn get_file_browser(
+async fn get_file_browser(
     request: FileBrowserRequest,
     bridge: tauri::State<'_, ServiceBridge>,
 ) -> Result<serde_json::Value, String> {
-    bridge.invoke(&serde_json::json!({ "command": "getFileBrowser", "request": request }))
+    invoke_service(
+        bridge,
+        serde_json::json!({ "command": "getFileBrowser", "request": request }),
+    )
+    .await
 }
 
 #[tauri::command]
-fn read_file(
+async fn read_file(
     request: FileReadRequest,
     bridge: tauri::State<'_, ServiceBridge>,
 ) -> Result<Vec<u8>, String> {
-    bridge.invoke(&serde_json::json!({ "command": "readFile", "request": request }))
+    invoke_service(
+        bridge,
+        serde_json::json!({ "command": "readFile", "request": request }),
+    )
+    .await
 }
 
 #[tauri::command]
-fn create_directory(
+async fn create_directory(
     request: FileCreateRequest,
     bridge: tauri::State<'_, ServiceBridge>,
 ) -> Result<serde_json::Value, String> {
-    bridge.invoke(&serde_json::json!({ "command": "createDirectory", "request": request }))
+    invoke_service(
+        bridge,
+        serde_json::json!({ "command": "createDirectory", "request": request }),
+    )
+    .await
 }
 
 #[tauri::command]
-fn create_file(
+async fn create_file(
     request: FileCreateRequest,
     bridge: tauri::State<'_, ServiceBridge>,
 ) -> Result<serde_json::Value, String> {
-    bridge.invoke(&serde_json::json!({ "command": "createFile", "request": request }))
+    invoke_service(
+        bridge,
+        serde_json::json!({ "command": "createFile", "request": request }),
+    )
+    .await
 }
 
 #[tauri::command]
-fn import_entries(
+async fn import_entries(
     request: FileImportRequest,
     bridge: tauri::State<'_, ServiceBridge>,
 ) -> Result<serde_json::Value, String> {
-    bridge.invoke(&serde_json::json!({ "command": "importEntries", "request": request }))
+    invoke_service(
+        bridge,
+        serde_json::json!({ "command": "importEntries", "request": request }),
+    )
+    .await
 }
 
 #[tauri::command]
-fn rename_entry(
+async fn rename_entry(
     request: FileRenameRequest,
     bridge: tauri::State<'_, ServiceBridge>,
 ) -> Result<serde_json::Value, String> {
-    bridge.invoke(&serde_json::json!({ "command": "renameEntry", "request": request }))
+    invoke_service(
+        bridge,
+        serde_json::json!({ "command": "renameEntry", "request": request }),
+    )
+    .await
 }
 
 #[tauri::command]
-fn delete_entry(
+async fn delete_entry(
     request: FileDeleteRequest,
     bridge: tauri::State<'_, ServiceBridge>,
 ) -> Result<serde_json::Value, String> {
-    bridge.invoke(&serde_json::json!({ "command": "deleteEntry", "request": request }))
+    invoke_service(
+        bridge,
+        serde_json::json!({ "command": "deleteEntry", "request": request }),
+    )
+    .await
 }
 
 #[tauri::command]
-fn create_repository(
+async fn create_repository(
     request: RepositoryMutationRequest,
     bridge: tauri::State<'_, ServiceBridge>,
 ) -> Result<serde_json::Value, String> {
-    bridge.invoke(&serde_json::json!({ "command": "createRepository", "request": request }))
+    invoke_service(
+        bridge,
+        serde_json::json!({ "command": "createRepository", "request": request }),
+    )
+    .await
 }
 
 #[tauri::command]
-fn import_repository(
+async fn import_repository(
     request: RepositoryMutationRequest,
     bridge: tauri::State<'_, ServiceBridge>,
 ) -> Result<serde_json::Value, String> {
-    bridge.invoke(&serde_json::json!({ "command": "importRepository", "request": request }))
+    invoke_service(
+        bridge,
+        serde_json::json!({ "command": "importRepository", "request": request }),
+    )
+    .await
 }
 
 #[tauri::command]
-fn attach_repository_folder(
+async fn attach_repository_folder(
     request: RepositoryFolderRequest,
     bridge: tauri::State<'_, ServiceBridge>,
 ) -> Result<serde_json::Value, String> {
-    bridge.invoke(&serde_json::json!({ "command": "attachRepositoryFolder", "request": request }))
+    invoke_service(
+        bridge,
+        serde_json::json!({ "command": "attachRepositoryFolder", "request": request }),
+    )
+    .await
 }
 
 #[tauri::command]
-fn delete_repository(
+async fn delete_repository(
     repo_id: String,
     bridge: tauri::State<'_, ServiceBridge>,
 ) -> Result<(), String> {
-    let _: serde_json::Value =
-        bridge.invoke(&serde_json::json!({ "command": "deleteRepository", "repoId": repo_id }))?;
+    let _: serde_json::Value = invoke_service(
+        bridge,
+        serde_json::json!({ "command": "deleteRepository", "repoId": repo_id }),
+    )
+    .await?;
     Ok(())
 }
 
 #[tauri::command]
-fn export_repository(
-    repo_id: String,
+async fn export_repository(
+    request: RepositoryExportRequest,
     bridge: tauri::State<'_, ServiceBridge>,
 ) -> Result<serde_json::Value, String> {
-    bridge.invoke(&serde_json::json!({ "command": "exportRepository", "repoId": repo_id }))
+    invoke_service(
+        bridge,
+        serde_json::json!({ "command": "exportRepository", "request": request }),
+    )
+    .await
 }
 
 #[tauri::command]
-fn sync_repository(
+async fn sync_repository(
     request: SyncRequest,
     bridge: tauri::State<'_, ServiceBridge>,
 ) -> Result<serde_json::Value, String> {
-    bridge.invoke(&serde_json::json!({ "command": "syncRepository", "request": request }))
+    invoke_service(
+        bridge,
+        serde_json::json!({ "command": "syncRepository", "request": request }),
+    )
+    .await
 }
 
 #[tauri::command]
-fn undo_last_revision(
+async fn undo_last_revision(
     request: RevisionActionRequest,
     bridge: tauri::State<'_, ServiceBridge>,
 ) -> Result<serde_json::Value, String> {
-    bridge.invoke(&serde_json::json!({ "command": "undoLastRevision", "request": request }))
+    invoke_service(
+        bridge,
+        serde_json::json!({ "command": "undoLastRevision", "request": request }),
+    )
+    .await
 }
 
 #[tauri::command]
-fn redo_last_revision(
+async fn redo_last_revision(
     request: RevisionActionRequest,
     bridge: tauri::State<'_, ServiceBridge>,
 ) -> Result<serde_json::Value, String> {
-    bridge.invoke(&serde_json::json!({ "command": "redoLastRevision", "request": request }))
+    invoke_service(
+        bridge,
+        serde_json::json!({ "command": "redoLastRevision", "request": request }),
+    )
+    .await
 }
 
 #[tauri::command]
-fn list_plugins(bridge: tauri::State<'_, ServiceBridge>) -> Result<serde_json::Value, String> {
-    bridge.invoke(&serde_json::json!({ "command": "listPlugins" }))
-}
-
-#[tauri::command]
-fn get_cache_snapshot(
+async fn list_plugins(
     bridge: tauri::State<'_, ServiceBridge>,
 ) -> Result<serde_json::Value, String> {
-    bridge.invoke(&serde_json::json!({ "command": "getCacheSnapshot" }))
+    invoke_service(bridge, serde_json::json!({ "command": "listPlugins" })).await
 }
 
 #[tauri::command]
-fn get_api_design_snapshot(
+async fn get_cache_snapshot(
     bridge: tauri::State<'_, ServiceBridge>,
 ) -> Result<serde_json::Value, String> {
-    bridge.invoke(&serde_json::json!({ "command": "getApiDesignSnapshot" }))
+    invoke_service(bridge, serde_json::json!({ "command": "getCacheSnapshot" })).await
+}
+
+#[tauri::command]
+async fn get_api_design_snapshot(
+    bridge: tauri::State<'_, ServiceBridge>,
+) -> Result<serde_json::Value, String> {
+    invoke_service(
+        bridge,
+        serde_json::json!({ "command": "getApiDesignSnapshot" }),
+    )
+    .await
+}
+
+fn show_main_window(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
+        let _ = window.show();
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+    }
+}
+
+fn quit_app(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
+        window_state::persist_main_window_state(app, &window);
+    }
+    if let Some(bridge) = app.try_state::<ServiceBridge>() {
+        bridge.shutdown();
+    }
+    app.exit(0);
+}
+
+fn setup_tray(app: &AppHandle) -> Result<(), tauri::Error> {
+    let open = MenuItem::with_id(app, TRAY_OPEN_ID, "打开 MomoBako", true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, TRAY_QUIT_ID, "退出", true, None::<&str>)?;
+    let menu = Menu::with_items(app, &[&open, &quit])?;
+    let icon = app.default_window_icon().cloned();
+    let tray = TrayIconBuilder::with_id("main-tray")
+        .menu(&menu)
+        .tooltip("MomoBako")
+        .show_menu_on_left_click(false)
+        .on_menu_event(|app, event| match event.id().as_ref() {
+            TRAY_OPEN_ID => show_main_window(app),
+            TRAY_QUIT_ID => quit_app(app),
+            _ => {}
+        })
+        .on_tray_icon_event(|tray, event| {
+            if matches!(
+                event,
+                TrayIconEvent::Click {
+                    button: MouseButton::Left,
+                    button_state: MouseButtonState::Up,
+                    ..
+                } | TrayIconEvent::DoubleClick {
+                    button: MouseButton::Left,
+                    ..
+                }
+            ) {
+                show_main_window(tray.app_handle());
+            }
+        });
+
+    if let Some(icon) = icon {
+        tray.icon(icon).build(app)?;
+    } else {
+        tray.build(app)?;
+    }
+    Ok(())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -211,6 +372,7 @@ pub fn run() {
         .setup(|app| {
             let bridge = ServiceBridge::start(app.handle())?;
             app.manage(bridge);
+            setup_tray(app.handle())?;
 
             if let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
                 let _ = window.set_background_color(Some(BG));
@@ -225,13 +387,26 @@ pub fn run() {
             if window.label() != MAIN_WINDOW_LABEL {
                 return;
             }
-            if matches!(
-                event,
-                WindowEvent::CloseRequested { .. } | WindowEvent::Destroyed
-            ) {
-                if let Some(webview_window) = window.get_webview_window(MAIN_WINDOW_LABEL) {
-                    window_state::persist_main_window_state(&window.app_handle(), &webview_window);
+            match event {
+                WindowEvent::CloseRequested { api, .. } => {
+                    if let Some(webview_window) = window.get_webview_window(MAIN_WINDOW_LABEL) {
+                        window_state::persist_main_window_state(
+                            &window.app_handle(),
+                            &webview_window,
+                        );
+                    }
+                    api.prevent_close();
+                    let _ = window.hide();
                 }
+                WindowEvent::Destroyed => {
+                    if let Some(webview_window) = window.get_webview_window(MAIN_WINDOW_LABEL) {
+                        window_state::persist_main_window_state(
+                            &window.app_handle(),
+                            &webview_window,
+                        );
+                    }
+                }
+                _ => {}
             }
         })
         .invoke_handler(tauri::generate_handler![

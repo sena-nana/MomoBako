@@ -8,6 +8,7 @@ import {
   createDirectoryOnNextSync,
   getInvokeCalls,
   seedMockRepository,
+  setMockSavePath,
 } from "./setupTests";
 
 async function renderApp() {
@@ -154,5 +155,33 @@ describe("文件管理冒烟", () => {
     await fireEvent.dblClick(resizer);
     expect(shell.style.getPropertyValue("--sidebar-width")).toBe("276px");
     expect(localStorage.getItem("momobako.sidebarWidth")).toBe("276");
+  });
+
+  it("通过导出弹窗提交资源库压缩包选项", async () => {
+    seedMockRepository();
+    setMockSavePath("C:/Mock/Exports/Momo.zip");
+    const workspace = useRepositoryWorkspace();
+    workspace.setActivePanel("libraries");
+    await renderApp();
+
+    await fireEvent.click(await screen.findByRole("button", { name: "导出" }));
+    expect(await screen.findByRole("dialog", { name: "导出资源库" })).toBeInTheDocument();
+    await fireEvent.click(screen.getByRole("button", { name: "导出压缩包" }));
+
+    await waitFor(() => {
+      const exportCalls = getInvokeCalls("export_repository");
+      expect(exportCalls.at(-1)?.args).toMatchObject({
+        request: {
+          repoId: "repo-main-001",
+          target: "archive",
+          archive: {
+            format: "zip",
+            outputPath: "C:/Mock/Exports/Momo.zip",
+            compression: "balanced",
+            encrypt: false,
+          },
+        },
+      });
+    });
   });
 });

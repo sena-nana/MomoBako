@@ -19,6 +19,7 @@ import { FBXLoader } from "three/examples/jsm/loaders/FBXLoader.js";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { OBJLoader } from "three/examples/jsm/loaders/OBJLoader.js";
 import { readFile } from "../../services/repositoryApi";
+import { useTaskCenter } from "../../composables/useTaskCenter";
 import type { FileBrowserEntry } from "../../types/repository";
 
 const props = defineProps<{
@@ -31,7 +32,14 @@ const canvas = ref<HTMLCanvasElement | null>(null);
 const state = ref<"idle" | "loading" | "ready" | "error">("idle");
 const errorMessage = ref("");
 const modelInfo = ref("");
+const loadProgress = ref({
+  value: 6,
+  label: "读取模型",
+  detail: "准备读取文件",
+  indeterminate: true,
+});
 const renderer = shallowRef<WebGLRenderer | null>(null);
+const { upsertTask, removeTask } = useTaskCenter();
 let scene: Scene | null = null;
 let camera: PerspectiveCamera | null = null;
 let controls: OrbitControls | null = null;
@@ -59,6 +67,13 @@ async function loadModel() {
   state.value = "loading";
   errorMessage.value = "";
   modelInfo.value = "";
+  loadProgress.value = {
+    value: 6,
+    label: "读取模型",
+    detail: "准备读取文件",
+    indeterminate: true,
+  };
+  publishLoadProgress();
 
   await nextTick();
   if (!canvas.value || !container.value) return;
@@ -73,6 +88,13 @@ async function loadModel() {
       return;
     }
     objectUrl = source;
+    loadProgress.value = {
+      value: 48,
+      label: "解析模型",
+      detail: "读取几何与材质",
+      indeterminate: true,
+    };
+    publishLoadProgress();
     const object = await loadObjectByExtension(source, extension.value);
     if (token !== loadToken) {
       if (objectUrl === source) {
@@ -83,19 +105,41 @@ async function loadModel() {
       return;
     }
     mountObject(object);
+    loadProgress.value = {
+      value: 100,
+      label: "模型就绪",
+      detail: "已完成",
+      indeterminate: false,
+    };
+    removeLoadTaskSoon(token);
     state.value = "ready";
   } catch (cause) {
     if (token !== loadToken) return;
+    removeLoadTask();
     state.value = "error";
     errorMessage.value = cause instanceof Error ? cause.message : String(cause);
   }
 }
 
 async function createModelObjectUrl() {
+  loadProgress.value = {
+    value: 18,
+    label: "读取模型",
+    detail: props.entry.sizeLabel ? `读取 ${props.entry.sizeLabel}` : "读取模型文件",
+    indeterminate: true,
+  };
+  publishLoadProgress();
   const bytes = await readFile({
     repoId: props.repoId,
     path: props.entry.path,
   });
+  loadProgress.value = {
+    value: 42,
+    label: "读取模型",
+    detail: "创建预览数据",
+    indeterminate: false,
+  };
+  publishLoadProgress();
   const data = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
   return URL.createObjectURL(new Blob([data], { type: mimeTypeForExtension(extension.value) }));
 }
@@ -186,14 +230,35 @@ function normalizeMaterials(object: Object3D) {
 }
 
 async function loadObjectByExtension(source: string, fileExtension: string) {
+  const onProgress = (event: ProgressEvent<EventTarget>) => {
+    if (!event.lengthComputable || event.total <= 0) {
+      loadProgress.value = {
+        value: Math.max(loadProgress.value.value, 58),
+        label: "解析模型",
+        detail: "解析模型结构",
+        indeterminate: true,
+      };
+      publishLoadProgress();
+      return;
+    }
+    const loadedPercent = Math.round((event.loaded / event.total) * 42);
+    loadProgress.value = {
+      value: Math.min(94, 48 + loadedPercent),
+      label: "解析模型",
+      detail: "读取几何与材质",
+      indeterminate: false,
+    };
+    publishLoadProgress();
+  };
+
   if (fileExtension === "fbx") {
-    return new FBXLoader().loadAsync(source);
+    return new FBXLoader().loadAsync(source, onProgress);
   }
   if (fileExtension === "obj") {
-    return new OBJLoader().loadAsync(source);
+    return new OBJLoader().loadAsync(source, onProgress);
   }
   if (fileExtension === "glb" || fileExtension === "gltf") {
-    const result = await new GLTFLoader().loadAsync(source);
+    const result = await new GLTFLoader().loadAsync(source, onProgress);
     return result.scene;
   }
   throw new Error(`暂不支持 .${fileExtension || "unknown"} 模型预览`);
@@ -216,7 +281,35 @@ function animate() {
   }
 }
 
+function loadTaskId() {
+  return `preview-model:${props.repoId}:${props.entry.path}`;
+}
+
+function publishLoadProgress() {
+  upsertTask({
+    id: loadTaskId(),
+    label: loadProgress.value.label,
+    detail: loadProgress.value.detail,
+    value: loadProgress.value.value,
+    indeterminate: loadProgress.value.indeterminate,
+    source: "模型预览",
+  });
+}
+
+function removeLoadTask() {
+  removeTask(loadTaskId());
+}
+
+function removeLoadTaskSoon(token: number) {
+  window.setTimeout(() => {
+    if (token === loadToken) {
+      removeLoadTask();
+    }
+  }, 300);
+}
+
 function teardown() {
+  removeLoadTask();
   if (objectUrl) {
     URL.revokeObjectURL(objectUrl);
     objectUrl = null;
@@ -250,8 +343,9 @@ function disposeObject(object: Object3D) {
   <div ref="container" class="model-preview">
     <canvas ref="canvas" class="model-preview__canvas" />
 
-    <div v-if="state === 'loading'" class="model-preview__overlay">
-      <span>正在加载 3D 模型</span>
+    <div v-if="state === 'loading'" class="model-preview__status">
+      <span>{{ loadProgress.label }}</span>
+      <span>{{ loadProgress.detail }}</span>
     </div>
 
     <div v-else-if="state === 'error'" class="model-preview__overlay model-preview__overlay--error">
