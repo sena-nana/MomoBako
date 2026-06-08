@@ -14,7 +14,7 @@ const previewPlugins: FilePreviewPlugin[] = [
     pluginId: "builtin.three-model-preview",
     name: "3D Model Preview",
     kind: "preview",
-    supportedExtensions: ["fbx", "obj", "glb", "gltf"],
+    supportedExtensions: ["fbx", "obj", "glb", "gltf", "vrm"],
     component: defineAsyncComponent(() => import("./threeModelPreview/ThreeModelPreview.vue")),
   },
 ];

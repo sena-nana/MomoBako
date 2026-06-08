@@ -14,9 +14,10 @@ import {
   Vector3,
   WebGLRenderer,
 } from "three";
+import { VRMLoaderPlugin, VRMMetaLoaderPlugin, VRMUtils, type VRM } from "@pixiv/three-vrm";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { FBXLoader } from "three/examples/jsm/loaders/FBXLoader.js";
-import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { GLTFLoader, type GLTFParser } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { OBJLoader } from "three/examples/jsm/loaders/OBJLoader.js";
 import { preparePreviewFileSource } from "../../services/repositoryApi";
 import { useRepositoryWorkspace } from "../../composables/useRepositoryWorkspace";
@@ -45,9 +46,16 @@ const { saveGeneratedWorkspaceEntryThumbnail } = useRepositoryWorkspace();
 let scene: Scene | null = null;
 let camera: PerspectiveCamera | null = null;
 let controls: OrbitControls | null = null;
+let currentVrm: VRM | null = null;
 let frameId: number | null = null;
 let resizeObserver: ResizeObserver | null = null;
 let loadToken = 0;
+let previousFrameTime = 0;
+
+type LoadedModel = {
+  object: Object3D;
+  vrm?: VRM;
+};
 
 const extension = computed(() => props.entry.extension?.toLowerCase() ?? "");
 
@@ -94,12 +102,13 @@ async function loadModel() {
       indeterminate: true,
     };
     publishLoadProgress();
-    const object = await loadObjectByExtension(source, extension.value);
+    const loaded = await loadObjectByExtension(source, extension.value);
     if (token !== loadToken) {
-      disposeObject(object);
+      disposeObject(loaded.object);
       return;
     }
-    mountObject(object);
+    currentVrm = loaded.vrm ?? null;
+    mountObject(loaded.object);
     loadProgress.value = {
       value: 100,
       label: "模型就绪",
@@ -193,7 +202,8 @@ function setupRenderer() {
   resizeObserver = new ResizeObserver(resizeRenderer);
   resizeObserver.observe(container.value);
   resizeRenderer();
-  animate();
+  previousFrameTime = performance.now();
+  animate(previousFrameTime);
 }
 
 function mountObject(object: Object3D) {
@@ -256,16 +266,46 @@ async function loadObjectByExtension(source: string, fileExtension: string) {
   };
 
   if (fileExtension === "fbx") {
-    return new FBXLoader().loadAsync(source, onProgress);
+    return { object: await new FBXLoader().loadAsync(source, onProgress) } satisfies LoadedModel;
   }
   if (fileExtension === "obj") {
-    return new OBJLoader().loadAsync(source, onProgress);
+    return { object: await new OBJLoader().loadAsync(source, onProgress) } satisfies LoadedModel;
   }
-  if (fileExtension === "glb" || fileExtension === "gltf") {
-    const result = await new GLTFLoader().loadAsync(source, onProgress);
-    return result.scene;
+  if (fileExtension === "glb" || fileExtension === "gltf" || fileExtension === "vrm") {
+    const loader = new GLTFLoader();
+    if (fileExtension === "vrm") {
+      loader.register(createVrmLoaderPlugin);
+    }
+    const result = await loader.loadAsync(source, onProgress);
+    const vrm = result.userData.vrm as VRM | undefined;
+    if (vrm) {
+      VRMUtils.rotateVRM0(vrm);
+      return { object: vrm.scene, vrm } satisfies LoadedModel;
+    }
+    return { object: result.scene };
   }
   throw new Error(`暂不支持 .${fileExtension || "unknown"} 模型预览`);
+}
+
+function createVrmLoaderPlugin(parser: GLTFParser) {
+  const licenseUrl = getVrmLicenseUrl(parser.json);
+  return new VRMLoaderPlugin(parser, {
+    metaPlugin: new VRMMetaLoaderPlugin(parser, {
+      acceptLicenseUrls: licenseUrl ? [licenseUrl] : undefined,
+    }),
+  });
+}
+
+function getVrmLicenseUrl(json: unknown) {
+  if (!json || typeof json !== "object") return null;
+  const extensions = (json as { extensions?: unknown }).extensions;
+  if (!extensions || typeof extensions !== "object") return null;
+  const vrmExtension = (extensions as { VRMC_vrm?: unknown }).VRMC_vrm;
+  if (!vrmExtension || typeof vrmExtension !== "object") return null;
+  const meta = (vrmExtension as { meta?: unknown }).meta;
+  if (!meta || typeof meta !== "object") return null;
+  const licenseUrl = (meta as { licenseUrl?: unknown }).licenseUrl;
+  return typeof licenseUrl === "string" && licenseUrl ? licenseUrl : null;
 }
 
 function resizeRenderer() {
@@ -277,8 +317,11 @@ function resizeRenderer() {
   camera.updateProjectionMatrix();
 }
 
-function animate() {
+function animate(frameTime = performance.now()) {
   frameId = window.requestAnimationFrame(animate);
+  const delta = Math.min(Math.max((frameTime - previousFrameTime) / 1000, 0), 0.1);
+  previousFrameTime = frameTime;
+  currentVrm?.update(delta);
   controls?.update();
   if (scene && camera) {
     renderer.value?.render(scene, camera);
@@ -322,6 +365,7 @@ function teardown() {
   resizeObserver = null;
   controls?.dispose();
   controls = null;
+  currentVrm = null;
   scene?.children.forEach((child) => disposeObject(child));
   scene = null;
   renderer.value?.dispose();
@@ -330,12 +374,7 @@ function teardown() {
 }
 
 function disposeObject(object: Object3D) {
-  object.traverse((child) => {
-    if (!(child instanceof Mesh)) return;
-    child.geometry?.dispose();
-    const materials = Array.isArray(child.material) ? child.material : [child.material];
-    materials.forEach((material) => material?.dispose());
-  });
+  VRMUtils.deepDispose(object);
 }
 </script>
 

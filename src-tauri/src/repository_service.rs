@@ -3613,7 +3613,7 @@ fn preview_file_token(
 
 fn preview_media_type_for_extension(extension: &str) -> &'static str {
     match extension {
-        "glb" => "model/gltf-binary",
+        "glb" | "vrm" => "model/gltf-binary",
         "gltf" => "model/gltf+json",
         "obj" => "text/plain",
         "fbx" => "application/octet-stream",
@@ -3760,13 +3760,14 @@ fn default_plugins() -> Vec<PluginManifest> {
             name: "3D Model Preview".to_string(),
             version: "1.0.0".to_string(),
             kind: "preview".to_string(),
-            description: "为 FBX、OBJ、GLB 与 glTF 模型提供可旋转缩放的 3D 文件预览。".to_string(),
+            description: "为 FBX、OBJ、GLB、glTF 与 VRM 模型提供可旋转缩放的 3D 文件预览。".to_string(),
             capabilities: vec![
                 "preview".to_string(),
                 "3d-model".to_string(),
                 "fbx".to_string(),
                 "obj".to_string(),
                 "gltf".to_string(),
+                "vrm".to_string(),
             ],
             enabled: true,
         },
