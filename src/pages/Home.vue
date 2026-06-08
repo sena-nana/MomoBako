@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -38,6 +38,7 @@ import type {
   RepositoryArchiveFormat,
   RepositoryCompressionLevel,
   RepositorySummary,
+  SearchHit,
 } from "../types/repository";
 
 const createFileName = ref("");
@@ -91,6 +92,7 @@ const {
   openWorkspaceEntry,
   revealWorkspaceEntry,
   selectWorkspaceEntry,
+  setActivePanel,
   setWorkspaceEntryThumbnail,
   setWorkspaceEntryThumbnailFromBytes,
   clearWorkspaceEntryThumbnail,
@@ -291,6 +293,12 @@ function entryDeletedAtLabel(entry: FileBrowserEntry) {
   if (typeof value !== "string" || !value) return null;
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString("zh-CN");
+}
+
+function getParentPath(path: string) {
+  const normalizedPath = path.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+  const index = normalizedPath.lastIndexOf("/");
+  return index >= 0 ? normalizedPath.slice(0, index) : "";
 }
 
 function openDirectory(path: string) {
@@ -538,12 +546,26 @@ function fileEntryContextMenu(entry: FileBrowserEntry) {
   return items;
 }
 
-function openSearchHit(repoId: string, assetId: string) {
-  if (activeRepoId.value !== repoId) {
-    void selectRepository(repoId).then(() => selectAsset(assetId));
-    return;
+async function openSearchHit(result: SearchHit) {
+  previewFilePath.value = null;
+  setActivePanel("files");
+
+  if (activeRepoId.value !== result.repoId) {
+    await selectRepository(result.repoId);
   }
-  void selectAsset(assetId);
+  if (activeRepoId.value !== result.repoId) return;
+
+  const snapshot = await loadFileBrowserForDirectory(getParentPath(result.path), { includeTree: true });
+  const matchedEntry = snapshot?.entries.find((entry) => entry.path === result.path);
+  if (matchedEntry) {
+    selectWorkspaceEntry(matchedEntry.path);
+    if (matchedEntry.kind === "file") {
+      await nextTick();
+      previewFilePath.value = matchedEntry.path;
+    }
+  }
+
+  await selectAsset(result.assetId);
 }
 
 function formatRepositoryStatus(status: string) {
@@ -1135,7 +1157,7 @@ onUnmounted(() => {
           :key="`${result.repoId}:${result.assetId}`"
           type="button"
           class="search-workbench__item"
-          @click="openSearchHit(result.repoId, result.assetId)"
+          @click="openSearchHit(result)"
         >
           <div class="search-workbench__item-icon">
             <FileImage :size="18" aria-hidden="true" />

@@ -13,6 +13,7 @@ import {
   failNextOpenerCall,
   getInvokeCalls,
   getOpenerCalls,
+  seedCrossRepositorySearchHit,
   seedMockRepository,
   setMockSavePath,
   seedMockRepositoryPath,
@@ -305,6 +306,41 @@ describe("文件管理冒烟", () => {
 
     await fireEvent.click(settingsButton);
     expect(await screen.findByRole("heading", { name: "设置" })).toBeInTheDocument();
+  });
+
+  it("点击跨仓库搜索结果后切到文件视图并预览命中文件", async () => {
+    seedCrossRepositorySearchHit();
+    await renderApp();
+
+    await fireEvent.update(screen.getByRole("searchbox", { name: "全局搜索" }), "target");
+    expect(await screen.findByRole("heading", { name: "搜索结果" })).toBeInTheDocument();
+
+    await fireEvent.click(await screen.findByRole("button", { name: /target-preview\.png/ }));
+
+    await waitFor(() => {
+      expect(getInvokeCalls("get_repository_snapshot").at(-1)?.args).toMatchObject({
+        repoId: "repo-alt-001",
+      });
+    });
+    await waitFor(() => {
+      expect(getInvokeCalls("get_file_browser").at(-1)?.args).toMatchObject({
+        request: {
+          repoId: "repo-alt-001",
+          directoryPath: "Reference/Paint",
+          includeTree: true,
+        },
+      });
+    });
+    await waitFor(() => {
+      expect(getInvokeCalls("get_asset_detail").at(-1)?.args).toMatchObject({
+        repoId: "repo-alt-001",
+        assetId: "asset-alt-01",
+      });
+    });
+
+    expect(screen.queryByRole("heading", { name: "搜索结果" })).not.toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "target-preview.png" })).toBeInTheDocument();
+    expect(screen.getByText("Reference/Paint/target-preview.png")).toBeInTheDocument();
   });
 
   it("使用本地绝对路径打开和定位文件，并展示 opener 失败信息", async () => {

@@ -4,7 +4,7 @@ use sha2::{Digest, Sha256};
 use std::{
     collections::BTreeMap,
     ffi::OsString,
-    fs::{self, OpenOptions},
+    fs::{self, File, OpenOptions},
     path::{Path, PathBuf},
     process::Command,
     sync::{Arc, Mutex, OnceLock},
@@ -1243,10 +1243,7 @@ impl RepositoryState {
         })
     }
 
-    pub fn open_preview_file_source(
-        &self,
-        token: &str,
-    ) -> Result<(fs::File, String, u64), String> {
+    pub fn open_preview_file_source(&self, token: &str) -> Result<(File, String), String> {
         let source = self
             .preview_sources
             .lock()
@@ -1257,9 +1254,8 @@ impl RepositoryState {
         if !source.path.is_file() {
             return Err("preview source file is no longer available".to_string());
         }
-        let metadata = fs::metadata(&source.path).map_err(io_error)?;
-        let file = fs::File::open(&source.path).map_err(io_error)?;
-        Ok((file, source.media_type, metadata.len()))
+        let file = File::open(&source.path).map_err(io_error)?;
+        Ok((file, source.media_type))
     }
 
     pub fn search_assets(&self, request: SearchRequest) -> Result<SearchResponse, String> {
@@ -1435,9 +1431,13 @@ impl RepositoryState {
         if kind == "directory" {
             let response = match action {
                 "ensure" => {
-                    let record =
-                        load_entry_thumbnail_record(&connection, &request.repo_id, &entry_path, kind)
-                            .map_err(db_error)?;
+                    let record = load_entry_thumbnail_record(
+                        &connection,
+                        &request.repo_id,
+                        &entry_path,
+                        kind,
+                    )
+                    .map_err(db_error)?;
                     normalize_entry_thumbnail_record(
                         &connection,
                         &repo,
@@ -1446,8 +1446,8 @@ impl RepositoryState {
                         kind,
                         record,
                     )?
-                        .map(|record| (Some(record.path), record.custom))
-                        .unwrap_or((None, false))
+                    .map(|record| (Some(record.path), record.custom))
+                    .unwrap_or((None, false))
                 }
                 "save" => {
                     let bytes = thumbnail_bytes_from_request(&request)?;
@@ -1596,13 +1596,8 @@ impl RepositoryState {
             ),
             "save" => {
                 let bytes = thumbnail_bytes_from_request(&request)?;
-                let thumbnail_path = save_custom_thumbnail_bytes(
-                    &thumbnail_root,
-                    &repo,
-                    &entry_path,
-                    kind,
-                    &bytes,
-                )?;
+                let thumbnail_path =
+                    save_custom_thumbnail_bytes(&thumbnail_root, &repo, &entry_path, kind, &bytes)?;
                 upsert_entry_thumbnail_record(
                     &connection,
                     &request.repo_id,
@@ -2377,8 +2372,14 @@ fn normalize_asset_thumbnail_path(
     thumbnail_path: Option<String>,
 ) -> Result<Option<String>, String> {
     let original_path = thumbnail_path.clone();
-    let normalized =
-        normalize_thumbnail_path(repo, thumbnail_root, entry_path, "file", "generated", thumbnail_path)?;
+    let normalized = normalize_thumbnail_path(
+        repo,
+        thumbnail_root,
+        entry_path,
+        "file",
+        "generated",
+        thumbnail_path,
+    )?;
     if normalized != original_path {
         update_asset_thumbnail_path(
             connection,
@@ -2429,8 +2430,14 @@ fn normalize_entry_thumbnail_record(
     };
     let source = if record.custom { "custom" } else { "generated" };
     let original_path = record.path.clone();
-    let normalized =
-        normalize_thumbnail_path(repo, thumbnail_root, entry_path, kind, source, Some(record.path))?;
+    let normalized = normalize_thumbnail_path(
+        repo,
+        thumbnail_root,
+        entry_path,
+        kind,
+        source,
+        Some(record.path),
+    )?;
     match normalized {
         Some(path) => {
             if path != original_path {
@@ -3498,8 +3505,7 @@ fn ensure_thumbnail_for_file(
                 &repo.summary.repo_id,
                 &repo.summary.path,
             ));
-            let thumbnail_path = Path::new(&path);
-            if thumbnail_path.starts_with(&expected_dir) && thumbnail_path.is_file() {
+            if thumbnail_path_is_valid(&expected_dir, &path) {
                 return Ok(Some(path));
             }
         }
@@ -3510,7 +3516,17 @@ fn ensure_thumbnail_for_file(
 
 fn thumbnail_path_is_valid(thumbnail_root: &Path, path: &str) -> bool {
     let thumbnail_path = Path::new(path);
-    thumbnail_path.starts_with(thumbnail_root) && thumbnail_path.is_file()
+    if !thumbnail_path.is_file() {
+        return false;
+    }
+
+    let Ok(thumbnail_path) = canonicalize_local_path(thumbnail_path) else {
+        return false;
+    };
+    let Ok(thumbnail_root) = canonicalize_local_path(thumbnail_root) else {
+        return false;
+    };
+    thumbnail_path.starts_with(thumbnail_root)
 }
 
 fn thumbnail_bytes_from_request(request: &ThumbnailRequest) -> Result<Vec<u8>, String> {
@@ -6336,9 +6352,11 @@ mod tests {
     fn create_test_state(label: &str) -> (RepositoryState, PathBuf, PathBuf, PathBuf) {
         let root = unique_temp_dir(label);
         let repo_root = root.join("repo");
+        fs::create_dir_all(&repo_root).expect("repo root should be created");
+        let root = canonicalize_local_path(&root).expect("test root should canonicalize");
+        let repo_root = canonicalize_local_path(&repo_root).expect("repo root should canonicalize");
         let state_root = root.join("state");
         let thumbnail_root = repo_root.join(REPO_META_DIR).join("thumbnails");
-        fs::create_dir_all(&repo_root).expect("repo root should be created");
         (
             RepositoryState::from_root(state_root),
             root,
@@ -6731,6 +6749,66 @@ mod tests {
 
         assert_eq!(response.thumbnail_path, None);
 
+        fs::remove_dir_all(root).expect("test temp root should be removed");
+    }
+
+    #[test]
+    fn open_preview_file_source_returns_registered_file() {
+        let (state, root, repo_root, _thumbnail_root) = create_test_state("preview-open");
+        let source_path = repo_root.join("model.glb");
+        fs::write(&source_path, b"glb").expect("preview source should be written");
+        let repo_id = create_repository_for_path(&state, &repo_root);
+        let response = state
+            .prepare_preview_file_source(FileReadRequest {
+                repo_id,
+                path: "model.glb".to_string(),
+            })
+            .expect("preview source should be prepared");
+
+        let (mut file, media_type) = state
+            .open_preview_file_source(&response.token)
+            .expect("registered preview token should open");
+        let mut body = Vec::new();
+        use std::io::Read;
+        file.read_to_end(&mut body)
+            .expect("preview file should be readable");
+
+        assert_eq!(body, b"glb");
+        assert_eq!(media_type, "model/gltf-binary");
+        fs::remove_dir_all(root).expect("test temp root should be removed");
+    }
+
+    #[test]
+    fn open_preview_file_source_rejects_unknown_token() {
+        let (state, root, _repo_root, _thumbnail_root) = create_test_state("preview-unknown");
+
+        let error = state
+            .open_preview_file_source(&"0".repeat(64))
+            .expect_err("unknown preview token should fail");
+
+        assert!(error.contains("preview source not found"));
+        fs::remove_dir_all(root).expect("test temp root should be removed");
+    }
+
+    #[test]
+    fn open_preview_file_source_rejects_deleted_source_file() {
+        let (state, root, repo_root, _thumbnail_root) = create_test_state("preview-deleted");
+        let source_path = repo_root.join("model.glb");
+        fs::write(&source_path, b"glb").expect("preview source should be written");
+        let repo_id = create_repository_for_path(&state, &repo_root);
+        let response = state
+            .prepare_preview_file_source(FileReadRequest {
+                repo_id,
+                path: "model.glb".to_string(),
+            })
+            .expect("preview source should be prepared");
+        fs::remove_file(source_path).expect("preview source should be removed");
+
+        let error = state
+            .open_preview_file_source(&response.token)
+            .expect_err("deleted preview source should fail");
+
+        assert!(error.contains("preview source file is no longer available"));
         fs::remove_dir_all(root).expect("test temp root should be removed");
     }
 
