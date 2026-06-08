@@ -11,6 +11,8 @@
     "tauri": "tauri",
     "tauri:dev": "node scripts/tauri-dev.mjs",
     "tauri:build": "tauri build",
+    "icons:generate": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/generate-icon.ps1",
+    "icons:tauri": "yarn tauri icon src-tauri/icons/icon-source.png",
     "verify": "yarn test && yarn build && cargo check --manifest-path src-tauri/Cargo.toml"
   },
   "dependencies": {
