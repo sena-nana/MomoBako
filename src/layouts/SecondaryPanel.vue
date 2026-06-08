@@ -76,6 +76,7 @@ const {
   createDirectoryInWorkspace,
   renameWorkspaceEntry,
   deleteWorkspaceEntry,
+  createNewRepository,
   attachRepository,
 } = useRepositoryWorkspace();
 
@@ -337,16 +338,10 @@ async function chooseLocalFolderAndCreate() {
   }
 }
 
-function inferRepositoryNameFromPath(path: string) {
-  const segments = path.split(/[\\/]/).filter(Boolean);
-  return segments[segments.length - 1] ?? "";
-}
-
 async function createLocalRepositoryFromPath(path: string, fallbackPosition = addRepositoryPopoverPosition.value) {
   const nextPath = path.trim();
   if (!nextPath) return false;
   backendPluginId.value = "builtin.local-filesystem";
-  const name = backendName.value.trim() || inferRepositoryNameFromPath(nextPath) || "新资源库";
   addRepositoryError.value = "";
   isSubmittingBackend.value = true;
   try {
