@@ -15,6 +15,8 @@ use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 const REGISTRY_FILE_NAME: &str = "repositories.db";
 const REPO_META_DIR: &str = ".momo";
 const LEGACY_REPO_META_DIR: &str = ".meta";
+const REPO_TRASH_DIR: &str = "trash";
+const REPO_TRASH_MANIFEST_FILE_NAME: &str = "trash.json";
 const REPO_METADATA_FILE_NAME: &str = "repository.json";
 const REPO_DB_FILE_NAME: &str = "metadata.db";
 const REPO_SCHEMA_VERSION: i64 = 1;
@@ -286,6 +288,7 @@ pub struct FileBrowserEntry {
     pub asset_id: Option<String>,
     pub status: Option<String>,
     pub thumbnail_path: Option<String>,
+    pub metadata: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -296,6 +299,8 @@ pub struct FileBrowserSnapshot {
     pub backend_plugin_id: String,
     pub backend_kind: String,
     pub current_path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub special_location: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tree: Option<Vec<FileTreeNode>>,
     pub entries: Vec<FileBrowserEntry>,
@@ -406,6 +411,7 @@ pub struct FileBrowserRequest {
     pub repo_id: String,
     pub directory_path: Option<String>,
     pub include_tree: Option<bool>,
+    pub special_location: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -445,6 +451,29 @@ pub struct FileDeleteRequest {
     pub repo_id: String,
     pub path: String,
     pub mode: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TrashMutationRequest {
+    pub repo_id: String,
+    pub action: String,
+    pub path: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+struct TrashManifest {
+    entries: Vec<TrashManifestEntry>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct TrashManifestEntry {
+    original_path: String,
+    trash_path: String,
+    deleted_at: String,
+    kind: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -1018,20 +1047,34 @@ impl RepositoryState {
 
         let repo = self.load_repository_record(&request.repo_id)?;
         let repo_root = PathBuf::from(&repo.summary.path);
-        let current_path =
-            normalize_directory_path(request.directory_path.as_deref().unwrap_or_default())?;
         let connection = self.open_repository_connection(
             &repo.summary.repo_id,
             &repo.summary.path,
             &repo.backend_record,
         )?;
         let asset_map = load_asset_path_map(&connection, &request.repo_id).map_err(db_error)?;
-        let tree = if request.include_tree.unwrap_or(true) {
+        let special_location = normalize_special_location(request.special_location.as_deref())?;
+        if special_location.is_some() && repo.backend_record.plugin_id != LOCAL_FILESYSTEM_PLUGIN_ID
+        {
+            return Err(format!(
+                "trash browser is only supported for local filesystem repositories, got: {}",
+                repo.backend_record.plugin_id
+            ));
+        }
+        let current_path =
+            normalize_directory_path(request.directory_path.as_deref().unwrap_or_default())?;
+        let tree = if special_location.is_some() {
+            None
+        } else if request.include_tree.unwrap_or(true) {
             Some(list_backend_tree(&repo, &repo_root)?)
         } else {
             None
         };
-        let entries = list_backend_directory_entries(&repo, &repo_root, &current_path, &asset_map)?;
+        let entries = if special_location.as_deref() == Some("trash") {
+            list_trash_directory_entries(&repo_root, &current_path, &asset_map)?
+        } else {
+            list_backend_directory_entries(&repo, &repo_root, &current_path, &asset_map)?
+        };
 
         Ok(FileBrowserSnapshot {
             repo_id: request.repo_id,
@@ -1039,6 +1082,7 @@ impl RepositoryState {
             backend_plugin_id: repo.backend_record.plugin_id.clone(),
             backend_kind: repo.summary.backend.kind,
             current_path,
+            special_location,
             tree,
             entries,
         })
@@ -1308,6 +1352,7 @@ impl RepositoryState {
             repo_id: request.repo_id,
             directory_path: Some(parent_path),
             include_tree: Some(true),
+            special_location: None,
         })
     }
 
@@ -1327,6 +1372,7 @@ impl RepositoryState {
             repo_id: request.repo_id,
             directory_path: Some(parent_path),
             include_tree: Some(false),
+            special_location: None,
         })
     }
 
@@ -1366,6 +1412,7 @@ impl RepositoryState {
             repo_id: request.repo_id,
             directory_path: Some(parent_path),
             include_tree: Some(imported_directory),
+            special_location: None,
         })
     }
 
@@ -1416,6 +1463,7 @@ impl RepositoryState {
             repo_id: request.repo_id,
             directory_path: Some(parent_path),
             include_tree: Some(is_directory),
+            special_location: None,
         })
     }
 
@@ -1423,13 +1471,32 @@ impl RepositoryState {
         self.ensure_initialized()?;
         let repo = self.load_repository_record(&request.repo_id)?;
         let repo_root = PathBuf::from(&repo.summary.path);
+        let delete_mode = request.mode.as_deref().unwrap_or("delete");
+
+        if delete_mode == "permanentDelete" {
+            if repo.backend_record.plugin_id != LOCAL_FILESYSTEM_PLUGIN_ID {
+                return Err(format!(
+                    "permanent trash delete is only supported for local filesystem repositories, got: {}",
+                    repo.backend_record.plugin_id
+                ));
+            }
+            let trash_path = normalize_trash_relative_path(&request.path, false)?;
+            let parent_path = parent_relative_path(&trash_path);
+            delete_trash_entry(&repo_root, &trash_path)?;
+            return self.load_file_browser(FileBrowserRequest {
+                repo_id: request.repo_id,
+                directory_path: Some(parent_path),
+                include_tree: Some(false),
+                special_location: Some("trash".to_string()),
+            });
+        }
+
         let entry_path = normalize_entry_path(&request.path)?;
         let parent_path = parent_relative_path(&entry_path);
         let entry = stat_backend_entry(&repo, &repo_root, &entry_path)?;
 
         let is_directory = matches!(entry.kind, FileSystemEntryKind::Directory);
         if is_directory {
-            let delete_mode = request.mode.as_deref().unwrap_or("delete");
             if delete_mode == "moveToParent" {
                 move_directory_contents_to_parent(
                     &self.root,
@@ -1439,7 +1506,13 @@ impl RepositoryState {
                     &entry_path,
                 )?;
             } else {
-                delete_backend_entry(&repo, &repo_root, &entry_path, true)?;
+                if repo.backend_record.plugin_id != LOCAL_FILESYSTEM_PLUGIN_ID {
+                    return Err(format!(
+                        "trash delete is only supported for local filesystem repositories, got: {}",
+                        repo.backend_record.plugin_id
+                    ));
+                }
+                move_entry_to_trash(&repo_root, &entry_path, is_directory)?;
                 let mut connection = self.open_repository_connection(
                     &repo.summary.repo_id,
                     &repo.summary.path,
@@ -1451,7 +1524,13 @@ impl RepositoryState {
                 tx.commit().map_err(db_error)?;
             }
         } else {
-            delete_backend_entry(&repo, &repo_root, &entry_path, false)?;
+            if repo.backend_record.plugin_id != LOCAL_FILESYSTEM_PLUGIN_ID {
+                return Err(format!(
+                    "trash delete is only supported for local filesystem repositories, got: {}",
+                    repo.backend_record.plugin_id
+                ));
+            }
+            move_entry_to_trash(&repo_root, &entry_path, is_directory)?;
             let mut connection = self.open_repository_connection(
                 &repo.summary.repo_id,
                 &repo.summary.path,
@@ -1466,6 +1545,51 @@ impl RepositoryState {
             repo_id: request.repo_id,
             directory_path: Some(parent_path),
             include_tree: Some(is_directory),
+            special_location: None,
+        })
+    }
+
+    pub fn mutate_trash(
+        &self,
+        request: TrashMutationRequest,
+    ) -> Result<FileBrowserSnapshot, String> {
+        self.ensure_initialized()?;
+        let repo = self.load_repository_record(&request.repo_id)?;
+        if repo.backend_record.plugin_id != LOCAL_FILESYSTEM_PLUGIN_ID {
+            return Err(format!(
+                "trash operations are only supported for local filesystem repositories, got: {}",
+                repo.backend_record.plugin_id
+            ));
+        }
+        let repo_root = PathBuf::from(&repo.summary.path);
+
+        match request.action.as_str() {
+            "restore" => {
+                let trash_path = request
+                    .path
+                    .as_deref()
+                    .ok_or_else(|| "trash restore requires a path".to_string())
+                    .and_then(|path| normalize_trash_relative_path(path, false))?;
+                restore_trash_entry(&repo_root, &trash_path)?;
+            }
+            "restoreAll" => {
+                restore_all_trash_entries(&repo_root)?;
+            }
+            "empty" => {
+                empty_trash(&repo_root)?;
+            }
+            value => return Err(format!("unsupported trash action: {value}")),
+        }
+
+        let _ = self.sync_repository(SyncRequest {
+            repo_id: request.repo_id.clone(),
+        })?;
+
+        self.load_file_browser(FileBrowserRequest {
+            repo_id: request.repo_id,
+            directory_path: Some(String::new()),
+            include_tree: Some(false),
+            special_location: Some("trash".to_string()),
         })
     }
 
@@ -3408,7 +3532,7 @@ fn ensure_repository_storage_paths(
 
 fn ensure_repository_metadata_dirs(metadata_dir: &Path) -> Result<(), String> {
     fs::create_dir_all(metadata_dir).map_err(io_error)?;
-    for subdir in ["cache", "thumbnails", "logs", "indexes"] {
+    for subdir in ["cache", "thumbnails", "logs", "indexes", REPO_TRASH_DIR] {
         fs::create_dir_all(metadata_dir.join(subdir)).map_err(io_error)?;
     }
     Ok(())
@@ -3424,6 +3548,14 @@ fn infer_repository_name(repo_root: &Path) -> String {
 
 fn repository_meta_dir(repo_root: &Path) -> PathBuf {
     repo_root.join(REPO_META_DIR)
+}
+
+fn repository_trash_dir(repo_root: &Path) -> PathBuf {
+    repository_meta_dir(repo_root).join(REPO_TRASH_DIR)
+}
+
+fn repository_trash_manifest_path(repo_root: &Path) -> PathBuf {
+    repository_meta_dir(repo_root).join(REPO_TRASH_MANIFEST_FILE_NAME)
 }
 
 fn legacy_repository_meta_dir(repo_root: &Path) -> PathBuf {
@@ -3524,6 +3656,14 @@ fn normalize_entry_path(path: &str) -> Result<String, String> {
     Ok(normalized)
 }
 
+fn normalize_special_location(value: Option<&str>) -> Result<Option<String>, String> {
+    match value.map(str::trim).filter(|item| !item.is_empty()) {
+        Some("trash") => Ok(Some("trash".to_string())),
+        Some(value) => Err(format!("unsupported file browser location: {value}")),
+        None => Ok(None),
+    }
+}
+
 fn normalize_relative_path(path: &str, allow_empty: bool) -> Result<String, String> {
     let trimmed = path.trim().replace('\\', "/").trim_matches('/').to_string();
     if trimmed.is_empty() {
@@ -3574,6 +3714,244 @@ fn resolve_repository_relative_path(
         }
     }
     Ok(path)
+}
+
+fn resolve_trash_relative_path(trash_root: &Path, relative_path: &str) -> Result<PathBuf, String> {
+    if relative_path.is_empty() {
+        return Ok(trash_root.to_path_buf());
+    }
+
+    let normalized = normalize_trash_relative_path(relative_path, true)?;
+    let mut path = trash_root.to_path_buf();
+    for part in normalized.split('/') {
+        if !part.is_empty() {
+            path.push(part);
+        }
+    }
+    Ok(path)
+}
+
+fn normalize_trash_relative_path(path: &str, allow_empty: bool) -> Result<String, String> {
+    let trimmed = path.trim().replace('\\', "/").trim_matches('/').to_string();
+    if trimmed.is_empty() {
+        return if allow_empty {
+            Ok(String::new())
+        } else {
+            Err("path cannot be empty".to_string())
+        };
+    }
+
+    let mut parts = Vec::new();
+    for part in trimmed.split('/') {
+        if part.is_empty() || part == "." {
+            continue;
+        }
+        if part == ".." {
+            return Err("path cannot escape trash root".to_string());
+        }
+        parts.push(part);
+    }
+
+    let normalized = parts.join("/");
+    if normalized.is_empty() && allow_empty {
+        Ok(String::new())
+    } else if normalized.is_empty() {
+        Err("path cannot be empty".to_string())
+    } else {
+        Ok(normalized)
+    }
+}
+
+fn unique_trash_target_path(trash_root: &Path, entry_path: &str) -> Result<PathBuf, String> {
+    let entry = Path::new(entry_path);
+    let name = entry
+        .file_name()
+        .map(|value| value.to_string_lossy().to_string())
+        .ok_or_else(|| format!("invalid entry path: {entry_path}"))?;
+
+    let parent_path = parent_relative_path(entry_path);
+    let target_parent = resolve_trash_relative_path(trash_root, &parent_path)?;
+    fs::create_dir_all(&target_parent).map_err(io_error)?;
+
+    let mut target = target_parent.join(&name);
+    if !target.exists() {
+        return Ok(target);
+    }
+
+    let stem = entry
+        .file_stem()
+        .map(|value| value.to_string_lossy().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| name.clone());
+    let extension = entry
+        .extension()
+        .map(|value| value.to_string_lossy().to_string());
+    let timestamp = trash_timestamp_suffix();
+    let mut suffix = 1;
+    while target.exists() {
+        let candidate_name = match &extension {
+            Some(extension) => format!("{stem} (deleted-{timestamp}-{suffix}).{extension}"),
+            None => format!("{stem} (deleted-{timestamp}-{suffix})"),
+        };
+        target = target_parent.join(candidate_name);
+        suffix += 1;
+    }
+    Ok(target)
+}
+
+fn trash_timestamp_suffix() -> String {
+    now_rfc3339()
+        .replace(':', "")
+        .replace('.', "-")
+        .replace('Z', "z")
+}
+
+fn trash_relative_path_for_target(trash_root: &Path, target_abs: &Path) -> Result<String, String> {
+    target_abs
+        .strip_prefix(trash_root)
+        .map_err(path_error)
+        .map(|path| path.to_string_lossy().replace('\\', "/"))
+}
+
+fn load_trash_manifest(repo_root: &Path) -> Result<TrashManifest, String> {
+    let manifest_path = repository_trash_manifest_path(repo_root);
+    if !manifest_path.exists() {
+        return Ok(TrashManifest::default());
+    }
+
+    let raw = fs::read_to_string(manifest_path).map_err(io_error)?;
+    if raw.trim().is_empty() {
+        return Ok(TrashManifest::default());
+    }
+    serde_json::from_str::<TrashManifest>(&raw).map_err(json_error)
+}
+
+fn save_trash_manifest(repo_root: &Path, manifest: &TrashManifest) -> Result<(), String> {
+    let meta_dir = repository_meta_dir(repo_root);
+    fs::create_dir_all(&meta_dir).map_err(io_error)?;
+    let manifest_json = serde_json::to_string_pretty(manifest).map_err(json_error)?;
+    fs::write(repository_trash_manifest_path(repo_root), manifest_json).map_err(io_error)
+}
+
+fn trash_path_matches_or_descends(path: &str, ancestor: &str) -> bool {
+    path == ancestor || path.starts_with(&format!("{ancestor}/"))
+}
+
+fn relative_suffix(path: &str, ancestor: &str) -> Option<String> {
+    if path == ancestor {
+        Some(String::new())
+    } else {
+        path.strip_prefix(&format!("{ancestor}/"))
+            .map(ToString::to_string)
+    }
+}
+
+fn find_trash_manifest_entry<'a>(
+    manifest: &'a TrashManifest,
+    trash_path: &str,
+) -> Option<&'a TrashManifestEntry> {
+    manifest
+        .entries
+        .iter()
+        .filter(|entry| trash_path_matches_or_descends(trash_path, &entry.trash_path))
+        .max_by_key(|entry| entry.trash_path.len())
+}
+
+fn original_path_for_trash_path(entry: &TrashManifestEntry, trash_path: &str) -> String {
+    match relative_suffix(trash_path, &entry.trash_path) {
+        Some(suffix) if suffix.is_empty() => entry.original_path.clone(),
+        Some(suffix) => join_relative_path(&entry.original_path, &suffix),
+        None => entry.original_path.clone(),
+    }
+}
+
+fn remove_manifest_paths(manifest: &mut TrashManifest, trash_path: &str) {
+    manifest
+        .entries
+        .retain(|entry| !trash_path_matches_or_descends(&entry.trash_path, trash_path));
+}
+
+fn prune_empty_trash_parents(trash_root: &Path, restored_trash_path: &str) -> Result<(), String> {
+    let mut current = parent_relative_path(restored_trash_path);
+    while !current.is_empty() {
+        let dir = resolve_trash_relative_path(trash_root, &current)?;
+        if dir.exists() && dir.is_dir() && fs::read_dir(&dir).map_err(io_error)?.next().is_none() {
+            fs::remove_dir(&dir).map_err(io_error)?;
+            current = parent_relative_path(&current);
+        } else {
+            break;
+        }
+    }
+    Ok(())
+}
+
+fn ensure_restore_target_available(
+    source_abs: &Path,
+    target_abs: &Path,
+    target_path: &str,
+) -> Result<(), String> {
+    if !target_abs.exists() {
+        return Ok(());
+    }
+    let source_metadata = source_abs.metadata().map_err(io_error)?;
+    if source_metadata.is_dir() && target_abs.is_dir() {
+        return ensure_directory_merge_available(source_abs, target_abs, target_path);
+    }
+    Err(format!("target already exists: {target_path}"))
+}
+
+fn ensure_directory_merge_available(
+    source_dir: &Path,
+    target_dir: &Path,
+    target_path: &str,
+) -> Result<(), String> {
+    for entry in fs::read_dir(source_dir).map_err(io_error)? {
+        let entry = entry.map_err(io_error)?;
+        let source_child = entry.path();
+        let target_child = target_dir.join(entry.file_name());
+        if !target_child.exists() {
+            continue;
+        }
+        let source_metadata = entry.metadata().map_err(io_error)?;
+        if source_metadata.is_dir() && target_child.is_dir() {
+            ensure_directory_merge_available(&source_child, &target_child, target_path)?;
+        } else {
+            return Err(format!("target already exists: {target_path}"));
+        }
+    }
+    Ok(())
+}
+
+fn restore_path_to_target(
+    source_abs: &Path,
+    target_abs: &Path,
+    target_path: &str,
+) -> Result<(), String> {
+    ensure_restore_target_available(source_abs, target_abs, target_path)?;
+    if let Some(parent) = target_abs.parent() {
+        fs::create_dir_all(parent).map_err(io_error)?;
+    }
+
+    if source_abs.is_dir() && target_abs.is_dir() {
+        merge_directory_contents(source_abs, target_abs)
+    } else {
+        fs::rename(source_abs, target_abs).map_err(io_error)
+    }
+}
+
+fn merge_directory_contents(source_dir: &Path, target_dir: &Path) -> Result<(), String> {
+    fs::create_dir_all(target_dir).map_err(io_error)?;
+    for entry in fs::read_dir(source_dir).map_err(io_error)? {
+        let entry = entry.map_err(io_error)?;
+        let source_child = entry.path();
+        let target_child = target_dir.join(entry.file_name());
+        if source_child.is_dir() && target_child.is_dir() {
+            merge_directory_contents(&source_child, &target_child)?;
+        } else {
+            fs::rename(&source_child, &target_child).map_err(io_error)?;
+        }
+    }
+    fs::remove_dir(source_dir).map_err(io_error)
 }
 
 #[derive(Debug, Clone)]
@@ -3787,7 +4165,11 @@ fn export_tar_archive(
     let mut command = Command::new("tar");
     command
         .current_dir(repo_root)
-        .arg(if options.compression == "none" { "-cf" } else { "-czf" })
+        .arg(if options.compression == "none" {
+            "-cf"
+        } else {
+            "-czf"
+        })
         .arg(output_path)
         .arg(".");
 
@@ -4077,6 +4459,23 @@ fn list_backend_directory_entries(
     Ok(map_file_browser_entries(entries, asset_map))
 }
 
+fn list_trash_directory_entries(
+    repo_root: &Path,
+    current_path: &str,
+    asset_map: &BTreeMap<String, (String, String, Option<String>)>,
+) -> Result<Vec<FileBrowserEntry>, String> {
+    let trash_root = repository_trash_dir(repo_root);
+    fs::create_dir_all(&trash_root).map_err(io_error)?;
+    let manifest = load_trash_manifest(repo_root)?;
+    let current_dir = resolve_trash_relative_path(&trash_root, current_path)?;
+    if !current_dir.exists() || !current_dir.is_dir() {
+        return Err(format!("trash directory not found: {current_path}"));
+    }
+
+    let entries = local_directory_entries(&trash_root, &current_dir)?;
+    Ok(map_trash_browser_entries(entries, asset_map, &manifest))
+}
+
 fn create_backend_directory(
     repo: &RepositoryRecord,
     repo_root: &Path,
@@ -4134,6 +4533,155 @@ fn delete_backend_entry(
         recursive,
         &repo.backend_record.config,
     )
+}
+
+fn move_entry_to_trash(
+    repo_root: &Path,
+    entry_path: &str,
+    is_directory: bool,
+) -> Result<(), String> {
+    let source_abs = resolve_repository_relative_path(repo_root, entry_path)?;
+    if !source_abs.exists() {
+        return Err(format!("entry not found: {entry_path}"));
+    }
+
+    let trash_root = repository_trash_dir(repo_root);
+    fs::create_dir_all(&trash_root).map_err(io_error)?;
+    let target_abs = unique_trash_target_path(&trash_root, entry_path)?;
+    fs::rename(source_abs, &target_abs).map_err(io_error)?;
+
+    let trash_path = trash_relative_path_for_target(&trash_root, &target_abs)?;
+    let mut manifest = load_trash_manifest(repo_root)?;
+    remove_manifest_paths(&mut manifest, &trash_path);
+    manifest.entries.push(TrashManifestEntry {
+        original_path: entry_path.to_string(),
+        trash_path,
+        deleted_at: now_rfc3339(),
+        kind: if is_directory { "directory" } else { "file" }.to_string(),
+    });
+    save_trash_manifest(repo_root, &manifest)
+}
+
+fn delete_trash_entry(repo_root: &Path, trash_path: &str) -> Result<(), String> {
+    let trash_root = repository_trash_dir(repo_root);
+    let entry_abs = resolve_trash_relative_path(&trash_root, trash_path)?;
+    if !entry_abs.exists() {
+        return Err(format!("trash entry not found: {trash_path}"));
+    }
+
+    let metadata = entry_abs.metadata().map_err(io_error)?;
+    if metadata.is_dir() {
+        fs::remove_dir_all(entry_abs).map_err(io_error)?;
+    } else {
+        fs::remove_file(entry_abs).map_err(io_error)?;
+    }
+
+    let mut manifest = load_trash_manifest(repo_root)?;
+    remove_manifest_paths(&mut manifest, trash_path);
+    save_trash_manifest(repo_root, &manifest)
+}
+
+fn restore_trash_entry(repo_root: &Path, trash_path: &str) -> Result<(), String> {
+    let trash_root = repository_trash_dir(repo_root);
+    let entry_abs = resolve_trash_relative_path(&trash_root, trash_path)?;
+    if !entry_abs.exists() {
+        return Err(format!("trash entry not found: {trash_path}"));
+    }
+
+    let mut manifest = load_trash_manifest(repo_root)?;
+    let manifest_entry = find_trash_manifest_entry(&manifest, trash_path)
+        .cloned()
+        .ok_or_else(|| format!("trash metadata not found: {trash_path}"))?;
+    let original_path = original_path_for_trash_path(&manifest_entry, trash_path);
+    let target_abs = resolve_repository_relative_path(repo_root, &original_path)?;
+
+    restore_path_to_target(&entry_abs, &target_abs, &original_path)?;
+    remove_manifest_paths(&mut manifest, trash_path);
+    save_trash_manifest(repo_root, &manifest)?;
+    prune_empty_trash_parents(&trash_root, trash_path)
+}
+
+fn restore_all_trash_entries(repo_root: &Path) -> Result<(), String> {
+    let trash_root = repository_trash_dir(repo_root);
+    fs::create_dir_all(&trash_root).map_err(io_error)?;
+    let mut manifest = load_trash_manifest(repo_root)?;
+    manifest
+        .entries
+        .sort_by(|left, right| left.trash_path.cmp(&right.trash_path));
+
+    for entry in &manifest.entries {
+        let entry_abs = resolve_trash_relative_path(&trash_root, &entry.trash_path)?;
+        if !entry_abs.exists() {
+            continue;
+        }
+        let target_abs = resolve_repository_relative_path(repo_root, &entry.original_path)?;
+        ensure_restore_target_available(&entry_abs, &target_abs, &entry.original_path)?;
+    }
+
+    for entry in &manifest.entries {
+        let entry_abs = resolve_trash_relative_path(&trash_root, &entry.trash_path)?;
+        if !entry_abs.exists() {
+            continue;
+        }
+        let target_abs = resolve_repository_relative_path(repo_root, &entry.original_path)?;
+        restore_path_to_target(&entry_abs, &target_abs, &entry.original_path)?;
+    }
+
+    save_trash_manifest(repo_root, &TrashManifest::default())?;
+    clean_empty_trash_directories(&trash_root)
+}
+
+fn empty_trash(repo_root: &Path) -> Result<(), String> {
+    let trash_root = repository_trash_dir(repo_root);
+    fs::create_dir_all(&trash_root).map_err(io_error)?;
+    for entry in fs::read_dir(&trash_root).map_err(io_error)? {
+        let entry = entry.map_err(io_error)?;
+        let metadata = entry.metadata().map_err(io_error)?;
+        if metadata.is_dir() {
+            fs::remove_dir_all(entry.path()).map_err(io_error)?;
+        } else {
+            fs::remove_file(entry.path()).map_err(io_error)?;
+        }
+    }
+    save_trash_manifest(repo_root, &TrashManifest::default())
+}
+
+fn clean_empty_trash_directories(trash_root: &Path) -> Result<(), String> {
+    if !trash_root.exists() {
+        return Ok(());
+    }
+
+    let mut directories = Vec::new();
+    collect_trash_directories(trash_root, trash_root, &mut directories)?;
+    directories.sort_by(|left, right| right.components().count().cmp(&left.components().count()));
+    for directory in directories {
+        if directory == trash_root {
+            continue;
+        }
+        if directory.exists()
+            && directory.is_dir()
+            && fs::read_dir(&directory).map_err(io_error)?.next().is_none()
+        {
+            fs::remove_dir(directory).map_err(io_error)?;
+        }
+    }
+    Ok(())
+}
+
+fn collect_trash_directories(
+    trash_root: &Path,
+    current_dir: &Path,
+    directories: &mut Vec<PathBuf>,
+) -> Result<(), String> {
+    for entry in fs::read_dir(current_dir).map_err(io_error)? {
+        let entry = entry.map_err(io_error)?;
+        let path = entry.path();
+        if path.is_dir() {
+            collect_trash_directories(trash_root, &path, directories)?;
+        }
+    }
+    directories.push(current_dir.to_path_buf());
+    Ok(())
 }
 
 fn build_directory_tree(repo_root: &Path) -> Result<Vec<FileTreeNode>, String> {
@@ -4228,6 +4776,68 @@ fn map_file_browser_entries(
                 asset_id,
                 status,
                 thumbnail_path,
+                metadata: BTreeMap::new(),
+            }
+        })
+        .collect()
+}
+
+fn map_trash_browser_entries(
+    mut entries: Vec<FileSystemEntry>,
+    asset_map: &BTreeMap<String, (String, String, Option<String>)>,
+    manifest: &TrashManifest,
+) -> Vec<FileBrowserEntry> {
+    entries.sort_by(|left, right| match (&left.kind, &right.kind) {
+        (FileSystemEntryKind::Directory, FileSystemEntryKind::File) => std::cmp::Ordering::Less,
+        (FileSystemEntryKind::File, FileSystemEntryKind::Directory) => std::cmp::Ordering::Greater,
+        _ => left.name.to_lowercase().cmp(&right.name.to_lowercase()),
+    });
+
+    entries
+        .into_iter()
+        .map(|entry| {
+            let trash_path = entry.path.clone();
+            let manifest_entry = find_trash_manifest_entry(manifest, &trash_path);
+            let original_path = manifest_entry
+                .map(|item| original_path_for_trash_path(item, &trash_path))
+                .unwrap_or_else(|| trash_path.clone());
+            let (asset_id, status, thumbnail_path) = asset_map
+                .get(&original_path)
+                .map(|(id, entry_status, thumbnail)| {
+                    (
+                        Some(id.clone()),
+                        Some(entry_status.clone()),
+                        thumbnail.clone(),
+                    )
+                })
+                .unwrap_or((None, Some("deleted".to_string()), None));
+            let mut metadata = BTreeMap::new();
+            if let Some(item) = manifest_entry {
+                metadata.insert(
+                    "deletedAt".to_string(),
+                    serde_json::Value::String(item.deleted_at.clone()),
+                );
+                metadata.insert(
+                    "originalPath".to_string(),
+                    serde_json::Value::String(original_path),
+                );
+            }
+            let size_bytes = entry.size_bytes;
+            FileBrowserEntry {
+                path: trash_path,
+                name: entry.name,
+                kind: match entry.kind {
+                    FileSystemEntryKind::Directory => "directory".to_string(),
+                    FileSystemEntryKind::File => "file".to_string(),
+                },
+                extension: entry.extension,
+                size_bytes,
+                size_label: size_bytes.map(format_size_label),
+                modified_at: entry.modified_at,
+                asset_id,
+                status,
+                thumbnail_path,
+                metadata,
             }
         })
         .collect()
@@ -4904,10 +5514,8 @@ mod tests {
                 .duration_since(UNIX_EPOCH)
                 .expect("system clock must be after unix epoch")
                 .as_nanos();
-            let root = std::env::temp_dir().join(format!(
-                "momobako-{name}-{}-{unique}",
-                std::process::id()
-            ));
+            let root = std::env::temp_dir()
+                .join(format!("momobako-{name}-{}-{unique}", std::process::id()));
             Self { root }
         }
 
@@ -4983,6 +5591,50 @@ mod tests {
             })
             .expect("repository should be created");
         response.repository.repo_id
+    }
+
+    fn create_repository_without_initial_sync(state: &RepositoryState, repo_root: &Path) -> String {
+        let repo_id = format!(
+            "repo-{}",
+            slugify_repo_id("test", &repo_root.to_string_lossy())
+        );
+        state
+            .ensure_initialized()
+            .expect("repository state should initialize");
+        let repo_path = repo_root.to_string_lossy().to_string();
+        let backend = RepositoryBackendRecord {
+            plugin_id: LOCAL_FILESYSTEM_PLUGIN_ID.to_string(),
+            config: serde_json::json!({}),
+        };
+        let seed = RepositorySeed {
+            repo_id: &repo_id,
+            name: "Test Repo",
+            root_path: "",
+            status: "ready",
+            assets: &[],
+        };
+        initialize_repository_directory(&state.root, repo_root, &seed, &backend)
+            .expect("repository files should be prepared");
+        let registry = Connection::open(&state.registry_path).expect("registry should open");
+        registry
+            .execute(
+                r#"
+                INSERT OR REPLACE INTO repositories (
+                  repo_id, name, path, backend_plugin_id, backend_config_json, status, created_at, updated_at
+                )
+                VALUES (?1, ?2, ?3, ?4, ?5, 'ready', ?6, ?6)
+                "#,
+                params![
+                    &repo_id,
+                    "Test Repo",
+                    &repo_path,
+                    LOCAL_FILESYSTEM_PLUGIN_ID,
+                    "{}",
+                    now_rfc3339()
+                ],
+            )
+            .expect("repository should be registered");
+        repo_id
     }
 
     fn write_test_image(path: &Path) {
@@ -5073,6 +5725,7 @@ mod tests {
             Some(thumbnail_path.to_string_lossy().to_string())
         );
 
+        drop(connection);
         fs::remove_dir_all(root).expect("test temp root should be removed");
     }
 
@@ -5090,6 +5743,190 @@ mod tests {
             .expect("unsupported thumbnail request should succeed");
 
         assert_eq!(response.thumbnail_path, None);
+
+        fs::remove_dir_all(root).expect("test temp root should be removed");
+    }
+
+    #[test]
+    fn delete_entry_moves_to_trash_then_permanently_deletes() {
+        let (state, root, repo_root, _thumbnail_root) = create_test_state("trash-delete");
+        let repo_id = create_repository_without_initial_sync(&state, &repo_root);
+        fs::write(repo_root.join("note.txt"), "plain text").expect("test file should be written");
+        state
+            .sync_repository(SyncRequest {
+                repo_id: repo_id.clone(),
+            })
+            .expect("repository should sync");
+
+        state
+            .delete_entry(FileDeleteRequest {
+                repo_id: repo_id.clone(),
+                path: "note.txt".to_string(),
+                mode: None,
+            })
+            .expect("file should move to trash");
+
+        assert!(!repo_root.join("note.txt").exists());
+        let trash_dir = repository_trash_dir(&repo_root);
+        let trash_entries = fs::read_dir(&trash_dir)
+            .expect("trash directory should be readable")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("trash entries should be readable");
+        assert_eq!(trash_entries.len(), 1);
+        let trash_path = trash_entries[0].file_name().to_string_lossy().to_string();
+
+        let trash_snapshot = state
+            .load_file_browser(FileBrowserRequest {
+                repo_id: repo_id.clone(),
+                directory_path: Some(String::new()),
+                include_tree: Some(false),
+                special_location: Some("trash".to_string()),
+            })
+            .expect("trash browser should load");
+        let trash_entry = trash_snapshot
+            .entries
+            .iter()
+            .find(|entry| entry.path == trash_path)
+            .expect("trash entry should be listed");
+        assert_eq!(
+            trash_entry.metadata.get("originalPath"),
+            Some(&serde_json::Value::String("note.txt".to_string()))
+        );
+        assert!(trash_entry
+            .metadata
+            .get("deletedAt")
+            .and_then(serde_json::Value::as_str)
+            .is_some());
+
+        let snapshot = state
+            .load_snapshot(&repo_id)
+            .expect("snapshot should load after trash delete");
+        assert!(snapshot.assets.is_empty());
+
+        state
+            .delete_entry(FileDeleteRequest {
+                repo_id,
+                path: trash_path,
+                mode: Some("permanentDelete".to_string()),
+            })
+            .expect("trash entry should be permanently deleted");
+
+        assert_eq!(
+            fs::read_dir(trash_dir)
+                .expect("trash directory should still exist")
+                .count(),
+            0
+        );
+
+        fs::remove_dir_all(root).expect("test temp root should be removed");
+    }
+
+    #[test]
+    fn trash_restore_all_and_empty_keep_directory_metadata() {
+        let (state, root, repo_root, _thumbnail_root) = create_test_state("trash-restore");
+        let repo_id = create_repository_without_initial_sync(&state, &repo_root);
+        fs::create_dir_all(repo_root.join("Scenes/Act1"))
+            .expect("test directory should be written");
+        fs::write(repo_root.join("Scenes/Act1/shot.txt"), "plain text")
+            .expect("test nested file should be written");
+        fs::write(repo_root.join("loose.txt"), "plain text").expect("test file should be written");
+        state
+            .sync_repository(SyncRequest {
+                repo_id: repo_id.clone(),
+            })
+            .expect("repository should sync");
+
+        state
+            .delete_entry(FileDeleteRequest {
+                repo_id: repo_id.clone(),
+                path: "loose.txt".to_string(),
+                mode: None,
+            })
+            .expect("file should move to trash");
+        assert!(!repo_root.join("loose.txt").exists());
+
+        state
+            .mutate_trash(TrashMutationRequest {
+                repo_id: repo_id.clone(),
+                action: "restore".to_string(),
+                path: Some("loose.txt".to_string()),
+            })
+            .expect("file should restore from trash");
+        assert!(repo_root.join("loose.txt").exists());
+
+        state
+            .delete_entry(FileDeleteRequest {
+                repo_id: repo_id.clone(),
+                path: "Scenes".to_string(),
+                mode: None,
+            })
+            .expect("directory should move to trash");
+        assert!(!repo_root.join("Scenes").exists());
+        assert!(repository_trash_dir(&repo_root)
+            .join("Scenes/Act1/shot.txt")
+            .exists());
+
+        let nested_trash_snapshot = state
+            .load_file_browser(FileBrowserRequest {
+                repo_id: repo_id.clone(),
+                directory_path: Some("Scenes/Act1".to_string()),
+                include_tree: Some(false),
+                special_location: Some("trash".to_string()),
+            })
+            .expect("nested trash browser should load");
+        let nested_entry = nested_trash_snapshot
+            .entries
+            .iter()
+            .find(|entry| entry.path == "Scenes/Act1/shot.txt")
+            .expect("nested trash entry should be listed");
+        assert_eq!(
+            nested_entry.metadata.get("originalPath"),
+            Some(&serde_json::Value::String(
+                "Scenes/Act1/shot.txt".to_string()
+            ))
+        );
+        assert!(nested_entry
+            .metadata
+            .get("deletedAt")
+            .and_then(serde_json::Value::as_str)
+            .is_some());
+
+        state
+            .mutate_trash(TrashMutationRequest {
+                repo_id: repo_id.clone(),
+                action: "restoreAll".to_string(),
+                path: None,
+            })
+            .expect("all trash entries should restore");
+        assert!(repo_root.join("Scenes/Act1/shot.txt").exists());
+        assert_eq!(
+            fs::read_dir(repository_trash_dir(&repo_root))
+                .expect("trash directory should exist")
+                .count(),
+            0
+        );
+
+        state
+            .delete_entry(FileDeleteRequest {
+                repo_id: repo_id.clone(),
+                path: "loose.txt".to_string(),
+                mode: None,
+            })
+            .expect("file should move to trash again");
+        state
+            .mutate_trash(TrashMutationRequest {
+                repo_id,
+                action: "empty".to_string(),
+                path: None,
+            })
+            .expect("trash should empty");
+        assert!(!repo_root.join("loose.txt").exists());
+        assert_eq!(
+            fs::read_dir(repository_trash_dir(&repo_root))
+                .expect("trash directory should exist")
+                .count(),
+            0
+        );
 
         fs::remove_dir_all(root).expect("test temp root should be removed");
     }

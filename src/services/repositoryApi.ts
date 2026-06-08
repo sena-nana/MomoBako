@@ -29,6 +29,7 @@ import type {
   SyncResult,
   ThumbnailRequest,
   ThumbnailResponse,
+  TrashMutationRequest,
 } from "../types/repository";
 
 export function listRepositories() {
@@ -77,6 +78,10 @@ export function renameEntry(request: FileRenameRequest) {
 
 export function deleteEntry(request: FileDeleteRequest) {
   return invoke<FileBrowserSnapshot>("delete_entry", { request });
+}
+
+export function mutateTrash(request: TrashMutationRequest) {
+  return invoke<FileBrowserSnapshot>("mutate_trash", { request });
 }
 
 export function createRepository(request: RepositoryMutationRequest) {
