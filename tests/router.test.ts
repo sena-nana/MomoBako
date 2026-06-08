@@ -2,7 +2,9 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/vue";
 import { createMemoryHistory } from "vue-router";
 import { describe, expect, it } from "vitest";
 import App from "../src/App.vue";
+import { installContextMenu } from "../src/composables/useContextMenu";
 import { resetRepositoryWorkspaceForTests, useRepositoryWorkspace } from "../src/composables/useRepositoryWorkspace";
+import { vContextMenu } from "../src/directives/contextMenu";
 import { createTemplateRouter } from "../src/router";
 import {
   createDirectoryOnNextSync,
@@ -14,11 +16,13 @@ import {
   seedMockRepository,
   setMockSavePath,
   seedMockRepositoryPath,
+  selectMockFile,
   selectMockFolder,
 } from "./setupTests";
 
 async function renderApp() {
   resetRepositoryWorkspaceForTests();
+  installContextMenu();
   const router = createTemplateRouter(createMemoryHistory());
   await router.push("/");
   await router.isReady();
@@ -27,12 +31,16 @@ async function renderApp() {
   render(App, {
     global: {
       plugins: [router],
+      directives: {
+        "context-menu": vContextMenu,
+      },
     },
   });
 }
 
 async function renderAppWithoutStartupPreload() {
   resetRepositoryWorkspaceForTests();
+  installContextMenu();
   const router = createTemplateRouter(createMemoryHistory());
   await router.push("/");
   await router.isReady();
@@ -40,6 +48,9 @@ async function renderAppWithoutStartupPreload() {
   render(App, {
     global: {
       plugins: [router],
+      directives: {
+        "context-menu": vContextMenu,
+      },
     },
   });
 }
@@ -129,7 +140,7 @@ describe("文件管理冒烟", () => {
     await renderApp();
 
     expect(screen.getAllByText("cover-final.psd").length).toBeGreaterThan(0);
-    expect(workspace.fileBrowser.value?.entries.find((entry) => entry.path === "cover-final.psd")?.thumbnailPath).toBeNull();
+    expect(workspace.fileBrowser.value?.entries.find((entry) => entry.path === "cover-final.psd")?.thumbnailPath ?? null).toBeNull();
     expect(getInvokeCalls("ensure_thumbnail")).toHaveLength(1);
 
     delay.resolve();
@@ -153,6 +164,29 @@ describe("文件管理冒烟", () => {
       expect(workspace.fileBrowser.value?.currentPath).toBe("Campaigns");
     });
     expect(workspace.fileBrowser.value?.entries.some((entry) => entry.path === "cover-final.psd")).toBe(false);
+  });
+
+  it("文件右键缩略图菜单支持选择自定义缩略图", async () => {
+    seedMockRepository();
+    selectMockFile("C:/Mock/ThumbSources/custom.png");
+    const workspace = useRepositoryWorkspace();
+    workspace.setActivePanel("files");
+    await renderApp();
+
+    const target = (await screen.findAllByText("cover-final.psd"))[0];
+    await fireEvent.contextMenu(target);
+    await fireEvent.click(await screen.findByRole("menuitem", { name: "自定义缩略图（选择文件）", hidden: true }));
+
+    await waitFor(() => {
+      expect(getInvokeCalls("ensure_thumbnail").at(-1)?.args).toMatchObject({
+        request: {
+          path: "cover-final.psd",
+          action: "save",
+          sourcePath: "C:/Mock/ThumbSources/custom.png",
+        },
+      });
+    });
+    expect(workspace.fileBrowser.value?.entries.find((entry) => entry.path === "cover-final.psd")?.thumbnailCustom).toBe(true);
   });
 
   it("侧栏选择本地文件夹时挂载已有目录而不是创建新仓库", async () => {

@@ -7,7 +7,8 @@ export interface ContextMenuItem {
   disabled?: boolean;
   danger?: boolean;
   confirmLabel?: string;
-  onSelect: () => void | Promise<void>;
+  children?: ContextMenuItem[];
+  onSelect?: () => void | Promise<void>;
 }
 
 export type ContextMenuProvider = (
@@ -86,14 +87,14 @@ export function isContextMenuItemPending(item: ContextMenuItem): boolean {
 }
 
 export async function selectContextMenuItem(item: ContextMenuItem) {
-  if (item.disabled) return;
+  if (item.disabled || item.children?.length) return;
   const key = itemKey(item);
   if (item.confirmLabel && state.pendingConfirmId !== key) {
     state.pendingConfirmId = key;
     return;
   }
   closeContextMenu();
-  await item.onSelect();
+  await item.onSelect?.();
 }
 
 export function installContextMenu() {

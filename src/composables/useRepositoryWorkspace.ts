@@ -17,6 +17,7 @@ import {
   importRepository,
   listPlugins,
   listRepositories,
+  mutateTrash,
   openRepositoryPath,
   redoLastRevision,
   renameEntry,
@@ -44,10 +45,11 @@ import type {
   SearchHit,
   SearchRequest,
   SyncResult,
+  ThumbnailResponse,
   WorkspaceStartupState,
 } from "../types/repository";
 
-export type WorkspacePanelKey = "libraries" | "files" | "search" | "extensions";
+export type WorkspacePanelKey = "libraries" | "files" | "deleted" | "search" | "extensions";
 
 export type WorkspaceOperationProgress = {
   label: string;
@@ -288,6 +290,7 @@ export async function selectAsset(assetId: string) {
 
 type FileBrowserLoadOptions = {
   includeTree?: boolean;
+  specialLocation?: "trash";
 };
 
 function getDefaultFileBrowserSelection(snapshot: FileBrowserSnapshot) {
@@ -299,9 +302,7 @@ function getDefaultFileBrowserSelection(snapshot: FileBrowserSnapshot) {
 function applyFileBrowserSnapshot(snapshot: FileBrowserSnapshot) {
   const displaySnapshot = {
     ...snapshot,
-    entries: snapshot.entries.map((entry) => (
-      entry.kind === "file" ? { ...entry, thumbnailPath: null } : entry
-    )),
+    entries: snapshot.entries.map((entry) => ({ ...entry })),
   };
   fileBrowser.value = displaySnapshot;
   if (displaySnapshot.tree) {
@@ -316,8 +317,9 @@ function applyFileBrowserSnapshot(snapshot: FileBrowserSnapshot) {
 }
 
 async function loadThumbnailsForSnapshot(snapshot: FileBrowserSnapshot) {
+  if (snapshot.specialLocation === "trash") return;
   const token = ++thumbnailLoadToken;
-  const files = snapshot.entries.filter((entry) => entry.kind === "file");
+  const files = snapshot.entries.filter((entry) => entry.kind === "file" && !entry.thumbnailPath);
   let cursor = 0;
 
   async function worker() {
@@ -337,38 +339,45 @@ async function loadThumbnailForEntry(snapshot: FileBrowserSnapshot, entry: FileB
     const response = await ensureThumbnail({
       repoId: snapshot.repoId,
       path: entry.path,
+      action: "ensure",
     });
     if (!response.thumbnailPath || token !== thumbnailLoadToken) return;
-    const current = fileBrowser.value;
-    if (!current || current.repoId !== snapshot.repoId || current.currentPath !== snapshot.currentPath) return;
-    if (!current.entries.some((item) => item.path === response.path && item.kind === "file")) return;
-
-    fileBrowser.value = {
-      ...current,
-      entries: current.entries.map((item) => (
-        item.path === response.path && item.kind === "file"
-          ? {
-              ...item,
-              assetId: response.assetId,
-              thumbnailPath: response.thumbnailPath ?? null,
-            }
-          : item
-      )),
-    };
+    applyThumbnailResponse(response, snapshot.currentPath);
   } catch {
     return;
   }
+}
+
+function applyThumbnailResponse(response: ThumbnailResponse, expectedDirectoryPath = currentDirectoryPath.value) {
+  const current = fileBrowser.value;
+  if (!current || current.repoId !== response.repoId || current.currentPath !== expectedDirectoryPath) return;
+  if (!current.entries.some((item) => item.path === response.path && item.kind === response.kind)) return;
+
+  fileBrowser.value = {
+    ...current,
+    entries: current.entries.map((item) => (
+      item.path === response.path && item.kind === response.kind
+        ? {
+            ...item,
+            assetId: response.assetId || item.assetId,
+            thumbnailPath: response.thumbnailPath ?? null,
+            thumbnailCustom: response.thumbnailCustom,
+          }
+        : item
+    )),
+  };
 }
 
 export async function loadFileBrowserForDirectory(directoryPath = "", options: FileBrowserLoadOptions = {}) {
   if (!activeRepoId.value) return null;
 
   const includeTree = options.includeTree ?? false;
+  const specialLocation = options.specialLocation ?? (activePanel.value === "deleted" ? "trash" : undefined);
   isLoadingFileBrowser.value = true;
   error.value = null;
   const progressId = startOperationProgress(
-    includeTree ? "读取文件树" : "读取目录",
-    directoryPath ? `正在读取 ${directoryPath}` : "正在读取根目录",
+    specialLocation === "trash" ? "读取回收站" : includeTree ? "读取文件树" : "读取目录",
+    directoryPath ? `正在读取 ${directoryPath}` : specialLocation === "trash" ? "正在读取回收站" : "正在读取根目录",
     { initial: 14, indeterminate: true },
   );
   try {
@@ -376,6 +385,7 @@ export async function loadFileBrowserForDirectory(directoryPath = "", options: F
       repoId: activeRepoId.value,
       directoryPath,
       includeTree,
+      specialLocation,
     });
     updateOperationProgress(progressId, { detail: "整理目录条目", value: 92 });
     applyFileBrowserSnapshot(snapshot);
@@ -490,10 +500,11 @@ export async function deleteWorkspaceEntry(path: string, mode?: FileDeleteMode) 
   isMutatingFiles.value = true;
   error.value = null;
   try {
+    const deleteMode = mode ?? (activePanel.value === "deleted" ? "permanentDelete" : undefined);
     const snapshot = await deleteEntry({
       repoId: activeRepoId.value,
       path,
-      mode,
+      mode: deleteMode,
     });
     const shouldSelectDefault = selectedFilePath.value === path;
     applyFileBrowserSnapshot(snapshot);
@@ -501,6 +512,76 @@ export async function deleteWorkspaceEntry(path: string, mode?: FileDeleteMode) 
       selectedFilePath.value = getDefaultFileBrowserSelection(snapshot);
     }
     await refreshRepositorySnapshot(activeRepoId.value);
+    return snapshot;
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : String(cause);
+    return null;
+  } finally {
+    isMutatingFiles.value = false;
+  }
+}
+
+export async function restoreTrashEntry(path: string) {
+  if (!activeRepoId.value) return null;
+  isMutatingFiles.value = true;
+  error.value = null;
+  try {
+    const snapshot = await mutateTrash({
+      repoId: activeRepoId.value,
+      action: "restore",
+      path,
+    });
+    const shouldSelectDefault = selectedFilePath.value === path;
+    applyFileBrowserSnapshot(snapshot);
+    if (shouldSelectDefault) {
+      selectedFilePath.value = getDefaultFileBrowserSelection(snapshot);
+    }
+    await refreshRepositorySnapshot(activeRepoId.value);
+    await refreshRepositorySummaries();
+    return snapshot;
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : String(cause);
+    return null;
+  } finally {
+    isMutatingFiles.value = false;
+  }
+}
+
+export async function restoreAllTrashEntries() {
+  if (!activeRepoId.value) return null;
+  isMutatingFiles.value = true;
+  error.value = null;
+  try {
+    const snapshot = await mutateTrash({
+      repoId: activeRepoId.value,
+      action: "restoreAll",
+    });
+    applyFileBrowserSnapshot(snapshot);
+    selectedFilePath.value = getDefaultFileBrowserSelection(snapshot);
+    await refreshRepositorySnapshot(activeRepoId.value);
+    await refreshRepositorySummaries();
+    return snapshot;
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : String(cause);
+    return null;
+  } finally {
+    isMutatingFiles.value = false;
+  }
+}
+
+export async function emptyTrash() {
+  if (!activeRepoId.value) return null;
+  isMutatingFiles.value = true;
+  error.value = null;
+  try {
+    const snapshot = await mutateTrash({
+      repoId: activeRepoId.value,
+      action: "empty",
+    });
+    applyFileBrowserSnapshot(snapshot);
+    selectedFilePath.value = getDefaultFileBrowserSelection(snapshot);
+    await refreshRepositorySnapshot(activeRepoId.value);
+    await refreshRepositorySummaries();
     return snapshot;
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : String(cause);
@@ -618,8 +699,103 @@ export function selectWorkspaceEntry(path: string) {
   selectedFilePath.value = path;
 }
 
+export async function setWorkspaceEntryThumbnail(path: string, sourcePath: string) {
+  if (!activeRepoId.value || fileBrowser.value?.specialLocation === "trash") return null;
+  error.value = null;
+  try {
+    const response = await ensureThumbnail({
+      repoId: activeRepoId.value,
+      path,
+      action: "save",
+      sourcePath,
+    });
+    applyThumbnailResponse(response);
+    return response;
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : String(cause);
+    return null;
+  }
+}
+
+export async function setWorkspaceEntryThumbnailFromBytes(path: string, imageBytes: number[], mediaType?: string) {
+  if (!activeRepoId.value || fileBrowser.value?.specialLocation === "trash") return null;
+  error.value = null;
+  try {
+    const response = await ensureThumbnail({
+      repoId: activeRepoId.value,
+      path,
+      action: "save",
+      imageBytes,
+      mediaType,
+    });
+    applyThumbnailResponse(response);
+    return response;
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : String(cause);
+    return null;
+  }
+}
+
+export async function saveGeneratedWorkspaceEntryThumbnail(path: string, imageBytes: number[], mediaType?: string) {
+  if (!activeRepoId.value || fileBrowser.value?.specialLocation === "trash") return null;
+  error.value = null;
+  try {
+    const response = await ensureThumbnail({
+      repoId: activeRepoId.value,
+      path,
+      action: "saveGenerated",
+      imageBytes,
+      mediaType,
+    });
+    applyThumbnailResponse(response);
+    return response;
+  } catch {
+    return null;
+  }
+}
+
+export async function clearWorkspaceEntryThumbnail(path: string) {
+  if (!activeRepoId.value || fileBrowser.value?.specialLocation === "trash") return null;
+  error.value = null;
+  try {
+    const response = await ensureThumbnail({
+      repoId: activeRepoId.value,
+      path,
+      action: "clear",
+    });
+    applyThumbnailResponse(response);
+    return response;
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : String(cause);
+    return null;
+  }
+}
+
+export async function refreshWorkspaceEntryThumbnail(path: string) {
+  if (!activeRepoId.value || fileBrowser.value?.specialLocation === "trash") return null;
+  error.value = null;
+  try {
+    const response = await ensureThumbnail({
+      repoId: activeRepoId.value,
+      path,
+      action: "refresh",
+    });
+    applyThumbnailResponse(response);
+    return response;
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : String(cause);
+    return null;
+  }
+}
+
 export function setActivePanel(panel: WorkspacePanelKey) {
   activePanel.value = panel;
+  if (panel === "files" && activeRepoId.value && fileBrowser.value?.specialLocation === "trash") {
+    void loadFileBrowserForDirectory("", { includeTree: true });
+  }
+  if (panel === "deleted" && activeRepoId.value) {
+    void loadFileBrowserForDirectory("", { specialLocation: "trash" });
+  }
 }
 
 export async function runSearch(request: SearchRequest) {
@@ -690,6 +866,8 @@ export async function syncActiveRepository() {
     setSyncProgress("refreshing", "刷新仓库视图", 3);
     if (activePanel.value === "files") {
       await loadFileBrowserForDirectory(previousDirectoryPath, { includeTree: true });
+    } else if (activePanel.value === "deleted") {
+      await loadFileBrowserForDirectory(previousDirectoryPath, { specialLocation: "trash" });
     }
     setSyncProgress("complete", "同步完成", 3);
     finishOperationProgress(progressId);
@@ -718,7 +896,10 @@ export async function refreshFileBrowserTree() {
     lastSyncResult.value = result;
     await refreshRepositorySnapshot(activeRepoId.value);
     setSyncProgress("refreshing", "刷新文件夹树", 3);
-    const snapshot = await loadFileBrowserForDirectory(currentDirectoryPath.value, { includeTree: true });
+    const snapshot = await loadFileBrowserForDirectory(
+      currentDirectoryPath.value,
+      activePanel.value === "deleted" ? { specialLocation: "trash" } : { includeTree: true },
+    );
     setSyncProgress("complete", "刷新完成", 3);
     finishOperationProgress(progressId);
     return snapshot;
@@ -1029,9 +1210,17 @@ export function useRepositoryWorkspace() {
     importEntriesToWorkspace,
     renameWorkspaceEntry,
     deleteWorkspaceEntry,
+    restoreTrashEntry,
+    restoreAllTrashEntries,
+    emptyTrash,
     openWorkspaceEntry,
     revealWorkspaceEntry,
     selectWorkspaceEntry,
+    setWorkspaceEntryThumbnail,
+    setWorkspaceEntryThumbnailFromBytes,
+    saveGeneratedWorkspaceEntryThumbnail,
+    clearWorkspaceEntryThumbnail,
+    refreshWorkspaceEntryThumbnail,
     setActivePanel,
     runSearch,
     saveAssetMetadata,

@@ -29,10 +29,21 @@
   - Response keeps the existing `SyncResult` counters: `scannedFiles`, `createdAssets`, `updatedAssets`, `deletedAssets`, `createdEvents`
   - Desktop UI may expose local sync progress as phased client state (`scanning`, `writing`, `refreshing`, `complete`) without changing this transport contract
   - Sync updates repository indexes only; thumbnail generation is handled by the thumbnail API after content is visible
+- File browser requests may include `specialLocation: "trash"` to browse `.momo/trash` without exposing internal repository directories in normal browsing.
+- Trash browser entries include `metadata.deletedAt` and `metadata.originalPath` when they were moved by MomoBako.
+- `deleteEntry` moves files or recursive directory deletes to `.momo/trash` by default. Use `mode: "permanentDelete"` only for deleting entries already shown from the trash view.
+- `mutateTrash` supports `action: "restore" | "restoreAll" | "empty"` to restore a selected trash item, restore all tracked trash items, or clear `.momo/trash`.
 - `POST /repositories/{repoId}/thumbnails:ensure`
   - Request body includes repository-relative `path`
   - Reuse an existing valid thumbnail cache entry or generate one for supported local image/video files
-  - Response fields: `repoId`, `path`, `assetId`, `thumbnailPath`
+  - Optional `action`: `ensure`, `refresh`, `save`, `saveGenerated`, `clear`
+  - `save` accepts `sourcePath` or `imageBytes` for custom file/folder thumbnails; `saveGenerated` accepts frontend-generated image bytes, used by 3D previews
+  - Thumbnail cache files live under repository `.momo/thumbnails/` and use sha256 hex filenames
+  - Response fields: `repoId`, `path`, `assetId`, `kind`, `thumbnailPath`, `thumbnailCustom`
+- `POST /repositories/{repoId}/files:preparePreviewSource`
+  - Request body includes repository-relative `path`
+  - Response returns a session-scoped local preview `sourceUrl` for streaming local files into preview loaders
+  - 3D previews use this source instead of returning full file bytes through the desktop command bridge
 
 ## Desktop Runtime State
 

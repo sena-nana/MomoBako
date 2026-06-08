@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { convertFileSrc } from "@tauri-apps/api/core";
-import { save } from "@tauri-apps/plugin-dialog";
+import { open, save } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import {
@@ -20,7 +20,11 @@ import {
   HardDrive,
   Files,
   Download,
+  ImagePlus,
+  ImageOff,
+  Clipboard,
   RefreshCw,
+  RotateCcw,
   Search,
   Trash2,
   X,
@@ -81,9 +85,16 @@ const {
   importEntriesToWorkspace,
   renameWorkspaceEntry,
   deleteWorkspaceEntry,
+  restoreTrashEntry,
+  restoreAllTrashEntries,
+  emptyTrash,
   openWorkspaceEntry,
   revealWorkspaceEntry,
   selectWorkspaceEntry,
+  setWorkspaceEntryThumbnail,
+  setWorkspaceEntryThumbnailFromBytes,
+  clearWorkspaceEntryThumbnail,
+  refreshWorkspaceEntryThumbnail,
   removeRepository,
   exportCurrentRepository,
 } = useRepositoryWorkspace();
@@ -91,8 +102,10 @@ const {
 const hasRepository = computed(() => Boolean(activeSnapshot.value));
 const isLibrariesPanel = computed(() => activePanel.value === "libraries");
 const isFilesPanel = computed(() => activePanel.value === "files");
+const isTrashPanel = computed(() => activePanel.value === "deleted");
 const isSearchPanel = computed(() => activePanel.value === "search");
 const isExtensionsPanel = computed(() => activePanel.value === "extensions");
+const isFileBrowserPanel = computed(() => isFilesPanel.value || isTrashPanel.value);
 
 const currentFileEntry = computed(() => (
   fileBrowser.value?.entries.find((entry) => entry.path === selectedFilePath.value) ?? null
@@ -107,9 +120,10 @@ const breadcrumbSegments = computed(() => {
   }));
 });
 
-const canRenameSelected = computed(() => Boolean(currentFileEntry.value));
-const canPreviewSelected = computed(() => currentFileEntry.value?.kind === "file");
-const canDeleteSelected = computed(() => currentFileEntry.value?.kind === "file");
+const canRenameSelected = computed(() => Boolean(currentFileEntry.value) && !isTrashPanel.value);
+const canPreviewSelected = computed(() => currentFileEntry.value?.kind === "file" && !isTrashPanel.value);
+const canDeleteSelected = computed(() => Boolean(currentFileEntry.value));
+const canRestoreSelected = computed(() => Boolean(currentFileEntry.value) && isTrashPanel.value);
 const libraryOverview = computed(() => activeSnapshot.value?.overview ?? null);
 const directoryEntries = computed(() => (fileBrowser.value?.entries ?? []).filter((entry) => entry.kind === "directory"));
 const fileEntries = computed(() => (fileBrowser.value?.entries ?? []).filter((entry) => entry.kind === "file"));
@@ -150,10 +164,10 @@ watch(currentFileEntry, (entry) => {
 });
 
 watch(
-  () => isFilesPanel.value,
+  () => isFileBrowserPanel.value,
   (enabled) => {
     if (enabled && activeRepoId.value && !fileBrowser.value) {
-      void loadFileBrowserForDirectory("", { includeTree: true });
+      void loadFileBrowserForDirectory("", isTrashPanel.value ? { specialLocation: "trash" } : { includeTree: true });
     }
   },
 );
@@ -205,8 +219,82 @@ function markThumbnailFailed(entry: FileBrowserEntry) {
   failedThumbnailPaths.value = new Set([...failedThumbnailPaths.value, entry.path]);
 }
 
+function resetThumbnailFailure(path: string) {
+  const next = new Set(failedThumbnailPaths.value);
+  next.delete(path);
+  failedThumbnailPaths.value = next;
+}
+
+async function chooseCustomThumbnail(entry: FileBrowserEntry) {
+  if (isTrashPanel.value) return;
+  const selected = await open({
+    title: "选择自定义缩略图",
+    multiple: false,
+    filters: [
+      {
+        name: "图片",
+        extensions: ["png", "jpg", "jpeg", "webp", "bmp"],
+      },
+    ],
+  });
+  if (typeof selected !== "string") return;
+  const response = await setWorkspaceEntryThumbnail(entry.path, selected);
+  if (response?.thumbnailPath) resetThumbnailFailure(entry.path);
+}
+
+async function readClipboardImageBytes() {
+  const items = await navigator.clipboard?.read?.();
+  if (!items?.length) return null;
+
+  for (const item of items) {
+    const type = item.types.find((value) => value.startsWith("image/"));
+    if (!type) continue;
+    const blob = await item.getType(type);
+    return {
+      mediaType: type,
+      bytes: Array.from(new Uint8Array(await blob.arrayBuffer())),
+    };
+  }
+
+  return null;
+}
+
+async function pasteCustomThumbnail(entry: FileBrowserEntry) {
+  if (isTrashPanel.value) return;
+  try {
+    const image = await readClipboardImageBytes();
+    if (!image) return;
+    const response = await setWorkspaceEntryThumbnailFromBytes(entry.path, image.bytes, image.mediaType);
+    if (response?.thumbnailPath) resetThumbnailFailure(entry.path);
+  } catch {
+    return;
+  }
+}
+
+async function clearCustomThumbnail(entry: FileBrowserEntry) {
+  if (isTrashPanel.value) return;
+  const response = await clearWorkspaceEntryThumbnail(entry.path);
+  resetThumbnailFailure(entry.path);
+  if (!response?.thumbnailPath && entry.kind === "file") {
+    await refreshWorkspaceEntryThumbnail(entry.path);
+  }
+}
+
+async function refreshEntryThumbnail(entry: FileBrowserEntry) {
+  if (isTrashPanel.value) return;
+  const response = await refreshWorkspaceEntryThumbnail(entry.path);
+  if (response?.thumbnailPath) resetThumbnailFailure(entry.path);
+}
+
+function entryDeletedAtLabel(entry: FileBrowserEntry) {
+  const value = entry.metadata?.deletedAt;
+  if (typeof value !== "string" || !value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString("zh-CN");
+}
+
 function openDirectory(path: string) {
-  void loadFileBrowserForDirectory(path);
+  void loadFileBrowserForDirectory(path, isTrashPanel.value ? { specialLocation: "trash" } : {});
 }
 
 function selectFileEntry(entry: FileBrowserEntry) {
@@ -218,7 +306,7 @@ function selectFileEntry(entry: FileBrowserEntry) {
 }
 
 function previewFileEntryByDoubleClick(entry: FileBrowserEntry) {
-  if (entry.kind !== "file") return;
+  if (entry.kind !== "file" || isTrashPanel.value) return;
   selectWorkspaceEntry(entry.path);
   previewFilePath.value = entry.path;
 }
@@ -263,6 +351,7 @@ function handleDragLeave(event: DragEvent) {
 async function handleDrop(event: DragEvent) {
   event.preventDefault();
   isDraggingFiles.value = false;
+  if (isTrashPanel.value) return;
   const sourcePaths = getDroppedSourcePaths(event);
   if (!sourcePaths.length) return;
   void importEntriesToWorkspace(sourcePaths);
@@ -294,6 +383,7 @@ async function handleEmptyRepositoryDrop(event: DragEvent) {
 }
 
 async function handleCreateFile() {
+  if (isTrashPanel.value) return;
   if (!createFileName.value.trim()) return;
   const snapshot = await createFileInWorkspace(createFileName.value.trim());
   if (snapshot) {
@@ -318,31 +408,60 @@ async function submitRenameSelected() {
 
 async function deleteSelectedEntry() {
   if (!currentFileEntry.value) return;
-  await deleteWorkspaceEntry(currentFileEntry.value.path);
+  await deleteWorkspaceEntry(currentFileEntry.value.path, isTrashPanel.value ? "permanentDelete" : undefined);
 }
 
 async function deleteEntry(entry: FileBrowserEntry) {
-  await deleteWorkspaceEntry(entry.path);
+  await deleteWorkspaceEntry(entry.path, isTrashPanel.value ? "permanentDelete" : undefined);
+}
+
+async function restoreSelectedEntry() {
+  if (!currentFileEntry.value || !isTrashPanel.value) return;
+  await restoreTrashEntry(currentFileEntry.value.path);
+}
+
+async function restoreEntry(entry: FileBrowserEntry) {
+  if (!isTrashPanel.value) return;
+  await restoreTrashEntry(entry.path);
+}
+
+async function handleRestoreAllTrash() {
+  if (!isTrashPanel.value) return;
+  await restoreAllTrashEntries();
+}
+
+async function handleEmptyTrash() {
+  if (!isTrashPanel.value) return;
+  await emptyTrash();
 }
 
 async function openSelectedEntry() {
+  if (isTrashPanel.value) return;
   if (!currentFileEntry.value) return;
   await openWorkspaceEntry(currentFileEntry.value.path);
 }
 
 async function revealSelectedEntry() {
+  if (isTrashPanel.value) return;
   if (!currentFileEntry.value) return;
   await revealWorkspaceEntry(currentFileEntry.value.path);
 }
 
 function fileEntryContextMenu(entry: FileBrowserEntry) {
   selectWorkspaceEntry(entry.path);
-  return [
+  const items = [
+    ...(isTrashPanel.value ? [{
+      id: "restore",
+      label: "还原",
+      icon: RotateCcw,
+      disabled: isMutatingFiles.value,
+      onSelect: () => restoreEntry(entry),
+    }] : []),
     {
       id: "preview",
       label: "预览",
       icon: Eye,
-      disabled: entry.kind !== "file",
+      disabled: entry.kind !== "file" || isTrashPanel.value,
       onSelect: () => {
         if (entry.kind === "file") {
           previewFilePath.value = entry.path;
@@ -353,19 +472,54 @@ function fileEntryContextMenu(entry: FileBrowserEntry) {
       id: "open",
       label: "打开",
       icon: Eye,
-      disabled: entry.kind !== "file",
+      disabled: entry.kind !== "file" || isTrashPanel.value,
       onSelect: () => openWorkspaceEntry(entry.path),
     },
     {
       id: "reveal",
       label: "定位",
       icon: FolderOpen,
+      disabled: isTrashPanel.value,
       onSelect: () => revealWorkspaceEntry(entry.path),
+    },
+    {
+      id: "thumbnail",
+      label: "缩略图",
+      icon: FileImage,
+      disabled: isTrashPanel.value,
+      children: [
+        {
+          id: "thumbnail-custom-file",
+          label: "自定义缩略图（选择文件）",
+          icon: ImagePlus,
+          onSelect: () => chooseCustomThumbnail(entry),
+        },
+        {
+          id: "thumbnail-custom-clipboard",
+          label: "新增自定义缩略图（从剪贴板）",
+          icon: Clipboard,
+          onSelect: () => pasteCustomThumbnail(entry),
+        },
+        {
+          id: "thumbnail-clear-custom",
+          label: "取消自定义缩略图",
+          icon: ImageOff,
+          disabled: !entry.thumbnailCustom,
+          onSelect: () => clearCustomThumbnail(entry),
+        },
+        {
+          id: "thumbnail-refresh",
+          label: "刷新缩略图",
+          icon: RefreshCw,
+          onSelect: () => refreshEntryThumbnail(entry),
+        },
+      ],
     },
     {
       id: "rename",
       label: "重命名",
       icon: PencilLine,
+      disabled: isTrashPanel.value,
       onSelect: () => {
         renameTargetPath.value = entry.path;
         renameValue.value = entry.name;
@@ -373,14 +527,15 @@ function fileEntryContextMenu(entry: FileBrowserEntry) {
     },
     {
       id: "delete",
-      label: "删除",
+      label: isTrashPanel.value ? "彻底删除" : "删除",
       icon: Trash2,
       danger: true,
-      disabled: entry.kind !== "file" || isMutatingFiles.value,
-      confirmLabel: "确认删除？再点一次",
+      disabled: isMutatingFiles.value,
+      confirmLabel: isTrashPanel.value ? "确认彻底删除？再点一次" : undefined,
       onSelect: () => deleteEntry(entry),
     },
   ];
+  return items;
 }
 
 function openSearchHit(repoId: string, assetId: string) {
@@ -700,7 +855,7 @@ onUnmounted(() => {
     </div>
   </section>
 
-  <section v-else-if="hasRepository && isFilesPanel" :class="previewFileEntry ? 'files-preview-page' : 'files-workbench'">
+  <section v-else-if="hasRepository && isFileBrowserPanel" :class="previewFileEntry ? 'files-preview-page' : 'files-workbench'">
     <template v-if="previewFileEntry">
       <header class="files-preview-page__header">
         <button type="button" class="ghost files-preview-page__back" @click="exitPreview">
@@ -767,16 +922,16 @@ onUnmounted(() => {
     >
       <header class="files-browser__header">
         <div>
-          <p class="asset-browser__eyebrow">当前目录</p>
+          <p class="asset-browser__eyebrow">{{ isTrashPanel ? "回收站" : "当前目录" }}</p>
           <div class="files-breadcrumbs">
-            <button type="button" class="files-breadcrumbs__item" @click="openDirectory('')">根目录</button>
+            <button type="button" class="files-breadcrumbs__item" @click="openDirectory('')">{{ isTrashPanel ? "回收站" : "根目录" }}</button>
             <button v-for="segment in breadcrumbSegments" :key="segment.path" type="button" class="files-breadcrumbs__item" @click="openDirectory(segment.path)">
               {{ segment.label }}
             </button>
           </div>
         </div>
 
-        <div class="files-toolbar">
+        <div v-if="!isTrashPanel" class="files-toolbar">
           <label class="files-toolbar__field">
             <Plus :size="14" aria-hidden="true" />
             <input v-model="createFileName" type="text" placeholder="新建空文件，例如 note.txt" />
@@ -784,6 +939,16 @@ onUnmounted(() => {
           <button type="button" class="ghost files-toolbar__btn" :disabled="isMutatingFiles" @click="handleCreateFile">
             <File :size="14" aria-hidden="true" />
             建文件
+          </button>
+        </div>
+        <div v-else class="files-toolbar">
+          <button type="button" class="ghost files-toolbar__btn" :disabled="isMutatingFiles" @click="handleRestoreAllTrash">
+            <RotateCcw :size="14" aria-hidden="true" />
+            还原所有项目
+          </button>
+          <button type="button" class="ghost danger files-toolbar__btn" :disabled="isMutatingFiles" @click="handleEmptyTrash">
+            <Trash2 :size="14" aria-hidden="true" />
+            清空回收站
           </button>
         </div>
       </header>
@@ -865,11 +1030,15 @@ onUnmounted(() => {
 
         <div class="files-detail__section">
           <div class="files-detail__actions">
+            <button v-if="isTrashPanel" type="button" class="ghost" :disabled="isMutatingFiles || !canRestoreSelected" @click="restoreSelectedEntry">
+              <RotateCcw :size="14" aria-hidden="true" />
+              还原
+            </button>
             <button type="button" class="ghost" :disabled="!canPreviewSelected" @click="openSelectedEntry">
               <Eye :size="14" aria-hidden="true" />
               查看
             </button>
-            <button type="button" class="ghost" @click="revealSelectedEntry">
+            <button type="button" class="ghost" :disabled="isTrashPanel" @click="revealSelectedEntry">
               <FolderOpen :size="14" aria-hidden="true" />
               定位
             </button>
@@ -879,11 +1048,11 @@ onUnmounted(() => {
             </button>
             <button type="button" class="ghost danger" :disabled="isMutatingFiles || !canDeleteSelected" @click="deleteSelectedEntry">
               <File :size="14" aria-hidden="true" />
-              删除
+              {{ isTrashPanel ? "彻底删除" : "删除" }}
             </button>
           </div>
-          <p v-if="currentFileEntry.kind === 'directory'" class="files-detail__hint">
-            文件夹删除请在左侧文件夹树中操作，以选择删除内容或转移到上级目录。
+          <p v-if="isTrashPanel" class="files-detail__hint">
+            回收站中的删除会直接从文件系统移除。
           </p>
         </div>
 
@@ -915,13 +1084,17 @@ onUnmounted(() => {
             <span>修改时间</span>
             <span class="asset-meta__value">{{ currentFileEntry.modifiedAt ? new Date(currentFileEntry.modifiedAt).toLocaleString("zh-CN") : "未记录" }}</span>
           </div>
+          <div v-if="isTrashPanel" class="asset-meta__row">
+            <span>删除时间</span>
+            <span class="asset-meta__value">{{ entryDeletedAtLabel(currentFileEntry) || "未记录" }}</span>
+          </div>
         </div>
       </div>
 
       <div v-else class="files-detail__empty">
-        <p class="asset-browser__eyebrow">文件管理</p>
+        <p class="asset-browser__eyebrow">{{ isTrashPanel ? "回收站" : "文件管理" }}</p>
         <h2>选择一个文件或文件夹</h2>
-        <p>在中间列表中选择目标，然后可执行查看、定位、重命名和删除。</p>
+        <p>{{ isTrashPanel ? "在中间列表中选择目标，然后可执行还原或彻底删除。" : "在中间列表中选择目标，然后可执行查看、定位、重命名和删除。" }}</p>
       </div>
     </aside>
     </template>

@@ -2,10 +2,12 @@ use crate::repository_service::{
     FileBrowserRequest, FileCreateRequest, FileDeleteRequest, FileImportRequest, FileReadRequest,
     FileRenameRequest, MetadataUpdateRequest, RepositoryExportRequest, RepositoryFolderRequest,
     RepositoryMutationRequest, RepositoryState, RevisionActionRequest, SearchRequest, SyncRequest,
-    ThumbnailRequest,
+    ThumbnailRequest, TrashMutationRequest,
 };
 use notify::{Config, Event, RecommendedWatcher, RecursiveMode, Watcher};
 use serde::{Deserialize, Serialize};
+#[cfg(test)]
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::{
     collections::BTreeSet,
     io::Read,
@@ -15,13 +17,12 @@ use std::{
     sync::{mpsc::channel, Arc, Mutex},
     thread,
 };
-#[cfg(test)]
-use std::sync::atomic::{AtomicUsize, Ordering};
-use tauri::{AppHandle, Manager};
-use tiny_http::{Method, Response, Server, StatusCode};
+use tauri::AppHandle;
+use tiny_http::{Header, Method, Response, Server, StatusCode};
 
 const SERVICE_HOST: &str = "127.0.0.1";
 const SERVICE_START_ATTEMPTS: usize = 3;
+const PREVIEW_SOURCE_PREFIX: &str = "/preview/";
 #[cfg(test)]
 static SERVICE_HANDLE_SHUTDOWN_COUNT: AtomicUsize = AtomicUsize::new(0);
 
@@ -68,6 +69,9 @@ enum ServiceRequest {
     ReadFile {
         request: FileReadRequest,
     },
+    PreparePreviewFileSource {
+        request: FileReadRequest,
+    },
     CreateDirectory {
         request: FileCreateRequest,
     },
@@ -83,6 +87,9 @@ enum ServiceRequest {
     DeleteEntry {
         request: FileDeleteRequest,
     },
+    MutateTrash {
+        request: TrashMutationRequest,
+    },
     CreateRepository {
         request: RepositoryMutationRequest,
     },
@@ -96,7 +103,9 @@ enum ServiceRequest {
         #[serde(rename = "repoId", alias = "repo_id")]
         repo_id: String,
     },
-    ExportRepository { request: RepositoryExportRequest },
+    ExportRepository {
+        request: RepositoryExportRequest,
+    },
     SyncRepository {
         request: SyncRequest,
     },
@@ -123,22 +132,13 @@ struct ServiceResponse<T> {
 }
 
 impl ServiceBridge {
-    pub fn start(app: &AppHandle) -> Result<Self, String> {
-        let thumbnail_dir = app
-            .path()
-            .app_data_dir()
-            .map_err(|error| error.to_string())?
-            .join("thumbnails");
+    pub fn start(_app: &AppHandle) -> Result<Self, String> {
         let executable = std::env::current_exe().map_err(|error| error.to_string())?;
 
         for _ in 0..SERVICE_START_ATTEMPTS {
             let addr = reserve_service_addr()?;
             let mut command = Command::new(&executable);
-            command
-                .arg("--service-mode")
-                .arg(&addr)
-                .arg("--thumbnail-dir")
-                .arg(&thumbnail_dir);
+            command.arg("--service-mode").arg(&addr);
 
             #[cfg(target_os = "windows")]
             {
@@ -199,9 +199,13 @@ impl ServiceBridge {
                 .ok_or_else(|| "missing service payload".to_string())
         } else {
             Err(response
-                .error
+            .error
                 .unwrap_or_else(|| "service request failed".to_string()))
         }
+    }
+
+    pub fn preview_source_url(&self, token: &str) -> String {
+        format!("http://{}/preview/{}", self.addr, token)
     }
 
     pub fn shutdown(&self) {
@@ -279,15 +283,23 @@ pub fn run_service_process(addr: &str) -> Result<(), String> {
     let root = std::env::current_dir()
         .map_err(|error| error.to_string())?
         .join(".service-data");
-    let thumbnail_root =
-        service_thumbnail_dir_from_args()?.unwrap_or_else(|| root.join("thumbnails"));
-    let repository_state = Arc::new(RepositoryState::from_roots(root, thumbnail_root));
+    let repository_state = Arc::new(RepositoryState::from_root(root));
     let write_lock = Arc::new(Mutex::new(()));
     repository_state.ensure_initialized()?;
     let watcher_handle = RepositoryWatcher::start(repository_state.clone(), write_lock.clone())?;
 
     let server = Server::http(addr).map_err(|error| error.to_string())?;
     for mut request in server.incoming_requests() {
+        if request.method() == &Method::Get {
+            if let Some(token) = preview_token_from_url(request.url()) {
+                let repository_state = repository_state.clone();
+                thread::spawn(move || {
+                    respond_preview_file_request(request, &repository_state, &token);
+                });
+                continue;
+            }
+        }
+
         if request.method() != &Method::Post || request.url() != "/rpc" {
             let _ = request.respond(Response::empty(StatusCode(404)));
             continue;
@@ -316,18 +328,45 @@ pub fn run_service_process(addr: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn service_thumbnail_dir_from_args() -> Result<Option<PathBuf>, String> {
-    let mut args = std::env::args().skip(3);
-    while let Some(arg) = args.next() {
-        if arg == "--thumbnail-dir" {
-            return args
-                .next()
-                .map(PathBuf::from)
-                .map(Some)
-                .ok_or_else(|| "missing --thumbnail-dir value".to_string());
+fn preview_token_from_url(url: &str) -> Option<String> {
+    let path = url.split('?').next().unwrap_or(url);
+    let token = path.strip_prefix(PREVIEW_SOURCE_PREFIX)?;
+    if token.len() == 64 && token.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        Some(token.to_string())
+    } else {
+        None
+    }
+}
+
+fn respond_preview_file_request(
+    request: tiny_http::Request,
+    repository_state: &Arc<RepositoryState>,
+    token: &str,
+) {
+    match repository_state.open_preview_file_source(token) {
+        Ok((file, media_type, size_bytes)) => {
+            let response = Response::from_file(file);
+            let response = response_with_header(response, "Content-Type", &media_type);
+            let response =
+                response_with_header(response, "Content-Length", &size_bytes.to_string());
+            let response = response_with_header(response, "Access-Control-Allow-Origin", "*");
+            let response = response_with_header(response, "Cache-Control", "no-store");
+            let _ = request.respond(response);
+        }
+        Err(error) => {
+            let response = Response::from_string(error).with_status_code(StatusCode(404));
+            let response = response_with_header(response, "Content-Type", "text/plain");
+            let response = response_with_header(response, "Access-Control-Allow-Origin", "*");
+            let _ = request.respond(response);
         }
     }
-    Ok(None)
+}
+
+fn response_with_header<R: Read>(response: Response<R>, name: &str, value: &str) -> Response<R> {
+    match Header::from_bytes(name.as_bytes(), value.as_bytes()) {
+        Ok(header) => response.with_header(header),
+        Err(_) => response,
+    }
 }
 
 fn handle_service_request(
@@ -384,6 +423,9 @@ fn dispatch_request(
             to_value(repository_state.load_file_browser(request)?)
         }
         ServiceRequest::ReadFile { request } => to_value(repository_state.read_file(request)?),
+        ServiceRequest::PreparePreviewFileSource { request } => {
+            to_value(repository_state.prepare_preview_file_source(request)?)
+        }
         ServiceRequest::CreateDirectory { request } => {
             let _guard = write_lock
                 .lock()
@@ -413,6 +455,12 @@ fn dispatch_request(
                 .lock()
                 .map_err(|_| "service write lock poisoned".to_string())?;
             to_value(repository_state.delete_entry(request)?)
+        }
+        ServiceRequest::MutateTrash { request } => {
+            let _guard = write_lock
+                .lock()
+                .map_err(|_| "service write lock poisoned".to_string())?;
+            to_value(repository_state.mutate_trash(request)?)
         }
         ServiceRequest::CreateRepository { request } => {
             let _guard = write_lock
@@ -459,6 +507,9 @@ fn dispatch_request(
             to_value(repository_state.sync_repository(request)?)
         }
         ServiceRequest::EnsureThumbnail { request } => {
+            let _guard = write_lock
+                .lock()
+                .map_err(|_| "service write lock poisoned".to_string())?;
             to_value(repository_state.ensure_thumbnail(request)?)
         }
         ServiceRequest::UndoLastRevision { request } => {
@@ -646,7 +697,12 @@ mod tests {
 
         assert_eq!(Arc::strong_count(&handle), 2);
         assert_eq!(SERVICE_HANDLE_SHUTDOWN_COUNT.load(Ordering::SeqCst), 0);
-        assert!(bridge.child.child.lock().expect("child lock should be healthy").is_none());
+        assert!(bridge
+            .child
+            .child
+            .lock()
+            .expect("child lock should be healthy")
+            .is_none());
     }
 
     #[test]
