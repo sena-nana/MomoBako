@@ -2,10 +2,12 @@ use crate::repository_service::{
     FileBrowserRequest, FileCreateRequest, FileDeleteRequest, FileImportRequest, FileReadRequest,
     FileRenameRequest, MetadataUpdateRequest, RepositoryExportRequest, RepositoryFolderRequest,
     RepositoryMutationRequest, RepositoryState, RevisionActionRequest, SearchRequest, SyncRequest,
-    ThumbnailRequest,
+    ThumbnailRequest, TrashMutationRequest,
 };
 use notify::{Config, Event, RecommendedWatcher, RecursiveMode, Watcher};
 use serde::{Deserialize, Serialize};
+#[cfg(test)]
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::{
     collections::BTreeSet,
     io::Read,
@@ -15,8 +17,6 @@ use std::{
     sync::{mpsc::channel, Arc, Mutex},
     thread,
 };
-#[cfg(test)]
-use std::sync::atomic::{AtomicUsize, Ordering};
 use tauri::{AppHandle, Manager};
 use tiny_http::{Method, Response, Server, StatusCode};
 
@@ -83,6 +83,9 @@ enum ServiceRequest {
     DeleteEntry {
         request: FileDeleteRequest,
     },
+    MutateTrash {
+        request: TrashMutationRequest,
+    },
     CreateRepository {
         request: RepositoryMutationRequest,
     },
@@ -96,7 +99,9 @@ enum ServiceRequest {
         #[serde(rename = "repoId", alias = "repo_id")]
         repo_id: String,
     },
-    ExportRepository { request: RepositoryExportRequest },
+    ExportRepository {
+        request: RepositoryExportRequest,
+    },
     SyncRepository {
         request: SyncRequest,
     },
@@ -414,6 +419,12 @@ fn dispatch_request(
                 .map_err(|_| "service write lock poisoned".to_string())?;
             to_value(repository_state.delete_entry(request)?)
         }
+        ServiceRequest::MutateTrash { request } => {
+            let _guard = write_lock
+                .lock()
+                .map_err(|_| "service write lock poisoned".to_string())?;
+            to_value(repository_state.mutate_trash(request)?)
+        }
         ServiceRequest::CreateRepository { request } => {
             let _guard = write_lock
                 .lock()
@@ -646,7 +657,12 @@ mod tests {
 
         assert_eq!(Arc::strong_count(&handle), 2);
         assert_eq!(SERVICE_HANDLE_SHUTDOWN_COUNT.load(Ordering::SeqCst), 0);
-        assert!(bridge.child.child.lock().expect("child lock should be healthy").is_none());
+        assert!(bridge
+            .child
+            .child
+            .lock()
+            .expect("child lock should be healthy")
+            .is_none());
     }
 
     #[test]

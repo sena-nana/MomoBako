@@ -74,6 +74,7 @@ export type FileBrowserEntry = {
   assetId?: string | null;
   status?: string | null;
   thumbnailPath?: string | null;
+  metadata?: Record<string, unknown>;
 };
 
 export type FileBrowserSnapshot = {
@@ -82,6 +83,7 @@ export type FileBrowserSnapshot = {
   backendPluginId: string;
   backendKind: string;
   currentPath: string;
+  specialLocation?: "trash" | null;
   tree?: FileTreeNode[];
   entries: FileBrowserEntry[];
 };
@@ -198,6 +200,7 @@ export type FileBrowserRequest = {
   repoId: string;
   directoryPath?: string;
   includeTree?: boolean;
+  specialLocation?: "trash";
 };
 
 export type FileReadRequest = {
@@ -223,12 +226,20 @@ export type FileRenameRequest = {
   newName: string;
 };
 
-export type FileDeleteMode = "delete" | "moveToParent";
+export type FileDeleteMode = "delete" | "moveToParent" | "permanentDelete";
 
 export type FileDeleteRequest = {
   repoId: string;
   path: string;
   mode?: FileDeleteMode;
+};
+
+export type TrashMutationAction = "restore" | "restoreAll" | "empty";
+
+export type TrashMutationRequest = {
+  repoId: string;
+  action: TrashMutationAction;
+  path?: string;
 };
 
 export type RepositoryMutationResponse = {

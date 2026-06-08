@@ -28,6 +28,7 @@ type MockEntry = {
   assetId: string | null;
   status: string | null;
   thumbnailPath?: string | null;
+  metadata?: Record<string, unknown>;
 };
 
 let mockRepositories: MockRepository[] = [];
@@ -87,7 +88,8 @@ const initialEntries = (): MockEntry[] => [
   },
 ];
 
-let mockEntries = initialEntries();
+let mockEntries: MockEntry[] = initialEntries();
+let mockTrashEntries: MockEntry[] = [];
 
 function getParentPath(path: string) {
   const index = path.lastIndexOf("/");
@@ -115,6 +117,66 @@ function addMockEntry(path: string, kind: "directory" | "file") {
       status: kind === "file" ? "synced" : null,
     },
   ];
+}
+
+function moveEntryTreeToTrash(targetPath: string) {
+  const targetEntry = mockEntries.find((entry) => entry.path === targetPath);
+  if (!targetEntry) return null;
+
+  const deletedAt = new Date().toISOString();
+  const trashRootPath = targetPath;
+  const movingEntries = mockEntries
+    .filter((entry) => entry.path === targetPath || entry.path.startsWith(`${targetPath}/`))
+    .map((entry) => ({
+      ...entry,
+      path: entry.path === targetPath ? trashRootPath : `${trashRootPath}${entry.path.slice(targetPath.length)}`,
+      name: getEntryName(entry.path === targetPath ? trashRootPath : `${trashRootPath}${entry.path.slice(targetPath.length)}`),
+      status: entry.kind === "file" ? "deleted" : entry.status,
+      metadata: {
+        deletedAt,
+        originalPath: entry.path,
+      },
+    }));
+
+  mockEntries = mockEntries.filter((entry) => (
+    entry.path !== targetPath && !entry.path.startsWith(`${targetPath}/`)
+  ));
+  mockTrashEntries = [
+    ...mockTrashEntries.filter((entry) => (
+      entry.path !== trashRootPath && !entry.path.startsWith(`${trashRootPath}/`)
+    )),
+    ...movingEntries,
+  ];
+  return targetEntry;
+}
+
+function restoreTrashTree(targetPath: string) {
+  const selectedEntries = mockTrashEntries.filter((entry) => (
+    entry.path === targetPath || entry.path.startsWith(`${targetPath}/`)
+  ));
+  if (!selectedEntries.length) return;
+
+  const restoredEntries = selectedEntries.map((entry) => {
+    const originalPath = typeof entry.metadata?.originalPath === "string"
+      ? entry.metadata.originalPath
+      : entry.path;
+    return {
+      ...entry,
+      path: originalPath,
+      name: getEntryName(originalPath),
+      status: entry.kind === "file" ? "synced" : entry.status,
+      metadata: undefined,
+    };
+  });
+  mockEntries = [
+    ...mockEntries.filter((entry) => (
+      !restoredEntries.some((restored) => restored.path === entry.path)
+    )),
+    ...restoredEntries,
+  ];
+  mockTrashEntries = mockTrashEntries.filter((entry) => (
+    entry.path !== targetPath && !entry.path.startsWith(`${targetPath}/`)
+  ));
 }
 
 function buildTree() {
@@ -159,13 +221,15 @@ function getEntriesForDirectory(directoryPath: string) {
     });
 }
 
-function getMockFileBrowser(directoryPath = "", includeTree = true) {
+function getMockFileBrowser(directoryPath = "", includeTree = true, specialLocation?: "trash") {
+  const entries = specialLocation === "trash" ? mockTrashEntries : mockEntries;
   const snapshot: {
     repoId: string;
     rootPath: string;
     backendPluginId: string;
     backendKind: string;
     currentPath: string;
+    specialLocation?: "trash";
     tree?: ReturnType<typeof buildTree>;
     entries: ReturnType<typeof getEntriesForDirectory>;
   } = {
@@ -174,9 +238,18 @@ function getMockFileBrowser(directoryPath = "", includeTree = true) {
     backendPluginId: "builtin.local-filesystem",
     backendKind: "filesystem",
     currentPath: directoryPath,
-    entries: getEntriesForDirectory(directoryPath),
+    entries: entries
+      .filter((entry) => getParentPath(entry.path) === directoryPath)
+      .sort((left, right) => {
+        if (left.kind !== right.kind) {
+          return left.kind === "directory" ? -1 : 1;
+        }
+        return left.path.localeCompare(right.path);
+      }),
   };
-  if (includeTree) {
+  if (specialLocation) {
+    snapshot.specialLocation = specialLocation;
+  } else if (includeTree) {
     snapshot.tree = buildTree();
   }
   return snapshot;
@@ -328,8 +401,8 @@ vi.mock("@tauri-apps/api/core", () => ({
       };
     }
     if (command === "get_file_browser") {
-      const request = args?.request as { directoryPath?: string; includeTree?: boolean } | undefined;
-      return getMockFileBrowser(request?.directoryPath ?? "", request?.includeTree ?? true);
+      const request = args?.request as { directoryPath?: string; includeTree?: boolean; specialLocation?: "trash" } | undefined;
+      return getMockFileBrowser(request?.directoryPath ?? "", request?.includeTree ?? true, request?.specialLocation);
     }
     if (command === "read_file") {
       return [35, 32, 77, 111, 99, 107, 32, 102, 105, 108, 101];
@@ -383,13 +456,14 @@ vi.mock("@tauri-apps/api/core", () => ({
       return getMockFileBrowser(parentPath, mockEntries.some((entry) => entry.path === targetPath && entry.kind === "directory"));
     }
     if (command === "delete_entry") {
-      const request = args?.request as { path?: string; mode?: "delete" | "moveToParent" } | undefined;
+      const request = args?.request as { path?: string; mode?: "delete" | "moveToParent" | "permanentDelete" } | undefined;
       const targetPath = request?.path ?? "";
       const mode = request?.mode ?? "delete";
-      const targetEntry = mockEntries.find((entry) => entry.path === targetPath);
+      const entries = mode === "permanentDelete" ? mockTrashEntries : mockEntries;
+      const targetEntry = entries.find((entry) => entry.path === targetPath);
       const parentPath = getParentPath(targetPath);
       if (!targetEntry) {
-        return getMockFileBrowser(parentPath);
+        return getMockFileBrowser(parentPath, false, mode === "permanentDelete" ? "trash" : undefined);
       }
 
       if (targetEntry.kind === "directory" && mode === "moveToParent") {
@@ -410,10 +484,28 @@ vi.mock("@tauri-apps/api/core", () => ({
         return getMockFileBrowser(parentPath, true);
       }
 
-      mockEntries = mockEntries.filter((entry) => (
-        entry.path !== targetPath && !entry.path.startsWith(`${targetPath}/`)
-      ));
+      if (mode === "permanentDelete") {
+        mockTrashEntries = mockTrashEntries.filter((entry) => (
+          entry.path !== targetPath && !entry.path.startsWith(`${targetPath}/`)
+        ));
+        return getMockFileBrowser(parentPath, false, "trash");
+      }
+
+      moveEntryTreeToTrash(targetPath);
       return getMockFileBrowser(parentPath, targetEntry.kind === "directory");
+    }
+    if (command === "mutate_trash") {
+      const request = args?.request as { action?: "restore" | "restoreAll" | "empty"; path?: string } | undefined;
+      if (request?.action === "restore" && request.path) {
+        restoreTrashTree(request.path);
+      } else if (request?.action === "restoreAll") {
+        for (const entry of [...mockTrashEntries].filter((item) => !getParentPath(item.path))) {
+          restoreTrashTree(entry.path);
+        }
+      } else if (request?.action === "empty") {
+        mockTrashEntries = [];
+      }
+      return getMockFileBrowser("", false, "trash");
     }
     if (command === "create_repository" || command === "import_repository") {
       const request = args?.request as {
@@ -634,6 +726,7 @@ afterEach(() => {
   mockInvokeDelay = null;
   mockRepositories = [];
   mockEntries = initialEntries();
+  mockTrashEntries = [];
   invokeCalls.length = 0;
   openerCalls.length = 0;
 });

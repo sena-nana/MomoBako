@@ -19,6 +19,7 @@ use repository_service::{
     FileBrowserRequest, FileCreateRequest, FileDeleteRequest, FileImportRequest, FileReadRequest,
     FileRenameRequest, MetadataUpdateRequest, RepositoryExportRequest, RepositoryFolderRequest,
     RepositoryMutationRequest, RevisionActionRequest, SearchRequest, SyncRequest, ThumbnailRequest,
+    TrashMutationRequest,
 };
 use service_process::ServiceBridge;
 
@@ -181,6 +182,18 @@ async fn delete_entry(
     invoke_service(
         bridge,
         serde_json::json!({ "command": "deleteEntry", "request": request }),
+    )
+    .await
+}
+
+#[tauri::command]
+async fn mutate_trash(
+    request: TrashMutationRequest,
+    bridge: tauri::State<'_, ServiceBridge>,
+) -> Result<serde_json::Value, String> {
+    invoke_service(
+        bridge,
+        serde_json::json!({ "command": "mutateTrash", "request": request }),
     )
     .await
 }
@@ -456,6 +469,7 @@ pub fn run() {
             import_entries,
             rename_entry,
             delete_entry,
+            mutate_trash,
             create_repository,
             import_repository,
             attach_repository_folder,
