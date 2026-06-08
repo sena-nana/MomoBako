@@ -17,6 +17,14 @@
   - Export repository descriptor for external tools
 - `POST /repositories/{repoId}:sync`
   - Trigger incremental scan and emit filesystem events
+  - Response keeps the existing `SyncResult` counters: `scannedFiles`, `createdAssets`, `updatedAssets`, `deletedAssets`, `createdEvents`
+  - Desktop UI may expose local sync progress as phased client state (`scanning`, `writing`, `refreshing`, `complete`) without changing this transport contract
+
+## Desktop Runtime State
+
+- Workspace startup progress is a desktop UI state, not a repository service endpoint
+- Startup progress fields: `status`, `stepLabel`, `currentStep`, `totalSteps`, `percent`, `error`
+- Sync progress fields reserved for phased UI feedback: `phase`, `label`, `current`, `total`, `percent`
 
 ## Asset API
 

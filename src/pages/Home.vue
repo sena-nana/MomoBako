@@ -51,7 +51,6 @@ const {
   isSearching,
   isMutatingFiles,
   error,
-  ensureRepositoryWorkspace,
   refreshRepositoryWorkspace,
   selectRepository,
   selectAsset,
@@ -412,7 +411,6 @@ const searchSummary = computed(() => {
 });
 
 onMounted(() => {
-  void ensureRepositoryWorkspace();
   try {
     const currentWindow = getCurrentWindow();
     currentWindow.onDragDropEvent(({ payload }) => {

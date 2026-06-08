@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { RouterView } from "vue-router";
+import { RefreshCw } from "lucide-vue-next";
 import TitleBar from "../components/TitleBar.vue";
 import SecondaryPanel from "./SecondaryPanel.vue";
+import { useRepositoryWorkspace } from "../composables/useRepositoryWorkspace";
 import { useResizablePane } from "../composables/useResizablePane";
 
 const MIN_WIDTH = 220;
@@ -28,6 +30,12 @@ function writeStorage(key: string, value: string) {
 }
 
 const sidebarCollapsed = ref(readStorage(COLLAPSED_STORAGE_KEY) === "1");
+const {
+  workspaceStartup,
+  ensureRepositoryWorkspace,
+} = useRepositoryWorkspace();
+const isWorkspaceReady = computed(() => workspaceStartup.value.status === "ready");
+const isWorkspaceStartupError = computed(() => workspaceStartup.value.status === "error");
 const sidebarWidth = useResizablePane({
   storageKey: WIDTH_STORAGE_KEY,
   minWidth: MIN_WIDTH,
@@ -41,6 +49,14 @@ function toggleSidebarCollapsed() {
   sidebarCollapsed.value = !sidebarCollapsed.value;
   writeStorage(COLLAPSED_STORAGE_KEY, sidebarCollapsed.value ? "1" : "0");
 }
+
+function retryWorkspaceStartup() {
+  void ensureRepositoryWorkspace();
+}
+
+onMounted(() => {
+  void ensureRepositoryWorkspace();
+});
 </script>
 
 <template>
@@ -49,6 +65,7 @@ function toggleSidebarCollapsed() {
     :class="{
       'is-resizing': sidebarWidth.isResizing.value,
       'is-sidebar-collapsed': sidebarCollapsed,
+      'is-starting-workspace': !isWorkspaceReady,
     }"
     :style="{ '--sidebar-width': sidebarCollapsed ? '0px' : sidebarWidth.width.value + 'px' }"
   >
@@ -56,8 +73,9 @@ function toggleSidebarCollapsed() {
       :left-sidebar-collapsed="sidebarCollapsed"
       @toggle-left-sidebar="toggleSidebarCollapsed"
     />
-    <SecondaryPanel />
+    <SecondaryPanel v-if="isWorkspaceReady" />
     <div
+      v-if="isWorkspaceReady"
       class="shell__resizer"
       role="separator"
       aria-orientation="vertical"
@@ -70,7 +88,38 @@ function toggleSidebarCollapsed() {
       @dblclick="sidebarWidth.resetWidth"
     />
     <main class="shell__main">
-      <RouterView />
+      <section v-if="!isWorkspaceReady" class="workspace-startup" aria-live="polite">
+        <div class="workspace-startup__panel">
+          <p class="asset-browser__eyebrow">MomoBako</p>
+          <h1>{{ workspaceStartup.stepLabel }}</h1>
+          <p class="workspace-startup__meta">
+            第 {{ workspaceStartup.currentStep }} / {{ workspaceStartup.totalSteps }} 步
+          </p>
+          <div
+            class="workspace-startup__progress"
+            role="progressbar"
+            :aria-valuenow="workspaceStartup.percent"
+            aria-valuemin="0"
+            aria-valuemax="100"
+            :aria-label="workspaceStartup.stepLabel"
+          >
+            <span :style="{ width: `${workspaceStartup.percent}%` }"></span>
+          </div>
+          <p v-if="workspaceStartup.error" class="workspace-startup__error">
+            {{ workspaceStartup.error }}
+          </p>
+          <button
+            v-if="isWorkspaceStartupError"
+            type="button"
+            class="ghost workspace-startup__retry"
+            @click="retryWorkspaceStartup"
+          >
+            <RefreshCw :size="14" aria-hidden="true" />
+            重试
+          </button>
+        </div>
+      </section>
+      <RouterView v-else />
     </main>
   </div>
 </template>

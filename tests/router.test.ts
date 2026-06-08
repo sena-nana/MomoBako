@@ -2,10 +2,12 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/vue";
 import { createMemoryHistory } from "vue-router";
 import { describe, expect, it } from "vitest";
 import App from "../src/App.vue";
-import { useRepositoryWorkspace } from "../src/composables/useRepositoryWorkspace";
+import { resetRepositoryWorkspaceForTests, useRepositoryWorkspace } from "../src/composables/useRepositoryWorkspace";
 import { createTemplateRouter } from "../src/router";
 import {
   createDirectoryOnNextSync,
+  delayNextInvoke,
+  failNextInvoke,
   failNextOpenerCall,
   getInvokeCalls,
   getOpenerCalls,
@@ -15,10 +17,24 @@ import {
 } from "./setupTests";
 
 async function renderApp() {
+  resetRepositoryWorkspaceForTests();
   const router = createTemplateRouter(createMemoryHistory());
   await router.push("/");
   await router.isReady();
-  await useRepositoryWorkspace().refreshRepositoryWorkspace();
+  await useRepositoryWorkspace().ensureRepositoryWorkspace();
+
+  render(App, {
+    global: {
+      plugins: [router],
+    },
+  });
+}
+
+async function renderAppWithoutStartupPreload() {
+  resetRepositoryWorkspaceForTests();
+  const router = createTemplateRouter(createMemoryHistory());
+  await router.push("/");
+  await router.isReady();
 
   render(App, {
     global: {
@@ -43,6 +59,66 @@ function pointerEvent(type: string, clientX: number) {
 }
 
 describe("文件管理冒烟", () => {
+  it("启动加载显示进度，完成后再显示仓库内容", async () => {
+    seedMockRepository();
+    const delay = delayNextInvoke("list_repositories");
+    await renderAppWithoutStartupPreload();
+
+    expect(screen.getByRole("heading", { name: "加载仓库列表" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "资源库" })).not.toBeInTheDocument();
+
+    delay.resolve();
+    expect(await screen.findByRole("button", { name: "资源库" })).toBeInTheDocument();
+    expect((await screen.findAllByText("Campaigns")).length).toBeGreaterThan(0);
+    expect(screen.queryByRole("heading", { name: "加载仓库列表" })).not.toBeInTheDocument();
+  });
+
+  it("启动加载并发调用复用同一条链路", async () => {
+    seedMockRepository();
+    resetRepositoryWorkspaceForTests();
+    const workspace = useRepositoryWorkspace();
+    const delay = delayNextInvoke("list_repositories");
+
+    const first = workspace.ensureRepositoryWorkspace();
+    const second = workspace.ensureRepositoryWorkspace();
+    expect(first).toBe(second);
+    expect(getInvokeCalls("list_repositories")).toHaveLength(1);
+
+    delay.resolve();
+    await first;
+    expect(getInvokeCalls("list_repositories")).toHaveLength(1);
+    expect(workspace.workspaceStartup.value.status).toBe("ready");
+  });
+
+  it("启动失败显示错误并允许重试", async () => {
+    seedMockRepository();
+    failNextInvoke("list_repositories", "仓库注册表读取失败");
+    await renderAppWithoutStartupPreload();
+
+    expect(await screen.findByText("仓库注册表读取失败")).toBeInTheDocument();
+    await fireEvent.click(screen.getByRole("button", { name: "重试" }));
+
+    expect(await screen.findByRole("button", { name: "资源库" })).toBeInTheDocument();
+    expect(getInvokeCalls("list_repositories")).toHaveLength(2);
+  });
+
+  it("手动同步时展示同步进度", async () => {
+    seedMockRepository();
+    const workspace = useRepositoryWorkspace();
+    workspace.setActivePanel("files");
+    await renderApp();
+
+    const delay = delayNextInvoke("sync_repository");
+    const syncPromise = workspace.syncActiveRepository();
+
+    expect(await screen.findByText("扫描仓库文件")).toBeInTheDocument();
+    expect(await screen.findByText("33%")).toBeInTheDocument();
+
+    delay.resolve();
+    await syncPromise;
+    expect(workspace.syncProgress.value.phase).toBe("complete");
+  });
+
   it("侧栏选择本地文件夹时挂载已有目录而不是创建新仓库", async () => {
     seedMockRepository();
     selectMockFolder("C:/Mock/SelectedRepo");

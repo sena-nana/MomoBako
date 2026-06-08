@@ -34,6 +34,8 @@ let mockRepositories: MockRepository[] = [];
 let mockSelectedFolder: string | null = null;
 let mockDirectoryCreatedOnNextSync: string | null = null;
 let mockOpenerFailure: Error | null = null;
+let mockInvokeFailure: { command: string; error: Error } | null = null;
+let mockInvokeDelay: { command: string; resolve: () => void; promise: Promise<void> } | null = null;
 const invokeCalls: Array<{ command: string; args?: Record<string, unknown> }> = [];
 const openerCalls: Array<{ command: "openPath" | "revealItemInDir"; path: string }> = [];
 
@@ -264,6 +266,15 @@ vi.mock("@tauri-apps/api/core", () => ({
   convertFileSrc: (path: string) => `asset://${path}`,
   invoke: async (command: string, args?: Record<string, unknown>) => {
     invokeCalls.push({ command, args });
+    if (mockInvokeDelay?.command === command) {
+      await mockInvokeDelay.promise;
+      mockInvokeDelay = null;
+    }
+    if (mockInvokeFailure?.command === command) {
+      const failure = mockInvokeFailure.error;
+      mockInvokeFailure = null;
+      throw failure;
+    }
     if (command === "list_repositories") return mockRepositories;
     if (command === "get_repository_snapshot") {
       const repoId = typeof args?.repoId === "string" ? args.repoId : mockSnapshot.repository.repoId;
@@ -595,6 +606,8 @@ afterEach(() => {
   mockSelectedFolder = null;
   mockDirectoryCreatedOnNextSync = null;
   mockOpenerFailure = null;
+  mockInvokeFailure = null;
+  mockInvokeDelay = null;
   mockRepositories = [];
   mockEntries = initialEntries();
   invokeCalls.length = 0;
@@ -632,4 +645,23 @@ export function getOpenerCalls(command?: "openPath" | "revealItemInDir") {
 
 export function failNextOpenerCall(message: string) {
   mockOpenerFailure = new Error(message);
+}
+
+export function failNextInvoke(command: string, message: string) {
+  mockInvokeFailure = { command, error: new Error(message) };
+}
+
+export function delayNextInvoke(command: string) {
+  let resolveDelay = () => {};
+  const promise = new Promise<void>((resolve) => {
+    resolveDelay = resolve;
+  });
+  mockInvokeDelay = {
+    command,
+    resolve: resolveDelay,
+    promise,
+  };
+  return {
+    resolve: resolveDelay,
+  };
 }

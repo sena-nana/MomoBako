@@ -64,11 +64,11 @@ const {
   activeSnapshot,
   currentDirectoryPath,
   fileTree,
+  syncProgress,
   isBusy,
   isLoadingFileBrowser,
   isMutatingFiles,
   error,
-  ensureRepositoryWorkspace,
   refreshFileBrowserTree,
   selectRepository,
   setActivePanel,
@@ -121,6 +121,11 @@ const folderDialogPlaceholder = computed(() => (
   folderDialogMode.value === "create" ? "输入文件夹名称" : "输入新的文件夹名称"
 ));
 const folderDialogDisabled = computed(() => !folderDialogValue.value.trim() || isMutatingFiles.value);
+const isShowingSyncProgress = computed(() => (
+  syncProgress.value.phase === "scanning" ||
+  syncProgress.value.phase === "writing" ||
+  syncProgress.value.phase === "refreshing"
+));
 
 watch(
   fileTreeNodes,
@@ -400,7 +405,6 @@ function handleDocumentPointerDown(event: PointerEvent) {
 }
 
 onMounted(() => {
-  void ensureRepositoryWorkspace();
   window.addEventListener("momo:add-repository", handleAddRepositoryRequest);
   document.addEventListener("keydown", handleDocumentKeydown);
   document.addEventListener("pointerdown", handleDocumentPointerDown, true);
@@ -462,6 +466,12 @@ onBeforeUnmount(() => {
         <div v-else-if="isBusy" class="workspace-state">
           <LoaderCircle class="spin" :size="16" aria-hidden="true" />
           正在同步仓库状态
+        </div>
+
+        <div v-else-if="isShowingSyncProgress" class="workspace-state workspace-state--progress">
+          <LoaderCircle class="spin" :size="16" aria-hidden="true" />
+          <span>{{ syncProgress.label }}</span>
+          <span class="workspace-state__percent">{{ syncProgress.percent }}%</span>
         </div>
 
         <section class="workspace-group">
