@@ -24,3 +24,4 @@ time = { version = "0.3", features = ["formatting", "macros"] }
 notify = "6"
 tiny_http = "0.12"
 image = "0.25"
+ffmpeg-sidecar = "2.5.2"

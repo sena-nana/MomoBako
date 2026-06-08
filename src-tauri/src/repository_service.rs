@@ -5,7 +5,7 @@ use std::{
     fs::{self, OpenOptions},
     path::{Path, PathBuf},
     process::Command,
-    sync::Mutex,
+    sync::{Mutex, OnceLock},
     time::SystemTime,
 };
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
@@ -17,6 +17,11 @@ const REPO_METADATA_FILE_NAME: &str = "repository.json";
 const REPO_DB_FILE_NAME: &str = "metadata.db";
 const REPO_SCHEMA_VERSION: i64 = 1;
 const THUMBNAIL_SIZE: u32 = 256;
+const THUMBNAIL_CACHE_PREFIX_CHARS: usize = 48;
+const FNV_OFFSET_BASIS: u64 = 0xcbf29ce484222325;
+const FNV_PRIME: u64 = 0x100000001b3;
+
+static FFMPEG_READY: OnceLock<Result<(), String>> = OnceLock::new();
 
 const REGISTRY_SCHEMA_SQL: &str = r#"
 CREATE TABLE IF NOT EXISTS repositories (
@@ -2537,13 +2542,12 @@ fn generate_thumbnail_for_file(
     }
 
     let source_path = resolve_repository_relative_path(repo_root, &file.relative_path)?;
-    let thumbnail_dir =
-        thumbnail_root.join(slugify_repo_id(&repo.summary.repo_id, &repo.summary.path));
-    fs::create_dir_all(&thumbnail_dir).map_err(io_error)?;
-    let thumbnail_path = thumbnail_dir.join(format!(
-        "{}.jpg",
-        slugify_repo_id(asset_id, &file.relative_path)
+    let thumbnail_dir = thumbnail_root.join(thumbnail_repository_dir_name(
+        &repo.summary.repo_id,
+        &repo.summary.path,
     ));
+    fs::create_dir_all(&thumbnail_dir).map_err(io_error)?;
+    let thumbnail_path = thumbnail_dir.join(thumbnail_file_name(asset_id, &file.relative_path));
 
     let generated = if is_image_extension(&extension) {
         generate_image_thumbnail(&source_path, &thumbnail_path)
@@ -2573,8 +2577,10 @@ fn ensure_thumbnail_for_file(
     existing_thumbnail_path: Option<String>,
 ) -> Result<Option<String>, String> {
     if let Some(path) = existing_thumbnail_path {
-        let expected_dir =
-            thumbnail_root.join(slugify_repo_id(&repo.summary.repo_id, &repo.summary.path));
+        let expected_dir = thumbnail_root.join(thumbnail_repository_dir_name(
+            &repo.summary.repo_id,
+            &repo.summary.path,
+        ));
         let thumbnail_path = Path::new(&path);
         if thumbnail_path.starts_with(&expected_dir) && thumbnail_path.is_file() {
             return Ok(Some(path));
@@ -2594,7 +2600,9 @@ fn generate_image_thumbnail(source_path: &Path, thumbnail_path: &Path) -> Result
 }
 
 fn generate_video_thumbnail(source_path: &Path, thumbnail_path: &Path) -> Result<(), String> {
-    let status = Command::new("ffmpeg")
+    ensure_ffmpeg_ready()?;
+
+    let status = Command::new(ffmpeg_sidecar::paths::ffmpeg_path())
         .arg("-y")
         .arg("-ss")
         .arg("00:00:01")
@@ -2613,6 +2621,15 @@ fn generate_video_thumbnail(source_path: &Path, thumbnail_path: &Path) -> Result
     } else {
         Err(format!("ffmpeg exited with status: {status}"))
     }
+}
+
+fn ensure_ffmpeg_ready() -> Result<(), String> {
+    FFMPEG_READY
+        .get_or_init(|| {
+            ffmpeg_sidecar::download::auto_download()
+                .map_err(|error| format!("ffmpeg setup error: {error}"))
+        })
+        .clone()
 }
 
 fn is_image_extension(extension: &str) -> bool {
@@ -2636,8 +2653,33 @@ struct DiscoveredFile {
 }
 
 fn slugify_repo_id(name: &str, path: &str) -> String {
-    let combined = format!("{name}-{path}");
-    let slug = combined
+    slugify_ascii_component(&format!("{name}-{path}"))
+}
+
+fn thumbnail_repository_dir_name(repo_id: &str, repo_path: &str) -> String {
+    compact_thumbnail_component(repo_id, &[repo_id, repo_path])
+}
+
+fn thumbnail_file_name(asset_id: &str, relative_path: &str) -> String {
+    format!(
+        "{}.jpg",
+        compact_thumbnail_component(asset_id, &[asset_id, relative_path])
+    )
+}
+
+fn compact_thumbnail_component(label: &str, hash_parts: &[&str]) -> String {
+    let slug = slugify_ascii_component(label);
+    let slug = if slug.is_empty() {
+        "thumbnail".to_string()
+    } else {
+        slug
+    };
+    let prefix = safe_prefix(&slug, THUMBNAIL_CACHE_PREFIX_CHARS);
+    format!("{prefix}-{}", stable_hash_hex(hash_parts))
+}
+
+fn slugify_ascii_component(value: &str) -> String {
+    let slug = value
         .chars()
         .map(|ch| {
             if ch.is_ascii_alphanumeric() {
@@ -2648,6 +2690,19 @@ fn slugify_repo_id(name: &str, path: &str) -> String {
         })
         .collect::<String>();
     slug.trim_matches('-').to_string()
+}
+
+fn stable_hash_hex(parts: &[&str]) -> String {
+    let mut hash = FNV_OFFSET_BASIS;
+    for part in parts {
+        for byte in part.as_bytes() {
+            hash ^= u64::from(*byte);
+            hash = hash.wrapping_mul(FNV_PRIME);
+        }
+        hash ^= 0xff;
+        hash = hash.wrapping_mul(FNV_PRIME);
+    }
+    format!("{hash:016x}")
 }
 
 fn default_plugins() -> Vec<PluginManifest> {
@@ -4290,4 +4345,51 @@ fn safe_prefix(value: &str, max_chars: usize) -> &str {
         .map(|(index, _)| index)
         .unwrap_or(value.len());
     &value[..end]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const LONG_RELATIVE_PATH: &str = "CubismSdkForNative-5-r.5/Samples/OpenGL/Demo/proj.harmonyos.cmake/Full/entry/src/main/resources/base/media/startIcon.png";
+
+    #[test]
+    fn thumbnail_file_name_stays_within_windows_component_limit() {
+        let asset_id = format!(
+            "asset-{}",
+            slugify_repo_id("startIcon.png", LONG_RELATIVE_PATH)
+        );
+        let repo_dir = thumbnail_repository_dir_name(&asset_id, LONG_RELATIVE_PATH);
+        let file_name = thumbnail_file_name(&asset_id, LONG_RELATIVE_PATH);
+
+        assert!(repo_dir.len() <= 255);
+        assert!(file_name.len() <= 255);
+        assert!(file_name.ends_with(".jpg"));
+    }
+
+    #[test]
+    fn thumbnail_cache_names_are_stable() {
+        let repo_dir = thumbnail_repository_dir_name("repo-cubism", "C:/Assets/Cubism");
+        let file_name = thumbnail_file_name("asset-start-icon", LONG_RELATIVE_PATH);
+
+        assert_eq!(
+            repo_dir,
+            thumbnail_repository_dir_name("repo-cubism", "C:/Assets/Cubism")
+        );
+        assert_eq!(
+            file_name,
+            thumbnail_file_name("asset-start-icon", LONG_RELATIVE_PATH)
+        );
+    }
+
+    #[test]
+    fn thumbnail_cache_names_differ_for_different_paths() {
+        let first = thumbnail_file_name("asset-icon", LONG_RELATIVE_PATH);
+        let second = thumbnail_file_name(
+            "asset-icon",
+            "CubismSdkForNative-5-r.5/Samples/OpenGL/Demo/proj.harmonyos.cmake/Full/entry/src/ohosTest/resources/base/media/icon.png",
+        );
+
+        assert_ne!(first, second);
+    }
 }
