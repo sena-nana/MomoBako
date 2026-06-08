@@ -17,7 +17,7 @@ use std::{
     sync::{mpsc::channel, Arc, Mutex},
     thread,
 };
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
 use tiny_http::{Header, Method, Response, Server, StatusCode};
 
 const SERVICE_HOST: &str = "127.0.0.1";
@@ -132,22 +132,13 @@ struct ServiceResponse<T> {
 }
 
 impl ServiceBridge {
-    pub fn start(app: &AppHandle) -> Result<Self, String> {
-        let thumbnail_dir = app
-            .path()
-            .app_data_dir()
-            .map_err(|error| error.to_string())?
-            .join("thumbnails");
+    pub fn start(_app: &AppHandle) -> Result<Self, String> {
         let executable = std::env::current_exe().map_err(|error| error.to_string())?;
 
         for _ in 0..SERVICE_START_ATTEMPTS {
             let addr = reserve_service_addr()?;
             let mut command = Command::new(&executable);
-            command
-                .arg("--service-mode")
-                .arg(&addr)
-                .arg("--thumbnail-dir")
-                .arg(&thumbnail_dir);
+            command.arg("--service-mode").arg(&addr);
 
             #[cfg(target_os = "windows")]
             {
@@ -292,9 +283,7 @@ pub fn run_service_process(addr: &str) -> Result<(), String> {
     let root = std::env::current_dir()
         .map_err(|error| error.to_string())?
         .join(".service-data");
-    let thumbnail_root =
-        service_thumbnail_dir_from_args()?.unwrap_or_else(|| root.join("thumbnails"));
-    let repository_state = Arc::new(RepositoryState::from_roots(root, thumbnail_root));
+    let repository_state = Arc::new(RepositoryState::from_root(root));
     let write_lock = Arc::new(Mutex::new(()));
     repository_state.ensure_initialized()?;
     let watcher_handle = RepositoryWatcher::start(repository_state.clone(), write_lock.clone())?;
@@ -337,20 +326,6 @@ pub fn run_service_process(addr: &str) -> Result<(), String> {
     }
 
     Ok(())
-}
-
-fn service_thumbnail_dir_from_args() -> Result<Option<PathBuf>, String> {
-    let mut args = std::env::args().skip(3);
-    while let Some(arg) = args.next() {
-        if arg == "--thumbnail-dir" {
-            return args
-                .next()
-                .map(PathBuf::from)
-                .map(Some)
-                .ok_or_else(|| "missing --thumbnail-dir value".to_string());
-        }
-    }
-    Ok(None)
 }
 
 fn preview_token_from_url(url: &str) -> Option<String> {
