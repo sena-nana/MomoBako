@@ -1,4 +1,3 @@
-use serde::{de::DeserializeOwned, Serialize};
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
@@ -11,340 +10,277 @@ const TRAY_OPEN_ID: &str = "tray-open";
 const TRAY_QUIT_ID: &str = "tray-quit";
 const BG: Color = Color(0x18, 0x18, 0x18, 0xFF);
 
+mod repository_runtime;
 mod repository_service;
-pub mod service_process;
 mod window_state;
 
+use repository_runtime::RepositoryRuntime;
 use repository_service::{
-    FileBrowserRequest, FileCreateRequest, FileDeleteRequest, FileImportRequest,
-    FilePreviewSourceResponse, FileReadRequest, FileRenameRequest, MetadataUpdateRequest,
-    RepositoryExportRequest, RepositoryFolderRequest, RepositoryMutationRequest,
-    RevisionActionRequest, SearchRequest, SyncRequest, ThumbnailRequest, TrashMutationRequest,
+    ApiDesignSnapshot, AssetDetail, CacheSnapshot, FileBrowserRequest, FileBrowserSnapshot,
+    FileCreateRequest, FileDeleteRequest, FileImportRequest, FilePreviewSourceResponse,
+    FileReadRequest, FileRenameRequest, MetadataUpdateRequest, MetadataUpdateResponse,
+    PluginManifest, RepositoryExportRequest, RepositoryExportResponse, RepositoryFolderRequest,
+    RepositoryMutationRequest, RepositoryMutationResponse, RepositorySnapshot, RepositorySummary,
+    RevisionActionRequest, RevisionActionResponse, SearchRequest, SearchResponse, SyncRequest,
+    SyncResult, ThumbnailRequest, ThumbnailResponse, TrashMutationRequest,
 };
-use service_process::ServiceBridge;
-
-async fn invoke_service<T, S>(
-    bridge: tauri::State<'_, ServiceBridge>,
-    request: S,
-) -> Result<T, String>
-where
-    T: DeserializeOwned + Send + 'static,
-    S: Serialize + Send + 'static,
-{
-    let bridge = bridge.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || bridge.invoke(&request))
-        .await
-        .map_err(|error| error.to_string())?
-}
 
 #[tauri::command]
-async fn ping(bridge: tauri::State<'_, ServiceBridge>) -> Result<String, String> {
-    invoke_service(bridge, serde_json::json!({ "command": "ping" })).await
+async fn ping() -> Result<String, String> {
+    Ok("pong".to_string())
 }
 
 #[tauri::command]
 async fn list_repositories(
-    bridge: tauri::State<'_, ServiceBridge>,
-) -> Result<serde_json::Value, String> {
-    invoke_service(bridge, serde_json::json!({ "command": "listRepositories" })).await
+    runtime: tauri::State<'_, RepositoryRuntime>,
+) -> Result<Vec<RepositorySummary>, String> {
+    runtime.run_read(|state| state.list_repositories()).await
 }
 
 #[tauri::command]
 async fn get_repository_snapshot(
     repo_id: String,
-    bridge: tauri::State<'_, ServiceBridge>,
-) -> Result<serde_json::Value, String> {
-    invoke_service(
-        bridge,
-        serde_json::json!({ "command": "getRepositorySnapshot", "repoId": repo_id }),
-    )
-    .await
+    runtime: tauri::State<'_, RepositoryRuntime>,
+) -> Result<RepositorySnapshot, String> {
+    runtime
+        .run_read(move |state| state.load_snapshot(&repo_id))
+        .await
 }
 
 #[tauri::command]
 async fn get_asset_detail(
     repo_id: String,
     asset_id: String,
-    bridge: tauri::State<'_, ServiceBridge>,
-) -> Result<serde_json::Value, String> {
-    invoke_service(
-        bridge,
-        serde_json::json!({
-            "command": "getAssetDetail",
-            "repoId": repo_id,
-            "assetId": asset_id
-        }),
-    )
-    .await
+    runtime: tauri::State<'_, RepositoryRuntime>,
+) -> Result<AssetDetail, String> {
+    runtime
+        .run_read(move |state| state.load_asset_detail(&repo_id, &asset_id))
+        .await
 }
 
 #[tauri::command]
 async fn search_assets(
     request: SearchRequest,
-    bridge: tauri::State<'_, ServiceBridge>,
-) -> Result<serde_json::Value, String> {
-    invoke_service(
-        bridge,
-        serde_json::json!({ "command": "searchAssets", "request": request }),
-    )
-    .await
+    runtime: tauri::State<'_, RepositoryRuntime>,
+) -> Result<SearchResponse, String> {
+    runtime
+        .run_read(move |state| state.search_assets(request))
+        .await
 }
 
 #[tauri::command]
 async fn update_asset_metadata(
     request: MetadataUpdateRequest,
-    bridge: tauri::State<'_, ServiceBridge>,
-) -> Result<serde_json::Value, String> {
-    invoke_service(
-        bridge,
-        serde_json::json!({ "command": "updateAssetMetadata", "request": request }),
-    )
-    .await
+    runtime: tauri::State<'_, RepositoryRuntime>,
+) -> Result<MetadataUpdateResponse, String> {
+    runtime
+        .run_write(move |state| state.update_asset_metadata(request))
+        .await
 }
 
 #[tauri::command]
 async fn get_file_browser(
     request: FileBrowserRequest,
-    bridge: tauri::State<'_, ServiceBridge>,
-) -> Result<serde_json::Value, String> {
-    invoke_service(
-        bridge,
-        serde_json::json!({ "command": "getFileBrowser", "request": request }),
-    )
-    .await
+    runtime: tauri::State<'_, RepositoryRuntime>,
+) -> Result<FileBrowserSnapshot, String> {
+    runtime
+        .run_read(move |state| state.load_file_browser(request))
+        .await
 }
 
 #[tauri::command]
 async fn read_file(
     request: FileReadRequest,
-    bridge: tauri::State<'_, ServiceBridge>,
+    runtime: tauri::State<'_, RepositoryRuntime>,
 ) -> Result<Vec<u8>, String> {
-    invoke_service(
-        bridge,
-        serde_json::json!({ "command": "readFile", "request": request }),
-    )
-    .await
+    runtime
+        .run_read(move |state| state.read_file(request))
+        .await
 }
 
 #[tauri::command]
 async fn prepare_preview_file_source(
     request: FileReadRequest,
-    bridge: tauri::State<'_, ServiceBridge>,
+    runtime: tauri::State<'_, RepositoryRuntime>,
 ) -> Result<FilePreviewSourceResponse, String> {
-    let bridge_for_url = bridge.inner().clone();
-    let mut response: FilePreviewSourceResponse = invoke_service(
-        bridge,
-        serde_json::json!({ "command": "preparePreviewFileSource", "request": request }),
-    )
-    .await?;
-    response.source_url = Some(bridge_for_url.preview_source_url(&response.token));
+    let mut response = runtime
+        .run_read(move |state| state.prepare_preview_file_source(request))
+        .await?;
+    response.source_url = Some(runtime.preview_source_url(&response.token));
     Ok(response)
 }
 
 #[tauri::command]
 async fn create_directory(
     request: FileCreateRequest,
-    bridge: tauri::State<'_, ServiceBridge>,
-) -> Result<serde_json::Value, String> {
-    invoke_service(
-        bridge,
-        serde_json::json!({ "command": "createDirectory", "request": request }),
-    )
-    .await
+    runtime: tauri::State<'_, RepositoryRuntime>,
+) -> Result<FileBrowserSnapshot, String> {
+    runtime
+        .run_write(move |state| state.create_directory(request))
+        .await
 }
 
 #[tauri::command]
 async fn create_file(
     request: FileCreateRequest,
-    bridge: tauri::State<'_, ServiceBridge>,
-) -> Result<serde_json::Value, String> {
-    invoke_service(
-        bridge,
-        serde_json::json!({ "command": "createFile", "request": request }),
-    )
-    .await
+    runtime: tauri::State<'_, RepositoryRuntime>,
+) -> Result<FileBrowserSnapshot, String> {
+    runtime
+        .run_write(move |state| state.create_file(request))
+        .await
 }
 
 #[tauri::command]
 async fn import_entries(
     request: FileImportRequest,
-    bridge: tauri::State<'_, ServiceBridge>,
-) -> Result<serde_json::Value, String> {
-    invoke_service(
-        bridge,
-        serde_json::json!({ "command": "importEntries", "request": request }),
-    )
-    .await
+    runtime: tauri::State<'_, RepositoryRuntime>,
+) -> Result<FileBrowserSnapshot, String> {
+    runtime
+        .run_write(move |state| state.import_entries(request))
+        .await
 }
 
 #[tauri::command]
 async fn rename_entry(
     request: FileRenameRequest,
-    bridge: tauri::State<'_, ServiceBridge>,
-) -> Result<serde_json::Value, String> {
-    invoke_service(
-        bridge,
-        serde_json::json!({ "command": "renameEntry", "request": request }),
-    )
-    .await
+    runtime: tauri::State<'_, RepositoryRuntime>,
+) -> Result<FileBrowserSnapshot, String> {
+    runtime
+        .run_write(move |state| state.rename_entry(request))
+        .await
 }
 
 #[tauri::command]
 async fn delete_entry(
     request: FileDeleteRequest,
-    bridge: tauri::State<'_, ServiceBridge>,
-) -> Result<serde_json::Value, String> {
-    invoke_service(
-        bridge,
-        serde_json::json!({ "command": "deleteEntry", "request": request }),
-    )
-    .await
+    runtime: tauri::State<'_, RepositoryRuntime>,
+) -> Result<FileBrowserSnapshot, String> {
+    runtime
+        .run_write(move |state| state.delete_entry(request))
+        .await
 }
 
 #[tauri::command]
 async fn mutate_trash(
     request: TrashMutationRequest,
-    bridge: tauri::State<'_, ServiceBridge>,
-) -> Result<serde_json::Value, String> {
-    invoke_service(
-        bridge,
-        serde_json::json!({ "command": "mutateTrash", "request": request }),
-    )
-    .await
+    runtime: tauri::State<'_, RepositoryRuntime>,
+) -> Result<FileBrowserSnapshot, String> {
+    runtime
+        .run_write(move |state| state.mutate_trash(request))
+        .await
 }
 
 #[tauri::command]
 async fn create_repository(
     request: RepositoryMutationRequest,
-    bridge: tauri::State<'_, ServiceBridge>,
-) -> Result<serde_json::Value, String> {
-    invoke_service(
-        bridge,
-        serde_json::json!({ "command": "createRepository", "request": request }),
-    )
-    .await
+    runtime: tauri::State<'_, RepositoryRuntime>,
+) -> Result<RepositoryMutationResponse, String> {
+    runtime
+        .run_repository_collection_write(move |state| state.create_repository(request))
+        .await
 }
 
 #[tauri::command]
 async fn import_repository(
     request: RepositoryMutationRequest,
-    bridge: tauri::State<'_, ServiceBridge>,
-) -> Result<serde_json::Value, String> {
-    invoke_service(
-        bridge,
-        serde_json::json!({ "command": "importRepository", "request": request }),
-    )
-    .await
+    runtime: tauri::State<'_, RepositoryRuntime>,
+) -> Result<RepositoryMutationResponse, String> {
+    runtime
+        .run_repository_collection_write(move |state| state.import_repository(request))
+        .await
 }
 
 #[tauri::command]
 async fn attach_repository_folder(
     request: RepositoryFolderRequest,
-    bridge: tauri::State<'_, ServiceBridge>,
-) -> Result<serde_json::Value, String> {
-    invoke_service(
-        bridge,
-        serde_json::json!({ "command": "attachRepositoryFolder", "request": request }),
-    )
-    .await
+    runtime: tauri::State<'_, RepositoryRuntime>,
+) -> Result<RepositoryMutationResponse, String> {
+    runtime
+        .run_repository_collection_write(move |state| state.attach_repository_folder(request))
+        .await
 }
 
 #[tauri::command]
 async fn delete_repository(
     repo_id: String,
-    bridge: tauri::State<'_, ServiceBridge>,
+    runtime: tauri::State<'_, RepositoryRuntime>,
 ) -> Result<(), String> {
-    let _: serde_json::Value = invoke_service(
-        bridge,
-        serde_json::json!({ "command": "deleteRepository", "repoId": repo_id }),
-    )
-    .await?;
-    Ok(())
+    runtime
+        .run_repository_collection_write(move |state| state.delete_repository(&repo_id))
+        .await
 }
 
 #[tauri::command]
 async fn export_repository(
     request: RepositoryExportRequest,
-    bridge: tauri::State<'_, ServiceBridge>,
-) -> Result<serde_json::Value, String> {
-    invoke_service(
-        bridge,
-        serde_json::json!({ "command": "exportRepository", "request": request }),
-    )
-    .await
+    runtime: tauri::State<'_, RepositoryRuntime>,
+) -> Result<RepositoryExportResponse, String> {
+    runtime
+        .run_write(move |state| state.export_repository(request))
+        .await
 }
 
 #[tauri::command]
 async fn sync_repository(
     request: SyncRequest,
-    bridge: tauri::State<'_, ServiceBridge>,
-) -> Result<serde_json::Value, String> {
-    invoke_service(
-        bridge,
-        serde_json::json!({ "command": "syncRepository", "request": request }),
-    )
-    .await
+    runtime: tauri::State<'_, RepositoryRuntime>,
+) -> Result<SyncResult, String> {
+    runtime
+        .run_write(move |state| state.sync_repository(request))
+        .await
 }
 
 #[tauri::command]
 async fn ensure_thumbnail(
     request: ThumbnailRequest,
-    bridge: tauri::State<'_, ServiceBridge>,
-) -> Result<serde_json::Value, String> {
-    invoke_service(
-        bridge,
-        serde_json::json!({ "command": "ensureThumbnail", "request": request }),
-    )
-    .await
+    runtime: tauri::State<'_, RepositoryRuntime>,
+) -> Result<ThumbnailResponse, String> {
+    runtime
+        .run_write(move |state| state.ensure_thumbnail(request))
+        .await
 }
 
 #[tauri::command]
 async fn undo_last_revision(
     request: RevisionActionRequest,
-    bridge: tauri::State<'_, ServiceBridge>,
-) -> Result<serde_json::Value, String> {
-    invoke_service(
-        bridge,
-        serde_json::json!({ "command": "undoLastRevision", "request": request }),
-    )
-    .await
+    runtime: tauri::State<'_, RepositoryRuntime>,
+) -> Result<RevisionActionResponse, String> {
+    runtime
+        .run_write(move |state| state.undo_last_revision(request))
+        .await
 }
 
 #[tauri::command]
 async fn redo_last_revision(
     request: RevisionActionRequest,
-    bridge: tauri::State<'_, ServiceBridge>,
-) -> Result<serde_json::Value, String> {
-    invoke_service(
-        bridge,
-        serde_json::json!({ "command": "redoLastRevision", "request": request }),
-    )
-    .await
+    runtime: tauri::State<'_, RepositoryRuntime>,
+) -> Result<RevisionActionResponse, String> {
+    runtime
+        .run_write(move |state| state.redo_last_revision(request))
+        .await
 }
 
 #[tauri::command]
 async fn list_plugins(
-    bridge: tauri::State<'_, ServiceBridge>,
-) -> Result<serde_json::Value, String> {
-    invoke_service(bridge, serde_json::json!({ "command": "listPlugins" })).await
+    runtime: tauri::State<'_, RepositoryRuntime>,
+) -> Result<Vec<PluginManifest>, String> {
+    runtime.run_read(|state| state.list_plugins()).await
 }
 
 #[tauri::command]
 async fn get_cache_snapshot(
-    bridge: tauri::State<'_, ServiceBridge>,
-) -> Result<serde_json::Value, String> {
-    invoke_service(bridge, serde_json::json!({ "command": "getCacheSnapshot" })).await
+    runtime: tauri::State<'_, RepositoryRuntime>,
+) -> Result<CacheSnapshot, String> {
+    runtime.run_read(|state| state.get_cache_snapshot()).await
 }
 
 #[tauri::command]
 async fn get_api_design_snapshot(
-    bridge: tauri::State<'_, ServiceBridge>,
-) -> Result<serde_json::Value, String> {
-    invoke_service(
-        bridge,
-        serde_json::json!({ "command": "getApiDesignSnapshot" }),
-    )
-    .await
+    runtime: tauri::State<'_, RepositoryRuntime>,
+) -> Result<ApiDesignSnapshot, String> {
+    runtime
+        .run_read(|state| state.get_api_design_snapshot())
+        .await
 }
 
 fn show_main_window(app: &AppHandle) {
@@ -355,16 +291,17 @@ fn show_main_window(app: &AppHandle) {
     }
 }
 
-fn quit_app(app: &AppHandle) {
+fn persist_main_window_state(app: &AppHandle) {
     let cache = app.state::<window_state::MainWindowStateCache>();
     if let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
         window_state::persist_main_window_state(app, &cache, &window);
     } else {
         window_state::persist_cached_main_window_state(app, &cache);
     }
-    if let Some(bridge) = app.try_state::<ServiceBridge>() {
-        bridge.shutdown();
-    }
+}
+
+fn quit_app(app: &AppHandle) {
+    persist_main_window_state(app);
     app.exit(0);
 }
 
@@ -414,8 +351,8 @@ pub fn run() {
         .plugin(tauri_plugin_store::Builder::default().build())
         .manage(window_state::MainWindowStateCache::default())
         .setup(|app| {
-            let bridge = ServiceBridge::start(app.handle())?;
-            app.manage(bridge);
+            let runtime = RepositoryRuntime::start()?;
+            app.manage(runtime);
             setup_tray(app.handle())?;
 
             if let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
@@ -443,29 +380,11 @@ pub fn run() {
                         window_state::remember_main_window_state(&cache, &webview_window);
                     }
                 }
-                WindowEvent::CloseRequested { api, .. } => {
-                    if let Some(webview_window) = window.get_webview_window(MAIN_WINDOW_LABEL) {
-                        window_state::persist_main_window_state(
-                            &app_handle,
-                            &cache,
-                            &webview_window,
-                        );
-                    } else {
-                        window_state::persist_cached_main_window_state(&app_handle, &cache);
-                    }
-                    api.prevent_close();
-                    let _ = window.hide();
+                WindowEvent::CloseRequested { .. } => {
+                    quit_app(&app_handle);
                 }
                 WindowEvent::Destroyed => {
-                    if let Some(webview_window) = window.get_webview_window(MAIN_WINDOW_LABEL) {
-                        window_state::persist_main_window_state(
-                            &app_handle,
-                            &cache,
-                            &webview_window,
-                        );
-                    } else {
-                        window_state::persist_cached_main_window_state(&app_handle, &cache);
-                    }
+                    persist_main_window_state(&app_handle);
                 }
                 _ => {}
             }

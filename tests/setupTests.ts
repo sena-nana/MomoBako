@@ -1,6 +1,7 @@
 import "@testing-library/jest-dom/vitest";
 import { cleanup } from "@testing-library/vue";
 import { afterEach, vi } from "vitest";
+import type { SearchHit } from "../src/types/repository";
 
 type MockRepository = {
   repoId: string;
@@ -40,6 +41,7 @@ let mockDirectoryCreatedOnNextSync: string | null = null;
 let mockOpenerFailure: Error | null = null;
 let mockInvokeFailure: { command: string; error: Error } | null = null;
 let mockInvokeDelay: { command: string; resolve: () => void; promise: Promise<void> } | null = null;
+let mockSearchResults: SearchHit[] | null = null;
 const invokeCalls: Array<{ command: string; args?: Record<string, unknown> }> = [];
 const openerCalls: Array<{ command: "openPath" | "revealItemInDir"; path: string }> = [];
 
@@ -181,11 +183,11 @@ function restoreTrashTree(targetPath: string) {
   ));
 }
 
-function buildTree() {
+function buildTree(entries = mockEntries) {
   type TreeNode = { path: string; label: string; children: TreeNode[] };
   const roots: TreeNode[] = [];
   const nodeMap = new Map<string, TreeNode>();
-  const directoryEntries = mockEntries
+  const directoryEntries = entries
     .filter((entry) => entry.kind === "directory")
     .sort((left, right) => left.path.localeCompare(right.path));
 
@@ -212,8 +214,8 @@ function buildTree() {
   return roots;
 }
 
-function getEntriesForDirectory(directoryPath: string) {
-  return mockEntries
+function getEntriesForDirectory(entries: MockEntry[], directoryPath: string) {
+  return entries
     .filter((entry) => getParentPath(entry.path) === directoryPath)
     .sort((left, right) => {
       if (left.kind !== right.kind) {
@@ -223,8 +225,17 @@ function getEntriesForDirectory(directoryPath: string) {
     });
 }
 
-function getMockFileBrowser(directoryPath = "", includeTree = true, specialLocation?: "trash") {
-  const entries = specialLocation === "trash" ? mockTrashEntries : mockEntries;
+function getMockEntriesForRepository(repoId: string) {
+  return repoId === altSnapshot.repository.repoId ? altEntries : mockEntries;
+}
+
+function getMockSnapshot(repoId: string) {
+  return repoId === altSnapshot.repository.repoId ? altSnapshot : mockSnapshot;
+}
+
+function getMockFileBrowser(directoryPath = "", includeTree = true, specialLocation?: "trash", repoId = "repo-main-001") {
+  const entries = specialLocation === "trash" ? mockTrashEntries : getMockEntriesForRepository(repoId);
+  const snapshotSource = getMockSnapshot(repoId);
   const snapshot: {
     repoId: string;
     rootPath: string;
@@ -235,24 +246,17 @@ function getMockFileBrowser(directoryPath = "", includeTree = true, specialLocat
     tree?: ReturnType<typeof buildTree>;
     entries: ReturnType<typeof getEntriesForDirectory>;
   } = {
-    repoId: "repo-main-001",
-    rootPath: "C:/Mock/AnimeAssets",
-    backendPluginId: "builtin.local-filesystem",
-    backendKind: "filesystem",
+    repoId,
+    rootPath: snapshotSource.repository.path,
+    backendPluginId: snapshotSource.repository.backend.pluginId,
+    backendKind: snapshotSource.repository.backend.kind,
     currentPath: directoryPath,
-    entries: entries
-      .filter((entry) => getParentPath(entry.path) === directoryPath)
-      .sort((left, right) => {
-        if (left.kind !== right.kind) {
-          return left.kind === "directory" ? -1 : 1;
-        }
-        return left.path.localeCompare(right.path);
-      }),
+    entries: getEntriesForDirectory(entries, directoryPath),
   };
   if (specialLocation) {
     snapshot.specialLocation = specialLocation;
   } else if (includeTree) {
-    snapshot.tree = buildTree();
+    snapshot.tree = buildTree(entries);
   }
   return snapshot;
 }
@@ -317,6 +321,90 @@ const mockSnapshot = {
   },
 };
 
+const altRepository = {
+  repoId: "repo-alt-001",
+  name: "参考资源库",
+  path: "C:/Mock/ReferenceAssets",
+  backend: {
+    pluginId: "builtin.local-filesystem",
+    kind: "filesystem",
+    name: "Local Filesystem",
+    capabilities: ["browse", "read", "write", "watch", "sync"],
+  },
+  status: "ready",
+  assetCount: 1,
+  updatedAt: "2026-06-05T00:18:00Z",
+};
+
+const altEntries: MockEntry[] = [
+  {
+    path: "Reference",
+    name: "Reference",
+    kind: "directory",
+    extension: null,
+    sizeBytes: null,
+    sizeLabel: null,
+    modifiedAt: "2026-06-05T00:18:00Z",
+    assetId: null,
+    status: null,
+  },
+  {
+    path: "Reference/Paint",
+    name: "Paint",
+    kind: "directory",
+    extension: null,
+    sizeBytes: null,
+    sizeLabel: null,
+    modifiedAt: "2026-06-05T00:18:00Z",
+    assetId: null,
+    status: null,
+  },
+  {
+    path: "Reference/Paint/target-preview.png",
+    name: "target-preview.png",
+    kind: "file",
+    extension: "png",
+    sizeBytes: 4096,
+    sizeLabel: "4 KB",
+    modifiedAt: "2026-06-05T00:18:00Z",
+    assetId: "asset-alt-01",
+    status: "synced",
+  },
+];
+
+const altSnapshot = {
+  repository: altRepository,
+  folderLabel: "Reference",
+  folders: [
+    { path: "Reference", label: "Reference", assetCount: 1 },
+    { path: "Reference/Paint", label: "Paint", assetCount: 1 },
+  ],
+  assets: [
+    {
+      assetId: "asset-alt-01",
+      repoId: "repo-alt-001",
+      path: "Reference/Paint/target-preview.png",
+      filename: "target-preview.png",
+      extension: "png",
+      sizeBytes: 4096,
+      sizeLabel: "4 KB",
+      status: "synced",
+      modifiedAt: "2026-06-05T00:18:00Z",
+      version: 1,
+      tags: ["参考", "PNG"],
+    },
+  ],
+  metadataFields: ["note"],
+  recentRevisionCount: 1,
+  overview: {
+    totalSizeBytes: 4096,
+    totalSizeLabel: "4 KB",
+    fileCount: 1,
+    folderCount: 2,
+    readmeContent: null,
+  },
+};
+
 const mockAssetDetail = {
   summary: mockSnapshot.assets[0],
   metadata: [
@@ -354,14 +442,17 @@ vi.mock("@tauri-apps/api/core", () => ({
     if (command === "list_repositories") return mockRepositories;
     if (command === "get_repository_snapshot") {
       const repoId = typeof args?.repoId === "string" ? args.repoId : mockSnapshot.repository.repoId;
+      const snapshot = getMockSnapshot(repoId);
       return {
-        ...mockSnapshot,
-        repository: mockRepositories.find((item) => item.repoId === repoId) ?? mockSnapshot.repository,
+        ...snapshot,
+        repository: mockRepositories.find((item) => item.repoId === repoId) ?? snapshot.repository,
       };
     }
     if (command === "get_asset_detail") {
+      const repoId = typeof args?.repoId === "string" ? args.repoId : mockSnapshot.repository.repoId;
       const assetId = typeof args?.assetId === "string" ? args.assetId : "asset-01";
-      const summary = mockSnapshot.assets.find((item) => item.assetId === assetId) ?? mockSnapshot.assets[0];
+      const snapshot = getMockSnapshot(repoId);
+      const summary = snapshot.assets.find((item) => item.assetId === assetId) ?? snapshot.assets[0];
       return {
         ...mockAssetDetail,
         summary,
@@ -371,7 +462,7 @@ vi.mock("@tauri-apps/api/core", () => ({
       const request = args?.request as { query?: string } | undefined;
       return {
         query: typeof request?.query === "string" ? request.query : "",
-        results: [
+        results: mockSearchResults ?? [
           {
             repoId: "repo-main-001",
             repoName: "主资源库",
@@ -403,8 +494,13 @@ vi.mock("@tauri-apps/api/core", () => ({
       };
     }
     if (command === "get_file_browser") {
-      const request = args?.request as { directoryPath?: string; includeTree?: boolean; specialLocation?: "trash" } | undefined;
-      return getMockFileBrowser(request?.directoryPath ?? "", request?.includeTree ?? true, request?.specialLocation);
+      const request = args?.request as { repoId?: string; directoryPath?: string; includeTree?: boolean; specialLocation?: "trash" } | undefined;
+      return getMockFileBrowser(
+        request?.directoryPath ?? "",
+        request?.includeTree ?? true,
+        request?.specialLocation,
+        request?.repoId ?? "repo-main-001",
+      );
     }
     if (command === "read_file") {
       return [35, 32, 77, 111, 99, 107, 32, 102, 105, 108, 101];
@@ -771,6 +867,7 @@ afterEach(() => {
   mockOpenerFailure = null;
   mockInvokeFailure = null;
   mockInvokeDelay = null;
+  mockSearchResults = null;
   mockRepositories = [];
   mockEntries = initialEntries();
   mockTrashEntries = [];
@@ -784,6 +881,23 @@ export function getInvokeCalls(command?: string) {
 
 export function seedMockRepository() {
   mockRepositories = [mockSnapshot.repository];
+}
+
+export function seedCrossRepositorySearchHit() {
+  mockRepositories = [mockSnapshot.repository, altRepository];
+  const asset = altSnapshot.assets[0];
+  mockSearchResults = [
+    {
+      repoId: altRepository.repoId,
+      repoName: altRepository.name,
+      assetId: asset.assetId,
+      path: asset.path,
+      filename: asset.filename,
+      status: asset.status,
+      tags: asset.tags,
+      metadata: { note: "跨仓库命中" },
+    },
+  ];
 }
 
 export function setMockSavePath(path: string | null) {

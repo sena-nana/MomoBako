@@ -4,7 +4,7 @@ import { router } from "./router";
 import "./composables/useTheme";
 import { installContextMenu } from "./composables/useContextMenu";
 import { vContextMenu } from "./directives/contextMenu";
-import "./styles.css";
+import "./styles/index.css";
 
 installContextMenu();
 
