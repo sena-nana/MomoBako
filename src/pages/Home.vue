@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { convertFileSrc } from "@tauri-apps/api/core";
-import { save } from "@tauri-apps/plugin-dialog";
+import { open, save } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import {
@@ -20,6 +20,9 @@ import {
   HardDrive,
   Files,
   Download,
+  ImagePlus,
+  ImageOff,
+  Clipboard,
   RefreshCw,
   RotateCcw,
   Search,
@@ -88,6 +91,10 @@ const {
   openWorkspaceEntry,
   revealWorkspaceEntry,
   selectWorkspaceEntry,
+  setWorkspaceEntryThumbnail,
+  setWorkspaceEntryThumbnailFromBytes,
+  clearWorkspaceEntryThumbnail,
+  refreshWorkspaceEntryThumbnail,
   removeRepository,
   exportCurrentRepository,
 } = useRepositoryWorkspace();
@@ -210,6 +217,73 @@ function thumbnailSrc(entry: FileBrowserEntry) {
 
 function markThumbnailFailed(entry: FileBrowserEntry) {
   failedThumbnailPaths.value = new Set([...failedThumbnailPaths.value, entry.path]);
+}
+
+function resetThumbnailFailure(path: string) {
+  const next = new Set(failedThumbnailPaths.value);
+  next.delete(path);
+  failedThumbnailPaths.value = next;
+}
+
+async function chooseCustomThumbnail(entry: FileBrowserEntry) {
+  if (isTrashPanel.value) return;
+  const selected = await open({
+    title: "选择自定义缩略图",
+    multiple: false,
+    filters: [
+      {
+        name: "图片",
+        extensions: ["png", "jpg", "jpeg", "webp", "bmp"],
+      },
+    ],
+  });
+  if (typeof selected !== "string") return;
+  const response = await setWorkspaceEntryThumbnail(entry.path, selected);
+  if (response?.thumbnailPath) resetThumbnailFailure(entry.path);
+}
+
+async function readClipboardImageBytes() {
+  const items = await navigator.clipboard?.read?.();
+  if (!items?.length) return null;
+
+  for (const item of items) {
+    const type = item.types.find((value) => value.startsWith("image/"));
+    if (!type) continue;
+    const blob = await item.getType(type);
+    return {
+      mediaType: type,
+      bytes: Array.from(new Uint8Array(await blob.arrayBuffer())),
+    };
+  }
+
+  return null;
+}
+
+async function pasteCustomThumbnail(entry: FileBrowserEntry) {
+  if (isTrashPanel.value) return;
+  try {
+    const image = await readClipboardImageBytes();
+    if (!image) return;
+    const response = await setWorkspaceEntryThumbnailFromBytes(entry.path, image.bytes, image.mediaType);
+    if (response?.thumbnailPath) resetThumbnailFailure(entry.path);
+  } catch {
+    return;
+  }
+}
+
+async function clearCustomThumbnail(entry: FileBrowserEntry) {
+  if (isTrashPanel.value) return;
+  const response = await clearWorkspaceEntryThumbnail(entry.path);
+  resetThumbnailFailure(entry.path);
+  if (!response?.thumbnailPath && entry.kind === "file") {
+    await refreshWorkspaceEntryThumbnail(entry.path);
+  }
+}
+
+async function refreshEntryThumbnail(entry: FileBrowserEntry) {
+  if (isTrashPanel.value) return;
+  const response = await refreshWorkspaceEntryThumbnail(entry.path);
+  if (response?.thumbnailPath) resetThumbnailFailure(entry.path);
 }
 
 function entryDeletedAtLabel(entry: FileBrowserEntry) {
@@ -407,6 +481,39 @@ function fileEntryContextMenu(entry: FileBrowserEntry) {
       icon: FolderOpen,
       disabled: isTrashPanel.value,
       onSelect: () => revealWorkspaceEntry(entry.path),
+    },
+    {
+      id: "thumbnail",
+      label: "缩略图",
+      icon: FileImage,
+      disabled: isTrashPanel.value,
+      children: [
+        {
+          id: "thumbnail-custom-file",
+          label: "自定义缩略图（选择文件）",
+          icon: ImagePlus,
+          onSelect: () => chooseCustomThumbnail(entry),
+        },
+        {
+          id: "thumbnail-custom-clipboard",
+          label: "新增自定义缩略图（从剪贴板）",
+          icon: Clipboard,
+          onSelect: () => pasteCustomThumbnail(entry),
+        },
+        {
+          id: "thumbnail-clear-custom",
+          label: "取消自定义缩略图",
+          icon: ImageOff,
+          disabled: !entry.thumbnailCustom,
+          onSelect: () => clearCustomThumbnail(entry),
+        },
+        {
+          id: "thumbnail-refresh",
+          label: "刷新缩略图",
+          icon: RefreshCw,
+          onSelect: () => refreshEntryThumbnail(entry),
+        },
+      ],
     },
     {
       id: "rename",

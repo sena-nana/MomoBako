@@ -3121,6 +3121,10 @@ button.ghost.danger:hover {
   user-select: none;
 }
 
+.ctx-menu__slot {
+  position: relative;
+}
+
 .ctx-menu__item {
   display: flex;
   align-items: center;
@@ -3141,9 +3145,18 @@ button.ghost.danger:hover {
   transition: background-color 0.12s ease, color 0.12s ease;
 }
 
+.ctx-menu__slot--nested > .ctx-menu__item {
+  padding-right: 8px;
+}
+
 .ctx-menu__item:hover:not(:disabled) {
   background: var(--bg-hover);
   filter: none;
+}
+
+.ctx-menu__slot--nested:hover > .ctx-menu__item,
+.ctx-menu__slot--nested:focus-within > .ctx-menu__item {
+  background: var(--bg-hover);
 }
 
 .ctx-menu__item:disabled {
@@ -3173,6 +3186,25 @@ button.ghost.danger:hover {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.ctx-menu__chevron {
+  color: var(--text-faint);
+  font-size: 16px;
+  line-height: 1;
+}
+
+.ctx-menu__submenu {
+  display: none;
+  position: absolute;
+  left: calc(100% + 4px);
+  top: -4px;
+  max-width: min(260px, calc(100vw - 8px));
+}
+
+.ctx-menu__slot--nested:hover > .ctx-menu__submenu,
+.ctx-menu__slot--nested:focus-within > .ctx-menu__submenu {
+  display: flex;
 }
 
 .modal-overlay {

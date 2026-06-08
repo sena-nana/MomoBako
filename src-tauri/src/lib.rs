@@ -16,10 +16,10 @@ pub mod service_process;
 mod window_state;
 
 use repository_service::{
-    FileBrowserRequest, FileCreateRequest, FileDeleteRequest, FileImportRequest, FileReadRequest,
-    FileRenameRequest, MetadataUpdateRequest, RepositoryExportRequest, RepositoryFolderRequest,
-    RepositoryMutationRequest, RevisionActionRequest, SearchRequest, SyncRequest, ThumbnailRequest,
-    TrashMutationRequest,
+    FileBrowserRequest, FileCreateRequest, FileDeleteRequest, FileImportRequest,
+    FilePreviewSourceResponse, FileReadRequest, FileRenameRequest, MetadataUpdateRequest,
+    RepositoryExportRequest, RepositoryFolderRequest, RepositoryMutationRequest,
+    RevisionActionRequest, SearchRequest, SyncRequest, ThumbnailRequest, TrashMutationRequest,
 };
 use service_process::ServiceBridge;
 
@@ -124,6 +124,21 @@ async fn read_file(
         serde_json::json!({ "command": "readFile", "request": request }),
     )
     .await
+}
+
+#[tauri::command]
+async fn prepare_preview_file_source(
+    request: FileReadRequest,
+    bridge: tauri::State<'_, ServiceBridge>,
+) -> Result<FilePreviewSourceResponse, String> {
+    let bridge_for_url = bridge.inner().clone();
+    let mut response: FilePreviewSourceResponse = invoke_service(
+        bridge,
+        serde_json::json!({ "command": "preparePreviewFileSource", "request": request }),
+    )
+    .await?;
+    response.source_url = Some(bridge_for_url.preview_source_url(&response.token));
+    Ok(response)
 }
 
 #[tauri::command]
@@ -464,6 +479,7 @@ pub fn run() {
             update_asset_metadata,
             get_file_browser,
             read_file,
+            prepare_preview_file_source,
             create_directory,
             create_file,
             import_entries,

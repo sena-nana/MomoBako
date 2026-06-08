@@ -66,6 +66,8 @@
   - thumbnail cache
   - query cache
 - Current UI surfaces capacities and recent entries
+- Thumbnail cache files use sha256 hex filenames; 3D preview thumbnails are rendered on the frontend and persisted through the thumbnail API.
+- Large local preview files are exposed to preview plugins through session-scoped service-process URLs so the UI does not marshal full file bytes through the Tauri command bridge.
 
 ## Plugin Architecture
 

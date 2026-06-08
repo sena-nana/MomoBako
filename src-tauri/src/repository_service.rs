@@ -1,5 +1,6 @@
 use rusqlite::{params, types::Type, Connection, OptionalExtension, Transaction};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::{
     collections::BTreeMap,
     ffi::OsString,
@@ -21,9 +22,6 @@ const REPO_METADATA_FILE_NAME: &str = "repository.json";
 const REPO_DB_FILE_NAME: &str = "metadata.db";
 const REPO_SCHEMA_VERSION: i64 = 1;
 const THUMBNAIL_SIZE: u32 = 256;
-const THUMBNAIL_CACHE_PREFIX_CHARS: usize = 48;
-const FNV_OFFSET_BASIS: u64 = 0xcbf29ce484222325;
-const FNV_PRIME: u64 = 0x100000001b3;
 
 static FFMPEG_READY: OnceLock<Result<(), String>> = OnceLock::new();
 
@@ -87,6 +85,16 @@ CREATE TABLE IF NOT EXISTS assets (
 CREATE UNIQUE INDEX IF NOT EXISTS idx_assets_repo_path ON assets(repo_id, path);
 CREATE INDEX IF NOT EXISTS idx_assets_repo_filename ON assets(repo_id, filename);
 CREATE INDEX IF NOT EXISTS idx_assets_repo_status ON assets(repo_id, status);
+
+CREATE TABLE IF NOT EXISTS entry_thumbnails (
+  repo_id TEXT NOT NULL,
+  path TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  thumbnail_path TEXT NOT NULL,
+  custom INTEGER NOT NULL DEFAULT 0,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY(repo_id, path, kind)
+);
 
 CREATE TABLE IF NOT EXISTS metadata (
   asset_id TEXT NOT NULL,
@@ -288,6 +296,7 @@ pub struct FileBrowserEntry {
     pub asset_id: Option<String>,
     pub status: Option<String>,
     pub thumbnail_path: Option<String>,
+    pub thumbnail_custom: bool,
     pub metadata: BTreeMap<String, serde_json::Value>,
 }
 
@@ -423,6 +432,20 @@ pub struct FileReadRequest {
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct FilePreviewSourceResponse {
+    pub repo_id: String,
+    pub path: String,
+    pub token: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_url: Option<String>,
+    pub media_type: String,
+    pub size_bytes: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub modified_at: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct FileCreateRequest {
     pub repo_id: String,
     pub parent_path: Option<String>,
@@ -476,6 +499,12 @@ struct TrashManifestEntry {
     kind: String,
 }
 
+#[derive(Debug)]
+struct ThumbnailRecord {
+    path: String,
+    custom: bool,
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RepositoryMutationResponse {
@@ -493,6 +522,10 @@ pub struct SyncRequest {
 pub struct ThumbnailRequest {
     pub repo_id: String,
     pub path: String,
+    pub action: Option<String>,
+    pub source_path: Option<String>,
+    pub image_bytes: Option<Vec<u8>>,
+    pub media_type: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -501,7 +534,9 @@ pub struct ThumbnailResponse {
     pub repo_id: String,
     pub path: String,
     pub asset_id: String,
+    pub kind: String,
     pub thumbnail_path: Option<String>,
+    pub thumbnail_custom: bool,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -632,6 +667,12 @@ struct RepositoryStoragePaths {
 }
 
 #[derive(Debug, Clone)]
+struct PreviewFileSource {
+    path: PathBuf,
+    media_type: String,
+}
+
+#[derive(Debug, Clone)]
 struct FileSystemPluginDescriptor {
     plugin_id: &'static str,
     kind: &'static str,
@@ -734,6 +775,7 @@ pub struct RepositoryState {
     thumbnail_root: PathBuf,
     registry_path: PathBuf,
     initialized: Mutex<bool>,
+    preview_sources: Mutex<BTreeMap<String, PreviewFileSource>>,
 }
 
 impl RepositoryState {
@@ -744,6 +786,7 @@ impl RepositoryState {
             thumbnail_root,
             registry_path,
             initialized: Mutex::new(false),
+            preview_sources: Mutex::new(BTreeMap::new()),
         }
     }
 
@@ -1053,6 +1096,8 @@ impl RepositoryState {
             &repo.backend_record,
         )?;
         let asset_map = load_asset_path_map(&connection, &request.repo_id).map_err(db_error)?;
+        let thumbnail_map =
+            load_entry_thumbnail_map(&connection, &request.repo_id).map_err(db_error)?;
         let special_location = normalize_special_location(request.special_location.as_deref())?;
         if special_location.is_some() && repo.backend_record.plugin_id != LOCAL_FILESYSTEM_PLUGIN_ID
         {
@@ -1071,9 +1116,15 @@ impl RepositoryState {
             None
         };
         let entries = if special_location.as_deref() == Some("trash") {
-            list_trash_directory_entries(&repo_root, &current_path, &asset_map)?
+            list_trash_directory_entries(&repo_root, &current_path, &asset_map, &thumbnail_map)?
         } else {
-            list_backend_directory_entries(&repo, &repo_root, &current_path, &asset_map)?
+            list_backend_directory_entries(
+                &repo,
+                &repo_root,
+                &current_path,
+                &asset_map,
+                &thumbnail_map,
+            )?
         };
 
         Ok(FileBrowserSnapshot {
@@ -1110,6 +1161,91 @@ impl RepositoryState {
         }
 
         fs::read(file_path).map_err(io_error)
+    }
+
+    pub fn prepare_preview_file_source(
+        &self,
+        request: FileReadRequest,
+    ) -> Result<FilePreviewSourceResponse, String> {
+        self.ensure_initialized()?;
+
+        let repo = self.load_repository_record(&request.repo_id)?;
+        if repo.backend_record.plugin_id != LOCAL_FILESYSTEM_PLUGIN_ID {
+            return Err(format!(
+                "file preview source is not available for backend: {}",
+                repo.backend_record.plugin_id
+            ));
+        }
+
+        let entry_path = normalize_entry_path(&request.path)?;
+        let repo_root = PathBuf::from(&repo.summary.path);
+        let file_path = resolve_repository_relative_path(&repo_root, &entry_path)?;
+        if !file_path.exists() {
+            return Err(format!("file not found: {entry_path}"));
+        }
+        if !file_path.is_file() {
+            return Err(format!("path is not a file: {entry_path}"));
+        }
+
+        let metadata = fs::metadata(&file_path).map_err(io_error)?;
+        let modified_at = metadata
+            .modified()
+            .ok()
+            .map(system_time_to_rfc3339)
+            .transpose()
+            .map_err(time_error)?;
+        let extension = file_path
+            .extension()
+            .map(|value| value.to_string_lossy().to_lowercase())
+            .unwrap_or_default();
+        let media_type = preview_media_type_for_extension(&extension).to_string();
+        let token = preview_file_token(
+            &repo.summary.repo_id,
+            &repo.summary.path,
+            &entry_path,
+            metadata.len(),
+            modified_at.as_deref().unwrap_or_default(),
+        );
+
+        self.preview_sources
+            .lock()
+            .map_err(|_| "preview source lock poisoned".to_string())?
+            .insert(
+                token.clone(),
+                PreviewFileSource {
+                    path: file_path,
+                    media_type: media_type.clone(),
+                },
+            );
+
+        Ok(FilePreviewSourceResponse {
+            repo_id: request.repo_id,
+            path: entry_path,
+            token,
+            source_url: None,
+            media_type,
+            size_bytes: metadata.len() as i64,
+            modified_at,
+        })
+    }
+
+    pub fn open_preview_file_source(
+        &self,
+        token: &str,
+    ) -> Result<(fs::File, String, u64), String> {
+        let source = self
+            .preview_sources
+            .lock()
+            .map_err(|_| "preview source lock poisoned".to_string())?
+            .get(token)
+            .cloned()
+            .ok_or_else(|| "preview source not found".to_string())?;
+        if !source.path.is_file() {
+            return Err("preview source file is no longer available".to_string());
+        }
+        let metadata = fs::metadata(&source.path).map_err(io_error)?;
+        let file = fs::File::open(&source.path).map_err(io_error)?;
+        Ok((file, source.media_type, metadata.len()))
     }
 
     pub fn search_assets(&self, request: SearchRequest) -> Result<SearchResponse, String> {
@@ -1269,11 +1405,92 @@ impl RepositoryState {
         let repo = self.load_repository_record(&request.repo_id)?;
         let entry_path = normalize_entry_path(&request.path)?;
         let repo_root = PathBuf::from(&repo.summary.path);
+        let entry = stat_backend_entry(&repo, &repo_root, &entry_path)?;
         let connection = self.open_repository_connection(
             &repo.summary.repo_id,
             &repo.summary.path,
             &repo.backend_record,
         )?;
+        let action = request.action.as_deref().unwrap_or("ensure");
+        let kind = match entry.kind {
+            FileSystemEntryKind::Directory => "directory",
+            FileSystemEntryKind::File => "file",
+        };
+
+        if kind == "directory" {
+            let response = match action {
+                "ensure" => {
+                    let record =
+                        load_entry_thumbnail_record(&connection, &request.repo_id, &entry_path, kind)
+                            .map_err(db_error)?;
+                    record
+                        .filter(|record| thumbnail_path_is_valid(&self.thumbnail_root, &record.path))
+                        .map(|record| (Some(record.path), record.custom))
+                        .unwrap_or((None, false))
+                }
+                "save" => {
+                    let bytes = thumbnail_bytes_from_request(&request)?;
+                    let thumbnail_path = save_custom_thumbnail_bytes(
+                        &self.thumbnail_root,
+                        &repo,
+                        &entry_path,
+                        kind,
+                        &bytes,
+                    )?;
+                    upsert_entry_thumbnail_record(
+                        &connection,
+                        &request.repo_id,
+                        &entry_path,
+                        kind,
+                        &thumbnail_path,
+                        true,
+                    )
+                    .map_err(db_error)?;
+                    (Some(thumbnail_path), true)
+                }
+                "saveGenerated" => {
+                    let bytes = thumbnail_bytes_from_request(&request)?;
+                    let thumbnail_path = save_thumbnail_bytes(
+                        &self.thumbnail_root,
+                        &repo,
+                        &entry_path,
+                        kind,
+                        "generated",
+                        &bytes,
+                    )?;
+                    upsert_entry_thumbnail_record(
+                        &connection,
+                        &request.repo_id,
+                        &entry_path,
+                        kind,
+                        &thumbnail_path,
+                        false,
+                    )
+                    .map_err(db_error)?;
+                    (Some(thumbnail_path), false)
+                }
+                "clear" => {
+                    remove_entry_thumbnail_record(&connection, &request.repo_id, &entry_path, kind)
+                        .map_err(db_error)?;
+                    (None, false)
+                }
+                "refresh" => {
+                    remove_entry_thumbnail_record(&connection, &request.repo_id, &entry_path, kind)
+                        .map_err(db_error)?;
+                    (None, false)
+                }
+                value => return Err(format!("unsupported thumbnail action: {value}")),
+            };
+
+            return Ok(ThumbnailResponse {
+                repo_id: request.repo_id,
+                path: entry_path,
+                asset_id: String::new(),
+                kind: kind.to_string(),
+                thumbnail_path: response.0,
+                thumbnail_custom: response.1,
+            });
+        }
 
         let asset = connection
             .query_row(
@@ -1307,33 +1524,102 @@ impl RepositoryState {
             size_bytes,
             modified_at,
         };
-        let thumbnail_path = ensure_thumbnail_for_file(
-            &repo,
-            &repo_root,
-            &self.thumbnail_root,
-            &asset_id,
-            &file,
-            existing_thumbnail_path,
-        )?;
-
-        if let Some(path) = &thumbnail_path {
-            connection
-                .execute(
-                    r#"
-                    UPDATE assets
-                    SET thumbnail_path = ?3, updated_at = ?4
-                    WHERE repo_id = ?1 AND asset_id = ?2
-                    "#,
-                    params![&request.repo_id, &asset_id, path, now_rfc3339()],
+        let existing_record =
+            load_entry_thumbnail_record(&connection, &request.repo_id, &entry_path, kind)
+                .map_err(db_error)?;
+        let custom_record = existing_record
+            .filter(|record| record.custom && thumbnail_path_is_valid(&self.thumbnail_root, &record.path));
+        let (thumbnail_path, thumbnail_custom) = match action {
+            "ensure" => {
+                if let Some(record) = custom_record {
+                    (Some(record.path), true)
+                } else {
+                    (
+                        ensure_thumbnail_for_file(
+                            &repo,
+                            &repo_root,
+                            &self.thumbnail_root,
+                            &file,
+                            existing_thumbnail_path,
+                            false,
+                        )?,
+                        false,
+                    )
+                }
+            }
+            "refresh" => (
+                ensure_thumbnail_for_file(
+                    &repo,
+                    &repo_root,
+                    &self.thumbnail_root,
+                    &file,
+                    existing_thumbnail_path,
+                    true,
+                )?,
+                false,
+            ),
+            "save" => {
+                let bytes = thumbnail_bytes_from_request(&request)?;
+                let thumbnail_path = save_custom_thumbnail_bytes(
+                    &self.thumbnail_root,
+                    &repo,
+                    &entry_path,
+                    kind,
+                    &bytes,
+                )?;
+                upsert_entry_thumbnail_record(
+                    &connection,
+                    &request.repo_id,
+                    &entry_path,
+                    kind,
+                    &thumbnail_path,
+                    true,
                 )
                 .map_err(db_error)?;
+                (Some(thumbnail_path), true)
+            }
+            "saveGenerated" => {
+                let bytes = thumbnail_bytes_from_request(&request)?;
+                let thumbnail_path = save_thumbnail_bytes(
+                    &self.thumbnail_root,
+                    &repo,
+                    &entry_path,
+                    kind,
+                    "generated",
+                    &bytes,
+                )?;
+                remove_entry_thumbnail_record(&connection, &request.repo_id, &entry_path, kind)
+                    .map_err(db_error)?;
+                (Some(thumbnail_path), false)
+            }
+            "clear" => {
+                remove_entry_thumbnail_record(&connection, &request.repo_id, &entry_path, kind)
+                    .map_err(db_error)?;
+                (existing_thumbnail_path, false)
+            }
+            value => return Err(format!("unsupported thumbnail action: {value}")),
+        };
+
+        if thumbnail_custom {
+            update_asset_thumbnail_path(&connection, &request.repo_id, &asset_id, None)
+                .map_err(db_error)?;
+        } else {
+            update_asset_thumbnail_path(
+                &connection,
+                &request.repo_id,
+                &asset_id,
+                thumbnail_path.as_deref(),
+            )
+            .map_err(db_error)?;
         }
 
         Ok(ThumbnailResponse {
             repo_id: request.repo_id,
             path: entry_path,
             asset_id,
+            kind: kind.to_string(),
             thumbnail_path,
+            thumbnail_custom,
         })
     }
 
@@ -1867,6 +2153,128 @@ fn load_asset_path_map(
         map.insert(path, (asset_id, status, thumbnail_path));
     }
     Ok(map)
+}
+
+fn load_entry_thumbnail_map(
+    connection: &Connection,
+    repo_id: &str,
+) -> Result<BTreeMap<(String, String), ThumbnailRecord>, rusqlite::Error> {
+    let mut stmt = connection.prepare(
+        r#"
+        SELECT path, kind, thumbnail_path, custom
+        FROM entry_thumbnails
+        WHERE repo_id = ?1
+        "#,
+    )?;
+
+    let rows = stmt.query_map([repo_id], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+            row.get::<_, i64>(3)?,
+        ))
+    })?;
+
+    let mut map = BTreeMap::new();
+    for row in rows {
+        let (path, kind, thumbnail_path, custom) = row?;
+        map.insert(
+            (path, kind),
+            ThumbnailRecord {
+                path: thumbnail_path,
+                custom: custom != 0,
+            },
+        );
+    }
+    Ok(map)
+}
+
+fn load_entry_thumbnail_record(
+    connection: &Connection,
+    repo_id: &str,
+    path: &str,
+    kind: &str,
+) -> Result<Option<ThumbnailRecord>, rusqlite::Error> {
+    connection
+        .query_row(
+            r#"
+            SELECT thumbnail_path, custom
+            FROM entry_thumbnails
+            WHERE repo_id = ?1 AND path = ?2 AND kind = ?3
+            "#,
+            params![repo_id, path, kind],
+            |row| {
+                Ok(ThumbnailRecord {
+                    path: row.get(0)?,
+                    custom: row.get::<_, i64>(1)? != 0,
+                })
+            },
+        )
+        .optional()
+}
+
+fn upsert_entry_thumbnail_record(
+    connection: &Connection,
+    repo_id: &str,
+    path: &str,
+    kind: &str,
+    thumbnail_path: &str,
+    custom: bool,
+) -> Result<(), rusqlite::Error> {
+    connection.execute(
+        r#"
+        INSERT INTO entry_thumbnails (repo_id, path, kind, thumbnail_path, custom, updated_at)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+        ON CONFLICT(repo_id, path, kind)
+        DO UPDATE SET
+          thumbnail_path = excluded.thumbnail_path,
+          custom = excluded.custom,
+          updated_at = excluded.updated_at
+        "#,
+        params![
+            repo_id,
+            path,
+            kind,
+            thumbnail_path,
+            if custom { 1 } else { 0 },
+            now_rfc3339()
+        ],
+    )?;
+    Ok(())
+}
+
+fn remove_entry_thumbnail_record(
+    connection: &Connection,
+    repo_id: &str,
+    path: &str,
+    kind: &str,
+) -> Result<(), rusqlite::Error> {
+    connection.execute(
+        r#"
+        DELETE FROM entry_thumbnails
+        WHERE repo_id = ?1 AND path = ?2 AND kind = ?3
+        "#,
+        params![repo_id, path, kind],
+    )?;
+    Ok(())
+}
+
+fn update_asset_thumbnail_path(
+    connection: &Connection,
+    repo_id: &str,
+    asset_id: &str,
+    thumbnail_path: Option<&str>,
+) -> Result<(), rusqlite::Error> {
+    connection.execute(
+        r#"
+        UPDATE assets
+        SET thumbnail_path = ?3, updated_at = ?4
+        WHERE repo_id = ?1 AND asset_id = ?2
+        "#,
+        params![repo_id, asset_id, thumbnail_path, now_rfc3339()],
+    )?;
+    Ok(())
 }
 
 fn load_folder_summaries(
@@ -2482,10 +2890,7 @@ fn sync_repository_files(
             )?;
             created_events += 1;
         } else {
-            let asset_id = format!(
-                "asset-{}",
-                slugify_repo_id(&file.filename, &file.relative_path)
-            );
+            let asset_id = asset_id_for_path(&repo.summary.repo_id, &file.relative_path);
             tx.execute(
                 r#"
                 INSERT INTO assets (
@@ -2817,7 +3222,6 @@ fn generate_thumbnail_for_file(
     repo: &RepositoryRecord,
     repo_root: &Path,
     thumbnail_root: &Path,
-    asset_id: &str,
     file: &DiscoveredFile,
 ) -> Result<Option<String>, String> {
     if repo.backend_record.plugin_id != LOCAL_FILESYSTEM_PLUGIN_ID {
@@ -2835,7 +3239,13 @@ fn generate_thumbnail_for_file(
         &repo.summary.path,
     ));
     fs::create_dir_all(&thumbnail_dir).map_err(io_error)?;
-    let thumbnail_path = thumbnail_dir.join(thumbnail_file_name(asset_id, &file.relative_path));
+    let thumbnail_path = thumbnail_dir.join(thumbnail_file_name(
+        &repo.summary.repo_id,
+        &repo.summary.path,
+        &file.relative_path,
+        "file",
+        "generated",
+    ));
 
     let generated = if is_image_extension(&extension) {
         generate_image_thumbnail(&source_path, &thumbnail_path)
@@ -2860,22 +3270,146 @@ fn ensure_thumbnail_for_file(
     repo: &RepositoryRecord,
     repo_root: &Path,
     thumbnail_root: &Path,
-    asset_id: &str,
     file: &DiscoveredFile,
     existing_thumbnail_path: Option<String>,
+    refresh: bool,
 ) -> Result<Option<String>, String> {
-    if let Some(path) = existing_thumbnail_path {
-        let expected_dir = thumbnail_root.join(thumbnail_repository_dir_name(
-            &repo.summary.repo_id,
-            &repo.summary.path,
-        ));
-        let thumbnail_path = Path::new(&path);
-        if thumbnail_path.starts_with(&expected_dir) && thumbnail_path.is_file() {
-            return Ok(Some(path));
+    if !refresh {
+        if let Some(path) = existing_thumbnail_path {
+            let expected_dir = thumbnail_root.join(thumbnail_repository_dir_name(
+                &repo.summary.repo_id,
+                &repo.summary.path,
+            ));
+            let thumbnail_path = Path::new(&path);
+            if thumbnail_path.starts_with(&expected_dir) && thumbnail_path.is_file() {
+                return Ok(Some(path));
+            }
         }
     }
 
-    generate_thumbnail_for_file(repo, repo_root, thumbnail_root, asset_id, file)
+    generate_thumbnail_for_file(repo, repo_root, thumbnail_root, file)
+}
+
+fn thumbnail_path_is_valid(thumbnail_root: &Path, path: &str) -> bool {
+    let thumbnail_path = Path::new(path);
+    thumbnail_path.starts_with(thumbnail_root) && thumbnail_path.is_file()
+}
+
+fn thumbnail_bytes_from_request(request: &ThumbnailRequest) -> Result<Vec<u8>, String> {
+    if let Some(bytes) = &request.image_bytes {
+        return Ok(bytes.clone());
+    }
+
+    let source_path = request
+        .source_path
+        .as_deref()
+        .ok_or_else(|| "thumbnail source is required".to_string())?;
+    let path = Path::new(source_path);
+    if !path.is_file() {
+        return Err(format!("thumbnail source file not found: {source_path}"));
+    }
+    fs::read(path).map_err(io_error)
+}
+
+fn save_custom_thumbnail_bytes(
+    thumbnail_root: &Path,
+    repo: &RepositoryRecord,
+    entry_path: &str,
+    kind: &str,
+    bytes: &[u8],
+) -> Result<String, String> {
+    save_thumbnail_bytes(thumbnail_root, repo, entry_path, kind, "custom", bytes)
+}
+
+fn save_thumbnail_bytes(
+    thumbnail_root: &Path,
+    repo: &RepositoryRecord,
+    entry_path: &str,
+    kind: &str,
+    source: &str,
+    bytes: &[u8],
+) -> Result<String, String> {
+    if bytes.is_empty() {
+        return Err("thumbnail image is empty".to_string());
+    }
+
+    let thumbnail_dir = thumbnail_root.join(thumbnail_repository_dir_name(
+        &repo.summary.repo_id,
+        &repo.summary.path,
+    ));
+    fs::create_dir_all(&thumbnail_dir).map_err(io_error)?;
+    let thumbnail_path = thumbnail_dir.join(thumbnail_file_name(
+        &repo.summary.repo_id,
+        &repo.summary.path,
+        entry_path,
+        kind,
+        source,
+    ));
+    let image = image::load_from_memory(bytes)
+        .map_err(|error| format!("thumbnail image error: {error}"))?;
+    let thumbnail = image.thumbnail(THUMBNAIL_SIZE, THUMBNAIL_SIZE);
+    thumbnail
+        .save_with_format(&thumbnail_path, image::ImageFormat::Jpeg)
+        .map_err(|error| format!("thumbnail image error: {error}"))?;
+    Ok(thumbnail_path.to_string_lossy().to_string())
+}
+
+fn thumbnail_repository_dir_name(repo_id: &str, repo_path: &str) -> String {
+    sha256_hex(&[repo_id.as_bytes(), repo_path.as_bytes()])
+}
+
+fn thumbnail_file_name(
+    repo_id: &str,
+    repo_path: &str,
+    entry_path: &str,
+    kind: &str,
+    source: &str,
+) -> String {
+    format!(
+        "{}.jpg",
+        sha256_hex(&[
+            repo_id.as_bytes(),
+            repo_path.as_bytes(),
+            entry_path.as_bytes(),
+            kind.as_bytes(),
+            source.as_bytes(),
+        ])
+    )
+}
+
+fn preview_file_token(
+    repo_id: &str,
+    repo_path: &str,
+    entry_path: &str,
+    size_bytes: u64,
+    modified_at: &str,
+) -> String {
+    sha256_hex(&[
+        repo_id.as_bytes(),
+        repo_path.as_bytes(),
+        entry_path.as_bytes(),
+        size_bytes.to_string().as_bytes(),
+        modified_at.as_bytes(),
+    ])
+}
+
+fn preview_media_type_for_extension(extension: &str) -> &'static str {
+    match extension {
+        "glb" => "model/gltf-binary",
+        "gltf" => "model/gltf+json",
+        "obj" => "text/plain",
+        "fbx" => "application/octet-stream",
+        _ => "application/octet-stream",
+    }
+}
+
+fn sha256_hex(parts: &[&[u8]]) -> String {
+    let mut hash = Sha256::new();
+    for part in parts {
+        hash.update(part);
+        hash.update([0xff]);
+    }
+    hex::encode(hash.finalize())
 }
 
 fn generate_image_thumbnail(source_path: &Path, thumbnail_path: &Path) -> Result<(), String> {
@@ -2955,26 +3489,11 @@ fn slugify_repo_id(name: &str, path: &str) -> String {
     slugify_ascii_component(&format!("{name}-{path}"))
 }
 
-fn thumbnail_repository_dir_name(repo_id: &str, repo_path: &str) -> String {
-    compact_thumbnail_component(repo_id, &[repo_id, repo_path])
-}
-
-fn thumbnail_file_name(asset_id: &str, relative_path: &str) -> String {
+fn asset_id_for_path(repo_id: &str, relative_path: &str) -> String {
     format!(
-        "{}.jpg",
-        compact_thumbnail_component(asset_id, &[asset_id, relative_path])
+        "asset-{}",
+        sha256_hex(&[repo_id.as_bytes(), relative_path.as_bytes()])
     )
-}
-
-fn compact_thumbnail_component(label: &str, hash_parts: &[&str]) -> String {
-    let slug = slugify_ascii_component(label);
-    let slug = if slug.is_empty() {
-        "thumbnail".to_string()
-    } else {
-        slug
-    };
-    let prefix = safe_prefix(&slug, THUMBNAIL_CACHE_PREFIX_CHARS);
-    format!("{prefix}-{}", stable_hash_hex(hash_parts))
 }
 
 fn slugify_ascii_component(value: &str) -> String {
@@ -2989,19 +3508,6 @@ fn slugify_ascii_component(value: &str) -> String {
         })
         .collect::<String>();
     slug.trim_matches('-').to_string()
-}
-
-fn stable_hash_hex(parts: &[&str]) -> String {
-    let mut hash = FNV_OFFSET_BASIS;
-    for part in parts {
-        for byte in part.as_bytes() {
-            hash ^= u64::from(*byte);
-            hash = hash.wrapping_mul(FNV_PRIME);
-        }
-        hash ^= 0xff;
-        hash = hash.wrapping_mul(FNV_PRIME);
-    }
-    format!("{hash:016x}")
 }
 
 fn default_plugins() -> Vec<PluginManifest> {
@@ -3130,6 +3636,12 @@ fn default_api_definitions() -> Vec<ApiDefinition> {
             method: "POST".to_string(),
             path: "/repositories/{repoId}/thumbnails:ensure".to_string(),
             summary: "按需复用或生成单个资产缩略图。".to_string(),
+        },
+        ApiDefinition {
+            group: "Preview API".to_string(),
+            method: "POST".to_string(),
+            path: "/repositories/{repoId}/files:preparePreviewSource".to_string(),
+            summary: "为本地文件预览准备流式读取源。".to_string(),
         },
         ApiDefinition {
             group: "Metadata API".to_string(),
@@ -3284,6 +3796,19 @@ fn migrate_repository_schema(connection: &Connection) -> Result<(), rusqlite::Er
     if !columns.iter().any(|column| column == "thumbnail_path") {
         connection.execute("ALTER TABLE assets ADD COLUMN thumbnail_path TEXT", [])?;
     }
+    connection.execute_batch(
+        r#"
+        CREATE TABLE IF NOT EXISTS entry_thumbnails (
+          repo_id TEXT NOT NULL,
+          path TEXT NOT NULL,
+          kind TEXT NOT NULL,
+          thumbnail_path TEXT NOT NULL,
+          custom INTEGER NOT NULL DEFAULT 0,
+          updated_at TEXT NOT NULL,
+          PRIMARY KEY(repo_id, path, kind)
+        );
+        "#,
+    )?;
     Ok(())
 }
 
@@ -4450,19 +4975,21 @@ fn list_backend_directory_entries(
     repo_root: &Path,
     current_path: &str,
     asset_map: &BTreeMap<String, (String, String, Option<String>)>,
+    thumbnail_map: &BTreeMap<(String, String), ThumbnailRecord>,
 ) -> Result<Vec<FileBrowserEntry>, String> {
     let entries = backend_adapter(repo).list_directory_entries(
         repo_root,
         current_path,
         &repo.backend_record.config,
     )?;
-    Ok(map_file_browser_entries(entries, asset_map))
+    Ok(map_file_browser_entries(entries, asset_map, thumbnail_map))
 }
 
 fn list_trash_directory_entries(
     repo_root: &Path,
     current_path: &str,
     asset_map: &BTreeMap<String, (String, String, Option<String>)>,
+    thumbnail_map: &BTreeMap<(String, String), ThumbnailRecord>,
 ) -> Result<Vec<FileBrowserEntry>, String> {
     let trash_root = repository_trash_dir(repo_root);
     fs::create_dir_all(&trash_root).map_err(io_error)?;
@@ -4473,7 +5000,12 @@ fn list_trash_directory_entries(
     }
 
     let entries = local_directory_entries(&trash_root, &current_dir)?;
-    Ok(map_trash_browser_entries(entries, asset_map, &manifest))
+    Ok(map_trash_browser_entries(
+        entries,
+        asset_map,
+        thumbnail_map,
+        &manifest,
+    ))
 }
 
 fn create_backend_directory(
@@ -4741,6 +5273,7 @@ fn build_directory_node(repo_root: &Path, relative_path: &str) -> Result<FileTre
 fn map_file_browser_entries(
     mut entries: Vec<FileSystemEntry>,
     asset_map: &BTreeMap<String, (String, String, Option<String>)>,
+    thumbnail_map: &BTreeMap<(String, String), ThumbnailRecord>,
 ) -> Vec<FileBrowserEntry> {
     entries.sort_by(|left, right| match (&left.kind, &right.kind) {
         (FileSystemEntryKind::Directory, FileSystemEntryKind::File) => std::cmp::Ordering::Less,
@@ -4751,7 +5284,11 @@ fn map_file_browser_entries(
     entries
         .into_iter()
         .map(|entry| {
-            let (asset_id, status, thumbnail_path) = asset_map
+            let kind = match entry.kind {
+                FileSystemEntryKind::Directory => "directory",
+                FileSystemEntryKind::File => "file",
+            };
+            let (asset_id, status, asset_thumbnail_path) = asset_map
                 .get(&entry.path)
                 .map(|(id, entry_status, thumbnail)| {
                     (
@@ -4761,14 +5298,16 @@ fn map_file_browser_entries(
                     )
                 })
                 .unwrap_or((None, None, None));
+            let entry_thumbnail = thumbnail_map.get(&(entry.path.clone(), kind.to_string()));
+            let thumbnail_path = entry_thumbnail
+                .map(|record| record.path.clone())
+                .or(asset_thumbnail_path);
+            let thumbnail_custom = entry_thumbnail.map(|record| record.custom).unwrap_or(false);
             let size_bytes = entry.size_bytes;
             FileBrowserEntry {
                 path: entry.path.clone(),
                 name: entry.name,
-                kind: match entry.kind {
-                    FileSystemEntryKind::Directory => "directory".to_string(),
-                    FileSystemEntryKind::File => "file".to_string(),
-                },
+                kind: kind.to_string(),
                 extension: entry.extension,
                 size_bytes,
                 size_label: size_bytes.map(format_size_label),
@@ -4776,6 +5315,7 @@ fn map_file_browser_entries(
                 asset_id,
                 status,
                 thumbnail_path,
+                thumbnail_custom,
                 metadata: BTreeMap::new(),
             }
         })
@@ -4785,6 +5325,7 @@ fn map_file_browser_entries(
 fn map_trash_browser_entries(
     mut entries: Vec<FileSystemEntry>,
     asset_map: &BTreeMap<String, (String, String, Option<String>)>,
+    thumbnail_map: &BTreeMap<(String, String), ThumbnailRecord>,
     manifest: &TrashManifest,
 ) -> Vec<FileBrowserEntry> {
     entries.sort_by(|left, right| match (&left.kind, &right.kind) {
@@ -4801,7 +5342,11 @@ fn map_trash_browser_entries(
             let original_path = manifest_entry
                 .map(|item| original_path_for_trash_path(item, &trash_path))
                 .unwrap_or_else(|| trash_path.clone());
-            let (asset_id, status, thumbnail_path) = asset_map
+            let kind = match entry.kind {
+                FileSystemEntryKind::Directory => "directory",
+                FileSystemEntryKind::File => "file",
+            };
+            let (asset_id, status, asset_thumbnail_path) = asset_map
                 .get(&original_path)
                 .map(|(id, entry_status, thumbnail)| {
                     (
@@ -4811,6 +5356,11 @@ fn map_trash_browser_entries(
                     )
                 })
                 .unwrap_or((None, Some("deleted".to_string()), None));
+            let entry_thumbnail = thumbnail_map.get(&(original_path.clone(), kind.to_string()));
+            let thumbnail_path = entry_thumbnail
+                .map(|record| record.path.clone())
+                .or(asset_thumbnail_path);
+            let thumbnail_custom = entry_thumbnail.map(|record| record.custom).unwrap_or(false);
             let mut metadata = BTreeMap::new();
             if let Some(item) = manifest_entry {
                 metadata.insert(
@@ -4826,10 +5376,7 @@ fn map_trash_browser_entries(
             FileBrowserEntry {
                 path: trash_path,
                 name: entry.name,
-                kind: match entry.kind {
-                    FileSystemEntryKind::Directory => "directory".to_string(),
-                    FileSystemEntryKind::File => "file".to_string(),
-                },
+                kind: kind.to_string(),
                 extension: entry.extension,
                 size_bytes,
                 size_label: size_bytes.map(format_size_label),
@@ -4837,6 +5384,7 @@ fn map_trash_browser_entries(
                 asset_id,
                 status,
                 thumbnail_path,
+                thumbnail_custom,
                 metadata,
             }
         })
@@ -5677,6 +6225,35 @@ mod tests {
     }
 
     #[test]
+    fn sync_repository_generates_unique_asset_ids_for_slug_collisions() {
+        let (state, root, repo_root, _thumbnail_root) = create_test_state("sync-asset-id");
+        fs::create_dir_all(repo_root.join("A B")).expect("spaced directory should be created");
+        fs::create_dir_all(repo_root.join("A-B")).expect("hyphen directory should be created");
+        fs::write(repo_root.join("A B").join("cover.png"), "first")
+            .expect("first file should be written");
+        fs::write(repo_root.join("A-B").join("cover.png"), "second")
+            .expect("second file should be written");
+
+        let repo_id = create_repository_for_path(&state, &repo_root);
+        let snapshot = state
+            .load_snapshot(&repo_id)
+            .expect("snapshot should load after sync");
+        let asset_ids = snapshot
+            .assets
+            .iter()
+            .map(|asset| asset.asset_id.as_str())
+            .collect::<std::collections::BTreeSet<_>>();
+
+        assert_eq!(snapshot.assets.len(), 2);
+        assert_eq!(asset_ids.len(), 2);
+        assert!(asset_ids
+            .iter()
+            .all(|asset_id| asset_id.starts_with("asset-") && asset_id.len() == 70));
+
+        fs::remove_dir_all(root).expect("test temp root should be removed");
+    }
+
+    #[test]
     fn ensure_thumbnail_reuses_existing_cache_path() {
         let (state, root, repo_root, thumbnail_root) = create_test_state("thumb-reuse");
         write_test_image(&repo_root.join("cover.png"));
@@ -5690,7 +6267,13 @@ mod tests {
             &repo_root.to_string_lossy(),
         ));
         fs::create_dir_all(&thumbnail_dir).expect("thumbnail dir should be created");
-        let thumbnail_path = thumbnail_dir.join(thumbnail_file_name(&asset_id, "cover.png"));
+        let thumbnail_path = thumbnail_dir.join(thumbnail_file_name(
+            &repo_id,
+            &repo_root.to_string_lossy(),
+            "cover.png",
+            "file",
+            "generated",
+        ));
         fs::write(&thumbnail_path, b"cached").expect("cached thumbnail should be written");
 
         let storage_paths = ensure_repository_storage_paths(
@@ -5717,6 +6300,10 @@ mod tests {
             .ensure_thumbnail(ThumbnailRequest {
                 repo_id,
                 path: "cover.png".to_string(),
+                action: None,
+                source_path: None,
+                image_bytes: None,
+                media_type: None,
             })
             .expect("thumbnail should be ensured");
 
@@ -5739,6 +6326,10 @@ mod tests {
             .ensure_thumbnail(ThumbnailRequest {
                 repo_id,
                 path: "note.txt".to_string(),
+                action: None,
+                source_path: None,
+                image_bytes: None,
+                media_type: None,
             })
             .expect("unsupported thumbnail request should succeed");
 
@@ -5938,17 +6529,30 @@ mod tests {
             slugify_repo_id("startIcon.png", LONG_RELATIVE_PATH)
         );
         let repo_dir = thumbnail_repository_dir_name(&asset_id, LONG_RELATIVE_PATH);
-        let file_name = thumbnail_file_name(&asset_id, LONG_RELATIVE_PATH);
+        let file_name = thumbnail_file_name(
+            &asset_id,
+            LONG_RELATIVE_PATH,
+            LONG_RELATIVE_PATH,
+            "file",
+            "generated",
+        );
 
         assert!(repo_dir.len() <= 255);
         assert!(file_name.len() <= 255);
         assert!(file_name.ends_with(".jpg"));
+        assert_eq!(file_name.len(), 68);
     }
 
     #[test]
     fn thumbnail_cache_names_are_stable() {
         let repo_dir = thumbnail_repository_dir_name("repo-cubism", "C:/Assets/Cubism");
-        let file_name = thumbnail_file_name("asset-start-icon", LONG_RELATIVE_PATH);
+        let file_name = thumbnail_file_name(
+            "repo-cubism",
+            "C:/Assets/Cubism",
+            LONG_RELATIVE_PATH,
+            "file",
+            "generated",
+        );
 
         assert_eq!(
             repo_dir,
@@ -5956,16 +6560,31 @@ mod tests {
         );
         assert_eq!(
             file_name,
-            thumbnail_file_name("asset-start-icon", LONG_RELATIVE_PATH)
+            thumbnail_file_name(
+                "repo-cubism",
+                "C:/Assets/Cubism",
+                LONG_RELATIVE_PATH,
+                "file",
+                "generated",
+            )
         );
     }
 
     #[test]
     fn thumbnail_cache_names_differ_for_different_paths() {
-        let first = thumbnail_file_name("asset-icon", LONG_RELATIVE_PATH);
+        let first = thumbnail_file_name(
+            "repo-cubism",
+            "C:/Assets/Cubism",
+            LONG_RELATIVE_PATH,
+            "file",
+            "generated",
+        );
         let second = thumbnail_file_name(
-            "asset-icon",
+            "repo-cubism",
+            "C:/Assets/Cubism",
             "CubismSdkForNative-5-r.5/Samples/OpenGL/Demo/proj.harmonyos.cmake/Full/entry/src/ohosTest/resources/base/media/icon.png",
+            "file",
+            "generated",
         );
 
         assert_ne!(first, second);
