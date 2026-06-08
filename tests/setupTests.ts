@@ -28,11 +28,13 @@ type MockEntry = {
   assetId: string | null;
   status: string | null;
   thumbnailPath?: string | null;
+  thumbnailCustom?: boolean;
   metadata?: Record<string, unknown>;
 };
 
 let mockRepositories: MockRepository[] = [];
 let mockSelectedFolder: string | null = null;
+let mockSelectedFile: string | null = null;
 let mockSavePath: string | null = "C:/Mock/Exports/repository.zip";
 let mockDirectoryCreatedOnNextSync: string | null = null;
 let mockOpenerFailure: Error | null = null;
@@ -407,6 +409,19 @@ vi.mock("@tauri-apps/api/core", () => ({
     if (command === "read_file") {
       return [35, 32, 77, 111, 99, 107, 32, 102, 105, 108, 101];
     }
+    if (command === "prepare_preview_file_source") {
+      const request = args?.request as { repoId?: string; path?: string } | undefined;
+      const path = request?.path ?? "model.glb";
+      return {
+        repoId: request?.repoId ?? "repo-main-001",
+        path,
+        token: "0".repeat(64),
+        sourceUrl: `http://127.0.0.1:49152/preview/${"0".repeat(64)}`,
+        mediaType: path.endsWith(".glb") ? "model/gltf-binary" : "application/octet-stream",
+        sizeBytes: 1024,
+        modifiedAt: "2026-06-05T00:18:00Z",
+      };
+    }
     if (command === "create_directory") {
       const request = args?.request as { name?: string; parentPath?: string } | undefined;
       const name = request?.name ?? "NewFolder";
@@ -592,14 +607,38 @@ vi.mock("@tauri-apps/api/core", () => ({
       };
     }
     if (command === "ensure_thumbnail") {
-      const request = args?.request as { repoId?: string; path?: string } | undefined;
+      const request = args?.request as {
+        repoId?: string;
+        path?: string;
+        action?: "ensure" | "refresh" | "save" | "saveGenerated" | "clear";
+        sourcePath?: string;
+        imageBytes?: number[];
+      } | undefined;
       const path = request?.path ?? "";
-      const entry = mockEntries.find((item) => item.path === path && item.kind === "file");
+      const entries = mockEntries.find((item) => item.path === path)
+        ? mockEntries
+        : mockTrashEntries;
+      const entry = entries.find((item) => item.path === path);
+      const action = request?.action ?? "ensure";
+      if (entry && (action === "save" || action === "saveGenerated")) {
+        entry.thumbnailPath = `C:/Mock/Thumbs/${path.replace(/[\\/]/g, "__")}.jpg`;
+        entry.thumbnailCustom = action === "save";
+      } else if (entry && action === "clear") {
+        entry.thumbnailPath = null;
+        entry.thumbnailCustom = false;
+      } else if (entry && action === "refresh") {
+        entry.thumbnailPath = entry.kind === "file" ? `C:/Mock/Thumbs/${path.replace(/[\\/]/g, "__")}.jpg` : null;
+        entry.thumbnailCustom = false;
+      } else if (entry && !entry.thumbnailPath && entry.kind === "file") {
+        entry.thumbnailPath = `C:/Mock/Thumbs/${path.replace(/[\\/]/g, "__")}.jpg`;
+      }
       return {
         repoId: request?.repoId ?? "repo-main-001",
         path,
         assetId: entry?.assetId ?? `asset-${path.replace(/[^a-z0-9]/gi, "-")}`,
-        thumbnailPath: path ? `C:/Mock/Thumbs/${path.replace(/[\\/]/g, "__")}.jpg` : null,
+        kind: entry?.kind ?? "file",
+        thumbnailPath: entry?.thumbnailPath ?? null,
+        thumbnailCustom: entry?.thumbnailCustom ?? false,
       };
     }
     if (command === "undo_last_revision" || command === "redo_last_revision") {
@@ -691,7 +730,10 @@ vi.mock("@tauri-apps/api/core", () => ({
 }));
 
 vi.mock("@tauri-apps/plugin-dialog", () => ({
-  open: async () => mockSelectedFolder,
+  open: async (options?: { filters?: unknown[] }) => {
+    if (options?.filters) return mockSelectedFile;
+    return mockSelectedFolder;
+  },
   save: async () => mockSavePath,
 }));
 
@@ -719,6 +761,7 @@ afterEach(() => {
   localStorage.clear();
   document.documentElement.removeAttribute("data-theme");
   mockSelectedFolder = null;
+  mockSelectedFile = null;
   mockSavePath = "C:/Mock/Exports/repository.zip";
   mockDirectoryCreatedOnNextSync = null;
   mockOpenerFailure = null;
@@ -754,6 +797,10 @@ export function seedMockRepositoryPath(path: string) {
 
 export function selectMockFolder(path: string) {
   mockSelectedFolder = path;
+}
+
+export function selectMockFile(path: string | null) {
+  mockSelectedFile = path;
 }
 
 export function createDirectoryOnNextSync(path: string) {

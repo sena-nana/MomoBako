@@ -74,6 +74,7 @@ export type FileBrowserEntry = {
   assetId?: string | null;
   status?: string | null;
   thumbnailPath?: string | null;
+  thumbnailCustom?: boolean;
   metadata?: Record<string, unknown>;
 };
 
@@ -208,6 +209,16 @@ export type FileReadRequest = {
   path: string;
 };
 
+export type FilePreviewSourceResponse = {
+  repoId: string;
+  path: string;
+  token: string;
+  sourceUrl?: string | null;
+  mediaType: string;
+  sizeBytes: number;
+  modifiedAt?: string | null;
+};
+
 export type FileCreateRequest = {
   repoId: string;
   parentPath?: string;
@@ -259,16 +270,24 @@ export type SyncResult = {
   createdEvents: number;
 };
 
+export type ThumbnailAction = "ensure" | "refresh" | "save" | "saveGenerated" | "clear";
+
 export type ThumbnailRequest = {
   repoId: string;
   path: string;
+  action?: ThumbnailAction;
+  sourcePath?: string;
+  imageBytes?: number[];
+  mediaType?: string;
 };
 
 export type ThumbnailResponse = {
   repoId: string;
   path: string;
   assetId: string;
+  kind: "directory" | "file";
   thumbnailPath?: string | null;
+  thumbnailCustom: boolean;
 };
 
 export type WorkspaceStartupStatus = "idle" | "loading" | "ready" | "error";

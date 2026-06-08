@@ -18,10 +18,11 @@ use std::{
     thread,
 };
 use tauri::{AppHandle, Manager};
-use tiny_http::{Method, Response, Server, StatusCode};
+use tiny_http::{Header, Method, Response, Server, StatusCode};
 
 const SERVICE_HOST: &str = "127.0.0.1";
 const SERVICE_START_ATTEMPTS: usize = 3;
+const PREVIEW_SOURCE_PREFIX: &str = "/preview/";
 #[cfg(test)]
 static SERVICE_HANDLE_SHUTDOWN_COUNT: AtomicUsize = AtomicUsize::new(0);
 
@@ -66,6 +67,9 @@ enum ServiceRequest {
         request: FileBrowserRequest,
     },
     ReadFile {
+        request: FileReadRequest,
+    },
+    PreparePreviewFileSource {
         request: FileReadRequest,
     },
     CreateDirectory {
@@ -204,9 +208,13 @@ impl ServiceBridge {
                 .ok_or_else(|| "missing service payload".to_string())
         } else {
             Err(response
-                .error
+            .error
                 .unwrap_or_else(|| "service request failed".to_string()))
         }
+    }
+
+    pub fn preview_source_url(&self, token: &str) -> String {
+        format!("http://{}/preview/{}", self.addr, token)
     }
 
     pub fn shutdown(&self) {
@@ -293,6 +301,16 @@ pub fn run_service_process(addr: &str) -> Result<(), String> {
 
     let server = Server::http(addr).map_err(|error| error.to_string())?;
     for mut request in server.incoming_requests() {
+        if request.method() == &Method::Get {
+            if let Some(token) = preview_token_from_url(request.url()) {
+                let repository_state = repository_state.clone();
+                thread::spawn(move || {
+                    respond_preview_file_request(request, &repository_state, &token);
+                });
+                continue;
+            }
+        }
+
         if request.method() != &Method::Post || request.url() != "/rpc" {
             let _ = request.respond(Response::empty(StatusCode(404)));
             continue;
@@ -333,6 +351,47 @@ fn service_thumbnail_dir_from_args() -> Result<Option<PathBuf>, String> {
         }
     }
     Ok(None)
+}
+
+fn preview_token_from_url(url: &str) -> Option<String> {
+    let path = url.split('?').next().unwrap_or(url);
+    let token = path.strip_prefix(PREVIEW_SOURCE_PREFIX)?;
+    if token.len() == 64 && token.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        Some(token.to_string())
+    } else {
+        None
+    }
+}
+
+fn respond_preview_file_request(
+    request: tiny_http::Request,
+    repository_state: &Arc<RepositoryState>,
+    token: &str,
+) {
+    match repository_state.open_preview_file_source(token) {
+        Ok((file, media_type, size_bytes)) => {
+            let response = Response::from_file(file);
+            let response = response_with_header(response, "Content-Type", &media_type);
+            let response =
+                response_with_header(response, "Content-Length", &size_bytes.to_string());
+            let response = response_with_header(response, "Access-Control-Allow-Origin", "*");
+            let response = response_with_header(response, "Cache-Control", "no-store");
+            let _ = request.respond(response);
+        }
+        Err(error) => {
+            let response = Response::from_string(error).with_status_code(StatusCode(404));
+            let response = response_with_header(response, "Content-Type", "text/plain");
+            let response = response_with_header(response, "Access-Control-Allow-Origin", "*");
+            let _ = request.respond(response);
+        }
+    }
+}
+
+fn response_with_header<R: Read>(response: Response<R>, name: &str, value: &str) -> Response<R> {
+    match Header::from_bytes(name.as_bytes(), value.as_bytes()) {
+        Ok(header) => response.with_header(header),
+        Err(_) => response,
+    }
 }
 
 fn handle_service_request(
@@ -389,6 +448,9 @@ fn dispatch_request(
             to_value(repository_state.load_file_browser(request)?)
         }
         ServiceRequest::ReadFile { request } => to_value(repository_state.read_file(request)?),
+        ServiceRequest::PreparePreviewFileSource { request } => {
+            to_value(repository_state.prepare_preview_file_source(request)?)
+        }
         ServiceRequest::CreateDirectory { request } => {
             let _guard = write_lock
                 .lock()
@@ -470,6 +532,9 @@ fn dispatch_request(
             to_value(repository_state.sync_repository(request)?)
         }
         ServiceRequest::EnsureThumbnail { request } => {
+            let _guard = write_lock
+                .lock()
+                .map_err(|_| "service write lock poisoned".to_string())?;
             to_value(repository_state.ensure_thumbnail(request)?)
         }
         ServiceRequest::UndoLastRevision { request } => {

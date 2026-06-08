@@ -9,6 +9,7 @@ import type {
   FileCreateRequest,
   FileImportRequest,
   FileDeleteRequest,
+  FilePreviewSourceResponse,
   FileReadRequest,
   FileRenameRequest,
   MetadataUpdateRequest,
@@ -58,6 +59,10 @@ export function getFileBrowser(request: FileBrowserRequest) {
 
 export function readFile(request: FileReadRequest) {
   return invoke<number[]>("read_file", { request });
+}
+
+export function preparePreviewFileSource(request: FileReadRequest) {
+  return invoke<FilePreviewSourceResponse>("prepare_preview_file_source", { request });
 }
 
 export function createDirectory(request: FileCreateRequest) {

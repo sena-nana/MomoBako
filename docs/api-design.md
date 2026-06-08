@@ -36,7 +36,14 @@
 - `POST /repositories/{repoId}/thumbnails:ensure`
   - Request body includes repository-relative `path`
   - Reuse an existing valid thumbnail cache entry or generate one for supported local image/video files
-  - Response fields: `repoId`, `path`, `assetId`, `thumbnailPath`
+  - Optional `action`: `ensure`, `refresh`, `save`, `saveGenerated`, `clear`
+  - `save` accepts `sourcePath` or `imageBytes` for custom file/folder thumbnails; `saveGenerated` accepts frontend-generated image bytes, used by 3D previews
+  - Thumbnail cache files live under `thumbnails/` and use sha256 hex filenames
+  - Response fields: `repoId`, `path`, `assetId`, `kind`, `thumbnailPath`, `thumbnailCustom`
+- `POST /repositories/{repoId}/files:preparePreviewSource`
+  - Request body includes repository-relative `path`
+  - Response returns a session-scoped local preview `sourceUrl` for streaming local files into preview loaders
+  - 3D previews use this source instead of returning full file bytes through the desktop command bridge
 
 ## Desktop Runtime State
 
