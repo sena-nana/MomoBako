@@ -517,7 +517,15 @@ vi.mock("@tauri-apps/api/core", () => ({
           ? "model/gltf-binary"
           : path.endsWith(".gltf")
             ? "model/gltf+json"
-            : "application/octet-stream",
+            : path.endsWith(".mp4") || path.endsWith(".m4v")
+              ? "video/mp4"
+              : path.endsWith(".webm")
+                ? "video/webm"
+                : path.endsWith(".mp3")
+                  ? "audio/mpeg"
+                  : path.endsWith(".wav")
+                    ? "audio/wav"
+                    : "application/octet-stream",
         sizeBytes: 1024,
         modifiedAt: "2026-06-05T00:18:00Z",
       };

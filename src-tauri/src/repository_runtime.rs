@@ -2,11 +2,13 @@ use crate::repository_service::{RepositoryState, SyncRequest};
 use notify::{Config, Event, RecommendedWatcher, RecursiveMode, Watcher};
 use std::{
     collections::BTreeSet,
+    fs::File,
+    io::{Read, Seek, SeekFrom},
     path::{Path, PathBuf},
     sync::{mpsc::channel, Arc, Mutex},
     thread,
 };
-use tiny_http::{Header, Method, Request, Response, Server, StatusCode};
+use tiny_http::{Header, Method, Request, Response, ResponseBox, Server, StatusCode};
 
 const PREVIEW_HOST: &str = "127.0.0.1";
 const PREVIEW_PATH_PREFIX: &str = "/preview/";
@@ -23,6 +25,12 @@ pub struct RepositoryRuntime {
 struct RepositoryWatcher {
     watcher: RecommendedWatcher,
     watched_paths: BTreeSet<PathBuf>,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct ByteRange {
+    start: u64,
+    end: u64,
 }
 
 impl RepositoryRuntime {
@@ -121,14 +129,16 @@ fn start_preview_server(repository_state: Arc<RepositoryState>) -> Result<String
 fn handle_preview_request(request: Request, repository_state: &Arc<RepositoryState>) {
     match preview_token_from_url(request.url()) {
         Some(token) if request.method() == &Method::Get || request.method() == &Method::Head => {
+            let range_header = request
+                .headers()
+                .iter()
+                .find(|item| item.field.equiv("Range"))
+                .map(|item| item.value.as_str().to_string());
             let response =
                 repository_state
                     .open_preview_file_source(token)
-                    .map(|(file, media_type)| {
-                        Response::from_file(file)
-                            .with_header(header("Content-Type", &media_type))
-                            .with_header(header("Cache-Control", "no-store"))
-                            .with_header(header("Access-Control-Allow-Origin", "*"))
+                    .and_then(|(file, media_type)| {
+                        build_preview_file_response(file, &media_type, range_header.as_deref())
                     });
             match response {
                 Ok(response) => {
@@ -150,6 +160,92 @@ fn handle_preview_request(request: Request, repository_state: &Arc<RepositorySta
                 .respond(Response::from_string("not found").with_status_code(StatusCode(404)));
         }
     }
+}
+
+fn build_preview_file_response(
+    mut file: File,
+    media_type: &str,
+    range_header: Option<&str>,
+) -> Result<ResponseBox, String> {
+    let file_size = file.metadata().map_err(|error| error.to_string())?.len();
+    let mut headers = base_preview_headers(media_type);
+    headers.push(header("Accept-Ranges", "bytes"));
+
+    if let Some(range_value) = range_header {
+        let Some(range) = parse_byte_range(range_value, file_size) else {
+            return Ok(Response::from_string("range not satisfiable")
+                .with_status_code(StatusCode(416))
+                .with_header(header("Content-Range", &format!("bytes */{file_size}")))
+                .with_header(header("Access-Control-Allow-Origin", "*"))
+                .boxed());
+        };
+        file.seek(SeekFrom::Start(range.start))
+            .map_err(|error| error.to_string())?;
+        let length = range.end - range.start + 1;
+        headers.push(header(
+            "Content-Range",
+            &format!("bytes {}-{}/{}", range.start, range.end, file_size),
+        ));
+        return Ok(Response::new(
+            StatusCode(206),
+            headers,
+            file.take(length),
+            Some(length as usize),
+            None,
+        )
+        .boxed());
+    }
+
+    Ok(Response::from_file(file)
+        .with_header(header("Content-Type", media_type))
+        .with_header(header("Cache-Control", "no-store"))
+        .with_header(header("Access-Control-Allow-Origin", "*"))
+        .with_header(header("Accept-Ranges", "bytes"))
+        .boxed())
+}
+
+fn base_preview_headers(media_type: &str) -> Vec<Header> {
+    vec![
+        header("Content-Type", media_type),
+        header("Cache-Control", "no-store"),
+        header("Access-Control-Allow-Origin", "*"),
+    ]
+}
+
+fn parse_byte_range(value: &str, file_size: u64) -> Option<ByteRange> {
+    if file_size == 0 {
+        return None;
+    }
+    let range_value = value.trim().strip_prefix("bytes=")?;
+    if range_value.contains(',') {
+        return None;
+    }
+    let (start_value, end_value) = range_value.split_once('-')?;
+    if start_value.is_empty() {
+        let suffix_length = end_value.parse::<u64>().ok()?;
+        if suffix_length == 0 {
+            return None;
+        }
+        let start = file_size.saturating_sub(suffix_length);
+        return Some(ByteRange {
+            start,
+            end: file_size - 1,
+        });
+    }
+
+    let start = start_value.parse::<u64>().ok()?;
+    if start >= file_size {
+        return None;
+    }
+    let end = if end_value.is_empty() {
+        file_size - 1
+    } else {
+        end_value.parse::<u64>().ok()?.min(file_size - 1)
+    };
+    if end < start {
+        return None;
+    }
+    Some(ByteRange { start, end })
 }
 
 fn preview_token_from_url(url: &str) -> Option<&str> {
@@ -308,6 +404,35 @@ mod tests {
     }
 
     #[test]
+    fn preview_parse_byte_range_accepts_standard_and_suffix_ranges() {
+        assert_eq!(
+            parse_byte_range("bytes=2-5", 10),
+            Some(ByteRange { start: 2, end: 5 })
+        );
+        assert_eq!(
+            parse_byte_range("bytes=7-", 10),
+            Some(ByteRange { start: 7, end: 9 })
+        );
+        assert_eq!(
+            parse_byte_range("bytes=-4", 10),
+            Some(ByteRange { start: 6, end: 9 })
+        );
+        assert_eq!(
+            parse_byte_range("bytes=8-99", 10),
+            Some(ByteRange { start: 8, end: 9 })
+        );
+    }
+
+    #[test]
+    fn preview_parse_byte_range_rejects_unsatisfiable_ranges() {
+        assert_eq!(parse_byte_range("items=0-1", 10), None);
+        assert_eq!(parse_byte_range("bytes=10-12", 10), None);
+        assert_eq!(parse_byte_range("bytes=5-4", 10), None);
+        assert_eq!(parse_byte_range("bytes=0-1,4-5", 10), None);
+        assert_eq!(parse_byte_range("bytes=-0", 10), None);
+    }
+
+    #[test]
     fn preview_server_serves_registered_source_file() {
         let root = unique_temp_dir("preview-server");
         let service_root = root.join("state");
@@ -356,6 +481,59 @@ mod tests {
         assert!(raw.starts_with("HTTP/1.0 200 OK"));
         assert!(raw.contains("Content-Type: model/gltf-binary"));
         assert!(raw.ends_with("glb-body"));
+        fs::remove_dir_all(root).expect("test temp root should be removed");
+    }
+
+    #[test]
+    fn preview_server_serves_registered_source_file_range() {
+        let root = unique_temp_dir("preview-server-range");
+        let service_root = root.join("state");
+        let repo_root = root.join("repo");
+        fs::create_dir_all(&repo_root).expect("repo root should be created");
+        fs::write(repo_root.join("clip.mp4"), b"media-body")
+            .expect("preview source should be written");
+
+        let state = RepositoryState::from_root(service_root);
+        let repo_id = state
+            .create_repository(RepositoryMutationRequest {
+                repo_id: Some("repo-preview-range".to_string()),
+                name: "Preview Range".to_string(),
+                path: repo_root.to_string_lossy().to_string(),
+                backend_plugin_id: None,
+                backend_config: None,
+            })
+            .expect("repository should be created")
+            .repository
+            .repo_id;
+        let response = state
+            .prepare_preview_file_source(FileReadRequest {
+                repo_id,
+                path: "clip.mp4".to_string(),
+            })
+            .expect("preview source should be prepared");
+
+        let addr = start_preview_server(Arc::new(state)).expect("preview server should start");
+        let mut stream =
+            TcpStream::connect(addr).expect("preview server should accept connections");
+        stream
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .expect("read timeout should be set");
+        write!(
+            stream,
+            "GET /preview/{} HTTP/1.0\r\nHost: localhost\r\nRange: bytes=6-9\r\n\r\n",
+            response.token
+        )
+        .expect("request should be written");
+
+        let mut raw = String::new();
+        stream
+            .read_to_string(&mut raw)
+            .expect("response should be readable");
+
+        assert!(raw.starts_with("HTTP/1.0 206 Partial Content"));
+        assert!(raw.contains("Content-Type: video/mp4"));
+        assert!(raw.contains("Content-Range: bytes 6-9/10"));
+        assert!(raw.ends_with("body"));
         fs::remove_dir_all(root).expect("test temp root should be removed");
     }
 }

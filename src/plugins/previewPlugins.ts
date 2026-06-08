@@ -1,5 +1,6 @@
 import { defineAsyncComponent, type Component } from "vue";
 import type { FileBrowserEntry } from "../types/repository";
+import { audioPreviewExtensions, videoPreviewExtensions } from "./mediaPreview/mediaExtensions";
 
 export type FilePreviewPlugin = {
   pluginId: string;
@@ -16,6 +17,13 @@ const previewPlugins: FilePreviewPlugin[] = [
     kind: "preview",
     supportedExtensions: ["fbx", "obj", "glb", "gltf", "vrm"],
     component: defineAsyncComponent(() => import("./threeModelPreview/ThreeModelPreview.vue")),
+  },
+  {
+    pluginId: "builtin.media-preview",
+    name: "Media Preview",
+    kind: "preview",
+    supportedExtensions: [...videoPreviewExtensions, ...audioPreviewExtensions],
+    component: defineAsyncComponent(() => import("./mediaPreview/MediaPreview.vue")),
   },
 ];
 
