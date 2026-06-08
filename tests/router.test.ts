@@ -6,15 +6,20 @@ import { useRepositoryWorkspace } from "../src/composables/useRepositoryWorkspac
 import { createTemplateRouter } from "../src/router";
 import {
   createDirectoryOnNextSync,
+  failNextOpenerCall,
   getInvokeCalls,
+  getOpenerCalls,
   seedMockRepository,
   setMockSavePath,
+  seedMockRepositoryPath,
+  selectMockFolder,
 } from "./setupTests";
 
 async function renderApp() {
   const router = createTemplateRouter(createMemoryHistory());
   await router.push("/");
   await router.isReady();
+  await useRepositoryWorkspace().refreshRepositoryWorkspace();
 
   render(App, {
     global: {
@@ -39,6 +44,49 @@ function pointerEvent(type: string, clientX: number) {
 }
 
 describe("文件管理冒烟", () => {
+  it("侧栏选择本地文件夹时挂载已有目录而不是创建新仓库", async () => {
+    seedMockRepository();
+    selectMockFolder("C:/Mock/SelectedRepo");
+    await renderApp();
+
+    await fireEvent.click(screen.getByRole("button", { name: "添加资源库" }));
+    await fireEvent.click(await screen.findByRole("button", { name: "本地文件夹" }));
+
+    await waitFor(() => {
+      expect(getInvokeCalls("attach_repository_folder").at(-1)?.args).toMatchObject({
+        request: {
+          path: "C:/Mock/SelectedRepo",
+        },
+      });
+    });
+    expect(getInvokeCalls("create_repository")).toHaveLength(0);
+  });
+
+  it("空状态拖入本地文件夹时挂载已有目录而不是创建新仓库", async () => {
+    await renderApp();
+    const dropZone = document.querySelector(".empty-state-page");
+    expect(dropZone).toBeInstanceOf(HTMLElement);
+    const folder = new File([], "EmptyRepo");
+    Object.defineProperty(folder, "path", {
+      value: "C:/Mock/EmptyRepo",
+    });
+
+    await fireEvent.drop(dropZone as HTMLElement, {
+      dataTransfer: {
+        files: [folder],
+      },
+    });
+
+    await waitFor(() => {
+      expect(getInvokeCalls("attach_repository_folder").at(-1)?.args).toMatchObject({
+        request: {
+          path: "C:/Mock/EmptyRepo",
+        },
+      });
+    });
+    expect(getInvokeCalls("create_repository")).toHaveLength(0);
+  });
+
   it("保留目录按需加载，并在结构变化后刷新文件夹树", async () => {
     seedMockRepository();
     const workspace = useRepositoryWorkspace();
@@ -112,6 +160,27 @@ describe("文件管理冒烟", () => {
 
     await fireEvent.click(settingsButton);
     expect(await screen.findByRole("heading", { name: "设置" })).toBeInTheDocument();
+  });
+
+  it("使用本地绝对路径打开和定位文件，并展示 opener 失败信息", async () => {
+    seedMockRepositoryPath("C:\\Mock\\AnimeAssets\\");
+    const workspace = useRepositoryWorkspace();
+    workspace.setActivePanel("files");
+    await renderApp();
+
+    await workspace.openWorkspaceEntry("Campaigns/Summer/cover.psd");
+    expect(getOpenerCalls("openPath").at(-1)).toMatchObject({
+      path: "C:\\Mock\\AnimeAssets\\Campaigns\\Summer\\cover.psd",
+    });
+
+    await workspace.revealWorkspaceEntry("Campaigns");
+    expect(getOpenerCalls("revealItemInDir").at(-1)).toMatchObject({
+      path: "C:\\Mock\\AnimeAssets\\Campaigns",
+    });
+
+    failNextOpenerCall("系统找不到指定的路径");
+    await workspace.openWorkspaceEntry("missing.psd");
+    expect((await screen.findAllByText("系统找不到指定的路径")).length).toBeGreaterThan(0);
   });
 
   it("支持折叠、拖拽调整和重置侧边栏宽度", async () => {

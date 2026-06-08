@@ -785,6 +785,11 @@ kbd {
   box-shadow: 0 12px 32px -12px rgba(0, 0, 0, 0.62);
 }
 
+.repository-add-popover--menu {
+  width: auto;
+  min-width: 132px;
+}
+
 .repository-add-popover__header,
 .repository-add-popover__actions {
   display: flex;
@@ -3040,6 +3045,7 @@ button.ghost.danger:hover {
 .ctx-menu__item {
   display: flex;
   align-items: center;
+  justify-content: flex-start;
   gap: 10px;
   height: 28px;
   min-width: 0;

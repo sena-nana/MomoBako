@@ -77,6 +77,7 @@ const {
   renameWorkspaceEntry,
   deleteWorkspaceEntry,
   createNewRepository,
+  attachRepository,
 } = useRepositoryWorkspace();
 
 const shortcuts = computed(() => {
@@ -96,7 +97,7 @@ const expandedFolderPathSet = computed(() => new Set(expandedFolderPaths.value))
 const fileTreeNodes = computed(() => fileTree.value);
 const backendOptions = computed(() => repositoryBackendOptions.value.map((item) => ({
   value: item.pluginId,
-  label: item.name,
+  label: formatAddRepositoryBackendLabel(item.pluginId, item.name),
   enabled: item.enabled,
 })));
 const selectedBackend = computed(() => (
@@ -172,6 +173,12 @@ function repositoryInitial(name: string) {
   return name.trim().slice(0, 2).toUpperCase() || "库";
 }
 
+function formatAddRepositoryBackendLabel(pluginId: string, fallback: string) {
+  if (pluginId === "builtin.local-filesystem") return "本地文件夹";
+  if (pluginId === "builtin.cloud-drive") return "云盘";
+  return fallback;
+}
+
 function resetBackendForm(pluginId = repositoryBackendOptions.value[0]?.pluginId ?? "builtin.local-filesystem") {
   backendPluginId.value = pluginId;
   backendName.value = "";
@@ -201,7 +208,7 @@ function getPopoverPosition(anchor?: AddRepositoryAnchor | null) {
     bottom: 44,
   };
   const current = anchor ?? fallback;
-  const width = 320;
+  const width = addRepositoryPopoverMode.value === "menu" ? 160 : 320;
   const maxLeft = Math.max(8, window.innerWidth - width - 8);
   const left = Math.max(8, Math.min(current.left, maxLeft));
   const top = Math.max(8, Math.min(current.bottom + 6, window.innerHeight - 80));
@@ -212,8 +219,8 @@ function openAddRepositoryMenu(anchor?: AddRepositoryAnchor | null) {
   if (!isSubmittingBackend.value) {
     resetBackendForm();
   }
-  addRepositoryPopoverPosition.value = getPopoverPosition(anchor);
   addRepositoryPopoverMode.value = "menu";
+  addRepositoryPopoverPosition.value = getPopoverPosition(anchor);
 }
 
 function openAddRepositoryMenuFromEvent(event: MouseEvent) {
@@ -331,20 +338,14 @@ async function chooseLocalFolderAndCreate() {
   }
 }
 
-function inferRepositoryNameFromPath(path: string) {
-  const segments = path.split(/[\\/]/).filter(Boolean);
-  return segments[segments.length - 1] ?? "";
-}
-
 async function createLocalRepositoryFromPath(path: string, fallbackPosition = addRepositoryPopoverPosition.value) {
   const nextPath = path.trim();
   if (!nextPath) return false;
   backendPluginId.value = "builtin.local-filesystem";
-  const name = backendName.value.trim() || inferRepositoryNameFromPath(nextPath) || "新资源库";
   addRepositoryError.value = "";
   isSubmittingBackend.value = true;
   try {
-    await createNewRepository(name, nextPath, "builtin.local-filesystem");
+    await attachRepository(nextPath);
     addRepositoryPopoverMode.value = "closed";
     return true;
   } catch (cause) {
@@ -580,7 +581,10 @@ onBeforeUnmount(() => {
         v-if="addRepositoryPopoverMode !== 'closed'"
         ref="addRepositoryPopoverRef"
         class="repository-add-popover"
-        :class="{ 'ctx-menu': addRepositoryPopoverMode === 'menu' }"
+        :class="{
+          'ctx-menu': addRepositoryPopoverMode === 'menu',
+          'repository-add-popover--menu': addRepositoryPopoverMode === 'menu',
+        }"
         :style="{ left: `${addRepositoryPopoverPosition.left}px`, top: `${addRepositoryPopoverPosition.top}px` }"
         aria-label="添加资源库"
       >

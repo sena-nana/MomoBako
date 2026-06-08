@@ -77,7 +77,7 @@ const {
   selectAsset,
   loadFileBrowserForDirectory,
   createFileInWorkspace,
-  createNewRepository,
+  attachRepository,
   importEntriesToWorkspace,
   renameWorkspaceEntry,
   deleteWorkspaceEntry,
@@ -246,17 +246,12 @@ function getDroppedSourcePaths(event: DragEvent) {
     .filter((path) => path.trim().length > 0);
 }
 
-function inferRepositoryNameFromPath(path: string) {
-  const segments = path.split(/[\\/]/).filter(Boolean);
-  return segments[segments.length - 1] ?? "新资源库";
-}
-
 async function createRepositoryFromFolder(path: string) {
   const nextPath = path.trim();
   if (!nextPath) return;
   emptyRepositoryError.value = "";
   try {
-    await createNewRepository(inferRepositoryNameFromPath(nextPath), nextPath, "builtin.local-filesystem");
+    await attachRepository(nextPath);
   } catch (cause) {
     emptyRepositoryError.value = cause instanceof Error ? cause.message : String(cause);
   }
