@@ -417,7 +417,11 @@ vi.mock("@tauri-apps/api/core", () => ({
         path,
         token: "0".repeat(64),
         sourceUrl: `http://127.0.0.1:49152/preview/${"0".repeat(64)}`,
-        mediaType: path.endsWith(".glb") ? "model/gltf-binary" : "application/octet-stream",
+        mediaType: path.endsWith(".glb") || path.endsWith(".vrm")
+          ? "model/gltf-binary"
+          : path.endsWith(".gltf")
+            ? "model/gltf+json"
+            : "application/octet-stream",
         sizeBytes: 1024,
         modifiedAt: "2026-06-05T00:18:00Z",
       };
@@ -681,8 +685,8 @@ vi.mock("@tauri-apps/api/core", () => ({
           name: "3D Model Preview",
           version: "1.0.0",
           kind: "preview",
-          description: "为 FBX、OBJ、GLB 与 glTF 模型提供可旋转缩放的 3D 文件预览。",
-          capabilities: ["preview", "3d-model", "fbx", "obj", "gltf"],
+          description: "为 FBX、OBJ、GLB、glTF 与 VRM 模型提供可旋转缩放的 3D 文件预览。",
+          capabilities: ["preview", "3d-model", "fbx", "obj", "gltf", "vrm"],
           enabled: true,
         },
         {

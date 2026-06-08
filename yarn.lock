@@ -545,6 +545,142 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@pixiv/three-vrm-core@npm:3.5.3":
+  version: 3.5.3
+  resolution: "@pixiv/three-vrm-core@npm:3.5.3"
+  dependencies:
+    "@pixiv/types-vrm-0.0": "npm:3.5.3"
+    "@pixiv/types-vrmc-vrm-1.0": "npm:3.5.3"
+  peerDependencies:
+    three: ">=0.137"
+  checksum: 10c0/b36ec0d5e085fc5fe55454abfc959f21c6018484a2ec2f1fe8f4f8b823cf4784c1d5666c4b93568dfa80df739945ff9e4cd2d9cb3a2d93d49595539ae162e456
+  languageName: node
+  linkType: hard
+
+"@pixiv/three-vrm-materials-hdr-emissive-multiplier@npm:3.5.3":
+  version: 3.5.3
+  resolution: "@pixiv/three-vrm-materials-hdr-emissive-multiplier@npm:3.5.3"
+  dependencies:
+    "@pixiv/types-vrmc-materials-hdr-emissive-multiplier-1.0": "npm:3.5.3"
+  peerDependencies:
+    three: ">=0.137"
+  checksum: 10c0/8a18ce9da410a224a9672b9ec74912929e669675a5960578c86d078bd43de0107b91162bdde018fdce2f85a1538fbb5e29917e33d063ea04a4f3d33d76f98b01
+  languageName: node
+  linkType: hard
+
+"@pixiv/three-vrm-materials-mtoon@npm:3.5.3":
+  version: 3.5.3
+  resolution: "@pixiv/three-vrm-materials-mtoon@npm:3.5.3"
+  dependencies:
+    "@pixiv/types-vrm-0.0": "npm:3.5.3"
+    "@pixiv/types-vrmc-materials-mtoon-1.0": "npm:3.5.3"
+  peerDependencies:
+    three: ">=0.137"
+  checksum: 10c0/20f56e1f68e1b89125df8d502af430c4dded2605a8e4b6041b3b901c96e1901383d0a135a3058d3faeaec3550c79460171532053a5c8184811d1af40ad3a7b4f
+  languageName: node
+  linkType: hard
+
+"@pixiv/three-vrm-materials-v0compat@npm:3.5.3":
+  version: 3.5.3
+  resolution: "@pixiv/three-vrm-materials-v0compat@npm:3.5.3"
+  dependencies:
+    "@pixiv/types-vrm-0.0": "npm:3.5.3"
+    "@pixiv/types-vrmc-materials-mtoon-1.0": "npm:3.5.3"
+  peerDependencies:
+    three: ">=0.137"
+  checksum: 10c0/253ef2bf3b019f5fc43b5d0a6072ad4190397c9683fee89db01528408a0e1a4c29d94f79cea9d932cf9ac21a0d80c8e656a5fb6cbcb676d36371a3e19377646c
+  languageName: node
+  linkType: hard
+
+"@pixiv/three-vrm-node-constraint@npm:3.5.3":
+  version: 3.5.3
+  resolution: "@pixiv/three-vrm-node-constraint@npm:3.5.3"
+  dependencies:
+    "@pixiv/types-vrmc-node-constraint-1.0": "npm:3.5.3"
+  peerDependencies:
+    three: ">=0.137"
+  checksum: 10c0/b96ed0a4eb7d42d635d066936094891a574844edb0c6ef167808f6296317f9b6d3e9d900bafa5dcfcc9799cb39462d789051c9ad57cae39cb9cf6d26cdd577fe
+  languageName: node
+  linkType: hard
+
+"@pixiv/three-vrm-springbone@npm:3.5.3":
+  version: 3.5.3
+  resolution: "@pixiv/three-vrm-springbone@npm:3.5.3"
+  dependencies:
+    "@pixiv/types-vrm-0.0": "npm:3.5.3"
+    "@pixiv/types-vrmc-springbone-1.0": "npm:3.5.3"
+    "@pixiv/types-vrmc-springbone-extended-collider-1.0": "npm:3.5.3"
+  peerDependencies:
+    three: ">=0.137"
+  checksum: 10c0/490641f17377f2f441152e2f2defeabe4aebf11c3c48bd8e072a9df44f0c5454503ea27ec0e1f84d1ef45890813c781fc1c63c0f3f60d7e5054e156416cc498c
+  languageName: node
+  linkType: hard
+
+"@pixiv/three-vrm@npm:^3.4.5":
+  version: 3.5.3
+  resolution: "@pixiv/three-vrm@npm:3.5.3"
+  dependencies:
+    "@pixiv/three-vrm-core": "npm:3.5.3"
+    "@pixiv/three-vrm-materials-hdr-emissive-multiplier": "npm:3.5.3"
+    "@pixiv/three-vrm-materials-mtoon": "npm:3.5.3"
+    "@pixiv/three-vrm-materials-v0compat": "npm:3.5.3"
+    "@pixiv/three-vrm-node-constraint": "npm:3.5.3"
+    "@pixiv/three-vrm-springbone": "npm:3.5.3"
+  peerDependencies:
+    three: ">=0.137"
+  checksum: 10c0/48498c2d7d33301a83d9ed7b7555969d4ba55a37b9525e5ccd2b0c86e741c81ede6588d9afd4701a261d52d03dc4bdeea9efb9d885d68bdc73206a5436f2a593
+  languageName: node
+  linkType: hard
+
+"@pixiv/types-vrm-0.0@npm:3.5.3":
+  version: 3.5.3
+  resolution: "@pixiv/types-vrm-0.0@npm:3.5.3"
+  checksum: 10c0/b8bd1300a6f0068a66a802685ce5f370624c32166a7551fad100366811af6b4b49239f842eb846d8aeb2a6848953f9c9fb67b8f187993708449f808bd2c80d36
+  languageName: node
+  linkType: hard
+
+"@pixiv/types-vrmc-materials-hdr-emissive-multiplier-1.0@npm:3.5.3":
+  version: 3.5.3
+  resolution: "@pixiv/types-vrmc-materials-hdr-emissive-multiplier-1.0@npm:3.5.3"
+  checksum: 10c0/deab4b5bfee813a94f04acf767cc44f12088aa1682c95de4a8c6a6e7ff5f316715fa48fd74e5d63086d6deed5fe5638b2c6ba35c635aa0e9d1875c952c338d0b
+  languageName: node
+  linkType: hard
+
+"@pixiv/types-vrmc-materials-mtoon-1.0@npm:3.5.3":
+  version: 3.5.3
+  resolution: "@pixiv/types-vrmc-materials-mtoon-1.0@npm:3.5.3"
+  checksum: 10c0/a8517247cc1181b798e1424f81c505cea4ee1c6f387a02891949e95ccdea1c54837917b4ecc5245d3fa783259ba1c52d80d13682ffab05a521f37f4a8df1f462
+  languageName: node
+  linkType: hard
+
+"@pixiv/types-vrmc-node-constraint-1.0@npm:3.5.3":
+  version: 3.5.3
+  resolution: "@pixiv/types-vrmc-node-constraint-1.0@npm:3.5.3"
+  checksum: 10c0/4047deb3dda96790c41777de02afdba179213f4a73e3bca7cc00f40daf6493299508ccb14435980a72211f93ff1b2f7629a41b294cc9b5dda8a50a174f8f994e
+  languageName: node
+  linkType: hard
+
+"@pixiv/types-vrmc-springbone-1.0@npm:3.5.3":
+  version: 3.5.3
+  resolution: "@pixiv/types-vrmc-springbone-1.0@npm:3.5.3"
+  checksum: 10c0/6228b39e159518edb44b4982da7b89c87efa3fdca4e872f0a6e0b95c57b7b544b78073344d77ee865045b1464556aa8a4d844c006faacddd6827d7f0b4da921b
+  languageName: node
+  linkType: hard
+
+"@pixiv/types-vrmc-springbone-extended-collider-1.0@npm:3.5.3":
+  version: 3.5.3
+  resolution: "@pixiv/types-vrmc-springbone-extended-collider-1.0@npm:3.5.3"
+  checksum: 10c0/3884c4c892e2ec0490aad94937d5e10dbb0fdf07d2f6a073c5bebdf36ceffb879ed8ceeeb6fbd8bcaeb7973605bcd5e329c4f7e4069fa2bd375a442807c20a70
+  languageName: node
+  linkType: hard
+
+"@pixiv/types-vrmc-vrm-1.0@npm:3.5.3":
+  version: 3.5.3
+  resolution: "@pixiv/types-vrmc-vrm-1.0@npm:3.5.3"
+  checksum: 10c0/ec82b99667ca27ccc30517795ae79357b9503083a525869c5e167db44794e000528ad192b3d8ae662260ccf2dfa75d84ff1f9e57a10b2bc952a03f6386b7e5d0
+  languageName: node
+  linkType: hard
+
 "@pkgjs/parseargs@npm:^0.11.0":
   version: 0.11.0
   resolution: "@pkgjs/parseargs@npm:0.11.0"
@@ -3717,6 +3853,7 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "tauri-template@workspace:."
   dependencies:
+    "@pixiv/three-vrm": "npm:^3.4.5"
     "@tauri-apps/api": "npm:^2"
     "@tauri-apps/cli": "npm:^2"
     "@tauri-apps/plugin-dialog": "npm:^2"
