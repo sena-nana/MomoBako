@@ -11,7 +11,6 @@ const {
   cacheSnapshot,
   apiDesign,
   isLoadingSettingsData,
-  ensureRepositoryWorkspace,
   loadSettingsData,
 } = useRepositoryWorkspace();
 
@@ -34,7 +33,6 @@ const repositoryBackends = computed(() => {
 });
 
 onMounted(() => {
-  void ensureRepositoryWorkspace();
   void loadSettingsData();
 });
 </script>

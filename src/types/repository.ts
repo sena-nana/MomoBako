@@ -214,6 +214,25 @@ export type SyncResult = {
   createdEvents: number;
 };
 
+export type WorkspaceStartupStatus = "idle" | "loading" | "ready" | "error";
+
+export type WorkspaceStartupState = {
+  status: WorkspaceStartupStatus;
+  stepLabel: string;
+  currentStep: number;
+  totalSteps: number;
+  percent: number;
+  error: string | null;
+};
+
+export type RepositorySyncProgress = {
+  phase: "idle" | "scanning" | "writing" | "refreshing" | "complete" | "error";
+  label: string;
+  current: number;
+  total: number;
+  percent: number;
+};
+
 export type RevisionActionRequest = {
   repoId: string;
   assetId: string;

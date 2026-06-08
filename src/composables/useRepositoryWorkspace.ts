@@ -34,14 +34,40 @@ import type {
   FileDeleteMode,
   PluginManifest,
   RepositoryBackendOption,
+  RepositorySyncProgress,
   RepositorySnapshot,
   RepositorySummary,
   SearchHit,
   SearchRequest,
   SyncResult,
+  WorkspaceStartupState,
 } from "../types/repository";
 
 export type WorkspacePanelKey = "libraries" | "files" | "search" | "extensions";
+
+const STARTUP_TOTAL_STEPS = 4;
+const SYNC_TOTAL_STEPS = 3;
+
+function createInitialWorkspaceStartup(): WorkspaceStartupState {
+  return {
+    status: "idle",
+    stepLabel: "准备加载仓库",
+    currentStep: 0,
+    totalSteps: STARTUP_TOTAL_STEPS,
+    percent: 0,
+    error: null,
+  };
+}
+
+function createInitialSyncProgress(): RepositorySyncProgress {
+  return {
+    phase: "idle",
+    label: "",
+    current: 0,
+    total: SYNC_TOTAL_STEPS,
+    percent: 0,
+  };
+}
 
 const repositories = ref<RepositorySummary[]>([]);
 const activeRepoId = ref<string | null>(null);
@@ -69,7 +95,9 @@ const isSyncing = ref(false);
 const isMutatingFiles = ref(false);
 const isLoadingSettingsData = ref(false);
 const error = ref<string | null>(null);
-const bootstrapped = ref(false);
+const workspaceStartup = ref<WorkspaceStartupState>(createInitialWorkspaceStartup());
+const syncProgress = ref<RepositorySyncProgress>(createInitialSyncProgress());
+let startupPromise: Promise<void> | null = null;
 
 function repositoryBackendOptionsFromPlugins(items: PluginManifest[]): RepositoryBackendOption[] {
   return items
@@ -337,6 +365,87 @@ export async function openWorkspaceEntry(path: string) {
   }
 }
 
+function resetWorkspaceSelection() {
+  activeRepoId.value = null;
+  activeSnapshot.value = null;
+  activeAssetId.value = null;
+  activeAssetDetail.value = null;
+  fileBrowser.value = null;
+  fileTree.value = [];
+  currentDirectoryPath.value = "";
+  selectedFilePath.value = null;
+}
+
+function setStartupProgress(currentStep: number, stepLabel: string) {
+  const totalSteps = workspaceStartup.value.totalSteps || 4;
+  workspaceStartup.value = {
+    status: "loading",
+    stepLabel,
+    currentStep,
+    totalSteps,
+    percent: Math.round((currentStep / totalSteps) * 100),
+    error: null,
+  };
+}
+
+function setSyncProgress(
+  phase: RepositorySyncProgress["phase"],
+  label: string,
+  current: number,
+  total = SYNC_TOTAL_STEPS,
+) {
+  syncProgress.value = {
+    phase,
+    label,
+    current,
+    total,
+    percent: Math.round((current / total) * 100),
+  };
+}
+
+function setStartupLoadingFlags(value: boolean) {
+  isLoadingRepositories.value = value;
+  isLoadingSnapshot.value = value;
+  isLoadingFileBrowser.value = value;
+  isLoadingSettingsData.value = value;
+}
+
+async function loadInitialRepository(items: RepositorySummary[]) {
+  if (!items.length) {
+    resetWorkspaceSelection();
+    return;
+  }
+
+  const nextRepoId = activeRepoId.value && items.some((item) => item.repoId === activeRepoId.value)
+    ? activeRepoId.value
+    : items[0].repoId;
+
+  setStartupProgress(2, "读取仓库摘要");
+  const snapshot = await getRepositorySnapshot(nextRepoId);
+  activeRepoId.value = nextRepoId;
+  activeSnapshot.value = snapshot;
+
+  const defaultAssetId = activeAssetId.value && snapshot.assets.some((item) => item.assetId === activeAssetId.value)
+    ? activeAssetId.value
+    : snapshot.assets[0]?.assetId ?? null;
+
+  activeAssetId.value = defaultAssetId;
+  if (defaultAssetId) {
+    activeAssetDetail.value = await getAssetDetail(nextRepoId, defaultAssetId);
+  } else {
+    activeAssetDetail.value = null;
+  }
+
+  setStartupProgress(3, "读取首屏目录");
+  currentDirectoryPath.value = "";
+  const browserSnapshot = await getFileBrowser({
+    repoId: nextRepoId,
+    directoryPath: "",
+    includeTree: true,
+  });
+  applyFileBrowserSnapshot(browserSnapshot);
+}
+
 export async function revealWorkspaceEntry(path: string) {
   if (!activeSnapshot.value) return;
   const absolutePath = joinAbsolutePath(activeSnapshot.value.repository.path, path);
@@ -406,19 +515,24 @@ export async function syncActiveRepository() {
 
   isSyncing.value = true;
   error.value = null;
+  setSyncProgress("scanning", "扫描仓库文件", 1);
 
   try {
     const previousDirectoryPath = currentDirectoryPath.value;
     const result = await syncRepository({ repoId: activeRepoId.value });
+    setSyncProgress("writing", "写入索引结果", 2);
     lastSyncResult.value = result;
     await refreshRepositorySnapshot(activeRepoId.value);
     await refreshRepositorySummaries();
+    setSyncProgress("refreshing", "刷新仓库视图", 3);
     if (activePanel.value === "files") {
       await loadFileBrowserForDirectory(previousDirectoryPath, { includeTree: true });
     }
+    setSyncProgress("complete", "同步完成", 3);
     return result;
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : String(cause);
+    setSyncProgress("error", error.value, 3);
     return null;
   } finally {
     isSyncing.value = false;
@@ -430,13 +544,19 @@ export async function refreshFileBrowserTree() {
 
   isLoadingFileBrowser.value = true;
   error.value = null;
+  setSyncProgress("scanning", "扫描文件夹结构", 1);
   try {
     const result = await syncRepository({ repoId: activeRepoId.value });
+    setSyncProgress("writing", "写入索引结果", 2);
     lastSyncResult.value = result;
     await refreshRepositorySnapshot(activeRepoId.value);
-    return await loadFileBrowserForDirectory(currentDirectoryPath.value, { includeTree: true });
+    setSyncProgress("refreshing", "刷新文件夹树", 3);
+    const snapshot = await loadFileBrowserForDirectory(currentDirectoryPath.value, { includeTree: true });
+    setSyncProgress("complete", "刷新完成", 3);
+    return snapshot;
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : String(cause);
+    setSyncProgress("error", error.value, 3);
     return null;
   } finally {
     isLoadingFileBrowser.value = false;
@@ -505,7 +625,11 @@ export async function exportCurrentRepository() {
   return exportRepository(activeRepoId.value);
 }
 
-export async function loadSettingsData() {
+type SettingsDataLoadOptions = {
+  failFast?: boolean;
+};
+
+export async function loadSettingsData(options: SettingsDataLoadOptions = {}) {
   isLoadingSettingsData.value = true;
 
   try {
@@ -519,6 +643,9 @@ export async function loadSettingsData() {
     apiDesign.value = api;
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : String(cause);
+    if (options.failFast) {
+      throw cause;
+    }
   } finally {
     isLoadingSettingsData.value = false;
   }
@@ -570,14 +697,78 @@ function trimTrailingPathSeparators(path: string) {
   return trimmed.replace(/[\\/]+$/, "") || trimmed;
 }
 
-export async function ensureRepositoryWorkspace() {
-  if (bootstrapped.value) return;
-  bootstrapped.value = true;
-  await Promise.all([loadRepositories(), loadSettingsData()]);
+export function ensureRepositoryWorkspace() {
+  if (workspaceStartup.value.status === "ready") return;
+  if (startupPromise) return startupPromise;
+
+  startupPromise = (async () => {
+    workspaceStartup.value = { ...createInitialWorkspaceStartup(), status: "loading" };
+    error.value = null;
+    setStartupLoadingFlags(true);
+
+    try {
+      setStartupProgress(1, "加载仓库列表");
+      const items = await listRepositories();
+      repositories.value = items;
+
+      await loadInitialRepository(items);
+
+      setStartupProgress(4, "加载插件与设置");
+      await loadSettingsData({ failFast: true });
+
+      workspaceStartup.value = {
+        status: "ready",
+        stepLabel: "加载完成",
+        currentStep: STARTUP_TOTAL_STEPS,
+        totalSteps: STARTUP_TOTAL_STEPS,
+        percent: 100,
+        error: null,
+      };
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : String(cause);
+      error.value = message;
+      workspaceStartup.value = {
+        ...workspaceStartup.value,
+        status: "error",
+        stepLabel: "加载失败",
+        error: message,
+      };
+    } finally {
+      setStartupLoadingFlags(false);
+      startupPromise = null;
+    }
+  })();
+
+  return startupPromise;
 }
 
 export function refreshRepositoryWorkspace() {
   return loadRepositories();
+}
+
+export function resetRepositoryWorkspaceForTests() {
+  repositories.value = [];
+  resetWorkspaceSelection();
+  activePanel.value = "files";
+  searchQuery.value = "";
+  searchResults.value = [];
+  lastSyncResult.value = null;
+  plugins.value = [];
+  cacheSnapshot.value = null;
+  apiDesign.value = null;
+  error.value = null;
+  isLoadingRepositories.value = false;
+  isLoadingSnapshot.value = false;
+  isLoadingAssetDetail.value = false;
+  isLoadingFileBrowser.value = false;
+  isSearching.value = false;
+  isSavingMetadata.value = false;
+  isSyncing.value = false;
+  isMutatingFiles.value = false;
+  isLoadingSettingsData.value = false;
+  workspaceStartup.value = createInitialWorkspaceStartup();
+  syncProgress.value = createInitialSyncProgress();
+  startupPromise = null;
 }
 
 export function useRepositoryWorkspace() {
@@ -599,6 +790,8 @@ export function useRepositoryWorkspace() {
     repositoryBackendOptions: computed(() => getRepositoryBackendOptions()),
     cacheSnapshot: computed(() => cacheSnapshot.value),
     apiDesign: computed(() => apiDesign.value),
+    workspaceStartup: computed(() => workspaceStartup.value),
+    syncProgress: computed(() => syncProgress.value),
     isLoadingRepositories: computed(() => isLoadingRepositories.value),
     isLoadingSnapshot: computed(() => isLoadingSnapshot.value),
     isLoadingAssetDetail: computed(() => isLoadingAssetDetail.value),

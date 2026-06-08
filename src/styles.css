@@ -211,6 +211,17 @@ kbd {
   transition-delay: 0s, 0s, 0.22s;
 }
 
+.shell.is-starting-workspace {
+  grid-template-columns: 1fr;
+  grid-template-areas:
+    "titlebar"
+    "main";
+}
+
+.shell.is-starting-workspace .shell__main {
+  border-top-left-radius: 0;
+}
+
 .secondary-panel--workspace {
   flex-direction: column;
   gap: 0;
@@ -642,6 +653,16 @@ kbd {
   border-color: rgba(244, 113, 116, 0.36);
 }
 
+.workspace-state--progress {
+  width: 100%;
+}
+
+.workspace-state__percent {
+  margin-left: auto;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
 .workspace-empty {
   padding: 6px 8px;
   border-radius: 6px;
@@ -806,6 +827,62 @@ kbd {
 .panel-leave-to {
   opacity: 0;
   transform: translateY(-4px);
+}
+
+.workspace-startup {
+  min-height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: var(--bg);
+}
+
+.workspace-startup__panel {
+  width: min(420px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.workspace-startup__panel h1 {
+  margin: 0;
+  font-size: 20px;
+  line-height: 1.25;
+}
+
+.workspace-startup__meta,
+.workspace-startup__error {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.workspace-startup__progress {
+  height: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--bg-subtle);
+}
+
+.workspace-startup__progress span {
+  display: block;
+  height: 100%;
+  min-width: 4px;
+  border-radius: inherit;
+  background: var(--accent);
+  transition: width 0.18s ease;
+}
+
+.workspace-startup__error {
+  padding: 10px 12px;
+  border-radius: 6px;
+  background: var(--err-soft);
+  color: var(--err);
+}
+
+.workspace-startup__retry {
+  width: fit-content;
 }
 
 .asset-workbench {
