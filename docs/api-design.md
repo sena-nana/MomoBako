@@ -19,6 +19,11 @@
   - Trigger incremental scan and emit filesystem events
   - Response keeps the existing `SyncResult` counters: `scannedFiles`, `createdAssets`, `updatedAssets`, `deletedAssets`, `createdEvents`
   - Desktop UI may expose local sync progress as phased client state (`scanning`, `writing`, `refreshing`, `complete`) without changing this transport contract
+  - Sync updates repository indexes only; thumbnail generation is handled by the thumbnail API after content is visible
+- `POST /repositories/{repoId}/thumbnails:ensure`
+  - Request body includes repository-relative `path`
+  - Reuse an existing valid thumbnail cache entry or generate one for supported local image/video files
+  - Response fields: `repoId`, `path`, `assetId`, `thumbnailPath`
 
 ## Desktop Runtime State
 

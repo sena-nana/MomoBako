@@ -6,6 +6,7 @@ import {
   createRepository,
   deleteEntry,
   deleteRepository,
+  ensureThumbnail,
   exportRepository,
   getApiDesignSnapshot,
   getAssetDetail,
@@ -29,6 +30,7 @@ import type {
   ApiDesignSnapshot,
   AssetDetail,
   CacheSnapshot,
+  FileBrowserEntry,
   FileBrowserSnapshot,
   FileTreeNode,
   FileDeleteMode,
@@ -45,8 +47,9 @@ import type {
 
 export type WorkspacePanelKey = "libraries" | "files" | "search" | "extensions";
 
-const STARTUP_TOTAL_STEPS = 4;
+const STARTUP_TOTAL_STEPS = 3;
 const SYNC_TOTAL_STEPS = 3;
+const THUMBNAIL_LOAD_CONCURRENCY = 3;
 
 function createInitialWorkspaceStartup(): WorkspaceStartupState {
   return {
@@ -98,6 +101,7 @@ const error = ref<string | null>(null);
 const workspaceStartup = ref<WorkspaceStartupState>(createInitialWorkspaceStartup());
 const syncProgress = ref<RepositorySyncProgress>(createInitialSyncProgress());
 let startupPromise: Promise<void> | null = null;
+let thumbnailLoadToken = 0;
 
 function repositoryBackendOptionsFromPlugins(items: PluginManifest[]): RepositoryBackendOption[] {
   return items
@@ -165,14 +169,13 @@ export async function selectRepository(repoId: string) {
       : snapshot.assets[0]?.assetId ?? null;
 
     activeAssetId.value = defaultAssetId;
-    if (defaultAssetId) {
-      await selectAsset(defaultAssetId);
-    } else {
-      activeAssetDetail.value = null;
-    }
+    activeAssetDetail.value = null;
 
     currentDirectoryPath.value = "";
     await loadFileBrowserForDirectory("", { includeTree: true });
+    if (defaultAssetId) {
+      void selectAsset(defaultAssetId);
+    }
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : String(cause);
   } finally {
@@ -207,15 +210,67 @@ function getDefaultFileBrowserSelection(snapshot: FileBrowserSnapshot) {
 }
 
 function applyFileBrowserSnapshot(snapshot: FileBrowserSnapshot) {
-  fileBrowser.value = snapshot;
-  if (snapshot.tree) {
-    fileTree.value = snapshot.tree;
+  const displaySnapshot = {
+    ...snapshot,
+    entries: snapshot.entries.map((entry) => (
+      entry.kind === "file" ? { ...entry, thumbnailPath: null } : entry
+    )),
+  };
+  fileBrowser.value = displaySnapshot;
+  if (displaySnapshot.tree) {
+    fileTree.value = displaySnapshot.tree;
   }
-  currentDirectoryPath.value = snapshot.currentPath;
+  currentDirectoryPath.value = displaySnapshot.currentPath;
 
   const hasCurrentSelection = selectedFilePath.value
-    && snapshot.entries.some((entry) => entry.path === selectedFilePath.value);
-  selectedFilePath.value = hasCurrentSelection ? selectedFilePath.value : getDefaultFileBrowserSelection(snapshot);
+    && displaySnapshot.entries.some((entry) => entry.path === selectedFilePath.value);
+  selectedFilePath.value = hasCurrentSelection ? selectedFilePath.value : getDefaultFileBrowserSelection(displaySnapshot);
+  void loadThumbnailsForSnapshot(displaySnapshot);
+}
+
+async function loadThumbnailsForSnapshot(snapshot: FileBrowserSnapshot) {
+  const token = ++thumbnailLoadToken;
+  const files = snapshot.entries.filter((entry) => entry.kind === "file");
+  let cursor = 0;
+
+  async function worker() {
+    while (cursor < files.length) {
+      const entry = files[cursor++];
+      await loadThumbnailForEntry(snapshot, entry, token);
+    }
+  }
+
+  await Promise.all(
+    Array.from({ length: Math.min(THUMBNAIL_LOAD_CONCURRENCY, files.length) }, () => worker()),
+  );
+}
+
+async function loadThumbnailForEntry(snapshot: FileBrowserSnapshot, entry: FileBrowserEntry, token: number) {
+  try {
+    const response = await ensureThumbnail({
+      repoId: snapshot.repoId,
+      path: entry.path,
+    });
+    if (!response.thumbnailPath || token !== thumbnailLoadToken) return;
+    const current = fileBrowser.value;
+    if (!current || current.repoId !== snapshot.repoId || current.currentPath !== snapshot.currentPath) return;
+    if (!current.entries.some((item) => item.path === response.path && item.kind === "file")) return;
+
+    fileBrowser.value = {
+      ...current,
+      entries: current.entries.map((item) => (
+        item.path === response.path && item.kind === "file"
+          ? {
+              ...item,
+              assetId: response.assetId,
+              thumbnailPath: response.thumbnailPath ?? null,
+            }
+          : item
+      )),
+    };
+  } catch {
+    return;
+  }
 }
 
 export async function loadFileBrowserForDirectory(directoryPath = "", options: FileBrowserLoadOptions = {}) {
@@ -366,6 +421,7 @@ export async function openWorkspaceEntry(path: string) {
 }
 
 function resetWorkspaceSelection() {
+  thumbnailLoadToken += 1;
   activeRepoId.value = null;
   activeSnapshot.value = null;
   activeAssetId.value = null;
@@ -430,11 +486,7 @@ async function loadInitialRepository(items: RepositorySummary[]) {
     : snapshot.assets[0]?.assetId ?? null;
 
   activeAssetId.value = defaultAssetId;
-  if (defaultAssetId) {
-    activeAssetDetail.value = await getAssetDetail(nextRepoId, defaultAssetId);
-  } else {
-    activeAssetDetail.value = null;
-  }
+  activeAssetDetail.value = null;
 
   setStartupProgress(3, "读取首屏目录");
   currentDirectoryPath.value = "";
@@ -444,6 +496,10 @@ async function loadInitialRepository(items: RepositorySummary[]) {
     includeTree: true,
   });
   applyFileBrowserSnapshot(browserSnapshot);
+
+  if (defaultAssetId) {
+    void selectAsset(defaultAssetId);
+  }
 }
 
 export async function revealWorkspaceEntry(path: string) {
@@ -713,9 +769,6 @@ export function ensureRepositoryWorkspace() {
 
       await loadInitialRepository(items);
 
-      setStartupProgress(4, "加载插件与设置");
-      await loadSettingsData({ failFast: true });
-
       workspaceStartup.value = {
         status: "ready",
         stepLabel: "加载完成",
@@ -724,6 +777,7 @@ export function ensureRepositoryWorkspace() {
         percent: 100,
         error: null,
       };
+      void loadSettingsData();
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : String(cause);
       error.value = message;

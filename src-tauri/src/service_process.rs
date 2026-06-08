@@ -1,7 +1,7 @@
 use crate::repository_service::{
     FileBrowserRequest, FileCreateRequest, FileDeleteRequest, FileImportRequest, FileReadRequest,
     FileRenameRequest, MetadataUpdateRequest, RepositoryFolderRequest, RepositoryMutationRequest,
-    RepositoryState, RevisionActionRequest, SearchRequest, SyncRequest,
+    RepositoryState, RevisionActionRequest, SearchRequest, SyncRequest, ThumbnailRequest,
 };
 use notify::{Config, Event, RecommendedWatcher, RecursiveMode, Watcher};
 use serde::{Deserialize, Serialize};
@@ -91,6 +91,9 @@ enum ServiceRequest {
     },
     SyncRepository {
         request: SyncRequest,
+    },
+    EnsureThumbnail {
+        request: ThumbnailRequest,
     },
     UndoLastRevision {
         request: RevisionActionRequest,
@@ -446,6 +449,12 @@ fn dispatch_request(
                 .lock()
                 .map_err(|_| "service state lock poisoned".to_string())?;
             to_value(state.sync_repository(request)?)
+        }
+        ServiceRequest::EnsureThumbnail { request } => {
+            let state = repository_state
+                .lock()
+                .map_err(|_| "service state lock poisoned".to_string())?;
+            to_value(state.ensure_thumbnail(request)?)
         }
         ServiceRequest::UndoLastRevision { request } => {
             let state = repository_state

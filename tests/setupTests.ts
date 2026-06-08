@@ -488,6 +488,17 @@ vi.mock("@tauri-apps/api/core", () => ({
         createdEvents: 6,
       };
     }
+    if (command === "ensure_thumbnail") {
+      const request = args?.request as { repoId?: string; path?: string } | undefined;
+      const path = request?.path ?? "";
+      const entry = mockEntries.find((item) => item.path === path && item.kind === "file");
+      return {
+        repoId: request?.repoId ?? "repo-main-001",
+        path,
+        assetId: entry?.assetId ?? `asset-${path.replace(/[^a-z0-9]/gi, "-")}`,
+        thumbnailPath: path ? `C:/Mock/Thumbs/${path.replace(/[\\/]/g, "__")}.jpg` : null,
+      };
+    }
     if (command === "undo_last_revision" || command === "redo_last_revision") {
       return {
         outcome: "success",

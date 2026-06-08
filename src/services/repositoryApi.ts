@@ -25,6 +25,8 @@ import type {
   SearchResponse,
   SyncRequest,
   SyncResult,
+  ThumbnailRequest,
+  ThumbnailResponse,
 } from "../types/repository";
 
 export function listRepositories() {
@@ -97,6 +99,10 @@ export function exportRepository(repoId: string) {
 
 export function syncRepository(request: SyncRequest) {
   return invoke<SyncResult>("sync_repository", { request });
+}
+
+export function ensureThumbnail(request: ThumbnailRequest) {
+  return invoke<ThumbnailResponse>("ensure_thumbnail", { request });
 }
 
 export function undoLastRevision(request: RevisionActionRequest) {
