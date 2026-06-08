@@ -9,6 +9,7 @@ import {
   Archive,
   Eye,
   File,
+  FileAudio,
   FileImage,
   FileVideo,
   Folder,
@@ -33,6 +34,7 @@ import Markdown from "vue3-markdown-it";
 import { useRepositoryWorkspace } from "../composables/useRepositoryWorkspace";
 import { vContextMenu } from "../directives/contextMenu";
 import { getPreviewPluginForEntry } from "../plugins/previewPlugins";
+import { isAudioExtension, isVideoExtension } from "../plugins/mediaPreview/mediaExtensions";
 import type {
   FileBrowserEntry,
   RepositoryArchiveFormat,
@@ -205,7 +207,11 @@ function fileTone(entry: FileBrowserEntry) {
 }
 
 function isVideoEntry(entry: FileBrowserEntry) {
-  return ["mp4", "mov", "mkv", "webm", "avi", "m4v"].includes((entry.extension ?? "").toLowerCase());
+  return isVideoExtension(entry.extension);
+}
+
+function isAudioEntry(entry: FileBrowserEntry) {
+  return isAudioExtension(entry.extension);
 }
 
 function isModelEntry(entry: FileBrowserEntry) {
@@ -911,6 +917,7 @@ onUnmounted(() => {
           />
           <img v-else-if="thumbnailSrc(previewFileEntry)" :src="thumbnailSrc(previewFileEntry) ?? undefined" alt="" @error="markThumbnailFailed(previewFileEntry)" />
           <FileVideo v-else-if="isVideoEntry(previewFileEntry)" :size="54" aria-hidden="true" />
+          <FileAudio v-else-if="isAudioEntry(previewFileEntry)" :size="54" aria-hidden="true" />
           <FileImage v-else :size="54" aria-hidden="true" />
         </div>
         <div class="files-detail__stats files-preview-page__stats">
@@ -1023,6 +1030,7 @@ onUnmounted(() => {
             <div class="files-list__preview">
               <img v-if="thumbnailSrc(entry)" :src="thumbnailSrc(entry) ?? undefined" alt="" loading="lazy" @error="markThumbnailFailed(entry)" />
               <FileVideo v-else-if="isVideoEntry(entry)" :size="24" aria-hidden="true" />
+              <FileAudio v-else-if="isAudioEntry(entry)" :size="24" aria-hidden="true" />
               <File v-else-if="isModelEntry(entry)" :size="24" aria-hidden="true" />
               <FileImage v-else :size="24" aria-hidden="true" />
             </div>
@@ -1040,6 +1048,7 @@ onUnmounted(() => {
           <img v-if="thumbnailSrc(currentFileEntry)" :src="thumbnailSrc(currentFileEntry) ?? undefined" alt="" @error="markThumbnailFailed(currentFileEntry)" />
           <Folder v-else-if="currentFileEntry.kind === 'directory'" :size="34" aria-hidden="true" />
           <FileVideo v-else-if="isVideoEntry(currentFileEntry)" :size="34" aria-hidden="true" />
+          <FileAudio v-else-if="isAudioEntry(currentFileEntry)" :size="34" aria-hidden="true" />
           <File v-else-if="isModelEntry(currentFileEntry)" :size="34" aria-hidden="true" />
           <FileImage v-else :size="34" aria-hidden="true" />
         </div>

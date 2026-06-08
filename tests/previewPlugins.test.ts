@@ -2,10 +2,10 @@ import { describe, expect, it } from "vitest";
 import { getPreviewPluginForEntry, listPreviewPlugins } from "../src/plugins/previewPlugins";
 import type { FileBrowserEntry } from "../src/types/repository";
 
-function modelEntry(extension: string): FileBrowserEntry {
+function fileEntry(extension: string): FileBrowserEntry {
   return {
-    path: `Characters/avatar.${extension}`,
-    name: `avatar.${extension}`,
+    path: `Characters/asset.${extension}`,
+    name: `asset.${extension}`,
     kind: "file",
     extension,
     sizeBytes: 1024,
@@ -21,9 +21,17 @@ function modelEntry(extension: string): FileBrowserEntry {
 
 describe("previewPlugins", () => {
   it("routes VRM files to the built-in 3D model preview", () => {
-    const plugin = getPreviewPluginForEntry(modelEntry("vrm"));
+    const plugin = getPreviewPluginForEntry(fileEntry("vrm"));
 
     expect(plugin?.pluginId).toBe("builtin.three-model-preview");
-    expect(listPreviewPlugins()[0]?.supportedExtensions).toContain("vrm");
+    expect(listPreviewPlugins().some((item) => item.supportedExtensions.includes("vrm"))).toBe(true);
+  });
+
+  it("routes video and audio files to the built-in media preview", () => {
+    expect(getPreviewPluginForEntry(fileEntry("mp4"))?.pluginId).toBe("builtin.media-preview");
+    expect(getPreviewPluginForEntry(fileEntry("mp3"))?.pluginId).toBe("builtin.media-preview");
+    const mediaPlugin = listPreviewPlugins().find((plugin) => plugin.pluginId === "builtin.media-preview");
+    expect(mediaPlugin?.supportedExtensions).toContain("webm");
+    expect(mediaPlugin?.supportedExtensions).toContain("wav");
   });
 });

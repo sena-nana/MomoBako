@@ -3633,6 +3633,16 @@ fn preview_media_type_for_extension(extension: &str) -> &'static str {
         "gltf" => "model/gltf+json",
         "obj" => "text/plain",
         "fbx" => "application/octet-stream",
+        "mp4" | "m4v" => "video/mp4",
+        "mov" => "video/quicktime",
+        "mkv" => "video/x-matroska",
+        "webm" => "video/webm",
+        "avi" => "video/x-msvideo",
+        "mp3" => "audio/mpeg",
+        "wav" => "audio/wav",
+        "ogg" | "opus" => "audio/ogg",
+        "flac" => "audio/flac",
+        "m4a" | "aac" => "audio/aac",
         _ => "application/octet-stream",
     }
 }
@@ -3776,7 +3786,8 @@ fn default_plugins() -> Vec<PluginManifest> {
             name: "3D Model Preview".to_string(),
             version: "1.0.0".to_string(),
             kind: "preview".to_string(),
-            description: "为 FBX、OBJ、GLB、glTF 与 VRM 模型提供可旋转缩放的 3D 文件预览。".to_string(),
+            description: "为 FBX、OBJ、GLB、glTF 与 VRM 模型提供可旋转缩放的 3D 文件预览。"
+                .to_string(),
             capabilities: vec![
                 "preview".to_string(),
                 "3d-model".to_string(),
