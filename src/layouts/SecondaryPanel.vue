@@ -16,6 +16,7 @@ import {
   X,
 } from "lucide-vue-next";
 import FolderTreeNode from "../components/FolderTreeNode.vue";
+import TaskPopover from "../components/TaskPopover.vue";
 import { useRepositoryWorkspace, type WorkspacePanelKey } from "../composables/useRepositoryWorkspace";
 import type { FileDeleteMode } from "../types/repository";
 
@@ -64,7 +65,6 @@ const {
   activeSnapshot,
   currentDirectoryPath,
   fileTree,
-  isBusy,
   isLoadingFileBrowser,
   isMutatingFiles,
   error,
@@ -458,11 +458,6 @@ onBeforeUnmount(() => {
           {{ error }}
         </div>
 
-        <div v-else-if="isBusy" class="workspace-state">
-          <LoaderCircle class="spin" :size="16" aria-hidden="true" />
-          正在同步仓库状态
-        </div>
-
         <section class="workspace-group">
           <div class="workspace-shortcuts">
             <button
@@ -574,6 +569,7 @@ onBeforeUnmount(() => {
         >
           <Puzzle :size="14" aria-hidden="true" />
         </button>
+        <TaskPopover />
       </footer>
     </div>
   </aside>

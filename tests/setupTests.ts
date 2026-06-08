@@ -32,6 +32,7 @@ type MockEntry = {
 
 let mockRepositories: MockRepository[] = [];
 let mockSelectedFolder: string | null = null;
+let mockSavePath: string | null = "C:/Mock/Exports/repository.zip";
 let mockDirectoryCreatedOnNextSync: string | null = null;
 const invokeCalls: Array<{ command: string; args?: Record<string, unknown> }> = [];
 
@@ -458,7 +459,17 @@ vi.mock("@tauri-apps/api/core", () => ({
       return { repository: mockRepositories[0] };
     }
     if (command === "export_repository") {
-      return { repository: mockRepositories[0] };
+      const request = args?.request as { target?: string; archive?: { outputPath?: string; format?: string; encrypt?: boolean }; git?: { remote?: string; branch?: string } } | undefined;
+      return {
+        repository: mockRepositories[0],
+        target: request?.target ?? "archive",
+        outputPath: request?.archive?.outputPath,
+        format: request?.archive?.format,
+        encrypted: request?.archive?.encrypt,
+        remote: request?.git?.remote,
+        branch: request?.git?.branch,
+        message: request?.target === "git" ? "资源库已上传到 Git" : "资源库压缩包已导出",
+      };
     }
     if (command === "delete_repository") return undefined;
     if (command === "sync_repository") {
@@ -565,6 +576,7 @@ vi.mock("@tauri-apps/api/core", () => ({
 
 vi.mock("@tauri-apps/plugin-dialog", () => ({
   open: async () => mockSelectedFolder,
+  save: async () => mockSavePath,
 }));
 
 vi.mock("@tauri-apps/plugin-opener", () => ({
@@ -577,6 +589,7 @@ afterEach(() => {
   localStorage.clear();
   document.documentElement.removeAttribute("data-theme");
   mockSelectedFolder = null;
+  mockSavePath = "C:/Mock/Exports/repository.zip";
   mockDirectoryCreatedOnNextSync = null;
   mockRepositories = [];
   mockEntries = initialEntries();
@@ -589,6 +602,10 @@ export function getInvokeCalls(command?: string) {
 
 export function seedMockRepository() {
   mockRepositories = [mockSnapshot.repository];
+}
+
+export function setMockSavePath(path: string | null) {
+  mockSavePath = path;
 }
 
 export function createDirectoryOnNextSync(path: string) {

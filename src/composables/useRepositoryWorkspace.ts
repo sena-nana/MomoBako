@@ -33,6 +33,8 @@ import type {
   FileTreeNode,
   FileDeleteMode,
   PluginManifest,
+  RepositoryExportRequest,
+  RepositoryExportResponse,
   RepositoryBackendOption,
   RepositorySnapshot,
   RepositorySummary,
@@ -42,6 +44,13 @@ import type {
 } from "../types/repository";
 
 export type WorkspacePanelKey = "libraries" | "files" | "search" | "extensions";
+
+export type WorkspaceOperationProgress = {
+  label: string;
+  detail: string;
+  value: number;
+  indeterminate: boolean;
+};
 
 const repositories = ref<RepositorySummary[]>([]);
 const activeRepoId = ref<string | null>(null);
@@ -70,6 +79,75 @@ const isMutatingFiles = ref(false);
 const isLoadingSettingsData = ref(false);
 const error = ref<string | null>(null);
 const bootstrapped = ref(false);
+const operationProgress = ref<WorkspaceOperationProgress | null>(null);
+let operationProgressTimer: number | null = null;
+let operationProgressId = 0;
+
+function stopOperationProgressTimer() {
+  if (operationProgressTimer === null) return;
+  window.clearInterval(operationProgressTimer);
+  operationProgressTimer = null;
+}
+
+function startOperationProgress(
+  label: string,
+  detail: string,
+  options: { initial?: number; ceiling?: number; indeterminate?: boolean } = {},
+) {
+  const id = ++operationProgressId;
+  const ceiling = options.ceiling ?? 88;
+  stopOperationProgressTimer();
+  operationProgress.value = {
+    label,
+    detail,
+    value: options.initial ?? 8,
+    indeterminate: options.indeterminate ?? false,
+  };
+
+  operationProgressTimer = window.setInterval(() => {
+    if (id !== operationProgressId || !operationProgress.value) return;
+    const current = operationProgress.value.value;
+    const increment = current < 35 ? 5 : current < 70 ? 3 : 1;
+    operationProgress.value = {
+      ...operationProgress.value,
+      value: Math.min(ceiling, current + increment),
+    };
+  }, 220);
+
+  return id;
+}
+
+function updateOperationProgress(id: number, patch: Partial<WorkspaceOperationProgress>) {
+  if (id !== operationProgressId || !operationProgress.value) return;
+  operationProgress.value = {
+    ...operationProgress.value,
+    ...patch,
+    value: patch.value == null ? operationProgress.value.value : Math.max(0, Math.min(100, patch.value)),
+  };
+}
+
+function finishOperationProgress(id: number) {
+  if (id !== operationProgressId) return;
+  stopOperationProgressTimer();
+  if (operationProgress.value) {
+    operationProgress.value = {
+      ...operationProgress.value,
+      value: 100,
+      indeterminate: false,
+    };
+  }
+  window.setTimeout(() => {
+    if (id === operationProgressId) {
+      operationProgress.value = null;
+    }
+  }, 180);
+}
+
+function cancelOperationProgress(id: number) {
+  if (id !== operationProgressId) return;
+  stopOperationProgressTimer();
+  operationProgress.value = null;
+}
 
 function repositoryBackendOptionsFromPlugins(items: PluginManifest[]): RepositoryBackendOption[] {
   return items
@@ -87,9 +165,11 @@ function repositoryBackendOptionsFromPlugins(items: PluginManifest[]): Repositor
 async function loadRepositories() {
   isLoadingRepositories.value = true;
   error.value = null;
+  const progressId = startOperationProgress("加载资源库", "读取已注册资源库", { initial: 12, indeterminate: true });
 
   try {
     const items = await listRepositories();
+    updateOperationProgress(progressId, { detail: "加载资源库摘要", value: 38 });
     repositories.value = items;
 
     if (!items.length) {
@@ -101,6 +181,7 @@ async function loadRepositories() {
       fileTree.value = [];
       currentDirectoryPath.value = "";
       selectedFilePath.value = null;
+      finishOperationProgress(progressId);
       return;
     }
 
@@ -109,8 +190,10 @@ async function loadRepositories() {
       : items[0].repoId;
 
     await selectRepository(nextRepoId);
+    finishOperationProgress(progressId);
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : String(cause);
+    cancelOperationProgress(progressId);
   } finally {
     isLoadingRepositories.value = false;
   }
@@ -126,9 +209,11 @@ export async function selectRepository(repoId: string) {
 
   isLoadingSnapshot.value = true;
   error.value = null;
+  const progressId = startOperationProgress("加载资源库", "读取资源库快照", { initial: 10, indeterminate: true });
 
   try {
     const snapshot = await getRepositorySnapshot(repoId);
+    updateOperationProgress(progressId, { detail: "加载资源索引", value: 46 });
     activeRepoId.value = repoId;
     activeSnapshot.value = snapshot;
 
@@ -145,8 +230,10 @@ export async function selectRepository(repoId: string) {
 
     currentDirectoryPath.value = "";
     await loadFileBrowserForDirectory("", { includeTree: true });
+    finishOperationProgress(progressId);
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : String(cause);
+    cancelOperationProgress(progressId);
   } finally {
     isLoadingSnapshot.value = false;
   }
@@ -196,16 +283,24 @@ export async function loadFileBrowserForDirectory(directoryPath = "", options: F
   const includeTree = options.includeTree ?? false;
   isLoadingFileBrowser.value = true;
   error.value = null;
+  const progressId = startOperationProgress(
+    includeTree ? "读取文件树" : "读取目录",
+    directoryPath ? `正在读取 ${directoryPath}` : "正在读取根目录",
+    { initial: 14, indeterminate: true },
+  );
   try {
     const snapshot = await getFileBrowser({
       repoId: activeRepoId.value,
       directoryPath,
       includeTree,
     });
+    updateOperationProgress(progressId, { detail: "整理目录条目", value: 92 });
     applyFileBrowserSnapshot(snapshot);
+    finishOperationProgress(progressId);
     return snapshot;
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : String(cause);
+    cancelOperationProgress(progressId);
     return null;
   } finally {
     isLoadingFileBrowser.value = false;
@@ -257,25 +352,31 @@ export async function createFileInWorkspace(name: string, parentPath = currentDi
 
 export async function importEntriesToWorkspace(sourcePaths: string[], parentPath = currentDirectoryPath.value) {
   if (!activeRepoId.value || !sourcePaths.length) return null;
-  isMutatingFiles.value = true;
   error.value = null;
+  const progressId = startOperationProgress(
+    "导入文件",
+    `准备导入 ${sourcePaths.length} 个条目`,
+    { initial: 8 },
+  );
   try {
+    updateOperationProgress(progressId, { detail: "复制文件到当前资源库", value: 24 });
     const snapshot = await importEntries({
       repoId: activeRepoId.value,
       parentPath,
       sourcePaths,
     });
+    updateOperationProgress(progressId, { detail: "刷新文件索引", value: 84 });
     applyFileBrowserSnapshot(snapshot);
     selectedFilePath.value = snapshot.entries.find((entry) => sourcePaths.some((sourcePath) => (
       sourcePath.replace(/\\/g, "/").endsWith(`/${entry.name}`) || sourcePath.replace(/\\/g, "/") === entry.name
     )))?.path ?? selectedFilePath.value;
     await refreshRepositorySnapshot(activeRepoId.value);
+    finishOperationProgress(progressId);
     return snapshot;
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : String(cause);
+    cancelOperationProgress(progressId);
     return null;
-  } finally {
-    isMutatingFiles.value = false;
   }
 }
 
@@ -396,19 +497,27 @@ export async function syncActiveRepository() {
 
   isSyncing.value = true;
   error.value = null;
+  const progressId = startOperationProgress("同步资源库", "扫描文件变化", { initial: 10 });
 
   try {
     const previousDirectoryPath = currentDirectoryPath.value;
     const result = await syncRepository({ repoId: activeRepoId.value });
+    updateOperationProgress(progressId, {
+      detail: `已扫描 ${result.scannedFiles} 个文件`,
+      value: 72,
+      indeterminate: false,
+    });
     lastSyncResult.value = result;
     await refreshRepositorySnapshot(activeRepoId.value);
     await refreshRepositorySummaries();
     if (activePanel.value === "files") {
       await loadFileBrowserForDirectory(previousDirectoryPath, { includeTree: true });
     }
+    finishOperationProgress(progressId);
     return result;
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : String(cause);
+    cancelOperationProgress(progressId);
     return null;
   } finally {
     isSyncing.value = false;
@@ -420,13 +529,18 @@ export async function refreshFileBrowserTree() {
 
   isLoadingFileBrowser.value = true;
   error.value = null;
+  const progressId = startOperationProgress("刷新文件树", "同步并读取目录结构", { initial: 12 });
   try {
     const result = await syncRepository({ repoId: activeRepoId.value });
+    updateOperationProgress(progressId, { detail: `已扫描 ${result.scannedFiles} 个文件`, value: 58 });
     lastSyncResult.value = result;
     await refreshRepositorySnapshot(activeRepoId.value);
-    return await loadFileBrowserForDirectory(currentDirectoryPath.value, { includeTree: true });
+    const snapshot = await loadFileBrowserForDirectory(currentDirectoryPath.value, { includeTree: true });
+    finishOperationProgress(progressId);
+    return snapshot;
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : String(cause);
+    cancelOperationProgress(progressId);
     return null;
   } finally {
     isLoadingFileBrowser.value = false;
@@ -471,18 +585,39 @@ export async function createNewRepository(
   backendPluginId?: string,
   backendConfig?: Record<string, unknown>,
 ) {
-  await createRepository({ name, path, backendPluginId, backendConfig });
-  await loadRepositories();
+  const progressId = startOperationProgress("创建资源库", "初始化资源库并扫描文件", { initial: 8 });
+  try {
+    await createRepository({ name, path, backendPluginId, backendConfig });
+    await loadRepositories();
+    finishOperationProgress(progressId);
+  } catch (cause) {
+    cancelOperationProgress(progressId);
+    throw cause;
+  }
 }
 
 export async function importExistingRepository(name: string, path: string) {
-  await importRepository({ name, path });
-  await loadRepositories();
+  const progressId = startOperationProgress("导入资源库", "读取资源库元数据并扫描文件", { initial: 8 });
+  try {
+    await importRepository({ name, path });
+    await loadRepositories();
+    finishOperationProgress(progressId);
+  } catch (cause) {
+    cancelOperationProgress(progressId);
+    throw cause;
+  }
 }
 
 export async function attachRepository(path: string) {
-  await attachRepositoryFolder({ path });
-  await loadRepositories();
+  const progressId = startOperationProgress("挂载资源库", "检查文件夹并读取索引", { initial: 8 });
+  try {
+    await attachRepositoryFolder({ path });
+    await loadRepositories();
+    finishOperationProgress(progressId);
+  } catch (cause) {
+    cancelOperationProgress(progressId);
+    throw cause;
+  }
 }
 
 export async function removeRepository(repoId: string) {
@@ -490,9 +625,31 @@ export async function removeRepository(repoId: string) {
   await loadRepositories();
 }
 
-export async function exportCurrentRepository() {
+export async function exportCurrentRepository(
+  request: Omit<RepositoryExportRequest, "repoId">,
+): Promise<RepositoryExportResponse | null> {
   if (!activeRepoId.value) return null;
-  return exportRepository(activeRepoId.value);
+
+  error.value = null;
+  const progressId = startOperationProgress(
+    request.target === "git" ? "上传到 Git" : "导出资源库",
+    request.target === "git" ? "准备提交并推送资源库" : "准备打包资源库文件",
+    { initial: 8 },
+  );
+
+  try {
+    const response = await exportRepository({
+      ...request,
+      repoId: activeRepoId.value,
+    });
+    updateOperationProgress(progressId, { detail: response.message, value: 92 });
+    finishOperationProgress(progressId);
+    return response;
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : String(cause);
+    cancelOperationProgress(progressId);
+    return null;
+  }
 }
 
 export async function loadSettingsData() {
@@ -573,6 +730,7 @@ export function useRepositoryWorkspace() {
     repositoryBackendOptions: computed(() => getRepositoryBackendOptions()),
     cacheSnapshot: computed(() => cacheSnapshot.value),
     apiDesign: computed(() => apiDesign.value),
+    operationProgress: computed(() => operationProgress.value),
     isLoadingRepositories: computed(() => isLoadingRepositories.value),
     isLoadingSnapshot: computed(() => isLoadingSnapshot.value),
     isLoadingAssetDetail: computed(() => isLoadingAssetDetail.value),

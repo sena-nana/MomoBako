@@ -14,7 +14,16 @@
 - `DELETE /repositories/{repoId}`
   - Remove a repository from registry without deleting user files
 - `POST /repositories/{repoId}:export`
-  - Export repository descriptor for external tools
+  - Export repository to an archive or upload it to Git
+  - Request:
+    - `repoId`
+    - `target`: `archive` | `git`
+    - `archive.format`: `zip` | `7z` | `tar`
+    - `archive.outputPath`
+    - `archive.compression`: `none` | `fast` | `balanced` | `maximum`
+    - `archive.encrypt` and optional `archive.password`
+    - `git.remote`, `git.branch`, `git.message`
+  - Response includes repository summary, target, output path or Git target, and result message
 - `POST /repositories/{repoId}:sync`
   - Trigger incremental scan and emit filesystem events
 

@@ -160,6 +160,40 @@ export type RepositoryFolderRequest = {
   path: string;
 };
 
+export type RepositoryExportTarget = "archive" | "git";
+
+export type RepositoryArchiveFormat = "zip" | "7z" | "tar";
+
+export type RepositoryCompressionLevel = "none" | "fast" | "balanced" | "maximum";
+
+export type RepositoryExportRequest = {
+  repoId: string;
+  target: RepositoryExportTarget;
+  archive?: {
+    format: RepositoryArchiveFormat;
+    outputPath: string;
+    compression: RepositoryCompressionLevel;
+    encrypt: boolean;
+    password?: string;
+  };
+  git?: {
+    remote?: string;
+    branch?: string;
+    message?: string;
+  };
+};
+
+export type RepositoryExportResponse = {
+  repository: RepositorySummary;
+  target: RepositoryExportTarget;
+  outputPath?: string;
+  format?: RepositoryArchiveFormat;
+  encrypted?: boolean;
+  remote?: string;
+  branch?: string;
+  message: string;
+};
+
 export type FileBrowserRequest = {
   repoId: string;
   directoryPath?: string;
