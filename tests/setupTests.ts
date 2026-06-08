@@ -33,7 +33,9 @@ type MockEntry = {
 let mockRepositories: MockRepository[] = [];
 let mockSelectedFolder: string | null = null;
 let mockDirectoryCreatedOnNextSync: string | null = null;
+let mockOpenerFailure: Error | null = null;
 const invokeCalls: Array<{ command: string; args?: Record<string, unknown> }> = [];
+const openerCalls: Array<{ command: "openPath" | "revealItemInDir"; path: string }> = [];
 
 const initialEntries = (): MockEntry[] => [
   {
@@ -568,8 +570,22 @@ vi.mock("@tauri-apps/plugin-dialog", () => ({
 }));
 
 vi.mock("@tauri-apps/plugin-opener", () => ({
-  openPath: async () => undefined,
-  revealItemInDir: async () => undefined,
+  openPath: async (path: string) => {
+    openerCalls.push({ command: "openPath", path });
+    if (mockOpenerFailure) {
+      const failure = mockOpenerFailure;
+      mockOpenerFailure = null;
+      throw failure;
+    }
+  },
+  revealItemInDir: async (path: string) => {
+    openerCalls.push({ command: "revealItemInDir", path });
+    if (mockOpenerFailure) {
+      const failure = mockOpenerFailure;
+      mockOpenerFailure = null;
+      throw failure;
+    }
+  },
 }));
 
 afterEach(() => {
@@ -578,9 +594,11 @@ afterEach(() => {
   document.documentElement.removeAttribute("data-theme");
   mockSelectedFolder = null;
   mockDirectoryCreatedOnNextSync = null;
+  mockOpenerFailure = null;
   mockRepositories = [];
   mockEntries = initialEntries();
   invokeCalls.length = 0;
+  openerCalls.length = 0;
 });
 
 export function getInvokeCalls(command?: string) {
@@ -591,10 +609,27 @@ export function seedMockRepository() {
   mockRepositories = [mockSnapshot.repository];
 }
 
+export function seedMockRepositoryPath(path: string) {
+  mockRepositories = [
+    {
+      ...mockSnapshot.repository,
+      path,
+    },
+  ];
+}
+
 export function selectMockFolder(path: string) {
   mockSelectedFolder = path;
 }
 
 export function createDirectoryOnNextSync(path: string) {
   mockDirectoryCreatedOnNextSync = path;
+}
+
+export function getOpenerCalls(command?: "openPath" | "revealItemInDir") {
+  return command ? openerCalls.filter((call) => call.command === command) : [...openerCalls];
+}
+
+export function failNextOpenerCall(message: string) {
+  mockOpenerFailure = new Error(message);
 }

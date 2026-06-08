@@ -6,8 +6,11 @@ import { useRepositoryWorkspace } from "../src/composables/useRepositoryWorkspac
 import { createTemplateRouter } from "../src/router";
 import {
   createDirectoryOnNextSync,
+  failNextOpenerCall,
   getInvokeCalls,
+  getOpenerCalls,
   seedMockRepository,
+  seedMockRepositoryPath,
   selectMockFolder,
 } from "./setupTests";
 
@@ -156,6 +159,27 @@ describe("文件管理冒烟", () => {
 
     await fireEvent.click(settingsButton);
     expect(await screen.findByRole("heading", { name: "设置" })).toBeInTheDocument();
+  });
+
+  it("使用本地绝对路径打开和定位文件，并展示 opener 失败信息", async () => {
+    seedMockRepositoryPath("C:\\Mock\\AnimeAssets\\");
+    const workspace = useRepositoryWorkspace();
+    workspace.setActivePanel("files");
+    await renderApp();
+
+    await workspace.openWorkspaceEntry("Campaigns/Summer/cover.psd");
+    expect(getOpenerCalls("openPath").at(-1)).toMatchObject({
+      path: "C:\\Mock\\AnimeAssets\\Campaigns\\Summer\\cover.psd",
+    });
+
+    await workspace.revealWorkspaceEntry("Campaigns");
+    expect(getOpenerCalls("revealItemInDir").at(-1)).toMatchObject({
+      path: "C:\\Mock\\AnimeAssets\\Campaigns",
+    });
+
+    failNextOpenerCall("系统找不到指定的路径");
+    await workspace.openWorkspaceEntry("missing.psd");
+    expect((await screen.findAllByText("系统找不到指定的路径")).length).toBeGreaterThan(0);
   });
 
   it("支持折叠、拖拽调整和重置侧边栏宽度", async () => {

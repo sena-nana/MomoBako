@@ -716,7 +716,7 @@ impl RepositoryState {
         let repo_id = request
             .repo_id
             .unwrap_or_else(|| slugify_repo_id(&request.name, &request.path));
-        let repo_root = PathBuf::from(&request.path);
+        let repo_root = normalize_repository_root_for_backend(&request.path, &backend, false)?;
         let seed = RepositorySeed {
             repo_id: &repo_id,
             name: &request.name,
@@ -742,8 +742,8 @@ impl RepositoryState {
     ) -> Result<RepositoryMutationResponse, String> {
         self.ensure_initialized()?;
 
-        let repo_root = PathBuf::from(&request.path);
         let requested_backend = parse_backend_request(&request)?;
+        let repo_root = normalize_repository_root_for_backend(&request.path, &requested_backend, true)?;
         migrate_legacy_meta_dir_if_needed(&repo_root, &requested_backend.plugin_id)?;
         let metadata_path = repository_meta_dir(&repo_root).join(REPO_METADATA_FILE_NAME);
         let imported_metadata = if metadata_path.exists() {
@@ -803,7 +803,6 @@ impl RepositoryState {
             return Err("repository path cannot be empty".to_string());
         }
 
-        let repo_root = PathBuf::from(path);
         let backend = parse_backend_request(&RepositoryMutationRequest {
             repo_id: None,
             name: String::new(),
@@ -811,6 +810,7 @@ impl RepositoryState {
             backend_plugin_id: None,
             backend_config: None,
         })?;
+        let repo_root = normalize_repository_root_for_backend(path, &backend, true)?;
         ensure_backend_path_is_attachable(&backend, &repo_root)?;
         let name = infer_repository_name(&repo_root);
         let metadata_path = if repository_meta_dir(&repo_root).exists() {
@@ -3158,15 +3158,14 @@ fn ensure_repository_storage_paths(
 ) -> Result<RepositoryStoragePaths, String> {
     let metadata_dir = if backend_plugin_id == LOCAL_FILESYSTEM_PLUGIN_ID {
         migrate_legacy_meta_dir_if_needed(repo_root, backend_plugin_id)?;
-        repository_meta_dir(repo_root)
+        let metadata_dir = repository_meta_dir(repo_root);
+        create_repository_metadata_dirs(&metadata_dir)?;
+        metadata_dir
     } else {
         let service_repo_dir = repository_state_storage_dir(service_root, repo_id);
         fs::create_dir_all(&service_repo_dir).map_err(io_error)?;
         let metadata_dir = service_repo_dir.join(REPO_META_DIR);
-        fs::create_dir_all(metadata_dir.join("cache")).map_err(io_error)?;
-        fs::create_dir_all(metadata_dir.join("thumbnails")).map_err(io_error)?;
-        fs::create_dir_all(metadata_dir.join("logs")).map_err(io_error)?;
-        fs::create_dir_all(metadata_dir.join("indexes")).map_err(io_error)?;
+        create_repository_metadata_dirs(&metadata_dir)?;
         metadata_dir
     };
     Ok(RepositoryStoragePaths {
@@ -3189,6 +3188,14 @@ fn repository_meta_dir(repo_root: &Path) -> PathBuf {
 
 fn legacy_repository_meta_dir(repo_root: &Path) -> PathBuf {
     repo_root.join(LEGACY_REPO_META_DIR)
+}
+
+fn create_repository_metadata_dirs(metadata_dir: &Path) -> Result<(), String> {
+    fs::create_dir_all(metadata_dir.join("cache")).map_err(io_error)?;
+    fs::create_dir_all(metadata_dir.join("thumbnails")).map_err(io_error)?;
+    fs::create_dir_all(metadata_dir.join("logs")).map_err(io_error)?;
+    fs::create_dir_all(metadata_dir.join("indexes")).map_err(io_error)?;
+    Ok(())
 }
 
 fn is_internal_repository_dir(name: &str) -> bool {
@@ -3219,6 +3226,58 @@ fn hide_repository_meta_dir(path: &Path) {
     {
         let _ = Command::new("attrib").arg("+H").arg(path).status();
     }
+}
+
+fn normalize_repository_root_for_backend(
+    path: &str,
+    backend: &RepositoryBackendRecord,
+    must_exist: bool,
+) -> Result<PathBuf, String> {
+    let repo_root = PathBuf::from(path);
+    if backend.plugin_id != LOCAL_FILESYSTEM_PLUGIN_ID {
+        return Ok(repo_root);
+    }
+
+    if must_exist || repo_root.exists() {
+        return canonicalize_local_path(&repo_root);
+    }
+
+    if let Some(parent) = repo_root.parent() {
+        if parent.exists() {
+            let parent = canonicalize_local_path(parent)?;
+            if let Some(name) = repo_root.file_name() {
+                return Ok(parent.join(name));
+            }
+        }
+    }
+
+    if repo_root.is_relative() {
+        return Ok(std::env::current_dir().map_err(io_error)?.join(repo_root));
+    }
+
+    Ok(repo_root)
+}
+
+fn canonicalize_local_path(path: &Path) -> Result<PathBuf, String> {
+    let canonical = path.canonicalize().map_err(io_error)?;
+    Ok(strip_windows_verbatim_prefix(canonical))
+}
+
+#[cfg(target_os = "windows")]
+fn strip_windows_verbatim_prefix(path: PathBuf) -> PathBuf {
+    let value = path.to_string_lossy();
+    if let Some(stripped) = value.strip_prefix(r"\\?\UNC\") {
+        return PathBuf::from(format!(r"\\{stripped}"));
+    }
+    if let Some(stripped) = value.strip_prefix(r"\\?\") {
+        return PathBuf::from(stripped);
+    }
+    path
+}
+
+#[cfg(not(target_os = "windows"))]
+fn strip_windows_verbatim_prefix(path: PathBuf) -> PathBuf {
+    path
 }
 
 fn normalize_directory_path(path: &str) -> Result<String, String> {
