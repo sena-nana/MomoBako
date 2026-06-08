@@ -430,13 +430,23 @@ export async function deleteWorkspaceEntry(path: string, mode?: FileDeleteMode) 
 export async function openWorkspaceEntry(path: string) {
   if (!activeSnapshot.value) return;
   const absolutePath = joinAbsolutePath(activeSnapshot.value.repository.path, path);
-  await openRepositoryPath(absolutePath);
+  error.value = null;
+  try {
+    await openRepositoryPath(absolutePath);
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : String(cause);
+  }
 }
 
 export async function revealWorkspaceEntry(path: string) {
   if (!activeSnapshot.value) return;
   const absolutePath = joinAbsolutePath(activeSnapshot.value.repository.path, path);
-  await revealRepositoryPath(absolutePath);
+  error.value = null;
+  try {
+    await revealRepositoryPath(absolutePath);
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : String(cause);
+  }
 }
 
 export function selectWorkspaceEntry(path: string) {
@@ -696,9 +706,25 @@ async function refreshRepositorySnapshot(repoId: string) {
 }
 
 function joinAbsolutePath(rootPath: string, relativePath: string) {
-  if (!relativePath) return rootPath;
-  const normalizedRoot = rootPath.replace(/[\\/]+$/, "");
-  return `${normalizedRoot}/${relativePath}`;
+  const normalizedRoot = trimTrailingPathSeparators(rootPath);
+  const normalizedRelative = relativePath
+    .trim()
+    .replace(/^[\\/]+|[\\/]+$/g, "")
+    .split(/[\\/]+/)
+    .filter(Boolean);
+  if (!normalizedRelative.length) return normalizedRoot;
+
+  const separator = normalizedRoot.includes("\\") ? "\\" : "/";
+  if (/^[A-Za-z]:[\\/]$/.test(normalizedRoot)) {
+    return `${normalizedRoot}${normalizedRelative.join(separator)}`;
+  }
+  return `${normalizedRoot}${separator}${normalizedRelative.join(separator)}`;
+}
+
+function trimTrailingPathSeparators(path: string) {
+  const trimmed = path.trim();
+  if (/^[A-Za-z]:[\\/]$/.test(trimmed)) return trimmed;
+  return trimmed.replace(/[\\/]+$/, "") || trimmed;
 }
 
 export async function ensureRepositoryWorkspace() {
