@@ -28,9 +28,7 @@
       "assetProtocol": {
         "enable": true,
         "scope": [
-          "$APPDATA/thumbnails/**",
-          "$APPLOCALDATA/thumbnails/**",
-          "$APPCACHE/thumbnails/**"
+          "**/.momo/thumbnails/**"
         ]
       }
     }

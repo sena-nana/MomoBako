@@ -38,7 +38,7 @@
   - Reuse an existing valid thumbnail cache entry or generate one for supported local image/video files
   - Optional `action`: `ensure`, `refresh`, `save`, `saveGenerated`, `clear`
   - `save` accepts `sourcePath` or `imageBytes` for custom file/folder thumbnails; `saveGenerated` accepts frontend-generated image bytes, used by 3D previews
-  - Thumbnail cache files live under `thumbnails/` and use sha256 hex filenames
+  - Thumbnail cache files live under repository `.momo/thumbnails/` and use sha256 hex filenames
   - Response fields: `repoId`, `path`, `assetId`, `kind`, `thumbnailPath`, `thumbnailCustom`
 - `POST /repositories/{repoId}/files:preparePreviewSource`
   - Request body includes repository-relative `path`
