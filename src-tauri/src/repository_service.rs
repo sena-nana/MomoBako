@@ -2,6 +2,7 @@ use rusqlite::{params, types::Type, Connection, OptionalExtension, Transaction};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
+    ffi::OsString,
     fs::{self, OpenOptions},
     path::{Path, PathBuf},
     process::Command,
@@ -458,6 +459,22 @@ pub struct SyncRequest {
     pub repo_id: String,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ThumbnailRequest {
+    pub repo_id: String,
+    pub path: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ThumbnailResponse {
+    pub repo_id: String,
+    pub path: String,
+    pub asset_id: String,
+    pub thumbnail_path: Option<String>,
+}
+
 #[derive(Debug, Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct SyncResult {
@@ -795,7 +812,8 @@ impl RepositoryState {
         self.ensure_initialized()?;
 
         let requested_backend = parse_backend_request(&request)?;
-        let repo_root = normalize_repository_root_for_backend(&request.path, &requested_backend, true)?;
+        let repo_root =
+            normalize_repository_root_for_backend(&request.path, &requested_backend, true)?;
         migrate_legacy_meta_dir_if_needed(&repo_root, &requested_backend.plugin_id)?;
         let metadata_path = repository_meta_dir(&repo_root).join(REPO_METADATA_FILE_NAME);
         let imported_metadata = if metadata_path.exists() {
@@ -1197,9 +1215,82 @@ impl RepositoryState {
         )?;
         let tx = connection.transaction().map_err(db_error)?;
 
-        let scan = sync_repository_files(&tx, &repo, &self.thumbnail_root).map_err(db_error)?;
+        let scan = sync_repository_files(&tx, &repo).map_err(db_error)?;
         tx.commit().map_err(db_error)?;
         Ok(scan)
+    }
+
+    pub fn ensure_thumbnail(&self, request: ThumbnailRequest) -> Result<ThumbnailResponse, String> {
+        self.ensure_initialized()?;
+        let repo = self.load_repository_record(&request.repo_id)?;
+        let entry_path = normalize_entry_path(&request.path)?;
+        let repo_root = PathBuf::from(&repo.summary.path);
+        let connection = self.open_repository_connection(
+            &repo.summary.repo_id,
+            &repo.summary.path,
+            &repo.backend_record,
+        )?;
+
+        let asset = connection
+            .query_row(
+                r#"
+                SELECT asset_id, filename, extension, size_bytes, modified_at, thumbnail_path
+                FROM assets
+                WHERE repo_id = ?1 AND path = ?2 AND status != 'deleted'
+                "#,
+                params![&request.repo_id, &entry_path],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, i64>(3)?,
+                        row.get::<_, String>(4)?,
+                        row.get::<_, Option<String>>(5)?,
+                    ))
+                },
+            )
+            .optional()
+            .map_err(db_error)?
+            .ok_or_else(|| format!("asset not found: {}", request.path))?;
+
+        let (asset_id, filename, extension, size_bytes, modified_at, existing_thumbnail_path) =
+            asset;
+        let file = DiscoveredFile {
+            relative_path: entry_path.clone(),
+            filename,
+            extension,
+            size_bytes,
+            modified_at,
+        };
+        let thumbnail_path = ensure_thumbnail_for_file(
+            &repo,
+            &repo_root,
+            &self.thumbnail_root,
+            &asset_id,
+            &file,
+            existing_thumbnail_path,
+        )?;
+
+        if let Some(path) = &thumbnail_path {
+            connection
+                .execute(
+                    r#"
+                    UPDATE assets
+                    SET thumbnail_path = ?3, updated_at = ?4
+                    WHERE repo_id = ?1 AND asset_id = ?2
+                    "#,
+                    params![&request.repo_id, &asset_id, path, now_rfc3339()],
+                )
+                .map_err(db_error)?;
+        }
+
+        Ok(ThumbnailResponse {
+            repo_id: request.repo_id,
+            path: entry_path,
+            asset_id,
+            thumbnail_path,
+        })
     }
 
     pub fn create_directory(
@@ -2193,7 +2284,6 @@ fn parse_json_column_optional(
 fn sync_repository_files(
     tx: &Transaction<'_>,
     repo: &RepositoryRecord,
-    thumbnail_root: &Path,
 ) -> Result<SyncResult, rusqlite::Error> {
     let repo_root = PathBuf::from(&repo.summary.path);
     let files = list_backend_files(repo, &repo_root).map_err(|error| {
@@ -2234,15 +2324,6 @@ fn sync_repository_files(
         if let Some((asset_id, previous_status, existing_thumbnail_path)) =
             existing_by_path.remove(&file.relative_path)
         {
-            let thumbnail_path = ensure_thumbnail_for_file(
-                repo,
-                &repo_root,
-                thumbnail_root,
-                &asset_id,
-                file,
-                existing_thumbnail_path,
-            )
-            .map_err(string_to_sql_error)?;
             tx.execute(
                 r#"
                 UPDATE assets
@@ -2257,7 +2338,7 @@ fn sync_repository_files(
                     file.size_bytes,
                     file.modified_at,
                     now,
-                    thumbnail_path
+                    existing_thumbnail_path
                 ],
             )?;
             if previous_status == "deleted" {
@@ -2281,9 +2362,6 @@ fn sync_repository_files(
                 "asset-{}",
                 slugify_repo_id(&file.filename, &file.relative_path)
             );
-            let thumbnail_path =
-                generate_thumbnail_for_file(repo, &repo_root, thumbnail_root, &asset_id, file)
-                    .map_err(string_to_sql_error)?;
             tx.execute(
                 r#"
                 INSERT INTO assets (
@@ -2303,7 +2381,7 @@ fn sync_repository_files(
                     file.modified_at,
                     format!("sha256:{}", safe_prefix(&asset_id, 18)),
                     now,
-                    thumbnail_path
+                    Option::<String>::None
                 ],
             )?;
             insert_default_metadata(
@@ -2689,16 +2767,7 @@ fn generate_video_thumbnail(source_path: &Path, thumbnail_path: &Path) -> Result
     ensure_ffmpeg_ready()?;
 
     let status = Command::new(ffmpeg_sidecar::paths::ffmpeg_path())
-        .arg("-y")
-        .arg("-ss")
-        .arg("00:00:01")
-        .arg("-i")
-        .arg(source_path)
-        .arg("-frames:v")
-        .arg("1")
-        .arg("-vf")
-        .arg(format!("scale='min({THUMBNAIL_SIZE},iw)':-1"))
-        .arg(thumbnail_path)
+        .args(video_thumbnail_ffmpeg_args(source_path, thumbnail_path))
         .status()
         .map_err(|error| format!("ffmpeg unavailable: {error}"))?;
 
@@ -2707,6 +2776,26 @@ fn generate_video_thumbnail(source_path: &Path, thumbnail_path: &Path) -> Result
     } else {
         Err(format!("ffmpeg exited with status: {status}"))
     }
+}
+
+fn video_thumbnail_ffmpeg_args(source_path: &Path, thumbnail_path: &Path) -> Vec<OsString> {
+    vec![
+        "-hide_banner".into(),
+        "-loglevel".into(),
+        "error".into(),
+        "-y".into(),
+        "-ss".into(),
+        "00:00:01".into(),
+        "-i".into(),
+        source_path.as_os_str().to_os_string(),
+        "-frames:v".into(),
+        "1".into(),
+        "-update".into(),
+        "1".into(),
+        "-vf".into(),
+        format!("scale='min({THUMBNAIL_SIZE},iw)':-1").into(),
+        thumbnail_path.as_os_str().to_os_string(),
+    ]
 }
 
 fn ensure_ffmpeg_ready() -> Result<(), String> {
@@ -2913,6 +3002,12 @@ fn default_api_definitions() -> Vec<ApiDefinition> {
             summary: "读取资产详情与元数据。".to_string(),
         },
         ApiDefinition {
+            group: "Thumbnail API".to_string(),
+            method: "POST".to_string(),
+            path: "/repositories/{repoId}/thumbnails:ensure".to_string(),
+            summary: "按需复用或生成单个资产缩略图。".to_string(),
+        },
+        ApiDefinition {
             group: "Metadata API".to_string(),
             method: "PATCH".to_string(),
             path: "/repositories/{repoId}/assets/{assetId}/metadata".to_string(),
@@ -3034,13 +3129,6 @@ fn parse_backend_config_json(value: &str) -> Result<serde_json::Value, serde_jso
 
 fn to_from_sql_error(error: serde_json::Error) -> rusqlite::Error {
     rusqlite::Error::FromSqlConversionFailure(0, Type::Text, Box::new(error))
-}
-
-fn string_to_sql_error(error: String) -> rusqlite::Error {
-    rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::new(
-        std::io::ErrorKind::Other,
-        error,
-    )))
 }
 
 fn migrate_registry_schema(registry: &Connection) -> Result<(), rusqlite::Error> {
@@ -4862,6 +4950,150 @@ mod tests {
 
     const LONG_RELATIVE_PATH: &str = "CubismSdkForNative-5-r.5/Samples/OpenGL/Demo/proj.harmonyos.cmake/Full/entry/src/main/resources/base/media/startIcon.png";
 
+    fn unique_temp_dir(label: &str) -> PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .expect("system time should be after unix epoch")
+            .as_nanos();
+        std::env::temp_dir().join(format!("momobako-{label}-{}-{unique}", std::process::id()))
+    }
+
+    fn create_test_state(label: &str) -> (RepositoryState, PathBuf, PathBuf, PathBuf) {
+        let root = unique_temp_dir(label);
+        let repo_root = root.join("repo");
+        let state_root = root.join("state");
+        let thumbnail_root = root.join("thumbs");
+        fs::create_dir_all(&repo_root).expect("repo root should be created");
+        (
+            RepositoryState::from_roots(state_root, thumbnail_root.clone()),
+            root,
+            repo_root,
+            thumbnail_root,
+        )
+    }
+
+    fn create_repository_for_path(state: &RepositoryState, repo_root: &Path) -> String {
+        let response = state
+            .create_repository(RepositoryMutationRequest {
+                repo_id: None,
+                name: "Test Repo".to_string(),
+                path: repo_root.to_string_lossy().to_string(),
+                backend_plugin_id: None,
+                backend_config: None,
+            })
+            .expect("repository should be created");
+        response.repository.repo_id
+    }
+
+    fn write_test_image(path: &Path) {
+        let image = image::RgbImage::from_pixel(2, 2, image::Rgb([120, 120, 120]));
+        image.save(path).expect("test image should be saved");
+    }
+
+    fn count_files(path: &Path) -> usize {
+        if !path.exists() {
+            return 0;
+        }
+        fs::read_dir(path)
+            .expect("path should be readable")
+            .map(|entry| {
+                let path = entry.expect("dir entry should be readable").path();
+                if path.is_dir() {
+                    count_files(&path)
+                } else {
+                    1
+                }
+            })
+            .sum()
+    }
+
+    #[test]
+    fn sync_repository_indexes_assets_without_generating_thumbnails() {
+        let (state, root, repo_root, thumbnail_root) = create_test_state("sync-no-thumb");
+        write_test_image(&repo_root.join("cover.png"));
+
+        let repo_id = create_repository_for_path(&state, &repo_root);
+        let snapshot = state
+            .load_snapshot(&repo_id)
+            .expect("snapshot should load after sync");
+
+        assert_eq!(snapshot.assets.len(), 1);
+        assert_eq!(snapshot.assets[0].thumbnail_path, None);
+        assert_eq!(count_files(&thumbnail_root), 0);
+
+        fs::remove_dir_all(root).expect("test temp root should be removed");
+    }
+
+    #[test]
+    fn ensure_thumbnail_reuses_existing_cache_path() {
+        let (state, root, repo_root, thumbnail_root) = create_test_state("thumb-reuse");
+        write_test_image(&repo_root.join("cover.png"));
+        let repo_id = create_repository_for_path(&state, &repo_root);
+        let snapshot = state
+            .load_snapshot(&repo_id)
+            .expect("snapshot should load after sync");
+        let asset_id = snapshot.assets[0].asset_id.clone();
+        let thumbnail_dir = thumbnail_root.join(thumbnail_repository_dir_name(
+            &repo_id,
+            &repo_root.to_string_lossy(),
+        ));
+        fs::create_dir_all(&thumbnail_dir).expect("thumbnail dir should be created");
+        let thumbnail_path = thumbnail_dir.join(thumbnail_file_name(&asset_id, "cover.png"));
+        fs::write(&thumbnail_path, b"cached").expect("cached thumbnail should be written");
+
+        let storage_paths = ensure_repository_storage_paths(
+            &state.root,
+            &repo_id,
+            &repo_root,
+            LOCAL_FILESYSTEM_PLUGIN_ID,
+        )
+        .expect("storage paths should resolve");
+        let connection =
+            Connection::open(storage_paths.database_path).expect("repository db should open");
+        connection
+            .execute(
+                "UPDATE assets SET thumbnail_path = ?3 WHERE repo_id = ?1 AND asset_id = ?2",
+                params![
+                    repo_id,
+                    asset_id,
+                    thumbnail_path.to_string_lossy().to_string()
+                ],
+            )
+            .expect("asset thumbnail path should update");
+
+        let response = state
+            .ensure_thumbnail(ThumbnailRequest {
+                repo_id,
+                path: "cover.png".to_string(),
+            })
+            .expect("thumbnail should be ensured");
+
+        assert_eq!(
+            response.thumbnail_path,
+            Some(thumbnail_path.to_string_lossy().to_string())
+        );
+
+        fs::remove_dir_all(root).expect("test temp root should be removed");
+    }
+
+    #[test]
+    fn ensure_thumbnail_returns_null_for_unsupported_types() {
+        let (state, root, repo_root, _thumbnail_root) = create_test_state("thumb-unsupported");
+        fs::write(repo_root.join("note.txt"), "plain text").expect("text file should be written");
+        let repo_id = create_repository_for_path(&state, &repo_root);
+
+        let response = state
+            .ensure_thumbnail(ThumbnailRequest {
+                repo_id,
+                path: "note.txt".to_string(),
+            })
+            .expect("unsupported thumbnail request should succeed");
+
+        assert_eq!(response.thumbnail_path, None);
+
+        fs::remove_dir_all(root).expect("test temp root should be removed");
+    }
+
     #[test]
     fn thumbnail_file_name_stays_within_windows_component_limit() {
         let asset_id = format!(
@@ -4900,5 +5132,25 @@ mod tests {
         );
 
         assert_ne!(first, second);
+    }
+
+    #[test]
+    fn video_thumbnail_ffmpeg_args_write_a_single_image() {
+        let source_path = Path::new("C:/Assets/video.mp4");
+        let thumbnail_path = Path::new("C:/Cache/thumbnail.jpg");
+        let args = video_thumbnail_ffmpeg_args(source_path, thumbnail_path);
+
+        assert!(args.windows(2).any(|items| items == ["-frames:v", "1"]));
+        assert!(args.windows(2).any(|items| items == ["-update", "1"]));
+
+        let update_index = args
+            .iter()
+            .position(|item| item == "-update")
+            .expect("missing -update");
+        let output_index = args
+            .iter()
+            .position(|item| item == thumbnail_path.as_os_str())
+            .expect("missing output path");
+        assert!(update_index < output_index);
     }
 }

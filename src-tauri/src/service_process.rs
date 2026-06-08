@@ -2,6 +2,7 @@ use crate::repository_service::{
     FileBrowserRequest, FileCreateRequest, FileDeleteRequest, FileImportRequest, FileReadRequest,
     FileRenameRequest, MetadataUpdateRequest, RepositoryExportRequest, RepositoryFolderRequest,
     RepositoryMutationRequest, RepositoryState, RevisionActionRequest, SearchRequest, SyncRequest,
+    ThumbnailRequest,
 };
 use notify::{Config, Event, RecommendedWatcher, RecursiveMode, Watcher};
 use serde::{Deserialize, Serialize};
@@ -98,6 +99,9 @@ enum ServiceRequest {
     ExportRepository { request: RepositoryExportRequest },
     SyncRepository {
         request: SyncRequest,
+    },
+    EnsureThumbnail {
+        request: ThumbnailRequest,
     },
     UndoLastRevision {
         request: RevisionActionRequest,
@@ -453,6 +457,9 @@ fn dispatch_request(
                 .lock()
                 .map_err(|_| "service write lock poisoned".to_string())?;
             to_value(repository_state.sync_repository(request)?)
+        }
+        ServiceRequest::EnsureThumbnail { request } => {
+            to_value(repository_state.ensure_thumbnail(request)?)
         }
         ServiceRequest::UndoLastRevision { request } => {
             let _guard = write_lock

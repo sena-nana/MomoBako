@@ -55,6 +55,7 @@ const exportGitBranch = ref("");
 const exportGitMessage = ref("");
 const exportDialogError = ref("");
 const isExporting = ref(false);
+const failedThumbnailPaths = ref<Set<string>>(new Set());
 
 const {
   activePanel,
@@ -71,7 +72,6 @@ const {
   isSearching,
   isMutatingFiles,
   error,
-  ensureRepositoryWorkspace,
   refreshRepositoryWorkspace,
   selectRepository,
   selectAsset,
@@ -181,29 +181,11 @@ function statusLabel(status: string) {
   }
 }
 
-function assetTone(extension: string) {
-  const palette: Record<string, string> = {
-    psd: "linear-gradient(135deg, #4e6d7c 0%, #24333a 100%)",
-    png: "linear-gradient(135deg, #7c9e70 0%, #2f4734 100%)",
-    webp: "linear-gradient(135deg, #d3b98e 0%, #7f5e44 100%)",
-    svg: "linear-gradient(135deg, #8e9bb8 0%, #3c4964 100%)",
-    mp4: "linear-gradient(135deg, #b76e5d 0%, #4f2b26 100%)",
-    tif: "linear-gradient(135deg, #92958d 0%, #464840 100%)",
-    jpg: "linear-gradient(135deg, #8ba8b6 0%, #35525f 100%)",
-    fbx: "linear-gradient(135deg, #6c95a8 0%, #34424a 100%)",
-    obj: "linear-gradient(135deg, #87916d 0%, #404738 100%)",
-    glb: "linear-gradient(135deg, #a58f73 0%, #4c3d2f 100%)",
-    gltf: "linear-gradient(135deg, #a58f73 0%, #4c3d2f 100%)",
-  };
-
-  return palette[extension.toLowerCase()] ?? "linear-gradient(135deg, #6f7788 0%, #2b313e 100%)";
-}
-
 function fileTone(entry: FileBrowserEntry) {
   if (entry.kind === "directory") {
     return "linear-gradient(135deg, #c7a566 0%, #73552f 100%)";
   }
-  return assetTone(entry.extension ?? "");
+  return "var(--thumbnail-placeholder-bg)";
 }
 
 function isVideoEntry(entry: FileBrowserEntry) {
@@ -215,7 +197,12 @@ function isModelEntry(entry: FileBrowserEntry) {
 }
 
 function thumbnailSrc(entry: FileBrowserEntry) {
-  return entry.thumbnailPath ? convertFileSrc(entry.thumbnailPath) : null;
+  if (!entry.thumbnailPath || failedThumbnailPaths.value.has(entry.path)) return null;
+  return convertFileSrc(entry.thumbnailPath);
+}
+
+function markThumbnailFailed(entry: FileBrowserEntry) {
+  failedThumbnailPaths.value = new Set([...failedThumbnailPaths.value, entry.path]);
 }
 
 function openDirectory(path: string) {
@@ -531,7 +518,6 @@ const searchSummary = computed(() => {
 });
 
 onMounted(() => {
-  void ensureRepositoryWorkspace();
   try {
     const currentWindow = getCurrentWindow();
     currentWindow.onDragDropEvent(({ payload }) => {
@@ -739,14 +725,14 @@ onUnmounted(() => {
       </header>
 
       <div class="files-preview-page__body">
-        <div class="files-preview-page__preview" :class="{ 'files-preview-page__preview--plugin': previewPlugin }" :style="{ background: previewFileEntry.thumbnailPath || previewPlugin ? undefined : fileTone(previewFileEntry) }">
+        <div class="files-preview-page__preview" :class="{ 'files-preview-page__preview--plugin': previewPlugin }">
           <component
             :is="previewPlugin.component"
             v-if="previewPlugin"
             :entry="previewFileEntry"
             :repo-id="activeRepoId ?? ''"
           />
-          <img v-else-if="thumbnailSrc(previewFileEntry)" :src="thumbnailSrc(previewFileEntry) ?? undefined" alt="" />
+          <img v-else-if="thumbnailSrc(previewFileEntry)" :src="thumbnailSrc(previewFileEntry) ?? undefined" alt="" @error="markThumbnailFailed(previewFileEntry)" />
           <FileVideo v-else-if="isVideoEntry(previewFileEntry)" :size="54" aria-hidden="true" />
           <FileImage v-else :size="54" aria-hidden="true" />
         </div>
@@ -827,7 +813,7 @@ onUnmounted(() => {
             :class="{ 'is-active': selectedFilePath === entry.path }"
             @click="selectFileEntry(entry)"
           >
-            <div class="files-list__preview" :style="{ background: entry.thumbnailPath ? undefined : fileTone(entry) }">
+            <div class="files-list__preview" :style="{ background: fileTone(entry) }">
               <Folder :size="24" aria-hidden="true" />
             </div>
             <div class="files-list__body">
@@ -847,8 +833,8 @@ onUnmounted(() => {
             @click="selectFileEntry(entry)"
             @dblclick="previewFileEntryByDoubleClick(entry)"
           >
-            <div class="files-list__preview" :style="{ background: entry.thumbnailPath ? undefined : fileTone(entry) }">
-              <img v-if="thumbnailSrc(entry)" :src="thumbnailSrc(entry) ?? undefined" alt="" loading="lazy" />
+            <div class="files-list__preview">
+              <img v-if="thumbnailSrc(entry)" :src="thumbnailSrc(entry) ?? undefined" alt="" loading="lazy" @error="markThumbnailFailed(entry)" />
               <FileVideo v-else-if="isVideoEntry(entry)" :size="24" aria-hidden="true" />
               <File v-else-if="isModelEntry(entry)" :size="24" aria-hidden="true" />
               <FileImage v-else :size="24" aria-hidden="true" />
@@ -863,8 +849,8 @@ onUnmounted(() => {
 
     <aside class="files-detail">
       <div v-if="currentFileEntry" class="files-detail__card">
-        <div class="files-detail__preview" :style="{ background: currentFileEntry.thumbnailPath ? undefined : fileTone(currentFileEntry) }">
-          <img v-if="thumbnailSrc(currentFileEntry)" :src="thumbnailSrc(currentFileEntry) ?? undefined" alt="" />
+        <div class="files-detail__preview" :style="{ background: currentFileEntry.kind === 'directory' ? fileTone(currentFileEntry) : undefined }">
+          <img v-if="thumbnailSrc(currentFileEntry)" :src="thumbnailSrc(currentFileEntry) ?? undefined" alt="" @error="markThumbnailFailed(currentFileEntry)" />
           <Folder v-else-if="currentFileEntry.kind === 'directory'" :size="34" aria-hidden="true" />
           <FileVideo v-else-if="isVideoEntry(currentFileEntry)" :size="34" aria-hidden="true" />
           <File v-else-if="isModelEntry(currentFileEntry)" :size="34" aria-hidden="true" />
