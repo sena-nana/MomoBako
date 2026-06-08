@@ -1,3 +1,5 @@
+use std::sync::Mutex;
+
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, PhysicalPosition, PhysicalSize, WebviewWindow};
 use tauri_plugin_store::StoreExt;
@@ -24,6 +26,42 @@ pub struct MainWindowSnapshot {
     pub width: u32,
     pub height: u32,
     pub maximized: bool,
+}
+
+#[derive(Default)]
+pub struct MainWindowStateCache {
+    data: Mutex<MainWindowStateCacheData>,
+}
+
+#[derive(Default)]
+struct MainWindowStateCacheData {
+    latest_snapshot: Option<MainWindowSnapshot>,
+    latest_normal_state: Option<MainWindowState>,
+}
+
+impl MainWindowStateCache {
+    fn record(&self, snapshot: MainWindowSnapshot) {
+        if let Ok(mut data) = self.data.lock() {
+            data.latest_snapshot = Some(snapshot);
+            if !snapshot.maximized {
+                let state = snapshot.into_state();
+                if is_restorable_main_window_state(&state) {
+                    data.latest_normal_state = Some(state);
+                }
+            }
+        }
+    }
+
+    fn latest(&self) -> Option<MainWindowSnapshot> {
+        self.data.lock().ok().and_then(|data| data.latest_snapshot)
+    }
+
+    fn latest_normal_state(&self) -> Option<MainWindowState> {
+        self.data
+            .lock()
+            .ok()
+            .and_then(|data| data.latest_normal_state)
+    }
 }
 
 impl MainWindowSnapshot {
@@ -65,13 +103,19 @@ pub fn load_main_window_state(app: &AppHandle) -> Option<MainWindowState> {
         .filter(is_restorable_main_window_state)
 }
 
-pub fn save_main_window_state(app: &AppHandle, snapshot: MainWindowSnapshot) -> Result<(), String> {
+fn save_main_window_state(
+    app: &AppHandle,
+    snapshot: MainWindowSnapshot,
+    session_previous: Option<MainWindowState>,
+) -> Result<(), String> {
     let store = app
         .store(MAIN_WINDOW_STATE_STORE_FILE)
         .map_err(|error| format!("failed to open window state store: {error}"))?;
-    let previous = store
-        .get(MAIN_WINDOW_STATE_KEY)
-        .and_then(|value| serde_json::from_value::<MainWindowState>(value).ok());
+    let previous = session_previous.or_else(|| {
+        store
+            .get(MAIN_WINDOW_STATE_KEY)
+            .and_then(|value| serde_json::from_value::<MainWindowState>(value).ok())
+    });
     let state = merge_main_window_state(previous, snapshot);
     let value = serde_json::to_value(state).map_err(|error| error.to_string())?;
     store.set(MAIN_WINDOW_STATE_KEY, value);
@@ -101,13 +145,39 @@ pub fn restore_main_window_state(window: &WebviewWindow, state: MainWindowState)
     }
 }
 
-pub fn persist_main_window_state(app: &AppHandle, window: &WebviewWindow) {
-    let Some(snapshot) = capture_main_window_snapshot(window) else {
-        return;
-    };
-    if let Err(error) = save_main_window_state(app, snapshot) {
+pub fn remember_main_window_state(cache: &MainWindowStateCache, window: &WebviewWindow) {
+    if let Some(snapshot) = capture_main_window_snapshot(window) {
+        cache.record(snapshot);
+    }
+}
+
+pub fn persist_main_window_snapshot(
+    app: &AppHandle,
+    cache: &MainWindowStateCache,
+    snapshot: MainWindowSnapshot,
+) {
+    if let Err(error) = save_main_window_state(app, snapshot, cache.latest_normal_state()) {
         eprintln!("[window-state] {error}");
     }
+}
+
+pub fn persist_cached_main_window_state(app: &AppHandle, cache: &MainWindowStateCache) {
+    if let Some(snapshot) = cache.latest() {
+        persist_main_window_snapshot(app, cache, snapshot);
+    }
+}
+
+pub fn persist_main_window_state(
+    app: &AppHandle,
+    cache: &MainWindowStateCache,
+    window: &WebviewWindow,
+) {
+    let Some(snapshot) = capture_main_window_snapshot(window) else {
+        persist_cached_main_window_state(app, cache);
+        return;
+    };
+    cache.record(snapshot);
+    persist_main_window_snapshot(app, cache, snapshot);
 }
 
 #[cfg(test)]
@@ -138,6 +208,110 @@ mod tests {
             MainWindowState {
                 maximized: true,
                 ..previous
+            }
+        );
+    }
+
+    #[test]
+    fn normal_snapshot_replaces_previous_geometry() {
+        let previous = MainWindowState {
+            x: 120,
+            y: 80,
+            width: 1180,
+            height: 760,
+            maximized: true,
+        };
+        let normal_snapshot = MainWindowSnapshot {
+            x: 320,
+            y: 180,
+            width: 1320,
+            height: 860,
+            maximized: false,
+        };
+
+        let merged = merge_main_window_state(Some(previous), normal_snapshot);
+
+        assert_eq!(merged, normal_snapshot.into_state());
+    }
+
+    #[test]
+    fn maximized_snapshot_without_restorable_previous_uses_current_snapshot() {
+        let previous = MainWindowState {
+            x: 120,
+            y: 80,
+            width: 640,
+            height: 480,
+            maximized: false,
+        };
+        let maximized_snapshot = MainWindowSnapshot {
+            x: -8,
+            y: -8,
+            width: 1936,
+            height: 1056,
+            maximized: true,
+        };
+
+        let merged = merge_main_window_state(Some(previous), maximized_snapshot);
+
+        assert_eq!(merged, maximized_snapshot.into_state());
+    }
+
+    #[test]
+    fn rejects_state_smaller_than_main_window_minimum() {
+        let too_narrow = MainWindowState {
+            x: 120,
+            y: 80,
+            width: MIN_MAIN_WINDOW_WIDTH - 1,
+            height: MIN_MAIN_WINDOW_HEIGHT,
+            maximized: false,
+        };
+        let too_short = MainWindowState {
+            height: MIN_MAIN_WINDOW_HEIGHT - 1,
+            width: MIN_MAIN_WINDOW_WIDTH,
+            ..too_narrow
+        };
+        let restorable = MainWindowState {
+            width: MIN_MAIN_WINDOW_WIDTH,
+            height: MIN_MAIN_WINDOW_HEIGHT,
+            ..too_narrow
+        };
+
+        assert!(!is_restorable_main_window_state(&too_narrow));
+        assert!(!is_restorable_main_window_state(&too_short));
+        assert!(is_restorable_main_window_state(&restorable));
+    }
+
+    #[test]
+    fn cache_keeps_latest_normal_geometry_after_maximized_snapshot() {
+        let cache = MainWindowStateCache::default();
+        let normal_snapshot = MainWindowSnapshot {
+            x: 320,
+            y: 180,
+            width: 1320,
+            height: 860,
+            maximized: false,
+        };
+        let maximized_snapshot = MainWindowSnapshot {
+            x: -8,
+            y: -8,
+            width: 1936,
+            height: 1056,
+            maximized: true,
+        };
+
+        cache.record(normal_snapshot);
+        cache.record(maximized_snapshot);
+
+        assert_eq!(cache.latest(), Some(maximized_snapshot));
+        assert_eq!(
+            cache.latest_normal_state(),
+            Some(normal_snapshot.into_state())
+        );
+        assert_eq!(
+            merge_main_window_state(cache.latest_normal_state(), maximized_snapshot),
+            MainWindowState {
+                maximized: true,
+                ..normal_snapshot.into_state()
             }
         );
     }
