@@ -16,9 +16,10 @@ pub mod service_process;
 mod window_state;
 
 use repository_service::{
-    FileBrowserRequest, FileCreateRequest, FileDeleteRequest, FileImportRequest, FileReadRequest,
-    FileRenameRequest, MetadataUpdateRequest, RepositoryExportRequest, RepositoryFolderRequest,
-    RepositoryMutationRequest, RevisionActionRequest, SearchRequest, SyncRequest, ThumbnailRequest,
+    FileBrowserRequest, FileCreateRequest, FileDeleteRequest, FileImportRequest,
+    FilePreviewSourceResponse, FileReadRequest, FileRenameRequest, MetadataUpdateRequest,
+    RepositoryExportRequest, RepositoryFolderRequest, RepositoryMutationRequest,
+    RevisionActionRequest, SearchRequest, SyncRequest, ThumbnailRequest, TrashMutationRequest,
 };
 use service_process::ServiceBridge;
 
@@ -126,6 +127,21 @@ async fn read_file(
 }
 
 #[tauri::command]
+async fn prepare_preview_file_source(
+    request: FileReadRequest,
+    bridge: tauri::State<'_, ServiceBridge>,
+) -> Result<FilePreviewSourceResponse, String> {
+    let bridge_for_url = bridge.inner().clone();
+    let mut response: FilePreviewSourceResponse = invoke_service(
+        bridge,
+        serde_json::json!({ "command": "preparePreviewFileSource", "request": request }),
+    )
+    .await?;
+    response.source_url = Some(bridge_for_url.preview_source_url(&response.token));
+    Ok(response)
+}
+
+#[tauri::command]
 async fn create_directory(
     request: FileCreateRequest,
     bridge: tauri::State<'_, ServiceBridge>,
@@ -181,6 +197,18 @@ async fn delete_entry(
     invoke_service(
         bridge,
         serde_json::json!({ "command": "deleteEntry", "request": request }),
+    )
+    .await
+}
+
+#[tauri::command]
+async fn mutate_trash(
+    request: TrashMutationRequest,
+    bridge: tauri::State<'_, ServiceBridge>,
+) -> Result<serde_json::Value, String> {
+    invoke_service(
+        bridge,
+        serde_json::json!({ "command": "mutateTrash", "request": request }),
     )
     .await
 }
@@ -451,11 +479,13 @@ pub fn run() {
             update_asset_metadata,
             get_file_browser,
             read_file,
+            prepare_preview_file_source,
             create_directory,
             create_file,
             import_entries,
             rename_entry,
             delete_entry,
+            mutate_trash,
             create_repository,
             import_repository,
             attach_repository_folder,

@@ -20,6 +20,10 @@ function isDanger(item: ContextMenuItem) {
   return item.danger || isContextMenuItemPending(item);
 }
 
+function hasChildren(item: ContextMenuItem) {
+  return Boolean(item.children?.length);
+}
+
 watch(
   () => state.open,
   async (open) => {
@@ -44,22 +48,47 @@ watch(
       role="menu"
       :style="{ left: `${pos.x}px`, top: `${pos.y}px` }"
     >
-      <button
+      <div
         v-for="(item, index) in state.items"
         :key="item.id ?? index"
-        type="button"
-        class="ctx-menu__item"
-        :class="{
-          'ctx-menu__item--danger': isDanger(item),
-          'ctx-menu__item--pending': isContextMenuItemPending(item),
-        }"
-        :disabled="item.disabled"
-        role="menuitem"
-        @click="selectContextMenuItem(item)"
+        class="ctx-menu__slot"
+        :class="{ 'ctx-menu__slot--nested': hasChildren(item) }"
       >
-        <component v-if="item.icon" :is="item.icon" :size="13" aria-hidden="true" />
-        <span class="ctx-menu__label">{{ displayLabel(item) }}</span>
-      </button>
+        <button
+          type="button"
+          class="ctx-menu__item"
+          :class="{
+            'ctx-menu__item--danger': isDanger(item),
+            'ctx-menu__item--pending': isContextMenuItemPending(item),
+          }"
+          :disabled="item.disabled"
+          role="menuitem"
+          :aria-haspopup="hasChildren(item) ? 'menu' : undefined"
+          @click="selectContextMenuItem(item)"
+        >
+          <component v-if="item.icon" :is="item.icon" :size="13" aria-hidden="true" />
+          <span class="ctx-menu__label">{{ displayLabel(item) }}</span>
+          <span v-if="hasChildren(item)" class="ctx-menu__chevron" aria-hidden="true">›</span>
+        </button>
+        <div v-if="item.children?.length" class="ctx-menu ctx-menu__submenu" role="menu">
+          <button
+            v-for="(child, childIndex) in item.children"
+            :key="child.id ?? childIndex"
+            type="button"
+            class="ctx-menu__item"
+            :class="{
+              'ctx-menu__item--danger': isDanger(child),
+              'ctx-menu__item--pending': isContextMenuItemPending(child),
+            }"
+            :disabled="child.disabled"
+            role="menuitem"
+            @click="selectContextMenuItem(child)"
+          >
+            <component v-if="child.icon" :is="child.icon" :size="13" aria-hidden="true" />
+            <span class="ctx-menu__label">{{ displayLabel(child) }}</span>
+          </button>
+        </div>
+      </div>
     </div>
   </Teleport>
 </template>

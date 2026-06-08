@@ -18,7 +18,8 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { FBXLoader } from "three/examples/jsm/loaders/FBXLoader.js";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { OBJLoader } from "three/examples/jsm/loaders/OBJLoader.js";
-import { readFile } from "../../services/repositoryApi";
+import { preparePreviewFileSource } from "../../services/repositoryApi";
+import { useRepositoryWorkspace } from "../../composables/useRepositoryWorkspace";
 import { useTaskCenter } from "../../composables/useTaskCenter";
 import type { FileBrowserEntry } from "../../types/repository";
 
@@ -40,18 +41,18 @@ const loadProgress = ref({
 });
 const renderer = shallowRef<WebGLRenderer | null>(null);
 const { upsertTask, removeTask } = useTaskCenter();
+const { saveGeneratedWorkspaceEntryThumbnail } = useRepositoryWorkspace();
 let scene: Scene | null = null;
 let camera: PerspectiveCamera | null = null;
 let controls: OrbitControls | null = null;
 let frameId: number | null = null;
 let resizeObserver: ResizeObserver | null = null;
-let objectUrl: string | null = null;
 let loadToken = 0;
 
 const extension = computed(() => props.entry.extension?.toLowerCase() ?? "");
 
 watch(
-  () => [props.repoId, props.entry.path],
+  [() => props.repoId, () => props.entry.path],
   () => {
     void loadModel();
   },
@@ -82,12 +83,10 @@ async function loadModel() {
   setupRenderer();
 
   try {
-    const source = await createModelObjectUrl();
+    const source = await createModelSourceUrl();
     if (token !== loadToken) {
-      URL.revokeObjectURL(source);
       return;
     }
-    objectUrl = source;
     loadProgress.value = {
       value: 48,
       label: "解析模型",
@@ -97,10 +96,6 @@ async function loadModel() {
     publishLoadProgress();
     const object = await loadObjectByExtension(source, extension.value);
     if (token !== loadToken) {
-      if (objectUrl === source) {
-        URL.revokeObjectURL(source);
-        objectUrl = null;
-      }
       disposeObject(object);
       return;
     }
@@ -113,6 +108,7 @@ async function loadModel() {
     };
     removeLoadTaskSoon(token);
     state.value = "ready";
+    void persistCanvasThumbnail(token);
   } catch (cause) {
     if (token !== loadToken) return;
     removeLoadTask();
@@ -121,7 +117,19 @@ async function loadModel() {
   }
 }
 
-async function createModelObjectUrl() {
+async function persistCanvasThumbnail(token: number) {
+  await nextTick();
+  if (token !== loadToken || !canvas.value || !renderer.value || !scene || !camera) return;
+  renderer.value.render(scene, camera);
+  const blob = await new Promise<Blob | null>((resolve) => {
+    canvas.value?.toBlob(resolve, "image/jpeg", 0.86);
+  });
+  if (token !== loadToken || !blob) return;
+  const bytes = Array.from(new Uint8Array(await blob.arrayBuffer()));
+  await saveGeneratedWorkspaceEntryThumbnail(props.entry.path, bytes, blob.type || "image/jpeg");
+}
+
+async function createModelSourceUrl() {
   loadProgress.value = {
     value: 18,
     label: "读取模型",
@@ -129,26 +137,21 @@ async function createModelObjectUrl() {
     indeterminate: true,
   };
   publishLoadProgress();
-  const bytes = await readFile({
+  const response = await preparePreviewFileSource({
     repoId: props.repoId,
     path: props.entry.path,
   });
+  if (!response.sourceUrl) {
+    throw new Error("模型预览源不可用");
+  }
   loadProgress.value = {
     value: 42,
     label: "读取模型",
-    detail: "创建预览数据",
+    detail: "建立预览流",
     indeterminate: false,
   };
   publishLoadProgress();
-  const data = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
-  return URL.createObjectURL(new Blob([data], { type: mimeTypeForExtension(extension.value) }));
-}
-
-function mimeTypeForExtension(fileExtension: string) {
-  if (fileExtension === "glb") return "model/gltf-binary";
-  if (fileExtension === "gltf") return "model/gltf+json";
-  if (fileExtension === "obj") return "text/plain";
-  return "application/octet-stream";
+  return response.sourceUrl;
 }
 
 function setupRenderer() {
@@ -158,6 +161,7 @@ function setupRenderer() {
     canvas: canvas.value,
     antialias: true,
     alpha: true,
+    preserveDrawingBuffer: true,
   });
   nextRenderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   nextRenderer.setClearColor(new Color(0x000000), 0);
@@ -310,10 +314,6 @@ function removeLoadTaskSoon(token: number) {
 
 function teardown() {
   removeLoadTask();
-  if (objectUrl) {
-    URL.revokeObjectURL(objectUrl);
-    objectUrl = null;
-  }
   if (frameId !== null) {
     window.cancelAnimationFrame(frameId);
     frameId = null;

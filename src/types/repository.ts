@@ -74,6 +74,8 @@ export type FileBrowserEntry = {
   assetId?: string | null;
   status?: string | null;
   thumbnailPath?: string | null;
+  thumbnailCustom?: boolean;
+  metadata?: Record<string, unknown>;
 };
 
 export type FileBrowserSnapshot = {
@@ -82,6 +84,7 @@ export type FileBrowserSnapshot = {
   backendPluginId: string;
   backendKind: string;
   currentPath: string;
+  specialLocation?: "trash" | null;
   tree?: FileTreeNode[];
   entries: FileBrowserEntry[];
 };
@@ -198,11 +201,22 @@ export type FileBrowserRequest = {
   repoId: string;
   directoryPath?: string;
   includeTree?: boolean;
+  specialLocation?: "trash";
 };
 
 export type FileReadRequest = {
   repoId: string;
   path: string;
+};
+
+export type FilePreviewSourceResponse = {
+  repoId: string;
+  path: string;
+  token: string;
+  sourceUrl?: string | null;
+  mediaType: string;
+  sizeBytes: number;
+  modifiedAt?: string | null;
 };
 
 export type FileCreateRequest = {
@@ -223,12 +237,20 @@ export type FileRenameRequest = {
   newName: string;
 };
 
-export type FileDeleteMode = "delete" | "moveToParent";
+export type FileDeleteMode = "delete" | "moveToParent" | "permanentDelete";
 
 export type FileDeleteRequest = {
   repoId: string;
   path: string;
   mode?: FileDeleteMode;
+};
+
+export type TrashMutationAction = "restore" | "restoreAll" | "empty";
+
+export type TrashMutationRequest = {
+  repoId: string;
+  action: TrashMutationAction;
+  path?: string;
 };
 
 export type RepositoryMutationResponse = {
@@ -248,16 +270,24 @@ export type SyncResult = {
   createdEvents: number;
 };
 
+export type ThumbnailAction = "ensure" | "refresh" | "save" | "saveGenerated" | "clear";
+
 export type ThumbnailRequest = {
   repoId: string;
   path: string;
+  action?: ThumbnailAction;
+  sourcePath?: string;
+  imageBytes?: number[];
+  mediaType?: string;
 };
 
 export type ThumbnailResponse = {
   repoId: string;
   path: string;
   assetId: string;
+  kind: "directory" | "file";
   thumbnailPath?: string | null;
+  thumbnailCustom: boolean;
 };
 
 export type WorkspaceStartupStatus = "idle" | "loading" | "ready" | "error";

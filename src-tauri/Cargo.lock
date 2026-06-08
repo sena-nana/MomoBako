@@ -4508,11 +4508,13 @@ name = "tauri_template"
 version = "0.1.0"
 dependencies = [
  "ffmpeg-sidecar",
+ "hex",
  "image",
  "notify",
  "rusqlite",
  "serde",
  "serde_json",
+ "sha2",
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch, type Component } from "vue";
 import { open } from "@tauri-apps/plugin-dialog";
 import { RouterLink, useRoute, useRouter } from "vue-router";
 import {
@@ -21,6 +21,13 @@ import { useRepositoryWorkspace, type WorkspacePanelKey } from "../composables/u
 import type { FileDeleteMode } from "../types/repository";
 
 type PanelKey = Exclude<WorkspacePanelKey, "files" | "search">;
+type ShortcutKey = "all" | "processing" | "untagged" | "deleted";
+type ShortcutItem = {
+  id: ShortcutKey;
+  label: string;
+  count: number;
+  icon: Component;
+};
 
 type AddRepositoryPopoverMode = "closed" | "menu" | "form";
 type AddRepositoryAnchor = {
@@ -81,7 +88,7 @@ const {
   attachRepository,
 } = useRepositoryWorkspace();
 
-const shortcuts = computed(() => {
+const shortcuts = computed<ShortcutItem[]>(() => {
   const assets = activeSnapshot.value?.assets ?? [];
   return [
     { id: "all", label: "全部", count: assets.length, icon: Archive },
@@ -94,6 +101,7 @@ const shortcuts = computed(() => {
 const activeRepository = computed(() => (
   repositories.value.find((item) => item.repoId === activeRepoId.value) ?? null
 ));
+const isTrashPanel = computed(() => activePanel.value === "deleted");
 const expandedFolderPathSet = computed(() => new Set(expandedFolderPaths.value));
 const fileTreeNodes = computed(() => fileTree.value);
 const backendOptions = computed(() => repositoryBackendOptions.value.map((item) => ({
@@ -162,6 +170,17 @@ watch(
 
 function selectPanel(next: PanelKey) {
   setActivePanel(next);
+  if (route.path === "/settings") {
+    void router.push("/");
+  }
+}
+
+function selectShortcut(id: ShortcutKey) {
+  if (id === "deleted") {
+    selectPanel("deleted");
+    return;
+  }
+  setActivePanel("files");
   if (route.path === "/settings") {
     void router.push("/");
   }
@@ -482,6 +501,8 @@ onBeforeUnmount(() => {
               :key="item.id"
               type="button"
               class="workspace-shortcuts__item"
+              :class="{ 'is-active': activePanel === item.id || (item.id === 'all' && activePanel === 'files') }"
+              @click="selectShortcut(item.id)"
             >
               <span class="workspace-shortcuts__label">
                 <component :is="item.icon" :size="15" aria-hidden="true" />
@@ -499,7 +520,7 @@ onBeforeUnmount(() => {
               <button
                 type="button"
                 class="workspace-tree-action"
-                :disabled="!activeRepoId || isMutatingFiles"
+              :disabled="!activeRepoId || isMutatingFiles || isTrashPanel"
                 title="在当前目录新建文件夹"
                 aria-label="在当前目录新建文件夹"
                 @click="openCreateFolderDialog(currentDirectoryPath)"
@@ -509,7 +530,7 @@ onBeforeUnmount(() => {
               <button
                 type="button"
                 class="workspace-tree-action"
-                :disabled="!activeRepoId || isLoadingFileBrowser"
+              :disabled="!activeRepoId || isLoadingFileBrowser"
                 title="刷新文件夹树"
                 aria-label="刷新文件夹树"
                 @click="refreshFileBrowserTree"
@@ -546,6 +567,7 @@ onBeforeUnmount(() => {
             </div>
 
             <FolderTreeNode
+              v-if="!isTrashPanel"
               v-for="node in fileTreeNodes"
               :key="node.path"
               :node="node"
@@ -560,8 +582,8 @@ onBeforeUnmount(() => {
               @delete="openDeleteFolderDialog"
             />
           </div>
-          <div v-if="activeRepoId && !fileTreeNodes.length && !isLoadingFileBrowser" class="workspace-empty workspace-empty--compact">
-            <p class="workspace-empty__text">当前仓库还没有子文件夹。</p>
+          <div v-if="activeRepoId && (isTrashPanel || !fileTreeNodes.length) && !isLoadingFileBrowser" class="workspace-empty workspace-empty--compact">
+            <p class="workspace-empty__text">{{ isTrashPanel ? "回收站条目在主视图中管理。" : "当前仓库还没有子文件夹。" }}</p>
           </div>
         </section>
       </section>
@@ -750,15 +772,15 @@ onBeforeUnmount(() => {
         class="modal-overlay"
         role="dialog"
         aria-modal="true"
-        aria-label="删除文件夹"
+        aria-label="处理文件夹"
         @click.self="closeDeleteFolderDialog"
       >
         <div class="modal-card dialog-card folder-delete-dialog">
           <div class="dialog-card__header dialog-card__header--danger">
-            <span>删除文件夹</span>
+            <span>处理文件夹</span>
           </div>
           <div class="dialog-card__body folder-delete-dialog__body">
-            <p>将删除文件夹“{{ pendingDeleteFolderLabel }}”。请选择内部内容的处理方式。</p>
+            <p>将处理文件夹“{{ pendingDeleteFolderLabel }}”。请选择内部内容的处理方式。</p>
             <div class="folder-delete-dialog__options">
               <button
                 type="button"
@@ -775,8 +797,8 @@ onBeforeUnmount(() => {
                 :disabled="isMutatingFiles"
                 @click="confirmDeleteFolder('delete')"
               >
-                <strong>连同内部内容一起删除</strong>
-                <span>递归删除该目录下的全部文件和子文件夹。</span>
+                <strong>移入回收站</strong>
+                <span>将该目录及其全部内容移入回收站，可在回收站中还原。</span>
               </button>
             </div>
           </div>
