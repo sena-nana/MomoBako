@@ -119,6 +119,41 @@ describe("文件管理冒烟", () => {
     expect(workspace.syncProgress.value.phase).toBe("complete");
   });
 
+  it("目录内容先显示灰色占位，再异步补充缩略图", async () => {
+    seedMockRepository();
+    const workspace = useRepositoryWorkspace();
+    workspace.setActivePanel("files");
+    const delay = delayNextInvoke("ensure_thumbnail");
+
+    await renderApp();
+
+    expect(screen.getAllByText("cover-final.psd").length).toBeGreaterThan(0);
+    expect(workspace.fileBrowser.value?.entries.find((entry) => entry.path === "cover-final.psd")?.thumbnailPath).toBeNull();
+    expect(getInvokeCalls("ensure_thumbnail")).toHaveLength(1);
+
+    delay.resolve();
+    await waitFor(() => {
+      expect(workspace.fileBrowser.value?.entries.find((entry) => entry.path === "cover-final.psd")?.thumbnailPath)
+        .toBe("C:/Mock/Thumbs/cover-final.psd.jpg");
+    });
+  });
+
+  it("切目录后丢弃旧目录返回的缩略图", async () => {
+    seedMockRepository();
+    const workspace = useRepositoryWorkspace();
+    workspace.setActivePanel("files");
+    const delay = delayNextInvoke("ensure_thumbnail");
+
+    await renderApp();
+    await workspace.loadFileBrowserForDirectory("Campaigns");
+    delay.resolve();
+
+    await waitFor(() => {
+      expect(workspace.fileBrowser.value?.currentPath).toBe("Campaigns");
+    });
+    expect(workspace.fileBrowser.value?.entries.some((entry) => entry.path === "cover-final.psd")).toBe(false);
+  });
+
   it("侧栏选择本地文件夹时挂载已有目录而不是创建新仓库", async () => {
     seedMockRepository();
     selectMockFolder("C:/Mock/SelectedRepo");

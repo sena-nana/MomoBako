@@ -31,6 +31,7 @@
   --ok-soft: rgba(63, 185, 80, 0.14);
   --warn-soft: rgba(212, 168, 91, 0.16);
   --err-soft: rgba(244, 113, 116, 0.14);
+  --thumbnail-placeholder-bg: #3a3a3a;
   font-family: var(--font-sans);
   font-size: 14px;
   line-height: 1.55;
@@ -63,6 +64,7 @@
   --ok-soft: rgba(29, 133, 64, 0.10);
   --warn-soft: rgba(184, 119, 28, 0.12);
   --err-soft: rgba(201, 60, 60, 0.10);
+  --thumbnail-placeholder-bg: #d8dce2;
 }
 
 * {
@@ -1472,7 +1474,7 @@ kbd {
   align-items: center;
   justify-content: center;
   color: rgba(255, 255, 255, 0.92);
-  background: var(--bg-subtle);
+  background: var(--thumbnail-placeholder-bg);
 }
 
 .files-list__preview img,

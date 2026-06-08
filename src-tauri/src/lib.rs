@@ -10,7 +10,7 @@ mod window_state;
 use repository_service::{
     FileBrowserRequest, FileCreateRequest, FileDeleteRequest, FileImportRequest, FileReadRequest,
     FileRenameRequest, MetadataUpdateRequest, RepositoryFolderRequest, RepositoryMutationRequest,
-    RevisionActionRequest, SearchRequest, SyncRequest,
+    RevisionActionRequest, SearchRequest, SyncRequest, ThumbnailRequest,
 };
 use service_process::ServiceBridge;
 
@@ -168,6 +168,14 @@ fn sync_repository(
 }
 
 #[tauri::command]
+fn ensure_thumbnail(
+    request: ThumbnailRequest,
+    bridge: tauri::State<'_, ServiceBridge>,
+) -> Result<serde_json::Value, String> {
+    bridge.invoke(&serde_json::json!({ "command": "ensureThumbnail", "request": request }))
+}
+
+#[tauri::command]
 fn undo_last_revision(
     request: RevisionActionRequest,
     bridge: tauri::State<'_, ServiceBridge>,
@@ -272,6 +280,7 @@ pub fn run() {
             delete_repository,
             export_repository,
             sync_repository,
+            ensure_thumbnail,
             undo_last_revision,
             redo_last_revision,
             list_plugins,
