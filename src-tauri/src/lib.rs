@@ -208,6 +208,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_store::Builder::default().build())
+        .manage(window_state::MainWindowStateCache::default())
         .setup(|app| {
             let bridge = ServiceBridge::start(app.handle())?;
             app.manage(bridge);
@@ -218,6 +219,8 @@ pub fn run() {
                     window_state::restore_main_window_state(&window, state);
                 }
                 let _ = window.show();
+                let cache = app.state::<window_state::MainWindowStateCache>();
+                window_state::remember_main_window_state(&cache, &window);
             }
             Ok(())
         })
@@ -225,12 +228,27 @@ pub fn run() {
             if window.label() != MAIN_WINDOW_LABEL {
                 return;
             }
+            let app_handle = window.app_handle();
+            let cache = app_handle.state::<window_state::MainWindowStateCache>();
+            if matches!(
+                event,
+                WindowEvent::Moved(_)
+                    | WindowEvent::Resized(_)
+                    | WindowEvent::ScaleFactorChanged { .. }
+            ) {
+                if let Some(webview_window) = window.get_webview_window(MAIN_WINDOW_LABEL) {
+                    window_state::remember_main_window_state(&cache, &webview_window);
+                }
+                return;
+            }
             if matches!(
                 event,
                 WindowEvent::CloseRequested { .. } | WindowEvent::Destroyed
             ) {
                 if let Some(webview_window) = window.get_webview_window(MAIN_WINDOW_LABEL) {
-                    window_state::persist_main_window_state(&window.app_handle(), &webview_window);
+                    window_state::persist_main_window_state(&app_handle, &cache, &webview_window);
+                } else {
+                    window_state::persist_cached_main_window_state(&app_handle, &cache);
                 }
             }
         })
