@@ -2,6 +2,7 @@ use rusqlite::{params, types::Type, Connection, OptionalExtension, Transaction};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
+    ffi::OsString,
     fs::{self, OpenOptions},
     path::{Path, PathBuf},
     process::Command,
@@ -2603,16 +2604,7 @@ fn generate_video_thumbnail(source_path: &Path, thumbnail_path: &Path) -> Result
     ensure_ffmpeg_ready()?;
 
     let status = Command::new(ffmpeg_sidecar::paths::ffmpeg_path())
-        .arg("-y")
-        .arg("-ss")
-        .arg("00:00:01")
-        .arg("-i")
-        .arg(source_path)
-        .arg("-frames:v")
-        .arg("1")
-        .arg("-vf")
-        .arg(format!("scale='min({THUMBNAIL_SIZE},iw)':-1"))
-        .arg(thumbnail_path)
+        .args(video_thumbnail_ffmpeg_args(source_path, thumbnail_path))
         .status()
         .map_err(|error| format!("ffmpeg unavailable: {error}"))?;
 
@@ -2621,6 +2613,26 @@ fn generate_video_thumbnail(source_path: &Path, thumbnail_path: &Path) -> Result
     } else {
         Err(format!("ffmpeg exited with status: {status}"))
     }
+}
+
+fn video_thumbnail_ffmpeg_args(source_path: &Path, thumbnail_path: &Path) -> Vec<OsString> {
+    vec![
+        "-hide_banner".into(),
+        "-loglevel".into(),
+        "error".into(),
+        "-y".into(),
+        "-ss".into(),
+        "00:00:01".into(),
+        "-i".into(),
+        source_path.as_os_str().to_os_string(),
+        "-frames:v".into(),
+        "1".into(),
+        "-update".into(),
+        "1".into(),
+        "-vf".into(),
+        format!("scale='min({THUMBNAIL_SIZE},iw)':-1").into(),
+        thumbnail_path.as_os_str().to_os_string(),
+    ]
 }
 
 fn ensure_ffmpeg_ready() -> Result<(), String> {
@@ -4391,5 +4403,25 @@ mod tests {
         );
 
         assert_ne!(first, second);
+    }
+
+    #[test]
+    fn video_thumbnail_ffmpeg_args_write_a_single_image() {
+        let source_path = Path::new("C:/Assets/video.mp4");
+        let thumbnail_path = Path::new("C:/Cache/thumbnail.jpg");
+        let args = video_thumbnail_ffmpeg_args(source_path, thumbnail_path);
+
+        assert!(args.windows(2).any(|items| items == ["-frames:v", "1"]));
+        assert!(args.windows(2).any(|items| items == ["-update", "1"]));
+
+        let update_index = args
+            .iter()
+            .position(|item| item == "-update")
+            .expect("missing -update");
+        let output_index = args
+            .iter()
+            .position(|item| item == thumbnail_path.as_os_str())
+            .expect("missing output path");
+        assert!(update_index < output_index);
     }
 }
