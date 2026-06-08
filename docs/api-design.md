@@ -26,6 +26,19 @@
   - Response includes repository summary, target, output path or Git target, and result message
 - `POST /repositories/{repoId}:sync`
   - Trigger incremental scan and emit filesystem events
+  - Response keeps the existing `SyncResult` counters: `scannedFiles`, `createdAssets`, `updatedAssets`, `deletedAssets`, `createdEvents`
+  - Desktop UI may expose local sync progress as phased client state (`scanning`, `writing`, `refreshing`, `complete`) without changing this transport contract
+  - Sync updates repository indexes only; thumbnail generation is handled by the thumbnail API after content is visible
+- `POST /repositories/{repoId}/thumbnails:ensure`
+  - Request body includes repository-relative `path`
+  - Reuse an existing valid thumbnail cache entry or generate one for supported local image/video files
+  - Response fields: `repoId`, `path`, `assetId`, `thumbnailPath`
+
+## Desktop Runtime State
+
+- Workspace startup progress is a desktop UI state, not a repository service endpoint
+- Startup progress fields: `status`, `stepLabel`, `currentStep`, `totalSteps`, `percent`, `error`
+- Sync progress fields reserved for phased UI feedback: `phase`, `label`, `current`, `total`, `percent`
 
 ## Asset API
 
