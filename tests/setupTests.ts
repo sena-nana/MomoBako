@@ -591,6 +591,10 @@ export function seedMockRepository() {
   mockRepositories = [mockSnapshot.repository];
 }
 
+export function selectMockFolder(path: string) {
+  mockSelectedFolder = path;
+}
+
 export function createDirectoryOnNextSync(path: string) {
   mockDirectoryCreatedOnNextSync = path;
 }

@@ -8,12 +8,14 @@ import {
   createDirectoryOnNextSync,
   getInvokeCalls,
   seedMockRepository,
+  selectMockFolder,
 } from "./setupTests";
 
 async function renderApp() {
   const router = createTemplateRouter(createMemoryHistory());
   await router.push("/");
   await router.isReady();
+  await useRepositoryWorkspace().refreshRepositoryWorkspace();
 
   render(App, {
     global: {
@@ -38,6 +40,49 @@ function pointerEvent(type: string, clientX: number) {
 }
 
 describe("文件管理冒烟", () => {
+  it("侧栏选择本地文件夹时挂载已有目录而不是创建新仓库", async () => {
+    seedMockRepository();
+    selectMockFolder("C:/Mock/SelectedRepo");
+    await renderApp();
+
+    await fireEvent.click(screen.getByRole("button", { name: "添加资源库" }));
+    await fireEvent.click(await screen.findByRole("button", { name: "本地文件夹" }));
+
+    await waitFor(() => {
+      expect(getInvokeCalls("attach_repository_folder").at(-1)?.args).toMatchObject({
+        request: {
+          path: "C:/Mock/SelectedRepo",
+        },
+      });
+    });
+    expect(getInvokeCalls("create_repository")).toHaveLength(0);
+  });
+
+  it("空状态拖入本地文件夹时挂载已有目录而不是创建新仓库", async () => {
+    await renderApp();
+    const dropZone = document.querySelector(".empty-state-page");
+    expect(dropZone).toBeInstanceOf(HTMLElement);
+    const folder = new File([], "EmptyRepo");
+    Object.defineProperty(folder, "path", {
+      value: "C:/Mock/EmptyRepo",
+    });
+
+    await fireEvent.drop(dropZone as HTMLElement, {
+      dataTransfer: {
+        files: [folder],
+      },
+    });
+
+    await waitFor(() => {
+      expect(getInvokeCalls("attach_repository_folder").at(-1)?.args).toMatchObject({
+        request: {
+          path: "C:/Mock/EmptyRepo",
+        },
+      });
+    });
+    expect(getInvokeCalls("create_repository")).toHaveLength(0);
+  });
+
   it("保留目录按需加载，并在结构变化后刷新文件夹树", async () => {
     seedMockRepository();
     const workspace = useRepositoryWorkspace();
