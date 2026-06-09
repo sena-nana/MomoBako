@@ -409,6 +409,87 @@ describe("文件管理冒烟", () => {
     expect(await screen.findByRole("heading", { name: "搜索结果" })).toBeInTheDocument();
     expect(await screen.findByText("cover-final.psd")).toBeInTheDocument();
 
+    await fireEvent.click(screen.getByRole("button", { name: "显示筛选栏" }));
+    expect(await screen.findByLabelText("资源筛选")).toBeInTheDocument();
+    await fireEvent.click(screen.getByRole("button", { name: "psd" }));
+    await waitFor(() => {
+      const searchCalls = getInvokeCalls("search_assets");
+      expect(searchCalls.at(-1)?.args).toMatchObject({
+        request: {
+          query: "cover",
+          repoId: "repo-main-001",
+          formats: ["psd"],
+        },
+      });
+    });
+
+    await fireEvent.click(screen.getByRole("button", { name: "封面" }));
+    await waitFor(() => {
+      const searchCalls = getInvokeCalls("search_assets");
+      expect(searchCalls.at(-1)?.args).toMatchObject({
+        request: {
+          repoId: "repo-main-001",
+          formats: ["psd"],
+          tags: ["封面"],
+        },
+      });
+    });
+
+    await fireEvent.click(screen.getByRole("button", { name: "5 星+" }));
+    await waitFor(() => {
+      const searchCalls = getInvokeCalls("search_assets");
+      expect(searchCalls.at(-1)?.args).toMatchObject({
+        request: {
+          repoId: "repo-main-001",
+          formats: ["psd"],
+          tags: ["封面"],
+          minRating: 5,
+        },
+      });
+    });
+
+    await fireEvent.click(screen.getByRole("button", { name: "红色" }));
+    await waitFor(() => {
+      const searchCalls = getInvokeCalls("search_assets");
+      expect(searchCalls.at(-1)?.args).toMatchObject({
+        request: {
+          repoId: "repo-main-001",
+          metadataFilters: [
+            { key: "color", value: "红色" },
+          ],
+        },
+      });
+    });
+
+    await fireEvent.click(screen.getByRole("button", { name: "方形" }));
+    await waitFor(() => {
+      const searchCalls = getInvokeCalls("search_assets");
+      expect(searchCalls.at(-1)?.args).toMatchObject({
+        request: {
+          repoId: "repo-main-001",
+          metadataFilters: [
+            { key: "color", value: "红色" },
+            { key: "shape", value: "方形" },
+          ],
+        },
+      });
+    });
+
+    await fireEvent.click(screen.getByRole("button", { name: "清除" }));
+    await waitFor(() => {
+      const searchCalls = getInvokeCalls("search_assets");
+      expect(searchCalls.at(-1)?.args).toMatchObject({
+        request: {
+          query: "cover",
+        },
+      });
+      expect(searchCalls.at(-1)?.args).not.toMatchObject({
+        request: {
+          repoId: "repo-main-001",
+        },
+      });
+    });
+
     await fireEvent.click(extensionsButton);
     expect(await screen.findByRole("heading", { name: "文件系统与插件" })).toBeInTheDocument();
 

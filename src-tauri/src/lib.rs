@@ -17,8 +17,9 @@ mod window_state;
 use repository_runtime::RepositoryRuntime;
 use repository_service::{
     ApiDesignSnapshot, AssetDetail, CacheSnapshot, FileBrowserRequest, FileBrowserSnapshot,
-    FileCreateRequest, FileDeleteRequest, FileImportRequest, FilePreviewSourceResponse,
-    FileReadRequest, FileRenameRequest, MetadataUpdateRequest, MetadataUpdateResponse,
+    FileCopyRequest, FileCreateRequest, FileDeleteRequest, FileImportRequest,
+    FilePreviewSourceResponse, FileReadRequest, FileRenameRequest, HardlinkCandidateResponse,
+    HardlinkConfirmRequest, HardlinkConfirmResponse, MetadataUpdateRequest, MetadataUpdateResponse,
     PluginEnabledRequest, PluginInstallRequest, PluginManifest, PluginMutationResponse,
     RepositoryExportRequest, RepositoryExportResponse, RepositoryFolderRequest,
     RepositoryMutationRequest, RepositoryMutationResponse, RepositorySnapshot, RepositorySummary,
@@ -142,6 +143,16 @@ async fn import_entries(
 }
 
 #[tauri::command]
+async fn copy_entries(
+    request: FileCopyRequest,
+    runtime: tauri::State<'_, RepositoryRuntime>,
+) -> Result<FileBrowserSnapshot, String> {
+    runtime
+        .run_write(move |state| state.copy_entries(request))
+        .await
+}
+
+#[tauri::command]
 async fn rename_entry(
     request: FileRenameRequest,
     runtime: tauri::State<'_, RepositoryRuntime>,
@@ -228,6 +239,26 @@ async fn sync_repository(
 ) -> Result<SyncResult, String> {
     runtime
         .run_write(move |state| state.sync_repository(request))
+        .await
+}
+
+#[tauri::command]
+async fn list_hardlink_candidates(
+    repo_id: String,
+    runtime: tauri::State<'_, RepositoryRuntime>,
+) -> Result<HardlinkCandidateResponse, String> {
+    runtime
+        .run_read(move |state| state.list_hardlink_candidates(&repo_id))
+        .await
+}
+
+#[tauri::command]
+async fn confirm_hardlink_candidate(
+    request: HardlinkConfirmRequest,
+    runtime: tauri::State<'_, RepositoryRuntime>,
+) -> Result<HardlinkConfirmResponse, String> {
+    runtime
+        .run_write(move |state| state.confirm_hardlink_candidate(request))
         .await
 }
 
@@ -434,6 +465,7 @@ pub fn run() {
             create_directory,
             create_file,
             import_entries,
+            copy_entries,
             rename_entry,
             delete_entry,
             mutate_trash,
@@ -443,6 +475,8 @@ pub fn run() {
             delete_repository,
             export_repository,
             sync_repository,
+            list_hardlink_candidates,
+            confirm_hardlink_candidate,
             ensure_thumbnail,
             undo_last_revision,
             redo_last_revision,

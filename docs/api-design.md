@@ -26,13 +26,24 @@
   - Response includes repository summary, target, output path or Git target, and result message
 - `POST /repositories/{repoId}:sync`
   - Trigger incremental scan and emit filesystem events
-  - Response keeps the existing `SyncResult` counters: `scannedFiles`, `createdAssets`, `updatedAssets`, `deletedAssets`, `createdEvents`
+  - Response keeps the existing `SyncResult` counters: `scannedFiles`, `createdAssets`, `updatedAssets`, `deletedAssets`, `createdEvents`, plus `hardlinkCandidates`
   - Desktop UI may expose local sync progress as phased client state (`scanning`, `writing`, `refreshing`, `complete`) without changing this transport contract
   - Sync updates repository indexes only; thumbnail generation is handled by the thumbnail API after content is visible
+  - Local filesystem scans store real `sha256:<hex>` content hashes on assets. When a newly discovered file has the same content hash as an existing active asset and is not already in a hardlink group, sync records a pending hardlink candidate instead of auto-linking it.
 - File browser requests may include `specialLocation: "trash"` to browse `.momo/trash` without exposing internal repository directories in normal browsing.
 - Trash browser entries include `metadata.deletedAt` and `metadata.originalPath` when they were moved by MomoBako.
 - `deleteEntry` moves files or recursive directory deletes to `.momo/trash` by default. Use `mode: "permanentDelete"` only for deleting entries already shown from the trash view.
 - `mutateTrash` supports `action: "restore" | "restoreAll" | "empty"` to restore a selected trash item, restore all tracked trash items, or clear `.momo/trash`.
+- `POST /repositories/{repoId}/files:copy`
+  - Request body includes repository-relative `sourcePaths`, optional `parentPath`, and optional `mode`: `hardlinkPreferred` | `copy`
+  - Local filesystem repositories use `hardlinkPreferred` by default. File copies try to create hard links first and fall back to ordinary copies if the platform, filesystem, volume boundary, network location, or permissions reject the link.
+  - Directory copies create the destination directory tree and apply the same per-file hardlink-preferred behavior recursively.
+  - Successful hard links create or reuse `hardlink_groups` by content hash and record `hardlink_members`; fallback copies are recorded with `linkState: "copiedFallback"`.
+- `GET /repositories/{repoId}/hardlinks:candidates`
+  - Returns pending same-hash candidates discovered by sync.
+- `POST /repositories/{repoId}/hardlinks:confirm`
+  - Request body includes `candidateId`
+  - Confirms a pending candidate and joins both assets into the same hardlink group only when their stored content hashes and sizes still match.
 - `POST /repositories/{repoId}/thumbnails:ensure`
   - Request body includes repository-relative `path`
   - Reuse an existing valid thumbnail cache entry or generate one for supported local image/video files
@@ -73,9 +84,15 @@
     - free text query
     - `repoId`
     - `tag`
+    - `tags`
     - `metadataKey`
     - `metadataValue`
+    - `metadataFilters`
+    - `formats`
     - `minRating`
+  - `tags` and `formats` match with OR semantics inside each field; different filter fields combine with AND semantics.
+  - `metadataFilters` accepts key/value pairs such as `color` and `shape`; values are matched against metadata text.
+  - Desktop resource filtering sends the current `repoId` and may search with an empty free text query.
 
 ## Plugin API
 
