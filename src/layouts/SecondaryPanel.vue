@@ -6,7 +6,6 @@ import {
   Archive,
   Check,
   ChevronsUpDown,
-  FolderOpen,
   FolderTree,
   LoaderCircle,
   Plus,
@@ -314,6 +313,11 @@ async function deleteActiveRepositoryFromMenu() {
   }
 }
 
+function openFolder(path: string) {
+  setActivePanel("files");
+  void loadFileBrowserForDirectory(path);
+}
+
 function toggleFolderExpansion(path: string) {
   const next = new Set(expandedFolderPaths.value);
   if (next.has(path)) {
@@ -322,11 +326,6 @@ function toggleFolderExpansion(path: string) {
     next.add(path);
   }
   expandedFolderPaths.value = Array.from(next);
-}
-
-function openFolder(path: string) {
-  setActivePanel("files");
-  void loadFileBrowserForDirectory(path);
 }
 
 function openCreateFolderDialog(parentPath = "") {
@@ -569,28 +568,6 @@ onBeforeUnmount(() => {
             <p class="workspace-empty__text">先选择或添加一个资源库。</p>
           </div>
           <div v-else class="workspace-folder-tree">
-            <div class="workspace-folder-tree__branch">
-              <div class="workspace-folder-tree__row" :class="{ 'is-active': currentDirectoryPath === '' }">
-                <button
-                  type="button"
-                  class="workspace-folder-tree__toggle workspace-folder-tree__toggle is-hidden"
-                  aria-hidden="true"
-                  disabled
-                />
-                <button
-                  type="button"
-                  class="workspace-folder-tree__item"
-                  :class="{ 'is-active': currentDirectoryPath === '' }"
-                  @click="openFolder('')"
-                >
-                  <span class="workspace-folder-tree__label">
-                    <FolderOpen :size="15" aria-hidden="true" />
-                    根目录
-                  </span>
-                </button>
-              </div>
-            </div>
-
             <FolderTreeNode
               v-if="!isTrashPanel"
               v-for="node in fileTreeNodes"
