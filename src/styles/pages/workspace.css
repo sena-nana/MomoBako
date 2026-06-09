@@ -706,6 +706,14 @@
   filter: none;
 }
 
+.files-list__item.can-drag-out {
+  cursor: grab;
+}
+
+.files-list__item.can-drag-out:active {
+  cursor: grabbing;
+}
+
 .files-list__preview {
   width: 100%;
   aspect-ratio: 1 / 1;
@@ -753,6 +761,8 @@
   width: 100%;
   height: 100%;
   object-fit: cover;
+  user-select: none;
+  -webkit-user-drag: none;
 }
 
 .files-list__body {

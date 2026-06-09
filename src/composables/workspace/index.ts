@@ -20,6 +20,7 @@ import {
   installPluginFromArchive,
   listPlugins,
   setPluginEnabled,
+  startExternalFileDrag,
   mutateTrash,
   openRepositoryPath,
   redoLastRevision,
@@ -438,6 +439,22 @@ export async function revealWorkspaceEntry(path: string) {
     await revealRepositoryPath(absolutePath);
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : String(cause);
+  }
+}
+
+export async function startWorkspaceEntryDrag(path: string, icon?: string) {
+  if (fileBrowser.value?.specialLocation === "trash") return false;
+  if (activeSnapshot.value?.repository.backend.kind !== "filesystem") return false;
+  const absolutePath = joinActiveRepositoryPath(path);
+  if (!absolutePath) return false;
+
+  error.value = null;
+  try {
+    await startExternalFileDrag([absolutePath], icon);
+    return true;
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : String(cause);
+    return false;
   }
 }
 
@@ -925,6 +942,7 @@ export function useRepositoryWorkspace() {
     emptyTrash,
     openWorkspaceEntry,
     revealWorkspaceEntry,
+    startWorkspaceEntryDrag,
     selectWorkspaceEntry,
     setWorkspaceEntryThumbnail,
     setWorkspaceEntryThumbnailFromBytes,

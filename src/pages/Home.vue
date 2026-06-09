@@ -128,6 +128,7 @@ const {
   emptyTrash,
   openWorkspaceEntry,
   revealWorkspaceEntry,
+  startWorkspaceEntryDrag,
   selectWorkspaceEntry,
   setActivePanel,
   setWorkspaceEntryThumbnail,
@@ -154,6 +155,7 @@ const canRenameSelected = computed(() => Boolean(currentFileEntry.value) && !isT
 const canPreviewSelected = computed(() => currentFileEntry.value?.kind === "file" && !isTrashPanel.value);
 const canDeleteSelected = computed(() => Boolean(currentFileEntry.value));
 const canRestoreSelected = computed(() => Boolean(currentFileEntry.value) && isTrashPanel.value);
+const canDragEntries = computed(() => !isTrashPanel.value && fileBrowser.value?.backendKind === "filesystem");
 const previewFileEntry = computed(() => (
   previewFilePath.value ? fileBrowserEntryMap.value.get(previewFilePath.value) ?? null : null
 ));
@@ -345,6 +347,56 @@ function fileItemStyle(entry: FileBrowserEntry) {
   };
 }
 
+function fillRoundedRect(context: CanvasRenderingContext2D, x: number, y: number, width: number, height: number, radius: number) {
+  context.beginPath();
+  context.moveTo(x + radius, y);
+  context.lineTo(x + width - radius, y);
+  context.quadraticCurveTo(x + width, y, x + width, y + radius);
+  context.lineTo(x + width, y + height - radius);
+  context.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
+  context.lineTo(x + radius, y + height);
+  context.quadraticCurveTo(x, y + height, x, y + height - radius);
+  context.lineTo(x, y + radius);
+  context.quadraticCurveTo(x, y, x + radius, y);
+  context.closePath();
+  context.fill();
+}
+
+function createExternalDragIcon(entry: FileBrowserEntry) {
+  const canvas = document.createElement("canvas");
+  const context = canvas.getContext("2d");
+  if (!context) return undefined;
+
+  const size = 72;
+  const scale = Math.min(Math.max(window.devicePixelRatio || 1, 1), 2);
+  canvas.width = size * scale;
+  canvas.height = size * scale;
+  context.scale(scale, scale);
+
+  const gradient = context.createLinearGradient(0, 0, size, size);
+  if (entry.kind === "directory") {
+    gradient.addColorStop(0, "#d3b26f");
+    gradient.addColorStop(1, "#6e542e");
+  } else {
+    gradient.addColorStop(0, "#8aa8b0");
+    gradient.addColorStop(1, "#314a53");
+  }
+
+  context.fillStyle = "rgba(0, 0, 0, 0.22)";
+  fillRoundedRect(context, 8, 10, 56, 56, 12);
+  context.fillStyle = gradient;
+  fillRoundedRect(context, 6, 6, 56, 56, 12);
+
+  context.fillStyle = "rgba(255, 255, 255, 0.9)";
+  context.font = "700 16px system-ui, sans-serif";
+  context.textAlign = "center";
+  context.textBaseline = "middle";
+  const label = entry.kind === "directory" ? "DIR" : (entry.extension || "FILE").slice(0, 4).toUpperCase();
+  context.fillText(label, 34, 34, 44);
+
+  return canvas.toDataURL("image/png");
+}
+
 function resetThumbnailFailure(path: string) {
   const next = new Set(failedThumbnailPaths.value);
   next.delete(path);
@@ -439,6 +491,12 @@ function selectFileEntry(entry: FileBrowserEntry) {
     return;
   }
   selectWorkspaceEntry(entry.path);
+}
+
+function handleEntryDragStart(entry: FileBrowserEntry) {
+  if (!canDragEntries.value) return;
+  selectWorkspaceEntry(entry.path);
+  void startWorkspaceEntryDrag(entry.path, createExternalDragIcon(entry));
 }
 
 function previewFileEntryByDoubleClick(entry: FileBrowserEntry) {
@@ -1071,6 +1129,7 @@ onUnmounted(() => {
       v-model:file-display-mode="fileDisplayMode"
       v-model:rename-value="renameValue"
       :breadcrumbs="breadcrumbSegments"
+      :can-drag-entries="canDragEntries"
       :can-delete-selected="canDeleteSelected"
       :can-preview-selected="canPreviewSelected"
       :can-rename-selected="canRenameSelected"
@@ -1105,6 +1164,7 @@ onUnmounted(() => {
       @drag-over="handleDragOver"
       @drop="handleDrop"
       @empty-trash="handleEmptyTrash"
+      @entry-drag-start="handleEntryDragStart"
       @mark-thumbnail-failed="markThumbnailFailed"
       @open-directory="openDirectory"
       @open-selected="openSelectedEntry"

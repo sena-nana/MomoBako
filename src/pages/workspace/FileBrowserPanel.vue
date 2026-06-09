@@ -22,9 +22,16 @@ type BreadcrumbSegment = {
   label: string;
   path: string;
 };
+type EntryDragIntent = {
+  entryPath: string;
+  pointerId: number;
+  startX: number;
+  startY: number;
+};
 
-defineProps<{
+const props = defineProps<{
   breadcrumbs: BreadcrumbSegment[];
+  canDragEntries: boolean;
   canDeleteSelected: boolean;
   canPreviewSelected: boolean;
   canRenameSelected: boolean;
@@ -66,6 +73,7 @@ const emit = defineEmits<{
   dragOver: [event: DragEvent];
   drop: [event: DragEvent];
   emptyTrash: [];
+  entryDragStart: [entry: FileBrowserEntry, event: PointerEvent];
   markThumbnailFailed: [entry: FileBrowserEntry];
   openDirectory: [path: string];
   openSelected: [];
@@ -78,6 +86,60 @@ const emit = defineEmits<{
   submitRename: [];
   thumbnailLoaded: [entry: FileBrowserEntry, event: Event];
 }>();
+
+const dragStartThreshold = 7;
+let entryDragIntent: EntryDragIntent | null = null;
+let suppressClickPath: string | null = null;
+
+function releaseEntryPointer(event: PointerEvent) {
+  const target = event.currentTarget as HTMLElement | null;
+  if (target?.hasPointerCapture?.(event.pointerId)) {
+    target.releasePointerCapture(event.pointerId);
+  }
+}
+
+function handleEntryPointerDown(entry: FileBrowserEntry, event: PointerEvent) {
+  if (!props.canDragEntries || event.button !== 0) return;
+  entryDragIntent = {
+    entryPath: entry.path,
+    pointerId: event.pointerId,
+    startX: event.clientX,
+    startY: event.clientY,
+  };
+  (event.currentTarget as HTMLElement | null)?.setPointerCapture?.(event.pointerId);
+}
+
+function handleEntryPointerMove(entry: FileBrowserEntry, event: PointerEvent) {
+  const intent = entryDragIntent;
+  if (!intent || intent.pointerId !== event.pointerId || intent.entryPath !== entry.path) return;
+  if ((event.buttons & 1) !== 1) {
+    entryDragIntent = null;
+    return;
+  }
+
+  const distance = Math.hypot(event.clientX - intent.startX, event.clientY - intent.startY);
+  if (distance < dragStartThreshold) return;
+
+  suppressClickPath = entry.path;
+  entryDragIntent = null;
+  releaseEntryPointer(event);
+  emit("entryDragStart", entry, event);
+}
+
+function clearEntryDragIntent(event: PointerEvent) {
+  if (entryDragIntent?.pointerId === event.pointerId) {
+    entryDragIntent = null;
+  }
+  releaseEntryPointer(event);
+}
+
+function handleEntryClick(entry: FileBrowserEntry) {
+  if (suppressClickPath === entry.path) {
+    suppressClickPath = null;
+    return;
+  }
+  emit("selectEntry", entry);
+}
 </script>
 
 <template>
@@ -163,8 +225,12 @@ const emit = defineEmits<{
           v-context-menu="() => fileEntryContextMenu(entry)"
           type="button"
           class="files-list__item"
-          :class="{ 'is-active': selectedFilePath === entry.path }"
-          @click="emit('selectEntry', entry)"
+          :class="{ 'is-active': selectedFilePath === entry.path, 'can-drag-out': canDragEntries }"
+          @click="handleEntryClick(entry)"
+          @pointerdown="handleEntryPointerDown(entry, $event)"
+          @pointermove="handleEntryPointerMove(entry, $event)"
+          @pointerup="clearEntryDragIntent"
+          @pointercancel="clearEntryDragIntent"
         >
           <div class="files-list__preview" :style="{ background: fileTone(entry) }">
             <Folder :size="24" aria-hidden="true" />
@@ -183,18 +249,24 @@ const emit = defineEmits<{
             v-context-menu="() => fileEntryContextMenu(entry)"
             type="button"
             class="files-list__item files-list__item--file"
-            :class="{ 'is-active': selectedFilePath === entry.path }"
+            :class="{ 'is-active': selectedFilePath === entry.path, 'can-drag-out': canDragEntries }"
             :style="fileItemStyle(entry)"
-            @click="emit('selectEntry', entry)"
+            @click="handleEntryClick(entry)"
             @dblclick="emit('previewFile', entry)"
+            @pointerdown="handleEntryPointerDown(entry, $event)"
+            @pointermove="handleEntryPointerMove(entry, $event)"
+            @pointerup="clearEntryDragIntent"
+            @pointercancel="clearEntryDragIntent"
           >
             <div class="files-list__preview">
               <img
                 v-if="thumbnailSrc(entry)"
                 :src="thumbnailSrc(entry) ?? undefined"
                 alt=""
+                draggable="false"
                 loading="lazy"
                 @load="emit('thumbnailLoaded', entry, $event)"
+                @dragstart.prevent
                 @error="emit('markThumbnailFailed', entry)"
               />
               <FileVideo v-else-if="isVideoEntry(entry)" :size="24" aria-hidden="true" />
@@ -223,7 +295,14 @@ const emit = defineEmits<{
   <aside class="files-detail">
     <div v-if="currentFileEntry" class="files-detail__card">
       <div class="files-detail__preview" :style="{ background: currentFileEntry.kind === 'directory' ? fileTone(currentFileEntry) : undefined }">
-        <img v-if="thumbnailSrc(currentFileEntry)" :src="thumbnailSrc(currentFileEntry) ?? undefined" alt="" @error="emit('markThumbnailFailed', currentFileEntry)" />
+        <img
+          v-if="thumbnailSrc(currentFileEntry)"
+          :src="thumbnailSrc(currentFileEntry) ?? undefined"
+          alt=""
+          draggable="false"
+          @dragstart.prevent
+          @error="emit('markThumbnailFailed', currentFileEntry)"
+        />
         <Folder v-else-if="currentFileEntry.kind === 'directory'" :size="34" aria-hidden="true" />
         <FileVideo v-else-if="isVideoEntry(currentFileEntry)" :size="34" aria-hidden="true" />
         <FileAudio v-else-if="isAudioEntry(currentFileEntry)" :size="34" aria-hidden="true" />
