@@ -59,50 +59,51 @@ const depthStyle = computed(() => ({
         />
       </button>
 
-      <button
-        type="button"
-        class="workspace-folder-tree__item"
-        :class="{ 'is-active': isActive }"
-        @click="emit('open', node.path)"
-      >
-        <span class="workspace-folder-tree__label">
-          <FolderOpen v-if="isCurrentBranch" :size="14" aria-hidden="true" />
-          <Folder v-else :size="14" aria-hidden="true" />
-          {{ node.label }}
-        </span>
-      </button>
+      <div class="workspace-folder-tree__card">
+        <button
+          type="button"
+          class="workspace-folder-tree__item"
+          @click="emit('open', node.path)"
+        >
+          <span class="workspace-folder-tree__label">
+            <FolderOpen v-if="isCurrentBranch" :size="14" aria-hidden="true" />
+            <Folder v-else :size="14" aria-hidden="true" />
+            {{ node.label }}
+          </span>
+        </button>
 
-      <div class="workspace-folder-tree__actions">
-        <button
-          type="button"
-          class="workspace-folder-tree__action"
-          title="新建子文件夹"
-          aria-label="新建子文件夹"
-          :disabled="isMutating"
-          @click.stop="emit('create', node.path)"
-        >
-          <FolderPlus :size="13" aria-hidden="true" />
-        </button>
-        <button
-          type="button"
-          class="workspace-folder-tree__action"
-          title="重命名文件夹"
-          aria-label="重命名文件夹"
-          :disabled="isMutating"
-          @click.stop="emit('rename', node.path, node.label)"
-        >
-          <PencilLine :size="13" aria-hidden="true" />
-        </button>
-        <button
-          type="button"
-          class="workspace-folder-tree__action workspace-folder-tree__action--danger"
-          title="删除文件夹"
-          aria-label="删除文件夹"
-          :disabled="isMutating"
-          @click.stop="emit('delete', node.path, node.label)"
-        >
-          <Trash2 :size="13" aria-hidden="true" />
-        </button>
+        <div class="workspace-folder-tree__actions">
+          <button
+            type="button"
+            class="workspace-folder-tree__action"
+            title="新建子文件夹"
+            aria-label="新建子文件夹"
+            :disabled="isMutating"
+            @click.stop="emit('create', node.path)"
+          >
+            <FolderPlus :size="13" aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            class="workspace-folder-tree__action"
+            title="重命名文件夹"
+            aria-label="重命名文件夹"
+            :disabled="isMutating"
+            @click.stop="emit('rename', node.path, node.label)"
+          >
+            <PencilLine :size="13" aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            class="workspace-folder-tree__action workspace-folder-tree__action--danger"
+            title="删除文件夹"
+            aria-label="删除文件夹"
+            :disabled="isMutating"
+            @click.stop="emit('delete', node.path, node.label)"
+          >
+            <Trash2 :size="13" aria-hidden="true" />
+          </button>
+        </div>
       </div>
     </div>
 
