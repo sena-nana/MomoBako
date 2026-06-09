@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { convertFileSrc } from "@tauri-apps/api/core";
-import { open, save } from "@tauri-apps/plugin-dialog";
+import { open } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import {
@@ -24,9 +24,6 @@ import { isAudioExtension, isVideoExtension } from "../plugins/mediaPreview/medi
 import type {
   FileBrowserEntry,
   HardlinkCandidate,
-  RepositoryArchiveFormat,
-  RepositoryCompressionLevel,
-  RepositorySummary,
   SearchHit,
 } from "../types/repository";
 
@@ -50,8 +47,6 @@ const workspaceComponentLoaders = {
   FileBrowserPanel: () => import("./workspace/FileBrowserPanel.vue"),
   FilePreviewPane: () => import("./workspace/FilePreviewPane.vue"),
   HardlinkCandidateDialog: () => import("./workspace/HardlinkCandidateDialog.vue"),
-  LibraryPanel: () => import("./workspace/LibraryPanel.vue"),
-  RepositoryExportDialog: () => import("./workspace/RepositoryExportDialog.vue"),
   SearchPanel: () => import("./workspace/SearchPanel.vue"),
 };
 const CopyTargetDialog = defineAsyncComponent(workspaceComponentLoaders.CopyTargetDialog);
@@ -59,8 +54,6 @@ const ExtensionsPanel = defineAsyncComponent(workspaceComponentLoaders.Extension
 const FileBrowserPanel = defineAsyncComponent(workspaceComponentLoaders.FileBrowserPanel);
 const FilePreviewPane = defineAsyncComponent(workspaceComponentLoaders.FilePreviewPane);
 const HardlinkCandidateDialog = defineAsyncComponent(workspaceComponentLoaders.HardlinkCandidateDialog);
-const LibraryPanel = defineAsyncComponent(workspaceComponentLoaders.LibraryPanel);
-const RepositoryExportDialog = defineAsyncComponent(workspaceComponentLoaders.RepositoryExportDialog);
 const SearchPanel = defineAsyncComponent(workspaceComponentLoaders.SearchPanel);
 
 let dragDropUnlisten: UnlistenFn | null = null;
@@ -88,17 +81,6 @@ const isDraggingRepositoryFolder = ref(false);
 const emptyRepositoryError = ref("");
 const previewFilePath = ref<string | null>(null);
 const extensionKeyword = ref("");
-const exportDialogRepository = ref<RepositorySummary | null>(null);
-const exportTarget = ref<"archive" | "git">("archive");
-const exportArchiveFormat = ref<RepositoryArchiveFormat>("zip");
-const exportCompression = ref<RepositoryCompressionLevel>("balanced");
-const exportEncrypt = ref(false);
-const exportPassword = ref("");
-const exportGitRemote = ref("origin");
-const exportGitBranch = ref("");
-const exportGitMessage = ref("");
-const exportDialogError = ref("");
-const isExporting = ref(false);
 const failedThumbnailPaths = ref<Set<string>>(new Set());
 const fileDisplayMode = ref<FileDisplayMode>(readInitialFileDisplayMode());
 const thumbnailAspectRatios = ref<Record<string, number>>({});
@@ -130,12 +112,10 @@ const {
   selectedFilePath,
   searchResults,
   hardlinkCandidates,
-  isBusy,
   isLoadingFileBrowser,
   isSearching,
   isMutatingFiles,
   error,
-  refreshRepositoryWorkspace,
   selectRepository,
   selectAsset,
   loadFileBrowserForDirectory,
@@ -161,13 +141,10 @@ const {
   setMinimumRatingFilter,
   clearFilters,
   runFilteredSearch,
-  removeRepository,
-  exportCurrentRepository,
   confirmWorkspaceHardlinkCandidate,
 } = useRepositoryWorkspace();
 
 const hasRepository = computed(() => Boolean(activeSnapshot.value));
-const isLibrariesPanel = computed(() => activePanel.value === "libraries");
 const isFilesPanel = computed(() => activePanel.value === "files");
 const isTrashPanel = computed(() => activePanel.value === "deleted");
 const isSearchPanel = computed(() => activePanel.value === "search");
@@ -197,18 +174,6 @@ const filteredPlugins = computed(() => {
     plugin.capabilities.some((capability) => capability.toLowerCase().includes(keyword))
   ));
 });
-const exportArchiveExtension = computed(() => {
-  if (exportArchiveFormat.value === "tar" && exportCompression.value !== "none") {
-    return "tar.gz";
-  }
-  return exportArchiveFormat.value === "7z" ? "7z" : exportArchiveFormat.value;
-});
-const exportArchiveFilterExtension = computed(() => (
-  exportArchiveFormat.value === "tar" && exportCompression.value !== "none"
-    ? "gz"
-    : exportArchiveExtension.value
-));
-const exportActionLabel = computed(() => exportTarget.value === "git" ? "上传到 Git" : "导出压缩包");
 const ratingFilterOptions = [1, 2, 3, 4, 5];
 const filterColorMap: Record<string, string> = {
   red: "#e05252",
@@ -845,125 +810,6 @@ function filterColorStyle(color: string) {
   };
 }
 
-function formatRepositoryStatus(status: string) {
-  switch (status) {
-    case "ready":
-      return "已同步";
-    case "readonly":
-      return "只读";
-    case "indexing":
-      return "处理中";
-    default:
-      return status;
-  }
-}
-
-function sanitizeExportName(value: string) {
-  return value.trim().replace(/[<>:"/\\|?*\u0000-\u001F]/g, "-") || "momobako-repository";
-}
-
-function closeExportDialog(force = false) {
-  if (isExporting.value && !force) return;
-  exportDialogRepository.value = null;
-  exportDialogError.value = "";
-  exportPassword.value = "";
-}
-
-async function requestRepositoryExport(library: RepositorySummary) {
-  exportDialogError.value = "";
-  if (activeRepoId.value !== library.repoId) {
-    await selectRepository(library.repoId);
-  }
-  if (activeRepoId.value !== library.repoId) return;
-  exportDialogRepository.value = repositories.value.find((item) => item.repoId === library.repoId) ?? library;
-}
-
-async function chooseArchiveOutputPath(repository: RepositorySummary) {
-  const extension = exportArchiveExtension.value;
-  return save({
-    title: "导出资源库",
-    defaultPath: `${sanitizeExportName(repository.name)}.${extension}`,
-    filters: [
-      {
-        name: extension.toUpperCase(),
-        extensions: [exportArchiveFilterExtension.value],
-      },
-    ],
-  });
-}
-
-async function submitExportDialog() {
-  const repository = exportDialogRepository.value;
-  if (!repository) return;
-
-  exportDialogError.value = "";
-  isExporting.value = true;
-
-  try {
-    if (exportTarget.value === "archive") {
-      if (exportEncrypt.value && !exportPassword.value.trim()) {
-        exportDialogError.value = "请输入加密密码。";
-        return;
-      }
-
-      const outputPath = await chooseArchiveOutputPath(repository);
-      if (!outputPath) return;
-
-      const response = await exportCurrentRepository({
-        target: "archive",
-        archive: {
-          format: exportArchiveFormat.value,
-          outputPath,
-          compression: exportCompression.value,
-          encrypt: exportEncrypt.value,
-          password: exportEncrypt.value ? exportPassword.value : undefined,
-        },
-      });
-      if (response) {
-        closeExportDialog(true);
-      } else {
-        exportDialogError.value = error.value ?? "资源库导出失败。";
-      }
-      return;
-    }
-
-    const response = await exportCurrentRepository({
-      target: "git",
-      git: {
-        remote: exportGitRemote.value.trim() || undefined,
-        branch: exportGitBranch.value.trim() || undefined,
-        message: exportGitMessage.value.trim() || undefined,
-      },
-    });
-    if (response) {
-      closeExportDialog(true);
-    } else {
-      exportDialogError.value = error.value ?? "Git 上传失败。";
-    }
-  } finally {
-    isExporting.value = false;
-  }
-}
-
-function getAnchorFromElement(element: EventTarget | null) {
-  if (!(element instanceof HTMLElement)) return null;
-  const rect = element.getBoundingClientRect();
-  return {
-    left: rect.left,
-    top: rect.top,
-    right: rect.right,
-    bottom: rect.bottom,
-  };
-}
-
-function requestAddRepository(event?: MouseEvent) {
-  window.dispatchEvent(new CustomEvent("momo:add-repository", {
-    detail: {
-      anchor: getAnchorFromElement(event?.currentTarget ?? null),
-    },
-  }));
-}
-
 const searchSummary = computed(() => {
   if (hasActiveFilters.value) {
     return searchQuery.value.trim()
@@ -977,21 +823,17 @@ const searchSummary = computed(() => {
 });
 
 function preloadWorkspaceComponents() {
-  const primaryLoaders = activePanel.value === "libraries"
-    ? [workspaceComponentLoaders.LibraryPanel]
-    : activePanel.value === "search"
-      ? [workspaceComponentLoaders.SearchPanel]
-      : activePanel.value === "extensions"
-        ? [workspaceComponentLoaders.ExtensionsPanel]
-        : [workspaceComponentLoaders.FileBrowserPanel];
+  const primaryLoaders = activePanel.value === "search"
+    ? [workspaceComponentLoaders.SearchPanel]
+    : activePanel.value === "extensions"
+      ? [workspaceComponentLoaders.ExtensionsPanel]
+      : [workspaceComponentLoaders.FileBrowserPanel];
   const secondaryLoaders = [
     workspaceComponentLoaders.FilePreviewPane,
     workspaceComponentLoaders.SearchPanel,
-    workspaceComponentLoaders.LibraryPanel,
     workspaceComponentLoaders.ExtensionsPanel,
     workspaceComponentLoaders.CopyTargetDialog,
     workspaceComponentLoaders.HardlinkCandidateDialog,
-    workspaceComponentLoaders.RepositoryExportDialog,
   ];
 
   for (const load of new Set([...primaryLoaders, ...secondaryLoaders])) {
@@ -1216,22 +1058,7 @@ onUnmounted(() => {
     </div>
   </div>
 
-  <LibraryPanel
-    v-if="hasRepository && isLibrariesPanel"
-    :active-repo-id="activeRepoId"
-    :snapshot="activeSnapshot"
-    :repositories="repositories"
-    :error="error"
-    :is-busy="isBusy"
-    :status-label="formatRepositoryStatus"
-    @add-repository="requestAddRepository"
-    @export-repository="requestRepositoryExport"
-    @refresh="refreshRepositoryWorkspace"
-    @remove-repository="removeRepository"
-    @select-repository="selectRepository"
-  />
-
-  <section v-else-if="hasRepository && isFileBrowserPanel" :class="previewFileEntry ? 'files-preview-page' : 'files-workbench'">
+  <section v-if="hasRepository && isFileBrowserPanel" :class="previewFileEntry ? 'files-preview-page' : 'files-workbench'">
     <template v-if="previewFileEntry">
       <FilePreviewPane
         :entry="previewFileEntry"
@@ -1353,23 +1180,5 @@ onUnmounted(() => {
     :message="hardlinkCandidateMessage"
     @confirm="confirmCurrentHardlinkCandidate"
     @skip="skipCurrentHardlinkCandidate"
-  />
-
-  <RepositoryExportDialog
-    v-if="exportDialogRepository"
-    v-model:target="exportTarget"
-    v-model:archive-format="exportArchiveFormat"
-    v-model:compression="exportCompression"
-    v-model:encrypt="exportEncrypt"
-    v-model:password="exportPassword"
-    v-model:git-remote="exportGitRemote"
-    v-model:git-branch="exportGitBranch"
-    v-model:git-message="exportGitMessage"
-    :repository="exportDialogRepository"
-    :error="exportDialogError"
-    :is-exporting="isExporting"
-    :action-label="exportActionLabel"
-    @close="closeExportDialog"
-    @submit="submitExportDialog"
   />
 </template>
