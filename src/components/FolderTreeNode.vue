@@ -1,8 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import {
-  ChevronDown,
-  ChevronRight,
   Folder,
   FolderOpen,
   FolderPlus,
@@ -53,8 +51,12 @@ const depthStyle = computed(() => ({
         :disabled="!hasChildren"
         @click.stop="emit('toggle', node.path)"
       >
-        <ChevronDown v-if="hasChildren && isExpanded" :size="14" aria-hidden="true" />
-        <ChevronRight v-else-if="hasChildren" :size="14" aria-hidden="true" />
+        <span
+          v-if="hasChildren"
+          class="workspace-folder-tree__toggle-caret"
+          :class="{ 'is-expanded': isExpanded }"
+          aria-hidden="true"
+        />
       </button>
 
       <button
@@ -64,8 +66,8 @@ const depthStyle = computed(() => ({
         @click="emit('open', node.path)"
       >
         <span class="workspace-folder-tree__label">
-          <FolderOpen v-if="isCurrentBranch" :size="15" aria-hidden="true" />
-          <Folder v-else :size="15" aria-hidden="true" />
+          <FolderOpen v-if="isCurrentBranch" :size="14" aria-hidden="true" />
+          <Folder v-else :size="14" aria-hidden="true" />
           {{ node.label }}
         </span>
       </button>
