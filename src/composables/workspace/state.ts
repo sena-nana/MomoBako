@@ -14,7 +14,7 @@ import type {
   WorkspaceStartupState,
 } from "../../types/repository";
 
-export type WorkspacePanelKey = "libraries" | "files" | "deleted" | "search" | "extensions";
+export type WorkspacePanelKey = "files" | "deleted" | "search" | "extensions";
 
 export type WorkspaceFilterState = {
   tags: string[];

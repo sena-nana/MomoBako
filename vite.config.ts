@@ -28,4 +28,23 @@ export default defineConfig(async () => ({
     environment: "jsdom",
     setupFiles: ["./tests/setupTests.ts"],
   },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          const normalizedId = id.replace(/\\/g, "/");
+          if (
+            normalizedId.includes("/node_modules/three/") ||
+            normalizedId.includes("/node_modules/@pixiv/three-vrm/")
+          ) {
+            return "vendor-three-preview";
+          }
+          if (normalizedId.includes("/node_modules/vue3-markdown-it/")) {
+            return "vendor-markdown-preview";
+          }
+          return undefined;
+        },
+      },
+    },
+  },
 }));

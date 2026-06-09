@@ -4,7 +4,8 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { RouterLink, useRoute, useRouter } from "vue-router";
 import {
   Archive,
-  FolderOpen,
+  Check,
+  ChevronsUpDown,
   FolderTree,
   LoaderCircle,
   Plus,
@@ -29,21 +30,21 @@ type ShortcutItem = {
   icon: Component;
 };
 
-type AddRepositoryPopoverMode = "closed" | "menu" | "form";
-type AddRepositoryAnchor = {
+type RepositoryPopoverMode = "closed" | "switcher" | "addMenu" | "form";
+type RepositoryPopoverAnchor = {
   left: number;
-  top: number;
-  right: number;
   bottom: number;
+  width: number;
 };
 type AddRepositoryRequestDetail = {
-  anchor?: AddRepositoryAnchor;
+  anchor?: RepositoryPopoverAnchor;
 };
 
-const addRepositoryPopoverMode = ref<AddRepositoryPopoverMode>("closed");
-const addRepositoryPopoverPosition = ref({ left: 0, top: 0 });
+const addRepositoryPopoverMode = ref<RepositoryPopoverMode>("closed");
+const addRepositoryPopoverPosition = ref({ left: 0, top: 0, width: 0 });
 const addRepositoryPopoverRef = ref<HTMLElement | null>(null);
 const localFilesystemPluginId = "momobako.local-filesystem";
+const repositorySwitcherButtonRef = ref<HTMLElement | null>(null);
 const backendPluginId = ref(localFilesystemPluginId);
 const backendName = ref("");
 const backendUrl = ref("");
@@ -51,6 +52,8 @@ const backendUsername = ref("");
 const backendPassword = ref("");
 const backendRoot = ref("");
 const isSubmittingBackend = ref(false);
+const isRemovingRepository = ref(false);
+const isConfirmingRepositoryDelete = ref(false);
 const addRepositoryError = ref("");
 const expandedFolderPaths = ref<string[]>([]);
 const showFolderDialog = ref(false);
@@ -88,6 +91,7 @@ const {
   deleteWorkspaceEntry,
   createNewRepository,
   attachRepository,
+  removeRepository,
 } = useRepositoryWorkspace();
 
 const shortcuts = computed<ShortcutItem[]>(() => {
@@ -186,15 +190,14 @@ function selectShortcut(id: ShortcutKey) {
 }
 
 function selectRepositoryFromList(repoId: string) {
+  if (isSubmittingBackend.value || isRemovingRepository.value) return;
+  isConfirmingRepositoryDelete.value = false;
   void selectRepository(repoId).then(() => {
+    addRepositoryPopoverMode.value = "closed";
     if (route.path === "/settings") {
       void router.push("/");
     }
   });
-}
-
-function repositoryInitial(name: string) {
-  return name.trim().slice(0, 2).toUpperCase() || "库";
 }
 
 function formatAddRepositoryBackendLabel(pluginId: string, fallback: string) {
@@ -213,47 +216,67 @@ function resetBackendForm(pluginId = repositoryBackendOptions.value[0]?.pluginId
   addRepositoryError.value = "";
 }
 
-function getAnchorFromElement(element: EventTarget | null): AddRepositoryAnchor | null {
+function getAnchorFromElement(element: EventTarget | null): RepositoryPopoverAnchor | null {
   if (!(element instanceof HTMLElement)) return null;
   const rect = element.getBoundingClientRect();
   return {
     left: rect.left,
-    top: rect.top,
-    right: rect.right,
     bottom: rect.bottom,
+    width: rect.width,
   };
 }
 
-function getPopoverPosition(anchor?: AddRepositoryAnchor | null) {
+function getPopoverWidth(mode = addRepositoryPopoverMode.value) {
+  if (mode === "switcher") return 280;
+  if (mode === "addMenu") return 160;
+  return 320;
+}
+
+function getPopoverPosition(anchor?: RepositoryPopoverAnchor | null, mode = addRepositoryPopoverMode.value) {
   const fallback = {
     left: 16,
-    top: 44,
-    right: 16,
     bottom: 44,
+    width: getPopoverWidth(mode),
   };
   const current = anchor ?? fallback;
-  const width = addRepositoryPopoverMode.value === "menu" ? 160 : 320;
+  const width = mode === "switcher" ? current.width : getPopoverWidth(mode);
   const maxLeft = Math.max(8, window.innerWidth - width - 8);
   const left = Math.max(8, Math.min(current.left, maxLeft));
   const top = Math.max(8, Math.min(current.bottom + 6, window.innerHeight - 80));
-  return { left, top };
+  return { left, top, width };
 }
 
-function openAddRepositoryMenu(anchor?: AddRepositoryAnchor | null) {
+function showAddRepositoryMenu() {
   if (!isSubmittingBackend.value) {
     resetBackendForm();
   }
-  addRepositoryPopoverMode.value = "menu";
-  addRepositoryPopoverPosition.value = getPopoverPosition(anchor);
+  isConfirmingRepositoryDelete.value = false;
+  addRepositoryPopoverMode.value = "addMenu";
 }
 
-function openAddRepositoryMenuFromEvent(event: MouseEvent) {
-  openAddRepositoryMenu(getAnchorFromElement(event.currentTarget));
+function openAddRepositoryMenu(anchor?: RepositoryPopoverAnchor | null) {
+  showAddRepositoryMenu();
+  addRepositoryPopoverPosition.value = getPopoverPosition(anchor, "addMenu");
+}
+
+function openRepositorySwitcherFromEvent(event: MouseEvent) {
+  if (isSubmittingBackend.value || isRemovingRepository.value) return;
+  if (addRepositoryPopoverMode.value === "switcher") return;
+  addRepositoryError.value = "";
+  isConfirmingRepositoryDelete.value = false;
+  addRepositoryPopoverMode.value = "switcher";
+  addRepositoryPopoverPosition.value = getPopoverPosition(getAnchorFromElement(event.currentTarget), "switcher");
+}
+
+function showAddRepositoryMenuFromSwitcher() {
+  if (isSubmittingBackend.value || isRemovingRepository.value) return;
+  showAddRepositoryMenu();
 }
 
 function closeAddRepositoryPopover() {
-  if (isSubmittingBackend.value) return;
+  if (isSubmittingBackend.value || isRemovingRepository.value) return;
   addRepositoryPopoverMode.value = "closed";
+  isConfirmingRepositoryDelete.value = false;
 }
 
 async function selectBackend(pluginId: string) {
@@ -269,6 +292,33 @@ async function selectBackend(pluginId: string) {
   addRepositoryPopoverMode.value = "form";
 }
 
+async function deleteActiveRepositoryFromMenu() {
+  if (!activeRepoId.value || isSubmittingBackend.value || isRemovingRepository.value) return;
+  if (!isConfirmingRepositoryDelete.value) {
+    isConfirmingRepositoryDelete.value = true;
+    return;
+  }
+  isRemovingRepository.value = true;
+  addRepositoryError.value = "";
+  try {
+    await removeRepository(activeRepoId.value);
+    addRepositoryPopoverMode.value = "closed";
+    isConfirmingRepositoryDelete.value = false;
+    if (route.path === "/settings") {
+      void router.push("/");
+    }
+  } catch (cause) {
+    addRepositoryError.value = cause instanceof Error ? cause.message : String(cause);
+  } finally {
+    isRemovingRepository.value = false;
+  }
+}
+
+function openFolder(path: string) {
+  setActivePanel("files");
+  void loadFileBrowserForDirectory(path);
+}
+
 function toggleFolderExpansion(path: string) {
   const next = new Set(expandedFolderPaths.value);
   if (next.has(path)) {
@@ -277,11 +327,6 @@ function toggleFolderExpansion(path: string) {
     next.add(path);
   }
   expandedFolderPaths.value = Array.from(next);
-}
-
-function openFolder(path: string) {
-  setActivePanel("files");
-  void loadFileBrowserForDirectory(path);
 }
 
 function openCreateFolderDialog(parentPath = "") {
@@ -375,7 +420,7 @@ async function createLocalRepositoryFromPath(path: string, fallbackPosition = ad
   } catch (cause) {
     addRepositoryError.value = cause instanceof Error ? cause.message : String(cause);
     addRepositoryPopoverPosition.value = fallbackPosition;
-    addRepositoryPopoverMode.value = "menu";
+    addRepositoryPopoverMode.value = "addMenu";
     console.error("failed to create repository backend", cause);
     return false;
   } finally {
@@ -417,9 +462,10 @@ function handleDocumentKeydown(event: KeyboardEvent) {
 }
 
 function handleDocumentPointerDown(event: PointerEvent) {
-  if (addRepositoryPopoverMode.value === "closed" || isSubmittingBackend.value) return;
+  if (addRepositoryPopoverMode.value === "closed" || isSubmittingBackend.value || isRemovingRepository.value) return;
   const target = event.target as Node | null;
   if (target && addRepositoryPopoverRef.value?.contains(target)) return;
+  if (target && repositorySwitcherButtonRef.value?.contains(target)) return;
   closeAddRepositoryPopover();
 }
 
@@ -442,37 +488,17 @@ onBeforeUnmount(() => {
       <section class="workspace-sidebar__top" aria-label="资源库与视图">
         <div class="workspace-sidebar__repo-head">
           <button
+            ref="repositorySwitcherButtonRef"
             type="button"
             class="workspace-sidebar__repo-current"
             :title="activeRepository?.path ?? '添加资源库'"
+            aria-haspopup="menu"
+            :aria-expanded="addRepositoryPopoverMode === 'switcher'"
             aria-label="资源库"
-            @click="selectPanel('libraries')"
+            @click="openRepositorySwitcherFromEvent"
           >
             <span>{{ activeRepository?.name ?? "无资源库" }}</span>
-          </button>
-          <button
-            type="button"
-            class="workspace-panel__refresh"
-            aria-label="添加资源库"
-            title="添加资源库"
-            @click="openAddRepositoryMenuFromEvent"
-          >
-            <Plus :size="14" aria-hidden="true" />
-          </button>
-        </div>
-
-        <div class="workspace-sidebar__repo-list" aria-label="切换资源库">
-          <button
-            v-for="library in repositories"
-            :key="library.repoId"
-            type="button"
-            class="workspace-sidebar__repo-btn"
-            :class="{ 'is-active': activeRepoId === library.repoId }"
-            :title="`${library.name}\n${library.path}`"
-            :aria-label="`切换资源库 ${library.name}`"
-            @click="selectRepositoryFromList(library.repoId)"
-          >
-            <span>{{ repositoryInitial(library.name) }}</span>
+            <ChevronsUpDown :size="13" aria-hidden="true" />
           </button>
         </div>
       </section>
@@ -543,28 +569,6 @@ onBeforeUnmount(() => {
             <p class="workspace-empty__text">先选择或添加一个资源库。</p>
           </div>
           <div v-else class="workspace-folder-tree">
-            <div class="workspace-folder-tree__branch">
-              <div class="workspace-folder-tree__row" :class="{ 'is-active': currentDirectoryPath === '' }">
-                <button
-                  type="button"
-                  class="workspace-folder-tree__toggle workspace-folder-tree__toggle is-hidden"
-                  aria-hidden="true"
-                  disabled
-                />
-                <button
-                  type="button"
-                  class="workspace-folder-tree__item"
-                  :class="{ 'is-active': currentDirectoryPath === '' }"
-                  @click="openFolder('')"
-                >
-                  <span class="workspace-folder-tree__label">
-                    <FolderOpen :size="15" aria-hidden="true" />
-                    根目录
-                  </span>
-                </button>
-              </div>
-            </div>
-
             <FolderTreeNode
               v-if="!isTrashPanel"
               v-for="node in fileTreeNodes"
@@ -619,13 +623,70 @@ onBeforeUnmount(() => {
         ref="addRepositoryPopoverRef"
         class="repository-add-popover"
         :class="{
-          'ctx-menu': addRepositoryPopoverMode === 'menu',
-          'repository-add-popover--menu': addRepositoryPopoverMode === 'menu',
+          'ctx-menu': addRepositoryPopoverMode === 'addMenu',
+          'repository-add-popover--menu': addRepositoryPopoverMode === 'addMenu',
+          'repository-add-popover--switcher': addRepositoryPopoverMode === 'switcher',
         }"
-        :style="{ left: `${addRepositoryPopoverPosition.left}px`, top: `${addRepositoryPopoverPosition.top}px` }"
-        aria-label="添加资源库"
+        :style="{
+          left: `${addRepositoryPopoverPosition.left}px`,
+          top: `${addRepositoryPopoverPosition.top}px`,
+          width: addRepositoryPopoverMode === 'switcher' ? `${addRepositoryPopoverPosition.width}px` : undefined,
+        }"
+        :aria-label="addRepositoryPopoverMode === 'switcher' ? '切换资源库' : '添加资源库'"
       >
-        <template v-if="addRepositoryPopoverMode === 'menu'">
+        <template v-if="addRepositoryPopoverMode === 'switcher'">
+          <div class="repository-switcher__list" role="menu" aria-label="资源库列表">
+            <button
+              v-for="library in repositories"
+              :key="library.repoId"
+              type="button"
+              class="repository-switcher__item"
+              :class="{ 'is-active': activeRepoId === library.repoId }"
+              :title="`${library.name}\n${library.path}`"
+              :aria-label="`切换资源库 ${library.name}`"
+              :disabled="isRemovingRepository || isSubmittingBackend"
+              @click="selectRepositoryFromList(library.repoId)"
+            >
+              <span class="repository-switcher__check">
+                <Check v-if="activeRepoId === library.repoId" :size="13" aria-hidden="true" />
+              </span>
+              <span class="repository-switcher__main">
+                <strong>{{ library.name }}</strong>
+              </span>
+            </button>
+          </div>
+
+          <div class="repository-switcher__actions">
+            <button
+              type="button"
+              class="ctx-menu__item"
+              :disabled="isSubmittingBackend || isRemovingRepository"
+              @click="showAddRepositoryMenuFromSwitcher"
+            >
+              <Plus :size="14" aria-hidden="true" />
+              <span class="ctx-menu__label">添加资源库</span>
+            </button>
+            <button
+              type="button"
+              class="ctx-menu__item ctx-menu__item--danger"
+              :class="{ 'ctx-menu__item--pending': isConfirmingRepositoryDelete }"
+              :disabled="!activeRepoId || isSubmittingBackend || isRemovingRepository"
+              @click="deleteActiveRepositoryFromMenu"
+            >
+              <LoaderCircle v-if="isRemovingRepository" class="spin" :size="14" aria-hidden="true" />
+              <Trash2 v-else :size="14" aria-hidden="true" />
+              <span class="ctx-menu__label">
+                {{ isConfirmingRepositoryDelete ? "确认删除当前资源库" : "删除当前资源库" }}
+              </span>
+            </button>
+          </div>
+
+          <p v-if="addRepositoryError" class="repository-add-popover__error">
+            {{ addRepositoryError }}
+          </p>
+        </template>
+
+        <template v-else-if="addRepositoryPopoverMode === 'addMenu'">
           <button
             v-for="option in backendOptions"
             :key="option.value"
@@ -693,7 +754,7 @@ onBeforeUnmount(() => {
           </div>
 
           <div class="repository-add-popover__actions">
-            <button type="button" class="ghost" :disabled="isSubmittingBackend" @click="addRepositoryPopoverMode = 'menu'">
+            <button type="button" class="ghost" :disabled="isSubmittingBackend" @click="addRepositoryPopoverMode = 'addMenu'">
               返回
             </button>
             <button type="button" class="ghost" :disabled="isSubmittingBackend" @click="closeAddRepositoryPopover">
