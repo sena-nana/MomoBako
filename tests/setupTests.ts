@@ -546,7 +546,7 @@ vi.mock("@tauri-apps/api/core", () => ({
       addMockEntry(path, "file");
       return getMockFileBrowser(parentPath, false);
     }
-    if (command === "import_entries") {
+    if (command === "import_entries" || command === "copy_entries") {
       const request = args?.request as { parentPath?: string; sourcePaths?: string[] } | undefined;
       const parentPath = request?.parentPath ?? "";
       let importedDirectory = false;
@@ -559,6 +559,29 @@ vi.mock("@tauri-apps/api/core", () => ({
         importedDirectory ||= kind === "directory";
       }
       return getMockFileBrowser(parentPath, importedDirectory);
+    }
+    if (command === "list_hardlink_candidates") {
+      const repoId = typeof args?.repoId === "string" ? args.repoId : "repo-main-001";
+      return { repoId, candidates: [] };
+    }
+    if (command === "confirm_hardlink_candidate") {
+      const request = args?.request as { repoId?: string; candidateId?: string } | undefined;
+      return {
+        repoId: request?.repoId ?? "repo-main-001",
+        candidate: {
+          candidateId: request?.candidateId ?? "candidate-01",
+          repoId: request?.repoId ?? "repo-main-001",
+          newAssetId: "asset-new",
+          newPath: "copy.psd",
+          existingAssetId: "asset-01",
+          existingPath: "cover-final.psd",
+          contentHash: "sha256:mock",
+          sizeBytes: 1,
+          sizeLabel: "1 B",
+          createdAt: "2026-06-05T00:18:00Z",
+        },
+        state: "linked",
+      };
     }
     if (command === "rename_entry") {
       const request = args?.request as { path?: string; newName?: string } | undefined;
@@ -712,6 +735,7 @@ vi.mock("@tauri-apps/api/core", () => ({
         updatedAssets: 5,
         deletedAssets: 0,
         createdEvents: 6,
+        hardlinkCandidates: 0,
       };
     }
     if (command === "ensure_thumbnail") {

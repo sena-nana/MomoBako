@@ -1,6 +1,8 @@
 import { computed, ref } from "vue";
 import {
   attachRepositoryFolder,
+  confirmHardlinkCandidate,
+  copyEntries,
   createDirectory,
   createFile,
   createRepository,
@@ -15,6 +17,7 @@ import {
   importEntries,
   getRepositorySnapshot,
   importRepository,
+  listHardlinkCandidates,
   listPlugins,
   listRepositories,
   mutateTrash,
@@ -35,6 +38,8 @@ import type {
   FileBrowserSnapshot,
   FileTreeNode,
   FileDeleteMode,
+  HardlinkCandidate,
+  HardlinkConfirmResponse,
   PluginManifest,
   RepositoryExportRequest,
   RepositoryExportResponse,
@@ -95,6 +100,7 @@ const fileTree = ref<FileTreeNode[]>([]);
 const selectedFilePath = ref<string | null>(null);
 const searchQuery = ref("");
 const searchResults = ref<SearchHit[]>([]);
+const hardlinkCandidates = ref<HardlinkCandidate[]>([]);
 const lastSyncResult = ref<SyncResult | null>(null);
 const plugins = ref<PluginManifest[]>([]);
 const cacheSnapshot = ref<CacheSnapshot | null>(null);
@@ -238,6 +244,34 @@ async function refreshRepositorySummaries() {
   repositories.value = items;
 }
 
+async function refreshHardlinkCandidates(repoId = activeRepoId.value) {
+  if (!repoId) {
+    hardlinkCandidates.value = [];
+    return;
+  }
+  const response = await listHardlinkCandidates(repoId);
+  if (activeRepoId.value === repoId) {
+    hardlinkCandidates.value = response.candidates;
+  }
+}
+
+function entryNameFromPath(path: string) {
+  const segments = path.replace(/\\/g, "/").replace(/\/+$/g, "").split("/").filter(Boolean);
+  return segments[segments.length - 1] ?? path;
+}
+
+async function finishFileTransfer(
+  repoId: string,
+  snapshot: FileBrowserSnapshot,
+  sourcePaths: string[],
+) {
+  applyFileBrowserSnapshot(snapshot);
+  const sourceNames = new Set(sourcePaths.map(entryNameFromPath));
+  selectedFilePath.value = snapshot.entries.find((entry) => sourceNames.has(entry.name))?.path ?? selectedFilePath.value;
+  await refreshRepositorySnapshot(repoId);
+  await refreshHardlinkCandidates(repoId);
+}
+
 export async function selectRepository(repoId: string) {
   if (!repoId) return;
 
@@ -263,6 +297,7 @@ export async function selectRepository(repoId: string) {
     if (defaultAssetId) {
       void selectAsset(defaultAssetId);
     }
+    void refreshHardlinkCandidates(repoId);
     finishOperationProgress(progressId);
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : String(cause);
@@ -444,7 +479,8 @@ export async function createFileInWorkspace(name: string, parentPath = currentDi
 }
 
 export async function importEntriesToWorkspace(sourcePaths: string[], parentPath = currentDirectoryPath.value) {
-  if (!activeRepoId.value || !sourcePaths.length) return null;
+  const repoId = activeRepoId.value;
+  if (!repoId || !sourcePaths.length) return null;
   error.value = null;
   const progressId = startOperationProgress(
     "导入文件",
@@ -452,24 +488,47 @@ export async function importEntriesToWorkspace(sourcePaths: string[], parentPath
     { initial: 8 },
   );
   try {
-    updateOperationProgress(progressId, { detail: "复制文件到当前资源库", value: 24 });
+    updateOperationProgress(progressId, { detail: "导入文件到当前资源库", value: 24 });
     const snapshot = await importEntries({
-      repoId: activeRepoId.value,
+      repoId,
       parentPath,
       sourcePaths,
     });
     updateOperationProgress(progressId, { detail: "刷新文件索引", value: 84 });
-    applyFileBrowserSnapshot(snapshot);
-    selectedFilePath.value = snapshot.entries.find((entry) => sourcePaths.some((sourcePath) => (
-      sourcePath.replace(/\\/g, "/").endsWith(`/${entry.name}`) || sourcePath.replace(/\\/g, "/") === entry.name
-    )))?.path ?? selectedFilePath.value;
-    await refreshRepositorySnapshot(activeRepoId.value);
+    await finishFileTransfer(repoId, snapshot, sourcePaths);
     finishOperationProgress(progressId);
     return snapshot;
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : String(cause);
     cancelOperationProgress(progressId);
     return null;
+  }
+}
+
+export async function copyWorkspaceEntries(sourcePaths: string[], parentPath = currentDirectoryPath.value) {
+  const repoId = activeRepoId.value;
+  if (!repoId || !sourcePaths.length) return null;
+  isMutatingFiles.value = true;
+  error.value = null;
+  const progressId = startOperationProgress("复制文件", `准备复制 ${sourcePaths.length} 个条目`, { initial: 8 });
+  try {
+    updateOperationProgress(progressId, { detail: "创建硬链接或复制文件", value: 32 });
+    const snapshot = await copyEntries({
+      repoId,
+      sourcePaths,
+      parentPath,
+      mode: "hardlinkPreferred",
+    });
+    updateOperationProgress(progressId, { detail: "刷新文件索引", value: 84 });
+    await finishFileTransfer(repoId, snapshot, sourcePaths);
+    finishOperationProgress(progressId);
+    return snapshot;
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : String(cause);
+    cancelOperationProgress(progressId);
+    return null;
+  } finally {
+    isMutatingFiles.value = false;
   }
 }
 
@@ -843,6 +902,36 @@ export async function saveAssetMetadata(metadata: Record<string, unknown>) {
   }
 }
 
+export async function confirmWorkspaceHardlinkCandidate(candidateId: string): Promise<HardlinkConfirmResponse | null> {
+  const repoId = activeRepoId.value;
+  if (!repoId) return null;
+  isMutatingFiles.value = true;
+  error.value = null;
+  try {
+    const response = await confirmHardlinkCandidate({
+      repoId,
+      candidateId,
+    });
+    await refreshHardlinkCandidates(repoId);
+    await refreshRepositorySnapshot(repoId);
+    if (fileBrowser.value && !fileBrowser.value.specialLocation) {
+      await loadFileBrowserForDirectory(currentDirectoryPath.value, { includeTree: false });
+    }
+    return response;
+  } catch (cause) {
+    const confirmError = cause instanceof Error ? cause.message : String(cause);
+    try {
+      await refreshHardlinkCandidates(repoId);
+    } catch {
+      // Keep the confirmation error visible if the follow-up refresh also fails.
+    }
+    error.value = confirmError;
+    return null;
+  } finally {
+    isMutatingFiles.value = false;
+  }
+}
+
 export async function syncActiveRepository() {
   if (!activeRepoId.value) return null;
 
@@ -863,6 +952,7 @@ export async function syncActiveRepository() {
     lastSyncResult.value = result;
     await refreshRepositorySnapshot(activeRepoId.value);
     await refreshRepositorySummaries();
+    await refreshHardlinkCandidates(activeRepoId.value);
     setSyncProgress("refreshing", "刷新仓库视图", 3);
     if (activePanel.value === "files") {
       await loadFileBrowserForDirectory(previousDirectoryPath, { includeTree: true });
@@ -895,6 +985,7 @@ export async function refreshFileBrowserTree() {
     setSyncProgress("writing", "写入索引结果", 2);
     lastSyncResult.value = result;
     await refreshRepositorySnapshot(activeRepoId.value);
+    await refreshHardlinkCandidates(activeRepoId.value);
     setSyncProgress("refreshing", "刷新文件夹树", 3);
     const snapshot = await loadFileBrowserForDirectory(
       currentDirectoryPath.value,
@@ -1143,6 +1234,7 @@ export function resetRepositoryWorkspaceForTests() {
   activePanel.value = "files";
   searchQuery.value = "";
   searchResults.value = [];
+  hardlinkCandidates.value = [];
   lastSyncResult.value = null;
   plugins.value = [];
   cacheSnapshot.value = null;
@@ -1176,6 +1268,7 @@ export function useRepositoryWorkspace() {
     selectedFilePath: computed(() => selectedFilePath.value),
     searchQuery: computed(() => searchQuery.value),
     searchResults: computed(() => searchResults.value),
+    hardlinkCandidates: computed(() => hardlinkCandidates.value),
     lastSyncResult: computed(() => lastSyncResult.value),
     plugins: computed(() => plugins.value),
     repositoryBackendOptions: computed(() => getRepositoryBackendOptions()),
@@ -1208,6 +1301,7 @@ export function useRepositoryWorkspace() {
     createDirectoryInWorkspace,
     createFileInWorkspace,
     importEntriesToWorkspace,
+    copyWorkspaceEntries,
     renameWorkspaceEntry,
     deleteWorkspaceEntry,
     restoreTrashEntry,
@@ -1224,6 +1318,8 @@ export function useRepositoryWorkspace() {
     setActivePanel,
     runSearch,
     saveAssetMetadata,
+    refreshHardlinkCandidates,
+    confirmWorkspaceHardlinkCandidate,
     syncActiveRepository,
     undoAssetRevision,
     redoAssetRevision,

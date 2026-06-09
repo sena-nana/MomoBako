@@ -6,12 +6,16 @@ import type {
   CacheSnapshot,
   FileBrowserRequest,
   FileBrowserSnapshot,
+  FileCopyRequest,
   FileCreateRequest,
   FileImportRequest,
   FileDeleteRequest,
   FilePreviewSourceResponse,
   FileReadRequest,
   FileRenameRequest,
+  HardlinkCandidateResponse,
+  HardlinkConfirmRequest,
+  HardlinkConfirmResponse,
   MetadataUpdateRequest,
   MetadataUpdateResponse,
   RepositoryExportRequest,
@@ -77,6 +81,10 @@ export function importEntries(request: FileImportRequest) {
   return invoke<FileBrowserSnapshot>("import_entries", { request });
 }
 
+export function copyEntries(request: FileCopyRequest) {
+  return invoke<FileBrowserSnapshot>("copy_entries", { request });
+}
+
 export function renameEntry(request: FileRenameRequest) {
   return invoke<FileBrowserSnapshot>("rename_entry", { request });
 }
@@ -111,6 +119,14 @@ export function exportRepository(request: RepositoryExportRequest) {
 
 export function syncRepository(request: SyncRequest) {
   return invoke<SyncResult>("sync_repository", { request });
+}
+
+export function listHardlinkCandidates(repoId: string) {
+  return invoke<HardlinkCandidateResponse>("list_hardlink_candidates", { repoId });
+}
+
+export function confirmHardlinkCandidate(request: HardlinkConfirmRequest) {
+  return invoke<HardlinkConfirmResponse>("confirm_hardlink_candidate", { request });
 }
 
 export function ensureThumbnail(request: ThumbnailRequest) {
