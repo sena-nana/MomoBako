@@ -123,21 +123,20 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
-  padding-bottom: 0;
+  padding-bottom: 8px;
   border-bottom: 1px solid var(--border-soft);
   flex-shrink: 0;
 }
 
 .workspace-sidebar__repo-head {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  display: flex;
   align-items: center;
-  gap: 4px;
   padding: 0 2px;
 }
 
 .workspace-sidebar__repo-current {
   min-width: 0;
+  width: 100%;
   height: 28px;
   padding: 0 8px;
   border-radius: 6px;
@@ -148,10 +147,10 @@
   text-align: left;
   font-size: 13px;
   font-weight: 600;
+  gap: 6px;
 }
 
 .workspace-sidebar__repo-current:focus-visible,
-.workspace-sidebar__repo-btn:focus-visible,
 .workspace-panel__refresh:focus-visible,
 .workspace-list__item:focus-visible,
 .workspace-shortcuts__item:focus-visible,
@@ -167,7 +166,6 @@
 }
 
 .workspace-sidebar__repo-current:hover,
-.workspace-sidebar__repo-btn:hover,
 .workspace-panel__refresh:hover,
 .workspace-list__item:hover,
 .workspace-shortcuts__item:hover,
@@ -181,7 +179,6 @@
   filter: none;
 }
 
-.workspace-sidebar__repo-btn.is-active,
 .workspace-list__item.is-active,
 .workspace-shortcuts__item.is-active,
 .workspace-footer__btn.is-active {
@@ -190,30 +187,11 @@
 }
 
 .workspace-sidebar__repo-current span {
+  flex: 1;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.workspace-sidebar__repo-list {
-  display: flex;
-  gap: 4px;
-  overflow-x: auto;
-  padding: 0 2px 2px;
-}
-
-.workspace-sidebar__repo-btn {
-  width: 28px;
-  height: 28px;
-  flex: 0 0 auto;
-  padding: 0;
-  border-radius: 6px;
-  border: 0;
-  background: transparent;
-  color: var(--text-faint);
-  font-size: 10px;
-  font-weight: 700;
 }
 
 .workspace-sidebar__files {
@@ -687,8 +665,85 @@
 }
 
 .repository-add-popover--menu {
-  width: auto;
+  width: min(160px, calc(100vw - 16px));
   min-width: 132px;
+}
+
+.repository-add-popover--switcher {
+  width: min(280px, calc(100vw - 16px));
+  padding: 6px;
+  gap: 6px;
+}
+
+.repository-switcher__list,
+.repository-switcher__actions {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.repository-switcher__list {
+  max-height: min(320px, calc(100vh - 180px));
+  overflow: auto;
+}
+
+.repository-switcher__actions {
+  padding-top: 6px;
+  border-top: 1px solid var(--border-soft);
+}
+
+.repository-switcher__item {
+  min-width: 0;
+  height: 30px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  text-align: left;
+}
+
+.repository-switcher__item:hover:not(:disabled),
+.repository-switcher__item:focus-visible {
+  background: var(--bg-hover);
+  color: var(--text);
+  filter: none;
+}
+
+.repository-switcher__item:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.repository-switcher__item.is-active {
+  background: var(--accent-soft);
+}
+
+.repository-switcher__check {
+  width: 16px;
+  color: var(--accent);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.repository-switcher__main {
+  min-width: 0;
+}
+
+.repository-switcher__main strong {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
 }
 
 .repository-add-popover__header,
