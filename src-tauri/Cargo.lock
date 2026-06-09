@@ -2521,6 +2521,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "momobako"
+version = "0.1.0"
+dependencies = [
+ "ffmpeg-sidecar",
+ "hex",
+ "image",
+ "notify",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-dialog",
+ "tauri-plugin-opener",
+ "tauri-plugin-store",
+ "time",
+ "tiny_http",
+]
+
+[[package]]
 name = "moxcms"
 version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4501,27 +4522,6 @@ dependencies = [
  "dunce",
  "embed-resource",
  "toml 1.1.2+spec-1.1.0",
-]
-
-[[package]]
-name = "tauri_template"
-version = "0.1.0"
-dependencies = [
- "ffmpeg-sidecar",
- "hex",
- "image",
- "notify",
- "rusqlite",
- "serde",
- "serde_json",
- "sha2",
- "tauri",
- "tauri-build",
- "tauri-plugin-dialog",
- "tauri-plugin-opener",
- "tauri-plugin-store",
- "time",
- "tiny_http",
 ]
 
 [[package]]

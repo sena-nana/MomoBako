@@ -2,12 +2,13 @@ import { ref, watch } from "vue";
 
 export type Theme = "dark" | "light";
 
-const STORAGE_KEY = "tauri-template.theme";
+const STORAGE_KEY = "momobako.theme";
+const LEGACY_STORAGE_KEY = "tauri-template.theme";
 const DEFAULT_THEME: Theme = "dark";
 
 function loadInitial(): Theme {
   try {
-    const stored = localStorage.getItem(STORAGE_KEY);
+    const stored = localStorage.getItem(STORAGE_KEY) ?? localStorage.getItem(LEGACY_STORAGE_KEY);
     if (stored === "light" || stored === "dark") return stored;
   } catch {
     // localStorage 不可用时回到默认主题。
@@ -33,17 +34,18 @@ apply(theme.value);
 
 watch(theme, persist);
 
+function setThemeValue(next: Theme): void {
+  theme.value = next;
+}
+
 export function useTheme() {
   return {
     theme,
     setTheme(next: Theme) {
-      theme.value = next;
-      persist(next);
+      setThemeValue(next);
     },
     toggleTheme() {
-      const next = theme.value === "dark" ? "light" : "dark";
-      theme.value = next;
-      persist(next);
+      setThemeValue(theme.value === "dark" ? "light" : "dark");
     },
   };
 }

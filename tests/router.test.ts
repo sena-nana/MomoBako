@@ -5,7 +5,7 @@ import App from "../src/App.vue";
 import { installContextMenu } from "../src/composables/useContextMenu";
 import { resetRepositoryWorkspaceForTests, useRepositoryWorkspace } from "../src/composables/useRepositoryWorkspace";
 import { vContextMenu } from "../src/directives/contextMenu";
-import { createTemplateRouter } from "../src/router";
+import { createMomoBakoRouter } from "../src/router";
 import {
   createDirectoryOnNextSync,
   delayNextInvoke,
@@ -24,7 +24,7 @@ import {
 async function renderApp() {
   resetRepositoryWorkspaceForTests();
   installContextMenu();
-  const router = createTemplateRouter(createMemoryHistory());
+  const router = createMomoBakoRouter(createMemoryHistory());
   await router.push("/");
   await router.isReady();
   await useRepositoryWorkspace().ensureRepositoryWorkspace();
@@ -42,7 +42,7 @@ async function renderApp() {
 async function renderAppWithoutStartupPreload() {
   resetRepositoryWorkspaceForTests();
   installContextMenu();
-  const router = createTemplateRouter(createMemoryHistory());
+  const router = createMomoBakoRouter(createMemoryHistory());
   await router.push("/");
   await router.isReady();
 
