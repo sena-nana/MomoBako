@@ -43,6 +43,29 @@ import type {
   SearchHit,
 } from "../types/repository";
 
+type FileDisplayMode = "adaptive" | "masonry" | "grid" | "list";
+
+const fileDisplayModeStorageKey = "momobako.fileDisplayMode";
+const fileDisplayModeOptions: Array<{ value: FileDisplayMode; label: string }> = [
+  { value: "adaptive", label: "自适应" },
+  { value: "masonry", label: "瀑布流" },
+  { value: "grid", label: "网格" },
+  { value: "list", label: "列表" },
+];
+
+function isFileDisplayMode(value: string | null): value is FileDisplayMode {
+  return fileDisplayModeOptions.some((option) => option.value === value);
+}
+
+function readInitialFileDisplayMode(): FileDisplayMode {
+  try {
+    const savedMode = localStorage.getItem(fileDisplayModeStorageKey);
+    return isFileDisplayMode(savedMode) ? savedMode : "adaptive";
+  } catch {
+    return "adaptive";
+  }
+}
+
 const createFileName = ref("");
 const renameValue = ref("");
 const renameTargetPath = ref<string | null>(null);
@@ -63,6 +86,8 @@ const exportGitMessage = ref("");
 const exportDialogError = ref("");
 const isExporting = ref(false);
 const failedThumbnailPaths = ref<Set<string>>(new Set());
+const fileDisplayMode = ref<FileDisplayMode>(readInitialFileDisplayMode());
+const thumbnailAspectRatios = ref<Record<string, number>>({});
 
 const {
   activePanel,
@@ -137,6 +162,7 @@ const previewFileEntry = computed(() => (
 ));
 const previewPlugin = computed(() => getPreviewPluginForEntry(previewFileEntry.value));
 const hasSplitFileGroups = computed(() => directoryEntries.value.length > 0 && fileEntries.value.length > 0);
+const fileDisplayModeClass = computed(() => `files-list__files--${fileDisplayMode.value}`);
 const filteredPlugins = computed(() => {
   const keyword = extensionKeyword.value.trim().toLowerCase();
   if (!keyword) return plugins.value;
@@ -164,6 +190,14 @@ watch(currentFileEntry, (entry) => {
   if (renameTargetPath.value && renameTargetPath.value !== entry?.path) {
     renameTargetPath.value = null;
     renameValue.value = "";
+  }
+});
+
+watch(fileDisplayMode, (mode) => {
+  try {
+    localStorage.setItem(fileDisplayModeStorageKey, mode);
+  } catch {
+    return;
   }
 });
 
@@ -225,6 +259,23 @@ function thumbnailSrc(entry: FileBrowserEntry) {
 
 function markThumbnailFailed(entry: FileBrowserEntry) {
   failedThumbnailPaths.value = new Set([...failedThumbnailPaths.value, entry.path]);
+}
+
+function updateThumbnailAspectRatio(entry: FileBrowserEntry, event: Event) {
+  const image = event.currentTarget as HTMLImageElement | null;
+  if (!image?.naturalWidth || !image.naturalHeight) return;
+  const aspectRatio = image.naturalWidth / image.naturalHeight;
+  if (!Number.isFinite(aspectRatio) || aspectRatio <= 0) return;
+  thumbnailAspectRatios.value = {
+    ...thumbnailAspectRatios.value,
+    [entry.path]: Math.min(Math.max(aspectRatio, 0.55), 2.4),
+  };
+}
+
+function fileItemStyle(entry: FileBrowserEntry) {
+  return {
+    "--file-thumb-aspect": String(thumbnailAspectRatios.value[entry.path] ?? 1),
+  };
 }
 
 function resetThumbnailFailure(path: string) {
@@ -299,6 +350,10 @@ function entryDeletedAtLabel(entry: FileBrowserEntry) {
   if (typeof value !== "string" || !value) return null;
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString("zh-CN");
+}
+
+function entryModifiedAtLabel(entry: FileBrowserEntry) {
+  return entry.modifiedAt ? new Date(entry.modifiedAt).toLocaleString("zh-CN") : "未记录";
 }
 
 function getParentPath(path: string) {
@@ -960,25 +1015,37 @@ onUnmounted(() => {
           </div>
         </div>
 
-        <div v-if="!isTrashPanel" class="files-toolbar">
-          <label class="files-toolbar__field">
-            <Plus :size="14" aria-hidden="true" />
-            <input v-model="createFileName" type="text" placeholder="新建空文件，例如 note.txt" />
+        <div class="files-toolbar">
+          <label class="files-toolbar__select">
+            <span>展示方式</span>
+            <select v-model="fileDisplayMode" aria-label="素材展示方式">
+              <option v-for="option in fileDisplayModeOptions" :key="option.value" :value="option.value">
+                {{ option.label }}
+              </option>
+            </select>
           </label>
-          <button type="button" class="ghost files-toolbar__btn" :disabled="isMutatingFiles" @click="handleCreateFile">
-            <File :size="14" aria-hidden="true" />
-            建文件
-          </button>
-        </div>
-        <div v-else class="files-toolbar">
-          <button type="button" class="ghost files-toolbar__btn" :disabled="isMutatingFiles" @click="handleRestoreAllTrash">
-            <RotateCcw :size="14" aria-hidden="true" />
-            还原所有项目
-          </button>
-          <button type="button" class="ghost danger files-toolbar__btn" :disabled="isMutatingFiles" @click="handleEmptyTrash">
-            <Trash2 :size="14" aria-hidden="true" />
-            清空回收站
-          </button>
+
+          <template v-if="!isTrashPanel">
+            <label class="files-toolbar__field">
+              <Plus :size="14" aria-hidden="true" />
+              <input v-model="createFileName" type="text" placeholder="新建空文件，例如 note.txt" />
+            </label>
+            <button type="button" class="ghost files-toolbar__btn" :disabled="isMutatingFiles" @click="handleCreateFile">
+              <File :size="14" aria-hidden="true" />
+              建文件
+            </button>
+          </template>
+
+          <template v-else>
+            <button type="button" class="ghost files-toolbar__btn" :disabled="isMutatingFiles" @click="handleRestoreAllTrash">
+              <RotateCcw :size="14" aria-hidden="true" />
+              还原所有项目
+            </button>
+            <button type="button" class="ghost danger files-toolbar__btn" :disabled="isMutatingFiles" @click="handleEmptyTrash">
+              <Trash2 :size="14" aria-hidden="true" />
+              清空回收站
+            </button>
+          </template>
         </div>
       </header>
 
@@ -1017,27 +1084,37 @@ onUnmounted(() => {
 
           <div v-if="hasSplitFileGroups" class="files-list__divider" aria-hidden="true"></div>
 
-          <button
-            v-for="entry in fileEntries"
-            :key="entry.path"
-            v-context-menu="() => fileEntryContextMenu(entry)"
-            type="button"
-            class="files-list__item"
-            :class="{ 'is-active': selectedFilePath === entry.path }"
-            @click="selectFileEntry(entry)"
-            @dblclick="previewFileEntryByDoubleClick(entry)"
-          >
-            <div class="files-list__preview">
-              <img v-if="thumbnailSrc(entry)" :src="thumbnailSrc(entry) ?? undefined" alt="" loading="lazy" @error="markThumbnailFailed(entry)" />
-              <FileVideo v-else-if="isVideoEntry(entry)" :size="24" aria-hidden="true" />
-              <FileAudio v-else-if="isAudioEntry(entry)" :size="24" aria-hidden="true" />
-              <File v-else-if="isModelEntry(entry)" :size="24" aria-hidden="true" />
-              <FileImage v-else :size="24" aria-hidden="true" />
-            </div>
-            <div class="files-list__body">
-              <strong>{{ entry.name }}</strong>
-            </div>
-          </button>
+          <div class="files-list__files" :class="fileDisplayModeClass">
+            <button
+              v-for="entry in fileEntries"
+              :key="entry.path"
+              v-context-menu="() => fileEntryContextMenu(entry)"
+              type="button"
+              class="files-list__item files-list__item--file"
+              :class="{ 'is-active': selectedFilePath === entry.path }"
+              :style="fileItemStyle(entry)"
+              @click="selectFileEntry(entry)"
+              @dblclick="previewFileEntryByDoubleClick(entry)"
+            >
+              <div class="files-list__preview">
+                <img v-if="thumbnailSrc(entry)" :src="thumbnailSrc(entry) ?? undefined" alt="" loading="lazy" @load="updateThumbnailAspectRatio(entry, $event)" @error="markThumbnailFailed(entry)" />
+                <FileVideo v-else-if="isVideoEntry(entry)" :size="24" aria-hidden="true" />
+                <FileAudio v-else-if="isAudioEntry(entry)" :size="24" aria-hidden="true" />
+                <File v-else-if="isModelEntry(entry)" :size="24" aria-hidden="true" />
+                <FileImage v-else :size="24" aria-hidden="true" />
+              </div>
+              <div class="files-list__body">
+                <strong>{{ entry.name }}</strong>
+                <span v-if="fileDisplayMode === 'list'">{{ entry.path }}</span>
+              </div>
+              <div v-if="fileDisplayMode === 'list'" class="files-list__meta">
+                <span>{{ entry.extension || '文件' }}</span>
+                <span>{{ entry.sizeLabel || "未知" }}</span>
+                <span>{{ entry.status ? statusLabel(entry.status) : "未索引" }}</span>
+                <span>{{ entryModifiedAtLabel(entry) }}</span>
+              </div>
+            </button>
+          </div>
         </div>
       </template>
     </div>
