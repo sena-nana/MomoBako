@@ -71,16 +71,16 @@
 
 ## Plugin Architecture
 
-- Plugin manifest includes:
-  - `pluginId`
-  - `name`
-  - `version`
-  - `kind`
-  - `description`
-  - `capabilities`
-  - `enabled`
-- Extension points:
-  - filesystem watcher
-  - metadata provider
-  - semantic/vector search
-  - OCR / AI tagging / sync adapters
+- Runtime plugins live under `plugins/builtin/*` in development. `yarn plugins:build` stages the runtime subset under `src-tauri/resources/plugins/builtin/*`, and release builds bundle it to `$RESOURCE/plugins/builtin/*`. The Tauri resource map intentionally avoids source-relative `../` paths so release packages do not expose `_up_/plugins/builtin`. When Tauri provides a resource directory, the runtime only scans `$RESOURCE/plugins/builtin` and does not fall back to cwd/source directories.
+- Plugin manifest includes the existing display fields plus runtime fields:
+  - `pluginId`, `legacyPluginIds`, `name`, `version`, `kind`, `description`, `capabilities`, `enabled`
+  - `sdk`: `frontend` or `backend`
+  - `runtime`: `vue-module`, `native-dylib`, or `manifest-only`
+  - `entry`, `source`, `permissions`, `compat`, `status`
+- Frontend plugins use `src/plugins/sdk.ts` and register Vue preview components with `definePreviewPlugin()` and `registerPreviewPlugin()`.
+- Backend plugins use a C ABI boundary with JSON request/response envelopes:
+  - `momobako_plugin_manifest`
+  - `momobako_plugin_call`
+  - `momobako_plugin_free`
+- The repository runtime discovers manifests at startup from the runtime plugin directory, normalizes legacy IDs such as `builtin.local-filesystem`, and routes filesystem backend operations through the plugin registry. If the runtime plugin directory is removed, `GET /plugins` reflects that removal instead of silently rebuilding the list from compiled manifests.
+- Built-in local filesystem is available as a trusted runtime backend loaded from its plugin directory. WebDAV, cloud drive, watcher, metadata provider, and vector index are separate manifest-only built-ins until their runtime implementations are added.

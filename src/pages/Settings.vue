@@ -1,16 +1,15 @@
 <script setup lang="ts">
 import { computed, onMounted } from "vue";
-import { Database, Moon, PlugZap, ServerCog, Sun } from "lucide-vue-next";
+import { Database, Moon, ServerCog, Sun } from "lucide-vue-next";
+import PluginManagerPanel from "../components/PluginManagerPanel.vue";
 import { useTheme } from "../composables/useTheme";
 import { useRepositoryWorkspace } from "../composables/useRepositoryWorkspace";
 
 const { theme, setTheme } = useTheme();
 const {
   repositories,
-  plugins,
   cacheSnapshot,
   apiDesign,
-  isLoadingSettingsData,
   loadSettingsData,
 } = useRepositoryWorkspace();
 
@@ -91,27 +90,14 @@ onMounted(() => {
       </ul>
     </div>
 
-    <div class="card">
-      <h2>插件系统</h2>
-      <div v-if="isLoadingSettingsData" class="workspace-state">正在加载插件信息</div>
-      <ul v-else class="settings-list">
-        <li v-for="plugin in plugins" :key="plugin.pluginId" class="settings-list__item">
-          <div class="settings-list__title">
-            <PlugZap :size="15" aria-hidden="true" />
-            <strong>{{ plugin.name }}</strong>
-            <span class="muted">{{ plugin.version }}</span>
-          </div>
-          <div class="settings-list__desc">{{ plugin.description }}</div>
-          <div class="settings-list__chips">
-            <span class="workspace-hints__chip">{{ plugin.kind }}</span>
-            <span class="workspace-hints__chip">{{ plugin.enabled ? "已启用" : "未启用" }}</span>
-            <span v-for="capability in plugin.capabilities" :key="capability" class="workspace-hints__chip">
-              {{ capability }}
-            </span>
-          </div>
-        </li>
-      </ul>
-    </div>
+    <PluginManagerPanel
+      title="插件管理"
+      eyebrow="系统扩展"
+      subline="在这里启用、禁用、删除用户插件，或从压缩包导入新的插件。"
+      search-placeholder="筛选插件、能力或运行时"
+      empty-title="没有匹配的插件"
+      empty-description="试试其他关键词，或从压缩包导入新的插件。"
+    />
 
     <div class="card">
       <h2>缓存</h2>

@@ -43,7 +43,8 @@ type AddRepositoryRequestDetail = {
 const addRepositoryPopoverMode = ref<AddRepositoryPopoverMode>("closed");
 const addRepositoryPopoverPosition = ref({ left: 0, top: 0 });
 const addRepositoryPopoverRef = ref<HTMLElement | null>(null);
-const backendPluginId = ref("builtin.local-filesystem");
+const localFilesystemPluginId = "momobako.local-filesystem";
+const backendPluginId = ref(localFilesystemPluginId);
 const backendName = ref("");
 const backendUrl = ref("");
 const backendUsername = ref("");
@@ -199,12 +200,12 @@ function repositoryInitial(name: string) {
 }
 
 function formatAddRepositoryBackendLabel(pluginId: string, fallback: string) {
-  if (pluginId === "builtin.local-filesystem") return "本地文件夹";
-  if (pluginId === "builtin.cloud-drive") return "云盘";
+  if (pluginId === localFilesystemPluginId || pluginId === "builtin.local-filesystem") return "本地文件夹";
+  if (pluginId === "momobako.cloud-drive" || pluginId === "builtin.cloud-drive") return "云盘";
   return fallback;
 }
 
-function resetBackendForm(pluginId = repositoryBackendOptions.value[0]?.pluginId ?? "builtin.local-filesystem") {
+function resetBackendForm(pluginId = repositoryBackendOptions.value[0]?.pluginId ?? localFilesystemPluginId) {
   backendPluginId.value = pluginId;
   backendName.value = "";
   backendUrl.value = "";
@@ -262,7 +263,7 @@ async function selectBackend(pluginId: string) {
   const backend = repositoryBackendOptions.value.find((item) => item.pluginId === pluginId);
   if (!backend?.enabled) return;
   resetBackendForm(pluginId);
-  if (pluginId === "builtin.local-filesystem") {
+  if (pluginId === localFilesystemPluginId) {
     await chooseLocalFolderAndCreate();
     return;
   }
@@ -366,7 +367,7 @@ async function chooseLocalFolderAndCreate() {
 async function createLocalRepositoryFromPath(path: string, fallbackPosition = addRepositoryPopoverPosition.value) {
   const nextPath = path.trim();
   if (!nextPath) return false;
-  backendPluginId.value = "builtin.local-filesystem";
+  backendPluginId.value = localFilesystemPluginId;
   addRepositoryError.value = "";
   isSubmittingBackend.value = true;
   try {

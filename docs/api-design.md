@@ -80,7 +80,11 @@
 ## Plugin API
 
 - `GET /plugins`
-  - List plugin manifests and capabilities
+  - List runtime-discovered plugin manifests and capabilities
+  - Release builds discover built-in plugins from `$RESOURCE/plugins/builtin`; missing or deleted plugin directories are reflected in the response instead of being replaced by compiled defaults or cwd/source fallbacks
+  - Manifest fields include `pluginId`, `legacyPluginIds`, `name`, `version`, `kind`, `description`, `capabilities`, `enabled`, `sdk`, `entry`, `source`, `runtime`, `permissions`, `compat`, and `status`
+  - Backend plugin IDs are normalized to the `momobako.*` namespace; legacy `builtin.*` IDs remain accepted when reading existing repositories
+  - Disabled or manifest-only filesystem backends are displayed but not offered as attachable repository backends
 
 ## Cache API
 

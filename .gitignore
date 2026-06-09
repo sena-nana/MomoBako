@@ -60,6 +60,10 @@ target/
 **/target/
 **/*.rs.bk
 *.pdb
+plugins/builtin/**/*.dll
+plugins/builtin/**/*.dylib
+plugins/builtin/**/*.so
+src-tauri/resources/plugins/builtin/
 src-tauri/gen/schemas/
 
 # Databases

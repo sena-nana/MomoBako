@@ -1,0 +1,20 @@
+{
+  "pluginId": "momobako.filesystem-watcher",
+  "legacyPluginIds": ["builtin.filesystem-watcher"],
+  "name": "Filesystem Watcher",
+  "version": "1.0.0",
+  "kind": "watcher",
+  "description": "监听仓库目录，记录新增、删除、修改与重命名事件。",
+  "capabilities": ["watch", "events", "sync"],
+  "enabled": false,
+  "sdk": "backend",
+  "entry": {},
+  "source": "builtin",
+  "runtime": "manifest-only",
+  "permissions": ["filesystem:read"],
+  "compat": {
+    "sdkVersion": "1",
+    "legacyPluginIds": ["builtin.filesystem-watcher"]
+  },
+  "status": "disabled"
+}

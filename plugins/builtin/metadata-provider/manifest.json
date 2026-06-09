@@ -1,0 +1,20 @@
+{
+  "pluginId": "momobako.metadata-provider",
+  "legacyPluginIds": ["builtin.metadata-provider"],
+  "name": "Metadata Provider",
+  "version": "1.0.0",
+  "kind": "metadata",
+  "description": "提供可扩展的元数据生成与写入能力。",
+  "capabilities": ["metadata", "tags", "ocr"],
+  "enabled": false,
+  "sdk": "backend",
+  "entry": {},
+  "source": "builtin",
+  "runtime": "manifest-only",
+  "permissions": ["filesystem:read"],
+  "compat": {
+    "sdkVersion": "1",
+    "legacyPluginIds": ["builtin.metadata-provider"]
+  },
+  "status": "disabled"
+}

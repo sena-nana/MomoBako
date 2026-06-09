@@ -566,6 +566,25 @@
   margin: 0;
 }
 
+.extensions-workbench__card-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.plugin-manager {
+  min-height: 100%;
+}
+
+.plugin-manager__meta {
+  display: inline-flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: 12px;
+}
+
 .files-browser,
 .files-detail {
   min-height: 0;
@@ -1593,6 +1612,11 @@
 .asset-card__pill--ghost {
   background: var(--bg-subtle);
   color: var(--text-muted);
+}
+
+.asset-card__pill--danger {
+  background: var(--err-soft);
+  color: var(--err);
 }
 
 .asset-search-results {

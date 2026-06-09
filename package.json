@@ -9,11 +9,12 @@
     "test": "vitest run",
     "preview": "vite preview",
     "tauri": "tauri",
-    "tauri:dev": "node scripts/tauri-dev.mjs",
+    "tauri:dev": "yarn plugins:build && node scripts/tauri-dev.mjs",
+    "plugins:build": "node scripts/build-builtin-plugins.mjs",
     "tauri:build": "tauri build",
     "icons:generate": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/generate-icon.ps1",
     "icons:tauri": "yarn tauri icon src-tauri/icons/icon-source.png",
-    "verify": "yarn test && yarn build && cargo check --manifest-path src-tauri/Cargo.toml"
+    "verify": "yarn test && yarn build && cargo check --manifest-path src-tauri/Cargo.toml && yarn plugins:build"
   },
   "dependencies": {
     "@pixiv/three-vrm": "^3.4.5",

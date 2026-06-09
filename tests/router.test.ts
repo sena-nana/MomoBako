@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/vue";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/vue";
 import { createMemoryHistory } from "vue-router";
 import { describe, expect, it } from "vitest";
 import App from "../src/App.vue";
@@ -20,6 +20,8 @@ import {
   selectMockFile,
   selectMockFolder,
 } from "./setupTests";
+import { getPreviewPluginForEntry } from "../src/plugins/previewPlugins";
+import type { FileBrowserEntry } from "../src/types/repository";
 
 async function renderApp() {
   resetRepositoryWorkspaceForTests();
@@ -69,6 +71,23 @@ function pointerEvent(type: string, clientX: number) {
     clientX,
     pointerId: 1,
   });
+}
+
+function previewEntry(extension: string): FileBrowserEntry {
+  return {
+    path: `Preview/asset.${extension}`,
+    name: `asset.${extension}`,
+    kind: "file",
+    extension,
+    sizeBytes: 1024,
+    sizeLabel: "1 KB",
+    modifiedAt: "2026-06-05T00:18:00Z",
+    assetId: `asset-${extension}`,
+    status: "synced",
+    thumbnailPath: null,
+    thumbnailCustom: false,
+    metadata: {},
+  };
 }
 
 describe("文件管理冒烟", () => {
@@ -282,6 +301,77 @@ describe("文件管理冒烟", () => {
       });
     });
     expect(getInvokeCalls("create_repository")).toHaveLength(0);
+  });
+
+  it("没有仓库时也能在设置页管理插件", async () => {
+    selectMockFile("C:/Mock/Plugins/sample-plugin.zip");
+    const router = createMomoBakoRouter(createMemoryHistory());
+    await router.push("/settings");
+    await router.isReady();
+    await useRepositoryWorkspace().ensureRepositoryWorkspace();
+
+    render(App, {
+      global: {
+        plugins: [router],
+        directives: {
+          "context-menu": vContextMenu,
+        },
+      },
+    });
+
+    expect(await screen.findByRole("heading", { name: "插件管理" })).toBeInTheDocument();
+
+    await fireEvent.click(screen.getByRole("button", { name: "从压缩包安装" }));
+    await waitFor(() => {
+      expect(getInvokeCalls("install_plugin_from_archive").at(-1)?.args).toMatchObject({
+        request: {
+          archivePath: "C:/Mock/Plugins/sample-plugin.zip",
+        },
+      });
+    });
+    expect(await screen.findByText("插件已安装。")).toBeInTheDocument();
+    const pluginCardTitle = await screen.findByText("Sample Plugin");
+    const pluginCard = pluginCardTitle.closest(".extensions-workbench__card");
+    expect(pluginCard).toBeInstanceOf(HTMLElement);
+
+    await fireEvent.click(within(pluginCard as HTMLElement).getByRole("button", { name: "禁用" }));
+    await waitFor(() => {
+      expect(getInvokeCalls("set_plugin_enabled").at(-1)?.args).toMatchObject({
+        request: {
+          pluginId: "user.sample-plugin",
+          enabled: false,
+        },
+      });
+    });
+    expect(await screen.findByText("插件已禁用。")).toBeInTheDocument();
+
+    await fireEvent.click(within(pluginCard as HTMLElement).getByRole("button", { name: "删除" }));
+    const deleteDialog = await screen.findByRole("dialog", { name: "删除插件" });
+    await fireEvent.click(within(deleteDialog).getByRole("button", { name: "删除", exact: true }));
+    await waitFor(() => {
+      expect(getInvokeCalls("delete_plugin").at(-1)?.args).toMatchObject({
+        pluginId: "user.sample-plugin",
+      });
+    });
+    expect(await screen.findByText("插件已删除。")).toBeInTheDocument();
+    expect(screen.queryByText("Sample Plugin")).not.toBeInTheDocument();
+  });
+
+  it("禁用预览插件后不再为对应文件分配预览组件", async () => {
+    seedMockRepository();
+    const workspace = useRepositoryWorkspace();
+    await workspace.ensureRepositoryWorkspace();
+    await workspace.loadSettingsData({ failFast: true });
+
+    expect(getPreviewPluginForEntry(previewEntry("mp4"))?.pluginId).toBe("momobako.preview.media");
+    expect(getPreviewPluginForEntry(previewEntry("vrm"))?.pluginId).toBe("momobako.preview.three-model");
+
+    await workspace.setPluginEnabledInWorkspace("momobako.preview.media", false);
+    await workspace.setPluginEnabledInWorkspace("momobako.preview.three-model", false);
+
+    expect(getPreviewPluginForEntry(previewEntry("mp4"))).toBeNull();
+    expect(getPreviewPluginForEntry(previewEntry("mp3"))).toBeNull();
+    expect(getPreviewPluginForEntry(previewEntry("vrm"))).toBeNull();
   });
 
   it("保留目录按需加载，并在结构变化后刷新文件夹树", async () => {
