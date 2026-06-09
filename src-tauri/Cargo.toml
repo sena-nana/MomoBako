@@ -1,12 +1,12 @@
 [package]
-name = "tauri_template"
+name = "momobako"
 version = "0.1.0"
-description = "A minimal Tauri application template"
-authors = ["you"]
+description = "MomoBako desktop application"
+authors = ["MomoBako contributors"]
 edition = "2021"
 
 [lib]
-name = "tauri_template_lib"
+name = "momobako_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]

@@ -7,7 +7,7 @@ import AppShell from "./layouts/AppShell.vue";
 import Home from "./pages/Home.vue";
 import Settings from "./pages/Settings.vue";
 
-export function createTemplateRouter(history: RouterHistory = createWebHistory()) {
+export function createMomoBakoRouter(history: RouterHistory = createWebHistory()) {
   return createRouter({
     history,
     routes: [
@@ -24,4 +24,4 @@ export function createTemplateRouter(history: RouterHistory = createWebHistory()
   });
 }
 
-export const router = createTemplateRouter();
+export const router = createMomoBakoRouter();

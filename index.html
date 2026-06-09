@@ -3,10 +3,10 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Tauri Template</title>
+    <title>MomoBako</title>
     <script>
       try {
-        var t = localStorage.getItem("tauri-template.theme");
+        var t = localStorage.getItem("momobako.theme") || localStorage.getItem("tauri-template.theme");
         if (t === "light" || t === "dark") {
           document.documentElement.dataset.theme = t;
         }
