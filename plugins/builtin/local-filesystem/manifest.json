@@ -1,0 +1,22 @@
+{
+  "pluginId": "momobako.local-filesystem",
+  "legacyPluginIds": ["builtin.local-filesystem"],
+  "name": "Local Filesystem",
+  "version": "1.0.0",
+  "kind": "filesystem",
+  "description": "使用本地目录作为仓库文件管理后端。",
+  "capabilities": ["browse", "read", "write", "watch", "sync"],
+  "enabled": true,
+  "sdk": "backend",
+  "entry": {
+    "library": "momobako_builtin_local_filesystem"
+  },
+  "source": "builtin",
+  "runtime": "native-dylib",
+  "permissions": ["filesystem:read", "filesystem:write"],
+  "compat": {
+    "sdkVersion": "1",
+    "legacyPluginIds": ["builtin.local-filesystem"]
+  },
+  "status": "ready"
+}

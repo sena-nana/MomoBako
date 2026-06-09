@@ -3,8 +3,10 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
     collections::BTreeMap,
-    ffi::OsString,
+    ffi::{CStr, CString, OsString},
     fs::{self, File, OpenOptions},
+    io::{Read, Write},
+    os::raw::c_char,
     path::{Path, PathBuf},
     process::Command,
     sync::{Arc, Mutex, OnceLock},
@@ -24,6 +26,7 @@ const REPO_SCHEMA_VERSION: i64 = 1;
 const THUMBNAIL_SIZE: u32 = 256;
 
 static FFMPEG_READY: OnceLock<Result<(), String>> = OnceLock::new();
+static RUNTIME_PLUGIN_RESOURCE_DIR: OnceLock<PathBuf> = OnceLock::new();
 
 const REGISTRY_SCHEMA_SQL: &str = r#"
 CREATE TABLE IF NOT EXISTS repositories (
@@ -47,9 +50,13 @@ VALUES ('registry', 1)
 ON CONFLICT(component) DO UPDATE SET version = excluded.version;
 "#;
 
-const LOCAL_FILESYSTEM_PLUGIN_ID: &str = "builtin.local-filesystem";
-const WEBDAV_PLUGIN_ID: &str = "builtin.webdav";
-const CLOUD_DRIVE_PLUGIN_ID: &str = "builtin.cloud-drive";
+const LOCAL_FILESYSTEM_PLUGIN_ID: &str = "momobako.local-filesystem";
+const WEBDAV_PLUGIN_ID: &str = "momobako.webdav";
+const CLOUD_DRIVE_PLUGIN_ID: &str = "momobako.cloud-drive";
+const LEGACY_LOCAL_FILESYSTEM_PLUGIN_ID: &str = "builtin.local-filesystem";
+const LEGACY_WEBDAV_PLUGIN_ID: &str = "builtin.webdav";
+const LEGACY_CLOUD_DRIVE_PLUGIN_ID: &str = "builtin.cloud-drive";
+const PLUGIN_SDK_VERSION: &str = "1";
 const MAX_PARALLEL_IMPORTS: usize = 4;
 
 const REPOSITORY_SCHEMA_SQL: &str = r#"
@@ -275,7 +282,7 @@ pub struct RepositoryOverview {
     pub readme_content: Option<String>,
 }
 
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct FileTreeNode {
     pub path: String,
@@ -332,8 +339,11 @@ struct RepositoryMetadataFile {
 struct RepositoryMetadataFileImport {
     repo_id: String,
     name: Option<String>,
+    root_path: Option<String>,
     backend_plugin_id: Option<String>,
     backend_config: Option<serde_json::Value>,
+    created_at: Option<String>,
+    schema_version: Option<i64>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -598,16 +608,65 @@ pub struct CacheSnapshot {
     pub entries: Vec<CacheEntry>,
 }
 
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct PluginManifest {
     pub plugin_id: String,
+    pub legacy_plugin_ids: Vec<String>,
     pub name: String,
     pub version: String,
     pub kind: String,
     pub description: String,
     pub capabilities: Vec<String>,
     pub enabled: bool,
+    pub sdk: String,
+    pub entry: serde_json::Value,
+    pub source: String,
+    pub runtime: String,
+    pub permissions: Vec<String>,
+    pub compat: PluginCompat,
+    pub status: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginEnabledRequest {
+    pub plugin_id: String,
+    pub enabled: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginInstallRequest {
+    pub archive_path: String,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginMutationResponse {
+    pub plugins: Vec<PluginManifest>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginCompat {
+    pub sdk_version: String,
+    pub legacy_plugin_ids: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PluginCallEnvelope {
+    method: String,
+    payload: serde_json::Value,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PluginCallResponse {
+    ok: bool,
+    payload: Option<serde_json::Value>,
+    error: Option<String>,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -670,14 +729,6 @@ struct RepositoryStoragePaths {
 struct PreviewFileSource {
     path: PathBuf,
     media_type: String,
-}
-
-#[derive(Debug, Clone)]
-struct FileSystemPluginDescriptor {
-    plugin_id: &'static str,
-    kind: &'static str,
-    name: &'static str,
-    capabilities: &'static [&'static str],
 }
 
 trait FileSystemBackendAdapter {
@@ -749,13 +800,15 @@ trait FileSystemBackendAdapter {
     ) -> Result<(), String>;
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 enum FileSystemEntryKind {
     Directory,
     File,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct FileSystemEntry {
     path: String,
     name: String,
@@ -765,11 +818,12 @@ struct FileSystemEntry {
     modified_at: Option<String>,
 }
 
-struct LocalFileSystemBackend;
-struct UnsupportedFileSystemBackend {
-    descriptor: &'static FileSystemPluginDescriptor,
+struct RuntimeFileSystemBackendAdapter {
+    service_root: PathBuf,
+    plugin_id: String,
 }
 
+struct LocalFileSystemBackend;
 pub struct RepositoryState {
     root: PathBuf,
     registry_path: PathBuf,
@@ -803,6 +857,7 @@ impl RepositoryState {
             .execute_batch(REGISTRY_SCHEMA_SQL)
             .map_err(db_error)?;
         migrate_registry_schema(&registry).map_err(db_error)?;
+        migrate_registry_plugin_ids(&registry).map_err(db_error)?;
 
         *initialized = true;
         Ok(())
@@ -822,11 +877,13 @@ impl RepositoryState {
             )
             .map_err(db_error)?;
 
+        let plugin_registry = backend_plugin_registry(&self.root);
         let rows = stmt
             .query_map([], |row| {
                 let repo_id: String = row.get(0)?;
                 let path: String = row.get(2)?;
                 let backend_plugin_id: String = row.get(3)?;
+                let backend_plugin_id = plugin_registry.normalize_plugin_id(&backend_plugin_id);
                 let asset_count =
                     load_asset_count(&self.root, &repo_id, &path, &backend_plugin_id).unwrap_or(0);
 
@@ -834,7 +891,7 @@ impl RepositoryState {
                     repo_id,
                     name: row.get(1)?,
                     path,
-                    backend: backend_summary(&backend_plugin_id),
+                    backend: backend_summary_from_registry(&plugin_registry, &backend_plugin_id),
                     status: row.get(5)?,
                     asset_count,
                     updated_at: row.get(6)?,
@@ -851,7 +908,7 @@ impl RepositoryState {
     ) -> Result<RepositoryMutationResponse, String> {
         self.ensure_initialized()?;
 
-        let backend = parse_backend_request(&request)?;
+        let backend = parse_backend_request(&self.root, &request)?;
         let repo_id = request
             .repo_id
             .unwrap_or_else(|| slugify_repo_id(&request.name, &request.path));
@@ -881,14 +938,22 @@ impl RepositoryState {
     ) -> Result<RepositoryMutationResponse, String> {
         self.ensure_initialized()?;
 
-        let requested_backend = parse_backend_request(&request)?;
+        let requested_backend = parse_backend_request(&self.root, &request)?;
         let repo_root =
             normalize_repository_root_for_backend(&request.path, &requested_backend, true)?;
         migrate_legacy_meta_dir_if_needed(&repo_root, &requested_backend.plugin_id)?;
         let metadata_path = repository_meta_dir(&repo_root).join(REPO_METADATA_FILE_NAME);
         let imported_metadata = if metadata_path.exists() {
             let raw = fs::read_to_string(&metadata_path).map_err(io_error)?;
-            Some(serde_json::from_str::<RepositoryMetadataFileImport>(&raw).map_err(json_error)?)
+            let metadata =
+                serde_json::from_str::<RepositoryMetadataFileImport>(&raw).map_err(json_error)?;
+            migrate_repository_metadata_plugin_id_if_needed(
+                &self.root,
+                &metadata_path,
+                &metadata,
+                &repo_root,
+            )?;
+            Some(metadata)
         } else {
             None
         };
@@ -905,7 +970,7 @@ impl RepositoryState {
             .to_string();
         let backend = imported_metadata
             .as_ref()
-            .and_then(import_backend_record)
+            .and_then(|metadata| import_backend_record(&self.root, metadata))
             .unwrap_or(requested_backend);
 
         let seed = RepositorySeed {
@@ -943,15 +1008,18 @@ impl RepositoryState {
             return Err("repository path cannot be empty".to_string());
         }
 
-        let backend = parse_backend_request(&RepositoryMutationRequest {
-            repo_id: None,
-            name: String::new(),
-            path: path.to_string(),
-            backend_plugin_id: None,
-            backend_config: None,
-        })?;
+        let backend = parse_backend_request(
+            &self.root,
+            &RepositoryMutationRequest {
+                repo_id: None,
+                name: String::new(),
+                path: path.to_string(),
+                backend_plugin_id: None,
+                backend_config: None,
+            },
+        )?;
         let repo_root = normalize_repository_root_for_backend(path, &backend, true)?;
-        ensure_backend_path_is_attachable(&backend, &repo_root)?;
+        ensure_backend_path_is_attachable(&self.root, &backend, &repo_root)?;
         let name = infer_repository_name(&repo_root);
         let metadata_path = if repository_meta_dir(&repo_root).exists() {
             repository_meta_dir(&repo_root).join(REPO_METADATA_FILE_NAME)
@@ -1125,7 +1193,7 @@ impl RepositoryState {
         let tree = if special_location.is_some() {
             None
         } else if request.include_tree.unwrap_or(true) {
-            Some(list_backend_tree(&repo, &repo_root)?)
+            Some(list_backend_tree(&self.root, &repo, &repo_root)?)
         } else {
             None
         };
@@ -1133,6 +1201,7 @@ impl RepositoryState {
             list_trash_directory_entries(&repo_root, &current_path, &asset_map, &thumbnail_map)?
         } else {
             list_backend_directory_entries(
+                &self.root,
                 &repo,
                 &repo_root,
                 &current_path,
@@ -1405,7 +1474,7 @@ impl RepositoryState {
         )?;
         let tx = connection.transaction().map_err(db_error)?;
 
-        let scan = sync_repository_files(&tx, &repo).map_err(db_error)?;
+        let scan = sync_repository_files(&self.root, &tx, &repo).map_err(db_error)?;
         tx.commit().map_err(db_error)?;
         Ok(scan)
     }
@@ -1415,7 +1484,7 @@ impl RepositoryState {
         let repo = self.load_repository_record(&request.repo_id)?;
         let entry_path = normalize_entry_path(&request.path)?;
         let repo_root = PathBuf::from(&repo.summary.path);
-        let entry = stat_backend_entry(&repo, &repo_root, &entry_path)?;
+        let entry = stat_backend_entry(&self.root, &repo, &repo_root, &entry_path)?;
         let connection = self.open_repository_connection(
             &repo.summary.repo_id,
             &repo.summary.path,
@@ -1664,7 +1733,7 @@ impl RepositoryState {
         let parent_path =
             normalize_directory_path(request.parent_path.as_deref().unwrap_or_default())?;
         let name = validate_new_entry_name(&request.name)?;
-        create_backend_directory(&repo, &repo_root, &parent_path, &name)?;
+        create_backend_directory(&self.root, &repo, &repo_root, &parent_path, &name)?;
         self.load_file_browser(FileBrowserRequest {
             repo_id: request.repo_id,
             directory_path: Some(parent_path),
@@ -1680,7 +1749,7 @@ impl RepositoryState {
         let parent_path =
             normalize_directory_path(request.parent_path.as_deref().unwrap_or_default())?;
         let name = validate_new_entry_name(&request.name)?;
-        create_backend_file(&repo, &repo_root, &parent_path, &name)?;
+        create_backend_file(&self.root, &repo, &repo_root, &parent_path, &name)?;
         let _ = self.sync_repository(SyncRequest {
             repo_id: request.repo_id.clone(),
         })?;
@@ -1741,7 +1810,7 @@ impl RepositoryState {
         let new_name = validate_new_entry_name(&request.new_name)?;
         let parent_path = parent_relative_path(&source_path);
         let target_path = join_relative_path(&parent_path, &new_name);
-        let renamed = rename_backend_entry(&repo, &repo_root, &source_path, &new_name)?;
+        let renamed = rename_backend_entry(&self.root, &repo, &repo_root, &source_path, &new_name)?;
 
         let is_directory = matches!(renamed.kind, FileSystemEntryKind::Directory);
         if !is_directory {
@@ -1810,7 +1879,7 @@ impl RepositoryState {
 
         let entry_path = normalize_entry_path(&request.path)?;
         let parent_path = parent_relative_path(&entry_path);
-        let entry = stat_backend_entry(&repo, &repo_root, &entry_path)?;
+        let entry = stat_backend_entry(&self.root, &repo, &repo_root, &entry_path)?;
 
         let is_directory = matches!(entry.kind, FileSystemEntryKind::Directory);
         if is_directory {
@@ -1980,7 +2049,91 @@ impl RepositoryState {
 
     pub fn list_plugins(&self) -> Result<Vec<PluginManifest>, String> {
         self.ensure_initialized()?;
-        Ok(default_plugins())
+        Ok(default_plugins(&self.root))
+    }
+
+    pub fn set_plugin_enabled(
+        &self,
+        request: PluginEnabledRequest,
+    ) -> Result<PluginMutationResponse, String> {
+        self.ensure_initialized()?;
+        let registry = plugin_management_registry(&self.root);
+        let normalized_plugin_id = registry.normalize_plugin_id(&request.plugin_id);
+        let manifest = registry
+            .manifest(&normalized_plugin_id)
+            .ok_or_else(|| format!("plugin not found: {}", request.plugin_id))?;
+
+        if !request.enabled
+            && is_repository_backend_plugin(manifest)
+            && self.repository_backend_in_use(&normalized_plugin_id)?
+        {
+            return Err(format!(
+                "plugin is used by an existing repository: {}",
+                manifest.plugin_id
+            ));
+        }
+
+        let mut settings = load_plugin_settings(&self.root)?;
+        settings
+            .plugins
+            .entry(normalized_plugin_id)
+            .or_default()
+            .enabled = Some(request.enabled);
+        save_plugin_settings(&self.root, &settings)?;
+
+        Ok(PluginMutationResponse {
+            plugins: default_plugins(&self.root),
+        })
+    }
+
+    pub fn delete_plugin(&self, plugin_id: String) -> Result<PluginMutationResponse, String> {
+        self.ensure_initialized()?;
+        let registry = plugin_management_registry(&self.root);
+        let normalized_plugin_id = registry.normalize_plugin_id(&plugin_id);
+        let registration = registry
+            .registration(&normalized_plugin_id)
+            .ok_or_else(|| format!("plugin not found: {plugin_id}"))?;
+        if registration.manifest.source != "user" {
+            return Err(format!(
+                "built-in plugins cannot be deleted: {}",
+                registration.manifest.plugin_id
+            ));
+        }
+        if is_repository_backend_plugin(&registration.manifest)
+            && self.repository_backend_in_use(&normalized_plugin_id)?
+        {
+            return Err(format!(
+                "plugin is used by an existing repository: {}",
+                registration.manifest.plugin_id
+            ));
+        }
+
+        let manifest_dir = registration
+            .manifest_dir
+            .as_ref()
+            .ok_or_else(|| format!("plugin directory is not available: {plugin_id}"))?;
+        ensure_user_plugin_dir(&self.root, manifest_dir)?;
+        fs::remove_dir_all(manifest_dir).map_err(io_error)?;
+
+        let mut settings = load_plugin_settings(&self.root)?;
+        settings.plugins.remove(&normalized_plugin_id);
+        save_plugin_settings(&self.root, &settings)?;
+
+        Ok(PluginMutationResponse {
+            plugins: default_plugins(&self.root),
+        })
+    }
+
+    pub fn install_plugin_from_archive(
+        &self,
+        request: PluginInstallRequest,
+    ) -> Result<PluginMutationResponse, String> {
+        self.ensure_initialized()?;
+        install_plugin_archive(&self.root, Path::new(request.archive_path.trim()))?;
+
+        Ok(PluginMutationResponse {
+            plugins: default_plugins(&self.root),
+        })
     }
 
     pub fn get_cache_snapshot(&self) -> Result<CacheSnapshot, String> {
@@ -2005,6 +2158,7 @@ impl RepositoryState {
 
     fn load_repository_record(&self, repo_id: &str) -> Result<RepositoryRecord, String> {
         let registry = Connection::open(&self.registry_path).map_err(db_error)?;
+        let plugin_registry = backend_plugin_registry(&self.root);
         registry
             .query_row(
                 r#"
@@ -2015,6 +2169,7 @@ impl RepositoryState {
                 [repo_id],
                 |row| {
                     let backend_plugin_id: String = row.get(3)?;
+                    let backend_plugin_id = plugin_registry.normalize_plugin_id(&backend_plugin_id);
                     let backend_config_json: String = row.get(4)?;
                     let backend_config = parse_backend_config_json(&backend_config_json).map_err(to_from_sql_error)?;
                     Ok(RepositoryRecord {
@@ -2022,7 +2177,7 @@ impl RepositoryState {
                             repo_id: row.get(0)?,
                             name: row.get(1)?,
                             path: row.get(2)?,
-                            backend: backend_summary(&backend_plugin_id),
+                            backend: backend_summary_from_registry(&plugin_registry, &backend_plugin_id),
                             status: row.get(5)?,
                             asset_count: 0,
                             updated_at: row.get(6)?,
@@ -2051,9 +2206,11 @@ impl RepositoryState {
                 "#,
             )
             .map_err(db_error)?;
+        let plugin_registry = backend_plugin_registry(&self.root);
         let rows = stmt
             .query_map([], |row| {
                 let backend_plugin_id: String = row.get(3)?;
+                let backend_plugin_id = plugin_registry.normalize_plugin_id(&backend_plugin_id);
                 let backend_config_json: String = row.get(4)?;
                 let backend_config =
                     parse_backend_config_json(&backend_config_json).map_err(to_from_sql_error)?;
@@ -2062,7 +2219,10 @@ impl RepositoryState {
                         repo_id: row.get(0)?,
                         name: row.get(1)?,
                         path: row.get(2)?,
-                        backend: backend_summary(&backend_plugin_id),
+                        backend: backend_summary_from_registry(
+                            &plugin_registry,
+                            &backend_plugin_id,
+                        ),
                         status: row.get(5)?,
                         asset_count: 0,
                         updated_at: row.get(6)?,
@@ -2076,6 +2236,25 @@ impl RepositoryState {
             .map_err(db_error)?;
 
         rows.collect::<Result<Vec<_>, _>>().map_err(db_error)
+    }
+
+    fn repository_backend_in_use(&self, plugin_id: &str) -> Result<bool, String> {
+        let registry = Connection::open(&self.registry_path).map_err(db_error)?;
+        let plugin_registry = backend_plugin_registry(&self.root);
+        let mut stmt = registry
+            .prepare("SELECT backend_plugin_id FROM repositories")
+            .map_err(db_error)?;
+        let rows = stmt
+            .query_map([], |row| row.get::<_, String>(0))
+            .map_err(db_error)?;
+
+        for row in rows {
+            let stored_plugin_id = row.map_err(db_error)?;
+            if plugin_registry.normalize_plugin_id(&stored_plugin_id) == plugin_id {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 
     fn open_repository_connection(
@@ -3039,11 +3218,12 @@ fn parse_json_column_optional(
 }
 
 fn sync_repository_files(
+    service_root: &Path,
     tx: &Transaction<'_>,
     repo: &RepositoryRecord,
 ) -> Result<SyncResult, rusqlite::Error> {
     let repo_root = PathBuf::from(&repo.summary.path);
-    let files = list_backend_files(repo, &repo_root).map_err(|error| {
+    let files = list_backend_files(service_root, repo, &repo_root).map_err(|error| {
         rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::new(
             std::io::ErrorKind::Other,
             error,
@@ -3720,7 +3900,8 @@ fn is_video_extension(extension: &str) -> bool {
     matches!(extension, "mp4" | "mov" | "mkv" | "webm" | "avi" | "m4v")
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct DiscoveredFile {
     relative_path: String,
     filename: String,
@@ -3754,87 +3935,662 @@ fn slugify_ascii_component(value: &str) -> String {
     slug.trim_matches('-').to_string()
 }
 
-fn default_plugins() -> Vec<PluginManifest> {
-    let mut plugins = file_system_plugin_descriptors()
-        .iter()
-        .map(|descriptor| PluginManifest {
-            plugin_id: descriptor.plugin_id.to_string(),
-            name: descriptor.name.to_string(),
-            version: if descriptor.plugin_id == LOCAL_FILESYSTEM_PLUGIN_ID {
-                "1.0.0".to_string()
-            } else {
-                "0.1.0".to_string()
-            },
-            kind: descriptor.kind.to_string(),
-            description: match descriptor.plugin_id {
-                LOCAL_FILESYSTEM_PLUGIN_ID => "使用本地目录作为仓库文件管理后端。".to_string(),
-                WEBDAV_PLUGIN_ID => "通过 WebDAV 适配远程文件管理服务。".to_string(),
-                CLOUD_DRIVE_PLUGIN_ID => "预留云盘文件系统接入点，如对象存储或网盘。".to_string(),
-                _ => "文件系统后端插件。".to_string(),
-            },
-            capabilities: descriptor
-                .capabilities
-                .iter()
-                .map(|item| (*item).to_string())
-                .collect(),
-            enabled: descriptor.plugin_id == LOCAL_FILESYSTEM_PLUGIN_ID,
+const BUILTIN_PLUGIN_MANIFESTS: &[&str] = &[
+    include_str!("../../plugins/builtin/local-filesystem/manifest.json"),
+    include_str!("../../plugins/builtin/webdav/manifest.json"),
+    include_str!("../../plugins/builtin/cloud-drive/manifest.json"),
+    include_str!("../../plugins/builtin/three-model-preview/manifest.json"),
+    include_str!("../../plugins/builtin/media-preview/manifest.json"),
+    include_str!("../../plugins/builtin/filesystem-watcher/manifest.json"),
+    include_str!("../../plugins/builtin/metadata-provider/manifest.json"),
+    include_str!("../../plugins/builtin/vector-index/manifest.json"),
+];
+
+type PluginManifestFn = unsafe extern "C" fn() -> *mut c_char;
+type PluginCallFn = unsafe extern "C" fn(*const c_char) -> *mut c_char;
+type PluginFreeFn = unsafe extern "C" fn(*mut c_char);
+
+struct NativePlugin {
+    _library: libloading::Library,
+    call: PluginCallFn,
+    free: PluginFreeFn,
+}
+
+#[derive(Debug)]
+struct DiscoveredPluginManifest {
+    manifest: PluginManifest,
+    manifest_dir: Option<PathBuf>,
+}
+
+struct BackendPluginRegistration {
+    manifest: PluginManifest,
+    manifest_dir: Option<PathBuf>,
+    native: Option<NativePlugin>,
+    load_error: Option<String>,
+}
+
+struct BackendPluginRegistry {
+    registrations: BTreeMap<String, BackendPluginRegistration>,
+    legacy_ids: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PluginSettings {
+    plugins: BTreeMap<String, PluginSettingsEntry>,
+}
+
+#[derive(Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PluginSettingsEntry {
+    enabled: Option<bool>,
+}
+
+impl BackendPluginRegistry {
+    fn load(service_root: &Path) -> Self {
+        Self::load_with_options(service_root, true)
+    }
+
+    fn load_for_management(service_root: &Path) -> Self {
+        Self::load_with_options(service_root, false)
+    }
+
+    fn load_with_options(service_root: &Path, load_native: bool) -> Self {
+        let settings = load_plugin_settings(service_root).unwrap_or_default();
+        let manifests = load_runtime_plugin_manifests(service_root);
+        let mut registrations = BTreeMap::new();
+        let mut legacy_ids = BTreeMap::new();
+        for discovered in manifests {
+            let mut manifest = discovered.manifest;
+            apply_plugin_settings(&mut manifest, &settings);
+            for legacy_id in plugin_legacy_ids(&manifest) {
+                legacy_ids.insert(legacy_id, manifest.plugin_id.clone());
+            }
+            let (native, load_error) =
+                if load_native && manifest.enabled && manifest.runtime == "native-dylib" {
+                    match load_native_plugin(&manifest, discovered.manifest_dir.as_deref()) {
+                        Ok(native) => (Some(native), None),
+                        Err(error) => (None, Some(error)),
+                    }
+                } else {
+                    (None, None)
+                };
+            registrations.insert(
+                manifest.plugin_id.clone(),
+                BackendPluginRegistration {
+                    manifest,
+                    manifest_dir: discovered.manifest_dir,
+                    native,
+                    load_error,
+                },
+            );
+        }
+
+        Self {
+            registrations,
+            legacy_ids,
+        }
+    }
+
+    fn list_manifests(&self) -> Vec<PluginManifest> {
+        self.registrations
+            .values()
+            .map(|registration| {
+                let mut manifest = registration.manifest.clone();
+                if manifest.runtime == "native-dylib"
+                    && manifest.enabled
+                    && registration.native.is_none()
+                    && !embedded_local_filesystem_fallback_enabled(&manifest.plugin_id)
+                {
+                    manifest.status = "unavailable".to_string();
+                }
+                manifest
+            })
+            .collect()
+    }
+
+    fn manifest(&self, plugin_id: &str) -> Option<&PluginManifest> {
+        let normalized = self.normalize_plugin_id(plugin_id);
+        self.registrations
+            .get(normalized.as_str())
+            .map(|registration| &registration.manifest)
+    }
+
+    fn registration(&self, plugin_id: &str) -> Option<&BackendPluginRegistration> {
+        let normalized = self.normalize_plugin_id(plugin_id);
+        self.registrations.get(normalized.as_str())
+    }
+
+    fn normalize_plugin_id(&self, plugin_id: &str) -> String {
+        let trimmed = plugin_id.trim();
+        self.legacy_ids
+            .get(trimmed)
+            .cloned()
+            .unwrap_or_else(|| normalized_builtin_plugin_id(trimmed).to_string())
+    }
+
+    fn call(
+        &self,
+        plugin_id: &str,
+        method: &str,
+        payload: serde_json::Value,
+    ) -> Result<serde_json::Value, String> {
+        let normalized = self.normalize_plugin_id(plugin_id);
+        let registration = self
+            .registrations
+            .get(normalized.as_str())
+            .ok_or_else(|| format!("unsupported plugin: {plugin_id}"))?;
+        if !registration.manifest.enabled {
+            return Err(format!(
+                "plugin is disabled: {}",
+                registration.manifest.plugin_id
+            ));
+        }
+        if let Some(native) = &registration.native {
+            return native.call(method, payload);
+        }
+        if embedded_local_filesystem_fallback_enabled(&registration.manifest.plugin_id) {
+            return call_builtin_local_filesystem(method, payload);
+        }
+        if let Some(error) = &registration.load_error {
+            return Err(format!(
+                "plugin runtime is not available: {} ({error})",
+                registration.manifest.plugin_id
+            ));
+        }
+        Err(format!(
+            "plugin runtime is not available: {}",
+            registration.manifest.plugin_id
+        ))
+    }
+}
+
+impl NativePlugin {
+    fn call(&self, method: &str, payload: serde_json::Value) -> Result<serde_json::Value, String> {
+        let request = PluginCallEnvelope {
+            method: method.to_string(),
+            payload,
+        };
+        let request_json = serde_json::to_string(&request).map_err(json_error)?;
+        let request_cstring = CString::new(request_json)
+            .map_err(|_| "plugin request contains an invalid null byte".to_string())?;
+        let response_ptr = unsafe { (self.call)(request_cstring.as_ptr()) };
+        if response_ptr.is_null() {
+            return Err("plugin returned a null response".to_string());
+        }
+        let response_json = unsafe { CStr::from_ptr(response_ptr) }
+            .to_string_lossy()
+            .to_string();
+        unsafe { (self.free)(response_ptr) };
+        let response: PluginCallResponse =
+            serde_json::from_str(&response_json).map_err(json_error)?;
+        if response.ok {
+            Ok(response.payload.unwrap_or_else(|| serde_json::json!({})))
+        } else {
+            Err(response
+                .error
+                .unwrap_or_else(|| "plugin call failed without an error message".to_string()))
+        }
+    }
+}
+
+fn backend_plugin_registry(service_root: &Path) -> BackendPluginRegistry {
+    BackendPluginRegistry::load(service_root)
+}
+
+fn plugin_management_registry(service_root: &Path) -> BackendPluginRegistry {
+    BackendPluginRegistry::load_for_management(service_root)
+}
+
+pub fn set_runtime_plugin_resource_dir(resource_dir: PathBuf) {
+    let _ = RUNTIME_PLUGIN_RESOURCE_DIR.set(resource_dir);
+}
+
+fn load_runtime_plugin_manifests(service_root: &Path) -> Vec<DiscoveredPluginManifest> {
+    let mut manifests =
+        load_plugin_manifests_from_runtime(runtime_builtin_plugins_dir().as_deref(), cfg!(test));
+    if let Ok(mut user_manifests) =
+        read_plugin_manifests_from_dir(&user_plugins_dir(service_root), Some("user"))
+    {
+        manifests.append(&mut user_manifests);
+    }
+    manifests.sort_by(|left, right| left.manifest.plugin_id.cmp(&right.manifest.plugin_id));
+    manifests
+}
+
+fn load_plugin_manifests_from_runtime(
+    runtime_root: Option<&Path>,
+    allow_compiled_fallback: bool,
+) -> Vec<DiscoveredPluginManifest> {
+    if let Some(runtime_root) = runtime_root {
+        return read_plugin_manifests_from_dir(runtime_root, Some("builtin")).unwrap_or_default();
+    }
+
+    if !allow_compiled_fallback {
+        return Vec::new();
+    }
+
+    load_compiled_builtin_plugin_manifests()
+        .into_iter()
+        .map(|manifest| DiscoveredPluginManifest {
+            manifest,
+            manifest_dir: None,
         })
-        .collect::<Vec<_>>();
-    plugins.extend([
-        PluginManifest {
-            plugin_id: "builtin.three-model-preview".to_string(),
-            name: "3D Model Preview".to_string(),
-            version: "1.0.0".to_string(),
-            kind: "preview".to_string(),
-            description: "为 FBX、OBJ、GLB、glTF 与 VRM 模型提供可旋转缩放的 3D 文件预览。"
-                .to_string(),
-            capabilities: vec![
-                "preview".to_string(),
-                "3d-model".to_string(),
-                "fbx".to_string(),
-                "obj".to_string(),
-                "gltf".to_string(),
-                "vrm".to_string(),
-            ],
-            enabled: true,
-        },
-        PluginManifest {
-            plugin_id: "builtin.filesystem-watcher".to_string(),
-            name: "Filesystem Watcher".to_string(),
-            version: "1.0.0".to_string(),
-            kind: "watcher".to_string(),
-            description: "监听仓库目录，记录新增、删除、修改与重命名事件。".to_string(),
-            capabilities: vec![
-                "watch".to_string(),
-                "events".to_string(),
-                "sync".to_string(),
-            ],
-            enabled: true,
-        },
-        PluginManifest {
-            plugin_id: "builtin.metadata-provider".to_string(),
-            name: "Metadata Provider".to_string(),
-            version: "1.0.0".to_string(),
-            kind: "metadata".to_string(),
-            description: "提供可扩展的元数据生成与写入能力。".to_string(),
-            capabilities: vec![
-                "metadata".to_string(),
-                "tags".to_string(),
-                "ocr".to_string(),
-            ],
-            enabled: false,
-        },
-        PluginManifest {
-            plugin_id: "builtin.vector-index".to_string(),
-            name: "Vector Index".to_string(),
-            version: "0.1.0".to_string(),
-            kind: "search".to_string(),
-            description: "预留向量检索与 AI 语义搜索扩展点。".to_string(),
-            capabilities: vec!["semantic-search".to_string(), "embedding".to_string()],
-            enabled: false,
-        },
-    ]);
-    plugins
+        .collect()
+}
+
+fn runtime_builtin_plugins_dir() -> Option<PathBuf> {
+    let resource_dir = RUNTIME_PLUGIN_RESOURCE_DIR.get().map(PathBuf::as_path);
+    let exe_dir = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(Path::to_path_buf));
+    let current_dir = std::env::current_dir().ok();
+    runtime_builtin_plugins_dir_from(resource_dir, exe_dir.as_deref(), current_dir.as_deref())
+}
+
+fn runtime_builtin_plugins_dir_from(
+    resource_dir: Option<&Path>,
+    exe_dir: Option<&Path>,
+    current_dir: Option<&Path>,
+) -> Option<PathBuf> {
+    builtin_plugin_dir_candidates(resource_dir, exe_dir, current_dir)
+        .into_iter()
+        .find(|candidate| candidate.is_dir())
+}
+
+fn builtin_plugin_dir_candidates(
+    resource_dir: Option<&Path>,
+    exe_dir: Option<&Path>,
+    current_dir: Option<&Path>,
+) -> Vec<PathBuf> {
+    let relative_plugin_dir = PathBuf::from("plugins").join("builtin");
+    let mut candidates = Vec::new();
+    if let Some(dir) = resource_dir {
+        candidates.push(dir.join(&relative_plugin_dir));
+        return candidates;
+    }
+    if let Some(dir) = exe_dir {
+        candidates.extend([
+            dir.join("resources").join(&relative_plugin_dir),
+            dir.join(&relative_plugin_dir),
+            dir.join("..").join("Resources").join(&relative_plugin_dir),
+            dir.join("..").join("resources").join(&relative_plugin_dir),
+        ]);
+    }
+    if let Some(dir) = current_dir {
+        candidates.extend([
+            dir.join(&relative_plugin_dir),
+            dir.join("..").join(&relative_plugin_dir),
+        ]);
+    }
+    candidates
+}
+
+fn read_plugin_manifests_from_dir(
+    root: &Path,
+    source_override: Option<&str>,
+) -> Result<Vec<DiscoveredPluginManifest>, String> {
+    let mut manifests = Vec::new();
+    for entry in fs::read_dir(root).map_err(io_error)? {
+        let entry = entry.map_err(io_error)?;
+        let manifest_dir = entry.path();
+        let manifest_path = manifest_dir.join("manifest.json");
+        if !manifest_path.is_file() {
+            continue;
+        }
+        let raw = fs::read_to_string(&manifest_path).map_err(io_error)?;
+        manifests.push(DiscoveredPluginManifest {
+            manifest: parse_plugin_manifest_with_source(&raw, source_override)?,
+            manifest_dir: Some(manifest_dir),
+        });
+    }
+    manifests.sort_by(|left, right| left.manifest.plugin_id.cmp(&right.manifest.plugin_id));
+    Ok(manifests)
+}
+
+fn load_compiled_builtin_plugin_manifests() -> Vec<PluginManifest> {
+    BUILTIN_PLUGIN_MANIFESTS
+        .iter()
+        .filter_map(|raw| parse_plugin_manifest(raw).ok())
+        .collect()
+}
+
+fn parse_plugin_manifest(raw: &str) -> Result<PluginManifest, String> {
+    parse_plugin_manifest_with_source(raw, None)
+}
+
+fn parse_plugin_manifest_with_source(
+    raw: &str,
+    source_override: Option<&str>,
+) -> Result<PluginManifest, String> {
+    let mut manifest = serde_json::from_str::<PluginManifest>(raw).map_err(json_error)?;
+    manifest.plugin_id = normalized_builtin_plugin_id(&manifest.plugin_id).to_string();
+    if let Some(source) = source_override {
+        manifest.source = source.to_string();
+    }
+    manifest.legacy_plugin_ids = plugin_legacy_ids(&manifest);
+    manifest.compat.legacy_plugin_ids = plugin_legacy_ids(&manifest);
+    if manifest.compat.sdk_version.trim().is_empty() {
+        manifest.compat.sdk_version = PLUGIN_SDK_VERSION.to_string();
+    }
+    Ok(manifest)
+}
+
+fn plugin_legacy_ids(manifest: &PluginManifest) -> Vec<String> {
+    let mut values = manifest.legacy_plugin_ids.clone();
+    values.extend(manifest.compat.legacy_plugin_ids.clone());
+    values.sort();
+    values.dedup();
+    values
+}
+
+fn plugin_settings_path(service_root: &Path) -> PathBuf {
+    service_root.join("plugin-state.json")
+}
+
+fn user_plugins_dir(service_root: &Path) -> PathBuf {
+    service_root.join("plugins").join("user")
+}
+
+fn load_plugin_settings(service_root: &Path) -> Result<PluginSettings, String> {
+    let path = plugin_settings_path(service_root);
+    if !path.is_file() {
+        return Ok(PluginSettings::default());
+    }
+    let raw = fs::read_to_string(path).map_err(io_error)?;
+    serde_json::from_str::<PluginSettings>(&raw).map_err(json_error)
+}
+
+fn save_plugin_settings(service_root: &Path, settings: &PluginSettings) -> Result<(), String> {
+    fs::create_dir_all(service_root).map_err(io_error)?;
+    let raw = serde_json::to_string_pretty(settings).map_err(json_error)?;
+    fs::write(plugin_settings_path(service_root), raw).map_err(io_error)
+}
+
+fn apply_plugin_settings(manifest: &mut PluginManifest, settings: &PluginSettings) {
+    let Some(entry) = settings.plugins.get(&manifest.plugin_id) else {
+        if !manifest.enabled {
+            manifest.status = "disabled".to_string();
+        }
+        return;
+    };
+    if let Some(enabled) = entry.enabled {
+        manifest.enabled = enabled;
+        manifest.status = if enabled {
+            "ready".to_string()
+        } else {
+            "disabled".to_string()
+        };
+    } else if !manifest.enabled {
+        manifest.status = "disabled".to_string();
+    }
+}
+
+fn is_repository_backend_plugin(manifest: &PluginManifest) -> bool {
+    matches!(manifest.kind.as_str(), "filesystem" | "webdav" | "cloud")
+}
+
+fn ensure_user_plugin_dir(service_root: &Path, plugin_dir: &Path) -> Result<(), String> {
+    let user_root = user_plugins_dir(service_root);
+    let user_root = user_root.canonicalize().map_err(io_error)?;
+    let plugin_dir = plugin_dir.canonicalize().map_err(io_error)?;
+    if plugin_dir.starts_with(&user_root) {
+        Ok(())
+    } else {
+        Err(format!(
+            "plugin directory is outside the user plugin root: {}",
+            plugin_dir.display()
+        ))
+    }
+}
+
+fn install_plugin_archive(
+    service_root: &Path,
+    archive_path: &Path,
+) -> Result<PluginManifest, String> {
+    if archive_path.as_os_str().is_empty() {
+        return Err("plugin archive path cannot be empty".to_string());
+    }
+    if !archive_path.is_file() {
+        return Err(format!(
+            "plugin archive not found: {}",
+            archive_path.display()
+        ));
+    }
+
+    let file = File::open(archive_path).map_err(io_error)?;
+    let mut archive = zip::ZipArchive::new(file).map_err(|error| error.to_string())?;
+    let (manifest_index, manifest_prefix) = find_zip_plugin_manifest(&mut archive)?;
+    let mut manifest_raw = String::new();
+    archive
+        .by_index(manifest_index)
+        .map_err(|error| error.to_string())?
+        .read_to_string(&mut manifest_raw)
+        .map_err(io_error)?;
+
+    let manifest = parse_plugin_manifest_with_source(&manifest_raw, Some("user"))?;
+    if manifest.plugin_id.trim().is_empty() {
+        return Err("plugin manifest is missing pluginId".to_string());
+    }
+
+    let existing_registry = plugin_management_registry(service_root);
+    if existing_registry.manifest(&manifest.plugin_id).is_some() {
+        return Err(format!("plugin already exists: {}", manifest.plugin_id));
+    }
+
+    let user_root = user_plugins_dir(service_root);
+    fs::create_dir_all(&user_root).map_err(io_error)?;
+    let install_slug = slugify_ascii_component(&manifest.plugin_id);
+    let install_slug = if install_slug.is_empty() {
+        "plugin".to_string()
+    } else {
+        install_slug
+    };
+    let target_dir = user_root.join(&install_slug);
+    if target_dir.exists() {
+        return Err(format!(
+            "plugin install directory already exists: {}",
+            target_dir.display()
+        ));
+    }
+    let staging_dir = user_root.join(format!(".installing-{install_slug}"));
+    if staging_dir.exists() {
+        fs::remove_dir_all(&staging_dir).map_err(io_error)?;
+    }
+    fs::create_dir_all(&staging_dir).map_err(io_error)?;
+
+    let extract_result = extract_zip_plugin(&mut archive, &manifest_prefix, &staging_dir);
+    if let Err(error) = extract_result {
+        let _ = fs::remove_dir_all(&staging_dir);
+        return Err(error);
+    }
+
+    let staged_manifest = staging_dir.join("manifest.json");
+    if !staged_manifest.is_file() {
+        let _ = fs::remove_dir_all(&staging_dir);
+        return Err("plugin archive did not extract a manifest.json".to_string());
+    }
+    fs::rename(&staging_dir, &target_dir).map_err(io_error)?;
+
+    Ok(manifest)
+}
+
+fn find_zip_plugin_manifest<R: Read + std::io::Seek>(
+    archive: &mut zip::ZipArchive<R>,
+) -> Result<(usize, String), String> {
+    let mut fallback = None;
+    for index in 0..archive.len() {
+        let name = archive
+            .by_index(index)
+            .map_err(|error| error.to_string())?
+            .name()
+            .replace('\\', "/")
+            .trim_start_matches('/')
+            .to_string();
+        if name == "manifest.json" {
+            return Ok((index, String::new()));
+        }
+        if let Some(prefix) = name.strip_suffix("/manifest.json") {
+            if !prefix.is_empty() && !prefix.split('/').any(|part| part == "..") {
+                fallback.get_or_insert((index, format!("{prefix}/")));
+            }
+        }
+    }
+    fallback.ok_or_else(|| "plugin archive must contain a manifest.json".to_string())
+}
+
+fn extract_zip_plugin<R: Read + std::io::Seek>(
+    archive: &mut zip::ZipArchive<R>,
+    manifest_prefix: &str,
+    staging_dir: &Path,
+) -> Result<(), String> {
+    let prefix = manifest_prefix.trim_start_matches('/').replace('\\', "/");
+    for index in 0..archive.len() {
+        let mut entry = archive.by_index(index).map_err(|error| error.to_string())?;
+        let entry_name = entry
+            .name()
+            .replace('\\', "/")
+            .trim_start_matches('/')
+            .to_string();
+        if !prefix.is_empty() && !entry_name.starts_with(&prefix) {
+            continue;
+        }
+        let relative_name = if prefix.is_empty() {
+            entry_name.as_str()
+        } else {
+            &entry_name[prefix.len()..]
+        };
+        if relative_name.is_empty() {
+            continue;
+        }
+        let relative_path = safe_zip_relative_path(relative_name)?;
+        let output_path = staging_dir.join(&relative_path);
+        if entry.is_dir() {
+            fs::create_dir_all(&output_path).map_err(io_error)?;
+            continue;
+        }
+        if let Some(parent) = output_path.parent() {
+            fs::create_dir_all(parent).map_err(io_error)?;
+        }
+        let mut output = File::create(&output_path).map_err(io_error)?;
+        std::io::copy(&mut entry, &mut output).map_err(io_error)?;
+        output.flush().map_err(io_error)?;
+    }
+    Ok(())
+}
+
+fn safe_zip_relative_path(value: &str) -> Result<PathBuf, String> {
+    let mut path = PathBuf::new();
+    for part in value.split('/') {
+        if part.is_empty() || part == "." {
+            continue;
+        }
+        if part == ".." || part.contains(':') || part.contains('\\') {
+            return Err(format!("unsafe plugin archive path: {value}"));
+        }
+        path.push(part);
+    }
+    if path.as_os_str().is_empty() {
+        Err(format!("unsafe plugin archive path: {value}"))
+    } else {
+        Ok(path)
+    }
+}
+
+fn normalized_builtin_plugin_id(plugin_id: &str) -> &str {
+    match plugin_id {
+        LEGACY_LOCAL_FILESYSTEM_PLUGIN_ID => LOCAL_FILESYSTEM_PLUGIN_ID,
+        LEGACY_WEBDAV_PLUGIN_ID => WEBDAV_PLUGIN_ID,
+        LEGACY_CLOUD_DRIVE_PLUGIN_ID => CLOUD_DRIVE_PLUGIN_ID,
+        "builtin.three-model-preview" => "momobako.preview.three-model",
+        "builtin.media-preview" => "momobako.preview.media",
+        "builtin.filesystem-watcher" => "momobako.filesystem-watcher",
+        "builtin.metadata-provider" => "momobako.metadata-provider",
+        "builtin.vector-index" => "momobako.vector-index",
+        value => value,
+    }
+}
+
+fn load_native_plugin(
+    manifest: &PluginManifest,
+    manifest_dir: Option<&Path>,
+) -> Result<NativePlugin, String> {
+    let library_name = manifest
+        .entry
+        .get("library")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| {
+            format!(
+                "native plugin is missing entry.library: {}",
+                manifest.plugin_id
+            )
+        })?;
+    let library_path = native_plugin_library_path(library_name, manifest_dir)
+        .ok_or_else(|| format!("native plugin library not found: {library_name}"))?;
+    let library = unsafe { libloading::Library::new(&library_path) }.map_err(|error| {
+        format!(
+            "failed to load plugin library {}: {error}",
+            library_path.display()
+        )
+    })?;
+    let (call, free) = unsafe {
+        let manifest_fn: libloading::Symbol<PluginManifestFn> = library
+            .get(b"momobako_plugin_manifest")
+            .map_err(|error| format!("missing momobako_plugin_manifest: {error}"))?;
+        let manifest_ptr = manifest_fn();
+        if !manifest_ptr.is_null() {
+            let free_fn: libloading::Symbol<PluginFreeFn> = library
+                .get(b"momobako_plugin_free")
+                .map_err(|error| format!("missing momobako_plugin_free: {error}"))?;
+            free_fn(manifest_ptr);
+        }
+        let call = *library
+            .get::<PluginCallFn>(b"momobako_plugin_call")
+            .map_err(|error| format!("missing momobako_plugin_call: {error}"))?;
+        let free = *library
+            .get::<PluginFreeFn>(b"momobako_plugin_free")
+            .map_err(|error| format!("missing momobako_plugin_free: {error}"))?;
+        (call, free)
+    };
+    Ok(NativePlugin {
+        _library: library,
+        call,
+        free,
+    })
+}
+
+fn native_plugin_library_path(library_name: &str, manifest_dir: Option<&Path>) -> Option<PathBuf> {
+    let file_name = native_plugin_library_file_name(library_name);
+    let mut candidates = Vec::new();
+    if let Some(dir) = manifest_dir {
+        candidates.push(dir.join(&file_name));
+        candidates.push(dir.join(library_name).join(&file_name));
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(parent) = exe.parent() {
+            candidates.push(parent.join(&file_name));
+        }
+    }
+    candidates.push(PathBuf::from(&file_name));
+    candidates.into_iter().find(|candidate| candidate.is_file())
+}
+
+fn native_plugin_library_file_name(library_name: &str) -> String {
+    if cfg!(target_os = "windows") {
+        format!("{library_name}.dll")
+    } else if cfg!(target_os = "macos") {
+        format!("lib{library_name}.dylib")
+    } else {
+        format!("lib{library_name}.so")
+    }
+}
+
+fn embedded_local_filesystem_fallback_enabled(plugin_id: &str) -> bool {
+    cfg!(test) && plugin_id == LOCAL_FILESYSTEM_PLUGIN_ID
+}
+
+fn default_plugins(service_root: &Path) -> Vec<PluginManifest> {
+    backend_plugin_registry(service_root).list_manifests()
 }
 
 fn default_cache_entries() -> Vec<CacheEntry> {
@@ -3916,52 +4672,30 @@ fn default_api_definitions() -> Vec<ApiDefinition> {
     ]
 }
 
-fn file_system_plugin_descriptors() -> &'static [FileSystemPluginDescriptor] {
-    &[
-        FileSystemPluginDescriptor {
-            plugin_id: LOCAL_FILESYSTEM_PLUGIN_ID,
-            kind: "filesystem",
-            name: "Local Filesystem",
-            capabilities: &["browse", "read", "write", "watch", "sync"],
-        },
-        FileSystemPluginDescriptor {
-            plugin_id: WEBDAV_PLUGIN_ID,
-            kind: "webdav",
-            name: "WebDAV",
-            capabilities: &["browse", "read", "write", "sync"],
-        },
-        FileSystemPluginDescriptor {
-            plugin_id: CLOUD_DRIVE_PLUGIN_ID,
-            kind: "cloud",
-            name: "Cloud Drive",
-            capabilities: &["browse", "read", "write", "sync"],
-        },
-    ]
-}
-
-fn file_system_plugin_descriptor(plugin_id: &str) -> Option<&'static FileSystemPluginDescriptor> {
-    file_system_plugin_descriptors()
-        .iter()
-        .find(|descriptor| descriptor.plugin_id == plugin_id)
-}
-
-fn backend_summary(plugin_id: &str) -> RepositoryBackendSummary {
-    let descriptor = file_system_plugin_descriptor(plugin_id)
-        .or_else(|| file_system_plugin_descriptor(LOCAL_FILESYSTEM_PLUGIN_ID))
-        .expect("local filesystem plugin descriptor must exist");
-    RepositoryBackendSummary {
-        plugin_id: descriptor.plugin_id.to_string(),
-        kind: descriptor.kind.to_string(),
-        name: descriptor.name.to_string(),
-        capabilities: descriptor
-            .capabilities
-            .iter()
-            .map(|value| (*value).to_string())
-            .collect(),
+fn backend_summary_from_registry(
+    registry: &BackendPluginRegistry,
+    plugin_id: &str,
+) -> RepositoryBackendSummary {
+    let normalized_plugin_id = registry.normalize_plugin_id(plugin_id);
+    if let Some(manifest) = registry.manifest(&normalized_plugin_id) {
+        RepositoryBackendSummary {
+            plugin_id: manifest.plugin_id.clone(),
+            kind: manifest.kind.clone(),
+            name: manifest.name.clone(),
+            capabilities: manifest.capabilities.clone(),
+        }
+    } else {
+        RepositoryBackendSummary {
+            plugin_id: normalized_plugin_id,
+            kind: "unavailable".to_string(),
+            name: "Unavailable plugin".to_string(),
+            capabilities: Vec::new(),
+        }
     }
 }
 
 fn parse_backend_request(
+    service_root: &Path,
     request: &RepositoryMutationRequest,
 ) -> Result<RepositoryBackendRecord, String> {
     let plugin_id = request
@@ -3969,8 +4703,17 @@ fn parse_backend_request(
         .as_deref()
         .unwrap_or(LOCAL_FILESYSTEM_PLUGIN_ID)
         .trim();
-    let descriptor = file_system_plugin_descriptor(plugin_id)
+    let registry = backend_plugin_registry(service_root);
+    let normalized_plugin_id = registry.normalize_plugin_id(plugin_id);
+    let manifest = registry
+        .manifest(&normalized_plugin_id)
         .ok_or_else(|| format!("unsupported filesystem backend plugin: {plugin_id}"))?;
+    if !["filesystem", "webdav", "cloud"].contains(&manifest.kind.as_str()) {
+        return Err(format!(
+            "plugin is not a filesystem backend: {}",
+            manifest.plugin_id
+        ));
+    }
     let config = request
         .backend_config
         .clone()
@@ -3979,25 +4722,67 @@ fn parse_backend_request(
         return Err("backend config must be a JSON object".to_string());
     }
     Ok(RepositoryBackendRecord {
-        plugin_id: descriptor.plugin_id.to_string(),
+        plugin_id: manifest.plugin_id.clone(),
         config,
     })
 }
 
 fn import_backend_record(
+    service_root: &Path,
     metadata: &RepositoryMetadataFileImport,
 ) -> Option<RepositoryBackendRecord> {
     let plugin_id = metadata
         .backend_plugin_id
         .as_deref()
         .unwrap_or(LOCAL_FILESYSTEM_PLUGIN_ID);
-    file_system_plugin_descriptor(plugin_id).map(|descriptor| RepositoryBackendRecord {
-        plugin_id: descriptor.plugin_id.to_string(),
-        config: metadata
+    let registry = backend_plugin_registry(service_root);
+    let normalized_plugin_id = registry.normalize_plugin_id(plugin_id);
+    registry
+        .manifest(&normalized_plugin_id)
+        .map(|manifest| RepositoryBackendRecord {
+            plugin_id: manifest.plugin_id.clone(),
+            config: metadata
+                .backend_config
+                .clone()
+                .unwrap_or_else(|| serde_json::json!({})),
+        })
+}
+
+fn migrate_repository_metadata_plugin_id_if_needed(
+    service_root: &Path,
+    metadata_path: &Path,
+    metadata: &RepositoryMetadataFileImport,
+    repo_root: &Path,
+) -> Result<(), String> {
+    let Some(raw_plugin_id) = metadata.backend_plugin_id.as_deref() else {
+        return Ok(());
+    };
+    let normalized_plugin_id =
+        backend_plugin_registry(service_root).normalize_plugin_id(raw_plugin_id);
+    if normalized_plugin_id == raw_plugin_id {
+        return Ok(());
+    }
+
+    let migrated = RepositoryMetadataFile {
+        repo_id: metadata.repo_id.clone(),
+        name: metadata
+            .name
+            .clone()
+            .unwrap_or_else(|| infer_repository_name(repo_root)),
+        root_path: metadata
+            .root_path
+            .clone()
+            .unwrap_or_else(|| repo_root.to_string_lossy().to_string()),
+        backend_plugin_id: normalized_plugin_id,
+        backend_config: metadata
             .backend_config
             .clone()
             .unwrap_or_else(|| serde_json::json!({})),
-    })
+        created_at: metadata.created_at.clone().unwrap_or_else(now_rfc3339),
+        schema_version: metadata.schema_version.unwrap_or(REPO_SCHEMA_VERSION),
+    };
+    let migrated_json = serde_json::to_string_pretty(&migrated).map_err(json_error)?;
+    fs::write(metadata_path, migrated_json).map_err(io_error)
 }
 
 fn parse_backend_config_json(value: &str) -> Result<serde_json::Value, serde_json::Error> {
@@ -4033,6 +4818,23 @@ fn migrate_registry_schema(registry: &Connection) -> Result<(), rusqlite::Error>
     Ok(())
 }
 
+fn migrate_registry_plugin_ids(registry: &Connection) -> Result<(), rusqlite::Error> {
+    for (legacy_id, plugin_id) in [
+        (
+            LEGACY_LOCAL_FILESYSTEM_PLUGIN_ID,
+            LOCAL_FILESYSTEM_PLUGIN_ID,
+        ),
+        (LEGACY_WEBDAV_PLUGIN_ID, WEBDAV_PLUGIN_ID),
+        (LEGACY_CLOUD_DRIVE_PLUGIN_ID, CLOUD_DRIVE_PLUGIN_ID),
+    ] {
+        registry.execute(
+            "UPDATE repositories SET backend_plugin_id = ?1 WHERE backend_plugin_id = ?2",
+            params![plugin_id, legacy_id],
+        )?;
+    }
+    Ok(())
+}
+
 fn migrate_repository_schema(connection: &Connection) -> Result<(), rusqlite::Error> {
     connection.execute_batch(REPOSITORY_SCHEMA_SQL)?;
     let mut stmt = connection.prepare("PRAGMA table_info(assets)")?;
@@ -4059,18 +4861,13 @@ fn migrate_repository_schema(connection: &Connection) -> Result<(), rusqlite::Er
 }
 
 fn ensure_backend_path_is_attachable(
+    service_root: &Path,
     backend: &RepositoryBackendRecord,
     repo_root: &Path,
 ) -> Result<(), String> {
-    let descriptor = file_system_plugin_descriptor(&backend.plugin_id).ok_or_else(|| {
-        format!(
-            "unsupported filesystem backend plugin: {}",
-            backend.plugin_id
-        )
-    })?;
-    let adapter: Box<dyn FileSystemBackendAdapter> = match backend.plugin_id.as_str() {
-        LOCAL_FILESYSTEM_PLUGIN_ID => Box::new(LocalFileSystemBackend),
-        _ => Box::new(UnsupportedFileSystemBackend { descriptor }),
+    let adapter = RuntimeFileSystemBackendAdapter {
+        service_root: service_root.to_path_buf(),
+        plugin_id: backend.plugin_id.clone(),
     };
     adapter.ensure_attachable(repo_root, &backend.config)
 }
@@ -4081,15 +4878,9 @@ fn initialize_repository_directory(
     seed: &RepositorySeed<'_>,
     backend: &RepositoryBackendRecord,
 ) -> Result<(), String> {
-    let descriptor = file_system_plugin_descriptor(&backend.plugin_id).ok_or_else(|| {
-        format!(
-            "unsupported filesystem backend plugin: {}",
-            backend.plugin_id
-        )
-    })?;
-    let adapter: Box<dyn FileSystemBackendAdapter> = match backend.plugin_id.as_str() {
-        LOCAL_FILESYSTEM_PLUGIN_ID => Box::new(LocalFileSystemBackend),
-        _ => Box::new(UnsupportedFileSystemBackend { descriptor }),
+    let adapter = RuntimeFileSystemBackendAdapter {
+        service_root: service_root.to_path_buf(),
+        plugin_id: backend.plugin_id.clone(),
     };
     adapter.prepare_repository_root(repo_root, &backend.config)?;
     let storage_paths =
@@ -4280,7 +5071,8 @@ fn ensure_repository_storage_paths(
     repo_root: &Path,
     backend_plugin_id: &str,
 ) -> Result<RepositoryStoragePaths, String> {
-    let metadata_dir = if backend_plugin_id == LOCAL_FILESYSTEM_PLUGIN_ID {
+    let normalized_backend_plugin_id = normalized_builtin_plugin_id(backend_plugin_id);
+    let metadata_dir = if normalized_backend_plugin_id == LOCAL_FILESYSTEM_PLUGIN_ID {
         migrate_legacy_meta_dir_if_needed(repo_root, backend_plugin_id)?;
         let metadata_dir = repository_meta_dir(repo_root);
         if repo_root.exists() {
@@ -5191,39 +5983,141 @@ fn join_relative_path(parent: &str, name: &str) -> String {
     }
 }
 
-fn backend_adapter<'a>(repo: &'a RepositoryRecord) -> Box<dyn FileSystemBackendAdapter + 'a> {
-    match repo.backend_record.plugin_id.as_str() {
-        LOCAL_FILESYSTEM_PLUGIN_ID => Box::new(LocalFileSystemBackend),
-        plugin_id => Box::new(UnsupportedFileSystemBackend {
-            descriptor: file_system_plugin_descriptor(plugin_id)
-                .or_else(|| file_system_plugin_descriptor(LOCAL_FILESYSTEM_PLUGIN_ID))
-                .expect("filesystem backend descriptor must exist"),
-        }),
+fn backend_adapter<'a>(
+    service_root: &'a Path,
+    repo: &'a RepositoryRecord,
+) -> Box<dyn FileSystemBackendAdapter + 'a> {
+    Box::new(RuntimeFileSystemBackendAdapter {
+        service_root: service_root.to_path_buf(),
+        plugin_id: repo.backend_record.plugin_id.clone(),
+    })
+}
+
+fn call_builtin_local_filesystem(
+    method: &str,
+    payload: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let backend = LocalFileSystemBackend;
+    let repo_root = PathBuf::from(
+        payload
+            .get("repoRoot")
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| format!("plugin call is missing repoRoot for {method}"))?,
+    );
+    let config = payload
+        .get("config")
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!({}));
+    match method {
+        "filesystem.ensureAttachable" => {
+            backend.ensure_attachable(&repo_root, &config)?;
+            Ok(serde_json::json!({}))
+        }
+        "filesystem.prepareRepositoryRoot" => {
+            backend.prepare_repository_root(&repo_root, &config)?;
+            Ok(serde_json::json!({}))
+        }
+        "filesystem.listFiles" => {
+            let files = backend.list_files(&repo_root, &config)?;
+            serde_json::to_value(files).map_err(json_error)
+        }
+        "filesystem.listTree" => {
+            let tree = backend.list_tree(&repo_root, &config)?;
+            serde_json::to_value(tree).map_err(json_error)
+        }
+        "filesystem.listDirectory" => {
+            let directory_path = payload
+                .get("directoryPath")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default();
+            let entries = backend.list_directory_entries(&repo_root, directory_path, &config)?;
+            serde_json::to_value(entries).map_err(json_error)
+        }
+        "filesystem.createDirectory" => {
+            let parent_path = payload
+                .get("parentPath")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default();
+            let name = payload
+                .get("name")
+                .and_then(serde_json::Value::as_str)
+                .ok_or_else(|| "plugin call is missing name".to_string())?;
+            backend.create_directory(&repo_root, parent_path, name, &config)?;
+            Ok(serde_json::json!({}))
+        }
+        "filesystem.createFile" => {
+            let parent_path = payload
+                .get("parentPath")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default();
+            let name = payload
+                .get("name")
+                .and_then(serde_json::Value::as_str)
+                .ok_or_else(|| "plugin call is missing name".to_string())?;
+            backend.create_file(&repo_root, parent_path, name, &config)?;
+            Ok(serde_json::json!({}))
+        }
+        "filesystem.statEntry" => {
+            let entry_path = payload
+                .get("entryPath")
+                .and_then(serde_json::Value::as_str)
+                .ok_or_else(|| "plugin call is missing entryPath".to_string())?;
+            let entry = backend.stat_entry(&repo_root, entry_path, &config)?;
+            serde_json::to_value(entry).map_err(json_error)
+        }
+        "filesystem.renameEntry" => {
+            let source_path = payload
+                .get("sourcePath")
+                .and_then(serde_json::Value::as_str)
+                .ok_or_else(|| "plugin call is missing sourcePath".to_string())?;
+            let new_name = payload
+                .get("newName")
+                .and_then(serde_json::Value::as_str)
+                .ok_or_else(|| "plugin call is missing newName".to_string())?;
+            let entry = backend.rename_entry(&repo_root, source_path, new_name, &config)?;
+            serde_json::to_value(entry).map_err(json_error)
+        }
+        "filesystem.deleteEntry" => {
+            let entry_path = payload
+                .get("entryPath")
+                .and_then(serde_json::Value::as_str)
+                .ok_or_else(|| "plugin call is missing entryPath".to_string())?;
+            let recursive = payload
+                .get("recursive")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false);
+            backend.delete_entry(&repo_root, entry_path, recursive, &config)?;
+            Ok(serde_json::json!({}))
+        }
+        _ => Err(format!("unsupported filesystem plugin method: {method}")),
     }
 }
 
 fn list_backend_files(
+    service_root: &Path,
     repo: &RepositoryRecord,
     repo_root: &Path,
 ) -> Result<Vec<DiscoveredFile>, String> {
-    backend_adapter(repo).list_files(repo_root, &repo.backend_record.config)
+    backend_adapter(service_root, repo).list_files(repo_root, &repo.backend_record.config)
 }
 
 fn list_backend_tree(
+    service_root: &Path,
     repo: &RepositoryRecord,
     repo_root: &Path,
 ) -> Result<Vec<FileTreeNode>, String> {
-    backend_adapter(repo).list_tree(repo_root, &repo.backend_record.config)
+    backend_adapter(service_root, repo).list_tree(repo_root, &repo.backend_record.config)
 }
 
 fn list_backend_directory_entries(
+    service_root: &Path,
     repo: &RepositoryRecord,
     repo_root: &Path,
     current_path: &str,
     asset_map: &BTreeMap<String, (String, String, Option<String>)>,
     thumbnail_map: &BTreeMap<(String, String), ThumbnailRecord>,
 ) -> Result<Vec<FileBrowserEntry>, String> {
-    let entries = backend_adapter(repo).list_directory_entries(
+    let entries = backend_adapter(service_root, repo).list_directory_entries(
         repo_root,
         current_path,
         &repo.backend_record.config,
@@ -5255,12 +6149,13 @@ fn list_trash_directory_entries(
 }
 
 fn create_backend_directory(
+    service_root: &Path,
     repo: &RepositoryRecord,
     repo_root: &Path,
     parent_path: &str,
     name: &str,
 ) -> Result<(), String> {
-    backend_adapter(repo).create_directory(
+    backend_adapter(service_root, repo).create_directory(
         repo_root,
         parent_path,
         name,
@@ -5269,29 +6164,41 @@ fn create_backend_directory(
 }
 
 fn create_backend_file(
+    service_root: &Path,
     repo: &RepositoryRecord,
     repo_root: &Path,
     parent_path: &str,
     name: &str,
 ) -> Result<(), String> {
-    backend_adapter(repo).create_file(repo_root, parent_path, name, &repo.backend_record.config)
+    backend_adapter(service_root, repo).create_file(
+        repo_root,
+        parent_path,
+        name,
+        &repo.backend_record.config,
+    )
 }
 
 fn stat_backend_entry(
+    service_root: &Path,
     repo: &RepositoryRecord,
     repo_root: &Path,
     entry_path: &str,
 ) -> Result<FileSystemEntry, String> {
-    backend_adapter(repo).stat_entry(repo_root, entry_path, &repo.backend_record.config)
+    backend_adapter(service_root, repo).stat_entry(
+        repo_root,
+        entry_path,
+        &repo.backend_record.config,
+    )
 }
 
 fn rename_backend_entry(
+    service_root: &Path,
     repo: &RepositoryRecord,
     repo_root: &Path,
     source_path: &str,
     new_name: &str,
 ) -> Result<FileSystemEntry, String> {
-    backend_adapter(repo).rename_entry(
+    backend_adapter(service_root, repo).rename_entry(
         repo_root,
         source_path,
         new_name,
@@ -5300,12 +6207,13 @@ fn rename_backend_entry(
 }
 
 fn delete_backend_entry(
+    service_root: &Path,
     repo: &RepositoryRecord,
     repo_root: &Path,
     entry_path: &str,
     recursive: bool,
 ) -> Result<(), String> {
-    backend_adapter(repo).delete_entry(
+    backend_adapter(service_root, repo).delete_entry(
         repo_root,
         entry_path,
         recursive,
@@ -5689,6 +6597,188 @@ fn local_directory_entries(
     Ok(entries)
 }
 
+impl FileSystemBackendAdapter for RuntimeFileSystemBackendAdapter {
+    fn ensure_attachable(
+        &self,
+        repo_root: &Path,
+        config: &serde_json::Value,
+    ) -> Result<(), String> {
+        backend_plugin_registry(&self.service_root).call(
+            &self.plugin_id,
+            "filesystem.ensureAttachable",
+            serde_json::json!({
+                "repoRoot": repo_root,
+                "config": config,
+            }),
+        )?;
+        Ok(())
+    }
+
+    fn prepare_repository_root(
+        &self,
+        repo_root: &Path,
+        config: &serde_json::Value,
+    ) -> Result<(), String> {
+        backend_plugin_registry(&self.service_root).call(
+            &self.plugin_id,
+            "filesystem.prepareRepositoryRoot",
+            serde_json::json!({
+                "repoRoot": repo_root,
+                "config": config,
+            }),
+        )?;
+        Ok(())
+    }
+
+    fn list_files(
+        &self,
+        repo_root: &Path,
+        config: &serde_json::Value,
+    ) -> Result<Vec<DiscoveredFile>, String> {
+        let response = backend_plugin_registry(&self.service_root).call(
+            &self.plugin_id,
+            "filesystem.listFiles",
+            serde_json::json!({
+                "repoRoot": repo_root,
+                "config": config,
+            }),
+        )?;
+        serde_json::from_value(response).map_err(json_error)
+    }
+
+    fn list_tree(
+        &self,
+        repo_root: &Path,
+        config: &serde_json::Value,
+    ) -> Result<Vec<FileTreeNode>, String> {
+        let response = backend_plugin_registry(&self.service_root).call(
+            &self.plugin_id,
+            "filesystem.listTree",
+            serde_json::json!({
+                "repoRoot": repo_root,
+                "config": config,
+            }),
+        )?;
+        serde_json::from_value(response).map_err(json_error)
+    }
+
+    fn list_directory_entries(
+        &self,
+        repo_root: &Path,
+        directory_path: &str,
+        config: &serde_json::Value,
+    ) -> Result<Vec<FileSystemEntry>, String> {
+        let response = backend_plugin_registry(&self.service_root).call(
+            &self.plugin_id,
+            "filesystem.listDirectory",
+            serde_json::json!({
+                "repoRoot": repo_root,
+                "directoryPath": directory_path,
+                "config": config,
+            }),
+        )?;
+        serde_json::from_value(response).map_err(json_error)
+    }
+
+    fn create_directory(
+        &self,
+        repo_root: &Path,
+        parent_path: &str,
+        name: &str,
+        config: &serde_json::Value,
+    ) -> Result<(), String> {
+        backend_plugin_registry(&self.service_root).call(
+            &self.plugin_id,
+            "filesystem.createDirectory",
+            serde_json::json!({
+                "repoRoot": repo_root,
+                "parentPath": parent_path,
+                "name": name,
+                "config": config,
+            }),
+        )?;
+        Ok(())
+    }
+
+    fn create_file(
+        &self,
+        repo_root: &Path,
+        parent_path: &str,
+        name: &str,
+        config: &serde_json::Value,
+    ) -> Result<(), String> {
+        backend_plugin_registry(&self.service_root).call(
+            &self.plugin_id,
+            "filesystem.createFile",
+            serde_json::json!({
+                "repoRoot": repo_root,
+                "parentPath": parent_path,
+                "name": name,
+                "config": config,
+            }),
+        )?;
+        Ok(())
+    }
+
+    fn stat_entry(
+        &self,
+        repo_root: &Path,
+        entry_path: &str,
+        config: &serde_json::Value,
+    ) -> Result<FileSystemEntry, String> {
+        let response = backend_plugin_registry(&self.service_root).call(
+            &self.plugin_id,
+            "filesystem.statEntry",
+            serde_json::json!({
+                "repoRoot": repo_root,
+                "entryPath": entry_path,
+                "config": config,
+            }),
+        )?;
+        serde_json::from_value(response).map_err(json_error)
+    }
+
+    fn rename_entry(
+        &self,
+        repo_root: &Path,
+        source_path: &str,
+        new_name: &str,
+        config: &serde_json::Value,
+    ) -> Result<FileSystemEntry, String> {
+        let response = backend_plugin_registry(&self.service_root).call(
+            &self.plugin_id,
+            "filesystem.renameEntry",
+            serde_json::json!({
+                "repoRoot": repo_root,
+                "sourcePath": source_path,
+                "newName": new_name,
+                "config": config,
+            }),
+        )?;
+        serde_json::from_value(response).map_err(json_error)
+    }
+
+    fn delete_entry(
+        &self,
+        repo_root: &Path,
+        entry_path: &str,
+        recursive: bool,
+        config: &serde_json::Value,
+    ) -> Result<(), String> {
+        backend_plugin_registry(&self.service_root).call(
+            &self.plugin_id,
+            "filesystem.deleteEntry",
+            serde_json::json!({
+                "repoRoot": repo_root,
+                "entryPath": entry_path,
+                "recursive": recursive,
+                "config": config,
+            }),
+        )?;
+        Ok(())
+    }
+}
+
 impl FileSystemBackendAdapter for LocalFileSystemBackend {
     fn ensure_attachable(
         &self,
@@ -5868,125 +6958,6 @@ impl FileSystemBackendAdapter for LocalFileSystemBackend {
     }
 }
 
-impl FileSystemBackendAdapter for UnsupportedFileSystemBackend {
-    fn ensure_attachable(
-        &self,
-        _repo_root: &Path,
-        _config: &serde_json::Value,
-    ) -> Result<(), String> {
-        Err(format!(
-            "filesystem backend is registered but not implemented yet: {}",
-            self.descriptor.plugin_id
-        ))
-    }
-
-    fn prepare_repository_root(
-        &self,
-        _repo_root: &Path,
-        _config: &serde_json::Value,
-    ) -> Result<(), String> {
-        Ok(())
-    }
-
-    fn list_files(
-        &self,
-        _repo_root: &Path,
-        _config: &serde_json::Value,
-    ) -> Result<Vec<DiscoveredFile>, String> {
-        Err(format!(
-            "filesystem backend is registered but not implemented yet: {}",
-            self.descriptor.plugin_id
-        ))
-    }
-
-    fn list_tree(
-        &self,
-        _repo_root: &Path,
-        _config: &serde_json::Value,
-    ) -> Result<Vec<FileTreeNode>, String> {
-        Err(format!(
-            "filesystem backend is registered but not implemented yet: {}",
-            self.descriptor.plugin_id
-        ))
-    }
-
-    fn list_directory_entries(
-        &self,
-        _repo_root: &Path,
-        _directory_path: &str,
-        _config: &serde_json::Value,
-    ) -> Result<Vec<FileSystemEntry>, String> {
-        Err(format!(
-            "filesystem backend is registered but not implemented yet: {}",
-            self.descriptor.plugin_id
-        ))
-    }
-
-    fn create_directory(
-        &self,
-        _repo_root: &Path,
-        _parent_path: &str,
-        _name: &str,
-        _config: &serde_json::Value,
-    ) -> Result<(), String> {
-        Err(format!(
-            "filesystem backend is registered but not implemented yet: {}",
-            self.descriptor.plugin_id
-        ))
-    }
-
-    fn create_file(
-        &self,
-        _repo_root: &Path,
-        _parent_path: &str,
-        _name: &str,
-        _config: &serde_json::Value,
-    ) -> Result<(), String> {
-        Err(format!(
-            "filesystem backend is registered but not implemented yet: {}",
-            self.descriptor.plugin_id
-        ))
-    }
-
-    fn stat_entry(
-        &self,
-        _repo_root: &Path,
-        _entry_path: &str,
-        _config: &serde_json::Value,
-    ) -> Result<FileSystemEntry, String> {
-        Err(format!(
-            "filesystem backend is registered but not implemented yet: {}",
-            self.descriptor.plugin_id
-        ))
-    }
-
-    fn rename_entry(
-        &self,
-        _repo_root: &Path,
-        _source_path: &str,
-        _new_name: &str,
-        _config: &serde_json::Value,
-    ) -> Result<FileSystemEntry, String> {
-        Err(format!(
-            "filesystem backend is registered but not implemented yet: {}",
-            self.descriptor.plugin_id
-        ))
-    }
-
-    fn delete_entry(
-        &self,
-        _repo_root: &Path,
-        _entry_path: &str,
-        _recursive: bool,
-        _config: &serde_json::Value,
-    ) -> Result<(), String> {
-        Err(format!(
-            "filesystem backend is registered but not implemented yet: {}",
-            self.descriptor.plugin_id
-        ))
-    }
-}
-
 fn rename_file_asset_record(
     tx: &Transaction<'_>,
     repo_id: &str,
@@ -6126,7 +7097,7 @@ fn move_directory_contents_to_parent(
     }
 
     if children.is_empty() {
-        delete_backend_entry(repo, repo_root, source_path, true)?;
+        delete_backend_entry(service_root, repo, repo_root, source_path, true)?;
         return Ok(());
     }
 
@@ -6348,6 +7319,431 @@ mod tests {
         for subdir in ["cache", "thumbnails", "logs", "indexes"] {
             assert!(metadata_dir.join(subdir).is_dir());
         }
+    }
+
+    #[test]
+    fn plugin_registry_discovers_builtin_manifests_and_legacy_ids() {
+        let workspace = TestWorkspace::new("plugin-registry");
+        let registry = backend_plugin_registry(&workspace.path("service"));
+        let manifests = registry.list_manifests();
+
+        assert!(manifests.iter().any(|manifest| {
+            manifest.plugin_id == LOCAL_FILESYSTEM_PLUGIN_ID
+                && manifest.runtime == "native-dylib"
+                && manifest
+                    .legacy_plugin_ids
+                    .contains(&LEGACY_LOCAL_FILESYSTEM_PLUGIN_ID.to_string())
+        }));
+        assert!(manifests.iter().any(|manifest| {
+            manifest.plugin_id == "momobako.preview.media" && manifest.sdk == "frontend"
+        }));
+        assert_eq!(
+            registry.normalize_plugin_id(LEGACY_LOCAL_FILESYSTEM_PLUGIN_ID),
+            LOCAL_FILESYSTEM_PLUGIN_ID
+        );
+        assert_eq!(
+            registry.normalize_plugin_id("builtin.three-model-preview"),
+            "momobako.preview.three-model"
+        );
+    }
+
+    #[test]
+    fn release_plugin_manifest_loading_does_not_fall_back_to_compiled_manifests() {
+        let manifests = load_plugin_manifests_from_runtime(None, false);
+
+        assert!(manifests.is_empty());
+    }
+
+    #[test]
+    fn runtime_manifest_scan_reflects_deleted_plugin_directories() {
+        let workspace = TestWorkspace::new("runtime-plugin-scan");
+        let plugin_root = workspace.path("plugins").join("builtin");
+        fs::create_dir_all(plugin_root.join("local-filesystem"))
+            .expect("runtime plugin dir should be created");
+        fs::write(
+            plugin_root.join("local-filesystem").join("manifest.json"),
+            include_str!("../../plugins/builtin/local-filesystem/manifest.json"),
+        )
+        .expect("runtime manifest should be written");
+
+        let manifests = load_plugin_manifests_from_runtime(Some(&plugin_root), false);
+        assert_eq!(manifests.len(), 1);
+        assert_eq!(manifests[0].manifest.plugin_id, LOCAL_FILESYSTEM_PLUGIN_ID);
+
+        fs::remove_dir_all(plugin_root.join("local-filesystem"))
+            .expect("runtime plugin dir should be removable");
+        let manifests = load_plugin_manifests_from_runtime(Some(&plugin_root), false);
+        assert!(manifests.is_empty());
+    }
+
+    #[test]
+    fn bundled_plugin_dir_candidates_do_not_use_tauri_up_resource_path() {
+        let resource_dir = Path::new("C:/Apps/MomoBako/resources");
+        let exe_dir = Path::new("C:/Apps/MomoBako");
+        let cwd = Path::new("C:/Workspace/MomoBako/src-tauri");
+        let candidates =
+            builtin_plugin_dir_candidates(Some(resource_dir), Some(exe_dir), Some(cwd));
+
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(
+            candidates[0],
+            PathBuf::from("C:/Apps/MomoBako/resources")
+                .join("plugins")
+                .join("builtin")
+        );
+        assert!(candidates
+            .iter()
+            .all(|path| !path.to_string_lossy().contains("_up_")));
+    }
+
+    #[test]
+    fn tauri_config_bundles_staged_plugin_resources() {
+        let config: serde_json::Value = serde_json::from_str(include_str!("../tauri.conf.json"))
+            .expect("tauri config should parse");
+        let resources = config
+            .pointer("/bundle/resources")
+            .and_then(serde_json::Value::as_object)
+            .expect("tauri config should declare bundle resources");
+
+        assert_eq!(
+            resources
+                .get("resources/plugins/builtin/")
+                .and_then(serde_json::Value::as_str),
+            Some("plugins/builtin/")
+        );
+        assert!(resources.keys().all(|path| {
+            !path.contains("..") && !path.contains("_up_") && !path.contains("\\_up_")
+        }));
+    }
+
+    #[test]
+    fn resource_plugin_dir_does_not_fallback_to_cwd_when_missing() {
+        let workspace = TestWorkspace::new("resource-plugin-dir-strict");
+        let resource_dir = workspace.path("resources");
+        let cwd = workspace.path("workspace");
+        let cwd_plugin_dir = cwd.join("plugins").join("builtin");
+        fs::create_dir_all(&resource_dir).expect("resource dir should be created");
+        fs::create_dir_all(&cwd_plugin_dir).expect("cwd plugin dir should be created");
+
+        assert_eq!(
+            runtime_builtin_plugins_dir_from(Some(&resource_dir), None, Some(&cwd)),
+            None
+        );
+    }
+
+    #[test]
+    fn resource_plugin_dir_uses_resource_plugins_when_present() {
+        let workspace = TestWorkspace::new("resource-plugin-dir-present");
+        let resource_dir = workspace.path("resources");
+        let resource_plugin_dir = resource_dir.join("plugins").join("builtin");
+        fs::create_dir_all(&resource_plugin_dir).expect("resource plugin dir should be created");
+
+        assert_eq!(
+            runtime_builtin_plugins_dir_from(Some(&resource_dir), None, None),
+            Some(resource_plugin_dir)
+        );
+    }
+
+    #[test]
+    fn set_plugin_enabled_persists_plugin_state() {
+        let workspace = TestWorkspace::new("plugin-enabled-state");
+        let service_root = workspace.path("service");
+        let state = RepositoryState::from_root(service_root.clone());
+
+        let response = state
+            .set_plugin_enabled(PluginEnabledRequest {
+                plugin_id: "momobako.preview.media".to_string(),
+                enabled: false,
+            })
+            .expect("plugin should be disabled");
+        let disabled = response
+            .plugins
+            .iter()
+            .find(|plugin| plugin.plugin_id == "momobako.preview.media")
+            .expect("media plugin should be listed");
+        assert!(!disabled.enabled);
+        assert_eq!(disabled.status, "disabled");
+
+        let reloaded_state = RepositoryState::from_root(service_root);
+        let plugins = reloaded_state
+            .list_plugins()
+            .expect("plugins should reload from persisted state");
+        let disabled = plugins
+            .iter()
+            .find(|plugin| plugin.plugin_id == "momobako.preview.media")
+            .expect("media plugin should be listed after reload");
+        assert!(!disabled.enabled);
+    }
+
+    #[test]
+    fn delete_plugin_rejects_builtin_plugins() {
+        let workspace = TestWorkspace::new("builtin-plugin-delete");
+        let state = RepositoryState::from_root(workspace.path("service"));
+
+        let error = state
+            .delete_plugin("momobako.preview.media".to_string())
+            .expect_err("built-in plugins should not be deleted");
+
+        assert!(error.contains("built-in plugins cannot be deleted"));
+    }
+
+    #[test]
+    fn install_plugin_from_archive_loads_and_deletes_user_plugin() {
+        let workspace = TestWorkspace::new("plugin-archive-install");
+        let service_root = workspace.path("service");
+        let archive_path = workspace.path("sample-plugin.zip");
+        write_test_plugin_archive(&archive_path, "user.sample-metadata");
+        let state = RepositoryState::from_root(service_root.clone());
+
+        let response = state
+            .install_plugin_from_archive(PluginInstallRequest {
+                archive_path: archive_path.to_string_lossy().to_string(),
+            })
+            .expect("plugin archive should install");
+        let installed = response
+            .plugins
+            .iter()
+            .find(|plugin| plugin.plugin_id == "user.sample-metadata")
+            .expect("installed plugin should be listed");
+        assert_eq!(installed.source, "user");
+        assert!(installed.enabled);
+        assert!(user_plugins_dir(&service_root)
+            .join("user-sample-metadata")
+            .join("manifest.json")
+            .is_file());
+
+        let response = state
+            .delete_plugin("user.sample-metadata".to_string())
+            .expect("user plugin should be deleted");
+        assert!(!response
+            .plugins
+            .iter()
+            .any(|plugin| plugin.plugin_id == "user.sample-metadata"));
+        assert!(!user_plugins_dir(&service_root)
+            .join("user-sample-metadata")
+            .exists());
+    }
+
+    fn write_test_plugin_archive(path: &Path, plugin_id: &str) {
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).expect("plugin archive parent should be created");
+        }
+        let file = File::create(path).expect("plugin archive should be created");
+        let mut archive = zip::ZipWriter::new(file);
+        archive
+            .start_file(
+                "sample-plugin/manifest.json",
+                zip::write::SimpleFileOptions::default(),
+            )
+            .expect("manifest entry should start");
+        archive
+            .write_all(
+                serde_json::to_string_pretty(&serde_json::json!({
+                    "pluginId": plugin_id,
+                    "legacyPluginIds": [],
+                    "name": "Sample Metadata",
+                    "version": "0.1.0",
+                    "kind": "metadata",
+                    "description": "Test plugin installed from archive.",
+                    "capabilities": ["metadata"],
+                    "enabled": true,
+                    "sdk": "backend",
+                    "entry": {},
+                    "source": "user",
+                    "runtime": "manifest-only",
+                    "permissions": [],
+                    "compat": {
+                        "sdkVersion": "1",
+                        "legacyPluginIds": []
+                    },
+                    "status": "ready"
+                }))
+                .expect("manifest should encode")
+                .as_bytes(),
+            )
+            .expect("manifest should write");
+        archive.finish().expect("plugin archive should finish");
+    }
+
+    #[test]
+    fn native_plugin_library_path_prefers_manifest_directory() {
+        let workspace = TestWorkspace::new("native-plugin-path");
+        let plugin_dir = workspace
+            .path("plugins")
+            .join("builtin")
+            .join("local-filesystem");
+        fs::create_dir_all(&plugin_dir).expect("plugin dir should be created");
+        let library_name = "momobako_builtin_local_filesystem";
+        let library_path = plugin_dir.join(native_plugin_library_file_name(library_name));
+        fs::write(&library_path, b"test").expect("library file should be written");
+
+        assert_eq!(
+            native_plugin_library_path(library_name, Some(&plugin_dir)),
+            Some(library_path)
+        );
+    }
+
+    #[test]
+    fn disabled_manifest_only_backend_is_not_attachable() {
+        let workspace = TestWorkspace::new("disabled-backend");
+        let state = RepositoryState::from_root(workspace.path("service"));
+        let repo_root = workspace.path("repo");
+
+        let error = state
+            .create_repository(RepositoryMutationRequest {
+                repo_id: Some("repo-webdav".to_string()),
+                name: "WebDAV Repo".to_string(),
+                path: repo_root.to_string_lossy().to_string(),
+                backend_plugin_id: Some(WEBDAV_PLUGIN_ID.to_string()),
+                backend_config: None,
+            })
+            .expect_err("disabled manifest-only backend should not create a repository");
+
+        assert!(
+            error.contains("plugin is disabled")
+                || error.contains("plugin runtime is not available")
+        );
+    }
+
+    #[test]
+    fn local_filesystem_backend_runs_through_runtime_registry() {
+        let workspace = TestWorkspace::new("runtime-local-backend");
+        let service_root = workspace.path("service");
+        let repo_root = workspace.path("repo");
+        let state = RepositoryState::from_root(service_root);
+
+        let repo_id = state
+            .create_repository(RepositoryMutationRequest {
+                repo_id: Some("repo-runtime".to_string()),
+                name: "Runtime Repo".to_string(),
+                path: repo_root.to_string_lossy().to_string(),
+                backend_plugin_id: Some(LEGACY_LOCAL_FILESYSTEM_PLUGIN_ID.to_string()),
+                backend_config: None,
+            })
+            .expect("legacy local filesystem id should migrate and create")
+            .repository
+            .repo_id;
+
+        let record = state
+            .load_repository_record(&repo_id)
+            .expect("repository record should load");
+        assert_eq!(record.backend_record.plugin_id, LOCAL_FILESYSTEM_PLUGIN_ID);
+
+        state
+            .create_file(FileCreateRequest {
+                repo_id: repo_id.clone(),
+                parent_path: None,
+                name: "note.txt".to_string(),
+            })
+            .expect("runtime local backend should create a file");
+        assert!(repo_root.join("note.txt").is_file());
+
+        state
+            .rename_entry(FileRenameRequest {
+                repo_id: repo_id.clone(),
+                path: "note.txt".to_string(),
+                new_name: "renamed.txt".to_string(),
+            })
+            .expect("runtime local backend should rename a file");
+        assert!(repo_root.join("renamed.txt").is_file());
+
+        state
+            .delete_entry(FileDeleteRequest {
+                repo_id,
+                path: "renamed.txt".to_string(),
+                mode: None,
+            })
+            .expect("runtime local backend should move a file to trash");
+        assert!(!repo_root.join("renamed.txt").exists());
+        assert!(repository_trash_dir(&repo_root).exists());
+    }
+
+    #[test]
+    fn ensure_initialized_migrates_registry_plugin_ids() {
+        let workspace = TestWorkspace::new("registry-plugin-id-migration");
+        let service_root = workspace.path("service");
+        fs::create_dir_all(&service_root).expect("service root should be created");
+        let registry_path = service_root.join(REGISTRY_FILE_NAME);
+        let registry = Connection::open(&registry_path).expect("registry should open");
+        registry
+            .execute_batch(REGISTRY_SCHEMA_SQL)
+            .expect("registry schema should initialize");
+        registry
+            .execute(
+                r#"
+                INSERT INTO repositories (
+                  repo_id, name, path, backend_plugin_id, backend_config_json, status, created_at, updated_at
+                )
+                VALUES (?1, ?2, ?3, ?4, '{}', 'ready', ?5, ?5)
+                "#,
+                params![
+                    "repo-legacy",
+                    "Legacy Repo",
+                    workspace.path("repo").to_string_lossy().to_string(),
+                    LEGACY_LOCAL_FILESYSTEM_PLUGIN_ID,
+                    now_rfc3339()
+                ],
+            )
+            .expect("legacy registry row should insert");
+        drop(registry);
+
+        let state = RepositoryState::from_root(service_root.clone());
+        state
+            .ensure_initialized()
+            .expect("state should initialize and migrate registry IDs");
+
+        let registry = Connection::open(registry_path).expect("registry should reopen");
+        let plugin_id: String = registry
+            .query_row(
+                "SELECT backend_plugin_id FROM repositories WHERE repo_id = ?1",
+                ["repo-legacy"],
+                |row| row.get(0),
+            )
+            .expect("plugin id should load");
+        assert_eq!(plugin_id, LOCAL_FILESYSTEM_PLUGIN_ID);
+    }
+
+    #[test]
+    fn import_repository_migrates_repository_metadata_plugin_id() {
+        let workspace = TestWorkspace::new("metadata-plugin-id-migration");
+        let service_root = workspace.path("service");
+        let repo_root = workspace.path("repo");
+        let meta_dir = repo_root.join(REPO_META_DIR);
+        fs::create_dir_all(&meta_dir).expect("metadata dir should be created");
+        let metadata_path = meta_dir.join(REPO_METADATA_FILE_NAME);
+        fs::write(
+            &metadata_path,
+            serde_json::to_string_pretty(&serde_json::json!({
+                "repoId": "repo-metadata-legacy",
+                "name": "Metadata Legacy",
+                "rootPath": repo_root.to_string_lossy(),
+                "backendPluginId": LEGACY_LOCAL_FILESYSTEM_PLUGIN_ID,
+                "backendConfig": {},
+                "createdAt": now_rfc3339(),
+                "schemaVersion": REPO_SCHEMA_VERSION,
+            }))
+            .expect("metadata json should encode"),
+        )
+        .expect("legacy metadata should be written");
+
+        let state = RepositoryState::from_root(service_root);
+        state
+            .import_repository(RepositoryMutationRequest {
+                repo_id: None,
+                name: "Metadata Legacy".to_string(),
+                path: repo_root.to_string_lossy().to_string(),
+                backend_plugin_id: Some(LOCAL_FILESYSTEM_PLUGIN_ID.to_string()),
+                backend_config: None,
+            })
+            .expect("legacy metadata repository should import");
+
+        let raw = fs::read_to_string(metadata_path).expect("metadata should read");
+        let migrated: RepositoryMetadataFileImport =
+            serde_json::from_str(&raw).expect("metadata should parse after migration");
+        assert_eq!(
+            migrated.backend_plugin_id.as_deref(),
+            Some(LOCAL_FILESYSTEM_PLUGIN_ID)
+        );
     }
 
     const LONG_RELATIVE_PATH: &str = "CubismSdkForNative-5-r.5/Samples/OpenGL/Demo/proj.harmonyos.cmake/Full/entry/src/main/resources/base/media/startIcon.png";

@@ -14,10 +14,13 @@ import type {
   FileRenameRequest,
   MetadataUpdateRequest,
   MetadataUpdateResponse,
+  PluginEnabledRequest,
+  PluginInstallRequest,
   RepositoryExportRequest,
   RepositoryExportResponse,
   RepositoryFolderRequest,
   PluginManifest,
+  PluginMutationResponse,
   RepositoryMutationRequest,
   RepositoryMutationResponse,
   RepositorySnapshot,
@@ -127,6 +130,18 @@ export function redoLastRevision(request: RevisionActionRequest) {
 
 export function listPlugins() {
   return invoke<PluginManifest[]>("list_plugins");
+}
+
+export function setPluginEnabled(request: PluginEnabledRequest) {
+  return invoke<PluginMutationResponse>("set_plugin_enabled", { request });
+}
+
+export function deletePlugin(pluginId: string) {
+  return invoke<PluginMutationResponse>("delete_plugin", { pluginId });
+}
+
+export function installPluginFromArchive(request: PluginInstallRequest) {
+  return invoke<PluginMutationResponse>("install_plugin_from_archive", { request });
 }
 
 export function getCacheSnapshot() {

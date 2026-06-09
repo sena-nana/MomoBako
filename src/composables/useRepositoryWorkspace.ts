@@ -12,9 +12,11 @@ import {
   getAssetDetail,
   getCacheSnapshot,
   getFileBrowser,
+  deletePlugin,
   importEntries,
   getRepositorySnapshot,
   importRepository,
+  installPluginFromArchive,
   listPlugins,
   listRepositories,
   mutateTrash,
@@ -23,10 +25,12 @@ import {
   renameEntry,
   revealRepositoryPath,
   searchAssets,
+  setPluginEnabled,
   syncRepository,
   undoLastRevision,
   updateAssetMetadata,
 } from "../services/repositoryApi";
+import { syncRegisteredPreviewPluginManifests } from "../plugins/sdk";
 import type {
   ApiDesignSnapshot,
   AssetDetail,
@@ -108,6 +112,7 @@ const isSavingMetadata = ref(false);
 const isSyncing = ref(false);
 const isMutatingFiles = ref(false);
 const isLoadingSettingsData = ref(false);
+const isManagingPlugins = ref(false);
 const error = ref<string | null>(null);
 const operationProgress = ref<WorkspaceOperationProgress | null>(null);
 let operationProgressTimer: number | null = null;
@@ -185,7 +190,7 @@ let thumbnailLoadToken = 0;
 
 function repositoryBackendOptionsFromPlugins(items: PluginManifest[]): RepositoryBackendOption[] {
   return items
-    .filter((plugin) => ["filesystem", "webdav", "cloud"].includes(plugin.kind))
+    .filter((plugin) => plugin.enabled && ["filesystem", "webdav", "cloud"].includes(plugin.kind))
     .map((plugin) => ({
       pluginId: plugin.pluginId,
       kind: plugin.kind,
@@ -1032,6 +1037,7 @@ export async function loadSettingsData(options: SettingsDataLoadOptions = {}) {
       getApiDesignSnapshot(),
     ]);
     plugins.value = pluginItems;
+    syncRegisteredPreviewPluginManifests(pluginItems);
     cacheSnapshot.value = cache;
     apiDesign.value = api;
   } catch (cause) {
@@ -1042,6 +1048,34 @@ export async function loadSettingsData(options: SettingsDataLoadOptions = {}) {
   } finally {
     isLoadingSettingsData.value = false;
   }
+}
+
+async function applyPluginMutation(action: () => Promise<{ plugins: PluginManifest[] }>) {
+  isManagingPlugins.value = true;
+  error.value = null;
+  try {
+    const response = await action();
+    plugins.value = response.plugins;
+    syncRegisteredPreviewPluginManifests(response.plugins);
+    return response;
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : String(cause);
+    return null;
+  } finally {
+    isManagingPlugins.value = false;
+  }
+}
+
+export function setPluginEnabledInWorkspace(pluginId: string, enabled: boolean) {
+  return applyPluginMutation(() => setPluginEnabled({ pluginId, enabled }));
+}
+
+export function deletePluginInWorkspace(pluginId: string) {
+  return applyPluginMutation(() => deletePlugin(pluginId));
+}
+
+export function installPluginArchiveInWorkspace(archivePath: string) {
+  return applyPluginMutation(() => installPluginFromArchive({ archivePath }));
 }
 
 export function getRepositoryBackendOptions() {
@@ -1145,6 +1179,7 @@ export function resetRepositoryWorkspaceForTests() {
   searchResults.value = [];
   lastSyncResult.value = null;
   plugins.value = [];
+  syncRegisteredPreviewPluginManifests([]);
   cacheSnapshot.value = null;
   apiDesign.value = null;
   error.value = null;
@@ -1157,6 +1192,7 @@ export function resetRepositoryWorkspaceForTests() {
   isSyncing.value = false;
   isMutatingFiles.value = false;
   isLoadingSettingsData.value = false;
+  isManagingPlugins.value = false;
   workspaceStartup.value = createInitialWorkspaceStartup();
   syncProgress.value = createInitialSyncProgress();
   startupPromise = null;
@@ -1193,6 +1229,7 @@ export function useRepositoryWorkspace() {
     isSyncing: computed(() => isSyncing.value),
     isMutatingFiles: computed(() => isMutatingFiles.value),
     isLoadingSettingsData: computed(() => isLoadingSettingsData.value),
+    isManagingPlugins: computed(() => isManagingPlugins.value),
     isBusy: computed(() => (
       isLoadingRepositories.value ||
       isLoadingSnapshot.value ||
@@ -1233,5 +1270,8 @@ export function useRepositoryWorkspace() {
     removeRepository,
     exportCurrentRepository,
     loadSettingsData,
+    setPluginEnabledInWorkspace,
+    deletePluginInWorkspace,
+    installPluginArchiveInWorkspace,
   };
 }

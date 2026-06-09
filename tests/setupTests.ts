@@ -1,7 +1,7 @@
 import "@testing-library/jest-dom/vitest";
 import { cleanup } from "@testing-library/vue";
 import { afterEach, vi } from "vitest";
-import type { SearchHit } from "../src/types/repository";
+import type { PluginManifest, SearchHit } from "../src/types/repository";
 
 type MockRepository = {
   repoId: string;
@@ -42,6 +42,7 @@ let mockOpenerFailure: Error | null = null;
 let mockInvokeFailure: { command: string; error: Error } | null = null;
 let mockInvokeDelay: { command: string; resolve: () => void; promise: Promise<void> } | null = null;
 let mockSearchResults: SearchHit[] | null = null;
+let mockPlugins: PluginManifest[] | null = null;
 const invokeCalls: Array<{ command: string; args?: Record<string, unknown> }> = [];
 const openerCalls: Array<{ command: "openPath" | "revealItemInDir"; path: string }> = [];
 
@@ -267,7 +268,7 @@ const mockSnapshot = {
     name: "主资源库",
     path: "C:/Mock/AnimeAssets",
     backend: {
-      pluginId: "builtin.local-filesystem",
+      pluginId: "momobako.local-filesystem",
       kind: "filesystem",
       name: "Local Filesystem",
       capabilities: ["browse", "read", "write", "watch", "sync"],
@@ -326,7 +327,7 @@ const altRepository = {
   name: "参考资源库",
   path: "C:/Mock/ReferenceAssets",
   backend: {
-    pluginId: "builtin.local-filesystem",
+    pluginId: "momobako.local-filesystem",
     kind: "filesystem",
     name: "Local Filesystem",
     capabilities: ["browse", "read", "write", "watch", "sync"],
@@ -425,6 +426,51 @@ const mockAssetDetail = {
     },
   ],
 };
+
+function pluginManifest(
+  pluginId: string,
+  legacyPluginIds: string[],
+  name: string,
+  version: string,
+  kind: string,
+  description: string,
+  capabilities: string[],
+  enabled: boolean,
+  sdk: "frontend" | "backend",
+  runtime: "vue-module" | "native-dylib" | "manifest-only",
+  source: "builtin" | "user" | "system" = "builtin",
+): PluginManifest {
+  return {
+    pluginId,
+    legacyPluginIds,
+    name,
+    version,
+    kind,
+    description,
+    capabilities,
+    enabled,
+    sdk,
+    entry: {},
+    source,
+    runtime,
+    permissions: [],
+    compat: { sdkVersion: "1", legacyPluginIds },
+    status: enabled ? "ready" : "disabled",
+  };
+}
+
+function createMockPlugins() {
+  return [
+    pluginManifest("momobako.local-filesystem", ["builtin.local-filesystem"], "Local Filesystem", "1.0.0", "filesystem", "使用本地目录作为仓库文件管理后端。", ["browse", "read", "write", "watch", "sync"], true, "backend", "native-dylib"),
+    pluginManifest("momobako.webdav", ["builtin.webdav"], "WebDAV", "0.1.0", "webdav", "通过 WebDAV 适配远程文件管理服务。", ["browse", "read", "write", "sync"], false, "backend", "manifest-only"),
+    pluginManifest("momobako.cloud-drive", ["builtin.cloud-drive"], "Cloud Drive", "0.1.0", "cloud", "预留云盘文件系统接入点，如对象存储或网盘。", ["browse", "read", "write", "sync"], false, "backend", "manifest-only"),
+    pluginManifest("momobako.preview.three-model", ["builtin.three-model-preview"], "3D Model Preview", "1.0.0", "preview", "为 FBX、OBJ、GLB、glTF 与 VRM 模型提供可旋转缩放的 3D 文件预览。", ["preview", "3d-model", "fbx", "obj", "gltf", "vrm"], true, "frontend", "vue-module"),
+    pluginManifest("momobako.preview.media", ["builtin.media-preview"], "Media Preview", "1.0.0", "preview", "为常见视频与音频文件提供内联播放预览。", ["preview", "media", "video", "audio"], true, "frontend", "vue-module"),
+    pluginManifest("momobako.filesystem-watcher", ["builtin.filesystem-watcher"], "Filesystem Watcher", "1.0.0", "watcher", "监听仓库目录，记录新增、删除、修改与重命名事件。", ["watch", "events", "sync"], false, "backend", "manifest-only"),
+    pluginManifest("momobako.metadata-provider", ["builtin.metadata-provider"], "Metadata Provider", "1.0.0", "metadata", "提供可扩展的元数据生成与写入能力。", ["metadata", "tags", "ocr"], false, "backend", "manifest-only"),
+    pluginManifest("momobako.vector-index", ["builtin.vector-index"], "Vector Index", "0.1.0", "search", "预留向量检索与 AI 语义搜索扩展点。", ["semantic-search", "embedding"], false, "backend", "manifest-only"),
+  ];
+}
 
 vi.mock("@tauri-apps/api/core", () => ({
   convertFileSrc: (path: string) => `asset://${path}`,
@@ -636,15 +682,15 @@ vi.mock("@tauri-apps/api/core", () => ({
         path?: string;
         backendPluginId?: string;
       } | undefined;
-      const backendPluginId = request?.backendPluginId ?? "builtin.local-filesystem";
-      const backendKind = backendPluginId === "builtin.webdav"
+      const backendPluginId = request?.backendPluginId ?? "momobako.local-filesystem";
+      const backendKind = backendPluginId === "momobako.webdav"
         ? "webdav"
-        : backendPluginId === "builtin.cloud-drive"
+        : backendPluginId === "momobako.cloud-drive"
           ? "cloud"
           : "filesystem";
-      const backendName = backendPluginId === "builtin.webdav"
+      const backendName = backendPluginId === "momobako.webdav"
         ? "WebDAV"
-        : backendPluginId === "builtin.cloud-drive"
+        : backendPluginId === "momobako.cloud-drive"
           ? "Cloud Drive"
           : "Local Filesystem";
       mockRepositories = [
@@ -674,7 +720,7 @@ vi.mock("@tauri-apps/api/core", () => ({
           name: path.split("/").filter(Boolean).at(-1) ?? "NewRepo",
           path,
           backend: {
-            pluginId: "builtin.local-filesystem",
+            pluginId: "momobako.local-filesystem",
             kind: "filesystem",
             name: "Local Filesystem",
             capabilities: ["browse", "read", "write", "watch", "sync"],
@@ -756,53 +802,36 @@ vi.mock("@tauri-apps/api/core", () => ({
       };
     }
     if (command === "list_plugins") {
-      return [
-        {
-          pluginId: "builtin.local-filesystem",
-          name: "Local Filesystem",
-          version: "1.0.0",
-          kind: "filesystem",
-          description: "使用本地目录作为仓库文件管理后端。",
-          capabilities: ["browse", "read", "write", "watch", "sync"],
-          enabled: true,
-        },
-        {
-          pluginId: "builtin.webdav",
-          name: "WebDAV",
-          version: "0.1.0",
-          kind: "webdav",
-          description: "通过 WebDAV 适配远程文件管理服务。",
-          capabilities: ["browse", "read", "write", "sync"],
-          enabled: false,
-        },
-        {
-          pluginId: "builtin.cloud-drive",
-          name: "Cloud Drive",
-          version: "0.1.0",
-          kind: "cloud",
-          description: "预留云盘文件系统接入点，如对象存储或网盘。",
-          capabilities: ["browse", "read", "write", "sync"],
-          enabled: false,
-        },
-        {
-          pluginId: "builtin.three-model-preview",
-          name: "3D Model Preview",
-          version: "1.0.0",
-          kind: "preview",
-          description: "为 FBX、OBJ、GLB、glTF 与 VRM 模型提供可旋转缩放的 3D 文件预览。",
-          capabilities: ["preview", "3d-model", "fbx", "obj", "gltf", "vrm"],
-          enabled: true,
-        },
-        {
-          pluginId: "builtin.filesystem-watcher",
-          name: "Filesystem Watcher",
-          version: "1.0.0",
-          kind: "watcher",
-          description: "监听仓库目录，记录新增、删除、修改与重命名事件。",
-          capabilities: ["watch", "events", "sync"],
-          enabled: true,
-        },
+      mockPlugins ??= createMockPlugins();
+      return mockPlugins;
+    }
+    if (command === "set_plugin_enabled") {
+      mockPlugins ??= createMockPlugins();
+      const request = args?.request as { pluginId?: string; enabled?: boolean } | undefined;
+      mockPlugins = mockPlugins.map((plugin) => (
+        plugin.pluginId === request?.pluginId
+          ? {
+              ...plugin,
+              enabled: Boolean(request.enabled),
+              status: request.enabled ? "ready" : "disabled",
+            }
+          : plugin
+      ));
+      return { plugins: mockPlugins };
+    }
+    if (command === "delete_plugin") {
+      mockPlugins ??= createMockPlugins();
+      const pluginId = args?.pluginId;
+      mockPlugins = mockPlugins.filter((plugin) => plugin.pluginId !== pluginId);
+      return { plugins: mockPlugins };
+    }
+    if (command === "install_plugin_from_archive") {
+      mockPlugins ??= createMockPlugins();
+      mockPlugins = [
+        ...mockPlugins,
+        pluginManifest("user.sample-plugin", [], "Sample Plugin", "0.1.0", "metadata", "从压缩包安装的测试插件。", ["metadata"], true, "backend", "manifest-only", "user"),
       ];
+      return { plugins: mockPlugins };
     }
     if (command === "get_cache_snapshot") {
       return {
@@ -876,6 +905,7 @@ afterEach(() => {
   mockInvokeFailure = null;
   mockInvokeDelay = null;
   mockSearchResults = null;
+  mockPlugins = null;
   mockRepositories = [];
   mockEntries = initialEntries();
   mockTrashEntries = [];

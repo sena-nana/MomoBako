@@ -19,7 +19,8 @@ use repository_service::{
     ApiDesignSnapshot, AssetDetail, CacheSnapshot, FileBrowserRequest, FileBrowserSnapshot,
     FileCreateRequest, FileDeleteRequest, FileImportRequest, FilePreviewSourceResponse,
     FileReadRequest, FileRenameRequest, MetadataUpdateRequest, MetadataUpdateResponse,
-    PluginManifest, RepositoryExportRequest, RepositoryExportResponse, RepositoryFolderRequest,
+    PluginEnabledRequest, PluginInstallRequest, PluginManifest, PluginMutationResponse,
+    RepositoryExportRequest, RepositoryExportResponse, RepositoryFolderRequest,
     RepositoryMutationRequest, RepositoryMutationResponse, RepositorySnapshot, RepositorySummary,
     RevisionActionRequest, RevisionActionResponse, SearchRequest, SearchResponse, SyncRequest,
     SyncResult, ThumbnailRequest, ThumbnailResponse, TrashMutationRequest,
@@ -268,6 +269,36 @@ async fn list_plugins(
 }
 
 #[tauri::command]
+async fn set_plugin_enabled(
+    request: PluginEnabledRequest,
+    runtime: tauri::State<'_, RepositoryRuntime>,
+) -> Result<PluginMutationResponse, String> {
+    runtime
+        .run_write(move |state| state.set_plugin_enabled(request))
+        .await
+}
+
+#[tauri::command]
+async fn delete_plugin(
+    plugin_id: String,
+    runtime: tauri::State<'_, RepositoryRuntime>,
+) -> Result<PluginMutationResponse, String> {
+    runtime
+        .run_write(move |state| state.delete_plugin(plugin_id))
+        .await
+}
+
+#[tauri::command]
+async fn install_plugin_from_archive(
+    request: PluginInstallRequest,
+    runtime: tauri::State<'_, RepositoryRuntime>,
+) -> Result<PluginMutationResponse, String> {
+    runtime
+        .run_write(move |state| state.install_plugin_from_archive(request))
+        .await
+}
+
+#[tauri::command]
 async fn get_cache_snapshot(
     runtime: tauri::State<'_, RepositoryRuntime>,
 ) -> Result<CacheSnapshot, String> {
@@ -351,7 +382,8 @@ pub fn run() {
         .plugin(tauri_plugin_store::Builder::default().build())
         .manage(window_state::MainWindowStateCache::default())
         .setup(|app| {
-            let runtime = RepositoryRuntime::start()?;
+            let resource_dir = app.path().resource_dir().ok();
+            let runtime = RepositoryRuntime::start_with_resource_dir(resource_dir)?;
             app.manage(runtime);
             setup_tray(app.handle())?;
 
@@ -415,6 +447,9 @@ pub fn run() {
             undo_last_revision,
             redo_last_revision,
             list_plugins,
+            set_plugin_enabled,
+            delete_plugin,
+            install_plugin_from_archive,
             get_cache_snapshot,
             get_api_design_snapshot
         ])

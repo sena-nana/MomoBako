@@ -338,12 +338,36 @@ export type CacheSnapshot = {
 
 export type PluginManifest = {
   pluginId: string;
+  legacyPluginIds?: string[];
   name: string;
   version: string;
   kind: string;
   description: string;
   capabilities: string[];
   enabled: boolean;
+  sdk?: "frontend" | "backend";
+  entry?: Record<string, unknown>;
+  source?: "builtin" | "user" | "system";
+  runtime?: "vue-module" | "native-dylib" | "manifest-only";
+  permissions?: string[];
+  compat?: {
+    sdkVersion?: string;
+    legacyPluginIds?: string[];
+  };
+  status?: "ready" | "disabled" | "unavailable" | "error";
+};
+
+export type PluginEnabledRequest = {
+  pluginId: string;
+  enabled: boolean;
+};
+
+export type PluginInstallRequest = {
+  archivePath: string;
+};
+
+export type PluginMutationResponse = {
+  plugins: PluginManifest[];
 };
 
 export type ApiDefinition = {

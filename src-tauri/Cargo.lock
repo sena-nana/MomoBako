@@ -2527,6 +2527,7 @@ dependencies = [
  "ffmpeg-sidecar",
  "hex",
  "image",
+ "libloading",
  "notify",
  "rusqlite",
  "serde",
@@ -2539,6 +2540,7 @@ dependencies = [
  "tauri-plugin-store",
  "time",
  "tiny_http",
+ "zip",
 ]
 
 [[package]]

@@ -1,0 +1,13 @@
+{
+  "plugins": {
+    "momobako.cloud-drive": {
+      "enabled": false
+    },
+    "momobako.preview.media": {
+      "enabled": true
+    },
+    "momobako.preview.three-model": {
+      "enabled": true
+    }
+  }
+}

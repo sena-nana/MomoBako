@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { convertFileSrc } from "@tauri-apps/api/core";
-import { open, save } from "@tauri-apps/plugin-dialog";
+import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import {
@@ -26,11 +26,11 @@ import {
   Clipboard,
   RefreshCw,
   RotateCcw,
-  Search,
   Trash2,
   X,
 } from "lucide-vue-next";
 import Markdown from "vue3-markdown-it";
+import PluginManagerPanel from "../components/PluginManagerPanel.vue";
 import { useRepositoryWorkspace } from "../composables/useRepositoryWorkspace";
 import { vContextMenu } from "../directives/contextMenu";
 import { getPreviewPluginForEntry } from "../plugins/previewPlugins";
@@ -73,7 +73,6 @@ const isDraggingFiles = ref(false);
 const isDraggingRepositoryFolder = ref(false);
 const emptyRepositoryError = ref("");
 const previewFilePath = ref<string | null>(null);
-const extensionKeyword = ref("");
 const exportDialogRepository = ref<RepositorySummary | null>(null);
 const exportTarget = ref<"archive" | "git">("archive");
 const exportArchiveFormat = ref<RepositoryArchiveFormat>("zip");
@@ -94,7 +93,6 @@ const {
   activeSnapshot,
   activeRepoId,
   fileBrowser,
-  plugins,
   repositories,
   searchQuery,
   selectedFilePath,
@@ -163,16 +161,6 @@ const previewFileEntry = computed(() => (
 const previewPlugin = computed(() => getPreviewPluginForEntry(previewFileEntry.value));
 const hasSplitFileGroups = computed(() => directoryEntries.value.length > 0 && fileEntries.value.length > 0);
 const fileDisplayModeClass = computed(() => `files-list__files--${fileDisplayMode.value}`);
-const filteredPlugins = computed(() => {
-  const keyword = extensionKeyword.value.trim().toLowerCase();
-  if (!keyword) return plugins.value;
-  return plugins.value.filter((plugin) => (
-    plugin.name.toLowerCase().includes(keyword) ||
-    plugin.description.toLowerCase().includes(keyword) ||
-    plugin.kind.toLowerCase().includes(keyword) ||
-    plugin.capabilities.some((capability) => capability.toLowerCase().includes(keyword))
-  ));
-});
 const exportArchiveExtension = computed(() => {
   if (exportArchiveFormat.value === "tar" && exportCompression.value !== "none") {
     return "tar.gz";
@@ -286,7 +274,7 @@ function resetThumbnailFailure(path: string) {
 
 async function chooseCustomThumbnail(entry: FileBrowserEntry) {
   if (isTrashPanel.value) return;
-  const selected = await open({
+  const selected = await openDialog({
     title: "选择自定义缩略图",
     multiple: false,
     filters: [
@@ -664,7 +652,7 @@ async function requestRepositoryExport(library: RepositorySummary) {
 
 async function chooseArchiveOutputPath(repository: RepositorySummary) {
   const extension = exportArchiveExtension.value;
-  return save({
+  return saveDialog({
     title: "导出资源库",
     defaultPath: `${sanitizeExportName(repository.name)}.${extension}`,
     filters: [
@@ -1258,45 +1246,14 @@ onUnmounted(() => {
   </section>
 
   <section v-else-if="isExtensionsPanel" class="extensions-workbench">
-    <div class="search-workbench__panel">
-      <header class="search-workbench__header">
-        <div>
-          <p class="asset-browser__eyebrow">拓展能力</p>
-          <h1>文件系统与插件</h1>
-          <p class="search-workbench__subline">这里集中展示当前插件和后端能力。</p>
-        </div>
-        <div class="search-workbench__stats">
-          <span class="asset-stat">{{ filteredPlugins.length }} 个插件</span>
-        </div>
-      </header>
-
-      <label class="search-workbench__field">
-        <Search :size="15" aria-hidden="true" />
-        <input
-          v-model="extensionKeyword"
-          type="search"
-          placeholder="筛选导入器、脚本或元数据拓展"
-        />
-      </label>
-
-      <div class="extensions-workbench__list">
-        <article v-for="plugin in filteredPlugins" :key="plugin.pluginId" class="extensions-workbench__card">
-          <div class="extensions-workbench__card-head">
-            <strong>{{ plugin.name }}</strong>
-            <span class="asset-card__pill" :class="{ 'asset-card__pill--ghost': !plugin.enabled }">
-              {{ plugin.enabled ? "已启用" : "未启用" }}
-            </span>
-          </div>
-          <p class="extensions-workbench__card-desc">{{ plugin.description }}</p>
-          <div class="settings-list__chips">
-            <span class="workspace-hints__chip">{{ plugin.kind }}</span>
-            <span v-for="capability in plugin.capabilities" :key="capability" class="workspace-hints__chip">
-              {{ capability }}
-            </span>
-          </div>
-        </article>
-      </div>
-    </div>
+    <PluginManagerPanel
+      title="文件系统与插件"
+      eyebrow="拓展能力"
+      subline="这里集中展示当前插件和后端能力。"
+      search-placeholder="筛选导入器、脚本或元数据拓展"
+      empty-title="没有匹配的插件"
+      empty-description="试试其他关键词，或从压缩包安装新的插件。"
+    />
   </section>
 
   <section
