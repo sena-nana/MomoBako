@@ -37,6 +37,7 @@ async function renderApp() {
       },
     },
   });
+  await waitForCurrentWorkspaceView();
 }
 
 async function renderAppWithoutStartupPreload() {
@@ -53,6 +54,22 @@ async function renderAppWithoutStartupPreload() {
         "context-menu": vContextMenu,
       },
     },
+  });
+}
+
+async function waitForCurrentWorkspaceView() {
+  await waitFor(() => {
+    const workspace = useRepositoryWorkspace();
+    const selector = workspace.activeSnapshot.value
+      ? workspace.activePanel.value === "libraries"
+        ? ".library-overview"
+        : workspace.activePanel.value === "search"
+          ? ".search-workbench"
+          : workspace.activePanel.value === "extensions"
+            ? ".extensions-workbench"
+            : ".files-browser, .files-preview-page__body"
+      : ".empty-state-page";
+    expect(document.querySelector(selector)).toBeInTheDocument();
   });
 }
 
