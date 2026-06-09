@@ -8,8 +8,14 @@ const DEFAULT_THEME: Theme = "dark";
 
 function loadInitial(): Theme {
   try {
-    const stored = localStorage.getItem(STORAGE_KEY) ?? localStorage.getItem(LEGACY_STORAGE_KEY);
+    const stored = localStorage.getItem(STORAGE_KEY);
     if (stored === "light" || stored === "dark") return stored;
+
+    const legacyStored = localStorage.getItem(LEGACY_STORAGE_KEY);
+    if (legacyStored === "light" || legacyStored === "dark") {
+      localStorage.setItem(STORAGE_KEY, legacyStored);
+      return legacyStored;
+    }
   } catch {
     // localStorage 不可用时回到默认主题。
   }
