@@ -24,6 +24,7 @@ import {
   ImagePlus,
   ImageOff,
   Clipboard,
+  Copy,
   RefreshCw,
   RotateCcw,
   Search,
@@ -37,6 +38,7 @@ import { getPreviewPluginForEntry } from "../plugins/previewPlugins";
 import { isAudioExtension, isVideoExtension } from "../plugins/mediaPreview/mediaExtensions";
 import type {
   FileBrowserEntry,
+  HardlinkCandidate,
   RepositoryArchiveFormat,
   RepositoryCompressionLevel,
   RepositorySummary,
@@ -88,6 +90,10 @@ const isExporting = ref(false);
 const failedThumbnailPaths = ref<Set<string>>(new Set());
 const fileDisplayMode = ref<FileDisplayMode>(readInitialFileDisplayMode());
 const thumbnailAspectRatios = ref<Record<string, number>>({});
+const pendingCopySourcePaths = ref<string[]>([]);
+const copyTargetDialogOpen = ref(false);
+const copyTargetPath = ref("");
+const skippedHardlinkCandidateIds = ref<Set<string>>(new Set());
 
 const {
   activePanel,
@@ -99,6 +105,7 @@ const {
   searchQuery,
   selectedFilePath,
   searchResults,
+  hardlinkCandidates,
   isBusy,
   isLoadingFileBrowser,
   isSearching,
@@ -109,6 +116,7 @@ const {
   selectAsset,
   loadFileBrowserForDirectory,
   createFileInWorkspace,
+  copyWorkspaceEntries,
   attachRepository,
   importEntriesToWorkspace,
   renameWorkspaceEntry,
@@ -126,6 +134,7 @@ const {
   refreshWorkspaceEntryThumbnail,
   removeRepository,
   exportCurrentRepository,
+  confirmWorkspaceHardlinkCandidate,
 } = useRepositoryWorkspace();
 
 const hasRepository = computed(() => Boolean(activeSnapshot.value));
@@ -163,6 +172,9 @@ const previewFileEntry = computed(() => (
 const previewPlugin = computed(() => getPreviewPluginForEntry(previewFileEntry.value));
 const hasSplitFileGroups = computed(() => directoryEntries.value.length > 0 && fileEntries.value.length > 0);
 const fileDisplayModeClass = computed(() => `files-list__files--${fileDisplayMode.value}`);
+const currentHardlinkCandidate = computed(() => (
+  hardlinkCandidates.value.find((candidate) => !skippedHardlinkCandidateIds.value.has(candidate.candidateId)) ?? null
+));
 const filteredPlugins = computed(() => {
   const keyword = extensionKeyword.value.trim().toLowerCase();
   if (!keyword) return plugins.value;
@@ -185,6 +197,25 @@ const exportArchiveFilterExtension = computed(() => (
     : exportArchiveExtension.value
 ));
 const exportActionLabel = computed(() => exportTarget.value === "git" ? "上传到 Git" : "导出压缩包");
+
+function hardlinkStateLabel(entry: FileBrowserEntry) {
+  switch (entry.hardlinkState) {
+    case "linked":
+      return "硬链接关联";
+    case "copiedFallback":
+      return "普通复制";
+    case "broken":
+      return "关联异常";
+    case "missing":
+      return "关联缺失";
+    default:
+      return "";
+  }
+}
+
+function hardlinkCandidateMessage(candidate: HardlinkCandidate) {
+  return `${candidate.newPath} 与 ${candidate.existingPath} 内容哈希一致，大小 ${candidate.sizeLabel}。确认后会将新文件加入硬链接关联。`;
+}
 
 watch(currentFileEntry, (entry) => {
   if (renameTargetPath.value && renameTargetPath.value !== entry?.path) {
@@ -484,6 +515,47 @@ async function deleteEntry(entry: FileBrowserEntry) {
   await deleteWorkspaceEntry(entry.path, isTrashPanel.value ? "permanentDelete" : undefined);
 }
 
+function openCopyTargetDialog(entry: FileBrowserEntry) {
+  if (isTrashPanel.value) return;
+  pendingCopySourcePaths.value = [entry.path];
+  copyTargetPath.value = fileBrowser.value?.currentPath ?? "";
+  copyTargetDialogOpen.value = true;
+}
+
+async function submitCopyTarget() {
+  const paths = pendingCopySourcePaths.value;
+  if (!paths.length) return;
+  const targetPath = copyTargetPath.value.trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+  const snapshot = await copyWorkspaceEntries(paths, targetPath);
+  if (snapshot) {
+    cancelCopyTarget();
+  }
+}
+
+function cancelCopyTarget() {
+  copyTargetDialogOpen.value = false;
+  pendingCopySourcePaths.value = [];
+  copyTargetPath.value = "";
+}
+
+async function confirmCurrentHardlinkCandidate() {
+  const candidate = currentHardlinkCandidate.value;
+  if (!candidate) return;
+  const response = await confirmWorkspaceHardlinkCandidate(candidate.candidateId);
+  if (response) {
+    skippedHardlinkCandidateIds.value.delete(candidate.candidateId);
+  }
+}
+
+function skipCurrentHardlinkCandidate() {
+  const candidate = currentHardlinkCandidate.value;
+  if (!candidate) return;
+  skippedHardlinkCandidateIds.value = new Set([
+    ...skippedHardlinkCandidateIds.value,
+    candidate.candidateId,
+  ]);
+}
+
 async function restoreSelectedEntry() {
   if (!currentFileEntry.value || !isTrashPanel.value) return;
   await restoreTrashEntry(currentFileEntry.value.path);
@@ -550,6 +622,13 @@ function fileEntryContextMenu(entry: FileBrowserEntry) {
       icon: FolderOpen,
       disabled: isTrashPanel.value,
       onSelect: () => revealWorkspaceEntry(entry.path),
+    },
+    {
+      id: "copy-target",
+      label: "复制到…",
+      icon: Files,
+      disabled: isTrashPanel.value || isMutatingFiles.value,
+      onSelect: () => openCopyTargetDialog(entry),
     },
     {
       id: "thumbnail",
@@ -988,6 +1067,10 @@ onUnmounted(() => {
             <span>状态</span>
             <span class="asset-meta__value">{{ previewFileEntry.status ? statusLabel(previewFileEntry.status) : "未索引" }}</span>
           </div>
+          <div v-if="hardlinkStateLabel(previewFileEntry)" class="asset-meta__row">
+            <span>硬链接</span>
+            <span class="asset-meta__value">{{ hardlinkStateLabel(previewFileEntry) }}</span>
+          </div>
           <div class="asset-meta__row">
             <span>修改时间</span>
             <span class="asset-meta__value">{{ previewFileEntry.modifiedAt ? new Date(previewFileEntry.modifiedAt).toLocaleString("zh-CN") : "未记录" }}</span>
@@ -1105,12 +1188,14 @@ onUnmounted(() => {
               </div>
               <div class="files-list__body">
                 <strong>{{ entry.name }}</strong>
+                <span v-if="hardlinkStateLabel(entry) && fileDisplayMode !== 'list'">{{ hardlinkStateLabel(entry) }}</span>
                 <span v-if="fileDisplayMode === 'list'">{{ entry.path }}</span>
               </div>
               <div v-if="fileDisplayMode === 'list'" class="files-list__meta">
                 <span>{{ entry.extension || '文件' }}</span>
                 <span>{{ entry.sizeLabel || "未知" }}</span>
                 <span>{{ entry.status ? statusLabel(entry.status) : "未索引" }}</span>
+                <span v-if="hardlinkStateLabel(entry)">{{ hardlinkStateLabel(entry) }}</span>
                 <span>{{ entryModifiedAtLabel(entry) }}</span>
               </div>
             </button>
@@ -1187,6 +1272,10 @@ onUnmounted(() => {
           <div class="asset-meta__row">
             <span>状态</span>
             <span class="asset-meta__value">{{ currentFileEntry.status ? statusLabel(currentFileEntry.status) : "未索引" }}</span>
+          </div>
+          <div v-if="hardlinkStateLabel(currentFileEntry)" class="asset-meta__row">
+            <span>硬链接</span>
+            <span class="asset-meta__value">{{ hardlinkStateLabel(currentFileEntry) }}</span>
           </div>
           <div class="asset-meta__row">
             <span>修改时间</span>
@@ -1315,6 +1404,75 @@ onUnmounted(() => {
       </p>
     </div>
   </section>
+
+  <Teleport to="body">
+    <Transition name="modal">
+      <div
+        v-if="copyTargetDialogOpen"
+        class="modal-overlay"
+        role="dialog"
+        aria-modal="true"
+        aria-label="复制到文件夹"
+        @click.self="cancelCopyTarget()"
+      >
+        <div class="modal-card dialog-card copy-target-dialog">
+          <div class="dialog-card__header">
+            <Copy :size="14" aria-hidden="true" />
+            <span>复制到文件夹</span>
+          </div>
+          <div class="dialog-card__body copy-target-dialog__body">
+            <label class="dialog-field">
+              <span>目标目录</span>
+              <input v-model="copyTargetPath" type="text" placeholder="留空表示根目录" />
+            </label>
+          </div>
+          <div class="dialog-card__actions">
+            <button type="button" class="ghost" :disabled="isMutatingFiles" @click="cancelCopyTarget()">
+              取消
+            </button>
+            <button type="button" class="primary" :disabled="isMutatingFiles" @click="submitCopyTarget()">
+              {{ isMutatingFiles ? "处理中..." : "复制" }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </Transition>
+  </Teleport>
+
+  <Teleport to="body">
+    <Transition name="modal">
+      <div
+        v-if="currentHardlinkCandidate"
+        class="modal-overlay"
+        role="dialog"
+        aria-modal="true"
+        aria-label="加入硬链接关联"
+        @click.self="skipCurrentHardlinkCandidate()"
+      >
+        <div class="modal-card dialog-card hardlink-candidate-dialog">
+          <div class="dialog-card__header">
+            <Copy :size="14" aria-hidden="true" />
+            <span>加入硬链接关联</span>
+          </div>
+          <div class="dialog-card__body hardlink-candidate-dialog__body">
+            <p>{{ hardlinkCandidateMessage(currentHardlinkCandidate) }}</p>
+            <div class="hardlink-candidate-dialog__paths">
+              <span>{{ currentHardlinkCandidate.existingPath }}</span>
+              <span>{{ currentHardlinkCandidate.newPath }}</span>
+            </div>
+          </div>
+          <div class="dialog-card__actions">
+            <button type="button" class="ghost" :disabled="isMutatingFiles" @click="skipCurrentHardlinkCandidate()">
+              跳过
+            </button>
+            <button type="button" class="primary" :disabled="isMutatingFiles" @click="confirmCurrentHardlinkCandidate()">
+              {{ isMutatingFiles ? "处理中..." : "加入关联" }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </Transition>
+  </Teleport>
 
   <Teleport to="body">
     <Transition name="modal">

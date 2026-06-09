@@ -878,7 +878,7 @@
 
 .files-list__meta {
   display: grid;
-  grid-template-columns: minmax(44px, auto) minmax(64px, auto) minmax(56px, auto) minmax(132px, auto);
+  grid-template-columns: repeat(5, minmax(44px, auto));
   align-items: flex-end;
   justify-content: end;
   gap: 10px;
@@ -1537,6 +1537,27 @@
 .asset-card.is-active {
   background: color-mix(in srgb, var(--bg) 90%, var(--accent) 10%);
   border-color: color-mix(in srgb, var(--accent) 34%, var(--border-strong));
+}
+
+.copy-target-dialog__body,
+.hardlink-candidate-dialog__body {
+  display: grid;
+  gap: 12px;
+}
+
+.hardlink-candidate-dialog__paths {
+  display: grid;
+  gap: 6px;
+  padding: 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--bg-subtle);
+}
+
+.hardlink-candidate-dialog__paths span {
+  overflow-wrap: anywhere;
+  color: var(--text-muted);
+  font-size: 12px;
 }
 
 .asset-card__thumb {

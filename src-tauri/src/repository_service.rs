@@ -2,9 +2,10 @@ use rusqlite::{params, types::Type, Connection, OptionalExtension, Transaction};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, HashSet},
     ffi::OsString,
     fs::{self, File, OpenOptions},
+    io::Read,
     path::{Path, PathBuf},
     process::Command,
     sync::{Arc, Mutex, OnceLock},
@@ -85,6 +86,52 @@ CREATE TABLE IF NOT EXISTS assets (
 CREATE UNIQUE INDEX IF NOT EXISTS idx_assets_repo_path ON assets(repo_id, path);
 CREATE INDEX IF NOT EXISTS idx_assets_repo_filename ON assets(repo_id, filename);
 CREATE INDEX IF NOT EXISTS idx_assets_repo_status ON assets(repo_id, status);
+CREATE INDEX IF NOT EXISTS idx_assets_repo_hash ON assets(repo_id, hash);
+
+CREATE TABLE IF NOT EXISTS hardlink_groups (
+  group_id TEXT PRIMARY KEY,
+  repo_id TEXT NOT NULL,
+  content_hash TEXT NOT NULL,
+  size_bytes INTEGER NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY(repo_id) REFERENCES repositories(repo_id)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_hardlink_groups_repo_hash_size
+ON hardlink_groups(repo_id, content_hash, size_bytes);
+
+CREATE TABLE IF NOT EXISTS hardlink_members (
+  group_id TEXT NOT NULL,
+  repo_id TEXT NOT NULL,
+  asset_id TEXT NOT NULL,
+  path TEXT NOT NULL,
+  link_state TEXT NOT NULL,
+  linked_at TEXT NOT NULL,
+  verified_at TEXT NOT NULL,
+  PRIMARY KEY(repo_id, asset_id),
+  FOREIGN KEY(group_id) REFERENCES hardlink_groups(group_id),
+  FOREIGN KEY(asset_id) REFERENCES assets(asset_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_hardlink_members_repo_path
+ON hardlink_members(repo_id, path);
+
+CREATE TABLE IF NOT EXISTS hardlink_candidates (
+  candidate_id TEXT PRIMARY KEY,
+  repo_id TEXT NOT NULL,
+  new_asset_id TEXT NOT NULL,
+  new_path TEXT NOT NULL,
+  existing_asset_id TEXT NOT NULL,
+  existing_path TEXT NOT NULL,
+  content_hash TEXT NOT NULL,
+  size_bytes INTEGER NOT NULL,
+  created_at TEXT NOT NULL,
+  FOREIGN KEY(repo_id) REFERENCES repositories(repo_id)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_hardlink_candidates_unique
+ON hardlink_candidates(repo_id, new_asset_id, existing_asset_id);
 
 CREATE TABLE IF NOT EXISTS entry_thumbnails (
   repo_id TEXT NOT NULL,
@@ -193,6 +240,8 @@ pub struct AssetSummary {
     pub version: i64,
     pub tags: Vec<String>,
     pub thumbnail_path: Option<String>,
+    pub hardlink_group_id: Option<String>,
+    pub hardlink_state: Option<String>,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -297,6 +346,8 @@ pub struct FileBrowserEntry {
     pub status: Option<String>,
     pub thumbnail_path: Option<String>,
     pub thumbnail_custom: bool,
+    pub hardlink_group_id: Option<String>,
+    pub hardlink_state: Option<String>,
     pub metadata: BTreeMap<String, serde_json::Value>,
 }
 
@@ -462,6 +513,52 @@ pub struct FileImportRequest {
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct FileCopyRequest {
+    pub repo_id: String,
+    pub source_paths: Vec<String>,
+    pub parent_path: Option<String>,
+    pub mode: Option<String>,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct HardlinkCandidate {
+    pub candidate_id: String,
+    pub repo_id: String,
+    pub new_asset_id: String,
+    pub new_path: String,
+    pub existing_asset_id: String,
+    pub existing_path: String,
+    pub content_hash: String,
+    pub size_bytes: i64,
+    pub size_label: String,
+    pub created_at: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HardlinkCandidateResponse {
+    pub repo_id: String,
+    pub candidates: Vec<HardlinkCandidate>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HardlinkConfirmRequest {
+    pub repo_id: String,
+    pub candidate_id: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HardlinkConfirmResponse {
+    pub repo_id: String,
+    pub candidate: HardlinkCandidate,
+    pub state: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct FileRenameRequest {
     pub repo_id: String,
     pub path: String,
@@ -503,6 +600,39 @@ struct TrashManifestEntry {
 struct ThumbnailRecord {
     path: String,
     custom: bool,
+}
+
+#[derive(Debug, Clone)]
+struct AssetPathRecord {
+    asset_id: String,
+    status: String,
+    thumbnail_path: Option<String>,
+    hardlink_group_id: Option<String>,
+    hardlink_state: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct ExistingAssetRecord {
+    asset_id: String,
+    status: String,
+    thumbnail_path: Option<String>,
+    size_bytes: i64,
+    modified_at: String,
+    hash: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct HardlinkCopyOutcome {
+    source_path: Option<String>,
+    target_path: String,
+    link_state: String,
+}
+
+#[derive(Debug, Clone)]
+struct HardlinkAssetRecord {
+    asset_id: String,
+    content_hash: String,
+    size_bytes: i64,
 }
 
 #[derive(Debug, Serialize)]
@@ -548,6 +678,7 @@ pub struct SyncResult {
     pub updated_assets: i64,
     pub deleted_assets: i64,
     pub created_events: i64,
+    pub hardlink_candidates: i64,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -1299,6 +1430,96 @@ impl RepositoryState {
         })
     }
 
+    pub fn list_hardlink_candidates(
+        &self,
+        repo_id: &str,
+    ) -> Result<HardlinkCandidateResponse, String> {
+        self.ensure_initialized()?;
+        let repo = self.load_repository_record(repo_id)?;
+        let connection = self.open_repository_connection(
+            &repo.summary.repo_id,
+            &repo.summary.path,
+            &repo.backend_record,
+        )?;
+        let candidates = load_hardlink_candidates(&connection, repo_id).map_err(db_error)?;
+        Ok(HardlinkCandidateResponse {
+            repo_id: repo_id.to_string(),
+            candidates,
+        })
+    }
+
+    pub fn confirm_hardlink_candidate(
+        &self,
+        request: HardlinkConfirmRequest,
+    ) -> Result<HardlinkConfirmResponse, String> {
+        self.ensure_initialized()?;
+        let repo = self.load_repository_record(&request.repo_id)?;
+        if repo.backend_record.plugin_id != LOCAL_FILESYSTEM_PLUGIN_ID {
+            return Err(
+                "hardlink confirmation is only supported for local filesystem repositories"
+                    .to_string(),
+            );
+        }
+        let repo_root = PathBuf::from(&repo.summary.path);
+        let mut connection = self.open_repository_connection(
+            &repo.summary.repo_id,
+            &repo.summary.path,
+            &repo.backend_record,
+        )?;
+        let tx = connection.transaction().map_err(db_error)?;
+        let candidate =
+            load_hardlink_candidate_from_transaction(&tx, &request.repo_id, &request.candidate_id)
+                .map_err(db_error)?
+                .ok_or_else(|| format!("hardlink candidate not found: {}", request.candidate_id))?;
+
+        let existing_abs = resolve_repository_relative_path(&repo_root, &candidate.existing_path)?;
+        let new_abs = resolve_repository_relative_path(&repo_root, &candidate.new_path)?;
+        let existing_file_current = current_file_matches_content(
+            &existing_abs,
+            &candidate.content_hash,
+            candidate.size_bytes,
+        )?;
+        let new_file_current =
+            current_file_matches_content(&new_abs, &candidate.content_hash, candidate.size_bytes)?;
+        if !existing_file_current || !new_file_current {
+            delete_hardlink_candidate(&tx, &request.repo_id, &request.candidate_id)
+                .map_err(db_error)?;
+            tx.commit().map_err(db_error)?;
+            return Err("hardlink candidate is no longer valid".to_string());
+        }
+
+        replace_file_with_hardlink(&repo_root, &existing_abs, &new_abs)?;
+        upsert_hardlink_member(
+            &tx,
+            &request.repo_id,
+            &candidate.existing_asset_id,
+            &candidate.existing_path,
+            &candidate.content_hash,
+            candidate.size_bytes,
+            "linked",
+        )
+        .map_err(db_error)?;
+        upsert_hardlink_member(
+            &tx,
+            &request.repo_id,
+            &candidate.new_asset_id,
+            &candidate.new_path,
+            &candidate.content_hash,
+            candidate.size_bytes,
+            "linked",
+        )
+        .map_err(db_error)?;
+        delete_hardlink_candidate(&tx, &request.repo_id, &request.candidate_id)
+            .map_err(db_error)?;
+        tx.commit().map_err(db_error)?;
+
+        Ok(HardlinkConfirmResponse {
+            repo_id: request.repo_id,
+            candidate,
+            state: "linked".to_string(),
+        })
+    }
+
     pub fn update_asset_metadata(
         &self,
         request: MetadataUpdateRequest,
@@ -1396,8 +1617,16 @@ impl RepositoryState {
     }
 
     pub fn sync_repository(&self, request: SyncRequest) -> Result<SyncResult, String> {
+        self.sync_repository_with_candidate_skips(&request.repo_id, &HashSet::new())
+    }
+
+    fn sync_repository_with_candidate_skips(
+        &self,
+        repo_id: &str,
+        skip_hardlink_candidate_paths: &HashSet<String>,
+    ) -> Result<SyncResult, String> {
         self.ensure_initialized()?;
-        let repo = self.load_repository_record(&request.repo_id)?;
+        let repo = self.load_repository_record(repo_id)?;
         let mut connection = self.open_repository_connection(
             &repo.summary.repo_id,
             &repo.summary.path,
@@ -1405,7 +1634,8 @@ impl RepositoryState {
         )?;
         let tx = connection.transaction().map_err(db_error)?;
 
-        let scan = sync_repository_files(&tx, &repo).map_err(db_error)?;
+        let scan =
+            sync_repository_files(&tx, &repo, skip_hardlink_candidate_paths).map_err(db_error)?;
         tx.commit().map_err(db_error)?;
         Ok(scan)
     }
@@ -1547,6 +1777,7 @@ impl RepositoryState {
             existing_thumbnail_path,
         )?;
         let file = DiscoveredFile {
+            absolute_path: resolve_repository_relative_path(&repo_root, &entry_path)?,
             relative_path: entry_path.clone(),
             filename,
             extension,
@@ -1699,38 +1930,121 @@ impl RepositoryState {
     ) -> Result<FileBrowserSnapshot, String> {
         self.ensure_initialized()?;
         let repo = self.load_repository_record(&request.repo_id)?;
-        if repo.backend_record.plugin_id != LOCAL_FILESYSTEM_PLUGIN_ID {
-            return Err(
-                "importing files is only supported for local filesystem repositories".to_string(),
-            );
-        }
+        ensure_local_filesystem_repository(&repo, "importing files")?;
 
         let repo_root = PathBuf::from(&repo.summary.path);
-        let parent_path =
-            normalize_directory_path(request.parent_path.as_deref().unwrap_or_default())?;
-        let target_dir = resolve_repository_relative_path(&repo_root, &parent_path)?;
-        if !target_dir.exists() || !target_dir.is_dir() {
-            return Err(format!("directory not found: {parent_path}"));
-        }
-        if request.source_paths.is_empty() {
-            return Err("no source files were provided".to_string());
-        }
+        let (parent_path, target_dir) = resolve_file_copy_target(
+            &repo_root,
+            request.parent_path.as_deref(),
+            &request.source_paths,
+        )?;
 
         let import_plan =
             validate_external_import_entries(&request.source_paths, &repo_root, &target_dir)?;
-        let imported_directory = import_plan.iter().any(|entry| entry.is_directory);
-        copy_external_entries_parallel(import_plan)?;
+        let include_tree = import_plan.iter().any(|entry| entry.is_directory);
+        let outcomes = copy_external_entries_parallel(import_plan, true)?;
+        self.finish_file_copy_operation(&request.repo_id, parent_path, include_tree, outcomes)
+    }
 
-        let _ = self.sync_repository(SyncRequest {
-            repo_id: request.repo_id.clone(),
-        })?;
+    pub fn copy_entries(&self, request: FileCopyRequest) -> Result<FileBrowserSnapshot, String> {
+        self.ensure_initialized()?;
+        let repo = self.load_repository_record(&request.repo_id)?;
+        ensure_local_filesystem_repository(&repo, "copying files")?;
+
+        let repo_root = PathBuf::from(&repo.summary.path);
+        let (parent_path, target_dir) = resolve_file_copy_target(
+            &repo_root,
+            request.parent_path.as_deref(),
+            &request.source_paths,
+        )?;
+
+        let copy_plan =
+            validate_repository_copy_entries(&request.source_paths, &repo_root, &target_dir)?;
+        let include_tree = copy_plan.iter().any(|entry| entry.is_directory);
+        let hardlink_preferred =
+            request.mode.as_deref().unwrap_or("hardlinkPreferred") == "hardlinkPreferred";
+        let outcomes = copy_external_entries_parallel(copy_plan, hardlink_preferred)?;
+        self.finish_file_copy_operation(&request.repo_id, parent_path, include_tree, outcomes)
+    }
+
+    fn finish_file_copy_operation(
+        &self,
+        repo_id: &str,
+        parent_path: String,
+        include_tree: bool,
+        outcomes: Vec<HardlinkCopyOutcome>,
+    ) -> Result<FileBrowserSnapshot, String> {
+        let skip_candidate_paths = hardlink_outcome_target_paths(&outcomes);
+        self.sync_repository_with_candidate_skips(repo_id, &skip_candidate_paths)?;
+        self.record_hardlink_copy_outcomes(repo_id, outcomes)?;
 
         self.load_file_browser(FileBrowserRequest {
-            repo_id: request.repo_id,
+            repo_id: repo_id.to_string(),
             directory_path: Some(parent_path),
-            include_tree: Some(imported_directory),
+            include_tree: Some(include_tree),
             special_location: None,
         })
+    }
+
+    fn record_hardlink_copy_outcomes(
+        &self,
+        repo_id: &str,
+        outcomes: Vec<HardlinkCopyOutcome>,
+    ) -> Result<(), String> {
+        if outcomes.is_empty() {
+            return Ok(());
+        }
+        let repo = self.load_repository_record(repo_id)?;
+        let mut connection = self.open_repository_connection(
+            &repo.summary.repo_id,
+            &repo.summary.path,
+            &repo.backend_record,
+        )?;
+        let tx = connection.transaction().map_err(db_error)?;
+        for outcome in outcomes {
+            let Some(target_asset) =
+                load_hardlink_asset_for_path(&tx, repo_id, &outcome.target_path)
+                    .map_err(db_error)?
+            else {
+                continue;
+            };
+            upsert_hardlink_member(
+                &tx,
+                repo_id,
+                &target_asset.asset_id,
+                &outcome.target_path,
+                &target_asset.content_hash,
+                target_asset.size_bytes,
+                &outcome.link_state,
+            )
+            .map_err(db_error)?;
+
+            if outcome.link_state == "linked" {
+                let Some(source_path) = outcome.source_path.as_deref() else {
+                    continue;
+                };
+                let Some(source_asset) =
+                    load_hardlink_asset_for_path(&tx, repo_id, source_path).map_err(db_error)?
+                else {
+                    continue;
+                };
+                if source_asset.content_hash == target_asset.content_hash
+                    && source_asset.size_bytes == target_asset.size_bytes
+                {
+                    upsert_hardlink_member(
+                        &tx,
+                        repo_id,
+                        &source_asset.asset_id,
+                        source_path,
+                        &target_asset.content_hash,
+                        target_asset.size_bytes,
+                        "linked",
+                    )
+                    .map_err(db_error)?;
+                }
+            }
+        }
+        tx.commit().map_err(db_error)
     }
 
     pub fn rename_entry(&self, request: FileRenameRequest) -> Result<FileBrowserSnapshot, String> {
@@ -2171,12 +2485,13 @@ fn load_asset_count(
 fn load_asset_path_map(
     connection: &Connection,
     repo_id: &str,
-) -> Result<BTreeMap<String, (String, String, Option<String>)>, rusqlite::Error> {
+) -> Result<BTreeMap<String, AssetPathRecord>, rusqlite::Error> {
     let mut stmt = connection.prepare(
         r#"
-        SELECT path, asset_id, status, thumbnail_path
-        FROM assets
-        WHERE repo_id = ?1
+        SELECT a.path, a.asset_id, a.status, a.thumbnail_path, hm.group_id, hm.link_state
+        FROM assets a
+        LEFT JOIN hardlink_members hm ON hm.repo_id = a.repo_id AND hm.asset_id = a.asset_id
+        WHERE a.repo_id = ?1
         "#,
     )?;
 
@@ -2186,13 +2501,24 @@ fn load_asset_path_map(
             row.get::<_, String>(1)?,
             row.get::<_, String>(2)?,
             row.get::<_, Option<String>>(3)?,
+            row.get::<_, Option<String>>(4)?,
+            row.get::<_, Option<String>>(5)?,
         ))
     })?;
 
     let mut map = BTreeMap::new();
     for row in rows {
-        let (path, asset_id, status, thumbnail_path) = row?;
-        map.insert(path, (asset_id, status, thumbnail_path));
+        let (path, asset_id, status, thumbnail_path, hardlink_group_id, hardlink_state) = row?;
+        map.insert(
+            path,
+            AssetPathRecord {
+                asset_id,
+                status,
+                thumbnail_path,
+                hardlink_group_id,
+                hardlink_state,
+            },
+        );
     }
     Ok(map)
 }
@@ -2345,20 +2671,21 @@ fn normalize_asset_thumbnail_map(
     connection: &Connection,
     repo: &RepositoryRecord,
     thumbnail_root: &Path,
-    asset_map: BTreeMap<String, (String, String, Option<String>)>,
-) -> Result<BTreeMap<String, (String, String, Option<String>)>, String> {
+    asset_map: BTreeMap<String, AssetPathRecord>,
+) -> Result<BTreeMap<String, AssetPathRecord>, String> {
     asset_map
         .into_iter()
-        .map(|(path, (asset_id, status, thumbnail_path))| {
+        .map(|(path, mut record)| {
             let thumbnail_path = normalize_asset_thumbnail_path(
                 connection,
                 repo,
                 thumbnail_root,
-                &asset_id,
+                &record.asset_id,
                 &path,
-                thumbnail_path,
+                record.thumbnail_path,
             )?;
-            Ok((path, (asset_id, status, thumbnail_path)))
+            record.thumbnail_path = thumbnail_path;
+            Ok((path, record))
         })
         .collect()
 }
@@ -2539,10 +2866,23 @@ fn load_assets(
 ) -> Result<Vec<AssetSummary>, rusqlite::Error> {
     let mut stmt = connection.prepare(
         r#"
-        SELECT asset_id, repo_id, path, filename, extension, size_bytes, status, modified_at, version, thumbnail_path
-        FROM assets
-        WHERE repo_id = ?1 AND status != 'deleted'
-        ORDER BY modified_at DESC, filename COLLATE NOCASE
+        SELECT
+          a.asset_id,
+          a.repo_id,
+          a.path,
+          a.filename,
+          a.extension,
+          a.size_bytes,
+          a.status,
+          a.modified_at,
+          a.version,
+          a.thumbnail_path,
+          hm.group_id,
+          hm.link_state
+        FROM assets a
+        LEFT JOIN hardlink_members hm ON hm.repo_id = a.repo_id AND hm.asset_id = a.asset_id
+        WHERE a.repo_id = ?1 AND a.status != 'deleted'
+        ORDER BY a.modified_at DESC, a.filename COLLATE NOCASE
         "#,
     )?;
 
@@ -2558,6 +2898,8 @@ fn load_assets(
             row.get::<_, String>(7)?,
             row.get::<_, i64>(8)?,
             row.get::<_, Option<String>>(9)?,
+            row.get::<_, Option<String>>(10)?,
+            row.get::<_, Option<String>>(11)?,
         ))
     })?;
 
@@ -2577,6 +2919,8 @@ fn load_assets(
                 modified_at,
                 version,
                 thumbnail_path,
+                hardlink_group_id,
+                hardlink_state,
             )| {
                 let tags = load_tags(connection, &asset_id)?;
 
@@ -2593,6 +2937,8 @@ fn load_assets(
                     version,
                     tags,
                     thumbnail_path,
+                    hardlink_group_id,
+                    hardlink_state,
                 })
             },
         )
@@ -2804,9 +3150,22 @@ fn load_asset_summary(
     connection
         .query_row(
             r#"
-            SELECT asset_id, repo_id, path, filename, extension, size_bytes, status, modified_at, version, thumbnail_path
-            FROM assets
-            WHERE repo_id = ?1 AND asset_id = ?2
+            SELECT
+              a.asset_id,
+              a.repo_id,
+              a.path,
+              a.filename,
+              a.extension,
+              a.size_bytes,
+              a.status,
+              a.modified_at,
+              a.version,
+              a.thumbnail_path,
+              hm.group_id,
+              hm.link_state
+            FROM assets a
+            LEFT JOIN hardlink_members hm ON hm.repo_id = a.repo_id AND hm.asset_id = a.asset_id
+            WHERE a.repo_id = ?1 AND a.asset_id = ?2
             "#,
             params![repo_id, asset_id],
             |row| {
@@ -2821,12 +3180,27 @@ fn load_asset_summary(
                     row.get::<_, String>(7)?,
                     row.get::<_, i64>(8)?,
                     row.get::<_, Option<String>>(9)?,
+                    row.get::<_, Option<String>>(10)?,
+                    row.get::<_, Option<String>>(11)?,
                 ))
             },
         )
         .optional()?
         .map(
-            |(asset_id, repo_id, path, filename, extension, size_bytes, status, modified_at, version, thumbnail_path)| {
+            |(
+                asset_id,
+                repo_id,
+                path,
+                filename,
+                extension,
+                size_bytes,
+                status,
+                modified_at,
+                version,
+                thumbnail_path,
+                hardlink_group_id,
+                hardlink_state,
+            )| {
                 let tags = load_tags(connection, &asset_id)?;
                 Ok(AssetSummary {
                     asset_id,
@@ -2841,6 +3215,8 @@ fn load_asset_summary(
                     version,
                     tags,
                     thumbnail_path,
+                    hardlink_group_id,
+                    hardlink_state,
                 })
             },
         )
@@ -2855,9 +3231,22 @@ fn load_asset_summary_from_transaction(
     let base = tx
         .query_row(
             r#"
-            SELECT asset_id, repo_id, path, filename, extension, size_bytes, status, modified_at, version, thumbnail_path
-            FROM assets
-            WHERE repo_id = ?1 AND asset_id = ?2
+            SELECT
+              a.asset_id,
+              a.repo_id,
+              a.path,
+              a.filename,
+              a.extension,
+              a.size_bytes,
+              a.status,
+              a.modified_at,
+              a.version,
+              a.thumbnail_path,
+              hm.group_id,
+              hm.link_state
+            FROM assets a
+            LEFT JOIN hardlink_members hm ON hm.repo_id = a.repo_id AND hm.asset_id = a.asset_id
+            WHERE a.repo_id = ?1 AND a.asset_id = ?2
             "#,
             params![repo_id, asset_id],
             |row| {
@@ -2872,6 +3261,8 @@ fn load_asset_summary_from_transaction(
                     row.get::<_, String>(7)?,
                     row.get::<_, i64>(8)?,
                     row.get::<_, Option<String>>(9)?,
+                    row.get::<_, Option<String>>(10)?,
+                    row.get::<_, Option<String>>(11)?,
                 ))
             },
         )
@@ -2888,6 +3279,8 @@ fn load_asset_summary_from_transaction(
         modified_at,
         version,
         thumbnail_path,
+        hardlink_group_id,
+        hardlink_state,
     )) = base
     else {
         return Ok(None);
@@ -2917,6 +3310,8 @@ fn load_asset_summary_from_transaction(
         version,
         tags,
         thumbnail_path,
+        hardlink_group_id,
+        hardlink_state,
     }))
 }
 
@@ -3041,6 +3436,7 @@ fn parse_json_column_optional(
 fn sync_repository_files(
     tx: &Transaction<'_>,
     repo: &RepositoryRecord,
+    skip_hardlink_candidate_paths: &HashSet<String>,
 ) -> Result<SyncResult, rusqlite::Error> {
     let repo_root = PathBuf::from(&repo.summary.path);
     let files = list_backend_files(repo, &repo_root).map_err(|error| {
@@ -3052,7 +3448,7 @@ fn sync_repository_files(
 
     let mut existing_stmt = tx.prepare(
         r#"
-        SELECT asset_id, path, status, thumbnail_path
+        SELECT asset_id, path, status, thumbnail_path, size_bytes, modified_at, hash
         FROM assets
         WHERE repo_id = ?1
         "#,
@@ -3061,14 +3457,20 @@ fn sync_repository_files(
         Ok((
             row.get::<_, String>(0)?,
             row.get::<_, String>(1)?,
-            row.get::<_, String>(2)?,
-            row.get::<_, Option<String>>(3)?,
+            ExistingAssetRecord {
+                asset_id: row.get::<_, String>(0)?,
+                status: row.get::<_, String>(2)?,
+                thumbnail_path: row.get::<_, Option<String>>(3)?,
+                size_bytes: row.get::<_, i64>(4)?,
+                modified_at: row.get::<_, String>(5)?,
+                hash: row.get::<_, Option<String>>(6)?,
+            },
         ))
     })?;
     let existing = existing_rows.collect::<Result<Vec<_>, _>>()?;
     let mut existing_by_path = existing
         .into_iter()
-        .map(|(asset_id, path, status, thumbnail_path)| (path, (asset_id, status, thumbnail_path)))
+        .map(|(_asset_id, path, record)| (path, record))
         .collect::<BTreeMap<_, _>>();
 
     let now = now_rfc3339();
@@ -3078,13 +3480,32 @@ fn sync_repository_files(
     let mut created_events = 0_i64;
 
     for file in &files {
-        if let Some((asset_id, previous_status, existing_thumbnail_path)) =
-            existing_by_path.remove(&file.relative_path)
-        {
+        if let Some(existing_record) = existing_by_path.remove(&file.relative_path) {
+            let asset_id = existing_record.asset_id;
+            let content_hash = if existing_record.size_bytes == file.size_bytes
+                && existing_record.modified_at == file.modified_at
+            {
+                match existing_record.hash.filter(|hash| is_content_hash(hash)) {
+                    Some(hash) => hash,
+                    None => file_sha256_hash(&file.absolute_path).map_err(|error| {
+                        rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::new(
+                            std::io::ErrorKind::Other,
+                            error,
+                        )))
+                    })?,
+                }
+            } else {
+                file_sha256_hash(&file.absolute_path).map_err(|error| {
+                    rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::new(
+                        std::io::ErrorKind::Other,
+                        error,
+                    )))
+                })?
+            };
             tx.execute(
                 r#"
                 UPDATE assets
-                SET filename = ?3, extension = ?4, size_bytes = ?5, modified_at = ?6, status = 'synced', updated_at = ?7, thumbnail_path = ?8
+                SET filename = ?3, extension = ?4, size_bytes = ?5, modified_at = ?6, hash = ?7, status = 'synced', updated_at = ?8, thumbnail_path = ?9
                 WHERE repo_id = ?1 AND asset_id = ?2
                 "#,
                 params![
@@ -3094,13 +3515,21 @@ fn sync_repository_files(
                     file.extension,
                     file.size_bytes,
                     file.modified_at,
+                    if content_hash.is_empty() { None } else { Some(content_hash.as_str()) },
                     now,
-                    existing_thumbnail_path
+                    existing_record.thumbnail_path
                 ],
             )?;
-            if previous_status == "deleted" {
+            if existing_record.status == "deleted" {
                 created_events += 1;
             }
+            update_hardlink_member_verification(
+                tx,
+                &repo.summary.repo_id,
+                &asset_id,
+                &file.relative_path,
+                &content_hash,
+            )?;
             updated_assets += 1;
             insert_event(
                 tx,
@@ -3116,6 +3545,12 @@ fn sync_repository_files(
             created_events += 1;
         } else {
             let asset_id = asset_id_for_path(&repo.summary.repo_id, &file.relative_path);
+            let content_hash = file_sha256_hash(&file.absolute_path).map_err(|error| {
+                rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    error,
+                )))
+            })?;
             tx.execute(
                 r#"
                 INSERT INTO assets (
@@ -3133,11 +3568,21 @@ fn sync_repository_files(
                     file.size_bytes,
                     now,
                     file.modified_at,
-                    format!("sha256:{}", safe_prefix(&asset_id, 18)),
+                    content_hash,
                     now,
                     Option::<String>::None
                 ],
             )?;
+            if !skip_hardlink_candidate_paths.contains(&file.relative_path) {
+                record_hardlink_candidate_for_new_asset(
+                    tx,
+                    &repo.summary.repo_id,
+                    &asset_id,
+                    &file.relative_path,
+                    &content_hash,
+                    file.size_bytes,
+                )?;
+            }
             insert_default_metadata(
                 tx,
                 &asset_id,
@@ -3160,8 +3605,8 @@ fn sync_repository_files(
         }
     }
 
-    for (path, (asset_id, status, _thumbnail_path)) in existing_by_path {
-        if status == "deleted" {
+    for (path, record) in existing_by_path {
+        if record.status == "deleted" {
             continue;
         }
         tx.execute(
@@ -3170,12 +3615,13 @@ fn sync_repository_files(
             SET status = 'deleted', updated_at = ?3
             WHERE repo_id = ?1 AND asset_id = ?2
             "#,
-            params![repo.summary.repo_id, asset_id, now],
+            params![repo.summary.repo_id, record.asset_id, now],
         )?;
+        mark_hardlink_member_missing(tx, &repo.summary.repo_id, &record.asset_id)?;
         insert_event(
             tx,
             &repo.summary,
-            &asset_id,
+            &record.asset_id,
             "asset.deleted",
             &path,
             serde_json::json!({
@@ -3186,6 +3632,9 @@ fn sync_repository_files(
         created_events += 1;
     }
 
+    let hardlink_candidates =
+        count_pending_hardlink_candidates(tx, &repo.summary.repo_id).unwrap_or(0);
+
     Ok(SyncResult {
         repo_id: repo.summary.repo_id.clone(),
         scanned_files: files.len() as i64,
@@ -3193,6 +3642,7 @@ fn sync_repository_files(
         updated_assets,
         deleted_assets,
         created_events,
+        hardlink_candidates,
     })
 }
 
@@ -3351,6 +3801,360 @@ fn insert_default_metadata(
     Ok(())
 }
 
+fn hardlink_group_id_for(repo_id: &str, content_hash: &str, size_bytes: i64) -> String {
+    format!(
+        "hardlink-{}",
+        sha256_hex(&[
+            repo_id.as_bytes(),
+            content_hash.as_bytes(),
+            size_bytes.to_string().as_bytes()
+        ])
+    )
+}
+
+fn hardlink_candidate_id_for(repo_id: &str, new_asset_id: &str, existing_asset_id: &str) -> String {
+    format!(
+        "hardlink-candidate-{}",
+        sha256_hex(&[
+            repo_id.as_bytes(),
+            new_asset_id.as_bytes(),
+            existing_asset_id.as_bytes()
+        ])
+    )
+}
+
+fn ensure_hardlink_group(
+    tx: &Transaction<'_>,
+    repo_id: &str,
+    content_hash: &str,
+    size_bytes: i64,
+) -> Result<String, rusqlite::Error> {
+    let group_id = hardlink_group_id_for(repo_id, content_hash, size_bytes);
+    let now = now_rfc3339();
+    tx.execute(
+        r#"
+        INSERT INTO hardlink_groups (group_id, repo_id, content_hash, size_bytes, created_at, updated_at)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?5)
+        ON CONFLICT(repo_id, content_hash, size_bytes)
+        DO UPDATE SET updated_at = excluded.updated_at
+        "#,
+        params![group_id, repo_id, content_hash, size_bytes, now],
+    )?;
+    tx.query_row(
+        r#"
+        SELECT group_id
+        FROM hardlink_groups
+        WHERE repo_id = ?1 AND content_hash = ?2 AND size_bytes = ?3
+        "#,
+        params![repo_id, content_hash, size_bytes],
+        |row| row.get(0),
+    )
+}
+
+fn upsert_hardlink_member(
+    tx: &Transaction<'_>,
+    repo_id: &str,
+    asset_id: &str,
+    path: &str,
+    content_hash: &str,
+    size_bytes: i64,
+    link_state: &str,
+) -> Result<(), rusqlite::Error> {
+    let group_id = ensure_hardlink_group(tx, repo_id, content_hash, size_bytes)?;
+    let now = now_rfc3339();
+    tx.execute(
+        r#"
+        INSERT INTO hardlink_members (group_id, repo_id, asset_id, path, link_state, linked_at, verified_at)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6)
+        ON CONFLICT(repo_id, asset_id)
+        DO UPDATE SET
+          group_id = excluded.group_id,
+          path = excluded.path,
+          link_state = excluded.link_state,
+          verified_at = excluded.verified_at
+        "#,
+        params![group_id, repo_id, asset_id, path, link_state, now],
+    )?;
+    Ok(())
+}
+
+fn update_hardlink_member_verification(
+    tx: &Transaction<'_>,
+    repo_id: &str,
+    asset_id: &str,
+    path: &str,
+    content_hash: &str,
+) -> Result<(), rusqlite::Error> {
+    let Some((group_id, expected_hash, current_state)) = tx
+        .query_row(
+            r#"
+            SELECT hm.group_id, hg.content_hash, hm.link_state
+            FROM hardlink_members hm
+            JOIN hardlink_groups hg ON hg.group_id = hm.group_id
+            WHERE hm.repo_id = ?1 AND hm.asset_id = ?2
+            "#,
+            params![repo_id, asset_id],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            },
+        )
+        .optional()?
+    else {
+        return Ok(());
+    };
+    let state = if expected_hash != content_hash {
+        "broken"
+    } else if current_state == "copiedFallback" {
+        "copiedFallback"
+    } else {
+        "linked"
+    };
+    tx.execute(
+        r#"
+        UPDATE hardlink_members
+        SET path = ?4, link_state = ?5, verified_at = ?6
+        WHERE repo_id = ?1 AND asset_id = ?2 AND group_id = ?3
+        "#,
+        params![repo_id, asset_id, group_id, path, state, now_rfc3339()],
+    )?;
+    Ok(())
+}
+
+fn mark_hardlink_member_missing(
+    tx: &Transaction<'_>,
+    repo_id: &str,
+    asset_id: &str,
+) -> Result<(), rusqlite::Error> {
+    tx.execute(
+        r#"
+        UPDATE hardlink_members
+        SET link_state = 'missing', verified_at = ?3
+        WHERE repo_id = ?1 AND asset_id = ?2
+        "#,
+        params![repo_id, asset_id, now_rfc3339()],
+    )?;
+    Ok(())
+}
+
+fn record_hardlink_candidate_for_new_asset(
+    tx: &Transaction<'_>,
+    repo_id: &str,
+    new_asset_id: &str,
+    new_path: &str,
+    content_hash: &str,
+    size_bytes: i64,
+) -> Result<(), rusqlite::Error> {
+    let existing = tx
+        .query_row(
+            r#"
+            SELECT asset_id, path
+            FROM assets
+            WHERE repo_id = ?1
+              AND asset_id != ?2
+              AND hash = ?3
+              AND size_bytes = ?4
+              AND status != 'deleted'
+            ORDER BY updated_at DESC
+            LIMIT 1
+            "#,
+            params![repo_id, new_asset_id, content_hash, size_bytes],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+        )
+        .optional()?;
+    let Some((existing_asset_id, existing_path)) = existing else {
+        return Ok(());
+    };
+    let candidate_id = hardlink_candidate_id_for(repo_id, new_asset_id, &existing_asset_id);
+    tx.execute(
+        r#"
+        INSERT OR IGNORE INTO hardlink_candidates (
+          candidate_id, repo_id, new_asset_id, new_path, existing_asset_id, existing_path,
+          content_hash, size_bytes, created_at
+        )
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+        "#,
+        params![
+            candidate_id,
+            repo_id,
+            new_asset_id,
+            new_path,
+            existing_asset_id,
+            existing_path,
+            content_hash,
+            size_bytes,
+            now_rfc3339()
+        ],
+    )?;
+    Ok(())
+}
+
+fn count_pending_hardlink_candidates(
+    tx: &Transaction<'_>,
+    repo_id: &str,
+) -> Result<i64, rusqlite::Error> {
+    tx.query_row(
+        r#"
+        SELECT COUNT(*)
+        FROM hardlink_candidates hc
+        JOIN assets new_asset
+          ON new_asset.repo_id = hc.repo_id
+         AND new_asset.asset_id = hc.new_asset_id
+         AND new_asset.path = hc.new_path
+         AND new_asset.hash = hc.content_hash
+         AND new_asset.size_bytes = hc.size_bytes
+         AND new_asset.status != 'deleted'
+        JOIN assets existing_asset
+          ON existing_asset.repo_id = hc.repo_id
+         AND existing_asset.asset_id = hc.existing_asset_id
+         AND existing_asset.path = hc.existing_path
+         AND existing_asset.hash = hc.content_hash
+         AND existing_asset.size_bytes = hc.size_bytes
+         AND existing_asset.status != 'deleted'
+        WHERE hc.repo_id = ?1
+        "#,
+        [repo_id],
+        |row| row.get(0),
+    )
+}
+
+fn load_hardlink_asset_for_path(
+    tx: &Transaction<'_>,
+    repo_id: &str,
+    path: &str,
+) -> Result<Option<HardlinkAssetRecord>, rusqlite::Error> {
+    let record = tx
+        .query_row(
+            r#"
+            SELECT asset_id, hash, size_bytes
+            FROM assets
+            WHERE repo_id = ?1 AND path = ?2 AND status != 'deleted'
+            "#,
+            params![repo_id, path],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, i64>(2)?,
+                ))
+            },
+        )
+        .optional()?;
+    Ok(record.and_then(|(asset_id, hash, size_bytes)| {
+        hash.filter(|value| is_content_hash(value))
+            .map(|content_hash| HardlinkAssetRecord {
+                asset_id,
+                content_hash,
+                size_bytes,
+            })
+    }))
+}
+
+fn hardlink_outcome_target_paths(outcomes: &[HardlinkCopyOutcome]) -> HashSet<String> {
+    outcomes
+        .iter()
+        .map(|outcome| outcome.target_path.clone())
+        .collect()
+}
+
+fn load_hardlink_candidates(
+    connection: &Connection,
+    repo_id: &str,
+) -> Result<Vec<HardlinkCandidate>, rusqlite::Error> {
+    let mut stmt = connection.prepare(
+        r#"
+        SELECT hc.candidate_id, hc.repo_id, hc.new_asset_id, hc.new_path,
+               hc.existing_asset_id, hc.existing_path, hc.content_hash,
+               hc.size_bytes, hc.created_at
+        FROM hardlink_candidates hc
+        JOIN assets new_asset
+          ON new_asset.repo_id = hc.repo_id
+         AND new_asset.asset_id = hc.new_asset_id
+         AND new_asset.path = hc.new_path
+         AND new_asset.hash = hc.content_hash
+         AND new_asset.size_bytes = hc.size_bytes
+         AND new_asset.status != 'deleted'
+        JOIN assets existing_asset
+          ON existing_asset.repo_id = hc.repo_id
+         AND existing_asset.asset_id = hc.existing_asset_id
+         AND existing_asset.path = hc.existing_path
+         AND existing_asset.hash = hc.content_hash
+         AND existing_asset.size_bytes = hc.size_bytes
+         AND existing_asset.status != 'deleted'
+        WHERE hc.repo_id = ?1
+        ORDER BY hc.created_at ASC
+        "#,
+    )?;
+    let rows = stmt.query_map([repo_id], map_hardlink_candidate_row)?;
+    rows.collect::<Result<Vec<_>, _>>()
+}
+
+fn load_hardlink_candidate_from_transaction(
+    tx: &Transaction<'_>,
+    repo_id: &str,
+    candidate_id: &str,
+) -> Result<Option<HardlinkCandidate>, rusqlite::Error> {
+    tx.query_row(
+        r#"
+        SELECT hc.candidate_id, hc.repo_id, hc.new_asset_id, hc.new_path,
+               hc.existing_asset_id, hc.existing_path, hc.content_hash,
+               hc.size_bytes, hc.created_at
+        FROM hardlink_candidates hc
+        JOIN assets new_asset
+          ON new_asset.repo_id = hc.repo_id
+         AND new_asset.asset_id = hc.new_asset_id
+         AND new_asset.path = hc.new_path
+         AND new_asset.hash = hc.content_hash
+         AND new_asset.size_bytes = hc.size_bytes
+         AND new_asset.status != 'deleted'
+        JOIN assets existing_asset
+          ON existing_asset.repo_id = hc.repo_id
+         AND existing_asset.asset_id = hc.existing_asset_id
+         AND existing_asset.path = hc.existing_path
+         AND existing_asset.hash = hc.content_hash
+         AND existing_asset.size_bytes = hc.size_bytes
+         AND existing_asset.status != 'deleted'
+        WHERE hc.repo_id = ?1 AND hc.candidate_id = ?2
+        "#,
+        params![repo_id, candidate_id],
+        map_hardlink_candidate_row,
+    )
+    .optional()
+}
+
+fn delete_hardlink_candidate(
+    tx: &Transaction<'_>,
+    repo_id: &str,
+    candidate_id: &str,
+) -> Result<(), rusqlite::Error> {
+    tx.execute(
+        "DELETE FROM hardlink_candidates WHERE repo_id = ?1 AND candidate_id = ?2",
+        params![repo_id, candidate_id],
+    )?;
+    Ok(())
+}
+
+fn map_hardlink_candidate_row(
+    row: &rusqlite::Row<'_>,
+) -> Result<HardlinkCandidate, rusqlite::Error> {
+    let size_bytes = row.get::<_, i64>(7)?;
+    Ok(HardlinkCandidate {
+        candidate_id: row.get(0)?,
+        repo_id: row.get(1)?,
+        new_asset_id: row.get(2)?,
+        new_path: row.get(3)?,
+        existing_asset_id: row.get(4)?,
+        existing_path: row.get(5)?,
+        content_hash: row.get(6)?,
+        size_bytes,
+        size_label: format_size_label(size_bytes),
+        created_at: row.get(8)?,
+    })
+}
+
 fn collect_repository_files(repo_root: &Path) -> std::io::Result<Vec<DiscoveredFile>> {
     let mut files = Vec::new();
     if !repo_root.exists() {
@@ -3432,11 +4236,18 @@ fn collect_repository_files_recursive(
             .unwrap_or_default();
 
         files.push(DiscoveredFile {
+            absolute_path: path,
             relative_path: relative,
             filename: file_name.to_string(),
             extension,
             size_bytes: metadata.len() as i64,
-            modified_at: now_rfc3339(),
+            modified_at: metadata
+                .modified()
+                .ok()
+                .map(system_time_to_rfc3339)
+                .transpose()
+                .map_err(|error| std::io::Error::new(std::io::ErrorKind::Other, error))?
+                .unwrap_or_else(now_rfc3339),
         });
     }
 
@@ -3656,6 +4467,53 @@ fn sha256_hex(parts: &[&[u8]]) -> String {
     hex::encode(hash.finalize())
 }
 
+fn file_sha256_hash(path: &Path) -> Result<String, String> {
+    let mut file = File::open(path).map_err(io_error)?;
+    let mut hash = Sha256::new();
+    let mut buffer = [0_u8; 64 * 1024];
+    loop {
+        let read = file.read(&mut buffer).map_err(io_error)?;
+        if read == 0 {
+            break;
+        }
+        hash.update(&buffer[..read]);
+    }
+    Ok(format!("sha256:{}", hex::encode(hash.finalize())))
+}
+
+fn file_content_hash_and_size(path: &Path) -> Result<Option<(String, i64)>, String> {
+    let metadata = match fs::metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(io_error(error)),
+    };
+    if !metadata.is_file() {
+        return Ok(None);
+    }
+    let size_bytes = i64::try_from(metadata.len())
+        .map_err(|_| "file size exceeds supported range".to_string())?;
+    let content_hash = file_sha256_hash(path)?;
+    Ok(Some((content_hash, size_bytes)))
+}
+
+fn current_file_matches_content(
+    path: &Path,
+    expected_hash: &str,
+    expected_size_bytes: i64,
+) -> Result<bool, String> {
+    let Some((content_hash, size_bytes)) = file_content_hash_and_size(path)? else {
+        return Ok(false);
+    };
+    Ok(content_hash == expected_hash && size_bytes == expected_size_bytes)
+}
+
+fn is_content_hash(value: &str) -> bool {
+    let Some(hex) = value.strip_prefix("sha256:") else {
+        return false;
+    };
+    hex.len() == 64 && hex.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
 fn generate_image_thumbnail(source_path: &Path, thumbnail_path: &Path) -> Result<(), String> {
     let image =
         image::open(source_path).map_err(|error| format!("image thumbnail error: {error}"))?;
@@ -3722,6 +4580,7 @@ fn is_video_extension(extension: &str) -> bool {
 
 #[derive(Debug)]
 struct DiscoveredFile {
+    absolute_path: PathBuf,
     relative_path: String,
     filename: String,
     extension: String,
@@ -4044,6 +4903,8 @@ fn migrate_repository_schema(connection: &Connection) -> Result<(), rusqlite::Er
     }
     connection.execute_batch(
         r#"
+        CREATE INDEX IF NOT EXISTS idx_assets_repo_hash ON assets(repo_id, hash);
+
         CREATE TABLE IF NOT EXISTS entry_thumbnails (
           repo_id TEXT NOT NULL,
           path TEXT NOT NULL,
@@ -4053,6 +4914,51 @@ fn migrate_repository_schema(connection: &Connection) -> Result<(), rusqlite::Er
           updated_at TEXT NOT NULL,
           PRIMARY KEY(repo_id, path, kind)
         );
+
+        CREATE TABLE IF NOT EXISTS hardlink_groups (
+          group_id TEXT PRIMARY KEY,
+          repo_id TEXT NOT NULL,
+          content_hash TEXT NOT NULL,
+          size_bytes INTEGER NOT NULL,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          FOREIGN KEY(repo_id) REFERENCES repositories(repo_id)
+        );
+
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_hardlink_groups_repo_hash_size
+        ON hardlink_groups(repo_id, content_hash, size_bytes);
+
+        CREATE TABLE IF NOT EXISTS hardlink_members (
+          group_id TEXT NOT NULL,
+          repo_id TEXT NOT NULL,
+          asset_id TEXT NOT NULL,
+          path TEXT NOT NULL,
+          link_state TEXT NOT NULL,
+          linked_at TEXT NOT NULL,
+          verified_at TEXT NOT NULL,
+          PRIMARY KEY(repo_id, asset_id),
+          FOREIGN KEY(group_id) REFERENCES hardlink_groups(group_id),
+          FOREIGN KEY(asset_id) REFERENCES assets(asset_id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_hardlink_members_repo_path
+        ON hardlink_members(repo_id, path);
+
+        CREATE TABLE IF NOT EXISTS hardlink_candidates (
+          candidate_id TEXT PRIMARY KEY,
+          repo_id TEXT NOT NULL,
+          new_asset_id TEXT NOT NULL,
+          new_path TEXT NOT NULL,
+          existing_asset_id TEXT NOT NULL,
+          existing_path TEXT NOT NULL,
+          content_hash TEXT NOT NULL,
+          size_bytes INTEGER NOT NULL,
+          created_at TEXT NOT NULL,
+          FOREIGN KEY(repo_id) REFERENCES repositories(repo_id)
+        );
+
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_hardlink_candidates_unique
+        ON hardlink_candidates(repo_id, new_asset_id, existing_asset_id);
         "#,
     )?;
     Ok(())
@@ -4725,10 +5631,38 @@ fn merge_directory_contents(source_dir: &Path, target_dir: &Path) -> Result<(), 
     fs::remove_dir(source_dir).map_err(io_error)
 }
 
+fn ensure_local_filesystem_repository(repo: &RepositoryRecord, action: &str) -> Result<(), String> {
+    if repo.backend_record.plugin_id == LOCAL_FILESYSTEM_PLUGIN_ID {
+        Ok(())
+    } else {
+        Err(format!(
+            "{action} is only supported for local filesystem repositories"
+        ))
+    }
+}
+
+fn resolve_file_copy_target(
+    repo_root: &Path,
+    parent_path: Option<&str>,
+    source_paths: &[String],
+) -> Result<(String, PathBuf), String> {
+    let parent_path = normalize_directory_path(parent_path.unwrap_or_default())?;
+    let target_dir = resolve_repository_relative_path(repo_root, &parent_path)?;
+    if !target_dir.exists() || !target_dir.is_dir() {
+        return Err(format!("directory not found: {parent_path}"));
+    }
+    if source_paths.is_empty() {
+        return Err("no source files were provided".to_string());
+    }
+    Ok((parent_path, target_dir))
+}
+
 #[derive(Debug, Clone)]
 struct FileImportPlanEntry {
     source: PathBuf,
+    source_relative_path: Option<String>,
     target: PathBuf,
+    target_relative_path: String,
     is_directory: bool,
 }
 
@@ -4757,6 +5691,11 @@ fn validate_external_import_entries(
             .ok_or_else(|| format!("invalid source path: {}", source.to_string_lossy()))?;
         let name = validate_new_entry_name(&name)?;
         let target = target_dir.join(&name);
+        let target_relative_path = target
+            .strip_prefix(repo_root)
+            .map_err(path_error)?
+            .to_string_lossy()
+            .replace('\\', "/");
         if target.exists() || planned_targets.iter().any(|planned| planned == &target) {
             return Err(format!("entry already exists: {name}"));
         }
@@ -4771,13 +5710,17 @@ fn validate_external_import_entries(
             }
             plan.push(FileImportPlanEntry {
                 source: source_canonical,
+                source_relative_path: None,
                 target: target.clone(),
+                target_relative_path: target_relative_path.clone(),
                 is_directory: true,
             });
         } else if source.is_file() {
             plan.push(FileImportPlanEntry {
                 source,
+                source_relative_path: None,
                 target: target.clone(),
+                target_relative_path: target_relative_path.clone(),
                 is_directory: false,
             });
         } else {
@@ -4792,17 +5735,87 @@ fn validate_external_import_entries(
     Ok(plan)
 }
 
-fn copy_external_entries_parallel(plan: Vec<FileImportPlanEntry>) -> Result<(), String> {
+fn validate_repository_copy_entries(
+    source_paths: &[String],
+    repo_root: &Path,
+    target_dir: &Path,
+) -> Result<Vec<FileImportPlanEntry>, String> {
+    let target_canonical_parent = target_dir.canonicalize().map_err(io_error)?;
+    let mut planned_targets = Vec::<PathBuf>::new();
+    let mut plan = Vec::with_capacity(source_paths.len());
+
+    for source_path in source_paths {
+        let source_relative = normalize_entry_path(source_path)?;
+        let source = resolve_repository_relative_path(repo_root, &source_relative)?;
+        if !source.exists() {
+            return Err(format!("source path does not exist: {source_relative}"));
+        }
+        let source_canonical = source.canonicalize().map_err(io_error)?;
+        let source_parent = source_canonical
+            .parent()
+            .ok_or_else(|| format!("invalid source path: {source_relative}"))?;
+        if source_parent == target_canonical_parent {
+            return Err("不能复制到原目录".to_string());
+        }
+        let name = source
+            .file_name()
+            .map(|value| value.to_string_lossy().to_string())
+            .ok_or_else(|| format!("invalid source path: {source_relative}"))?;
+        let name = validate_new_entry_name(&name)?;
+        let target = target_dir.join(&name);
+        let target_relative_path = target
+            .strip_prefix(repo_root)
+            .map_err(path_error)?
+            .to_string_lossy()
+            .replace('\\', "/");
+        if target.exists() || planned_targets.iter().any(|planned| planned == &target) {
+            return Err(format!("entry already exists: {name}"));
+        }
+
+        if source.is_dir() {
+            if target_canonical_parent.starts_with(&source_canonical) {
+                return Err("cannot copy a folder into one of its descendants".to_string());
+            }
+            plan.push(FileImportPlanEntry {
+                source: source_canonical,
+                source_relative_path: Some(source_relative.clone()),
+                target: target.clone(),
+                target_relative_path: target_relative_path.clone(),
+                is_directory: true,
+            });
+        } else if source.is_file() {
+            plan.push(FileImportPlanEntry {
+                source,
+                source_relative_path: Some(source_relative.clone()),
+                target: target.clone(),
+                target_relative_path: target_relative_path.clone(),
+                is_directory: false,
+            });
+        } else {
+            return Err(format!("unsupported source path type: {source_relative}"));
+        }
+        planned_targets.push(target);
+    }
+
+    Ok(plan)
+}
+
+fn copy_external_entries_parallel(
+    plan: Vec<FileImportPlanEntry>,
+    hardlink_preferred: bool,
+) -> Result<Vec<HardlinkCopyOutcome>, String> {
     if plan.is_empty() {
-        return Ok(());
+        return Ok(Vec::new());
     }
 
     let worker_count = plan.len().min(MAX_PARALLEL_IMPORTS);
     let queue = Arc::new(Mutex::new(plan.into_iter()));
+    let outcomes = Arc::new(Mutex::new(Vec::new()));
     let mut handles = Vec::with_capacity(worker_count);
 
     for _ in 0..worker_count {
         let queue = queue.clone();
+        let outcomes = outcomes.clone();
         handles.push(thread::spawn(move || loop {
             let Some(entry) = ({
                 let mut entries = queue
@@ -4813,11 +5826,27 @@ fn copy_external_entries_parallel(plan: Vec<FileImportPlanEntry>) -> Result<(), 
                 return Ok(());
             };
 
-            if entry.is_directory {
-                copy_directory_recursive(&entry.source, &entry.target)?;
+            let mut entry_outcomes = if entry.is_directory {
+                copy_directory_recursive_with_mode(
+                    &entry.source,
+                    entry.source_relative_path.as_deref(),
+                    &entry.target,
+                    &entry.target_relative_path,
+                    hardlink_preferred,
+                )?
             } else {
-                fs::copy(&entry.source, &entry.target).map_err(io_error)?;
-            }
+                vec![copy_file_with_mode(
+                    &entry.source,
+                    entry.source_relative_path.as_deref(),
+                    &entry.target,
+                    &entry.target_relative_path,
+                    hardlink_preferred,
+                )?]
+            };
+            outcomes
+                .lock()
+                .map_err(|_| "import outcome lock poisoned".to_string())?
+                .append(&mut entry_outcomes);
         }));
     }
 
@@ -4829,7 +5858,11 @@ fn copy_external_entries_parallel(plan: Vec<FileImportPlanEntry>) -> Result<(), 
         }
     }
 
-    Ok(())
+    let outcomes = Arc::try_unwrap(outcomes)
+        .map_err(|_| "import outcome still shared".to_string())?
+        .into_inner()
+        .map_err(|_| "import outcome lock poisoned".to_string())?;
+    Ok(outcomes)
 }
 
 fn export_repository_archive(
@@ -5136,8 +6169,15 @@ fn command_error(label: &str, output: &std::process::Output) -> String {
     format!("{label} failed: {detail}")
 }
 
-fn copy_directory_recursive(source: &Path, target: &Path) -> Result<(), String> {
+fn copy_directory_recursive_with_mode(
+    source: &Path,
+    source_relative_path: Option<&str>,
+    target: &Path,
+    target_relative_path: &str,
+    hardlink_preferred: bool,
+) -> Result<Vec<HardlinkCopyOutcome>, String> {
     fs::create_dir(target).map_err(io_error)?;
+    let mut outcomes = Vec::new();
     for entry in fs::read_dir(source).map_err(io_error)? {
         let entry = entry.map_err(io_error)?;
         let name = entry.file_name().to_string_lossy().to_string();
@@ -5147,15 +6187,93 @@ fn copy_directory_recursive(source: &Path, target: &Path) -> Result<(), String> 
 
         let child_source = entry.path();
         let child_target = target.join(&name);
+        let child_source_relative_path =
+            source_relative_path.map(|parent| join_relative_path(parent, &name));
+        let child_relative_path = join_relative_path(target_relative_path, &name);
         let metadata = entry.metadata().map_err(io_error)?;
         if metadata.is_dir() {
-            copy_directory_recursive(&child_source, &child_target)?;
+            outcomes.extend(copy_directory_recursive_with_mode(
+                &child_source,
+                child_source_relative_path.as_deref(),
+                &child_target,
+                &child_relative_path,
+                hardlink_preferred,
+            )?);
         } else if metadata.is_file() {
-            fs::copy(&child_source, &child_target).map_err(io_error)?;
+            outcomes.push(copy_file_with_mode(
+                &child_source,
+                child_source_relative_path.as_deref(),
+                &child_target,
+                &child_relative_path,
+                hardlink_preferred,
+            )?);
         }
     }
 
-    Ok(())
+    Ok(outcomes)
+}
+
+fn copy_file_with_mode(
+    source: &Path,
+    source_relative_path: Option<&str>,
+    target: &Path,
+    target_relative_path: &str,
+    hardlink_preferred: bool,
+) -> Result<HardlinkCopyOutcome, String> {
+    if let Some(parent) = target.parent() {
+        fs::create_dir_all(parent).map_err(io_error)?;
+    }
+    if hardlink_preferred && fs::hard_link(source, target).is_ok() {
+        return Ok(HardlinkCopyOutcome {
+            source_path: source_relative_path.map(str::to_string),
+            target_path: target_relative_path.to_string(),
+            link_state: "linked".to_string(),
+        });
+    }
+    fs::copy(source, target).map_err(io_error)?;
+    Ok(HardlinkCopyOutcome {
+        source_path: source_relative_path.map(str::to_string),
+        target_path: target_relative_path.to_string(),
+        link_state: "copiedFallback".to_string(),
+    })
+}
+
+fn replace_file_with_hardlink(
+    repo_root: &Path,
+    source: &Path,
+    target: &Path,
+) -> Result<(), String> {
+    if !source.is_file() {
+        return Err("hardlink source is not a file".to_string());
+    }
+    if !target.is_file() {
+        return Err("hardlink target is not a file".to_string());
+    }
+    let staging_dir = repository_meta_dir(repo_root).join("hardlink-staging");
+    fs::create_dir_all(&staging_dir).map_err(io_error)?;
+    let backup = staging_dir.join(format!(
+        "{}.bak",
+        sha256_hex(&[
+            target.to_string_lossy().as_bytes(),
+            now_rfc3339().as_bytes()
+        ])
+    ));
+    fs::rename(target, &backup).map_err(io_error)?;
+    match fs::hard_link(source, target) {
+        Ok(()) => {
+            fs::remove_file(&backup).map_err(io_error)?;
+            Ok(())
+        }
+        Err(error) => {
+            let restore_result = fs::rename(&backup, target);
+            if let Err(restore_error) = restore_result {
+                return Err(format!(
+                    "hardlink failed: {error}; restore failed: {restore_error}"
+                ));
+            }
+            Err(format!("hardlink failed: {error}"))
+        }
+    }
 }
 
 fn validate_new_entry_name(name: &str) -> Result<String, String> {
@@ -5220,7 +6338,7 @@ fn list_backend_directory_entries(
     repo: &RepositoryRecord,
     repo_root: &Path,
     current_path: &str,
-    asset_map: &BTreeMap<String, (String, String, Option<String>)>,
+    asset_map: &BTreeMap<String, AssetPathRecord>,
     thumbnail_map: &BTreeMap<(String, String), ThumbnailRecord>,
 ) -> Result<Vec<FileBrowserEntry>, String> {
     let entries = backend_adapter(repo).list_directory_entries(
@@ -5234,7 +6352,7 @@ fn list_backend_directory_entries(
 fn list_trash_directory_entries(
     repo_root: &Path,
     current_path: &str,
-    asset_map: &BTreeMap<String, (String, String, Option<String>)>,
+    asset_map: &BTreeMap<String, AssetPathRecord>,
     thumbnail_map: &BTreeMap<(String, String), ThumbnailRecord>,
 ) -> Result<Vec<FileBrowserEntry>, String> {
     let trash_root = repository_trash_dir(repo_root);
@@ -5518,7 +6636,7 @@ fn build_directory_node(repo_root: &Path, relative_path: &str) -> Result<FileTre
 
 fn map_file_browser_entries(
     mut entries: Vec<FileSystemEntry>,
-    asset_map: &BTreeMap<String, (String, String, Option<String>)>,
+    asset_map: &BTreeMap<String, AssetPathRecord>,
     thumbnail_map: &BTreeMap<(String, String), ThumbnailRecord>,
 ) -> Vec<FileBrowserEntry> {
     entries.sort_by(|left, right| match (&left.kind, &right.kind) {
@@ -5534,16 +6652,14 @@ fn map_file_browser_entries(
                 FileSystemEntryKind::Directory => "directory",
                 FileSystemEntryKind::File => "file",
             };
-            let (asset_id, status, asset_thumbnail_path) = asset_map
-                .get(&entry.path)
-                .map(|(id, entry_status, thumbnail)| {
-                    (
-                        Some(id.clone()),
-                        Some(entry_status.clone()),
-                        thumbnail.clone(),
-                    )
-                })
-                .unwrap_or((None, None, None));
+            let asset_record = asset_map.get(&entry.path);
+            let asset_id = asset_record.map(|record| record.asset_id.clone());
+            let status = asset_record.map(|record| record.status.clone());
+            let asset_thumbnail_path =
+                asset_record.and_then(|record| record.thumbnail_path.clone());
+            let hardlink_group_id =
+                asset_record.and_then(|record| record.hardlink_group_id.clone());
+            let hardlink_state = asset_record.and_then(|record| record.hardlink_state.clone());
             let entry_thumbnail = thumbnail_map.get(&(entry.path.clone(), kind.to_string()));
             let thumbnail_path = entry_thumbnail
                 .map(|record| record.path.clone())
@@ -5562,6 +6678,8 @@ fn map_file_browser_entries(
                 status,
                 thumbnail_path,
                 thumbnail_custom,
+                hardlink_group_id,
+                hardlink_state,
                 metadata: BTreeMap::new(),
             }
         })
@@ -5570,7 +6688,7 @@ fn map_file_browser_entries(
 
 fn map_trash_browser_entries(
     mut entries: Vec<FileSystemEntry>,
-    asset_map: &BTreeMap<String, (String, String, Option<String>)>,
+    asset_map: &BTreeMap<String, AssetPathRecord>,
     thumbnail_map: &BTreeMap<(String, String), ThumbnailRecord>,
     manifest: &TrashManifest,
 ) -> Vec<FileBrowserEntry> {
@@ -5592,16 +6710,16 @@ fn map_trash_browser_entries(
                 FileSystemEntryKind::Directory => "directory",
                 FileSystemEntryKind::File => "file",
             };
-            let (asset_id, status, asset_thumbnail_path) = asset_map
-                .get(&original_path)
-                .map(|(id, entry_status, thumbnail)| {
-                    (
-                        Some(id.clone()),
-                        Some(entry_status.clone()),
-                        thumbnail.clone(),
-                    )
-                })
-                .unwrap_or((None, Some("deleted".to_string()), None));
+            let asset_record = asset_map.get(&original_path);
+            let asset_id = asset_record.map(|record| record.asset_id.clone());
+            let status = asset_record
+                .map(|record| record.status.clone())
+                .or_else(|| Some("deleted".to_string()));
+            let asset_thumbnail_path =
+                asset_record.and_then(|record| record.thumbnail_path.clone());
+            let hardlink_group_id =
+                asset_record.and_then(|record| record.hardlink_group_id.clone());
+            let hardlink_state = asset_record.and_then(|record| record.hardlink_state.clone());
             let entry_thumbnail = thumbnail_map.get(&(original_path.clone(), kind.to_string()));
             let thumbnail_path = entry_thumbnail
                 .map(|record| record.path.clone())
@@ -5631,6 +6749,8 @@ fn map_trash_browser_entries(
                 status,
                 thumbnail_path,
                 thumbnail_custom,
+                hardlink_group_id,
+                hardlink_state,
                 metadata,
             }
         })
@@ -6038,6 +7158,17 @@ fn rename_file_asset_record(
             now_rfc3339()
         ],
     )?;
+    tx.execute(
+        r#"
+        UPDATE hardlink_members
+        SET path = ?3, verified_at = ?4
+        WHERE repo_id = ?1
+          AND asset_id = (
+            SELECT asset_id FROM assets WHERE repo_id = ?1 AND path = ?2 LIMIT 1
+          )
+        "#,
+        params![repo_id, target_path, target_path, now_rfc3339()],
+    )?;
 
     Ok(())
 }
@@ -6081,6 +7212,14 @@ fn rename_directory_asset_records(
             WHERE repo_id = ?1 AND asset_id = ?2
             "#,
             params![repo_id, asset_id, new_path, filename, extension, now],
+        )?;
+        tx.execute(
+            r#"
+            UPDATE hardlink_members
+            SET path = ?3, verified_at = ?4
+            WHERE repo_id = ?1 AND asset_id = ?2
+            "#,
+            params![repo_id, asset_id, new_path, now],
         )?;
     }
 
@@ -6197,6 +7336,16 @@ fn rename_directory_move_asset_records(
             "#,
             params![repo_id, source_path, target_path, filename, extension, now],
         )?;
+        tx.execute(
+            r#"
+            UPDATE hardlink_members
+            SET path = ?3, verified_at = ?4
+            WHERE repo_id = ?1 AND asset_id = (
+              SELECT asset_id FROM assets WHERE repo_id = ?1 AND path = ?3 LIMIT 1
+            )
+            "#,
+            params![repo_id, source_path, target_path, now],
+        )?;
         return Ok(());
     }
 
@@ -6208,6 +7357,13 @@ fn mark_file_asset_deleted(
     repo_id: &str,
     path: &str,
 ) -> Result<(), rusqlite::Error> {
+    let asset_id = tx
+        .query_row(
+            "SELECT asset_id FROM assets WHERE repo_id = ?1 AND path = ?2",
+            params![repo_id, path],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()?;
     tx.execute(
         r#"
         UPDATE assets
@@ -6216,6 +7372,9 @@ fn mark_file_asset_deleted(
         "#,
         params![repo_id, path, now_rfc3339()],
     )?;
+    if let Some(asset_id) = asset_id {
+        mark_hardlink_member_missing(tx, repo_id, &asset_id)?;
+    }
     Ok(())
 }
 
@@ -6225,6 +7384,17 @@ fn mark_directory_assets_deleted(
     path: &str,
 ) -> Result<(), rusqlite::Error> {
     let prefix = format!("{path}/%");
+    let mut stmt = tx.prepare(
+        r#"
+        SELECT asset_id
+        FROM assets
+        WHERE repo_id = ?1 AND (path = ?2 OR path LIKE ?3)
+        "#,
+    )?;
+    let asset_rows = stmt.query_map(params![repo_id, path, prefix.as_str()], |row| {
+        row.get::<_, String>(0)
+    })?;
+    let asset_ids = asset_rows.collect::<Result<Vec<_>, _>>()?;
     tx.execute(
         r#"
         UPDATE assets
@@ -6233,6 +7403,9 @@ fn mark_directory_assets_deleted(
         "#,
         params![repo_id, path, prefix, now_rfc3339()],
     )?;
+    for asset_id in asset_ids {
+        mark_hardlink_member_missing(tx, repo_id, &asset_id)?;
+    }
     Ok(())
 }
 
@@ -6497,6 +7670,262 @@ mod tests {
         assert!(asset_ids
             .iter()
             .all(|asset_id| asset_id.starts_with("asset-") && asset_id.len() == 70));
+
+        fs::remove_dir_all(root).expect("test temp root should be removed");
+    }
+
+    #[test]
+    fn sync_repository_stores_real_content_hash_and_candidates() {
+        let (state, root, repo_root, _thumbnail_root) =
+            create_test_state("sync-hardlink-candidate");
+        fs::write(repo_root.join("source.txt"), b"same bytes")
+            .expect("source file should be written");
+        let repo_id = create_repository_for_path(&state, &repo_root);
+        fs::write(repo_root.join("copy.txt"), b"same bytes").expect("copy file should be written");
+
+        let result = state
+            .sync_repository(SyncRequest {
+                repo_id: repo_id.clone(),
+            })
+            .expect("sync should complete");
+        assert_eq!(result.hardlink_candidates, 1);
+
+        let connection = state
+            .open_repository_connection(
+                &repo_id,
+                &repo_root.to_string_lossy(),
+                &RepositoryBackendRecord {
+                    plugin_id: LOCAL_FILESYSTEM_PLUGIN_ID.to_string(),
+                    config: serde_json::json!({}),
+                },
+            )
+            .expect("repository connection should open");
+        let hash: String = connection
+            .query_row(
+                "SELECT hash FROM assets WHERE repo_id = ?1 AND path = 'source.txt'",
+                [repo_id.as_str()],
+                |row| row.get(0),
+            )
+            .expect("hash should load");
+        assert!(is_content_hash(&hash));
+
+        let candidates = state
+            .list_hardlink_candidates(&repo_id)
+            .expect("candidates should load");
+        assert_eq!(candidates.candidates.len(), 1);
+
+        drop(connection);
+        fs::remove_dir_all(root).expect("test temp root should be removed");
+    }
+
+    #[test]
+    fn copy_entries_records_linked_hardlink_member() {
+        let (state, root, repo_root, _thumbnail_root) = create_test_state("copy-hardlink");
+        fs::create_dir_all(repo_root.join("Copies")).expect("copies folder should be created");
+        fs::write(repo_root.join("source.txt"), b"copy me").expect("source file should be written");
+        let repo_id = create_repository_for_path(&state, &repo_root);
+
+        state
+            .copy_entries(FileCopyRequest {
+                repo_id: repo_id.clone(),
+                source_paths: vec!["source.txt".to_string()],
+                parent_path: Some("Copies".to_string()),
+                mode: None,
+            })
+            .expect("copy should complete");
+
+        let snapshot = state
+            .load_file_browser(FileBrowserRequest {
+                repo_id: repo_id.clone(),
+                directory_path: Some("Copies".to_string()),
+                include_tree: Some(false),
+                special_location: None,
+            })
+            .expect("browser should load");
+        let copied = snapshot
+            .entries
+            .iter()
+            .find(|entry| entry.path == "Copies/source.txt")
+            .expect("copied entry should exist");
+        assert_eq!(copied.hardlink_state.as_deref(), Some("linked"));
+        assert!(copied.hardlink_group_id.is_some());
+        let root_snapshot = state
+            .load_file_browser(FileBrowserRequest {
+                repo_id: repo_id.clone(),
+                directory_path: Some(String::new()),
+                include_tree: Some(false),
+                special_location: None,
+            })
+            .expect("root browser should load");
+        let source = root_snapshot
+            .entries
+            .iter()
+            .find(|entry| entry.path == "source.txt")
+            .expect("source entry should exist");
+        assert_eq!(source.hardlink_state.as_deref(), Some("linked"));
+        assert_eq!(source.hardlink_group_id, copied.hardlink_group_id);
+        let candidates = state
+            .list_hardlink_candidates(&repo_id)
+            .expect("candidates should load");
+        assert!(candidates.candidates.is_empty());
+
+        fs::remove_dir_all(root).expect("test temp root should be removed");
+    }
+
+    #[test]
+    fn copy_entries_rejects_same_directory_target() {
+        let (state, root, repo_root, _thumbnail_root) = create_test_state("copy-same-directory");
+        fs::write(repo_root.join("source.txt"), b"copy me").expect("source file should be written");
+        let repo_id = create_repository_for_path(&state, &repo_root);
+
+        let error = state
+            .copy_entries(FileCopyRequest {
+                repo_id,
+                source_paths: vec!["source.txt".to_string()],
+                parent_path: Some("".to_string()),
+                mode: None,
+            })
+            .expect_err("same-directory copy should fail");
+        assert!(error.contains("不能复制到原目录"));
+
+        fs::remove_dir_all(root).expect("test temp root should be removed");
+    }
+
+    #[test]
+    fn copy_entries_copy_mode_records_fallback_without_candidate() {
+        let (state, root, repo_root, _thumbnail_root) = create_test_state("copy-fallback");
+        fs::create_dir_all(repo_root.join("Copies")).expect("copies folder should be created");
+        fs::write(repo_root.join("source.txt"), b"copy me").expect("source file should be written");
+        let repo_id = create_repository_for_path(&state, &repo_root);
+
+        state
+            .copy_entries(FileCopyRequest {
+                repo_id: repo_id.clone(),
+                source_paths: vec!["source.txt".to_string()],
+                parent_path: Some("Copies".to_string()),
+                mode: Some("copy".to_string()),
+            })
+            .expect("copy should complete");
+
+        let snapshot = state
+            .load_file_browser(FileBrowserRequest {
+                repo_id: repo_id.clone(),
+                directory_path: Some("Copies".to_string()),
+                include_tree: Some(false),
+                special_location: None,
+            })
+            .expect("browser should load");
+        let copied = snapshot
+            .entries
+            .iter()
+            .find(|entry| entry.path == "Copies/source.txt")
+            .expect("copied entry should exist");
+        assert_eq!(copied.hardlink_state.as_deref(), Some("copiedFallback"));
+        state
+            .sync_repository(SyncRequest {
+                repo_id: repo_id.clone(),
+            })
+            .expect("sync should preserve fallback state");
+        let synced_snapshot = state
+            .load_file_browser(FileBrowserRequest {
+                repo_id: repo_id.clone(),
+                directory_path: Some("Copies".to_string()),
+                include_tree: Some(false),
+                special_location: None,
+            })
+            .expect("browser should load after sync");
+        let synced_copy = synced_snapshot
+            .entries
+            .iter()
+            .find(|entry| entry.path == "Copies/source.txt")
+            .expect("copied entry should exist after sync");
+        assert_eq!(
+            synced_copy.hardlink_state.as_deref(),
+            Some("copiedFallback")
+        );
+        let candidates = state
+            .list_hardlink_candidates(&repo_id)
+            .expect("candidates should load");
+        assert!(candidates.candidates.is_empty());
+
+        fs::remove_dir_all(root).expect("test temp root should be removed");
+    }
+
+    #[test]
+    fn confirm_hardlink_candidate_rejects_changed_file() {
+        let (state, root, repo_root, _thumbnail_root) =
+            create_test_state("confirm-hardlink-changed");
+        fs::write(repo_root.join("source.txt"), b"same bytes")
+            .expect("source file should be written");
+        let repo_id = create_repository_for_path(&state, &repo_root);
+        fs::write(repo_root.join("copy.txt"), b"same bytes").expect("copy file should be written");
+        state
+            .sync_repository(SyncRequest {
+                repo_id: repo_id.clone(),
+            })
+            .expect("sync should create candidate");
+        let candidate_id = state
+            .list_hardlink_candidates(&repo_id)
+            .expect("candidates should load")
+            .candidates
+            .first()
+            .expect("candidate should exist")
+            .candidate_id
+            .clone();
+
+        fs::write(repo_root.join("copy.txt"), b"changed bytes")
+            .expect("copy file should be modified");
+        let error = state
+            .confirm_hardlink_candidate(HardlinkConfirmRequest {
+                repo_id: repo_id.clone(),
+                candidate_id,
+            })
+            .expect_err("changed candidate should fail");
+        assert!(error.contains("no longer valid"));
+        let bytes = fs::read(repo_root.join("copy.txt")).expect("copy file should still exist");
+        assert_eq!(bytes, b"changed bytes");
+        let candidates = state
+            .list_hardlink_candidates(&repo_id)
+            .expect("candidates should load after rejection");
+        assert!(candidates.candidates.is_empty());
+
+        fs::remove_dir_all(root).expect("test temp root should be removed");
+    }
+
+    #[test]
+    fn hardlink_candidate_list_filters_stale_records() {
+        let (state, root, repo_root, _thumbnail_root) =
+            create_test_state("hardlink-stale-candidate");
+        fs::write(repo_root.join("source.txt"), b"same bytes")
+            .expect("source file should be written");
+        let repo_id = create_repository_for_path(&state, &repo_root);
+        fs::write(repo_root.join("copy.txt"), b"same bytes").expect("copy file should be written");
+        state
+            .sync_repository(SyncRequest {
+                repo_id: repo_id.clone(),
+            })
+            .expect("sync should create candidate");
+        assert_eq!(
+            state
+                .list_hardlink_candidates(&repo_id)
+                .expect("candidate should load")
+                .candidates
+                .len(),
+            1
+        );
+
+        fs::write(repo_root.join("copy.txt"), b"different bytes")
+            .expect("copy file should be modified");
+        state
+            .sync_repository(SyncRequest {
+                repo_id: repo_id.clone(),
+            })
+            .expect("sync should mark candidate stale");
+        assert!(state
+            .list_hardlink_candidates(&repo_id)
+            .expect("stale candidates should be filtered")
+            .candidates
+            .is_empty());
 
         fs::remove_dir_all(root).expect("test temp root should be removed");
     }
