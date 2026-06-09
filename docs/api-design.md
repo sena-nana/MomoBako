@@ -84,9 +84,15 @@
     - free text query
     - `repoId`
     - `tag`
+    - `tags`
     - `metadataKey`
     - `metadataValue`
+    - `metadataFilters`
+    - `formats`
     - `minRating`
+  - `tags` and `formats` match with OR semantics inside each field; different filter fields combine with AND semantics.
+  - `metadataFilters` accepts key/value pairs such as `color` and `shape`; values are matched against metadata text.
+  - Desktop resource filtering sends the current `repoId` and may search with an empty free text query.
 
 ## Plugin API
 
