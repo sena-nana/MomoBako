@@ -5,6 +5,7 @@ import {
   Minus,
   PanelLeftClose,
   PanelLeftOpen,
+  SlidersHorizontal,
   Square,
   X,
 } from "lucide-vue-next";
@@ -25,9 +26,13 @@ const appWindow = safeCurrentWindow();
 const route = useRoute();
 const router = useRouter();
 const {
+  activeFilterCount,
+  hasActiveFilters,
+  isFilterBarOpen,
   searchQuery,
   runSearch,
   setActivePanel,
+  toggleFilterBar,
 } = useRepositoryWorkspace();
 let unlisten: (() => void) | null = null;
 
@@ -67,6 +72,14 @@ function onSearchInput(event: Event) {
     void router.push("/");
   }
   void runSearch({ query });
+}
+
+function onToggleFilterBar() {
+  toggleFilterBar();
+  setActivePanel("search");
+  if (route.path !== "/") {
+    void router.push("/");
+  }
 }
 
 async function onMinimize() {
@@ -109,15 +122,29 @@ async function onClose() {
         />
       </button>
     </div>
-    <label class="titlebar__search" aria-label="全局搜索">
-      <input
-        :value="searchQuery"
-        type="search"
-        aria-label="全局搜索"
-        placeholder="搜索文件名、标签、元数据"
-        @input="onSearchInput"
-      />
-    </label>
+    <div class="titlebar__search-group">
+      <label class="titlebar__search" aria-label="全局搜索">
+        <input
+          :value="searchQuery"
+          type="search"
+          aria-label="全局搜索"
+          placeholder="搜索文件名、标签、元数据"
+          @input="onSearchInput"
+        />
+      </label>
+      <button
+        type="button"
+        class="titlebar__filter-btn"
+        :class="{ 'is-active': isFilterBarOpen || hasActiveFilters }"
+        :aria-label="isFilterBarOpen ? '隐藏筛选栏' : '显示筛选栏'"
+        :aria-pressed="isFilterBarOpen"
+        title="筛选"
+        @click="onToggleFilterBar"
+      >
+        <SlidersHorizontal :size="14" aria-hidden="true" />
+        <span v-if="activeFilterCount" class="titlebar__filter-count">{{ activeFilterCount }}</span>
+      </button>
+    </div>
     <div class="titlebar__controls">
       <button
         type="button"

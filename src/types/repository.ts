@@ -33,6 +33,8 @@ export type AssetSummary = {
   version: number;
   tags: string[];
   thumbnailPath?: string | null;
+  hardlinkGroupId?: string | null;
+  hardlinkState?: HardlinkState | null;
 };
 
 export type FolderSummary = {
@@ -75,6 +77,8 @@ export type FileBrowserEntry = {
   status?: string | null;
   thumbnailPath?: string | null;
   thumbnailCustom?: boolean;
+  hardlinkGroupId?: string | null;
+  hardlinkState?: HardlinkState | null;
   metadata?: Record<string, unknown>;
 };
 
@@ -129,12 +133,20 @@ export type SearchResponse = {
   results: SearchHit[];
 };
 
+export type SearchMetadataFilter = {
+  key: string;
+  value: string;
+};
+
 export type SearchRequest = {
   query: string;
   repoId?: string;
   metadataKey?: string;
   metadataValue?: string;
   tag?: string;
+  tags?: string[];
+  metadataFilters?: SearchMetadataFilter[];
+  formats?: string[];
   minRating?: number;
 };
 
@@ -231,6 +243,46 @@ export type FileImportRequest = {
   sourcePaths: string[];
 };
 
+export type FileCopyMode = "hardlinkPreferred" | "copy";
+
+export type FileCopyRequest = {
+  repoId: string;
+  sourcePaths: string[];
+  parentPath?: string;
+  mode?: FileCopyMode;
+};
+
+export type HardlinkState = "linked" | "copiedFallback" | "broken" | "missing";
+
+export type HardlinkCandidate = {
+  candidateId: string;
+  repoId: string;
+  newAssetId: string;
+  newPath: string;
+  existingAssetId: string;
+  existingPath: string;
+  contentHash: string;
+  sizeBytes: number;
+  sizeLabel: string;
+  createdAt: string;
+};
+
+export type HardlinkCandidateResponse = {
+  repoId: string;
+  candidates: HardlinkCandidate[];
+};
+
+export type HardlinkConfirmRequest = {
+  repoId: string;
+  candidateId: string;
+};
+
+export type HardlinkConfirmResponse = {
+  repoId: string;
+  candidate: HardlinkCandidate;
+  state: HardlinkState;
+};
+
 export type FileRenameRequest = {
   repoId: string;
   path: string;
@@ -268,6 +320,7 @@ export type SyncResult = {
   updatedAssets: number;
   deletedAssets: number;
   createdEvents: number;
+  hardlinkCandidates: number;
 };
 
 export type ThumbnailAction = "ensure" | "refresh" | "save" | "saveGenerated" | "clear";

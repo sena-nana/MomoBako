@@ -397,6 +397,146 @@
   min-height: 100%;
 }
 
+.workspace-filter-bar {
+  margin-bottom: 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+  background: var(--bg-elev);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.workspace-filter-bar__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.workspace-filter-bar__head strong {
+  display: block;
+  margin-top: 3px;
+  font-size: 13px;
+}
+
+.workspace-filter-bar__actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.workspace-filter-bar__btn {
+  height: 28px;
+  padding: 0 9px;
+}
+
+.workspace-filter-bar__groups {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.workspace-filter-bar__group {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr);
+  align-items: start;
+  gap: 8px;
+}
+
+.workspace-filter-bar__group > span {
+  min-height: 26px;
+  display: inline-flex;
+  align-items: center;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.workspace-filter-bar__options {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.workspace-filter-chip {
+  min-height: 26px;
+  padding: 0 9px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg);
+  color: var(--text-muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.workspace-filter-chip:hover,
+.workspace-filter-chip.is-active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+  filter: none;
+}
+
+.workspace-filter-chip__swatch {
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  background: var(--filter-swatch, var(--accent));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--border-strong) 70%, transparent);
+}
+
+.workspace-filter-input {
+  height: 26px;
+  display: inline-grid;
+  grid-template-columns: minmax(86px, 120px) auto;
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--bg);
+}
+
+.workspace-filter-input input {
+  min-width: 0;
+  height: 100%;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+}
+
+.workspace-filter-input input:focus {
+  border: 0;
+}
+
+.workspace-filter-input button {
+  height: 100%;
+  padding: 0 9px;
+  border: 0;
+  border-left: 1px solid var(--border-soft);
+  border-radius: 0;
+  background: var(--bg-subtle);
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.workspace-filter-input button:hover:not(:disabled) {
+  background: var(--accent-soft);
+  color: var(--accent);
+  filter: none;
+}
+
 .search-workbench,
 .extensions-workbench {
   min-height: 100%;
@@ -897,7 +1037,7 @@
 
 .files-list__meta {
   display: grid;
-  grid-template-columns: minmax(44px, auto) minmax(64px, auto) minmax(56px, auto) minmax(132px, auto);
+  grid-template-columns: repeat(5, minmax(44px, auto));
   align-items: flex-end;
   justify-content: end;
   gap: 10px;
@@ -1558,6 +1698,27 @@
   border-color: color-mix(in srgb, var(--accent) 34%, var(--border-strong));
 }
 
+.copy-target-dialog__body,
+.hardlink-candidate-dialog__body {
+  display: grid;
+  gap: 12px;
+}
+
+.hardlink-candidate-dialog__paths {
+  display: grid;
+  gap: 6px;
+  padding: 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--bg-subtle);
+}
+
+.hardlink-candidate-dialog__paths span {
+  overflow-wrap: anywhere;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
 .asset-card__thumb {
   height: calc(var(--asset-scale) + 46px);
   border-radius: 12px;
@@ -2159,6 +2320,7 @@
 
   .library-overview__header,
   .library-manager__item,
+  .workspace-filter-bar__head,
   .search-workbench__header {
     grid-template-columns: 1fr;
     flex-direction: column;
@@ -2167,8 +2329,14 @@
 
   .library-overview__actions,
   .library-manager__actions,
+  .workspace-filter-bar__actions,
   .search-workbench__stats {
     justify-content: flex-start;
+  }
+
+  .workspace-filter-bar__group {
+    grid-template-columns: 1fr;
+    gap: 4px;
   }
 
   .repository-export-dialog__grid {
