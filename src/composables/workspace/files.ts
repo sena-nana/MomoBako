@@ -1,0 +1,114 @@
+import { getFileBrowser } from "../../services/repositoryApi";
+import type { FileBrowserSnapshot } from "../../types/repository";
+import {
+  activePanel,
+  activeRepoId,
+  activeSnapshot,
+  currentDirectoryPath,
+  error,
+  fileBrowser,
+  fileTree,
+  isLoadingFileBrowser,
+  selectedFilePath,
+} from "./state";
+import {
+  cancelOperationProgress,
+  finishOperationProgress,
+  startOperationProgress,
+  updateOperationProgress,
+} from "./tasks";
+import { loadThumbnailsForSnapshot } from "./thumbnails";
+
+export type FileBrowserLoadOptions = {
+  includeTree?: boolean;
+  specialLocation?: "trash";
+};
+
+export function entryNameFromPath(path: string) {
+  const segments = path.replace(/\\/g, "/").replace(/\/+$/g, "").split("/").filter(Boolean);
+  return segments[segments.length - 1] ?? path;
+}
+
+export function getDefaultFileBrowserSelection(snapshot: FileBrowserSnapshot) {
+  return snapshot.entries.find((entry) => entry.kind === "file")?.path
+    ?? snapshot.entries[0]?.path
+    ?? null;
+}
+
+export function applyFileBrowserSnapshot(snapshot: FileBrowserSnapshot) {
+  const displaySnapshot = {
+    ...snapshot,
+    entries: snapshot.entries.map((entry) => ({ ...entry })),
+  };
+  fileBrowser.value = displaySnapshot;
+  if (displaySnapshot.tree) {
+    fileTree.value = displaySnapshot.tree;
+  }
+  currentDirectoryPath.value = displaySnapshot.currentPath;
+
+  const hasCurrentSelection = selectedFilePath.value
+    && displaySnapshot.entries.some((entry) => entry.path === selectedFilePath.value);
+  selectedFilePath.value = hasCurrentSelection
+    ? selectedFilePath.value
+    : getDefaultFileBrowserSelection(displaySnapshot);
+  loadThumbnailsForSnapshot(displaySnapshot);
+}
+
+export async function loadFileBrowserForDirectory(directoryPath = "", options: FileBrowserLoadOptions = {}) {
+  if (!activeRepoId.value) return null;
+
+  const includeTree = options.includeTree ?? false;
+  const specialLocation = options.specialLocation ?? (activePanel.value === "deleted" ? "trash" : undefined);
+  isLoadingFileBrowser.value = true;
+  error.value = null;
+  const progressId = startOperationProgress(
+    specialLocation === "trash" ? "读取回收站" : includeTree ? "读取文件树" : "读取目录",
+    directoryPath ? `正在读取 ${directoryPath}` : specialLocation === "trash" ? "正在读取回收站" : "正在读取根目录",
+    { initial: 14, indeterminate: true },
+  );
+  try {
+    const snapshot = await getFileBrowser({
+      repoId: activeRepoId.value,
+      directoryPath,
+      includeTree,
+      specialLocation,
+    });
+    updateOperationProgress(progressId, { detail: "整理目录条目", value: 92 });
+    applyFileBrowserSnapshot(snapshot);
+    finishOperationProgress(progressId);
+    return snapshot;
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : String(cause);
+    cancelOperationProgress(progressId);
+    return null;
+  } finally {
+    isLoadingFileBrowser.value = false;
+  }
+}
+
+export function joinActiveRepositoryPath(relativePath: string) {
+  if (!activeSnapshot.value) return null;
+  return joinAbsolutePath(activeSnapshot.value.repository.path, relativePath);
+}
+
+function joinAbsolutePath(rootPath: string, relativePath: string) {
+  const normalizedRoot = trimTrailingPathSeparators(rootPath);
+  const normalizedRelative = relativePath
+    .trim()
+    .replace(/^[\\/]+|[\\/]+$/g, "")
+    .split(/[\\/]+/)
+    .filter(Boolean);
+  if (!normalizedRelative.length) return normalizedRoot;
+
+  const separator = normalizedRoot.includes("\\") ? "\\" : "/";
+  if (/^[A-Za-z]:[\\/]$/.test(normalizedRoot)) {
+    return `${normalizedRoot}${normalizedRelative.join(separator)}`;
+  }
+  return `${normalizedRoot}${separator}${normalizedRelative.join(separator)}`;
+}
+
+function trimTrailingPathSeparators(path: string) {
+  const trimmed = path.trim();
+  if (/^[A-Za-z]:[\\/]$/.test(trimmed)) return trimmed;
+  return trimmed.replace(/[\\/]+$/, "") || trimmed;
+}

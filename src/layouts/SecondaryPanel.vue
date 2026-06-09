@@ -66,6 +66,7 @@ const router = useRouter();
 
 const {
   repositories,
+  activeRepository,
   repositoryBackendOptions,
   activePanel,
   activeRepoId,
@@ -98,9 +99,6 @@ const shortcuts = computed<ShortcutItem[]>(() => {
   ];
 });
 
-const activeRepository = computed(() => (
-  repositories.value.find((item) => item.repoId === activeRepoId.value) ?? null
-));
 const isTrashPanel = computed(() => activePanel.value === "deleted");
 const expandedFolderPathSet = computed(() => new Set(expandedFolderPaths.value));
 const fileTreeNodes = computed(() => fileTree.value);
