@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
+import { computed, defineAsyncComponent, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -21,14 +21,6 @@ import {
 import { useRepositoryWorkspace } from "../composables/useRepositoryWorkspace";
 import { getPreviewPluginForEntry } from "../plugins/previewPlugins";
 import { isAudioExtension, isVideoExtension } from "../plugins/mediaPreview/mediaExtensions";
-import CopyTargetDialog from "./workspace/CopyTargetDialog.vue";
-import ExtensionsPanel from "./workspace/ExtensionsPanel.vue";
-import FileBrowserPanel from "./workspace/FileBrowserPanel.vue";
-import FilePreviewPane from "./workspace/FilePreviewPane.vue";
-import HardlinkCandidateDialog from "./workspace/HardlinkCandidateDialog.vue";
-import LibraryPanel from "./workspace/LibraryPanel.vue";
-import RepositoryExportDialog from "./workspace/RepositoryExportDialog.vue";
-import SearchPanel from "./workspace/SearchPanel.vue";
 import type {
   FileBrowserEntry,
   HardlinkCandidate,
@@ -40,6 +32,10 @@ import type {
 
 type FileDisplayMode = "adaptive" | "masonry" | "grid" | "list";
 type SearchFilterListKey = "tags" | "formats" | "colors" | "shapes";
+type IdlePreloadWindow = Window & {
+  requestIdleCallback?: (callback: () => void, options?: { timeout?: number }) => number;
+  cancelIdleCallback?: (handle: number) => void;
+};
 
 const fileDisplayModeStorageKey = "momobako.fileDisplayMode";
 const fileDisplayModeOptions: Array<{ value: FileDisplayMode; label: string }> = [
@@ -48,6 +44,28 @@ const fileDisplayModeOptions: Array<{ value: FileDisplayMode; label: string }> =
   { value: "grid", label: "网格" },
   { value: "list", label: "列表" },
 ];
+const workspaceComponentLoaders = {
+  CopyTargetDialog: () => import("./workspace/CopyTargetDialog.vue"),
+  ExtensionsPanel: () => import("./workspace/ExtensionsPanel.vue"),
+  FileBrowserPanel: () => import("./workspace/FileBrowserPanel.vue"),
+  FilePreviewPane: () => import("./workspace/FilePreviewPane.vue"),
+  HardlinkCandidateDialog: () => import("./workspace/HardlinkCandidateDialog.vue"),
+  LibraryPanel: () => import("./workspace/LibraryPanel.vue"),
+  RepositoryExportDialog: () => import("./workspace/RepositoryExportDialog.vue"),
+  SearchPanel: () => import("./workspace/SearchPanel.vue"),
+};
+const CopyTargetDialog = defineAsyncComponent(workspaceComponentLoaders.CopyTargetDialog);
+const ExtensionsPanel = defineAsyncComponent(workspaceComponentLoaders.ExtensionsPanel);
+const FileBrowserPanel = defineAsyncComponent(workspaceComponentLoaders.FileBrowserPanel);
+const FilePreviewPane = defineAsyncComponent(workspaceComponentLoaders.FilePreviewPane);
+const HardlinkCandidateDialog = defineAsyncComponent(workspaceComponentLoaders.HardlinkCandidateDialog);
+const LibraryPanel = defineAsyncComponent(workspaceComponentLoaders.LibraryPanel);
+const RepositoryExportDialog = defineAsyncComponent(workspaceComponentLoaders.RepositoryExportDialog);
+const SearchPanel = defineAsyncComponent(workspaceComponentLoaders.SearchPanel);
+
+let dragDropUnlisten: UnlistenFn | null = null;
+let preloadHandle: { kind: "idle" | "timeout"; id: number } | null = null;
+let hasQueuedWorkspacePreload = false;
 
 function isFileDisplayMode(value: string | null): value is FileDisplayMode {
   return fileDisplayModeOptions.some((option) => option.value === value);
@@ -958,6 +976,63 @@ const searchSummary = computed(() => {
   return "输入关键词、标签或评分条件后，这里会展示跨仓库结果。";
 });
 
+function preloadWorkspaceComponents() {
+  const primaryLoaders = activePanel.value === "libraries"
+    ? [workspaceComponentLoaders.LibraryPanel]
+    : activePanel.value === "search"
+      ? [workspaceComponentLoaders.SearchPanel]
+      : activePanel.value === "extensions"
+        ? [workspaceComponentLoaders.ExtensionsPanel]
+        : [workspaceComponentLoaders.FileBrowserPanel];
+  const secondaryLoaders = [
+    workspaceComponentLoaders.FilePreviewPane,
+    workspaceComponentLoaders.SearchPanel,
+    workspaceComponentLoaders.LibraryPanel,
+    workspaceComponentLoaders.ExtensionsPanel,
+    workspaceComponentLoaders.CopyTargetDialog,
+    workspaceComponentLoaders.HardlinkCandidateDialog,
+    workspaceComponentLoaders.RepositoryExportDialog,
+  ];
+
+  for (const load of new Set([...primaryLoaders, ...secondaryLoaders])) {
+    void load().catch(() => undefined);
+  }
+}
+
+function queueWorkspaceComponentPreload() {
+  if (hasQueuedWorkspacePreload) return;
+  hasQueuedWorkspacePreload = true;
+  const currentWindow = window as IdlePreloadWindow;
+  if (currentWindow.requestIdleCallback) {
+    preloadHandle = {
+      kind: "idle",
+      id: currentWindow.requestIdleCallback(preloadWorkspaceComponents, { timeout: 1200 }),
+    };
+    return;
+  }
+  preloadHandle = {
+    kind: "timeout",
+    id: window.setTimeout(preloadWorkspaceComponents, 250),
+  };
+}
+
+function cancelWorkspaceComponentPreload() {
+  if (!preloadHandle) return;
+  const currentWindow = window as IdlePreloadWindow;
+  if (preloadHandle.kind === "idle" && currentWindow.cancelIdleCallback) {
+    currentWindow.cancelIdleCallback(preloadHandle.id);
+  } else {
+    window.clearTimeout(preloadHandle.id);
+  }
+  preloadHandle = null;
+}
+
+watch(hasRepository, (ready) => {
+  if (ready) {
+    queueWorkspaceComponentPreload();
+  }
+}, { immediate: true });
+
 onMounted(() => {
   try {
     const currentWindow = getCurrentWindow();
@@ -1000,10 +1075,9 @@ onMounted(() => {
   }
 });
 
-let dragDropUnlisten: UnlistenFn | null = null;
-
 onUnmounted(() => {
   dragDropUnlisten?.();
+  cancelWorkspaceComponentPreload();
 });
 </script>
 
@@ -1264,6 +1338,7 @@ onUnmounted(() => {
   </section>
 
   <CopyTargetDialog
+    v-if="copyTargetDialogOpen"
     v-model:target-path="copyTargetPath"
     :open="copyTargetDialogOpen"
     :is-mutating="isMutatingFiles"
@@ -1272,6 +1347,7 @@ onUnmounted(() => {
   />
 
   <HardlinkCandidateDialog
+    v-if="currentHardlinkCandidate"
     :candidate="currentHardlinkCandidate"
     :is-mutating="isMutatingFiles"
     :message="hardlinkCandidateMessage"
@@ -1280,6 +1356,7 @@ onUnmounted(() => {
   />
 
   <RepositoryExportDialog
+    v-if="exportDialogRepository"
     v-model:target="exportTarget"
     v-model:archive-format="exportArchiveFormat"
     v-model:compression="exportCompression"
