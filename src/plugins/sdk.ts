@@ -7,6 +7,10 @@ export type FilePreviewPlugin = {
   kind: "preview";
   supportedExtensions: string[];
   component: Component;
+  generateThumbnail?: (context: {
+    repoId: string;
+    entry: FileBrowserEntry;
+  }) => Promise<{ bytes: number[]; mediaType: string } | null>;
   manifest?: PluginManifest;
 };
 
@@ -14,6 +18,7 @@ export type PreviewPluginDefinition = {
   manifest: PluginManifest;
   supportedExtensions: string[];
   component: Component;
+  generateThumbnail?: FilePreviewPlugin["generateThumbnail"];
 };
 
 const previewPluginRegistry = new Map<string, FilePreviewPlugin>();
@@ -28,6 +33,7 @@ export function definePreviewPlugin(definition: PreviewPluginDefinition) {
     kind: "preview" as const,
     supportedExtensions: [...new Set(extensions)],
     component: definition.component,
+    generateThumbnail: definition.generateThumbnail,
     manifest: definition.manifest,
   };
 }

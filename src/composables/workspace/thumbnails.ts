@@ -1,4 +1,5 @@
 import { ensureThumbnail } from "../../services/repositoryApi";
+import { getPreviewPluginForEntry } from "../../plugins/previewPlugins";
 import type { FileBrowserEntry, FileBrowserSnapshot, ThumbnailResponse } from "../../types/repository";
 import { currentDirectoryPath, fileBrowser } from "./state";
 
@@ -46,6 +47,33 @@ async function loadThumbnailForQueueItem(item: ThumbnailQueueItem, token: number
       repoId: item.repoId,
       path: item.entry.path,
       action: "ensure",
+    });
+    if (!response.thumbnailPath) {
+      await loadGeneratedThumbnailForQueueItem(item, token);
+      return;
+    }
+    if (token !== thumbnailDirectoryToken) return;
+    applyThumbnailResponse(response, item.directoryPath);
+  } catch {
+    await loadGeneratedThumbnailForQueueItem(item, token);
+  }
+}
+
+async function loadGeneratedThumbnailForQueueItem(item: ThumbnailQueueItem, token: number) {
+  const generator = getPreviewPluginForEntry(item.entry)?.generateThumbnail;
+  if (!generator) return;
+  try {
+    const thumbnail = await generator({
+      repoId: item.repoId,
+      entry: item.entry,
+    });
+    if (!thumbnail || token !== thumbnailDirectoryToken) return;
+    const response = await ensureThumbnail({
+      repoId: item.repoId,
+      path: item.entry.path,
+      action: "saveGenerated",
+      imageBytes: thumbnail.bytes,
+      mediaType: thumbnail.mediaType,
     });
     if (!response.thumbnailPath || token !== thumbnailDirectoryToken) return;
     applyThumbnailResponse(response, item.directoryPath);

@@ -1,0 +1,23 @@
+{
+  "pluginId": "momobako.preview.office",
+  "legacyPluginIds": ["builtin.office-preview"],
+  "name": "Office & PDF Preview",
+  "version": "1.0.0",
+  "kind": "preview",
+  "description": "为 Microsoft Office 文档与 PDF 文件提供预览，并生成文档缩略图。",
+  "capabilities": ["preview", "thumbnail", "pdf", "office", "word", "excel", "powerpoint"],
+  "enabled": true,
+  "sdk": "frontend",
+  "entry": {
+    "module": "plugins/builtin/office-preview/preview.ts",
+    "component": "OfficePreview"
+  },
+  "source": "builtin",
+  "runtime": "vue-module",
+  "permissions": ["preview:read", "thumbnail:write"],
+  "compat": {
+    "sdkVersion": "1",
+    "legacyPluginIds": ["builtin.office-preview"]
+  },
+  "status": "ready"
+}

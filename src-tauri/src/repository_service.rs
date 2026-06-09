@@ -4725,6 +4725,32 @@ fn preview_media_type_for_extension(extension: &str) -> &'static str {
         "ogg" | "opus" => "audio/ogg",
         "flac" => "audio/flac",
         "m4a" | "aac" => "audio/aac",
+        "pdf" => "application/pdf",
+        "docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "docm" => "application/vnd.ms-word.document.macroenabled.12",
+        "dotx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.template",
+        "dotm" => "application/vnd.ms-word.template.macroenabled.12",
+        "xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "xlsm" => "application/vnd.ms-excel.sheet.macroenabled.12",
+        "xlsb" => "application/vnd.ms-excel.sheet.binary.macroenabled.12",
+        "xltx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.template",
+        "xltm" => "application/vnd.ms-excel.template.macroenabled.12",
+        "pptx" => "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        "pptm" => "application/vnd.ms-powerpoint.presentation.macroenabled.12",
+        "ppsx" => "application/vnd.openxmlformats-officedocument.presentationml.slideshow",
+        "ppsm" => "application/vnd.ms-powerpoint.slideshow.macroenabled.12",
+        "potx" => "application/vnd.openxmlformats-officedocument.presentationml.template",
+        "potm" => "application/vnd.ms-powerpoint.template.macroenabled.12",
+        "doc" | "dot" => "application/msword",
+        "xls" | "xlt" => "application/vnd.ms-excel",
+        "ppt" | "pps" | "pot" => "application/vnd.ms-powerpoint",
+        "md" | "markdown" | "mdown" | "mkd" | "mkdn" | "mdx" => "text/markdown",
+        "txt" | "text" | "log" | "csv" | "tsv" | "yaml" | "yml" | "toml" | "xml"
+        | "html" | "css" | "scss" | "sass" | "less" | "js" | "jsx" | "ts" | "tsx"
+        | "vue" | "rs" | "py" | "rb" | "go" | "java" | "c" | "h" | "cpp" | "hpp"
+        | "cs" | "php" | "sh" | "bash" | "zsh" | "ps1" | "bat" | "cmd" | "ini"
+        | "cfg" | "conf" | "env" | "gitignore" | "gitattributes" => "text/plain",
+        "json" | "jsonl" => "application/json",
         _ => "application/octet-stream",
     }
 }
@@ -4858,6 +4884,35 @@ struct DiscoveredFile {
     extension: String,
     size_bytes: i64,
     modified_at: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BackendDiscoveredFile {
+    absolute_path: Option<PathBuf>,
+    relative_path: String,
+    filename: String,
+    extension: String,
+    size_bytes: i64,
+    modified_at: String,
+}
+
+impl BackendDiscoveredFile {
+    fn into_discovered_file(self, repo_root: &Path) -> Result<DiscoveredFile, String> {
+        let relative_path = normalize_entry_path(&self.relative_path)?;
+        let absolute_path = self
+            .absolute_path
+            .map(Ok)
+            .unwrap_or_else(|| resolve_repository_relative_path(repo_root, &relative_path))?;
+        Ok(DiscoveredFile {
+            absolute_path,
+            relative_path,
+            filename: self.filename,
+            extension: self.extension,
+            size_bytes: self.size_bytes,
+            modified_at: self.modified_at,
+        })
+    }
 }
 
 fn slugify_repo_id(name: &str, path: &str) -> String {
@@ -7854,7 +7909,11 @@ impl FileSystemBackendAdapter for RuntimeFileSystemBackendAdapter {
                 "config": config,
             }),
         )?;
-        serde_json::from_value(response).map_err(json_error)
+        serde_json::from_value::<Vec<BackendDiscoveredFile>>(response)
+            .map_err(json_error)?
+            .into_iter()
+            .map(|file| file.into_discovered_file(repo_root))
+            .collect()
     }
 
     fn list_tree(
@@ -9113,6 +9172,31 @@ mod tests {
                 }
             })
             .sum()
+    }
+
+    #[test]
+    fn backend_discovered_file_falls_back_to_repository_path_when_absolute_path_is_missing() {
+        let workspace = TestWorkspace::new("backend-discovered-file-compat");
+        let repo_root = workspace.path("repo");
+        fs::create_dir_all(repo_root.join("notes")).expect("repo directory should be created");
+
+        let raw = serde_json::json!({
+            "relativePath": "notes/today.txt",
+            "filename": "today.txt",
+            "extension": "txt",
+            "sizeBytes": 12,
+            "modifiedAt": "2026-06-09T00:00:00Z"
+        });
+        let file = serde_json::from_value::<BackendDiscoveredFile>(raw)
+            .expect("legacy plugin file payload should decode")
+            .into_discovered_file(&repo_root)
+            .expect("legacy plugin file payload should normalize");
+
+        assert_eq!(file.relative_path, "notes/today.txt");
+        assert_eq!(
+            file.absolute_path,
+            repo_root.join("notes").join("today.txt")
+        );
     }
 
     #[test]

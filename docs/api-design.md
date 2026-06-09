@@ -48,13 +48,13 @@
   - Request body includes repository-relative `path`
   - Reuse an existing valid thumbnail cache entry or generate one for supported local image/video files
   - Optional `action`: `ensure`, `refresh`, `save`, `saveGenerated`, `clear`
-  - `save` accepts `sourcePath` or `imageBytes` for custom file/folder thumbnails; `saveGenerated` accepts frontend-generated image bytes, used by 3D previews
+  - `save` accepts `sourcePath` or `imageBytes` for custom file/folder thumbnails; `saveGenerated` accepts frontend-generated image bytes, used by 3D and text previews
   - Thumbnail cache files live under repository `.momo/thumbnails/` and use sha256 hex filenames
   - Response fields: `repoId`, `path`, `assetId`, `kind`, `thumbnailPath`, `thumbnailCustom`
 - `POST /repositories/{repoId}/files:preparePreviewSource`
   - Request body includes repository-relative `path`
   - Response returns a session-scoped local preview `sourceUrl` backed by the in-process repository runtime
-  - 3D previews use this source instead of returning full file bytes through the desktop command bridge
+  - 3D and text previews use this source instead of returning full file bytes through the desktop command bridge
 
 ## Desktop Runtime State
 
@@ -102,6 +102,7 @@
   - Manifest fields include `pluginId`, `legacyPluginIds`, `name`, `version`, `kind`, `description`, `capabilities`, `enabled`, `sdk`, `entry`, `source`, `runtime`, `permissions`, `compat`, and `status`
   - Backend plugin IDs are normalized to the `momobako.*` namespace; legacy `builtin.*` IDs remain accepted when reading existing repositories
   - Disabled or manifest-only filesystem backends are displayed but not offered as attachable repository backends
+  - Filesystem backend `listFiles` responses include `absolutePath`, `relativePath`, `filename`, `extension`, `sizeBytes`, and `modifiedAt`; the runtime tolerates legacy responses without `absolutePath` by resolving `relativePath` under `repoRoot`
 
 ## Cache API
 

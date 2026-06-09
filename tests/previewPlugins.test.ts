@@ -1,4 +1,8 @@
 import { afterEach, describe, expect, it } from "vitest";
+import {
+  isPptxPreviewExtension,
+  isVueOfficePreviewExtension,
+} from "../src/plugins/officePreview/officeExtensions";
 import { getPreviewPluginForEntry, listPreviewPlugins } from "../src/plugins/previewPlugins";
 import { syncRegisteredPreviewPluginManifests } from "../src/plugins/sdk";
 import type { FileBrowserEntry } from "../src/types/repository";
@@ -38,6 +42,45 @@ describe("previewPlugins", () => {
     const mediaPlugin = listPreviewPlugins().find((plugin) => plugin.pluginId === "momobako.preview.media");
     expect(mediaPlugin?.supportedExtensions).toContain("webm");
     expect(mediaPlugin?.supportedExtensions).toContain("wav");
+  });
+
+  it("routes text and markdown files to the built-in text preview", () => {
+    expect(getPreviewPluginForEntry(fileEntry("txt"))?.pluginId).toBe("momobako.preview.text");
+    expect(getPreviewPluginForEntry(fileEntry("md"))?.pluginId).toBe("momobako.preview.text");
+    const textPlugin = listPreviewPlugins().find((plugin) => plugin.pluginId === "momobako.preview.text");
+    expect(textPlugin?.supportedExtensions).toContain("markdown");
+    expect(textPlugin?.generateThumbnail).toBeTypeOf("function");
+  });
+
+  it("routes Office and PDF files to the built-in document preview", () => {
+    expect(getPreviewPluginForEntry(fileEntry("pdf"))?.pluginId).toBe("momobako.preview.office");
+    expect(getPreviewPluginForEntry(fileEntry("docx"))?.pluginId).toBe("momobako.preview.office");
+    expect(getPreviewPluginForEntry(fileEntry("xlsx"))?.pluginId).toBe("momobako.preview.office");
+    expect(getPreviewPluginForEntry(fileEntry("pptx"))?.pluginId).toBe("momobako.preview.office");
+    expect(getPreviewPluginForEntry(fileEntry("docm"))?.pluginId).toBe("momobako.preview.office");
+    expect(getPreviewPluginForEntry(fileEntry("xlsm"))?.pluginId).toBe("momobako.preview.office");
+    expect(getPreviewPluginForEntry(fileEntry("pptm"))?.pluginId).toBe("momobako.preview.office");
+    expect(getPreviewPluginForEntry(fileEntry("csv"))?.pluginId).toBe("momobako.preview.text");
+    const officePlugin = listPreviewPlugins().find((plugin) => plugin.pluginId === "momobako.preview.office");
+    expect(officePlugin?.supportedExtensions).toContain("doc");
+    expect(officePlugin?.supportedExtensions).toContain("ppt");
+    expect(officePlugin?.generateThumbnail).toBeTypeOf("function");
+  });
+
+  it("uses vue-office only for docx, xlsx, and pdf document previews", () => {
+    expect(isVueOfficePreviewExtension("docx")).toBe(true);
+    expect(isVueOfficePreviewExtension("xlsx")).toBe(true);
+    expect(isVueOfficePreviewExtension("pdf")).toBe(true);
+    expect(isVueOfficePreviewExtension("docm")).toBe(false);
+    expect(isVueOfficePreviewExtension("xlsm")).toBe(false);
+    expect(isVueOfficePreviewExtension("pptx")).toBe(false);
+  });
+
+  it("uses pptx-preview only for pptx presentation previews", () => {
+    expect(isPptxPreviewExtension("pptx")).toBe(true);
+    expect(isPptxPreviewExtension("pptm")).toBe(false);
+    expect(isPptxPreviewExtension("ppsx")).toBe(false);
+    expect(isPptxPreviewExtension("docx")).toBe(false);
   });
 
   it("skips disabled preview plugins after manifest sync", () => {

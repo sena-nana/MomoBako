@@ -543,6 +543,8 @@ function createMockPlugins() {
     pluginManifest("momobako.cloud-drive", ["builtin.cloud-drive"], "Cloud Drive", "0.1.0", "cloud", "预留云盘文件系统接入点，如对象存储或网盘。", ["browse", "read", "write", "sync"], false, "backend", "manifest-only"),
     pluginManifest("momobako.preview.three-model", ["builtin.three-model-preview"], "3D Model Preview", "1.0.0", "preview", "为 FBX、OBJ、GLB、glTF 与 VRM 模型提供可旋转缩放的 3D 文件预览。", ["preview", "3d-model", "fbx", "obj", "gltf", "vrm"], true, "frontend", "vue-module"),
     pluginManifest("momobako.preview.media", ["builtin.media-preview"], "Media Preview", "1.0.0", "preview", "为常见视频与音频文件提供内联播放预览。", ["preview", "media", "video", "audio"], true, "frontend", "vue-module"),
+    pluginManifest("momobako.preview.text", ["builtin.text-preview"], "Text Preview", "1.0.0", "preview", "为常见文本与 Markdown 文件提供阅读预览，并生成文本缩略图。", ["preview", "text", "markdown", "thumbnail"], true, "frontend", "vue-module"),
+    pluginManifest("momobako.preview.office", ["builtin.office-preview"], "Office & PDF Preview", "1.0.0", "preview", "为 Microsoft Office 文档与 PDF 文件提供预览，并生成文档缩略图。", ["preview", "thumbnail", "pdf", "office", "word", "excel", "powerpoint"], true, "frontend", "vue-module"),
     pluginManifest("momobako.filesystem-watcher", ["builtin.filesystem-watcher"], "Filesystem Watcher", "1.0.0", "watcher", "监听仓库目录，记录新增、删除、修改与重命名事件。", ["watch", "events", "sync"], false, "backend", "manifest-only"),
     pluginManifest("momobako.metadata-provider", ["builtin.metadata-provider"], "Metadata Provider", "1.0.0", "metadata", "提供可扩展的元数据生成与写入能力。", ["metadata", "tags", "ocr"], false, "backend", "manifest-only"),
     pluginManifest("momobako.vector-index", ["builtin.vector-index"], "Vector Index", "0.1.0", "search", "预留向量检索与 AI 语义搜索扩展点。", ["semantic-search", "embedding"], false, "backend", "manifest-only"),
@@ -630,6 +632,20 @@ vi.mock("@tauri-apps/api/core", () => ({
           ? "model/gltf-binary"
           : path.endsWith(".gltf")
             ? "model/gltf+json"
+            : path.endsWith(".pdf")
+              ? "application/pdf"
+              : path.endsWith(".docx")
+                ? "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                : path.endsWith(".docm")
+                  ? "application/vnd.ms-word.document.macroenabled.12"
+                : path.endsWith(".xlsx")
+                  ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                  : path.endsWith(".xlsm")
+                    ? "application/vnd.ms-excel.sheet.macroenabled.12"
+                    : path.endsWith(".pptx")
+                      ? "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+                      : path.endsWith(".pptm")
+                        ? "application/vnd.ms-powerpoint.presentation.macroenabled.12"
             : path.endsWith(".mp4") || path.endsWith(".m4v")
               ? "video/mp4"
               : path.endsWith(".webm")

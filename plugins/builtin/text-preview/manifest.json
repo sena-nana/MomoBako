@@ -1,0 +1,23 @@
+{
+  "pluginId": "momobako.preview.text",
+  "legacyPluginIds": ["builtin.text-preview"],
+  "name": "Text Preview",
+  "version": "1.0.0",
+  "kind": "preview",
+  "description": "为常见文本与 Markdown 文件提供阅读预览，并生成文本缩略图。",
+  "capabilities": ["preview", "text", "markdown", "thumbnail"],
+  "enabled": true,
+  "sdk": "frontend",
+  "entry": {
+    "module": "plugins/builtin/text-preview/preview.ts",
+    "component": "TextPreview"
+  },
+  "source": "builtin",
+  "runtime": "vue-module",
+  "permissions": ["preview:read", "thumbnail:write"],
+  "compat": {
+    "sdkVersion": "1",
+    "legacyPluginIds": ["builtin.text-preview"]
+  },
+  "status": "ready"
+}

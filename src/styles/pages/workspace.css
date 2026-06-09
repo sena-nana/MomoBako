@@ -1173,6 +1173,475 @@
   overflow-wrap: anywhere;
 }
 
+.text-preview {
+  position: relative;
+  width: 100%;
+  min-height: 360px;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  background: var(--bg);
+}
+
+.text-preview__toolbar {
+  min-height: 42px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-soft);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.text-preview__toolbar span {
+  min-height: 26px;
+  padding: 4px 8px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg-elev);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.text-preview__kind {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.text-preview__content {
+  min-height: 0;
+  overflow: auto;
+  padding: 20px 22px;
+}
+
+.text-preview__plain {
+  margin: 0;
+  min-height: 100%;
+  color: var(--text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.65;
+}
+
+.text-preview__plain code {
+  display: block;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+
+.text-preview__markdown {
+  max-width: 820px;
+  color: var(--text);
+  line-height: 1.7;
+}
+
+.text-preview__markdown > :first-child {
+  margin-top: 0;
+}
+
+.text-preview__markdown > :last-child {
+  margin-bottom: 0;
+}
+
+.text-preview__markdown h1,
+.text-preview__markdown h2,
+.text-preview__markdown h3 {
+  margin: 1.25em 0 0.55em;
+  line-height: 1.25;
+}
+
+.text-preview__markdown h1 {
+  font-size: 24px;
+}
+
+.text-preview__markdown h2 {
+  font-size: 19px;
+}
+
+.text-preview__markdown h3 {
+  font-size: 16px;
+}
+
+.text-preview__markdown p,
+.text-preview__markdown ul,
+.text-preview__markdown ol,
+.text-preview__markdown blockquote,
+.text-preview__markdown pre,
+.text-preview__markdown table {
+  margin: 0 0 14px;
+}
+
+.text-preview__markdown a {
+  color: var(--accent);
+}
+
+.text-preview__markdown blockquote {
+  padding: 8px 12px;
+  border-left: 3px solid var(--accent);
+  background: var(--bg-subtle);
+  color: var(--text-muted);
+}
+
+.text-preview__markdown pre {
+  overflow: auto;
+  padding: 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border-soft);
+  background: var(--bg-subtle);
+}
+
+.text-preview__markdown pre code {
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.text-preview__markdown table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.text-preview__markdown th,
+.text-preview__markdown td {
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+}
+
+.text-preview__status {
+  position: absolute;
+  left: 12px;
+  top: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: calc(100% - 24px);
+  padding: 5px 8px;
+  border-radius: 8px;
+  border: 1px solid var(--border-soft);
+  background: color-mix(in srgb, var(--bg-elev) 84%, transparent);
+  color: var(--text-muted);
+  font-size: 12px;
+  pointer-events: none;
+}
+
+.text-preview__status span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.text-preview__status span:first-child {
+  flex-shrink: 0;
+  color: var(--text);
+  font-weight: 600;
+}
+
+.text-preview__overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  color: var(--text-muted);
+  background: color-mix(in srgb, var(--bg) 74%, transparent);
+}
+
+.text-preview__overlay--error {
+  flex-direction: column;
+  gap: 8px;
+  color: var(--err);
+  text-align: center;
+}
+
+.text-preview__overlay--error span {
+  max-width: 520px;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+.office-preview {
+  position: relative;
+  width: 100%;
+  min-height: 360px;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  background: var(--bg);
+}
+
+.office-preview__toolbar {
+  min-height: 42px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-soft);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.office-preview__toolbar span {
+  min-height: 26px;
+  padding: 4px 8px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg-elev);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.office-preview__kind {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.office-preview__status {
+  position: absolute;
+  left: 12px;
+  top: 54px;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: calc(100% - 24px);
+  padding: 5px 8px;
+  border-radius: 8px;
+  border: 1px solid var(--border-soft);
+  background: color-mix(in srgb, var(--bg-elev) 84%, transparent);
+  color: var(--text-muted);
+  font-size: 12px;
+  pointer-events: none;
+}
+
+.office-preview__status span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.office-preview__status span:first-child {
+  flex-shrink: 0;
+  color: var(--text);
+  font-weight: 600;
+}
+
+.office-preview__overlay {
+  position: absolute;
+  inset: 42px 0 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  color: var(--text-muted);
+  background: color-mix(in srgb, var(--bg) 74%, transparent);
+}
+
+.office-preview__overlay--error {
+  flex-direction: column;
+  gap: 8px;
+  color: var(--err);
+  text-align: center;
+}
+
+.office-preview__overlay--error span {
+  max-width: 520px;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+.office-preview__viewer {
+  min-height: 0;
+  overflow: auto;
+  background: var(--bg);
+}
+
+.office-preview__viewer--word,
+.office-preview__viewer--pdf,
+.office-preview__viewer--presentation {
+  padding: 18px;
+  background:
+    linear-gradient(0deg, color-mix(in srgb, var(--bg-subtle) 82%, transparent), transparent 34%),
+    var(--bg);
+}
+
+.office-preview__viewer--spreadsheet {
+  background: #ffffff;
+}
+
+.office-preview__vue-office {
+  width: 100%;
+  min-height: 100%;
+}
+
+.office-preview__viewer--word .vue-office-docx {
+  min-height: 100%;
+}
+
+.office-preview__viewer--word .docx-wrapper {
+  background: transparent;
+}
+
+.office-preview__viewer--word .docx-wrapper > section.docx {
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.24);
+}
+
+.office-preview__viewer--pdf canvas {
+  display: block;
+  margin: 0 auto 14px;
+  border: 1px solid var(--border-soft);
+  background: #ffffff;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.24);
+}
+
+.office-preview__viewer--spreadsheet .vue-office-excel,
+.office-preview__viewer--spreadsheet .x-spreadsheet {
+  min-height: 100%;
+}
+
+.office-preview__pptx-host {
+  width: 100%;
+  min-height: 100%;
+}
+
+.office-preview__pptx-host .pptx-preview-wrapper {
+  max-width: 100%;
+  border: 1px solid var(--border-soft);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.24);
+}
+
+.office-preview__pptx-host .pptx-preview-slide-wrapper {
+  max-width: 100%;
+}
+
+.office-preview__document {
+  min-height: 0;
+  overflow: auto;
+  padding: 20px 22px 24px;
+  display: grid;
+  align-content: start;
+  gap: 14px;
+}
+
+.office-preview__document-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px;
+  border-radius: 8px;
+  border: 1px solid var(--border-soft);
+  background: var(--bg-subtle);
+}
+
+.office-preview__document-head svg {
+  flex-shrink: 0;
+  color: var(--accent);
+}
+
+.office-preview__document-head h2 {
+  margin: 0;
+  color: var(--text);
+  font-size: 15px;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+.office-preview__document-head p {
+  margin: 4px 0 0;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.office-preview__stats {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.office-preview__stats span {
+  min-height: 26px;
+  padding: 4px 8px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg-elev);
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.office-preview__section {
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--bg-elev);
+}
+
+.office-preview__section h3 {
+  margin: 0;
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--border-soft);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.office-preview__rows {
+  min-width: 0;
+  overflow: auto;
+}
+
+.office-preview__row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.office-preview__row:last-child {
+  border-bottom: 0;
+}
+
+.office-preview__row span {
+  min-width: 0;
+  min-height: 32px;
+  padding: 7px 10px;
+  border-right: 1px solid var(--border-soft);
+  color: var(--text-muted);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.office-preview__row span:last-child {
+  border-right: 0;
+}
+
+.office-preview--word .office-preview__document-head svg {
+  color: #5b8fd8;
+}
+
+.office-preview--spreadsheet .office-preview__document-head svg {
+  color: #4d9c6b;
+}
+
+.office-preview--presentation .office-preview__document-head svg {
+  color: #c8784d;
+}
+
+.office-preview--pdf .office-preview__kind svg {
+  color: #d15f5f;
+}
+
 .files-preview-page__stats {
   align-self: start;
   padding: 14px;
