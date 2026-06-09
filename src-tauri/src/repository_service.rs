@@ -697,12 +697,22 @@ pub struct RevisionActionResponse {
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct SearchMetadataFilter {
+    pub key: String,
+    pub value: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SearchRequest {
     pub query: String,
     pub repo_id: Option<String>,
     pub metadata_key: Option<String>,
     pub metadata_value: Option<String>,
     pub tag: Option<String>,
+    pub tags: Option<Vec<String>>,
+    pub metadata_filters: Option<Vec<SearchMetadataFilter>>,
+    pub formats: Option<Vec<String>>,
     pub min_rating: Option<f64>,
 }
 
@@ -1395,7 +1405,26 @@ impl RepositoryState {
         let normalized_query = request.query.trim().to_lowercase();
         if normalized_query.is_empty()
             && request.tag.is_none()
+            && request
+                .tags
+                .as_ref()
+                .map(|items| items.iter().all(|item| item.trim().is_empty()))
+                .unwrap_or(true)
             && request.metadata_key.is_none()
+            && request
+                .metadata_filters
+                .as_ref()
+                .map(|items| {
+                    items
+                        .iter()
+                        .all(|item| item.key.trim().is_empty() || item.value.trim().is_empty())
+                })
+                .unwrap_or(true)
+            && request
+                .formats
+                .as_ref()
+                .map(|items| items.iter().all(|item| item.trim().is_empty()))
+                .unwrap_or(true)
             && request.min_rating.is_none()
         {
             return Ok(SearchResponse {
@@ -3330,11 +3359,28 @@ fn search_repository_assets(
         if !query.is_empty() && !haystack.contains(query) {
             continue;
         }
+        if let Some(formats) = &request.formats {
+            let formats = normalized_filter_values(formats);
+            if !formats.is_empty() && !formats.contains(&asset.extension.to_lowercase()) {
+                continue;
+            }
+        }
         if let Some(tag) = &request.tag {
             if !asset
                 .tags
                 .iter()
                 .any(|item| item.to_lowercase().contains(&tag.to_lowercase()))
+            {
+                continue;
+            }
+        }
+        if let Some(tags) = &request.tags {
+            let tags = normalized_filter_values(tags);
+            if !tags.is_empty()
+                && !asset.tags.iter().any(|item| {
+                    let normalized_tag = item.to_lowercase();
+                    tags.iter().any(|tag| normalized_tag.contains(tag))
+                })
             {
                 continue;
             }
@@ -3350,6 +3396,11 @@ fn search_repository_assets(
                 {
                     continue;
                 }
+            }
+        }
+        if let Some(filters) = &request.metadata_filters {
+            if !metadata_filters_match(&metadata, filters) {
+                continue;
             }
         }
         if let Some(min_rating) = request.min_rating {
@@ -3378,6 +3429,42 @@ fn search_repository_assets(
     }
 
     Ok(results)
+}
+
+fn normalized_filter_values(values: &[String]) -> Vec<String> {
+    values
+        .iter()
+        .map(|value| value.trim().to_lowercase())
+        .filter(|value| !value.is_empty())
+        .collect()
+}
+
+fn metadata_filters_match(
+    metadata: &BTreeMap<String, serde_json::Value>,
+    filters: &[SearchMetadataFilter],
+) -> bool {
+    let mut grouped_filters = BTreeMap::<String, Vec<String>>::new();
+    for filter in filters {
+        let key = filter.key.trim();
+        let value = filter.value.trim();
+        if key.is_empty() || value.is_empty() {
+            continue;
+        }
+        grouped_filters
+            .entry(key.to_string())
+            .or_default()
+            .push(value.to_lowercase());
+    }
+
+    grouped_filters.into_iter().all(|(key, expected_values)| {
+        let Some(actual_value) = metadata.get(&key) else {
+            return false;
+        };
+        let actual_text = json_value_to_search_text(actual_value).to_lowercase();
+        expected_values
+            .iter()
+            .any(|expected| actual_text == *expected || actual_text.contains(expected))
+    })
 }
 
 fn build_search_haystack(
@@ -7715,6 +7802,121 @@ mod tests {
         assert_eq!(candidates.candidates.len(), 1);
 
         drop(connection);
+        fs::remove_dir_all(root).expect("test temp root should be removed");
+    }
+
+    #[test]
+    fn search_assets_filters_current_repository_metadata_and_formats() {
+        let (state, root, repo_root, _thumbnail_root) = create_test_state("search-filters");
+        fs::write(repo_root.join("cover.psd"), b"cover")
+            .expect("cover file should be written");
+        fs::write(repo_root.join("alt.psd"), b"alternate")
+            .expect("alt file should be written");
+        fs::write(repo_root.join("icon.png"), b"icon")
+            .expect("icon file should be written");
+        fs::write(repo_root.join("deleted.psd"), b"deleted")
+            .expect("deleted file should be written");
+        let repo_id = create_repository_for_path(&state, &repo_root);
+
+        let repo = state
+            .load_repository_record(&repo_id)
+            .expect("repository record should load");
+        let connection = state
+            .open_repository_connection(
+                &repo.summary.repo_id,
+                &repo.summary.path,
+                &repo.backend_record,
+            )
+            .expect("repository connection should open");
+        let now = now_rfc3339();
+        let cover_asset_id: String = connection
+            .query_row(
+                "SELECT asset_id FROM assets WHERE repo_id = ?1 AND path = 'cover.psd'",
+                [repo_id.as_str()],
+                |row| row.get(0),
+            )
+            .expect("cover asset id should load");
+        let alt_asset_id: String = connection
+            .query_row(
+                "SELECT asset_id FROM assets WHERE repo_id = ?1 AND path = 'alt.psd'",
+                [repo_id.as_str()],
+                |row| row.get(0),
+            )
+            .expect("alt asset id should load");
+        let deleted_asset_id: String = connection
+            .query_row(
+                "SELECT asset_id FROM assets WHERE repo_id = ?1 AND path = 'deleted.psd'",
+                [repo_id.as_str()],
+                |row| row.get(0),
+            )
+            .expect("deleted asset id should load");
+
+        for (asset_id, key, value) in [
+            (&cover_asset_id, "color", serde_json::json!("红色")),
+            (&cover_asset_id, "shape", serde_json::json!("方形")),
+            (&cover_asset_id, "rating", serde_json::json!(5)),
+            (&alt_asset_id, "color", serde_json::json!("蓝色")),
+            (&alt_asset_id, "shape", serde_json::json!("圆形")),
+            (&alt_asset_id, "rating", serde_json::json!(2)),
+            (&deleted_asset_id, "color", serde_json::json!("红色")),
+            (&deleted_asset_id, "shape", serde_json::json!("方形")),
+            (&deleted_asset_id, "rating", serde_json::json!(5)),
+        ] {
+            connection
+                .execute(
+                    r#"
+                    INSERT OR REPLACE INTO metadata (asset_id, key, value_type, value_json, version, updated_at)
+                    VALUES (?1, ?2, ?3, ?4, 1, ?5)
+                    "#,
+                    params![asset_id, key, infer_value_type(&value), value.to_string(), now],
+                )
+                .expect("metadata should be written");
+        }
+        for (asset_id, tag) in [(&cover_asset_id, "封面"), (&alt_asset_id, "草稿")] {
+            connection
+                .execute(
+                    r#"
+                    INSERT OR REPLACE INTO tags (asset_id, tag, normalized_tag)
+                    VALUES (?1, ?2, ?3)
+                    "#,
+                    params![asset_id, tag, tag.to_lowercase()],
+                )
+                .expect("tag should be written");
+        }
+        connection
+            .execute(
+                "UPDATE assets SET status = 'deleted' WHERE repo_id = ?1 AND path = 'deleted.psd'",
+                [repo_id.as_str()],
+            )
+            .expect("deleted asset should be marked");
+        drop(connection);
+
+        let response = state
+            .search_assets(SearchRequest {
+                query: String::new(),
+                repo_id: Some(repo_id.clone()),
+                metadata_key: None,
+                metadata_value: None,
+                tag: None,
+                tags: Some(vec!["封面".to_string(), "主视觉".to_string()]),
+                metadata_filters: Some(vec![
+                    SearchMetadataFilter {
+                        key: "color".to_string(),
+                        value: "红色".to_string(),
+                    },
+                    SearchMetadataFilter {
+                        key: "shape".to_string(),
+                        value: "方形".to_string(),
+                    },
+                ]),
+                formats: Some(vec!["psd".to_string(), "jpg".to_string()]),
+                min_rating: Some(4.0),
+            })
+            .expect("filtered search should complete");
+
+        assert_eq!(response.results.len(), 1);
+        assert_eq!(response.results[0].path, "cover.psd");
+
         fs::remove_dir_all(root).expect("test temp root should be removed");
     }
 

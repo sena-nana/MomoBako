@@ -1,7 +1,7 @@
 import "@testing-library/jest-dom/vitest";
 import { cleanup } from "@testing-library/vue";
 import { afterEach, vi } from "vitest";
-import type { SearchHit } from "../src/types/repository";
+import type { SearchHit, SearchRequest } from "../src/types/repository";
 
 type MockRepository = {
   repoId: string;
@@ -44,6 +44,39 @@ let mockInvokeDelay: { command: string; resolve: () => void; promise: Promise<vo
 let mockSearchResults: SearchHit[] | null = null;
 const invokeCalls: Array<{ command: string; args?: Record<string, unknown> }> = [];
 const openerCalls: Array<{ command: "openPath" | "revealItemInDir"; path: string }> = [];
+
+const defaultSearchHits = (): SearchHit[] => [
+  {
+    repoId: "repo-main-001",
+    repoName: "主资源库",
+    assetId: "asset-01",
+    path: "Campaigns/Summer/cover-final.psd",
+    filename: "cover-final.psd",
+    status: "synced",
+    tags: ["封面", "主视觉", "PSD"],
+    metadata: {
+      note: "最终版封面，保留可编辑图层。",
+      color: "红色",
+      shape: "方形",
+      rating: 5,
+    },
+  },
+  {
+    repoId: "repo-main-001",
+    repoName: "主资源库",
+    assetId: "asset-02",
+    path: "Backgrounds/scene-forest-03.png",
+    filename: "scene-forest-03.png",
+    status: "synced",
+    tags: ["背景", "森林", "PNG"],
+    metadata: {
+      note: "森林场景背景。",
+      color: "绿色",
+      shape: "横版",
+      rating: 3,
+    },
+  },
+];
 
 const initialEntries = (): MockEntry[] => [
   {
@@ -121,6 +154,50 @@ function addMockEntry(path: string, kind: "directory" | "file") {
       status: kind === "file" ? "synced" : null,
     },
   ];
+}
+
+function searchHitFormat(hit: SearchHit) {
+  const index = hit.filename.lastIndexOf(".");
+  return index >= 0 ? hit.filename.slice(index + 1).toLowerCase() : "";
+}
+
+function metadataSearchText(value: unknown) {
+  if (typeof value === "string") return value.toLowerCase();
+  if (typeof value === "number" || typeof value === "boolean") return String(value).toLowerCase();
+  return "";
+}
+
+function filterSearchHits(request: SearchRequest | undefined, hits: SearchHit[]) {
+  if (!request) return hits;
+  const query = request.query.trim().toLowerCase();
+  const tags = request.tags?.map((tag) => tag.toLowerCase()).filter(Boolean) ?? [];
+  const formats = request.formats?.map((format) => format.toLowerCase()).filter(Boolean) ?? [];
+  const metadataFilters = request.metadataFilters ?? [];
+
+  return hits.filter((hit) => {
+    if (request.repoId && hit.repoId !== request.repoId) return false;
+    if (query) {
+      const haystack = [
+        hit.repoName,
+        hit.filename,
+        hit.path,
+        ...hit.tags,
+        ...Object.values(hit.metadata).map(metadataSearchText),
+      ].join(" ").toLowerCase();
+      if (!haystack.includes(query)) return false;
+    }
+    if (formats.length && !formats.includes(searchHitFormat(hit))) return false;
+    if (tags.length && !hit.tags.some((tag) => tags.some((expected) => tag.toLowerCase().includes(expected)))) return false;
+    if (request.minRating != null) {
+      const rating = typeof hit.metadata.rating === "number" ? hit.metadata.rating : 0;
+      if (rating < request.minRating) return false;
+    }
+    return metadataFilters.every((filter) => {
+      const actual = metadataSearchText(hit.metadata[filter.key]);
+      const expected = filter.value.toLowerCase();
+      return actual === expected || actual.includes(expected);
+    });
+  });
 }
 
 function moveEntryTreeToTrash(targetPath: string) {
@@ -459,21 +536,11 @@ vi.mock("@tauri-apps/api/core", () => ({
       };
     }
     if (command === "search_assets") {
-      const request = args?.request as { query?: string } | undefined;
+      const request = args?.request as SearchRequest | undefined;
+      const results = filterSearchHits(request, mockSearchResults ?? defaultSearchHits());
       return {
         query: typeof request?.query === "string" ? request.query : "",
-        results: mockSearchResults ?? [
-          {
-            repoId: "repo-main-001",
-            repoName: "主资源库",
-            assetId: "asset-01",
-            path: "Campaigns/Summer/cover-final.psd",
-            filename: "cover-final.psd",
-            status: "synced",
-            tags: ["封面", "主视觉", "PSD"],
-            metadata: { note: "最终版封面，保留可编辑图层。" },
-          },
-        ],
+        results,
       };
     }
     if (command === "update_asset_metadata") {

@@ -46,6 +46,7 @@ import type {
 } from "../types/repository";
 
 type FileDisplayMode = "adaptive" | "masonry" | "grid" | "list";
+type SearchFilterListKey = "tags" | "formats" | "colors" | "shapes";
 
 const fileDisplayModeStorageKey = "momobako.fileDisplayMode";
 const fileDisplayModeOptions: Array<{ value: FileDisplayMode; label: string }> = [
@@ -94,6 +95,8 @@ const pendingCopySourcePaths = ref<string[]>([]);
 const copyTargetDialogOpen = ref(false);
 const copyTargetPath = ref("");
 const skippedHardlinkCandidateIds = ref<Set<string>>(new Set());
+const colorFilterInput = ref("");
+const shapeFilterInput = ref("");
 
 const {
   activePanel,
@@ -102,6 +105,10 @@ const {
   fileBrowser,
   plugins,
   repositories,
+  filters,
+  isFilterBarOpen,
+  activeFilterCount,
+  hasActiveFilters,
   searchQuery,
   selectedFilePath,
   searchResults,
@@ -132,6 +139,11 @@ const {
   setWorkspaceEntryThumbnailFromBytes,
   clearWorkspaceEntryThumbnail,
   refreshWorkspaceEntryThumbnail,
+  setFilterBarOpen,
+  toggleFilterValue,
+  setMinimumRatingFilter,
+  clearFilters,
+  runFilteredSearch,
   removeRepository,
   exportCurrentRepository,
   confirmWorkspaceHardlinkCandidate,
@@ -197,6 +209,77 @@ const exportArchiveFilterExtension = computed(() => (
     : exportArchiveExtension.value
 ));
 const exportActionLabel = computed(() => exportTarget.value === "git" ? "上传到 Git" : "导出压缩包");
+const ratingFilterOptions = [1, 2, 3, 4, 5];
+const filterColorMap: Record<string, string> = {
+  red: "#e05252",
+  green: "#4f9d69",
+  blue: "#4c7bd9",
+  yellow: "#d6a93f",
+  purple: "#8b6bd6",
+  pink: "#d66b9a",
+  orange: "#d98b3d",
+  black: "#333333",
+  white: "#e8e8e8",
+  gray: "#8c9299",
+  grey: "#8c9299",
+  红色: "#e05252",
+  绿色: "#4f9d69",
+  蓝色: "#4c7bd9",
+  黄色: "#d6a93f",
+  紫色: "#8b6bd6",
+  粉色: "#d66b9a",
+  橙色: "#d98b3d",
+  黑色: "#333333",
+  白色: "#e8e8e8",
+  灰色: "#8c9299",
+};
+
+function uniqueSorted(values: Array<string | null | undefined>) {
+  return Array.from(new Set(
+    values
+      .map((value) => value?.trim() ?? "")
+      .filter(Boolean),
+  )).sort((left, right) => left.localeCompare(right, "zh-CN"));
+}
+
+function searchResultFormat(result: SearchHit) {
+  const filename = result.filename || result.path;
+  const index = filename.lastIndexOf(".");
+  return index >= 0 ? filename.slice(index + 1).toLowerCase() : "";
+}
+
+function metadataText(metadata: Record<string, unknown>, key: string) {
+  const value = metadata[key];
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  return "";
+}
+
+function metadataFilterOptions(key: string) {
+  return uniqueSorted([
+    ...searchResults.value.map((result) => metadataText(result.metadata, key)),
+    ...(fileBrowser.value?.entries.map((entry) => metadataText(entry.metadata ?? {}, key)) ?? []),
+  ]);
+}
+
+const tagFilterOptions = computed(() => uniqueSorted([
+  ...(activeSnapshot.value?.assets.flatMap((asset) => asset.tags) ?? []),
+  ...searchResults.value.flatMap((result) => result.tags),
+]));
+
+const formatFilterOptions = computed(() => uniqueSorted([
+  ...(activeSnapshot.value?.assets.map((asset) => asset.extension) ?? []),
+  ...searchResults.value.map(searchResultFormat),
+]));
+
+const colorFilterOptions = computed(() => metadataFilterOptions("color"));
+const shapeFilterOptions = computed(() => metadataFilterOptions("shape"));
+
+const searchResultScopeLabel = computed(() => (
+  hasActiveFilters.value
+    ? `${activeSnapshot.value?.repository.name ?? "当前资源库"}内筛选`
+    : "全局搜索"
+));
 
 function hardlinkStateLabel(entry: FileBrowserEntry) {
   switch (entry.hardlinkState) {
@@ -708,6 +791,60 @@ async function openSearchHit(result: SearchHit) {
   await selectAsset(result.assetId);
 }
 
+function toggleSearchFilter(key: SearchFilterListKey, value: string) {
+  toggleFilterValue(key, value);
+  setActivePanel("search");
+  void runFilteredSearch();
+}
+
+function submitMetadataFilterInput(key: "colors" | "shapes") {
+  const input = key === "colors" ? colorFilterInput : shapeFilterInput;
+  const value = input.value.trim();
+  if (!value) return;
+  toggleSearchFilter(key, value);
+  input.value = "";
+}
+
+function selectMinimumRating(value: number | null) {
+  setMinimumRatingFilter(value);
+  setActivePanel("search");
+  void runFilteredSearch();
+}
+
+function clearSearchFilters() {
+  clearFilters();
+  colorFilterInput.value = "";
+  shapeFilterInput.value = "";
+  setActivePanel("search");
+  void runFilteredSearch();
+}
+
+function closeFilterBar() {
+  setFilterBarOpen(false);
+}
+
+function searchResultRating(result: SearchHit) {
+  const value = result.metadata.rating;
+  return typeof value === "number" ? value : null;
+}
+
+function searchResultContext(result: SearchHit) {
+  const rating = searchResultRating(result);
+  return [
+    searchResultFormat(result) || "文件",
+    ...result.tags.slice(0, 3),
+    metadataText(result.metadata, "color"),
+    metadataText(result.metadata, "shape"),
+    rating == null ? "" : `${rating} 星`,
+  ].filter(Boolean);
+}
+
+function filterColorStyle(color: string) {
+  return {
+    "--filter-swatch": filterColorMap[color.toLowerCase()] ?? filterColorMap[color] ?? "var(--accent)",
+  };
+}
+
 function formatRepositoryStatus(status: string) {
   switch (status) {
     case "ready":
@@ -828,6 +965,11 @@ function requestAddRepository(event?: MouseEvent) {
 }
 
 const searchSummary = computed(() => {
+  if (hasActiveFilters.value) {
+    return searchQuery.value.trim()
+      ? `当前资源库筛选: ${searchQuery.value}`
+      : "按当前资源库筛选结果。";
+  }
   if (searchQuery.value.trim()) {
     return `当前查询: ${searchQuery.value}`;
   }
@@ -884,6 +1026,140 @@ onUnmounted(() => {
 </script>
 
 <template>
+  <div v-if="hasRepository && isFilterBarOpen" class="workspace-filter-bar" aria-label="资源筛选">
+    <div class="workspace-filter-bar__head">
+      <div>
+        <p class="asset-browser__eyebrow">当前资源库筛选</p>
+        <strong>{{ activeSnapshot?.repository.name }}</strong>
+      </div>
+      <div class="workspace-filter-bar__actions">
+        <span v-if="activeFilterCount" class="asset-stat">{{ activeFilterCount }} 个条件</span>
+        <button type="button" class="ghost workspace-filter-bar__btn" :disabled="!hasActiveFilters && !searchQuery.trim()" @click="clearSearchFilters">
+          清除
+        </button>
+        <button type="button" class="ghost workspace-filter-bar__btn" aria-label="关闭筛选栏" @click="closeFilterBar">
+          <X :size="14" aria-hidden="true" />
+        </button>
+      </div>
+    </div>
+
+    <div class="workspace-filter-bar__groups">
+      <section v-if="formatFilterOptions.length" class="workspace-filter-bar__group" aria-label="格式筛选">
+        <span>格式</span>
+        <div class="workspace-filter-bar__options">
+          <button
+            v-for="format in formatFilterOptions"
+            :key="format"
+            type="button"
+            class="workspace-filter-chip"
+            :class="{ 'is-active': filters.formats.includes(format) }"
+            @click="toggleSearchFilter('formats', format)"
+          >
+            {{ format }}
+          </button>
+        </div>
+      </section>
+
+      <section v-if="tagFilterOptions.length" class="workspace-filter-bar__group" aria-label="文件标签筛选">
+        <span>标签</span>
+        <div class="workspace-filter-bar__options">
+          <button
+            v-for="tag in tagFilterOptions"
+            :key="tag"
+            type="button"
+            class="workspace-filter-chip"
+            :class="{ 'is-active': filters.tags.includes(tag) }"
+            @click="toggleSearchFilter('tags', tag)"
+          >
+            {{ tag }}
+          </button>
+        </div>
+      </section>
+
+      <section class="workspace-filter-bar__group" aria-label="文件颜色筛选">
+        <span>颜色</span>
+        <div class="workspace-filter-bar__options">
+          <button
+            v-for="color in colorFilterOptions"
+            :key="color"
+            type="button"
+            class="workspace-filter-chip"
+            :class="{ 'is-active': filters.colors.includes(color) }"
+            :style="filterColorStyle(color)"
+            @click="toggleSearchFilter('colors', color)"
+          >
+            <i class="workspace-filter-chip__swatch" aria-hidden="true"></i>
+            {{ color }}
+          </button>
+          <label class="workspace-filter-input">
+            <input
+              v-model="colorFilterInput"
+              type="text"
+              aria-label="输入文件颜色"
+              placeholder="输入颜色"
+              @keydown.enter.prevent="submitMetadataFilterInput('colors')"
+            />
+            <button type="button" :disabled="!colorFilterInput.trim()" @click="submitMetadataFilterInput('colors')">
+              添加
+            </button>
+          </label>
+        </div>
+      </section>
+
+      <section class="workspace-filter-bar__group" aria-label="形状筛选">
+        <span>形状</span>
+        <div class="workspace-filter-bar__options">
+          <button
+            v-for="shape in shapeFilterOptions"
+            :key="shape"
+            type="button"
+            class="workspace-filter-chip"
+            :class="{ 'is-active': filters.shapes.includes(shape) }"
+            @click="toggleSearchFilter('shapes', shape)"
+          >
+            {{ shape }}
+          </button>
+          <label class="workspace-filter-input">
+            <input
+              v-model="shapeFilterInput"
+              type="text"
+              aria-label="输入形状"
+              placeholder="输入形状"
+              @keydown.enter.prevent="submitMetadataFilterInput('shapes')"
+            />
+            <button type="button" :disabled="!shapeFilterInput.trim()" @click="submitMetadataFilterInput('shapes')">
+              添加
+            </button>
+          </label>
+        </div>
+      </section>
+
+      <section class="workspace-filter-bar__group" aria-label="评分筛选">
+        <span>评分</span>
+        <div class="workspace-filter-bar__options">
+          <button
+            type="button"
+            class="workspace-filter-chip"
+            :class="{ 'is-active': filters.minRating == null }"
+            @click="selectMinimumRating(null)"
+          >
+            全部
+          </button>
+          <button
+            v-for="rating in ratingFilterOptions"
+            :key="rating"
+            type="button"
+            class="workspace-filter-chip"
+            :class="{ 'is-active': filters.minRating === rating }"
+            @click="selectMinimumRating(rating)"
+          >
+            {{ rating }} 星+
+          </button>
+        </div>
+      </section>
+    </div>
+  </div>
+
   <section v-if="hasRepository && isLibrariesPanel" class="library-overview">
     <div class="library-overview__panel">
       <header class="library-overview__header">
@@ -1301,7 +1577,7 @@ onUnmounted(() => {
     <div class="search-workbench__panel">
       <header class="search-workbench__header">
         <div>
-          <p class="asset-browser__eyebrow">全局搜索</p>
+          <p class="asset-browser__eyebrow">{{ searchResultScopeLabel }}</p>
           <h1>搜索结果</h1>
           <p class="search-workbench__subline">{{ searchSummary }}</p>
         </div>
@@ -1340,6 +1616,11 @@ onUnmounted(() => {
           <div class="search-workbench__item-body">
             <strong>{{ result.filename }}</strong>
             <span>{{ result.repoName }} / {{ result.path }}</span>
+          </div>
+          <div class="search-workbench__item-tags">
+            <span v-for="item in searchResultContext(result)" :key="item" class="workspace-hints__chip">
+              {{ item }}
+            </span>
           </div>
         </button>
       </div>

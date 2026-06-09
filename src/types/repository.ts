@@ -133,12 +133,20 @@ export type SearchResponse = {
   results: SearchHit[];
 };
 
+export type SearchMetadataFilter = {
+  key: string;
+  value: string;
+};
+
 export type SearchRequest = {
   query: string;
   repoId?: string;
   metadataKey?: string;
   metadataValue?: string;
   tag?: string;
+  tags?: string[];
+  metadataFilters?: SearchMetadataFilter[];
+  formats?: string[];
   minRating?: number;
 };
 

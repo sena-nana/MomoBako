@@ -63,6 +63,14 @@ export type WorkspaceOperationProgress = {
   indeterminate: boolean;
 };
 
+export type WorkspaceFilterState = {
+  tags: string[];
+  formats: string[];
+  colors: string[];
+  shapes: string[];
+  minRating: number | null;
+};
+
 const STARTUP_TOTAL_STEPS = 3;
 const SYNC_TOTAL_STEPS = 3;
 const THUMBNAIL_LOAD_CONCURRENCY = 3;
@@ -88,6 +96,16 @@ function createInitialSyncProgress(): RepositorySyncProgress {
   };
 }
 
+function createInitialFilters(): WorkspaceFilterState {
+  return {
+    tags: [],
+    formats: [],
+    colors: [],
+    shapes: [],
+    minRating: null,
+  };
+}
+
 const repositories = ref<RepositorySummary[]>([]);
 const activeRepoId = ref<string | null>(null);
 const activeSnapshot = ref<RepositorySnapshot | null>(null);
@@ -100,6 +118,8 @@ const fileTree = ref<FileTreeNode[]>([]);
 const selectedFilePath = ref<string | null>(null);
 const searchQuery = ref("");
 const searchResults = ref<SearchHit[]>([]);
+const isFilterBarOpen = ref(false);
+const filters = ref<WorkspaceFilterState>(createInitialFilters());
 const hardlinkCandidates = ref<HardlinkCandidate[]>([]);
 const lastSyncResult = ref<SyncResult | null>(null);
 const plugins = ref<PluginManifest[]>([]);
@@ -244,6 +264,16 @@ async function refreshRepositorySummaries() {
   repositories.value = items;
 }
 
+const activeFilterCount = computed(() => (
+  filters.value.tags.length +
+  filters.value.formats.length +
+  filters.value.colors.length +
+  filters.value.shapes.length +
+  (filters.value.minRating == null ? 0 : 1)
+));
+
+const hasActiveFilters = computed(() => activeFilterCount.value > 0);
+
 async function refreshHardlinkCandidates(repoId = activeRepoId.value) {
   if (!repoId) {
     hardlinkCandidates.value = [];
@@ -275,6 +305,7 @@ async function finishFileTransfer(
 export async function selectRepository(repoId: string) {
   if (!repoId) return;
 
+  const isSwitchingRepository = activeRepoId.value !== repoId;
   isLoadingSnapshot.value = true;
   error.value = null;
   const progressId = startOperationProgress("加载资源库", "读取资源库快照", { initial: 10, indeterminate: true });
@@ -284,6 +315,9 @@ export async function selectRepository(repoId: string) {
     updateOperationProgress(progressId, { detail: "加载资源索引", value: 46 });
     activeRepoId.value = repoId;
     activeSnapshot.value = snapshot;
+    if (isSwitchingRepository) {
+      resetSearchState();
+    }
 
     const defaultAssetId = activeAssetId.value && snapshot.assets.some((item) => item.assetId === activeAssetId.value)
       ? activeAssetId.value
@@ -671,6 +705,14 @@ function resetWorkspaceSelection() {
   fileTree.value = [];
   currentDirectoryPath.value = "";
   selectedFilePath.value = null;
+  resetSearchState();
+}
+
+function resetSearchState() {
+  searchQuery.value = "";
+  searchResults.value = [];
+  filters.value = createInitialFilters();
+  isFilterBarOpen.value = false;
 }
 
 function setStartupProgress(currentStep: number, stepLabel: string) {
@@ -857,9 +899,90 @@ export function setActivePanel(panel: WorkspacePanelKey) {
   }
 }
 
+function normalizeFilterValues(values: string[]) {
+  return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean)));
+}
+
+function buildSearchRequest(query = searchQuery.value): SearchRequest {
+  const nextFilters = filters.value;
+  const metadataFilters = [
+    ...nextFilters.colors.map((value) => ({ key: "color", value })),
+    ...nextFilters.shapes.map((value) => ({ key: "shape", value })),
+  ];
+
+  return {
+    query,
+    repoId: hasActiveFilters.value ? activeRepoId.value ?? undefined : undefined,
+    tags: normalizeFilterValues(nextFilters.tags),
+    formats: normalizeFilterValues(nextFilters.formats),
+    metadataFilters,
+    minRating: nextFilters.minRating ?? undefined,
+  };
+}
+
+function hasSearchCriteria(request: SearchRequest) {
+  return Boolean(
+    request.query.trim() ||
+    request.tag ||
+    (request.tags?.length ?? 0) > 0 ||
+    request.metadataKey ||
+    (request.metadataFilters?.length ?? 0) > 0 ||
+    (request.formats?.length ?? 0) > 0 ||
+    request.minRating != null,
+  );
+}
+
+export function setFilterBarOpen(open: boolean) {
+  isFilterBarOpen.value = open;
+}
+
+export function toggleFilterBar() {
+  isFilterBarOpen.value = !isFilterBarOpen.value;
+}
+
+function updateFilterList(key: "tags" | "formats" | "colors" | "shapes", value: string, enabled: boolean) {
+  const normalizedValue = value.trim();
+  if (!normalizedValue) return;
+  const current = filters.value[key];
+  const next = enabled
+    ? normalizeFilterValues([...current, normalizedValue])
+    : current.filter((item) => item !== normalizedValue);
+  filters.value = {
+    ...filters.value,
+    [key]: next,
+  };
+}
+
+export function toggleFilterValue(key: "tags" | "formats" | "colors" | "shapes", value: string) {
+  const current = filters.value[key];
+  updateFilterList(key, value, !current.includes(value));
+}
+
+export function setMinimumRatingFilter(value: number | null) {
+  filters.value = {
+    ...filters.value,
+    minRating: value == null || value <= 0 ? null : value,
+  };
+}
+
+export function clearFilters() {
+  filters.value = createInitialFilters();
+}
+
 export async function runSearch(request: SearchRequest) {
   searchQuery.value = request.query;
-  if (!request.query.trim() && !request.tag && !request.metadataKey && request.minRating == null) {
+  const filterRequest = buildSearchRequest(request.query);
+  const repoId = hasActiveFilters.value ? activeRepoId.value ?? undefined : undefined;
+  const normalizedRequest: SearchRequest = {
+    ...request,
+    repoId: request.repoId ?? repoId,
+    tags: request.tags ?? filterRequest.tags,
+    formats: request.formats ?? filterRequest.formats,
+    metadataFilters: request.metadataFilters ?? filterRequest.metadataFilters,
+    minRating: request.minRating ?? filterRequest.minRating,
+  };
+
+  if (!hasSearchCriteria(normalizedRequest)) {
     searchResults.value = [];
     return;
   }
@@ -868,13 +991,21 @@ export async function runSearch(request: SearchRequest) {
   error.value = null;
 
   try {
-    const response = await searchAssets(request);
+    const response = await searchAssets(normalizedRequest);
     searchResults.value = response.results;
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : String(cause);
   } finally {
     isSearching.value = false;
   }
+}
+
+export function runFilteredSearch() {
+  if (!activeRepoId.value && hasActiveFilters.value) {
+    searchResults.value = [];
+    return Promise.resolve();
+  }
+  return runSearch(buildSearchRequest());
 }
 
 export async function saveAssetMetadata(metadata: Record<string, unknown>) {
@@ -1232,8 +1363,6 @@ export function resetRepositoryWorkspaceForTests() {
   repositories.value = [];
   resetWorkspaceSelection();
   activePanel.value = "files";
-  searchQuery.value = "";
-  searchResults.value = [];
   hardlinkCandidates.value = [];
   lastSyncResult.value = null;
   plugins.value = [];
@@ -1268,6 +1397,10 @@ export function useRepositoryWorkspace() {
     selectedFilePath: computed(() => selectedFilePath.value),
     searchQuery: computed(() => searchQuery.value),
     searchResults: computed(() => searchResults.value),
+    isFilterBarOpen: computed(() => isFilterBarOpen.value),
+    filters: computed(() => filters.value),
+    activeFilterCount,
+    hasActiveFilters,
     hardlinkCandidates: computed(() => hardlinkCandidates.value),
     lastSyncResult: computed(() => lastSyncResult.value),
     plugins: computed(() => plugins.value),
@@ -1316,7 +1449,13 @@ export function useRepositoryWorkspace() {
     clearWorkspaceEntryThumbnail,
     refreshWorkspaceEntryThumbnail,
     setActivePanel,
+    setFilterBarOpen,
+    toggleFilterBar,
+    toggleFilterValue,
+    setMinimumRatingFilter,
+    clearFilters,
     runSearch,
+    runFilteredSearch,
     saveAssetMetadata,
     refreshHardlinkCandidates,
     confirmWorkspaceHardlinkCandidate,

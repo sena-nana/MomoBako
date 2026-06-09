@@ -896,22 +896,30 @@
   -webkit-app-region: no-drag;
 }
 
-.titlebar__search {
+.titlebar__search-group {
   position: absolute;
   top: 50%;
   left: 50%;
   width: min(430px, calc(100vw - 220px));
   min-width: 180px;
   height: 28px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 28px;
+  gap: 4px;
+  transform: translate(-50%, -50%);
+  -webkit-app-region: no-drag;
+}
+
+.titlebar__search {
+  min-width: 0;
+  height: 28px;
   display: inline-flex;
   align-items: center;
-  transform: translate(-50%, -50%);
   padding: 0 10px;
   border-radius: 6px;
   border: 0;
   background: var(--bg-subtle);
   color: var(--text-muted);
-  -webkit-app-region: no-drag;
   transition: background-color 0.12s ease, color 0.12s ease;
 }
 
@@ -939,6 +947,39 @@
 
 .titlebar__search input::placeholder {
   color: var(--text-faint);
+}
+
+.titlebar__filter-btn {
+  position: relative;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: var(--bg-subtle);
+  color: var(--text-muted);
+}
+
+.titlebar__filter-btn:hover,
+.titlebar__filter-btn.is-active {
+  background: var(--accent-soft);
+  color: var(--accent);
+  filter: none;
+}
+
+.titlebar__filter-count {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--bg);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 14px;
 }
 
 .titlebar__controls {
