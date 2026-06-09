@@ -20,6 +20,7 @@ describe("useTheme", () => {
 
     expect(useTheme().theme.value).toBe("light");
     expect(document.documentElement.dataset.theme).toBe("light");
+    expect(localStorage.getItem("momobako.theme")).toBe("light");
   });
 
   it("prefers the MomoBako theme key over the legacy key", async () => {
