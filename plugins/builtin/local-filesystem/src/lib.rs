@@ -14,6 +14,7 @@ const MANIFEST: &str = include_str!("../manifest.json");
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct DiscoveredFile {
+    absolute_path: PathBuf,
     relative_path: String,
     filename: String,
     extension: String,
@@ -221,6 +222,7 @@ fn collect_files_recursive(
         let metadata = fs::metadata(&path).map_err(io_error)?;
         let relative_path = relative_path(repo_root, &path)?;
         files.push(DiscoveredFile {
+            absolute_path: path.clone(),
             filename: path
                 .file_name()
                 .map(|value| value.to_string_lossy().to_string())

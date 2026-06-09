@@ -66,8 +66,8 @@
   - thumbnail cache
   - query cache
 - Current UI surfaces capacities and recent entries
-- Thumbnail cache files use sha256 hex filenames; 3D preview thumbnails are rendered on the frontend and persisted through the thumbnail API.
-- Large local preview files are exposed to preview plugins through session-scoped local HTTP URLs served by the in-process repository runtime, so the UI does not marshal full file bytes through the command bridge.
+- Thumbnail cache files use sha256 hex filenames; 3D and text preview thumbnails are rendered on the frontend and persisted through the thumbnail API.
+- Large local preview files are exposed to preview plugins through session-scoped local HTTP URLs served by the in-process repository runtime, so the UI does not marshal full file bytes through the command bridge. Text previews fetch bounded byte ranges from the same source and fall back to direct file reads when needed.
 
 ## Plugin Architecture
 
@@ -84,3 +84,4 @@
   - `momobako_plugin_free`
 - The repository runtime discovers manifests at startup from the runtime plugin directory, normalizes legacy IDs such as `builtin.local-filesystem`, and routes filesystem backend operations through the plugin registry. If the runtime plugin directory is removed, `GET /plugins` reflects that removal instead of silently rebuilding the list from compiled manifests.
 - Built-in local filesystem is available as a trusted runtime backend loaded from its plugin directory. WebDAV, cloud drive, watcher, metadata provider, and vector index are separate manifest-only built-ins until their runtime implementations are added.
+- Filesystem backend `listFiles` responses carry both repository-relative paths and absolute local paths so the repository scanner can hash file content after plugin discovery. The runtime still resolves legacy responses that only include `relativePath`.

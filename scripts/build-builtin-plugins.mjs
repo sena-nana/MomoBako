@@ -30,6 +30,8 @@ const runtimePluginPackages = [
   { name: "local-filesystem", files: ["manifest.json"] },
   { name: "media-preview", files: ["manifest.json", "preview.ts"] },
   { name: "metadata-provider", files: ["manifest.json"] },
+  { name: "office-preview", files: ["manifest.json", "preview.ts"] },
+  { name: "text-preview", files: ["manifest.json", "preview.ts"] },
   { name: "three-model-preview", files: ["manifest.json", "preview.ts"] },
   { name: "vector-index", files: ["manifest.json"] },
   { name: "webdav", files: ["manifest.json"] },
