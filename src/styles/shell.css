@@ -123,21 +123,20 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
-  padding-bottom: 0;
+  padding-bottom: 8px;
   border-bottom: 1px solid var(--border-soft);
   flex-shrink: 0;
 }
 
 .workspace-sidebar__repo-head {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  display: flex;
   align-items: center;
-  gap: 4px;
   padding: 0 2px;
 }
 
 .workspace-sidebar__repo-current {
   min-width: 0;
+  width: 100%;
   height: 28px;
   padding: 0 8px;
   border-radius: 6px;
@@ -148,17 +147,15 @@
   text-align: left;
   font-size: 13px;
   font-weight: 600;
+  gap: 6px;
 }
 
 .workspace-sidebar__repo-current:focus-visible,
-.workspace-sidebar__repo-btn:focus-visible,
 .workspace-panel__refresh:focus-visible,
 .workspace-list__item:focus-visible,
 .workspace-shortcuts__item:focus-visible,
 .workspace-tree-action:focus-visible,
-.workspace-folder-tree__toggle:focus-visible,
 .workspace-folder-tree__action:focus-visible,
-.workspace-folder-tree__item:focus-visible,
 .workspace-footer__btn:focus-visible {
   outline: 1px solid var(--accent);
   outline-offset: 1px;
@@ -167,21 +164,17 @@
 }
 
 .workspace-sidebar__repo-current:hover,
-.workspace-sidebar__repo-btn:hover,
 .workspace-panel__refresh:hover,
 .workspace-list__item:hover,
 .workspace-shortcuts__item:hover,
 .workspace-tree-action:hover:not(:disabled),
-.workspace-folder-tree__toggle:hover:not(:disabled),
 .workspace-folder-tree__action:hover:not(:disabled),
-.workspace-folder-tree__item:hover,
 .workspace-footer__btn:hover {
   background: var(--bg-hover);
   color: var(--text);
   filter: none;
 }
 
-.workspace-sidebar__repo-btn.is-active,
 .workspace-list__item.is-active,
 .workspace-shortcuts__item.is-active,
 .workspace-footer__btn.is-active {
@@ -190,30 +183,11 @@
 }
 
 .workspace-sidebar__repo-current span {
+  flex: 1;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.workspace-sidebar__repo-list {
-  display: flex;
-  gap: 4px;
-  overflow-x: auto;
-  padding: 0 2px 2px;
-}
-
-.workspace-sidebar__repo-btn {
-  width: 28px;
-  height: 28px;
-  flex: 0 0 auto;
-  padding: 0;
-  border-radius: 6px;
-  border: 0;
-  background: transparent;
-  color: var(--text-faint);
-  font-size: 10px;
-  font-weight: 700;
 }
 
 .workspace-sidebar__files {
@@ -489,26 +463,78 @@
 }
 
 .workspace-folder-tree {
+  --folder-tree-toggle-width: 10px;
+  --folder-tree-item-pad: 4px;
+  --folder-tree-indent: 20px;
+  --folder-tree-guide-offset: calc(var(--folder-tree-toggle-width) + var(--folder-tree-item-pad) + 6.5px);
   display: flex;
   flex-direction: column;
-  gap: 1px;
+  gap: 3px;
 }
 
 .workspace-folder-tree__branch,
 .workspace-folder-tree__children {
   display: flex;
   flex-direction: column;
-  gap: 1px;
+  gap: 3px;
 }
 
 .workspace-folder-tree__row {
+  position: relative;
   display: grid;
-  grid-template-columns: 18px minmax(0, 1fr) auto;
+  grid-template-columns: var(--folder-tree-toggle-width) minmax(0, 1fr);
   align-items: center;
-  gap: 2px;
+  gap: 0;
+  padding-left: calc(max(var(--folder-node-depth, 0) - 1, 0) * var(--folder-tree-indent));
+}
+
+.workspace-folder-tree__row::before {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: var(--folder-tree-guide-offset);
+  width: calc(max(var(--folder-node-depth, 0) - 1, 0) * var(--folder-tree-indent));
+  pointer-events: none;
+  content: "";
+  background-image: repeating-linear-gradient(
+    to right,
+    var(--border) 0,
+    var(--border) 1px,
+    transparent 1px,
+    transparent var(--folder-tree-indent)
+  );
+  z-index: 0;
 }
 
 .workspace-folder-tree__toggle,
+.workspace-folder-tree__item,
+.workspace-folder-tree__action,
+.workspace-folder-tree__card {
+  position: relative;
+  z-index: 1;
+}
+
+.workspace-folder-tree__card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0;
+  min-width: 0;
+  height: 24px;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+}
+
+.workspace-folder-tree__row:hover .workspace-folder-tree__card,
+.workspace-folder-tree__row:focus-within .workspace-folder-tree__card {
+  background: var(--bg-hover);
+}
+
+.workspace-folder-tree__row.is-active .workspace-folder-tree__card {
+  background: var(--bg-active);
+}
+
 .workspace-folder-tree__action {
   width: 22px;
   height: 22px;
@@ -519,15 +545,80 @@
   color: var(--text-faint);
 }
 
+.workspace-folder-tree__toggle {
+  display: inline-flex;
+  align-items: center;
+  width: var(--folder-tree-toggle-width);
+  height: 20px;
+  padding: 0;
+  border: 0;
+  justify-self: center;
+  justify-content: flex-start;
+  background: transparent;
+  color: var(--text-faint);
+}
+
+.workspace-folder-tree__toggle::before {
+  position: absolute;
+  top: -1px;
+  bottom: -1px;
+  left: -6px;
+  width: 18px;
+  pointer-events: none;
+  content: "";
+  background: var(--bg-elev);
+  z-index: 0;
+}
+
+.workspace-folder-tree__item:hover:not(:disabled) {
+  background: transparent;
+  filter: none;
+}
+
+.workspace-folder-tree__item:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
+  background: transparent;
+  color: var(--text);
+  filter: none;
+}
+
+.workspace-folder-tree__toggle:hover:not(:disabled),
+.workspace-folder-tree__toggle:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
+  background: transparent;
+  color: var(--text);
+}
+
+.workspace-folder-tree__toggle:hover:not(:disabled) {
+  outline: none;
+}
+
+.workspace-folder-tree__toggle-caret {
+  position: relative;
+  z-index: 1;
+  width: 0;
+  height: 0;
+  margin-left: -2px;
+  border-top: 3px solid transparent;
+  border-bottom: 3px solid transparent;
+  border-left: 4px solid currentColor;
+}
+
+.workspace-folder-tree__toggle-caret.is-expanded {
+  transform: rotate(90deg);
+}
+
 .workspace-folder-tree__toggle.is-hidden {
   visibility: hidden;
 }
 
 .workspace-folder-tree__item {
   width: 100%;
-  min-height: 28px;
-  padding: 0 8px;
-  border-radius: 6px;
+  height: 24px;
+  padding: 0 6px 0 var(--folder-tree-item-pad);
+  border-radius: 0;
   border: 0;
   background: transparent;
   color: var(--text);
@@ -535,19 +626,12 @@
   text-align: left;
   font-size: 13px;
   font-weight: 500;
-  padding-left: calc(8px + max(var(--folder-node-depth, 0) - 1, 0) * 12px);
-}
-
-.workspace-folder-tree__item.is-active,
-.workspace-folder-tree__row.is-active .workspace-folder-tree__item {
-  background: var(--bg-active);
-  color: var(--text);
 }
 
 .workspace-folder-tree__label {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -560,6 +644,7 @@
   gap: 2px;
   opacity: 0;
   pointer-events: none;
+  transition: opacity 0.12s ease;
 }
 
 .workspace-folder-tree__row:hover .workspace-folder-tree__actions,
@@ -687,8 +772,85 @@
 }
 
 .repository-add-popover--menu {
-  width: auto;
+  width: min(160px, calc(100vw - 16px));
   min-width: 132px;
+}
+
+.repository-add-popover--switcher {
+  width: min(280px, calc(100vw - 16px));
+  padding: 6px;
+  gap: 6px;
+}
+
+.repository-switcher__list,
+.repository-switcher__actions {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.repository-switcher__list {
+  max-height: min(320px, calc(100vh - 180px));
+  overflow: auto;
+}
+
+.repository-switcher__actions {
+  padding-top: 6px;
+  border-top: 1px solid var(--border-soft);
+}
+
+.repository-switcher__item {
+  min-width: 0;
+  height: 30px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  text-align: left;
+}
+
+.repository-switcher__item:hover:not(:disabled),
+.repository-switcher__item:focus-visible {
+  background: var(--bg-hover);
+  color: var(--text);
+  filter: none;
+}
+
+.repository-switcher__item:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.repository-switcher__item.is-active {
+  background: var(--accent-soft);
+}
+
+.repository-switcher__check {
+  width: 16px;
+  color: var(--accent);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.repository-switcher__main {
+  min-width: 0;
+}
+
+.repository-switcher__main strong {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
 }
 
 .repository-add-popover__header,

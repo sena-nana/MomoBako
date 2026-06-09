@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
+import { computed, defineAsyncComponent, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { convertFileSrc } from "@tauri-apps/api/core";
-import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import {
@@ -22,24 +22,18 @@ import PluginManagerPanel from "../components/PluginManagerPanel.vue";
 import { useRepositoryWorkspace } from "../composables/useRepositoryWorkspace";
 import { getPreviewPluginForEntry } from "../plugins/previewPlugins";
 import { isAudioExtension, isVideoExtension } from "../plugins/mediaPreview/mediaExtensions";
-import CopyTargetDialog from "./workspace/CopyTargetDialog.vue";
-import FileBrowserPanel from "./workspace/FileBrowserPanel.vue";
-import FilePreviewPane from "./workspace/FilePreviewPane.vue";
-import HardlinkCandidateDialog from "./workspace/HardlinkCandidateDialog.vue";
-import LibraryPanel from "./workspace/LibraryPanel.vue";
-import RepositoryExportDialog from "./workspace/RepositoryExportDialog.vue";
-import SearchPanel from "./workspace/SearchPanel.vue";
 import type {
   FileBrowserEntry,
   HardlinkCandidate,
-  RepositoryArchiveFormat,
-  RepositoryCompressionLevel,
-  RepositorySummary,
   SearchHit,
 } from "../types/repository";
 
 type FileDisplayMode = "adaptive" | "masonry" | "grid" | "list";
 type SearchFilterListKey = "tags" | "formats" | "colors" | "shapes";
+type IdlePreloadWindow = Window & {
+  requestIdleCallback?: (callback: () => void, options?: { timeout?: number }) => number;
+  cancelIdleCallback?: (handle: number) => void;
+};
 
 const fileDisplayModeStorageKey = "momobako.fileDisplayMode";
 const fileDisplayModeOptions: Array<{ value: FileDisplayMode; label: string }> = [
@@ -48,6 +42,23 @@ const fileDisplayModeOptions: Array<{ value: FileDisplayMode; label: string }> =
   { value: "grid", label: "网格" },
   { value: "list", label: "列表" },
 ];
+const workspaceComponentLoaders = {
+  CopyTargetDialog: () => import("./workspace/CopyTargetDialog.vue"),
+  ExtensionsPanel: () => import("./workspace/ExtensionsPanel.vue"),
+  FileBrowserPanel: () => import("./workspace/FileBrowserPanel.vue"),
+  FilePreviewPane: () => import("./workspace/FilePreviewPane.vue"),
+  HardlinkCandidateDialog: () => import("./workspace/HardlinkCandidateDialog.vue"),
+  SearchPanel: () => import("./workspace/SearchPanel.vue"),
+};
+const CopyTargetDialog = defineAsyncComponent(workspaceComponentLoaders.CopyTargetDialog);
+const FileBrowserPanel = defineAsyncComponent(workspaceComponentLoaders.FileBrowserPanel);
+const FilePreviewPane = defineAsyncComponent(workspaceComponentLoaders.FilePreviewPane);
+const HardlinkCandidateDialog = defineAsyncComponent(workspaceComponentLoaders.HardlinkCandidateDialog);
+const SearchPanel = defineAsyncComponent(workspaceComponentLoaders.SearchPanel);
+
+let dragDropUnlisten: UnlistenFn | null = null;
+let preloadHandle: { kind: "idle" | "timeout"; id: number } | null = null;
+let hasQueuedWorkspacePreload = false;
 
 function isFileDisplayMode(value: string | null): value is FileDisplayMode {
   return fileDisplayModeOptions.some((option) => option.value === value);
@@ -69,17 +80,6 @@ const isDraggingFiles = ref(false);
 const isDraggingRepositoryFolder = ref(false);
 const emptyRepositoryError = ref("");
 const previewFilePath = ref<string | null>(null);
-const exportDialogRepository = ref<RepositorySummary | null>(null);
-const exportTarget = ref<"archive" | "git">("archive");
-const exportArchiveFormat = ref<RepositoryArchiveFormat>("zip");
-const exportCompression = ref<RepositoryCompressionLevel>("balanced");
-const exportEncrypt = ref(false);
-const exportPassword = ref("");
-const exportGitRemote = ref("origin");
-const exportGitBranch = ref("");
-const exportGitMessage = ref("");
-const exportDialogError = ref("");
-const isExporting = ref(false);
 const failedThumbnailPaths = ref<Set<string>>(new Set());
 const fileDisplayMode = ref<FileDisplayMode>(readInitialFileDisplayMode());
 const thumbnailAspectRatios = ref<Record<string, number>>({});
@@ -110,12 +110,10 @@ const {
   selectedFilePath,
   searchResults,
   hardlinkCandidates,
-  isBusy,
   isLoadingFileBrowser,
   isSearching,
   isMutatingFiles,
   error,
-  refreshRepositoryWorkspace,
   selectRepository,
   selectAsset,
   loadFileBrowserForDirectory,
@@ -141,13 +139,10 @@ const {
   setMinimumRatingFilter,
   clearFilters,
   runFilteredSearch,
-  removeRepository,
-  exportCurrentRepository,
   confirmWorkspaceHardlinkCandidate,
 } = useRepositoryWorkspace();
 
 const hasRepository = computed(() => Boolean(activeSnapshot.value));
-const isLibrariesPanel = computed(() => activePanel.value === "libraries");
 const isFilesPanel = computed(() => activePanel.value === "files");
 const isTrashPanel = computed(() => activePanel.value === "deleted");
 const isSearchPanel = computed(() => activePanel.value === "search");
@@ -167,18 +162,6 @@ const fileDisplayModeClass = computed(() => `files-list__files--${fileDisplayMod
 const currentHardlinkCandidate = computed(() => (
   hardlinkCandidates.value.find((candidate) => !skippedHardlinkCandidateIds.value.has(candidate.candidateId)) ?? null
 ));
-const exportArchiveExtension = computed(() => {
-  if (exportArchiveFormat.value === "tar" && exportCompression.value !== "none") {
-    return "tar.gz";
-  }
-  return exportArchiveFormat.value === "7z" ? "7z" : exportArchiveFormat.value;
-});
-const exportArchiveFilterExtension = computed(() => (
-  exportArchiveFormat.value === "tar" && exportCompression.value !== "none"
-    ? "gz"
-    : exportArchiveExtension.value
-));
-const exportActionLabel = computed(() => exportTarget.value === "git" ? "上传到 Git" : "导出压缩包");
 const ratingFilterOptions = [1, 2, 3, 4, 5];
 const filterColorMap: Record<string, string> = {
   red: "#e05252",
@@ -815,124 +798,6 @@ function filterColorStyle(color: string) {
   };
 }
 
-function formatRepositoryStatus(status: string) {
-  switch (status) {
-    case "ready":
-      return "已同步";
-    case "readonly":
-      return "只读";
-    case "indexing":
-      return "处理中";
-    default:
-      return status;
-  }
-}
-
-function sanitizeExportName(value: string) {
-  return value.trim().replace(/[<>:"/\\|?*\u0000-\u001F]/g, "-") || "momobako-repository";
-}
-
-function closeExportDialog(force = false) {
-  if (isExporting.value && !force) return;
-  exportDialogRepository.value = null;
-  exportDialogError.value = "";
-  exportPassword.value = "";
-}
-
-async function requestRepositoryExport(library: RepositorySummary) {
-  exportDialogError.value = "";
-  if (activeRepoId.value !== library.repoId) {
-    await selectRepository(library.repoId);
-  }
-  if (activeRepoId.value !== library.repoId) return;
-  exportDialogRepository.value = repositories.value.find((item) => item.repoId === library.repoId) ?? library;
-}
-
-async function chooseArchiveOutputPath(repository: RepositorySummary) {
-  const extension = exportArchiveExtension.value;
-  return saveDialog({
-    title: "导出资源库",
-    defaultPath: `${sanitizeExportName(repository.name)}.${extension}`,
-    filters: [
-      {
-        name: extension.toUpperCase(),
-        extensions: [exportArchiveFilterExtension.value],
-      },
-    ],
-  });
-}
-
-async function submitExportDialog() {
-  const repository = exportDialogRepository.value;
-  if (!repository) return;
-
-  exportDialogError.value = "";
-  isExporting.value = true;
-
-  try {
-    if (exportTarget.value === "archive") {
-      if (exportEncrypt.value && !exportPassword.value.trim()) {
-        exportDialogError.value = "请输入加密密码。";
-        return;
-      }
-
-      const outputPath = await chooseArchiveOutputPath(repository);
-      if (!outputPath) return;
-
-      const response = await exportCurrentRepository({
-        target: "archive",
-        archive: {
-          format: exportArchiveFormat.value,
-          outputPath,
-          compression: exportCompression.value,
-          encrypt: exportEncrypt.value,
-          password: exportEncrypt.value ? exportPassword.value : undefined,
-        },
-      });
-      if (response) {
-        closeExportDialog(true);
-      } else {
-        exportDialogError.value = error.value ?? "资源库导出失败。";
-      }
-      return;
-    }
-
-    const response = await exportCurrentRepository({
-      target: "git",
-      git: {
-        remote: exportGitRemote.value.trim() || undefined,
-        branch: exportGitBranch.value.trim() || undefined,
-        message: exportGitMessage.value.trim() || undefined,
-      },
-    });
-    if (response) {
-      closeExportDialog(true);
-    } else {
-      exportDialogError.value = error.value ?? "Git 上传失败。";
-    }
-  } finally {
-    isExporting.value = false;
-  }
-}
-
-function getAnchorFromElement(element: EventTarget | null) {
-  if (!(element instanceof HTMLElement)) return null;
-  const rect = element.getBoundingClientRect();
-  return {
-    left: rect.left,
-    top: rect.top,
-    right: rect.right,
-    bottom: rect.bottom,
-  };
-}
-
-function requestAddRepository(event?: MouseEvent) {
-  window.dispatchEvent(new CustomEvent("momo:add-repository", {
-    detail: {
-      anchor: getAnchorFromElement(event?.currentTarget ?? null),
-    },
-  }));
-}
 
 const searchSummary = computed(() => {
   if (hasActiveFilters.value) {
@@ -945,6 +810,59 @@ const searchSummary = computed(() => {
   }
   return "输入关键词、标签或评分条件后，这里会展示跨仓库结果。";
 });
+
+function preloadWorkspaceComponents() {
+  const primaryLoaders = activePanel.value === "search"
+    ? [workspaceComponentLoaders.SearchPanel]
+    : activePanel.value === "extensions"
+      ? [workspaceComponentLoaders.ExtensionsPanel]
+      : [workspaceComponentLoaders.FileBrowserPanel];
+  const secondaryLoaders = [
+    workspaceComponentLoaders.FilePreviewPane,
+    workspaceComponentLoaders.SearchPanel,
+    workspaceComponentLoaders.ExtensionsPanel,
+    workspaceComponentLoaders.CopyTargetDialog,
+    workspaceComponentLoaders.HardlinkCandidateDialog,
+  ];
+
+  for (const load of new Set([...primaryLoaders, ...secondaryLoaders])) {
+    void load().catch(() => undefined);
+  }
+}
+
+function queueWorkspaceComponentPreload() {
+  if (hasQueuedWorkspacePreload) return;
+  hasQueuedWorkspacePreload = true;
+  const currentWindow = window as IdlePreloadWindow;
+  if (currentWindow.requestIdleCallback) {
+    preloadHandle = {
+      kind: "idle",
+      id: currentWindow.requestIdleCallback(preloadWorkspaceComponents, { timeout: 1200 }),
+    };
+    return;
+  }
+  preloadHandle = {
+    kind: "timeout",
+    id: window.setTimeout(preloadWorkspaceComponents, 250),
+  };
+}
+
+function cancelWorkspaceComponentPreload() {
+  if (!preloadHandle) return;
+  const currentWindow = window as IdlePreloadWindow;
+  if (preloadHandle.kind === "idle" && currentWindow.cancelIdleCallback) {
+    currentWindow.cancelIdleCallback(preloadHandle.id);
+  } else {
+    window.clearTimeout(preloadHandle.id);
+  }
+  preloadHandle = null;
+}
+
+watch(hasRepository, (ready) => {
+  if (ready) {
+    queueWorkspaceComponentPreload();
+  }
+}, { immediate: true });
 
 onMounted(() => {
   try {
@@ -988,10 +906,9 @@ onMounted(() => {
   }
 });
 
-let dragDropUnlisten: UnlistenFn | null = null;
-
 onUnmounted(() => {
   dragDropUnlisten?.();
+  cancelWorkspaceComponentPreload();
 });
 </script>
 
@@ -1130,22 +1047,7 @@ onUnmounted(() => {
     </div>
   </div>
 
-  <LibraryPanel
-    v-if="hasRepository && isLibrariesPanel"
-    :active-repo-id="activeRepoId"
-    :snapshot="activeSnapshot"
-    :repositories="repositories"
-    :error="error"
-    :is-busy="isBusy"
-    :status-label="formatRepositoryStatus"
-    @add-repository="requestAddRepository"
-    @export-repository="requestRepositoryExport"
-    @refresh="refreshRepositoryWorkspace"
-    @remove-repository="removeRepository"
-    @select-repository="selectRepository"
-  />
-
-  <section v-else-if="hasRepository && isFileBrowserPanel" :class="previewFileEntry ? 'files-preview-page' : 'files-workbench'">
+  <section v-if="hasRepository && isFileBrowserPanel" :class="previewFileEntry ? 'files-preview-page' : 'files-workbench'">
     <template v-if="previewFileEntry">
       <FilePreviewPane
         :entry="previewFileEntry"
@@ -1257,6 +1159,7 @@ onUnmounted(() => {
   </section>
 
   <CopyTargetDialog
+    v-if="copyTargetDialogOpen"
     v-model:target-path="copyTargetPath"
     :open="copyTargetDialogOpen"
     :is-mutating="isMutatingFiles"
@@ -1265,27 +1168,11 @@ onUnmounted(() => {
   />
 
   <HardlinkCandidateDialog
+    v-if="currentHardlinkCandidate"
     :candidate="currentHardlinkCandidate"
     :is-mutating="isMutatingFiles"
     :message="hardlinkCandidateMessage"
     @confirm="confirmCurrentHardlinkCandidate"
     @skip="skipCurrentHardlinkCandidate"
-  />
-
-  <RepositoryExportDialog
-    v-model:target="exportTarget"
-    v-model:archive-format="exportArchiveFormat"
-    v-model:compression="exportCompression"
-    v-model:encrypt="exportEncrypt"
-    v-model:password="exportPassword"
-    v-model:git-remote="exportGitRemote"
-    v-model:git-branch="exportGitBranch"
-    v-model:git-message="exportGitMessage"
-    :repository="exportDialogRepository"
-    :error="exportDialogError"
-    :is-exporting="isExporting"
-    :action-label="exportActionLabel"
-    @close="closeExportDialog"
-    @submit="submitExportDialog"
   />
 </template>

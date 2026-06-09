@@ -15,7 +15,6 @@ import {
   getOpenerCalls,
   seedCrossRepositorySearchHit,
   seedMockRepository,
-  setMockSavePath,
   seedMockRepositoryPath,
   selectMockFile,
   selectMockFolder,
@@ -39,6 +38,7 @@ async function renderApp() {
       },
     },
   });
+  await waitForCurrentWorkspaceView();
 }
 
 async function renderAppWithoutStartupPreload() {
@@ -55,6 +55,20 @@ async function renderAppWithoutStartupPreload() {
         "context-menu": vContextMenu,
       },
     },
+  });
+}
+
+async function waitForCurrentWorkspaceView() {
+  await waitFor(() => {
+    const workspace = useRepositoryWorkspace();
+    const selector = workspace.activeSnapshot.value
+      ? workspace.activePanel.value === "search"
+          ? ".search-workbench"
+          : workspace.activePanel.value === "extensions"
+            ? ".extensions-workbench"
+            : ".files-browser, .files-preview-page__body"
+      : ".empty-state-page";
+    expect(document.querySelector(selector)).toBeInTheDocument();
   });
 }
 
@@ -265,7 +279,8 @@ describe("文件管理冒烟", () => {
     selectMockFolder("C:/Mock/SelectedRepo");
     await renderApp();
 
-    await fireEvent.click(screen.getByRole("button", { name: "添加资源库" }));
+    await fireEvent.click(screen.getByRole("button", { name: "资源库" }));
+    await fireEvent.click(await screen.findByRole("button", { name: "添加资源库" }));
     await fireEvent.click(await screen.findByRole("button", { name: "本地文件夹" }));
 
     await waitFor(() => {
@@ -629,30 +644,19 @@ describe("文件管理冒烟", () => {
     expect(localStorage.getItem("momobako.sidebarWidth")).toBe("276");
   });
 
-  it("通过导出弹窗提交资源库压缩包选项", async () => {
+  it("通过资源库下拉菜单二次确认删除当前资源库", async () => {
     seedMockRepository();
-    setMockSavePath("C:/Mock/Exports/Momo.zip");
-    const workspace = useRepositoryWorkspace();
     await renderApp();
-    workspace.setActivePanel("libraries");
 
-    await fireEvent.click(await screen.findByRole("button", { name: "导出" }));
-    expect(await screen.findByRole("dialog", { name: "导出资源库" })).toBeInTheDocument();
-    await fireEvent.click(screen.getByRole("button", { name: "导出压缩包" }));
+    await fireEvent.click(await screen.findByRole("button", { name: "资源库" }));
+    await fireEvent.click(await screen.findByRole("button", { name: "删除当前资源库" }));
+    expect(screen.getByRole("button", { name: "确认删除当前资源库" })).toBeInTheDocument();
+    expect(getInvokeCalls("delete_repository")).toHaveLength(0);
+    await fireEvent.click(screen.getByRole("button", { name: "确认删除当前资源库" }));
 
     await waitFor(() => {
-      const exportCalls = getInvokeCalls("export_repository");
-      expect(exportCalls.at(-1)?.args).toMatchObject({
-        request: {
-          repoId: "repo-main-001",
-          target: "archive",
-          archive: {
-            format: "zip",
-            outputPath: "C:/Mock/Exports/Momo.zip",
-            compression: "balanced",
-            encrypt: false,
-          },
-        },
+      expect(getInvokeCalls("delete_repository").at(-1)?.args).toMatchObject({
+        repoId: "repo-main-001",
       });
     });
   });
