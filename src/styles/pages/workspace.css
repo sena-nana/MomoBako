@@ -642,7 +642,8 @@
   gap: 10px;
 }
 
-.files-toolbar__field {
+.files-toolbar__field,
+.files-toolbar__select {
   min-width: 220px;
   display: inline-flex;
   align-items: center;
@@ -654,6 +655,16 @@
   color: var(--text-muted);
 }
 
+.files-toolbar__select {
+  min-width: 156px;
+  height: 34px;
+}
+
+.files-toolbar__select span {
+  flex-shrink: 0;
+  font-size: 12px;
+}
+
 .files-toolbar__field input {
   width: 100%;
   border: 0;
@@ -662,6 +673,21 @@
 }
 
 .files-toolbar__field input:focus {
+  border: 0;
+}
+
+.files-toolbar__select select {
+  min-width: 0;
+  flex: 1;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+}
+
+.files-toolbar__select select:focus {
   border: 0;
 }
 
@@ -684,6 +710,36 @@
   background: var(--border-strong);
 }
 
+.files-list__files {
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+
+.files-list__files--adaptive {
+  display: flex;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  gap: 14px;
+}
+
+.files-list__files--grid {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(auto-fill, 148px);
+  align-items: start;
+}
+
+.files-list__files--masonry {
+  column-width: 164px;
+  column-gap: 14px;
+}
+
+.files-list__files--list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
 .files-list__item {
   width: 100%;
   min-height: 0;
@@ -697,6 +753,40 @@
   flex-direction: column;
   gap: 8px;
   text-align: center;
+}
+
+.files-list__item--file {
+  min-width: 0;
+  --file-thumb-aspect: 1;
+}
+
+.files-list__files--adaptive .files-list__item--file {
+  width: clamp(118px, calc((120px * var(--file-thumb-aspect)) + 16px), 300px);
+}
+
+.files-list__files--masonry .files-list__item--file,
+.files-list__files--grid .files-list__item--file {
+  width: 100%;
+}
+
+.files-list__files--masonry .files-list__item--file {
+  display: inline-flex;
+  break-inside: avoid;
+  margin-bottom: 14px;
+}
+
+.files-list__files--grid .files-list__item--file {
+  height: 190px;
+}
+
+.files-list__files--list .files-list__item--file {
+  min-height: 72px;
+  padding: 8px 10px;
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr) minmax(280px, auto);
+  align-items: center;
+  gap: 12px;
+  text-align: left;
 }
 
 .files-list__item:hover {
@@ -714,6 +804,36 @@
   justify-content: center;
   color: rgba(255, 255, 255, 0.92);
   background: var(--thumbnail-placeholder-bg);
+}
+
+.files-list__files--adaptive .files-list__preview {
+  width: auto;
+  height: 120px;
+  aspect-ratio: var(--file-thumb-aspect) / 1;
+}
+
+.files-list__files--adaptive .files-list__preview img {
+  object-fit: cover;
+}
+
+.files-list__files--masonry .files-list__preview {
+  aspect-ratio: var(--file-thumb-aspect) / 1;
+}
+
+.files-list__files--masonry .files-list__preview img {
+  object-fit: cover;
+}
+
+.files-list__files--grid .files-list__preview {
+  height: 112px;
+  aspect-ratio: auto;
+}
+
+.files-list__files--list .files-list__preview {
+  width: 56px;
+  height: 56px;
+  aspect-ratio: auto;
+  border-radius: 7px;
 }
 
 .files-list__preview img,
@@ -740,6 +860,10 @@
   -webkit-box-orient: vertical;
 }
 
+.files-list__files--list .files-list__body strong {
+  min-height: 0;
+}
+
 .files-list__body span {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -753,10 +877,17 @@
 }
 
 .files-list__meta {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: minmax(44px, auto) minmax(64px, auto) minmax(56px, auto) minmax(132px, auto);
   align-items: flex-end;
-  gap: 6px;
+  justify-content: end;
+  gap: 10px;
+  white-space: nowrap;
+}
+
+.files-list__meta span {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .files-detail__card {
@@ -1934,6 +2065,27 @@
 
   .files-toolbar {
     justify-content: flex-start;
+  }
+
+  .files-list__files--grid {
+    grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+  }
+
+  .files-list__files--list .files-list__item--file {
+    grid-template-columns: 52px minmax(0, 1fr);
+    align-items: start;
+  }
+
+  .files-list__files--list .files-list__preview {
+    width: 52px;
+    height: 52px;
+  }
+
+  .files-list__files--list .files-list__meta {
+    grid-column: 2;
+    grid-template-columns: repeat(2, minmax(0, auto));
+    justify-content: start;
+    white-space: normal;
   }
 
   .settings-grid {

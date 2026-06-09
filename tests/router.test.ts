@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/vue";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/vue";
 import { createMemoryHistory } from "vue-router";
 import { describe, expect, it } from "vitest";
 import App from "../src/App.vue";
@@ -149,6 +149,57 @@ describe("文件管理冒烟", () => {
       expect(workspace.fileBrowser.value?.entries.find((entry) => entry.path === "cover-final.psd")?.thumbnailPath)
         .toBe("C:/Mock/Thumbs/cover-final.psd.jpg");
     });
+  });
+
+  it("支持切换并记住素材展示方式", async () => {
+    seedMockRepository();
+    const workspace = useRepositoryWorkspace();
+    workspace.setActivePanel("files");
+
+    await renderApp();
+
+    const displayModeSelect = await screen.findByLabelText("素材展示方式");
+    expect(displayModeSelect).toHaveValue("adaptive");
+
+    await fireEvent.update(displayModeSelect, "list");
+    expect(localStorage.getItem("momobako.fileDisplayMode")).toBe("list");
+    expect((await screen.findAllByText("227.9 MB")).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText("已同步")).length).toBeGreaterThan(0);
+
+    cleanup();
+    localStorage.setItem("momobako.fileDisplayMode", "masonry");
+    await renderApp();
+    expect(await screen.findByLabelText("素材展示方式")).toHaveValue("masonry");
+    const masonryList = document.querySelector<HTMLElement>(".files-list__files--masonry");
+    expect(masonryList).toBeInTheDocument();
+
+    cleanup();
+    localStorage.setItem("momobako.fileDisplayMode", "invalid-mode");
+    await renderApp();
+    expect(await screen.findByLabelText("素材展示方式")).toHaveValue("adaptive");
+  });
+
+  it("自适应展示方式使用缩略图自然比例调整素材宽度", async () => {
+    seedMockRepository();
+    const workspace = useRepositoryWorkspace();
+    workspace.setActivePanel("files");
+
+    await renderApp();
+
+    await waitFor(() => {
+      expect(workspace.fileBrowser.value?.entries.find((entry) => entry.path === "cover-final.psd")?.thumbnailPath)
+        .toBe("C:/Mock/Thumbs/cover-final.psd.jpg");
+    });
+
+    const thumbnail = document.querySelector<HTMLImageElement>(".files-list__item--file .files-list__preview img");
+    expect(thumbnail).not.toBeNull();
+    Object.defineProperty(thumbnail, "naturalWidth", { configurable: true, value: 1600 });
+    Object.defineProperty(thumbnail, "naturalHeight", { configurable: true, value: 900 });
+
+    await fireEvent.load(thumbnail as HTMLImageElement);
+
+    const fileItem = thumbnail?.closest<HTMLElement>(".files-list__item--file");
+    expect(fileItem?.style.getPropertyValue("--file-thumb-aspect")).toBe(String(1600 / 900));
   });
 
   it("切目录后丢弃旧目录返回的缩略图", async () => {
