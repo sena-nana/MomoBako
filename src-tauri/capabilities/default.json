@@ -12,6 +12,7 @@
     "core:window:allow-internal-toggle-maximize",
     "core:window:allow-close",
     "dialog:default",
+    "drag:default",
     "opener:default",
     "opener:allow-open-path",
     "store:default"

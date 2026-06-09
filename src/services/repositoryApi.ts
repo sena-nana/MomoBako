@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { Channel, invoke } from "@tauri-apps/api/core";
 import { openPath, revealItemInDir } from "@tauri-apps/plugin-opener";
 import type {
   ApiDesignSnapshot,
@@ -39,6 +39,16 @@ import type {
   ThumbnailResponse,
   TrashMutationRequest,
 } from "../types/repository";
+
+type ExternalFileDragEvent = {
+  result: "Dropped" | "Cancel";
+  cursorPos: {
+    x: number;
+    y: number;
+  };
+};
+
+const fallbackFileDragIcon = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHeAAAA1klEQVR4nO2aMQ6DMAxFf6n//7JzSbqVKAWyJE6RMXBpZRmCcL7ugPfr7YkNQKkAqQBYAGABBkKr+S2q681+RjvfbWAA4FO9VxOAQ3VFcvLaKQwwqgbgtI2kQNdEAZpWAJalYBWIVgD62AhgGwhqgVAFYqCx+WK4QClyHb1ZAMKoHDCu5TgBsK4IuM0EnJbx0B5oEGh96F/Nh78qfm83pkQ+ZpA6lAyoo9CRPz39QLLm9YkA8C1yNEioOl4H8NZuTkAmFK5e4Z4A1UkaIBUAC4AFwALg3AE5mFG5Q1UzmgAAAABJRU5ErkJggg==";
 
 export function listRepositories() {
   return invoke<RepositorySummary[]>("list_repositories");
@@ -166,6 +176,16 @@ export function getCacheSnapshot() {
 
 export function getApiDesignSnapshot() {
   return invoke<ApiDesignSnapshot>("get_api_design_snapshot");
+}
+
+export function startExternalFileDrag(paths: string[], icon = fallbackFileDragIcon) {
+  const onEvent = new Channel<ExternalFileDragEvent>();
+  return invoke<void>("plugin:drag|start_drag", {
+    item: paths,
+    image: icon,
+    options: { mode: "copy" },
+    onEvent,
+  });
 }
 
 export function openRepositoryPath(path: string) {
