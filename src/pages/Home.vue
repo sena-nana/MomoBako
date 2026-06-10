@@ -175,11 +175,12 @@ const currentFileEntry = computed(() => {
   return selectedEntry.value;
 });
 
-const canRenameSelected = computed(() => Boolean(currentFileEntry.value) && !isTrashPanel.value && !isSmartFolderPanel.value);
-const canPreviewSelected = computed(() => currentFileEntry.value?.kind === "file" && !isTrashPanel.value);
-const canDeleteSelected = computed(() => Boolean(currentFileEntry.value) && !isSmartFolderPanel.value);
-const canRestoreSelected = computed(() => Boolean(currentFileEntry.value) && isTrashPanel.value);
-const canDragEntries = computed(() => !isTrashPanel.value && !isSmartFolderPanel.value && fileBrowser.value?.backendKind === "filesystem");
+const isRepositoryWritable = computed(() => hasRepository.value && !isMissingRepository.value);
+const canRenameSelected = computed(() => Boolean(currentFileEntry.value) && isRepositoryWritable.value && !isTrashPanel.value && !isSmartFolderPanel.value);
+const canPreviewSelected = computed(() => currentFileEntry.value?.kind === "file" && !isMissingRepository.value && !isTrashPanel.value);
+const canDeleteSelected = computed(() => Boolean(currentFileEntry.value) && isRepositoryWritable.value && !isSmartFolderPanel.value);
+const canRestoreSelected = computed(() => Boolean(currentFileEntry.value) && isRepositoryWritable.value && isTrashPanel.value);
+const canDragEntries = computed(() => isRepositoryWritable.value && !isTrashPanel.value && !isSmartFolderPanel.value && fileBrowser.value?.backendKind === "filesystem");
 const previewFileEntry = computed(() => (
   previewFilePath.value
     ? (isSmartFolderPanel.value ? smartFolderEntryMap.value : fileBrowserEntryMap.value).get(previewFilePath.value) ?? null
@@ -580,7 +581,7 @@ async function createRepositoryFromFolder(path: string) {
 }
 
 function handleDragOver(event: DragEvent) {
-  if (!hasRepository.value || !isFilesPanel.value) return;
+  if (!isRepositoryWritable.value || !isFilesPanel.value) return;
   event.preventDefault();
   if (event.dataTransfer) {
     event.dataTransfer.dropEffect = "copy";
@@ -598,14 +599,14 @@ function handleDragLeave(event: DragEvent) {
 async function handleDrop(event: DragEvent) {
   event.preventDefault();
   isDraggingFiles.value = false;
-  if (isTrashPanel.value) return;
+  if (!isRepositoryWritable.value || isTrashPanel.value) return;
   const sourcePaths = getDroppedSourcePaths(event);
   if (!sourcePaths.length) return;
   void importEntriesToWorkspace(sourcePaths);
 }
 
 function handleEmptyRepositoryDragOver(event: DragEvent) {
-  if (hasRepository.value) return;
+  if (activeRepoId.value || hasRepository.value) return;
   event.preventDefault();
   if (event.dataTransfer) {
     event.dataTransfer.dropEffect = "copy";
@@ -623,6 +624,7 @@ function handleEmptyRepositoryDragLeave(event: DragEvent) {
 async function handleEmptyRepositoryDrop(event: DragEvent) {
   event.preventDefault();
   isDraggingRepositoryFolder.value = false;
+  if (activeRepoId.value || hasRepository.value) return;
   const [path] = getDroppedSourcePaths(event);
   if (path) {
     await createRepositoryFromFolder(path);
@@ -884,12 +886,14 @@ async function openSearchHit(result: SearchHit) {
 }
 
 function toggleSearchFilter(key: SearchFilterListKey, value: string) {
+  if (!isRepositoryWritable.value) return;
   toggleFilterValue(key, value);
   setActivePanel("search");
   void runFilteredSearch();
 }
 
 function submitMetadataFilterInput(key: "colors" | "shapes") {
+  if (!isRepositoryWritable.value) return;
   const input = key === "colors" ? colorFilterInput : shapeFilterInput;
   const value = input.value.trim();
   if (!value) return;
@@ -898,12 +902,14 @@ function submitMetadataFilterInput(key: "colors" | "shapes") {
 }
 
 function selectMinimumRating(value: number | null) {
+  if (!isRepositoryWritable.value) return;
   setMinimumRatingFilter(value);
   setActivePanel("search");
   void runFilteredSearch();
 }
 
 function clearSearchFilters() {
+  if (!isRepositoryWritable.value) return;
   clearFilters();
   colorFilterInput.value = "";
   shapeFilterInput.value = "";
@@ -1083,7 +1089,7 @@ onMounted(() => {
         }
         return;
       }
-      if (!hasRepository.value || !isFilesPanel.value) return;
+      if (!isRepositoryWritable.value || !isFilesPanel.value) return;
       if (payload.type === "enter" || payload.type === "over") {
         isDraggingFiles.value = true;
         return;
