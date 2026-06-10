@@ -18,6 +18,8 @@ const props = defineProps<{
   currentPath: string;
   expandedPaths: Set<string>;
   depth: number;
+  dropTargetPath: string | null;
+  isDragActive: boolean;
   isMutating: boolean;
 }>();
 
@@ -27,6 +29,9 @@ const emit = defineEmits<{
   (event: "create", path: string): void;
   (event: "rename", path: string, label: string): void;
   (event: "delete", path: string, label: string): void;
+  (event: "hover-folder", path: string): void;
+  (event: "leave-folder", path: string): void;
+  (event: "drop-folder", path: string, dragEvent: DragEvent): void;
 }>();
 
 const isExpanded = computed(() => props.expandedPaths.has(props.node.path));
@@ -34,6 +39,7 @@ const isActive = computed(() => props.currentPath === props.node.path);
 const isCurrentBranch = computed(() => (
   props.currentPath === props.node.path || props.currentPath.startsWith(`${props.node.path}/`)
 ));
+const isDropTarget = computed(() => props.dropTargetPath === props.node.path);
 const hasChildren = computed(() => props.node.children.length > 0);
 const depthStyle = computed(() => ({
   "--folder-node-depth": String(props.depth),
@@ -42,7 +48,16 @@ const depthStyle = computed(() => ({
 
 <template>
   <div class="workspace-folder-tree__branch">
-    <div class="workspace-folder-tree__row" :class="{ 'is-active': isActive }" :style="depthStyle">
+    <div
+      class="workspace-folder-tree__row"
+      :class="{ 'is-active': isActive, 'is-drop-target': isDragActive && isDropTarget }"
+      :style="depthStyle"
+      :data-folder-path="node.path"
+      @dragenter.prevent="emit('hover-folder', node.path)"
+      @dragover.prevent="emit('hover-folder', node.path)"
+      @dragleave.prevent="emit('leave-folder', node.path)"
+      @drop.stop.prevent="emit('drop-folder', node.path, $event)"
+    >
       <button
         type="button"
         class="workspace-folder-tree__toggle"
@@ -115,12 +130,17 @@ const depthStyle = computed(() => ({
         :current-path="currentPath"
         :expanded-paths="expandedPaths"
         :depth="depth + 1"
+        :drop-target-path="dropTargetPath"
+        :is-drag-active="isDragActive"
         :is-mutating="isMutating"
         @toggle="emit('toggle', $event)"
         @open="emit('open', $event)"
         @create="emit('create', $event)"
         @rename="(path, label) => emit('rename', path, label)"
         @delete="(path, label) => emit('delete', path, label)"
+        @hover-folder="emit('hover-folder', $event)"
+        @leave-folder="emit('leave-folder', $event)"
+        @drop-folder="(path, dragEvent) => emit('drop-folder', path, dragEvent)"
       />
     </div>
   </div>

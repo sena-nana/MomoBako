@@ -26,6 +26,8 @@ import {
   isLoadingSettingsData,
   isManagingPlugins,
   isLoadingSnapshot,
+  isExternalDragActive,
+  isInternalDragActive,
   isMutatingFiles,
   isMutatingSmartFolder,
   isSavingMetadata,
@@ -34,12 +36,16 @@ import {
   lastSyncResult,
   plugins,
   repositories,
+  selectedFilePaths,
+  selectionAnchorPath,
   selectedFilePath,
   activeSmartFolderId,
   smartFolderResult,
   smartFolders,
   STARTUP_TOTAL_STEPS,
   workspaceStartup,
+  dragHoverFolderPath,
+  draggedWorkspacePaths,
 } from "./state";
 import { applyFileBrowserSnapshot } from "./files";
 import { resetSearchState } from "./search";
@@ -73,6 +79,12 @@ export function resetActiveRepositoryContent() {
   smartFolderResult.value = null;
   currentDirectoryPath.value = "";
   selectedFilePath.value = null;
+  selectedFilePaths.value = [];
+  selectionAnchorPath.value = null;
+  isExternalDragActive.value = false;
+  isInternalDragActive.value = false;
+  draggedWorkspacePaths.value = [];
+  dragHoverFolderPath.value = null;
   resetSearchState();
 }
 

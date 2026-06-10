@@ -24,6 +24,13 @@ import PluginManagerPanel from "../components/PluginManagerPanel.vue";
 import { useRepositoryWorkspace } from "../composables/useRepositoryWorkspace";
 import { getPreviewPluginForEntry } from "../plugins/previewPlugins";
 import { isAudioExtension, isVideoExtension } from "../plugins/mediaPreview/mediaExtensions";
+import {
+  getWorkspaceParentPath,
+  internalWorkspaceDragDistance,
+  normalizeWorkspaceMovePaths,
+  resolveWorkspaceDropTarget,
+  shouldDelegateToExternalDrag as shouldDelegateToExternalWorkspaceDrag,
+} from "./workspace/dragBehavior";
 import type {
   FileBrowserEntry,
   HardlinkCandidate,
@@ -35,6 +42,14 @@ type SearchFilterListKey = "tags" | "formats" | "colors" | "shapes";
 type IdlePreloadWindow = Window & {
   requestIdleCallback?: (callback: () => void, options?: { timeout?: number }) => number;
   cancelIdleCallback?: (handle: number) => void;
+};
+type InternalWorkspaceDragSession = {
+  startX: number;
+  startY: number;
+  lastX: number;
+  lastY: number;
+  entry: FileBrowserEntry;
+  delegatedToExternalDrag: boolean;
 };
 
 const fileDisplayModeStorageKey = "momobako.fileDisplayMode";
@@ -94,12 +109,17 @@ const copyTargetPath = ref("");
 const skippedHardlinkCandidateIds = ref<Set<string>>(new Set());
 const colorFilterInput = ref("");
 const shapeFilterInput = ref("");
+const internalWorkspaceDragSession = ref<InternalWorkspaceDragSession | null>(null);
+const externalDragSwitchDistance = 72;
 
 const {
   activePanel,
   activeSnapshot,
   activeRepository,
   activeRepoId,
+  currentDirectoryPath,
+  dragHoverFolderPath,
+  draggedWorkspacePaths,
   fileBrowser,
   repositories,
   filters,
@@ -110,13 +130,19 @@ const {
   directoryEntries,
   fileBrowserEntryMap,
   fileEntries,
+  hasMultipleSelection,
   hasSplitFileGroups,
   selectedEntry,
+  selectedEntries,
   searchQuery,
+  selectedFilePathSet,
+  selectedFilePaths,
   selectedFilePath,
   searchResults,
   smartFolderResult,
   hardlinkCandidates,
+  isExternalDragActive,
+  isInternalDragActive,
   isLoadingFileBrowser,
   isSearching,
   isLoadingSmartFolder,
@@ -128,20 +154,30 @@ const {
   loadFileBrowserForDirectory,
   createFileInWorkspace,
   copyWorkspaceEntries,
+  moveWorkspaceEntries,
   attachRepository,
   removeRepository,
   relocateMissingRepository,
+  clearDraggedWorkspaceState,
+  clearWorkspaceSelection,
+  deleteWorkspaceEntries,
   importEntriesToWorkspace,
   renameWorkspaceEntry,
   deleteWorkspaceEntry,
+  restoreTrashEntries,
   restoreTrashEntry,
   restoreAllTrashEntries,
   emptyTrash,
   openWorkspaceEntry,
   revealWorkspaceEntry,
-  startWorkspaceEntryDrag,
+  startWorkspaceEntriesDrag,
   selectWorkspaceEntry,
+  selectWorkspaceEntries,
+  setDraggedWorkspacePaths,
   setActivePanel,
+  setDragHoverFolderPath,
+  setExternalDragActive,
+  setInternalDragActive,
   setWorkspaceEntryThumbnail,
   setWorkspaceEntryThumbnailFromBytes,
   clearWorkspaceEntryThumbnail,
@@ -176,11 +212,12 @@ const currentFileEntry = computed(() => {
 });
 
 const isRepositoryWritable = computed(() => hasRepository.value && !isMissingRepository.value);
-const canRenameSelected = computed(() => Boolean(currentFileEntry.value) && isRepositoryWritable.value && !isTrashPanel.value && !isSmartFolderPanel.value);
-const canPreviewSelected = computed(() => currentFileEntry.value?.kind === "file" && !isMissingRepository.value && !isTrashPanel.value);
-const canDeleteSelected = computed(() => Boolean(currentFileEntry.value) && isRepositoryWritable.value && !isSmartFolderPanel.value);
-const canRestoreSelected = computed(() => Boolean(currentFileEntry.value) && isRepositoryWritable.value && isTrashPanel.value);
+const canRenameSelected = computed(() => selectedEntries.value.length === 1 && isRepositoryWritable.value && !isTrashPanel.value && !isSmartFolderPanel.value);
+const canOpenSelected = computed(() => selectedEntries.value.length === 1 && !isMissingRepository.value && !isTrashPanel.value);
+const canDeleteSelected = computed(() => selectedEntries.value.length > 0 && isRepositoryWritable.value && !isSmartFolderPanel.value);
+const canRestoreSelected = computed(() => selectedEntries.value.length > 0 && isRepositoryWritable.value && isTrashPanel.value);
 const canDragEntries = computed(() => isRepositoryWritable.value && !isTrashPanel.value && !isSmartFolderPanel.value && fileBrowser.value?.backendKind === "filesystem");
+const openSelectedLabel = computed(() => currentFileEntry.value?.kind === "directory" ? "进入" : "查看");
 const previewFileEntry = computed(() => (
   previewFilePath.value
     ? (isSmartFolderPanel.value ? smartFolderEntryMap.value : fileBrowserEntryMap.value).get(previewFilePath.value) ?? null
@@ -305,8 +342,8 @@ function hardlinkCandidateMessage(candidate: HardlinkCandidate) {
   return `${candidate.newPath} 与 ${candidate.existingPath} 内容哈希一致，大小 ${candidate.sizeLabel}。确认后会将新文件加入硬链接关联。`;
 }
 
-watch(currentFileEntry, (entry) => {
-  if (renameTargetPath.value && renameTargetPath.value !== entry?.path) {
+watch([currentFileEntry, hasMultipleSelection], ([entry, multiple]) => {
+  if (multiple || (renameTargetPath.value && renameTargetPath.value !== entry?.path)) {
     renameTargetPath.value = null;
     renameValue.value = "";
   }
@@ -331,6 +368,12 @@ watch(
 
 watch(selectedFilePath, (path) => {
   if (previewFilePath.value && previewFilePath.value !== path) {
+    previewFilePath.value = null;
+  }
+});
+
+watch(hasMultipleSelection, (multiple) => {
+  if (multiple) {
     previewFilePath.value = null;
   }
 });
@@ -413,38 +456,42 @@ function fillRoundedRect(context: CanvasRenderingContext2D, x: number, y: number
 }
 
 function createExternalDragIcon(entry: FileBrowserEntry) {
-  const canvas = document.createElement("canvas");
-  const context = canvas.getContext("2d");
-  if (!context) return undefined;
+  try {
+    const canvas = document.createElement("canvas");
+    const context = canvas.getContext("2d");
+    if (!context) return undefined;
 
-  const size = 72;
-  const scale = Math.min(Math.max(window.devicePixelRatio || 1, 1), 2);
-  canvas.width = size * scale;
-  canvas.height = size * scale;
-  context.scale(scale, scale);
+    const size = 72;
+    const scale = Math.min(Math.max(window.devicePixelRatio || 1, 1), 2);
+    canvas.width = size * scale;
+    canvas.height = size * scale;
+    context.scale(scale, scale);
 
-  const gradient = context.createLinearGradient(0, 0, size, size);
-  if (entry.kind === "directory") {
-    gradient.addColorStop(0, "#d3b26f");
-    gradient.addColorStop(1, "#6e542e");
-  } else {
-    gradient.addColorStop(0, "#8aa8b0");
-    gradient.addColorStop(1, "#314a53");
+    const gradient = context.createLinearGradient(0, 0, size, size);
+    if (entry.kind === "directory") {
+      gradient.addColorStop(0, "#d3b26f");
+      gradient.addColorStop(1, "#6e542e");
+    } else {
+      gradient.addColorStop(0, "#8aa8b0");
+      gradient.addColorStop(1, "#314a53");
+    }
+
+    context.fillStyle = "rgba(0, 0, 0, 0.22)";
+    fillRoundedRect(context, 8, 10, 56, 56, 12);
+    context.fillStyle = gradient;
+    fillRoundedRect(context, 6, 6, 56, 56, 12);
+
+    context.fillStyle = "rgba(255, 255, 255, 0.9)";
+    context.font = "700 16px system-ui, sans-serif";
+    context.textAlign = "center";
+    context.textBaseline = "middle";
+    const label = entry.kind === "directory" ? "DIR" : (entry.extension || "FILE").slice(0, 4).toUpperCase();
+    context.fillText(label, 34, 34, 44);
+
+    return canvas.toDataURL("image/png");
+  } catch {
+    return undefined;
   }
-
-  context.fillStyle = "rgba(0, 0, 0, 0.22)";
-  fillRoundedRect(context, 8, 10, 56, 56, 12);
-  context.fillStyle = gradient;
-  fillRoundedRect(context, 6, 6, 56, 56, 12);
-
-  context.fillStyle = "rgba(255, 255, 255, 0.9)";
-  context.font = "700 16px system-ui, sans-serif";
-  context.textAlign = "center";
-  context.textBaseline = "middle";
-  const label = entry.kind === "directory" ? "DIR" : (entry.extension || "FILE").slice(0, 4).toUpperCase();
-  context.fillText(label, 34, 34, 44);
-
-  return canvas.toDataURL("image/png");
 }
 
 function resetThumbnailFailure(path: string) {
@@ -526,36 +573,125 @@ function entryModifiedAtLabel(entry: FileBrowserEntry) {
 }
 
 function getParentPath(path: string) {
-  const normalizedPath = path.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
-  const index = normalizedPath.lastIndexOf("/");
-  return index >= 0 ? normalizedPath.slice(0, index) : "";
+  return getWorkspaceParentPath(path);
 }
 
 function openDirectory(path: string) {
+  setDragHoverFolderPath(null);
   void loadFileBrowserForDirectory(path, isTrashPanel.value ? { specialLocation: "trash" } : {});
 }
 
-function selectFileEntry(entry: FileBrowserEntry) {
-  if (isSmartFolderPanel.value) {
-    selectWorkspaceEntry(entry.path);
-    return;
-  }
-  if (entry.kind === "directory") {
-    openDirectory(entry.path);
-    return;
-  }
-  selectWorkspaceEntry(entry.path);
+function selectFileEntry(entry: FileBrowserEntry, mode: "replace" | "toggle" | "range") {
+  selectWorkspaceEntry(entry.path, { mode });
 }
 
-function handleEntryDragStart(entry: FileBrowserEntry) {
-  if (!canDragEntries.value || isSmartFolderPanel.value) return;
-  selectWorkspaceEntry(entry.path);
-  void startWorkspaceEntryDrag(entry.path, createExternalDragIcon(entry));
+function startInternalWorkspaceDrag(paths: string[]) {
+  setDraggedWorkspacePaths(paths);
+  setInternalDragActive(true);
+}
+
+function finishInternalWorkspaceDrag() {
+  internalWorkspaceDragSession.value = null;
+  clearDraggedWorkspaceState();
+  setDragHoverFolderPath(null);
+}
+
+function resolveFolderDropTarget(clientX: number, clientY: number) {
+  return resolveWorkspaceDropTarget(document, clientX, clientY, currentDirectoryPath.value);
+}
+
+function updateInternalWorkspaceHover(clientX: number, clientY: number) {
+  const nextTargetPath = resolveFolderDropTarget(clientX, clientY);
+  if (nextTargetPath == null) {
+    setDragHoverFolderPath(null);
+    return null;
+  }
+  setDragHoverFolderPath(nextTargetPath);
+  return nextTargetPath;
+}
+
+function shouldDelegateToExternalDrag(clientX: number, clientY: number) {
+  const session = internalWorkspaceDragSession.value;
+  if (!session) return false;
+  return shouldDelegateToExternalWorkspaceDrag(
+    session,
+    clientX,
+    clientY,
+    { width: window.innerWidth, height: window.innerHeight },
+    externalDragSwitchDistance,
+  );
+}
+
+async function delegateToExternalWorkspaceDrag() {
+  const session = internalWorkspaceDragSession.value;
+  if (!session || session.delegatedToExternalDrag || !draggedWorkspacePaths.value.length) return;
+  internalWorkspaceDragSession.value = {
+    ...session,
+    delegatedToExternalDrag: true,
+  };
+  const dragPaths = [...draggedWorkspacePaths.value];
+  const icon = createExternalDragIcon(session.entry);
+  finishInternalWorkspaceDrag();
+  await startWorkspaceEntriesDrag(dragPaths, icon);
+}
+
+function handleEntryDragStart(entry: FileBrowserEntry, event: PointerEvent) {
+  if (!canDragEntries.value) return;
+  const dragPaths = selectedFilePathSet.value.has(entry.path)
+    ? selectedFilePaths.value
+    : [entry.path];
+  if (!selectedFilePathSet.value.has(entry.path)) {
+    selectWorkspaceEntries([entry.path], { primaryPath: entry.path, anchorPath: entry.path });
+  }
+  startInternalWorkspaceDrag(dragPaths);
+  internalWorkspaceDragSession.value = {
+    startX: event.clientX,
+    startY: event.clientY,
+    lastX: event.clientX,
+    lastY: event.clientY,
+    entry,
+    delegatedToExternalDrag: false,
+  };
+  updateInternalWorkspaceHover(event.clientX, event.clientY);
+}
+
+function handleEntryDragMove(event: PointerEvent) {
+  if (!isInternalDragActive.value) return;
+  if (internalWorkspaceDragSession.value) {
+    internalWorkspaceDragSession.value = {
+      ...internalWorkspaceDragSession.value,
+      lastX: event.clientX,
+      lastY: event.clientY,
+    };
+  }
+  updateInternalWorkspaceHover(event.clientX, event.clientY);
+  if (shouldDelegateToExternalDrag(event.clientX, event.clientY)) {
+    void delegateToExternalWorkspaceDrag();
+  }
+}
+
+async function handleEntryDragEnd(event: PointerEvent | null) {
+  const session = internalWorkspaceDragSession.value;
+  if (!session) {
+    finishInternalWorkspaceDrag();
+    return;
+  }
+  if (session.delegatedToExternalDrag) {
+    finishInternalWorkspaceDrag();
+    return;
+  }
+
+  const targetPath = event ? updateInternalWorkspaceHover(event.clientX, event.clientY) : dragHoverFolderPath.value;
+  if (!targetPath) {
+    finishInternalWorkspaceDrag();
+    return;
+  }
+  await moveDraggedWorkspaceEntries(targetPath);
 }
 
 function previewFileEntryByDoubleClick(entry: FileBrowserEntry) {
   if (entry.kind !== "file" || isTrashPanel.value) return;
-  selectWorkspaceEntry(entry.path);
+  selectWorkspaceEntries([entry.path], { primaryPath: entry.path, anchorPath: entry.path });
   previewFilePath.value = entry.path;
 }
 
@@ -563,10 +699,137 @@ function exitPreview() {
   previewFilePath.value = null;
 }
 
+function handleBoxSelection(paths: string[], mode: "replace" | "append") {
+  if (mode === "append") {
+    if (!paths.length) return;
+    const nextPaths = Array.from(new Set([...selectedFilePaths.value, ...paths]));
+    selectWorkspaceEntries(nextPaths, {
+      primaryPath: selectedFilePath.value ?? paths[0] ?? null,
+      anchorPath: selectedFilePath.value ?? paths[0] ?? null,
+    });
+    return;
+  }
+
+  if (!paths.length) {
+    clearWorkspaceSelection();
+    return;
+  }
+  selectWorkspaceEntries(paths, { primaryPath: paths[0], anchorPath: paths[0] });
+}
+
+function normalizeWorkspaceDragPaths(targetPath: string) {
+  return normalizeWorkspaceMovePaths(draggedWorkspacePaths.value, targetPath);
+}
+
+async function moveDraggedWorkspaceEntries(targetPath: string) {
+  const sourcePaths = normalizeWorkspaceDragPaths(targetPath);
+  finishInternalWorkspaceDrag();
+  if (!sourcePaths.length || isTrashPanel.value) return;
+  await moveWorkspaceEntries(sourcePaths, targetPath);
+}
+
+function handleFolderDropHover(path: string) {
+  if (isTrashPanel.value) return;
+  setDragHoverFolderPath(path);
+}
+
+function handleFolderDropLeave(path: string) {
+  if (dragHoverFolderPath.value === path) {
+    setDragHoverFolderPath(null);
+  }
+}
+
+async function handleFolderDrop(path: string, event: DragEvent) {
+  if (isInternalWorkspaceDragEvent(event)) {
+    await moveDraggedWorkspaceEntries(path);
+    return;
+  }
+
+  const sourcePaths = getDroppedSourcePaths(event);
+  if (!sourcePaths.length) return;
+  setExternalDragActive(false);
+  isDraggingFiles.value = false;
+  setDragHoverFolderPath(null);
+  await importEntriesToWorkspace(sourcePaths, path);
+}
+
+function handleWindowPointerLeave(event: PointerEvent) {
+  const session = internalWorkspaceDragSession.value;
+  if (!session || session.delegatedToExternalDrag || !isInternalDragActive.value) return;
+  internalWorkspaceDragSession.value = {
+    ...session,
+    lastX: event.clientX,
+    lastY: event.clientY,
+  };
+  if (internalWorkspaceDragDistance(internalWorkspaceDragSession.value) >= externalDragSwitchDistance) {
+    void delegateToExternalWorkspaceDrag();
+  }
+}
+
+function handleWindowBlur() {
+  const session = internalWorkspaceDragSession.value;
+  if (!session || session.delegatedToExternalDrag || !isInternalDragActive.value) return;
+  if (internalWorkspaceDragDistance(session) >= externalDragSwitchDistance) {
+    void delegateToExternalWorkspaceDrag();
+  }
+}
+
 function getDroppedSourcePaths(event: DragEvent) {
   return Array.from(event.dataTransfer?.files ?? [])
     .map((file) => (file as File & { path?: string }).path ?? "")
     .filter((path) => path.trim().length > 0);
+}
+
+function trimTrailingPathSeparators(path: string) {
+  const trimmed = path.trim();
+  if (/^[A-Za-z]:[\\/]$/.test(trimmed)) return trimmed;
+  return trimmed.replace(/[\\/]+$/, "") || trimmed;
+}
+
+function normalizeFilesystemPath(path: string) {
+  return trimTrailingPathSeparators(path)
+    .replace(/\//g, "\\")
+    .toLowerCase();
+}
+
+function joinRepositoryPath(rootPath: string, relativePath: string, name?: string) {
+  const normalizedRoot = trimTrailingPathSeparators(rootPath);
+  const parts = [
+    ...relativePath
+      .trim()
+      .replace(/^[\\/]+|[\\/]+$/g, "")
+      .split(/[\\/]+/)
+      .filter(Boolean),
+    ...(name ? [name] : []),
+  ];
+  if (!parts.length) return normalizedRoot;
+  const separator = normalizedRoot.includes("\\") ? "\\" : "/";
+  if (/^[A-Za-z]:[\\/]$/.test(normalizedRoot)) {
+    return `${normalizedRoot}${parts.join(separator)}`;
+  }
+  return `${normalizedRoot}${separator}${parts.join(separator)}`;
+}
+
+async function handleExternalPathsDrop(paths: string[]) {
+  setExternalDragActive(false);
+  const targetPath = dragHoverFolderPath.value ?? currentDirectoryPath.value;
+  setDragHoverFolderPath(null);
+
+  if (isTrashPanel.value || !activeSnapshot.value) return;
+
+  const repoRoot = activeSnapshot.value.repository.path;
+  const filteredPaths = paths.filter((sourcePath) => {
+    const normalizedSourcePath = trimTrailingPathSeparators(sourcePath);
+    if (!normalizedSourcePath) return false;
+    const segments = normalizedSourcePath.split(/[\\/]+/).filter(Boolean);
+    const name = segments[segments.length - 1];
+    if (!name) return false;
+    const targetAbsolutePath = joinRepositoryPath(repoRoot, targetPath, name);
+    return normalizeFilesystemPath(targetAbsolutePath) !== normalizeFilesystemPath(normalizedSourcePath);
+  });
+
+  if (!filteredPaths.length) return;
+  await importEntriesToWorkspace(filteredPaths, targetPath);
 }
 
 async function createRepositoryFromFolder(path: string) {
@@ -580,12 +843,24 @@ async function createRepositoryFromFolder(path: string) {
   }
 }
 
+function isInternalWorkspaceDragEvent(event: DragEvent) {
+  return isInternalDragActive.value
+    || Array.from(event.dataTransfer?.types ?? []).includes("application/x-momobako-entry");
+}
+
 function handleDragOver(event: DragEvent) {
   if (!isRepositoryWritable.value || !isFilesPanel.value) return;
   event.preventDefault();
+  if (isInternalWorkspaceDragEvent(event)) {
+    if (event.dataTransfer) {
+      event.dataTransfer.dropEffect = "move";
+    }
+    return;
+  }
   if (event.dataTransfer) {
     event.dataTransfer.dropEffect = "copy";
   }
+  setExternalDragActive(true);
   isDraggingFiles.value = true;
 }
 
@@ -593,16 +868,24 @@ function handleDragLeave(event: DragEvent) {
   const currentTarget = event.currentTarget as HTMLElement | null;
   const relatedTarget = event.relatedTarget as Node | null;
   if (currentTarget && relatedTarget && currentTarget.contains(relatedTarget)) return;
+  if (isInternalDragActive.value) return;
+  setExternalDragActive(false);
+  setDragHoverFolderPath(null);
   isDraggingFiles.value = false;
 }
 
 async function handleDrop(event: DragEvent) {
   event.preventDefault();
+  if (isInternalWorkspaceDragEvent(event)) {
+    await moveDraggedWorkspaceEntries(dragHoverFolderPath.value ?? currentDirectoryPath.value);
+    return;
+  }
+  setExternalDragActive(false);
   isDraggingFiles.value = false;
   if (!isRepositoryWritable.value || isTrashPanel.value) return;
   const sourcePaths = getDroppedSourcePaths(event);
   if (!sourcePaths.length) return;
-  void importEntriesToWorkspace(sourcePaths);
+  await handleExternalPathsDrop(sourcePaths);
 }
 
 function handleEmptyRepositoryDragOver(event: DragEvent) {
@@ -656,6 +939,11 @@ async function submitRenameSelected() {
 }
 
 async function deleteSelectedEntry() {
+  if (!selectedFilePaths.value.length) return;
+  if (selectedFilePaths.value.length > 1) {
+    await deleteWorkspaceEntries(selectedFilePaths.value, isTrashPanel.value ? "permanentDelete" : undefined);
+    return;
+  }
   if (!currentFileEntry.value) return;
   await deleteWorkspaceEntry(currentFileEntry.value.path, isTrashPanel.value ? "permanentDelete" : undefined);
 }
@@ -666,7 +954,9 @@ async function deleteEntry(entry: FileBrowserEntry) {
 
 function openCopyTargetDialog(entry: FileBrowserEntry) {
   if (isTrashPanel.value) return;
-  pendingCopySourcePaths.value = [entry.path];
+  pendingCopySourcePaths.value = selectedFilePathSet.value.has(entry.path)
+    ? [...selectedFilePaths.value]
+    : [entry.path];
   copyTargetPath.value = fileBrowser.value?.currentPath ?? "";
   copyTargetDialogOpen.value = true;
 }
@@ -706,7 +996,12 @@ function skipCurrentHardlinkCandidate() {
 }
 
 async function restoreSelectedEntry() {
-  if (!currentFileEntry.value || !isTrashPanel.value) return;
+  if (!selectedFilePaths.value.length || !isTrashPanel.value) return;
+  if (selectedFilePaths.value.length > 1) {
+    await restoreTrashEntries(selectedFilePaths.value);
+    return;
+  }
+  if (!currentFileEntry.value) return;
   await restoreTrashEntry(currentFileEntry.value.path);
 }
 
@@ -728,6 +1023,10 @@ async function handleEmptyTrash() {
 async function openSelectedEntry() {
   if (isTrashPanel.value) return;
   if (!currentFileEntry.value) return;
+  if (currentFileEntry.value.kind === "directory") {
+    openDirectory(currentFileEntry.value.path);
+    return;
+  }
   await openWorkspaceEntry(currentFileEntry.value.path);
 }
 
@@ -738,7 +1037,12 @@ async function revealSelectedEntry() {
 }
 
 function fileEntryContextMenu(entry: FileBrowserEntry) {
-  selectWorkspaceEntry(entry.path);
+  if (!selectedFilePathSet.value.has(entry.path)) {
+    selectWorkspaceEntries([entry.path], { primaryPath: entry.path, anchorPath: entry.path });
+  }
+  const contextSelectionPaths = selectedFilePathSet.value.has(entry.path)
+    ? selectedFilePaths.value
+    : [entry.path];
   if (isSmartFolderPanel.value) {
     return [
       {
@@ -773,13 +1077,19 @@ function fileEntryContextMenu(entry: FileBrowserEntry) {
       label: "还原",
       icon: RotateCcw,
       disabled: isMutatingFiles.value,
-      onSelect: () => restoreEntry(entry),
+      onSelect: async () => {
+        if (contextSelectionPaths.length > 1) {
+          await restoreTrashEntries(contextSelectionPaths);
+          return;
+        }
+        await restoreEntry(entry);
+      },
     }] : []),
     {
       id: "preview",
       label: "预览",
       icon: Eye,
-      disabled: entry.kind !== "file" || isTrashPanel.value,
+      disabled: entry.kind !== "file" || isTrashPanel.value || hasMultipleSelection.value,
       onSelect: () => {
         if (entry.kind === "file") {
           previewFilePath.value = entry.path;
@@ -788,10 +1098,16 @@ function fileEntryContextMenu(entry: FileBrowserEntry) {
     },
     {
       id: "open",
-      label: "打开",
+      label: entry.kind === "directory" ? "进入" : "打开",
       icon: Eye,
-      disabled: entry.kind !== "file" || isTrashPanel.value,
-      onSelect: () => openWorkspaceEntry(entry.path),
+      disabled: isTrashPanel.value || hasMultipleSelection.value,
+      onSelect: () => {
+        if (entry.kind === "directory") {
+          openDirectory(entry.path);
+          return;
+        }
+        return openWorkspaceEntry(entry.path);
+      },
     },
     {
       id: "reveal",
@@ -844,7 +1160,7 @@ function fileEntryContextMenu(entry: FileBrowserEntry) {
       id: "rename",
       label: "重命名",
       icon: PencilLine,
-      disabled: isTrashPanel.value,
+      disabled: isTrashPanel.value || hasMultipleSelection.value,
       onSelect: () => {
         renameTargetPath.value = entry.path;
         renameValue.value = entry.name;
@@ -857,7 +1173,13 @@ function fileEntryContextMenu(entry: FileBrowserEntry) {
       danger: true,
       disabled: isMutatingFiles.value,
       confirmLabel: isTrashPanel.value ? "确认彻底删除？再点一次" : undefined,
-      onSelect: () => deleteEntry(entry),
+      onSelect: async () => {
+        if (contextSelectionPaths.length > 1) {
+          await deleteWorkspaceEntries(contextSelectionPaths, isTrashPanel.value ? "permanentDelete" : undefined);
+          return;
+        }
+        await deleteEntry(entry);
+      },
     },
   ];
   return items;
@@ -875,7 +1197,7 @@ async function openSearchHit(result: SearchHit) {
   const snapshot = await loadFileBrowserForDirectory(getParentPath(result.path), { includeTree: true });
   const matchedEntry = snapshot?.entries.find((entry) => entry.path === result.path);
   if (matchedEntry) {
-    selectWorkspaceEntry(matchedEntry.path);
+    selectWorkspaceEntries([matchedEntry.path], { primaryPath: matchedEntry.path, anchorPath: matchedEntry.path });
     if (matchedEntry.kind === "file") {
       await nextTick();
       previewFilePath.value = matchedEntry.path;
@@ -1071,6 +1393,8 @@ async function confirmMissingRepositoryDelete() {
 }
 
 onMounted(() => {
+  window.addEventListener("pointerleave", handleWindowPointerLeave);
+  window.addEventListener("blur", handleWindowBlur);
   try {
     const currentWindow = getCurrentWindow();
     currentWindow.onDragDropEvent(({ payload }) => {
@@ -1091,16 +1415,20 @@ onMounted(() => {
       }
       if (!isRepositoryWritable.value || !isFilesPanel.value) return;
       if (payload.type === "enter" || payload.type === "over") {
+        setExternalDragActive(true);
         isDraggingFiles.value = true;
         return;
       }
       if (payload.type === "leave") {
+        setExternalDragActive(false);
+        setDragHoverFolderPath(null);
         isDraggingFiles.value = false;
         return;
       }
+      setExternalDragActive(false);
       isDraggingFiles.value = false;
       if (payload.paths.length) {
-        void importEntriesToWorkspace(payload.paths);
+        void handleExternalPathsDrop(payload.paths);
       }
     }).then((unlisten) => {
       dragDropUnlisten = unlisten;
@@ -1114,6 +1442,11 @@ onMounted(() => {
 
 onUnmounted(() => {
   dragDropUnlisten?.();
+  window.removeEventListener("pointerleave", handleWindowPointerLeave);
+  window.removeEventListener("blur", handleWindowBlur);
+  setExternalDragActive(false);
+  setDragHoverFolderPath(null);
+  clearDraggedWorkspaceState();
   cancelWorkspaceComponentPreload();
 });
 </script>
@@ -1324,13 +1657,14 @@ onUnmounted(() => {
       :breadcrumbs="breadcrumbSegments"
       :can-drag-entries="canDragEntries"
       :can-delete-selected="canDeleteSelected"
-      :can-preview-selected="canPreviewSelected"
+      :can-open-selected="canOpenSelected"
       :can-rename-selected="canRenameSelected"
       :can-restore-selected="canRestoreSelected"
       :current-file-entry="currentFileEntry"
       :directory-entries="activeDirectoryEntries"
       :display-mode-class="fileDisplayModeClass"
       :display-mode-options="fileDisplayModeOptions"
+      :drop-target-path="dragHoverFolderPath"
       :entry-deleted-at-label="entryDeletedAtLabel"
       :entry-modified-at-label="entryModifiedAtLabel"
       :error="error"
@@ -1341,6 +1675,7 @@ onUnmounted(() => {
       :hardlink-state-label="hardlinkStateLabel"
       :has-split-file-groups="hasActiveSplitFileGroups"
       :is-audio-entry="isAudioEntry"
+      :is-drag-active="isExternalDragActive || isInternalDragActive"
       :is-dragging-files="isDraggingFiles"
       :is-loading-file-browser="isActiveBrowserLoading"
       :is-model-entry="isModelEntry"
@@ -1348,7 +1683,10 @@ onUnmounted(() => {
       :is-read-only-virtual="isSmartFolderPanel"
       :is-trash-panel="isTrashPanel"
       :is-video-entry="isVideoEntry"
+      :open-selected-label="openSelectedLabel"
       :rename-target-path="renameTargetPath"
+      :selected-entries="selectedEntries"
+      :selected-file-paths="selectedFilePaths"
       :selected-file-path="selectedFilePath"
       :status-label="statusLabel"
       :thumbnail-src="thumbnailSrc"
@@ -1360,8 +1698,13 @@ onUnmounted(() => {
       @drag-over="handleDragOver"
       @drop="handleDrop"
       @empty-trash="handleEmptyTrash"
+      @entry-drag-end="handleEntryDragEnd"
+      @entry-drag-move="handleEntryDragMove"
       @entry-drag-start="handleEntryDragStart"
+      @hover-folder="handleFolderDropHover"
       @mark-thumbnail-failed="markThumbnailFailed"
+      @leave-folder="handleFolderDropLeave"
+      @drop-on-folder="handleFolderDrop"
       @open-directory="openDirectory"
       @open-selected="openSelectedEntry"
       @preview-file="previewFileEntryByDoubleClick"
@@ -1369,6 +1712,7 @@ onUnmounted(() => {
       @restore-selected="restoreSelectedEntry"
       @reveal-selected="revealSelectedEntry"
       @select-entry="selectFileEntry"
+      @select-entries="handleBoxSelection"
       @start-rename="startRenameSelected"
       @submit-rename="submitRenameSelected"
       @thumbnail-loaded="updateThumbnailAspectRatio"

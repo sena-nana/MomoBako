@@ -1,0 +1,7 @@
+[project]
+name = "eaglelibrarychanger"
+version = "0.1.0"
+description = "Convert Eagle libraries into MomoBako repositories."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = []

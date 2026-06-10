@@ -309,6 +309,12 @@ export type FileCopyRequest = {
   mode?: FileCopyMode;
 };
 
+export type FileMoveRequest = {
+  repoId: string;
+  sourcePaths: string[];
+  parentPath: string;
+};
+
 export type HardlinkState = "linked" | "copiedFallback" | "broken" | "missing";
 
 export type HardlinkCandidate = {

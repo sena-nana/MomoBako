@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/vue";
 import { createMemoryHistory } from "vue-router";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import App from "../src/App.vue";
 import { installContextMenu } from "../src/composables/useContextMenu";
 import { resetRepositoryWorkspaceForTests, useRepositoryWorkspace } from "../src/composables/useRepositoryWorkspace";
@@ -87,9 +87,44 @@ function pointerEvent(type: string, clientX: number) {
   return new PointerEvent(type, {
     bubbles: true,
     button: 0,
+    buttons: 1,
     clientX,
     pointerId: 1,
   });
+}
+
+function workspaceBrowser() {
+  const browser = document.querySelector(".files-browser");
+  expect(browser).toBeInstanceOf(HTMLElement);
+  return browser as HTMLElement;
+}
+
+function fileListItems() {
+  return Array.from(document.querySelectorAll<HTMLElement>(".files-list__item[data-entry-path]"));
+}
+
+function fileListItem(path: string) {
+  const item = fileListItems().find((element) => element.dataset.entryPath === path);
+  expect(item).toBeInstanceOf(HTMLElement);
+  return item as HTMLElement;
+}
+
+function folderTreeItem(path: string) {
+  const item = Array.from(document.querySelectorAll<HTMLElement>(".workspace-folder-tree__item"))
+    .find((element) => element.textContent?.includes(path.split("/").at(-1) ?? path));
+  expect(item).toBeInstanceOf(HTMLElement);
+  return item as HTMLElement;
+}
+
+function setElementRect(element: HTMLElement, rect: { left: number; top: number; right: number; bottom: number }) {
+  element.getBoundingClientRect = () => ({
+    ...rect,
+    width: rect.right - rect.left,
+    height: rect.bottom - rect.top,
+    x: rect.left,
+    y: rect.top,
+    toJSON: () => rect,
+  } as DOMRect);
 }
 
 function previewEntry(extension: string): FileBrowserEntry {
@@ -329,6 +364,97 @@ describe("文件管理冒烟", () => {
     expect(fileItem?.style.getPropertyValue("--file-thumb-aspect")).toBe(String(1600 / 900));
   });
 
+  it("目录单击只选中，双击才进入目录", async () => {
+    seedMockRepository();
+    const workspace = useRepositoryWorkspace();
+    workspace.setActivePanel("files");
+    await renderApp();
+
+    await fireEvent.click(fileListItem("Campaigns"));
+    expect(workspace.currentDirectoryPath.value).toBe("");
+    expect(workspace.selectedFilePaths.value).toEqual(["Campaigns"]);
+
+    await fireEvent.dblClick(fileListItem("Campaigns"));
+    await waitFor(() => {
+      expect(getInvokeCalls("get_file_browser").at(-1)?.args).toMatchObject({
+        request: {
+          directoryPath: "Campaigns",
+        },
+      });
+    });
+    expect(workspace.currentDirectoryPath.value).toBe("Campaigns");
+    expect(fileListItem("Campaigns/Summer")).toBeInTheDocument();
+  });
+
+  it("支持 Ctrl 多选、Shift 连选和框选", async () => {
+    seedMockRepository();
+    const workspace = useRepositoryWorkspace();
+    workspace.setActivePanel("files");
+    await renderApp();
+
+    await fireEvent.click(fileListItem("Campaigns"));
+    await fireEvent.click(fileListItem("cover-final.psd"), { ctrlKey: true });
+    expect(workspace.selectedFilePaths.value).toEqual(["Campaigns", "cover-final.psd"]);
+
+    await fireEvent.click(fileListItem("Campaigns"));
+    await fireEvent.click(fileListItem("cover-final.psd"), { shiftKey: true });
+    expect(workspace.selectedFilePaths.value).toEqual(["Campaigns", "cover-final.psd"]);
+
+    const list = document.querySelector(".files-list");
+    expect(list).toBeInstanceOf(HTMLElement);
+    setElementRect(list as HTMLElement, { left: 0, top: 0, right: 320, bottom: 240 });
+    setElementRect(fileListItem("Campaigns"), { left: 12, top: 12, right: 92, bottom: 92 });
+    setElementRect(fileListItem("Backgrounds"), { left: 108, top: 12, right: 188, bottom: 92 });
+    setElementRect(fileListItem("cover-final.psd"), { left: 204, top: 12, right: 284, bottom: 92 });
+
+    await fireEvent.pointerDown(list as HTMLElement, {
+      button: 0,
+      clientX: 8,
+      clientY: 8,
+      pointerId: 2,
+    });
+    await fireEvent.pointerMove(list as HTMLElement, {
+      buttons: 1,
+      clientX: 190,
+      clientY: 100,
+      pointerId: 2,
+    });
+    await fireEvent.pointerUp(list as HTMLElement, {
+      buttons: 0,
+      clientX: 190,
+      clientY: 100,
+      pointerId: 2,
+    });
+
+    expect(workspace.selectedFilePaths.value).toEqual(["Backgrounds", "Campaigns"]);
+  });
+
+  it("多选后支持批量拖出和批量删除", async () => {
+    seedMockRepository();
+    const workspace = useRepositoryWorkspace();
+    workspace.setActivePanel("files");
+    await renderApp();
+
+    await fireEvent.click(fileListItem("Campaigns"));
+    await fireEvent.click(fileListItem("cover-final.psd"), { ctrlKey: true });
+
+    await workspace.startWorkspaceEntriesDrag(workspace.selectedFilePaths.value);
+
+    await waitFor(() => {
+      expect(getInvokeCalls("plugin:drag|start_drag").at(-1)?.args).toMatchObject({
+        item: [
+          "C:/Mock/AnimeAssets/Campaigns",
+          "C:/Mock/AnimeAssets/cover-final.psd",
+        ],
+      });
+    });
+
+    await fireEvent.click(screen.getByRole("button", { name: "批量删除" }));
+    await waitFor(() => {
+      expect(getInvokeCalls("delete_entry")).toHaveLength(2);
+    });
+  });
+
   it("切目录后丢弃旧目录返回的缩略图", async () => {
     seedMockRepository();
     const workspace = useRepositoryWorkspace();
@@ -343,6 +469,91 @@ describe("文件管理冒烟", () => {
       expect(workspace.fileBrowser.value?.currentPath).toBe("Campaigns");
     });
     expect(workspace.fileBrowser.value?.entries.some((entry) => entry.path === "cover-final.psd")).toBe(false);
+  });
+
+  it("外部文件拖经文件夹树悬停后切换目录，再导入到该目录", async () => {
+    vi.useFakeTimers();
+    try {
+      seedMockRepository();
+      const workspace = useRepositoryWorkspace();
+      workspace.setActivePanel("files");
+      await renderApp();
+
+      const browser = workspaceBrowser();
+      await fireEvent.dragOver(browser, { dataTransfer: { files: [new File([], "new-shot.png")] } });
+      await fireEvent.dragEnter(folderTreeItem("Campaigns"));
+      await vi.advanceTimersByTimeAsync(460);
+
+      await waitFor(() => {
+        expect(getInvokeCalls("get_file_browser").at(-1)?.args).toMatchObject({
+          request: {
+            directoryPath: "Campaigns",
+          },
+        });
+      });
+
+      const importFile = new File([], "new-shot.png");
+      Object.defineProperty(importFile, "path", {
+        value: "C:/Import/new-shot.png",
+      });
+      await fireEvent.drop(browser, {
+        dataTransfer: {
+          files: [importFile],
+        },
+      });
+
+      await waitFor(() => {
+        expect(getInvokeCalls("import_entries").at(-1)?.args).toMatchObject({
+          request: {
+            parentPath: "Campaigns",
+            sourcePaths: ["C:/Import/new-shot.png"],
+          },
+        });
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("拖回原目录原位置时静默跳过，混合批次仅导入有效条目", async () => {
+    seedMockRepository();
+    const workspace = useRepositoryWorkspace();
+    workspace.setActivePanel("files");
+    await renderApp();
+
+    const browser = workspaceBrowser();
+    const samePathFile = new File([], "cover-final.psd");
+    Object.defineProperty(samePathFile, "path", {
+      value: "C:/Mock/AnimeAssets/cover-final.psd",
+    });
+
+    const importCountBefore = getInvokeCalls("import_entries").length;
+    await fireEvent.drop(browser, {
+      dataTransfer: {
+        files: [samePathFile],
+      },
+    });
+    expect(getInvokeCalls("import_entries")).toHaveLength(importCountBefore);
+    expect(workspace.error.value).toBeNull();
+
+    const newFile = new File([], "new-shot.png");
+    Object.defineProperty(newFile, "path", {
+      value: "C:/Import/new-shot.png",
+    });
+    await fireEvent.drop(browser, {
+      dataTransfer: {
+        files: [samePathFile, newFile],
+      },
+    });
+
+    await waitFor(() => {
+      expect(getInvokeCalls("import_entries").at(-1)?.args).toMatchObject({
+        request: {
+          parentPath: "",
+          sourcePaths: ["C:/Import/new-shot.png"],
+        },
+      });
+    });
   });
 
   it("文件右键缩略图菜单支持选择自定义缩略图", async () => {
