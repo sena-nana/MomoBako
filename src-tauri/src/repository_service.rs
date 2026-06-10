@@ -4764,6 +4764,7 @@ fn sync_repository_files(
                 &file.extension,
                 &asset_created_at,
                 file.created_at.as_deref(),
+                &[],
                 false,
             )?;
             updated_assets += 1;
@@ -4819,6 +4820,7 @@ fn sync_repository_files(
                     file.size_bytes,
                 )?;
             }
+            let palette = extract_image_palette(&file.absolute_path, &file.extension);
             insert_default_metadata(
                 tx,
                 &asset_id,
@@ -4826,6 +4828,7 @@ fn sync_repository_files(
                 &file.extension,
                 &now,
                 file.created_at.as_deref(),
+                &palette,
             )?;
             insert_event(
                 tx,
@@ -5019,6 +5022,7 @@ fn insert_default_metadata(
     extension: &str,
     added_to_library_at: &str,
     file_created_at: Option<&str>,
+    palette: &[String],
 ) -> Result<(), rusqlite::Error> {
     ensure_default_metadata(
         tx,
@@ -5027,6 +5031,7 @@ fn insert_default_metadata(
         extension,
         added_to_library_at,
         file_created_at,
+        palette,
         true,
     )
 }
@@ -5038,6 +5043,7 @@ fn ensure_default_metadata(
     extension: &str,
     added_to_library_at: &str,
     file_created_at: Option<&str>,
+    palette: &[String],
     overwrite_existing: bool,
 ) -> Result<(), rusqlite::Error> {
     let mut defaults = vec![
@@ -5058,6 +5064,13 @@ fn ensure_default_metadata(
             "fileCreatedAt".to_string(),
             serde_json::Value::String(file_created_at.to_string()),
         ));
+    }
+    if let Some(primary_color) = palette.first() {
+        defaults.push((
+            "color".to_string(),
+            serde_json::Value::String(primary_color.clone()),
+        ));
+        defaults.push(("palette".to_string(), serde_json::json!(palette)));
     }
 
     for (key, value) in defaults {
@@ -6037,6 +6050,71 @@ fn is_image_extension(extension: &str) -> bool {
         extension,
         "jpg" | "jpeg" | "png" | "webp" | "gif" | "bmp" | "tif" | "tiff"
     )
+}
+
+#[derive(Debug, Default)]
+struct PaletteBucket {
+    count: u64,
+    red_sum: u64,
+    green_sum: u64,
+    blue_sum: u64,
+}
+
+fn extract_image_palette(source_path: &Path, extension: &str) -> Vec<String> {
+    if !is_image_extension(&extension.to_ascii_lowercase()) {
+        return Vec::new();
+    }
+
+    let Ok(image) = image::open(source_path) else {
+        return Vec::new();
+    };
+    let sampled = if image.width().max(image.height()) > 160 {
+        image.thumbnail(160, 160)
+    } else {
+        image
+    };
+    let thumbnail = sampled.to_rgba8();
+    let mut buckets = BTreeMap::<(u8, u8, u8), PaletteBucket>::new();
+
+    for pixel in thumbnail.pixels() {
+        let [red, green, blue, alpha] = pixel.0;
+        if alpha < 128 {
+            continue;
+        }
+        let bucket = buckets.entry((red & 0xf8, green & 0xf8, blue & 0xf8)).or_default();
+        bucket.count += 1;
+        bucket.red_sum += u64::from(red);
+        bucket.green_sum += u64::from(green);
+        bucket.blue_sum += u64::from(blue);
+    }
+
+    let mut colors = buckets
+        .into_iter()
+        .filter(|(_, bucket)| bucket.count > 0)
+        .collect::<Vec<_>>();
+    colors.sort_by(|(left_key, left), (right_key, right)| {
+        right
+            .count
+            .cmp(&left.count)
+            .then_with(|| left_key.cmp(right_key))
+    });
+
+    colors
+        .into_iter()
+        .take(5)
+        .map(|(_, bucket)| averaged_hex_color(&bucket))
+        .collect()
+}
+
+fn averaged_hex_color(bucket: &PaletteBucket) -> String {
+    let red = rounded_channel_average(bucket.red_sum, bucket.count);
+    let green = rounded_channel_average(bucket.green_sum, bucket.count);
+    let blue = rounded_channel_average(bucket.blue_sum, bucket.count);
+    format!("#{red:02X}{green:02X}{blue:02X}")
+}
+
+fn rounded_channel_average(sum: u64, count: u64) -> u8 {
+    ((sum + count / 2) / count) as u8
 }
 
 fn is_video_extension(extension: &str) -> bool {
@@ -10710,6 +10788,47 @@ mod tests {
         image.save(path).expect("test image should be saved");
     }
 
+    fn write_test_palette_image(path: &Path) {
+        let mut image = image::RgbImage::new(100, 10);
+        for x in 0..100 {
+            let color = if x < 60 {
+                image::Rgb([210, 40, 30])
+            } else if x < 85 {
+                image::Rgb([40, 180, 90])
+            } else {
+                image::Rgb([20, 80, 200])
+            };
+            for y in 0..10 {
+                image.put_pixel(x, y, color);
+            }
+        }
+        image.save(path).expect("test palette image should be saved");
+    }
+
+    fn metadata_for_asset_path(
+        state: &RepositoryState,
+        repo_id: &str,
+        path: &str,
+    ) -> BTreeMap<String, serde_json::Value> {
+        let snapshot = state
+            .load_snapshot(repo_id)
+            .expect("snapshot should load after sync");
+        let asset_id = snapshot
+            .assets
+            .iter()
+            .find(|asset| asset.path == path)
+            .expect("asset should exist")
+            .asset_id
+            .clone();
+        state
+            .load_asset_detail(repo_id, &asset_id)
+            .expect("asset detail should load")
+            .metadata
+            .into_iter()
+            .map(|entry| (entry.key, entry.value))
+            .collect()
+    }
+
     fn count_files(path: &Path) -> usize {
         if !path.exists() {
             return 0;
@@ -10798,6 +10917,55 @@ mod tests {
             .get("addedToLibraryAt")
             .and_then(serde_json::Value::as_str)
             .is_some());
+
+        fs::remove_dir_all(root).expect("test temp root should be removed");
+    }
+
+    #[test]
+    fn sync_repository_extracts_palette_metadata_for_new_images() {
+        let (state, root, repo_root, _thumbnail_root) = create_test_state("sync-palette");
+        write_test_palette_image(&repo_root.join("cover.png"));
+
+        let repo_id = create_repository_for_path(&state, &repo_root);
+        let metadata = metadata_for_asset_path(&state, &repo_id, "cover.png");
+
+        assert_eq!(
+            metadata.get("color"),
+            Some(&serde_json::Value::String("#D2281E".to_string()))
+        );
+        assert_eq!(
+            metadata.get("palette"),
+            Some(&serde_json::json!(["#D2281E", "#28B45A", "#1450C8"]))
+        );
+
+        fs::remove_dir_all(root).expect("test temp root should be removed");
+    }
+
+    #[test]
+    fn sync_repository_skips_palette_metadata_for_non_images() {
+        let (state, root, repo_root, _thumbnail_root) = create_test_state("sync-no-palette");
+        fs::write(repo_root.join("note.txt"), "plain text").expect("text file should be written");
+
+        let repo_id = create_repository_for_path(&state, &repo_root);
+        let metadata = metadata_for_asset_path(&state, &repo_id, "note.txt");
+
+        assert_eq!(metadata.get("color"), None);
+        assert_eq!(metadata.get("palette"), None);
+
+        fs::remove_dir_all(root).expect("test temp root should be removed");
+    }
+
+    #[test]
+    fn sync_repository_ignores_broken_images_when_extracting_palette() {
+        let (state, root, repo_root, _thumbnail_root) = create_test_state("sync-broken-palette");
+        fs::write(repo_root.join("broken.png"), b"not an image")
+            .expect("broken image should be written");
+
+        let repo_id = create_repository_for_path(&state, &repo_root);
+        let metadata = metadata_for_asset_path(&state, &repo_id, "broken.png");
+
+        assert_eq!(metadata.get("color"), None);
+        assert_eq!(metadata.get("palette"), None);
 
         fs::remove_dir_all(root).expect("test temp root should be removed");
     }

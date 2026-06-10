@@ -36,6 +36,7 @@
   - Response keeps the existing `SyncResult` counters: `scannedFiles`, `createdAssets`, `updatedAssets`, `deletedAssets`, `createdEvents`, plus `hardlinkCandidates`
   - Desktop UI may expose local sync progress as phased client state (`scanning`, `writing`, `refreshing`, `complete`) without changing this transport contract
   - Sync updates repository indexes only; thumbnail generation is handled by the thumbnail API after content is visible
+  - Newly discovered image assets automatically receive `metadata.color` as the primary `#RRGGBB` color and `metadata.palette` as up to five dominant `#RRGGBB` colors. Palette extraction failures are ignored so imports and syncs can continue.
   - Local filesystem scans store real `sha256:<hex>` content hashes on assets. When a newly discovered file has the same content hash as an existing active asset and is not already in a hardlink group, sync records a pending hardlink candidate instead of auto-linking it.
 - File browser requests may include `specialLocation: "trash"` to browse `.momo/trash` without exposing internal repository directories in normal browsing.
 - Trash browser entries include `metadata.deletedAt` and `metadata.originalPath` when they were moved by MomoBako.
