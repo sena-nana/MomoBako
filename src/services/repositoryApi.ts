@@ -10,6 +10,7 @@ import type {
   FileCreateRequest,
   FileImportRequest,
   FileDeleteRequest,
+  FileMoveRequest,
   FilePreviewSourceResponse,
   FileReadRequest,
   FileRenameRequest,
@@ -122,6 +123,10 @@ export function importEntries(request: FileImportRequest) {
 
 export function copyEntries(request: FileCopyRequest) {
   return invoke<FileBrowserSnapshot>("copy_entries", { request });
+}
+
+export function moveEntries(request: FileMoveRequest) {
+  return invoke<FileBrowserSnapshot>("move_entries", { request });
 }
 
 export function renameEntry(request: FileRenameRequest) {

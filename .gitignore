@@ -50,6 +50,10 @@ dist/
 # TypeScript
 *.tsbuildinfo
 
+# Python
+__pycache__/
+*.pyc
+
 # Tests
 coverage/
 *.lcov

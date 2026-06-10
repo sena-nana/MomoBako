@@ -9,6 +9,8 @@ import {
   fileBrowser,
   fileTree,
   isLoadingFileBrowser,
+  selectedFilePaths,
+  selectionAnchorPath,
   selectedFilePath,
 } from "./state";
 import {
@@ -46,11 +48,28 @@ export function applyFileBrowserSnapshot(snapshot: FileBrowserSnapshot) {
   }
   currentDirectoryPath.value = displaySnapshot.currentPath;
 
-  const hasCurrentSelection = selectedFilePath.value
-    && displaySnapshot.entries.some((entry) => entry.path === selectedFilePath.value);
-  selectedFilePath.value = hasCurrentSelection
+  const entryPaths = new Set(displaySnapshot.entries.map((entry) => entry.path));
+  let nextSelectedPaths = selectedFilePaths.value.filter((path) => entryPaths.has(path));
+  let nextPrimaryPath = selectedFilePath.value && entryPaths.has(selectedFilePath.value)
     ? selectedFilePath.value
-    : getDefaultFileBrowserSelection(displaySnapshot);
+    : null;
+
+  if (nextPrimaryPath && !nextSelectedPaths.includes(nextPrimaryPath)) {
+    nextSelectedPaths = [nextPrimaryPath, ...nextSelectedPaths];
+  }
+
+  if (!nextSelectedPaths.length) {
+    nextPrimaryPath = getDefaultFileBrowserSelection(displaySnapshot);
+    nextSelectedPaths = nextPrimaryPath ? [nextPrimaryPath] : [];
+  } else if (!nextPrimaryPath) {
+    nextPrimaryPath = nextSelectedPaths[0] ?? null;
+  }
+
+  selectedFilePaths.value = nextSelectedPaths;
+  selectedFilePath.value = nextPrimaryPath;
+  selectionAnchorPath.value = selectionAnchorPath.value && entryPaths.has(selectionAnchorPath.value)
+    ? selectionAnchorPath.value
+    : nextPrimaryPath;
   loadThumbnailsForSnapshot(displaySnapshot);
 }
 

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed, ref } from "vue";
 import {
   Eye,
   File,
@@ -28,18 +29,30 @@ type EntryDragIntent = {
   startX: number;
   startY: number;
 };
+type SelectionMode = "replace" | "toggle" | "range";
+type BoxSelectionMode = "replace" | "append";
+type BoxSelectionState = {
+  pointerId: number;
+  startX: number;
+  startY: number;
+  currentX: number;
+  currentY: number;
+  additive: boolean;
+  didDrag: boolean;
+};
 
 const props = defineProps<{
   breadcrumbs: BreadcrumbSegment[];
   canDragEntries: boolean;
   canDeleteSelected: boolean;
-  canPreviewSelected: boolean;
+  canOpenSelected: boolean;
   canRenameSelected: boolean;
   canRestoreSelected: boolean;
   currentFileEntry: FileBrowserEntry | null;
   directoryEntries: FileBrowserEntry[];
   displayModeClass: string;
   displayModeOptions: Array<{ value: FileDisplayMode; label: string }>;
+  dropTargetPath: string | null;
   entryDeletedAtLabel: (entry: FileBrowserEntry) => string | null;
   entryModifiedAtLabel: (entry: FileBrowserEntry) => string;
   error: string | null;
@@ -51,13 +64,17 @@ const props = defineProps<{
   hasSplitFileGroups: boolean;
   isAudioEntry: (entry: FileBrowserEntry) => boolean;
   isDraggingFiles: boolean;
+  isDragActive: boolean;
   isLoadingFileBrowser: boolean;
   isModelEntry: (entry: FileBrowserEntry) => boolean;
   isMutatingFiles: boolean;
   isReadOnlyVirtual?: boolean;
   isTrashPanel: boolean;
   isVideoEntry: (entry: FileBrowserEntry) => boolean;
+  openSelectedLabel: string;
   renameTargetPath: string | null;
+  selectedEntries: FileBrowserEntry[];
+  selectedFilePaths: string[];
   selectedFilePath: string | null;
   statusLabel: (status: string) => string;
   thumbnailSrc: (entry: FileBrowserEntry) => string | null;
@@ -76,15 +93,21 @@ const emit = defineEmits<{
   dragOver: [event: DragEvent];
   drop: [event: DragEvent];
   emptyTrash: [];
+  entryDragEnd: [event: PointerEvent | null];
+  entryDragMove: [event: PointerEvent];
   entryDragStart: [entry: FileBrowserEntry, event: PointerEvent];
+  hoverFolder: [path: string];
+  leaveFolder: [path: string];
   markThumbnailFailed: [entry: FileBrowserEntry];
   openDirectory: [path: string];
   openSelected: [];
+  dropOnFolder: [path: string, dragEvent: DragEvent];
   previewFile: [entry: FileBrowserEntry];
   restoreAllTrash: [];
   restoreSelected: [];
   revealSelected: [];
-  selectEntry: [entry: FileBrowserEntry];
+  selectEntries: [paths: string[], mode: BoxSelectionMode];
+  selectEntry: [entry: FileBrowserEntry, mode: SelectionMode];
   startRename: [];
   submitRename: [];
   thumbnailLoaded: [entry: FileBrowserEntry, event: Event];
@@ -92,7 +115,120 @@ const emit = defineEmits<{
 
 const dragStartThreshold = 7;
 let entryDragIntent: EntryDragIntent | null = null;
+let activeDragPointerId: number | null = null;
 let suppressClickPath: string | null = null;
+const filesListRef = ref<HTMLElement | null>(null);
+const boxSelection = ref<BoxSelectionState | null>(null);
+const selectedPathSet = computed(() => new Set(props.selectedFilePaths));
+const dropTargetPathSet = computed(() => (
+  props.dropTargetPath ? new Set([props.dropTargetPath]) : new Set<string>()
+));
+const multiSelectionSummary = computed(() => {
+  const directoryCount = props.selectedEntries.filter((entry) => entry.kind === "directory").length;
+  const fileCount = props.selectedEntries.length - directoryCount;
+  return [
+    directoryCount ? `${directoryCount} 个文件夹` : "",
+    fileCount ? `${fileCount} 个文件` : "",
+  ].filter(Boolean).join(" · ");
+});
+const selectionBoxStyle = computed(() => {
+  const selection = boxSelection.value;
+  const container = filesListRef.value;
+  if (!selection || !selection.didDrag || !container) return null;
+
+  const rect = container.getBoundingClientRect();
+  const left = Math.max(0, Math.min(selection.startX, selection.currentX) - rect.left + container.scrollLeft);
+  const top = Math.max(0, Math.min(selection.startY, selection.currentY) - rect.top + container.scrollTop);
+  const width = Math.abs(selection.currentX - selection.startX);
+  const height = Math.abs(selection.currentY - selection.startY);
+  return {
+    left: `${left}px`,
+    top: `${top}px`,
+    width: `${width}px`,
+    height: `${height}px`,
+  };
+});
+
+function selectionModeFromEvent(event: MouseEvent): SelectionMode {
+  if (event.shiftKey) return "range";
+  if (event.ctrlKey || event.metaKey) return "toggle";
+  return "replace";
+}
+
+function handleEntryClick(entry: FileBrowserEntry, event: MouseEvent) {
+  if (suppressClickPath === entry.path) {
+    suppressClickPath = null;
+    return;
+  }
+  emit("selectEntry", entry, selectionModeFromEvent(event));
+}
+
+function handleEntryDoubleClick(entry: FileBrowserEntry) {
+  if (entry.kind === "directory") {
+    emit("openDirectory", entry.path);
+    return;
+  }
+  emit("previewFile", entry);
+}
+
+function handleListPointerDown(event: PointerEvent) {
+  if (event.button !== 0) return;
+  if ((event.target as HTMLElement | null)?.closest(".files-list__item")) return;
+
+  boxSelection.value = {
+    pointerId: event.pointerId,
+    startX: event.clientX,
+    startY: event.clientY,
+    currentX: event.clientX,
+    currentY: event.clientY,
+    additive: event.ctrlKey || event.metaKey,
+    didDrag: false,
+  };
+  filesListRef.value?.setPointerCapture?.(event.pointerId);
+}
+
+function collectBoxSelectionPaths(selection: BoxSelectionState) {
+  const container = filesListRef.value;
+  if (!container) return [];
+
+  const left = Math.min(selection.startX, selection.currentX);
+  const right = Math.max(selection.startX, selection.currentX);
+  const top = Math.min(selection.startY, selection.currentY);
+  const bottom = Math.max(selection.startY, selection.currentY);
+
+  return Array.from(container.querySelectorAll<HTMLElement>(".files-list__item[data-entry-path]"))
+    .filter((item) => {
+      const rect = item.getBoundingClientRect();
+      return rect.right >= left && rect.left <= right && rect.bottom >= top && rect.top <= bottom;
+    })
+    .map((item) => item.dataset.entryPath ?? "")
+    .filter(Boolean);
+}
+
+function updateBoxSelection(event: PointerEvent) {
+  const selection = boxSelection.value;
+  if (!selection || selection.pointerId !== event.pointerId) return;
+
+  selection.currentX = event.clientX;
+  selection.currentY = event.clientY;
+  selection.didDrag ||= Math.abs(selection.currentX - selection.startX) > 3 || Math.abs(selection.currentY - selection.startY) > 3;
+  boxSelection.value = { ...selection };
+
+  if (!selection.didDrag) return;
+  const paths = collectBoxSelectionPaths(selection);
+  emit("selectEntries", paths, selection.additive ? "append" : "replace");
+}
+
+function clearBoxSelection(event: PointerEvent) {
+  const selection = boxSelection.value;
+  if (!selection || selection.pointerId !== event.pointerId) return;
+
+  if (!selection.didDrag && !selection.additive) {
+    emit("selectEntries", [], "replace");
+  }
+  filesListRef.value?.releasePointerCapture?.(event.pointerId);
+  boxSelection.value = null;
+}
 
 function releaseEntryPointer(event: PointerEvent) {
   const target = event.currentTarget as HTMLElement | null;
@@ -109,10 +245,16 @@ function handleEntryPointerDown(entry: FileBrowserEntry, event: PointerEvent) {
     startX: event.clientX,
     startY: event.clientY,
   };
+  activeDragPointerId = null;
   (event.currentTarget as HTMLElement | null)?.setPointerCapture?.(event.pointerId);
 }
 
 function handleEntryPointerMove(entry: FileBrowserEntry, event: PointerEvent) {
+  if (activeDragPointerId === event.pointerId) {
+    emit("entryDragMove", event);
+    return;
+  }
+
   const intent = entryDragIntent;
   if (!intent || intent.pointerId !== event.pointerId || intent.entryPath !== entry.path) return;
   if ((event.buttons & 1) !== 1) {
@@ -124,24 +266,34 @@ function handleEntryPointerMove(entry: FileBrowserEntry, event: PointerEvent) {
   if (distance < dragStartThreshold) return;
 
   suppressClickPath = entry.path;
+  activeDragPointerId = event.pointerId;
   entryDragIntent = null;
-  releaseEntryPointer(event);
   emit("entryDragStart", entry, event);
+  emit("entryDragMove", event);
 }
 
 function clearEntryDragIntent(event: PointerEvent) {
+  const shouldEmitDragEnd = activeDragPointerId === event.pointerId;
   if (entryDragIntent?.pointerId === event.pointerId) {
     entryDragIntent = null;
+  }
+  if (shouldEmitDragEnd) {
+    activeDragPointerId = null;
+    emit("entryDragEnd", event);
   }
   releaseEntryPointer(event);
 }
 
-function handleEntryClick(entry: FileBrowserEntry) {
-  if (suppressClickPath === entry.path) {
-    suppressClickPath = null;
-    return;
+function cancelEntryDragIntent(event: PointerEvent) {
+  const shouldEmitDragEnd = activeDragPointerId === event.pointerId;
+  if (entryDragIntent?.pointerId === event.pointerId) {
+    entryDragIntent = null;
   }
-  emit("selectEntry", entry);
+  if (shouldEmitDragEnd) {
+    activeDragPointerId = null;
+    emit("entryDragEnd", null);
+  }
+  releaseEntryPointer(event);
 }
 </script>
 
@@ -228,19 +380,37 @@ function handleEntryClick(entry: FileBrowserEntry) {
     </div>
 
     <template v-else>
-      <div class="files-list">
+      <div
+        ref="filesListRef"
+        class="files-list"
+        @pointerdown="handleListPointerDown"
+        @pointermove="updateBoxSelection"
+        @pointerup="clearBoxSelection"
+        @pointercancel="clearBoxSelection"
+      >
         <button
           v-for="entry in directoryEntries"
           :key="entry.path"
           v-context-menu="() => fileEntryContextMenu(entry)"
           type="button"
           class="files-list__item"
-          :class="{ 'is-active': selectedFilePath === entry.path, 'can-drag-out': canDragEntries }"
-          @click="handleEntryClick(entry)"
+          :class="{
+            'is-active': selectedPathSet.has(entry.path),
+            'can-drag-out': canDragEntries,
+            'is-drop-target': isDragActive && dropTargetPathSet.has(entry.path),
+          }"
+          :data-entry-path="entry.path"
+          :data-folder-path="entry.path"
+          @click="handleEntryClick(entry, $event)"
+          @dblclick="handleEntryDoubleClick(entry)"
           @pointerdown="handleEntryPointerDown(entry, $event)"
           @pointermove="handleEntryPointerMove(entry, $event)"
           @pointerup="clearEntryDragIntent"
-          @pointercancel="clearEntryDragIntent"
+          @pointercancel="cancelEntryDragIntent"
+          @dragenter.prevent="emit('hoverFolder', entry.path)"
+          @dragover.prevent="emit('hoverFolder', entry.path)"
+          @dragleave.prevent="emit('leaveFolder', entry.path)"
+          @drop.stop.prevent="emit('dropOnFolder', entry.path, $event)"
         >
           <div class="files-list__preview" :style="{ background: fileTone(entry) }">
             <Folder :size="24" aria-hidden="true" />
@@ -259,14 +429,15 @@ function handleEntryClick(entry: FileBrowserEntry) {
             v-context-menu="() => fileEntryContextMenu(entry)"
             type="button"
             class="files-list__item files-list__item--file"
-            :class="{ 'is-active': selectedFilePath === entry.path, 'can-drag-out': canDragEntries }"
+            :class="{ 'is-active': selectedPathSet.has(entry.path), 'can-drag-out': canDragEntries }"
+            :data-entry-path="entry.path"
             :style="fileItemStyle(entry)"
-            @click="handleEntryClick(entry)"
-            @dblclick="emit('previewFile', entry)"
+            @click="handleEntryClick(entry, $event)"
+            @dblclick="handleEntryDoubleClick(entry)"
             @pointerdown="handleEntryPointerDown(entry, $event)"
             @pointermove="handleEntryPointerMove(entry, $event)"
             @pointerup="clearEntryDragIntent"
-            @pointercancel="clearEntryDragIntent"
+            @pointercancel="cancelEntryDragIntent"
           >
             <div class="files-list__preview">
               <img
@@ -298,12 +469,43 @@ function handleEntryClick(entry: FileBrowserEntry) {
             </div>
           </button>
         </div>
+
+        <div v-if="selectionBoxStyle" class="files-list__selection-box" :style="selectionBoxStyle"></div>
       </div>
     </template>
   </div>
 
   <aside class="files-detail">
-    <div v-if="currentFileEntry" class="files-detail__card">
+    <div v-if="selectedEntries.length > 1" class="files-detail__card">
+      <div class="files-detail__section">
+        <p class="asset-browser__eyebrow">选中项</p>
+        <h2>已选择 {{ selectedEntries.length }} 个项目</h2>
+        <p class="files-detail__subline">{{ multiSelectionSummary }}</p>
+      </div>
+
+      <div class="files-detail__section">
+        <div class="files-detail__actions">
+          <button v-if="isTrashPanel" type="button" class="ghost" :disabled="isMutatingFiles || !canRestoreSelected" @click="emit('restoreSelected')">
+            <RotateCcw :size="14" aria-hidden="true" />
+            批量还原
+          </button>
+          <button type="button" class="ghost" disabled>
+            <Eye :size="14" aria-hidden="true" />
+            预览仅支持单选
+          </button>
+          <button type="button" class="ghost" disabled>
+            <PencilLine :size="14" aria-hidden="true" />
+            重命名仅支持单选
+          </button>
+          <button type="button" class="ghost danger" :disabled="isMutatingFiles || !canDeleteSelected" @click="emit('deleteSelected')">
+            <File :size="14" aria-hidden="true" />
+            {{ isTrashPanel ? "批量彻底删除" : "批量删除" }}
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div v-else-if="currentFileEntry" class="files-detail__card">
       <div class="files-detail__preview" :style="{ background: currentFileEntry.kind === 'directory' ? fileTone(currentFileEntry) : undefined }">
         <img
           v-if="thumbnailSrc(currentFileEntry)"
@@ -332,9 +534,9 @@ function handleEntryClick(entry: FileBrowserEntry) {
             <RotateCcw :size="14" aria-hidden="true" />
             还原
           </button>
-          <button type="button" class="ghost" :disabled="!canPreviewSelected" @click="emit('openSelected')">
+          <button type="button" class="ghost" :disabled="!canOpenSelected" @click="emit('openSelected')">
             <Eye :size="14" aria-hidden="true" />
-            查看
+            {{ openSelectedLabel }}
           </button>
           <button type="button" class="ghost" :disabled="isTrashPanel" @click="emit('revealSelected')">
             <FolderOpen :size="14" aria-hidden="true" />

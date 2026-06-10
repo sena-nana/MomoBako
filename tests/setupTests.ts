@@ -623,6 +623,9 @@ function createMockPlugins() {
 }
 
 vi.mock("@tauri-apps/api/core", () => ({
+  Channel: class MockChannel<T> {
+    onmessage: ((message: T) => void) | null = null;
+  },
   convertFileSrc: (path: string) => `asset://${path}`,
   invoke: async (command: string, args?: Record<string, unknown>) => {
     invokeCalls.push({ command, args });

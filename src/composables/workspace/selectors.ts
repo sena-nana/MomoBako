@@ -8,13 +8,18 @@ import {
   filters,
   plugins,
   repositories,
+  selectedFilePaths,
   selectedFilePath,
 } from "./state";
 
 export type WorkspaceSelectors = {
   activeRepository: ComputedRef<(typeof repositories.value)[number] | null>;
   fileBrowserEntryMap: ComputedRef<ReadonlyMap<string, FileBrowserEntry>>;
+  visibleEntries: ComputedRef<FileBrowserEntry[]>;
   selectedEntry: ComputedRef<FileBrowserEntry | null>;
+  selectedEntries: ComputedRef<FileBrowserEntry[]>;
+  selectedFilePathSet: ComputedRef<ReadonlySet<string>>;
+  hasMultipleSelection: ComputedRef<boolean>;
   directoryEntries: ComputedRef<FileBrowserEntry[]>;
   fileEntries: ComputedRef<FileBrowserEntry[]>;
   hasSplitFileGroups: ComputedRef<boolean>;
@@ -43,6 +48,22 @@ export const directoryEntries = computed(() => (
 export const fileEntries = computed(() => (
   (fileBrowser.value?.entries ?? []).filter((entry) => entry.kind === "file")
 ));
+
+export const visibleEntries = computed(() => (
+  [...directoryEntries.value, ...fileEntries.value]
+));
+
+export const selectedFilePathSet = computed<ReadonlySet<string>>(() => (
+  new Set(selectedFilePaths.value)
+));
+
+export const selectedEntries = computed(() => (
+  selectedFilePaths.value
+    .map((path) => fileBrowserEntryMap.value.get(path) ?? null)
+    .filter((entry): entry is FileBrowserEntry => Boolean(entry))
+));
+
+export const hasMultipleSelection = computed(() => selectedEntries.value.length > 1);
 
 export const hasSplitFileGroups = computed(() => (
   directoryEntries.value.length > 0 && fileEntries.value.length > 0

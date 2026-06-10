@@ -19,6 +19,7 @@ import {
 import FolderTreeNode from "../components/FolderTreeNode.vue";
 import SmartFolderTreeNode from "../components/SmartFolderTreeNode.vue";
 import TaskPopover from "../components/TaskPopover.vue";
+import { normalizeWorkspaceMovePaths } from "../pages/workspace/dragBehavior";
 import { useRepositoryWorkspace, type WorkspacePanelKey } from "../composables/useRepositoryWorkspace";
 import type { FileDeleteMode, SmartFolder, SmartFolderFilter, SmartFolderTreeNode as SmartFolderTreeNodeType } from "../types/repository";
 
@@ -95,9 +96,13 @@ const {
   activeSmartFolderId,
   activeSnapshot,
   currentDirectoryPath,
+  dragHoverFolderPath,
+  draggedWorkspacePaths,
   fileTree,
   smartFolders,
   syncProgress,
+  isExternalDragActive,
+  isInternalDragActive,
   isBusy,
   isLoadingFileBrowser,
   isMutatingFiles,
@@ -112,11 +117,15 @@ const {
   updateSmartFolderInWorkspace,
   deleteSmartFolderInWorkspace,
   createDirectoryInWorkspace,
+  importEntriesToWorkspace,
+  moveWorkspaceEntries,
   renameWorkspaceEntry,
   deleteWorkspaceEntry,
   createNewRepository,
   attachRepository,
   removeRepository,
+  clearDraggedWorkspaceState,
+  setDragHoverFolderPath,
 } = useRepositoryWorkspace();
 
 const shortcuts = computed<ShortcutItem[]>(() => {
@@ -131,6 +140,7 @@ const shortcuts = computed<ShortcutItem[]>(() => {
 
 const isTrashPanel = computed(() => activePanel.value === "deleted");
 const isActiveRepositoryMissing = computed(() => activeRepository.value?.status === "missing");
+const isFolderDragActive = computed(() => isExternalDragActive.value || isInternalDragActive.value);
 const expandedFolderPathSet = computed(() => new Set(expandedFolderPaths.value));
 const fileTreeNodes = computed(() => fileTree.value);
 const backendOptions = computed(() => repositoryBackendOptions.value.map((item) => ({
@@ -174,6 +184,9 @@ const isShowingSyncProgress = computed(() => (
   syncProgress.value.phase === "writing" ||
   syncProgress.value.phase === "refreshing"
 ));
+
+let folderHoverSwitchTimer: number | null = null;
+let pendingHoverFolderPath: string | null = null;
 
 watch(
   fileTreeNodes,
@@ -297,6 +310,12 @@ function smartFolderAncestry(id: string) {
   }
   return path;
 }
+
+watch(isFolderDragActive, (active) => {
+  if (!active) {
+    clearFolderDragHover();
+  }
+});
 
 function selectPanel(next: PanelKey) {
   setActivePanel(next);
@@ -445,6 +464,81 @@ async function deleteActiveRepositoryFromMenu() {
 function openFolder(path: string) {
   setActivePanel("files");
   void loadFileBrowserForDirectory(path);
+}
+
+function ensureFolderExpanded(path: string) {
+  if (!path) return;
+  const next = new Set(expandedFolderPaths.value);
+  next.add(path);
+  expandedFolderPaths.value = Array.from(next);
+}
+
+function clearFolderHoverTimer() {
+  if (folderHoverSwitchTimer != null) {
+    window.clearTimeout(folderHoverSwitchTimer);
+    folderHoverSwitchTimer = null;
+  }
+  pendingHoverFolderPath = null;
+}
+
+function clearFolderDragHover() {
+  clearFolderHoverTimer();
+  setDragHoverFolderPath(null);
+}
+
+function handleFolderDragHover(path: string) {
+  if (!activeRepoId.value || isTrashPanel.value || !isFolderDragActive.value) return;
+  setDragHoverFolderPath(path);
+  if (pendingHoverFolderPath === path) return;
+
+  clearFolderHoverTimer();
+  pendingHoverFolderPath = path;
+  folderHoverSwitchTimer = window.setTimeout(() => {
+    ensureFolderExpanded(path);
+    openFolder(path);
+    folderHoverSwitchTimer = null;
+    pendingHoverFolderPath = null;
+  }, 450);
+}
+
+function handleFolderDragLeave(path: string) {
+  if (dragHoverFolderPath.value === path) {
+    setDragHoverFolderPath(null);
+  }
+  if (pendingHoverFolderPath === path) {
+    clearFolderHoverTimer();
+  }
+}
+
+function getDroppedSourcePaths(event: DragEvent) {
+  return Array.from(event.dataTransfer?.files ?? [])
+    .map((file) => (file as File & { path?: string }).path ?? "")
+    .filter((path) => path.trim().length > 0);
+}
+
+async function handleFolderDrop(path: string, event: DragEvent) {
+  clearFolderDragHover();
+
+  if (!activeRepoId.value || isTrashPanel.value) {
+    clearDraggedWorkspaceState();
+    return;
+  }
+
+  if (isInternalDragActive.value && draggedWorkspacePaths.value.length) {
+    const sourcePaths = normalizeWorkspaceMovePaths(draggedWorkspacePaths.value, path);
+    if (!sourcePaths.length) {
+      clearDraggedWorkspaceState();
+      return;
+    }
+    await moveWorkspaceEntries(sourcePaths, path);
+    clearDraggedWorkspaceState();
+    return;
+  }
+
+  const sourcePaths = getDroppedSourcePaths(event);
+  if (sourcePaths.length) {
+    await importEntriesToWorkspace(sourcePaths, path);
+  }
 }
 
 function toggleFolderExpansion(path: string) {
@@ -704,6 +798,7 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
+  clearFolderDragHover();
   window.removeEventListener("momo:add-repository", handleAddRepositoryRequest);
   document.removeEventListener("keydown", handleDocumentKeydown);
   document.removeEventListener("pointerdown", handleDocumentPointerDown, true);
@@ -809,12 +904,17 @@ onBeforeUnmount(() => {
               :current-path="currentDirectoryPath"
               :expanded-paths="expandedFolderPathSet"
               :depth="1"
+              :drop-target-path="dragHoverFolderPath"
+              :is-drag-active="isFolderDragActive"
               :is-mutating="isMutatingFiles"
               @toggle="toggleFolderExpansion"
               @open="openFolder"
               @create="openCreateFolderDialog"
               @rename="openRenameFolderDialog"
               @delete="openDeleteFolderDialog"
+              @hover-folder="handleFolderDragHover"
+              @leave-folder="handleFolderDragLeave"
+              @drop-folder="handleFolderDrop"
             />
           </div>
           <div v-if="activeRepoId && !isActiveRepositoryMissing && (isTrashPanel || !fileTreeNodes.length) && !isLoadingFileBrowser" class="workspace-empty workspace-empty--compact">
