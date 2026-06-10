@@ -33,9 +33,9 @@
     "pdfjs-dist": "^6.0.227",
     "pptx-preview": "^1.0.7",
     "three": "^0.184.0",
-    "vue": "^3.5.34",
+    "vue": "^3.5.35",
     "vue-demi": "^0.14.10",
-    "vue-router": "^5.0.7",
+    "vue-router": "^5.1.0",
     "vue3-markdown-it": "^1.0.10"
   },
   "devDependencies": {
@@ -45,13 +45,13 @@
     "@testing-library/vue": "^8.1.0",
     "@types/three": "^0.184.1",
     "@vitejs/plugin-vue": "^6.0.7",
-    "@vue/compiler-sfc": "^3.5.34",
+    "@vue/compiler-sfc": "^3.5.35",
     "jsdom": "^29.1.1",
-    "typescript": "~5.8.3",
-    "vite": "^7.0.4",
+    "typescript": "~6.0.3",
+    "vite": "^8.0.16",
     "vitepress": "^1.6.4",
-    "vitest": "^4.1.6",
-    "vue-tsc": "^3.2.9"
+    "vitest": "^4.1.8",
+    "vue-tsc": "^3.3.4"
   },
   "packageManager": "yarn@4.14.1"
 }

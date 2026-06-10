@@ -5,6 +5,7 @@ import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import {
+  AlertTriangle,
   Eye,
   FileImage,
   Files,
@@ -18,6 +19,7 @@ import {
   Trash2,
   X,
 } from "lucide-vue-next";
+import ConfirmDialog from "../components/ConfirmDialog.vue";
 import PluginManagerPanel from "../components/PluginManagerPanel.vue";
 import { useRepositoryWorkspace } from "../composables/useRepositoryWorkspace";
 import { getPreviewPluginForEntry } from "../plugins/previewPlugins";
@@ -95,6 +97,9 @@ const renameTargetPath = ref<string | null>(null);
 const isDraggingFiles = ref(false);
 const isDraggingRepositoryFolder = ref(false);
 const emptyRepositoryError = ref("");
+const missingRepositoryError = ref("");
+const missingRepositoryAction = ref<"relocating" | "deleting" | null>(null);
+const showMissingRepositoryDeleteDialog = ref(false);
 const previewFilePath = ref<string | null>(null);
 const failedThumbnailPaths = ref<Set<string>>(new Set());
 const fileDisplayMode = ref<FileDisplayMode>(readInitialFileDisplayMode());
@@ -113,6 +118,7 @@ const {
   activePanel,
   activeAssetId,
   activeSnapshot,
+  activeRepository,
   activeRepoId,
   currentDirectoryPath,
   dragHoverFolderPath,
@@ -136,14 +142,17 @@ const {
   selectedFilePaths,
   selectedFilePath,
   searchResults,
+  smartFolderResult,
   hardlinkCandidates,
   isExternalDragActive,
   isInternalDragActive,
   isLoadingFileBrowser,
   isSearching,
   isSavingMetadata,
+  isLoadingSmartFolder,
   isMutatingFiles,
   error,
+  refreshRepositoryWorkspace,
   selectRepository,
   selectAsset,
   loadFileBrowserForDirectory,
@@ -151,6 +160,8 @@ const {
   copyWorkspaceEntries,
   moveWorkspaceEntries,
   attachRepository,
+  removeRepository,
+  relocateMissingRepository,
   clearDraggedWorkspaceState,
   clearWorkspaceSelection,
   deleteWorkspaceEntries,
@@ -185,24 +196,63 @@ const {
 } = useRepositoryWorkspace();
 
 const hasRepository = computed(() => Boolean(activeSnapshot.value));
+const isMissingRepository = computed(() => activeRepository.value?.status === "missing");
+const isMissingRepositoryBusy = computed(() => missingRepositoryAction.value !== null);
+const isRepairingMissingRepository = computed(() => missingRepositoryAction.value === "relocating");
+const isDeletingMissingRepository = computed(() => missingRepositoryAction.value === "deleting");
 const isFilesPanel = computed(() => activePanel.value === "files");
 const isTrashPanel = computed(() => activePanel.value === "deleted");
 const isSearchPanel = computed(() => activePanel.value === "search");
+const isSmartFolderPanel = computed(() => activePanel.value === "smartFolder");
 const isExtensionsPanel = computed(() => activePanel.value === "extensions");
-const isFileBrowserPanel = computed(() => isFilesPanel.value || isTrashPanel.value);
-const currentFileEntry = selectedEntry;
+const isFileBrowserPanel = computed(() => isFilesPanel.value || isTrashPanel.value || isSmartFolderPanel.value);
+const smartFolderEntryMap = computed<ReadonlyMap<string, FileBrowserEntry>>(() => (
+  new Map((smartFolderResult.value?.results ?? []).map((entry) => [entry.path, entry]))
+));
+const currentFileEntry = computed(() => {
+  if (isSmartFolderPanel.value) {
+    return selectedFilePath.value ? smartFolderEntryMap.value.get(selectedFilePath.value) ?? null : null;
+  }
+  return selectedEntry.value;
+});
 
-const canRenameSelected = computed(() => selectedEntries.value.length === 1 && !isTrashPanel.value);
-const canOpenSelected = computed(() => selectedEntries.value.length === 1 && !isTrashPanel.value);
-const canDeleteSelected = computed(() => selectedEntries.value.length > 0);
-const canRestoreSelected = computed(() => selectedEntries.value.length > 0 && isTrashPanel.value);
-const canDragEntries = computed(() => !isTrashPanel.value && fileBrowser.value?.backendKind === "filesystem");
+const isRepositoryWritable = computed(() => hasRepository.value && !isMissingRepository.value);
+const canRenameSelected = computed(() => selectedEntries.value.length === 1 && isRepositoryWritable.value && !isTrashPanel.value && !isSmartFolderPanel.value);
+const canOpenSelected = computed(() => selectedEntries.value.length === 1 && !isMissingRepository.value && !isTrashPanel.value);
+const canDeleteSelected = computed(() => selectedEntries.value.length > 0 && isRepositoryWritable.value && !isSmartFolderPanel.value);
+const canRestoreSelected = computed(() => selectedEntries.value.length > 0 && isRepositoryWritable.value && isTrashPanel.value);
+const canDragEntries = computed(() => isRepositoryWritable.value && !isTrashPanel.value && !isSmartFolderPanel.value && fileBrowser.value?.backendKind === "filesystem");
 const openSelectedLabel = computed(() => currentFileEntry.value?.kind === "directory" ? "进入" : "查看");
 const previewFileEntry = computed(() => (
-  previewFilePath.value ? fileBrowserEntryMap.value.get(previewFilePath.value) ?? null : null
+  previewFilePath.value
+    ? (isSmartFolderPanel.value ? smartFolderEntryMap.value : fileBrowserEntryMap.value).get(previewFilePath.value) ?? null
+    : null
 ));
 const previewPlugin = computed(() => getPreviewPluginForEntry(previewFileEntry.value));
 const fileDisplayModeClass = computed(() => `files-list__files--${fileDisplayMode.value}`);
+const activeDirectoryEntries = computed(() => (isSmartFolderPanel.value ? [] : directoryEntries.value));
+const activeFileEntries = computed(() => (isSmartFolderPanel.value ? smartFolderResult.value?.results ?? [] : fileEntries.value));
+const hasActiveSplitFileGroups = computed(() => (
+  isSmartFolderPanel.value ? false : hasSplitFileGroups.value
+));
+const isActiveBrowserLoading = computed(() => (
+  isSmartFolderPanel.value ? isLoadingSmartFolder.value : isLoadingFileBrowser.value
+));
+const smartFolderSummary = computed(() => {
+  if (!smartFolderResult.value) return "";
+  const filter = smartFolderResult.value.inheritedFilter;
+  const parts = [
+    filter.query ? `关键词 ${filter.query.replace(/\n/g, " + ")}` : "",
+    filter.pathPrefix ? `路径 ${filter.pathPrefix.replace(/\n/g, " + ")}` : "",
+    filter.formats?.length ? `格式 ${filter.formats.join(" / ")}` : "",
+    filter.tags?.length ? `标签 ${filter.tags.join(" / ")}` : "",
+    filter.colors?.length ? `颜色 ${filter.colors.join(" / ")}` : "",
+    filter.shapes?.length ? `形状 ${filter.shapes.join(" / ")}` : "",
+    filter.minRating ? `${filter.minRating} 星+` : "",
+    filter.metadataFilters?.length ? `${filter.metadataFilters.length} 个元数据条件` : "",
+  ].filter(Boolean);
+  return `${smartFolderResult.value.results.length} 条结果${parts.length ? ` · ${parts.join(" · ")}` : ""}`;
+});
 const currentHardlinkCandidate = computed(() => (
   hardlinkCandidates.value.find((candidate) => !skippedHardlinkCandidateIds.value.has(candidate.candidateId)) ?? null
 ));
@@ -894,7 +944,7 @@ function isInternalWorkspaceDragEvent(event: DragEvent) {
 }
 
 function handleDragOver(event: DragEvent) {
-  if (!hasRepository.value || !isFilesPanel.value) return;
+  if (!isRepositoryWritable.value || !isFilesPanel.value) return;
   event.preventDefault();
   if (isInternalWorkspaceDragEvent(event)) {
     if (event.dataTransfer) {
@@ -927,14 +977,14 @@ async function handleDrop(event: DragEvent) {
   }
   setExternalDragActive(false);
   isDraggingFiles.value = false;
-  if (isTrashPanel.value) return;
+  if (!isRepositoryWritable.value || isTrashPanel.value) return;
   const sourcePaths = getDroppedSourcePaths(event);
   if (!sourcePaths.length) return;
   await handleExternalPathsDrop(sourcePaths);
 }
 
 function handleEmptyRepositoryDragOver(event: DragEvent) {
-  if (hasRepository.value) return;
+  if (activeRepoId.value || hasRepository.value) return;
   event.preventDefault();
   if (event.dataTransfer) {
     event.dataTransfer.dropEffect = "copy";
@@ -952,6 +1002,7 @@ function handleEmptyRepositoryDragLeave(event: DragEvent) {
 async function handleEmptyRepositoryDrop(event: DragEvent) {
   event.preventDefault();
   isDraggingRepositoryFolder.value = false;
+  if (activeRepoId.value || hasRepository.value) return;
   const [path] = getDroppedSourcePaths(event);
   if (path) {
     await createRepositoryFromFolder(path);
@@ -1087,6 +1138,34 @@ function fileEntryContextMenu(entry: FileBrowserEntry) {
   const contextSelectionPaths = selectedFilePathSet.value.has(entry.path)
     ? selectedFilePaths.value
     : [entry.path];
+  if (isSmartFolderPanel.value) {
+    return [
+      {
+        id: "preview",
+        label: "预览",
+        icon: Eye,
+        disabled: entry.kind !== "file",
+        onSelect: () => {
+          if (entry.kind === "file") {
+            previewFilePath.value = entry.path;
+          }
+        },
+      },
+      {
+        id: "open",
+        label: "打开",
+        icon: Eye,
+        disabled: entry.kind !== "file",
+        onSelect: () => openWorkspaceEntry(entry.path),
+      },
+      {
+        id: "reveal",
+        label: "定位",
+        icon: FolderOpen,
+        onSelect: () => revealWorkspaceEntry(entry.path),
+      },
+    ];
+  }
   const items = [
     ...(isTrashPanel.value ? [{
       id: "restore",
@@ -1224,12 +1303,14 @@ async function openSearchHit(result: SearchHit) {
 }
 
 function toggleSearchFilter(key: SearchFilterListKey, value: string) {
+  if (!isRepositoryWritable.value) return;
   toggleFilterValue(key, value);
   setActivePanel("search");
   void runFilteredSearch();
 }
 
 function submitMetadataFilterInput(key: "colors" | "shapes") {
+  if (!isRepositoryWritable.value) return;
   const input = key === "colors" ? colorFilterInput : shapeFilterInput;
   const value = input.value.trim();
   if (!value) return;
@@ -1238,12 +1319,14 @@ function submitMetadataFilterInput(key: "colors" | "shapes") {
 }
 
 function selectMinimumRating(value: number | null) {
+  if (!isRepositoryWritable.value) return;
   setMinimumRatingFilter(value);
   setActivePanel("search");
   void runFilteredSearch();
 }
 
 function clearSearchFilters() {
+  if (!isRepositoryWritable.value) return;
   clearFilters();
   colorFilterInput.value = "";
   shapeFilterInput.value = "";
@@ -1343,13 +1426,74 @@ watch(hasRepository, (ready) => {
   }
 }, { immediate: true });
 
+watch(activeRepoId, () => {
+  missingRepositoryError.value = "";
+  showMissingRepositoryDeleteDialog.value = false;
+});
+
+async function chooseMissingRepositoryPath() {
+  if (!activeRepoId.value || isMissingRepositoryBusy.value) return;
+  missingRepositoryError.value = "";
+  const selected = await openDialog({
+    title: "重定向资源库位置",
+    directory: true,
+    multiple: false,
+  });
+  if (typeof selected !== "string" || !selected.trim()) return;
+
+  missingRepositoryAction.value = "relocating";
+  try {
+    await relocateMissingRepository(activeRepoId.value, selected);
+    missingRepositoryError.value = "";
+  } catch (cause) {
+    missingRepositoryError.value = cause instanceof Error ? cause.message : String(cause);
+  } finally {
+    missingRepositoryAction.value = null;
+  }
+}
+
+async function refreshMissingRepository() {
+  if (isMissingRepositoryBusy.value) return;
+  missingRepositoryError.value = "";
+  try {
+    await refreshRepositoryWorkspace();
+  } catch (cause) {
+    missingRepositoryError.value = cause instanceof Error ? cause.message : String(cause);
+  }
+}
+
+function openMissingRepositoryDeleteDialog() {
+  if (!activeRepoId.value || isMissingRepositoryBusy.value) return;
+  missingRepositoryError.value = "";
+  showMissingRepositoryDeleteDialog.value = true;
+}
+
+function closeMissingRepositoryDeleteDialog() {
+  if (isDeletingMissingRepository.value) return;
+  showMissingRepositoryDeleteDialog.value = false;
+}
+
+async function confirmMissingRepositoryDelete() {
+  if (!activeRepoId.value) return;
+  missingRepositoryAction.value = "deleting";
+  missingRepositoryError.value = "";
+  try {
+    await removeRepository(activeRepoId.value);
+    showMissingRepositoryDeleteDialog.value = false;
+  } catch (cause) {
+    missingRepositoryError.value = cause instanceof Error ? cause.message : String(cause);
+  } finally {
+    missingRepositoryAction.value = null;
+  }
+}
+
 onMounted(() => {
   window.addEventListener("pointerleave", handleWindowPointerLeave);
   window.addEventListener("blur", handleWindowBlur);
   try {
     const currentWindow = getCurrentWindow();
     currentWindow.onDragDropEvent(({ payload }) => {
-      if (!hasRepository.value) {
+      if (!hasRepository.value && !isMissingRepository.value) {
         if (payload.type === "enter" || payload.type === "over") {
           isDraggingRepositoryFolder.value = true;
           return;
@@ -1364,7 +1508,7 @@ onMounted(() => {
         }
         return;
       }
-      if (!hasRepository.value || !isFilesPanel.value) return;
+      if (!isRepositoryWritable.value || !isFilesPanel.value) return;
       if (payload.type === "enter" || payload.type === "over") {
         setExternalDragActive(true);
         isDraggingFiles.value = true;
@@ -1537,7 +1681,52 @@ onUnmounted(() => {
     </div>
   </div>
 
-  <section v-if="hasRepository && isFileBrowserPanel" :class="previewFileEntry ? 'files-preview-page' : 'files-workbench'">
+  <section v-if="isMissingRepository" class="missing-repository-page" aria-live="polite">
+    <div class="missing-repository-page__panel">
+      <div class="missing-repository-page__icon" aria-hidden="true">
+        <AlertTriangle :size="22" />
+      </div>
+      <p class="asset-browser__eyebrow">资源库丢失</p>
+      <h1>{{ activeRepository?.name ?? "资源库不可用" }}</h1>
+      <p class="missing-repository-page__summary">
+        MomoBako 找不到这个资源库的本地文件夹。可以重定向到原资源库位置，或移除这条注册记录和本机缓存。
+      </p>
+      <p class="missing-repository-page__path">
+        {{ activeRepository?.path }}
+      </p>
+      <p v-if="missingRepositoryError" class="missing-repository-page__error">
+        {{ missingRepositoryError }}
+      </p>
+      <div class="missing-repository-page__actions">
+        <button
+          type="button"
+          class="primary"
+          :disabled="isMissingRepositoryBusy"
+          @click="chooseMissingRepositoryPath"
+        >
+          {{ isRepairingMissingRepository ? "重定向中..." : "重定向" }}
+        </button>
+        <button
+          type="button"
+          class="ghost"
+          :disabled="isMissingRepositoryBusy"
+          @click="refreshMissingRepository"
+        >
+          刷新
+        </button>
+        <button
+          type="button"
+          class="ghost danger"
+          :disabled="isMissingRepositoryBusy"
+          @click="openMissingRepositoryDeleteDialog"
+        >
+          {{ isDeletingMissingRepository ? "删除中..." : "删除资源库" }}
+        </button>
+      </div>
+    </div>
+  </section>
+
+  <section v-else-if="hasRepository && isFileBrowserPanel" :class="previewFileEntry ? 'files-preview-page' : 'files-workbench'">
     <template v-if="previewFileEntry">
       <FilePreviewPane
         :entry="previewFileEntry"
@@ -1572,25 +1761,26 @@ onUnmounted(() => {
       :can-rename-selected="canRenameSelected"
       :can-restore-selected="canRestoreSelected"
       :current-file-entry="currentFileEntry"
-      :directory-entries="directoryEntries"
+      :directory-entries="activeDirectoryEntries"
       :display-mode-class="fileDisplayModeClass"
       :display-mode-options="fileDisplayModeOptions"
       :drop-target-path="dragHoverFolderPath"
       :entry-deleted-at-label="entryDeletedAtLabel"
       :entry-modified-at-label="entryModifiedAtLabel"
       :error="error"
-      :file-entries="fileEntries"
+      :file-entries="activeFileEntries"
       :file-entry-context-menu="fileEntryContextMenu"
       :file-item-style="fileItemStyle"
       :file-tone="fileTone"
       :hardlink-state-label="hardlinkStateLabel"
-      :has-split-file-groups="hasSplitFileGroups"
+      :has-split-file-groups="hasActiveSplitFileGroups"
       :is-audio-entry="isAudioEntry"
       :is-drag-active="isExternalDragActive || isInternalDragActive"
       :is-dragging-files="isDraggingFiles"
-      :is-loading-file-browser="isLoadingFileBrowser"
+      :is-loading-file-browser="isActiveBrowserLoading"
       :is-model-entry="isModelEntry"
       :is-mutating-files="isMutatingFiles"
+      :is-read-only-virtual="isSmartFolderPanel"
       :is-trash-panel="isTrashPanel"
       :is-video-entry="isVideoEntry"
       :open-selected-label="openSelectedLabel"
@@ -1604,6 +1794,8 @@ onUnmounted(() => {
       :selected-file-path="selectedFilePath"
       :status-label="statusLabel"
       :thumbnail-src="thumbnailSrc"
+      :virtual-subline="smartFolderSummary"
+      :virtual-title="smartFolderResult?.smartFolder.name"
       @create-file="handleCreateFile"
       @delete-selected="deleteSelectedEntry"
       @drag-leave="handleDragLeave"
@@ -1686,5 +1878,18 @@ onUnmounted(() => {
     :message="hardlinkCandidateMessage"
     @confirm="confirmCurrentHardlinkCandidate"
     @skip="skipCurrentHardlinkCandidate"
+  />
+
+  <ConfirmDialog
+    :open="showMissingRepositoryDeleteDialog"
+    title="删除丢失资源库"
+    message="会移除这条资源库注册记录并清理本机缓存，不会删除原路径中的用户文件。"
+    confirm-text="删除"
+    cancel-text="取消"
+    busy-text="删除中..."
+    :busy="isDeletingMissingRepository"
+    danger
+    @confirm="confirmMissingRepositoryDelete"
+    @cancel="closeMissingRepositoryDeleteDialog"
   />
 </template>

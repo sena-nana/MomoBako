@@ -11,9 +11,12 @@ import {
   delayNextInvoke,
   failNextInvoke,
   failNextOpenerCall,
+  getRelocatedRepositoryPath,
   getInvokeCalls,
   getOpenerCalls,
   seedCrossRepositorySearchHit,
+  seedMissingMockRepository,
+  seedMixedMockRepositories,
   seedMockRepository,
   seedMockRepositoryPath,
   selectMockFile,
@@ -67,7 +70,9 @@ async function waitForCurrentWorkspaceView() {
           : workspace.activePanel.value === "extensions"
             ? ".extensions-workbench"
             : ".files-browser, .files-preview-page__body"
-      : ".empty-state-page";
+      : workspace.activeRepository.value?.status === "missing"
+        ? ".missing-repository-page"
+        : ".empty-state-page";
     expect(document.querySelector(selector)).toBeInTheDocument();
   });
 }
@@ -181,6 +186,95 @@ describe("文件管理冒烟", () => {
 
     expect(await screen.findByRole("button", { name: "资源库" })).toBeInTheDocument();
     expect(getInvokeCalls("list_repositories")).toHaveLength(2);
+  });
+
+  it("启动时当前资源库丢失，进入工作区并显示修复操作", async () => {
+    seedMissingMockRepository();
+    await renderApp();
+
+    expect(await screen.findByRole("heading", { name: "主资源库" })).toBeInTheDocument();
+    expect(screen.getByText("资源库丢失")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "重定向" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "删除资源库" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "资源库" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /全部/ })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /已删除/ })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "刷新文件夹树" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "新建智能文件夹" })).toBeDisabled();
+    expect(getInvokeCalls("get_repository_snapshot")).toHaveLength(0);
+  });
+
+  it("资源库切换器标记丢失资源库，并允许切换到丢失态", async () => {
+    seedMixedMockRepositories();
+    await renderApp();
+
+    expect((await screen.findAllByText("Reference")).length).toBeGreaterThan(0);
+    await fireEvent.click(screen.getByRole("button", { name: "资源库" }));
+    expect(await screen.findByText("丢失")).toBeInTheDocument();
+    await fireEvent.click(await screen.findByRole("button", { name: "切换资源库 主资源库" }));
+
+    expect(await screen.findByText("资源库丢失")).toBeInTheDocument();
+    const snapshotCalls = getInvokeCalls("get_repository_snapshot").filter((call) => call.args?.repoId === "repo-main-001");
+    expect(snapshotCalls).toHaveLength(0);
+  });
+
+  it("重定向丢失资源库失败时保留丢失态并显示错误", async () => {
+    seedMissingMockRepository();
+    selectMockFolder("C:/Mock/DifferentRepo");
+    await renderApp();
+
+    await fireEvent.click(screen.getByRole("button", { name: "重定向" }));
+
+    expect(await screen.findByText("selected folder belongs to a different repository")).toBeInTheDocument();
+    expect(screen.getByText("资源库丢失")).toBeInTheDocument();
+    expect(getInvokeCalls("relocate_repository").at(-1)?.args).toMatchObject({
+      request: {
+        repoId: "repo-main-001",
+        path: "C:/Mock/DifferentRepo",
+      },
+    });
+  });
+
+  it("重定向丢失资源库成功后加载仓库内容", async () => {
+    seedMissingMockRepository();
+    selectMockFolder(getRelocatedRepositoryPath());
+    await renderApp();
+
+    await fireEvent.click(screen.getByRole("button", { name: "重定向" }));
+
+    await waitFor(() => {
+      expect(getInvokeCalls("relocate_repository").at(-1)?.args).toMatchObject({
+        request: {
+          repoId: "repo-main-001",
+          path: getRelocatedRepositoryPath(),
+        },
+      });
+    });
+    expect((await screen.findAllByText("Campaigns")).length).toBeGreaterThan(0);
+    expect(screen.queryByText("资源库丢失")).not.toBeInTheDocument();
+    expect(getInvokeCalls("get_repository_snapshot").at(-1)?.args).toMatchObject({
+      repoId: "repo-main-001",
+    });
+  });
+
+  it("删除丢失资源库会移除注册并切到剩余资源库", async () => {
+    seedMixedMockRepositories();
+    await renderApp();
+
+    await fireEvent.click(screen.getByRole("button", { name: "资源库" }));
+    await fireEvent.click(await screen.findByRole("button", { name: "切换资源库 主资源库" }));
+    await screen.findByText("资源库丢失");
+    await fireEvent.click(screen.getByRole("button", { name: "删除资源库" }));
+    const dialog = await screen.findByRole("dialog", { name: "删除丢失资源库" });
+    await fireEvent.click(within(dialog).getByRole("button", { name: "删除" }));
+
+    await waitFor(() => {
+      expect(getInvokeCalls("delete_repository").at(-1)?.args).toMatchObject({
+        repoId: "repo-main-001",
+      });
+    });
+    expect((await screen.findAllByText("Reference")).length).toBeGreaterThan(0);
+    expect(screen.queryByText("资源库丢失")).not.toBeInTheDocument();
   });
 
   it("手动同步时展示同步进度", async () => {
@@ -789,6 +883,48 @@ describe("文件管理冒烟", () => {
     expect(screen.queryByRole("heading", { name: "搜索结果" })).not.toBeInTheDocument();
     expect(await screen.findByRole("heading", { name: "target-preview.png" })).toBeInTheDocument();
     expect(screen.getByText("Reference/Paint/target-preview.png")).toBeInTheDocument();
+  });
+
+  it("智能文件夹使用虚拟文件列表并只提供只读导航操作", async () => {
+    seedMockRepository();
+    await renderApp();
+
+    await fireEvent.click(screen.getByRole("button", { name: "新建智能文件夹" }));
+    const dialog = await screen.findByRole("dialog", { name: "新建智能文件夹" });
+    await fireEvent.update(within(dialog).getByLabelText("名称"), "高评分封面");
+    await fireEvent.update(within(dialog).getByLabelText("路径前缀"), "Campaigns");
+    await fireEvent.update(within(dialog).getByLabelText("格式"), "psd");
+    await fireEvent.update(within(dialog).getByLabelText("标签"), "封面");
+    await fireEvent.update(within(dialog).getByLabelText("最低评分"), "5");
+    await fireEvent.click(within(dialog).getByRole("button", { name: "创建" }));
+
+    await waitFor(() => {
+      expect(getInvokeCalls("create_smart_folder").at(-1)?.args).toMatchObject({
+        request: {
+          repoId: "repo-main-001",
+          name: "高评分封面",
+          filter: {
+            pathPrefix: "Campaigns",
+            formats: ["psd"],
+            tags: ["封面"],
+            minRating: 5,
+          },
+        },
+      });
+    });
+    await waitFor(() => {
+      expect(getInvokeCalls("query_smart_folder").at(-1)?.args).toMatchObject({
+        repoId: "repo-main-001",
+        smartFolderId: "smart-1",
+      });
+    });
+
+    expect((await screen.findAllByText("高评分封面")).length).toBeGreaterThan(0);
+    expect(await screen.findByText("智能文件夹不会改变实际目录。")).toBeInTheDocument();
+    expect((await screen.findAllByText("cover-final.psd")).length).toBeGreaterThan(0);
+    expect(screen.queryByRole("button", { name: "建文件" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "重命名" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "删除" })).not.toBeInTheDocument();
   });
 
   it("使用本地绝对路径打开和定位文件，并展示 opener 失败信息", async () => {

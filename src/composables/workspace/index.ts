@@ -18,17 +18,23 @@ import {
   getRepositorySnapshot,
   importRepository,
   installPluginFromArchive,
+  listSmartFolders,
   listPlugins,
+  createSmartFolder,
+  deleteSmartFolder,
+  querySmartFolder,
   moveEntries,
   setPluginEnabled,
   startExternalFileDrag,
   mutateTrash,
   openRepositoryPath,
   redoLastRevision,
+  relocateRepository,
   renameEntry,
   revealRepositoryPath,
   syncRepository,
   undoLastRevision,
+  updateSmartFolder,
   updateAssetMetadata,
 } from "../../services/repositoryApi";
 import { syncRegisteredPreviewPluginManifests } from "../../plugins/sdk";
@@ -39,12 +45,16 @@ import type {
   HardlinkConfirmResponse,
   RepositoryExportRequest,
   RepositoryExportResponse,
+  SmartFolderFilter,
+  SmartFolderMutationRequest,
+  SmartFolderUpdateRequest,
 } from "../../types/repository";
 import {
   activeAssetDetail,
   activeAssetId,
   activePanel,
   activeRepoId,
+  activeSmartFolderId,
   activeSnapshot,
   apiDesign,
   cacheSnapshot,
@@ -61,10 +71,12 @@ import {
   isLoadingRepositories,
   isLoadingSnapshot,
   isLoadingSettingsData,
+  isLoadingSmartFolder,
   isManagingPlugins,
   isExternalDragActive,
   isInternalDragActive,
   isMutatingFiles,
+  isMutatingSmartFolder,
   isSavingMetadata,
   isSearching,
   isSyncing,
@@ -77,6 +89,8 @@ import {
   selectedFilePaths,
   selectionAnchorPath,
   selectedFilePath,
+  smartFolderResult,
+  smartFolders,
   workspaceStartup,
   type WorkspaceFilterState,
   type WorkspacePanelKey,
@@ -136,6 +150,7 @@ import {
 import {
   ensureRepositoryWorkspace as ensureRepositoryWorkspaceLifecycle,
   loadRepositories as loadRepositoriesLifecycle,
+  resetActiveRepositoryContent,
 } from "./lifecycle";
 
 export type { WorkspaceFilterState, WorkspaceOperationProgress, WorkspacePanelKey };
@@ -209,12 +224,26 @@ export async function selectRepository(repoId: string) {
   const progressId = startOperationProgress("加载资源库", "读取资源库快照", { initial: 10, indeterminate: true });
 
   try {
+    const repository = repositories.value.find((item) => item.repoId === repoId);
+    if (repository?.status === "missing") {
+      activeRepoId.value = repoId;
+      resetActiveRepositoryContent();
+      if (isSwitchingRepository) {
+        resetSearchState();
+      }
+      finishOperationProgress(progressId);
+      return;
+    }
+
     const snapshot = await getRepositorySnapshot(repoId);
     updateOperationProgress(progressId, { detail: "加载资源索引", value: 46 });
     activeRepoId.value = repoId;
     activeSnapshot.value = snapshot;
+    smartFolders.value = await listSmartFolders(repoId);
     if (isSwitchingRepository) {
       resetSearchState();
+      activeSmartFolderId.value = null;
+      smartFolderResult.value = null;
     }
 
     const defaultAssetId = activeAssetId.value && snapshot.assets.some((item) => item.assetId === activeAssetId.value)
@@ -724,6 +753,140 @@ export function setDragHoverFolderPath(path: string | null) {
   dragHoverFolderPath.value = path;
 }
 
+function smartFolderTreeContains(items: typeof smartFolders.value, smartFolderId: string | null): boolean {
+  if (!smartFolderId) return false;
+  return items.some((item) => (
+    item.smartFolderId === smartFolderId || smartFolderTreeContains(item.children, smartFolderId)
+  ));
+}
+
+function normalizeSmartFolderFilter(filter: SmartFolderFilter): SmartFolderFilter {
+  const normalizeList = (items?: string[]) => {
+    const values = Array.from(new Set((items ?? []).map((item) => item.trim()).filter(Boolean)));
+    return values.length ? values : undefined;
+  };
+  const metadataFilters = filter.metadataFilters
+    ?.map((item) => ({ key: item.key.trim(), value: item.value.trim() }))
+    .filter((item) => item.key && item.value);
+  return {
+    query: filter.query?.trim() || undefined,
+    pathPrefix: filter.pathPrefix?.trim() || undefined,
+    tags: normalizeList(filter.tags),
+    formats: normalizeList(filter.formats),
+    colors: normalizeList(filter.colors),
+    shapes: normalizeList(filter.shapes),
+    metadataFilters: metadataFilters?.length ? metadataFilters : undefined,
+    minRating: filter.minRating && filter.minRating > 0 ? filter.minRating : undefined,
+  };
+}
+
+export async function refreshSmartFolders(repoId = activeRepoId.value) {
+  if (!repoId) {
+    smartFolders.value = [];
+    return [];
+  }
+  const items = await listSmartFolders(repoId);
+  if (activeRepoId.value === repoId) {
+    smartFolders.value = items;
+  }
+  return items;
+}
+
+export async function selectSmartFolder(smartFolderId: string) {
+  const repoId = activeRepoId.value;
+  if (!repoId || !smartFolderId) return null;
+  activePanel.value = "smartFolder";
+  activeSmartFolderId.value = smartFolderId;
+  isLoadingSmartFolder.value = true;
+  error.value = null;
+  try {
+    const snapshot = await querySmartFolder(repoId, smartFolderId);
+    if (activeRepoId.value !== repoId || activeSmartFolderId.value !== smartFolderId) {
+      return snapshot;
+    }
+    smartFolderResult.value = snapshot;
+    selectedFilePath.value = snapshot.results[0]?.path ?? null;
+    return snapshot;
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : String(cause);
+    return null;
+  } finally {
+    isLoadingSmartFolder.value = false;
+  }
+}
+
+export async function createSmartFolderInWorkspace(request: Omit<SmartFolderMutationRequest, "repoId">) {
+  const repoId = activeRepoId.value;
+  if (!repoId) return null;
+  isMutatingSmartFolder.value = true;
+  error.value = null;
+  try {
+    const response = await createSmartFolder({
+      ...request,
+      repoId,
+      parentId: request.parentId || undefined,
+      filter: normalizeSmartFolderFilter(request.filter),
+    });
+    smartFolders.value = response.smartFolders;
+    if (response.smartFolder) {
+      await selectSmartFolder(response.smartFolder.smartFolderId);
+    }
+    return response;
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : String(cause);
+    return null;
+  } finally {
+    isMutatingSmartFolder.value = false;
+  }
+}
+
+export async function updateSmartFolderInWorkspace(request: Omit<SmartFolderUpdateRequest, "repoId">) {
+  const repoId = activeRepoId.value;
+  if (!repoId) return null;
+  isMutatingSmartFolder.value = true;
+  error.value = null;
+  try {
+    const response = await updateSmartFolder({
+      ...request,
+      repoId,
+      parentId: request.parentId || undefined,
+      filter: normalizeSmartFolderFilter(request.filter),
+    });
+    smartFolders.value = response.smartFolders;
+    if (activeSmartFolderId.value === request.smartFolderId) {
+      await selectSmartFolder(request.smartFolderId);
+    }
+    return response;
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : String(cause);
+    return null;
+  } finally {
+    isMutatingSmartFolder.value = false;
+  }
+}
+
+export async function deleteSmartFolderInWorkspace(smartFolderId: string) {
+  const repoId = activeRepoId.value;
+  if (!repoId) return null;
+  isMutatingSmartFolder.value = true;
+  error.value = null;
+  try {
+    const response = await deleteSmartFolder(repoId, smartFolderId);
+    smartFolders.value = response.smartFolders;
+    if (!smartFolderTreeContains(response.smartFolders, activeSmartFolderId.value)) {
+      activeSmartFolderId.value = null;
+      smartFolderResult.value = null;
+      activePanel.value = "files";
+    }
+    return response;
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : String(cause);
+    return null;
+  } finally {
+    isMutatingSmartFolder.value = false;
+  }
+}
+
 export async function setWorkspaceEntryThumbnail(path: string, sourcePath: string) {
   if (!activeRepoId.value || fileBrowser.value?.specialLocation === "trash") return null;
   error.value = null;
@@ -1026,6 +1189,23 @@ export async function removeRepository(repoId: string) {
   await loadRepositories();
 }
 
+export async function relocateMissingRepository(repoId: string, path: string) {
+  const progressId = startOperationProgress("重定向资源库", "校验资源库位置", { initial: 12 });
+  try {
+    const response = await relocateRepository({ repoId, path });
+    updateOperationProgress(progressId, { detail: "刷新资源库列表", value: 64 });
+    await loadRepositories();
+    if (activeRepoId.value !== response.repository.repoId || !activeSnapshot.value) {
+      await selectRepository(response.repository.repoId);
+    }
+    finishOperationProgress(progressId);
+    return response;
+  } catch (cause) {
+    cancelOperationProgress(progressId);
+    throw cause;
+  }
+}
+
 export async function exportCurrentRepository(
   request: Omit<RepositoryExportRequest, "repoId">,
 ): Promise<RepositoryExportResponse | null> {
@@ -1166,6 +1346,9 @@ export function useRepositoryWorkspace() {
     selectedFilePaths: computed(() => selectedFilePaths.value),
     searchQuery: computed(() => searchQuery.value),
     searchResults: computed(() => searchResults.value),
+    smartFolders: computed(() => smartFolders.value),
+    activeSmartFolderId: computed(() => activeSmartFolderId.value),
+    smartFolderResult: computed(() => smartFolderResult.value),
     activeRepository,
     fileBrowserEntryMap,
     visibleEntries,
@@ -1196,9 +1379,11 @@ export function useRepositoryWorkspace() {
     isLoadingAssetDetail: computed(() => isLoadingAssetDetail.value),
     isLoadingFileBrowser: computed(() => isLoadingFileBrowser.value),
     isSearching: computed(() => isSearching.value),
+    isLoadingSmartFolder: computed(() => isLoadingSmartFolder.value),
     isSavingMetadata: computed(() => isSavingMetadata.value),
     isSyncing: computed(() => isSyncing.value),
     isMutatingFiles: computed(() => isMutatingFiles.value),
+    isMutatingSmartFolder: computed(() => isMutatingSmartFolder.value),
     isLoadingSettingsData: computed(() => isLoadingSettingsData.value),
     isManagingPlugins: computed(() => isManagingPlugins.value),
     isExternalDragActive: computed(() => isExternalDragActive.value),
@@ -1236,6 +1421,11 @@ export function useRepositoryWorkspace() {
     selectWorkspaceEntry,
     selectWorkspaceEntries,
     clearWorkspaceSelection,
+    refreshSmartFolders,
+    selectSmartFolder,
+    createSmartFolderInWorkspace,
+    updateSmartFolderInWorkspace,
+    deleteSmartFolderInWorkspace,
     setWorkspaceEntryThumbnail,
     setWorkspaceEntryThumbnailFromBytes,
     saveGeneratedWorkspaceEntryThumbnail,
@@ -1264,6 +1454,7 @@ export function useRepositoryWorkspace() {
     importExistingRepository,
     attachRepository,
     removeRepository,
+    relocateMissingRepository,
     exportCurrentRepository,
     loadSettingsData,
     setPluginEnabledInWorkspace,

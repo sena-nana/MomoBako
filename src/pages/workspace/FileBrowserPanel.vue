@@ -70,6 +70,7 @@ const props = defineProps<{
   isLoadingFileBrowser: boolean;
   isModelEntry: (entry: FileBrowserEntry) => boolean;
   isMutatingFiles: boolean;
+  isReadOnlyVirtual?: boolean;
   isTrashPanel: boolean;
   isVideoEntry: (entry: FileBrowserEntry) => boolean;
   openSelectedLabel: string;
@@ -83,6 +84,8 @@ const props = defineProps<{
   availableTags: string[];
   thumbnailPalette: (entry: FileBrowserEntry) => string[];
   saveMetadata: (entry: FileBrowserEntry, metadata: Record<string, unknown>) => Promise<unknown>;
+  virtualSubline?: string;
+  virtualTitle?: string;
 }>();
 
 const createFileName = defineModel<string>("createFileName", { required: true });
@@ -310,12 +313,18 @@ function cancelEntryDragIntent(event: PointerEvent) {
   >
     <header class="files-browser__header">
       <div>
-        <p class="asset-browser__eyebrow">{{ isTrashPanel ? "回收站" : "当前目录" }}</p>
+        <p class="asset-browser__eyebrow">{{ isReadOnlyVirtual ? "智能文件夹" : isTrashPanel ? "回收站" : "当前目录" }}</p>
         <div class="files-breadcrumbs">
-          <button type="button" class="files-breadcrumbs__item" @click="emit('openDirectory', '')">
-            {{ isTrashPanel ? "回收站" : "根目录" }}
+          <button
+            type="button"
+            class="files-breadcrumbs__item"
+            :disabled="isReadOnlyVirtual"
+            @click="emit('openDirectory', '')"
+          >
+            {{ isReadOnlyVirtual ? virtualTitle || "智能文件夹" : isTrashPanel ? "回收站" : "根目录" }}
           </button>
           <button
+            v-if="!isReadOnlyVirtual"
             v-for="segment in breadcrumbs"
             :key="segment.path"
             type="button"
@@ -325,6 +334,7 @@ function cancelEntryDragIntent(event: PointerEvent) {
             {{ segment.label }}
           </button>
         </div>
+        <p v-if="isReadOnlyVirtual && virtualSubline" class="files-browser__subline">{{ virtualSubline }}</p>
       </div>
 
       <div class="files-toolbar">
@@ -337,7 +347,7 @@ function cancelEntryDragIntent(event: PointerEvent) {
           </select>
         </label>
 
-        <template v-if="!isTrashPanel">
+        <template v-if="!isTrashPanel && !isReadOnlyVirtual">
           <label class="files-toolbar__field">
             <Plus :size="14" aria-hidden="true" />
             <input v-model="createFileName" type="text" placeholder="新建空文件，例如 note.txt" />
@@ -542,11 +552,11 @@ function cancelEntryDragIntent(event: PointerEvent) {
             <FolderOpen :size="14" aria-hidden="true" />
             定位
           </button>
-          <button type="button" class="ghost" :disabled="!canRenameSelected" @click="emit('startRename')">
+          <button v-if="!isReadOnlyVirtual" type="button" class="ghost" :disabled="!canRenameSelected" @click="emit('startRename')">
             <PencilLine :size="14" aria-hidden="true" />
             重命名
           </button>
-          <button type="button" class="ghost danger" :disabled="isMutatingFiles || !canDeleteSelected" @click="emit('deleteSelected')">
+          <button v-if="!isReadOnlyVirtual" type="button" class="ghost danger" :disabled="isMutatingFiles || !canDeleteSelected" @click="emit('deleteSelected')">
             <File :size="14" aria-hidden="true" />
             {{ isTrashPanel ? "彻底删除" : "删除" }}
           </button>
@@ -554,9 +564,12 @@ function cancelEntryDragIntent(event: PointerEvent) {
         <p v-if="isTrashPanel" class="files-detail__hint">
           回收站中的删除会直接从文件系统移除。
         </p>
+        <p v-else-if="isReadOnlyVirtual" class="files-detail__hint">
+          智能文件夹不会改变实际目录。
+        </p>
       </div>
 
-      <div v-if="renameTargetPath === currentFileEntry.path" class="files-detail__section">
+      <div v-if="!isReadOnlyVirtual && renameTargetPath === currentFileEntry.path" class="files-detail__section">
         <p class="asset-browser__eyebrow">重命名</p>
         <div class="files-detail__rename">
           <input v-model="renameValue" type="text" />
@@ -604,9 +617,9 @@ function cancelEntryDragIntent(event: PointerEvent) {
     </div>
 
     <div v-else class="files-detail__empty">
-      <p class="asset-browser__eyebrow">{{ isTrashPanel ? "回收站" : "文件管理" }}</p>
+      <p class="asset-browser__eyebrow">{{ isReadOnlyVirtual ? "智能文件夹" : isTrashPanel ? "回收站" : "文件管理" }}</p>
       <h2>选择一个文件或文件夹</h2>
-      <p>{{ isTrashPanel ? "在中间列表中选择目标，然后可执行还原或彻底删除。" : "在中间列表中选择目标，然后可执行查看、定位、重命名和删除。" }}</p>
+      <p>{{ isReadOnlyVirtual ? "在中间列表中选择目标，然后可执行查看、定位。" : isTrashPanel ? "在中间列表中选择目标，然后可执行还原或彻底删除。" : "在中间列表中选择目标，然后可执行查看、定位、重命名和删除。" }}</p>
     </div>
   </aside>
 </template>

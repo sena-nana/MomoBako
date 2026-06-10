@@ -10,12 +10,14 @@ export type RepositoryBackendOption = RepositoryBackendSummary & {
   enabled: boolean;
 };
 
+export type RepositoryStatus = "ready" | "missing";
+
 export type RepositorySummary = {
   repoId: string;
   name: string;
   path: string;
   backend: RepositoryBackendSummary;
-  status: string;
+  status: RepositoryStatus;
   assetCount: number;
   updatedAt: string;
 };
@@ -152,6 +154,56 @@ export type SearchRequest = {
   minRating?: number;
 };
 
+export type SmartFolderFilter = {
+  query?: string;
+  pathPrefix?: string;
+  tags?: string[];
+  formats?: string[];
+  colors?: string[];
+  shapes?: string[];
+  metadataFilters?: SearchMetadataFilter[];
+  minRating?: number;
+};
+
+export type SmartFolder = {
+  smartFolderId: string;
+  repoId: string;
+  parentId?: string | null;
+  name: string;
+  filter: SmartFolderFilter;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type SmartFolderTreeNode = SmartFolder & {
+  children: SmartFolderTreeNode[];
+};
+
+export type SmartFolderMutationRequest = {
+  repoId: string;
+  smartFolderId?: string;
+  parentId?: string | null;
+  name: string;
+  filter: SmartFolderFilter;
+};
+
+export type SmartFolderUpdateRequest = SmartFolderMutationRequest & {
+  smartFolderId: string;
+};
+
+export type SmartFolderMutationResponse = {
+  smartFolders: SmartFolderTreeNode[];
+  smartFolder?: SmartFolder | null;
+};
+
+export type SmartFolderResultSnapshot = {
+  repoId: string;
+  smartFolder: SmartFolder;
+  inheritedFilter: SmartFolderFilter;
+  results: FileBrowserEntry[];
+};
+
 export type MetadataUpdateRequest = {
   repoId: string;
   assetId: string;
@@ -174,6 +226,11 @@ export type RepositoryMutationRequest = {
 };
 
 export type RepositoryFolderRequest = {
+  path: string;
+};
+
+export type RepositoryRelocateRequest = {
+  repoId: string;
   path: string;
 };
 
