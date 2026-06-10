@@ -27,7 +27,6 @@ WINDOWS_RESERVED_NAMES = {
 }
 UNSUPPORTED_CAPABILITIES = [
     "单素材多文件夹归属",
-    "smartFolders",
     "quickAccess",
     "tagsGroups",
     "文件夹 password / passwordTips",
@@ -68,6 +67,25 @@ class AssetPlan:
 
 
 @dataclass(slots=True)
+class SmartFolderPlan:
+    smart_folder_id: str
+    source: str
+    source_id: str
+    name: str
+    filter: dict[str, Any]
+    sort_order: int
+
+
+@dataclass(slots=True)
+class SkippedSmartFolder:
+    source: str
+    source_id: str
+    name: str
+    reason: str
+    conditions: Any
+
+
+@dataclass(slots=True)
 class ConversionPlan:
     input_root: Path
     output_root: Path
@@ -75,6 +93,8 @@ class ConversionPlan:
     repo_id: str
     assets: list[AssetPlan]
     folder_paths: dict[str, str]
+    smart_folders: list[SmartFolderPlan]
+    skipped_smart_folders: list[SkippedSmartFolder]
     warnings: list[dict[str, Any]]
     unsupported_hits: list[dict[str, Any]]
     report: dict[str, Any]
@@ -189,6 +209,14 @@ def build_conversion_plan(input_root: Path, output_root: Path, repo_name: str) -
         )
         assets.append(asset_plan)
 
+    smart_folders, skipped_smart_folders = build_smart_folder_plans(
+        repo_id=repo_id,
+        library_smart_folders=library_metadata.get("smartFolders") or [],
+        saved_filters=saved_filters_json,
+        folder_index=folder_index,
+        warnings=warnings,
+    )
+
     unsupported_hits = collect_unsupported_hits(
         library_metadata=library_metadata,
         tags_json=tags_json,
@@ -196,6 +224,7 @@ def build_conversion_plan(input_root: Path, output_root: Path, repo_name: str) -
         saved_filters_json=saved_filters_json,
         mtime_json=mtime_json,
         assets=assets,
+        skipped_smart_folders=skipped_smart_folders,
     )
 
     report = build_report(
@@ -205,6 +234,8 @@ def build_conversion_plan(input_root: Path, output_root: Path, repo_name: str) -
         repo_id=repo_id,
         folder_nodes=folder_nodes,
         assets=assets,
+        smart_folders=smart_folders,
+        skipped_smart_folders=skipped_smart_folders,
         warnings=warnings,
         unsupported_hits=unsupported_hits,
     )
@@ -215,6 +246,8 @@ def build_conversion_plan(input_root: Path, output_root: Path, repo_name: str) -
         repo_id=repo_id,
         assets=assets,
         folder_paths=folder_index,
+        smart_folders=smart_folders,
+        skipped_smart_folders=skipped_smart_folders,
         warnings=warnings,
         unsupported_hits=unsupported_hits,
         report=report,
@@ -391,6 +424,508 @@ def select_thumbnail_file(info_dir: Path) -> Path | None:
     return thumbnails[0]
 
 
+def build_smart_folder_plans(
+    repo_id: str,
+    library_smart_folders: list[Any],
+    saved_filters: list[Any],
+    folder_index: dict[str, str],
+    warnings: list[dict[str, Any]],
+) -> tuple[list[SmartFolderPlan], list[SkippedSmartFolder]]:
+    plans: list[SmartFolderPlan] = []
+    skipped: list[SkippedSmartFolder] = []
+    used_ids: set[str] = set()
+    sources = [
+        ("smartFolders", library_smart_folders),
+        ("saved-filters", saved_filters),
+    ]
+    for source, entries in sources:
+        if not isinstance(entries, list):
+            record_skipped_smart_folder(
+                skipped,
+                warnings,
+                source=source,
+                source_id=source,
+                name=source,
+                reason="source is not a list",
+                conditions=entries,
+            )
+            continue
+        for entry in entries:
+            if not isinstance(entry, dict):
+                record_skipped_smart_folder(
+                    skipped,
+                    warnings,
+                    source=source,
+                    source_id=source,
+                    name=source,
+                    reason="entry is not an object",
+                    conditions=entry,
+                )
+                continue
+
+            source_id = smart_folder_source_id(entry, source, len(plans) + len(skipped))
+            name = smart_folder_name(entry, source_id)
+            filter_result = convert_eagle_smart_folder_filter(entry, folder_index)
+            if filter_result["reason"]:
+                record_skipped_smart_folder(
+                    skipped,
+                    warnings,
+                    source=source,
+                    source_id=source_id,
+                    name=name,
+                    reason=filter_result["reason"],
+                    conditions=filter_result["conditions"],
+                )
+                continue
+
+            smart_folder_id = unique_smart_folder_id(repo_id, source, source_id, name, used_ids)
+            plans.append(
+                SmartFolderPlan(
+                    smart_folder_id=smart_folder_id,
+                    source=source,
+                    source_id=source_id,
+                    name=name,
+                    filter=filter_result["filter"],
+                    sort_order=len(plans),
+                )
+            )
+    return plans, skipped
+
+
+def record_skipped_smart_folder(
+    skipped: list[SkippedSmartFolder],
+    warnings: list[dict[str, Any]],
+    *,
+    source: str,
+    source_id: str,
+    name: str,
+    reason: str,
+    conditions: Any,
+) -> None:
+    skipped_item = SkippedSmartFolder(
+        source=source,
+        source_id=source_id,
+        name=name,
+        reason=reason,
+        conditions=summarize_conditions(conditions),
+    )
+    skipped.append(skipped_item)
+    warnings.append(
+        {
+            "type": "smartFolderSkipped",
+            "source": skipped_item.source,
+            "sourceId": skipped_item.source_id,
+            "name": skipped_item.name,
+            "reason": skipped_item.reason,
+        }
+    )
+
+
+def smart_folder_source_id(entry: dict[str, Any], source: str, index: int) -> str:
+    for key in ("id", "uuid", "smartFolderId", "filterId"):
+        value = str(entry.get(key) or "").strip()
+        if value:
+            return value
+    return f"{source}-{index + 1}"
+
+
+def smart_folder_name(entry: dict[str, Any], source_id: str) -> str:
+    for key in ("name", "title", "label"):
+        value = str(entry.get(key) or "").strip()
+        if value:
+            return sanitize_segment(value, fallback=f"Smart Folder {source_id[:8]}")
+    return f"Smart Folder {source_id[:8]}"
+
+
+def convert_eagle_smart_folder_filter(entry: dict[str, Any], folder_index: dict[str, str]) -> dict[str, Any]:
+    filter_root = entry.get("filter") if isinstance(entry.get("filter"), dict) else entry
+    if contains_or_semantics(filter_root):
+        return skipped_filter_result("OR semantics are not equivalent in MomoBako", filter_root)
+    if contains_negative_semantics(filter_root):
+        return skipped_filter_result("negative conditions are not supported", filter_root)
+    if contains_unsupported_smart_folder_keys(filter_root):
+        return skipped_filter_result("unsupported filter fields are present", filter_root)
+
+    conditions = extract_smart_folder_conditions(filter_root)
+    if conditions is None:
+        return skipped_filter_result("filter conditions are not a supported shape", filter_root)
+
+    query_values: list[str] = []
+    tag_values: list[str] = []
+    format_values: list[str] = []
+    path_values: list[str] = []
+    metadata_filters: list[dict[str, str]] = []
+    min_rating: float | None = None
+
+    direct_result = apply_direct_smart_folder_fields(
+        filter_root,
+        folder_index,
+        query_values,
+        tag_values,
+        format_values,
+        path_values,
+        metadata_filters,
+    )
+    if isinstance(direct_result, str):
+        return skipped_filter_result(direct_result, filter_root)
+
+    for condition in conditions:
+        if not isinstance(condition, dict):
+            return skipped_filter_result("filter condition is not an object", conditions)
+        condition_result = apply_smart_folder_condition(
+            condition,
+            folder_index,
+            query_values,
+            tag_values,
+            format_values,
+            path_values,
+            metadata_filters,
+        )
+        if isinstance(condition_result, str):
+            return skipped_filter_result(condition_result, conditions)
+        rating_value = rating_from_condition(condition)
+        if isinstance(rating_value, str):
+            return skipped_filter_result(rating_value, conditions)
+        if rating_value is not None:
+            min_rating = max(min_rating or 0, rating_value)
+
+    direct_rating = direct_min_rating(filter_root)
+    if isinstance(direct_rating, str):
+        return skipped_filter_result(direct_rating, filter_root)
+    if direct_rating is not None:
+        min_rating = max(min_rating or 0, direct_rating)
+
+    filter_value: dict[str, Any] = {}
+    if query_values:
+        filter_value["query"] = "\n".join(dedupe_preserve_order(query_values))
+    if path_values:
+        filter_value["pathPrefix"] = "\n".join(dedupe_preserve_order(path_values))
+    if tag_values:
+        filter_value["tags"] = dedupe_preserve_order(tag_values)
+    if format_values:
+        filter_value["formats"] = dedupe_preserve_order(format_values)
+    if metadata_filters:
+        filter_value["metadataFilters"] = dedupe_metadata_filters(metadata_filters)
+    if min_rating is not None:
+        filter_value["minRating"] = min_rating
+
+    if not filter_value:
+        return skipped_filter_result("no equivalent MomoBako smart folder filter fields", filter_root)
+    return {"filter": filter_value, "reason": "", "conditions": conditions or filter_root}
+
+
+def skipped_filter_result(reason: str, conditions: Any) -> dict[str, Any]:
+    return {"filter": {}, "reason": reason, "conditions": conditions}
+
+
+def extract_smart_folder_conditions(filter_root: Any) -> list[Any] | None:
+    if not isinstance(filter_root, dict):
+        return None
+    for key in ("conditions", "rules", "filters"):
+        value = filter_root.get(key)
+        if value is None:
+            continue
+        if isinstance(value, list):
+            return value
+        return None
+    return []
+
+
+def apply_direct_smart_folder_fields(
+    filter_root: dict[str, Any],
+    folder_index: dict[str, str],
+    query_values: list[str],
+    tag_values: list[str],
+    format_values: list[str],
+    path_values: list[str],
+    metadata_filters: list[dict[str, str]],
+) -> str | None:
+    direct_mappings = [
+        ("query", query_values, normalize_text_values),
+        ("keyword", query_values, normalize_text_values),
+        ("keywords", query_values, normalize_text_values),
+        ("text", query_values, normalize_text_values),
+        ("tags", tag_values, normalize_text_values),
+        ("tag", tag_values, normalize_text_values),
+        ("formats", format_values, normalize_format_values),
+        ("format", format_values, normalize_format_values),
+        ("ext", format_values, normalize_format_values),
+        ("extensions", format_values, normalize_format_values),
+    ]
+    for key, target, normalizer in direct_mappings:
+        target.extend(normalizer(filter_root.get(key)))
+
+    for key in ("folderId", "folderIds", "folders"):
+        folder_values = normalize_text_values(filter_root.get(key))
+        for folder_id in folder_values:
+            path = folder_index.get(folder_id)
+            if not path:
+                return f"unknown folder id: {folder_id}"
+            path_values.append(path)
+
+    for key in ("pathPrefix", "path", "folderPath"):
+        path_values.extend(normalize_path_values(filter_root.get(key)))
+
+    color_values = normalize_text_values(filter_root.get("colors")) + normalize_text_values(filter_root.get("color"))
+    shape_values = normalize_text_values(filter_root.get("shapes")) + normalize_text_values(filter_root.get("shape"))
+    metadata_filters.extend({"key": "color", "value": value} for value in color_values)
+    metadata_filters.extend({"key": "shape", "value": value} for value in shape_values)
+    return None
+
+
+def apply_smart_folder_condition(
+    condition: dict[str, Any],
+    folder_index: dict[str, str],
+    query_values: list[str],
+    tag_values: list[str],
+    format_values: list[str],
+    path_values: list[str],
+    metadata_filters: list[dict[str, str]],
+) -> str | None:
+    if contains_or_semantics(condition):
+        return "OR semantics are not equivalent in MomoBako"
+    if contains_negative_semantics(condition):
+        return "negative conditions are not supported"
+    operator = condition_operator(condition)
+    if operator and operator not in {"is", "eq", "equals", "contains", "include", "includes", "in", "gte", "min", "atleast"}:
+        return f"unsupported operator: {operator}"
+
+    field_name = condition_field(condition)
+    values = condition_values(condition)
+    if not field_name or not values:
+        return None
+
+    if field_name in {"keyword", "keywords", "query", "text", "name", "filename"}:
+        query_values.extend(normalize_text_values(values))
+        return None
+    if field_name in {"tag", "tags"}:
+        tag_values.extend(normalize_text_values(values))
+        return None
+    if field_name in {"format", "formats", "ext", "extension", "extensions", "filetype", "filetypes"}:
+        format_values.extend(normalize_format_values(values))
+        return None
+    if field_name in {"folder", "folders", "folderid", "folderids"}:
+        for folder_id in normalize_text_values(values):
+            path = folder_index.get(folder_id)
+            if not path:
+                return f"unknown folder id: {folder_id}"
+            path_values.append(path)
+        return None
+    if field_name in {"path", "pathprefix", "folderpath"}:
+        path_values.extend(normalize_path_values(values))
+        return None
+    if field_name in {"color", "colors"}:
+        metadata_filters.extend({"key": "color", "value": value} for value in normalize_text_values(values))
+        return None
+    if field_name in {"shape", "shapes"}:
+        metadata_filters.extend({"key": "shape", "value": value} for value in normalize_text_values(values))
+        return None
+    if field_name in {"rating", "score"}:
+        return None
+    return f"unsupported field: {field_name}"
+
+
+def condition_field(condition: dict[str, Any]) -> str:
+    for key in ("field", "key", "type", "property", "name"):
+        value = str(condition.get(key) or "").strip().lower()
+        if value:
+            return re.sub(r"[^a-z0-9]", "", value)
+    return ""
+
+
+def condition_values(condition: dict[str, Any]) -> Any:
+    for key in ("value", "values", "keyword", "keywords", "text", "folderId", "folderIds"):
+        if key in condition:
+            return condition[key]
+    return None
+
+
+def condition_operator(condition: dict[str, Any]) -> str:
+    for key in ("operator", "op", "match", "matcher"):
+        value = str(condition.get(key) or "").strip().lower()
+        if value:
+            return re.sub(r"[^a-z0-9]", "", value)
+    return ""
+
+
+def rating_from_condition(condition: dict[str, Any]) -> float | str | None:
+    if condition_field(condition) not in {"rating", "score"}:
+        return None
+    operator = condition_operator(condition)
+    if operator and operator not in {"gte", "min", "atleast"}:
+        return f"unsupported rating operator: {operator}"
+    value = first_scalar_value(condition_values(condition))
+    try:
+        rating = float(value)
+    except (TypeError, ValueError):
+        return "rating value is not numeric"
+    return rating if rating > 0 else None
+
+
+def direct_min_rating(filter_root: dict[str, Any]) -> float | str | None:
+    for key in ("minRating", "rating"):
+        if key not in filter_root:
+            continue
+        value = first_scalar_value(filter_root.get(key))
+        try:
+            rating = float(value)
+        except (TypeError, ValueError):
+            return "rating value is not numeric"
+        return rating if rating > 0 else None
+    return None
+
+
+def contains_or_semantics(value: Any) -> bool:
+    if isinstance(value, dict):
+        for key, item in value.items():
+            normalized_key = str(key).strip().lower()
+            if normalized_key in {"match", "logic", "operator", "join", "combinator"}:
+                normalized_value = str(item).strip().lower()
+                if normalized_value in {"or", "any", "some"}:
+                    return True
+            if contains_or_semantics(item):
+                return True
+    elif isinstance(value, list):
+        return any(contains_or_semantics(item) for item in value)
+    return False
+
+
+def contains_negative_semantics(value: Any) -> bool:
+    if isinstance(value, dict):
+        for key, item in value.items():
+            normalized_key = str(key).strip().lower()
+            normalized_value = str(item).strip().lower()
+            if normalized_key in {"exclude", "excluded", "negative", "not", "isnot"} and item:
+                return True
+            if normalized_key in {"operator", "op", "match", "matcher"} and normalized_value in {
+                "not",
+                "notcontains",
+                "doesnotcontain",
+                "ne",
+                "neq",
+                "notequals",
+                "exclude",
+            }:
+                return True
+            if contains_negative_semantics(item):
+                return True
+    elif isinstance(value, list):
+        return any(contains_negative_semantics(item) for item in value)
+    return False
+
+
+def contains_unsupported_smart_folder_keys(value: Any) -> bool:
+    unsupported_keys = {
+        "sort",
+        "sortby",
+        "order",
+        "orderby",
+        "limit",
+        "createdat",
+        "created",
+        "updatedat",
+        "updated",
+        "modifiedat",
+        "mtime",
+        "width",
+        "height",
+        "size",
+        "filesize",
+        "ratio",
+        "aspectratio",
+    }
+    if isinstance(value, dict):
+        for key, item in value.items():
+            normalized_key = re.sub(r"[^a-z0-9]", "", str(key).lower())
+            if normalized_key in unsupported_keys:
+                return True
+            if normalized_key in {"field", "key", "type", "property", "name"}:
+                normalized_value = re.sub(r"[^a-z0-9]", "", str(item).lower())
+                if normalized_value in unsupported_keys:
+                    return True
+            if contains_unsupported_smart_folder_keys(item):
+                return True
+    elif isinstance(value, list):
+        return any(contains_unsupported_smart_folder_keys(item) for item in value)
+    return False
+
+
+def normalize_text_values(value: Any) -> list[str]:
+    values = flatten_scalar_values(value)
+    return [item for item in (str(value).strip() for value in values) if item]
+
+
+def normalize_format_values(value: Any) -> list[str]:
+    formats = []
+    for item in normalize_text_values(value):
+        normalized = item.lower().lstrip(".")
+        if normalized:
+            formats.append(normalized)
+    return formats
+
+
+def normalize_path_values(value: Any) -> list[str]:
+    paths = []
+    for item in normalize_text_values(value):
+        normalized = item.replace("\\", "/").strip("/")
+        if normalized:
+            paths.append(normalized)
+    return paths
+
+
+def flatten_scalar_values(value: Any) -> list[Any]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        result: list[Any] = []
+        for item in value:
+            result.extend(flatten_scalar_values(item))
+        return result
+    if isinstance(value, dict):
+        for key in ("id", "name", "value", "text"):
+            if key in value:
+                return flatten_scalar_values(value[key])
+        return []
+    return [value]
+
+
+def first_scalar_value(value: Any) -> Any:
+    values = flatten_scalar_values(value)
+    return values[0] if values else None
+
+
+def dedupe_metadata_filters(filters: list[dict[str, str]]) -> list[dict[str, str]]:
+    seen: set[tuple[str, str]] = set()
+    result: list[dict[str, str]] = []
+    for item in filters:
+        key = item["key"].strip()
+        value = item["value"].strip()
+        marker = (key, value)
+        if not key or not value or marker in seen:
+            continue
+        seen.add(marker)
+        result.append({"key": key, "value": value})
+    return result
+
+
+def unique_smart_folder_id(repo_id: str, source: str, source_id: str, name: str, used_ids: set[str]) -> str:
+    base = slugify_ascii_component(f"smart-{repo_id}-{source}-{source_id}-{name}")
+    candidate = base
+    index = 2
+    while candidate in used_ids:
+        candidate = f"{base}-{index}"
+        index += 1
+    used_ids.add(candidate)
+    return candidate
+
+
+def summarize_conditions(value: Any) -> Any:
+    text = json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
+    if len(text) > 1000:
+        return text[:997] + "..."
+    return value
+
+
 def collect_unsupported_hits(
     library_metadata: dict[str, Any],
     tags_json: dict[str, Any],
@@ -398,10 +933,9 @@ def collect_unsupported_hits(
     saved_filters_json: list[Any],
     mtime_json: dict[str, Any],
     assets: list[AssetPlan],
+    skipped_smart_folders: list[SkippedSmartFolder],
 ) -> list[dict[str, Any]]:
     hits: list[dict[str, Any]] = []
-    if library_metadata.get("smartFolders"):
-        hits.append({"capability": "smartFolders", "count": len(library_metadata["smartFolders"])})
     if library_metadata.get("quickAccess"):
         hits.append({"capability": "quickAccess", "count": len(library_metadata["quickAccess"])})
     if library_metadata.get("tagsGroups"):
@@ -415,8 +949,14 @@ def collect_unsupported_hits(
         hits.append({"capability": "文件夹 password / passwordTips", "folders": password_folders})
     if actions_json:
         hits.append({"capability": "actions", "count": len(actions_json)})
-    if saved_filters_json:
-        hits.append({"capability": "saved-filters", "count": len(saved_filters_json)})
+    if skipped_smart_folders:
+        hits.append(
+            {
+                "capability": "smartFolders/saved-filters",
+                "count": len(skipped_smart_folders),
+                "items": [serialize_skipped_smart_folder(item) for item in skipped_smart_folders],
+            }
+        )
     if mtime_json:
         hits.append({"capability": "mtime", "count": len(mtime_json)})
     multi_folder_assets = [
@@ -444,6 +984,8 @@ def build_report(
     repo_id: str,
     folder_nodes: list[FolderNode],
     assets: list[AssetPlan],
+    smart_folders: list[SmartFolderPlan],
+    skipped_smart_folders: list[SkippedSmartFolder],
     warnings: list[dict[str, Any]],
     unsupported_hits: list[dict[str, Any]],
 ) -> dict[str, Any]:
@@ -455,6 +997,8 @@ def build_report(
         "summary": {
             "assetCount": len(assets),
             "folderCount": count_folder_nodes(folder_nodes),
+            "smartFolderCount": len(smart_folders),
+            "skippedSmartFolderCount": len(skipped_smart_folders),
             "thumbnailCount": sum(1 for asset in assets if asset.source_thumbnail is not None),
             "warningCount": len(warnings),
             "unsupportedCapabilityCount": len(unsupported_hits),
@@ -475,6 +1019,8 @@ def build_report(
             }
             for asset in assets
         ],
+        "smartFolders": [serialize_smart_folder_plan(item) for item in smart_folders],
+        "skippedSmartFolders": [serialize_skipped_smart_folder(item) for item in skipped_smart_folders],
         "warnings": warnings,
         "unsupportedCapabilities": unsupported_hits,
     }
@@ -493,6 +1039,27 @@ def serialize_folder_node(node: FolderNode) -> dict[str, Any]:
     }
 
 
+def serialize_smart_folder_plan(plan: SmartFolderPlan) -> dict[str, Any]:
+    return {
+        "smartFolderId": plan.smart_folder_id,
+        "source": plan.source,
+        "sourceId": plan.source_id,
+        "name": plan.name,
+        "filter": plan.filter,
+        "sortOrder": plan.sort_order,
+    }
+
+
+def serialize_skipped_smart_folder(skipped: SkippedSmartFolder) -> dict[str, Any]:
+    return {
+        "source": skipped.source,
+        "sourceId": skipped.source_id,
+        "name": skipped.name,
+        "reason": skipped.reason,
+        "conditions": skipped.conditions,
+    }
+
+
 def print_summary(plan: ConversionPlan) -> None:
     print(f"输入资源库: {plan.input_root}")
     print(f"输出目录: {plan.output_root}")
@@ -500,6 +1067,8 @@ def print_summary(plan: ConversionPlan) -> None:
     print(f"repoId: {plan.repo_id}")
     print(f"素材数量: {len(plan.assets)}")
     print(f"文件夹数量: {len(plan.folder_paths)}")
+    print(f"智能文件夹数量: {len(plan.smart_folders)}")
+    print(f"跳过智能文件夹数量: {len(plan.skipped_smart_folders)}")
     print(f"缩略图数量: {sum(1 for asset in plan.assets if asset.source_thumbnail is not None)}")
     print(f"警告数量: {len(plan.warnings)}")
     print(f"能力缺口命中: {len(plan.unsupported_hits)}")
@@ -582,6 +1151,8 @@ def write_database(plan: ConversionPlan) -> None:
         write_repository_record(connection, plan)
         for asset in plan.assets:
             write_asset_record(connection, plan, asset)
+        for smart_folder in plan.smart_folders:
+            write_smart_folder_record(connection, plan, smart_folder)
         connection.commit()
     finally:
         connection.close()
@@ -674,6 +1245,22 @@ CREATE TABLE IF NOT EXISTS entry_thumbnails (
   updated_at TEXT NOT NULL,
   PRIMARY KEY(repo_id, path, kind)
 );
+
+CREATE TABLE IF NOT EXISTS smart_folders (
+  smart_folder_id TEXT PRIMARY KEY,
+  repo_id TEXT NOT NULL,
+  parent_id TEXT,
+  name TEXT NOT NULL,
+  filter_json TEXT NOT NULL,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY(repo_id) REFERENCES repositories(repo_id),
+  FOREIGN KEY(parent_id) REFERENCES smart_folders(smart_folder_id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_smart_folders_repo_parent
+ON smart_folders(repo_id, parent_id, sort_order, name);
 
 CREATE TABLE IF NOT EXISTS metadata (
   asset_id TEXT NOT NULL,
@@ -842,6 +1429,32 @@ def write_asset_record(connection: sqlite3.Connection, plan: ConversionPlan, ass
             asset.target_relative_path,
             json.dumps({"origin": "eagle-importer"}, ensure_ascii=False),
             modified_at,
+        ),
+    )
+
+
+def write_smart_folder_record(
+    connection: sqlite3.Connection,
+    plan: ConversionPlan,
+    smart_folder: SmartFolderPlan,
+) -> None:
+    timestamp = now_rfc3339()
+    connection.execute(
+        """
+        INSERT OR REPLACE INTO smart_folders (
+          smart_folder_id, repo_id, parent_id, name, filter_json,
+          sort_order, created_at, updated_at
+        )
+        VALUES (?, ?, NULL, ?, ?, ?, ?, ?)
+        """,
+        (
+            smart_folder.smart_folder_id,
+            plan.repo_id,
+            smart_folder.name,
+            json.dumps(smart_folder.filter, ensure_ascii=False, sort_keys=True),
+            smart_folder.sort_order,
+            timestamp,
+            timestamp,
         ),
     )
 

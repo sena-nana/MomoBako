@@ -3,7 +3,6 @@
 以下能力当前无法完整转换为 MomoBako 原生形式：
 
 - 单素材多文件夹归属
-- smartFolders
 - quickAccess
 - tagsGroups
 - 文件夹 password / passwordTips

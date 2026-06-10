@@ -94,6 +94,73 @@ class EagleLibraryChangerTests(unittest.TestCase):
         self.assertTrue(all(Path(path).is_file() for path in thumbnail_paths))
         self.assertFalse(any(key.startswith("eagle") for key in metadata_keys))
 
+    def test_smart_folders_convert_to_momobako_filters(self) -> None:
+        source = self.create_smart_folder_library()
+        output = self.temp_dir / "SmartFolders.library"
+
+        plan = convert.build_conversion_plan(source, output, "SmartFolders")
+
+        self.assertEqual(len(plan.smart_folders), 2)
+        self.assertEqual(len(plan.skipped_smart_folders), 1)
+        self.assertEqual(plan.report["summary"]["smartFolderCount"], 2)
+        self.assertEqual(plan.report["summary"]["skippedSmartFolderCount"], 1)
+
+        metadata_filter = next(item for item in plan.smart_folders if item.source == "smartFolders")
+        self.assertEqual(metadata_filter.name, "Campaign PNG")
+        self.assertEqual(
+            metadata_filter.filter,
+            {
+                "query": "hero",
+                "pathPrefix": "Campaigns",
+                "tags": ["Poster"],
+                "formats": ["png"],
+                "metadataFilters": [{"key": "color", "value": "red"}],
+                "minRating": 4.0,
+            },
+        )
+
+        saved_filter = next(item for item in plan.smart_folders if item.source == "saved-filters")
+        self.assertEqual(saved_filter.name, "Saved PSD")
+        self.assertEqual(saved_filter.filter, {"tags": ["Draft"], "formats": ["psd"]})
+        self.assertEqual(plan.skipped_smart_folders[0].reason, "OR semantics are not equivalent in MomoBako")
+        self.assertTrue(any(hit["capability"] == "smartFolders/saved-filters" for hit in plan.unsupported_hits))
+
+    def test_execute_conversion_writes_smart_folders_to_database(self) -> None:
+        source = self.create_smart_folder_library()
+        output = self.temp_dir / "SmartFolderDb.library"
+
+        exit_code = convert.main(
+            [
+                "--input",
+                str(source),
+                "--output",
+                str(output),
+                "--yes",
+            ]
+        )
+
+        self.assertEqual(exit_code, 0)
+        connection = sqlite3.connect(output / ".momo" / "metadata.db")
+        try:
+            rows = connection.execute(
+                """
+                SELECT smart_folder_id, parent_id, name, filter_json, sort_order
+                FROM smart_folders
+                ORDER BY sort_order
+                """
+            ).fetchall()
+        finally:
+            connection.close()
+
+        self.assertEqual(len(rows), 2)
+        self.assertTrue(all(row[1] is None for row in rows))
+        self.assertEqual([row[2] for row in rows], ["Campaign PNG", "Saved PSD"])
+        self.assertEqual([row[4] for row in rows], [0, 1])
+        filters = [json.loads(row[3]) for row in rows]
+        self.assertEqual(filters[0]["pathPrefix"], "Campaigns")
+        self.assertEqual(filters[0]["formats"], ["png"])
+        self.assertEqual(filters[1], {"formats": ["psd"], "tags": ["Draft"]})
+
     def test_multi_folder_asset_keeps_first_folder_only(self) -> None:
         source = self.create_multi_folder_library()
         output = self.temp_dir / "MultiFolder.library"
@@ -125,10 +192,116 @@ class EagleLibraryChangerTests(unittest.TestCase):
         self.assertTrue(any("[" in path for path in target_paths))
 
     def copy_example_library(self) -> Path:
-        source = REPO_ROOT / "External" / "Examples" / "TestBench.library"
-        target = self.temp_dir / "TestBench.library"
-        shutil.copytree(source, target)
-        return target
+        root = self.temp_dir / "TestBench.library"
+        (root / "images").mkdir(parents=True)
+        (root / "metadata.json").write_text(
+            json.dumps(
+                {
+                    "folders": [
+                        {"id": "folder-main", "name": "未命名文件夹", "children": []},
+                    ],
+                    "smartFolders": [],
+                    "quickAccess": [],
+                    "tagsGroups": [],
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        self.write_supporting_json(root)
+        for index in range(11):
+            asset_id = f"ASSET{index:03d}"
+            info_dir = root / "images" / f"{asset_id}.info"
+            info_dir.mkdir()
+            filename = f"asset-{index}.png"
+            (info_dir / filename).write_bytes(f"png-data-{index}".encode("utf-8"))
+            (info_dir / f"asset-{index}_thumbnail.png").write_bytes(f"thumb-{index}".encode("utf-8"))
+            (info_dir / "metadata.json").write_text(
+                json.dumps(
+                    {
+                        "id": asset_id,
+                        "name": f"asset-{index}",
+                        "ext": "png",
+                        "folders": ["folder-main"] if index == 0 else [],
+                        "tags": ["TagA"] if index % 2 == 0 else [],
+                        "annotation": "note" if index == 1 else "",
+                        "isDeleted": False,
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+        return root
+
+    def create_smart_folder_library(self) -> Path:
+        root = self.temp_dir / "SmartFolderSource.library"
+        images_dir = root / "images" / "ASSET001.info"
+        images_dir.mkdir(parents=True)
+        (root / "metadata.json").write_text(
+            json.dumps(
+                {
+                    "folders": [
+                        {"id": "folder-campaigns", "name": "Campaigns", "children": []},
+                    ],
+                    "smartFolders": [
+                        {
+                            "id": "smart-1",
+                            "name": "Campaign PNG",
+                            "query": "hero",
+                            "tags": ["Poster"],
+                            "formats": [".PNG"],
+                            "folderIds": ["folder-campaigns"],
+                            "colors": ["red"],
+                            "minRating": 4,
+                        },
+                        {
+                            "id": "smart-or",
+                            "name": "Too Wide",
+                            "match": "or",
+                            "conditions": [
+                                {"field": "tag", "operator": "contains", "value": "A"},
+                                {"field": "tag", "operator": "contains", "value": "B"},
+                            ],
+                        },
+                    ],
+                    "quickAccess": [],
+                    "tagsGroups": [],
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        self.write_supporting_json(
+            root,
+            saved_filters=[
+                {
+                    "id": "saved-1",
+                    "title": "Saved PSD",
+                    "conditions": [
+                        {"field": "tag", "operator": "contains", "value": "Draft"},
+                        {"field": "extension", "operator": "is", "value": "psd"},
+                    ],
+                }
+            ],
+        )
+        (images_dir / "asset.png").write_bytes(b"png-data")
+        (images_dir / "asset_thumbnail.png").write_bytes(b"thumb-data")
+        (images_dir / "metadata.json").write_text(
+            json.dumps(
+                {
+                    "id": "ASSET001",
+                    "name": "asset",
+                    "ext": "png",
+                    "folders": ["folder-campaigns"],
+                    "tags": ["Poster"],
+                    "annotation": "",
+                    "isDeleted": False,
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        return root
 
     def create_multi_folder_library(self) -> Path:
         root = self.temp_dir / "MultiFolderSource.library"
@@ -207,10 +380,10 @@ class EagleLibraryChangerTests(unittest.TestCase):
             )
         return root
 
-    def write_supporting_json(self, root: Path) -> None:
+    def write_supporting_json(self, root: Path, saved_filters: list[dict[str, object]] | None = None) -> None:
         (root / "tags.json").write_text(json.dumps({"historyTags": [], "starredTags": []}), encoding="utf-8")
         (root / "actions.json").write_text("[]", encoding="utf-8")
-        (root / "saved-filters.json").write_text("[]", encoding="utf-8")
+        (root / "saved-filters.json").write_text(json.dumps(saved_filters or [], ensure_ascii=False), encoding="utf-8")
         (root / "mtime.json").write_text("{}", encoding="utf-8")
 
 
