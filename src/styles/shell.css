@@ -917,7 +917,8 @@
 
 .repository-add-popover__field input,
 .dialog-field input,
-.dialog-field select {
+.dialog-field select,
+.dialog-field textarea {
   width: 100%;
   min-height: 32px;
   padding: 6px 8px;
@@ -929,10 +930,16 @@
 
 .repository-add-popover__field input:focus,
 .dialog-field input:focus,
-.dialog-field select:focus {
+.dialog-field select:focus,
+.dialog-field textarea:focus {
   outline: none;
   border-color: var(--accent);
   box-shadow: 0 0 0 1px var(--accent);
+}
+
+.dialog-field textarea {
+  resize: vertical;
+  font: inherit;
 }
 
 .repository-add-popover__note,
@@ -1417,9 +1424,20 @@
 }
 
 .folder-dialog__body,
-.folder-delete-dialog__body {
+.folder-delete-dialog__body,
+.smart-folder-dialog__body {
   display: flex;
   flex-direction: column;
+  gap: 12px;
+}
+
+.smart-folder-dialog {
+  width: min(720px, calc(100vw - 40px));
+}
+
+.smart-folder-dialog__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
 }
 

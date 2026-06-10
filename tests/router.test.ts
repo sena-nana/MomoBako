@@ -580,6 +580,48 @@ describe("文件管理冒烟", () => {
     expect(screen.getByText("Reference/Paint/target-preview.png")).toBeInTheDocument();
   });
 
+  it("智能文件夹使用虚拟文件列表并只提供只读导航操作", async () => {
+    seedMockRepository();
+    await renderApp();
+
+    await fireEvent.click(screen.getByRole("button", { name: "新建智能文件夹" }));
+    const dialog = await screen.findByRole("dialog", { name: "新建智能文件夹" });
+    await fireEvent.update(within(dialog).getByLabelText("名称"), "高评分封面");
+    await fireEvent.update(within(dialog).getByLabelText("路径前缀"), "Campaigns");
+    await fireEvent.update(within(dialog).getByLabelText("格式"), "psd");
+    await fireEvent.update(within(dialog).getByLabelText("标签"), "封面");
+    await fireEvent.update(within(dialog).getByLabelText("最低评分"), "5");
+    await fireEvent.click(within(dialog).getByRole("button", { name: "创建" }));
+
+    await waitFor(() => {
+      expect(getInvokeCalls("create_smart_folder").at(-1)?.args).toMatchObject({
+        request: {
+          repoId: "repo-main-001",
+          name: "高评分封面",
+          filter: {
+            pathPrefix: "Campaigns",
+            formats: ["psd"],
+            tags: ["封面"],
+            minRating: 5,
+          },
+        },
+      });
+    });
+    await waitFor(() => {
+      expect(getInvokeCalls("query_smart_folder").at(-1)?.args).toMatchObject({
+        repoId: "repo-main-001",
+        smartFolderId: "smart-1",
+      });
+    });
+
+    expect((await screen.findAllByText("高评分封面")).length).toBeGreaterThan(0);
+    expect(await screen.findByText("智能文件夹不会改变实际目录。")).toBeInTheDocument();
+    expect((await screen.findAllByText("cover-final.psd")).length).toBeGreaterThan(0);
+    expect(screen.queryByRole("button", { name: "建文件" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "重命名" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "删除" })).not.toBeInTheDocument();
+  });
+
   it("使用本地绝对路径打开和定位文件，并展示 opener 失败信息", async () => {
     seedMockRepositoryPath("C:\\Mock\\AnimeAssets\\");
     const workspace = useRepositoryWorkspace();
