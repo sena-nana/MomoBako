@@ -54,6 +54,7 @@ struct FileSystemPayload {
     repo_root: PathBuf,
     directory_path: Option<String>,
     parent_path: Option<String>,
+    target_parent_path: Option<String>,
     entry_path: Option<String>,
     source_path: Option<String>,
     name: Option<String>,
@@ -158,6 +159,33 @@ fn handle_call(input: *const c_char) -> Result<serde_json::Value, String> {
             }
             fs::rename(&source_abs, &target_abs).map_err(io_error)?;
             let target_path = join_relative_path(&parent_relative_path(source_path), new_name);
+            let entry = stat_entry(&payload.repo_root, &target_path)?;
+            serde_json::to_value(entry).map_err(|error| error.to_string())
+        }
+        "filesystem.moveEntry" => {
+            let source_path = payload.source_path.as_deref().ok_or("missing sourcePath")?;
+            let target_parent_path = payload
+                .target_parent_path
+                .as_deref()
+                .ok_or("missing targetParentPath")?;
+            let source_abs = resolve_relative_path(&payload.repo_root, source_path)?;
+            if !source_abs.exists() {
+                return Err(format!("entry not found: {source_path}"));
+            }
+            let target_parent_abs = resolve_relative_path(&payload.repo_root, target_parent_path)?;
+            if !target_parent_abs.exists() || !target_parent_abs.is_dir() {
+                return Err(format!("directory not found: {target_parent_path}"));
+            }
+            let name = source_abs
+                .file_name()
+                .map(|value| value.to_string_lossy().to_string())
+                .ok_or_else(|| format!("invalid source path: {source_path}"))?;
+            let target_abs = target_parent_abs.join(&name);
+            if target_abs.exists() {
+                return Err(format!("entry already exists: {name}"));
+            }
+            fs::rename(&source_abs, &target_abs).map_err(io_error)?;
+            let target_path = join_relative_path(target_parent_path, &name);
             let entry = stat_entry(&payload.repo_root, &target_path)?;
             serde_json::to_value(entry).map_err(|error| error.to_string())
         }

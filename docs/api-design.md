@@ -34,6 +34,10 @@
 - Trash browser entries include `metadata.deletedAt` and `metadata.originalPath` when they were moved by MomoBako.
 - `deleteEntry` moves files or recursive directory deletes to `.momo/trash` by default. Use `mode: "permanentDelete"` only for deleting entries already shown from the trash view.
 - `mutateTrash` supports `action: "restore" | "restoreAll" | "empty"` to restore a selected trash item, restore all tracked trash items, or clear `.momo/trash`.
+- `POST /repositories/{repoId}/files:move`
+  - Request body includes repository-relative `sourcePaths` and target `parentPath`
+  - Moving into the original parent directory is rejected as a no-op.
+  - Directories cannot be moved into themselves or any descendant directory.
 - `POST /repositories/{repoId}/files:copy`
   - Request body includes repository-relative `sourcePaths`, optional `parentPath`, and optional `mode`: `hardlinkPreferred` | `copy`
   - Local filesystem repositories use `hardlinkPreferred` by default. File copies try to create hard links first and fall back to ordinary copies if the platform, filesystem, volume boundary, network location, or permissions reject the link.

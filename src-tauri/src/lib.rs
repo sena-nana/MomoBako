@@ -17,7 +17,7 @@ mod window_state;
 use repository_runtime::RepositoryRuntime;
 use repository_service::{
     ApiDesignSnapshot, AssetDetail, CacheSnapshot, FileBrowserRequest, FileBrowserSnapshot,
-    FileCopyRequest, FileCreateRequest, FileDeleteRequest, FileImportRequest,
+    FileCopyRequest, FileCreateRequest, FileDeleteRequest, FileImportRequest, FileMoveRequest,
     FilePreviewSourceResponse, FileReadRequest, FileRenameRequest, HardlinkCandidateResponse,
     HardlinkConfirmRequest, HardlinkConfirmResponse, MetadataUpdateRequest, MetadataUpdateResponse,
     PluginEnabledRequest, PluginInstallRequest, PluginManifest, PluginMutationResponse,
@@ -149,6 +149,16 @@ async fn copy_entries(
 ) -> Result<FileBrowserSnapshot, String> {
     runtime
         .run_write(move |state| state.copy_entries(request))
+        .await
+}
+
+#[tauri::command]
+async fn move_entries(
+    request: FileMoveRequest,
+    runtime: tauri::State<'_, RepositoryRuntime>,
+) -> Result<FileBrowserSnapshot, String> {
+    runtime
+        .run_write(move |state| state.move_entries(request))
         .await
 }
 
@@ -467,6 +477,7 @@ pub fn run() {
             create_file,
             import_entries,
             copy_entries,
+            move_entries,
             rename_entry,
             delete_entry,
             mutate_trash,
