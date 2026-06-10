@@ -9,10 +9,17 @@
 
 - `GET /repositories`
   - List registered repositories from `MetaHub/repositories.db`
+  - Local filesystem repositories return `status: "ready"` when the registered path exists and `status: "missing"` when the local directory cannot be found.
 - `POST /repositories`
   - Create a new repository or import an existing folder with `.momo`
+- `POST /repositories/{repoId}:relocate`
+  - Repair a missing local filesystem repository by pointing the existing `repoId` at a new local folder.
+  - Request includes `repoId` and `path`.
+  - The selected folder must contain `.momo/repository.json` whose `repoId` matches the request; folders without metadata or with a different `repoId` are rejected.
+  - A successful response returns the updated repository summary and preserves existing repository identity, metadata and smart folders.
 - `DELETE /repositories/{repoId}`
-  - Remove a repository from registry without deleting user files
+  - Remove a repository from registry without deleting user files.
+  - Also clears application-managed state for that `repoId` when it lives under MomoBako's service storage.
 - `POST /repositories/{repoId}:export`
   - Export repository to an archive or upload it to Git
   - Request:
@@ -99,6 +106,22 @@
   - `tags` and `formats` match with OR semantics inside each field; different filter fields combine with AND semantics.
   - `metadataFilters` accepts key/value pairs such as `color` and `shape`; values are matched against metadata text.
   - Desktop resource filtering sends the current `repoId` and may search with an empty free text query.
+
+## Smart Folder API
+
+- Smart folders are repository-scoped virtual filter templates stored under `.momo/metadata.db`; they never create or mutate real directories.
+- `GET /repositories/{repoId}/smart-folders`
+  - Returns nested `SmartFolderTreeNode[]` ordered by parent and `sortOrder`.
+- `POST /repositories/{repoId}/smart-folders`
+  - Creates a smart folder with `name`, optional `parentId`, and `filter`.
+- `PATCH /repositories/{repoId}/smart-folders/{smartFolderId}`
+  - Updates name, parent and filter.
+- `DELETE /repositories/{repoId}/smart-folders/{smartFolderId}`
+  - Deletes the selected template and child templates only; repository files are untouched.
+- `POST /repositories/{repoId}/smart-folders/{smartFolderId}:query`
+  - Returns file-list entries for the selected smart folder.
+  - Child smart folders inherit parent filters with AND semantics.
+  - Supported filters: `query`, `pathPrefix`, `tags`, `formats`, `colors`, `shapes`, `metadataFilters`, and `minRating`.
 
 ## Plugin API
 

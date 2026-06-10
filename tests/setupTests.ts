@@ -1,7 +1,15 @@
 import "@testing-library/jest-dom/vitest";
 import { cleanup } from "@testing-library/vue";
 import { afterEach, vi } from "vitest";
-import type { PluginManifest, SearchHit, SearchRequest } from "../src/types/repository";
+import type {
+  FileBrowserEntry,
+  PluginManifest,
+  SearchHit,
+  SearchRequest,
+  SmartFolder,
+  SmartFolderFilter,
+  SmartFolderTreeNode,
+} from "../src/types/repository";
 
 type MockRepository = {
   repoId: string;
@@ -17,6 +25,9 @@ type MockRepository = {
   assetCount: number;
   updatedAt: string;
 };
+
+const missingRepositoryPath = "C:/Mock/MissingAnimeAssets";
+const relocatedRepositoryPath = "C:/Mock/RelocatedAnimeAssets";
 
 type MockEntry = {
   path: string;
@@ -42,6 +53,7 @@ let mockOpenerFailure: Error | null = null;
 let mockInvokeFailure: { command: string; error: Error } | null = null;
 let mockInvokeDelay: { command: string; resolve: () => void; promise: Promise<void> } | null = null;
 let mockSearchResults: SearchHit[] | null = null;
+let mockSmartFolders: SmartFolder[] = [];
 let mockPlugins: PluginManifest[] | null = null;
 const invokeCalls: Array<{ command: string; args?: Record<string, unknown> }> = [];
 const openerCalls: Array<{ command: "openPath" | "revealItemInDir"; path: string }> = [];
@@ -199,6 +211,65 @@ function filterSearchHits(request: SearchRequest | undefined, hits: SearchHit[])
       return actual === expected || actual.includes(expected);
     });
   });
+}
+
+function buildSmartFolderTree(parentId: string | null = null): SmartFolderTreeNode[] {
+  return mockSmartFolders
+    .filter((folder) => (folder.parentId ?? null) === parentId)
+    .sort((left, right) => left.sortOrder - right.sortOrder || left.name.localeCompare(right.name))
+    .map((folder) => ({
+      ...folder,
+      children: buildSmartFolderTree(folder.smartFolderId),
+    }));
+}
+
+function deleteSmartFolderTree(smartFolderId: string) {
+  const ids = new Set<string>([smartFolderId]);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const folder of mockSmartFolders) {
+      if (folder.parentId && ids.has(folder.parentId) && !ids.has(folder.smartFolderId)) {
+        ids.add(folder.smartFolderId);
+        changed = true;
+      }
+    }
+  }
+  mockSmartFolders = mockSmartFolders.filter((folder) => !ids.has(folder.smartFolderId));
+}
+
+function smartFolderSearchRequest(filter: SmartFolderFilter, repoId: string): SearchRequest {
+  return {
+    query: filter.query ?? "",
+    repoId,
+    tags: filter.tags,
+    formats: filter.formats,
+    minRating: filter.minRating,
+    metadataFilters: [
+      ...(filter.metadataFilters ?? []),
+      ...(filter.colors ?? []).map((value) => ({ key: "color", value })),
+      ...(filter.shapes ?? []).map((value) => ({ key: "shape", value })),
+    ],
+  };
+}
+
+function smartFolderResultEntries(filter: SmartFolderFilter, repoId: string): FileBrowserEntry[] {
+  return filterSearchHits(smartFolderSearchRequest(filter, repoId), defaultSearchHits())
+    .filter((hit) => !filter.pathPrefix || hit.path === filter.pathPrefix || hit.path.startsWith(`${filter.pathPrefix}/`))
+    .map((hit) => ({
+      path: hit.path,
+      name: hit.filename,
+      kind: "file",
+      extension: searchHitFormat(hit),
+      sizeBytes: hit.assetId === "asset-01" ? 238950400 : 15245312,
+      sizeLabel: hit.assetId === "asset-01" ? "227.9 MB" : "14.5 MB",
+      modifiedAt: "2026-06-05T00:18:00Z",
+      assetId: hit.assetId,
+      status: hit.status,
+      thumbnailPath: null,
+      thumbnailCustom: false,
+      metadata: hit.metadata,
+    }));
 }
 
 function moveEntryTreeToTrash(targetPath: string) {
@@ -620,6 +691,79 @@ vi.mock("@tauri-apps/api/core", () => ({
         request?.repoId ?? "repo-main-001",
       );
     }
+    if (command === "list_smart_folders") {
+      return buildSmartFolderTree();
+    }
+    if (command === "create_smart_folder") {
+      const request = args?.request as {
+        repoId?: string;
+        parentId?: string | null;
+        name?: string;
+        filter?: SmartFolderFilter;
+      } | undefined;
+      const now = "2026-06-05T00:18:00Z";
+      const parentId = request?.parentId || null;
+      const smartFolder: SmartFolder = {
+        smartFolderId: `smart-${mockSmartFolders.length + 1}`,
+        repoId: request?.repoId ?? "repo-main-001",
+        parentId,
+        name: request?.name ?? "智能文件夹",
+        filter: request?.filter ?? {},
+        sortOrder: mockSmartFolders.filter((item) => (item.parentId ?? null) === parentId).length,
+        createdAt: now,
+        updatedAt: now,
+      };
+      mockSmartFolders = [...mockSmartFolders, smartFolder];
+      return {
+        smartFolders: buildSmartFolderTree(),
+        smartFolder,
+      };
+    }
+    if (command === "update_smart_folder") {
+      const request = args?.request as {
+        repoId?: string;
+        smartFolderId?: string;
+        parentId?: string | null;
+        name?: string;
+        filter?: SmartFolderFilter;
+      } | undefined;
+      let updated: SmartFolder | null = null;
+      mockSmartFolders = mockSmartFolders.map((folder) => {
+        if (folder.smartFolderId !== request?.smartFolderId) return folder;
+        updated = {
+          ...folder,
+          parentId: request.parentId || null,
+          name: request.name ?? folder.name,
+          filter: request.filter ?? folder.filter,
+          updatedAt: "2026-06-05T00:18:00Z",
+        };
+        return updated;
+      });
+      return {
+        smartFolders: buildSmartFolderTree(),
+        smartFolder: updated,
+      };
+    }
+    if (command === "delete_smart_folder") {
+      const smartFolderId = typeof args?.smartFolderId === "string" ? args.smartFolderId : "";
+      deleteSmartFolderTree(smartFolderId);
+      return {
+        smartFolders: buildSmartFolderTree(),
+        smartFolder: null,
+      };
+    }
+    if (command === "query_smart_folder") {
+      const repoId = typeof args?.repoId === "string" ? args.repoId : "repo-main-001";
+      const smartFolderId = typeof args?.smartFolderId === "string" ? args.smartFolderId : "";
+      const smartFolder = mockSmartFolders.find((folder) => folder.smartFolderId === smartFolderId) ?? mockSmartFolders[0];
+      const inheritedFilter = smartFolder?.filter ?? {};
+      return {
+        repoId,
+        smartFolder,
+        inheritedFilter,
+        results: smartFolder ? smartFolderResultEntries(inheritedFilter, repoId) : [],
+      };
+    }
     if (command === "read_file") {
       return [35, 32, 77, 111, 99, 107, 32, 102, 105, 108, 101];
     }
@@ -841,6 +985,31 @@ vi.mock("@tauri-apps/api/core", () => ({
       ];
       return { repository: mockRepositories[0] };
     }
+    if (command === "relocate_repository") {
+      const request = args?.request as { repoId?: string; path?: string } | undefined;
+      if (request?.path === "C:/Mock/DifferentRepo") {
+        throw new Error("selected folder belongs to a different repository");
+      }
+      if (request?.path === "C:/Mock/NoMetadata") {
+        throw new Error("repository metadata not found in selected folder");
+      }
+      const repoId = request?.repoId ?? "repo-main-001";
+      const path = request?.path ?? relocatedRepositoryPath;
+      const existing = mockRepositories.find((repo) => repo.repoId === repoId) ?? mockSnapshot.repository;
+      const repository = {
+        ...existing,
+        path,
+        status: "ready",
+        assetCount: mockSnapshot.repository.assetCount,
+      };
+      mockRepositories = mockRepositories.map((repo) => (
+        repo.repoId === repoId ? repository : repo
+      ));
+      if (!mockRepositories.some((repo) => repo.repoId === repoId)) {
+        mockRepositories = [repository];
+      }
+      return { repository };
+    }
     if (command === "export_repository") {
       const request = args?.request as { target?: string; archive?: { outputPath?: string; format?: string; encrypt?: boolean }; git?: { remote?: string; branch?: string } } | undefined;
       return {
@@ -854,7 +1023,11 @@ vi.mock("@tauri-apps/api/core", () => ({
         message: request?.target === "git" ? "资源库已上传到 Git" : "资源库压缩包已导出",
       };
     }
-    if (command === "delete_repository") return undefined;
+    if (command === "delete_repository") {
+      const repoId = typeof args?.repoId === "string" ? args.repoId : "";
+      mockRepositories = mockRepositories.filter((repo) => repo.repoId !== repoId);
+      return undefined;
+    }
     if (command === "sync_repository") {
       if (mockDirectoryCreatedOnNextSync) {
         addMockEntry(mockDirectoryCreatedOnNextSync, "directory");
@@ -1015,6 +1188,7 @@ afterEach(() => {
   mockInvokeFailure = null;
   mockInvokeDelay = null;
   mockSearchResults = null;
+  mockSmartFolders = [];
   mockPlugins = null;
   mockRepositories = [];
   mockEntries = initialEntries();
@@ -1029,6 +1203,27 @@ export function getInvokeCalls(command?: string) {
 
 export function seedMockRepository() {
   mockRepositories = [mockSnapshot.repository];
+}
+
+function createMissingMockRepository() {
+  return {
+    ...mockSnapshot.repository,
+    path: missingRepositoryPath,
+    status: "missing",
+    assetCount: 0,
+  };
+}
+
+export function seedMissingMockRepository() {
+  mockRepositories = [createMissingMockRepository()];
+}
+
+export function seedMixedMockRepositories() {
+  mockRepositories = [altRepository, createMissingMockRepository()];
+}
+
+export function getRelocatedRepositoryPath() {
+  return relocatedRepositoryPath;
 }
 
 export function seedCrossRepositorySearchHit() {

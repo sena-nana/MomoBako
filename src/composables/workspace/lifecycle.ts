@@ -1,6 +1,7 @@
 import {
   getFileBrowser,
   getRepositorySnapshot,
+  listSmartFolders,
   listRepositories,
 } from "../../services/repositoryApi";
 import type { RepositorySummary } from "../../types/repository";
@@ -20,6 +21,7 @@ import {
   hardlinkCandidates,
   isLoadingAssetDetail,
   isLoadingFileBrowser,
+  isLoadingSmartFolder,
   isLoadingRepositories,
   isLoadingSettingsData,
   isManagingPlugins,
@@ -27,6 +29,7 @@ import {
   isExternalDragActive,
   isInternalDragActive,
   isMutatingFiles,
+  isMutatingSmartFolder,
   isSavingMetadata,
   isSearching,
   isSyncing,
@@ -36,6 +39,9 @@ import {
   selectedFilePaths,
   selectionAnchorPath,
   selectedFilePath,
+  activeSmartFolderId,
+  smartFolderResult,
+  smartFolders,
   STARTUP_TOTAL_STEPS,
   workspaceStartup,
   dragHoverFolderPath,
@@ -57,13 +63,20 @@ import { invalidateThumbnailQueue } from "./thumbnails";
 let startupPromise: Promise<void> | null = null;
 
 export function resetWorkspaceSelection() {
-  invalidateThumbnailQueue();
   activeRepoId.value = null;
+  resetActiveRepositoryContent();
+}
+
+export function resetActiveRepositoryContent() {
+  invalidateThumbnailQueue();
   activeSnapshot.value = null;
   activeAssetId.value = null;
   activeAssetDetail.value = null;
   fileBrowser.value = null;
   fileTree.value = [];
+  smartFolders.value = [];
+  activeSmartFolderId.value = null;
+  smartFolderResult.value = null;
   currentDirectoryPath.value = "";
   selectedFilePath.value = null;
   selectedFilePaths.value = [];
@@ -106,11 +119,19 @@ async function loadInitialRepository(
   const nextRepoId = activeRepoId.value && items.some((item) => item.repoId === activeRepoId.value)
     ? activeRepoId.value
     : items[0].repoId;
+  const nextRepository = items.find((item) => item.repoId === nextRepoId);
+
+  if (nextRepository?.status === "missing") {
+    activeRepoId.value = nextRepoId;
+    resetActiveRepositoryContent();
+    return;
+  }
 
   setStartupProgress(2, "读取仓库摘要");
   const snapshot = await getRepositorySnapshot(nextRepoId);
   activeRepoId.value = nextRepoId;
   activeSnapshot.value = snapshot;
+  smartFolders.value = await listSmartFolders(nextRepoId);
 
   const defaultAssetId = activeAssetId.value && snapshot.assets.some((item) => item.assetId === activeAssetId.value)
     ? activeAssetId.value
@@ -225,7 +246,9 @@ export function resetRepositoryWorkspaceForTests() {
   isLoadingSnapshot.value = false;
   isLoadingAssetDetail.value = false;
   isLoadingFileBrowser.value = false;
+  isLoadingSmartFolder.value = false;
   isSearching.value = false;
+  isMutatingSmartFolder.value = false;
   isSavingMetadata.value = false;
   isSyncing.value = false;
   isMutatingFiles.value = false;

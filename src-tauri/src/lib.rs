@@ -22,8 +22,10 @@ use repository_service::{
     HardlinkConfirmRequest, HardlinkConfirmResponse, MetadataUpdateRequest, MetadataUpdateResponse,
     PluginEnabledRequest, PluginInstallRequest, PluginManifest, PluginMutationResponse,
     RepositoryExportRequest, RepositoryExportResponse, RepositoryFolderRequest,
-    RepositoryMutationRequest, RepositoryMutationResponse, RepositorySnapshot, RepositorySummary,
-    RevisionActionRequest, RevisionActionResponse, SearchRequest, SearchResponse, SyncRequest,
+    RepositoryMutationRequest, RepositoryMutationResponse, RepositoryRelocateRequest,
+    RepositorySnapshot, RepositorySummary, RevisionActionRequest, RevisionActionResponse,
+    SearchRequest, SearchResponse, SmartFolderMutationRequest, SmartFolderMutationResponse,
+    SmartFolderResultSnapshot, SmartFolderTreeNode, SmartFolderUpdateRequest, SyncRequest,
     SyncResult, ThumbnailRequest, ThumbnailResponse, TrashMutationRequest,
 };
 
@@ -87,6 +89,58 @@ async fn get_file_browser(
 ) -> Result<FileBrowserSnapshot, String> {
     runtime
         .run_read(move |state| state.load_file_browser(request))
+        .await
+}
+
+#[tauri::command]
+async fn list_smart_folders(
+    repo_id: String,
+    runtime: tauri::State<'_, RepositoryRuntime>,
+) -> Result<Vec<SmartFolderTreeNode>, String> {
+    runtime
+        .run_read(move |state| state.list_smart_folders(&repo_id))
+        .await
+}
+
+#[tauri::command]
+async fn create_smart_folder(
+    request: SmartFolderMutationRequest,
+    runtime: tauri::State<'_, RepositoryRuntime>,
+) -> Result<SmartFolderMutationResponse, String> {
+    runtime
+        .run_write(move |state| state.create_smart_folder(request))
+        .await
+}
+
+#[tauri::command]
+async fn update_smart_folder(
+    request: SmartFolderUpdateRequest,
+    runtime: tauri::State<'_, RepositoryRuntime>,
+) -> Result<SmartFolderMutationResponse, String> {
+    runtime
+        .run_write(move |state| state.update_smart_folder(request))
+        .await
+}
+
+#[tauri::command]
+async fn delete_smart_folder(
+    repo_id: String,
+    smart_folder_id: String,
+    runtime: tauri::State<'_, RepositoryRuntime>,
+) -> Result<SmartFolderMutationResponse, String> {
+    runtime
+        .run_write(move |state| state.delete_smart_folder(&repo_id, &smart_folder_id))
+        .await
+}
+
+#[tauri::command]
+async fn query_smart_folder(
+    repo_id: String,
+    smart_folder_id: String,
+    runtime: tauri::State<'_, RepositoryRuntime>,
+) -> Result<SmartFolderResultSnapshot, String> {
+    runtime
+        .run_read(move |state| state.query_smart_folder(&repo_id, &smart_folder_id))
         .await
 }
 
@@ -229,6 +283,16 @@ async fn delete_repository(
 ) -> Result<(), String> {
     runtime
         .run_repository_collection_write(move |state| state.delete_repository(&repo_id))
+        .await
+}
+
+#[tauri::command]
+async fn relocate_repository(
+    request: RepositoryRelocateRequest,
+    runtime: tauri::State<'_, RepositoryRuntime>,
+) -> Result<RepositoryMutationResponse, String> {
+    runtime
+        .run_repository_collection_write(move |state| state.relocate_repository(request))
         .await
 }
 
@@ -471,6 +535,11 @@ pub fn run() {
             search_assets,
             update_asset_metadata,
             get_file_browser,
+            list_smart_folders,
+            create_smart_folder,
+            update_smart_folder,
+            delete_smart_folder,
+            query_smart_folder,
             read_file,
             prepare_preview_file_source,
             create_directory,
@@ -485,6 +554,7 @@ pub fn run() {
             import_repository,
             attach_repository_folder,
             delete_repository,
+            relocate_repository,
             export_repository,
             sync_repository,
             list_hardlink_candidates,
