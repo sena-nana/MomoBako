@@ -19,6 +19,7 @@ import {
   importRepository,
   installPluginFromArchive,
   listPlugins,
+  moveEntries,
   setPluginEnabled,
   startExternalFileDrag,
   mutateTrash,
@@ -33,6 +34,7 @@ import {
 import { syncRegisteredPreviewPluginManifests } from "../../plugins/sdk";
 import type {
   AssetDetail,
+  FileBrowserSnapshot,
   FileDeleteMode,
   HardlinkConfirmResponse,
   RepositoryExportRequest,
@@ -47,6 +49,7 @@ import {
   apiDesign,
   cacheSnapshot,
   currentDirectoryPath,
+  dragHoverFolderPath,
   error,
   fileBrowser,
   fileTree,
@@ -59,6 +62,8 @@ import {
   isLoadingSnapshot,
   isLoadingSettingsData,
   isManagingPlugins,
+  isExternalDragActive,
+  isInternalDragActive,
   isMutatingFiles,
   isSavingMetadata,
   isSearching,
@@ -68,6 +73,9 @@ import {
   repositories,
   searchQuery,
   searchResults,
+  draggedWorkspacePaths,
+  selectedFilePaths,
+  selectionAnchorPath,
   selectedFilePath,
   workspaceStartup,
   type WorkspaceFilterState,
@@ -81,10 +89,14 @@ import {
   fileBrowserEntryMap,
   fileEntries,
   hasActiveFilters,
+  hasMultipleSelection,
   hasSplitFileGroups,
   libraryOverview,
   repositoryBackendOptions,
+  selectedEntries,
   selectedEntry,
+  selectedFilePathSet,
+  visibleEntries,
 } from "./selectors";
 import {
   clearFilters,
@@ -133,14 +145,58 @@ async function loadRepositories() {
   return loadRepositoriesLifecycle(selectRepository);
 }
 
+function normalizeSelectionPaths(paths: string[]) {
+  return Array.from(new Set(
+    paths
+      .map((path) => path.trim())
+      .filter(Boolean),
+  ));
+}
+
+function applyWorkspaceSelection(
+  paths: string[],
+  primaryPath: string | null = paths[0] ?? null,
+  anchorPath: string | null = primaryPath,
+) {
+  const nextPaths = normalizeSelectionPaths(paths);
+  const nextPrimaryPath = primaryPath && nextPaths.includes(primaryPath)
+    ? primaryPath
+    : nextPaths[0] ?? null;
+
+  selectedFilePaths.value = nextPaths;
+  selectedFilePath.value = nextPrimaryPath;
+  selectionAnchorPath.value = nextPaths.length
+    ? anchorPath && nextPaths.includes(anchorPath) ? anchorPath : nextPrimaryPath
+    : null;
+}
+
+function defaultDirectoryRefreshPlan(paths: string[]): WorkspaceRefreshPlan["directory"] {
+  if (activePanel.value === "deleted") return "trash";
+  const selectedPaths = new Set(paths);
+  const includesDirectory = visibleEntries.value.some((entry) => (
+    entry.kind === "directory" && selectedPaths.has(entry.path)
+  ));
+  return includesDirectory ? "currentWithTree" : "current";
+}
+
+function resolveBatchMutationPrimaryPath(excludedPaths: string[]) {
+  const excluded = new Set(excludedPaths);
+  return visibleEntries.value.find((entry) => !excluded.has(entry.path))?.path ?? null;
+}
+
 async function finishFileTransfer(
   repoId: string,
-  snapshot: import("../../types/repository").FileBrowserSnapshot,
+  snapshot: FileBrowserSnapshot,
   sourcePaths: string[],
 ) {
   applyFileBrowserSnapshot(snapshot);
   const sourceNames = new Set(sourcePaths.map(entryNameFromPath));
-  selectedFilePath.value = snapshot.entries.find((entry) => sourceNames.has(entry.name))?.path ?? selectedFilePath.value;
+  const nextSelection = snapshot.entries
+    .filter((entry) => sourceNames.has(entry.name))
+    .map((entry) => entry.path);
+  if (nextSelection.length) {
+    applyWorkspaceSelection(nextSelection, nextSelection[0], nextSelection[0]);
+  }
   await refreshWorkspaceAfterMutation(repoId, { hardlinkCandidates: true, repositorySnapshot: true });
 }
 
@@ -231,7 +287,10 @@ export async function createFileInWorkspace(name: string, parentPath = currentDi
       name,
     });
     applyFileBrowserSnapshot(snapshot);
-    selectedFilePath.value = snapshot.entries.find((entry) => entry.name === name)?.path ?? selectedFilePath.value;
+    const createdPath = snapshot.entries.find((entry) => entry.name === name)?.path ?? null;
+    if (createdPath) {
+      applyWorkspaceSelection([createdPath], createdPath, createdPath);
+    }
     await refreshWorkspaceAfterMutation(activeRepoId.value, { repositorySnapshot: true });
     return snapshot;
   } catch (cause) {
@@ -296,6 +355,53 @@ export async function copyWorkspaceEntries(sourcePaths: string[], parentPath = c
   }
 }
 
+export async function moveWorkspaceEntries(sourcePaths: string[], parentPath: string) {
+  const repoId = activeRepoId.value;
+  const nextPaths = normalizeSelectionPaths(sourcePaths);
+  if (!repoId || !nextPaths.length) return null;
+
+  isMutatingFiles.value = true;
+  error.value = null;
+  const progressId = startOperationProgress("移动文件", `准备移动 ${nextPaths.length} 个条目`, { initial: 8 });
+  try {
+    updateOperationProgress(progressId, { detail: "移动到目标文件夹", value: 36 });
+    const snapshot = await moveEntries({
+      repoId,
+      sourcePaths: nextPaths,
+      parentPath,
+    });
+    updateOperationProgress(progressId, { detail: "刷新文件索引", value: 82 });
+
+    if (currentDirectoryPath.value === parentPath) {
+      applyFileBrowserSnapshot(snapshot);
+      const movedNames = new Set(nextPaths.map(entryNameFromPath));
+      const nextSelection = snapshot.entries
+        .filter((entry) => movedNames.has(entry.name))
+        .map((entry) => entry.path);
+      if (nextSelection.length) {
+        applyWorkspaceSelection(nextSelection, nextSelection[0], nextSelection[0]);
+      }
+      await refreshWorkspaceAfterMutation(repoId, { repositorySnapshot: true });
+    } else {
+      const nextPrimaryPath = resolveBatchMutationPrimaryPath(nextPaths);
+      applyWorkspaceSelection(nextPrimaryPath ? [nextPrimaryPath] : [], nextPrimaryPath, nextPrimaryPath);
+      await refreshWorkspaceAfterMutation(repoId, {
+        directory: defaultDirectoryRefreshPlan(nextPaths),
+        repositorySnapshot: true,
+      });
+    }
+
+    finishOperationProgress(progressId);
+    return snapshot;
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : String(cause);
+    cancelOperationProgress(progressId);
+    return null;
+  } finally {
+    isMutatingFiles.value = false;
+  }
+}
+
 export async function renameWorkspaceEntry(path: string, newName: string) {
   if (!activeRepoId.value) return null;
   isMutatingFiles.value = true;
@@ -307,7 +413,10 @@ export async function renameWorkspaceEntry(path: string, newName: string) {
       newName,
     });
     applyFileBrowserSnapshot(snapshot);
-    selectedFilePath.value = snapshot.entries.find((entry) => entry.name === newName)?.path ?? selectedFilePath.value;
+    const renamedPath = snapshot.entries.find((entry) => entry.name === newName)?.path ?? null;
+    if (renamedPath) {
+      applyWorkspaceSelection([renamedPath], renamedPath, renamedPath);
+    }
     await refreshWorkspaceAfterMutation(activeRepoId.value, { repositorySnapshot: true });
     return snapshot;
   } catch (cause) {
@@ -344,6 +453,44 @@ export async function deleteWorkspaceEntry(path: string, mode?: FileDeleteMode) 
   }
 }
 
+export async function deleteWorkspaceEntries(paths: string[], mode?: FileDeleteMode) {
+  const repoId = activeRepoId.value;
+  const nextPaths = normalizeSelectionPaths(paths);
+  if (!repoId || !nextPaths.length) return null;
+
+  isMutatingFiles.value = true;
+  error.value = null;
+  const progressId = startOperationProgress("删除文件", `准备处理 ${nextPaths.length} 个条目`, { initial: 10 });
+  try {
+    const deleteMode = mode ?? (activePanel.value === "deleted" ? "permanentDelete" : undefined);
+    const nextPrimaryPath = resolveBatchMutationPrimaryPath(nextPaths);
+    for (const [index, path] of nextPaths.entries()) {
+      updateOperationProgress(progressId, {
+        detail: `正在处理 ${entryNameFromPath(path)}`,
+        value: Math.round(((index + 1) / nextPaths.length) * 72),
+      });
+      await deleteEntry({
+        repoId,
+        path,
+        mode: deleteMode,
+      });
+    }
+    applyWorkspaceSelection(nextPrimaryPath ? [nextPrimaryPath] : [], nextPrimaryPath, nextPrimaryPath);
+    await refreshWorkspaceAfterMutation(repoId, {
+      directory: defaultDirectoryRefreshPlan(nextPaths),
+      repositorySnapshot: true,
+    });
+    finishOperationProgress(progressId);
+    return fileBrowser.value;
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : String(cause);
+    cancelOperationProgress(progressId);
+    return null;
+  } finally {
+    isMutatingFiles.value = false;
+  }
+}
+
 export async function restoreTrashEntry(path: string) {
   if (!activeRepoId.value) return null;
   isMutatingFiles.value = true;
@@ -366,6 +513,43 @@ export async function restoreTrashEntry(path: string) {
     return snapshot;
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : String(cause);
+    return null;
+  } finally {
+    isMutatingFiles.value = false;
+  }
+}
+
+export async function restoreTrashEntries(paths: string[]) {
+  const repoId = activeRepoId.value;
+  const nextPaths = normalizeSelectionPaths(paths);
+  if (!repoId || !nextPaths.length) return null;
+
+  isMutatingFiles.value = true;
+  error.value = null;
+  const progressId = startOperationProgress("还原文件", `准备还原 ${nextPaths.length} 个条目`, { initial: 10 });
+  try {
+    for (const [index, path] of nextPaths.entries()) {
+      updateOperationProgress(progressId, {
+        detail: `正在还原 ${entryNameFromPath(path)}`,
+        value: Math.round(((index + 1) / nextPaths.length) * 72),
+      });
+      await mutateTrash({
+        repoId,
+        action: "restore",
+        path,
+      });
+    }
+    clearWorkspaceSelection();
+    await refreshWorkspaceAfterMutation(repoId, {
+      directory: "trash",
+      repositorySnapshot: true,
+      repositorySummary: true,
+    });
+    finishOperationProgress(progressId);
+    return fileBrowser.value;
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : String(cause);
+    cancelOperationProgress(progressId);
     return null;
   } finally {
     isMutatingFiles.value = false;
@@ -443,14 +627,20 @@ export async function revealWorkspaceEntry(path: string) {
 }
 
 export async function startWorkspaceEntryDrag(path: string, icon?: string) {
+  return startWorkspaceEntriesDrag([path], icon);
+}
+
+export async function startWorkspaceEntriesDrag(paths: string[], icon?: string) {
   if (fileBrowser.value?.specialLocation === "trash") return false;
   if (activeSnapshot.value?.repository.backend.kind !== "filesystem") return false;
-  const absolutePath = joinActiveRepositoryPath(path);
-  if (!absolutePath) return false;
+  const absolutePaths = normalizeSelectionPaths(paths)
+    .map((path) => joinActiveRepositoryPath(path))
+    .filter((path): path is string => Boolean(path));
+  if (!absolutePaths.length) return false;
 
   error.value = null;
   try {
-    await startExternalFileDrag([absolutePath], icon);
+    await startExternalFileDrag(absolutePaths, icon);
     return true;
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : String(cause);
@@ -458,8 +648,80 @@ export async function startWorkspaceEntryDrag(path: string, icon?: string) {
   }
 }
 
-export function selectWorkspaceEntry(path: string) {
-  selectedFilePath.value = path;
+export function clearWorkspaceSelection() {
+  applyWorkspaceSelection([]);
+}
+
+export function selectWorkspaceEntries(
+  paths: string[],
+  options: {
+    primaryPath?: string | null;
+    anchorPath?: string | null;
+  } = {},
+) {
+  const nextPaths = normalizeSelectionPaths(paths);
+  applyWorkspaceSelection(nextPaths, options.primaryPath ?? nextPaths[0] ?? null, options.anchorPath ?? options.primaryPath ?? nextPaths[0] ?? null);
+}
+
+export function selectWorkspaceEntry(
+  path: string,
+  options: {
+    mode?: "replace" | "toggle" | "range";
+  } = {},
+) {
+  const mode = options.mode ?? "replace";
+
+  if (mode === "toggle") {
+    const nextSelection = new Set(selectedFilePaths.value);
+    if (nextSelection.has(path)) {
+      nextSelection.delete(path);
+      const nextPaths = Array.from(nextSelection);
+      const nextPrimaryPath = selectedFilePath.value === path
+        ? nextPaths[0] ?? null
+        : selectedFilePath.value;
+      applyWorkspaceSelection(nextPaths, nextPrimaryPath, selectionAnchorPath.value === path ? nextPrimaryPath : selectionAnchorPath.value);
+      return;
+    }
+    const nextPaths = [...selectedFilePaths.value, path];
+    applyWorkspaceSelection(nextPaths, path, path);
+    return;
+  }
+
+  if (mode === "range") {
+    const orderedPaths = visibleEntries.value.map((entry) => entry.path);
+    const anchorPath = selectionAnchorPath.value ?? selectedFilePath.value ?? path;
+    const anchorIndex = orderedPaths.indexOf(anchorPath);
+    const targetIndex = orderedPaths.indexOf(path);
+    if (anchorIndex >= 0 && targetIndex >= 0) {
+      const [start, end] = anchorIndex <= targetIndex ? [anchorIndex, targetIndex] : [targetIndex, anchorIndex];
+      const nextPaths = orderedPaths.slice(start, end + 1);
+      applyWorkspaceSelection(nextPaths, path, anchorPath);
+      return;
+    }
+  }
+
+  applyWorkspaceSelection([path], path, path);
+}
+
+export function setExternalDragActive(value: boolean) {
+  isExternalDragActive.value = value;
+}
+
+export function setInternalDragActive(value: boolean) {
+  isInternalDragActive.value = value;
+}
+
+export function setDraggedWorkspacePaths(paths: string[]) {
+  draggedWorkspacePaths.value = normalizeSelectionPaths(paths);
+}
+
+export function clearDraggedWorkspaceState() {
+  isInternalDragActive.value = false;
+  draggedWorkspacePaths.value = [];
+}
+
+export function setDragHoverFolderPath(path: string | null) {
+  dragHoverFolderPath.value = path;
 }
 
 export async function setWorkspaceEntryThumbnail(path: string, sourcePath: string) {
@@ -886,11 +1148,16 @@ export function useRepositoryWorkspace() {
     fileBrowser: computed(() => fileBrowser.value),
     fileTree: computed(() => fileTree.value),
     selectedFilePath: computed(() => selectedFilePath.value),
+    selectedFilePaths: computed(() => selectedFilePaths.value),
     searchQuery: computed(() => searchQuery.value),
     searchResults: computed(() => searchResults.value),
     activeRepository,
     fileBrowserEntryMap,
+    visibleEntries,
     selectedEntry,
+    selectedEntries,
+    selectedFilePathSet,
+    hasMultipleSelection,
     directoryEntries,
     fileEntries,
     hasSplitFileGroups,
@@ -919,6 +1186,10 @@ export function useRepositoryWorkspace() {
     isMutatingFiles: computed(() => isMutatingFiles.value),
     isLoadingSettingsData: computed(() => isLoadingSettingsData.value),
     isManagingPlugins: computed(() => isManagingPlugins.value),
+    isExternalDragActive: computed(() => isExternalDragActive.value),
+    isInternalDragActive: computed(() => isInternalDragActive.value),
+    draggedWorkspacePaths: computed(() => draggedWorkspacePaths.value),
+    dragHoverFolderPath: computed(() => dragHoverFolderPath.value),
     isBusy: computed(() => (
       isLoadingRepositories.value ||
       isLoadingSnapshot.value ||
@@ -935,21 +1206,32 @@ export function useRepositoryWorkspace() {
     createFileInWorkspace,
     importEntriesToWorkspace,
     copyWorkspaceEntries,
+    moveWorkspaceEntries,
     renameWorkspaceEntry,
     deleteWorkspaceEntry,
+    deleteWorkspaceEntries,
     restoreTrashEntry,
+    restoreTrashEntries,
     restoreAllTrashEntries,
     emptyTrash,
     openWorkspaceEntry,
     revealWorkspaceEntry,
     startWorkspaceEntryDrag,
+    startWorkspaceEntriesDrag,
     selectWorkspaceEntry,
+    selectWorkspaceEntries,
+    clearWorkspaceSelection,
     setWorkspaceEntryThumbnail,
     setWorkspaceEntryThumbnailFromBytes,
     saveGeneratedWorkspaceEntryThumbnail,
     clearWorkspaceEntryThumbnail,
     refreshWorkspaceEntryThumbnail,
     setActivePanel,
+    setExternalDragActive,
+    setInternalDragActive,
+    setDraggedWorkspacePaths,
+    clearDraggedWorkspaceState,
+    setDragHoverFolderPath,
     setFilterBarOpen,
     toggleFilterBar,
     toggleFilterValue,

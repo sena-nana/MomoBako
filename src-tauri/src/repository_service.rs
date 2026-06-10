@@ -576,6 +576,14 @@ pub struct FileRenameRequest {
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct FileMoveRequest {
+    pub repo_id: String,
+    pub source_paths: Vec<String>,
+    pub parent_path: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct FileDeleteRequest {
     pub repo_id: String,
     pub path: String,
@@ -928,6 +936,14 @@ trait FileSystemBackendAdapter {
         repo_root: &Path,
         source_path: &str,
         new_name: &str,
+        config: &serde_json::Value,
+    ) -> Result<FileSystemEntry, String>;
+
+    fn move_entry(
+        &self,
+        repo_root: &Path,
+        source_path: &str,
+        target_parent_path: &str,
         config: &serde_json::Value,
     ) -> Result<FileSystemEntry, String>;
 
@@ -2067,6 +2083,72 @@ impl RepositoryState {
             request.mode.as_deref().unwrap_or("hardlinkPreferred") == "hardlinkPreferred";
         let outcomes = copy_external_entries_parallel(copy_plan, hardlink_preferred)?;
         self.finish_file_copy_operation(&request.repo_id, parent_path, include_tree, outcomes)
+    }
+
+    pub fn move_entries(&self, request: FileMoveRequest) -> Result<FileBrowserSnapshot, String> {
+        self.ensure_initialized()?;
+        let repo = self.load_repository_record(&request.repo_id)?;
+        ensure_local_filesystem_repository(&repo, "moving files")?;
+
+        let repo_root = PathBuf::from(&repo.summary.path);
+        let parent_path = normalize_directory_path(&request.parent_path)?;
+        let target_dir = resolve_repository_relative_path(&repo_root, &parent_path)?;
+        if !target_dir.exists() || !target_dir.is_dir() {
+            return Err(format!("directory not found: {parent_path}"));
+        }
+        if request.source_paths.is_empty() {
+            return Err("no source files were provided".to_string());
+        }
+
+        let move_plan =
+            validate_repository_move_entries(&request.source_paths, &repo_root, &target_dir)?;
+        let include_tree = move_plan.iter().any(|entry| entry.is_directory);
+        let mut connection = self.open_repository_connection(
+            &repo.summary.repo_id,
+            &repo.summary.path,
+            &repo.backend_record,
+        )?;
+        let tx = connection.transaction().map_err(db_error)?;
+
+        for entry in &move_plan {
+            let moved = move_backend_entry(
+                &self.root,
+                &repo,
+                &repo_root,
+                &entry.source_relative_path,
+                &parent_path,
+            )?;
+            if entry.is_directory {
+                rename_directory_asset_records(
+                    &tx,
+                    &request.repo_id,
+                    &entry.source_relative_path,
+                    &entry.target_relative_path,
+                )
+                .map_err(db_error)?;
+            } else {
+                let extension = moved.extension.unwrap_or_default();
+                let modified_at = moved.modified_at.unwrap_or_else(now_rfc3339);
+                rename_file_asset_record(
+                    &tx,
+                    &request.repo_id,
+                    &entry.source_relative_path,
+                    &entry.target_relative_path,
+                    &entry.target_name,
+                    &extension,
+                    &modified_at,
+                )
+                .map_err(db_error)?;
+            }
+        }
+        tx.commit().map_err(db_error)?;
+
+        self.load_file_browser(FileBrowserRequest {
+            repo_id: request.repo_id,
+            directory_path: Some(parent_path),
+            include_tree: Some(include_tree),
+            special_location: None,
+        })
     }
 
     fn finish_file_copy_operation(
@@ -6604,6 +6686,14 @@ struct FileImportPlanEntry {
     is_directory: bool,
 }
 
+#[derive(Debug, Clone)]
+struct FileMovePlanEntry {
+    source_relative_path: String,
+    target_relative_path: String,
+    target_name: String,
+    is_directory: bool,
+}
+
 fn validate_external_import_entries(
     source_paths: &[String],
     repo_root: &Path,
@@ -6733,6 +6823,65 @@ fn validate_repository_copy_entries(
             return Err(format!("unsupported source path type: {source_relative}"));
         }
         planned_targets.push(target);
+    }
+
+    Ok(plan)
+}
+
+fn validate_repository_move_entries(
+    source_paths: &[String],
+    repo_root: &Path,
+    target_dir: &Path,
+) -> Result<Vec<FileMovePlanEntry>, String> {
+    let target_canonical_parent = target_dir.canonicalize().map_err(io_error)?;
+    let mut planned_targets = Vec::<PathBuf>::new();
+    let mut plan = Vec::with_capacity(source_paths.len());
+
+    for source_path in source_paths {
+        let source_relative = normalize_entry_path(source_path)?;
+        let source = resolve_repository_relative_path(repo_root, &source_relative)?;
+        if !source.exists() {
+            return Err(format!("source path does not exist: {source_relative}"));
+        }
+
+        let source_canonical = source.canonicalize().map_err(io_error)?;
+        let source_parent = source_canonical
+            .parent()
+            .ok_or_else(|| format!("invalid source path: {source_relative}"))?;
+        if source_parent == target_canonical_parent {
+            return Err("不能移动到原目录".to_string());
+        }
+
+        let name = source
+            .file_name()
+            .map(|value| value.to_string_lossy().to_string())
+            .ok_or_else(|| format!("invalid source path: {source_relative}"))?;
+        let target_name = validate_new_entry_name(&name)?;
+        let target = target_dir.join(&target_name);
+        let target_relative_path = target
+            .strip_prefix(repo_root)
+            .map_err(path_error)?
+            .to_string_lossy()
+            .replace('\\', "/");
+        if target.exists() || planned_targets.iter().any(|planned| planned == &target) {
+            return Err(format!("entry already exists: {target_name}"));
+        }
+
+        let is_directory = source.is_dir();
+        if is_directory && target_canonical_parent.starts_with(&source_canonical) {
+            return Err("文件夹不能移动到自身或其子文件夹内".to_string());
+        }
+        if !is_directory && !source.is_file() {
+            return Err(format!("unsupported source path type: {source_relative}"));
+        }
+
+        planned_targets.push(target);
+        plan.push(FileMovePlanEntry {
+            source_relative_path: source_relative,
+            target_relative_path,
+            target_name,
+            is_directory,
+        });
     }
 
     Ok(plan)
@@ -7341,6 +7490,19 @@ fn call_builtin_local_filesystem(
             let entry = backend.rename_entry(&repo_root, source_path, new_name, &config)?;
             serde_json::to_value(entry).map_err(json_error)
         }
+        "filesystem.moveEntry" => {
+            let source_path = payload
+                .get("sourcePath")
+                .and_then(serde_json::Value::as_str)
+                .ok_or_else(|| "plugin call is missing sourcePath".to_string())?;
+            let target_parent_path = payload
+                .get("targetParentPath")
+                .and_then(serde_json::Value::as_str)
+                .ok_or_else(|| "plugin call is missing targetParentPath".to_string())?;
+            let entry =
+                backend.move_entry(&repo_root, source_path, target_parent_path, &config)?;
+            serde_json::to_value(entry).map_err(json_error)
+        }
         "filesystem.deleteEntry" => {
             let entry_path = payload
                 .get("entryPath")
@@ -7466,6 +7628,21 @@ fn rename_backend_entry(
         repo_root,
         source_path,
         new_name,
+        &repo.backend_record.config,
+    )
+}
+
+fn move_backend_entry(
+    service_root: &Path,
+    repo: &RepositoryRecord,
+    repo_root: &Path,
+    source_path: &str,
+    target_parent_path: &str,
+) -> Result<FileSystemEntry, String> {
+    backend_adapter(service_root, repo).move_entry(
+        repo_root,
+        source_path,
+        target_parent_path,
         &repo.backend_record.config,
     )
 }
@@ -8028,6 +8205,26 @@ impl FileSystemBackendAdapter for RuntimeFileSystemBackendAdapter {
         serde_json::from_value(response).map_err(json_error)
     }
 
+    fn move_entry(
+        &self,
+        repo_root: &Path,
+        source_path: &str,
+        target_parent_path: &str,
+        config: &serde_json::Value,
+    ) -> Result<FileSystemEntry, String> {
+        let response = backend_plugin_registry(&self.service_root).call(
+            &self.plugin_id,
+            "filesystem.moveEntry",
+            serde_json::json!({
+                "repoRoot": repo_root,
+                "sourcePath": source_path,
+                "targetParentPath": target_parent_path,
+                "config": config,
+            }),
+        )?;
+        serde_json::from_value(response).map_err(json_error)
+    }
+
     fn delete_entry(
         &self,
         repo_root: &Path,
@@ -8206,6 +8403,31 @@ impl FileSystemBackendAdapter for LocalFileSystemBackend {
         fs::rename(&source_abs, &target_abs).map_err(io_error)?;
         let parent_path = parent_relative_path(source_path);
         let target_path = join_relative_path(&parent_path, new_name);
+        self.stat_entry(repo_root, &target_path, config)
+    }
+
+    fn move_entry(
+        &self,
+        repo_root: &Path,
+        source_path: &str,
+        target_parent_path: &str,
+        config: &serde_json::Value,
+    ) -> Result<FileSystemEntry, String> {
+        let source_abs = resolve_repository_relative_path(repo_root, source_path)?;
+        if !source_abs.exists() {
+            return Err(format!("entry not found: {source_path}"));
+        }
+        let name = source_abs
+            .file_name()
+            .map(|value| value.to_string_lossy().to_string())
+            .ok_or_else(|| format!("invalid source path: {source_path}"))?;
+        let target_parent_abs = resolve_repository_relative_path(repo_root, target_parent_path)?;
+        let target_abs = target_parent_abs.join(&name);
+        if target_abs.exists() {
+            return Err(format!("entry already exists: {name}"));
+        }
+        fs::rename(&source_abs, &target_abs).map_err(io_error)?;
+        let target_path = join_relative_path(target_parent_path, &name);
         self.stat_entry(repo_root, &target_path, config)
     }
 
@@ -9473,6 +9695,85 @@ mod tests {
             })
             .expect_err("same-directory copy should fail");
         assert!(error.contains("不能复制到原目录"));
+
+        fs::remove_dir_all(root).expect("test temp root should be removed");
+    }
+
+    #[test]
+    fn move_entries_updates_filesystem_and_asset_paths() {
+        let (state, root, repo_root, _thumbnail_root) = create_test_state("move-file");
+        fs::create_dir_all(repo_root.join("Archive")).expect("archive folder should be created");
+        fs::write(repo_root.join("note.txt"), b"move me").expect("source file should be written");
+        let repo_id = create_repository_without_initial_sync(&state, &repo_root);
+        state
+            .sync_repository(SyncRequest {
+                repo_id: repo_id.clone(),
+            })
+            .expect("repository should sync");
+
+        let snapshot = state
+            .move_entries(FileMoveRequest {
+                repo_id: repo_id.clone(),
+                source_paths: vec!["note.txt".to_string()],
+                parent_path: "Archive".to_string(),
+            })
+            .expect("move should complete");
+
+        assert!(!repo_root.join("note.txt").exists());
+        assert!(repo_root.join("Archive/note.txt").is_file());
+        assert!(snapshot.entries.iter().any(|entry| entry.path == "Archive/note.txt"));
+
+        let repository_snapshot = state
+            .load_snapshot(&repo_id)
+            .expect("repository snapshot should load");
+        assert!(repository_snapshot
+            .assets
+            .iter()
+            .any(|asset| asset.path == "Archive/note.txt"));
+
+        fs::remove_dir_all(root).expect("test temp root should be removed");
+    }
+
+    #[test]
+    fn move_entries_reject_same_directory_target() {
+        let (state, root, repo_root, _thumbnail_root) = create_test_state("move-same-directory");
+        fs::write(repo_root.join("source.txt"), b"move me").expect("source file should be written");
+        let repo_id = create_repository_for_path(&state, &repo_root);
+
+        let error = state
+            .move_entries(FileMoveRequest {
+                repo_id,
+                source_paths: vec!["source.txt".to_string()],
+                parent_path: String::new(),
+            })
+            .expect_err("same-directory move should fail");
+        assert!(error.contains("不能移动到原目录"));
+
+        fs::remove_dir_all(root).expect("test temp root should be removed");
+    }
+
+    #[test]
+    fn move_entries_reject_folder_cycle_nesting() {
+        let (state, root, repo_root, _thumbnail_root) = create_test_state("move-folder-cycle");
+        fs::create_dir_all(repo_root.join("Scenes/Act1"))
+            .expect("nested folder should be created");
+        fs::write(repo_root.join("Scenes/Act1/shot.txt"), b"scene")
+            .expect("nested file should be written");
+        let repo_id = create_repository_without_initial_sync(&state, &repo_root);
+        state
+            .sync_repository(SyncRequest {
+                repo_id: repo_id.clone(),
+            })
+            .expect("repository should sync");
+
+        let error = state
+            .move_entries(FileMoveRequest {
+                repo_id,
+                source_paths: vec!["Scenes".to_string()],
+                parent_path: "Scenes/Act1".to_string(),
+            })
+            .expect_err("cyclic folder move should fail");
+        assert!(error.contains("文件夹不能移动到自身或其子文件夹内"));
 
         fs::remove_dir_all(root).expect("test temp root should be removed");
     }
