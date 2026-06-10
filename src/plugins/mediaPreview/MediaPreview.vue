@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
-import { AudioLines, FileAudio, FileVideo } from "lucide-vue-next";
+import { AudioLines, FileAudio, FileImage, FileVideo } from "lucide-vue-next";
 import { preparePreviewFileSource } from "../../services/repositoryApi";
 import type { FileBrowserEntry } from "../../types/repository";
-import { isVideoExtension } from "./mediaExtensions";
+import { isImageExtension, isVideoExtension } from "./mediaExtensions";
 
 const props = defineProps<{
   entry: FileBrowserEntry;
@@ -16,10 +16,12 @@ const sourceMediaType = ref("");
 const errorMessage = ref("");
 let loadToken = 0;
 
-const mediaKind = computed<"video" | "audio">(() => (
-  isVideoExtension(props.entry.extension) ? "video" : "audio"
+const mediaKind = computed<"image" | "video" | "audio">(() => (
+  isImageExtension(props.entry.extension) ? "image" : isVideoExtension(props.entry.extension) ? "video" : "audio"
 ));
-const extensionLabel = computed(() => props.entry.extension?.toUpperCase() || (mediaKind.value === "video" ? "VIDEO" : "AUDIO"));
+const extensionLabel = computed(() => (
+  props.entry.extension?.toUpperCase() || (mediaKind.value === "image" ? "IMAGE" : mediaKind.value === "video" ? "VIDEO" : "AUDIO")
+));
 
 watch(
   [() => props.repoId, () => props.entry.path],
@@ -57,7 +59,7 @@ async function loadMediaSource() {
 
 function handleMediaError() {
   state.value = "error";
-  errorMessage.value = `${mediaKind.value === "video" ? "视频" : "音频"}无法播放`;
+  errorMessage.value = `${mediaKind.value === "image" ? "图片" : mediaKind.value === "video" ? "视频" : "音频"}无法播放`;
 }
 </script>
 
@@ -72,6 +74,13 @@ function handleMediaError() {
       <strong>无法预览该媒体</strong>
       <span>{{ errorMessage }}</span>
     </div>
+
+    <template v-else-if="sourceUrl && mediaKind === 'image'">
+      <img class="media-preview__image" :src="sourceUrl" alt="" @error="handleMediaError" />
+      <div class="media-preview__hud">
+        <span>{{ extensionLabel }}</span>
+      </div>
+    </template>
 
     <template v-else-if="sourceUrl && mediaKind === 'video'">
       <video class="media-preview__video" controls preload="metadata" playsinline @error="handleMediaError">
@@ -100,6 +109,7 @@ function handleMediaError() {
       </div>
     </div>
 
+    <FileImage v-else-if="isImageExtension(entry.extension)" :size="54" aria-hidden="true" />
     <FileVideo v-else-if="isVideoExtension(entry.extension)" :size="54" aria-hidden="true" />
     <FileAudio v-else :size="54" aria-hidden="true" />
   </div>

@@ -779,8 +779,16 @@ vi.mock("@tauri-apps/api/core", () => ({
           ? "model/gltf-binary"
           : path.endsWith(".gltf")
             ? "model/gltf+json"
-            : path.endsWith(".pdf")
-              ? "application/pdf"
+            : path.endsWith(".png")
+              ? "image/png"
+              : path.endsWith(".jpg") || path.endsWith(".jpeg")
+                ? "image/jpeg"
+                : path.endsWith(".webp")
+                  ? "image/webp"
+                  : path.endsWith(".gif")
+                    ? "image/gif"
+              : path.endsWith(".pdf")
+                ? "application/pdf"
               : path.endsWith(".docx")
                 ? "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                 : path.endsWith(".docm")
