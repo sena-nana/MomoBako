@@ -96,6 +96,7 @@ export function applyThumbnailResponse(response: ThumbnailResponse, expectedDire
             assetId: response.assetId || item.assetId,
             thumbnailPath: response.thumbnailPath ?? null,
             thumbnailCustom: response.thumbnailCustom,
+            metadata: response.metadata ?? item.metadata,
           }
         : item
     )),

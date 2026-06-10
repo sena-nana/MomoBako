@@ -1109,6 +1109,21 @@ export function installPluginArchiveInWorkspace(archivePath: string) {
 function applyAssetResponse(response: { asset: AssetDetail }) {
   activeAssetDetail.value = response.asset;
   activeAssetId.value = response.asset.summary.assetId;
+  const metadata = Object.fromEntries(response.asset.metadata.map((entry) => [entry.key, entry.value]));
+
+  if (fileBrowser.value) {
+    fileBrowser.value = {
+      ...fileBrowser.value,
+      entries: fileBrowser.value.entries.map((entry) => (
+        entry.assetId === response.asset.summary.assetId
+          ? {
+              ...entry,
+              metadata,
+            }
+          : entry
+      )),
+    };
+  }
 
   if (!activeSnapshot.value) return;
 
