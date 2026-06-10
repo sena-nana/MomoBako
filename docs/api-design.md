@@ -9,10 +9,17 @@
 
 - `GET /repositories`
   - List registered repositories from `MetaHub/repositories.db`
+  - Local filesystem repositories return `status: "ready"` when the registered path exists and `status: "missing"` when the local directory cannot be found.
 - `POST /repositories`
   - Create a new repository or import an existing folder with `.momo`
+- `POST /repositories/{repoId}:relocate`
+  - Repair a missing local filesystem repository by pointing the existing `repoId` at a new local folder.
+  - Request includes `repoId` and `path`.
+  - The selected folder must contain `.momo/repository.json` whose `repoId` matches the request; folders without metadata or with a different `repoId` are rejected.
+  - A successful response returns the updated repository summary and preserves existing repository identity, metadata and smart folders.
 - `DELETE /repositories/{repoId}`
-  - Remove a repository from registry without deleting user files
+  - Remove a repository from registry without deleting user files.
+  - Also clears application-managed state for that `repoId` when it lives under MomoBako's service storage.
 - `POST /repositories/{repoId}:export`
   - Export repository to an archive or upload it to Git
   - Request:

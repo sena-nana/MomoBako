@@ -11,9 +11,12 @@ import {
   delayNextInvoke,
   failNextInvoke,
   failNextOpenerCall,
+  getRelocatedRepositoryPath,
   getInvokeCalls,
   getOpenerCalls,
   seedCrossRepositorySearchHit,
+  seedMissingMockRepository,
+  seedMixedMockRepositories,
   seedMockRepository,
   seedMockRepositoryPath,
   selectMockFile,
@@ -67,7 +70,9 @@ async function waitForCurrentWorkspaceView() {
           : workspace.activePanel.value === "extensions"
             ? ".extensions-workbench"
             : ".files-browser, .files-preview-page__body"
-      : ".empty-state-page";
+      : workspace.activeRepository.value?.status === "missing"
+        ? ".missing-repository-page"
+        : ".empty-state-page";
     expect(document.querySelector(selector)).toBeInTheDocument();
   });
 }
@@ -146,6 +151,91 @@ describe("文件管理冒烟", () => {
 
     expect(await screen.findByRole("button", { name: "资源库" })).toBeInTheDocument();
     expect(getInvokeCalls("list_repositories")).toHaveLength(2);
+  });
+
+  it("启动时当前资源库丢失，进入工作区并显示修复操作", async () => {
+    seedMissingMockRepository();
+    await renderApp();
+
+    expect(await screen.findByRole("heading", { name: "主资源库" })).toBeInTheDocument();
+    expect(screen.getByText("资源库丢失")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "重定向" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "删除资源库" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "资源库" })).toBeInTheDocument();
+    expect(getInvokeCalls("get_repository_snapshot")).toHaveLength(0);
+  });
+
+  it("资源库切换器标记丢失资源库，并允许切换到丢失态", async () => {
+    seedMixedMockRepositories();
+    await renderApp();
+
+    expect((await screen.findAllByText("Reference")).length).toBeGreaterThan(0);
+    await fireEvent.click(screen.getByRole("button", { name: "资源库" }));
+    expect(await screen.findByText("丢失")).toBeInTheDocument();
+    await fireEvent.click(await screen.findByRole("button", { name: "切换资源库 主资源库" }));
+
+    expect(await screen.findByText("资源库丢失")).toBeInTheDocument();
+    const snapshotCalls = getInvokeCalls("get_repository_snapshot").filter((call) => call.args?.repoId === "repo-main-001");
+    expect(snapshotCalls).toHaveLength(0);
+  });
+
+  it("重定向丢失资源库失败时保留丢失态并显示错误", async () => {
+    seedMissingMockRepository();
+    selectMockFolder("C:/Mock/DifferentRepo");
+    await renderApp();
+
+    await fireEvent.click(screen.getByRole("button", { name: "重定向" }));
+
+    expect(await screen.findByText("selected folder belongs to a different repository")).toBeInTheDocument();
+    expect(screen.getByText("资源库丢失")).toBeInTheDocument();
+    expect(getInvokeCalls("relocate_repository").at(-1)?.args).toMatchObject({
+      request: {
+        repoId: "repo-main-001",
+        path: "C:/Mock/DifferentRepo",
+      },
+    });
+  });
+
+  it("重定向丢失资源库成功后加载仓库内容", async () => {
+    seedMissingMockRepository();
+    selectMockFolder(getRelocatedRepositoryPath());
+    await renderApp();
+
+    await fireEvent.click(screen.getByRole("button", { name: "重定向" }));
+
+    await waitFor(() => {
+      expect(getInvokeCalls("relocate_repository").at(-1)?.args).toMatchObject({
+        request: {
+          repoId: "repo-main-001",
+          path: getRelocatedRepositoryPath(),
+        },
+      });
+    });
+    expect((await screen.findAllByText("Campaigns")).length).toBeGreaterThan(0);
+    expect(screen.queryByText("资源库丢失")).not.toBeInTheDocument();
+    expect(getInvokeCalls("get_repository_snapshot").at(-1)?.args).toMatchObject({
+      repoId: "repo-main-001",
+    });
+  });
+
+  it("删除丢失资源库会移除注册并切到剩余资源库", async () => {
+    seedMixedMockRepositories();
+    await renderApp();
+
+    await fireEvent.click(screen.getByRole("button", { name: "资源库" }));
+    await fireEvent.click(await screen.findByRole("button", { name: "切换资源库 主资源库" }));
+    await screen.findByText("资源库丢失");
+    await fireEvent.click(screen.getByRole("button", { name: "删除资源库" }));
+    const dialog = await screen.findByRole("dialog", { name: "删除丢失资源库" });
+    await fireEvent.click(within(dialog).getByRole("button", { name: "删除" }));
+
+    await waitFor(() => {
+      expect(getInvokeCalls("delete_repository").at(-1)?.args).toMatchObject({
+        repoId: "repo-main-001",
+      });
+    });
+    expect((await screen.findAllByText("Reference")).length).toBeGreaterThan(0);
+    expect(screen.queryByText("资源库丢失")).not.toBeInTheDocument();
   });
 
   it("手动同步时展示同步进度", async () => {

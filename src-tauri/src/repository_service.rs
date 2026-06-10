@@ -447,6 +447,13 @@ pub struct RepositoryFolderRequest {
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct RepositoryRelocateRequest {
+    pub repo_id: String,
+    pub path: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RepositoryArchiveExportOptions {
     pub format: String,
     pub output_path: String,
@@ -1110,15 +1117,23 @@ impl RepositoryState {
                 let path: String = row.get(2)?;
                 let backend_plugin_id: String = row.get(3)?;
                 let backend_plugin_id = plugin_registry.normalize_plugin_id(&backend_plugin_id);
-                let asset_count =
-                    load_asset_count(&self.root, &repo_id, &path, &backend_plugin_id).unwrap_or(0);
+                let status = repository_runtime_status(
+                    &path,
+                    &backend_plugin_id,
+                    row.get::<_, String>(5)?.as_str(),
+                );
+                let asset_count = if status == "missing" {
+                    0
+                } else {
+                    load_asset_count(&self.root, &repo_id, &path, &backend_plugin_id).unwrap_or(0)
+                };
 
                 Ok(RepositorySummary {
                     repo_id,
                     name: row.get(1)?,
                     path,
                     backend: backend_summary_from_registry(&plugin_registry, &backend_plugin_id),
-                    status: row.get(5)?,
+                    status,
                     asset_count,
                     updated_at: row.get(6)?,
                 })
@@ -1273,7 +1288,77 @@ impl RepositoryState {
         registry
             .execute("DELETE FROM repositories WHERE repo_id = ?1", [repo_id])
             .map_err(db_error)?;
+        let storage_dir = repository_state_storage_dir(&self.root, repo_id);
+        if storage_dir.exists() {
+            fs::remove_dir_all(storage_dir).map_err(io_error)?;
+        }
         Ok(())
+    }
+
+    pub fn relocate_repository(
+        &self,
+        request: RepositoryRelocateRequest,
+    ) -> Result<RepositoryMutationResponse, String> {
+        self.ensure_initialized()?;
+
+        let repo = self.load_repository_record(&request.repo_id)?;
+        if normalized_builtin_plugin_id(&repo.backend_record.plugin_id)
+            != LOCAL_FILESYSTEM_PLUGIN_ID
+        {
+            return Err("only local filesystem repositories can be relocated".to_string());
+        }
+
+        let next_path = request.path.trim();
+        if next_path.is_empty() {
+            return Err("repository path cannot be empty".to_string());
+        }
+
+        let repo_root =
+            normalize_repository_root_for_backend(next_path, &repo.backend_record, true)?;
+        if !repo_root.is_dir() {
+            return Err("repository path is not a directory".to_string());
+        }
+        ensure_backend_path_is_attachable(&self.root, &repo.backend_record, &repo_root)?;
+
+        let metadata_path = repository_meta_dir(&repo_root).join(REPO_METADATA_FILE_NAME);
+        if !metadata_path.exists() {
+            return Err("repository metadata not found in selected folder".to_string());
+        }
+        let raw = fs::read_to_string(&metadata_path).map_err(io_error)?;
+        let metadata =
+            serde_json::from_str::<RepositoryMetadataFileImport>(&raw).map_err(json_error)?;
+        if metadata.repo_id != request.repo_id {
+            return Err("selected folder belongs to a different repository".to_string());
+        }
+        migrate_repository_metadata_plugin_id_if_needed(
+            &self.root,
+            &metadata_path,
+            &metadata,
+            &repo_root,
+        )?;
+
+        let registry = Connection::open(&self.registry_path).map_err(db_error)?;
+        registry
+            .execute(
+                r#"
+                UPDATE repositories
+                SET path = ?2, status = 'ready', updated_at = ?3
+                WHERE repo_id = ?1
+                "#,
+                params![
+                    request.repo_id.as_str(),
+                    repo_root.to_string_lossy().to_string(),
+                    now_rfc3339()
+                ],
+            )
+            .map_err(db_error)?;
+
+        self.sync_repository(SyncRequest {
+            repo_id: request.repo_id.clone(),
+        })?;
+
+        let repository = self.load_repository_record(&request.repo_id)?.summary;
+        Ok(RepositoryMutationResponse { repository })
     }
 
     pub fn export_repository(
@@ -1553,10 +1638,7 @@ impl RepositoryState {
         Ok((file, source.media_type))
     }
 
-    pub fn list_smart_folders(
-        &self,
-        repo_id: &str,
-    ) -> Result<Vec<SmartFolderTreeNode>, String> {
+    pub fn list_smart_folders(&self, repo_id: &str) -> Result<Vec<SmartFolderTreeNode>, String> {
         self.ensure_initialized()?;
         let repo = self.load_repository_record(repo_id)?;
         let connection = self.open_repository_connection(
@@ -1580,14 +1662,21 @@ impl RepositoryState {
             &repo.backend_record,
         )?;
         let name = validate_smart_folder_name(&request.name)?;
-        validate_smart_folder_parent(&connection, &request.repo_id, request.parent_id.as_deref(), None)
-            .map_err(db_error)?;
+        validate_smart_folder_parent(
+            &connection,
+            &request.repo_id,
+            request.parent_id.as_deref(),
+            None,
+        )
+        .map_err(db_error)?;
         let smart_folder_id = request
             .smart_folder_id
             .as_deref()
             .map(validate_smart_folder_id)
             .transpose()?
-            .unwrap_or_else(|| smart_folder_id_for(&request.repo_id, request.parent_id.as_deref(), &name));
+            .unwrap_or_else(|| {
+                smart_folder_id_for(&request.repo_id, request.parent_id.as_deref(), &name)
+            });
         let filter = normalize_smart_folder_filter(request.filter);
         let filter_json = serde_json::to_string(&filter).map_err(json_error)?;
         let now = now_rfc3339();
@@ -1655,16 +1744,17 @@ impl RepositoryState {
         let filter = normalize_smart_folder_filter(request.filter);
         let filter_json = serde_json::to_string(&filter).map_err(json_error)?;
         let now = now_rfc3339();
-        let sort_order = if normalized_optional_id(request.parent_id.as_deref()) == existing.parent_id {
-            existing.sort_order
-        } else {
-            next_smart_folder_sort_order(
-                &connection,
-                &request.repo_id,
-                request.parent_id.as_deref(),
-            )
-            .map_err(db_error)?
-        };
+        let sort_order =
+            if normalized_optional_id(request.parent_id.as_deref()) == existing.parent_id {
+                existing.sort_order
+            } else {
+                next_smart_folder_sort_order(
+                    &connection,
+                    &request.repo_id,
+                    request.parent_id.as_deref(),
+                )
+                .map_err(db_error)?
+            };
         connection
             .execute(
                 r#"
@@ -1765,13 +1855,9 @@ impl RepositoryState {
             &thumbnail_root,
             load_asset_path_map(&connection, repo_id).map_err(db_error)?,
         )?;
-        let results = query_smart_folder_entries(
-            &connection,
-            &repo.summary,
-            &inherited_filter,
-            &asset_map,
-        )
-        .map_err(db_error)?;
+        let results =
+            query_smart_folder_entries(&connection, &repo.summary, &inherited_filter, &asset_map)
+                .map_err(db_error)?;
         Ok(SmartFolderResultSnapshot {
             repo_id: repo_id.to_string(),
             smart_folder,
@@ -2044,13 +2130,8 @@ impl RepositoryState {
         )?;
         let tx = connection.transaction().map_err(db_error)?;
 
-        let scan = sync_repository_files(
-            &self.root,
-            &tx,
-            &repo,
-            skip_hardlink_candidate_paths,
-        )
-        .map_err(db_error)?;
+        let scan = sync_repository_files(&self.root, &tx, &repo, skip_hardlink_candidate_paths)
+            .map_err(db_error)?;
         tx.commit().map_err(db_error)?;
         Ok(scan)
     }
@@ -4124,7 +4205,10 @@ fn merge_smart_folder_filters(
     }
 }
 
-fn merge_optional_lists(parent: Option<Vec<String>>, child: Option<Vec<String>>) -> Option<Vec<String>> {
+fn merge_optional_lists(
+    parent: Option<Vec<String>>,
+    child: Option<Vec<String>>,
+) -> Option<Vec<String>> {
     let mut values = parent.unwrap_or_default();
     values.extend(child.unwrap_or_default());
     empty_vec_to_none(values)
@@ -4140,8 +4224,12 @@ fn empty_vec_to_none<T>(values: Vec<T>) -> Option<Vec<T>> {
 
 fn merge_path_prefix(parent: Option<String>, child: Option<String>) -> Option<String> {
     match (parent, child) {
-        (Some(left), Some(right)) if right.starts_with(&format!("{left}/")) || right == left => Some(right),
-        (Some(left), Some(right)) if left.starts_with(&format!("{right}/")) || left == right => Some(left),
+        (Some(left), Some(right)) if right.starts_with(&format!("{left}/")) || right == left => {
+            Some(right)
+        }
+        (Some(left), Some(right)) if left.starts_with(&format!("{right}/")) || left == right => {
+            Some(left)
+        }
         (Some(left), Some(right)) => Some(format!("{left}\n{right}")),
         (Some(left), None) => Some(left),
         (None, Some(right)) => Some(right),
@@ -4187,8 +4275,9 @@ fn load_smart_folders(
 
 fn map_smart_folder_row(row: &rusqlite::Row<'_>) -> Result<SmartFolder, rusqlite::Error> {
     let filter_json: String = row.get(4)?;
-    let filter = serde_json::from_str::<SmartFolderFilter>(&filter_json)
-        .map_err(|error| rusqlite::Error::FromSqlConversionFailure(4, Type::Text, Box::new(error)))?;
+    let filter = serde_json::from_str::<SmartFolderFilter>(&filter_json).map_err(|error| {
+        rusqlite::Error::FromSqlConversionFailure(4, Type::Text, Box::new(error))
+    })?;
     Ok(SmartFolder {
         smart_folder_id: row.get(0)?,
         repo_id: row.get(1)?,
@@ -4265,7 +4354,11 @@ fn inherited_smart_folder_filter(
         current = folder
             .parent_id
             .as_ref()
-            .and_then(|parent_id| folders.iter().find(|item| &item.smart_folder_id == parent_id))
+            .and_then(|parent_id| {
+                folders
+                    .iter()
+                    .find(|item| &item.smart_folder_id == parent_id)
+            })
             .cloned();
         chain.push(folder);
     }
@@ -4293,9 +4386,9 @@ fn smart_folder_filter_matches(
             .filter(|value| !value.is_empty())
             .collect::<Vec<_>>();
         if !prefixes.is_empty()
-            && !prefixes
-                .iter()
-                .all(|prefix| asset.path == *prefix || asset.path.starts_with(&format!("{prefix}/")))
+            && !prefixes.iter().all(|prefix| {
+                asset.path == *prefix || asset.path.starts_with(&format!("{prefix}/"))
+            })
         {
             return false;
         }
@@ -5476,11 +5569,11 @@ fn preview_media_type_for_extension(extension: &str) -> &'static str {
         "xls" | "xlt" => "application/vnd.ms-excel",
         "ppt" | "pps" | "pot" => "application/vnd.ms-powerpoint",
         "md" | "markdown" | "mdown" | "mkd" | "mkdn" | "mdx" => "text/markdown",
-        "txt" | "text" | "log" | "csv" | "tsv" | "yaml" | "yml" | "toml" | "xml"
-        | "html" | "css" | "scss" | "sass" | "less" | "js" | "jsx" | "ts" | "tsx"
-        | "vue" | "rs" | "py" | "rb" | "go" | "java" | "c" | "h" | "cpp" | "hpp"
-        | "cs" | "php" | "sh" | "bash" | "zsh" | "ps1" | "bat" | "cmd" | "ini"
-        | "cfg" | "conf" | "env" | "gitignore" | "gitattributes" => "text/plain",
+        "txt" | "text" | "log" | "csv" | "tsv" | "yaml" | "yml" | "toml" | "xml" | "html"
+        | "css" | "scss" | "sass" | "less" | "js" | "jsx" | "ts" | "tsx" | "vue" | "rs" | "py"
+        | "rb" | "go" | "java" | "c" | "h" | "cpp" | "hpp" | "cs" | "php" | "sh" | "bash"
+        | "zsh" | "ps1" | "bat" | "cmd" | "ini" | "cfg" | "conf" | "env" | "gitignore"
+        | "gitattributes" => "text/plain",
         "json" | "jsonl" => "application/json",
         _ => "application/octet-stream",
     }
@@ -6445,6 +6538,18 @@ fn backend_summary_from_registry(
             name: "Unavailable plugin".to_string(),
             capabilities: Vec::new(),
         }
+    }
+}
+
+fn repository_runtime_status(path: &str, backend_plugin_id: &str, stored_status: &str) -> String {
+    if normalized_builtin_plugin_id(backend_plugin_id) == LOCAL_FILESYSTEM_PLUGIN_ID {
+        if Path::new(path).is_dir() {
+            "ready".to_string()
+        } else {
+            "missing".to_string()
+        }
+    } else {
+        stored_status.to_string()
     }
 }
 
@@ -9834,6 +9939,119 @@ mod tests {
         );
     }
 
+    #[test]
+    fn list_repositories_marks_missing_local_paths() {
+        let (state, root, repo_root, _thumbnail_root) = create_test_state("missing-repo-list");
+        let repo_id = create_repository_for_path(&state, &repo_root);
+        fs::remove_dir_all(&repo_root).expect("repo root should be removed");
+
+        let repositories = state
+            .list_repositories()
+            .expect("repositories should list even when path is missing");
+        let repository = repositories
+            .iter()
+            .find(|item| item.repo_id == repo_id)
+            .expect("missing repository should stay registered");
+
+        assert_eq!(repository.status, "missing");
+        assert_eq!(repository.asset_count, 0);
+        fs::remove_dir_all(root).expect("test temp root should be removed");
+    }
+
+    #[test]
+    fn relocate_repository_requires_matching_metadata_repo_id() {
+        let (state, root, repo_root, _thumbnail_root) = create_test_state("relocate-mismatch");
+        let repo_id = create_repository_for_path(&state, &repo_root);
+        let other_root = root.join("other-repo");
+        let other_meta_dir = other_root.join(REPO_META_DIR);
+        fs::create_dir_all(&other_meta_dir).expect("other metadata dir should be created");
+        fs::write(
+            other_meta_dir.join(REPO_METADATA_FILE_NAME),
+            serde_json::to_string_pretty(&serde_json::json!({
+                "repoId": "repo-other",
+                "name": "Other Repo",
+                "rootPath": other_root.to_string_lossy(),
+                "backendPluginId": LOCAL_FILESYSTEM_PLUGIN_ID,
+                "backendConfig": {},
+                "createdAt": now_rfc3339(),
+                "schemaVersion": REPO_SCHEMA_VERSION,
+            }))
+            .expect("metadata json should encode"),
+        )
+        .expect("other metadata should be written");
+
+        let error = state
+            .relocate_repository(RepositoryRelocateRequest {
+                repo_id,
+                path: other_root.to_string_lossy().to_string(),
+            })
+            .expect_err("mismatched metadata repo id should fail");
+
+        assert!(error.contains("different repository"));
+        fs::remove_dir_all(root).expect("test temp root should be removed");
+    }
+
+    #[test]
+    fn relocate_repository_updates_path_and_preserves_repo_id() {
+        let (state, root, repo_root, _thumbnail_root) = create_test_state("relocate-success");
+        let repo_id = create_repository_for_path(&state, &repo_root);
+        let relocated_root = root.join("relocated-repo");
+        fs::rename(&repo_root, &relocated_root).expect("repo root should move");
+
+        let missing = state
+            .list_repositories()
+            .expect("repositories should list")
+            .into_iter()
+            .find(|item| item.repo_id == repo_id)
+            .expect("repository should stay registered");
+        assert_eq!(missing.status, "missing");
+
+        let response = state
+            .relocate_repository(RepositoryRelocateRequest {
+                repo_id: repo_id.clone(),
+                path: relocated_root.to_string_lossy().to_string(),
+            })
+            .expect("relocation should succeed");
+
+        assert_eq!(response.repository.repo_id, repo_id);
+        assert_eq!(
+            PathBuf::from(&response.repository.path),
+            canonicalize_local_path(&relocated_root).expect("relocated root should canonicalize")
+        );
+        let ready = state
+            .list_repositories()
+            .expect("repositories should list after relocation")
+            .into_iter()
+            .find(|item| item.repo_id == response.repository.repo_id)
+            .expect("repository should still be registered");
+        assert_eq!(ready.status, "ready");
+        fs::remove_dir_all(root).expect("test temp root should be removed");
+    }
+
+    #[test]
+    fn delete_repository_removes_registry_and_managed_state_dir() {
+        let (state, root, repo_root, _thumbnail_root) = create_test_state("delete-repo-state");
+        let repo_id = create_repository_for_path(&state, &repo_root);
+        let managed_state_dir = repository_state_storage_dir(&state.root, &repo_id);
+        fs::create_dir_all(managed_state_dir.join("cache"))
+            .expect("managed state dir should be created");
+        fs::write(managed_state_dir.join("cache/index.json"), "{}")
+            .expect("managed cache file should be written");
+
+        state
+            .delete_repository(&repo_id)
+            .expect("repository should delete");
+
+        assert!(!managed_state_dir.exists());
+        assert!(repo_root.exists());
+        assert!(state
+            .list_repositories()
+            .expect("repositories should list after delete")
+            .iter()
+            .all(|item| item.repo_id != repo_id));
+        fs::remove_dir_all(root).expect("test temp root should be removed");
+    }
+
     const LONG_RELATIVE_PATH: &str = "CubismSdkForNative-5-r.5/Samples/OpenGL/Demo/proj.harmonyos.cmake/Full/entry/src/main/resources/base/media/startIcon.png";
 
     fn unique_temp_dir(label: &str) -> PathBuf {
@@ -10057,12 +10275,9 @@ mod tests {
     #[test]
     fn search_assets_filters_current_repository_metadata_and_formats() {
         let (state, root, repo_root, _thumbnail_root) = create_test_state("search-filters");
-        fs::write(repo_root.join("cover.psd"), b"cover")
-            .expect("cover file should be written");
-        fs::write(repo_root.join("alt.psd"), b"alternate")
-            .expect("alt file should be written");
-        fs::write(repo_root.join("icon.png"), b"icon")
-            .expect("icon file should be written");
+        fs::write(repo_root.join("cover.psd"), b"cover").expect("cover file should be written");
+        fs::write(repo_root.join("alt.psd"), b"alternate").expect("alt file should be written");
+        fs::write(repo_root.join("icon.png"), b"icon").expect("icon file should be written");
         fs::write(repo_root.join("deleted.psd"), b"deleted")
             .expect("deleted file should be written");
         let repo_id = create_repository_for_path(&state, &repo_root);

@@ -5,6 +5,7 @@ import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import {
+  AlertTriangle,
   Eye,
   FileImage,
   Files,
@@ -18,6 +19,7 @@ import {
   Trash2,
   X,
 } from "lucide-vue-next";
+import ConfirmDialog from "../components/ConfirmDialog.vue";
 import PluginManagerPanel from "../components/PluginManagerPanel.vue";
 import { useRepositoryWorkspace } from "../composables/useRepositoryWorkspace";
 import { getPreviewPluginForEntry } from "../plugins/previewPlugins";
@@ -79,6 +81,9 @@ const renameTargetPath = ref<string | null>(null);
 const isDraggingFiles = ref(false);
 const isDraggingRepositoryFolder = ref(false);
 const emptyRepositoryError = ref("");
+const missingRepositoryError = ref("");
+const missingRepositoryAction = ref<"relocating" | "deleting" | null>(null);
+const showMissingRepositoryDeleteDialog = ref(false);
 const previewFilePath = ref<string | null>(null);
 const failedThumbnailPaths = ref<Set<string>>(new Set());
 const fileDisplayMode = ref<FileDisplayMode>(readInitialFileDisplayMode());
@@ -93,6 +98,7 @@ const shapeFilterInput = ref("");
 const {
   activePanel,
   activeSnapshot,
+  activeRepository,
   activeRepoId,
   fileBrowser,
   repositories,
@@ -116,12 +122,15 @@ const {
   isLoadingSmartFolder,
   isMutatingFiles,
   error,
+  refreshRepositoryWorkspace,
   selectRepository,
   selectAsset,
   loadFileBrowserForDirectory,
   createFileInWorkspace,
   copyWorkspaceEntries,
   attachRepository,
+  removeRepository,
+  relocateMissingRepository,
   importEntriesToWorkspace,
   renameWorkspaceEntry,
   deleteWorkspaceEntry,
@@ -146,6 +155,10 @@ const {
 } = useRepositoryWorkspace();
 
 const hasRepository = computed(() => Boolean(activeSnapshot.value));
+const isMissingRepository = computed(() => activeRepository.value?.status === "missing");
+const isMissingRepositoryBusy = computed(() => missingRepositoryAction.value !== null);
+const isRepairingMissingRepository = computed(() => missingRepositoryAction.value === "relocating");
+const isDeletingMissingRepository = computed(() => missingRepositoryAction.value === "deleting");
 const isFilesPanel = computed(() => activePanel.value === "files");
 const isTrashPanel = computed(() => activePanel.value === "deleted");
 const isSearchPanel = computed(() => activePanel.value === "search");
@@ -990,11 +1003,72 @@ watch(hasRepository, (ready) => {
   }
 }, { immediate: true });
 
+watch(activeRepoId, () => {
+  missingRepositoryError.value = "";
+  showMissingRepositoryDeleteDialog.value = false;
+});
+
+async function chooseMissingRepositoryPath() {
+  if (!activeRepoId.value || isMissingRepositoryBusy.value) return;
+  missingRepositoryError.value = "";
+  const selected = await openDialog({
+    title: "重定向资源库位置",
+    directory: true,
+    multiple: false,
+  });
+  if (typeof selected !== "string" || !selected.trim()) return;
+
+  missingRepositoryAction.value = "relocating";
+  try {
+    await relocateMissingRepository(activeRepoId.value, selected);
+    missingRepositoryError.value = "";
+  } catch (cause) {
+    missingRepositoryError.value = cause instanceof Error ? cause.message : String(cause);
+  } finally {
+    missingRepositoryAction.value = null;
+  }
+}
+
+async function refreshMissingRepository() {
+  if (isMissingRepositoryBusy.value) return;
+  missingRepositoryError.value = "";
+  try {
+    await refreshRepositoryWorkspace();
+  } catch (cause) {
+    missingRepositoryError.value = cause instanceof Error ? cause.message : String(cause);
+  }
+}
+
+function openMissingRepositoryDeleteDialog() {
+  if (!activeRepoId.value || isMissingRepositoryBusy.value) return;
+  missingRepositoryError.value = "";
+  showMissingRepositoryDeleteDialog.value = true;
+}
+
+function closeMissingRepositoryDeleteDialog() {
+  if (isDeletingMissingRepository.value) return;
+  showMissingRepositoryDeleteDialog.value = false;
+}
+
+async function confirmMissingRepositoryDelete() {
+  if (!activeRepoId.value) return;
+  missingRepositoryAction.value = "deleting";
+  missingRepositoryError.value = "";
+  try {
+    await removeRepository(activeRepoId.value);
+    showMissingRepositoryDeleteDialog.value = false;
+  } catch (cause) {
+    missingRepositoryError.value = cause instanceof Error ? cause.message : String(cause);
+  } finally {
+    missingRepositoryAction.value = null;
+  }
+}
+
 onMounted(() => {
   try {
     const currentWindow = getCurrentWindow();
     currentWindow.onDragDropEvent(({ payload }) => {
-      if (!hasRepository.value) {
+      if (!hasRepository.value && !isMissingRepository.value) {
         if (payload.type === "enter" || payload.type === "over") {
           isDraggingRepositoryFolder.value = true;
           return;
@@ -1173,7 +1247,52 @@ onUnmounted(() => {
     </div>
   </div>
 
-  <section v-if="hasRepository && isFileBrowserPanel" :class="previewFileEntry ? 'files-preview-page' : 'files-workbench'">
+  <section v-if="isMissingRepository" class="missing-repository-page" aria-live="polite">
+    <div class="missing-repository-page__panel">
+      <div class="missing-repository-page__icon" aria-hidden="true">
+        <AlertTriangle :size="22" />
+      </div>
+      <p class="asset-browser__eyebrow">资源库丢失</p>
+      <h1>{{ activeRepository?.name ?? "资源库不可用" }}</h1>
+      <p class="missing-repository-page__summary">
+        MomoBako 找不到这个资源库的本地文件夹。可以重定向到原资源库位置，或移除这条注册记录和本机缓存。
+      </p>
+      <p class="missing-repository-page__path">
+        {{ activeRepository?.path }}
+      </p>
+      <p v-if="missingRepositoryError" class="missing-repository-page__error">
+        {{ missingRepositoryError }}
+      </p>
+      <div class="missing-repository-page__actions">
+        <button
+          type="button"
+          class="primary"
+          :disabled="isMissingRepositoryBusy"
+          @click="chooseMissingRepositoryPath"
+        >
+          {{ isRepairingMissingRepository ? "重定向中..." : "重定向" }}
+        </button>
+        <button
+          type="button"
+          class="ghost"
+          :disabled="isMissingRepositoryBusy"
+          @click="refreshMissingRepository"
+        >
+          刷新
+        </button>
+        <button
+          type="button"
+          class="ghost danger"
+          :disabled="isMissingRepositoryBusy"
+          @click="openMissingRepositoryDeleteDialog"
+        >
+          {{ isDeletingMissingRepository ? "删除中..." : "删除资源库" }}
+        </button>
+      </div>
+    </div>
+  </section>
+
+  <section v-else-if="hasRepository && isFileBrowserPanel" :class="previewFileEntry ? 'files-preview-page' : 'files-workbench'">
     <template v-if="previewFileEntry">
       <FilePreviewPane
         :entry="previewFileEntry"
@@ -1305,5 +1424,18 @@ onUnmounted(() => {
     :message="hardlinkCandidateMessage"
     @confirm="confirmCurrentHardlinkCandidate"
     @skip="skipCurrentHardlinkCandidate"
+  />
+
+  <ConfirmDialog
+    :open="showMissingRepositoryDeleteDialog"
+    title="删除丢失资源库"
+    message="会移除这条资源库注册记录并清理本机缓存，不会删除原路径中的用户文件。"
+    confirm-text="删除"
+    cancel-text="取消"
+    busy-text="删除中..."
+    :busy="isDeletingMissingRepository"
+    danger
+    @confirm="confirmMissingRepositoryDelete"
+    @cancel="closeMissingRepositoryDeleteDialog"
   />
 </template>
