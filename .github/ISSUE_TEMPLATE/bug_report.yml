@@ -1,0 +1,88 @@
+name: BUG
+description: 记录一个需要修掉的问题
+title: "[BUG] "
+labels:
+  - bug
+  - needs triage
+body:
+  - type: markdown
+    attributes:
+      value: |
+        把 BUG 当作修复 todo 使用：先写现象，有复现路径或日志再补。涉及本地路径、仓库内容或截图时请先脱敏。
+  - type: textarea
+    id: problem
+    attributes:
+      label: 问题
+      description: 实际发生了什么？
+      placeholder: 例如：资源库同步后部分缩略图没有刷新。
+    validations:
+      required: true
+  - type: textarea
+    id: clues
+    attributes:
+      label: 复现 / 线索
+      description: 写已知复现步骤、触发条件、相关提交或怀疑范围。
+      placeholder: |
+        1. ...
+        2. ...
+        3. ...
+    validations:
+      required: false
+  - type: textarea
+    id: done
+    attributes:
+      label: 修好以后
+      description: 怎样判断这个问题已经修掉？
+      placeholder: |
+        - 不再出现...
+        - 能通过...
+    validations:
+      required: false
+  - type: dropdown
+    id: severity
+    attributes:
+      label: 影响程度
+      options:
+        - 阻断主要流程
+        - 影响常用流程
+        - 影响局部体验
+        - 轻微问题
+    validations:
+      required: false
+  - type: dropdown
+    id: area
+    attributes:
+      label: 影响范围
+      options:
+        - 资源库 / 数据模型
+        - 文件同步 / 导入导出
+        - 预览 / 缩略图
+        - 插件
+        - Tauri / Rust 后端
+        - 构建 / 发布
+        - UI / 主题
+        - 文档
+        - 其他
+    validations:
+      required: false
+  - type: textarea
+    id: environment
+    attributes:
+      label: 环境
+      description: 如果和本机环境有关，再填写这些信息。
+      value: |
+        - OS:
+        - MomoBako 版本 / commit:
+        - Node / Yarn:
+        - Rust:
+        - 相关配置:
+    validations:
+      required: false
+  - type: textarea
+    id: logs
+    attributes:
+      label: 日志 / 截图
+      description: 粘贴相关日志、错误栈、截图或录屏。敏感信息请先脱敏。
+      render: shell
+    validations:
+      required: false
