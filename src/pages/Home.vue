@@ -22,6 +22,7 @@ import PluginManagerPanel from "../components/PluginManagerPanel.vue";
 import { useRepositoryWorkspace } from "../composables/useRepositoryWorkspace";
 import { getPreviewPluginForEntry } from "../plugins/previewPlugins";
 import { isAudioExtension, isVideoExtension } from "../plugins/mediaPreview/mediaExtensions";
+import { metadataPalette } from "../utils/fileMetadata";
 import {
   getWorkspaceParentPath,
   internalWorkspaceDragDistance,
@@ -98,6 +99,7 @@ const previewFilePath = ref<string | null>(null);
 const failedThumbnailPaths = ref<Set<string>>(new Set());
 const fileDisplayMode = ref<FileDisplayMode>(readInitialFileDisplayMode());
 const thumbnailAspectRatios = ref<Record<string, number>>({});
+const thumbnailPalettes = ref<Record<string, string[]>>({});
 const pendingCopySourcePaths = ref<string[]>([]);
 const copyTargetDialogOpen = ref(false);
 const copyTargetPath = ref("");
@@ -109,6 +111,7 @@ const externalDragSwitchDistance = 72;
 
 const {
   activePanel,
+  activeAssetId,
   activeSnapshot,
   activeRepoId,
   currentDirectoryPath,
@@ -138,6 +141,7 @@ const {
   isInternalDragActive,
   isLoadingFileBrowser,
   isSearching,
+  isSavingMetadata,
   isMutatingFiles,
   error,
   selectRepository,
@@ -177,6 +181,7 @@ const {
   clearFilters,
   runFilteredSearch,
   confirmWorkspaceHardlinkCandidate,
+  saveAssetMetadata,
 } = useRepositoryWorkspace();
 
 const hasRepository = computed(() => Boolean(activeSnapshot.value));
@@ -382,12 +387,94 @@ function updateThumbnailAspectRatio(entry: FileBrowserEntry, event: Event) {
     ...thumbnailAspectRatios.value,
     [entry.path]: Math.min(Math.max(aspectRatio, 0.55), 2.4),
   };
+  const palette = extractPaletteFromImageElement(image);
+  if (palette.length) {
+    thumbnailPalettes.value = {
+      ...thumbnailPalettes.value,
+      [entry.path]: palette,
+    };
+  }
 }
 
 function fileItemStyle(entry: FileBrowserEntry) {
   return {
     "--file-thumb-aspect": String(thumbnailAspectRatios.value[entry.path] ?? 1),
   };
+}
+
+function thumbnailPaletteColors(entry: FileBrowserEntry) {
+  const metadataColors = metadataPalette(entry.metadata);
+  if (metadataColors.length) return metadataColors;
+  return thumbnailPalettes.value[entry.path] ?? [];
+}
+
+function extractPaletteFromImageElement(image: HTMLImageElement) {
+  try {
+    const canvas = document.createElement("canvas");
+    const context = canvas.getContext("2d", { willReadFrequently: true });
+    if (!context) return [];
+
+    const width = 40;
+    const sourceWidth = image.naturalWidth || image.width || 1;
+    const sourceHeight = image.naturalHeight || image.height || 1;
+    canvas.width = width;
+    canvas.height = Math.min(Math.max(1, Math.round((sourceHeight / sourceWidth) * width)), 40);
+    context.drawImage(image, 0, 0, canvas.width, canvas.height);
+    const data = context.getImageData(0, 0, canvas.width, canvas.height).data;
+    const buckets = new Map<string, { count: number; r: number; g: number; b: number }>();
+
+    for (let index = 0; index < data.length; index += 4) {
+      const alpha = data[index + 3];
+      if (alpha < 24) continue;
+      const r = data[index];
+      const g = data[index + 1];
+      const b = data[index + 2];
+      const key = `${Math.floor(r / 16)}-${Math.floor(g / 16)}-${Math.floor(b / 16)}`;
+      const bucket = buckets.get(key) ?? { count: 0, r: 0, g: 0, b: 0 };
+      bucket.count += 1;
+      bucket.r += r;
+      bucket.g += g;
+      bucket.b += b;
+      buckets.set(key, bucket);
+    }
+
+    const ranked = [...buckets.values()]
+      .filter((bucket) => bucket.count > 0)
+      .map((bucket) => ({
+        count: bucket.count,
+        r: Math.round(bucket.r / bucket.count),
+        g: Math.round(bucket.g / bucket.count),
+        b: Math.round(bucket.b / bucket.count),
+      }))
+      .sort((left, right) => right.count - left.count);
+
+    const colors: string[] = [];
+    for (const color of ranked) {
+      if (colors.some((existing) => colorDistance(existing, color) < 30)) continue;
+      colors.push(rgbToHex(color.r, color.g, color.b));
+      if (colors.length === 5) break;
+    }
+    return colors;
+  } catch {
+    return [];
+  }
+}
+
+function rgbToHex(r: number, g: number, b: number) {
+  return `#${[r, g, b].map((value) => value.toString(16).padStart(2, "0")).join("").toUpperCase()}`;
+}
+
+function colorDistance(leftHex: string, right: { r: number; g: number; b: number }) {
+  const left = [
+    Number.parseInt(leftHex.slice(1, 3), 16),
+    Number.parseInt(leftHex.slice(3, 5), 16),
+    Number.parseInt(leftHex.slice(5, 7), 16),
+  ];
+  return Math.sqrt(
+    (left[0] - right.r) ** 2 +
+    (left[1] - right.g) ** 2 +
+    (left[2] - right.b) ** 2,
+  );
 }
 
 function fillRoundedRect(context: CanvasRenderingContext2D, x: number, y: number, width: number, height: number, radius: number) {
@@ -533,6 +620,14 @@ function openDirectory(path: string) {
 
 function selectFileEntry(entry: FileBrowserEntry, mode: "replace" | "toggle" | "range") {
   selectWorkspaceEntry(entry.path, { mode });
+}
+
+async function saveFileMetadata(entry: FileBrowserEntry, metadata: Record<string, unknown>) {
+  if (entry.kind !== "file" || !entry.assetId) return null;
+  if (activeAssetId.value !== entry.assetId) {
+    await selectAsset(entry.assetId);
+  }
+  return saveAssetMetadata(metadata);
 }
 
 function startInternalWorkspaceDrag(paths: string[]) {
@@ -1162,7 +1257,7 @@ function closeFilterBar() {
 
 function searchResultRating(result: SearchHit) {
   const value = result.metadata.rating;
-  return typeof value === "number" ? value : null;
+  return typeof value === "number" && value > 0 ? value : null;
 }
 
 function searchResultContext(result: SearchHit) {
@@ -1452,10 +1547,15 @@ onUnmounted(() => {
         :is-video-entry="isVideoEntry"
         :is-audio-entry="isAudioEntry"
         :hardlink-state-label="hardlinkStateLabel"
+        :is-saving-metadata="isSavingMetadata"
+        :available-tags="tagFilterOptions"
+        :thumbnail-palette="thumbnailPaletteColors"
+        :save-metadata="saveFileMetadata"
         :status-label="statusLabel"
         @back="exitPreview"
         @open="openWorkspaceEntry"
         @reveal="revealWorkspaceEntry"
+        @thumbnail-loaded="updateThumbnailAspectRatio"
         @thumbnail-error="markThumbnailFailed"
       />
     </template>
@@ -1495,6 +1595,10 @@ onUnmounted(() => {
       :is-video-entry="isVideoEntry"
       :open-selected-label="openSelectedLabel"
       :rename-target-path="renameTargetPath"
+      :is-saving-metadata="isSavingMetadata"
+      :available-tags="tagFilterOptions"
+      :thumbnail-palette="thumbnailPaletteColors"
+      :save-metadata="saveFileMetadata"
       :selected-entries="selectedEntries"
       :selected-file-paths="selectedFilePaths"
       :selected-file-path="selectedFilePath"

@@ -14,6 +14,8 @@ import {
   RotateCcw,
   Trash2,
 } from "lucide-vue-next";
+import FileMetadataEditor from "./FileMetadataEditor.vue";
+import ThumbnailPalette from "../../components/ThumbnailPalette.vue";
 import type { ContextMenuItem } from "../../composables/useContextMenu";
 import { vContextMenu } from "../../directives/contextMenu";
 import type { FileBrowserEntry } from "../../types/repository";
@@ -77,6 +79,10 @@ const props = defineProps<{
   selectedFilePath: string | null;
   statusLabel: (status: string) => string;
   thumbnailSrc: (entry: FileBrowserEntry) => string | null;
+  isSavingMetadata: boolean;
+  availableTags: string[];
+  thumbnailPalette: (entry: FileBrowserEntry) => string[];
+  saveMetadata: (entry: FileBrowserEntry, metadata: Record<string, unknown>) => Promise<unknown>;
 }>();
 
 const createFileName = defineModel<string>("createFileName", { required: true });
@@ -434,6 +440,7 @@ function cancelEntryDragIntent(event: PointerEvent) {
                 v-if="thumbnailSrc(entry)"
                 :src="thumbnailSrc(entry) ?? undefined"
                 alt=""
+                crossorigin="anonymous"
                 draggable="false"
                 loading="lazy"
                 @load="emit('thumbnailLoaded', entry, $event)"
@@ -501,7 +508,9 @@ function cancelEntryDragIntent(event: PointerEvent) {
           v-if="thumbnailSrc(currentFileEntry)"
           :src="thumbnailSrc(currentFileEntry) ?? undefined"
           alt=""
+          crossorigin="anonymous"
           draggable="false"
+          @load="emit('thumbnailLoaded', currentFileEntry, $event)"
           @dragstart.prevent
           @error="emit('markThumbnailFailed', currentFileEntry)"
         />
@@ -511,6 +520,7 @@ function cancelEntryDragIntent(event: PointerEvent) {
         <File v-else-if="isModelEntry(currentFileEntry)" :size="34" aria-hidden="true" />
         <FileImage v-else :size="34" aria-hidden="true" />
       </div>
+      <ThumbnailPalette :colors="thumbnailPalette(currentFileEntry)" />
 
       <div class="files-detail__section">
         <p class="asset-browser__eyebrow">选中项</p>
@@ -583,6 +593,14 @@ function cancelEntryDragIntent(event: PointerEvent) {
           <span class="asset-meta__value">{{ entryDeletedAtLabel(currentFileEntry) || "未记录" }}</span>
         </div>
       </div>
+
+      <FileMetadataEditor
+        v-if="!isTrashPanel"
+        :entry="currentFileEntry"
+        :is-saving="isSavingMetadata"
+        :available-tags="availableTags"
+        :save-metadata="saveMetadata"
+      />
     </div>
 
     <div v-else class="files-detail__empty">

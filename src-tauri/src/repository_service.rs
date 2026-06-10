@@ -2,7 +2,7 @@ use rusqlite::{params, types::Type, Connection, OptionalExtension, Transaction};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
-    collections::{BTreeMap, HashSet},
+    collections::{BTreeMap, HashMap, HashSet},
     ffi::{CStr, CString, OsString},
     fs::{self, File, OpenOptions},
     io::{Read, Write},
@@ -634,6 +634,7 @@ struct ExistingAssetRecord {
     status: String,
     thumbnail_path: Option<String>,
     size_bytes: i64,
+    created_at: String,
     modified_at: String,
     hash: Option<String>,
 }
@@ -684,6 +685,8 @@ pub struct ThumbnailResponse {
     pub kind: String,
     pub thumbnail_path: Option<String>,
     pub thumbnail_custom: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<BTreeMap<String, serde_json::Value>>,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -1365,6 +1368,7 @@ impl RepositoryState {
                 &thumbnail_map,
             )?
         };
+        let entries = attach_browser_entry_metadata(&connection, entries).map_err(db_error)?;
 
         Ok(FileBrowserSnapshot {
             repo_id: request.repo_id,
@@ -1858,6 +1862,7 @@ impl RepositoryState {
                 kind: kind.to_string(),
                 thumbnail_path: response.0,
                 thumbnail_custom: response.1,
+                metadata: None,
             });
         }
 
@@ -1900,6 +1905,7 @@ impl RepositoryState {
             filename,
             extension,
             size_bytes,
+            created_at: None,
             modified_at,
         };
         let existing_record =
@@ -1992,6 +1998,9 @@ impl RepositoryState {
             )
             .map_err(db_error)?;
         }
+        sync_thumbnail_palette_metadata(&connection, &asset_id, thumbnail_path.as_deref())
+            .map_err(db_error)?;
+        let metadata = load_metadata_map(&connection, &asset_id).map_err(db_error)?;
 
         Ok(ThumbnailResponse {
             repo_id: request.repo_id,
@@ -2000,6 +2009,7 @@ impl RepositoryState {
             kind: kind.to_string(),
             thumbnail_path,
             thumbnail_custom,
+            metadata: Some(metadata),
         })
     }
 
@@ -3292,6 +3302,42 @@ fn load_metadata_map(
         .collect::<BTreeMap<_, _>>())
 }
 
+fn load_metadata_maps_for_assets(
+    connection: &Connection,
+    asset_ids: &[String],
+) -> Result<BTreeMap<String, BTreeMap<String, serde_json::Value>>, rusqlite::Error> {
+    if asset_ids.is_empty() {
+        return Ok(BTreeMap::new());
+    }
+
+    let placeholders = std::iter::repeat("?")
+        .take(asset_ids.len())
+        .collect::<Vec<_>>()
+        .join(", ");
+    let mut stmt = connection.prepare(&format!(
+        r#"
+        SELECT asset_id, key, value_json
+        FROM metadata
+        WHERE asset_id IN ({placeholders})
+        ORDER BY key COLLATE NOCASE
+        "#
+    ))?;
+    let rows = stmt.query_map(rusqlite::params_from_iter(asset_ids.iter()), |row| {
+        let value_json: String = row.get(2)?;
+        let value = parse_json_column(&value_json)?;
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, value))
+    })?;
+
+    let mut map = BTreeMap::new();
+    for row in rows {
+        let (asset_id, key, value) = row?;
+        map.entry(asset_id)
+            .or_insert_with(BTreeMap::new)
+            .insert(key, value);
+    }
+    Ok(map)
+}
+
 fn load_metadata_map_from_transaction(
     tx: &Transaction<'_>,
     asset_id: &str,
@@ -3801,7 +3847,7 @@ fn sync_repository_files(
 
     let mut existing_stmt = tx.prepare(
         r#"
-        SELECT asset_id, path, status, thumbnail_path, size_bytes, modified_at, hash
+        SELECT asset_id, path, status, thumbnail_path, size_bytes, created_at, modified_at, hash
         FROM assets
         WHERE repo_id = ?1
         "#,
@@ -3815,8 +3861,9 @@ fn sync_repository_files(
                 status: row.get::<_, String>(2)?,
                 thumbnail_path: row.get::<_, Option<String>>(3)?,
                 size_bytes: row.get::<_, i64>(4)?,
-                modified_at: row.get::<_, String>(5)?,
-                hash: row.get::<_, Option<String>>(6)?,
+                created_at: row.get::<_, String>(5)?,
+                modified_at: row.get::<_, String>(6)?,
+                hash: row.get::<_, Option<String>>(7)?,
             },
         ))
     })?;
@@ -3835,6 +3882,7 @@ fn sync_repository_files(
     for file in &files {
         if let Some(existing_record) = existing_by_path.remove(&file.relative_path) {
             let asset_id = existing_record.asset_id;
+            let asset_created_at = existing_record.created_at.clone();
             let content_hash = if existing_record.size_bytes == file.size_bytes
                 && existing_record.modified_at == file.modified_at
             {
@@ -3882,6 +3930,15 @@ fn sync_repository_files(
                 &asset_id,
                 &file.relative_path,
                 &content_hash,
+            )?;
+            ensure_default_metadata(
+                tx,
+                &asset_id,
+                &file.filename,
+                &file.extension,
+                &asset_created_at,
+                file.created_at.as_deref(),
+                false,
             )?;
             updated_assets += 1;
             insert_event(
@@ -3941,7 +3998,8 @@ fn sync_repository_files(
                 &asset_id,
                 &file.filename,
                 &file.extension,
-                &file.modified_at,
+                &now,
+                file.created_at.as_deref(),
             )?;
             insert_event(
                 tx,
@@ -4133,25 +4191,221 @@ fn insert_default_metadata(
     asset_id: &str,
     filename: &str,
     extension: &str,
-    updated_at: &str,
+    added_to_library_at: &str,
+    file_created_at: Option<&str>,
 ) -> Result<(), rusqlite::Error> {
-    let defaults = [
-        ("title", serde_json::Value::String(filename.to_string())),
-        ("favorite", serde_json::Value::Bool(false)),
-        ("type", serde_json::Value::String(extension.to_string())),
+    ensure_default_metadata(
+        tx,
+        asset_id,
+        filename,
+        extension,
+        added_to_library_at,
+        file_created_at,
+        true,
+    )
+}
+
+fn ensure_default_metadata(
+    tx: &Transaction<'_>,
+    asset_id: &str,
+    filename: &str,
+    extension: &str,
+    added_to_library_at: &str,
+    file_created_at: Option<&str>,
+    overwrite_existing: bool,
+) -> Result<(), rusqlite::Error> {
+    let mut defaults = vec![
+        ("title".to_string(), serde_json::Value::String(filename.to_string())),
+        ("favorite".to_string(), serde_json::Value::Bool(false)),
+        ("type".to_string(), serde_json::Value::String(extension.to_string())),
+        ("rating".to_string(), serde_json::json!(0)),
+        ("comment".to_string(), serde_json::Value::String(String::new())),
+        ("link".to_string(), serde_json::Value::String(String::new())),
+        ("tagGroups".to_string(), serde_json::json!([])),
+        (
+            "addedToLibraryAt".to_string(),
+            serde_json::Value::String(added_to_library_at.to_string()),
+        ),
     ];
+    if let Some(file_created_at) = file_created_at {
+        defaults.push((
+            "fileCreatedAt".to_string(),
+            serde_json::Value::String(file_created_at.to_string()),
+        ));
+    }
 
     for (key, value) in defaults {
-        tx.execute(
-            r#"
-            INSERT OR REPLACE INTO metadata (asset_id, key, value_type, value_json, version, updated_at)
-            VALUES (?1, ?2, ?3, ?4, 1, ?5)
-            "#,
-            params![asset_id, key, infer_value_type(&value), value.to_string(), updated_at],
-        )?;
+        if overwrite_existing {
+            tx.execute(
+                r#"
+                INSERT OR REPLACE INTO metadata (asset_id, key, value_type, value_json, version, updated_at)
+                VALUES (?1, ?2, ?3, ?4, 1, ?5)
+                "#,
+                params![
+                    asset_id,
+                    key,
+                    infer_value_type(&value),
+                    value.to_string(),
+                    added_to_library_at
+                ],
+            )?;
+        } else {
+            tx.execute(
+                r#"
+                INSERT OR IGNORE INTO metadata (asset_id, key, value_type, value_json, version, updated_at)
+                VALUES (?1, ?2, ?3, ?4, 1, ?5)
+                "#,
+                params![
+                    asset_id,
+                    key,
+                    infer_value_type(&value),
+                    value.to_string(),
+                    added_to_library_at
+                ],
+            )?;
+        }
     }
 
     Ok(())
+}
+
+fn upsert_metadata_value(
+    connection: &Connection,
+    asset_id: &str,
+    key: &str,
+    value: &serde_json::Value,
+) -> Result<(), rusqlite::Error> {
+    let now = now_rfc3339();
+    connection.execute(
+        r#"
+        INSERT INTO metadata (asset_id, key, value_type, value_json, version, updated_at)
+        VALUES (?1, ?2, ?3, ?4, 1, ?5)
+        ON CONFLICT(asset_id, key)
+        DO UPDATE SET
+          value_type = excluded.value_type,
+          value_json = excluded.value_json,
+          version = metadata.version + 1,
+          updated_at = excluded.updated_at
+        "#,
+        params![asset_id, key, infer_value_type(value), value.to_string(), now],
+    )?;
+    Ok(())
+}
+
+fn delete_metadata_value(
+    connection: &Connection,
+    asset_id: &str,
+    key: &str,
+) -> Result<(), rusqlite::Error> {
+    connection.execute(
+        "DELETE FROM metadata WHERE asset_id = ?1 AND key = ?2",
+        params![asset_id, key],
+    )?;
+    Ok(())
+}
+
+fn sync_thumbnail_palette_metadata(
+    connection: &Connection,
+    asset_id: &str,
+    thumbnail_path: Option<&str>,
+) -> Result<(), rusqlite::Error> {
+    let Some(thumbnail_path) = thumbnail_path else {
+        return delete_metadata_value(connection, asset_id, "thumbnailPalette");
+    };
+
+    let colors = extract_thumbnail_palette(Path::new(thumbnail_path)).map_err(|error| {
+        rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            error,
+        )))
+    })?;
+    if colors.is_empty() {
+        return delete_metadata_value(connection, asset_id, "thumbnailPalette");
+    }
+
+    upsert_metadata_value(
+        connection,
+        asset_id,
+        "thumbnailPalette",
+        &serde_json::json!(colors),
+    )
+}
+
+fn extract_thumbnail_palette(path: &Path) -> Result<Vec<String>, String> {
+    let image = image::open(path).map_err(|error| format!("thumbnail palette error: {error}"))?;
+    let thumbnail = image.thumbnail(48, 48).to_rgb8();
+    if thumbnail.width() == 0 || thumbnail.height() == 0 {
+        return Ok(Vec::new());
+    }
+
+    let mut buckets = HashMap::<u16, (u64, u64, u64, usize)>::new();
+    for pixel in thumbnail.pixels() {
+        let [r, g, b] = pixel.0;
+        let key = (((r as u16) >> 4) << 8) | (((g as u16) >> 4) << 4) | ((b as u16) >> 4);
+        let entry = buckets.entry(key).or_insert((0, 0, 0, 0));
+        entry.0 += r as u64;
+        entry.1 += g as u64;
+        entry.2 += b as u64;
+        entry.3 += 1;
+    }
+
+    let mut ranked = buckets
+        .into_values()
+        .filter(|(_, _, _, count)| *count > 0)
+        .map(|(r, g, b, count)| {
+            (
+                count,
+                (r / count as u64) as u8,
+                (g / count as u64) as u8,
+                (b / count as u64) as u8,
+            )
+        })
+        .collect::<Vec<_>>();
+    ranked.sort_by(|left, right| right.0.cmp(&left.0));
+
+    let mut palette = Vec::new();
+    for (_, r, g, b) in ranked {
+        if palette
+            .iter()
+            .any(|(pr, pg, pb)| color_distance_sq((r, g, b), (*pr, *pg, *pb)) < 720)
+        {
+            continue;
+        }
+        palette.push((r, g, b));
+        if palette.len() == 5 {
+            break;
+        }
+    }
+
+    if palette.is_empty() {
+        let mut totals = (0_u64, 0_u64, 0_u64, 0_u64);
+        for pixel in thumbnail.pixels() {
+            let [r, g, b] = pixel.0;
+            totals.0 += r as u64;
+            totals.1 += g as u64;
+            totals.2 += b as u64;
+            totals.3 += 1;
+        }
+        if totals.3 > 0 {
+            palette.push((
+                (totals.0 / totals.3) as u8,
+                (totals.1 / totals.3) as u8,
+                (totals.2 / totals.3) as u8,
+            ));
+        }
+    }
+
+    Ok(palette
+        .into_iter()
+        .map(|(r, g, b)| format!("#{r:02X}{g:02X}{b:02X}"))
+        .collect())
+}
+
+fn color_distance_sq(left: (u8, u8, u8), right: (u8, u8, u8)) -> i32 {
+    let dr = left.0 as i32 - right.0 as i32;
+    let dg = left.1 as i32 - right.1 as i32;
+    let db = left.2 as i32 - right.2 as i32;
+    dr * dr + dg * dg + db * db
 }
 
 fn hardlink_group_id_for(repo_id: &str, content_hash: &str, size_bytes: i64) -> String {
@@ -4594,6 +4848,12 @@ fn collect_repository_files_recursive(
             filename: file_name.to_string(),
             extension,
             size_bytes: metadata.len() as i64,
+            created_at: metadata
+                .created()
+                .ok()
+                .map(system_time_to_rfc3339)
+                .transpose()
+                .map_err(|error| std::io::Error::new(std::io::ErrorKind::Other, error))?,
             modified_at: metadata
                 .modified()
                 .ok()
@@ -4965,6 +5225,7 @@ struct DiscoveredFile {
     filename: String,
     extension: String,
     size_bytes: i64,
+    created_at: Option<String>,
     modified_at: String,
 }
 
@@ -4976,6 +5237,7 @@ struct BackendDiscoveredFile {
     filename: String,
     extension: String,
     size_bytes: i64,
+    created_at: Option<String>,
     modified_at: String,
 }
 
@@ -4992,6 +5254,7 @@ impl BackendDiscoveredFile {
             filename: self.filename,
             extension: self.extension,
             size_bytes: self.size_bytes,
+            created_at: self.created_at,
             modified_at: self.modified_at,
         })
     }
@@ -5989,6 +6252,29 @@ fn migrate_repository_schema(connection: &Connection) -> Result<(), rusqlite::Er
 
         CREATE UNIQUE INDEX IF NOT EXISTS idx_hardlink_candidates_unique
         ON hardlink_candidates(repo_id, new_asset_id, existing_asset_id);
+        "#,
+    )?;
+    connection.execute_batch(
+        r#"
+        INSERT OR IGNORE INTO metadata (asset_id, key, value_type, value_json, version, updated_at)
+        SELECT asset_id, 'rating', 'number', '0', 1, updated_at
+        FROM assets;
+
+        INSERT OR IGNORE INTO metadata (asset_id, key, value_type, value_json, version, updated_at)
+        SELECT asset_id, 'comment', 'string', '""', 1, updated_at
+        FROM assets;
+
+        INSERT OR IGNORE INTO metadata (asset_id, key, value_type, value_json, version, updated_at)
+        SELECT asset_id, 'link', 'string', '""', 1, updated_at
+        FROM assets;
+
+        INSERT OR IGNORE INTO metadata (asset_id, key, value_type, value_json, version, updated_at)
+        SELECT asset_id, 'tagGroups', 'json', '[]', 1, updated_at
+        FROM assets;
+
+        INSERT OR IGNORE INTO metadata (asset_id, key, value_type, value_json, version, updated_at)
+        SELECT asset_id, 'addedToLibraryAt', 'string', json_quote(created_at), 1, updated_at
+        FROM assets;
         "#,
     )?;
     Ok(())
@@ -7988,6 +8274,31 @@ fn map_trash_browser_entries(
         .collect()
 }
 
+fn attach_browser_entry_metadata(
+    connection: &Connection,
+    mut entries: Vec<FileBrowserEntry>,
+) -> Result<Vec<FileBrowserEntry>, rusqlite::Error> {
+    let asset_ids = entries
+        .iter()
+        .filter_map(|entry| entry.asset_id.clone())
+        .collect::<Vec<_>>();
+    let metadata_by_asset = load_metadata_maps_for_assets(connection, &asset_ids)?;
+
+    for entry in &mut entries {
+        let Some(asset_id) = &entry.asset_id else {
+            continue;
+        };
+        let Some(metadata) = metadata_by_asset.get(asset_id) else {
+            continue;
+        };
+        let mut merged = metadata.clone();
+        merged.extend(entry.metadata.clone());
+        entry.metadata = merged;
+    }
+
+    Ok(entries)
+}
+
 fn local_directory_entries(
     repo_root: &Path,
     current_dir: &Path,
@@ -9439,6 +9750,39 @@ mod tests {
     }
 
     #[test]
+    fn load_file_browser_returns_generic_file_metadata() {
+        let (state, root, repo_root, _thumbnail_root) = create_test_state("browser-metadata");
+        fs::write(repo_root.join("note.txt"), "plain text").expect("test file should be written");
+        let repo_id = create_repository_for_path(&state, &repo_root);
+
+        let snapshot = state
+            .load_file_browser(FileBrowserRequest {
+                repo_id,
+                directory_path: Some(String::new()),
+                include_tree: Some(false),
+                special_location: None,
+            })
+            .expect("file browser should load");
+        let entry = snapshot
+            .entries
+            .iter()
+            .find(|item| item.path == "note.txt")
+            .expect("file entry should be listed");
+
+        assert_eq!(entry.metadata.get("rating"), Some(&serde_json::json!(0)));
+        assert_eq!(entry.metadata.get("comment"), Some(&serde_json::json!("")));
+        assert_eq!(entry.metadata.get("link"), Some(&serde_json::json!("")));
+        assert_eq!(entry.metadata.get("tagGroups"), Some(&serde_json::json!([])));
+        assert!(entry
+            .metadata
+            .get("addedToLibraryAt")
+            .and_then(serde_json::Value::as_str)
+            .is_some());
+
+        fs::remove_dir_all(root).expect("test temp root should be removed");
+    }
+
+    #[test]
     fn sync_repository_generates_unique_asset_ids_for_slug_collisions() {
         let (state, root, repo_root, _thumbnail_root) = create_test_state("sync-asset-id");
         fs::create_dir_all(repo_root.join("A B")).expect("spaced directory should be created");
@@ -10153,6 +10497,56 @@ mod tests {
         assert!(thumbnail_path.starts_with(&thumbnail_root));
         assert!(thumbnail_path.is_file());
         assert_eq!(count_files(&thumbnail_root), 1);
+
+        fs::remove_dir_all(root).expect("test temp root should be removed");
+    }
+
+    #[test]
+    fn ensure_thumbnail_extracts_palette_metadata() {
+        let (state, root, repo_root, _thumbnail_root) = create_test_state("thumb-palette");
+        write_test_image(&repo_root.join("cover.png"));
+        let repo_id = create_repository_for_path(&state, &repo_root);
+
+        let response = state
+            .ensure_thumbnail(ThumbnailRequest {
+                repo_id: repo_id.clone(),
+                path: "cover.png".to_string(),
+                action: None,
+                source_path: None,
+                image_bytes: None,
+                media_type: None,
+            })
+            .expect("thumbnail should be generated");
+        let palette = response
+            .metadata
+            .as_ref()
+            .and_then(|metadata| metadata.get("thumbnailPalette"))
+            .and_then(serde_json::Value::as_array)
+            .cloned()
+            .expect("thumbnail palette should be returned");
+
+        assert!(!palette.is_empty());
+        assert!(palette
+            .iter()
+            .all(|item| item.as_str().is_some_and(|value| value.starts_with('#'))));
+
+        let snapshot = state
+            .load_file_browser(FileBrowserRequest {
+                repo_id,
+                directory_path: Some(String::new()),
+                include_tree: Some(false),
+                special_location: None,
+            })
+            .expect("file browser should load");
+        let entry = snapshot
+            .entries
+            .iter()
+            .find(|item| item.path == "cover.png")
+            .expect("cover entry should be listed");
+        assert_eq!(
+            entry.metadata.get("thumbnailPalette"),
+            Some(&serde_json::Value::Array(palette))
+        );
 
         fs::remove_dir_all(root).expect("test temp root should be removed");
     }

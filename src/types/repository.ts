@@ -82,6 +82,8 @@ export type FileBrowserEntry = {
   metadata?: Record<string, unknown>;
 };
 
+export type MetadataTagGroup = string;
+
 export type FileBrowserSnapshot = {
   repoId: string;
   rootPath: string;
@@ -347,6 +349,7 @@ export type ThumbnailResponse = {
   kind: "directory" | "file";
   thumbnailPath?: string | null;
   thumbnailCustom: boolean;
+  metadata?: Record<string, unknown> | null;
 };
 
 export type WorkspaceStartupStatus = "idle" | "loading" | "ready" | "error";

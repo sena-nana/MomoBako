@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { ArrowLeft, Eye, FileAudio, FileImage, FileVideo, FolderOpen } from "lucide-vue-next";
 import type { Component } from "vue";
+import FileMetadataEditor from "./FileMetadataEditor.vue";
+import ThumbnailPalette from "../../components/ThumbnailPalette.vue";
 import type { FileBrowserEntry } from "../../types/repository";
 
 defineProps<{
@@ -12,6 +14,10 @@ defineProps<{
   isAudioEntry: (entry: FileBrowserEntry) => boolean;
   hardlinkStateLabel: (entry: FileBrowserEntry) => string;
   statusLabel: (status: string) => string;
+  isSavingMetadata: boolean;
+  availableTags: string[];
+  thumbnailPalette: (entry: FileBrowserEntry) => string[];
+  saveMetadata: (entry: FileBrowserEntry, metadata: Record<string, unknown>) => Promise<unknown>;
 }>();
 
 const emit = defineEmits<{
@@ -19,6 +25,7 @@ const emit = defineEmits<{
   open: [path: string];
   reveal: [path: string];
   thumbnailError: [entry: FileBrowserEntry];
+  thumbnailLoaded: [entry: FileBrowserEntry, event: Event];
 }>();
 </script>
 
@@ -46,17 +53,27 @@ const emit = defineEmits<{
   </header>
 
   <div class="files-preview-page__body">
-    <div class="files-preview-page__preview" :class="{ 'files-preview-page__preview--plugin': plugin }">
-      <component
-        :is="plugin.component"
-        v-if="plugin"
-        :entry="entry"
-        :repo-id="repoId"
-      />
-      <img v-else-if="thumbnailSrc(entry)" :src="thumbnailSrc(entry) ?? undefined" alt="" @error="emit('thumbnailError', entry)" />
-      <FileVideo v-else-if="isVideoEntry(entry)" :size="54" aria-hidden="true" />
-      <FileAudio v-else-if="isAudioEntry(entry)" :size="54" aria-hidden="true" />
-      <FileImage v-else :size="54" aria-hidden="true" />
+    <div class="files-preview-page__preview-shell">
+      <div class="files-preview-page__preview" :class="{ 'files-preview-page__preview--plugin': plugin }">
+        <component
+          :is="plugin.component"
+          v-if="plugin"
+          :entry="entry"
+          :repo-id="repoId"
+        />
+        <img
+          v-else-if="thumbnailSrc(entry)"
+          :src="thumbnailSrc(entry) ?? undefined"
+          alt=""
+          crossorigin="anonymous"
+          @load="emit('thumbnailLoaded', entry, $event)"
+          @error="emit('thumbnailError', entry)"
+        />
+        <FileVideo v-else-if="isVideoEntry(entry)" :size="54" aria-hidden="true" />
+        <FileAudio v-else-if="isAudioEntry(entry)" :size="54" aria-hidden="true" />
+        <FileImage v-else :size="54" aria-hidden="true" />
+      </div>
+      <ThumbnailPalette :colors="thumbnailPalette(entry)" />
     </div>
     <div class="files-detail__stats files-preview-page__stats">
       <div class="asset-meta__row">
@@ -79,6 +96,12 @@ const emit = defineEmits<{
         <span>修改时间</span>
         <span class="asset-meta__value">{{ entry.modifiedAt ? new Date(entry.modifiedAt).toLocaleString("zh-CN") : "未记录" }}</span>
       </div>
+      <FileMetadataEditor
+        :entry="entry"
+        :is-saving="isSavingMetadata"
+        :available-tags="availableTags"
+        :save-metadata="saveMetadata"
+      />
     </div>
   </div>
 </template>

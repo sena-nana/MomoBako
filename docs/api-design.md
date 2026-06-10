@@ -54,7 +54,8 @@
   - Optional `action`: `ensure`, `refresh`, `save`, `saveGenerated`, `clear`
   - `save` accepts `sourcePath` or `imageBytes` for custom file/folder thumbnails; `saveGenerated` accepts frontend-generated image bytes, used by 3D and text previews
   - Thumbnail cache files live under repository `.momo/thumbnails/` and use sha256 hex filenames
-  - Response fields: `repoId`, `path`, `assetId`, `kind`, `thumbnailPath`, `thumbnailCustom`
+  - File thumbnails also backfill derived metadata such as `thumbnailPalette`
+  - Response fields: `repoId`, `path`, `assetId`, `kind`, `thumbnailPath`, `thumbnailCustom`, optional `metadata`
 - `POST /repositories/{repoId}/files:preparePreviewSource`
   - Request body includes repository-relative `path`
   - Response returns a session-scoped local preview `sourceUrl` backed by the in-process repository runtime
@@ -79,6 +80,7 @@
 
 - `PATCH /repositories/{repoId}/assets/{assetId}/metadata`
   - Request body includes `expectedVersion`
+  - Generic file metadata keys include `rating`, `addedToLibraryAt`, `fileCreatedAt`, `comment`, `link`, `thumbnailPalette`, and `tagGroups`
   - Outcomes: `success`, `conflict`, `merged`
 
 ## Search API
