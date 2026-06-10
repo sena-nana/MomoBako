@@ -7,6 +7,9 @@
     "dev": "vite",
     "build": "vue-tsc --noEmit && vite build",
     "test": "vitest run",
+    "docs:dev": "vitepress dev docs",
+    "docs:build": "vitepress build docs",
+    "docs:preview": "vitepress preview docs",
     "preview": "vite preview",
     "tauri": "tauri",
     "tauri:dev": "yarn plugins:build && node scripts/tauri-dev.mjs",
@@ -14,7 +17,7 @@
     "tauri:build": "tauri build",
     "icons:generate": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/generate-icon.ps1",
     "icons:tauri": "yarn tauri icon src-tauri/icons/icon-source.png",
-    "verify": "yarn test && yarn build && cargo check --manifest-path src-tauri/Cargo.toml && yarn plugins:build"
+    "verify": "yarn test && yarn build && yarn plugins:build && cargo check --manifest-path src-tauri/Cargo.toml"
   },
   "dependencies": {
     "@pixiv/three-vrm": "^3.4.5",
@@ -46,6 +49,7 @@
     "jsdom": "^29.1.1",
     "typescript": "~5.8.3",
     "vite": "^7.0.4",
+    "vitepress": "^1.6.4",
     "vitest": "^4.1.6",
     "vue-tsc": "^3.2.9"
   },
