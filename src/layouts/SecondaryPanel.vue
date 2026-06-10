@@ -17,11 +17,12 @@ import {
   X,
 } from "lucide-vue-next";
 import FolderTreeNode from "../components/FolderTreeNode.vue";
+import SmartFolderTreeNode from "../components/SmartFolderTreeNode.vue";
 import TaskPopover from "../components/TaskPopover.vue";
 import { useRepositoryWorkspace, type WorkspacePanelKey } from "../composables/useRepositoryWorkspace";
-import type { FileDeleteMode } from "../types/repository";
+import type { FileDeleteMode, SmartFolder, SmartFolderFilter, SmartFolderTreeNode as SmartFolderTreeNodeType } from "../types/repository";
 
-type PanelKey = Exclude<WorkspacePanelKey, "files" | "search">;
+type PanelKey = Exclude<WorkspacePanelKey, "files" | "search" | "smartFolder">;
 type ShortcutKey = "all" | "processing" | "untagged" | "deleted";
 type ShortcutItem = {
   id: ShortcutKey;
@@ -56,6 +57,7 @@ const isRemovingRepository = ref(false);
 const isConfirmingRepositoryDelete = ref(false);
 const addRepositoryError = ref("");
 const expandedFolderPaths = ref<string[]>([]);
+const expandedSmartFolderIds = ref<string[]>([]);
 const showFolderDialog = ref(false);
 const folderDialogMode = ref<"create" | "rename">("create");
 const folderDialogParentPath = ref("");
@@ -65,6 +67,22 @@ const folderDialogValue = ref("");
 const showFolderDeleteDialog = ref(false);
 const pendingDeleteFolderPath = ref("");
 const pendingDeleteFolderLabel = ref("");
+const showSmartFolderDialog = ref(false);
+const smartFolderDialogMode = ref<"create" | "edit">("create");
+const smartFolderTargetId = ref("");
+const smartFolderParentId = ref("");
+const smartFolderName = ref("");
+const smartFolderQuery = ref("");
+const smartFolderPathPrefix = ref("");
+const smartFolderFormats = ref("");
+const smartFolderTags = ref("");
+const smartFolderColors = ref("");
+const smartFolderShapes = ref("");
+const smartFolderMinRating = ref("");
+const smartFolderMetadataFilters = ref("");
+const showSmartFolderDeleteDialog = ref(false);
+const pendingDeleteSmartFolderId = ref("");
+const pendingDeleteSmartFolderLabel = ref("");
 const route = useRoute();
 const router = useRouter();
 
@@ -74,18 +92,25 @@ const {
   repositoryBackendOptions,
   activePanel,
   activeRepoId,
+  activeSmartFolderId,
   activeSnapshot,
   currentDirectoryPath,
   fileTree,
+  smartFolders,
   syncProgress,
   isBusy,
   isLoadingFileBrowser,
   isMutatingFiles,
+  isMutatingSmartFolder,
   error,
   refreshFileBrowserTree,
   selectRepository,
+  selectSmartFolder,
   setActivePanel,
   loadFileBrowserForDirectory,
+  createSmartFolderInWorkspace,
+  updateSmartFolderInWorkspace,
+  deleteSmartFolderInWorkspace,
   createDirectoryInWorkspace,
   renameWorkspaceEntry,
   deleteWorkspaceEntry,
@@ -133,6 +158,16 @@ const folderDialogPlaceholder = computed(() => (
   folderDialogMode.value === "create" ? "输入文件夹名称" : "输入新的文件夹名称"
 ));
 const folderDialogDisabled = computed(() => !folderDialogValue.value.trim() || isMutatingFiles.value);
+const flatSmartFolders = computed(() => flattenSmartFolders(smartFolders.value));
+const smartFolderById = computed(() => new Map(flatSmartFolders.value.map((item) => [item.smartFolderId, item])));
+const expandedSmartFolderIdSet = computed(() => new Set(expandedSmartFolderIds.value));
+const smartFolderDialogTitle = computed(() => (
+  smartFolderDialogMode.value === "create" ? "新建智能文件夹" : "编辑智能文件夹"
+));
+const smartFolderDialogActionLabel = computed(() => (
+  smartFolderDialogMode.value === "create" ? "创建" : "保存"
+));
+const smartFolderDialogDisabled = computed(() => !smartFolderName.value.trim() || isMutatingSmartFolder.value);
 const isShowingSyncProgress = computed(() => (
   syncProgress.value.phase === "scanning" ||
   syncProgress.value.phase === "writing" ||
@@ -170,6 +205,97 @@ watch(
   },
   { immediate: true },
 );
+
+watch(
+  flatSmartFolders,
+  (folders) => {
+    const validIds = new Set(folders.map((item) => item.smartFolderId));
+    expandedSmartFolderIds.value = expandedSmartFolderIds.value.filter((id) => validIds.has(id));
+  },
+);
+
+watch(
+  activeSmartFolderId,
+  (id) => {
+    if (!id) return;
+    const path = smartFolderAncestry(id);
+    if (!path.length) return;
+    const next = new Set(expandedSmartFolderIds.value);
+    for (const item of path.slice(0, -1)) {
+      next.add(item.smartFolderId);
+    }
+    expandedSmartFolderIds.value = Array.from(next);
+  },
+  { immediate: true },
+);
+
+function splitListInput(value: string) {
+  return Array.from(new Set(
+    value
+      .split(/[,，\n]/)
+      .map((item) => item.trim())
+      .filter(Boolean),
+  ));
+}
+
+function joinListInput(values?: string[]) {
+  return values?.join("，") ?? "";
+}
+
+function parseMetadataFiltersInput(value: string) {
+  return value
+    .split(/\n|[,，]/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .flatMap((item) => {
+      const index = item.indexOf("=");
+      if (index < 0) return [];
+      const key = item.slice(0, index).trim();
+      const filterValue = item.slice(index + 1).trim();
+      return key && filterValue ? [{ key, value: filterValue }] : [];
+    });
+}
+
+function formatMetadataFiltersInput(filter: SmartFolderFilter) {
+  return filter.metadataFilters?.map((item) => `${item.key}=${item.value}`).join("\n") ?? "";
+}
+
+function buildSmartFolderFilter(): SmartFolderFilter {
+  const minRating = Number(smartFolderMinRating.value);
+  return {
+    query: smartFolderQuery.value.trim() || undefined,
+    pathPrefix: smartFolderPathPrefix.value.trim() || undefined,
+    formats: splitListInput(smartFolderFormats.value),
+    tags: splitListInput(smartFolderTags.value),
+    colors: splitListInput(smartFolderColors.value),
+    shapes: splitListInput(smartFolderShapes.value),
+    minRating: Number.isFinite(minRating) && minRating > 0 ? minRating : undefined,
+    metadataFilters: parseMetadataFiltersInput(smartFolderMetadataFilters.value),
+  };
+}
+
+function flattenSmartFolders(nodes: SmartFolderTreeNodeType[]): SmartFolder[] {
+  return nodes.flatMap((node) => [
+    node,
+    ...flattenSmartFolders(node.children),
+  ]);
+}
+
+function findSmartFolder(id: string) {
+  return smartFolderById.value.get(id) ?? null;
+}
+
+function smartFolderAncestry(id: string) {
+  const path: SmartFolder[] = [];
+  let current = findSmartFolder(id);
+  while (current) {
+    path.unshift(current);
+    current = current.parentId
+      ? findSmartFolder(current.parentId)
+      : null;
+  }
+  return path;
+}
 
 function selectPanel(next: PanelKey) {
   setActivePanel(next);
@@ -327,6 +453,106 @@ function toggleFolderExpansion(path: string) {
     next.add(path);
   }
   expandedFolderPaths.value = Array.from(next);
+}
+
+function toggleSmartFolderExpansion(smartFolderId: string) {
+  const next = new Set(expandedSmartFolderIds.value);
+  if (next.has(smartFolderId)) {
+    next.delete(smartFolderId);
+  } else {
+    next.add(smartFolderId);
+  }
+  expandedSmartFolderIds.value = Array.from(next);
+}
+
+function openSmartFolder(smartFolderId: string) {
+  if (route.path === "/settings") {
+    void router.push("/");
+  }
+  void selectSmartFolder(smartFolderId);
+}
+
+function resetSmartFolderDialog(parentId = "") {
+  smartFolderTargetId.value = "";
+  smartFolderParentId.value = parentId;
+  smartFolderName.value = "";
+  smartFolderQuery.value = "";
+  smartFolderPathPrefix.value = "";
+  smartFolderFormats.value = "";
+  smartFolderTags.value = "";
+  smartFolderColors.value = "";
+  smartFolderShapes.value = "";
+  smartFolderMinRating.value = "";
+  smartFolderMetadataFilters.value = "";
+}
+
+function openCreateSmartFolderDialog(parentId = "") {
+  smartFolderDialogMode.value = "create";
+  resetSmartFolderDialog(parentId);
+  showSmartFolderDialog.value = true;
+}
+
+function openEditSmartFolderDialog(smartFolderId: string) {
+  const folder = findSmartFolder(smartFolderId);
+  if (!folder) return;
+  smartFolderDialogMode.value = "edit";
+  smartFolderTargetId.value = folder.smartFolderId;
+  smartFolderParentId.value = folder.parentId ?? "";
+  smartFolderName.value = folder.name;
+  smartFolderQuery.value = folder.filter.query ?? "";
+  smartFolderPathPrefix.value = folder.filter.pathPrefix ?? "";
+  smartFolderFormats.value = joinListInput(folder.filter.formats);
+  smartFolderTags.value = joinListInput(folder.filter.tags);
+  smartFolderColors.value = joinListInput(folder.filter.colors);
+  smartFolderShapes.value = joinListInput(folder.filter.shapes);
+  smartFolderMinRating.value = folder.filter.minRating == null ? "" : String(folder.filter.minRating);
+  smartFolderMetadataFilters.value = formatMetadataFiltersInput(folder.filter);
+  showSmartFolderDialog.value = true;
+}
+
+function closeSmartFolderDialog() {
+  if (isMutatingSmartFolder.value) return;
+  showSmartFolderDialog.value = false;
+}
+
+async function submitSmartFolderDialog() {
+  const name = smartFolderName.value.trim();
+  if (!name) return;
+  const filter = buildSmartFolderFilter();
+  const parentId = smartFolderParentId.value || undefined;
+  const response = smartFolderDialogMode.value === "create"
+    ? await createSmartFolderInWorkspace({ parentId, name, filter })
+    : await updateSmartFolderInWorkspace({
+      smartFolderId: smartFolderTargetId.value,
+      parentId,
+      name,
+      filter,
+    });
+  if (!response) return;
+  if (parentId) {
+    const next = new Set(expandedSmartFolderIds.value);
+    next.add(parentId);
+    expandedSmartFolderIds.value = Array.from(next);
+  }
+  showSmartFolderDialog.value = false;
+}
+
+function openDeleteSmartFolderDialog(smartFolderId: string, label: string) {
+  pendingDeleteSmartFolderId.value = smartFolderId;
+  pendingDeleteSmartFolderLabel.value = label;
+  showSmartFolderDeleteDialog.value = true;
+}
+
+function closeSmartFolderDeleteDialog() {
+  if (isMutatingSmartFolder.value) return;
+  showSmartFolderDeleteDialog.value = false;
+}
+
+async function confirmDeleteSmartFolder() {
+  const response = await deleteSmartFolderInWorkspace(pendingDeleteSmartFolderId.value);
+  if (response) {
+    showSmartFolderDeleteDialog.value = false;
+  }
 }
 
 function openCreateFolderDialog(parentPath = "") {
@@ -589,6 +815,46 @@ onBeforeUnmount(() => {
             <p class="workspace-empty__text">{{ isTrashPanel ? "回收站条目在主视图中管理。" : "当前仓库还没有子文件夹。" }}</p>
           </div>
         </section>
+
+        <section class="workspace-group workspace-group--tree">
+          <div class="workspace-group__header">
+            <span>智能文件夹</span>
+            <div class="workspace-group__actions">
+              <button
+                type="button"
+                class="workspace-tree-action"
+                :disabled="!activeRepoId || isMutatingSmartFolder"
+                title="新建智能文件夹"
+                aria-label="新建智能文件夹"
+                @click="openCreateSmartFolderDialog()"
+              >
+                <Plus :size="13" aria-hidden="true" />
+              </button>
+            </div>
+          </div>
+          <div v-if="!activeRepoId" class="workspace-empty workspace-empty--compact">
+            <p class="workspace-empty__text">先选择或添加一个资源库。</p>
+          </div>
+          <div v-else-if="smartFolders.length" class="workspace-folder-tree">
+            <SmartFolderTreeNode
+              v-for="node in smartFolders"
+              :key="node.smartFolderId"
+              :node="node"
+              :active-id="activeSmartFolderId"
+              :expanded-ids="expandedSmartFolderIdSet"
+              :depth="1"
+              :is-mutating="isMutatingSmartFolder"
+              @toggle="toggleSmartFolderExpansion"
+              @open="openSmartFolder"
+              @create="openCreateSmartFolderDialog"
+              @edit="openEditSmartFolderDialog"
+              @delete="openDeleteSmartFolderDialog"
+            />
+          </div>
+          <div v-else class="workspace-empty workspace-empty--compact">
+            <p class="workspace-empty__text">还没有智能文件夹。</p>
+          </div>
+        </section>
       </section>
 
       <footer class="workspace-sidebar__footer" aria-label="辅助入口">
@@ -772,6 +1038,134 @@ onBeforeUnmount(() => {
           </div>
         </template>
       </section>
+    </Transition>
+  </Teleport>
+
+  <Teleport to="body">
+    <Transition name="modal">
+      <div
+        v-if="showSmartFolderDialog"
+        class="modal-overlay"
+        role="dialog"
+        aria-modal="true"
+        :aria-label="smartFolderDialogTitle"
+        @click.self="closeSmartFolderDialog"
+      >
+        <div class="modal-card dialog-card smart-folder-dialog">
+          <div class="dialog-card__header">
+            <span>{{ smartFolderDialogTitle }}</span>
+          </div>
+          <div class="dialog-card__body smart-folder-dialog__body">
+            <label class="dialog-field">
+              <span>名称</span>
+              <input
+                v-model="smartFolderName"
+                type="text"
+                placeholder="例如 高评分 PSD"
+                @keydown.enter.prevent="submitSmartFolderDialog"
+              />
+            </label>
+
+            <label class="dialog-field">
+              <span>父级</span>
+              <select v-model="smartFolderParentId">
+                <option value="">顶层智能文件夹</option>
+                <option
+                  v-for="folder in flatSmartFolders.filter((item) => item.smartFolderId !== smartFolderTargetId)"
+                  :key="folder.smartFolderId"
+                  :value="folder.smartFolderId"
+                >
+                  {{ folder.name }}
+                </option>
+              </select>
+            </label>
+
+            <div class="smart-folder-dialog__grid">
+              <label class="dialog-field">
+                <span>关键词</span>
+                <input v-model="smartFolderQuery" type="text" placeholder="文件名、标签或元数据" />
+              </label>
+              <label class="dialog-field">
+                <span>路径前缀</span>
+                <input v-model="smartFolderPathPrefix" type="text" placeholder="Campaigns/Summer" />
+              </label>
+              <label class="dialog-field">
+                <span>格式</span>
+                <input v-model="smartFolderFormats" type="text" placeholder="psd，png" />
+              </label>
+              <label class="dialog-field">
+                <span>标签</span>
+                <input v-model="smartFolderTags" type="text" placeholder="封面，主视觉" />
+              </label>
+              <label class="dialog-field">
+                <span>颜色</span>
+                <input v-model="smartFolderColors" type="text" placeholder="红色，绿色" />
+              </label>
+              <label class="dialog-field">
+                <span>形状</span>
+                <input v-model="smartFolderShapes" type="text" placeholder="方形，横版" />
+              </label>
+              <label class="dialog-field">
+                <span>最低评分</span>
+                <input v-model="smartFolderMinRating" type="number" min="1" max="5" step="1" placeholder="4" />
+              </label>
+            </div>
+
+            <label class="dialog-field">
+              <span>元数据键值</span>
+              <textarea
+                v-model="smartFolderMetadataFilters"
+                rows="3"
+                placeholder="artist=demo&#10;source=reference"
+              />
+            </label>
+          </div>
+          <div class="dialog-card__actions">
+            <button type="button" class="ghost" :disabled="isMutatingSmartFolder" @click="closeSmartFolderDialog">
+              取消
+            </button>
+            <button
+              type="button"
+              class="primary"
+              :disabled="smartFolderDialogDisabled"
+              @click="submitSmartFolderDialog"
+            >
+              <LoaderCircle v-if="isMutatingSmartFolder" class="spin" :size="13" aria-hidden="true" />
+              {{ smartFolderDialogActionLabel }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </Transition>
+  </Teleport>
+
+  <Teleport to="body">
+    <Transition name="modal">
+      <div
+        v-if="showSmartFolderDeleteDialog"
+        class="modal-overlay"
+        role="dialog"
+        aria-modal="true"
+        aria-label="删除智能文件夹"
+        @click.self="closeSmartFolderDeleteDialog"
+      >
+        <div class="modal-card dialog-card folder-delete-dialog">
+          <div class="dialog-card__header dialog-card__header--danger">
+            <span>删除智能文件夹</span>
+          </div>
+          <div class="dialog-card__body folder-delete-dialog__body">
+            <p>将删除“{{ pendingDeleteSmartFolderLabel }}”及其子智能文件夹。实际文件和真实目录不会被删除。</p>
+          </div>
+          <div class="dialog-card__actions">
+            <button type="button" class="ghost" :disabled="isMutatingSmartFolder" @click="closeSmartFolderDeleteDialog">
+              取消
+            </button>
+            <button type="button" class="ghost danger" :disabled="isMutatingSmartFolder" @click="confirmDeleteSmartFolder">
+              删除
+            </button>
+          </div>
+        </div>
+      </div>
     </Transition>
   </Teleport>
 

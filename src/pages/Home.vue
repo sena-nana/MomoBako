@@ -109,9 +109,11 @@ const {
   searchQuery,
   selectedFilePath,
   searchResults,
+  smartFolderResult,
   hardlinkCandidates,
   isLoadingFileBrowser,
   isSearching,
+  isLoadingSmartFolder,
   isMutatingFiles,
   error,
   selectRepository,
@@ -147,20 +149,54 @@ const hasRepository = computed(() => Boolean(activeSnapshot.value));
 const isFilesPanel = computed(() => activePanel.value === "files");
 const isTrashPanel = computed(() => activePanel.value === "deleted");
 const isSearchPanel = computed(() => activePanel.value === "search");
+const isSmartFolderPanel = computed(() => activePanel.value === "smartFolder");
 const isExtensionsPanel = computed(() => activePanel.value === "extensions");
-const isFileBrowserPanel = computed(() => isFilesPanel.value || isTrashPanel.value);
-const currentFileEntry = selectedEntry;
+const isFileBrowserPanel = computed(() => isFilesPanel.value || isTrashPanel.value || isSmartFolderPanel.value);
+const smartFolderEntryMap = computed<ReadonlyMap<string, FileBrowserEntry>>(() => (
+  new Map((smartFolderResult.value?.results ?? []).map((entry) => [entry.path, entry]))
+));
+const currentFileEntry = computed(() => {
+  if (isSmartFolderPanel.value) {
+    return selectedFilePath.value ? smartFolderEntryMap.value.get(selectedFilePath.value) ?? null : null;
+  }
+  return selectedEntry.value;
+});
 
-const canRenameSelected = computed(() => Boolean(currentFileEntry.value) && !isTrashPanel.value);
+const canRenameSelected = computed(() => Boolean(currentFileEntry.value) && !isTrashPanel.value && !isSmartFolderPanel.value);
 const canPreviewSelected = computed(() => currentFileEntry.value?.kind === "file" && !isTrashPanel.value);
-const canDeleteSelected = computed(() => Boolean(currentFileEntry.value));
+const canDeleteSelected = computed(() => Boolean(currentFileEntry.value) && !isSmartFolderPanel.value);
 const canRestoreSelected = computed(() => Boolean(currentFileEntry.value) && isTrashPanel.value);
-const canDragEntries = computed(() => !isTrashPanel.value && fileBrowser.value?.backendKind === "filesystem");
+const canDragEntries = computed(() => !isTrashPanel.value && !isSmartFolderPanel.value && fileBrowser.value?.backendKind === "filesystem");
 const previewFileEntry = computed(() => (
-  previewFilePath.value ? fileBrowserEntryMap.value.get(previewFilePath.value) ?? null : null
+  previewFilePath.value
+    ? (isSmartFolderPanel.value ? smartFolderEntryMap.value : fileBrowserEntryMap.value).get(previewFilePath.value) ?? null
+    : null
 ));
 const previewPlugin = computed(() => getPreviewPluginForEntry(previewFileEntry.value));
 const fileDisplayModeClass = computed(() => `files-list__files--${fileDisplayMode.value}`);
+const activeDirectoryEntries = computed(() => (isSmartFolderPanel.value ? [] : directoryEntries.value));
+const activeFileEntries = computed(() => (isSmartFolderPanel.value ? smartFolderResult.value?.results ?? [] : fileEntries.value));
+const hasActiveSplitFileGroups = computed(() => (
+  isSmartFolderPanel.value ? false : hasSplitFileGroups.value
+));
+const isActiveBrowserLoading = computed(() => (
+  isSmartFolderPanel.value ? isLoadingSmartFolder.value : isLoadingFileBrowser.value
+));
+const smartFolderSummary = computed(() => {
+  if (!smartFolderResult.value) return "";
+  const filter = smartFolderResult.value.inheritedFilter;
+  const parts = [
+    filter.query ? `关键词 ${filter.query.replace(/\n/g, " + ")}` : "",
+    filter.pathPrefix ? `路径 ${filter.pathPrefix.replace(/\n/g, " + ")}` : "",
+    filter.formats?.length ? `格式 ${filter.formats.join(" / ")}` : "",
+    filter.tags?.length ? `标签 ${filter.tags.join(" / ")}` : "",
+    filter.colors?.length ? `颜色 ${filter.colors.join(" / ")}` : "",
+    filter.shapes?.length ? `形状 ${filter.shapes.join(" / ")}` : "",
+    filter.minRating ? `${filter.minRating} 星+` : "",
+    filter.metadataFilters?.length ? `${filter.metadataFilters.length} 个元数据条件` : "",
+  ].filter(Boolean);
+  return `${smartFolderResult.value.results.length} 条结果${parts.length ? ` · ${parts.join(" · ")}` : ""}`;
+});
 const currentHardlinkCandidate = computed(() => (
   hardlinkCandidates.value.find((candidate) => !skippedHardlinkCandidateIds.value.has(candidate.candidateId)) ?? null
 ));
@@ -486,6 +522,10 @@ function openDirectory(path: string) {
 }
 
 function selectFileEntry(entry: FileBrowserEntry) {
+  if (isSmartFolderPanel.value) {
+    selectWorkspaceEntry(entry.path);
+    return;
+  }
   if (entry.kind === "directory") {
     openDirectory(entry.path);
     return;
@@ -494,7 +534,7 @@ function selectFileEntry(entry: FileBrowserEntry) {
 }
 
 function handleEntryDragStart(entry: FileBrowserEntry) {
-  if (!canDragEntries.value) return;
+  if (!canDragEntries.value || isSmartFolderPanel.value) return;
   selectWorkspaceEntry(entry.path);
   void startWorkspaceEntryDrag(entry.path, createExternalDragIcon(entry));
 }
@@ -684,6 +724,34 @@ async function revealSelectedEntry() {
 
 function fileEntryContextMenu(entry: FileBrowserEntry) {
   selectWorkspaceEntry(entry.path);
+  if (isSmartFolderPanel.value) {
+    return [
+      {
+        id: "preview",
+        label: "预览",
+        icon: Eye,
+        disabled: entry.kind !== "file",
+        onSelect: () => {
+          if (entry.kind === "file") {
+            previewFilePath.value = entry.path;
+          }
+        },
+      },
+      {
+        id: "open",
+        label: "打开",
+        icon: Eye,
+        disabled: entry.kind !== "file",
+        onSelect: () => openWorkspaceEntry(entry.path),
+      },
+      {
+        id: "reveal",
+        label: "定位",
+        icon: FolderOpen,
+        onSelect: () => revealWorkspaceEntry(entry.path),
+      },
+    ];
+  }
   const items = [
     ...(isTrashPanel.value ? [{
       id: "restore",
@@ -1135,29 +1203,32 @@ onUnmounted(() => {
       :can-rename-selected="canRenameSelected"
       :can-restore-selected="canRestoreSelected"
       :current-file-entry="currentFileEntry"
-      :directory-entries="directoryEntries"
+      :directory-entries="activeDirectoryEntries"
       :display-mode-class="fileDisplayModeClass"
       :display-mode-options="fileDisplayModeOptions"
       :entry-deleted-at-label="entryDeletedAtLabel"
       :entry-modified-at-label="entryModifiedAtLabel"
       :error="error"
-      :file-entries="fileEntries"
+      :file-entries="activeFileEntries"
       :file-entry-context-menu="fileEntryContextMenu"
       :file-item-style="fileItemStyle"
       :file-tone="fileTone"
       :hardlink-state-label="hardlinkStateLabel"
-      :has-split-file-groups="hasSplitFileGroups"
+      :has-split-file-groups="hasActiveSplitFileGroups"
       :is-audio-entry="isAudioEntry"
       :is-dragging-files="isDraggingFiles"
-      :is-loading-file-browser="isLoadingFileBrowser"
+      :is-loading-file-browser="isActiveBrowserLoading"
       :is-model-entry="isModelEntry"
       :is-mutating-files="isMutatingFiles"
+      :is-read-only-virtual="isSmartFolderPanel"
       :is-trash-panel="isTrashPanel"
       :is-video-entry="isVideoEntry"
       :rename-target-path="renameTargetPath"
       :selected-file-path="selectedFilePath"
       :status-label="statusLabel"
       :thumbnail-src="thumbnailSrc"
+      :virtual-subline="smartFolderSummary"
+      :virtual-title="smartFolderResult?.smartFolder.name"
       @create-file="handleCreateFile"
       @delete-selected="deleteSelectedEntry"
       @drag-leave="handleDragLeave"

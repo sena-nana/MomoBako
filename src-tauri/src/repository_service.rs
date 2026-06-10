@@ -149,6 +149,22 @@ CREATE TABLE IF NOT EXISTS entry_thumbnails (
   PRIMARY KEY(repo_id, path, kind)
 );
 
+CREATE TABLE IF NOT EXISTS smart_folders (
+  smart_folder_id TEXT PRIMARY KEY,
+  repo_id TEXT NOT NULL,
+  parent_id TEXT,
+  name TEXT NOT NULL,
+  filter_json TEXT NOT NULL,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY(repo_id) REFERENCES repositories(repo_id),
+  FOREIGN KEY(parent_id) REFERENCES smart_folders(smart_folder_id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_smart_folders_repo_parent
+ON smart_folders(repo_id, parent_id, sort_order, name);
+
 CREATE TABLE IF NOT EXISTS metadata (
   asset_id TEXT NOT NULL,
   key TEXT NOT NULL,
@@ -704,7 +720,7 @@ pub struct RevisionActionResponse {
     pub asset: AssetDetail,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct SearchMetadataFilter {
     pub key: String,
@@ -723,6 +739,76 @@ pub struct SearchRequest {
     pub metadata_filters: Option<Vec<SearchMetadataFilter>>,
     pub formats: Option<Vec<String>>,
     pub min_rating: Option<f64>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct SmartFolderFilter {
+    pub query: Option<String>,
+    pub path_prefix: Option<String>,
+    pub tags: Option<Vec<String>>,
+    pub formats: Option<Vec<String>>,
+    pub colors: Option<Vec<String>>,
+    pub shapes: Option<Vec<String>>,
+    pub metadata_filters: Option<Vec<SearchMetadataFilter>>,
+    pub min_rating: Option<f64>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct SmartFolder {
+    pub smart_folder_id: String,
+    pub repo_id: String,
+    pub parent_id: Option<String>,
+    pub name: String,
+    pub filter: SmartFolderFilter,
+    pub sort_order: i64,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct SmartFolderTreeNode {
+    #[serde(flatten)]
+    pub folder: SmartFolder,
+    pub children: Vec<SmartFolderTreeNode>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SmartFolderResultSnapshot {
+    pub repo_id: String,
+    pub smart_folder: SmartFolder,
+    pub inherited_filter: SmartFolderFilter,
+    pub results: Vec<FileBrowserEntry>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SmartFolderMutationRequest {
+    pub repo_id: String,
+    pub smart_folder_id: Option<String>,
+    pub parent_id: Option<String>,
+    pub name: String,
+    pub filter: SmartFolderFilter,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SmartFolderUpdateRequest {
+    pub repo_id: String,
+    pub smart_folder_id: String,
+    pub parent_id: Option<String>,
+    pub name: String,
+    pub filter: SmartFolderFilter,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SmartFolderMutationResponse {
+    pub smart_folders: Vec<SmartFolderTreeNode>,
+    pub smart_folder: Option<SmartFolder>,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -1465,6 +1551,233 @@ impl RepositoryState {
         }
         let file = File::open(&source.path).map_err(io_error)?;
         Ok((file, source.media_type))
+    }
+
+    pub fn list_smart_folders(
+        &self,
+        repo_id: &str,
+    ) -> Result<Vec<SmartFolderTreeNode>, String> {
+        self.ensure_initialized()?;
+        let repo = self.load_repository_record(repo_id)?;
+        let connection = self.open_repository_connection(
+            &repo.summary.repo_id,
+            &repo.summary.path,
+            &repo.backend_record,
+        )?;
+        let folders = load_smart_folders(&connection, repo_id).map_err(db_error)?;
+        Ok(build_smart_folder_tree(folders))
+    }
+
+    pub fn create_smart_folder(
+        &self,
+        request: SmartFolderMutationRequest,
+    ) -> Result<SmartFolderMutationResponse, String> {
+        self.ensure_initialized()?;
+        let repo = self.load_repository_record(&request.repo_id)?;
+        let connection = self.open_repository_connection(
+            &repo.summary.repo_id,
+            &repo.summary.path,
+            &repo.backend_record,
+        )?;
+        let name = validate_smart_folder_name(&request.name)?;
+        validate_smart_folder_parent(&connection, &request.repo_id, request.parent_id.as_deref(), None)
+            .map_err(db_error)?;
+        let smart_folder_id = request
+            .smart_folder_id
+            .as_deref()
+            .map(validate_smart_folder_id)
+            .transpose()?
+            .unwrap_or_else(|| smart_folder_id_for(&request.repo_id, request.parent_id.as_deref(), &name));
+        let filter = normalize_smart_folder_filter(request.filter);
+        let filter_json = serde_json::to_string(&filter).map_err(json_error)?;
+        let now = now_rfc3339();
+        let sort_order = next_smart_folder_sort_order(
+            &connection,
+            &request.repo_id,
+            request.parent_id.as_deref(),
+        )
+        .map_err(db_error)?;
+        connection
+            .execute(
+                r#"
+                INSERT INTO smart_folders (
+                  smart_folder_id, repo_id, parent_id, name, filter_json,
+                  sort_order, created_at, updated_at
+                )
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7)
+                "#,
+                params![
+                    smart_folder_id,
+                    request.repo_id,
+                    normalized_optional_id(request.parent_id.as_deref()),
+                    name,
+                    filter_json,
+                    sort_order,
+                    now
+                ],
+            )
+            .map_err(db_error)?;
+
+        let folders = load_smart_folders(&connection, &request.repo_id).map_err(db_error)?;
+        let smart_folder = folders
+            .iter()
+            .find(|folder| folder.smart_folder_id == smart_folder_id)
+            .cloned();
+        Ok(SmartFolderMutationResponse {
+            smart_folders: build_smart_folder_tree(folders),
+            smart_folder,
+        })
+    }
+
+    pub fn update_smart_folder(
+        &self,
+        request: SmartFolderUpdateRequest,
+    ) -> Result<SmartFolderMutationResponse, String> {
+        self.ensure_initialized()?;
+        let repo = self.load_repository_record(&request.repo_id)?;
+        let connection = self.open_repository_connection(
+            &repo.summary.repo_id,
+            &repo.summary.path,
+            &repo.backend_record,
+        )?;
+        let smart_folder_id = validate_smart_folder_id(&request.smart_folder_id)?;
+        let name = validate_smart_folder_name(&request.name)?;
+        let existing = load_smart_folder(&connection, &request.repo_id, &smart_folder_id)
+            .map_err(db_error)?
+            .ok_or_else(|| format!("smart folder not found: {smart_folder_id}"))?;
+        validate_smart_folder_parent(
+            &connection,
+            &request.repo_id,
+            request.parent_id.as_deref(),
+            Some(&smart_folder_id),
+        )
+        .map_err(db_error)?;
+        let filter = normalize_smart_folder_filter(request.filter);
+        let filter_json = serde_json::to_string(&filter).map_err(json_error)?;
+        let now = now_rfc3339();
+        let sort_order = if normalized_optional_id(request.parent_id.as_deref()) == existing.parent_id {
+            existing.sort_order
+        } else {
+            next_smart_folder_sort_order(
+                &connection,
+                &request.repo_id,
+                request.parent_id.as_deref(),
+            )
+            .map_err(db_error)?
+        };
+        connection
+            .execute(
+                r#"
+                UPDATE smart_folders
+                SET parent_id = ?3, name = ?4, filter_json = ?5,
+                    sort_order = ?6, updated_at = ?7
+                WHERE repo_id = ?1 AND smart_folder_id = ?2
+                "#,
+                params![
+                    request.repo_id,
+                    smart_folder_id,
+                    normalized_optional_id(request.parent_id.as_deref()),
+                    name,
+                    filter_json,
+                    sort_order,
+                    now
+                ],
+            )
+            .map_err(db_error)?;
+
+        let folders = load_smart_folders(&connection, &request.repo_id).map_err(db_error)?;
+        let smart_folder = folders
+            .iter()
+            .find(|folder| folder.smart_folder_id == smart_folder_id)
+            .cloned();
+        Ok(SmartFolderMutationResponse {
+            smart_folders: build_smart_folder_tree(folders),
+            smart_folder,
+        })
+    }
+
+    pub fn delete_smart_folder(
+        &self,
+        repo_id: &str,
+        smart_folder_id: &str,
+    ) -> Result<SmartFolderMutationResponse, String> {
+        self.ensure_initialized()?;
+        let repo = self.load_repository_record(repo_id)?;
+        let connection = self.open_repository_connection(
+            &repo.summary.repo_id,
+            &repo.summary.path,
+            &repo.backend_record,
+        )?;
+        let smart_folder_id = validate_smart_folder_id(smart_folder_id)?;
+        load_smart_folder(&connection, repo_id, &smart_folder_id)
+            .map_err(db_error)?
+            .ok_or_else(|| format!("smart folder not found: {smart_folder_id}"))?;
+        connection
+            .execute(
+                r#"
+                WITH RECURSIVE deleting(id) AS (
+                  SELECT smart_folder_id
+                  FROM smart_folders
+                  WHERE repo_id = ?1 AND smart_folder_id = ?2
+                  UNION ALL
+                  SELECT child.smart_folder_id
+                  FROM smart_folders child
+                  INNER JOIN deleting ON child.parent_id = deleting.id
+                  WHERE child.repo_id = ?1
+                )
+                DELETE FROM smart_folders
+                WHERE repo_id = ?1 AND smart_folder_id IN (SELECT id FROM deleting)
+                "#,
+                params![repo_id, smart_folder_id],
+            )
+            .map_err(db_error)?;
+        let folders = load_smart_folders(&connection, repo_id).map_err(db_error)?;
+        Ok(SmartFolderMutationResponse {
+            smart_folders: build_smart_folder_tree(folders),
+            smart_folder: None,
+        })
+    }
+
+    pub fn query_smart_folder(
+        &self,
+        repo_id: &str,
+        smart_folder_id: &str,
+    ) -> Result<SmartFolderResultSnapshot, String> {
+        self.ensure_initialized()?;
+        let repo = self.load_repository_record(repo_id)?;
+        let connection = self.open_repository_connection(
+            &repo.summary.repo_id,
+            &repo.summary.path,
+            &repo.backend_record,
+        )?;
+        let smart_folder_id = validate_smart_folder_id(smart_folder_id)?;
+        let folders = load_smart_folders(&connection, repo_id).map_err(db_error)?;
+        let smart_folder = folders
+            .iter()
+            .find(|folder| folder.smart_folder_id == smart_folder_id)
+            .cloned()
+            .ok_or_else(|| format!("smart folder not found: {smart_folder_id}"))?;
+        let inherited_filter = inherited_smart_folder_filter(&folders, &smart_folder);
+        let thumbnail_root = self.repository_thumbnail_root(&repo)?;
+        let asset_map = normalize_asset_thumbnail_map(
+            &connection,
+            &repo,
+            &thumbnail_root,
+            load_asset_path_map(&connection, repo_id).map_err(db_error)?,
+        )?;
+        let results = query_smart_folder_entries(
+            &connection,
+            &repo.summary,
+            &inherited_filter,
+            &asset_map,
+        )
+        .map_err(db_error)?;
+        Ok(SmartFolderResultSnapshot {
+            repo_id: repo_id.to_string(),
+            smart_folder,
+            inherited_filter,
+            results,
+        })
     }
 
     pub fn search_assets(&self, request: SearchRequest) -> Result<SearchResponse, String> {
@@ -3650,6 +3963,424 @@ fn metadata_filters_match(
     })
 }
 
+fn normalize_smart_folder_filter(filter: SmartFolderFilter) -> SmartFolderFilter {
+    SmartFolderFilter {
+        query: normalize_optional_text(filter.query),
+        path_prefix: normalize_optional_path_prefix(filter.path_prefix),
+        tags: normalize_optional_values(filter.tags),
+        formats: normalize_optional_values(filter.formats).map(|items| {
+            items
+                .into_iter()
+                .map(|item| item.to_lowercase())
+                .collect::<Vec<_>>()
+        }),
+        colors: normalize_optional_values(filter.colors),
+        shapes: normalize_optional_values(filter.shapes),
+        metadata_filters: normalize_metadata_filter_values(filter.metadata_filters),
+        min_rating: filter.min_rating.filter(|value| *value > 0.0),
+    }
+}
+
+fn normalize_optional_text(value: Option<String>) -> Option<String> {
+    value
+        .map(|item| item.trim().to_string())
+        .filter(|item| !item.is_empty())
+}
+
+fn normalize_optional_values(values: Option<Vec<String>>) -> Option<Vec<String>> {
+    let normalized = values
+        .unwrap_or_default()
+        .into_iter()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .collect::<Vec<_>>();
+    if normalized.is_empty() {
+        None
+    } else {
+        Some(normalized)
+    }
+}
+
+fn normalize_metadata_filter_values(
+    filters: Option<Vec<SearchMetadataFilter>>,
+) -> Option<Vec<SearchMetadataFilter>> {
+    let normalized = filters
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|filter| {
+            let key = filter.key.trim();
+            let value = filter.value.trim();
+            if key.is_empty() || value.is_empty() {
+                return None;
+            }
+            Some(SearchMetadataFilter {
+                key: key.to_string(),
+                value: value.to_string(),
+            })
+        })
+        .collect::<Vec<_>>();
+    if normalized.is_empty() {
+        None
+    } else {
+        Some(normalized)
+    }
+}
+
+fn normalize_optional_path_prefix(value: Option<String>) -> Option<String> {
+    value
+        .and_then(|path| normalize_directory_path(&path).ok())
+        .filter(|path| !path.is_empty())
+}
+
+fn normalized_optional_id(value: Option<&str>) -> Option<String> {
+    value
+        .map(|item| item.trim().to_string())
+        .filter(|item| !item.is_empty())
+}
+
+fn validate_smart_folder_name(name: &str) -> Result<String, String> {
+    let value = name.trim();
+    if value.is_empty() {
+        return Err("smart folder name cannot be empty".to_string());
+    }
+    if value.contains('/') || value.contains('\\') {
+        return Err("smart folder name cannot contain path separators".to_string());
+    }
+    Ok(value.to_string())
+}
+
+fn validate_smart_folder_id(id: &str) -> Result<String, String> {
+    let value = id.trim();
+    if value.is_empty() {
+        return Err("smart folder id cannot be empty".to_string());
+    }
+    Ok(slugify_ascii_component(value))
+}
+
+fn smart_folder_id_for(repo_id: &str, parent_id: Option<&str>, name: &str) -> String {
+    slugify_ascii_component(&format!(
+        "smart-{repo_id}-{}-{name}-{}",
+        parent_id.unwrap_or("root"),
+        now_rfc3339()
+    ))
+}
+
+fn smart_folder_filter_metadata_filters(filter: &SmartFolderFilter) -> Vec<SearchMetadataFilter> {
+    let mut filters = filter.metadata_filters.clone().unwrap_or_default();
+    filters.extend(
+        filter
+            .colors
+            .clone()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|value| SearchMetadataFilter {
+                key: "color".to_string(),
+                value,
+            }),
+    );
+    filters.extend(
+        filter
+            .shapes
+            .clone()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|value| SearchMetadataFilter {
+                key: "shape".to_string(),
+                value,
+            }),
+    );
+    filters
+}
+
+fn merge_smart_folder_filters(
+    parent: SmartFolderFilter,
+    child: &SmartFolderFilter,
+) -> SmartFolderFilter {
+    let mut metadata_filters = parent.metadata_filters.unwrap_or_default();
+    metadata_filters.extend(child.metadata_filters.clone().unwrap_or_default());
+    let mut colors = parent.colors.unwrap_or_default();
+    colors.extend(child.colors.clone().unwrap_or_default());
+    let mut shapes = parent.shapes.unwrap_or_default();
+    shapes.extend(child.shapes.clone().unwrap_or_default());
+    SmartFolderFilter {
+        query: match (parent.query, child.query.clone()) {
+            (Some(left), Some(right)) => Some(format!("{left}\n{right}")),
+            (Some(left), None) => Some(left),
+            (None, Some(right)) => Some(right),
+            (None, None) => None,
+        },
+        path_prefix: merge_path_prefix(parent.path_prefix, child.path_prefix.clone()),
+        tags: merge_optional_lists(parent.tags, child.tags.clone()),
+        formats: merge_optional_lists(parent.formats, child.formats.clone()),
+        colors: empty_vec_to_none(colors),
+        shapes: empty_vec_to_none(shapes),
+        metadata_filters: empty_vec_to_none(metadata_filters),
+        min_rating: match (parent.min_rating, child.min_rating) {
+            (Some(left), Some(right)) => Some(left.max(right)),
+            (Some(left), None) => Some(left),
+            (None, Some(right)) => Some(right),
+            (None, None) => None,
+        },
+    }
+}
+
+fn merge_optional_lists(parent: Option<Vec<String>>, child: Option<Vec<String>>) -> Option<Vec<String>> {
+    let mut values = parent.unwrap_or_default();
+    values.extend(child.unwrap_or_default());
+    empty_vec_to_none(values)
+}
+
+fn empty_vec_to_none<T>(values: Vec<T>) -> Option<Vec<T>> {
+    if values.is_empty() {
+        None
+    } else {
+        Some(values)
+    }
+}
+
+fn merge_path_prefix(parent: Option<String>, child: Option<String>) -> Option<String> {
+    match (parent, child) {
+        (Some(left), Some(right)) if right.starts_with(&format!("{left}/")) || right == left => Some(right),
+        (Some(left), Some(right)) if left.starts_with(&format!("{right}/")) || left == right => Some(left),
+        (Some(left), Some(right)) => Some(format!("{left}\n{right}")),
+        (Some(left), None) => Some(left),
+        (None, Some(right)) => Some(right),
+        (None, None) => None,
+    }
+}
+
+fn load_smart_folder(
+    connection: &Connection,
+    repo_id: &str,
+    smart_folder_id: &str,
+) -> Result<Option<SmartFolder>, rusqlite::Error> {
+    connection
+        .query_row(
+            r#"
+            SELECT smart_folder_id, repo_id, parent_id, name, filter_json,
+                   sort_order, created_at, updated_at
+            FROM smart_folders
+            WHERE repo_id = ?1 AND smart_folder_id = ?2
+            "#,
+            params![repo_id, smart_folder_id],
+            map_smart_folder_row,
+        )
+        .optional()
+}
+
+fn load_smart_folders(
+    connection: &Connection,
+    repo_id: &str,
+) -> Result<Vec<SmartFolder>, rusqlite::Error> {
+    let mut stmt = connection.prepare(
+        r#"
+        SELECT smart_folder_id, repo_id, parent_id, name, filter_json,
+               sort_order, created_at, updated_at
+        FROM smart_folders
+        WHERE repo_id = ?1
+        ORDER BY parent_id IS NOT NULL, parent_id, sort_order, name COLLATE NOCASE
+        "#,
+    )?;
+    let rows = stmt.query_map([repo_id], map_smart_folder_row)?;
+    rows.collect::<Result<Vec<_>, _>>()
+}
+
+fn map_smart_folder_row(row: &rusqlite::Row<'_>) -> Result<SmartFolder, rusqlite::Error> {
+    let filter_json: String = row.get(4)?;
+    let filter = serde_json::from_str::<SmartFolderFilter>(&filter_json)
+        .map_err(|error| rusqlite::Error::FromSqlConversionFailure(4, Type::Text, Box::new(error)))?;
+    Ok(SmartFolder {
+        smart_folder_id: row.get(0)?,
+        repo_id: row.get(1)?,
+        parent_id: row.get(2)?,
+        name: row.get(3)?,
+        filter,
+        sort_order: row.get(5)?,
+        created_at: row.get(6)?,
+        updated_at: row.get(7)?,
+    })
+}
+
+fn build_smart_folder_tree(folders: Vec<SmartFolder>) -> Vec<SmartFolderTreeNode> {
+    fn build(parent_id: Option<&str>, folders: &[SmartFolder]) -> Vec<SmartFolderTreeNode> {
+        folders
+            .iter()
+            .filter(|folder| folder.parent_id.as_deref() == parent_id)
+            .map(|folder| SmartFolderTreeNode {
+                folder: folder.clone(),
+                children: build(Some(&folder.smart_folder_id), folders),
+            })
+            .collect()
+    }
+    build(None, &folders)
+}
+
+fn validate_smart_folder_parent(
+    connection: &Connection,
+    repo_id: &str,
+    parent_id: Option<&str>,
+    editing_id: Option<&str>,
+) -> Result<(), rusqlite::Error> {
+    let Some(parent_id) = normalized_optional_id(parent_id) else {
+        return Ok(());
+    };
+    if editing_id == Some(parent_id.as_str()) {
+        return Err(rusqlite::Error::InvalidQuery);
+    }
+    let mut cursor = Some(parent_id);
+    while let Some(current_id) = cursor {
+        let parent = load_smart_folder(connection, repo_id, &current_id)?
+            .ok_or_else(|| rusqlite::Error::QueryReturnedNoRows)?;
+        if editing_id == Some(parent.smart_folder_id.as_str()) {
+            return Err(rusqlite::Error::InvalidQuery);
+        }
+        cursor = parent.parent_id;
+    }
+    Ok(())
+}
+
+fn next_smart_folder_sort_order(
+    connection: &Connection,
+    repo_id: &str,
+    parent_id: Option<&str>,
+) -> Result<i64, rusqlite::Error> {
+    connection.query_row(
+        r#"
+        SELECT COALESCE(MAX(sort_order), -1) + 1
+        FROM smart_folders
+        WHERE repo_id = ?1 AND parent_id IS ?2
+        "#,
+        params![repo_id, normalized_optional_id(parent_id)],
+        |row| row.get(0),
+    )
+}
+
+fn inherited_smart_folder_filter(
+    folders: &[SmartFolder],
+    smart_folder: &SmartFolder,
+) -> SmartFolderFilter {
+    let mut chain = Vec::<SmartFolder>::new();
+    let mut current = Some(smart_folder.clone());
+    while let Some(folder) = current {
+        current = folder
+            .parent_id
+            .as_ref()
+            .and_then(|parent_id| folders.iter().find(|item| &item.smart_folder_id == parent_id))
+            .cloned();
+        chain.push(folder);
+    }
+    chain.reverse();
+    let mut filter = SmartFolderFilter::default();
+    for folder in chain {
+        filter = merge_smart_folder_filters(filter, &normalize_smart_folder_filter(folder.filter));
+    }
+    filter
+}
+
+fn smart_folder_filter_matches(
+    repo: &RepositorySummary,
+    asset: &AssetSummary,
+    metadata: &BTreeMap<String, serde_json::Value>,
+    filter: &SmartFolderFilter,
+) -> bool {
+    if asset.status == "deleted" {
+        return false;
+    }
+    if let Some(path_prefix) = &filter.path_prefix {
+        let prefixes = path_prefix
+            .lines()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .collect::<Vec<_>>();
+        if !prefixes.is_empty()
+            && !prefixes
+                .iter()
+                .all(|prefix| asset.path == *prefix || asset.path.starts_with(&format!("{prefix}/")))
+        {
+            return false;
+        }
+    }
+    if let Some(query) = &filter.query {
+        let haystack = build_search_haystack(repo, asset, metadata);
+        if !query
+            .lines()
+            .map(|value| value.trim().to_lowercase())
+            .filter(|value| !value.is_empty())
+            .all(|value| haystack.contains(&value))
+        {
+            return false;
+        }
+    }
+    if let Some(formats) = &filter.formats {
+        let formats = normalized_filter_values(formats);
+        if !formats.is_empty() && !formats.contains(&asset.extension.to_lowercase()) {
+            return false;
+        }
+    }
+    if let Some(tags) = &filter.tags {
+        let tags = normalized_filter_values(tags);
+        if !tags.is_empty()
+            && !asset.tags.iter().any(|item| {
+                let normalized_tag = item.to_lowercase();
+                tags.iter().any(|tag| normalized_tag.contains(tag))
+            })
+        {
+            return false;
+        }
+    }
+    let metadata_filters = smart_folder_filter_metadata_filters(filter);
+    if !metadata_filters.is_empty() && !metadata_filters_match(metadata, &metadata_filters) {
+        return false;
+    }
+    if let Some(min_rating) = filter.min_rating {
+        let rating = metadata
+            .get("rating")
+            .and_then(|value| value.as_f64())
+            .unwrap_or_default();
+        if rating < min_rating {
+            return false;
+        }
+    }
+    true
+}
+
+fn query_smart_folder_entries(
+    connection: &Connection,
+    repo: &RepositorySummary,
+    filter: &SmartFolderFilter,
+    asset_map: &BTreeMap<String, AssetPathRecord>,
+) -> Result<Vec<FileBrowserEntry>, rusqlite::Error> {
+    let assets = load_assets(connection, &repo.repo_id)?;
+    let mut results = Vec::new();
+    for asset in assets {
+        let metadata = load_metadata_map(connection, &asset.asset_id)?;
+        if !smart_folder_filter_matches(repo, &asset, &metadata, filter) {
+            continue;
+        }
+        let asset_record = asset_map.get(&asset.path);
+        results.push(FileBrowserEntry {
+            path: asset.path.clone(),
+            name: asset.filename.clone(),
+            kind: "file".to_string(),
+            extension: Some(asset.extension.clone()),
+            size_bytes: Some(asset.size_bytes),
+            size_label: Some(asset.size_label.clone()),
+            modified_at: Some(asset.modified_at.clone()),
+            asset_id: Some(asset.asset_id.clone()),
+            status: Some(asset.status.clone()),
+            thumbnail_path: asset_record
+                .and_then(|record| record.thumbnail_path.clone())
+                .or(asset.thumbnail_path.clone()),
+            thumbnail_custom: false,
+            hardlink_group_id: asset_record.and_then(|record| record.hardlink_group_id.clone()),
+            hardlink_state: asset_record.and_then(|record| record.hardlink_state.clone()),
+            metadata,
+        });
+    }
+    results.sort_by(|left, right| left.path.to_lowercase().cmp(&right.path.to_lowercase()));
+    Ok(results)
+}
+
 fn build_search_haystack(
     repo: &RepositorySummary,
     asset: &AssetSummary,
@@ -5669,6 +6400,24 @@ fn default_api_definitions() -> Vec<ApiDefinition> {
             summary: "执行跨仓库结构化搜索。".to_string(),
         },
         ApiDefinition {
+            group: "Smart Folder API".to_string(),
+            method: "GET".to_string(),
+            path: "/repositories/{repoId}/smart-folders".to_string(),
+            summary: "列出资源库内的智能文件夹树。".to_string(),
+        },
+        ApiDefinition {
+            group: "Smart Folder API".to_string(),
+            method: "POST".to_string(),
+            path: "/repositories/{repoId}/smart-folders".to_string(),
+            summary: "创建资源库内的智能文件夹模板。".to_string(),
+        },
+        ApiDefinition {
+            group: "Smart Folder API".to_string(),
+            method: "POST".to_string(),
+            path: "/repositories/{repoId}/smart-folders/{smartFolderId}:query".to_string(),
+            summary: "按智能文件夹条件查询虚拟文件列表。".to_string(),
+        },
+        ApiDefinition {
             group: "Plugin API".to_string(),
             method: "GET".to_string(),
             path: "/plugins".to_string(),
@@ -5907,6 +6656,22 @@ fn migrate_repository_schema(connection: &Connection) -> Result<(), rusqlite::Er
 
         CREATE UNIQUE INDEX IF NOT EXISTS idx_hardlink_candidates_unique
         ON hardlink_candidates(repo_id, new_asset_id, existing_asset_id);
+
+        CREATE TABLE IF NOT EXISTS smart_folders (
+          smart_folder_id TEXT PRIMARY KEY,
+          repo_id TEXT NOT NULL,
+          parent_id TEXT,
+          name TEXT NOT NULL,
+          filter_json TEXT NOT NULL,
+          sort_order INTEGER NOT NULL DEFAULT 0,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          FOREIGN KEY(repo_id) REFERENCES repositories(repo_id),
+          FOREIGN KEY(parent_id) REFERENCES smart_folders(smart_folder_id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_smart_folders_repo_parent
+        ON smart_folders(repo_id, parent_id, sort_order, name);
         "#,
     )?;
     Ok(())

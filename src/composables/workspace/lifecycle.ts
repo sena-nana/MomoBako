@@ -1,6 +1,7 @@
 import {
   getFileBrowser,
   getRepositorySnapshot,
+  listSmartFolders,
   listRepositories,
 } from "../../services/repositoryApi";
 import type { RepositorySummary } from "../../types/repository";
@@ -20,11 +21,13 @@ import {
   hardlinkCandidates,
   isLoadingAssetDetail,
   isLoadingFileBrowser,
+  isLoadingSmartFolder,
   isLoadingRepositories,
   isLoadingSettingsData,
   isManagingPlugins,
   isLoadingSnapshot,
   isMutatingFiles,
+  isMutatingSmartFolder,
   isSavingMetadata,
   isSearching,
   isSyncing,
@@ -32,6 +35,9 @@ import {
   plugins,
   repositories,
   selectedFilePath,
+  activeSmartFolderId,
+  smartFolderResult,
+  smartFolders,
   STARTUP_TOTAL_STEPS,
   workspaceStartup,
 } from "./state";
@@ -58,6 +64,9 @@ export function resetWorkspaceSelection() {
   activeAssetDetail.value = null;
   fileBrowser.value = null;
   fileTree.value = [];
+  smartFolders.value = [];
+  activeSmartFolderId.value = null;
+  smartFolderResult.value = null;
   currentDirectoryPath.value = "";
   selectedFilePath.value = null;
   resetSearchState();
@@ -99,6 +108,7 @@ async function loadInitialRepository(
   const snapshot = await getRepositorySnapshot(nextRepoId);
   activeRepoId.value = nextRepoId;
   activeSnapshot.value = snapshot;
+  smartFolders.value = await listSmartFolders(nextRepoId);
 
   const defaultAssetId = activeAssetId.value && snapshot.assets.some((item) => item.assetId === activeAssetId.value)
     ? activeAssetId.value
@@ -213,7 +223,9 @@ export function resetRepositoryWorkspaceForTests() {
   isLoadingSnapshot.value = false;
   isLoadingAssetDetail.value = false;
   isLoadingFileBrowser.value = false;
+  isLoadingSmartFolder.value = false;
   isSearching.value = false;
+  isMutatingSmartFolder.value = false;
   isSavingMetadata.value = false;
   isSyncing.value = false;
   isMutatingFiles.value = false;

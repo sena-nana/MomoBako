@@ -94,6 +94,22 @@
   - `metadataFilters` accepts key/value pairs such as `color` and `shape`; values are matched against metadata text.
   - Desktop resource filtering sends the current `repoId` and may search with an empty free text query.
 
+## Smart Folder API
+
+- Smart folders are repository-scoped virtual filter templates stored under `.momo/metadata.db`; they never create or mutate real directories.
+- `GET /repositories/{repoId}/smart-folders`
+  - Returns nested `SmartFolderTreeNode[]` ordered by parent and `sortOrder`.
+- `POST /repositories/{repoId}/smart-folders`
+  - Creates a smart folder with `name`, optional `parentId`, and `filter`.
+- `PATCH /repositories/{repoId}/smart-folders/{smartFolderId}`
+  - Updates name, parent and filter.
+- `DELETE /repositories/{repoId}/smart-folders/{smartFolderId}`
+  - Deletes the selected template and child templates only; repository files are untouched.
+- `POST /repositories/{repoId}/smart-folders/{smartFolderId}:query`
+  - Returns file-list entries for the selected smart folder.
+  - Child smart folders inherit parent filters with AND semantics.
+  - Supported filters: `query`, `pathPrefix`, `tags`, `formats`, `colors`, `shapes`, `metadataFilters`, and `minRating`.
+
 ## Plugin API
 
 - `GET /plugins`

@@ -10,11 +10,13 @@ import type {
   RepositorySnapshot,
   RepositorySummary,
   SearchHit,
+  SmartFolderResultSnapshot,
+  SmartFolderTreeNode,
   SyncResult,
   WorkspaceStartupState,
 } from "../../types/repository";
 
-export type WorkspacePanelKey = "files" | "deleted" | "search" | "extensions";
+export type WorkspacePanelKey = "files" | "deleted" | "search" | "smartFolder" | "extensions";
 
 export type WorkspaceFilterState = {
   tags: string[];
@@ -61,6 +63,9 @@ export const fileTree = shallowRef<FileTreeNode[]>([]);
 export const selectedFilePath = ref<string | null>(null);
 export const searchQuery = ref("");
 export const searchResults = shallowRef<SearchHit[]>([]);
+export const smartFolders = shallowRef<SmartFolderTreeNode[]>([]);
+export const activeSmartFolderId = ref<string | null>(null);
+export const smartFolderResult = shallowRef<SmartFolderResultSnapshot | null>(null);
 export const isFilterBarOpen = ref(false);
 export const filters = ref<WorkspaceFilterState>(createInitialFilters());
 export const hardlinkCandidates = shallowRef<HardlinkCandidate[]>([]);
@@ -74,6 +79,8 @@ export const isLoadingSnapshot = ref(false);
 export const isLoadingAssetDetail = ref(false);
 export const isLoadingFileBrowser = ref(false);
 export const isSearching = ref(false);
+export const isLoadingSmartFolder = ref(false);
+export const isMutatingSmartFolder = ref(false);
 export const isSavingMetadata = ref(false);
 export const isSyncing = ref(false);
 export const isMutatingFiles = ref(false);
