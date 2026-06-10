@@ -162,6 +162,10 @@ describe("文件管理冒烟", () => {
     expect(screen.getByRole("button", { name: "重定向" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "删除资源库" })).toBeInTheDocument();
     expect(await screen.findByRole("button", { name: "资源库" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /全部/ })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /已删除/ })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "刷新文件夹树" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "新建智能文件夹" })).toBeDisabled();
     expect(getInvokeCalls("get_repository_snapshot")).toHaveLength(0);
   });
 

@@ -306,6 +306,7 @@ function selectPanel(next: PanelKey) {
 }
 
 function selectShortcut(id: ShortcutKey) {
+  if (isActiveRepositoryMissing.value) return;
   if (id === "deleted") {
     selectPanel("deleted");
     return;
@@ -754,6 +755,7 @@ onBeforeUnmount(() => {
               type="button"
               class="workspace-shortcuts__item"
               :class="{ 'is-active': activePanel === item.id || (item.id === 'all' && activePanel === 'files') }"
+              :disabled="isActiveRepositoryMissing"
               @click="selectShortcut(item.id)"
             >
               <span class="workspace-shortcuts__label">
@@ -914,7 +916,7 @@ onBeforeUnmount(() => {
               :key="library.repoId"
               type="button"
               class="repository-switcher__item"
-              :class="{ 'is-active': activeRepoId === library.repoId }"
+              :class="{ 'is-active': activeRepoId === library.repoId, 'is-missing': library.status === 'missing' }"
               :title="`${library.name}\n${library.path}`"
               :aria-label="`切换资源库 ${library.name}`"
               :disabled="isRemovingRepository || isSubmittingBackend"

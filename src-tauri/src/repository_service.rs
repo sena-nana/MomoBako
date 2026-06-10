@@ -1188,11 +1188,12 @@ impl RepositoryState {
             let raw = fs::read_to_string(&metadata_path).map_err(io_error)?;
             let metadata =
                 serde_json::from_str::<RepositoryMetadataFileImport>(&raw).map_err(json_error)?;
-            migrate_repository_metadata_plugin_id_if_needed(
+            rewrite_repository_metadata_if_needed(
                 &self.root,
                 &metadata_path,
                 &metadata,
                 &repo_root,
+                None,
             )?;
             Some(metadata)
         } else {
@@ -1330,11 +1331,12 @@ impl RepositoryState {
         if metadata.repo_id != request.repo_id {
             return Err("selected folder belongs to a different repository".to_string());
         }
-        migrate_repository_metadata_plugin_id_if_needed(
+        rewrite_repository_metadata_if_needed(
             &self.root,
             &metadata_path,
             &metadata,
             &repo_root,
+            Some(&repo_root),
         )?;
 
         let registry = Connection::open(&self.registry_path).map_err(db_error)?;
@@ -6607,31 +6609,36 @@ fn import_backend_record(
         })
 }
 
-fn migrate_repository_metadata_plugin_id_if_needed(
+fn rewrite_repository_metadata_if_needed(
     service_root: &Path,
     metadata_path: &Path,
     metadata: &RepositoryMetadataFileImport,
     repo_root: &Path,
+    next_root_path: Option<&Path>,
 ) -> Result<(), String> {
-    let Some(raw_plugin_id) = metadata.backend_plugin_id.as_deref() else {
-        return Ok(());
-    };
-    let normalized_plugin_id =
-        backend_plugin_registry(service_root).normalize_plugin_id(raw_plugin_id);
-    if normalized_plugin_id == raw_plugin_id {
+    let normalized_plugin_id = metadata
+        .backend_plugin_id
+        .as_deref()
+        .map(|plugin_id| backend_plugin_registry(service_root).normalize_plugin_id(plugin_id))
+        .unwrap_or_else(|| LOCAL_FILESYSTEM_PLUGIN_ID.to_string());
+    let root_path = next_root_path
+        .map(|path| path.to_string_lossy().to_string())
+        .or_else(|| metadata.root_path.clone())
+        .unwrap_or_else(|| repo_root.to_string_lossy().to_string());
+
+    if metadata.root_path.as_deref() == Some(root_path.as_str())
+        && metadata.backend_plugin_id.as_deref() == Some(normalized_plugin_id.as_str())
+    {
         return Ok(());
     }
 
-    let migrated = RepositoryMetadataFile {
+    let rewritten = RepositoryMetadataFile {
         repo_id: metadata.repo_id.clone(),
         name: metadata
             .name
             .clone()
             .unwrap_or_else(|| infer_repository_name(repo_root)),
-        root_path: metadata
-            .root_path
-            .clone()
-            .unwrap_or_else(|| repo_root.to_string_lossy().to_string()),
+        root_path,
         backend_plugin_id: normalized_plugin_id,
         backend_config: metadata
             .backend_config
@@ -6640,8 +6647,8 @@ fn migrate_repository_metadata_plugin_id_if_needed(
         created_at: metadata.created_at.clone().unwrap_or_else(now_rfc3339),
         schema_version: metadata.schema_version.unwrap_or(REPO_SCHEMA_VERSION),
     };
-    let migrated_json = serde_json::to_string_pretty(&migrated).map_err(json_error)?;
-    fs::write(metadata_path, migrated_json).map_err(io_error)
+    let metadata_json = serde_json::to_string_pretty(&rewritten).map_err(json_error)?;
+    fs::write(metadata_path, metadata_json).map_err(io_error)
 }
 
 fn parse_backend_config_json(value: &str) -> Result<serde_json::Value, serde_json::Error> {
@@ -9995,6 +10002,18 @@ mod tests {
     fn relocate_repository_updates_path_and_preserves_repo_id() {
         let (state, root, repo_root, _thumbnail_root) = create_test_state("relocate-success");
         let repo_id = create_repository_for_path(&state, &repo_root);
+        state
+            .create_smart_folder(SmartFolderMutationRequest {
+                repo_id: repo_id.clone(),
+                smart_folder_id: Some("sf-reference".to_string()),
+                parent_id: None,
+                name: "Reference".to_string(),
+                filter: SmartFolderFilter {
+                    path_prefix: Some("Reference".to_string()),
+                    ..SmartFolderFilter::default()
+                },
+            })
+            .expect("smart folder should be created before relocation");
         let relocated_root = root.join("relocated-repo");
         fs::rename(&repo_root, &relocated_root).expect("repo root should move");
 
@@ -10025,6 +10044,24 @@ mod tests {
             .find(|item| item.repo_id == response.repository.repo_id)
             .expect("repository should still be registered");
         assert_eq!(ready.status, "ready");
+        let raw_metadata = fs::read_to_string(
+            relocated_root.join(REPO_META_DIR).join(REPO_METADATA_FILE_NAME),
+        )
+        .expect("relocated metadata should read");
+        let metadata: RepositoryMetadataFileImport =
+            serde_json::from_str(&raw_metadata).expect("relocated metadata should parse");
+        let expected_root_path = relocated_root.to_string_lossy().to_string();
+        assert_eq!(metadata.repo_id, repo_id);
+        assert_eq!(metadata.root_path.as_deref(), Some(expected_root_path.as_str()));
+        let smart_folders = state
+            .list_smart_folders(&response.repository.repo_id)
+            .expect("smart folders should load after relocation");
+        assert_eq!(smart_folders.len(), 1);
+        assert_eq!(smart_folders[0].folder.smart_folder_id, "sf-reference");
+        assert_eq!(
+            smart_folders[0].folder.filter.path_prefix.as_deref(),
+            Some("Reference")
+        );
         fs::remove_dir_all(root).expect("test temp root should be removed");
     }
 
