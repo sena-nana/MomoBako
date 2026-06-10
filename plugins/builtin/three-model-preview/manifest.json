@@ -4,8 +4,8 @@
   "name": "3D Model Preview",
   "version": "1.0.0",
   "kind": "preview",
-  "description": "为 FBX、OBJ、GLB、glTF 与 VRM 模型提供可旋转缩放的 3D 文件预览。",
-  "capabilities": ["preview", "3d-model", "fbx", "obj", "gltf", "vrm"],
+  "description": "为 FBX、OBJ、GLB、glTF、VRM、STL 与 3MF 模型提供可旋转缩放的 3D 文件预览，并为 BLEND 文件提供转换提示。",
+  "capabilities": ["preview", "3d-model", "fbx", "obj", "gltf", "vrm", "stl", "3mf", "blend"],
   "enabled": true,
   "sdk": "frontend",
   "entry": {

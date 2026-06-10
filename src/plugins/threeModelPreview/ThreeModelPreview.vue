@@ -6,6 +6,7 @@ import {
   Color,
   DirectionalLight,
   GridHelper,
+  BufferGeometry,
   Mesh,
   MeshStandardMaterial,
   Object3D,
@@ -16,9 +17,11 @@ import {
 } from "three";
 import { VRMLoaderPlugin, VRMMetaLoaderPlugin, VRMUtils, type VRM } from "@pixiv/three-vrm";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
+import { ThreeMFLoader } from "three/examples/jsm/loaders/3MFLoader.js";
 import { FBXLoader } from "three/examples/jsm/loaders/FBXLoader.js";
 import { GLTFLoader, type GLTFParser } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { OBJLoader } from "three/examples/jsm/loaders/OBJLoader.js";
+import { STLLoader } from "three/examples/jsm/loaders/STLLoader.js";
 import { preparePreviewFileSource } from "../../services/repositoryApi";
 import { useRepositoryWorkspace } from "../../composables/useRepositoryWorkspace";
 import { useTaskCenter } from "../../composables/useTaskCenter";
@@ -91,6 +94,9 @@ async function loadModel() {
   setupRenderer();
 
   try {
+    if (extension.value === "blend") {
+      throw new Error("暂不支持直接预览 .blend 源文件，请先从 Blender 导出为 glb、gltf、fbx、obj、stl 或 3mf。");
+    }
     const source = await createModelSourceUrl();
     if (token !== loadToken) {
       return;
@@ -271,6 +277,13 @@ async function loadObjectByExtension(source: string, fileExtension: string) {
   if (fileExtension === "obj") {
     return { object: await new OBJLoader().loadAsync(source, onProgress) } satisfies LoadedModel;
   }
+  if (fileExtension === "stl") {
+    const geometry = await new STLLoader().loadAsync(source, onProgress);
+    return { object: createStlObject(geometry) } satisfies LoadedModel;
+  }
+  if (fileExtension === "3mf") {
+    return { object: await new ThreeMFLoader().loadAsync(source, onProgress) } satisfies LoadedModel;
+  }
   if (fileExtension === "glb" || fileExtension === "gltf" || fileExtension === "vrm") {
     const loader = new GLTFLoader();
     if (fileExtension === "vrm") {
@@ -285,6 +298,20 @@ async function loadObjectByExtension(source: string, fileExtension: string) {
     return { object: result.scene };
   }
   throw new Error(`暂不支持 .${fileExtension || "unknown"} 模型预览`);
+}
+
+function createStlObject(geometry: BufferGeometry) {
+  if (!geometry.getAttribute("normal")) {
+    geometry.computeVertexNormals();
+  }
+  return new Mesh(
+    geometry,
+    new MeshStandardMaterial({
+      color: 0xb8c2cc,
+      roughness: 0.72,
+      metalness: 0.08,
+    }),
+  );
 }
 
 function createVrmLoaderPlugin(parser: GLTFParser) {
