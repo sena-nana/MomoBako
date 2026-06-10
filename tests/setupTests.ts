@@ -26,6 +26,9 @@ type MockRepository = {
   updatedAt: string;
 };
 
+const missingRepositoryPath = "C:/Mock/MissingAnimeAssets";
+const relocatedRepositoryPath = "C:/Mock/RelocatedAnimeAssets";
+
 type MockEntry = {
   path: string;
   name: string;
@@ -979,6 +982,31 @@ vi.mock("@tauri-apps/api/core", () => ({
       ];
       return { repository: mockRepositories[0] };
     }
+    if (command === "relocate_repository") {
+      const request = args?.request as { repoId?: string; path?: string } | undefined;
+      if (request?.path === "C:/Mock/DifferentRepo") {
+        throw new Error("selected folder belongs to a different repository");
+      }
+      if (request?.path === "C:/Mock/NoMetadata") {
+        throw new Error("repository metadata not found in selected folder");
+      }
+      const repoId = request?.repoId ?? "repo-main-001";
+      const path = request?.path ?? relocatedRepositoryPath;
+      const existing = mockRepositories.find((repo) => repo.repoId === repoId) ?? mockSnapshot.repository;
+      const repository = {
+        ...existing,
+        path,
+        status: "ready",
+        assetCount: mockSnapshot.repository.assetCount,
+      };
+      mockRepositories = mockRepositories.map((repo) => (
+        repo.repoId === repoId ? repository : repo
+      ));
+      if (!mockRepositories.some((repo) => repo.repoId === repoId)) {
+        mockRepositories = [repository];
+      }
+      return { repository };
+    }
     if (command === "export_repository") {
       const request = args?.request as { target?: string; archive?: { outputPath?: string; format?: string; encrypt?: boolean }; git?: { remote?: string; branch?: string } } | undefined;
       return {
@@ -992,7 +1020,11 @@ vi.mock("@tauri-apps/api/core", () => ({
         message: request?.target === "git" ? "资源库已上传到 Git" : "资源库压缩包已导出",
       };
     }
-    if (command === "delete_repository") return undefined;
+    if (command === "delete_repository") {
+      const repoId = typeof args?.repoId === "string" ? args.repoId : "";
+      mockRepositories = mockRepositories.filter((repo) => repo.repoId !== repoId);
+      return undefined;
+    }
     if (command === "sync_repository") {
       if (mockDirectoryCreatedOnNextSync) {
         addMockEntry(mockDirectoryCreatedOnNextSync, "directory");
@@ -1168,6 +1200,27 @@ export function getInvokeCalls(command?: string) {
 
 export function seedMockRepository() {
   mockRepositories = [mockSnapshot.repository];
+}
+
+function createMissingMockRepository() {
+  return {
+    ...mockSnapshot.repository,
+    path: missingRepositoryPath,
+    status: "missing",
+    assetCount: 0,
+  };
+}
+
+export function seedMissingMockRepository() {
+  mockRepositories = [createMissingMockRepository()];
+}
+
+export function seedMixedMockRepositories() {
+  mockRepositories = [altRepository, createMissingMockRepository()];
+}
+
+export function getRelocatedRepositoryPath() {
+  return relocatedRepositoryPath;
 }
 
 export function seedCrossRepositorySearchHit() {

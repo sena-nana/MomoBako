@@ -130,6 +130,7 @@ const shortcuts = computed<ShortcutItem[]>(() => {
 });
 
 const isTrashPanel = computed(() => activePanel.value === "deleted");
+const isActiveRepositoryMissing = computed(() => activeRepository.value?.status === "missing");
 const expandedFolderPathSet = computed(() => new Set(expandedFolderPaths.value));
 const fileTreeNodes = computed(() => fileTree.value);
 const backendOptions = computed(() => repositoryBackendOptions.value.map((item) => ({
@@ -771,7 +772,7 @@ onBeforeUnmount(() => {
               <button
                 type="button"
                 class="workspace-tree-action"
-              :disabled="!activeRepoId || isMutatingFiles || isTrashPanel"
+              :disabled="!activeRepoId || isActiveRepositoryMissing || isMutatingFiles || isTrashPanel"
                 title="在当前目录新建文件夹"
                 aria-label="在当前目录新建文件夹"
                 @click="openCreateFolderDialog(currentDirectoryPath)"
@@ -781,7 +782,7 @@ onBeforeUnmount(() => {
               <button
                 type="button"
                 class="workspace-tree-action"
-              :disabled="!activeRepoId || isLoadingFileBrowser"
+              :disabled="!activeRepoId || isActiveRepositoryMissing || isLoadingFileBrowser"
                 title="刷新文件夹树"
                 aria-label="刷新文件夹树"
                 @click="refreshFileBrowserTree"
@@ -793,6 +794,9 @@ onBeforeUnmount(() => {
           </div>
           <div v-if="!activeRepoId" class="workspace-empty workspace-empty--compact">
             <p class="workspace-empty__text">先选择或添加一个资源库。</p>
+          </div>
+          <div v-else-if="isActiveRepositoryMissing" class="workspace-empty workspace-empty--compact">
+            <p class="workspace-empty__text">资源库文件夹丢失，请先在主视图修复。</p>
           </div>
           <div v-else class="workspace-folder-tree">
             <FolderTreeNode
@@ -811,7 +815,7 @@ onBeforeUnmount(() => {
               @delete="openDeleteFolderDialog"
             />
           </div>
-          <div v-if="activeRepoId && (isTrashPanel || !fileTreeNodes.length) && !isLoadingFileBrowser" class="workspace-empty workspace-empty--compact">
+          <div v-if="activeRepoId && !isActiveRepositoryMissing && (isTrashPanel || !fileTreeNodes.length) && !isLoadingFileBrowser" class="workspace-empty workspace-empty--compact">
             <p class="workspace-empty__text">{{ isTrashPanel ? "回收站条目在主视图中管理。" : "当前仓库还没有子文件夹。" }}</p>
           </div>
         </section>
@@ -823,7 +827,7 @@ onBeforeUnmount(() => {
               <button
                 type="button"
                 class="workspace-tree-action"
-                :disabled="!activeRepoId || isMutatingSmartFolder"
+                :disabled="!activeRepoId || isActiveRepositoryMissing || isMutatingSmartFolder"
                 title="新建智能文件夹"
                 aria-label="新建智能文件夹"
                 @click="openCreateSmartFolderDialog()"
@@ -834,6 +838,9 @@ onBeforeUnmount(() => {
           </div>
           <div v-if="!activeRepoId" class="workspace-empty workspace-empty--compact">
             <p class="workspace-empty__text">先选择或添加一个资源库。</p>
+          </div>
+          <div v-else-if="isActiveRepositoryMissing" class="workspace-empty workspace-empty--compact">
+            <p class="workspace-empty__text">资源库修复后可继续使用智能文件夹。</p>
           </div>
           <div v-else-if="smartFolders.length" class="workspace-folder-tree">
             <SmartFolderTreeNode
@@ -918,6 +925,7 @@ onBeforeUnmount(() => {
               </span>
               <span class="repository-switcher__main">
                 <strong>{{ library.name }}</strong>
+                <span v-if="library.status === 'missing'" class="repository-switcher__status">丢失</span>
               </span>
             </button>
           </div>

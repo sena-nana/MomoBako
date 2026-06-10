@@ -840,6 +840,10 @@
 
 .repository-switcher__main {
   min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
 }
 
 .repository-switcher__main strong {
@@ -851,6 +855,15 @@
   color: var(--text);
   font-size: 13px;
   font-weight: 600;
+}
+
+.repository-switcher__status {
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: var(--err-soft);
+  color: var(--err);
+  font-size: 11px;
+  line-height: 1.35;
 }
 
 .repository-add-popover__header,

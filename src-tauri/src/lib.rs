@@ -22,11 +22,11 @@ use repository_service::{
     HardlinkConfirmRequest, HardlinkConfirmResponse, MetadataUpdateRequest, MetadataUpdateResponse,
     PluginEnabledRequest, PluginInstallRequest, PluginManifest, PluginMutationResponse,
     RepositoryExportRequest, RepositoryExportResponse, RepositoryFolderRequest,
-    RepositoryMutationRequest, RepositoryMutationResponse, RepositorySnapshot, RepositorySummary,
-    RevisionActionRequest, RevisionActionResponse, SearchRequest, SearchResponse,
-    SmartFolderMutationRequest, SmartFolderMutationResponse, SmartFolderResultSnapshot,
-    SmartFolderTreeNode, SmartFolderUpdateRequest, SyncRequest, SyncResult, ThumbnailRequest,
-    ThumbnailResponse, TrashMutationRequest,
+    RepositoryMutationRequest, RepositoryMutationResponse, RepositoryRelocateRequest,
+    RepositorySnapshot, RepositorySummary, RevisionActionRequest, RevisionActionResponse,
+    SearchRequest, SearchResponse, SmartFolderMutationRequest, SmartFolderMutationResponse,
+    SmartFolderResultSnapshot, SmartFolderTreeNode, SmartFolderUpdateRequest, SyncRequest,
+    SyncResult, ThumbnailRequest, ThumbnailResponse, TrashMutationRequest,
 };
 
 #[tauri::command]
@@ -273,6 +273,16 @@ async fn delete_repository(
 ) -> Result<(), String> {
     runtime
         .run_repository_collection_write(move |state| state.delete_repository(&repo_id))
+        .await
+}
+
+#[tauri::command]
+async fn relocate_repository(
+    request: RepositoryRelocateRequest,
+    runtime: tauri::State<'_, RepositoryRuntime>,
+) -> Result<RepositoryMutationResponse, String> {
+    runtime
+        .run_repository_collection_write(move |state| state.relocate_repository(request))
         .await
 }
 
@@ -533,6 +543,7 @@ pub fn run() {
             import_repository,
             attach_repository_folder,
             delete_repository,
+            relocate_repository,
             export_repository,
             sync_repository,
             list_hardlink_candidates,

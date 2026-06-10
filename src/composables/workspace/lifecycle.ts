@@ -57,8 +57,12 @@ import { invalidateThumbnailQueue } from "./thumbnails";
 let startupPromise: Promise<void> | null = null;
 
 export function resetWorkspaceSelection() {
-  invalidateThumbnailQueue();
   activeRepoId.value = null;
+  resetActiveRepositoryContent();
+}
+
+export function resetActiveRepositoryContent() {
+  invalidateThumbnailQueue();
   activeSnapshot.value = null;
   activeAssetId.value = null;
   activeAssetDetail.value = null;
@@ -103,6 +107,13 @@ async function loadInitialRepository(
   const nextRepoId = activeRepoId.value && items.some((item) => item.repoId === activeRepoId.value)
     ? activeRepoId.value
     : items[0].repoId;
+  const nextRepository = items.find((item) => item.repoId === nextRepoId);
+
+  if (nextRepository?.status === "missing") {
+    activeRepoId.value = nextRepoId;
+    resetActiveRepositoryContent();
+    return;
+  }
 
   setStartupProgress(2, "读取仓库摘要");
   const snapshot = await getRepositorySnapshot(nextRepoId);

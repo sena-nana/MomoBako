@@ -10,12 +10,14 @@ export type RepositoryBackendOption = RepositoryBackendSummary & {
   enabled: boolean;
 };
 
+export type RepositoryStatus = "ready" | "missing";
+
 export type RepositorySummary = {
   repoId: string;
   name: string;
   path: string;
   backend: RepositoryBackendSummary;
-  status: string;
+  status: RepositoryStatus;
   assetCount: number;
   updatedAt: string;
 };
@@ -222,6 +224,11 @@ export type RepositoryMutationRequest = {
 };
 
 export type RepositoryFolderRequest = {
+  path: string;
+};
+
+export type RepositoryRelocateRequest = {
+  repoId: string;
   path: string;
 };
 

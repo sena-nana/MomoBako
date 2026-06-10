@@ -28,6 +28,7 @@ import {
   mutateTrash,
   openRepositoryPath,
   redoLastRevision,
+  relocateRepository,
   renameEntry,
   revealRepositoryPath,
   syncRepository,
@@ -137,6 +138,7 @@ import {
 import {
   ensureRepositoryWorkspace as ensureRepositoryWorkspaceLifecycle,
   loadRepositories as loadRepositoriesLifecycle,
+  resetActiveRepositoryContent,
 } from "./lifecycle";
 
 export type { WorkspaceFilterState, WorkspaceOperationProgress, WorkspacePanelKey };
@@ -166,6 +168,17 @@ export async function selectRepository(repoId: string) {
   const progressId = startOperationProgress("加载资源库", "读取资源库快照", { initial: 10, indeterminate: true });
 
   try {
+    const repository = repositories.value.find((item) => item.repoId === repoId);
+    if (repository?.status === "missing") {
+      activeRepoId.value = repoId;
+      resetActiveRepositoryContent();
+      if (isSwitchingRepository) {
+        resetSearchState();
+      }
+      finishOperationProgress(progressId);
+      return;
+    }
+
     const snapshot = await getRepositorySnapshot(repoId);
     updateOperationProgress(progressId, { detail: "加载资源索引", value: 46 });
     activeRepoId.value = repoId;
@@ -914,6 +927,23 @@ export async function removeRepository(repoId: string) {
   await loadRepositories();
 }
 
+export async function relocateMissingRepository(repoId: string, path: string) {
+  const progressId = startOperationProgress("重定向资源库", "校验资源库位置", { initial: 12 });
+  try {
+    const response = await relocateRepository({ repoId, path });
+    updateOperationProgress(progressId, { detail: "刷新资源库列表", value: 64 });
+    await loadRepositories();
+    if (activeRepoId.value !== response.repository.repoId || !activeSnapshot.value) {
+      await selectRepository(response.repository.repoId);
+    }
+    finishOperationProgress(progressId);
+    return response;
+  } catch (cause) {
+    cancelOperationProgress(progressId);
+    throw cause;
+  }
+}
+
 export async function exportCurrentRepository(
   request: Omit<RepositoryExportRequest, "repoId">,
 ): Promise<RepositoryExportResponse | null> {
@@ -1127,6 +1157,7 @@ export function useRepositoryWorkspace() {
     importExistingRepository,
     attachRepository,
     removeRepository,
+    relocateMissingRepository,
     exportCurrentRepository,
     loadSettingsData,
     setPluginEnabledInWorkspace,

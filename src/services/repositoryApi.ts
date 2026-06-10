@@ -23,6 +23,7 @@ import type {
   RepositoryExportRequest,
   RepositoryExportResponse,
   RepositoryFolderRequest,
+  RepositoryRelocateRequest,
   PluginManifest,
   PluginMutationResponse,
   RepositoryMutationRequest,
@@ -149,6 +150,10 @@ export function attachRepositoryFolder(request: RepositoryFolderRequest) {
 
 export function deleteRepository(repoId: string) {
   return invoke<void>("delete_repository", { repoId });
+}
+
+export function relocateRepository(request: RepositoryRelocateRequest) {
+  return invoke<RepositoryMutationResponse>("relocate_repository", { request });
 }
 
 export function exportRepository(request: RepositoryExportRequest) {
