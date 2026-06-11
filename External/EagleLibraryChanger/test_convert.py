@@ -30,6 +30,7 @@ class EagleLibraryChangerTests(unittest.TestCase):
 
         self.assertEqual(len(plan.assets), 11)
         self.assertTrue(any(asset.target_relative_dir == "未命名文件夹" for asset in plan.assets))
+        self.assertEqual(plan.assets[0].palette, ["#AA1122", "#336699", "#FFFFFF", "#000000", "#123456"])
         self.assertTrue(all(not key.startswith("eagle") for key in collect_metadata_keys(plan.report)))
 
     def test_dry_run_does_not_write_output(self) -> None:
@@ -81,6 +82,14 @@ class EagleLibraryChangerTests(unittest.TestCase):
                 row[0]
                 for row in connection.execute("SELECT key FROM metadata")
             }
+            asset_rows = connection.execute(
+                """
+                SELECT key, value_type, value_json
+                FROM metadata
+                WHERE asset_id = ?
+                """,
+                (convert.asset_id_for_path(repo_meta["repoId"], "未命名文件夹/asset-0.png"),),
+            ).fetchall()
             thumbnail_paths = [
                 row[0]
                 for row in connection.execute("SELECT thumbnail_path FROM assets WHERE thumbnail_path IS NOT NULL")
@@ -89,7 +98,10 @@ class EagleLibraryChangerTests(unittest.TestCase):
             connection.close()
 
         self.assertEqual(asset_count, 11)
-        self.assertTrue({"favorite", "title", "type"}.issubset(metadata_keys))
+        self.assertTrue({"color", "favorite", "palette", "title", "type"}.issubset(metadata_keys))
+        asset_metadata = {key: (value_type, json.loads(value_json)) for key, value_type, value_json in asset_rows}
+        self.assertEqual(asset_metadata["color"], ("string", "#AA1122"))
+        self.assertEqual(asset_metadata["palette"], ("array", ["#AA1122", "#336699", "#FFFFFF", "#000000", "#123456"]))
         self.assertTrue(thumbnail_paths)
         self.assertTrue(all(Path(path).is_file() for path in thumbnail_paths))
         self.assertFalse(any(key.startswith("eagle") for key in metadata_keys))
@@ -225,6 +237,17 @@ class EagleLibraryChangerTests(unittest.TestCase):
                         "folders": ["folder-main"] if index == 0 else [],
                         "tags": ["TagA"] if index % 2 == 0 else [],
                         "annotation": "note" if index == 1 else "",
+                        "palettes": [
+                            {"color": "aa1122", "ratio": 0.5},
+                            {"color": "#336699", "ratio": 0.25},
+                            {"color": "fff", "ratio": 0.1},
+                            {"color": "#000000", "ratio": 0.05},
+                            {"color": "not-a-color", "ratio": 0.04},
+                            {"color": "#123456", "ratio": 0.03},
+                            {"color": "#654321", "ratio": 0.02},
+                        ]
+                        if index == 0
+                        else [],
                         "isDeleted": False,
                     },
                     ensure_ascii=False,

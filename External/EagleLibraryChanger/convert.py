@@ -32,7 +32,6 @@ UNSUPPORTED_CAPABILITIES = [
     "文件夹 password / passwordTips",
     "isDeleted 语义",
     "url",
-    "palettes",
     "原始时间字段与尺寸字段",
 ]
 
@@ -62,6 +61,7 @@ class AssetPlan:
     extension: str
     tags: list[str]
     note: str | None
+    palette: list[str]
     discarded_folder_names: list[str] = field(default_factory=list)
     missing_folder_ids: list[str] = field(default_factory=list)
 
@@ -360,6 +360,7 @@ def build_asset_plan(
 
     note = str(asset_metadata.get("annotation") or "").strip() or None
     tags = [str(tag).strip() for tag in asset_metadata.get("tags") or [] if str(tag).strip()]
+    palette = normalize_eagle_palette(asset_metadata.get("palettes"))
     if source_thumbnail is None:
         warnings.append(
             {
@@ -380,9 +381,45 @@ def build_asset_plan(
         extension=extension,
         tags=dedupe_preserve_order(tags),
         note=note,
+        palette=palette,
         discarded_folder_names=discarded_folder_names,
         missing_folder_ids=missing_folder_ids,
     )
+
+
+def normalize_eagle_palette(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+
+    colors: list[str] = []
+    for item in value:
+        color_value: Any
+        if isinstance(item, dict):
+            color_value = item.get("color")
+        else:
+            color_value = item
+        color = normalize_hex_color(color_value)
+        if color and color not in colors:
+            colors.append(color)
+        if len(colors) == 5:
+            break
+    return colors
+
+
+def normalize_hex_color(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+
+    color = value.strip()
+    if not color:
+        return None
+    if color.startswith("#"):
+        color = color[1:]
+    if len(color) == 3 and re.fullmatch(r"[0-9a-fA-F]{3}", color):
+        color = "".join(character * 2 for character in color)
+    if not re.fullmatch(r"[0-9a-fA-F]{6}", color):
+        return None
+    return f"#{color.upper()}"
 
 
 def select_source_file(info_dir: Path, asset_metadata: dict[str, Any]) -> Path:
@@ -1381,6 +1418,9 @@ def write_asset_record(connection: sqlite3.Connection, plan: ConversionPlan, ass
     }
     if asset.note is not None:
         metadata_entries["note"] = asset.note
+    if asset.palette:
+        metadata_entries["color"] = asset.palette[0]
+        metadata_entries["palette"] = asset.palette
     for key, value in metadata_entries.items():
         connection.execute(
             """
