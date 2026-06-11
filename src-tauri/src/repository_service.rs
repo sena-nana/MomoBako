@@ -5704,7 +5704,10 @@ fn generate_thumbnail_for_file(
     }
 
     let extension = file.extension.to_lowercase();
-    if !is_image_extension(&extension) && !is_video_extension(&extension) {
+    if !is_image_extension(&extension)
+        && !is_video_extension(&extension)
+        && !is_audio_extension(&extension)
+    {
         return Ok(None);
     }
 
@@ -5724,6 +5727,8 @@ fn generate_thumbnail_for_file(
 
     let generated = if is_image_extension(&extension) {
         generate_image_thumbnail(&source_path, &thumbnail_path)
+    } else if is_audio_extension(&extension) {
+        generate_audio_thumbnail(&source_path, &thumbnail_path)
     } else {
         generate_video_thumbnail(&source_path, &thumbnail_path)
     };
@@ -6003,6 +6008,21 @@ fn generate_video_thumbnail(source_path: &Path, thumbnail_path: &Path) -> Result
     }
 }
 
+fn generate_audio_thumbnail(source_path: &Path, thumbnail_path: &Path) -> Result<(), String> {
+    ensure_ffmpeg_ready()?;
+
+    let status = Command::new(ffmpeg_sidecar::paths::ffmpeg_path())
+        .args(audio_thumbnail_ffmpeg_args(source_path, thumbnail_path))
+        .status()
+        .map_err(|error| format!("ffmpeg unavailable: {error}"))?;
+
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("ffmpeg exited with status: {status}"))
+    }
+}
+
 fn video_thumbnail_ffmpeg_args(source_path: &Path, thumbnail_path: &Path) -> Vec<OsString> {
     vec![
         "-hide_banner".into(),
@@ -6013,6 +6033,26 @@ fn video_thumbnail_ffmpeg_args(source_path: &Path, thumbnail_path: &Path) -> Vec
         "00:00:01".into(),
         "-i".into(),
         source_path.as_os_str().to_os_string(),
+        "-frames:v".into(),
+        "1".into(),
+        "-update".into(),
+        "1".into(),
+        "-vf".into(),
+        format!("scale='min({THUMBNAIL_SIZE},iw)':-1").into(),
+        thumbnail_path.as_os_str().to_os_string(),
+    ]
+}
+
+fn audio_thumbnail_ffmpeg_args(source_path: &Path, thumbnail_path: &Path) -> Vec<OsString> {
+    vec![
+        "-hide_banner".into(),
+        "-loglevel".into(),
+        "error".into(),
+        "-y".into(),
+        "-i".into(),
+        source_path.as_os_str().to_os_string(),
+        "-map".into(),
+        "0:v:0".into(),
         "-frames:v".into(),
         "1".into(),
         "-update".into(),
@@ -6041,6 +6081,10 @@ fn is_image_extension(extension: &str) -> bool {
 
 fn is_video_extension(extension: &str) -> bool {
     matches!(extension, "mp4" | "mov" | "mkv" | "webm" | "avi" | "m4v")
+}
+
+fn is_audio_extension(extension: &str) -> bool {
+    matches!(extension, "mp3" | "wav" | "ogg" | "flac" | "m4a" | "aac" | "opus")
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -11920,5 +11964,26 @@ mod tests {
             .position(|item| item == thumbnail_path.as_os_str())
             .expect("missing output path");
         assert!(update_index < output_index);
+    }
+
+    #[test]
+    fn audio_thumbnail_ffmpeg_args_extract_the_first_embedded_cover_stream() {
+        let source_path = Path::new("C:/Assets/track.flac");
+        let thumbnail_path = Path::new("C:/Cache/thumbnail.jpg");
+        let args = audio_thumbnail_ffmpeg_args(source_path, thumbnail_path);
+
+        assert!(args.windows(2).any(|items| items == ["-map", "0:v:0"]));
+        assert!(args.windows(2).any(|items| items == ["-frames:v", "1"]));
+        assert!(args.windows(2).any(|items| items == ["-update", "1"]));
+
+        let map_index = args
+            .iter()
+            .position(|item| item == "-map")
+            .expect("missing -map");
+        let output_index = args
+            .iter()
+            .position(|item| item == thumbnail_path.as_os_str())
+            .expect("missing output path");
+        assert!(map_index < output_index);
     }
 }
