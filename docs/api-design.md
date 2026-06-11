@@ -89,7 +89,8 @@
 
 - `PATCH /repositories/{repoId}/assets/{assetId}/metadata`
   - Request body includes `expectedVersion`
-  - Generic file metadata keys include `rating`, `addedToLibraryAt`, `fileCreatedAt`, `comment`, `link`, `thumbnailPalette`, and `tagGroups`
+  - Generic file metadata keys include `rating`, `addedToLibraryAt`, `fileCreatedAt`, `fileModifiedAt`, `comment`, `link`, `width`, `height`, `originalSizeBytes`, `thumbnailPalette`, and `tagGroups`
+  - Eagle imports preserve original source and timing fields in generic metadata: `url` becomes `link`, import/create/modified timestamps become `addedToLibraryAt`, `fileCreatedAt`, and `fileModifiedAt`, and dimensions/size become `width`, `height`, and `originalSizeBytes`
   - Outcomes: `success`, `conflict`, `merged`
 
 ## Search API

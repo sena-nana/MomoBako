@@ -32,6 +32,32 @@ class EagleLibraryChangerTests(unittest.TestCase):
         self.assertEqual(plan.report["summary"]["deletedAssetCount"], 1)
         self.assertTrue(any(asset.target_relative_dir == "未命名文件夹" for asset in plan.assets))
         self.assertEqual(plan.assets[0].palette, ["#AA1122", "#336699", "#FFFFFF", "#000000", "#123456"])
+        self.assertEqual(
+            plan.assets[0].preserved_metadata,
+            {
+                "addedToLibraryAt": "2024-01-02T00:00:00Z",
+                "fileCreatedAt": "2024-01-03T02:05:06Z",
+                "fileModifiedAt": "2024-01-04T00:00:00Z",
+                "height": 480,
+                "link": "https://example.test/source/asset-0",
+                "originalSizeBytes": 123456,
+                "width": 640,
+            },
+        )
+        asset_report = next(asset for asset in plan.report["assets"] if asset["assetId"] == "ASSET000")
+        self.assertEqual(
+            asset_report["preservedMetadataKeys"],
+            [
+                "addedToLibraryAt",
+                "fileCreatedAt",
+                "fileModifiedAt",
+                "height",
+                "link",
+                "originalSizeBytes",
+                "width",
+            ],
+        )
+        self.assertEqual(plan.report["summary"]["preservedMetadataAssetCount"], 1)
         deleted_asset = next(asset for asset in plan.assets if asset.asset_id == "ASSET010")
         self.assertTrue(deleted_asset.is_deleted)
         self.assertEqual(deleted_asset.target_relative_path, "asset-10.png")
@@ -43,6 +69,15 @@ class EagleLibraryChangerTests(unittest.TestCase):
         self.assertTrue(all(not key.startswith("eagle") for key in collect_metadata_keys(plan.report)))
         self.assertFalse(any(warning["type"] == "deletedAssetSemanticIgnored" for warning in plan.warnings))
         self.assertFalse(any(hit["capability"] == "isDeleted 语义" for hit in plan.unsupported_hits))
+        self.assertFalse(any(hit["capability"] in {"url", "原始时间字段与尺寸字段", "mtime"} for hit in plan.unsupported_hits))
+        self.assertTrue(
+            any(
+                warning["type"] == "invalidEagleMetadataField"
+                and warning["assetId"] == "ASSET001"
+                and warning["field"] == "importedAt"
+                for warning in plan.warnings
+            )
+        )
 
     def test_dry_run_does_not_write_output(self) -> None:
         source = self.copy_example_library()
@@ -118,6 +153,13 @@ class EagleLibraryChangerTests(unittest.TestCase):
         asset_metadata = {key: (value_type, json.loads(value_json)) for key, value_type, value_json in asset_rows}
         self.assertEqual(asset_metadata["color"], ("string", "#AA1122"))
         self.assertEqual(asset_metadata["palette"], ("array", ["#AA1122", "#336699", "#FFFFFF", "#000000", "#123456"]))
+        self.assertEqual(asset_metadata["link"], ("string", "https://example.test/source/asset-0"))
+        self.assertEqual(asset_metadata["addedToLibraryAt"], ("string", "2024-01-02T00:00:00Z"))
+        self.assertEqual(asset_metadata["fileCreatedAt"], ("string", "2024-01-03T02:05:06Z"))
+        self.assertEqual(asset_metadata["fileModifiedAt"], ("string", "2024-01-04T00:00:00Z"))
+        self.assertEqual(asset_metadata["width"], ("number", 640))
+        self.assertEqual(asset_metadata["height"], ("number", 480))
+        self.assertEqual(asset_metadata["originalSizeBytes"], ("number", 123456))
         self.assertTrue(thumbnail_paths)
         self.assertTrue(all(Path(path).is_file() for path in thumbnail_paths))
         self.assertFalse(any(key.startswith("eagle") for key in metadata_keys))
@@ -253,6 +295,10 @@ class EagleLibraryChangerTests(unittest.TestCase):
             encoding="utf-8",
         )
         self.write_supporting_json(root)
+        (root / "mtime.json").write_text(
+            json.dumps({"ASSET000": 1704326400000}, ensure_ascii=False),
+            encoding="utf-8",
+        )
         for index in range(11):
             asset_id = f"ASSET{index:03d}"
             info_dir = root / "images" / f"{asset_id}.info"
@@ -260,30 +306,41 @@ class EagleLibraryChangerTests(unittest.TestCase):
             filename = f"asset-{index}.png"
             (info_dir / filename).write_bytes(f"png-data-{index}".encode("utf-8"))
             (info_dir / f"asset-{index}_thumbnail.png").write_bytes(f"thumb-{index}".encode("utf-8"))
-            (info_dir / "metadata.json").write_text(
-                json.dumps(
+            metadata = {
+                "id": asset_id,
+                "name": f"asset-{index}",
+                "ext": "png",
+                "folders": ["folder-main"] if index == 0 else [],
+                "tags": ["TagA"] if index % 2 == 0 else [],
+                "annotation": "note" if index == 1 else "",
+                "palettes": [
+                    {"color": "aa1122", "ratio": 0.5},
+                    {"color": "#336699", "ratio": 0.25},
+                    {"color": "fff", "ratio": 0.1},
+                    {"color": "#000000", "ratio": 0.05},
+                    {"color": "not-a-color", "ratio": 0.04},
+                    {"color": "#123456", "ratio": 0.03},
+                    {"color": "#654321", "ratio": 0.02},
+                ]
+                if index == 0
+                else [],
+                "isDeleted": index == 10,
+            }
+            if index == 0:
+                metadata.update(
                     {
-                        "id": asset_id,
-                        "name": f"asset-{index}",
-                        "ext": "png",
-                        "folders": ["folder-main"] if index == 0 else [],
-                        "tags": ["TagA"] if index % 2 == 0 else [],
-                        "annotation": "note" if index == 1 else "",
-                        "palettes": [
-                            {"color": "aa1122", "ratio": 0.5},
-                            {"color": "#336699", "ratio": 0.25},
-                            {"color": "fff", "ratio": 0.1},
-                            {"color": "#000000", "ratio": 0.05},
-                            {"color": "not-a-color", "ratio": 0.04},
-                            {"color": "#123456", "ratio": 0.03},
-                            {"color": "#654321", "ratio": 0.02},
-                        ]
-                        if index == 0
-                        else [],
-                        "isDeleted": index == 10,
-                    },
-                    ensure_ascii=False,
-                ),
+                        "url": "https://example.test/source/asset-0",
+                        "importedAt": 1704153600,
+                        "btime": "2024-01-03T04:05:06+02:00",
+                        "width": 640,
+                        "height": 480,
+                        "size": 123456,
+                    }
+                )
+            elif index == 1:
+                metadata["importedAt"] = "not-a-time"
+            (info_dir / "metadata.json").write_text(
+                json.dumps(metadata, ensure_ascii=False),
                 encoding="utf-8",
             )
         return root

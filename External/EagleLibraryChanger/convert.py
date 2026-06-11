@@ -30,8 +30,16 @@ UNSUPPORTED_CAPABILITIES = [
     "quickAccess",
     "tagsGroups",
     "文件夹 password / passwordTips",
-    "url",
-    "原始时间字段与尺寸字段",
+]
+EAGLE_CREATED_TIME_METADATA_KEYS = [
+    ("btime", "fileCreatedAt"),
+    ("createdAt", "fileCreatedAt"),
+    ("birthtime", "fileCreatedAt"),
+]
+EAGLE_NUMERIC_METADATA_KEYS = [
+    ("width", "width"),
+    ("height", "height"),
+    ("size", "originalSizeBytes"),
 ]
 
 
@@ -62,6 +70,7 @@ class AssetPlan:
     note: str | None
     palette: list[str]
     is_deleted: bool
+    preserved_metadata: dict[str, Any] = field(default_factory=dict)
     discarded_folder_names: list[str] = field(default_factory=list)
     missing_folder_ids: list[str] = field(default_factory=list)
 
@@ -202,6 +211,7 @@ def build_conversion_plan(input_root: Path, output_root: Path, repo_name: str) -
         asset_plan = build_asset_plan(
             info_dir=info_dir,
             asset_metadata=asset_metadata,
+            mtime_json=mtime_json,
             folder_index=folder_index,
             folder_name_index=folder_name_index,
             output_name_usage=output_name_usage,
@@ -219,10 +229,7 @@ def build_conversion_plan(input_root: Path, output_root: Path, repo_name: str) -
 
     unsupported_hits = collect_unsupported_hits(
         library_metadata=library_metadata,
-        tags_json=tags_json,
         actions_json=actions_json,
-        saved_filters_json=saved_filters_json,
-        mtime_json=mtime_json,
         assets=assets,
         skipped_smart_folders=skipped_smart_folders,
     )
@@ -301,6 +308,7 @@ def build_folder_index(
 def build_asset_plan(
     info_dir: Path,
     asset_metadata: dict[str, Any],
+    mtime_json: dict[str, Any],
     folder_index: dict[str, str],
     folder_name_index: dict[str, str],
     output_name_usage: dict[str, set[str]],
@@ -354,6 +362,13 @@ def build_asset_plan(
     tags = [str(tag).strip() for tag in asset_metadata.get("tags") or [] if str(tag).strip()]
     palette = normalize_eagle_palette(asset_metadata.get("palettes"))
     is_deleted = asset_metadata.get("isDeleted") is True
+    preserved_metadata = build_preserved_metadata(
+        asset_id=asset_id,
+        info_dir=info_dir,
+        asset_metadata=asset_metadata,
+        mtime_json=mtime_json,
+        warnings=warnings,
+    )
     if source_thumbnail is None:
         warnings.append(
             {
@@ -376,9 +391,178 @@ def build_asset_plan(
         note=note,
         palette=palette,
         is_deleted=is_deleted,
+        preserved_metadata=preserved_metadata,
         discarded_folder_names=discarded_folder_names,
         missing_folder_ids=missing_folder_ids,
     )
+
+
+def build_preserved_metadata(
+    *,
+    asset_id: str,
+    info_dir: Path,
+    asset_metadata: dict[str, Any],
+    mtime_json: dict[str, Any],
+    warnings: list[dict[str, Any]],
+) -> dict[str, Any]:
+    preserved: dict[str, Any] = {}
+
+    link = normalize_non_empty_string(asset_metadata.get("url"))
+    if link is not None:
+        preserved["link"] = link
+
+    for source_key, target_key in [("importedAt", "addedToLibraryAt"), *EAGLE_CREATED_TIME_METADATA_KEYS]:
+        if target_key in preserved or source_key not in asset_metadata:
+            continue
+        timestamp = normalize_eagle_datetime(
+            asset_metadata.get(source_key),
+            asset_id=asset_id,
+            source_key=source_key,
+            warnings=warnings,
+        )
+        if timestamp is not None:
+            preserved[target_key] = timestamp
+
+    mtime_value = lookup_mtime_value(mtime_json, asset_id, info_dir)
+    for source_key, value, available in [
+        ("modifiedAt", asset_metadata.get("modifiedAt"), "modifiedAt" in asset_metadata),
+        ("mtime", mtime_value, mtime_value is not None),
+    ]:
+        if not available:
+            continue
+        timestamp = normalize_eagle_datetime(
+            value,
+            asset_id=asset_id,
+            source_key=source_key,
+            warnings=warnings,
+        )
+        if timestamp is not None:
+            preserved["fileModifiedAt"] = timestamp
+            break
+
+    for source_key, target_key in EAGLE_NUMERIC_METADATA_KEYS:
+        if source_key not in asset_metadata:
+            continue
+        number = normalize_non_negative_number(asset_metadata.get(source_key))
+        if number is None:
+            record_invalid_eagle_metadata_field(
+                warnings,
+                asset_id=asset_id,
+                field=source_key,
+                reason="expected a non-negative number",
+            )
+            continue
+        preserved[target_key] = number
+
+    return preserved
+
+
+def normalize_non_empty_string(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip()
+    return normalized or None
+
+
+def lookup_mtime_value(mtime_json: dict[str, Any], asset_id: str, info_dir: Path) -> Any | None:
+    if not isinstance(mtime_json, dict):
+        return None
+    for key in (asset_id, info_dir.name, info_dir.stem):
+        if key not in mtime_json:
+            continue
+        value = mtime_json[key]
+        if isinstance(value, dict):
+            for nested_key in ("modifiedAt", "mtime", "time", "value"):
+                if nested_key in value:
+                    return value[nested_key]
+            return None
+        return value
+    return None
+
+
+def normalize_eagle_datetime(
+    value: Any,
+    *,
+    asset_id: str,
+    source_key: str,
+    warnings: list[dict[str, Any]],
+) -> str | None:
+    normalized = parse_eagle_datetime(value)
+    if normalized is not None:
+        return normalized
+    record_invalid_eagle_metadata_field(
+        warnings,
+        asset_id=asset_id,
+        field=source_key,
+        reason="expected RFC3339 or Unix timestamp seconds/milliseconds",
+    )
+    return None
+
+
+def record_invalid_eagle_metadata_field(
+    warnings: list[dict[str, Any]],
+    *,
+    asset_id: str,
+    field: str,
+    reason: str,
+) -> None:
+    warnings.append(
+        {
+            "type": "invalidEagleMetadataField",
+            "assetId": asset_id,
+            "field": field,
+            "reason": reason,
+        }
+    )
+
+
+def parse_eagle_datetime(value: Any) -> str | None:
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return rfc3339_from_eagle_timestamp(float(value))
+    if not isinstance(value, str):
+        return None
+
+    text = value.strip()
+    if not text:
+        return None
+    if re.fullmatch(r"-?\d+(?:\.\d+)?", text):
+        return rfc3339_from_eagle_timestamp(float(text))
+
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def rfc3339_from_eagle_timestamp(value: float) -> str | None:
+    if value <= 0:
+        return None
+    seconds = value / 1000 if abs(value) > 10_000_000_000 else value
+    try:
+        return rfc3339_from_timestamp(seconds)
+    except (OSError, OverflowError, ValueError):
+        return None
+
+
+def normalize_non_negative_number(value: Any) -> int | float | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        number = value
+    elif isinstance(value, str) and re.fullmatch(r"\d+(?:\.\d+)?", value.strip()):
+        number = float(value.strip())
+    else:
+        return None
+    if number < 0:
+        return None
+    if float(number).is_integer():
+        return int(number)
+    return number
 
 
 def normalize_eagle_palette(value: Any) -> list[str]:
@@ -959,10 +1143,7 @@ def summarize_conditions(value: Any) -> Any:
 
 def collect_unsupported_hits(
     library_metadata: dict[str, Any],
-    tags_json: dict[str, Any],
     actions_json: list[Any],
-    saved_filters_json: list[Any],
-    mtime_json: dict[str, Any],
     assets: list[AssetPlan],
     skipped_smart_folders: list[SkippedSmartFolder],
 ) -> list[dict[str, Any]]:
@@ -988,8 +1169,6 @@ def collect_unsupported_hits(
                 "items": [serialize_skipped_smart_folder(item) for item in skipped_smart_folders],
             }
         )
-    if mtime_json:
-        hits.append({"capability": "mtime", "count": len(mtime_json)})
     multi_folder_assets = [
         {"assetId": asset.asset_id, "discardedFolders": asset.discarded_folder_names}
         for asset in assets
@@ -1032,6 +1211,7 @@ def build_report(
             "smartFolderCount": len(smart_folders),
             "skippedSmartFolderCount": len(skipped_smart_folders),
             "thumbnailCount": sum(1 for asset in assets if asset.source_thumbnail is not None),
+            "preservedMetadataAssetCount": sum(1 for asset in assets if asset.preserved_metadata),
             "warningCount": len(warnings),
             "unsupportedCapabilityCount": len(unsupported_hits),
         },
@@ -1049,6 +1229,7 @@ def build_report(
                 "title": asset.display_title,
                 "tags": asset.tags,
                 "hasNote": asset.note is not None,
+                "preservedMetadataKeys": sorted(asset.preserved_metadata.keys()),
                 "discardedFolders": asset.discarded_folder_names,
                 "missingFolderIds": asset.missing_folder_ids,
             }
@@ -1421,6 +1602,7 @@ def write_asset_record(connection: sqlite3.Connection, plan: ConversionPlan, ass
     if asset.palette:
         metadata_entries["color"] = asset.palette[0]
         metadata_entries["palette"] = asset.palette
+    metadata_entries.update(asset.preserved_metadata)
     for key, value in metadata_entries.items():
         connection.execute(
             """
