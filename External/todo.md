@@ -6,5 +6,3 @@
 - quickAccess
 - tagsGroups
 - 文件夹 password / passwordTips
-- url
-- 原始时间字段与尺寸字段
