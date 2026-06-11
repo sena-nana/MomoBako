@@ -69,7 +69,8 @@ const defaultSearchHits = (): SearchHit[] => [
     tags: ["封面", "主视觉", "PSD"],
     metadata: {
       note: "最终版封面，保留可编辑图层。",
-      color: "红色",
+      color: "#336699",
+      palette: ["#336699", "#88AACC"],
       shape: "方形",
       rating: 5,
     },
@@ -177,6 +178,7 @@ function searchHitFormat(hit: SearchHit) {
 function metadataSearchText(value: unknown) {
   if (typeof value === "string") return value.toLowerCase();
   if (typeof value === "number" || typeof value === "boolean") return String(value).toLowerCase();
+  if (Array.isArray(value)) return value.map(metadataSearchText).filter(Boolean).join(" ");
   return "";
 }
 
