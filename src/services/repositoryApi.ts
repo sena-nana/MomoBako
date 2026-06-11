@@ -21,6 +21,11 @@ import type {
   MetadataUpdateResponse,
   PluginEnabledRequest,
   PluginInstallRequest,
+  RepositoryAction,
+  RepositoryActionEnabledRequest,
+  RepositoryActionMutationResponse,
+  RepositoryActionRunRequest,
+  RepositoryActionRunResponse,
   RepositoryExportRequest,
   RepositoryExportResponse,
   RepositoryFolderRequest,
@@ -99,6 +104,22 @@ export function deleteSmartFolder(repoId: string, smartFolderId: string) {
 
 export function querySmartFolder(repoId: string, smartFolderId: string) {
   return invoke<SmartFolderResultSnapshot>("query_smart_folder", { repoId, smartFolderId });
+}
+
+export function listRepositoryActions(repoId: string) {
+  return invoke<RepositoryAction[]>("list_repository_actions", { repoId });
+}
+
+export function getRepositoryAction(repoId: string, actionId: string) {
+  return invoke<RepositoryAction>("get_repository_action", { repoId, actionId });
+}
+
+export function setRepositoryActionEnabled(request: RepositoryActionEnabledRequest) {
+  return invoke<RepositoryActionMutationResponse>("set_repository_action_enabled", { request });
+}
+
+export function runRepositoryAction(request: RepositoryActionRunRequest) {
+  return invoke<RepositoryActionRunResponse>("run_repository_action", { request });
 }
 
 export function readFile(request: FileReadRequest) {

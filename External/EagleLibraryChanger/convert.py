@@ -94,6 +94,32 @@ class RepositoryShortcutPlan:
 
 
 @dataclass(slots=True)
+class RepositoryActionStepPlan:
+    step_id: str
+    action_id: str
+    step_kind: str
+    label: str
+    status: str
+    config: dict[str, Any]
+    raw: Any
+    unsupported_reason: str | None
+    sort_order: int
+
+
+@dataclass(slots=True)
+class RepositoryActionPlan:
+    action_id: str
+    source_action_id: str | None
+    name: str
+    status: str
+    enabled: bool
+    raw: Any
+    unsupported_reason: str | None
+    sort_order: int
+    steps: list[RepositoryActionStepPlan]
+
+
+@dataclass(slots=True)
 class TagGroupPlan:
     tag_group_id: str
     name: str
@@ -130,6 +156,7 @@ class ConversionPlan:
     folder_paths: dict[str, str]
     folder_nodes: list[FolderNode]
     quick_access: list[RepositoryShortcutPlan]
+    repository_actions: list[RepositoryActionPlan]
     tag_groups: list[TagGroupPlan]
     smart_folders: list[SmartFolderPlan]
     skipped_smart_folders: list[SkippedSmartFolder]
@@ -263,6 +290,11 @@ def build_conversion_plan(input_root: Path, output_root: Path, repo_name: str) -
         assets=assets,
         warnings=warnings,
     )
+    repository_actions = build_repository_action_plans(
+        repo_id=repo_id,
+        actions_json=actions_json,
+        warnings=warnings,
+    )
     tag_groups = build_tag_group_plans(
         repo_id=repo_id,
         tags_groups=library_metadata.get("tagsGroups") or [],
@@ -271,9 +303,6 @@ def build_conversion_plan(input_root: Path, output_root: Path, repo_name: str) -
     )
 
     unsupported_hits = collect_unsupported_hits(
-        library_metadata=library_metadata,
-        actions_json=actions_json,
-        assets=assets,
         skipped_smart_folders=skipped_smart_folders,
     )
 
@@ -284,6 +313,7 @@ def build_conversion_plan(input_root: Path, output_root: Path, repo_name: str) -
         repo_id=repo_id,
         folder_nodes=folder_nodes,
         quick_access=quick_access,
+        repository_actions=repository_actions,
         tag_groups=tag_groups,
         assets=assets,
         smart_folders=smart_folders,
@@ -300,6 +330,7 @@ def build_conversion_plan(input_root: Path, output_root: Path, repo_name: str) -
         folder_paths=folder_index,
         folder_nodes=folder_nodes,
         quick_access=quick_access,
+        repository_actions=repository_actions,
         tag_groups=tag_groups,
         smart_folders=smart_folders,
         skipped_smart_folders=skipped_smart_folders,
@@ -827,10 +858,14 @@ def convert_eagle_smart_folder_filter(entry: dict[str, Any], folder_index: dict[
     tag_values: list[str] = []
     format_values: list[str] = []
     path_values: list[str] = []
+    exclude_query_values: list[str] = []
+    exclude_path_values: list[str] = []
     metadata_filters: list[dict[str, str]] = []
     exclude_tag_values: list[str] = []
     exclude_format_values: list[str] = []
     exclude_metadata_filters: list[dict[str, str]] = []
+    exclude_number_filters: list[dict[str, Any]] = []
+    exclude_date_filters: list[dict[str, Any]] = []
     number_filters: list[dict[str, Any]] = []
     date_filters: list[dict[str, Any]] = []
     min_rating: float | None = None
@@ -842,10 +877,14 @@ def convert_eagle_smart_folder_filter(entry: dict[str, Any], folder_index: dict[
         tag_values,
         format_values,
         path_values,
+        exclude_query_values,
+        exclude_path_values,
         metadata_filters,
         exclude_tag_values,
         exclude_format_values,
         exclude_metadata_filters,
+        exclude_number_filters,
+        exclude_date_filters,
         number_filters,
         date_filters,
     )
@@ -862,10 +901,14 @@ def convert_eagle_smart_folder_filter(entry: dict[str, Any], folder_index: dict[
             tag_values,
             format_values,
             path_values,
+            exclude_query_values,
+            exclude_path_values,
             metadata_filters,
             exclude_tag_values,
             exclude_format_values,
             exclude_metadata_filters,
+            exclude_number_filters,
+            exclude_date_filters,
             number_filters,
             date_filters,
         )
@@ -888,6 +931,10 @@ def convert_eagle_smart_folder_filter(entry: dict[str, Any], folder_index: dict[
         filter_value["query"] = "\n".join(dedupe_preserve_order(query_values))
     if path_values:
         filter_value["pathPrefix"] = "\n".join(dedupe_preserve_order(path_values))
+    if exclude_query_values:
+        filter_value["excludeQuery"] = "\n".join(dedupe_preserve_order(exclude_query_values))
+    if exclude_path_values:
+        filter_value["excludePathPrefixes"] = dedupe_preserve_order(exclude_path_values)
     if tag_values:
         filter_value["tags"] = dedupe_preserve_order(tag_values)
     if format_values:
@@ -900,6 +947,10 @@ def convert_eagle_smart_folder_filter(entry: dict[str, Any], folder_index: dict[
         filter_value["excludeFormats"] = dedupe_preserve_order(exclude_format_values)
     if exclude_metadata_filters:
         filter_value["excludeMetadataFilters"] = dedupe_metadata_filters(exclude_metadata_filters)
+    if exclude_number_filters:
+        filter_value["excludeNumberFilters"] = exclude_number_filters
+    if exclude_date_filters:
+        filter_value["excludeDateFilters"] = exclude_date_filters
     if number_filters:
         filter_value["numberFilters"] = dedupe_range_filters(number_filters)
     if date_filters:
@@ -945,10 +996,14 @@ def apply_direct_smart_folder_fields(
     tag_values: list[str],
     format_values: list[str],
     path_values: list[str],
+    exclude_query_values: list[str],
+    exclude_path_values: list[str],
     metadata_filters: list[dict[str, str]],
     exclude_tag_values: list[str],
     exclude_format_values: list[str],
     exclude_metadata_filters: list[dict[str, str]],
+    exclude_number_filters: list[dict[str, Any]],
+    exclude_date_filters: list[dict[str, Any]],
     number_filters: list[dict[str, Any]],
     date_filters: list[dict[str, Any]],
 ) -> str | None:
@@ -986,6 +1041,32 @@ def apply_direct_smart_folder_fields(
     exclude_format_values.extend(
         normalize_format_values(filter_root.get("excludeFormats") or filter_root.get("excludedFormats"))
     )
+    exclude_query_values.extend(
+        normalize_text_values(
+            filter_root.get("excludeQuery")
+            or filter_root.get("excludedQuery")
+            or filter_root.get("excludeKeyword")
+            or filter_root.get("excludedKeyword")
+            or filter_root.get("excludeText")
+            or filter_root.get("excludedText")
+        )
+    )
+    exclude_path_values.extend(
+        normalize_path_values(
+            filter_root.get("excludePathPrefixes")
+            or filter_root.get("excludedPathPrefixes")
+            or filter_root.get("excludePath")
+            or filter_root.get("excludedPath")
+            or filter_root.get("excludeFolderPath")
+            or filter_root.get("excludedFolderPath")
+        )
+    )
+    for key in ("excludeFolderIds", "excludedFolderIds", "excludeFolders", "excludedFolders"):
+        for folder_id in normalize_text_values(filter_root.get(key)):
+            path = folder_index.get(folder_id)
+            if not path:
+                return f"unknown folder id: {folder_id}"
+            exclude_path_values.append(path)
     for key in ("excludeColors", "excludedColors"):
         exclude_metadata_filters.extend({"key": "color", "value": value} for value in normalize_text_values(filter_root.get(key)))
     for key in ("excludeShapes", "excludedShapes"):
@@ -996,6 +1077,18 @@ def apply_direct_smart_folder_fields(
     add_direct_range_filter(filter_root, date_filters, "createdAt", "fileCreatedAt")
     add_direct_range_filter(filter_root, date_filters, "modifiedAt", "fileModifiedAt")
     add_direct_range_filter(filter_root, date_filters, "importedAt", "addedToLibraryAt")
+    add_direct_range_filter(filter_root, exclude_number_filters, "excludeWidth", "width")
+    add_direct_range_filter(filter_root, exclude_number_filters, "excludedWidth", "width")
+    add_direct_range_filter(filter_root, exclude_number_filters, "excludeHeight", "height")
+    add_direct_range_filter(filter_root, exclude_number_filters, "excludedHeight", "height")
+    add_direct_range_filter(filter_root, exclude_number_filters, "excludeSize", "originalSizeBytes")
+    add_direct_range_filter(filter_root, exclude_number_filters, "excludedSize", "originalSizeBytes")
+    add_direct_range_filter(filter_root, exclude_date_filters, "excludeCreatedAt", "fileCreatedAt")
+    add_direct_range_filter(filter_root, exclude_date_filters, "excludedCreatedAt", "fileCreatedAt")
+    add_direct_range_filter(filter_root, exclude_date_filters, "excludeModifiedAt", "fileModifiedAt")
+    add_direct_range_filter(filter_root, exclude_date_filters, "excludedModifiedAt", "fileModifiedAt")
+    add_direct_range_filter(filter_root, exclude_date_filters, "excludeImportedAt", "addedToLibraryAt")
+    add_direct_range_filter(filter_root, exclude_date_filters, "excludedImportedAt", "addedToLibraryAt")
     return None
 
 
@@ -1006,10 +1099,14 @@ def apply_smart_folder_condition(
     tag_values: list[str],
     format_values: list[str],
     path_values: list[str],
+    exclude_query_values: list[str],
+    exclude_path_values: list[str],
     metadata_filters: list[dict[str, str]],
     exclude_tag_values: list[str],
     exclude_format_values: list[str],
     exclude_metadata_filters: list[dict[str, str]],
+    exclude_number_filters: list[dict[str, Any]],
+    exclude_date_filters: list[dict[str, Any]],
     number_filters: list[dict[str, Any]],
     date_filters: list[dict[str, Any]],
 ) -> str | None:
@@ -1050,9 +1147,7 @@ def apply_smart_folder_condition(
     negative = operator in {"not", "notcontains", "doesnotcontain", "ne", "neq", "notequals", "exclude"}
 
     if field_name in {"keyword", "keywords", "query", "text", "name", "filename"}:
-        if negative:
-            return "negative text search is not supported"
-        query_values.extend(normalize_text_values(values))
+        (exclude_query_values if negative else query_values).extend(normalize_text_values(values))
         return None
     if field_name in {"tag", "tags"}:
         (exclude_tag_values if negative else tag_values).extend(normalize_text_values(values))
@@ -1061,18 +1156,14 @@ def apply_smart_folder_condition(
         (exclude_format_values if negative else format_values).extend(normalize_format_values(values))
         return None
     if field_name in {"folder", "folders", "folderid", "folderids"}:
-        if negative:
-            return "negative folder conditions are not supported"
         for folder_id in normalize_text_values(values):
             path = folder_index.get(folder_id)
             if not path:
                 return f"unknown folder id: {folder_id}"
-            path_values.append(path)
+            (exclude_path_values if negative else path_values).append(path)
         return None
     if field_name in {"path", "pathprefix", "folderpath"}:
-        if negative:
-            return "negative path conditions are not supported"
-        path_values.extend(normalize_path_values(values))
+        (exclude_path_values if negative else path_values).extend(normalize_path_values(values))
         return None
     if field_name in {"color", "colors"}:
         target = exclude_metadata_filters if negative else metadata_filters
@@ -1085,18 +1176,14 @@ def apply_smart_folder_condition(
     if field_name in {"rating", "score"}:
         return None
     if field_name in {"width", "height", "size", "filesize", "originalsizebytes"}:
-        if negative:
-            return f"negative numeric range is not supported: {field_name}"
         number_filter = range_filter_from_condition(condition, numeric_filter_key(field_name))
         if number_filter:
-            number_filters.append(number_filter)
+            (exclude_number_filters if negative else number_filters).append(number_filter)
             return None
     if field_name in {"createdat", "created", "btime", "modifiedat", "mtime", "updatedat", "importedat", "addedat"}:
-        if negative:
-            return f"negative date range is not supported: {field_name}"
         date_filter = range_filter_from_condition(condition, date_filter_key(field_name))
         if date_filter:
-            date_filters.append(date_filter)
+            (exclude_date_filters if negative else date_filters).append(date_filter)
             return None
     return f"unsupported field: {field_name}"
 
@@ -1273,7 +1360,11 @@ def range_filter_from_condition(condition: dict[str, Any], key: str) -> dict[str
     is_date = key in DATE_FILTER_KEYS
     lower_key = "from" if is_date else "min"
     upper_key = "to" if is_date else "max"
-    if operator in {"lte", "max", "lessthan", "lt"}:
+    if second is not None:
+        if first is not None:
+            entry[lower_key] = first
+        entry[upper_key] = second
+    elif operator in {"lte", "max", "lessthan", "lt"}:
         if first is not None:
             entry[upper_key] = first
     elif operator in {"between", "range"}:
@@ -1332,66 +1423,6 @@ def contains_or_semantics(value: Any) -> bool:
                 return True
     elif isinstance(value, list):
         return any(contains_or_semantics(item) for item in value)
-    return False
-
-
-def contains_negative_semantics(value: Any) -> bool:
-    if isinstance(value, dict):
-        for key, item in value.items():
-            normalized_key = str(key).strip().lower()
-            normalized_value = str(item).strip().lower()
-            if normalized_key in {"exclude", "excluded", "negative", "not", "isnot"} and item:
-                return True
-            if normalized_key in {"operator", "op", "match", "matcher"} and normalized_value in {
-                "not",
-                "notcontains",
-                "doesnotcontain",
-                "ne",
-                "neq",
-                "notequals",
-                "exclude",
-            }:
-                return True
-            if contains_negative_semantics(item):
-                return True
-    elif isinstance(value, list):
-        return any(contains_negative_semantics(item) for item in value)
-    return False
-
-
-def contains_unsupported_smart_folder_keys(value: Any) -> bool:
-    unsupported_keys = {
-        "sort",
-        "sortby",
-        "order",
-        "orderby",
-        "limit",
-        "createdat",
-        "created",
-        "updatedat",
-        "updated",
-        "modifiedat",
-        "mtime",
-        "width",
-        "height",
-        "size",
-        "filesize",
-        "ratio",
-        "aspectratio",
-    }
-    if isinstance(value, dict):
-        for key, item in value.items():
-            normalized_key = re.sub(r"[^a-z0-9]", "", str(key).lower())
-            if normalized_key in unsupported_keys:
-                return True
-            if normalized_key in {"field", "key", "type", "property", "name"}:
-                normalized_value = re.sub(r"[^a-z0-9]", "", str(item).lower())
-                if normalized_value in unsupported_keys:
-                    return True
-            if contains_unsupported_smart_folder_keys(item):
-                return True
-    elif isinstance(value, list):
-        return any(contains_unsupported_smart_folder_keys(item) for item in value)
     return False
 
 
@@ -1591,6 +1622,190 @@ def build_tag_group_plans(
     return plans
 
 
+def build_repository_action_plans(
+    repo_id: str,
+    actions_json: Any,
+    warnings: list[dict[str, Any]],
+) -> list[RepositoryActionPlan]:
+    if not actions_json:
+        return []
+    if not isinstance(actions_json, list):
+        warnings.append({"type": "invalidActions", "reason": "actions.json is not a list"})
+        return []
+
+    plans: list[RepositoryActionPlan] = []
+    used_ids: set[str] = set()
+    for index, action in enumerate(actions_json):
+        if not isinstance(action, dict):
+            warnings.append({"type": "invalidAction", "index": index, "reason": "entry is not an object"})
+            continue
+        source_action_id = normalize_non_empty_string(action.get("id") or action.get("uuid") or action.get("actionId"))
+        name = normalize_non_empty_string(action.get("name") or action.get("title") or action.get("label")) or f"Eagle Action {index + 1}"
+        action_id = unique_repository_action_id(repo_id, source_action_id or str(index), name, used_ids)
+        steps_source = action.get("steps") or action.get("tasks") or action.get("actions") or action.get("items") or []
+        steps = build_repository_action_step_plans(
+            repo_id=repo_id,
+            action_id=action_id,
+            steps_source=steps_source,
+            warnings=warnings,
+        )
+        if not steps:
+            steps = [
+                RepositoryActionStepPlan(
+                    step_id=f"{action_id}-step-1",
+                    action_id=action_id,
+                    step_kind="unsupported",
+                    label="未识别动作",
+                    status="unsupported",
+                    config={},
+                    raw=action,
+                    unsupported_reason="action has no recognizable steps",
+                    sort_order=0,
+                )
+            ]
+        unsupported_reasons = [step.unsupported_reason for step in steps if step.status != "ready" and step.unsupported_reason]
+        status = "unsupported" if unsupported_reasons else "ready"
+        plans.append(
+            RepositoryActionPlan(
+                action_id=action_id,
+                source_action_id=source_action_id,
+                name=name,
+                status=status,
+                enabled=status == "ready",
+                raw=action,
+                unsupported_reason="; ".join(unsupported_reasons) if unsupported_reasons else None,
+                sort_order=index,
+                steps=steps,
+            )
+        )
+    return plans
+
+
+def build_repository_action_step_plans(
+    *,
+    repo_id: str,
+    action_id: str,
+    steps_source: Any,
+    warnings: list[dict[str, Any]],
+) -> list[RepositoryActionStepPlan]:
+    if isinstance(steps_source, dict):
+        steps = [steps_source]
+    elif isinstance(steps_source, list):
+        steps = steps_source
+    else:
+        warnings.append({"type": "invalidActionSteps", "actionId": action_id, "reason": "steps are not a list"})
+        return []
+    plans: list[RepositoryActionStepPlan] = []
+    for index, step in enumerate(steps):
+        raw = step
+        if not isinstance(step, dict):
+            plan = unsupported_action_step_plan(repo_id, action_id, index, raw, "step is not an object")
+        else:
+            plan = convert_repository_action_step(repo_id, action_id, index, step)
+        plans.append(plan)
+    return plans
+
+
+def convert_repository_action_step(
+    repo_id: str,
+    action_id: str,
+    index: int,
+    step: dict[str, Any],
+) -> RepositoryActionStepPlan:
+    step_type = str(
+        step.get("type")
+        or step.get("kind")
+        or step.get("action")
+        or step.get("command")
+        or step.get("name")
+        or ""
+    ).strip().lower()
+    metadata: dict[str, Any] = {}
+
+    if step_type in {"rating", "score", "setrating"} or "rating" in step:
+        rating = normalize_non_negative_number(step.get("rating") if "rating" in step else step.get("value"))
+        if rating is not None:
+            metadata["rating"] = rating
+    if step_type in {"favorite", "favourite", "star", "setfavorite"} or "favorite" in step or "favourite" in step:
+        value = step.get("favorite", step.get("favourite", step.get("value", True)))
+        metadata["favorite"] = bool(value)
+    if step_type in {"tag", "tags", "settags", "addtags"} or "tags" in step:
+        tags = normalize_text_values(step.get("tags") or step.get("value") or step.get("values"))
+        return RepositoryActionStepPlan(
+            step_id=repository_action_step_id(repo_id, action_id, index, step_type or "tags"),
+            action_id=action_id,
+            step_kind="tagGroups.set",
+            label=normalize_non_empty_string(step.get("label") or step.get("title")) or "设置标签",
+            status="ready",
+            config={"tags": tags},
+            raw=step,
+            unsupported_reason=None,
+            sort_order=index,
+        )
+    if step_type in {"annotation", "comment", "note", "setcomment"} or "annotation" in step or "comment" in step:
+        value = normalize_non_empty_string(step.get("comment") or step.get("annotation") or step.get("note") or step.get("value"))
+        metadata["comment"] = value or ""
+    if step_type in {"url", "link", "setlink"} or "url" in step or "link" in step:
+        value = normalize_non_empty_string(step.get("link") or step.get("url") or step.get("value"))
+        metadata["link"] = value or ""
+    if step_type in {"metadata", "setmetadata", "update_metadata"} and isinstance(step.get("metadata"), dict):
+        metadata.update(step["metadata"])
+
+    if metadata:
+        return RepositoryActionStepPlan(
+            step_id=repository_action_step_id(repo_id, action_id, index, step_type or "metadata"),
+            action_id=action_id,
+            step_kind="metadata.update",
+            label=normalize_non_empty_string(step.get("label") or step.get("title")) or "更新元数据",
+            status="ready",
+            config={"metadata": metadata},
+            raw=step,
+            unsupported_reason=None,
+            sort_order=index,
+        )
+
+    if step_type in {"move", "copy", "rename", "delete", "trash", "open", "export", "download"}:
+        reason = f"dangerous or external step requires native executor: {step_type}"
+    else:
+        reason = f"unsupported action step: {step_type or 'unknown'}"
+    return unsupported_action_step_plan(repo_id, action_id, index, step, reason)
+
+
+def unsupported_action_step_plan(
+    repo_id: str,
+    action_id: str,
+    index: int,
+    raw: Any,
+    reason: str,
+) -> RepositoryActionStepPlan:
+    return RepositoryActionStepPlan(
+        step_id=repository_action_step_id(repo_id, action_id, index, reason),
+        action_id=action_id,
+        step_kind="unsupported",
+        label=f"未支持步骤 {index + 1}",
+        status="unsupported",
+        config={},
+        raw=raw,
+        unsupported_reason=reason,
+        sort_order=index,
+    )
+
+
+def unique_repository_action_id(repo_id: str, source_id: str, name: str, used_ids: set[str]) -> str:
+    base = slugify_ascii_component(f"action-{repo_id}-{source_id}-{name}")
+    candidate = base
+    index = 2
+    while candidate in used_ids:
+        candidate = f"{base}-{index}"
+        index += 1
+    used_ids.add(candidate)
+    return candidate
+
+
+def repository_action_step_id(repo_id: str, action_id: str, index: int, key: str) -> str:
+    return slugify_ascii_component(f"action-step-{repo_id}-{action_id}-{index}-{key}")
+
+
 def unique_tag_group_id(repo_id: str, source_id: str | None, name: str, used_ids: set[str]) -> str:
     base = slugify_ascii_component(f"tag-group-{repo_id}-{source_id or name}")
     candidate = base
@@ -1621,14 +1836,9 @@ def summarize_conditions(value: Any) -> Any:
 
 
 def collect_unsupported_hits(
-    library_metadata: dict[str, Any],
-    actions_json: list[Any],
-    assets: list[AssetPlan],
     skipped_smart_folders: list[SkippedSmartFolder],
 ) -> list[dict[str, Any]]:
     hits: list[dict[str, Any]] = []
-    if actions_json:
-        hits.append({"capability": "actions", "count": len(actions_json)})
     if skipped_smart_folders:
         hits.append(
             {
@@ -1655,6 +1865,7 @@ def build_report(
     repo_id: str,
     folder_nodes: list[FolderNode],
     quick_access: list[RepositoryShortcutPlan],
+    repository_actions: list[RepositoryActionPlan],
     tag_groups: list[TagGroupPlan],
     assets: list[AssetPlan],
     smart_folders: list[SmartFolderPlan],
@@ -1672,6 +1883,13 @@ def build_report(
             "deletedAssetCount": sum(1 for asset in assets if asset.is_deleted),
             "folderCount": count_folder_nodes(folder_nodes),
             "quickAccessCount": len(quick_access),
+            "repositoryActionCount": len(repository_actions),
+            "unsupportedActionStepCount": sum(
+                1
+                for action in repository_actions
+                for step in action.steps
+                if step.status != "ready"
+            ),
             "tagGroupCount": len(tag_groups),
             "aliasAssetCount": sum(max(len(asset.memberships) - 1, 0) for asset in assets),
             "smartFolderCount": len(smart_folders),
@@ -1683,6 +1901,7 @@ def build_report(
         },
         "folders": [serialize_folder_node(node) for node in folder_nodes],
         "quickAccess": [serialize_shortcut_plan(item) for item in quick_access],
+        "repositoryActions": [serialize_repository_action_plan(item) for item in repository_actions],
         "tagGroups": [serialize_tag_group_plan(item) for item in tag_groups],
         "assets": [
             {
@@ -1741,6 +1960,29 @@ def serialize_shortcut_plan(plan: RepositoryShortcutPlan) -> dict[str, Any]:
         "targetPath": plan.target_path,
         "targetId": plan.target_id,
         "sortOrder": plan.sort_order,
+    }
+
+
+def serialize_repository_action_plan(plan: RepositoryActionPlan) -> dict[str, Any]:
+    return {
+        "actionId": plan.action_id,
+        "sourceActionId": plan.source_action_id,
+        "name": plan.name,
+        "status": plan.status,
+        "enabled": plan.enabled,
+        "unsupportedReason": plan.unsupported_reason,
+        "sortOrder": plan.sort_order,
+        "steps": [
+            {
+                "stepId": step.step_id,
+                "stepKind": step.step_kind,
+                "label": step.label,
+                "status": step.status,
+                "unsupportedReason": step.unsupported_reason,
+                "sortOrder": step.sort_order,
+            }
+            for step in plan.steps
+        ],
     }
 
 
@@ -1818,6 +2060,7 @@ def execute_plan(plan: ConversionPlan, force: bool) -> None:
         repo_id=plan.repo_id,
         folder_nodes=plan.folder_nodes,
         quick_access=plan.quick_access,
+        repository_actions=plan.repository_actions,
         tag_groups=plan.tag_groups,
         assets=plan.assets,
         smart_folders=plan.smart_folders,
@@ -1880,6 +2123,7 @@ def write_database(plan: ConversionPlan) -> None:
         write_repository_record(connection, plan)
         write_folder_metadata_records(connection, plan)
         write_repository_shortcut_records(connection, plan)
+        write_repository_action_records(connection, plan)
         write_tag_group_records(connection, plan)
         for asset in plan.assets:
             write_asset_record(connection, plan, asset)
@@ -2066,6 +2310,73 @@ CREATE TABLE IF NOT EXISTS smart_folders (
 CREATE INDEX IF NOT EXISTS idx_smart_folders_repo_parent
 ON smart_folders(repo_id, parent_id, sort_order, name);
 
+CREATE TABLE IF NOT EXISTS repository_actions (
+  action_id TEXT PRIMARY KEY,
+  repo_id TEXT NOT NULL,
+  source TEXT NOT NULL,
+  source_action_id TEXT,
+  name TEXT NOT NULL,
+  status TEXT NOT NULL,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  raw_json TEXT NOT NULL,
+  unsupported_reason TEXT,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY(repo_id) REFERENCES repositories(repo_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_repository_actions_repo_order
+ON repository_actions(repo_id, sort_order, name);
+
+CREATE TABLE IF NOT EXISTS repository_action_steps (
+  step_id TEXT PRIMARY KEY,
+  action_id TEXT NOT NULL,
+  repo_id TEXT NOT NULL,
+  step_kind TEXT NOT NULL,
+  label TEXT NOT NULL,
+  status TEXT NOT NULL,
+  config_json TEXT NOT NULL,
+  raw_json TEXT NOT NULL,
+  unsupported_reason TEXT,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  FOREIGN KEY(action_id) REFERENCES repository_actions(action_id) ON DELETE CASCADE,
+  FOREIGN KEY(repo_id) REFERENCES repositories(repo_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_repository_action_steps_action_order
+ON repository_action_steps(action_id, sort_order);
+
+CREATE TABLE IF NOT EXISTS repository_action_runs (
+  run_id TEXT PRIMARY KEY,
+  action_id TEXT NOT NULL,
+  repo_id TEXT NOT NULL,
+  status TEXT NOT NULL,
+  target_json TEXT NOT NULL,
+  message TEXT,
+  started_at TEXT NOT NULL,
+  finished_at TEXT,
+  FOREIGN KEY(action_id) REFERENCES repository_actions(action_id),
+  FOREIGN KEY(repo_id) REFERENCES repositories(repo_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_repository_action_runs_action_time
+ON repository_action_runs(action_id, started_at DESC);
+
+CREATE TABLE IF NOT EXISTS repository_action_run_steps (
+  run_step_id TEXT PRIMARY KEY,
+  run_id TEXT NOT NULL,
+  step_id TEXT NOT NULL,
+  repo_id TEXT NOT NULL,
+  status TEXT NOT NULL,
+  message TEXT,
+  started_at TEXT NOT NULL,
+  finished_at TEXT,
+  FOREIGN KEY(run_id) REFERENCES repository_action_runs(run_id) ON DELETE CASCADE,
+  FOREIGN KEY(step_id) REFERENCES repository_action_steps(step_id),
+  FOREIGN KEY(repo_id) REFERENCES repositories(repo_id)
+);
+
 CREATE TABLE IF NOT EXISTS metadata (
   asset_id TEXT NOT NULL,
   key TEXT NOT NULL,
@@ -2178,6 +2489,55 @@ def write_repository_shortcut_records(connection: sqlite3.Connection, plan: Conv
                 timestamp,
             ),
         )
+
+
+def write_repository_action_records(connection: sqlite3.Connection, plan: ConversionPlan) -> None:
+    timestamp = now_rfc3339()
+    for action in plan.repository_actions:
+        connection.execute(
+            """
+            INSERT OR REPLACE INTO repository_actions (
+              action_id, repo_id, source, source_action_id, name, status, enabled,
+              raw_json, unsupported_reason, sort_order, created_at, updated_at
+            )
+            VALUES (?, ?, 'eagle-importer', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                action.action_id,
+                plan.repo_id,
+                action.source_action_id,
+                action.name,
+                action.status,
+                1 if action.enabled else 0,
+                json.dumps(action.raw, ensure_ascii=False),
+                action.unsupported_reason,
+                action.sort_order,
+                timestamp,
+                timestamp,
+            ),
+        )
+        for step in action.steps:
+            connection.execute(
+                """
+                INSERT OR REPLACE INTO repository_action_steps (
+                  step_id, action_id, repo_id, step_kind, label, status,
+                  config_json, raw_json, unsupported_reason, sort_order
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    step.step_id,
+                    action.action_id,
+                    plan.repo_id,
+                    step.step_kind,
+                    step.label,
+                    step.status,
+                    json.dumps(step.config, ensure_ascii=False),
+                    json.dumps(step.raw, ensure_ascii=False),
+                    step.unsupported_reason,
+                    step.sort_order,
+                ),
+            )
 
 
 def write_tag_group_records(connection: sqlite3.Connection, plan: ConversionPlan) -> None:
@@ -2474,14 +2834,15 @@ def write_todo_file(path: Path) -> None:
     lines = [
         "# Eagle -> MomoBako Todo",
         "",
-        "以下能力当前无法完整转换为 MomoBako 原生形式：",
+        "静态清单不再声明“暂无缺口”。每次 Eagle 导入都会根据实际输入在 import report 中输出 unsupportedCapabilities、skippedSmartFolders、repositoryActions 和 unsupportedActionStepCount。",
+        "",
+        "已知的剩余能力应以最新导入报告为准；无法安全识别的 Action 步骤会原样保留为 unsupported，并默认禁用。",
         "",
     ]
     if UNSUPPORTED_CAPABILITIES:
+        lines.append("历史固定关注项：")
         for capability in UNSUPPORTED_CAPABILITIES:
             lines.append(f"- {capability}")
-    else:
-        lines.append("- 暂无已知剩余能力缺口")
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 

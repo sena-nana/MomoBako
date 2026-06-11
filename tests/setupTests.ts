@@ -4,6 +4,7 @@ import { afterEach, vi } from "vitest";
 import type {
   FileBrowserEntry,
   PluginManifest,
+  RepositoryAction,
   SearchHit,
   SearchRequest,
   SmartFolder,
@@ -60,6 +61,7 @@ let mockInvokeFailure: { command: string; error: Error } | null = null;
 let mockInvokeDelay: { command: string; resolve: () => void; promise: Promise<void> } | null = null;
 let mockSearchResults: SearchHit[] | null = null;
 let mockSmartFolders: SmartFolder[] = [];
+let mockRepositoryActions: RepositoryAction[] = [];
 let mockPlugins: PluginManifest[] | null = null;
 const invokeCalls: Array<{ command: string; args?: Record<string, unknown> }> = [];
 const openerCalls: Array<{ command: "openPath" | "revealItemInDir"; path: string }> = [];
@@ -261,18 +263,47 @@ function filterSearchHits(request: SearchRequest | undefined, hits: SearchHit[])
   const excludeTags = request.excludeTags?.map((tag) => tag.toLowerCase()).filter(Boolean) ?? [];
   const excludeFormats = request.excludeFormats?.map((format) => format.toLowerCase()).filter(Boolean) ?? [];
   const excludeMetadataFilters = request.excludeMetadataFilters ?? [];
+  const excludeQueryTerms = request.excludeQuery?.toLowerCase().split(/\s+/).filter(Boolean) ?? [];
+  const excludePathPrefixes = request.excludePathPrefixes?.map((path) => path.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "").toLowerCase()).filter(Boolean) ?? [];
+  const excludeNumberFilters = request.excludeNumberFilters ?? [];
+  const excludeDateFilters = request.excludeDateFilters ?? [];
   const numberFilters = request.numberFilters ?? [];
   const dateFilters = request.dateFilters ?? [];
   const matchMode = request.matchMode === "or" ? "or" : "and";
 
   const results = hits.filter((hit) => {
     if (request.repoId && hit.repoId !== request.repoId) return false;
+    if (excludePathPrefixes.some((prefix) => {
+      const path = hit.path.toLowerCase();
+      return path === prefix || path.startsWith(`${prefix}/`);
+    })) return false;
+    if (excludeQueryTerms.length) {
+      const haystack = [
+        hit.repoName,
+        hit.filename,
+        hit.path,
+        ...hit.tags,
+        ...Object.values(hit.metadata).map(metadataSearchText),
+      ].join(" ").toLowerCase();
+      if (excludeQueryTerms.some((term) => haystack.includes(term))) return false;
+    }
     if (excludeFormats.length && excludeFormats.includes(searchHitFormat(hit))) return false;
     if (excludeTags.length && hit.tags.some((tag) => excludeTags.some((expected) => tag.toLowerCase().includes(expected)))) return false;
     if (excludeMetadataFilters.some((filter) => {
       const actual = metadataSearchText(hit.metadata[filter.key]);
       const expected = filter.value.toLowerCase();
       return actual === expected || actual.includes(expected);
+    })) return false;
+    if (excludeNumberFilters.some((filter) => {
+      const actual = metadataNumber(hit.metadata[filter.key]);
+      return actual != null && (filter.min == null || actual >= filter.min) && (filter.max == null || actual <= filter.max);
+    })) return false;
+    if (excludeDateFilters.some((filter) => {
+      const actualText = metadataSearchText(hit.metadata[filter.key]);
+      const actualTime = Date.parse(actualText);
+      return !Number.isNaN(actualTime)
+        && (!filter.from || actualTime >= Date.parse(filter.from))
+        && (!filter.to || actualTime <= Date.parse(filter.to));
     })) return false;
     if (numberFilters.some((filter) => {
       const actual = metadataNumber(hit.metadata[filter.key]);
@@ -351,6 +382,7 @@ function smartFolderSearchRequest(filter: SmartFolderFilter, repoId: string): Se
   return {
     query: filter.query ?? "",
     repoId,
+    excludeQuery: filter.excludeQuery,
     tags: filter.tags,
     formats: filter.formats,
     minRating: filter.minRating,
@@ -362,6 +394,9 @@ function smartFolderSearchRequest(filter: SmartFolderFilter, repoId: string): Se
     excludeTags: filter.excludeTags,
     excludeFormats: filter.excludeFormats,
     excludeMetadataFilters: filter.excludeMetadataFilters,
+    excludePathPrefixes: filter.excludePathPrefixes,
+    excludeNumberFilters: filter.excludeNumberFilters,
+    excludeDateFilters: filter.excludeDateFilters,
     numberFilters: filter.numberFilters,
     dateFilters: filter.dateFilters,
     matchMode: filter.matchMode,
@@ -773,6 +808,69 @@ function createMockPlugins() {
   ];
 }
 
+function defaultRepositoryActions(): RepositoryAction[] {
+  return [
+    {
+      actionId: "action-ready",
+      repoId: "repo-main-001",
+      source: "eagle-importer",
+      sourceActionId: "eagle-action-ready",
+      name: "标记精选",
+      status: "ready",
+      enabled: true,
+      raw: { id: "eagle-action-ready", name: "标记精选" },
+      unsupportedReason: null,
+      sortOrder: 0,
+      createdAt: "2026-06-05T00:18:00Z",
+      updatedAt: "2026-06-05T00:18:00Z",
+      steps: [
+        {
+          stepId: "action-ready-step-1",
+          actionId: "action-ready",
+          repoId: "repo-main-001",
+          stepKind: "metadata.update",
+          label: "更新元数据",
+          status: "ready",
+          config: { metadata: { rating: 5 } },
+          raw: { type: "rating", rating: 5 },
+          unsupportedReason: null,
+          sortOrder: 0,
+        },
+      ],
+      lastRun: null,
+    },
+    {
+      actionId: "action-unsupported",
+      repoId: "repo-main-001",
+      source: "eagle-importer",
+      sourceActionId: "eagle-action-unsupported",
+      name: "外部导出",
+      status: "unsupported",
+      enabled: false,
+      raw: { id: "eagle-action-unsupported", name: "外部导出" },
+      unsupportedReason: "unsupported action step: shell",
+      sortOrder: 1,
+      createdAt: "2026-06-05T00:18:00Z",
+      updatedAt: "2026-06-05T00:18:00Z",
+      steps: [
+        {
+          stepId: "action-unsupported-step-1",
+          actionId: "action-unsupported",
+          repoId: "repo-main-001",
+          stepKind: "unsupported",
+          label: "未支持步骤 1",
+          status: "unsupported",
+          config: {},
+          raw: { type: "shell", command: "open-external-app" },
+          unsupportedReason: "unsupported action step: shell",
+          sortOrder: 0,
+        },
+      ],
+      lastRun: null,
+    },
+  ];
+}
+
 vi.mock("@tauri-apps/api/core", () => ({
   Channel: class MockChannel<T> {
     onmessage: ((message: T) => void) | null = null;
@@ -844,6 +942,56 @@ vi.mock("@tauri-apps/api/core", () => ({
     }
     if (command === "list_smart_folders") {
       return buildSmartFolderTree();
+    }
+    if (command === "list_repository_actions") {
+      const repoId = typeof args?.repoId === "string" ? args.repoId : "repo-main-001";
+      return mockRepositoryActions.filter((action) => action.repoId === repoId);
+    }
+    if (command === "get_repository_action") {
+      const repoId = typeof args?.repoId === "string" ? args.repoId : "repo-main-001";
+      const actionId = typeof args?.actionId === "string" ? args.actionId : "";
+      return mockRepositoryActions.find((action) => action.repoId === repoId && action.actionId === actionId) ?? null;
+    }
+    if (command === "set_repository_action_enabled") {
+      const request = args?.request as { repoId?: string; actionId?: string; enabled?: boolean } | undefined;
+      let action: RepositoryAction | null = null;
+      mockRepositoryActions = mockRepositoryActions.map((item) => {
+        if (item.repoId !== request?.repoId || item.actionId !== request?.actionId) return item;
+        action = {
+          ...item,
+          enabled: Boolean(request.enabled),
+          updatedAt: "2026-06-05T00:19:00Z",
+        };
+        return action;
+      });
+      return { action };
+    }
+    if (command === "run_repository_action") {
+      const request = args?.request as { repoId?: string; actionId?: string; assetIds?: string[]; targetPaths?: string[] } | undefined;
+      const run = {
+        runId: `run-${request?.actionId ?? "action"}-1`,
+        actionId: request?.actionId ?? "",
+        repoId: request?.repoId ?? "repo-main-001",
+        status: "success",
+        target: {
+          assetIds: request?.assetIds ?? [],
+          targetPaths: request?.targetPaths ?? [],
+        },
+        message: "已处理目标",
+        startedAt: "2026-06-05T00:19:00Z",
+        finishedAt: "2026-06-05T00:19:01Z",
+      };
+      let action: RepositoryAction | null = null;
+      mockRepositoryActions = mockRepositoryActions.map((item) => {
+        if (item.repoId !== request?.repoId || item.actionId !== request?.actionId) return item;
+        action = {
+          ...item,
+          lastRun: run,
+          updatedAt: "2026-06-05T00:19:01Z",
+        };
+        return action;
+      });
+      return { action, run };
     }
     if (command === "create_smart_folder") {
       const request = args?.request as {
@@ -1340,6 +1488,7 @@ afterEach(() => {
   mockInvokeDelay = null;
   mockSearchResults = null;
   mockSmartFolders = [];
+  mockRepositoryActions = [];
   mockPlugins = null;
   mockRepositories = [];
   mockEntries = initialEntries();
@@ -1354,6 +1503,7 @@ export function getInvokeCalls(command?: string) {
 
 export function seedMockRepository() {
   mockRepositories = [mockSnapshot.repository];
+  mockRepositoryActions = defaultRepositoryActions();
 }
 
 function createMissingMockRepository() {
@@ -1371,6 +1521,11 @@ export function seedMissingMockRepository() {
 
 export function seedMixedMockRepositories() {
   mockRepositories = [altRepository, createMissingMockRepository()];
+  mockRepositoryActions = defaultRepositoryActions();
+}
+
+export function seedMockRepositoryActions(actions: RepositoryAction[] = defaultRepositoryActions()) {
+  mockRepositoryActions = actions;
 }
 
 export function getRelocatedRepositoryPath() {
