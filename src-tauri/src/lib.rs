@@ -21,9 +21,11 @@ use repository_service::{
     FilePreviewSourceResponse, FileReadRequest, FileRenameRequest, HardlinkCandidateResponse,
     HardlinkConfirmRequest, HardlinkConfirmResponse, MetadataUpdateRequest, MetadataUpdateResponse,
     PluginEnabledRequest, PluginInstallRequest, PluginManifest, PluginMutationResponse,
-    RepositoryExportRequest, RepositoryExportResponse, RepositoryFolderRequest,
-    RepositoryMutationRequest, RepositoryMutationResponse, RepositoryRelocateRequest,
-    RepositorySnapshot, RepositorySummary, RevisionActionRequest, RevisionActionResponse,
+    RepositoryAction, RepositoryActionEnabledRequest, RepositoryActionMutationResponse,
+    RepositoryActionRunRequest, RepositoryActionRunResponse, RepositoryExportRequest,
+    RepositoryExportResponse, RepositoryFolderRequest, RepositoryMutationRequest,
+    RepositoryMutationResponse, RepositoryRelocateRequest, RepositorySnapshot, RepositorySummary,
+    RevisionActionRequest, RevisionActionResponse,
     SearchRequest, SearchResponse, SmartFolderMutationRequest, SmartFolderMutationResponse,
     SmartFolderResultSnapshot, SmartFolderTreeNode, SmartFolderUpdateRequest, SyncRequest,
     SyncResult, ThumbnailRequest, ThumbnailResponse, TrashMutationRequest,
@@ -141,6 +143,47 @@ async fn query_smart_folder(
 ) -> Result<SmartFolderResultSnapshot, String> {
     runtime
         .run_read(move |state| state.query_smart_folder(&repo_id, &smart_folder_id))
+        .await
+}
+
+#[tauri::command]
+async fn list_repository_actions(
+    repo_id: String,
+    runtime: tauri::State<'_, RepositoryRuntime>,
+) -> Result<Vec<RepositoryAction>, String> {
+    runtime
+        .run_read(move |state| state.list_repository_actions(&repo_id))
+        .await
+}
+
+#[tauri::command]
+async fn get_repository_action(
+    repo_id: String,
+    action_id: String,
+    runtime: tauri::State<'_, RepositoryRuntime>,
+) -> Result<RepositoryAction, String> {
+    runtime
+        .run_read(move |state| state.get_repository_action(&repo_id, &action_id))
+        .await
+}
+
+#[tauri::command]
+async fn set_repository_action_enabled(
+    request: RepositoryActionEnabledRequest,
+    runtime: tauri::State<'_, RepositoryRuntime>,
+) -> Result<RepositoryActionMutationResponse, String> {
+    runtime
+        .run_write(move |state| state.set_repository_action_enabled(request))
+        .await
+}
+
+#[tauri::command]
+async fn run_repository_action(
+    request: RepositoryActionRunRequest,
+    runtime: tauri::State<'_, RepositoryRuntime>,
+) -> Result<RepositoryActionRunResponse, String> {
+    runtime
+        .run_write(move |state| state.run_repository_action(request))
         .await
 }
 
@@ -540,6 +583,10 @@ pub fn run() {
             update_smart_folder,
             delete_smart_folder,
             query_smart_folder,
+            list_repository_actions,
+            get_repository_action,
+            set_repository_action_enabled,
+            run_repository_action,
             read_file,
             prepare_preview_file_source,
             create_directory,

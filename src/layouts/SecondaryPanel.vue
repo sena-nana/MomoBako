@@ -7,6 +7,7 @@ import {
   Bookmark,
   Check,
   ChevronsUpDown,
+  ClipboardList,
   File,
   FolderTree,
   LoaderCircle,
@@ -25,7 +26,7 @@ import { normalizeWorkspaceMovePaths } from "../pages/workspace/dragBehavior";
 import { useRepositoryWorkspace, type WorkspacePanelKey } from "../composables/useRepositoryWorkspace";
 import type { FileDeleteMode, RepositoryShortcut, SmartFolder, SmartFolderFilter, SmartFolderTreeNode as SmartFolderTreeNodeType } from "../types/repository";
 
-type PanelKey = Exclude<WorkspacePanelKey, "files" | "search" | "smartFolder">;
+type PanelKey = Exclude<WorkspacePanelKey, "files" | "search" | "smartFolder" | "actions">;
 type ShortcutKey = "all" | "processing" | "untagged" | "deleted";
 type ShortcutItem = {
   id: ShortcutKey;
@@ -84,9 +85,13 @@ const smartFolderShapes = ref("");
 const smartFolderMinRating = ref("");
 const smartFolderMetadataFilters = ref("");
 const smartFolderMatchMode = ref<"and" | "or">("and");
+const smartFolderExcludeQuery = ref("");
+const smartFolderExcludePathPrefixes = ref("");
 const smartFolderExcludeTags = ref("");
 const smartFolderExcludeFormats = ref("");
 const smartFolderExcludeMetadataFilters = ref("");
+const smartFolderExcludeNumberFilters = ref("");
+const smartFolderExcludeDateFilters = ref("");
 const smartFolderNumberFilters = ref("");
 const smartFolderDateFilters = ref("");
 const smartFolderSortField = ref("");
@@ -111,6 +116,7 @@ const {
   draggedWorkspacePaths,
   fileTree,
   smartFolders,
+  repositoryActions,
   syncProgress,
   isExternalDragActive,
   isInternalDragActive,
@@ -321,6 +327,10 @@ function formatNumberFiltersInput(filter: SmartFolderFilter) {
   return filter.numberFilters?.map((item) => `${item.key}=${item.min ?? ""}..${item.max ?? ""}`).join("\n") ?? "";
 }
 
+function formatExcludeNumberFiltersInput(filter: SmartFolderFilter) {
+  return filter.excludeNumberFilters?.map((item) => `${item.key}=${item.min ?? ""}..${item.max ?? ""}`).join("\n") ?? "";
+}
+
 function parseDateFiltersInput(value: string) {
   return value
     .split(/\n|[,，]/)
@@ -342,6 +352,10 @@ function formatDateFiltersInput(filter: SmartFolderFilter) {
   return filter.dateFilters?.map((item) => `${item.key}=${item.from ?? ""}..${item.to ?? ""}`).join("\n") ?? "";
 }
 
+function formatExcludeDateFiltersInput(filter: SmartFolderFilter) {
+  return filter.excludeDateFilters?.map((item) => `${item.key}=${item.from ?? ""}..${item.to ?? ""}`).join("\n") ?? "";
+}
+
 function buildSmartFolderFilter(): SmartFolderFilter {
   const minRating = Number(smartFolderMinRating.value);
   const limit = Number(smartFolderLimit.value);
@@ -355,9 +369,13 @@ function buildSmartFolderFilter(): SmartFolderFilter {
     minRating: Number.isFinite(minRating) && minRating > 0 ? minRating : undefined,
     metadataFilters: parseMetadataFiltersInput(smartFolderMetadataFilters.value),
     matchMode: smartFolderMatchMode.value,
+    excludeQuery: smartFolderExcludeQuery.value.trim() || undefined,
+    excludePathPrefixes: splitListInput(smartFolderExcludePathPrefixes.value),
     excludeTags: splitListInput(smartFolderExcludeTags.value),
     excludeFormats: splitListInput(smartFolderExcludeFormats.value),
     excludeMetadataFilters: parseMetadataFiltersInput(smartFolderExcludeMetadataFilters.value),
+    excludeNumberFilters: parseNumberFiltersInput(smartFolderExcludeNumberFilters.value),
+    excludeDateFilters: parseDateFiltersInput(smartFolderExcludeDateFilters.value),
     numberFilters: parseNumberFiltersInput(smartFolderNumberFilters.value),
     dateFilters: parseDateFiltersInput(smartFolderDateFilters.value),
     sort: smartFolderSortField.value.trim()
@@ -692,9 +710,13 @@ function resetSmartFolderDialog(parentId = "") {
   smartFolderMinRating.value = "";
   smartFolderMetadataFilters.value = "";
   smartFolderMatchMode.value = "and";
+  smartFolderExcludeQuery.value = "";
+  smartFolderExcludePathPrefixes.value = "";
   smartFolderExcludeTags.value = "";
   smartFolderExcludeFormats.value = "";
   smartFolderExcludeMetadataFilters.value = "";
+  smartFolderExcludeNumberFilters.value = "";
+  smartFolderExcludeDateFilters.value = "";
   smartFolderNumberFilters.value = "";
   smartFolderDateFilters.value = "";
   smartFolderSortField.value = "";
@@ -724,9 +746,13 @@ function openEditSmartFolderDialog(smartFolderId: string) {
   smartFolderMinRating.value = folder.filter.minRating == null ? "" : String(folder.filter.minRating);
   smartFolderMetadataFilters.value = formatMetadataFiltersInput(folder.filter);
   smartFolderMatchMode.value = folder.filter.matchMode === "or" ? "or" : "and";
+  smartFolderExcludeQuery.value = folder.filter.excludeQuery ?? "";
+  smartFolderExcludePathPrefixes.value = joinListInput(folder.filter.excludePathPrefixes);
   smartFolderExcludeTags.value = joinListInput(folder.filter.excludeTags);
   smartFolderExcludeFormats.value = joinListInput(folder.filter.excludeFormats);
   smartFolderExcludeMetadataFilters.value = formatExcludeMetadataFiltersInput(folder.filter);
+  smartFolderExcludeNumberFilters.value = formatExcludeNumberFiltersInput(folder.filter);
+  smartFolderExcludeDateFilters.value = formatExcludeDateFiltersInput(folder.filter);
   smartFolderNumberFilters.value = formatNumberFiltersInput(folder.filter);
   smartFolderDateFilters.value = formatDateFiltersInput(folder.filter);
   smartFolderSortField.value = folder.filter.sort?.field ?? "";
@@ -1009,6 +1035,27 @@ onBeforeUnmount(() => {
                 <component :is="shortcutIcon(item)" :size="15" aria-hidden="true" />
                 {{ item.label }}
               </span>
+            </button>
+          </div>
+        </section>
+
+        <section v-if="repositoryActions.length" class="workspace-group">
+          <div class="workspace-group__header">
+            <span>动作</span>
+          </div>
+          <div class="workspace-shortcuts">
+            <button
+              type="button"
+              class="workspace-shortcuts__item"
+              :class="{ 'is-active': activePanel === 'actions' }"
+              :disabled="isActiveRepositoryMissing"
+              @click="setActivePanel('actions')"
+            >
+              <span class="workspace-shortcuts__label">
+                <ClipboardList :size="15" aria-hidden="true" />
+                动作
+              </span>
+              <span class="workspace-shortcuts__count">{{ repositoryActions.length }}</span>
             </button>
           </div>
         </section>
@@ -1390,6 +1437,14 @@ onBeforeUnmount(() => {
 
             <div class="smart-folder-dialog__grid">
               <label class="dialog-field">
+                <span>排除关键词</span>
+                <input v-model="smartFolderExcludeQuery" type="text" placeholder="draft，archive" />
+              </label>
+              <label class="dialog-field">
+                <span>排除路径</span>
+                <input v-model="smartFolderExcludePathPrefixes" type="text" placeholder="Archive，Temp" />
+              </label>
+              <label class="dialog-field">
                 <span>排除标签</span>
                 <input v-model="smartFolderExcludeTags" type="text" placeholder="草稿，临时" />
               </label>
@@ -1422,6 +1477,25 @@ onBeforeUnmount(() => {
                 placeholder="status=archived"
               />
             </label>
+
+            <div class="smart-folder-dialog__grid">
+              <label class="dialog-field">
+                <span>排除数值范围</span>
+                <textarea
+                  v-model="smartFolderExcludeNumberFilters"
+                  rows="2"
+                  placeholder="width=0..640"
+                />
+              </label>
+              <label class="dialog-field">
+                <span>排除日期范围</span>
+                <textarea
+                  v-model="smartFolderExcludeDateFilters"
+                  rows="2"
+                  placeholder="fileCreatedAt=2024-01-01T00:00:00Z..2024-01-31T00:00:00Z"
+                />
+              </label>
+            </div>
 
             <label class="dialog-field">
               <span>数值范围</span>

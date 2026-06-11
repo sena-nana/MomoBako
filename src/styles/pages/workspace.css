@@ -492,6 +492,120 @@
   flex-wrap: wrap;
 }
 
+.repository-actions-panel {
+  min-height: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 18px;
+}
+
+.repository-actions-panel__header,
+.repository-actions-panel__detail-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.repository-actions-panel__header h2,
+.repository-actions-panel__detail-head h3 {
+  margin: 0;
+  font-size: 18px;
+  line-height: 1.25;
+}
+
+.repository-actions-panel__detail-head p {
+  margin: 4px 0 0;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.repository-actions-panel__body {
+  min-height: 0;
+  flex: 1;
+  display: grid;
+  grid-template-columns: minmax(220px, 300px) minmax(0, 1fr);
+  gap: 12px;
+}
+
+.repository-actions-panel__list,
+.repository-actions-panel__detail {
+  min-height: 0;
+  overflow: auto;
+  border: 1px solid var(--border-soft);
+  background: var(--bg-elev);
+  border-radius: 8px;
+}
+
+.repository-actions-panel__item {
+  width: 100%;
+  min-height: 54px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 0;
+  border-bottom: 1px solid var(--border-soft);
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.repository-actions-panel__item:hover,
+.repository-actions-panel__item.is-active {
+  background: var(--bg-hover);
+}
+
+.repository-actions-panel__item strong,
+.repository-actions-panel__steps strong {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.repository-actions-panel__item small,
+.repository-actions-panel__steps small {
+  display: block;
+  margin-top: 3px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.repository-actions-panel__detail {
+  padding: 14px;
+}
+
+.repository-actions-panel__steps {
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 8px;
+}
+
+.repository-actions-panel__steps li {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  background: var(--bg-subtle);
+}
+
+.repository-actions-panel__steps em {
+  max-width: 44%;
+  color: var(--err);
+  font-size: 12px;
+  font-style: normal;
+  text-align: right;
+}
+
 .plugin-manager {
   min-height: 100%;
 }

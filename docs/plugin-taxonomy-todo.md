@@ -7,6 +7,7 @@
 - 候选确认队列：统一承载 parser、provider、library-kind 产出的 metadata 补全、封面、归并、重命名和移动候选。
 - metadata 合并与冲突处理：按字段来源、置信度、人工编辑优先级生成可确认 diff。
 - 批量整理计划：核心负责生成预览、冲突检查、事务执行、审计记录和回滚依据；插件只声明规则和候选。
+- 动作执行器扩展：现有核心动作表已可承载 Eagle actions 和 metadata/tag 原生步骤；后续为移动、复制、重命名、删除、导出等危险步骤补齐 dry-run、确认、审计和回滚。
 - 统一进度模型：支持观看、收听、阅读、游玩状态，记录当前位置、百分比、最后打开时间、评分和收藏。
 - 播放列表与 PiP 宿主：核心维护队列、快捷键、窗口状态和进度回写，media preview 和库类型插件只通过 hook 接入。
 - 下载任务队列：核心维护任务状态、失败重试、输出路径和候选写入，下载服务插件只提供执行能力。
@@ -15,7 +16,7 @@
 
 - 插件依赖解析：读取 manifest 的 `requires` / `optional`，展示缺失依赖、禁用原因和降级结果。
 - 权限授权：按 `readRepository`、`readMetadata`、`readArchive`、`network`、`runCommand`、`deriveAI`、`useProvider`、`writeCandidates`、`suggestRename`、`suggestMove` 做核心授权。
-- Hook 调度器：把 `playlist`、`pip`、`progress`、`candidateQueue`、`batchOrganize`、`downloadQueue`、`metadataMerge`、`renameMove`、`auditLog`、`search` 接入核心动作表。
+- Hook 调度器：把 `playlist`、`pip`、`progress`、`candidateQueue`、`batchOrganize`、`downloadQueue`、`metadataMerge`、`renameMove`、`auditLog`、`search` 接入核心动作表和运行记录。
 - 降级提示：缺 library-kind 回退通用库；缺 parser 只保留原始文件信息；缺 preview 显示不可预览；缺 service 禁用对应动作。
 - 插件管理 UI：按 `source`、`library-kind`、`parser`、`preview`、`service` 分组，显示依赖、权限、hook 和贡献内容。
 

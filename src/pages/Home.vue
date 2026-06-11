@@ -66,12 +66,14 @@ const workspaceComponentLoaders = {
   FileBrowserPanel: () => import("./workspace/FileBrowserPanel.vue"),
   FilePreviewPane: () => import("./workspace/FilePreviewPane.vue"),
   HardlinkCandidateDialog: () => import("./workspace/HardlinkCandidateDialog.vue"),
+  RepositoryActionsPanel: () => import("./workspace/RepositoryActionsPanel.vue"),
   SearchPanel: () => import("./workspace/SearchPanel.vue"),
 };
 const CopyTargetDialog = defineAsyncComponent(workspaceComponentLoaders.CopyTargetDialog);
 const FileBrowserPanel = defineAsyncComponent(workspaceComponentLoaders.FileBrowserPanel);
 const FilePreviewPane = defineAsyncComponent(workspaceComponentLoaders.FilePreviewPane);
 const HardlinkCandidateDialog = defineAsyncComponent(workspaceComponentLoaders.HardlinkCandidateDialog);
+const RepositoryActionsPanel = defineAsyncComponent(workspaceComponentLoaders.RepositoryActionsPanel);
 const SearchPanel = defineAsyncComponent(workspaceComponentLoaders.SearchPanel);
 
 let dragDropUnlisten: UnlistenFn | null = null;
@@ -111,9 +113,13 @@ const copyTargetPath = ref("");
 const skippedHardlinkCandidateIds = ref<Set<string>>(new Set());
 const colorFilterInput = ref("");
 const shapeFilterInput = ref("");
+const excludeQueryInput = ref("");
+const excludePathPrefixesInput = ref("");
 const excludeTagsInput = ref("");
 const excludeFormatsInput = ref("");
 const excludeMetadataFiltersInput = ref("");
+const excludeNumberFiltersInput = ref("");
+const excludeDateFiltersInput = ref("");
 const numberFiltersInput = ref("");
 const dateFiltersInput = ref("");
 const sortFieldInput = ref("");
@@ -151,6 +157,8 @@ const {
   selectedFilePath,
   searchResults,
   smartFolderResult,
+  repositoryActions,
+  activeRepositoryActionId,
   hardlinkCandidates,
   isExternalDragActive,
   isInternalDragActive,
@@ -158,7 +166,9 @@ const {
   isSearching,
   isSavingMetadata,
   isLoadingSmartFolder,
+  isLoadingRepositoryActions,
   isMutatingFiles,
+  isRunningRepositoryAction,
   error,
   refreshRepositoryWorkspace,
   selectRepository,
@@ -202,6 +212,8 @@ const {
   runFilteredSearch,
   confirmWorkspaceHardlinkCandidate,
   saveAssetMetadata,
+  selectRepositoryAction,
+  runActiveRepositoryAction,
 } = useRepositoryWorkspace();
 
 const hasRepository = computed(() => Boolean(activeSnapshot.value));
@@ -213,6 +225,7 @@ const isFilesPanel = computed(() => activePanel.value === "files");
 const isTrashPanel = computed(() => activePanel.value === "deleted");
 const isSearchPanel = computed(() => activePanel.value === "search");
 const isSmartFolderPanel = computed(() => activePanel.value === "smartFolder");
+const isActionsPanel = computed(() => activePanel.value === "actions");
 const isExtensionsPanel = computed(() => activePanel.value === "extensions");
 const isFileBrowserPanel = computed(() => isFilesPanel.value || isTrashPanel.value || isSmartFolderPanel.value);
 const smartFolderEntryMap = computed<ReadonlyMap<string, FileBrowserEntry>>(() => (
@@ -1342,9 +1355,13 @@ function clearSearchFilters() {
   clearFilters();
   colorFilterInput.value = "";
   shapeFilterInput.value = "";
+  excludeQueryInput.value = "";
+  excludePathPrefixesInput.value = "";
   excludeTagsInput.value = "";
   excludeFormatsInput.value = "";
   excludeMetadataFiltersInput.value = "";
+  excludeNumberFiltersInput.value = "";
+  excludeDateFiltersInput.value = "";
   numberFiltersInput.value = "";
   dateFiltersInput.value = "";
   sortFieldInput.value = "";
@@ -1358,9 +1375,13 @@ function applyAdvancedSearchFilters() {
   if (!isRepositoryWritable.value) return;
   const limit = Number(limitInput.value);
   updateFilters({
+    excludeQuery: excludeQueryInput.value.trim(),
+    excludePathPrefixes: excludePathPrefixesInput.value.trim(),
     excludeTags: splitFilterInput(excludeTagsInput.value),
     excludeFormats: splitFilterInput(excludeFormatsInput.value),
     excludeMetadataFilters: excludeMetadataFiltersInput.value.trim(),
+    excludeNumberFilters: excludeNumberFiltersInput.value.trim(),
+    excludeDateFilters: excludeDateFiltersInput.value.trim(),
     numberFilters: numberFiltersInput.value.trim(),
     dateFilters: dateFiltersInput.value.trim(),
     sortField: sortFieldInput.value.trim(),
@@ -1732,6 +1753,24 @@ onUnmounted(() => {
         <div class="workspace-filter-bar__advanced">
           <label class="workspace-filter-input">
             <input
+              v-model="excludeQueryInput"
+              type="text"
+              aria-label="排除关键词"
+              placeholder="排除关键词"
+              @keydown.enter.prevent="applyAdvancedSearchFilters"
+            />
+          </label>
+          <label class="workspace-filter-input">
+            <input
+              v-model="excludePathPrefixesInput"
+              type="text"
+              aria-label="排除路径"
+              placeholder="排除路径"
+              @keydown.enter.prevent="applyAdvancedSearchFilters"
+            />
+          </label>
+          <label class="workspace-filter-input">
+            <input
               v-model="excludeTagsInput"
               type="text"
               aria-label="排除标签"
@@ -1754,6 +1793,24 @@ onUnmounted(() => {
               type="text"
               aria-label="排除元数据"
               placeholder="status=archived"
+              @keydown.enter.prevent="applyAdvancedSearchFilters"
+            />
+          </label>
+          <label class="workspace-filter-input workspace-filter-input--wide">
+            <input
+              v-model="excludeNumberFiltersInput"
+              type="text"
+              aria-label="排除数值范围"
+              placeholder="排除 width=0..640"
+              @keydown.enter.prevent="applyAdvancedSearchFilters"
+            />
+          </label>
+          <label class="workspace-filter-input workspace-filter-input--wide">
+            <input
+              v-model="excludeDateFiltersInput"
+              type="text"
+              aria-label="排除日期范围"
+              placeholder="排除 fileCreatedAt=2024-01-01T00:00:00Z.."
               @keydown.enter.prevent="applyAdvancedSearchFilters"
             />
           </label>
@@ -1962,6 +2019,17 @@ onUnmounted(() => {
     :summary="searchSummary"
     :result-context="searchResultContext"
     @open-result="openSearchHit"
+  />
+
+  <RepositoryActionsPanel
+    v-else-if="isActionsPanel"
+    :actions="repositoryActions"
+    :active-action-id="activeRepositoryActionId"
+    :selected-count="selectedFilePaths.length"
+    :is-loading="isLoadingRepositoryActions"
+    :is-running="isRunningRepositoryAction"
+    @select="selectRepositoryAction"
+    @run="runActiveRepositoryAction"
   />
 
   <section v-else-if="isExtensionsPanel" class="extensions-workbench">

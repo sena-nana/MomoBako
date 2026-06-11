@@ -61,6 +61,17 @@
   - `RepositorySnapshot` returns repository summary, folder summaries, indexed asset summaries, metadata field registry, overview, optional `quickAccess`, and optional `tagGroups`.
   - `quickAccess` entries expose `shortcutId`, `label`, `targetKind`, optional `targetPath`, and optional `targetId`, and can point to files, folders, or smart folders imported from Eagle.
   - `tagGroups` expose repository-level tag grouping metadata for the desktop tag editor; they do not replace per-asset searchable tags.
+- `GET /repositories/{repoId}/actions`
+  - Lists imported repository actions ordered by `sortOrder` and name.
+  - Each action includes `source`, `sourceActionId`, `status`, `enabled`, steps, raw source JSON summary, unsupported reason, and last run.
+- `GET /repositories/{repoId}/actions/{actionId}`
+  - Reads one action and its steps.
+- `PATCH /repositories/{repoId}/actions/{actionId}:enabled`
+  - Enables or disables an action. Unsupported actions cannot be enabled.
+- `POST /repositories/{repoId}/actions/{actionId}:run`
+  - Request must explicitly include `assetIds` or repository-relative `targetPaths`; actions are never run during import.
+  - Only ready, enabled actions with supported steps execute. Unsupported or disabled actions, missing targets, and invalid target paths are rejected before mutation.
+  - Supported native steps currently update metadata and tag groups through the same revision path as manual metadata edits. Dangerous file operations remain disabled unless a core executor implements confirmation and audit for them.
 - `POST /repositories/{repoId}/thumbnails:ensure`
   - Request body includes repository-relative `path`
   - Reuse an existing valid thumbnail cache entry or generate one for supported local image/video files
@@ -114,9 +125,13 @@
     - `metadataKey`
     - `metadataValue`
     - `metadataFilters`
+    - `excludeQuery`
+    - `excludePathPrefixes`
     - `excludeTags`
     - `excludeFormats`
     - `excludeMetadataFilters`
+    - `excludeNumberFilters`
+    - `excludeDateFilters`
     - `numberFilters`
     - `dateFilters`
     - `matchMode`
@@ -126,7 +141,7 @@
     - `minRating`
   - `tags` and `formats` match with OR semantics inside each field; different filter fields combine with AND semantics.
   - `metadataFilters` accepts key/value pairs such as `color` and `shape`; values are matched against metadata text.
-  - `exclude*` filters remove matches after inclusion filters are applied.
+  - `exclude*` filters remove matches after inclusion filters are applied. `excludeQuery` matches against the same text haystack as `query`; `excludePathPrefixes` removes matching repository-relative path prefixes.
   - `numberFilters` support numeric ranges such as `width=1024..4096` or `originalSizeBytes=..10485760`.
   - `dateFilters` support ISO timestamp ranges such as `fileCreatedAt=2024-01-01T00:00:00Z..2024-12-31T23:59:59Z`.
   - `matchMode: "or"` allows smart-folder-style any-match logic across populated include filters; the default remains AND semantics.
@@ -148,7 +163,7 @@
 - `POST /repositories/{repoId}/smart-folders/{smartFolderId}:query`
   - Returns file-list entries for the selected smart folder.
   - Child smart folders inherit parent filters with AND semantics.
-  - Supported filters: `query`, `pathPrefix`, `tags`, `formats`, `colors`, `shapes`, `metadataFilters`, `excludeTags`, `excludeFormats`, `excludeMetadataFilters`, `numberFilters`, `dateFilters`, `matchMode`, `sort`, `limit`, and `minRating`.
+  - Supported filters: `query`, `pathPrefix`, `excludeQuery`, `excludePathPrefixes`, `tags`, `formats`, `colors`, `shapes`, `metadataFilters`, `excludeTags`, `excludeFormats`, `excludeMetadataFilters`, `excludeNumberFilters`, `excludeDateFilters`, `numberFilters`, `dateFilters`, `matchMode`, `sort`, `limit`, and `minRating`.
   - Eagle smart folders now map OR logic, exclusion rules, date ranges, numeric ranges, sort order, and result limits without being silently skipped.
 
 ## Eagle Import Notes
@@ -156,7 +171,8 @@
 - Eagle multi-folder ownership is imported as one primary asset plus additional alias asset rows. Alias files attempt hard-link creation first and fall back to normal copies when the filesystem rejects linking.
 - Alias rows are tracked in `asset_alias_groups` / `asset_alias_members`; hardlink or copy state continues to use the existing hardlink tables.
 - Eagle `quickAccess` is imported into repository shortcuts, and Eagle `tagsGroups` becomes repository-level tag groups.
-- Folder passwords are not preserved as credentials. MomoBako only stores `protected=true` and optional `passwordTip` for display as migration hints.
+- Eagle `actions.json` is imported into repository actions and steps. Recognized metadata/tag steps become MomoBako native steps; unknown or dangerous steps are preserved as `unsupported`, keep their raw payload, and disable the containing action by default.
+- Eagle folder passwords are explicitly out of scope. MomoBako does not read, store, hash, export, or enforce Eagle plaintext `password`; it only stores `protected=true` and optional `passwordTip` for display as migration hints.
 
 ## Plugin API
 

@@ -80,6 +80,13 @@ function parseDateFiltersInput(value: string) {
     });
 }
 
+function parsePathPrefixesInput(value: string) {
+  return value
+    .split(/\n|[,，]/)
+    .map((item) => item.trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, ""))
+    .filter(Boolean);
+}
+
 export function buildSearchRequest(query = searchQuery.value): SearchRequest {
   const nextFilters = filters.value;
   const metadataFilters = [
@@ -91,12 +98,16 @@ export function buildSearchRequest(query = searchQuery.value): SearchRequest {
   return {
     query,
     repoId: hasActiveFilters.value ? activeRepoId.value ?? undefined : undefined,
+    excludeQuery: nextFilters.excludeQuery.trim() || undefined,
     tags: normalizeFilterValues(nextFilters.tags),
     formats: normalizeFilterValues(nextFilters.formats),
     metadataFilters,
     excludeTags: normalizeFilterValues(nextFilters.excludeTags),
     excludeFormats: normalizeFilterValues(nextFilters.excludeFormats),
     excludeMetadataFilters: parseMetadataFiltersInput(nextFilters.excludeMetadataFilters),
+    excludePathPrefixes: parsePathPrefixesInput(nextFilters.excludePathPrefixes),
+    excludeNumberFilters: parseNumberFiltersInput(nextFilters.excludeNumberFilters),
+    excludeDateFilters: parseDateFiltersInput(nextFilters.excludeDateFilters),
     numberFilters: parseNumberFiltersInput(nextFilters.numberFilters),
     dateFilters: parseDateFiltersInput(nextFilters.dateFilters),
     matchMode: nextFilters.matchMode === "or" ? "or" : undefined,
@@ -115,7 +126,11 @@ function hasSearchCriteria(request: SearchRequest) {
     (request.metadataFilters?.length ?? 0) > 0 ||
     (request.excludeTags?.length ?? 0) > 0 ||
     (request.excludeFormats?.length ?? 0) > 0 ||
+    Boolean(request.excludeQuery?.trim()) ||
+    (request.excludePathPrefixes?.length ?? 0) > 0 ||
     (request.excludeMetadataFilters?.length ?? 0) > 0 ||
+    (request.excludeNumberFilters?.length ?? 0) > 0 ||
+    (request.excludeDateFilters?.length ?? 0) > 0 ||
     (request.numberFilters?.length ?? 0) > 0 ||
     (request.dateFilters?.length ?? 0) > 0 ||
     (request.formats?.length ?? 0) > 0 ||
@@ -185,7 +200,11 @@ export async function runSearch(request: SearchRequest) {
     metadataFilters: request.metadataFilters ?? filterRequest.metadataFilters,
     excludeTags: request.excludeTags ?? filterRequest.excludeTags,
     excludeFormats: request.excludeFormats ?? filterRequest.excludeFormats,
+    excludeQuery: request.excludeQuery ?? filterRequest.excludeQuery,
+    excludePathPrefixes: request.excludePathPrefixes ?? filterRequest.excludePathPrefixes,
     excludeMetadataFilters: request.excludeMetadataFilters ?? filterRequest.excludeMetadataFilters,
+    excludeNumberFilters: request.excludeNumberFilters ?? filterRequest.excludeNumberFilters,
+    excludeDateFilters: request.excludeDateFilters ?? filterRequest.excludeDateFilters,
     numberFilters: request.numberFilters ?? filterRequest.numberFilters,
     dateFilters: request.dateFilters ?? filterRequest.dateFilters,
     matchMode: request.matchMode ?? filterRequest.matchMode,

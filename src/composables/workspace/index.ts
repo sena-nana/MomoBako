@@ -18,6 +18,7 @@ import {
   getRepositorySnapshot,
   importRepository,
   installPluginFromArchive,
+  listRepositoryActions,
   listSmartFolders,
   listPlugins,
   createSmartFolder,
@@ -32,6 +33,7 @@ import {
   relocateRepository,
   renameEntry,
   revealRepositoryPath,
+  runRepositoryAction,
   syncRepository,
   undoLastRevision,
   updateSmartFolder,
@@ -54,6 +56,7 @@ import {
   activeAssetId,
   activePanel,
   activeRepoId,
+  activeRepositoryActionId,
   activeSmartFolderId,
   activeSnapshot,
   apiDesign,
@@ -69,6 +72,7 @@ import {
   isLoadingAssetDetail,
   isLoadingFileBrowser,
   isLoadingRepositories,
+  isLoadingRepositoryActions,
   isLoadingSnapshot,
   isLoadingSettingsData,
   isLoadingSmartFolder,
@@ -77,12 +81,14 @@ import {
   isInternalDragActive,
   isMutatingFiles,
   isMutatingSmartFolder,
+  isRunningRepositoryAction,
   isSavingMetadata,
   isSearching,
   isSyncing,
   lastSyncResult,
   plugins,
   repositories,
+  repositoryActions,
   searchQuery,
   searchResults,
   draggedWorkspacePaths,
@@ -241,10 +247,12 @@ export async function selectRepository(repoId: string) {
     activeRepoId.value = repoId;
     activeSnapshot.value = snapshot;
     smartFolders.value = await listSmartFolders(repoId);
+    repositoryActions.value = await listRepositoryActions(repoId);
     if (isSwitchingRepository) {
       resetSearchState();
       activeSmartFolderId.value = null;
       smartFolderResult.value = null;
+      activeRepositoryActionId.value = repositoryActions.value[0]?.actionId ?? null;
     }
 
     const defaultAssetId = activeAssetId.value && snapshot.assets.some((item) => item.assetId === activeAssetId.value)
@@ -772,13 +780,21 @@ function normalizeSmartFolderFilter(filter: SmartFolderFilter): SmartFolderFilte
   const numberFilters = filter.numberFilters
     ?.map((item) => ({ key: item.key.trim(), min: item.min, max: item.max }))
     .filter((item) => item.key && (item.min != null || item.max != null));
+  const excludeNumberFilters = filter.excludeNumberFilters
+    ?.map((item) => ({ key: item.key.trim(), min: item.min, max: item.max }))
+    .filter((item) => item.key && (item.min != null || item.max != null));
   const dateFilters = filter.dateFilters
+    ?.map((item) => ({ key: item.key.trim(), from: item.from?.trim() || undefined, to: item.to?.trim() || undefined }))
+    .filter((item) => item.key && (item.from || item.to));
+  const excludeDateFilters = filter.excludeDateFilters
     ?.map((item) => ({ key: item.key.trim(), from: item.from?.trim() || undefined, to: item.to?.trim() || undefined }))
     .filter((item) => item.key && (item.from || item.to));
   const sortField = filter.sort?.field.trim();
   return {
     query: filter.query?.trim() || undefined,
     pathPrefix: filter.pathPrefix?.trim() || undefined,
+    excludeQuery: filter.excludeQuery?.trim() || undefined,
+    excludePathPrefixes: normalizeList(filter.excludePathPrefixes),
     tags: normalizeList(filter.tags),
     formats: normalizeList(filter.formats),
     colors: normalizeList(filter.colors),
@@ -789,6 +805,8 @@ function normalizeSmartFolderFilter(filter: SmartFolderFilter): SmartFolderFilte
     excludeMetadataFilters: normalizeMetadataFilters(filter.excludeMetadataFilters)?.length
       ? normalizeMetadataFilters(filter.excludeMetadataFilters)
       : undefined,
+    excludeNumberFilters: excludeNumberFilters?.length ? excludeNumberFilters : undefined,
+    excludeDateFilters: excludeDateFilters?.length ? excludeDateFilters : undefined,
     numberFilters: numberFilters?.length ? numberFilters : undefined,
     dateFilters: dateFilters?.length ? dateFilters : undefined,
     minRating: filter.minRating && filter.minRating > 0 ? filter.minRating : undefined,
@@ -902,6 +920,67 @@ export async function deleteSmartFolderInWorkspace(smartFolderId: string) {
     return null;
   } finally {
     isMutatingSmartFolder.value = false;
+  }
+}
+
+export async function refreshRepositoryActions(repoId = activeRepoId.value) {
+  if (!repoId) {
+    repositoryActions.value = [];
+    activeRepositoryActionId.value = null;
+    return [];
+  }
+  isLoadingRepositoryActions.value = true;
+  error.value = null;
+  try {
+    const actions = await listRepositoryActions(repoId);
+    if (activeRepoId.value === repoId) {
+      repositoryActions.value = actions;
+      if (activeRepositoryActionId.value && !actions.some((action) => action.actionId === activeRepositoryActionId.value)) {
+        activeRepositoryActionId.value = null;
+      }
+      activeRepositoryActionId.value = activeRepositoryActionId.value ?? actions[0]?.actionId ?? null;
+    }
+    return actions;
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : String(cause);
+    return [];
+  } finally {
+    isLoadingRepositoryActions.value = false;
+  }
+}
+
+export function selectRepositoryAction(actionId: string) {
+  activeRepositoryActionId.value = actionId;
+  activePanel.value = "actions";
+}
+
+export async function runActiveRepositoryAction(actionId = activeRepositoryActionId.value) {
+  const repoId = activeRepoId.value;
+  if (!repoId || !actionId) return null;
+  const targetPaths = selectedFilePaths.value.length
+    ? selectedFilePaths.value
+    : selectedFilePath.value ? [selectedFilePath.value] : [];
+  isRunningRepositoryAction.value = true;
+  error.value = null;
+  try {
+    const response = await runRepositoryAction({
+      repoId,
+      actionId,
+      targetPaths,
+    });
+    repositoryActions.value = repositoryActions.value.map((action) => (
+      action.actionId === response.action.actionId ? response.action : action
+    ));
+    await refreshWorkspaceAfterMutation(repoId, {
+      directory: fileBrowser.value && !fileBrowser.value.specialLocation ? "current" : undefined,
+      repositorySnapshot: true,
+    });
+    return response;
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : String(cause);
+    return null;
+  } finally {
+    isRunningRepositoryAction.value = false;
   }
 }
 
@@ -1365,7 +1444,9 @@ export function useRepositoryWorkspace() {
     searchQuery: computed(() => searchQuery.value),
     searchResults: computed(() => searchResults.value),
     smartFolders: computed(() => smartFolders.value),
+    repositoryActions: computed(() => repositoryActions.value),
     activeSmartFolderId: computed(() => activeSmartFolderId.value),
+    activeRepositoryActionId: computed(() => activeRepositoryActionId.value),
     smartFolderResult: computed(() => smartFolderResult.value),
     activeRepository,
     fileBrowserEntryMap,
@@ -1398,10 +1479,12 @@ export function useRepositoryWorkspace() {
     isLoadingFileBrowser: computed(() => isLoadingFileBrowser.value),
     isSearching: computed(() => isSearching.value),
     isLoadingSmartFolder: computed(() => isLoadingSmartFolder.value),
+    isLoadingRepositoryActions: computed(() => isLoadingRepositoryActions.value),
     isSavingMetadata: computed(() => isSavingMetadata.value),
     isSyncing: computed(() => isSyncing.value),
     isMutatingFiles: computed(() => isMutatingFiles.value),
     isMutatingSmartFolder: computed(() => isMutatingSmartFolder.value),
+    isRunningRepositoryAction: computed(() => isRunningRepositoryAction.value),
     isLoadingSettingsData: computed(() => isLoadingSettingsData.value),
     isManagingPlugins: computed(() => isManagingPlugins.value),
     isExternalDragActive: computed(() => isExternalDragActive.value),
@@ -1441,6 +1524,9 @@ export function useRepositoryWorkspace() {
     clearWorkspaceSelection,
     refreshSmartFolders,
     selectSmartFolder,
+    refreshRepositoryActions,
+    selectRepositoryAction,
+    runActiveRepositoryAction,
     createSmartFolderInWorkspace,
     updateSmartFolderInWorkspace,
     deleteSmartFolderInWorkspace,

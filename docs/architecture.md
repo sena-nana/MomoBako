@@ -25,6 +25,10 @@
   - `assets`
   - `metadata`
   - `tags`
+  - `repository_actions`
+  - `repository_action_steps`
+  - `repository_action_runs`
+  - `repository_action_run_steps`
   - `revisions`
   - `events`
   - `schema_version`
@@ -45,6 +49,13 @@
 - Undo/Redo are implemented by replaying `before` / `after` metadata snapshots
 - Asset version is incremented on every applied state transition
 
+## Repository Actions
+
+- Imported Eagle `actions.json` records live in repository-local action tables.
+- Import never executes actions. It stores original action JSON, normalized steps, unsupported reasons and enabled state.
+- Ready steps can be executed only when the user supplies explicit target asset IDs or paths. Supported metadata/tag steps reuse the normal metadata revision path.
+- Unsupported or dangerous steps are preserved for auditability and keep the containing action disabled until a core executor can safely confirm and audit that class of write.
+
 ## Search Strategy
 
 - Current implementation performs structured search across:
@@ -53,6 +64,7 @@
   - status
   - tags
   - metadata values
+- Inclusion filters run first. Exclusion filters then remove matching rows by text query, path prefixes, tags, formats, metadata key/value, numeric ranges, or date ranges.
 - Indexed columns exist for:
   - `assets(repo_id, path)`
   - `assets(filename)`

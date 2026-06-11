@@ -223,9 +223,17 @@ class EagleLibraryChangerTests(unittest.TestCase):
                 "SELECT COUNT(*) FROM metadata WHERE asset_id = ? AND key = 'note'",
                 (asset_id,),
             ).fetchone()[0]
+            leaked_password_count = connection.execute(
+                """
+                SELECT COUNT(*)
+                FROM metadata
+                WHERE value_json LIKE '%plaintext-should-not-be-stored%'
+                """
+            ).fetchone()[0]
         finally:
             connection.close()
 
+        report_text = convert.report_output_path(output).read_text(encoding="utf-8")
         self.assertEqual(
             shortcuts,
             [
@@ -239,6 +247,8 @@ class EagleLibraryChangerTests(unittest.TestCase):
         self.assertEqual(metadata_rows["comment"], "Eagle 注释")
         self.assertEqual(metadata_rows["tagGroups"], ["封面"])
         self.assertEqual(note_count, 0)
+        self.assertEqual(leaked_password_count, 0)
+        self.assertNotIn("plaintext-should-not-be-stored", report_text)
 
     def test_smart_folders_convert_to_momobako_filters(self) -> None:
         source = self.create_smart_folder_library()
@@ -342,6 +352,78 @@ class EagleLibraryChangerTests(unittest.TestCase):
             },
         )
         self.assertEqual(filters[2], {"formats": ["psd"], "tags": ["Draft"]})
+
+    def test_actions_json_writes_repository_actions_and_unsupported_steps(self) -> None:
+        source = self.create_action_library()
+        output = self.temp_dir / "ActionDb.library"
+
+        plan = convert.build_conversion_plan(source, output, "ActionDb")
+
+        self.assertEqual(plan.report["summary"]["repositoryActionCount"], 2)
+        self.assertEqual(plan.report["summary"]["unsupportedActionStepCount"], 1)
+        ready_action = next(item for item in plan.report["repositoryActions"] if item["name"] == "标记精选")
+        unsupported_action = next(item for item in plan.report["repositoryActions"] if item["name"] == "外部导出")
+        self.assertTrue(ready_action["enabled"])
+        self.assertFalse(unsupported_action["enabled"])
+        self.assertEqual(unsupported_action["status"], "unsupported")
+        self.assertEqual(unsupported_action["steps"][0]["stepKind"], "unsupported")
+
+        exit_code = convert.main(["--input", str(source), "--output", str(output), "--yes"])
+        self.assertEqual(exit_code, 0)
+
+        connection = sqlite3.connect(output / ".momo" / "metadata.db")
+        try:
+            actions = connection.execute(
+                """
+                SELECT name, status, enabled, source_action_id
+                FROM repository_actions
+                ORDER BY sort_order
+                """
+            ).fetchall()
+            steps = connection.execute(
+                """
+                SELECT ra.name, ras.step_kind, ras.status, ras.config_json, ras.raw_json, ras.unsupported_reason
+                FROM repository_action_steps ras
+                JOIN repository_actions ra ON ra.action_id = ras.action_id
+                ORDER BY ra.sort_order, ras.sort_order
+                """
+            ).fetchall()
+        finally:
+            connection.close()
+
+        self.assertEqual(
+            actions,
+            [
+                ("标记精选", "ready", 1, "action-ready"),
+                ("外部导出", "unsupported", 0, "action-unsupported"),
+            ],
+        )
+        ready_steps = [step for step in steps if step[0] == "标记精选"]
+        unsupported_steps = [step for step in steps if step[0] == "外部导出"]
+        self.assertEqual(ready_steps[0][1:3], ("metadata.update", "ready"))
+        self.assertEqual(json.loads(ready_steps[0][3])["metadata"]["rating"], 5)
+        self.assertEqual(unsupported_steps[0][1:3], ("unsupported", "unsupported"))
+        self.assertEqual(json.loads(unsupported_steps[0][4])["type"], "shell")
+        self.assertIn("unsupported action step", unsupported_steps[0][5])
+
+    def test_negative_smart_folder_fields_convert_to_exclude_filters(self) -> None:
+        source = self.create_negative_smart_folder_library()
+        output = self.temp_dir / "NegativeSmartFolder.library"
+
+        plan = convert.build_conversion_plan(source, output, "NegativeSmartFolder")
+
+        self.assertEqual(len(plan.smart_folders), 1)
+        self.assertEqual(
+            plan.smart_folders[0].filter,
+            {
+                "query": "hero",
+                "excludeQuery": "draft",
+                "excludePathPrefixes": ["Archive"],
+                "excludeNumberFilters": [{"key": "width", "min": 0, "max": 640}],
+                "excludeDateFilters": [{"key": "fileCreatedAt", "from": "2024-01-01T00:00:00Z", "to": "2024-01-31T00:00:00Z"}],
+            },
+        )
+        self.assertFalse(any(hit["capability"] == "smartFolders/saved-filters" for hit in plan.unsupported_hits))
 
     def test_multi_folder_asset_creates_alias_members(self) -> None:
         source = self.create_multi_folder_library()
@@ -642,6 +724,119 @@ class EagleLibraryChangerTests(unittest.TestCase):
                     "tags": ["TagA"],
                     "annotation": "",
                     "isDeleted": is_deleted,
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        return root
+
+    def create_action_library(self) -> Path:
+        root = self.temp_dir / "ActionSource.library"
+        images_dir = root / "images" / "ASSET001.info"
+        images_dir.mkdir(parents=True)
+        (root / "metadata.json").write_text(
+            json.dumps(
+                {
+                    "folders": [],
+                    "smartFolders": [],
+                    "quickAccess": [],
+                    "tagsGroups": [],
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        self.write_supporting_json(root)
+        (root / "actions.json").write_text(
+            json.dumps(
+                [
+                    {
+                        "id": "action-ready",
+                        "name": "标记精选",
+                        "steps": [
+                            {"type": "rating", "rating": 5},
+                            {"type": "comment", "value": "Imported action"},
+                        ],
+                    },
+                    {
+                        "id": "action-unsupported",
+                        "name": "外部导出",
+                        "steps": [
+                            {"type": "shell", "command": "open-external-app"},
+                        ],
+                    },
+                ],
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        (images_dir / "asset.png").write_bytes(b"png-data")
+        (images_dir / "asset_thumbnail.png").write_bytes(b"thumb-data")
+        (images_dir / "metadata.json").write_text(
+            json.dumps(
+                {
+                    "id": "ASSET001",
+                    "name": "asset",
+                    "ext": "png",
+                    "folders": [],
+                    "tags": [],
+                    "annotation": "",
+                    "isDeleted": False,
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        return root
+
+    def create_negative_smart_folder_library(self) -> Path:
+        root = self.temp_dir / "NegativeSmartFolderSource.library"
+        images_dir = root / "images" / "ASSET001.info"
+        images_dir.mkdir(parents=True)
+        (root / "metadata.json").write_text(
+            json.dumps(
+                {
+                    "folders": [
+                        {"id": "folder-archive", "name": "Archive", "children": []},
+                    ],
+                    "smartFolders": [
+                        {
+                            "id": "negative-smart",
+                            "name": "No Draft Archive",
+                            "query": "hero",
+                            "conditions": [
+                                {"field": "query", "operator": "notContains", "value": "draft"},
+                                {"field": "folder", "operator": "not", "value": "folder-archive"},
+                                {"field": "width", "operator": "not", "value": [0, 640]},
+                                {
+                                    "field": "createdAt",
+                                    "operator": "not",
+                                    "value": ["2024-01-01T00:00:00Z", "2024-01-31T00:00:00Z"],
+                                },
+                            ],
+                        },
+                    ],
+                    "quickAccess": [],
+                    "tagsGroups": [],
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        self.write_supporting_json(root)
+        (images_dir / "asset.png").write_bytes(b"png-data")
+        (images_dir / "asset_thumbnail.png").write_bytes(b"thumb-data")
+        (images_dir / "metadata.json").write_text(
+            json.dumps(
+                {
+                    "id": "ASSET001",
+                    "name": "asset",
+                    "ext": "png",
+                    "folders": ["folder-archive"],
+                    "tags": [],
+                    "annotation": "",
+                    "isDeleted": False,
                 },
                 ensure_ascii=False,
             ),

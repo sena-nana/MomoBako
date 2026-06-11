@@ -237,6 +237,73 @@ CREATE TABLE IF NOT EXISTS smart_folders (
 CREATE INDEX IF NOT EXISTS idx_smart_folders_repo_parent
 ON smart_folders(repo_id, parent_id, sort_order, name);
 
+CREATE TABLE IF NOT EXISTS repository_actions (
+  action_id TEXT PRIMARY KEY,
+  repo_id TEXT NOT NULL,
+  source TEXT NOT NULL,
+  source_action_id TEXT,
+  name TEXT NOT NULL,
+  status TEXT NOT NULL,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  raw_json TEXT NOT NULL,
+  unsupported_reason TEXT,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY(repo_id) REFERENCES repositories(repo_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_repository_actions_repo_order
+ON repository_actions(repo_id, sort_order, name);
+
+CREATE TABLE IF NOT EXISTS repository_action_steps (
+  step_id TEXT PRIMARY KEY,
+  action_id TEXT NOT NULL,
+  repo_id TEXT NOT NULL,
+  step_kind TEXT NOT NULL,
+  label TEXT NOT NULL,
+  status TEXT NOT NULL,
+  config_json TEXT NOT NULL,
+  raw_json TEXT NOT NULL,
+  unsupported_reason TEXT,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  FOREIGN KEY(action_id) REFERENCES repository_actions(action_id) ON DELETE CASCADE,
+  FOREIGN KEY(repo_id) REFERENCES repositories(repo_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_repository_action_steps_action_order
+ON repository_action_steps(action_id, sort_order);
+
+CREATE TABLE IF NOT EXISTS repository_action_runs (
+  run_id TEXT PRIMARY KEY,
+  action_id TEXT NOT NULL,
+  repo_id TEXT NOT NULL,
+  status TEXT NOT NULL,
+  target_json TEXT NOT NULL,
+  message TEXT,
+  started_at TEXT NOT NULL,
+  finished_at TEXT,
+  FOREIGN KEY(action_id) REFERENCES repository_actions(action_id),
+  FOREIGN KEY(repo_id) REFERENCES repositories(repo_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_repository_action_runs_action_time
+ON repository_action_runs(action_id, started_at DESC);
+
+CREATE TABLE IF NOT EXISTS repository_action_run_steps (
+  run_step_id TEXT PRIMARY KEY,
+  run_id TEXT NOT NULL,
+  step_id TEXT NOT NULL,
+  repo_id TEXT NOT NULL,
+  status TEXT NOT NULL,
+  message TEXT,
+  started_at TEXT NOT NULL,
+  finished_at TEXT,
+  FOREIGN KEY(run_id) REFERENCES repository_action_runs(run_id) ON DELETE CASCADE,
+  FOREIGN KEY(step_id) REFERENCES repository_action_steps(step_id),
+  FOREIGN KEY(repo_id) REFERENCES repositories(repo_id)
+);
+
 CREATE TABLE IF NOT EXISTS metadata (
   asset_id TEXT NOT NULL,
   key TEXT NOT NULL,
@@ -443,6 +510,83 @@ pub struct RepositoryOverview {
     pub file_count: i64,
     pub folder_count: i64,
     pub readme_content: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct RepositoryActionStep {
+    pub step_id: String,
+    pub action_id: String,
+    pub repo_id: String,
+    pub step_kind: String,
+    pub label: String,
+    pub status: String,
+    pub config: serde_json::Value,
+    pub raw: serde_json::Value,
+    pub unsupported_reason: Option<String>,
+    pub sort_order: i64,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct RepositoryAction {
+    pub action_id: String,
+    pub repo_id: String,
+    pub source: String,
+    pub source_action_id: Option<String>,
+    pub name: String,
+    pub status: String,
+    pub enabled: bool,
+    pub raw: serde_json::Value,
+    pub unsupported_reason: Option<String>,
+    pub sort_order: i64,
+    pub created_at: String,
+    pub updated_at: String,
+    pub steps: Vec<RepositoryActionStep>,
+    pub last_run: Option<RepositoryActionRun>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct RepositoryActionRun {
+    pub run_id: String,
+    pub action_id: String,
+    pub repo_id: String,
+    pub status: String,
+    pub target: serde_json::Value,
+    pub message: Option<String>,
+    pub started_at: String,
+    pub finished_at: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct RepositoryActionRunRequest {
+    pub repo_id: String,
+    pub action_id: String,
+    pub target_paths: Option<Vec<String>>,
+    pub asset_ids: Option<Vec<String>>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RepositoryActionRunResponse {
+    pub action: RepositoryAction,
+    pub run: RepositoryActionRun,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct RepositoryActionEnabledRequest {
+    pub repo_id: String,
+    pub action_id: String,
+    pub enabled: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RepositoryActionMutationResponse {
+    pub action: RepositoryAction,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -875,6 +1019,7 @@ pub struct SearchSort {
 pub struct SearchRequest {
     pub query: String,
     pub repo_id: Option<String>,
+    pub exclude_query: Option<String>,
     pub metadata_key: Option<String>,
     pub metadata_value: Option<String>,
     pub tag: Option<String>,
@@ -883,6 +1028,9 @@ pub struct SearchRequest {
     pub exclude_tags: Option<Vec<String>>,
     pub exclude_formats: Option<Vec<String>>,
     pub exclude_metadata_filters: Option<Vec<SearchMetadataFilter>>,
+    pub exclude_path_prefixes: Option<Vec<String>>,
+    pub exclude_number_filters: Option<Vec<SearchNumberFilter>>,
+    pub exclude_date_filters: Option<Vec<SearchDateFilter>>,
     pub number_filters: Option<Vec<SearchNumberFilter>>,
     pub date_filters: Option<Vec<SearchDateFilter>>,
     pub formats: Option<Vec<String>>,
@@ -897,6 +1045,8 @@ pub struct SearchRequest {
 pub struct SmartFolderFilter {
     pub query: Option<String>,
     pub path_prefix: Option<String>,
+    pub exclude_query: Option<String>,
+    pub exclude_path_prefixes: Option<Vec<String>>,
     pub tags: Option<Vec<String>>,
     pub formats: Option<Vec<String>>,
     pub colors: Option<Vec<String>>,
@@ -905,6 +1055,8 @@ pub struct SmartFolderFilter {
     pub exclude_tags: Option<Vec<String>>,
     pub exclude_formats: Option<Vec<String>>,
     pub exclude_metadata_filters: Option<Vec<SearchMetadataFilter>>,
+    pub exclude_number_filters: Option<Vec<SearchNumberFilter>>,
+    pub exclude_date_filters: Option<Vec<SearchDateFilter>>,
     pub number_filters: Option<Vec<SearchNumberFilter>>,
     pub date_filters: Option<Vec<SearchDateFilter>>,
     pub min_rating: Option<f64>,
@@ -2058,6 +2210,193 @@ impl RepositoryState {
         })
     }
 
+    pub fn list_repository_actions(&self, repo_id: &str) -> Result<Vec<RepositoryAction>, String> {
+        self.ensure_initialized()?;
+        let repo = self.load_repository_record(repo_id)?;
+        let connection = self.open_repository_connection(
+            &repo.summary.repo_id,
+            &repo.summary.path,
+            &repo.backend_record,
+        )?;
+        load_repository_actions(&connection, repo_id).map_err(db_error)
+    }
+
+    pub fn get_repository_action(
+        &self,
+        repo_id: &str,
+        action_id: &str,
+    ) -> Result<RepositoryAction, String> {
+        self.ensure_initialized()?;
+        let repo = self.load_repository_record(repo_id)?;
+        let connection = self.open_repository_connection(
+            &repo.summary.repo_id,
+            &repo.summary.path,
+            &repo.backend_record,
+        )?;
+        load_repository_action(&connection, repo_id, action_id)
+            .map_err(db_error)?
+            .ok_or_else(|| format!("repository action not found: {action_id}"))
+    }
+
+    pub fn set_repository_action_enabled(
+        &self,
+        request: RepositoryActionEnabledRequest,
+    ) -> Result<RepositoryActionMutationResponse, String> {
+        self.ensure_initialized()?;
+        let repo = self.load_repository_record(&request.repo_id)?;
+        let connection = self.open_repository_connection(
+            &repo.summary.repo_id,
+            &repo.summary.path,
+            &repo.backend_record,
+        )?;
+        let action = load_repository_action(&connection, &request.repo_id, &request.action_id)
+            .map_err(db_error)?
+            .ok_or_else(|| format!("repository action not found: {}", request.action_id))?;
+        if request.enabled && action.status != "ready" {
+            return Err("unsupported repository actions cannot be enabled".to_string());
+        }
+        let now = now_rfc3339();
+        connection
+            .execute(
+                r#"
+                UPDATE repository_actions
+                SET enabled = ?3, updated_at = ?4
+                WHERE repo_id = ?1 AND action_id = ?2
+                "#,
+                params![
+                    request.repo_id,
+                    request.action_id,
+                    if request.enabled { 1 } else { 0 },
+                    now
+                ],
+            )
+            .map_err(db_error)?;
+        let action = load_repository_action(&connection, &repo.summary.repo_id, &request.action_id)
+            .map_err(db_error)?
+            .ok_or_else(|| format!("repository action not found: {}", request.action_id))?;
+        Ok(RepositoryActionMutationResponse { action })
+    }
+
+    pub fn run_repository_action(
+        &self,
+        request: RepositoryActionRunRequest,
+    ) -> Result<RepositoryActionRunResponse, String> {
+        self.ensure_initialized()?;
+        let repo = self.load_repository_record(&request.repo_id)?;
+        let mut connection = self.open_repository_connection(
+            &repo.summary.repo_id,
+            &repo.summary.path,
+            &repo.backend_record,
+        )?;
+        let action = load_repository_action(&connection, &request.repo_id, &request.action_id)
+            .map_err(db_error)?
+            .ok_or_else(|| format!("repository action not found: {}", request.action_id))?;
+        if action.status != "ready" {
+            return Err("repository action contains unsupported steps".to_string());
+        }
+        if !action.enabled {
+            return Err("repository action is disabled".to_string());
+        }
+        let target_asset_ids = resolve_action_target_asset_ids(&connection, &request)?;
+        if target_asset_ids.is_empty() {
+            return Err("repository action requires at least one target".to_string());
+        }
+
+        let started_at = now_rfc3339();
+        let run_id = slugify_ascii_component(&format!(
+            "action-run-{}-{}-{}",
+            request.repo_id, request.action_id, started_at
+        ));
+        let target_json = serde_json::json!({
+            "assetIds": target_asset_ids.clone(),
+            "targetPaths": request.target_paths.clone().unwrap_or_default(),
+        });
+        let mut run_status = "success".to_string();
+        let mut run_message = format!("已处理 {} 个目标", target_asset_ids.len());
+        let tx = connection.transaction().map_err(db_error)?;
+
+        tx.execute(
+            r#"
+            INSERT INTO repository_action_runs (
+              run_id, action_id, repo_id, status, target_json, message, started_at, finished_at
+            )
+            VALUES (?1, ?2, ?3, 'running', ?4, NULL, ?5, NULL)
+            "#,
+            params![
+                run_id,
+                request.action_id,
+                request.repo_id,
+                serde_json::to_string(&target_json).map_err(json_error)?,
+                started_at
+            ],
+        )
+        .map_err(db_error)?;
+
+        for step in &action.steps {
+            let run_step_id = slugify_ascii_component(&format!("{}-{}", run_id, step.step_id));
+            let step_started_at = now_rfc3339();
+            let step_result = apply_repository_action_step(
+                &tx,
+                &request.repo_id,
+                &target_asset_ids,
+                step,
+                &format!("repository-action:{}", action.action_id),
+            );
+            let (step_status, step_message) = match step_result {
+                Ok(message) => ("success".to_string(), message),
+                Err(error) => {
+                    run_status = "failed".to_string();
+                    run_message = error.clone();
+                    ("failed".to_string(), error)
+                }
+            };
+            let step_finished_at = now_rfc3339();
+            tx.execute(
+                r#"
+                INSERT INTO repository_action_run_steps (
+                  run_step_id, run_id, step_id, repo_id, status, message, started_at, finished_at
+                )
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+                "#,
+                params![
+                    run_step_id,
+                    run_id,
+                    step.step_id,
+                    request.repo_id,
+                    step_status,
+                    step_message,
+                    step_started_at,
+                    step_finished_at
+                ],
+            )
+            .map_err(db_error)?;
+            if run_status == "failed" {
+                break;
+            }
+        }
+
+        let finished_at = now_rfc3339();
+        tx.execute(
+            r#"
+            UPDATE repository_action_runs
+            SET status = ?3, message = ?4, finished_at = ?5
+            WHERE repo_id = ?1 AND run_id = ?2
+            "#,
+            params![request.repo_id, run_id, run_status, run_message, finished_at],
+        )
+        .map_err(db_error)?;
+        tx.commit().map_err(db_error)?;
+
+        let action = load_repository_action(&connection, &repo.summary.repo_id, &request.action_id)
+            .map_err(db_error)?
+            .ok_or_else(|| format!("repository action not found: {}", request.action_id))?;
+        let run = action
+            .last_run
+            .clone()
+            .ok_or_else(|| "repository action run was not recorded".to_string())?;
+        Ok(RepositoryActionRunResponse { action, run })
+    }
+
     pub fn search_assets(&self, request: SearchRequest) -> Result<SearchResponse, String> {
         self.ensure_initialized()?;
 
@@ -2070,6 +2409,53 @@ impl RepositoryState {
                 .map(|items| items.iter().all(|item| item.trim().is_empty()))
                 .unwrap_or(true)
             && request.metadata_key.is_none()
+            && request
+                .exclude_query
+                .as_ref()
+                .map(|item| item.trim().is_empty())
+                .unwrap_or(true)
+            && request
+                .exclude_path_prefixes
+                .as_ref()
+                .map(|items| items.iter().all(|item| item.trim().is_empty()))
+                .unwrap_or(true)
+            && request
+                .exclude_tags
+                .as_ref()
+                .map(|items| items.iter().all(|item| item.trim().is_empty()))
+                .unwrap_or(true)
+            && request
+                .exclude_formats
+                .as_ref()
+                .map(|items| items.iter().all(|item| item.trim().is_empty()))
+                .unwrap_or(true)
+            && request
+                .exclude_metadata_filters
+                .as_ref()
+                .map(|items| {
+                    items
+                        .iter()
+                        .all(|item| item.key.trim().is_empty() || item.value.trim().is_empty())
+                })
+                .unwrap_or(true)
+            && request
+                .exclude_number_filters
+                .as_ref()
+                .map(|items| {
+                    items
+                        .iter()
+                        .all(|item| item.key.trim().is_empty() || (item.min.is_none() && item.max.is_none()))
+                })
+                .unwrap_or(true)
+            && request
+                .exclude_date_filters
+                .as_ref()
+                .map(|items| {
+                    items
+                        .iter()
+                        .all(|item| item.key.trim().is_empty() || (item.from.is_none() && item.to.is_none()))
+                })
+                .unwrap_or(true)
             && request
                 .metadata_filters
                 .as_ref()
@@ -2241,80 +2627,15 @@ impl RepositoryState {
             });
         }
 
-        let target_asset_ids =
-            load_alias_member_asset_ids(&tx, &request.repo_id, &request.asset_id).map_err(db_error)?;
-        let sync_tags = request.metadata.contains_key("tagGroups");
-        let synced_tags = if sync_tags {
-            metadata_tags_from_tag_groups(request.metadata.get("tagGroups"))
-        } else {
-            Vec::new()
-        };
-        let now = now_rfc3339();
         let source = request.source.unwrap_or_else(|| "desktop".to_string());
-
-        for target_asset_id in &target_asset_ids {
-            let before_map =
-                load_metadata_map_from_transaction(&tx, target_asset_id).map_err(db_error)?;
-            for (key, value) in &request.metadata {
-                let value_type = infer_value_type(value);
-                tx.execute(
-                    r#"
-                    INSERT INTO metadata (asset_id, key, value_type, value_json, version, updated_at)
-                    VALUES (?1, ?2, ?3, ?4, 1, ?5)
-                    ON CONFLICT(asset_id, key)
-                    DO UPDATE SET
-                      value_type = excluded.value_type,
-                      value_json = excluded.value_json,
-                      version = metadata.version + 1,
-                      updated_at = excluded.updated_at
-                    "#,
-                    params![target_asset_id, key, value_type, value.to_string(), now],
-                )
-                .map_err(db_error)?;
-            }
-            if sync_tags {
-                replace_asset_tags(&tx, target_asset_id, &synced_tags).map_err(db_error)?;
-            }
-
-            let target_version: i64 = tx
-                .query_row(
-                    "SELECT version + 1 FROM assets WHERE repo_id = ?1 AND asset_id = ?2",
-                    params![request.repo_id, target_asset_id],
-                    |row| row.get(0),
-                )
-                .map_err(db_error)?;
-            tx.execute(
-                r#"
-                UPDATE assets
-                SET version = ?3, updated_at = ?4, modified_at = ?4
-                WHERE repo_id = ?1 AND asset_id = ?2
-                "#,
-                params![request.repo_id, target_asset_id, target_version, now],
-            )
-            .map_err(db_error)?;
-
-            let after_map =
-                load_metadata_map_from_transaction(&tx, target_asset_id).map_err(db_error)?;
-            tx.execute(
-                r#"
-                INSERT INTO revisions (
-                  revision_id, repo_id, asset_id, timestamp, operation, before_json, after_json, source
-                )
-                VALUES (?1, ?2, ?3, ?4, 'metadata.updated', ?5, ?6, ?7)
-                "#,
-                params![
-                    format!("rev-{}-{}", target_asset_id, target_version),
-                    request.repo_id,
-                    target_asset_id,
-                    now,
-                    serde_json::to_string(&before_map).map_err(json_error)?,
-                    serde_json::to_string(&after_map).map_err(json_error)?,
-                    &source
-                ],
-            )
-            .map_err(db_error)?;
-        }
-
+        update_metadata_for_asset_in_transaction(
+            &tx,
+            &request.repo_id,
+            &request.asset_id,
+            &request.metadata,
+            &source,
+        )
+        .map_err(db_error)?;
         tx.commit().map_err(db_error)?;
         let asset = self.load_asset_detail(&request.repo_id, &request.asset_id)?;
 
@@ -3811,6 +4132,315 @@ fn load_repository_tag_groups(
     Ok(result)
 }
 
+fn load_repository_actions(
+    connection: &Connection,
+    repo_id: &str,
+) -> Result<Vec<RepositoryAction>, rusqlite::Error> {
+    let mut stmt = connection.prepare(
+        r#"
+        SELECT action_id
+        FROM repository_actions
+        WHERE repo_id = ?1
+        ORDER BY sort_order, name COLLATE NOCASE
+        "#,
+    )?;
+    let ids = stmt
+        .query_map([repo_id], |row| row.get::<_, String>(0))?
+        .collect::<Result<Vec<_>, _>>()?;
+    ids.into_iter()
+        .filter_map(|action_id| match load_repository_action(connection, repo_id, &action_id) {
+            Ok(Some(action)) => Some(Ok(action)),
+            Ok(None) => None,
+            Err(error) => Some(Err(error)),
+        })
+        .collect()
+}
+
+fn load_repository_action(
+    connection: &Connection,
+    repo_id: &str,
+    action_id: &str,
+) -> Result<Option<RepositoryAction>, rusqlite::Error> {
+    let Some(base) = connection
+        .query_row(
+            r#"
+            SELECT action_id, repo_id, source, source_action_id, name, status, enabled,
+                   raw_json, unsupported_reason, sort_order, created_at, updated_at
+            FROM repository_actions
+            WHERE repo_id = ?1 AND action_id = ?2
+            "#,
+            params![repo_id, action_id],
+            |row| {
+                let raw_json: String = row.get(7)?;
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, String>(5)?,
+                    row.get::<_, i64>(6)? != 0,
+                    parse_json_column(&raw_json)?,
+                    row.get::<_, Option<String>>(8)?,
+                    row.get::<_, i64>(9)?,
+                    row.get::<_, String>(10)?,
+                    row.get::<_, String>(11)?,
+                ))
+            },
+        )
+        .optional()?
+    else {
+        return Ok(None);
+    };
+    let steps = load_repository_action_steps(connection, repo_id, action_id)?;
+    let last_run = load_repository_action_last_run(connection, repo_id, action_id)?;
+    Ok(Some(RepositoryAction {
+        action_id: base.0,
+        repo_id: base.1,
+        source: base.2,
+        source_action_id: base.3,
+        name: base.4,
+        status: base.5,
+        enabled: base.6,
+        raw: base.7,
+        unsupported_reason: base.8,
+        sort_order: base.9,
+        created_at: base.10,
+        updated_at: base.11,
+        steps,
+        last_run,
+    }))
+}
+
+fn load_repository_action_steps(
+    connection: &Connection,
+    repo_id: &str,
+    action_id: &str,
+) -> Result<Vec<RepositoryActionStep>, rusqlite::Error> {
+    let mut stmt = connection.prepare(
+        r#"
+        SELECT step_id, action_id, repo_id, step_kind, label, status,
+               config_json, raw_json, unsupported_reason, sort_order
+        FROM repository_action_steps
+        WHERE repo_id = ?1 AND action_id = ?2
+        ORDER BY sort_order, label COLLATE NOCASE
+        "#,
+    )?;
+    let rows = stmt.query_map(params![repo_id, action_id], |row| {
+        let config_json: String = row.get(6)?;
+        let raw_json: String = row.get(7)?;
+        Ok(RepositoryActionStep {
+            step_id: row.get(0)?,
+            action_id: row.get(1)?,
+            repo_id: row.get(2)?,
+            step_kind: row.get(3)?,
+            label: row.get(4)?,
+            status: row.get(5)?,
+            config: parse_json_column(&config_json)?,
+            raw: parse_json_column(&raw_json)?,
+            unsupported_reason: row.get(8)?,
+            sort_order: row.get(9)?,
+        })
+    })?;
+    rows.collect::<Result<Vec<_>, _>>()
+}
+
+fn load_repository_action_last_run(
+    connection: &Connection,
+    repo_id: &str,
+    action_id: &str,
+) -> Result<Option<RepositoryActionRun>, rusqlite::Error> {
+    connection
+        .query_row(
+            r#"
+            SELECT run_id, action_id, repo_id, status, target_json, message, started_at, finished_at
+            FROM repository_action_runs
+            WHERE repo_id = ?1 AND action_id = ?2
+            ORDER BY started_at DESC
+            LIMIT 1
+            "#,
+            params![repo_id, action_id],
+            |row| {
+                let target_json: String = row.get(4)?;
+                Ok(RepositoryActionRun {
+                    run_id: row.get(0)?,
+                    action_id: row.get(1)?,
+                    repo_id: row.get(2)?,
+                    status: row.get(3)?,
+                    target: parse_json_column(&target_json)?,
+                    message: row.get(5)?,
+                    started_at: row.get(6)?,
+                    finished_at: row.get(7)?,
+                })
+            },
+        )
+        .optional()
+}
+
+fn resolve_action_target_asset_ids(
+    connection: &Connection,
+    request: &RepositoryActionRunRequest,
+) -> Result<Vec<String>, String> {
+    let mut ids = request.asset_ids.clone().unwrap_or_default();
+    for path in request.target_paths.clone().unwrap_or_default() {
+        let entry_path = normalize_entry_path(&path)?;
+        let asset_id = connection
+            .query_row(
+                "SELECT asset_id FROM assets WHERE repo_id = ?1 AND path = ?2 AND status != 'deleted'",
+                params![request.repo_id, entry_path],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(db_error)?
+            .ok_or_else(|| format!("action target asset not found: {path}"))?;
+        ids.push(asset_id);
+    }
+    let mut seen = HashSet::new();
+    let mut result = Vec::new();
+    for id in ids {
+        let id = id.trim().to_string();
+        if id.is_empty() || !seen.insert(id.clone()) {
+            continue;
+        }
+        let exists = connection
+            .query_row(
+                "SELECT 1 FROM assets WHERE repo_id = ?1 AND asset_id = ?2 AND status != 'deleted'",
+                params![request.repo_id, id.as_str()],
+                |_| Ok(()),
+            )
+            .optional()
+            .map_err(db_error)?
+            .is_some();
+        if !exists {
+            return Err(format!("action target asset not found: {id}"));
+        }
+        result.push(id);
+    }
+    Ok(result)
+}
+
+fn apply_repository_action_step(
+    tx: &Transaction<'_>,
+    repo_id: &str,
+    target_asset_ids: &[String],
+    step: &RepositoryActionStep,
+    source: &str,
+) -> Result<String, String> {
+    if step.status != "ready" {
+        return Err(step
+            .unsupported_reason
+            .clone()
+            .unwrap_or_else(|| "repository action step is unsupported".to_string()));
+    }
+    match step.step_kind.as_str() {
+        "metadata.update" => {
+            let metadata = step
+                .config
+                .get("metadata")
+                .and_then(serde_json::Value::as_object)
+                .ok_or_else(|| "metadata action step is missing metadata".to_string())?;
+            let patch = metadata
+                .iter()
+                .map(|(key, value)| (key.clone(), value.clone()))
+                .collect::<BTreeMap<_, _>>();
+            for asset_id in target_asset_ids {
+                update_metadata_for_asset_in_transaction(tx, repo_id, asset_id, &patch, source)
+                    .map_err(db_error)?;
+            }
+            Ok(format!("已更新 {} 个目标的元数据", target_asset_ids.len()))
+        }
+        "tagGroups.set" => {
+            let tags = step
+                .config
+                .get("tags")
+                .cloned()
+                .unwrap_or_else(|| serde_json::json!([]));
+            let patch = BTreeMap::from([("tagGroups".to_string(), tags)]);
+            for asset_id in target_asset_ids {
+                update_metadata_for_asset_in_transaction(tx, repo_id, asset_id, &patch, source)
+                    .map_err(db_error)?;
+            }
+            Ok(format!("已更新 {} 个目标的标签", target_asset_ids.len()))
+        }
+        value => Err(format!("unsupported repository action step kind: {value}")),
+    }
+}
+
+fn update_metadata_for_asset_in_transaction(
+    tx: &Transaction<'_>,
+    repo_id: &str,
+    asset_id: &str,
+    metadata: &BTreeMap<String, serde_json::Value>,
+    source: &str,
+) -> Result<(), rusqlite::Error> {
+    let target_asset_ids = load_alias_member_asset_ids(tx, repo_id, asset_id)?;
+    let sync_tags = metadata.contains_key("tagGroups");
+    let synced_tags = if sync_tags {
+        metadata_tags_from_tag_groups(metadata.get("tagGroups"))
+    } else {
+        Vec::new()
+    };
+    let now = now_rfc3339();
+    for target_asset_id in target_asset_ids {
+        let before_map = load_metadata_map_from_transaction(tx, &target_asset_id)?;
+        for (key, value) in metadata {
+            let value_type = infer_value_type(value);
+            tx.execute(
+                r#"
+                INSERT INTO metadata (asset_id, key, value_type, value_json, version, updated_at)
+                VALUES (?1, ?2, ?3, ?4, 1, ?5)
+                ON CONFLICT(asset_id, key)
+                DO UPDATE SET
+                  value_type = excluded.value_type,
+                  value_json = excluded.value_json,
+                  version = metadata.version + 1,
+                  updated_at = excluded.updated_at
+                "#,
+                params![target_asset_id, key, value_type, value.to_string(), now],
+            )?;
+        }
+        if sync_tags {
+            replace_asset_tags(tx, &target_asset_id, &synced_tags)?;
+        }
+        let target_version: i64 = tx.query_row(
+            "SELECT version + 1 FROM assets WHERE repo_id = ?1 AND asset_id = ?2",
+            params![repo_id, target_asset_id],
+            |row| row.get(0),
+        )?;
+        tx.execute(
+            r#"
+            UPDATE assets
+            SET version = ?3, updated_at = ?4, modified_at = ?4
+            WHERE repo_id = ?1 AND asset_id = ?2
+            "#,
+            params![repo_id, target_asset_id, target_version, now],
+        )?;
+        let after_map = load_metadata_map_from_transaction(tx, &target_asset_id)?;
+        tx.execute(
+            r#"
+            INSERT INTO revisions (
+              revision_id, repo_id, asset_id, timestamp, operation, before_json, after_json, source
+            )
+            VALUES (?1, ?2, ?3, ?4, 'metadata.updated', ?5, ?6, ?7)
+            "#,
+            params![
+                format!("rev-{}-{}", target_asset_id, target_version),
+                repo_id,
+                target_asset_id,
+                now,
+                serde_json::to_string(&before_map).map_err(|error| {
+                    rusqlite::Error::ToSqlConversionFailure(Box::new(error))
+                })?,
+                serde_json::to_string(&after_map).map_err(|error| {
+                    rusqlite::Error::ToSqlConversionFailure(Box::new(error))
+                })?,
+                source
+            ],
+        )?;
+    }
+    Ok(())
+}
+
 fn load_assets(
     connection: &Connection,
     repo_id: &str,
@@ -4597,12 +5227,18 @@ fn search_filter_matches(
     }
 
     !matches_excluded_filters(
+        repo,
+        asset,
         &asset.tags,
         &asset.extension,
         metadata,
+        request.exclude_query.as_deref(),
+        request.exclude_path_prefixes.as_ref(),
         request.exclude_tags.as_ref(),
         request.exclude_formats.as_ref(),
         request.exclude_metadata_filters.as_ref(),
+        request.exclude_number_filters.as_ref(),
+        request.exclude_date_filters.as_ref(),
     )
 }
 
@@ -4764,13 +5400,34 @@ fn combine_include_matches(matches: &[bool], match_mode: Option<&str>) -> bool {
 }
 
 fn matches_excluded_filters(
+    repo: &RepositorySummary,
+    asset: &AssetSummary,
     asset_tags: &[String],
     extension: &str,
     metadata: &BTreeMap<String, serde_json::Value>,
+    exclude_query: Option<&str>,
+    exclude_path_prefixes: Option<&Vec<String>>,
     exclude_tags: Option<&Vec<String>>,
     exclude_formats: Option<&Vec<String>>,
     exclude_metadata_filters: Option<&Vec<SearchMetadataFilter>>,
+    exclude_number_filters: Option<&Vec<SearchNumberFilter>>,
+    exclude_date_filters: Option<&Vec<SearchDateFilter>>,
 ) -> bool {
+    if query_terms(exclude_query)
+        .iter()
+        .any(|term| build_search_haystack(repo, asset, metadata).contains(term))
+    {
+        return true;
+    }
+    if exclude_path_prefixes.is_some_and(|prefixes| {
+        prefixes.iter().any(|prefix| {
+            normalize_directory_path(prefix).ok().is_some_and(|prefix| {
+                !prefix.is_empty() && (asset.path == prefix || asset.path.starts_with(&format!("{prefix}/")))
+            })
+        })
+    }) {
+        return true;
+    }
     let tags = exclude_tags.map_or_else(Vec::new, |values| normalized_filter_values(values));
     if !tags.is_empty() && tags_match(asset_tags, &tags, Some("or")) {
         return true;
@@ -4783,6 +5440,10 @@ fn matches_excluded_filters(
 
     exclude_metadata_filters.is_some_and(|filters| {
         has_active_metadata_filters(filters) && metadata_filters_match_with_mode(metadata, filters, Some("or"))
+    }) || exclude_number_filters.is_some_and(|filters| {
+        has_active_number_filters(filters) && number_filters_match(metadata, filters)
+    }) || exclude_date_filters.is_some_and(|filters| {
+        has_active_date_filters(filters) && date_filters_match(metadata, filters)
     })
 }
 
@@ -4980,6 +5641,8 @@ fn normalize_smart_folder_filter(filter: SmartFolderFilter) -> SmartFolderFilter
     SmartFolderFilter {
         query: normalize_optional_text(filter.query),
         path_prefix: normalize_optional_path_prefix(filter.path_prefix),
+        exclude_query: normalize_optional_text(filter.exclude_query),
+        exclude_path_prefixes: normalize_optional_path_values(filter.exclude_path_prefixes),
         tags: normalize_optional_values(filter.tags),
         formats: normalize_optional_values(filter.formats).map(|items| {
             items
@@ -4998,6 +5661,8 @@ fn normalize_smart_folder_filter(filter: SmartFolderFilter) -> SmartFolderFilter
                 .collect::<Vec<_>>()
         }),
         exclude_metadata_filters: normalize_metadata_filter_values(filter.exclude_metadata_filters),
+        exclude_number_filters: normalize_number_filter_values(filter.exclude_number_filters),
+        exclude_date_filters: normalize_date_filter_values(filter.exclude_date_filters),
         number_filters: normalize_number_filter_values(filter.number_filters),
         date_filters: normalize_date_filter_values(filter.date_filters),
         min_rating: filter.min_rating.filter(|value| *value > 0.0),
@@ -5132,6 +5797,16 @@ fn normalize_optional_path_prefix(value: Option<String>) -> Option<String> {
         .filter(|path| !path.is_empty())
 }
 
+fn normalize_optional_path_values(values: Option<Vec<String>>) -> Option<Vec<String>> {
+    let normalized = values
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|path| normalize_directory_path(&path).ok())
+        .filter(|path| !path.is_empty())
+        .collect::<Vec<_>>();
+    empty_vec_to_none(normalized)
+}
+
 fn normalized_optional_id(value: Option<&str>) -> Option<String> {
     value
         .map(|item| item.trim().to_string())
@@ -5200,6 +5875,12 @@ fn merge_smart_folder_filters(
     metadata_filters.extend(child.metadata_filters.clone().unwrap_or_default());
     let mut exclude_metadata_filters = parent.exclude_metadata_filters.unwrap_or_default();
     exclude_metadata_filters.extend(child.exclude_metadata_filters.clone().unwrap_or_default());
+    let mut exclude_number_filters = parent.exclude_number_filters.unwrap_or_default();
+    exclude_number_filters.extend(child.exclude_number_filters.clone().unwrap_or_default());
+    let mut exclude_date_filters = parent.exclude_date_filters.unwrap_or_default();
+    exclude_date_filters.extend(child.exclude_date_filters.clone().unwrap_or_default());
+    let mut exclude_path_prefixes = parent.exclude_path_prefixes.unwrap_or_default();
+    exclude_path_prefixes.extend(child.exclude_path_prefixes.clone().unwrap_or_default());
     let mut number_filters = parent.number_filters.unwrap_or_default();
     number_filters.extend(child.number_filters.clone().unwrap_or_default());
     let mut date_filters = parent.date_filters.unwrap_or_default();
@@ -5216,6 +5897,13 @@ fn merge_smart_folder_filters(
             (None, None) => None,
         },
         path_prefix: merge_path_prefix(parent.path_prefix, child.path_prefix.clone()),
+        exclude_query: match (parent.exclude_query, child.exclude_query.clone()) {
+            (Some(left), Some(right)) => Some(format!("{left}\n{right}")),
+            (Some(left), None) => Some(left),
+            (None, Some(right)) => Some(right),
+            (None, None) => None,
+        },
+        exclude_path_prefixes: empty_vec_to_none(exclude_path_prefixes),
         tags: merge_optional_lists(parent.tags, child.tags.clone()),
         formats: merge_optional_lists(parent.formats, child.formats.clone()),
         colors: empty_vec_to_none(colors),
@@ -5224,6 +5912,8 @@ fn merge_smart_folder_filters(
         exclude_tags: merge_optional_lists(parent.exclude_tags, child.exclude_tags.clone()),
         exclude_formats: merge_optional_lists(parent.exclude_formats, child.exclude_formats.clone()),
         exclude_metadata_filters: empty_vec_to_none(exclude_metadata_filters),
+        exclude_number_filters: empty_vec_to_none(exclude_number_filters),
+        exclude_date_filters: empty_vec_to_none(exclude_date_filters),
         number_filters: empty_vec_to_none(number_filters),
         date_filters: empty_vec_to_none(date_filters),
         min_rating: match (parent.min_rating, child.min_rating) {
@@ -5431,12 +6121,18 @@ fn smart_folder_filter_matches(
 
     combine_include_matches(&include_matches, filter.match_mode.as_deref())
         && !matches_excluded_filters(
+            repo,
+            asset,
             &asset.tags,
             &asset.extension,
             metadata,
+            filter.exclude_query.as_deref(),
+            filter.exclude_path_prefixes.as_ref(),
             filter.exclude_tags.as_ref(),
             filter.exclude_formats.as_ref(),
             filter.exclude_metadata_filters.as_ref(),
+            filter.exclude_number_filters.as_ref(),
+            filter.exclude_date_filters.as_ref(),
         )
 }
 
@@ -8327,6 +9023,73 @@ fn migrate_repository_schema(connection: &Connection) -> Result<(), rusqlite::Er
 
         CREATE INDEX IF NOT EXISTS idx_smart_folders_repo_parent
         ON smart_folders(repo_id, parent_id, sort_order, name);
+
+        CREATE TABLE IF NOT EXISTS repository_actions (
+          action_id TEXT PRIMARY KEY,
+          repo_id TEXT NOT NULL,
+          source TEXT NOT NULL,
+          source_action_id TEXT,
+          name TEXT NOT NULL,
+          status TEXT NOT NULL,
+          enabled INTEGER NOT NULL DEFAULT 1,
+          raw_json TEXT NOT NULL,
+          unsupported_reason TEXT,
+          sort_order INTEGER NOT NULL DEFAULT 0,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          FOREIGN KEY(repo_id) REFERENCES repositories(repo_id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_repository_actions_repo_order
+        ON repository_actions(repo_id, sort_order, name);
+
+        CREATE TABLE IF NOT EXISTS repository_action_steps (
+          step_id TEXT PRIMARY KEY,
+          action_id TEXT NOT NULL,
+          repo_id TEXT NOT NULL,
+          step_kind TEXT NOT NULL,
+          label TEXT NOT NULL,
+          status TEXT NOT NULL,
+          config_json TEXT NOT NULL,
+          raw_json TEXT NOT NULL,
+          unsupported_reason TEXT,
+          sort_order INTEGER NOT NULL DEFAULT 0,
+          FOREIGN KEY(action_id) REFERENCES repository_actions(action_id) ON DELETE CASCADE,
+          FOREIGN KEY(repo_id) REFERENCES repositories(repo_id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_repository_action_steps_action_order
+        ON repository_action_steps(action_id, sort_order);
+
+        CREATE TABLE IF NOT EXISTS repository_action_runs (
+          run_id TEXT PRIMARY KEY,
+          action_id TEXT NOT NULL,
+          repo_id TEXT NOT NULL,
+          status TEXT NOT NULL,
+          target_json TEXT NOT NULL,
+          message TEXT,
+          started_at TEXT NOT NULL,
+          finished_at TEXT,
+          FOREIGN KEY(action_id) REFERENCES repository_actions(action_id),
+          FOREIGN KEY(repo_id) REFERENCES repositories(repo_id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_repository_action_runs_action_time
+        ON repository_action_runs(action_id, started_at DESC);
+
+        CREATE TABLE IF NOT EXISTS repository_action_run_steps (
+          run_step_id TEXT PRIMARY KEY,
+          run_id TEXT NOT NULL,
+          step_id TEXT NOT NULL,
+          repo_id TEXT NOT NULL,
+          status TEXT NOT NULL,
+          message TEXT,
+          started_at TEXT NOT NULL,
+          finished_at TEXT,
+          FOREIGN KEY(run_id) REFERENCES repository_action_runs(run_id) ON DELETE CASCADE,
+          FOREIGN KEY(step_id) REFERENCES repository_action_steps(step_id),
+          FOREIGN KEY(repo_id) REFERENCES repositories(repo_id)
+        );
         "#,
     )?;
     connection.execute_batch(
@@ -11983,6 +12746,19 @@ mod tests {
             .collect()
     }
 
+    fn asset_id_for_test_path(state: &RepositoryState, repo_id: &str, path: &str) -> String {
+        let snapshot = state
+            .load_snapshot(repo_id)
+            .expect("snapshot should load after sync");
+        snapshot
+            .assets
+            .iter()
+            .find(|asset| asset.path == path)
+            .expect("asset should exist")
+            .asset_id
+            .clone()
+    }
+
     fn count_files(path: &Path) -> usize {
         if !path.exists() {
             return 0;
@@ -12284,6 +13060,7 @@ mod tests {
             .search_assets(SearchRequest {
                 query: String::new(),
                 repo_id: Some(repo_id.clone()),
+                exclude_query: None,
                 metadata_key: None,
                 metadata_value: None,
                 tag: None,
@@ -12303,6 +13080,9 @@ mod tests {
                 exclude_tags: None,
                 exclude_formats: None,
                 exclude_metadata_filters: None,
+                exclude_path_prefixes: None,
+                exclude_number_filters: None,
+                exclude_date_filters: None,
                 number_filters: None,
                 date_filters: None,
                 match_mode: None,
@@ -12313,6 +13093,257 @@ mod tests {
 
         assert_eq!(response.results.len(), 1);
         assert_eq!(response.results[0].path, "cover.psd");
+
+        fs::remove_dir_all(root).expect("test temp root should be removed");
+    }
+
+    #[test]
+    fn repository_actions_list_run_and_reject_unsafe_states() {
+        let (state, root, repo_root, _thumbnail_root) = create_test_state("repository-actions");
+        fs::write(repo_root.join("cover.png"), b"cover").expect("cover file should be written");
+        let repo_id = create_repository_for_path(&state, &repo_root);
+        let asset_id = asset_id_for_test_path(&state, &repo_id, "cover.png");
+
+        let repo = state
+            .load_repository_record(&repo_id)
+            .expect("repository record should load");
+        let connection = state
+            .open_repository_connection(
+                &repo.summary.repo_id,
+                &repo.summary.path,
+                &repo.backend_record,
+            )
+            .expect("repository connection should open");
+        let now = now_rfc3339();
+        connection
+            .execute(
+                r#"
+                INSERT INTO repository_actions (
+                  action_id, repo_id, source, source_action_id, name, status, enabled,
+                  raw_json, unsupported_reason, sort_order, created_at, updated_at
+                )
+                VALUES
+                  ('action-ready', ?1, 'eagle-importer', 'source-ready', '标记精选', 'ready', 1, '{}', NULL, 0, ?2, ?2),
+                  ('action-disabled', ?1, 'eagle-importer', 'source-disabled', '停用动作', 'ready', 0, '{}', NULL, 1, ?2, ?2),
+                  ('action-unsupported', ?1, 'eagle-importer', 'source-unsupported', '未知动作', 'unsupported', 0, '{}', 'unsupported action step: shell', 2, ?2, ?2)
+                "#,
+                params![repo_id, now],
+            )
+            .expect("actions should be inserted");
+        connection
+            .execute(
+                r#"
+                INSERT INTO repository_action_steps (
+                  step_id, action_id, repo_id, step_kind, label, status,
+                  config_json, raw_json, unsupported_reason, sort_order
+                )
+                VALUES
+                  ('step-ready-1', 'action-ready', ?1, 'metadata.update', '更新评分', 'ready', '{"metadata":{"rating":5,"comment":"Action run"}}', '{"type":"rating"}', NULL, 0),
+                  ('step-ready-2', 'action-ready', ?1, 'tagGroups.set', '设置标签', 'ready', '{"tags":["精选"]}', '{"type":"tags"}', NULL, 1),
+                  ('step-disabled-1', 'action-disabled', ?1, 'metadata.update', '更新评分', 'ready', '{"metadata":{"rating":4}}', '{"type":"rating"}', NULL, 0),
+                  ('step-unsupported-1', 'action-unsupported', ?1, 'unsupported', '外部脚本', 'unsupported', '{}', '{"type":"shell"}', 'unsupported action step: shell', 0)
+                "#,
+                [repo_id.as_str()],
+            )
+            .expect("action steps should be inserted");
+        drop(connection);
+
+        let actions = state
+            .list_repository_actions(&repo_id)
+            .expect("actions should list");
+        assert_eq!(
+            actions.iter().map(|action| action.name.as_str()).collect::<Vec<_>>(),
+            vec!["标记精选", "停用动作", "未知动作"]
+        );
+        assert_eq!(actions[0].steps.len(), 2);
+
+        let disabled_error = state
+            .run_repository_action(RepositoryActionRunRequest {
+                repo_id: repo_id.clone(),
+                action_id: "action-disabled".to_string(),
+                target_paths: Some(vec!["cover.png".to_string()]),
+                asset_ids: None,
+            })
+            .expect_err("disabled action should be rejected");
+        assert!(disabled_error.contains("disabled"));
+
+        let unsupported_error = state
+            .set_repository_action_enabled(RepositoryActionEnabledRequest {
+                repo_id: repo_id.clone(),
+                action_id: "action-unsupported".to_string(),
+                enabled: true,
+            })
+            .expect_err("unsupported action cannot be enabled");
+        assert!(unsupported_error.contains("unsupported"));
+
+        let missing_target_error = state
+            .run_repository_action(RepositoryActionRunRequest {
+                repo_id: repo_id.clone(),
+                action_id: "action-ready".to_string(),
+                target_paths: None,
+                asset_ids: None,
+            })
+            .expect_err("targetless action should be rejected");
+        assert!(missing_target_error.contains("at least one target"));
+
+        let response = state
+            .run_repository_action(RepositoryActionRunRequest {
+                repo_id: repo_id.clone(),
+                action_id: "action-ready".to_string(),
+                target_paths: Some(vec!["cover.png".to_string()]),
+                asset_ids: None,
+            })
+            .expect("ready action should run");
+        assert_eq!(response.run.status, "success");
+        assert_eq!(response.action.last_run.as_ref().map(|run| run.status.as_str()), Some("success"));
+
+        let detail = state
+            .load_asset_detail(&repo_id, &asset_id)
+            .expect("asset detail should load after action");
+        let metadata = detail
+            .metadata
+            .iter()
+            .map(|entry| (entry.key.as_str(), entry.value.clone()))
+            .collect::<BTreeMap<_, _>>();
+        assert_eq!(metadata.get("rating"), Some(&serde_json::json!(5)));
+        assert_eq!(metadata.get("comment"), Some(&serde_json::json!("Action run")));
+        assert_eq!(metadata.get("tagGroups"), Some(&serde_json::json!(["精选"])));
+        assert!(detail
+            .revisions
+            .iter()
+            .any(|revision| revision.source == "repository-action:action-ready"));
+
+        fs::remove_dir_all(root).expect("test temp root should be removed");
+    }
+
+    #[test]
+    fn search_and_smart_folders_apply_exclude_filters_after_include_filters() {
+        let (state, root, repo_root, _thumbnail_root) = create_test_state("search-excludes");
+        fs::create_dir_all(repo_root.join("Archive")).expect("archive directory should be created");
+        fs::write(repo_root.join("hero.png"), b"hero").expect("hero file should be written");
+        fs::write(repo_root.join("draft.png"), b"draft").expect("draft file should be written");
+        fs::write(repo_root.join("Archive/old.png"), b"old").expect("archived file should be written");
+        let repo_id = create_repository_for_path(&state, &repo_root);
+
+        let repo = state
+            .load_repository_record(&repo_id)
+            .expect("repository record should load");
+        let connection = state
+            .open_repository_connection(
+                &repo.summary.repo_id,
+                &repo.summary.path,
+                &repo.backend_record,
+            )
+            .expect("repository connection should open");
+        let now = now_rfc3339();
+        let ids = ["hero.png", "draft.png", "Archive/old.png"]
+            .into_iter()
+            .map(|path| {
+                let asset_id: String = connection
+                    .query_row(
+                        "SELECT asset_id FROM assets WHERE repo_id = ?1 AND path = ?2",
+                        params![repo_id.as_str(), path],
+                        |row| row.get(0),
+                    )
+                    .expect("asset id should load");
+                (path.to_string(), asset_id)
+            })
+            .collect::<BTreeMap<_, _>>();
+        for (path, width, created_at, note) in [
+            ("hero.png", serde_json::json!(1920), serde_json::json!("2024-02-02T00:00:00Z"), serde_json::json!("final hero")),
+            ("draft.png", serde_json::json!(480), serde_json::json!("2024-02-02T00:00:00Z"), serde_json::json!("draft hero")),
+            ("Archive/old.png", serde_json::json!(1920), serde_json::json!("2024-01-10T00:00:00Z"), serde_json::json!("old hero")),
+        ] {
+            for (key, value) in [("width", width), ("fileCreatedAt", created_at), ("note", note)] {
+                connection
+                    .execute(
+                        r#"
+                        INSERT OR REPLACE INTO metadata (asset_id, key, value_type, value_json, version, updated_at)
+                        VALUES (?1, ?2, ?3, ?4, 1, ?5)
+                        "#,
+                        params![
+                            ids[path].as_str(),
+                            key,
+                            infer_value_type(&value),
+                            value.to_string(),
+                            now
+                        ],
+                    )
+                    .expect("metadata should be written");
+            }
+        }
+        drop(connection);
+
+        let response = state
+            .search_assets(SearchRequest {
+                query: "hero".to_string(),
+                repo_id: Some(repo_id.clone()),
+                exclude_query: Some("draft".to_string()),
+                metadata_key: None,
+                metadata_value: None,
+                tag: None,
+                tags: None,
+                metadata_filters: None,
+                exclude_tags: None,
+                exclude_formats: None,
+                exclude_metadata_filters: None,
+                exclude_path_prefixes: Some(vec!["Archive".to_string()]),
+                exclude_number_filters: Some(vec![SearchNumberFilter {
+                    key: "width".to_string(),
+                    min: None,
+                    max: Some(640.0),
+                }]),
+                exclude_date_filters: Some(vec![SearchDateFilter {
+                    key: "fileCreatedAt".to_string(),
+                    from: Some("2024-01-01T00:00:00Z".to_string()),
+                    to: Some("2024-01-31T00:00:00Z".to_string()),
+                }]),
+                number_filters: None,
+                date_filters: None,
+                formats: Some(vec!["png".to_string()]),
+                min_rating: None,
+                match_mode: None,
+                sort: None,
+                limit: None,
+            })
+            .expect("exclude search should complete");
+        assert_eq!(
+            response.results.iter().map(|item| item.path.as_str()).collect::<Vec<_>>(),
+            vec!["hero.png"]
+        );
+
+        state
+            .create_smart_folder(SmartFolderMutationRequest {
+                repo_id: repo_id.clone(),
+                smart_folder_id: Some("smart-hero".to_string()),
+                parent_id: None,
+                name: "Hero".to_string(),
+                filter: SmartFolderFilter {
+                    query: Some("hero".to_string()),
+                    formats: Some(vec!["png".to_string()]),
+                    exclude_query: Some("draft".to_string()),
+                    exclude_path_prefixes: Some(vec!["Archive".to_string()]),
+                    exclude_number_filters: Some(vec![SearchNumberFilter {
+                        key: "width".to_string(),
+                        min: None,
+                        max: Some(640.0),
+                    }]),
+                    exclude_date_filters: Some(vec![SearchDateFilter {
+                        key: "fileCreatedAt".to_string(),
+                        from: Some("2024-01-01T00:00:00Z".to_string()),
+                        to: Some("2024-01-31T00:00:00Z".to_string()),
+                    }]),
+                    ..SmartFolderFilter::default()
+                },
+            })
+            .expect("smart folder should be created");
+        let smart_result = state
+            .query_smart_folder(&repo_id, "smart-hero")
+            .expect("smart folder should query");
+        assert_eq!(
+            smart_result.results.iter().map(|item| item.path.as_str()).collect::<Vec<_>>(),
+            vec!["hero.png"]
+        );
 
         fs::remove_dir_all(root).expect("test temp root should be removed");
     }
@@ -12421,6 +13452,7 @@ mod tests {
             .search_assets(SearchRequest {
                 query: String::new(),
                 repo_id: Some(repo_id.clone()),
+                exclude_query: None,
                 metadata_key: None,
                 metadata_value: None,
                 tag: None,
@@ -12432,6 +13464,9 @@ mod tests {
                 exclude_tags: None,
                 exclude_formats: None,
                 exclude_metadata_filters: None,
+                exclude_path_prefixes: None,
+                exclude_number_filters: None,
+                exclude_date_filters: None,
                 number_filters: None,
                 date_filters: None,
                 formats: None,
@@ -12459,6 +13494,7 @@ mod tests {
             .search_assets(SearchRequest {
                 query: String::new(),
                 repo_id: Some(repo_id.clone()),
+                exclude_query: None,
                 metadata_key: None,
                 metadata_value: None,
                 tag: None,
@@ -12467,6 +13503,9 @@ mod tests {
                 exclude_tags: None,
                 exclude_formats: None,
                 exclude_metadata_filters: None,
+                exclude_path_prefixes: None,
+                exclude_number_filters: None,
+                exclude_date_filters: None,
                 number_filters: None,
                 date_filters: None,
                 formats: Some(vec!["png".to_string()]),
@@ -12494,6 +13533,7 @@ mod tests {
             .search_assets(SearchRequest {
                 query: String::new(),
                 repo_id: Some(repo_id),
+                exclude_query: None,
                 metadata_key: None,
                 metadata_value: None,
                 tag: None,
@@ -12505,6 +13545,9 @@ mod tests {
                 exclude_tags: None,
                 exclude_formats: None,
                 exclude_metadata_filters: None,
+                exclude_path_prefixes: None,
+                exclude_number_filters: None,
+                exclude_date_filters: None,
                 number_filters: None,
                 date_filters: None,
                 formats: None,

@@ -186,6 +186,7 @@ export type SearchSort = {
 export type SearchRequest = {
   query: string;
   repoId?: string;
+  excludeQuery?: string;
   metadataKey?: string;
   metadataValue?: string;
   tag?: string;
@@ -194,6 +195,9 @@ export type SearchRequest = {
   excludeTags?: string[];
   excludeFormats?: string[];
   excludeMetadataFilters?: SearchMetadataFilter[];
+  excludePathPrefixes?: string[];
+  excludeNumberFilters?: SearchNumberFilter[];
+  excludeDateFilters?: SearchDateFilter[];
   numberFilters?: SearchNumberFilter[];
   dateFilters?: SearchDateFilter[];
   formats?: string[];
@@ -206,6 +210,8 @@ export type SearchRequest = {
 export type SmartFolderFilter = {
   query?: string;
   pathPrefix?: string;
+  excludeQuery?: string;
+  excludePathPrefixes?: string[];
   tags?: string[];
   formats?: string[];
   colors?: string[];
@@ -214,6 +220,8 @@ export type SmartFolderFilter = {
   excludeTags?: string[];
   excludeFormats?: string[];
   excludeMetadataFilters?: SearchMetadataFilter[];
+  excludeNumberFilters?: SearchNumberFilter[];
+  excludeDateFilters?: SearchDateFilter[];
   numberFilters?: SearchNumberFilter[];
   dateFilters?: SearchDateFilter[];
   minRating?: number;
@@ -252,6 +260,69 @@ export type SmartFolderUpdateRequest = SmartFolderMutationRequest & {
 export type SmartFolderMutationResponse = {
   smartFolders: SmartFolderTreeNode[];
   smartFolder?: SmartFolder | null;
+};
+
+export type RepositoryActionStep = {
+  stepId: string;
+  actionId: string;
+  repoId: string;
+  stepKind: string;
+  label: string;
+  status: "ready" | "unsupported" | string;
+  config: Record<string, unknown> | unknown;
+  raw: Record<string, unknown> | unknown;
+  unsupportedReason?: string | null;
+  sortOrder: number;
+};
+
+export type RepositoryActionRun = {
+  runId: string;
+  actionId: string;
+  repoId: string;
+  status: "running" | "success" | "failed" | string;
+  target: Record<string, unknown> | unknown;
+  message?: string | null;
+  startedAt: string;
+  finishedAt?: string | null;
+};
+
+export type RepositoryAction = {
+  actionId: string;
+  repoId: string;
+  source: string;
+  sourceActionId?: string | null;
+  name: string;
+  status: "ready" | "unsupported" | string;
+  enabled: boolean;
+  raw: Record<string, unknown> | unknown;
+  unsupportedReason?: string | null;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+  steps: RepositoryActionStep[];
+  lastRun?: RepositoryActionRun | null;
+};
+
+export type RepositoryActionRunRequest = {
+  repoId: string;
+  actionId: string;
+  targetPaths?: string[];
+  assetIds?: string[];
+};
+
+export type RepositoryActionRunResponse = {
+  action: RepositoryAction;
+  run: RepositoryActionRun;
+};
+
+export type RepositoryActionEnabledRequest = {
+  repoId: string;
+  actionId: string;
+  enabled: boolean;
+};
+
+export type RepositoryActionMutationResponse = {
+  action: RepositoryAction;
 };
 
 export type SmartFolderResultSnapshot = {
