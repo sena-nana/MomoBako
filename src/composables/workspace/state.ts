@@ -23,6 +23,15 @@ export type WorkspaceFilterState = {
   formats: string[];
   colors: string[];
   shapes: string[];
+  excludeTags: string[];
+  excludeFormats: string[];
+  excludeMetadataFilters: string;
+  numberFilters: string;
+  dateFilters: string;
+  matchMode: "and" | "or";
+  sortField: string;
+  sortDirection: "asc" | "desc";
+  limit: number | null;
   minRating: number | null;
 };
 
@@ -47,6 +56,15 @@ export function createInitialFilters(): WorkspaceFilterState {
     formats: [],
     colors: [],
     shapes: [],
+    excludeTags: [],
+    excludeFormats: [],
+    excludeMetadataFilters: "",
+    numberFilters: "",
+    dateFilters: "",
+    matchMode: "and",
+    sortField: "",
+    sortDirection: "asc",
+    limit: null,
     minRating: null,
   };
 }

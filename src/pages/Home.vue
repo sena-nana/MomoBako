@@ -111,6 +111,14 @@ const copyTargetPath = ref("");
 const skippedHardlinkCandidateIds = ref<Set<string>>(new Set());
 const colorFilterInput = ref("");
 const shapeFilterInput = ref("");
+const excludeTagsInput = ref("");
+const excludeFormatsInput = ref("");
+const excludeMetadataFiltersInput = ref("");
+const numberFiltersInput = ref("");
+const dateFiltersInput = ref("");
+const sortFieldInput = ref("");
+const sortDirectionInput = ref<"asc" | "desc">("asc");
+const limitInput = ref("");
 const internalWorkspaceDragSession = ref<InternalWorkspaceDragSession | null>(null);
 const externalDragSwitchDistance = 72;
 
@@ -189,6 +197,7 @@ const {
   setFilterBarOpen,
   toggleFilterValue,
   setMinimumRatingFilter,
+  updateFilters,
   clearFilters,
   runFilteredSearch,
   confirmWorkspaceHardlinkCandidate,
@@ -330,8 +339,11 @@ const searchResultScopeLabel = computed(() => (
 
 function hardlinkStateLabel(entry: FileBrowserEntry) {
   switch (entry.hardlinkState) {
+    case "primary":
+      return "主归属";
     case "linked":
       return "硬链接关联";
+    case "copied":
     case "copiedFallback":
       return "普通复制";
     case "broken":
@@ -1330,8 +1342,42 @@ function clearSearchFilters() {
   clearFilters();
   colorFilterInput.value = "";
   shapeFilterInput.value = "";
+  excludeTagsInput.value = "";
+  excludeFormatsInput.value = "";
+  excludeMetadataFiltersInput.value = "";
+  numberFiltersInput.value = "";
+  dateFiltersInput.value = "";
+  sortFieldInput.value = "";
+  sortDirectionInput.value = "asc";
+  limitInput.value = "";
   setActivePanel("search");
   void runFilteredSearch();
+}
+
+function applyAdvancedSearchFilters() {
+  if (!isRepositoryWritable.value) return;
+  const limit = Number(limitInput.value);
+  updateFilters({
+    excludeTags: splitFilterInput(excludeTagsInput.value),
+    excludeFormats: splitFilterInput(excludeFormatsInput.value),
+    excludeMetadataFilters: excludeMetadataFiltersInput.value.trim(),
+    numberFilters: numberFiltersInput.value.trim(),
+    dateFilters: dateFiltersInput.value.trim(),
+    sortField: sortFieldInput.value.trim(),
+    sortDirection: sortDirectionInput.value,
+    limit: Number.isFinite(limit) && limit > 0 ? limit : null,
+  });
+  setActivePanel("search");
+  void runFilteredSearch();
+}
+
+function splitFilterInput(value: string) {
+  return Array.from(new Set(
+    value
+      .split(/[,，\n]/)
+      .map((item) => item.trim())
+      .filter(Boolean),
+  ));
 }
 
 function closeFilterBar() {
@@ -1680,6 +1726,86 @@ onUnmounted(() => {
           </button>
         </div>
       </section>
+
+      <section class="workspace-filter-bar__group workspace-filter-bar__group--wide" aria-label="高级筛选">
+        <span>高级</span>
+        <div class="workspace-filter-bar__advanced">
+          <label class="workspace-filter-input">
+            <input
+              v-model="excludeTagsInput"
+              type="text"
+              aria-label="排除标签"
+              placeholder="排除标签"
+              @keydown.enter.prevent="applyAdvancedSearchFilters"
+            />
+          </label>
+          <label class="workspace-filter-input">
+            <input
+              v-model="excludeFormatsInput"
+              type="text"
+              aria-label="排除格式"
+              placeholder="排除格式"
+              @keydown.enter.prevent="applyAdvancedSearchFilters"
+            />
+          </label>
+          <label class="workspace-filter-input workspace-filter-input--wide">
+            <input
+              v-model="excludeMetadataFiltersInput"
+              type="text"
+              aria-label="排除元数据"
+              placeholder="status=archived"
+              @keydown.enter.prevent="applyAdvancedSearchFilters"
+            />
+          </label>
+          <label class="workspace-filter-input workspace-filter-input--wide">
+            <input
+              v-model="numberFiltersInput"
+              type="text"
+              aria-label="数值范围"
+              placeholder="width=1024..4096"
+              @keydown.enter.prevent="applyAdvancedSearchFilters"
+            />
+          </label>
+          <label class="workspace-filter-input workspace-filter-input--wide">
+            <input
+              v-model="dateFiltersInput"
+              type="text"
+              aria-label="日期范围"
+              placeholder="fileCreatedAt=2024-01-01T00:00:00Z.."
+              @keydown.enter.prevent="applyAdvancedSearchFilters"
+            />
+          </label>
+          <label class="workspace-filter-input">
+            <input
+              v-model="sortFieldInput"
+              type="text"
+              aria-label="排序字段"
+              placeholder="排序字段"
+              @keydown.enter.prevent="applyAdvancedSearchFilters"
+            />
+          </label>
+          <label class="workspace-filter-input workspace-filter-input--select">
+            <select v-model="sortDirectionInput" aria-label="排序方向">
+              <option value="asc">升序</option>
+              <option value="desc">降序</option>
+            </select>
+          </label>
+          <label class="workspace-filter-input">
+            <input
+              v-model="limitInput"
+              type="number"
+              min="1"
+              step="1"
+              aria-label="结果数量"
+              placeholder="数量"
+              @keydown.enter.prevent="applyAdvancedSearchFilters"
+            />
+          </label>
+          <button type="button" class="ghost workspace-filter-bar__btn" @click="applyAdvancedSearchFilters">
+            应用
+          </button>
+        </div>
+      </section>
     </div>
   </div>
 
@@ -1740,6 +1866,7 @@ onUnmounted(() => {
         :hardlink-state-label="hardlinkStateLabel"
         :is-saving-metadata="isSavingMetadata"
         :available-tags="tagFilterOptions"
+        :tag-groups="activeSnapshot?.tagGroups ?? []"
         :thumbnail-palette="thumbnailPaletteColors"
         :save-metadata="saveFileMetadata"
         :status-label="statusLabel"
@@ -1789,6 +1916,7 @@ onUnmounted(() => {
       :rename-target-path="renameTargetPath"
       :is-saving-metadata="isSavingMetadata"
       :available-tags="tagFilterOptions"
+      :tag-groups="activeSnapshot?.tagGroups ?? []"
       :thumbnail-palette="thumbnailPaletteColors"
       :save-metadata="saveFileMetadata"
       :selected-entries="selectedEntries"

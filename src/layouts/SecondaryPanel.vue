@@ -4,8 +4,10 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { RouterLink, useRoute, useRouter } from "vue-router";
 import {
   Archive,
+  Bookmark,
   Check,
   ChevronsUpDown,
+  File,
   FolderTree,
   LoaderCircle,
   Plus,
@@ -21,7 +23,7 @@ import SmartFolderTreeNode from "../components/SmartFolderTreeNode.vue";
 import TaskPopover from "../components/TaskPopover.vue";
 import { normalizeWorkspaceMovePaths } from "../pages/workspace/dragBehavior";
 import { useRepositoryWorkspace, type WorkspacePanelKey } from "../composables/useRepositoryWorkspace";
-import type { FileDeleteMode, SmartFolder, SmartFolderFilter, SmartFolderTreeNode as SmartFolderTreeNodeType } from "../types/repository";
+import type { FileDeleteMode, RepositoryShortcut, SmartFolder, SmartFolderFilter, SmartFolderTreeNode as SmartFolderTreeNodeType } from "../types/repository";
 
 type PanelKey = Exclude<WorkspacePanelKey, "files" | "search" | "smartFolder">;
 type ShortcutKey = "all" | "processing" | "untagged" | "deleted";
@@ -81,6 +83,15 @@ const smartFolderColors = ref("");
 const smartFolderShapes = ref("");
 const smartFolderMinRating = ref("");
 const smartFolderMetadataFilters = ref("");
+const smartFolderMatchMode = ref<"and" | "or">("and");
+const smartFolderExcludeTags = ref("");
+const smartFolderExcludeFormats = ref("");
+const smartFolderExcludeMetadataFilters = ref("");
+const smartFolderNumberFilters = ref("");
+const smartFolderDateFilters = ref("");
+const smartFolderSortField = ref("");
+const smartFolderSortDirection = ref<"asc" | "desc">("asc");
+const smartFolderLimit = ref("");
 const showSmartFolderDeleteDialog = ref(false);
 const pendingDeleteSmartFolderId = ref("");
 const pendingDeleteSmartFolderLabel = ref("");
@@ -111,6 +122,7 @@ const {
   refreshFileBrowserTree,
   selectRepository,
   selectSmartFolder,
+  selectWorkspaceEntry,
   setActivePanel,
   loadFileBrowserForDirectory,
   createSmartFolderInWorkspace,
@@ -139,6 +151,7 @@ const shortcuts = computed<ShortcutItem[]>(() => {
 });
 
 const isTrashPanel = computed(() => activePanel.value === "deleted");
+const quickAccess = computed(() => activeSnapshot.value?.quickAccess ?? []);
 const isActiveRepositoryMissing = computed(() => activeRepository.value?.status === "missing");
 const isFolderDragActive = computed(() => isExternalDragActive.value || isInternalDragActive.value);
 const expandedFolderPathSet = computed(() => new Set(expandedFolderPaths.value));
@@ -274,8 +287,64 @@ function formatMetadataFiltersInput(filter: SmartFolderFilter) {
   return filter.metadataFilters?.map((item) => `${item.key}=${item.value}`).join("\n") ?? "";
 }
 
+function formatExcludeMetadataFiltersInput(filter: SmartFolderFilter) {
+  return filter.excludeMetadataFilters?.map((item) => `${item.key}=${item.value}`).join("\n") ?? "";
+}
+
+function parseNumberFiltersInput(value: string) {
+  const parseRangeBound = (text: string) => {
+    const trimmed = text.trim();
+    if (!trimmed) return undefined;
+    const number = Number(trimmed);
+    return Number.isFinite(number) ? number : undefined;
+  };
+
+  return value
+    .split(/\n|[,，]/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .flatMap((item) => {
+      const [key, range] = item.split("=");
+      if (!key?.trim() || !range?.trim()) return [];
+      const [minText, maxText] = range.split("..").map((part) => part.trim());
+      const min = parseRangeBound(minText ?? "");
+      const max = parseRangeBound(maxText ?? "");
+      return [{
+        key: key.trim(),
+        min,
+        max,
+      }].filter((filter) => filter.min != null || filter.max != null);
+    });
+}
+
+function formatNumberFiltersInput(filter: SmartFolderFilter) {
+  return filter.numberFilters?.map((item) => `${item.key}=${item.min ?? ""}..${item.max ?? ""}`).join("\n") ?? "";
+}
+
+function parseDateFiltersInput(value: string) {
+  return value
+    .split(/\n|[,，]/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .flatMap((item) => {
+      const [key, range] = item.split("=");
+      if (!key?.trim() || !range?.trim()) return [];
+      const [from, to] = range.split("..").map((part) => part.trim());
+      return [{
+        key: key.trim(),
+        from: from || undefined,
+        to: to || undefined,
+      }].filter((filter) => filter.from || filter.to);
+    });
+}
+
+function formatDateFiltersInput(filter: SmartFolderFilter) {
+  return filter.dateFilters?.map((item) => `${item.key}=${item.from ?? ""}..${item.to ?? ""}`).join("\n") ?? "";
+}
+
 function buildSmartFolderFilter(): SmartFolderFilter {
   const minRating = Number(smartFolderMinRating.value);
+  const limit = Number(smartFolderLimit.value);
   return {
     query: smartFolderQuery.value.trim() || undefined,
     pathPrefix: smartFolderPathPrefix.value.trim() || undefined,
@@ -285,6 +354,16 @@ function buildSmartFolderFilter(): SmartFolderFilter {
     shapes: splitListInput(smartFolderShapes.value),
     minRating: Number.isFinite(minRating) && minRating > 0 ? minRating : undefined,
     metadataFilters: parseMetadataFiltersInput(smartFolderMetadataFilters.value),
+    matchMode: smartFolderMatchMode.value,
+    excludeTags: splitListInput(smartFolderExcludeTags.value),
+    excludeFormats: splitListInput(smartFolderExcludeFormats.value),
+    excludeMetadataFilters: parseMetadataFiltersInput(smartFolderExcludeMetadataFilters.value),
+    numberFilters: parseNumberFiltersInput(smartFolderNumberFilters.value),
+    dateFilters: parseDateFiltersInput(smartFolderDateFilters.value),
+    sort: smartFolderSortField.value.trim()
+      ? { field: smartFolderSortField.value.trim(), direction: smartFolderSortDirection.value }
+      : undefined,
+    limit: Number.isFinite(limit) && limit > 0 ? limit : undefined,
   };
 }
 
@@ -333,6 +412,38 @@ function selectShortcut(id: ShortcutKey) {
   setActivePanel("files");
   if (route.path === "/settings") {
     void router.push("/");
+  }
+}
+
+function shortcutIcon(shortcut: RepositoryShortcut) {
+  if (shortcut.targetKind === "smartFolder") return Bookmark;
+  if (shortcut.targetKind === "file") return File;
+  return FolderTree;
+}
+
+function parentPathFor(path: string) {
+  const normalized = path.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+  const index = normalized.lastIndexOf("/");
+  return index > 0 ? normalized.slice(0, index) : "";
+}
+
+async function openQuickAccess(shortcut: RepositoryShortcut) {
+  if (isActiveRepositoryMissing.value) return;
+  if (route.path === "/settings") {
+    void router.push("/");
+  }
+  if (shortcut.targetKind === "smartFolder" && shortcut.targetId) {
+    await selectSmartFolder(shortcut.targetId);
+    return;
+  }
+  if (shortcut.targetKind === "file" && shortcut.targetPath) {
+    setActivePanel("files");
+    await loadFileBrowserForDirectory(parentPathFor(shortcut.targetPath));
+    selectWorkspaceEntry(shortcut.targetPath);
+    return;
+  }
+  if (shortcut.targetPath != null) {
+    openFolder(shortcut.targetPath);
   }
 }
 
@@ -580,6 +691,15 @@ function resetSmartFolderDialog(parentId = "") {
   smartFolderShapes.value = "";
   smartFolderMinRating.value = "";
   smartFolderMetadataFilters.value = "";
+  smartFolderMatchMode.value = "and";
+  smartFolderExcludeTags.value = "";
+  smartFolderExcludeFormats.value = "";
+  smartFolderExcludeMetadataFilters.value = "";
+  smartFolderNumberFilters.value = "";
+  smartFolderDateFilters.value = "";
+  smartFolderSortField.value = "";
+  smartFolderSortDirection.value = "asc";
+  smartFolderLimit.value = "";
 }
 
 function openCreateSmartFolderDialog(parentId = "") {
@@ -603,6 +723,15 @@ function openEditSmartFolderDialog(smartFolderId: string) {
   smartFolderShapes.value = joinListInput(folder.filter.shapes);
   smartFolderMinRating.value = folder.filter.minRating == null ? "" : String(folder.filter.minRating);
   smartFolderMetadataFilters.value = formatMetadataFiltersInput(folder.filter);
+  smartFolderMatchMode.value = folder.filter.matchMode === "or" ? "or" : "and";
+  smartFolderExcludeTags.value = joinListInput(folder.filter.excludeTags);
+  smartFolderExcludeFormats.value = joinListInput(folder.filter.excludeFormats);
+  smartFolderExcludeMetadataFilters.value = formatExcludeMetadataFiltersInput(folder.filter);
+  smartFolderNumberFilters.value = formatNumberFiltersInput(folder.filter);
+  smartFolderDateFilters.value = formatDateFiltersInput(folder.filter);
+  smartFolderSortField.value = folder.filter.sort?.field ?? "";
+  smartFolderSortDirection.value = folder.filter.sort?.direction === "desc" ? "desc" : "asc";
+  smartFolderLimit.value = folder.filter.limit == null ? "" : String(folder.filter.limit);
   showSmartFolderDialog.value = true;
 }
 
@@ -858,6 +987,28 @@ onBeforeUnmount(() => {
                 {{ item.label }}
               </span>
               <span class="workspace-shortcuts__count">{{ item.count }}</span>
+            </button>
+          </div>
+        </section>
+
+        <section v-if="quickAccess.length" class="workspace-group">
+          <div class="workspace-group__header">
+            <span>快捷访问</span>
+          </div>
+          <div class="workspace-shortcuts">
+            <button
+              v-for="item in quickAccess"
+              :key="item.shortcutId"
+              type="button"
+              class="workspace-shortcuts__item"
+              :disabled="isActiveRepositoryMissing"
+              :title="item.targetPath ?? item.targetId ?? item.label"
+              @click="openQuickAccess(item)"
+            >
+              <span class="workspace-shortcuts__label">
+                <component :is="shortcutIcon(item)" :size="15" aria-hidden="true" />
+                {{ item.label }}
+              </span>
             </button>
           </div>
         </section>
@@ -1219,6 +1370,13 @@ onBeforeUnmount(() => {
                 <span>最低评分</span>
                 <input v-model="smartFolderMinRating" type="number" min="1" max="5" step="1" placeholder="4" />
               </label>
+              <label class="dialog-field">
+                <span>匹配方式</span>
+                <select v-model="smartFolderMatchMode">
+                  <option value="and">全部匹配</option>
+                  <option value="or">任一匹配</option>
+                </select>
+              </label>
             </div>
 
             <label class="dialog-field">
@@ -1227,6 +1385,59 @@ onBeforeUnmount(() => {
                 v-model="smartFolderMetadataFilters"
                 rows="3"
                 placeholder="artist=demo&#10;source=reference"
+              />
+            </label>
+
+            <div class="smart-folder-dialog__grid">
+              <label class="dialog-field">
+                <span>排除标签</span>
+                <input v-model="smartFolderExcludeTags" type="text" placeholder="草稿，临时" />
+              </label>
+              <label class="dialog-field">
+                <span>排除格式</span>
+                <input v-model="smartFolderExcludeFormats" type="text" placeholder="gif，webp" />
+              </label>
+              <label class="dialog-field">
+                <span>排序字段</span>
+                <input v-model="smartFolderSortField" type="text" placeholder="modifiedAt / rating / metadata.width" />
+              </label>
+              <label class="dialog-field">
+                <span>排序方向</span>
+                <select v-model="smartFolderSortDirection">
+                  <option value="asc">升序</option>
+                  <option value="desc">降序</option>
+                </select>
+              </label>
+              <label class="dialog-field">
+                <span>结果数量</span>
+                <input v-model="smartFolderLimit" type="number" min="1" step="1" placeholder="100" />
+              </label>
+            </div>
+
+            <label class="dialog-field">
+              <span>排除元数据</span>
+              <textarea
+                v-model="smartFolderExcludeMetadataFilters"
+                rows="2"
+                placeholder="status=archived"
+              />
+            </label>
+
+            <label class="dialog-field">
+              <span>数值范围</span>
+              <textarea
+                v-model="smartFolderNumberFilters"
+                rows="2"
+                placeholder="width=1024..4096&#10;originalSizeBytes=..10485760"
+              />
+            </label>
+
+            <label class="dialog-field">
+              <span>日期范围</span>
+              <textarea
+                v-model="smartFolderDateFilters"
+                rows="2"
+                placeholder="fileCreatedAt=2024-01-01T00:00:00Z..2024-12-31T23:59:59Z"
               />
             </label>
           </div>

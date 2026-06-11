@@ -57,6 +57,10 @@
 - `POST /repositories/{repoId}/hardlinks:confirm`
   - Request body includes `candidateId`
   - Confirms a pending candidate and joins both assets into the same hardlink group only when their stored content hashes and sizes still match.
+- `GET /repositories/{repoId}/snapshot`
+  - `RepositorySnapshot` returns repository summary, folder summaries, indexed asset summaries, metadata field registry, overview, optional `quickAccess`, and optional `tagGroups`.
+  - `quickAccess` entries expose `shortcutId`, `label`, `targetKind`, optional `targetPath`, and optional `targetId`, and can point to files, folders, or smart folders imported from Eagle.
+  - `tagGroups` expose repository-level tag grouping metadata for the desktop tag editor; they do not replace per-asset searchable tags.
 - `POST /repositories/{repoId}/thumbnails:ensure`
   - Request body includes repository-relative `path`
   - Reuse an existing valid thumbnail cache entry or generate one for supported local image/video files
@@ -80,6 +84,9 @@
 
 - `GET /repositories/{repoId}/assets/{assetId}`
   - Read asset summary, metadata and revision history
+  - File browser and asset detail payloads may include `tags`, `aliasPaths`, `hardlinkGroupId`, `hardlinkState`, and `folderMetadata`.
+  - `aliasPaths` lists additional repository-relative locations for Eagle multi-folder aliases; every alias remains a normal asset row and may be linked by hardlink or fallback copy.
+  - `folderMetadata` currently carries `protected` and optional `passwordTip` as migration hints only; MomoBako does not store Eagle plaintext passwords and does not block folder access.
 - `POST /repositories/{repoId}/assets/{assetId}:undo`
   - Reapply previous metadata snapshot
 - `POST /repositories/{repoId}/assets/{assetId}:redo`
@@ -90,7 +97,10 @@
 - `PATCH /repositories/{repoId}/assets/{assetId}/metadata`
   - Request body includes `expectedVersion`
   - Generic file metadata keys include `rating`, `addedToLibraryAt`, `fileCreatedAt`, `fileModifiedAt`, `comment`, `link`, `width`, `height`, `originalSizeBytes`, `thumbnailPalette`, and `tagGroups`
-  - Eagle imports preserve original source and timing fields in generic metadata: `url` becomes `link`, import/create/modified timestamps become `addedToLibraryAt`, `fileCreatedAt`, and `fileModifiedAt`, and dimensions/size become `width`, `height`, and `originalSizeBytes`
+  - Eagle imports preserve original source and timing fields in generic metadata: `url` becomes `link`, `annotation` becomes `comment`, import/create/modified timestamps become `addedToLibraryAt`, `fileCreatedAt`, and `fileModifiedAt`, and dimensions/size become `width`, `height`, and `originalSizeBytes`
+  - Reads remain backward compatible with legacy `note`; when `comment` is empty, desktop clients and repository migration may fall back to `note`.
+  - When `metadata.tagGroups` is supplied, the backend also synchronizes the flattened values into the searchable `tags` table.
+  - Assets that belong to the same Eagle alias group propagate metadata updates together so duplicate paths stay behaviorally aligned.
   - Outcomes: `success`, `conflict`, `merged`
 
 ## Search API
@@ -104,10 +114,24 @@
     - `metadataKey`
     - `metadataValue`
     - `metadataFilters`
+    - `excludeTags`
+    - `excludeFormats`
+    - `excludeMetadataFilters`
+    - `numberFilters`
+    - `dateFilters`
+    - `matchMode`
+    - `sort`
+    - `limit`
     - `formats`
     - `minRating`
   - `tags` and `formats` match with OR semantics inside each field; different filter fields combine with AND semantics.
   - `metadataFilters` accepts key/value pairs such as `color` and `shape`; values are matched against metadata text.
+  - `exclude*` filters remove matches after inclusion filters are applied.
+  - `numberFilters` support numeric ranges such as `width=1024..4096` or `originalSizeBytes=..10485760`.
+  - `dateFilters` support ISO timestamp ranges such as `fileCreatedAt=2024-01-01T00:00:00Z..2024-12-31T23:59:59Z`.
+  - `matchMode: "or"` allows smart-folder-style any-match logic across populated include filters; the default remains AND semantics.
+  - `sort.field` accepts built-in fields such as `filename`, `path`, `rating`, `sizeBytes`, `modifiedAt`, and metadata fields such as `metadata.width`, `metadata.fileCreatedAt`, and `metadata.addedToLibraryAt`.
+  - `limit` truncates the result set after sorting.
   - Desktop resource filtering sends the current `repoId` and may search with an empty free text query.
 
 ## Smart Folder API
@@ -124,7 +148,15 @@
 - `POST /repositories/{repoId}/smart-folders/{smartFolderId}:query`
   - Returns file-list entries for the selected smart folder.
   - Child smart folders inherit parent filters with AND semantics.
-  - Supported filters: `query`, `pathPrefix`, `tags`, `formats`, `colors`, `shapes`, `metadataFilters`, and `minRating`.
+  - Supported filters: `query`, `pathPrefix`, `tags`, `formats`, `colors`, `shapes`, `metadataFilters`, `excludeTags`, `excludeFormats`, `excludeMetadataFilters`, `numberFilters`, `dateFilters`, `matchMode`, `sort`, `limit`, and `minRating`.
+  - Eagle smart folders now map OR logic, exclusion rules, date ranges, numeric ranges, sort order, and result limits without being silently skipped.
+
+## Eagle Import Notes
+
+- Eagle multi-folder ownership is imported as one primary asset plus additional alias asset rows. Alias files attempt hard-link creation first and fall back to normal copies when the filesystem rejects linking.
+- Alias rows are tracked in `asset_alias_groups` / `asset_alias_members`; hardlink or copy state continues to use the existing hardlink tables.
+- Eagle `quickAccess` is imported into repository shortcuts, and Eagle `tagsGroups` becomes repository-level tag groups.
+- Folder passwords are not preserved as credentials. MomoBako only stores `protected=true` and optional `passwordTip` for display as migration hints.
 
 ## Plugin API
 

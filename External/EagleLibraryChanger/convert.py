@@ -26,10 +26,6 @@ WINDOWS_RESERVED_NAMES = {
     *(f"LPT{index}" for index in range(1, 10)),
 }
 UNSUPPORTED_CAPABILITIES = [
-    "单素材多文件夹归属",
-    "quickAccess",
-    "tagsGroups",
-    "文件夹 password / passwordTips",
 ]
 EAGLE_CREATED_TIME_METADATA_KEYS = [
     ("btime", "fileCreatedAt"),
@@ -52,7 +48,18 @@ class FolderNode:
     folder_id: str
     name: str
     path: str
+    protected: bool = False
+    password_tip: str | None = None
     children: list["FolderNode"] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class AssetMembership:
+    target_relative_path: str
+    target_relative_dir: str
+    target_filename: str
+    role: str
+    link_state: str | None = None
 
 
 @dataclass(slots=True)
@@ -64,6 +71,7 @@ class AssetPlan:
     target_relative_path: str
     target_relative_dir: str
     target_filename: str
+    memberships: list[AssetMembership]
     display_title: str
     extension: str
     tags: list[str]
@@ -73,6 +81,24 @@ class AssetPlan:
     preserved_metadata: dict[str, Any] = field(default_factory=dict)
     discarded_folder_names: list[str] = field(default_factory=list)
     missing_folder_ids: list[str] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class RepositoryShortcutPlan:
+    shortcut_id: str
+    label: str
+    target_kind: str
+    target_path: str | None
+    target_id: str | None
+    sort_order: int
+
+
+@dataclass(slots=True)
+class TagGroupPlan:
+    tag_group_id: str
+    name: str
+    tags: list[str]
+    sort_order: int
 
 
 @dataclass(slots=True)
@@ -102,6 +128,9 @@ class ConversionPlan:
     repo_id: str
     assets: list[AssetPlan]
     folder_paths: dict[str, str]
+    folder_nodes: list[FolderNode]
+    quick_access: list[RepositoryShortcutPlan]
+    tag_groups: list[TagGroupPlan]
     smart_folders: list[SmartFolderPlan]
     skipped_smart_folders: list[SkippedSmartFolder]
     warnings: list[dict[str, Any]]
@@ -226,6 +255,20 @@ def build_conversion_plan(input_root: Path, output_root: Path, repo_name: str) -
         folder_index=folder_index,
         warnings=warnings,
     )
+    quick_access = build_quick_access_plans(
+        repo_id=repo_id,
+        quick_access=library_metadata.get("quickAccess") or [],
+        folder_index=folder_index,
+        smart_folders=smart_folders,
+        assets=assets,
+        warnings=warnings,
+    )
+    tag_groups = build_tag_group_plans(
+        repo_id=repo_id,
+        tags_groups=library_metadata.get("tagsGroups") or [],
+        tags_json=tags_json,
+        warnings=warnings,
+    )
 
     unsupported_hits = collect_unsupported_hits(
         library_metadata=library_metadata,
@@ -240,6 +283,8 @@ def build_conversion_plan(input_root: Path, output_root: Path, repo_name: str) -
         repo_name=repo_name,
         repo_id=repo_id,
         folder_nodes=folder_nodes,
+        quick_access=quick_access,
+        tag_groups=tag_groups,
         assets=assets,
         smart_folders=smart_folders,
         skipped_smart_folders=skipped_smart_folders,
@@ -253,6 +298,9 @@ def build_conversion_plan(input_root: Path, output_root: Path, repo_name: str) -
         repo_id=repo_id,
         assets=assets,
         folder_paths=folder_index,
+        folder_nodes=folder_nodes,
+        quick_access=quick_access,
+        tag_groups=tag_groups,
         smart_folders=smart_folders,
         skipped_smart_folders=skipped_smart_folders,
         warnings=warnings,
@@ -301,7 +349,23 @@ def build_folder_index(
             folder_index,
             folder_name_index,
         )
-        nodes.append(FolderNode(folder_id=folder_id, name=unique_name, path=path, children=child_nodes))
+        password_tip = normalize_non_empty_string(
+            folder.get("passwordTips")
+            or folder.get("passwordTip")
+            or folder.get("password_hint")
+            or folder.get("passwordHint")
+        )
+        protected = bool(normalize_non_empty_string(folder.get("password")) or password_tip)
+        nodes.append(
+            FolderNode(
+                folder_id=folder_id,
+                name=unique_name,
+                path=path,
+                protected=protected,
+                password_tip=password_tip,
+                children=child_nodes,
+            )
+        )
     return nodes
 
 
@@ -321,43 +385,42 @@ def build_asset_plan(
     source_file = select_source_file(info_dir, asset_metadata)
     source_thumbnail = select_thumbnail_file(info_dir)
     extension = source_file.suffix.lstrip(".").lower()
-    folder_ids = [str(item).strip() for item in asset_metadata.get("folders") or [] if str(item).strip()]
-    primary_dir = ""
+    folder_ids = dedupe_preserve_order(
+        [str(item).strip() for item in asset_metadata.get("folders") or [] if str(item).strip()]
+    )
+    target_dirs: list[tuple[str, str]] = []
     missing_folder_ids: list[str] = []
-    discarded_folder_names: list[str] = []
     if folder_ids:
-        first_folder_id = folder_ids[0]
-        primary_dir = folder_index.get(first_folder_id, "")
-        if not primary_dir:
-            missing_folder_ids.append(first_folder_id)
-            warnings.append(
-                {
-                    "type": "missingPrimaryFolder",
-                    "assetId": asset_id,
-                    "folderId": first_folder_id,
-                    "fallbackTarget": "repo-root",
-                }
-            )
-        for folder_id in folder_ids[1:]:
-            name = folder_name_index.get(folder_id, folder_id)
-            discarded_folder_names.append(name)
-            if folder_id not in folder_index:
+        for folder_id in folder_ids:
+            target_dir = folder_index.get(folder_id)
+            if target_dir is None:
                 missing_folder_ids.append(folder_id)
+                warnings.append(
+                    {
+                        "type": "missingFolder",
+                        "assetId": asset_id,
+                        "folderId": folder_id,
+                    }
+                )
+                continue
+            target_dirs.append((folder_id, target_dir))
+    if not target_dirs:
+        target_dirs.append(("", ""))
 
     filename = sanitize_filename(source_file.name, fallback=f"asset-{asset_id[:8]}.{extension or 'bin'}")
-    directory_usage = output_name_usage.setdefault(primary_dir, set())
-    filename = ensure_unique_filename(filename, directory_usage, asset_id)
-    target_relative_path = join_relative_path(primary_dir, filename)
-
-    if discarded_folder_names:
-        warnings.append(
-            {
-                "type": "multiFolderAsset",
-                "assetId": asset_id,
-                "keptFolder": primary_dir or "repo-root",
-                "discardedFolders": discarded_folder_names,
-            }
+    memberships: list[AssetMembership] = []
+    for index, (folder_id, target_dir) in enumerate(target_dirs):
+        directory_usage = output_name_usage.setdefault(target_dir, set())
+        member_filename = ensure_unique_filename(filename, directory_usage, f"{asset_id}-{folder_id or index}")
+        memberships.append(
+            AssetMembership(
+                target_relative_path=join_relative_path(target_dir, member_filename),
+                target_relative_dir=target_dir,
+                target_filename=member_filename,
+                role="primary" if index == 0 else "alias",
+            )
         )
+    primary_membership = memberships[0]
     note = str(asset_metadata.get("annotation") or "").strip() or None
     tags = [str(tag).strip() for tag in asset_metadata.get("tags") or [] if str(tag).strip()]
     palette = normalize_eagle_palette(asset_metadata.get("palettes"))
@@ -382,9 +445,10 @@ def build_asset_plan(
         source_info_dir=info_dir,
         source_file=source_file,
         source_thumbnail=source_thumbnail,
-        target_relative_path=target_relative_path,
-        target_relative_dir=primary_dir,
-        target_filename=filename,
+        target_relative_path=primary_membership.target_relative_path,
+        target_relative_dir=primary_membership.target_relative_dir,
+        target_filename=primary_membership.target_filename,
+        memberships=memberships,
         display_title=str(asset_metadata.get("name") or source_file.stem).strip() or source_file.stem,
         extension=extension,
         tags=dedupe_preserve_order(tags),
@@ -392,7 +456,7 @@ def build_asset_plan(
         palette=palette,
         is_deleted=is_deleted,
         preserved_metadata=preserved_metadata,
-        discarded_folder_names=discarded_folder_names,
+        discarded_folder_names=[],
         missing_folder_ids=missing_folder_ids,
     )
 
@@ -754,12 +818,6 @@ def smart_folder_name(entry: dict[str, Any], source_id: str) -> str:
 
 def convert_eagle_smart_folder_filter(entry: dict[str, Any], folder_index: dict[str, str]) -> dict[str, Any]:
     filter_root = entry.get("filter") if isinstance(entry.get("filter"), dict) else entry
-    if contains_or_semantics(filter_root):
-        return skipped_filter_result("OR semantics are not equivalent in MomoBako", filter_root)
-    if contains_negative_semantics(filter_root):
-        return skipped_filter_result("negative conditions are not supported", filter_root)
-    if contains_unsupported_smart_folder_keys(filter_root):
-        return skipped_filter_result("unsupported filter fields are present", filter_root)
 
     conditions = extract_smart_folder_conditions(filter_root)
     if conditions is None:
@@ -770,6 +828,11 @@ def convert_eagle_smart_folder_filter(entry: dict[str, Any], folder_index: dict[
     format_values: list[str] = []
     path_values: list[str] = []
     metadata_filters: list[dict[str, str]] = []
+    exclude_tag_values: list[str] = []
+    exclude_format_values: list[str] = []
+    exclude_metadata_filters: list[dict[str, str]] = []
+    number_filters: list[dict[str, Any]] = []
+    date_filters: list[dict[str, Any]] = []
     min_rating: float | None = None
 
     direct_result = apply_direct_smart_folder_fields(
@@ -780,6 +843,11 @@ def convert_eagle_smart_folder_filter(entry: dict[str, Any], folder_index: dict[
         format_values,
         path_values,
         metadata_filters,
+        exclude_tag_values,
+        exclude_format_values,
+        exclude_metadata_filters,
+        number_filters,
+        date_filters,
     )
     if isinstance(direct_result, str):
         return skipped_filter_result(direct_result, filter_root)
@@ -795,6 +863,11 @@ def convert_eagle_smart_folder_filter(entry: dict[str, Any], folder_index: dict[
             format_values,
             path_values,
             metadata_filters,
+            exclude_tag_values,
+            exclude_format_values,
+            exclude_metadata_filters,
+            number_filters,
+            date_filters,
         )
         if isinstance(condition_result, str):
             return skipped_filter_result(condition_result, conditions)
@@ -821,8 +894,27 @@ def convert_eagle_smart_folder_filter(entry: dict[str, Any], folder_index: dict[
         filter_value["formats"] = dedupe_preserve_order(format_values)
     if metadata_filters:
         filter_value["metadataFilters"] = dedupe_metadata_filters(metadata_filters)
+    if exclude_tag_values:
+        filter_value["excludeTags"] = dedupe_preserve_order(exclude_tag_values)
+    if exclude_format_values:
+        filter_value["excludeFormats"] = dedupe_preserve_order(exclude_format_values)
+    if exclude_metadata_filters:
+        filter_value["excludeMetadataFilters"] = dedupe_metadata_filters(exclude_metadata_filters)
+    if number_filters:
+        filter_value["numberFilters"] = dedupe_range_filters(number_filters)
+    if date_filters:
+        filter_value["dateFilters"] = dedupe_range_filters(date_filters)
     if min_rating is not None:
         filter_value["minRating"] = min_rating
+    match_mode = direct_match_mode(filter_root)
+    if match_mode:
+        filter_value["matchMode"] = match_mode
+    sort = direct_sort(filter_root)
+    if sort:
+        filter_value["sort"] = sort
+    limit = direct_limit(filter_root)
+    if limit:
+        filter_value["limit"] = limit
 
     if not filter_value:
         return skipped_filter_result("no equivalent MomoBako smart folder filter fields", filter_root)
@@ -854,6 +946,11 @@ def apply_direct_smart_folder_fields(
     format_values: list[str],
     path_values: list[str],
     metadata_filters: list[dict[str, str]],
+    exclude_tag_values: list[str],
+    exclude_format_values: list[str],
+    exclude_metadata_filters: list[dict[str, str]],
+    number_filters: list[dict[str, Any]],
+    date_filters: list[dict[str, Any]],
 ) -> str | None:
     direct_mappings = [
         ("query", query_values, normalize_text_values),
@@ -885,6 +982,20 @@ def apply_direct_smart_folder_fields(
     shape_values = normalize_text_values(filter_root.get("shapes")) + normalize_text_values(filter_root.get("shape"))
     metadata_filters.extend({"key": "color", "value": value} for value in color_values)
     metadata_filters.extend({"key": "shape", "value": value} for value in shape_values)
+    exclude_tag_values.extend(normalize_text_values(filter_root.get("excludeTags") or filter_root.get("excludedTags")))
+    exclude_format_values.extend(
+        normalize_format_values(filter_root.get("excludeFormats") or filter_root.get("excludedFormats"))
+    )
+    for key in ("excludeColors", "excludedColors"):
+        exclude_metadata_filters.extend({"key": "color", "value": value} for value in normalize_text_values(filter_root.get(key)))
+    for key in ("excludeShapes", "excludedShapes"):
+        exclude_metadata_filters.extend({"key": "shape", "value": value} for value in normalize_text_values(filter_root.get(key)))
+    add_direct_range_filter(filter_root, number_filters, "width", "width")
+    add_direct_range_filter(filter_root, number_filters, "height", "height")
+    add_direct_range_filter(filter_root, number_filters, "size", "originalSizeBytes")
+    add_direct_range_filter(filter_root, date_filters, "createdAt", "fileCreatedAt")
+    add_direct_range_filter(filter_root, date_filters, "modifiedAt", "fileModifiedAt")
+    add_direct_range_filter(filter_root, date_filters, "importedAt", "addedToLibraryAt")
     return None
 
 
@@ -896,30 +1007,62 @@ def apply_smart_folder_condition(
     format_values: list[str],
     path_values: list[str],
     metadata_filters: list[dict[str, str]],
+    exclude_tag_values: list[str],
+    exclude_format_values: list[str],
+    exclude_metadata_filters: list[dict[str, str]],
+    number_filters: list[dict[str, Any]],
+    date_filters: list[dict[str, Any]],
 ) -> str | None:
-    if contains_or_semantics(condition):
-        return "OR semantics are not equivalent in MomoBako"
-    if contains_negative_semantics(condition):
-        return "negative conditions are not supported"
     operator = condition_operator(condition)
-    if operator and operator not in {"is", "eq", "equals", "contains", "include", "includes", "in", "gte", "min", "atleast"}:
+    supported_operators = {
+        "is",
+        "eq",
+        "equals",
+        "contains",
+        "include",
+        "includes",
+        "in",
+        "gte",
+        "min",
+        "atleast",
+        "gt",
+        "lte",
+        "max",
+        "lessthan",
+        "lt",
+        "between",
+        "range",
+        "not",
+        "notcontains",
+        "doesnotcontain",
+        "ne",
+        "neq",
+        "notequals",
+        "exclude",
+    }
+    if operator and operator not in supported_operators:
         return f"unsupported operator: {operator}"
 
     field_name = condition_field(condition)
     values = condition_values(condition)
     if not field_name or not values:
         return None
+    negative = operator in {"not", "notcontains", "doesnotcontain", "ne", "neq", "notequals", "exclude"}
 
     if field_name in {"keyword", "keywords", "query", "text", "name", "filename"}:
+        if negative:
+            return "negative text search is not supported"
         query_values.extend(normalize_text_values(values))
         return None
     if field_name in {"tag", "tags"}:
-        tag_values.extend(normalize_text_values(values))
+        (exclude_tag_values if negative else tag_values).extend(normalize_text_values(values))
         return None
     if field_name in {"format", "formats", "ext", "extension", "extensions", "filetype", "filetypes"}:
-        format_values.extend(normalize_format_values(values))
+        (exclude_format_values if negative else format_values).extend(normalize_format_values(values))
         return None
     if field_name in {"folder", "folders", "folderid", "folderids"}:
+        if negative:
+            return "negative folder conditions are not supported"
         for folder_id in normalize_text_values(values):
             path = folder_index.get(folder_id)
             if not path:
@@ -927,16 +1070,34 @@ def apply_smart_folder_condition(
             path_values.append(path)
         return None
     if field_name in {"path", "pathprefix", "folderpath"}:
+        if negative:
+            return "negative path conditions are not supported"
         path_values.extend(normalize_path_values(values))
         return None
     if field_name in {"color", "colors"}:
-        metadata_filters.extend({"key": "color", "value": value} for value in normalize_text_values(values))
+        target = exclude_metadata_filters if negative else metadata_filters
+        target.extend({"key": "color", "value": value} for value in normalize_text_values(values))
         return None
     if field_name in {"shape", "shapes"}:
-        metadata_filters.extend({"key": "shape", "value": value} for value in normalize_text_values(values))
+        target = exclude_metadata_filters if negative else metadata_filters
+        target.extend({"key": "shape", "value": value} for value in normalize_text_values(values))
         return None
     if field_name in {"rating", "score"}:
         return None
+    if field_name in {"width", "height", "size", "filesize", "originalsizebytes"}:
+        if negative:
+            return f"negative numeric range is not supported: {field_name}"
+        number_filter = range_filter_from_condition(condition, numeric_filter_key(field_name))
+        if number_filter:
+            number_filters.append(number_filter)
+            return None
+    if field_name in {"createdat", "created", "btime", "modifiedat", "mtime", "updatedat", "importedat", "addedat"}:
+        if negative:
+            return f"negative date range is not supported: {field_name}"
+        date_filter = range_filter_from_condition(condition, date_filter_key(field_name))
+        if date_filter:
+            date_filters.append(date_filter)
+            return None
     return f"unsupported field: {field_name}"
 
 
@@ -988,6 +1149,175 @@ def direct_min_rating(filter_root: dict[str, Any]) -> float | str | None:
             return "rating value is not numeric"
         return rating if rating > 0 else None
     return None
+
+
+def direct_match_mode(filter_root: dict[str, Any]) -> str | None:
+    for key in ("match", "logic", "join", "combinator"):
+        value = str(filter_root.get(key) or "").strip().lower()
+        if value in {"or", "any", "some"}:
+            return "or"
+        if value in {"and", "all"}:
+            return "and"
+    return None
+
+
+def direct_sort(filter_root: dict[str, Any]) -> dict[str, str] | None:
+    sort_value = filter_root.get("sort") or filter_root.get("sortBy") or filter_root.get("orderBy") or filter_root.get("order")
+    direction_value = filter_root.get("sortDirection") or filter_root.get("direction") or filter_root.get("orderDirection")
+    field = ""
+    direction = str(direction_value or "").strip().lower()
+    if isinstance(sort_value, dict):
+        field = str(sort_value.get("field") or sort_value.get("key") or sort_value.get("by") or "").strip()
+        direction = str(sort_value.get("direction") or sort_value.get("order") or direction).strip().lower()
+    elif sort_value is not None:
+        field = str(sort_value).strip()
+    if not field:
+        return None
+    normalized_field = normalize_sort_field(field)
+    if not normalized_field:
+        return None
+    return {"field": normalized_field, "direction": "desc" if direction in {"desc", "descending", "-1"} else "asc"}
+
+
+def normalize_sort_field(value: str) -> str | None:
+    normalized = re.sub(r"[^a-z0-9]", "", value.lower())
+    mapping = {
+        "name": "filename",
+        "filename": "filename",
+        "path": "path",
+        "rating": "rating",
+        "score": "rating",
+        "size": "sizeBytes",
+        "filesize": "sizeBytes",
+        "modified": "modifiedAt",
+        "modifiedat": "modifiedAt",
+        "mtime": "modifiedAt",
+        "created": "metadata.fileCreatedAt",
+        "createdat": "metadata.fileCreatedAt",
+        "imported": "metadata.addedToLibraryAt",
+        "importedat": "metadata.addedToLibraryAt",
+        "addedat": "metadata.addedToLibraryAt",
+        "width": "metadata.width",
+        "height": "metadata.height",
+    }
+    return mapping.get(normalized)
+
+
+def direct_limit(filter_root: dict[str, Any]) -> int | None:
+    for key in ("limit", "count", "maxResults", "take"):
+        if key not in filter_root:
+            continue
+        try:
+            value = int(filter_root[key])
+        except (TypeError, ValueError):
+            continue
+        if value > 0:
+            return value
+    return None
+
+
+def add_direct_range_filter(
+    filter_root: dict[str, Any],
+    target: list[dict[str, Any]],
+    source_key: str,
+    target_key: str,
+) -> None:
+    lower_keys = [source_key, f"min{source_key[:1].upper()}{source_key[1:]}", f"{source_key}Min"]
+    upper_keys = [f"max{source_key[:1].upper()}{source_key[1:]}", f"{source_key}Max"]
+    exact = first_present(filter_root, [source_key])
+    lower = first_present(filter_root, lower_keys)
+    upper = first_present(filter_root, upper_keys)
+    if exact is not None and lower is None and upper is None:
+        lower = exact
+        upper = exact
+    entry: dict[str, Any] = {"key": target_key}
+    min_value = normalize_range_bound(lower)
+    max_value = normalize_range_bound(upper)
+    if min_value is not None:
+        entry["min" if target_key not in DATE_FILTER_KEYS else "from"] = min_value
+    if max_value is not None:
+        entry["max" if target_key not in DATE_FILTER_KEYS else "to"] = max_value
+    if len(entry) > 1:
+        target.append(entry)
+
+
+DATE_FILTER_KEYS = {"fileCreatedAt", "fileModifiedAt", "addedToLibraryAt"}
+
+
+def first_present(source: dict[str, Any], keys: list[str]) -> Any | None:
+    for key in keys:
+        if key in source:
+            return source[key]
+    return None
+
+
+def normalize_range_bound(value: Any) -> Any | None:
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return value
+    if isinstance(value, str):
+        text = value.strip()
+        return text or None
+    return None
+
+
+def range_filter_from_condition(condition: dict[str, Any], key: str) -> dict[str, Any] | None:
+    operator = condition_operator(condition)
+    values = flatten_scalar_values(condition_values(condition))
+    if not values:
+        return None
+    entry: dict[str, Any] = {"key": key}
+    first = normalize_range_bound(values[0])
+    second = normalize_range_bound(values[1]) if len(values) > 1 else None
+    is_date = key in DATE_FILTER_KEYS
+    lower_key = "from" if is_date else "min"
+    upper_key = "to" if is_date else "max"
+    if operator in {"lte", "max", "lessthan", "lt"}:
+        if first is not None:
+            entry[upper_key] = first
+    elif operator in {"between", "range"}:
+        if first is not None:
+            entry[lower_key] = first
+        if second is not None:
+            entry[upper_key] = second
+    elif operator in {"is", "eq", "equals"}:
+        if first is not None:
+            entry[lower_key] = first
+            entry[upper_key] = first
+    else:
+        if first is not None:
+            entry[lower_key] = first
+    return entry if len(entry) > 1 else None
+
+
+def numeric_filter_key(field_name: str) -> str:
+    if field_name in {"size", "filesize", "originalsizebytes"}:
+        return "originalSizeBytes"
+    return field_name
+
+
+def date_filter_key(field_name: str) -> str:
+    if field_name in {"modifiedat", "mtime", "updatedat"}:
+        return "fileModifiedAt"
+    if field_name in {"importedat", "addedat"}:
+        return "addedToLibraryAt"
+    return "fileCreatedAt"
+
+
+def dedupe_range_filters(filters: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    seen: set[str] = set()
+    result: list[dict[str, Any]] = []
+    for item in filters:
+        key = str(item.get("key") or "").strip()
+        if not key:
+            continue
+        normalized = json.dumps(item, ensure_ascii=False, sort_keys=True, default=str)
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        result.append(item)
+    return result
 
 
 def contains_or_semantics(value: Any) -> bool:
@@ -1123,6 +1453,155 @@ def dedupe_metadata_filters(filters: list[dict[str, str]]) -> list[dict[str, str
     return result
 
 
+def build_quick_access_plans(
+    repo_id: str,
+    quick_access: Any,
+    folder_index: dict[str, str],
+    smart_folders: list[SmartFolderPlan],
+    assets: list[AssetPlan],
+    warnings: list[dict[str, Any]],
+) -> list[RepositoryShortcutPlan]:
+    if not quick_access:
+        return []
+    if not isinstance(quick_access, list):
+        warnings.append({"type": "invalidQuickAccess", "reason": "quickAccess is not a list"})
+        return []
+
+    smart_by_source_id = {item.source_id: item.smart_folder_id for item in smart_folders}
+    asset_by_source_id = {item.asset_id: item.target_relative_path for item in assets}
+    plans: list[RepositoryShortcutPlan] = []
+    used_ids: set[str] = set()
+    for index, entry in enumerate(quick_access):
+        if isinstance(entry, str):
+            entry = {"target": entry}
+        if not isinstance(entry, dict):
+            warnings.append({"type": "invalidQuickAccess", "index": index, "reason": "entry is not an object"})
+            continue
+
+        label = normalize_non_empty_string(entry.get("name") or entry.get("label") or entry.get("title"))
+        raw_kind = normalize_non_empty_string(entry.get("type") or entry.get("kind") or entry.get("targetKind"))
+        raw_target = normalize_non_empty_string(
+            entry.get("target")
+            or entry.get("targetId")
+            or entry.get("id")
+            or entry.get("path")
+            or entry.get("folderId")
+            or entry.get("smartFolderId")
+            or entry.get("assetId")
+        )
+        if not raw_target:
+            warnings.append({"type": "invalidQuickAccess", "index": index, "reason": "missing target"})
+            continue
+
+        target_kind = normalize_quick_access_kind(raw_kind, entry)
+        target_path: str | None = None
+        target_id: str | None = None
+        if target_kind == "folder":
+            target_path = folder_index.get(raw_target) or normalize_quick_access_path(raw_target)
+        elif target_kind == "smartFolder":
+            target_id = smart_by_source_id.get(raw_target) or raw_target
+        elif target_kind == "file":
+            target_path = asset_by_source_id.get(raw_target) or normalize_quick_access_path(raw_target)
+        else:
+            if raw_target in folder_index:
+                target_kind = "folder"
+                target_path = folder_index[raw_target]
+            elif raw_target in smart_by_source_id:
+                target_kind = "smartFolder"
+                target_id = smart_by_source_id[raw_target]
+            elif raw_target in asset_by_source_id:
+                target_kind = "file"
+                target_path = asset_by_source_id[raw_target]
+            else:
+                target_path = normalize_quick_access_path(raw_target)
+                target_kind = "folder" if "." not in Path(target_path).name else "file"
+
+        if not label:
+            label = Path(target_path or target_id or raw_target).name or raw_target
+        shortcut_id = unique_shortcut_id(repo_id, raw_target, label, used_ids)
+        plans.append(
+            RepositoryShortcutPlan(
+                shortcut_id=shortcut_id,
+                label=label,
+                target_kind=target_kind,
+                target_path=target_path,
+                target_id=target_id,
+                sort_order=index,
+            )
+        )
+    return plans
+
+
+def normalize_quick_access_kind(raw_kind: str | None, entry: dict[str, Any]) -> str:
+    text = re.sub(r"[^a-z0-9]", "", (raw_kind or "").lower())
+    if text in {"folder", "directory", "dir"} or "folderId" in entry:
+        return "folder"
+    if text in {"smartfolder", "smart", "savedfilter"} or "smartFolderId" in entry:
+        return "smartFolder"
+    if text in {"file", "asset", "item"} or "assetId" in entry:
+        return "file"
+    return ""
+
+
+def normalize_quick_access_path(value: str) -> str:
+    return value.replace("\\", "/").strip("/")
+
+
+def unique_shortcut_id(repo_id: str, source_id: str, label: str, used_ids: set[str]) -> str:
+    base = slugify_ascii_component(f"shortcut-{repo_id}-{source_id}-{label}")
+    candidate = base
+    index = 2
+    while candidate in used_ids:
+        candidate = f"{base}-{index}"
+        index += 1
+    used_ids.add(candidate)
+    return candidate
+
+
+def build_tag_group_plans(
+    repo_id: str,
+    tags_groups: Any,
+    tags_json: Any,
+    warnings: list[dict[str, Any]],
+) -> list[TagGroupPlan]:
+    plans: list[TagGroupPlan] = []
+    used_ids: set[str] = set()
+    if isinstance(tags_groups, list):
+        for index, group in enumerate(tags_groups):
+            if isinstance(group, str):
+                name = group.strip()
+                tags: list[str] = []
+            elif isinstance(group, dict):
+                name = normalize_non_empty_string(group.get("name") or group.get("label") or group.get("title")) or f"Tag Group {index + 1}"
+                tags = normalize_text_values(group.get("tags") or group.get("children") or group.get("items"))
+            else:
+                warnings.append({"type": "invalidTagGroup", "index": index, "reason": "entry is not an object"})
+                continue
+            tag_group_id = unique_tag_group_id(repo_id, normalize_non_empty_string(group.get("id")) if isinstance(group, dict) else None, name, used_ids)
+            plans.append(TagGroupPlan(tag_group_id=tag_group_id, name=name, tags=dedupe_preserve_order(tags), sort_order=index))
+    elif tags_groups:
+        warnings.append({"type": "invalidTagGroups", "reason": "tagsGroups is not a list"})
+
+    starred = []
+    if isinstance(tags_json, dict):
+        starred = normalize_text_values(tags_json.get("starredTags"))
+    if starred:
+        tag_group_id = unique_tag_group_id(repo_id, "starredTags", "Starred Tags", used_ids)
+        plans.append(TagGroupPlan(tag_group_id=tag_group_id, name="Starred Tags", tags=dedupe_preserve_order(starred), sort_order=len(plans)))
+    return plans
+
+
+def unique_tag_group_id(repo_id: str, source_id: str | None, name: str, used_ids: set[str]) -> str:
+    base = slugify_ascii_component(f"tag-group-{repo_id}-{source_id or name}")
+    candidate = base
+    index = 2
+    while candidate in used_ids:
+        candidate = f"{base}-{index}"
+        index += 1
+    used_ids.add(candidate)
+    return candidate
+
+
 def unique_smart_folder_id(repo_id: str, source: str, source_id: str, name: str, used_ids: set[str]) -> str:
     base = slugify_ascii_component(f"smart-{repo_id}-{source}-{source_id}-{name}")
     candidate = base
@@ -1148,17 +1627,6 @@ def collect_unsupported_hits(
     skipped_smart_folders: list[SkippedSmartFolder],
 ) -> list[dict[str, Any]]:
     hits: list[dict[str, Any]] = []
-    if library_metadata.get("quickAccess"):
-        hits.append({"capability": "quickAccess", "count": len(library_metadata["quickAccess"])})
-    if library_metadata.get("tagsGroups"):
-        hits.append({"capability": "tagsGroups", "count": len(library_metadata["tagsGroups"])})
-    password_folders = [
-        str(folder.get("name") or folder.get("id") or "")
-        for folder in walk_folders(library_metadata.get("folders") or [])
-        if str(folder.get("password") or "").strip() or str(folder.get("passwordTips") or "").strip()
-    ]
-    if password_folders:
-        hits.append({"capability": "文件夹 password / passwordTips", "folders": password_folders})
     if actions_json:
         hits.append({"capability": "actions", "count": len(actions_json)})
     if skipped_smart_folders:
@@ -1169,13 +1637,6 @@ def collect_unsupported_hits(
                 "items": [serialize_skipped_smart_folder(item) for item in skipped_smart_folders],
             }
         )
-    multi_folder_assets = [
-        {"assetId": asset.asset_id, "discardedFolders": asset.discarded_folder_names}
-        for asset in assets
-        if asset.discarded_folder_names
-    ]
-    if multi_folder_assets:
-        hits.append({"capability": "单素材多文件夹归属", "assets": multi_folder_assets})
     return hits
 
 
@@ -1193,6 +1654,8 @@ def build_report(
     repo_name: str,
     repo_id: str,
     folder_nodes: list[FolderNode],
+    quick_access: list[RepositoryShortcutPlan],
+    tag_groups: list[TagGroupPlan],
     assets: list[AssetPlan],
     smart_folders: list[SmartFolderPlan],
     skipped_smart_folders: list[SkippedSmartFolder],
@@ -1208,6 +1671,9 @@ def build_report(
             "assetCount": len(assets),
             "deletedAssetCount": sum(1 for asset in assets if asset.is_deleted),
             "folderCount": count_folder_nodes(folder_nodes),
+            "quickAccessCount": len(quick_access),
+            "tagGroupCount": len(tag_groups),
+            "aliasAssetCount": sum(max(len(asset.memberships) - 1, 0) for asset in assets),
             "smartFolderCount": len(smart_folders),
             "skippedSmartFolderCount": len(skipped_smart_folders),
             "thumbnailCount": sum(1 for asset in assets if asset.source_thumbnail is not None),
@@ -1216,6 +1682,8 @@ def build_report(
             "unsupportedCapabilityCount": len(unsupported_hits),
         },
         "folders": [serialize_folder_node(node) for node in folder_nodes],
+        "quickAccess": [serialize_shortcut_plan(item) for item in quick_access],
+        "tagGroups": [serialize_tag_group_plan(item) for item in tag_groups],
         "assets": [
             {
                 "assetId": asset.asset_id,
@@ -1223,6 +1691,15 @@ def build_report(
                 "sourceFile": str(asset.source_file),
                 "sourceThumbnail": str(asset.source_thumbnail) if asset.source_thumbnail else None,
                 "targetRelativePath": asset.target_relative_path,
+                "aliasPaths": [membership.target_relative_path for membership in asset.memberships[1:]],
+                "memberships": [
+                    {
+                        "targetRelativePath": membership.target_relative_path,
+                        "role": membership.role,
+                        "linkState": membership.link_state,
+                    }
+                    for membership in asset.memberships
+                ],
                 "isDeleted": asset.is_deleted,
                 "status": asset_status(asset),
                 "trashRelativePath": asset_trash_relative_path(asset),
@@ -1230,7 +1707,6 @@ def build_report(
                 "tags": asset.tags,
                 "hasNote": asset.note is not None,
                 "preservedMetadataKeys": sorted(asset.preserved_metadata.keys()),
-                "discardedFolders": asset.discarded_folder_names,
                 "missingFolderIds": asset.missing_folder_ids,
             }
             for asset in assets
@@ -1251,7 +1727,29 @@ def serialize_folder_node(node: FolderNode) -> dict[str, Any]:
         "folderId": node.folder_id,
         "name": node.name,
         "path": node.path,
+        "protected": node.protected,
+        "passwordTip": node.password_tip,
         "children": [serialize_folder_node(child) for child in node.children],
+    }
+
+
+def serialize_shortcut_plan(plan: RepositoryShortcutPlan) -> dict[str, Any]:
+    return {
+        "shortcutId": plan.shortcut_id,
+        "label": plan.label,
+        "targetKind": plan.target_kind,
+        "targetPath": plan.target_path,
+        "targetId": plan.target_id,
+        "sortOrder": plan.sort_order,
+    }
+
+
+def serialize_tag_group_plan(plan: TagGroupPlan) -> dict[str, Any]:
+    return {
+        "tagGroupId": plan.tag_group_id,
+        "name": plan.name,
+        "tags": plan.tags,
+        "sortOrder": plan.sort_order,
     }
 
 
@@ -1313,6 +1811,20 @@ def execute_plan(plan: ConversionPlan, force: bool) -> None:
     move_assets(plan)
     write_trash_manifest(plan)
     write_database(plan)
+    plan.report = build_report(
+        input_root=plan.input_root,
+        output_root=plan.output_root,
+        repo_name=plan.repo_name,
+        repo_id=plan.repo_id,
+        folder_nodes=plan.folder_nodes,
+        quick_access=plan.quick_access,
+        tag_groups=plan.tag_groups,
+        assets=plan.assets,
+        smart_folders=plan.smart_folders,
+        skipped_smart_folders=plan.skipped_smart_folders,
+        warnings=plan.warnings,
+        unsupported_hits=plan.unsupported_hits,
+    )
     report_path = report_output_path(plan.output_root)
     report_path.write_text(json.dumps(plan.report, ensure_ascii=False, indent=2), encoding="utf-8")
 
@@ -1366,6 +1878,9 @@ def write_database(plan: ConversionPlan) -> None:
         connection.execute("PRAGMA foreign_keys=ON;")
         connection.executescript(repository_schema_sql())
         write_repository_record(connection, plan)
+        write_folder_metadata_records(connection, plan)
+        write_repository_shortcut_records(connection, plan)
+        write_tag_group_records(connection, plan)
         for asset in plan.assets:
             write_asset_record(connection, plan, asset)
         for smart_folder in plan.smart_folders:
@@ -1452,6 +1967,78 @@ CREATE TABLE IF NOT EXISTS hardlink_candidates (
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_hardlink_candidates_unique
 ON hardlink_candidates(repo_id, new_asset_id, existing_asset_id);
+
+CREATE TABLE IF NOT EXISTS asset_alias_groups (
+  alias_group_id TEXT PRIMARY KEY,
+  repo_id TEXT NOT NULL,
+  source TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY(repo_id) REFERENCES repositories(repo_id)
+);
+
+CREATE TABLE IF NOT EXISTS asset_alias_members (
+  alias_group_id TEXT NOT NULL,
+  repo_id TEXT NOT NULL,
+  asset_id TEXT NOT NULL,
+  path TEXT NOT NULL,
+  role TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  PRIMARY KEY(repo_id, asset_id),
+  FOREIGN KEY(alias_group_id) REFERENCES asset_alias_groups(alias_group_id),
+  FOREIGN KEY(asset_id) REFERENCES assets(asset_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_asset_alias_members_group
+ON asset_alias_members(repo_id, alias_group_id, path);
+
+CREATE TABLE IF NOT EXISTS repository_shortcuts (
+  shortcut_id TEXT PRIMARY KEY,
+  repo_id TEXT NOT NULL,
+  label TEXT NOT NULL,
+  target_kind TEXT NOT NULL,
+  target_path TEXT,
+  target_id TEXT,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  FOREIGN KEY(repo_id) REFERENCES repositories(repo_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_repository_shortcuts_repo_order
+ON repository_shortcuts(repo_id, sort_order, label);
+
+CREATE TABLE IF NOT EXISTS tag_groups (
+  tag_group_id TEXT PRIMARY KEY,
+  repo_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY(repo_id) REFERENCES repositories(repo_id)
+);
+
+CREATE TABLE IF NOT EXISTS tag_group_members (
+  tag_group_id TEXT NOT NULL,
+  repo_id TEXT NOT NULL,
+  tag TEXT NOT NULL,
+  normalized_tag TEXT NOT NULL,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY(tag_group_id, normalized_tag),
+  FOREIGN KEY(tag_group_id) REFERENCES tag_groups(tag_group_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_tag_group_members_repo_tag
+ON tag_group_members(repo_id, normalized_tag);
+
+CREATE TABLE IF NOT EXISTS folder_metadata (
+  repo_id TEXT NOT NULL,
+  path TEXT NOT NULL,
+  protected INTEGER NOT NULL DEFAULT 0,
+  password_tip TEXT,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY(repo_id, path),
+  FOREIGN KEY(repo_id) REFERENCES repositories(repo_id)
+);
 
 CREATE TABLE IF NOT EXISTS entry_thumbnails (
   repo_id TEXT NOT NULL,
@@ -1556,103 +2143,223 @@ def write_repository_record(connection: sqlite3.Connection, plan: ConversionPlan
     )
 
 
+def write_folder_metadata_records(connection: sqlite3.Connection, plan: ConversionPlan) -> None:
+    timestamp = now_rfc3339()
+    for folder in flatten_folder_nodes(plan.folder_nodes):
+        if not folder.protected and not folder.password_tip:
+            continue
+        connection.execute(
+            """
+            INSERT OR REPLACE INTO folder_metadata (repo_id, path, protected, password_tip, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (plan.repo_id, folder.path, 1 if folder.protected else 0, folder.password_tip, timestamp),
+        )
+
+
+def write_repository_shortcut_records(connection: sqlite3.Connection, plan: ConversionPlan) -> None:
+    timestamp = now_rfc3339()
+    for shortcut in plan.quick_access:
+        connection.execute(
+            """
+            INSERT OR REPLACE INTO repository_shortcuts (
+              shortcut_id, repo_id, label, target_kind, target_path, target_id, sort_order, created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                shortcut.shortcut_id,
+                plan.repo_id,
+                shortcut.label,
+                shortcut.target_kind,
+                shortcut.target_path,
+                shortcut.target_id,
+                shortcut.sort_order,
+                timestamp,
+            ),
+        )
+
+
+def write_tag_group_records(connection: sqlite3.Connection, plan: ConversionPlan) -> None:
+    timestamp = now_rfc3339()
+    for group in plan.tag_groups:
+        connection.execute(
+            """
+            INSERT OR REPLACE INTO tag_groups (
+              tag_group_id, repo_id, name, sort_order, created_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (group.tag_group_id, plan.repo_id, group.name, group.sort_order, timestamp, timestamp),
+        )
+        for index, tag in enumerate(group.tags):
+            connection.execute(
+                """
+                INSERT OR REPLACE INTO tag_group_members (
+                  tag_group_id, repo_id, tag, normalized_tag, sort_order
+                )
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (group.tag_group_id, plan.repo_id, tag, tag.lower(), index),
+            )
+
+
 def write_asset_record(connection: sqlite3.Connection, plan: ConversionPlan, asset: AssetPlan) -> None:
-    target_path = asset_file_output_path(plan, asset)
-    if not target_path.is_file():
+    existing_memberships = [
+        membership
+        for membership in asset.memberships
+        if membership_asset_file_output_path(plan, asset, membership).is_file()
+    ]
+    if not existing_memberships:
         return
-    stat = target_path.stat()
+    primary_path = membership_asset_file_output_path(plan, asset, existing_memberships[0])
+    stat = primary_path.stat()
     modified_at = rfc3339_from_timestamp(stat.st_mtime)
     created_at = now_rfc3339()
-    asset_id = asset_id_for_path(plan.repo_id, asset.target_relative_path)
-    file_hash = file_sha256_hash(target_path)
-    thumbnail_path = None
-    if asset.source_thumbnail is not None:
-        thumbnail_path = build_thumbnail_target_path(plan, asset)
-    connection.execute(
-        """
-        INSERT OR REPLACE INTO assets (
-          asset_id, repo_id, path, filename, extension, size_bytes,
-          created_at, modified_at, hash, status, version, updated_at, thumbnail_path
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
-        """,
-        (
-            asset_id,
-            plan.repo_id,
-            asset.target_relative_path,
-            asset.target_filename,
-            asset.extension,
-            stat.st_size,
-            created_at,
-            modified_at,
-            file_hash,
-            asset_status(asset),
-            created_at,
-            str(thumbnail_path) if thumbnail_path else None,
-        ),
-    )
-
+    file_hash = file_sha256_hash(primary_path)
     metadata_entries: dict[str, Any] = {
         "title": asset.display_title,
         "type": asset.extension,
         "favorite": False,
     }
     if asset.note is not None:
-        metadata_entries["note"] = asset.note
+        metadata_entries["comment"] = asset.note
     if asset.palette:
         metadata_entries["color"] = asset.palette[0]
         metadata_entries["palette"] = asset.palette
     metadata_entries.update(asset.preserved_metadata)
-    for key, value in metadata_entries.items():
+    alias_group_id = alias_group_id_for_asset(plan.repo_id, asset.asset_id)
+    hardlink_group_id = hardlink_group_id_for_asset(plan.repo_id, file_hash, stat.st_size)
+    if len(existing_memberships) > 1:
         connection.execute(
             """
-            INSERT OR REPLACE INTO metadata (asset_id, key, value_type, value_json, version, updated_at)
-            VALUES (?, ?, ?, ?, 1, ?)
+            INSERT OR REPLACE INTO asset_alias_groups (alias_group_id, repo_id, source, created_at, updated_at)
+            VALUES (?, ?, 'eagle-importer', ?, ?)
             """,
-            (asset_id, key, infer_value_type(value), json.dumps(value, ensure_ascii=False), created_at),
+            (alias_group_id, plan.repo_id, created_at, created_at),
         )
-
-    for tag in dedupe_preserve_order(asset.tags):
         connection.execute(
             """
-            INSERT OR REPLACE INTO tags (asset_id, tag, normalized_tag)
-            VALUES (?, ?, ?)
+            INSERT OR REPLACE INTO hardlink_groups (
+              group_id, repo_id, content_hash, size_bytes, created_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
             """,
-            (asset_id, tag, tag.lower()),
+            (hardlink_group_id, plan.repo_id, file_hash, stat.st_size, created_at, created_at),
         )
 
-    connection.execute(
-        """
-        INSERT OR REPLACE INTO revisions (
-          revision_id, repo_id, asset_id, timestamp, operation, before_json, after_json, source
+    for membership in existing_memberships:
+        member_path = membership_asset_file_output_path(plan, asset, membership)
+        member_stat = member_path.stat()
+        member_id = asset_id_for_path(plan.repo_id, membership.target_relative_path)
+        thumbnail_path = build_thumbnail_target_path(plan, asset) if membership.role == "primary" and asset.source_thumbnail else None
+        connection.execute(
+            """
+            INSERT OR REPLACE INTO assets (
+              asset_id, repo_id, path, filename, extension, size_bytes,
+              created_at, modified_at, hash, status, version, updated_at, thumbnail_path
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+            """,
+            (
+                member_id,
+                plan.repo_id,
+                membership.target_relative_path,
+                membership.target_filename,
+                asset.extension,
+                member_stat.st_size,
+                created_at,
+                rfc3339_from_timestamp(member_stat.st_mtime),
+                file_hash,
+                asset_status(asset),
+                created_at,
+                str(thumbnail_path) if thumbnail_path else None,
+            ),
         )
-        VALUES (?, ?, ?, ?, 'metadata.seeded', ?, ?, 'eagle-importer')
-        """,
-        (
-            f"rev-{asset_id}",
-            plan.repo_id,
-            asset_id,
-            modified_at,
-            "{}",
-            json.dumps(metadata_entries, ensure_ascii=False),
-        ),
-    )
-    connection.execute(
-        """
-        INSERT OR REPLACE INTO events (
-          event_id, repo_id, asset_id, event_type, path, payload_json, created_at
+        if len(existing_memberships) > 1:
+            connection.execute(
+                """
+                INSERT OR REPLACE INTO asset_alias_members (
+                  alias_group_id, repo_id, asset_id, path, role, created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (alias_group_id, plan.repo_id, member_id, membership.target_relative_path, membership.role, created_at),
+            )
+            connection.execute(
+                """
+                INSERT OR REPLACE INTO hardlink_members (
+                  group_id, repo_id, asset_id, path, link_state, linked_at, verified_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    hardlink_group_id,
+                    plan.repo_id,
+                    member_id,
+                    membership.target_relative_path,
+                    membership.link_state or "linked",
+                    created_at,
+                    created_at,
+                ),
+            )
+
+        for key, value in metadata_entries.items():
+            connection.execute(
+                """
+                INSERT OR REPLACE INTO metadata (asset_id, key, value_type, value_json, version, updated_at)
+                VALUES (?, ?, ?, ?, 1, ?)
+                """,
+                (member_id, key, infer_value_type(value), json.dumps(value, ensure_ascii=False), created_at),
+            )
+        if asset.tags:
+            connection.execute(
+                """
+                INSERT OR REPLACE INTO metadata (asset_id, key, value_type, value_json, version, updated_at)
+                VALUES (?, 'tagGroups', 'array', ?, 1, ?)
+                """,
+                (member_id, json.dumps(dedupe_preserve_order(asset.tags), ensure_ascii=False), created_at),
+            )
+        for tag in dedupe_preserve_order(asset.tags):
+            connection.execute(
+                """
+                INSERT OR REPLACE INTO tags (asset_id, tag, normalized_tag)
+                VALUES (?, ?, ?)
+                """,
+                (member_id, tag, tag.lower()),
+            )
+        connection.execute(
+            """
+            INSERT OR REPLACE INTO revisions (
+              revision_id, repo_id, asset_id, timestamp, operation, before_json, after_json, source
+            )
+            VALUES (?, ?, ?, ?, 'metadata.seeded', ?, ?, 'eagle-importer')
+            """,
+            (
+                f"rev-{member_id}",
+                plan.repo_id,
+                member_id,
+                modified_at,
+                "{}",
+                json.dumps(metadata_entries, ensure_ascii=False),
+            ),
         )
-        VALUES (?, ?, ?, 'asset.discovered', ?, ?, ?)
-        """,
-        (
-            f"evt-{asset_id}",
-            plan.repo_id,
-            asset_id,
-            asset.target_relative_path,
-            json.dumps({"origin": "eagle-importer"}, ensure_ascii=False),
-            modified_at,
-        ),
-    )
+        connection.execute(
+            """
+            INSERT OR REPLACE INTO events (
+              event_id, repo_id, asset_id, event_type, path, payload_json, created_at
+            )
+            VALUES (?, ?, ?, 'asset.discovered', ?, ?, ?)
+            """,
+            (
+                f"evt-{member_id}",
+                plan.repo_id,
+                member_id,
+                membership.target_relative_path,
+                json.dumps({"origin": "eagle-importer", "aliasRole": membership.role}, ensure_ascii=False),
+                modified_at,
+            ),
+        )
 
 
 def write_smart_folder_record(
@@ -1683,9 +2390,28 @@ def write_smart_folder_record(
 
 def move_assets(plan: ConversionPlan) -> None:
     for asset in plan.assets:
-        target_file = asset_file_output_path(plan, asset)
+        primary = asset.memberships[0]
+        target_file = membership_asset_file_output_path(plan, asset, primary)
         target_file.parent.mkdir(parents=True, exist_ok=True)
         shutil.move(str(asset.source_file), str(target_file))
+        primary.link_state = "primary"
+        for membership in asset.memberships[1:]:
+            alias_target = membership_asset_file_output_path(plan, asset, membership)
+            alias_target.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                os.link(target_file, alias_target)
+                membership.link_state = "linked"
+            except OSError as error:
+                shutil.copy2(target_file, alias_target)
+                membership.link_state = "copied"
+                plan.warnings.append(
+                    {
+                        "type": "aliasHardlinkFallback",
+                        "assetId": asset.asset_id,
+                        "targetRelativePath": membership.target_relative_path,
+                        "reason": str(error),
+                    }
+                )
         if asset.source_thumbnail is not None:
             thumbnail_target = build_thumbnail_target_path(plan, asset)
             thumbnail_target.parent.mkdir(parents=True, exist_ok=True)
@@ -1695,10 +2421,14 @@ def move_assets(plan: ConversionPlan) -> None:
 
 
 def asset_file_output_path(plan: ConversionPlan, asset: AssetPlan) -> Path:
+    return membership_asset_file_output_path(plan, asset, asset.memberships[0])
+
+
+def membership_asset_file_output_path(plan: ConversionPlan, asset: AssetPlan, membership: AssetMembership) -> Path:
     trash_path = asset_trash_relative_path(asset)
     if trash_path is not None:
-        return plan.output_root / REPO_META_DIR / "trash" / trash_path
-    return plan.output_root / asset.target_relative_path
+        return plan.output_root / REPO_META_DIR / "trash" / membership.target_relative_path
+    return plan.output_root / membership.target_relative_path
 
 
 def asset_status(asset: AssetPlan) -> str:
@@ -1747,8 +2477,11 @@ def write_todo_file(path: Path) -> None:
         "以下能力当前无法完整转换为 MomoBako 原生形式：",
         "",
     ]
-    for capability in UNSUPPORTED_CAPABILITIES:
-        lines.append(f"- {capability}")
+    if UNSUPPORTED_CAPABILITIES:
+        for capability in UNSUPPORTED_CAPABILITIES:
+            lines.append(f"- {capability}")
+    else:
+        lines.append("- 暂无已知剩余能力缺口")
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
@@ -1803,6 +2536,22 @@ def slugify_ascii_component(value: str) -> str:
 
 def asset_id_for_path(repo_id: str, relative_path: str) -> str:
     return f"asset-{sha256_hex([repo_id.encode('utf-8'), relative_path.encode('utf-8')])}"
+
+
+def alias_group_id_for_asset(repo_id: str, eagle_asset_id: str) -> str:
+    return f"alias-{sha256_hex([repo_id.encode('utf-8'), eagle_asset_id.encode('utf-8')])}"
+
+
+def hardlink_group_id_for_asset(repo_id: str, content_hash: str, size_bytes: int) -> str:
+    return f"hardlink-{sha256_hex([repo_id.encode('utf-8'), content_hash.encode('utf-8'), str(size_bytes).encode('utf-8')])}"
+
+
+def flatten_folder_nodes(nodes: list[FolderNode]) -> list[FolderNode]:
+    flattened: list[FolderNode] = []
+    for node in nodes:
+        flattened.append(node)
+        flattened.extend(flatten_folder_nodes(node.children))
+    return flattened
 
 
 def thumbnail_repository_dir_name(repo_id: str, repo_path: str) -> str:

@@ -45,11 +45,32 @@ export type FolderSummary = {
   assetCount: number;
 };
 
+export type RepositoryShortcut = {
+  shortcutId: string;
+  label: string;
+  targetKind: "file" | "folder" | "smartFolder" | string;
+  targetPath?: string | null;
+  targetId?: string | null;
+};
+
+export type RepositoryTagGroup = {
+  tagGroupId: string;
+  name: string;
+  tags: string[];
+};
+
+export type FolderMetadata = {
+  protected: boolean;
+  passwordTip?: string | null;
+};
+
 export type RepositorySnapshot = {
   repository: RepositorySummary;
   folderLabel: string;
   folders: FolderSummary[];
   assets: AssetSummary[];
+  quickAccess?: RepositoryShortcut[];
+  tagGroups?: RepositoryTagGroup[];
   metadataFields: string[];
   recentRevisionCount: number;
   overview: {
@@ -81,6 +102,9 @@ export type FileBrowserEntry = {
   thumbnailCustom?: boolean;
   hardlinkGroupId?: string | null;
   hardlinkState?: HardlinkState | null;
+  tags?: string[];
+  aliasPaths?: string[];
+  folderMetadata?: FolderMetadata | null;
   metadata?: Record<string, unknown>;
 };
 
@@ -142,6 +166,23 @@ export type SearchMetadataFilter = {
   value: string;
 };
 
+export type SearchNumberFilter = {
+  key: string;
+  min?: number;
+  max?: number;
+};
+
+export type SearchDateFilter = {
+  key: string;
+  from?: string;
+  to?: string;
+};
+
+export type SearchSort = {
+  field: string;
+  direction: "asc" | "desc" | string;
+};
+
 export type SearchRequest = {
   query: string;
   repoId?: string;
@@ -150,8 +191,16 @@ export type SearchRequest = {
   tag?: string;
   tags?: string[];
   metadataFilters?: SearchMetadataFilter[];
+  excludeTags?: string[];
+  excludeFormats?: string[];
+  excludeMetadataFilters?: SearchMetadataFilter[];
+  numberFilters?: SearchNumberFilter[];
+  dateFilters?: SearchDateFilter[];
   formats?: string[];
   minRating?: number;
+  matchMode?: "and" | "or" | string;
+  sort?: SearchSort;
+  limit?: number;
 };
 
 export type SmartFolderFilter = {
@@ -162,7 +211,15 @@ export type SmartFolderFilter = {
   colors?: string[];
   shapes?: string[];
   metadataFilters?: SearchMetadataFilter[];
+  excludeTags?: string[];
+  excludeFormats?: string[];
+  excludeMetadataFilters?: SearchMetadataFilter[];
+  numberFilters?: SearchNumberFilter[];
+  dateFilters?: SearchDateFilter[];
   minRating?: number;
+  matchMode?: "and" | "or" | string;
+  sort?: SearchSort;
+  limit?: number;
 };
 
 export type SmartFolder = {
@@ -317,7 +374,7 @@ export type FileMoveRequest = {
   parentPath: string;
 };
 
-export type HardlinkState = "linked" | "copiedFallback" | "broken" | "missing";
+export type HardlinkState = "primary" | "linked" | "copied" | "copiedFallback" | "broken" | "missing";
 
 export type HardlinkCandidate = {
   candidateId: string;
