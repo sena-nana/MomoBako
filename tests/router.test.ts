@@ -961,6 +961,18 @@ describe("文件管理冒烟", () => {
     expect(screen.queryByRole("heading", { name: "搜索结果" })).not.toBeInTheDocument();
     expect(await screen.findByRole("heading", { name: "target-preview.png" })).toBeInTheDocument();
     expect(screen.getByText("Reference/Paint/target-preview.png")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(getInvokeCalls("prepare_preview_file_source").at(-1)?.args).toMatchObject({
+        request: {
+          repoId: "repo-alt-001",
+          path: "Reference/Paint/target-preview.png",
+        },
+      });
+    });
+    await waitFor(() => {
+      const previewImage = document.querySelector<HTMLImageElement>(".media-preview__image");
+      expect(previewImage?.getAttribute("src")).toBe(`http://127.0.0.1:49152/preview/${"0".repeat(64)}`);
+    });
   });
 
   it("智能文件夹使用虚拟文件列表并只提供只读导航操作", async () => {

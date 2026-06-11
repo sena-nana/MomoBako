@@ -36,10 +36,22 @@ describe("previewPlugins", () => {
     expect(listPreviewPlugins().some((item) => item.supportedExtensions.includes("vrm"))).toBe(true);
   });
 
-  it("routes video and audio files to the built-in media preview", () => {
+  it("routes STL, 3MF, and BLEND files to the built-in 3D model preview", () => {
+    expect(getPreviewPluginForEntry(fileEntry("stl"))?.pluginId).toBe("momobako.preview.three-model");
+    expect(getPreviewPluginForEntry(fileEntry("3mf"))?.pluginId).toBe("momobako.preview.three-model");
+    expect(getPreviewPluginForEntry(fileEntry("blend"))?.pluginId).toBe("momobako.preview.three-model");
+    const modelPlugin = listPreviewPlugins().find((plugin) => plugin.pluginId === "momobako.preview.three-model");
+    expect(modelPlugin?.supportedExtensions).toContain("stl");
+    expect(modelPlugin?.supportedExtensions).toContain("3mf");
+    expect(modelPlugin?.supportedExtensions).toContain("blend");
+  });
+
+  it("routes image, video, and audio files to the built-in media preview", () => {
+    expect(getPreviewPluginForEntry(fileEntry("png"))?.pluginId).toBe("momobako.preview.media");
     expect(getPreviewPluginForEntry(fileEntry("mp4"))?.pluginId).toBe("momobako.preview.media");
     expect(getPreviewPluginForEntry(fileEntry("mp3"))?.pluginId).toBe("momobako.preview.media");
     const mediaPlugin = listPreviewPlugins().find((plugin) => plugin.pluginId === "momobako.preview.media");
+    expect(mediaPlugin?.supportedExtensions).toContain("png");
     expect(mediaPlugin?.supportedExtensions).toContain("webm");
     expect(mediaPlugin?.supportedExtensions).toContain("wav");
   });

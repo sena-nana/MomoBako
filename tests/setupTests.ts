@@ -599,6 +599,13 @@ vi.mock("@tauri-apps/api/core", () => ({
       };
     }
     if (command === "read_file") {
+      const request = args?.request as { path?: string } | undefined;
+      if (request?.path === "Music/theme-song.lrc") {
+        return Array.from(new TextEncoder().encode("[00:10.00]Mock lyric line 1\n[00:20.00]Mock lyric line 2"));
+      }
+      if (request?.path?.endsWith(".lrc")) {
+        throw new Error(`file not found: ${request.path}`);
+      }
       return [35, 32, 77, 111, 99, 107, 32, 102, 105, 108, 101];
     }
     if (command === "prepare_preview_file_source") {
@@ -613,8 +620,16 @@ vi.mock("@tauri-apps/api/core", () => ({
           ? "model/gltf-binary"
           : path.endsWith(".gltf")
             ? "model/gltf+json"
-            : path.endsWith(".pdf")
-              ? "application/pdf"
+            : path.endsWith(".png")
+              ? "image/png"
+              : path.endsWith(".jpg") || path.endsWith(".jpeg")
+                ? "image/jpeg"
+                : path.endsWith(".webp")
+                  ? "image/webp"
+                  : path.endsWith(".gif")
+                    ? "image/gif"
+              : path.endsWith(".pdf")
+                ? "application/pdf"
               : path.endsWith(".docx")
                 ? "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                 : path.endsWith(".docm")
