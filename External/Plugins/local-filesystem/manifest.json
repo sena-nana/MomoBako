@@ -7,6 +7,7 @@
     "kind": "filesystem"
   },
   "kind": "filesystem",
+  "category": "source",
   "description": "使用本地目录作为仓库文件管理后端。",
   "capabilities": ["browse", "read", "write", "watch", "sync"],
   "enabled": true,
@@ -18,6 +19,15 @@
     }
   },
   "permissions": ["filesystem:read", "filesystem:write"],
+  "requires": [],
+  "optional": ["momobako.filesystem-watcher"],
+  "hooks": [],
+  "contributes": {
+    "source": {
+      "operations": ["list", "read", "write", "move", "delete", "watch"],
+      "dangerousOperations": ["write", "move", "delete"]
+    }
+  },
   "compat": {
     "sdkVersion": "1",
     "legacyPluginIds": []

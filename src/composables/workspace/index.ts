@@ -9,7 +9,6 @@ import {
   createRepository,
   deleteEntry,
   deleteRepository,
-  ensureThumbnail,
   exportRepository,
   getApiDesignSnapshot,
   getAssetDetail,
@@ -18,6 +17,7 @@ import {
   getRepositorySnapshot,
   importRepository,
   installPluginFromArchive,
+  listRepositoryActions,
   listSmartFolders,
   listPlugins,
   createSmartFolder,
@@ -32,6 +32,7 @@ import {
   relocateRepository,
   renameEntry,
   revealRepositoryPath,
+  runRepositoryAction,
   syncRepository,
   undoLastRevision,
   updateSmartFolder,
@@ -54,6 +55,7 @@ import {
   activeAssetId,
   activePanel,
   activeRepoId,
+  activeRepositoryActionId,
   activeSmartFolderId,
   activeSnapshot,
   apiDesign,
@@ -69,6 +71,7 @@ import {
   isLoadingAssetDetail,
   isLoadingFileBrowser,
   isLoadingRepositories,
+  isLoadingRepositoryActions,
   isLoadingSnapshot,
   isLoadingSettingsData,
   isLoadingSmartFolder,
@@ -77,12 +80,14 @@ import {
   isInternalDragActive,
   isMutatingFiles,
   isMutatingSmartFolder,
+  isRunningRepositoryAction,
   isSavingMetadata,
   isSearching,
   isSyncing,
   lastSyncResult,
   plugins,
   repositories,
+  repositoryActions,
   searchQuery,
   searchResults,
   draggedWorkspacePaths,
@@ -121,6 +126,7 @@ import {
   setMinimumRatingFilter,
   toggleFilterBar,
   toggleFilterValue,
+  updateFilters,
 } from "./search";
 import {
   refreshHardlinkCandidates,
@@ -138,7 +144,11 @@ import {
   type WorkspaceOperationProgress,
 } from "./tasks";
 import {
-  applyThumbnailResponse,
+  clearWorkspaceEntryThumbnail,
+  refreshWorkspaceEntryThumbnail,
+  saveGeneratedWorkspaceEntryThumbnail,
+  setWorkspaceEntryThumbnail,
+  setWorkspaceEntryThumbnailFromBytes,
 } from "./thumbnails";
 import {
   applyFileBrowserSnapshot,
@@ -240,10 +250,12 @@ export async function selectRepository(repoId: string) {
     activeRepoId.value = repoId;
     activeSnapshot.value = snapshot;
     smartFolders.value = await listSmartFolders(repoId);
+    repositoryActions.value = await listRepositoryActions(repoId);
     if (isSwitchingRepository) {
       resetSearchState();
       activeSmartFolderId.value = null;
       smartFolderResult.value = null;
+      activeRepositoryActionId.value = repositoryActions.value[0]?.actionId ?? null;
     }
 
     const defaultAssetId = activeAssetId.value && snapshot.assets.some((item) => item.assetId === activeAssetId.value)
@@ -765,18 +777,45 @@ function normalizeSmartFolderFilter(filter: SmartFolderFilter): SmartFolderFilte
     const values = Array.from(new Set((items ?? []).map((item) => item.trim()).filter(Boolean)));
     return values.length ? values : undefined;
   };
-  const metadataFilters = filter.metadataFilters
+  const normalizeMetadataFilters = (items = filter.metadataFilters) => items
     ?.map((item) => ({ key: item.key.trim(), value: item.value.trim() }))
     .filter((item) => item.key && item.value);
+  const numberFilters = filter.numberFilters
+    ?.map((item) => ({ key: item.key.trim(), min: item.min, max: item.max }))
+    .filter((item) => item.key && (item.min != null || item.max != null));
+  const excludeNumberFilters = filter.excludeNumberFilters
+    ?.map((item) => ({ key: item.key.trim(), min: item.min, max: item.max }))
+    .filter((item) => item.key && (item.min != null || item.max != null));
+  const dateFilters = filter.dateFilters
+    ?.map((item) => ({ key: item.key.trim(), from: item.from?.trim() || undefined, to: item.to?.trim() || undefined }))
+    .filter((item) => item.key && (item.from || item.to));
+  const excludeDateFilters = filter.excludeDateFilters
+    ?.map((item) => ({ key: item.key.trim(), from: item.from?.trim() || undefined, to: item.to?.trim() || undefined }))
+    .filter((item) => item.key && (item.from || item.to));
+  const sortField = filter.sort?.field.trim();
   return {
     query: filter.query?.trim() || undefined,
     pathPrefix: filter.pathPrefix?.trim() || undefined,
+    excludeQuery: filter.excludeQuery?.trim() || undefined,
+    excludePathPrefixes: normalizeList(filter.excludePathPrefixes),
     tags: normalizeList(filter.tags),
     formats: normalizeList(filter.formats),
     colors: normalizeList(filter.colors),
     shapes: normalizeList(filter.shapes),
-    metadataFilters: metadataFilters?.length ? metadataFilters : undefined,
+    metadataFilters: normalizeMetadataFilters()?.length ? normalizeMetadataFilters() : undefined,
+    excludeTags: normalizeList(filter.excludeTags),
+    excludeFormats: normalizeList(filter.excludeFormats),
+    excludeMetadataFilters: normalizeMetadataFilters(filter.excludeMetadataFilters)?.length
+      ? normalizeMetadataFilters(filter.excludeMetadataFilters)
+      : undefined,
+    excludeNumberFilters: excludeNumberFilters?.length ? excludeNumberFilters : undefined,
+    excludeDateFilters: excludeDateFilters?.length ? excludeDateFilters : undefined,
+    numberFilters: numberFilters?.length ? numberFilters : undefined,
+    dateFilters: dateFilters?.length ? dateFilters : undefined,
     minRating: filter.minRating && filter.minRating > 0 ? filter.minRating : undefined,
+    matchMode: filter.matchMode === "or" ? "or" : undefined,
+    sort: sortField ? { field: sortField, direction: filter.sort?.direction === "desc" ? "desc" : "asc" } : undefined,
+    limit: filter.limit && filter.limit > 0 ? filter.limit : undefined,
   };
 }
 
@@ -887,92 +926,64 @@ export async function deleteSmartFolderInWorkspace(smartFolderId: string) {
   }
 }
 
-export async function setWorkspaceEntryThumbnail(path: string, sourcePath: string) {
-  if (!activeRepoId.value || fileBrowser.value?.specialLocation === "trash") return null;
+export async function refreshRepositoryActions(repoId = activeRepoId.value) {
+  if (!repoId) {
+    repositoryActions.value = [];
+    activeRepositoryActionId.value = null;
+    return [];
+  }
+  isLoadingRepositoryActions.value = true;
   error.value = null;
   try {
-    const response = await ensureThumbnail({
-      repoId: activeRepoId.value,
-      path,
-      action: "save",
-      sourcePath,
+    const actions = await listRepositoryActions(repoId);
+    if (activeRepoId.value === repoId) {
+      repositoryActions.value = actions;
+      if (activeRepositoryActionId.value && !actions.some((action) => action.actionId === activeRepositoryActionId.value)) {
+        activeRepositoryActionId.value = null;
+      }
+      activeRepositoryActionId.value = activeRepositoryActionId.value ?? actions[0]?.actionId ?? null;
+    }
+    return actions;
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : String(cause);
+    return [];
+  } finally {
+    isLoadingRepositoryActions.value = false;
+  }
+}
+
+export function selectRepositoryAction(actionId: string) {
+  activeRepositoryActionId.value = actionId;
+  activePanel.value = "actions";
+}
+
+export async function runActiveRepositoryAction(actionId = activeRepositoryActionId.value) {
+  const repoId = activeRepoId.value;
+  if (!repoId || !actionId) return null;
+  const targetPaths = selectedFilePaths.value.length
+    ? selectedFilePaths.value
+    : selectedFilePath.value ? [selectedFilePath.value] : [];
+  isRunningRepositoryAction.value = true;
+  error.value = null;
+  try {
+    const response = await runRepositoryAction({
+      repoId,
+      actionId,
+      targetPaths,
     });
-    applyThumbnailResponse(response);
+    repositoryActions.value = repositoryActions.value.map((action) => (
+      action.actionId === response.action.actionId ? response.action : action
+    ));
+    await refreshWorkspaceAfterMutation(repoId, {
+      directory: fileBrowser.value && !fileBrowser.value.specialLocation ? "current" : undefined,
+      repositorySnapshot: true,
+    });
     return response;
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : String(cause);
     return null;
-  }
-}
-
-export async function setWorkspaceEntryThumbnailFromBytes(path: string, imageBytes: number[], mediaType?: string) {
-  if (!activeRepoId.value || fileBrowser.value?.specialLocation === "trash") return null;
-  error.value = null;
-  try {
-    const response = await ensureThumbnail({
-      repoId: activeRepoId.value,
-      path,
-      action: "save",
-      imageBytes,
-      mediaType,
-    });
-    applyThumbnailResponse(response);
-    return response;
-  } catch (cause) {
-    error.value = cause instanceof Error ? cause.message : String(cause);
-    return null;
-  }
-}
-
-export async function saveGeneratedWorkspaceEntryThumbnail(path: string, imageBytes: number[], mediaType?: string) {
-  if (!activeRepoId.value || fileBrowser.value?.specialLocation === "trash") return null;
-  error.value = null;
-  try {
-    const response = await ensureThumbnail({
-      repoId: activeRepoId.value,
-      path,
-      action: "saveGenerated",
-      imageBytes,
-      mediaType,
-    });
-    applyThumbnailResponse(response);
-    return response;
-  } catch {
-    return null;
-  }
-}
-
-export async function clearWorkspaceEntryThumbnail(path: string) {
-  if (!activeRepoId.value || fileBrowser.value?.specialLocation === "trash") return null;
-  error.value = null;
-  try {
-    const response = await ensureThumbnail({
-      repoId: activeRepoId.value,
-      path,
-      action: "clear",
-    });
-    applyThumbnailResponse(response);
-    return response;
-  } catch (cause) {
-    error.value = cause instanceof Error ? cause.message : String(cause);
-    return null;
-  }
-}
-
-export async function refreshWorkspaceEntryThumbnail(path: string) {
-  if (!activeRepoId.value || fileBrowser.value?.specialLocation === "trash") return null;
-  error.value = null;
-  try {
-    const response = await ensureThumbnail({
-      repoId: activeRepoId.value,
-      path,
-      action: "refresh",
-    });
-    applyThumbnailResponse(response);
-    return response;
-  } catch (cause) {
-    error.value = cause instanceof Error ? cause.message : String(cause);
-    return null;
+  } finally {
+    isRunningRepositoryAction.value = false;
   }
 }
 
@@ -1347,7 +1358,9 @@ export function useRepositoryWorkspace() {
     searchQuery: computed(() => searchQuery.value),
     searchResults: computed(() => searchResults.value),
     smartFolders: computed(() => smartFolders.value),
+    repositoryActions: computed(() => repositoryActions.value),
     activeSmartFolderId: computed(() => activeSmartFolderId.value),
+    activeRepositoryActionId: computed(() => activeRepositoryActionId.value),
     smartFolderResult: computed(() => smartFolderResult.value),
     activeRepository,
     fileBrowserEntryMap,
@@ -1380,10 +1393,12 @@ export function useRepositoryWorkspace() {
     isLoadingFileBrowser: computed(() => isLoadingFileBrowser.value),
     isSearching: computed(() => isSearching.value),
     isLoadingSmartFolder: computed(() => isLoadingSmartFolder.value),
+    isLoadingRepositoryActions: computed(() => isLoadingRepositoryActions.value),
     isSavingMetadata: computed(() => isSavingMetadata.value),
     isSyncing: computed(() => isSyncing.value),
     isMutatingFiles: computed(() => isMutatingFiles.value),
     isMutatingSmartFolder: computed(() => isMutatingSmartFolder.value),
+    isRunningRepositoryAction: computed(() => isRunningRepositoryAction.value),
     isLoadingSettingsData: computed(() => isLoadingSettingsData.value),
     isManagingPlugins: computed(() => isManagingPlugins.value),
     isExternalDragActive: computed(() => isExternalDragActive.value),
@@ -1423,6 +1438,9 @@ export function useRepositoryWorkspace() {
     clearWorkspaceSelection,
     refreshSmartFolders,
     selectSmartFolder,
+    refreshRepositoryActions,
+    selectRepositoryAction,
+    runActiveRepositoryAction,
     createSmartFolderInWorkspace,
     updateSmartFolderInWorkspace,
     deleteSmartFolderInWorkspace,
@@ -1441,6 +1459,7 @@ export function useRepositoryWorkspace() {
     toggleFilterBar,
     toggleFilterValue,
     setMinimumRatingFilter,
+    updateFilters,
     clearFilters,
     runSearch,
     runFilteredSearch,

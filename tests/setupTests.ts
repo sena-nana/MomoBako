@@ -4,45 +4,30 @@ import { afterEach, vi } from "vitest";
 import type {
   FileBrowserEntry,
   PluginManifest,
+  RepositoryAction,
   SearchHit,
   SearchRequest,
   SmartFolder,
   SmartFolderFilter,
   SmartFolderTreeNode,
 } from "../src/types/repository";
-
-type MockRepository = {
-  repoId: string;
-  name: string;
-  path: string;
-  backend: {
-    pluginId: string;
-    kind: string;
-    name: string;
-    capabilities: string[];
-  };
-  status: string;
-  assetCount: number;
-  updatedAt: string;
-};
+import {
+  altEntries,
+  altRepository,
+  altSnapshot,
+  createMockPlugins,
+  defaultRepositoryActions,
+  defaultSearchHits,
+  initialEntries,
+  mockAssetDetail,
+  mockSnapshot,
+  pluginManifest,
+} from "./fixtures/repositoryFixtures";
+import type { MockEntry, MockRepository } from "./fixtures/repositoryFixtures";
 
 const missingRepositoryPath = "C:/Mock/MissingAnimeAssets";
 const relocatedRepositoryPath = "C:/Mock/RelocatedAnimeAssets";
 
-type MockEntry = {
-  path: string;
-  name: string;
-  kind: "directory" | "file";
-  extension: string | null;
-  sizeBytes: number | null;
-  sizeLabel: string | null;
-  modifiedAt: string | null;
-  assetId: string | null;
-  status: string | null;
-  thumbnailPath?: string | null;
-  thumbnailCustom?: boolean;
-  metadata?: Record<string, unknown>;
-};
 
 let mockRepositories: MockRepository[] = [];
 let mockSelectedFolder: string | null = null;
@@ -54,90 +39,11 @@ let mockInvokeFailure: { command: string; error: Error } | null = null;
 let mockInvokeDelay: { command: string; resolve: () => void; promise: Promise<void> } | null = null;
 let mockSearchResults: SearchHit[] | null = null;
 let mockSmartFolders: SmartFolder[] = [];
+let mockRepositoryActions: RepositoryAction[] = [];
 let mockPlugins: PluginManifest[] | null = null;
 const invokeCalls: Array<{ command: string; args?: Record<string, unknown> }> = [];
 const openerCalls: Array<{ command: "openPath" | "revealItemInDir"; path: string }> = [];
 
-const defaultSearchHits = (): SearchHit[] => [
-  {
-    repoId: "repo-main-001",
-    repoName: "主资源库",
-    assetId: "asset-01",
-    path: "Campaigns/Summer/cover-final.psd",
-    filename: "cover-final.psd",
-    status: "synced",
-    tags: ["封面", "主视觉", "PSD"],
-    metadata: {
-      note: "最终版封面，保留可编辑图层。",
-      color: "#336699",
-      palette: ["#336699", "#88AACC"],
-      shape: "方形",
-      rating: 5,
-    },
-  },
-  {
-    repoId: "repo-main-001",
-    repoName: "主资源库",
-    assetId: "asset-02",
-    path: "Backgrounds/scene-forest-03.png",
-    filename: "scene-forest-03.png",
-    status: "synced",
-    tags: ["背景", "森林", "PNG"],
-    metadata: {
-      note: "森林场景背景。",
-      color: "绿色",
-      shape: "横版",
-      rating: 3,
-    },
-  },
-];
-
-const initialEntries = (): MockEntry[] => [
-  {
-    path: "Campaigns",
-    name: "Campaigns",
-    kind: "directory",
-    extension: null,
-    sizeBytes: null,
-    sizeLabel: null,
-    modifiedAt: "2026-06-05T00:18:00Z",
-    assetId: null,
-    status: null,
-  },
-  {
-    path: "Campaigns/Summer",
-    name: "Summer",
-    kind: "directory",
-    extension: null,
-    sizeBytes: null,
-    sizeLabel: null,
-    modifiedAt: "2026-06-05T00:18:00Z",
-    assetId: null,
-    status: null,
-  },
-  {
-    path: "Backgrounds",
-    name: "Backgrounds",
-    kind: "directory",
-    extension: null,
-    sizeBytes: null,
-    sizeLabel: null,
-    modifiedAt: "2026-06-05T00:18:00Z",
-    assetId: null,
-    status: null,
-  },
-  {
-    path: "cover-final.psd",
-    name: "cover-final.psd",
-    kind: "file",
-    extension: "psd",
-    sizeBytes: 238950400,
-    sizeLabel: "227.9 MB",
-    modifiedAt: "2026-06-05T00:18:00Z",
-    assetId: "asset-01",
-    status: "synced",
-  },
-];
 
 let mockEntries: MockEntry[] = initialEntries();
 let mockTrashEntries: MockEntry[] = [];
@@ -182,15 +88,79 @@ function metadataSearchText(value: unknown) {
   return "";
 }
 
+function metadataNumber(value: unknown) {
+  if (typeof value === "number") return value;
+  if (typeof value === "string" && value.trim()) {
+    const number = Number(value);
+    return Number.isFinite(number) ? number : null;
+  }
+  return null;
+}
+
 function filterSearchHits(request: SearchRequest | undefined, hits: SearchHit[]) {
   if (!request) return hits;
   const query = request.query.trim().toLowerCase();
   const tags = request.tags?.map((tag) => tag.toLowerCase()).filter(Boolean) ?? [];
   const formats = request.formats?.map((format) => format.toLowerCase()).filter(Boolean) ?? [];
   const metadataFilters = request.metadataFilters ?? [];
+  const excludeTags = request.excludeTags?.map((tag) => tag.toLowerCase()).filter(Boolean) ?? [];
+  const excludeFormats = request.excludeFormats?.map((format) => format.toLowerCase()).filter(Boolean) ?? [];
+  const excludeMetadataFilters = request.excludeMetadataFilters ?? [];
+  const excludeQueryTerms = request.excludeQuery?.toLowerCase().split(/\s+/).filter(Boolean) ?? [];
+  const excludePathPrefixes = request.excludePathPrefixes?.map((path) => path.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "").toLowerCase()).filter(Boolean) ?? [];
+  const excludeNumberFilters = request.excludeNumberFilters ?? [];
+  const excludeDateFilters = request.excludeDateFilters ?? [];
+  const numberFilters = request.numberFilters ?? [];
+  const dateFilters = request.dateFilters ?? [];
+  const matchMode = request.matchMode === "or" ? "or" : "and";
 
-  return hits.filter((hit) => {
+  const results = hits.filter((hit) => {
     if (request.repoId && hit.repoId !== request.repoId) return false;
+    if (excludePathPrefixes.some((prefix) => {
+      const path = hit.path.toLowerCase();
+      return path === prefix || path.startsWith(`${prefix}/`);
+    })) return false;
+    if (excludeQueryTerms.length) {
+      const haystack = [
+        hit.repoName,
+        hit.filename,
+        hit.path,
+        ...hit.tags,
+        ...Object.values(hit.metadata).map(metadataSearchText),
+      ].join(" ").toLowerCase();
+      if (excludeQueryTerms.some((term) => haystack.includes(term))) return false;
+    }
+    if (excludeFormats.length && excludeFormats.includes(searchHitFormat(hit))) return false;
+    if (excludeTags.length && hit.tags.some((tag) => excludeTags.some((expected) => tag.toLowerCase().includes(expected)))) return false;
+    if (excludeMetadataFilters.some((filter) => {
+      const actual = metadataSearchText(hit.metadata[filter.key]);
+      const expected = filter.value.toLowerCase();
+      return actual === expected || actual.includes(expected);
+    })) return false;
+    if (excludeNumberFilters.some((filter) => {
+      const actual = metadataNumber(hit.metadata[filter.key]);
+      return actual != null && (filter.min == null || actual >= filter.min) && (filter.max == null || actual <= filter.max);
+    })) return false;
+    if (excludeDateFilters.some((filter) => {
+      const actualText = metadataSearchText(hit.metadata[filter.key]);
+      const actualTime = Date.parse(actualText);
+      return !Number.isNaN(actualTime)
+        && (!filter.from || actualTime >= Date.parse(filter.from))
+        && (!filter.to || actualTime <= Date.parse(filter.to));
+    })) return false;
+    if (numberFilters.some((filter) => {
+      const actual = metadataNumber(hit.metadata[filter.key]);
+      return actual == null || (filter.min != null && actual < filter.min) || (filter.max != null && actual > filter.max);
+    })) return false;
+    if (dateFilters.some((filter) => {
+      const actualText = metadataSearchText(hit.metadata[filter.key]);
+      const actualTime = Date.parse(actualText);
+      return Number.isNaN(actualTime)
+        || (filter.from && actualTime < Date.parse(filter.from))
+        || (filter.to && actualTime > Date.parse(filter.to));
+    })) return false;
+
+    const checks: boolean[] = [];
     if (query) {
       const haystack = [
         hit.repoName,
@@ -199,20 +169,31 @@ function filterSearchHits(request: SearchRequest | undefined, hits: SearchHit[])
         ...hit.tags,
         ...Object.values(hit.metadata).map(metadataSearchText),
       ].join(" ").toLowerCase();
-      if (!haystack.includes(query)) return false;
+      checks.push(haystack.includes(query));
     }
-    if (formats.length && !formats.includes(searchHitFormat(hit))) return false;
-    if (tags.length && !hit.tags.some((tag) => tags.some((expected) => tag.toLowerCase().includes(expected)))) return false;
+    if (formats.length) checks.push(formats.includes(searchHitFormat(hit)));
+    if (tags.length) checks.push(hit.tags.some((tag) => tags.some((expected) => tag.toLowerCase().includes(expected))));
     if (request.minRating != null) {
       const rating = typeof hit.metadata.rating === "number" ? hit.metadata.rating : 0;
-      if (rating < request.minRating) return false;
+      checks.push(rating >= request.minRating);
     }
-    return metadataFilters.every((filter) => {
+    checks.push(...metadataFilters.map((filter) => {
       const actual = metadataSearchText(hit.metadata[filter.key]);
       const expected = filter.value.toLowerCase();
       return actual === expected || actual.includes(expected);
-    });
+    }));
+    return matchMode === "or" && checks.length ? checks.some(Boolean) : checks.every(Boolean);
   });
+  if (request.sort?.field) {
+    const direction = request.sort.direction === "desc" ? -1 : 1;
+    results.sort((left, right) => {
+      const field = request.sort?.field ?? "";
+      const leftValue = field === "modifiedAt" ? left.metadata.fileCreatedAt : left.metadata[field.replace(/^metadata\./, "")];
+      const rightValue = field === "modifiedAt" ? right.metadata.fileCreatedAt : right.metadata[field.replace(/^metadata\./, "")];
+      return metadataSearchText(leftValue).localeCompare(metadataSearchText(rightValue)) * direction;
+    });
+  }
+  return request.limit ? results.slice(0, request.limit) : results;
 }
 
 function buildSmartFolderTree(parentId: string | null = null): SmartFolderTreeNode[] {
@@ -244,6 +225,7 @@ function smartFolderSearchRequest(filter: SmartFolderFilter, repoId: string): Se
   return {
     query: filter.query ?? "",
     repoId,
+    excludeQuery: filter.excludeQuery,
     tags: filter.tags,
     formats: filter.formats,
     minRating: filter.minRating,
@@ -252,6 +234,17 @@ function smartFolderSearchRequest(filter: SmartFolderFilter, repoId: string): Se
       ...(filter.colors ?? []).map((value) => ({ key: "color", value })),
       ...(filter.shapes ?? []).map((value) => ({ key: "shape", value })),
     ],
+    excludeTags: filter.excludeTags,
+    excludeFormats: filter.excludeFormats,
+    excludeMetadataFilters: filter.excludeMetadataFilters,
+    excludePathPrefixes: filter.excludePathPrefixes,
+    excludeNumberFilters: filter.excludeNumberFilters,
+    excludeDateFilters: filter.excludeDateFilters,
+    numberFilters: filter.numberFilters,
+    dateFilters: filter.dateFilters,
+    matchMode: filter.matchMode,
+    sort: filter.sort,
+    limit: filter.limit,
   };
 }
 
@@ -412,226 +405,6 @@ function getMockFileBrowser(directoryPath = "", includeTree = true, specialLocat
   return snapshot;
 }
 
-const mockSnapshot = {
-  repository: {
-    repoId: "repo-main-001",
-    name: "主资源库",
-    path: "C:/Mock/AnimeAssets",
-    backend: {
-      pluginId: "momobako.local-filesystem",
-      kind: "filesystem",
-      name: "Local Filesystem",
-      capabilities: ["browse", "read", "write", "watch", "sync"],
-    },
-    status: "ready",
-    assetCount: 6,
-    updatedAt: "2026-06-05T00:18:00Z",
-  },
-  folderLabel: "Campaigns",
-  folders: [
-    { path: "Campaigns", label: "Campaigns", assetCount: 1 },
-    { path: "Backgrounds", label: "Backgrounds", assetCount: 1 },
-    { path: "Characters", label: "Characters", assetCount: 1 },
-  ],
-  assets: [
-    {
-      assetId: "asset-01",
-      repoId: "repo-main-001",
-      path: "Campaigns/Summer/cover-final.psd",
-      filename: "cover-final.psd",
-      extension: "psd",
-      sizeBytes: 238950400,
-      sizeLabel: "227.9 MB",
-      status: "synced",
-      modifiedAt: "2026-06-05T00:18:00Z",
-      version: 1,
-      tags: ["封面", "主视觉", "PSD"],
-    },
-    {
-      assetId: "asset-02",
-      repoId: "repo-main-001",
-      path: "Backgrounds/scene-forest-03.png",
-      filename: "scene-forest-03.png",
-      extension: "png",
-      sizeBytes: 15245312,
-      sizeLabel: "14.5 MB",
-      status: "synced",
-      modifiedAt: "2026-06-04T22:04:00Z",
-      version: 1,
-      tags: ["背景", "森林", "PNG"],
-    },
-  ],
-  metadataFields: ["favorite", "note", "rating", "title"],
-  recentRevisionCount: 6,
-  overview: {
-    totalSizeBytes: 254195712,
-    totalSizeLabel: "242.4 MB",
-    fileCount: 2,
-    folderCount: 3,
-    readmeContent: "# 主资源库\n用于存放项目主视觉、背景和衍生素材。\n",
-  },
-};
-
-const altRepository = {
-  repoId: "repo-alt-001",
-  name: "参考资源库",
-  path: "C:/Mock/ReferenceAssets",
-  backend: {
-    pluginId: "momobako.local-filesystem",
-    kind: "filesystem",
-    name: "Local Filesystem",
-    capabilities: ["browse", "read", "write", "watch", "sync"],
-  },
-  status: "ready",
-  assetCount: 1,
-  updatedAt: "2026-06-05T00:18:00Z",
-};
-
-const altEntries: MockEntry[] = [
-  {
-    path: "Reference",
-    name: "Reference",
-    kind: "directory",
-    extension: null,
-    sizeBytes: null,
-    sizeLabel: null,
-    modifiedAt: "2026-06-05T00:18:00Z",
-    assetId: null,
-    status: null,
-  },
-  {
-    path: "Reference/Paint",
-    name: "Paint",
-    kind: "directory",
-    extension: null,
-    sizeBytes: null,
-    sizeLabel: null,
-    modifiedAt: "2026-06-05T00:18:00Z",
-    assetId: null,
-    status: null,
-  },
-  {
-    path: "Reference/Paint/target-preview.png",
-    name: "target-preview.png",
-    kind: "file",
-    extension: "png",
-    sizeBytes: 4096,
-    sizeLabel: "4 KB",
-    modifiedAt: "2026-06-05T00:18:00Z",
-    assetId: "asset-alt-01",
-    status: "synced",
-  },
-];
-
-const altSnapshot = {
-  repository: altRepository,
-  folderLabel: "Reference",
-  folders: [
-    { path: "Reference", label: "Reference", assetCount: 1 },
-    { path: "Reference/Paint", label: "Paint", assetCount: 1 },
-  ],
-  assets: [
-    {
-      assetId: "asset-alt-01",
-      repoId: "repo-alt-001",
-      path: "Reference/Paint/target-preview.png",
-      filename: "target-preview.png",
-      extension: "png",
-      sizeBytes: 4096,
-      sizeLabel: "4 KB",
-      status: "synced",
-      modifiedAt: "2026-06-05T00:18:00Z",
-      version: 1,
-      tags: ["参考", "PNG"],
-    },
-  ],
-  metadataFields: ["note"],
-  recentRevisionCount: 1,
-  overview: {
-    totalSizeBytes: 4096,
-    totalSizeLabel: "4 KB",
-    fileCount: 1,
-    folderCount: 2,
-    readmeContent: null,
-  },
-};
-
-const mockAssetDetail = {
-  summary: mockSnapshot.assets[0],
-  metadata: [
-    { key: "favorite", valueType: "boolean", value: true, version: 1, updatedAt: "2026-06-05T00:18:00Z" },
-    { key: "note", valueType: "string", value: "最终版封面，保留可编辑图层。", version: 1, updatedAt: "2026-06-05T00:18:00Z" },
-    { key: "rating", valueType: "number", value: 5, version: 1, updatedAt: "2026-06-05T00:18:00Z" },
-    { key: "title", valueType: "string", value: "Summer Launch Cover", version: 1, updatedAt: "2026-06-05T00:18:00Z" },
-  ],
-  revisions: [
-    {
-      revisionId: "rev-asset-01",
-      assetId: "asset-01",
-      timestamp: "2026-06-05T00:18:00Z",
-      operation: "metadata.seeded",
-      before: {},
-      after: { note: "最终版封面，保留可编辑图层。", rating: 5 },
-      source: "seed",
-    },
-  ],
-};
-
-function pluginManifest(
-  pluginId: string,
-  legacyPluginIds: string[],
-  name: string,
-  version: string,
-  layer: "source" | "library-kind" | "extractor-parser" | "provider-service" | "integration-capability-hook",
-  kind: string,
-  description: string,
-  capabilities: string[],
-  enabled: boolean,
-  sdk: "frontend" | "backend",
-  runtime: "vue-module" | "native-dylib" | "manifest-only",
-  source: "builtin" | "user" | "system" = "builtin",
-): PluginManifest {
-  const previewExtensions =
-    pluginId === "momobako.preview.three-model" ? ["fbx", "obj", "glb", "gltf", "vrm", "stl", "3mf", "blend"]
-    : pluginId === "momobako.preview.media" ? ["png", "jpg", "jpeg", "webp", "gif", "bmp", "avif", "svg", "mp4", "mov", "mkv", "webm", "avi", "m4v", "mp3", "wav", "ogg", "flac", "m4a", "aac", "opus"]
-    : pluginId === "momobako.preview.text" ? ["txt", "md", "markdown", "json", "yaml", "yml", "csv"]
-    : pluginId === "momobako.preview.office" ? ["pdf", "doc", "docx", "docm", "xls", "xlsx", "xlsm", "ppt", "pptx", "pptm"]
-    : [];
-  return {
-    pluginId,
-    legacyPluginIds,
-    name,
-    version,
-    type: {
-      layer,
-      kind,
-    },
-    kind,
-    description,
-    capabilities,
-    enabled,
-    sdk,
-    entry: sdk === "frontend"
-      ? {
-          frontend: {
-            module: "dist/register.js",
-            export: "register",
-          },
-        }
-      : {},
-    source,
-    runtime,
-    contributes: previewExtensions.length ? {
-      preview: {
-        extensions: previewExtensions,
-      },
-    } : {},
-    permissions: [],
-    compat: { sdkVersion: "1", legacyPluginIds },
-    status: enabled ? "ready" : "disabled",
-  };
-}
-
 function previewPluginModuleSource(pluginId: string) {
   if (pluginId === "momobako.preview.media") {
     return [
@@ -731,21 +504,6 @@ function previewPluginModuleSource(pluginId: string) {
   ].filter(Boolean).join("\n");
 }
 
-function createMockPlugins() {
-  return [
-    pluginManifest("momobako.local-filesystem", [], "Local Filesystem", "1.0.0", "source", "filesystem", "使用本地目录作为仓库文件管理后端。", ["browse", "read", "write", "watch", "sync"], true, "backend", "native-dylib"),
-    pluginManifest("momobako.webdav", [], "WebDAV", "0.1.0", "source", "webdav", "通过 WebDAV 适配远程文件管理服务。", ["browse", "read", "write", "sync"], false, "backend", "manifest-only"),
-    pluginManifest("momobako.cloud-drive", [], "Cloud Drive", "0.1.0", "source", "cloud", "预留云盘文件系统接入点，如对象存储或网盘。", ["browse", "read", "write", "sync"], false, "backend", "manifest-only"),
-    pluginManifest("momobako.preview.three-model", [], "3D Model Preview", "1.0.0", "library-kind", "preview", "为 FBX、OBJ、GLB、glTF 与 VRM 模型提供可旋转缩放的 3D 文件预览。", ["preview", "3d-model", "fbx", "obj", "gltf", "vrm"], true, "frontend", "vue-module"),
-    pluginManifest("momobako.preview.media", [], "Media Preview", "1.0.0", "library-kind", "preview", "为常见视频与音频文件提供内联播放预览。", ["preview", "media", "video", "audio"], true, "frontend", "vue-module"),
-    pluginManifest("momobako.preview.text", [], "Text Preview", "1.0.0", "library-kind", "preview", "为常见文本与 Markdown 文件提供阅读预览，并生成文本缩略图。", ["preview", "text", "markdown", "thumbnail"], true, "frontend", "vue-module"),
-    pluginManifest("momobako.preview.office", [], "Office & PDF Preview", "1.0.0", "library-kind", "preview", "为 Microsoft Office 文档与 PDF 文件提供预览，并生成文档缩略图。", ["preview", "thumbnail", "pdf", "office", "word", "excel", "powerpoint"], true, "frontend", "vue-module"),
-    pluginManifest("momobako.filesystem-watcher", [], "Filesystem Watcher", "1.0.0", "integration-capability-hook", "watcher", "监听仓库目录，记录新增、删除、修改与重命名事件。", ["watch", "events", "sync"], false, "backend", "manifest-only"),
-    pluginManifest("momobako.metadata-provider", [], "Metadata Provider", "1.0.0", "provider-service", "metadata", "提供可扩展的元数据生成与写入能力。", ["metadata", "tags", "ocr"], false, "backend", "manifest-only"),
-    pluginManifest("momobako.vector-index", [], "Vector Index", "0.1.0", "provider-service", "search", "预留向量检索与 AI 语义搜索扩展点。", ["semantic-search", "embedding"], false, "backend", "manifest-only"),
-  ];
-}
-
 vi.mock("@tauri-apps/api/core", () => ({
   Channel: class MockChannel<T> {
     onmessage: ((message: T) => void) | null = null;
@@ -791,7 +549,7 @@ vi.mock("@tauri-apps/api/core", () => ({
     }
     if (command === "update_asset_metadata") {
       const request = args?.request as { metadata?: Record<string, unknown> } | undefined;
-      const nextNote = request?.metadata?.note ?? mockAssetDetail.metadata[1].value;
+      const nextComment = request?.metadata?.comment ?? request?.metadata?.note ?? mockAssetDetail.metadata[1].value;
       return {
         outcome: "success",
         asset: {
@@ -801,7 +559,7 @@ vi.mock("@tauri-apps/api/core", () => ({
             version: mockAssetDetail.summary.version + 1,
           },
           metadata: mockAssetDetail.metadata.map((entry) => (
-            entry.key === "note" ? { ...entry, value: nextNote } : entry
+            entry.key === "note" || entry.key === "comment" ? { ...entry, value: nextComment } : entry
           )),
         },
       };
@@ -817,6 +575,56 @@ vi.mock("@tauri-apps/api/core", () => ({
     }
     if (command === "list_smart_folders") {
       return buildSmartFolderTree();
+    }
+    if (command === "list_repository_actions") {
+      const repoId = typeof args?.repoId === "string" ? args.repoId : "repo-main-001";
+      return mockRepositoryActions.filter((action) => action.repoId === repoId);
+    }
+    if (command === "get_repository_action") {
+      const repoId = typeof args?.repoId === "string" ? args.repoId : "repo-main-001";
+      const actionId = typeof args?.actionId === "string" ? args.actionId : "";
+      return mockRepositoryActions.find((action) => action.repoId === repoId && action.actionId === actionId) ?? null;
+    }
+    if (command === "set_repository_action_enabled") {
+      const request = args?.request as { repoId?: string; actionId?: string; enabled?: boolean } | undefined;
+      let action: RepositoryAction | null = null;
+      mockRepositoryActions = mockRepositoryActions.map((item) => {
+        if (item.repoId !== request?.repoId || item.actionId !== request?.actionId) return item;
+        action = {
+          ...item,
+          enabled: Boolean(request.enabled),
+          updatedAt: "2026-06-05T00:19:00Z",
+        };
+        return action;
+      });
+      return { action };
+    }
+    if (command === "run_repository_action") {
+      const request = args?.request as { repoId?: string; actionId?: string; assetIds?: string[]; targetPaths?: string[] } | undefined;
+      const run = {
+        runId: `run-${request?.actionId ?? "action"}-1`,
+        actionId: request?.actionId ?? "",
+        repoId: request?.repoId ?? "repo-main-001",
+        status: "success",
+        target: {
+          assetIds: request?.assetIds ?? [],
+          targetPaths: request?.targetPaths ?? [],
+        },
+        message: "已处理目标",
+        startedAt: "2026-06-05T00:19:00Z",
+        finishedAt: "2026-06-05T00:19:01Z",
+      };
+      let action: RepositoryAction | null = null;
+      mockRepositoryActions = mockRepositoryActions.map((item) => {
+        if (item.repoId !== request?.repoId || item.actionId !== request?.actionId) return item;
+        action = {
+          ...item,
+          lastRun: run,
+          updatedAt: "2026-06-05T00:19:01Z",
+        };
+        return action;
+      });
+      return { action, run };
     }
     if (command === "create_smart_folder") {
       const request = args?.request as {
@@ -1337,6 +1145,7 @@ afterEach(() => {
   mockInvokeDelay = null;
   mockSearchResults = null;
   mockSmartFolders = [];
+  mockRepositoryActions = [];
   mockPlugins = null;
   mockRepositories = [];
   mockEntries = initialEntries();
@@ -1351,6 +1160,7 @@ export function getInvokeCalls(command?: string) {
 
 export function seedMockRepository() {
   mockRepositories = [mockSnapshot.repository];
+  mockRepositoryActions = defaultRepositoryActions();
 }
 
 function createMissingMockRepository() {
@@ -1368,6 +1178,11 @@ export function seedMissingMockRepository() {
 
 export function seedMixedMockRepositories() {
   mockRepositories = [altRepository, createMissingMockRepository()];
+  mockRepositoryActions = defaultRepositoryActions();
+}
+
+export function seedMockRepositoryActions(actions: RepositoryAction[] = defaultRepositoryActions()) {
+  mockRepositoryActions = actions;
 }
 
 export function getRelocatedRepositoryPath() {

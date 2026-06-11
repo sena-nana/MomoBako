@@ -1,0 +1,61 @@
+{
+  "pluginId": "momobako.service.provider.bangumi",
+  "legacyPluginIds": [
+    "builtin.service-provider-bangumi"
+  ],
+  "name": "Bangumi Provider",
+  "version": "0.1.0",
+  "kind": "provider",
+  "category": "service",
+  "description": "声明 Bangumi 番剧与动画元数据候选源，供番剧库手动触发补全。",
+  "capabilities": [
+    "metadata-provider",
+    "anime",
+    "external-id",
+    "candidate-results"
+  ],
+  "enabled": false,
+  "sdk": "backend",
+  "entry": {},
+  "source": "builtin",
+  "runtime": "manifest-only",
+  "permissions": [
+    "network",
+    "useProvider",
+    "writeCandidates"
+  ],
+  "requires": [
+    "momobako.service.network-search"
+  ],
+  "optional": [],
+  "hooks": [
+    {
+      "slot": "candidateQueue",
+      "action": "provider.bangumi.writeCandidates",
+      "label": "写入 Bangumi 候选"
+    }
+  ],
+  "contributes": {
+    "provider": {
+      "domain": "anime",
+      "fields": [
+        "bangumiId",
+        "title",
+        "originalTitle",
+        "episodeNumber",
+        "airDate",
+        "year",
+        "cover"
+      ],
+      "manualTrigger": true,
+      "candidateOnly": true
+    }
+  },
+  "compat": {
+    "sdkVersion": "1",
+    "legacyPluginIds": [
+      "builtin.service-provider-bangumi"
+    ]
+  },
+  "status": "disabled"
+}

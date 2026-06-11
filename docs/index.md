@@ -6,6 +6,7 @@ MomoBako 是一个基于 Tauri 2、Vue 3 与 TypeScript 的桌面资源库工作
 
 - [架构](./architecture.md)：资源库布局、SQLite 存储、同步、缓存和插件运行时。
 - [API 设计](./api-design.md)：Tauri 命令背后的资源库、文件、缩略图、插件和缓存接口。
+- [插件分层 TODO](./plugin-taxonomy-todo.md)：插件类别落地后的核心宿主、解析器、服务和库类型后续任务。
 - [样式标准](./design/style-standard.md)：MomoBako 工作台 UI 的样式分层与标准组件类。
 
 ## 本地开发

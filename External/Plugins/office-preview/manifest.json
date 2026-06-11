@@ -7,6 +7,7 @@
     "kind": "preview"
   },
   "kind": "preview",
+  "category": "preview",
   "description": "为 Microsoft Office 文档与 PDF 文件提供预览，并生成文档缩略图。",
   "capabilities": ["preview", "thumbnail", "pdf", "office", "word", "excel", "powerpoint"],
   "enabled": true,
@@ -18,12 +19,18 @@
       "export": "register"
     }
   },
+  "permissions": ["preview:read", "thumbnail:write"],
+  "requires": [],
+  "optional": ["momobako.parser.ebook"],
+  "hooks": [
+    { "slot": "progress", "action": "preview.office.reportReadPosition", "label": "更新阅读进度" }
+  ],
   "contributes": {
     "preview": {
-      "extensions": ["pdf", "doc", "docx", "docm", "dotx", "dotm", "dot", "xls", "xlsx", "xlsm", "xlsb", "xltx", "xltm", "xlt", "ppt", "pptx", "pptm", "ppsx", "ppsm", "pps", "potx", "potm", "pot"]
+      "extensions": ["pdf", "doc", "docx", "docm", "dotx", "dotm", "dot", "xls", "xlsx", "xlsm", "xlsb", "xltx", "xltm", "xlt", "ppt", "pptx", "pptm", "ppsx", "ppsm", "pps", "potx", "potm", "pot"],
+      "thumbnail": true
     }
   },
-  "permissions": ["preview:read"],
   "compat": {
     "sdkVersion": "1",
     "legacyPluginIds": []

@@ -1,0 +1,60 @@
+{
+  "pluginId": "momobako.parser.font",
+  "legacyPluginIds": [
+    "builtin.parser-font"
+  ],
+  "name": "Font Parser",
+  "version": "0.1.0",
+  "kind": "parser",
+  "category": "parser",
+  "description": "声明字体字族、样式、字重、脚本覆盖和版本解析能力。",
+  "capabilities": [
+    "parser",
+    "font-metadata",
+    "glyph-coverage"
+  ],
+  "enabled": false,
+  "sdk": "backend",
+  "entry": {},
+  "source": "builtin",
+  "runtime": "manifest-only",
+  "permissions": [
+    "readRepository",
+    "readMetadata"
+  ],
+  "requires": [],
+  "optional": [],
+  "hooks": [
+    {
+      "slot": "candidateQueue",
+      "action": "parser.font.writeMetadataCandidates",
+      "label": "写入字体解析候选"
+    }
+  ],
+  "contributes": {
+    "parser": {
+      "extensions": [
+        "ttf",
+        "otf",
+        "woff",
+        "woff2"
+      ],
+      "outputs": [
+        "family",
+        "style",
+        "weight",
+        "scripts",
+        "glyphCoverage",
+        "version"
+      ],
+      "candidateOnly": true
+    }
+  },
+  "compat": {
+    "sdkVersion": "1",
+    "legacyPluginIds": [
+      "builtin.parser-font"
+    ]
+  },
+  "status": "disabled"
+}

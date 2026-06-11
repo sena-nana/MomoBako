@@ -1,0 +1,52 @@
+{
+  "pluginId": "momobako.service.downloader",
+  "legacyPluginIds": [
+    "builtin.service-downloader"
+  ],
+  "name": "Download Service",
+  "version": "0.1.0",
+  "kind": "download",
+  "category": "service",
+  "description": "声明下载队列、远程文件获取和下载结果候选的基础服务接入。",
+  "capabilities": [
+    "download",
+    "download-queue",
+    "candidate-results"
+  ],
+  "enabled": false,
+  "sdk": "backend",
+  "entry": {},
+  "source": "builtin",
+  "runtime": "manifest-only",
+  "permissions": [
+    "network",
+    "writeCandidates"
+  ],
+  "requires": [],
+  "optional": [],
+  "hooks": [
+    {
+      "slot": "downloadQueue",
+      "action": "service.downloader.enqueue",
+      "label": "加入下载队列"
+    },
+    {
+      "slot": "candidateQueue",
+      "action": "service.downloader.writeResultCandidates",
+      "label": "写入下载结果候选"
+    }
+  ],
+  "contributes": {
+    "service": {
+      "type": "download",
+      "candidateOnly": true
+    }
+  },
+  "compat": {
+    "sdkVersion": "1",
+    "legacyPluginIds": [
+      "builtin.service-downloader"
+    ]
+  },
+  "status": "disabled"
+}

@@ -1,0 +1,8 @@
+{
+  "pluginId": "momobako.library.archive",
+  "build": {
+    "type": "manifest-only",
+    "sourceDir": "src",
+    "outputDir": ".dist/library-archive"
+  }
+}

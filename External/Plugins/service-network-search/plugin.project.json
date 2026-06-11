@@ -1,0 +1,8 @@
+{
+  "pluginId": "momobako.service.network-search",
+  "build": {
+    "type": "manifest-only",
+    "sourceDir": "src",
+    "outputDir": ".dist/service-network-search"
+  }
+}

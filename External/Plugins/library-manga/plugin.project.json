@@ -1,0 +1,8 @@
+{
+  "pluginId": "momobako.library.manga",
+  "build": {
+    "type": "manifest-only",
+    "sourceDir": "src",
+    "outputDir": ".dist/library-manga"
+  }
+}

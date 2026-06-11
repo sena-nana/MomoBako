@@ -1,0 +1,8 @@
+{
+  "pluginId": "momobako.library.video",
+  "build": {
+    "type": "manifest-only",
+    "sourceDir": "src",
+    "outputDir": ".dist/library-video"
+  }
+}

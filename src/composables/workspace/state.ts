@@ -7,6 +7,7 @@ import type {
   FileTreeNode,
   HardlinkCandidate,
   PluginManifest,
+  RepositoryAction,
   RepositorySnapshot,
   RepositorySummary,
   SearchHit,
@@ -16,13 +17,26 @@ import type {
   WorkspaceStartupState,
 } from "../../types/repository";
 
-export type WorkspacePanelKey = "files" | "deleted" | "search" | "smartFolder" | "extensions";
+export type WorkspacePanelKey = "files" | "deleted" | "search" | "smartFolder" | "actions" | "extensions";
 
 export type WorkspaceFilterState = {
   tags: string[];
   formats: string[];
   colors: string[];
   shapes: string[];
+  excludeTags: string[];
+  excludeFormats: string[];
+  excludeQuery: string;
+  excludePathPrefixes: string;
+  excludeMetadataFilters: string;
+  excludeNumberFilters: string;
+  excludeDateFilters: string;
+  numberFilters: string;
+  dateFilters: string;
+  matchMode: "and" | "or";
+  sortField: string;
+  sortDirection: "asc" | "desc";
+  limit: number | null;
   minRating: number | null;
 };
 
@@ -47,6 +61,19 @@ export function createInitialFilters(): WorkspaceFilterState {
     formats: [],
     colors: [],
     shapes: [],
+    excludeTags: [],
+    excludeFormats: [],
+    excludeQuery: "",
+    excludePathPrefixes: "",
+    excludeMetadataFilters: "",
+    excludeNumberFilters: "",
+    excludeDateFilters: "",
+    numberFilters: "",
+    dateFilters: "",
+    matchMode: "and",
+    sortField: "",
+    sortDirection: "asc",
+    limit: null,
     minRating: null,
   };
 }
@@ -66,6 +93,8 @@ export const selectionAnchorPath = ref<string | null>(null);
 export const searchQuery = ref("");
 export const searchResults = shallowRef<SearchHit[]>([]);
 export const smartFolders = shallowRef<SmartFolderTreeNode[]>([]);
+export const repositoryActions = shallowRef<RepositoryAction[]>([]);
+export const activeRepositoryActionId = ref<string | null>(null);
 export const activeSmartFolderId = ref<string | null>(null);
 export const smartFolderResult = shallowRef<SmartFolderResultSnapshot | null>(null);
 export const isFilterBarOpen = ref(false);
@@ -82,6 +111,8 @@ export const isLoadingAssetDetail = ref(false);
 export const isLoadingFileBrowser = ref(false);
 export const isSearching = ref(false);
 export const isLoadingSmartFolder = ref(false);
+export const isLoadingRepositoryActions = ref(false);
+export const isRunningRepositoryAction = ref(false);
 export const isMutatingSmartFolder = ref(false);
 export const isSavingMetadata = ref(false);
 export const isSyncing = ref(false);

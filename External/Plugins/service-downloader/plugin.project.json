@@ -1,0 +1,8 @@
+{
+  "pluginId": "momobako.service.downloader",
+  "build": {
+    "type": "manifest-only",
+    "sourceDir": "src",
+    "outputDir": ".dist/service-downloader"
+  }
+}

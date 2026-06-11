@@ -25,6 +25,10 @@
   - `assets`
   - `metadata`
   - `tags`
+  - `repository_actions`
+  - `repository_action_steps`
+  - `repository_action_runs`
+  - `repository_action_run_steps`
   - `revisions`
   - `events`
   - `schema_version`
@@ -45,6 +49,13 @@
 - Undo/Redo are implemented by replaying `before` / `after` metadata snapshots
 - Asset version is incremented on every applied state transition
 
+## Repository Actions
+
+- Imported Eagle `actions.json` records live in repository-local action tables.
+- Import never executes actions. It stores original action JSON, normalized steps, unsupported reasons and enabled state.
+- Ready steps can be executed only when the user supplies explicit target asset IDs or paths. Supported metadata/tag steps reuse the normal metadata revision path.
+- Unsupported or dangerous steps are preserved for auditability and keep the containing action disabled until a core executor can safely confirm and audit that class of write.
+
 ## Search Strategy
 
 - Current implementation performs structured search across:
@@ -53,6 +64,7 @@
   - status
   - tags
   - metadata values
+- Inclusion filters run first. Exclusion filters then remove matching rows by text query, path prefixes, tags, formats, metadata key/value, numeric ranges, or date ranges.
 - Indexed columns exist for:
   - `assets(repo_id, path)`
   - `assets(filename)`
@@ -74,11 +86,18 @@
 - Plugin source projects live under `External/Plugins/*` and are built independently from the main app.
 - Runtime plugins live under `<serviceRoot>/plugins/*.momoplug`.
 - The desktop runtime scans only `.momoplug` files in that directory, reads `manifest.json` from the archive directly, and does not fall back to compiled manifests or source-relative plugin folders.
-- Plugin manifest includes the existing display fields plus runtime fields:
-  - `pluginId`, `legacyPluginIds`, `name`, `version`, `type`, `kind`, `description`, `capabilities`, `enabled`
+- Plugin manifest includes the existing display fields plus taxonomy, runtime and contribution fields:
+  - `pluginId`, `legacyPluginIds`, `name`, `version`, `type`, `kind`, `category`, `description`, `capabilities`, `enabled`
   - `sdk`: `frontend` or `backend`
   - `runtime`: `vue-module`, `native-dylib`, or `manifest-only`
-  - `entry`, `contributes`, `source`, `permissions`, `compat`, `status`
+  - `entry`, `source`, `permissions`, `requires`, `optional`, `hooks`, `contributes`, `compat`, `status`
+- `category` defines the plugin responsibility layer:
+  - `source` provides repository IO such as list/read/write/move/delete/watch. Local filesystem, WebDAV and cloud drive are source plugins.
+  - `library-kind` declares content semantics, metadata fields, search facets, default views, organization rules and core host hooks for resource types such as audio, ASMR, anime, manga, fonts and software.
+  - `parser` declares file or container metadata extraction outputs by extension/MIME/probe result. Parser plugins only produce normalized candidates.
+  - `preview` renders files and thumbnails. Library-kind plugins can prefer preview plugins but do not own preview rendering.
+  - `service` provides shared external or background capabilities such as network search, metadata providers, download queues, OCR/ASR, vector search or filesystem watching.
+- Core-hosted capabilities such as playlist, PiP, progress, candidate queue, batch organize, download queue, metadata merge, rename/move execution, audit log and unified search are exposed through declarative `hooks`. Plugins contribute data and actions; core owns state, confirmation and dangerous writes.
 - Frontend preview registration is driven by runtime plugin manifests and `.momoplug` bundle loading; preview modules are read from the archive at runtime and do not enter the host frontend bundle.
 - Backend plugins use a C ABI boundary with JSON request/response envelopes:
   - `momobako_plugin_manifest`
@@ -86,4 +105,5 @@
   - `momobako_plugin_free`
 - The repository runtime discovers manifests at startup from `.momoplug` archives and routes filesystem backend operations through the plugin registry using canonical `momobako.*` plugin IDs.
 - Native backend libraries are extracted from `.momoplug` into a controlled temporary cache before loading; plugin installation itself does not persistently extract archives.
+- The runtime infers `category` for legacy manifests that only declare `kind`, normalizes legacy IDs such as `builtin.local-filesystem`, and reflects runtime plugin directory changes directly in `GET /plugins`.
 - Filesystem backend `listFiles` responses carry both repository-relative paths and absolute local paths so the repository scanner can hash file content after plugin discovery. The runtime still resolves legacy responses that only include `relativePath`.

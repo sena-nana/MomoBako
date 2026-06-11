@@ -1,0 +1,83 @@
+{
+  "pluginId": "momobako.library.model3d",
+  "legacyPluginIds": [
+    "builtin.library-model3d"
+  ],
+  "name": "3D Model Library",
+  "version": "0.1.0",
+  "kind": "library-kind",
+  "category": "library-kind",
+  "description": "为 3D 模型声明格式、材质、贴图、骨骼、动画和引擎兼容性。",
+  "capabilities": [
+    "library-kind",
+    "metadata-schema",
+    "view-presets",
+    "organize-candidates"
+  ],
+  "enabled": true,
+  "sdk": "backend",
+  "entry": {},
+  "source": "builtin",
+  "runtime": "manifest-only",
+  "permissions": [
+    "readRepository",
+    "readMetadata",
+    "writeCandidates",
+    "suggestRename",
+    "suggestMove"
+  ],
+  "requires": [],
+  "optional": [],
+  "hooks": [
+    {
+      "slot": "batchOrganize",
+      "action": "library.model3d.suggestAssetLayout",
+      "label": "生成模型整理候选"
+    }
+  ],
+  "contributes": {
+    "libraryKind": {
+      "id": "model3d",
+      "fields": [
+        "title",
+        "format",
+        "polygonCount",
+        "materials",
+        "textures",
+        "rigged",
+        "animations",
+        "unit",
+        "engineCompatibility",
+        "license",
+        "sourceUrl"
+      ],
+      "facets": [
+        "format",
+        "rigged",
+        "engineCompatibility",
+        "license"
+      ],
+      "sortFields": [
+        "format",
+        "polygonCount",
+        "updatedAt"
+      ],
+      "views": [
+        "models",
+        "materials",
+        "missingTextures",
+        "engineCompatibility"
+      ],
+      "preview": [
+        "momobako.preview.three-model"
+      ]
+    }
+  },
+  "compat": {
+    "sdkVersion": "1",
+    "legacyPluginIds": [
+      "builtin.library-model3d"
+    ]
+  },
+  "status": "ready"
+}

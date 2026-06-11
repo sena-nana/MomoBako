@@ -29,8 +29,55 @@ class EagleLibraryChangerTests(unittest.TestCase):
         plan = convert.build_conversion_plan(source, output, "Converted")
 
         self.assertEqual(len(plan.assets), 11)
+        self.assertEqual(plan.report["summary"]["deletedAssetCount"], 1)
         self.assertTrue(any(asset.target_relative_dir == "未命名文件夹" for asset in plan.assets))
+        self.assertEqual(plan.assets[0].palette, ["#AA1122", "#336699", "#FFFFFF", "#000000", "#123456"])
+        self.assertEqual(
+            plan.assets[0].preserved_metadata,
+            {
+                "addedToLibraryAt": "2024-01-02T00:00:00Z",
+                "fileCreatedAt": "2024-01-03T02:05:06Z",
+                "fileModifiedAt": "2024-01-04T00:00:00Z",
+                "height": 480,
+                "link": "https://example.test/source/asset-0",
+                "originalSizeBytes": 123456,
+                "width": 640,
+            },
+        )
+        asset_report = next(asset for asset in plan.report["assets"] if asset["assetId"] == "ASSET000")
+        self.assertEqual(
+            asset_report["preservedMetadataKeys"],
+            [
+                "addedToLibraryAt",
+                "fileCreatedAt",
+                "fileModifiedAt",
+                "height",
+                "link",
+                "originalSizeBytes",
+                "width",
+            ],
+        )
+        self.assertEqual(plan.report["summary"]["preservedMetadataAssetCount"], 1)
+        deleted_asset = next(asset for asset in plan.assets if asset.asset_id == "ASSET010")
+        self.assertTrue(deleted_asset.is_deleted)
+        self.assertEqual(deleted_asset.target_relative_path, "asset-10.png")
+        self.assertEqual(convert.asset_trash_relative_path(deleted_asset), "asset-10.png")
+        deleted_report = next(asset for asset in plan.report["assets"] if asset["assetId"] == "ASSET010")
+        self.assertTrue(deleted_report["isDeleted"])
+        self.assertEqual(deleted_report["status"], "deleted")
+        self.assertEqual(deleted_report["trashRelativePath"], "asset-10.png")
         self.assertTrue(all(not key.startswith("eagle") for key in collect_metadata_keys(plan.report)))
+        self.assertFalse(any(warning["type"] == "deletedAssetSemanticIgnored" for warning in plan.warnings))
+        self.assertFalse(any(hit["capability"] == "isDeleted 语义" for hit in plan.unsupported_hits))
+        self.assertFalse(any(hit["capability"] in {"url", "原始时间字段与尺寸字段", "mtime"} for hit in plan.unsupported_hits))
+        self.assertTrue(
+            any(
+                warning["type"] == "invalidEagleMetadataField"
+                and warning["assetId"] == "ASSET001"
+                and warning["field"] == "importedAt"
+                for warning in plan.warnings
+            )
+        )
 
     def test_dry_run_does_not_write_output(self) -> None:
         source = self.copy_example_library()
@@ -77,10 +124,22 @@ class EagleLibraryChangerTests(unittest.TestCase):
         connection = sqlite3.connect(output / ".momo" / "metadata.db")
         try:
             asset_count = connection.execute("SELECT COUNT(*) FROM assets").fetchone()[0]
+            deleted_asset_row = connection.execute(
+                "SELECT path, status FROM assets WHERE path = ?",
+                ("asset-10.png",),
+            ).fetchone()
             metadata_keys = {
                 row[0]
                 for row in connection.execute("SELECT key FROM metadata")
             }
+            asset_rows = connection.execute(
+                """
+                SELECT key, value_type, value_json
+                FROM metadata
+                WHERE asset_id = ?
+                """,
+                (convert.asset_id_for_path(repo_meta["repoId"], "未命名文件夹/asset-0.png"),),
+            ).fetchall()
             thumbnail_paths = [
                 row[0]
                 for row in connection.execute("SELECT thumbnail_path FROM assets WHERE thumbnail_path IS NOT NULL")
@@ -89,10 +148,107 @@ class EagleLibraryChangerTests(unittest.TestCase):
             connection.close()
 
         self.assertEqual(asset_count, 11)
-        self.assertTrue({"favorite", "title", "type"}.issubset(metadata_keys))
+        self.assertEqual(deleted_asset_row, ("asset-10.png", "deleted"))
+        self.assertTrue({"color", "favorite", "palette", "title", "type"}.issubset(metadata_keys))
+        asset_metadata = {key: (value_type, json.loads(value_json)) for key, value_type, value_json in asset_rows}
+        self.assertEqual(asset_metadata["color"], ("string", "#AA1122"))
+        self.assertEqual(asset_metadata["palette"], ("array", ["#AA1122", "#336699", "#FFFFFF", "#000000", "#123456"]))
+        self.assertEqual(asset_metadata["link"], ("string", "https://example.test/source/asset-0"))
+        self.assertEqual(asset_metadata["addedToLibraryAt"], ("string", "2024-01-02T00:00:00Z"))
+        self.assertEqual(asset_metadata["fileCreatedAt"], ("string", "2024-01-03T02:05:06Z"))
+        self.assertEqual(asset_metadata["fileModifiedAt"], ("string", "2024-01-04T00:00:00Z"))
+        self.assertEqual(asset_metadata["width"], ("number", 640))
+        self.assertEqual(asset_metadata["height"], ("number", 480))
+        self.assertEqual(asset_metadata["originalSizeBytes"], ("number", 123456))
         self.assertTrue(thumbnail_paths)
         self.assertTrue(all(Path(path).is_file() for path in thumbnail_paths))
         self.assertFalse(any(key.startswith("eagle") for key in metadata_keys))
+
+        self.assertFalse((output / "asset-10.png").exists())
+        self.assertTrue((output / ".momo" / "trash" / "asset-10.png").is_file())
+        trash_manifest = json.loads((output / ".momo" / "trash.json").read_text(encoding="utf-8"))
+        self.assertEqual(
+            trash_manifest["entries"],
+            [
+                {
+                    "originalPath": "asset-10.png",
+                    "trashPath": "asset-10.png",
+                    "deletedAt": trash_manifest["entries"][0]["deletedAt"],
+                    "kind": "file",
+                }
+            ],
+        )
+        self.assertRegex(trash_manifest["entries"][0]["deletedAt"], r"^\d{4}-\d{2}-\d{2}T")
+
+    def test_execute_conversion_writes_eagle_repository_fields(self) -> None:
+        source = self.create_eagle_fields_library()
+        output = self.temp_dir / "EagleFields.library"
+
+        exit_code = convert.main(["--input", str(source), "--output", str(output), "--yes"])
+
+        self.assertEqual(exit_code, 0)
+        repo_meta = json.loads((output / ".momo" / "repository.json").read_text(encoding="utf-8"))
+        asset_id = convert.asset_id_for_path(repo_meta["repoId"], "Protected/asset.png")
+        connection = sqlite3.connect(output / ".momo" / "metadata.db")
+        try:
+            shortcuts = connection.execute(
+                """
+                SELECT label, target_kind, target_path, target_id
+                FROM repository_shortcuts
+                ORDER BY sort_order
+                """
+            ).fetchall()
+            tag_groups = connection.execute("SELECT name FROM tag_groups ORDER BY sort_order").fetchall()
+            tag_members = connection.execute(
+                """
+                SELECT tag FROM tag_group_members
+                WHERE tag_group_id = (
+                  SELECT tag_group_id FROM tag_groups WHERE name = ?
+                )
+                ORDER BY sort_order
+                """,
+                ("用途",),
+            ).fetchall()
+            folder_metadata = connection.execute(
+                "SELECT path, protected, password_tip FROM folder_metadata"
+            ).fetchall()
+            metadata_rows = {
+                key: json.loads(value_json)
+                for key, value_json in connection.execute(
+                    "SELECT key, value_json FROM metadata WHERE asset_id = ?",
+                    (asset_id,),
+                )
+            }
+            note_count = connection.execute(
+                "SELECT COUNT(*) FROM metadata WHERE asset_id = ? AND key = 'note'",
+                (asset_id,),
+            ).fetchone()[0]
+            leaked_password_count = connection.execute(
+                """
+                SELECT COUNT(*)
+                FROM metadata
+                WHERE value_json LIKE '%plaintext-should-not-be-stored%'
+                """
+            ).fetchone()[0]
+        finally:
+            connection.close()
+
+        report_text = convert.report_output_path(output).read_text(encoding="utf-8")
+        self.assertEqual(
+            shortcuts,
+            [
+                ("Protected shortcut", "folder", "Protected", None),
+                ("Asset shortcut", "file", "Protected/asset.png", None),
+            ],
+        )
+        self.assertEqual(tag_groups, [("用途",), ("Starred Tags",)])
+        self.assertEqual(tag_members, [("封面",), ("主视觉",)])
+        self.assertEqual(folder_metadata, [("Protected", 1, "项目归档密码提示")])
+        self.assertEqual(metadata_rows["comment"], "Eagle 注释")
+        self.assertEqual(metadata_rows["tagGroups"], ["封面"])
+        self.assertEqual(note_count, 0)
+        self.assertEqual(leaked_password_count, 0)
+        self.assertNotIn("plaintext-should-not-be-stored", report_text)
 
     def test_smart_folders_convert_to_momobako_filters(self) -> None:
         source = self.create_smart_folder_library()
@@ -100,10 +256,10 @@ class EagleLibraryChangerTests(unittest.TestCase):
 
         plan = convert.build_conversion_plan(source, output, "SmartFolders")
 
-        self.assertEqual(len(plan.smart_folders), 2)
-        self.assertEqual(len(plan.skipped_smart_folders), 1)
-        self.assertEqual(plan.report["summary"]["smartFolderCount"], 2)
-        self.assertEqual(plan.report["summary"]["skippedSmartFolderCount"], 1)
+        self.assertEqual(len(plan.smart_folders), 3)
+        self.assertEqual(len(plan.skipped_smart_folders), 0)
+        self.assertEqual(plan.report["summary"]["smartFolderCount"], 3)
+        self.assertEqual(plan.report["summary"]["skippedSmartFolderCount"], 0)
 
         metadata_filter = next(item for item in plan.smart_folders if item.source == "smartFolders")
         self.assertEqual(metadata_filter.name, "Campaign PNG")
@@ -122,8 +278,26 @@ class EagleLibraryChangerTests(unittest.TestCase):
         saved_filter = next(item for item in plan.smart_folders if item.source == "saved-filters")
         self.assertEqual(saved_filter.name, "Saved PSD")
         self.assertEqual(saved_filter.filter, {"tags": ["Draft"], "formats": ["psd"]})
-        self.assertEqual(plan.skipped_smart_folders[0].reason, "OR semantics are not equivalent in MomoBako")
-        self.assertTrue(any(hit["capability"] == "smartFolders/saved-filters" for hit in plan.unsupported_hits))
+        or_filter = next(item for item in plan.smart_folders if item.source_id == "smart-or")
+        self.assertEqual(
+            or_filter.filter,
+            {
+                "tags": ["A", "B"],
+                "matchMode": "or",
+                "excludeTags": ["Draft"],
+                "excludeFormats": ["gif"],
+                "numberFilters": [
+                    {"key": "width", "min": 1024, "max": 4096},
+                    {"key": "originalSizeBytes", "max": 10485760},
+                ],
+                "dateFilters": [
+                    {"key": "fileCreatedAt", "from": "2024-01-01T00:00:00Z"},
+                ],
+                "sort": {"field": "metadata.width", "direction": "desc"},
+                "limit": 20,
+            },
+        )
+        self.assertFalse(any(hit["capability"] == "smartFolders/saved-filters" for hit in plan.unsupported_hits))
 
     def test_execute_conversion_writes_smart_folders_to_database(self) -> None:
         source = self.create_smart_folder_library()
@@ -152,16 +326,106 @@ class EagleLibraryChangerTests(unittest.TestCase):
         finally:
             connection.close()
 
-        self.assertEqual(len(rows), 2)
+        self.assertEqual(len(rows), 3)
         self.assertTrue(all(row[1] is None for row in rows))
-        self.assertEqual([row[2] for row in rows], ["Campaign PNG", "Saved PSD"])
-        self.assertEqual([row[4] for row in rows], [0, 1])
+        self.assertEqual([row[2] for row in rows], ["Campaign PNG", "Too Wide", "Saved PSD"])
+        self.assertEqual([row[4] for row in rows], [0, 1, 2])
         filters = [json.loads(row[3]) for row in rows]
         self.assertEqual(filters[0]["pathPrefix"], "Campaigns")
         self.assertEqual(filters[0]["formats"], ["png"])
-        self.assertEqual(filters[1], {"formats": ["psd"], "tags": ["Draft"]})
+        self.assertEqual(
+            filters[1],
+            {
+                "matchMode": "or",
+                "tags": ["A", "B"],
+                "excludeTags": ["Draft"],
+                "excludeFormats": ["gif"],
+                "numberFilters": [
+                    {"key": "width", "min": 1024, "max": 4096},
+                    {"key": "originalSizeBytes", "max": 10485760},
+                ],
+                "dateFilters": [
+                    {"key": "fileCreatedAt", "from": "2024-01-01T00:00:00Z"},
+                ],
+                "sort": {"field": "metadata.width", "direction": "desc"},
+                "limit": 20,
+            },
+        )
+        self.assertEqual(filters[2], {"formats": ["psd"], "tags": ["Draft"]})
 
-    def test_multi_folder_asset_keeps_first_folder_only(self) -> None:
+    def test_actions_json_writes_repository_actions_and_unsupported_steps(self) -> None:
+        source = self.create_action_library()
+        output = self.temp_dir / "ActionDb.library"
+
+        plan = convert.build_conversion_plan(source, output, "ActionDb")
+
+        self.assertEqual(plan.report["summary"]["repositoryActionCount"], 2)
+        self.assertEqual(plan.report["summary"]["unsupportedActionStepCount"], 1)
+        ready_action = next(item for item in plan.report["repositoryActions"] if item["name"] == "标记精选")
+        unsupported_action = next(item for item in plan.report["repositoryActions"] if item["name"] == "外部导出")
+        self.assertTrue(ready_action["enabled"])
+        self.assertFalse(unsupported_action["enabled"])
+        self.assertEqual(unsupported_action["status"], "unsupported")
+        self.assertEqual(unsupported_action["steps"][0]["stepKind"], "unsupported")
+
+        exit_code = convert.main(["--input", str(source), "--output", str(output), "--yes"])
+        self.assertEqual(exit_code, 0)
+
+        connection = sqlite3.connect(output / ".momo" / "metadata.db")
+        try:
+            actions = connection.execute(
+                """
+                SELECT name, status, enabled, source_action_id
+                FROM repository_actions
+                ORDER BY sort_order
+                """
+            ).fetchall()
+            steps = connection.execute(
+                """
+                SELECT ra.name, ras.step_kind, ras.status, ras.config_json, ras.raw_json, ras.unsupported_reason
+                FROM repository_action_steps ras
+                JOIN repository_actions ra ON ra.action_id = ras.action_id
+                ORDER BY ra.sort_order, ras.sort_order
+                """
+            ).fetchall()
+        finally:
+            connection.close()
+
+        self.assertEqual(
+            actions,
+            [
+                ("标记精选", "ready", 1, "action-ready"),
+                ("外部导出", "unsupported", 0, "action-unsupported"),
+            ],
+        )
+        ready_steps = [step for step in steps if step[0] == "标记精选"]
+        unsupported_steps = [step for step in steps if step[0] == "外部导出"]
+        self.assertEqual(ready_steps[0][1:3], ("metadata.update", "ready"))
+        self.assertEqual(json.loads(ready_steps[0][3])["metadata"]["rating"], 5)
+        self.assertEqual(unsupported_steps[0][1:3], ("unsupported", "unsupported"))
+        self.assertEqual(json.loads(unsupported_steps[0][4])["type"], "shell")
+        self.assertIn("unsupported action step", unsupported_steps[0][5])
+
+    def test_negative_smart_folder_fields_convert_to_exclude_filters(self) -> None:
+        source = self.create_negative_smart_folder_library()
+        output = self.temp_dir / "NegativeSmartFolder.library"
+
+        plan = convert.build_conversion_plan(source, output, "NegativeSmartFolder")
+
+        self.assertEqual(len(plan.smart_folders), 1)
+        self.assertEqual(
+            plan.smart_folders[0].filter,
+            {
+                "query": "hero",
+                "excludeQuery": "draft",
+                "excludePathPrefixes": ["Archive"],
+                "excludeNumberFilters": [{"key": "width", "min": 0, "max": 640}],
+                "excludeDateFilters": [{"key": "fileCreatedAt", "from": "2024-01-01T00:00:00Z", "to": "2024-01-31T00:00:00Z"}],
+            },
+        )
+        self.assertFalse(any(hit["capability"] == "smartFolders/saved-filters" for hit in plan.unsupported_hits))
+
+    def test_multi_folder_asset_creates_alias_members(self) -> None:
         source = self.create_multi_folder_library()
         output = self.temp_dir / "MultiFolder.library"
 
@@ -170,7 +434,49 @@ class EagleLibraryChangerTests(unittest.TestCase):
         self.assertEqual(len(plan.assets), 1)
         asset = plan.assets[0]
         self.assertEqual(asset.target_relative_dir, "Folder A")
-        self.assertEqual(asset.discarded_folder_names, ["Folder B"])
+        self.assertEqual([item.target_relative_path for item in asset.memberships], ["Folder A/asset.png", "Folder B/asset.png"])
+        self.assertEqual(plan.report["summary"]["aliasAssetCount"], 1)
+
+        exit_code = convert.main(["--input", str(source), "--output", str(output), "--yes"])
+        self.assertEqual(exit_code, 0)
+        self.assertTrue((output / "Folder A" / "asset.png").is_file())
+        self.assertTrue((output / "Folder B" / "asset.png").is_file())
+        connection = sqlite3.connect(output / ".momo" / "metadata.db")
+        try:
+            asset_rows = connection.execute("SELECT path FROM assets ORDER BY path").fetchall()
+            alias_rows = connection.execute("SELECT path, role FROM asset_alias_members ORDER BY path").fetchall()
+            hardlink_rows = connection.execute("SELECT path, link_state FROM hardlink_members ORDER BY path").fetchall()
+        finally:
+            connection.close()
+        self.assertEqual(asset_rows, [("Folder A/asset.png",), ("Folder B/asset.png",)])
+        self.assertEqual(alias_rows, [("Folder A/asset.png", "primary"), ("Folder B/asset.png", "alias")])
+        self.assertEqual(hardlink_rows[0], ("Folder A/asset.png", "primary"))
+        self.assertIn(hardlink_rows[1][1], {"linked", "copied"})
+
+    def test_deleted_multi_folder_asset_preserves_alias_memberships_in_trash(self) -> None:
+        source = self.create_multi_folder_library(is_deleted=True)
+        output = self.temp_dir / "DeletedMultiFolder.library"
+
+        exit_code = convert.main(["--input", str(source), "--output", str(output), "--yes"])
+        self.assertEqual(exit_code, 0)
+        self.assertTrue((output / ".momo" / "trash" / "Folder A" / "asset.png").is_file())
+        self.assertTrue((output / ".momo" / "trash" / "Folder B" / "asset.png").is_file())
+
+        connection = sqlite3.connect(output / ".momo" / "metadata.db")
+        try:
+            asset_rows = connection.execute("SELECT path, status FROM assets ORDER BY path").fetchall()
+            alias_rows = connection.execute("SELECT path, role FROM asset_alias_members ORDER BY path").fetchall()
+            hardlink_rows = connection.execute("SELECT path, link_state FROM hardlink_members ORDER BY path").fetchall()
+        finally:
+            connection.close()
+
+        self.assertEqual(
+            asset_rows,
+            [("Folder A/asset.png", "deleted"), ("Folder B/asset.png", "deleted")],
+        )
+        self.assertEqual(alias_rows, [("Folder A/asset.png", "primary"), ("Folder B/asset.png", "alias")])
+        self.assertEqual(hardlink_rows[0], ("Folder A/asset.png", "primary"))
+        self.assertIn(hardlink_rows[1][1], {"linked", "copied"})
 
     def test_todo_file_path_targets_repo_external_todo(self) -> None:
         expected = REPO_ROOT / "External" / "todo.md"
@@ -209,6 +515,10 @@ class EagleLibraryChangerTests(unittest.TestCase):
             encoding="utf-8",
         )
         self.write_supporting_json(root)
+        (root / "mtime.json").write_text(
+            json.dumps({"ASSET000": 1704326400000}, ensure_ascii=False),
+            encoding="utf-8",
+        )
         for index in range(11):
             asset_id = f"ASSET{index:03d}"
             info_dir = root / "images" / f"{asset_id}.info"
@@ -216,21 +526,92 @@ class EagleLibraryChangerTests(unittest.TestCase):
             filename = f"asset-{index}.png"
             (info_dir / filename).write_bytes(f"png-data-{index}".encode("utf-8"))
             (info_dir / f"asset-{index}_thumbnail.png").write_bytes(f"thumb-{index}".encode("utf-8"))
-            (info_dir / "metadata.json").write_text(
-                json.dumps(
+            metadata = {
+                "id": asset_id,
+                "name": f"asset-{index}",
+                "ext": "png",
+                "folders": ["folder-main"] if index == 0 else [],
+                "tags": ["TagA"] if index % 2 == 0 else [],
+                "annotation": "note" if index == 1 else "",
+                "palettes": [
+                    {"color": "aa1122", "ratio": 0.5},
+                    {"color": "#336699", "ratio": 0.25},
+                    {"color": "fff", "ratio": 0.1},
+                    {"color": "#000000", "ratio": 0.05},
+                    {"color": "not-a-color", "ratio": 0.04},
+                    {"color": "#123456", "ratio": 0.03},
+                    {"color": "#654321", "ratio": 0.02},
+                ]
+                if index == 0
+                else [],
+                "isDeleted": index == 10,
+            }
+            if index == 0:
+                metadata.update(
                     {
-                        "id": asset_id,
-                        "name": f"asset-{index}",
-                        "ext": "png",
-                        "folders": ["folder-main"] if index == 0 else [],
-                        "tags": ["TagA"] if index % 2 == 0 else [],
-                        "annotation": "note" if index == 1 else "",
-                        "isDeleted": False,
-                    },
-                    ensure_ascii=False,
-                ),
+                        "url": "https://example.test/source/asset-0",
+                        "importedAt": 1704153600,
+                        "btime": "2024-01-03T04:05:06+02:00",
+                        "width": 640,
+                        "height": 480,
+                        "size": 123456,
+                    }
+                )
+            elif index == 1:
+                metadata["importedAt"] = "not-a-time"
+            (info_dir / "metadata.json").write_text(
+                json.dumps(metadata, ensure_ascii=False),
                 encoding="utf-8",
             )
+        return root
+
+    def create_eagle_fields_library(self) -> Path:
+        root = self.temp_dir / "EagleFieldsSource.library"
+        images_dir = root / "images" / "ASSET001.info"
+        images_dir.mkdir(parents=True)
+        (root / "metadata.json").write_text(
+            json.dumps(
+                {
+                    "folders": [
+                        {
+                            "id": "folder-protected",
+                            "name": "Protected",
+                            "password": "plaintext-should-not-be-stored",
+                            "passwordTips": "项目归档密码提示",
+                            "children": [],
+                        },
+                    ],
+                    "smartFolders": [],
+                    "quickAccess": [
+                        {"name": "Protected shortcut", "folderId": "folder-protected"},
+                        {"name": "Asset shortcut", "assetId": "ASSET001"},
+                    ],
+                    "tagsGroups": [
+                        {"id": "usage", "name": "用途", "tags": ["封面", "主视觉"]},
+                    ],
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        self.write_supporting_json(root, starred_tags=["收藏"])
+        (images_dir / "asset.png").write_bytes(b"png-data")
+        (images_dir / "asset_thumbnail.png").write_bytes(b"thumb-data")
+        (images_dir / "metadata.json").write_text(
+            json.dumps(
+                {
+                    "id": "ASSET001",
+                    "name": "asset",
+                    "ext": "png",
+                    "folders": ["folder-protected"],
+                    "tags": ["封面"],
+                    "annotation": "Eagle 注释",
+                    "isDeleted": False,
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
         return root
 
     def create_smart_folder_library(self) -> Path:
@@ -258,6 +639,14 @@ class EagleLibraryChangerTests(unittest.TestCase):
                             "id": "smart-or",
                             "name": "Too Wide",
                             "match": "or",
+                            "excludeTags": ["Draft"],
+                            "excludeFormats": ["gif"],
+                            "minWidth": 1024,
+                            "maxWidth": 4096,
+                            "maxSize": 10485760,
+                            "minCreatedAt": "2024-01-01T00:00:00Z",
+                            "sort": {"field": "width", "direction": "desc"},
+                            "limit": 20,
                             "conditions": [
                                 {"field": "tag", "operator": "contains", "value": "A"},
                                 {"field": "tag", "operator": "contains", "value": "B"},
@@ -303,7 +692,7 @@ class EagleLibraryChangerTests(unittest.TestCase):
         )
         return root
 
-    def create_multi_folder_library(self) -> Path:
+    def create_multi_folder_library(self, is_deleted: bool = False) -> Path:
         root = self.temp_dir / "MultiFolderSource.library"
         images_dir = root / "images" / "ASSET001.info"
         images_dir.mkdir(parents=True)
@@ -333,6 +722,119 @@ class EagleLibraryChangerTests(unittest.TestCase):
                     "ext": "png",
                     "folders": ["folder-a", "folder-b"],
                     "tags": ["TagA"],
+                    "annotation": "",
+                    "isDeleted": is_deleted,
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        return root
+
+    def create_action_library(self) -> Path:
+        root = self.temp_dir / "ActionSource.library"
+        images_dir = root / "images" / "ASSET001.info"
+        images_dir.mkdir(parents=True)
+        (root / "metadata.json").write_text(
+            json.dumps(
+                {
+                    "folders": [],
+                    "smartFolders": [],
+                    "quickAccess": [],
+                    "tagsGroups": [],
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        self.write_supporting_json(root)
+        (root / "actions.json").write_text(
+            json.dumps(
+                [
+                    {
+                        "id": "action-ready",
+                        "name": "标记精选",
+                        "steps": [
+                            {"type": "rating", "rating": 5},
+                            {"type": "comment", "value": "Imported action"},
+                        ],
+                    },
+                    {
+                        "id": "action-unsupported",
+                        "name": "外部导出",
+                        "steps": [
+                            {"type": "shell", "command": "open-external-app"},
+                        ],
+                    },
+                ],
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        (images_dir / "asset.png").write_bytes(b"png-data")
+        (images_dir / "asset_thumbnail.png").write_bytes(b"thumb-data")
+        (images_dir / "metadata.json").write_text(
+            json.dumps(
+                {
+                    "id": "ASSET001",
+                    "name": "asset",
+                    "ext": "png",
+                    "folders": [],
+                    "tags": [],
+                    "annotation": "",
+                    "isDeleted": False,
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        return root
+
+    def create_negative_smart_folder_library(self) -> Path:
+        root = self.temp_dir / "NegativeSmartFolderSource.library"
+        images_dir = root / "images" / "ASSET001.info"
+        images_dir.mkdir(parents=True)
+        (root / "metadata.json").write_text(
+            json.dumps(
+                {
+                    "folders": [
+                        {"id": "folder-archive", "name": "Archive", "children": []},
+                    ],
+                    "smartFolders": [
+                        {
+                            "id": "negative-smart",
+                            "name": "No Draft Archive",
+                            "query": "hero",
+                            "conditions": [
+                                {"field": "query", "operator": "notContains", "value": "draft"},
+                                {"field": "folder", "operator": "not", "value": "folder-archive"},
+                                {"field": "width", "operator": "not", "value": [0, 640]},
+                                {
+                                    "field": "createdAt",
+                                    "operator": "not",
+                                    "value": ["2024-01-01T00:00:00Z", "2024-01-31T00:00:00Z"],
+                                },
+                            ],
+                        },
+                    ],
+                    "quickAccess": [],
+                    "tagsGroups": [],
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        self.write_supporting_json(root)
+        (images_dir / "asset.png").write_bytes(b"png-data")
+        (images_dir / "asset_thumbnail.png").write_bytes(b"thumb-data")
+        (images_dir / "metadata.json").write_text(
+            json.dumps(
+                {
+                    "id": "ASSET001",
+                    "name": "asset",
+                    "ext": "png",
+                    "folders": ["folder-archive"],
+                    "tags": [],
                     "annotation": "",
                     "isDeleted": False,
                 },
@@ -380,8 +882,16 @@ class EagleLibraryChangerTests(unittest.TestCase):
             )
         return root
 
-    def write_supporting_json(self, root: Path, saved_filters: list[dict[str, object]] | None = None) -> None:
-        (root / "tags.json").write_text(json.dumps({"historyTags": [], "starredTags": []}), encoding="utf-8")
+    def write_supporting_json(
+        self,
+        root: Path,
+        saved_filters: list[dict[str, object]] | None = None,
+        starred_tags: list[str] | None = None,
+    ) -> None:
+        (root / "tags.json").write_text(
+            json.dumps({"historyTags": [], "starredTags": starred_tags or []}, ensure_ascii=False),
+            encoding="utf-8",
+        )
         (root / "actions.json").write_text("[]", encoding="utf-8")
         (root / "saved-filters.json").write_text(json.dumps(saved_filters or [], ensure_ascii=False), encoding="utf-8")
         (root / "mtime.json").write_text("{}", encoding="utf-8")
