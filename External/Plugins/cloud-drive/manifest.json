@@ -1,0 +1,23 @@
+{
+  "pluginId": "momobako.cloud-drive",
+  "name": "Cloud Drive",
+  "version": "0.1.0",
+  "type": {
+    "layer": "source",
+    "kind": "cloud"
+  },
+  "kind": "cloud",
+  "description": "预留云盘文件系统接入点，如对象存储或网盘。",
+  "capabilities": ["browse", "read", "write", "sync"],
+  "enabled": false,
+  "sdk": "backend",
+  "runtime": "manifest-only",
+  "entry": {},
+  "permissions": ["filesystem:read"],
+  "compat": {
+    "sdkVersion": "1",
+    "legacyPluginIds": []
+  },
+  "source": "builtin",
+  "status": "disabled"
+}

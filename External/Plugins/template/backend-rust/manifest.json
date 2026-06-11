@@ -1,0 +1,27 @@
+{
+  "pluginId": "momobako.template.backend",
+  "name": "Template Backend Plugin",
+  "version": "0.1.0",
+  "type": {
+    "layer": "provider-service",
+    "kind": "service"
+  },
+  "kind": "service",
+  "description": "Template backend plugin manifest.",
+  "capabilities": ["service"],
+  "enabled": true,
+  "sdk": "backend",
+  "runtime": "native-dylib",
+  "entry": {
+    "backend": {
+      "library": "momobako_template_backend"
+    }
+  },
+  "permissions": [],
+  "source": "user",
+  "status": "ready",
+  "compat": {
+    "sdkVersion": "1",
+    "legacyPluginIds": []
+  }
+}

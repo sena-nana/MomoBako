@@ -25,7 +25,7 @@ withDefaults(defineProps<{
   subline: "集中管理当前可用插件与后端能力。",
   searchPlaceholder: "筛选导入器、脚本或元数据拓展",
   emptyTitle: "暂无匹配插件",
-  emptyDescription: "调整筛选条件，或先从压缩包安装新的插件。",
+  emptyDescription: "调整筛选条件，或先从 .momoplug 安装新的插件。",
 });
 
 const {
@@ -46,10 +46,15 @@ const filteredPlugins = computed(() => {
   return plugins.value.filter((plugin) => (
     plugin.name.toLowerCase().includes(normalizedKeyword) ||
     plugin.description.toLowerCase().includes(normalizedKeyword) ||
+    (plugin.type?.layer ?? "").toLowerCase().includes(normalizedKeyword) ||
     plugin.kind.toLowerCase().includes(normalizedKeyword) ||
     plugin.capabilities.some((capability) => capability.toLowerCase().includes(normalizedKeyword))
   ));
 });
+
+function pluginLayerLabel(plugin: PluginManifest) {
+  return plugin.type?.layer ?? plugin.kind;
+}
 
 function pluginSourceLabel(source: PluginManifest["source"]) {
   if (source === "user") return "用户插件";
@@ -65,15 +70,15 @@ function pluginRuntimeLabel(runtime: PluginManifest["runtime"]) {
 }
 
 function pluginStatusLabel(plugin: PluginManifest) {
-  if (!plugin.enabled || plugin.status === "disabled") return "未启用";
-  if (plugin.status === "unavailable") return "不可用";
   if (plugin.status === "error") return "错误";
+  if (plugin.status === "unavailable") return "不可用";
+  if (!plugin.enabled || plugin.status === "disabled") return "未启用";
   return "已启用";
 }
 
 function pluginStatusClass(plugin: PluginManifest) {
-  if (!plugin.enabled || plugin.status === "disabled") return "asset-card__pill--ghost";
   if (plugin.status === "unavailable" || plugin.status === "error") return "asset-card__pill--danger";
+  if (!plugin.enabled || plugin.status === "disabled") return "asset-card__pill--ghost";
   return "";
 }
 
@@ -97,12 +102,12 @@ async function refreshPlugins() {
 async function choosePluginArchive() {
   resetActionState();
   const selected = await open({
-    title: "选择插件压缩包",
+    title: "选择 .momoplug 插件包",
     multiple: false,
     filters: [
       {
         name: "MomoBako 插件",
-        extensions: ["zip"],
+        extensions: ["momoplug"],
       },
     ],
   });
@@ -166,7 +171,7 @@ async function confirmDeletePlugin() {
         </button>
         <button type="button" class="primary" :disabled="isManagingPlugins" @click="choosePluginArchive">
           <Upload :size="14" aria-hidden="true" />
-          从压缩包安装
+          从 .momoplug 安装
         </button>
       </div>
     </header>
@@ -210,6 +215,7 @@ async function confirmDeletePlugin() {
           <span class="muted">v{{ plugin.version }}</span>
         </div>
         <div class="settings-list__chips">
+          <span class="workspace-hints__chip">{{ pluginLayerLabel(plugin) }}</span>
           <span class="workspace-hints__chip">{{ plugin.kind }}</span>
           <span class="workspace-hints__chip">{{ pluginSourceLabel(plugin.source) }}</span>
           <span class="workspace-hints__chip">{{ pluginRuntimeLabel(plugin.runtime) }}</span>
@@ -239,7 +245,7 @@ async function confirmDeletePlugin() {
     <ConfirmDialog
       :open="Boolean(pendingDeletePlugin)"
       title="删除插件"
-      :message="pendingDeletePlugin ? `删除插件“${pendingDeletePlugin.name}”后将移除其安装目录。` : ''"
+      :message="pendingDeletePlugin ? `删除插件“${pendingDeletePlugin.name}”后将移除其 .momoplug 安装包。` : ''"
       confirm-text="删除"
       cancel-text="取消"
       :danger="true"

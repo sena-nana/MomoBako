@@ -1,0 +1,9 @@
+{
+  "pluginId": "momobako.preview.office",
+  "build": {
+    "type": "frontend-module",
+    "sourceDir": "src",
+    "entry": "dist/register.js",
+    "outputDir": ".dist/office-preview"
+  }
+}

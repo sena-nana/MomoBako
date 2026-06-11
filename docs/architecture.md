@@ -71,17 +71,19 @@
 
 ## Plugin Architecture
 
-- Runtime plugins live under `plugins/builtin/*` in development. `yarn plugins:build` stages the runtime subset under `src-tauri/resources/plugins/builtin/*`, and release builds bundle it to `$RESOURCE/plugins/builtin/*`. The Tauri resource map intentionally avoids source-relative `../` paths so release packages do not expose `_up_/plugins/builtin`. When Tauri provides a resource directory, the runtime only scans `$RESOURCE/plugins/builtin` and does not fall back to cwd/source directories.
+- Plugin source projects live under `External/Plugins/*` and are built independently from the main app.
+- Runtime plugins live under `<serviceRoot>/plugins/*.momoplug`.
+- The desktop runtime scans only `.momoplug` files in that directory, reads `manifest.json` from the archive directly, and does not fall back to compiled manifests or source-relative plugin folders.
 - Plugin manifest includes the existing display fields plus runtime fields:
-  - `pluginId`, `legacyPluginIds`, `name`, `version`, `kind`, `description`, `capabilities`, `enabled`
+  - `pluginId`, `legacyPluginIds`, `name`, `version`, `type`, `kind`, `description`, `capabilities`, `enabled`
   - `sdk`: `frontend` or `backend`
   - `runtime`: `vue-module`, `native-dylib`, or `manifest-only`
-  - `entry`, `source`, `permissions`, `compat`, `status`
-- Frontend plugins use `src/plugins/sdk.ts` and register Vue preview components with `definePreviewPlugin()` and `registerPreviewPlugin()`.
+  - `entry`, `contributes`, `source`, `permissions`, `compat`, `status`
+- Frontend preview registration is driven by runtime plugin manifests and `.momoplug` bundle loading; preview modules are read from the archive at runtime and do not enter the host frontend bundle.
 - Backend plugins use a C ABI boundary with JSON request/response envelopes:
   - `momobako_plugin_manifest`
   - `momobako_plugin_call`
   - `momobako_plugin_free`
-- The repository runtime discovers manifests at startup from the runtime plugin directory, normalizes legacy IDs such as `builtin.local-filesystem`, and routes filesystem backend operations through the plugin registry. If the runtime plugin directory is removed, `GET /plugins` reflects that removal instead of silently rebuilding the list from compiled manifests.
-- Built-in local filesystem is available as a trusted runtime backend loaded from its plugin directory. WebDAV, cloud drive, watcher, metadata provider, and vector index are separate manifest-only built-ins until their runtime implementations are added.
+- The repository runtime discovers manifests at startup from `.momoplug` archives and routes filesystem backend operations through the plugin registry using canonical `momobako.*` plugin IDs.
+- Native backend libraries are extracted from `.momoplug` into a controlled temporary cache before loading; plugin installation itself does not persistently extract archives.
 - Filesystem backend `listFiles` responses carry both repository-relative paths and absolute local paths so the repository scanner can hash file content after plugin discovery. The runtime still resolves legacy responses that only include `relativePath`.

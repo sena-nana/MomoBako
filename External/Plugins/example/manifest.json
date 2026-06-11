@@ -1,0 +1,33 @@
+{
+  "pluginId": "momobako.example.text-preview",
+  "name": "Example Text Preview",
+  "version": "0.1.0",
+  "type": {
+    "layer": "library-kind",
+    "kind": "preview"
+  },
+  "kind": "preview",
+  "description": "Example preview plugin for text files.",
+  "capabilities": ["preview", "text"],
+  "enabled": true,
+  "sdk": "frontend",
+  "runtime": "vue-module",
+  "entry": {
+    "frontend": {
+      "module": "dist/register.js",
+      "export": "register"
+    }
+  },
+  "contributes": {
+    "preview": {
+      "extensions": ["txt", "md"]
+    }
+  },
+  "permissions": [],
+  "source": "user",
+  "status": "ready",
+  "compat": {
+    "sdkVersion": "1",
+    "legacyPluginIds": []
+  }
+}

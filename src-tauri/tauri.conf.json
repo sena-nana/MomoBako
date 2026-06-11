@@ -6,7 +6,7 @@
   "build": {
     "beforeDevCommand": "yarn dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "yarn plugins:build && yarn build",
+    "beforeBuildCommand": "yarn build",
     "frontendDist": "../dist"
   },
   "app": {
@@ -36,9 +36,6 @@
   "bundle": {
     "active": true,
     "targets": "all",
-    "resources": {
-      "resources/plugins/builtin/": "plugins/builtin/"
-    },
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

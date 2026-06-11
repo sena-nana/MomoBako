@@ -280,6 +280,39 @@ export type FileReadRequest = {
   path: string;
 };
 
+export type PluginCallRequest = {
+  pluginId: string;
+  method: string;
+  payload?: Record<string, unknown>;
+};
+
+export type PluginCallResponse<T = unknown> = {
+  pluginId: string;
+  method: string;
+  payload: T;
+};
+
+export type PluginArchiveReadRequest = {
+  pluginId: string;
+  path: string;
+};
+
+export type PluginArchiveTextResponse = {
+  pluginId: string;
+  path: string;
+  text: string;
+};
+
+export type BinaryFileWriteRequest = {
+  path: string;
+  bytes: number[];
+};
+
+export type BinaryFileWriteResponse = {
+  path: string;
+  sizeBytes: number;
+};
+
 export type FilePreviewSourceResponse = {
   repoId: string;
   path: string;
@@ -460,12 +493,41 @@ export type PluginManifest = {
   legacyPluginIds?: string[];
   name: string;
   version: string;
+  type: {
+    layer:
+      | "source"
+      | "library-kind"
+      | "extractor-parser"
+      | "provider-service"
+      | "integration-capability-hook";
+    kind: string;
+  };
   kind: string;
   description: string;
   capabilities: string[];
   enabled: boolean;
   sdk?: "frontend" | "backend";
-  entry?: Record<string, unknown>;
+  entry?: {
+    frontend?: {
+      module: string;
+      export?: string;
+    };
+    backend?: {
+      library: string;
+      path?: string;
+    };
+    manifestOnly?: boolean;
+    [key: string]: unknown;
+  };
+  contributes?: {
+    preview?: {
+      extensions?: string[];
+    };
+    source?: Record<string, unknown>;
+    extractors?: Array<Record<string, unknown>>;
+    providers?: Array<Record<string, unknown>>;
+    hooks?: Array<Record<string, unknown>>;
+  };
   source?: "builtin" | "user" | "system";
   runtime?: "vue-module" | "native-dylib" | "manifest-only";
   permissions?: string[];
@@ -474,6 +536,7 @@ export type PluginManifest = {
     legacyPluginIds?: string[];
   };
   status?: "ready" | "disabled" | "unavailable" | "error";
+  archivePath?: string;
 };
 
 export type PluginEnabledRequest = {
@@ -482,7 +545,7 @@ export type PluginEnabledRequest = {
 };
 
 export type PluginInstallRequest = {
-  archivePath: string;
+  packagePath: string;
 };
 
 export type PluginMutationResponse = {

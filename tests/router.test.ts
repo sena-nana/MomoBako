@@ -626,7 +626,7 @@ describe("文件管理冒烟", () => {
   });
 
   it("没有仓库时也能在设置页管理插件", async () => {
-    selectMockFile("C:/Mock/Plugins/sample-plugin.zip");
+    selectMockFile("C:/Mock/Plugins/sample-plugin.momoplug");
     const router = createMomoBakoRouter(createMemoryHistory());
     await router.push("/settings");
     await router.isReady();
@@ -643,11 +643,11 @@ describe("文件管理冒烟", () => {
 
     expect(await screen.findByRole("heading", { name: "插件管理" })).toBeInTheDocument();
 
-    await fireEvent.click(screen.getByRole("button", { name: "从压缩包安装" }));
+    await fireEvent.click(screen.getByRole("button", { name: "从 .momoplug 安装" }));
     await waitFor(() => {
       expect(getInvokeCalls("install_plugin_from_archive").at(-1)?.args).toMatchObject({
         request: {
-          archivePath: "C:/Mock/Plugins/sample-plugin.zip",
+          packagePath: "C:/Mock/Plugins/sample-plugin.momoplug",
         },
       });
     });

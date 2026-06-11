@@ -1247,7 +1247,7 @@ export async function loadSettingsData(options: SettingsDataLoadOptions = {}) {
       getApiDesignSnapshot(),
     ]);
     plugins.value = pluginItems;
-    syncRegisteredPreviewPluginManifests(pluginItems);
+    await syncRegisteredPreviewPluginManifests(pluginItems);
     cacheSnapshot.value = cache;
     apiDesign.value = api;
   } catch (cause) {
@@ -1265,7 +1265,7 @@ async function applyPluginMutation(action: () => Promise<{ plugins: import("../.
   try {
     const response = await action();
     plugins.value = response.plugins;
-    syncRegisteredPreviewPluginManifests(response.plugins);
+    await syncRegisteredPreviewPluginManifests(response.plugins);
     return response;
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : String(cause);
@@ -1283,8 +1283,8 @@ export function deletePluginInWorkspace(pluginId: string) {
   return applyPluginMutation(() => deletePlugin(pluginId));
 }
 
-export function installPluginArchiveInWorkspace(archivePath: string) {
-  return applyPluginMutation(() => installPluginFromArchive({ archivePath }));
+export function installPluginArchiveInWorkspace(packagePath: string) {
+  return applyPluginMutation(() => installPluginFromArchive({ packagePath }));
 }
 function applyAssetResponse(response: { asset: AssetDetail }) {
   activeAssetDetail.value = response.asset;

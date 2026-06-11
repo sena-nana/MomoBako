@@ -1,0 +1,8 @@
+{
+  "pluginId": "momobako.cloud-drive",
+  "build": {
+    "type": "manifest-only",
+    "sourceDir": "src",
+    "outputDir": ".dist/cloud-drive"
+  }
+}

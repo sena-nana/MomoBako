@@ -4,6 +4,8 @@ import type {
   ApiDesignSnapshot,
   AssetDetail,
   CacheSnapshot,
+  BinaryFileWriteRequest,
+  BinaryFileWriteResponse,
   FileBrowserRequest,
   FileBrowserSnapshot,
   FileCopyRequest,
@@ -19,6 +21,10 @@ import type {
   HardlinkConfirmResponse,
   MetadataUpdateRequest,
   MetadataUpdateResponse,
+  PluginCallRequest,
+  PluginCallResponse,
+  PluginArchiveReadRequest,
+  PluginArchiveTextResponse,
   PluginEnabledRequest,
   PluginInstallRequest,
   RepositoryExportRequest,
@@ -107,6 +113,18 @@ export function readFile(request: FileReadRequest) {
 
 export function preparePreviewFileSource(request: FileReadRequest) {
   return invoke<FilePreviewSourceResponse>("prepare_preview_file_source", { request });
+}
+
+export function callPlugin<T = unknown>(request: PluginCallRequest) {
+  return invoke<PluginCallResponse<T>>("call_plugin", { request });
+}
+
+export function readPluginArchiveText(request: PluginArchiveReadRequest) {
+  return invoke<PluginArchiveTextResponse>("read_plugin_archive_text", { request });
+}
+
+export function writeBinaryFile(request: BinaryFileWriteRequest) {
+  return invoke<BinaryFileWriteResponse>("write_binary_file", { request });
 }
 
 export function createDirectory(request: FileCreateRequest) {

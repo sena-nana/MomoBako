@@ -1,6 +1,8 @@
 import { render, screen, waitFor } from "@testing-library/vue";
 import { beforeEach, describe, expect, it } from "vitest";
-import MediaPreview from "../src/plugins/mediaPreview/MediaPreview.vue";
+import { getPreviewPluginForEntry } from "../src/plugins/previewPlugins";
+import { clearPreviewPluginRegistry, syncRegisteredPreviewPluginManifests } from "../src/plugins/sdk";
+import { listPlugins } from "../src/services/repositoryApi";
 import { getInvokeCalls } from "./setupTests";
 
 const audioEntry = {
@@ -19,12 +21,17 @@ const audioEntry = {
 };
 
 describe("MediaPreview", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     document.body.innerHTML = "";
+    clearPreviewPluginRegistry();
+    await syncRegisteredPreviewPluginManifests(await listPlugins());
   });
 
   it("为音频预览读取同名 lrc 歌词并显示在右侧面板", async () => {
-    render(MediaPreview, {
+    const plugin = getPreviewPluginForEntry(audioEntry);
+    expect(plugin).not.toBeNull();
+
+    render(plugin!.component, {
       props: {
         repoId: "repo-main-001",
         entry: audioEntry,
@@ -61,7 +68,14 @@ describe("MediaPreview", () => {
   });
 
   it("同名 lrc 不存在时显示暂无歌词", async () => {
-    render(MediaPreview, {
+    const plugin = getPreviewPluginForEntry({
+      ...audioEntry,
+      path: "Music/no-lyrics-track.mp3",
+      name: "no-lyrics-track.mp3",
+    });
+    expect(plugin).not.toBeNull();
+
+    render(plugin!.component, {
       props: {
         repoId: "repo-main-001",
         entry: {
@@ -85,7 +99,10 @@ describe("MediaPreview", () => {
   });
 
   it("根据播放时间高亮当前歌词行", async () => {
-    const { container } = render(MediaPreview, {
+    const plugin = getPreviewPluginForEntry(audioEntry);
+    expect(plugin).not.toBeNull();
+
+    const { container } = render(plugin!.component, {
       props: {
         repoId: "repo-main-001",
         entry: audioEntry,

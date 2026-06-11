@@ -1,0 +1,28 @@
+{
+  "pluginId": "momobako.template.example",
+  "name": "Template Example",
+  "version": "0.1.0",
+  "type": {
+    "layer": "library-kind",
+    "kind": "preview"
+  },
+  "kind": "preview",
+  "description": "Template plugin manifest.",
+  "capabilities": ["preview"],
+  "enabled": true,
+  "sdk": "frontend",
+  "runtime": "vue-module",
+  "entry": {
+    "frontend": {
+      "module": "dist/register.js",
+      "export": "register"
+    }
+  },
+  "permissions": [],
+  "source": "user",
+  "status": "ready",
+  "compat": {
+    "sdkVersion": "1",
+    "legacyPluginIds": []
+  }
+}

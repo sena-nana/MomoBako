@@ -3,7 +3,13 @@
     "momobako.cloud-drive": {
       "enabled": false
     },
+    "momobako.ncm-codec": {
+      "enabled": true
+    },
     "momobako.preview.media": {
+      "enabled": true
+    },
+    "momobako.preview.ncm": {
       "enabled": true
     },
     "momobako.preview.three-model": {

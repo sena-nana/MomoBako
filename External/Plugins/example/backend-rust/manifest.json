@@ -1,0 +1,27 @@
+{
+  "pluginId": "momobako.example.backend-ping",
+  "name": "Example Backend Ping",
+  "version": "0.1.0",
+  "type": {
+    "layer": "provider-service",
+    "kind": "service"
+  },
+  "kind": "service",
+  "description": "Example backend plugin for ping-style service calls.",
+  "capabilities": ["service", "ping"],
+  "enabled": true,
+  "sdk": "backend",
+  "runtime": "native-dylib",
+  "entry": {
+    "backend": {
+      "library": "momobako_example_backend_ping"
+    }
+  },
+  "permissions": [],
+  "source": "user",
+  "status": "ready",
+  "compat": {
+    "sdkVersion": "1",
+    "legacyPluginIds": []
+  }
+}

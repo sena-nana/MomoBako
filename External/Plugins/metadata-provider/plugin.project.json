@@ -1,0 +1,8 @@
+{
+  "pluginId": "momobako.metadata-provider",
+  "build": {
+    "type": "manifest-only",
+    "sourceDir": "src",
+    "outputDir": ".dist/metadata-provider"
+  }
+}
