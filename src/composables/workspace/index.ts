@@ -9,7 +9,6 @@ import {
   createRepository,
   deleteEntry,
   deleteRepository,
-  ensureThumbnail,
   exportRepository,
   getApiDesignSnapshot,
   getAssetDetail,
@@ -145,7 +144,11 @@ import {
   type WorkspaceOperationProgress,
 } from "./tasks";
 import {
-  applyThumbnailResponse,
+  clearWorkspaceEntryThumbnail,
+  refreshWorkspaceEntryThumbnail,
+  saveGeneratedWorkspaceEntryThumbnail,
+  setWorkspaceEntryThumbnail,
+  setWorkspaceEntryThumbnailFromBytes,
 } from "./thumbnails";
 import {
   applyFileBrowserSnapshot,
@@ -981,95 +984,6 @@ export async function runActiveRepositoryAction(actionId = activeRepositoryActio
     return null;
   } finally {
     isRunningRepositoryAction.value = false;
-  }
-}
-
-export async function setWorkspaceEntryThumbnail(path: string, sourcePath: string) {
-  if (!activeRepoId.value || fileBrowser.value?.specialLocation === "trash") return null;
-  error.value = null;
-  try {
-    const response = await ensureThumbnail({
-      repoId: activeRepoId.value,
-      path,
-      action: "save",
-      sourcePath,
-    });
-    applyThumbnailResponse(response);
-    return response;
-  } catch (cause) {
-    error.value = cause instanceof Error ? cause.message : String(cause);
-    return null;
-  }
-}
-
-export async function setWorkspaceEntryThumbnailFromBytes(path: string, imageBytes: number[], mediaType?: string) {
-  if (!activeRepoId.value || fileBrowser.value?.specialLocation === "trash") return null;
-  error.value = null;
-  try {
-    const response = await ensureThumbnail({
-      repoId: activeRepoId.value,
-      path,
-      action: "save",
-      imageBytes,
-      mediaType,
-    });
-    applyThumbnailResponse(response);
-    return response;
-  } catch (cause) {
-    error.value = cause instanceof Error ? cause.message : String(cause);
-    return null;
-  }
-}
-
-export async function saveGeneratedWorkspaceEntryThumbnail(path: string, imageBytes: number[], mediaType?: string) {
-  if (!activeRepoId.value || fileBrowser.value?.specialLocation === "trash") return null;
-  error.value = null;
-  try {
-    const response = await ensureThumbnail({
-      repoId: activeRepoId.value,
-      path,
-      action: "saveGenerated",
-      imageBytes,
-      mediaType,
-    });
-    applyThumbnailResponse(response);
-    return response;
-  } catch {
-    return null;
-  }
-}
-
-export async function clearWorkspaceEntryThumbnail(path: string) {
-  if (!activeRepoId.value || fileBrowser.value?.specialLocation === "trash") return null;
-  error.value = null;
-  try {
-    const response = await ensureThumbnail({
-      repoId: activeRepoId.value,
-      path,
-      action: "clear",
-    });
-    applyThumbnailResponse(response);
-    return response;
-  } catch (cause) {
-    error.value = cause instanceof Error ? cause.message : String(cause);
-    return null;
-  }
-}
-
-export async function refreshWorkspaceEntryThumbnail(path: string) {
-  if (!activeRepoId.value || fileBrowser.value?.specialLocation === "trash") return null;
-  error.value = null;
-  try {
-    const response = await ensureThumbnail({
-      repoId: activeRepoId.value,
-      path,
-      action: "refresh",
-    });
-    applyThumbnailResponse(response);
-    return response;
-  } catch (cause) {
-    error.value = cause instanceof Error ? cause.message : String(cause);
-    return null;
   }
 }
 

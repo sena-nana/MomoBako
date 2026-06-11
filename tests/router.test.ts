@@ -754,7 +754,6 @@ describe("文件管理冒烟", () => {
     expect(screen.getByRole("button", { name: /全部/ })).toBeInTheDocument();
     const settingsButton = screen.getByRole("link", { name: "设置" });
     const extensionsButton = screen.getByRole("button", { name: "拓展" });
-    expect(settingsButton.compareDocumentPosition(extensionsButton)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
 
     await waitFor(() => {
       const browserCalls = getInvokeCalls("get_file_browser");

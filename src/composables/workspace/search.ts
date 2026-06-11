@@ -11,80 +11,19 @@ import {
   searchResults,
 } from "./state";
 import { hasActiveFilters } from "./selectors";
+import {
+  normalizeFilterValues,
+  parseDateFiltersInput,
+  parseMetadataFiltersInput,
+  parseNumberFiltersInput,
+  parsePathPrefixesInput,
+} from "./filterInputs";
 
 export function resetSearchState() {
   searchQuery.value = "";
   searchResults.value = [];
   filters.value = createInitialFilters();
   isFilterBarOpen.value = false;
-}
-
-function normalizeFilterValues(values: string[]) {
-  return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean)));
-}
-
-function parseMetadataFiltersInput(value: string) {
-  return value
-    .split(/\n|[,，]/)
-    .map((item) => item.trim())
-    .filter(Boolean)
-    .flatMap((item) => {
-      const index = item.indexOf("=");
-      if (index < 0) return [];
-      const key = item.slice(0, index).trim();
-      const filterValue = item.slice(index + 1).trim();
-      return key && filterValue ? [{ key, value: filterValue }] : [];
-    });
-}
-
-function parseNumberFiltersInput(value: string) {
-  const parseRangeBound = (text: string) => {
-    const trimmed = text.trim();
-    if (!trimmed) return undefined;
-    const number = Number(trimmed);
-    return Number.isFinite(number) ? number : undefined;
-  };
-
-  return value
-    .split(/\n|[,，]/)
-    .map((item) => item.trim())
-    .filter(Boolean)
-    .flatMap((item) => {
-      const [key, range] = item.split("=");
-      if (!key?.trim() || !range?.trim()) return [];
-      const [minText, maxText] = range.split("..").map((part) => part.trim());
-      const min = parseRangeBound(minText ?? "");
-      const max = parseRangeBound(maxText ?? "");
-      return [{
-        key: key.trim(),
-        min,
-        max,
-      }].filter((filter) => filter.min != null || filter.max != null);
-    });
-}
-
-function parseDateFiltersInput(value: string) {
-  return value
-    .split(/\n|[,，]/)
-    .map((item) => item.trim())
-    .filter(Boolean)
-    .flatMap((item) => {
-      const [key, range] = item.split("=");
-      if (!key?.trim() || !range?.trim()) return [];
-      const [from, to] = range.split("..").map((part) => part.trim());
-      return [{
-        key: key.trim(),
-        from: from || undefined,
-        to: to || undefined,
-      }].filter((filter) => filter.from || filter.to);
-    });
-}
-
-function parsePathPrefixesInput(value: string) {
-  return value
-    .split(/\n|[,，]/)
-    .map((item) => item.trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, ""))
-    .filter(Boolean);
 }
 
 export function buildSearchRequest(query = searchQuery.value): SearchRequest {
