@@ -1,4 +1,4 @@
-import { copyFileSync, existsSync, mkdirSync, rmSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readdirSync, rmSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
@@ -24,48 +24,23 @@ const plugins = [
   },
 ];
 
-const runtimePluginPackages = [
-  { name: "cloud-drive", files: ["manifest.json"] },
-  { name: "filesystem-watcher", files: ["manifest.json"] },
-  { name: "local-filesystem", files: ["manifest.json"] },
-  { name: "library-anime", files: ["manifest.json"] },
-  { name: "library-archive", files: ["manifest.json"] },
-  { name: "library-asmr", files: ["manifest.json"] },
-  { name: "library-audio", files: ["manifest.json"] },
-  { name: "library-design", files: ["manifest.json"] },
-  { name: "library-ebook", files: ["manifest.json"] },
-  { name: "library-font", files: ["manifest.json"] },
-  { name: "library-game", files: ["manifest.json"] },
-  { name: "library-image", files: ["manifest.json"] },
-  { name: "library-manga", files: ["manifest.json"] },
-  { name: "library-model3d", files: ["manifest.json"] },
-  { name: "library-project", files: ["manifest.json"] },
-  { name: "library-software", files: ["manifest.json"] },
-  { name: "library-video", files: ["manifest.json"] },
-  { name: "media-preview", files: ["manifest.json", "preview.ts"] },
-  { name: "metadata-provider", files: ["manifest.json"] },
-  { name: "office-preview", files: ["manifest.json", "preview.ts"] },
-  { name: "parser-archive", files: ["manifest.json"] },
-  { name: "parser-audio", files: ["manifest.json"] },
-  { name: "parser-ebook", files: ["manifest.json"] },
-  { name: "parser-font", files: ["manifest.json"] },
-  { name: "parser-image", files: ["manifest.json"] },
-  { name: "parser-video", files: ["manifest.json"] },
-  { name: "service-downloader", files: ["manifest.json"] },
-  { name: "service-network-search", files: ["manifest.json"] },
-  { name: "service-provider-bangumi", files: ["manifest.json"] },
-  { name: "service-provider-musicbrainz", files: ["manifest.json"] },
-  { name: "service-provider-tmdb", files: ["manifest.json"] },
-  { name: "text-preview", files: ["manifest.json", "preview.ts"] },
-  { name: "three-model-preview", files: ["manifest.json", "preview.ts"] },
-  { name: "vector-index", files: ["manifest.json"] },
-  { name: "webdav", files: ["manifest.json"] },
-];
-
 function dynamicLibraryFileName(packageName) {
   if (process.platform === "win32") return `${packageName}.dll`;
   if (process.platform === "darwin") return `lib${packageName}.dylib`;
   return `lib${packageName}.so`;
+}
+
+function discoverRuntimePluginPackages() {
+  return readdirSync(builtinPluginsRoot, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => {
+      const files = ["manifest.json"];
+      if (existsSync(join(builtinPluginsRoot, entry.name, "preview.ts"))) {
+        files.push("preview.ts");
+      }
+      return { name: entry.name, files };
+    })
+    .sort((left, right) => left.name.localeCompare(right.name));
 }
 
 function copyRuntimePluginFile(pluginName, fileName) {
@@ -109,7 +84,7 @@ for (const plugin of plugins) {
 }
 
 rmSync(tauriBuiltinResourceRoot, { recursive: true, force: true });
-for (const plugin of runtimePluginPackages) {
+for (const plugin of discoverRuntimePluginPackages()) {
   for (const fileName of plugin.files) {
     copyRuntimePluginFile(plugin.name, fileName);
   }

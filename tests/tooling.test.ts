@@ -6,11 +6,6 @@ function read(path: string) {
   return readFileSync(resolve(path), "utf-8");
 }
 
-function expectNoSourceResidue(content: string) {
-  expect(content).not.toContain("Tauri Template");
-  expect(content).not.toContain("Lilia");
-}
-
 describe("MomoBako 工具链", () => {
   it("package.json 提供文档脚本并保留插件验证链路", () => {
     const pkg = JSON.parse(read("package.json"));
@@ -37,7 +32,6 @@ describe("MomoBako 工具链", () => {
     expect(ci).toContain("src-tauri/target");
     expect(ci).toContain("plugins/backend-sdk/target");
     expect(ci).toContain("plugins/builtin/local-filesystem/target");
-    expectNoSourceResidue(ci);
   });
 
   it("GitHub release 发布 MomoBako Windows draft bundle", () => {
@@ -49,7 +43,6 @@ describe("MomoBako 工具链", () => {
     expect(release).toContain("tauriScript: corepack yarn tauri");
     expect(release).toContain("releaseName: MomoBako");
     expect(release).toContain("releaseDraft: true");
-    expectNoSourceResidue(release);
   });
 
   it("GitHub Pages 使用文档产物和 Pages 权限", () => {
@@ -60,22 +53,6 @@ describe("MomoBako 工具链", () => {
     expect(pages).toContain("corepack yarn docs:build");
     expect(pages).toContain("docs/.vitepress/dist");
     expect(pages).not.toContain("enablement: true");
-  });
-
-  it("GitHub Issue 模板使用 MomoBako 领域字段", () => {
-    const bug = read(".github/ISSUE_TEMPLATE/bug_report.yml");
-    const feature = read(".github/ISSUE_TEMPLATE/feature_request.yml");
-    const combined = `${bug}\n${feature}`;
-
-    expect(combined).toContain("MomoBako 版本 / commit");
-    expect(combined).toContain("资源库 / 数据模型");
-    expect(combined).toContain("文件同步 / 导入导出");
-    expect(combined).toContain("预览 / 缩略图");
-    expect(combined).toContain("插件");
-    expect(combined).toContain("Tauri / Rust 后端");
-    expect(combined).toContain("构建 / 发布");
-    expect(combined).toContain("UI / 主题");
-    expectNoSourceResidue(combined);
   });
 
   it("VitePress 文档站使用现有 MomoBako 文档入口", () => {

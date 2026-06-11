@@ -1,7 +1,7 @@
 import { ensureThumbnail } from "../../services/repositoryApi";
 import { getPreviewPluginForEntry } from "../../plugins/previewPlugins";
 import type { FileBrowserEntry, FileBrowserSnapshot, ThumbnailResponse } from "../../types/repository";
-import { currentDirectoryPath, fileBrowser } from "./state";
+import { activeRepoId, currentDirectoryPath, error, fileBrowser } from "./state";
 
 const THUMBNAIL_LOAD_CONCURRENCY = 3;
 
@@ -101,4 +101,68 @@ export function applyThumbnailResponse(response: ThumbnailResponse, expectedDire
         : item
     )),
   };
+}
+
+type WorkspaceThumbnailSaveRequest =
+  | {
+      action: "save";
+      sourcePath: string;
+    }
+  | {
+      action: "save" | "saveGenerated";
+      imageBytes: number[];
+      mediaType?: string;
+    }
+  | {
+      action: "clear" | "refresh";
+    };
+
+async function mutateWorkspaceEntryThumbnail(path: string, request: WorkspaceThumbnailSaveRequest, reportError = true) {
+  if (!activeRepoId.value || fileBrowser.value?.specialLocation === "trash") return null;
+  error.value = null;
+  try {
+    const response = await ensureThumbnail({
+      repoId: activeRepoId.value,
+      path,
+      ...request,
+    });
+    applyThumbnailResponse(response);
+    return response;
+  } catch (cause) {
+    if (reportError) {
+      error.value = cause instanceof Error ? cause.message : String(cause);
+    }
+    return null;
+  }
+}
+
+export function setWorkspaceEntryThumbnail(path: string, sourcePath: string) {
+  return mutateWorkspaceEntryThumbnail(path, {
+    action: "save",
+    sourcePath,
+  });
+}
+
+export function setWorkspaceEntryThumbnailFromBytes(path: string, imageBytes: number[], mediaType?: string) {
+  return mutateWorkspaceEntryThumbnail(path, {
+    action: "save",
+    imageBytes,
+    mediaType,
+  });
+}
+
+export function saveGeneratedWorkspaceEntryThumbnail(path: string, imageBytes: number[], mediaType?: string) {
+  return mutateWorkspaceEntryThumbnail(path, {
+    action: "saveGenerated",
+    imageBytes,
+    mediaType,
+  }, false);
+}
+
+export function clearWorkspaceEntryThumbnail(path: string) {
+  return mutateWorkspaceEntryThumbnail(path, { action: "clear" });
+}
+
+export function refreshWorkspaceEntryThumbnail(path: string) {
+  return mutateWorkspaceEntryThumbnail(path, { action: "refresh" });
 }
