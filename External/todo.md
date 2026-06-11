@@ -6,6 +6,5 @@
 - quickAccess
 - tagsGroups
 - 文件夹 password / passwordTips
-- isDeleted 语义
 - url
 - 原始时间字段与尺寸字段

@@ -29,9 +29,20 @@ class EagleLibraryChangerTests(unittest.TestCase):
         plan = convert.build_conversion_plan(source, output, "Converted")
 
         self.assertEqual(len(plan.assets), 11)
+        self.assertEqual(plan.report["summary"]["deletedAssetCount"], 1)
         self.assertTrue(any(asset.target_relative_dir == "未命名文件夹" for asset in plan.assets))
         self.assertEqual(plan.assets[0].palette, ["#AA1122", "#336699", "#FFFFFF", "#000000", "#123456"])
+        deleted_asset = next(asset for asset in plan.assets if asset.asset_id == "ASSET010")
+        self.assertTrue(deleted_asset.is_deleted)
+        self.assertEqual(deleted_asset.target_relative_path, "asset-10.png")
+        self.assertEqual(convert.asset_trash_relative_path(deleted_asset), "asset-10.png")
+        deleted_report = next(asset for asset in plan.report["assets"] if asset["assetId"] == "ASSET010")
+        self.assertTrue(deleted_report["isDeleted"])
+        self.assertEqual(deleted_report["status"], "deleted")
+        self.assertEqual(deleted_report["trashRelativePath"], "asset-10.png")
         self.assertTrue(all(not key.startswith("eagle") for key in collect_metadata_keys(plan.report)))
+        self.assertFalse(any(warning["type"] == "deletedAssetSemanticIgnored" for warning in plan.warnings))
+        self.assertFalse(any(hit["capability"] == "isDeleted 语义" for hit in plan.unsupported_hits))
 
     def test_dry_run_does_not_write_output(self) -> None:
         source = self.copy_example_library()
@@ -78,6 +89,10 @@ class EagleLibraryChangerTests(unittest.TestCase):
         connection = sqlite3.connect(output / ".momo" / "metadata.db")
         try:
             asset_count = connection.execute("SELECT COUNT(*) FROM assets").fetchone()[0]
+            deleted_asset_row = connection.execute(
+                "SELECT path, status FROM assets WHERE path = ?",
+                ("asset-10.png",),
+            ).fetchone()
             metadata_keys = {
                 row[0]
                 for row in connection.execute("SELECT key FROM metadata")
@@ -98,6 +113,7 @@ class EagleLibraryChangerTests(unittest.TestCase):
             connection.close()
 
         self.assertEqual(asset_count, 11)
+        self.assertEqual(deleted_asset_row, ("asset-10.png", "deleted"))
         self.assertTrue({"color", "favorite", "palette", "title", "type"}.issubset(metadata_keys))
         asset_metadata = {key: (value_type, json.loads(value_json)) for key, value_type, value_json in asset_rows}
         self.assertEqual(asset_metadata["color"], ("string", "#AA1122"))
@@ -105,6 +121,22 @@ class EagleLibraryChangerTests(unittest.TestCase):
         self.assertTrue(thumbnail_paths)
         self.assertTrue(all(Path(path).is_file() for path in thumbnail_paths))
         self.assertFalse(any(key.startswith("eagle") for key in metadata_keys))
+
+        self.assertFalse((output / "asset-10.png").exists())
+        self.assertTrue((output / ".momo" / "trash" / "asset-10.png").is_file())
+        trash_manifest = json.loads((output / ".momo" / "trash.json").read_text(encoding="utf-8"))
+        self.assertEqual(
+            trash_manifest["entries"],
+            [
+                {
+                    "originalPath": "asset-10.png",
+                    "trashPath": "asset-10.png",
+                    "deletedAt": trash_manifest["entries"][0]["deletedAt"],
+                    "kind": "file",
+                }
+            ],
+        )
+        self.assertRegex(trash_manifest["entries"][0]["deletedAt"], r"^\d{4}-\d{2}-\d{2}T")
 
     def test_smart_folders_convert_to_momobako_filters(self) -> None:
         source = self.create_smart_folder_library()
@@ -248,7 +280,7 @@ class EagleLibraryChangerTests(unittest.TestCase):
                         ]
                         if index == 0
                         else [],
-                        "isDeleted": False,
+                        "isDeleted": index == 10,
                     },
                     ensure_ascii=False,
                 ),
