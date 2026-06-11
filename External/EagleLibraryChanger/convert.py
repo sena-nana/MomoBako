@@ -30,7 +30,6 @@ UNSUPPORTED_CAPABILITIES = [
     "quickAccess",
     "tagsGroups",
     "文件夹 password / passwordTips",
-    "isDeleted 语义",
     "url",
     "原始时间字段与尺寸字段",
 ]
@@ -62,6 +61,7 @@ class AssetPlan:
     tags: list[str]
     note: str | None
     palette: list[str]
+    is_deleted: bool
     discarded_folder_names: list[str] = field(default_factory=list)
     missing_folder_ids: list[str] = field(default_factory=list)
 
@@ -350,17 +350,10 @@ def build_asset_plan(
                 "discardedFolders": discarded_folder_names,
             }
         )
-    if asset_metadata.get("isDeleted") is True:
-        warnings.append(
-            {
-                "type": "deletedAssetSemanticIgnored",
-                "assetId": asset_id,
-            }
-        )
-
     note = str(asset_metadata.get("annotation") or "").strip() or None
     tags = [str(tag).strip() for tag in asset_metadata.get("tags") or [] if str(tag).strip()]
     palette = normalize_eagle_palette(asset_metadata.get("palettes"))
+    is_deleted = asset_metadata.get("isDeleted") is True
     if source_thumbnail is None:
         warnings.append(
             {
@@ -382,6 +375,7 @@ def build_asset_plan(
         tags=dedupe_preserve_order(tags),
         note=note,
         palette=palette,
+        is_deleted=is_deleted,
         discarded_folder_names=discarded_folder_names,
         missing_folder_ids=missing_folder_ids,
     )
@@ -1033,6 +1027,7 @@ def build_report(
         "repoId": repo_id,
         "summary": {
             "assetCount": len(assets),
+            "deletedAssetCount": sum(1 for asset in assets if asset.is_deleted),
             "folderCount": count_folder_nodes(folder_nodes),
             "smartFolderCount": len(smart_folders),
             "skippedSmartFolderCount": len(skipped_smart_folders),
@@ -1048,6 +1043,9 @@ def build_report(
                 "sourceFile": str(asset.source_file),
                 "sourceThumbnail": str(asset.source_thumbnail) if asset.source_thumbnail else None,
                 "targetRelativePath": asset.target_relative_path,
+                "isDeleted": asset.is_deleted,
+                "status": asset_status(asset),
+                "trashRelativePath": asset_trash_relative_path(asset),
                 "title": asset.display_title,
                 "tags": asset.tags,
                 "hasNote": asset.note is not None,
@@ -1132,6 +1130,7 @@ def execute_plan(plan: ConversionPlan, force: bool) -> None:
     write_todo_file(todo_file_path())
     write_repository_metadata(plan)
     move_assets(plan)
+    write_trash_manifest(plan)
     write_database(plan)
     report_path = report_output_path(plan.output_root)
     report_path.write_text(json.dumps(plan.report, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -1377,7 +1376,7 @@ def write_repository_record(connection: sqlite3.Connection, plan: ConversionPlan
 
 
 def write_asset_record(connection: sqlite3.Connection, plan: ConversionPlan, asset: AssetPlan) -> None:
-    target_path = plan.output_root / asset.target_relative_path
+    target_path = asset_file_output_path(plan, asset)
     if not target_path.is_file():
         return
     stat = target_path.stat()
@@ -1394,7 +1393,7 @@ def write_asset_record(connection: sqlite3.Connection, plan: ConversionPlan, ass
           asset_id, repo_id, path, filename, extension, size_bytes,
           created_at, modified_at, hash, status, version, updated_at, thumbnail_path
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced', 1, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
         """,
         (
             asset_id,
@@ -1406,6 +1405,7 @@ def write_asset_record(connection: sqlite3.Connection, plan: ConversionPlan, ass
             created_at,
             modified_at,
             file_hash,
+            asset_status(asset),
             created_at,
             str(thumbnail_path) if thumbnail_path else None,
         ),
@@ -1501,7 +1501,7 @@ def write_smart_folder_record(
 
 def move_assets(plan: ConversionPlan) -> None:
     for asset in plan.assets:
-        target_file = plan.output_root / asset.target_relative_path
+        target_file = asset_file_output_path(plan, asset)
         target_file.parent.mkdir(parents=True, exist_ok=True)
         shutil.move(str(asset.source_file), str(target_file))
         if asset.source_thumbnail is not None:
@@ -1510,6 +1510,42 @@ def move_assets(plan: ConversionPlan) -> None:
             shutil.move(str(asset.source_thumbnail), str(thumbnail_target))
         if asset.source_info_dir.exists():
             shutil.rmtree(asset.source_info_dir)
+
+
+def asset_file_output_path(plan: ConversionPlan, asset: AssetPlan) -> Path:
+    trash_path = asset_trash_relative_path(asset)
+    if trash_path is not None:
+        return plan.output_root / REPO_META_DIR / "trash" / trash_path
+    return plan.output_root / asset.target_relative_path
+
+
+def asset_status(asset: AssetPlan) -> str:
+    return "deleted" if asset.is_deleted else "synced"
+
+
+def asset_trash_relative_path(asset: AssetPlan) -> str | None:
+    return asset.target_relative_path if asset.is_deleted else None
+
+
+def write_trash_manifest(plan: ConversionPlan) -> None:
+    deleted_assets = [asset for asset in plan.assets if asset.is_deleted]
+    if not deleted_assets:
+        return
+
+    timestamp = now_rfc3339()
+    manifest = {
+        "entries": [
+            {
+                "originalPath": asset.target_relative_path,
+                "trashPath": asset_trash_relative_path(asset),
+                "deletedAt": timestamp,
+                "kind": "file",
+            }
+            for asset in deleted_assets
+        ]
+    }
+    manifest_path = plan.output_root / REPO_META_DIR / "trash.json"
+    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def build_thumbnail_target_path(plan: ConversionPlan, asset: AssetPlan) -> Path:
