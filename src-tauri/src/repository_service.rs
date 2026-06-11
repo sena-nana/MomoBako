@@ -139,6 +139,78 @@ CREATE TABLE IF NOT EXISTS hardlink_candidates (
 CREATE UNIQUE INDEX IF NOT EXISTS idx_hardlink_candidates_unique
 ON hardlink_candidates(repo_id, new_asset_id, existing_asset_id);
 
+CREATE TABLE IF NOT EXISTS asset_alias_groups (
+  alias_group_id TEXT PRIMARY KEY,
+  repo_id TEXT NOT NULL,
+  source TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY(repo_id) REFERENCES repositories(repo_id)
+);
+
+CREATE TABLE IF NOT EXISTS asset_alias_members (
+  alias_group_id TEXT NOT NULL,
+  repo_id TEXT NOT NULL,
+  asset_id TEXT NOT NULL,
+  path TEXT NOT NULL,
+  role TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  PRIMARY KEY(repo_id, asset_id),
+  FOREIGN KEY(alias_group_id) REFERENCES asset_alias_groups(alias_group_id),
+  FOREIGN KEY(asset_id) REFERENCES assets(asset_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_asset_alias_members_group
+ON asset_alias_members(repo_id, alias_group_id, path);
+
+CREATE TABLE IF NOT EXISTS repository_shortcuts (
+  shortcut_id TEXT PRIMARY KEY,
+  repo_id TEXT NOT NULL,
+  label TEXT NOT NULL,
+  target_kind TEXT NOT NULL,
+  target_path TEXT,
+  target_id TEXT,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  FOREIGN KEY(repo_id) REFERENCES repositories(repo_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_repository_shortcuts_repo_order
+ON repository_shortcuts(repo_id, sort_order, label);
+
+CREATE TABLE IF NOT EXISTS tag_groups (
+  tag_group_id TEXT PRIMARY KEY,
+  repo_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY(repo_id) REFERENCES repositories(repo_id)
+);
+
+CREATE TABLE IF NOT EXISTS tag_group_members (
+  tag_group_id TEXT NOT NULL,
+  repo_id TEXT NOT NULL,
+  tag TEXT NOT NULL,
+  normalized_tag TEXT NOT NULL,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY(tag_group_id, normalized_tag),
+  FOREIGN KEY(tag_group_id) REFERENCES tag_groups(tag_group_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_tag_group_members_repo_tag
+ON tag_group_members(repo_id, normalized_tag);
+
+CREATE TABLE IF NOT EXISTS folder_metadata (
+  repo_id TEXT NOT NULL,
+  path TEXT NOT NULL,
+  protected INTEGER NOT NULL DEFAULT 0,
+  password_tip TEXT,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY(repo_id, path),
+  FOREIGN KEY(repo_id) REFERENCES repositories(repo_id)
+);
+
 CREATE TABLE IF NOT EXISTS entry_thumbnails (
   repo_id TEXT NOT NULL,
   path TEXT NOT NULL,
@@ -276,6 +348,31 @@ pub struct FolderSummary {
 
 #[derive(Debug, Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
+pub struct RepositoryShortcut {
+    pub shortcut_id: String,
+    pub label: String,
+    pub target_kind: String,
+    pub target_path: Option<String>,
+    pub target_id: Option<String>,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct RepositoryTagGroup {
+    pub tag_group_id: String,
+    pub name: String,
+    pub tags: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct FolderMetadata {
+    pub protected: bool,
+    pub password_tip: Option<String>,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
 pub struct MetadataEntry {
     pub key: String,
     pub value_type: String,
@@ -331,6 +428,8 @@ pub struct RepositorySnapshot {
     pub folder_label: String,
     pub folders: Vec<FolderSummary>,
     pub assets: Vec<AssetSummary>,
+    pub quick_access: Vec<RepositoryShortcut>,
+    pub tag_groups: Vec<RepositoryTagGroup>,
     pub metadata_fields: Vec<String>,
     pub recent_revision_count: i64,
     pub overview: RepositoryOverview,
@@ -370,6 +469,9 @@ pub struct FileBrowserEntry {
     pub thumbnail_custom: bool,
     pub hardlink_group_id: Option<String>,
     pub hardlink_state: Option<String>,
+    pub tags: Vec<String>,
+    pub alias_paths: Vec<String>,
+    pub folder_metadata: Option<FolderMetadata>,
     pub metadata: BTreeMap<String, serde_json::Value>,
 }
 
@@ -745,6 +847,29 @@ pub struct SearchMetadataFilter {
     pub value: String,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchNumberFilter {
+    pub key: String,
+    pub min: Option<f64>,
+    pub max: Option<f64>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchDateFilter {
+    pub key: String,
+    pub from: Option<String>,
+    pub to: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchSort {
+    pub field: String,
+    pub direction: String,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SearchRequest {
@@ -755,8 +880,16 @@ pub struct SearchRequest {
     pub tag: Option<String>,
     pub tags: Option<Vec<String>>,
     pub metadata_filters: Option<Vec<SearchMetadataFilter>>,
+    pub exclude_tags: Option<Vec<String>>,
+    pub exclude_formats: Option<Vec<String>>,
+    pub exclude_metadata_filters: Option<Vec<SearchMetadataFilter>>,
+    pub number_filters: Option<Vec<SearchNumberFilter>>,
+    pub date_filters: Option<Vec<SearchDateFilter>>,
     pub formats: Option<Vec<String>>,
     pub min_rating: Option<f64>,
+    pub match_mode: Option<String>,
+    pub sort: Option<SearchSort>,
+    pub limit: Option<usize>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
@@ -769,7 +902,15 @@ pub struct SmartFolderFilter {
     pub colors: Option<Vec<String>>,
     pub shapes: Option<Vec<String>>,
     pub metadata_filters: Option<Vec<SearchMetadataFilter>>,
+    pub exclude_tags: Option<Vec<String>>,
+    pub exclude_formats: Option<Vec<String>>,
+    pub exclude_metadata_filters: Option<Vec<SearchMetadataFilter>>,
+    pub number_filters: Option<Vec<SearchNumberFilter>>,
+    pub date_filters: Option<Vec<SearchDateFilter>>,
     pub min_rating: Option<f64>,
+    pub match_mode: Option<String>,
+    pub sort: Option<SearchSort>,
+    pub limit: Option<usize>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -1455,6 +1596,8 @@ impl RepositoryState {
             &thumbnail_root,
             load_assets(&connection, repo_id).map_err(db_error)?,
         )?;
+        let quick_access = load_repository_shortcuts(&connection, repo_id).map_err(db_error)?;
+        let tag_groups = load_repository_tag_groups(&connection, repo_id).map_err(db_error)?;
         let metadata_fields = load_metadata_fields(&connection).map_err(db_error)?;
         let recent_revision_count: i64 = connection
             .query_row("SELECT COUNT(*) FROM revisions", [], |row| row.get(0))
@@ -1469,6 +1612,8 @@ impl RepositoryState {
             folder_label: dominant_folder_label(&folders, &assets),
             folders,
             assets,
+            quick_access,
+            tag_groups,
             metadata_fields,
             recent_revision_count,
             overview,
@@ -1512,6 +1657,8 @@ impl RepositoryState {
             &thumbnail_root,
             load_entry_thumbnail_map(&connection, &request.repo_id).map_err(db_error)?,
         )?;
+        let folder_metadata =
+            load_folder_metadata_map(&connection, &request.repo_id).map_err(db_error)?;
         let special_location = normalize_special_location(request.special_location.as_deref())?;
         if special_location.is_some() && repo.backend_record.plugin_id != LOCAL_FILESYSTEM_PLUGIN_ID
         {
@@ -1539,9 +1686,11 @@ impl RepositoryState {
                 &current_path,
                 &asset_map,
                 &thumbnail_map,
+                &folder_metadata,
             )?
         };
-        let entries = attach_browser_entry_metadata(&connection, entries).map_err(db_error)?;
+        let entries =
+            attach_browser_entry_metadata(&connection, &request.repo_id, entries).map_err(db_error)?;
 
         Ok(FileBrowserSnapshot {
             repo_id: request.repo_id,
@@ -2071,59 +2220,79 @@ impl RepositoryState {
             });
         }
 
-        let before_map =
-            load_metadata_map_from_transaction(&tx, &request.asset_id).map_err(db_error)?;
+        let target_asset_ids =
+            load_alias_member_asset_ids(&tx, &request.repo_id, &request.asset_id).map_err(db_error)?;
+        let sync_tags = request.metadata.contains_key("tagGroups");
+        let synced_tags = if sync_tags {
+            metadata_tags_from_tag_groups(request.metadata.get("tagGroups"))
+        } else {
+            Vec::new()
+        };
         let now = now_rfc3339();
-        let next_version = current_version + 1;
+        let source = request.source.unwrap_or_else(|| "desktop".to_string());
 
-        for (key, value) in &request.metadata {
-            let value_type = infer_value_type(value);
+        for target_asset_id in &target_asset_ids {
+            let before_map =
+                load_metadata_map_from_transaction(&tx, target_asset_id).map_err(db_error)?;
+            for (key, value) in &request.metadata {
+                let value_type = infer_value_type(value);
+                tx.execute(
+                    r#"
+                    INSERT INTO metadata (asset_id, key, value_type, value_json, version, updated_at)
+                    VALUES (?1, ?2, ?3, ?4, 1, ?5)
+                    ON CONFLICT(asset_id, key)
+                    DO UPDATE SET
+                      value_type = excluded.value_type,
+                      value_json = excluded.value_json,
+                      version = metadata.version + 1,
+                      updated_at = excluded.updated_at
+                    "#,
+                    params![target_asset_id, key, value_type, value.to_string(), now],
+                )
+                .map_err(db_error)?;
+            }
+            if sync_tags {
+                replace_asset_tags(&tx, target_asset_id, &synced_tags).map_err(db_error)?;
+            }
+
+            let target_version: i64 = tx
+                .query_row(
+                    "SELECT version + 1 FROM assets WHERE repo_id = ?1 AND asset_id = ?2",
+                    params![request.repo_id, target_asset_id],
+                    |row| row.get(0),
+                )
+                .map_err(db_error)?;
             tx.execute(
                 r#"
-                INSERT INTO metadata (asset_id, key, value_type, value_json, version, updated_at)
-                VALUES (?1, ?2, ?3, ?4, 1, ?5)
-                ON CONFLICT(asset_id, key)
-                DO UPDATE SET
-                  value_type = excluded.value_type,
-                  value_json = excluded.value_json,
-                  version = metadata.version + 1,
-                  updated_at = excluded.updated_at
+                UPDATE assets
+                SET version = ?3, updated_at = ?4, modified_at = ?4
+                WHERE repo_id = ?1 AND asset_id = ?2
                 "#,
-                params![request.asset_id, key, value_type, value.to_string(), now],
+                params![request.repo_id, target_asset_id, target_version, now],
+            )
+            .map_err(db_error)?;
+
+            let after_map =
+                load_metadata_map_from_transaction(&tx, target_asset_id).map_err(db_error)?;
+            tx.execute(
+                r#"
+                INSERT INTO revisions (
+                  revision_id, repo_id, asset_id, timestamp, operation, before_json, after_json, source
+                )
+                VALUES (?1, ?2, ?3, ?4, 'metadata.updated', ?5, ?6, ?7)
+                "#,
+                params![
+                    format!("rev-{}-{}", target_asset_id, target_version),
+                    request.repo_id,
+                    target_asset_id,
+                    now,
+                    serde_json::to_string(&before_map).map_err(json_error)?,
+                    serde_json::to_string(&after_map).map_err(json_error)?,
+                    &source
+                ],
             )
             .map_err(db_error)?;
         }
-
-        tx.execute(
-            r#"
-            UPDATE assets
-            SET version = ?3, updated_at = ?4, modified_at = ?4
-            WHERE repo_id = ?1 AND asset_id = ?2
-            "#,
-            params![request.repo_id, request.asset_id, next_version, now],
-        )
-        .map_err(db_error)?;
-
-        let after_map =
-            load_metadata_map_from_transaction(&tx, &request.asset_id).map_err(db_error)?;
-        tx.execute(
-            r#"
-            INSERT INTO revisions (
-              revision_id, repo_id, asset_id, timestamp, operation, before_json, after_json, source
-            )
-            VALUES (?1, ?2, ?3, ?4, 'metadata.updated', ?5, ?6, ?7)
-            "#,
-            params![
-                format!("rev-{}-{}", request.asset_id, next_version),
-                request.repo_id,
-                request.asset_id,
-                now,
-                serde_json::to_string(&before_map).map_err(json_error)?,
-                serde_json::to_string(&after_map).map_err(json_error)?,
-                request.source.unwrap_or_else(|| "desktop".to_string())
-            ],
-        )
-        .map_err(db_error)?;
 
         tx.commit().map_err(db_error)?;
         let asset = self.load_asset_detail(&request.repo_id, &request.asset_id)?;
@@ -3560,6 +3729,67 @@ fn load_folder_summaries(
     rows.collect::<Result<Vec<_>, _>>()
 }
 
+fn load_repository_shortcuts(
+    connection: &Connection,
+    repo_id: &str,
+) -> Result<Vec<RepositoryShortcut>, rusqlite::Error> {
+    let mut stmt = connection.prepare(
+        r#"
+        SELECT shortcut_id, label, target_kind, target_path, target_id
+        FROM repository_shortcuts
+        WHERE repo_id = ?1
+        ORDER BY sort_order, label COLLATE NOCASE
+        "#,
+    )?;
+    let rows = stmt.query_map([repo_id], |row| {
+        Ok(RepositoryShortcut {
+            shortcut_id: row.get(0)?,
+            label: row.get(1)?,
+            target_kind: row.get(2)?,
+            target_path: row.get(3)?,
+            target_id: row.get(4)?,
+        })
+    })?;
+    rows.collect::<Result<Vec<_>, _>>()
+}
+
+fn load_repository_tag_groups(
+    connection: &Connection,
+    repo_id: &str,
+) -> Result<Vec<RepositoryTagGroup>, rusqlite::Error> {
+    let mut group_stmt = connection.prepare(
+        r#"
+        SELECT tag_group_id, name
+        FROM tag_groups
+        WHERE repo_id = ?1
+        ORDER BY sort_order, name COLLATE NOCASE
+        "#,
+    )?;
+    let group_rows = group_stmt.query_map([repo_id], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    })?;
+    let groups = group_rows.collect::<Result<Vec<_>, _>>()?;
+    let mut result = Vec::new();
+    for (tag_group_id, name) in groups {
+        let mut member_stmt = connection.prepare(
+            r#"
+            SELECT tag
+            FROM tag_group_members
+            WHERE repo_id = ?1 AND tag_group_id = ?2
+            ORDER BY sort_order, tag COLLATE NOCASE
+            "#,
+        )?;
+        let member_rows =
+            member_stmt.query_map(params![repo_id, tag_group_id.as_str()], |row| row.get(0))?;
+        result.push(RepositoryTagGroup {
+            tag_group_id,
+            name,
+            tags: member_rows.collect::<Result<Vec<String>, _>>()?,
+        });
+    }
+    Ok(result)
+}
+
 fn load_assets(
     connection: &Connection,
     repo_id: &str,
@@ -3692,10 +3922,12 @@ fn load_metadata_map(
     asset_id: &str,
 ) -> Result<BTreeMap<String, serde_json::Value>, rusqlite::Error> {
     let entries = load_metadata_entries(connection, asset_id)?;
-    Ok(entries
+    let mut metadata = entries
         .into_iter()
         .map(|entry| (entry.key, entry.value))
-        .collect::<BTreeMap<_, _>>())
+        .collect::<BTreeMap<_, _>>();
+    normalize_loaded_metadata(&mut metadata);
+    Ok(metadata)
 }
 
 fn load_metadata_maps_for_assets(
@@ -3731,7 +3963,83 @@ fn load_metadata_maps_for_assets(
             .or_insert_with(BTreeMap::new)
             .insert(key, value);
     }
+    for metadata in map.values_mut() {
+        normalize_loaded_metadata(metadata);
+    }
     Ok(map)
+}
+
+fn load_alias_paths_for_assets(
+    connection: &Connection,
+    repo_id: &str,
+    asset_ids: &[String],
+) -> Result<BTreeMap<String, Vec<String>>, rusqlite::Error> {
+    if asset_ids.is_empty() {
+        return Ok(BTreeMap::new());
+    }
+    let placeholders = std::iter::repeat("?")
+        .take(asset_ids.len())
+        .collect::<Vec<_>>()
+        .join(", ");
+    let mut stmt = connection.prepare(&format!(
+        r#"
+        WITH selected_assets(asset_id) AS (
+          SELECT asset_id FROM assets WHERE asset_id IN ({placeholders})
+        ),
+        selected_groups(alias_group_id) AS (
+          SELECT DISTINCT alias_group_id
+          FROM asset_alias_members
+          WHERE repo_id = ? AND asset_id IN (SELECT asset_id FROM selected_assets)
+        )
+        SELECT selected_assets.asset_id, member.path
+        FROM selected_assets
+        JOIN asset_alias_members selected_member
+          ON selected_member.repo_id = ? AND selected_member.asset_id = selected_assets.asset_id
+        JOIN asset_alias_members member
+          ON member.repo_id = selected_member.repo_id
+         AND member.alias_group_id = selected_member.alias_group_id
+        JOIN selected_groups
+          ON selected_groups.alias_group_id = member.alias_group_id
+        ORDER BY member.role DESC, member.path COLLATE NOCASE
+        "#
+    ))?;
+    let params = asset_ids
+        .iter()
+        .map(String::as_str)
+        .chain(std::iter::once(repo_id))
+        .chain(std::iter::once(repo_id));
+    let rows = stmt.query_map(rusqlite::params_from_iter(params), |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    })?;
+    let mut map: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for row in rows {
+        let (asset_id, path) = row?;
+        map.entry(asset_id).or_default().push(path);
+    }
+    Ok(map)
+}
+
+fn load_folder_metadata_map(
+    connection: &Connection,
+    repo_id: &str,
+) -> Result<BTreeMap<String, FolderMetadata>, rusqlite::Error> {
+    let mut stmt = connection.prepare(
+        r#"
+        SELECT path, protected, password_tip
+        FROM folder_metadata
+        WHERE repo_id = ?1
+        "#,
+    )?;
+    let rows = stmt.query_map([repo_id], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            FolderMetadata {
+                protected: row.get::<_, i64>(1)? != 0,
+                password_tip: row.get(2)?,
+            },
+        ))
+    })?;
+    rows.collect::<Result<BTreeMap<_, _>, _>>()
 }
 
 fn load_metadata_map_from_transaction(
@@ -3754,7 +4062,158 @@ fn load_metadata_map_from_transaction(
     })?;
 
     let pairs = rows.collect::<Result<Vec<_>, _>>()?;
-    Ok(pairs.into_iter().collect::<BTreeMap<_, _>>())
+    let mut metadata = pairs.into_iter().collect::<BTreeMap<_, _>>();
+    normalize_loaded_metadata(&mut metadata);
+    Ok(metadata)
+}
+
+fn normalize_loaded_metadata(metadata: &mut BTreeMap<String, serde_json::Value>) {
+    let comment_is_empty = metadata
+        .get("comment")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .unwrap_or_default()
+        .is_empty();
+    if comment_is_empty {
+        if let Some(note) = metadata.get("note").and_then(|value| value.as_str()) {
+            if !note.trim().is_empty() {
+                metadata.insert(
+                    "comment".to_string(),
+                    serde_json::Value::String(note.to_string()),
+                );
+            }
+        }
+    }
+}
+
+fn normalize_metadata_entries(mut entries: Vec<MetadataEntry>) -> Vec<MetadataEntry> {
+    let comment_is_empty = entries
+        .iter()
+        .find(|entry| entry.key == "comment")
+        .and_then(|entry| entry.value.as_str())
+        .map(str::trim)
+        .unwrap_or_default()
+        .is_empty();
+    if !comment_is_empty {
+        return entries;
+    }
+    let Some(note) = entries
+        .iter()
+        .find(|entry| entry.key == "note")
+        .and_then(|entry| entry.value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+    else {
+        return entries;
+    };
+    if let Some(comment) = entries.iter_mut().find(|entry| entry.key == "comment") {
+        comment.value = serde_json::Value::String(note);
+    } else {
+        entries.push(MetadataEntry {
+            key: "comment".to_string(),
+            value_type: "string".to_string(),
+            value: serde_json::Value::String(note),
+            version: 1,
+            updated_at: now_rfc3339(),
+        });
+        entries.sort_by(|left, right| left.key.to_lowercase().cmp(&right.key.to_lowercase()));
+    }
+    entries
+}
+
+fn load_alias_member_asset_ids(
+    tx: &Transaction<'_>,
+    repo_id: &str,
+    asset_id: &str,
+) -> Result<Vec<String>, rusqlite::Error> {
+    let alias_group_id = tx
+        .query_row(
+            r#"
+            SELECT alias_group_id
+            FROM asset_alias_members
+            WHERE repo_id = ?1 AND asset_id = ?2
+            "#,
+            params![repo_id, asset_id],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()?;
+
+    let Some(alias_group_id) = alias_group_id else {
+        return Ok(vec![asset_id.to_string()]);
+    };
+
+    let mut stmt = tx.prepare(
+        r#"
+        SELECT asset_id
+        FROM asset_alias_members
+        WHERE repo_id = ?1 AND alias_group_id = ?2
+        ORDER BY role DESC, path COLLATE NOCASE
+        "#,
+    )?;
+    let rows = stmt.query_map(params![repo_id, alias_group_id], |row| row.get(0))?;
+    let mut asset_ids = rows.collect::<Result<Vec<String>, _>>()?;
+    if !asset_ids.iter().any(|item| item == asset_id) {
+        asset_ids.push(asset_id.to_string());
+    }
+    Ok(asset_ids)
+}
+
+fn metadata_tags_from_tag_groups(value: Option<&serde_json::Value>) -> Vec<String> {
+    let mut tags = Vec::new();
+    if let Some(value) = value {
+        collect_metadata_tags(value, &mut tags);
+    }
+    let mut seen = HashSet::new();
+    tags.into_iter()
+        .map(|tag| tag.trim().to_string())
+        .filter(|tag| !tag.is_empty())
+        .filter(|tag| seen.insert(tag.to_lowercase()))
+        .collect()
+}
+
+fn collect_metadata_tags(value: &serde_json::Value, tags: &mut Vec<String>) {
+    match value {
+        serde_json::Value::String(tag) => tags.push(tag.clone()),
+        serde_json::Value::Array(items) => {
+            for item in items {
+                collect_metadata_tags(item, tags);
+            }
+        }
+        serde_json::Value::Object(map) => {
+            for key in ["tags", "items", "children"] {
+                if let Some(value) = map.get(key) {
+                    collect_metadata_tags(value, tags);
+                }
+            }
+            if let Some(label) = map
+                .get("label")
+                .or_else(|| map.get("name"))
+                .and_then(|value| value.as_str())
+            {
+                tags.push(label.to_string());
+            }
+        }
+        _ => {}
+    }
+}
+
+fn replace_asset_tags(
+    tx: &Transaction<'_>,
+    asset_id: &str,
+    tags: &[String],
+) -> Result<(), rusqlite::Error> {
+    tx.execute("DELETE FROM tags WHERE asset_id = ?1", [asset_id])?;
+    for tag in tags {
+        tx.execute(
+            r#"
+            INSERT OR REPLACE INTO tags (asset_id, tag, normalized_tag)
+            VALUES (?1, ?2, ?3)
+            "#,
+            params![asset_id, tag, tag.to_lowercase()],
+        )?;
+    }
+    Ok(())
 }
 
 fn load_revision_entries(
@@ -3808,7 +4267,7 @@ fn load_asset_detail_from_connection(
 ) -> Result<AssetDetail, rusqlite::Error> {
     let summary = load_asset_summary(connection, repo_id, asset_id)?
         .ok_or_else(|| rusqlite::Error::QueryReturnedNoRows)?;
-    let metadata = load_metadata_entries(connection, asset_id)?;
+    let metadata = normalize_metadata_entries(load_metadata_entries(connection, asset_id)?);
     let revisions = load_revision_entries(connection, asset_id)?;
 
     Ok(AssetDetail {
@@ -3845,7 +4304,7 @@ fn load_asset_detail_from_transaction(
             updated_at: row.get(4)?,
         })
     })?;
-    let metadata = metadata_rows.collect::<Result<Vec<_>, _>>()?;
+    let metadata = normalize_metadata_entries(metadata_rows.collect::<Result<Vec<_>, _>>()?);
 
     let mut revision_stmt = tx.prepare(
         r#"
@@ -4062,64 +4521,10 @@ fn search_repository_assets(
 
     for asset in assets {
         let metadata = load_metadata_map(connection, &asset.asset_id)?;
-        let haystack = build_search_haystack(repo, &asset, &metadata);
-        if !query.is_empty() && !haystack.contains(query) {
+        if asset.status == "deleted" {
             continue;
         }
-        if let Some(formats) = &request.formats {
-            let formats = normalized_filter_values(formats);
-            if !formats.is_empty() && !formats.contains(&asset.extension.to_lowercase()) {
-                continue;
-            }
-        }
-        if let Some(tag) = &request.tag {
-            if !asset
-                .tags
-                .iter()
-                .any(|item| item.to_lowercase().contains(&tag.to_lowercase()))
-            {
-                continue;
-            }
-        }
-        if let Some(tags) = &request.tags {
-            let tags = normalized_filter_values(tags);
-            if !tags.is_empty()
-                && !asset.tags.iter().any(|item| {
-                    let normalized_tag = item.to_lowercase();
-                    tags.iter().any(|tag| normalized_tag.contains(tag))
-                })
-            {
-                continue;
-            }
-        }
-        if let Some(metadata_key) = &request.metadata_key {
-            let Some(value) = metadata.get(metadata_key) else {
-                continue;
-            };
-            if let Some(expected) = &request.metadata_value {
-                if !json_value_to_search_text(value)
-                    .to_lowercase()
-                    .contains(&expected.to_lowercase())
-                {
-                    continue;
-                }
-            }
-        }
-        if let Some(filters) = &request.metadata_filters {
-            if !metadata_filters_match(&metadata, filters) {
-                continue;
-            }
-        }
-        if let Some(min_rating) = request.min_rating {
-            let rating = metadata
-                .get("rating")
-                .and_then(|value| value.as_f64())
-                .unwrap_or_default();
-            if rating < min_rating {
-                continue;
-            }
-        }
-        if asset.status == "deleted" {
+        if !search_filter_matches(repo, &asset, &metadata, query, request) {
             continue;
         }
 
@@ -4135,7 +4540,229 @@ fn search_repository_assets(
         });
     }
 
+    sort_search_hits(&mut results, request.sort.as_ref());
+    if let Some(limit) = request.limit.filter(|value| *value > 0) {
+        results.truncate(limit);
+    }
+
     Ok(results)
+}
+
+fn search_filter_matches(
+    repo: &RepositorySummary,
+    asset: &AssetSummary,
+    metadata: &BTreeMap<String, serde_json::Value>,
+    query: &str,
+    request: &SearchRequest,
+) -> bool {
+    let mut include_matches = Vec::new();
+    push_query_match(&mut include_matches, repo, asset, metadata, Some(query));
+    push_format_match(&mut include_matches, &asset.extension, request.formats.as_ref());
+    push_legacy_tag_match(&mut include_matches, &asset.tags, request.tag.as_deref());
+    push_tag_match(&mut include_matches, &asset.tags, request.tags.as_ref());
+    push_legacy_metadata_match(
+        &mut include_matches,
+        metadata,
+        request.metadata_key.as_deref(),
+        request.metadata_value.as_deref(),
+    );
+    push_metadata_match(&mut include_matches, metadata, request.metadata_filters.as_ref());
+    push_number_match(&mut include_matches, metadata, request.number_filters.as_ref());
+    push_date_match(&mut include_matches, metadata, request.date_filters.as_ref());
+    push_rating_match(&mut include_matches, metadata, request.min_rating);
+
+    if !combine_include_matches(&include_matches, request.match_mode.as_deref()) {
+        return false;
+    }
+
+    !matches_excluded_filters(
+        &asset.tags,
+        &asset.extension,
+        metadata,
+        request.exclude_tags.as_ref(),
+        request.exclude_formats.as_ref(),
+        request.exclude_metadata_filters.as_ref(),
+    )
+}
+
+fn push_query_match(
+    include_matches: &mut Vec<bool>,
+    repo: &RepositorySummary,
+    asset: &AssetSummary,
+    metadata: &BTreeMap<String, serde_json::Value>,
+    query: Option<&str>,
+) {
+    let terms = query_terms(query);
+    if terms.is_empty() {
+        return;
+    }
+    let haystack = build_search_haystack(repo, asset, metadata);
+    include_matches.push(terms.iter().all(|term| haystack.contains(term)));
+}
+
+fn push_path_prefix_match(
+    include_matches: &mut Vec<bool>,
+    asset: &AssetSummary,
+    path_prefix: Option<&str>,
+) {
+    let prefixes = query_terms(path_prefix);
+    if prefixes.is_empty() {
+        return;
+    }
+    include_matches.push(
+        prefixes
+            .iter()
+            .all(|prefix| asset.path == *prefix || asset.path.starts_with(&format!("{prefix}/"))),
+    );
+}
+
+fn push_format_match(
+    include_matches: &mut Vec<bool>,
+    extension: &str,
+    formats: Option<&Vec<String>>,
+) {
+    let formats = formats.map_or_else(Vec::new, |values| normalized_filter_values(values));
+    if formats.is_empty() {
+        return;
+    }
+    include_matches.push(formats.contains(&extension.to_lowercase()));
+}
+
+fn push_legacy_tag_match(
+    include_matches: &mut Vec<bool>,
+    asset_tags: &[String],
+    tag: Option<&str>,
+) {
+    let Some(tag) = tag.map(str::trim).filter(|value| !value.is_empty()) else {
+        return;
+    };
+    let tag = tag.to_lowercase();
+    include_matches.push(
+        asset_tags
+            .iter()
+            .any(|item| item.to_lowercase().contains(&tag)),
+    );
+}
+
+fn push_tag_match(
+    include_matches: &mut Vec<bool>,
+    asset_tags: &[String],
+    tags: Option<&Vec<String>>,
+) {
+    let tags = tags.map_or_else(Vec::new, |values| normalized_filter_values(values));
+    if tags.is_empty() {
+        return;
+    }
+    include_matches.push(tags_match(asset_tags, &tags, Some("and")));
+}
+
+fn push_legacy_metadata_match(
+    include_matches: &mut Vec<bool>,
+    metadata: &BTreeMap<String, serde_json::Value>,
+    metadata_key: Option<&str>,
+    metadata_value: Option<&str>,
+) {
+    let Some(key) = metadata_key.map(str::trim).filter(|value| !value.is_empty()) else {
+        return;
+    };
+    let matched = metadata.get(key).is_some_and(|value| {
+        metadata_value
+            .map(str::trim)
+            .filter(|expected| !expected.is_empty())
+            .is_none_or(|expected| {
+                json_value_to_search_text(value)
+                    .to_lowercase()
+                    .contains(&expected.to_lowercase())
+            })
+    });
+    include_matches.push(matched);
+}
+
+fn push_metadata_match(
+    include_matches: &mut Vec<bool>,
+    metadata: &BTreeMap<String, serde_json::Value>,
+    filters: Option<&Vec<SearchMetadataFilter>>,
+) {
+    let Some(filters) = filters else {
+        return;
+    };
+    if has_active_metadata_filters(filters) {
+        include_matches.push(metadata_filters_match_with_mode(metadata, filters, Some("and")));
+    }
+}
+
+fn push_number_match(
+    include_matches: &mut Vec<bool>,
+    metadata: &BTreeMap<String, serde_json::Value>,
+    filters: Option<&Vec<SearchNumberFilter>>,
+) {
+    let Some(filters) = filters else {
+        return;
+    };
+    if has_active_number_filters(filters) {
+        include_matches.push(number_filters_match(metadata, filters));
+    }
+}
+
+fn push_date_match(
+    include_matches: &mut Vec<bool>,
+    metadata: &BTreeMap<String, serde_json::Value>,
+    filters: Option<&Vec<SearchDateFilter>>,
+) {
+    let Some(filters) = filters else {
+        return;
+    };
+    if has_active_date_filters(filters) {
+        include_matches.push(date_filters_match(metadata, filters));
+    }
+}
+
+fn push_rating_match(
+    include_matches: &mut Vec<bool>,
+    metadata: &BTreeMap<String, serde_json::Value>,
+    min_rating: Option<f64>,
+) {
+    let Some(min_rating) = min_rating else {
+        return;
+    };
+    let rating = metadata
+        .get("rating")
+        .and_then(|value| value.as_f64())
+        .unwrap_or_default();
+    include_matches.push(rating >= min_rating);
+}
+
+fn combine_include_matches(matches: &[bool], match_mode: Option<&str>) -> bool {
+    if matches.is_empty() {
+        true
+    } else if is_or_match_mode(match_mode) {
+        matches.iter().any(|matched| *matched)
+    } else {
+        matches.iter().all(|matched| *matched)
+    }
+}
+
+fn matches_excluded_filters(
+    asset_tags: &[String],
+    extension: &str,
+    metadata: &BTreeMap<String, serde_json::Value>,
+    exclude_tags: Option<&Vec<String>>,
+    exclude_formats: Option<&Vec<String>>,
+    exclude_metadata_filters: Option<&Vec<SearchMetadataFilter>>,
+) -> bool {
+    let tags = exclude_tags.map_or_else(Vec::new, |values| normalized_filter_values(values));
+    if !tags.is_empty() && tags_match(asset_tags, &tags, Some("or")) {
+        return true;
+    }
+
+    let formats = exclude_formats.map_or_else(Vec::new, |values| normalized_filter_values(values));
+    if !formats.is_empty() && formats.contains(&extension.to_lowercase()) {
+        return true;
+    }
+
+    exclude_metadata_filters.is_some_and(|filters| {
+        has_active_metadata_filters(filters) && metadata_filters_match_with_mode(metadata, filters, Some("or"))
+    })
 }
 
 fn normalized_filter_values(values: &[String]) -> Vec<String> {
@@ -4146,10 +4773,34 @@ fn normalized_filter_values(values: &[String]) -> Vec<String> {
         .collect()
 }
 
-fn metadata_filters_match(
-    metadata: &BTreeMap<String, serde_json::Value>,
-    filters: &[SearchMetadataFilter],
-) -> bool {
+fn tags_match(asset_tags: &[String], filters: &[String], match_mode: Option<&str>) -> bool {
+    let matches = |filter: &String| {
+        asset_tags.iter().any(|item| {
+            let normalized_tag = item.to_lowercase();
+            normalized_tag.contains(filter)
+        })
+    };
+    if is_or_match_mode(match_mode) {
+        filters.iter().any(matches)
+    } else {
+        filters.iter().all(matches)
+    }
+}
+
+fn query_terms(value: Option<&str>) -> Vec<String> {
+    value
+        .map(|value| {
+            value
+                .lines()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(|value| value.to_lowercase())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn metadata_filter_groups(filters: &[SearchMetadataFilter]) -> BTreeMap<String, Vec<String>> {
     let mut grouped_filters = BTreeMap::<String, Vec<String>>::new();
     for filter in filters {
         let key = filter.key.trim();
@@ -4162,8 +4813,23 @@ fn metadata_filters_match(
             .or_default()
             .push(value.to_lowercase());
     }
+    grouped_filters
+}
 
-    grouped_filters.into_iter().all(|(key, expected_values)| {
+fn has_active_metadata_filters(filters: &[SearchMetadataFilter]) -> bool {
+    filters.iter().any(|filter| {
+        !filter.key.trim().is_empty() && !filter.value.trim().is_empty()
+    })
+}
+
+fn metadata_filters_match_with_mode(
+    metadata: &BTreeMap<String, serde_json::Value>,
+    filters: &[SearchMetadataFilter],
+    match_mode: Option<&str>,
+) -> bool {
+    let grouped_filters = metadata_filter_groups(filters);
+
+    let matcher = |(key, expected_values): (String, Vec<String>)| {
         let Some(actual_value) = metadata.get(&key) else {
             return false;
         };
@@ -4171,7 +4837,122 @@ fn metadata_filters_match(
         expected_values
             .iter()
             .any(|expected| actual_text == *expected || actual_text.contains(expected))
+    };
+    if is_or_match_mode(match_mode) {
+        grouped_filters.into_iter().any(matcher)
+    } else {
+        grouped_filters.into_iter().all(matcher)
+    }
+}
+
+fn number_filters_match(
+    metadata: &BTreeMap<String, serde_json::Value>,
+    filters: &[SearchNumberFilter],
+) -> bool {
+    filters.iter().all(|filter| {
+        let key = filter.key.trim();
+        if key.is_empty() {
+            return true;
+        }
+        let Some(value) = metadata.get(key).and_then(|value| value.as_f64()) else {
+            return false;
+        };
+        if filter.min.is_some_and(|min| value < min) {
+            return false;
+        }
+        if filter.max.is_some_and(|max| value > max) {
+            return false;
+        }
+        true
     })
+}
+
+fn has_active_number_filters(filters: &[SearchNumberFilter]) -> bool {
+    filters
+        .iter()
+        .any(|filter| !filter.key.trim().is_empty() && (filter.min.is_some() || filter.max.is_some()))
+}
+
+fn date_filters_match(
+    metadata: &BTreeMap<String, serde_json::Value>,
+    filters: &[SearchDateFilter],
+) -> bool {
+    filters.iter().all(|filter| {
+        let key = filter.key.trim();
+        if key.is_empty() {
+            return true;
+        }
+        let Some(value) = metadata
+            .get(key)
+            .and_then(|value| value.as_str())
+            .and_then(parse_rfc3339_timestamp)
+        else {
+            return false;
+        };
+        if filter
+            .from
+            .as_deref()
+            .and_then(parse_rfc3339_timestamp)
+            .is_some_and(|from| value < from)
+        {
+            return false;
+        }
+        if filter
+            .to
+            .as_deref()
+            .and_then(parse_rfc3339_timestamp)
+            .is_some_and(|to| value > to)
+        {
+            return false;
+        }
+        true
+    })
+}
+
+fn has_active_date_filters(filters: &[SearchDateFilter]) -> bool {
+    filters
+        .iter()
+        .any(|filter| !filter.key.trim().is_empty() && (filter.from.is_some() || filter.to.is_some()))
+}
+
+fn parse_rfc3339_timestamp(value: &str) -> Option<OffsetDateTime> {
+    OffsetDateTime::parse(value, &Rfc3339).ok()
+}
+
+fn is_or_match_mode(match_mode: Option<&str>) -> bool {
+    matches!(
+        match_mode.map(|value| value.trim().to_lowercase()),
+        Some(value) if matches!(value.as_str(), "or" | "any" | "some")
+    )
+}
+
+fn sort_search_hits(results: &mut [SearchHit], sort: Option<&SearchSort>) {
+    let Some(sort) = sort else {
+        return;
+    };
+    let field = sort.field.trim();
+    let normalized_field = field.to_lowercase();
+    let descending = sort.direction.trim().eq_ignore_ascii_case("desc");
+    results.sort_by(|left, right| {
+        let ordering = compare_sort_field(
+            field,
+            &left.metadata,
+            &right.metadata,
+            || match normalized_field.as_str() {
+                "filename" | "name" => left.filename.to_lowercase().cmp(&right.filename.to_lowercase()),
+                "path" => left.path.to_lowercase().cmp(&right.path.to_lowercase()),
+                "rating" => metadata_sort_number(&left.metadata, "rating")
+                    .partial_cmp(&metadata_sort_number(&right.metadata, "rating"))
+                    .unwrap_or(std::cmp::Ordering::Equal),
+                _ => left.path.to_lowercase().cmp(&right.path.to_lowercase()),
+            },
+        );
+        if descending {
+            ordering.reverse()
+        } else {
+            ordering
+        }
+    });
 }
 
 fn normalize_smart_folder_filter(filter: SmartFolderFilter) -> SmartFolderFilter {
@@ -4188,7 +4969,20 @@ fn normalize_smart_folder_filter(filter: SmartFolderFilter) -> SmartFolderFilter
         colors: normalize_optional_values(filter.colors),
         shapes: normalize_optional_values(filter.shapes),
         metadata_filters: normalize_metadata_filter_values(filter.metadata_filters),
+        exclude_tags: normalize_optional_values(filter.exclude_tags),
+        exclude_formats: normalize_optional_values(filter.exclude_formats).map(|items| {
+            items
+                .into_iter()
+                .map(|item| item.to_lowercase())
+                .collect::<Vec<_>>()
+        }),
+        exclude_metadata_filters: normalize_metadata_filter_values(filter.exclude_metadata_filters),
+        number_filters: normalize_number_filter_values(filter.number_filters),
+        date_filters: normalize_date_filter_values(filter.date_filters),
         min_rating: filter.min_rating.filter(|value| *value > 0.0),
+        match_mode: normalize_match_mode(filter.match_mode),
+        sort: normalize_search_sort(filter.sort),
+        limit: filter.limit.filter(|value| *value > 0),
     }
 }
 
@@ -4235,6 +5029,80 @@ fn normalize_metadata_filter_values(
     } else {
         Some(normalized)
     }
+}
+
+fn normalize_number_filter_values(
+    filters: Option<Vec<SearchNumberFilter>>,
+) -> Option<Vec<SearchNumberFilter>> {
+    let normalized = filters
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|filter| {
+            let key = filter.key.trim().to_string();
+            if key.is_empty() || (filter.min.is_none() && filter.max.is_none()) {
+                return None;
+            }
+            Some(SearchNumberFilter {
+                key,
+                min: filter.min,
+                max: filter.max,
+            })
+        })
+        .collect::<Vec<_>>();
+    if normalized.is_empty() {
+        None
+    } else {
+        Some(normalized)
+    }
+}
+
+fn normalize_date_filter_values(
+    filters: Option<Vec<SearchDateFilter>>,
+) -> Option<Vec<SearchDateFilter>> {
+    let normalized = filters
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|filter| {
+            let key = filter.key.trim().to_string();
+            let from = normalize_optional_text(filter.from);
+            let to = normalize_optional_text(filter.to);
+            if key.is_empty() || (from.is_none() && to.is_none()) {
+                return None;
+            }
+            Some(SearchDateFilter { key, from, to })
+        })
+        .collect::<Vec<_>>();
+    if normalized.is_empty() {
+        None
+    } else {
+        Some(normalized)
+    }
+}
+
+fn normalize_match_mode(value: Option<String>) -> Option<String> {
+    let value = value?.trim().to_lowercase();
+    match value.as_str() {
+        "or" | "any" | "some" => Some("or".to_string()),
+        "and" | "all" => Some("and".to_string()),
+        _ => None,
+    }
+}
+
+fn normalize_search_sort(sort: Option<SearchSort>) -> Option<SearchSort> {
+    let sort = sort?;
+    let field = sort.field.trim().to_string();
+    if field.is_empty() {
+        return None;
+    }
+    let direction = if sort.direction.trim().eq_ignore_ascii_case("desc") {
+        "desc"
+    } else {
+        "asc"
+    };
+    Some(SearchSort {
+        field,
+        direction: direction.to_string(),
+    })
 }
 
 fn normalize_optional_path_prefix(value: Option<String>) -> Option<String> {
@@ -4309,6 +5177,12 @@ fn merge_smart_folder_filters(
 ) -> SmartFolderFilter {
     let mut metadata_filters = parent.metadata_filters.unwrap_or_default();
     metadata_filters.extend(child.metadata_filters.clone().unwrap_or_default());
+    let mut exclude_metadata_filters = parent.exclude_metadata_filters.unwrap_or_default();
+    exclude_metadata_filters.extend(child.exclude_metadata_filters.clone().unwrap_or_default());
+    let mut number_filters = parent.number_filters.unwrap_or_default();
+    number_filters.extend(child.number_filters.clone().unwrap_or_default());
+    let mut date_filters = parent.date_filters.unwrap_or_default();
+    date_filters.extend(child.date_filters.clone().unwrap_or_default());
     let mut colors = parent.colors.unwrap_or_default();
     colors.extend(child.colors.clone().unwrap_or_default());
     let mut shapes = parent.shapes.unwrap_or_default();
@@ -4326,12 +5200,20 @@ fn merge_smart_folder_filters(
         colors: empty_vec_to_none(colors),
         shapes: empty_vec_to_none(shapes),
         metadata_filters: empty_vec_to_none(metadata_filters),
+        exclude_tags: merge_optional_lists(parent.exclude_tags, child.exclude_tags.clone()),
+        exclude_formats: merge_optional_lists(parent.exclude_formats, child.exclude_formats.clone()),
+        exclude_metadata_filters: empty_vec_to_none(exclude_metadata_filters),
+        number_filters: empty_vec_to_none(number_filters),
+        date_filters: empty_vec_to_none(date_filters),
         min_rating: match (parent.min_rating, child.min_rating) {
             (Some(left), Some(right)) => Some(left.max(right)),
             (Some(left), None) => Some(left),
             (None, Some(right)) => Some(right),
             (None, None) => None,
         },
+        match_mode: child.match_mode.clone().or(parent.match_mode),
+        sort: child.sort.clone().or(parent.sort),
+        limit: child.limit.or(parent.limit),
     }
 }
 
@@ -4509,62 +5391,32 @@ fn smart_folder_filter_matches(
     if asset.status == "deleted" {
         return false;
     }
-    if let Some(path_prefix) = &filter.path_prefix {
-        let prefixes = path_prefix
-            .lines()
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .collect::<Vec<_>>();
-        if !prefixes.is_empty()
-            && !prefixes.iter().all(|prefix| {
-                asset.path == *prefix || asset.path.starts_with(&format!("{prefix}/"))
-            })
-        {
-            return false;
-        }
-    }
-    if let Some(query) = &filter.query {
-        let haystack = build_search_haystack(repo, asset, metadata);
-        if !query
-            .lines()
-            .map(|value| value.trim().to_lowercase())
-            .filter(|value| !value.is_empty())
-            .all(|value| haystack.contains(&value))
-        {
-            return false;
-        }
-    }
-    if let Some(formats) = &filter.formats {
-        let formats = normalized_filter_values(formats);
-        if !formats.is_empty() && !formats.contains(&asset.extension.to_lowercase()) {
-            return false;
-        }
-    }
-    if let Some(tags) = &filter.tags {
-        let tags = normalized_filter_values(tags);
-        if !tags.is_empty()
-            && !asset.tags.iter().any(|item| {
-                let normalized_tag = item.to_lowercase();
-                tags.iter().any(|tag| normalized_tag.contains(tag))
-            })
-        {
-            return false;
-        }
-    }
+    let mut include_matches = Vec::new();
+    push_path_prefix_match(&mut include_matches, asset, filter.path_prefix.as_deref());
+    push_query_match(
+        &mut include_matches,
+        repo,
+        asset,
+        metadata,
+        filter.query.as_deref(),
+    );
+    push_format_match(&mut include_matches, &asset.extension, filter.formats.as_ref());
+    push_tag_match(&mut include_matches, &asset.tags, filter.tags.as_ref());
     let metadata_filters = smart_folder_filter_metadata_filters(filter);
-    if !metadata_filters.is_empty() && !metadata_filters_match(metadata, &metadata_filters) {
-        return false;
-    }
-    if let Some(min_rating) = filter.min_rating {
-        let rating = metadata
-            .get("rating")
-            .and_then(|value| value.as_f64())
-            .unwrap_or_default();
-        if rating < min_rating {
-            return false;
-        }
-    }
-    true
+    push_metadata_match(&mut include_matches, metadata, Some(&metadata_filters));
+    push_number_match(&mut include_matches, metadata, filter.number_filters.as_ref());
+    push_date_match(&mut include_matches, metadata, filter.date_filters.as_ref());
+    push_rating_match(&mut include_matches, metadata, filter.min_rating);
+
+    combine_include_matches(&include_matches, filter.match_mode.as_deref())
+        && !matches_excluded_filters(
+            &asset.tags,
+            &asset.extension,
+            metadata,
+            filter.exclude_tags.as_ref(),
+            filter.exclude_formats.as_ref(),
+            filter.exclude_metadata_filters.as_ref(),
+        )
 }
 
 fn query_smart_folder_entries(
@@ -4574,6 +5426,11 @@ fn query_smart_folder_entries(
     asset_map: &BTreeMap<String, AssetPathRecord>,
 ) -> Result<Vec<FileBrowserEntry>, rusqlite::Error> {
     let assets = load_assets(connection, &repo.repo_id)?;
+    let asset_ids = assets
+        .iter()
+        .map(|asset| asset.asset_id.clone())
+        .collect::<Vec<_>>();
+    let alias_paths_by_asset = load_alias_paths_for_assets(connection, &repo.repo_id, &asset_ids)?;
     let mut results = Vec::new();
     for asset in assets {
         let metadata = load_metadata_map(connection, &asset.asset_id)?;
@@ -4597,10 +5454,19 @@ fn query_smart_folder_entries(
             thumbnail_custom: false,
             hardlink_group_id: asset_record.and_then(|record| record.hardlink_group_id.clone()),
             hardlink_state: asset_record.and_then(|record| record.hardlink_state.clone()),
+            tags: asset.tags.clone(),
+            alias_paths: alias_paths_by_asset
+                .get(&asset.asset_id)
+                .cloned()
+                .unwrap_or_default(),
+            folder_metadata: None,
             metadata,
         });
     }
-    results.sort_by(|left, right| left.path.to_lowercase().cmp(&right.path.to_lowercase()));
+    sort_file_browser_entries(&mut results, filter.sort.as_ref());
+    if let Some(limit) = filter.limit.filter(|value| *value > 0) {
+        results.truncate(limit);
+    }
     Ok(results)
 }
 
@@ -4625,6 +5491,117 @@ fn build_search_haystack(
     ]
     .join(" ")
     .to_lowercase()
+}
+
+fn sort_file_browser_entries(entries: &mut [FileBrowserEntry], sort: Option<&SearchSort>) {
+    let Some(sort) = sort else {
+        entries.sort_by(|left, right| left.path.to_lowercase().cmp(&right.path.to_lowercase()));
+        return;
+    };
+    let field = sort.field.trim();
+    let normalized_field = field.to_lowercase();
+    let descending = sort.direction.trim().eq_ignore_ascii_case("desc");
+    entries.sort_by(|left, right| {
+        let ordering = compare_sort_field(
+            field,
+            &left.metadata,
+            &right.metadata,
+            || match normalized_field.as_str() {
+                "filename" | "name" => left.name.to_lowercase().cmp(&right.name.to_lowercase()),
+                "size" | "sizebytes" => left.size_bytes.cmp(&right.size_bytes),
+                "modified" | "modifiedat" => left.modified_at.cmp(&right.modified_at),
+                "rating" => metadata_sort_number(&left.metadata, "rating")
+                    .partial_cmp(&metadata_sort_number(&right.metadata, "rating"))
+                    .unwrap_or(std::cmp::Ordering::Equal),
+                _ => left.path.to_lowercase().cmp(&right.path.to_lowercase()),
+            },
+        );
+        if descending {
+            ordering.reverse()
+        } else {
+            ordering
+        }
+    });
+}
+
+fn metadata_sort_number(metadata: &BTreeMap<String, serde_json::Value>, key: &str) -> f64 {
+    metadata.get(key).and_then(|value| value.as_f64()).unwrap_or(0.0)
+}
+
+fn metadata_sort_field_key(field: &str) -> Option<&str> {
+    const PREFIX: &str = "metadata.";
+    if field.len() > PREFIX.len() && field[..PREFIX.len()].eq_ignore_ascii_case(PREFIX) {
+        Some(&field[PREFIX.len()..])
+    } else {
+        None
+    }
+}
+
+fn compare_sort_field(
+    field: &str,
+    left_metadata: &BTreeMap<String, serde_json::Value>,
+    right_metadata: &BTreeMap<String, serde_json::Value>,
+    fallback: impl FnOnce() -> std::cmp::Ordering,
+) -> std::cmp::Ordering {
+    if let Some(metadata_key) = metadata_sort_field_key(field) {
+        compare_metadata_values(left_metadata, right_metadata, metadata_key)
+    } else {
+        fallback()
+    }
+}
+
+fn compare_metadata_values(
+    left: &BTreeMap<String, serde_json::Value>,
+    right: &BTreeMap<String, serde_json::Value>,
+    key: &str,
+) -> std::cmp::Ordering {
+    compare_optional_json_values(left.get(key), right.get(key))
+}
+
+fn compare_optional_json_values(
+    left: Option<&serde_json::Value>,
+    right: Option<&serde_json::Value>,
+) -> std::cmp::Ordering {
+    match (left, right) {
+        (Some(left), Some(right)) => compare_json_values(left, right),
+        (Some(_), None) => std::cmp::Ordering::Less,
+        (None, Some(_)) => std::cmp::Ordering::Greater,
+        (None, None) => std::cmp::Ordering::Equal,
+    }
+}
+
+fn compare_json_values(
+    left: &serde_json::Value,
+    right: &serde_json::Value,
+) -> std::cmp::Ordering {
+    if let (Some(left), Some(right)) = (json_value_to_f64(left), json_value_to_f64(right)) {
+        return left.partial_cmp(&right).unwrap_or(std::cmp::Ordering::Equal);
+    }
+    if let (Some(left), Some(right)) = (
+        json_value_to_timestamp(left),
+        json_value_to_timestamp(right),
+    ) {
+        return left.cmp(&right);
+    }
+    json_value_to_search_text(left)
+        .to_lowercase()
+        .cmp(&json_value_to_search_text(right).to_lowercase())
+}
+
+fn json_value_to_f64(value: &serde_json::Value) -> Option<f64> {
+    value.as_f64().or_else(|| {
+        value
+            .as_str()
+            .map(str::trim)
+            .and_then(|value| value.parse::<f64>().ok())
+    })
+}
+
+fn json_value_to_timestamp(value: &serde_json::Value) -> Option<OffsetDateTime> {
+    value
+        .as_str()
+        .map(str::trim)
+        .and_then(parse_rfc3339_timestamp)
 }
 
 fn json_value_to_search_text(value: &serde_json::Value) -> String {
@@ -7192,6 +8169,78 @@ fn migrate_repository_schema(connection: &Connection) -> Result<(), rusqlite::Er
         CREATE UNIQUE INDEX IF NOT EXISTS idx_hardlink_candidates_unique
         ON hardlink_candidates(repo_id, new_asset_id, existing_asset_id);
 
+        CREATE TABLE IF NOT EXISTS asset_alias_groups (
+          alias_group_id TEXT PRIMARY KEY,
+          repo_id TEXT NOT NULL,
+          source TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          FOREIGN KEY(repo_id) REFERENCES repositories(repo_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS asset_alias_members (
+          alias_group_id TEXT NOT NULL,
+          repo_id TEXT NOT NULL,
+          asset_id TEXT NOT NULL,
+          path TEXT NOT NULL,
+          role TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          PRIMARY KEY(repo_id, asset_id),
+          FOREIGN KEY(alias_group_id) REFERENCES asset_alias_groups(alias_group_id),
+          FOREIGN KEY(asset_id) REFERENCES assets(asset_id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_asset_alias_members_group
+        ON asset_alias_members(repo_id, alias_group_id, path);
+
+        CREATE TABLE IF NOT EXISTS repository_shortcuts (
+          shortcut_id TEXT PRIMARY KEY,
+          repo_id TEXT NOT NULL,
+          label TEXT NOT NULL,
+          target_kind TEXT NOT NULL,
+          target_path TEXT,
+          target_id TEXT,
+          sort_order INTEGER NOT NULL DEFAULT 0,
+          created_at TEXT NOT NULL,
+          FOREIGN KEY(repo_id) REFERENCES repositories(repo_id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_repository_shortcuts_repo_order
+        ON repository_shortcuts(repo_id, sort_order, label);
+
+        CREATE TABLE IF NOT EXISTS tag_groups (
+          tag_group_id TEXT PRIMARY KEY,
+          repo_id TEXT NOT NULL,
+          name TEXT NOT NULL,
+          sort_order INTEGER NOT NULL DEFAULT 0,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          FOREIGN KEY(repo_id) REFERENCES repositories(repo_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS tag_group_members (
+          tag_group_id TEXT NOT NULL,
+          repo_id TEXT NOT NULL,
+          tag TEXT NOT NULL,
+          normalized_tag TEXT NOT NULL,
+          sort_order INTEGER NOT NULL DEFAULT 0,
+          PRIMARY KEY(tag_group_id, normalized_tag),
+          FOREIGN KEY(tag_group_id) REFERENCES tag_groups(tag_group_id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_tag_group_members_repo_tag
+        ON tag_group_members(repo_id, normalized_tag);
+
+        CREATE TABLE IF NOT EXISTS folder_metadata (
+          repo_id TEXT NOT NULL,
+          path TEXT NOT NULL,
+          protected INTEGER NOT NULL DEFAULT 0,
+          password_tip TEXT,
+          updated_at TEXT NOT NULL,
+          PRIMARY KEY(repo_id, path),
+          FOREIGN KEY(repo_id) REFERENCES repositories(repo_id)
+        );
+
         CREATE TABLE IF NOT EXISTS smart_folders (
           smart_folder_id TEXT PRIMARY KEY,
           repo_id TEXT NOT NULL,
@@ -8783,13 +9832,19 @@ fn list_backend_directory_entries(
     current_path: &str,
     asset_map: &BTreeMap<String, AssetPathRecord>,
     thumbnail_map: &BTreeMap<(String, String), ThumbnailRecord>,
+    folder_metadata: &BTreeMap<String, FolderMetadata>,
 ) -> Result<Vec<FileBrowserEntry>, String> {
     let entries = backend_adapter(service_root, repo).list_directory_entries(
         repo_root,
         current_path,
         &repo.backend_record.config,
     )?;
-    Ok(map_file_browser_entries(entries, asset_map, thumbnail_map))
+    Ok(map_file_browser_entries(
+        entries,
+        asset_map,
+        thumbnail_map,
+        folder_metadata,
+    ))
 }
 
 fn list_trash_directory_entries(
@@ -9110,6 +10165,7 @@ fn map_file_browser_entries(
     mut entries: Vec<FileSystemEntry>,
     asset_map: &BTreeMap<String, AssetPathRecord>,
     thumbnail_map: &BTreeMap<(String, String), ThumbnailRecord>,
+    folder_metadata: &BTreeMap<String, FolderMetadata>,
 ) -> Vec<FileBrowserEntry> {
     entries.sort_by(|left, right| match (&left.kind, &right.kind) {
         (FileSystemEntryKind::Directory, FileSystemEntryKind::File) => std::cmp::Ordering::Less,
@@ -9152,6 +10208,9 @@ fn map_file_browser_entries(
                 thumbnail_custom,
                 hardlink_group_id,
                 hardlink_state,
+                tags: Vec::new(),
+                alias_paths: Vec::new(),
+                folder_metadata: folder_metadata.get(&entry.path).cloned(),
                 metadata: BTreeMap::new(),
             }
         })
@@ -9223,6 +10282,9 @@ fn map_trash_browser_entries(
                 thumbnail_custom,
                 hardlink_group_id,
                 hardlink_state,
+                tags: Vec::new(),
+                alias_paths: Vec::new(),
+                folder_metadata: None,
                 metadata,
             }
         })
@@ -9231,6 +10293,7 @@ fn map_trash_browser_entries(
 
 fn attach_browser_entry_metadata(
     connection: &Connection,
+    repo_id: &str,
     mut entries: Vec<FileBrowserEntry>,
 ) -> Result<Vec<FileBrowserEntry>, rusqlite::Error> {
     let asset_ids = entries
@@ -9238,6 +10301,7 @@ fn attach_browser_entry_metadata(
         .filter_map(|entry| entry.asset_id.clone())
         .collect::<Vec<_>>();
     let metadata_by_asset = load_metadata_maps_for_assets(connection, &asset_ids)?;
+    let alias_paths_by_asset = load_alias_paths_for_assets(connection, repo_id, &asset_ids)?;
 
     for entry in &mut entries {
         let Some(asset_id) = &entry.asset_id else {
@@ -9248,7 +10312,10 @@ fn attach_browser_entry_metadata(
         };
         let mut merged = metadata.clone();
         merged.extend(entry.metadata.clone());
+        normalize_loaded_metadata(&mut merged);
         entry.metadata = merged;
+        entry.tags = load_tags(connection, asset_id)?;
+        entry.alias_paths = alias_paths_by_asset.get(asset_id).cloned().unwrap_or_default();
     }
 
     Ok(entries)
@@ -11133,7 +12200,7 @@ mod tests {
                 metadata_key: None,
                 metadata_value: None,
                 tag: None,
-                tags: Some(vec!["封面".to_string(), "主视觉".to_string()]),
+                tags: Some(vec!["封面".to_string()]),
                 metadata_filters: Some(vec![
                     SearchMetadataFilter {
                         key: "color".to_string(),
@@ -11146,11 +12213,195 @@ mod tests {
                 ]),
                 formats: Some(vec!["psd".to_string(), "jpg".to_string()]),
                 min_rating: Some(4.0),
+                exclude_tags: None,
+                exclude_formats: None,
+                exclude_metadata_filters: None,
+                number_filters: None,
+                date_filters: None,
+                match_mode: None,
+                sort: None,
+                limit: None,
             })
             .expect("filtered search should complete");
 
         assert_eq!(response.results.len(), 1);
         assert_eq!(response.results[0].path, "cover.psd");
+
+        fs::remove_dir_all(root).expect("test temp root should be removed");
+    }
+
+    #[test]
+    fn search_assets_match_mode_or_spans_filter_families_and_metadata_sort_is_typed() {
+        let (state, root, repo_root, _thumbnail_root) = create_test_state("search-or-sort");
+        fs::write(repo_root.join("tag-only.png"), b"tag").expect("tag-only file should be written");
+        fs::write(repo_root.join("metadata-only.png"), b"metadata")
+            .expect("metadata-only file should be written");
+        fs::write(repo_root.join("small.png"), b"small").expect("small file should be written");
+        fs::write(repo_root.join("large.png"), b"large").expect("large file should be written");
+        let repo_id = create_repository_for_path(&state, &repo_root);
+
+        let repo = state
+            .load_repository_record(&repo_id)
+            .expect("repository record should load");
+        let connection = state
+            .open_repository_connection(
+                &repo.summary.repo_id,
+                &repo.summary.path,
+                &repo.backend_record,
+            )
+            .expect("repository connection should open");
+        let now = now_rfc3339();
+        let ids = ["tag-only.png", "metadata-only.png", "small.png", "large.png"]
+            .into_iter()
+            .map(|path| {
+                let asset_id: String = connection
+                    .query_row(
+                        "SELECT asset_id FROM assets WHERE repo_id = ?1 AND path = ?2",
+                        params![repo_id.as_str(), path],
+                        |row| row.get(0),
+                    )
+                    .expect("asset id should load");
+                (path.to_string(), asset_id)
+            })
+            .collect::<BTreeMap<_, _>>();
+
+        connection
+            .execute(
+                "INSERT OR REPLACE INTO tags (asset_id, tag, normalized_tag) VALUES (?1, ?2, ?3)",
+                params![ids["tag-only.png"].as_str(), "Poster", "poster"],
+            )
+            .expect("tag should be written");
+        for (path, width, created_at) in [
+            ("metadata-only.png", serde_json::json!(1920), serde_json::json!("2024-01-04T00:00:00Z")),
+            ("small.png", serde_json::json!(800), serde_json::json!("2024-01-01T00:00:00Z")),
+            ("large.png", serde_json::json!(1920), serde_json::json!("2024-01-03T00:00:00Z")),
+        ] {
+            for (key, value) in [("width", width), ("fileCreatedAt", created_at)] {
+                connection
+                    .execute(
+                        r#"
+                        INSERT OR REPLACE INTO metadata (asset_id, key, value_type, value_json, version, updated_at)
+                        VALUES (?1, ?2, ?3, ?4, 1, ?5)
+                        "#,
+                        params![
+                            ids[path].as_str(),
+                            key,
+                            infer_value_type(&value),
+                            value.to_string(),
+                            now
+                        ],
+                    )
+                    .expect("metadata should be written");
+            }
+        }
+        drop(connection);
+
+        let or_response = state
+            .search_assets(SearchRequest {
+                query: String::new(),
+                repo_id: Some(repo_id.clone()),
+                metadata_key: None,
+                metadata_value: None,
+                tag: None,
+                tags: Some(vec!["Poster".to_string()]),
+                metadata_filters: Some(vec![SearchMetadataFilter {
+                    key: "width".to_string(),
+                    value: "1920".to_string(),
+                }]),
+                exclude_tags: None,
+                exclude_formats: None,
+                exclude_metadata_filters: None,
+                number_filters: None,
+                date_filters: None,
+                formats: None,
+                min_rating: None,
+                match_mode: Some("or".to_string()),
+                sort: Some(SearchSort {
+                    field: "metadata.fileCreatedAt".to_string(),
+                    direction: "asc".to_string(),
+                }),
+                limit: None,
+            })
+            .expect("or search should complete");
+
+        let or_paths = or_response
+            .results
+            .iter()
+            .map(|item| item.path.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(or_paths.len(), 3);
+        assert!(or_paths.contains(&"tag-only.png"));
+        assert!(or_paths.contains(&"metadata-only.png"));
+        assert!(or_paths.contains(&"large.png"));
+
+        let width_sorted = state
+            .search_assets(SearchRequest {
+                query: String::new(),
+                repo_id: Some(repo_id.clone()),
+                metadata_key: None,
+                metadata_value: None,
+                tag: None,
+                tags: None,
+                metadata_filters: None,
+                exclude_tags: None,
+                exclude_formats: None,
+                exclude_metadata_filters: None,
+                number_filters: None,
+                date_filters: None,
+                formats: Some(vec!["png".to_string()]),
+                min_rating: None,
+                match_mode: None,
+                sort: Some(SearchSort {
+                    field: "metadata.width".to_string(),
+                    direction: "asc".to_string(),
+                }),
+                limit: None,
+            })
+            .expect("metadata width sort should complete");
+
+        let sorted_paths = width_sorted
+            .results
+            .iter()
+            .map(|item| item.path.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            sorted_paths,
+            vec!["small.png", "large.png", "metadata-only.png", "tag-only.png"]
+        );
+
+        let date_sorted = state
+            .search_assets(SearchRequest {
+                query: String::new(),
+                repo_id: Some(repo_id),
+                metadata_key: None,
+                metadata_value: None,
+                tag: None,
+                tags: None,
+                metadata_filters: Some(vec![SearchMetadataFilter {
+                    key: "width".to_string(),
+                    value: "1920".to_string(),
+                }]),
+                exclude_tags: None,
+                exclude_formats: None,
+                exclude_metadata_filters: None,
+                number_filters: None,
+                date_filters: None,
+                formats: None,
+                min_rating: None,
+                match_mode: None,
+                sort: Some(SearchSort {
+                    field: "metadata.fileCreatedAt".to_string(),
+                    direction: "asc".to_string(),
+                }),
+                limit: None,
+            })
+            .expect("metadata date sort should complete");
+        let date_paths = date_sorted
+            .results
+            .iter()
+            .map(|item| item.path.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(date_paths, vec!["large.png", "metadata-only.png"]);
 
         fs::remove_dir_all(root).expect("test temp root should be removed");
     }

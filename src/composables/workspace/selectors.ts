@@ -76,6 +76,14 @@ export const activeFilterCount = computed(() => (
   filters.value.formats.length +
   filters.value.colors.length +
   filters.value.shapes.length +
+  filters.value.excludeTags.length +
+  filters.value.excludeFormats.length +
+  (filters.value.excludeMetadataFilters.trim() ? 1 : 0) +
+  (filters.value.numberFilters.trim() ? 1 : 0) +
+  (filters.value.dateFilters.trim() ? 1 : 0) +
+  (filters.value.matchMode === "or" ? 1 : 0) +
+  (filters.value.sortField.trim() ? 1 : 0) +
+  (filters.value.limit == null ? 0 : 1) +
   (filters.value.minRating == null ? 0 : 1)
 ));
 

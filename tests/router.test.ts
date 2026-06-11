@@ -388,6 +388,53 @@ describe("文件管理冒烟", () => {
     expect(fileListItem("Campaigns/Summer")).toBeInTheDocument();
   });
 
+  it("Eagle 快捷访问可以定位文件夹和文件", async () => {
+    seedMockRepository();
+    const workspace = useRepositoryWorkspace();
+    workspace.setActivePanel("files");
+    await renderApp();
+
+    await fireEvent.click(screen.getByRole("button", { name: /快捷 Campaigns/ }));
+    await waitFor(() => {
+      expect(getInvokeCalls("get_file_browser").at(-1)?.args).toMatchObject({
+        request: {
+          directoryPath: "Campaigns",
+        },
+      });
+    });
+    expect(workspace.currentDirectoryPath.value).toBe("Campaigns");
+
+    await fireEvent.click(screen.getByRole("button", { name: /封面文件/ }));
+    await waitFor(() => {
+      expect(getInvokeCalls("get_file_browser").at(-1)?.args).toMatchObject({
+        request: {
+          directoryPath: "Campaigns/Summer",
+        },
+      });
+    });
+    expect(workspace.currentDirectoryPath.value).toBe("Campaigns/Summer");
+    expect(workspace.selectedFilePaths.value).toEqual(["Campaigns/Summer/cover-final.psd"]);
+  });
+
+  it("文件和文件夹详情展示 Eagle 迁移字段", async () => {
+    seedMockRepository();
+    const workspace = useRepositoryWorkspace();
+    workspace.setActivePanel("files");
+    await renderApp();
+
+    await fireEvent.click(fileListItem("Campaigns"));
+    expect(await screen.findByText("受保护")).toBeInTheDocument();
+    expect(screen.getByText("项目归档密码提示")).toBeInTheDocument();
+
+    await fireEvent.click(fileListItem("cover-final.psd"));
+    expect(await screen.findByDisplayValue("最终版封面，保留可编辑图层。")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("https://example.test/source/cover")).toBeInTheDocument();
+    expect(screen.getByText("1920 × 1080")).toBeInTheDocument();
+    expect(screen.getAllByText("227.9 MB").length).toBeGreaterThan(0);
+    expect(screen.getByText("Campaigns/Summer/cover-final.psd")).toBeInTheDocument();
+    expect(screen.getByText("封面，主视觉，PSD")).toBeInTheDocument();
+  });
+
   it("支持 Ctrl 多选、Shift 连选和框选", async () => {
     seedMockRepository();
     const workspace = useRepositoryWorkspace();
@@ -799,6 +846,34 @@ describe("文件管理冒烟", () => {
       });
     });
 
+    await fireEvent.update(screen.getByLabelText("排除标签"), "草稿，临时");
+    await fireEvent.update(screen.getByLabelText("排除格式"), "gif");
+    await fireEvent.update(screen.getByLabelText("排除元数据"), "status=archived");
+    await fireEvent.update(screen.getByLabelText("数值范围"), "width=1024..4096, originalSizeBytes=..10485760");
+    await fireEvent.update(screen.getByLabelText("日期范围"), "fileCreatedAt=2024-01-01T00:00:00Z..");
+    await fireEvent.update(screen.getByLabelText("排序字段"), "metadata.width");
+    await fireEvent.update(screen.getByLabelText("排序方向"), "desc");
+    await fireEvent.update(screen.getByLabelText("结果数量"), "10");
+    await fireEvent.click(screen.getByRole("button", { name: "应用" }));
+    await waitFor(() => {
+      const searchCalls = getInvokeCalls("search_assets");
+      expect(searchCalls.at(-1)?.args).toMatchObject({
+        request: {
+          repoId: "repo-main-001",
+          excludeTags: ["草稿", "临时"],
+          excludeFormats: ["gif"],
+          excludeMetadataFilters: [{ key: "status", value: "archived" }],
+          numberFilters: [
+            { key: "width", min: 1024, max: 4096 },
+            { key: "originalSizeBytes", max: 10485760 },
+          ],
+          dateFilters: [{ key: "fileCreatedAt", from: "2024-01-01T00:00:00Z" }],
+          sort: { field: "metadata.width", direction: "desc" },
+          limit: 10,
+        },
+      });
+    });
+
     await fireEvent.click(screen.getByRole("button", { name: "清除" }));
     await waitFor(() => {
       const searchCalls = getInvokeCalls("search_assets");
@@ -929,6 +1004,49 @@ describe("文件管理冒烟", () => {
     expect(screen.queryByRole("button", { name: "建文件" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "重命名" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "删除" })).not.toBeInTheDocument();
+  });
+
+  it("智能文件夹表单发送高级过滤字段", async () => {
+    seedMockRepository();
+    await renderApp();
+
+    await fireEvent.click(screen.getByRole("button", { name: "新建智能文件夹" }));
+    const dialog = await screen.findByRole("dialog", { name: "新建智能文件夹" });
+    await fireEvent.update(within(dialog).getByLabelText("名称"), "Eagle 高级条件");
+    await fireEvent.update(within(dialog).getByLabelText("标签"), "封面");
+    await fireEvent.update(within(dialog).getByLabelText("匹配方式"), "or");
+    await fireEvent.update(within(dialog).getByLabelText("排除标签"), "草稿");
+    await fireEvent.update(within(dialog).getByLabelText("排除格式"), "gif，webp");
+    await fireEvent.update(within(dialog).getByLabelText("排除元数据"), "status=archived");
+    await fireEvent.update(within(dialog).getByLabelText("数值范围"), "width=1024..4096\noriginalSizeBytes=..10485760");
+    await fireEvent.update(within(dialog).getByLabelText("日期范围"), "fileCreatedAt=2024-01-01T00:00:00Z..2024-12-31T23:59:59Z");
+    await fireEvent.update(within(dialog).getByLabelText("排序字段"), "metadata.width");
+    await fireEvent.update(within(dialog).getByLabelText("排序方向"), "desc");
+    await fireEvent.update(within(dialog).getByLabelText("结果数量"), "20");
+    await fireEvent.click(within(dialog).getByRole("button", { name: "创建" }));
+
+    await waitFor(() => {
+      expect(getInvokeCalls("create_smart_folder").at(-1)?.args).toMatchObject({
+        request: {
+          repoId: "repo-main-001",
+          name: "Eagle 高级条件",
+          filter: {
+            tags: ["封面"],
+            matchMode: "or",
+            excludeTags: ["草稿"],
+            excludeFormats: ["gif", "webp"],
+            excludeMetadataFilters: [{ key: "status", value: "archived" }],
+            numberFilters: [
+              { key: "width", min: 1024, max: 4096 },
+              { key: "originalSizeBytes", max: 10485760 },
+            ],
+            dateFilters: [{ key: "fileCreatedAt", from: "2024-01-01T00:00:00Z", to: "2024-12-31T23:59:59Z" }],
+            sort: { field: "metadata.width", direction: "desc" },
+            limit: 20,
+          },
+        },
+      });
+    });
   });
 
   it("使用本地绝对路径打开和定位文件，并展示 opener 失败信息", async () => {

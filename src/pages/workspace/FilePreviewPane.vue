@@ -3,7 +3,7 @@ import { ArrowLeft, Eye, FileAudio, FileImage, FileVideo, FolderOpen } from "luc
 import type { Component } from "vue";
 import FileMetadataEditor from "./FileMetadataEditor.vue";
 import ThumbnailPalette from "../../components/ThumbnailPalette.vue";
-import type { FileBrowserEntry } from "../../types/repository";
+import type { FileBrowserEntry, RepositoryTagGroup } from "../../types/repository";
 
 defineProps<{
   entry: FileBrowserEntry;
@@ -16,6 +16,7 @@ defineProps<{
   statusLabel: (status: string) => string;
   isSavingMetadata: boolean;
   availableTags: string[];
+  tagGroups?: RepositoryTagGroup[];
   thumbnailPalette: (entry: FileBrowserEntry) => string[];
   saveMetadata: (entry: FileBrowserEntry, metadata: Record<string, unknown>) => Promise<unknown>;
 }>();
@@ -100,6 +101,7 @@ const emit = defineEmits<{
         :entry="entry"
         :is-saving="isSavingMetadata"
         :available-tags="availableTags"
+        :tag-groups="tagGroups"
         :save-metadata="saveMetadata"
       />
     </div>

@@ -121,6 +121,7 @@ import {
   setMinimumRatingFilter,
   toggleFilterBar,
   toggleFilterValue,
+  updateFilters,
 } from "./search";
 import {
   refreshHardlinkCandidates,
@@ -765,9 +766,16 @@ function normalizeSmartFolderFilter(filter: SmartFolderFilter): SmartFolderFilte
     const values = Array.from(new Set((items ?? []).map((item) => item.trim()).filter(Boolean)));
     return values.length ? values : undefined;
   };
-  const metadataFilters = filter.metadataFilters
+  const normalizeMetadataFilters = (items = filter.metadataFilters) => items
     ?.map((item) => ({ key: item.key.trim(), value: item.value.trim() }))
     .filter((item) => item.key && item.value);
+  const numberFilters = filter.numberFilters
+    ?.map((item) => ({ key: item.key.trim(), min: item.min, max: item.max }))
+    .filter((item) => item.key && (item.min != null || item.max != null));
+  const dateFilters = filter.dateFilters
+    ?.map((item) => ({ key: item.key.trim(), from: item.from?.trim() || undefined, to: item.to?.trim() || undefined }))
+    .filter((item) => item.key && (item.from || item.to));
+  const sortField = filter.sort?.field.trim();
   return {
     query: filter.query?.trim() || undefined,
     pathPrefix: filter.pathPrefix?.trim() || undefined,
@@ -775,8 +783,18 @@ function normalizeSmartFolderFilter(filter: SmartFolderFilter): SmartFolderFilte
     formats: normalizeList(filter.formats),
     colors: normalizeList(filter.colors),
     shapes: normalizeList(filter.shapes),
-    metadataFilters: metadataFilters?.length ? metadataFilters : undefined,
+    metadataFilters: normalizeMetadataFilters()?.length ? normalizeMetadataFilters() : undefined,
+    excludeTags: normalizeList(filter.excludeTags),
+    excludeFormats: normalizeList(filter.excludeFormats),
+    excludeMetadataFilters: normalizeMetadataFilters(filter.excludeMetadataFilters)?.length
+      ? normalizeMetadataFilters(filter.excludeMetadataFilters)
+      : undefined,
+    numberFilters: numberFilters?.length ? numberFilters : undefined,
+    dateFilters: dateFilters?.length ? dateFilters : undefined,
     minRating: filter.minRating && filter.minRating > 0 ? filter.minRating : undefined,
+    matchMode: filter.matchMode === "or" ? "or" : undefined,
+    sort: sortField ? { field: sortField, direction: filter.sort?.direction === "desc" ? "desc" : "asc" } : undefined,
+    limit: filter.limit && filter.limit > 0 ? filter.limit : undefined,
   };
 }
 
@@ -1441,6 +1459,7 @@ export function useRepositoryWorkspace() {
     toggleFilterBar,
     toggleFilterValue,
     setMinimumRatingFilter,
+    updateFilters,
     clearFilters,
     runSearch,
     runFilteredSearch,

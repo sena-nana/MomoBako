@@ -41,6 +41,12 @@ type MockEntry = {
   status: string | null;
   thumbnailPath?: string | null;
   thumbnailCustom?: boolean;
+  tags?: string[];
+  aliasPaths?: string[];
+  folderMetadata?: {
+    protected: boolean;
+    passwordTip?: string | null;
+  } | null;
   metadata?: Record<string, unknown>;
 };
 
@@ -73,6 +79,9 @@ const defaultSearchHits = (): SearchHit[] => [
       palette: ["#336699", "#88AACC"],
       shape: "方形",
       rating: 5,
+      width: 1920,
+      originalSizeBytes: 238950400,
+      fileCreatedAt: "2026-06-01T00:00:00Z",
     },
   },
   {
@@ -88,6 +97,9 @@ const defaultSearchHits = (): SearchHit[] => [
       color: "绿色",
       shape: "横版",
       rating: 3,
+      width: 1280,
+      originalSizeBytes: 15245312,
+      fileCreatedAt: "2026-06-04T00:00:00Z",
     },
   },
 ];
@@ -103,6 +115,10 @@ const initialEntries = (): MockEntry[] => [
     modifiedAt: "2026-06-05T00:18:00Z",
     assetId: null,
     status: null,
+    folderMetadata: {
+      protected: true,
+      passwordTip: "项目归档密码提示",
+    },
   },
   {
     path: "Campaigns/Summer",
@@ -114,6 +130,34 @@ const initialEntries = (): MockEntry[] => [
     modifiedAt: "2026-06-05T00:18:00Z",
     assetId: null,
     status: null,
+  },
+  {
+    path: "Campaigns/Summer/cover-final.psd",
+    name: "cover-final.psd",
+    kind: "file",
+    extension: "psd",
+    sizeBytes: 238950400,
+    sizeLabel: "227.9 MB",
+    modifiedAt: "2026-06-05T00:18:00Z",
+    assetId: "asset-01",
+    status: "synced",
+    tags: ["封面", "主视觉", "PSD"],
+    aliasPaths: [
+      "cover-final.psd",
+      "Campaigns/Summer/cover-final.psd",
+    ],
+    metadata: {
+      note: "最终版封面，保留可编辑图层。",
+      link: "https://example.test/source/cover",
+      addedToLibraryAt: "2026-06-01T00:18:00Z",
+      fileCreatedAt: "2026-06-02T00:18:00Z",
+      fileModifiedAt: "2026-06-05T00:18:00Z",
+      width: 1920,
+      height: 1080,
+      originalSizeBytes: 238950400,
+      palette: ["#336699", "#88AACC"],
+      tagGroups: ["封面", "主视觉"],
+    },
   },
   {
     path: "Backgrounds",
@@ -136,6 +180,23 @@ const initialEntries = (): MockEntry[] => [
     modifiedAt: "2026-06-05T00:18:00Z",
     assetId: "asset-01",
     status: "synced",
+    tags: ["封面", "主视觉", "PSD"],
+    aliasPaths: [
+      "cover-final.psd",
+      "Campaigns/Summer/cover-final.psd",
+    ],
+    metadata: {
+      note: "最终版封面，保留可编辑图层。",
+      link: "https://example.test/source/cover",
+      addedToLibraryAt: "2026-06-01T00:18:00Z",
+      fileCreatedAt: "2026-06-02T00:18:00Z",
+      fileModifiedAt: "2026-06-05T00:18:00Z",
+      width: 1920,
+      height: 1080,
+      originalSizeBytes: 238950400,
+      palette: ["#336699", "#88AACC"],
+      tagGroups: ["封面", "主视觉"],
+    },
   },
 ];
 
@@ -182,15 +243,50 @@ function metadataSearchText(value: unknown) {
   return "";
 }
 
+function metadataNumber(value: unknown) {
+  if (typeof value === "number") return value;
+  if (typeof value === "string" && value.trim()) {
+    const number = Number(value);
+    return Number.isFinite(number) ? number : null;
+  }
+  return null;
+}
+
 function filterSearchHits(request: SearchRequest | undefined, hits: SearchHit[]) {
   if (!request) return hits;
   const query = request.query.trim().toLowerCase();
   const tags = request.tags?.map((tag) => tag.toLowerCase()).filter(Boolean) ?? [];
   const formats = request.formats?.map((format) => format.toLowerCase()).filter(Boolean) ?? [];
   const metadataFilters = request.metadataFilters ?? [];
+  const excludeTags = request.excludeTags?.map((tag) => tag.toLowerCase()).filter(Boolean) ?? [];
+  const excludeFormats = request.excludeFormats?.map((format) => format.toLowerCase()).filter(Boolean) ?? [];
+  const excludeMetadataFilters = request.excludeMetadataFilters ?? [];
+  const numberFilters = request.numberFilters ?? [];
+  const dateFilters = request.dateFilters ?? [];
+  const matchMode = request.matchMode === "or" ? "or" : "and";
 
-  return hits.filter((hit) => {
+  const results = hits.filter((hit) => {
     if (request.repoId && hit.repoId !== request.repoId) return false;
+    if (excludeFormats.length && excludeFormats.includes(searchHitFormat(hit))) return false;
+    if (excludeTags.length && hit.tags.some((tag) => excludeTags.some((expected) => tag.toLowerCase().includes(expected)))) return false;
+    if (excludeMetadataFilters.some((filter) => {
+      const actual = metadataSearchText(hit.metadata[filter.key]);
+      const expected = filter.value.toLowerCase();
+      return actual === expected || actual.includes(expected);
+    })) return false;
+    if (numberFilters.some((filter) => {
+      const actual = metadataNumber(hit.metadata[filter.key]);
+      return actual == null || (filter.min != null && actual < filter.min) || (filter.max != null && actual > filter.max);
+    })) return false;
+    if (dateFilters.some((filter) => {
+      const actualText = metadataSearchText(hit.metadata[filter.key]);
+      const actualTime = Date.parse(actualText);
+      return Number.isNaN(actualTime)
+        || (filter.from && actualTime < Date.parse(filter.from))
+        || (filter.to && actualTime > Date.parse(filter.to));
+    })) return false;
+
+    const checks: boolean[] = [];
     if (query) {
       const haystack = [
         hit.repoName,
@@ -199,20 +295,31 @@ function filterSearchHits(request: SearchRequest | undefined, hits: SearchHit[])
         ...hit.tags,
         ...Object.values(hit.metadata).map(metadataSearchText),
       ].join(" ").toLowerCase();
-      if (!haystack.includes(query)) return false;
+      checks.push(haystack.includes(query));
     }
-    if (formats.length && !formats.includes(searchHitFormat(hit))) return false;
-    if (tags.length && !hit.tags.some((tag) => tags.some((expected) => tag.toLowerCase().includes(expected)))) return false;
+    if (formats.length) checks.push(formats.includes(searchHitFormat(hit)));
+    if (tags.length) checks.push(hit.tags.some((tag) => tags.some((expected) => tag.toLowerCase().includes(expected))));
     if (request.minRating != null) {
       const rating = typeof hit.metadata.rating === "number" ? hit.metadata.rating : 0;
-      if (rating < request.minRating) return false;
+      checks.push(rating >= request.minRating);
     }
-    return metadataFilters.every((filter) => {
+    checks.push(...metadataFilters.map((filter) => {
       const actual = metadataSearchText(hit.metadata[filter.key]);
       const expected = filter.value.toLowerCase();
       return actual === expected || actual.includes(expected);
-    });
+    }));
+    return matchMode === "or" && checks.length ? checks.some(Boolean) : checks.every(Boolean);
   });
+  if (request.sort?.field) {
+    const direction = request.sort.direction === "desc" ? -1 : 1;
+    results.sort((left, right) => {
+      const field = request.sort?.field ?? "";
+      const leftValue = field === "modifiedAt" ? left.metadata.fileCreatedAt : left.metadata[field.replace(/^metadata\./, "")];
+      const rightValue = field === "modifiedAt" ? right.metadata.fileCreatedAt : right.metadata[field.replace(/^metadata\./, "")];
+      return metadataSearchText(leftValue).localeCompare(metadataSearchText(rightValue)) * direction;
+    });
+  }
+  return request.limit ? results.slice(0, request.limit) : results;
 }
 
 function buildSmartFolderTree(parentId: string | null = null): SmartFolderTreeNode[] {
@@ -252,6 +359,14 @@ function smartFolderSearchRequest(filter: SmartFolderFilter, repoId: string): Se
       ...(filter.colors ?? []).map((value) => ({ key: "color", value })),
       ...(filter.shapes ?? []).map((value) => ({ key: "shape", value })),
     ],
+    excludeTags: filter.excludeTags,
+    excludeFormats: filter.excludeFormats,
+    excludeMetadataFilters: filter.excludeMetadataFilters,
+    numberFilters: filter.numberFilters,
+    dateFilters: filter.dateFilters,
+    matchMode: filter.matchMode,
+    sort: filter.sort,
+    limit: filter.limit,
   };
 }
 
@@ -433,6 +548,39 @@ const mockSnapshot = {
     { path: "Backgrounds", label: "Backgrounds", assetCount: 1 },
     { path: "Characters", label: "Characters", assetCount: 1 },
   ],
+  quickAccess: [
+    {
+      shortcutId: "shortcut-folder-campaigns",
+      repoId: "repo-main-001",
+      label: "快捷 Campaigns",
+      targetKind: "folder",
+      targetPath: "Campaigns",
+      targetId: null,
+      sortOrder: 0,
+      createdAt: "2026-06-05T00:18:00Z",
+    },
+    {
+      shortcutId: "shortcut-file-cover",
+      repoId: "repo-main-001",
+      label: "封面文件",
+      targetKind: "file",
+      targetPath: "Campaigns/Summer/cover-final.psd",
+      targetId: null,
+      sortOrder: 1,
+      createdAt: "2026-06-05T00:18:00Z",
+    },
+  ],
+  tagGroups: [
+    {
+      tagGroupId: "tag-group-project",
+      repoId: "repo-main-001",
+      name: "项目标签",
+      tags: ["封面", "主视觉", "背景"],
+      sortOrder: 0,
+      createdAt: "2026-06-05T00:18:00Z",
+      updatedAt: "2026-06-05T00:18:00Z",
+    },
+  ],
   assets: [
     {
       assetId: "asset-01",
@@ -461,7 +609,7 @@ const mockSnapshot = {
       tags: ["背景", "森林", "PNG"],
     },
   ],
-  metadataFields: ["favorite", "note", "rating", "title"],
+  metadataFields: ["comment", "favorite", "note", "rating", "title"],
   recentRevisionCount: 6,
   overview: {
     totalSizeBytes: 254195712,
@@ -560,6 +708,7 @@ const mockAssetDetail = {
   summary: mockSnapshot.assets[0],
   metadata: [
     { key: "favorite", valueType: "boolean", value: true, version: 1, updatedAt: "2026-06-05T00:18:00Z" },
+    { key: "comment", valueType: "string", value: "最终版封面，保留可编辑图层。", version: 1, updatedAt: "2026-06-05T00:18:00Z" },
     { key: "note", valueType: "string", value: "最终版封面，保留可编辑图层。", version: 1, updatedAt: "2026-06-05T00:18:00Z" },
     { key: "rating", valueType: "number", value: 5, version: 1, updatedAt: "2026-06-05T00:18:00Z" },
     { key: "title", valueType: "string", value: "Summer Launch Cover", version: 1, updatedAt: "2026-06-05T00:18:00Z" },
@@ -571,7 +720,7 @@ const mockAssetDetail = {
       timestamp: "2026-06-05T00:18:00Z",
       operation: "metadata.seeded",
       before: {},
-      after: { note: "最终版封面，保留可编辑图层。", rating: 5 },
+      after: { comment: "最终版封面，保留可编辑图层。", note: "最终版封面，保留可编辑图层。", rating: 5 },
       source: "seed",
     },
   ],
@@ -669,7 +818,7 @@ vi.mock("@tauri-apps/api/core", () => ({
     }
     if (command === "update_asset_metadata") {
       const request = args?.request as { metadata?: Record<string, unknown> } | undefined;
-      const nextNote = request?.metadata?.note ?? mockAssetDetail.metadata[1].value;
+      const nextComment = request?.metadata?.comment ?? request?.metadata?.note ?? mockAssetDetail.metadata[1].value;
       return {
         outcome: "success",
         asset: {
@@ -679,7 +828,7 @@ vi.mock("@tauri-apps/api/core", () => ({
             version: mockAssetDetail.summary.version + 1,
           },
           metadata: mockAssetDetail.metadata.map((entry) => (
-            entry.key === "note" ? { ...entry, value: nextNote } : entry
+            entry.key === "note" || entry.key === "comment" ? { ...entry, value: nextComment } : entry
           )),
         },
       };
