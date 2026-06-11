@@ -4,6 +4,7 @@
   "name": "Vector Index",
   "version": "0.1.0",
   "kind": "search",
+  "category": "service",
   "description": "预留向量检索与 AI 语义搜索扩展点。",
   "capabilities": ["semantic-search", "embedding"],
   "enabled": false,
@@ -12,6 +13,17 @@
   "source": "builtin",
   "runtime": "manifest-only",
   "permissions": ["filesystem:read"],
+  "requires": [],
+  "optional": [],
+  "hooks": [
+    { "slot": "search", "action": "service.vector.search", "label": "语义搜索" }
+  ],
+  "contributes": {
+    "service": {
+      "type": "semantic-search",
+      "candidateOnly": true
+    }
+  },
   "compat": {
     "sdkVersion": "1",
     "legacyPluginIds": ["builtin.vector-index"]

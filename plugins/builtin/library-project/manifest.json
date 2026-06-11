@@ -1,0 +1,36 @@
+{
+  "pluginId": "momobako.library.project",
+  "legacyPluginIds": ["builtin.library-project"],
+  "name": "Project Library",
+  "version": "0.1.0",
+  "kind": "library-kind",
+  "category": "library-kind",
+  "description": "为代码、工程和项目资料声明语言、框架、入口命令、依赖锁文件和归档状态。",
+  "capabilities": ["library-kind", "metadata-schema", "view-presets", "organize-candidates"],
+  "enabled": true,
+  "sdk": "backend",
+  "entry": {},
+  "source": "builtin",
+  "runtime": "manifest-only",
+  "permissions": ["readRepository", "readMetadata", "writeCandidates", "suggestRename", "suggestMove"],
+  "requires": [],
+  "optional": [],
+  "hooks": [
+    { "slot": "batchOrganize", "action": "library.project.suggestProjectLayout", "label": "生成项目整理候选" }
+  ],
+  "contributes": {
+    "libraryKind": {
+      "id": "project",
+      "fields": ["title", "language", "framework", "packageManager", "license", "readmePath", "entryCommands", "lockfiles", "archived", "sourceUrl"],
+      "facets": ["language", "framework", "packageManager", "license", "archived"],
+      "sortFields": ["language", "updatedAt", "title"],
+      "views": ["projects", "languages", "frameworks", "dependencies", "archived"],
+      "preview": ["momobako.preview.text", "momobako.preview.office"]
+    }
+  },
+  "compat": {
+    "sdkVersion": "1",
+    "legacyPluginIds": ["builtin.library-project"]
+  },
+  "status": "ready"
+}

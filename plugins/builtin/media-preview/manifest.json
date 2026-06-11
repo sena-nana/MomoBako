@@ -4,6 +4,7 @@
   "name": "Media Preview",
   "version": "1.0.0",
   "kind": "preview",
+  "category": "preview",
   "description": "为常见视频与音频文件提供内联播放预览。",
   "capabilities": ["preview", "media", "video", "audio"],
   "enabled": true,
@@ -15,6 +16,19 @@
   "source": "builtin",
   "runtime": "vue-module",
   "permissions": ["preview:read"],
+  "requires": [],
+  "optional": ["momobako.parser.audio", "momobako.parser.video"],
+  "hooks": [
+    { "slot": "playlist", "action": "preview.media.enqueue", "label": "加入播放列表" },
+    { "slot": "pip", "action": "preview.media.openPip", "label": "画中画" },
+    { "slot": "progress", "action": "preview.media.reportProgress", "label": "更新播放进度" }
+  ],
+  "contributes": {
+    "preview": {
+      "extensions": ["mp4", "mov", "mkv", "webm", "avi", "m4v", "mp3", "wav", "ogg", "flac", "m4a", "aac", "opus"],
+      "thumbnail": false
+    }
+  },
   "compat": {
     "sdkVersion": "1",
     "legacyPluginIds": ["builtin.media-preview"]

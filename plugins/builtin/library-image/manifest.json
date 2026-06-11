@@ -1,0 +1,36 @@
+{
+  "pluginId": "momobako.library.image",
+  "legacyPluginIds": ["builtin.library-image"],
+  "name": "Image Library",
+  "version": "0.1.0",
+  "kind": "library-kind",
+  "category": "library-kind",
+  "description": "为图片、摄影和视觉素材声明 EXIF、色彩、尺寸、相似图和质检视图。",
+  "capabilities": ["library-kind", "metadata-schema", "view-presets", "organize-candidates"],
+  "enabled": true,
+  "sdk": "backend",
+  "entry": {},
+  "source": "builtin",
+  "runtime": "manifest-only",
+  "permissions": ["readRepository", "readMetadata", "writeCandidates", "suggestRename", "suggestMove"],
+  "requires": [],
+  "optional": ["momobako.parser.image"],
+  "hooks": [
+    { "slot": "batchOrganize", "action": "library.image.suggestDateLayout", "label": "生成图片整理候选" }
+  ],
+  "contributes": {
+    "libraryKind": {
+      "id": "image",
+      "fields": ["title", "camera", "lens", "shotAt", "gps", "width", "height", "orientation", "color", "palette", "perceptualHash", "license", "sourceUrl"],
+      "facets": ["camera", "lens", "shotAt", "color", "license"],
+      "sortFields": ["shotAt", "width", "height", "originalSizeBytes"],
+      "views": ["files", "timeline", "camera", "similar", "missingMetadata"],
+      "preview": ["momobako.preview.media"]
+    }
+  },
+  "compat": {
+    "sdkVersion": "1",
+    "legacyPluginIds": ["builtin.library-image"]
+  },
+  "status": "ready"
+}

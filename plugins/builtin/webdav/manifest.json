@@ -4,6 +4,7 @@
   "name": "WebDAV",
   "version": "0.1.0",
   "kind": "webdav",
+  "category": "source",
   "description": "通过 WebDAV 适配远程文件管理服务。",
   "capabilities": ["browse", "read", "write", "sync"],
   "enabled": false,
@@ -12,6 +13,15 @@
   "source": "builtin",
   "runtime": "manifest-only",
   "permissions": ["network", "filesystem:read", "filesystem:write"],
+  "requires": [],
+  "optional": [],
+  "hooks": [],
+  "contributes": {
+    "source": {
+      "operations": ["list", "read", "write", "move", "delete", "watch"],
+      "dangerousOperations": ["write", "move", "delete"]
+    }
+  },
   "compat": {
     "sdkVersion": "1",
     "legacyPluginIds": ["builtin.webdav"]

@@ -1,0 +1,38 @@
+{
+  "pluginId": "momobako.library.asmr",
+  "legacyPluginIds": ["builtin.library-asmr"],
+  "name": "ASMR Library",
+  "version": "0.1.0",
+  "kind": "library-kind",
+  "category": "library-kind",
+  "description": "为 ASMR 与同人音声文件夹声明作品字段、音轨视图和整理候选。",
+  "capabilities": ["library-kind", "metadata-schema", "view-presets", "playlist", "progress", "organize-candidates"],
+  "enabled": true,
+  "sdk": "backend",
+  "entry": {},
+  "source": "builtin",
+  "runtime": "manifest-only",
+  "permissions": ["readRepository", "readMetadata", "writeCandidates", "suggestRename", "suggestMove"],
+  "requires": [],
+  "optional": ["momobako.parser.audio", "momobako.service.network-search"],
+  "hooks": [
+    { "slot": "playlist", "action": "library.asmr.enqueueWorkTracks", "label": "加入播放列表" },
+    { "slot": "progress", "action": "library.asmr.trackListeningProgress", "label": "记录收听进度" },
+    { "slot": "batchOrganize", "action": "library.asmr.suggestWorkLayout", "label": "生成作品整理候选" }
+  ],
+  "contributes": {
+    "libraryKind": {
+      "id": "asmr",
+      "fields": ["title", "circle", "creator", "voiceActors", "characters", "workId", "series", "releaseDate", "durationMs", "trackCount", "language", "rating", "scenarioTags", "audioTraits", "sourceUrl", "purchaseSource"],
+      "facets": ["circle", "voiceActors", "series", "language", "scenarioTags"],
+      "sortFields": ["releaseDate", "rating", "durationMs", "trackCount"],
+      "views": ["works", "tracks", "circles", "voiceActors", "series", "missingMetadata"],
+      "preview": ["momobako.preview.media"]
+    }
+  },
+  "compat": {
+    "sdkVersion": "1",
+    "legacyPluginIds": ["builtin.library-asmr"]
+  },
+  "status": "ready"
+}

@@ -1,0 +1,33 @@
+{
+  "pluginId": "momobako.parser.ebook",
+  "legacyPluginIds": ["builtin.parser-ebook"],
+  "name": "E-book Parser",
+  "version": "0.1.0",
+  "kind": "parser",
+  "category": "parser",
+  "description": "声明 EPUB、PDF 和常见文档的标题、作者、目录和页数解析能力。",
+  "capabilities": ["parser", "ebook-metadata", "table-of-contents"],
+  "enabled": false,
+  "sdk": "backend",
+  "entry": {},
+  "source": "builtin",
+  "runtime": "manifest-only",
+  "permissions": ["readRepository", "readMetadata"],
+  "requires": [],
+  "optional": [],
+  "hooks": [
+    { "slot": "candidateQueue", "action": "parser.ebook.writeMetadataCandidates", "label": "写入电子书解析候选" }
+  ],
+  "contributes": {
+    "parser": {
+      "extensions": ["epub", "pdf", "txt", "doc", "docx"],
+      "outputs": ["title", "author", "language", "pageCount", "tableOfContents", "coverArt"],
+      "candidateOnly": true
+    }
+  },
+  "compat": {
+    "sdkVersion": "1",
+    "legacyPluginIds": ["builtin.parser-ebook"]
+  },
+  "status": "disabled"
+}

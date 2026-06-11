@@ -163,9 +163,16 @@
 - `GET /plugins`
   - List runtime-discovered plugin manifests and capabilities
   - Release builds discover built-in plugins from `$RESOURCE/plugins/builtin`; missing or deleted plugin directories are reflected in the response instead of being replaced by compiled defaults or cwd/source fallbacks
-  - Manifest fields include `pluginId`, `legacyPluginIds`, `name`, `version`, `kind`, `description`, `capabilities`, `enabled`, `sdk`, `entry`, `source`, `runtime`, `permissions`, `compat`, and `status`
+  - Manifest fields include `pluginId`, `legacyPluginIds`, `name`, `version`, `kind`, `category`, `description`, `capabilities`, `enabled`, `sdk`, `entry`, `source`, `runtime`, `permissions`, `requires`, `optional`, `hooks`, `contributes`, `compat`, and `status`
+  - `category` is one of `source`, `library-kind`, `parser`, `preview`, or `service`; legacy manifests without `category` are inferred from `kind`.
+  - `source` plugins are attachable repository IO backends. Existing `filesystem`, `webdav`, and `cloud` kinds remain accepted as source plugins for compatibility.
+  - `library-kind` plugins declare content fields, facets, view presets, organization rules and declarative core-host hooks for content types. Built-in manifest-only library kinds include audio, ASMR, video, anime, manga, ebook, image, design, 3D model, font, game, software, archive and project.
+  - `parser` plugins declare extraction targets and normalized candidate outputs for concrete file/container types; parser output enters the candidate queue rather than directly writing metadata.
+  - `preview` plugins render file previews and thumbnails independently of library-kind semantics.
+  - `service` plugins expose shared capabilities such as metadata providers, network search, download queues, filesystem watching and vector search. External/network services are manual-trigger and candidate-only unless a future runtime implementation changes the contract.
+  - `hooks` declare how plugins attach to core-hosted capabilities such as playlist, PiP, progress, candidate queue, batch organize, download queue, metadata merge, rename/move execution, audit log and unified search.
   - Backend plugin IDs are normalized to the `momobako.*` namespace; legacy `builtin.*` IDs remain accepted when reading existing repositories
-  - Disabled or manifest-only filesystem backends are displayed but not offered as attachable repository backends
+  - Disabled or manifest-only source backends are displayed but not offered as usable repository backends until enabled with an available runtime
   - Filesystem backend `listFiles` responses include `absolutePath`, `relativePath`, `filename`, `extension`, `sizeBytes`, and `modifiedAt`; the runtime tolerates legacy responses without `absolutePath` by resolving `relativePath` under `repoRoot`
 
 ## Cache API

@@ -1,0 +1,36 @@
+{
+  "pluginId": "momobako.library.archive",
+  "legacyPluginIds": ["builtin.library-archive"],
+  "name": "Archive Library",
+  "version": "0.1.0",
+  "kind": "library-kind",
+  "category": "library-kind",
+  "description": "为压缩包和容器资源声明内部清单、入口文件、封面候选和重复线索。",
+  "capabilities": ["library-kind", "metadata-schema", "view-presets", "organize-candidates"],
+  "enabled": true,
+  "sdk": "backend",
+  "entry": {},
+  "source": "builtin",
+  "runtime": "manifest-only",
+  "permissions": ["readRepository", "readMetadata", "readArchive", "writeCandidates"],
+  "requires": [],
+  "optional": ["momobako.parser.archive"],
+  "hooks": [
+    { "slot": "candidateQueue", "action": "library.archive.writeContainerCandidates", "label": "写入容器索引候选" }
+  ],
+  "contributes": {
+    "libraryKind": {
+      "id": "archive",
+      "fields": ["title", "archiveFormat", "entryCount", "totalExpandedSize", "mainEntry", "coverCandidate", "containsExtensions", "checksum", "createdAt"],
+      "facets": ["archiveFormat", "containsExtensions"],
+      "sortFields": ["entryCount", "totalExpandedSize", "createdAt"],
+      "views": ["archives", "contents", "duplicates", "missingIndex"],
+      "preview": ["momobako.preview.text"]
+    }
+  },
+  "compat": {
+    "sdkVersion": "1",
+    "legacyPluginIds": ["builtin.library-archive"]
+  },
+  "status": "ready"
+}

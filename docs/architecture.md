@@ -72,16 +72,23 @@
 ## Plugin Architecture
 
 - Runtime plugins live under `plugins/builtin/*` in development. `yarn plugins:build` stages the runtime subset under `src-tauri/resources/plugins/builtin/*`, and release builds bundle it to `$RESOURCE/plugins/builtin/*`. The Tauri resource map intentionally avoids source-relative `../` paths so release packages do not expose `_up_/plugins/builtin`. When Tauri provides a resource directory, the runtime only scans `$RESOURCE/plugins/builtin` and does not fall back to cwd/source directories.
-- Plugin manifest includes the existing display fields plus runtime fields:
-  - `pluginId`, `legacyPluginIds`, `name`, `version`, `kind`, `description`, `capabilities`, `enabled`
+- Plugin manifest includes the existing display fields plus taxonomy, runtime and contribution fields:
+  - `pluginId`, `legacyPluginIds`, `name`, `version`, `kind`, `category`, `description`, `capabilities`, `enabled`
   - `sdk`: `frontend` or `backend`
   - `runtime`: `vue-module`, `native-dylib`, or `manifest-only`
-  - `entry`, `source`, `permissions`, `compat`, `status`
+  - `entry`, `source`, `permissions`, `requires`, `optional`, `hooks`, `contributes`, `compat`, `status`
+- `category` defines the plugin responsibility layer:
+  - `source` provides repository IO such as list/read/write/move/delete/watch. Local filesystem, WebDAV and cloud drive are source plugins.
+  - `library-kind` declares content semantics, metadata fields, search facets, default views, organization rules and core host hooks for resource types such as audio, ASMR, anime, manga, fonts and software.
+  - `parser` declares file or container metadata extraction outputs by extension/MIME/probe result. Parser plugins only produce normalized candidates.
+  - `preview` renders files and thumbnails. Library-kind plugins can prefer preview plugins but do not own preview rendering.
+  - `service` provides shared external or background capabilities such as network search, metadata providers, download queues, OCR/ASR, vector search or filesystem watching.
+- Core-hosted capabilities such as playlist, PiP, progress, candidate queue, batch organize, download queue, metadata merge, rename/move execution, audit log and unified search are exposed through declarative `hooks`. Plugins contribute data and actions; core owns state, confirmation and dangerous writes.
 - Frontend plugins use `src/plugins/sdk.ts` and register Vue preview components with `definePreviewPlugin()` and `registerPreviewPlugin()`.
 - Backend plugins use a C ABI boundary with JSON request/response envelopes:
   - `momobako_plugin_manifest`
   - `momobako_plugin_call`
   - `momobako_plugin_free`
-- The repository runtime discovers manifests at startup from the runtime plugin directory, normalizes legacy IDs such as `builtin.local-filesystem`, and routes filesystem backend operations through the plugin registry. If the runtime plugin directory is removed, `GET /plugins` reflects that removal instead of silently rebuilding the list from compiled manifests.
-- Built-in local filesystem is available as a trusted runtime backend loaded from its plugin directory. WebDAV, cloud drive, watcher, metadata provider, and vector index are separate manifest-only built-ins until their runtime implementations are added.
+- The repository runtime discovers manifests at startup from the runtime plugin directory, infers `category` for legacy manifests that only declare `kind`, normalizes legacy IDs such as `builtin.local-filesystem`, and routes source backend operations through the plugin registry. If the runtime plugin directory is removed, `GET /plugins` reflects that removal instead of silently rebuilding the list from compiled manifests.
+- Built-in local filesystem is available as a trusted source backend loaded from its plugin directory. WebDAV, cloud drive, library-kind, parser, provider, watcher, downloader and vector index plugins are separate manifest-only built-ins until their runtime implementations are added.
 - Filesystem backend `listFiles` responses carry both repository-relative paths and absolute local paths so the repository scanner can hash file content after plugin discovery. The runtime still resolves legacy responses that only include `relativePath`.

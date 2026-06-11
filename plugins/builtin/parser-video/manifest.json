@@ -1,0 +1,33 @@
+{
+  "pluginId": "momobako.parser.video",
+  "legacyPluginIds": ["builtin.parser-video"],
+  "name": "Video Parser",
+  "version": "0.1.0",
+  "kind": "parser",
+  "category": "parser",
+  "description": "声明视频容器、时长、清晰度、编码、音轨和字幕轨的解析能力。",
+  "capabilities": ["parser", "video-streams", "subtitles", "duration"],
+  "enabled": false,
+  "sdk": "backend",
+  "entry": {},
+  "source": "builtin",
+  "runtime": "manifest-only",
+  "permissions": ["readRepository", "readMetadata"],
+  "requires": [],
+  "optional": [],
+  "hooks": [
+    { "slot": "candidateQueue", "action": "parser.video.writeMetadataCandidates", "label": "写入视频解析候选" }
+  ],
+  "contributes": {
+    "parser": {
+      "extensions": ["mp4", "mkv", "mov", "webm", "avi", "m4v"],
+      "outputs": ["durationMs", "resolution", "videoCodec", "audioCodec", "subtitleLanguages", "audioLanguages", "container"],
+      "candidateOnly": true
+    }
+  },
+  "compat": {
+    "sdkVersion": "1",
+    "legacyPluginIds": ["builtin.parser-video"]
+  },
+  "status": "disabled"
+}

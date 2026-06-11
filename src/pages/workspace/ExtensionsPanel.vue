@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { Search } from "lucide-vue-next";
 import type { PluginManifest } from "../../types/repository";
+import { pluginCategory, pluginCategoryLabel } from "../../utils/pluginTaxonomy";
 
 defineProps<{
   plugins: PluginManifest[];
@@ -50,6 +51,7 @@ function updateKeyword(event: Event) {
           </div>
           <p class="extensions-workbench__card-desc">{{ plugin.description }}</p>
           <div class="settings-list__chips">
+            <span class="workspace-hints__chip">{{ pluginCategoryLabel(pluginCategory(plugin)) }}</span>
             <span class="workspace-hints__chip">{{ plugin.kind }}</span>
             <span v-for="capability in plugin.capabilities" :key="capability" class="workspace-hints__chip">
               {{ capability }}
