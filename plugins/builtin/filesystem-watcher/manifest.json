@@ -4,6 +4,7 @@
   "name": "Filesystem Watcher",
   "version": "1.0.0",
   "kind": "watcher",
+  "category": "service",
   "description": "监听仓库目录，记录新增、删除、修改与重命名事件。",
   "capabilities": ["watch", "events", "sync"],
   "enabled": false,
@@ -12,6 +13,16 @@
   "source": "builtin",
   "runtime": "manifest-only",
   "permissions": ["filesystem:read"],
+  "requires": [],
+  "optional": [],
+  "hooks": [
+    { "slot": "auditLog", "action": "service.watcher.recordEvents", "label": "记录文件事件" }
+  ],
+  "contributes": {
+    "service": {
+      "type": "watcher"
+    }
+  },
   "compat": {
     "sdkVersion": "1",
     "legacyPluginIds": ["builtin.filesystem-watcher"]

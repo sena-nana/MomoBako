@@ -4,6 +4,7 @@
   "name": "Text Preview",
   "version": "1.0.0",
   "kind": "preview",
+  "category": "preview",
   "description": "为常见文本与 Markdown 文件提供阅读预览，并生成文本缩略图。",
   "capabilities": ["preview", "text", "markdown", "thumbnail"],
   "enabled": true,
@@ -15,6 +16,17 @@
   "source": "builtin",
   "runtime": "vue-module",
   "permissions": ["preview:read", "thumbnail:write"],
+  "requires": [],
+  "optional": [],
+  "hooks": [
+    { "slot": "progress", "action": "preview.text.reportReadPosition", "label": "更新阅读进度" }
+  ],
+  "contributes": {
+    "preview": {
+      "extensions": ["txt", "md", "markdown", "json", "xml", "yaml", "yml", "csv", "log"],
+      "thumbnail": true
+    }
+  },
   "compat": {
     "sdkVersion": "1",
     "legacyPluginIds": ["builtin.text-preview"]

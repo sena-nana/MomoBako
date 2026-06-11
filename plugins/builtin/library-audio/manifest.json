@@ -1,0 +1,38 @@
+{
+  "pluginId": "momobako.library.audio",
+  "legacyPluginIds": ["builtin.library-audio"],
+  "name": "Audio Library",
+  "version": "0.1.0",
+  "kind": "library-kind",
+  "category": "library-kind",
+  "description": "为音乐与普通音频库声明字段、视图、筛选器和播放接入。",
+  "capabilities": ["library-kind", "metadata-schema", "view-presets", "playlist", "progress", "organize-candidates"],
+  "enabled": true,
+  "sdk": "backend",
+  "entry": {},
+  "source": "builtin",
+  "runtime": "manifest-only",
+  "permissions": ["readRepository", "readMetadata", "writeCandidates", "suggestRename", "suggestMove"],
+  "requires": [],
+  "optional": ["momobako.parser.audio", "momobako.service.provider.musicbrainz"],
+  "hooks": [
+    { "slot": "playlist", "action": "library.audio.enqueueSelection", "label": "加入播放列表" },
+    { "slot": "progress", "action": "library.audio.trackListeningProgress", "label": "记录收听进度" },
+    { "slot": "batchOrganize", "action": "library.audio.suggestAlbumLayout", "label": "生成专辑整理候选" }
+  ],
+  "contributes": {
+    "libraryKind": {
+      "id": "audio",
+      "fields": ["title", "artist", "album", "albumArtist", "trackNumber", "discNumber", "genre", "year", "durationMs", "bitrate", "sampleRate", "channels", "codec", "lyrics", "coverArt", "musicBrainzId"],
+      "facets": ["artist", "album", "genre", "year", "codec"],
+      "sortFields": ["album", "trackNumber", "year", "durationMs", "bitrate"],
+      "views": ["files", "albums", "artists", "recent", "missingMetadata"],
+      "preview": ["momobako.preview.media"]
+    }
+  },
+  "compat": {
+    "sdkVersion": "1",
+    "legacyPluginIds": ["builtin.library-audio"]
+  },
+  "status": "ready"
+}

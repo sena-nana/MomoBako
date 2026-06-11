@@ -4,6 +4,7 @@
   "name": "Metadata Provider",
   "version": "1.0.0",
   "kind": "metadata",
+  "category": "service",
   "description": "提供可扩展的元数据生成与写入能力。",
   "capabilities": ["metadata", "tags", "ocr"],
   "enabled": false,
@@ -12,6 +13,18 @@
   "source": "builtin",
   "runtime": "manifest-only",
   "permissions": ["filesystem:read"],
+  "requires": [],
+  "optional": ["momobako.service.network-search"],
+  "hooks": [
+    { "slot": "candidateQueue", "action": "service.metadata.writeCandidates", "label": "写入元数据候选" },
+    { "slot": "metadataMerge", "action": "service.metadata.mergeCandidates", "label": "合并元数据候选" }
+  ],
+  "contributes": {
+    "service": {
+      "type": "metadata-provider",
+      "candidateOnly": true
+    }
+  },
   "compat": {
     "sdkVersion": "1",
     "legacyPluginIds": ["builtin.metadata-provider"]

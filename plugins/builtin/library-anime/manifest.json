@@ -1,0 +1,39 @@
+{
+  "pluginId": "momobako.library.anime",
+  "legacyPluginIds": ["builtin.library-anime"],
+  "name": "Anime Library",
+  "version": "0.1.0",
+  "kind": "library-kind",
+  "category": "library-kind",
+  "description": "为番剧、OVA、SP 和动画电影声明集数、放送、字幕和观看视图。",
+  "capabilities": ["library-kind", "metadata-schema", "view-presets", "playlist", "pip", "progress", "organize-candidates"],
+  "enabled": true,
+  "sdk": "backend",
+  "entry": {},
+  "source": "builtin",
+  "runtime": "manifest-only",
+  "permissions": ["readRepository", "readMetadata", "writeCandidates", "suggestRename", "suggestMove"],
+  "requires": [],
+  "optional": ["momobako.parser.video", "momobako.service.provider.bangumi"],
+  "hooks": [
+    { "slot": "playlist", "action": "library.anime.enqueueEpisodes", "label": "加入播放列表" },
+    { "slot": "pip", "action": "library.anime.openPip", "label": "画中画" },
+    { "slot": "progress", "action": "library.anime.trackWatchProgress", "label": "记录观看进度" },
+    { "slot": "batchOrganize", "action": "library.anime.suggestEpisodeLayout", "label": "生成番剧整理候选" }
+  ],
+  "contributes": {
+    "libraryKind": {
+      "id": "anime",
+      "fields": ["title", "originalTitle", "seasonTitle", "episodeNumber", "episodeTitle", "airDate", "year", "resolution", "subtitleLanguages", "audioLanguages", "fansubGroup", "bangumiId", "watchStatus"],
+      "facets": ["year", "fansubGroup", "subtitleLanguages", "watchStatus"],
+      "sortFields": ["airDate", "episodeNumber", "resolution"],
+      "views": ["series", "episodes", "continueWatching", "missingEpisodes", "subtitleCheck"],
+      "preview": ["momobako.preview.media"]
+    }
+  },
+  "compat": {
+    "sdkVersion": "1",
+    "legacyPluginIds": ["builtin.library-anime"]
+  },
+  "status": "ready"
+}

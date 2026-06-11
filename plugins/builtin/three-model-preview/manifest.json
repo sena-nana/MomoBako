@@ -4,6 +4,7 @@
   "name": "3D Model Preview",
   "version": "1.0.0",
   "kind": "preview",
+  "category": "preview",
   "description": "为 FBX、OBJ、GLB、glTF 与 VRM 模型提供可旋转缩放的 3D 文件预览。",
   "capabilities": ["preview", "3d-model", "fbx", "obj", "gltf", "vrm"],
   "enabled": true,
@@ -15,6 +16,15 @@
   "source": "builtin",
   "runtime": "vue-module",
   "permissions": ["preview:read"],
+  "requires": [],
+  "optional": [],
+  "hooks": [],
+  "contributes": {
+    "preview": {
+      "extensions": ["fbx", "obj", "glb", "gltf", "vrm"],
+      "thumbnail": true
+    }
+  },
   "compat": {
     "sdkVersion": "1",
     "legacyPluginIds": ["builtin.three-model-preview"]

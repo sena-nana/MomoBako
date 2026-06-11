@@ -11,6 +11,7 @@ import {
   useRepositoryWorkspace,
 } from "../composables/useRepositoryWorkspace";
 import type { PluginManifest } from "../types/repository";
+import { pluginCategory, pluginCategoryLabel } from "../utils/pluginTaxonomy";
 
 withDefaults(defineProps<{
   title?: string;
@@ -47,6 +48,7 @@ const filteredPlugins = computed(() => {
     plugin.name.toLowerCase().includes(normalizedKeyword) ||
     plugin.description.toLowerCase().includes(normalizedKeyword) ||
     plugin.kind.toLowerCase().includes(normalizedKeyword) ||
+    pluginCategory(plugin).toLowerCase().includes(normalizedKeyword) ||
     plugin.capabilities.some((capability) => capability.toLowerCase().includes(normalizedKeyword))
   ));
 });
@@ -210,6 +212,7 @@ async function confirmDeletePlugin() {
           <span class="muted">v{{ plugin.version }}</span>
         </div>
         <div class="settings-list__chips">
+          <span class="workspace-hints__chip">{{ pluginCategoryLabel(pluginCategory(plugin)) }}</span>
           <span class="workspace-hints__chip">{{ plugin.kind }}</span>
           <span class="workspace-hints__chip">{{ pluginSourceLabel(plugin.source) }}</span>
           <span class="workspace-hints__chip">{{ pluginRuntimeLabel(plugin.runtime) }}</span>

@@ -4,6 +4,7 @@
   "name": "Cloud Drive",
   "version": "0.1.0",
   "kind": "cloud",
+  "category": "source",
   "description": "预留云盘文件系统接入点，如对象存储或网盘。",
   "capabilities": ["browse", "read", "write", "sync"],
   "enabled": false,
@@ -12,6 +13,15 @@
   "source": "builtin",
   "runtime": "manifest-only",
   "permissions": ["network", "filesystem:read", "filesystem:write"],
+  "requires": [],
+  "optional": [],
+  "hooks": [],
+  "contributes": {
+    "source": {
+      "operations": ["list", "read", "write", "move", "delete", "watch"],
+      "dangerousOperations": ["write", "move", "delete"]
+    }
+  },
   "compat": {
     "sdkVersion": "1",
     "legacyPluginIds": ["builtin.cloud-drive"]

@@ -1,0 +1,33 @@
+{
+  "pluginId": "momobako.parser.image",
+  "legacyPluginIds": ["builtin.parser-image"],
+  "name": "Image Parser",
+  "version": "0.1.0",
+  "kind": "parser",
+  "category": "parser",
+  "description": "声明图片 EXIF、尺寸、色彩、方向和感知哈希解析能力。",
+  "capabilities": ["parser", "exif", "palette", "perceptual-hash"],
+  "enabled": false,
+  "sdk": "backend",
+  "entry": {},
+  "source": "builtin",
+  "runtime": "manifest-only",
+  "permissions": ["readRepository", "readMetadata"],
+  "requires": [],
+  "optional": [],
+  "hooks": [
+    { "slot": "candidateQueue", "action": "parser.image.writeMetadataCandidates", "label": "写入图片解析候选" }
+  ],
+  "contributes": {
+    "parser": {
+      "extensions": ["jpg", "jpeg", "png", "webp", "gif", "tif", "tiff", "heic", "avif"],
+      "outputs": ["width", "height", "shotAt", "camera", "lens", "gps", "orientation", "color", "palette", "perceptualHash"],
+      "candidateOnly": true
+    }
+  },
+  "compat": {
+    "sdkVersion": "1",
+    "legacyPluginIds": ["builtin.parser-image"]
+  },
+  "status": "disabled"
+}

@@ -4,6 +4,7 @@
   "name": "Office & PDF Preview",
   "version": "1.0.0",
   "kind": "preview",
+  "category": "preview",
   "description": "为 Microsoft Office 文档与 PDF 文件提供预览，并生成文档缩略图。",
   "capabilities": ["preview", "thumbnail", "pdf", "office", "word", "excel", "powerpoint"],
   "enabled": true,
@@ -15,6 +16,17 @@
   "source": "builtin",
   "runtime": "vue-module",
   "permissions": ["preview:read", "thumbnail:write"],
+  "requires": [],
+  "optional": ["momobako.parser.ebook"],
+  "hooks": [
+    { "slot": "progress", "action": "preview.office.reportReadPosition", "label": "更新阅读进度" }
+  ],
+  "contributes": {
+    "preview": {
+      "extensions": ["pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "docm", "xlsm", "pptm"],
+      "thumbnail": true
+    }
+  },
   "compat": {
     "sdkVersion": "1",
     "legacyPluginIds": ["builtin.office-preview"]

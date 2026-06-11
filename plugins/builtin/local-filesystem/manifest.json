@@ -4,6 +4,7 @@
   "name": "Local Filesystem",
   "version": "1.0.0",
   "kind": "filesystem",
+  "category": "source",
   "description": "使用本地目录作为仓库文件管理后端。",
   "capabilities": ["browse", "read", "write", "watch", "sync"],
   "enabled": true,
@@ -14,6 +15,15 @@
   "source": "builtin",
   "runtime": "native-dylib",
   "permissions": ["filesystem:read", "filesystem:write"],
+  "requires": [],
+  "optional": ["momobako.filesystem-watcher"],
+  "hooks": [],
+  "contributes": {
+    "source": {
+      "operations": ["list", "read", "write", "move", "delete", "watch"],
+      "dangerousOperations": ["write", "move", "delete"]
+    }
+  },
   "compat": {
     "sdkVersion": "1",
     "legacyPluginIds": ["builtin.local-filesystem"]

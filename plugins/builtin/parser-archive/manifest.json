@@ -1,0 +1,33 @@
+{
+  "pluginId": "momobako.parser.archive",
+  "legacyPluginIds": ["builtin.parser-archive"],
+  "name": "Archive Parser",
+  "version": "0.1.0",
+  "kind": "parser",
+  "category": "parser",
+  "description": "声明压缩包和容器内部清单、入口文件、封面候选和重复线索的解析能力。",
+  "capabilities": ["parser", "archive-index", "container-manifest"],
+  "enabled": false,
+  "sdk": "backend",
+  "entry": {},
+  "source": "builtin",
+  "runtime": "manifest-only",
+  "permissions": ["readRepository", "readArchive"],
+  "requires": [],
+  "optional": [],
+  "hooks": [
+    { "slot": "candidateQueue", "action": "parser.archive.writeContainerCandidates", "label": "写入容器解析候选" }
+  ],
+  "contributes": {
+    "parser": {
+      "extensions": ["zip", "7z", "rar", "cbz", "cbr", "tar", "gz"],
+      "outputs": ["archiveFormat", "entryCount", "totalExpandedSize", "mainEntry", "coverCandidate", "containsExtensions"],
+      "candidateOnly": true
+    }
+  },
+  "compat": {
+    "sdkVersion": "1",
+    "legacyPluginIds": ["builtin.parser-archive"]
+  },
+  "status": "disabled"
+}

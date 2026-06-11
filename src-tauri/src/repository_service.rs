@@ -1001,6 +1001,8 @@ pub struct PluginManifest {
     pub name: String,
     pub version: String,
     pub kind: String,
+    #[serde(default)]
+    pub category: String,
     pub description: String,
     pub capabilities: Vec<String>,
     pub enabled: bool,
@@ -1009,8 +1011,27 @@ pub struct PluginManifest {
     pub source: String,
     pub runtime: String,
     pub permissions: Vec<String>,
+    #[serde(default)]
+    pub requires: Vec<String>,
+    #[serde(default)]
+    pub optional: Vec<String>,
+    #[serde(default)]
+    pub hooks: Vec<PluginHook>,
+    #[serde(default)]
+    pub contributes: serde_json::Value,
     pub compat: PluginCompat,
     pub status: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginHook {
+    pub slot: String,
+    pub action: String,
+    #[serde(default)]
+    pub label: Option<String>,
+    #[serde(default)]
+    pub requires: Vec<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -7172,9 +7193,36 @@ const BUILTIN_PLUGIN_MANIFESTS: &[&str] = &[
     include_str!("../../plugins/builtin/cloud-drive/manifest.json"),
     include_str!("../../plugins/builtin/three-model-preview/manifest.json"),
     include_str!("../../plugins/builtin/media-preview/manifest.json"),
+    include_str!("../../plugins/builtin/office-preview/manifest.json"),
+    include_str!("../../plugins/builtin/text-preview/manifest.json"),
     include_str!("../../plugins/builtin/filesystem-watcher/manifest.json"),
     include_str!("../../plugins/builtin/metadata-provider/manifest.json"),
     include_str!("../../plugins/builtin/vector-index/manifest.json"),
+    include_str!("../../plugins/builtin/library-audio/manifest.json"),
+    include_str!("../../plugins/builtin/library-asmr/manifest.json"),
+    include_str!("../../plugins/builtin/library-video/manifest.json"),
+    include_str!("../../plugins/builtin/library-anime/manifest.json"),
+    include_str!("../../plugins/builtin/library-manga/manifest.json"),
+    include_str!("../../plugins/builtin/library-ebook/manifest.json"),
+    include_str!("../../plugins/builtin/library-image/manifest.json"),
+    include_str!("../../plugins/builtin/library-design/manifest.json"),
+    include_str!("../../plugins/builtin/library-model3d/manifest.json"),
+    include_str!("../../plugins/builtin/library-font/manifest.json"),
+    include_str!("../../plugins/builtin/library-game/manifest.json"),
+    include_str!("../../plugins/builtin/library-software/manifest.json"),
+    include_str!("../../plugins/builtin/library-archive/manifest.json"),
+    include_str!("../../plugins/builtin/library-project/manifest.json"),
+    include_str!("../../plugins/builtin/parser-audio/manifest.json"),
+    include_str!("../../plugins/builtin/parser-video/manifest.json"),
+    include_str!("../../plugins/builtin/parser-archive/manifest.json"),
+    include_str!("../../plugins/builtin/parser-ebook/manifest.json"),
+    include_str!("../../plugins/builtin/parser-image/manifest.json"),
+    include_str!("../../plugins/builtin/parser-font/manifest.json"),
+    include_str!("../../plugins/builtin/service-downloader/manifest.json"),
+    include_str!("../../plugins/builtin/service-network-search/manifest.json"),
+    include_str!("../../plugins/builtin/service-provider-musicbrainz/manifest.json"),
+    include_str!("../../plugins/builtin/service-provider-tmdb/manifest.json"),
+    include_str!("../../plugins/builtin/service-provider-bangumi/manifest.json"),
 ];
 
 type PluginManifestFn = unsafe extern "C" fn() -> *mut c_char;
@@ -7496,6 +7544,12 @@ fn parse_plugin_manifest_with_source(
 ) -> Result<PluginManifest, String> {
     let mut manifest = serde_json::from_str::<PluginManifest>(raw).map_err(json_error)?;
     manifest.plugin_id = normalized_builtin_plugin_id(&manifest.plugin_id).to_string();
+    if manifest.category.trim().is_empty() {
+        manifest.category = plugin_category_for_kind(&manifest.kind).to_string();
+    }
+    if manifest.contributes.is_null() {
+        manifest.contributes = serde_json::json!({});
+    }
     if let Some(source) = source_override {
         manifest.source = source.to_string();
     }
@@ -7513,6 +7567,23 @@ fn plugin_legacy_ids(manifest: &PluginManifest) -> Vec<String> {
     values.sort();
     values.dedup();
     values
+}
+
+fn plugin_category_for_kind(kind: &str) -> &'static str {
+    match kind {
+        "filesystem" | "webdav" | "cloud" => "source",
+        "preview" => "preview",
+        "library-kind" => "library-kind",
+        "parser" => "parser",
+        "metadata" | "provider" | "search" | "watcher" | "download" | "ocr" | "asr" | "ai" => {
+            "service"
+        }
+        _ => "service",
+    }
+}
+
+fn is_source_plugin(manifest: &PluginManifest) -> bool {
+    manifest.category == "source" || matches!(manifest.kind.as_str(), "filesystem" | "webdav" | "cloud")
 }
 
 fn plugin_settings_path(service_root: &Path) -> PathBuf {
@@ -7558,7 +7629,7 @@ fn apply_plugin_settings(manifest: &mut PluginManifest, settings: &PluginSetting
 }
 
 fn is_repository_backend_plugin(manifest: &PluginManifest) -> bool {
-    matches!(manifest.kind.as_str(), "filesystem" | "webdav" | "cloud")
+    is_source_plugin(manifest)
 }
 
 fn ensure_user_plugin_dir(service_root: &Path, plugin_dir: &Path) -> Result<(), String> {
@@ -7969,9 +8040,9 @@ fn parse_backend_request(
     let manifest = registry
         .manifest(&normalized_plugin_id)
         .ok_or_else(|| format!("unsupported filesystem backend plugin: {plugin_id}"))?;
-    if !["filesystem", "webdav", "cloud"].contains(&manifest.kind.as_str()) {
+    if !is_source_plugin(manifest) {
         return Err(format!(
-            "plugin is not a filesystem backend: {}",
+            "plugin is not a repository source: {}",
             manifest.plugin_id
         ));
     }
@@ -11207,13 +11278,29 @@ mod tests {
 
         assert!(manifests.iter().any(|manifest| {
             manifest.plugin_id == LOCAL_FILESYSTEM_PLUGIN_ID
+                && manifest.category == "source"
                 && manifest.runtime == "native-dylib"
                 && manifest
                     .legacy_plugin_ids
                     .contains(&LEGACY_LOCAL_FILESYSTEM_PLUGIN_ID.to_string())
         }));
         assert!(manifests.iter().any(|manifest| {
-            manifest.plugin_id == "momobako.preview.media" && manifest.sdk == "frontend"
+            manifest.plugin_id == "momobako.preview.media"
+                && manifest.category == "preview"
+                && manifest.sdk == "frontend"
+                && manifest.hooks.iter().any(|hook| hook.slot == "playlist")
+        }));
+        assert!(manifests.iter().any(|manifest| {
+            manifest.plugin_id == "momobako.library.audio"
+                && manifest.category == "library-kind"
+                && manifest.optional.contains(&"momobako.parser.audio".to_string())
+        }));
+        assert!(manifests.iter().any(|manifest| {
+            manifest.plugin_id == "momobako.parser.audio" && manifest.category == "parser"
+        }));
+        assert!(manifests.iter().any(|manifest| {
+            manifest.plugin_id == "momobako.service.network-search"
+                && manifest.category == "service"
         }));
         assert_eq!(
             registry.normalize_plugin_id(LEGACY_LOCAL_FILESYSTEM_PLUGIN_ID),
@@ -12228,6 +12315,40 @@ mod tests {
         assert_eq!(response.results[0].path, "cover.psd");
 
         fs::remove_dir_all(root).expect("test temp root should be removed");
+    }
+
+    #[test]
+    fn plugin_manifest_infers_category_for_legacy_kind() {
+        let manifest = parse_plugin_manifest(
+            r#"{
+              "pluginId": "user.legacy-webdav",
+              "legacyPluginIds": [],
+              "name": "Legacy WebDAV",
+              "version": "0.1.0",
+              "kind": "webdav",
+              "description": "Legacy source plugin.",
+              "capabilities": ["browse"],
+              "enabled": true,
+              "sdk": "backend",
+              "entry": {},
+              "source": "user",
+              "runtime": "manifest-only",
+              "permissions": [],
+              "compat": {
+                "sdkVersion": "1",
+                "legacyPluginIds": []
+              },
+              "status": "ready"
+            }"#,
+        )
+        .expect("legacy manifest should parse");
+
+        assert_eq!(manifest.category, "source");
+        assert!(is_repository_backend_plugin(&manifest));
+        assert!(manifest.requires.is_empty());
+        assert!(manifest.optional.is_empty());
+        assert!(manifest.hooks.is_empty());
+        assert!(manifest.contributes.is_object());
     }
 
     #[test]

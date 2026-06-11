@@ -518,6 +518,7 @@ export type PluginManifest = {
   name: string;
   version: string;
   kind: string;
+  category?: PluginCategory | string;
   description: string;
   capabilities: string[];
   enabled: boolean;
@@ -526,12 +527,37 @@ export type PluginManifest = {
   source?: "builtin" | "user" | "system";
   runtime?: "vue-module" | "native-dylib" | "manifest-only";
   permissions?: string[];
+  requires?: string[];
+  optional?: string[];
+  hooks?: PluginHook[];
+  contributes?: Record<string, unknown>;
   compat?: {
     sdkVersion?: string;
     legacyPluginIds?: string[];
   };
   status?: "ready" | "disabled" | "unavailable" | "error";
 };
+
+export type PluginCategory = "source" | "library-kind" | "parser" | "preview" | "service";
+
+export type PluginHook = {
+  slot: CoreHostCapability | string;
+  action: string;
+  label?: string;
+  requires?: string[];
+};
+
+export type CoreHostCapability =
+  | "playlist"
+  | "pip"
+  | "progress"
+  | "candidateQueue"
+  | "batchOrganize"
+  | "downloadQueue"
+  | "metadataMerge"
+  | "renameMove"
+  | "auditLog"
+  | "search";
 
 export type PluginEnabledRequest = {
   pluginId: string;

@@ -1,5 +1,6 @@
 import { computed, type ComputedRef } from "vue";
 import type { FileBrowserEntry, RepositoryBackendOption } from "../../types/repository";
+import { isSourcePlugin } from "../../utils/pluginTaxonomy";
 import {
   activeRepoId,
   activeSnapshot,
@@ -100,7 +101,7 @@ export const breadcrumbSegments = computed(() => {
 
 export function repositoryBackendOptionsFromPlugins(): RepositoryBackendOption[] {
   return plugins.value
-    .filter((plugin) => ["filesystem", "webdav", "cloud"].includes(plugin.kind))
+    .filter(isSourcePlugin)
     .map((plugin) => ({
       pluginId: plugin.pluginId,
       kind: plugin.kind,
