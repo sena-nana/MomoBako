@@ -348,8 +348,8 @@ function selectRepositoryFromList(repoId: string) {
 }
 
 function formatAddRepositoryBackendLabel(pluginId: string, fallback: string) {
-  if (pluginId === localFilesystemPluginId || pluginId === "builtin.local-filesystem") return "本地文件夹";
-  if (pluginId === "momobako.cloud-drive" || pluginId === "builtin.cloud-drive") return "云盘";
+  if (pluginId === localFilesystemPluginId) return "本地文件夹";
+  if (pluginId === "momobako.cloud-drive") return "云盘";
   return fallback;
 }
 

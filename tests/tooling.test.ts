@@ -21,22 +21,57 @@ describe("MomoBako 工具链", () => {
       "docs:dev": "vitepress dev docs",
       "docs:build": "vitepress build docs",
       "docs:preview": "vitepress preview docs",
-      "plugins:build": "node scripts/build-builtin-plugins.mjs",
-      verify:
-        "yarn test && yarn build && yarn plugins:build && cargo check --manifest-path src-tauri/Cargo.toml",
+      "plugins:build": "node scripts/build-external-plugins.mjs",
+      "plugins:package": "node scripts/package-external-plugins.mjs",
+      "plugins:stage:dev": "node scripts/stage-external-plugins.mjs",
+      "tauri:dev:with-plugins": "yarn plugins:build && yarn plugins:package && yarn plugins:stage:dev && node scripts/tauri-dev.mjs",
+      verify: "yarn test && yarn build && cargo check --manifest-path src-tauri/Cargo.toml",
     });
     expect(deps.vitepress).toBeDefined();
+    expect(deps.jszip).toBeUndefined();
+    expect(deps.three).toBeUndefined();
+    expect(deps["@pixiv/three-vrm"]).toBeUndefined();
+  });
+
+  it("External/Plugins 提供标准开发入口并与主线源码隔离", () => {
+    const devGuide = read("External/Plugins/dev.md");
+    const pluginsPkg = JSON.parse(read("External/Plugins/package.json"));
+    const templateManifest = read("External/Plugins/template/manifest.json");
+    const templateProject = read("External/Plugins/template/plugin.project.json");
+    const exampleManifest = read("External/Plugins/example/manifest.json");
+    const exampleProject = read("External/Plugins/example/plugin.project.json");
+    const tsconfig = read("tsconfig.json");
+
+    expect(devGuide).toContain("External/Plugins/");
+    expect(devGuide).toContain("External/Plugins/package.json");
+    expect(devGuide).toContain("<serviceRoot>/plugins");
+    expect(devGuide).toContain(".momoplug");
+    expect(devGuide).toContain("register(ctx)");
+    expect(devGuide).toContain("momobako_plugin_call");
+    expect(pluginsPkg.scripts).toMatchObject({
+      build: "node scripts/build.mjs",
+      package: "node scripts/package.mjs",
+      "stage:dev": "node scripts/stage-dev.mjs",
+    });
+    expect(read("External/Plugins/scripts/package.mjs")).toContain("no plugin build outputs found to package");
+    expect(templateManifest).toContain("\"pluginId\"");
+    expect(templateProject).toContain("\"build\"");
+    expect(exampleManifest).toContain("\"pluginId\"");
+    expect(exampleProject).toContain("\"build\"");
+    expect(tsconfig).not.toContain("plugins/**/*.ts");
+    expect(tsconfig).not.toContain("plugins/**/*.json");
   });
 
   it("GitHub CI 使用 MomoBako 验证和文档构建配置", () => {
     const ci = read(".github/workflows/ci.yml");
 
     expect(ci).toContain("Verify MomoBako");
+    expect(ci).toContain("Build External Plugins");
     expect(ci).toContain("corepack yarn verify");
+    expect(ci).toContain("working-directory: External/Plugins");
+    expect(ci).toContain("corepack yarn package");
     expect(ci).toContain("corepack yarn docs:build");
     expect(ci).toContain("src-tauri/target");
-    expect(ci).toContain("plugins/backend-sdk/target");
-    expect(ci).toContain("plugins/builtin/local-filesystem/target");
     expectNoSourceResidue(ci);
   });
 
@@ -45,6 +80,8 @@ describe("MomoBako 工具链", () => {
 
     expect(release).toContain("Publish Windows Release");
     expect(release).toContain("corepack yarn verify");
+    expect(release).toContain("Install external plugin dependencies");
+    expect(release).toContain("Upload external plugin packages");
     expect(release).toContain("projectPath: .");
     expect(release).toContain("tauriScript: corepack yarn tauri");
     expect(release).toContain("releaseName: MomoBako");

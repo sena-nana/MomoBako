@@ -46,6 +46,10 @@ node_modules/
 .vite/
 dist/
 *.local
+External/Plugins/.dist/
+External/Plugins/.packages/
+External/Plugins/.yarn/
+.service-data/
 
 # TypeScript
 *.tsbuildinfo
@@ -64,10 +68,6 @@ target/
 **/target/
 **/*.rs.bk
 *.pdb
-plugins/builtin/**/*.dll
-plugins/builtin/**/*.dylib
-plugins/builtin/**/*.so
-src-tauri/resources/plugins/builtin/
 src-tauri/gen/schemas/
 
 # Databases

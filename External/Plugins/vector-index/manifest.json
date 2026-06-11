@@ -1,0 +1,23 @@
+{
+  "pluginId": "momobako.vector-index",
+  "name": "Vector Index",
+  "version": "0.1.0",
+  "type": {
+    "layer": "provider-service",
+    "kind": "search"
+  },
+  "kind": "search",
+  "description": "预留向量检索与 AI 语义搜索扩展点。",
+  "capabilities": ["semantic-search", "embedding"],
+  "enabled": false,
+  "sdk": "backend",
+  "runtime": "manifest-only",
+  "entry": {},
+  "permissions": [],
+  "compat": {
+    "sdkVersion": "1",
+    "legacyPluginIds": []
+  },
+  "source": "builtin",
+  "status": "disabled"
+}

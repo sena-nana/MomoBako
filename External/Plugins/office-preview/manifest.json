@@ -1,0 +1,33 @@
+{
+  "pluginId": "momobako.preview.office",
+  "name": "Office & PDF Preview",
+  "version": "1.0.0",
+  "type": {
+    "layer": "library-kind",
+    "kind": "preview"
+  },
+  "kind": "preview",
+  "description": "为 Microsoft Office 文档与 PDF 文件提供预览，并生成文档缩略图。",
+  "capabilities": ["preview", "thumbnail", "pdf", "office", "word", "excel", "powerpoint"],
+  "enabled": true,
+  "sdk": "frontend",
+  "runtime": "vue-module",
+  "entry": {
+    "frontend": {
+      "module": "dist/register.js",
+      "export": "register"
+    }
+  },
+  "contributes": {
+    "preview": {
+      "extensions": ["pdf", "doc", "docx", "docm", "dotx", "dotm", "dot", "xls", "xlsx", "xlsm", "xlsb", "xltx", "xltm", "xlt", "ppt", "pptx", "pptm", "ppsx", "ppsm", "pps", "potx", "potm", "pot"]
+    }
+  },
+  "permissions": ["preview:read"],
+  "compat": {
+    "sdkVersion": "1",
+    "legacyPluginIds": []
+  },
+  "source": "builtin",
+  "status": "ready"
+}

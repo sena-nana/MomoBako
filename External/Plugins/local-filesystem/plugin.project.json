@@ -1,0 +1,9 @@
+{
+  "pluginId": "momobako.local-filesystem",
+  "build": {
+    "type": "cargo-native",
+    "sourceDir": "src",
+    "manifestPath": "Cargo.toml",
+    "outputDir": ".dist/local-filesystem"
+  }
+}

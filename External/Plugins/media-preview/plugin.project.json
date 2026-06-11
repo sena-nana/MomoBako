@@ -1,0 +1,9 @@
+{
+  "pluginId": "momobako.preview.media",
+  "build": {
+    "type": "frontend-module",
+    "sourceDir": "src",
+    "entry": "dist/register.js",
+    "outputDir": ".dist/media-preview"
+  }
+}

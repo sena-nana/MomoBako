@@ -21,9 +21,10 @@ import {
 } from "lucide-vue-next";
 import ConfirmDialog from "../components/ConfirmDialog.vue";
 import PluginManagerPanel from "../components/PluginManagerPanel.vue";
+import type { ContextMenuItem } from "../composables/useContextMenu";
 import { useRepositoryWorkspace } from "../composables/useRepositoryWorkspace";
-import { getPreviewPluginForEntry } from "../plugins/previewPlugins";
-import { isAudioExtension, isVideoExtension } from "../plugins/mediaPreview/mediaExtensions";
+import { getPreviewPluginFileActions, getPreviewPluginForEntry } from "../plugins/previewPlugins";
+import { isAudioExtension, isVideoExtension } from "../utils/filePreviewExtensions";
 import { metadataPalette } from "../utils/fileMetadata";
 import {
   getWorkspaceParentPath,
@@ -1166,6 +1167,17 @@ function fileEntryContextMenu(entry: FileBrowserEntry) {
       },
     ];
   }
+  const pluginActions = activeRepoId.value && entry.kind === "file" && !isTrashPanel.value
+    ? getPreviewPluginFileActions(activeRepoId.value, entry).map<ContextMenuItem>((action) => ({
+      id: action.id,
+      label: action.label,
+      icon: action.icon,
+      disabled: action.disabled || hasMultipleSelection.value,
+      danger: action.danger,
+      confirmLabel: action.confirmLabel,
+      onSelect: action.onSelect,
+    }))
+    : [];
   const items = [
     ...(isTrashPanel.value ? [{
       id: "restore",
@@ -1218,6 +1230,7 @@ function fileEntryContextMenu(entry: FileBrowserEntry) {
       disabled: isTrashPanel.value || isMutatingFiles.value,
       onSelect: () => openCopyTargetDialog(entry),
     },
+    ...pluginActions,
     {
       id: "thumbnail",
       label: "缩略图",
@@ -1843,7 +1856,7 @@ onUnmounted(() => {
       subline="这里集中展示当前插件和后端能力。"
       search-placeholder="筛选导入器、脚本或元数据拓展"
       empty-title="没有匹配的插件"
-      empty-description="试试其他关键词，或从压缩包安装新的插件。"
+      empty-description="试试其他关键词，或从 .momoplug 安装新的插件。"
     />
   </section>
 

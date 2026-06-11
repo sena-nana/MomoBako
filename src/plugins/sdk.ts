@@ -1,5 +1,35 @@
-import type { Component } from "vue";
+import type { Component, DefineComponent } from "vue";
+import {
+  computed,
+  defineAsyncComponent,
+  h,
+  nextTick,
+  onBeforeUnmount,
+  onMounted,
+  ref,
+  watch,
+} from "vue";
+import { convertFileSrc } from "@tauri-apps/api/core";
+import { save as saveDialog } from "@tauri-apps/plugin-dialog";
 import type { FileBrowserEntry, PluginManifest } from "../types/repository";
+import {
+  callPlugin,
+  ensureThumbnail,
+  preparePreviewFileSource,
+  readFile,
+  readPluginArchiveText,
+  writeBinaryFile,
+} from "../services/repositoryApi";
+
+export type PreviewPluginFileAction = {
+  id: string;
+  label: string;
+  icon?: Component;
+  disabled?: boolean;
+  danger?: boolean;
+  confirmLabel?: string;
+  onSelect: () => Promise<void> | void;
+};
 
 export type FilePreviewPlugin = {
   pluginId: string;
@@ -11,6 +41,10 @@ export type FilePreviewPlugin = {
     repoId: string;
     entry: FileBrowserEntry;
   }) => Promise<{ bytes: number[]; mediaType: string } | null>;
+  getFileActions?: (context: {
+    repoId: string;
+    entry: FileBrowserEntry;
+  }) => PreviewPluginFileAction[];
   manifest?: PluginManifest;
 };
 
@@ -19,21 +53,61 @@ export type PreviewPluginDefinition = {
   supportedExtensions: string[];
   component: Component;
   generateThumbnail?: FilePreviewPlugin["generateThumbnail"];
+  getFileActions?: FilePreviewPlugin["getFileActions"];
+};
+
+export type FrontendPluginContext = {
+  manifest: PluginManifest;
+  registerPreview: (definition: Omit<PreviewPluginDefinition, "manifest">) => FilePreviewPlugin;
+  defineLazyComponent: <T extends Component | DefineComponent>(
+    loader: () => Promise<T | { default: T }>,
+  ) => Component;
+  loadModule: <T = unknown>(path: string) => Promise<T>;
+  callPlugin: typeof callPlugin;
+  preparePreviewFileSource: typeof preparePreviewFileSource;
+  readFile: typeof readFile;
+  ensureThumbnail: typeof ensureThumbnail;
+  saveGeneratedThumbnail: (request: {
+    repoId: string;
+    path: string;
+    imageBytes: number[];
+    mediaType?: string;
+  }) => Promise<Awaited<ReturnType<typeof ensureThumbnail>>>;
+  writeBinaryFile: typeof writeBinaryFile;
+  saveFileDialog: typeof saveDialog;
+  fileSrc: typeof convertFileSrc;
+  vue: {
+    h: typeof h;
+    ref: typeof ref;
+    computed: typeof computed;
+    watch: typeof watch;
+    onMounted: typeof onMounted;
+    onBeforeUnmount: typeof onBeforeUnmount;
+    nextTick: typeof nextTick;
+  };
 };
 
 const previewPluginRegistry = new Map<string, FilePreviewPlugin>();
+const loadedPluginModules = new Map<string, Promise<void>>();
+const pluginModuleUrls = new Map<string, string>();
+
+function normalizeExtensions(extensions: string[]) {
+  return [...new Set(
+    extensions
+      .map((extension) => extension.trim().toLowerCase())
+      .filter(Boolean),
+  )];
+}
 
 export function definePreviewPlugin(definition: PreviewPluginDefinition) {
-  const extensions = definition.supportedExtensions
-    .map((extension) => extension.trim().toLowerCase())
-    .filter(Boolean);
   return {
     pluginId: definition.manifest.pluginId,
     name: definition.manifest.name,
     kind: "preview" as const,
-    supportedExtensions: [...new Set(extensions)],
+    supportedExtensions: normalizeExtensions(definition.supportedExtensions),
     component: definition.component,
     generateThumbnail: definition.generateThumbnail,
+    getFileActions: definition.getFileActions,
     manifest: definition.manifest,
   };
 }
@@ -47,12 +121,110 @@ export function listRegisteredPreviewPlugins() {
   return [...previewPluginRegistry.values()];
 }
 
-export function syncRegisteredPreviewPluginManifests(manifests: PluginManifest[]) {
+function pluginBlobUrlCacheKey(pluginId: string, path: string) {
+  return `${pluginId}:${path}`;
+}
+
+async function loadPluginModule<T = unknown>(pluginId: string, path: string): Promise<T> {
+  const cacheKey = pluginBlobUrlCacheKey(pluginId, path);
+  let url = pluginModuleUrls.get(cacheKey);
+  if (!url) {
+    const response = await readPluginArchiveText({ pluginId, path });
+    url = `data:text/javascript;charset=utf-8,${encodeURIComponent(response.text)}`;
+    pluginModuleUrls.set(cacheKey, url);
+  }
+  return import(/* @vite-ignore */ url) as Promise<T>;
+}
+
+function createFrontendPluginContext(manifest: PluginManifest): FrontendPluginContext {
+  return {
+    manifest,
+    registerPreview(definition) {
+      const plugin = definePreviewPlugin({
+        manifest,
+        ...definition,
+      });
+      registerPreviewPlugin(plugin);
+      return plugin;
+    },
+    defineLazyComponent(loader) {
+      return defineAsyncComponent(loader);
+    },
+    loadModule<T = unknown>(path: string) {
+      return loadPluginModule<T>(manifest.pluginId, path);
+    },
+    callPlugin,
+    preparePreviewFileSource,
+    readFile,
+    ensureThumbnail,
+    saveGeneratedThumbnail(request) {
+      return ensureThumbnail({
+        repoId: request.repoId,
+        path: request.path,
+        action: "saveGenerated",
+        imageBytes: request.imageBytes,
+        mediaType: request.mediaType,
+      });
+    },
+    writeBinaryFile,
+    saveFileDialog: saveDialog,
+    fileSrc: convertFileSrc,
+    vue: {
+      h,
+      ref,
+      computed,
+      watch,
+      onMounted,
+      onBeforeUnmount,
+      nextTick,
+    },
+  };
+}
+
+async function registerFrontendPluginManifest(manifest: PluginManifest) {
+  const modulePath = manifest.entry?.frontend?.module?.trim();
+  if (!modulePath) return;
+  const moduleExport = manifest.entry?.frontend?.export?.trim() || "register";
+  const module = await loadPluginModule<Record<string, unknown>>(manifest.pluginId, modulePath);
+  const register = module[moduleExport];
+  if (typeof register !== "function") {
+    throw new Error(`plugin register export not found: ${manifest.pluginId}:${moduleExport}`);
+  }
+  await Promise.resolve(register(createFrontendPluginContext(manifest)));
+}
+
+export async function syncRegisteredPreviewPluginManifests(manifests: PluginManifest[]) {
   const manifestMap = new Map(manifests.map((manifest) => [manifest.pluginId, manifest]));
-  for (const plugin of previewPluginRegistry.values()) {
-    const manifest = manifestMap.get(plugin.pluginId);
-    if (!manifest) continue;
+  for (const [pluginId, plugin] of previewPluginRegistry) {
+    const manifest = manifestMap.get(pluginId);
+    if (!manifest) {
+      previewPluginRegistry.delete(pluginId);
+      loadedPluginModules.delete(pluginId);
+      continue;
+    }
     plugin.manifest = manifest;
+  }
+
+  for (const manifest of manifests) {
+    if (manifest.sdk !== "frontend" || manifest.runtime !== "vue-module") continue;
+    if (!manifest.entry?.frontend?.module) continue;
+    if (previewPluginRegistry.has(manifest.pluginId)) {
+      const plugin = previewPluginRegistry.get(manifest.pluginId);
+      if (plugin) plugin.manifest = manifest;
+      continue;
+    }
+    if (!loadedPluginModules.has(manifest.pluginId)) {
+      loadedPluginModules.set(
+        manifest.pluginId,
+        registerFrontendPluginManifest(manifest).catch((error) => {
+          loadedPluginModules.delete(manifest.pluginId);
+          throw error;
+        }),
+      );
+    }
+    await loadedPluginModules.get(manifest.pluginId);
+    const plugin = previewPluginRegistry.get(manifest.pluginId);
+    if (plugin) plugin.manifest = manifest;
   }
 }
 
@@ -66,4 +238,6 @@ export function getRegisteredPreviewPluginForEntry(entry: FileBrowserEntry | nul
 
 export function clearPreviewPluginRegistry() {
   previewPluginRegistry.clear();
+  loadedPluginModules.clear();
+  pluginModuleUrls.clear();
 }

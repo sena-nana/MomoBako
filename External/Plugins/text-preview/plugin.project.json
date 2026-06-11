@@ -1,0 +1,9 @@
+{
+  "pluginId": "momobako.preview.text",
+  "build": {
+    "type": "frontend-module",
+    "sourceDir": "src",
+    "entry": "dist/register.js",
+    "outputDir": ".dist/text-preview"
+  }
+}

@@ -1,4 +1,4 @@
-use crate::repository_service::{set_runtime_plugin_resource_dir, RepositoryState, SyncRequest};
+use crate::repository_service::{RepositoryState, SyncRequest};
 use notify::{Config, Event, RecommendedWatcher, RecursiveMode, Watcher};
 use std::{
     collections::BTreeSet,
@@ -13,7 +13,6 @@ use tiny_http::{Header, Method, Request, Response, ResponseBox, Server, StatusCo
 const PREVIEW_HOST: &str = "127.0.0.1";
 const PREVIEW_PATH_PREFIX: &str = "/preview/";
 const LOCAL_FILESYSTEM_PLUGIN_ID: &str = "momobako.local-filesystem";
-const LEGACY_LOCAL_FILESYSTEM_PLUGIN_ID: &str = "builtin.local-filesystem";
 
 #[derive(Clone)]
 pub struct RepositoryRuntime {
@@ -36,10 +35,7 @@ struct ByteRange {
 }
 
 impl RepositoryRuntime {
-    pub fn start_with_resource_dir(resource_dir: Option<PathBuf>) -> Result<Self, String> {
-        if let Some(resource_dir) = resource_dir {
-            set_runtime_plugin_resource_dir(resource_dir);
-        }
+    pub fn start() -> Result<Self, String> {
         let root = std::env::current_dir()
             .map_err(|error| error.to_string())?
             .join(".service-data");
@@ -309,10 +305,7 @@ fn sync_watched_paths(
     let repositories = repository_state.list_repositories()?;
     let desired_paths = repositories
         .into_iter()
-        .filter(|repository| {
-            repository.backend.plugin_id == LOCAL_FILESYSTEM_PLUGIN_ID
-                || repository.backend.plugin_id == LEGACY_LOCAL_FILESYSTEM_PLUGIN_ID
-        })
+        .filter(|repository| repository.backend.plugin_id == LOCAL_FILESYSTEM_PLUGIN_ID)
         .map(|repository| PathBuf::from(repository.path))
         .collect::<BTreeSet<_>>();
 

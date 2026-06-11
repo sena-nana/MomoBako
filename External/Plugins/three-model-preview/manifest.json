@@ -1,0 +1,33 @@
+{
+  "pluginId": "momobako.preview.three-model",
+  "name": "3D Model Preview",
+  "version": "1.0.0",
+  "type": {
+    "layer": "library-kind",
+    "kind": "preview"
+  },
+  "kind": "preview",
+  "description": "为 FBX、OBJ、GLB、glTF 与 VRM 模型提供可旋转缩放的 3D 文件预览。",
+  "capabilities": ["preview", "3d-model", "fbx", "obj", "gltf", "vrm"],
+  "enabled": true,
+  "sdk": "frontend",
+  "runtime": "vue-module",
+  "entry": {
+    "frontend": {
+      "module": "dist/register.js",
+      "export": "register"
+    }
+  },
+  "contributes": {
+    "preview": {
+      "extensions": ["fbx", "obj", "glb", "gltf", "vrm", "stl", "3mf", "blend"]
+    }
+  },
+  "permissions": ["preview:read"],
+  "compat": {
+    "sdkVersion": "1",
+    "legacyPluginIds": []
+  },
+  "source": "builtin",
+  "status": "ready"
+}

@@ -68,7 +68,6 @@
   - Request body includes repository-relative `path`
   - Response returns a session-scoped local preview `sourceUrl` backed by the in-process repository runtime
   - 3D and text previews use this source instead of returning full file bytes through the desktop command bridge
-
 ## Desktop Runtime State
 
 - Workspace startup progress is a desktop UI state, not a repository service endpoint
@@ -128,11 +127,21 @@
 
 - `GET /plugins`
   - List runtime-discovered plugin manifests and capabilities
-  - Release builds discover built-in plugins from `$RESOURCE/plugins/builtin`; missing or deleted plugin directories are reflected in the response instead of being replaced by compiled defaults or cwd/source fallbacks
-  - Manifest fields include `pluginId`, `legacyPluginIds`, `name`, `version`, `kind`, `description`, `capabilities`, `enabled`, `sdk`, `entry`, `source`, `runtime`, `permissions`, `compat`, and `status`
-  - Backend plugin IDs are normalized to the `momobako.*` namespace; legacy `builtin.*` IDs remain accepted when reading existing repositories
+  - Runtime discovery scans `<serviceRoot>/plugins/*.momoplug`; missing or deleted archive files are reflected directly in the response and are not replaced by compiled defaults
+  - Manifest fields include `pluginId`, `legacyPluginIds`, `name`, `version`, `type`, `kind`, `description`, `capabilities`, `enabled`, `sdk`, `entry`, `contributes`, `source`, `runtime`, `permissions`, `compat`, and `status`
+  - Backend plugin IDs use the `momobako.*` namespace directly; repositories and plugin packages must store canonical plugin IDs
   - Disabled or manifest-only filesystem backends are displayed but not offered as attachable repository backends
   - Filesystem backend `listFiles` responses include `absolutePath`, `relativePath`, `filename`, `extension`, `sizeBytes`, and `modifiedAt`; the runtime tolerates legacy responses without `absolutePath` by resolving `relativePath` under `repoRoot`
+- `POST /plugins:install`
+  - Request body includes `packagePath`
+  - Only `.momoplug` files are accepted
+  - Install copies the archive to `<serviceRoot>/plugins` and refreshes discovery without persistent extraction
+- `POST /plugins:call`
+  - Request body includes `pluginId`, `method`, and arbitrary JSON `payload`
+  - Used by frontend preview or codec plugins to invoke native plugin capabilities without adding file-format-specific commands to the core runtime
+- `POST /files:writeBinary`
+  - Request body includes absolute `path` and raw `bytes`
+  - Used by plugins for export flows such as writing decoded media chosen through a save dialog
 
 ## Cache API
 

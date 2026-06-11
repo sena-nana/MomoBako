@@ -67,9 +67,7 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             src-tauri/target
-            plugins/backend-sdk/target
-            plugins/builtin/local-filesystem/target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('src-tauri/Cargo.lock', 'plugins/backend-sdk/Cargo.lock', 'plugins/builtin/local-filesystem/Cargo.lock') }}
+          key: ${{ runner.os }}-cargo-${{ hashFiles('src-tauri/Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-cargo-
 
@@ -79,8 +77,20 @@ jobs:
       - name: Install dependencies
         run: corepack yarn install --immutable
 
+      - name: Install external plugin dependencies
+        working-directory: External/Plugins
+        run: corepack yarn install --immutable
+
       - name: Verify MomoBako
         run: corepack yarn verify
+
+      - name: Build external plugins
+        working-directory: External/Plugins
+        run: corepack yarn build
+
+      - name: Package external plugins
+        working-directory: External/Plugins
+        run: corepack yarn package
 
       - name: Build and publish Windows bundle
         uses: tauri-apps/tauri-action@v1
@@ -93,3 +103,9 @@ jobs:
           releaseName: MomoBako ${{ steps.release_ref.outputs.tag }}
           releaseDraft: true
           generateReleaseNotes: true
+
+      - name: Upload external plugin packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: external-plugin-packages
+          path: External/Plugins/.packages/*.momoplug

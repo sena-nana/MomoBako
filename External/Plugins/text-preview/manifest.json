@@ -1,0 +1,33 @@
+{
+  "pluginId": "momobako.preview.text",
+  "name": "Text Preview",
+  "version": "1.0.0",
+  "type": {
+    "layer": "library-kind",
+    "kind": "preview"
+  },
+  "kind": "preview",
+  "description": "为常见文本与 Markdown 文件提供阅读预览，并生成文本缩略图。",
+  "capabilities": ["preview", "text", "markdown", "thumbnail"],
+  "enabled": true,
+  "sdk": "frontend",
+  "runtime": "vue-module",
+  "entry": {
+    "frontend": {
+      "module": "dist/register.js",
+      "export": "register"
+    }
+  },
+  "contributes": {
+    "preview": {
+      "extensions": ["txt", "text", "log", "csv", "tsv", "json", "jsonl", "yaml", "yml", "toml", "xml", "html", "css", "scss", "sass", "less", "js", "jsx", "ts", "tsx", "vue", "rs", "py", "rb", "go", "java", "c", "h", "cpp", "hpp", "cs", "php", "sh", "bash", "zsh", "ps1", "bat", "cmd", "ini", "cfg", "conf", "env", "gitignore", "gitattributes", "md", "markdown", "mdown", "mkd", "mkdn", "mdx"]
+    }
+  },
+  "permissions": ["preview:read"],
+  "compat": {
+    "sdkVersion": "1",
+    "legacyPluginIds": []
+  },
+  "source": "builtin",
+  "status": "ready"
+}

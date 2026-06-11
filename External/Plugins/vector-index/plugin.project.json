@@ -1,0 +1,8 @@
+{
+  "pluginId": "momobako.vector-index",
+  "build": {
+    "type": "manifest-only",
+    "sourceDir": "src",
+    "outputDir": ".dist/vector-index"
+  }
+}

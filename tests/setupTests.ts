@@ -582,6 +582,7 @@ function pluginManifest(
   legacyPluginIds: string[],
   name: string,
   version: string,
+  layer: "source" | "library-kind" | "extractor-parser" | "provider-service" | "integration-capability-hook",
   kind: string,
   description: string,
   capabilities: string[],
@@ -590,37 +591,158 @@ function pluginManifest(
   runtime: "vue-module" | "native-dylib" | "manifest-only",
   source: "builtin" | "user" | "system" = "builtin",
 ): PluginManifest {
+  const previewExtensions =
+    pluginId === "momobako.preview.three-model" ? ["fbx", "obj", "glb", "gltf", "vrm", "stl", "3mf", "blend"]
+    : pluginId === "momobako.preview.media" ? ["png", "jpg", "jpeg", "webp", "gif", "bmp", "avif", "svg", "mp4", "mov", "mkv", "webm", "avi", "m4v", "mp3", "wav", "ogg", "flac", "m4a", "aac", "opus"]
+    : pluginId === "momobako.preview.text" ? ["txt", "md", "markdown", "json", "yaml", "yml", "csv"]
+    : pluginId === "momobako.preview.office" ? ["pdf", "doc", "docx", "docm", "xls", "xlsx", "xlsm", "ppt", "pptx", "pptm"]
+    : [];
   return {
     pluginId,
     legacyPluginIds,
     name,
     version,
+    type: {
+      layer,
+      kind,
+    },
     kind,
     description,
     capabilities,
     enabled,
     sdk,
-    entry: {},
+    entry: sdk === "frontend"
+      ? {
+          frontend: {
+            module: "dist/register.js",
+            export: "register",
+          },
+        }
+      : {},
     source,
     runtime,
+    contributes: previewExtensions.length ? {
+      preview: {
+        extensions: previewExtensions,
+      },
+    } : {},
     permissions: [],
     compat: { sdkVersion: "1", legacyPluginIds },
     status: enabled ? "ready" : "disabled",
   };
 }
 
+function previewPluginModuleSource(pluginId: string) {
+  if (pluginId === "momobako.preview.media") {
+    return [
+      "export function register(ctx) {",
+      "  const { computed, h, nextTick, onBeforeUnmount, onMounted, ref, watch } = ctx.vue;",
+      "  const audioExtensions = ['mp3', 'wav', 'ogg', 'flac', 'm4a', 'aac', 'opus'];",
+      "  const imageExtensions = ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'avif', 'svg'];",
+      "  const videoExtensions = ['mp4', 'mov', 'mkv', 'webm', 'avi', 'm4v'];",
+      "  const MediaPreviewPlugin = {",
+      "    name: 'MediaPreviewPlugin',",
+      "    props: { entry: { type: Object, default: null }, repoId: { type: String, default: '' } },",
+      "    setup(props) {",
+      "      const state = ref('idle');",
+      "      const sourceUrl = ref('');",
+      "      const sourceMediaType = ref('');",
+      "      const errorMessage = ref('');",
+      "      const audioArtworkPath = ref(props.entry?.thumbnailPath ?? null);",
+      "      const lyricsStatus = ref('idle');",
+      "      const lyricsLines = ref([]);",
+      "      const currentPlaybackMs = ref(0);",
+      "      const activeLyricIndex = ref(-1);",
+      "      const lyricsInset = ref(104);",
+      "      const lyricsViewport = ref(null);",
+      "      const lyricsItems = ref([]);",
+      "      let resizeObserver = null;",
+      "      const mediaKind = computed(() => imageExtensions.includes((props.entry?.extension ?? '').toLowerCase()) ? 'image' : videoExtensions.includes((props.entry?.extension ?? '').toLowerCase()) ? 'video' : 'audio');",
+      "      const extensionLabel = computed(() => props.entry?.extension?.toUpperCase() || 'AUDIO');",
+      "      const audioArtworkUrl = computed(() => audioArtworkPath.value ? ctx.fileSrc(audioArtworkPath.value) : null);",
+      "      const lyricsPlaceholder = computed(() => lyricsStatus.value === 'loading' ? '读取歌词...' : '暂无歌词');",
+      "      function syncLyricsInset() { const viewport = lyricsViewport.value; if (!viewport) return; lyricsInset.value = Math.max(72, Math.floor(viewport.clientHeight / 2) - 32); }",
+      "      function centerActiveLyric() { const viewport = lyricsViewport.value; if (!viewport || activeLyricIndex.value < 0) return; const item = lyricsItems.value[activeLyricIndex.value]; if (!item) return; viewport.scrollTop = Math.max(0, item.offsetTop - (viewport.clientHeight / 2) + (item.clientHeight / 2)); }",
+      "      function decodeTextBytes(bytes) { if (bytes.length >= 3 && bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) return new TextDecoder('utf-8').decode(bytes.slice(3)); return new TextDecoder('utf-8').decode(bytes); }",
+      "      function timestampToMs(minutes, seconds, fraction) { const minuteValue = Number.parseInt(minutes, 10); const secondValue = Number.parseInt(seconds, 10); const fractionValue = fraction ? Number.parseInt(fraction.padEnd(3, '0').slice(0, 3), 10) : 0; return (minuteValue * 60 * 1000) + (secondValue * 1000) + fractionValue; }",
+      "      function parseLrcLyrics(text) { const normalized = text.replace(/\\r\\n?/g, '\\n'); const rawLines = normalized.split('\\n').map((line) => line.trim()).filter(Boolean); const parsed = []; for (const rawLine of rawLines) { const timeTags = [...rawLine.matchAll(/\\[(\\d{1,2}):(\\d{1,2})(?:[.:](\\d{1,3}))?\\]/g)]; const plainText = rawLine.replace(/\\[(\\d{1,2}):(\\d{1,2})(?:[.:](\\d{1,3}))?\\]/g, '').trim(); if (timeTags.length > 0) { const textValue = plainText || '…'; for (const [index, tag] of timeTags.entries()) { parsed.push({ id: `${tag[0]}-${parsed.length}-${index}`, text: textValue, timeMs: timestampToMs(tag[1], tag[2], tag[3]) }); } continue; } if (plainText) parsed.push({ id: `plain-${parsed.length}`, text: plainText, timeMs: null }); } return parsed.sort((left, right) => { if (left.timeMs == null && right.timeMs == null) return 0; if (left.timeMs == null) return 1; if (right.timeMs == null) return -1; return left.timeMs - right.timeMs; }); }",
+      "      function findActiveLyricIndex(lines, playbackMs) { let index = -1; for (let cursor = 0; cursor < lines.length; cursor += 1) { const line = lines[cursor]; if (line.timeMs == null || line.timeMs > playbackMs) continue; index = cursor; } return index; }",
+      "      function siblingLrcPath(path) { const extensionIndex = path.lastIndexOf('.'); return extensionIndex >= 0 ? `${path.slice(0, extensionIndex)}.lrc` : `${path}.lrc`; }",
+      "      async function loadMediaSource() { state.value = 'loading'; sourceUrl.value = ''; sourceMediaType.value = ''; errorMessage.value = ''; const response = await ctx.preparePreviewFileSource({ repoId: props.repoId, path: props.entry.path }); sourceUrl.value = response.sourceUrl ?? ''; sourceMediaType.value = response.mediaType; state.value = 'ready'; }",
+      "      async function loadAudioLyrics() { if (!audioExtensions.includes((props.entry?.extension ?? '').toLowerCase())) { lyricsStatus.value = 'idle'; lyricsLines.value = []; return; } lyricsStatus.value = 'loading'; try { const bytes = await ctx.readFile({ repoId: props.repoId, path: siblingLrcPath(props.entry.path) }); lyricsLines.value = parseLrcLyrics(decodeTextBytes(Uint8Array.from(bytes))); lyricsStatus.value = lyricsLines.value.length ? 'ready' : 'empty'; await nextTick(); syncLyricsInset(); } catch { lyricsLines.value = []; lyricsStatus.value = 'empty'; } }",
+      "      watch(() => [props.repoId, props.entry?.path, props.entry?.extension], async () => { await loadMediaSource(); await loadAudioLyrics(); }, { immediate: true });",
+      "      watch(currentPlaybackMs, () => { activeLyricIndex.value = findActiveLyricIndex(lyricsLines.value, currentPlaybackMs.value); centerActiveLyric(); });",
+      "      onMounted(() => { if (typeof ResizeObserver !== 'undefined' && lyricsViewport.value) { resizeObserver = new ResizeObserver(() => { syncLyricsInset(); centerActiveLyric(); }); resizeObserver.observe(lyricsViewport.value); } });",
+      "      onBeforeUnmount(() => { resizeObserver?.disconnect(); });",
+      "      function setLyricItemRef(index, element) { if (!element) return; lyricsItems.value[index] = element; }",
+      "      return { activeLyricIndex, audioArtworkUrl, entry: props.entry, extensionLabel, lyricsInset, lyricsLines, lyricsPlaceholder, lyricsViewport, mediaKind, setLyricItemRef, sourceMediaType, sourceUrl, state, errorMessage, onAudioTimeUpdate(event) { currentPlaybackMs.value = Math.round((event.target?.currentTime ?? 0) * 1000); } };",
+      "    },",
+      "    render() {",
+      "      if (this.sourceUrl && this.mediaKind === 'audio') return h('div', { class: 'media-preview media-preview--audio' }, [h('div', { class: 'media-preview__audio-main' }, [h('div', { class: 'media-preview__audio-art', 'aria-hidden': 'true' }, [this.audioArtworkUrl ? h('img', { class: 'media-preview__audio-cover', src: this.audioArtworkUrl, alt: '' }) : h('span', { class: 'media-preview__audio-chip' }, this.extensionLabel)]), h('section', { class: 'media-preview__audio-panel', 'aria-label': '歌词面板' }, [h('header', { class: 'media-preview__audio-panel-head' }, [h('strong', this.entry?.name ?? ''), h('span', { class: 'media-preview__audio-chip' }, this.extensionLabel)]), h('div', { ref: 'lyricsViewport', class: ['media-preview__audio-lyrics', { 'media-preview__audio-lyrics--empty': !this.lyricsLines.length }] }, this.lyricsLines.length ? [h('div', { class: 'media-preview__audio-lyrics-track', style: { '--lyrics-inset': `${this.lyricsInset}px` } }, this.lyricsLines.map((line, index) => h('button', { key: line.id, type: 'button', class: ['media-preview__audio-lyric', { 'is-active': index === this.activeLyricIndex, 'is-passed': this.activeLyricIndex > index, 'is-timed': line.timeMs != null }], disabled: line.timeMs == null, ref: (element) => this.setLyricItemRef(index, element) }, line.text)))] : [h('span', this.lyricsPlaceholder)])])]), h('audio', { class: 'media-preview__audio-control', controls: true, preload: 'metadata', onTimeupdate: this.onAudioTimeUpdate }, [h('source', { src: this.sourceUrl, type: this.sourceMediaType })])]);",
+      "      if (this.sourceUrl && this.mediaKind === 'image') return h('section', { class: 'mock-preview-plugin' }, [h('img', { class: 'media-preview__image', src: this.sourceUrl, alt: '' })]);",
+      "      if (this.sourceUrl && this.mediaKind === 'video') return h('section', { class: 'mock-preview-plugin' }, [h('video', { class: 'media-preview__video', controls: true }, [h('source', { src: this.sourceUrl, type: this.sourceMediaType })])]);",
+      "      return h('section', { class: 'mock-preview-plugin' });",
+      "    },",
+      "  };",
+      "  ctx.registerPreview({ supportedExtensions: [...imageExtensions, ...videoExtensions, ...audioExtensions], component: MediaPreviewPlugin });",
+      "}",
+      "",
+    ].join("\n");
+  }
+
+  const definitionMap: Record<string, { extensions: string[]; thumbnail?: boolean; fileActions?: boolean }> = {
+    "momobako.preview.three-model": {
+      extensions: ["fbx", "obj", "glb", "gltf", "vrm", "stl", "3mf", "blend"],
+    },
+    "momobako.preview.text": {
+      extensions: ["txt", "md", "markdown", "json", "yaml", "yml", "csv"],
+      thumbnail: true,
+    },
+    "momobako.preview.office": {
+      extensions: ["pdf", "doc", "docx", "docm", "xls", "xlsx", "xlsm", "ppt", "pptx", "pptm"],
+      thumbnail: true,
+    },
+  };
+  const definition = definitionMap[pluginId];
+  if (!definition) {
+    return "export function register() { return null; }\n";
+  }
+
+  return [
+    "export function register(ctx) {",
+    "  ctx.registerPreview({",
+    `    supportedExtensions: ${JSON.stringify(definition.extensions)},`,
+    "    component: {",
+    "      name: 'MockPreviewComponent',",
+    pluginId === "momobako.preview.media"
+      ? "      template: '<section class=\"mock-preview-plugin\"><img v-if=\"previewUrl\" class=\"media-preview__image\" :src=\"previewUrl\" alt=\"\" /></section>',"
+      : "      template: '<section class=\"mock-preview-plugin\"></section>',",
+    "      props: { entry: { type: Object, default: null }, repoId: { type: String, default: '' } },",
+    pluginId === "momobako.preview.media" ? "      data() { return { previewUrl: '' }; }," : "",
+    pluginId === "momobako.preview.media"
+      ? "      async mounted() { if (this.entry?.path && this.repoId) { const source = await ctx.preparePreviewFileSource({ repoId: this.repoId, path: this.entry.path }); this.previewUrl = source.sourceUrl ?? ''; } },"
+      : "",
+    "    },",
+    definition.thumbnail ? "    generateThumbnail: async () => null," : "",
+    definition.fileActions ? "    getFileActions: () => []," : "",
+    "  });",
+    "}",
+    "",
+  ].filter(Boolean).join("\n");
+}
+
 function createMockPlugins() {
   return [
-    pluginManifest("momobako.local-filesystem", ["builtin.local-filesystem"], "Local Filesystem", "1.0.0", "filesystem", "使用本地目录作为仓库文件管理后端。", ["browse", "read", "write", "watch", "sync"], true, "backend", "native-dylib"),
-    pluginManifest("momobako.webdav", ["builtin.webdav"], "WebDAV", "0.1.0", "webdav", "通过 WebDAV 适配远程文件管理服务。", ["browse", "read", "write", "sync"], false, "backend", "manifest-only"),
-    pluginManifest("momobako.cloud-drive", ["builtin.cloud-drive"], "Cloud Drive", "0.1.0", "cloud", "预留云盘文件系统接入点，如对象存储或网盘。", ["browse", "read", "write", "sync"], false, "backend", "manifest-only"),
-    pluginManifest("momobako.preview.three-model", ["builtin.three-model-preview"], "3D Model Preview", "1.0.0", "preview", "为 FBX、OBJ、GLB、glTF 与 VRM 模型提供可旋转缩放的 3D 文件预览。", ["preview", "3d-model", "fbx", "obj", "gltf", "vrm"], true, "frontend", "vue-module"),
-    pluginManifest("momobako.preview.media", ["builtin.media-preview"], "Media Preview", "1.0.0", "preview", "为常见视频与音频文件提供内联播放预览。", ["preview", "media", "video", "audio"], true, "frontend", "vue-module"),
-    pluginManifest("momobako.preview.text", ["builtin.text-preview"], "Text Preview", "1.0.0", "preview", "为常见文本与 Markdown 文件提供阅读预览，并生成文本缩略图。", ["preview", "text", "markdown", "thumbnail"], true, "frontend", "vue-module"),
-    pluginManifest("momobako.preview.office", ["builtin.office-preview"], "Office & PDF Preview", "1.0.0", "preview", "为 Microsoft Office 文档与 PDF 文件提供预览，并生成文档缩略图。", ["preview", "thumbnail", "pdf", "office", "word", "excel", "powerpoint"], true, "frontend", "vue-module"),
-    pluginManifest("momobako.filesystem-watcher", ["builtin.filesystem-watcher"], "Filesystem Watcher", "1.0.0", "watcher", "监听仓库目录，记录新增、删除、修改与重命名事件。", ["watch", "events", "sync"], false, "backend", "manifest-only"),
-    pluginManifest("momobako.metadata-provider", ["builtin.metadata-provider"], "Metadata Provider", "1.0.0", "metadata", "提供可扩展的元数据生成与写入能力。", ["metadata", "tags", "ocr"], false, "backend", "manifest-only"),
-    pluginManifest("momobako.vector-index", ["builtin.vector-index"], "Vector Index", "0.1.0", "search", "预留向量检索与 AI 语义搜索扩展点。", ["semantic-search", "embedding"], false, "backend", "manifest-only"),
+    pluginManifest("momobako.local-filesystem", [], "Local Filesystem", "1.0.0", "source", "filesystem", "使用本地目录作为仓库文件管理后端。", ["browse", "read", "write", "watch", "sync"], true, "backend", "native-dylib"),
+    pluginManifest("momobako.webdav", [], "WebDAV", "0.1.0", "source", "webdav", "通过 WebDAV 适配远程文件管理服务。", ["browse", "read", "write", "sync"], false, "backend", "manifest-only"),
+    pluginManifest("momobako.cloud-drive", [], "Cloud Drive", "0.1.0", "source", "cloud", "预留云盘文件系统接入点，如对象存储或网盘。", ["browse", "read", "write", "sync"], false, "backend", "manifest-only"),
+    pluginManifest("momobako.preview.three-model", [], "3D Model Preview", "1.0.0", "library-kind", "preview", "为 FBX、OBJ、GLB、glTF 与 VRM 模型提供可旋转缩放的 3D 文件预览。", ["preview", "3d-model", "fbx", "obj", "gltf", "vrm"], true, "frontend", "vue-module"),
+    pluginManifest("momobako.preview.media", [], "Media Preview", "1.0.0", "library-kind", "preview", "为常见视频与音频文件提供内联播放预览。", ["preview", "media", "video", "audio"], true, "frontend", "vue-module"),
+    pluginManifest("momobako.preview.text", [], "Text Preview", "1.0.0", "library-kind", "preview", "为常见文本与 Markdown 文件提供阅读预览，并生成文本缩略图。", ["preview", "text", "markdown", "thumbnail"], true, "frontend", "vue-module"),
+    pluginManifest("momobako.preview.office", [], "Office & PDF Preview", "1.0.0", "library-kind", "preview", "为 Microsoft Office 文档与 PDF 文件提供预览，并生成文档缩略图。", ["preview", "thumbnail", "pdf", "office", "word", "excel", "powerpoint"], true, "frontend", "vue-module"),
+    pluginManifest("momobako.filesystem-watcher", [], "Filesystem Watcher", "1.0.0", "integration-capability-hook", "watcher", "监听仓库目录，记录新增、删除、修改与重命名事件。", ["watch", "events", "sync"], false, "backend", "manifest-only"),
+    pluginManifest("momobako.metadata-provider", [], "Metadata Provider", "1.0.0", "provider-service", "metadata", "提供可扩展的元数据生成与写入能力。", ["metadata", "tags", "ocr"], false, "backend", "manifest-only"),
+    pluginManifest("momobako.vector-index", [], "Vector Index", "0.1.0", "provider-service", "search", "预留向量检索与 AI 语义搜索扩展点。", ["semantic-search", "embedding"], false, "backend", "manifest-only"),
   ];
 }
 
@@ -1105,6 +1227,15 @@ vi.mock("@tauri-apps/api/core", () => ({
       mockPlugins ??= createMockPlugins();
       return mockPlugins;
     }
+    if (command === "read_plugin_archive_text") {
+      const request = args?.request as { pluginId?: string; path?: string } | undefined;
+      const pluginId = request?.pluginId ?? "";
+      return {
+        pluginId,
+        path: request?.path ?? "dist/register.js",
+        text: previewPluginModuleSource(pluginId),
+      };
+    }
     if (command === "set_plugin_enabled") {
       mockPlugins ??= createMockPlugins();
       const request = args?.request as { pluginId?: string; enabled?: boolean } | undefined;
@@ -1129,7 +1260,7 @@ vi.mock("@tauri-apps/api/core", () => ({
       mockPlugins ??= createMockPlugins();
       mockPlugins = [
         ...mockPlugins,
-        pluginManifest("user.sample-plugin", [], "Sample Plugin", "0.1.0", "metadata", "从压缩包安装的测试插件。", ["metadata"], true, "backend", "manifest-only", "user"),
+        pluginManifest("user.sample-plugin", [], "Sample Plugin", "0.1.0", "provider-service", "metadata", "从压缩包安装的测试插件。", ["metadata"], true, "backend", "manifest-only", "user"),
       ];
       return { plugins: mockPlugins };
     }

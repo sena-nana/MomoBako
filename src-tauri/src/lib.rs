@@ -4,6 +4,7 @@ use tauri::{
     utils::config::Color,
     AppHandle, Manager, WindowEvent,
 };
+use std::{fs, path::PathBuf};
 
 const MAIN_WINDOW_LABEL: &str = "main";
 const TRAY_OPEN_ID: &str = "tray-open";
@@ -16,17 +17,17 @@ mod window_state;
 
 use repository_runtime::RepositoryRuntime;
 use repository_service::{
-    ApiDesignSnapshot, AssetDetail, CacheSnapshot, FileBrowserRequest, FileBrowserSnapshot,
+    ApiDesignSnapshot, AssetDetail, BinaryFileWriteRequest, BinaryFileWriteResponse, CacheSnapshot, FileBrowserRequest, FileBrowserSnapshot,
     FileCopyRequest, FileCreateRequest, FileDeleteRequest, FileImportRequest, FileMoveRequest,
-    FilePreviewSourceResponse, FileReadRequest, FileRenameRequest, HardlinkCandidateResponse,
-    HardlinkConfirmRequest, HardlinkConfirmResponse, MetadataUpdateRequest, MetadataUpdateResponse,
-    PluginEnabledRequest, PluginInstallRequest, PluginManifest, PluginMutationResponse,
-    RepositoryExportRequest, RepositoryExportResponse, RepositoryFolderRequest,
-    RepositoryMutationRequest, RepositoryMutationResponse, RepositoryRelocateRequest,
-    RepositorySnapshot, RepositorySummary, RevisionActionRequest, RevisionActionResponse,
-    SearchRequest, SearchResponse, SmartFolderMutationRequest, SmartFolderMutationResponse,
-    SmartFolderResultSnapshot, SmartFolderTreeNode, SmartFolderUpdateRequest, SyncRequest,
-    SyncResult, ThumbnailRequest, ThumbnailResponse, TrashMutationRequest,
+    FilePreviewSourceResponse, FileReadRequest, FileRenameRequest, HardlinkCandidateResponse, HardlinkConfirmRequest,
+    HardlinkConfirmResponse, MetadataUpdateRequest, MetadataUpdateResponse, PluginEnabledRequest,
+    PluginArchiveReadRequest, PluginArchiveTextResponse, PluginCallRequest, PluginCallResult, PluginInstallRequest, PluginManifest, PluginMutationResponse, RepositoryExportRequest,
+    RepositoryExportResponse, RepositoryFolderRequest, RepositoryMutationRequest,
+    RepositoryMutationResponse, RepositoryRelocateRequest, RepositorySnapshot, RepositorySummary,
+    RevisionActionRequest, RevisionActionResponse, SearchRequest, SearchResponse,
+    SmartFolderMutationRequest, SmartFolderMutationResponse, SmartFolderResultSnapshot,
+    SmartFolderTreeNode, SmartFolderUpdateRequest, SyncRequest, SyncResult, ThumbnailRequest,
+    ThumbnailResponse, TrashMutationRequest,
 };
 
 #[tauri::command]
@@ -164,6 +165,46 @@ async fn prepare_preview_file_source(
         .await?;
     response.source_url = Some(runtime.preview_source_url(&response.token));
     Ok(response)
+}
+
+#[tauri::command]
+async fn call_plugin(
+    request: PluginCallRequest,
+    runtime: tauri::State<'_, RepositoryRuntime>,
+) -> Result<PluginCallResult, String> {
+    runtime
+        .run_read(move |state| state.call_plugin(request))
+        .await
+}
+
+#[tauri::command]
+async fn read_plugin_archive_text(
+    request: PluginArchiveReadRequest,
+    runtime: tauri::State<'_, RepositoryRuntime>,
+) -> Result<PluginArchiveTextResponse, String> {
+    runtime
+        .run_read(move |state| state.read_plugin_archive_text(request))
+        .await
+}
+
+#[tauri::command]
+async fn write_binary_file(
+    request: BinaryFileWriteRequest,
+) -> Result<BinaryFileWriteResponse, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let output_path = PathBuf::from(&request.path);
+        if let Some(parent) = output_path.parent() {
+            fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+        }
+        fs::write(&output_path, &request.bytes).map_err(|error| error.to_string())?;
+        Ok(BinaryFileWriteResponse {
+            path: request.path,
+            size_bytes: i64::try_from(request.bytes.len())
+                .map_err(|_| "written file is too large".to_string())?,
+        })
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
@@ -488,8 +529,7 @@ pub fn run() {
         .plugin(tauri_plugin_store::Builder::default().build())
         .manage(window_state::MainWindowStateCache::default())
         .setup(|app| {
-            let resource_dir = app.path().resource_dir().ok();
-            let runtime = RepositoryRuntime::start_with_resource_dir(resource_dir)?;
+            let runtime = RepositoryRuntime::start()?;
             app.manage(runtime);
             setup_tray(app.handle())?;
 
@@ -542,6 +582,9 @@ pub fn run() {
             query_smart_folder,
             read_file,
             prepare_preview_file_source,
+            call_plugin,
+            read_plugin_archive_text,
+            write_binary_file,
             create_directory,
             create_file,
             import_entries,
