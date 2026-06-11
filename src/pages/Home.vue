@@ -1355,8 +1355,10 @@ function searchResultContext(result: SearchHit) {
 }
 
 function filterColorStyle(color: string) {
+  const trimmed = color.trim();
+  const hexColor = /^#[0-9a-f]{6}$/i.test(trimmed) ? trimmed : null;
   return {
-    "--filter-swatch": filterColorMap[color.toLowerCase()] ?? filterColorMap[color] ?? "var(--accent)",
+    "--filter-swatch": hexColor ?? filterColorMap[color.toLowerCase()] ?? filterColorMap[color] ?? "var(--accent)",
   };
 }
 

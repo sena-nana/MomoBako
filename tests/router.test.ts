@@ -154,9 +154,11 @@ describe("文件管理冒烟", () => {
     expect(screen.queryByRole("button", { name: "资源库" })).not.toBeInTheDocument();
 
     delay.resolve();
-    expect(await screen.findByRole("button", { name: "资源库" })).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.queryByRole("heading", { name: "加载仓库列表" })).not.toBeInTheDocument();
+    });
+    await waitForCurrentWorkspaceView();
     expect((await screen.findAllByText("Campaigns")).length).toBeGreaterThan(0);
-    expect(screen.queryByRole("heading", { name: "加载仓库列表" })).not.toBeInTheDocument();
   });
 
   it("启动加载并发调用复用同一条链路", async () => {
@@ -768,14 +770,16 @@ describe("文件管理冒烟", () => {
       });
     });
 
-    await fireEvent.click(screen.getByRole("button", { name: "红色" }));
+    const hexColorButton = screen.getByRole("button", { name: "#336699" });
+    expect(hexColorButton.style.getPropertyValue("--filter-swatch")).toBe("#336699");
+    await fireEvent.click(hexColorButton);
     await waitFor(() => {
       const searchCalls = getInvokeCalls("search_assets");
       expect(searchCalls.at(-1)?.args).toMatchObject({
         request: {
           repoId: "repo-main-001",
           metadataFilters: [
-            { key: "color", value: "红色" },
+            { key: "color", value: "#336699" },
           ],
         },
       });
@@ -788,7 +792,7 @@ describe("文件管理冒烟", () => {
         request: {
           repoId: "repo-main-001",
           metadataFilters: [
-            { key: "color", value: "红色" },
+            { key: "color", value: "#336699" },
             { key: "shape", value: "方形" },
           ],
         },
