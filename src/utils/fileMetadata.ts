@@ -7,14 +7,36 @@ export function metadataString(metadata: Record<string, unknown> | undefined, ke
   return typeof value === "string" ? value : "";
 }
 
+export function metadataComment(metadata: Record<string, unknown> | undefined) {
+  return metadataString(metadata, "comment") || metadataString(metadata, "note");
+}
+
 export function metadataNumber(metadata: Record<string, unknown> | undefined, key: string) {
   const value = metadata?.[key];
   if (typeof value !== "number" || !Number.isFinite(value)) return 0;
   return Math.min(Math.max(Math.round(value), 0), 5);
 }
 
+export function metadataRawNumber(metadata: Record<string, unknown> | undefined, key: string) {
+  const value = metadata?.[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+export function formatBytes(value: number | null | undefined) {
+  if (value == null || !Number.isFinite(value)) return "未记录";
+  if (value < 1024) return `${value} B`;
+  const units = ["KB", "MB", "GB", "TB"];
+  let size = value / 1024;
+  let index = 0;
+  while (size >= 1024 && index < units.length - 1) {
+    size /= 1024;
+    index += 1;
+  }
+  return `${size >= 10 ? size.toFixed(0) : size.toFixed(1)} ${units[index]}`;
+}
+
 export function metadataPalette(metadata: Record<string, unknown> | undefined) {
-  const value = metadata?.thumbnailPalette;
+  const value = metadata?.thumbnailPalette ?? metadata?.palette;
   if (!Array.isArray(value)) return [];
   return value
     .filter((item): item is string => typeof item === "string" && hexColorPattern.test(item))

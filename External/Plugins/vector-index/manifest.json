@@ -7,13 +7,25 @@
     "kind": "search"
   },
   "kind": "search",
+  "category": "service",
   "description": "预留向量检索与 AI 语义搜索扩展点。",
   "capabilities": ["semantic-search", "embedding"],
   "enabled": false,
   "sdk": "backend",
   "runtime": "manifest-only",
   "entry": {},
-  "permissions": [],
+  "permissions": ["filesystem:read"],
+  "requires": [],
+  "optional": [],
+  "hooks": [
+    { "slot": "search", "action": "service.vector.search", "label": "语义搜索" }
+  ],
+  "contributes": {
+    "service": {
+      "type": "semantic-search",
+      "candidateOnly": true
+    }
+  },
   "compat": {
     "sdkVersion": "1",
     "legacyPluginIds": []

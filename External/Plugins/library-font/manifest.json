@@ -1,0 +1,85 @@
+{
+  "pluginId": "momobako.library.font",
+  "legacyPluginIds": [
+    "builtin.library-font"
+  ],
+  "name": "Font Library",
+  "version": "0.1.0",
+  "kind": "library-kind",
+  "category": "library-kind",
+  "description": "为字体文件声明字族、字重、字形覆盖、授权和预览字段。",
+  "capabilities": [
+    "library-kind",
+    "metadata-schema",
+    "view-presets",
+    "organize-candidates"
+  ],
+  "enabled": true,
+  "sdk": "backend",
+  "entry": {},
+  "source": "builtin",
+  "runtime": "manifest-only",
+  "permissions": [
+    "readRepository",
+    "readMetadata",
+    "writeCandidates",
+    "suggestRename",
+    "suggestMove"
+  ],
+  "requires": [],
+  "optional": [
+    "momobako.parser.font"
+  ],
+  "hooks": [
+    {
+      "slot": "batchOrganize",
+      "action": "library.font.suggestFamilyLayout",
+      "label": "生成字体整理候选"
+    }
+  ],
+  "contributes": {
+    "libraryKind": {
+      "id": "font",
+      "fields": [
+        "family",
+        "style",
+        "weight",
+        "scripts",
+        "glyphCoverage",
+        "version",
+        "license",
+        "foundry",
+        "sourceUrl"
+      ],
+      "facets": [
+        "family",
+        "style",
+        "weight",
+        "scripts",
+        "license"
+      ],
+      "sortFields": [
+        "family",
+        "weight",
+        "version"
+      ],
+      "views": [
+        "families",
+        "styles",
+        "licenses",
+        "duplicates",
+        "missingMetadata"
+      ],
+      "preview": [
+        "momobako.preview.text"
+      ]
+    }
+  },
+  "compat": {
+    "sdkVersion": "1",
+    "legacyPluginIds": [
+      "builtin.library-font"
+    ]
+  },
+  "status": "ready"
+}

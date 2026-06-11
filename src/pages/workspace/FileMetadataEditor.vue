@@ -1,10 +1,14 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, reactive, ref, watch } from "vue";
 import { ChevronDown, ChevronRight, Link2, MessageSquareText, Plus, Star } from "lucide-vue-next";
-import type { FileBrowserEntry } from "../../types/repository";
+import type { FileBrowserEntry, RepositoryTagGroup } from "../../types/repository";
 import {
+  formatBytes,
   formatMetadataDate,
+  metadataComment,
   metadataNumber,
+  metadataPalette,
+  metadataRawNumber,
   metadataString,
   metadataTagGroups,
 } from "../../utils/fileMetadata";
@@ -13,6 +17,7 @@ const props = defineProps<{
   entry: FileBrowserEntry;
   isSaving: boolean;
   availableTags: string[];
+  tagGroups?: RepositoryTagGroup[];
   saveMetadata: (entry: FileBrowserEntry, metadata: Record<string, unknown>) => Promise<unknown>;
 }>();
 
@@ -33,7 +38,7 @@ let saveTimer: ReturnType<typeof setTimeout> | null = null;
 
 const sourcePayload = computed(() => ({
   rating: metadataNumber(props.entry.metadata, "rating"),
-  comment: metadataString(props.entry.metadata, "comment"),
+  comment: metadataComment(props.entry.metadata),
   link: metadataString(props.entry.metadata, "link"),
   tagGroups: metadataTagGroups(props.entry.metadata),
 }));
@@ -51,7 +56,26 @@ const hasChanges = computed(() => (
 
 const addedToLibraryAt = computed(() => formatMetadataDate(metadataString(props.entry.metadata, "addedToLibraryAt")));
 const fileCreatedAt = computed(() => formatMetadataDate(metadataString(props.entry.metadata, "fileCreatedAt")));
+const fileModifiedAt = computed(() => formatMetadataDate(metadataString(props.entry.metadata, "fileModifiedAt") || props.entry.modifiedAt || ""));
+const dimensionsLabel = computed(() => {
+  const width = metadataRawNumber(props.entry.metadata, "width");
+  const height = metadataRawNumber(props.entry.metadata, "height");
+  return width && height ? `${width} × ${height}` : "未记录";
+});
+const originalSizeLabel = computed(() => formatBytes(metadataRawNumber(props.entry.metadata, "originalSizeBytes")));
+const palette = computed(() => metadataPalette(props.entry.metadata));
+const aliasPaths = computed(() => props.entry.aliasPaths?.filter((path) => path !== props.entry.path) ?? []);
+const indexedTags = computed(() => props.entry.tags ?? []);
 const canEdit = computed(() => props.entry.kind === "file" && Boolean(props.entry.assetId));
+const groupedTagOptions = computed(() => {
+  const selected = new Set(draft.tags);
+  return (props.tagGroups ?? [])
+    .map((group) => ({
+      ...group,
+      tags: group.tags.filter((tag) => !selected.has(tag)),
+    }))
+    .filter((group) => group.tags.length);
+});
 const filteredExistingTags = computed(() => {
   const keyword = tagDraft.value.trim().toLowerCase();
   return props.availableTags
@@ -210,6 +234,32 @@ onBeforeUnmount(() => {
         <span>创建时间</span>
         <span class="asset-meta__value">{{ fileCreatedAt }}</span>
       </div>
+      <div class="asset-meta__row">
+        <span>文件修改时间</span>
+        <span class="asset-meta__value">{{ fileModifiedAt }}</span>
+      </div>
+      <div class="asset-meta__row">
+        <span>尺寸</span>
+        <span class="asset-meta__value">{{ dimensionsLabel }}</span>
+      </div>
+      <div class="asset-meta__row">
+        <span>原始大小</span>
+        <span class="asset-meta__value">{{ originalSizeLabel }}</span>
+      </div>
+      <div v-if="palette.length" class="asset-meta__row">
+        <span>调色板</span>
+        <span class="file-metadata-card__palette">
+          <i v-for="color in palette" :key="color" :style="{ backgroundColor: color }" :title="color" />
+        </span>
+      </div>
+      <div v-if="indexedTags.length" class="asset-meta__row">
+        <span>索引标签</span>
+        <span class="asset-meta__value">{{ indexedTags.join("，") }}</span>
+      </div>
+      <div v-if="aliasPaths.length" class="asset-meta__row file-metadata-card__alias-row">
+        <span>多归属位置</span>
+        <span class="asset-meta__value">{{ aliasPaths.join("，") }}</span>
+      </div>
     </div>
 
     <label class="asset-meta__row file-metadata-card__inline-row">
@@ -296,6 +346,24 @@ onBeforeUnmount(() => {
               >
                 添加“{{ tagDraft.trim() || "新标签" }}”
               </button>
+              <div v-if="groupedTagOptions.length" class="file-metadata-card__tag-options">
+                <span>标签分组</span>
+                <div v-for="group in groupedTagOptions" :key="group.tagGroupId" class="file-metadata-card__tag-group">
+                  <strong>{{ group.name }}</strong>
+                  <div class="file-metadata-card__tag-option-list">
+                    <button
+                      v-for="tag in group.tags"
+                      :key="`${group.tagGroupId}-${tag}`"
+                      type="button"
+                      class="workspace-filter-chip"
+                      :disabled="isSaving"
+                      @click="addTag(tag)"
+                    >
+                      {{ tag }}
+                    </button>
+                  </div>
+                </div>
+              </div>
               <div v-if="filteredExistingTags.length" class="file-metadata-card__tag-options">
                 <span>已有标签</span>
                 <div class="file-metadata-card__tag-option-list">
@@ -346,6 +414,24 @@ onBeforeUnmount(() => {
           >
             添加“{{ tagDraft.trim() || "新标签" }}”
           </button>
+          <div v-if="groupedTagOptions.length" class="file-metadata-card__tag-options">
+            <span>标签分组</span>
+            <div v-for="group in groupedTagOptions" :key="group.tagGroupId" class="file-metadata-card__tag-group">
+              <strong>{{ group.name }}</strong>
+              <div class="file-metadata-card__tag-option-list">
+                <button
+                  v-for="tag in group.tags"
+                  :key="`${group.tagGroupId}-${tag}`"
+                  type="button"
+                  class="workspace-filter-chip"
+                  :disabled="isSaving"
+                  @click="addTag(tag)"
+                >
+                  {{ tag }}
+                </button>
+              </div>
+            </div>
+          </div>
           <div v-if="filteredExistingTags.length" class="file-metadata-card__tag-options">
             <span>已有标签</span>
             <div class="file-metadata-card__tag-option-list">

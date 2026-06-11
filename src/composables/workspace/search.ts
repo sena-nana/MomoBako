@@ -11,6 +11,13 @@ import {
   searchResults,
 } from "./state";
 import { hasActiveFilters } from "./selectors";
+import {
+  normalizeFilterValues,
+  parseDateFiltersInput,
+  parseMetadataFiltersInput,
+  parseNumberFiltersInput,
+  parsePathPrefixesInput,
+} from "./filterInputs";
 
 export function resetSearchState() {
   searchQuery.value = "";
@@ -19,23 +26,32 @@ export function resetSearchState() {
   isFilterBarOpen.value = false;
 }
 
-function normalizeFilterValues(values: string[]) {
-  return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean)));
-}
-
 export function buildSearchRequest(query = searchQuery.value): SearchRequest {
   const nextFilters = filters.value;
   const metadataFilters = [
     ...nextFilters.colors.map((value) => ({ key: "color", value })),
     ...nextFilters.shapes.map((value) => ({ key: "shape", value })),
   ];
+  const sortField = nextFilters.sortField.trim();
 
   return {
     query,
     repoId: hasActiveFilters.value ? activeRepoId.value ?? undefined : undefined,
+    excludeQuery: nextFilters.excludeQuery.trim() || undefined,
     tags: normalizeFilterValues(nextFilters.tags),
     formats: normalizeFilterValues(nextFilters.formats),
     metadataFilters,
+    excludeTags: normalizeFilterValues(nextFilters.excludeTags),
+    excludeFormats: normalizeFilterValues(nextFilters.excludeFormats),
+    excludeMetadataFilters: parseMetadataFiltersInput(nextFilters.excludeMetadataFilters),
+    excludePathPrefixes: parsePathPrefixesInput(nextFilters.excludePathPrefixes),
+    excludeNumberFilters: parseNumberFiltersInput(nextFilters.excludeNumberFilters),
+    excludeDateFilters: parseDateFiltersInput(nextFilters.excludeDateFilters),
+    numberFilters: parseNumberFiltersInput(nextFilters.numberFilters),
+    dateFilters: parseDateFiltersInput(nextFilters.dateFilters),
+    matchMode: nextFilters.matchMode === "or" ? "or" : undefined,
+    sort: sortField ? { field: sortField, direction: nextFilters.sortDirection } : undefined,
+    limit: nextFilters.limit ?? undefined,
     minRating: nextFilters.minRating ?? undefined,
   };
 }
@@ -47,7 +63,18 @@ function hasSearchCriteria(request: SearchRequest) {
     (request.tags?.length ?? 0) > 0 ||
     request.metadataKey ||
     (request.metadataFilters?.length ?? 0) > 0 ||
+    (request.excludeTags?.length ?? 0) > 0 ||
+    (request.excludeFormats?.length ?? 0) > 0 ||
+    Boolean(request.excludeQuery?.trim()) ||
+    (request.excludePathPrefixes?.length ?? 0) > 0 ||
+    (request.excludeMetadataFilters?.length ?? 0) > 0 ||
+    (request.excludeNumberFilters?.length ?? 0) > 0 ||
+    (request.excludeDateFilters?.length ?? 0) > 0 ||
+    (request.numberFilters?.length ?? 0) > 0 ||
+    (request.dateFilters?.length ?? 0) > 0 ||
     (request.formats?.length ?? 0) > 0 ||
+    request.sort != null ||
+    request.limit != null ||
     request.minRating != null,
   );
 }
@@ -60,7 +87,11 @@ export function toggleFilterBar() {
   isFilterBarOpen.value = !isFilterBarOpen.value;
 }
 
-function updateFilterList(key: "tags" | "formats" | "colors" | "shapes", value: string, enabled: boolean) {
+function updateFilterList(
+  key: "tags" | "formats" | "colors" | "shapes" | "excludeTags" | "excludeFormats",
+  value: string,
+  enabled: boolean,
+) {
   const normalizedValue = value.trim();
   if (!normalizedValue) return;
   const current = filters.value[key];
@@ -73,7 +104,7 @@ function updateFilterList(key: "tags" | "formats" | "colors" | "shapes", value: 
   };
 }
 
-export function toggleFilterValue(key: "tags" | "formats" | "colors" | "shapes", value: string) {
+export function toggleFilterValue(key: "tags" | "formats" | "colors" | "shapes" | "excludeTags" | "excludeFormats", value: string) {
   const current = filters.value[key];
   updateFilterList(key, value, !current.includes(value));
 }
@@ -82,6 +113,13 @@ export function setMinimumRatingFilter(value: number | null) {
   filters.value = {
     ...filters.value,
     minRating: value == null || value <= 0 ? null : value,
+  };
+}
+
+export function updateFilters(patch: Partial<typeof filters.value>) {
+  filters.value = {
+    ...filters.value,
+    ...patch,
   };
 }
 
@@ -99,6 +137,18 @@ export async function runSearch(request: SearchRequest) {
     tags: request.tags ?? filterRequest.tags,
     formats: request.formats ?? filterRequest.formats,
     metadataFilters: request.metadataFilters ?? filterRequest.metadataFilters,
+    excludeTags: request.excludeTags ?? filterRequest.excludeTags,
+    excludeFormats: request.excludeFormats ?? filterRequest.excludeFormats,
+    excludeQuery: request.excludeQuery ?? filterRequest.excludeQuery,
+    excludePathPrefixes: request.excludePathPrefixes ?? filterRequest.excludePathPrefixes,
+    excludeMetadataFilters: request.excludeMetadataFilters ?? filterRequest.excludeMetadataFilters,
+    excludeNumberFilters: request.excludeNumberFilters ?? filterRequest.excludeNumberFilters,
+    excludeDateFilters: request.excludeDateFilters ?? filterRequest.excludeDateFilters,
+    numberFilters: request.numberFilters ?? filterRequest.numberFilters,
+    dateFilters: request.dateFilters ?? filterRequest.dateFilters,
+    matchMode: request.matchMode ?? filterRequest.matchMode,
+    sort: request.sort ?? filterRequest.sort,
+    limit: request.limit ?? filterRequest.limit,
     minRating: request.minRating ?? filterRequest.minRating,
   };
 

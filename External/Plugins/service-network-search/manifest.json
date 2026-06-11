@@ -1,0 +1,53 @@
+{
+  "pluginId": "momobako.service.network-search",
+  "legacyPluginIds": [
+    "builtin.service-network-search"
+  ],
+  "name": "Network Search Service",
+  "version": "0.1.0",
+  "kind": "search",
+  "category": "service",
+  "description": "声明手动触发的联网搜索、候选匹配和来源置信度标准化能力。",
+  "capabilities": [
+    "network-search",
+    "metadata-candidates",
+    "confidence"
+  ],
+  "enabled": false,
+  "sdk": "backend",
+  "entry": {},
+  "source": "builtin",
+  "runtime": "manifest-only",
+  "permissions": [
+    "network",
+    "writeCandidates"
+  ],
+  "requires": [],
+  "optional": [],
+  "hooks": [
+    {
+      "slot": "search",
+      "action": "service.networkSearch.query",
+      "label": "联网搜索"
+    },
+    {
+      "slot": "candidateQueue",
+      "action": "service.networkSearch.writeCandidates",
+      "label": "写入联网候选"
+    }
+  ],
+  "contributes": {
+    "service": {
+      "type": "network-search",
+      "manualTrigger": true,
+      "candidateOnly": true
+    }
+  },
+  "compat": {
+    "sdkVersion": "1",
+    "legacyPluginIds": [
+      "builtin.service-network-search"
+    ]
+  },
+  "status": "disabled"
+}

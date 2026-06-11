@@ -7,13 +7,24 @@
     "kind": "watcher"
   },
   "kind": "watcher",
+  "category": "service",
   "description": "监听仓库目录，记录新增、删除、修改与重命名事件。",
   "capabilities": ["watch", "events", "sync"],
   "enabled": false,
   "sdk": "backend",
   "runtime": "manifest-only",
   "entry": {},
-  "permissions": [],
+  "permissions": ["filesystem:read"],
+  "requires": [],
+  "optional": [],
+  "hooks": [
+    { "slot": "auditLog", "action": "service.watcher.recordEvents", "label": "记录文件事件" }
+  ],
+  "contributes": {
+    "service": {
+      "type": "watcher"
+    }
+  },
   "compat": {
     "sdkVersion": "1",
     "legacyPluginIds": []

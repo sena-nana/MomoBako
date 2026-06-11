@@ -1,0 +1,87 @@
+{
+  "pluginId": "momobako.library.design",
+  "legacyPluginIds": [
+    "builtin.library-design"
+  ],
+  "name": "Design Asset Library",
+  "version": "0.1.0",
+  "kind": "library-kind",
+  "category": "library-kind",
+  "description": "为设计源文件、导出图和工程素材声明画板、版本、依赖字体和链接资源。",
+  "capabilities": [
+    "library-kind",
+    "metadata-schema",
+    "view-presets",
+    "organize-candidates"
+  ],
+  "enabled": true,
+  "sdk": "backend",
+  "entry": {},
+  "source": "builtin",
+  "runtime": "manifest-only",
+  "permissions": [
+    "readRepository",
+    "readMetadata",
+    "writeCandidates",
+    "suggestRename",
+    "suggestMove"
+  ],
+  "requires": [],
+  "optional": [
+    "momobako.parser.image",
+    "momobako.parser.font"
+  ],
+  "hooks": [
+    {
+      "slot": "batchOrganize",
+      "action": "library.design.suggestProjectLayout",
+      "label": "生成设计资源整理候选"
+    }
+  ],
+  "contributes": {
+    "libraryKind": {
+      "id": "design",
+      "fields": [
+        "title",
+        "project",
+        "tool",
+        "version",
+        "artboards",
+        "exportFormats",
+        "linkedAssets",
+        "requiredFonts",
+        "license",
+        "sourceUrl"
+      ],
+      "facets": [
+        "project",
+        "tool",
+        "exportFormats",
+        "license"
+      ],
+      "sortFields": [
+        "project",
+        "updatedAt",
+        "version"
+      ],
+      "views": [
+        "projects",
+        "files",
+        "exports",
+        "missingLinks",
+        "missingFonts"
+      ],
+      "preview": [
+        "momobako.preview.media",
+        "momobako.preview.office"
+      ]
+    }
+  },
+  "compat": {
+    "sdkVersion": "1",
+    "legacyPluginIds": [
+      "builtin.library-design"
+    ]
+  },
+  "status": "ready"
+}

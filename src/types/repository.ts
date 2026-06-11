@@ -45,11 +45,32 @@ export type FolderSummary = {
   assetCount: number;
 };
 
+export type RepositoryShortcut = {
+  shortcutId: string;
+  label: string;
+  targetKind: "file" | "folder" | "smartFolder" | string;
+  targetPath?: string | null;
+  targetId?: string | null;
+};
+
+export type RepositoryTagGroup = {
+  tagGroupId: string;
+  name: string;
+  tags: string[];
+};
+
+export type FolderMetadata = {
+  protected: boolean;
+  passwordTip?: string | null;
+};
+
 export type RepositorySnapshot = {
   repository: RepositorySummary;
   folderLabel: string;
   folders: FolderSummary[];
   assets: AssetSummary[];
+  quickAccess?: RepositoryShortcut[];
+  tagGroups?: RepositoryTagGroup[];
   metadataFields: string[];
   recentRevisionCount: number;
   overview: {
@@ -81,6 +102,9 @@ export type FileBrowserEntry = {
   thumbnailCustom?: boolean;
   hardlinkGroupId?: string | null;
   hardlinkState?: HardlinkState | null;
+  tags?: string[];
+  aliasPaths?: string[];
+  folderMetadata?: FolderMetadata | null;
   metadata?: Record<string, unknown>;
 };
 
@@ -142,27 +166,68 @@ export type SearchMetadataFilter = {
   value: string;
 };
 
+export type SearchNumberFilter = {
+  key: string;
+  min?: number;
+  max?: number;
+};
+
+export type SearchDateFilter = {
+  key: string;
+  from?: string;
+  to?: string;
+};
+
+export type SearchSort = {
+  field: string;
+  direction: "asc" | "desc" | string;
+};
+
 export type SearchRequest = {
   query: string;
   repoId?: string;
+  excludeQuery?: string;
   metadataKey?: string;
   metadataValue?: string;
   tag?: string;
   tags?: string[];
   metadataFilters?: SearchMetadataFilter[];
+  excludeTags?: string[];
+  excludeFormats?: string[];
+  excludeMetadataFilters?: SearchMetadataFilter[];
+  excludePathPrefixes?: string[];
+  excludeNumberFilters?: SearchNumberFilter[];
+  excludeDateFilters?: SearchDateFilter[];
+  numberFilters?: SearchNumberFilter[];
+  dateFilters?: SearchDateFilter[];
   formats?: string[];
   minRating?: number;
+  matchMode?: "and" | "or" | string;
+  sort?: SearchSort;
+  limit?: number;
 };
 
 export type SmartFolderFilter = {
   query?: string;
   pathPrefix?: string;
+  excludeQuery?: string;
+  excludePathPrefixes?: string[];
   tags?: string[];
   formats?: string[];
   colors?: string[];
   shapes?: string[];
   metadataFilters?: SearchMetadataFilter[];
+  excludeTags?: string[];
+  excludeFormats?: string[];
+  excludeMetadataFilters?: SearchMetadataFilter[];
+  excludeNumberFilters?: SearchNumberFilter[];
+  excludeDateFilters?: SearchDateFilter[];
+  numberFilters?: SearchNumberFilter[];
+  dateFilters?: SearchDateFilter[];
   minRating?: number;
+  matchMode?: "and" | "or" | string;
+  sort?: SearchSort;
+  limit?: number;
 };
 
 export type SmartFolder = {
@@ -195,6 +260,69 @@ export type SmartFolderUpdateRequest = SmartFolderMutationRequest & {
 export type SmartFolderMutationResponse = {
   smartFolders: SmartFolderTreeNode[];
   smartFolder?: SmartFolder | null;
+};
+
+export type RepositoryActionStep = {
+  stepId: string;
+  actionId: string;
+  repoId: string;
+  stepKind: string;
+  label: string;
+  status: "ready" | "unsupported" | string;
+  config: Record<string, unknown> | unknown;
+  raw: Record<string, unknown> | unknown;
+  unsupportedReason?: string | null;
+  sortOrder: number;
+};
+
+export type RepositoryActionRun = {
+  runId: string;
+  actionId: string;
+  repoId: string;
+  status: "running" | "success" | "failed" | string;
+  target: Record<string, unknown> | unknown;
+  message?: string | null;
+  startedAt: string;
+  finishedAt?: string | null;
+};
+
+export type RepositoryAction = {
+  actionId: string;
+  repoId: string;
+  source: string;
+  sourceActionId?: string | null;
+  name: string;
+  status: "ready" | "unsupported" | string;
+  enabled: boolean;
+  raw: Record<string, unknown> | unknown;
+  unsupportedReason?: string | null;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+  steps: RepositoryActionStep[];
+  lastRun?: RepositoryActionRun | null;
+};
+
+export type RepositoryActionRunRequest = {
+  repoId: string;
+  actionId: string;
+  targetPaths?: string[];
+  assetIds?: string[];
+};
+
+export type RepositoryActionRunResponse = {
+  action: RepositoryAction;
+  run: RepositoryActionRun;
+};
+
+export type RepositoryActionEnabledRequest = {
+  repoId: string;
+  actionId: string;
+  enabled: boolean;
+};
+
+export type RepositoryActionMutationResponse = {
+  action: RepositoryAction;
 };
 
 export type SmartFolderResultSnapshot = {
@@ -350,7 +478,7 @@ export type FileMoveRequest = {
   parentPath: string;
 };
 
-export type HardlinkState = "linked" | "copiedFallback" | "broken" | "missing";
+export type HardlinkState = "primary" | "linked" | "copied" | "copiedFallback" | "broken" | "missing";
 
 export type HardlinkCandidate = {
   candidateId: string;
@@ -493,7 +621,7 @@ export type PluginManifest = {
   legacyPluginIds?: string[];
   name: string;
   version: string;
-  type: {
+  type?: {
     layer:
       | "source"
       | "library-kind"
@@ -503,6 +631,7 @@ export type PluginManifest = {
     kind: string;
   };
   kind: string;
+  category?: PluginCategory | string;
   description: string;
   capabilities: string[];
   enabled: boolean;
@@ -519,18 +648,13 @@ export type PluginManifest = {
     manifestOnly?: boolean;
     [key: string]: unknown;
   };
-  contributes?: {
-    preview?: {
-      extensions?: string[];
-    };
-    source?: Record<string, unknown>;
-    extractors?: Array<Record<string, unknown>>;
-    providers?: Array<Record<string, unknown>>;
-    hooks?: Array<Record<string, unknown>>;
-  };
   source?: "builtin" | "user" | "system";
   runtime?: "vue-module" | "native-dylib" | "manifest-only";
   permissions?: string[];
+  requires?: string[];
+  optional?: string[];
+  hooks?: PluginHook[];
+  contributes?: Record<string, unknown>;
   compat?: {
     sdkVersion?: string;
     legacyPluginIds?: string[];
@@ -538,6 +662,27 @@ export type PluginManifest = {
   status?: "ready" | "disabled" | "unavailable" | "error";
   archivePath?: string;
 };
+
+export type PluginCategory = "source" | "library-kind" | "parser" | "preview" | "service";
+
+export type PluginHook = {
+  slot: CoreHostCapability | string;
+  action: string;
+  label?: string;
+  requires?: string[];
+};
+
+export type CoreHostCapability =
+  | "playlist"
+  | "pip"
+  | "progress"
+  | "candidateQueue"
+  | "batchOrganize"
+  | "downloadQueue"
+  | "metadataMerge"
+  | "renameMove"
+  | "auditLog"
+  | "search";
 
 export type PluginEnabledRequest = {
   pluginId: string;

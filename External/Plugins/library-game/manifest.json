@@ -1,0 +1,94 @@
+{
+  "pluginId": "momobako.library.game",
+  "legacyPluginIds": [
+    "builtin.library-game"
+  ],
+  "name": "Game Library",
+  "version": "0.1.0",
+  "kind": "library-kind",
+  "category": "library-kind",
+  "description": "为游戏本体、补丁、DLC 和启动入口声明平台、版本、进度和依赖。",
+  "capabilities": [
+    "library-kind",
+    "metadata-schema",
+    "view-presets",
+    "progress",
+    "organize-candidates"
+  ],
+  "enabled": true,
+  "sdk": "backend",
+  "entry": {},
+  "source": "builtin",
+  "runtime": "manifest-only",
+  "permissions": [
+    "readRepository",
+    "readMetadata",
+    "writeCandidates",
+    "suggestRename",
+    "suggestMove"
+  ],
+  "requires": [],
+  "optional": [
+    "momobako.parser.archive",
+    "momobako.service.network-search"
+  ],
+  "hooks": [
+    {
+      "slot": "progress",
+      "action": "library.game.trackPlayProgress",
+      "label": "记录游玩状态"
+    },
+    {
+      "slot": "batchOrganize",
+      "action": "library.game.suggestPackageLayout",
+      "label": "生成游戏整理候选"
+    }
+  ],
+  "contributes": {
+    "libraryKind": {
+      "id": "game",
+      "fields": [
+        "title",
+        "platform",
+        "version",
+        "region",
+        "developer",
+        "publisher",
+        "releaseDate",
+        "entryPoint",
+        "savePath",
+        "runtimeDependencies",
+        "playStatus"
+      ],
+      "facets": [
+        "platform",
+        "region",
+        "developer",
+        "publisher",
+        "playStatus"
+      ],
+      "sortFields": [
+        "title",
+        "releaseDate",
+        "version"
+      ],
+      "views": [
+        "games",
+        "platforms",
+        "versions",
+        "dependencies",
+        "continuePlaying"
+      ],
+      "preview": [
+        "momobako.preview.media"
+      ]
+    }
+  },
+  "compat": {
+    "sdkVersion": "1",
+    "legacyPluginIds": [
+      "builtin.library-game"
+    ]
+  },
+  "status": "ready"
+}

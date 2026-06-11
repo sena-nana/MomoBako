@@ -1,0 +1,88 @@
+{
+  "pluginId": "momobako.library.software",
+  "legacyPluginIds": [
+    "builtin.library-software"
+  ],
+  "name": "Software Library",
+  "version": "0.1.0",
+  "kind": "library-kind",
+  "category": "library-kind",
+  "description": "为安装包、便携软件、补丁和工具归档声明版本、平台、校验和和依赖。",
+  "capabilities": [
+    "library-kind",
+    "metadata-schema",
+    "view-presets",
+    "organize-candidates"
+  ],
+  "enabled": true,
+  "sdk": "backend",
+  "entry": {},
+  "source": "builtin",
+  "runtime": "manifest-only",
+  "permissions": [
+    "readRepository",
+    "readMetadata",
+    "readArchive",
+    "writeCandidates",
+    "suggestRename",
+    "suggestMove"
+  ],
+  "requires": [],
+  "optional": [
+    "momobako.parser.archive"
+  ],
+  "hooks": [
+    {
+      "slot": "batchOrganize",
+      "action": "library.software.suggestVersionLayout",
+      "label": "生成软件整理候选"
+    }
+  ],
+  "contributes": {
+    "libraryKind": {
+      "id": "software",
+      "fields": [
+        "title",
+        "vendor",
+        "version",
+        "platform",
+        "architecture",
+        "installerType",
+        "checksum",
+        "license",
+        "dependencies",
+        "releaseDate",
+        "sourceUrl"
+      ],
+      "facets": [
+        "vendor",
+        "platform",
+        "architecture",
+        "installerType",
+        "license"
+      ],
+      "sortFields": [
+        "title",
+        "version",
+        "releaseDate"
+      ],
+      "views": [
+        "software",
+        "versions",
+        "platforms",
+        "dependencies",
+        "checksumAudit"
+      ],
+      "preview": [
+        "momobako.preview.text"
+      ]
+    }
+  },
+  "compat": {
+    "sdkVersion": "1",
+    "legacyPluginIds": [
+      "builtin.library-software"
+    ]
+  },
+  "status": "ready"
+}

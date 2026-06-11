@@ -1,0 +1,60 @@
+{
+  "pluginId": "momobako.service.provider.musicbrainz",
+  "legacyPluginIds": [
+    "builtin.service-provider-musicbrainz"
+  ],
+  "name": "MusicBrainz Provider",
+  "version": "0.1.0",
+  "kind": "provider",
+  "category": "service",
+  "description": "声明 MusicBrainz 音乐元数据候选源，供音频库手动触发补全。",
+  "capabilities": [
+    "metadata-provider",
+    "music",
+    "external-id",
+    "candidate-results"
+  ],
+  "enabled": false,
+  "sdk": "backend",
+  "entry": {},
+  "source": "builtin",
+  "runtime": "manifest-only",
+  "permissions": [
+    "network",
+    "useProvider",
+    "writeCandidates"
+  ],
+  "requires": [
+    "momobako.service.network-search"
+  ],
+  "optional": [],
+  "hooks": [
+    {
+      "slot": "candidateQueue",
+      "action": "provider.musicbrainz.writeCandidates",
+      "label": "写入 MusicBrainz 候选"
+    }
+  ],
+  "contributes": {
+    "provider": {
+      "domain": "music",
+      "fields": [
+        "musicBrainzId",
+        "artist",
+        "album",
+        "trackNumber",
+        "releaseDate",
+        "genre"
+      ],
+      "manualTrigger": true,
+      "candidateOnly": true
+    }
+  },
+  "compat": {
+    "sdkVersion": "1",
+    "legacyPluginIds": [
+      "builtin.service-provider-musicbrainz"
+    ]
+  },
+  "status": "disabled"
+}

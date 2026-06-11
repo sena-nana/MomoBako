@@ -1,0 +1,8 @@
+{
+  "pluginId": "momobako.library.font",
+  "build": {
+    "type": "manifest-only",
+    "sourceDir": "src",
+    "outputDir": ".dist/library-font"
+  }
+}

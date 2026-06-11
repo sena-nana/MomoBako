@@ -1,0 +1,115 @@
+{
+  "pluginId": "momobako.library.video",
+  "legacyPluginIds": [
+    "builtin.library-video"
+  ],
+  "name": "Video Library",
+  "version": "0.1.0",
+  "kind": "library-kind",
+  "category": "library-kind",
+  "description": "为电影、剧集与普通视频声明播放、字幕、清晰度和整理视图。",
+  "capabilities": [
+    "library-kind",
+    "metadata-schema",
+    "view-presets",
+    "playlist",
+    "pip",
+    "progress",
+    "organize-candidates"
+  ],
+  "enabled": true,
+  "sdk": "backend",
+  "entry": {},
+  "source": "builtin",
+  "runtime": "manifest-only",
+  "permissions": [
+    "readRepository",
+    "readMetadata",
+    "writeCandidates",
+    "suggestRename",
+    "suggestMove"
+  ],
+  "requires": [],
+  "optional": [
+    "momobako.parser.video",
+    "momobako.service.provider.tmdb"
+  ],
+  "hooks": [
+    {
+      "slot": "playlist",
+      "action": "library.video.enqueueSelection",
+      "label": "加入播放列表"
+    },
+    {
+      "slot": "pip",
+      "action": "library.video.openPip",
+      "label": "画中画"
+    },
+    {
+      "slot": "progress",
+      "action": "library.video.trackWatchProgress",
+      "label": "记录观看进度"
+    },
+    {
+      "slot": "batchOrganize",
+      "action": "library.video.suggestSeriesLayout",
+      "label": "生成影视整理候选"
+    }
+  ],
+  "contributes": {
+    "libraryKind": {
+      "id": "video",
+      "fields": [
+        "title",
+        "originalTitle",
+        "seasonTitle",
+        "seasonNumber",
+        "episodeNumber",
+        "episodeTitle",
+        "year",
+        "releaseDate",
+        "durationMs",
+        "resolution",
+        "videoCodec",
+        "audioCodec",
+        "subtitleLanguages",
+        "audioLanguages",
+        "container",
+        "providerIds",
+        "watchStatus"
+      ],
+      "facets": [
+        "year",
+        "resolution",
+        "subtitleLanguages",
+        "audioLanguages",
+        "watchStatus"
+      ],
+      "sortFields": [
+        "releaseDate",
+        "seasonNumber",
+        "episodeNumber",
+        "durationMs",
+        "resolution"
+      ],
+      "views": [
+        "files",
+        "series",
+        "seasons",
+        "episodes",
+        "continueWatching",
+        "qualityCheck"
+      ],
+      "preview": [
+        "momobako.preview.media"
+      ]
+    }
+  },
+  "compat": {
+    "sdkVersion": "1",
+    "legacyPluginIds": [
+      "builtin.library-video"
+    ]
+  },
+  "status": "ready"
+}

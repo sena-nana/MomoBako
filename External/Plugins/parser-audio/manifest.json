@@ -1,0 +1,68 @@
+{
+  "pluginId": "momobako.parser.audio",
+  "legacyPluginIds": [
+    "builtin.parser-audio"
+  ],
+  "name": "Audio Parser",
+  "version": "0.1.0",
+  "kind": "parser",
+  "category": "parser",
+  "description": "声明音频标签、时长、码率、采样率、声道和封面的解析能力。",
+  "capabilities": [
+    "parser",
+    "audio-tags",
+    "duration",
+    "cover-art"
+  ],
+  "enabled": false,
+  "sdk": "backend",
+  "entry": {},
+  "source": "builtin",
+  "runtime": "manifest-only",
+  "permissions": [
+    "readRepository",
+    "readMetadata"
+  ],
+  "requires": [],
+  "optional": [],
+  "hooks": [
+    {
+      "slot": "candidateQueue",
+      "action": "parser.audio.writeMetadataCandidates",
+      "label": "写入音频解析候选"
+    }
+  ],
+  "contributes": {
+    "parser": {
+      "extensions": [
+        "mp3",
+        "flac",
+        "wav",
+        "m4a",
+        "aac",
+        "ogg",
+        "opus"
+      ],
+      "outputs": [
+        "title",
+        "artist",
+        "album",
+        "trackNumber",
+        "durationMs",
+        "bitrate",
+        "sampleRate",
+        "channels",
+        "codec",
+        "coverArt"
+      ],
+      "candidateOnly": true
+    }
+  },
+  "compat": {
+    "sdkVersion": "1",
+    "legacyPluginIds": [
+      "builtin.parser-audio"
+    ]
+  },
+  "status": "disabled"
+}

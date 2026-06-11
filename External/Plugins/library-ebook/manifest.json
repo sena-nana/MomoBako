@@ -1,0 +1,95 @@
+{
+  "pluginId": "momobako.library.ebook",
+  "legacyPluginIds": [
+    "builtin.library-ebook"
+  ],
+  "name": "E-book Library",
+  "version": "0.1.0",
+  "kind": "library-kind",
+  "category": "library-kind",
+  "description": "为电子书和文档库声明作者、ISBN、出版信息、系列和阅读进度。",
+  "capabilities": [
+    "library-kind",
+    "metadata-schema",
+    "view-presets",
+    "progress",
+    "organize-candidates"
+  ],
+  "enabled": true,
+  "sdk": "backend",
+  "entry": {},
+  "source": "builtin",
+  "runtime": "manifest-only",
+  "permissions": [
+    "readRepository",
+    "readMetadata",
+    "writeCandidates",
+    "suggestRename",
+    "suggestMove"
+  ],
+  "requires": [],
+  "optional": [
+    "momobako.parser.ebook"
+  ],
+  "hooks": [
+    {
+      "slot": "progress",
+      "action": "library.ebook.trackReadProgress",
+      "label": "记录阅读进度"
+    },
+    {
+      "slot": "batchOrganize",
+      "action": "library.ebook.suggestAuthorLayout",
+      "label": "生成书籍整理候选"
+    }
+  ],
+  "contributes": {
+    "libraryKind": {
+      "id": "ebook",
+      "fields": [
+        "title",
+        "author",
+        "isbn",
+        "publisher",
+        "language",
+        "series",
+        "volumeNumber",
+        "pageCount",
+        "wordCount",
+        "publishedAt",
+        "readStatus"
+      ],
+      "facets": [
+        "author",
+        "publisher",
+        "language",
+        "series",
+        "readStatus"
+      ],
+      "sortFields": [
+        "author",
+        "series",
+        "volumeNumber",
+        "publishedAt"
+      ],
+      "views": [
+        "books",
+        "authors",
+        "series",
+        "continueReading",
+        "missingMetadata"
+      ],
+      "preview": [
+        "momobako.preview.office",
+        "momobako.preview.text"
+      ]
+    }
+  },
+  "compat": {
+    "sdkVersion": "1",
+    "legacyPluginIds": [
+      "builtin.library-ebook"
+    ]
+  },
+  "status": "ready"
+}

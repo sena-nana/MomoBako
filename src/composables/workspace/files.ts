@@ -20,16 +20,14 @@ import {
   updateOperationProgress,
 } from "./tasks";
 import { loadThumbnailsForSnapshot } from "./thumbnails";
+import { joinRepositoryPath } from "./paths";
 
 export type FileBrowserLoadOptions = {
   includeTree?: boolean;
   specialLocation?: "trash";
 };
 
-export function entryNameFromPath(path: string) {
-  const segments = path.replace(/\\/g, "/").replace(/\/+$/g, "").split("/").filter(Boolean);
-  return segments[segments.length - 1] ?? path;
-}
+export { entryNameFromPath } from "./paths";
 
 export function getDefaultFileBrowserSelection(snapshot: FileBrowserSnapshot) {
   return snapshot.entries.find((entry) => entry.kind === "file")?.path
@@ -107,27 +105,5 @@ export async function loadFileBrowserForDirectory(directoryPath = "", options: F
 
 export function joinActiveRepositoryPath(relativePath: string) {
   if (!activeSnapshot.value) return null;
-  return joinAbsolutePath(activeSnapshot.value.repository.path, relativePath);
-}
-
-function joinAbsolutePath(rootPath: string, relativePath: string) {
-  const normalizedRoot = trimTrailingPathSeparators(rootPath);
-  const normalizedRelative = relativePath
-    .trim()
-    .replace(/^[\\/]+|[\\/]+$/g, "")
-    .split(/[\\/]+/)
-    .filter(Boolean);
-  if (!normalizedRelative.length) return normalizedRoot;
-
-  const separator = normalizedRoot.includes("\\") ? "\\" : "/";
-  if (/^[A-Za-z]:[\\/]$/.test(normalizedRoot)) {
-    return `${normalizedRoot}${normalizedRelative.join(separator)}`;
-  }
-  return `${normalizedRoot}${separator}${normalizedRelative.join(separator)}`;
-}
-
-function trimTrailingPathSeparators(path: string) {
-  const trimmed = path.trim();
-  if (/^[A-Za-z]:[\\/]$/.test(trimmed)) return trimmed;
-  return trimmed.replace(/[\\/]+$/, "") || trimmed;
+  return joinRepositoryPath(activeSnapshot.value.repository.path, relativePath);
 }

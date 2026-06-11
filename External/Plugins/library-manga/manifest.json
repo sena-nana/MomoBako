@@ -1,0 +1,96 @@
+{
+  "pluginId": "momobako.library.manga",
+  "legacyPluginIds": [
+    "builtin.library-manga"
+  ],
+  "name": "Manga Library",
+  "version": "0.1.0",
+  "kind": "library-kind",
+  "category": "library-kind",
+  "description": "为漫画目录和 CBZ/CBR 容器声明卷、话、页数、阅读方向和阅读进度。",
+  "capabilities": [
+    "library-kind",
+    "metadata-schema",
+    "view-presets",
+    "progress",
+    "organize-candidates"
+  ],
+  "enabled": true,
+  "sdk": "backend",
+  "entry": {},
+  "source": "builtin",
+  "runtime": "manifest-only",
+  "permissions": [
+    "readRepository",
+    "readMetadata",
+    "readArchive",
+    "writeCandidates",
+    "suggestRename",
+    "suggestMove"
+  ],
+  "requires": [],
+  "optional": [
+    "momobako.parser.archive",
+    "momobako.parser.image"
+  ],
+  "hooks": [
+    {
+      "slot": "progress",
+      "action": "library.manga.trackReadProgress",
+      "label": "记录阅读进度"
+    },
+    {
+      "slot": "batchOrganize",
+      "action": "library.manga.suggestVolumeLayout",
+      "label": "生成漫画整理候选"
+    }
+  ],
+  "contributes": {
+    "libraryKind": {
+      "id": "manga",
+      "fields": [
+        "title",
+        "originalTitle",
+        "author",
+        "publisher",
+        "series",
+        "volumeNumber",
+        "chapterNumber",
+        "chapterTitle",
+        "pageCount",
+        "readingDirection",
+        "releaseDate",
+        "readStatus"
+      ],
+      "facets": [
+        "author",
+        "publisher",
+        "series",
+        "readStatus"
+      ],
+      "sortFields": [
+        "series",
+        "volumeNumber",
+        "chapterNumber",
+        "releaseDate"
+      ],
+      "views": [
+        "series",
+        "volumes",
+        "chapters",
+        "continueReading",
+        "missingMetadata"
+      ],
+      "preview": [
+        "momobako.preview.office"
+      ]
+    }
+  },
+  "compat": {
+    "sdkVersion": "1",
+    "legacyPluginIds": [
+      "builtin.library-manga"
+    ]
+  },
+  "status": "ready"
+}

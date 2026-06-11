@@ -26,6 +26,14 @@ import { useRepositoryWorkspace } from "../composables/useRepositoryWorkspace";
 import { getPreviewPluginFileActions, getPreviewPluginForEntry } from "../plugins/previewPlugins";
 import { isAudioExtension, isVideoExtension } from "../utils/filePreviewExtensions";
 import { metadataPalette } from "../utils/fileMetadata";
+import { splitListInput } from "../composables/workspace/filterInputs";
+import {
+  joinRepositoryPath,
+  normalizeFilesystemPath,
+  normalizeRepositoryRelativePath,
+  repositoryPathParts,
+  trimTrailingPathSeparators,
+} from "../composables/workspace/paths";
 import {
   getWorkspaceParentPath,
   internalWorkspaceDragDistance,
@@ -33,6 +41,10 @@ import {
   resolveWorkspaceDropTarget,
   shouldDelegateToExternalDrag as shouldDelegateToExternalWorkspaceDrag,
 } from "./workspace/dragBehavior";
+import {
+  createExternalDragIcon,
+  extractPaletteFromImageElement,
+} from "./workspace/thumbnailUi";
 import type {
   FileBrowserEntry,
   HardlinkCandidate,
@@ -67,12 +79,14 @@ const workspaceComponentLoaders = {
   FileBrowserPanel: () => import("./workspace/FileBrowserPanel.vue"),
   FilePreviewPane: () => import("./workspace/FilePreviewPane.vue"),
   HardlinkCandidateDialog: () => import("./workspace/HardlinkCandidateDialog.vue"),
+  RepositoryActionsPanel: () => import("./workspace/RepositoryActionsPanel.vue"),
   SearchPanel: () => import("./workspace/SearchPanel.vue"),
 };
 const CopyTargetDialog = defineAsyncComponent(workspaceComponentLoaders.CopyTargetDialog);
 const FileBrowserPanel = defineAsyncComponent(workspaceComponentLoaders.FileBrowserPanel);
 const FilePreviewPane = defineAsyncComponent(workspaceComponentLoaders.FilePreviewPane);
 const HardlinkCandidateDialog = defineAsyncComponent(workspaceComponentLoaders.HardlinkCandidateDialog);
+const RepositoryActionsPanel = defineAsyncComponent(workspaceComponentLoaders.RepositoryActionsPanel);
 const SearchPanel = defineAsyncComponent(workspaceComponentLoaders.SearchPanel);
 
 let dragDropUnlisten: UnlistenFn | null = null;
@@ -112,6 +126,18 @@ const copyTargetPath = ref("");
 const skippedHardlinkCandidateIds = ref<Set<string>>(new Set());
 const colorFilterInput = ref("");
 const shapeFilterInput = ref("");
+const excludeQueryInput = ref("");
+const excludePathPrefixesInput = ref("");
+const excludeTagsInput = ref("");
+const excludeFormatsInput = ref("");
+const excludeMetadataFiltersInput = ref("");
+const excludeNumberFiltersInput = ref("");
+const excludeDateFiltersInput = ref("");
+const numberFiltersInput = ref("");
+const dateFiltersInput = ref("");
+const sortFieldInput = ref("");
+const sortDirectionInput = ref<"asc" | "desc">("asc");
+const limitInput = ref("");
 const internalWorkspaceDragSession = ref<InternalWorkspaceDragSession | null>(null);
 const externalDragSwitchDistance = 72;
 
@@ -144,6 +170,8 @@ const {
   selectedFilePath,
   searchResults,
   smartFolderResult,
+  repositoryActions,
+  activeRepositoryActionId,
   hardlinkCandidates,
   isExternalDragActive,
   isInternalDragActive,
@@ -151,7 +179,9 @@ const {
   isSearching,
   isSavingMetadata,
   isLoadingSmartFolder,
+  isLoadingRepositoryActions,
   isMutatingFiles,
+  isRunningRepositoryAction,
   error,
   refreshRepositoryWorkspace,
   selectRepository,
@@ -190,10 +220,13 @@ const {
   setFilterBarOpen,
   toggleFilterValue,
   setMinimumRatingFilter,
+  updateFilters,
   clearFilters,
   runFilteredSearch,
   confirmWorkspaceHardlinkCandidate,
   saveAssetMetadata,
+  selectRepositoryAction,
+  runActiveRepositoryAction,
 } = useRepositoryWorkspace();
 
 const hasRepository = computed(() => Boolean(activeSnapshot.value));
@@ -205,6 +238,7 @@ const isFilesPanel = computed(() => activePanel.value === "files");
 const isTrashPanel = computed(() => activePanel.value === "deleted");
 const isSearchPanel = computed(() => activePanel.value === "search");
 const isSmartFolderPanel = computed(() => activePanel.value === "smartFolder");
+const isActionsPanel = computed(() => activePanel.value === "actions");
 const isExtensionsPanel = computed(() => activePanel.value === "extensions");
 const isFileBrowserPanel = computed(() => isFilesPanel.value || isTrashPanel.value || isSmartFolderPanel.value);
 const smartFolderEntryMap = computed<ReadonlyMap<string, FileBrowserEntry>>(() => (
@@ -331,8 +365,11 @@ const searchResultScopeLabel = computed(() => (
 
 function hardlinkStateLabel(entry: FileBrowserEntry) {
   switch (entry.hardlinkState) {
+    case "primary":
+      return "主归属";
     case "linked":
       return "硬链接关联";
+    case "copied":
     case "copiedFallback":
       return "普通复制";
     case "broken":
@@ -457,129 +494,6 @@ function thumbnailPaletteColors(entry: FileBrowserEntry) {
   const metadataColors = metadataPalette(entry.metadata);
   if (metadataColors.length) return metadataColors;
   return thumbnailPalettes.value[entry.path] ?? [];
-}
-
-function extractPaletteFromImageElement(image: HTMLImageElement) {
-  try {
-    const canvas = document.createElement("canvas");
-    const context = canvas.getContext("2d", { willReadFrequently: true });
-    if (!context) return [];
-
-    const width = 40;
-    const sourceWidth = image.naturalWidth || image.width || 1;
-    const sourceHeight = image.naturalHeight || image.height || 1;
-    canvas.width = width;
-    canvas.height = Math.min(Math.max(1, Math.round((sourceHeight / sourceWidth) * width)), 40);
-    context.drawImage(image, 0, 0, canvas.width, canvas.height);
-    const data = context.getImageData(0, 0, canvas.width, canvas.height).data;
-    const buckets = new Map<string, { count: number; r: number; g: number; b: number }>();
-
-    for (let index = 0; index < data.length; index += 4) {
-      const alpha = data[index + 3];
-      if (alpha < 24) continue;
-      const r = data[index];
-      const g = data[index + 1];
-      const b = data[index + 2];
-      const key = `${Math.floor(r / 16)}-${Math.floor(g / 16)}-${Math.floor(b / 16)}`;
-      const bucket = buckets.get(key) ?? { count: 0, r: 0, g: 0, b: 0 };
-      bucket.count += 1;
-      bucket.r += r;
-      bucket.g += g;
-      bucket.b += b;
-      buckets.set(key, bucket);
-    }
-
-    const ranked = [...buckets.values()]
-      .filter((bucket) => bucket.count > 0)
-      .map((bucket) => ({
-        count: bucket.count,
-        r: Math.round(bucket.r / bucket.count),
-        g: Math.round(bucket.g / bucket.count),
-        b: Math.round(bucket.b / bucket.count),
-      }))
-      .sort((left, right) => right.count - left.count);
-
-    const colors: string[] = [];
-    for (const color of ranked) {
-      if (colors.some((existing) => colorDistance(existing, color) < 30)) continue;
-      colors.push(rgbToHex(color.r, color.g, color.b));
-      if (colors.length === 5) break;
-    }
-    return colors;
-  } catch {
-    return [];
-  }
-}
-
-function rgbToHex(r: number, g: number, b: number) {
-  return `#${[r, g, b].map((value) => value.toString(16).padStart(2, "0")).join("").toUpperCase()}`;
-}
-
-function colorDistance(leftHex: string, right: { r: number; g: number; b: number }) {
-  const left = [
-    Number.parseInt(leftHex.slice(1, 3), 16),
-    Number.parseInt(leftHex.slice(3, 5), 16),
-    Number.parseInt(leftHex.slice(5, 7), 16),
-  ];
-  return Math.sqrt(
-    (left[0] - right.r) ** 2 +
-    (left[1] - right.g) ** 2 +
-    (left[2] - right.b) ** 2,
-  );
-}
-
-function fillRoundedRect(context: CanvasRenderingContext2D, x: number, y: number, width: number, height: number, radius: number) {
-  context.beginPath();
-  context.moveTo(x + radius, y);
-  context.lineTo(x + width - radius, y);
-  context.quadraticCurveTo(x + width, y, x + width, y + radius);
-  context.lineTo(x + width, y + height - radius);
-  context.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
-  context.lineTo(x + radius, y + height);
-  context.quadraticCurveTo(x, y + height, x, y + height - radius);
-  context.lineTo(x, y + radius);
-  context.quadraticCurveTo(x, y, x + radius, y);
-  context.closePath();
-  context.fill();
-}
-
-function createExternalDragIcon(entry: FileBrowserEntry) {
-  try {
-    const canvas = document.createElement("canvas");
-    const context = canvas.getContext("2d");
-    if (!context) return undefined;
-
-    const size = 72;
-    const scale = Math.min(Math.max(window.devicePixelRatio || 1, 1), 2);
-    canvas.width = size * scale;
-    canvas.height = size * scale;
-    context.scale(scale, scale);
-
-    const gradient = context.createLinearGradient(0, 0, size, size);
-    if (entry.kind === "directory") {
-      gradient.addColorStop(0, "#d3b26f");
-      gradient.addColorStop(1, "#6e542e");
-    } else {
-      gradient.addColorStop(0, "#8aa8b0");
-      gradient.addColorStop(1, "#314a53");
-    }
-
-    context.fillStyle = "rgba(0, 0, 0, 0.22)";
-    fillRoundedRect(context, 8, 10, 56, 56, 12);
-    context.fillStyle = gradient;
-    fillRoundedRect(context, 6, 6, 56, 56, 12);
-
-    context.fillStyle = "rgba(255, 255, 255, 0.9)";
-    context.font = "700 16px system-ui, sans-serif";
-    context.textAlign = "center";
-    context.textBaseline = "middle";
-    const label = entry.kind === "directory" ? "DIR" : (entry.extension || "FILE").slice(0, 4).toUpperCase();
-    context.fillText(label, 34, 34, 44);
-
-    return canvas.toDataURL("image/png");
-  } catch {
-    return undefined;
-  }
 }
 
 function resetThumbnailFailure(path: string) {
@@ -876,36 +790,6 @@ function getDroppedSourcePaths(event: DragEvent) {
     .filter((path) => path.trim().length > 0);
 }
 
-function trimTrailingPathSeparators(path: string) {
-  const trimmed = path.trim();
-  if (/^[A-Za-z]:[\\/]$/.test(trimmed)) return trimmed;
-  return trimmed.replace(/[\\/]+$/, "") || trimmed;
-}
-
-function normalizeFilesystemPath(path: string) {
-  return trimTrailingPathSeparators(path)
-    .replace(/\//g, "\\")
-    .toLowerCase();
-}
-
-function joinRepositoryPath(rootPath: string, relativePath: string, name?: string) {
-  const normalizedRoot = trimTrailingPathSeparators(rootPath);
-  const parts = [
-    ...relativePath
-      .trim()
-      .replace(/^[\\/]+|[\\/]+$/g, "")
-      .split(/[\\/]+/)
-      .filter(Boolean),
-    ...(name ? [name] : []),
-  ];
-  if (!parts.length) return normalizedRoot;
-  const separator = normalizedRoot.includes("\\") ? "\\" : "/";
-  if (/^[A-Za-z]:[\\/]$/.test(normalizedRoot)) {
-    return `${normalizedRoot}${parts.join(separator)}`;
-  }
-  return `${normalizedRoot}${separator}${parts.join(separator)}`;
-}
-
 async function handleExternalPathsDrop(paths: string[]) {
   setExternalDragActive(false);
   const targetPath = dragHoverFolderPath.value ?? currentDirectoryPath.value;
@@ -917,7 +801,7 @@ async function handleExternalPathsDrop(paths: string[]) {
   const filteredPaths = paths.filter((sourcePath) => {
     const normalizedSourcePath = trimTrailingPathSeparators(sourcePath);
     if (!normalizedSourcePath) return false;
-    const segments = normalizedSourcePath.split(/[\\/]+/).filter(Boolean);
+    const segments = repositoryPathParts(normalizedSourcePath);
     const name = segments[segments.length - 1];
     if (!name) return false;
     const targetAbsolutePath = joinRepositoryPath(repoRoot, targetPath, name);
@@ -1060,7 +944,7 @@ function openCopyTargetDialog(entry: FileBrowserEntry) {
 async function submitCopyTarget() {
   const paths = pendingCopySourcePaths.value;
   if (!paths.length) return;
-  const targetPath = copyTargetPath.value.trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+  const targetPath = normalizeRepositoryRelativePath(copyTargetPath.value);
   const snapshot = await copyWorkspaceEntries(paths, targetPath);
   if (snapshot) {
     cancelCopyTarget();
@@ -1343,6 +1227,39 @@ function clearSearchFilters() {
   clearFilters();
   colorFilterInput.value = "";
   shapeFilterInput.value = "";
+  excludeQueryInput.value = "";
+  excludePathPrefixesInput.value = "";
+  excludeTagsInput.value = "";
+  excludeFormatsInput.value = "";
+  excludeMetadataFiltersInput.value = "";
+  excludeNumberFiltersInput.value = "";
+  excludeDateFiltersInput.value = "";
+  numberFiltersInput.value = "";
+  dateFiltersInput.value = "";
+  sortFieldInput.value = "";
+  sortDirectionInput.value = "asc";
+  limitInput.value = "";
+  setActivePanel("search");
+  void runFilteredSearch();
+}
+
+function applyAdvancedSearchFilters() {
+  if (!isRepositoryWritable.value) return;
+  const limit = Number(limitInput.value);
+  updateFilters({
+    excludeQuery: excludeQueryInput.value.trim(),
+    excludePathPrefixes: excludePathPrefixesInput.value.trim(),
+    excludeTags: splitListInput(excludeTagsInput.value),
+    excludeFormats: splitListInput(excludeFormatsInput.value),
+    excludeMetadataFilters: excludeMetadataFiltersInput.value.trim(),
+    excludeNumberFilters: excludeNumberFiltersInput.value.trim(),
+    excludeDateFilters: excludeDateFiltersInput.value.trim(),
+    numberFilters: numberFiltersInput.value.trim(),
+    dateFilters: dateFiltersInput.value.trim(),
+    sortField: sortFieldInput.value.trim(),
+    sortDirection: sortDirectionInput.value,
+    limit: Number.isFinite(limit) && limit > 0 ? limit : null,
+  });
   setActivePanel("search");
   void runFilteredSearch();
 }
@@ -1693,6 +1610,122 @@ onUnmounted(() => {
           </button>
         </div>
       </section>
+
+      <section class="workspace-filter-bar__group workspace-filter-bar__group--wide" aria-label="高级筛选">
+        <span>高级</span>
+        <div class="workspace-filter-bar__advanced">
+          <label class="workspace-filter-input">
+            <input
+              v-model="excludeQueryInput"
+              type="text"
+              aria-label="排除关键词"
+              placeholder="排除关键词"
+              @keydown.enter.prevent="applyAdvancedSearchFilters"
+            />
+          </label>
+          <label class="workspace-filter-input">
+            <input
+              v-model="excludePathPrefixesInput"
+              type="text"
+              aria-label="排除路径"
+              placeholder="排除路径"
+              @keydown.enter.prevent="applyAdvancedSearchFilters"
+            />
+          </label>
+          <label class="workspace-filter-input">
+            <input
+              v-model="excludeTagsInput"
+              type="text"
+              aria-label="排除标签"
+              placeholder="排除标签"
+              @keydown.enter.prevent="applyAdvancedSearchFilters"
+            />
+          </label>
+          <label class="workspace-filter-input">
+            <input
+              v-model="excludeFormatsInput"
+              type="text"
+              aria-label="排除格式"
+              placeholder="排除格式"
+              @keydown.enter.prevent="applyAdvancedSearchFilters"
+            />
+          </label>
+          <label class="workspace-filter-input workspace-filter-input--wide">
+            <input
+              v-model="excludeMetadataFiltersInput"
+              type="text"
+              aria-label="排除元数据"
+              placeholder="status=archived"
+              @keydown.enter.prevent="applyAdvancedSearchFilters"
+            />
+          </label>
+          <label class="workspace-filter-input workspace-filter-input--wide">
+            <input
+              v-model="excludeNumberFiltersInput"
+              type="text"
+              aria-label="排除数值范围"
+              placeholder="排除 width=0..640"
+              @keydown.enter.prevent="applyAdvancedSearchFilters"
+            />
+          </label>
+          <label class="workspace-filter-input workspace-filter-input--wide">
+            <input
+              v-model="excludeDateFiltersInput"
+              type="text"
+              aria-label="排除日期范围"
+              placeholder="排除 fileCreatedAt=2024-01-01T00:00:00Z.."
+              @keydown.enter.prevent="applyAdvancedSearchFilters"
+            />
+          </label>
+          <label class="workspace-filter-input workspace-filter-input--wide">
+            <input
+              v-model="numberFiltersInput"
+              type="text"
+              aria-label="数值范围"
+              placeholder="width=1024..4096"
+              @keydown.enter.prevent="applyAdvancedSearchFilters"
+            />
+          </label>
+          <label class="workspace-filter-input workspace-filter-input--wide">
+            <input
+              v-model="dateFiltersInput"
+              type="text"
+              aria-label="日期范围"
+              placeholder="fileCreatedAt=2024-01-01T00:00:00Z.."
+              @keydown.enter.prevent="applyAdvancedSearchFilters"
+            />
+          </label>
+          <label class="workspace-filter-input">
+            <input
+              v-model="sortFieldInput"
+              type="text"
+              aria-label="排序字段"
+              placeholder="排序字段"
+              @keydown.enter.prevent="applyAdvancedSearchFilters"
+            />
+          </label>
+          <label class="workspace-filter-input workspace-filter-input--select">
+            <select v-model="sortDirectionInput" aria-label="排序方向">
+              <option value="asc">升序</option>
+              <option value="desc">降序</option>
+            </select>
+          </label>
+          <label class="workspace-filter-input">
+            <input
+              v-model="limitInput"
+              type="number"
+              min="1"
+              step="1"
+              aria-label="结果数量"
+              placeholder="数量"
+              @keydown.enter.prevent="applyAdvancedSearchFilters"
+            />
+          </label>
+          <button type="button" class="ghost workspace-filter-bar__btn" @click="applyAdvancedSearchFilters">
+            应用
+          </button>
+        </div>
+      </section>
     </div>
   </div>
 
@@ -1753,6 +1786,7 @@ onUnmounted(() => {
         :hardlink-state-label="hardlinkStateLabel"
         :is-saving-metadata="isSavingMetadata"
         :available-tags="tagFilterOptions"
+        :tag-groups="activeSnapshot?.tagGroups ?? []"
         :thumbnail-palette="thumbnailPaletteColors"
         :save-metadata="saveFileMetadata"
         :status-label="statusLabel"
@@ -1802,6 +1836,7 @@ onUnmounted(() => {
       :rename-target-path="renameTargetPath"
       :is-saving-metadata="isSavingMetadata"
       :available-tags="tagFilterOptions"
+      :tag-groups="activeSnapshot?.tagGroups ?? []"
       :thumbnail-palette="thumbnailPaletteColors"
       :save-metadata="saveFileMetadata"
       :selected-entries="selectedEntries"
@@ -1847,6 +1882,17 @@ onUnmounted(() => {
     :summary="searchSummary"
     :result-context="searchResultContext"
     @open-result="openSearchHit"
+  />
+
+  <RepositoryActionsPanel
+    v-else-if="isActionsPanel"
+    :actions="repositoryActions"
+    :active-action-id="activeRepositoryActionId"
+    :selected-count="selectedFilePaths.length"
+    :is-loading="isLoadingRepositoryActions"
+    :is-running="isRunningRepositoryAction"
+    @select="selectRepositoryAction"
+    @run="runActiveRepositoryAction"
   />
 
   <section v-else-if="isExtensionsPanel" class="extensions-workbench">

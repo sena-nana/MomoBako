@@ -1,0 +1,62 @@
+{
+  "pluginId": "momobako.service.provider.tmdb",
+  "legacyPluginIds": [
+    "builtin.service-provider-tmdb"
+  ],
+  "name": "TMDB Provider",
+  "version": "0.1.0",
+  "kind": "provider",
+  "category": "service",
+  "description": "声明 TMDB 影视元数据候选源，供影视库手动触发补全。",
+  "capabilities": [
+    "metadata-provider",
+    "video",
+    "external-id",
+    "candidate-results"
+  ],
+  "enabled": false,
+  "sdk": "backend",
+  "entry": {},
+  "source": "builtin",
+  "runtime": "manifest-only",
+  "permissions": [
+    "network",
+    "useProvider",
+    "writeCandidates"
+  ],
+  "requires": [
+    "momobako.service.network-search"
+  ],
+  "optional": [],
+  "hooks": [
+    {
+      "slot": "candidateQueue",
+      "action": "provider.tmdb.writeCandidates",
+      "label": "写入 TMDB 候选"
+    }
+  ],
+  "contributes": {
+    "provider": {
+      "domain": "video",
+      "fields": [
+        "providerIds",
+        "title",
+        "originalTitle",
+        "year",
+        "releaseDate",
+        "seasonNumber",
+        "episodeNumber",
+        "poster"
+      ],
+      "manualTrigger": true,
+      "candidateOnly": true
+    }
+  },
+  "compat": {
+    "sdkVersion": "1",
+    "legacyPluginIds": [
+      "builtin.service-provider-tmdb"
+    ]
+  },
+  "status": "disabled"
+}

@@ -1,0 +1,8 @@
+{
+  "pluginId": "momobako.parser.audio",
+  "build": {
+    "type": "manifest-only",
+    "sourceDir": "src",
+    "outputDir": ".dist/parser-audio"
+  }
+}

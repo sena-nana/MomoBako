@@ -18,7 +18,7 @@ import FileMetadataEditor from "./FileMetadataEditor.vue";
 import ThumbnailPalette from "../../components/ThumbnailPalette.vue";
 import type { ContextMenuItem } from "../../composables/useContextMenu";
 import { vContextMenu } from "../../directives/contextMenu";
-import type { FileBrowserEntry } from "../../types/repository";
+import type { FileBrowserEntry, RepositoryTagGroup } from "../../types/repository";
 
 type FileDisplayMode = "adaptive" | "masonry" | "grid" | "list";
 type BreadcrumbSegment = {
@@ -82,6 +82,7 @@ const props = defineProps<{
   thumbnailSrc: (entry: FileBrowserEntry) => string | null;
   isSavingMetadata: boolean;
   availableTags: string[];
+  tagGroups?: RepositoryTagGroup[];
   thumbnailPalette: (entry: FileBrowserEntry) => string[];
   saveMetadata: (entry: FileBrowserEntry, metadata: Record<string, unknown>) => Promise<unknown>;
   virtualSubline?: string;
@@ -597,6 +598,10 @@ function cancelEntryDragIntent(event: PointerEvent) {
           <span>硬链接</span>
           <span class="asset-meta__value">{{ hardlinkStateLabel(currentFileEntry) }}</span>
         </div>
+        <div v-if="currentFileEntry.folderMetadata?.protected" class="asset-meta__row">
+          <span>受保护</span>
+          <span class="asset-meta__value">{{ currentFileEntry.folderMetadata.passwordTip || "Eagle 迁移提示" }}</span>
+        </div>
         <div class="asset-meta__row">
           <span>修改时间</span>
           <span class="asset-meta__value">{{ currentFileEntry.modifiedAt ? new Date(currentFileEntry.modifiedAt).toLocaleString("zh-CN") : "未记录" }}</span>
@@ -612,6 +617,7 @@ function cancelEntryDragIntent(event: PointerEvent) {
         :entry="currentFileEntry"
         :is-saving="isSavingMetadata"
         :available-tags="availableTags"
+        :tag-groups="tagGroups"
         :save-metadata="saveMetadata"
       />
     </div>
