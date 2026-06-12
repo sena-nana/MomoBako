@@ -52,8 +52,6 @@ ON CONFLICT(component) DO UPDATE SET version = excluded.version;
 
 const LOCAL_FILESYSTEM_PLUGIN_ID: &str = "momobako.local-filesystem";
 const LEGACY_LOCAL_FILESYSTEM_PLUGIN_ID: &str = "builtin.local-filesystem";
-const WEBDAV_PLUGIN_ID: &str = "momobako.webdav";
-const CLOUD_DRIVE_PLUGIN_ID: &str = "momobako.cloud-drive";
 const PLUGIN_SDK_VERSION: &str = "1";
 const MAX_PARALLEL_IMPORTS: usize = 4;
 
@@ -1816,6 +1814,13 @@ impl RepositoryState {
             .map_err(db_error)?;
 
         rows.collect::<Result<Vec<_>, _>>().map_err(db_error)
+    }
+
+    pub fn list_repository_thumbnail_roots(&self) -> Result<Vec<PathBuf>, String> {
+        self.load_repository_records()?
+            .into_iter()
+            .map(|repo| self.repository_thumbnail_root(&repo))
+            .collect()
     }
 
     pub fn create_repository(
@@ -8758,7 +8763,7 @@ fn collect_repository_files(repo_root: &Path) -> std::io::Result<Vec<DiscoveredF
         return Ok(files);
     }
 
-    collect_repository_files_recursive(repo_root, repo_root, &mut files)?;
+    collect_repository_files_recursive(repo_root, repo_root, &mut files, false)?;
     Ok(files)
 }
 
@@ -8767,23 +8772,41 @@ fn count_repository_directories(repo_root: &Path) -> Result<i64, String> {
         return Ok(0);
     }
 
-    count_repository_directories_recursive(repo_root)
+    count_repository_directories_recursive(repo_root, false)
 }
 
-fn count_repository_directories_recursive(current: &Path) -> Result<i64, String> {
+fn count_repository_directories_recursive(
+    current: &Path,
+    skip_current_on_access_error: bool,
+) -> Result<i64, String> {
     let mut total = 0;
-    for entry in fs::read_dir(current).map_err(io_error)? {
-        let entry = entry.map_err(io_error)?;
+    let entries = match fs::read_dir(current) {
+        Ok(entries) => entries,
+        Err(error) if skip_current_on_access_error && is_skippable_filesystem_error(&error) => {
+            return Ok(0);
+        }
+        Err(error) => return Err(io_error(error)),
+    };
+    for entry in entries {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(error) if is_skippable_filesystem_error(&error) => continue,
+            Err(error) => return Err(io_error(error)),
+        };
         let file_name = entry.file_name();
         let file_name = file_name.to_string_lossy();
         if is_internal_repository_dir(file_name.as_ref()) {
             continue;
         }
 
-        let metadata = entry.metadata().map_err(io_error)?;
+        let metadata = match entry.metadata() {
+            Ok(metadata) => metadata,
+            Err(error) if is_skippable_filesystem_error(&error) => continue,
+            Err(error) => return Err(io_error(error)),
+        };
         if metadata.is_dir() {
             total += 1;
-            total += count_repository_directories_recursive(&entry.path())?;
+            total += count_repository_directories_recursive(&entry.path(), true)?;
         }
     }
 
@@ -8806,9 +8829,21 @@ fn collect_repository_files_recursive(
     repo_root: &Path,
     current: &Path,
     files: &mut Vec<DiscoveredFile>,
+    skip_current_on_access_error: bool,
 ) -> std::io::Result<()> {
-    for entry in fs::read_dir(current)? {
-        let entry = entry?;
+    let entries = match fs::read_dir(current) {
+        Ok(entries) => entries,
+        Err(error) if skip_current_on_access_error && is_skippable_filesystem_error(&error) => {
+            return Ok(());
+        }
+        Err(error) => return Err(error),
+    };
+    for entry in entries {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(error) if is_skippable_filesystem_error(&error) => continue,
+            Err(error) => return Err(error),
+        };
         let path = entry.path();
         let file_name = entry.file_name();
         let file_name = file_name.to_string_lossy();
@@ -8816,9 +8851,13 @@ fn collect_repository_files_recursive(
             continue;
         }
 
-        let metadata = entry.metadata()?;
+        let metadata = match entry.metadata() {
+            Ok(metadata) => metadata,
+            Err(error) if is_skippable_filesystem_error(&error) => continue,
+            Err(error) => return Err(error),
+        };
         if metadata.is_dir() {
-            collect_repository_files_recursive(repo_root, &path, files)?;
+            collect_repository_files_recursive(repo_root, &path, files, true)?;
             continue;
         }
 
@@ -8890,15 +8929,19 @@ fn generate_thumbnail_for_file(
     ));
 
     let generated = if is_image_extension(&extension) {
-        generate_image_thumbnail(&source_path, &thumbnail_path)
+        generate_image_thumbnail(&source_path, &thumbnail_path).map(|_| true)
     } else if is_audio_extension(&extension) {
         generate_audio_thumbnail(&source_path, &thumbnail_path)
     } else {
-        generate_video_thumbnail(&source_path, &thumbnail_path)
+        generate_video_thumbnail(&source_path, &thumbnail_path).map(|_| true)
     };
 
     match generated {
-        Ok(()) => Ok(Some(thumbnail_path.to_string_lossy().to_string())),
+        Ok(true) => Ok(Some(thumbnail_path.to_string_lossy().to_string())),
+        Ok(false) => {
+            let _ = fs::remove_file(&thumbnail_path);
+            Ok(None)
+        }
         Err(error) => {
             let _ = fs::remove_file(&thumbnail_path);
             eprintln!(
@@ -9211,8 +9254,12 @@ fn generate_video_thumbnail(source_path: &Path, thumbnail_path: &Path) -> Result
     }
 }
 
-fn generate_audio_thumbnail(source_path: &Path, thumbnail_path: &Path) -> Result<(), String> {
+fn generate_audio_thumbnail(source_path: &Path, thumbnail_path: &Path) -> Result<bool, String> {
     ensure_ffmpeg_ready()?;
+
+    if !audio_has_cover_stream(source_path)? {
+        return Ok(false);
+    }
 
     let status = Command::new(ffmpeg_sidecar::paths::ffmpeg_path())
         .args(audio_thumbnail_ffmpeg_args(source_path, thumbnail_path))
@@ -9220,10 +9267,35 @@ fn generate_audio_thumbnail(source_path: &Path, thumbnail_path: &Path) -> Result
         .map_err(|error| format!("ffmpeg unavailable: {error}"))?;
 
     if status.success() {
-        Ok(())
+        Ok(true)
     } else {
         Err(format!("ffmpeg exited with status: {status}"))
     }
+}
+
+fn audio_has_cover_stream(source_path: &Path) -> Result<bool, String> {
+    let output = match Command::new(ffmpeg_sidecar::ffprobe::ffprobe_path())
+        .args(audio_cover_probe_args(source_path))
+        .output()
+    {
+        Ok(output) => output,
+        Err(_) => return Ok(false),
+    };
+
+    if !output.status.success() {
+        return Err(format!("ffprobe exited with status: {}", output.status));
+    }
+
+    audio_cover_probe_output_has_stream(&output.stdout)
+}
+
+fn audio_cover_probe_output_has_stream(output: &[u8]) -> Result<bool, String> {
+    let value: serde_json::Value =
+        serde_json::from_slice(output).map_err(|error| format!("ffprobe output error: {error}"))?;
+    Ok(value
+        .get("streams")
+        .and_then(serde_json::Value::as_array)
+        .is_some_and(|streams| !streams.is_empty()))
 }
 
 fn video_thumbnail_ffmpeg_args(source_path: &Path, thumbnail_path: &Path) -> Vec<OsString> {
@@ -9263,6 +9335,21 @@ fn audio_thumbnail_ffmpeg_args(source_path: &Path, thumbnail_path: &Path) -> Vec
         "-vf".into(),
         format!("scale='min({THUMBNAIL_SIZE},iw)':-1").into(),
         thumbnail_path.as_os_str().to_os_string(),
+    ]
+}
+
+fn audio_cover_probe_args(source_path: &Path) -> Vec<OsString> {
+    vec![
+        "-hide_banner".into(),
+        "-loglevel".into(),
+        "error".into(),
+        "-select_streams".into(),
+        "v".into(),
+        "-show_entries".into(),
+        "stream=index".into(),
+        "-of".into(),
+        "json".into(),
+        source_path.as_os_str().to_os_string(),
     ]
 }
 
@@ -9689,36 +9776,9 @@ fn plugin_management_registry(service_root: &Path) -> BackendPluginRegistry {
 }
 
 fn load_runtime_plugin_manifests(service_root: &Path) -> Vec<DiscoveredPluginManifest> {
-    let mut manifests = Vec::new();
-    for plugin_root in bundled_plugin_roots() {
-        manifests.extend(load_plugin_manifests_from_runtime(plugin_root));
-    }
-    manifests.extend(load_plugin_manifests_from_runtime(runtime_plugins_dir(
-        service_root,
-    )));
+    let mut manifests = load_plugin_manifests_from_runtime(runtime_plugins_dir(service_root));
     manifests.sort_by(|left, right| left.manifest.plugin_id.cmp(&right.manifest.plugin_id));
     manifests
-}
-
-fn bundled_plugin_roots() -> Vec<PathBuf> {
-    let mut roots = Vec::new();
-    if let Ok(current_dir) = std::env::current_dir() {
-        push_existing_plugin_root(&mut roots, current_dir.join("External").join("Plugins"));
-        if let Some(parent) = current_dir.parent() {
-            push_existing_plugin_root(&mut roots, parent.join("External").join("Plugins"));
-        }
-    }
-    roots
-}
-
-fn push_existing_plugin_root(roots: &mut Vec<PathBuf>, root: PathBuf) {
-    if !root.is_dir() {
-        return;
-    }
-    let normalized = canonicalize_local_path(&root).unwrap_or(root);
-    if !roots.iter().any(|item| item == &normalized) {
-        roots.push(normalized);
-    }
 }
 
 fn load_plugin_manifests_from_runtime(runtime_root: PathBuf) -> Vec<DiscoveredPluginManifest> {
@@ -9795,6 +9855,58 @@ fn read_discovered_plugin_manifest_from_archive(
         archive_path: archive_path.to_path_buf(),
         manifest_prefix,
     })
+}
+
+#[cfg(test)]
+pub fn install_local_filesystem_test_plugin_archive(service_root: &Path) {
+    let runtime_plugin_root = runtime_plugins_dir(service_root);
+    let archive_path = runtime_plugin_root.join("local-filesystem.momoplug");
+    if archive_path.exists() {
+        return;
+    }
+    if let Some(parent) = archive_path.parent() {
+        fs::create_dir_all(parent).expect("plugin archive parent should be created");
+    }
+    let file = File::create(&archive_path).expect("plugin archive should be created");
+    let mut archive = zip::ZipWriter::new(file);
+    archive
+        .start_file(
+            "momobako-local-filesystem-0.1.0/manifest.json",
+            zip::write::SimpleFileOptions::default(),
+        )
+        .expect("manifest entry should start");
+    archive
+        .write_all(
+            serde_json::to_string_pretty(&serde_json::json!({
+                "pluginId": LOCAL_FILESYSTEM_PLUGIN_ID,
+                "legacyPluginIds": [LEGACY_LOCAL_FILESYSTEM_PLUGIN_ID],
+                "name": "Local Filesystem",
+                "version": "0.1.0",
+                "type": {
+                    "layer": "source",
+                    "kind": "filesystem"
+                },
+                "kind": "filesystem",
+                "category": "source",
+                "description": "Test local filesystem backend.",
+                "capabilities": ["listFiles", "readFile", "writeFile", "moveFile", "deleteFile"],
+                "enabled": true,
+                "sdk": "backend",
+                "entry": {},
+                "source": "system",
+                "runtime": "manifest-only",
+                "permissions": [],
+                "compat": {
+                    "sdkVersion": "1",
+                    "legacyPluginIds": []
+                },
+                "status": "ready"
+            }))
+            .expect("manifest should encode")
+            .as_bytes(),
+        )
+        .expect("manifest should write");
+    archive.finish().expect("plugin archive should finish");
 }
 
 fn parse_plugin_manifest(raw: &str) -> Result<PluginManifest, String> {
@@ -13427,8 +13539,16 @@ fn build_directory_tree(repo_root: &Path) -> Result<Vec<FileTreeNode>, String> {
     let mut children = Vec::new();
     let entries = fs::read_dir(repo_root).map_err(io_error)?;
     for entry in entries {
-        let entry = entry.map_err(io_error)?;
-        let metadata = entry.metadata().map_err(io_error)?;
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(error) if is_skippable_filesystem_error(&error) => continue,
+            Err(error) => return Err(io_error(error)),
+        };
+        let metadata = match entry.metadata() {
+            Ok(metadata) => metadata,
+            Err(error) if is_skippable_filesystem_error(&error) => continue,
+            Err(error) => return Err(io_error(error)),
+        };
         if !metadata.is_dir() {
             continue;
         }
@@ -13439,20 +13559,38 @@ fn build_directory_tree(repo_root: &Path) -> Result<Vec<FileTreeNode>, String> {
         }
 
         let path = name.clone();
-        children.push(build_directory_node(repo_root, &path)?);
+        if let Some(node) = build_directory_node(repo_root, &path)? {
+            children.push(node);
+        }
     }
 
     children.sort_by(|left, right| left.label.to_lowercase().cmp(&right.label.to_lowercase()));
     Ok(children)
 }
 
-fn build_directory_node(repo_root: &Path, relative_path: &str) -> Result<FileTreeNode, String> {
+fn build_directory_node(
+    repo_root: &Path,
+    relative_path: &str,
+) -> Result<Option<FileTreeNode>, String> {
     let abs_path = resolve_repository_relative_path(repo_root, relative_path)?;
     let mut children = Vec::new();
 
-    for entry in fs::read_dir(&abs_path).map_err(io_error)? {
-        let entry = entry.map_err(io_error)?;
-        let metadata = entry.metadata().map_err(io_error)?;
+    let entries = match fs::read_dir(&abs_path) {
+        Ok(entries) => entries,
+        Err(error) if is_skippable_filesystem_error(&error) => return Ok(None),
+        Err(error) => return Err(io_error(error)),
+    };
+    for entry in entries {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(error) if is_skippable_filesystem_error(&error) => continue,
+            Err(error) => return Err(io_error(error)),
+        };
+        let metadata = match entry.metadata() {
+            Ok(metadata) => metadata,
+            Err(error) if is_skippable_filesystem_error(&error) => continue,
+            Err(error) => return Err(io_error(error)),
+        };
         if !metadata.is_dir() {
             continue;
         }
@@ -13463,18 +13601,20 @@ fn build_directory_node(repo_root: &Path, relative_path: &str) -> Result<FileTre
         }
 
         let child_path = join_relative_path(relative_path, &name);
-        children.push(build_directory_node(repo_root, &child_path)?);
+        if let Some(node) = build_directory_node(repo_root, &child_path)? {
+            children.push(node);
+        }
     }
 
     children.sort_by(|left, right| left.label.to_lowercase().cmp(&right.label.to_lowercase()));
-    Ok(FileTreeNode {
+    Ok(Some(FileTreeNode {
         path: relative_path.to_string(),
         label: Path::new(relative_path)
             .file_name()
             .map(|name| name.to_string_lossy().to_string())
             .unwrap_or_else(|| relative_path.to_string()),
         children,
-    })
+    }))
 }
 
 fn map_file_browser_entries(
@@ -13647,14 +13787,22 @@ fn local_directory_entries(
     let mut entries = Vec::new();
 
     for entry in fs::read_dir(current_dir).map_err(io_error)? {
-        let entry = entry.map_err(io_error)?;
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(error) if is_skippable_filesystem_error(&error) => continue,
+            Err(error) => return Err(io_error(error)),
+        };
         let name = entry.file_name().to_string_lossy().to_string();
         if is_internal_repository_dir(&name) {
             continue;
         }
 
         let path = entry.path();
-        let metadata = entry.metadata().map_err(io_error)?;
+        let metadata = match entry.metadata() {
+            Ok(metadata) => metadata,
+            Err(error) if is_skippable_filesystem_error(&error) => continue,
+            Err(error) => return Err(io_error(error)),
+        };
         let relative_path = path
             .strip_prefix(repo_root)
             .map_err(path_error)?
@@ -14440,6 +14588,10 @@ fn io_error(error: std::io::Error) -> String {
     format!("io error: {error}")
 }
 
+fn is_skippable_filesystem_error(error: &std::io::Error) -> bool {
+    matches!(error.kind(), std::io::ErrorKind::PermissionDenied)
+}
+
 fn path_error(error: std::path::StripPrefixError) -> String {
     format!("path error: {error}")
 }
@@ -14466,6 +14618,8 @@ mod tests {
     use super::*;
     use std::net::TcpListener;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    const TEST_WEBDAV_PLUGIN_ID: &str = "momobako.webdav";
 
     struct TestWorkspace {
         root: PathBuf,
@@ -14498,6 +14652,7 @@ mod tests {
         let workspace = TestWorkspace::new("local-repository-create");
         let service_root = workspace.path("service");
         let repo_root = workspace.path("repo");
+        install_local_filesystem_test_plugin_archive(&service_root);
         let state = RepositoryState::from_root(service_root);
 
         state
@@ -14522,7 +14677,9 @@ mod tests {
     #[test]
     fn plugin_registry_discovers_runtime_manifests() {
         let workspace = TestWorkspace::new("plugin-registry");
-        let registry = backend_plugin_registry(&workspace.path("service"));
+        let service_root = workspace.path("service");
+        seed_standard_test_plugins(&service_root);
+        let registry = backend_plugin_registry(&service_root);
         let manifests = registry.list_manifests();
 
         assert!(manifests.iter().any(|manifest| {
@@ -14707,6 +14864,7 @@ mod tests {
     fn set_plugin_enabled_persists_plugin_state() {
         let workspace = TestWorkspace::new("plugin-enabled-state");
         let service_root = workspace.path("service");
+        seed_standard_test_plugins(&service_root);
         let state = RepositoryState::from_root(service_root.clone());
 
         let response = state
@@ -14737,7 +14895,9 @@ mod tests {
     #[test]
     fn delete_plugin_rejects_builtin_plugins() {
         let workspace = TestWorkspace::new("builtin-plugin-delete");
-        let state = RepositoryState::from_root(workspace.path("service"));
+        let service_root = workspace.path("service");
+        seed_standard_test_plugins(&service_root);
+        let state = RepositoryState::from_root(service_root);
 
         let error = state
             .delete_plugin("momobako.preview.media".to_string())
@@ -14967,6 +15127,110 @@ mod tests {
         );
     }
 
+    fn seed_standard_test_plugins(service_root: &Path) {
+        let runtime_root = runtime_plugins_dir(service_root);
+        write_test_plugin_archive_with_manifest(
+            &runtime_root.join("local-filesystem.momoplug"),
+            test_plugin_manifest_json(
+                LOCAL_FILESYSTEM_PLUGIN_ID,
+                "Local Filesystem",
+                serde_json::json!({
+                    "legacyPluginIds": [LEGACY_LOCAL_FILESYSTEM_PLUGIN_ID],
+                    "kind": "filesystem",
+                    "category": "source",
+                    "type": {
+                        "layer": "source",
+                        "kind": "filesystem"
+                    },
+                    "capabilities": ["listFiles", "readFile", "writeFile", "moveFile", "deleteFile"],
+                    "sdk": "backend",
+                    "runtime": "native-dylib",
+                    "source": "system"
+                }),
+            ),
+        );
+        write_test_plugin_archive_with_manifest(
+            &runtime_root.join("media-preview.momoplug"),
+            test_plugin_manifest_json(
+                "momobako.preview.media",
+                "Media Preview",
+                serde_json::json!({
+                    "kind": "preview",
+                    "category": "preview",
+                    "type": {
+                        "layer": "library-kind",
+                        "kind": "preview"
+                    },
+                    "capabilities": ["preview", "playlist", "media"],
+                    "sdk": "frontend",
+                    "runtime": "vue-module",
+                    "source": "builtin",
+                    "hooks": [
+                        { "slot": "playlist", "action": "preview.media.enqueue", "label": "加入播放列表" }
+                    ]
+                }),
+            ),
+        );
+        write_test_plugin_archive_with_manifest(
+            &runtime_root.join("library-audio.momoplug"),
+            test_plugin_manifest_json(
+                "momobako.library.audio",
+                "Audio Library",
+                serde_json::json!({
+                    "kind": "audio",
+                    "category": "library-kind",
+                    "type": {
+                        "layer": "library-kind",
+                        "kind": "audio"
+                    },
+                    "capabilities": ["library", "audio"],
+                    "sdk": "frontend",
+                    "runtime": "manifest-only",
+                    "source": "builtin",
+                    "optional": ["momobako.parser.audio"]
+                }),
+            ),
+        );
+        write_test_plugin_archive_with_manifest(
+            &runtime_root.join("parser-audio.momoplug"),
+            test_plugin_manifest_json(
+                "momobako.parser.audio",
+                "Audio Parser",
+                serde_json::json!({
+                    "kind": "parser",
+                    "category": "parser",
+                    "type": {
+                        "layer": "parser",
+                        "kind": "audio"
+                    },
+                    "capabilities": ["parse", "audio"],
+                    "sdk": "backend",
+                    "runtime": "manifest-only",
+                    "source": "builtin"
+                }),
+            ),
+        );
+        write_test_plugin_archive_with_manifest(
+            &runtime_root.join("service-network-search.momoplug"),
+            test_plugin_manifest_json(
+                "momobako.service.network-search",
+                "Network Search",
+                serde_json::json!({
+                    "kind": "search",
+                    "category": "service",
+                    "type": {
+                        "layer": "provider-service",
+                        "kind": "search"
+                    },
+                    "capabilities": ["network", "search"],
+                    "sdk": "backend",
+                    "runtime": "manifest-only",
+                    "source": "builtin"
+                }),
+            ),
+        );
+    }
+
     fn test_plugin_manifest_json(
         plugin_id: &str,
         name: &str,
@@ -15158,7 +15422,29 @@ mod tests {
     #[test]
     fn disabled_manifest_only_backend_is_not_attachable() {
         let workspace = TestWorkspace::new("disabled-backend");
-        let state = RepositoryState::from_root(workspace.path("service"));
+        let service_root = workspace.path("service");
+        let runtime_root = runtime_plugins_dir(&service_root);
+        write_test_plugin_archive_with_manifest(
+            &runtime_root.join("webdav.momoplug"),
+            test_plugin_manifest_json(
+                TEST_WEBDAV_PLUGIN_ID,
+                "WebDAV",
+                serde_json::json!({
+                    "kind": "webdav",
+                    "category": "source",
+                    "type": {
+                        "layer": "source",
+                        "kind": "webdav"
+                    },
+                    "capabilities": ["listFiles", "readFile", "writeFile"],
+                    "enabled": false,
+                    "sdk": "backend",
+                    "runtime": "manifest-only",
+                    "source": "system"
+                }),
+            ),
+        );
+        let state = RepositoryState::from_root(service_root);
         let repo_root = workspace.path("repo");
 
         let error = state
@@ -15166,7 +15452,7 @@ mod tests {
                 repo_id: Some("repo-webdav".to_string()),
                 name: "WebDAV Repo".to_string(),
                 path: repo_root.to_string_lossy().to_string(),
-                backend_plugin_id: Some(WEBDAV_PLUGIN_ID.to_string()),
+                backend_plugin_id: Some(TEST_WEBDAV_PLUGIN_ID.to_string()),
                 backend_config: None,
             })
             .expect_err("disabled manifest-only backend should not create a repository");
@@ -15182,6 +15468,7 @@ mod tests {
         let workspace = TestWorkspace::new("runtime-local-backend");
         let service_root = workspace.path("service");
         let repo_root = workspace.path("repo");
+        install_local_filesystem_test_plugin_archive(&service_root);
         let state = RepositoryState::from_root(service_root);
 
         let repo_id = state
@@ -15422,29 +15709,7 @@ mod tests {
         state
             .ensure_initialized()
             .expect("repository state should initialize");
-        let runtime_plugin_root = runtime_plugins_dir(&state.root);
-        let archive_path = runtime_plugin_root.join("local-filesystem.momoplug");
-        if archive_path.exists() {
-            return;
-        }
-        write_test_plugin_archive_with_manifest(
-            &archive_path,
-            test_plugin_manifest_json(
-                LOCAL_FILESYSTEM_PLUGIN_ID,
-                "Local Filesystem",
-                serde_json::json!({
-                    "kind": "filesystem",
-                    "category": "source",
-                    "type": {
-                        "layer": "source",
-                        "kind": "filesystem"
-                    },
-                    "capabilities": ["listFiles", "readFile", "writeFile", "moveFile", "deleteFile"],
-                    "runtime": "manifest-only",
-                    "source": "system"
-                }),
-            ),
-        );
+        install_local_filesystem_test_plugin_archive(&state.root);
     }
 
     fn create_repository_without_initial_sync(state: &RepositoryState, repo_root: &Path) -> String {
@@ -15455,6 +15720,7 @@ mod tests {
         state
             .ensure_initialized()
             .expect("repository state should initialize");
+        install_local_filesystem_test_plugin_archive(&state.root);
         let repo_path = repo_root.to_string_lossy().to_string();
         let backend = RepositoryBackendRecord {
             plugin_id: LOCAL_FILESYSTEM_PLUGIN_ID.to_string(),
@@ -17926,5 +18192,30 @@ mod tests {
             .position(|item| item == thumbnail_path.as_os_str())
             .expect("missing output path");
         assert!(map_index < output_index);
+    }
+
+    #[test]
+    fn audio_cover_probe_args_select_video_streams_as_json() {
+        let source_path = Path::new("C:/Assets/track.mp3");
+        let args = audio_cover_probe_args(source_path);
+
+        assert!(args.windows(2).any(|items| items == ["-select_streams", "v"]));
+        assert!(args.windows(2).any(|items| items == ["-show_entries", "stream=index"]));
+        assert!(args.windows(2).any(|items| items == ["-of", "json"]));
+        assert_eq!(args.last(), Some(&source_path.as_os_str().to_os_string()));
+    }
+
+    #[test]
+    fn audio_cover_probe_output_reports_missing_streams() {
+        assert!(!audio_cover_probe_output_has_stream(br#"{"streams":[]}"#)
+            .expect("probe output should parse"));
+        assert!(!audio_cover_probe_output_has_stream(br#"{}"#)
+            .expect("probe output should parse"));
+    }
+
+    #[test]
+    fn audio_cover_probe_output_reports_present_streams() {
+        assert!(audio_cover_probe_output_has_stream(br#"{"streams":[{"index":1}]}"#)
+            .expect("probe output should parse"));
     }
 }
