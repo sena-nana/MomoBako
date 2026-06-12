@@ -118,6 +118,10 @@ type WorkspaceThumbnailSaveRequest =
       sourcePath: string;
     }
   | {
+      action: "save";
+      sourceUrl: string;
+    }
+  | {
       action: "save" | "saveGenerated";
       imageBytes: number[];
       mediaType?: string;
@@ -149,6 +153,13 @@ export function setWorkspaceEntryThumbnail(path: string, sourcePath: string) {
   return mutateWorkspaceEntryThumbnail(path, {
     action: "save",
     sourcePath,
+  });
+}
+
+export function setWorkspaceEntryThumbnailFromUrl(path: string, sourceUrl: string) {
+  return mutateWorkspaceEntryThumbnail(path, {
+    action: "save",
+    sourceUrl,
   });
 }
 

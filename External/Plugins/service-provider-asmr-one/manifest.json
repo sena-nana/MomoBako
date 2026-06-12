@@ -1,0 +1,104 @@
+{
+  "pluginId": "momobako.service.provider.asmr-one",
+  "legacyPluginIds": [
+    "builtin.service-provider-asmr-one"
+  ],
+  "name": "ASMR One Provider",
+  "version": "0.1.0",
+  "type": {
+    "layer": "provider-service",
+    "kind": "provider"
+  },
+  "kind": "provider",
+  "category": "service",
+  "description": "声明 ASMR One 同人音声元数据候选源，作为 DLsite 补全失败时的可选候选来源。",
+  "capabilities": [
+    "metadata-provider",
+    "asmr",
+    "asmr-one",
+    "external-id",
+    "candidate-results"
+  ],
+  "enabled": false,
+  "sdk": "backend",
+  "entry": {},
+  "source": "builtin",
+  "runtime": "manifest-only",
+  "permissions": [
+    "network",
+    "useProvider",
+    "writeCandidates"
+  ],
+  "requires": [
+    "momobako.service.network-search"
+  ],
+  "optional": [],
+  "hooks": [
+    {
+      "slot": "candidateQueue",
+      "action": "provider.asmrOne.writeCandidates",
+      "label": "写入 ASMR One 候选"
+    }
+  ],
+  "contributes": {
+    "provider": {
+      "domain": "asmr",
+      "source": "asmr-one",
+      "lookup": {
+        "idPattern": "RJ\\d{6,8}",
+        "detailUrlTemplate": "https://api.asmr-200.com/api/workInfo/{rjDigits}"
+      },
+      "fields": [
+        "workId",
+        "rjCode",
+        "title",
+        "circle",
+        "voiceActors",
+        "scenarioTags",
+        "nsfw",
+        "ageRating",
+        "language",
+        "releaseDate",
+        "price",
+        "dlCount",
+        "reviewCount",
+        "rateCount",
+        "rateAverage",
+        "cover",
+        "sourceUrl"
+      ],
+      "settings": {
+        "language": {
+          "default": "zh-cn",
+          "options": [
+            "zh-cn",
+            "zh-tw",
+            "ja-jp"
+          ]
+        },
+        "proxy": {
+          "default": "",
+          "scheme": [
+            "http",
+            "https"
+          ]
+        },
+        "maxParallelism": {
+          "default": 4,
+          "minimum": 1,
+          "maximum": 16
+        }
+      },
+      "manualTrigger": true,
+      "candidateOnly": true,
+      "confidence": "external-id"
+    }
+  },
+  "compat": {
+    "sdkVersion": "1",
+    "legacyPluginIds": [
+      "builtin.service-provider-asmr-one"
+    ]
+  },
+  "status": "disabled"
+}

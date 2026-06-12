@@ -1,0 +1,123 @@
+{
+  "pluginId": "momobako.parser.asmr-folder",
+  "legacyPluginIds": [
+    "builtin.parser-asmr-folder"
+  ],
+  "name": "ASMR Folder Parser",
+  "version": "0.1.0",
+  "type": {
+    "layer": "extractor-parser",
+    "kind": "asmr-folder"
+  },
+  "kind": "parser",
+  "category": "parser",
+  "description": "声明同人音声 RJ 作品目录、音轨树、附属文件和本地歌词状态的解析候选。",
+  "capabilities": [
+    "parser",
+    "asmr-folder",
+    "rj-code",
+    "track-tree",
+    "lyrics",
+    "candidate-results"
+  ],
+  "enabled": false,
+  "sdk": "backend",
+  "entry": {},
+  "source": "builtin",
+  "runtime": "manifest-only",
+  "permissions": [
+    "readRepository",
+    "readMetadata",
+    "writeCandidates"
+  ],
+  "requires": [],
+  "optional": [
+    "momobako.parser.audio"
+  ],
+  "hooks": [
+    {
+      "slot": "candidateQueue",
+      "action": "parser.asmrFolder.writeMetadataCandidates",
+      "label": "写入 ASMR 目录解析候选"
+    }
+  ],
+  "contributes": {
+    "parser": {
+      "scope": "folder",
+      "folderPattern": "(?i)RJ\\d{6,8}",
+      "nonMatchingFolderPolicy": "recurse",
+      "duplicatePolicy": "candidate-warning",
+      "extensions": [
+        "mp3",
+        "ogg",
+        "opus",
+        "wav",
+        "aac",
+        "flac",
+        "webm",
+        "mp4",
+        "m4a",
+        "mka",
+        "lrc",
+        "srt",
+        "ass",
+        "vtt",
+        "txt",
+        "pdf",
+        "jpg",
+        "jpeg",
+        "png",
+        "webp"
+      ],
+      "outputs": [
+        "libraryKind",
+        "workId",
+        "rjCode",
+        "workRoot",
+        "workTitle",
+        "trackTree",
+        "trackPath",
+        "trackTitle",
+        "trackCount",
+        "durationMs",
+        "trackDurationMs",
+        "lyricStatus",
+        "asmrEntryKind"
+      ],
+      "trackExtensions": [
+        "mp3",
+        "ogg",
+        "opus",
+        "wav",
+        "aac",
+        "flac",
+        "webm",
+        "mp4",
+        "m4a",
+        "mka"
+      ],
+      "lyricExtensions": [
+        "lrc",
+        "srt",
+        "ass",
+        "vtt"
+      ],
+      "companionExtensions": [
+        "txt",
+        "pdf",
+        "jpg",
+        "jpeg",
+        "png",
+        "webp"
+      ],
+      "candidateOnly": true
+    }
+  },
+  "compat": {
+    "sdkVersion": "1",
+    "legacyPluginIds": [
+      "builtin.parser-asmr-folder"
+    ]
+  },
+  "status": "disabled"
+}

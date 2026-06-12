@@ -30,6 +30,7 @@ export type WorkspaceFilterState = {
   excludeFormats: string[];
   excludeQuery: string;
   excludePathPrefixes: string;
+  metadataFilters: string;
   excludeMetadataFilters: string;
   excludeNumberFilters: string;
   excludeDateFilters: string;
@@ -83,6 +84,7 @@ export function createInitialFilters(): WorkspaceFilterState {
     excludeFormats: [],
     excludeQuery: "",
     excludePathPrefixes: "",
+    metadataFilters: "",
     excludeMetadataFilters: "",
     excludeNumberFilters: "",
     excludeDateFilters: "",

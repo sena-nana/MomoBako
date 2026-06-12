@@ -99,6 +99,7 @@ import {
   saveGeneratedWorkspaceEntryThumbnail,
   setWorkspaceEntryThumbnail,
   setWorkspaceEntryThumbnailFromBytes,
+  setWorkspaceEntryThumbnailFromUrl,
 } from "./thumbnails";
 import { loadFileBrowserForDirectory } from "./files";
 import {
@@ -440,6 +441,7 @@ export function useRepositoryWorkspace() {
     deleteSmartFolderInWorkspace,
     setWorkspaceEntryThumbnail,
     setWorkspaceEntryThumbnailFromBytes,
+    setWorkspaceEntryThumbnailFromUrl,
     saveGeneratedWorkspaceEntryThumbnail,
     clearWorkspaceEntryThumbnail,
     refreshWorkspaceEntryThumbnail,

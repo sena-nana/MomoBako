@@ -21,6 +21,15 @@ import {
   SearchPanel,
   type WorkspacePreloadHandle,
 } from "./workspace/lazyComponents";
+import {
+  asmrWorkAudioEntries,
+  clearAsmrPlaylistForRepo,
+  hasAsmrPlaylistEntry,
+  mergeAsmrPlaylistEntries,
+  parseStoredAsmrPlaylist,
+  resolveActiveAsmrPlaylist,
+  type AsmrPlaylistItem,
+} from "./workspace/asmrPlaylist";
 import { useWorkspaceSearchUi } from "./workspace/useWorkspaceSearchUi";
 import { useMissingRepositoryActions } from "./workspace/useMissingRepositoryActions";
 import { useWorkspaceThumbnailActions } from "./workspace/useWorkspaceThumbnailActions";
@@ -36,6 +45,7 @@ import type {
 type FileDisplayMode = "adaptive" | "masonry" | "grid" | "list";
 
 const fileDisplayModeStorageKey = "momobako.fileDisplayMode";
+const asmrPlaylistStorageKey = "momobako.asmrPlaylist.v1";
 const fileDisplayModeOptions: Array<{ value: FileDisplayMode; label: string }> = [
   { value: "adaptive", label: "自适应" },
   { value: "masonry", label: "瀑布流" },
@@ -58,8 +68,17 @@ function readInitialFileDisplayMode(): FileDisplayMode {
   }
 }
 
+function readStoredAsmrPlaylist() {
+  try {
+    return parseStoredAsmrPlaylist(localStorage.getItem(asmrPlaylistStorageKey));
+  } catch {
+    return [];
+  }
+}
+
 const previewFilePath = ref<string | null>(null);
 const fileDisplayMode = ref<FileDisplayMode>(readInitialFileDisplayMode());
+const asmrPlaylistItems = ref<AsmrPlaylistItem[]>(readStoredAsmrPlaylist());
 
 const {
   activePanel,
@@ -134,6 +153,7 @@ const {
   setInternalDragActive,
   setWorkspaceEntryThumbnail,
   setWorkspaceEntryThumbnailFromBytes,
+  setWorkspaceEntryThumbnailFromUrl,
   clearWorkspaceEntryThumbnail,
   refreshWorkspaceEntryThumbnail,
   setFilterBarOpen,
@@ -195,6 +215,12 @@ const previewPlugin = computed(() => getPreviewPluginForEntry(previewFileEntry.v
 const fileDisplayModeClass = computed(() => `files-list__files--${fileDisplayMode.value}`);
 const activeDirectoryEntries = computed(() => (isSmartFolderPanel.value ? [] : directoryEntries.value));
 const activeFileEntries = computed(() => (isSmartFolderPanel.value ? smartFolderResult.value?.results ?? [] : fileEntries.value));
+const activeEntryByPath = computed<ReadonlyMap<string, FileBrowserEntry>>(() => (
+  new Map(activeFileEntries.value.map((entry) => [entry.path, entry]))
+));
+const asmrPlaylist = computed<AsmrPlaylistItem[]>(() => (
+  resolveActiveAsmrPlaylist(asmrPlaylistItems.value, activeRepoId.value, activeEntryByPath.value)
+));
 const hasActiveSplitFileGroups = computed(() => (
   isSmartFolderPanel.value ? false : hasSplitFileGroups.value
 ));
@@ -224,6 +250,7 @@ const {
   excludePathPrefixesInput,
   excludeTagsInput,
   excludeFormatsInput,
+  metadataFiltersInput,
   excludeMetadataFiltersInput,
   excludeNumberFiltersInput,
   excludeDateFiltersInput,
@@ -259,6 +286,116 @@ const {
   toggleFilterValue,
   updateFilters,
 });
+
+const hasAsmrAssets = computed(() => {
+  const entries = fileBrowser.value?.entries ?? [];
+  const results = searchResults.value;
+  return [...entries, ...results].some((item) => {
+    const metadata = item.metadata ?? {};
+    return metadata.libraryKind === "asmr" || Boolean(metadata.workId) || Boolean(metadata.rjCode);
+  });
+});
+
+function applyMetadataFilterShortcut(metadataFilters: string, sortField = "", sortDirection: "asc" | "desc" = "asc") {
+  if (!isRepositoryWritable.value) return;
+  metadataFiltersInput.value = metadataFilters;
+  excludeTagsInput.value = "";
+  excludeFormatsInput.value = "";
+  limitInput.value = "";
+  sortFieldInput.value = sortField;
+  sortDirectionInput.value = sortDirection;
+  updateFilters({
+    metadataFilters,
+    excludeQuery: excludeQueryInput.value.trim(),
+    excludePathPrefixes: excludePathPrefixesInput.value.trim(),
+    excludeTags: [],
+    excludeFormats: [],
+    excludeMetadataFilters: excludeMetadataFiltersInput.value.trim(),
+    excludeNumberFilters: excludeNumberFiltersInput.value.trim(),
+    excludeDateFilters: excludeDateFiltersInput.value.trim(),
+    numberFilters: numberFiltersInput.value.trim(),
+    dateFilters: dateFiltersInput.value.trim(),
+    sortField,
+    sortDirection,
+    limit: null,
+  });
+  setActivePanel("search");
+  void runFilteredSearch();
+}
+
+function applyAsmrShortcut(kind: "all" | "lyrics" | "continue" | "random") {
+  if (kind === "lyrics") {
+    applyMetadataFilterShortcut("libraryKind=asmr\nlyricStatus=local");
+    return;
+  }
+  if (kind === "continue") {
+    applyMetadataFilterShortcut("libraryKind=asmr\nlisteningStatus=listening", "metadata.lastListenedAt", "desc");
+    return;
+  }
+  if (kind === "random") {
+    applyMetadataFilterShortcut("libraryKind=asmr", "random", "asc");
+    return;
+  }
+  applyMetadataFilterShortcut("libraryKind=asmr", "metadata.workId", "asc");
+}
+
+function persistAsmrPlaylist(items = asmrPlaylistItems.value) {
+  try {
+    localStorage.setItem(asmrPlaylistStorageKey, JSON.stringify(items));
+  } catch {
+    return;
+  }
+}
+
+function addAsmrPlaylistEntries(entries: FileBrowserEntry[]) {
+  if (!activeRepoId.value) return;
+  const next = mergeAsmrPlaylistEntries(asmrPlaylistItems.value, activeRepoId.value, entries);
+  asmrPlaylistItems.value = next;
+  persistAsmrPlaylist(next);
+}
+
+function addAsmrPlaylistTrack(entry: FileBrowserEntry) {
+  addAsmrPlaylistEntries([entry]);
+}
+
+function addAsmrPlaylistWork(entry: FileBrowserEntry) {
+  addAsmrPlaylistEntries(asmrWorkAudioEntries(entry, activeFileEntries.value));
+}
+
+function addRandomAsmrPlaylistTrack(entry: FileBrowserEntry) {
+  if (!activeRepoId.value) return;
+  const workEntries = asmrWorkAudioEntries(entry, activeFileEntries.value);
+  const candidates = workEntries.filter((item) => !hasAsmrPlaylistEntry(asmrPlaylistItems.value, activeRepoId.value as string, item.path));
+  const pool = candidates.length ? candidates : workEntries;
+  const selected = pool[Math.floor(Math.random() * pool.length)];
+  if (selected) addAsmrPlaylistEntries([selected]);
+}
+
+function clearAsmrPlaylist() {
+  const next = clearAsmrPlaylistForRepo(asmrPlaylistItems.value, activeRepoId.value);
+  asmrPlaylistItems.value = next;
+  persistAsmrPlaylist(next);
+}
+
+async function previewAsmrPlaylistPath(path: string) {
+  const entry = activeEntryByPath.value.get(path);
+  if (entry) {
+    previewFileEntryByDoubleClick(entry);
+    return;
+  }
+  if (!activeRepoId.value || isTrashPanel.value) return;
+  setActivePanel("files");
+  const snapshot = await loadFileBrowserForDirectory(getParentPath(path), { includeTree: true });
+  const matchedEntry = snapshot?.entries.find((item) => item.path === path);
+  if (matchedEntry?.kind === "file") {
+    selectWorkspaceEntries([matchedEntry.path], { primaryPath: matchedEntry.path, anchorPath: matchedEntry.path });
+    await nextTick();
+    previewFilePath.value = matchedEntry.path;
+    if (matchedEntry.assetId) {
+      await selectAsset(matchedEntry.assetId);
+    }
+  }
+}
 const {
   missingRepositoryError,
   isMissingRepositoryBusy,
@@ -702,6 +839,24 @@ onUnmounted(cancelWorkspacePreload);
         </div>
       </section>
 
+      <section v-if="hasAsmrAssets" class="workspace-filter-bar__group" aria-label="ASMR 筛选">
+        <span>ASMR</span>
+        <div class="workspace-filter-bar__options">
+          <button type="button" class="workspace-filter-chip" @click="applyAsmrShortcut('all')">
+            作品
+          </button>
+          <button type="button" class="workspace-filter-chip" @click="applyAsmrShortcut('lyrics')">
+            含歌词
+          </button>
+          <button type="button" class="workspace-filter-chip" @click="applyAsmrShortcut('continue')">
+            继续收听
+          </button>
+          <button type="button" class="workspace-filter-chip" @click="applyAsmrShortcut('random')">
+            随机一首
+          </button>
+        </div>
+      </section>
+
       <section class="workspace-filter-bar__group workspace-filter-bar__group--wide" aria-label="高级筛选">
         <span>高级</span>
         <div class="workspace-filter-bar__advanced">
@@ -738,6 +893,15 @@ onUnmounted(cancelWorkspacePreload);
               type="text"
               aria-label="排除格式"
               placeholder="排除格式"
+              @keydown.enter.prevent="applyAdvancedSearchFilters"
+            />
+          </label>
+          <label class="workspace-filter-input workspace-filter-input--wide">
+            <input
+              v-model="metadataFiltersInput"
+              type="text"
+              aria-label="元数据"
+              placeholder="libraryKind=asmr"
               @keydown.enter.prevent="applyAdvancedSearchFilters"
             />
           </label>
@@ -878,12 +1042,21 @@ onUnmounted(cancelWorkspacePreload);
         :is-saving-metadata="isSavingMetadata"
         :available-tags="tagFilterOptions"
         :tag-groups="activeSnapshot?.tagGroups ?? []"
+        :playlist-entries="activeFileEntries"
+        :asmr-playlist="asmrPlaylist"
         :thumbnail-palette="thumbnailPaletteColors"
         :save-metadata="saveFileMetadata"
+        :save-cover-thumbnail="setWorkspaceEntryThumbnailFromUrl"
         :status-label="statusLabel"
         @back="exitPreview"
         @open="openWorkspaceEntry"
         @reveal="revealWorkspaceEntry"
+        @preview="previewFileEntryByDoubleClick"
+        @playlist-add-track="addAsmrPlaylistTrack"
+        @playlist-add-work="addAsmrPlaylistWork"
+        @playlist-random="addRandomAsmrPlaylistTrack"
+        @playlist-clear="clearAsmrPlaylist"
+        @playlist-select="previewAsmrPlaylistPath"
         @thumbnail-loaded="updateThumbnailAspectRatio"
         @thumbnail-error="markThumbnailFailed"
       />

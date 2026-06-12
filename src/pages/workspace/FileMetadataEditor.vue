@@ -1,8 +1,15 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, reactive, ref, watch } from "vue";
-import { ChevronDown, ChevronRight, Copy, ExternalLink, Link2, MessageSquareText, Plus, Star } from "lucide-vue-next";
-import { openExternalUrl } from "../../services/repositoryApi";
+import { Check, ChevronDown, ChevronRight, Copy, ExternalLink, ImagePlus, Link2, MessageSquareText, Plus, Star } from "lucide-vue-next";
+import { lookupAsmrMetadataCandidate, openExternalUrl } from "../../services/repositoryApi";
 import type { FileBrowserEntry, RepositoryTagGroup } from "../../types/repository";
+import {
+  appendAsmrMetadataCandidate,
+  buildAsmrMetadataCandidateSummary,
+  formatCandidateFieldValue,
+  parseAsmrMetadataCandidateJson,
+  readAsmrMetadataCandidates,
+} from "./asmrMetadataCandidates";
 import {
   formatBytes,
   formatMetadataDate,
@@ -20,6 +27,7 @@ const props = defineProps<{
   availableTags: string[];
   tagGroups?: RepositoryTagGroup[];
   saveMetadata: (entry: FileBrowserEntry, metadata: Record<string, unknown>) => Promise<unknown>;
+  saveCoverThumbnail?: (path: string, sourceUrl: string) => Promise<unknown>;
 }>();
 
 const draft = reactive({
@@ -34,6 +42,15 @@ const tagDraft = ref("");
 const tagMenuRef = ref<HTMLElement | null>(null);
 const tagButtonRef = ref<HTMLElement | null>(null);
 const saveState = ref<"idle" | "saving" | "saved">("idle");
+const asmrCandidateImportOpen = ref(false);
+const asmrCandidateImportDraft = ref("");
+const asmrCandidateImportError = ref("");
+const asmrProviderLookup = reactive({
+  provider: "dlsite",
+  rjCode: "",
+  isLoading: false,
+});
+const asmrCoverSaveState = ref<"idle" | "saving" | "saved">("idle");
 let hydrateDraft = false;
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -76,6 +93,53 @@ const sourceLinks = computed(() => [
   { key: "originReferrer", label: "来源页", value: originReferrer.value },
 ].filter((item) => item.value));
 const hasSourceMetadata = computed(() => Boolean(sourceTitle.value || sourceLinks.value.length));
+const isAsmrEntry = computed(() => {
+  const metadata = props.entry.metadata ?? {};
+  return metadata.libraryKind === "asmr" || Boolean(metadata.workId) || Boolean(metadata.rjCode);
+});
+const asmrRjCode = computed(() => metadataString(props.entry.metadata, "rjCode") || metadataString(props.entry.metadata, "workId"));
+const asmrRows = computed(() => {
+  const metadata = props.entry.metadata ?? {};
+  const text = (key: string) => metadataString(metadata, key);
+  const number = (key: string) => metadataRawNumber(metadata, key);
+  const rows = [
+    { key: "workId", label: "作品 ID", value: text("workId") || text("rjCode") },
+    { key: "workTitle", label: "标题", value: text("workTitle") },
+    { key: "workRoot", label: "作品目录", value: text("workRoot") },
+    { key: "trackTitle", label: "音轨", value: text("trackTitle") },
+    { key: "circle", label: "社团", value: text("circle") },
+    { key: "voiceActors", label: "声优", value: formatMetadataList(metadata.voiceActors) },
+    { key: "series", label: "系列", value: text("series") },
+    { key: "scenarioTags", label: "标签", value: formatMetadataList(metadata.scenarioTags ?? metadata.tags) },
+    { key: "releaseDate", label: "发售日", value: text("releaseDate") },
+    { key: "ageRating", label: "年龄分级", value: text("ageRating") },
+    { key: "lyricStatus", label: "歌词", value: text("lyricStatus") || "未检测" },
+    { key: "asmrEntryKind", label: "条目类型", value: text("asmrEntryKind") },
+    { key: "listeningStatus", label: "收听状态", value: formatListeningStatus(text("listeningStatus"), number("listeningProgress")) },
+    { key: "trackDurationMs", label: "音轨时长", value: formatDuration(number("trackDurationMs")) },
+    { key: "price", label: "价格", value: formatNumberValue(number("price"), " JPY") },
+    { key: "sales", label: "销量", value: formatNumberValue(number("sales") ?? number("dlCount")) },
+    { key: "rateAverage", label: "评分", value: formatNumberValue(number("rateAverage") ?? number("ratingAverage")) },
+    { key: "reviewCount", label: "评论数", value: formatNumberValue(number("reviewCount")) },
+  ];
+  return rows.filter((row) => row.value);
+});
+const asmrMetadataCandidates = computed(() => (
+  readAsmrMetadataCandidates(props.entry.metadata)
+    .map(buildAsmrMetadataCandidateSummary)
+    .filter((candidate) => Object.keys(candidate.patch).length || candidate.skipped.length)
+));
+const asmrCandidateFields = computed(() => (
+  asmrMetadataCandidates.value.map((candidate) => ({
+    ...candidate,
+    coverUrl: readRemoteCoverUrl(candidate.patch),
+    fields: Object.entries(candidate.patch).map(([key, value]) => ({
+      key,
+      value: formatCandidateFieldValue(value),
+    })),
+  }))
+));
+const asmrCoverUrl = computed(() => readRemoteCoverUrl(props.entry.metadata));
 const groupedTagOptions = computed(() => {
   const selected = new Set(draft.tags);
   return (props.tagGroups ?? [])
@@ -93,6 +157,13 @@ function isOpenableSourceLink(value: string) {
   return openableProtocolPattern.test(value) && !blockedProtocolPattern.test(value);
 }
 
+function readRemoteCoverUrl(metadata: Record<string, unknown> | undefined) {
+  const cover = metadata?.coverUrl ?? metadata?.cover;
+  if (typeof cover !== "string") return "";
+  const value = cover.trim();
+  return /^https?:\/\//i.test(value) ? value : "";
+}
+
 async function openSourceLink(value: string) {
   if (!isOpenableSourceLink(value)) return;
   await openExternalUrl(value);
@@ -100,6 +171,55 @@ async function openSourceLink(value: string) {
 
 async function copySourceLink(value: string) {
   await navigator.clipboard.writeText(value);
+}
+
+async function saveAsmrCoverThumbnail(sourceUrl: string) {
+  if (!canEdit.value || props.isSaving || asmrCoverSaveState.value === "saving" || !props.saveCoverThumbnail) return;
+  asmrCoverSaveState.value = "saving";
+  try {
+    await props.saveCoverThumbnail(props.entry.path, sourceUrl);
+    asmrCoverSaveState.value = "saved";
+  } catch {
+    asmrCoverSaveState.value = "idle";
+  }
+}
+
+function formatMetadataList(value: unknown) {
+  if (Array.isArray(value)) {
+    return value
+      .filter((item): item is string | number | boolean => (
+        typeof item === "string" || typeof item === "number" || typeof item === "boolean"
+      ))
+      .map(String)
+      .filter(Boolean)
+      .join("，");
+  }
+  if (typeof value === "string") return value;
+  return "";
+}
+
+function formatNumberValue(value: number | null, suffix = "") {
+  if (value == null) return "";
+  return `${value.toLocaleString("zh-CN")}${suffix}`;
+}
+
+function formatDuration(value: number | null) {
+  if (value == null || value <= 0) return "";
+  const seconds = Math.round(value / 1000);
+  const minutes = Math.floor(seconds / 60);
+  const rest = seconds % 60;
+  return `${minutes}:${String(rest).padStart(2, "0")}`;
+}
+
+function formatListeningStatus(status: string, progress: number | null) {
+  const labels: Record<string, string> = {
+    unlistened: "未收听",
+    listening: "收听中",
+    listened: "已听完",
+  };
+  const label = labels[status] ?? status;
+  if (progress == null || progress <= 0) return label;
+  return `${label} · ${Math.round(progress)}%`;
 }
 const filteredExistingTags = computed(() => {
   const keyword = tagDraft.value.trim().toLowerCase();
@@ -124,6 +244,12 @@ watch(sourcePayload, (payload) => {
   queueMicrotask(() => {
     hydrateDraft = false;
   });
+}, { immediate: true });
+
+watch(asmrRjCode, (value) => {
+  if (!asmrProviderLookup.rjCode) {
+    asmrProviderLookup.rjCode = value;
+  }
 }, { immediate: true });
 
 function setRating(nextRating: number) {
@@ -189,6 +315,58 @@ async function handleSave() {
   if (!canEdit.value || !hasChanges.value || props.isSaving) return;
   saveState.value = "saving";
   await props.saveMetadata(props.entry, editablePayload.value);
+}
+
+async function applyAsmrMetadataCandidate(candidate: { patch: Record<string, unknown> }) {
+  if (!canEdit.value || props.isSaving || !Object.keys(candidate.patch).length) return;
+  saveState.value = "saving";
+  await props.saveMetadata(props.entry, candidate.patch);
+}
+
+function toggleAsmrCandidateImport() {
+  asmrCandidateImportOpen.value = !asmrCandidateImportOpen.value;
+  asmrCandidateImportError.value = "";
+}
+
+async function importAsmrMetadataCandidate() {
+  if (!canEdit.value || props.isSaving) return;
+  const result = parseAsmrMetadataCandidateJson(asmrCandidateImportDraft.value);
+  if (!result.ok) {
+    asmrCandidateImportError.value = result.error;
+    return;
+  }
+  asmrCandidateImportError.value = "";
+  saveState.value = "saving";
+  await props.saveMetadata(props.entry, {
+    providerCandidates: appendAsmrMetadataCandidate(props.entry.metadata, result.candidate),
+  });
+  asmrCandidateImportDraft.value = "";
+  asmrCandidateImportOpen.value = false;
+}
+
+async function lookupAsmrProviderCandidate() {
+  if (!canEdit.value || props.isSaving || asmrProviderLookup.isLoading) return;
+  const rjCode = (asmrProviderLookup.rjCode || asmrRjCode.value).trim();
+  if (!rjCode) {
+    asmrCandidateImportError.value = "缺少 RJ 作品 ID";
+    return;
+  }
+  asmrProviderLookup.isLoading = true;
+  asmrCandidateImportError.value = "";
+  try {
+    const response = await lookupAsmrMetadataCandidate({
+      provider: asmrProviderLookup.provider,
+      rjCode,
+    });
+    saveState.value = "saving";
+    await props.saveMetadata(props.entry, {
+      providerCandidates: appendAsmrMetadataCandidate(props.entry.metadata, response.candidate),
+    });
+  } catch (cause) {
+    asmrCandidateImportError.value = cause instanceof Error ? cause.message : String(cause);
+  } finally {
+    asmrProviderLookup.isLoading = false;
+  }
 }
 
 function scheduleAutoSave() {
@@ -286,6 +464,118 @@ onBeforeUnmount(() => {
         <span class="asset-meta__value">{{ aliasPaths.join("，") }}</span>
       </div>
     </div>
+
+    <section v-if="isAsmrEntry && asmrRows.length" class="file-metadata-card__source file-metadata-card__asmr" aria-label="ASMR 信息">
+      <div class="file-metadata-card__source-head">
+        <div>
+          <p class="asset-browser__eyebrow">ASMR Metadata</p>
+          <strong>作品信息</strong>
+        </div>
+        <button
+          v-if="asmrCoverUrl && saveCoverThumbnail"
+          type="button"
+          class="ghost"
+          :disabled="!canEdit || isSaving || asmrCoverSaveState === 'saving'"
+          @click="saveAsmrCoverThumbnail(asmrCoverUrl)"
+        >
+          <ImagePlus :size="14" aria-hidden="true" />
+          {{ asmrCoverSaveState === "saving" ? "保存中" : "保存封面" }}
+        </button>
+      </div>
+      <div class="file-metadata-card__source-grid">
+        <div v-for="item in asmrRows" :key="item.key" class="asset-meta__row file-metadata-card__source-row">
+          <span>{{ item.label }}</span>
+          <span class="asset-meta__value">{{ item.value }}</span>
+        </div>
+      </div>
+    </section>
+
+    <section v-if="isAsmrEntry" class="file-metadata-card__source file-metadata-card__asmr-candidates" aria-label="ASMR 元数据候选">
+      <div class="file-metadata-card__source-head">
+        <div>
+          <p class="asset-browser__eyebrow">ASMR Provider</p>
+          <strong>补全候选</strong>
+        </div>
+        <button type="button" class="ghost" :disabled="!canEdit || isSaving" @click="toggleAsmrCandidateImport">
+          <Plus :size="14" aria-hidden="true" />
+          导入
+        </button>
+      </div>
+      <div v-if="asmrCandidateImportOpen" class="file-metadata-card__candidate-import">
+        <div class="file-metadata-card__provider-lookup">
+          <select v-model="asmrProviderLookup.provider" :disabled="!canEdit || isSaving || asmrProviderLookup.isLoading" aria-label="ASMR Provider">
+            <option value="dlsite">DLsite</option>
+            <option value="asmr-one">ASMR One</option>
+          </select>
+          <input
+            v-model="asmrProviderLookup.rjCode"
+            type="text"
+            aria-label="RJ 作品 ID"
+            placeholder="RJ123456"
+            :disabled="!canEdit || isSaving || asmrProviderLookup.isLoading"
+          />
+          <button
+            type="button"
+            class="ghost"
+            :disabled="!canEdit || isSaving || asmrProviderLookup.isLoading"
+            @click="lookupAsmrProviderCandidate"
+          >
+            {{ asmrProviderLookup.isLoading ? "抓取中" : "抓取候选" }}
+          </button>
+        </div>
+        <textarea
+          v-model="asmrCandidateImportDraft"
+          aria-label="ASMR 候选 JSON"
+          :disabled="!canEdit || isSaving"
+        />
+        <div>
+          <span>{{ asmrCandidateImportError }}</span>
+          <button type="button" class="ghost" :disabled="!canEdit || isSaving" @click="importAsmrMetadataCandidate">
+            导入候选
+          </button>
+        </div>
+      </div>
+      <div v-if="asmrCandidateFields.length" class="file-metadata-card__candidate-list">
+        <article v-for="(candidate, index) in asmrCandidateFields" :key="`${candidate.source}-${candidate.confidence}-${index}`" class="file-metadata-card__candidate">
+          <header>
+            <span>
+              <strong>{{ candidate.source }}</strong>
+              <small>{{ candidate.confidence }}</small>
+            </span>
+            <span class="file-metadata-card__candidate-actions">
+              <button
+                v-if="candidate.coverUrl && saveCoverThumbnail"
+                type="button"
+                class="ghost"
+                :disabled="!canEdit || isSaving || asmrCoverSaveState === 'saving'"
+                @click="saveAsmrCoverThumbnail(candidate.coverUrl)"
+              >
+                <ImagePlus :size="14" aria-hidden="true" />
+                封面
+              </button>
+              <button
+                type="button"
+                class="ghost"
+                :disabled="!canEdit || isSaving || !candidate.fields.length"
+                @click="applyAsmrMetadataCandidate(candidate)"
+              >
+                <Check :size="14" aria-hidden="true" />
+                应用
+              </button>
+            </span>
+          </header>
+          <div v-if="candidate.fields.length" class="file-metadata-card__candidate-fields">
+            <span v-for="field in candidate.fields" :key="field.key">
+              {{ field.key }}={{ field.value }}
+            </span>
+          </div>
+          <small v-if="candidate.skipped.length" class="file-metadata-card__candidate-skipped">
+            跳过 {{ candidate.skipped.join("，") }}
+          </small>
+        </article>
+      </div>
+      <small v-else-if="!asmrCandidateImportOpen" class="file-metadata-card__candidate-skipped">暂无候选</small>
+    </section>
 
     <section v-if="hasSourceMetadata" class="file-metadata-card__source" aria-label="来源信息">
       <div class="file-metadata-card__source-head">

@@ -1,6 +1,8 @@
 import "@testing-library/jest-dom/vitest";
 import { cleanup } from "@testing-library/vue";
 import { afterEach, vi } from "vitest";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import type {
   FileBrowserEntry,
   PluginManifest,
@@ -416,60 +418,7 @@ function getMockFileBrowser(directoryPath = "", includeTree = true, specialLocat
 
 function previewPluginModuleSource(pluginId: string) {
   if (pluginId === "momobako.preview.media") {
-    return [
-      "export function register(ctx) {",
-      "  const { computed, h, nextTick, onBeforeUnmount, onMounted, ref, watch } = ctx.vue;",
-      "  const audioExtensions = ['mp3', 'wav', 'ogg', 'flac', 'm4a', 'aac', 'opus'];",
-      "  const imageExtensions = ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'avif', 'svg'];",
-      "  const videoExtensions = ['mp4', 'mov', 'mkv', 'webm', 'avi', 'm4v'];",
-      "  const MediaPreviewPlugin = {",
-      "    name: 'MediaPreviewPlugin',",
-      "    props: { entry: { type: Object, default: null }, repoId: { type: String, default: '' } },",
-      "    setup(props) {",
-      "      const state = ref('idle');",
-      "      const sourceUrl = ref('');",
-      "      const sourceMediaType = ref('');",
-      "      const errorMessage = ref('');",
-      "      const audioArtworkPath = ref(props.entry?.thumbnailPath ?? null);",
-      "      const lyricsStatus = ref('idle');",
-      "      const lyricsLines = ref([]);",
-      "      const currentPlaybackMs = ref(0);",
-      "      const activeLyricIndex = ref(-1);",
-      "      const lyricsInset = ref(104);",
-      "      const lyricsViewport = ref(null);",
-      "      const lyricsItems = ref([]);",
-      "      let resizeObserver = null;",
-      "      const mediaKind = computed(() => imageExtensions.includes((props.entry?.extension ?? '').toLowerCase()) ? 'image' : videoExtensions.includes((props.entry?.extension ?? '').toLowerCase()) ? 'video' : 'audio');",
-      "      const extensionLabel = computed(() => props.entry?.extension?.toUpperCase() || 'AUDIO');",
-      "      const audioArtworkUrl = computed(() => audioArtworkPath.value ? ctx.fileSrc(audioArtworkPath.value) : null);",
-      "      const lyricsPlaceholder = computed(() => lyricsStatus.value === 'loading' ? '读取歌词...' : '暂无歌词');",
-      "      function syncLyricsInset() { const viewport = lyricsViewport.value; if (!viewport) return; lyricsInset.value = Math.max(72, Math.floor(viewport.clientHeight / 2) - 32); }",
-      "      function centerActiveLyric() { const viewport = lyricsViewport.value; if (!viewport || activeLyricIndex.value < 0) return; const item = lyricsItems.value[activeLyricIndex.value]; if (!item) return; viewport.scrollTop = Math.max(0, item.offsetTop - (viewport.clientHeight / 2) + (item.clientHeight / 2)); }",
-      "      function decodeTextBytes(bytes) { if (bytes.length >= 3 && bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) return new TextDecoder('utf-8').decode(bytes.slice(3)); return new TextDecoder('utf-8').decode(bytes); }",
-      "      function timestampToMs(minutes, seconds, fraction) { const minuteValue = Number.parseInt(minutes, 10); const secondValue = Number.parseInt(seconds, 10); const fractionValue = fraction ? Number.parseInt(fraction.padEnd(3, '0').slice(0, 3), 10) : 0; return (minuteValue * 60 * 1000) + (secondValue * 1000) + fractionValue; }",
-      "      function parseLrcLyrics(text) { const normalized = text.replace(/\\r\\n?/g, '\\n'); const rawLines = normalized.split('\\n').map((line) => line.trim()).filter(Boolean); const parsed = []; for (const rawLine of rawLines) { const timeTags = [...rawLine.matchAll(/\\[(\\d{1,2}):(\\d{1,2})(?:[.:](\\d{1,3}))?\\]/g)]; const plainText = rawLine.replace(/\\[(\\d{1,2}):(\\d{1,2})(?:[.:](\\d{1,3}))?\\]/g, '').trim(); if (timeTags.length > 0) { const textValue = plainText || '…'; for (const [index, tag] of timeTags.entries()) { parsed.push({ id: `${tag[0]}-${parsed.length}-${index}`, text: textValue, timeMs: timestampToMs(tag[1], tag[2], tag[3]) }); } continue; } if (plainText) parsed.push({ id: `plain-${parsed.length}`, text: plainText, timeMs: null }); } return parsed.sort((left, right) => { if (left.timeMs == null && right.timeMs == null) return 0; if (left.timeMs == null) return 1; if (right.timeMs == null) return -1; return left.timeMs - right.timeMs; }); }",
-      "      function findActiveLyricIndex(lines, playbackMs) { let index = -1; for (let cursor = 0; cursor < lines.length; cursor += 1) { const line = lines[cursor]; if (line.timeMs == null || line.timeMs > playbackMs) continue; index = cursor; } return index; }",
-      "      function siblingLrcPath(path) { const extensionIndex = path.lastIndexOf('.'); return extensionIndex >= 0 ? `${path.slice(0, extensionIndex)}.lrc` : `${path}.lrc`; }",
-      "      async function loadMediaSource() { state.value = 'loading'; sourceUrl.value = ''; sourceMediaType.value = ''; errorMessage.value = ''; const response = await ctx.preparePreviewFileSource({ repoId: props.repoId, path: props.entry.path }); sourceUrl.value = response.sourceUrl ?? ''; sourceMediaType.value = response.mediaType; state.value = 'ready'; }",
-      "      async function loadAudioLyrics() { if (!audioExtensions.includes((props.entry?.extension ?? '').toLowerCase())) { lyricsStatus.value = 'idle'; lyricsLines.value = []; return; } lyricsStatus.value = 'loading'; try { const bytes = await ctx.readFile({ repoId: props.repoId, path: siblingLrcPath(props.entry.path) }); lyricsLines.value = parseLrcLyrics(decodeTextBytes(Uint8Array.from(bytes))); lyricsStatus.value = lyricsLines.value.length ? 'ready' : 'empty'; await nextTick(); syncLyricsInset(); } catch { lyricsLines.value = []; lyricsStatus.value = 'empty'; } }",
-      "      watch(() => [props.repoId, props.entry?.path, props.entry?.extension], async () => { await loadMediaSource(); await loadAudioLyrics(); }, { immediate: true });",
-      "      watch(currentPlaybackMs, () => { activeLyricIndex.value = findActiveLyricIndex(lyricsLines.value, currentPlaybackMs.value); centerActiveLyric(); });",
-      "      onMounted(() => { if (typeof ResizeObserver !== 'undefined' && lyricsViewport.value) { resizeObserver = new ResizeObserver(() => { syncLyricsInset(); centerActiveLyric(); }); resizeObserver.observe(lyricsViewport.value); } });",
-      "      onBeforeUnmount(() => { resizeObserver?.disconnect(); });",
-      "      function setLyricItemRef(index, element) { if (!element) return; lyricsItems.value[index] = element; }",
-      "      return { activeLyricIndex, audioArtworkUrl, entry: props.entry, extensionLabel, lyricsInset, lyricsLines, lyricsPlaceholder, lyricsViewport, mediaKind, setLyricItemRef, sourceMediaType, sourceUrl, state, errorMessage, onAudioTimeUpdate(event) { currentPlaybackMs.value = Math.round((event.target?.currentTime ?? 0) * 1000); } };",
-      "    },",
-      "    render() {",
-      "      if (this.sourceUrl && this.mediaKind === 'audio') return h('div', { class: 'media-preview media-preview--audio' }, [h('div', { class: 'media-preview__audio-main' }, [h('div', { class: 'media-preview__audio-art', 'aria-hidden': 'true' }, [this.audioArtworkUrl ? h('img', { class: 'media-preview__audio-cover', src: this.audioArtworkUrl, alt: '' }) : h('span', { class: 'media-preview__audio-chip' }, this.extensionLabel)]), h('section', { class: 'media-preview__audio-panel', 'aria-label': '歌词面板' }, [h('header', { class: 'media-preview__audio-panel-head' }, [h('strong', this.entry?.name ?? ''), h('span', { class: 'media-preview__audio-chip' }, this.extensionLabel)]), h('div', { ref: 'lyricsViewport', class: ['media-preview__audio-lyrics', { 'media-preview__audio-lyrics--empty': !this.lyricsLines.length }] }, this.lyricsLines.length ? [h('div', { class: 'media-preview__audio-lyrics-track', style: { '--lyrics-inset': `${this.lyricsInset}px` } }, this.lyricsLines.map((line, index) => h('button', { key: line.id, type: 'button', class: ['media-preview__audio-lyric', { 'is-active': index === this.activeLyricIndex, 'is-passed': this.activeLyricIndex > index, 'is-timed': line.timeMs != null }], disabled: line.timeMs == null, ref: (element) => this.setLyricItemRef(index, element) }, line.text)))] : [h('span', this.lyricsPlaceholder)])])]), h('audio', { class: 'media-preview__audio-control', controls: true, preload: 'metadata', onTimeupdate: this.onAudioTimeUpdate }, [h('source', { src: this.sourceUrl, type: this.sourceMediaType })])]);",
-      "      if (this.sourceUrl && this.mediaKind === 'image') return h('section', { class: 'mock-preview-plugin' }, [h('img', { class: 'media-preview__image', src: this.sourceUrl, alt: '' })]);",
-      "      if (this.sourceUrl && this.mediaKind === 'video') return h('section', { class: 'mock-preview-plugin' }, [h('video', { class: 'media-preview__video', controls: true }, [h('source', { src: this.sourceUrl, type: this.sourceMediaType })])]);",
-      "      return h('section', { class: 'mock-preview-plugin' });",
-      "    },",
-      "  };",
-      "  ctx.registerPreview({ supportedExtensions: [...imageExtensions, ...videoExtensions, ...audioExtensions], component: MediaPreviewPlugin });",
-      "}",
-      "",
-    ].join("\n");
+    return mediaPreviewPluginSourceForTest();
   }
 
   const definitionMap: Record<string, { extensions: string[]; thumbnail?: boolean; fileActions?: boolean }> = {
@@ -511,6 +460,21 @@ function previewPluginModuleSource(pluginId: string) {
     "}",
     "",
   ].filter(Boolean).join("\n");
+}
+
+function mediaPreviewPluginSourceForTest() {
+  const sourcePath = resolve("External/Plugins/media-preview/src/register.js");
+  return readFileSync(sourcePath, "utf-8")
+    .replace(
+      new RegExp('import\\s*\\{[\\s\\S]*?\\}\\s*from\\s*"\\./mediaExtensions\\.js";\\s*'),
+      [
+        "const audioPreviewExtensions = ['mp3', 'wav', 'ogg', 'flac', 'm4a', 'aac', 'opus'];",
+        "const imagePreviewExtensions = ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'avif', 'svg'];",
+        "const videoPreviewExtensions = ['mp4', 'mov', 'mkv', 'webm', 'avi', 'm4v'];",
+        "const isImageExtension = (extension) => imagePreviewExtensions.includes((extension ?? '').toLowerCase());",
+        "const isVideoExtension = (extension) => videoPreviewExtensions.includes((extension ?? '').toLowerCase());",
+      ].join("\n"),
+    );
 }
 
 vi.mock("@tauri-apps/api/core", () => ({
@@ -815,6 +779,25 @@ vi.mock("@tauri-apps/api/core", () => ({
         state: "linked",
       };
     }
+    if (command === "lookup_asmr_metadata_candidate") {
+      const request = args?.request as { provider?: string; rjCode?: string } | undefined;
+      return {
+        provider: request?.provider ?? "dlsite",
+        rjCode: request?.rjCode ?? "RJ123456",
+        sourceUrl: `https://example.test/${request?.rjCode ?? "RJ123456"}`,
+        fetchedAt: "2026-06-05T00:18:00Z",
+        candidate: {
+          source: request?.provider ?? "dlsite",
+          confidence: "external-id",
+          fields: {
+            workId: request?.rjCode ?? "RJ123456",
+            rjCode: request?.rjCode ?? "RJ123456",
+            workTitle: "Fetched Rain Voice",
+            circle: "Fetched Circle",
+          },
+        },
+      };
+    }
     if (command === "rename_entry") {
       const request = args?.request as { path?: string; newName?: string } | undefined;
       const sourcePath = request?.path ?? "";
@@ -1005,6 +988,7 @@ vi.mock("@tauri-apps/api/core", () => ({
         path?: string;
         action?: "ensure" | "refresh" | "save" | "saveGenerated" | "clear";
         sourcePath?: string;
+        sourceUrl?: string;
         imageBytes?: number[];
       } | undefined;
       const path = request?.path ?? "";

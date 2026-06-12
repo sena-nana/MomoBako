@@ -156,6 +156,71 @@ const selectionBoxStyle = computed(() => {
   };
 });
 
+function metadataText(entry: FileBrowserEntry, key: string) {
+  const value = entry.metadata?.[key];
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  return "";
+}
+
+function metadataNumber(entry: FileBrowserEntry, key: string) {
+  const value = entry.metadata?.[key];
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim() !== "") {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+function isAsmrEntry(entry: FileBrowserEntry) {
+  const metadata = entry.metadata ?? {};
+  return metadata.libraryKind === "asmr" || Boolean(metadata.workId) || Boolean(metadata.rjCode);
+}
+
+function listeningStatusLabel(status: string) {
+  switch (status) {
+    case "unlistened":
+      return "未收听";
+    case "listening":
+      return "收听中";
+    case "listened":
+      return "已听完";
+    default:
+      return status;
+  }
+}
+
+function asmrSummary(entry: FileBrowserEntry) {
+  if (!isAsmrEntry(entry)) return null;
+  const rjCode = metadataText(entry, "rjCode") || metadataText(entry, "workId");
+  const workTitle = metadataText(entry, "workTitle") || metadataText(entry, "title");
+  const trackTitle = metadataText(entry, "trackTitle");
+  const listeningStatus = listeningStatusLabel(metadataText(entry, "listeningStatus"));
+  const lyricStatus = metadataText(entry, "lyricStatus");
+  const progress = metadataNumber(entry, "listeningProgress");
+  return {
+    rjCode,
+    workTitle,
+    trackTitle,
+    listeningStatus,
+    lyricStatus,
+    progress: progress == null ? "" : `${Math.round(progress)}%`,
+  };
+}
+
+function asmrInlineLabel(entry: FileBrowserEntry) {
+  const summary = asmrSummary(entry);
+  if (!summary) return "";
+  return [
+    summary.rjCode,
+    summary.workTitle,
+    summary.listeningStatus,
+    summary.progress,
+    summary.lyricStatus ? "歌词" : "",
+  ].filter(Boolean).join(" · ");
+}
+
 function selectionModeFromEvent(event: MouseEvent): SelectionMode {
   if (event.shiftKey) return "range";
   if (event.ctrlKey || event.metaKey) return "toggle";
@@ -466,9 +531,11 @@ function cancelEntryDragIntent(event: PointerEvent) {
             <div class="files-list__body">
               <strong>{{ entry.name }}</strong>
               <span v-if="hardlinkStateLabel(entry) && fileDisplayMode !== 'list'">{{ hardlinkStateLabel(entry) }}</span>
+              <span v-if="asmrInlineLabel(entry) && fileDisplayMode !== 'list'" class="files-list__asmr-line">{{ asmrInlineLabel(entry) }}</span>
               <span v-if="fileDisplayMode === 'list'">{{ entry.path }}</span>
             </div>
             <div v-if="fileDisplayMode === 'list'" class="files-list__meta">
+              <span v-if="asmrInlineLabel(entry)" class="files-list__asmr-list-label">{{ asmrInlineLabel(entry) }}</span>
               <span>{{ entry.extension || '文件' }}</span>
               <span>{{ entry.sizeLabel || "未知" }}</span>
               <span>{{ entry.status ? statusLabel(entry.status) : "未索引" }}</span>
@@ -610,6 +677,30 @@ function cancelEntryDragIntent(event: PointerEvent) {
           <span>删除时间</span>
           <span class="asset-meta__value">{{ entryDeletedAtLabel(currentFileEntry) || "未记录" }}</span>
         </div>
+        <template v-if="asmrSummary(currentFileEntry)">
+          <div class="asset-meta__row">
+            <span>ASMR</span>
+            <span class="asset-meta__value">{{ asmrSummary(currentFileEntry)?.rjCode || "作品" }}</span>
+          </div>
+          <div v-if="asmrSummary(currentFileEntry)?.workTitle" class="asset-meta__row">
+            <span>作品</span>
+            <span class="asset-meta__value">{{ asmrSummary(currentFileEntry)?.workTitle }}</span>
+          </div>
+          <div v-if="asmrSummary(currentFileEntry)?.trackTitle" class="asset-meta__row">
+            <span>音轨</span>
+            <span class="asset-meta__value">{{ asmrSummary(currentFileEntry)?.trackTitle }}</span>
+          </div>
+          <div v-if="asmrSummary(currentFileEntry)?.listeningStatus || asmrSummary(currentFileEntry)?.progress" class="asset-meta__row">
+            <span>收听</span>
+            <span class="asset-meta__value">
+              {{ [asmrSummary(currentFileEntry)?.listeningStatus, asmrSummary(currentFileEntry)?.progress].filter(Boolean).join(" · ") }}
+            </span>
+          </div>
+          <div v-if="asmrSummary(currentFileEntry)?.lyricStatus" class="asset-meta__row">
+            <span>歌词</span>
+            <span class="asset-meta__value">{{ asmrSummary(currentFileEntry)?.lyricStatus }}</span>
+          </div>
+        </template>
       </div>
 
       <FileMetadataEditor

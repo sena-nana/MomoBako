@@ -79,6 +79,7 @@ export const activeFilterCount = computed(() => (
   filters.value.shapes.length +
   filters.value.excludeTags.length +
   filters.value.excludeFormats.length +
+  (filters.value.metadataFilters.trim() ? 1 : 0) +
   (filters.value.excludeMetadataFilters.trim() ? 1 : 0) +
   (filters.value.numberFilters.trim() ? 1 : 0) +
   (filters.value.dateFilters.trim() ? 1 : 0) +

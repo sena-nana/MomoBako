@@ -24,6 +24,7 @@ type WorkspaceSearchUiOptions = {
   updateFilters: (filters: {
     excludeQuery: string;
     excludePathPrefixes: string;
+    metadataFilters: string;
     excludeTags: string[];
     excludeFormats: string[];
     excludeMetadataFilters: string;
@@ -91,6 +92,7 @@ export function useWorkspaceSearchUi(options: WorkspaceSearchUiOptions) {
   const excludePathPrefixesInput = ref("");
   const excludeTagsInput = ref("");
   const excludeFormatsInput = ref("");
+  const metadataFiltersInput = ref("");
   const excludeMetadataFiltersInput = ref("");
   const excludeNumberFiltersInput = ref("");
   const excludeDateFiltersInput = ref("");
@@ -218,6 +220,7 @@ export function useWorkspaceSearchUi(options: WorkspaceSearchUiOptions) {
     excludePathPrefixesInput.value = "";
     excludeTagsInput.value = "";
     excludeFormatsInput.value = "";
+    metadataFiltersInput.value = "";
     excludeMetadataFiltersInput.value = "";
     excludeNumberFiltersInput.value = "";
     excludeDateFiltersInput.value = "";
@@ -236,6 +239,7 @@ export function useWorkspaceSearchUi(options: WorkspaceSearchUiOptions) {
     options.updateFilters({
       excludeQuery: excludeQueryInput.value.trim(),
       excludePathPrefixes: excludePathPrefixesInput.value.trim(),
+      metadataFilters: metadataFiltersInput.value.trim(),
       excludeTags: splitListInput(excludeTagsInput.value),
       excludeFormats: splitListInput(excludeFormatsInput.value),
       excludeMetadataFilters: excludeMetadataFiltersInput.value.trim(),
@@ -282,6 +286,7 @@ export function useWorkspaceSearchUi(options: WorkspaceSearchUiOptions) {
     excludePathPrefixesInput,
     excludeTagsInput,
     excludeFormatsInput,
+    metadataFiltersInput,
     excludeMetadataFiltersInput,
     excludeNumberFiltersInput,
     excludeDateFiltersInput,
