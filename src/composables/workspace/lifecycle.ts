@@ -1,6 +1,8 @@
 import {
   getFileBrowser,
   getRepositorySnapshot,
+  listHardlinkCandidates,
+  listRepositoryActions,
   listSmartFolders,
   listRepositories,
 } from "../../services/repositoryApi";
@@ -15,8 +17,10 @@ import {
   cacheSnapshot,
   createInitialWorkspaceStartup,
   currentDirectoryPath,
+  createEmptyFileBrowserDerivedState,
   error,
   fileBrowser,
+  fileBrowserDerived,
   fileTree,
   hardlinkCandidates,
   isLoadingAssetDetail,
@@ -24,8 +28,8 @@ import {
   isLoadingSmartFolder,
   isLoadingRepositories,
   isLoadingSettingsData,
-  isManagingPlugins,
   isLoadingSnapshot,
+  isManagingPlugins,
   isExternalDragActive,
   isInternalDragActive,
   isMutatingFiles,
@@ -46,6 +50,8 @@ import {
   workspaceStartup,
   dragHoverFolderPath,
   draggedWorkspacePaths,
+  repositoryActions,
+  activeRepositoryActionId,
 } from "./state";
 import { applyFileBrowserSnapshot } from "./files";
 import { resetSearchState } from "./search";
@@ -59,6 +65,7 @@ import {
   updateOperationProgress,
 } from "./tasks";
 import { invalidateThumbnailQueue } from "./thumbnails";
+import { scheduleIdleTask } from "./scheduler";
 
 let startupPromise: Promise<void> | null = null;
 
@@ -73,6 +80,7 @@ export function resetActiveRepositoryContent() {
   activeAssetId.value = null;
   activeAssetDetail.value = null;
   fileBrowser.value = null;
+  fileBrowserDerived.value = createEmptyFileBrowserDerivedState();
   fileTree.value = [];
   smartFolders.value = [];
   activeSmartFolderId.value = null;
@@ -131,7 +139,6 @@ async function loadInitialRepository(
   const snapshot = await getRepositorySnapshot(nextRepoId);
   activeRepoId.value = nextRepoId;
   activeSnapshot.value = snapshot;
-  smartFolders.value = await listSmartFolders(nextRepoId);
 
   const defaultAssetId = activeAssetId.value && snapshot.assets.some((item) => item.assetId === activeAssetId.value)
     ? activeAssetId.value
@@ -145,12 +152,56 @@ async function loadInitialRepository(
   const browserSnapshot = await getFileBrowser({
     repoId: nextRepoId,
     directoryPath: "",
-    includeTree: true,
+    includeTree: false,
   });
   applyFileBrowserSnapshot(browserSnapshot);
 
   if (defaultAssetId) {
     void selectAsset(defaultAssetId);
+  }
+  queueRepositoryBackgroundLoads(nextRepoId);
+}
+
+export function queueRepositoryBackgroundLoads(repoId: string) {
+  scheduleIdleTask(() => {
+    void loadRepositorySecondaryData(repoId);
+  }, 250);
+}
+
+async function loadRepositorySecondaryData(repoId: string) {
+  const [
+    smartFolderItems,
+    actionItems,
+    hardlinkResponse,
+    treeSnapshot,
+  ] = await Promise.allSettled([
+    listSmartFolders(repoId),
+    listRepositoryActions(repoId),
+    listHardlinkCandidates(repoId),
+    getFileBrowser({
+      repoId,
+      directoryPath: currentDirectoryPath.value,
+      includeTree: true,
+    }),
+  ]);
+
+  if (activeRepoId.value !== repoId) return;
+
+  if (smartFolderItems.status === "fulfilled") {
+    smartFolders.value = smartFolderItems.value;
+  }
+  if (actionItems.status === "fulfilled") {
+    repositoryActions.value = actionItems.value;
+    if (activeRepositoryActionId.value && !actionItems.value.some((action) => action.actionId === activeRepositoryActionId.value)) {
+      activeRepositoryActionId.value = null;
+    }
+    activeRepositoryActionId.value = activeRepositoryActionId.value ?? actionItems.value[0]?.actionId ?? null;
+  }
+  if (hardlinkResponse.status === "fulfilled") {
+    hardlinkCandidates.value = hardlinkResponse.value.candidates;
+  }
+  if (treeSnapshot.status === "fulfilled" && treeSnapshot.value.tree) {
+    fileTree.value = treeSnapshot.value.tree;
   }
 }
 

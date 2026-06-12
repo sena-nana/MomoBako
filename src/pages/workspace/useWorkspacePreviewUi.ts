@@ -10,6 +10,8 @@ export function useWorkspacePreviewUi() {
   const failedThumbnailPaths = ref<Set<string>>(new Set());
   const thumbnailAspectRatios = ref<Record<string, number>>({});
   const thumbnailPalettes = ref<Record<string, string[]>>({});
+  const thumbnailSourceCache = new Map<string, string>();
+  const modelEntryExtensionCache = new Map<string, boolean>();
 
   function isVideoEntry(entry: FileBrowserEntry) {
     return isVideoExtension(entry.extension);
@@ -20,12 +22,22 @@ export function useWorkspacePreviewUi() {
   }
 
   function isModelEntry(entry: FileBrowserEntry) {
-    return Boolean(getPreviewPluginForEntry(entry));
+    const extension = entry.extension?.toLowerCase() ?? "";
+    if (!extension) return false;
+    const cached = modelEntryExtensionCache.get(extension);
+    if (cached != null) return cached;
+    const value = Boolean(getPreviewPluginForEntry(entry));
+    modelEntryExtensionCache.set(extension, value);
+    return value;
   }
 
   function thumbnailSrc(entry: FileBrowserEntry) {
     if (!entry.thumbnailPath || failedThumbnailPaths.value.has(entry.path)) return null;
-    return convertFileSrc(entry.thumbnailPath);
+    const cached = thumbnailSourceCache.get(entry.thumbnailPath);
+    if (cached) return cached;
+    const src = convertFileSrc(entry.thumbnailPath);
+    thumbnailSourceCache.set(entry.thumbnailPath, src);
+    return src;
   }
 
   function markThumbnailFailed(entry: FileBrowserEntry) {

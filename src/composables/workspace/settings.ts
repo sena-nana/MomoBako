@@ -21,6 +21,12 @@ type SettingsDataLoadOptions = {
   failFast?: boolean;
 };
 
+function syncPreviewPluginsInBackground(items: PluginManifest[]) {
+  void syncRegisteredPreviewPluginManifests(items).catch((cause) => {
+    error.value = cause instanceof Error ? cause.message : String(cause);
+  });
+}
+
 export async function loadSettingsData(options: SettingsDataLoadOptions = {}) {
   isLoadingSettingsData.value = true;
 
@@ -31,7 +37,7 @@ export async function loadSettingsData(options: SettingsDataLoadOptions = {}) {
       getApiDesignSnapshot(),
     ]);
     plugins.value = pluginItems;
-    await syncRegisteredPreviewPluginManifests(pluginItems);
+    syncPreviewPluginsInBackground(pluginItems);
     cacheSnapshot.value = cache;
     apiDesign.value = api;
   } catch (cause) {
@@ -50,7 +56,7 @@ async function applyPluginMutation(action: () => Promise<{ plugins: PluginManife
   try {
     const response = await action();
     plugins.value = response.plugins;
-    await syncRegisteredPreviewPluginManifests(response.plugins);
+    syncPreviewPluginsInBackground(response.plugins);
     return response;
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : String(cause);

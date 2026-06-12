@@ -1163,6 +1163,30 @@ export function seedMockRepository() {
   mockRepositoryActions = defaultRepositoryActions();
 }
 
+export function seedLargeMockDirectory(entryCount = 1200) {
+  seedMockRepository();
+  mockEntries = Array.from({ length: entryCount }, (_, index): MockEntry => {
+    const isDirectory = index % 5 === 0;
+    const padded = String(index).padStart(4, "0");
+    const name = isDirectory ? `Folder-${padded}` : `asset-${padded}.png`;
+    return {
+      path: name,
+      name,
+      kind: isDirectory ? "directory" : "file",
+      extension: isDirectory ? null : "png",
+      sizeBytes: isDirectory ? null : 1024 + index,
+      sizeLabel: isDirectory ? null : "1 KB",
+      modifiedAt: "2026-06-05T00:18:00Z",
+      assetId: isDirectory ? null : `asset-large-${padded}`,
+      status: isDirectory ? null : "synced",
+      thumbnailPath: isDirectory ? undefined : null,
+      thumbnailCustom: false,
+      tags: isDirectory ? undefined : ["large"],
+      metadata: isDirectory ? undefined : { color: index % 2 ? "红色" : "蓝色" },
+    };
+  });
+}
+
 function createMissingMockRepository() {
   return {
     ...mockSnapshot.repository,
