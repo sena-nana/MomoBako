@@ -12,9 +12,10 @@ import {
   PerspectiveCamera,
   Scene,
   Vector3,
-  WebGLRenderer,
 } from "three";
-import { VRMLoaderPlugin, VRMMetaLoaderPlugin, VRMUtils, type VRM } from "@pixiv/three-vrm";
+import { WebGPURenderer } from "three/webgpu";
+import { MToonMaterialLoaderPlugin, VRMLoaderPlugin, VRMMetaLoaderPlugin, VRMUtils, type VRM } from "@pixiv/three-vrm";
+import { MToonNodeMaterial } from "@pixiv/three-vrm/nodes";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { FBXLoader } from "three/examples/jsm/loaders/FBXLoader.js";
 import { GLTFLoader, type GLTFParser } from "three/examples/jsm/loaders/GLTFLoader.js";
@@ -40,7 +41,7 @@ const loadProgress = ref({
   detail: "准备读取文件",
   indeterminate: true,
 });
-const renderer = shallowRef<WebGLRenderer | null>(null);
+const renderer = shallowRef<ModelPreviewRenderer | null>(null);
 const { upsertTask, removeTask } = useTaskCenter();
 const { saveGeneratedWorkspaceEntryThumbnail } = useRepositoryWorkspace();
 let scene: Scene | null = null;
@@ -51,6 +52,14 @@ let frameId: number | null = null;
 let resizeObserver: ResizeObserver | null = null;
 let loadToken = 0;
 let previousFrameTime = 0;
+let firstFrameRendered = false;
+const rendererBackend = ref<"webgpu" | "webgl2" | null>(null);
+
+type ModelPreviewRenderer = WebGPURenderer & {
+  backend?: {
+    isWebGPUBackend?: boolean;
+  };
+};
 
 type LoadedModel = {
   object: Object3D;
@@ -76,6 +85,7 @@ async function loadModel() {
   state.value = "loading";
   errorMessage.value = "";
   modelInfo.value = "";
+  rendererBackend.value = null;
   loadProgress.value = {
     value: 6,
     label: "读取模型",
@@ -88,9 +98,12 @@ async function loadModel() {
   if (!canvas.value || !container.value) return;
 
   teardown();
-  setupRenderer();
 
   try {
+    await setupRenderer(token);
+    if (token !== loadToken) {
+      return;
+    }
     const source = await createModelSourceUrl();
     if (token !== loadToken) {
       return;
@@ -129,6 +142,8 @@ async function loadModel() {
 async function persistCanvasThumbnail(token: number) {
   await nextTick();
   if (token !== loadToken || !canvas.value || !renderer.value || !scene || !camera) return;
+  await waitForFirstFrame(token);
+  if (token !== loadToken || !canvas.value || !renderer.value || !scene || !camera) return;
   renderer.value.render(scene, camera);
   const blob = await new Promise<Blob | null>((resolve) => {
     canvas.value?.toBlob(resolve, "image/jpeg", 0.86);
@@ -163,18 +178,23 @@ async function createModelSourceUrl() {
   return response.sourceUrl;
 }
 
-function setupRenderer() {
+async function setupRenderer(token: number) {
   if (!canvas.value || !container.value) return;
 
-  const nextRenderer = new WebGLRenderer({
+  const nextRenderer = new WebGPURenderer({
     canvas: canvas.value,
     antialias: true,
     alpha: true,
-    preserveDrawingBuffer: true,
-  });
+  }) as ModelPreviewRenderer;
   nextRenderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   nextRenderer.setClearColor(new Color(0x000000), 0);
+  await nextRenderer.init();
+  if (token !== loadToken) {
+    nextRenderer.dispose();
+    return;
+  }
   renderer.value = nextRenderer;
+  rendererBackend.value = nextRenderer.backend?.isWebGPUBackend ? "webgpu" : "webgl2";
 
   scene = new Scene();
   scene.add(new AmbientLight(0xffffff, 1.8));
@@ -203,6 +223,7 @@ function setupRenderer() {
   resizeObserver.observe(container.value);
   resizeRenderer();
   previousFrameTime = performance.now();
+  firstFrameRendered = false;
   animate(previousFrameTime);
 }
 
@@ -289,7 +310,11 @@ async function loadObjectByExtension(source: string, fileExtension: string) {
 
 function createVrmLoaderPlugin(parser: GLTFParser) {
   const licenseUrl = getVrmLicenseUrl(parser.json);
+  const mtoonMaterialPlugin = new MToonMaterialLoaderPlugin(parser, {
+    materialType: MToonNodeMaterial,
+  });
   return new VRMLoaderPlugin(parser, {
+    mtoonMaterialPlugin,
     metaPlugin: new VRMMetaLoaderPlugin(parser, {
       acceptLicenseUrls: licenseUrl ? [licenseUrl] : undefined,
     }),
@@ -325,6 +350,18 @@ function animate(frameTime = performance.now()) {
   controls?.update();
   if (scene && camera) {
     renderer.value?.render(scene, camera);
+    firstFrameRendered = true;
+  }
+}
+
+async function waitForFirstFrame(token: number) {
+  if (firstFrameRendered) return;
+  await new Promise<void>((resolve) => {
+    window.requestAnimationFrame(() => resolve());
+  });
+  if (token === loadToken && renderer.value && scene && camera && !firstFrameRendered) {
+    renderer.value.render(scene, camera);
+    firstFrameRendered = true;
   }
 }
 
@@ -379,7 +416,11 @@ function disposeObject(object: Object3D) {
 </script>
 
 <template>
-  <div ref="container" class="model-preview">
+  <div
+    ref="container"
+    class="model-preview"
+    :data-renderer-backend="rendererBackend"
+  >
     <canvas ref="canvas" class="model-preview__canvas" />
 
     <div v-if="state === 'loading'" class="model-preview__status">
