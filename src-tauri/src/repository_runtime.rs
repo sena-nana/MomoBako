@@ -118,6 +118,15 @@ impl RepositoryRuntime {
         .map_err(|error| error.to_string())?
     }
 
+    pub async fn repository_thumbnail_roots(&self) -> Result<Vec<PathBuf>, String> {
+        let repository_state = self.repository_state.clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            repository_state.list_repository_thumbnail_roots()
+        })
+        .await
+        .map_err(|error| error.to_string())?
+    }
+
     pub fn preview_source_url(&self, token: &str) -> String {
         format!("http://{}/preview/{token}", self.preview_addr)
     }
@@ -678,7 +687,9 @@ fn normalize_path(path: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::repository_service::{FileReadRequest, RepositoryMutationRequest};
+    use crate::repository_service::{
+        install_local_filesystem_test_plugin_archive, FileReadRequest, RepositoryMutationRequest,
+    };
     use rusqlite::{params, Connection};
     use std::{
         fs,
@@ -756,6 +767,7 @@ mod tests {
         fs::create_dir_all(&repo_root).expect("repo root should be created");
         fs::write(repo_root.join("model.glb"), b"glb-body")
             .expect("preview source should be written");
+        install_local_filesystem_test_plugin_archive(&service_root);
 
         let state = RepositoryState::from_root(service_root);
         let repo_id = state
@@ -893,6 +905,7 @@ mod tests {
         fs::create_dir_all(&repo_root).expect("repo root should be created");
         fs::write(repo_root.join("clip.mp4"), b"media-body")
             .expect("preview source should be written");
+        install_local_filesystem_test_plugin_archive(&service_root);
 
         let state = RepositoryState::from_root(service_root);
         let repo_id = state

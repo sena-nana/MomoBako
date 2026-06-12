@@ -440,51 +440,65 @@ async fn mutate_trash(
 #[tauri::command]
 async fn create_repository(
     request: RepositoryMutationRequest,
+    app: AppHandle,
     runtime: tauri::State<'_, RepositoryRuntime>,
 ) -> Result<RepositoryMutationResponse, String> {
-    runtime
+    let response = runtime
         .run_repository_collection_write(move |state| state.create_repository(request))
-        .await
+        .await?;
+    refresh_thumbnail_asset_scope(&app, &runtime).await?;
+    Ok(response)
 }
 
 #[tauri::command]
 async fn import_repository(
     request: RepositoryMutationRequest,
+    app: AppHandle,
     runtime: tauri::State<'_, RepositoryRuntime>,
 ) -> Result<RepositoryMutationResponse, String> {
-    runtime
+    let response = runtime
         .run_repository_collection_write(move |state| state.import_repository(request))
-        .await
+        .await?;
+    refresh_thumbnail_asset_scope(&app, &runtime).await?;
+    Ok(response)
 }
 
 #[tauri::command]
 async fn attach_repository_folder(
     request: RepositoryFolderRequest,
+    app: AppHandle,
     runtime: tauri::State<'_, RepositoryRuntime>,
 ) -> Result<RepositoryMutationResponse, String> {
-    runtime
+    let response = runtime
         .run_repository_collection_write(move |state| state.attach_repository_folder(request))
-        .await
+        .await?;
+    refresh_thumbnail_asset_scope(&app, &runtime).await?;
+    Ok(response)
 }
 
 #[tauri::command]
 async fn delete_repository(
     repo_id: String,
+    app: AppHandle,
     runtime: tauri::State<'_, RepositoryRuntime>,
 ) -> Result<(), String> {
     runtime
         .run_repository_collection_write(move |state| state.delete_repository(&repo_id))
-        .await
+        .await?;
+    refresh_thumbnail_asset_scope(&app, &runtime).await
 }
 
 #[tauri::command]
 async fn relocate_repository(
     request: RepositoryRelocateRequest,
+    app: AppHandle,
     runtime: tauri::State<'_, RepositoryRuntime>,
 ) -> Result<RepositoryMutationResponse, String> {
-    runtime
+    let response = runtime
         .run_repository_collection_write(move |state| state.relocate_repository(request))
-        .await
+        .await?;
+    refresh_thumbnail_asset_scope(&app, &runtime).await?;
+    Ok(response)
 }
 
 #[tauri::command]
@@ -617,6 +631,25 @@ async fn get_external_api_connection_status(
     Ok(runtime.external_api_connection_status())
 }
 
+async fn refresh_thumbnail_asset_scope(
+    app: &AppHandle,
+    runtime: &RepositoryRuntime,
+) -> Result<(), String> {
+    allow_thumbnail_asset_roots(app, runtime.repository_thumbnail_roots().await?)
+}
+
+fn allow_thumbnail_asset_roots(
+    app: &AppHandle,
+    paths: Vec<PathBuf>,
+) -> Result<(), String> {
+    for path in paths {
+        app.asset_protocol_scope()
+            .allow_directory(path, true)
+            .map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
 fn show_main_window(app: &AppHandle) {
     if let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
         let _ = window.show();
@@ -687,6 +720,10 @@ pub fn run() {
         .manage(window_state::MainWindowStateCache::default())
         .setup(|app| {
             let runtime = RepositoryRuntime::start()?;
+            allow_thumbnail_asset_roots(
+                app.handle(),
+                tauri::async_runtime::block_on(runtime.repository_thumbnail_roots())?,
+            )?;
             app.manage(runtime);
             setup_tray(app.handle())?;
 
