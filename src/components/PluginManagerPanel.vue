@@ -44,14 +44,7 @@ const pendingDeletePlugin = ref<PluginManifest | null>(null);
 const filteredPlugins = computed(() => {
   const normalizedKeyword = keyword.value.trim().toLowerCase();
   if (!normalizedKeyword) return plugins.value;
-  return plugins.value.filter((plugin) => (
-    plugin.name.toLowerCase().includes(normalizedKeyword) ||
-    plugin.description.toLowerCase().includes(normalizedKeyword) ||
-    (plugin.type?.layer ?? "").toLowerCase().includes(normalizedKeyword) ||
-    plugin.kind.toLowerCase().includes(normalizedKeyword) ||
-    pluginCategory(plugin).toLowerCase().includes(normalizedKeyword) ||
-    plugin.capabilities.some((capability) => capability.toLowerCase().includes(normalizedKeyword))
-  ));
+  return plugins.value.filter((plugin) => pluginSearchText(plugin).includes(normalizedKeyword));
 });
 
 function pluginSourceLabel(source: PluginManifest["source"]) {
@@ -70,18 +63,63 @@ function pluginRuntimeLabel(runtime: PluginManifest["runtime"]) {
 function pluginStatusLabel(plugin: PluginManifest) {
   if (plugin.status === "error") return "错误";
   if (plugin.status === "unavailable") return "不可用";
+  if (plugin.degraded && plugin.enabled) return "降级运行";
   if (!plugin.enabled || plugin.status === "disabled") return "未启用";
   return "已启用";
 }
 
 function pluginStatusClass(plugin: PluginManifest) {
   if (plugin.status === "unavailable" || plugin.status === "error") return "asset-card__pill--danger";
+  if (plugin.degraded && plugin.enabled) return "asset-card__pill--warning";
   if (!plugin.enabled || plugin.status === "disabled") return "asset-card__pill--ghost";
   return "";
 }
 
 function canDeletePlugin(plugin: PluginManifest) {
   return plugin.source === "user";
+}
+
+function pluginSearchText(plugin: PluginManifest) {
+  return [
+    plugin.name,
+    plugin.description,
+    plugin.pluginId,
+    plugin.disableReason,
+    plugin.degradationReason,
+    plugin.type?.layer,
+    plugin.kind,
+    pluginCategory(plugin),
+    ...plugin.capabilities,
+    ...(plugin.permissions ?? []),
+    ...(plugin.requires ?? []),
+    ...(plugin.optional ?? []),
+    ...(plugin.hooks ?? []).flatMap((hook) => [hook.slot, hook.action, hook.label]),
+  ]
+    .filter((value): value is string => Boolean(value))
+    .join("\n")
+    .toLowerCase();
+}
+
+function dependencyLabel(plugin: PluginManifest) {
+  const requiredCount = plugin.dependencyStatus?.required.length ?? plugin.requires?.length ?? 0;
+  const optionalCount = plugin.dependencyStatus?.optional.length ?? plugin.optional?.length ?? 0;
+  if (!requiredCount && !optionalCount) return "无依赖";
+  return `必需 ${requiredCount} / 可选 ${optionalCount}`;
+}
+
+function dependencyClass(status: string) {
+  if (status === "missing" || status === "unavailable" || status === "error") return "plugin-manager__dependency--danger";
+  if (status === "disabled") return "plugin-manager__dependency--muted";
+  return "";
+}
+
+function dependencyStatusLabel(status: string) {
+  if (status === "ready") return "可用";
+  if (status === "missing") return "缺失";
+  if (status === "disabled") return "未启用";
+  if (status === "unavailable") return "不可用";
+  if (status === "error") return "错误";
+  return status;
 }
 
 function resetActionState() {
@@ -212,14 +250,63 @@ async function confirmDeletePlugin() {
           <span class="muted">{{ plugin.pluginId }}</span>
           <span class="muted">v{{ plugin.version }}</span>
         </div>
+        <div v-if="plugin.disableReason || plugin.degradationReason" class="plugin-manager__notices">
+          <p v-if="plugin.disableReason" class="plugin-manager__notice plugin-manager__notice--danger">
+            {{ plugin.disableReason }}
+          </p>
+          <p v-if="plugin.degradationReason" class="plugin-manager__notice">
+            {{ plugin.degradationReason }}
+          </p>
+        </div>
         <div class="settings-list__chips">
           <span class="workspace-hints__chip">{{ pluginCategoryLabel(pluginCategory(plugin)) }}</span>
           <span class="workspace-hints__chip">{{ plugin.kind }}</span>
           <span class="workspace-hints__chip">{{ pluginSourceLabel(plugin.source) }}</span>
           <span class="workspace-hints__chip">{{ pluginRuntimeLabel(plugin.runtime) }}</span>
+          <span class="workspace-hints__chip">依赖 {{ dependencyLabel(plugin) }}</span>
           <span v-for="capability in plugin.capabilities" :key="capability" class="workspace-hints__chip">
             {{ capability }}
           </span>
+        </div>
+        <div
+          v-if="plugin.dependencyStatus?.required.length || plugin.dependencyStatus?.optional.length"
+          class="plugin-manager__section"
+        >
+          <span class="plugin-manager__section-label">依赖</span>
+          <div class="plugin-manager__dependency-list">
+            <span
+              v-for="dependency in plugin.dependencyStatus?.required ?? []"
+              :key="`required-${dependency.pluginId}`"
+              class="plugin-manager__dependency"
+              :class="dependencyClass(dependency.status)"
+            >
+              必需 {{ dependency.name ?? dependency.pluginId }} · {{ dependencyStatusLabel(dependency.status) }}
+            </span>
+            <span
+              v-for="dependency in plugin.dependencyStatus?.optional ?? []"
+              :key="`optional-${dependency.pluginId}`"
+              class="plugin-manager__dependency"
+              :class="dependencyClass(dependency.status)"
+            >
+              可选 {{ dependency.name ?? dependency.pluginId }} · {{ dependencyStatusLabel(dependency.status) }}
+            </span>
+          </div>
+        </div>
+        <div v-if="plugin.permissions?.length" class="plugin-manager__section">
+          <span class="plugin-manager__section-label">权限</span>
+          <div class="plugin-manager__dependency-list">
+            <span v-for="permission in plugin.permissions" :key="permission" class="plugin-manager__dependency">
+              {{ permission }}
+            </span>
+          </div>
+        </div>
+        <div v-if="plugin.hooks?.length" class="plugin-manager__section">
+          <span class="plugin-manager__section-label">Hook</span>
+          <div class="plugin-manager__dependency-list">
+            <span v-for="hook in plugin.hooks" :key="`${hook.slot}-${hook.action}`" class="plugin-manager__dependency">
+              {{ hook.label ?? hook.action }} · {{ hook.slot }}
+            </span>
+          </div>
         </div>
         <div class="extensions-workbench__card-actions">
           <button type="button" class="ghost" :disabled="isManagingPlugins" @click="togglePlugin(plugin)">

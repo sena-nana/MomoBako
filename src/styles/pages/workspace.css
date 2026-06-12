@@ -617,6 +617,64 @@
   font-size: 12px;
 }
 
+.plugin-manager__notices {
+  display: grid;
+  gap: 6px;
+}
+
+.plugin-manager__notice {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--bg-subtle);
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.plugin-manager__notice--danger {
+  background: var(--err-soft);
+  color: var(--err);
+}
+
+.plugin-manager__section {
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+}
+
+.plugin-manager__section-label {
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 24px;
+}
+
+.plugin-manager__dependency-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.plugin-manager__dependency {
+  min-height: 24px;
+  padding: 4px 8px;
+  border-radius: 8px;
+  background: var(--bg-subtle);
+  color: var(--text);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.plugin-manager__dependency--muted {
+  color: var(--text-muted);
+}
+
+.plugin-manager__dependency--danger {
+  background: var(--err-soft);
+  color: var(--err);
+}
+
 .files-browser,
 .files-detail {
   min-height: 0;
@@ -2685,6 +2743,11 @@
 .asset-card__pill--danger {
   background: var(--err-soft);
   color: var(--err);
+}
+
+.asset-card__pill--warning {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
 }
 
 .asset-search-results {

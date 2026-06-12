@@ -660,7 +660,28 @@ export type PluginManifest = {
     legacyPluginIds?: string[];
   };
   status?: "ready" | "disabled" | "unavailable" | "error";
+  dependencyStatus?: PluginDependencyStatus;
+  disableReason?: string | null;
+  degraded?: boolean;
+  degradationReason?: string | null;
   archivePath?: string;
+};
+
+export type PluginDependencyStatus = {
+  required: PluginDependencyState[];
+  optional: PluginDependencyState[];
+  missingRequired: string[];
+  missingOptional: string[];
+  disabledRequired: string[];
+  disabledOptional: string[];
+};
+
+export type PluginDependencyState = {
+  pluginId: string;
+  name?: string | null;
+  status: "ready" | "disabled" | "missing" | "unavailable" | "error" | string;
+  enabled: boolean;
+  available: boolean;
 };
 
 export type PluginCategory = "source" | "library-kind" | "parser" | "preview" | "service";

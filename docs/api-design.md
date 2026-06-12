@@ -178,7 +178,7 @@
 - `GET /plugins`
   - List runtime-discovered plugin manifests and capabilities
   - Runtime discovery scans `<serviceRoot>/plugins/*.momoplug`; missing or deleted archive files are reflected directly in the response and are not replaced by compiled defaults
-  - Manifest fields include `pluginId`, `legacyPluginIds`, `name`, `version`, `type`, `kind`, `category`, `description`, `capabilities`, `enabled`, `sdk`, `entry`, `source`, `runtime`, `permissions`, `requires`, `optional`, `hooks`, `contributes`, `compat`, and `status`
+  - Manifest fields include `pluginId`, `legacyPluginIds`, `name`, `version`, `type`, `kind`, `category`, `description`, `capabilities`, `enabled`, `sdk`, `entry`, `source`, `runtime`, `permissions`, `requires`, `optional`, `hooks`, `contributes`, `compat`, `status`, `dependencyStatus`, `disableReason`, `degraded`, and `degradationReason`
   - `category` is one of `source`, `library-kind`, `parser`, `preview`, or `service`; legacy manifests without `category` are inferred from `kind`.
   - `source` plugins are attachable repository IO backends. Existing `filesystem`, `webdav`, and `cloud` kinds remain accepted as source plugins for compatibility.
   - `library-kind` plugins declare content fields, facets, view presets, organization rules and declarative core-host hooks for content types. Official manifest-only library kinds include audio, ASMR, video, anime, manga, ebook, image, design, 3D model, font, game, software, archive and project.
@@ -186,6 +186,8 @@
   - `preview` plugins render file previews and thumbnails independently of library-kind semantics.
   - `service` plugins expose shared capabilities such as metadata providers, network search, download queues, filesystem watching and vector search. External/network services are manual-trigger and candidate-only unless a future runtime implementation changes the contract.
   - `hooks` declare how plugins attach to core-hosted capabilities such as playlist, PiP, progress, candidate queue, batch organize, download queue, metadata merge, rename/move execution, audit log and unified search.
+  - `dependencyStatus` resolves manifest `requires` and `optional` against current runtime-discovered plugins, including legacy plugin IDs. Missing or disabled required dependencies mark the plugin unavailable/disabled with `disableReason`; missing or disabled optional dependencies keep the plugin usable but set `degraded` with `degradationReason`.
+  - `permissions` are host-visible permission claims. The plugin manager displays them for review; runtime authorization enforcement is still tracked as plugin-orchestration follow-up work.
   - Backend plugin IDs are normalized to the `momobako.*` namespace; legacy `builtin.*` IDs remain accepted when reading existing repositories
   - Disabled or manifest-only source backends are displayed but not offered as usable repository backends until enabled with an available runtime
   - Filesystem backend `listFiles` responses include `absolutePath`, `relativePath`, `filename`, `extension`, `sizeBytes`, and `modifiedAt`; the runtime tolerates legacy responses without `absolutePath` by resolving `relativePath` under `repoRoot`
