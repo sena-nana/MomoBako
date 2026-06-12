@@ -11,6 +11,7 @@
 - Connection discovery:
   - MomoBako writes `<serviceRoot>/external-api.json` at startup.
   - Fields: `baseUrl`, `token`, `version`, `startedAt`.
+  - Desktop settings exposes the same connection payload for status checks, copy actions and JSON export.
   - External clients send `Authorization: Bearer <token>` for every protected route.
 - `GET /external/v1/health`
   - No token required.

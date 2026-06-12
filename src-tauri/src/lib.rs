@@ -1,10 +1,10 @@
+use std::{fs, path::PathBuf};
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     utils::config::Color,
     AppHandle, Manager, WindowEvent,
 };
-use std::{fs, path::PathBuf};
 
 const MAIN_WINDOW_LABEL: &str = "main";
 const TRAY_OPEN_ID: &str = "tray-open";
@@ -15,23 +15,23 @@ mod repository_runtime;
 mod repository_service;
 mod window_state;
 
-use repository_runtime::RepositoryRuntime;
+use repository_runtime::{ExternalApiConnectionStatus, RepositoryRuntime};
 use repository_service::{
-    ApiDesignSnapshot, AssetDetail, BinaryFileWriteRequest, BinaryFileWriteResponse,
-    CacheSnapshot, FileBrowserRequest, FileBrowserSnapshot, FileCopyRequest, FileCreateRequest,
-    FileDeleteRequest, FileImportRequest, FileMoveRequest, FilePreviewSourceResponse,
-    FileReadRequest, FileRenameRequest, HardlinkCandidateResponse, HardlinkConfirmRequest,
-    HardlinkConfirmResponse, MetadataUpdateRequest, MetadataUpdateResponse,
-    PluginArchiveReadRequest, PluginArchiveTextResponse, PluginCallRequest, PluginCallResult,
-    PluginEnabledRequest, PluginInstallRequest, PluginManifest, PluginMutationResponse,
-    RepositoryAction, RepositoryActionEnabledRequest, RepositoryActionMutationResponse,
-    RepositoryActionRunRequest, RepositoryActionRunResponse, RepositoryExportRequest,
-    RepositoryExportResponse, RepositoryFolderRequest, RepositoryMutationRequest,
-    RepositoryMutationResponse, RepositoryRelocateRequest, RepositorySnapshot,
-    RepositorySummary, RevisionActionRequest, RevisionActionResponse, SearchRequest,
-    SearchResponse, SmartFolderMutationRequest, SmartFolderMutationResponse,
-    SmartFolderResultSnapshot, SmartFolderTreeNode, SmartFolderUpdateRequest, SyncRequest,
-    SyncResult, ThumbnailRequest, ThumbnailResponse, TrashMutationRequest,
+    ApiDesignSnapshot, AssetDetail, BinaryFileWriteRequest, BinaryFileWriteResponse, CacheSnapshot,
+    FileBrowserRequest, FileBrowserSnapshot, FileCopyRequest, FileCreateRequest, FileDeleteRequest,
+    FileImportRequest, FileMoveRequest, FilePreviewSourceResponse, FileReadRequest,
+    FileRenameRequest, HardlinkCandidateResponse, HardlinkConfirmRequest, HardlinkConfirmResponse,
+    MetadataUpdateRequest, MetadataUpdateResponse, PluginArchiveReadRequest,
+    PluginArchiveTextResponse, PluginCallRequest, PluginCallResult, PluginEnabledRequest,
+    PluginInstallRequest, PluginManifest, PluginMutationResponse, RepositoryAction,
+    RepositoryActionEnabledRequest, RepositoryActionMutationResponse, RepositoryActionRunRequest,
+    RepositoryActionRunResponse, RepositoryExportRequest, RepositoryExportResponse,
+    RepositoryFolderRequest, RepositoryMutationRequest, RepositoryMutationResponse,
+    RepositoryRelocateRequest, RepositorySnapshot, RepositorySummary, RevisionActionRequest,
+    RevisionActionResponse, SearchRequest, SearchResponse, SmartFolderMutationRequest,
+    SmartFolderMutationResponse, SmartFolderResultSnapshot, SmartFolderTreeNode,
+    SmartFolderUpdateRequest, SyncRequest, SyncResult, ThumbnailRequest, ThumbnailResponse,
+    TrashMutationRequest,
 };
 
 #[tauri::command]
@@ -505,6 +505,13 @@ async fn get_api_design_snapshot(
         .await
 }
 
+#[tauri::command]
+async fn get_external_api_connection_status(
+    runtime: tauri::State<'_, RepositoryRuntime>,
+) -> Result<ExternalApiConnectionStatus, String> {
+    Ok(runtime.external_api_connection_status())
+}
+
 fn show_main_window(app: &AppHandle) {
     if let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
         let _ = window.show();
@@ -659,7 +666,8 @@ pub fn run() {
             delete_plugin,
             install_plugin_from_archive,
             get_cache_snapshot,
-            get_api_design_snapshot
+            get_api_design_snapshot,
+            get_external_api_connection_status
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

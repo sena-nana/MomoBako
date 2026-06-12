@@ -24,8 +24,7 @@ pub struct RepositoryRuntime {
     watcher_handle: Arc<Mutex<RepositoryWatcher>>,
     write_lock: Arc<Mutex<()>>,
     preview_addr: String,
-    _external_addr: String,
-    _external_token: String,
+    external_connection: ExternalApiConnectionStatus,
 }
 
 #[derive(Debug)]
@@ -57,15 +56,17 @@ impl RepositoryRuntime {
             write_lock.clone(),
             external_token.clone(),
         )?;
-        write_external_connection_file(&root, &external_addr, &external_token)?;
+        let started_at = now_unix_millis().to_string();
+        let external_connection =
+            build_external_connection_status(&root, &external_addr, &external_token, &started_at);
+        write_external_connection_file(&external_connection)?;
 
         Ok(Self {
             repository_state,
             watcher_handle,
             write_lock,
             preview_addr,
-            _external_addr: external_addr,
-            _external_token: external_token,
+            external_connection,
         })
     }
 
@@ -119,6 +120,13 @@ impl RepositoryRuntime {
 
     pub fn preview_source_url(&self, token: &str) -> String {
         format!("http://{}/preview/{token}", self.preview_addr)
+    }
+
+    pub fn external_api_connection_status(&self) -> ExternalApiConnectionStatus {
+        ExternalApiConnectionStatus {
+            ready: self.repository_state.ensure_initialized().is_ok(),
+            ..self.external_connection.clone()
+        }
     }
 }
 
@@ -177,6 +185,17 @@ struct ExternalConnectionFile {
     started_at: String,
 }
 
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExternalApiConnectionStatus {
+    pub base_url: String,
+    pub token: String,
+    pub version: String,
+    pub started_at: String,
+    pub ready: bool,
+    pub connection_file_path: String,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ExternalHealthResponse {
@@ -193,16 +212,38 @@ struct ExternalErrorResponse {
     retryable: bool,
 }
 
-fn write_external_connection_file(root: &Path, addr: &str, token: &str) -> Result<(), String> {
-    fs::create_dir_all(root).map_err(|error| error.to_string())?;
-    let payload = ExternalConnectionFile {
+fn build_external_connection_status(
+    root: &Path,
+    addr: &str,
+    token: &str,
+    started_at: &str,
+) -> ExternalApiConnectionStatus {
+    ExternalApiConnectionStatus {
         base_url: format!("http://{addr}/external/v1"),
         token: token.to_string(),
         version: "1".to_string(),
-        started_at: now_unix_millis().to_string(),
+        started_at: started_at.to_string(),
+        ready: true,
+        connection_file_path: root
+            .join(EXTERNAL_CONNECTION_FILE_NAME)
+            .to_string_lossy()
+            .to_string(),
+    }
+}
+
+fn write_external_connection_file(connection: &ExternalApiConnectionStatus) -> Result<(), String> {
+    let connection_file_path = Path::new(&connection.connection_file_path);
+    if let Some(parent) = connection_file_path.parent() {
+        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+    let payload = ExternalConnectionFile {
+        base_url: connection.base_url.clone(),
+        token: connection.token.clone(),
+        version: connection.version.clone(),
+        started_at: connection.started_at.clone(),
     };
     let json = serde_json::to_string_pretty(&payload).map_err(|error| error.to_string())?;
-    fs::write(root.join(EXTERNAL_CONNECTION_FILE_NAME), json).map_err(|error| error.to_string())
+    fs::write(connection_file_path, json).map_err(|error| error.to_string())
 }
 
 fn generate_external_api_token() -> Result<String, String> {
