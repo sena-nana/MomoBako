@@ -1,0 +1,16 @@
+{
+  "manifest_version": 3,
+  "name": "MomoBako External Asset Client",
+  "version": "0.1.0",
+  "description": "Send page assets to MomoBako through the source-neutral external asset API.",
+  "permissions": ["contextMenus", "storage", "activeTab", "scripting"],
+  "host_permissions": ["http://127.0.0.1/*"],
+  "background": {
+    "service_worker": "service-worker.js"
+  },
+  "action": {
+    "default_title": "MomoBako",
+    "default_popup": "popup.html"
+  },
+  "options_page": "options.html"
+}

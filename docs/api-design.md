@@ -4,6 +4,37 @@
 
 - Primary transport: Tauri commands backed by an in-process repository runtime
 - Runtime execution: blocking repository work runs on Tauri's blocking task pool
+- External client transport: a loopback HTTP API bound to `127.0.0.1` with a startup-generated bearer token written to the service connection file. The external API is source-neutral; browser extensions, native tools and other local clients all call the same contract.
+
+## External Asset API
+
+- Connection discovery:
+  - MomoBako writes `<serviceRoot>/external-api.json` at startup.
+  - Fields: `baseUrl`, `token`, `version`, `startedAt`.
+  - External clients send `Authorization: Bearer <token>` for every protected route.
+- `GET /external/v1/health`
+  - No token required.
+  - Returns `version`, `ready`, and generic capabilities such as `assets.add.remoteUrl`.
+- `GET /external/v1/repositories`
+  - Token required.
+  - Returns ready local filesystem repositories that can accept external additions.
+- `POST /external/v1/assets:add`
+  - Token required.
+  - Request:
+    - `repoId`
+    - optional `parentPath`
+    - optional `client`: `{ id?, name?, version? }` for audit/error context only
+    - `items[]`, currently supporting `{ kind: "remoteUrl", url, filename?, headers?, metadata? }`
+  - Core recognizes input kinds, not client origins. It does not branch on browser, collector or other source-specific identities.
+  - `remoteUrl` supports `http` and `https`; downloaded files are staged under service storage and then imported through the same local filesystem import path as desktop drag/drop.
+  - `metadata` is source-neutral and is written to the imported asset after sync. Clients may choose keys such as `sourceUrl`, `originTitle`, or `originReferrer`; Core treats them as ordinary metadata.
+  - Response:
+    - `requestId`
+    - `status`: `success` | `partial` | `failed`
+    - `imported[]`: `itemIndex`, optional `assetId`, `path`
+    - `failed[]`: `itemIndex`, `code`, `message`, `retryable`, optional `details`
+    - `summary`: `total`, `imported`, `failed`
+  - Boundary error codes: `unauthorized`, `notReady`, `repoNotFound`, `repoUnavailable`, `unsupportedRepositoryBackend`, `invalidTargetPath`, `invalidInput`, `downloadFailed`, `duplicateTarget`, `importRejected`, `internalError`.
 
 ## Repository API
 
