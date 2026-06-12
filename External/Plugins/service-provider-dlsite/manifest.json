@@ -1,0 +1,125 @@
+{
+  "pluginId": "momobako.service.provider.dlsite",
+  "legacyPluginIds": [
+    "builtin.service-provider-dlsite"
+  ],
+  "name": "DLsite Provider",
+  "version": "0.1.0",
+  "type": {
+    "layer": "provider-service",
+    "kind": "provider"
+  },
+  "kind": "provider",
+  "category": "service",
+  "description": "声明 DLsite 同人音声元数据、动态评分销量和封面候选源，供 ASMR 库手动触发补全。",
+  "capabilities": [
+    "metadata-provider",
+    "asmr",
+    "dlsite",
+    "external-id",
+    "cover-candidates",
+    "candidate-results"
+  ],
+  "enabled": false,
+  "sdk": "backend",
+  "entry": {},
+  "source": "builtin",
+  "runtime": "manifest-only",
+  "permissions": [
+    "network",
+    "useProvider",
+    "writeCandidates"
+  ],
+  "requires": [
+    "momobako.service.network-search"
+  ],
+  "optional": [],
+  "hooks": [
+    {
+      "slot": "candidateQueue",
+      "action": "provider.dlsite.writeCandidates",
+      "label": "写入 DLsite 候选"
+    },
+    {
+      "slot": "metadataMerge",
+      "action": "provider.dlsite.mergeCandidates",
+      "label": "合并 DLsite 候选"
+    }
+  ],
+  "contributes": {
+    "provider": {
+      "domain": "asmr",
+      "source": "dlsite",
+      "lookup": {
+        "idPattern": "RJ\\d{6,8}",
+        "detailUrlTemplate": "https://www.dlsite.com/maniax/work/=/product_id/{rjCode}.html"
+      },
+      "fields": [
+        "workId",
+        "rjCode",
+        "title",
+        "circle",
+        "voiceActors",
+        "series",
+        "scenarioTags",
+        "nsfw",
+        "ageRating",
+        "language",
+        "releaseDate",
+        "price",
+        "dlCount",
+        "reviewCount",
+        "rateCount",
+        "rateAverage",
+        "rateCountDetail",
+        "rank",
+        "cover",
+        "coverSourceWorkId",
+        "sourceUrl"
+      ],
+      "coverTypes": [
+        "main",
+        "sam",
+        "240x240",
+        "360x360"
+      ],
+      "settings": {
+        "language": {
+          "default": "zh-cn",
+          "options": [
+            "zh-cn",
+            "zh-tw",
+            "ja-jp"
+          ]
+        },
+        "proxy": {
+          "default": "",
+          "scheme": [
+            "http",
+            "https"
+          ]
+        },
+        "maxParallelism": {
+          "default": 4,
+          "minimum": 1,
+          "maximum": 16
+        },
+        "requestTimeoutMs": {
+          "default": 10000,
+          "minimum": 1000,
+          "maximum": 60000
+        }
+      },
+      "manualTrigger": true,
+      "candidateOnly": true,
+      "confidence": "external-id"
+    }
+  },
+  "compat": {
+    "sdkVersion": "1",
+    "legacyPluginIds": [
+      "builtin.service-provider-dlsite"
+    ]
+  },
+  "status": "disabled"
+}

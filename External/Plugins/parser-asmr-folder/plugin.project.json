@@ -1,0 +1,8 @@
+{
+  "pluginId": "momobako.parser.asmr-folder",
+  "build": {
+    "type": "manifest-only",
+    "sourceDir": "src",
+    "outputDir": ".dist/parser-asmr-folder"
+  }
+}

@@ -5,6 +5,7 @@ import App from "../src/App.vue";
 import { installContextMenu } from "../src/composables/useContextMenu";
 import { resetRepositoryWorkspaceForTests, useRepositoryWorkspace } from "../src/composables/useRepositoryWorkspace";
 import { usePlaylistPlayer } from "../src/composables/usePlaylistPlayer";
+import { waitForFileBrowserDerivedState } from "../src/composables/workspace/files";
 import { vContextMenu } from "../src/directives/contextMenu";
 import { createMomoBakoRouter } from "../src/router";
 import {
@@ -18,6 +19,7 @@ import {
   seedCrossRepositorySearchHit,
   seedMissingMockRepository,
   seedMixedMockRepositories,
+  seedLargeMockDirectory,
   seedMockPlaylists,
   seedMockPlugins,
   seedMockRepository,
@@ -379,7 +381,11 @@ describe("文件管理冒烟", () => {
 
     expect(screen.getAllByText("cover-final.psd").length).toBeGreaterThan(0);
     expect(workspace.fileBrowser.value?.entries.find((entry) => entry.path === "cover-final.psd")?.thumbnailPath ?? null).toBeNull();
-    expect(getInvokeCalls("ensure_thumbnail")).toHaveLength(1);
+    await waitFor(() => {
+      expect(getInvokeCalls("ensure_thumbnail").some((call) => (
+        (call.args?.request as { path?: string } | undefined)?.path === "cover-final.psd"
+      ))).toBe(true);
+    });
 
     delay.resolve();
     await waitFor(() => {
@@ -416,6 +422,21 @@ describe("文件管理冒烟", () => {
     expect(await screen.findByLabelText("素材展示方式")).toHaveValue("adaptive");
   });
 
+  it("derives large directory indexes asynchronously", async () => {
+    seedLargeMockDirectory(1200);
+    const workspace = useRepositoryWorkspace();
+    workspace.setActivePanel("files");
+
+    await renderApp();
+    expect(workspace.fileBrowser.value?.entries).toHaveLength(1200);
+
+    await waitForFileBrowserDerivedState();
+    expect(workspace.directoryEntries.value).toHaveLength(240);
+    expect(workspace.fileEntries.value).toHaveLength(960);
+    expect(workspace.fileBrowserEntryMap.value.get("asset-0001.png")?.assetId).toBe("asset-large-0001");
+    expect(workspace.selectedFilePaths.value).toEqual(["asset-0001.png"]);
+  });
+
   it("自适应展示方式使用缩略图自然比例调整素材宽度", async () => {
     seedMockRepository();
     const workspace = useRepositoryWorkspace();
@@ -428,8 +449,11 @@ describe("文件管理冒烟", () => {
         .toBe("C:/Mock/Thumbs/cover-final.psd.jpg");
     });
 
-    const thumbnail = document.querySelector<HTMLImageElement>(".files-list__item--file .files-list__preview img");
-    expect(thumbnail).not.toBeNull();
+    const thumbnail = await waitFor(() => {
+      const element = document.querySelector<HTMLImageElement>(".files-list__item--file .files-list__preview img");
+      expect(element).not.toBeNull();
+      return element as HTMLImageElement;
+    });
     Object.defineProperty(thumbnail, "naturalWidth", { configurable: true, value: 1600 });
     Object.defineProperty(thumbnail, "naturalHeight", { configurable: true, value: 900 });
 
@@ -603,6 +627,9 @@ describe("文件管理冒烟", () => {
 
       const browser = workspaceBrowser();
       await fireEvent.dragOver(browser, { dataTransfer: { files: [new File([], "new-shot.png")] } });
+      await waitFor(() => {
+        expect(document.querySelectorAll<HTMLElement>(".workspace-folder-tree__item").length).toBeGreaterThan(0);
+      });
       await fireEvent.dragEnter(folderTreeItem("Campaigns"));
       await vi.advanceTimersByTimeAsync(460);
 
@@ -1000,7 +1027,7 @@ describe("文件管理冒烟", () => {
     await fireEvent.click((playlistPage.closest(".playlist-page__panel") as HTMLElement).querySelector(".workspace-player__media") as HTMLElement);
 
     await waitFor(() => {
-      expect(document.querySelector(".files-preview-page__player-mount .mock-playlist-runtime-image")).toBeInTheDocument();
+      expect(document.querySelector(".files-preview-page__player-mount .media-playlist-runtime--image [data-path='cover-final.psd']")).toBeInTheDocument();
     });
     expect(screen.getByRole("heading", { name: "cover-final.psd" })).toBeInTheDocument();
 
@@ -1047,7 +1074,7 @@ describe("文件管理冒烟", () => {
 
     await fireEvent.click(screen.getByRole("button", { name: "显示筛选栏" }));
     expect(await screen.findByLabelText("资源筛选")).toBeInTheDocument();
-    await fireEvent.click(screen.getByRole("button", { name: "psd" }));
+    await fireEvent.click(await screen.findByRole("button", { name: "psd" }));
     await waitFor(() => {
       const searchCalls = getInvokeCalls("search_assets");
       expect(searchCalls.at(-1)?.args).toMatchObject({

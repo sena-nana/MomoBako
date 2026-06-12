@@ -28,6 +28,10 @@ export function register(ctx) {
         type: String,
         default: "",
       },
+      saveMetadata: {
+        type: Function,
+        default: null,
+      },
     },
     setup(props) {
       const state = ref("idle");
@@ -44,6 +48,8 @@ export function register(ctx) {
       const lyricsItems = ref([]);
       let objectUrl = null;
       let resizeObserver = null;
+      let lastProgressSaveAt = 0;
+      let lastProgressSaveSecond = -1;
 
       const mediaKind = computed(() => (
         isImageExtension(props.entry?.extension) ? "image" : isVideoExtension(props.entry?.extension) ? "video" : "audio"
@@ -161,6 +167,58 @@ export function register(ctx) {
         errorMessage.value = "媒体无法播放";
       }
 
+      function isAsmrAudioEntry() {
+        const metadata = props.entry?.metadata ?? {};
+        return mediaKind.value === "audio" && (
+          metadata.libraryKind === "asmr" ||
+          Boolean(metadata.workId) ||
+          Boolean(metadata.rjCode)
+        );
+      }
+
+      function currentTrackDurationMs(target) {
+        const duration = Number(target?.duration);
+        return Number.isFinite(duration) && duration > 0 ? Math.round(duration * 1000) : 0;
+      }
+
+      function buildProgressMetadata(target, statusOverride = null) {
+        const durationMs = currentTrackDurationMs(target);
+        const currentMs = Math.max(0, Math.round((Number(target?.currentTime) || 0) * 1000));
+        const progress = durationMs > 0 ? Math.min(100, Math.max(0, Math.round((currentMs / durationMs) * 100))) : 0;
+        const finished = statusOverride === "listened" || (durationMs > 0 && progress >= 95);
+        return {
+          listeningProgress: finished ? 100 : progress,
+          listeningStatus: finished ? "listened" : "listening",
+          lastListenedAt: new Date().toISOString(),
+          trackDurationMs: durationMs,
+          trackPositionMs: finished ? durationMs : currentMs,
+        };
+      }
+
+      function persistAsmrDuration(target) {
+        if (!props.saveMetadata || !props.entry || !isAsmrAudioEntry()) return;
+        const durationMs = currentTrackDurationMs(target);
+        if (durationMs <= 0 || props.entry.metadata?.trackDurationMs === durationMs) return;
+        void props.saveMetadata(props.entry, { trackDurationMs: durationMs });
+      }
+
+      function persistAsmrProgress(target, options = {}) {
+        if (!props.saveMetadata || !props.entry || !isAsmrAudioEntry()) return;
+        const metadata = buildProgressMetadata(target, options.status);
+        const currentSecond = Math.floor((Number(target?.currentTime) || 0));
+        const now = Date.now();
+        const shouldSave = options.force ||
+          metadata.listeningStatus === "listened" ||
+          (metadata.trackDurationMs > 0 &&
+            metadata.trackPositionMs > 0 &&
+            now - lastProgressSaveAt >= 15000 &&
+            Math.abs(currentSecond - lastProgressSaveSecond) >= 5);
+        if (!shouldSave || (metadata.listeningStatus !== "listened" && metadata.trackPositionMs <= 0)) return;
+        lastProgressSaveAt = now;
+        lastProgressSaveSecond = currentSecond;
+        void props.saveMetadata(props.entry, metadata);
+      }
+
       function setLyricItemRef(index, element) {
         if (!element) return;
         lyricsItems.value[index] = element;
@@ -184,8 +242,19 @@ export function register(ctx) {
         sourceUrl,
         state,
         errorMessage,
+        onAudioEnded(event) {
+          currentPlaybackMs.value = Math.round(((event.target?.currentTime ?? 0) * 1000));
+          persistAsmrProgress(event.target, { force: true, status: "listened" });
+        },
+        onAudioLoadedMetadata(event) {
+          persistAsmrDuration(event.target);
+        },
+        onAudioPause(event) {
+          persistAsmrProgress(event.target, { force: true });
+        },
         onAudioTimeUpdate(event) {
           currentPlaybackMs.value = Math.round(((event.target?.currentTime ?? 0) * 1000));
+          persistAsmrProgress(event.target);
         },
       };
     },
@@ -282,6 +351,9 @@ export function register(ctx) {
             controls: true,
             preload: "metadata",
             onError: this.handleMediaError,
+            onEnded: this.onAudioEnded,
+            onLoadedmetadata: this.onAudioLoadedMetadata,
+            onPause: this.onAudioPause,
             onTimeupdate: this.onAudioTimeUpdate,
           }, [
             h("source", { src: this.sourceUrl, type: this.sourceMediaType }),
@@ -672,7 +744,8 @@ export function register(ctx) {
         mediaElement?.pause();
       },
       seek(timeMs) {
-        currentTimeMs = Math.max(0, Math.min(durationMs, Math.round(timeMs)));
+        const requestedMs = Math.max(0, Math.round(timeMs));
+        currentTimeMs = durationMs > 0 ? Math.min(durationMs, requestedMs) : requestedMs;
         if (kind === "image") {
           emitTime();
           return;
@@ -680,6 +753,7 @@ export function register(ctx) {
         if (!mediaElement) return;
         mediaElement.currentTime = currentTimeMs / 1000;
         updateRuntimeLyrics();
+        emitTime();
       },
       configure(nextSettings = {}) {
         if (nextSettings.imageDurationMs !== undefined) {

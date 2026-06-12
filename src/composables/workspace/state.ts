@@ -3,7 +3,9 @@ import type {
   ApiDesignSnapshot,
   AssetDetail,
   CacheSnapshot,
+  ExternalApiConnectionStatus,
   FileBrowserSnapshot,
+  FileBrowserEntry,
   FileTreeNode,
   HardlinkCandidate,
   PlaylistDetail,
@@ -30,6 +32,7 @@ export type WorkspaceFilterState = {
   excludeFormats: string[];
   excludeQuery: string;
   excludePathPrefixes: string;
+  metadataFilters: string;
   excludeMetadataFilters: string;
   excludeNumberFilters: string;
   excludeDateFilters: string;
@@ -43,6 +46,22 @@ export type WorkspaceFilterState = {
 };
 
 export type WorkspaceRequestToken = number;
+
+export type FileBrowserDerivedState = {
+  entryMap: ReadonlyMap<string, FileBrowserEntry>;
+  directories: FileBrowserEntry[];
+  files: FileBrowserEntry[];
+  visibleEntries: FileBrowserEntry[];
+};
+
+export function createEmptyFileBrowserDerivedState(): FileBrowserDerivedState {
+  return {
+    entryMap: new Map(),
+    directories: [],
+    files: [],
+    visibleEntries: [],
+  };
+}
 
 export const STARTUP_TOTAL_STEPS = 3;
 
@@ -67,6 +86,7 @@ export function createInitialFilters(): WorkspaceFilterState {
     excludeFormats: [],
     excludeQuery: "",
     excludePathPrefixes: "",
+    metadataFilters: "",
     excludeMetadataFilters: "",
     excludeNumberFilters: "",
     excludeDateFilters: "",
@@ -89,6 +109,7 @@ export const activePreviewPath = ref<string | null>(null);
 export const activePanel = ref<WorkspacePanelKey>("files");
 export const currentDirectoryPath = ref("");
 export const fileBrowser = shallowRef<FileBrowserSnapshot | null>(null);
+export const fileBrowserDerived = shallowRef<FileBrowserDerivedState>(createEmptyFileBrowserDerivedState());
 export const fileTree = shallowRef<FileTreeNode[]>([]);
 export const selectedFilePath = ref<string | null>(null);
 export const selectedFilePaths = ref<string[]>([]);
@@ -111,6 +132,7 @@ export const lastSyncResult = shallowRef<SyncResult | null>(null);
 export const plugins = shallowRef<PluginManifest[]>([]);
 export const cacheSnapshot = shallowRef<CacheSnapshot | null>(null);
 export const apiDesign = shallowRef<ApiDesignSnapshot | null>(null);
+export const externalApiConnection = shallowRef<ExternalApiConnectionStatus | null>(null);
 export const workspaceStartup = ref<WorkspaceStartupState>(createInitialWorkspaceStartup());
 export const isLoadingRepositories = ref(false);
 export const isLoadingSnapshot = ref(false);

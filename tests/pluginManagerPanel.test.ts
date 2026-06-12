@@ -1,0 +1,120 @@
+import { render, screen } from "@testing-library/vue";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import PluginManagerPanel from "../src/components/PluginManagerPanel.vue";
+import type { PluginManifest } from "../src/types/repository";
+
+const plugins = vi.hoisted(() => ({ value: [] as PluginManifest[] }));
+const error = vi.hoisted(() => ({ value: "" }));
+
+vi.mock("../src/composables/useRepositoryWorkspace", () => ({
+  deletePluginInWorkspace: vi.fn(),
+  installPluginArchiveInWorkspace: vi.fn(),
+  loadSettingsData: vi.fn(),
+  setPluginEnabledInWorkspace: vi.fn(),
+  useRepositoryWorkspace: () => ({
+    plugins,
+    isLoadingSettingsData: false,
+    isManagingPlugins: false,
+    error,
+  }),
+}));
+
+vi.mock("@tauri-apps/plugin-dialog", () => ({
+  open: vi.fn(),
+}));
+
+function manifest(input: Partial<PluginManifest> & Pick<PluginManifest, "pluginId" | "name">): PluginManifest {
+  return {
+    pluginId: input.pluginId,
+    name: input.name,
+    version: "0.1.0",
+    kind: "metadata",
+    category: "service",
+    description: "Test plugin.",
+    capabilities: ["metadata"],
+    enabled: true,
+    sdk: "backend",
+    source: "user",
+    runtime: "manifest-only",
+    permissions: [],
+    requires: [],
+    optional: [],
+    hooks: [],
+    contributes: {},
+    compat: { sdkVersion: "1", legacyPluginIds: [] },
+    status: "ready",
+    dependencyStatus: {
+      required: [],
+      optional: [],
+      missingRequired: [],
+      missingOptional: [],
+      disabledRequired: [],
+      disabledOptional: [],
+    },
+    degraded: false,
+    ...input,
+  };
+}
+
+describe("PluginManagerPanel", () => {
+  beforeEach(() => {
+    plugins.value = [];
+    error.value = "";
+  });
+
+  it("shows dependency, permission, disable reason, and degraded feedback", () => {
+    plugins.value = [
+      manifest({
+        pluginId: "user.dependent",
+        name: "Dependent Plugin",
+        permissions: ["readMetadata", "network"],
+        requires: ["user.provider"],
+        optional: ["user.optional-helper"],
+        status: "ready",
+        degraded: true,
+        degradationReason: "可选依赖不可用，部分能力降级：Optional Helper。",
+        dependencyStatus: {
+          required: [
+            {
+              pluginId: "user.provider",
+              name: "Provider",
+              status: "ready",
+              enabled: true,
+              available: true,
+            },
+          ],
+          optional: [
+            {
+              pluginId: "user.optional-helper",
+              name: "Optional Helper",
+              status: "disabled",
+              enabled: false,
+              available: false,
+            },
+          ],
+          missingRequired: [],
+          missingOptional: [],
+          disabledRequired: [],
+          disabledOptional: ["Optional Helper"],
+        },
+      }),
+      manifest({
+        pluginId: "user.missing-required",
+        name: "Missing Required",
+        enabled: false,
+        status: "unavailable",
+        disableReason: "缺少必需依赖：Provider。",
+      }),
+    ];
+
+    render(PluginManagerPanel);
+
+    expect(screen.getByText("降级运行")).toBeInTheDocument();
+    expect(screen.getByText("可选依赖不可用，部分能力降级：Optional Helper。")).toBeInTheDocument();
+    expect(screen.getByText("必需 Provider · 可用")).toBeInTheDocument();
+    expect(screen.getByText("可选 Optional Helper · 未启用")).toBeInTheDocument();
+    expect(screen.getByText("readMetadata")).toBeInTheDocument();
+    expect(screen.getByText("network")).toBeInTheDocument();
+    expect(screen.getByText("缺少必需依赖：Provider。")).toBeInTheDocument();
+  });
+});

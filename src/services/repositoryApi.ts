@@ -1,11 +1,14 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
-import { openPath, revealItemInDir } from "@tauri-apps/plugin-opener";
+import { openPath, openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
 import type {
   ApiDesignSnapshot,
+  AsmrMetadataLookupRequest,
+  AsmrMetadataLookupResponse,
   AssetDetail,
   CacheSnapshot,
   BinaryFileWriteRequest,
   BinaryFileWriteResponse,
+  ExternalApiConnectionStatus,
   FileBrowserRequest,
   FileBrowserSnapshot,
   FileCopyRequest,
@@ -193,6 +196,10 @@ export function readPluginArchiveText(request: PluginArchiveReadRequest) {
   return invoke<PluginArchiveTextResponse>("read_plugin_archive_text", { request });
 }
 
+export function lookupAsmrMetadataCandidate(request: AsmrMetadataLookupRequest) {
+  return invoke<AsmrMetadataLookupResponse>("lookup_asmr_metadata_candidate", { request });
+}
+
 export function writeBinaryFile(request: BinaryFileWriteRequest) {
   return invoke<BinaryFileWriteResponse>("write_binary_file", { request });
 }
@@ -301,6 +308,10 @@ export function getApiDesignSnapshot() {
   return invoke<ApiDesignSnapshot>("get_api_design_snapshot");
 }
 
+export function getExternalApiConnectionStatus() {
+  return invoke<ExternalApiConnectionStatus>("get_external_api_connection_status");
+}
+
 export function startExternalFileDrag(paths: string[], icon = fallbackFileDragIcon) {
   const onEvent = new Channel<ExternalFileDragEvent>();
   return invoke<void>("plugin:drag|start_drag", {
@@ -313,6 +324,10 @@ export function startExternalFileDrag(paths: string[], icon = fallbackFileDragIc
 
 export function openRepositoryPath(path: string) {
   return openPath(path);
+}
+
+export function openExternalUrl(url: string) {
+  return openUrl(url);
 }
 
 export function revealRepositoryPath(path: string) {

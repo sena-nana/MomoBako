@@ -65,6 +65,7 @@
   - tags
   - metadata values
 - Inclusion filters run first. Exclusion filters then remove matching rows by text query, path prefixes, tags, formats, metadata key/value, numeric ranges, or date ranges.
+- Core search and file browsing own common sorting behavior, including `random`; library-kind plugins only surface shortcuts that call these core sort fields.
 - Indexed columns exist for:
   - `assets(repo_id, path)`
   - `assets(filename)`
@@ -98,6 +99,7 @@
   - `preview` renders files and thumbnails. Library-kind plugins can prefer preview plugins but do not own preview rendering.
   - `service` provides shared external or background capabilities such as network search, metadata providers, download queues, OCR/ASR, vector search or filesystem watching.
 - Core-hosted capabilities such as playlist, PiP, progress, candidate queue, batch organize, download queue, metadata merge, rename/move execution, audit log and unified search are exposed through declarative `hooks`. Plugins contribute data and actions; core owns state, confirmation and dangerous writes.
+- ASMR support follows that split: the ASMR library-kind declares RJ work semantics, views, facets and progress fields; the ASMR folder parser declares track-tree and local lyric candidates; DLsite and ASMR One providers declare manual metadata candidates. Local sync may seed safe default ASMR metadata for RJ paths so the generic browser/search surfaces work before provider candidates are merged. The desktop metadata panel can fetch, import and confirm provider-shaped ASMR candidates while preserving manual review fields and listening progress.
 - Frontend preview registration is driven by runtime plugin manifests and `.momoplug` bundle loading; preview modules are read from the archive at runtime and do not enter the host frontend bundle.
 - Backend plugins use a C ABI boundary with JSON request/response envelopes:
   - `momobako_plugin_manifest`

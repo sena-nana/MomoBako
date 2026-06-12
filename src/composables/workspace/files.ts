@@ -1,12 +1,14 @@
 import { getFileBrowser } from "../../services/repositoryApi";
-import type { FileBrowserSnapshot } from "../../types/repository";
+import type { FileBrowserEntry, FileBrowserSnapshot } from "../../types/repository";
 import {
   activePanel,
   activeRepoId,
   activeSnapshot,
   currentDirectoryPath,
+  createEmptyFileBrowserDerivedState,
   error,
   fileBrowser,
+  fileBrowserDerived,
   fileTree,
   isLoadingFileBrowser,
   selectedFilePaths,
@@ -21,6 +23,7 @@ import {
 } from "./tasks";
 import { loadThumbnailsForSnapshot } from "./thumbnails";
 import { joinRepositoryPath } from "./paths";
+import { shouldYieldEvery, yieldEvery } from "./scheduler";
 
 export type FileBrowserLoadOptions = {
   includeTree?: boolean;
@@ -35,20 +38,41 @@ export function getDefaultFileBrowserSelection(snapshot: FileBrowserSnapshot) {
     ?? null;
 }
 
-export function applyFileBrowserSnapshot(snapshot: FileBrowserSnapshot) {
-  const displaySnapshot = {
-    ...snapshot,
-    entries: snapshot.entries.map((entry) => ({ ...entry })),
-  };
-  fileBrowser.value = displaySnapshot;
-  if (displaySnapshot.tree) {
-    fileTree.value = displaySnapshot.tree;
-  }
-  currentDirectoryPath.value = displaySnapshot.currentPath;
+let derivedRequestId = 0;
+let latestDerivedPromise: Promise<void> = Promise.resolve();
 
-  const entryPaths = new Set(displaySnapshot.entries.map((entry) => entry.path));
-  let nextSelectedPaths = selectedFilePaths.value.filter((path) => entryPaths.has(path));
-  let nextPrimaryPath = selectedFilePath.value && entryPaths.has(selectedFilePath.value)
+async function buildFileBrowserDerivedState(snapshot: FileBrowserSnapshot, requestId: number) {
+  const entryMap = new Map<string, FileBrowserEntry>();
+  const directories: FileBrowserEntry[] = [];
+  const files: FileBrowserEntry[] = [];
+
+  for (let index = 0; index < snapshot.entries.length; index += 1) {
+    const entry = snapshot.entries[index];
+    entryMap.set(entry.path, entry);
+    if (entry.kind === "directory") {
+      directories.push(entry);
+    } else {
+      files.push(entry);
+    }
+    if (shouldYieldEvery(index)) {
+      await yieldEvery(index);
+    }
+    if (requestId !== derivedRequestId) return;
+  }
+
+  if (requestId !== derivedRequestId) return;
+  fileBrowserDerived.value = {
+    entryMap,
+    directories,
+    files,
+    visibleEntries: [...directories, ...files],
+  };
+  applySelectionForEntryMap(snapshot, entryMap);
+}
+
+function applySelectionForEntryMap(snapshot: FileBrowserSnapshot, entryMap: ReadonlyMap<string, FileBrowserEntry>) {
+  let nextSelectedPaths = selectedFilePaths.value.filter((path) => entryMap.has(path));
+  let nextPrimaryPath = selectedFilePath.value && entryMap.has(selectedFilePath.value)
     ? selectedFilePath.value
     : null;
 
@@ -57,7 +81,7 @@ export function applyFileBrowserSnapshot(snapshot: FileBrowserSnapshot) {
   }
 
   if (!nextSelectedPaths.length) {
-    nextPrimaryPath = getDefaultFileBrowserSelection(displaySnapshot);
+    nextPrimaryPath = getDefaultFileBrowserSelection(snapshot);
     nextSelectedPaths = nextPrimaryPath ? [nextPrimaryPath] : [];
   } else if (!nextPrimaryPath) {
     nextPrimaryPath = nextSelectedPaths[0] ?? null;
@@ -65,10 +89,32 @@ export function applyFileBrowserSnapshot(snapshot: FileBrowserSnapshot) {
 
   selectedFilePaths.value = nextSelectedPaths;
   selectedFilePath.value = nextPrimaryPath;
-  selectionAnchorPath.value = selectionAnchorPath.value && entryPaths.has(selectionAnchorPath.value)
+  selectionAnchorPath.value = selectionAnchorPath.value && entryMap.has(selectionAnchorPath.value)
     ? selectionAnchorPath.value
     : nextPrimaryPath;
-  loadThumbnailsForSnapshot(displaySnapshot);
+}
+
+export function applyFileBrowserSnapshot(snapshot: FileBrowserSnapshot) {
+  const requestId = ++derivedRequestId;
+  fileBrowser.value = snapshot;
+  fileBrowserDerived.value = createEmptyFileBrowserDerivedState();
+  if (snapshot.tree) {
+    fileTree.value = snapshot.tree;
+  }
+  currentDirectoryPath.value = snapshot.currentPath;
+  const defaultSelection = getDefaultFileBrowserSelection(snapshot);
+  if (!selectedFilePath.value) {
+    selectedFilePath.value = defaultSelection;
+    selectedFilePaths.value = defaultSelection ? [defaultSelection] : [];
+    selectionAnchorPath.value = defaultSelection;
+  }
+  latestDerivedPromise = buildFileBrowserDerivedState(snapshot, requestId);
+  void latestDerivedPromise;
+  loadThumbnailsForSnapshot(snapshot);
+}
+
+export function waitForFileBrowserDerivedState() {
+  return latestDerivedPromise;
 }
 
 export async function loadFileBrowserForDirectory(directoryPath = "", options: FileBrowserLoadOptions = {}) {

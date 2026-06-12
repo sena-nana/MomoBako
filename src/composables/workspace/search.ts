@@ -31,6 +31,7 @@ export function buildSearchRequest(query = searchQuery.value): SearchRequest {
   const metadataFilters = [
     ...nextFilters.colors.map((value) => ({ key: "color", value })),
     ...nextFilters.shapes.map((value) => ({ key: "shape", value })),
+    ...parseMetadataFiltersInput(nextFilters.metadataFilters),
   ];
   const sortField = nextFilters.sortField.trim();
 
