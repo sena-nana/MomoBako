@@ -22,14 +22,15 @@ function createEntry(metadata: Record<string, unknown>): FileBrowserEntry {
   };
 }
 
-function renderEditor(entry: FileBrowserEntry) {
+function renderEditor(entry: FileBrowserEntry, saveMetadata = vi.fn(), saveCoverThumbnail = vi.fn()) {
   return render(FileMetadataEditor, {
     props: {
       entry,
       isSaving: false,
       availableTags: [],
       tagGroups: [],
-      saveMetadata: vi.fn(),
+      saveMetadata,
+      saveCoverThumbnail,
     },
   });
 }
@@ -65,5 +66,169 @@ describe("FileMetadataEditor", () => {
       path: "https://example.test/assets/imported-image.png",
     });
     expect(writeText).toHaveBeenCalledWith("https://example.test/assets/imported-image.png");
+  });
+
+  it("显示 ASMR 作品 metadata 专用区", () => {
+    renderEditor(createEntry({
+      libraryKind: "asmr",
+      workId: "RJ123456",
+      rjCode: "RJ123456",
+      workTitle: "Rain Voice",
+      workRoot: "Voice/RJ123456 Rain Voice",
+      trackTitle: "01 intro.mp3",
+      circle: "Blue Circle",
+      voiceActors: ["Aoi", "Momo"],
+      scenarioTags: ["睡眠", "耳语"],
+      lyricStatus: "local",
+      listeningStatus: "listening",
+      listeningProgress: 42,
+      trackDurationMs: 180000,
+      rateAverage: 4.8,
+      reviewCount: 12,
+    }));
+
+    const asmrRegion = screen.getByRole("region", { name: "ASMR 信息" });
+    expect(asmrRegion).toHaveTextContent("RJ123456");
+    expect(asmrRegion).toHaveTextContent("Rain Voice");
+    expect(asmrRegion).toHaveTextContent("Blue Circle");
+    expect(asmrRegion).toHaveTextContent("Aoi，Momo");
+    expect(asmrRegion).toHaveTextContent("收听中 · 42%");
+    expect(asmrRegion).toHaveTextContent("3:00");
+    expect(asmrRegion).toHaveTextContent("4.8");
+  });
+
+  it("显示并应用 ASMR provider 候选，同时跳过人工字段", async () => {
+    const saveMetadata = vi.fn().mockResolvedValue(undefined);
+    renderEditor(createEntry({
+      libraryKind: "asmr",
+      workId: "RJ123456",
+      workTitle: "Rain Voice",
+      providerCandidates: [
+        {
+          source: "dlsite",
+          confidence: "external-id",
+          fields: {
+            workTitle: "Rain Voice Deluxe",
+            circle: "Blue Circle",
+            voiceActors: ["Aoi", "Momo"],
+            rating: 5,
+            comment: "manual note",
+            listeningStatus: "listened",
+          },
+        },
+      ],
+    }), saveMetadata);
+
+    const candidateRegion = screen.getByRole("region", { name: "ASMR 元数据候选" });
+    expect(candidateRegion).toHaveTextContent("dlsite");
+    expect(candidateRegion).toHaveTextContent("workTitle=Rain Voice Deluxe");
+    expect(candidateRegion).toHaveTextContent("voiceActors=Aoi，Momo");
+    expect(candidateRegion).toHaveTextContent("跳过 rating，comment，listeningStatus");
+
+    await fireEvent.click(within(candidateRegion).getByText("应用"));
+
+    expect(saveMetadata).toHaveBeenCalledWith(expect.objectContaining({
+      path: "References/imported-image.png",
+    }), {
+      workTitle: "Rain Voice Deluxe",
+      circle: "Blue Circle",
+      voiceActors: ["Aoi", "Momo"],
+    });
+  });
+
+  it("支持将 ASMR provider 候选封面保存为条目缩略图", async () => {
+    const saveMetadata = vi.fn().mockResolvedValue(undefined);
+    const saveCoverThumbnail = vi.fn().mockResolvedValue(undefined);
+    renderEditor(createEntry({
+      libraryKind: "asmr",
+      workId: "RJ123456",
+      workTitle: "Rain Voice",
+      providerCandidates: [
+        {
+          source: "dlsite",
+          confidence: "external-id",
+          fields: {
+            workTitle: "Rain Voice Deluxe",
+            coverUrl: "https://img.example.test/RJ123456.jpg",
+          },
+        },
+      ],
+    }), saveMetadata, saveCoverThumbnail);
+
+    const candidateRegion = screen.getByRole("region", { name: "ASMR 元数据候选" });
+    await fireEvent.click(within(candidateRegion).getByText("封面"));
+
+    expect(saveCoverThumbnail).toHaveBeenCalledWith(
+      "References/imported-image.png",
+      "https://img.example.test/RJ123456.jpg",
+    );
+    expect(saveMetadata).not.toHaveBeenCalled();
+  });
+
+  it("支持手动导入 ASMR provider 候选 JSON", async () => {
+    const saveMetadata = vi.fn().mockResolvedValue(undefined);
+    renderEditor(createEntry({
+      libraryKind: "asmr",
+      workId: "RJ123456",
+      workTitle: "Rain Voice",
+    }), saveMetadata);
+
+    const candidateRegion = screen.getByRole("region", { name: "ASMR 元数据候选" });
+    await fireEvent.click(within(candidateRegion).getByText("导入"));
+    await fireEvent.update(within(candidateRegion).getByLabelText("ASMR 候选 JSON"), JSON.stringify({
+      source: "dlsite",
+      confidence: "manual",
+      fields: {
+        workTitle: "Rain Voice Deluxe",
+        circle: "Blue Circle",
+      },
+    }));
+    await fireEvent.click(within(candidateRegion).getByText("导入候选"));
+
+    expect(saveMetadata).toHaveBeenCalledWith(expect.objectContaining({
+      path: "References/imported-image.png",
+    }), {
+      providerCandidates: [
+        {
+          source: "dlsite",
+          confidence: "manual",
+          fields: {
+            workTitle: "Rain Voice Deluxe",
+            circle: "Blue Circle",
+          },
+        },
+      ],
+    });
+  });
+
+  it("支持通过后端 provider 抓取 ASMR 候选", async () => {
+    const saveMetadata = vi.fn().mockResolvedValue(undefined);
+    renderEditor(createEntry({
+      libraryKind: "asmr",
+      workId: "RJ123456",
+      rjCode: "RJ123456",
+      workTitle: "Rain Voice",
+    }), saveMetadata);
+
+    const candidateRegion = screen.getByRole("region", { name: "ASMR 元数据候选" });
+    await fireEvent.click(within(candidateRegion).getByText("导入"));
+    await fireEvent.click(within(candidateRegion).getByText("抓取候选"));
+
+    expect(saveMetadata).toHaveBeenCalledWith(expect.objectContaining({
+      path: "References/imported-image.png",
+    }), {
+      providerCandidates: [
+        {
+          source: "dlsite",
+          confidence: "external-id",
+          fields: {
+            workId: "RJ123456",
+            rjCode: "RJ123456",
+            workTitle: "Fetched Rain Voice",
+            circle: "Fetched Circle",
+          },
+        },
+      ],
+    });
   });
 });

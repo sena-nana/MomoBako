@@ -1,5 +1,6 @@
 {
   "pluginId": "momobako.preview.media",
+  "legacyPluginIds": ["builtin.media-preview"],
   "name": "Media Preview",
   "version": "1.0.0",
   "type": {
@@ -19,11 +20,6 @@
       "export": "register"
     }
   },
-  "contributes": {
-    "preview": {
-      "extensions": ["png", "jpg", "jpeg", "webp", "gif", "bmp", "avif", "svg", "mp4", "mov", "mkv", "webm", "avi", "m4v", "mp3", "wav", "ogg", "flac", "m4a", "aac", "opus"]
-    }
-  },
   "permissions": ["preview:read"],
   "requires": [],
   "optional": ["momobako.parser.audio", "momobako.parser.video"],
@@ -34,13 +30,13 @@
   ],
   "contributes": {
     "preview": {
-      "extensions": ["mp4", "mov", "mkv", "webm", "avi", "m4v", "mp3", "wav", "ogg", "flac", "m4a", "aac", "opus"],
+      "extensions": ["png", "jpg", "jpeg", "webp", "gif", "bmp", "avif", "svg", "mp4", "mov", "mkv", "webm", "avi", "m4v", "mp3", "wav", "ogg", "flac", "m4a", "aac", "opus"],
       "thumbnail": false
     }
   },
   "compat": {
     "sdkVersion": "1",
-    "legacyPluginIds": []
+    "legacyPluginIds": ["builtin.media-preview"]
   },
   "source": "builtin",
   "status": "ready"

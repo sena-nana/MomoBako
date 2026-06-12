@@ -5,13 +5,14 @@ use std::{
     collections::{BTreeMap, HashMap, HashSet},
     ffi::{CStr, CString, OsString},
     fs::{self, File, OpenOptions},
+    hash::{Hash, Hasher},
     io::{Read, Write},
     os::raw::c_char,
     path::{Path, PathBuf},
     process::Command,
     sync::{Arc, Mutex, OnceLock},
     thread,
-    time::{Duration, SystemTime},
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 
@@ -24,6 +25,7 @@ const REPO_METADATA_FILE_NAME: &str = "repository.json";
 const REPO_DB_FILE_NAME: &str = "metadata.db";
 const REPO_SCHEMA_VERSION: i64 = 1;
 const THUMBNAIL_SIZE: u32 = 256;
+const MAX_REMOTE_THUMBNAIL_BYTES: u64 = 10 * 1024 * 1024;
 
 static FFMPEG_READY: OnceLock<Result<(), String>> = OnceLock::new();
 const REGISTRY_SCHEMA_SQL: &str = r#"
@@ -789,6 +791,32 @@ pub struct PluginArchiveTextResponse {
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct AsmrMetadataLookupRequest {
+    pub provider: String,
+    pub rj_code: String,
+    pub detail_url: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AsmrMetadataCandidatePayload {
+    pub source: String,
+    pub confidence: String,
+    pub fields: BTreeMap<String, serde_json::Value>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AsmrMetadataLookupResponse {
+    pub provider: String,
+    pub rj_code: String,
+    pub source_url: String,
+    pub fetched_at: String,
+    pub candidate: AsmrMetadataCandidatePayload,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct BinaryFileWriteRequest {
     pub path: String,
     pub bytes: Vec<u8>,
@@ -1047,6 +1075,7 @@ pub struct ThumbnailRequest {
     pub path: String,
     pub action: Option<String>,
     pub source_path: Option<String>,
+    pub source_url: Option<String>,
     pub image_bytes: Option<Vec<u8>>,
     pub media_type: Option<String>,
 }
@@ -2167,6 +2196,14 @@ impl RepositoryState {
             path: archive_entry_path,
             text,
         })
+    }
+
+    pub fn lookup_asmr_metadata_candidate(
+        &self,
+        request: AsmrMetadataLookupRequest,
+    ) -> Result<AsmrMetadataLookupResponse, String> {
+        self.ensure_initialized()?;
+        lookup_asmr_metadata_candidate(request)
     }
 
     pub fn list_smart_folders(&self, repo_id: &str) -> Result<Vec<SmartFolderTreeNode>, String> {
@@ -6070,6 +6107,10 @@ fn sort_search_hits(results: &mut [SearchHit], sort: Option<&SearchSort>) {
     };
     let field = sort.field.trim();
     let normalized_field = field.to_lowercase();
+    if normalized_field == "random" {
+        sort_by_random_key(results, |hit| &hit.path, sort.direction.trim().eq_ignore_ascii_case("desc"));
+        return;
+    }
     let descending = sort.direction.trim().eq_ignore_ascii_case("desc");
     results.sort_by(|left, right| {
         let ordering =
@@ -6688,6 +6729,10 @@ fn sort_file_browser_entries(entries: &mut [FileBrowserEntry], sort: Option<&Sea
     };
     let field = sort.field.trim();
     let normalized_field = field.to_lowercase();
+    if normalized_field == "random" {
+        sort_by_random_key(entries, |entry| &entry.path, sort.direction.trim().eq_ignore_ascii_case("desc"));
+        return;
+    }
     let descending = sort.direction.trim().eq_ignore_ascii_case("desc");
     entries.sort_by(|left, right| {
         let ordering =
@@ -6705,6 +6750,29 @@ fn sort_file_browser_entries(entries: &mut [FileBrowserEntry], sort: Option<&Sea
                     _ => left.path.to_lowercase().cmp(&right.path.to_lowercase()),
                 },
             );
+        if descending {
+            ordering.reverse()
+        } else {
+            ordering
+        }
+    });
+}
+
+fn sort_by_random_key<T>(items: &mut [T], key: impl Fn(&T) -> &str, descending: bool) {
+    use std::collections::hash_map::DefaultHasher;
+
+    let seed = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos() as u64)
+        .unwrap_or(0);
+    items.sort_by(|left, right| {
+        let mut left_hasher = DefaultHasher::new();
+        seed.hash(&mut left_hasher);
+        key(left).hash(&mut left_hasher);
+        let mut right_hasher = DefaultHasher::new();
+        seed.hash(&mut right_hasher);
+        key(right).hash(&mut right_hasher);
+        let ordering = left_hasher.finish().cmp(&right_hasher.finish());
         if descending {
             ordering.reverse()
         } else {
@@ -6809,6 +6877,73 @@ fn infer_value_type(value: &serde_json::Value) -> &'static str {
         serde_json::Value::Bool(_) => "boolean",
         _ => "json",
     }
+}
+
+#[derive(Debug, Clone)]
+struct AsmrWorkContext {
+    work_id: String,
+    work_root: String,
+    work_title: String,
+}
+
+impl AsmrWorkContext {
+    fn from_relative_path(relative_path: &str) -> Option<Self> {
+        let parts = relative_path
+            .split('/')
+            .filter(|part| !part.is_empty())
+            .collect::<Vec<_>>();
+        let (index, work_id) = parts
+            .iter()
+            .enumerate()
+            .find_map(|(index, part)| extract_rj_work_id(part).map(|work_id| (index, work_id)))?;
+        let work_root = parts[..=index].join("/");
+        let work_title = parts[index].to_string();
+
+        Some(Self {
+            work_id,
+            work_root,
+            work_title,
+        })
+    }
+}
+
+fn extract_rj_work_id(value: &str) -> Option<String> {
+    let bytes = value.as_bytes();
+    for index in 0..bytes.len().saturating_sub(1) {
+        if !bytes[index].eq_ignore_ascii_case(&b'R')
+            || !bytes[index + 1].eq_ignore_ascii_case(&b'J')
+        {
+            continue;
+        }
+
+        let digits_start = index + 2;
+        let mut digits_end = digits_start;
+        while digits_end < bytes.len() && bytes[digits_end].is_ascii_digit() {
+            digits_end += 1;
+        }
+        let digit_count = digits_end.saturating_sub(digits_start);
+        if (6..=8).contains(&digit_count) {
+            let digits = &value[digits_start..digits_end];
+            return Some(format!("RJ{digits}"));
+        }
+    }
+
+    None
+}
+
+fn is_asmr_audio_extension(extension: &str) -> bool {
+    matches!(
+        extension,
+        "mp3" | "ogg" | "opus" | "wav" | "aac" | "flac" | "webm" | "mp4" | "m4a" | "mka"
+    )
+}
+
+fn is_asmr_lyric_extension(extension: &str) -> bool {
+    matches!(extension, "lrc" | "srt" | "ass" | "vtt")
+}
+
+fn is_asmr_companion_extension(extension: &str) -> bool {
+    matches!(extension, "txt" | "pdf" | "jpg" | "jpeg" | "png" | "webp")
 }
 
 fn parse_json_column(value_json: &str) -> Result<serde_json::Value, rusqlite::Error> {
@@ -6928,6 +7063,7 @@ fn sync_repository_files(
             ensure_default_metadata(
                 tx,
                 &asset_id,
+                &file.relative_path,
                 &file.filename,
                 &file.extension,
                 &asset_created_at,
@@ -6992,6 +7128,7 @@ fn sync_repository_files(
             insert_default_metadata(
                 tx,
                 &asset_id,
+                &file.relative_path,
                 &file.filename,
                 &file.extension,
                 &now,
@@ -7186,6 +7323,7 @@ fn insert_event(
 fn insert_default_metadata(
     tx: &Transaction<'_>,
     asset_id: &str,
+    relative_path: &str,
     filename: &str,
     extension: &str,
     added_to_library_at: &str,
@@ -7195,6 +7333,7 @@ fn insert_default_metadata(
     ensure_default_metadata(
         tx,
         asset_id,
+        relative_path,
         filename,
         extension,
         added_to_library_at,
@@ -7207,6 +7346,7 @@ fn insert_default_metadata(
 fn ensure_default_metadata(
     tx: &Transaction<'_>,
     asset_id: &str,
+    relative_path: &str,
     filename: &str,
     extension: &str,
     added_to_library_at: &str,
@@ -7249,6 +7389,7 @@ fn ensure_default_metadata(
         ));
         defaults.push(("palette".to_string(), serde_json::json!(palette)));
     }
+    defaults.extend(asmr_default_metadata(relative_path, filename, extension));
 
     for (key, value) in defaults {
         if overwrite_existing {
@@ -7283,6 +7424,87 @@ fn ensure_default_metadata(
     }
 
     Ok(())
+}
+
+fn asmr_default_metadata(
+    relative_path: &str,
+    filename: &str,
+    extension: &str,
+) -> Vec<(String, serde_json::Value)> {
+    let Some(context) = AsmrWorkContext::from_relative_path(relative_path) else {
+        return Vec::new();
+    };
+    let extension = extension.to_ascii_lowercase();
+    let mut defaults = vec![
+        (
+            "libraryKind".to_string(),
+            serde_json::Value::String("asmr".to_string()),
+        ),
+        (
+            "workId".to_string(),
+            serde_json::Value::String(context.work_id.clone()),
+        ),
+        (
+            "rjCode".to_string(),
+            serde_json::Value::String(context.work_id.clone()),
+        ),
+        (
+            "workRoot".to_string(),
+            serde_json::Value::String(context.work_root),
+        ),
+        (
+            "workTitle".to_string(),
+            serde_json::Value::String(context.work_title),
+        ),
+        (
+            "trackPath".to_string(),
+            serde_json::Value::String(relative_path.to_string()),
+        ),
+        (
+            "trackTitle".to_string(),
+            serde_json::Value::String(filename.to_string()),
+        ),
+        (
+            "sourceUrl".to_string(),
+            serde_json::Value::String(format!(
+                "https://www.dlsite.com/maniax/work/=/product_id/{}.html",
+                context.work_id
+            )),
+        ),
+    ];
+
+    if is_asmr_audio_extension(&extension) {
+        defaults.extend([
+            (
+                "asmrEntryKind".to_string(),
+                serde_json::Value::String("audio".to_string()),
+            ),
+            (
+                "listeningStatus".to_string(),
+                serde_json::Value::String("unlistened".to_string()),
+            ),
+            ("listeningProgress".to_string(), serde_json::json!(0)),
+            ("trackDurationMs".to_string(), serde_json::json!(0)),
+        ]);
+    } else if is_asmr_lyric_extension(&extension) {
+        defaults.extend([
+            (
+                "asmrEntryKind".to_string(),
+                serde_json::Value::String("lyric".to_string()),
+            ),
+            (
+                "lyricStatus".to_string(),
+                serde_json::Value::String("local".to_string()),
+            ),
+        ]);
+    } else if is_asmr_companion_extension(&extension) {
+        defaults.push((
+            "asmrEntryKind".to_string(),
+            serde_json::Value::String("companion".to_string()),
+        ));
+    }
+
+    defaults
 }
 
 fn upsert_metadata_value(
@@ -7985,6 +8207,13 @@ fn thumbnail_bytes_from_request(request: &ThumbnailRequest) -> Result<Vec<u8>, S
         return Ok(bytes.clone());
     }
 
+    if let Some(source_url) = request.source_url.as_deref().map(str::trim).filter(|value| !value.is_empty()) {
+        if request.action.as_deref() != Some("save") {
+            return Err("thumbnail sourceUrl can only be used with save action".to_string());
+        }
+        return download_remote_thumbnail_bytes(source_url);
+    }
+
     let source_path = request
         .source_path
         .as_deref()
@@ -7994,6 +8223,38 @@ fn thumbnail_bytes_from_request(request: &ThumbnailRequest) -> Result<Vec<u8>, S
         return Err(format!("thumbnail source file not found: {source_path}"));
     }
     fs::read(path).map_err(io_error)
+}
+
+fn download_remote_thumbnail_bytes(url: &str) -> Result<Vec<u8>, String> {
+    if !url.starts_with("http://") && !url.starts_with("https://") {
+        return Err("thumbnail sourceUrl only supports http and https URLs".to_string());
+    }
+    let client = reqwest::blocking::Client::builder()
+        .user_agent("MomoBakoThumbnail/1")
+        .timeout(Duration::from_secs(30))
+        .build()
+        .map_err(|error| format!("thumbnail download client error: {error}"))?;
+    let response = client
+        .get(url)
+        .send()
+        .map_err(|error| format!("thumbnail download request failed: {error}"))?;
+    let status = response.status();
+    if !status.is_success() {
+        return Err(format!("thumbnail download returned HTTP {status}"));
+    }
+    if response
+        .content_length()
+        .is_some_and(|length| length > MAX_REMOTE_THUMBNAIL_BYTES)
+    {
+        return Err("thumbnail source is too large".to_string());
+    }
+    let bytes = response
+        .bytes()
+        .map_err(|error| format!("thumbnail download body error: {error}"))?;
+    if bytes.len() as u64 > MAX_REMOTE_THUMBNAIL_BYTES {
+        return Err("thumbnail source is too large".to_string());
+    }
+    Ok(bytes.to_vec())
 }
 
 fn save_custom_thumbnail_bytes(
@@ -8630,9 +8891,36 @@ fn plugin_management_registry(service_root: &Path) -> BackendPluginRegistry {
 }
 
 fn load_runtime_plugin_manifests(service_root: &Path) -> Vec<DiscoveredPluginManifest> {
-    let mut manifests = load_plugin_manifests_from_runtime(runtime_plugins_dir(service_root));
+    let mut manifests = Vec::new();
+    for plugin_root in bundled_plugin_roots() {
+        manifests.extend(load_plugin_manifests_from_runtime(plugin_root));
+    }
+    manifests.extend(load_plugin_manifests_from_runtime(runtime_plugins_dir(
+        service_root,
+    )));
     manifests.sort_by(|left, right| left.manifest.plugin_id.cmp(&right.manifest.plugin_id));
     manifests
+}
+
+fn bundled_plugin_roots() -> Vec<PathBuf> {
+    let mut roots = Vec::new();
+    if let Ok(current_dir) = std::env::current_dir() {
+        push_existing_plugin_root(&mut roots, current_dir.join("External").join("Plugins"));
+        if let Some(parent) = current_dir.parent() {
+            push_existing_plugin_root(&mut roots, parent.join("External").join("Plugins"));
+        }
+    }
+    roots
+}
+
+fn push_existing_plugin_root(roots: &mut Vec<PathBuf>, root: PathBuf) {
+    if !root.is_dir() {
+        return;
+    }
+    let normalized = canonicalize_local_path(&root).unwrap_or(root);
+    if !roots.iter().any(|item| item == &normalized) {
+        roots.push(normalized);
+    }
 }
 
 fn load_plugin_manifests_from_runtime(runtime_root: PathBuf) -> Vec<DiscoveredPluginManifest> {
@@ -8656,21 +8944,48 @@ fn read_plugin_manifests_from_dir(root: &Path) -> Result<Vec<DiscoveredPluginMan
     }
     for entry in fs::read_dir(root).map_err(io_error)? {
         let entry = entry.map_err(io_error)?;
-        let archive_path = entry.path();
-        if archive_path.extension().and_then(|value| value.to_str()) != Some("momoplug") {
+        let plugin_path = entry.path();
+        if plugin_path.is_dir() {
+            match read_discovered_plugin_manifest_from_directory(&plugin_path) {
+                Ok(Some(discovered)) => manifests.push(discovered),
+                Ok(None) => {}
+                Err(error) => manifests.push(DiscoveredPluginManifest {
+                    manifest: broken_plugin_manifest(&plugin_path, &error),
+                    archive_path: plugin_path,
+                    manifest_prefix: String::new(),
+                }),
+            }
             continue;
         }
-        match read_discovered_plugin_manifest_from_archive(&archive_path) {
+        if plugin_path.extension().and_then(|value| value.to_str()) != Some("momoplug") {
+            continue;
+        }
+        match read_discovered_plugin_manifest_from_archive(&plugin_path) {
             Ok(discovered) => manifests.push(discovered),
             Err(error) => manifests.push(DiscoveredPluginManifest {
-                manifest: broken_plugin_manifest(&archive_path, &error),
-                archive_path,
+                manifest: broken_plugin_manifest(&plugin_path, &error),
+                archive_path: plugin_path,
                 manifest_prefix: String::new(),
             }),
         }
     }
     manifests.sort_by(|left, right| left.manifest.plugin_id.cmp(&right.manifest.plugin_id));
     Ok(manifests)
+}
+
+fn read_discovered_plugin_manifest_from_directory(
+    plugin_dir: &Path,
+) -> Result<Option<DiscoveredPluginManifest>, String> {
+    let manifest_path = plugin_dir.join("manifest.json");
+    if !manifest_path.is_file() {
+        return Ok(None);
+    }
+    let raw = fs::read_to_string(&manifest_path).map_err(io_error)?;
+    Ok(Some(DiscoveredPluginManifest {
+        manifest: parse_plugin_manifest_with_source(&raw, None)?,
+        archive_path: plugin_dir.to_path_buf(),
+        manifest_prefix: String::new(),
+    }))
 }
 
 fn read_discovered_plugin_manifest_from_archive(
@@ -9283,7 +9598,7 @@ fn native_plugin_library_file_name(library_name: &str) -> String {
 }
 
 fn embedded_local_filesystem_fallback_enabled(plugin_id: &str) -> bool {
-    cfg!(test) && plugin_id == LOCAL_FILESYSTEM_PLUGIN_ID
+    plugin_id == LOCAL_FILESYSTEM_PLUGIN_ID
 }
 
 fn default_plugins(service_root: &Path) -> Vec<PluginManifest> {
@@ -9431,6 +9746,12 @@ fn default_api_definitions() -> Vec<ApiDefinition> {
             method: "GET".to_string(),
             path: "/plugins".to_string(),
             summary: "列出插件与能力声明。".to_string(),
+        },
+        ApiDefinition {
+            group: "Provider API".to_string(),
+            method: "POST".to_string(),
+            path: "/providers/asmr:lookup".to_string(),
+            summary: "手动抓取 ASMR provider 元数据候选，不直接写入资产 metadata。".to_string(),
         },
     ]
 }
@@ -11067,6 +11388,370 @@ fn download_remote_asset(
         .copy_to(&mut file)
         .map_err(|error| format!("download body error: {error}"))?;
     Ok(())
+}
+
+fn lookup_asmr_metadata_candidate(
+    request: AsmrMetadataLookupRequest,
+) -> Result<AsmrMetadataLookupResponse, String> {
+    let rj_code = normalize_rj_code(&request.rj_code)
+        .ok_or_else(|| "ASMR provider lookup requires an RJ code".to_string())?;
+    let provider = normalize_asmr_provider(&request.provider)?;
+    let source_url = request
+        .detail_url
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| default_asmr_provider_url(&provider, &rj_code));
+    if !source_url.starts_with("http://") && !source_url.starts_with("https://") {
+        return Err("ASMR provider lookup only supports http and https URLs".to_string());
+    }
+    let body = fetch_asmr_provider_body(&provider, &source_url)?;
+    let candidate = parse_asmr_provider_candidate(&provider, &rj_code, &source_url, &body)?;
+    Ok(AsmrMetadataLookupResponse {
+        provider,
+        rj_code,
+        source_url,
+        fetched_at: now_rfc3339(),
+        candidate,
+    })
+}
+
+fn normalize_asmr_provider(value: &str) -> Result<String, String> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "dlsite" | "momobako.service.provider.dlsite" => Ok("dlsite".to_string()),
+        "asmr-one" | "asmr_one" | "asmrone" | "momobako.service.provider.asmr-one" => {
+            Ok("asmr-one".to_string())
+        }
+        value => Err(format!("unsupported ASMR metadata provider: {value}")),
+    }
+}
+
+fn normalize_rj_code(value: &str) -> Option<String> {
+    extract_rj_work_id(value)
+}
+
+fn default_asmr_provider_url(provider: &str, rj_code: &str) -> String {
+    match provider {
+        "asmr-one" => format!(
+            "https://api.asmr-200.com/api/workInfo/{}",
+            rj_code.trim_start_matches("RJ")
+        ),
+        _ => format!("https://www.dlsite.com/maniax/work/=/product_id/{rj_code}.html"),
+    }
+}
+
+fn fetch_asmr_provider_body(provider: &str, url: &str) -> Result<String, String> {
+    let client = reqwest::blocking::Client::builder()
+        .user_agent("MomoBakoASMRProvider/1")
+        .timeout(Duration::from_secs(20))
+        .build()
+        .map_err(|error| format!("ASMR provider client error: {error}"))?;
+    let response = client
+        .get(url)
+        .header(
+            reqwest::header::ACCEPT,
+            if provider == "asmr-one" {
+                "application/json, text/plain, */*"
+            } else {
+                "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+            },
+        )
+        .send()
+        .map_err(|error| format!("ASMR provider request failed: {error}"))?;
+    let status = response.status();
+    if !status.is_success() {
+        return Err(format!("ASMR provider returned HTTP {status}"));
+    }
+    response
+        .text()
+        .map_err(|error| format!("ASMR provider body error: {error}"))
+}
+
+fn parse_asmr_provider_candidate(
+    provider: &str,
+    rj_code: &str,
+    source_url: &str,
+    body: &str,
+) -> Result<AsmrMetadataCandidatePayload, String> {
+    let fields = match provider {
+        "asmr-one" => parse_asmr_one_candidate_fields(rj_code, source_url, body)?,
+        "dlsite" => parse_dlsite_candidate_fields(rj_code, source_url, body),
+        value => return Err(format!("unsupported ASMR metadata provider: {value}")),
+    };
+    if fields.len() <= 3 {
+        return Err("ASMR provider did not return usable metadata".to_string());
+    }
+    Ok(AsmrMetadataCandidatePayload {
+        source: provider.to_string(),
+        confidence: "external-id".to_string(),
+        fields,
+    })
+}
+
+fn base_asmr_candidate_fields(
+    rj_code: &str,
+    source_url: &str,
+) -> BTreeMap<String, serde_json::Value> {
+    BTreeMap::from([
+        ("workId".to_string(), serde_json::json!(rj_code)),
+        ("rjCode".to_string(), serde_json::json!(rj_code)),
+        ("sourceUrl".to_string(), serde_json::json!(source_url)),
+    ])
+}
+
+fn parse_asmr_one_candidate_fields(
+    rj_code: &str,
+    source_url: &str,
+    body: &str,
+) -> Result<BTreeMap<String, serde_json::Value>, String> {
+    let value = serde_json::from_str::<serde_json::Value>(body).map_err(json_error)?;
+    let payload = value
+        .get("data")
+        .filter(|item| item.is_object())
+        .unwrap_or(&value);
+    let mut fields = base_asmr_candidate_fields(rj_code, source_url);
+    insert_json_string_field(&mut fields, "workTitle", first_json_string(payload, &["title", "name", "workTitle"]));
+    insert_json_string_field(&mut fields, "circle", nested_json_string(payload, &[&["circle", "name"], &["maker", "name"], &["circleName"]]));
+    insert_json_string_field(&mut fields, "series", nested_json_string(payload, &[&["series", "name"], &["seriesName"]]));
+    insert_json_string_field(&mut fields, "releaseDate", first_json_string(payload, &["release", "releaseDate", "release_dtl"]));
+    insert_json_string_field(&mut fields, "ageRating", first_json_string(payload, &["ageCategory", "ageRating", "rate"]));
+    insert_json_number_field(&mut fields, "price", first_json_number(payload, &["price"]));
+    insert_json_number_field(&mut fields, "dlCount", first_json_number(payload, &["dl_count", "dlCount", "sales"]));
+    insert_json_number_field(&mut fields, "reviewCount", first_json_number(payload, &["review_count", "reviewCount"]));
+    insert_json_number_field(&mut fields, "rateAverage", first_json_number(payload, &["rate_average_2dp", "rateAverage", "rating"]));
+    insert_json_array_field(&mut fields, "voiceActors", collect_named_json_array(payload, &["vas", "voiceActors", "creators"]));
+    insert_json_array_field(&mut fields, "scenarioTags", collect_named_json_array(payload, &["tags", "genres"]));
+    if let Some(cover) = first_json_string(payload, &["mainCoverUrl", "cover", "image_main", "imageMain"]) {
+        fields.insert("cover".to_string(), serde_json::json!(cover));
+    }
+    Ok(fields)
+}
+
+fn parse_dlsite_candidate_fields(
+    rj_code: &str,
+    source_url: &str,
+    body: &str,
+) -> BTreeMap<String, serde_json::Value> {
+    let mut fields = base_asmr_candidate_fields(rj_code, source_url);
+    insert_json_string_field(&mut fields, "workTitle", html_meta_content(body, "og:title").or_else(|| html_title(body)));
+    insert_json_string_field(&mut fields, "circle", html_meta_content(body, "product:brand").or_else(|| dlsite_json_like_string(body, "maker_name")));
+    insert_json_string_field(&mut fields, "releaseDate", dlsite_json_like_string(body, "regist_date"));
+    insert_json_number_field(&mut fields, "price", dlsite_json_like_number(body, "price"));
+    insert_json_number_field(&mut fields, "dlCount", dlsite_json_like_number(body, "dl_count"));
+    insert_json_number_field(&mut fields, "reviewCount", dlsite_json_like_number(body, "review_count"));
+    insert_json_number_field(&mut fields, "rateAverage", dlsite_json_like_number(body, "rate_average_2dp"));
+    if let Some(cover) = html_meta_content(body, "og:image") {
+        fields.insert("cover".to_string(), serde_json::json!(cover));
+    }
+    fields
+}
+
+fn insert_json_string_field(
+    fields: &mut BTreeMap<String, serde_json::Value>,
+    key: &str,
+    value: Option<String>,
+) {
+    let Some(value) = value.map(|item| item.trim().to_string()).filter(|item| !item.is_empty()) else {
+        return;
+    };
+    fields.insert(key.to_string(), serde_json::json!(value));
+}
+
+fn insert_json_number_field(
+    fields: &mut BTreeMap<String, serde_json::Value>,
+    key: &str,
+    value: Option<f64>,
+) {
+    let Some(value) = value.filter(|item| item.is_finite()) else {
+        return;
+    };
+    fields.insert(key.to_string(), serde_json::json!(value));
+}
+
+fn insert_json_array_field(
+    fields: &mut BTreeMap<String, serde_json::Value>,
+    key: &str,
+    values: Vec<String>,
+) {
+    if values.is_empty() {
+        return;
+    }
+    fields.insert(key.to_string(), serde_json::json!(values));
+}
+
+fn first_json_string(value: &serde_json::Value, keys: &[&str]) -> Option<String> {
+    keys.iter()
+        .find_map(|key| value.get(*key).and_then(json_value_string))
+}
+
+fn first_json_number(value: &serde_json::Value, keys: &[&str]) -> Option<f64> {
+    keys.iter()
+        .find_map(|key| value.get(*key).and_then(json_value_number))
+}
+
+fn nested_json_string(value: &serde_json::Value, paths: &[&[&str]]) -> Option<String> {
+    for path in paths {
+        let mut current = value;
+        let mut found = true;
+        for key in *path {
+            if let Some(next) = current.get(*key) {
+                current = next;
+            } else {
+                found = false;
+                break;
+            }
+        }
+        if found {
+            if let Some(text) = json_value_string(current) {
+                return Some(text);
+            }
+        }
+    }
+    None
+}
+
+fn json_value_string(value: &serde_json::Value) -> Option<String> {
+    match value {
+        serde_json::Value::String(text) => Some(text.clone()),
+        serde_json::Value::Number(number) => Some(number.to_string()),
+        _ => None,
+    }
+}
+
+fn json_value_number(value: &serde_json::Value) -> Option<f64> {
+    match value {
+        serde_json::Value::Number(number) => number.as_f64(),
+        serde_json::Value::String(text) => text.replace(',', "").parse::<f64>().ok(),
+        _ => None,
+    }
+}
+
+fn collect_named_json_array(value: &serde_json::Value, keys: &[&str]) -> Vec<String> {
+    let mut values = Vec::new();
+    let mut seen = HashSet::new();
+    for key in keys {
+        let Some(raw) = value.get(*key) else {
+            continue;
+        };
+        collect_json_names(raw, &mut values, &mut seen);
+    }
+    values
+}
+
+fn collect_json_names(value: &serde_json::Value, values: &mut Vec<String>, seen: &mut HashSet<String>) {
+    match value {
+        serde_json::Value::Array(items) => {
+            for item in items {
+                collect_json_names(item, values, seen);
+            }
+        }
+        serde_json::Value::Object(map) => {
+            if let Some(name) = map
+                .get("name")
+                .or_else(|| map.get("label"))
+                .or_else(|| map.get("value"))
+                .and_then(json_value_string)
+            {
+                push_unique_text(values, seen, name);
+            }
+        }
+        serde_json::Value::String(text) => push_unique_text(values, seen, text.clone()),
+        _ => {}
+    }
+}
+
+fn push_unique_text(values: &mut Vec<String>, seen: &mut HashSet<String>, value: String) {
+    let normalized = value.trim();
+    if normalized.is_empty() || !seen.insert(normalized.to_string()) {
+        return;
+    }
+    values.push(normalized.to_string());
+}
+
+fn html_meta_content(body: &str, property: &str) -> Option<String> {
+    let property_marker = format!("property=\"{property}\"");
+    let name_marker = format!("name=\"{property}\"");
+    for tag in body.split('<').filter(|chunk| chunk.trim_start().starts_with("meta")) {
+        if !tag.contains(&property_marker) && !tag.contains(&name_marker) {
+            continue;
+        }
+        if let Some(content) = html_attribute(tag, "content") {
+            return Some(html_decode_basic(&content));
+        }
+    }
+    None
+}
+
+fn html_title(body: &str) -> Option<String> {
+    let start = body.find("<title>")? + "<title>".len();
+    let end = body[start..].find("</title>")? + start;
+    Some(html_decode_basic(&body[start..end]))
+}
+
+fn html_attribute(tag: &str, name: &str) -> Option<String> {
+    let marker = format!("{name}=\"");
+    let start = tag.find(&marker)? + marker.len();
+    let end = tag[start..].find('"')? + start;
+    Some(tag[start..end].to_string())
+}
+
+fn html_decode_basic(value: &str) -> String {
+    value
+        .replace("&amp;", "&")
+        .replace("&quot;", "\"")
+        .replace("&#39;", "'")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .trim()
+        .to_string()
+}
+
+fn dlsite_json_like_string(body: &str, key: &str) -> Option<String> {
+    let marker = format!("\"{key}\"");
+    let start = body.find(&marker)?;
+    let after_key = &body[start + marker.len()..];
+    let colon = after_key.find(':')?;
+    let after_colon = after_key[colon + 1..].trim_start();
+    if !after_colon.starts_with('"') {
+        return None;
+    }
+    let mut escaped = false;
+    let mut end = None;
+    for (index, ch) in after_colon[1..].char_indices() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if ch == '\\' {
+            escaped = true;
+            continue;
+        }
+        if ch == '"' {
+            end = Some(index + 1);
+            break;
+        }
+    }
+    let raw = &after_colon[..=end?];
+    serde_json::from_str::<String>(raw).ok()
+}
+
+fn dlsite_json_like_number(body: &str, key: &str) -> Option<f64> {
+    let marker = format!("\"{key}\"");
+    let start = body.find(&marker)?;
+    let after_key = &body[start + marker.len()..];
+    let colon = after_key.find(':')?;
+    let after_colon = after_key[colon + 1..].trim_start();
+    let raw = if let Some(stripped) = after_colon.strip_prefix('"') {
+        let end = stripped.find('"')?;
+        stripped[..end].replace(',', "")
+    } else {
+        after_colon
+            .chars()
+            .take_while(|ch| ch.is_ascii_digit() || matches!(ch, '.' | '-'))
+            .collect()
+    };
+    raw.parse::<f64>().ok()
 }
 
 fn is_safe_external_header_name(value: &str) -> bool {
@@ -13922,6 +14607,7 @@ mod tests {
     }
 
     fn create_repository_for_path(state: &RepositoryState, repo_root: &Path) -> String {
+        install_local_filesystem_test_plugin(state);
         let response = state
             .create_repository(RepositoryMutationRequest {
                 repo_id: None,
@@ -13932,6 +14618,35 @@ mod tests {
             })
             .expect("repository should be created");
         response.repository.repo_id
+    }
+
+    fn install_local_filesystem_test_plugin(state: &RepositoryState) {
+        state
+            .ensure_initialized()
+            .expect("repository state should initialize");
+        let runtime_plugin_root = runtime_plugins_dir(&state.root);
+        let archive_path = runtime_plugin_root.join("local-filesystem.momoplug");
+        if archive_path.exists() {
+            return;
+        }
+        write_test_plugin_archive_with_manifest(
+            &archive_path,
+            test_plugin_manifest_json(
+                LOCAL_FILESYSTEM_PLUGIN_ID,
+                "Local Filesystem",
+                serde_json::json!({
+                    "kind": "filesystem",
+                    "category": "source",
+                    "type": {
+                        "layer": "source",
+                        "kind": "filesystem"
+                    },
+                    "capabilities": ["listFiles", "readFile", "writeFile", "moveFile", "deleteFile"],
+                    "runtime": "manifest-only",
+                    "source": "system"
+                }),
+            ),
+        );
     }
 
     fn create_repository_without_initial_sync(state: &RepositoryState, repo_root: &Path) -> String {
@@ -14068,7 +14783,7 @@ mod tests {
         image.save(path).expect("test image should be saved");
     }
 
-    fn serve_test_http_body(body: &'static [u8]) -> String {
+    fn serve_test_http_body(body: impl AsRef<[u8]> + Send + 'static) -> String {
         let listener = TcpListener::bind("127.0.0.1:0").expect("test HTTP server should bind");
         let addr = listener
             .local_addr()
@@ -14077,6 +14792,7 @@ mod tests {
             if let Ok((mut stream, _)) = listener.accept() {
                 let mut request = [0_u8; 1024];
                 let _ = stream.read(&mut request);
+                let body = body.as_ref();
                 let response = format!(
                     "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
                     body.len()
@@ -14237,6 +14953,207 @@ mod tests {
             .is_some());
 
         fs::remove_dir_all(root).expect("test temp root should be removed");
+    }
+
+    #[test]
+    fn sync_repository_seeds_asmr_metadata_for_rj_work_folders() {
+        let (state, root, repo_root, _thumbnail_root) = create_test_state("sync-asmr-metadata");
+        let work_dir = repo_root.join("VoiceWork").join("RJ123456 Test Work");
+        fs::create_dir_all(work_dir.join("bonus")).expect("asmr work folder should be created");
+        fs::write(work_dir.join("track01.mp3"), "audio").expect("audio track should be written");
+        fs::write(work_dir.join("track01.lrc"), "[00:00.00] lyric")
+            .expect("local lyric should be written");
+        fs::write(work_dir.join("bonus").join("notes.txt"), "memo")
+            .expect("companion text should be written");
+
+        let repo_id = create_repository_for_path(&state, &repo_root);
+        let audio_metadata =
+            metadata_for_asset_path(&state, &repo_id, "VoiceWork/RJ123456 Test Work/track01.mp3");
+        let lyric_metadata =
+            metadata_for_asset_path(&state, &repo_id, "VoiceWork/RJ123456 Test Work/track01.lrc");
+        let companion_metadata = metadata_for_asset_path(
+            &state,
+            &repo_id,
+            "VoiceWork/RJ123456 Test Work/bonus/notes.txt",
+        );
+
+        assert_eq!(
+            audio_metadata.get("libraryKind"),
+            Some(&serde_json::json!("asmr"))
+        );
+        assert_eq!(
+            audio_metadata.get("workId"),
+            Some(&serde_json::json!("RJ123456"))
+        );
+        assert_eq!(
+            audio_metadata.get("rjCode"),
+            Some(&serde_json::json!("RJ123456"))
+        );
+        assert_eq!(
+            audio_metadata.get("workRoot"),
+            Some(&serde_json::json!("VoiceWork/RJ123456 Test Work"))
+        );
+        assert_eq!(
+            audio_metadata.get("asmrEntryKind"),
+            Some(&serde_json::json!("audio"))
+        );
+        assert_eq!(
+            audio_metadata.get("listeningStatus"),
+            Some(&serde_json::json!("unlistened"))
+        );
+        assert_eq!(
+            lyric_metadata.get("lyricStatus"),
+            Some(&serde_json::json!("local"))
+        );
+        assert_eq!(
+            companion_metadata.get("asmrEntryKind"),
+            Some(&serde_json::json!("companion"))
+        );
+
+        let results = state
+            .search_assets(SearchRequest {
+                query: "RJ123456".to_string(),
+                repo_id: Some(repo_id),
+                exclude_query: None,
+                metadata_key: None,
+                metadata_value: None,
+                tag: None,
+                tags: None,
+                metadata_filters: Some(vec![SearchMetadataFilter {
+                    key: "libraryKind".to_string(),
+                    value: "asmr".to_string(),
+                }]),
+                exclude_tags: None,
+                exclude_formats: None,
+                exclude_metadata_filters: None,
+                exclude_path_prefixes: None,
+                exclude_number_filters: None,
+                exclude_date_filters: None,
+                number_filters: None,
+                date_filters: None,
+                formats: None,
+                min_rating: None,
+                match_mode: None,
+                sort: Some(SearchSort {
+                    field: "metadata.workId".to_string(),
+                    direction: "asc".to_string(),
+                }),
+                limit: None,
+            })
+            .expect("asmr metadata search should complete");
+
+        let paths = results
+            .results
+            .iter()
+            .map(|hit| hit.path.as_str())
+            .collect::<Vec<_>>();
+        assert!(paths.contains(&"VoiceWork/RJ123456 Test Work/track01.mp3"));
+        assert!(paths.contains(&"VoiceWork/RJ123456 Test Work/track01.lrc"));
+
+        fs::remove_dir_all(root).expect("test temp root should be removed");
+    }
+
+    #[test]
+    fn parses_asmr_provider_metadata_candidates_without_writing_metadata() {
+        let asmr_one_body = r#"{
+          "id": "RJ123456",
+          "title": "Rain Voice",
+          "circle": { "name": "Blue Circle" },
+          "vas": [{ "name": "Aoi" }, { "name": "Momo" }],
+          "tags": [{ "name": "耳语" }, { "name": "睡眠" }],
+          "release": "2026-06-01",
+          "price": 1100,
+          "dl_count": 420,
+          "rate_average_2dp": 4.8,
+          "mainCoverUrl": "https://example.test/cover.jpg"
+        }"#;
+        let candidate = parse_asmr_provider_candidate(
+            "asmr-one",
+            "RJ123456",
+            "https://api.asmr-200.com/api/workInfo/123456",
+            asmr_one_body,
+        )
+        .expect("asmr-one candidate should parse");
+
+        assert_eq!(candidate.source, "asmr-one");
+        assert_eq!(candidate.confidence, "external-id");
+        assert_eq!(candidate.fields.get("workTitle"), Some(&serde_json::json!("Rain Voice")));
+        assert_eq!(candidate.fields.get("circle"), Some(&serde_json::json!("Blue Circle")));
+        assert_eq!(
+            candidate.fields.get("voiceActors"),
+            Some(&serde_json::json!(["Aoi", "Momo"]))
+        );
+        assert_eq!(candidate.fields.get("dlCount"), Some(&serde_json::json!(420.0)));
+
+        let dlsite_body = r#"
+          <html><head>
+            <meta property="og:title" content="DLsite Rain Voice" />
+            <meta property="og:image" content="https://img.example.test/main.jpg" />
+          </head><body>
+            <script>{"maker_name":"DL Circle","price":1320,"dl_count":"1,234","review_count":56,"rate_average_2dp":4.72}</script>
+          </body></html>
+        "#;
+        let dlsite_candidate = parse_asmr_provider_candidate(
+            "dlsite",
+            "RJ123456",
+            "https://www.dlsite.com/maniax/work/=/product_id/RJ123456.html",
+            dlsite_body,
+        )
+        .expect("dlsite candidate should parse");
+
+        assert_eq!(dlsite_candidate.source, "dlsite");
+        assert_eq!(
+            dlsite_candidate.fields.get("workTitle"),
+            Some(&serde_json::json!("DLsite Rain Voice"))
+        );
+        assert_eq!(
+            dlsite_candidate.fields.get("circle"),
+            Some(&serde_json::json!("DL Circle"))
+        );
+        assert_eq!(dlsite_candidate.fields.get("dlCount"), Some(&serde_json::json!(1234.0)));
+        assert_eq!(
+            dlsite_candidate.fields.get("cover"),
+            Some(&serde_json::json!("https://img.example.test/main.jpg"))
+        );
+    }
+
+    #[test]
+    fn lookup_asmr_metadata_candidate_fetches_provider_candidate() {
+        let body = br#"
+          <html><head>
+            <meta property="og:title" content="Fetched DLsite Work" />
+          </head><body>
+            <script>{"maker_name":"Fetched Circle","price":990,"dl_count":321}</script>
+          </body></html>
+        "#;
+        let url = serve_test_http_body(body);
+        let workspace = TestWorkspace::new("asmr-provider-lookup");
+        let state = RepositoryState::from_root(workspace.path("service"));
+
+        let response = state
+            .lookup_asmr_metadata_candidate(AsmrMetadataLookupRequest {
+                provider: "dlsite".to_string(),
+                rj_code: "RJ123456".to_string(),
+                detail_url: Some(url.clone()),
+            })
+            .expect("provider lookup should fetch local test body");
+
+        assert_eq!(response.provider, "dlsite");
+        assert_eq!(response.rj_code, "RJ123456");
+        assert_eq!(response.source_url, url);
+        assert_eq!(response.candidate.source, "dlsite");
+        assert_eq!(
+            response.candidate.fields.get("workTitle"),
+            Some(&serde_json::json!("Fetched DLsite Work"))
+        );
+        assert_eq!(
+            response.candidate.fields.get("circle"),
+            Some(&serde_json::json!("Fetched Circle"))
+        );
+        assert_eq!(
+            response.candidate.fields.get("dlCount"),
+            Some(&serde_json::json!(321.0))
+        );
     }
 
     #[test]
@@ -15105,7 +16022,7 @@ mod tests {
         let date_sorted = state
             .search_assets(SearchRequest {
                 query: String::new(),
-                repo_id: Some(repo_id),
+                repo_id: Some(repo_id.clone()),
                 exclude_query: None,
                 metadata_key: None,
                 metadata_value: None,
@@ -15139,6 +16056,49 @@ mod tests {
             .map(|item| item.path.as_str())
             .collect::<Vec<_>>();
         assert_eq!(date_paths, vec!["large.png", "metadata-only.png"]);
+
+        let random_sorted = state
+            .search_assets(SearchRequest {
+                query: String::new(),
+                repo_id: Some(repo_id),
+                exclude_query: None,
+                metadata_key: None,
+                metadata_value: None,
+                tag: None,
+                tags: None,
+                metadata_filters: None,
+                exclude_tags: None,
+                exclude_formats: None,
+                exclude_metadata_filters: None,
+                exclude_path_prefixes: None,
+                exclude_number_filters: None,
+                exclude_date_filters: None,
+                number_filters: None,
+                date_filters: None,
+                formats: Some(vec!["png".to_string()]),
+                min_rating: None,
+                match_mode: None,
+                sort: Some(SearchSort {
+                    field: "random".to_string(),
+                    direction: "asc".to_string(),
+                }),
+                limit: None,
+            })
+            .expect("core random sort should complete");
+        let random_paths = random_sorted
+            .results
+            .iter()
+            .map(|item| item.path.as_str())
+            .collect::<HashSet<_>>();
+        assert_eq!(
+            random_paths,
+            HashSet::from([
+                "large.png",
+                "metadata-only.png",
+                "small.png",
+                "tag-only.png",
+            ])
+        );
 
         fs::remove_dir_all(root).expect("test temp root should be removed");
     }
@@ -15457,7 +16417,7 @@ mod tests {
             "file",
             "generated",
         ));
-        fs::write(&thumbnail_path, b"cached").expect("cached thumbnail should be written");
+        write_test_image(&thumbnail_path);
 
         let storage_paths = ensure_repository_storage_paths(
             &state.root,
@@ -15485,6 +16445,7 @@ mod tests {
                 path: "cover.png".to_string(),
                 action: None,
                 source_path: None,
+                source_url: None,
                 image_bytes: None,
                 media_type: None,
             })
@@ -15549,6 +16510,7 @@ mod tests {
                 path: "cover.png".to_string(),
                 action: None,
                 source_path: None,
+                source_url: None,
                 image_bytes: None,
                 media_type: None,
             })
@@ -15620,6 +16582,7 @@ mod tests {
                 path: "Shots".to_string(),
                 action: None,
                 source_path: None,
+                source_url: None,
                 image_bytes: None,
                 media_type: None,
             })
@@ -15659,6 +16622,7 @@ mod tests {
                 path: "cover.png".to_string(),
                 action: None,
                 source_path: None,
+                source_url: None,
                 image_bytes: None,
                 media_type: None,
             })
@@ -15677,6 +16641,69 @@ mod tests {
     }
 
     #[test]
+    fn ensure_thumbnail_saves_remote_source_url_as_custom_thumbnail() {
+        let (state, root, repo_root, thumbnail_root) = create_test_state("thumb-remote-source");
+        fs::write(repo_root.join("track.mp3"), b"fake audio").expect("track file should be written");
+        let repo_id = create_repository_for_path(&state, &repo_root);
+        let mut body = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(
+            2,
+            2,
+            image::Rgb([220, 80, 40]),
+        ))
+        .write_to(&mut body, image::ImageFormat::Png)
+        .expect("test thumbnail image should encode");
+        let source_url = serve_test_http_body(body.into_inner());
+
+        let response = state
+            .ensure_thumbnail(ThumbnailRequest {
+                repo_id: repo_id.clone(),
+                path: "track.mp3".to_string(),
+                action: Some("save".to_string()),
+                source_path: None,
+                source_url: Some(source_url),
+                image_bytes: None,
+                media_type: None,
+            })
+            .expect("remote thumbnail should be saved");
+        let thumbnail_path = response
+            .thumbnail_path
+            .as_deref()
+            .map(Path::new)
+            .expect("thumbnail path should be returned");
+
+        assert!(response.thumbnail_custom);
+        assert!(thumbnail_path.starts_with(&thumbnail_root));
+        assert!(thumbnail_path.is_file());
+        assert!(response
+            .metadata
+            .as_ref()
+            .and_then(|metadata| metadata.get("thumbnailPalette"))
+            .is_some());
+
+        let snapshot = state
+            .load_file_browser(FileBrowserRequest {
+                repo_id,
+                directory_path: Some(String::new()),
+                include_tree: Some(false),
+                special_location: None,
+            })
+            .expect("file browser should load");
+        let entry = snapshot
+            .entries
+            .iter()
+            .find(|item| item.path == "track.mp3")
+            .expect("track entry should be listed");
+        assert!(entry.thumbnail_custom);
+        assert_eq!(
+            entry.thumbnail_path.as_deref(),
+            Some(thumbnail_path.to_string_lossy().as_ref())
+        );
+
+        fs::remove_dir_all(root).expect("test temp root should be removed");
+    }
+
+    #[test]
     fn ensure_thumbnail_extracts_palette_metadata() {
         let (state, root, repo_root, _thumbnail_root) = create_test_state("thumb-palette");
         write_test_image(&repo_root.join("cover.png"));
@@ -15688,6 +16715,7 @@ mod tests {
                 path: "cover.png".to_string(),
                 action: None,
                 source_path: None,
+                source_url: None,
                 image_bytes: None,
                 media_type: None,
             })
@@ -15738,6 +16766,7 @@ mod tests {
                 path: "note.txt".to_string(),
                 action: None,
                 source_path: None,
+                source_url: None,
                 image_bytes: None,
                 media_type: None,
             })

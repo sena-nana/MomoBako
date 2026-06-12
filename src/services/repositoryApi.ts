@@ -2,6 +2,8 @@ import { Channel, invoke } from "@tauri-apps/api/core";
 import { openPath, openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
 import type {
   ApiDesignSnapshot,
+  AsmrMetadataLookupRequest,
+  AsmrMetadataLookupResponse,
   AssetDetail,
   CacheSnapshot,
   BinaryFileWriteRequest,
@@ -143,6 +145,10 @@ export function callPlugin<T = unknown>(request: PluginCallRequest) {
 
 export function readPluginArchiveText(request: PluginArchiveReadRequest) {
   return invoke<PluginArchiveTextResponse>("read_plugin_archive_text", { request });
+}
+
+export function lookupAsmrMetadataCandidate(request: AsmrMetadataLookupRequest) {
+  return invoke<AsmrMetadataLookupResponse>("lookup_asmr_metadata_candidate", { request });
 }
 
 export function writeBinaryFile(request: BinaryFileWriteRequest) {
