@@ -58,9 +58,29 @@
   - Request body includes `candidateId`
   - Confirms a pending candidate and joins both assets into the same hardlink group only when their stored content hashes and sizes still match.
 - `GET /repositories/{repoId}/snapshot`
-  - `RepositorySnapshot` returns repository summary, folder summaries, indexed asset summaries, metadata field registry, overview, optional `quickAccess`, and optional `tagGroups`.
+  - `RepositorySnapshot` returns repository summary, folder summaries, indexed asset summaries, metadata field registry, overview, optional `playlists`, optional `quickAccess`, and optional `tagGroups`.
+  - `playlists` returns repository-scoped playlist summaries for sidebar and workspace entry points; full queue contents are loaded from the playlist API.
   - `quickAccess` entries expose `shortcutId`, `label`, `targetKind`, optional `targetPath`, and optional `targetId`, and can point to files, folders, or smart folders imported from Eagle.
   - `tagGroups` expose repository-level tag grouping metadata for the desktop tag editor; they do not replace per-asset searchable tags.
+- `GET /repositories/{repoId}/playlists`
+  - Returns `PlaylistSummary[]` ordered by `sortOrder`, then `updatedAt`.
+- `POST /repositories/{repoId}/playlists`
+  - Creates a playlist with `name` and `playerTypeId`.
+- `PATCH /repositories/{repoId}/playlists/{playlistId}`
+  - Updates playlist display name and, when compatible, `playerTypeId`.
+- `DELETE /repositories/{repoId}/playlists/{playlistId}`
+  - Deletes the playlist and all membership rows only; repository files and assets are untouched.
+- `GET /repositories/{repoId}/playlists/{playlistId}`
+  - Returns `PlaylistDetail` including resolved item status, current file path, and thumbnail.
+- `POST /repositories/{repoId}/playlists/{playlistId}:items`
+  - Appends asset IDs to the end of the playlist, deduplicated within the same playlist.
+- `PATCH /repositories/{repoId}/playlists/{playlistId}:itemsOrder`
+  - Replaces item sort order using ordered `itemIds`.
+- `DELETE /repositories/{repoId}/playlists/{playlistId}/items/{playlistItemId}`
+  - Removes one playlist item without affecting the underlying asset.
+- `POST /repositories/{repoId}/playlists:membership`
+  - Atomically sets one asset's compatible playlist membership using the checked `playlistIds`.
+  - Incompatible playlists are ignored and reported by omission; existing compatible memberships not present in the request are removed.
 - `GET /repositories/{repoId}/actions`
   - Lists imported repository actions ordered by `sortOrder` and name.
   - Each action includes `source`, `sourceActionId`, `status`, `enabled`, steps, raw source JSON summary, unsupported reason, and last run.
@@ -186,6 +206,8 @@
   - `preview` plugins render file previews and thumbnails independently of library-kind semantics.
   - `service` plugins expose shared capabilities such as metadata providers, network search, download queues, filesystem watching and vector search. External/network services are manual-trigger and candidate-only unless a future runtime implementation changes the contract.
   - `hooks` declare how plugins attach to core-hosted capabilities such as playlist, PiP, progress, candidate queue, batch organize, download queue, metadata merge, rename/move execution, audit log and unified search.
+  - Frontend plugins may declare `contributes.playlistPlayers[]` to register playlist playback types. Each item includes `playerTypeId`, `label`, `fileClass`, `supportedExtensions`, `supportsSeek`, `supportsVolume`, `supportsPreviewNavigation`, and optional `description`.
+  - Playlist player runtimes implement `load`, `play`, `pause`, optional `seek`, optional `setVolume`, optional `dispose`, and optional `configure(settings)`. Current settings are `{ imageDurationMs?: number, objectFit?: "contain" | "cover" }` for slideshow timing and image/video fitting.
   - Backend plugin IDs are normalized to the `momobako.*` namespace; legacy `builtin.*` IDs remain accepted when reading existing repositories
   - Disabled or manifest-only source backends are displayed but not offered as usable repository backends until enabled with an available runtime
   - Filesystem backend `listFiles` responses include `absolutePath`, `relativePath`, `filename`, `extension`, `sizeBytes`, and `modifiedAt`; the runtime tolerates legacy responses without `absolutePath` by resolving `relativePath` under `repoRoot`

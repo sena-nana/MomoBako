@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { getPreviewPluginForEntry, listPreviewPlugins } from "../src/plugins/previewPlugins";
+import { getPlaylistPlayerByType, listPlaylistPlayers } from "../src/plugins/playlistPlayers";
 import { clearPreviewPluginRegistry, syncRegisteredPreviewPluginManifests } from "../src/plugins/sdk";
 import { listPlugins } from "../src/services/repositoryApi";
 import type { FileBrowserEntry } from "../src/types/repository";
@@ -54,6 +55,35 @@ describe("previewPlugins", () => {
     expect(mediaPlugin?.supportedExtensions).toContain("png");
     expect(mediaPlugin?.supportedExtensions).toContain("webm");
     expect(mediaPlugin?.supportedExtensions).toContain("wav");
+  });
+
+  it("registers built-in playlist player types from the media plugin manifest", async () => {
+    await syncRegisteredPreviewPluginManifests(await listPlugins());
+
+    expect(getPlaylistPlayerByType("momobako.playlist.image-slideshow")?.fileClass).toBe("image");
+    expect(getPlaylistPlayerByType("momobako.playlist.audio-sequence")?.fileClass).toBe("audio");
+    expect(getPlaylistPlayerByType("momobako.playlist.video-sequence")?.fileClass).toBe("video");
+    expect(listPlaylistPlayers()).toHaveLength(3);
+  });
+
+  it("skips disabled media playlist players after manifest sync", async () => {
+    await syncRegisteredPreviewPluginManifests(await listPlugins());
+    const manifests = listPreviewPlugins().map((plugin) => (
+      plugin.pluginId === "momobako.preview.media"
+        ? {
+            ...plugin.manifest!,
+            enabled: false,
+            status: "disabled" as const,
+          }
+        : plugin.manifest!
+    ));
+
+    await syncRegisteredPreviewPluginManifests(manifests);
+
+    expect(getPlaylistPlayerByType("momobako.playlist.image-slideshow")).toBeNull();
+    expect(getPlaylistPlayerByType("momobako.playlist.audio-sequence")).toBeNull();
+    expect(getPlaylistPlayerByType("momobako.playlist.video-sequence")).toBeNull();
+    expect(listPlaylistPlayers()).toHaveLength(0);
   });
 
   it("routes text and markdown files to the built-in text preview", async () => {

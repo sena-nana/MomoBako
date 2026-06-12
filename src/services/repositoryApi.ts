@@ -27,6 +27,15 @@ import type {
   PluginArchiveTextResponse,
   PluginEnabledRequest,
   PluginInstallRequest,
+  PlaylistDetail,
+  PlaylistItemsAddRequest,
+  PlaylistItemsOrderRequest,
+  PlaylistMembershipRequest,
+  PlaylistMembershipSnapshot,
+  PlaylistMutationRequest,
+  PlaylistMutationResponse,
+  PlaylistSummary,
+  PlaylistUpdateRequest,
   RepositoryAction,
   RepositoryActionEnabledRequest,
   RepositoryActionMutationResponse,
@@ -94,6 +103,46 @@ export function getFileBrowser(request: FileBrowserRequest) {
 
 export function listSmartFolders(repoId: string) {
   return invoke<SmartFolderTreeNode[]>("list_smart_folders", { repoId });
+}
+
+export function listPlaylists(repoId: string) {
+  return invoke<PlaylistSummary[]>("list_playlists", { repoId });
+}
+
+export function createPlaylist(request: PlaylistMutationRequest) {
+  return invoke<PlaylistMutationResponse>("create_playlist", { request });
+}
+
+export function updatePlaylist(request: PlaylistUpdateRequest) {
+  return invoke<PlaylistMutationResponse>("update_playlist", { request });
+}
+
+export function deletePlaylist(repoId: string, playlistId: string) {
+  return invoke<PlaylistMutationResponse>("delete_playlist", { repoId, playlistId });
+}
+
+export function getPlaylistDetail(repoId: string, playlistId: string) {
+  return invoke<PlaylistDetail>("get_playlist_detail", { repoId, playlistId });
+}
+
+export function addPlaylistItems(request: PlaylistItemsAddRequest) {
+  return invoke<PlaylistDetail>("add_playlist_items", { request });
+}
+
+export function reorderPlaylistItems(request: PlaylistItemsOrderRequest) {
+  return invoke<PlaylistDetail>("reorder_playlist_items", { request });
+}
+
+export function removePlaylistItem(request: {
+  repoId: string;
+  playlistId: string;
+  playlistItemId: string;
+}) {
+  return invoke<PlaylistDetail>("remove_playlist_item", { request });
+}
+
+export function setPlaylistMembership(request: PlaylistMembershipRequest) {
+  return invoke<PlaylistMembershipSnapshot>("set_playlist_membership", { request });
 }
 
 export function createSmartFolder(request: SmartFolderMutationRequest) {

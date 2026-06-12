@@ -6,24 +6,32 @@ import {
   copyEntries,
   createDirectory,
   createFile,
+  createPlaylist,
   createRepository,
   deleteEntry,
+  deletePlaylist,
   deleteRepository,
   exportRepository,
   getApiDesignSnapshot,
   getAssetDetail,
   getCacheSnapshot,
+  getPlaylistDetail,
   importEntries,
   getRepositorySnapshot,
   importRepository,
   installPluginFromArchive,
+  listPlaylists,
   listRepositoryActions,
   listSmartFolders,
   listPlugins,
+  addPlaylistItems,
+  reorderPlaylistItems,
+  removePlaylistItem,
   createSmartFolder,
   deleteSmartFolder,
   querySmartFolder,
   moveEntries,
+  setPlaylistMembership,
   setPluginEnabled,
   startExternalFileDrag,
   mutateTrash,
@@ -44,6 +52,10 @@ import type {
   FileBrowserSnapshot,
   FileDeleteMode,
   HardlinkConfirmResponse,
+  PlaylistDetail,
+  PlaylistMembershipSnapshot,
+  PlaylistMutationRequest,
+  PlaylistSummary,
   RepositoryExportRequest,
   RepositoryExportResponse,
   SmartFolderFilter,
@@ -54,6 +66,9 @@ import {
   activeAssetDetail,
   activeAssetId,
   activePanel,
+  activePreviewPath,
+  activePlaylistDetail,
+  activePlaylistId,
   activeRepoId,
   activeRepositoryActionId,
   activeSmartFolderId,
@@ -86,6 +101,8 @@ import {
   isSyncing,
   lastSyncResult,
   plugins,
+  playlists,
+  playlistMemberships,
   repositories,
   repositoryActions,
   searchQuery,
@@ -195,6 +212,55 @@ function applyWorkspaceSelection(
     : null;
 }
 
+function rebuildPlaylistMemberships(
+  details: PlaylistDetail[],
+) {
+  const nextMemberships: Record<string, string[]> = {};
+
+  for (const detail of details) {
+    for (const item of detail.items) {
+      if (!nextMemberships[item.assetId]) {
+        nextMemberships[item.assetId] = [];
+      }
+      nextMemberships[item.assetId].push(detail.playlist.playlistId);
+    }
+  }
+
+  playlistMemberships.value = nextMemberships;
+}
+
+async function syncPlaylistMemberships(
+  repoId: string,
+  playlistItems: PlaylistSummary[] = playlists.value,
+) {
+  if (!repoId || !playlistItems.length) {
+    playlistMemberships.value = {};
+    if (activePlaylistId.value && !playlistItems.some((item) => item.playlistId === activePlaylistId.value)) {
+      activePlaylistId.value = null;
+      activePlaylistDetail.value = null;
+    }
+    return [];
+  }
+
+  const details = (await Promise.all(
+    playlistItems.map(async (playlist) => {
+      try {
+        return await getPlaylistDetail(repoId, playlist.playlistId);
+      } catch {
+        return null;
+      }
+    }),
+  )).filter((detail): detail is PlaylistDetail => Boolean(detail));
+
+  rebuildPlaylistMemberships(details);
+
+  if (activePlaylistId.value) {
+    activePlaylistDetail.value = details.find((detail) => detail.playlist.playlistId === activePlaylistId.value) ?? null;
+  }
+
+  return details;
+}
+
 function defaultDirectoryRefreshPlan(paths: string[]): WorkspaceRefreshPlan["directory"] {
   if (activePanel.value === "deleted") return "trash";
   const selectedPaths = new Set(paths);
@@ -249,10 +315,15 @@ export async function selectRepository(repoId: string) {
     updateOperationProgress(progressId, { detail: "加载资源索引", value: 46 });
     activeRepoId.value = repoId;
     activeSnapshot.value = snapshot;
+    playlists.value = snapshot.playlists ?? await listPlaylists(repoId);
+    await syncPlaylistMemberships(repoId, playlists.value);
     smartFolders.value = await listSmartFolders(repoId);
     repositoryActions.value = await listRepositoryActions(repoId);
     if (isSwitchingRepository) {
       resetSearchState();
+      activePlaylistId.value = null;
+      activePlaylistDetail.value = null;
+      activePreviewPath.value = null;
       activeSmartFolderId.value = null;
       smartFolderResult.value = null;
       activeRepositoryActionId.value = repositoryActions.value[0]?.actionId ?? null;
@@ -1270,6 +1341,104 @@ export async function loadSettingsData(options: SettingsDataLoadOptions = {}) {
     isLoadingSettingsData.value = false;
   }
 }
+
+export function setActivePreviewPath(path: string | null) {
+  activePreviewPath.value = path;
+}
+
+export async function refreshPlaylists(repoId = activeRepoId.value) {
+  if (!repoId) return [];
+  const items = await listPlaylists(repoId);
+  playlists.value = items;
+  await syncPlaylistMemberships(repoId, items);
+  if (activePlaylistId.value && !items.some((item) => item.playlistId === activePlaylistId.value)) {
+    activePlaylistId.value = null;
+    activePlaylistDetail.value = null;
+    if (activePanel.value === "playlist") {
+      activePanel.value = "files";
+    }
+  }
+  return items;
+}
+
+export async function selectPlaylist(playlistId: string) {
+  if (!activeRepoId.value) return null;
+  activePanel.value = "playlist";
+  activePlaylistId.value = playlistId;
+  activePlaylistDetail.value = await getPlaylistDetail(activeRepoId.value, playlistId);
+  return activePlaylistDetail.value;
+}
+
+export async function createPlaylistInWorkspace(request: Omit<PlaylistMutationRequest, "repoId">) {
+  if (!activeRepoId.value) return null;
+  const response = await createPlaylist({ ...request, repoId: activeRepoId.value });
+  playlists.value = response.playlists;
+  await syncPlaylistMemberships(activeRepoId.value, response.playlists);
+  if (response.playlist?.playlistId) {
+    await selectPlaylist(response.playlist.playlistId);
+  }
+  return response;
+}
+
+export async function deletePlaylistInWorkspace(playlistId: string) {
+  if (!activeRepoId.value) return null;
+  const response = await deletePlaylist(activeRepoId.value, playlistId);
+  playlists.value = response.playlists;
+  await syncPlaylistMemberships(activeRepoId.value, response.playlists);
+  if (activePlaylistId.value === playlistId) {
+    activePlaylistId.value = null;
+    activePlaylistDetail.value = null;
+    if (activePanel.value === "playlist") activePanel.value = "files";
+  }
+  return response;
+}
+
+export async function addPlaylistItemsInWorkspace(playlistId: string, assetIds: string[]) {
+  if (!activeRepoId.value) return null;
+  const detail = await addPlaylistItems({
+    repoId: activeRepoId.value,
+    playlistId,
+    assetIds,
+  });
+  activePlaylistDetail.value = detail;
+  await refreshPlaylists(activeRepoId.value);
+  return detail;
+}
+
+export async function reorderPlaylistItemsInWorkspace(playlistId: string, itemIds: string[]) {
+  if (!activeRepoId.value) return null;
+  const detail = await reorderPlaylistItems({
+    repoId: activeRepoId.value,
+    playlistId,
+    itemIds,
+  });
+  activePlaylistDetail.value = detail;
+  await refreshPlaylists(activeRepoId.value);
+  return detail;
+}
+
+export async function removePlaylistItemInWorkspace(playlistId: string, playlistItemId: string) {
+  if (!activeRepoId.value) return null;
+  const detail = await removePlaylistItem({
+    repoId: activeRepoId.value,
+    playlistId,
+    playlistItemId,
+  });
+  activePlaylistDetail.value = detail;
+  await refreshPlaylists(activeRepoId.value);
+  return detail;
+}
+
+export async function setPlaylistMembershipInWorkspace(assetId: string, playlistIds: string[]) {
+  if (!activeRepoId.value) return null;
+  const response: PlaylistMembershipSnapshot = await setPlaylistMembership({
+    repoId: activeRepoId.value,
+    assetId,
+    playlistIds,
+  });
+  await refreshPlaylists(activeRepoId.value);
+  return response;
+}
 async function applyPluginMutation(action: () => Promise<{ plugins: import("../../types/repository").PluginManifest[] }>) {
   isManagingPlugins.value = true;
   error.value = null;
@@ -1349,6 +1518,7 @@ export function useRepositoryWorkspace() {
     activeSnapshot: computed(() => activeSnapshot.value),
     activeAssetId: computed(() => activeAssetId.value),
     activeAssetDetail: computed(() => activeAssetDetail.value),
+    activePreviewPath: computed(() => activePreviewPath.value),
     activePanel: computed(() => activePanel.value),
     currentDirectoryPath: computed(() => currentDirectoryPath.value),
     fileBrowser: computed(() => fileBrowser.value),
@@ -1356,9 +1526,13 @@ export function useRepositoryWorkspace() {
     selectedFilePath: computed(() => selectedFilePath.value),
     selectedFilePaths: computed(() => selectedFilePaths.value),
     searchQuery: computed(() => searchQuery.value),
-    searchResults: computed(() => searchResults.value),
-    smartFolders: computed(() => smartFolders.value),
-    repositoryActions: computed(() => repositoryActions.value),
+    searchResults: computed(() => searchResults.value ?? []),
+    smartFolders: computed(() => smartFolders.value ?? []),
+    repositoryActions: computed(() => repositoryActions.value ?? []),
+    playlists: computed(() => playlists.value ?? []),
+    playlistMemberships: computed(() => playlistMemberships.value ?? {}),
+    activePlaylistId: computed(() => activePlaylistId.value),
+    activePlaylistDetail: computed(() => activePlaylistDetail.value),
     activeSmartFolderId: computed(() => activeSmartFolderId.value),
     activeRepositoryActionId: computed(() => activeRepositoryActionId.value),
     smartFolderResult: computed(() => smartFolderResult.value),
@@ -1378,9 +1552,9 @@ export function useRepositoryWorkspace() {
     filters: computed(() => filters.value),
     activeFilterCount,
     hasActiveFilters,
-    hardlinkCandidates: computed(() => hardlinkCandidates.value),
+    hardlinkCandidates: computed(() => hardlinkCandidates.value ?? []),
     lastSyncResult: computed(() => lastSyncResult.value),
-    plugins: computed(() => plugins.value),
+    plugins: computed(() => plugins.value ?? []),
     repositoryBackendOptions,
     cacheSnapshot: computed(() => cacheSnapshot.value),
     apiDesign: computed(() => apiDesign.value),
@@ -1431,12 +1605,21 @@ export function useRepositoryWorkspace() {
     emptyTrash,
     openWorkspaceEntry,
     revealWorkspaceEntry,
+    setActivePreviewPath,
     startWorkspaceEntryDrag,
     startWorkspaceEntriesDrag,
     selectWorkspaceEntry,
     selectWorkspaceEntries,
     clearWorkspaceSelection,
     refreshSmartFolders,
+    refreshPlaylists,
+    selectPlaylist,
+    createPlaylistInWorkspace,
+    deletePlaylistInWorkspace,
+    addPlaylistItemsInWorkspace,
+    reorderPlaylistItemsInWorkspace,
+    removePlaylistItemInWorkspace,
+    setPlaylistMembershipInWorkspace,
     selectSmartFolder,
     refreshRepositoryActions,
     selectRepositoryAction,
