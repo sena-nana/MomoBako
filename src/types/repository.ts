@@ -463,6 +463,65 @@ export type FileImportRequest = {
   sourcePaths: string[];
 };
 
+export type ExternalAddAssetClient = {
+  id?: string;
+  name?: string;
+  version?: string;
+};
+
+export type ExternalAddAssetItem = {
+  kind: "remoteUrl" | string;
+  url?: string;
+  filename?: string;
+  headers?: Record<string, string>;
+  metadata?: Record<string, unknown>;
+};
+
+export type ExternalAddAssetRequest = {
+  repoId: string;
+  parentPath?: string;
+  client?: ExternalAddAssetClient;
+  items: ExternalAddAssetItem[];
+};
+
+export type ExternalImportedAsset = {
+  itemIndex: number;
+  assetId?: string | null;
+  path: string;
+};
+
+export type ExternalAddAssetFailure = {
+  itemIndex: number;
+  code:
+    | "unauthorized"
+    | "notReady"
+    | "repoNotFound"
+    | "repoUnavailable"
+    | "unsupportedRepositoryBackend"
+    | "invalidTargetPath"
+    | "invalidInput"
+    | "downloadFailed"
+    | "duplicateTarget"
+    | "importRejected"
+    | "internalError"
+    | string;
+  message: string;
+  retryable: boolean;
+  details?: Record<string, unknown>;
+};
+
+export type ExternalAddAssetResponse = {
+  requestId: string;
+  status: "success" | "partial" | "failed";
+  imported: ExternalImportedAsset[];
+  failed: ExternalAddAssetFailure[];
+  summary: {
+    total: number;
+    imported: number;
+    failed: number;
+  };
+};
+
 export type FileCopyMode = "hardlinkPreferred" | "copy";
 
 export type FileCopyRequest = {

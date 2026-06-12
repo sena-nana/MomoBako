@@ -11,7 +11,7 @@ use std::{
     process::Command,
     sync::{Arc, Mutex, OnceLock},
     thread,
-    time::SystemTime,
+    time::{Duration, SystemTime},
 };
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 
@@ -829,6 +829,70 @@ pub struct FileImportRequest {
     pub repo_id: String,
     pub parent_path: Option<String>,
     pub source_paths: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ExternalAddAssetClient {
+    pub id: Option<String>,
+    pub name: Option<String>,
+    pub version: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct ExternalAddAssetItem {
+    pub kind: String,
+    pub url: Option<String>,
+    pub filename: Option<String>,
+    pub headers: Option<BTreeMap<String, String>>,
+    pub metadata: Option<BTreeMap<String, serde_json::Value>>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct ExternalAddAssetRequest {
+    pub repo_id: String,
+    pub parent_path: Option<String>,
+    pub client: Option<ExternalAddAssetClient>,
+    pub items: Vec<ExternalAddAssetItem>,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct ExternalImportedAsset {
+    pub item_index: usize,
+    pub asset_id: Option<String>,
+    pub path: String,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct ExternalAddAssetFailure {
+    pub item_index: usize,
+    pub code: String,
+    pub message: String,
+    pub retryable: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub details: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct ExternalAddAssetSummary {
+    pub total: usize,
+    pub imported: usize,
+    pub failed: usize,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct ExternalAddAssetResponse {
+    pub request_id: String,
+    pub status: String,
+    pub imported: Vec<ExternalImportedAsset>,
+    pub failed: Vec<ExternalAddAssetFailure>,
+    pub summary: ExternalAddAssetSummary,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -1943,8 +2007,8 @@ impl RepositoryState {
                 &folder_metadata,
             )?
         };
-        let entries =
-            attach_browser_entry_metadata(&connection, &request.repo_id, entries).map_err(db_error)?;
+        let entries = attach_browser_entry_metadata(&connection, &request.repo_id, entries)
+            .map_err(db_error)?;
 
         Ok(FileBrowserSnapshot {
             repo_id: request.repo_id,
@@ -2505,7 +2569,13 @@ impl RepositoryState {
             SET status = ?3, message = ?4, finished_at = ?5
             WHERE repo_id = ?1 AND run_id = ?2
             "#,
-            params![request.repo_id, run_id, run_status, run_message, finished_at],
+            params![
+                request.repo_id,
+                run_id,
+                run_status,
+                run_message,
+                finished_at
+            ],
         )
         .map_err(db_error)?;
         tx.commit().map_err(db_error)?;
@@ -2565,18 +2635,18 @@ impl RepositoryState {
                 .exclude_number_filters
                 .as_ref()
                 .map(|items| {
-                    items
-                        .iter()
-                        .all(|item| item.key.trim().is_empty() || (item.min.is_none() && item.max.is_none()))
+                    items.iter().all(|item| {
+                        item.key.trim().is_empty() || (item.min.is_none() && item.max.is_none())
+                    })
                 })
                 .unwrap_or(true)
             && request
                 .exclude_date_filters
                 .as_ref()
                 .map(|items| {
-                    items
-                        .iter()
-                        .all(|item| item.key.trim().is_empty() || (item.from.is_none() && item.to.is_none()))
+                    items.iter().all(|item| {
+                        item.key.trim().is_empty() || (item.from.is_none() && item.to.is_none())
+                    })
                 })
                 .unwrap_or(true)
             && request
@@ -3102,6 +3172,235 @@ impl RepositoryState {
         let include_tree = import_plan.iter().any(|entry| entry.is_directory);
         let outcomes = copy_external_entries_parallel(import_plan, true)?;
         self.finish_file_copy_operation(&request.repo_id, parent_path, include_tree, outcomes)
+    }
+
+    pub fn add_external_assets(
+        &self,
+        request_id: String,
+        request: ExternalAddAssetRequest,
+    ) -> ExternalAddAssetResponse {
+        let total = request.items.len();
+        let mut imported = Vec::new();
+        let mut failed = Vec::new();
+
+        if request.items.is_empty() {
+            failed.push(external_failure(
+                0,
+                "invalidInput",
+                "items cannot be empty".to_string(),
+                false,
+                None,
+            ));
+            return external_add_asset_response(request_id, imported, failed, total);
+        }
+
+        let context = match self.external_asset_import_context(&request_id, &request) {
+            Ok(context) => context,
+            Err(error) => {
+                failed.extend((0..total).map(|item_index| {
+                    external_failure(
+                        item_index,
+                        error.code,
+                        error.message.clone(),
+                        error.retryable,
+                        None,
+                    )
+                }));
+                return external_add_asset_response(request_id, imported, failed, total);
+            }
+        };
+
+        let mut staged_assets = Vec::<PlannedExternalAsset>::new();
+        let mut planned_targets = HashSet::<String>::new();
+
+        for (item_index, item) in request.items.iter().enumerate() {
+            match stage_external_asset_item(item_index, item, &context, &mut planned_targets) {
+                Ok(staged) => staged_assets.push(staged),
+                Err(failure) => failed.push(failure),
+            }
+        }
+
+        if !staged_assets.is_empty() {
+            let source_paths = staged_assets
+                .iter()
+                .map(|asset| asset.source_path.clone())
+                .collect::<Vec<_>>();
+            let metadata_by_target_path = staged_assets
+                .iter()
+                .filter_map(|asset| {
+                    asset
+                        .metadata
+                        .as_ref()
+                        .map(|metadata| (asset.target_path.clone(), metadata.clone()))
+                })
+                .collect::<BTreeMap<_, _>>();
+            let import_result = self.import_entries(FileImportRequest {
+                repo_id: request.repo_id.clone(),
+                parent_path: Some(context.parent_path.clone()),
+                source_paths,
+            });
+            match import_result {
+                Ok(_) => {
+                    if let Err(error) = self.apply_external_asset_metadata(
+                        &request.repo_id,
+                        &metadata_by_target_path,
+                        request.client.as_ref(),
+                    ) {
+                        failed.extend(staged_assets.iter().map(|asset| {
+                            external_failure(
+                                asset.item_index,
+                                "internalError",
+                                error.clone(),
+                                true,
+                                None,
+                            )
+                        }));
+                    } else {
+                        for asset in staged_assets {
+                            imported.push(ExternalImportedAsset {
+                                item_index: asset.item_index,
+                                asset_id: Some(asset_id_for_path(
+                                    &request.repo_id,
+                                    &asset.target_path,
+                                )),
+                                path: asset.target_path,
+                            });
+                        }
+                    }
+                }
+                Err(error) => {
+                    let code = external_import_error_code(&error);
+                    failed.extend(staged_assets.iter().map(|asset| {
+                        external_failure(asset.item_index, code, error.clone(), false, None)
+                    }));
+                }
+            }
+        }
+
+        let _ = fs::remove_dir_all(&context.staging_root);
+        external_add_asset_response(request_id, imported, failed, total)
+    }
+
+    fn external_asset_import_context(
+        &self,
+        request_id: &str,
+        request: &ExternalAddAssetRequest,
+    ) -> Result<ExternalAssetImportContext, ExternalRequestError> {
+        if let Err(error) = self.ensure_initialized() {
+            return Err(ExternalRequestError {
+                code: "notReady",
+                message: error,
+                retryable: true,
+            });
+        }
+
+        let repo = self
+            .load_repository_record(&request.repo_id)
+            .map_err(|error| {
+                let code = if error.contains("repository not found") {
+                    "repoNotFound"
+                } else {
+                    "internalError"
+                };
+                ExternalRequestError {
+                    code,
+                    message: error,
+                    retryable: false,
+                }
+            })?;
+        if repo.summary.status != "ready" {
+            return Err(ExternalRequestError {
+                code: "repoUnavailable",
+                message: format!("repository is not ready: {}", repo.summary.status),
+                retryable: true,
+            });
+        }
+        if let Err(error) = ensure_local_filesystem_repository(&repo, "adding external assets") {
+            return Err(ExternalRequestError {
+                code: "unsupportedRepositoryBackend",
+                message: error,
+                retryable: false,
+            });
+        }
+
+        let repo_root = PathBuf::from(&repo.summary.path);
+        let parent_path = normalize_directory_path(
+            request.parent_path.as_deref().unwrap_or_default(),
+        )
+        .map_err(|error| ExternalRequestError {
+            code: "invalidTargetPath",
+            message: error,
+            retryable: false,
+        })?;
+        let target_dir = match resolve_repository_relative_path(&repo_root, &parent_path) {
+            Ok(value) if value.exists() && value.is_dir() => value,
+            Ok(_) => {
+                return Err(ExternalRequestError {
+                    code: "invalidTargetPath",
+                    message: format!("directory not found: {parent_path}"),
+                    retryable: false,
+                });
+            }
+            Err(error) => {
+                return Err(ExternalRequestError {
+                    code: "invalidTargetPath",
+                    message: error,
+                    retryable: false,
+                });
+            }
+        };
+
+        let staging_root = self
+            .root
+            .join("external-imports")
+            .join(sanitize_external_component(request_id));
+        fs::create_dir_all(&staging_root)
+            .map_err(io_error)
+            .map_err(|error| ExternalRequestError {
+                code: "internalError",
+                message: error,
+                retryable: true,
+            })?;
+
+        Ok(ExternalAssetImportContext {
+            parent_path,
+            target_dir,
+            staging_root,
+        })
+    }
+
+    fn apply_external_asset_metadata(
+        &self,
+        repo_id: &str,
+        metadata_by_path: &BTreeMap<String, BTreeMap<String, serde_json::Value>>,
+        client: Option<&ExternalAddAssetClient>,
+    ) -> Result<(), String> {
+        if metadata_by_path.is_empty() {
+            return Ok(());
+        }
+        let repo = self.load_repository_record(repo_id)?;
+        let mut connection = self.open_repository_connection(
+            &repo.summary.repo_id,
+            &repo.summary.path,
+            &repo.backend_record,
+        )?;
+        let tx = connection.transaction().map_err(db_error)?;
+        let source = external_metadata_source(client);
+        for (path, metadata) in metadata_by_path {
+            let asset_id = tx
+                .query_row(
+                    "SELECT asset_id FROM assets WHERE repo_id = ?1 AND path = ?2 AND status != 'deleted'",
+                    params![repo_id, path],
+                    |row| row.get::<_, String>(0),
+                )
+                .optional()
+                .map_err(db_error)?
+                .ok_or_else(|| format!("imported asset not found: {path}"))?;
+            update_metadata_for_asset_in_transaction(&tx, repo_id, &asset_id, metadata, &source)
+                .map_err(db_error)?;
+        }
+        tx.commit().map_err(db_error)?;
+        Ok(())
     }
 
     pub fn copy_entries(&self, request: FileCopyRequest) -> Result<FileBrowserSnapshot, String> {
@@ -4278,11 +4577,13 @@ fn load_repository_actions(
         .query_map([repo_id], |row| row.get::<_, String>(0))?
         .collect::<Result<Vec<_>, _>>()?;
     ids.into_iter()
-        .filter_map(|action_id| match load_repository_action(connection, repo_id, &action_id) {
-            Ok(Some(action)) => Some(Ok(action)),
-            Ok(None) => None,
-            Err(error) => Some(Err(error)),
-        })
+        .filter_map(
+            |action_id| match load_repository_action(connection, repo_id, &action_id) {
+                Ok(Some(action)) => Some(Ok(action)),
+                Ok(None) => None,
+                Err(error) => Some(Err(error)),
+            },
+        )
         .collect()
 }
 
@@ -5338,7 +5639,11 @@ fn search_filter_matches(
 ) -> bool {
     let mut include_matches = Vec::new();
     push_query_match(&mut include_matches, repo, asset, metadata, Some(query));
-    push_format_match(&mut include_matches, &asset.extension, request.formats.as_ref());
+    push_format_match(
+        &mut include_matches,
+        &asset.extension,
+        request.formats.as_ref(),
+    );
     push_legacy_tag_match(&mut include_matches, &asset.tags, request.tag.as_deref());
     push_tag_match(&mut include_matches, &asset.tags, request.tags.as_ref());
     push_legacy_metadata_match(
@@ -5347,9 +5652,21 @@ fn search_filter_matches(
         request.metadata_key.as_deref(),
         request.metadata_value.as_deref(),
     );
-    push_metadata_match(&mut include_matches, metadata, request.metadata_filters.as_ref());
-    push_number_match(&mut include_matches, metadata, request.number_filters.as_ref());
-    push_date_match(&mut include_matches, metadata, request.date_filters.as_ref());
+    push_metadata_match(
+        &mut include_matches,
+        metadata,
+        request.metadata_filters.as_ref(),
+    );
+    push_number_match(
+        &mut include_matches,
+        metadata,
+        request.number_filters.as_ref(),
+    );
+    push_date_match(
+        &mut include_matches,
+        metadata,
+        request.date_filters.as_ref(),
+    );
     push_rating_match(&mut include_matches, metadata, request.min_rating);
 
     if !combine_include_matches(&include_matches, request.match_mode.as_deref()) {
@@ -5449,7 +5766,10 @@ fn push_legacy_metadata_match(
     metadata_key: Option<&str>,
     metadata_value: Option<&str>,
 ) {
-    let Some(key) = metadata_key.map(str::trim).filter(|value| !value.is_empty()) else {
+    let Some(key) = metadata_key
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
         return;
     };
     let matched = metadata.get(key).is_some_and(|value| {
@@ -5474,7 +5794,11 @@ fn push_metadata_match(
         return;
     };
     if has_active_metadata_filters(filters) {
-        include_matches.push(metadata_filters_match_with_mode(metadata, filters, Some("and")));
+        include_matches.push(metadata_filters_match_with_mode(
+            metadata,
+            filters,
+            Some("and"),
+        ));
     }
 }
 
@@ -5552,7 +5876,8 @@ fn matches_excluded_filters(
     if exclude_path_prefixes.is_some_and(|prefixes| {
         prefixes.iter().any(|prefix| {
             normalize_directory_path(prefix).ok().is_some_and(|prefix| {
-                !prefix.is_empty() && (asset.path == prefix || asset.path.starts_with(&format!("{prefix}/")))
+                !prefix.is_empty()
+                    && (asset.path == prefix || asset.path.starts_with(&format!("{prefix}/")))
             })
         })
     }) {
@@ -5569,7 +5894,8 @@ fn matches_excluded_filters(
     }
 
     exclude_metadata_filters.is_some_and(|filters| {
-        has_active_metadata_filters(filters) && metadata_filters_match_with_mode(metadata, filters, Some("or"))
+        has_active_metadata_filters(filters)
+            && metadata_filters_match_with_mode(metadata, filters, Some("or"))
     }) || exclude_number_filters.is_some_and(|filters| {
         has_active_number_filters(filters) && number_filters_match(metadata, filters)
     }) || exclude_date_filters.is_some_and(|filters| {
@@ -5629,9 +5955,9 @@ fn metadata_filter_groups(filters: &[SearchMetadataFilter]) -> BTreeMap<String, 
 }
 
 fn has_active_metadata_filters(filters: &[SearchMetadataFilter]) -> bool {
-    filters.iter().any(|filter| {
-        !filter.key.trim().is_empty() && !filter.value.trim().is_empty()
-    })
+    filters
+        .iter()
+        .any(|filter| !filter.key.trim().is_empty() && !filter.value.trim().is_empty())
 }
 
 fn metadata_filters_match_with_mode(
@@ -5680,9 +6006,9 @@ fn number_filters_match(
 }
 
 fn has_active_number_filters(filters: &[SearchNumberFilter]) -> bool {
-    filters
-        .iter()
-        .any(|filter| !filter.key.trim().is_empty() && (filter.min.is_some() || filter.max.is_some()))
+    filters.iter().any(|filter| {
+        !filter.key.trim().is_empty() && (filter.min.is_some() || filter.max.is_some())
+    })
 }
 
 fn date_filters_match(
@@ -5722,9 +6048,9 @@ fn date_filters_match(
 }
 
 fn has_active_date_filters(filters: &[SearchDateFilter]) -> bool {
-    filters
-        .iter()
-        .any(|filter| !filter.key.trim().is_empty() && (filter.from.is_some() || filter.to.is_some()))
+    filters.iter().any(|filter| {
+        !filter.key.trim().is_empty() && (filter.from.is_some() || filter.to.is_some())
+    })
 }
 
 fn parse_rfc3339_timestamp(value: &str) -> Option<OffsetDateTime> {
@@ -5746,19 +6072,23 @@ fn sort_search_hits(results: &mut [SearchHit], sort: Option<&SearchSort>) {
     let normalized_field = field.to_lowercase();
     let descending = sort.direction.trim().eq_ignore_ascii_case("desc");
     results.sort_by(|left, right| {
-        let ordering = compare_sort_field(
-            field,
-            &left.metadata,
-            &right.metadata,
-            || match normalized_field.as_str() {
-                "filename" | "name" => left.filename.to_lowercase().cmp(&right.filename.to_lowercase()),
-                "path" => left.path.to_lowercase().cmp(&right.path.to_lowercase()),
-                "rating" => metadata_sort_number(&left.metadata, "rating")
-                    .partial_cmp(&metadata_sort_number(&right.metadata, "rating"))
-                    .unwrap_or(std::cmp::Ordering::Equal),
-                _ => left.path.to_lowercase().cmp(&right.path.to_lowercase()),
-            },
-        );
+        let ordering =
+            compare_sort_field(
+                field,
+                &left.metadata,
+                &right.metadata,
+                || match normalized_field.as_str() {
+                    "filename" | "name" => left
+                        .filename
+                        .to_lowercase()
+                        .cmp(&right.filename.to_lowercase()),
+                    "path" => left.path.to_lowercase().cmp(&right.path.to_lowercase()),
+                    "rating" => metadata_sort_number(&left.metadata, "rating")
+                        .partial_cmp(&metadata_sort_number(&right.metadata, "rating"))
+                        .unwrap_or(std::cmp::Ordering::Equal),
+                    _ => left.path.to_lowercase().cmp(&right.path.to_lowercase()),
+                },
+            );
         if descending {
             ordering.reverse()
         } else {
@@ -6040,7 +6370,10 @@ fn merge_smart_folder_filters(
         shapes: empty_vec_to_none(shapes),
         metadata_filters: empty_vec_to_none(metadata_filters),
         exclude_tags: merge_optional_lists(parent.exclude_tags, child.exclude_tags.clone()),
-        exclude_formats: merge_optional_lists(parent.exclude_formats, child.exclude_formats.clone()),
+        exclude_formats: merge_optional_lists(
+            parent.exclude_formats,
+            child.exclude_formats.clone(),
+        ),
         exclude_metadata_filters: empty_vec_to_none(exclude_metadata_filters),
         exclude_number_filters: empty_vec_to_none(exclude_number_filters),
         exclude_date_filters: empty_vec_to_none(exclude_date_filters),
@@ -6241,11 +6574,19 @@ fn smart_folder_filter_matches(
         metadata,
         filter.query.as_deref(),
     );
-    push_format_match(&mut include_matches, &asset.extension, filter.formats.as_ref());
+    push_format_match(
+        &mut include_matches,
+        &asset.extension,
+        filter.formats.as_ref(),
+    );
     push_tag_match(&mut include_matches, &asset.tags, filter.tags.as_ref());
     let metadata_filters = smart_folder_filter_metadata_filters(filter);
     push_metadata_match(&mut include_matches, metadata, Some(&metadata_filters));
-    push_number_match(&mut include_matches, metadata, filter.number_filters.as_ref());
+    push_number_match(
+        &mut include_matches,
+        metadata,
+        filter.number_filters.as_ref(),
+    );
     push_date_match(&mut include_matches, metadata, filter.date_filters.as_ref());
     push_rating_match(&mut include_matches, metadata, filter.min_rating);
 
@@ -6349,20 +6690,21 @@ fn sort_file_browser_entries(entries: &mut [FileBrowserEntry], sort: Option<&Sea
     let normalized_field = field.to_lowercase();
     let descending = sort.direction.trim().eq_ignore_ascii_case("desc");
     entries.sort_by(|left, right| {
-        let ordering = compare_sort_field(
-            field,
-            &left.metadata,
-            &right.metadata,
-            || match normalized_field.as_str() {
-                "filename" | "name" => left.name.to_lowercase().cmp(&right.name.to_lowercase()),
-                "size" | "sizebytes" => left.size_bytes.cmp(&right.size_bytes),
-                "modified" | "modifiedat" => left.modified_at.cmp(&right.modified_at),
-                "rating" => metadata_sort_number(&left.metadata, "rating")
-                    .partial_cmp(&metadata_sort_number(&right.metadata, "rating"))
-                    .unwrap_or(std::cmp::Ordering::Equal),
-                _ => left.path.to_lowercase().cmp(&right.path.to_lowercase()),
-            },
-        );
+        let ordering =
+            compare_sort_field(
+                field,
+                &left.metadata,
+                &right.metadata,
+                || match normalized_field.as_str() {
+                    "filename" | "name" => left.name.to_lowercase().cmp(&right.name.to_lowercase()),
+                    "size" | "sizebytes" => left.size_bytes.cmp(&right.size_bytes),
+                    "modified" | "modifiedat" => left.modified_at.cmp(&right.modified_at),
+                    "rating" => metadata_sort_number(&left.metadata, "rating")
+                        .partial_cmp(&metadata_sort_number(&right.metadata, "rating"))
+                        .unwrap_or(std::cmp::Ordering::Equal),
+                    _ => left.path.to_lowercase().cmp(&right.path.to_lowercase()),
+                },
+            );
         if descending {
             ordering.reverse()
         } else {
@@ -6372,7 +6714,10 @@ fn sort_file_browser_entries(entries: &mut [FileBrowserEntry], sort: Option<&Sea
 }
 
 fn metadata_sort_number(metadata: &BTreeMap<String, serde_json::Value>, key: &str) -> f64 {
-    metadata.get(key).and_then(|value| value.as_f64()).unwrap_or(0.0)
+    metadata
+        .get(key)
+        .and_then(|value| value.as_f64())
+        .unwrap_or(0.0)
 }
 
 fn metadata_sort_field_key(field: &str) -> Option<&str> {
@@ -6417,12 +6762,11 @@ fn compare_optional_json_values(
     }
 }
 
-fn compare_json_values(
-    left: &serde_json::Value,
-    right: &serde_json::Value,
-) -> std::cmp::Ordering {
+fn compare_json_values(left: &serde_json::Value, right: &serde_json::Value) -> std::cmp::Ordering {
     if let (Some(left), Some(right)) = (json_value_to_f64(left), json_value_to_f64(right)) {
-        return left.partial_cmp(&right).unwrap_or(std::cmp::Ordering::Equal);
+        return left
+            .partial_cmp(&right)
+            .unwrap_or(std::cmp::Ordering::Equal);
     }
     if let (Some(left), Some(right)) = (
         json_value_to_timestamp(left),
@@ -6871,11 +7215,20 @@ fn ensure_default_metadata(
     overwrite_existing: bool,
 ) -> Result<(), rusqlite::Error> {
     let mut defaults = vec![
-        ("title".to_string(), serde_json::Value::String(filename.to_string())),
+        (
+            "title".to_string(),
+            serde_json::Value::String(filename.to_string()),
+        ),
         ("favorite".to_string(), serde_json::Value::Bool(false)),
-        ("type".to_string(), serde_json::Value::String(extension.to_string())),
+        (
+            "type".to_string(),
+            serde_json::Value::String(extension.to_string()),
+        ),
         ("rating".to_string(), serde_json::json!(0)),
-        ("comment".to_string(), serde_json::Value::String(String::new())),
+        (
+            "comment".to_string(),
+            serde_json::Value::String(String::new()),
+        ),
         ("link".to_string(), serde_json::Value::String(String::new())),
         ("tagGroups".to_string(), serde_json::json!([])),
         (
@@ -6950,7 +7303,13 @@ fn upsert_metadata_value(
           version = metadata.version + 1,
           updated_at = excluded.updated_at
         "#,
-        params![asset_id, key, infer_value_type(value), value.to_string(), now],
+        params![
+            asset_id,
+            key,
+            infer_value_type(value),
+            value.to_string(),
+            now
+        ],
     )?;
     Ok(())
 }
@@ -7945,7 +8304,9 @@ fn extract_image_palette(source_path: &Path, extension: &str) -> Vec<String> {
         if alpha < 128 {
             continue;
         }
-        let bucket = buckets.entry((red & 0xf8, green & 0xf8, blue & 0xf8)).or_default();
+        let bucket = buckets
+            .entry((red & 0xf8, green & 0xf8, blue & 0xf8))
+            .or_default();
         bucket.count += 1;
         bucket.red_sum += u64::from(red);
         bucket.green_sum += u64::from(green);
@@ -7986,7 +8347,10 @@ fn is_video_extension(extension: &str) -> bool {
 }
 
 fn is_audio_extension(extension: &str) -> bool {
-    matches!(extension, "mp3" | "wav" | "ogg" | "flac" | "m4a" | "aac" | "opus")
+    matches!(
+        extension,
+        "mp3" | "wav" | "ogg" | "flac" | "m4a" | "aac" | "opus"
+    )
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -8390,10 +8754,8 @@ fn resolve_plugin_manifest_dependencies(manifests: &mut [PluginManifest]) {
         if !missing_required.is_empty() {
             manifest.enabled = false;
             manifest.status = "unavailable".to_string();
-            manifest.disable_reason = Some(format!(
-                "缺少必需依赖：{}。",
-                missing_required.join("、")
-            ));
+            manifest.disable_reason =
+                Some(format!("缺少必需依赖：{}。", missing_required.join("、")));
         } else if !unavailable_required.is_empty() {
             manifest.enabled = false;
             manifest.status = "disabled".to_string();
@@ -8457,7 +8819,8 @@ fn resolve_plugin_dependency(
             available: false,
         };
     };
-    let available = plugin_dependency_available(&normalized, by_id, legacy_ids, &mut HashSet::new());
+    let available =
+        plugin_dependency_available(&normalized, by_id, legacy_ids, &mut HashSet::new());
     let status = if available {
         "ready"
     } else if dependency.status == "unavailable" || dependency.status == "error" {
@@ -8546,7 +8909,8 @@ fn plugin_category_for_kind(kind: &str) -> &'static str {
 }
 
 fn is_source_plugin(manifest: &PluginManifest) -> bool {
-    manifest.category == "source" || matches!(manifest.kind.as_str(), "filesystem" | "webdav" | "cloud")
+    manifest.category == "source"
+        || matches!(manifest.kind.as_str(), "filesystem" | "webdav" | "cloud")
 }
 
 fn plugin_settings_path(service_root: &Path) -> PathBuf {
@@ -8694,7 +9058,11 @@ fn install_plugin_archive(
 
     let runtime_root = runtime_plugins_dir(service_root);
     fs::create_dir_all(&runtime_root).map_err(io_error)?;
-    let install_name = format!("{}-{}.momoplug", slugify_ascii_component(&manifest.plugin_id), manifest.version);
+    let install_name = format!(
+        "{}-{}.momoplug",
+        slugify_ascii_component(&manifest.plugin_id),
+        manifest.version
+    );
     let target_path = runtime_root.join(install_name);
     if target_path.exists() {
         return Err(format!(
@@ -8814,12 +9182,8 @@ fn load_native_plugin(
                 manifest.plugin_id
             )
         })?;
-    let library_path = native_plugin_library_path(
-        service_root,
-        archive_path,
-        manifest_prefix,
-        library_name,
-    )?;
+    let library_path =
+        native_plugin_library_path(service_root, archive_path, manifest_prefix, library_name)?;
     let library = unsafe { libloading::Library::new(&library_path) }.map_err(|error| {
         format!(
             "failed to load plugin library {}: {error}",
@@ -8862,7 +9226,11 @@ fn native_plugin_library_path(
     let cache_root = plugin_runtime_cache_dir(service_root);
     fs::create_dir_all(&cache_root).map_err(io_error)?;
     let archive_hash = hash_file_sha256(archive_path)?;
-    let cache_dir = cache_root.join(format!("{}-{}", slugify_ascii_component(library_name), archive_hash));
+    let cache_dir = cache_root.join(format!(
+        "{}-{}",
+        slugify_ascii_component(library_name),
+        archive_hash
+    ));
     let output_path = cache_dir.join(&file_name);
     if output_path.is_file() {
         return Ok(output_path);
@@ -8899,7 +9267,9 @@ fn native_plugin_library_path(
             return Ok(output_path);
         }
     }
-    Err(format!("native plugin library not found in archive: {library_name}"))
+    Err(format!(
+        "native plugin library not found in archive: {library_name}"
+    ))
 }
 
 fn native_plugin_library_file_name(library_name: &str) -> String {
@@ -8940,9 +9310,7 @@ fn read_plugin_archive_text_entry(archive_path: &Path, entry_path: &str) -> Resu
         .by_name(entry_path)
         .map_err(|_| format!("plugin archive entry not found: {entry_path}"))?;
     let mut text = String::new();
-    archive_entry
-        .read_to_string(&mut text)
-        .map_err(io_error)?;
+    archive_entry.read_to_string(&mut text).map_err(io_error)?;
     Ok(text)
 }
 
@@ -10437,6 +10805,277 @@ fn copy_external_entries_parallel(
     Ok(outcomes)
 }
 
+fn external_add_asset_response(
+    request_id: String,
+    mut imported: Vec<ExternalImportedAsset>,
+    mut failed: Vec<ExternalAddAssetFailure>,
+    total: usize,
+) -> ExternalAddAssetResponse {
+    imported.sort_by_key(|item| item.item_index);
+    failed.sort_by_key(|item| item.item_index);
+    let status = if imported.is_empty() {
+        "failed"
+    } else if failed.is_empty() {
+        "success"
+    } else {
+        "partial"
+    };
+    ExternalAddAssetResponse {
+        request_id,
+        status: status.to_string(),
+        summary: ExternalAddAssetSummary {
+            total,
+            imported: imported.len(),
+            failed: failed.len(),
+        },
+        imported,
+        failed,
+    }
+}
+
+fn external_failure(
+    item_index: usize,
+    code: &str,
+    message: String,
+    retryable: bool,
+    details: Option<serde_json::Value>,
+) -> ExternalAddAssetFailure {
+    ExternalAddAssetFailure {
+        item_index,
+        code: code.to_string(),
+        message,
+        retryable,
+        details,
+    }
+}
+
+fn external_import_error_code(error: &str) -> &'static str {
+    if error.contains("entry already exists") {
+        "duplicateTarget"
+    } else if error.contains("directory not found")
+        || error.contains("path escapes repository root")
+        || error.contains("invalid path")
+    {
+        "invalidTargetPath"
+    } else {
+        "importRejected"
+    }
+}
+
+fn external_metadata_source(client: Option<&ExternalAddAssetClient>) -> String {
+    let Some(client) = client else {
+        return "external".to_string();
+    };
+    client
+        .id
+        .as_deref()
+        .or(client.name.as_deref())
+        .map(|value| format!("external:{value}"))
+        .unwrap_or_else(|| "external".to_string())
+}
+
+#[derive(Debug)]
+struct ExternalRequestError {
+    code: &'static str,
+    message: String,
+    retryable: bool,
+}
+
+#[derive(Debug)]
+struct ExternalAssetImportContext {
+    parent_path: String,
+    target_dir: PathBuf,
+    staging_root: PathBuf,
+}
+
+#[derive(Debug)]
+struct PlannedExternalAsset {
+    item_index: usize,
+    source_path: String,
+    target_path: String,
+    metadata: Option<BTreeMap<String, serde_json::Value>>,
+}
+
+fn external_item_filename(
+    item: &ExternalAddAssetItem,
+    item_index: usize,
+) -> Result<String, String> {
+    if let Some(filename) = item
+        .filename
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        return validate_new_entry_name(filename);
+    }
+    if let Some(url) = item.url.as_deref() {
+        let url_path = url.split(['?', '#']).next().unwrap_or(url);
+        if let Some(candidate) = url_path
+            .rsplit('/')
+            .find(|segment| !segment.trim().is_empty())
+            .map(percent_decode_filename)
+            .filter(|value| !value.trim().is_empty())
+        {
+            return validate_new_entry_name(&candidate);
+        }
+    }
+    validate_new_entry_name(&format!("external-asset-{item_index}.bin"))
+}
+
+fn percent_decode_filename(value: &str) -> String {
+    let bytes = value.as_bytes();
+    let mut output = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'%' && index + 2 < bytes.len() {
+            if let Ok(hex) = u8::from_str_radix(&value[index + 1..index + 3], 16) {
+                output.push(hex);
+                index += 3;
+                continue;
+            }
+        }
+        output.push(bytes[index]);
+        index += 1;
+    }
+    String::from_utf8_lossy(&output).to_string()
+}
+
+fn stage_external_asset_item(
+    item_index: usize,
+    item: &ExternalAddAssetItem,
+    context: &ExternalAssetImportContext,
+    planned_targets: &mut HashSet<String>,
+) -> Result<PlannedExternalAsset, ExternalAddAssetFailure> {
+    if item.kind != "remoteUrl" {
+        return Err(external_failure(
+            item_index,
+            "invalidInput",
+            format!("unsupported item kind: {}", item.kind),
+            false,
+            None,
+        ));
+    }
+    let Some(url) = item
+        .url
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return Err(external_failure(
+            item_index,
+            "invalidInput",
+            "remoteUrl item requires url".to_string(),
+            false,
+            None,
+        ));
+    };
+    if !url.starts_with("http://") && !url.starts_with("https://") {
+        return Err(external_failure(
+            item_index,
+            "invalidInput",
+            "remoteUrl only supports http and https URLs".to_string(),
+            false,
+            None,
+        ));
+    }
+
+    let filename = external_item_filename(item, item_index)
+        .map_err(|error| external_failure(item_index, "invalidInput", error, false, None))?;
+    let target_path = join_relative_path(&context.parent_path, &filename);
+    if context.target_dir.join(&filename).exists() || !planned_targets.insert(target_path.clone()) {
+        return Err(external_failure(
+            item_index,
+            "duplicateTarget",
+            format!("entry already exists: {filename}"),
+            false,
+            None,
+        ));
+    }
+
+    let staged_path = context.staging_root.join(&filename);
+    download_remote_asset(url, item.headers.as_ref(), &staged_path).map_err(|error| {
+        external_failure(
+            item_index,
+            "downloadFailed",
+            error,
+            true,
+            Some(serde_json::json!({ "url": url })),
+        )
+    })?;
+
+    Ok(PlannedExternalAsset {
+        item_index,
+        source_path: staged_path.to_string_lossy().to_string(),
+        target_path,
+        metadata: item.metadata.clone(),
+    })
+}
+
+fn sanitize_external_component(value: &str) -> String {
+    let sanitized = value
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_') {
+                ch
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>();
+    let trimmed = sanitized.trim_matches('-');
+    if trimmed.is_empty() {
+        "request".to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+fn download_remote_asset(
+    url: &str,
+    headers: Option<&BTreeMap<String, String>>,
+    output_path: &Path,
+) -> Result<(), String> {
+    if !url.starts_with("http://") && !url.starts_with("https://") {
+        return Err("remoteUrl only supports http and https URLs".to_string());
+    }
+    let client = reqwest::blocking::Client::builder()
+        .user_agent("MomoBakoExternalImport/1")
+        .timeout(Duration::from_secs(60))
+        .build()
+        .map_err(|error| format!("download client error: {error}"))?;
+    let mut request = client.get(url);
+    if let Some(headers) = headers {
+        for (name, value) in headers {
+            if is_safe_external_header_name(name) && !value.contains(['\r', '\n']) {
+                request = request.header(name, value);
+            }
+        }
+    }
+    let response = request
+        .send()
+        .map_err(|error| format!("download request failed: {error}"))?;
+    let status = response.status();
+    if !status.is_success() {
+        return Err(format!("download returned HTTP {status}"));
+    }
+    if let Some(parent) = output_path.parent() {
+        fs::create_dir_all(parent).map_err(io_error)?;
+    }
+    let mut file = File::create(output_path).map_err(io_error)?;
+    let mut response = response;
+    response
+        .copy_to(&mut file)
+        .map_err(|error| format!("download body error: {error}"))?;
+    Ok(())
+}
+
+fn is_safe_external_header_name(value: &str) -> bool {
+    !value.is_empty()
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-'))
+}
+
 fn export_repository_archive(
     repo_root: &Path,
     options: &RepositoryArchiveExportOptions,
@@ -10984,8 +11623,7 @@ fn call_builtin_local_filesystem(
                 .get("targetParentPath")
                 .and_then(serde_json::Value::as_str)
                 .ok_or_else(|| "plugin call is missing targetParentPath".to_string())?;
-            let entry =
-                backend.move_entry(&repo_root, source_path, target_parent_path, &config)?;
+            let entry = backend.move_entry(&repo_root, source_path, target_parent_path, &config)?;
             serde_json::to_value(entry).map_err(json_error)
         }
         "filesystem.deleteEntry" => {
@@ -11510,7 +12148,10 @@ fn attach_browser_entry_metadata(
         normalize_loaded_metadata(&mut merged);
         entry.metadata = merged;
         entry.tags = load_tags(connection, asset_id)?;
-        entry.alias_paths = alias_paths_by_asset.get(asset_id).cloned().unwrap_or_default();
+        entry.alias_paths = alias_paths_by_asset
+            .get(asset_id)
+            .cloned()
+            .unwrap_or_default();
     }
 
     Ok(entries)
@@ -12340,6 +12981,7 @@ fn safe_prefix(value: &str, max_chars: usize) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::net::TcpListener;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     struct TestWorkspace {
@@ -12417,7 +13059,9 @@ mod tests {
         assert!(manifests.iter().any(|manifest| {
             manifest.plugin_id == "momobako.library.audio"
                 && manifest.category == "library-kind"
-                && manifest.optional.contains(&"momobako.parser.audio".to_string())
+                && manifest
+                    .optional
+                    .contains(&"momobako.parser.audio".to_string())
         }));
         assert!(manifests.iter().any(|manifest| {
             manifest.plugin_id == "momobako.parser.audio" && manifest.category == "parser"
@@ -12443,7 +13087,11 @@ mod tests {
         );
         write_test_plugin_archive_with_manifest(
             &plugin_root.join("optional-helper.momoplug"),
-            test_plugin_manifest_json("user.optional-helper", "Optional Helper", serde_json::json!({})),
+            test_plugin_manifest_json(
+                "user.optional-helper",
+                "Optional Helper",
+                serde_json::json!({}),
+            ),
         );
         write_test_plugin_archive_with_manifest(
             &plugin_root.join("dependent-plugin.momoplug"),
@@ -12451,10 +13099,10 @@ mod tests {
                 "user.dependent",
                 "Dependent Plugin",
                 serde_json::json!({
-                "permissions": ["readMetadata"],
-                "requires": ["user.provider"],
-                "optional": ["user.optional-helper"]
-            }),
+                    "permissions": ["readMetadata"],
+                    "requires": ["user.provider"],
+                    "optional": ["user.optional-helper"]
+                }),
             ),
         );
         let state = RepositoryState::from_root(workspace.path("service"));
@@ -12514,19 +13162,23 @@ mod tests {
                 "user.provider",
                 "Provider",
                 serde_json::json!({
-                "legacyPluginIds": ["legacy.provider"],
-                "compat": {
-                    "sdkVersion": "1",
-                    "legacyPluginIds": []
-                }
-            }),
+                    "legacyPluginIds": ["legacy.provider"],
+                    "compat": {
+                        "sdkVersion": "1",
+                        "legacyPluginIds": []
+                    }
+                }),
             ),
         );
         write_test_plugin_archive_with_manifest(
             &plugin_root.join("dependent.momoplug"),
-            test_plugin_manifest_json("user.dependent", "Dependent", serde_json::json!({
-                "requires": ["legacy.provider"]
-            })),
+            test_plugin_manifest_json(
+                "user.dependent",
+                "Dependent",
+                serde_json::json!({
+                    "requires": ["legacy.provider"]
+                }),
+            ),
         );
         let state = RepositoryState::from_root(workspace.path("service"));
         let plugins = state.list_plugins().expect("plugins should load");
@@ -12685,7 +13337,10 @@ mod tests {
             })
             .expect("archive text should load from single-root package");
 
-        assert_eq!(response.path, "momobako-example-text-preview-0.1.0/dist/register.js");
+        assert_eq!(
+            response.path,
+            "momobako-example-text-preview-0.1.0/dist/register.js"
+        );
         assert!(response.text.contains("register"));
     }
 
@@ -12794,7 +13449,10 @@ mod tests {
         let service_root = workspace.path("service");
         let runtime_root = runtime_plugins_dir(&service_root);
         fs::create_dir_all(&runtime_root).expect("runtime plugin dir should be created");
-        write_test_plugin_archive(&runtime_root.join("good-plugin.momoplug"), "user.good-plugin");
+        write_test_plugin_archive(
+            &runtime_root.join("good-plugin.momoplug"),
+            "user.good-plugin",
+        );
         fs::write(runtime_root.join("broken-plugin.momoplug"), b"not-a-zip")
             .expect("broken plugin archive should be written");
 
@@ -12923,16 +13581,10 @@ mod tests {
         }
         let file = File::create(path).expect("plugin archive should be created");
         let mut archive = zip::ZipWriter::new(file);
-        let root_dir = format!(
-            "{}-0.1.0",
-            slugify_ascii_component(options.plugin_id)
-        );
+        let root_dir = format!("{}-0.1.0", slugify_ascii_component(options.plugin_id));
         let manifest_path = format!("{root_dir}/manifest.json");
         archive
-            .start_file(
-                manifest_path,
-                zip::write::SimpleFileOptions::default(),
-            )
+            .start_file(manifest_path, zip::write::SimpleFileOptions::default())
             .expect("manifest entry should start");
         archive
             .write_all(
@@ -13194,14 +13846,19 @@ mod tests {
             .expect("repository should still be registered");
         assert_eq!(ready.status, "ready");
         let raw_metadata = fs::read_to_string(
-            relocated_root.join(REPO_META_DIR).join(REPO_METADATA_FILE_NAME),
+            relocated_root
+                .join(REPO_META_DIR)
+                .join(REPO_METADATA_FILE_NAME),
         )
         .expect("relocated metadata should read");
         let metadata: RepositoryMetadataFileImport =
             serde_json::from_str(&raw_metadata).expect("relocated metadata should parse");
         let expected_root_path = relocated_root.to_string_lossy().to_string();
         assert_eq!(metadata.repo_id, repo_id);
-        assert_eq!(metadata.root_path.as_deref(), Some(expected_root_path.as_str()));
+        assert_eq!(
+            metadata.root_path.as_deref(),
+            Some(expected_root_path.as_str())
+        );
         let smart_folders = state
             .list_smart_folders(&response.repository.repo_id)
             .expect("smart folders should load after relocation");
@@ -13321,9 +13978,114 @@ mod tests {
         repo_id
     }
 
+    fn create_local_repository_record_for_external_tests(
+        state: &RepositoryState,
+        repo_root: &Path,
+    ) -> String {
+        let repo_id = format!(
+            "repo-{}",
+            slugify_repo_id("external", &repo_root.to_string_lossy())
+        );
+        state
+            .ensure_initialized()
+            .expect("repository state should initialize");
+        let runtime_plugin_root = runtime_plugins_dir(&state.root);
+        write_test_plugin_archive_with_manifest(
+            &runtime_plugin_root.join("local-filesystem.momoplug"),
+            test_plugin_manifest_json(
+                LOCAL_FILESYSTEM_PLUGIN_ID,
+                "Local Filesystem",
+                serde_json::json!({
+                    "kind": "filesystem",
+                    "category": "source",
+                    "type": {
+                        "layer": "source",
+                        "kind": "filesystem"
+                    },
+                    "capabilities": ["listFiles", "readFile", "writeFile", "moveFile", "deleteFile"],
+                    "runtime": "manifest-only",
+                    "source": "system"
+                }),
+            ),
+        );
+        let metadata_dir = repo_root.join(REPO_META_DIR);
+        fs::create_dir_all(&metadata_dir).expect("metadata dir should be created");
+        let now = now_rfc3339();
+        let metadata = RepositoryMetadataFile {
+            repo_id: repo_id.clone(),
+            name: "External Test Repo".to_string(),
+            root_path: repo_root.to_string_lossy().to_string(),
+            backend_plugin_id: LOCAL_FILESYSTEM_PLUGIN_ID.to_string(),
+            backend_config: serde_json::json!({}),
+            created_at: now.clone(),
+            schema_version: REPO_SCHEMA_VERSION,
+        };
+        fs::write(
+            metadata_dir.join(REPO_METADATA_FILE_NAME),
+            serde_json::to_string_pretty(&metadata).expect("metadata should encode"),
+        )
+        .expect("metadata should be written");
+        let connection = Connection::open(metadata_dir.join(REPO_DB_FILE_NAME))
+            .expect("repository db should open");
+        migrate_repository_schema(&connection).expect("repository schema should initialize");
+        seed_repository_data(
+            &connection,
+            &RepositorySeed {
+                repo_id: &repo_id,
+                name: "External Test Repo",
+                root_path: "",
+                status: "ready",
+                assets: &[],
+            },
+            &now,
+        )
+        .expect("repository data should seed");
+
+        let registry = Connection::open(&state.registry_path).expect("registry should open");
+        registry
+            .execute(
+                r#"
+                INSERT OR REPLACE INTO repositories (
+                  repo_id, name, path, backend_plugin_id, backend_config_json, status, created_at, updated_at
+                )
+                VALUES (?1, ?2, ?3, ?4, ?5, 'ready', ?6, ?6)
+                "#,
+                params![
+                    &repo_id,
+                    "External Test Repo",
+                    repo_root.to_string_lossy().to_string(),
+                    LOCAL_FILESYSTEM_PLUGIN_ID,
+                    "{}",
+                    now
+                ],
+            )
+            .expect("repository should be registered");
+        repo_id
+    }
+
     fn write_test_image(path: &Path) {
         let image = image::RgbImage::from_pixel(2, 2, image::Rgb([120, 120, 120]));
         image.save(path).expect("test image should be saved");
+    }
+
+    fn serve_test_http_body(body: &'static [u8]) -> String {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("test HTTP server should bind");
+        let addr = listener
+            .local_addr()
+            .expect("test HTTP server address should resolve");
+        thread::spawn(move || {
+            if let Ok((mut stream, _)) = listener.accept() {
+                let mut request = [0_u8; 1024];
+                let _ = stream.read(&mut request);
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    body.len()
+                );
+                let _ = stream.write_all(response.as_bytes());
+                let _ = stream.write_all(body);
+            }
+        });
+        format!("http://{addr}/asset.txt")
     }
 
     fn write_test_palette_image(path: &Path) {
@@ -13340,7 +14102,9 @@ mod tests {
                 image.put_pixel(x, y, color);
             }
         }
-        image.save(path).expect("test palette image should be saved");
+        image
+            .save(path)
+            .expect("test palette image should be saved");
     }
 
     fn metadata_for_asset_path(
@@ -13462,7 +14226,10 @@ mod tests {
         assert_eq!(entry.metadata.get("rating"), Some(&serde_json::json!(0)));
         assert_eq!(entry.metadata.get("comment"), Some(&serde_json::json!("")));
         assert_eq!(entry.metadata.get("link"), Some(&serde_json::json!("")));
-        assert_eq!(entry.metadata.get("tagGroups"), Some(&serde_json::json!([])));
+        assert_eq!(
+            entry.metadata.get("tagGroups"),
+            Some(&serde_json::json!([]))
+        );
         assert!(entry
             .metadata
             .get("addedToLibraryAt")
@@ -13719,6 +14486,125 @@ mod tests {
     }
 
     #[test]
+    fn add_external_assets_imports_remote_url_and_metadata() {
+        let (state, root, repo_root, _thumbnail_root) = create_test_state("external-add");
+        let repo_id = create_local_repository_record_for_external_tests(&state, &repo_root);
+        let url = serve_test_http_body(b"external body");
+        let response = state.add_external_assets(
+            "request-external-add".to_string(),
+            ExternalAddAssetRequest {
+                repo_id: repo_id.clone(),
+                parent_path: None,
+                client: Some(ExternalAddAssetClient {
+                    id: Some("test-client".to_string()),
+                    name: None,
+                    version: Some("1".to_string()),
+                }),
+                items: vec![ExternalAddAssetItem {
+                    kind: "remoteUrl".to_string(),
+                    url: Some(url),
+                    filename: Some("captured.txt".to_string()),
+                    headers: None,
+                    metadata: Some(BTreeMap::from([(
+                        "sourceUrl".to_string(),
+                        serde_json::Value::String("https://example.test/source".to_string()),
+                    )])),
+                }],
+            },
+        );
+
+        assert_eq!(response.status, "success", "{:?}", response.failed);
+        assert_eq!(response.imported.len(), 1);
+        assert_eq!(response.imported[0].path, "captured.txt");
+        assert!(repo_root.join("captured.txt").is_file());
+        let detail = state
+            .load_asset_detail(&repo_id, response.imported[0].asset_id.as_deref().unwrap())
+            .expect("asset detail should load");
+        assert!(detail.metadata.iter().any(|entry| entry.key == "sourceUrl"
+            && entry.value
+                == serde_json::Value::String("https://example.test/source".to_string())));
+
+        fs::remove_dir_all(root).expect("test temp root should be removed");
+    }
+
+    #[test]
+    fn add_external_assets_reports_partial_and_duplicate_failures() {
+        let (state, root, repo_root, _thumbnail_root) = create_test_state("external-partial");
+        let repo_id = create_local_repository_record_for_external_tests(&state, &repo_root);
+        let url = serve_test_http_body(b"first");
+
+        let response = state.add_external_assets(
+            "request-external-partial".to_string(),
+            ExternalAddAssetRequest {
+                repo_id,
+                parent_path: None,
+                client: None,
+                items: vec![
+                    ExternalAddAssetItem {
+                        kind: "remoteUrl".to_string(),
+                        url: Some(url),
+                        filename: Some("same.txt".to_string()),
+                        headers: None,
+                        metadata: None,
+                    },
+                    ExternalAddAssetItem {
+                        kind: "remoteUrl".to_string(),
+                        url: Some("https://example.test/second.txt".to_string()),
+                        filename: Some("same.txt".to_string()),
+                        headers: None,
+                        metadata: None,
+                    },
+                    ExternalAddAssetItem {
+                        kind: "localPath".to_string(),
+                        url: None,
+                        filename: None,
+                        headers: None,
+                        metadata: None,
+                    },
+                ],
+            },
+        );
+
+        assert_eq!(response.status, "partial");
+        assert_eq!(response.imported.len(), 1);
+        assert_eq!(response.failed.len(), 2);
+        assert!(response
+            .failed
+            .iter()
+            .any(|failure| failure.code == "duplicateTarget"));
+        assert!(response
+            .failed
+            .iter()
+            .any(|failure| failure.code == "invalidInput"));
+        fs::remove_dir_all(root).expect("test temp root should be removed");
+    }
+
+    #[test]
+    fn add_external_assets_rejects_invalid_target_path() {
+        let (state, root, repo_root, _thumbnail_root) = create_test_state("external-target");
+        let repo_id = create_local_repository_record_for_external_tests(&state, &repo_root);
+        let response = state.add_external_assets(
+            "request-external-target".to_string(),
+            ExternalAddAssetRequest {
+                repo_id,
+                parent_path: Some("missing".to_string()),
+                client: None,
+                items: vec![ExternalAddAssetItem {
+                    kind: "remoteUrl".to_string(),
+                    url: Some("https://example.test/asset.txt".to_string()),
+                    filename: Some("asset.txt".to_string()),
+                    headers: None,
+                    metadata: None,
+                }],
+            },
+        );
+
+        assert_eq!(response.status, "failed");
+        assert_eq!(response.failed[0].code, "invalidTargetPath");
+        fs::remove_dir_all(root).expect("test temp root should be removed");
+    }
+
+    #[test]
     fn repository_actions_list_run_and_reject_unsafe_states() {
         let (state, root, repo_root, _thumbnail_root) = create_test_state("repository-actions");
         fs::write(repo_root.join("cover.png"), b"cover").expect("cover file should be written");
@@ -13773,7 +14659,10 @@ mod tests {
             .list_repository_actions(&repo_id)
             .expect("actions should list");
         assert_eq!(
-            actions.iter().map(|action| action.name.as_str()).collect::<Vec<_>>(),
+            actions
+                .iter()
+                .map(|action| action.name.as_str())
+                .collect::<Vec<_>>(),
             vec!["标记精选", "停用动作", "未知动作"]
         );
         assert_eq!(actions[0].steps.len(), 2);
@@ -13816,7 +14705,14 @@ mod tests {
             })
             .expect("ready action should run");
         assert_eq!(response.run.status, "success");
-        assert_eq!(response.action.last_run.as_ref().map(|run| run.status.as_str()), Some("success"));
+        assert_eq!(
+            response
+                .action
+                .last_run
+                .as_ref()
+                .map(|run| run.status.as_str()),
+            Some("success")
+        );
 
         let detail = state
             .load_asset_detail(&repo_id, &asset_id)
@@ -13827,8 +14723,14 @@ mod tests {
             .map(|entry| (entry.key.as_str(), entry.value.clone()))
             .collect::<BTreeMap<_, _>>();
         assert_eq!(metadata.get("rating"), Some(&serde_json::json!(5)));
-        assert_eq!(metadata.get("comment"), Some(&serde_json::json!("Action run")));
-        assert_eq!(metadata.get("tagGroups"), Some(&serde_json::json!(["精选"])));
+        assert_eq!(
+            metadata.get("comment"),
+            Some(&serde_json::json!("Action run"))
+        );
+        assert_eq!(
+            metadata.get("tagGroups"),
+            Some(&serde_json::json!(["精选"]))
+        );
         assert!(detail
             .revisions
             .iter()
@@ -13843,7 +14745,8 @@ mod tests {
         fs::create_dir_all(repo_root.join("Archive")).expect("archive directory should be created");
         fs::write(repo_root.join("hero.png"), b"hero").expect("hero file should be written");
         fs::write(repo_root.join("draft.png"), b"draft").expect("draft file should be written");
-        fs::write(repo_root.join("Archive/old.png"), b"old").expect("archived file should be written");
+        fs::write(repo_root.join("Archive/old.png"), b"old")
+            .expect("archived file should be written");
         let repo_id = create_repository_for_path(&state, &repo_root);
 
         let repo = state
@@ -13871,11 +14774,30 @@ mod tests {
             })
             .collect::<BTreeMap<_, _>>();
         for (path, width, created_at, note) in [
-            ("hero.png", serde_json::json!(1920), serde_json::json!("2024-02-02T00:00:00Z"), serde_json::json!("final hero")),
-            ("draft.png", serde_json::json!(480), serde_json::json!("2024-02-02T00:00:00Z"), serde_json::json!("draft hero")),
-            ("Archive/old.png", serde_json::json!(1920), serde_json::json!("2024-01-10T00:00:00Z"), serde_json::json!("old hero")),
+            (
+                "hero.png",
+                serde_json::json!(1920),
+                serde_json::json!("2024-02-02T00:00:00Z"),
+                serde_json::json!("final hero"),
+            ),
+            (
+                "draft.png",
+                serde_json::json!(480),
+                serde_json::json!("2024-02-02T00:00:00Z"),
+                serde_json::json!("draft hero"),
+            ),
+            (
+                "Archive/old.png",
+                serde_json::json!(1920),
+                serde_json::json!("2024-01-10T00:00:00Z"),
+                serde_json::json!("old hero"),
+            ),
         ] {
-            for (key, value) in [("width", width), ("fileCreatedAt", created_at), ("note", note)] {
+            for (key, value) in [
+                ("width", width),
+                ("fileCreatedAt", created_at),
+                ("note", note),
+            ] {
                 connection
                     .execute(
                         r#"
@@ -13929,7 +14851,11 @@ mod tests {
             })
             .expect("exclude search should complete");
         assert_eq!(
-            response.results.iter().map(|item| item.path.as_str()).collect::<Vec<_>>(),
+            response
+                .results
+                .iter()
+                .map(|item| item.path.as_str())
+                .collect::<Vec<_>>(),
             vec!["hero.png"]
         );
 
@@ -13962,7 +14888,11 @@ mod tests {
             .query_smart_folder(&repo_id, "smart-hero")
             .expect("smart folder should query");
         assert_eq!(
-            smart_result.results.iter().map(|item| item.path.as_str()).collect::<Vec<_>>(),
+            smart_result
+                .results
+                .iter()
+                .map(|item| item.path.as_str())
+                .collect::<Vec<_>>(),
             vec!["hero.png"]
         );
 
@@ -14024,19 +14954,24 @@ mod tests {
             )
             .expect("repository connection should open");
         let now = now_rfc3339();
-        let ids = ["tag-only.png", "metadata-only.png", "small.png", "large.png"]
-            .into_iter()
-            .map(|path| {
-                let asset_id: String = connection
-                    .query_row(
-                        "SELECT asset_id FROM assets WHERE repo_id = ?1 AND path = ?2",
-                        params![repo_id.as_str(), path],
-                        |row| row.get(0),
-                    )
-                    .expect("asset id should load");
-                (path.to_string(), asset_id)
-            })
-            .collect::<BTreeMap<_, _>>();
+        let ids = [
+            "tag-only.png",
+            "metadata-only.png",
+            "small.png",
+            "large.png",
+        ]
+        .into_iter()
+        .map(|path| {
+            let asset_id: String = connection
+                .query_row(
+                    "SELECT asset_id FROM assets WHERE repo_id = ?1 AND path = ?2",
+                    params![repo_id.as_str(), path],
+                    |row| row.get(0),
+                )
+                .expect("asset id should load");
+            (path.to_string(), asset_id)
+        })
+        .collect::<BTreeMap<_, _>>();
 
         connection
             .execute(
@@ -14045,9 +14980,21 @@ mod tests {
             )
             .expect("tag should be written");
         for (path, width, created_at) in [
-            ("metadata-only.png", serde_json::json!(1920), serde_json::json!("2024-01-04T00:00:00Z")),
-            ("small.png", serde_json::json!(800), serde_json::json!("2024-01-01T00:00:00Z")),
-            ("large.png", serde_json::json!(1920), serde_json::json!("2024-01-03T00:00:00Z")),
+            (
+                "metadata-only.png",
+                serde_json::json!(1920),
+                serde_json::json!("2024-01-04T00:00:00Z"),
+            ),
+            (
+                "small.png",
+                serde_json::json!(800),
+                serde_json::json!("2024-01-01T00:00:00Z"),
+            ),
+            (
+                "large.png",
+                serde_json::json!(1920),
+                serde_json::json!("2024-01-03T00:00:00Z"),
+            ),
         ] {
             for (key, value) in [("width", width), ("fileCreatedAt", created_at)] {
                 connection
@@ -14147,7 +15094,12 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(
             sorted_paths,
-            vec!["small.png", "large.png", "metadata-only.png", "tag-only.png"]
+            vec![
+                "small.png",
+                "large.png",
+                "metadata-only.png",
+                "tag-only.png"
+            ]
         );
 
         let date_sorted = state
@@ -14286,7 +15238,10 @@ mod tests {
 
         assert!(!repo_root.join("note.txt").exists());
         assert!(repo_root.join("Archive/note.txt").is_file());
-        assert!(snapshot.entries.iter().any(|entry| entry.path == "Archive/note.txt"));
+        assert!(snapshot
+            .entries
+            .iter()
+            .any(|entry| entry.path == "Archive/note.txt"));
 
         let repository_snapshot = state
             .load_snapshot(&repo_id)
@@ -14320,8 +15275,7 @@ mod tests {
     #[test]
     fn move_entries_reject_folder_cycle_nesting() {
         let (state, root, repo_root, _thumbnail_root) = create_test_state("move-folder-cycle");
-        fs::create_dir_all(repo_root.join("Scenes/Act1"))
-            .expect("nested folder should be created");
+        fs::create_dir_all(repo_root.join("Scenes/Act1")).expect("nested folder should be created");
         fs::write(repo_root.join("Scenes/Act1/shot.txt"), b"scene")
             .expect("nested file should be written");
         let repo_id = create_repository_without_initial_sync(&state, &repo_root);
