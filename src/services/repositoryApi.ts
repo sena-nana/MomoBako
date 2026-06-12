@@ -1,5 +1,5 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
-import { openPath, revealItemInDir } from "@tauri-apps/plugin-opener";
+import { openPath, openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
 import type {
   ApiDesignSnapshot,
   AssetDetail,
@@ -269,6 +269,10 @@ export function startExternalFileDrag(paths: string[], icon = fallbackFileDragIc
 
 export function openRepositoryPath(path: string) {
   return openPath(path);
+}
+
+export function openExternalUrl(url: string) {
+  return openUrl(url);
 }
 
 export function revealRepositoryPath(path: string) {

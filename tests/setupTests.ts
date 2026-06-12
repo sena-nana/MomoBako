@@ -42,11 +42,20 @@ let mockSmartFolders: SmartFolder[] = [];
 let mockRepositoryActions: RepositoryAction[] = [];
 let mockPlugins: PluginManifest[] | null = null;
 const invokeCalls: Array<{ command: string; args?: Record<string, unknown> }> = [];
-const openerCalls: Array<{ command: "openPath" | "revealItemInDir"; path: string }> = [];
+const openerCalls: Array<{ command: "openPath" | "openUrl" | "revealItemInDir"; path: string }> = [];
 
 
 let mockEntries: MockEntry[] = initialEntries();
 let mockTrashEntries: MockEntry[] = [];
+
+function recordOpenerCall(command: "openPath" | "openUrl" | "revealItemInDir", path: string) {
+  openerCalls.push({ command, path });
+  if (mockOpenerFailure) {
+    const failure = mockOpenerFailure;
+    mockOpenerFailure = null;
+    throw failure;
+  }
+}
 
 function getParentPath(path: string) {
   const index = path.lastIndexOf("/");
@@ -1115,20 +1124,13 @@ vi.mock("@tauri-apps/plugin-dialog", () => ({
 
 vi.mock("@tauri-apps/plugin-opener", () => ({
   openPath: async (path: string) => {
-    openerCalls.push({ command: "openPath", path });
-    if (mockOpenerFailure) {
-      const failure = mockOpenerFailure;
-      mockOpenerFailure = null;
-      throw failure;
-    }
+    recordOpenerCall("openPath", path);
+  },
+  openUrl: async (path: string) => {
+    recordOpenerCall("openUrl", path);
   },
   revealItemInDir: async (path: string) => {
-    openerCalls.push({ command: "revealItemInDir", path });
-    if (mockOpenerFailure) {
-      const failure = mockOpenerFailure;
-      mockOpenerFailure = null;
-      throw failure;
-    }
+    recordOpenerCall("revealItemInDir", path);
   },
 }));
 
@@ -1255,7 +1257,7 @@ export function createDirectoryOnNextSync(path: string) {
   mockDirectoryCreatedOnNextSync = path;
 }
 
-export function getOpenerCalls(command?: "openPath" | "revealItemInDir") {
+export function getOpenerCalls(command?: "openPath" | "openUrl" | "revealItemInDir") {
   return command ? openerCalls.filter((call) => call.command === command) : [...openerCalls];
 }
 
