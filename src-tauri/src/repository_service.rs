@@ -49,6 +49,7 @@ ON CONFLICT(component) DO UPDATE SET version = excluded.version;
 "#;
 
 const LOCAL_FILESYSTEM_PLUGIN_ID: &str = "momobako.local-filesystem";
+const LEGACY_LOCAL_FILESYSTEM_PLUGIN_ID: &str = "builtin.local-filesystem";
 const WEBDAV_PLUGIN_ID: &str = "momobako.webdav";
 const CLOUD_DRIVE_PLUGIN_ID: &str = "momobako.cloud-drive";
 const PLUGIN_SDK_VERSION: &str = "1";
@@ -1233,7 +1234,37 @@ pub struct PluginManifest {
     pub compat: PluginCompat,
     pub status: String,
     #[serde(default)]
+    pub dependency_status: PluginDependencyStatus,
+    #[serde(default)]
+    pub disable_reason: Option<String>,
+    #[serde(default)]
+    pub degraded: bool,
+    #[serde(default)]
+    pub degradation_reason: Option<String>,
+    #[serde(default)]
     pub archive_path: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginDependencyStatus {
+    pub required: Vec<PluginDependencyState>,
+    pub optional: Vec<PluginDependencyState>,
+    pub missing_required: Vec<String>,
+    pub missing_optional: Vec<String>,
+    pub disabled_required: Vec<String>,
+    pub disabled_optional: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginDependencyState {
+    pub plugin_id: String,
+    #[serde(default)]
+    pub name: Option<String>,
+    pub status: String,
+    pub enabled: bool,
+    pub available: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -8121,7 +8152,8 @@ impl BackendPluginRegistry {
     }
 
     fn list_manifests(&self) -> Vec<PluginManifest> {
-        self.registrations
+        let mut manifests = self
+            .registrations
             .values()
             .map(|registration| {
                 let mut manifest = registration.manifest.clone();
@@ -8131,10 +8163,13 @@ impl BackendPluginRegistry {
                     && !embedded_local_filesystem_fallback_enabled(&manifest.plugin_id)
                 {
                     manifest.status = "unavailable".to_string();
+                    manifest.disable_reason = Some("原生运行时不可用。".to_string());
                 }
                 manifest
             })
-            .collect()
+            .collect::<Vec<_>>();
+        resolve_plugin_manifest_dependencies(&mut manifests);
+        manifests
     }
 
     fn manifest(&self, plugin_id: &str) -> Option<&PluginManifest> {
@@ -8320,9 +8355,179 @@ fn plugin_legacy_ids(manifest: &PluginManifest) -> Vec<String> {
     values
 }
 
+fn resolve_plugin_manifest_dependencies(manifests: &mut [PluginManifest]) {
+    let by_id = manifests
+        .iter()
+        .map(|manifest| (manifest.plugin_id.clone(), manifest.clone()))
+        .collect::<BTreeMap<_, _>>();
+    let legacy_ids = manifests
+        .iter()
+        .flat_map(|manifest| {
+            plugin_legacy_ids(manifest)
+                .into_iter()
+                .map(|legacy_id| (legacy_id, manifest.plugin_id.clone()))
+                .collect::<Vec<_>>()
+        })
+        .collect::<BTreeMap<_, _>>();
+
+    for manifest in manifests {
+        let required = resolve_plugin_dependency_list(&manifest.requires, &by_id, &legacy_ids);
+        let optional = resolve_plugin_dependency_list(&manifest.optional, &by_id, &legacy_ids);
+        let missing_required = dependency_ids_by_status(&required, "missing");
+        let missing_optional = dependency_ids_by_status(&optional, "missing");
+        let unavailable_required = unavailable_dependency_ids(&required);
+        let unavailable_optional = unavailable_dependency_ids(&optional);
+
+        manifest.dependency_status = PluginDependencyStatus {
+            required,
+            optional,
+            missing_required: missing_required.clone(),
+            missing_optional: missing_optional.clone(),
+            disabled_required: unavailable_required.clone(),
+            disabled_optional: unavailable_optional.clone(),
+        };
+
+        if !missing_required.is_empty() {
+            manifest.enabled = false;
+            manifest.status = "unavailable".to_string();
+            manifest.disable_reason = Some(format!(
+                "缺少必需依赖：{}。",
+                missing_required.join("、")
+            ));
+        } else if !unavailable_required.is_empty() {
+            manifest.enabled = false;
+            manifest.status = "disabled".to_string();
+            manifest.disable_reason = Some(format!(
+                "必需依赖不可用：{}。",
+                unavailable_required.join("、")
+            ));
+        } else if manifest.disable_reason.is_none() {
+            if !manifest.enabled || manifest.status == "disabled" {
+                manifest.disable_reason = Some("插件已被禁用。".to_string());
+            } else if manifest.status == "unavailable" {
+                manifest.disable_reason = Some("插件运行时不可用。".to_string());
+            } else if manifest.status == "error" {
+                manifest.disable_reason = Some("插件清单或运行时存在错误。".to_string());
+            }
+        }
+
+        manifest.degraded = !missing_optional.is_empty() || !unavailable_optional.is_empty();
+        manifest.degradation_reason = if manifest.degraded {
+            Some(format!(
+                "可选依赖不可用，部分能力降级：{}。",
+                missing_optional
+                    .iter()
+                    .chain(unavailable_optional.iter())
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .join("、")
+            ))
+        } else {
+            None
+        };
+    }
+}
+
+fn resolve_plugin_dependency_list(
+    dependency_ids: &[String],
+    by_id: &BTreeMap<String, PluginManifest>,
+    legacy_ids: &BTreeMap<String, String>,
+) -> Vec<PluginDependencyState> {
+    dependency_ids
+        .iter()
+        .map(|dependency_id| resolve_plugin_dependency(dependency_id, by_id, legacy_ids))
+        .collect()
+}
+
+fn resolve_plugin_dependency(
+    dependency_id: &str,
+    by_id: &BTreeMap<String, PluginManifest>,
+    legacy_ids: &BTreeMap<String, String>,
+) -> PluginDependencyState {
+    let normalized = legacy_ids
+        .get(dependency_id)
+        .cloned()
+        .unwrap_or_else(|| dependency_id.to_string());
+    let Some(dependency) = by_id.get(&normalized) else {
+        return PluginDependencyState {
+            plugin_id: dependency_id.to_string(),
+            name: None,
+            status: "missing".to_string(),
+            enabled: false,
+            available: false,
+        };
+    };
+    let available = plugin_dependency_available(&normalized, by_id, legacy_ids, &mut HashSet::new());
+    let status = if available {
+        "ready"
+    } else if dependency.status == "unavailable" || dependency.status == "error" {
+        dependency.status.as_str()
+    } else {
+        "disabled"
+    };
+    PluginDependencyState {
+        plugin_id: dependency.plugin_id.clone(),
+        name: Some(dependency.name.clone()),
+        status: status.to_string(),
+        enabled: dependency.enabled,
+        available,
+    }
+}
+
+fn plugin_dependency_available(
+    plugin_id: &str,
+    by_id: &BTreeMap<String, PluginManifest>,
+    legacy_ids: &BTreeMap<String, String>,
+    visited: &mut HashSet<String>,
+) -> bool {
+    let normalized = legacy_ids
+        .get(plugin_id)
+        .cloned()
+        .unwrap_or_else(|| plugin_id.to_string());
+    if !visited.insert(normalized.clone()) {
+        return true;
+    }
+    let Some(manifest) = by_id.get(&normalized) else {
+        return false;
+    };
+    if !manifest.enabled || !matches!(manifest.status.as_str(), "ready" | "") {
+        return false;
+    }
+    manifest
+        .requires
+        .iter()
+        .all(|dependency_id| plugin_dependency_available(dependency_id, by_id, legacy_ids, visited))
+}
+
+fn dependency_ids_by_status(dependencies: &[PluginDependencyState], status: &str) -> Vec<String> {
+    dependencies
+        .iter()
+        .filter(|dependency| dependency.status == status)
+        .map(|dependency| {
+            dependency
+                .name
+                .clone()
+                .unwrap_or_else(|| dependency.plugin_id.clone())
+        })
+        .collect()
+}
+
+fn unavailable_dependency_ids(dependencies: &[PluginDependencyState]) -> Vec<String> {
+    dependencies
+        .iter()
+        .filter(|dependency| dependency.status != "ready" && dependency.status != "missing")
+        .map(|dependency| {
+            dependency
+                .name
+                .clone()
+                .unwrap_or_else(|| dependency.plugin_id.clone())
+        })
+        .collect()
+}
+
 fn normalized_builtin_plugin_id(plugin_id: &str) -> &str {
     match plugin_id.trim() {
-        "builtin.local-filesystem" => LOCAL_FILESYSTEM_PLUGIN_ID,
+        LEGACY_LOCAL_FILESYSTEM_PLUGIN_ID => LOCAL_FILESYSTEM_PLUGIN_ID,
         other => other,
     }
 }
@@ -8381,6 +8586,10 @@ fn broken_plugin_manifest(archive_path: &Path, error: &str) -> PluginManifest {
             legacy_plugin_ids: Vec::new(),
         },
         status: "error".to_string(),
+        dependency_status: PluginDependencyStatus::default(),
+        disable_reason: Some("插件清单读取失败。".to_string()),
+        degraded: false,
+        degradation_reason: None,
         archive_path: Some(archive_path.to_string_lossy().to_string()),
     }
 }
@@ -12224,6 +12433,117 @@ mod tests {
     }
 
     #[test]
+    fn plugin_registry_resolves_dependencies_and_degraded_state() {
+        let workspace = TestWorkspace::new("plugin-dependency-state");
+        let plugin_root = workspace.path("service/plugins");
+        fs::create_dir_all(&plugin_root).expect("runtime plugin dir should be created");
+        write_test_plugin_archive_with_manifest(
+            &plugin_root.join("required-provider.momoplug"),
+            test_plugin_manifest_json("user.provider", "Provider", serde_json::json!({})),
+        );
+        write_test_plugin_archive_with_manifest(
+            &plugin_root.join("optional-helper.momoplug"),
+            test_plugin_manifest_json("user.optional-helper", "Optional Helper", serde_json::json!({})),
+        );
+        write_test_plugin_archive_with_manifest(
+            &plugin_root.join("dependent-plugin.momoplug"),
+            test_plugin_manifest_json(
+                "user.dependent",
+                "Dependent Plugin",
+                serde_json::json!({
+                "permissions": ["readMetadata"],
+                "requires": ["user.provider"],
+                "optional": ["user.optional-helper"]
+            }),
+            ),
+        );
+        let state = RepositoryState::from_root(workspace.path("service"));
+
+        state
+            .set_plugin_enabled(PluginEnabledRequest {
+                plugin_id: "user.optional-helper".to_string(),
+                enabled: false,
+            })
+            .expect("optional helper should be disabled");
+        let plugins = state.list_plugins().expect("plugins should load");
+        let dependent = plugins
+            .iter()
+            .find(|manifest| manifest.plugin_id == "user.dependent")
+            .expect("dependent plugin should exist");
+
+        assert_eq!(dependent.status, "ready");
+        assert!(dependent.enabled);
+        assert!(dependent.degraded);
+        assert_eq!(
+            dependent.dependency_status.optional[0].plugin_id,
+            "user.optional-helper"
+        );
+        assert_eq!(dependent.dependency_status.optional[0].status, "disabled");
+        assert!(dependent
+            .degradation_reason
+            .as_deref()
+            .unwrap_or_default()
+            .contains("Optional Helper"));
+
+        fs::remove_file(plugin_root.join("required-provider.momoplug"))
+            .expect("required provider archive should be removable");
+        let plugins = state.list_plugins().expect("plugins should reload");
+        let dependent = plugins
+            .iter()
+            .find(|manifest| manifest.plugin_id == "user.dependent")
+            .expect("dependent plugin should remain listed");
+
+        assert_eq!(dependent.status, "unavailable");
+        assert!(!dependent.enabled);
+        assert_eq!(dependent.dependency_status.required[0].status, "missing");
+        assert!(dependent
+            .disable_reason
+            .as_deref()
+            .unwrap_or_default()
+            .contains("user.provider"));
+    }
+
+    #[test]
+    fn plugin_dependency_resolution_accepts_legacy_ids() {
+        let workspace = TestWorkspace::new("plugin-legacy-dependency");
+        let plugin_root = workspace.path("service/plugins");
+        fs::create_dir_all(&plugin_root).expect("runtime plugin dir should be created");
+        write_test_plugin_archive_with_manifest(
+            &plugin_root.join("provider.momoplug"),
+            test_plugin_manifest_json(
+                "user.provider",
+                "Provider",
+                serde_json::json!({
+                "legacyPluginIds": ["legacy.provider"],
+                "compat": {
+                    "sdkVersion": "1",
+                    "legacyPluginIds": []
+                }
+            }),
+            ),
+        );
+        write_test_plugin_archive_with_manifest(
+            &plugin_root.join("dependent.momoplug"),
+            test_plugin_manifest_json("user.dependent", "Dependent", serde_json::json!({
+                "requires": ["legacy.provider"]
+            })),
+        );
+        let state = RepositoryState::from_root(workspace.path("service"));
+        let plugins = state.list_plugins().expect("plugins should load");
+        let dependent = plugins
+            .iter()
+            .find(|manifest| manifest.plugin_id == "user.dependent")
+            .expect("dependent plugin should exist");
+
+        assert_eq!(dependent.status, "ready");
+        assert_eq!(
+            dependent.dependency_status.required[0].plugin_id,
+            "user.provider"
+        );
+        assert!(dependent.dependency_status.missing_required.is_empty());
+    }
+
+    #[test]
     fn release_plugin_manifest_loading_returns_empty_when_runtime_dir_is_empty() {
         let workspace = TestWorkspace::new("runtime-plugin-empty");
         let manifests = load_plugin_manifests_from_runtime(workspace.path("plugins"));
@@ -12504,6 +12824,66 @@ mod tests {
                 ..TestPluginArchiveOptions::default()
             },
         );
+    }
+
+    fn test_plugin_manifest_json(
+        plugin_id: &str,
+        name: &str,
+        overrides: serde_json::Value,
+    ) -> serde_json::Value {
+        let mut manifest = serde_json::json!({
+            "pluginId": plugin_id,
+            "legacyPluginIds": [],
+            "name": name,
+            "version": "0.1.0",
+            "kind": "metadata",
+            "description": "Test plugin.",
+            "capabilities": ["metadata"],
+            "enabled": true,
+            "sdk": "backend",
+            "entry": {},
+            "source": "user",
+            "runtime": "manifest-only",
+            "permissions": [],
+            "compat": {
+                "sdkVersion": "1",
+                "legacyPluginIds": []
+            },
+            "status": "ready"
+        });
+        if let (Some(base), Some(extra)) = (manifest.as_object_mut(), overrides.as_object()) {
+            for (key, value) in extra {
+                base.insert(key.clone(), value.clone());
+            }
+        }
+        manifest
+    }
+
+    fn write_test_plugin_archive_with_manifest(path: &Path, manifest: serde_json::Value) {
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).expect("plugin archive parent should be created");
+        }
+        let plugin_id = manifest
+            .get("pluginId")
+            .and_then(|value| value.as_str())
+            .unwrap_or("user.sample-metadata");
+        let file = File::create(path).expect("plugin archive should be created");
+        let mut archive = zip::ZipWriter::new(file);
+        let root_dir = format!("{plugin_id}-0.1.0");
+        archive
+            .start_file(
+                format!("{root_dir}/manifest.json"),
+                zip::write::SimpleFileOptions::default(),
+            )
+            .expect("manifest entry should start");
+        archive
+            .write_all(
+                serde_json::to_string_pretty(&manifest)
+                    .expect("manifest should encode")
+                    .as_bytes(),
+            )
+            .expect("manifest should write");
+        archive.finish().expect("plugin archive should finish");
     }
 
     #[derive(Clone)]
