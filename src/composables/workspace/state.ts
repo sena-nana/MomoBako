@@ -3,6 +3,7 @@ import type {
   ApiDesignSnapshot,
   AssetDetail,
   CacheSnapshot,
+  ExternalApiConnectionStatus,
   FileBrowserSnapshot,
   FileBrowserEntry,
   FileTreeNode,
@@ -122,6 +123,7 @@ export const lastSyncResult = shallowRef<SyncResult | null>(null);
 export const plugins = shallowRef<PluginManifest[]>([]);
 export const cacheSnapshot = shallowRef<CacheSnapshot | null>(null);
 export const apiDesign = shallowRef<ApiDesignSnapshot | null>(null);
+export const externalApiConnection = shallowRef<ExternalApiConnectionStatus | null>(null);
 export const workspaceStartup = ref<WorkspaceStartupState>(createInitialWorkspaceStartup());
 export const isLoadingRepositories = ref(false);
 export const isLoadingSnapshot = ref(false);

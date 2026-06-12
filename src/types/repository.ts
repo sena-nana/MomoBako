@@ -484,6 +484,15 @@ export type ExternalAddAssetRequest = {
   items: ExternalAddAssetItem[];
 };
 
+export type ExternalApiConnectionStatus = {
+  baseUrl: string;
+  token: string;
+  version: string;
+  startedAt: string;
+  ready: boolean;
+  connectionFilePath: string;
+};
+
 export type ExternalImportedAsset = {
   itemIndex: number;
   assetId?: string | null;

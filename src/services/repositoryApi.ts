@@ -6,6 +6,7 @@ import type {
   CacheSnapshot,
   BinaryFileWriteRequest,
   BinaryFileWriteResponse,
+  ExternalApiConnectionStatus,
   FileBrowserRequest,
   FileBrowserSnapshot,
   FileCopyRequest,
@@ -250,6 +251,10 @@ export function getCacheSnapshot() {
 
 export function getApiDesignSnapshot() {
   return invoke<ApiDesignSnapshot>("get_api_design_snapshot");
+}
+
+export function getExternalApiConnectionStatus() {
+  return invoke<ExternalApiConnectionStatus>("get_external_api_connection_status");
 }
 
 export function startExternalFileDrag(paths: string[], icon = fallbackFileDragIcon) {

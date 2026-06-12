@@ -1,17 +1,32 @@
 <script setup lang="ts">
-import { computed, onMounted } from "vue";
-import { Database, Moon, ServerCog, Sun } from "lucide-vue-next";
+import { computed, onMounted, ref } from "vue";
+import { save as saveDialog } from "@tauri-apps/plugin-dialog";
+import {
+  CheckCircle2,
+  Copy,
+  Database,
+  Download,
+  FileJson,
+  Moon,
+  ServerCog,
+  Sun,
+} from "lucide-vue-next";
 import PluginManagerPanel from "../components/PluginManagerPanel.vue";
 import { useTheme } from "../composables/useTheme";
 import { useRepositoryWorkspace } from "../composables/useRepositoryWorkspace";
+import { writeBinaryFile } from "../services/repositoryApi";
 
 const { theme, setTheme } = useTheme();
 const {
   repositories,
   cacheSnapshot,
   apiDesign,
+  externalApiConnection,
   loadSettingsData,
 } = useRepositoryWorkspace();
+
+const externalApiMessage = ref("");
+const externalApiError = ref("");
 
 const repositoryCount = computed(() => repositories.value.length);
 const repositoryBackends = computed(() => {
@@ -30,6 +45,75 @@ const repositoryBackends = computed(() => {
   }
   return Array.from(backendMap.values());
 });
+
+const externalConnectionJson = computed(() => {
+  const connection = externalApiConnection.value;
+  if (!connection) return "";
+  return JSON.stringify(
+    {
+      baseUrl: connection.baseUrl,
+      token: connection.token,
+      version: connection.version,
+      startedAt: connection.startedAt,
+    },
+    null,
+    2,
+  );
+});
+
+const externalApiStatusLabel = computed(() => {
+  if (!externalApiConnection.value) return "未加载";
+  return externalApiConnection.value.ready ? "运行中" : "未就绪";
+});
+
+const maskedExternalApiToken = computed(() => {
+  const token = externalApiConnection.value?.token;
+  if (!token) return "未加载";
+  return `${token.slice(0, 10)}...${token.slice(-6)}`;
+});
+
+function setExternalApiNotice(message: string, error = "") {
+  externalApiMessage.value = message;
+  externalApiError.value = error;
+}
+
+async function copyExternalApiValue(label: string, value?: string) {
+  if (!value) {
+    setExternalApiNotice("", `${label} 尚未加载。`);
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(value);
+    setExternalApiNotice(`${label} 已复制。`);
+  } catch (cause) {
+    const reason = cause instanceof Error ? cause.message : String(cause);
+    setExternalApiNotice("", `复制失败：${reason}`);
+  }
+}
+
+async function exportExternalConnectionJson() {
+  const content = externalConnectionJson.value;
+  if (!content) {
+    setExternalApiNotice("", "连接 JSON 尚未加载。");
+    return;
+  }
+  try {
+    const selectedPath = await saveDialog({
+      title: "导出外部 API 连接 JSON",
+      defaultPath: "external-api.json",
+      filters: [{ name: "JSON", extensions: ["json"] }],
+    });
+    if (!selectedPath) {
+      return;
+    }
+    const bytes = Array.from(new TextEncoder().encode(content));
+    await writeBinaryFile({ path: selectedPath, bytes });
+    setExternalApiNotice("external-api.json 已导出。");
+  } catch (cause) {
+    const reason = cause instanceof Error ? cause.message : String(cause);
+    setExternalApiNotice("", `导出失败：${reason}`);
+  }
+}
 
 onMounted(() => {
   void loadSettingsData();
@@ -88,6 +172,42 @@ onMounted(() => {
           <span>{{ repositoryBackends.map((item) => `${item.name} (${item.count})`).join(" / ") || "无" }}</span>
         </li>
       </ul>
+    </div>
+
+    <div class="card">
+      <div class="settings-card-head">
+        <h2>外部素材接入</h2>
+        <span class="settings-status" :class="{ 'is-ready': externalApiConnection?.ready }">
+          <CheckCircle2 :size="13" aria-hidden="true" />
+          {{ externalApiStatusLabel }}
+        </span>
+      </div>
+      <ul class="kv">
+        <li><span>连接文件</span><span>{{ externalApiConnection?.connectionFilePath ?? "未加载" }}</span></li>
+        <li><span>Base URL</span><span>{{ externalApiConnection?.baseUrl ?? "未加载" }}</span></li>
+        <li><span>Token</span><span>{{ maskedExternalApiToken }}</span></li>
+        <li><span>启动时间</span><span>{{ externalApiConnection?.startedAt ?? "未加载" }}</span></li>
+      </ul>
+      <div class="settings-actions">
+        <button type="button" class="ghost" :disabled="!externalApiConnection" @click="copyExternalApiValue('Base URL', externalApiConnection?.baseUrl)">
+          <Copy :size="14" aria-hidden="true" />
+          复制 Base URL
+        </button>
+        <button type="button" class="ghost" :disabled="!externalApiConnection" @click="copyExternalApiValue('Token', externalApiConnection?.token)">
+          <Copy :size="14" aria-hidden="true" />
+          复制 Token
+        </button>
+        <button type="button" class="ghost" :disabled="!externalConnectionJson" @click="copyExternalApiValue('连接 JSON', externalConnectionJson)">
+          <FileJson :size="14" aria-hidden="true" />
+          复制 JSON
+        </button>
+        <button type="button" class="primary" :disabled="!externalConnectionJson" @click="exportExternalConnectionJson">
+          <Download :size="14" aria-hidden="true" />
+          导出 JSON
+        </button>
+      </div>
+      <p v-if="externalApiError" class="settings-notice settings-notice--error">{{ externalApiError }}</p>
+      <p v-else-if="externalApiMessage" class="settings-notice">{{ externalApiMessage }}</p>
     </div>
 
     <PluginManagerPanel

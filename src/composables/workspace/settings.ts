@@ -2,6 +2,7 @@ import {
   deletePlugin,
   getApiDesignSnapshot,
   getCacheSnapshot,
+  getExternalApiConnectionStatus,
   installPluginFromArchive,
   listPlugins,
   setPluginEnabled,
@@ -12,6 +13,7 @@ import {
   apiDesign,
   cacheSnapshot,
   error,
+  externalApiConnection,
   isLoadingSettingsData,
   isManagingPlugins,
   plugins,
@@ -31,15 +33,17 @@ export async function loadSettingsData(options: SettingsDataLoadOptions = {}) {
   isLoadingSettingsData.value = true;
 
   try {
-    const [pluginItems, cache, api] = await Promise.all([
+    const [pluginItems, cache, api, externalApi] = await Promise.all([
       listPlugins(),
       getCacheSnapshot(),
       getApiDesignSnapshot(),
+      getExternalApiConnectionStatus(),
     ]);
     plugins.value = pluginItems;
     syncPreviewPluginsInBackground(pluginItems);
     cacheSnapshot.value = cache;
     apiDesign.value = api;
+    externalApiConnection.value = externalApi;
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : String(cause);
     if (options.failFast) {
