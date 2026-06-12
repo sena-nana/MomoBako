@@ -4,6 +4,38 @@
 
 - Primary transport: Tauri commands backed by an in-process repository runtime
 - Runtime execution: blocking repository work runs on Tauri's blocking task pool
+- External client transport: a loopback HTTP API bound to `127.0.0.1` with a startup-generated bearer token written to the service connection file. The external API is source-neutral; browser extensions, native tools and other local clients all call the same contract.
+
+## External Asset API
+
+- Connection discovery:
+  - MomoBako writes `<serviceRoot>/external-api.json` at startup.
+  - Fields: `baseUrl`, `token`, `version`, `startedAt`.
+  - Desktop settings exposes the same connection payload for status checks, copy actions and JSON export.
+  - External clients send `Authorization: Bearer <token>` for every protected route.
+- `GET /external/v1/health`
+  - No token required.
+  - Returns `version`, `ready`, and generic capabilities such as `assets.add.remoteUrl`.
+- `GET /external/v1/repositories`
+  - Token required.
+  - Returns ready local filesystem repositories that can accept external additions.
+- `POST /external/v1/assets:add`
+  - Token required.
+  - Request:
+    - `repoId`
+    - optional `parentPath`
+    - optional `client`: `{ id?, name?, version? }` for audit/error context only
+    - `items[]`, currently supporting `{ kind: "remoteUrl", url, filename?, headers?, metadata? }`
+  - Core recognizes input kinds, not client origins. It does not branch on browser, collector or other source-specific identities.
+  - `remoteUrl` supports `http` and `https`; downloaded files are staged under service storage and then imported through the same local filesystem import path as desktop drag/drop.
+  - `metadata` is source-neutral and is written to the imported asset after sync. Clients may choose keys such as `sourceUrl`, `originTitle`, or `originReferrer`; Core treats them as ordinary metadata.
+  - Response:
+    - `requestId`
+    - `status`: `success` | `partial` | `failed`
+    - `imported[]`: `itemIndex`, optional `assetId`, `path`
+    - `failed[]`: `itemIndex`, `code`, `message`, `retryable`, optional `details`
+    - `summary`: `total`, `imported`, `failed`
+  - Boundary error codes: `unauthorized`, `notReady`, `repoNotFound`, `repoUnavailable`, `unsupportedRepositoryBackend`, `invalidTargetPath`, `invalidInput`, `downloadFailed`, `duplicateTarget`, `importRejected`, `internalError`.
 
 ## Repository API
 
@@ -96,7 +128,8 @@
   - Request body includes repository-relative `path`
   - Reuse an existing valid thumbnail cache entry or generate one for supported local image/video files
   - Optional `action`: `ensure`, `refresh`, `save`, `saveGenerated`, `clear`
-  - `save` accepts `sourcePath` or `imageBytes` for custom file/folder thumbnails; `saveGenerated` accepts frontend-generated image bytes, used by 3D and text previews
+  - `save` accepts local `sourcePath`, remote HTTP(S) `sourceUrl`, or `imageBytes` for custom file/folder thumbnails; `sourceUrl` is downloaded by the backend so provider cover candidates do not depend on frontend CORS
+  - `saveGenerated` accepts frontend-generated image bytes, used by 3D and text previews
   - Thumbnail cache files live under repository `.momo/thumbnails/` and use sha256 hex filenames
   - File thumbnails also backfill derived metadata such as `thumbnailPalette`
   - Response fields: `repoId`, `path`, `assetId`, `kind`, `thumbnailPath`, `thumbnailCustom`, optional `metadata`
@@ -164,7 +197,7 @@
   - `numberFilters` support numeric ranges such as `width=1024..4096` or `originalSizeBytes=..10485760`.
   - `dateFilters` support ISO timestamp ranges such as `fileCreatedAt=2024-01-01T00:00:00Z..2024-12-31T23:59:59Z`.
   - `matchMode: "or"` allows smart-folder-style any-match logic across populated include filters; the default remains AND semantics.
-  - `sort.field` accepts built-in fields such as `filename`, `path`, `rating`, `sizeBytes`, `modifiedAt`, and metadata fields such as `metadata.width`, `metadata.fileCreatedAt`, and `metadata.addedToLibraryAt`.
+  - `sort.field` accepts core fields such as `filename`, `path`, `rating`, `sizeBytes`, `modifiedAt`, and `random`, plus metadata fields such as `metadata.width`, `metadata.fileCreatedAt`, and `metadata.addedToLibraryAt`.
   - `limit` truncates the result set after sorting.
   - Desktop resource filtering sends the current `repoId` and may search with an empty free text query.
 
@@ -198,16 +231,24 @@
 - `GET /plugins`
   - List runtime-discovered plugin manifests and capabilities
   - Runtime discovery scans `<serviceRoot>/plugins/*.momoplug`; missing or deleted archive files are reflected directly in the response and are not replaced by compiled defaults
-  - Manifest fields include `pluginId`, `legacyPluginIds`, `name`, `version`, `type`, `kind`, `category`, `description`, `capabilities`, `enabled`, `sdk`, `entry`, `source`, `runtime`, `permissions`, `requires`, `optional`, `hooks`, `contributes`, `compat`, and `status`
+  - Manifest fields include `pluginId`, `legacyPluginIds`, `name`, `version`, `type`, `kind`, `category`, `description`, `capabilities`, `enabled`, `sdk`, `entry`, `source`, `runtime`, `permissions`, `requires`, `optional`, `hooks`, `contributes`, `compat`, `status`, `dependencyStatus`, `disableReason`, `degraded`, and `degradationReason`
   - `category` is one of `source`, `library-kind`, `parser`, `preview`, or `service`; legacy manifests without `category` are inferred from `kind`.
   - `source` plugins are attachable repository IO backends. Existing `filesystem`, `webdav`, and `cloud` kinds remain accepted as source plugins for compatibility.
   - `library-kind` plugins declare content fields, facets, view presets, organization rules and declarative core-host hooks for content types. Official manifest-only library kinds include audio, ASMR, video, anime, manga, ebook, image, design, 3D model, font, game, software, archive and project.
+  - ASMR library-kind recognizes repository paths containing `RJ` plus 6 to 8 digits as same-work folders during local sync. Matching files receive non-destructive default metadata such as `libraryKind=asmr`, `workId`, `rjCode`, `workRoot`, `trackPath`, `trackTitle`, `asmrEntryKind`, `lyricStatus`, and listening progress fields when those keys do not already exist.
   - `parser` plugins declare extraction targets and normalized candidate outputs for concrete file/container types; parser output enters the candidate queue rather than directly writing metadata.
+  - `momobako.parser.asmr-folder` declares ASMR folder parsing for RJ work roots, audio track trees, local lyrics and companion files. It is candidate-only; local sync may still seed safe ASMR defaults for search and file browsing.
   - `preview` plugins render file previews and thumbnails independently of library-kind semantics.
   - `service` plugins expose shared capabilities such as metadata providers, network search, download queues, filesystem watching and vector search. External/network services are manual-trigger and candidate-only unless a future runtime implementation changes the contract.
+  - `momobako.service.provider.dlsite` and `momobako.service.provider.asmr-one` declare manual ASMR metadata provider sources. They produce candidates for DLsite/ASMR One fields, dynamic rating/sales data and cover URLs; they do not overwrite user rating, comments or listening progress.
+  - ASMR provider results may be surfaced on file metadata as `providerCandidates` or `asmrProviderCandidates`, each item containing `source`, optional `confidence`, and `fields`/`metadata`. The desktop metadata panel only applies allowlisted provider fields after user confirmation and skips protected fields such as `rating`, `comment`, `listeningStatus`, `listeningProgress`, and `lastListenedAt`.
+  - `POST /providers/asmr:lookup` maps to the desktop command `lookup_asmr_metadata_candidate`. It accepts `provider` (`dlsite` or `asmr-one`) and `rjCode`, fetches provider metadata with the backend network client, and returns a single provider-shaped candidate without writing asset metadata.
+  - Users can also manually import provider-shaped ASMR candidate JSON in the desktop metadata panel. The JSON is saved as `providerCandidates`, then merged through the same confirmation and protected-field rules.
   - `hooks` declare how plugins attach to core-hosted capabilities such as playlist, PiP, progress, candidate queue, batch organize, download queue, metadata merge, rename/move execution, audit log and unified search.
   - Frontend plugins may declare `contributes.playlistPlayers[]` to register playlist playback types. Each item includes `playerTypeId`, `label`, `fileClass`, `supportedExtensions`, `supportsSeek`, `supportsVolume`, `supportsPreviewNavigation`, and optional `description`.
   - Playlist player runtimes implement `load`, `play`, `pause`, optional `seek`, optional `setVolume`, optional `dispose`, and optional `configure(settings)`. Current settings are `{ imageDurationMs?: number, objectFit?: "contain" | "cover" }` for slideshow timing and image/video fitting.
+  - `dependencyStatus` resolves manifest `requires` and `optional` against current runtime-discovered plugins, including legacy plugin IDs. Missing or disabled required dependencies mark the plugin unavailable/disabled with `disableReason`; missing or disabled optional dependencies keep the plugin usable but set `degraded` with `degradationReason`.
+  - `permissions` are host-visible permission claims. The plugin manager displays them for review; runtime authorization enforcement is still tracked as plugin-orchestration follow-up work.
   - Backend plugin IDs are normalized to the `momobako.*` namespace; legacy `builtin.*` IDs remain accepted when reading existing repositories
   - Disabled or manifest-only source backends are displayed but not offered as usable repository backends until enabled with an available runtime
   - Filesystem backend `listFiles` responses include `absolutePath`, `relativePath`, `filename`, `extension`, `sizeBytes`, and `modifiedAt`; the runtime tolerates legacy responses without `absolutePath` by resolving `relativePath` under `repoRoot`

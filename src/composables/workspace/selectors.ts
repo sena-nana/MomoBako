@@ -5,7 +5,7 @@ import {
   activeRepoId,
   activeSnapshot,
   currentDirectoryPath,
-  fileBrowser,
+  fileBrowserDerived,
   filters,
   plugins,
   repositories,
@@ -34,7 +34,7 @@ export const activeRepository = computed(() => (
 ));
 
 export const fileBrowserEntryMap = computed<ReadonlyMap<string, FileBrowserEntry>>(() => (
-  new Map((fileBrowser.value?.entries ?? []).map((entry) => [entry.path, entry]))
+  fileBrowserDerived.value.entryMap
 ));
 
 export const selectedEntry = computed(() => {
@@ -43,15 +43,15 @@ export const selectedEntry = computed(() => {
 });
 
 export const directoryEntries = computed(() => (
-  (fileBrowser.value?.entries ?? []).filter((entry) => entry.kind === "directory")
+  fileBrowserDerived.value.directories
 ));
 
 export const fileEntries = computed(() => (
-  (fileBrowser.value?.entries ?? []).filter((entry) => entry.kind === "file")
+  fileBrowserDerived.value.files
 ));
 
 export const visibleEntries = computed(() => (
-  [...directoryEntries.value, ...fileEntries.value]
+  fileBrowserDerived.value.visibleEntries
 ));
 
 export const selectedFilePathSet = computed<ReadonlySet<string>>(() => (
@@ -79,6 +79,7 @@ export const activeFilterCount = computed(() => (
   filters.value.shapes.length +
   filters.value.excludeTags.length +
   filters.value.excludeFormats.length +
+  (filters.value.metadataFilters.trim() ? 1 : 0) +
   (filters.value.excludeMetadataFilters.trim() ? 1 : 0) +
   (filters.value.numberFilters.trim() ? 1 : 0) +
   (filters.value.dateFilters.trim() ? 1 : 0) +

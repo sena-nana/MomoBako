@@ -1,17 +1,21 @@
-use crate::repository_service::{RepositoryState, SyncRequest};
+use crate::repository_service::{ExternalAddAssetRequest, RepositoryState, SyncRequest};
 use notify::{Config, Event, RecommendedWatcher, RecursiveMode, Watcher};
+use serde::Serialize;
 use std::{
     collections::BTreeSet,
-    fs::File,
+    fs::{self, File},
     io::{Read, Seek, SeekFrom},
     path::{Path, PathBuf},
     sync::{mpsc::channel, Arc, Mutex},
     thread,
+    time::SystemTime,
 };
 use tiny_http::{Header, Method, Request, Response, ResponseBox, Server, StatusCode};
 
 const PREVIEW_HOST: &str = "127.0.0.1";
 const PREVIEW_PATH_PREFIX: &str = "/preview/";
+const EXTERNAL_PATH_PREFIX: &str = "/external/v1/";
+const EXTERNAL_CONNECTION_FILE_NAME: &str = "external-api.json";
 const LOCAL_FILESYSTEM_PLUGIN_ID: &str = "momobako.local-filesystem";
 
 #[derive(Clone)]
@@ -20,6 +24,7 @@ pub struct RepositoryRuntime {
     watcher_handle: Arc<Mutex<RepositoryWatcher>>,
     write_lock: Arc<Mutex<()>>,
     preview_addr: String,
+    external_connection: ExternalApiConnectionStatus,
 }
 
 #[derive(Debug)]
@@ -39,18 +44,29 @@ impl RepositoryRuntime {
         let root = std::env::current_dir()
             .map_err(|error| error.to_string())?
             .join(".service-data");
-        let repository_state = Arc::new(RepositoryState::from_root(root));
+        let repository_state = Arc::new(RepositoryState::from_root(root.clone()));
         let write_lock = Arc::new(Mutex::new(()));
         repository_state.ensure_initialized()?;
         let watcher_handle =
             RepositoryWatcher::start(repository_state.clone(), write_lock.clone())?;
         let preview_addr = start_preview_server(repository_state.clone())?;
+        let external_token = generate_external_api_token()?;
+        let external_addr = start_external_api_server(
+            repository_state.clone(),
+            write_lock.clone(),
+            external_token.clone(),
+        )?;
+        let started_at = now_unix_millis().to_string();
+        let external_connection =
+            build_external_connection_status(&root, &external_addr, &external_token, &started_at);
+        write_external_connection_file(&external_connection)?;
 
         Ok(Self {
             repository_state,
             watcher_handle,
             write_lock,
             preview_addr,
+            external_connection,
         })
     }
 
@@ -105,6 +121,13 @@ impl RepositoryRuntime {
     pub fn preview_source_url(&self, token: &str) -> String {
         format!("http://{}/preview/{token}", self.preview_addr)
     }
+
+    pub fn external_api_connection_status(&self) -> ExternalApiConnectionStatus {
+        ExternalApiConnectionStatus {
+            ready: self.repository_state.ensure_initialized().is_ok(),
+            ..self.external_connection.clone()
+        }
+    }
 }
 
 fn start_preview_server(repository_state: Arc<RepositoryState>) -> Result<String, String> {
@@ -125,6 +148,127 @@ fn start_preview_server(repository_state: Arc<RepositoryState>) -> Result<String
     });
 
     Ok(preview_addr)
+}
+
+fn start_external_api_server(
+    repository_state: Arc<RepositoryState>,
+    write_lock: Arc<Mutex<()>>,
+    token: String,
+) -> Result<String, String> {
+    let server = Server::http(format!("{PREVIEW_HOST}:0")).map_err(|error| error.to_string())?;
+    let addr = server
+        .server_addr()
+        .to_ip()
+        .ok_or_else(|| "external API server did not bind to a TCP address".to_string())?;
+    let external_addr = format!("{PREVIEW_HOST}:{}", addr.port());
+
+    thread::spawn(move || {
+        for request in server.incoming_requests() {
+            let repository_state = repository_state.clone();
+            let write_lock = write_lock.clone();
+            let token = token.clone();
+            thread::spawn(move || {
+                handle_external_api_request(request, &repository_state, &write_lock, &token);
+            });
+        }
+    });
+
+    Ok(external_addr)
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ExternalConnectionFile {
+    base_url: String,
+    token: String,
+    version: String,
+    started_at: String,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExternalApiConnectionStatus {
+    pub base_url: String,
+    pub token: String,
+    pub version: String,
+    pub started_at: String,
+    pub ready: bool,
+    pub connection_file_path: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ExternalHealthResponse {
+    version: String,
+    ready: bool,
+    capabilities: Vec<&'static str>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ExternalErrorResponse {
+    code: String,
+    message: String,
+    retryable: bool,
+}
+
+fn build_external_connection_status(
+    root: &Path,
+    addr: &str,
+    token: &str,
+    started_at: &str,
+) -> ExternalApiConnectionStatus {
+    ExternalApiConnectionStatus {
+        base_url: format!("http://{addr}/external/v1"),
+        token: token.to_string(),
+        version: "1".to_string(),
+        started_at: started_at.to_string(),
+        ready: true,
+        connection_file_path: root
+            .join(EXTERNAL_CONNECTION_FILE_NAME)
+            .to_string_lossy()
+            .to_string(),
+    }
+}
+
+fn write_external_connection_file(connection: &ExternalApiConnectionStatus) -> Result<(), String> {
+    let connection_file_path = Path::new(&connection.connection_file_path);
+    if let Some(parent) = connection_file_path.parent() {
+        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+    let payload = ExternalConnectionFile {
+        base_url: connection.base_url.clone(),
+        token: connection.token.clone(),
+        version: connection.version.clone(),
+        started_at: connection.started_at.clone(),
+    };
+    let json = serde_json::to_string_pretty(&payload).map_err(|error| error.to_string())?;
+    fs::write(connection_file_path, json).map_err(|error| error.to_string())
+}
+
+fn generate_external_api_token() -> Result<String, String> {
+    let mut bytes = [0_u8; 32];
+    getrandom::fill(&mut bytes)
+        .map_err(|error| format!("failed to generate external API token: {error}"))?;
+    Ok(hex::encode(bytes))
+}
+
+fn generate_external_request_id() -> Result<String, String> {
+    let mut bytes = [0_u8; 8];
+    getrandom::fill(&mut bytes)
+        .map_err(|error| format!("failed to generate external request id: {error}"))?;
+    Ok(format!(
+        "external-{}-{}",
+        now_unix_millis(),
+        hex::encode(bytes)
+    ))
+}
+
+fn now_unix_millis() -> u128 {
+    SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map(|value| value.as_millis())
+        .unwrap_or_default()
 }
 
 fn handle_preview_request(request: Request, repository_state: &Arc<RepositoryState>) {
@@ -161,6 +305,176 @@ fn handle_preview_request(request: Request, repository_state: &Arc<RepositorySta
                 .respond(Response::from_string("not found").with_status_code(StatusCode(404)));
         }
     }
+}
+
+fn handle_external_api_request(
+    mut request: Request,
+    repository_state: &Arc<RepositoryState>,
+    write_lock: &Arc<Mutex<()>>,
+    token: &str,
+) {
+    let path = request
+        .url()
+        .split(['?', '#'])
+        .next()
+        .unwrap_or_default()
+        .to_string();
+    if request.method() == &Method::Options {
+        respond_json(request, StatusCode(204), &serde_json::json!({}));
+        return;
+    }
+    if !path.starts_with(EXTERNAL_PATH_PREFIX) {
+        respond_external_error(request, StatusCode(404), "notFound", "not found", false);
+        return;
+    }
+
+    match (request.method(), path.as_str()) {
+        (&Method::Get, "/external/v1/health") => {
+            respond_json(
+                request,
+                StatusCode(200),
+                &ExternalHealthResponse {
+                    version: "1".to_string(),
+                    ready: repository_state.ensure_initialized().is_ok(),
+                    capabilities: vec!["assets.add.remoteUrl"],
+                },
+            );
+        }
+        (&Method::Get, "/external/v1/repositories") => {
+            if !external_authorized(&request, token) {
+                respond_external_error(
+                    request,
+                    StatusCode(401),
+                    "unauthorized",
+                    "unauthorized",
+                    false,
+                );
+                return;
+            }
+            match repository_state.list_repositories() {
+                Ok(repositories) => {
+                    let repositories = repositories
+                        .into_iter()
+                        .filter(|repo| {
+                            repo.status == "ready"
+                                && repo.backend.plugin_id == LOCAL_FILESYSTEM_PLUGIN_ID
+                        })
+                        .collect::<Vec<_>>();
+                    respond_json(request, StatusCode(200), &repositories);
+                }
+                Err(error) => {
+                    respond_external_error(request, StatusCode(503), "notReady", &error, true);
+                }
+            }
+        }
+        (&Method::Post, "/external/v1/assets:add") => {
+            if !external_authorized(&request, token) {
+                respond_external_error(
+                    request,
+                    StatusCode(401),
+                    "unauthorized",
+                    "unauthorized",
+                    false,
+                );
+                return;
+            }
+            let mut body = String::new();
+            if let Err(error) = request.as_reader().read_to_string(&mut body) {
+                respond_external_error(
+                    request,
+                    StatusCode(400),
+                    "invalidInput",
+                    &format!("invalid request body: {error}"),
+                    false,
+                );
+                return;
+            }
+            let payload = match serde_json::from_str::<ExternalAddAssetRequest>(&body) {
+                Ok(payload) => payload,
+                Err(error) => {
+                    respond_external_error(
+                        request,
+                        StatusCode(400),
+                        "invalidInput",
+                        &format!("invalid JSON: {error}"),
+                        false,
+                    );
+                    return;
+                }
+            };
+            let request_id = match generate_external_request_id() {
+                Ok(value) => value,
+                Err(error) => {
+                    respond_external_error(request, StatusCode(503), "notReady", &error, true);
+                    return;
+                }
+            };
+            let Ok(_guard) = write_lock.lock() else {
+                respond_external_error(
+                    request,
+                    StatusCode(503),
+                    "notReady",
+                    "repository write lock poisoned",
+                    true,
+                );
+                return;
+            };
+            let response = repository_state.add_external_assets(request_id, payload);
+            let status = if response.status == "failed" {
+                StatusCode(422)
+            } else {
+                StatusCode(200)
+            };
+            respond_json(request, status, &response);
+        }
+        _ => respond_external_error(
+            request,
+            StatusCode(404),
+            "notFound",
+            "external API route not found",
+            false,
+        ),
+    }
+}
+
+fn external_authorized(request: &Request, token: &str) -> bool {
+    request.headers().iter().any(|header| {
+        header.field.equiv("Authorization") && header.value.as_str() == format!("Bearer {token}")
+    })
+}
+
+fn respond_external_error(
+    request: Request,
+    status: StatusCode,
+    code: &str,
+    message: &str,
+    retryable: bool,
+) {
+    respond_json(
+        request,
+        status,
+        &ExternalErrorResponse {
+            code: code.to_string(),
+            message: message.to_string(),
+            retryable,
+        },
+    );
+}
+
+fn respond_json<T: Serialize>(request: Request, status: StatusCode, payload: &T) {
+    let body = serde_json::to_string(payload).unwrap_or_else(|_| "{}".to_string());
+    let _ = request.respond(
+        Response::from_string(body)
+            .with_status_code(status)
+            .with_header(header("Content-Type", "application/json"))
+            .with_header(header("Cache-Control", "no-store"))
+            .with_header(header("Access-Control-Allow-Origin", "*"))
+            .with_header(header(
+                "Access-Control-Allow-Headers",
+                "Authorization, Content-Type",
+            ))
+            .with_header(header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")),
+    );
 }
 
 fn build_preview_file_response(
@@ -365,6 +679,7 @@ fn normalize_path(path: &Path) -> String {
 mod tests {
     use super::*;
     use crate::repository_service::{FileReadRequest, RepositoryMutationRequest};
+    use rusqlite::{params, Connection};
     use std::{
         fs,
         io::{Read, Write},
@@ -482,6 +797,91 @@ mod tests {
         assert!(raw.starts_with("HTTP/1.0 200 OK"));
         assert!(raw.contains("Content-Type: model/gltf-binary"));
         assert!(raw.ends_with("glb-body"));
+        fs::remove_dir_all(root).expect("test temp root should be removed");
+    }
+
+    #[test]
+    fn external_api_serves_health_and_requires_token() {
+        let root = unique_temp_dir("external-api");
+        let service_root = root.join("state");
+        let repo_root = root.join("repo");
+        fs::create_dir_all(&repo_root).expect("repo root should be created");
+        let state = RepositoryState::from_root(service_root.clone());
+        state
+            .ensure_initialized()
+            .expect("repository state should initialize");
+        let repo_id = "repo-external-api".to_string();
+        let registry =
+            Connection::open(service_root.join("repositories.db")).expect("registry should open");
+        registry
+            .execute(
+                r#"
+                INSERT INTO repositories (
+                  repo_id, name, path, backend_plugin_id, backend_config_json, status, created_at, updated_at
+                )
+                VALUES (?1, 'External API Repo', ?2, ?3, '{}', 'ready', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')
+                "#,
+                params![&repo_id, repo_root.to_string_lossy(), LOCAL_FILESYSTEM_PLUGIN_ID],
+            )
+            .expect("repository should be registered");
+        drop(registry);
+
+        let token = "token-test".to_string();
+        let addr =
+            start_external_api_server(Arc::new(state), Arc::new(Mutex::new(())), token.clone())
+                .expect("external API should start");
+
+        let mut health = TcpStream::connect(&addr).expect("external API should accept connections");
+        health
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .expect("read timeout should be set");
+        write!(
+            health,
+            "GET /external/v1/health HTTP/1.0\r\nHost: localhost\r\n\r\n"
+        )
+        .expect("request should be written");
+        let mut health_raw = String::new();
+        health
+            .read_to_string(&mut health_raw)
+            .expect("health response should be readable");
+        assert!(health_raw.starts_with("HTTP/1.0 200 OK"));
+        assert!(health_raw.contains("assets.add.remoteUrl"));
+
+        let mut unauthorized =
+            TcpStream::connect(&addr).expect("external API should accept connections");
+        unauthorized
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .expect("read timeout should be set");
+        write!(
+            unauthorized,
+            "GET /external/v1/repositories HTTP/1.0\r\nHost: localhost\r\n\r\n"
+        )
+        .expect("request should be written");
+        let mut unauthorized_raw = String::new();
+        unauthorized
+            .read_to_string(&mut unauthorized_raw)
+            .expect("unauthorized response should be readable");
+        assert!(unauthorized_raw.starts_with("HTTP/1.0 401 Unauthorized"));
+        drop(unauthorized);
+
+        let mut authorized =
+            TcpStream::connect(&addr).expect("external API should accept connections");
+        authorized
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .expect("read timeout should be set");
+        write!(
+            authorized,
+            "GET /external/v1/repositories HTTP/1.0\r\nHost: localhost\r\nAuthorization: Bearer {token}\r\n\r\n"
+        )
+        .expect("request should be written");
+        let mut authorized_raw = String::new();
+        authorized
+            .read_to_string(&mut authorized_raw)
+            .expect("authorized response should be readable");
+        assert!(authorized_raw.starts_with("HTTP/1.0 200 OK"));
+        assert!(authorized_raw.contains(&repo_id));
+        drop(authorized);
+        drop(health);
         fs::remove_dir_all(root).expect("test temp root should be removed");
     }
 

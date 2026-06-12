@@ -1,5 +1,6 @@
 {
   "pluginId": "momobako.preview.media",
+  "legacyPluginIds": ["builtin.media-preview"],
   "name": "Media Preview",
   "version": "1.0.0",
   "type": {
@@ -67,7 +68,7 @@
   ],
   "compat": {
     "sdkVersion": "1",
-    "legacyPluginIds": []
+    "legacyPluginIds": ["builtin.media-preview"]
   },
   "source": "builtin",
   "status": "ready"

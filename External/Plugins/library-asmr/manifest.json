@@ -4,16 +4,22 @@
     "builtin.library-asmr"
   ],
   "name": "ASMR Library",
-  "version": "0.1.0",
+  "version": "0.2.0",
+  "type": {
+    "layer": "library-kind",
+    "kind": "asmr"
+  },
   "kind": "library-kind",
   "category": "library-kind",
-  "description": "为 ASMR 与同人音声文件夹声明作品字段、音轨视图和整理候选。",
+  "description": "为 ASMR 与同人音声作品声明 RJ 目录识别、作品字段、音轨视图、播放进度、搜索筛选和整理候选。",
   "capabilities": [
     "library-kind",
     "metadata-schema",
     "view-presets",
     "playlist",
     "progress",
+    "search",
+    "metadata-merge",
     "organize-candidates"
   ],
   "enabled": true,
@@ -31,7 +37,11 @@
   "requires": [],
   "optional": [
     "momobako.parser.audio",
-    "momobako.service.network-search"
+    "momobako.parser.asmr-folder",
+    "momobako.preview.media",
+    "momobako.service.network-search",
+    "momobako.service.provider.dlsite",
+    "momobako.service.provider.asmr-one"
   ],
   "hooks": [
     {
@@ -40,9 +50,24 @@
       "label": "加入播放列表"
     },
     {
+      "slot": "playlist",
+      "action": "library.asmr.enqueueRandomWork",
+      "label": "随心听"
+    },
+    {
       "slot": "progress",
       "action": "library.asmr.trackListeningProgress",
       "label": "记录收听进度"
+    },
+    {
+      "slot": "search",
+      "action": "library.asmr.applySearchFacets",
+      "label": "ASMR 检索筛选"
+    },
+    {
+      "slot": "metadataMerge",
+      "action": "library.asmr.mergeProviderCandidates",
+      "label": "合并作品元数据候选"
     },
     {
       "slot": "batchOrganize",
@@ -53,34 +78,73 @@
   "contributes": {
     "libraryKind": {
       "id": "asmr",
+      "recognition": {
+        "folderPattern": "(?i)RJ\\d{6,8}",
+        "scope": "folder",
+        "duplicatePolicy": "candidate-warning",
+        "nonMatchingFolderPolicy": "recurse"
+      },
       "fields": [
+        "libraryKind",
+        "workId",
+        "rjCode",
         "title",
+        "workTitle",
         "circle",
         "creator",
         "voiceActors",
         "characters",
-        "workId",
         "series",
-        "releaseDate",
-        "durationMs",
-        "trackCount",
-        "language",
-        "rating",
         "scenarioTags",
         "audioTraits",
+        "nsfw",
+        "ageRating",
+        "language",
+        "releaseDate",
+        "price",
+        "dlCount",
+        "reviewCount",
+        "rateCount",
+        "rateAverage",
+        "rateCountDetail",
+        "rank",
+        "cover",
+        "coverSourceWorkId",
         "sourceUrl",
-        "purchaseSource"
+        "purchaseSource",
+        "workRoot",
+        "trackPath",
+        "trackTitle",
+        "trackCount",
+        "trackDurationMs",
+        "durationMs",
+        "lyricStatus",
+        "listeningStatus",
+        "listeningProgress",
+        "lastListenedAt",
+        "comment",
+        "rating"
       ],
       "facets": [
         "circle",
         "voiceActors",
         "series",
+        "scenarioTags",
+        "audioTraits",
         "language",
-        "scenarioTags"
+        "nsfw",
+        "lyricStatus",
+        "listeningStatus"
       ],
       "sortFields": [
         "releaseDate",
+        "dlCount",
+        "price",
+        "rateAverage",
+        "reviewCount",
         "rating",
+        "addedToLibraryAt",
+        "lastListenedAt",
         "durationMs",
         "trackCount"
       ],
@@ -90,8 +154,42 @@
         "circles",
         "voiceActors",
         "series",
-        "missingMetadata"
+        "withLyrics",
+        "continueListening",
+        "marked",
+        "missingMetadata",
+        "duplicateWorks"
       ],
+      "search": {
+        "keywordFields": [
+          "workId",
+          "rjCode",
+          "title",
+          "workTitle",
+          "circle",
+          "voiceActors",
+          "scenarioTags"
+        ],
+        "advancedConditionMode": "and"
+      },
+      "progress": {
+        "statusField": "listeningStatus",
+        "positionField": "listeningProgress",
+        "lastOpenedField": "lastListenedAt",
+        "statusValues": [
+          "marked",
+          "listening",
+          "listened",
+          "replay",
+          "postponed",
+          "unlistened"
+        ]
+      },
+      "organize": {
+        "workFolderTemplate": "{rjCode} {title}",
+        "trackSort": "natural",
+        "candidateOnly": true
+      },
       "preview": [
         "momobako.preview.media"
       ]

@@ -1,56 +1,49 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { convertFileSrc } from "@tauri-apps/api/core";
-import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import { getCurrentWindow } from "@tauri-apps/api/window";
-import type { UnlistenFn } from "@tauri-apps/api/event";
+import { computed, nextTick, onUnmounted, ref, watch } from "vue";
 import {
   AlertTriangle,
-  Eye,
-  FileImage,
-  Files,
-  FolderOpen,
   GripVertical,
-  PencilLine,
-  ImagePlus,
-  ImageOff,
-  Clipboard,
   Play,
-  RefreshCw,
-  RotateCcw,
   Trash2,
   X,
 } from "lucide-vue-next";
 import ConfirmDialog from "../components/ConfirmDialog.vue";
-import PluginManagerPanel from "../components/PluginManagerPanel.vue";
 import WorkspacePlayerBar from "../components/WorkspacePlayerBar.vue";
-import type { ContextMenuItem } from "../composables/useContextMenu";
 import { useRepositoryWorkspace } from "../composables/useRepositoryWorkspace";
 import { usePlaylistPlayer } from "../composables/usePlaylistPlayer";
-import { getPreviewPluginFileActions, getPreviewPluginForEntry } from "../plugins/previewPlugins";
+import { getPreviewPluginForEntry } from "../plugins/previewPlugins";
 import { getPlaylistPlayerByType } from "../plugins/playlistPlayers";
 import type { PlaylistPlayerObjectFit } from "../plugins/sdk";
-import { isAudioExtension, isVideoExtension } from "../utils/filePreviewExtensions";
-import { metadataPalette } from "../utils/fileMetadata";
-import { splitListInput } from "../composables/workspace/filterInputs";
+import { getWorkspaceParentPath } from "./workspace/dragBehavior";
+import { useWorkspacePreviewUi } from "./workspace/useWorkspacePreviewUi";
 import {
-  joinRepositoryPath,
-  normalizeFilesystemPath,
-  normalizeRepositoryRelativePath,
-  repositoryPathParts,
-  trimTrailingPathSeparators,
-} from "../composables/workspace/paths";
+  cancelWorkspaceComponentPreload,
+  CopyTargetDialog,
+  FileBrowserPanel,
+  FilePreviewPane,
+  HardlinkCandidateDialog,
+  PluginManagerPanel,
+  queueWorkspaceComponentPreload,
+  RepositoryActionsPanel,
+  SearchPanel,
+  type WorkspacePreloadHandle,
+} from "./workspace/lazyComponents";
 import {
-  getWorkspaceParentPath,
-  internalWorkspaceDragDistance,
-  normalizeWorkspaceMovePaths,
-  resolveWorkspaceDropTarget,
-  shouldDelegateToExternalDrag as shouldDelegateToExternalWorkspaceDrag,
-} from "./workspace/dragBehavior";
-import {
-  createExternalDragIcon,
-  extractPaletteFromImageElement,
-} from "./workspace/thumbnailUi";
+  asmrWorkAudioEntries,
+  clearAsmrPlaylistForRepo,
+  hasAsmrPlaylistEntry,
+  mergeAsmrPlaylistEntries,
+  parseStoredAsmrPlaylist,
+  resolveActiveAsmrPlaylist,
+  type AsmrPlaylistItem,
+} from "./workspace/asmrPlaylist";
+import { useWorkspaceSearchUi } from "./workspace/useWorkspaceSearchUi";
+import { useMissingRepositoryActions } from "./workspace/useMissingRepositoryActions";
+import { useWorkspaceThumbnailActions } from "./workspace/useWorkspaceThumbnailActions";
+import { useWorkspaceDragDrop } from "./workspace/useWorkspaceDragDrop";
+import { useWorkspaceFileActions } from "./workspace/useWorkspaceFileActions";
+import { useWorkspaceContextMenu } from "./workspace/useWorkspaceContextMenu";
 import type {
   FileBrowserEntry,
   HardlinkCandidate,
@@ -59,45 +52,16 @@ import type {
 } from "../types/repository";
 
 type FileDisplayMode = "adaptive" | "masonry" | "grid" | "list";
-type SearchFilterListKey = "tags" | "formats" | "colors" | "shapes";
-type IdlePreloadWindow = Window & {
-  requestIdleCallback?: (callback: () => void, options?: { timeout?: number }) => number;
-  cancelIdleCallback?: (handle: number) => void;
-};
-type InternalWorkspaceDragSession = {
-  startX: number;
-  startY: number;
-  lastX: number;
-  lastY: number;
-  entry: FileBrowserEntry;
-  delegatedToExternalDrag: boolean;
-};
 
 const fileDisplayModeStorageKey = "momobako.fileDisplayMode";
+const asmrPlaylistStorageKey = "momobako.asmrPlaylist.v1";
 const fileDisplayModeOptions: Array<{ value: FileDisplayMode; label: string }> = [
   { value: "adaptive", label: "自适应" },
   { value: "masonry", label: "瀑布流" },
   { value: "grid", label: "网格" },
   { value: "list", label: "列表" },
 ];
-const workspaceComponentLoaders = {
-  CopyTargetDialog: () => import("./workspace/CopyTargetDialog.vue"),
-  ExtensionsPanel: () => import("./workspace/ExtensionsPanel.vue"),
-  FileBrowserPanel: () => import("./workspace/FileBrowserPanel.vue"),
-  FilePreviewPane: () => import("./workspace/FilePreviewPane.vue"),
-  HardlinkCandidateDialog: () => import("./workspace/HardlinkCandidateDialog.vue"),
-  RepositoryActionsPanel: () => import("./workspace/RepositoryActionsPanel.vue"),
-  SearchPanel: () => import("./workspace/SearchPanel.vue"),
-};
-const CopyTargetDialog = defineAsyncComponent(workspaceComponentLoaders.CopyTargetDialog);
-const FileBrowserPanel = defineAsyncComponent(workspaceComponentLoaders.FileBrowserPanel);
-const FilePreviewPane = defineAsyncComponent(workspaceComponentLoaders.FilePreviewPane);
-const HardlinkCandidateDialog = defineAsyncComponent(workspaceComponentLoaders.HardlinkCandidateDialog);
-const RepositoryActionsPanel = defineAsyncComponent(workspaceComponentLoaders.RepositoryActionsPanel);
-const SearchPanel = defineAsyncComponent(workspaceComponentLoaders.SearchPanel);
-
-let dragDropUnlisten: UnlistenFn | null = null;
-let preloadHandle: { kind: "idle" | "timeout"; id: number } | null = null;
+let preloadHandle: WorkspacePreloadHandle | null = null;
 let hasQueuedWorkspacePreload = false;
 
 function isFileDisplayMode(value: string | null): value is FileDisplayMode {
@@ -113,40 +77,17 @@ function readInitialFileDisplayMode(): FileDisplayMode {
   }
 }
 
-const createFileName = ref("");
-const renameValue = ref("");
-const renameTargetPath = ref<string | null>(null);
-const isDraggingFiles = ref(false);
-const isDraggingRepositoryFolder = ref(false);
-const emptyRepositoryError = ref("");
-const missingRepositoryError = ref("");
-const missingRepositoryAction = ref<"relocating" | "deleting" | null>(null);
-const showMissingRepositoryDeleteDialog = ref(false);
+function readStoredAsmrPlaylist() {
+  try {
+    return parseStoredAsmrPlaylist(localStorage.getItem(asmrPlaylistStorageKey));
+  } catch {
+    return [];
+  }
+}
+
 const previewFilePath = ref<string | null>(null);
-const failedThumbnailPaths = ref<Set<string>>(new Set());
 const fileDisplayMode = ref<FileDisplayMode>(readInitialFileDisplayMode());
-const thumbnailAspectRatios = ref<Record<string, number>>({});
-const thumbnailPalettes = ref<Record<string, string[]>>({});
-const pendingCopySourcePaths = ref<string[]>([]);
-const copyTargetDialogOpen = ref(false);
-const copyTargetPath = ref("");
-const skippedHardlinkCandidateIds = ref<Set<string>>(new Set());
-const colorFilterInput = ref("");
-const shapeFilterInput = ref("");
-const excludeQueryInput = ref("");
-const excludePathPrefixesInput = ref("");
-const excludeTagsInput = ref("");
-const excludeFormatsInput = ref("");
-const excludeMetadataFiltersInput = ref("");
-const excludeNumberFiltersInput = ref("");
-const excludeDateFiltersInput = ref("");
-const numberFiltersInput = ref("");
-const dateFiltersInput = ref("");
-const sortFieldInput = ref("");
-const sortDirectionInput = ref<"asc" | "desc">("asc");
-const limitInput = ref("");
-const internalWorkspaceDragSession = ref<InternalWorkspaceDragSession | null>(null);
-const externalDragSwitchDistance = 72;
+const asmrPlaylistItems = ref<AsmrPlaylistItem[]>(readStoredAsmrPlaylist());
 const playlistDragItemId = ref<string | null>(null);
 
 const {
@@ -207,7 +148,6 @@ const {
   removeRepository,
   relocateMissingRepository,
   clearDraggedWorkspaceState,
-  clearWorkspaceSelection,
   deleteWorkspaceEntries,
   importEntriesToWorkspace,
   renameWorkspaceEntry,
@@ -232,6 +172,7 @@ const {
   setInternalDragActive,
   setWorkspaceEntryThumbnail,
   setWorkspaceEntryThumbnailFromBytes,
+  setWorkspaceEntryThumbnailFromUrl,
   clearWorkspaceEntryThumbnail,
   refreshWorkspaceEntryThumbnail,
   setFilterBarOpen,
@@ -247,11 +188,20 @@ const {
 } = useRepositoryWorkspace();
 const playlistPlayer = usePlaylistPlayer();
 
+const {
+  fileItemStyle,
+  isAudioEntry,
+  isModelEntry,
+  isVideoEntry,
+  markThumbnailFailed,
+  resetThumbnailFailure,
+  thumbnailPaletteColors,
+  thumbnailSrc,
+  updateThumbnailAspectRatio,
+} = useWorkspacePreviewUi();
+
 const hasRepository = computed(() => Boolean(activeSnapshot.value));
 const isMissingRepository = computed(() => activeRepository.value?.status === "missing");
-const isMissingRepositoryBusy = computed(() => missingRepositoryAction.value !== null);
-const isRepairingMissingRepository = computed(() => missingRepositoryAction.value === "relocating");
-const isDeletingMissingRepository = computed(() => missingRepositoryAction.value === "deleting");
 const isFilesPanel = computed(() => activePanel.value === "files");
 const isTrashPanel = computed(() => activePanel.value === "deleted");
 const isSearchPanel = computed(() => activePanel.value === "search");
@@ -294,6 +244,12 @@ const previewPlugin = computed(() => getPreviewPluginForEntry(previewFileEntry.v
 const fileDisplayModeClass = computed(() => `files-list__files--${fileDisplayMode.value}`);
 const activeDirectoryEntries = computed(() => (isSmartFolderPanel.value ? [] : directoryEntries.value));
 const activeFileEntries = computed(() => (isSmartFolderPanel.value ? smartFolderResult.value?.results ?? [] : fileEntries.value));
+const activeEntryByPath = computed<ReadonlyMap<string, FileBrowserEntry>>(() => (
+  new Map(activeFileEntries.value.map((entry) => [entry.path, entry]))
+));
+const asmrPlaylist = computed<AsmrPlaylistItem[]>(() => (
+  resolveActiveAsmrPlaylist(asmrPlaylistItems.value, activeRepoId.value, activeEntryByPath.value)
+));
 const hasActiveSplitFileGroups = computed(() => (
   isSmartFolderPanel.value ? false : hasSplitFileGroups.value
 ));
@@ -315,9 +271,6 @@ const smartFolderSummary = computed(() => {
   ].filter(Boolean);
   return `${smartFolderResult.value.results.length} 条结果${parts.length ? ` · ${parts.join(" · ")}` : ""}`;
 });
-const currentHardlinkCandidate = computed(() => (
-  hardlinkCandidates.value.find((candidate) => !skippedHardlinkCandidateIds.value.has(candidate.candidateId)) ?? null
-));
 const activePlaylistPlayer = computed(() => getPlaylistPlayerByType(activePlaylistDetail.value?.playlist.playerTypeId));
 const workspacePlayerDefinition = computed(() => (
   getPlaylistPlayerByType(playlistPlayer.activePlaylist.value?.playlist.playerTypeId)
@@ -372,76 +325,311 @@ const playlistStatusLabel = computed(() => {
   return `${activePlaylistDetail.value.playlist.playerLabel} · ${activePlaylistDetail.value.items.length} 项`;
 });
 const ratingFilterOptions = [1, 2, 3, 4, 5];
-const filterColorMap: Record<string, string> = {
-  red: "#e05252",
-  green: "#4f9d69",
-  blue: "#4c7bd9",
-  yellow: "#d6a93f",
-  purple: "#8b6bd6",
-  pink: "#d66b9a",
-  orange: "#d98b3d",
-  black: "#333333",
-  white: "#e8e8e8",
-  gray: "#8c9299",
-  grey: "#8c9299",
-  红色: "#e05252",
-  绿色: "#4f9d69",
-  蓝色: "#4c7bd9",
-  黄色: "#d6a93f",
-  紫色: "#8b6bd6",
-  粉色: "#d66b9a",
-  橙色: "#d98b3d",
-  黑色: "#333333",
-  白色: "#e8e8e8",
-  灰色: "#8c9299",
-};
+const {
+  colorFilterInput,
+  shapeFilterInput,
+  excludeQueryInput,
+  excludePathPrefixesInput,
+  excludeTagsInput,
+  excludeFormatsInput,
+  metadataFiltersInput,
+  excludeMetadataFiltersInput,
+  excludeNumberFiltersInput,
+  excludeDateFiltersInput,
+  numberFiltersInput,
+  dateFiltersInput,
+  sortFieldInput,
+  sortDirectionInput,
+  limitInput,
+  tagFilterOptions,
+  formatFilterOptions,
+  colorFilterOptions,
+  shapeFilterOptions,
+  searchResultScopeLabel,
+  searchSummary,
+  toggleSearchFilter,
+  submitMetadataFilterInput,
+  selectMinimumRating,
+  clearSearchFilters,
+  applyAdvancedSearchFilters,
+  searchResultContext,
+  filterColorStyle,
+} = useWorkspaceSearchUi({
+  activeSnapshot,
+  fileBrowser,
+  hasActiveFilters,
+  isRepositoryWritable,
+  searchQuery,
+  searchResults,
+  clearFilters,
+  runFilteredSearch,
+  setActivePanel,
+  setMinimumRatingFilter,
+  toggleFilterValue,
+  updateFilters,
+});
 
-function uniqueSorted(values: Array<string | null | undefined>) {
-  return Array.from(new Set(
-    values
-      .map((value) => value?.trim() ?? "")
-      .filter(Boolean),
-  )).sort((left, right) => left.localeCompare(right, "zh-CN"));
+const hasAsmrAssets = computed(() => {
+  const entries = fileBrowser.value?.entries ?? [];
+  const results = searchResults.value;
+  return [...entries, ...results].some((item) => {
+    const metadata = item.metadata ?? {};
+    return metadata.libraryKind === "asmr" || Boolean(metadata.workId) || Boolean(metadata.rjCode);
+  });
+});
+
+function applyMetadataFilterShortcut(metadataFilters: string, sortField = "", sortDirection: "asc" | "desc" = "asc") {
+  if (!isRepositoryWritable.value) return;
+  metadataFiltersInput.value = metadataFilters;
+  excludeTagsInput.value = "";
+  excludeFormatsInput.value = "";
+  limitInput.value = "";
+  sortFieldInput.value = sortField;
+  sortDirectionInput.value = sortDirection;
+  updateFilters({
+    metadataFilters,
+    excludeQuery: excludeQueryInput.value.trim(),
+    excludePathPrefixes: excludePathPrefixesInput.value.trim(),
+    excludeTags: [],
+    excludeFormats: [],
+    excludeMetadataFilters: excludeMetadataFiltersInput.value.trim(),
+    excludeNumberFilters: excludeNumberFiltersInput.value.trim(),
+    excludeDateFilters: excludeDateFiltersInput.value.trim(),
+    numberFilters: numberFiltersInput.value.trim(),
+    dateFilters: dateFiltersInput.value.trim(),
+    sortField,
+    sortDirection,
+    limit: null,
+  });
+  setActivePanel("search");
+  void runFilteredSearch();
 }
 
-function searchResultFormat(result: SearchHit) {
-  const filename = result.filename || result.path;
-  const index = filename.lastIndexOf(".");
-  return index >= 0 ? filename.slice(index + 1).toLowerCase() : "";
+function applyAsmrShortcut(kind: "all" | "lyrics" | "continue" | "random") {
+  if (kind === "lyrics") {
+    applyMetadataFilterShortcut("libraryKind=asmr\nlyricStatus=local");
+    return;
+  }
+  if (kind === "continue") {
+    applyMetadataFilterShortcut("libraryKind=asmr\nlisteningStatus=listening", "metadata.lastListenedAt", "desc");
+    return;
+  }
+  if (kind === "random") {
+    applyMetadataFilterShortcut("libraryKind=asmr", "random", "asc");
+    return;
+  }
+  applyMetadataFilterShortcut("libraryKind=asmr", "metadata.workId", "asc");
 }
 
-function metadataText(metadata: Record<string, unknown>, key: string) {
-  const value = metadata[key];
-  if (typeof value === "string") return value;
-  if (typeof value === "number" || typeof value === "boolean") return String(value);
-  return "";
+function persistAsmrPlaylist(items = asmrPlaylistItems.value) {
+  try {
+    localStorage.setItem(asmrPlaylistStorageKey, JSON.stringify(items));
+  } catch {
+    return;
+  }
 }
 
-function metadataFilterOptions(key: string) {
-  return uniqueSorted([
-    ...searchResults.value.map((result) => metadataText(result.metadata, key)),
-    ...(fileBrowser.value?.entries.map((entry) => metadataText(entry.metadata ?? {}, key)) ?? []),
-  ]);
+function addAsmrPlaylistEntries(entries: FileBrowserEntry[]) {
+  if (!activeRepoId.value) return;
+  const next = mergeAsmrPlaylistEntries(asmrPlaylistItems.value, activeRepoId.value, entries);
+  asmrPlaylistItems.value = next;
+  persistAsmrPlaylist(next);
 }
 
-const tagFilterOptions = computed(() => uniqueSorted([
-  ...(activeSnapshot.value?.assets.flatMap((asset) => asset.tags) ?? []),
-  ...searchResults.value.flatMap((result) => result.tags),
-]));
+function addAsmrPlaylistTrack(entry: FileBrowserEntry) {
+  addAsmrPlaylistEntries([entry]);
+}
 
-const formatFilterOptions = computed(() => uniqueSorted([
-  ...(activeSnapshot.value?.assets.map((asset) => asset.extension) ?? []),
-  ...searchResults.value.map(searchResultFormat),
-]));
+function addAsmrPlaylistWork(entry: FileBrowserEntry) {
+  addAsmrPlaylistEntries(asmrWorkAudioEntries(entry, activeFileEntries.value));
+}
 
-const colorFilterOptions = computed(() => metadataFilterOptions("color"));
-const shapeFilterOptions = computed(() => metadataFilterOptions("shape"));
+function addRandomAsmrPlaylistTrack(entry: FileBrowserEntry) {
+  if (!activeRepoId.value) return;
+  const workEntries = asmrWorkAudioEntries(entry, activeFileEntries.value);
+  const candidates = workEntries.filter((item) => !hasAsmrPlaylistEntry(asmrPlaylistItems.value, activeRepoId.value as string, item.path));
+  const pool = candidates.length ? candidates : workEntries;
+  const selected = pool[Math.floor(Math.random() * pool.length)];
+  if (selected) addAsmrPlaylistEntries([selected]);
+}
 
-const searchResultScopeLabel = computed(() => (
-  hasActiveFilters.value
-    ? `${activeSnapshot.value?.repository.name ?? "当前资源库"}内筛选`
-    : "全局搜索"
-));
+function clearAsmrPlaylist() {
+  const next = clearAsmrPlaylistForRepo(asmrPlaylistItems.value, activeRepoId.value);
+  asmrPlaylistItems.value = next;
+  persistAsmrPlaylist(next);
+}
+
+async function previewAsmrPlaylistPath(path: string) {
+  const entry = activeEntryByPath.value.get(path);
+  if (entry) {
+    previewFileEntryByDoubleClick(entry);
+    return;
+  }
+  if (!activeRepoId.value || isTrashPanel.value) return;
+  setActivePanel("files");
+  const snapshot = await loadFileBrowserForDirectory(getParentPath(path), { includeTree: true });
+  const matchedEntry = snapshot?.entries.find((item) => item.path === path);
+  if (matchedEntry?.kind === "file") {
+    selectWorkspaceEntries([matchedEntry.path], { primaryPath: matchedEntry.path, anchorPath: matchedEntry.path });
+    await nextTick();
+    previewFilePath.value = matchedEntry.path;
+    if (matchedEntry.assetId) {
+      await selectAsset(matchedEntry.assetId);
+    }
+  }
+}
+const {
+  missingRepositoryError,
+  isMissingRepositoryBusy,
+  isRepairingMissingRepository,
+  isDeletingMissingRepository,
+  showMissingRepositoryDeleteDialog,
+  chooseMissingRepositoryPath,
+  refreshMissingRepository,
+  openMissingRepositoryDeleteDialog,
+  closeMissingRepositoryDeleteDialog,
+  confirmMissingRepositoryDelete,
+} = useMissingRepositoryActions({
+  activeRepoId,
+  refreshRepositoryWorkspace,
+  relocateMissingRepository,
+  removeRepository,
+});
+const {
+  chooseCustomThumbnail,
+  pasteCustomThumbnail,
+  clearCustomThumbnail,
+  refreshEntryThumbnail,
+} = useWorkspaceThumbnailActions({
+  isTrashPanel,
+  clearWorkspaceEntryThumbnail,
+  refreshWorkspaceEntryThumbnail,
+  resetThumbnailFailure,
+  setWorkspaceEntryThumbnail,
+  setWorkspaceEntryThumbnailFromBytes,
+});
+const {
+  emptyRepositoryError,
+  isDraggingFiles,
+  isDraggingRepositoryFolder,
+  handleBoxSelection,
+  handleDragLeave,
+  handleDragOver,
+  handleDrop,
+  handleEmptyRepositoryDragLeave,
+  handleEmptyRepositoryDragOver,
+  handleEmptyRepositoryDrop,
+  handleEntryDragEnd,
+  handleEntryDragMove,
+  handleEntryDragStart,
+  handleFolderDrop,
+  handleFolderDropHover,
+  handleFolderDropLeave,
+} = useWorkspaceDragDrop({
+  activeRepoId,
+  activeSnapshot,
+  canDragEntries,
+  currentDirectoryPath,
+  dragHoverFolderPath,
+  draggedWorkspacePaths,
+  hasRepository,
+  isFilesPanel,
+  isInternalDragActive,
+  isMissingRepository,
+  isRepositoryWritable,
+  isTrashPanel,
+  selectedFilePath,
+  selectedFilePathSet,
+  selectedFilePaths,
+  attachRepository,
+  clearDraggedWorkspaceState,
+  importEntriesToWorkspace,
+  moveWorkspaceEntries,
+  selectWorkspaceEntries,
+  setDragHoverFolderPath,
+  setDraggedWorkspacePaths,
+  setExternalDragActive,
+  setInternalDragActive,
+  startWorkspaceEntriesDrag,
+});
+const {
+  copyTargetDialogOpen,
+  copyTargetPath,
+  createFileName,
+  currentHardlinkCandidate,
+  renameTargetPath,
+  renameValue,
+  cancelCopyTarget,
+  confirmCurrentHardlinkCandidate,
+  deleteContextSelection,
+  deleteSelectedEntry,
+  handleCreateFile,
+  handleEmptyTrash,
+  handleRestoreAllTrash,
+  openCopyTargetDialog,
+  openSelectedEntry,
+  restoreContextSelection,
+  restoreSelectedEntry,
+  revealSelectedEntry,
+  skipCurrentHardlinkCandidate,
+  startRenameEntry,
+  startRenameSelected,
+  submitCopyTarget,
+  submitRenameSelected,
+} = useWorkspaceFileActions({
+  currentFileEntry,
+  fileBrowser,
+  hasMultipleSelection,
+  hardlinkCandidates,
+  isTrashPanel,
+  selectedFilePathSet,
+  selectedFilePaths,
+  confirmWorkspaceHardlinkCandidate,
+  copyWorkspaceEntries,
+  createFileInWorkspace,
+  deleteWorkspaceEntries,
+  deleteWorkspaceEntry,
+  emptyTrash,
+  openDirectory,
+  openWorkspaceEntry,
+  renameWorkspaceEntry,
+  restoreAllTrashEntries,
+  restoreTrashEntries,
+  restoreTrashEntry,
+  revealWorkspaceEntry,
+});
+const { fileEntryContextMenu } = useWorkspaceContextMenu({
+  activeRepoId,
+  hasMultipleSelection,
+  isMutatingFiles,
+  isSmartFolderPanel,
+  isTrashPanel,
+  selectedFilePathSet,
+  selectedFilePaths,
+  chooseCustomThumbnail,
+  clearCustomThumbnail,
+  deleteContextSelection,
+  playlistMenuItems: (entry) => compatiblePlaylistsForEntry(entry).map((playlist) => ({
+    id: `playlist-${playlist.playlistId}`,
+    label: playlist.name,
+    checked: (playlistMemberships.value[entry.assetId ?? ""] ?? []).includes(playlist.playlistId),
+    onSelect: () => togglePlaylistMembership(entry, playlist.playlistId),
+  })),
+  openCopyTargetDialog,
+  openDirectory,
+  openWorkspaceEntry,
+  pasteCustomThumbnail,
+  previewEntry: (entry) => {
+    if (entry.kind === "file") {
+      previewFilePath.value = entry.path;
+    }
+  },
+  refreshEntryThumbnail,
+  restoreContextSelection,
+  revealWorkspaceEntry,
+  selectWorkspaceEntries,
+  startRenameEntry,
+});
 
 function hardlinkStateLabel(entry: FileBrowserEntry) {
   switch (entry.hardlinkState) {
@@ -464,13 +652,6 @@ function hardlinkStateLabel(entry: FileBrowserEntry) {
 function hardlinkCandidateMessage(candidate: HardlinkCandidate) {
   return `${candidate.newPath} 与 ${candidate.existingPath} 内容哈希一致，大小 ${candidate.sizeLabel}。确认后会将新文件加入硬链接关联。`;
 }
-
-watch([currentFileEntry, hasMultipleSelection], ([entry, multiple]) => {
-  if (multiple || (renameTargetPath.value && renameTargetPath.value !== entry?.path)) {
-    renameTargetPath.value = null;
-    renameValue.value = "";
-  }
-});
 
 watch(fileDisplayMode, (mode) => {
   try {
@@ -529,23 +710,6 @@ function fileTone(entry: FileBrowserEntry) {
   return "var(--thumbnail-placeholder-bg)";
 }
 
-function isVideoEntry(entry: FileBrowserEntry) {
-  return isVideoExtension(entry.extension);
-}
-
-function isAudioEntry(entry: FileBrowserEntry) {
-  return isAudioExtension(entry.extension);
-}
-
-function isModelEntry(entry: FileBrowserEntry) {
-  return Boolean(getPreviewPluginForEntry(entry));
-}
-
-function thumbnailSrc(entry: FileBrowserEntry) {
-  if (!entry.thumbnailPath || failedThumbnailPaths.value.has(entry.path)) return null;
-  return convertFileSrc(entry.thumbnailPath);
-}
-
 function playlistItemThumbnailSrc(item: PlaylistItem) {
   if (!item.thumbnailPath) return null;
   return convertFileSrc(item.thumbnailPath);
@@ -561,107 +725,6 @@ function playlistItemToFileEntry(item: PlaylistItem): FileBrowserEntry {
     status: item.status,
     thumbnailPath: item.thumbnailPath,
   };
-}
-
-function markThumbnailFailed(entry: FileBrowserEntry) {
-  failedThumbnailPaths.value = new Set([...failedThumbnailPaths.value, entry.path]);
-}
-
-function updateThumbnailAspectRatio(entry: FileBrowserEntry, event: Event) {
-  const image = event.currentTarget as HTMLImageElement | null;
-  if (!image?.naturalWidth || !image.naturalHeight) return;
-  const aspectRatio = image.naturalWidth / image.naturalHeight;
-  if (!Number.isFinite(aspectRatio) || aspectRatio <= 0) return;
-  thumbnailAspectRatios.value = {
-    ...thumbnailAspectRatios.value,
-    [entry.path]: Math.min(Math.max(aspectRatio, 0.55), 2.4),
-  };
-  const palette = extractPaletteFromImageElement(image);
-  if (palette.length) {
-    thumbnailPalettes.value = {
-      ...thumbnailPalettes.value,
-      [entry.path]: palette,
-    };
-  }
-}
-
-function fileItemStyle(entry: FileBrowserEntry) {
-  return {
-    "--file-thumb-aspect": String(thumbnailAspectRatios.value[entry.path] ?? 1),
-  };
-}
-
-function thumbnailPaletteColors(entry: FileBrowserEntry) {
-  const metadataColors = metadataPalette(entry.metadata);
-  if (metadataColors.length) return metadataColors;
-  return thumbnailPalettes.value[entry.path] ?? [];
-}
-
-function resetThumbnailFailure(path: string) {
-  const next = new Set(failedThumbnailPaths.value);
-  next.delete(path);
-  failedThumbnailPaths.value = next;
-}
-
-async function chooseCustomThumbnail(entry: FileBrowserEntry) {
-  if (isTrashPanel.value) return;
-  const selected = await openDialog({
-    title: "选择自定义缩略图",
-    multiple: false,
-    filters: [
-      {
-        name: "图片",
-        extensions: ["png", "jpg", "jpeg", "webp", "bmp"],
-      },
-    ],
-  });
-  if (typeof selected !== "string") return;
-  const response = await setWorkspaceEntryThumbnail(entry.path, selected);
-  if (response?.thumbnailPath) resetThumbnailFailure(entry.path);
-}
-
-async function readClipboardImageBytes() {
-  const items = await navigator.clipboard?.read?.();
-  if (!items?.length) return null;
-
-  for (const item of items) {
-    const type = item.types.find((value) => value.startsWith("image/"));
-    if (!type) continue;
-    const blob = await item.getType(type);
-    return {
-      mediaType: type,
-      bytes: Array.from(new Uint8Array(await blob.arrayBuffer())),
-    };
-  }
-
-  return null;
-}
-
-async function pasteCustomThumbnail(entry: FileBrowserEntry) {
-  if (isTrashPanel.value) return;
-  try {
-    const image = await readClipboardImageBytes();
-    if (!image) return;
-    const response = await setWorkspaceEntryThumbnailFromBytes(entry.path, image.bytes, image.mediaType);
-    if (response?.thumbnailPath) resetThumbnailFailure(entry.path);
-  } catch {
-    return;
-  }
-}
-
-async function clearCustomThumbnail(entry: FileBrowserEntry) {
-  if (isTrashPanel.value) return;
-  const response = await clearWorkspaceEntryThumbnail(entry.path);
-  resetThumbnailFailure(entry.path);
-  if (!response?.thumbnailPath && entry.kind === "file") {
-    await refreshWorkspaceEntryThumbnail(entry.path);
-  }
-}
-
-async function refreshEntryThumbnail(entry: FileBrowserEntry) {
-  if (isTrashPanel.value) return;
-  const response = await refreshWorkspaceEntryThumbnail(entry.path);
-  if (response?.thumbnailPath) resetThumbnailFailure(entry.path);
 }
 
 function entryDeletedAtLabel(entry: FileBrowserEntry) {
@@ -694,110 +757,6 @@ async function saveFileMetadata(entry: FileBrowserEntry, metadata: Record<string
     await selectAsset(entry.assetId);
   }
   return saveAssetMetadata(metadata);
-}
-
-function startInternalWorkspaceDrag(paths: string[]) {
-  setDraggedWorkspacePaths(paths);
-  setInternalDragActive(true);
-}
-
-function finishInternalWorkspaceDrag() {
-  internalWorkspaceDragSession.value = null;
-  clearDraggedWorkspaceState();
-  setDragHoverFolderPath(null);
-}
-
-function resolveFolderDropTarget(clientX: number, clientY: number) {
-  return resolveWorkspaceDropTarget(document, clientX, clientY, currentDirectoryPath.value);
-}
-
-function updateInternalWorkspaceHover(clientX: number, clientY: number) {
-  const nextTargetPath = resolveFolderDropTarget(clientX, clientY);
-  if (nextTargetPath == null) {
-    setDragHoverFolderPath(null);
-    return null;
-  }
-  setDragHoverFolderPath(nextTargetPath);
-  return nextTargetPath;
-}
-
-function shouldDelegateToExternalDrag(clientX: number, clientY: number) {
-  const session = internalWorkspaceDragSession.value;
-  if (!session) return false;
-  return shouldDelegateToExternalWorkspaceDrag(
-    session,
-    clientX,
-    clientY,
-    { width: window.innerWidth, height: window.innerHeight },
-    externalDragSwitchDistance,
-  );
-}
-
-async function delegateToExternalWorkspaceDrag() {
-  const session = internalWorkspaceDragSession.value;
-  if (!session || session.delegatedToExternalDrag || !draggedWorkspacePaths.value.length) return;
-  internalWorkspaceDragSession.value = {
-    ...session,
-    delegatedToExternalDrag: true,
-  };
-  const dragPaths = [...draggedWorkspacePaths.value];
-  const icon = createExternalDragIcon(session.entry);
-  finishInternalWorkspaceDrag();
-  await startWorkspaceEntriesDrag(dragPaths, icon);
-}
-
-function handleEntryDragStart(entry: FileBrowserEntry, event: PointerEvent) {
-  if (!canDragEntries.value) return;
-  const dragPaths = selectedFilePathSet.value.has(entry.path)
-    ? selectedFilePaths.value
-    : [entry.path];
-  if (!selectedFilePathSet.value.has(entry.path)) {
-    selectWorkspaceEntries([entry.path], { primaryPath: entry.path, anchorPath: entry.path });
-  }
-  startInternalWorkspaceDrag(dragPaths);
-  internalWorkspaceDragSession.value = {
-    startX: event.clientX,
-    startY: event.clientY,
-    lastX: event.clientX,
-    lastY: event.clientY,
-    entry,
-    delegatedToExternalDrag: false,
-  };
-  updateInternalWorkspaceHover(event.clientX, event.clientY);
-}
-
-function handleEntryDragMove(event: PointerEvent) {
-  if (!isInternalDragActive.value) return;
-  if (internalWorkspaceDragSession.value) {
-    internalWorkspaceDragSession.value = {
-      ...internalWorkspaceDragSession.value,
-      lastX: event.clientX,
-      lastY: event.clientY,
-    };
-  }
-  updateInternalWorkspaceHover(event.clientX, event.clientY);
-  if (shouldDelegateToExternalDrag(event.clientX, event.clientY)) {
-    void delegateToExternalWorkspaceDrag();
-  }
-}
-
-async function handleEntryDragEnd(event: PointerEvent | null) {
-  const session = internalWorkspaceDragSession.value;
-  if (!session) {
-    finishInternalWorkspaceDrag();
-    return;
-  }
-  if (session.delegatedToExternalDrag) {
-    finishInternalWorkspaceDrag();
-    return;
-  }
-
-  const targetPath = event ? updateInternalWorkspaceHover(event.clientX, event.clientY) : dragHoverFolderPath.value;
-  if (!targetPath) {
-    finishInternalWorkspaceDrag();
-    return;
-  }
-  await moveDraggedWorkspaceEntries(targetPath);
 }
 
 function previewFileEntryByDoubleClick(entry: FileBrowserEntry) {
@@ -893,491 +852,6 @@ async function handlePlaylistDrop(item: PlaylistItem) {
   await reorderPlaylistItemsInWorkspace(activePlaylistId.value, items.map((entry) => entry.playlistItemId));
 }
 
-function handleBoxSelection(paths: string[], mode: "replace" | "append") {
-  if (mode === "append") {
-    if (!paths.length) return;
-    const nextPaths = Array.from(new Set([...selectedFilePaths.value, ...paths]));
-    selectWorkspaceEntries(nextPaths, {
-      primaryPath: selectedFilePath.value ?? paths[0] ?? null,
-      anchorPath: selectedFilePath.value ?? paths[0] ?? null,
-    });
-    return;
-  }
-
-  if (!paths.length) {
-    clearWorkspaceSelection();
-    return;
-  }
-  selectWorkspaceEntries(paths, { primaryPath: paths[0], anchorPath: paths[0] });
-}
-
-function normalizeWorkspaceDragPaths(targetPath: string) {
-  return normalizeWorkspaceMovePaths(draggedWorkspacePaths.value, targetPath);
-}
-
-async function moveDraggedWorkspaceEntries(targetPath: string) {
-  const sourcePaths = normalizeWorkspaceDragPaths(targetPath);
-  finishInternalWorkspaceDrag();
-  if (!sourcePaths.length || isTrashPanel.value) return;
-  await moveWorkspaceEntries(sourcePaths, targetPath);
-}
-
-function handleFolderDropHover(path: string) {
-  if (isTrashPanel.value) return;
-  setDragHoverFolderPath(path);
-}
-
-function handleFolderDropLeave(path: string) {
-  if (dragHoverFolderPath.value === path) {
-    setDragHoverFolderPath(null);
-  }
-}
-
-async function handleFolderDrop(path: string, event: DragEvent) {
-  if (isInternalWorkspaceDragEvent(event)) {
-    await moveDraggedWorkspaceEntries(path);
-    return;
-  }
-
-  const sourcePaths = getDroppedSourcePaths(event);
-  if (!sourcePaths.length) return;
-  setExternalDragActive(false);
-  isDraggingFiles.value = false;
-  setDragHoverFolderPath(null);
-  await importEntriesToWorkspace(sourcePaths, path);
-}
-
-function handleWindowPointerLeave(event: PointerEvent) {
-  const session = internalWorkspaceDragSession.value;
-  if (!session || session.delegatedToExternalDrag || !isInternalDragActive.value) return;
-  internalWorkspaceDragSession.value = {
-    ...session,
-    lastX: event.clientX,
-    lastY: event.clientY,
-  };
-  if (internalWorkspaceDragDistance(internalWorkspaceDragSession.value) >= externalDragSwitchDistance) {
-    void delegateToExternalWorkspaceDrag();
-  }
-}
-
-function handleWindowBlur() {
-  const session = internalWorkspaceDragSession.value;
-  if (!session || session.delegatedToExternalDrag || !isInternalDragActive.value) return;
-  if (internalWorkspaceDragDistance(session) >= externalDragSwitchDistance) {
-    void delegateToExternalWorkspaceDrag();
-  }
-}
-
-function getDroppedSourcePaths(event: DragEvent) {
-  return Array.from(event.dataTransfer?.files ?? [])
-    .map((file) => (file as File & { path?: string }).path ?? "")
-    .filter((path) => path.trim().length > 0);
-}
-
-async function handleExternalPathsDrop(paths: string[]) {
-  setExternalDragActive(false);
-  const targetPath = dragHoverFolderPath.value ?? currentDirectoryPath.value;
-  setDragHoverFolderPath(null);
-
-  if (isTrashPanel.value || !activeSnapshot.value) return;
-
-  const repoRoot = activeSnapshot.value.repository.path;
-  const filteredPaths = paths.filter((sourcePath) => {
-    const normalizedSourcePath = trimTrailingPathSeparators(sourcePath);
-    if (!normalizedSourcePath) return false;
-    const segments = repositoryPathParts(normalizedSourcePath);
-    const name = segments[segments.length - 1];
-    if (!name) return false;
-    const targetAbsolutePath = joinRepositoryPath(repoRoot, targetPath, name);
-    return normalizeFilesystemPath(targetAbsolutePath) !== normalizeFilesystemPath(normalizedSourcePath);
-  });
-
-  if (!filteredPaths.length) return;
-  await importEntriesToWorkspace(filteredPaths, targetPath);
-}
-
-async function createRepositoryFromFolder(path: string) {
-  const nextPath = path.trim();
-  if (!nextPath) return;
-  emptyRepositoryError.value = "";
-  try {
-    await attachRepository(nextPath);
-  } catch (cause) {
-    emptyRepositoryError.value = cause instanceof Error ? cause.message : String(cause);
-  }
-}
-
-function isInternalWorkspaceDragEvent(event: DragEvent) {
-  return isInternalDragActive.value
-    || Array.from(event.dataTransfer?.types ?? []).includes("application/x-momobako-entry");
-}
-
-function handleDragOver(event: DragEvent) {
-  if (!isRepositoryWritable.value || !isFilesPanel.value) return;
-  event.preventDefault();
-  if (isInternalWorkspaceDragEvent(event)) {
-    if (event.dataTransfer) {
-      event.dataTransfer.dropEffect = "move";
-    }
-    return;
-  }
-  if (event.dataTransfer) {
-    event.dataTransfer.dropEffect = "copy";
-  }
-  setExternalDragActive(true);
-  isDraggingFiles.value = true;
-}
-
-function handleDragLeave(event: DragEvent) {
-  const currentTarget = event.currentTarget as HTMLElement | null;
-  const relatedTarget = event.relatedTarget as Node | null;
-  if (currentTarget && relatedTarget && currentTarget.contains(relatedTarget)) return;
-  if (isInternalDragActive.value) return;
-  setExternalDragActive(false);
-  setDragHoverFolderPath(null);
-  isDraggingFiles.value = false;
-}
-
-async function handleDrop(event: DragEvent) {
-  event.preventDefault();
-  if (isInternalWorkspaceDragEvent(event)) {
-    await moveDraggedWorkspaceEntries(dragHoverFolderPath.value ?? currentDirectoryPath.value);
-    return;
-  }
-  setExternalDragActive(false);
-  isDraggingFiles.value = false;
-  if (!isRepositoryWritable.value || isTrashPanel.value) return;
-  const sourcePaths = getDroppedSourcePaths(event);
-  if (!sourcePaths.length) return;
-  await handleExternalPathsDrop(sourcePaths);
-}
-
-function handleEmptyRepositoryDragOver(event: DragEvent) {
-  if (activeRepoId.value || hasRepository.value) return;
-  event.preventDefault();
-  if (event.dataTransfer) {
-    event.dataTransfer.dropEffect = "copy";
-  }
-  isDraggingRepositoryFolder.value = true;
-}
-
-function handleEmptyRepositoryDragLeave(event: DragEvent) {
-  const currentTarget = event.currentTarget as HTMLElement | null;
-  const relatedTarget = event.relatedTarget as Node | null;
-  if (currentTarget && relatedTarget && currentTarget.contains(relatedTarget)) return;
-  isDraggingRepositoryFolder.value = false;
-}
-
-async function handleEmptyRepositoryDrop(event: DragEvent) {
-  event.preventDefault();
-  isDraggingRepositoryFolder.value = false;
-  if (activeRepoId.value || hasRepository.value) return;
-  const [path] = getDroppedSourcePaths(event);
-  if (path) {
-    await createRepositoryFromFolder(path);
-  }
-}
-
-async function handleCreateFile() {
-  if (isTrashPanel.value) return;
-  if (!createFileName.value.trim()) return;
-  const snapshot = await createFileInWorkspace(createFileName.value.trim());
-  if (snapshot) {
-    createFileName.value = "";
-  }
-}
-
-function startRenameSelected() {
-  if (!currentFileEntry.value) return;
-  renameTargetPath.value = currentFileEntry.value.path;
-  renameValue.value = currentFileEntry.value.name;
-}
-
-async function submitRenameSelected() {
-  if (!renameTargetPath.value || !renameValue.value.trim()) return;
-  const snapshot = await renameWorkspaceEntry(renameTargetPath.value, renameValue.value.trim());
-  if (snapshot) {
-    renameTargetPath.value = null;
-    renameValue.value = "";
-  }
-}
-
-async function deleteSelectedEntry() {
-  if (!selectedFilePaths.value.length) return;
-  if (selectedFilePaths.value.length > 1) {
-    await deleteWorkspaceEntries(selectedFilePaths.value, isTrashPanel.value ? "permanentDelete" : undefined);
-    return;
-  }
-  if (!currentFileEntry.value) return;
-  await deleteWorkspaceEntry(currentFileEntry.value.path, isTrashPanel.value ? "permanentDelete" : undefined);
-}
-
-async function deleteEntry(entry: FileBrowserEntry) {
-  await deleteWorkspaceEntry(entry.path, isTrashPanel.value ? "permanentDelete" : undefined);
-}
-
-function openCopyTargetDialog(entry: FileBrowserEntry) {
-  if (isTrashPanel.value) return;
-  pendingCopySourcePaths.value = selectedFilePathSet.value.has(entry.path)
-    ? [...selectedFilePaths.value]
-    : [entry.path];
-  copyTargetPath.value = fileBrowser.value?.currentPath ?? "";
-  copyTargetDialogOpen.value = true;
-}
-
-async function submitCopyTarget() {
-  const paths = pendingCopySourcePaths.value;
-  if (!paths.length) return;
-  const targetPath = normalizeRepositoryRelativePath(copyTargetPath.value);
-  const snapshot = await copyWorkspaceEntries(paths, targetPath);
-  if (snapshot) {
-    cancelCopyTarget();
-  }
-}
-
-function cancelCopyTarget() {
-  copyTargetDialogOpen.value = false;
-  pendingCopySourcePaths.value = [];
-  copyTargetPath.value = "";
-}
-
-async function confirmCurrentHardlinkCandidate() {
-  const candidate = currentHardlinkCandidate.value;
-  if (!candidate) return;
-  const response = await confirmWorkspaceHardlinkCandidate(candidate.candidateId);
-  if (response) {
-    skippedHardlinkCandidateIds.value.delete(candidate.candidateId);
-  }
-}
-
-function skipCurrentHardlinkCandidate() {
-  const candidate = currentHardlinkCandidate.value;
-  if (!candidate) return;
-  skippedHardlinkCandidateIds.value = new Set([
-    ...skippedHardlinkCandidateIds.value,
-    candidate.candidateId,
-  ]);
-}
-
-async function restoreSelectedEntry() {
-  if (!selectedFilePaths.value.length || !isTrashPanel.value) return;
-  if (selectedFilePaths.value.length > 1) {
-    await restoreTrashEntries(selectedFilePaths.value);
-    return;
-  }
-  if (!currentFileEntry.value) return;
-  await restoreTrashEntry(currentFileEntry.value.path);
-}
-
-async function restoreEntry(entry: FileBrowserEntry) {
-  if (!isTrashPanel.value) return;
-  await restoreTrashEntry(entry.path);
-}
-
-async function handleRestoreAllTrash() {
-  if (!isTrashPanel.value) return;
-  await restoreAllTrashEntries();
-}
-
-async function handleEmptyTrash() {
-  if (!isTrashPanel.value) return;
-  await emptyTrash();
-}
-
-async function openSelectedEntry() {
-  if (isTrashPanel.value) return;
-  if (!currentFileEntry.value) return;
-  if (currentFileEntry.value.kind === "directory") {
-    openDirectory(currentFileEntry.value.path);
-    return;
-  }
-  await openWorkspaceEntry(currentFileEntry.value.path);
-}
-
-async function revealSelectedEntry() {
-  if (isTrashPanel.value) return;
-  if (!currentFileEntry.value) return;
-  await revealWorkspaceEntry(currentFileEntry.value.path);
-}
-
-function fileEntryContextMenu(entry: FileBrowserEntry) {
-  if (!selectedFilePathSet.value.has(entry.path)) {
-    selectWorkspaceEntries([entry.path], { primaryPath: entry.path, anchorPath: entry.path });
-  }
-  const contextSelectionPaths = selectedFilePathSet.value.has(entry.path)
-    ? selectedFilePaths.value
-    : [entry.path];
-  if (isSmartFolderPanel.value) {
-    return [
-      {
-        id: "preview",
-        label: "预览",
-        icon: Eye,
-        disabled: entry.kind !== "file",
-        onSelect: () => {
-          if (entry.kind === "file") {
-            previewFilePath.value = entry.path;
-          }
-        },
-      },
-      {
-        id: "open",
-        label: "打开",
-        icon: Eye,
-        disabled: entry.kind !== "file",
-        onSelect: () => openWorkspaceEntry(entry.path),
-      },
-      {
-        id: "reveal",
-        label: "定位",
-        icon: FolderOpen,
-        onSelect: () => revealWorkspaceEntry(entry.path),
-      },
-    ];
-  }
-  const pluginActions = activeRepoId.value && entry.kind === "file" && !isTrashPanel.value
-    ? getPreviewPluginFileActions(activeRepoId.value, entry).map<ContextMenuItem>((action) => ({
-      id: action.id,
-      label: action.label,
-      icon: action.icon,
-      disabled: action.disabled || hasMultipleSelection.value,
-      danger: action.danger,
-      confirmLabel: action.confirmLabel,
-      onSelect: action.onSelect,
-    }))
-    : [];
-  const playlistMenuItems = !isSmartFolderPanel.value
-    && !isTrashPanel.value
-    && entry.kind === "file"
-    && !hasMultipleSelection.value
-    && entry.assetId
-    ? compatiblePlaylistsForEntry(entry).map<ContextMenuItem>((playlist) => ({
-      id: `playlist-${playlist.playlistId}`,
-      label: playlist.name,
-      checked: (playlistMemberships.value[entry.assetId ?? ""] ?? []).includes(playlist.playlistId),
-      onSelect: () => togglePlaylistMembership(entry, playlist.playlistId),
-    }))
-    : [];
-  const items = [
-    ...(isTrashPanel.value ? [{
-      id: "restore",
-      label: "还原",
-      icon: RotateCcw,
-      disabled: isMutatingFiles.value,
-      onSelect: async () => {
-        if (contextSelectionPaths.length > 1) {
-          await restoreTrashEntries(contextSelectionPaths);
-          return;
-        }
-        await restoreEntry(entry);
-      },
-    }] : []),
-    {
-      id: "preview",
-      label: "预览",
-      icon: Eye,
-      disabled: entry.kind !== "file" || isTrashPanel.value || hasMultipleSelection.value,
-      onSelect: () => {
-        if (entry.kind === "file") {
-          previewFilePath.value = entry.path;
-        }
-      },
-    },
-    {
-      id: "open",
-      label: entry.kind === "directory" ? "进入" : "打开",
-      icon: Eye,
-      disabled: isTrashPanel.value || hasMultipleSelection.value,
-      onSelect: () => {
-        if (entry.kind === "directory") {
-          openDirectory(entry.path);
-          return;
-        }
-        return openWorkspaceEntry(entry.path);
-      },
-    },
-    {
-      id: "reveal",
-      label: "定位",
-      icon: FolderOpen,
-      disabled: isTrashPanel.value,
-      onSelect: () => revealWorkspaceEntry(entry.path),
-    },
-    {
-      id: "copy-target",
-      label: "复制到…",
-      icon: Files,
-      disabled: isTrashPanel.value || isMutatingFiles.value,
-      onSelect: () => openCopyTargetDialog(entry),
-    },
-    ...(playlistMenuItems.length ? [{
-      id: "playlist-membership",
-      label: "添加到播放集",
-      children: playlistMenuItems,
-    } satisfies ContextMenuItem] : []),
-    ...pluginActions,
-    {
-      id: "thumbnail",
-      label: "缩略图",
-      icon: FileImage,
-      disabled: isTrashPanel.value,
-      children: [
-        {
-          id: "thumbnail-custom-file",
-          label: "自定义缩略图（选择文件）",
-          icon: ImagePlus,
-          onSelect: () => chooseCustomThumbnail(entry),
-        },
-        {
-          id: "thumbnail-custom-clipboard",
-          label: "新增自定义缩略图（从剪贴板）",
-          icon: Clipboard,
-          onSelect: () => pasteCustomThumbnail(entry),
-        },
-        {
-          id: "thumbnail-clear-custom",
-          label: "取消自定义缩略图",
-          icon: ImageOff,
-          disabled: !entry.thumbnailCustom,
-          onSelect: () => clearCustomThumbnail(entry),
-        },
-        {
-          id: "thumbnail-refresh",
-          label: "刷新缩略图",
-          icon: RefreshCw,
-          onSelect: () => refreshEntryThumbnail(entry),
-        },
-      ],
-    },
-    {
-      id: "rename",
-      label: "重命名",
-      icon: PencilLine,
-      disabled: isTrashPanel.value || hasMultipleSelection.value,
-      onSelect: () => {
-        renameTargetPath.value = entry.path;
-        renameValue.value = entry.name;
-      },
-    },
-    {
-      id: "delete",
-      label: isTrashPanel.value ? "彻底删除" : "删除",
-      icon: Trash2,
-      danger: true,
-      disabled: isMutatingFiles.value,
-      confirmLabel: isTrashPanel.value ? "确认彻底删除？再点一次" : undefined,
-      onSelect: async () => {
-        if (contextSelectionPaths.length > 1) {
-          await deleteWorkspaceEntries(contextSelectionPaths, isTrashPanel.value ? "permanentDelete" : undefined);
-          return;
-        }
-        await deleteEntry(entry);
-      },
-    },
-  ];
-  return items;
-}
-
 async function openSearchHit(result: SearchHit) {
   previewFilePath.value = null;
   setActivePanel("files");
@@ -1400,283 +874,28 @@ async function openSearchHit(result: SearchHit) {
   await selectAsset(result.assetId);
 }
 
-function toggleSearchFilter(key: SearchFilterListKey, value: string) {
-  if (!isRepositoryWritable.value) return;
-  toggleFilterValue(key, value);
-  setActivePanel("search");
-  void runFilteredSearch();
-}
-
-function submitMetadataFilterInput(key: "colors" | "shapes") {
-  if (!isRepositoryWritable.value) return;
-  const input = key === "colors" ? colorFilterInput : shapeFilterInput;
-  const value = input.value.trim();
-  if (!value) return;
-  toggleSearchFilter(key, value);
-  input.value = "";
-}
-
-function selectMinimumRating(value: number | null) {
-  if (!isRepositoryWritable.value) return;
-  setMinimumRatingFilter(value);
-  setActivePanel("search");
-  void runFilteredSearch();
-}
-
-function clearSearchFilters() {
-  if (!isRepositoryWritable.value) return;
-  clearFilters();
-  colorFilterInput.value = "";
-  shapeFilterInput.value = "";
-  excludeQueryInput.value = "";
-  excludePathPrefixesInput.value = "";
-  excludeTagsInput.value = "";
-  excludeFormatsInput.value = "";
-  excludeMetadataFiltersInput.value = "";
-  excludeNumberFiltersInput.value = "";
-  excludeDateFiltersInput.value = "";
-  numberFiltersInput.value = "";
-  dateFiltersInput.value = "";
-  sortFieldInput.value = "";
-  sortDirectionInput.value = "asc";
-  limitInput.value = "";
-  setActivePanel("search");
-  void runFilteredSearch();
-}
-
-function applyAdvancedSearchFilters() {
-  if (!isRepositoryWritable.value) return;
-  const limit = Number(limitInput.value);
-  updateFilters({
-    excludeQuery: excludeQueryInput.value.trim(),
-    excludePathPrefixes: excludePathPrefixesInput.value.trim(),
-    excludeTags: splitListInput(excludeTagsInput.value),
-    excludeFormats: splitListInput(excludeFormatsInput.value),
-    excludeMetadataFilters: excludeMetadataFiltersInput.value.trim(),
-    excludeNumberFilters: excludeNumberFiltersInput.value.trim(),
-    excludeDateFilters: excludeDateFiltersInput.value.trim(),
-    numberFilters: numberFiltersInput.value.trim(),
-    dateFilters: dateFiltersInput.value.trim(),
-    sortField: sortFieldInput.value.trim(),
-    sortDirection: sortDirectionInput.value,
-    limit: Number.isFinite(limit) && limit > 0 ? limit : null,
-  });
-  setActivePanel("search");
-  void runFilteredSearch();
-}
-
 function closeFilterBar() {
   setFilterBarOpen(false);
 }
 
-function searchResultRating(result: SearchHit) {
-  const value = result.metadata.rating;
-  return typeof value === "number" && value > 0 ? value : null;
-}
-
-function searchResultContext(result: SearchHit) {
-  const rating = searchResultRating(result);
-  return [
-    searchResultFormat(result) || "文件",
-    ...result.tags.slice(0, 3),
-    metadataText(result.metadata, "color"),
-    metadataText(result.metadata, "shape"),
-    rating == null ? "" : `${rating} 星`,
-  ].filter(Boolean);
-}
-
-function filterColorStyle(color: string) {
-  const trimmed = color.trim();
-  const hexColor = /^#[0-9a-f]{6}$/i.test(trimmed) ? trimmed : null;
-  return {
-    "--filter-swatch": hexColor ?? filterColorMap[color.toLowerCase()] ?? filterColorMap[color] ?? "var(--accent)",
-  };
-}
-
-
-const searchSummary = computed(() => {
-  if (hasActiveFilters.value) {
-    return searchQuery.value.trim()
-      ? `当前资源库筛选: ${searchQuery.value}`
-      : "按当前资源库筛选结果。";
-  }
-  if (searchQuery.value.trim()) {
-    return `当前查询: ${searchQuery.value}`;
-  }
-  return "输入关键词、标签或评分条件后，这里会展示跨仓库结果。";
-});
-
-function preloadWorkspaceComponents() {
-  const primaryLoaders = activePanel.value === "search"
-    ? [workspaceComponentLoaders.SearchPanel]
-    : activePanel.value === "extensions"
-      ? [workspaceComponentLoaders.ExtensionsPanel]
-      : [workspaceComponentLoaders.FileBrowserPanel];
-  const secondaryLoaders = [
-    workspaceComponentLoaders.FilePreviewPane,
-    workspaceComponentLoaders.SearchPanel,
-    workspaceComponentLoaders.ExtensionsPanel,
-    workspaceComponentLoaders.CopyTargetDialog,
-    workspaceComponentLoaders.HardlinkCandidateDialog,
-  ];
-
-  for (const load of new Set([...primaryLoaders, ...secondaryLoaders])) {
-    void load().catch(() => undefined);
-  }
-}
-
-function queueWorkspaceComponentPreload() {
+function queueWorkspacePreload() {
   if (hasQueuedWorkspacePreload) return;
   hasQueuedWorkspacePreload = true;
-  const currentWindow = window as IdlePreloadWindow;
-  if (currentWindow.requestIdleCallback) {
-    preloadHandle = {
-      kind: "idle",
-      id: currentWindow.requestIdleCallback(preloadWorkspaceComponents, { timeout: 1200 }),
-    };
-    return;
-  }
-  preloadHandle = {
-    kind: "timeout",
-    id: window.setTimeout(preloadWorkspaceComponents, 250),
-  };
+  preloadHandle = queueWorkspaceComponentPreload(activePanel.value, preloadHandle);
 }
 
-function cancelWorkspaceComponentPreload() {
-  if (!preloadHandle) return;
-  const currentWindow = window as IdlePreloadWindow;
-  if (preloadHandle.kind === "idle" && currentWindow.cancelIdleCallback) {
-    currentWindow.cancelIdleCallback(preloadHandle.id);
-  } else {
-    window.clearTimeout(preloadHandle.id);
-  }
+function cancelWorkspacePreload() {
+  cancelWorkspaceComponentPreload(preloadHandle);
   preloadHandle = null;
 }
 
 watch(hasRepository, (ready) => {
   if (ready) {
-    queueWorkspaceComponentPreload();
+    queueWorkspacePreload();
   }
 }, { immediate: true });
 
-watch(activeRepoId, () => {
-  missingRepositoryError.value = "";
-  showMissingRepositoryDeleteDialog.value = false;
-});
-
-async function chooseMissingRepositoryPath() {
-  if (!activeRepoId.value || isMissingRepositoryBusy.value) return;
-  missingRepositoryError.value = "";
-  const selected = await openDialog({
-    title: "重定向资源库位置",
-    directory: true,
-    multiple: false,
-  });
-  if (typeof selected !== "string" || !selected.trim()) return;
-
-  missingRepositoryAction.value = "relocating";
-  try {
-    await relocateMissingRepository(activeRepoId.value, selected);
-    missingRepositoryError.value = "";
-  } catch (cause) {
-    missingRepositoryError.value = cause instanceof Error ? cause.message : String(cause);
-  } finally {
-    missingRepositoryAction.value = null;
-  }
-}
-
-async function refreshMissingRepository() {
-  if (isMissingRepositoryBusy.value) return;
-  missingRepositoryError.value = "";
-  try {
-    await refreshRepositoryWorkspace();
-  } catch (cause) {
-    missingRepositoryError.value = cause instanceof Error ? cause.message : String(cause);
-  }
-}
-
-function openMissingRepositoryDeleteDialog() {
-  if (!activeRepoId.value || isMissingRepositoryBusy.value) return;
-  missingRepositoryError.value = "";
-  showMissingRepositoryDeleteDialog.value = true;
-}
-
-function closeMissingRepositoryDeleteDialog() {
-  if (isDeletingMissingRepository.value) return;
-  showMissingRepositoryDeleteDialog.value = false;
-}
-
-async function confirmMissingRepositoryDelete() {
-  if (!activeRepoId.value) return;
-  missingRepositoryAction.value = "deleting";
-  missingRepositoryError.value = "";
-  try {
-    await removeRepository(activeRepoId.value);
-    showMissingRepositoryDeleteDialog.value = false;
-  } catch (cause) {
-    missingRepositoryError.value = cause instanceof Error ? cause.message : String(cause);
-  } finally {
-    missingRepositoryAction.value = null;
-  }
-}
-
-onMounted(() => {
-  window.addEventListener("pointerleave", handleWindowPointerLeave);
-  window.addEventListener("blur", handleWindowBlur);
-  try {
-    const currentWindow = getCurrentWindow();
-    currentWindow.onDragDropEvent(({ payload }) => {
-      if (!hasRepository.value && !isMissingRepository.value) {
-        if (payload.type === "enter" || payload.type === "over") {
-          isDraggingRepositoryFolder.value = true;
-          return;
-        }
-        if (payload.type === "leave") {
-          isDraggingRepositoryFolder.value = false;
-          return;
-        }
-        isDraggingRepositoryFolder.value = false;
-        if (payload.paths.length) {
-          void createRepositoryFromFolder(payload.paths[0]);
-        }
-        return;
-      }
-      if (!isRepositoryWritable.value || !isFilesPanel.value) return;
-      if (payload.type === "enter" || payload.type === "over") {
-        setExternalDragActive(true);
-        isDraggingFiles.value = true;
-        return;
-      }
-      if (payload.type === "leave") {
-        setExternalDragActive(false);
-        setDragHoverFolderPath(null);
-        isDraggingFiles.value = false;
-        return;
-      }
-      setExternalDragActive(false);
-      isDraggingFiles.value = false;
-      if (payload.paths.length) {
-        void handleExternalPathsDrop(payload.paths);
-      }
-    }).then((unlisten) => {
-      dragDropUnlisten = unlisten;
-    }).catch(() => {
-      dragDropUnlisten = null;
-    });
-  } catch {
-    dragDropUnlisten = null;
-  }
-});
-
-onUnmounted(() => {
-  dragDropUnlisten?.();
-  window.removeEventListener("pointerleave", handleWindowPointerLeave);
-  window.removeEventListener("blur", handleWindowBlur);
-  setExternalDragActive(false);
-  setDragHoverFolderPath(null);
-  clearDraggedWorkspaceState();
-  cancelWorkspaceComponentPreload();
-});
+onUnmounted(cancelWorkspacePreload);
 </script>
 
 <template>
@@ -1813,6 +1032,24 @@ onUnmounted(() => {
         </div>
       </section>
 
+      <section v-if="hasAsmrAssets" class="workspace-filter-bar__group" aria-label="ASMR 筛选">
+        <span>ASMR</span>
+        <div class="workspace-filter-bar__options">
+          <button type="button" class="workspace-filter-chip" @click="applyAsmrShortcut('all')">
+            作品
+          </button>
+          <button type="button" class="workspace-filter-chip" @click="applyAsmrShortcut('lyrics')">
+            含歌词
+          </button>
+          <button type="button" class="workspace-filter-chip" @click="applyAsmrShortcut('continue')">
+            继续收听
+          </button>
+          <button type="button" class="workspace-filter-chip" @click="applyAsmrShortcut('random')">
+            随机一首
+          </button>
+        </div>
+      </section>
+
       <section class="workspace-filter-bar__group workspace-filter-bar__group--wide" aria-label="高级筛选">
         <span>高级</span>
         <div class="workspace-filter-bar__advanced">
@@ -1849,6 +1086,15 @@ onUnmounted(() => {
               type="text"
               aria-label="排除格式"
               placeholder="排除格式"
+              @keydown.enter.prevent="applyAdvancedSearchFilters"
+            />
+          </label>
+          <label class="workspace-filter-input workspace-filter-input--wide">
+            <input
+              v-model="metadataFiltersInput"
+              type="text"
+              aria-label="元数据"
+              placeholder="libraryKind=asmr"
               @keydown.enter.prevent="applyAdvancedSearchFilters"
             />
           </label>
@@ -1993,12 +1239,21 @@ onUnmounted(() => {
         :is-saving-metadata="isSavingMetadata"
         :available-tags="tagFilterOptions"
         :tag-groups="activeSnapshot?.tagGroups ?? []"
+        :playlist-entries="activeFileEntries"
+        :asmr-playlist="asmrPlaylist"
         :thumbnail-palette="thumbnailPaletteColors"
         :save-metadata="saveFileMetadata"
+        :save-cover-thumbnail="setWorkspaceEntryThumbnailFromUrl"
         :status-label="statusLabel"
         @back="exitPreview"
         @open="openWorkspaceEntry"
         @reveal="revealWorkspaceEntry"
+        @preview="previewFileEntryByDoubleClick"
+        @playlist-add-track="addAsmrPlaylistTrack"
+        @playlist-add-work="addAsmrPlaylistWork"
+        @playlist-random="addRandomAsmrPlaylistTrack"
+        @playlist-clear="clearAsmrPlaylist"
+        @playlist-select="previewAsmrPlaylistPath"
         @thumbnail-loaded="updateThumbnailAspectRatio"
         @thumbnail-error="markThumbnailFailed"
       />

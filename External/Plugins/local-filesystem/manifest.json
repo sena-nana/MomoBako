@@ -1,5 +1,6 @@
 {
   "pluginId": "momobako.local-filesystem",
+  "legacyPluginIds": ["builtin.local-filesystem"],
   "name": "Local Filesystem",
   "version": "1.0.0",
   "type": {
@@ -30,7 +31,7 @@
   },
   "compat": {
     "sdkVersion": "1",
-    "legacyPluginIds": []
+    "legacyPluginIds": ["builtin.local-filesystem"]
   },
   "source": "builtin",
   "status": "ready"

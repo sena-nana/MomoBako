@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent, onMounted, ref, watch } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { RouterView } from "vue-router";
 import { RefreshCw } from "lucide-vue-next";
 import TitleBar from "../components/TitleBar.vue";
+import SecondaryPanel from "./SecondaryPanel.vue";
 import { useRepositoryWorkspace } from "../composables/useRepositoryWorkspace";
 import { usePlaylistPlayer } from "../composables/usePlaylistPlayer";
 import { useResizablePane } from "../composables/useResizablePane";
@@ -13,8 +14,6 @@ const MAX_WIDTH = 480;
 const DEFAULT_WIDTH = 276;
 const WIDTH_STORAGE_KEY = "momobako.sidebarWidth";
 const COLLAPSED_STORAGE_KEY = "momobako.sidebarCollapsed";
-
-const SecondaryPanel = defineAsyncComponent(() => import("./SecondaryPanel.vue"));
 
 function readStorage(key: string): string | null {
   try {

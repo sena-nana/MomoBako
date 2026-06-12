@@ -530,6 +530,28 @@ export type PluginArchiveTextResponse = {
   text: string;
 };
 
+export type AsmrMetadataLookupProvider = "dlsite" | "asmr-one" | string;
+
+export type AsmrMetadataLookupRequest = {
+  provider: AsmrMetadataLookupProvider;
+  rjCode: string;
+  detailUrl?: string | null;
+};
+
+export type AsmrMetadataCandidatePayload = {
+  source: string;
+  confidence: string;
+  fields: Record<string, unknown>;
+};
+
+export type AsmrMetadataLookupResponse = {
+  provider: string;
+  rjCode: string;
+  sourceUrl: string;
+  fetchedAt: string;
+  candidate: AsmrMetadataCandidatePayload;
+};
+
 export type BinaryFileWriteRequest = {
   path: string;
   bytes: number[];
@@ -560,6 +582,74 @@ export type FileImportRequest = {
   repoId: string;
   parentPath?: string;
   sourcePaths: string[];
+};
+
+export type ExternalAddAssetClient = {
+  id?: string;
+  name?: string;
+  version?: string;
+};
+
+export type ExternalAddAssetItem = {
+  kind: "remoteUrl" | string;
+  url?: string;
+  filename?: string;
+  headers?: Record<string, string>;
+  metadata?: Record<string, unknown>;
+};
+
+export type ExternalAddAssetRequest = {
+  repoId: string;
+  parentPath?: string;
+  client?: ExternalAddAssetClient;
+  items: ExternalAddAssetItem[];
+};
+
+export type ExternalApiConnectionStatus = {
+  baseUrl: string;
+  token: string;
+  version: string;
+  startedAt: string;
+  ready: boolean;
+  connectionFilePath: string;
+};
+
+export type ExternalImportedAsset = {
+  itemIndex: number;
+  assetId?: string | null;
+  path: string;
+};
+
+export type ExternalAddAssetFailure = {
+  itemIndex: number;
+  code:
+    | "unauthorized"
+    | "notReady"
+    | "repoNotFound"
+    | "repoUnavailable"
+    | "unsupportedRepositoryBackend"
+    | "invalidTargetPath"
+    | "invalidInput"
+    | "downloadFailed"
+    | "duplicateTarget"
+    | "importRejected"
+    | "internalError"
+    | string;
+  message: string;
+  retryable: boolean;
+  details?: Record<string, unknown>;
+};
+
+export type ExternalAddAssetResponse = {
+  requestId: string;
+  status: "success" | "partial" | "failed";
+  imported: ExternalImportedAsset[];
+  failed: ExternalAddAssetFailure[];
+  summary: {
+    total: number;
+    imported: number;
+    failed: number;
+  };
 };
 
 export type FileCopyMode = "hardlinkPreferred" | "copy";
@@ -655,6 +745,7 @@ export type ThumbnailRequest = {
   path: string;
   action?: ThumbnailAction;
   sourcePath?: string;
+  sourceUrl?: string;
   imageBytes?: number[];
   mediaType?: string;
 };
@@ -773,7 +864,28 @@ export type PluginManifest = {
     legacyPluginIds?: string[];
   };
   status?: "ready" | "disabled" | "unavailable" | "error";
+  dependencyStatus?: PluginDependencyStatus;
+  disableReason?: string | null;
+  degraded?: boolean;
+  degradationReason?: string | null;
   archivePath?: string;
+};
+
+export type PluginDependencyStatus = {
+  required: PluginDependencyState[];
+  optional: PluginDependencyState[];
+  missingRequired: string[];
+  missingOptional: string[];
+  disabledRequired: string[];
+  disabledOptional: string[];
+};
+
+export type PluginDependencyState = {
+  pluginId: string;
+  name?: string | null;
+  status: "ready" | "disabled" | "missing" | "unavailable" | "error" | string;
+  enabled: boolean;
+  available: boolean;
 };
 
 export type PluginCategory = "source" | "library-kind" | "parser" | "preview" | "service";

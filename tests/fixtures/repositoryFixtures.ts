@@ -537,6 +537,17 @@ export function pluginManifest(
     contributes,
     compat: { sdkVersion: "1", legacyPluginIds },
     status: enabled ? "ready" : "disabled",
+    dependencyStatus: {
+      required: [],
+      optional: [],
+      missingRequired: [],
+      missingOptional: [],
+      disabledRequired: [],
+      disabledOptional: [],
+    },
+    disableReason: enabled ? null : "插件已被禁用。",
+    degraded: false,
+    degradationReason: null,
   };
 }
 

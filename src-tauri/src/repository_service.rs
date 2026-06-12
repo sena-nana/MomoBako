@@ -5,13 +5,14 @@ use std::{
     collections::{BTreeMap, HashMap, HashSet},
     ffi::{CStr, CString, OsString},
     fs::{self, File, OpenOptions},
+    hash::{Hash, Hasher},
     io::{Read, Write},
     os::raw::c_char,
     path::{Path, PathBuf},
     process::Command,
     sync::{Arc, Mutex, OnceLock},
     thread,
-    time::SystemTime,
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 
@@ -24,6 +25,7 @@ const REPO_METADATA_FILE_NAME: &str = "repository.json";
 const REPO_DB_FILE_NAME: &str = "metadata.db";
 const REPO_SCHEMA_VERSION: i64 = 1;
 const THUMBNAIL_SIZE: u32 = 256;
+const MAX_REMOTE_THUMBNAIL_BYTES: u64 = 10 * 1024 * 1024;
 
 static FFMPEG_READY: OnceLock<Result<(), String>> = OnceLock::new();
 const REGISTRY_SCHEMA_SQL: &str = r#"
@@ -49,6 +51,7 @@ ON CONFLICT(component) DO UPDATE SET version = excluded.version;
 "#;
 
 const LOCAL_FILESYSTEM_PLUGIN_ID: &str = "momobako.local-filesystem";
+const LEGACY_LOCAL_FILESYSTEM_PLUGIN_ID: &str = "builtin.local-filesystem";
 const WEBDAV_PLUGIN_ID: &str = "momobako.webdav";
 const CLOUD_DRIVE_PLUGIN_ID: &str = "momobako.cloud-drive";
 const PLUGIN_SDK_VERSION: &str = "1";
@@ -941,6 +944,32 @@ pub struct PluginArchiveTextResponse {
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct AsmrMetadataLookupRequest {
+    pub provider: String,
+    pub rj_code: String,
+    pub detail_url: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AsmrMetadataCandidatePayload {
+    pub source: String,
+    pub confidence: String,
+    pub fields: BTreeMap<String, serde_json::Value>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AsmrMetadataLookupResponse {
+    pub provider: String,
+    pub rj_code: String,
+    pub source_url: String,
+    pub fetched_at: String,
+    pub candidate: AsmrMetadataCandidatePayload,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct BinaryFileWriteRequest {
     pub path: String,
     pub bytes: Vec<u8>,
@@ -981,6 +1010,70 @@ pub struct FileImportRequest {
     pub repo_id: String,
     pub parent_path: Option<String>,
     pub source_paths: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ExternalAddAssetClient {
+    pub id: Option<String>,
+    pub name: Option<String>,
+    pub version: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct ExternalAddAssetItem {
+    pub kind: String,
+    pub url: Option<String>,
+    pub filename: Option<String>,
+    pub headers: Option<BTreeMap<String, String>>,
+    pub metadata: Option<BTreeMap<String, serde_json::Value>>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct ExternalAddAssetRequest {
+    pub repo_id: String,
+    pub parent_path: Option<String>,
+    pub client: Option<ExternalAddAssetClient>,
+    pub items: Vec<ExternalAddAssetItem>,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct ExternalImportedAsset {
+    pub item_index: usize,
+    pub asset_id: Option<String>,
+    pub path: String,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct ExternalAddAssetFailure {
+    pub item_index: usize,
+    pub code: String,
+    pub message: String,
+    pub retryable: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub details: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct ExternalAddAssetSummary {
+    pub total: usize,
+    pub imported: usize,
+    pub failed: usize,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct ExternalAddAssetResponse {
+    pub request_id: String,
+    pub status: String,
+    pub imported: Vec<ExternalImportedAsset>,
+    pub failed: Vec<ExternalAddAssetFailure>,
+    pub summary: ExternalAddAssetSummary,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -1135,6 +1228,7 @@ pub struct ThumbnailRequest {
     pub path: String,
     pub action: Option<String>,
     pub source_path: Option<String>,
+    pub source_url: Option<String>,
     pub image_bytes: Option<Vec<u8>>,
     pub media_type: Option<String>,
 }
@@ -1386,6 +1480,14 @@ pub struct PluginManifest {
     pub compat: PluginCompat,
     pub status: String,
     #[serde(default)]
+    pub dependency_status: PluginDependencyStatus,
+    #[serde(default)]
+    pub disable_reason: Option<String>,
+    #[serde(default)]
+    pub degraded: bool,
+    #[serde(default)]
+    pub degradation_reason: Option<String>,
+    #[serde(default)]
     pub archive_path: Option<String>,
 }
 
@@ -1400,6 +1502,28 @@ struct PlaylistPlayerRegistration {
     supports_volume: bool,
     supports_preview_navigation: bool,
     description: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginDependencyStatus {
+    pub required: Vec<PluginDependencyState>,
+    pub optional: Vec<PluginDependencyState>,
+    pub missing_required: Vec<String>,
+    pub missing_optional: Vec<String>,
+    pub disabled_required: Vec<String>,
+    pub disabled_optional: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginDependencyState {
+    pub plugin_id: String,
+    #[serde(default)]
+    pub name: Option<String>,
+    pub status: String,
+    pub enabled: bool,
+    pub available: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -2398,8 +2522,8 @@ impl RepositoryState {
                 &folder_metadata,
             )?
         };
-        let entries =
-            attach_browser_entry_metadata(&connection, &request.repo_id, entries).map_err(db_error)?;
+        let entries = attach_browser_entry_metadata(&connection, &request.repo_id, entries)
+            .map_err(db_error)?;
 
         Ok(FileBrowserSnapshot {
             repo_id: request.repo_id,
@@ -2558,6 +2682,14 @@ impl RepositoryState {
             path: archive_entry_path,
             text,
         })
+    }
+
+    pub fn lookup_asmr_metadata_candidate(
+        &self,
+        request: AsmrMetadataLookupRequest,
+    ) -> Result<AsmrMetadataLookupResponse, String> {
+        self.ensure_initialized()?;
+        lookup_asmr_metadata_candidate(request)
     }
 
     pub fn list_smart_folders(&self, repo_id: &str) -> Result<Vec<SmartFolderTreeNode>, String> {
@@ -2960,7 +3092,13 @@ impl RepositoryState {
             SET status = ?3, message = ?4, finished_at = ?5
             WHERE repo_id = ?1 AND run_id = ?2
             "#,
-            params![request.repo_id, run_id, run_status, run_message, finished_at],
+            params![
+                request.repo_id,
+                run_id,
+                run_status,
+                run_message,
+                finished_at
+            ],
         )
         .map_err(db_error)?;
         tx.commit().map_err(db_error)?;
@@ -3020,18 +3158,18 @@ impl RepositoryState {
                 .exclude_number_filters
                 .as_ref()
                 .map(|items| {
-                    items
-                        .iter()
-                        .all(|item| item.key.trim().is_empty() || (item.min.is_none() && item.max.is_none()))
+                    items.iter().all(|item| {
+                        item.key.trim().is_empty() || (item.min.is_none() && item.max.is_none())
+                    })
                 })
                 .unwrap_or(true)
             && request
                 .exclude_date_filters
                 .as_ref()
                 .map(|items| {
-                    items
-                        .iter()
-                        .all(|item| item.key.trim().is_empty() || (item.from.is_none() && item.to.is_none()))
+                    items.iter().all(|item| {
+                        item.key.trim().is_empty() || (item.from.is_none() && item.to.is_none())
+                    })
                 })
                 .unwrap_or(true)
             && request
@@ -3557,6 +3695,235 @@ impl RepositoryState {
         let include_tree = import_plan.iter().any(|entry| entry.is_directory);
         let outcomes = copy_external_entries_parallel(import_plan, true)?;
         self.finish_file_copy_operation(&request.repo_id, parent_path, include_tree, outcomes)
+    }
+
+    pub fn add_external_assets(
+        &self,
+        request_id: String,
+        request: ExternalAddAssetRequest,
+    ) -> ExternalAddAssetResponse {
+        let total = request.items.len();
+        let mut imported = Vec::new();
+        let mut failed = Vec::new();
+
+        if request.items.is_empty() {
+            failed.push(external_failure(
+                0,
+                "invalidInput",
+                "items cannot be empty".to_string(),
+                false,
+                None,
+            ));
+            return external_add_asset_response(request_id, imported, failed, total);
+        }
+
+        let context = match self.external_asset_import_context(&request_id, &request) {
+            Ok(context) => context,
+            Err(error) => {
+                failed.extend((0..total).map(|item_index| {
+                    external_failure(
+                        item_index,
+                        error.code,
+                        error.message.clone(),
+                        error.retryable,
+                        None,
+                    )
+                }));
+                return external_add_asset_response(request_id, imported, failed, total);
+            }
+        };
+
+        let mut staged_assets = Vec::<PlannedExternalAsset>::new();
+        let mut planned_targets = HashSet::<String>::new();
+
+        for (item_index, item) in request.items.iter().enumerate() {
+            match stage_external_asset_item(item_index, item, &context, &mut planned_targets) {
+                Ok(staged) => staged_assets.push(staged),
+                Err(failure) => failed.push(failure),
+            }
+        }
+
+        if !staged_assets.is_empty() {
+            let source_paths = staged_assets
+                .iter()
+                .map(|asset| asset.source_path.clone())
+                .collect::<Vec<_>>();
+            let metadata_by_target_path = staged_assets
+                .iter()
+                .filter_map(|asset| {
+                    asset
+                        .metadata
+                        .as_ref()
+                        .map(|metadata| (asset.target_path.clone(), metadata.clone()))
+                })
+                .collect::<BTreeMap<_, _>>();
+            let import_result = self.import_entries(FileImportRequest {
+                repo_id: request.repo_id.clone(),
+                parent_path: Some(context.parent_path.clone()),
+                source_paths,
+            });
+            match import_result {
+                Ok(_) => {
+                    if let Err(error) = self.apply_external_asset_metadata(
+                        &request.repo_id,
+                        &metadata_by_target_path,
+                        request.client.as_ref(),
+                    ) {
+                        failed.extend(staged_assets.iter().map(|asset| {
+                            external_failure(
+                                asset.item_index,
+                                "internalError",
+                                error.clone(),
+                                true,
+                                None,
+                            )
+                        }));
+                    } else {
+                        for asset in staged_assets {
+                            imported.push(ExternalImportedAsset {
+                                item_index: asset.item_index,
+                                asset_id: Some(asset_id_for_path(
+                                    &request.repo_id,
+                                    &asset.target_path,
+                                )),
+                                path: asset.target_path,
+                            });
+                        }
+                    }
+                }
+                Err(error) => {
+                    let code = external_import_error_code(&error);
+                    failed.extend(staged_assets.iter().map(|asset| {
+                        external_failure(asset.item_index, code, error.clone(), false, None)
+                    }));
+                }
+            }
+        }
+
+        let _ = fs::remove_dir_all(&context.staging_root);
+        external_add_asset_response(request_id, imported, failed, total)
+    }
+
+    fn external_asset_import_context(
+        &self,
+        request_id: &str,
+        request: &ExternalAddAssetRequest,
+    ) -> Result<ExternalAssetImportContext, ExternalRequestError> {
+        if let Err(error) = self.ensure_initialized() {
+            return Err(ExternalRequestError {
+                code: "notReady",
+                message: error,
+                retryable: true,
+            });
+        }
+
+        let repo = self
+            .load_repository_record(&request.repo_id)
+            .map_err(|error| {
+                let code = if error.contains("repository not found") {
+                    "repoNotFound"
+                } else {
+                    "internalError"
+                };
+                ExternalRequestError {
+                    code,
+                    message: error,
+                    retryable: false,
+                }
+            })?;
+        if repo.summary.status != "ready" {
+            return Err(ExternalRequestError {
+                code: "repoUnavailable",
+                message: format!("repository is not ready: {}", repo.summary.status),
+                retryable: true,
+            });
+        }
+        if let Err(error) = ensure_local_filesystem_repository(&repo, "adding external assets") {
+            return Err(ExternalRequestError {
+                code: "unsupportedRepositoryBackend",
+                message: error,
+                retryable: false,
+            });
+        }
+
+        let repo_root = PathBuf::from(&repo.summary.path);
+        let parent_path = normalize_directory_path(
+            request.parent_path.as_deref().unwrap_or_default(),
+        )
+        .map_err(|error| ExternalRequestError {
+            code: "invalidTargetPath",
+            message: error,
+            retryable: false,
+        })?;
+        let target_dir = match resolve_repository_relative_path(&repo_root, &parent_path) {
+            Ok(value) if value.exists() && value.is_dir() => value,
+            Ok(_) => {
+                return Err(ExternalRequestError {
+                    code: "invalidTargetPath",
+                    message: format!("directory not found: {parent_path}"),
+                    retryable: false,
+                });
+            }
+            Err(error) => {
+                return Err(ExternalRequestError {
+                    code: "invalidTargetPath",
+                    message: error,
+                    retryable: false,
+                });
+            }
+        };
+
+        let staging_root = self
+            .root
+            .join("external-imports")
+            .join(sanitize_external_component(request_id));
+        fs::create_dir_all(&staging_root)
+            .map_err(io_error)
+            .map_err(|error| ExternalRequestError {
+                code: "internalError",
+                message: error,
+                retryable: true,
+            })?;
+
+        Ok(ExternalAssetImportContext {
+            parent_path,
+            target_dir,
+            staging_root,
+        })
+    }
+
+    fn apply_external_asset_metadata(
+        &self,
+        repo_id: &str,
+        metadata_by_path: &BTreeMap<String, BTreeMap<String, serde_json::Value>>,
+        client: Option<&ExternalAddAssetClient>,
+    ) -> Result<(), String> {
+        if metadata_by_path.is_empty() {
+            return Ok(());
+        }
+        let repo = self.load_repository_record(repo_id)?;
+        let mut connection = self.open_repository_connection(
+            &repo.summary.repo_id,
+            &repo.summary.path,
+            &repo.backend_record,
+        )?;
+        let tx = connection.transaction().map_err(db_error)?;
+        let source = external_metadata_source(client);
+        for (path, metadata) in metadata_by_path {
+            let asset_id = tx
+                .query_row(
+                    "SELECT asset_id FROM assets WHERE repo_id = ?1 AND path = ?2 AND status != 'deleted'",
+                    params![repo_id, path],
+                    |row| row.get::<_, String>(0),
+                )
+                .optional()
+                .map_err(db_error)?
+                .ok_or_else(|| format!("imported asset not found: {path}"))?;
+            update_metadata_for_asset_in_transaction(&tx, repo_id, &asset_id, metadata, &source)
+                .map_err(db_error)?;
+        }
+        tx.commit().map_err(db_error)?;
+        Ok(())
     }
 
     pub fn copy_entries(&self, request: FileCopyRequest) -> Result<FileBrowserSnapshot, String> {
@@ -4993,11 +5360,13 @@ fn load_repository_actions(
         .query_map([repo_id], |row| row.get::<_, String>(0))?
         .collect::<Result<Vec<_>, _>>()?;
     ids.into_iter()
-        .filter_map(|action_id| match load_repository_action(connection, repo_id, &action_id) {
-            Ok(Some(action)) => Some(Ok(action)),
-            Ok(None) => None,
-            Err(error) => Some(Err(error)),
-        })
+        .filter_map(
+            |action_id| match load_repository_action(connection, repo_id, &action_id) {
+                Ok(Some(action)) => Some(Ok(action)),
+                Ok(None) => None,
+                Err(error) => Some(Err(error)),
+            },
+        )
         .collect()
 }
 
@@ -6053,7 +6422,11 @@ fn search_filter_matches(
 ) -> bool {
     let mut include_matches = Vec::new();
     push_query_match(&mut include_matches, repo, asset, metadata, Some(query));
-    push_format_match(&mut include_matches, &asset.extension, request.formats.as_ref());
+    push_format_match(
+        &mut include_matches,
+        &asset.extension,
+        request.formats.as_ref(),
+    );
     push_legacy_tag_match(&mut include_matches, &asset.tags, request.tag.as_deref());
     push_tag_match(&mut include_matches, &asset.tags, request.tags.as_ref());
     push_legacy_metadata_match(
@@ -6062,9 +6435,21 @@ fn search_filter_matches(
         request.metadata_key.as_deref(),
         request.metadata_value.as_deref(),
     );
-    push_metadata_match(&mut include_matches, metadata, request.metadata_filters.as_ref());
-    push_number_match(&mut include_matches, metadata, request.number_filters.as_ref());
-    push_date_match(&mut include_matches, metadata, request.date_filters.as_ref());
+    push_metadata_match(
+        &mut include_matches,
+        metadata,
+        request.metadata_filters.as_ref(),
+    );
+    push_number_match(
+        &mut include_matches,
+        metadata,
+        request.number_filters.as_ref(),
+    );
+    push_date_match(
+        &mut include_matches,
+        metadata,
+        request.date_filters.as_ref(),
+    );
     push_rating_match(&mut include_matches, metadata, request.min_rating);
 
     if !combine_include_matches(&include_matches, request.match_mode.as_deref()) {
@@ -6164,7 +6549,10 @@ fn push_legacy_metadata_match(
     metadata_key: Option<&str>,
     metadata_value: Option<&str>,
 ) {
-    let Some(key) = metadata_key.map(str::trim).filter(|value| !value.is_empty()) else {
+    let Some(key) = metadata_key
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
         return;
     };
     let matched = metadata.get(key).is_some_and(|value| {
@@ -6189,7 +6577,11 @@ fn push_metadata_match(
         return;
     };
     if has_active_metadata_filters(filters) {
-        include_matches.push(metadata_filters_match_with_mode(metadata, filters, Some("and")));
+        include_matches.push(metadata_filters_match_with_mode(
+            metadata,
+            filters,
+            Some("and"),
+        ));
     }
 }
 
@@ -6267,7 +6659,8 @@ fn matches_excluded_filters(
     if exclude_path_prefixes.is_some_and(|prefixes| {
         prefixes.iter().any(|prefix| {
             normalize_directory_path(prefix).ok().is_some_and(|prefix| {
-                !prefix.is_empty() && (asset.path == prefix || asset.path.starts_with(&format!("{prefix}/")))
+                !prefix.is_empty()
+                    && (asset.path == prefix || asset.path.starts_with(&format!("{prefix}/")))
             })
         })
     }) {
@@ -6284,7 +6677,8 @@ fn matches_excluded_filters(
     }
 
     exclude_metadata_filters.is_some_and(|filters| {
-        has_active_metadata_filters(filters) && metadata_filters_match_with_mode(metadata, filters, Some("or"))
+        has_active_metadata_filters(filters)
+            && metadata_filters_match_with_mode(metadata, filters, Some("or"))
     }) || exclude_number_filters.is_some_and(|filters| {
         has_active_number_filters(filters) && number_filters_match(metadata, filters)
     }) || exclude_date_filters.is_some_and(|filters| {
@@ -6344,9 +6738,9 @@ fn metadata_filter_groups(filters: &[SearchMetadataFilter]) -> BTreeMap<String, 
 }
 
 fn has_active_metadata_filters(filters: &[SearchMetadataFilter]) -> bool {
-    filters.iter().any(|filter| {
-        !filter.key.trim().is_empty() && !filter.value.trim().is_empty()
-    })
+    filters
+        .iter()
+        .any(|filter| !filter.key.trim().is_empty() && !filter.value.trim().is_empty())
 }
 
 fn metadata_filters_match_with_mode(
@@ -6395,9 +6789,9 @@ fn number_filters_match(
 }
 
 fn has_active_number_filters(filters: &[SearchNumberFilter]) -> bool {
-    filters
-        .iter()
-        .any(|filter| !filter.key.trim().is_empty() && (filter.min.is_some() || filter.max.is_some()))
+    filters.iter().any(|filter| {
+        !filter.key.trim().is_empty() && (filter.min.is_some() || filter.max.is_some())
+    })
 }
 
 fn date_filters_match(
@@ -6437,9 +6831,9 @@ fn date_filters_match(
 }
 
 fn has_active_date_filters(filters: &[SearchDateFilter]) -> bool {
-    filters
-        .iter()
-        .any(|filter| !filter.key.trim().is_empty() && (filter.from.is_some() || filter.to.is_some()))
+    filters.iter().any(|filter| {
+        !filter.key.trim().is_empty() && (filter.from.is_some() || filter.to.is_some())
+    })
 }
 
 fn parse_rfc3339_timestamp(value: &str) -> Option<OffsetDateTime> {
@@ -6459,21 +6853,29 @@ fn sort_search_hits(results: &mut [SearchHit], sort: Option<&SearchSort>) {
     };
     let field = sort.field.trim();
     let normalized_field = field.to_lowercase();
+    if normalized_field == "random" {
+        sort_by_random_key(results, |hit| &hit.path, sort.direction.trim().eq_ignore_ascii_case("desc"));
+        return;
+    }
     let descending = sort.direction.trim().eq_ignore_ascii_case("desc");
     results.sort_by(|left, right| {
-        let ordering = compare_sort_field(
-            field,
-            &left.metadata,
-            &right.metadata,
-            || match normalized_field.as_str() {
-                "filename" | "name" => left.filename.to_lowercase().cmp(&right.filename.to_lowercase()),
-                "path" => left.path.to_lowercase().cmp(&right.path.to_lowercase()),
-                "rating" => metadata_sort_number(&left.metadata, "rating")
-                    .partial_cmp(&metadata_sort_number(&right.metadata, "rating"))
-                    .unwrap_or(std::cmp::Ordering::Equal),
-                _ => left.path.to_lowercase().cmp(&right.path.to_lowercase()),
-            },
-        );
+        let ordering =
+            compare_sort_field(
+                field,
+                &left.metadata,
+                &right.metadata,
+                || match normalized_field.as_str() {
+                    "filename" | "name" => left
+                        .filename
+                        .to_lowercase()
+                        .cmp(&right.filename.to_lowercase()),
+                    "path" => left.path.to_lowercase().cmp(&right.path.to_lowercase()),
+                    "rating" => metadata_sort_number(&left.metadata, "rating")
+                        .partial_cmp(&metadata_sort_number(&right.metadata, "rating"))
+                        .unwrap_or(std::cmp::Ordering::Equal),
+                    _ => left.path.to_lowercase().cmp(&right.path.to_lowercase()),
+                },
+            );
         if descending {
             ordering.reverse()
         } else {
@@ -6755,7 +7157,10 @@ fn merge_smart_folder_filters(
         shapes: empty_vec_to_none(shapes),
         metadata_filters: empty_vec_to_none(metadata_filters),
         exclude_tags: merge_optional_lists(parent.exclude_tags, child.exclude_tags.clone()),
-        exclude_formats: merge_optional_lists(parent.exclude_formats, child.exclude_formats.clone()),
+        exclude_formats: merge_optional_lists(
+            parent.exclude_formats,
+            child.exclude_formats.clone(),
+        ),
         exclude_metadata_filters: empty_vec_to_none(exclude_metadata_filters),
         exclude_number_filters: empty_vec_to_none(exclude_number_filters),
         exclude_date_filters: empty_vec_to_none(exclude_date_filters),
@@ -6956,11 +7361,19 @@ fn smart_folder_filter_matches(
         metadata,
         filter.query.as_deref(),
     );
-    push_format_match(&mut include_matches, &asset.extension, filter.formats.as_ref());
+    push_format_match(
+        &mut include_matches,
+        &asset.extension,
+        filter.formats.as_ref(),
+    );
     push_tag_match(&mut include_matches, &asset.tags, filter.tags.as_ref());
     let metadata_filters = smart_folder_filter_metadata_filters(filter);
     push_metadata_match(&mut include_matches, metadata, Some(&metadata_filters));
-    push_number_match(&mut include_matches, metadata, filter.number_filters.as_ref());
+    push_number_match(
+        &mut include_matches,
+        metadata,
+        filter.number_filters.as_ref(),
+    );
     push_date_match(&mut include_matches, metadata, filter.date_filters.as_ref());
     push_rating_match(&mut include_matches, metadata, filter.min_rating);
 
@@ -7062,22 +7475,50 @@ fn sort_file_browser_entries(entries: &mut [FileBrowserEntry], sort: Option<&Sea
     };
     let field = sort.field.trim();
     let normalized_field = field.to_lowercase();
+    if normalized_field == "random" {
+        sort_by_random_key(entries, |entry| &entry.path, sort.direction.trim().eq_ignore_ascii_case("desc"));
+        return;
+    }
     let descending = sort.direction.trim().eq_ignore_ascii_case("desc");
     entries.sort_by(|left, right| {
-        let ordering = compare_sort_field(
-            field,
-            &left.metadata,
-            &right.metadata,
-            || match normalized_field.as_str() {
-                "filename" | "name" => left.name.to_lowercase().cmp(&right.name.to_lowercase()),
-                "size" | "sizebytes" => left.size_bytes.cmp(&right.size_bytes),
-                "modified" | "modifiedat" => left.modified_at.cmp(&right.modified_at),
-                "rating" => metadata_sort_number(&left.metadata, "rating")
-                    .partial_cmp(&metadata_sort_number(&right.metadata, "rating"))
-                    .unwrap_or(std::cmp::Ordering::Equal),
-                _ => left.path.to_lowercase().cmp(&right.path.to_lowercase()),
-            },
-        );
+        let ordering =
+            compare_sort_field(
+                field,
+                &left.metadata,
+                &right.metadata,
+                || match normalized_field.as_str() {
+                    "filename" | "name" => left.name.to_lowercase().cmp(&right.name.to_lowercase()),
+                    "size" | "sizebytes" => left.size_bytes.cmp(&right.size_bytes),
+                    "modified" | "modifiedat" => left.modified_at.cmp(&right.modified_at),
+                    "rating" => metadata_sort_number(&left.metadata, "rating")
+                        .partial_cmp(&metadata_sort_number(&right.metadata, "rating"))
+                        .unwrap_or(std::cmp::Ordering::Equal),
+                    _ => left.path.to_lowercase().cmp(&right.path.to_lowercase()),
+                },
+            );
+        if descending {
+            ordering.reverse()
+        } else {
+            ordering
+        }
+    });
+}
+
+fn sort_by_random_key<T>(items: &mut [T], key: impl Fn(&T) -> &str, descending: bool) {
+    use std::collections::hash_map::DefaultHasher;
+
+    let seed = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos() as u64)
+        .unwrap_or(0);
+    items.sort_by(|left, right| {
+        let mut left_hasher = DefaultHasher::new();
+        seed.hash(&mut left_hasher);
+        key(left).hash(&mut left_hasher);
+        let mut right_hasher = DefaultHasher::new();
+        seed.hash(&mut right_hasher);
+        key(right).hash(&mut right_hasher);
+        let ordering = left_hasher.finish().cmp(&right_hasher.finish());
         if descending {
             ordering.reverse()
         } else {
@@ -7087,7 +7528,10 @@ fn sort_file_browser_entries(entries: &mut [FileBrowserEntry], sort: Option<&Sea
 }
 
 fn metadata_sort_number(metadata: &BTreeMap<String, serde_json::Value>, key: &str) -> f64 {
-    metadata.get(key).and_then(|value| value.as_f64()).unwrap_or(0.0)
+    metadata
+        .get(key)
+        .and_then(|value| value.as_f64())
+        .unwrap_or(0.0)
 }
 
 fn metadata_sort_field_key(field: &str) -> Option<&str> {
@@ -7132,12 +7576,11 @@ fn compare_optional_json_values(
     }
 }
 
-fn compare_json_values(
-    left: &serde_json::Value,
-    right: &serde_json::Value,
-) -> std::cmp::Ordering {
+fn compare_json_values(left: &serde_json::Value, right: &serde_json::Value) -> std::cmp::Ordering {
     if let (Some(left), Some(right)) = (json_value_to_f64(left), json_value_to_f64(right)) {
-        return left.partial_cmp(&right).unwrap_or(std::cmp::Ordering::Equal);
+        return left
+            .partial_cmp(&right)
+            .unwrap_or(std::cmp::Ordering::Equal);
     }
     if let (Some(left), Some(right)) = (
         json_value_to_timestamp(left),
@@ -7180,6 +7623,73 @@ fn infer_value_type(value: &serde_json::Value) -> &'static str {
         serde_json::Value::Bool(_) => "boolean",
         _ => "json",
     }
+}
+
+#[derive(Debug, Clone)]
+struct AsmrWorkContext {
+    work_id: String,
+    work_root: String,
+    work_title: String,
+}
+
+impl AsmrWorkContext {
+    fn from_relative_path(relative_path: &str) -> Option<Self> {
+        let parts = relative_path
+            .split('/')
+            .filter(|part| !part.is_empty())
+            .collect::<Vec<_>>();
+        let (index, work_id) = parts
+            .iter()
+            .enumerate()
+            .find_map(|(index, part)| extract_rj_work_id(part).map(|work_id| (index, work_id)))?;
+        let work_root = parts[..=index].join("/");
+        let work_title = parts[index].to_string();
+
+        Some(Self {
+            work_id,
+            work_root,
+            work_title,
+        })
+    }
+}
+
+fn extract_rj_work_id(value: &str) -> Option<String> {
+    let bytes = value.as_bytes();
+    for index in 0..bytes.len().saturating_sub(1) {
+        if !bytes[index].eq_ignore_ascii_case(&b'R')
+            || !bytes[index + 1].eq_ignore_ascii_case(&b'J')
+        {
+            continue;
+        }
+
+        let digits_start = index + 2;
+        let mut digits_end = digits_start;
+        while digits_end < bytes.len() && bytes[digits_end].is_ascii_digit() {
+            digits_end += 1;
+        }
+        let digit_count = digits_end.saturating_sub(digits_start);
+        if (6..=8).contains(&digit_count) {
+            let digits = &value[digits_start..digits_end];
+            return Some(format!("RJ{digits}"));
+        }
+    }
+
+    None
+}
+
+fn is_asmr_audio_extension(extension: &str) -> bool {
+    matches!(
+        extension,
+        "mp3" | "ogg" | "opus" | "wav" | "aac" | "flac" | "webm" | "mp4" | "m4a" | "mka"
+    )
+}
+
+fn is_asmr_lyric_extension(extension: &str) -> bool {
+    matches!(extension, "lrc" | "srt" | "ass" | "vtt")
+}
+
+fn is_asmr_companion_extension(extension: &str) -> bool {
+    matches!(extension, "txt" | "pdf" | "jpg" | "jpeg" | "png" | "webp")
 }
 
 fn parse_json_column(value_json: &str) -> Result<serde_json::Value, rusqlite::Error> {
@@ -7299,6 +7809,7 @@ fn sync_repository_files(
             ensure_default_metadata(
                 tx,
                 &asset_id,
+                &file.relative_path,
                 &file.filename,
                 &file.extension,
                 &asset_created_at,
@@ -7363,6 +7874,7 @@ fn sync_repository_files(
             insert_default_metadata(
                 tx,
                 &asset_id,
+                &file.relative_path,
                 &file.filename,
                 &file.extension,
                 &now,
@@ -7557,6 +8069,7 @@ fn insert_event(
 fn insert_default_metadata(
     tx: &Transaction<'_>,
     asset_id: &str,
+    relative_path: &str,
     filename: &str,
     extension: &str,
     added_to_library_at: &str,
@@ -7566,6 +8079,7 @@ fn insert_default_metadata(
     ensure_default_metadata(
         tx,
         asset_id,
+        relative_path,
         filename,
         extension,
         added_to_library_at,
@@ -7578,6 +8092,7 @@ fn insert_default_metadata(
 fn ensure_default_metadata(
     tx: &Transaction<'_>,
     asset_id: &str,
+    relative_path: &str,
     filename: &str,
     extension: &str,
     added_to_library_at: &str,
@@ -7586,11 +8101,20 @@ fn ensure_default_metadata(
     overwrite_existing: bool,
 ) -> Result<(), rusqlite::Error> {
     let mut defaults = vec![
-        ("title".to_string(), serde_json::Value::String(filename.to_string())),
+        (
+            "title".to_string(),
+            serde_json::Value::String(filename.to_string()),
+        ),
         ("favorite".to_string(), serde_json::Value::Bool(false)),
-        ("type".to_string(), serde_json::Value::String(extension.to_string())),
+        (
+            "type".to_string(),
+            serde_json::Value::String(extension.to_string()),
+        ),
         ("rating".to_string(), serde_json::json!(0)),
-        ("comment".to_string(), serde_json::Value::String(String::new())),
+        (
+            "comment".to_string(),
+            serde_json::Value::String(String::new()),
+        ),
         ("link".to_string(), serde_json::Value::String(String::new())),
         ("tagGroups".to_string(), serde_json::json!([])),
         (
@@ -7611,6 +8135,7 @@ fn ensure_default_metadata(
         ));
         defaults.push(("palette".to_string(), serde_json::json!(palette)));
     }
+    defaults.extend(asmr_default_metadata(relative_path, filename, extension));
 
     for (key, value) in defaults {
         if overwrite_existing {
@@ -7647,6 +8172,87 @@ fn ensure_default_metadata(
     Ok(())
 }
 
+fn asmr_default_metadata(
+    relative_path: &str,
+    filename: &str,
+    extension: &str,
+) -> Vec<(String, serde_json::Value)> {
+    let Some(context) = AsmrWorkContext::from_relative_path(relative_path) else {
+        return Vec::new();
+    };
+    let extension = extension.to_ascii_lowercase();
+    let mut defaults = vec![
+        (
+            "libraryKind".to_string(),
+            serde_json::Value::String("asmr".to_string()),
+        ),
+        (
+            "workId".to_string(),
+            serde_json::Value::String(context.work_id.clone()),
+        ),
+        (
+            "rjCode".to_string(),
+            serde_json::Value::String(context.work_id.clone()),
+        ),
+        (
+            "workRoot".to_string(),
+            serde_json::Value::String(context.work_root),
+        ),
+        (
+            "workTitle".to_string(),
+            serde_json::Value::String(context.work_title),
+        ),
+        (
+            "trackPath".to_string(),
+            serde_json::Value::String(relative_path.to_string()),
+        ),
+        (
+            "trackTitle".to_string(),
+            serde_json::Value::String(filename.to_string()),
+        ),
+        (
+            "sourceUrl".to_string(),
+            serde_json::Value::String(format!(
+                "https://www.dlsite.com/maniax/work/=/product_id/{}.html",
+                context.work_id
+            )),
+        ),
+    ];
+
+    if is_asmr_audio_extension(&extension) {
+        defaults.extend([
+            (
+                "asmrEntryKind".to_string(),
+                serde_json::Value::String("audio".to_string()),
+            ),
+            (
+                "listeningStatus".to_string(),
+                serde_json::Value::String("unlistened".to_string()),
+            ),
+            ("listeningProgress".to_string(), serde_json::json!(0)),
+            ("trackDurationMs".to_string(), serde_json::json!(0)),
+        ]);
+    } else if is_asmr_lyric_extension(&extension) {
+        defaults.extend([
+            (
+                "asmrEntryKind".to_string(),
+                serde_json::Value::String("lyric".to_string()),
+            ),
+            (
+                "lyricStatus".to_string(),
+                serde_json::Value::String("local".to_string()),
+            ),
+        ]);
+    } else if is_asmr_companion_extension(&extension) {
+        defaults.push((
+            "asmrEntryKind".to_string(),
+            serde_json::Value::String("companion".to_string()),
+        ));
+    }
+
+    defaults
+}
+
 fn upsert_metadata_value(
     connection: &Connection,
     asset_id: &str,
@@ -7665,7 +8271,13 @@ fn upsert_metadata_value(
           version = metadata.version + 1,
           updated_at = excluded.updated_at
         "#,
-        params![asset_id, key, infer_value_type(value), value.to_string(), now],
+        params![
+            asset_id,
+            key,
+            infer_value_type(value),
+            value.to_string(),
+            now
+        ],
     )?;
     Ok(())
 }
@@ -8341,6 +8953,13 @@ fn thumbnail_bytes_from_request(request: &ThumbnailRequest) -> Result<Vec<u8>, S
         return Ok(bytes.clone());
     }
 
+    if let Some(source_url) = request.source_url.as_deref().map(str::trim).filter(|value| !value.is_empty()) {
+        if request.action.as_deref() != Some("save") {
+            return Err("thumbnail sourceUrl can only be used with save action".to_string());
+        }
+        return download_remote_thumbnail_bytes(source_url);
+    }
+
     let source_path = request
         .source_path
         .as_deref()
@@ -8350,6 +8969,38 @@ fn thumbnail_bytes_from_request(request: &ThumbnailRequest) -> Result<Vec<u8>, S
         return Err(format!("thumbnail source file not found: {source_path}"));
     }
     fs::read(path).map_err(io_error)
+}
+
+fn download_remote_thumbnail_bytes(url: &str) -> Result<Vec<u8>, String> {
+    if !url.starts_with("http://") && !url.starts_with("https://") {
+        return Err("thumbnail sourceUrl only supports http and https URLs".to_string());
+    }
+    let client = reqwest::blocking::Client::builder()
+        .user_agent("MomoBakoThumbnail/1")
+        .timeout(Duration::from_secs(30))
+        .build()
+        .map_err(|error| format!("thumbnail download client error: {error}"))?;
+    let response = client
+        .get(url)
+        .send()
+        .map_err(|error| format!("thumbnail download request failed: {error}"))?;
+    let status = response.status();
+    if !status.is_success() {
+        return Err(format!("thumbnail download returned HTTP {status}"));
+    }
+    if response
+        .content_length()
+        .is_some_and(|length| length > MAX_REMOTE_THUMBNAIL_BYTES)
+    {
+        return Err("thumbnail source is too large".to_string());
+    }
+    let bytes = response
+        .bytes()
+        .map_err(|error| format!("thumbnail download body error: {error}"))?;
+    if bytes.len() as u64 > MAX_REMOTE_THUMBNAIL_BYTES {
+        return Err("thumbnail source is too large".to_string());
+    }
+    Ok(bytes.to_vec())
 }
 
 fn save_custom_thumbnail_bytes(
@@ -8660,7 +9311,9 @@ fn extract_image_palette(source_path: &Path, extension: &str) -> Vec<String> {
         if alpha < 128 {
             continue;
         }
-        let bucket = buckets.entry((red & 0xf8, green & 0xf8, blue & 0xf8)).or_default();
+        let bucket = buckets
+            .entry((red & 0xf8, green & 0xf8, blue & 0xf8))
+            .or_default();
         bucket.count += 1;
         bucket.red_sum += u64::from(red);
         bucket.green_sum += u64::from(green);
@@ -8701,7 +9354,10 @@ fn is_video_extension(extension: &str) -> bool {
 }
 
 fn is_audio_extension(extension: &str) -> bool {
-    matches!(extension, "mp3" | "wav" | "ogg" | "flac" | "m4a" | "aac" | "opus")
+    matches!(
+        extension,
+        "mp3" | "wav" | "ogg" | "flac" | "m4a" | "aac" | "opus"
+    )
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -8867,7 +9523,8 @@ impl BackendPluginRegistry {
     }
 
     fn list_manifests(&self) -> Vec<PluginManifest> {
-        self.registrations
+        let mut manifests = self
+            .registrations
             .values()
             .map(|registration| {
                 let mut manifest = registration.manifest.clone();
@@ -8877,10 +9534,13 @@ impl BackendPluginRegistry {
                     && !embedded_local_filesystem_fallback_enabled(&manifest.plugin_id)
                 {
                     manifest.status = "unavailable".to_string();
+                    manifest.disable_reason = Some("原生运行时不可用。".to_string());
                 }
                 manifest
             })
-            .collect()
+            .collect::<Vec<_>>();
+        resolve_plugin_manifest_dependencies(&mut manifests);
+        manifests
     }
 
     fn manifest(&self, plugin_id: &str) -> Option<&PluginManifest> {
@@ -9029,9 +9689,36 @@ fn plugin_management_registry(service_root: &Path) -> BackendPluginRegistry {
 }
 
 fn load_runtime_plugin_manifests(service_root: &Path) -> Vec<DiscoveredPluginManifest> {
-    let mut manifests = load_plugin_manifests_from_runtime(runtime_plugins_dir(service_root));
+    let mut manifests = Vec::new();
+    for plugin_root in bundled_plugin_roots() {
+        manifests.extend(load_plugin_manifests_from_runtime(plugin_root));
+    }
+    manifests.extend(load_plugin_manifests_from_runtime(runtime_plugins_dir(
+        service_root,
+    )));
     manifests.sort_by(|left, right| left.manifest.plugin_id.cmp(&right.manifest.plugin_id));
     manifests
+}
+
+fn bundled_plugin_roots() -> Vec<PathBuf> {
+    let mut roots = Vec::new();
+    if let Ok(current_dir) = std::env::current_dir() {
+        push_existing_plugin_root(&mut roots, current_dir.join("External").join("Plugins"));
+        if let Some(parent) = current_dir.parent() {
+            push_existing_plugin_root(&mut roots, parent.join("External").join("Plugins"));
+        }
+    }
+    roots
+}
+
+fn push_existing_plugin_root(roots: &mut Vec<PathBuf>, root: PathBuf) {
+    if !root.is_dir() {
+        return;
+    }
+    let normalized = canonicalize_local_path(&root).unwrap_or(root);
+    if !roots.iter().any(|item| item == &normalized) {
+        roots.push(normalized);
+    }
 }
 
 fn load_plugin_manifests_from_runtime(runtime_root: PathBuf) -> Vec<DiscoveredPluginManifest> {
@@ -9055,21 +9742,48 @@ fn read_plugin_manifests_from_dir(root: &Path) -> Result<Vec<DiscoveredPluginMan
     }
     for entry in fs::read_dir(root).map_err(io_error)? {
         let entry = entry.map_err(io_error)?;
-        let archive_path = entry.path();
-        if archive_path.extension().and_then(|value| value.to_str()) != Some("momoplug") {
+        let plugin_path = entry.path();
+        if plugin_path.is_dir() {
+            match read_discovered_plugin_manifest_from_directory(&plugin_path) {
+                Ok(Some(discovered)) => manifests.push(discovered),
+                Ok(None) => {}
+                Err(error) => manifests.push(DiscoveredPluginManifest {
+                    manifest: broken_plugin_manifest(&plugin_path, &error),
+                    archive_path: plugin_path,
+                    manifest_prefix: String::new(),
+                }),
+            }
             continue;
         }
-        match read_discovered_plugin_manifest_from_archive(&archive_path) {
+        if plugin_path.extension().and_then(|value| value.to_str()) != Some("momoplug") {
+            continue;
+        }
+        match read_discovered_plugin_manifest_from_archive(&plugin_path) {
             Ok(discovered) => manifests.push(discovered),
             Err(error) => manifests.push(DiscoveredPluginManifest {
-                manifest: broken_plugin_manifest(&archive_path, &error),
-                archive_path,
+                manifest: broken_plugin_manifest(&plugin_path, &error),
+                archive_path: plugin_path,
                 manifest_prefix: String::new(),
             }),
         }
     }
     manifests.sort_by(|left, right| left.manifest.plugin_id.cmp(&right.manifest.plugin_id));
     Ok(manifests)
+}
+
+fn read_discovered_plugin_manifest_from_directory(
+    plugin_dir: &Path,
+) -> Result<Option<DiscoveredPluginManifest>, String> {
+    let manifest_path = plugin_dir.join("manifest.json");
+    if !manifest_path.is_file() {
+        return Ok(None);
+    }
+    let raw = fs::read_to_string(&manifest_path).map_err(io_error)?;
+    Ok(Some(DiscoveredPluginManifest {
+        manifest: parse_plugin_manifest_with_source(&raw, None)?,
+        archive_path: plugin_dir.to_path_buf(),
+        manifest_prefix: String::new(),
+    }))
 }
 
 fn read_discovered_plugin_manifest_from_archive(
@@ -9118,9 +9832,178 @@ fn plugin_legacy_ids(manifest: &PluginManifest) -> Vec<String> {
     values
 }
 
+fn resolve_plugin_manifest_dependencies(manifests: &mut [PluginManifest]) {
+    let by_id = manifests
+        .iter()
+        .map(|manifest| (manifest.plugin_id.clone(), manifest.clone()))
+        .collect::<BTreeMap<_, _>>();
+    let legacy_ids = manifests
+        .iter()
+        .flat_map(|manifest| {
+            plugin_legacy_ids(manifest)
+                .into_iter()
+                .map(|legacy_id| (legacy_id, manifest.plugin_id.clone()))
+                .collect::<Vec<_>>()
+        })
+        .collect::<BTreeMap<_, _>>();
+
+    for manifest in manifests {
+        let required = resolve_plugin_dependency_list(&manifest.requires, &by_id, &legacy_ids);
+        let optional = resolve_plugin_dependency_list(&manifest.optional, &by_id, &legacy_ids);
+        let missing_required = dependency_ids_by_status(&required, "missing");
+        let missing_optional = dependency_ids_by_status(&optional, "missing");
+        let unavailable_required = unavailable_dependency_ids(&required);
+        let unavailable_optional = unavailable_dependency_ids(&optional);
+
+        manifest.dependency_status = PluginDependencyStatus {
+            required,
+            optional,
+            missing_required: missing_required.clone(),
+            missing_optional: missing_optional.clone(),
+            disabled_required: unavailable_required.clone(),
+            disabled_optional: unavailable_optional.clone(),
+        };
+
+        if !missing_required.is_empty() {
+            manifest.enabled = false;
+            manifest.status = "unavailable".to_string();
+            manifest.disable_reason =
+                Some(format!("缺少必需依赖：{}。", missing_required.join("、")));
+        } else if !unavailable_required.is_empty() {
+            manifest.enabled = false;
+            manifest.status = "disabled".to_string();
+            manifest.disable_reason = Some(format!(
+                "必需依赖不可用：{}。",
+                unavailable_required.join("、")
+            ));
+        } else if manifest.disable_reason.is_none() {
+            if !manifest.enabled || manifest.status == "disabled" {
+                manifest.disable_reason = Some("插件已被禁用。".to_string());
+            } else if manifest.status == "unavailable" {
+                manifest.disable_reason = Some("插件运行时不可用。".to_string());
+            } else if manifest.status == "error" {
+                manifest.disable_reason = Some("插件清单或运行时存在错误。".to_string());
+            }
+        }
+
+        manifest.degraded = !missing_optional.is_empty() || !unavailable_optional.is_empty();
+        manifest.degradation_reason = if manifest.degraded {
+            Some(format!(
+                "可选依赖不可用，部分能力降级：{}。",
+                missing_optional
+                    .iter()
+                    .chain(unavailable_optional.iter())
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .join("、")
+            ))
+        } else {
+            None
+        };
+    }
+}
+
+fn resolve_plugin_dependency_list(
+    dependency_ids: &[String],
+    by_id: &BTreeMap<String, PluginManifest>,
+    legacy_ids: &BTreeMap<String, String>,
+) -> Vec<PluginDependencyState> {
+    dependency_ids
+        .iter()
+        .map(|dependency_id| resolve_plugin_dependency(dependency_id, by_id, legacy_ids))
+        .collect()
+}
+
+fn resolve_plugin_dependency(
+    dependency_id: &str,
+    by_id: &BTreeMap<String, PluginManifest>,
+    legacy_ids: &BTreeMap<String, String>,
+) -> PluginDependencyState {
+    let normalized = legacy_ids
+        .get(dependency_id)
+        .cloned()
+        .unwrap_or_else(|| dependency_id.to_string());
+    let Some(dependency) = by_id.get(&normalized) else {
+        return PluginDependencyState {
+            plugin_id: dependency_id.to_string(),
+            name: None,
+            status: "missing".to_string(),
+            enabled: false,
+            available: false,
+        };
+    };
+    let available =
+        plugin_dependency_available(&normalized, by_id, legacy_ids, &mut HashSet::new());
+    let status = if available {
+        "ready"
+    } else if dependency.status == "unavailable" || dependency.status == "error" {
+        dependency.status.as_str()
+    } else {
+        "disabled"
+    };
+    PluginDependencyState {
+        plugin_id: dependency.plugin_id.clone(),
+        name: Some(dependency.name.clone()),
+        status: status.to_string(),
+        enabled: dependency.enabled,
+        available,
+    }
+}
+
+fn plugin_dependency_available(
+    plugin_id: &str,
+    by_id: &BTreeMap<String, PluginManifest>,
+    legacy_ids: &BTreeMap<String, String>,
+    visited: &mut HashSet<String>,
+) -> bool {
+    let normalized = legacy_ids
+        .get(plugin_id)
+        .cloned()
+        .unwrap_or_else(|| plugin_id.to_string());
+    if !visited.insert(normalized.clone()) {
+        return true;
+    }
+    let Some(manifest) = by_id.get(&normalized) else {
+        return false;
+    };
+    if !manifest.enabled || !matches!(manifest.status.as_str(), "ready" | "") {
+        return false;
+    }
+    manifest
+        .requires
+        .iter()
+        .all(|dependency_id| plugin_dependency_available(dependency_id, by_id, legacy_ids, visited))
+}
+
+fn dependency_ids_by_status(dependencies: &[PluginDependencyState], status: &str) -> Vec<String> {
+    dependencies
+        .iter()
+        .filter(|dependency| dependency.status == status)
+        .map(|dependency| {
+            dependency
+                .name
+                .clone()
+                .unwrap_or_else(|| dependency.plugin_id.clone())
+        })
+        .collect()
+}
+
+fn unavailable_dependency_ids(dependencies: &[PluginDependencyState]) -> Vec<String> {
+    dependencies
+        .iter()
+        .filter(|dependency| dependency.status != "ready" && dependency.status != "missing")
+        .map(|dependency| {
+            dependency
+                .name
+                .clone()
+                .unwrap_or_else(|| dependency.plugin_id.clone())
+        })
+        .collect()
+}
+
 fn normalized_builtin_plugin_id(plugin_id: &str) -> &str {
     match plugin_id.trim() {
-        "builtin.local-filesystem" => LOCAL_FILESYSTEM_PLUGIN_ID,
+        LEGACY_LOCAL_FILESYSTEM_PLUGIN_ID => LOCAL_FILESYSTEM_PLUGIN_ID,
         other => other,
     }
 }
@@ -9139,7 +10022,8 @@ fn plugin_category_for_kind(kind: &str) -> &'static str {
 }
 
 fn is_source_plugin(manifest: &PluginManifest) -> bool {
-    manifest.category == "source" || matches!(manifest.kind.as_str(), "filesystem" | "webdav" | "cloud")
+    manifest.category == "source"
+        || matches!(manifest.kind.as_str(), "filesystem" | "webdav" | "cloud")
 }
 
 fn plugin_settings_path(service_root: &Path) -> PathBuf {
@@ -9179,6 +10063,10 @@ fn broken_plugin_manifest(archive_path: &Path, error: &str) -> PluginManifest {
             legacy_plugin_ids: Vec::new(),
         },
         status: "error".to_string(),
+        dependency_status: PluginDependencyStatus::default(),
+        disable_reason: Some("插件清单读取失败。".to_string()),
+        degraded: false,
+        degradation_reason: None,
         archive_path: Some(archive_path.to_string_lossy().to_string()),
     }
 }
@@ -9283,7 +10171,11 @@ fn install_plugin_archive(
 
     let runtime_root = runtime_plugins_dir(service_root);
     fs::create_dir_all(&runtime_root).map_err(io_error)?;
-    let install_name = format!("{}-{}.momoplug", slugify_ascii_component(&manifest.plugin_id), manifest.version);
+    let install_name = format!(
+        "{}-{}.momoplug",
+        slugify_ascii_component(&manifest.plugin_id),
+        manifest.version
+    );
     let target_path = runtime_root.join(install_name);
     if target_path.exists() {
         return Err(format!(
@@ -9403,12 +10295,8 @@ fn load_native_plugin(
                 manifest.plugin_id
             )
         })?;
-    let library_path = native_plugin_library_path(
-        service_root,
-        archive_path,
-        manifest_prefix,
-        library_name,
-    )?;
+    let library_path =
+        native_plugin_library_path(service_root, archive_path, manifest_prefix, library_name)?;
     let library = unsafe { libloading::Library::new(&library_path) }.map_err(|error| {
         format!(
             "failed to load plugin library {}: {error}",
@@ -9451,7 +10339,11 @@ fn native_plugin_library_path(
     let cache_root = plugin_runtime_cache_dir(service_root);
     fs::create_dir_all(&cache_root).map_err(io_error)?;
     let archive_hash = hash_file_sha256(archive_path)?;
-    let cache_dir = cache_root.join(format!("{}-{}", slugify_ascii_component(library_name), archive_hash));
+    let cache_dir = cache_root.join(format!(
+        "{}-{}",
+        slugify_ascii_component(library_name),
+        archive_hash
+    ));
     let output_path = cache_dir.join(&file_name);
     if output_path.is_file() {
         return Ok(output_path);
@@ -9488,7 +10380,9 @@ fn native_plugin_library_path(
             return Ok(output_path);
         }
     }
-    Err(format!("native plugin library not found in archive: {library_name}"))
+    Err(format!(
+        "native plugin library not found in archive: {library_name}"
+    ))
 }
 
 fn native_plugin_library_file_name(library_name: &str) -> String {
@@ -9502,7 +10396,7 @@ fn native_plugin_library_file_name(library_name: &str) -> String {
 }
 
 fn embedded_local_filesystem_fallback_enabled(plugin_id: &str) -> bool {
-    cfg!(test) && plugin_id == LOCAL_FILESYSTEM_PLUGIN_ID
+    plugin_id == LOCAL_FILESYSTEM_PLUGIN_ID
 }
 
 fn default_plugins(service_root: &Path) -> Vec<PluginManifest> {
@@ -9529,9 +10423,7 @@ fn read_plugin_archive_text_entry(archive_path: &Path, entry_path: &str) -> Resu
         .by_name(entry_path)
         .map_err(|_| format!("plugin archive entry not found: {entry_path}"))?;
     let mut text = String::new();
-    archive_entry
-        .read_to_string(&mut text)
-        .map_err(io_error)?;
+    archive_entry.read_to_string(&mut text).map_err(io_error)?;
     Ok(text)
 }
 
@@ -9652,6 +10544,12 @@ fn default_api_definitions() -> Vec<ApiDefinition> {
             method: "GET".to_string(),
             path: "/plugins".to_string(),
             summary: "列出插件与能力声明。".to_string(),
+        },
+        ApiDefinition {
+            group: "Provider API".to_string(),
+            method: "POST".to_string(),
+            path: "/providers/asmr:lookup".to_string(),
+            summary: "手动抓取 ASMR provider 元数据候选，不直接写入资产 metadata。".to_string(),
         },
     ]
 }
@@ -11026,6 +11924,641 @@ fn copy_external_entries_parallel(
     Ok(outcomes)
 }
 
+fn external_add_asset_response(
+    request_id: String,
+    mut imported: Vec<ExternalImportedAsset>,
+    mut failed: Vec<ExternalAddAssetFailure>,
+    total: usize,
+) -> ExternalAddAssetResponse {
+    imported.sort_by_key(|item| item.item_index);
+    failed.sort_by_key(|item| item.item_index);
+    let status = if imported.is_empty() {
+        "failed"
+    } else if failed.is_empty() {
+        "success"
+    } else {
+        "partial"
+    };
+    ExternalAddAssetResponse {
+        request_id,
+        status: status.to_string(),
+        summary: ExternalAddAssetSummary {
+            total,
+            imported: imported.len(),
+            failed: failed.len(),
+        },
+        imported,
+        failed,
+    }
+}
+
+fn external_failure(
+    item_index: usize,
+    code: &str,
+    message: String,
+    retryable: bool,
+    details: Option<serde_json::Value>,
+) -> ExternalAddAssetFailure {
+    ExternalAddAssetFailure {
+        item_index,
+        code: code.to_string(),
+        message,
+        retryable,
+        details,
+    }
+}
+
+fn external_import_error_code(error: &str) -> &'static str {
+    if error.contains("entry already exists") {
+        "duplicateTarget"
+    } else if error.contains("directory not found")
+        || error.contains("path escapes repository root")
+        || error.contains("invalid path")
+    {
+        "invalidTargetPath"
+    } else {
+        "importRejected"
+    }
+}
+
+fn external_metadata_source(client: Option<&ExternalAddAssetClient>) -> String {
+    let Some(client) = client else {
+        return "external".to_string();
+    };
+    client
+        .id
+        .as_deref()
+        .or(client.name.as_deref())
+        .map(|value| format!("external:{value}"))
+        .unwrap_or_else(|| "external".to_string())
+}
+
+#[derive(Debug)]
+struct ExternalRequestError {
+    code: &'static str,
+    message: String,
+    retryable: bool,
+}
+
+#[derive(Debug)]
+struct ExternalAssetImportContext {
+    parent_path: String,
+    target_dir: PathBuf,
+    staging_root: PathBuf,
+}
+
+#[derive(Debug)]
+struct PlannedExternalAsset {
+    item_index: usize,
+    source_path: String,
+    target_path: String,
+    metadata: Option<BTreeMap<String, serde_json::Value>>,
+}
+
+fn external_item_filename(
+    item: &ExternalAddAssetItem,
+    item_index: usize,
+) -> Result<String, String> {
+    if let Some(filename) = item
+        .filename
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        return validate_new_entry_name(filename);
+    }
+    if let Some(url) = item.url.as_deref() {
+        let url_path = url.split(['?', '#']).next().unwrap_or(url);
+        if let Some(candidate) = url_path
+            .rsplit('/')
+            .find(|segment| !segment.trim().is_empty())
+            .map(percent_decode_filename)
+            .filter(|value| !value.trim().is_empty())
+        {
+            return validate_new_entry_name(&candidate);
+        }
+    }
+    validate_new_entry_name(&format!("external-asset-{item_index}.bin"))
+}
+
+fn percent_decode_filename(value: &str) -> String {
+    let bytes = value.as_bytes();
+    let mut output = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'%' && index + 2 < bytes.len() {
+            if let Ok(hex) = u8::from_str_radix(&value[index + 1..index + 3], 16) {
+                output.push(hex);
+                index += 3;
+                continue;
+            }
+        }
+        output.push(bytes[index]);
+        index += 1;
+    }
+    String::from_utf8_lossy(&output).to_string()
+}
+
+fn stage_external_asset_item(
+    item_index: usize,
+    item: &ExternalAddAssetItem,
+    context: &ExternalAssetImportContext,
+    planned_targets: &mut HashSet<String>,
+) -> Result<PlannedExternalAsset, ExternalAddAssetFailure> {
+    if item.kind != "remoteUrl" {
+        return Err(external_failure(
+            item_index,
+            "invalidInput",
+            format!("unsupported item kind: {}", item.kind),
+            false,
+            None,
+        ));
+    }
+    let Some(url) = item
+        .url
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return Err(external_failure(
+            item_index,
+            "invalidInput",
+            "remoteUrl item requires url".to_string(),
+            false,
+            None,
+        ));
+    };
+    if !url.starts_with("http://") && !url.starts_with("https://") {
+        return Err(external_failure(
+            item_index,
+            "invalidInput",
+            "remoteUrl only supports http and https URLs".to_string(),
+            false,
+            None,
+        ));
+    }
+
+    let filename = external_item_filename(item, item_index)
+        .map_err(|error| external_failure(item_index, "invalidInput", error, false, None))?;
+    let target_path = join_relative_path(&context.parent_path, &filename);
+    if context.target_dir.join(&filename).exists() || !planned_targets.insert(target_path.clone()) {
+        return Err(external_failure(
+            item_index,
+            "duplicateTarget",
+            format!("entry already exists: {filename}"),
+            false,
+            None,
+        ));
+    }
+
+    let staged_path = context.staging_root.join(&filename);
+    download_remote_asset(url, item.headers.as_ref(), &staged_path).map_err(|error| {
+        external_failure(
+            item_index,
+            "downloadFailed",
+            error,
+            true,
+            Some(serde_json::json!({ "url": url })),
+        )
+    })?;
+
+    Ok(PlannedExternalAsset {
+        item_index,
+        source_path: staged_path.to_string_lossy().to_string(),
+        target_path,
+        metadata: item.metadata.clone(),
+    })
+}
+
+fn sanitize_external_component(value: &str) -> String {
+    let sanitized = value
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_') {
+                ch
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>();
+    let trimmed = sanitized.trim_matches('-');
+    if trimmed.is_empty() {
+        "request".to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+fn download_remote_asset(
+    url: &str,
+    headers: Option<&BTreeMap<String, String>>,
+    output_path: &Path,
+) -> Result<(), String> {
+    if !url.starts_with("http://") && !url.starts_with("https://") {
+        return Err("remoteUrl only supports http and https URLs".to_string());
+    }
+    let client = reqwest::blocking::Client::builder()
+        .user_agent("MomoBakoExternalImport/1")
+        .timeout(Duration::from_secs(60))
+        .build()
+        .map_err(|error| format!("download client error: {error}"))?;
+    let mut request = client.get(url);
+    if let Some(headers) = headers {
+        for (name, value) in headers {
+            if is_safe_external_header_name(name) && !value.contains(['\r', '\n']) {
+                request = request.header(name, value);
+            }
+        }
+    }
+    let response = request
+        .send()
+        .map_err(|error| format!("download request failed: {error}"))?;
+    let status = response.status();
+    if !status.is_success() {
+        return Err(format!("download returned HTTP {status}"));
+    }
+    if let Some(parent) = output_path.parent() {
+        fs::create_dir_all(parent).map_err(io_error)?;
+    }
+    let mut file = File::create(output_path).map_err(io_error)?;
+    let mut response = response;
+    response
+        .copy_to(&mut file)
+        .map_err(|error| format!("download body error: {error}"))?;
+    Ok(())
+}
+
+fn lookup_asmr_metadata_candidate(
+    request: AsmrMetadataLookupRequest,
+) -> Result<AsmrMetadataLookupResponse, String> {
+    let rj_code = normalize_rj_code(&request.rj_code)
+        .ok_or_else(|| "ASMR provider lookup requires an RJ code".to_string())?;
+    let provider = normalize_asmr_provider(&request.provider)?;
+    let source_url = request
+        .detail_url
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| default_asmr_provider_url(&provider, &rj_code));
+    if !source_url.starts_with("http://") && !source_url.starts_with("https://") {
+        return Err("ASMR provider lookup only supports http and https URLs".to_string());
+    }
+    let body = fetch_asmr_provider_body(&provider, &source_url)?;
+    let candidate = parse_asmr_provider_candidate(&provider, &rj_code, &source_url, &body)?;
+    Ok(AsmrMetadataLookupResponse {
+        provider,
+        rj_code,
+        source_url,
+        fetched_at: now_rfc3339(),
+        candidate,
+    })
+}
+
+fn normalize_asmr_provider(value: &str) -> Result<String, String> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "dlsite" | "momobako.service.provider.dlsite" => Ok("dlsite".to_string()),
+        "asmr-one" | "asmr_one" | "asmrone" | "momobako.service.provider.asmr-one" => {
+            Ok("asmr-one".to_string())
+        }
+        value => Err(format!("unsupported ASMR metadata provider: {value}")),
+    }
+}
+
+fn normalize_rj_code(value: &str) -> Option<String> {
+    extract_rj_work_id(value)
+}
+
+fn default_asmr_provider_url(provider: &str, rj_code: &str) -> String {
+    match provider {
+        "asmr-one" => format!(
+            "https://api.asmr-200.com/api/workInfo/{}",
+            rj_code.trim_start_matches("RJ")
+        ),
+        _ => format!("https://www.dlsite.com/maniax/work/=/product_id/{rj_code}.html"),
+    }
+}
+
+fn fetch_asmr_provider_body(provider: &str, url: &str) -> Result<String, String> {
+    let client = reqwest::blocking::Client::builder()
+        .user_agent("MomoBakoASMRProvider/1")
+        .timeout(Duration::from_secs(20))
+        .build()
+        .map_err(|error| format!("ASMR provider client error: {error}"))?;
+    let response = client
+        .get(url)
+        .header(
+            reqwest::header::ACCEPT,
+            if provider == "asmr-one" {
+                "application/json, text/plain, */*"
+            } else {
+                "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+            },
+        )
+        .send()
+        .map_err(|error| format!("ASMR provider request failed: {error}"))?;
+    let status = response.status();
+    if !status.is_success() {
+        return Err(format!("ASMR provider returned HTTP {status}"));
+    }
+    response
+        .text()
+        .map_err(|error| format!("ASMR provider body error: {error}"))
+}
+
+fn parse_asmr_provider_candidate(
+    provider: &str,
+    rj_code: &str,
+    source_url: &str,
+    body: &str,
+) -> Result<AsmrMetadataCandidatePayload, String> {
+    let fields = match provider {
+        "asmr-one" => parse_asmr_one_candidate_fields(rj_code, source_url, body)?,
+        "dlsite" => parse_dlsite_candidate_fields(rj_code, source_url, body),
+        value => return Err(format!("unsupported ASMR metadata provider: {value}")),
+    };
+    if fields.len() <= 3 {
+        return Err("ASMR provider did not return usable metadata".to_string());
+    }
+    Ok(AsmrMetadataCandidatePayload {
+        source: provider.to_string(),
+        confidence: "external-id".to_string(),
+        fields,
+    })
+}
+
+fn base_asmr_candidate_fields(
+    rj_code: &str,
+    source_url: &str,
+) -> BTreeMap<String, serde_json::Value> {
+    BTreeMap::from([
+        ("workId".to_string(), serde_json::json!(rj_code)),
+        ("rjCode".to_string(), serde_json::json!(rj_code)),
+        ("sourceUrl".to_string(), serde_json::json!(source_url)),
+    ])
+}
+
+fn parse_asmr_one_candidate_fields(
+    rj_code: &str,
+    source_url: &str,
+    body: &str,
+) -> Result<BTreeMap<String, serde_json::Value>, String> {
+    let value = serde_json::from_str::<serde_json::Value>(body).map_err(json_error)?;
+    let payload = value
+        .get("data")
+        .filter(|item| item.is_object())
+        .unwrap_or(&value);
+    let mut fields = base_asmr_candidate_fields(rj_code, source_url);
+    insert_json_string_field(&mut fields, "workTitle", first_json_string(payload, &["title", "name", "workTitle"]));
+    insert_json_string_field(&mut fields, "circle", nested_json_string(payload, &[&["circle", "name"], &["maker", "name"], &["circleName"]]));
+    insert_json_string_field(&mut fields, "series", nested_json_string(payload, &[&["series", "name"], &["seriesName"]]));
+    insert_json_string_field(&mut fields, "releaseDate", first_json_string(payload, &["release", "releaseDate", "release_dtl"]));
+    insert_json_string_field(&mut fields, "ageRating", first_json_string(payload, &["ageCategory", "ageRating", "rate"]));
+    insert_json_number_field(&mut fields, "price", first_json_number(payload, &["price"]));
+    insert_json_number_field(&mut fields, "dlCount", first_json_number(payload, &["dl_count", "dlCount", "sales"]));
+    insert_json_number_field(&mut fields, "reviewCount", first_json_number(payload, &["review_count", "reviewCount"]));
+    insert_json_number_field(&mut fields, "rateAverage", first_json_number(payload, &["rate_average_2dp", "rateAverage", "rating"]));
+    insert_json_array_field(&mut fields, "voiceActors", collect_named_json_array(payload, &["vas", "voiceActors", "creators"]));
+    insert_json_array_field(&mut fields, "scenarioTags", collect_named_json_array(payload, &["tags", "genres"]));
+    if let Some(cover) = first_json_string(payload, &["mainCoverUrl", "cover", "image_main", "imageMain"]) {
+        fields.insert("cover".to_string(), serde_json::json!(cover));
+    }
+    Ok(fields)
+}
+
+fn parse_dlsite_candidate_fields(
+    rj_code: &str,
+    source_url: &str,
+    body: &str,
+) -> BTreeMap<String, serde_json::Value> {
+    let mut fields = base_asmr_candidate_fields(rj_code, source_url);
+    insert_json_string_field(&mut fields, "workTitle", html_meta_content(body, "og:title").or_else(|| html_title(body)));
+    insert_json_string_field(&mut fields, "circle", html_meta_content(body, "product:brand").or_else(|| dlsite_json_like_string(body, "maker_name")));
+    insert_json_string_field(&mut fields, "releaseDate", dlsite_json_like_string(body, "regist_date"));
+    insert_json_number_field(&mut fields, "price", dlsite_json_like_number(body, "price"));
+    insert_json_number_field(&mut fields, "dlCount", dlsite_json_like_number(body, "dl_count"));
+    insert_json_number_field(&mut fields, "reviewCount", dlsite_json_like_number(body, "review_count"));
+    insert_json_number_field(&mut fields, "rateAverage", dlsite_json_like_number(body, "rate_average_2dp"));
+    if let Some(cover) = html_meta_content(body, "og:image") {
+        fields.insert("cover".to_string(), serde_json::json!(cover));
+    }
+    fields
+}
+
+fn insert_json_string_field(
+    fields: &mut BTreeMap<String, serde_json::Value>,
+    key: &str,
+    value: Option<String>,
+) {
+    let Some(value) = value.map(|item| item.trim().to_string()).filter(|item| !item.is_empty()) else {
+        return;
+    };
+    fields.insert(key.to_string(), serde_json::json!(value));
+}
+
+fn insert_json_number_field(
+    fields: &mut BTreeMap<String, serde_json::Value>,
+    key: &str,
+    value: Option<f64>,
+) {
+    let Some(value) = value.filter(|item| item.is_finite()) else {
+        return;
+    };
+    fields.insert(key.to_string(), serde_json::json!(value));
+}
+
+fn insert_json_array_field(
+    fields: &mut BTreeMap<String, serde_json::Value>,
+    key: &str,
+    values: Vec<String>,
+) {
+    if values.is_empty() {
+        return;
+    }
+    fields.insert(key.to_string(), serde_json::json!(values));
+}
+
+fn first_json_string(value: &serde_json::Value, keys: &[&str]) -> Option<String> {
+    keys.iter()
+        .find_map(|key| value.get(*key).and_then(json_value_string))
+}
+
+fn first_json_number(value: &serde_json::Value, keys: &[&str]) -> Option<f64> {
+    keys.iter()
+        .find_map(|key| value.get(*key).and_then(json_value_number))
+}
+
+fn nested_json_string(value: &serde_json::Value, paths: &[&[&str]]) -> Option<String> {
+    for path in paths {
+        let mut current = value;
+        let mut found = true;
+        for key in *path {
+            if let Some(next) = current.get(*key) {
+                current = next;
+            } else {
+                found = false;
+                break;
+            }
+        }
+        if found {
+            if let Some(text) = json_value_string(current) {
+                return Some(text);
+            }
+        }
+    }
+    None
+}
+
+fn json_value_string(value: &serde_json::Value) -> Option<String> {
+    match value {
+        serde_json::Value::String(text) => Some(text.clone()),
+        serde_json::Value::Number(number) => Some(number.to_string()),
+        _ => None,
+    }
+}
+
+fn json_value_number(value: &serde_json::Value) -> Option<f64> {
+    match value {
+        serde_json::Value::Number(number) => number.as_f64(),
+        serde_json::Value::String(text) => text.replace(',', "").parse::<f64>().ok(),
+        _ => None,
+    }
+}
+
+fn collect_named_json_array(value: &serde_json::Value, keys: &[&str]) -> Vec<String> {
+    let mut values = Vec::new();
+    let mut seen = HashSet::new();
+    for key in keys {
+        let Some(raw) = value.get(*key) else {
+            continue;
+        };
+        collect_json_names(raw, &mut values, &mut seen);
+    }
+    values
+}
+
+fn collect_json_names(value: &serde_json::Value, values: &mut Vec<String>, seen: &mut HashSet<String>) {
+    match value {
+        serde_json::Value::Array(items) => {
+            for item in items {
+                collect_json_names(item, values, seen);
+            }
+        }
+        serde_json::Value::Object(map) => {
+            if let Some(name) = map
+                .get("name")
+                .or_else(|| map.get("label"))
+                .or_else(|| map.get("value"))
+                .and_then(json_value_string)
+            {
+                push_unique_text(values, seen, name);
+            }
+        }
+        serde_json::Value::String(text) => push_unique_text(values, seen, text.clone()),
+        _ => {}
+    }
+}
+
+fn push_unique_text(values: &mut Vec<String>, seen: &mut HashSet<String>, value: String) {
+    let normalized = value.trim();
+    if normalized.is_empty() || !seen.insert(normalized.to_string()) {
+        return;
+    }
+    values.push(normalized.to_string());
+}
+
+fn html_meta_content(body: &str, property: &str) -> Option<String> {
+    let property_marker = format!("property=\"{property}\"");
+    let name_marker = format!("name=\"{property}\"");
+    for tag in body.split('<').filter(|chunk| chunk.trim_start().starts_with("meta")) {
+        if !tag.contains(&property_marker) && !tag.contains(&name_marker) {
+            continue;
+        }
+        if let Some(content) = html_attribute(tag, "content") {
+            return Some(html_decode_basic(&content));
+        }
+    }
+    None
+}
+
+fn html_title(body: &str) -> Option<String> {
+    let start = body.find("<title>")? + "<title>".len();
+    let end = body[start..].find("</title>")? + start;
+    Some(html_decode_basic(&body[start..end]))
+}
+
+fn html_attribute(tag: &str, name: &str) -> Option<String> {
+    let marker = format!("{name}=\"");
+    let start = tag.find(&marker)? + marker.len();
+    let end = tag[start..].find('"')? + start;
+    Some(tag[start..end].to_string())
+}
+
+fn html_decode_basic(value: &str) -> String {
+    value
+        .replace("&amp;", "&")
+        .replace("&quot;", "\"")
+        .replace("&#39;", "'")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .trim()
+        .to_string()
+}
+
+fn dlsite_json_like_string(body: &str, key: &str) -> Option<String> {
+    let marker = format!("\"{key}\"");
+    let start = body.find(&marker)?;
+    let after_key = &body[start + marker.len()..];
+    let colon = after_key.find(':')?;
+    let after_colon = after_key[colon + 1..].trim_start();
+    if !after_colon.starts_with('"') {
+        return None;
+    }
+    let mut escaped = false;
+    let mut end = None;
+    for (index, ch) in after_colon[1..].char_indices() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if ch == '\\' {
+            escaped = true;
+            continue;
+        }
+        if ch == '"' {
+            end = Some(index + 1);
+            break;
+        }
+    }
+    let raw = &after_colon[..=end?];
+    serde_json::from_str::<String>(raw).ok()
+}
+
+fn dlsite_json_like_number(body: &str, key: &str) -> Option<f64> {
+    let marker = format!("\"{key}\"");
+    let start = body.find(&marker)?;
+    let after_key = &body[start + marker.len()..];
+    let colon = after_key.find(':')?;
+    let after_colon = after_key[colon + 1..].trim_start();
+    let raw = if let Some(stripped) = after_colon.strip_prefix('"') {
+        let end = stripped.find('"')?;
+        stripped[..end].replace(',', "")
+    } else {
+        after_colon
+            .chars()
+            .take_while(|ch| ch.is_ascii_digit() || matches!(ch, '.' | '-'))
+            .collect()
+    };
+    raw.parse::<f64>().ok()
+}
+
+fn is_safe_external_header_name(value: &str) -> bool {
+    !value.is_empty()
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-'))
+}
+
 fn export_repository_archive(
     repo_root: &Path,
     options: &RepositoryArchiveExportOptions,
@@ -11573,8 +13106,7 @@ fn call_builtin_local_filesystem(
                 .get("targetParentPath")
                 .and_then(serde_json::Value::as_str)
                 .ok_or_else(|| "plugin call is missing targetParentPath".to_string())?;
-            let entry =
-                backend.move_entry(&repo_root, source_path, target_parent_path, &config)?;
+            let entry = backend.move_entry(&repo_root, source_path, target_parent_path, &config)?;
             serde_json::to_value(entry).map_err(json_error)
         }
         "filesystem.deleteEntry" => {
@@ -12099,7 +13631,10 @@ fn attach_browser_entry_metadata(
         normalize_loaded_metadata(&mut merged);
         entry.metadata = merged;
         entry.tags = load_tags(connection, asset_id)?;
-        entry.alias_paths = alias_paths_by_asset.get(asset_id).cloned().unwrap_or_default();
+        entry.alias_paths = alias_paths_by_asset
+            .get(asset_id)
+            .cloned()
+            .unwrap_or_default();
     }
 
     Ok(entries)
@@ -12929,6 +14464,7 @@ fn safe_prefix(value: &str, max_chars: usize) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::net::TcpListener;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     struct TestWorkspace {
@@ -13006,7 +14542,9 @@ mod tests {
         assert!(manifests.iter().any(|manifest| {
             manifest.plugin_id == "momobako.library.audio"
                 && manifest.category == "library-kind"
-                && manifest.optional.contains(&"momobako.parser.audio".to_string())
+                && manifest
+                    .optional
+                    .contains(&"momobako.parser.audio".to_string())
         }));
         assert!(manifests.iter().any(|manifest| {
             manifest.plugin_id == "momobako.parser.audio" && manifest.category == "parser"
@@ -13019,6 +14557,125 @@ mod tests {
             registry.normalize_plugin_id(LOCAL_FILESYSTEM_PLUGIN_ID),
             LOCAL_FILESYSTEM_PLUGIN_ID
         );
+    }
+
+    #[test]
+    fn plugin_registry_resolves_dependencies_and_degraded_state() {
+        let workspace = TestWorkspace::new("plugin-dependency-state");
+        let plugin_root = workspace.path("service/plugins");
+        fs::create_dir_all(&plugin_root).expect("runtime plugin dir should be created");
+        write_test_plugin_archive_with_manifest(
+            &plugin_root.join("required-provider.momoplug"),
+            test_plugin_manifest_json("user.provider", "Provider", serde_json::json!({})),
+        );
+        write_test_plugin_archive_with_manifest(
+            &plugin_root.join("optional-helper.momoplug"),
+            test_plugin_manifest_json(
+                "user.optional-helper",
+                "Optional Helper",
+                serde_json::json!({}),
+            ),
+        );
+        write_test_plugin_archive_with_manifest(
+            &plugin_root.join("dependent-plugin.momoplug"),
+            test_plugin_manifest_json(
+                "user.dependent",
+                "Dependent Plugin",
+                serde_json::json!({
+                    "permissions": ["readMetadata"],
+                    "requires": ["user.provider"],
+                    "optional": ["user.optional-helper"]
+                }),
+            ),
+        );
+        let state = RepositoryState::from_root(workspace.path("service"));
+
+        state
+            .set_plugin_enabled(PluginEnabledRequest {
+                plugin_id: "user.optional-helper".to_string(),
+                enabled: false,
+            })
+            .expect("optional helper should be disabled");
+        let plugins = state.list_plugins().expect("plugins should load");
+        let dependent = plugins
+            .iter()
+            .find(|manifest| manifest.plugin_id == "user.dependent")
+            .expect("dependent plugin should exist");
+
+        assert_eq!(dependent.status, "ready");
+        assert!(dependent.enabled);
+        assert!(dependent.degraded);
+        assert_eq!(
+            dependent.dependency_status.optional[0].plugin_id,
+            "user.optional-helper"
+        );
+        assert_eq!(dependent.dependency_status.optional[0].status, "disabled");
+        assert!(dependent
+            .degradation_reason
+            .as_deref()
+            .unwrap_or_default()
+            .contains("Optional Helper"));
+
+        fs::remove_file(plugin_root.join("required-provider.momoplug"))
+            .expect("required provider archive should be removable");
+        let plugins = state.list_plugins().expect("plugins should reload");
+        let dependent = plugins
+            .iter()
+            .find(|manifest| manifest.plugin_id == "user.dependent")
+            .expect("dependent plugin should remain listed");
+
+        assert_eq!(dependent.status, "unavailable");
+        assert!(!dependent.enabled);
+        assert_eq!(dependent.dependency_status.required[0].status, "missing");
+        assert!(dependent
+            .disable_reason
+            .as_deref()
+            .unwrap_or_default()
+            .contains("user.provider"));
+    }
+
+    #[test]
+    fn plugin_dependency_resolution_accepts_legacy_ids() {
+        let workspace = TestWorkspace::new("plugin-legacy-dependency");
+        let plugin_root = workspace.path("service/plugins");
+        fs::create_dir_all(&plugin_root).expect("runtime plugin dir should be created");
+        write_test_plugin_archive_with_manifest(
+            &plugin_root.join("provider.momoplug"),
+            test_plugin_manifest_json(
+                "user.provider",
+                "Provider",
+                serde_json::json!({
+                    "legacyPluginIds": ["legacy.provider"],
+                    "compat": {
+                        "sdkVersion": "1",
+                        "legacyPluginIds": []
+                    }
+                }),
+            ),
+        );
+        write_test_plugin_archive_with_manifest(
+            &plugin_root.join("dependent.momoplug"),
+            test_plugin_manifest_json(
+                "user.dependent",
+                "Dependent",
+                serde_json::json!({
+                    "requires": ["legacy.provider"]
+                }),
+            ),
+        );
+        let state = RepositoryState::from_root(workspace.path("service"));
+        let plugins = state.list_plugins().expect("plugins should load");
+        let dependent = plugins
+            .iter()
+            .find(|manifest| manifest.plugin_id == "user.dependent")
+            .expect("dependent plugin should exist");
+
+        assert_eq!(dependent.status, "ready");
+        assert_eq!(
+            dependent.dependency_status.required[0].plugin_id,
+            "user.provider"
+        );
+        assert!(dependent.dependency_status.missing_required.is_empty());
     }
 
     #[test]
@@ -13163,7 +14820,10 @@ mod tests {
             })
             .expect("archive text should load from single-root package");
 
-        assert_eq!(response.path, "momobako-example-text-preview-0.1.0/dist/register.js");
+        assert_eq!(
+            response.path,
+            "momobako-example-text-preview-0.1.0/dist/register.js"
+        );
         assert!(response.text.contains("register"));
     }
 
@@ -13272,7 +14932,10 @@ mod tests {
         let service_root = workspace.path("service");
         let runtime_root = runtime_plugins_dir(&service_root);
         fs::create_dir_all(&runtime_root).expect("runtime plugin dir should be created");
-        write_test_plugin_archive(&runtime_root.join("good-plugin.momoplug"), "user.good-plugin");
+        write_test_plugin_archive(
+            &runtime_root.join("good-plugin.momoplug"),
+            "user.good-plugin",
+        );
         fs::write(runtime_root.join("broken-plugin.momoplug"), b"not-a-zip")
             .expect("broken plugin archive should be written");
 
@@ -13302,6 +14965,66 @@ mod tests {
                 ..TestPluginArchiveOptions::default()
             },
         );
+    }
+
+    fn test_plugin_manifest_json(
+        plugin_id: &str,
+        name: &str,
+        overrides: serde_json::Value,
+    ) -> serde_json::Value {
+        let mut manifest = serde_json::json!({
+            "pluginId": plugin_id,
+            "legacyPluginIds": [],
+            "name": name,
+            "version": "0.1.0",
+            "kind": "metadata",
+            "description": "Test plugin.",
+            "capabilities": ["metadata"],
+            "enabled": true,
+            "sdk": "backend",
+            "entry": {},
+            "source": "user",
+            "runtime": "manifest-only",
+            "permissions": [],
+            "compat": {
+                "sdkVersion": "1",
+                "legacyPluginIds": []
+            },
+            "status": "ready"
+        });
+        if let (Some(base), Some(extra)) = (manifest.as_object_mut(), overrides.as_object()) {
+            for (key, value) in extra {
+                base.insert(key.clone(), value.clone());
+            }
+        }
+        manifest
+    }
+
+    fn write_test_plugin_archive_with_manifest(path: &Path, manifest: serde_json::Value) {
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).expect("plugin archive parent should be created");
+        }
+        let plugin_id = manifest
+            .get("pluginId")
+            .and_then(|value| value.as_str())
+            .unwrap_or("user.sample-metadata");
+        let file = File::create(path).expect("plugin archive should be created");
+        let mut archive = zip::ZipWriter::new(file);
+        let root_dir = format!("{plugin_id}-0.1.0");
+        archive
+            .start_file(
+                format!("{root_dir}/manifest.json"),
+                zip::write::SimpleFileOptions::default(),
+            )
+            .expect("manifest entry should start");
+        archive
+            .write_all(
+                serde_json::to_string_pretty(&manifest)
+                    .expect("manifest should encode")
+                    .as_bytes(),
+            )
+            .expect("manifest should write");
+        archive.finish().expect("plugin archive should finish");
     }
 
     #[derive(Clone)]
@@ -13341,16 +15064,10 @@ mod tests {
         }
         let file = File::create(path).expect("plugin archive should be created");
         let mut archive = zip::ZipWriter::new(file);
-        let root_dir = format!(
-            "{}-0.1.0",
-            slugify_ascii_component(options.plugin_id)
-        );
+        let root_dir = format!("{}-0.1.0", slugify_ascii_component(options.plugin_id));
         let manifest_path = format!("{root_dir}/manifest.json");
         archive
-            .start_file(
-                manifest_path,
-                zip::write::SimpleFileOptions::default(),
-            )
+            .start_file(manifest_path, zip::write::SimpleFileOptions::default())
             .expect("manifest entry should start");
         archive
             .write_all(
@@ -13612,14 +15329,19 @@ mod tests {
             .expect("repository should still be registered");
         assert_eq!(ready.status, "ready");
         let raw_metadata = fs::read_to_string(
-            relocated_root.join(REPO_META_DIR).join(REPO_METADATA_FILE_NAME),
+            relocated_root
+                .join(REPO_META_DIR)
+                .join(REPO_METADATA_FILE_NAME),
         )
         .expect("relocated metadata should read");
         let metadata: RepositoryMetadataFileImport =
             serde_json::from_str(&raw_metadata).expect("relocated metadata should parse");
         let expected_root_path = relocated_root.to_string_lossy().to_string();
         assert_eq!(metadata.repo_id, repo_id);
-        assert_eq!(metadata.root_path.as_deref(), Some(expected_root_path.as_str()));
+        assert_eq!(
+            metadata.root_path.as_deref(),
+            Some(expected_root_path.as_str())
+        );
         let smart_folders = state
             .list_smart_folders(&response.repository.repo_id)
             .expect("smart folders should load after relocation");
@@ -13683,6 +15405,7 @@ mod tests {
     }
 
     fn create_repository_for_path(state: &RepositoryState, repo_root: &Path) -> String {
+        install_local_filesystem_test_plugin(state);
         let response = state
             .create_repository(RepositoryMutationRequest {
                 repo_id: None,
@@ -13693,6 +15416,35 @@ mod tests {
             })
             .expect("repository should be created");
         response.repository.repo_id
+    }
+
+    fn install_local_filesystem_test_plugin(state: &RepositoryState) {
+        state
+            .ensure_initialized()
+            .expect("repository state should initialize");
+        let runtime_plugin_root = runtime_plugins_dir(&state.root);
+        let archive_path = runtime_plugin_root.join("local-filesystem.momoplug");
+        if archive_path.exists() {
+            return;
+        }
+        write_test_plugin_archive_with_manifest(
+            &archive_path,
+            test_plugin_manifest_json(
+                LOCAL_FILESYSTEM_PLUGIN_ID,
+                "Local Filesystem",
+                serde_json::json!({
+                    "kind": "filesystem",
+                    "category": "source",
+                    "type": {
+                        "layer": "source",
+                        "kind": "filesystem"
+                    },
+                    "capabilities": ["listFiles", "readFile", "writeFile", "moveFile", "deleteFile"],
+                    "runtime": "manifest-only",
+                    "source": "system"
+                }),
+            ),
+        );
     }
 
     fn create_repository_without_initial_sync(state: &RepositoryState, repo_root: &Path) -> String {
@@ -13739,9 +15491,115 @@ mod tests {
         repo_id
     }
 
+    fn create_local_repository_record_for_external_tests(
+        state: &RepositoryState,
+        repo_root: &Path,
+    ) -> String {
+        let repo_id = format!(
+            "repo-{}",
+            slugify_repo_id("external", &repo_root.to_string_lossy())
+        );
+        state
+            .ensure_initialized()
+            .expect("repository state should initialize");
+        let runtime_plugin_root = runtime_plugins_dir(&state.root);
+        write_test_plugin_archive_with_manifest(
+            &runtime_plugin_root.join("local-filesystem.momoplug"),
+            test_plugin_manifest_json(
+                LOCAL_FILESYSTEM_PLUGIN_ID,
+                "Local Filesystem",
+                serde_json::json!({
+                    "kind": "filesystem",
+                    "category": "source",
+                    "type": {
+                        "layer": "source",
+                        "kind": "filesystem"
+                    },
+                    "capabilities": ["listFiles", "readFile", "writeFile", "moveFile", "deleteFile"],
+                    "runtime": "manifest-only",
+                    "source": "system"
+                }),
+            ),
+        );
+        let metadata_dir = repo_root.join(REPO_META_DIR);
+        fs::create_dir_all(&metadata_dir).expect("metadata dir should be created");
+        let now = now_rfc3339();
+        let metadata = RepositoryMetadataFile {
+            repo_id: repo_id.clone(),
+            name: "External Test Repo".to_string(),
+            root_path: repo_root.to_string_lossy().to_string(),
+            backend_plugin_id: LOCAL_FILESYSTEM_PLUGIN_ID.to_string(),
+            backend_config: serde_json::json!({}),
+            created_at: now.clone(),
+            schema_version: REPO_SCHEMA_VERSION,
+        };
+        fs::write(
+            metadata_dir.join(REPO_METADATA_FILE_NAME),
+            serde_json::to_string_pretty(&metadata).expect("metadata should encode"),
+        )
+        .expect("metadata should be written");
+        let connection = Connection::open(metadata_dir.join(REPO_DB_FILE_NAME))
+            .expect("repository db should open");
+        migrate_repository_schema(&connection).expect("repository schema should initialize");
+        seed_repository_data(
+            &connection,
+            &RepositorySeed {
+                repo_id: &repo_id,
+                name: "External Test Repo",
+                root_path: "",
+                status: "ready",
+                assets: &[],
+            },
+            &now,
+        )
+        .expect("repository data should seed");
+
+        let registry = Connection::open(&state.registry_path).expect("registry should open");
+        registry
+            .execute(
+                r#"
+                INSERT OR REPLACE INTO repositories (
+                  repo_id, name, path, backend_plugin_id, backend_config_json, status, created_at, updated_at
+                )
+                VALUES (?1, ?2, ?3, ?4, ?5, 'ready', ?6, ?6)
+                "#,
+                params![
+                    &repo_id,
+                    "External Test Repo",
+                    repo_root.to_string_lossy().to_string(),
+                    LOCAL_FILESYSTEM_PLUGIN_ID,
+                    "{}",
+                    now
+                ],
+            )
+            .expect("repository should be registered");
+        repo_id
+    }
+
     fn write_test_image(path: &Path) {
         let image = image::RgbImage::from_pixel(2, 2, image::Rgb([120, 120, 120]));
         image.save(path).expect("test image should be saved");
+    }
+
+    fn serve_test_http_body(body: impl AsRef<[u8]> + Send + 'static) -> String {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("test HTTP server should bind");
+        let addr = listener
+            .local_addr()
+            .expect("test HTTP server address should resolve");
+        thread::spawn(move || {
+            if let Ok((mut stream, _)) = listener.accept() {
+                let mut request = [0_u8; 1024];
+                let _ = stream.read(&mut request);
+                let body = body.as_ref();
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    body.len()
+                );
+                let _ = stream.write_all(response.as_bytes());
+                let _ = stream.write_all(body);
+            }
+        });
+        format!("http://{addr}/asset.txt")
     }
 
     fn write_test_palette_image(path: &Path) {
@@ -13758,7 +15616,9 @@ mod tests {
                 image.put_pixel(x, y, color);
             }
         }
-        image.save(path).expect("test palette image should be saved");
+        image
+            .save(path)
+            .expect("test palette image should be saved");
     }
 
     fn metadata_for_asset_path(
@@ -13880,7 +15740,10 @@ mod tests {
         assert_eq!(entry.metadata.get("rating"), Some(&serde_json::json!(0)));
         assert_eq!(entry.metadata.get("comment"), Some(&serde_json::json!("")));
         assert_eq!(entry.metadata.get("link"), Some(&serde_json::json!("")));
-        assert_eq!(entry.metadata.get("tagGroups"), Some(&serde_json::json!([])));
+        assert_eq!(
+            entry.metadata.get("tagGroups"),
+            Some(&serde_json::json!([]))
+        );
         assert!(entry
             .metadata
             .get("addedToLibraryAt")
@@ -13888,6 +15751,207 @@ mod tests {
             .is_some());
 
         fs::remove_dir_all(root).expect("test temp root should be removed");
+    }
+
+    #[test]
+    fn sync_repository_seeds_asmr_metadata_for_rj_work_folders() {
+        let (state, root, repo_root, _thumbnail_root) = create_test_state("sync-asmr-metadata");
+        let work_dir = repo_root.join("VoiceWork").join("RJ123456 Test Work");
+        fs::create_dir_all(work_dir.join("bonus")).expect("asmr work folder should be created");
+        fs::write(work_dir.join("track01.mp3"), "audio").expect("audio track should be written");
+        fs::write(work_dir.join("track01.lrc"), "[00:00.00] lyric")
+            .expect("local lyric should be written");
+        fs::write(work_dir.join("bonus").join("notes.txt"), "memo")
+            .expect("companion text should be written");
+
+        let repo_id = create_repository_for_path(&state, &repo_root);
+        let audio_metadata =
+            metadata_for_asset_path(&state, &repo_id, "VoiceWork/RJ123456 Test Work/track01.mp3");
+        let lyric_metadata =
+            metadata_for_asset_path(&state, &repo_id, "VoiceWork/RJ123456 Test Work/track01.lrc");
+        let companion_metadata = metadata_for_asset_path(
+            &state,
+            &repo_id,
+            "VoiceWork/RJ123456 Test Work/bonus/notes.txt",
+        );
+
+        assert_eq!(
+            audio_metadata.get("libraryKind"),
+            Some(&serde_json::json!("asmr"))
+        );
+        assert_eq!(
+            audio_metadata.get("workId"),
+            Some(&serde_json::json!("RJ123456"))
+        );
+        assert_eq!(
+            audio_metadata.get("rjCode"),
+            Some(&serde_json::json!("RJ123456"))
+        );
+        assert_eq!(
+            audio_metadata.get("workRoot"),
+            Some(&serde_json::json!("VoiceWork/RJ123456 Test Work"))
+        );
+        assert_eq!(
+            audio_metadata.get("asmrEntryKind"),
+            Some(&serde_json::json!("audio"))
+        );
+        assert_eq!(
+            audio_metadata.get("listeningStatus"),
+            Some(&serde_json::json!("unlistened"))
+        );
+        assert_eq!(
+            lyric_metadata.get("lyricStatus"),
+            Some(&serde_json::json!("local"))
+        );
+        assert_eq!(
+            companion_metadata.get("asmrEntryKind"),
+            Some(&serde_json::json!("companion"))
+        );
+
+        let results = state
+            .search_assets(SearchRequest {
+                query: "RJ123456".to_string(),
+                repo_id: Some(repo_id),
+                exclude_query: None,
+                metadata_key: None,
+                metadata_value: None,
+                tag: None,
+                tags: None,
+                metadata_filters: Some(vec![SearchMetadataFilter {
+                    key: "libraryKind".to_string(),
+                    value: "asmr".to_string(),
+                }]),
+                exclude_tags: None,
+                exclude_formats: None,
+                exclude_metadata_filters: None,
+                exclude_path_prefixes: None,
+                exclude_number_filters: None,
+                exclude_date_filters: None,
+                number_filters: None,
+                date_filters: None,
+                formats: None,
+                min_rating: None,
+                match_mode: None,
+                sort: Some(SearchSort {
+                    field: "metadata.workId".to_string(),
+                    direction: "asc".to_string(),
+                }),
+                limit: None,
+            })
+            .expect("asmr metadata search should complete");
+
+        let paths = results
+            .results
+            .iter()
+            .map(|hit| hit.path.as_str())
+            .collect::<Vec<_>>();
+        assert!(paths.contains(&"VoiceWork/RJ123456 Test Work/track01.mp3"));
+        assert!(paths.contains(&"VoiceWork/RJ123456 Test Work/track01.lrc"));
+
+        fs::remove_dir_all(root).expect("test temp root should be removed");
+    }
+
+    #[test]
+    fn parses_asmr_provider_metadata_candidates_without_writing_metadata() {
+        let asmr_one_body = r#"{
+          "id": "RJ123456",
+          "title": "Rain Voice",
+          "circle": { "name": "Blue Circle" },
+          "vas": [{ "name": "Aoi" }, { "name": "Momo" }],
+          "tags": [{ "name": "耳语" }, { "name": "睡眠" }],
+          "release": "2026-06-01",
+          "price": 1100,
+          "dl_count": 420,
+          "rate_average_2dp": 4.8,
+          "mainCoverUrl": "https://example.test/cover.jpg"
+        }"#;
+        let candidate = parse_asmr_provider_candidate(
+            "asmr-one",
+            "RJ123456",
+            "https://api.asmr-200.com/api/workInfo/123456",
+            asmr_one_body,
+        )
+        .expect("asmr-one candidate should parse");
+
+        assert_eq!(candidate.source, "asmr-one");
+        assert_eq!(candidate.confidence, "external-id");
+        assert_eq!(candidate.fields.get("workTitle"), Some(&serde_json::json!("Rain Voice")));
+        assert_eq!(candidate.fields.get("circle"), Some(&serde_json::json!("Blue Circle")));
+        assert_eq!(
+            candidate.fields.get("voiceActors"),
+            Some(&serde_json::json!(["Aoi", "Momo"]))
+        );
+        assert_eq!(candidate.fields.get("dlCount"), Some(&serde_json::json!(420.0)));
+
+        let dlsite_body = r#"
+          <html><head>
+            <meta property="og:title" content="DLsite Rain Voice" />
+            <meta property="og:image" content="https://img.example.test/main.jpg" />
+          </head><body>
+            <script>{"maker_name":"DL Circle","price":1320,"dl_count":"1,234","review_count":56,"rate_average_2dp":4.72}</script>
+          </body></html>
+        "#;
+        let dlsite_candidate = parse_asmr_provider_candidate(
+            "dlsite",
+            "RJ123456",
+            "https://www.dlsite.com/maniax/work/=/product_id/RJ123456.html",
+            dlsite_body,
+        )
+        .expect("dlsite candidate should parse");
+
+        assert_eq!(dlsite_candidate.source, "dlsite");
+        assert_eq!(
+            dlsite_candidate.fields.get("workTitle"),
+            Some(&serde_json::json!("DLsite Rain Voice"))
+        );
+        assert_eq!(
+            dlsite_candidate.fields.get("circle"),
+            Some(&serde_json::json!("DL Circle"))
+        );
+        assert_eq!(dlsite_candidate.fields.get("dlCount"), Some(&serde_json::json!(1234.0)));
+        assert_eq!(
+            dlsite_candidate.fields.get("cover"),
+            Some(&serde_json::json!("https://img.example.test/main.jpg"))
+        );
+    }
+
+    #[test]
+    fn lookup_asmr_metadata_candidate_fetches_provider_candidate() {
+        let body = br#"
+          <html><head>
+            <meta property="og:title" content="Fetched DLsite Work" />
+          </head><body>
+            <script>{"maker_name":"Fetched Circle","price":990,"dl_count":321}</script>
+          </body></html>
+        "#;
+        let url = serve_test_http_body(body);
+        let workspace = TestWorkspace::new("asmr-provider-lookup");
+        let state = RepositoryState::from_root(workspace.path("service"));
+
+        let response = state
+            .lookup_asmr_metadata_candidate(AsmrMetadataLookupRequest {
+                provider: "dlsite".to_string(),
+                rj_code: "RJ123456".to_string(),
+                detail_url: Some(url.clone()),
+            })
+            .expect("provider lookup should fetch local test body");
+
+        assert_eq!(response.provider, "dlsite");
+        assert_eq!(response.rj_code, "RJ123456");
+        assert_eq!(response.source_url, url);
+        assert_eq!(response.candidate.source, "dlsite");
+        assert_eq!(
+            response.candidate.fields.get("workTitle"),
+            Some(&serde_json::json!("Fetched DLsite Work"))
+        );
+        assert_eq!(
+            response.candidate.fields.get("circle"),
+            Some(&serde_json::json!("Fetched Circle"))
+        );
+        assert_eq!(
+            response.candidate.fields.get("dlCount"),
+            Some(&serde_json::json!(321.0))
+        );
     }
 
     #[test]
@@ -14137,6 +16201,125 @@ mod tests {
     }
 
     #[test]
+    fn add_external_assets_imports_remote_url_and_metadata() {
+        let (state, root, repo_root, _thumbnail_root) = create_test_state("external-add");
+        let repo_id = create_local_repository_record_for_external_tests(&state, &repo_root);
+        let url = serve_test_http_body(b"external body");
+        let response = state.add_external_assets(
+            "request-external-add".to_string(),
+            ExternalAddAssetRequest {
+                repo_id: repo_id.clone(),
+                parent_path: None,
+                client: Some(ExternalAddAssetClient {
+                    id: Some("test-client".to_string()),
+                    name: None,
+                    version: Some("1".to_string()),
+                }),
+                items: vec![ExternalAddAssetItem {
+                    kind: "remoteUrl".to_string(),
+                    url: Some(url),
+                    filename: Some("captured.txt".to_string()),
+                    headers: None,
+                    metadata: Some(BTreeMap::from([(
+                        "sourceUrl".to_string(),
+                        serde_json::Value::String("https://example.test/source".to_string()),
+                    )])),
+                }],
+            },
+        );
+
+        assert_eq!(response.status, "success", "{:?}", response.failed);
+        assert_eq!(response.imported.len(), 1);
+        assert_eq!(response.imported[0].path, "captured.txt");
+        assert!(repo_root.join("captured.txt").is_file());
+        let detail = state
+            .load_asset_detail(&repo_id, response.imported[0].asset_id.as_deref().unwrap())
+            .expect("asset detail should load");
+        assert!(detail.metadata.iter().any(|entry| entry.key == "sourceUrl"
+            && entry.value
+                == serde_json::Value::String("https://example.test/source".to_string())));
+
+        fs::remove_dir_all(root).expect("test temp root should be removed");
+    }
+
+    #[test]
+    fn add_external_assets_reports_partial_and_duplicate_failures() {
+        let (state, root, repo_root, _thumbnail_root) = create_test_state("external-partial");
+        let repo_id = create_local_repository_record_for_external_tests(&state, &repo_root);
+        let url = serve_test_http_body(b"first");
+
+        let response = state.add_external_assets(
+            "request-external-partial".to_string(),
+            ExternalAddAssetRequest {
+                repo_id,
+                parent_path: None,
+                client: None,
+                items: vec![
+                    ExternalAddAssetItem {
+                        kind: "remoteUrl".to_string(),
+                        url: Some(url),
+                        filename: Some("same.txt".to_string()),
+                        headers: None,
+                        metadata: None,
+                    },
+                    ExternalAddAssetItem {
+                        kind: "remoteUrl".to_string(),
+                        url: Some("https://example.test/second.txt".to_string()),
+                        filename: Some("same.txt".to_string()),
+                        headers: None,
+                        metadata: None,
+                    },
+                    ExternalAddAssetItem {
+                        kind: "localPath".to_string(),
+                        url: None,
+                        filename: None,
+                        headers: None,
+                        metadata: None,
+                    },
+                ],
+            },
+        );
+
+        assert_eq!(response.status, "partial");
+        assert_eq!(response.imported.len(), 1);
+        assert_eq!(response.failed.len(), 2);
+        assert!(response
+            .failed
+            .iter()
+            .any(|failure| failure.code == "duplicateTarget"));
+        assert!(response
+            .failed
+            .iter()
+            .any(|failure| failure.code == "invalidInput"));
+        fs::remove_dir_all(root).expect("test temp root should be removed");
+    }
+
+    #[test]
+    fn add_external_assets_rejects_invalid_target_path() {
+        let (state, root, repo_root, _thumbnail_root) = create_test_state("external-target");
+        let repo_id = create_local_repository_record_for_external_tests(&state, &repo_root);
+        let response = state.add_external_assets(
+            "request-external-target".to_string(),
+            ExternalAddAssetRequest {
+                repo_id,
+                parent_path: Some("missing".to_string()),
+                client: None,
+                items: vec![ExternalAddAssetItem {
+                    kind: "remoteUrl".to_string(),
+                    url: Some("https://example.test/asset.txt".to_string()),
+                    filename: Some("asset.txt".to_string()),
+                    headers: None,
+                    metadata: None,
+                }],
+            },
+        );
+
+        assert_eq!(response.status, "failed");
+        assert_eq!(response.failed[0].code, "invalidTargetPath");
+        fs::remove_dir_all(root).expect("test temp root should be removed");
+    }
+
+    #[test]
     fn repository_actions_list_run_and_reject_unsafe_states() {
         let (state, root, repo_root, _thumbnail_root) = create_test_state("repository-actions");
         fs::write(repo_root.join("cover.png"), b"cover").expect("cover file should be written");
@@ -14191,7 +16374,10 @@ mod tests {
             .list_repository_actions(&repo_id)
             .expect("actions should list");
         assert_eq!(
-            actions.iter().map(|action| action.name.as_str()).collect::<Vec<_>>(),
+            actions
+                .iter()
+                .map(|action| action.name.as_str())
+                .collect::<Vec<_>>(),
             vec!["标记精选", "停用动作", "未知动作"]
         );
         assert_eq!(actions[0].steps.len(), 2);
@@ -14234,7 +16420,14 @@ mod tests {
             })
             .expect("ready action should run");
         assert_eq!(response.run.status, "success");
-        assert_eq!(response.action.last_run.as_ref().map(|run| run.status.as_str()), Some("success"));
+        assert_eq!(
+            response
+                .action
+                .last_run
+                .as_ref()
+                .map(|run| run.status.as_str()),
+            Some("success")
+        );
 
         let detail = state
             .load_asset_detail(&repo_id, &asset_id)
@@ -14245,8 +16438,14 @@ mod tests {
             .map(|entry| (entry.key.as_str(), entry.value.clone()))
             .collect::<BTreeMap<_, _>>();
         assert_eq!(metadata.get("rating"), Some(&serde_json::json!(5)));
-        assert_eq!(metadata.get("comment"), Some(&serde_json::json!("Action run")));
-        assert_eq!(metadata.get("tagGroups"), Some(&serde_json::json!(["精选"])));
+        assert_eq!(
+            metadata.get("comment"),
+            Some(&serde_json::json!("Action run"))
+        );
+        assert_eq!(
+            metadata.get("tagGroups"),
+            Some(&serde_json::json!(["精选"]))
+        );
         assert!(detail
             .revisions
             .iter()
@@ -14261,7 +16460,8 @@ mod tests {
         fs::create_dir_all(repo_root.join("Archive")).expect("archive directory should be created");
         fs::write(repo_root.join("hero.png"), b"hero").expect("hero file should be written");
         fs::write(repo_root.join("draft.png"), b"draft").expect("draft file should be written");
-        fs::write(repo_root.join("Archive/old.png"), b"old").expect("archived file should be written");
+        fs::write(repo_root.join("Archive/old.png"), b"old")
+            .expect("archived file should be written");
         let repo_id = create_repository_for_path(&state, &repo_root);
 
         let repo = state
@@ -14289,11 +16489,30 @@ mod tests {
             })
             .collect::<BTreeMap<_, _>>();
         for (path, width, created_at, note) in [
-            ("hero.png", serde_json::json!(1920), serde_json::json!("2024-02-02T00:00:00Z"), serde_json::json!("final hero")),
-            ("draft.png", serde_json::json!(480), serde_json::json!("2024-02-02T00:00:00Z"), serde_json::json!("draft hero")),
-            ("Archive/old.png", serde_json::json!(1920), serde_json::json!("2024-01-10T00:00:00Z"), serde_json::json!("old hero")),
+            (
+                "hero.png",
+                serde_json::json!(1920),
+                serde_json::json!("2024-02-02T00:00:00Z"),
+                serde_json::json!("final hero"),
+            ),
+            (
+                "draft.png",
+                serde_json::json!(480),
+                serde_json::json!("2024-02-02T00:00:00Z"),
+                serde_json::json!("draft hero"),
+            ),
+            (
+                "Archive/old.png",
+                serde_json::json!(1920),
+                serde_json::json!("2024-01-10T00:00:00Z"),
+                serde_json::json!("old hero"),
+            ),
         ] {
-            for (key, value) in [("width", width), ("fileCreatedAt", created_at), ("note", note)] {
+            for (key, value) in [
+                ("width", width),
+                ("fileCreatedAt", created_at),
+                ("note", note),
+            ] {
                 connection
                     .execute(
                         r#"
@@ -14347,7 +16566,11 @@ mod tests {
             })
             .expect("exclude search should complete");
         assert_eq!(
-            response.results.iter().map(|item| item.path.as_str()).collect::<Vec<_>>(),
+            response
+                .results
+                .iter()
+                .map(|item| item.path.as_str())
+                .collect::<Vec<_>>(),
             vec!["hero.png"]
         );
 
@@ -14380,7 +16603,11 @@ mod tests {
             .query_smart_folder(&repo_id, "smart-hero")
             .expect("smart folder should query");
         assert_eq!(
-            smart_result.results.iter().map(|item| item.path.as_str()).collect::<Vec<_>>(),
+            smart_result
+                .results
+                .iter()
+                .map(|item| item.path.as_str())
+                .collect::<Vec<_>>(),
             vec!["hero.png"]
         );
 
@@ -14442,19 +16669,24 @@ mod tests {
             )
             .expect("repository connection should open");
         let now = now_rfc3339();
-        let ids = ["tag-only.png", "metadata-only.png", "small.png", "large.png"]
-            .into_iter()
-            .map(|path| {
-                let asset_id: String = connection
-                    .query_row(
-                        "SELECT asset_id FROM assets WHERE repo_id = ?1 AND path = ?2",
-                        params![repo_id.as_str(), path],
-                        |row| row.get(0),
-                    )
-                    .expect("asset id should load");
-                (path.to_string(), asset_id)
-            })
-            .collect::<BTreeMap<_, _>>();
+        let ids = [
+            "tag-only.png",
+            "metadata-only.png",
+            "small.png",
+            "large.png",
+        ]
+        .into_iter()
+        .map(|path| {
+            let asset_id: String = connection
+                .query_row(
+                    "SELECT asset_id FROM assets WHERE repo_id = ?1 AND path = ?2",
+                    params![repo_id.as_str(), path],
+                    |row| row.get(0),
+                )
+                .expect("asset id should load");
+            (path.to_string(), asset_id)
+        })
+        .collect::<BTreeMap<_, _>>();
 
         connection
             .execute(
@@ -14463,9 +16695,21 @@ mod tests {
             )
             .expect("tag should be written");
         for (path, width, created_at) in [
-            ("metadata-only.png", serde_json::json!(1920), serde_json::json!("2024-01-04T00:00:00Z")),
-            ("small.png", serde_json::json!(800), serde_json::json!("2024-01-01T00:00:00Z")),
-            ("large.png", serde_json::json!(1920), serde_json::json!("2024-01-03T00:00:00Z")),
+            (
+                "metadata-only.png",
+                serde_json::json!(1920),
+                serde_json::json!("2024-01-04T00:00:00Z"),
+            ),
+            (
+                "small.png",
+                serde_json::json!(800),
+                serde_json::json!("2024-01-01T00:00:00Z"),
+            ),
+            (
+                "large.png",
+                serde_json::json!(1920),
+                serde_json::json!("2024-01-03T00:00:00Z"),
+            ),
         ] {
             for (key, value) in [("width", width), ("fileCreatedAt", created_at)] {
                 connection
@@ -14565,13 +16809,18 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(
             sorted_paths,
-            vec!["small.png", "large.png", "metadata-only.png", "tag-only.png"]
+            vec![
+                "small.png",
+                "large.png",
+                "metadata-only.png",
+                "tag-only.png"
+            ]
         );
 
         let date_sorted = state
             .search_assets(SearchRequest {
                 query: String::new(),
-                repo_id: Some(repo_id),
+                repo_id: Some(repo_id.clone()),
                 exclude_query: None,
                 metadata_key: None,
                 metadata_value: None,
@@ -14605,6 +16854,49 @@ mod tests {
             .map(|item| item.path.as_str())
             .collect::<Vec<_>>();
         assert_eq!(date_paths, vec!["large.png", "metadata-only.png"]);
+
+        let random_sorted = state
+            .search_assets(SearchRequest {
+                query: String::new(),
+                repo_id: Some(repo_id),
+                exclude_query: None,
+                metadata_key: None,
+                metadata_value: None,
+                tag: None,
+                tags: None,
+                metadata_filters: None,
+                exclude_tags: None,
+                exclude_formats: None,
+                exclude_metadata_filters: None,
+                exclude_path_prefixes: None,
+                exclude_number_filters: None,
+                exclude_date_filters: None,
+                number_filters: None,
+                date_filters: None,
+                formats: Some(vec!["png".to_string()]),
+                min_rating: None,
+                match_mode: None,
+                sort: Some(SearchSort {
+                    field: "random".to_string(),
+                    direction: "asc".to_string(),
+                }),
+                limit: None,
+            })
+            .expect("core random sort should complete");
+        let random_paths = random_sorted
+            .results
+            .iter()
+            .map(|item| item.path.as_str())
+            .collect::<HashSet<_>>();
+        assert_eq!(
+            random_paths,
+            HashSet::from([
+                "large.png",
+                "metadata-only.png",
+                "small.png",
+                "tag-only.png",
+            ])
+        );
 
         fs::remove_dir_all(root).expect("test temp root should be removed");
     }
@@ -14704,7 +16996,10 @@ mod tests {
 
         assert!(!repo_root.join("note.txt").exists());
         assert!(repo_root.join("Archive/note.txt").is_file());
-        assert!(snapshot.entries.iter().any(|entry| entry.path == "Archive/note.txt"));
+        assert!(snapshot
+            .entries
+            .iter()
+            .any(|entry| entry.path == "Archive/note.txt"));
 
         let repository_snapshot = state
             .load_snapshot(&repo_id)
@@ -14738,8 +17033,7 @@ mod tests {
     #[test]
     fn move_entries_reject_folder_cycle_nesting() {
         let (state, root, repo_root, _thumbnail_root) = create_test_state("move-folder-cycle");
-        fs::create_dir_all(repo_root.join("Scenes/Act1"))
-            .expect("nested folder should be created");
+        fs::create_dir_all(repo_root.join("Scenes/Act1")).expect("nested folder should be created");
         fs::write(repo_root.join("Scenes/Act1/shot.txt"), b"scene")
             .expect("nested file should be written");
         let repo_id = create_repository_without_initial_sync(&state, &repo_root);
@@ -14921,7 +17215,7 @@ mod tests {
             "file",
             "generated",
         ));
-        fs::write(&thumbnail_path, b"cached").expect("cached thumbnail should be written");
+        write_test_image(&thumbnail_path);
 
         let storage_paths = ensure_repository_storage_paths(
             &state.root,
@@ -14949,6 +17243,7 @@ mod tests {
                 path: "cover.png".to_string(),
                 action: None,
                 source_path: None,
+                source_url: None,
                 image_bytes: None,
                 media_type: None,
             })
@@ -15013,6 +17308,7 @@ mod tests {
                 path: "cover.png".to_string(),
                 action: None,
                 source_path: None,
+                source_url: None,
                 image_bytes: None,
                 media_type: None,
             })
@@ -15084,6 +17380,7 @@ mod tests {
                 path: "Shots".to_string(),
                 action: None,
                 source_path: None,
+                source_url: None,
                 image_bytes: None,
                 media_type: None,
             })
@@ -15123,6 +17420,7 @@ mod tests {
                 path: "cover.png".to_string(),
                 action: None,
                 source_path: None,
+                source_url: None,
                 image_bytes: None,
                 media_type: None,
             })
@@ -15141,6 +17439,69 @@ mod tests {
     }
 
     #[test]
+    fn ensure_thumbnail_saves_remote_source_url_as_custom_thumbnail() {
+        let (state, root, repo_root, thumbnail_root) = create_test_state("thumb-remote-source");
+        fs::write(repo_root.join("track.mp3"), b"fake audio").expect("track file should be written");
+        let repo_id = create_repository_for_path(&state, &repo_root);
+        let mut body = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(
+            2,
+            2,
+            image::Rgb([220, 80, 40]),
+        ))
+        .write_to(&mut body, image::ImageFormat::Png)
+        .expect("test thumbnail image should encode");
+        let source_url = serve_test_http_body(body.into_inner());
+
+        let response = state
+            .ensure_thumbnail(ThumbnailRequest {
+                repo_id: repo_id.clone(),
+                path: "track.mp3".to_string(),
+                action: Some("save".to_string()),
+                source_path: None,
+                source_url: Some(source_url),
+                image_bytes: None,
+                media_type: None,
+            })
+            .expect("remote thumbnail should be saved");
+        let thumbnail_path = response
+            .thumbnail_path
+            .as_deref()
+            .map(Path::new)
+            .expect("thumbnail path should be returned");
+
+        assert!(response.thumbnail_custom);
+        assert!(thumbnail_path.starts_with(&thumbnail_root));
+        assert!(thumbnail_path.is_file());
+        assert!(response
+            .metadata
+            .as_ref()
+            .and_then(|metadata| metadata.get("thumbnailPalette"))
+            .is_some());
+
+        let snapshot = state
+            .load_file_browser(FileBrowserRequest {
+                repo_id,
+                directory_path: Some(String::new()),
+                include_tree: Some(false),
+                special_location: None,
+            })
+            .expect("file browser should load");
+        let entry = snapshot
+            .entries
+            .iter()
+            .find(|item| item.path == "track.mp3")
+            .expect("track entry should be listed");
+        assert!(entry.thumbnail_custom);
+        assert_eq!(
+            entry.thumbnail_path.as_deref(),
+            Some(thumbnail_path.to_string_lossy().as_ref())
+        );
+
+        fs::remove_dir_all(root).expect("test temp root should be removed");
+    }
+
+    #[test]
     fn ensure_thumbnail_extracts_palette_metadata() {
         let (state, root, repo_root, _thumbnail_root) = create_test_state("thumb-palette");
         write_test_image(&repo_root.join("cover.png"));
@@ -15152,6 +17513,7 @@ mod tests {
                 path: "cover.png".to_string(),
                 action: None,
                 source_path: None,
+                source_url: None,
                 image_bytes: None,
                 media_type: None,
             })
@@ -15202,6 +17564,7 @@ mod tests {
                 path: "note.txt".to_string(),
                 action: None,
                 source_path: None,
+                source_url: None,
                 image_bytes: None,
                 media_type: None,
             })

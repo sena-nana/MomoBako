@@ -1,7 +1,8 @@
 import { ensureThumbnail } from "../../services/repositoryApi";
 import { getPreviewPluginForEntry } from "../../plugins/previewPlugins";
 import type { FileBrowserEntry, FileBrowserSnapshot, ThumbnailResponse } from "../../types/repository";
-import { activeRepoId, currentDirectoryPath, error, fileBrowser } from "./state";
+import { activeRepoId, currentDirectoryPath, error, fileBrowser, selectedFilePath } from "./state";
+import { yieldToUi } from "./scheduler";
 
 const THUMBNAIL_LOAD_CONCURRENCY = 3;
 
@@ -26,12 +27,14 @@ export function loadThumbnailsForSnapshot(snapshot: FileBrowserSnapshot) {
       repoId: snapshot.repoId,
       directoryPath: snapshot.currentPath,
       entry,
-    }));
+    }))
+    .sort((left, right) => thumbnailPriority(left.entry) - thumbnailPriority(right.entry));
   let cursor = 0;
 
   async function worker() {
     while (cursor < queue.length) {
       const item = queue[cursor++];
+      await yieldToUi();
       await loadThumbnailForQueueItem(item, token);
     }
   }
@@ -39,6 +42,12 @@ export function loadThumbnailsForSnapshot(snapshot: FileBrowserSnapshot) {
   void Promise.all(
     Array.from({ length: Math.min(THUMBNAIL_LOAD_CONCURRENCY, queue.length) }, () => worker()),
   );
+}
+
+function thumbnailPriority(entry: FileBrowserEntry) {
+  if (entry.path === selectedFilePath.value) return 0;
+  if (!entry.path.includes("/")) return 1;
+  return 2;
 }
 
 async function loadThumbnailForQueueItem(item: ThumbnailQueueItem, token: number) {
@@ -109,6 +118,10 @@ type WorkspaceThumbnailSaveRequest =
       sourcePath: string;
     }
   | {
+      action: "save";
+      sourceUrl: string;
+    }
+  | {
       action: "save" | "saveGenerated";
       imageBytes: number[];
       mediaType?: string;
@@ -140,6 +153,13 @@ export function setWorkspaceEntryThumbnail(path: string, sourcePath: string) {
   return mutateWorkspaceEntryThumbnail(path, {
     action: "save",
     sourcePath,
+  });
+}
+
+export function setWorkspaceEntryThumbnailFromUrl(path: string, sourceUrl: string) {
+  return mutateWorkspaceEntryThumbnail(path, {
+    action: "save",
+    sourceUrl,
   });
 }
 
