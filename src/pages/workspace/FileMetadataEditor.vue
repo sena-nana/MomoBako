@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, reactive, ref, watch } from "vue";
-import { ChevronDown, ChevronRight, Link2, MessageSquareText, Plus, Star } from "lucide-vue-next";
+import { ChevronDown, ChevronRight, Copy, ExternalLink, Link2, MessageSquareText, Plus, Star } from "lucide-vue-next";
+import { openExternalUrl } from "../../services/repositoryApi";
 import type { FileBrowserEntry, RepositoryTagGroup } from "../../types/repository";
 import {
   formatBytes,
@@ -67,6 +68,14 @@ const palette = computed(() => metadataPalette(props.entry.metadata));
 const aliasPaths = computed(() => props.entry.aliasPaths?.filter((path) => path !== props.entry.path) ?? []);
 const indexedTags = computed(() => props.entry.tags ?? []);
 const canEdit = computed(() => props.entry.kind === "file" && Boolean(props.entry.assetId));
+const sourceTitle = computed(() => metadataString(props.entry.metadata, "originTitle"));
+const sourceUrl = computed(() => metadataString(props.entry.metadata, "sourceUrl"));
+const originReferrer = computed(() => metadataString(props.entry.metadata, "originReferrer"));
+const sourceLinks = computed(() => [
+  { key: "sourceUrl", label: "原始链接", value: sourceUrl.value },
+  { key: "originReferrer", label: "来源页", value: originReferrer.value },
+].filter((item) => item.value));
+const hasSourceMetadata = computed(() => Boolean(sourceTitle.value || sourceLinks.value.length));
 const groupedTagOptions = computed(() => {
   const selected = new Set(draft.tags);
   return (props.tagGroups ?? [])
@@ -76,6 +85,22 @@ const groupedTagOptions = computed(() => {
     }))
     .filter((group) => group.tags.length);
 });
+
+const openableProtocolPattern = /^[a-z][a-z\d+.-]*:/i;
+const blockedProtocolPattern = /^(javascript|data|vbscript):/i;
+
+function isOpenableSourceLink(value: string) {
+  return openableProtocolPattern.test(value) && !blockedProtocolPattern.test(value);
+}
+
+async function openSourceLink(value: string) {
+  if (!isOpenableSourceLink(value)) return;
+  await openExternalUrl(value);
+}
+
+async function copySourceLink(value: string) {
+  await navigator.clipboard.writeText(value);
+}
 const filteredExistingTags = computed(() => {
   const keyword = tagDraft.value.trim().toLowerCase();
   return props.availableTags
@@ -261,6 +286,46 @@ onBeforeUnmount(() => {
         <span class="asset-meta__value">{{ aliasPaths.join("，") }}</span>
       </div>
     </div>
+
+    <section v-if="hasSourceMetadata" class="file-metadata-card__source" aria-label="来源信息">
+      <div class="file-metadata-card__source-head">
+        <div>
+          <p class="asset-browser__eyebrow">来源 Metadata</p>
+          <strong>来源信息</strong>
+        </div>
+      </div>
+      <div class="file-metadata-card__source-grid">
+        <div v-if="sourceTitle" class="asset-meta__row file-metadata-card__source-row">
+          <span>来源标题</span>
+          <span class="asset-meta__value">{{ sourceTitle }}</span>
+        </div>
+        <div v-for="item in sourceLinks" :key="item.key" class="asset-meta__row file-metadata-card__source-row">
+          <span>{{ item.label }}</span>
+          <span class="file-metadata-card__source-value">
+            <span class="asset-meta__value">{{ item.value }}</span>
+            <span class="file-metadata-card__source-actions">
+              <button
+                type="button"
+                class="file-metadata-card__source-action"
+                :disabled="!isOpenableSourceLink(item.value)"
+                title="打开链接"
+                @click="openSourceLink(item.value)"
+              >
+                <ExternalLink :size="14" aria-hidden="true" />
+              </button>
+              <button
+                type="button"
+                class="file-metadata-card__source-action"
+                title="复制链接"
+                @click="copySourceLink(item.value)"
+              >
+                <Copy :size="14" aria-hidden="true" />
+              </button>
+            </span>
+          </span>
+        </div>
+      </div>
+    </section>
 
     <label class="asset-meta__row file-metadata-card__inline-row">
       <span>评分</span>
