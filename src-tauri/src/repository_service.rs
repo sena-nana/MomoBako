@@ -251,6 +251,41 @@ CREATE TABLE IF NOT EXISTS repository_actions (
 CREATE INDEX IF NOT EXISTS idx_repository_actions_repo_order
 ON repository_actions(repo_id, sort_order, name);
 
+CREATE TABLE IF NOT EXISTS playlists (
+  playlist_id TEXT PRIMARY KEY,
+  repo_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  player_type_id TEXT NOT NULL,
+  player_plugin_id TEXT NOT NULL,
+  player_label TEXT NOT NULL,
+  file_class TEXT NOT NULL,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY(repo_id) REFERENCES repositories(repo_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_playlists_repo_order
+ON playlists(repo_id, sort_order, updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS playlist_items (
+  playlist_item_id TEXT PRIMARY KEY,
+  repo_id TEXT NOT NULL,
+  playlist_id TEXT NOT NULL,
+  asset_id TEXT NOT NULL,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  added_at TEXT NOT NULL,
+  FOREIGN KEY(repo_id) REFERENCES repositories(repo_id),
+  FOREIGN KEY(playlist_id) REFERENCES playlists(playlist_id) ON DELETE CASCADE,
+  FOREIGN KEY(asset_id) REFERENCES assets(asset_id)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_playlist_items_unique_asset
+ON playlist_items(playlist_id, asset_id);
+
+CREATE INDEX IF NOT EXISTS idx_playlist_items_repo_order
+ON playlist_items(repo_id, playlist_id, sort_order, added_at);
+
 CREATE TABLE IF NOT EXISTS repository_action_steps (
   step_id TEXT PRIMARY KEY,
   action_id TEXT NOT NULL,
@@ -426,6 +461,59 @@ pub struct RepositoryTagGroup {
     pub tags: Vec<String>,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct PlaylistPlayerContribution {
+    pub player_type_id: String,
+    pub label: String,
+    pub file_class: String,
+    pub supported_extensions: Vec<String>,
+    pub supports_seek: bool,
+    pub supports_volume: bool,
+    pub supports_preview_navigation: bool,
+    #[serde(default)]
+    pub description: Option<String>,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct PlaylistSummary {
+    pub playlist_id: String,
+    pub repo_id: String,
+    pub name: String,
+    pub player_type_id: String,
+    pub player_plugin_id: String,
+    pub player_label: String,
+    pub file_class: String,
+    pub item_count: i64,
+    pub sort_order: i64,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct PlaylistItem {
+    pub playlist_item_id: String,
+    pub playlist_id: String,
+    pub asset_id: String,
+    pub path: String,
+    pub filename: String,
+    pub extension: String,
+    pub thumbnail_path: Option<String>,
+    pub status: String,
+    pub status_reason: Option<String>,
+    pub sort_order: i64,
+    pub added_at: String,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct PlaylistDetail {
+    pub playlist: PlaylistSummary,
+    pub items: Vec<PlaylistItem>,
+}
+
 #[derive(Debug, Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct FolderMetadata {
@@ -490,6 +578,7 @@ pub struct RepositorySnapshot {
     pub folder_label: String,
     pub folders: Vec<FolderSummary>,
     pub assets: Vec<AssetSummary>,
+    pub playlists: Vec<PlaylistSummary>,
     pub quick_access: Vec<RepositoryShortcut>,
     pub tag_groups: Vec<RepositoryTagGroup>,
     pub metadata_fields: Vec<String>,
@@ -582,6 +671,70 @@ pub struct RepositoryActionEnabledRequest {
 #[serde(rename_all = "camelCase")]
 pub struct RepositoryActionMutationResponse {
     pub action: RepositoryAction,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct PlaylistMutationRequest {
+    pub repo_id: String,
+    pub playlist_id: Option<String>,
+    pub name: String,
+    pub player_type_id: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct PlaylistUpdateRequest {
+    pub repo_id: String,
+    pub playlist_id: String,
+    pub name: Option<String>,
+    pub player_type_id: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlaylistMutationResponse {
+    pub playlists: Vec<PlaylistSummary>,
+    pub playlist: Option<PlaylistSummary>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct PlaylistItemsAddRequest {
+    pub repo_id: String,
+    pub playlist_id: String,
+    pub asset_ids: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct PlaylistItemsOrderRequest {
+    pub repo_id: String,
+    pub playlist_id: String,
+    pub item_ids: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct PlaylistItemRemoveRequest {
+    pub repo_id: String,
+    pub playlist_id: String,
+    pub playlist_item_id: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct PlaylistMembershipRequest {
+    pub repo_id: String,
+    pub asset_id: String,
+    pub playlist_ids: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlaylistMembershipSnapshot {
+    pub asset_id: String,
+    pub playlist_ids: Vec<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -1236,6 +1389,19 @@ pub struct PluginManifest {
     pub archive_path: Option<String>,
 }
 
+#[derive(Debug, Clone)]
+struct PlaylistPlayerRegistration {
+    plugin_id: String,
+    player_type_id: String,
+    label: String,
+    file_class: String,
+    supported_extensions: Vec<String>,
+    supports_seek: bool,
+    supports_volume: bool,
+    supports_preview_navigation: bool,
+    description: Option<String>,
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct PluginHook {
@@ -1821,6 +1987,7 @@ impl RepositoryState {
         )?;
         let quick_access = load_repository_shortcuts(&connection, repo_id).map_err(db_error)?;
         let tag_groups = load_repository_tag_groups(&connection, repo_id).map_err(db_error)?;
+        let playlists = load_playlists(&connection, repo_id).map_err(db_error)?;
         let metadata_fields = load_metadata_fields(&connection).map_err(db_error)?;
         let recent_revision_count: i64 = connection
             .query_row("SELECT COUNT(*) FROM revisions", [], |row| row.get(0))
@@ -1835,6 +2002,7 @@ impl RepositoryState {
             folder_label: dominant_folder_label(&folders, &assets),
             folders,
             assets,
+            playlists,
             quick_access,
             tag_groups,
             metadata_fields,
@@ -1852,6 +2020,324 @@ impl RepositoryState {
             &repo.backend_record,
         )?;
         load_asset_detail_from_connection(&connection, repo_id, asset_id).map_err(db_error)
+    }
+
+    pub fn list_playlists(&self, repo_id: &str) -> Result<Vec<PlaylistSummary>, String> {
+        self.ensure_initialized()?;
+        let repo = self.load_repository_record(repo_id)?;
+        let connection = self.open_repository_connection(
+            &repo.summary.repo_id,
+            &repo.summary.path,
+            &repo.backend_record,
+        )?;
+        load_playlists(&connection, repo_id).map_err(db_error)
+    }
+
+    pub fn create_playlist(
+        &self,
+        request: PlaylistMutationRequest,
+    ) -> Result<PlaylistMutationResponse, String> {
+        self.ensure_initialized()?;
+        let repo = self.load_repository_record(&request.repo_id)?;
+        let connection = self.open_repository_connection(
+            &repo.summary.repo_id,
+            &repo.summary.path,
+            &repo.backend_record,
+        )?;
+        let registry = backend_plugin_registry(&self.root);
+        let player = registry
+            .playlist_player(&request.player_type_id)
+            .ok_or_else(|| format!("playlist player not found: {}", request.player_type_id))?;
+        let playlist_id = request
+            .playlist_id
+            .as_deref()
+            .map(validate_playlist_id)
+            .transpose()?
+            .unwrap_or_else(|| playlist_id_for(&request.repo_id, &request.name));
+        let name = validate_playlist_name(&request.name)?;
+        let sort_order = next_playlist_sort_order(&connection, &request.repo_id).map_err(db_error)?;
+        let now = now_rfc3339();
+        connection.execute(
+            r#"
+            INSERT INTO playlists (
+              playlist_id, repo_id, name, player_type_id, player_plugin_id,
+              player_label, file_class, sort_order, created_at, updated_at
+            )
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9)
+            "#,
+            params![
+                playlist_id,
+                request.repo_id,
+                name,
+                player.player_type_id,
+                player.plugin_id,
+                player.label,
+                player.file_class,
+                sort_order,
+                now,
+            ],
+        ).map_err(db_error)?;
+        let playlists = load_playlists(&connection, &request.repo_id).map_err(db_error)?;
+        let playlist = playlists.iter().find(|item| item.playlist_id == playlist_id).cloned();
+        Ok(PlaylistMutationResponse { playlists, playlist })
+    }
+
+    pub fn update_playlist(
+        &self,
+        request: PlaylistUpdateRequest,
+    ) -> Result<PlaylistMutationResponse, String> {
+        self.ensure_initialized()?;
+        let repo = self.load_repository_record(&request.repo_id)?;
+        let connection = self.open_repository_connection(
+            &repo.summary.repo_id,
+            &repo.summary.path,
+            &repo.backend_record,
+        )?;
+        let existing = load_playlist_summary(&connection, &request.repo_id, &request.playlist_id)
+            .map_err(db_error)?
+            .ok_or_else(|| format!("playlist not found: {}", request.playlist_id))?;
+        let registry = backend_plugin_registry(&self.root);
+        let player = if let Some(player_type_id) = request.player_type_id.as_deref() {
+            registry
+                .playlist_player(player_type_id)
+                .ok_or_else(|| format!("playlist player not found: {player_type_id}"))?
+        } else {
+            registry
+                .playlist_player(&existing.player_type_id)
+                .unwrap_or(PlaylistPlayerRegistration {
+                    plugin_id: existing.player_plugin_id.clone(),
+                    player_type_id: existing.player_type_id.clone(),
+                    label: existing.player_label.clone(),
+                    file_class: existing.file_class.clone(),
+                    supported_extensions: Vec::new(),
+                    supports_seek: false,
+                    supports_volume: false,
+                    supports_preview_navigation: false,
+                    description: None,
+                })
+        };
+        let name = request
+            .name
+            .as_deref()
+            .map(validate_playlist_name)
+            .transpose()?
+            .unwrap_or(existing.name.clone());
+        let now = now_rfc3339();
+        connection.execute(
+            r#"
+            UPDATE playlists
+            SET
+              name = ?3,
+              player_type_id = ?4,
+              player_plugin_id = ?5,
+              player_label = ?6,
+              file_class = ?7,
+              updated_at = ?8
+            WHERE repo_id = ?1 AND playlist_id = ?2
+            "#,
+            params![
+                request.repo_id,
+                request.playlist_id,
+                name,
+                player.player_type_id,
+                player.plugin_id,
+                player.label,
+                player.file_class,
+                now,
+            ],
+        ).map_err(db_error)?;
+        let playlists = load_playlists(&connection, &request.repo_id).map_err(db_error)?;
+        let playlist = playlists
+            .iter()
+            .find(|item| item.playlist_id == request.playlist_id)
+            .cloned();
+        Ok(PlaylistMutationResponse { playlists, playlist })
+    }
+
+    pub fn delete_playlist(
+        &self,
+        repo_id: &str,
+        playlist_id: &str,
+    ) -> Result<PlaylistMutationResponse, String> {
+        self.ensure_initialized()?;
+        let repo = self.load_repository_record(repo_id)?;
+        let connection = self.open_repository_connection(
+            &repo.summary.repo_id,
+            &repo.summary.path,
+            &repo.backend_record,
+        )?;
+        connection.execute(
+            "DELETE FROM playlists WHERE repo_id = ?1 AND playlist_id = ?2",
+            params![repo_id, validate_playlist_id(playlist_id)?],
+        ).map_err(db_error)?;
+        let playlists = load_playlists(&connection, repo_id).map_err(db_error)?;
+        Ok(PlaylistMutationResponse {
+            playlists,
+            playlist: None,
+        })
+    }
+
+    pub fn get_playlist_detail(&self, repo_id: &str, playlist_id: &str) -> Result<PlaylistDetail, String> {
+        self.ensure_initialized()?;
+        let repo = self.load_repository_record(repo_id)?;
+        let connection = self.open_repository_connection(
+            &repo.summary.repo_id,
+            &repo.summary.path,
+            &repo.backend_record,
+        )?;
+        load_playlist_detail(&connection, &repo, &backend_plugin_registry(&self.root), repo_id, playlist_id)
+            .map_err(db_error)
+    }
+
+    pub fn add_playlist_items(&self, request: PlaylistItemsAddRequest) -> Result<PlaylistDetail, String> {
+        self.ensure_initialized()?;
+        let repo = self.load_repository_record(&request.repo_id)?;
+        let mut connection = self.open_repository_connection(
+            &repo.summary.repo_id,
+            &repo.summary.path,
+            &repo.backend_record,
+        )?;
+        let playlist = load_playlist_summary(&connection, &request.repo_id, &request.playlist_id)
+            .map_err(db_error)?
+            .ok_or_else(|| format!("playlist not found: {}", request.playlist_id))?;
+        let registry = backend_plugin_registry(&self.root);
+        let player = registry.playlist_player(&playlist.player_type_id);
+        let mut sort_order = next_playlist_item_sort_order(&connection, &request.repo_id, &request.playlist_id).map_err(db_error)?;
+        let tx = connection.transaction().map_err(db_error)?;
+        for asset_id in normalize_id_list(&request.asset_ids) {
+            let asset = load_asset_summary_from_transaction(&tx, &request.repo_id, &asset_id)
+                .map_err(db_error)?
+                .ok_or_else(|| format!("asset not found: {asset_id}"))?;
+            if let Some(player) = &player {
+                if !playlist_player_supports_extension(player, &asset.extension) {
+                    continue;
+                }
+            }
+            tx.execute(
+                r#"
+                INSERT OR IGNORE INTO playlist_items (
+                  playlist_item_id, repo_id, playlist_id, asset_id, sort_order, added_at
+                )
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                "#,
+                params![
+                    playlist_item_id_for(&request.playlist_id, &asset.asset_id),
+                    request.repo_id,
+                    request.playlist_id,
+                    asset.asset_id,
+                    sort_order,
+                    now_rfc3339(),
+                ],
+            ).map_err(db_error)?;
+            sort_order += 1;
+        }
+        tx.commit().map_err(db_error)?;
+        load_playlist_detail(&connection, &repo, &registry, &request.repo_id, &request.playlist_id).map_err(db_error)
+    }
+
+    pub fn reorder_playlist_items(&self, request: PlaylistItemsOrderRequest) -> Result<PlaylistDetail, String> {
+        self.ensure_initialized()?;
+        let repo = self.load_repository_record(&request.repo_id)?;
+        let mut connection = self.open_repository_connection(
+            &repo.summary.repo_id,
+            &repo.summary.path,
+            &repo.backend_record,
+        )?;
+        let tx = connection.transaction().map_err(db_error)?;
+        for (index, item_id) in request.item_ids.iter().enumerate() {
+            tx.execute(
+                r#"
+                UPDATE playlist_items
+                SET sort_order = ?4
+                WHERE repo_id = ?1 AND playlist_id = ?2 AND playlist_item_id = ?3
+                "#,
+                params![request.repo_id, request.playlist_id, item_id, index as i64],
+            ).map_err(db_error)?;
+        }
+        tx.execute(
+            r#"
+            UPDATE playlists
+            SET updated_at = ?3
+            WHERE repo_id = ?1 AND playlist_id = ?2
+            "#,
+            params![request.repo_id, request.playlist_id, now_rfc3339()],
+        ).map_err(db_error)?;
+        tx.commit().map_err(db_error)?;
+        load_playlist_detail(&connection, &repo, &backend_plugin_registry(&self.root), &request.repo_id, &request.playlist_id)
+            .map_err(db_error)
+    }
+
+    pub fn remove_playlist_item(&self, request: PlaylistItemRemoveRequest) -> Result<PlaylistDetail, String> {
+        self.ensure_initialized()?;
+        let repo = self.load_repository_record(&request.repo_id)?;
+        let connection = self.open_repository_connection(
+            &repo.summary.repo_id,
+            &repo.summary.path,
+            &repo.backend_record,
+        )?;
+        connection.execute(
+            "DELETE FROM playlist_items WHERE repo_id = ?1 AND playlist_id = ?2 AND playlist_item_id = ?3",
+            params![request.repo_id, request.playlist_id, request.playlist_item_id],
+        ).map_err(db_error)?;
+        load_playlist_detail(&connection, &repo, &backend_plugin_registry(&self.root), &request.repo_id, &request.playlist_id)
+            .map_err(db_error)
+    }
+
+    pub fn set_playlist_membership(&self, request: PlaylistMembershipRequest) -> Result<PlaylistMembershipSnapshot, String> {
+        self.ensure_initialized()?;
+        let repo = self.load_repository_record(&request.repo_id)?;
+        let mut connection = self.open_repository_connection(
+            &repo.summary.repo_id,
+            &repo.summary.path,
+            &repo.backend_record,
+        )?;
+        let asset = load_asset_summary(&connection, &request.repo_id, &request.asset_id)
+            .map_err(db_error)?
+            .ok_or_else(|| format!("asset not found: {}", request.asset_id))?;
+        let playlists = load_playlists(&connection, &request.repo_id).map_err(db_error)?;
+        let registry = backend_plugin_registry(&self.root);
+        let valid_target_ids = normalize_id_list(&request.playlist_ids);
+        let tx = connection.transaction().map_err(db_error)?;
+        let mut kept = Vec::new();
+        for playlist in playlists {
+            let Some(player) = registry.playlist_player(&playlist.player_type_id) else {
+                continue;
+            };
+            if !playlist_player_supports_extension(&player, &asset.extension) {
+                continue;
+            }
+            if valid_target_ids.iter().any(|item| item == &playlist.playlist_id) {
+                let sort_order = next_playlist_item_sort_order(&tx, &request.repo_id, &playlist.playlist_id).map_err(db_error)?;
+                tx.execute(
+                    r#"
+                    INSERT OR IGNORE INTO playlist_items (
+                      playlist_item_id, repo_id, playlist_id, asset_id, sort_order, added_at
+                    )
+                    VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                    "#,
+                    params![
+                        playlist_item_id_for(&playlist.playlist_id, &asset.asset_id),
+                        request.repo_id,
+                        playlist.playlist_id,
+                        asset.asset_id,
+                        sort_order,
+                        now_rfc3339(),
+                    ],
+                ).map_err(db_error)?;
+                kept.push(playlist.playlist_id);
+            } else {
+                tx.execute(
+                    "DELETE FROM playlist_items WHERE repo_id = ?1 AND playlist_id = ?2 AND asset_id = ?3",
+                    params![request.repo_id, playlist.playlist_id, request.asset_id],
+                ).map_err(db_error)?;
+            }
+        }
+        tx.commit().map_err(db_error)?;
+        kept.sort();
+        Ok(PlaylistMembershipSnapshot {
+            asset_id: request.asset_id,
+            playlist_ids: kept,
+        })
     }
 
     pub fn load_file_browser(
@@ -4192,6 +4678,266 @@ fn load_repository_shortcuts(
         })
     })?;
     rows.collect::<Result<Vec<_>, _>>()
+}
+
+fn load_playlists(
+    connection: &Connection,
+    repo_id: &str,
+) -> Result<Vec<PlaylistSummary>, rusqlite::Error> {
+    let mut stmt = connection.prepare(
+        r#"
+        SELECT
+          p.playlist_id,
+          p.repo_id,
+          p.name,
+          p.player_type_id,
+          p.player_plugin_id,
+          p.player_label,
+          p.file_class,
+          COUNT(pi.playlist_item_id) AS item_count,
+          p.sort_order,
+          p.created_at,
+          p.updated_at
+        FROM playlists p
+        LEFT JOIN playlist_items pi
+          ON pi.repo_id = p.repo_id AND pi.playlist_id = p.playlist_id
+        WHERE p.repo_id = ?1
+        GROUP BY
+          p.playlist_id, p.repo_id, p.name, p.player_type_id, p.player_plugin_id,
+          p.player_label, p.file_class, p.sort_order, p.created_at, p.updated_at
+        ORDER BY p.sort_order, p.updated_at DESC, p.name COLLATE NOCASE
+        "#,
+    )?;
+
+    let rows = stmt.query_map([repo_id], |row| {
+        Ok(PlaylistSummary {
+            playlist_id: row.get(0)?,
+            repo_id: row.get(1)?,
+            name: row.get(2)?,
+            player_type_id: row.get(3)?,
+            player_plugin_id: row.get(4)?,
+            player_label: row.get(5)?,
+            file_class: row.get(6)?,
+            item_count: row.get(7)?,
+            sort_order: row.get(8)?,
+            created_at: row.get(9)?,
+            updated_at: row.get(10)?,
+        })
+    })?;
+    rows.collect::<Result<Vec<_>, _>>()
+}
+
+fn load_playlist_summary(
+    connection: &Connection,
+    repo_id: &str,
+    playlist_id: &str,
+) -> Result<Option<PlaylistSummary>, rusqlite::Error> {
+    load_playlists(connection, repo_id).map(|items| {
+        items
+            .into_iter()
+            .find(|item| item.playlist_id == playlist_id)
+    })
+}
+
+fn load_playlist_detail(
+    connection: &Connection,
+    repo: &RepositoryRecord,
+    registry: &BackendPluginRegistry,
+    repo_id: &str,
+    playlist_id: &str,
+) -> Result<PlaylistDetail, rusqlite::Error> {
+    let playlist = load_playlist_summary(connection, repo_id, playlist_id)?
+        .ok_or(rusqlite::Error::QueryReturnedNoRows)?;
+    let active_player = registry.playlist_player(&playlist.player_type_id);
+    let mut stmt = connection.prepare(
+        r#"
+        SELECT
+          pi.playlist_item_id,
+          pi.playlist_id,
+          pi.asset_id,
+          pi.sort_order,
+          pi.added_at,
+          a.path,
+          a.filename,
+          a.extension,
+          a.thumbnail_path,
+          a.status
+        FROM playlist_items pi
+        LEFT JOIN assets a
+          ON a.repo_id = pi.repo_id AND a.asset_id = pi.asset_id
+        WHERE pi.repo_id = ?1 AND pi.playlist_id = ?2
+        ORDER BY pi.sort_order, pi.added_at
+        "#,
+    )?;
+    let rows = stmt.query_map(params![repo_id, playlist_id], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+            row.get::<_, i64>(3)?,
+            row.get::<_, String>(4)?,
+            row.get::<_, Option<String>>(5)?,
+            row.get::<_, Option<String>>(6)?,
+            row.get::<_, Option<String>>(7)?,
+            row.get::<_, Option<String>>(8)?,
+            row.get::<_, Option<String>>(9)?,
+        ))
+    })?;
+
+    let items = rows
+        .collect::<Result<Vec<_>, _>>()?
+        .into_iter()
+        .map(|row| {
+            let (
+                playlist_item_id,
+                playlist_id,
+                asset_id,
+                sort_order,
+                added_at,
+                path,
+                filename,
+                extension,
+                thumbnail_path,
+                asset_status,
+            ) = row;
+            let extension = extension.unwrap_or_default();
+            let path_value = path.clone().unwrap_or_default();
+            let thumbnail_asset_id = asset_id.clone();
+            let thumbnail_entry_path = path.clone().unwrap_or_default();
+            let (status, status_reason) = resolve_playlist_item_status(
+                &playlist,
+                active_player.as_ref(),
+                path.as_deref(),
+                &extension,
+                asset_status.as_deref(),
+            );
+            Ok(PlaylistItem {
+                playlist_item_id,
+                playlist_id,
+                asset_id,
+                path: path_value,
+                filename: filename.unwrap_or_else(|| "(已失效文件)".to_string()),
+                extension,
+                thumbnail_path: thumbnail_path.and_then(|item| {
+                    normalize_asset_thumbnail_path(
+                        connection,
+                        repo,
+                        &repo
+                            .summary
+                            .path
+                            .parse::<PathBuf>()
+                            .unwrap_or_else(|_| PathBuf::from(&repo.summary.path))
+                            .join(REPO_META_DIR)
+                            .join("thumbnails"),
+                        &thumbnail_asset_id,
+                        &thumbnail_entry_path,
+                        Some(item),
+                    )
+                    .ok()
+                    .flatten()
+                }),
+                status,
+                status_reason,
+                sort_order,
+                added_at,
+            })
+        })
+        .collect::<Result<Vec<_>, rusqlite::Error>>()?;
+
+    Ok(PlaylistDetail { playlist, items })
+}
+
+fn resolve_playlist_item_status(
+    playlist: &PlaylistSummary,
+    player: Option<&PlaylistPlayerRegistration>,
+    path: Option<&str>,
+    extension: &str,
+    asset_status: Option<&str>,
+) -> (String, Option<String>) {
+    let Some(path) = path else {
+        return ("missing".to_string(), Some("资源索引中已找不到该文件".to_string()));
+    };
+    let Some(asset_status) = asset_status else {
+        return ("missing".to_string(), Some("资源索引中已找不到该文件".to_string()));
+    };
+    if asset_status == "deleted" {
+        return ("trashed".to_string(), Some(format!("文件已移入回收站: {path}")));
+    }
+    let Some(player) = player else {
+        return (
+            "pluginUnavailable".to_string(),
+            Some(format!("缺少播放类型插件: {}", playlist.player_type_id)),
+        );
+    };
+    if !playlist_player_supports_extension(player, extension) {
+        return (
+            "incompatible".to_string(),
+            Some(format!("当前文件扩展名不再兼容: .{extension}")),
+        );
+    }
+    ("ready".to_string(), None)
+}
+
+fn playlist_player_supports_extension(player: &PlaylistPlayerRegistration, extension: &str) -> bool {
+    let normalized = extension.trim().to_ascii_lowercase();
+    !normalized.is_empty() && player.supported_extensions.iter().any(|item| item == &normalized)
+}
+
+fn next_playlist_sort_order(connection: &Connection, repo_id: &str) -> Result<i64, rusqlite::Error> {
+    connection.query_row(
+        "SELECT COALESCE(MAX(sort_order), -1) + 1 FROM playlists WHERE repo_id = ?1",
+        [repo_id],
+        |row| row.get(0),
+    )
+}
+
+fn next_playlist_item_sort_order(
+    connection: &Connection,
+    repo_id: &str,
+    playlist_id: &str,
+) -> Result<i64, rusqlite::Error> {
+    connection.query_row(
+        "SELECT COALESCE(MAX(sort_order), -1) + 1 FROM playlist_items WHERE repo_id = ?1 AND playlist_id = ?2",
+        params![repo_id, playlist_id],
+        |row| row.get(0),
+    )
+}
+
+fn validate_playlist_name(name: &str) -> Result<String, String> {
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        return Err("playlist name cannot be empty".to_string());
+    }
+    Ok(trimmed.to_string())
+}
+
+fn validate_playlist_id(id: &str) -> Result<String, String> {
+    let trimmed = id.trim();
+    if trimmed.is_empty() {
+        return Err("playlist id cannot be empty".to_string());
+    }
+    Ok(trimmed.to_string())
+}
+
+fn playlist_id_for(repo_id: &str, name: &str) -> String {
+    format!("playlist-{}", sha256_hex(&[repo_id.as_bytes(), name.trim().as_bytes()]))
+}
+
+fn playlist_item_id_for(playlist_id: &str, asset_id: &str) -> String {
+    format!(
+        "playlist-item-{}",
+        sha256_hex(&[playlist_id.as_bytes(), asset_id.as_bytes()])
+    )
+}
+
+fn normalize_id_list(values: &[String]) -> Vec<String> {
+    let mut seen = HashSet::new();
+    values
+        .iter()
+        .map(|item| item.trim().to_string())
+        .filter(|item| !item.is_empty())
+        .filter(|item| seen.insert(item.clone()))
+        .collect()
 }
 
 fn load_repository_tag_groups(
@@ -8190,6 +8936,58 @@ impl BackendPluginRegistry {
             "plugin runtime is not available: {}",
             registration.manifest.plugin_id
         ))
+    }
+
+    fn playlist_players(&self) -> Vec<PlaylistPlayerRegistration> {
+        let mut players = Vec::new();
+        for registration in self.registrations.values() {
+            if !registration.manifest.enabled || registration.manifest.status == "error" {
+                continue;
+            }
+            let Some(contributes) = registration.manifest.contributes.as_object() else {
+                continue;
+            };
+            let Some(raw_players) = contributes.get("playlistPlayers") else {
+                continue;
+            };
+            let Ok(parsed) =
+                serde_json::from_value::<Vec<PlaylistPlayerContribution>>(raw_players.clone())
+            else {
+                continue;
+            };
+            for player in parsed {
+                players.push(PlaylistPlayerRegistration {
+                    plugin_id: registration.manifest.plugin_id.clone(),
+                    player_type_id: player.player_type_id,
+                    label: player.label,
+                    file_class: player.file_class,
+                    supported_extensions: player
+                        .supported_extensions
+                        .into_iter()
+                        .map(|value| value.trim().to_ascii_lowercase())
+                        .filter(|value| !value.is_empty())
+                        .collect(),
+                    supports_seek: player.supports_seek,
+                    supports_volume: player.supports_volume,
+                    supports_preview_navigation: player.supports_preview_navigation,
+                    description: player.description,
+                });
+            }
+        }
+        players.sort_by(|left, right| {
+            left.label
+                .to_lowercase()
+                .cmp(&right.label.to_lowercase())
+                .then_with(|| left.player_type_id.cmp(&right.player_type_id))
+        });
+        players
+    }
+
+    fn playlist_player(&self, player_type_id: &str) -> Option<PlaylistPlayerRegistration> {
+        let normalized = player_type_id.trim();
+        self.playlist_players()
+            .into_iter()
+            .find(|player| player.player_type_id == normalized)
     }
 }
 

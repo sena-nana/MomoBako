@@ -305,182 +305,199 @@ function cancelEntryDragIntent(event: PointerEvent) {
 </script>
 
 <template>
-  <div
-    class="files-browser"
-    :class="{ 'is-dragging': isDraggingFiles }"
-    @dragover="emit('dragOver', $event)"
-    @dragleave="emit('dragLeave', $event)"
-    @drop="emit('drop', $event)"
-  >
-    <header class="files-browser__header">
-      <div>
-        <p class="asset-browser__eyebrow">{{ isReadOnlyVirtual ? "智能文件夹" : isTrashPanel ? "回收站" : "当前目录" }}</p>
-        <div class="files-breadcrumbs">
-          <button
-            type="button"
-            class="files-breadcrumbs__item"
-            :disabled="isReadOnlyVirtual"
-            @click="emit('openDirectory', '')"
-          >
-            {{ isReadOnlyVirtual ? virtualTitle || "智能文件夹" : isTrashPanel ? "回收站" : "根目录" }}
-          </button>
-          <button
-            v-if="!isReadOnlyVirtual"
-            v-for="segment in breadcrumbs"
-            :key="segment.path"
-            type="button"
-            class="files-breadcrumbs__item"
-            @click="emit('openDirectory', segment.path)"
-          >
-            {{ segment.label }}
-          </button>
+  <div class="files-workbench__main">
+    <div
+      class="files-browser"
+      :class="{ 'is-dragging': isDraggingFiles }"
+      @dragover="emit('dragOver', $event)"
+      @dragleave="emit('dragLeave', $event)"
+      @drop="emit('drop', $event)"
+    >
+      <header class="files-browser__header">
+        <div>
+          <p class="asset-browser__eyebrow">{{ isReadOnlyVirtual ? "智能文件夹" : isTrashPanel ? "回收站" : "当前目录" }}</p>
+          <div class="files-breadcrumbs">
+            <button
+              type="button"
+              class="files-breadcrumbs__item"
+              :disabled="isReadOnlyVirtual"
+              @click="emit('openDirectory', '')"
+            >
+              {{ isReadOnlyVirtual ? virtualTitle || "智能文件夹" : isTrashPanel ? "回收站" : "根目录" }}
+            </button>
+            <button
+              v-if="!isReadOnlyVirtual"
+              v-for="segment in breadcrumbs"
+              :key="segment.path"
+              type="button"
+              class="files-breadcrumbs__item"
+              @click="emit('openDirectory', segment.path)"
+            >
+              {{ segment.label }}
+            </button>
+          </div>
+          <p v-if="isReadOnlyVirtual && virtualSubline" class="files-browser__subline">{{ virtualSubline }}</p>
         </div>
-        <p v-if="isReadOnlyVirtual && virtualSubline" class="files-browser__subline">{{ virtualSubline }}</p>
-      </div>
 
-      <div class="files-toolbar">
-        <label class="files-toolbar__select">
-          <span>展示方式</span>
-          <select v-model="fileDisplayMode" aria-label="素材展示方式">
-            <option v-for="option in displayModeOptions" :key="option.value" :value="option.value">
-              {{ option.label }}
-            </option>
-          </select>
-        </label>
-
-        <template v-if="!isTrashPanel && !isReadOnlyVirtual">
-          <label class="files-toolbar__field">
-            <Plus :size="14" aria-hidden="true" />
-            <input v-model="createFileName" type="text" placeholder="新建空文件，例如 note.txt" />
+        <div class="files-toolbar">
+          <label class="files-toolbar__select">
+            <span>展示方式</span>
+            <select v-model="fileDisplayMode" aria-label="素材展示方式">
+              <option v-for="option in displayModeOptions" :key="option.value" :value="option.value">
+                {{ option.label }}
+              </option>
+            </select>
           </label>
-          <button type="button" class="ghost files-toolbar__btn" :disabled="isMutatingFiles" @click="emit('createFile')">
-            <File :size="14" aria-hidden="true" />
-            建文件
-          </button>
-        </template>
 
-        <template v-else>
-          <button type="button" class="ghost files-toolbar__btn" :disabled="isMutatingFiles" @click="emit('restoreAllTrash')">
-            <RotateCcw :size="14" aria-hidden="true" />
-            还原所有项目
-          </button>
-          <button type="button" class="ghost danger files-toolbar__btn" :disabled="isMutatingFiles" @click="emit('emptyTrash')">
-            <Trash2 :size="14" aria-hidden="true" />
-            清空回收站
-          </button>
-        </template>
-      </div>
-    </header>
+          <template v-if="!isTrashPanel && !isReadOnlyVirtual">
+            <label class="files-toolbar__field">
+              <Plus :size="14" aria-hidden="true" />
+              <input v-model="createFileName" type="text" placeholder="新建空文件，例如 note.txt" />
+            </label>
+            <button type="button" class="ghost files-toolbar__btn" :disabled="isMutatingFiles" @click="emit('createFile')">
+              <File :size="14" aria-hidden="true" />
+              建文件
+            </button>
+          </template>
 
-    <div v-if="error" class="asset-browser__state asset-browser__state--error">
-      {{ error }}
-    </div>
-
-    <div v-else-if="isLoadingFileBrowser" class="asset-browser__state">
-      <LoaderCircle class="spin" :size="16" aria-hidden="true" />
-      正在读取目录
-    </div>
-
-    <div v-else-if="isMutatingFiles" class="asset-browser__state">
-      <LoaderCircle class="spin" :size="16" aria-hidden="true" />
-      正在处理文件
-    </div>
-
-    <template v-else>
-      <div
-        ref="filesListRef"
-        class="files-list"
-        @pointerdown="handleListPointerDown"
-        @pointermove="updateBoxSelection"
-        @pointerup="clearBoxSelection"
-        @pointercancel="clearBoxSelection"
-      >
-        <button
-          v-for="entry in directoryEntries"
-          :key="entry.path"
-          v-context-menu="() => fileEntryContextMenu(entry)"
-          type="button"
-          class="files-list__item"
-          :class="{
-            'is-active': selectedPathSet.has(entry.path),
-            'can-drag-out': canDragEntries,
-            'is-drop-target': isDragActive && dropTargetPathSet.has(entry.path),
-          }"
-          :data-entry-path="entry.path"
-          :data-folder-path="entry.path"
-          @click="handleEntryClick(entry, $event)"
-          @dblclick="handleEntryDoubleClick(entry)"
-          @pointerdown="handleEntryPointerDown(entry, $event)"
-          @pointermove="handleEntryPointerMove(entry, $event)"
-          @pointerup="clearEntryDragIntent"
-          @pointercancel="cancelEntryDragIntent"
-          @dragenter.prevent="emit('hoverFolder', entry.path)"
-          @dragover.prevent="emit('hoverFolder', entry.path)"
-          @dragleave.prevent="emit('leaveFolder', entry.path)"
-          @drop.stop.prevent="emit('dropOnFolder', entry.path, $event)"
-        >
-          <div class="files-list__preview" :style="{ background: fileTone(entry) }">
-            <Folder :size="24" aria-hidden="true" />
-          </div>
-          <div class="files-list__body">
-            <strong>{{ entry.name }}</strong>
-          </div>
-        </button>
-
-        <div v-if="hasSplitFileGroups" class="files-list__divider" aria-hidden="true"></div>
-
-        <div class="files-list__files" :class="displayModeClass">
-          <button
-            v-for="entry in fileEntries"
-            :key="entry.path"
-            v-context-menu="() => fileEntryContextMenu(entry)"
-            type="button"
-            class="files-list__item files-list__item--file"
-            :class="{ 'is-active': selectedPathSet.has(entry.path), 'can-drag-out': canDragEntries }"
-            :data-entry-path="entry.path"
-            :style="fileItemStyle(entry)"
-            @click="handleEntryClick(entry, $event)"
-            @dblclick="handleEntryDoubleClick(entry)"
-            @pointerdown="handleEntryPointerDown(entry, $event)"
-            @pointermove="handleEntryPointerMove(entry, $event)"
-            @pointerup="clearEntryDragIntent"
-            @pointercancel="cancelEntryDragIntent"
-          >
-            <div class="files-list__preview">
-              <img
-                v-if="thumbnailSrc(entry)"
-                :src="thumbnailSrc(entry) ?? undefined"
-                alt=""
-                crossorigin="anonymous"
-                draggable="false"
-                loading="lazy"
-                @load="emit('thumbnailLoaded', entry, $event)"
-                @dragstart.prevent
-                @error="emit('markThumbnailFailed', entry)"
-              />
-              <FileVideo v-else-if="isVideoEntry(entry)" :size="24" aria-hidden="true" />
-              <FileAudio v-else-if="isAudioEntry(entry)" :size="24" aria-hidden="true" />
-              <File v-else-if="isModelEntry(entry)" :size="24" aria-hidden="true" />
-              <FileImage v-else :size="24" aria-hidden="true" />
-            </div>
-            <div class="files-list__body">
-              <strong>{{ entry.name }}</strong>
-              <span v-if="hardlinkStateLabel(entry) && fileDisplayMode !== 'list'">{{ hardlinkStateLabel(entry) }}</span>
-              <span v-if="fileDisplayMode === 'list'">{{ entry.path }}</span>
-            </div>
-            <div v-if="fileDisplayMode === 'list'" class="files-list__meta">
-              <span>{{ entry.extension || '文件' }}</span>
-              <span>{{ entry.sizeLabel || "未知" }}</span>
-              <span>{{ entry.status ? statusLabel(entry.status) : "未索引" }}</span>
-              <span v-if="hardlinkStateLabel(entry)">{{ hardlinkStateLabel(entry) }}</span>
-              <span>{{ entryModifiedAtLabel(entry) }}</span>
-            </div>
-          </button>
+          <template v-else>
+            <button type="button" class="ghost files-toolbar__btn" :disabled="isMutatingFiles" @click="emit('restoreAllTrash')">
+              <RotateCcw :size="14" aria-hidden="true" />
+              还原所有项目
+            </button>
+            <button type="button" class="ghost danger files-toolbar__btn" :disabled="isMutatingFiles" @click="emit('emptyTrash')">
+              <Trash2 :size="14" aria-hidden="true" />
+              清空回收站
+            </button>
+          </template>
         </div>
+      </header>
 
-        <div v-if="selectionBoxStyle" class="files-list__selection-box" :style="selectionBoxStyle"></div>
+      <div v-if="error" class="asset-browser__state asset-browser__state--error">
+        {{ error }}
       </div>
-    </template>
+
+      <div v-else-if="isLoadingFileBrowser" class="asset-browser__state">
+        <LoaderCircle class="spin" :size="16" aria-hidden="true" />
+        正在读取目录
+      </div>
+
+      <div v-else-if="isMutatingFiles" class="asset-browser__state">
+        <LoaderCircle class="spin" :size="16" aria-hidden="true" />
+        正在处理文件
+      </div>
+
+      <template v-else>
+        <div
+          ref="filesListRef"
+          class="files-list"
+          @pointerdown="handleListPointerDown"
+          @pointermove="updateBoxSelection"
+          @pointerup="clearBoxSelection"
+          @pointercancel="clearBoxSelection"
+        >
+          <div v-if="directoryEntries.length" class="files-list__group files-list__directories" :class="displayModeClass">
+            <button
+              v-for="entry in directoryEntries"
+              :key="entry.path"
+              v-context-menu="() => fileEntryContextMenu(entry)"
+              type="button"
+              class="files-list__item files-list__item--file files-list__item--directory"
+              :class="{
+                'is-active': selectedPathSet.has(entry.path),
+                'can-drag-out': canDragEntries,
+                'is-drop-target': isDragActive && dropTargetPathSet.has(entry.path),
+              }"
+              :data-entry-path="entry.path"
+              :data-folder-path="entry.path"
+              @click="handleEntryClick(entry, $event)"
+              @dblclick="handleEntryDoubleClick(entry)"
+              @pointerdown="handleEntryPointerDown(entry, $event)"
+              @pointermove="handleEntryPointerMove(entry, $event)"
+              @pointerup="clearEntryDragIntent"
+              @pointercancel="cancelEntryDragIntent"
+              @dragenter.prevent="emit('hoverFolder', entry.path)"
+              @dragover.prevent="emit('hoverFolder', entry.path)"
+              @dragleave.prevent="emit('leaveFolder', entry.path)"
+              @drop.stop.prevent="emit('dropOnFolder', entry.path, $event)"
+            >
+              <div class="files-list__preview" :style="{ background: fileTone(entry) }">
+                <Folder :size="24" aria-hidden="true" />
+              </div>
+              <div class="files-list__body">
+                <strong>{{ entry.name }}</strong>
+                <span v-if="fileDisplayMode === 'list'">{{ entry.path }}</span>
+              </div>
+              <div v-if="fileDisplayMode === 'list'" class="files-list__meta">
+                <span>文件夹</span>
+                <span>{{ entry.sizeLabel || "目录项" }}</span>
+                <span>{{ entry.status ? statusLabel(entry.status) : "未索引" }}</span>
+                <span>{{ entryModifiedAtLabel(entry) }}</span>
+              </div>
+            </button>
+          </div>
+
+          <div
+            v-if="hasSplitFileGroups && directoryEntries.length && fileEntries.length"
+            class="files-list__divider"
+            aria-hidden="true"
+          ></div>
+
+          <div v-if="fileEntries.length" class="files-list__group files-list__files" :class="displayModeClass">
+            <button
+              v-for="entry in fileEntries"
+              :key="entry.path"
+              v-context-menu="() => fileEntryContextMenu(entry)"
+              type="button"
+              class="files-list__item files-list__item--file"
+              :class="{ 'is-active': selectedPathSet.has(entry.path), 'can-drag-out': canDragEntries }"
+              :data-entry-path="entry.path"
+              :style="fileItemStyle(entry)"
+              @click="handleEntryClick(entry, $event)"
+              @dblclick="handleEntryDoubleClick(entry)"
+              @pointerdown="handleEntryPointerDown(entry, $event)"
+              @pointermove="handleEntryPointerMove(entry, $event)"
+              @pointerup="clearEntryDragIntent"
+              @pointercancel="cancelEntryDragIntent"
+            >
+              <div class="files-list__preview">
+                <img
+                  v-if="thumbnailSrc(entry)"
+                  :src="thumbnailSrc(entry) ?? undefined"
+                  alt=""
+                  crossorigin="anonymous"
+                  draggable="false"
+                  loading="lazy"
+                  @load="emit('thumbnailLoaded', entry, $event)"
+                  @dragstart.prevent
+                  @error="emit('markThumbnailFailed', entry)"
+                />
+                <FileVideo v-else-if="isVideoEntry(entry)" :size="24" aria-hidden="true" />
+                <FileAudio v-else-if="isAudioEntry(entry)" :size="24" aria-hidden="true" />
+                <File v-else-if="isModelEntry(entry)" :size="24" aria-hidden="true" />
+                <FileImage v-else :size="24" aria-hidden="true" />
+              </div>
+              <div class="files-list__body">
+                <strong>{{ entry.name }}</strong>
+                <span v-if="hardlinkStateLabel(entry) && fileDisplayMode !== 'list'">{{ hardlinkStateLabel(entry) }}</span>
+                <span v-if="fileDisplayMode === 'list'">{{ entry.path }}</span>
+              </div>
+              <div v-if="fileDisplayMode === 'list'" class="files-list__meta">
+                <span>{{ entry.extension || '文件' }}</span>
+                <span>{{ entry.sizeLabel || "未知" }}</span>
+                <span>{{ entry.status ? statusLabel(entry.status) : "未索引" }}</span>
+                <span v-if="hardlinkStateLabel(entry)">{{ hardlinkStateLabel(entry) }}</span>
+                <span>{{ entryModifiedAtLabel(entry) }}</span>
+              </div>
+            </button>
+          </div>
+
+          <div v-if="selectionBoxStyle" class="files-list__selection-box" :style="selectionBoxStyle"></div>
+        </div>
+      </template>
+    </div>
+
+    <slot name="player"></slot>
   </div>
 
   <aside class="files-detail">

@@ -3,6 +3,8 @@ import { cleanup } from "@testing-library/vue";
 import { afterEach, vi } from "vitest";
 import type {
   FileBrowserEntry,
+  PlaylistDetail,
+  PlaylistSummary,
   PluginManifest,
   RepositoryAction,
   SearchHit,
@@ -41,12 +43,52 @@ let mockSearchResults: SearchHit[] | null = null;
 let mockSmartFolders: SmartFolder[] = [];
 let mockRepositoryActions: RepositoryAction[] = [];
 let mockPlugins: PluginManifest[] | null = null;
+let mockPlaylists: PlaylistSummary[] | null = null;
+let mockPlaylistDetails: Record<string, PlaylistDetail> = {};
 const invokeCalls: Array<{ command: string; args?: Record<string, unknown> }> = [];
 const openerCalls: Array<{ command: "openPath" | "revealItemInDir"; path: string }> = [];
 
 
 let mockEntries: MockEntry[] = initialEntries();
 let mockTrashEntries: MockEntry[] = [];
+
+function defaultPlaylistSummary(repoId = "repo-main-001"): PlaylistSummary {
+  return {
+    playlistId: "playlist-mock",
+    repoId,
+    name: "Mock Playlist",
+    playerTypeId: "momobako.playlist.audio-sequence",
+    playerPluginId: "momobako.preview.media",
+    playerLabel: "音频顺序播放",
+    fileClass: "audio",
+    itemCount: 1,
+    sortOrder: 0,
+    createdAt: "2026-06-05T00:18:00Z",
+    updatedAt: "2026-06-05T00:18:00Z",
+  };
+}
+
+function defaultPlaylistDetail(repoId = "repo-main-001", playlistId = "playlist-mock"): PlaylistDetail {
+  return {
+    playlist: {
+      ...defaultPlaylistSummary(repoId),
+      playlistId,
+    },
+    items: [{
+      playlistItemId: "playlist-item-mock",
+      playlistId,
+      assetId: "asset-01",
+      path: "asset-01.mp3",
+      filename: "asset-01.mp3",
+      extension: "mp3",
+      thumbnailPath: null,
+      status: "ready",
+      statusReason: null,
+      sortOrder: 0,
+      addedAt: "2026-06-05T00:18:00Z",
+    }],
+  };
+}
 
 function getParentPath(path: string) {
   const index = path.lastIndexOf("/");
@@ -413,6 +455,27 @@ function previewPluginModuleSource(pluginId: string) {
       "  const audioExtensions = ['mp3', 'wav', 'ogg', 'flac', 'm4a', 'aac', 'opus'];",
       "  const imageExtensions = ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'avif', 'svg'];",
       "  const videoExtensions = ['mp4', 'mov', 'mkv', 'webm', 'avi', 'm4v'];",
+      "  function createMockRuntime(controller, kind) {",
+      "    const settings = { imageDurationMs: 5000, objectFit: 'contain' };",
+      "    let currentItem = null;",
+      "    let currentTimeMs = 0;",
+      "    let durationMs = kind === 'image' ? settings.imageDurationMs : 180000;",
+      "    let timer = null;",
+      "    let mediaElement = null;",
+      "    function emitTime() { controller.onEvent({ type: 'time', currentTimeMs, durationMs }); }",
+      "    function stopTimer() { if (timer) { clearInterval(timer); timer = null; } }",
+      "    function startTimer() { stopTimer(); timer = setInterval(() => { currentTimeMs += 1000; if (currentTimeMs >= durationMs) { currentTimeMs = durationMs; emitTime(); stopTimer(); controller.onEvent({ type: 'state', isPlaying: false }); controller.onEvent({ type: 'ended' }); return; } emitTime(); }, 1000); }",
+      "    function mountMockNode(item) { controller.mountTarget.replaceChildren(); const node = document.createElement(kind === 'video' ? 'video' : kind === 'audio' ? 'audio' : 'img'); node.className = `media-playlist-runtime__media mock-playlist-runtime-${kind}`; node.dataset.path = item.path; node.style.objectFit = settings.objectFit; if (kind !== 'image') { node.controls = true; node.addEventListener('timeupdate', () => { currentTimeMs = Math.round((node.currentTime ?? 0) * 1000); emitTime(); }); node.addEventListener('ended', () => { stopTimer(); controller.onEvent({ type: 'state', isPlaying: false }); controller.onEvent({ type: 'ended' }); }); } mediaElement = node; controller.mountTarget.append(node); }",
+      "    return {",
+      "      async load(item) { currentItem = item; currentTimeMs = 0; durationMs = kind === 'image' ? settings.imageDurationMs : 180000; mountMockNode(item); controller.onEvent({ type: 'state', canPlay: Boolean(item) }); emitTime(); },",
+      "      play() { if (!currentItem) return; controller.onEvent({ type: 'state', isPlaying: true, canPlay: true }); startTimer(); },",
+      "      pause() { stopTimer(); controller.onEvent({ type: 'state', isPlaying: false }); },",
+      "      seek(timeMs) { currentTimeMs = Math.max(0, Math.min(durationMs, Math.round(timeMs))); if (mediaElement && kind !== 'image') mediaElement.currentTime = currentTimeMs / 1000; emitTime(); },",
+      "      configure(nextSettings = {}) { if (nextSettings.imageDurationMs !== undefined) { settings.imageDurationMs = Math.min(30000, Math.max(2000, Math.round(Number(nextSettings.imageDurationMs)))); } if (nextSettings.objectFit !== undefined) { settings.objectFit = nextSettings.objectFit === 'cover' ? 'cover' : 'contain'; } if (kind === 'image') { durationMs = settings.imageDurationMs; currentTimeMs = Math.min(currentTimeMs, durationMs); emitTime(); } if (mediaElement) mediaElement.style.objectFit = settings.objectFit; },",
+      "      setVolume(value) { if (mediaElement) mediaElement.volume = value; },",
+      "      dispose() { stopTimer(); controller.mountTarget.replaceChildren(); },",
+      "    };",
+      "  }",
       "  const MediaPreviewPlugin = {",
       "    name: 'MediaPreviewPlugin',",
       "    props: { entry: { type: Object, default: null }, repoId: { type: String, default: '' } },",
@@ -434,7 +497,7 @@ function previewPluginModuleSource(pluginId: string) {
       "      const extensionLabel = computed(() => props.entry?.extension?.toUpperCase() || 'AUDIO');",
       "      const audioArtworkUrl = computed(() => audioArtworkPath.value ? ctx.fileSrc(audioArtworkPath.value) : null);",
       "      const lyricsPlaceholder = computed(() => lyricsStatus.value === 'loading' ? '读取歌词...' : '暂无歌词');",
-      "      function syncLyricsInset() { const viewport = lyricsViewport.value; if (!viewport) return; lyricsInset.value = Math.max(72, Math.floor(viewport.clientHeight / 2) - 32); }",
+      "      function syncLyricsInset() { const viewport = lyricsViewport.value; if (!viewport) return; lyricsInset.value = Math.max(96, Math.floor(viewport.clientHeight / 2)); }",
       "      function centerActiveLyric() { const viewport = lyricsViewport.value; if (!viewport || activeLyricIndex.value < 0) return; const item = lyricsItems.value[activeLyricIndex.value]; if (!item) return; viewport.scrollTop = Math.max(0, item.offsetTop - (viewport.clientHeight / 2) + (item.clientHeight / 2)); }",
       "      function decodeTextBytes(bytes) { if (bytes.length >= 3 && bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) return new TextDecoder('utf-8').decode(bytes.slice(3)); return new TextDecoder('utf-8').decode(bytes); }",
       "      function timestampToMs(minutes, seconds, fraction) { const minuteValue = Number.parseInt(minutes, 10); const secondValue = Number.parseInt(seconds, 10); const fractionValue = fraction ? Number.parseInt(fraction.padEnd(3, '0').slice(0, 3), 10) : 0; return (minuteValue * 60 * 1000) + (secondValue * 1000) + fractionValue; }",
@@ -451,13 +514,16 @@ function previewPluginModuleSource(pluginId: string) {
       "      return { activeLyricIndex, audioArtworkUrl, entry: props.entry, extensionLabel, lyricsInset, lyricsLines, lyricsPlaceholder, lyricsViewport, mediaKind, setLyricItemRef, sourceMediaType, sourceUrl, state, errorMessage, onAudioTimeUpdate(event) { currentPlaybackMs.value = Math.round((event.target?.currentTime ?? 0) * 1000); } };",
       "    },",
       "    render() {",
-      "      if (this.sourceUrl && this.mediaKind === 'audio') return h('div', { class: 'media-preview media-preview--audio' }, [h('div', { class: 'media-preview__audio-main' }, [h('div', { class: 'media-preview__audio-art', 'aria-hidden': 'true' }, [this.audioArtworkUrl ? h('img', { class: 'media-preview__audio-cover', src: this.audioArtworkUrl, alt: '' }) : h('span', { class: 'media-preview__audio-chip' }, this.extensionLabel)]), h('section', { class: 'media-preview__audio-panel', 'aria-label': '歌词面板' }, [h('header', { class: 'media-preview__audio-panel-head' }, [h('strong', this.entry?.name ?? ''), h('span', { class: 'media-preview__audio-chip' }, this.extensionLabel)]), h('div', { ref: 'lyricsViewport', class: ['media-preview__audio-lyrics', { 'media-preview__audio-lyrics--empty': !this.lyricsLines.length }] }, this.lyricsLines.length ? [h('div', { class: 'media-preview__audio-lyrics-track', style: { '--lyrics-inset': `${this.lyricsInset}px` } }, this.lyricsLines.map((line, index) => h('button', { key: line.id, type: 'button', class: ['media-preview__audio-lyric', { 'is-active': index === this.activeLyricIndex, 'is-passed': this.activeLyricIndex > index, 'is-timed': line.timeMs != null }], disabled: line.timeMs == null, ref: (element) => this.setLyricItemRef(index, element) }, line.text)))] : [h('span', this.lyricsPlaceholder)])])]), h('audio', { class: 'media-preview__audio-control', controls: true, preload: 'metadata', onTimeupdate: this.onAudioTimeUpdate }, [h('source', { src: this.sourceUrl, type: this.sourceMediaType })])]);",
+      "      if (this.sourceUrl && this.mediaKind === 'audio') return h('div', { class: 'media-preview media-preview--audio' }, [h('div', { class: 'media-preview__audio-layout' }, [h('section', { class: 'media-preview__audio-stage', 'aria-label': '音频封面' }, [h('div', { class: 'media-preview__audio-record' }, [h('div', { class: 'media-preview__audio-art', 'aria-hidden': 'true' }, [this.audioArtworkUrl ? h('img', { class: 'media-preview__audio-cover', src: this.audioArtworkUrl, alt: '' }) : h('span', { class: 'media-preview__audio-chip' }, this.extensionLabel)])]), h('div', { class: 'media-preview__audio-caption' }, [h('h2', this.entry?.name ?? ''), h('p', this.entry?.path ?? ''), h('div', { class: 'media-preview__audio-meta' }, [h('span', this.extensionLabel)])])]), h('section', { class: 'media-preview__audio-info', 'aria-label': '歌词' }, [h('section', { class: 'media-preview__audio-panel', 'aria-label': '歌词面板' }, [h('div', { ref: 'lyricsViewport', class: ['media-preview__audio-lyrics', { 'media-preview__audio-lyrics--empty': !this.lyricsLines.length }] }, this.lyricsLines.length ? [h('div', { class: 'media-preview__audio-lyrics-track', style: { '--lyrics-inset': `${this.lyricsInset}px` } }, this.lyricsLines.map((line, index) => h('button', { key: line.id, type: 'button', class: ['media-preview__audio-lyric', { 'is-active': index === this.activeLyricIndex, 'is-passed': this.activeLyricIndex > index, 'is-timed': line.timeMs != null }], disabled: line.timeMs == null, ref: (element) => this.setLyricItemRef(index, element) }, line.text)))] : [h('span', this.lyricsPlaceholder)])])])]), h('div', { class: 'media-preview__audio-control-bar' }, [h('audio', { class: 'media-preview__audio-control', controls: true, preload: 'metadata', onTimeupdate: this.onAudioTimeUpdate }, [h('source', { src: this.sourceUrl, type: this.sourceMediaType })])])]);",
       "      if (this.sourceUrl && this.mediaKind === 'image') return h('section', { class: 'mock-preview-plugin' }, [h('img', { class: 'media-preview__image', src: this.sourceUrl, alt: '' })]);",
       "      if (this.sourceUrl && this.mediaKind === 'video') return h('section', { class: 'mock-preview-plugin' }, [h('video', { class: 'media-preview__video', controls: true }, [h('source', { src: this.sourceUrl, type: this.sourceMediaType })])]);",
       "      return h('section', { class: 'mock-preview-plugin' });",
       "    },",
       "  };",
       "  ctx.registerPreview({ supportedExtensions: [...imageExtensions, ...videoExtensions, ...audioExtensions], component: MediaPreviewPlugin });",
+      "  ctx.registerPlaylistPlayer({ playerTypeId: 'momobako.playlist.image-slideshow', label: '图片幻灯片', fileClass: 'image', supportedExtensions: imageExtensions, supportsSeek: false, supportsVolume: false, supportsPreviewNavigation: true, description: '按顺序展示图片并交由宿主处理队列模式。', createRuntime(controller) { return createMockRuntime(controller, 'image'); } });",
+      "  ctx.registerPlaylistPlayer({ playerTypeId: 'momobako.playlist.audio-sequence', label: '音频顺序播放', fileClass: 'audio', supportedExtensions: audioExtensions, supportsSeek: true, supportsVolume: true, supportsPreviewNavigation: true, description: '复用媒体能力播放音频队列。', createRuntime(controller) { return createMockRuntime(controller, 'audio'); } });",
+      "  ctx.registerPlaylistPlayer({ playerTypeId: 'momobako.playlist.video-sequence', label: '视频顺序播放', fileClass: 'video', supportedExtensions: videoExtensions, supportsSeek: true, supportsVolume: true, supportsPreviewNavigation: true, description: '复用媒体能力播放视频队列。', createRuntime(controller) { return createMockRuntime(controller, 'video'); } });",
       "}",
       "",
     ].join("\n");
@@ -572,6 +638,35 @@ vi.mock("@tauri-apps/api/core", () => ({
         request?.specialLocation,
         request?.repoId ?? "repo-main-001",
       );
+    }
+    if (command === "list_playlists") {
+      const repoId = typeof args?.repoId === "string" ? args.repoId : "repo-main-001";
+      return (mockPlaylists ?? [defaultPlaylistSummary(repoId)]).map((playlist) => ({
+        ...playlist,
+        repoId,
+      }));
+    }
+    if (command === "get_playlist_detail") {
+      const repoId = typeof args?.repoId === "string" ? args.repoId : "repo-main-001";
+      const playlistId = typeof args?.playlistId === "string" ? args.playlistId : "playlist-mock";
+      return mockPlaylistDetails[playlistId] ?? defaultPlaylistDetail(repoId, playlistId);
+    }
+    if (command === "create_playlist" || command === "update_playlist" || command === "delete_playlist") {
+      return {
+        playlists: mockPlaylists ?? [],
+        playlist: null,
+      };
+    }
+    if (command === "add_playlist_items" || command === "reorder_playlist_items" || command === "remove_playlist_item") {
+      const request = args?.request as { repoId?: string; playlistId?: string } | undefined;
+      return mockPlaylistDetails[request?.playlistId ?? "playlist-mock"] ?? defaultPlaylistDetail(request?.repoId ?? "repo-main-001", request?.playlistId ?? "playlist-mock");
+    }
+    if (command === "set_playlist_membership") {
+      const request = args?.request as { assetId?: string; playlistIds?: string[] } | undefined;
+      return {
+        assetId: request?.assetId ?? "asset-01",
+        playlistIds: request?.playlistIds ?? [],
+      };
     }
     if (command === "list_smart_folders") {
       return buildSmartFolderTree();
@@ -1147,6 +1242,8 @@ afterEach(() => {
   mockSmartFolders = [];
   mockRepositoryActions = [];
   mockPlugins = null;
+  mockPlaylists = null;
+  mockPlaylistDetails = {};
   mockRepositories = [];
   mockEntries = initialEntries();
   mockTrashEntries = [];
@@ -1161,6 +1258,10 @@ export function getInvokeCalls(command?: string) {
 export function seedMockRepository() {
   mockRepositories = [mockSnapshot.repository];
   mockRepositoryActions = defaultRepositoryActions();
+  mockPlaylists = [defaultPlaylistSummary()];
+  mockPlaylistDetails = {
+    "playlist-mock": defaultPlaylistDetail(),
+  };
 }
 
 function createMissingMockRepository() {
@@ -1174,15 +1275,32 @@ function createMissingMockRepository() {
 
 export function seedMissingMockRepository() {
   mockRepositories = [createMissingMockRepository()];
+  mockPlaylists = [defaultPlaylistSummary()];
+  mockPlaylistDetails = {
+    "playlist-mock": defaultPlaylistDetail(),
+  };
 }
 
 export function seedMixedMockRepositories() {
   mockRepositories = [altRepository, createMissingMockRepository()];
   mockRepositoryActions = defaultRepositoryActions();
+  mockPlaylists = [defaultPlaylistSummary()];
+  mockPlaylistDetails = {
+    "playlist-mock": defaultPlaylistDetail(),
+  };
 }
 
 export function seedMockRepositoryActions(actions: RepositoryAction[] = defaultRepositoryActions()) {
   mockRepositoryActions = actions;
+}
+
+export function seedMockPlaylists(playlists: PlaylistSummary[], details: Record<string, PlaylistDetail>) {
+  mockPlaylists = playlists;
+  mockPlaylistDetails = details;
+}
+
+export function seedMockPlugins(plugins: PluginManifest[]) {
+  mockPlugins = plugins;
 }
 
 export function getRelocatedRepositoryPath() {

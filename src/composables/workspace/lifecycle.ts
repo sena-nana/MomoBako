@@ -1,6 +1,8 @@
 import {
   getFileBrowser,
+  getPlaylistDetail,
   getRepositorySnapshot,
+  listPlaylists,
   listSmartFolders,
   listRepositories,
 } from "../../services/repositoryApi";
@@ -8,6 +10,7 @@ import type { RepositorySummary } from "../../types/repository";
 import {
   activeAssetDetail,
   activeAssetId,
+  activePreviewPath,
   activePanel,
   activeRepoId,
   activeSnapshot,
@@ -19,6 +22,9 @@ import {
   fileBrowser,
   fileTree,
   hardlinkCandidates,
+  activePlaylistId,
+  activePlaylistDetail,
+  playlistMemberships,
   isLoadingAssetDetail,
   isLoadingFileBrowser,
   isLoadingSmartFolder,
@@ -35,6 +41,7 @@ import {
   isSyncing,
   lastSyncResult,
   plugins,
+  playlists,
   repositories,
   selectedFilePaths,
   selectionAnchorPath,
@@ -72,8 +79,13 @@ export function resetActiveRepositoryContent() {
   activeSnapshot.value = null;
   activeAssetId.value = null;
   activeAssetDetail.value = null;
+  activePreviewPath.value = null;
   fileBrowser.value = null;
   fileTree.value = [];
+  playlists.value = [];
+  playlistMemberships.value = {};
+  activePlaylistId.value = null;
+  activePlaylistDetail.value = null;
   smartFolders.value = [];
   activeSmartFolderId.value = null;
   smartFolderResult.value = null;
@@ -131,6 +143,7 @@ async function loadInitialRepository(
   const snapshot = await getRepositorySnapshot(nextRepoId);
   activeRepoId.value = nextRepoId;
   activeSnapshot.value = snapshot;
+  playlists.value = snapshot.playlists ?? [];
   smartFolders.value = await listSmartFolders(nextRepoId);
 
   const defaultAssetId = activeAssetId.value && snapshot.assets.some((item) => item.assetId === activeAssetId.value)
@@ -147,6 +160,29 @@ async function loadInitialRepository(
     directoryPath: "",
     includeTree: true,
   });
+  const playlistItems = snapshot.playlists ?? await listPlaylists(nextRepoId);
+  playlists.value = playlistItems;
+  if (playlistItems.length) {
+    const membershipEntries = await Promise.all(playlistItems.map(async (playlist) => {
+      try {
+        return await getPlaylistDetail(nextRepoId, playlist.playlistId);
+      } catch {
+        return null;
+      }
+    }));
+    playlistMemberships.value = membershipEntries.reduce<Record<string, string[]>>((accumulator, detail) => {
+      if (!detail) return accumulator;
+      for (const item of detail.items) {
+        if (!accumulator[item.assetId]) {
+          accumulator[item.assetId] = [];
+        }
+        accumulator[item.assetId].push(detail.playlist.playlistId);
+      }
+      return accumulator;
+    }, {});
+  } else {
+    playlistMemberships.value = {};
+  }
   applyFileBrowserSnapshot(browserSnapshot);
 
   if (defaultAssetId) {

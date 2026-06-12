@@ -24,6 +24,9 @@ use repository_service::{
     HardlinkConfirmResponse, MetadataUpdateRequest, MetadataUpdateResponse,
     PluginArchiveReadRequest, PluginArchiveTextResponse, PluginCallRequest, PluginCallResult,
     PluginEnabledRequest, PluginInstallRequest, PluginManifest, PluginMutationResponse,
+    PlaylistDetail, PlaylistItemRemoveRequest, PlaylistItemsAddRequest, PlaylistItemsOrderRequest,
+    PlaylistMembershipRequest, PlaylistMembershipSnapshot, PlaylistMutationRequest,
+    PlaylistMutationResponse, PlaylistSummary,
     RepositoryAction, RepositoryActionEnabledRequest, RepositoryActionMutationResponse,
     RepositoryActionRunRequest, RepositoryActionRunResponse, RepositoryExportRequest,
     RepositoryExportResponse, RepositoryFolderRequest, RepositoryMutationRequest,
@@ -104,6 +107,98 @@ async fn list_smart_folders(
 ) -> Result<Vec<SmartFolderTreeNode>, String> {
     runtime
         .run_read(move |state| state.list_smart_folders(&repo_id))
+        .await
+}
+
+#[tauri::command]
+async fn list_playlists(
+    repo_id: String,
+    runtime: tauri::State<'_, RepositoryRuntime>,
+) -> Result<Vec<PlaylistSummary>, String> {
+    runtime
+        .run_read(move |state| state.list_playlists(&repo_id))
+        .await
+}
+
+#[tauri::command]
+async fn create_playlist(
+    request: PlaylistMutationRequest,
+    runtime: tauri::State<'_, RepositoryRuntime>,
+) -> Result<PlaylistMutationResponse, String> {
+    runtime
+        .run_write(move |state| state.create_playlist(request))
+        .await
+}
+
+#[tauri::command]
+async fn update_playlist(
+    request: repository_service::PlaylistUpdateRequest,
+    runtime: tauri::State<'_, RepositoryRuntime>,
+) -> Result<PlaylistMutationResponse, String> {
+    runtime
+        .run_write(move |state| state.update_playlist(request))
+        .await
+}
+
+#[tauri::command]
+async fn delete_playlist(
+    repo_id: String,
+    playlist_id: String,
+    runtime: tauri::State<'_, RepositoryRuntime>,
+) -> Result<PlaylistMutationResponse, String> {
+    runtime
+        .run_write(move |state| state.delete_playlist(&repo_id, &playlist_id))
+        .await
+}
+
+#[tauri::command]
+async fn get_playlist_detail(
+    repo_id: String,
+    playlist_id: String,
+    runtime: tauri::State<'_, RepositoryRuntime>,
+) -> Result<PlaylistDetail, String> {
+    runtime
+        .run_read(move |state| state.get_playlist_detail(&repo_id, &playlist_id))
+        .await
+}
+
+#[tauri::command]
+async fn add_playlist_items(
+    request: PlaylistItemsAddRequest,
+    runtime: tauri::State<'_, RepositoryRuntime>,
+) -> Result<PlaylistDetail, String> {
+    runtime
+        .run_write(move |state| state.add_playlist_items(request))
+        .await
+}
+
+#[tauri::command]
+async fn reorder_playlist_items(
+    request: PlaylistItemsOrderRequest,
+    runtime: tauri::State<'_, RepositoryRuntime>,
+) -> Result<PlaylistDetail, String> {
+    runtime
+        .run_write(move |state| state.reorder_playlist_items(request))
+        .await
+}
+
+#[tauri::command]
+async fn remove_playlist_item(
+    request: PlaylistItemRemoveRequest,
+    runtime: tauri::State<'_, RepositoryRuntime>,
+) -> Result<PlaylistDetail, String> {
+    runtime
+        .run_write(move |state| state.remove_playlist_item(request))
+        .await
+}
+
+#[tauri::command]
+async fn set_playlist_membership(
+    request: PlaylistMembershipRequest,
+    runtime: tauri::State<'_, RepositoryRuntime>,
+) -> Result<PlaylistMembershipSnapshot, String> {
+    runtime
+        .run_write(move |state| state.set_playlist_membership(request))
         .await
 }
 
@@ -620,6 +715,15 @@ pub fn run() {
             search_assets,
             update_asset_metadata,
             get_file_browser,
+            list_playlists,
+            create_playlist,
+            update_playlist,
+            delete_playlist,
+            get_playlist_detail,
+            add_playlist_items,
+            reorder_playlist_items,
+            remove_playlist_item,
+            set_playlist_membership,
             list_smart_folders,
             create_smart_folder,
             update_smart_folder,
