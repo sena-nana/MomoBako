@@ -2,7 +2,6 @@ import { computed } from "vue";
 import {
   getAssetDetail,
   getRepositorySnapshot,
-  listSmartFolders,
 } from "../../services/repositoryApi";
 import {
   activeAssetDetail,
@@ -105,6 +104,7 @@ import {
   ensureRepositoryWorkspace as ensureRepositoryWorkspaceLifecycle,
   loadRepositories as loadRepositoriesLifecycle,
   resetActiveRepositoryContent,
+  queueRepositoryBackgroundLoads,
 } from "./lifecycle";
 import {
   deletePluginInWorkspace,
@@ -272,8 +272,6 @@ export async function selectRepository(repoId: string) {
     updateOperationProgress(progressId, { detail: "加载资源索引", value: 46 });
     activeRepoId.value = repoId;
     activeSnapshot.value = snapshot;
-    smartFolders.value = await listSmartFolders(repoId);
-    await refreshRepositoryActions(repoId);
     if (isSwitchingRepository) {
       resetSearchState();
       activeSmartFolderId.value = null;
@@ -288,11 +286,11 @@ export async function selectRepository(repoId: string) {
     activeAssetDetail.value = null;
 
     currentDirectoryPath.value = "";
-    await loadFileBrowserForDirectory("", { includeTree: true });
+    await loadFileBrowserForDirectory("", { includeTree: false });
     if (defaultAssetId) {
       void selectAsset(defaultAssetId);
     }
-    void refreshHardlinkCandidates(repoId);
+    queueRepositoryBackgroundLoads(repoId);
     finishOperationProgress(progressId);
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : String(cause);
@@ -321,7 +319,7 @@ export async function selectAsset(assetId: string) {
 export function setActivePanel(panel: WorkspacePanelKey) {
   activePanel.value = panel;
   if (panel === "files" && activeRepoId.value && fileBrowser.value?.specialLocation === "trash") {
-    void loadFileBrowserForDirectory("", { includeTree: true });
+    void loadFileBrowserForDirectory("", { includeTree: false });
   }
   if (panel === "deleted" && activeRepoId.value) {
     void loadFileBrowserForDirectory("", { specialLocation: "trash" });

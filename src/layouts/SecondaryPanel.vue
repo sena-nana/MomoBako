@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch, type Component } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch, type Component } from "vue";
 import { open } from "@tauri-apps/plugin-dialog";
 import { RouterLink, useRoute, useRouter } from "vue-router";
 import {
@@ -24,6 +24,7 @@ import SmartFolderTreeNode from "../components/SmartFolderTreeNode.vue";
 import TaskPopover from "../components/TaskPopover.vue";
 import { normalizeWorkspaceMovePaths } from "../pages/workspace/dragBehavior";
 import { useRepositoryWorkspace, type WorkspacePanelKey } from "../composables/useRepositoryWorkspace";
+import { scheduleIdleTask } from "../composables/workspace/scheduler";
 import type { FileDeleteMode, RepositoryShortcut, SmartFolder, SmartFolderFilter, SmartFolderTreeNode as SmartFolderTreeNodeType } from "../types/repository";
 
 type PanelKey = Exclude<WorkspacePanelKey, "files" | "search" | "smartFolder" | "actions">;
@@ -102,6 +103,17 @@ const pendingDeleteSmartFolderId = ref("");
 const pendingDeleteSmartFolderLabel = ref("");
 const route = useRoute();
 const router = useRouter();
+const shortcutCounts = shallowRef<Record<ShortcutKey, number>>({
+  all: 0,
+  processing: 0,
+  untagged: 0,
+  deleted: 0,
+});
+const flatSmartFolders = shallowRef<SmartFolder[]>([]);
+const smartFolderById = shallowRef<ReadonlyMap<string, SmartFolder>>(new Map());
+let cancelShortcutCountBuild: (() => void) | null = null;
+let cancelSmartFolderFlatten: (() => void) | null = null;
+let cancelFolderPathValidation: (() => void) | null = null;
 
 const {
   repositories,
@@ -147,12 +159,12 @@ const {
 } = useRepositoryWorkspace();
 
 const shortcuts = computed<ShortcutItem[]>(() => {
-  const assets = activeSnapshot.value?.assets ?? [];
+  const counts = shortcutCounts.value;
   return [
-    { id: "all", label: "全部", count: assets.length, icon: Archive },
-    { id: "processing", label: "处理中", count: assets.filter((item) => item.status === "processing").length, icon: FolderTree },
-    { id: "untagged", label: "未标签", count: assets.filter((item) => item.tags.length === 0).length, icon: Tag },
-    { id: "deleted", label: "已删除", count: 0, icon: Trash2 },
+    { id: "all", label: "全部", count: counts.all, icon: Archive },
+    { id: "processing", label: "处理中", count: counts.processing, icon: FolderTree },
+    { id: "untagged", label: "未标签", count: counts.untagged, icon: Tag },
+    { id: "deleted", label: "已删除", count: counts.deleted, icon: Trash2 },
   ];
 });
 
@@ -188,8 +200,6 @@ const folderDialogPlaceholder = computed(() => (
   folderDialogMode.value === "create" ? "输入文件夹名称" : "输入新的文件夹名称"
 ));
 const folderDialogDisabled = computed(() => !folderDialogValue.value.trim() || isMutatingFiles.value);
-const flatSmartFolders = computed(() => flattenSmartFolders(smartFolders.value));
-const smartFolderById = computed(() => new Map(flatSmartFolders.value.map((item) => [item.smartFolderId, item])));
 const expandedSmartFolderIdSet = computed(() => new Set(expandedSmartFolderIds.value));
 const smartFolderDialogTitle = computed(() => (
   smartFolderDialogMode.value === "create" ? "新建智能文件夹" : "编辑智能文件夹"
@@ -208,19 +218,57 @@ let folderHoverSwitchTimer: number | null = null;
 let pendingHoverFolderPath: string | null = null;
 
 watch(
+  activeSnapshot,
+  (snapshot) => {
+    cancelShortcutCountBuild?.();
+    cancelShortcutCountBuild = scheduleIdleTask(() => {
+      const assets = snapshot?.assets ?? [];
+      let processing = 0;
+      let untagged = 0;
+      for (const asset of assets) {
+        if (asset.status === "processing") processing += 1;
+        if (asset.tags.length === 0) untagged += 1;
+      }
+      shortcutCounts.value = {
+        all: assets.length,
+        processing,
+        untagged,
+        deleted: 0,
+      };
+    }, 200);
+  },
+  { immediate: true },
+);
+
+watch(
+  smartFolders,
+  (nodes) => {
+    cancelSmartFolderFlatten?.();
+    cancelSmartFolderFlatten = scheduleIdleTask(() => {
+      const folders = flattenSmartFolders(nodes);
+      flatSmartFolders.value = folders;
+      smartFolderById.value = new Map(folders.map((item) => [item.smartFolderId, item]));
+    }, 200);
+  },
+  { immediate: true },
+);
+
+watch(
   fileTreeNodes,
   (nodes) => {
-    const validPaths = new Set<string>([""]);
-    const collectPaths = (items: typeof nodes) => {
-      for (const item of items) {
-        validPaths.add(item.path);
-        collectPaths(item.children);
-      }
-    };
-    collectPaths(nodes);
-    expandedFolderPaths.value = expandedFolderPaths.value.filter((path) => validPaths.has(path));
+    cancelFolderPathValidation?.();
+    cancelFolderPathValidation = scheduleIdleTask(() => {
+      const validPaths = new Set<string>([""]);
+      const collectPaths = (items: typeof nodes) => {
+        for (const item of items) {
+          validPaths.add(item.path);
+          collectPaths(item.children);
+        }
+      };
+      collectPaths(nodes);
+      expandedFolderPaths.value = expandedFolderPaths.value.filter((path) => validPaths.has(path));
+    }, 200);
   },
-  { deep: true },
 );
 
 watch(
@@ -954,6 +1002,9 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   clearFolderDragHover();
+  cancelShortcutCountBuild?.();
+  cancelSmartFolderFlatten?.();
+  cancelFolderPathValidation?.();
   window.removeEventListener("momo:add-repository", handleAddRepositoryRequest);
   document.removeEventListener("keydown", handleDocumentKeydown);
   document.removeEventListener("pointerdown", handleDocumentPointerDown, true);

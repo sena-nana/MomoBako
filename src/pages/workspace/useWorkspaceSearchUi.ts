@@ -1,10 +1,11 @@
-import { computed, ref, type ComputedRef } from "vue";
+import { computed, ref, shallowRef, watch, type ComputedRef } from "vue";
 import { splitListInput } from "../../composables/workspace/filterInputs";
 import type {
   FileBrowserSnapshot,
   RepositorySnapshot,
   SearchHit,
 } from "../../types/repository";
+import { scheduleIdleTask, yieldEvery } from "../../composables/workspace/scheduler";
 
 type SearchFilterListKey = "tags" | "formats" | "colors" | "shapes";
 
@@ -60,12 +61,14 @@ const filterColorMap: Record<string, string> = {
   灰色: "#8c9299",
 };
 
-function uniqueSorted(values: Array<string | null | undefined>) {
-  return Array.from(new Set(
-    values
-      .map((value) => value?.trim() ?? "")
-      .filter(Boolean),
-  )).sort((left, right) => left.localeCompare(right, "zh-CN"));
+async function uniqueSortedAsync(values: Array<string | null | undefined>) {
+  const unique = new Set<string>();
+  for (let index = 0; index < values.length; index += 1) {
+    const value = values[index]?.trim() ?? "";
+    if (value) unique.add(value);
+    await yieldEvery(index);
+  }
+  return Array.from(unique).sort((left, right) => left.localeCompare(right, "zh-CN"));
 }
 
 function searchResultFormat(result: SearchHit) {
@@ -96,26 +99,74 @@ export function useWorkspaceSearchUi(options: WorkspaceSearchUiOptions) {
   const sortFieldInput = ref("");
   const sortDirectionInput = ref<"asc" | "desc">("asc");
   const limitInput = ref("");
+  const tagFilterOptions = shallowRef<string[]>([]);
+  const formatFilterOptions = shallowRef<string[]>([]);
+  const colorFilterOptions = shallowRef<string[]>([]);
+  const shapeFilterOptions = shallowRef<string[]>([]);
+  let filterOptionsToken = 0;
+  let cancelFilterOptionBuild: (() => void) | null = null;
 
-  function metadataFilterOptions(key: string) {
-    return uniqueSorted([
-      ...options.searchResults.value.map((result) => metadataText(result.metadata, key)),
-      ...(options.fileBrowser.value?.entries.map((entry) => metadataText(entry.metadata ?? {}, key)) ?? []),
+  async function rebuildFilterOptions(token: number) {
+    const assets = options.activeSnapshot.value?.assets ?? [];
+    const results = options.searchResults.value;
+    const tags: Array<string | null | undefined> = [];
+    const formats: Array<string | null | undefined> = [];
+    const colors: Array<string | null | undefined> = [];
+    const shapes: Array<string | null | undefined> = [];
+
+    for (let index = 0; index < assets.length; index += 1) {
+      const asset = assets[index];
+      tags.push(...asset.tags);
+      formats.push(asset.extension);
+      await yieldEvery(index);
+      if (token !== filterOptionsToken) return;
+    }
+    for (let index = 0; index < results.length; index += 1) {
+      const result = results[index];
+      tags.push(...result.tags);
+      formats.push(searchResultFormat(result));
+      colors.push(metadataText(result.metadata, "color"));
+      shapes.push(metadataText(result.metadata, "shape"));
+      await yieldEvery(index);
+      if (token !== filterOptionsToken) return;
+    }
+    const entries = options.fileBrowser.value?.entries ?? [];
+    for (let index = 0; index < entries.length; index += 1) {
+      colors.push(metadataText(entries[index].metadata ?? {}, "color"));
+      shapes.push(metadataText(entries[index].metadata ?? {}, "shape"));
+      await yieldEvery(index);
+      if (token !== filterOptionsToken) return;
+    }
+
+    const [nextTags, nextFormats, nextColors, nextShapes] = await Promise.all([
+      uniqueSortedAsync(tags),
+      uniqueSortedAsync(formats),
+      uniqueSortedAsync(colors),
+      uniqueSortedAsync(shapes),
     ]);
+    if (token !== filterOptionsToken) return;
+    tagFilterOptions.value = nextTags;
+    formatFilterOptions.value = nextFormats;
+    colorFilterOptions.value = nextColors;
+    shapeFilterOptions.value = nextShapes;
   }
 
-  const tagFilterOptions = computed(() => uniqueSorted([
-    ...(options.activeSnapshot.value?.assets.flatMap((asset) => asset.tags) ?? []),
-    ...options.searchResults.value.flatMap((result) => result.tags),
-  ]));
-
-  const formatFilterOptions = computed(() => uniqueSorted([
-    ...(options.activeSnapshot.value?.assets.map((asset) => asset.extension) ?? []),
-    ...options.searchResults.value.map(searchResultFormat),
-  ]));
-
-  const colorFilterOptions = computed(() => metadataFilterOptions("color"));
-  const shapeFilterOptions = computed(() => metadataFilterOptions("shape"));
+  watch(
+    () => [
+      options.activeSnapshot.value,
+      options.fileBrowser.value,
+      options.searchResults.value,
+    ] as const,
+    () => {
+      filterOptionsToken += 1;
+      const token = filterOptionsToken;
+      cancelFilterOptionBuild?.();
+      cancelFilterOptionBuild = scheduleIdleTask(() => {
+        void rebuildFilterOptions(token);
+      }, 300);
+    },
+    { immediate: true },
+  );
 
   const searchResultScopeLabel = computed(() => (
     options.hasActiveFilters.value
