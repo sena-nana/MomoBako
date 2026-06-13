@@ -12,8 +12,8 @@ import {
   PerspectiveCamera,
   Scene,
   Vector3,
-} from "three";
-import { WebGPURenderer } from "three/webgpu";
+  WebGPURenderer,
+} from "three/webgpu";
 import { MToonMaterialLoaderPlugin, VRMLoaderPlugin, VRMMetaLoaderPlugin, VRMUtils, type VRM } from "@pixiv/three-vrm";
 import { MToonNodeMaterial } from "@pixiv/three-vrm/nodes";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";

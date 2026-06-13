@@ -455,6 +455,13 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@dimforge/rapier3d-compat@npm:~0.12.0":
+  version: 0.12.0
+  resolution: "@dimforge/rapier3d-compat@npm:0.12.0"
+  checksum: 10c0/c66c24f90649c0fc870679c12e7fec1a111080d44450169b57561f957d7b6b284ad8a3ceeba95533e213176ea171351acebd3dd43885fafb33f18bfbd9d507db
+  languageName: node
+  linkType: hard
+
 "@docsearch/css@npm:3.8.2":
   version: 3.8.2
   resolution: "@docsearch/css@npm:3.8.2"
@@ -812,6 +819,142 @@ __metadata:
   version: 0.133.0
   resolution: "@oxc-project/types@npm:0.133.0"
   checksum: 10c0/70c57ba58644f7ec217b670c301801f4d06995f4ccdba6b2bd106ea3e5ee49d616573e6ef8d55530b87571a960696543687f3850e87ad173d3f88965c30cdd63
+  languageName: node
+  linkType: hard
+
+"@pixiv/three-vrm-core@npm:3.5.3":
+  version: 3.5.3
+  resolution: "@pixiv/three-vrm-core@npm:3.5.3"
+  dependencies:
+    "@pixiv/types-vrm-0.0": "npm:3.5.3"
+    "@pixiv/types-vrmc-vrm-1.0": "npm:3.5.3"
+  peerDependencies:
+    three: ">=0.137"
+  checksum: 10c0/b36ec0d5e085fc5fe55454abfc959f21c6018484a2ec2f1fe8f4f8b823cf4784c1d5666c4b93568dfa80df739945ff9e4cd2d9cb3a2d93d49595539ae162e456
+  languageName: node
+  linkType: hard
+
+"@pixiv/three-vrm-materials-hdr-emissive-multiplier@npm:3.5.3":
+  version: 3.5.3
+  resolution: "@pixiv/three-vrm-materials-hdr-emissive-multiplier@npm:3.5.3"
+  dependencies:
+    "@pixiv/types-vrmc-materials-hdr-emissive-multiplier-1.0": "npm:3.5.3"
+  peerDependencies:
+    three: ">=0.137"
+  checksum: 10c0/8a18ce9da410a224a9672b9ec74912929e669675a5960578c86d078bd43de0107b91162bdde018fdce2f85a1538fbb5e29917e33d063ea04a4f3d33d76f98b01
+  languageName: node
+  linkType: hard
+
+"@pixiv/three-vrm-materials-mtoon@npm:3.5.3":
+  version: 3.5.3
+  resolution: "@pixiv/three-vrm-materials-mtoon@npm:3.5.3"
+  dependencies:
+    "@pixiv/types-vrm-0.0": "npm:3.5.3"
+    "@pixiv/types-vrmc-materials-mtoon-1.0": "npm:3.5.3"
+  peerDependencies:
+    three: ">=0.137"
+  checksum: 10c0/20f56e1f68e1b89125df8d502af430c4dded2605a8e4b6041b3b901c96e1901383d0a135a3058d3faeaec3550c79460171532053a5c8184811d1af40ad3a7b4f
+  languageName: node
+  linkType: hard
+
+"@pixiv/three-vrm-materials-v0compat@npm:3.5.3":
+  version: 3.5.3
+  resolution: "@pixiv/three-vrm-materials-v0compat@npm:3.5.3"
+  dependencies:
+    "@pixiv/types-vrm-0.0": "npm:3.5.3"
+    "@pixiv/types-vrmc-materials-mtoon-1.0": "npm:3.5.3"
+  peerDependencies:
+    three: ">=0.137"
+  checksum: 10c0/253ef2bf3b019f5fc43b5d0a6072ad4190397c9683fee89db01528408a0e1a4c29d94f79cea9d932cf9ac21a0d80c8e656a5fb6cbcb676d36371a3e19377646c
+  languageName: node
+  linkType: hard
+
+"@pixiv/three-vrm-node-constraint@npm:3.5.3":
+  version: 3.5.3
+  resolution: "@pixiv/three-vrm-node-constraint@npm:3.5.3"
+  dependencies:
+    "@pixiv/types-vrmc-node-constraint-1.0": "npm:3.5.3"
+  peerDependencies:
+    three: ">=0.137"
+  checksum: 10c0/b96ed0a4eb7d42d635d066936094891a574844edb0c6ef167808f6296317f9b6d3e9d900bafa5dcfcc9799cb39462d789051c9ad57cae39cb9cf6d26cdd577fe
+  languageName: node
+  linkType: hard
+
+"@pixiv/three-vrm-springbone@npm:3.5.3":
+  version: 3.5.3
+  resolution: "@pixiv/three-vrm-springbone@npm:3.5.3"
+  dependencies:
+    "@pixiv/types-vrm-0.0": "npm:3.5.3"
+    "@pixiv/types-vrmc-springbone-1.0": "npm:3.5.3"
+    "@pixiv/types-vrmc-springbone-extended-collider-1.0": "npm:3.5.3"
+  peerDependencies:
+    three: ">=0.137"
+  checksum: 10c0/490641f17377f2f441152e2f2defeabe4aebf11c3c48bd8e072a9df44f0c5454503ea27ec0e1f84d1ef45890813c781fc1c63c0f3f60d7e5054e156416cc498c
+  languageName: node
+  linkType: hard
+
+"@pixiv/three-vrm@npm:^3.4.5":
+  version: 3.5.3
+  resolution: "@pixiv/three-vrm@npm:3.5.3"
+  dependencies:
+    "@pixiv/three-vrm-core": "npm:3.5.3"
+    "@pixiv/three-vrm-materials-hdr-emissive-multiplier": "npm:3.5.3"
+    "@pixiv/three-vrm-materials-mtoon": "npm:3.5.3"
+    "@pixiv/three-vrm-materials-v0compat": "npm:3.5.3"
+    "@pixiv/three-vrm-node-constraint": "npm:3.5.3"
+    "@pixiv/three-vrm-springbone": "npm:3.5.3"
+  peerDependencies:
+    three: ">=0.137"
+  checksum: 10c0/48498c2d7d33301a83d9ed7b7555969d4ba55a37b9525e5ccd2b0c86e741c81ede6588d9afd4701a261d52d03dc4bdeea9efb9d885d68bdc73206a5436f2a593
+  languageName: node
+  linkType: hard
+
+"@pixiv/types-vrm-0.0@npm:3.5.3":
+  version: 3.5.3
+  resolution: "@pixiv/types-vrm-0.0@npm:3.5.3"
+  checksum: 10c0/b8bd1300a6f0068a66a802685ce5f370624c32166a7551fad100366811af6b4b49239f842eb846d8aeb2a6848953f9c9fb67b8f187993708449f808bd2c80d36
+  languageName: node
+  linkType: hard
+
+"@pixiv/types-vrmc-materials-hdr-emissive-multiplier-1.0@npm:3.5.3":
+  version: 3.5.3
+  resolution: "@pixiv/types-vrmc-materials-hdr-emissive-multiplier-1.0@npm:3.5.3"
+  checksum: 10c0/deab4b5bfee813a94f04acf767cc44f12088aa1682c95de4a8c6a6e7ff5f316715fa48fd74e5d63086d6deed5fe5638b2c6ba35c635aa0e9d1875c952c338d0b
+  languageName: node
+  linkType: hard
+
+"@pixiv/types-vrmc-materials-mtoon-1.0@npm:3.5.3":
+  version: 3.5.3
+  resolution: "@pixiv/types-vrmc-materials-mtoon-1.0@npm:3.5.3"
+  checksum: 10c0/a8517247cc1181b798e1424f81c505cea4ee1c6f387a02891949e95ccdea1c54837917b4ecc5245d3fa783259ba1c52d80d13682ffab05a521f37f4a8df1f462
+  languageName: node
+  linkType: hard
+
+"@pixiv/types-vrmc-node-constraint-1.0@npm:3.5.3":
+  version: 3.5.3
+  resolution: "@pixiv/types-vrmc-node-constraint-1.0@npm:3.5.3"
+  checksum: 10c0/4047deb3dda96790c41777de02afdba179213f4a73e3bca7cc00f40daf6493299508ccb14435980a72211f93ff1b2f7629a41b294cc9b5dda8a50a174f8f994e
+  languageName: node
+  linkType: hard
+
+"@pixiv/types-vrmc-springbone-1.0@npm:3.5.3":
+  version: 3.5.3
+  resolution: "@pixiv/types-vrmc-springbone-1.0@npm:3.5.3"
+  checksum: 10c0/6228b39e159518edb44b4982da7b89c87efa3fdca4e872f0a6e0b95c57b7b544b78073344d77ee865045b1464556aa8a4d844c006faacddd6827d7f0b4da921b
+  languageName: node
+  linkType: hard
+
+"@pixiv/types-vrmc-springbone-extended-collider-1.0@npm:3.5.3":
+  version: 3.5.3
+  resolution: "@pixiv/types-vrmc-springbone-extended-collider-1.0@npm:3.5.3"
+  checksum: 10c0/3884c4c892e2ec0490aad94937d5e10dbb0fdf07d2f6a073c5bebdf36ceffb879ed8ceeeb6fbd8bcaeb7973605bcd5e329c4f7e4069fa2bd375a442807c20a70
+  languageName: node
+  linkType: hard
+
+"@pixiv/types-vrmc-vrm-1.0@npm:3.5.3":
+  version: 3.5.3
+  resolution: "@pixiv/types-vrmc-vrm-1.0@npm:3.5.3"
+  checksum: 10c0/ec82b99667ca27ccc30517795ae79357b9503083a525869c5e167db44794e000528ad192b3d8ae662260ccf2dfa75d84ff1f9e57a10b2bc952a03f6386b7e5d0
   languageName: node
   linkType: hard
 
@@ -1527,6 +1670,13 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@tweenjs/tween.js@npm:~23.1.3":
+  version: 23.1.3
+  resolution: "@tweenjs/tween.js@npm:23.1.3"
+  checksum: 10c0/811b30f5f0e7409fb41833401c501c2d6f600eb5f43039dd9067a7f70aff6dad5f5ce1233848e13f0b33a269a160d9c133f344d986cbff4f1f6b72ddecd06c89
+  languageName: node
+  linkType: hard
+
 "@tybys/wasm-util@npm:^0.10.1":
   version: 0.10.2
   resolution: "@tybys/wasm-util@npm:0.10.2"
@@ -1616,6 +1766,27 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@types/stats.js@npm:*":
+  version: 0.17.4
+  resolution: "@types/stats.js@npm:0.17.4"
+  checksum: 10c0/4fe0429998519f0476f03a25b4900b4d4a1474606478657271e40a884f7936ba902ea564b1c95cfd33a8e84af46cef6e1e98bb23e86fd3b6676cd5b974987151
+  languageName: node
+  linkType: hard
+
+"@types/three@npm:^0.184.1":
+  version: 0.184.1
+  resolution: "@types/three@npm:0.184.1"
+  dependencies:
+    "@dimforge/rapier3d-compat": "npm:~0.12.0"
+    "@tweenjs/tween.js": "npm:~23.1.3"
+    "@types/stats.js": "npm:*"
+    "@types/webxr": "npm:>=0.5.17"
+    fflate: "npm:~0.8.2"
+    meshoptimizer: "npm:~1.1.1"
+  checksum: 10c0/de5d9d1c9c2ff9642ced8d3567293a2a0b1c4550decea9073fd766a469ab72e0502014caf499d1db98ab0036ee28060e47b19acccd0ca96438883bbe1210c37c
+  languageName: node
+  linkType: hard
+
 "@types/unist@npm:*, @types/unist@npm:^3.0.0":
   version: 3.0.3
   resolution: "@types/unist@npm:3.0.3"
@@ -1627,6 +1798,13 @@ __metadata:
   version: 0.0.21
   resolution: "@types/web-bluetooth@npm:0.0.21"
   checksum: 10c0/5f47c5ec452ca31e6a9b44c8aaa54b66c4f57d4aca00166c45902a3883139580e14b254b774172ff982ba4458cc444b5aa59bb4573c2fd34562cfa599721f8e4
+  languageName: node
+  linkType: hard
+
+"@types/webxr@npm:>=0.5.17":
+  version: 0.5.24
+  resolution: "@types/webxr@npm:0.5.24"
+  checksum: 10c0/ff59ffd390d06ca3f89ab2531d583ac10bc5e2ab82e5a01ecc40fbc365224a3375e7caa5b14649cf6141db21fb024940da7ad2bd8faa3cd497a6665257cb53b5
   languageName: node
   linkType: hard
 
@@ -2863,6 +3041,13 @@ __metadata:
   languageName: node
   linkType: hard
 
+"fflate@npm:~0.8.2":
+  version: 0.8.3
+  resolution: "fflate@npm:0.8.3"
+  checksum: 10c0/eab181ca37f5348ae76d4b6f840e0026e30220e33153289ac942222d8b9638237d486507dbcc09878d724095bd354993a2ee48bbee99c8f2c6440d4448719aa7
+  languageName: node
+  linkType: hard
+
 "focus-trap@npm:^7.6.4":
   version: 7.8.0
   resolution: "focus-trap@npm:7.8.0"
@@ -3613,6 +3798,13 @@ __metadata:
   languageName: node
   linkType: hard
 
+"meshoptimizer@npm:~1.1.1":
+  version: 1.1.1
+  resolution: "meshoptimizer@npm:1.1.1"
+  checksum: 10c0/aacd816cbe206e49f16c88ed8b13deafec40cdb8b844080b6d614b4d945dfc7242d5dccfbc1269375a5d4dce2f354261c107d3ce6e564961bd9a220e4616dafb
+  languageName: node
+  linkType: hard
+
 "micromark-util-character@npm:^2.0.0":
   version: 2.1.1
   resolution: "micromark-util-character@npm:2.1.1"
@@ -3717,6 +3909,7 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "momobako@workspace:."
   dependencies:
+    "@pixiv/three-vrm": "npm:^3.4.5"
     "@tauri-apps/api": "npm:^2"
     "@tauri-apps/cli": "npm:^2"
     "@tauri-apps/plugin-dialog": "npm:^2"
@@ -3725,10 +3918,12 @@ __metadata:
     "@testing-library/dom": "npm:^10.4.1"
     "@testing-library/jest-dom": "npm:^6.9.1"
     "@testing-library/vue": "npm:^8.1.0"
+    "@types/three": "npm:^0.184.1"
     "@vitejs/plugin-vue": "npm:^6.0.7"
     "@vue/compiler-sfc": "npm:^3.5.35"
     jsdom: "npm:^29.1.1"
     lucide-vue-next: "npm:^1.0.0"
+    three: "npm:^0.184.0"
     typescript: "npm:~6.0.3"
     vite: "npm:^8.0.16"
     vitepress: "npm:^1.6.4"
@@ -4607,6 +4802,13 @@ __metadata:
     minizlib: "npm:^3.1.0"
     yallist: "npm:^5.0.0"
   checksum: 10c0/8f039edb1d12fdd7df6c6f9877d125afe9f3da3f5f9317df326fdd090d48793d6998cede1506a1471f3e3a250db270a89dace28005eb5e99c5a9132d704ac956
+  languageName: node
+  linkType: hard
+
+"three@npm:^0.184.0":
+  version: 0.184.0
+  resolution: "three@npm:0.184.0"
+  checksum: 10c0/6af4a36dd97e7082c8daca57af162a36df0ca18337a805913bdb6787dd5b2626face8b51d361a0cb2f767e18fdb1ad7e73ab945ae32647741af9278311f5369d
   languageName: node
   linkType: hard
 
