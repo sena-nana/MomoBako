@@ -923,6 +923,24 @@ pub struct PluginCallResult {
     pub plugin_id: String,
     pub method: String,
     pub payload: serde_json::Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runtime: Option<PluginCallRuntime>,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginCallRuntime {
+    pub degraded: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub degradation_reason: Option<String>,
+    pub dependency_status: PluginDependencyStatus,
+}
+
+#[derive(Debug)]
+struct PluginRuntimeCallResult {
+    plugin_id: String,
+    payload: serde_json::Value,
+    runtime: Option<PluginCallRuntime>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -2629,15 +2647,16 @@ impl RepositoryState {
         } else {
             request.payload
         };
-        let response = backend_plugin_registry(&self.root).call(
+        let response = backend_plugin_registry(&self.root).call_with_runtime(
             &request.plugin_id,
             &request.method,
             payload,
         )?;
         Ok(PluginCallResult {
-            plugin_id: request.plugin_id,
+            plugin_id: response.plugin_id,
             method: request.method,
-            payload: response,
+            payload: response.payload,
+            runtime: response.runtime,
         })
     }
 
@@ -9550,6 +9569,18 @@ impl BackendPluginRegistry {
         manifests
     }
 
+    fn resolved_manifests_by_id(&self) -> BTreeMap<String, PluginManifest> {
+        self.list_manifests()
+            .into_iter()
+            .map(|manifest| (manifest.plugin_id.clone(), manifest))
+            .collect()
+    }
+
+    fn resolved_manifest(&self, plugin_id: &str) -> Option<PluginManifest> {
+        let normalized = self.normalize_plugin_id(plugin_id);
+        self.resolved_manifests_by_id().remove(normalized.as_str())
+    }
+
     fn manifest(&self, plugin_id: &str) -> Option<&PluginManifest> {
         let normalized = self.normalize_plugin_id(plugin_id);
         self.registrations
@@ -9576,33 +9607,60 @@ impl BackendPluginRegistry {
         method: &str,
         payload: serde_json::Value,
     ) -> Result<serde_json::Value, String> {
+        self.call_with_runtime(plugin_id, method, payload)
+            .map(|result| result.payload)
+    }
+
+    fn call_with_runtime(
+        &self,
+        plugin_id: &str,
+        method: &str,
+        payload: serde_json::Value,
+    ) -> Result<PluginRuntimeCallResult, String> {
         let normalized = self.normalize_plugin_id(plugin_id);
         let registration = self
             .registrations
             .get(normalized.as_str())
             .ok_or_else(|| format!("unsupported plugin: {plugin_id}"))?;
-        if !registration.manifest.enabled {
+        let resolved_manifest = self
+            .resolved_manifest(&normalized)
+            .unwrap_or_else(|| registration.manifest.clone());
+        if !resolved_manifest.enabled
+            || matches!(
+                resolved_manifest.status.as_str(),
+                "disabled" | "unavailable" | "error"
+            )
+        {
+            let reason = resolved_manifest
+                .disable_reason
+                .as_deref()
+                .unwrap_or("插件不可用。");
             return Err(format!(
-                "plugin is disabled: {}",
-                registration.manifest.plugin_id
+                "plugin call blocked by dependency status: {} {method} ({reason})",
+                resolved_manifest.plugin_id
             ));
         }
-        if let Some(native) = &registration.native {
-            return native.call(method, payload);
-        }
-        if embedded_local_filesystem_fallback_enabled(&registration.manifest.plugin_id) {
-            return call_builtin_local_filesystem(method, payload);
-        }
-        if let Some(error) = &registration.load_error {
+        let runtime = plugin_call_runtime(&resolved_manifest);
+        let response = if let Some(native) = &registration.native {
+            native.call(method, payload)?
+        } else if embedded_local_filesystem_fallback_enabled(&registration.manifest.plugin_id) {
+            call_builtin_local_filesystem(method, payload)?
+        } else if let Some(error) = &registration.load_error {
             return Err(format!(
                 "plugin runtime is not available: {} ({error})",
                 registration.manifest.plugin_id
             ));
-        }
-        Err(format!(
-            "plugin runtime is not available: {}",
-            registration.manifest.plugin_id
-        ))
+        } else {
+            return Err(format!(
+                "plugin runtime is not available: {}",
+                registration.manifest.plugin_id
+            ));
+        };
+        Ok(PluginRuntimeCallResult {
+            plugin_id: resolved_manifest.plugin_id,
+            payload: response,
+            runtime,
+        })
     }
 
     fn playlist_players(&self) -> Vec<PlaylistPlayerRegistration> {
@@ -9659,14 +9717,26 @@ impl BackendPluginRegistry {
 
     fn metadata_default_providers(&self) -> Vec<(String, String)> {
         let mut providers = Vec::new();
+        let resolved_manifests = self.resolved_manifests_by_id();
         for registration in self.registrations.values() {
-            if !registration.manifest.enabled || registration.manifest.status == "error" {
-                continue;
-            }
-            let Some(contributes) = registration.manifest.contributes.as_object() else {
+            let Some(manifest) = resolved_manifests.get(&registration.manifest.plugin_id) else {
                 continue;
             };
-            let Some(defaults) = contributes.get("metadataDefaults").and_then(|value| value.as_object()) else {
+            if !manifest.enabled
+                || matches!(
+                    manifest.status.as_str(),
+                    "disabled" | "unavailable" | "error"
+                )
+            {
+                continue;
+            }
+            let Some(contributes) = manifest.contributes.as_object() else {
+                continue;
+            };
+            let Some(defaults) = contributes
+                .get("metadataDefaults")
+                .and_then(|value| value.as_object())
+            else {
                 continue;
             };
             let Some(action) = defaults
@@ -9677,7 +9747,7 @@ impl BackendPluginRegistry {
             else {
                 continue;
             };
-            providers.push((registration.manifest.plugin_id.clone(), action.to_string()));
+            providers.push((manifest.plugin_id.clone(), action.to_string()));
         }
         providers.sort_by(|left, right| left.0.cmp(&right.0).then_with(|| left.1.cmp(&right.1)));
         providers
@@ -9711,6 +9781,17 @@ impl NativePlugin {
                 .unwrap_or_else(|| "plugin call failed without an error message".to_string()))
         }
     }
+}
+
+fn plugin_call_runtime(manifest: &PluginManifest) -> Option<PluginCallRuntime> {
+    if !manifest.degraded {
+        return None;
+    }
+    Some(PluginCallRuntime {
+        degraded: true,
+        degradation_reason: manifest.degradation_reason.clone(),
+        dependency_status: manifest.dependency_status.clone(),
+    })
 }
 
 fn backend_plugin_registry(service_root: &Path) -> BackendPluginRegistry {
@@ -14445,6 +14526,157 @@ mod tests {
     }
 
     #[test]
+    fn plugin_call_blocks_missing_required_dependency() {
+        let workspace = TestWorkspace::new("plugin-call-required-missing");
+        let service_root = workspace.path("service");
+        let plugin_root = runtime_plugins_dir(&service_root);
+        write_test_local_filesystem_plugin_archive(
+            &plugin_root,
+            serde_json::json!({ "requires": ["user.required-provider"] }),
+        );
+        let state = RepositoryState::from_root(service_root.clone());
+        let error = state
+            .call_plugin(test_list_files_plugin_call(
+                LEGACY_LOCAL_FILESYSTEM_PLUGIN_ID,
+                workspace.path("repo"),
+            ))
+            .expect_err("missing required dependency should block plugin call");
+
+        assert!(error.contains("plugin call blocked by dependency status"));
+        assert!(error.contains(LOCAL_FILESYSTEM_PLUGIN_ID));
+        assert!(error.contains("filesystem.listFiles"));
+        assert!(error.contains("缺少必需依赖"));
+    }
+
+    #[test]
+    fn plugin_call_blocks_disabled_required_dependency() {
+        let workspace = TestWorkspace::new("plugin-call-required-disabled");
+        let service_root = workspace.path("service");
+        let plugin_root = runtime_plugins_dir(&service_root);
+        write_test_plugin_archive_with_manifest(
+            &plugin_root.join("required-provider.momoplug"),
+            test_plugin_manifest_json(
+                "user.required-provider",
+                "Required Provider",
+                serde_json::json!({}),
+            ),
+        );
+        write_test_local_filesystem_plugin_archive(
+            &plugin_root,
+            serde_json::json!({ "requires": ["user.required-provider"] }),
+        );
+        let state = RepositoryState::from_root(service_root);
+        state
+            .set_plugin_enabled(PluginEnabledRequest {
+                plugin_id: "user.required-provider".to_string(),
+                enabled: false,
+            })
+            .expect("required provider should be disabled");
+
+        let error = state
+            .call_plugin(test_list_files_plugin_call(
+                LOCAL_FILESYSTEM_PLUGIN_ID,
+                workspace.path("repo"),
+            ))
+            .expect_err("disabled required dependency should block plugin call");
+
+        assert!(error.contains("plugin call blocked by dependency status"));
+        assert!(error.contains("必需依赖不可用"));
+        assert!(error.contains("Required Provider"));
+    }
+
+    #[test]
+    fn plugin_call_returns_degraded_runtime_for_disabled_optional_dependency() {
+        let workspace = TestWorkspace::new("plugin-call-optional-disabled");
+        let service_root = workspace.path("service");
+        let repo_root = workspace.path("repo");
+        fs::create_dir_all(&repo_root).expect("repo root should be created");
+        fs::write(repo_root.join("track.mp3"), b"audio").expect("test file should be written");
+        let plugin_root = runtime_plugins_dir(&service_root);
+        write_test_plugin_archive_with_manifest(
+            &plugin_root.join("optional-helper.momoplug"),
+            test_plugin_manifest_json(
+                "user.optional-helper",
+                "Optional Helper",
+                serde_json::json!({}),
+            ),
+        );
+        write_test_local_filesystem_plugin_archive(
+            &plugin_root,
+            serde_json::json!({ "optional": ["user.optional-helper"] }),
+        );
+        let state = RepositoryState::from_root(service_root);
+        state
+            .set_plugin_enabled(PluginEnabledRequest {
+                plugin_id: "user.optional-helper".to_string(),
+                enabled: false,
+            })
+            .expect("optional helper should be disabled");
+
+        let response = state
+            .call_plugin(test_list_files_plugin_call(
+                LEGACY_LOCAL_FILESYSTEM_PLUGIN_ID,
+                repo_root,
+            ))
+            .expect("optional dependency should not block plugin call");
+
+        assert_eq!(response.plugin_id, LOCAL_FILESYSTEM_PLUGIN_ID);
+        assert!(response.payload.is_array());
+        let runtime = response
+            .runtime
+            .expect("degraded runtime context should be returned");
+        assert!(runtime.degraded);
+        assert!(runtime
+            .degradation_reason
+            .as_deref()
+            .unwrap_or_default()
+            .contains("Optional Helper"));
+        assert_eq!(
+            runtime.dependency_status.optional[0].plugin_id,
+            "user.optional-helper"
+        );
+        assert_eq!(runtime.dependency_status.optional[0].status, "disabled");
+    }
+
+    #[test]
+    fn plugin_call_accepts_legacy_required_dependency_id() {
+        let workspace = TestWorkspace::new("plugin-call-legacy-required");
+        let service_root = workspace.path("service");
+        let repo_root = workspace.path("repo");
+        fs::create_dir_all(&repo_root).expect("repo root should be created");
+        let plugin_root = runtime_plugins_dir(&service_root);
+        write_test_plugin_archive_with_manifest(
+            &plugin_root.join("provider.momoplug"),
+            test_plugin_manifest_json(
+                "user.provider",
+                "Provider",
+                serde_json::json!({
+                    "legacyPluginIds": ["legacy.provider"],
+                    "compat": {
+                        "sdkVersion": "1",
+                        "legacyPluginIds": []
+                    }
+                }),
+            ),
+        );
+        write_test_local_filesystem_plugin_archive(
+            &plugin_root,
+            serde_json::json!({ "requires": ["legacy.provider"] }),
+        );
+        let state = RepositoryState::from_root(service_root);
+
+        let response = state
+            .call_plugin(test_list_files_plugin_call(
+                LEGACY_LOCAL_FILESYSTEM_PLUGIN_ID,
+                repo_root,
+            ))
+            .expect("legacy dependency id should resolve before plugin call");
+
+        assert_eq!(response.plugin_id, LOCAL_FILESYSTEM_PLUGIN_ID);
+        assert!(response.runtime.is_none());
+    }
+
+    #[test]
     fn release_plugin_manifest_loading_returns_empty_when_runtime_dir_is_empty() {
         let workspace = TestWorkspace::new("runtime-plugin-empty");
         let manifests = load_plugin_manifests_from_runtime(workspace.path("plugins"));
@@ -14984,6 +15216,46 @@ mod tests {
                 .expect("extra entry should write");
         }
         archive.finish().expect("plugin archive should finish");
+    }
+
+    fn write_test_local_filesystem_plugin_archive(
+        plugin_root: &Path,
+        dependency_overrides: serde_json::Value,
+    ) {
+        let mut manifest = test_plugin_manifest_json(
+            LOCAL_FILESYSTEM_PLUGIN_ID,
+            "Local Filesystem",
+            serde_json::json!({
+                "legacyPluginIds": [LEGACY_LOCAL_FILESYSTEM_PLUGIN_ID],
+                "kind": "filesystem",
+                "category": "source",
+                "type": {
+                    "layer": "source",
+                    "kind": "filesystem"
+                },
+                "capabilities": ["listFiles"],
+                "sdk": "backend",
+                "runtime": "native-dylib",
+                "source": "system"
+            }),
+        );
+        if let (Some(base), Some(extra)) = (manifest.as_object_mut(), dependency_overrides.as_object()) {
+            for (key, value) in extra {
+                base.insert(key.clone(), value.clone());
+            }
+        }
+        write_test_plugin_archive_with_manifest(&plugin_root.join("local-filesystem.momoplug"), manifest);
+    }
+
+    fn test_list_files_plugin_call(plugin_id: &str, repo_root: PathBuf) -> PluginCallRequest {
+        PluginCallRequest {
+            plugin_id: plugin_id.to_string(),
+            method: "filesystem.listFiles".to_string(),
+            payload: serde_json::json!({
+                "repoRoot": repo_root,
+                "config": {}
+            }),
+        }
     }
 
     fn write_test_plugin_archive_without_root_dir(path: &Path, plugin_id: &str) {
