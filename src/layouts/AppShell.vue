@@ -1,11 +1,13 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { RouterView } from "vue-router";
 import { RefreshCw } from "lucide-vue-next";
 import TitleBar from "../components/TitleBar.vue";
 import SecondaryPanel from "./SecondaryPanel.vue";
 import { useRepositoryWorkspace } from "../composables/useRepositoryWorkspace";
+import { usePlaylistPlayer } from "../composables/usePlaylistPlayer";
 import { useResizablePane } from "../composables/useResizablePane";
+import { getPlaylistDetail } from "../services/repositoryApi";
 
 const MIN_WIDTH = 220;
 const MAX_WIDTH = 480;
@@ -29,13 +31,28 @@ function writeStorage(key: string, value: string) {
   }
 }
 
+function readPlaybackSession(repoId: string) {
+  try {
+    return localStorage.getItem(`momobako.playbackSession:${repoId}`);
+  } catch {
+    return null;
+  }
+}
+
 const sidebarCollapsed = ref(readStorage(COLLAPSED_STORAGE_KEY) === "1");
+const playerMountRef = ref<HTMLElement | null>(null);
+
 const {
+  activeRepoId,
+  playlists,
   workspaceStartup,
   ensureRepositoryWorkspace,
 } = useRepositoryWorkspace();
+const player = usePlaylistPlayer();
+
 const isWorkspaceReady = computed(() => workspaceStartup.value.status === "ready");
 const isWorkspaceStartupError = computed(() => workspaceStartup.value.status === "error");
+
 const sidebarWidth = useResizablePane({
   storageKey: WIDTH_STORAGE_KEY,
   minWidth: MIN_WIDTH,
@@ -54,6 +71,32 @@ function retryWorkspaceStartup() {
   void ensureRepositoryWorkspace();
 }
 
+watch(playerMountRef, (element) => {
+  player.attachMountTarget(element);
+}, { immediate: true });
+
+watch(activeRepoId, async (repoId, previousRepoId) => {
+  if (previousRepoId && previousRepoId !== repoId) {
+    await player.stop();
+  }
+});
+
+watch(
+  [activeRepoId, playlists],
+  async ([repoId, playlistItems]) => {
+    if (!repoId || !playlistItems.length || player.activeRepoId.value === repoId || !readPlaybackSession(repoId)) return;
+    const restored = await Promise.all(playlistItems.map(async (playlist) => {
+      const detail = await getPlaylistDetail(repoId, playlist.playlistId);
+      if (!detail) return false;
+      return player.restoreSession(repoId, detail);
+    }));
+    if (!restored.some(Boolean)) {
+      player.clearSession(repoId);
+    }
+  },
+  { immediate: true },
+);
+
 onMounted(() => {
   void ensureRepositoryWorkspace();
 });
@@ -67,7 +110,7 @@ onMounted(() => {
       'is-sidebar-collapsed': sidebarCollapsed,
       'is-starting-workspace': !isWorkspaceReady,
     }"
-    :style="{ '--sidebar-width': sidebarCollapsed ? '0px' : sidebarWidth.width.value + 'px' }"
+    :style="{ '--sidebar-width': sidebarCollapsed ? '0px' : `${sidebarWidth.width.value}px` }"
   >
     <TitleBar
       :left-sidebar-collapsed="sidebarCollapsed"
@@ -121,5 +164,7 @@ onMounted(() => {
       </section>
       <RouterView v-else />
     </main>
+
+    <div ref="playerMountRef" class="workspace-player-host" aria-hidden="true"></div>
   </div>
 </template>

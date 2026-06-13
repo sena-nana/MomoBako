@@ -27,6 +27,7 @@ type WorkspaceContextMenuOptions = {
   chooseCustomThumbnail: (entry: FileBrowserEntry) => void | Promise<void>;
   clearCustomThumbnail: (entry: FileBrowserEntry) => void | Promise<void>;
   deleteContextSelection: (entry: FileBrowserEntry, contextSelectionPaths: string[]) => void | Promise<void>;
+  playlistMenuItems?: (entry: FileBrowserEntry) => ContextMenuItem[];
   openCopyTargetDialog: (entry: FileBrowserEntry) => void | Promise<void>;
   openDirectory: (path: string) => void | Promise<void>;
   openWorkspaceEntry: (path: string) => void | Promise<void>;
@@ -90,6 +91,12 @@ export function useWorkspaceContextMenu(options: WorkspaceContextMenuOptions) {
         onSelect: action.onSelect,
       }))
       : [];
+    const playlistMenuItems = !options.isSmartFolderPanel.value
+      && !options.isTrashPanel.value
+      && entry.kind === "file"
+      && !options.hasMultipleSelection.value
+      ? options.playlistMenuItems?.(entry) ?? []
+      : [];
 
     return [
       ...(options.isTrashPanel.value ? [{
@@ -137,6 +144,11 @@ export function useWorkspaceContextMenu(options: WorkspaceContextMenuOptions) {
         disabled: options.isTrashPanel.value || options.isMutatingFiles.value,
         onSelect: () => options.openCopyTargetDialog(entry),
       },
+      ...(playlistMenuItems.length ? [{
+        id: "playlist-membership",
+        label: "添加到播放集",
+        children: playlistMenuItems,
+      } satisfies ContextMenuItem] : []),
       ...pluginActions,
       {
         id: "thumbnail",

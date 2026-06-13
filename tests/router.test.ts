@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import App from "../src/App.vue";
 import { installContextMenu } from "../src/composables/useContextMenu";
 import { resetRepositoryWorkspaceForTests, useRepositoryWorkspace } from "../src/composables/useRepositoryWorkspace";
+import { usePlaylistPlayer } from "../src/composables/usePlaylistPlayer";
 import { waitForFileBrowserDerivedState } from "../src/composables/workspace/files";
 import { vContextMenu } from "../src/directives/contextMenu";
 import { createMomoBakoRouter } from "../src/router";
@@ -19,16 +20,20 @@ import {
   seedMissingMockRepository,
   seedMixedMockRepositories,
   seedLargeMockDirectory,
+  seedMockPlaylists,
+  seedMockPlugins,
   seedMockRepository,
   seedMockRepositoryPath,
   selectMockFile,
   selectMockFolder,
 } from "./setupTests";
 import { getPreviewPluginForEntry } from "../src/plugins/previewPlugins";
-import type { FileBrowserEntry } from "../src/types/repository";
+import type { FileBrowserEntry, PlaylistDetail, PlaylistSummary } from "../src/types/repository";
+import { createMockPlugins } from "./fixtures/repositoryFixtures";
 
 async function renderApp() {
   resetRepositoryWorkspaceForTests();
+  usePlaylistPlayer().resetPlayerState();
   installContextMenu();
   const router = createMomoBakoRouter(createMemoryHistory());
   await router.push("/");
@@ -48,6 +53,7 @@ async function renderApp() {
 
 async function renderAppWithoutStartupPreload() {
   resetRepositoryWorkspaceForTests();
+  usePlaylistPlayer().resetPlayerState();
   installContextMenu();
   const router = createMomoBakoRouter(createMemoryHistory());
   await router.push("/");
@@ -109,6 +115,45 @@ function fileListItem(path: string) {
   const item = fileListItems().find((element) => element.dataset.entryPath === path);
   expect(item).toBeInstanceOf(HTMLElement);
   return item as HTMLElement;
+}
+
+function setPlaybackSession(repoId: string, session: Record<string, unknown>) {
+  window.localStorage.setItem(`momobako.playbackSession:${repoId}`, JSON.stringify(session));
+}
+
+function audioPlaylist(repoId = "repo-main-001"): PlaylistSummary {
+  return {
+    playlistId: "playlist-mock",
+    repoId,
+    name: "Mock Playlist",
+    playerTypeId: "momobako.playlist.audio-sequence",
+    playerPluginId: "momobako.preview.media",
+    playerLabel: "音频顺序播放",
+    fileClass: "audio",
+    itemCount: 1,
+    sortOrder: 0,
+    createdAt: "2026-06-05T00:18:00Z",
+    updatedAt: "2026-06-05T00:18:00Z",
+  };
+}
+
+function audioPlaylistDetail(repoId = "repo-main-001"): PlaylistDetail {
+  return {
+    playlist: audioPlaylist(repoId),
+    items: [{
+      playlistItemId: "playlist-item-mock",
+      playlistId: "playlist-mock",
+      assetId: "asset-01",
+      path: "asset-01.mp3",
+      filename: "asset-01.mp3",
+      extension: "mp3",
+      thumbnailPath: null,
+      status: "ready",
+      statusReason: null,
+      sortOrder: 0,
+      addedAt: "2026-06-05T00:18:00Z",
+    }],
+  };
 }
 
 function folderTreeItem(path: string) {
@@ -259,6 +304,34 @@ describe("文件管理冒烟", () => {
     expect(getInvokeCalls("get_repository_snapshot").at(-1)?.args).toMatchObject({
       repoId: "repo-main-001",
     });
+  });
+
+  it("启动后会恢复当前资源库的播放会话且不切走文件浏览页", async () => {
+    seedMockRepository();
+    setPlaybackSession("repo-main-001", {
+      repoId: "repo-main-001",
+      playlistId: "playlist-mock",
+      playerTypeId: "momobako.playlist.audio-sequence",
+      currentItemId: "playlist-item-mock",
+      currentTimeMs: 12000,
+      durationMs: 180000,
+      mode: "listLoop",
+      volume: 0.6,
+      isPlaying: false,
+    });
+
+    await renderApp();
+
+    await waitFor(() => {
+      expect(getInvokeCalls("get_playlist_detail").at(-1)?.args).toMatchObject({
+        repoId: "repo-main-001",
+        playlistId: "playlist-mock",
+      });
+    });
+    expect(document.querySelector(".files-browser")).toBeInTheDocument();
+    expect(document.querySelector(".workspace-player")).toBeInTheDocument();
+    expect(screen.getByText("asset-01.mp3")).toBeInTheDocument();
+    expect(screen.getByText(/音频顺序播放/)).toBeInTheDocument();
   });
 
   it("删除丢失资源库会移除注册并切到剩余资源库", async () => {
@@ -768,6 +841,201 @@ describe("文件管理冒烟", () => {
     expect(getPreviewPluginForEntry(previewEntry("mp4"))).toBeNull();
     expect(getPreviewPluginForEntry(previewEntry("mp3"))).toBeNull();
     expect(getPreviewPluginForEntry(previewEntry("vrm"))).toBeNull();
+  });
+
+  it("播放插件缺失时播放集仍可见，但播放操作禁用", async () => {
+    seedMockRepository();
+    seedMockPlaylists([audioPlaylist()], {
+      "playlist-mock": audioPlaylistDetail(),
+    });
+    seedMockPlugins(createMockPlugins().map((plugin) => (
+      plugin.pluginId === "momobako.preview.media"
+        ? { ...plugin, enabled: false, status: "disabled" as const }
+        : plugin
+    )));
+
+    await renderApp();
+
+    expect(await screen.findByText("Mock Playlist")).toBeInTheDocument();
+    const sidebarPlayButtons = screen.getAllByRole("button", { name: "播放播放集" });
+    expect(sidebarPlayButtons[0]).toBeDisabled();
+
+    await fireEvent.click(screen.getByRole("button", { name: /Mock Playlist/ }));
+    const heading = await screen.findByRole("heading", { name: "Mock Playlist" });
+    expect(heading).toBeInTheDocument();
+    expect(screen.getByText(/缺少对应播放插件/)).toBeInTheDocument();
+    const playlistPage = heading.closest(".playlist-page__panel");
+    expect(playlistPage).toBeInstanceOf(HTMLElement);
+    const playButtons = within(playlistPage as HTMLElement).getAllByRole("button", { name: "播放" });
+    expect(playButtons.every((button) => button.hasAttribute("disabled"))).toBe(true);
+  });
+
+  it("侧栏播放播放集只启动播放而不切换主窗体页面", async () => {
+    seedMockRepository();
+    seedMockPlaylists([audioPlaylist()], {
+      "playlist-mock": audioPlaylistDetail(),
+    });
+
+    await renderApp();
+
+    await fireEvent.click(await screen.findByRole("button", { name: "播放播放集" }));
+
+    await waitFor(() => {
+      expect(getInvokeCalls("get_playlist_detail").at(-1)?.args).toMatchObject({
+        repoId: "repo-main-001",
+        playlistId: "playlist-mock",
+      });
+    });
+    expect(document.querySelector(".files-browser")).toBeInTheDocument();
+    expect(document.querySelector(".playlist-page")).not.toBeInTheDocument();
+    expect(document.querySelector(".workspace-player")).toBeInTheDocument();
+    expect(screen.getByText("asset-01.mp3")).toBeInTheDocument();
+  });
+
+  it("文件右键菜单支持通过复选项设置播放集成员关系", async () => {
+    seedMockRepository();
+    const playlist: PlaylistSummary = {
+      ...audioPlaylist(),
+      name: "图片收藏",
+      playerTypeId: "momobako.playlist.image-slideshow",
+      playerLabel: "图片幻灯片",
+      fileClass: "image",
+    };
+    const detail: PlaylistDetail = {
+      playlist,
+      items: [],
+    };
+    seedMockPlaylists([playlist], {
+      [playlist.playlistId]: detail,
+    });
+
+    await renderApp();
+
+    await fireEvent.doubleClick(fileListItem("Backgrounds"));
+    const fileItem = fileListItem("Backgrounds/scene-forest-03.png");
+    await fireEvent.contextMenu(fileItem);
+    expect(await screen.findByText("添加到播放集")).toBeInTheDocument();
+
+    await fireEvent.click(screen.getByRole("menuitem", { name: "图片收藏" }));
+    await waitFor(() => {
+      expect(getInvokeCalls("set_playlist_membership").at(-1)?.args).toMatchObject({
+        request: {
+          repoId: "repo-main-001",
+          assetId: "asset-02",
+          playlistIds: ["playlist-mock"],
+        },
+      });
+    });
+  });
+
+  it("播放集列表支持拖拽排序并保存顺序", async () => {
+    seedMockRepository();
+    const playlist = audioPlaylist();
+    seedMockPlaylists([playlist], {
+      [playlist.playlistId]: {
+        playlist: {
+          ...playlist,
+          itemCount: 2,
+        },
+        items: [
+          {
+            playlistItemId: "playlist-item-1",
+            playlistId: playlist.playlistId,
+            assetId: "asset-01",
+            path: "asset-01.mp3",
+            filename: "asset-01.mp3",
+            extension: "mp3",
+            thumbnailPath: null,
+            status: "ready",
+            statusReason: null,
+            sortOrder: 0,
+            addedAt: "2026-06-05T00:18:00Z",
+          },
+          {
+            playlistItemId: "playlist-item-2",
+            playlistId: playlist.playlistId,
+            assetId: "asset-02",
+            path: "asset-02.mp3",
+            filename: "asset-02.mp3",
+            extension: "mp3",
+            thumbnailPath: null,
+            status: "ready",
+            statusReason: null,
+            sortOrder: 1,
+            addedAt: "2026-06-05T00:19:00Z",
+          },
+        ],
+      },
+    });
+
+    await renderApp();
+
+    await fireEvent.click(screen.getByRole("button", { name: /Mock Playlist/ }));
+    const items = document.querySelectorAll(".playlist-page__item");
+    expect(items).toHaveLength(2);
+
+    await fireEvent.dragStart(items[0]);
+    await fireEvent.drop(items[1]);
+
+    await waitFor(() => {
+      expect(getInvokeCalls("reorder_playlist_items").at(-1)?.args).toMatchObject({
+        request: {
+          repoId: "repo-main-001",
+          playlistId: "playlist-mock",
+          itemIds: ["playlist-item-2", "playlist-item-1"],
+        },
+      });
+    });
+  });
+
+  it("当前播放项预览使用可见播放挂载并保存媒体显示设置", async () => {
+    seedMockRepository();
+    const playlist: PlaylistSummary = {
+      ...audioPlaylist(),
+      name: "图片播放",
+      playerTypeId: "momobako.playlist.image-slideshow",
+      playerLabel: "图片幻灯片",
+      fileClass: "image",
+      itemCount: 1,
+    };
+    seedMockPlaylists([playlist], {
+      [playlist.playlistId]: {
+        playlist,
+        items: [{
+          playlistItemId: "image-item-1",
+          playlistId: playlist.playlistId,
+          assetId: "asset-02",
+          path: "cover-final.psd",
+          filename: "scene-forest-03.png",
+          extension: "png",
+          thumbnailPath: null,
+          status: "ready",
+          statusReason: null,
+          sortOrder: 0,
+          addedAt: "2026-06-05T00:18:00Z",
+        }],
+      },
+    });
+
+    await renderApp();
+    await fireEvent.click(screen.getByRole("button", { name: /图片播放/ }));
+    const playlistPage = await screen.findByRole("heading", { name: "图片播放" });
+    await fireEvent.click(within(playlistPage.closest(".playlist-page__panel") as HTMLElement).getAllByRole("button", { name: "播放" })[0]);
+
+    expect(screen.getByRole("heading", { name: "图片播放" })).toBeInTheDocument();
+    expect(document.querySelector(".files-preview-page__player-mount")).not.toBeInTheDocument();
+    await fireEvent.click((playlistPage.closest(".playlist-page__panel") as HTMLElement).querySelector(".workspace-player__media") as HTMLElement);
+
+    await waitFor(() => {
+      expect(document.querySelector(".files-preview-page__player-mount .media-playlist-runtime--image [data-path='cover-final.psd']")).toBeInTheDocument();
+    });
+    expect(screen.getByRole("heading", { name: "cover-final.psd" })).toBeInTheDocument();
+
+    await fireEvent.update(screen.getByLabelText("图片停留时长"), "7");
+    await fireEvent.click(screen.getByRole("radio", { name: "填充" }));
+
+    expect(localStorage.getItem("momobako.playbackSettings")).toContain("\"imageDurationMs\":7000");
+    expect(localStorage.getItem("momobako.playbackSettings")).toContain("\"objectFit\":\"cover\"");
   });
 
   it("保留目录按需加载，并在结构变化后刷新文件夹树", async () => {

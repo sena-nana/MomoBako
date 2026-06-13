@@ -50,6 +50,7 @@ External/Plugins/.dist/
 External/Plugins/.packages/
 External/Plugins/.yarn/
 .service-data/
+src-tauri/.service-data/
 
 # TypeScript
 *.tsbuildinfo

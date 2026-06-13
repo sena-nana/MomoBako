@@ -24,15 +24,17 @@ use repository_service::{
     HardlinkCandidateResponse, HardlinkConfirmRequest, HardlinkConfirmResponse,
     MetadataUpdateRequest, MetadataUpdateResponse, PluginArchiveReadRequest,
     PluginArchiveTextResponse, PluginCallRequest, PluginCallResult, PluginEnabledRequest,
-    PluginInstallRequest, PluginManifest, PluginMutationResponse, RepositoryAction,
-    RepositoryActionEnabledRequest, RepositoryActionMutationResponse, RepositoryActionRunRequest,
-    RepositoryActionRunResponse, RepositoryExportRequest, RepositoryExportResponse,
-    RepositoryFolderRequest, RepositoryMutationRequest, RepositoryMutationResponse,
-    RepositoryRelocateRequest, RepositorySnapshot, RepositorySummary, RevisionActionRequest,
-    RevisionActionResponse, SearchRequest, SearchResponse, SmartFolderMutationRequest,
-    SmartFolderMutationResponse, SmartFolderResultSnapshot, SmartFolderTreeNode,
-    SmartFolderUpdateRequest, SyncRequest, SyncResult, ThumbnailRequest, ThumbnailResponse,
-    TrashMutationRequest,
+    PluginInstallRequest, PluginManifest, PluginMutationResponse, PlaylistDetail,
+    PlaylistItemRemoveRequest, PlaylistItemsAddRequest, PlaylistItemsOrderRequest,
+    PlaylistMembershipRequest, PlaylistMembershipSnapshot, PlaylistMutationRequest,
+    PlaylistMutationResponse, PlaylistSummary, RepositoryAction, RepositoryActionEnabledRequest,
+    RepositoryActionMutationResponse, RepositoryActionRunRequest, RepositoryActionRunResponse,
+    RepositoryExportRequest, RepositoryExportResponse, RepositoryFolderRequest,
+    RepositoryMutationRequest, RepositoryMutationResponse, RepositoryRelocateRequest,
+    RepositorySnapshot, RepositorySummary, RevisionActionRequest, RevisionActionResponse,
+    SearchRequest, SearchResponse, SmartFolderMutationRequest, SmartFolderMutationResponse,
+    SmartFolderResultSnapshot, SmartFolderTreeNode, SmartFolderUpdateRequest, SyncRequest,
+    SyncResult, ThumbnailRequest, ThumbnailResponse, TrashMutationRequest,
 };
 
 #[tauri::command]
@@ -105,6 +107,98 @@ async fn list_smart_folders(
 ) -> Result<Vec<SmartFolderTreeNode>, String> {
     runtime
         .run_read(move |state| state.list_smart_folders(&repo_id))
+        .await
+}
+
+#[tauri::command]
+async fn list_playlists(
+    repo_id: String,
+    runtime: tauri::State<'_, RepositoryRuntime>,
+) -> Result<Vec<PlaylistSummary>, String> {
+    runtime
+        .run_read(move |state| state.list_playlists(&repo_id))
+        .await
+}
+
+#[tauri::command]
+async fn create_playlist(
+    request: PlaylistMutationRequest,
+    runtime: tauri::State<'_, RepositoryRuntime>,
+) -> Result<PlaylistMutationResponse, String> {
+    runtime
+        .run_write(move |state| state.create_playlist(request))
+        .await
+}
+
+#[tauri::command]
+async fn update_playlist(
+    request: repository_service::PlaylistUpdateRequest,
+    runtime: tauri::State<'_, RepositoryRuntime>,
+) -> Result<PlaylistMutationResponse, String> {
+    runtime
+        .run_write(move |state| state.update_playlist(request))
+        .await
+}
+
+#[tauri::command]
+async fn delete_playlist(
+    repo_id: String,
+    playlist_id: String,
+    runtime: tauri::State<'_, RepositoryRuntime>,
+) -> Result<PlaylistMutationResponse, String> {
+    runtime
+        .run_write(move |state| state.delete_playlist(&repo_id, &playlist_id))
+        .await
+}
+
+#[tauri::command]
+async fn get_playlist_detail(
+    repo_id: String,
+    playlist_id: String,
+    runtime: tauri::State<'_, RepositoryRuntime>,
+) -> Result<PlaylistDetail, String> {
+    runtime
+        .run_read(move |state| state.get_playlist_detail(&repo_id, &playlist_id))
+        .await
+}
+
+#[tauri::command]
+async fn add_playlist_items(
+    request: PlaylistItemsAddRequest,
+    runtime: tauri::State<'_, RepositoryRuntime>,
+) -> Result<PlaylistDetail, String> {
+    runtime
+        .run_write(move |state| state.add_playlist_items(request))
+        .await
+}
+
+#[tauri::command]
+async fn reorder_playlist_items(
+    request: PlaylistItemsOrderRequest,
+    runtime: tauri::State<'_, RepositoryRuntime>,
+) -> Result<PlaylistDetail, String> {
+    runtime
+        .run_write(move |state| state.reorder_playlist_items(request))
+        .await
+}
+
+#[tauri::command]
+async fn remove_playlist_item(
+    request: PlaylistItemRemoveRequest,
+    runtime: tauri::State<'_, RepositoryRuntime>,
+) -> Result<PlaylistDetail, String> {
+    runtime
+        .run_write(move |state| state.remove_playlist_item(request))
+        .await
+}
+
+#[tauri::command]
+async fn set_playlist_membership(
+    request: PlaylistMembershipRequest,
+    runtime: tauri::State<'_, RepositoryRuntime>,
+) -> Result<PlaylistMembershipSnapshot, String> {
+    runtime
+        .run_write(move |state| state.set_playlist_membership(request))
         .await
 }
 
@@ -346,51 +440,65 @@ async fn mutate_trash(
 #[tauri::command]
 async fn create_repository(
     request: RepositoryMutationRequest,
+    app: AppHandle,
     runtime: tauri::State<'_, RepositoryRuntime>,
 ) -> Result<RepositoryMutationResponse, String> {
-    runtime
+    let response = runtime
         .run_repository_collection_write(move |state| state.create_repository(request))
-        .await
+        .await?;
+    refresh_thumbnail_asset_scope(&app, &runtime).await?;
+    Ok(response)
 }
 
 #[tauri::command]
 async fn import_repository(
     request: RepositoryMutationRequest,
+    app: AppHandle,
     runtime: tauri::State<'_, RepositoryRuntime>,
 ) -> Result<RepositoryMutationResponse, String> {
-    runtime
+    let response = runtime
         .run_repository_collection_write(move |state| state.import_repository(request))
-        .await
+        .await?;
+    refresh_thumbnail_asset_scope(&app, &runtime).await?;
+    Ok(response)
 }
 
 #[tauri::command]
 async fn attach_repository_folder(
     request: RepositoryFolderRequest,
+    app: AppHandle,
     runtime: tauri::State<'_, RepositoryRuntime>,
 ) -> Result<RepositoryMutationResponse, String> {
-    runtime
+    let response = runtime
         .run_repository_collection_write(move |state| state.attach_repository_folder(request))
-        .await
+        .await?;
+    refresh_thumbnail_asset_scope(&app, &runtime).await?;
+    Ok(response)
 }
 
 #[tauri::command]
 async fn delete_repository(
     repo_id: String,
+    app: AppHandle,
     runtime: tauri::State<'_, RepositoryRuntime>,
 ) -> Result<(), String> {
     runtime
         .run_repository_collection_write(move |state| state.delete_repository(&repo_id))
-        .await
+        .await?;
+    refresh_thumbnail_asset_scope(&app, &runtime).await
 }
 
 #[tauri::command]
 async fn relocate_repository(
     request: RepositoryRelocateRequest,
+    app: AppHandle,
     runtime: tauri::State<'_, RepositoryRuntime>,
 ) -> Result<RepositoryMutationResponse, String> {
-    runtime
+    let response = runtime
         .run_repository_collection_write(move |state| state.relocate_repository(request))
-        .await
+        .await?;
+    refresh_thumbnail_asset_scope(&app, &runtime).await?;
+    Ok(response)
 }
 
 #[tauri::command]
@@ -523,6 +631,25 @@ async fn get_external_api_connection_status(
     Ok(runtime.external_api_connection_status())
 }
 
+async fn refresh_thumbnail_asset_scope(
+    app: &AppHandle,
+    runtime: &RepositoryRuntime,
+) -> Result<(), String> {
+    allow_thumbnail_asset_roots(app, runtime.repository_thumbnail_roots().await?)
+}
+
+fn allow_thumbnail_asset_roots(
+    app: &AppHandle,
+    paths: Vec<PathBuf>,
+) -> Result<(), String> {
+    for path in paths {
+        app.asset_protocol_scope()
+            .allow_directory(path, true)
+            .map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
 fn show_main_window(app: &AppHandle) {
     if let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
         let _ = window.show();
@@ -593,6 +720,10 @@ pub fn run() {
         .manage(window_state::MainWindowStateCache::default())
         .setup(|app| {
             let runtime = RepositoryRuntime::start()?;
+            allow_thumbnail_asset_roots(
+                app.handle(),
+                tauri::async_runtime::block_on(runtime.repository_thumbnail_roots())?,
+            )?;
             app.manage(runtime);
             setup_tray(app.handle())?;
 
@@ -638,6 +769,15 @@ pub fn run() {
             search_assets,
             update_asset_metadata,
             get_file_browser,
+            list_playlists,
+            create_playlist,
+            update_playlist,
+            delete_playlist,
+            get_playlist_detail,
+            add_playlist_items,
+            reorder_playlist_items,
+            remove_playlist_item,
+            set_playlist_membership,
             list_smart_folders,
             create_smart_folder,
             update_smart_folder,

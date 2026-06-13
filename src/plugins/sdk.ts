@@ -11,7 +11,12 @@ import {
 } from "vue";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { save as saveDialog } from "@tauri-apps/plugin-dialog";
-import type { FileBrowserEntry, PluginManifest } from "../types/repository";
+import type {
+  FileBrowserEntry,
+  PlaylistItem,
+  PlaylistPlayerContribution,
+  PluginManifest,
+} from "../types/repository";
 import {
   callPlugin,
   ensureThumbnail,
@@ -48,6 +53,42 @@ export type FilePreviewPlugin = {
   manifest?: PluginManifest;
 };
 
+export type PlaylistPlayerRuntimeEvent =
+  | { type: "state"; canPlay?: boolean; isPlaying?: boolean }
+  | { type: "time"; currentTimeMs: number; durationMs?: number }
+  | { type: "ended" }
+  | { type: "error"; message: string };
+
+export type PlaylistPlayerObjectFit = "contain" | "cover";
+
+export type PlaylistPlayerRuntimeSettings = {
+  imageDurationMs?: number;
+  objectFit?: PlaylistPlayerObjectFit;
+};
+
+export type PlaylistPlayerRuntimeApi = {
+  load: (item: PlaylistItem) => Promise<void> | void;
+  play: () => Promise<void> | void;
+  pause: () => Promise<void> | void;
+  configure?: (settings: PlaylistPlayerRuntimeSettings) => Promise<void> | void;
+  seek?: (timeMs: number) => Promise<void> | void;
+  setVolume?: (value: number) => Promise<void> | void;
+  dispose?: () => Promise<void> | void;
+};
+
+export type PlaylistPlayerController = {
+  mountTarget: HTMLElement;
+  repoId: string;
+  onEvent: (event: PlaylistPlayerRuntimeEvent) => void;
+};
+
+export type RegisteredPlaylistPlayer = PlaylistPlayerContribution & {
+  pluginId: string;
+  pluginName: string;
+  manifest?: PluginManifest;
+  createRuntime: (controller: PlaylistPlayerController) => Promise<PlaylistPlayerRuntimeApi> | PlaylistPlayerRuntimeApi;
+};
+
 export type PreviewPluginDefinition = {
   manifest: PluginManifest;
   supportedExtensions: string[];
@@ -59,6 +100,9 @@ export type PreviewPluginDefinition = {
 export type FrontendPluginContext = {
   manifest: PluginManifest;
   registerPreview: (definition: Omit<PreviewPluginDefinition, "manifest">) => FilePreviewPlugin;
+  registerPlaylistPlayer: (definition: PlaylistPlayerContribution & {
+    createRuntime: RegisteredPlaylistPlayer["createRuntime"];
+  }) => RegisteredPlaylistPlayer;
   defineLazyComponent: <T extends Component | DefineComponent>(
     loader: () => Promise<T | { default: T }>,
   ) => Component;
@@ -88,6 +132,7 @@ export type FrontendPluginContext = {
 };
 
 const previewPluginRegistry = new Map<string, FilePreviewPlugin>();
+const playlistPlayerRegistry = new Map<string, RegisteredPlaylistPlayer>();
 const loadedPluginModules = new Map<string, Promise<void>>();
 const pluginModuleUrls = new Map<string, string>();
 
@@ -117,8 +162,23 @@ export function registerPreviewPlugin(plugin: FilePreviewPlugin) {
   return plugin;
 }
 
+export function registerPlaylistPlayer(player: RegisteredPlaylistPlayer) {
+  playlistPlayerRegistry.set(player.playerTypeId, player);
+  return player;
+}
+
 export function listRegisteredPreviewPlugins() {
   return [...previewPluginRegistry.values()];
+}
+
+export function listRegisteredPlaylistPlayers() {
+  return [...playlistPlayerRegistry.values()].filter((player) => player.manifest?.enabled ?? true);
+}
+
+export function getRegisteredPlaylistPlayerByType(playerTypeId: string) {
+  const player = playlistPlayerRegistry.get(playerTypeId);
+  if (!player) return null;
+  return (player.manifest?.enabled ?? true) ? player : null;
 }
 
 function pluginBlobUrlCacheKey(pluginId: string, path: string) {
@@ -146,6 +206,17 @@ function createFrontendPluginContext(manifest: PluginManifest): FrontendPluginCo
       });
       registerPreviewPlugin(plugin);
       return plugin;
+    },
+    registerPlaylistPlayer(definition) {
+      const player: RegisteredPlaylistPlayer = {
+        ...definition,
+        pluginId: manifest.pluginId,
+        pluginName: manifest.name,
+        supportedExtensions: normalizeExtensions(definition.supportedExtensions),
+        manifest,
+      };
+      registerPlaylistPlayer(player);
+      return player;
     },
     defineLazyComponent(loader) {
       return defineAsyncComponent(loader);
@@ -204,13 +275,22 @@ export async function syncRegisteredPreviewPluginManifests(manifests: PluginMani
     }
     plugin.manifest = manifest;
   }
+  for (const player of playlistPlayerRegistry.values()) {
+    const manifest = manifestMap.get(player.pluginId);
+    if (manifest) player.manifest = manifest;
+  }
 
   for (const manifest of manifests) {
     if (manifest.sdk !== "frontend" || manifest.runtime !== "vue-module") continue;
     if (!manifest.entry?.frontend?.module) continue;
-    if (previewPluginRegistry.has(manifest.pluginId)) {
+    if (previewPluginRegistry.has(manifest.pluginId) || [...playlistPlayerRegistry.values()].some((player) => player.pluginId === manifest.pluginId)) {
       const plugin = previewPluginRegistry.get(manifest.pluginId);
       if (plugin) plugin.manifest = manifest;
+      for (const player of playlistPlayerRegistry.values()) {
+        if (player.pluginId === manifest.pluginId) {
+          player.manifest = manifest;
+        }
+      }
       continue;
     }
     if (!loadedPluginModules.has(manifest.pluginId)) {
@@ -238,6 +318,7 @@ export function getRegisteredPreviewPluginForEntry(entry: FileBrowserEntry | nul
 
 export function clearPreviewPluginRegistry() {
   previewPluginRegistry.clear();
+  playlistPlayerRegistry.clear();
   loadedPluginModules.clear();
   pluginModuleUrls.clear();
 }

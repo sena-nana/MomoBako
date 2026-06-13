@@ -90,9 +90,29 @@
   - Request body includes `candidateId`
   - Confirms a pending candidate and joins both assets into the same hardlink group only when their stored content hashes and sizes still match.
 - `GET /repositories/{repoId}/snapshot`
-  - `RepositorySnapshot` returns repository summary, folder summaries, indexed asset summaries, metadata field registry, overview, optional `quickAccess`, and optional `tagGroups`.
+  - `RepositorySnapshot` returns repository summary, folder summaries, indexed asset summaries, metadata field registry, overview, optional `playlists`, optional `quickAccess`, and optional `tagGroups`.
+  - `playlists` returns repository-scoped playlist summaries for sidebar and workspace entry points; full queue contents are loaded from the playlist API.
   - `quickAccess` entries expose `shortcutId`, `label`, `targetKind`, optional `targetPath`, and optional `targetId`, and can point to files, folders, or smart folders imported from Eagle.
   - `tagGroups` expose repository-level tag grouping metadata for the desktop tag editor; they do not replace per-asset searchable tags.
+- `GET /repositories/{repoId}/playlists`
+  - Returns `PlaylistSummary[]` ordered by `sortOrder`, then `updatedAt`.
+- `POST /repositories/{repoId}/playlists`
+  - Creates a playlist with `name` and `playerTypeId`.
+- `PATCH /repositories/{repoId}/playlists/{playlistId}`
+  - Updates playlist display name and, when compatible, `playerTypeId`.
+- `DELETE /repositories/{repoId}/playlists/{playlistId}`
+  - Deletes the playlist and all membership rows only; repository files and assets are untouched.
+- `GET /repositories/{repoId}/playlists/{playlistId}`
+  - Returns `PlaylistDetail` including resolved item status, current file path, and thumbnail.
+- `POST /repositories/{repoId}/playlists/{playlistId}:items`
+  - Appends asset IDs to the end of the playlist, deduplicated within the same playlist.
+- `PATCH /repositories/{repoId}/playlists/{playlistId}:itemsOrder`
+  - Replaces item sort order using ordered `itemIds`.
+- `DELETE /repositories/{repoId}/playlists/{playlistId}/items/{playlistItemId}`
+  - Removes one playlist item without affecting the underlying asset.
+- `POST /repositories/{repoId}/playlists:membership`
+  - Atomically sets one asset's compatible playlist membership using the checked `playlistIds`.
+  - Incompatible playlists are ignored and reported by omission; existing compatible memberships not present in the request are removed.
 - `GET /repositories/{repoId}/actions`
   - Lists imported repository actions ordered by `sortOrder` and name.
   - Each action includes `source`, `sourceActionId`, `status`, `enabled`, steps, raw source JSON summary, unsupported reason, and last run.
@@ -225,6 +245,8 @@
   - `POST /providers/asmr:lookup` maps to the desktop command `lookup_asmr_metadata_candidate`. It accepts `provider` (`dlsite` or `asmr-one`) and `rjCode`, fetches provider metadata with the backend network client, and returns a single provider-shaped candidate without writing asset metadata.
   - Users can also manually import provider-shaped ASMR candidate JSON in the desktop metadata panel. The JSON is saved as `providerCandidates`, then merged through the same confirmation and protected-field rules.
   - `hooks` declare how plugins attach to core-hosted capabilities such as playlist, PiP, progress, candidate queue, batch organize, download queue, metadata merge, rename/move execution, audit log and unified search.
+  - Frontend plugins may declare `contributes.playlistPlayers[]` to register playlist playback types. Each item includes `playerTypeId`, `label`, `fileClass`, `supportedExtensions`, `supportsSeek`, `supportsVolume`, `supportsPreviewNavigation`, and optional `description`.
+  - Playlist player runtimes implement `load`, `play`, `pause`, optional `seek`, optional `setVolume`, optional `dispose`, and optional `configure(settings)`. Current settings are `{ imageDurationMs?: number, objectFit?: "contain" | "cover" }` for slideshow timing and image/video fitting.
   - `dependencyStatus` resolves manifest `requires` and `optional` against current runtime-discovered plugins, including legacy plugin IDs. Missing or disabled required dependencies mark the plugin unavailable/disabled with `disableReason`; missing or disabled optional dependencies keep the plugin usable but set `degraded` with `degradationReason`.
   - `permissions` are host-visible permission claims. The plugin manager displays them for review; runtime authorization enforcement is still tracked as plugin-orchestration follow-up work.
   - Backend plugin IDs are normalized to the `momobako.*` namespace; legacy `builtin.*` IDs remain accepted when reading existing repositories

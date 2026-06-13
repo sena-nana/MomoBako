@@ -52,8 +52,6 @@ ON CONFLICT(component) DO UPDATE SET version = excluded.version;
 
 const LOCAL_FILESYSTEM_PLUGIN_ID: &str = "momobako.local-filesystem";
 const LEGACY_LOCAL_FILESYSTEM_PLUGIN_ID: &str = "builtin.local-filesystem";
-const WEBDAV_PLUGIN_ID: &str = "momobako.webdav";
-const CLOUD_DRIVE_PLUGIN_ID: &str = "momobako.cloud-drive";
 const PLUGIN_SDK_VERSION: &str = "1";
 const MAX_PARALLEL_IMPORTS: usize = 4;
 
@@ -254,6 +252,41 @@ CREATE TABLE IF NOT EXISTS repository_actions (
 CREATE INDEX IF NOT EXISTS idx_repository_actions_repo_order
 ON repository_actions(repo_id, sort_order, name);
 
+CREATE TABLE IF NOT EXISTS playlists (
+  playlist_id TEXT PRIMARY KEY,
+  repo_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  player_type_id TEXT NOT NULL,
+  player_plugin_id TEXT NOT NULL,
+  player_label TEXT NOT NULL,
+  file_class TEXT NOT NULL,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY(repo_id) REFERENCES repositories(repo_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_playlists_repo_order
+ON playlists(repo_id, sort_order, updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS playlist_items (
+  playlist_item_id TEXT PRIMARY KEY,
+  repo_id TEXT NOT NULL,
+  playlist_id TEXT NOT NULL,
+  asset_id TEXT NOT NULL,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  added_at TEXT NOT NULL,
+  FOREIGN KEY(repo_id) REFERENCES repositories(repo_id),
+  FOREIGN KEY(playlist_id) REFERENCES playlists(playlist_id) ON DELETE CASCADE,
+  FOREIGN KEY(asset_id) REFERENCES assets(asset_id)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_playlist_items_unique_asset
+ON playlist_items(playlist_id, asset_id);
+
+CREATE INDEX IF NOT EXISTS idx_playlist_items_repo_order
+ON playlist_items(repo_id, playlist_id, sort_order, added_at);
+
 CREATE TABLE IF NOT EXISTS repository_action_steps (
   step_id TEXT PRIMARY KEY,
   action_id TEXT NOT NULL,
@@ -429,6 +462,59 @@ pub struct RepositoryTagGroup {
     pub tags: Vec<String>,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct PlaylistPlayerContribution {
+    pub player_type_id: String,
+    pub label: String,
+    pub file_class: String,
+    pub supported_extensions: Vec<String>,
+    pub supports_seek: bool,
+    pub supports_volume: bool,
+    pub supports_preview_navigation: bool,
+    #[serde(default)]
+    pub description: Option<String>,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct PlaylistSummary {
+    pub playlist_id: String,
+    pub repo_id: String,
+    pub name: String,
+    pub player_type_id: String,
+    pub player_plugin_id: String,
+    pub player_label: String,
+    pub file_class: String,
+    pub item_count: i64,
+    pub sort_order: i64,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct PlaylistItem {
+    pub playlist_item_id: String,
+    pub playlist_id: String,
+    pub asset_id: String,
+    pub path: String,
+    pub filename: String,
+    pub extension: String,
+    pub thumbnail_path: Option<String>,
+    pub status: String,
+    pub status_reason: Option<String>,
+    pub sort_order: i64,
+    pub added_at: String,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct PlaylistDetail {
+    pub playlist: PlaylistSummary,
+    pub items: Vec<PlaylistItem>,
+}
+
 #[derive(Debug, Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct FolderMetadata {
@@ -493,6 +579,7 @@ pub struct RepositorySnapshot {
     pub folder_label: String,
     pub folders: Vec<FolderSummary>,
     pub assets: Vec<AssetSummary>,
+    pub playlists: Vec<PlaylistSummary>,
     pub quick_access: Vec<RepositoryShortcut>,
     pub tag_groups: Vec<RepositoryTagGroup>,
     pub metadata_fields: Vec<String>,
@@ -585,6 +672,70 @@ pub struct RepositoryActionEnabledRequest {
 #[serde(rename_all = "camelCase")]
 pub struct RepositoryActionMutationResponse {
     pub action: RepositoryAction,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct PlaylistMutationRequest {
+    pub repo_id: String,
+    pub playlist_id: Option<String>,
+    pub name: String,
+    pub player_type_id: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct PlaylistUpdateRequest {
+    pub repo_id: String,
+    pub playlist_id: String,
+    pub name: Option<String>,
+    pub player_type_id: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlaylistMutationResponse {
+    pub playlists: Vec<PlaylistSummary>,
+    pub playlist: Option<PlaylistSummary>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct PlaylistItemsAddRequest {
+    pub repo_id: String,
+    pub playlist_id: String,
+    pub asset_ids: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct PlaylistItemsOrderRequest {
+    pub repo_id: String,
+    pub playlist_id: String,
+    pub item_ids: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct PlaylistItemRemoveRequest {
+    pub repo_id: String,
+    pub playlist_id: String,
+    pub playlist_item_id: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct PlaylistMembershipRequest {
+    pub repo_id: String,
+    pub asset_id: String,
+    pub playlist_ids: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlaylistMembershipSnapshot {
+    pub asset_id: String,
+    pub playlist_ids: Vec<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -1338,6 +1489,19 @@ pub struct PluginManifest {
     pub archive_path: Option<String>,
 }
 
+#[derive(Debug, Clone)]
+struct PlaylistPlayerRegistration {
+    plugin_id: String,
+    player_type_id: String,
+    label: String,
+    file_class: String,
+    supported_extensions: Vec<String>,
+    supports_seek: bool,
+    supports_volume: bool,
+    supports_preview_navigation: bool,
+    description: Option<String>,
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct PluginDependencyStatus {
@@ -1652,6 +1816,13 @@ impl RepositoryState {
         rows.collect::<Result<Vec<_>, _>>().map_err(db_error)
     }
 
+    pub fn list_repository_thumbnail_roots(&self) -> Result<Vec<PathBuf>, String> {
+        self.load_repository_records()?
+            .into_iter()
+            .map(|repo| self.repository_thumbnail_root(&repo))
+            .collect()
+    }
+
     pub fn create_repository(
         &self,
         request: RepositoryMutationRequest,
@@ -1945,6 +2116,7 @@ impl RepositoryState {
         )?;
         let quick_access = load_repository_shortcuts(&connection, repo_id).map_err(db_error)?;
         let tag_groups = load_repository_tag_groups(&connection, repo_id).map_err(db_error)?;
+        let playlists = load_playlists(&connection, repo_id).map_err(db_error)?;
         let metadata_fields = load_metadata_fields(&connection).map_err(db_error)?;
         let recent_revision_count: i64 = connection
             .query_row("SELECT COUNT(*) FROM revisions", [], |row| row.get(0))
@@ -1959,6 +2131,7 @@ impl RepositoryState {
             folder_label: dominant_folder_label(&folders, &assets),
             folders,
             assets,
+            playlists,
             quick_access,
             tag_groups,
             metadata_fields,
@@ -1976,6 +2149,324 @@ impl RepositoryState {
             &repo.backend_record,
         )?;
         load_asset_detail_from_connection(&connection, repo_id, asset_id).map_err(db_error)
+    }
+
+    pub fn list_playlists(&self, repo_id: &str) -> Result<Vec<PlaylistSummary>, String> {
+        self.ensure_initialized()?;
+        let repo = self.load_repository_record(repo_id)?;
+        let connection = self.open_repository_connection(
+            &repo.summary.repo_id,
+            &repo.summary.path,
+            &repo.backend_record,
+        )?;
+        load_playlists(&connection, repo_id).map_err(db_error)
+    }
+
+    pub fn create_playlist(
+        &self,
+        request: PlaylistMutationRequest,
+    ) -> Result<PlaylistMutationResponse, String> {
+        self.ensure_initialized()?;
+        let repo = self.load_repository_record(&request.repo_id)?;
+        let connection = self.open_repository_connection(
+            &repo.summary.repo_id,
+            &repo.summary.path,
+            &repo.backend_record,
+        )?;
+        let registry = backend_plugin_registry(&self.root);
+        let player = registry
+            .playlist_player(&request.player_type_id)
+            .ok_or_else(|| format!("playlist player not found: {}", request.player_type_id))?;
+        let playlist_id = request
+            .playlist_id
+            .as_deref()
+            .map(validate_playlist_id)
+            .transpose()?
+            .unwrap_or_else(|| playlist_id_for(&request.repo_id, &request.name));
+        let name = validate_playlist_name(&request.name)?;
+        let sort_order = next_playlist_sort_order(&connection, &request.repo_id).map_err(db_error)?;
+        let now = now_rfc3339();
+        connection.execute(
+            r#"
+            INSERT INTO playlists (
+              playlist_id, repo_id, name, player_type_id, player_plugin_id,
+              player_label, file_class, sort_order, created_at, updated_at
+            )
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9)
+            "#,
+            params![
+                playlist_id,
+                request.repo_id,
+                name,
+                player.player_type_id,
+                player.plugin_id,
+                player.label,
+                player.file_class,
+                sort_order,
+                now,
+            ],
+        ).map_err(db_error)?;
+        let playlists = load_playlists(&connection, &request.repo_id).map_err(db_error)?;
+        let playlist = playlists.iter().find(|item| item.playlist_id == playlist_id).cloned();
+        Ok(PlaylistMutationResponse { playlists, playlist })
+    }
+
+    pub fn update_playlist(
+        &self,
+        request: PlaylistUpdateRequest,
+    ) -> Result<PlaylistMutationResponse, String> {
+        self.ensure_initialized()?;
+        let repo = self.load_repository_record(&request.repo_id)?;
+        let connection = self.open_repository_connection(
+            &repo.summary.repo_id,
+            &repo.summary.path,
+            &repo.backend_record,
+        )?;
+        let existing = load_playlist_summary(&connection, &request.repo_id, &request.playlist_id)
+            .map_err(db_error)?
+            .ok_or_else(|| format!("playlist not found: {}", request.playlist_id))?;
+        let registry = backend_plugin_registry(&self.root);
+        let player = if let Some(player_type_id) = request.player_type_id.as_deref() {
+            registry
+                .playlist_player(player_type_id)
+                .ok_or_else(|| format!("playlist player not found: {player_type_id}"))?
+        } else {
+            registry
+                .playlist_player(&existing.player_type_id)
+                .unwrap_or(PlaylistPlayerRegistration {
+                    plugin_id: existing.player_plugin_id.clone(),
+                    player_type_id: existing.player_type_id.clone(),
+                    label: existing.player_label.clone(),
+                    file_class: existing.file_class.clone(),
+                    supported_extensions: Vec::new(),
+                    supports_seek: false,
+                    supports_volume: false,
+                    supports_preview_navigation: false,
+                    description: None,
+                })
+        };
+        let name = request
+            .name
+            .as_deref()
+            .map(validate_playlist_name)
+            .transpose()?
+            .unwrap_or(existing.name.clone());
+        let now = now_rfc3339();
+        connection.execute(
+            r#"
+            UPDATE playlists
+            SET
+              name = ?3,
+              player_type_id = ?4,
+              player_plugin_id = ?5,
+              player_label = ?6,
+              file_class = ?7,
+              updated_at = ?8
+            WHERE repo_id = ?1 AND playlist_id = ?2
+            "#,
+            params![
+                request.repo_id,
+                request.playlist_id,
+                name,
+                player.player_type_id,
+                player.plugin_id,
+                player.label,
+                player.file_class,
+                now,
+            ],
+        ).map_err(db_error)?;
+        let playlists = load_playlists(&connection, &request.repo_id).map_err(db_error)?;
+        let playlist = playlists
+            .iter()
+            .find(|item| item.playlist_id == request.playlist_id)
+            .cloned();
+        Ok(PlaylistMutationResponse { playlists, playlist })
+    }
+
+    pub fn delete_playlist(
+        &self,
+        repo_id: &str,
+        playlist_id: &str,
+    ) -> Result<PlaylistMutationResponse, String> {
+        self.ensure_initialized()?;
+        let repo = self.load_repository_record(repo_id)?;
+        let connection = self.open_repository_connection(
+            &repo.summary.repo_id,
+            &repo.summary.path,
+            &repo.backend_record,
+        )?;
+        connection.execute(
+            "DELETE FROM playlists WHERE repo_id = ?1 AND playlist_id = ?2",
+            params![repo_id, validate_playlist_id(playlist_id)?],
+        ).map_err(db_error)?;
+        let playlists = load_playlists(&connection, repo_id).map_err(db_error)?;
+        Ok(PlaylistMutationResponse {
+            playlists,
+            playlist: None,
+        })
+    }
+
+    pub fn get_playlist_detail(&self, repo_id: &str, playlist_id: &str) -> Result<PlaylistDetail, String> {
+        self.ensure_initialized()?;
+        let repo = self.load_repository_record(repo_id)?;
+        let connection = self.open_repository_connection(
+            &repo.summary.repo_id,
+            &repo.summary.path,
+            &repo.backend_record,
+        )?;
+        load_playlist_detail(&connection, &repo, &backend_plugin_registry(&self.root), repo_id, playlist_id)
+            .map_err(db_error)
+    }
+
+    pub fn add_playlist_items(&self, request: PlaylistItemsAddRequest) -> Result<PlaylistDetail, String> {
+        self.ensure_initialized()?;
+        let repo = self.load_repository_record(&request.repo_id)?;
+        let mut connection = self.open_repository_connection(
+            &repo.summary.repo_id,
+            &repo.summary.path,
+            &repo.backend_record,
+        )?;
+        let playlist = load_playlist_summary(&connection, &request.repo_id, &request.playlist_id)
+            .map_err(db_error)?
+            .ok_or_else(|| format!("playlist not found: {}", request.playlist_id))?;
+        let registry = backend_plugin_registry(&self.root);
+        let player = registry.playlist_player(&playlist.player_type_id);
+        let mut sort_order = next_playlist_item_sort_order(&connection, &request.repo_id, &request.playlist_id).map_err(db_error)?;
+        let tx = connection.transaction().map_err(db_error)?;
+        for asset_id in normalize_id_list(&request.asset_ids) {
+            let asset = load_asset_summary_from_transaction(&tx, &request.repo_id, &asset_id)
+                .map_err(db_error)?
+                .ok_or_else(|| format!("asset not found: {asset_id}"))?;
+            if let Some(player) = &player {
+                if !playlist_player_supports_extension(player, &asset.extension) {
+                    continue;
+                }
+            }
+            tx.execute(
+                r#"
+                INSERT OR IGNORE INTO playlist_items (
+                  playlist_item_id, repo_id, playlist_id, asset_id, sort_order, added_at
+                )
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                "#,
+                params![
+                    playlist_item_id_for(&request.playlist_id, &asset.asset_id),
+                    request.repo_id,
+                    request.playlist_id,
+                    asset.asset_id,
+                    sort_order,
+                    now_rfc3339(),
+                ],
+            ).map_err(db_error)?;
+            sort_order += 1;
+        }
+        tx.commit().map_err(db_error)?;
+        load_playlist_detail(&connection, &repo, &registry, &request.repo_id, &request.playlist_id).map_err(db_error)
+    }
+
+    pub fn reorder_playlist_items(&self, request: PlaylistItemsOrderRequest) -> Result<PlaylistDetail, String> {
+        self.ensure_initialized()?;
+        let repo = self.load_repository_record(&request.repo_id)?;
+        let mut connection = self.open_repository_connection(
+            &repo.summary.repo_id,
+            &repo.summary.path,
+            &repo.backend_record,
+        )?;
+        let tx = connection.transaction().map_err(db_error)?;
+        for (index, item_id) in request.item_ids.iter().enumerate() {
+            tx.execute(
+                r#"
+                UPDATE playlist_items
+                SET sort_order = ?4
+                WHERE repo_id = ?1 AND playlist_id = ?2 AND playlist_item_id = ?3
+                "#,
+                params![request.repo_id, request.playlist_id, item_id, index as i64],
+            ).map_err(db_error)?;
+        }
+        tx.execute(
+            r#"
+            UPDATE playlists
+            SET updated_at = ?3
+            WHERE repo_id = ?1 AND playlist_id = ?2
+            "#,
+            params![request.repo_id, request.playlist_id, now_rfc3339()],
+        ).map_err(db_error)?;
+        tx.commit().map_err(db_error)?;
+        load_playlist_detail(&connection, &repo, &backend_plugin_registry(&self.root), &request.repo_id, &request.playlist_id)
+            .map_err(db_error)
+    }
+
+    pub fn remove_playlist_item(&self, request: PlaylistItemRemoveRequest) -> Result<PlaylistDetail, String> {
+        self.ensure_initialized()?;
+        let repo = self.load_repository_record(&request.repo_id)?;
+        let connection = self.open_repository_connection(
+            &repo.summary.repo_id,
+            &repo.summary.path,
+            &repo.backend_record,
+        )?;
+        connection.execute(
+            "DELETE FROM playlist_items WHERE repo_id = ?1 AND playlist_id = ?2 AND playlist_item_id = ?3",
+            params![request.repo_id, request.playlist_id, request.playlist_item_id],
+        ).map_err(db_error)?;
+        load_playlist_detail(&connection, &repo, &backend_plugin_registry(&self.root), &request.repo_id, &request.playlist_id)
+            .map_err(db_error)
+    }
+
+    pub fn set_playlist_membership(&self, request: PlaylistMembershipRequest) -> Result<PlaylistMembershipSnapshot, String> {
+        self.ensure_initialized()?;
+        let repo = self.load_repository_record(&request.repo_id)?;
+        let mut connection = self.open_repository_connection(
+            &repo.summary.repo_id,
+            &repo.summary.path,
+            &repo.backend_record,
+        )?;
+        let asset = load_asset_summary(&connection, &request.repo_id, &request.asset_id)
+            .map_err(db_error)?
+            .ok_or_else(|| format!("asset not found: {}", request.asset_id))?;
+        let playlists = load_playlists(&connection, &request.repo_id).map_err(db_error)?;
+        let registry = backend_plugin_registry(&self.root);
+        let valid_target_ids = normalize_id_list(&request.playlist_ids);
+        let tx = connection.transaction().map_err(db_error)?;
+        let mut kept = Vec::new();
+        for playlist in playlists {
+            let Some(player) = registry.playlist_player(&playlist.player_type_id) else {
+                continue;
+            };
+            if !playlist_player_supports_extension(&player, &asset.extension) {
+                continue;
+            }
+            if valid_target_ids.iter().any(|item| item == &playlist.playlist_id) {
+                let sort_order = next_playlist_item_sort_order(&tx, &request.repo_id, &playlist.playlist_id).map_err(db_error)?;
+                tx.execute(
+                    r#"
+                    INSERT OR IGNORE INTO playlist_items (
+                      playlist_item_id, repo_id, playlist_id, asset_id, sort_order, added_at
+                    )
+                    VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                    "#,
+                    params![
+                        playlist_item_id_for(&playlist.playlist_id, &asset.asset_id),
+                        request.repo_id,
+                        playlist.playlist_id,
+                        asset.asset_id,
+                        sort_order,
+                        now_rfc3339(),
+                    ],
+                ).map_err(db_error)?;
+                kept.push(playlist.playlist_id);
+            } else {
+                tx.execute(
+                    "DELETE FROM playlist_items WHERE repo_id = ?1 AND playlist_id = ?2 AND asset_id = ?3",
+                    params![request.repo_id, playlist.playlist_id, request.asset_id],
+                ).map_err(db_error)?;
+            }
+        }
+        tx.commit().map_err(db_error)?;
+        kept.sort();
+        Ok(PlaylistMembershipSnapshot {
+            asset_id: request.asset_id,
+            playlist_ids: kept,
+        })
     }
 
     pub fn load_file_browser(
@@ -4559,6 +5050,266 @@ fn load_repository_shortcuts(
         })
     })?;
     rows.collect::<Result<Vec<_>, _>>()
+}
+
+fn load_playlists(
+    connection: &Connection,
+    repo_id: &str,
+) -> Result<Vec<PlaylistSummary>, rusqlite::Error> {
+    let mut stmt = connection.prepare(
+        r#"
+        SELECT
+          p.playlist_id,
+          p.repo_id,
+          p.name,
+          p.player_type_id,
+          p.player_plugin_id,
+          p.player_label,
+          p.file_class,
+          COUNT(pi.playlist_item_id) AS item_count,
+          p.sort_order,
+          p.created_at,
+          p.updated_at
+        FROM playlists p
+        LEFT JOIN playlist_items pi
+          ON pi.repo_id = p.repo_id AND pi.playlist_id = p.playlist_id
+        WHERE p.repo_id = ?1
+        GROUP BY
+          p.playlist_id, p.repo_id, p.name, p.player_type_id, p.player_plugin_id,
+          p.player_label, p.file_class, p.sort_order, p.created_at, p.updated_at
+        ORDER BY p.sort_order, p.updated_at DESC, p.name COLLATE NOCASE
+        "#,
+    )?;
+
+    let rows = stmt.query_map([repo_id], |row| {
+        Ok(PlaylistSummary {
+            playlist_id: row.get(0)?,
+            repo_id: row.get(1)?,
+            name: row.get(2)?,
+            player_type_id: row.get(3)?,
+            player_plugin_id: row.get(4)?,
+            player_label: row.get(5)?,
+            file_class: row.get(6)?,
+            item_count: row.get(7)?,
+            sort_order: row.get(8)?,
+            created_at: row.get(9)?,
+            updated_at: row.get(10)?,
+        })
+    })?;
+    rows.collect::<Result<Vec<_>, _>>()
+}
+
+fn load_playlist_summary(
+    connection: &Connection,
+    repo_id: &str,
+    playlist_id: &str,
+) -> Result<Option<PlaylistSummary>, rusqlite::Error> {
+    load_playlists(connection, repo_id).map(|items| {
+        items
+            .into_iter()
+            .find(|item| item.playlist_id == playlist_id)
+    })
+}
+
+fn load_playlist_detail(
+    connection: &Connection,
+    repo: &RepositoryRecord,
+    registry: &BackendPluginRegistry,
+    repo_id: &str,
+    playlist_id: &str,
+) -> Result<PlaylistDetail, rusqlite::Error> {
+    let playlist = load_playlist_summary(connection, repo_id, playlist_id)?
+        .ok_or(rusqlite::Error::QueryReturnedNoRows)?;
+    let active_player = registry.playlist_player(&playlist.player_type_id);
+    let mut stmt = connection.prepare(
+        r#"
+        SELECT
+          pi.playlist_item_id,
+          pi.playlist_id,
+          pi.asset_id,
+          pi.sort_order,
+          pi.added_at,
+          a.path,
+          a.filename,
+          a.extension,
+          a.thumbnail_path,
+          a.status
+        FROM playlist_items pi
+        LEFT JOIN assets a
+          ON a.repo_id = pi.repo_id AND a.asset_id = pi.asset_id
+        WHERE pi.repo_id = ?1 AND pi.playlist_id = ?2
+        ORDER BY pi.sort_order, pi.added_at
+        "#,
+    )?;
+    let rows = stmt.query_map(params![repo_id, playlist_id], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+            row.get::<_, i64>(3)?,
+            row.get::<_, String>(4)?,
+            row.get::<_, Option<String>>(5)?,
+            row.get::<_, Option<String>>(6)?,
+            row.get::<_, Option<String>>(7)?,
+            row.get::<_, Option<String>>(8)?,
+            row.get::<_, Option<String>>(9)?,
+        ))
+    })?;
+
+    let items = rows
+        .collect::<Result<Vec<_>, _>>()?
+        .into_iter()
+        .map(|row| {
+            let (
+                playlist_item_id,
+                playlist_id,
+                asset_id,
+                sort_order,
+                added_at,
+                path,
+                filename,
+                extension,
+                thumbnail_path,
+                asset_status,
+            ) = row;
+            let extension = extension.unwrap_or_default();
+            let path_value = path.clone().unwrap_or_default();
+            let thumbnail_asset_id = asset_id.clone();
+            let thumbnail_entry_path = path.clone().unwrap_or_default();
+            let (status, status_reason) = resolve_playlist_item_status(
+                &playlist,
+                active_player.as_ref(),
+                path.as_deref(),
+                &extension,
+                asset_status.as_deref(),
+            );
+            Ok(PlaylistItem {
+                playlist_item_id,
+                playlist_id,
+                asset_id,
+                path: path_value,
+                filename: filename.unwrap_or_else(|| "(已失效文件)".to_string()),
+                extension,
+                thumbnail_path: thumbnail_path.and_then(|item| {
+                    normalize_asset_thumbnail_path(
+                        connection,
+                        repo,
+                        &repo
+                            .summary
+                            .path
+                            .parse::<PathBuf>()
+                            .unwrap_or_else(|_| PathBuf::from(&repo.summary.path))
+                            .join(REPO_META_DIR)
+                            .join("thumbnails"),
+                        &thumbnail_asset_id,
+                        &thumbnail_entry_path,
+                        Some(item),
+                    )
+                    .ok()
+                    .flatten()
+                }),
+                status,
+                status_reason,
+                sort_order,
+                added_at,
+            })
+        })
+        .collect::<Result<Vec<_>, rusqlite::Error>>()?;
+
+    Ok(PlaylistDetail { playlist, items })
+}
+
+fn resolve_playlist_item_status(
+    playlist: &PlaylistSummary,
+    player: Option<&PlaylistPlayerRegistration>,
+    path: Option<&str>,
+    extension: &str,
+    asset_status: Option<&str>,
+) -> (String, Option<String>) {
+    let Some(path) = path else {
+        return ("missing".to_string(), Some("资源索引中已找不到该文件".to_string()));
+    };
+    let Some(asset_status) = asset_status else {
+        return ("missing".to_string(), Some("资源索引中已找不到该文件".to_string()));
+    };
+    if asset_status == "deleted" {
+        return ("trashed".to_string(), Some(format!("文件已移入回收站: {path}")));
+    }
+    let Some(player) = player else {
+        return (
+            "pluginUnavailable".to_string(),
+            Some(format!("缺少播放类型插件: {}", playlist.player_type_id)),
+        );
+    };
+    if !playlist_player_supports_extension(player, extension) {
+        return (
+            "incompatible".to_string(),
+            Some(format!("当前文件扩展名不再兼容: .{extension}")),
+        );
+    }
+    ("ready".to_string(), None)
+}
+
+fn playlist_player_supports_extension(player: &PlaylistPlayerRegistration, extension: &str) -> bool {
+    let normalized = extension.trim().to_ascii_lowercase();
+    !normalized.is_empty() && player.supported_extensions.iter().any(|item| item == &normalized)
+}
+
+fn next_playlist_sort_order(connection: &Connection, repo_id: &str) -> Result<i64, rusqlite::Error> {
+    connection.query_row(
+        "SELECT COALESCE(MAX(sort_order), -1) + 1 FROM playlists WHERE repo_id = ?1",
+        [repo_id],
+        |row| row.get(0),
+    )
+}
+
+fn next_playlist_item_sort_order(
+    connection: &Connection,
+    repo_id: &str,
+    playlist_id: &str,
+) -> Result<i64, rusqlite::Error> {
+    connection.query_row(
+        "SELECT COALESCE(MAX(sort_order), -1) + 1 FROM playlist_items WHERE repo_id = ?1 AND playlist_id = ?2",
+        params![repo_id, playlist_id],
+        |row| row.get(0),
+    )
+}
+
+fn validate_playlist_name(name: &str) -> Result<String, String> {
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        return Err("playlist name cannot be empty".to_string());
+    }
+    Ok(trimmed.to_string())
+}
+
+fn validate_playlist_id(id: &str) -> Result<String, String> {
+    let trimmed = id.trim();
+    if trimmed.is_empty() {
+        return Err("playlist id cannot be empty".to_string());
+    }
+    Ok(trimmed.to_string())
+}
+
+fn playlist_id_for(repo_id: &str, name: &str) -> String {
+    format!("playlist-{}", sha256_hex(&[repo_id.as_bytes(), name.trim().as_bytes()]))
+}
+
+fn playlist_item_id_for(playlist_id: &str, asset_id: &str) -> String {
+    format!(
+        "playlist-item-{}",
+        sha256_hex(&[playlist_id.as_bytes(), asset_id.as_bytes()])
+    )
+}
+
+fn normalize_id_list(values: &[String]) -> Vec<String> {
+    let mut seen = HashSet::new();
+    values
+        .iter()
+        .map(|item| item.trim().to_string())
+        .filter(|item| !item.is_empty())
+        .filter(|item| seen.insert(item.clone()))
+        .collect()
 }
 
 fn load_repository_tag_groups(
@@ -8012,7 +8763,7 @@ fn collect_repository_files(repo_root: &Path) -> std::io::Result<Vec<DiscoveredF
         return Ok(files);
     }
 
-    collect_repository_files_recursive(repo_root, repo_root, &mut files)?;
+    collect_repository_files_recursive(repo_root, repo_root, &mut files, false)?;
     Ok(files)
 }
 
@@ -8021,23 +8772,41 @@ fn count_repository_directories(repo_root: &Path) -> Result<i64, String> {
         return Ok(0);
     }
 
-    count_repository_directories_recursive(repo_root)
+    count_repository_directories_recursive(repo_root, false)
 }
 
-fn count_repository_directories_recursive(current: &Path) -> Result<i64, String> {
+fn count_repository_directories_recursive(
+    current: &Path,
+    skip_current_on_access_error: bool,
+) -> Result<i64, String> {
     let mut total = 0;
-    for entry in fs::read_dir(current).map_err(io_error)? {
-        let entry = entry.map_err(io_error)?;
+    let entries = match fs::read_dir(current) {
+        Ok(entries) => entries,
+        Err(error) if skip_current_on_access_error && is_skippable_filesystem_error(&error) => {
+            return Ok(0);
+        }
+        Err(error) => return Err(io_error(error)),
+    };
+    for entry in entries {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(error) if is_skippable_filesystem_error(&error) => continue,
+            Err(error) => return Err(io_error(error)),
+        };
         let file_name = entry.file_name();
         let file_name = file_name.to_string_lossy();
         if is_internal_repository_dir(file_name.as_ref()) {
             continue;
         }
 
-        let metadata = entry.metadata().map_err(io_error)?;
+        let metadata = match entry.metadata() {
+            Ok(metadata) => metadata,
+            Err(error) if is_skippable_filesystem_error(&error) => continue,
+            Err(error) => return Err(io_error(error)),
+        };
         if metadata.is_dir() {
             total += 1;
-            total += count_repository_directories_recursive(&entry.path())?;
+            total += count_repository_directories_recursive(&entry.path(), true)?;
         }
     }
 
@@ -8060,9 +8829,21 @@ fn collect_repository_files_recursive(
     repo_root: &Path,
     current: &Path,
     files: &mut Vec<DiscoveredFile>,
+    skip_current_on_access_error: bool,
 ) -> std::io::Result<()> {
-    for entry in fs::read_dir(current)? {
-        let entry = entry?;
+    let entries = match fs::read_dir(current) {
+        Ok(entries) => entries,
+        Err(error) if skip_current_on_access_error && is_skippable_filesystem_error(&error) => {
+            return Ok(());
+        }
+        Err(error) => return Err(error),
+    };
+    for entry in entries {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(error) if is_skippable_filesystem_error(&error) => continue,
+            Err(error) => return Err(error),
+        };
         let path = entry.path();
         let file_name = entry.file_name();
         let file_name = file_name.to_string_lossy();
@@ -8070,9 +8851,13 @@ fn collect_repository_files_recursive(
             continue;
         }
 
-        let metadata = entry.metadata()?;
+        let metadata = match entry.metadata() {
+            Ok(metadata) => metadata,
+            Err(error) if is_skippable_filesystem_error(&error) => continue,
+            Err(error) => return Err(error),
+        };
         if metadata.is_dir() {
-            collect_repository_files_recursive(repo_root, &path, files)?;
+            collect_repository_files_recursive(repo_root, &path, files, true)?;
             continue;
         }
 
@@ -8144,15 +8929,19 @@ fn generate_thumbnail_for_file(
     ));
 
     let generated = if is_image_extension(&extension) {
-        generate_image_thumbnail(&source_path, &thumbnail_path)
+        generate_image_thumbnail(&source_path, &thumbnail_path).map(|_| true)
     } else if is_audio_extension(&extension) {
         generate_audio_thumbnail(&source_path, &thumbnail_path)
     } else {
-        generate_video_thumbnail(&source_path, &thumbnail_path)
+        generate_video_thumbnail(&source_path, &thumbnail_path).map(|_| true)
     };
 
     match generated {
-        Ok(()) => Ok(Some(thumbnail_path.to_string_lossy().to_string())),
+        Ok(true) => Ok(Some(thumbnail_path.to_string_lossy().to_string())),
+        Ok(false) => {
+            let _ = fs::remove_file(&thumbnail_path);
+            Ok(None)
+        }
         Err(error) => {
             let _ = fs::remove_file(&thumbnail_path);
             eprintln!(
@@ -8465,8 +9254,12 @@ fn generate_video_thumbnail(source_path: &Path, thumbnail_path: &Path) -> Result
     }
 }
 
-fn generate_audio_thumbnail(source_path: &Path, thumbnail_path: &Path) -> Result<(), String> {
+fn generate_audio_thumbnail(source_path: &Path, thumbnail_path: &Path) -> Result<bool, String> {
     ensure_ffmpeg_ready()?;
+
+    if !audio_has_cover_stream(source_path)? {
+        return Ok(false);
+    }
 
     let status = Command::new(ffmpeg_sidecar::paths::ffmpeg_path())
         .args(audio_thumbnail_ffmpeg_args(source_path, thumbnail_path))
@@ -8474,10 +9267,35 @@ fn generate_audio_thumbnail(source_path: &Path, thumbnail_path: &Path) -> Result
         .map_err(|error| format!("ffmpeg unavailable: {error}"))?;
 
     if status.success() {
-        Ok(())
+        Ok(true)
     } else {
         Err(format!("ffmpeg exited with status: {status}"))
     }
+}
+
+fn audio_has_cover_stream(source_path: &Path) -> Result<bool, String> {
+    let output = match Command::new(ffmpeg_sidecar::ffprobe::ffprobe_path())
+        .args(audio_cover_probe_args(source_path))
+        .output()
+    {
+        Ok(output) => output,
+        Err(_) => return Ok(false),
+    };
+
+    if !output.status.success() {
+        return Err(format!("ffprobe exited with status: {}", output.status));
+    }
+
+    audio_cover_probe_output_has_stream(&output.stdout)
+}
+
+fn audio_cover_probe_output_has_stream(output: &[u8]) -> Result<bool, String> {
+    let value: serde_json::Value =
+        serde_json::from_slice(output).map_err(|error| format!("ffprobe output error: {error}"))?;
+    Ok(value
+        .get("streams")
+        .and_then(serde_json::Value::as_array)
+        .is_some_and(|streams| !streams.is_empty()))
 }
 
 fn video_thumbnail_ffmpeg_args(source_path: &Path, thumbnail_path: &Path) -> Vec<OsString> {
@@ -8517,6 +9335,21 @@ fn audio_thumbnail_ffmpeg_args(source_path: &Path, thumbnail_path: &Path) -> Vec
         "-vf".into(),
         format!("scale='min({THUMBNAIL_SIZE},iw)':-1").into(),
         thumbnail_path.as_os_str().to_os_string(),
+    ]
+}
+
+fn audio_cover_probe_args(source_path: &Path) -> Vec<OsString> {
+    vec![
+        "-hide_banner".into(),
+        "-loglevel".into(),
+        "error".into(),
+        "-select_streams".into(),
+        "v".into(),
+        "-show_entries".into(),
+        "stream=index".into(),
+        "-of".into(),
+        "json".into(),
+        source_path.as_os_str().to_os_string(),
     ]
 }
 
@@ -8851,6 +9684,58 @@ impl BackendPluginRegistry {
             registration.manifest.plugin_id
         ))
     }
+
+    fn playlist_players(&self) -> Vec<PlaylistPlayerRegistration> {
+        let mut players = Vec::new();
+        for registration in self.registrations.values() {
+            if !registration.manifest.enabled || registration.manifest.status == "error" {
+                continue;
+            }
+            let Some(contributes) = registration.manifest.contributes.as_object() else {
+                continue;
+            };
+            let Some(raw_players) = contributes.get("playlistPlayers") else {
+                continue;
+            };
+            let Ok(parsed) =
+                serde_json::from_value::<Vec<PlaylistPlayerContribution>>(raw_players.clone())
+            else {
+                continue;
+            };
+            for player in parsed {
+                players.push(PlaylistPlayerRegistration {
+                    plugin_id: registration.manifest.plugin_id.clone(),
+                    player_type_id: player.player_type_id,
+                    label: player.label,
+                    file_class: player.file_class,
+                    supported_extensions: player
+                        .supported_extensions
+                        .into_iter()
+                        .map(|value| value.trim().to_ascii_lowercase())
+                        .filter(|value| !value.is_empty())
+                        .collect(),
+                    supports_seek: player.supports_seek,
+                    supports_volume: player.supports_volume,
+                    supports_preview_navigation: player.supports_preview_navigation,
+                    description: player.description,
+                });
+            }
+        }
+        players.sort_by(|left, right| {
+            left.label
+                .to_lowercase()
+                .cmp(&right.label.to_lowercase())
+                .then_with(|| left.player_type_id.cmp(&right.player_type_id))
+        });
+        players
+    }
+
+    fn playlist_player(&self, player_type_id: &str) -> Option<PlaylistPlayerRegistration> {
+        let normalized = player_type_id.trim();
+        self.playlist_players()
+            .into_iter()
+            .find(|player| player.player_type_id == normalized)
+    }
 }
 
 impl NativePlugin {
@@ -8891,36 +9776,9 @@ fn plugin_management_registry(service_root: &Path) -> BackendPluginRegistry {
 }
 
 fn load_runtime_plugin_manifests(service_root: &Path) -> Vec<DiscoveredPluginManifest> {
-    let mut manifests = Vec::new();
-    for plugin_root in bundled_plugin_roots() {
-        manifests.extend(load_plugin_manifests_from_runtime(plugin_root));
-    }
-    manifests.extend(load_plugin_manifests_from_runtime(runtime_plugins_dir(
-        service_root,
-    )));
+    let mut manifests = load_plugin_manifests_from_runtime(runtime_plugins_dir(service_root));
     manifests.sort_by(|left, right| left.manifest.plugin_id.cmp(&right.manifest.plugin_id));
     manifests
-}
-
-fn bundled_plugin_roots() -> Vec<PathBuf> {
-    let mut roots = Vec::new();
-    if let Ok(current_dir) = std::env::current_dir() {
-        push_existing_plugin_root(&mut roots, current_dir.join("External").join("Plugins"));
-        if let Some(parent) = current_dir.parent() {
-            push_existing_plugin_root(&mut roots, parent.join("External").join("Plugins"));
-        }
-    }
-    roots
-}
-
-fn push_existing_plugin_root(roots: &mut Vec<PathBuf>, root: PathBuf) {
-    if !root.is_dir() {
-        return;
-    }
-    let normalized = canonicalize_local_path(&root).unwrap_or(root);
-    if !roots.iter().any(|item| item == &normalized) {
-        roots.push(normalized);
-    }
 }
 
 fn load_plugin_manifests_from_runtime(runtime_root: PathBuf) -> Vec<DiscoveredPluginManifest> {
@@ -8997,6 +9855,58 @@ fn read_discovered_plugin_manifest_from_archive(
         archive_path: archive_path.to_path_buf(),
         manifest_prefix,
     })
+}
+
+#[cfg(test)]
+pub fn install_local_filesystem_test_plugin_archive(service_root: &Path) {
+    let runtime_plugin_root = runtime_plugins_dir(service_root);
+    let archive_path = runtime_plugin_root.join("local-filesystem.momoplug");
+    if archive_path.exists() {
+        return;
+    }
+    if let Some(parent) = archive_path.parent() {
+        fs::create_dir_all(parent).expect("plugin archive parent should be created");
+    }
+    let file = File::create(&archive_path).expect("plugin archive should be created");
+    let mut archive = zip::ZipWriter::new(file);
+    archive
+        .start_file(
+            "momobako-local-filesystem-0.1.0/manifest.json",
+            zip::write::SimpleFileOptions::default(),
+        )
+        .expect("manifest entry should start");
+    archive
+        .write_all(
+            serde_json::to_string_pretty(&serde_json::json!({
+                "pluginId": LOCAL_FILESYSTEM_PLUGIN_ID,
+                "legacyPluginIds": [LEGACY_LOCAL_FILESYSTEM_PLUGIN_ID],
+                "name": "Local Filesystem",
+                "version": "0.1.0",
+                "type": {
+                    "layer": "source",
+                    "kind": "filesystem"
+                },
+                "kind": "filesystem",
+                "category": "source",
+                "description": "Test local filesystem backend.",
+                "capabilities": ["listFiles", "readFile", "writeFile", "moveFile", "deleteFile"],
+                "enabled": true,
+                "sdk": "backend",
+                "entry": {},
+                "source": "system",
+                "runtime": "manifest-only",
+                "permissions": [],
+                "compat": {
+                    "sdkVersion": "1",
+                    "legacyPluginIds": []
+                },
+                "status": "ready"
+            }))
+            .expect("manifest should encode")
+            .as_bytes(),
+        )
+        .expect("manifest should write");
+    archive.finish().expect("plugin archive should finish");
 }
 
 fn parse_plugin_manifest(raw: &str) -> Result<PluginManifest, String> {
@@ -12629,8 +13539,16 @@ fn build_directory_tree(repo_root: &Path) -> Result<Vec<FileTreeNode>, String> {
     let mut children = Vec::new();
     let entries = fs::read_dir(repo_root).map_err(io_error)?;
     for entry in entries {
-        let entry = entry.map_err(io_error)?;
-        let metadata = entry.metadata().map_err(io_error)?;
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(error) if is_skippable_filesystem_error(&error) => continue,
+            Err(error) => return Err(io_error(error)),
+        };
+        let metadata = match entry.metadata() {
+            Ok(metadata) => metadata,
+            Err(error) if is_skippable_filesystem_error(&error) => continue,
+            Err(error) => return Err(io_error(error)),
+        };
         if !metadata.is_dir() {
             continue;
         }
@@ -12641,20 +13559,38 @@ fn build_directory_tree(repo_root: &Path) -> Result<Vec<FileTreeNode>, String> {
         }
 
         let path = name.clone();
-        children.push(build_directory_node(repo_root, &path)?);
+        if let Some(node) = build_directory_node(repo_root, &path)? {
+            children.push(node);
+        }
     }
 
     children.sort_by(|left, right| left.label.to_lowercase().cmp(&right.label.to_lowercase()));
     Ok(children)
 }
 
-fn build_directory_node(repo_root: &Path, relative_path: &str) -> Result<FileTreeNode, String> {
+fn build_directory_node(
+    repo_root: &Path,
+    relative_path: &str,
+) -> Result<Option<FileTreeNode>, String> {
     let abs_path = resolve_repository_relative_path(repo_root, relative_path)?;
     let mut children = Vec::new();
 
-    for entry in fs::read_dir(&abs_path).map_err(io_error)? {
-        let entry = entry.map_err(io_error)?;
-        let metadata = entry.metadata().map_err(io_error)?;
+    let entries = match fs::read_dir(&abs_path) {
+        Ok(entries) => entries,
+        Err(error) if is_skippable_filesystem_error(&error) => return Ok(None),
+        Err(error) => return Err(io_error(error)),
+    };
+    for entry in entries {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(error) if is_skippable_filesystem_error(&error) => continue,
+            Err(error) => return Err(io_error(error)),
+        };
+        let metadata = match entry.metadata() {
+            Ok(metadata) => metadata,
+            Err(error) if is_skippable_filesystem_error(&error) => continue,
+            Err(error) => return Err(io_error(error)),
+        };
         if !metadata.is_dir() {
             continue;
         }
@@ -12665,18 +13601,20 @@ fn build_directory_node(repo_root: &Path, relative_path: &str) -> Result<FileTre
         }
 
         let child_path = join_relative_path(relative_path, &name);
-        children.push(build_directory_node(repo_root, &child_path)?);
+        if let Some(node) = build_directory_node(repo_root, &child_path)? {
+            children.push(node);
+        }
     }
 
     children.sort_by(|left, right| left.label.to_lowercase().cmp(&right.label.to_lowercase()));
-    Ok(FileTreeNode {
+    Ok(Some(FileTreeNode {
         path: relative_path.to_string(),
         label: Path::new(relative_path)
             .file_name()
             .map(|name| name.to_string_lossy().to_string())
             .unwrap_or_else(|| relative_path.to_string()),
         children,
-    })
+    }))
 }
 
 fn map_file_browser_entries(
@@ -12849,14 +13787,22 @@ fn local_directory_entries(
     let mut entries = Vec::new();
 
     for entry in fs::read_dir(current_dir).map_err(io_error)? {
-        let entry = entry.map_err(io_error)?;
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(error) if is_skippable_filesystem_error(&error) => continue,
+            Err(error) => return Err(io_error(error)),
+        };
         let name = entry.file_name().to_string_lossy().to_string();
         if is_internal_repository_dir(&name) {
             continue;
         }
 
         let path = entry.path();
-        let metadata = entry.metadata().map_err(io_error)?;
+        let metadata = match entry.metadata() {
+            Ok(metadata) => metadata,
+            Err(error) if is_skippable_filesystem_error(&error) => continue,
+            Err(error) => return Err(io_error(error)),
+        };
         let relative_path = path
             .strip_prefix(repo_root)
             .map_err(path_error)?
@@ -13642,6 +14588,10 @@ fn io_error(error: std::io::Error) -> String {
     format!("io error: {error}")
 }
 
+fn is_skippable_filesystem_error(error: &std::io::Error) -> bool {
+    matches!(error.kind(), std::io::ErrorKind::PermissionDenied)
+}
+
 fn path_error(error: std::path::StripPrefixError) -> String {
     format!("path error: {error}")
 }
@@ -13668,6 +14618,8 @@ mod tests {
     use super::*;
     use std::net::TcpListener;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    const TEST_WEBDAV_PLUGIN_ID: &str = "momobako.webdav";
 
     struct TestWorkspace {
         root: PathBuf,
@@ -13700,6 +14652,7 @@ mod tests {
         let workspace = TestWorkspace::new("local-repository-create");
         let service_root = workspace.path("service");
         let repo_root = workspace.path("repo");
+        install_local_filesystem_test_plugin_archive(&service_root);
         let state = RepositoryState::from_root(service_root);
 
         state
@@ -13724,7 +14677,9 @@ mod tests {
     #[test]
     fn plugin_registry_discovers_runtime_manifests() {
         let workspace = TestWorkspace::new("plugin-registry");
-        let registry = backend_plugin_registry(&workspace.path("service"));
+        let service_root = workspace.path("service");
+        seed_standard_test_plugins(&service_root);
+        let registry = backend_plugin_registry(&service_root);
         let manifests = registry.list_manifests();
 
         assert!(manifests.iter().any(|manifest| {
@@ -13909,6 +14864,7 @@ mod tests {
     fn set_plugin_enabled_persists_plugin_state() {
         let workspace = TestWorkspace::new("plugin-enabled-state");
         let service_root = workspace.path("service");
+        seed_standard_test_plugins(&service_root);
         let state = RepositoryState::from_root(service_root.clone());
 
         let response = state
@@ -13939,7 +14895,9 @@ mod tests {
     #[test]
     fn delete_plugin_rejects_builtin_plugins() {
         let workspace = TestWorkspace::new("builtin-plugin-delete");
-        let state = RepositoryState::from_root(workspace.path("service"));
+        let service_root = workspace.path("service");
+        seed_standard_test_plugins(&service_root);
+        let state = RepositoryState::from_root(service_root);
 
         let error = state
             .delete_plugin("momobako.preview.media".to_string())
@@ -14169,6 +15127,110 @@ mod tests {
         );
     }
 
+    fn seed_standard_test_plugins(service_root: &Path) {
+        let runtime_root = runtime_plugins_dir(service_root);
+        write_test_plugin_archive_with_manifest(
+            &runtime_root.join("local-filesystem.momoplug"),
+            test_plugin_manifest_json(
+                LOCAL_FILESYSTEM_PLUGIN_ID,
+                "Local Filesystem",
+                serde_json::json!({
+                    "legacyPluginIds": [LEGACY_LOCAL_FILESYSTEM_PLUGIN_ID],
+                    "kind": "filesystem",
+                    "category": "source",
+                    "type": {
+                        "layer": "source",
+                        "kind": "filesystem"
+                    },
+                    "capabilities": ["listFiles", "readFile", "writeFile", "moveFile", "deleteFile"],
+                    "sdk": "backend",
+                    "runtime": "native-dylib",
+                    "source": "system"
+                }),
+            ),
+        );
+        write_test_plugin_archive_with_manifest(
+            &runtime_root.join("media-preview.momoplug"),
+            test_plugin_manifest_json(
+                "momobako.preview.media",
+                "Media Preview",
+                serde_json::json!({
+                    "kind": "preview",
+                    "category": "preview",
+                    "type": {
+                        "layer": "library-kind",
+                        "kind": "preview"
+                    },
+                    "capabilities": ["preview", "playlist", "media"],
+                    "sdk": "frontend",
+                    "runtime": "vue-module",
+                    "source": "builtin",
+                    "hooks": [
+                        { "slot": "playlist", "action": "preview.media.enqueue", "label": "加入播放列表" }
+                    ]
+                }),
+            ),
+        );
+        write_test_plugin_archive_with_manifest(
+            &runtime_root.join("library-audio.momoplug"),
+            test_plugin_manifest_json(
+                "momobako.library.audio",
+                "Audio Library",
+                serde_json::json!({
+                    "kind": "audio",
+                    "category": "library-kind",
+                    "type": {
+                        "layer": "library-kind",
+                        "kind": "audio"
+                    },
+                    "capabilities": ["library", "audio"],
+                    "sdk": "frontend",
+                    "runtime": "manifest-only",
+                    "source": "builtin",
+                    "optional": ["momobako.parser.audio"]
+                }),
+            ),
+        );
+        write_test_plugin_archive_with_manifest(
+            &runtime_root.join("parser-audio.momoplug"),
+            test_plugin_manifest_json(
+                "momobako.parser.audio",
+                "Audio Parser",
+                serde_json::json!({
+                    "kind": "parser",
+                    "category": "parser",
+                    "type": {
+                        "layer": "parser",
+                        "kind": "audio"
+                    },
+                    "capabilities": ["parse", "audio"],
+                    "sdk": "backend",
+                    "runtime": "manifest-only",
+                    "source": "builtin"
+                }),
+            ),
+        );
+        write_test_plugin_archive_with_manifest(
+            &runtime_root.join("service-network-search.momoplug"),
+            test_plugin_manifest_json(
+                "momobako.service.network-search",
+                "Network Search",
+                serde_json::json!({
+                    "kind": "search",
+                    "category": "service",
+                    "type": {
+                        "layer": "provider-service",
+                        "kind": "search"
+                    },
+                    "capabilities": ["network", "search"],
+                    "sdk": "backend",
+                    "runtime": "manifest-only",
+                    "source": "builtin"
+                }),
+            ),
+        );
+    }
+
     fn test_plugin_manifest_json(
         plugin_id: &str,
         name: &str,
@@ -14360,7 +15422,29 @@ mod tests {
     #[test]
     fn disabled_manifest_only_backend_is_not_attachable() {
         let workspace = TestWorkspace::new("disabled-backend");
-        let state = RepositoryState::from_root(workspace.path("service"));
+        let service_root = workspace.path("service");
+        let runtime_root = runtime_plugins_dir(&service_root);
+        write_test_plugin_archive_with_manifest(
+            &runtime_root.join("webdav.momoplug"),
+            test_plugin_manifest_json(
+                TEST_WEBDAV_PLUGIN_ID,
+                "WebDAV",
+                serde_json::json!({
+                    "kind": "webdav",
+                    "category": "source",
+                    "type": {
+                        "layer": "source",
+                        "kind": "webdav"
+                    },
+                    "capabilities": ["listFiles", "readFile", "writeFile"],
+                    "enabled": false,
+                    "sdk": "backend",
+                    "runtime": "manifest-only",
+                    "source": "system"
+                }),
+            ),
+        );
+        let state = RepositoryState::from_root(service_root);
         let repo_root = workspace.path("repo");
 
         let error = state
@@ -14368,7 +15452,7 @@ mod tests {
                 repo_id: Some("repo-webdav".to_string()),
                 name: "WebDAV Repo".to_string(),
                 path: repo_root.to_string_lossy().to_string(),
-                backend_plugin_id: Some(WEBDAV_PLUGIN_ID.to_string()),
+                backend_plugin_id: Some(TEST_WEBDAV_PLUGIN_ID.to_string()),
                 backend_config: None,
             })
             .expect_err("disabled manifest-only backend should not create a repository");
@@ -14384,6 +15468,7 @@ mod tests {
         let workspace = TestWorkspace::new("runtime-local-backend");
         let service_root = workspace.path("service");
         let repo_root = workspace.path("repo");
+        install_local_filesystem_test_plugin_archive(&service_root);
         let state = RepositoryState::from_root(service_root);
 
         let repo_id = state
@@ -14624,29 +15709,7 @@ mod tests {
         state
             .ensure_initialized()
             .expect("repository state should initialize");
-        let runtime_plugin_root = runtime_plugins_dir(&state.root);
-        let archive_path = runtime_plugin_root.join("local-filesystem.momoplug");
-        if archive_path.exists() {
-            return;
-        }
-        write_test_plugin_archive_with_manifest(
-            &archive_path,
-            test_plugin_manifest_json(
-                LOCAL_FILESYSTEM_PLUGIN_ID,
-                "Local Filesystem",
-                serde_json::json!({
-                    "kind": "filesystem",
-                    "category": "source",
-                    "type": {
-                        "layer": "source",
-                        "kind": "filesystem"
-                    },
-                    "capabilities": ["listFiles", "readFile", "writeFile", "moveFile", "deleteFile"],
-                    "runtime": "manifest-only",
-                    "source": "system"
-                }),
-            ),
-        );
+        install_local_filesystem_test_plugin_archive(&state.root);
     }
 
     fn create_repository_without_initial_sync(state: &RepositoryState, repo_root: &Path) -> String {
@@ -14657,6 +15720,7 @@ mod tests {
         state
             .ensure_initialized()
             .expect("repository state should initialize");
+        install_local_filesystem_test_plugin_archive(&state.root);
         let repo_path = repo_root.to_string_lossy().to_string();
         let backend = RepositoryBackendRecord {
             plugin_id: LOCAL_FILESYSTEM_PLUGIN_ID.to_string(),
@@ -17128,5 +18192,30 @@ mod tests {
             .position(|item| item == thumbnail_path.as_os_str())
             .expect("missing output path");
         assert!(map_index < output_index);
+    }
+
+    #[test]
+    fn audio_cover_probe_args_select_video_streams_as_json() {
+        let source_path = Path::new("C:/Assets/track.mp3");
+        let args = audio_cover_probe_args(source_path);
+
+        assert!(args.windows(2).any(|items| items == ["-select_streams", "v"]));
+        assert!(args.windows(2).any(|items| items == ["-show_entries", "stream=index"]));
+        assert!(args.windows(2).any(|items| items == ["-of", "json"]));
+        assert_eq!(args.last(), Some(&source_path.as_os_str().to_os_string()));
+    }
+
+    #[test]
+    fn audio_cover_probe_output_reports_missing_streams() {
+        assert!(!audio_cover_probe_output_has_stream(br#"{"streams":[]}"#)
+            .expect("probe output should parse"));
+        assert!(!audio_cover_probe_output_has_stream(br#"{}"#)
+            .expect("probe output should parse"));
+    }
+
+    #[test]
+    fn audio_cover_probe_output_reports_present_streams() {
+        assert!(audio_cover_probe_output_has_stream(br#"{"streams":[{"index":1}]}"#)
+            .expect("probe output should parse"));
     }
 }

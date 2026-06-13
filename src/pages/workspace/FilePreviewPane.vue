@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { ArrowLeft, Eye, FileAudio, FileImage, FileVideo, FolderOpen, ListMusic, Shuffle, Trash2 } from "lucide-vue-next";
-import { computed } from "vue";
 import type { Component } from "vue";
+import { computed, onBeforeUnmount, ref, watch } from "vue";
+import { usePlaylistPlayer } from "../../composables/usePlaylistPlayer";
 import FileMetadataEditor from "./FileMetadataEditor.vue";
 import ThumbnailPalette from "../../components/ThumbnailPalette.vue";
 import type { FileBrowserEntry, RepositoryTagGroup } from "../../types/repository";
@@ -40,6 +41,32 @@ const emit = defineEmits<{
   thumbnailLoaded: [entry: FileBrowserEntry, event: Event];
 }>();
 
+const playlistPlayer = usePlaylistPlayer();
+const playerPreviewMount = ref<HTMLElement | null>(null);
+const isCurrentPlaylistItem = computed(() => (
+  playlistPlayer.activeRepoId.value === props.repoId
+  && playlistPlayer.currentItem.value?.path === props.entry.path
+));
+
+function handlePreviewMediaPlay(event: Event) {
+  if (isCurrentPlaylistItem.value) return;
+  if (!(event.target instanceof HTMLMediaElement)) return;
+  if (playlistPlayer.activeFileClass.value !== "audio" || !playlistPlayer.isPlaying.value) return;
+  void playlistPlayer.setPlaybackState({ isPlaying: false });
+}
+
+watch(
+  [isCurrentPlaylistItem, playerPreviewMount],
+  ([active, element]) => {
+    playlistPlayer.attachVisibleMountTarget(active ? element : null);
+  },
+  { immediate: true },
+);
+
+onBeforeUnmount(() => {
+  playlistPlayer.attachVisibleMountTarget(null);
+});
+
 const asmrQueueEntries = computed(() => {
   return asmrWorkAudioEntries(props.entry, props.playlistEntries)
     .filter((item) => item.path !== props.entry.path);
@@ -77,10 +104,20 @@ const isAsmrAudioEntry = computed(() => isAsmrAudioFileEntry(props.entry));
 
   <div class="files-preview-page__body">
     <div class="files-preview-page__preview-shell">
-      <div class="files-preview-page__preview" :class="{ 'files-preview-page__preview--plugin': plugin }">
+      <div
+        class="files-preview-page__preview"
+        :class="{ 'files-preview-page__preview--plugin': plugin }"
+        @play.capture="handlePreviewMediaPlay"
+      >
+        <div
+          v-if="isCurrentPlaylistItem"
+          ref="playerPreviewMount"
+          class="files-preview-page__player-mount"
+          aria-label="当前播放画面"
+        ></div>
         <component
           :is="plugin.component"
-          v-if="plugin"
+          v-else-if="plugin"
           :entry="entry"
           :repo-id="repoId"
           :save-metadata="saveMetadata"
@@ -97,7 +134,9 @@ const isAsmrAudioEntry = computed(() => isAsmrAudioFileEntry(props.entry));
         <FileAudio v-else-if="isAudioEntry(entry)" :size="54" aria-hidden="true" />
         <FileImage v-else :size="54" aria-hidden="true" />
       </div>
-      <ThumbnailPalette :colors="thumbnailPalette(entry)" />
+      <div class="files-preview-page__palette-slot">
+        <ThumbnailPalette :colors="thumbnailPalette(entry)" />
+      </div>
       <section v-if="asmrQueueEntries.length" class="files-preview-page__queue" aria-label="ASMR 作品队列">
         <div class="files-preview-page__queue-head">
           <span>作品队列</span>

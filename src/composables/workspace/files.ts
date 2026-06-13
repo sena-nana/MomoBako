@@ -23,7 +23,7 @@ import {
 } from "./tasks";
 import { loadThumbnailsForSnapshot } from "./thumbnails";
 import { joinRepositoryPath } from "./paths";
-import { yieldEvery } from "./scheduler";
+import { shouldYieldEvery, yieldEvery } from "./scheduler";
 
 export type FileBrowserLoadOptions = {
   includeTree?: boolean;
@@ -54,7 +54,9 @@ async function buildFileBrowserDerivedState(snapshot: FileBrowserSnapshot, reque
     } else {
       files.push(entry);
     }
-    await yieldEvery(index);
+    if (shouldYieldEvery(index)) {
+      await yieldEvery(index);
+    }
     if (requestId !== derivedRequestId) return;
   }
 

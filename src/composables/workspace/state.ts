@@ -8,6 +8,8 @@ import type {
   FileBrowserEntry,
   FileTreeNode,
   HardlinkCandidate,
+  PlaylistDetail,
+  PlaylistSummary,
   PluginManifest,
   RepositoryAction,
   RepositorySnapshot,
@@ -19,7 +21,7 @@ import type {
   WorkspaceStartupState,
 } from "../../types/repository";
 
-export type WorkspacePanelKey = "files" | "deleted" | "search" | "smartFolder" | "actions" | "extensions";
+export type WorkspacePanelKey = "files" | "deleted" | "search" | "smartFolder" | "playlist" | "actions" | "extensions";
 
 export type WorkspaceFilterState = {
   tags: string[];
@@ -103,6 +105,7 @@ export const activeRepoId = ref<string | null>(null);
 export const activeSnapshot = shallowRef<RepositorySnapshot | null>(null);
 export const activeAssetId = ref<string | null>(null);
 export const activeAssetDetail = shallowRef<AssetDetail | null>(null);
+export const activePreviewPath = ref<string | null>(null);
 export const activePanel = ref<WorkspacePanelKey>("files");
 export const currentDirectoryPath = ref("");
 export const fileBrowser = shallowRef<FileBrowserSnapshot | null>(null);
@@ -115,6 +118,10 @@ export const searchQuery = ref("");
 export const searchResults = shallowRef<SearchHit[]>([]);
 export const smartFolders = shallowRef<SmartFolderTreeNode[]>([]);
 export const repositoryActions = shallowRef<RepositoryAction[]>([]);
+export const playlists = shallowRef<PlaylistSummary[]>([]);
+export const playlistMemberships = shallowRef<Record<string, string[]>>({});
+export const activePlaylistId = ref<string | null>(null);
+export const activePlaylistDetail = shallowRef<PlaylistDetail | null>(null);
 export const activeRepositoryActionId = ref<string | null>(null);
 export const activeSmartFolderId = ref<string | null>(null);
 export const smartFolderResult = shallowRef<SmartFolderResultSnapshot | null>(null);
