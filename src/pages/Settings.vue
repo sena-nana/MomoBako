@@ -13,17 +13,22 @@ import {
 } from "lucide-vue-next";
 import PluginManagerPanel from "../components/PluginManagerPanel.vue";
 import { useTheme } from "../composables/useTheme";
-import { useRepositoryWorkspace } from "../composables/useRepositoryWorkspace";
+import {
+  useWorkspaceRepository,
+  useWorkspaceSettings,
+} from "../composables/useRepositoryWorkspace";
 import { writeBinaryFile } from "../services/repositoryApi";
 
 const { theme, setTheme } = useTheme();
 const {
   repositories,
+} = useWorkspaceRepository();
+const {
   cacheSnapshot,
   apiDesign,
   externalApiConnection,
   loadSettingsData,
-} = useRepositoryWorkspace();
+} = useWorkspaceSettings();
 
 const externalApiMessage = ref("");
 const externalApiError = ref("");

@@ -297,7 +297,7 @@ vi.mock("../src/services/repositoryApi", () => ({
 }));
 
 vi.mock("../src/composables/useRepositoryWorkspace", () => ({
-  useRepositoryWorkspace: () => ({
+  useWorkspaceFiles: () => ({
     saveGeneratedWorkspaceEntryThumbnail: mocks.saveGeneratedWorkspaceEntryThumbnail,
   }),
 }));

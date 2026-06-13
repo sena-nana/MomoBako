@@ -21,7 +21,7 @@ import { FBXLoader } from "three/examples/jsm/loaders/FBXLoader.js";
 import { GLTFLoader, type GLTFParser } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { OBJLoader } from "three/examples/jsm/loaders/OBJLoader.js";
 import { preparePreviewFileSource } from "../../services/repositoryApi";
-import { useRepositoryWorkspace } from "../../composables/useRepositoryWorkspace";
+import { useWorkspaceFiles } from "../../composables/useRepositoryWorkspace";
 import { useTaskCenter } from "../../composables/useTaskCenter";
 import type { FileBrowserEntry } from "../../types/repository";
 
@@ -43,7 +43,7 @@ const loadProgress = ref({
 });
 const renderer = shallowRef<ModelPreviewRenderer | null>(null);
 const { upsertTask, removeTask } = useTaskCenter();
-const { saveGeneratedWorkspaceEntryThumbnail } = useRepositoryWorkspace();
+const { saveGeneratedWorkspaceEntryThumbnail } = useWorkspaceFiles();
 let scene: Scene | null = null;
 let camera: PerspectiveCamera | null = null;
 let controls: OrbitControls | null = null;

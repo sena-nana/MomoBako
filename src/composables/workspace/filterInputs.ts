@@ -7,8 +7,20 @@ export function splitListInput(value: string) {
   ));
 }
 
+export function joinListInput(values?: string[]) {
+  return values?.join("，") ?? "";
+}
+
 export function normalizeFilterValues(values: string[]) {
   return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean)));
+}
+
+export function formatMetadataFiltersInput(filter: { metadataFilters?: Array<{ key: string; value: string }> }) {
+  return filter.metadataFilters?.map((item) => `${item.key}=${item.value}`).join("\n") ?? "";
+}
+
+export function formatExcludeMetadataFiltersInput(filter: { excludeMetadataFilters?: Array<{ key: string; value: string }> }) {
+  return filter.excludeMetadataFilters?.map((item) => `${item.key}=${item.value}`).join("\n") ?? "";
 }
 
 export function parseMetadataFiltersInput(value: string) {
@@ -51,6 +63,14 @@ export function parseNumberFiltersInput(value: string) {
     });
 }
 
+export function formatNumberFiltersInput(filter: { numberFilters?: Array<{ key: string; min?: number; max?: number }> }) {
+  return filter.numberFilters?.map((item) => `${item.key}=${item.min ?? ""}..${item.max ?? ""}`).join("\n") ?? "";
+}
+
+export function formatExcludeNumberFiltersInput(filter: { excludeNumberFilters?: Array<{ key: string; min?: number; max?: number }> }) {
+  return filter.excludeNumberFilters?.map((item) => `${item.key}=${item.min ?? ""}..${item.max ?? ""}`).join("\n") ?? "";
+}
+
 export function parseDateFiltersInput(value: string) {
   return value
     .split(/\n|[,，]/)
@@ -66,6 +86,14 @@ export function parseDateFiltersInput(value: string) {
         to: to || undefined,
       })].filter((filter) => filter.from || filter.to);
     });
+}
+
+export function formatDateFiltersInput(filter: { dateFilters?: Array<{ key: string; from?: string; to?: string }> }) {
+  return filter.dateFilters?.map((item) => `${item.key}=${item.from ?? ""}..${item.to ?? ""}`).join("\n") ?? "";
+}
+
+export function formatExcludeDateFiltersInput(filter: { excludeDateFilters?: Array<{ key: string; from?: string; to?: string }> }) {
+  return filter.excludeDateFilters?.map((item) => `${item.key}=${item.from ?? ""}..${item.to ?? ""}`).join("\n") ?? "";
 }
 
 export function parsePathPrefixesInput(value: string) {

@@ -11,7 +11,10 @@ import {
 } from "lucide-vue-next";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useRoute, useRouter } from "vue-router";
-import { useRepositoryWorkspace } from "../composables/useRepositoryWorkspace";
+import {
+  useWorkspaceNavigation,
+  useWorkspaceSearch,
+} from "../composables/useRepositoryWorkspace";
 
 defineProps<{
   leftSidebarCollapsed?: boolean;
@@ -31,9 +34,11 @@ const {
   isFilterBarOpen,
   searchQuery,
   runSearch,
-  setActivePanel,
   toggleFilterBar,
-} = useRepositoryWorkspace();
+} = useWorkspaceSearch();
+const {
+  setActivePanel,
+} = useWorkspaceNavigation();
 let unlisten: (() => void) | null = null;
 
 function safeCurrentWindow(): ReturnType<typeof getCurrentWindow> | null {
