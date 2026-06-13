@@ -256,6 +256,7 @@
 - `POST /plugins:call`
   - Request body includes `pluginId`, `method`, and arbitrary JSON `payload`
   - Used by frontend preview or codec plugins to invoke native plugin capabilities without adding file-format-specific commands to the core runtime
+  - Runtime plugin calls resolve `requires` and `optional` before dispatch. Missing or disabled required dependencies reject the call with the plugin disable reason; missing or disabled optional dependencies keep the call usable and return `runtime.degraded`, `runtime.degradationReason`, and `runtime.dependencyStatus` alongside the plugin payload.
 - `POST /files:writeBinary`
   - Request body includes absolute `path` and raw `bytes`
   - Used by plugins for export flows such as writing decoded media chosen through a save dialog
