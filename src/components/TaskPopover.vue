@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, ref } from "vue";
 import { ClipboardList, X } from "lucide-vue-next";
 import ProgressBar from "./ProgressBar.vue";
-import { useRepositoryWorkspace } from "../composables/useRepositoryWorkspace";
+import { useWorkspaceProgress } from "../composables/useRepositoryWorkspace";
 import { useTaskCenter, type TaskProgress } from "../composables/useTaskCenter";
 
 const popoverOpen = ref(false);
@@ -10,7 +10,7 @@ const popoverPosition = ref({ left: 8, top: 8 });
 const popoverRef = ref<HTMLElement | null>(null);
 const buttonRef = ref<HTMLElement | null>(null);
 
-const { operationProgress } = useRepositoryWorkspace();
+const { operationProgress } = useWorkspaceProgress();
 const { tasks: registeredTasks } = useTaskCenter();
 
 const repositoryTask = computed<TaskProgress | null>(() => {

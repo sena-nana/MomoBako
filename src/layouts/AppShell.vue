@@ -4,7 +4,11 @@ import { RouterView } from "vue-router";
 import { RefreshCw } from "lucide-vue-next";
 import TitleBar from "../components/TitleBar.vue";
 import SecondaryPanel from "./SecondaryPanel.vue";
-import { useRepositoryWorkspace } from "../composables/useRepositoryWorkspace";
+import {
+  useWorkspacePlaylists,
+  useWorkspaceProgress,
+  useWorkspaceRepository,
+} from "../composables/useRepositoryWorkspace";
 import { usePlaylistPlayer } from "../composables/usePlaylistPlayer";
 import { useResizablePane } from "../composables/useResizablePane";
 import { getPlaylistDetail } from "../services/repositoryApi";
@@ -44,10 +48,10 @@ const playerMountRef = ref<HTMLElement | null>(null);
 
 const {
   activeRepoId,
-  playlists,
-  workspaceStartup,
   ensureRepositoryWorkspace,
-} = useRepositoryWorkspace();
+} = useWorkspaceRepository();
+const { playlists } = useWorkspacePlaylists();
+const { workspaceStartup } = useWorkspaceProgress();
 const player = usePlaylistPlayer();
 
 const isWorkspaceReady = computed(() => workspaceStartup.value.status === "ready");

@@ -4,11 +4,8 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { Power, RefreshCw, Trash2, Upload } from "lucide-vue-next";
 import ConfirmDialog from "./ConfirmDialog.vue";
 import {
-  deletePluginInWorkspace,
-  installPluginArchiveInWorkspace,
-  loadSettingsData,
-  setPluginEnabledInWorkspace,
-  useRepositoryWorkspace,
+  useWorkspaceProgress,
+  useWorkspaceSettings,
 } from "../composables/useRepositoryWorkspace";
 import type { PluginManifest } from "../types/repository";
 import { pluginCategory, pluginCategoryLabel } from "../utils/pluginTaxonomy";
@@ -31,10 +28,16 @@ withDefaults(defineProps<{
 
 const {
   plugins,
+  deletePluginInWorkspace,
+  installPluginArchiveInWorkspace,
+  loadSettingsData,
+  setPluginEnabledInWorkspace,
+} = useWorkspaceSettings();
+const {
   isLoadingSettingsData,
   isManagingPlugins,
   error,
-} = useRepositoryWorkspace();
+} = useWorkspaceProgress();
 
 const keyword = ref("");
 const actionError = ref("");

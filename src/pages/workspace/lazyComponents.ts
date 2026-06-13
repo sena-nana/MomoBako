@@ -10,67 +10,94 @@ type PreloadHandle = {
   kind: "idle" | "timeout";
   id: number;
 };
+type WorkspacePreloadHandle = {
+  primary: PreloadHandle | null;
+  secondary: PreloadHandle | null;
+};
 
 export const workspaceComponentLoaders = {
   CopyTargetDialog: () => import("./CopyTargetDialog.vue"),
+  ExtensionsPanel: () => import("./ExtensionsPanel.vue"),
   FileBrowserPanel: () => import("./FileBrowserPanel.vue"),
   FilePreviewPane: () => import("./FilePreviewPane.vue"),
   HardlinkCandidateDialog: () => import("./HardlinkCandidateDialog.vue"),
-  PluginManagerPanel: () => import("../../components/PluginManagerPanel.vue"),
   RepositoryActionsPanel: () => import("./RepositoryActionsPanel.vue"),
   SearchPanel: () => import("./SearchPanel.vue"),
+  WorkspaceFilterBar: () => import("./WorkspaceFilterBar.vue"),
+  WorkspaceFilesSurface: () => import("./WorkspaceFilesSurface.vue"),
+  WorkspacePlaylistPage: () => import("./WorkspacePlaylistPage.vue"),
 };
 
 export const CopyTargetDialog = defineAsyncComponent(workspaceComponentLoaders.CopyTargetDialog);
+export const ExtensionsPanel = defineAsyncComponent(workspaceComponentLoaders.ExtensionsPanel);
 export const FileBrowserPanel = defineAsyncComponent(workspaceComponentLoaders.FileBrowserPanel);
 export const FilePreviewPane = defineAsyncComponent(workspaceComponentLoaders.FilePreviewPane);
 export const HardlinkCandidateDialog = defineAsyncComponent(workspaceComponentLoaders.HardlinkCandidateDialog);
-export const PluginManagerPanel = defineAsyncComponent(workspaceComponentLoaders.PluginManagerPanel);
 export const RepositoryActionsPanel = defineAsyncComponent(workspaceComponentLoaders.RepositoryActionsPanel);
 export const SearchPanel = defineAsyncComponent(workspaceComponentLoaders.SearchPanel);
+export const WorkspaceFilterBar = defineAsyncComponent(workspaceComponentLoaders.WorkspaceFilterBar);
+export const WorkspaceFilesSurface = defineAsyncComponent(workspaceComponentLoaders.WorkspaceFilesSurface);
+export const WorkspacePlaylistPage = defineAsyncComponent(workspaceComponentLoaders.WorkspacePlaylistPage);
 
-function preloadWorkspaceComponents(activePanel: WorkspacePanelKey) {
-  const primaryLoaders = activePanel === "search"
+function currentPanelLoaders(activePanel: WorkspacePanelKey) {
+  return activePanel === "search"
     ? [workspaceComponentLoaders.SearchPanel]
     : activePanel === "extensions"
-      ? [workspaceComponentLoaders.PluginManagerPanel]
+      ? [workspaceComponentLoaders.ExtensionsPanel]
       : activePanel === "actions"
         ? [workspaceComponentLoaders.RepositoryActionsPanel]
-        : [workspaceComponentLoaders.FileBrowserPanel];
-  const secondaryLoaders = [
+        : activePanel === "playlist"
+          ? [workspaceComponentLoaders.WorkspacePlaylistPage]
+          : [workspaceComponentLoaders.WorkspaceFilesSurface, workspaceComponentLoaders.FileBrowserPanel];
+}
+
+function secondaryWorkspaceLoaders(activePanel: WorkspacePanelKey) {
+  return [
+    ...currentPanelLoaders(activePanel),
     workspaceComponentLoaders.FilePreviewPane,
+    workspaceComponentLoaders.WorkspaceFilterBar,
     workspaceComponentLoaders.SearchPanel,
-    workspaceComponentLoaders.PluginManagerPanel,
+    workspaceComponentLoaders.ExtensionsPanel,
     workspaceComponentLoaders.CopyTargetDialog,
     workspaceComponentLoaders.HardlinkCandidateDialog,
+    workspaceComponentLoaders.WorkspacePlaylistPage,
   ];
+}
 
-  for (const load of new Set([...primaryLoaders, ...secondaryLoaders])) {
+function preloadWorkspaceComponents(loaders: Array<() => Promise<unknown>>) {
+  for (const load of new Set(loaders)) {
     void load().catch(() => undefined);
   }
 }
 
-export function queueWorkspaceComponentPreload(
-  activePanel: WorkspacePanelKey,
-  existingHandle: PreloadHandle | null,
-) {
-  if (existingHandle) return existingHandle;
-
+function schedulePreload(callback: () => void, timeout: number, fallbackDelay: number): PreloadHandle {
   const currentWindow = window as IdlePreloadWindow;
   if (currentWindow.requestIdleCallback) {
     return {
-      kind: "idle" as const,
-      id: currentWindow.requestIdleCallback(() => preloadWorkspaceComponents(activePanel), { timeout: 1200 }),
+      kind: "idle",
+      id: currentWindow.requestIdleCallback(callback, { timeout }),
     };
   }
 
   return {
-    kind: "timeout" as const,
-    id: window.setTimeout(() => preloadWorkspaceComponents(activePanel), 250),
+    kind: "timeout",
+    id: window.setTimeout(callback, fallbackDelay),
   };
 }
 
-export function cancelWorkspaceComponentPreload(handle: PreloadHandle | null) {
+export function queueWorkspaceComponentPreload(
+  activePanel: WorkspacePanelKey,
+  existingHandle: WorkspacePreloadHandle | null,
+) {
+  if (existingHandle) return existingHandle;
+
+  return {
+    primary: schedulePreload(() => preloadWorkspaceComponents(currentPanelLoaders(activePanel)), 800, 120),
+    secondary: schedulePreload(() => preloadWorkspaceComponents(secondaryWorkspaceLoaders(activePanel)), 2400, 900),
+  };
+}
+
+function cancelPreloadHandle(handle: PreloadHandle | null) {
   if (!handle) return;
 
   const currentWindow = window as IdlePreloadWindow;
@@ -81,4 +108,10 @@ export function cancelWorkspaceComponentPreload(handle: PreloadHandle | null) {
   }
 }
 
-export type WorkspacePreloadHandle = PreloadHandle;
+export function cancelWorkspaceComponentPreload(handle: WorkspacePreloadHandle | null) {
+  if (!handle) return;
+  cancelPreloadHandle(handle.primary);
+  cancelPreloadHandle(handle.secondary);
+}
+
+export type { WorkspacePreloadHandle };

@@ -7,12 +7,14 @@ const plugins = vi.hoisted(() => ({ value: [] as PluginManifest[] }));
 const error = vi.hoisted(() => ({ value: "" }));
 
 vi.mock("../src/composables/useRepositoryWorkspace", () => ({
-  deletePluginInWorkspace: vi.fn(),
-  installPluginArchiveInWorkspace: vi.fn(),
-  loadSettingsData: vi.fn(),
-  setPluginEnabledInWorkspace: vi.fn(),
-  useRepositoryWorkspace: () => ({
+  useWorkspaceSettings: () => ({
     plugins,
+    deletePluginInWorkspace: vi.fn(),
+    installPluginArchiveInWorkspace: vi.fn(),
+    loadSettingsData: vi.fn(),
+    setPluginEnabledInWorkspace: vi.fn(),
+  }),
+  useWorkspaceProgress: () => ({
     isLoadingSettingsData: false,
     isManagingPlugins: false,
     error,
