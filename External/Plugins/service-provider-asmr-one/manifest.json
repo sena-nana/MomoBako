@@ -19,19 +19,21 @@
     "external-id",
     "candidate-results"
   ],
-  "enabled": false,
+  "enabled": true,
   "sdk": "backend",
-  "entry": {},
+  "entry": {
+    "backend": {
+      "library": "momobako_provider_asmr_one"
+    }
+  },
   "source": "builtin",
-  "runtime": "manifest-only",
+  "runtime": "native-dylib",
   "permissions": [
     "network",
     "useProvider",
     "writeCandidates"
   ],
-  "requires": [
-    "momobako.service.network-search"
-  ],
+  "requires": [],
   "optional": [],
   "hooks": [
     {
@@ -46,7 +48,8 @@
       "source": "asmr-one",
       "lookup": {
         "idPattern": "RJ\\d{6,8}",
-        "detailUrlTemplate": "https://api.asmr-200.com/api/workInfo/{rjDigits}"
+        "detailUrlTemplate": "https://api.asmr-200.com/api/workInfo/{rjDigits}",
+        "action": "provider.lookupMetadataCandidate"
       },
       "fields": [
         "workId",
@@ -100,5 +103,5 @@
       "builtin.service-provider-asmr-one"
     ]
   },
-  "status": "disabled"
+  "status": "ready"
 }

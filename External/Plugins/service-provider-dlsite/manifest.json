@@ -20,19 +20,21 @@
     "cover-candidates",
     "candidate-results"
   ],
-  "enabled": false,
+  "enabled": true,
   "sdk": "backend",
-  "entry": {},
+  "entry": {
+    "backend": {
+      "library": "momobako_provider_dlsite"
+    }
+  },
   "source": "builtin",
-  "runtime": "manifest-only",
+  "runtime": "native-dylib",
   "permissions": [
     "network",
     "useProvider",
     "writeCandidates"
   ],
-  "requires": [
-    "momobako.service.network-search"
-  ],
+  "requires": [],
   "optional": [],
   "hooks": [
     {
@@ -52,7 +54,8 @@
       "source": "dlsite",
       "lookup": {
         "idPattern": "RJ\\d{6,8}",
-        "detailUrlTemplate": "https://www.dlsite.com/maniax/work/=/product_id/{rjCode}.html"
+        "detailUrlTemplate": "https://www.dlsite.com/maniax/work/=/product_id/{rjCode}.html",
+        "action": "provider.lookupMetadataCandidate"
       },
       "fields": [
         "workId",
@@ -121,5 +124,5 @@
       "builtin.service-provider-dlsite"
     ]
   },
-  "status": "disabled"
+  "status": "ready"
 }

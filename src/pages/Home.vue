@@ -14,7 +14,7 @@ import { useRepositoryWorkspace } from "../composables/useRepositoryWorkspace";
 import { usePlaylistPlayer } from "../composables/usePlaylistPlayer";
 import { getPreviewPluginForEntry } from "../plugins/previewPlugins";
 import { getPlaylistPlayerByType } from "../plugins/playlistPlayers";
-import type { PlaylistPlayerObjectFit } from "../plugins/sdk";
+import { getRegisteredLibraryExtensionsForEntry, listRegisteredLibraryExtensions, type PlaylistPlayerObjectFit } from "../plugins/sdk";
 import { getWorkspaceParentPath } from "./workspace/dragBehavior";
 import { useWorkspacePreviewUi } from "./workspace/useWorkspacePreviewUi";
 import {
@@ -29,15 +29,6 @@ import {
   SearchPanel,
   type WorkspacePreloadHandle,
 } from "./workspace/lazyComponents";
-import {
-  asmrWorkAudioEntries,
-  clearAsmrPlaylistForRepo,
-  hasAsmrPlaylistEntry,
-  mergeAsmrPlaylistEntries,
-  parseStoredAsmrPlaylist,
-  resolveActiveAsmrPlaylist,
-  type AsmrPlaylistItem,
-} from "./workspace/asmrPlaylist";
 import { useWorkspaceSearchUi } from "./workspace/useWorkspaceSearchUi";
 import { useMissingRepositoryActions } from "./workspace/useMissingRepositoryActions";
 import { useWorkspaceThumbnailActions } from "./workspace/useWorkspaceThumbnailActions";
@@ -54,7 +45,6 @@ import type {
 type FileDisplayMode = "adaptive" | "masonry" | "grid" | "list";
 
 const fileDisplayModeStorageKey = "momobako.fileDisplayMode";
-const asmrPlaylistStorageKey = "momobako.asmrPlaylist.v1";
 const fileDisplayModeOptions: Array<{ value: FileDisplayMode; label: string }> = [
   { value: "adaptive", label: "自适应" },
   { value: "masonry", label: "瀑布流" },
@@ -77,17 +67,8 @@ function readInitialFileDisplayMode(): FileDisplayMode {
   }
 }
 
-function readStoredAsmrPlaylist() {
-  try {
-    return parseStoredAsmrPlaylist(localStorage.getItem(asmrPlaylistStorageKey));
-  } catch {
-    return [];
-  }
-}
-
 const previewFilePath = ref<string | null>(null);
 const fileDisplayMode = ref<FileDisplayMode>(readInitialFileDisplayMode());
-const asmrPlaylistItems = ref<AsmrPlaylistItem[]>(readStoredAsmrPlaylist());
 const playlistDragItemId = ref<string | null>(null);
 
 const {
@@ -241,15 +222,12 @@ const previewFileEntry = computed(() => {
     ?? null;
 });
 const previewPlugin = computed(() => getPreviewPluginForEntry(previewFileEntry.value));
+const libraryExtensions = computed(() => listRegisteredLibraryExtensions());
+const previewLibraryExtensions = computed(() => getRegisteredLibraryExtensionsForEntry(previewFileEntry.value));
+const currentLibraryExtensions = computed(() => getRegisteredLibraryExtensionsForEntry(currentFileEntry.value));
 const fileDisplayModeClass = computed(() => `files-list__files--${fileDisplayMode.value}`);
 const activeDirectoryEntries = computed(() => (isSmartFolderPanel.value ? [] : directoryEntries.value));
 const activeFileEntries = computed(() => (isSmartFolderPanel.value ? smartFolderResult.value?.results ?? [] : fileEntries.value));
-const activeEntryByPath = computed<ReadonlyMap<string, FileBrowserEntry>>(() => (
-  new Map(activeFileEntries.value.map((entry) => [entry.path, entry]))
-));
-const asmrPlaylist = computed<AsmrPlaylistItem[]>(() => (
-  resolveActiveAsmrPlaylist(asmrPlaylistItems.value, activeRepoId.value, activeEntryByPath.value)
-));
 const hasActiveSplitFileGroups = computed(() => (
   isSmartFolderPanel.value ? false : hasSplitFileGroups.value
 ));
@@ -369,14 +347,28 @@ const {
   updateFilters,
 });
 
-const hasAsmrAssets = computed(() => {
+const activeLibrarySearchShortcuts = computed(() => {
   const entries = fileBrowser.value?.entries ?? [];
   const results = searchResults.value;
-  return [...entries, ...results].some((item) => {
-    const metadata = item.metadata ?? {};
-    return metadata.libraryKind === "asmr" || Boolean(metadata.workId) || Boolean(metadata.rjCode);
+  return libraryExtensions.value.flatMap((extension) => {
+    if (!extension.searchShortcuts?.length) return [];
+    const hasMatches = entries.some((entry) => extension.matchEntry(entry))
+      || results.some((result) => extension.matchEntry(searchHitToFileEntry(result)));
+    return hasMatches ? extension.searchShortcuts.map((shortcut) => ({ extension, shortcut })) : [];
   });
 });
+
+function searchHitToFileEntry(result: SearchHit): FileBrowserEntry {
+  return {
+    path: result.path,
+    name: result.filename,
+    kind: "file",
+    assetId: result.assetId,
+    status: result.status,
+    tags: result.tags,
+    metadata: result.metadata,
+  };
+}
 
 function applyMetadataFilterShortcut(metadataFilters: string, sortField = "", sortDirection: "asc" | "desc" = "asc") {
   if (!isRepositoryWritable.value) return;
@@ -405,79 +397,6 @@ function applyMetadataFilterShortcut(metadataFilters: string, sortField = "", so
   void runFilteredSearch();
 }
 
-function applyAsmrShortcut(kind: "all" | "lyrics" | "continue" | "random") {
-  if (kind === "lyrics") {
-    applyMetadataFilterShortcut("libraryKind=asmr\nlyricStatus=local");
-    return;
-  }
-  if (kind === "continue") {
-    applyMetadataFilterShortcut("libraryKind=asmr\nlisteningStatus=listening", "metadata.lastListenedAt", "desc");
-    return;
-  }
-  if (kind === "random") {
-    applyMetadataFilterShortcut("libraryKind=asmr", "random", "asc");
-    return;
-  }
-  applyMetadataFilterShortcut("libraryKind=asmr", "metadata.workId", "asc");
-}
-
-function persistAsmrPlaylist(items = asmrPlaylistItems.value) {
-  try {
-    localStorage.setItem(asmrPlaylistStorageKey, JSON.stringify(items));
-  } catch {
-    return;
-  }
-}
-
-function addAsmrPlaylistEntries(entries: FileBrowserEntry[]) {
-  if (!activeRepoId.value) return;
-  const next = mergeAsmrPlaylistEntries(asmrPlaylistItems.value, activeRepoId.value, entries);
-  asmrPlaylistItems.value = next;
-  persistAsmrPlaylist(next);
-}
-
-function addAsmrPlaylistTrack(entry: FileBrowserEntry) {
-  addAsmrPlaylistEntries([entry]);
-}
-
-function addAsmrPlaylistWork(entry: FileBrowserEntry) {
-  addAsmrPlaylistEntries(asmrWorkAudioEntries(entry, activeFileEntries.value));
-}
-
-function addRandomAsmrPlaylistTrack(entry: FileBrowserEntry) {
-  if (!activeRepoId.value) return;
-  const workEntries = asmrWorkAudioEntries(entry, activeFileEntries.value);
-  const candidates = workEntries.filter((item) => !hasAsmrPlaylistEntry(asmrPlaylistItems.value, activeRepoId.value as string, item.path));
-  const pool = candidates.length ? candidates : workEntries;
-  const selected = pool[Math.floor(Math.random() * pool.length)];
-  if (selected) addAsmrPlaylistEntries([selected]);
-}
-
-function clearAsmrPlaylist() {
-  const next = clearAsmrPlaylistForRepo(asmrPlaylistItems.value, activeRepoId.value);
-  asmrPlaylistItems.value = next;
-  persistAsmrPlaylist(next);
-}
-
-async function previewAsmrPlaylistPath(path: string) {
-  const entry = activeEntryByPath.value.get(path);
-  if (entry) {
-    previewFileEntryByDoubleClick(entry);
-    return;
-  }
-  if (!activeRepoId.value || isTrashPanel.value) return;
-  setActivePanel("files");
-  const snapshot = await loadFileBrowserForDirectory(getParentPath(path), { includeTree: true });
-  const matchedEntry = snapshot?.entries.find((item) => item.path === path);
-  if (matchedEntry?.kind === "file") {
-    selectWorkspaceEntries([matchedEntry.path], { primaryPath: matchedEntry.path, anchorPath: matchedEntry.path });
-    await nextTick();
-    previewFilePath.value = matchedEntry.path;
-    if (matchedEntry.assetId) {
-      await selectAsset(matchedEntry.assetId);
-    }
-  }
-}
 const {
   missingRepositoryError,
   isMissingRepositoryBusy,
@@ -1032,20 +951,17 @@ onUnmounted(cancelWorkspacePreload);
         </div>
       </section>
 
-      <section v-if="hasAsmrAssets" class="workspace-filter-bar__group" aria-label="ASMR 筛选">
-        <span>ASMR</span>
+      <section v-if="activeLibrarySearchShortcuts.length" class="workspace-filter-bar__group" aria-label="库类型筛选">
+        <span>库类型</span>
         <div class="workspace-filter-bar__options">
-          <button type="button" class="workspace-filter-chip" @click="applyAsmrShortcut('all')">
-            作品
-          </button>
-          <button type="button" class="workspace-filter-chip" @click="applyAsmrShortcut('lyrics')">
-            含歌词
-          </button>
-          <button type="button" class="workspace-filter-chip" @click="applyAsmrShortcut('continue')">
-            继续收听
-          </button>
-          <button type="button" class="workspace-filter-chip" @click="applyAsmrShortcut('random')">
-            随机一首
+          <button
+            v-for="{ extension, shortcut } in activeLibrarySearchShortcuts"
+            :key="`${extension.pluginId}:${shortcut.id}`"
+            type="button"
+            class="workspace-filter-chip"
+            @click="applyMetadataFilterShortcut(shortcut.metadataFilters, shortcut.sort?.field ?? '', shortcut.sort?.direction === 'desc' ? 'desc' : 'asc')"
+          >
+            {{ shortcut.label }}
           </button>
         </div>
       </section>
@@ -1094,7 +1010,7 @@ onUnmounted(cancelWorkspacePreload);
               v-model="metadataFiltersInput"
               type="text"
               aria-label="元数据"
-              placeholder="libraryKind=asmr"
+              placeholder="libraryKind=audio"
               @keydown.enter.prevent="applyAdvancedSearchFilters"
             />
           </label>
@@ -1240,7 +1156,7 @@ onUnmounted(cancelWorkspacePreload);
         :available-tags="tagFilterOptions"
         :tag-groups="activeSnapshot?.tagGroups ?? []"
         :playlist-entries="activeFileEntries"
-        :asmr-playlist="asmrPlaylist"
+        :library-extensions="previewLibraryExtensions"
         :thumbnail-palette="thumbnailPaletteColors"
         :save-metadata="saveFileMetadata"
         :save-cover-thumbnail="setWorkspaceEntryThumbnailFromUrl"
@@ -1249,11 +1165,6 @@ onUnmounted(cancelWorkspacePreload);
         @open="openWorkspaceEntry"
         @reveal="revealWorkspaceEntry"
         @preview="previewFileEntryByDoubleClick"
-        @playlist-add-track="addAsmrPlaylistTrack"
-        @playlist-add-work="addAsmrPlaylistWork"
-        @playlist-random="addRandomAsmrPlaylistTrack"
-        @playlist-clear="clearAsmrPlaylist"
-        @playlist-select="previewAsmrPlaylistPath"
         @thumbnail-loaded="updateThumbnailAspectRatio"
         @thumbnail-error="markThumbnailFailed"
       />
@@ -1303,6 +1214,7 @@ onUnmounted(cancelWorkspacePreload);
         :is-saving-metadata="isSavingMetadata"
         :available-tags="tagFilterOptions"
         :tag-groups="activeSnapshot?.tagGroups ?? []"
+        :library-extensions="currentLibraryExtensions"
         :thumbnail-palette="thumbnailPaletteColors"
         :save-metadata="saveFileMetadata"
         :selected-entries="selectedEntries"

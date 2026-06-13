@@ -942,32 +942,6 @@ pub struct PluginArchiveTextResponse {
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct AsmrMetadataLookupRequest {
-    pub provider: String,
-    pub rj_code: String,
-    pub detail_url: Option<String>,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AsmrMetadataCandidatePayload {
-    pub source: String,
-    pub confidence: String,
-    pub fields: BTreeMap<String, serde_json::Value>,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AsmrMetadataLookupResponse {
-    pub provider: String,
-    pub rj_code: String,
-    pub source_url: String,
-    pub fetched_at: String,
-    pub candidate: AsmrMetadataCandidatePayload,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct BinaryFileWriteRequest {
     pub path: String,
     pub bytes: Vec<u8>,
@@ -2687,14 +2661,6 @@ impl RepositoryState {
             path: archive_entry_path,
             text,
         })
-    }
-
-    pub fn lookup_asmr_metadata_candidate(
-        &self,
-        request: AsmrMetadataLookupRequest,
-    ) -> Result<AsmrMetadataLookupResponse, String> {
-        self.ensure_initialized()?;
-        lookup_asmr_metadata_candidate(request)
     }
 
     pub fn list_smart_folders(&self, repo_id: &str) -> Result<Vec<SmartFolderTreeNode>, String> {
@@ -7630,73 +7596,6 @@ fn infer_value_type(value: &serde_json::Value) -> &'static str {
     }
 }
 
-#[derive(Debug, Clone)]
-struct AsmrWorkContext {
-    work_id: String,
-    work_root: String,
-    work_title: String,
-}
-
-impl AsmrWorkContext {
-    fn from_relative_path(relative_path: &str) -> Option<Self> {
-        let parts = relative_path
-            .split('/')
-            .filter(|part| !part.is_empty())
-            .collect::<Vec<_>>();
-        let (index, work_id) = parts
-            .iter()
-            .enumerate()
-            .find_map(|(index, part)| extract_rj_work_id(part).map(|work_id| (index, work_id)))?;
-        let work_root = parts[..=index].join("/");
-        let work_title = parts[index].to_string();
-
-        Some(Self {
-            work_id,
-            work_root,
-            work_title,
-        })
-    }
-}
-
-fn extract_rj_work_id(value: &str) -> Option<String> {
-    let bytes = value.as_bytes();
-    for index in 0..bytes.len().saturating_sub(1) {
-        if !bytes[index].eq_ignore_ascii_case(&b'R')
-            || !bytes[index + 1].eq_ignore_ascii_case(&b'J')
-        {
-            continue;
-        }
-
-        let digits_start = index + 2;
-        let mut digits_end = digits_start;
-        while digits_end < bytes.len() && bytes[digits_end].is_ascii_digit() {
-            digits_end += 1;
-        }
-        let digit_count = digits_end.saturating_sub(digits_start);
-        if (6..=8).contains(&digit_count) {
-            let digits = &value[digits_start..digits_end];
-            return Some(format!("RJ{digits}"));
-        }
-    }
-
-    None
-}
-
-fn is_asmr_audio_extension(extension: &str) -> bool {
-    matches!(
-        extension,
-        "mp3" | "ogg" | "opus" | "wav" | "aac" | "flac" | "webm" | "mp4" | "m4a" | "mka"
-    )
-}
-
-fn is_asmr_lyric_extension(extension: &str) -> bool {
-    matches!(extension, "lrc" | "srt" | "ass" | "vtt")
-}
-
-fn is_asmr_companion_extension(extension: &str) -> bool {
-    matches!(extension, "txt" | "pdf" | "jpg" | "jpeg" | "png" | "webp")
-}
-
 fn parse_json_column(value_json: &str) -> Result<serde_json::Value, rusqlite::Error> {
     serde_json::from_str(value_json)
         .map_err(|error| rusqlite::Error::FromSqlConversionFailure(0, Type::Text, Box::new(error)))
@@ -7709,6 +7608,49 @@ fn parse_json_column_optional(
         Some(value) => parse_json_column(&value),
         None => Ok(serde_json::json!({})),
     }
+}
+
+fn metadata_defaults_for_files(
+    service_root: &Path,
+    files: &[DiscoveredFile],
+    existing_metadata_by_path: &BTreeMap<String, BTreeMap<String, serde_json::Value>>,
+) -> Result<BTreeMap<String, BTreeMap<String, serde_json::Value>>, String> {
+    if files.is_empty() {
+        return Ok(BTreeMap::new());
+    }
+
+    let registry = backend_plugin_registry(service_root);
+    let providers = registry.metadata_default_providers();
+    if providers.is_empty() {
+        return Ok(BTreeMap::new());
+    }
+
+    let entries = files
+        .iter()
+        .map(|file| MetadataDefaultsBatchEntry {
+            path: file.relative_path.clone(),
+            name: file.filename.clone(),
+            extension: file.extension.clone(),
+            kind: "file".to_string(),
+            metadata: existing_metadata_by_path.get(&file.relative_path).cloned(),
+        })
+        .collect::<Vec<_>>();
+    let payload = serde_json::json!({ "entries": entries });
+    let mut defaults_by_path = BTreeMap::<String, BTreeMap<String, serde_json::Value>>::new();
+
+    for (plugin_id, action) in providers {
+        let response = registry.call(&plugin_id, &action, payload.clone())?;
+        let parsed = serde_json::from_value::<MetadataDefaultsBatchResponse>(response)
+            .map_err(json_error)?;
+        for (path, defaults) in parsed.defaults_by_path {
+            if !files.iter().any(|file| file.relative_path == path) {
+                continue;
+            }
+            defaults_by_path.entry(path).or_default().extend(defaults);
+        }
+    }
+
+    Ok(defaults_by_path)
 }
 
 fn sync_repository_files(
@@ -7748,6 +7690,27 @@ fn sync_repository_files(
         ))
     })?;
     let existing = existing_rows.collect::<Result<Vec<_>, _>>()?;
+    let existing_asset_ids = existing
+        .iter()
+        .map(|(_asset_id, _path, record)| record.asset_id.clone())
+        .collect::<Vec<_>>();
+    let existing_metadata_by_asset_id = load_metadata_maps_for_assets(tx, &existing_asset_ids)?;
+    let existing_metadata_by_path = existing
+        .iter()
+        .filter_map(|(_asset_id, path, record)| {
+            existing_metadata_by_asset_id
+                .get(&record.asset_id)
+                .cloned()
+                .map(|metadata| (path.clone(), metadata))
+        })
+        .collect::<BTreeMap<_, _>>();
+    let plugin_defaults_by_path =
+        metadata_defaults_for_files(service_root, &files, &existing_metadata_by_path).map_err(|error| {
+            rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                error,
+            )))
+        })?;
     let mut existing_by_path = existing
         .into_iter()
         .map(|(_asset_id, path, record)| (path, record))
@@ -7820,6 +7783,7 @@ fn sync_repository_files(
                 &asset_created_at,
                 file.created_at.as_deref(),
                 &[],
+                plugin_defaults_by_path.get(&file.relative_path),
                 false,
             )?;
             updated_assets += 1;
@@ -7885,6 +7849,7 @@ fn sync_repository_files(
                 &now,
                 file.created_at.as_deref(),
                 &palette,
+                plugin_defaults_by_path.get(&file.relative_path),
             )?;
             insert_event(
                 tx,
@@ -8080,6 +8045,7 @@ fn insert_default_metadata(
     added_to_library_at: &str,
     file_created_at: Option<&str>,
     palette: &[String],
+    plugin_defaults: Option<&BTreeMap<String, serde_json::Value>>,
 ) -> Result<(), rusqlite::Error> {
     ensure_default_metadata(
         tx,
@@ -8090,6 +8056,7 @@ fn insert_default_metadata(
         added_to_library_at,
         file_created_at,
         palette,
+        plugin_defaults,
         true,
     )
 }
@@ -8097,12 +8064,13 @@ fn insert_default_metadata(
 fn ensure_default_metadata(
     tx: &Transaction<'_>,
     asset_id: &str,
-    relative_path: &str,
+    _relative_path: &str,
     filename: &str,
     extension: &str,
     added_to_library_at: &str,
     file_created_at: Option<&str>,
     palette: &[String],
+    plugin_defaults: Option<&BTreeMap<String, serde_json::Value>>,
     overwrite_existing: bool,
 ) -> Result<(), rusqlite::Error> {
     let mut defaults = vec![
@@ -8140,8 +8108,6 @@ fn ensure_default_metadata(
         ));
         defaults.push(("palette".to_string(), serde_json::json!(palette)));
     }
-    defaults.extend(asmr_default_metadata(relative_path, filename, extension));
-
     for (key, value) in defaults {
         if overwrite_existing {
             tx.execute(
@@ -8173,89 +8139,25 @@ fn ensure_default_metadata(
             )?;
         }
     }
-
-    Ok(())
-}
-
-fn asmr_default_metadata(
-    relative_path: &str,
-    filename: &str,
-    extension: &str,
-) -> Vec<(String, serde_json::Value)> {
-    let Some(context) = AsmrWorkContext::from_relative_path(relative_path) else {
-        return Vec::new();
-    };
-    let extension = extension.to_ascii_lowercase();
-    let mut defaults = vec![
-        (
-            "libraryKind".to_string(),
-            serde_json::Value::String("asmr".to_string()),
-        ),
-        (
-            "workId".to_string(),
-            serde_json::Value::String(context.work_id.clone()),
-        ),
-        (
-            "rjCode".to_string(),
-            serde_json::Value::String(context.work_id.clone()),
-        ),
-        (
-            "workRoot".to_string(),
-            serde_json::Value::String(context.work_root),
-        ),
-        (
-            "workTitle".to_string(),
-            serde_json::Value::String(context.work_title),
-        ),
-        (
-            "trackPath".to_string(),
-            serde_json::Value::String(relative_path.to_string()),
-        ),
-        (
-            "trackTitle".to_string(),
-            serde_json::Value::String(filename.to_string()),
-        ),
-        (
-            "sourceUrl".to_string(),
-            serde_json::Value::String(format!(
-                "https://www.dlsite.com/maniax/work/=/product_id/{}.html",
-                context.work_id
-            )),
-        ),
-    ];
-
-    if is_asmr_audio_extension(&extension) {
-        defaults.extend([
-            (
-                "asmrEntryKind".to_string(),
-                serde_json::Value::String("audio".to_string()),
-            ),
-            (
-                "listeningStatus".to_string(),
-                serde_json::Value::String("unlistened".to_string()),
-            ),
-            ("listeningProgress".to_string(), serde_json::json!(0)),
-            ("trackDurationMs".to_string(), serde_json::json!(0)),
-        ]);
-    } else if is_asmr_lyric_extension(&extension) {
-        defaults.extend([
-            (
-                "asmrEntryKind".to_string(),
-                serde_json::Value::String("lyric".to_string()),
-            ),
-            (
-                "lyricStatus".to_string(),
-                serde_json::Value::String("local".to_string()),
-            ),
-        ]);
-    } else if is_asmr_companion_extension(&extension) {
-        defaults.push((
-            "asmrEntryKind".to_string(),
-            serde_json::Value::String("companion".to_string()),
-        ));
+    if let Some(plugin_defaults) = plugin_defaults {
+        for (key, value) in plugin_defaults {
+            tx.execute(
+                r#"
+                INSERT OR IGNORE INTO metadata (asset_id, key, value_type, value_json, version, updated_at)
+                VALUES (?1, ?2, ?3, ?4, 1, ?5)
+                "#,
+                params![
+                    asset_id,
+                    key,
+                    infer_value_type(value),
+                    value.to_string(),
+                    added_to_library_at
+                ],
+            )?;
+        }
     }
 
-    defaults
+    Ok(())
 }
 
 fn upsert_metadata_value(
@@ -9490,6 +9392,24 @@ impl BackendDiscoveredFile {
     }
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MetadataDefaultsBatchEntry {
+    path: String,
+    name: String,
+    extension: String,
+    kind: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    metadata: Option<BTreeMap<String, serde_json::Value>>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct MetadataDefaultsBatchResponse {
+    #[serde(default)]
+    defaults_by_path: BTreeMap<String, BTreeMap<String, serde_json::Value>>,
+}
+
 fn slugify_repo_id(name: &str, path: &str) -> String {
     slugify_ascii_component(&format!("{name}-{path}"))
 }
@@ -9735,6 +9655,32 @@ impl BackendPluginRegistry {
         self.playlist_players()
             .into_iter()
             .find(|player| player.player_type_id == normalized)
+    }
+
+    fn metadata_default_providers(&self) -> Vec<(String, String)> {
+        let mut providers = Vec::new();
+        for registration in self.registrations.values() {
+            if !registration.manifest.enabled || registration.manifest.status == "error" {
+                continue;
+            }
+            let Some(contributes) = registration.manifest.contributes.as_object() else {
+                continue;
+            };
+            let Some(defaults) = contributes.get("metadataDefaults").and_then(|value| value.as_object()) else {
+                continue;
+            };
+            let Some(action) = defaults
+                .get("action")
+                .and_then(|value| value.as_str())
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+            else {
+                continue;
+            };
+            providers.push((registration.manifest.plugin_id.clone(), action.to_string()));
+        }
+        providers.sort_by(|left, right| left.0.cmp(&right.0).then_with(|| left.1.cmp(&right.1)));
+        providers
     }
 }
 
@@ -10656,12 +10602,6 @@ fn default_api_definitions() -> Vec<ApiDefinition> {
             method: "GET".to_string(),
             path: "/plugins".to_string(),
             summary: "列出插件与能力声明。".to_string(),
-        },
-        ApiDefinition {
-            group: "Provider API".to_string(),
-            method: "POST".to_string(),
-            path: "/providers/asmr:lookup".to_string(),
-            summary: "手动抓取 ASMR provider 元数据候选，不直接写入资产 metadata。".to_string(),
         },
     ]
 }
@@ -12298,370 +12238,6 @@ fn download_remote_asset(
         .copy_to(&mut file)
         .map_err(|error| format!("download body error: {error}"))?;
     Ok(())
-}
-
-fn lookup_asmr_metadata_candidate(
-    request: AsmrMetadataLookupRequest,
-) -> Result<AsmrMetadataLookupResponse, String> {
-    let rj_code = normalize_rj_code(&request.rj_code)
-        .ok_or_else(|| "ASMR provider lookup requires an RJ code".to_string())?;
-    let provider = normalize_asmr_provider(&request.provider)?;
-    let source_url = request
-        .detail_url
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(ToOwned::to_owned)
-        .unwrap_or_else(|| default_asmr_provider_url(&provider, &rj_code));
-    if !source_url.starts_with("http://") && !source_url.starts_with("https://") {
-        return Err("ASMR provider lookup only supports http and https URLs".to_string());
-    }
-    let body = fetch_asmr_provider_body(&provider, &source_url)?;
-    let candidate = parse_asmr_provider_candidate(&provider, &rj_code, &source_url, &body)?;
-    Ok(AsmrMetadataLookupResponse {
-        provider,
-        rj_code,
-        source_url,
-        fetched_at: now_rfc3339(),
-        candidate,
-    })
-}
-
-fn normalize_asmr_provider(value: &str) -> Result<String, String> {
-    match value.trim().to_ascii_lowercase().as_str() {
-        "dlsite" | "momobako.service.provider.dlsite" => Ok("dlsite".to_string()),
-        "asmr-one" | "asmr_one" | "asmrone" | "momobako.service.provider.asmr-one" => {
-            Ok("asmr-one".to_string())
-        }
-        value => Err(format!("unsupported ASMR metadata provider: {value}")),
-    }
-}
-
-fn normalize_rj_code(value: &str) -> Option<String> {
-    extract_rj_work_id(value)
-}
-
-fn default_asmr_provider_url(provider: &str, rj_code: &str) -> String {
-    match provider {
-        "asmr-one" => format!(
-            "https://api.asmr-200.com/api/workInfo/{}",
-            rj_code.trim_start_matches("RJ")
-        ),
-        _ => format!("https://www.dlsite.com/maniax/work/=/product_id/{rj_code}.html"),
-    }
-}
-
-fn fetch_asmr_provider_body(provider: &str, url: &str) -> Result<String, String> {
-    let client = reqwest::blocking::Client::builder()
-        .user_agent("MomoBakoASMRProvider/1")
-        .timeout(Duration::from_secs(20))
-        .build()
-        .map_err(|error| format!("ASMR provider client error: {error}"))?;
-    let response = client
-        .get(url)
-        .header(
-            reqwest::header::ACCEPT,
-            if provider == "asmr-one" {
-                "application/json, text/plain, */*"
-            } else {
-                "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
-            },
-        )
-        .send()
-        .map_err(|error| format!("ASMR provider request failed: {error}"))?;
-    let status = response.status();
-    if !status.is_success() {
-        return Err(format!("ASMR provider returned HTTP {status}"));
-    }
-    response
-        .text()
-        .map_err(|error| format!("ASMR provider body error: {error}"))
-}
-
-fn parse_asmr_provider_candidate(
-    provider: &str,
-    rj_code: &str,
-    source_url: &str,
-    body: &str,
-) -> Result<AsmrMetadataCandidatePayload, String> {
-    let fields = match provider {
-        "asmr-one" => parse_asmr_one_candidate_fields(rj_code, source_url, body)?,
-        "dlsite" => parse_dlsite_candidate_fields(rj_code, source_url, body),
-        value => return Err(format!("unsupported ASMR metadata provider: {value}")),
-    };
-    if fields.len() <= 3 {
-        return Err("ASMR provider did not return usable metadata".to_string());
-    }
-    Ok(AsmrMetadataCandidatePayload {
-        source: provider.to_string(),
-        confidence: "external-id".to_string(),
-        fields,
-    })
-}
-
-fn base_asmr_candidate_fields(
-    rj_code: &str,
-    source_url: &str,
-) -> BTreeMap<String, serde_json::Value> {
-    BTreeMap::from([
-        ("workId".to_string(), serde_json::json!(rj_code)),
-        ("rjCode".to_string(), serde_json::json!(rj_code)),
-        ("sourceUrl".to_string(), serde_json::json!(source_url)),
-    ])
-}
-
-fn parse_asmr_one_candidate_fields(
-    rj_code: &str,
-    source_url: &str,
-    body: &str,
-) -> Result<BTreeMap<String, serde_json::Value>, String> {
-    let value = serde_json::from_str::<serde_json::Value>(body).map_err(json_error)?;
-    let payload = value
-        .get("data")
-        .filter(|item| item.is_object())
-        .unwrap_or(&value);
-    let mut fields = base_asmr_candidate_fields(rj_code, source_url);
-    insert_json_string_field(&mut fields, "workTitle", first_json_string(payload, &["title", "name", "workTitle"]));
-    insert_json_string_field(&mut fields, "circle", nested_json_string(payload, &[&["circle", "name"], &["maker", "name"], &["circleName"]]));
-    insert_json_string_field(&mut fields, "series", nested_json_string(payload, &[&["series", "name"], &["seriesName"]]));
-    insert_json_string_field(&mut fields, "releaseDate", first_json_string(payload, &["release", "releaseDate", "release_dtl"]));
-    insert_json_string_field(&mut fields, "ageRating", first_json_string(payload, &["ageCategory", "ageRating", "rate"]));
-    insert_json_number_field(&mut fields, "price", first_json_number(payload, &["price"]));
-    insert_json_number_field(&mut fields, "dlCount", first_json_number(payload, &["dl_count", "dlCount", "sales"]));
-    insert_json_number_field(&mut fields, "reviewCount", first_json_number(payload, &["review_count", "reviewCount"]));
-    insert_json_number_field(&mut fields, "rateAverage", first_json_number(payload, &["rate_average_2dp", "rateAverage", "rating"]));
-    insert_json_array_field(&mut fields, "voiceActors", collect_named_json_array(payload, &["vas", "voiceActors", "creators"]));
-    insert_json_array_field(&mut fields, "scenarioTags", collect_named_json_array(payload, &["tags", "genres"]));
-    if let Some(cover) = first_json_string(payload, &["mainCoverUrl", "cover", "image_main", "imageMain"]) {
-        fields.insert("cover".to_string(), serde_json::json!(cover));
-    }
-    Ok(fields)
-}
-
-fn parse_dlsite_candidate_fields(
-    rj_code: &str,
-    source_url: &str,
-    body: &str,
-) -> BTreeMap<String, serde_json::Value> {
-    let mut fields = base_asmr_candidate_fields(rj_code, source_url);
-    insert_json_string_field(&mut fields, "workTitle", html_meta_content(body, "og:title").or_else(|| html_title(body)));
-    insert_json_string_field(&mut fields, "circle", html_meta_content(body, "product:brand").or_else(|| dlsite_json_like_string(body, "maker_name")));
-    insert_json_string_field(&mut fields, "releaseDate", dlsite_json_like_string(body, "regist_date"));
-    insert_json_number_field(&mut fields, "price", dlsite_json_like_number(body, "price"));
-    insert_json_number_field(&mut fields, "dlCount", dlsite_json_like_number(body, "dl_count"));
-    insert_json_number_field(&mut fields, "reviewCount", dlsite_json_like_number(body, "review_count"));
-    insert_json_number_field(&mut fields, "rateAverage", dlsite_json_like_number(body, "rate_average_2dp"));
-    if let Some(cover) = html_meta_content(body, "og:image") {
-        fields.insert("cover".to_string(), serde_json::json!(cover));
-    }
-    fields
-}
-
-fn insert_json_string_field(
-    fields: &mut BTreeMap<String, serde_json::Value>,
-    key: &str,
-    value: Option<String>,
-) {
-    let Some(value) = value.map(|item| item.trim().to_string()).filter(|item| !item.is_empty()) else {
-        return;
-    };
-    fields.insert(key.to_string(), serde_json::json!(value));
-}
-
-fn insert_json_number_field(
-    fields: &mut BTreeMap<String, serde_json::Value>,
-    key: &str,
-    value: Option<f64>,
-) {
-    let Some(value) = value.filter(|item| item.is_finite()) else {
-        return;
-    };
-    fields.insert(key.to_string(), serde_json::json!(value));
-}
-
-fn insert_json_array_field(
-    fields: &mut BTreeMap<String, serde_json::Value>,
-    key: &str,
-    values: Vec<String>,
-) {
-    if values.is_empty() {
-        return;
-    }
-    fields.insert(key.to_string(), serde_json::json!(values));
-}
-
-fn first_json_string(value: &serde_json::Value, keys: &[&str]) -> Option<String> {
-    keys.iter()
-        .find_map(|key| value.get(*key).and_then(json_value_string))
-}
-
-fn first_json_number(value: &serde_json::Value, keys: &[&str]) -> Option<f64> {
-    keys.iter()
-        .find_map(|key| value.get(*key).and_then(json_value_number))
-}
-
-fn nested_json_string(value: &serde_json::Value, paths: &[&[&str]]) -> Option<String> {
-    for path in paths {
-        let mut current = value;
-        let mut found = true;
-        for key in *path {
-            if let Some(next) = current.get(*key) {
-                current = next;
-            } else {
-                found = false;
-                break;
-            }
-        }
-        if found {
-            if let Some(text) = json_value_string(current) {
-                return Some(text);
-            }
-        }
-    }
-    None
-}
-
-fn json_value_string(value: &serde_json::Value) -> Option<String> {
-    match value {
-        serde_json::Value::String(text) => Some(text.clone()),
-        serde_json::Value::Number(number) => Some(number.to_string()),
-        _ => None,
-    }
-}
-
-fn json_value_number(value: &serde_json::Value) -> Option<f64> {
-    match value {
-        serde_json::Value::Number(number) => number.as_f64(),
-        serde_json::Value::String(text) => text.replace(',', "").parse::<f64>().ok(),
-        _ => None,
-    }
-}
-
-fn collect_named_json_array(value: &serde_json::Value, keys: &[&str]) -> Vec<String> {
-    let mut values = Vec::new();
-    let mut seen = HashSet::new();
-    for key in keys {
-        let Some(raw) = value.get(*key) else {
-            continue;
-        };
-        collect_json_names(raw, &mut values, &mut seen);
-    }
-    values
-}
-
-fn collect_json_names(value: &serde_json::Value, values: &mut Vec<String>, seen: &mut HashSet<String>) {
-    match value {
-        serde_json::Value::Array(items) => {
-            for item in items {
-                collect_json_names(item, values, seen);
-            }
-        }
-        serde_json::Value::Object(map) => {
-            if let Some(name) = map
-                .get("name")
-                .or_else(|| map.get("label"))
-                .or_else(|| map.get("value"))
-                .and_then(json_value_string)
-            {
-                push_unique_text(values, seen, name);
-            }
-        }
-        serde_json::Value::String(text) => push_unique_text(values, seen, text.clone()),
-        _ => {}
-    }
-}
-
-fn push_unique_text(values: &mut Vec<String>, seen: &mut HashSet<String>, value: String) {
-    let normalized = value.trim();
-    if normalized.is_empty() || !seen.insert(normalized.to_string()) {
-        return;
-    }
-    values.push(normalized.to_string());
-}
-
-fn html_meta_content(body: &str, property: &str) -> Option<String> {
-    let property_marker = format!("property=\"{property}\"");
-    let name_marker = format!("name=\"{property}\"");
-    for tag in body.split('<').filter(|chunk| chunk.trim_start().starts_with("meta")) {
-        if !tag.contains(&property_marker) && !tag.contains(&name_marker) {
-            continue;
-        }
-        if let Some(content) = html_attribute(tag, "content") {
-            return Some(html_decode_basic(&content));
-        }
-    }
-    None
-}
-
-fn html_title(body: &str) -> Option<String> {
-    let start = body.find("<title>")? + "<title>".len();
-    let end = body[start..].find("</title>")? + start;
-    Some(html_decode_basic(&body[start..end]))
-}
-
-fn html_attribute(tag: &str, name: &str) -> Option<String> {
-    let marker = format!("{name}=\"");
-    let start = tag.find(&marker)? + marker.len();
-    let end = tag[start..].find('"')? + start;
-    Some(tag[start..end].to_string())
-}
-
-fn html_decode_basic(value: &str) -> String {
-    value
-        .replace("&amp;", "&")
-        .replace("&quot;", "\"")
-        .replace("&#39;", "'")
-        .replace("&lt;", "<")
-        .replace("&gt;", ">")
-        .trim()
-        .to_string()
-}
-
-fn dlsite_json_like_string(body: &str, key: &str) -> Option<String> {
-    let marker = format!("\"{key}\"");
-    let start = body.find(&marker)?;
-    let after_key = &body[start + marker.len()..];
-    let colon = after_key.find(':')?;
-    let after_colon = after_key[colon + 1..].trim_start();
-    if !after_colon.starts_with('"') {
-        return None;
-    }
-    let mut escaped = false;
-    let mut end = None;
-    for (index, ch) in after_colon[1..].char_indices() {
-        if escaped {
-            escaped = false;
-            continue;
-        }
-        if ch == '\\' {
-            escaped = true;
-            continue;
-        }
-        if ch == '"' {
-            end = Some(index + 1);
-            break;
-        }
-    }
-    let raw = &after_colon[..=end?];
-    serde_json::from_str::<String>(raw).ok()
-}
-
-fn dlsite_json_like_number(body: &str, key: &str) -> Option<f64> {
-    let marker = format!("\"{key}\"");
-    let start = body.find(&marker)?;
-    let after_key = &body[start + marker.len()..];
-    let colon = after_key.find(':')?;
-    let after_colon = after_key[colon + 1..].trim_start();
-    let raw = if let Some(stripped) = after_colon.strip_prefix('"') {
-        let end = stripped.find('"')?;
-        stripped[..end].replace(',', "")
-    } else {
-        after_colon
-            .chars()
-            .take_while(|ch| ch.is_ascii_digit() || matches!(ch, '.' | '-'))
-            .collect()
-    };
-    raw.parse::<f64>().ok()
 }
 
 fn is_safe_external_header_name(value: &str) -> bool {
@@ -16020,204 +15596,107 @@ mod tests {
     }
 
     #[test]
-    fn sync_repository_seeds_asmr_metadata_for_rj_work_folders() {
-        let (state, root, repo_root, _thumbnail_root) = create_test_state("sync-asmr-metadata");
-        let work_dir = repo_root.join("VoiceWork").join("RJ123456 Test Work");
-        fs::create_dir_all(work_dir.join("bonus")).expect("asmr work folder should be created");
-        fs::write(work_dir.join("track01.mp3"), "audio").expect("audio track should be written");
-        fs::write(work_dir.join("track01.lrc"), "[00:00.00] lyric")
-            .expect("local lyric should be written");
-        fs::write(work_dir.join("bonus").join("notes.txt"), "memo")
-            .expect("companion text should be written");
+    fn plugin_metadata_defaults_preserve_existing_values() {
+        let (state, root, repo_root, _thumbnail_root) =
+            create_test_state("plugin-metadata-defaults");
+        fs::write(repo_root.join("note.txt"), "hello").expect("test file should be written");
 
         let repo_id = create_repository_for_path(&state, &repo_root);
-        let audio_metadata =
-            metadata_for_asset_path(&state, &repo_id, "VoiceWork/RJ123456 Test Work/track01.mp3");
-        let lyric_metadata =
-            metadata_for_asset_path(&state, &repo_id, "VoiceWork/RJ123456 Test Work/track01.lrc");
-        let companion_metadata = metadata_for_asset_path(
-            &state,
-            &repo_id,
-            "VoiceWork/RJ123456 Test Work/bonus/notes.txt",
-        );
+        let repo = state
+            .load_repository_record(&repo_id)
+            .expect("repository record should load");
+        let mut connection = state
+            .open_repository_connection(&repo.summary.repo_id, &repo.summary.path, &repo.backend_record)
+            .expect("repository connection should open");
+        let tx = connection
+            .transaction()
+            .expect("metadata transaction should start");
+        let asset_id = tx
+            .query_row(
+                "SELECT asset_id FROM assets WHERE repo_id = ?1 AND path = 'note.txt'",
+                [&repo_id],
+                |row| row.get::<_, String>(0),
+            )
+            .expect("asset should exist");
+        upsert_metadata_value(&tx, &asset_id, "title", &serde_json::json!("User Title"))
+            .expect("existing title should update");
+        let plugin_defaults = BTreeMap::from([
+            ("title".to_string(), serde_json::json!("Plugin Title")),
+            ("pluginDefault".to_string(), serde_json::json!("Plugin Value")),
+        ]);
+        ensure_default_metadata(
+            &tx,
+            &asset_id,
+            "note.txt",
+            "note.txt",
+            "txt",
+            &now_rfc3339(),
+            None,
+            &[],
+            Some(&plugin_defaults),
+            false,
+        )
+        .expect("plugin defaults should merge");
+        tx.commit().expect("metadata transaction should commit");
 
+        let metadata = metadata_for_asset_path(&state, &repo_id, "note.txt");
+        assert_eq!(metadata.get("title"), Some(&serde_json::json!("User Title")));
         assert_eq!(
-            audio_metadata.get("libraryKind"),
-            Some(&serde_json::json!("asmr"))
+            metadata.get("pluginDefault"),
+            Some(&serde_json::json!("Plugin Value"))
         );
-        assert_eq!(
-            audio_metadata.get("workId"),
-            Some(&serde_json::json!("RJ123456"))
-        );
-        assert_eq!(
-            audio_metadata.get("rjCode"),
-            Some(&serde_json::json!("RJ123456"))
-        );
-        assert_eq!(
-            audio_metadata.get("workRoot"),
-            Some(&serde_json::json!("VoiceWork/RJ123456 Test Work"))
-        );
-        assert_eq!(
-            audio_metadata.get("asmrEntryKind"),
-            Some(&serde_json::json!("audio"))
-        );
-        assert_eq!(
-            audio_metadata.get("listeningStatus"),
-            Some(&serde_json::json!("unlistened"))
-        );
-        assert_eq!(
-            lyric_metadata.get("lyricStatus"),
-            Some(&serde_json::json!("local"))
-        );
-        assert_eq!(
-            companion_metadata.get("asmrEntryKind"),
-            Some(&serde_json::json!("companion"))
-        );
+        drop(connection);
 
-        let results = state
-            .search_assets(SearchRequest {
-                query: "RJ123456".to_string(),
-                repo_id: Some(repo_id),
-                exclude_query: None,
-                metadata_key: None,
-                metadata_value: None,
-                tag: None,
-                tags: None,
-                metadata_filters: Some(vec![SearchMetadataFilter {
-                    key: "libraryKind".to_string(),
-                    value: "asmr".to_string(),
-                }]),
-                exclude_tags: None,
-                exclude_formats: None,
-                exclude_metadata_filters: None,
-                exclude_path_prefixes: None,
-                exclude_number_filters: None,
-                exclude_date_filters: None,
-                number_filters: None,
-                date_filters: None,
-                formats: None,
-                min_rating: None,
-                match_mode: None,
-                sort: Some(SearchSort {
-                    field: "metadata.workId".to_string(),
-                    direction: "asc".to_string(),
-                }),
-                limit: None,
+        fs::write(repo_root.join("second.txt"), "second").expect("second test file should be written");
+        state
+            .sync_repository(SyncRequest {
+                repo_id: repo_id.clone(),
             })
-            .expect("asmr metadata search should complete");
+            .expect("repository should resync");
+        let repo = state
+            .load_repository_record(&repo_id)
+            .expect("repository record should reload");
+        let mut second_connection = state
+            .open_repository_connection(&repo.summary.repo_id, &repo.summary.path, &repo.backend_record)
+            .expect("repository connection should reopen");
+        let tx = second_connection
+            .transaction()
+            .expect("second metadata transaction should start");
+        let second_asset_id = tx
+            .query_row(
+                "SELECT asset_id FROM assets WHERE repo_id = ?1 AND path = 'second.txt'",
+                [&repo_id],
+                |row| row.get::<_, String>(0),
+            )
+            .expect("second asset should exist");
+        ensure_default_metadata(
+            &tx,
+            &second_asset_id,
+            "second.txt",
+            "second.txt",
+            "txt",
+            &now_rfc3339(),
+            None,
+            &[],
+            Some(&plugin_defaults),
+            true,
+        )
+        .expect("new asset plugin defaults should merge without replacing host defaults");
+        tx.commit()
+            .expect("second metadata transaction should commit");
+        let second_metadata = metadata_for_asset_path(&state, &repo_id, "second.txt");
+        assert_eq!(
+            second_metadata.get("title"),
+            Some(&serde_json::json!("second.txt"))
+        );
+        assert_eq!(
+            second_metadata.get("pluginDefault"),
+            Some(&serde_json::json!("Plugin Value"))
+        );
 
-        let paths = results
-            .results
-            .iter()
-            .map(|hit| hit.path.as_str())
-            .collect::<Vec<_>>();
-        assert!(paths.contains(&"VoiceWork/RJ123456 Test Work/track01.mp3"));
-        assert!(paths.contains(&"VoiceWork/RJ123456 Test Work/track01.lrc"));
-
+        drop(second_connection);
+        drop(state);
         fs::remove_dir_all(root).expect("test temp root should be removed");
-    }
-
-    #[test]
-    fn parses_asmr_provider_metadata_candidates_without_writing_metadata() {
-        let asmr_one_body = r#"{
-          "id": "RJ123456",
-          "title": "Rain Voice",
-          "circle": { "name": "Blue Circle" },
-          "vas": [{ "name": "Aoi" }, { "name": "Momo" }],
-          "tags": [{ "name": "耳语" }, { "name": "睡眠" }],
-          "release": "2026-06-01",
-          "price": 1100,
-          "dl_count": 420,
-          "rate_average_2dp": 4.8,
-          "mainCoverUrl": "https://example.test/cover.jpg"
-        }"#;
-        let candidate = parse_asmr_provider_candidate(
-            "asmr-one",
-            "RJ123456",
-            "https://api.asmr-200.com/api/workInfo/123456",
-            asmr_one_body,
-        )
-        .expect("asmr-one candidate should parse");
-
-        assert_eq!(candidate.source, "asmr-one");
-        assert_eq!(candidate.confidence, "external-id");
-        assert_eq!(candidate.fields.get("workTitle"), Some(&serde_json::json!("Rain Voice")));
-        assert_eq!(candidate.fields.get("circle"), Some(&serde_json::json!("Blue Circle")));
-        assert_eq!(
-            candidate.fields.get("voiceActors"),
-            Some(&serde_json::json!(["Aoi", "Momo"]))
-        );
-        assert_eq!(candidate.fields.get("dlCount"), Some(&serde_json::json!(420.0)));
-
-        let dlsite_body = r#"
-          <html><head>
-            <meta property="og:title" content="DLsite Rain Voice" />
-            <meta property="og:image" content="https://img.example.test/main.jpg" />
-          </head><body>
-            <script>{"maker_name":"DL Circle","price":1320,"dl_count":"1,234","review_count":56,"rate_average_2dp":4.72}</script>
-          </body></html>
-        "#;
-        let dlsite_candidate = parse_asmr_provider_candidate(
-            "dlsite",
-            "RJ123456",
-            "https://www.dlsite.com/maniax/work/=/product_id/RJ123456.html",
-            dlsite_body,
-        )
-        .expect("dlsite candidate should parse");
-
-        assert_eq!(dlsite_candidate.source, "dlsite");
-        assert_eq!(
-            dlsite_candidate.fields.get("workTitle"),
-            Some(&serde_json::json!("DLsite Rain Voice"))
-        );
-        assert_eq!(
-            dlsite_candidate.fields.get("circle"),
-            Some(&serde_json::json!("DL Circle"))
-        );
-        assert_eq!(dlsite_candidate.fields.get("dlCount"), Some(&serde_json::json!(1234.0)));
-        assert_eq!(
-            dlsite_candidate.fields.get("cover"),
-            Some(&serde_json::json!("https://img.example.test/main.jpg"))
-        );
-    }
-
-    #[test]
-    fn lookup_asmr_metadata_candidate_fetches_provider_candidate() {
-        let body = br#"
-          <html><head>
-            <meta property="og:title" content="Fetched DLsite Work" />
-          </head><body>
-            <script>{"maker_name":"Fetched Circle","price":990,"dl_count":321}</script>
-          </body></html>
-        "#;
-        let url = serve_test_http_body(body);
-        let workspace = TestWorkspace::new("asmr-provider-lookup");
-        let state = RepositoryState::from_root(workspace.path("service"));
-
-        let response = state
-            .lookup_asmr_metadata_candidate(AsmrMetadataLookupRequest {
-                provider: "dlsite".to_string(),
-                rj_code: "RJ123456".to_string(),
-                detail_url: Some(url.clone()),
-            })
-            .expect("provider lookup should fetch local test body");
-
-        assert_eq!(response.provider, "dlsite");
-        assert_eq!(response.rj_code, "RJ123456");
-        assert_eq!(response.source_url, url);
-        assert_eq!(response.candidate.source, "dlsite");
-        assert_eq!(
-            response.candidate.fields.get("workTitle"),
-            Some(&serde_json::json!("Fetched DLsite Work"))
-        );
-        assert_eq!(
-            response.candidate.fields.get("circle"),
-            Some(&serde_json::json!("Fetched Circle"))
-        );
-        assert_eq!(
-            response.candidate.fields.get("dlCount"),
-            Some(&serde_json::json!(321.0))
-        );
     }
 
     #[test]

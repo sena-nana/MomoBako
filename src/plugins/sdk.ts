@@ -16,6 +16,7 @@ import type {
   PlaylistItem,
   PlaylistPlayerContribution,
   PluginManifest,
+  SearchSort,
 } from "../types/repository";
 import {
   callPlugin,
@@ -89,6 +90,56 @@ export type RegisteredPlaylistPlayer = PlaylistPlayerContribution & {
   createRuntime: (controller: PlaylistPlayerController) => Promise<PlaylistPlayerRuntimeApi> | PlaylistPlayerRuntimeApi;
 };
 
+export type LibrarySearchShortcut = {
+  id: string;
+  label: string;
+  metadataFilters: string;
+  sort?: SearchSort;
+};
+
+export type LibraryFileSummary = {
+  inline?: string;
+  rows?: Array<{ label: string; value: string }>;
+};
+
+export type LibraryExtensionContext = {
+  repoId: string;
+  entry: FileBrowserEntry;
+  entries: FileBrowserEntry[];
+  saveMetadata: (entry: FileBrowserEntry, metadata: Record<string, unknown>) => Promise<unknown>;
+  saveCoverThumbnail?: (path: string, sourceUrl: string) => Promise<unknown>;
+  previewEntry?: (entry: FileBrowserEntry) => void;
+};
+
+export type LibraryExtensionComponentProps = LibraryExtensionContext;
+
+export type LibraryExtensionDefinition = {
+  libraryKind: string;
+  label: string;
+  matchEntry: (entry: FileBrowserEntry) => boolean;
+  searchShortcuts?: LibrarySearchShortcut[];
+  fileSummary?: (entry: FileBrowserEntry) => LibraryFileSummary | null;
+  metadataPanel?: Component;
+  previewPanel?: Component;
+};
+
+export type RegisteredLibraryExtension = LibraryExtensionDefinition & {
+  pluginId: string;
+  pluginName: string;
+  manifest?: PluginManifest;
+};
+
+export type PluginEventHandler<T = unknown> = (payload: T) => void | Promise<void>;
+
+export type MediaPlaybackEvent = {
+  repoId: string;
+  entry: FileBrowserEntry;
+  state: "metadata" | "timeupdate" | "pause" | "ended";
+  currentTimeMs: number;
+  durationMs: number;
+  saveMetadata?: (entry: FileBrowserEntry, metadata: Record<string, unknown>) => Promise<unknown>;
+};
+
 export type PreviewPluginDefinition = {
   manifest: PluginManifest;
   supportedExtensions: string[];
@@ -103,6 +154,7 @@ export type FrontendPluginContext = {
   registerPlaylistPlayer: (definition: PlaylistPlayerContribution & {
     createRuntime: RegisteredPlaylistPlayer["createRuntime"];
   }) => RegisteredPlaylistPlayer;
+  registerLibraryExtension: (definition: LibraryExtensionDefinition) => RegisteredLibraryExtension;
   defineLazyComponent: <T extends Component | DefineComponent>(
     loader: () => Promise<T | { default: T }>,
   ) => Component;
@@ -120,6 +172,8 @@ export type FrontendPluginContext = {
   writeBinaryFile: typeof writeBinaryFile;
   saveFileDialog: typeof saveDialog;
   fileSrc: typeof convertFileSrc;
+  emitPluginEvent: <T = unknown>(eventName: string, payload: T) => void;
+  onPluginEvent: <T = unknown>(eventName: string, handler: PluginEventHandler<T>) => () => void;
   vue: {
     h: typeof h;
     ref: typeof ref;
@@ -133,6 +187,8 @@ export type FrontendPluginContext = {
 
 const previewPluginRegistry = new Map<string, FilePreviewPlugin>();
 const playlistPlayerRegistry = new Map<string, RegisteredPlaylistPlayer>();
+const libraryExtensionRegistry = new Map<string, RegisteredLibraryExtension>();
+const pluginEventHandlers = new Map<string, Set<PluginEventHandler>>();
 const loadedPluginModules = new Map<string, Promise<void>>();
 const pluginModuleUrls = new Map<string, string>();
 
@@ -167,6 +223,11 @@ export function registerPlaylistPlayer(player: RegisteredPlaylistPlayer) {
   return player;
 }
 
+export function registerLibraryExtension(extension: RegisteredLibraryExtension) {
+  libraryExtensionRegistry.set(extension.libraryKind, extension);
+  return extension;
+}
+
 export function listRegisteredPreviewPlugins() {
   return [...previewPluginRegistry.values()];
 }
@@ -179,6 +240,31 @@ export function getRegisteredPlaylistPlayerByType(playerTypeId: string) {
   const player = playlistPlayerRegistry.get(playerTypeId);
   if (!player) return null;
   return (player.manifest?.enabled ?? true) ? player : null;
+}
+
+export function listRegisteredLibraryExtensions() {
+  return [...libraryExtensionRegistry.values()].filter((extension) => extension.manifest?.enabled ?? true);
+}
+
+export function getRegisteredLibraryExtensionsForEntry(entry: FileBrowserEntry | null) {
+  if (!entry) return [];
+  return listRegisteredLibraryExtensions().filter((extension) => extension.matchEntry(entry));
+}
+
+export function emitPluginEvent<T = unknown>(eventName: string, payload: T) {
+  for (const handler of pluginEventHandlers.get(eventName) ?? []) {
+    void Promise.resolve(handler(payload));
+  }
+}
+
+export function onPluginEvent<T = unknown>(eventName: string, handler: PluginEventHandler<T>) {
+  const handlers = pluginEventHandlers.get(eventName) ?? new Set<PluginEventHandler>();
+  handlers.add(handler as PluginEventHandler);
+  pluginEventHandlers.set(eventName, handlers);
+  return () => {
+    handlers.delete(handler as PluginEventHandler);
+    if (!handlers.size) pluginEventHandlers.delete(eventName);
+  };
 }
 
 function pluginBlobUrlCacheKey(pluginId: string, path: string) {
@@ -218,6 +304,16 @@ function createFrontendPluginContext(manifest: PluginManifest): FrontendPluginCo
       registerPlaylistPlayer(player);
       return player;
     },
+    registerLibraryExtension(definition) {
+      const extension: RegisteredLibraryExtension = {
+        ...definition,
+        pluginId: manifest.pluginId,
+        pluginName: manifest.name,
+        manifest,
+      };
+      registerLibraryExtension(extension);
+      return extension;
+    },
     defineLazyComponent(loader) {
       return defineAsyncComponent(loader);
     },
@@ -240,6 +336,8 @@ function createFrontendPluginContext(manifest: PluginManifest): FrontendPluginCo
     writeBinaryFile,
     saveFileDialog: saveDialog,
     fileSrc: convertFileSrc,
+    emitPluginEvent,
+    onPluginEvent,
     vue: {
       h,
       ref,
@@ -279,16 +377,34 @@ export async function syncRegisteredPreviewPluginManifests(manifests: PluginMani
     const manifest = manifestMap.get(player.pluginId);
     if (manifest) player.manifest = manifest;
   }
+  for (const [libraryKind, extension] of libraryExtensionRegistry) {
+    const manifest = manifestMap.get(extension.pluginId);
+    if (!manifest) {
+      libraryExtensionRegistry.delete(libraryKind);
+      loadedPluginModules.delete(extension.pluginId);
+      continue;
+    }
+    extension.manifest = manifest;
+  }
 
   for (const manifest of manifests) {
     if (manifest.sdk !== "frontend" || manifest.runtime !== "vue-module") continue;
     if (!manifest.entry?.frontend?.module) continue;
-    if (previewPluginRegistry.has(manifest.pluginId) || [...playlistPlayerRegistry.values()].some((player) => player.pluginId === manifest.pluginId)) {
+    if (
+      previewPluginRegistry.has(manifest.pluginId)
+      || [...playlistPlayerRegistry.values()].some((player) => player.pluginId === manifest.pluginId)
+      || [...libraryExtensionRegistry.values()].some((extension) => extension.pluginId === manifest.pluginId)
+    ) {
       const plugin = previewPluginRegistry.get(manifest.pluginId);
       if (plugin) plugin.manifest = manifest;
       for (const player of playlistPlayerRegistry.values()) {
         if (player.pluginId === manifest.pluginId) {
           player.manifest = manifest;
+        }
+      }
+      for (const extension of libraryExtensionRegistry.values()) {
+        if (extension.pluginId === manifest.pluginId) {
+          extension.manifest = manifest;
         }
       }
       continue;
@@ -319,6 +435,8 @@ export function getRegisteredPreviewPluginForEntry(entry: FileBrowserEntry | nul
 export function clearPreviewPluginRegistry() {
   previewPluginRegistry.clear();
   playlistPlayerRegistry.clear();
+  libraryExtensionRegistry.clear();
+  pluginEventHandlers.clear();
   loadedPluginModules.clear();
   pluginModuleUrls.clear();
 }

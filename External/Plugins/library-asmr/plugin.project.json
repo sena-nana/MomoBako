@@ -1,8 +1,9 @@
 {
   "pluginId": "momobako.library.asmr",
   "build": {
-    "type": "manifest-only",
+    "type": "frontend-module",
     "sourceDir": "src",
+    "sourceEntry": "src/register.js",
     "outputDir": ".dist/library-asmr"
   }
 }

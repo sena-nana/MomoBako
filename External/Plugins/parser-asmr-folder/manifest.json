@@ -20,11 +20,15 @@
     "lyrics",
     "candidate-results"
   ],
-  "enabled": false,
+  "enabled": true,
   "sdk": "backend",
-  "entry": {},
+  "entry": {
+    "backend": {
+      "library": "momobako_parser_asmr_folder"
+    }
+  },
   "source": "builtin",
-  "runtime": "manifest-only",
+  "runtime": "native-dylib",
   "permissions": [
     "readRepository",
     "readMetadata",
@@ -42,6 +46,11 @@
     }
   ],
   "contributes": {
+    "metadataDefaults": {
+      "action": "metadata.defaults.batch",
+      "candidateOnly": false,
+      "preserveExisting": true
+    },
     "parser": {
       "scope": "folder",
       "folderPattern": "(?i)RJ\\d{6,8}",
@@ -119,5 +128,5 @@
       "builtin.parser-asmr-folder"
     ]
   },
-  "status": "disabled"
+  "status": "ready"
 }

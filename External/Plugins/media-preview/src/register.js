@@ -48,8 +48,6 @@ export function register(ctx) {
       const lyricsItems = ref([]);
       let objectUrl = null;
       let resizeObserver = null;
-      let lastProgressSaveAt = 0;
-      let lastProgressSaveSecond = -1;
 
       const mediaKind = computed(() => (
         isImageExtension(props.entry?.extension) ? "image" : isVideoExtension(props.entry?.extension) ? "video" : "audio"
@@ -167,56 +165,18 @@ export function register(ctx) {
         errorMessage.value = "媒体无法播放";
       }
 
-      function isAsmrAudioEntry() {
-        const metadata = props.entry?.metadata ?? {};
-        return mediaKind.value === "audio" && (
-          metadata.libraryKind === "asmr" ||
-          Boolean(metadata.workId) ||
-          Boolean(metadata.rjCode)
-        );
-      }
-
-      function currentTrackDurationMs(target) {
+      function emitPlaybackState(event, playbackState) {
+        const target = event.target;
         const duration = Number(target?.duration);
-        return Number.isFinite(duration) && duration > 0 ? Math.round(duration * 1000) : 0;
-      }
-
-      function buildProgressMetadata(target, statusOverride = null) {
-        const durationMs = currentTrackDurationMs(target);
-        const currentMs = Math.max(0, Math.round((Number(target?.currentTime) || 0) * 1000));
-        const progress = durationMs > 0 ? Math.min(100, Math.max(0, Math.round((currentMs / durationMs) * 100))) : 0;
-        const finished = statusOverride === "listened" || (durationMs > 0 && progress >= 95);
-        return {
-          listeningProgress: finished ? 100 : progress,
-          listeningStatus: finished ? "listened" : "listening",
-          lastListenedAt: new Date().toISOString(),
-          trackDurationMs: durationMs,
-          trackPositionMs: finished ? durationMs : currentMs,
-        };
-      }
-
-      function persistAsmrDuration(target) {
-        if (!props.saveMetadata || !props.entry || !isAsmrAudioEntry()) return;
-        const durationMs = currentTrackDurationMs(target);
-        if (durationMs <= 0 || props.entry.metadata?.trackDurationMs === durationMs) return;
-        void props.saveMetadata(props.entry, { trackDurationMs: durationMs });
-      }
-
-      function persistAsmrProgress(target, options = {}) {
-        if (!props.saveMetadata || !props.entry || !isAsmrAudioEntry()) return;
-        const metadata = buildProgressMetadata(target, options.status);
-        const currentSecond = Math.floor((Number(target?.currentTime) || 0));
-        const now = Date.now();
-        const shouldSave = options.force ||
-          metadata.listeningStatus === "listened" ||
-          (metadata.trackDurationMs > 0 &&
-            metadata.trackPositionMs > 0 &&
-            now - lastProgressSaveAt >= 15000 &&
-            Math.abs(currentSecond - lastProgressSaveSecond) >= 5);
-        if (!shouldSave || (metadata.listeningStatus !== "listened" && metadata.trackPositionMs <= 0)) return;
-        lastProgressSaveAt = now;
-        lastProgressSaveSecond = currentSecond;
-        void props.saveMetadata(props.entry, metadata);
+        const currentTime = Number(target?.currentTime);
+        ctx.emitPluginEvent("media.playback", {
+          repoId: props.repoId,
+          entry: props.entry,
+          state: playbackState,
+          currentTimeMs: Number.isFinite(currentTime) && currentTime > 0 ? Math.round(currentTime * 1000) : 0,
+          durationMs: Number.isFinite(duration) && duration > 0 ? Math.round(duration * 1000) : 0,
+          saveMetadata: props.saveMetadata,
+        });
       }
 
       function setLyricItemRef(index, element) {
@@ -244,17 +204,17 @@ export function register(ctx) {
         errorMessage,
         onAudioEnded(event) {
           currentPlaybackMs.value = Math.round(((event.target?.currentTime ?? 0) * 1000));
-          persistAsmrProgress(event.target, { force: true, status: "listened" });
+          emitPlaybackState(event, "ended");
         },
         onAudioLoadedMetadata(event) {
-          persistAsmrDuration(event.target);
+          emitPlaybackState(event, "metadata");
         },
         onAudioPause(event) {
-          persistAsmrProgress(event.target, { force: true });
+          emitPlaybackState(event, "pause");
         },
         onAudioTimeUpdate(event) {
           currentPlaybackMs.value = Math.round(((event.target?.currentTime ?? 0) * 1000));
-          persistAsmrProgress(event.target);
+          emitPlaybackState(event, "timeupdate");
         },
       };
     },

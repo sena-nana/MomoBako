@@ -1263,8 +1263,8 @@
   font-size: 12px;
 }
 
-.files-list__body .files-list__asmr-line,
-.files-list__asmr-list-label {
+.files-list__body .files-list__library-line,
+.files-list__library-list-label {
   color: var(--accent);
 }
 
@@ -1282,7 +1282,7 @@
   text-overflow: ellipsis;
 }
 
-.files-list__meta span:first-child:not(.files-list__asmr-list-label) {
+.files-list__meta span:first-child:not(.files-list__library-list-label) {
   grid-column-start: 2;
 }
 
@@ -1410,11 +1410,11 @@
   background: var(--bg-soft);
 }
 
-.file-metadata-card__asmr {
+.file-metadata-card__library {
   background: color-mix(in srgb, var(--accent-soft) 42%, var(--bg-soft));
 }
 
-.file-metadata-card__asmr-candidates {
+.file-metadata-card__library-candidates {
   background: color-mix(in srgb, var(--bg-subtle) 82%, var(--accent-soft));
 }
 

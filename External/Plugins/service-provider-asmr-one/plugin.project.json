@@ -1,7 +1,7 @@
 {
   "pluginId": "momobako.service.provider.asmr-one",
   "build": {
-    "type": "manifest-only",
+    "type": "cargo-native",
     "sourceDir": "src",
     "outputDir": ".dist/service-provider-asmr-one"
   }
