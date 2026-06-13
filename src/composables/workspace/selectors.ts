@@ -1,6 +1,6 @@
 import { computed, type ComputedRef } from "vue";
 import type { FileBrowserEntry, RepositoryBackendOption } from "../../types/repository";
-import { isSourcePlugin } from "../../utils/pluginTaxonomy";
+import { isRepositoryBackendRuntimeAvailable, isSourcePlugin } from "../../utils/pluginTaxonomy";
 import {
   activeRepoId,
   activeSnapshot,
@@ -109,7 +109,7 @@ export function repositoryBackendOptionsFromPlugins(): RepositoryBackendOption[]
       name: plugin.name,
       capabilities: plugin.capabilities,
       description: plugin.description,
-      enabled: plugin.enabled,
+      enabled: isRepositoryBackendRuntimeAvailable(plugin),
     }));
 }
 
