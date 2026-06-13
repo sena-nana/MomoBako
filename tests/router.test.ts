@@ -747,6 +747,25 @@ describe("文件管理冒烟", () => {
     expect(getInvokeCalls("create_repository")).toHaveLength(0);
   });
 
+  it("新增资源库不会把 manifest-only 远端 source 当成可创建后端", async () => {
+    seedMockRepository();
+    seedMockPlugins(createMockPlugins().map((plugin) => (
+      plugin.pluginId === "momobako.webdav"
+        ? { ...plugin, enabled: true, status: "ready" as const }
+        : plugin
+    )));
+    await renderApp();
+
+    await fireEvent.click(screen.getByRole("button", { name: "资源库" }));
+    await fireEvent.click(await screen.findByRole("button", { name: "添加资源库" }));
+    const webdavOption = await screen.findByRole("button", { name: "WebDAV" });
+
+    expect(webdavOption).toBeDisabled();
+    await fireEvent.click(webdavOption);
+    expect(screen.queryByText("通过 WebDAV 适配远程文件管理服务。")).not.toBeInTheDocument();
+    expect(getInvokeCalls("create_repository")).toHaveLength(0);
+  });
+
   it("空状态拖入本地文件夹时挂载已有目录而不是创建新仓库", async () => {
     await renderApp();
     const dropZone = document.querySelector(".empty-state-page");

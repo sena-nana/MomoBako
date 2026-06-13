@@ -10084,6 +10084,37 @@ fn is_source_plugin(manifest: &PluginManifest) -> bool {
         || matches!(manifest.kind.as_str(), "filesystem" | "webdav" | "cloud")
 }
 
+fn ensure_repository_backend_runtime_available(
+    registration: &BackendPluginRegistration,
+) -> Result<(), String> {
+    let manifest = &registration.manifest;
+    if !manifest.enabled || manifest.status == "disabled" {
+        return Err(format!("plugin is disabled: {}", manifest.plugin_id));
+    }
+    if embedded_local_filesystem_fallback_enabled(&manifest.plugin_id) {
+        return Ok(());
+    }
+    if manifest.sdk != "backend" || manifest.runtime != "native-dylib" {
+        return Err(format!(
+            "plugin runtime is not available: {}",
+            manifest.plugin_id
+        ));
+    }
+    if registration.native.is_some() {
+        return Ok(());
+    }
+    if let Some(error) = &registration.load_error {
+        return Err(format!(
+            "plugin runtime is not available: {} ({error})",
+            manifest.plugin_id
+        ));
+    }
+    Err(format!(
+        "plugin runtime is not available: {}",
+        manifest.plugin_id
+    ))
+}
+
 fn plugin_settings_path(service_root: &Path) -> PathBuf {
     service_root.join("plugin-state.json")
 }
@@ -10651,15 +10682,17 @@ fn parse_backend_request(
         .trim();
     let registry = backend_plugin_registry(service_root);
     let normalized_plugin_id = registry.normalize_plugin_id(plugin_id);
-    let manifest = registry
-        .manifest(&normalized_plugin_id)
+    let registration = registry
+        .registration(&normalized_plugin_id)
         .ok_or_else(|| format!("unsupported filesystem backend plugin: {plugin_id}"))?;
+    let manifest = &registration.manifest;
     if !is_source_plugin(manifest) {
         return Err(format!(
             "plugin is not a repository source: {}",
             manifest.plugin_id
         ));
     }
+    ensure_repository_backend_runtime_available(registration)?;
     let config = request
         .backend_config
         .clone()
