@@ -5,6 +5,8 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import type {
   FileBrowserEntry,
+  PlaylistDetail,
+  PlaylistSummary,
   PluginManifest,
   RepositoryAction,
   SearchHit,
@@ -43,12 +45,52 @@ let mockSearchResults: SearchHit[] | null = null;
 let mockSmartFolders: SmartFolder[] = [];
 let mockRepositoryActions: RepositoryAction[] = [];
 let mockPlugins: PluginManifest[] | null = null;
+let mockPlaylists: PlaylistSummary[] | null = null;
+let mockPlaylistDetails: Record<string, PlaylistDetail> = {};
 const invokeCalls: Array<{ command: string; args?: Record<string, unknown> }> = [];
 const openerCalls: Array<{ command: "openPath" | "openUrl" | "revealItemInDir"; path: string }> = [];
 
 
 let mockEntries: MockEntry[] = initialEntries();
 let mockTrashEntries: MockEntry[] = [];
+
+function defaultPlaylistSummary(repoId = "repo-main-001"): PlaylistSummary {
+  return {
+    playlistId: "playlist-mock",
+    repoId,
+    name: "Mock Playlist",
+    playerTypeId: "momobako.playlist.audio-sequence",
+    playerPluginId: "momobako.preview.media",
+    playerLabel: "音频顺序播放",
+    fileClass: "audio",
+    itemCount: 1,
+    sortOrder: 0,
+    createdAt: "2026-06-05T00:18:00Z",
+    updatedAt: "2026-06-05T00:18:00Z",
+  };
+}
+
+function defaultPlaylistDetail(repoId = "repo-main-001", playlistId = "playlist-mock"): PlaylistDetail {
+  return {
+    playlist: {
+      ...defaultPlaylistSummary(repoId),
+      playlistId,
+    },
+    items: [{
+      playlistItemId: "playlist-item-mock",
+      playlistId,
+      assetId: "asset-01",
+      path: "asset-01.mp3",
+      filename: "asset-01.mp3",
+      extension: "mp3",
+      thumbnailPath: null,
+      status: "ready",
+      statusReason: null,
+      sortOrder: 0,
+      addedAt: "2026-06-05T00:18:00Z",
+    }],
+  };
+}
 
 function recordOpenerCall(command: "openPath" | "openUrl" | "revealItemInDir", path: string) {
   openerCalls.push({ command, path });
@@ -545,6 +587,35 @@ vi.mock("@tauri-apps/api/core", () => ({
         request?.specialLocation,
         request?.repoId ?? "repo-main-001",
       );
+    }
+    if (command === "list_playlists") {
+      const repoId = typeof args?.repoId === "string" ? args.repoId : "repo-main-001";
+      return (mockPlaylists ?? [defaultPlaylistSummary(repoId)]).map((playlist) => ({
+        ...playlist,
+        repoId,
+      }));
+    }
+    if (command === "get_playlist_detail") {
+      const repoId = typeof args?.repoId === "string" ? args.repoId : "repo-main-001";
+      const playlistId = typeof args?.playlistId === "string" ? args.playlistId : "playlist-mock";
+      return mockPlaylistDetails[playlistId] ?? defaultPlaylistDetail(repoId, playlistId);
+    }
+    if (command === "create_playlist" || command === "update_playlist" || command === "delete_playlist") {
+      return {
+        playlists: mockPlaylists ?? [],
+        playlist: null,
+      };
+    }
+    if (command === "add_playlist_items" || command === "reorder_playlist_items" || command === "remove_playlist_item") {
+      const request = args?.request as { repoId?: string; playlistId?: string } | undefined;
+      return mockPlaylistDetails[request?.playlistId ?? "playlist-mock"] ?? defaultPlaylistDetail(request?.repoId ?? "repo-main-001", request?.playlistId ?? "playlist-mock");
+    }
+    if (command === "set_playlist_membership") {
+      const request = args?.request as { assetId?: string; playlistIds?: string[] } | undefined;
+      return {
+        assetId: request?.assetId ?? "asset-01",
+        playlistIds: request?.playlistIds ?? [],
+      };
     }
     if (command === "list_smart_folders") {
       return buildSmartFolderTree();
@@ -1133,6 +1204,8 @@ afterEach(() => {
   mockSmartFolders = [];
   mockRepositoryActions = [];
   mockPlugins = null;
+  mockPlaylists = null;
+  mockPlaylistDetails = {};
   mockRepositories = [];
   mockEntries = initialEntries();
   mockTrashEntries = [];
@@ -1147,6 +1220,10 @@ export function getInvokeCalls(command?: string) {
 export function seedMockRepository() {
   mockRepositories = [mockSnapshot.repository];
   mockRepositoryActions = defaultRepositoryActions();
+  mockPlaylists = [defaultPlaylistSummary()];
+  mockPlaylistDetails = {
+    "playlist-mock": defaultPlaylistDetail(),
+  };
 }
 
 export function seedLargeMockDirectory(entryCount = 1200) {
@@ -1184,15 +1261,32 @@ function createMissingMockRepository() {
 
 export function seedMissingMockRepository() {
   mockRepositories = [createMissingMockRepository()];
+  mockPlaylists = [defaultPlaylistSummary()];
+  mockPlaylistDetails = {
+    "playlist-mock": defaultPlaylistDetail(),
+  };
 }
 
 export function seedMixedMockRepositories() {
   mockRepositories = [altRepository, createMissingMockRepository()];
   mockRepositoryActions = defaultRepositoryActions();
+  mockPlaylists = [defaultPlaylistSummary()];
+  mockPlaylistDetails = {
+    "playlist-mock": defaultPlaylistDetail(),
+  };
 }
 
 export function seedMockRepositoryActions(actions: RepositoryAction[] = defaultRepositoryActions()) {
   mockRepositoryActions = actions;
+}
+
+export function seedMockPlaylists(playlists: PlaylistSummary[], details: Record<string, PlaylistDetail>) {
+  mockPlaylists = playlists;
+  mockPlaylistDetails = details;
+}
+
+export function seedMockPlugins(plugins: PluginManifest[]) {
+  mockPlugins = plugins;
 }
 
 export function getRelocatedRepositoryPath() {

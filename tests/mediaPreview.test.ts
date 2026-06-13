@@ -128,6 +128,43 @@ describe("MediaPreview", () => {
     });
   });
 
+  it("播放到当前歌词时将当前行滚动到歌词区中间", async () => {
+    const plugin = getPreviewPluginForEntry(audioEntry);
+    expect(plugin).not.toBeNull();
+
+    const { container } = render(plugin!.component, {
+      props: {
+        repoId: "repo-main-001",
+        entry: audioEntry,
+      },
+    });
+
+    await waitFor(() => {
+      expect(container.querySelectorAll(".media-preview__audio-lyric").length).toBe(2);
+    });
+
+    const viewport = container.querySelector(".media-preview__audio-lyrics") as HTMLElement | null;
+    const lyricButtons = [...container.querySelectorAll(".media-preview__audio-lyric")] as HTMLElement[];
+    expect(viewport).not.toBeNull();
+    expect(lyricButtons).toHaveLength(2);
+
+    Object.defineProperty(viewport, "clientHeight", { configurable: true, value: 240 });
+    Object.defineProperty(lyricButtons[1], "offsetTop", { configurable: true, value: 360 });
+    Object.defineProperty(lyricButtons[1], "clientHeight", { configurable: true, value: 40 });
+
+    const audio = container.querySelector("audio");
+    expect(audio).toBeInstanceOf(HTMLAudioElement);
+    Object.defineProperty(audio as HTMLAudioElement, "currentTime", {
+      configurable: true,
+      value: 20.2,
+    });
+    audio?.dispatchEvent(new Event("timeupdate"));
+
+    await waitFor(() => {
+      expect(viewport?.scrollTop).toBe(260);
+    });
+  });
+
   it("ASMR 音频保存时长和收听进度", async () => {
     const plugin = getPreviewPluginForEntry({
       ...audioEntry,

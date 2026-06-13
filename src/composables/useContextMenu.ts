@@ -4,6 +4,7 @@ export interface ContextMenuItem {
   id?: string;
   label: string;
   icon?: Component;
+  checked?: boolean;
   disabled?: boolean;
   danger?: boolean;
   confirmLabel?: string;

@@ -25,3 +25,7 @@ export async function yieldEvery(index: number, batchSize = 500) {
     await yieldToUi();
   }
 }
+
+export function shouldYieldEvery(index: number, batchSize = 500) {
+  return index > 0 && index % batchSize === 0;
+}

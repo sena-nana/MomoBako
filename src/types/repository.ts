@@ -59,6 +59,51 @@ export type RepositoryTagGroup = {
   tags: string[];
 };
 
+export type PlaylistFileClass = "image" | "audio" | "video" | string;
+
+export type PlaylistItemStatus =
+  | "ready"
+  | "missing"
+  | "deleted"
+  | "trashed"
+  | "incompatible"
+  | "pluginUnavailable";
+
+export type PlaylistPlaybackMode = "listLoop" | "shuffle" | "singleLoop";
+
+export type PlaylistSummary = {
+  playlistId: string;
+  repoId: string;
+  name: string;
+  playerTypeId: string;
+  playerPluginId: string;
+  playerLabel: string;
+  fileClass: PlaylistFileClass;
+  itemCount: number;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type PlaylistItem = {
+  playlistItemId: string;
+  playlistId: string;
+  assetId: string;
+  path: string;
+  filename: string;
+  extension: string;
+  thumbnailPath?: string | null;
+  status: PlaylistItemStatus;
+  statusReason?: string | null;
+  sortOrder: number;
+  addedAt: string;
+};
+
+export type PlaylistDetail = {
+  playlist: PlaylistSummary;
+  items: PlaylistItem[];
+};
+
 export type FolderMetadata = {
   protected: boolean;
   passwordTip?: string | null;
@@ -69,6 +114,7 @@ export type RepositorySnapshot = {
   folderLabel: string;
   folders: FolderSummary[];
   assets: AssetSummary[];
+  playlists?: PlaylistSummary[];
   quickAccess?: RepositoryShortcut[];
   tagGroups?: RepositoryTagGroup[];
   metadataFields: string[];
@@ -323,6 +369,59 @@ export type RepositoryActionEnabledRequest = {
 
 export type RepositoryActionMutationResponse = {
   action: RepositoryAction;
+};
+
+export type PlaylistMutationRequest = {
+  repoId: string;
+  playlistId?: string;
+  name: string;
+  playerTypeId: string;
+};
+
+export type PlaylistUpdateRequest = {
+  repoId: string;
+  playlistId: string;
+  name?: string;
+  playerTypeId?: string;
+};
+
+export type PlaylistMutationResponse = {
+  playlists: PlaylistSummary[];
+  playlist?: PlaylistSummary | null;
+};
+
+export type PlaylistDetailRequest = {
+  repoId: string;
+  playlistId: string;
+};
+
+export type PlaylistItemsAddRequest = {
+  repoId: string;
+  playlistId: string;
+  assetIds: string[];
+};
+
+export type PlaylistItemsOrderRequest = {
+  repoId: string;
+  playlistId: string;
+  itemIds: string[];
+};
+
+export type PlaylistItemRemoveRequest = {
+  repoId: string;
+  playlistId: string;
+  playlistItemId: string;
+};
+
+export type PlaylistMembershipRequest = {
+  repoId: string;
+  assetId: string;
+  playlistIds: string[];
+};
+
+export type PlaylistMembershipSnapshot = {
+  assetId: string;
+  playlistIds: string[];
 };
 
 export type SmartFolderResultSnapshot = {
@@ -707,6 +806,17 @@ export type CacheSnapshot = {
   entries: CacheEntry[];
 };
 
+export type PlaylistPlayerContribution = {
+  playerTypeId: string;
+  label: string;
+  fileClass: PlaylistFileClass;
+  supportedExtensions: string[];
+  supportsSeek: boolean;
+  supportsVolume: boolean;
+  supportsPreviewNavigation: boolean;
+  description?: string;
+};
+
 export type PluginManifest = {
   pluginId: string;
   legacyPluginIds?: string[];
@@ -745,7 +855,10 @@ export type PluginManifest = {
   requires?: string[];
   optional?: string[];
   hooks?: PluginHook[];
-  contributes?: Record<string, unknown>;
+  contributes?: {
+    playlistPlayers?: PlaylistPlayerContribution[];
+    [key: string]: unknown;
+  };
   compat?: {
     sdkVersion?: string;
     legacyPluginIds?: string[];

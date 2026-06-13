@@ -1,6 +1,10 @@
 ﻿.shell {
   --sidebar-easing: cubic-bezier(0.4, 0, 0.2, 1);
   --sidebar-width: 276px;
+  --shell-main-padding-x: 24px;
+  --shell-main-padding-y: 20px;
+  --workspace-file-detail-width: 300px;
+  --workspace-file-detail-gap: 18px;
   display: grid;
   grid-template-columns: var(--sidebar-width) 1fr;
   grid-template-rows: 36px 1fr;
@@ -20,7 +24,7 @@
 .shell__main {
   grid-area: main;
   overflow: auto;
-  padding: 20px 24px;
+  padding: var(--shell-main-padding-y) var(--shell-main-padding-x);
   background: var(--bg);
   border-top-left-radius: 10px;
 }
@@ -299,6 +303,63 @@
   display: flex;
   flex-direction: column;
   gap: 1px;
+}
+
+.workspace-playlists {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.workspace-playlists__item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  padding: 4px;
+  border-radius: 8px;
+}
+
+.workspace-playlists__item.is-active {
+  background: var(--accent-soft);
+}
+
+.workspace-playlists__main {
+  min-width: 0;
+  height: 42px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  text-align: left;
+}
+
+.workspace-playlists__main strong,
+.workspace-playlists__main span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-playlists__main strong {
+  font-size: 13px;
+}
+
+.workspace-playlists__main span {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.workspace-playlists__actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
 }
 
 .workspace-sidebar__footer {
@@ -1057,6 +1118,336 @@
   width: fit-content;
 }
 
+.workspace-player-host {
+  position: fixed;
+  left: -10000px;
+  top: 0;
+  width: 320px;
+  height: 180px;
+  overflow: hidden;
+  pointer-events: none;
+  opacity: 0.01;
+}
+
+.workspace-player {
+  position: relative;
+  min-width: 0;
+  width: 100%;
+  min-height: 124px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 16px 16px;
+  border: 1px solid var(--border-strong);
+  border-radius: 16px;
+  background: var(--bg-elev);
+  box-shadow: 0 14px 34px -24px rgba(0, 0, 0, 0.45);
+}
+
+.workspace-player__progress {
+  position: relative;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--bg-subtle);
+  overflow: hidden;
+}
+
+.workspace-player__progress span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+}
+
+.workspace-player__progress-input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  opacity: 0;
+}
+
+.workspace-player__body {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) max-content minmax(170px, 0.72fr);
+  align-items: center;
+  gap: 18px;
+  min-height: 72px;
+}
+
+.workspace-player__media {
+  min-width: 0;
+  width: 100%;
+  height: auto;
+  min-height: 58px;
+  padding: 0;
+  overflow: visible;
+  border: 0;
+  background: transparent;
+  display: grid;
+  grid-template-columns: 58px minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  text-align: left;
+  color: var(--text);
+}
+
+.workspace-player__thumb {
+  width: 58px;
+  height: 58px;
+  border-radius: 10px;
+  background: var(--bg);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+  overflow: hidden;
+}
+
+.workspace-player__queue-thumb {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  background: var(--bg);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+  overflow: hidden;
+}
+
+.workspace-player__thumb img,
+.workspace-player__queue-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.workspace-player__meta {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.workspace-player__meta strong,
+.workspace-player__meta small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-player__meta small {
+  color: var(--text-muted);
+}
+
+.workspace-player__transport {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  justify-self: center;
+}
+
+.workspace-player__play {
+  width: 36px;
+  height: 36px;
+}
+
+.workspace-player__side {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  justify-self: end;
+  width: 100%;
+}
+
+.workspace-player__settings {
+  min-height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.workspace-player__setting {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.workspace-player__setting input {
+  width: 120px;
+}
+
+.workspace-player__fit {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--bg);
+}
+
+.workspace-player__fit button {
+  min-height: 26px;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.workspace-player__fit button.is-active {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.workspace-player__time {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.workspace-player__volume {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-muted);
+}
+
+.workspace-player__volume input {
+  width: min(120px, 18vw);
+  min-width: 72px;
+}
+
+.workspace-player__volume input:disabled,
+.workspace-player__progress-input:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.workspace-player__queue {
+  position: absolute;
+  right: 14px;
+  bottom: calc(100% + 10px);
+  width: min(360px, calc(100vw - 48px));
+  max-height: 320px;
+  padding: 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  background: var(--bg-elev);
+  box-shadow: 0 14px 34px -18px rgba(0, 0, 0, 0.6);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.workspace-player__queue-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.workspace-player__queue-head strong {
+  color: var(--text);
+  font-size: 13px;
+}
+
+.workspace-player__queue-list {
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.workspace-player__queue-item {
+  width: 100%;
+  height: auto;
+  min-height: 56px;
+  padding: 8px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--bg);
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr);
+  gap: 10px;
+  text-align: left;
+  color: var(--text);
+}
+
+.workspace-player__queue-item.is-active {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.workspace-player__queue-item.is-disabled {
+  opacity: 0.52;
+}
+
+.workspace-player__queue-thumb {
+  width: 40px;
+  height: 40px;
+}
+
+.workspace-player__queue-meta {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.workspace-player__queue-meta strong,
+.workspace-player__queue-meta small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-player__queue-meta small {
+  color: var(--text-muted);
+}
+
+@media (max-width: 1120px) {
+  .workspace-player__body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .workspace-player__transport {
+    grid-row: 2;
+    justify-self: center;
+  }
+
+  .workspace-player__side {
+    grid-column: 1 / -1;
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .workspace-player__settings {
+    justify-content: space-between;
+    flex-wrap: wrap;
+  }
+}
 
 .titlebar {
   position: relative;
@@ -1268,6 +1659,26 @@
 .ctx-menu__item--pending {
   background: var(--err-soft);
   font-weight: 600;
+}
+
+.ctx-menu__slot {
+  position: relative;
+}
+
+.ctx-menu__chevron {
+  color: var(--text-faint);
+}
+
+.ctx-menu__submenu {
+  position: absolute;
+  top: 0;
+  left: calc(100% + 4px);
+  display: none;
+}
+
+.ctx-menu__slot:hover > .ctx-menu__submenu,
+.ctx-menu__slot:focus-within > .ctx-menu__submenu {
+  display: flex;
 }
 
 .ctx-menu__label {

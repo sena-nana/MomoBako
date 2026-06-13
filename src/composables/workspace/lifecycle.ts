@@ -1,6 +1,7 @@
 import {
   getFileBrowser,
   getRepositorySnapshot,
+  listPlaylists,
   listHardlinkCandidates,
   listRepositoryActions,
   listSmartFolders,
@@ -10,6 +11,7 @@ import type { RepositorySummary } from "../../types/repository";
 import {
   activeAssetDetail,
   activeAssetId,
+  activePreviewPath,
   activePanel,
   activeRepoId,
   activeSnapshot,
@@ -23,6 +25,9 @@ import {
   fileBrowserDerived,
   fileTree,
   hardlinkCandidates,
+  activePlaylistId,
+  activePlaylistDetail,
+  playlistMemberships,
   isLoadingAssetDetail,
   isLoadingFileBrowser,
   isLoadingSmartFolder,
@@ -39,6 +44,7 @@ import {
   isSyncing,
   lastSyncResult,
   plugins,
+  playlists,
   repositories,
   selectedFilePaths,
   selectionAnchorPath,
@@ -66,6 +72,7 @@ import {
 } from "./tasks";
 import { invalidateThumbnailQueue } from "./thumbnails";
 import { scheduleIdleTask } from "./scheduler";
+import { syncPlaylistMemberships } from "./playlists";
 
 let startupPromise: Promise<void> | null = null;
 
@@ -79,9 +86,14 @@ export function resetActiveRepositoryContent() {
   activeSnapshot.value = null;
   activeAssetId.value = null;
   activeAssetDetail.value = null;
+  activePreviewPath.value = null;
   fileBrowser.value = null;
   fileBrowserDerived.value = createEmptyFileBrowserDerivedState();
   fileTree.value = [];
+  playlists.value = [];
+  playlistMemberships.value = {};
+  activePlaylistId.value = null;
+  activePlaylistDetail.value = null;
   smartFolders.value = [];
   activeSmartFolderId.value = null;
   smartFolderResult.value = null;
@@ -139,6 +151,7 @@ async function loadInitialRepository(
   const snapshot = await getRepositorySnapshot(nextRepoId);
   activeRepoId.value = nextRepoId;
   activeSnapshot.value = snapshot;
+  playlists.value = snapshot.playlists ?? [];
 
   const defaultAssetId = activeAssetId.value && snapshot.assets.some((item) => item.assetId === activeAssetId.value)
     ? activeAssetId.value
@@ -154,6 +167,9 @@ async function loadInitialRepository(
     directoryPath: "",
     includeTree: false,
   });
+  const playlistItems = snapshot.playlists ?? await listPlaylists(nextRepoId);
+  playlists.value = playlistItems;
+  await syncPlaylistMemberships(nextRepoId, playlistItems);
   applyFileBrowserSnapshot(browserSnapshot);
 
   if (defaultAssetId) {
@@ -170,11 +186,13 @@ export function queueRepositoryBackgroundLoads(repoId: string) {
 
 async function loadRepositorySecondaryData(repoId: string) {
   const [
+    playlistItems,
     smartFolderItems,
     actionItems,
     hardlinkResponse,
     treeSnapshot,
   ] = await Promise.allSettled([
+    listPlaylists(repoId),
     listSmartFolders(repoId),
     listRepositoryActions(repoId),
     listHardlinkCandidates(repoId),
@@ -187,6 +205,10 @@ async function loadRepositorySecondaryData(repoId: string) {
 
   if (activeRepoId.value !== repoId) return;
 
+  if (playlistItems.status === "fulfilled") {
+    playlists.value = playlistItems.value;
+    await syncPlaylistMemberships(repoId, playlistItems.value);
+  }
   if (smartFolderItems.status === "fulfilled") {
     smartFolders.value = smartFolderItems.value;
   }

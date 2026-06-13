@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { nextTick, ref, watch } from "vue";
+import { Check } from "lucide-vue-next";
 import {
   isContextMenuItemPending,
   selectContextMenuItem,
@@ -66,6 +67,7 @@ watch(
           :aria-haspopup="hasChildren(item) ? 'menu' : undefined"
           @click="selectContextMenuItem(item)"
         >
+          <Check v-if="item.checked" :size="13" aria-hidden="true" />
           <component v-if="item.icon" :is="item.icon" :size="13" aria-hidden="true" />
           <span class="ctx-menu__label">{{ displayLabel(item) }}</span>
           <span v-if="hasChildren(item)" class="ctx-menu__chevron" aria-hidden="true">›</span>
@@ -84,6 +86,7 @@ watch(
             role="menuitem"
             @click="selectContextMenuItem(child)"
           >
+            <Check v-if="child.checked" :size="13" aria-hidden="true" />
             <component v-if="child.icon" :is="child.icon" :size="13" aria-hidden="true" />
             <span class="ctx-menu__label">{{ displayLabel(child) }}</span>
           </button>

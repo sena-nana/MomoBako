@@ -10,6 +10,7 @@ import {
   ClipboardList,
   File,
   FolderTree,
+  Play,
   LoaderCircle,
   Plus,
   Puzzle,
@@ -24,8 +25,11 @@ import SmartFolderTreeNode from "../components/SmartFolderTreeNode.vue";
 import TaskPopover from "../components/TaskPopover.vue";
 import { normalizeWorkspaceMovePaths } from "../pages/workspace/dragBehavior";
 import { useRepositoryWorkspace, type WorkspacePanelKey } from "../composables/useRepositoryWorkspace";
+import { listPlaylistPlayers } from "../plugins/playlistPlayers";
+import { usePlaylistPlayer } from "../composables/usePlaylistPlayer";
+import { getPlaylistDetail } from "../services/repositoryApi";
 import { scheduleIdleTask } from "../composables/workspace/scheduler";
-import type { FileDeleteMode, RepositoryShortcut, SmartFolder, SmartFolderFilter, SmartFolderTreeNode as SmartFolderTreeNodeType } from "../types/repository";
+import type { FileDeleteMode, PlaylistSummary, RepositoryShortcut, SmartFolder, SmartFolderFilter, SmartFolderTreeNode as SmartFolderTreeNodeType } from "../types/repository";
 
 type PanelKey = Exclude<WorkspacePanelKey, "files" | "search" | "smartFolder" | "actions">;
 type ShortcutKey = "all" | "processing" | "untagged" | "deleted";
@@ -101,8 +105,12 @@ const smartFolderLimit = ref("");
 const showSmartFolderDeleteDialog = ref(false);
 const pendingDeleteSmartFolderId = ref("");
 const pendingDeleteSmartFolderLabel = ref("");
+const showPlaylistDialog = ref(false);
+const playlistName = ref("");
+const playlistPlayerTypeId = ref("");
 const route = useRoute();
 const router = useRouter();
+const playlistPlayer = usePlaylistPlayer();
 const shortcutCounts = shallowRef<Record<ShortcutKey, number>>({
   all: 0,
   processing: 0,
@@ -121,6 +129,8 @@ const {
   repositoryBackendOptions,
   activePanel,
   activeRepoId,
+  activePlaylistId,
+  activePlaylistDetail,
   activeSmartFolderId,
   activeSnapshot,
   currentDirectoryPath,
@@ -128,6 +138,7 @@ const {
   draggedWorkspacePaths,
   fileTree,
   smartFolders,
+  playlists,
   repositoryActions,
   syncProgress,
   isExternalDragActive,
@@ -138,6 +149,8 @@ const {
   isMutatingSmartFolder,
   error,
   refreshFileBrowserTree,
+  refreshPlaylists,
+  selectPlaylist,
   selectRepository,
   selectSmartFolder,
   selectWorkspaceEntry,
@@ -151,6 +164,8 @@ const {
   moveWorkspaceEntries,
   renameWorkspaceEntry,
   deleteWorkspaceEntry,
+  createPlaylistInWorkspace,
+  deletePlaylistInWorkspace,
   createNewRepository,
   attachRepository,
   removeRepository,
@@ -208,6 +223,11 @@ const smartFolderDialogActionLabel = computed(() => (
   smartFolderDialogMode.value === "create" ? "创建" : "保存"
 ));
 const smartFolderDialogDisabled = computed(() => !smartFolderName.value.trim() || isMutatingSmartFolder.value);
+const availablePlaylistPlayers = computed(() => listPlaylistPlayers() ?? []);
+const playlistDialogDisabled = computed(() => !playlistName.value.trim() || !playlistPlayerTypeId.value);
+const playlistItems = computed(() => playlists.value ?? []);
+const activePlaylist = computed(() => playlistItems.value.find((item) => item.playlistId === activePlaylistId.value) ?? null);
+const availablePlaylistPlayerTypeIds = computed(() => new Set(availablePlaylistPlayers.value.map((player) => player.playerTypeId)));
 const isShowingSyncProgress = computed(() => (
   syncProgress.value.phase === "scanning" ||
   syncProgress.value.phase === "writing" ||
@@ -745,6 +765,49 @@ function openSmartFolder(smartFolderId: string) {
   void selectSmartFolder(smartFolderId);
 }
 
+function openPlaylistDialog() {
+  if (!activeRepoId.value || isActiveRepositoryMissing.value) return;
+  playlistName.value = "";
+  playlistPlayerTypeId.value = availablePlaylistPlayers.value[0]?.playerTypeId ?? "";
+  showPlaylistDialog.value = true;
+}
+
+function closePlaylistDialog() {
+  showPlaylistDialog.value = false;
+}
+
+async function submitPlaylistDialog() {
+  if (!activeRepoId.value || playlistDialogDisabled.value) return;
+  const response = await createPlaylistInWorkspace({
+    name: playlistName.value.trim(),
+    playerTypeId: playlistPlayerTypeId.value,
+  });
+  if (response) {
+    showPlaylistDialog.value = false;
+  }
+}
+
+async function openPlaylist(playlistId: string) {
+  if (route.path === "/settings") {
+    await router.push("/");
+  }
+  await selectPlaylist(playlistId);
+}
+
+async function playPlaylist(playlist: PlaylistSummary) {
+  const detail = activePlaylistDetail.value?.playlist.playlistId === playlist.playlistId
+    ? activePlaylistDetail.value
+    : activeRepoId.value ? await getPlaylistDetail(activeRepoId.value, playlist.playlistId) : null;
+  if (!activeRepoId.value || !detail) return;
+  const startItemId = detail.items.find((item) => item.status === "ready")?.playlistItemId ?? detail.items[0]?.playlistItemId ?? null;
+  await playlistPlayer.setActivePlaylist(activeRepoId.value, detail, startItemId, { autoPlay: true });
+}
+
+async function removePlaylist(playlistId: string) {
+  await deletePlaylistInWorkspace(playlistId);
+  await refreshPlaylists();
+}
+
 function resetSmartFolderDialog(parentId = "") {
   smartFolderTargetId.value = "";
   smartFolderParentId.value = parentId;
@@ -1113,6 +1176,75 @@ onBeforeUnmount(() => {
 
         <section class="workspace-group workspace-group--tree">
           <div class="workspace-group__header">
+            <span>播放集</span>
+            <div class="workspace-group__actions">
+              <button
+                type="button"
+                class="workspace-tree-action"
+                :disabled="!activeRepoId || isActiveRepositoryMissing || !availablePlaylistPlayers.length"
+                title="新建播放集"
+                aria-label="新建播放集"
+                @click="openPlaylistDialog"
+              >
+                <Plus :size="13" aria-hidden="true" />
+              </button>
+            </div>
+          </div>
+          <div v-if="!activeRepoId" class="workspace-empty workspace-empty--compact">
+            <p class="workspace-empty__text">先选择或添加一个资源库。</p>
+          </div>
+          <div v-else-if="isActiveRepositoryMissing" class="workspace-empty workspace-empty--compact">
+            <p class="workspace-empty__text">资源库修复后可继续使用播放集。</p>
+          </div>
+          <div v-else-if="playlistItems.length" class="workspace-playlists">
+            <article
+              v-for="playlist in playlistItems"
+              :key="playlist.playlistId"
+              class="workspace-playlists__item"
+              :class="{ 'is-active': activePanel === 'playlist' && activePlaylist?.playlistId === playlist.playlistId }"
+            >
+              <button
+                type="button"
+                class="workspace-playlists__main"
+                :title="playlist.name"
+                @click="openPlaylist(playlist.playlistId)"
+              >
+                <strong>{{ playlist.name }}</strong>
+                <span>{{ playlist.playerLabel }} · {{ playlist.itemCount }} 项</span>
+              </button>
+              <div class="workspace-playlists__actions">
+                <button
+                  type="button"
+                  class="workspace-tree-action"
+                  :disabled="!availablePlaylistPlayerTypeIds.has(playlist.playerTypeId)"
+                  title="播放"
+                  aria-label="播放播放集"
+                  @click="playPlaylist(playlist)"
+                >
+                  <Play :size="13" aria-hidden="true" />
+                </button>
+                <button
+                  type="button"
+                  class="workspace-tree-action workspace-tree-action--danger"
+                  title="删除"
+                  aria-label="删除播放集"
+                  @click="removePlaylist(playlist.playlistId)"
+                >
+                  <Trash2 :size="13" aria-hidden="true" />
+                </button>
+              </div>
+            </article>
+          </div>
+          <div v-else-if="!availablePlaylistPlayers.length" class="workspace-empty workspace-empty--compact">
+            <p class="workspace-empty__text">当前没有可用的播放插件类型。</p>
+          </div>
+          <div v-else class="workspace-empty workspace-empty--compact">
+            <p class="workspace-empty__text">还没有播放集。</p>
+          </div>
+        </section>
+
+        <section class="workspace-group workspace-group--tree">
+          <div class="workspace-group__header">
             <span>文件夹</span>
             <div class="workspace-group__actions">
               <button
@@ -1397,6 +1529,63 @@ onBeforeUnmount(() => {
           </div>
         </template>
       </section>
+    </Transition>
+  </Teleport>
+
+  <Teleport to="body">
+    <Transition name="modal">
+      <div
+        v-if="showPlaylistDialog"
+        class="modal-overlay"
+        role="dialog"
+        aria-modal="true"
+        aria-label="新建播放集"
+        @click.self="closePlaylistDialog"
+      >
+        <div class="modal-card dialog-card">
+          <div class="dialog-card__header">
+            <span>新建播放集</span>
+          </div>
+          <div class="dialog-card__body">
+            <div class="playlist-dialog">
+              <label class="dialog-field">
+                <span>名称</span>
+                <input
+                  v-model="playlistName"
+                  type="text"
+                  placeholder="例如 通勤歌单 / 参考分镜"
+                  @keydown.enter.prevent="submitPlaylistDialog"
+                />
+              </label>
+              <label class="dialog-field">
+                <span>播放类型</span>
+                <select v-model="playlistPlayerTypeId">
+                  <option
+                    v-for="playerType in availablePlaylistPlayers"
+                    :key="playerType.playerTypeId"
+                    :value="playerType.playerTypeId"
+                  >
+                    {{ playerType.label }} · {{ playerType.fileClass }}
+                  </option>
+                </select>
+              </label>
+            </div>
+          </div>
+          <div class="dialog-card__actions">
+            <button type="button" class="ghost" @click="closePlaylistDialog">
+              取消
+            </button>
+            <button
+              type="button"
+              class="primary"
+              :disabled="playlistDialogDisabled"
+              @click="submitPlaylistDialog"
+            >
+              创建
+            </button>
+          </div>
+        </div>
+      </div>
     </Transition>
   </Teleport>
 

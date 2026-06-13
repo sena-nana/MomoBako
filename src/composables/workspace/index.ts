@@ -7,6 +7,9 @@ import {
   activeAssetDetail,
   activeAssetId,
   activePanel,
+  activePreviewPath,
+  activePlaylistDetail,
+  activePlaylistId,
   activeRepoId,
   activeRepositoryActionId,
   activeSmartFolderId,
@@ -40,6 +43,8 @@ import {
   isSyncing,
   lastSyncResult,
   plugins,
+  playlists,
+  playlistMemberships,
   repositories,
   repositoryActions,
   searchQuery,
@@ -173,6 +178,16 @@ import {
   refreshFileBrowserTree,
   syncActiveRepository,
 } from "./sync";
+import {
+  addPlaylistItemsInWorkspace,
+  createPlaylistInWorkspace,
+  deletePlaylistInWorkspace,
+  refreshPlaylists,
+  removePlaylistItemInWorkspace,
+  reorderPlaylistItemsInWorkspace,
+  selectPlaylist,
+  setPlaylistMembershipInWorkspace,
+} from "./playlists";
 
 export type { WorkspaceFilterState, WorkspaceOperationProgress, WorkspacePanelKey };
 export { resetRepositoryWorkspaceForTests } from "./lifecycle";
@@ -240,6 +255,16 @@ export {
   refreshFileBrowserTree,
   syncActiveRepository,
 } from "./sync";
+export {
+  addPlaylistItemsInWorkspace,
+  createPlaylistInWorkspace,
+  deletePlaylistInWorkspace,
+  refreshPlaylists,
+  removePlaylistItemInWorkspace,
+  reorderPlaylistItemsInWorkspace,
+  selectPlaylist,
+  setPlaylistMembershipInWorkspace,
+} from "./playlists";
 
 async function loadRepositories() {
   return loadRepositoriesLifecycle(selectRepository);
@@ -274,8 +299,12 @@ export async function selectRepository(repoId: string) {
     updateOperationProgress(progressId, { detail: "加载资源索引", value: 46 });
     activeRepoId.value = repoId;
     activeSnapshot.value = snapshot;
+    playlists.value = snapshot.playlists ?? [];
     if (isSwitchingRepository) {
       resetSearchState();
+      activePlaylistId.value = null;
+      activePlaylistDetail.value = null;
+      activePreviewPath.value = null;
       activeSmartFolderId.value = null;
       smartFolderResult.value = null;
     }
@@ -328,6 +357,9 @@ export function setActivePanel(panel: WorkspacePanelKey) {
   }
 }
 
+export function setActivePreviewPath(path: string | null) {
+  activePreviewPath.value = path;
+}
 export function ensureRepositoryWorkspace() {
   return ensureRepositoryWorkspaceLifecycle(selectAsset, loadSettingsData);
 }
@@ -343,6 +375,7 @@ export function useRepositoryWorkspace() {
     activeSnapshot: computed(() => activeSnapshot.value),
     activeAssetId: computed(() => activeAssetId.value),
     activeAssetDetail: computed(() => activeAssetDetail.value),
+    activePreviewPath: computed(() => activePreviewPath.value),
     activePanel: computed(() => activePanel.value),
     currentDirectoryPath: computed(() => currentDirectoryPath.value),
     fileBrowser: computed(() => fileBrowser.value),
@@ -350,9 +383,13 @@ export function useRepositoryWorkspace() {
     selectedFilePath: computed(() => selectedFilePath.value),
     selectedFilePaths: computed(() => selectedFilePaths.value),
     searchQuery: computed(() => searchQuery.value),
-    searchResults: computed(() => searchResults.value),
-    smartFolders: computed(() => smartFolders.value),
-    repositoryActions: computed(() => repositoryActions.value),
+    searchResults: computed(() => searchResults.value ?? []),
+    smartFolders: computed(() => smartFolders.value ?? []),
+    repositoryActions: computed(() => repositoryActions.value ?? []),
+    playlists: computed(() => playlists.value ?? []),
+    playlistMemberships: computed(() => playlistMemberships.value ?? {}),
+    activePlaylistId: computed(() => activePlaylistId.value),
+    activePlaylistDetail: computed(() => activePlaylistDetail.value),
     activeSmartFolderId: computed(() => activeSmartFolderId.value),
     activeRepositoryActionId: computed(() => activeRepositoryActionId.value),
     smartFolderResult: computed(() => smartFolderResult.value),
@@ -372,9 +409,9 @@ export function useRepositoryWorkspace() {
     filters: computed(() => filters.value),
     activeFilterCount,
     hasActiveFilters,
-    hardlinkCandidates: computed(() => hardlinkCandidates.value),
+    hardlinkCandidates: computed(() => hardlinkCandidates.value ?? []),
     lastSyncResult: computed(() => lastSyncResult.value),
-    plugins: computed(() => plugins.value),
+    plugins: computed(() => plugins.value ?? []),
     repositoryBackendOptions,
     cacheSnapshot: computed(() => cacheSnapshot.value),
     apiDesign: computed(() => apiDesign.value),
@@ -426,12 +463,21 @@ export function useRepositoryWorkspace() {
     emptyTrash,
     openWorkspaceEntry,
     revealWorkspaceEntry,
+    setActivePreviewPath,
     startWorkspaceEntryDrag,
     startWorkspaceEntriesDrag,
     selectWorkspaceEntry,
     selectWorkspaceEntries,
     clearWorkspaceSelection,
     refreshSmartFolders,
+    refreshPlaylists,
+    selectPlaylist,
+    createPlaylistInWorkspace,
+    deletePlaylistInWorkspace,
+    addPlaylistItemsInWorkspace,
+    reorderPlaylistItemsInWorkspace,
+    removePlaylistItemInWorkspace,
+    setPlaylistMembershipInWorkspace,
     selectSmartFolder,
     refreshRepositoryActions,
     selectRepositoryAction,
