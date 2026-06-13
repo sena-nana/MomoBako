@@ -241,7 +241,7 @@ const mocks = vi.hoisted(() => {
   };
 });
 
-vi.mock("three", () => ({
+vi.mock("three/webgpu", () => ({
   AmbientLight: mocks.AmbientLight,
   Box3: mocks.Box3,
   Color: mocks.Color,
@@ -253,9 +253,6 @@ vi.mock("three", () => ({
   PerspectiveCamera: mocks.PerspectiveCamera,
   Scene: mocks.Scene,
   Vector3: mocks.Vector3,
-}));
-
-vi.mock("three/webgpu", () => ({
   WebGPURenderer: mocks.WebGPURenderer,
 }));
 

@@ -29,8 +29,9 @@ describe("MomoBako 工具链", () => {
     });
     expect(deps.vitepress).toBeDefined();
     expect(deps.jszip).toBeUndefined();
-    expect(deps.three).toBeUndefined();
-    expect(deps["@pixiv/three-vrm"]).toBeUndefined();
+    expect(pkg.dependencies.three).toBeDefined();
+    expect(pkg.dependencies["@pixiv/three-vrm"]).toBeDefined();
+    expect(pkg.devDependencies["@types/three"]).toBeDefined();
   });
 
   it("External/Plugins 提供标准开发入口并与主线源码隔离", () => {
