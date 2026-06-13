@@ -1,7 +1,7 @@
 import { render, screen, waitFor } from "@testing-library/vue";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getPreviewPluginForEntry } from "../src/plugins/previewPlugins";
-import { clearPreviewPluginRegistry, syncRegisteredPreviewPluginManifests } from "../src/plugins/sdk";
+import { clearPreviewPluginRegistry, onPluginEvent, syncRegisteredPreviewPluginManifests } from "../src/plugins/sdk";
 import { listPlugins } from "../src/services/repositoryApi";
 import { getInvokeCalls } from "./setupTests";
 
@@ -165,69 +165,14 @@ describe("MediaPreview", () => {
     });
   });
 
-  it("ASMR 音频保存时长和收听进度", async () => {
-    const plugin = getPreviewPluginForEntry({
-      ...audioEntry,
-      metadata: {
-        libraryKind: "asmr",
-        workId: "RJ123456",
-        asmrEntryKind: "audio",
-      },
-    });
-    expect(plugin).not.toBeNull();
-    const saveMetadata = vi.fn().mockResolvedValue(null);
-
-    const { container } = render(plugin!.component, {
-      props: {
-        repoId: "repo-main-001",
-        entry: {
-          ...audioEntry,
-          metadata: {
-            libraryKind: "asmr",
-            workId: "RJ123456",
-            asmrEntryKind: "audio",
-          },
-        },
-        saveMetadata,
-      },
-    });
-
-    await waitFor(() => {
-      expect(container.querySelector("audio")).toBeInstanceOf(HTMLAudioElement);
-    });
-    const audio = container.querySelector("audio") as HTMLAudioElement;
-    Object.defineProperty(audio, "duration", { configurable: true, value: 120 });
-    Object.defineProperty(audio, "currentTime", { configurable: true, value: 0 });
-    audio.dispatchEvent(new Event("loadedmetadata"));
-
-    await waitFor(() => {
-      expect(saveMetadata).toHaveBeenCalledWith(
-        expect.objectContaining({ path: "Music/theme-song.mp3" }),
-        { trackDurationMs: 120000 },
-      );
-    });
-    saveMetadata.mockClear();
-
-    Object.defineProperty(audio, "currentTime", { configurable: true, value: 30 });
-    audio.dispatchEvent(new Event("pause"));
-
-    await waitFor(() => {
-      expect(saveMetadata).toHaveBeenCalledWith(
-        expect.objectContaining({ path: "Music/theme-song.mp3" }),
-        expect.objectContaining({
-          listeningProgress: 25,
-          listeningStatus: "listening",
-          trackDurationMs: 120000,
-          trackPositionMs: 30000,
-        }),
-      );
-    });
-  });
-
-  it("普通音频不会写入 ASMR 收听进度", async () => {
+  it("音频预览不直接写入领域 metadata", async () => {
     const plugin = getPreviewPluginForEntry(audioEntry);
     expect(plugin).not.toBeNull();
     const saveMetadata = vi.fn().mockResolvedValue(null);
+    const playbackEvents: unknown[] = [];
+    const disposePlaybackListener = onPluginEvent("media.playback", (event) => {
+      playbackEvents.push(event);
+    });
 
     const { container } = render(plugin!.component, {
       props: {
@@ -243,8 +188,31 @@ describe("MediaPreview", () => {
     const audio = container.querySelector("audio") as HTMLAudioElement;
     Object.defineProperty(audio, "duration", { configurable: true, value: 120 });
     Object.defineProperty(audio, "currentTime", { configurable: true, value: 30 });
+    audio.dispatchEvent(new Event("loadedmetadata"));
+    audio.dispatchEvent(new Event("timeupdate"));
     audio.dispatchEvent(new Event("pause"));
+    audio.dispatchEvent(new Event("ended"));
 
     expect(saveMetadata).not.toHaveBeenCalled();
+    expect(playbackEvents).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        repoId: "repo-main-001",
+        entry: audioEntry,
+        state: "metadata",
+        durationMs: 120000,
+        saveMetadata,
+      }),
+      expect.objectContaining({
+        state: "timeupdate",
+        currentTimeMs: 30000,
+      }),
+      expect.objectContaining({
+        state: "pause",
+      }),
+      expect.objectContaining({
+        state: "ended",
+      }),
+    ]));
+    disposePlaybackListener();
   });
 });

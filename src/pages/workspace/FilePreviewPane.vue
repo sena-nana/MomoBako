@@ -1,12 +1,12 @@
 <script setup lang="ts">
-import { ArrowLeft, Eye, FileAudio, FileImage, FileVideo, FolderOpen, ListMusic, Shuffle, Trash2 } from "lucide-vue-next";
+import { ArrowLeft, Eye, FileAudio, FileImage, FileVideo, FolderOpen } from "lucide-vue-next";
 import type { Component } from "vue";
 import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { usePlaylistPlayer } from "../../composables/usePlaylistPlayer";
 import FileMetadataEditor from "./FileMetadataEditor.vue";
 import ThumbnailPalette from "../../components/ThumbnailPalette.vue";
 import type { FileBrowserEntry, RepositoryTagGroup } from "../../types/repository";
-import { asmrMetadataText, asmrWorkAudioEntries, isAsmrAudioEntry as isAsmrAudioFileEntry, type AsmrPlaylistItem } from "./asmrPlaylist";
+import type { RegisteredLibraryExtension } from "../../plugins/sdk";
 
 const props = defineProps<{
   entry: FileBrowserEntry;
@@ -21,7 +21,7 @@ const props = defineProps<{
   availableTags: string[];
   tagGroups?: RepositoryTagGroup[];
   playlistEntries: FileBrowserEntry[];
-  asmrPlaylist: AsmrPlaylistItem[];
+  libraryExtensions: RegisteredLibraryExtension[];
   thumbnailPalette: (entry: FileBrowserEntry) => string[];
   saveMetadata: (entry: FileBrowserEntry, metadata: Record<string, unknown>) => Promise<unknown>;
   saveCoverThumbnail?: (path: string, sourceUrl: string) => Promise<unknown>;
@@ -32,11 +32,6 @@ const emit = defineEmits<{
   open: [path: string];
   reveal: [path: string];
   preview: [entry: FileBrowserEntry];
-  playlistAddTrack: [entry: FileBrowserEntry];
-  playlistAddWork: [entry: FileBrowserEntry];
-  playlistRandom: [entry: FileBrowserEntry];
-  playlistClear: [];
-  playlistSelect: [path: string];
   thumbnailError: [entry: FileBrowserEntry];
   thumbnailLoaded: [entry: FileBrowserEntry, event: Event];
 }>();
@@ -66,13 +61,6 @@ watch(
 onBeforeUnmount(() => {
   playlistPlayer.attachVisibleMountTarget(null);
 });
-
-const asmrQueueEntries = computed(() => {
-  return asmrWorkAudioEntries(props.entry, props.playlistEntries)
-    .filter((item) => item.path !== props.entry.path);
-});
-
-const isAsmrAudioEntry = computed(() => isAsmrAudioFileEntry(props.entry));
 </script>
 
 <template>
@@ -94,10 +82,6 @@ const isAsmrAudioEntry = computed(() => isAsmrAudioFileEntry(props.entry));
       <button type="button" class="ghost" @click="emit('reveal', entry.path)">
         <FolderOpen :size="14" aria-hidden="true" />
         定位
-      </button>
-      <button v-if="isAsmrAudioEntry" type="button" class="ghost" title="加入播放列表" @click="emit('playlistAddTrack', entry)">
-        <ListMusic :size="14" aria-hidden="true" />
-        加入
       </button>
     </div>
   </header>
@@ -137,58 +121,17 @@ const isAsmrAudioEntry = computed(() => isAsmrAudioFileEntry(props.entry));
       <div class="files-preview-page__palette-slot">
         <ThumbnailPalette :colors="thumbnailPalette(entry)" />
       </div>
-      <section v-if="asmrQueueEntries.length" class="files-preview-page__queue" aria-label="ASMR 作品队列">
-        <div class="files-preview-page__queue-head">
-          <span>作品队列</span>
-          <strong>{{ asmrQueueEntries.length + 1 }} 轨</strong>
-        </div>
-        <div class="files-preview-page__queue-list">
-          <button
-            v-for="queueEntry in asmrQueueEntries"
-            :key="queueEntry.path"
-            type="button"
-            class="files-preview-page__queue-item"
-            @click="emit('preview', queueEntry)"
-          >
-            <span>{{ asmrMetadataText(queueEntry, "trackTitle") || queueEntry.name }}</span>
-            <small>{{ asmrMetadataText(queueEntry, "listeningStatus") || "unlistened" }}</small>
-          </button>
-        </div>
-      </section>
-      <section v-if="isAsmrAudioEntry || asmrPlaylist.length" class="files-preview-page__queue" aria-label="ASMR 播放列表">
-        <div class="files-preview-page__queue-head">
-          <span>播放列表</span>
-          <strong>{{ asmrPlaylist.length }} 项</strong>
-        </div>
-        <div class="files-preview-page__queue-actions">
-          <button type="button" class="ghost" :disabled="!isAsmrAudioEntry" @click="emit('playlistAddWork', entry)">
-            <ListMusic :size="14" aria-hidden="true" />
-            加入作品
-          </button>
-          <button type="button" class="ghost" :disabled="!isAsmrAudioEntry" @click="emit('playlistRandom', entry)">
-            <Shuffle :size="14" aria-hidden="true" />
-            随机
-          </button>
-          <button type="button" class="ghost" :disabled="!asmrPlaylist.length" @click="emit('playlistClear')">
-            <Trash2 :size="14" aria-hidden="true" />
-            清空
-          </button>
-        </div>
-        <div v-if="asmrPlaylist.length" class="files-preview-page__queue-list">
-          <button
-            v-for="item in asmrPlaylist"
-            :key="item.path"
-            type="button"
-            class="files-preview-page__queue-item"
-            :class="{ 'is-active': item.path === entry.path }"
-            @click="emit('playlistSelect', item.path)"
-          >
-            <span>{{ item.title }}</span>
-            <small>{{ item.status || item.workTitle }}</small>
-          </button>
-        </div>
-        <div v-else class="files-preview-page__queue-empty">暂无播放队列</div>
-      </section>
+      <component
+        :is="extension.previewPanel"
+        v-for="extension in libraryExtensions.filter((item) => item.previewPanel)"
+        :key="`${extension.pluginId}:preview`"
+        :repo-id="repoId"
+        :entry="entry"
+        :entries="playlistEntries"
+        :save-metadata="saveMetadata"
+        :save-cover-thumbnail="saveCoverThumbnail"
+        :preview-entry="(target: FileBrowserEntry) => emit('preview', target)"
+      />
     </div>
     <div class="files-detail__stats files-preview-page__stats">
       <div class="asset-meta__row">
@@ -216,6 +159,9 @@ const isAsmrAudioEntry = computed(() => isAsmrAudioFileEntry(props.entry));
         :is-saving="isSavingMetadata"
         :available-tags="availableTags"
         :tag-groups="tagGroups"
+        :library-extensions="libraryExtensions"
+        :repo-id="repoId"
+        :playlist-entries="playlistEntries"
         :save-metadata="saveMetadata"
         :save-cover-thumbnail="saveCoverThumbnail"
       />

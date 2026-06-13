@@ -1,7 +1,9 @@
 import { render, screen } from "@testing-library/vue";
 import { describe, expect, it, vi } from "vitest";
 import FileBrowserPanel from "../src/pages/workspace/FileBrowserPanel.vue";
+import type { RegisteredLibraryExtension } from "../src/plugins/sdk";
 import type { FileBrowserEntry } from "../src/types/repository";
+import { fileSummary, matchAsmrEntry } from "../External/Plugins/library-asmr/src/asmrLibrary";
 
 function asmrEntry(): FileBrowserEntry {
   return {
@@ -29,6 +31,14 @@ function asmrEntry(): FileBrowserEntry {
 }
 
 function renderPanel(entry = asmrEntry()) {
+  const libraryExtension: RegisteredLibraryExtension = {
+    pluginId: "momobako.library.asmr",
+    pluginName: "ASMR Library",
+    libraryKind: "asmr",
+    label: "ASMR",
+    matchEntry: matchAsmrEntry,
+    fileSummary,
+  };
   return render(FileBrowserPanel, {
     props: {
       breadcrumbs: [],
@@ -71,6 +81,7 @@ function renderPanel(entry = asmrEntry()) {
       tagGroups: [],
       thumbnailPalette: () => [],
       saveMetadata: vi.fn(),
+      libraryExtensions: [libraryExtension],
       createFileName: "",
       fileDisplayMode: "list",
       renameValue: "",

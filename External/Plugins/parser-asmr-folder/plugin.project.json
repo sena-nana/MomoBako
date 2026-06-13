@@ -1,7 +1,7 @@
 {
   "pluginId": "momobako.parser.asmr-folder",
   "build": {
-    "type": "manifest-only",
+    "type": "cargo-native",
     "sourceDir": "src",
     "outputDir": ".dist/parser-asmr-folder"
   }

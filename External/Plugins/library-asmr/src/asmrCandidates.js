@@ -1,20 +1,3 @@
-export type AsmrMetadataCandidate = {
-  source: string;
-  confidence?: string;
-  fields: Record<string, unknown>;
-};
-
-export type AsmrMetadataCandidateSummary = {
-  source: string;
-  confidence: string;
-  patch: Record<string, unknown>;
-  skipped: string[];
-};
-
-export type AsmrMetadataCandidateParseResult =
-  | { ok: true; candidate: AsmrMetadataCandidate }
-  | { ok: false; error: string };
-
 const protectedCandidateFields = new Set([
   "comment",
   "rating",
@@ -56,23 +39,23 @@ const providerCandidateFields = new Set([
   "purchaseSource",
 ]);
 
-function isPlainRecord(value: unknown): value is Record<string, unknown> {
+function isPlainRecord(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function normalizeProviderName(value: unknown) {
+function normalizeProviderName(value) {
   if (typeof value !== "string") return "";
   const normalized = value.trim();
   return normalized || "";
 }
 
-function normalizeCandidateFields(candidate: Record<string, unknown>) {
+function normalizeCandidateFields(candidate) {
   const rawFields = isPlainRecord(candidate.fields)
     ? candidate.fields
     : isPlainRecord(candidate.metadata)
       ? candidate.metadata
       : candidate;
-  const fields: Record<string, unknown> = {};
+  const fields = {};
   for (const [key, value] of Object.entries(rawFields)) {
     if (key === "source" || key === "confidence" || key === "fields" || key === "metadata") continue;
     fields[key] = value;
@@ -80,12 +63,12 @@ function normalizeCandidateFields(candidate: Record<string, unknown>) {
   return fields;
 }
 
-export function readAsmrMetadataCandidates(metadata: Record<string, unknown> | undefined) {
+export function readMetadataCandidates(metadata) {
   const rawCandidates = metadata?.providerCandidates ?? metadata?.asmrProviderCandidates;
   if (!Array.isArray(rawCandidates)) return [];
   return rawCandidates
     .filter(isPlainRecord)
-    .map<AsmrMetadataCandidate>((candidate) => ({
+    .map((candidate) => ({
       source: normalizeProviderName(candidate.source) || "provider",
       confidence: normalizeProviderName(candidate.confidence) || undefined,
       fields: normalizeCandidateFields(candidate),
@@ -93,12 +76,12 @@ export function readAsmrMetadataCandidates(metadata: Record<string, unknown> | u
     .filter((candidate) => Object.keys(candidate.fields).length);
 }
 
-export function parseAsmrMetadataCandidateJson(raw: string): AsmrMetadataCandidateParseResult {
+export function parseCandidateJson(raw) {
   const trimmed = raw.trim();
   if (!trimmed) return { ok: false, error: "候选 JSON 为空" };
-  let parsed: unknown;
+  let parsed;
   try {
-    parsed = JSON.parse(trimmed) as unknown;
+    parsed = JSON.parse(trimmed);
   } catch {
     return { ok: false, error: "候选 JSON 格式不正确" };
   }
@@ -116,11 +99,8 @@ export function parseAsmrMetadataCandidateJson(raw: string): AsmrMetadataCandida
   return { ok: true, candidate };
 }
 
-export function appendAsmrMetadataCandidate(
-  metadata: Record<string, unknown> | undefined,
-  candidate: AsmrMetadataCandidate,
-) {
-  const current = readAsmrMetadataCandidates(metadata);
+export function appendMetadataCandidate(metadata, candidate) {
+  const current = readMetadataCandidates(metadata);
   return [
     ...current,
     {
@@ -131,9 +111,9 @@ export function appendAsmrMetadataCandidate(
   ];
 }
 
-export function buildAsmrMetadataCandidateSummary(candidate: AsmrMetadataCandidate) {
-  const patch: Record<string, unknown> = {};
-  const skipped: string[] = [];
+export function buildCandidateSummary(candidate) {
+  const patch = {};
+  const skipped = [];
   for (const [key, value] of Object.entries(candidate.fields)) {
     if (protectedCandidateFields.has(key) || !providerCandidateFields.has(key)) {
       skipped.push(key);
@@ -146,15 +126,13 @@ export function buildAsmrMetadataCandidateSummary(candidate: AsmrMetadataCandida
     confidence: candidate.confidence ?? "候选",
     patch,
     skipped,
-  } satisfies AsmrMetadataCandidateSummary;
+  };
 }
 
-export function formatCandidateFieldValue(value: unknown) {
+export function formatCandidateFieldValue(value) {
   if (Array.isArray(value)) {
     return value
-      .filter((item): item is string | number | boolean => (
-        typeof item === "string" || typeof item === "number" || typeof item === "boolean"
-      ))
+      .filter((item) => typeof item === "string" || typeof item === "number" || typeof item === "boolean")
       .map(String)
       .filter(Boolean)
       .join("，");

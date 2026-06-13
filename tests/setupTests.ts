@@ -850,25 +850,6 @@ vi.mock("@tauri-apps/api/core", () => ({
         state: "linked",
       };
     }
-    if (command === "lookup_asmr_metadata_candidate") {
-      const request = args?.request as { provider?: string; rjCode?: string } | undefined;
-      return {
-        provider: request?.provider ?? "dlsite",
-        rjCode: request?.rjCode ?? "RJ123456",
-        sourceUrl: `https://example.test/${request?.rjCode ?? "RJ123456"}`,
-        fetchedAt: "2026-06-05T00:18:00Z",
-        candidate: {
-          source: request?.provider ?? "dlsite",
-          confidence: "external-id",
-          fields: {
-            workId: request?.rjCode ?? "RJ123456",
-            rjCode: request?.rjCode ?? "RJ123456",
-            workTitle: "Fetched Rain Voice",
-            circle: "Fetched Circle",
-          },
-        },
-      };
-    }
     if (command === "rename_entry") {
       const request = args?.request as { path?: string; newName?: string } | undefined;
       const sourcePath = request?.path ?? "";
@@ -1098,6 +1079,24 @@ vi.mock("@tauri-apps/api/core", () => ({
     if (command === "list_plugins") {
       mockPlugins ??= createMockPlugins();
       return mockPlugins;
+    }
+    if (command === "call_plugin") {
+      const request = args?.request as { pluginId?: string; method?: string; payload?: { id?: string } } | undefined;
+      const id = request?.payload?.id ?? "RJ123456";
+      return {
+        pluginId: request?.pluginId ?? "momobako.service.provider.dlsite",
+        method: request?.method ?? "provider.lookupMetadataCandidate",
+        payload: {
+          source: request?.pluginId?.includes("asmr-one") ? "asmr-one" : "dlsite",
+          confidence: "external-id",
+          fields: {
+            workId: id,
+            rjCode: id,
+            workTitle: "Fetched Rain Voice",
+            circle: "Fetched Circle",
+          },
+        },
+      };
     }
     if (command === "read_plugin_archive_text") {
       const request = args?.request as { pluginId?: string; path?: string } | undefined;

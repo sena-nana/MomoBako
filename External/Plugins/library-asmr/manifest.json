@@ -23,10 +23,15 @@
     "organize-candidates"
   ],
   "enabled": true,
-  "sdk": "backend",
-  "entry": {},
+  "sdk": "frontend",
+  "entry": {
+    "frontend": {
+      "module": "src/register.js",
+      "export": "register"
+    }
+  },
   "source": "builtin",
-  "runtime": "manifest-only",
+  "runtime": "vue-module",
   "permissions": [
     "readRepository",
     "readMetadata",
@@ -76,6 +81,23 @@
     }
   ],
   "contributes": {
+    "libraryExtension": {
+      "libraryKind": "asmr",
+      "entry": "src/register.js",
+      "slots": [
+        "metadataPanel",
+        "previewPanel",
+        "fileSummary",
+        "searchShortcuts",
+        "playlist"
+      ],
+      "searchShortcuts": [
+        "works",
+        "lyrics",
+        "continue",
+        "random"
+      ]
+    },
     "libraryKind": {
       "id": "asmr",
       "recognition": {

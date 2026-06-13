@@ -17,10 +17,9 @@ mod window_state;
 
 use repository_runtime::{ExternalApiConnectionStatus, RepositoryRuntime};
 use repository_service::{
-    ApiDesignSnapshot, AsmrMetadataLookupRequest, AsmrMetadataLookupResponse, AssetDetail,
-    BinaryFileWriteRequest, BinaryFileWriteResponse, CacheSnapshot, FileBrowserRequest,
-    FileBrowserSnapshot, FileCopyRequest, FileCreateRequest, FileDeleteRequest, FileImportRequest,
-    FileMoveRequest, FilePreviewSourceResponse, FileReadRequest, FileRenameRequest,
+    ApiDesignSnapshot, AssetDetail, BinaryFileWriteRequest, BinaryFileWriteResponse, CacheSnapshot,
+    FileBrowserRequest, FileBrowserSnapshot, FileCopyRequest, FileCreateRequest, FileDeleteRequest,
+    FileImportRequest, FileMoveRequest, FilePreviewSourceResponse, FileReadRequest, FileRenameRequest,
     HardlinkCandidateResponse, HardlinkConfirmRequest, HardlinkConfirmResponse,
     MetadataUpdateRequest, MetadataUpdateResponse, PluginArchiveReadRequest,
     PluginArchiveTextResponse, PluginCallRequest, PluginCallResult, PluginEnabledRequest,
@@ -324,16 +323,6 @@ async fn read_plugin_archive_text(
 ) -> Result<PluginArchiveTextResponse, String> {
     runtime
         .run_read(move |state| state.read_plugin_archive_text(request))
-        .await
-}
-
-#[tauri::command]
-async fn lookup_asmr_metadata_candidate(
-    request: AsmrMetadataLookupRequest,
-    runtime: tauri::State<'_, RepositoryRuntime>,
-) -> Result<AsmrMetadataLookupResponse, String> {
-    runtime
-        .run_read(move |state| state.lookup_asmr_metadata_candidate(request))
         .await
 }
 
@@ -791,7 +780,6 @@ pub fn run() {
             prepare_preview_file_source,
             call_plugin,
             read_plugin_archive_text,
-            lookup_asmr_metadata_candidate,
             write_binary_file,
             create_directory,
             create_file,

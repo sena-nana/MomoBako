@@ -530,28 +530,6 @@ export type PluginArchiveTextResponse = {
   text: string;
 };
 
-export type AsmrMetadataLookupProvider = "dlsite" | "asmr-one" | string;
-
-export type AsmrMetadataLookupRequest = {
-  provider: AsmrMetadataLookupProvider;
-  rjCode: string;
-  detailUrl?: string | null;
-};
-
-export type AsmrMetadataCandidatePayload = {
-  source: string;
-  confidence: string;
-  fields: Record<string, unknown>;
-};
-
-export type AsmrMetadataLookupResponse = {
-  provider: string;
-  rjCode: string;
-  sourceUrl: string;
-  fetchedAt: string;
-  candidate: AsmrMetadataCandidatePayload;
-};
-
 export type BinaryFileWriteRequest = {
   path: string;
   bytes: number[];

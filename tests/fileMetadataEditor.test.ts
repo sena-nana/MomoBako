@@ -1,7 +1,11 @@
 import { fireEvent, render, screen, within } from "@testing-library/vue";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { h, computed, reactive, ref, watch } from "vue";
 import FileMetadataEditor from "../src/pages/workspace/FileMetadataEditor.vue";
+import type { RegisteredLibraryExtension } from "../src/plugins/sdk";
 import type { FileBrowserEntry } from "../src/types/repository";
+import { callPlugin } from "../src/services/repositoryApi";
+import { register as registerAsmrLibrary } from "../External/Plugins/library-asmr/src/register";
 import { getOpenerCalls } from "./setupTests";
 
 const writeText = vi.fn<[(text: string) => Promise<void>]>();
@@ -22,6 +26,25 @@ function createEntry(metadata: Record<string, unknown>): FileBrowserEntry {
   };
 }
 
+function asmrLibraryExtension(): RegisteredLibraryExtension {
+  let extension: RegisteredLibraryExtension | null = null;
+  registerAsmrLibrary({
+    vue: { h, computed, reactive, ref, watch },
+    callPlugin,
+    onPluginEvent: vi.fn(() => vi.fn()),
+    registerLibraryExtension(definition: RegisteredLibraryExtension) {
+      extension = {
+        ...definition,
+        pluginId: "momobako.library.asmr",
+        pluginName: "ASMR Library",
+      };
+      return extension;
+    },
+  });
+  if (!extension) throw new Error("ASMR library extension was not registered");
+  return extension;
+}
+
 function renderEditor(entry: FileBrowserEntry, saveMetadata = vi.fn(), saveCoverThumbnail = vi.fn()) {
   return render(FileMetadataEditor, {
     props: {
@@ -29,6 +52,9 @@ function renderEditor(entry: FileBrowserEntry, saveMetadata = vi.fn(), saveCover
       isSaving: false,
       availableTags: [],
       tagGroups: [],
+      repoId: "repo-main-001",
+      playlistEntries: [entry],
+      libraryExtensions: [asmrLibraryExtension()],
       saveMetadata,
       saveCoverThumbnail,
     },
