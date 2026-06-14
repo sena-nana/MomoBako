@@ -31,6 +31,8 @@ import type {
   PluginConfigSnapshot,
   PluginDataDirectoryResponse,
   PluginEnabledRequest,
+  PluginHookExecutionListRequest,
+  PluginHookExecutionListResponse,
   PluginInstallRequest,
   PlaylistDetail,
   PlaylistItemsAddRequest,
@@ -300,6 +302,10 @@ export function redoLastRevision(request: RevisionActionRequest) {
 
 export function listPlugins() {
   return invoke<PluginManifest[]>("list_plugins");
+}
+
+export function listPluginHookExecutions(request?: PluginHookExecutionListRequest) {
+  return invoke<PluginHookExecutionListResponse>("list_plugin_hook_executions", { request });
 }
 
 export function setPluginEnabled(request: PluginEnabledRequest) {

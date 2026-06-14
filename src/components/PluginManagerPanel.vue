@@ -36,6 +36,7 @@ withDefaults(defineProps<{
 
 const {
   plugins,
+  pluginHookExecutions,
   deletePluginConfigValueInWorkspace,
   deletePluginInWorkspace,
   installPluginArchiveInWorkspace,
@@ -61,6 +62,19 @@ const jsonDrafts = ref<Record<string, Record<string, string>>>({});
 const pluginCategoryOrder = ["source", "library-kind", "parser", "preview", "service"] as const satisfies readonly PluginCategory[];
 const pluginGroupOrder = [...pluginCategoryOrder, "unclassified"] as const;
 type PluginGroupCategory = (typeof pluginGroupOrder)[number];
+
+const hookExecutionsByPluginId = computed(() => {
+  const groups = new Map<string, typeof pluginHookExecutions.value>();
+  for (const record of pluginHookExecutions.value) {
+    const group = groups.get(record.pluginId);
+    if (group) {
+      group.push(record);
+    } else {
+      groups.set(record.pluginId, [record]);
+    }
+  }
+  return groups;
+});
 
 const filteredPlugins = computed(() => {
   const normalizedKeyword = keyword.value.trim().toLowerCase();
@@ -123,6 +137,34 @@ function pluginStatusClass(plugin: PluginManifest) {
   return "";
 }
 
+function hookExecutionStatusLabel(status: string) {
+  if (status === "success") return "成功";
+  if (status === "failed") return "失败";
+  if (status === "blocked") return "已拦截";
+  return status;
+}
+
+function hookExecutionClass(status: string) {
+  if (status === "failed") return "plugin-manager__dependency--danger";
+  if (status === "blocked") return "plugin-manager__dependency--muted";
+  return "";
+}
+
+function hookExecutionsFor(plugin: PluginManifest) {
+  return hookExecutionsByPluginId.value.get(plugin.pluginId)?.slice(0, 3) ?? [];
+}
+
+function hookExecutionTime(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString("zh-CN", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 function canDeletePlugin(plugin: PluginManifest) {
   return plugin.source === "user";
 }
@@ -142,6 +184,13 @@ function pluginSearchText(plugin: PluginManifest) {
     ...(plugin.requires ?? []),
     ...(plugin.optional ?? []),
     ...(plugin.hooks ?? []).flatMap((hook) => [hook.slot, hook.action, hook.label]),
+    ...hookExecutionsFor(plugin).flatMap((record) => [
+      record.status,
+      record.message,
+      record.hookAction,
+      record.hookSlot,
+      record.hookLabel,
+    ]),
   ]
     .filter((value): value is string => Boolean(value))
     .join("\n")
@@ -566,6 +615,28 @@ async function confirmDeletePlugin() {
                 <span v-for="hook in plugin.hooks" :key="`${hook.slot}-${hook.action}`" class="plugin-manager__dependency">
                   {{ hook.label ?? hook.action }} · {{ hook.slot }}
                 </span>
+              </div>
+            </div>
+            <div v-if="hookExecutionsFor(plugin).length" class="plugin-manager__section">
+              <span class="plugin-manager__section-label">执行记录</span>
+              <div class="plugin-manager__execution-list">
+                <div
+                  v-for="record in hookExecutionsFor(plugin)"
+                  :key="record.executionId"
+                  class="plugin-manager__execution-item"
+                >
+                  <span class="plugin-manager__dependency" :class="hookExecutionClass(record.status)">
+                    {{ hookExecutionStatusLabel(record.status) }}
+                  </span>
+                  <div class="plugin-manager__execution-body">
+                    <div class="plugin-manager__execution-title">
+                      <strong>{{ record.hookLabel ?? record.hookAction }}</strong>
+                      <span class="muted">{{ record.hookSlot }}</span>
+                    </div>
+                    <p v-if="record.message" class="plugin-manager__execution-message">{{ record.message }}</p>
+                    <p class="plugin-manager__execution-time muted">{{ hookExecutionTime(record.startedAt) }}</p>
+                  </div>
+                </div>
               </div>
             </div>
             <div class="extensions-workbench__card-actions">

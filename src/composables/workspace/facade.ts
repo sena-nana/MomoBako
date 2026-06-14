@@ -41,6 +41,7 @@ import {
   lastSyncResult,
   playlistMemberships,
   playlists,
+  pluginHookExecutions,
   plugins,
   repositories,
   repositoryActions,
@@ -357,6 +358,7 @@ export function useWorkspaceAssetMetadata() {
 export function useWorkspaceSettings() {
   return {
     plugins: readonlyArrayRef(plugins),
+    pluginHookExecutions: readonlyArrayRef(pluginHookExecutions),
     cacheSnapshot: readonlyRef(cacheSnapshot),
     apiDesign: readonlyRef(apiDesign),
     externalApiConnection: readonlyRef(externalApiConnection),
