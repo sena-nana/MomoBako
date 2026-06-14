@@ -462,6 +462,24 @@ function previewPluginModuleSource(pluginId: string) {
   if (pluginId === "momobako.preview.media") {
     return mediaPreviewPluginSourceForTest();
   }
+  if (pluginId === "momobako.tool.api-playground") {
+    return [
+      "export function register(ctx) {",
+      "  ctx.registerToolPage({",
+      "    toolPageId: 'momobako.tool.api-playground',",
+      "    label: 'API Playground',",
+      "    description: '调试 /external/v1 后端接口',",
+      "    order: 10,",
+      "    component: {",
+      "      name: 'MockApiPlayground',",
+      "      template: '<section class=\"mock-api-playground\">API Playground</section>',",
+      "      props: { manifest: { type: Object, default: null } },",
+      "    },",
+      "  });",
+      "}",
+      "",
+    ].join("\n");
+  }
 
   const definitionMap: Record<string, { extensions: string[]; thumbnail?: boolean; fileActions?: boolean }> = {
     "momobako.preview.three-model": {
@@ -1156,12 +1174,58 @@ vi.mock("@tauri-apps/api/core", () => ({
         transport: "REST over local repository service, gRPC-ready contract design",
         endpoints: [
           {
-            group: "Repository API",
+            group: "External Asset API",
+            transport: "external-http",
             method: "GET",
-            path: "/repositories",
+            path: "/external/v1/health",
+            summary: "检查外部 API 服务状态。",
+            requiresAuth: false,
+          },
+          {
+            group: "Repository API",
+            transport: "tauri-command",
+            method: "INVOKE",
+            path: "list_repositories",
+            command: "list_repositories",
             summary: "列出所有仓库。",
+            requestTemplate: {},
+          },
+          {
+            group: "Plugin API / DLsite Provider",
+            transport: "plugin-call",
+            method: "PLUGIN",
+            path: "momobako.service.provider.dlsite:provider.lookupMetadataCandidate",
+            summary: "查询 DLsite Provider 元数据候选。",
+            pluginId: "momobako.service.provider.dlsite",
+            pluginMethod: "provider.lookupMetadataCandidate",
+            requestTemplate: {
+              id: "RJ123456",
+            },
+          },
+          {
+            group: "Plugin API / Local Filesystem",
+            transport: "plugin-call",
+            method: "PLUGIN",
+            path: "momobako.local-filesystem:filesystem.listFiles",
+            summary: "递归列出本地仓库文件。",
+            pluginId: "momobako.local-filesystem",
+            pluginMethod: "filesystem.listFiles",
+            requestTemplate: {
+              repoRoot: "C:/Mock/AnimeAssets",
+              config: {},
+            },
           },
         ],
+      };
+    }
+    if (command === "get_external_api_connection_status") {
+      return {
+        baseUrl: "http://127.0.0.1:31337/external/v1",
+        token: "mock-external-token",
+        version: "1",
+        startedAt: "2026-06-05T00:18:00Z",
+        ready: true,
+        connectionFilePath: "C:/Mock/.service-data/external-api.json",
       };
     }
     return null;

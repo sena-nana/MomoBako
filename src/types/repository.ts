@@ -795,6 +795,20 @@ export type PlaylistPlayerContribution = {
   description?: string;
 };
 
+export type ToolPageContribution = {
+  toolPageId: string;
+  label: string;
+  description?: string;
+  order?: number;
+};
+
+export type PluginApiTestContribution = {
+  method: string;
+  summary?: string;
+  payload?: unknown;
+  requestTemplate?: unknown;
+};
+
 export type PluginManifest = {
   pluginId: string;
   legacyPluginIds?: string[];
@@ -834,7 +848,9 @@ export type PluginManifest = {
   optional?: string[];
   hooks?: PluginHook[];
   contributes?: {
+    apiTests?: PluginApiTestContribution[];
     playlistPlayers?: PlaylistPlayerContribution[];
+    toolPages?: ToolPageContribution[];
     [key: string]: unknown;
   };
   compat?: {
@@ -885,7 +901,8 @@ export type CoreHostCapability =
   | "metadataMerge"
   | "renameMove"
   | "auditLog"
-  | "search";
+  | "search"
+  | "toolPage";
 
 export type PluginEnabledRequest = {
   pluginId: string;
@@ -902,9 +919,15 @@ export type PluginMutationResponse = {
 
 export type ApiDefinition = {
   group: string;
+  transport?: "external-http" | "tauri-command" | "plugin-call" | string;
   method: string;
   path: string;
   summary: string;
+  command?: string;
+  pluginId?: string;
+  pluginMethod?: string;
+  requiresAuth?: boolean;
+  requestTemplate?: unknown;
 };
 
 export type ApiDesignSnapshot = {

@@ -46,6 +46,22 @@
     }
   ],
   "contributes": {
+    "apiTests": [
+      {
+        "method": "metadata.defaults.batch",
+        "summary": "生成 ASMR 目录元数据默认值。",
+        "payload": {
+          "entries": [
+            {
+              "path": "RJ123456/track01.mp3",
+              "name": "track01.mp3",
+              "extension": "mp3",
+              "kind": "file"
+            }
+          ]
+        }
+      }
+    ],
     "metadataDefaults": {
       "action": "metadata.defaults.batch",
       "candidateOnly": false,

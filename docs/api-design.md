@@ -242,6 +242,8 @@
   - `service` plugins expose shared capabilities such as metadata providers, network search, download queues, filesystem watching and vector search. External/network services are manual-trigger and candidate-only unless a future runtime implementation changes the contract.
   - Metadata provider plugins expose `provider.lookupMetadataCandidate` through `POST /plugins:call`. The input is `{ id, sourceUrl? }`; the output is `{ source, confidence?, fields }`. Provider results are candidate-only unless a frontend library extension or another user-confirmed flow applies selected fields through the normal metadata API.
   - `hooks` declare how plugins attach to core-hosted capabilities such as playlist, PiP, progress, candidate queue, batch organize, download queue, metadata merge, rename/move execution, audit log and unified search.
+  - Frontend plugins may declare `contributes.toolPages[]` and call `registerToolPage` to add a workspace extension page. Each page includes `toolPageId`, `label`, optional `description`, optional `order`, and a Vue component. Tool pages are host-rendered utility surfaces for plugin-provided workflows such as API debugging; the host lists enabled pages generically and does not branch on specific plugin IDs.
+  - Backend plugins may declare `contributes.apiTests[]` so API Playground can discover plugin-provided API tests automatically. Each item includes `method`, optional `summary`, and either `payload` or `requestTemplate`; the host calls it through `POST /plugins:call` with the current plugin ID. The host also derives plugin-call tests from provider `lookup.action` and `metadataDefaults.action` contributions.
   - Frontend plugins may declare `contributes.playlistPlayers[]` to register playlist playback types. Each item includes `playerTypeId`, `label`, `fileClass`, `supportedExtensions`, `supportsSeek`, `supportsVolume`, `supportsPreviewNavigation`, and optional `description`.
   - Playlist player runtimes implement `load`, `play`, `pause`, optional `seek`, optional `setVolume`, optional `dispose`, and optional `configure(settings)`. Current settings are `{ imageDurationMs?: number, objectFit?: "contain" | "cover" }` for slideshow timing and image/video fitting.
   - `dependencyStatus` resolves manifest `requires` and `optional` against current runtime-discovered plugins, including legacy plugin IDs. Missing or disabled required dependencies mark the plugin unavailable/disabled with `disableReason`; missing or disabled optional dependencies keep the plugin usable but set `degraded` with `degradationReason`.
@@ -256,6 +258,11 @@
 - `POST /plugins:call`
   - Request body includes `pluginId`, `method`, and arbitrary JSON `payload`
   - Used by frontend preview or codec plugins to invoke native plugin capabilities without adding file-format-specific commands to the core runtime
+- `GET /api-design:snapshot`
+  - Returns the host API test contract consumed by API Playground
+  - Each endpoint includes `group`, `transport`, `method`, `path`, `summary`, and optional `command`, `pluginId`, `pluginMethod`, `requiresAuth`, and `requestTemplate`
+  - `transport` is `external-http` for loopback HTTP APIs, `tauri-command` for core desktop commands, or `plugin-call` for plugin-provided API tests
+  - Core command coverage is checked against the Tauri `generate_handler!` list so newly added commands are detected during tests
 - `POST /files:writeBinary`
   - Request body includes absolute `path` and raw `bytes`
   - Used by plugins for export flows such as writing decoded media chosen through a save dialog

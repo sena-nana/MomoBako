@@ -9,7 +9,7 @@ import {
   ref,
   watch,
 } from "vue";
-import { convertFileSrc } from "@tauri-apps/api/core";
+import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { save as saveDialog } from "@tauri-apps/plugin-dialog";
 import type {
   FileBrowserEntry,
@@ -17,10 +17,13 @@ import type {
   PlaylistPlayerContribution,
   PluginManifest,
   SearchSort,
+  ToolPageContribution,
 } from "../types/repository";
 import {
   callPlugin,
   ensureThumbnail,
+  getApiDesignSnapshot,
+  getExternalApiConnectionStatus,
   preparePreviewFileSource,
   readFile,
   readPluginArchiveText,
@@ -129,6 +132,19 @@ export type RegisteredLibraryExtension = LibraryExtensionDefinition & {
   manifest?: PluginManifest;
 };
 
+export type ToolPageContext = {
+  manifest: PluginManifest;
+};
+
+export type ToolPageComponentProps = ToolPageContext;
+
+export type RegisteredToolPage = ToolPageContribution & {
+  pluginId: string;
+  pluginName: string;
+  manifest?: PluginManifest;
+  component: Component;
+};
+
 export type PluginEventHandler<T = unknown> = (payload: T) => void | Promise<void>;
 
 export type MediaPlaybackEvent = {
@@ -155,10 +171,16 @@ export type FrontendPluginContext = {
     createRuntime: RegisteredPlaylistPlayer["createRuntime"];
   }) => RegisteredPlaylistPlayer;
   registerLibraryExtension: (definition: LibraryExtensionDefinition) => RegisteredLibraryExtension;
+  registerToolPage: (definition: ToolPageContribution & {
+    component: Component;
+  }) => RegisteredToolPage;
   defineLazyComponent: <T extends Component | DefineComponent>(
     loader: () => Promise<T | { default: T }>,
   ) => Component;
   loadModule: <T = unknown>(path: string) => Promise<T>;
+  getApiDesignSnapshot: typeof getApiDesignSnapshot;
+  getExternalApiConnectionStatus: typeof getExternalApiConnectionStatus;
+  invokeCommand: typeof invoke;
   callPlugin: typeof callPlugin;
   preparePreviewFileSource: typeof preparePreviewFileSource;
   readFile: typeof readFile;
@@ -188,9 +210,15 @@ export type FrontendPluginContext = {
 const previewPluginRegistry = new Map<string, FilePreviewPlugin>();
 const playlistPlayerRegistry = new Map<string, RegisteredPlaylistPlayer>();
 const libraryExtensionRegistry = new Map<string, RegisteredLibraryExtension>();
+const toolPageRegistry = new Map<string, RegisteredToolPage>();
 const pluginEventHandlers = new Map<string, Set<PluginEventHandler>>();
 const loadedPluginModules = new Map<string, Promise<void>>();
 const pluginModuleUrls = new Map<string, string>();
+export const frontendPluginRegistryVersion = ref(0);
+
+function bumpFrontendPluginRegistry() {
+  frontendPluginRegistryVersion.value += 1;
+}
 
 function normalizeExtensions(extensions: string[]) {
   return [...new Set(
@@ -215,17 +243,26 @@ export function definePreviewPlugin(definition: PreviewPluginDefinition) {
 
 export function registerPreviewPlugin(plugin: FilePreviewPlugin) {
   previewPluginRegistry.set(plugin.pluginId, plugin);
+  bumpFrontendPluginRegistry();
   return plugin;
 }
 
 export function registerPlaylistPlayer(player: RegisteredPlaylistPlayer) {
   playlistPlayerRegistry.set(player.playerTypeId, player);
+  bumpFrontendPluginRegistry();
   return player;
 }
 
 export function registerLibraryExtension(extension: RegisteredLibraryExtension) {
   libraryExtensionRegistry.set(extension.libraryKind, extension);
+  bumpFrontendPluginRegistry();
   return extension;
+}
+
+export function registerToolPage(page: RegisteredToolPage) {
+  toolPageRegistry.set(page.toolPageId, page);
+  bumpFrontendPluginRegistry();
+  return page;
 }
 
 export function listRegisteredPreviewPlugins() {
@@ -249,6 +286,23 @@ export function listRegisteredLibraryExtensions() {
 export function getRegisteredLibraryExtensionsForEntry(entry: FileBrowserEntry | null) {
   if (!entry) return [];
   return listRegisteredLibraryExtensions().filter((extension) => extension.matchEntry(entry));
+}
+
+export function listRegisteredToolPages() {
+  return [...toolPageRegistry.values()]
+    .filter((page) => page.manifest?.enabled ?? true)
+    .sort((left, right) => (
+      (left.order ?? 100) - (right.order ?? 100)
+      || left.label.localeCompare(right.label)
+      || left.toolPageId.localeCompare(right.toolPageId)
+    ));
+}
+
+export function getRegisteredToolPage(pageId: string | null | undefined) {
+  if (!pageId) return null;
+  const page = toolPageRegistry.get(pageId);
+  if (!page) return null;
+  return (page.manifest?.enabled ?? true) ? page : null;
 }
 
 export function emitPluginEvent<T = unknown>(eventName: string, payload: T) {
@@ -314,12 +368,25 @@ function createFrontendPluginContext(manifest: PluginManifest): FrontendPluginCo
       registerLibraryExtension(extension);
       return extension;
     },
+    registerToolPage(definition) {
+      const page: RegisteredToolPage = {
+        ...definition,
+        pluginId: manifest.pluginId,
+        pluginName: manifest.name,
+        manifest,
+      };
+      registerToolPage(page);
+      return page;
+    },
     defineLazyComponent(loader) {
       return defineAsyncComponent(loader);
     },
     loadModule<T = unknown>(path: string) {
       return loadPluginModule<T>(manifest.pluginId, path);
     },
+    getApiDesignSnapshot,
+    getExternalApiConnectionStatus,
+    invokeCommand: invoke,
     callPlugin,
     preparePreviewFileSource,
     readFile,
@@ -373,9 +440,14 @@ export async function syncRegisteredPreviewPluginManifests(manifests: PluginMani
     }
     plugin.manifest = manifest;
   }
-  for (const player of playlistPlayerRegistry.values()) {
+  for (const [playerTypeId, player] of playlistPlayerRegistry) {
     const manifest = manifestMap.get(player.pluginId);
-    if (manifest) player.manifest = manifest;
+    if (!manifest) {
+      playlistPlayerRegistry.delete(playerTypeId);
+      loadedPluginModules.delete(player.pluginId);
+      continue;
+    }
+    player.manifest = manifest;
   }
   for (const [libraryKind, extension] of libraryExtensionRegistry) {
     const manifest = manifestMap.get(extension.pluginId);
@@ -386,6 +458,15 @@ export async function syncRegisteredPreviewPluginManifests(manifests: PluginMani
     }
     extension.manifest = manifest;
   }
+  for (const [toolPageId, page] of toolPageRegistry) {
+    const manifest = manifestMap.get(page.pluginId);
+    if (!manifest) {
+      toolPageRegistry.delete(toolPageId);
+      loadedPluginModules.delete(page.pluginId);
+      continue;
+    }
+    page.manifest = manifest;
+  }
 
   for (const manifest of manifests) {
     if (manifest.sdk !== "frontend" || manifest.runtime !== "vue-module") continue;
@@ -394,6 +475,7 @@ export async function syncRegisteredPreviewPluginManifests(manifests: PluginMani
       previewPluginRegistry.has(manifest.pluginId)
       || [...playlistPlayerRegistry.values()].some((player) => player.pluginId === manifest.pluginId)
       || [...libraryExtensionRegistry.values()].some((extension) => extension.pluginId === manifest.pluginId)
+      || [...toolPageRegistry.values()].some((page) => page.pluginId === manifest.pluginId)
     ) {
       const plugin = previewPluginRegistry.get(manifest.pluginId);
       if (plugin) plugin.manifest = manifest;
@@ -405,6 +487,11 @@ export async function syncRegisteredPreviewPluginManifests(manifests: PluginMani
       for (const extension of libraryExtensionRegistry.values()) {
         if (extension.pluginId === manifest.pluginId) {
           extension.manifest = manifest;
+        }
+      }
+      for (const page of toolPageRegistry.values()) {
+        if (page.pluginId === manifest.pluginId) {
+          page.manifest = manifest;
         }
       }
       continue;
@@ -422,6 +509,7 @@ export async function syncRegisteredPreviewPluginManifests(manifests: PluginMani
     const plugin = previewPluginRegistry.get(manifest.pluginId);
     if (plugin) plugin.manifest = manifest;
   }
+  bumpFrontendPluginRegistry();
 }
 
 export function getRegisteredPreviewPluginForEntry(entry: FileBrowserEntry | null) {
@@ -436,7 +524,11 @@ export function clearPreviewPluginRegistry() {
   previewPluginRegistry.clear();
   playlistPlayerRegistry.clear();
   libraryExtensionRegistry.clear();
+  toolPageRegistry.clear();
   pluginEventHandlers.clear();
   loadedPluginModules.clear();
   pluginModuleUrls.clear();
+  bumpFrontendPluginRegistry();
 }
+
+export const syncRegisteredFrontendPluginManifests = syncRegisteredPreviewPluginManifests;

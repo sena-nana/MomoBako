@@ -430,6 +430,8 @@ export function pluginManifest(
         ? [{ slot: "auditLog", action: "service.watcher.recordEvents", label: "记录文件事件" }]
       : pluginId === "momobako.vector-index"
         ? [{ slot: "search", action: "service.vector.search", label: "语义搜索" }]
+      : pluginId === "momobako.tool.api-playground"
+        ? [{ slot: "toolPage", action: "tool.apiPlayground.open", label: "打开 API Playground" }]
       : [];
   const optional =
     pluginId === "momobako.local-filesystem" ? ["momobako.filesystem-watcher"]
@@ -442,6 +444,7 @@ export function pluginManifest(
     : pluginId === "momobako.webdav" || pluginId === "momobako.cloud-drive" ? ["network", "filesystem:read", "filesystem:write"]
     : pluginId.startsWith("momobako.preview.") ? ["preview:read"]
     : pluginId === "momobako.preview.office" ? ["preview:read", "thumbnail:write"]
+    : pluginId === "momobako.tool.api-playground" ? ["network:localhost", "external-api:read", "external-api:write"]
     : pluginId === "momobako.filesystem-watcher" || pluginId === "momobako.vector-index" ? ["filesystem:read"]
     : [];
   const contributes =
@@ -504,6 +507,16 @@ export function pluginManifest(
         candidateOnly: true,
       },
     }
+    : pluginId === "momobako.tool.api-playground" ? {
+      toolPages: [
+        {
+          toolPageId: "momobako.tool.api-playground",
+          label: "API Playground",
+          description: "调试 /external/v1 后端接口",
+          order: 10,
+        },
+      ],
+    }
     : {};
   return {
     pluginId,
@@ -560,6 +573,7 @@ export function createMockPlugins() {
     pluginManifest("momobako.preview.media", ["builtin.media-preview"], "Media Preview", "1.0.0", "library-kind", "preview", "为常见图片、视频与音频文件提供内联预览和播放列表播放能力。", ["preview", "playlist", "media", "image", "video", "audio"], true, "frontend", "vue-module"),
     pluginManifest("momobako.preview.text", ["builtin.text-preview"], "Text Preview", "1.0.0", "library-kind", "preview", "为常见文本与 Markdown 文件提供阅读预览，并生成文本缩略图。", ["preview", "text", "markdown", "thumbnail"], true, "frontend", "vue-module"),
     pluginManifest("momobako.preview.office", ["builtin.office-preview"], "Office & PDF Preview", "1.0.0", "library-kind", "preview", "为 Microsoft Office 文档与 PDF 文件提供预览，并生成文档缩略图。", ["preview", "thumbnail", "pdf", "office", "word", "excel", "powerpoint"], true, "frontend", "vue-module"),
+    pluginManifest("momobako.tool.api-playground", [], "API Playground", "0.1.0", "integration-capability-hook", "api-playground", "在 MomoBako 内调试本机外部后端 API。", ["tool-page", "api-playground", "external-api"], true, "frontend", "vue-module"),
     pluginManifest("momobako.filesystem-watcher", ["builtin.filesystem-watcher"], "Filesystem Watcher", "1.0.0", "integration-capability-hook", "watcher", "监听仓库目录，记录新增、删除、修改与重命名事件。", ["watch", "events", "sync"], false, "backend", "manifest-only"),
     pluginManifest("momobako.metadata-provider", ["builtin.metadata-provider"], "Metadata Provider", "1.0.0", "provider-service", "metadata", "提供可扩展的元数据生成与写入能力。", ["metadata", "tags", "ocr"], false, "backend", "manifest-only"),
     pluginManifest("momobako.vector-index", ["builtin.vector-index"], "Vector Index", "0.1.0", "provider-service", "search", "预留向量检索与 AI 语义搜索扩展点。", ["semantic-search", "embedding"], false, "backend", "manifest-only"),

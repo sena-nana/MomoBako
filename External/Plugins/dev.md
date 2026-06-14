@@ -129,9 +129,17 @@ export function register(ctx) {
 
 - `manifest`
 - `registerPreview(definition)`
+- `registerPlaylistPlayer(definition)`
+- `registerLibraryExtension(definition)`
+- `registerToolPage(definition)`
 - `defineLazyComponent(loader)`
 - `loadModule(path)`
+- `getApiDesignSnapshot()`
+- `getExternalApiConnectionStatus()`
+- `invokeCommand(command, args?)`
 - `callPlugin(request)`
+
+后端插件可以通过 manifest 的 `contributes.apiTests[]` 声明可调试 API；每项使用 `method`、可选 `summary`、`payload` 或 `requestTemplate`。API Playground 会把这些声明和内置 provider / metadataDefaults 贡献点一起合并到宿主 API 快照中。
 
 宿主加载流程：
 

@@ -24,6 +24,108 @@
   "optional": ["momobako.filesystem-watcher"],
   "hooks": [],
   "contributes": {
+    "apiTests": [
+      {
+        "method": "filesystem.ensureAttachable",
+        "summary": "检查本地目录是否可作为仓库挂载。",
+        "payload": {
+          "repoRoot": "<absoluteRepositoryPath>",
+          "config": {}
+        }
+      },
+      {
+        "method": "filesystem.prepareRepositoryRoot",
+        "summary": "准备本地仓库根目录。",
+        "payload": {
+          "repoRoot": "<absoluteRepositoryPath>",
+          "config": {}
+        }
+      },
+      {
+        "method": "filesystem.listFiles",
+        "summary": "递归列出本地仓库文件。",
+        "payload": {
+          "repoRoot": "<absoluteRepositoryPath>",
+          "config": {}
+        }
+      },
+      {
+        "method": "filesystem.listTree",
+        "summary": "读取本地仓库目录树。",
+        "payload": {
+          "repoRoot": "<absoluteRepositoryPath>",
+          "config": {}
+        }
+      },
+      {
+        "method": "filesystem.listDirectory",
+        "summary": "列出本地仓库单个目录。",
+        "payload": {
+          "repoRoot": "<absoluteRepositoryPath>",
+          "directoryPath": "",
+          "config": {}
+        }
+      },
+      {
+        "method": "filesystem.createDirectory",
+        "summary": "创建本地目录。",
+        "payload": {
+          "repoRoot": "<absoluteRepositoryPath>",
+          "parentPath": "",
+          "name": "New Folder",
+          "config": {}
+        }
+      },
+      {
+        "method": "filesystem.createFile",
+        "summary": "创建本地文件。",
+        "payload": {
+          "repoRoot": "<absoluteRepositoryPath>",
+          "parentPath": "",
+          "name": "new-file.txt",
+          "config": {}
+        }
+      },
+      {
+        "method": "filesystem.statEntry",
+        "summary": "读取本地文件条目状态。",
+        "payload": {
+          "repoRoot": "<absoluteRepositoryPath>",
+          "entryPath": "<relativePath>",
+          "config": {}
+        }
+      },
+      {
+        "method": "filesystem.renameEntry",
+        "summary": "重命名本地文件条目。",
+        "payload": {
+          "repoRoot": "<absoluteRepositoryPath>",
+          "sourcePath": "<relativePath>",
+          "newName": "renamed.txt",
+          "config": {}
+        }
+      },
+      {
+        "method": "filesystem.moveEntry",
+        "summary": "移动本地文件条目。",
+        "payload": {
+          "repoRoot": "<absoluteRepositoryPath>",
+          "sourcePath": "<relativePath>",
+          "targetParentPath": "",
+          "config": {}
+        }
+      },
+      {
+        "method": "filesystem.deleteEntry",
+        "summary": "删除本地文件条目。",
+        "payload": {
+          "repoRoot": "<absoluteRepositoryPath>",
+          "entryPath": "<relativePath>",
+          "recursive": false,
+          "config": {}
+        }
+      }
+    ],
     "source": {
       "operations": ["list", "read", "write", "move", "delete", "watch"],
       "dangerousOperations": ["write", "move", "delete"]

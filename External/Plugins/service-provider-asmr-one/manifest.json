@@ -43,6 +43,15 @@
     }
   ],
   "contributes": {
+    "apiTests": [
+      {
+        "method": "provider.lookupMetadataCandidate",
+        "summary": "查询 ASMR One 元数据候选。",
+        "payload": {
+          "id": "RJ123456"
+        }
+      }
+    ],
     "provider": {
       "domain": "asmr",
       "source": "asmr-one",
