@@ -15,18 +15,24 @@ import type {
   FileBrowserEntry,
   PlaylistItem,
   PlaylistPlayerContribution,
+  PluginConfigSnapshot,
   PluginManifest,
+  PluginSettingsPageContribution,
   SearchSort,
   ToolPageContribution,
 } from "../types/repository";
 import {
   callPlugin,
+  deletePluginConfigValue,
   ensureThumbnail,
   getApiDesignSnapshot,
   getExternalApiConnectionStatus,
+  getPluginConfig,
+  getPluginDataDirectory,
   preparePreviewFileSource,
   readFile,
   readPluginArchiveText,
+  setPluginConfigValue,
   writeBinaryFile,
 } from "../services/repositoryApi";
 
@@ -145,6 +151,19 @@ export type RegisteredToolPage = ToolPageContribution & {
   component: Component;
 };
 
+export type PluginSettingsPageContext = {
+  manifest: PluginManifest;
+};
+
+export type PluginSettingsPageComponentProps = PluginSettingsPageContext;
+
+export type RegisteredPluginSettingsPage = PluginSettingsPageContribution & {
+  pluginId: string;
+  pluginName: string;
+  manifest?: PluginManifest;
+  component: Component;
+};
+
 export type PluginEventHandler<T = unknown> = (payload: T) => void | Promise<void>;
 
 export type MediaPlaybackEvent = {
@@ -174,12 +193,19 @@ export type FrontendPluginContext = {
   registerToolPage: (definition: ToolPageContribution & {
     component: Component;
   }) => RegisteredToolPage;
+  registerSettingsPage: (definition: PluginSettingsPageContribution & {
+    component: Component;
+  }) => RegisteredPluginSettingsPage;
   defineLazyComponent: <T extends Component | DefineComponent>(
     loader: () => Promise<T | { default: T }>,
   ) => Component;
   loadModule: <T = unknown>(path: string) => Promise<T>;
   getApiDesignSnapshot: typeof getApiDesignSnapshot;
   getExternalApiConnectionStatus: typeof getExternalApiConnectionStatus;
+  getPluginDataDirectory: () => ReturnType<typeof getPluginDataDirectory>;
+  getPluginConfig: () => Promise<PluginConfigSnapshot>;
+  setPluginConfigValue: (key: string, value: unknown) => Promise<PluginConfigSnapshot>;
+  deletePluginConfigValue: (key: string) => Promise<PluginConfigSnapshot>;
   invokeCommand: typeof invoke;
   callPlugin: typeof callPlugin;
   preparePreviewFileSource: typeof preparePreviewFileSource;
@@ -211,6 +237,7 @@ const previewPluginRegistry = new Map<string, FilePreviewPlugin>();
 const playlistPlayerRegistry = new Map<string, RegisteredPlaylistPlayer>();
 const libraryExtensionRegistry = new Map<string, RegisteredLibraryExtension>();
 const toolPageRegistry = new Map<string, RegisteredToolPage>();
+const settingsPageRegistry = new Map<string, RegisteredPluginSettingsPage>();
 const pluginEventHandlers = new Map<string, Set<PluginEventHandler>>();
 const loadedPluginModules = new Map<string, Promise<void>>();
 const pluginModuleUrls = new Map<string, string>();
@@ -265,6 +292,12 @@ export function registerToolPage(page: RegisteredToolPage) {
   return page;
 }
 
+export function registerPluginSettingsPage(page: RegisteredPluginSettingsPage) {
+  settingsPageRegistry.set(page.pluginId, page);
+  bumpFrontendPluginRegistry();
+  return page;
+}
+
 export function listRegisteredPreviewPlugins() {
   return [...previewPluginRegistry.values()];
 }
@@ -301,6 +334,23 @@ export function listRegisteredToolPages() {
 export function getRegisteredToolPage(pageId: string | null | undefined) {
   if (!pageId) return null;
   const page = toolPageRegistry.get(pageId);
+  if (!page) return null;
+  return (page.manifest?.enabled ?? true) ? page : null;
+}
+
+export function listRegisteredPluginSettingsPages() {
+  return [...settingsPageRegistry.values()]
+    .filter((page) => page.manifest?.enabled ?? true)
+    .sort((left, right) => (
+      (left.order ?? 100) - (right.order ?? 100)
+      || (left.label ?? left.pluginName).localeCompare(right.label ?? right.pluginName)
+      || left.pluginId.localeCompare(right.pluginId)
+    ));
+}
+
+export function getRegisteredPluginSettingsPage(pluginId: string | null | undefined) {
+  if (!pluginId) return null;
+  const page = settingsPageRegistry.get(pluginId);
   if (!page) return null;
   return (page.manifest?.enabled ?? true) ? page : null;
 }
@@ -378,6 +428,19 @@ function createFrontendPluginContext(manifest: PluginManifest): FrontendPluginCo
       registerToolPage(page);
       return page;
     },
+    registerSettingsPage(definition) {
+      const page: RegisteredPluginSettingsPage = {
+        ...definition,
+        label: definition.label ?? manifest.contributes?.settings?.settingsPage?.label ?? "设置",
+        description: definition.description ?? manifest.contributes?.settings?.settingsPage?.description,
+        order: definition.order ?? manifest.contributes?.settings?.settingsPage?.order,
+        pluginId: manifest.pluginId,
+        pluginName: manifest.name,
+        manifest,
+      };
+      registerPluginSettingsPage(page);
+      return page;
+    },
     defineLazyComponent(loader) {
       return defineAsyncComponent(loader);
     },
@@ -386,6 +449,18 @@ function createFrontendPluginContext(manifest: PluginManifest): FrontendPluginCo
     },
     getApiDesignSnapshot,
     getExternalApiConnectionStatus,
+    getPluginDataDirectory() {
+      return getPluginDataDirectory(manifest.pluginId);
+    },
+    getPluginConfig() {
+      return getPluginConfig(manifest.pluginId);
+    },
+    setPluginConfigValue(key, value) {
+      return setPluginConfigValue({ pluginId: manifest.pluginId, key, value });
+    },
+    deletePluginConfigValue(key) {
+      return deletePluginConfigValue({ pluginId: manifest.pluginId, key });
+    },
     invokeCommand: invoke,
     callPlugin,
     preparePreviewFileSource,
@@ -467,6 +542,15 @@ export async function syncRegisteredPreviewPluginManifests(manifests: PluginMani
     }
     page.manifest = manifest;
   }
+  for (const [pluginId, page] of settingsPageRegistry) {
+    const manifest = manifestMap.get(pluginId);
+    if (!manifest) {
+      settingsPageRegistry.delete(pluginId);
+      loadedPluginModules.delete(pluginId);
+      continue;
+    }
+    page.manifest = manifest;
+  }
 
   for (const manifest of manifests) {
     if (manifest.sdk !== "frontend" || manifest.runtime !== "vue-module") continue;
@@ -476,6 +560,7 @@ export async function syncRegisteredPreviewPluginManifests(manifests: PluginMani
       || [...playlistPlayerRegistry.values()].some((player) => player.pluginId === manifest.pluginId)
       || [...libraryExtensionRegistry.values()].some((extension) => extension.pluginId === manifest.pluginId)
       || [...toolPageRegistry.values()].some((page) => page.pluginId === manifest.pluginId)
+      || settingsPageRegistry.has(manifest.pluginId)
     ) {
       const plugin = previewPluginRegistry.get(manifest.pluginId);
       if (plugin) plugin.manifest = manifest;
@@ -494,6 +579,8 @@ export async function syncRegisteredPreviewPluginManifests(manifests: PluginMani
           page.manifest = manifest;
         }
       }
+      const settingsPage = settingsPageRegistry.get(manifest.pluginId);
+      if (settingsPage) settingsPage.manifest = manifest;
       continue;
     }
     if (!loadedPluginModules.has(manifest.pluginId)) {
@@ -525,6 +612,7 @@ export function clearPreviewPluginRegistry() {
   playlistPlayerRegistry.clear();
   libraryExtensionRegistry.clear();
   toolPageRegistry.clear();
+  settingsPageRegistry.clear();
   pluginEventHandlers.clear();
   loadedPluginModules.clear();
   pluginModuleUrls.clear();

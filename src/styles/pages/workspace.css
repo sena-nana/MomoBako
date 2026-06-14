@@ -1203,6 +1203,97 @@
   color: var(--err);
 }
 
+.plugin-manager__settings {
+  display: grid;
+  gap: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-soft);
+}
+
+.plugin-manager__settings-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.plugin-manager__settings-head strong {
+  display: block;
+  font-size: 13px;
+}
+
+.plugin-manager__settings-head p {
+  margin: 4px 0 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.plugin-manager__custom-settings {
+  min-width: 0;
+}
+
+.plugin-manager__settings-fields {
+  display: grid;
+  gap: 10px;
+}
+
+.plugin-manager__settings-field {
+  display: grid;
+  grid-template-columns: minmax(140px, 220px) minmax(180px, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+}
+
+.plugin-manager__settings-field--boolean {
+  grid-template-columns: minmax(140px, 220px) auto auto;
+  justify-content: start;
+}
+
+.plugin-manager__settings-field > span {
+  min-width: 0;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.plugin-manager__settings-field small {
+  display: block;
+  margin-top: 3px;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.4;
+}
+
+.plugin-manager__settings-field input:not([type="checkbox"]),
+.plugin-manager__settings-field select,
+.plugin-manager__settings-field textarea {
+  width: 100%;
+  min-width: 0;
+}
+
+.plugin-manager__settings-field input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--accent);
+}
+
+.plugin-manager__settings-field textarea {
+  min-height: 92px;
+  resize: vertical;
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+}
+
+@media (max-width: 720px) {
+  .plugin-manager__settings-head,
+  .plugin-manager__settings-field,
+  .plugin-manager__settings-field--boolean {
+    grid-template-columns: minmax(0, 1fr);
+    justify-content: stretch;
+  }
+}
+
 .files-browser,
 .files-detail {
   min-height: 0;

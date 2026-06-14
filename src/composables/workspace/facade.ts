@@ -99,9 +99,13 @@ import {
 } from "./thumbnails";
 import { loadFileBrowserForDirectory } from "./files";
 import {
+  deletePluginConfigValueInWorkspace,
   deletePluginInWorkspace,
   installPluginArchiveInWorkspace,
+  loadPluginConfigInWorkspace,
   loadSettingsData,
+  openPluginDataDirectoryInWorkspace,
+  setPluginConfigValueInWorkspace,
   setPluginEnabledInWorkspace,
 } from "./settings";
 import {
@@ -360,6 +364,10 @@ export function useWorkspaceSettings() {
     setPluginEnabledInWorkspace,
     deletePluginInWorkspace,
     installPluginArchiveInWorkspace,
+    openPluginDataDirectoryInWorkspace,
+    loadPluginConfigInWorkspace,
+    setPluginConfigValueInWorkspace,
+    deletePluginConfigValueInWorkspace,
   };
 }
 

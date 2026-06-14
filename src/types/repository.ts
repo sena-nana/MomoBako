@@ -537,6 +537,31 @@ export type PluginArchiveTextResponse = {
   text: string;
 };
 
+export type PluginDataDirectoryResponse = {
+  pluginId: string;
+  path: string;
+};
+
+export type PluginConfigValue = unknown;
+
+export type PluginConfigSnapshot = {
+  pluginId: string;
+  dataDirectory: string;
+  schema?: PluginSettingsContribution | Record<string, unknown> | null;
+  values: Record<string, PluginConfigValue>;
+};
+
+export type PluginConfigSetRequest = {
+  pluginId: string;
+  key: string;
+  value: PluginConfigValue;
+};
+
+export type PluginConfigDeleteRequest = {
+  pluginId: string;
+  key: string;
+};
+
 export type BinaryFileWriteRequest = {
   path: string;
   bytes: number[];
@@ -809,6 +834,36 @@ export type ToolPageContribution = {
   order?: number;
 };
 
+export type PluginConfigFieldOption = {
+  label: string;
+  value: string | number | boolean;
+};
+
+export type PluginConfigField = {
+  key: string;
+  label: string;
+  type: "string" | "number" | "boolean" | "select" | "json" | string;
+  description?: string;
+  required?: boolean;
+  default?: PluginConfigValue;
+  placeholder?: string;
+  options?: PluginConfigFieldOption[];
+  min?: number;
+  max?: number;
+};
+
+export type PluginSettingsPageContribution = {
+  label?: string;
+  description?: string;
+  order?: number;
+};
+
+export type PluginSettingsContribution = {
+  schemaVersion?: number;
+  fields?: PluginConfigField[];
+  settingsPage?: PluginSettingsPageContribution;
+};
+
 export type PluginApiTestContribution = {
   method: string;
   summary?: string;
@@ -857,6 +912,7 @@ export type PluginManifest = {
   contributes?: {
     apiTests?: PluginApiTestContribution[];
     playlistPlayers?: PlaylistPlayerContribution[];
+    settings?: PluginSettingsContribution;
     toolPages?: ToolPageContribution[];
     [key: string]: unknown;
   };

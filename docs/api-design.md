@@ -245,10 +245,12 @@
   - Frontend plugins may declare `contributes.toolPages[]` and call `registerToolPage` to add a workspace extension page. Each page includes `toolPageId`, `label`, optional `description`, optional `order`, and a Vue component. Tool pages are host-rendered utility surfaces for plugin-provided workflows such as API debugging; the host lists enabled pages generically and does not branch on specific plugin IDs.
   - Backend plugins may declare `contributes.apiTests[]` so API Playground can discover plugin-provided API tests automatically. Each item includes `method`, optional `summary`, and either `payload` or `requestTemplate`; the host calls it through `POST /plugins:call` with the current plugin ID. The host also derives plugin-call tests from provider `lookup.action` and `metadataDefaults.action` contributions.
   - Frontend plugins may declare `contributes.playlistPlayers[]` to register playlist playback types. Each item includes `playerTypeId`, `label`, `fileClass`, `supportedExtensions`, `supportsSeek`, `supportsVolume`, `supportsPreviewNavigation`, and optional `description`.
+  - Plugins may declare `contributes.settings` with `fields[]` and optional `settingsPage`. Each field includes `key`, `label`, `type` (`string`, `number`, `boolean`, `select`, or `json`), optional `description`, `default`, `placeholder`, numeric bounds, and select `options`. Frontend plugins can also call `registerSettingsPage` to provide a custom Vue settings surface for the same plugin manager entry.
   - Playlist player runtimes implement `load`, `play`, `pause`, optional `seek`, optional `setVolume`, optional `dispose`, and optional `configure(settings)`. Current settings are `{ imageDurationMs?: number, objectFit?: "contain" | "cover" }` for slideshow timing and image/video fitting.
   - `dependencyStatus` resolves manifest `requires` and `optional` against current runtime-discovered plugins, including legacy plugin IDs. Missing or disabled required dependencies mark the plugin unavailable/disabled with `disableReason`; missing or disabled optional dependencies keep the plugin usable but set `degraded` with `degradationReason`.
   - `permissions` are host-visible permission claims. The plugin manager displays them for review; runtime authorization enforcement is still tracked as plugin-orchestration follow-up work.
   - Backend plugin IDs are normalized to the `momobako.*` namespace; legacy `builtin.*` IDs remain accepted when reading existing repositories
+  - Each plugin has a host-owned data directory under `<serviceRoot>/plugin-data/<pluginSlug>` for plugin settings files and plugin-owned cache. The host creates it on demand and exposes it to frontend plugins through the SDK. Plugin key-value config is stored in that directory as `config.json` and accessed through the same normalized plugin ID path used by data-directory APIs and backend call runtime context.
   - Disabled or manifest-only source backends are displayed but not offered as usable repository backends until enabled with an available runtime
   - Filesystem backend `listFiles` responses include `absolutePath`, `relativePath`, `filename`, `extension`, `sizeBytes`, and `modifiedAt`; the runtime tolerates legacy responses without `absolutePath` by resolving `relativePath` under `repoRoot`
 - `POST /plugins:install`
@@ -258,7 +260,24 @@
 - `POST /plugins:call`
   - Request body includes `pluginId`, `method`, and arbitrary JSON `payload`
   - Used by frontend preview or codec plugins to invoke native plugin capabilities without adding file-format-specific commands to the core runtime
+  - Native plugin call envelopes include `runtime.pluginId`, `runtime.pluginDataDir`, and `runtime.pluginConfig`; `pluginDataDir` points to the plugin's own persistent directory and is created before dispatch, while `pluginConfig` is the current host-managed key-value config from `config.json`.
   - Runtime plugin calls resolve `requires` and `optional` before dispatch. Missing or disabled required dependencies reject the call with the plugin disable reason; missing or disabled optional dependencies keep the call usable and return `runtime.degraded`, `runtime.degradationReason`, and `runtime.dependencyStatus` alongside the plugin payload.
+- `GET /plugins/{pluginId}:data-directory`
+  - Tauri command: `get_plugin_data_directory`
+  - Creates and returns the plugin data directory as `{ pluginId, path }`
+  - The frontend plugin manager exposes this from the plugin settings entry and opens the returned directory in the system file manager.
+- `GET /plugins/{pluginId}:config`
+  - Tauri command: `get_plugin_config`
+  - Creates the plugin data directory if needed and returns `{ pluginId, dataDirectory, schema, values }`
+  - `schema` mirrors `manifest.contributes.settings`; `values` contains only stored key-value entries from `config.json`.
+- `PUT /plugins/{pluginId}:config/{key}`
+  - Tauri command: `set_plugin_config_value`
+  - Request body includes `{ pluginId, key, value }`
+  - The host validates primitive values against declared schema fields when a matching field exists, then writes the value to `config.json`.
+- `DELETE /plugins/{pluginId}:config/{key}`
+  - Tauri command: `delete_plugin_config_value`
+  - Request body includes `{ pluginId, key }`
+  - Removes the stored value from `config.json`; manifest defaults remain available to the frontend schema form.
 - `GET /api-design:snapshot`
   - Returns the host API test contract consumed by API Playground
   - Each endpoint includes `group`, `transport`, `method`, `path`, `summary`, and optional `command`, `pluginId`, `pluginMethod`, `requiresAuth`, and `requestTemplate`

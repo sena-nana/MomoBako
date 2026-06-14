@@ -37,9 +37,13 @@ export {
   useWorkspaceSmartFolders,
 } from "./facade";
 export {
+  deletePluginConfigValueInWorkspace,
   deletePluginInWorkspace,
   installPluginArchiveInWorkspace,
+  loadPluginConfigInWorkspace,
   loadSettingsData,
+  openPluginDataDirectoryInWorkspace,
+  setPluginConfigValueInWorkspace,
   setPluginEnabledInWorkspace,
 } from "./settings";
 export {
