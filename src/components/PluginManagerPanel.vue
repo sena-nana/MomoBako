@@ -1,13 +1,20 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 import { open } from "@tauri-apps/plugin-dialog";
-import { Power, RefreshCw, Trash2, Upload } from "lucide-vue-next";
+import { FolderOpen, Power, RefreshCw, Settings, Trash2, Upload } from "lucide-vue-next";
 import ConfirmDialog from "./ConfirmDialog.vue";
 import {
   useWorkspaceProgress,
   useWorkspaceSettings,
 } from "../composables/useRepositoryWorkspace";
-import type { PluginManifest } from "../types/repository";
+import { frontendPluginRegistryVersion } from "../plugins/sdk";
+import { getPluginSettingsPage } from "../plugins/settingsPages";
+import type {
+  PluginConfigField,
+  PluginConfigFieldOption,
+  PluginConfigSnapshot,
+  PluginManifest,
+} from "../types/repository";
 import { pluginCategory, pluginCategoryLabel } from "../utils/pluginTaxonomy";
 
 withDefaults(defineProps<{
@@ -28,9 +35,13 @@ withDefaults(defineProps<{
 
 const {
   plugins,
+  deletePluginConfigValueInWorkspace,
   deletePluginInWorkspace,
   installPluginArchiveInWorkspace,
+  loadPluginConfigInWorkspace,
   loadSettingsData,
+  openPluginDataDirectoryInWorkspace,
+  setPluginConfigValueInWorkspace,
   setPluginEnabledInWorkspace,
 } = useWorkspaceSettings();
 const {
@@ -43,6 +54,9 @@ const keyword = ref("");
 const actionError = ref("");
 const actionMessage = ref("");
 const pendingDeletePlugin = ref<PluginManifest | null>(null);
+const activeSettingsPluginId = ref<string | null>(null);
+const pluginConfigSnapshots = ref<Record<string, PluginConfigSnapshot>>({});
+const jsonDrafts = ref<Record<string, Record<string, string>>>({});
 
 const filteredPlugins = computed(() => {
   const normalizedKeyword = keyword.value.trim().toLowerCase();
@@ -125,6 +139,123 @@ function dependencyStatusLabel(status: string) {
   return status;
 }
 
+function settingsPageFor(plugin: PluginManifest) {
+  frontendPluginRegistryVersion.value;
+  return getPluginSettingsPage(plugin.pluginId);
+}
+
+function pluginSettingsFields(plugin: PluginManifest) {
+  return (plugin.contributes?.settings?.fields ?? [])
+    .filter((field): field is PluginConfigField => (
+      typeof field?.key === "string"
+      && field.key.trim().length > 0
+      && typeof field.label === "string"
+      && field.label.trim().length > 0
+    ));
+}
+
+function pluginSettingsLabel(plugin: PluginManifest) {
+  return settingsPageFor(plugin)?.label
+    ?? plugin.contributes?.settings?.settingsPage?.label
+    ?? "插件设置";
+}
+
+function pluginSettingsDescription(plugin: PluginManifest) {
+  return settingsPageFor(plugin)?.description
+    ?? plugin.contributes?.settings?.settingsPage?.description
+    ?? "";
+}
+
+function pluginConfigValue(plugin: PluginManifest, field: PluginConfigField) {
+  const snapshot = pluginConfigSnapshots.value[plugin.pluginId];
+  if (snapshot && Object.prototype.hasOwnProperty.call(snapshot.values, field.key)) {
+    return snapshot.values[field.key];
+  }
+  if (Object.prototype.hasOwnProperty.call(field, "default")) {
+    return field.default;
+  }
+  if (field.type === "boolean") return false;
+  if (field.type === "number") return "";
+  return "";
+}
+
+function fieldTextValue(plugin: PluginManifest, field: PluginConfigField) {
+  const value = pluginConfigValue(plugin, field);
+  if (value === null || value === undefined) return "";
+  if (typeof value === "string" || typeof value === "number") return value;
+  return String(value);
+}
+
+function fieldBooleanValue(plugin: PluginManifest, field: PluginConfigField) {
+  return Boolean(pluginConfigValue(plugin, field));
+}
+
+function optionWireValue(value: PluginConfigFieldOption["value"]) {
+  return JSON.stringify(value);
+}
+
+function selectFieldValue(plugin: PluginManifest, field: PluginConfigField) {
+  const value = pluginConfigValue(plugin, field);
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    return optionWireValue(value);
+  }
+  return "";
+}
+
+function jsonDraftValue(plugin: PluginManifest, field: PluginConfigField) {
+  const draft = jsonDrafts.value[plugin.pluginId]?.[field.key];
+  if (draft !== undefined) return draft;
+  const value = pluginConfigValue(plugin, field);
+  if (value === "" || value === undefined) return "";
+  return JSON.stringify(value, null, 2);
+}
+
+function updateJsonDraft(plugin: PluginManifest, field: PluginConfigField, value: string) {
+  jsonDrafts.value = {
+    ...jsonDrafts.value,
+    [plugin.pluginId]: {
+      ...(jsonDrafts.value[plugin.pluginId] ?? {}),
+      [field.key]: value,
+    },
+  };
+}
+
+function eventValue(event: Event) {
+  return (event.target as HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement).value;
+}
+
+function eventChecked(event: Event) {
+  return (event.target as HTMLInputElement).checked;
+}
+
+function normalizeConfigFieldInput(field: PluginConfigField, rawValue: string | boolean) {
+  if (field.type === "boolean") return Boolean(rawValue);
+  if (field.type === "number") {
+    if (typeof rawValue !== "string" || !rawValue.trim()) return null;
+    return Number(rawValue);
+  }
+  if (field.type === "select" && typeof rawValue === "string") {
+    const option = (field.options ?? []).find((item) => optionWireValue(item.value) === rawValue);
+    return option?.value ?? rawValue;
+  }
+  return rawValue;
+}
+
+function syncJsonDrafts(plugin: PluginManifest, snapshot: PluginConfigSnapshot) {
+  const drafts = { ...(jsonDrafts.value[plugin.pluginId] ?? {}) };
+  for (const field of pluginSettingsFields(plugin)) {
+    if (field.type !== "json") continue;
+    const value = Object.prototype.hasOwnProperty.call(snapshot.values, field.key)
+      ? snapshot.values[field.key]
+      : field.default;
+    drafts[field.key] = value === undefined ? "" : JSON.stringify(value, null, 2);
+  }
+  jsonDrafts.value = {
+    ...jsonDrafts.value,
+    [plugin.pluginId]: drafts,
+  };
+}
+
 function resetActionState() {
   actionError.value = "";
   actionMessage.value = "";
@@ -167,6 +298,95 @@ async function togglePlugin(plugin: PluginManifest) {
     actionMessage.value = plugin.enabled ? "插件已禁用。" : "插件已启用。";
   } else {
     actionError.value = error.value ?? "插件状态更新失败。";
+  }
+}
+
+async function openPluginSettings(plugin: PluginManifest) {
+  resetActionState();
+  if (activeSettingsPluginId.value === plugin.pluginId) {
+    activeSettingsPluginId.value = null;
+    return;
+  }
+  activeSettingsPluginId.value = plugin.pluginId;
+  const snapshot = await loadPluginConfigInWorkspace(plugin.pluginId);
+  if (snapshot) {
+    pluginConfigSnapshots.value = {
+      ...pluginConfigSnapshots.value,
+      [plugin.pluginId]: snapshot,
+    };
+    syncJsonDrafts(plugin, snapshot);
+  } else {
+    actionError.value = error.value ?? "插件设置读取失败。";
+  }
+}
+
+async function openPluginDataDirectory(plugin: PluginManifest) {
+  resetActionState();
+  const response = await openPluginDataDirectoryInWorkspace(plugin.pluginId);
+  if (response) {
+    actionMessage.value = `已打开“${plugin.name}”设置目录。`;
+  } else {
+    actionError.value = error.value ?? "插件设置目录打开失败。";
+  }
+}
+
+async function updatePluginConfigValue(plugin: PluginManifest, field: PluginConfigField, rawValue: string | boolean) {
+  resetActionState();
+  if (typeof rawValue === "string" && !rawValue.trim() && (field.type === "number" || field.type === "select")) {
+    await resetPluginConfigValue(plugin, field);
+    return;
+  }
+  const value = normalizeConfigFieldInput(field, rawValue);
+  const snapshot = await setPluginConfigValueInWorkspace(plugin.pluginId, field.key, value);
+  if (snapshot) {
+    pluginConfigSnapshots.value = {
+      ...pluginConfigSnapshots.value,
+      [plugin.pluginId]: snapshot,
+    };
+    syncJsonDrafts(plugin, snapshot);
+    actionMessage.value = "插件设置已保存。";
+  } else {
+    actionError.value = error.value ?? "插件设置保存失败。";
+  }
+}
+
+async function updateJsonConfigValue(plugin: PluginManifest, field: PluginConfigField) {
+  resetActionState();
+  const draft = jsonDraftValue(plugin, field).trim();
+  let parsed: unknown = null;
+  if (draft) {
+    try {
+      parsed = JSON.parse(draft);
+    } catch {
+      actionError.value = `${field.label} 不是有效 JSON。`;
+      return;
+    }
+  }
+  const snapshot = await setPluginConfigValueInWorkspace(plugin.pluginId, field.key, parsed);
+  if (snapshot) {
+    pluginConfigSnapshots.value = {
+      ...pluginConfigSnapshots.value,
+      [plugin.pluginId]: snapshot,
+    };
+    syncJsonDrafts(plugin, snapshot);
+    actionMessage.value = "插件设置已保存。";
+  } else {
+    actionError.value = error.value ?? "插件设置保存失败。";
+  }
+}
+
+async function resetPluginConfigValue(plugin: PluginManifest, field: PluginConfigField) {
+  resetActionState();
+  const snapshot = await deletePluginConfigValueInWorkspace(plugin.pluginId, field.key);
+  if (snapshot) {
+    pluginConfigSnapshots.value = {
+      ...pluginConfigSnapshots.value,
+      [plugin.pluginId]: snapshot,
+    };
+    syncJsonDrafts(plugin, snapshot);
+    actionMessage.value = "插件设置已重置。";
+  } else {
+    actionError.value = error.value ?? "插件设置重置失败。";
   }
 }
 
@@ -312,6 +532,16 @@ async function confirmDeletePlugin() {
           </div>
         </div>
         <div class="extensions-workbench__card-actions">
+          <button
+            type="button"
+            class="ghost"
+            :class="{ 'is-active': activeSettingsPluginId === plugin.pluginId }"
+            :disabled="isManagingPlugins"
+            @click="openPluginSettings(plugin)"
+          >
+            <Settings :size="14" aria-hidden="true" />
+            设置
+          </button>
           <button type="button" class="ghost" :disabled="isManagingPlugins" @click="togglePlugin(plugin)">
             <Power :size="14" aria-hidden="true" />
             {{ plugin.enabled ? "禁用" : "启用" }}
@@ -327,6 +557,86 @@ async function confirmDeletePlugin() {
             删除
           </button>
         </div>
+        <section v-if="activeSettingsPluginId === plugin.pluginId" class="plugin-manager__settings">
+          <div class="plugin-manager__settings-head">
+            <div>
+              <strong>{{ pluginSettingsLabel(plugin) }}</strong>
+              <p v-if="pluginSettingsDescription(plugin)">{{ pluginSettingsDescription(plugin) }}</p>
+            </div>
+            <button type="button" class="ghost" :disabled="isManagingPlugins" @click="openPluginDataDirectory(plugin)">
+              <FolderOpen :size="14" aria-hidden="true" />
+              打开目录
+            </button>
+          </div>
+
+          <div v-if="settingsPageFor(plugin)" class="plugin-manager__custom-settings">
+            <component :is="settingsPageFor(plugin)?.component" :manifest="plugin" />
+          </div>
+
+          <div v-if="pluginSettingsFields(plugin).length" class="plugin-manager__settings-fields">
+            <label
+              v-for="field in pluginSettingsFields(plugin)"
+              :key="field.key"
+              class="plugin-manager__settings-field"
+              :class="{ 'plugin-manager__settings-field--boolean': field.type === 'boolean' }"
+            >
+              <span>
+                {{ field.label }}
+                <small v-if="field.description">{{ field.description }}</small>
+              </span>
+
+              <input
+                v-if="field.type === 'boolean'"
+                type="checkbox"
+                :checked="fieldBooleanValue(plugin, field)"
+                :disabled="isManagingPlugins"
+                @change="updatePluginConfigValue(plugin, field, eventChecked($event))"
+              />
+              <select
+                v-else-if="field.type === 'select'"
+                :value="selectFieldValue(plugin, field)"
+                :disabled="isManagingPlugins"
+                @change="updatePluginConfigValue(plugin, field, eventValue($event))"
+              >
+                <option value=""></option>
+                <option
+                  v-for="option in field.options ?? []"
+                  :key="optionWireValue(option.value)"
+                  :value="optionWireValue(option.value)"
+                >
+                  {{ option.label }}
+                </option>
+              </select>
+              <textarea
+                v-else-if="field.type === 'json'"
+                :value="jsonDraftValue(plugin, field)"
+                :placeholder="field.placeholder"
+                :disabled="isManagingPlugins"
+                rows="4"
+                @input="updateJsonDraft(plugin, field, eventValue($event))"
+                @blur="updateJsonConfigValue(plugin, field)"
+              />
+              <input
+                v-else
+                :type="field.type === 'number' ? 'number' : 'text'"
+                :value="fieldTextValue(plugin, field)"
+                :placeholder="field.placeholder"
+                :min="field.min"
+                :max="field.max"
+                :disabled="isManagingPlugins"
+                @change="updatePluginConfigValue(plugin, field, eventValue($event))"
+              />
+              <button
+                type="button"
+                class="ghost"
+                :disabled="isManagingPlugins"
+                @click.prevent="resetPluginConfigValue(plugin, field)"
+              >
+                重置
+              </button>
+            </label>
+          </div>
+        </section>
       </article>
     </div>
 

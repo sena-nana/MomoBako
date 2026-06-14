@@ -1,14 +1,19 @@
 import {
   deletePlugin,
+  deletePluginConfigValue,
   getApiDesignSnapshot,
   getCacheSnapshot,
   getExternalApiConnectionStatus,
+  getPluginConfig,
+  getPluginDataDirectory,
   installPluginFromArchive,
   listPlugins,
+  openRepositoryPath,
+  setPluginConfigValue,
   setPluginEnabled,
 } from "../../services/repositoryApi";
 import { syncRegisteredFrontendPluginManifests } from "../../plugins/sdk";
-import type { PluginManifest } from "../../types/repository";
+import type { PluginConfigSnapshot, PluginConfigValue, PluginManifest } from "../../types/repository";
 import {
   apiDesign,
   cacheSnapshot,
@@ -80,4 +85,62 @@ export function deletePluginInWorkspace(pluginId: string) {
 
 export function installPluginArchiveInWorkspace(packagePath: string) {
   return applyPluginMutation(() => installPluginFromArchive({ packagePath }));
+}
+
+export async function openPluginDataDirectoryInWorkspace(pluginId: string) {
+  isManagingPlugins.value = true;
+  error.value = null;
+  try {
+    const directory = await getPluginDataDirectory(pluginId);
+    await openRepositoryPath(directory.path);
+    return directory;
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : String(cause);
+    return null;
+  } finally {
+    isManagingPlugins.value = false;
+  }
+}
+
+export async function loadPluginConfigInWorkspace(pluginId: string) {
+  isManagingPlugins.value = true;
+  error.value = null;
+  try {
+    return await getPluginConfig(pluginId);
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : String(cause);
+    return null;
+  } finally {
+    isManagingPlugins.value = false;
+  }
+}
+
+export async function setPluginConfigValueInWorkspace(
+  pluginId: string,
+  key: string,
+  value: PluginConfigValue,
+): Promise<PluginConfigSnapshot | null> {
+  isManagingPlugins.value = true;
+  error.value = null;
+  try {
+    return await setPluginConfigValue({ pluginId, key, value });
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : String(cause);
+    return null;
+  } finally {
+    isManagingPlugins.value = false;
+  }
+}
+
+export async function deletePluginConfigValueInWorkspace(pluginId: string, key: string) {
+  isManagingPlugins.value = true;
+  error.value = null;
+  try {
+    return await deletePluginConfigValue({ pluginId, key });
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : String(cause);
+    return null;
+  } finally {
+    isManagingPlugins.value = false;
+  }
 }

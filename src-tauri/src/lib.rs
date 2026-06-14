@@ -19,14 +19,15 @@ use repository_runtime::{ExternalApiConnectionStatus, RepositoryRuntime};
 use repository_service::{
     ApiDesignSnapshot, AssetDetail, BinaryFileWriteRequest, BinaryFileWriteResponse, CacheSnapshot,
     FileBrowserRequest, FileBrowserSnapshot, FileCopyRequest, FileCreateRequest, FileDeleteRequest,
-    FileImportRequest, FileMoveRequest, FilePreviewSourceResponse, FileReadRequest, FileRenameRequest,
-    HardlinkCandidateResponse, HardlinkConfirmRequest, HardlinkConfirmResponse,
-    MetadataUpdateRequest, MetadataUpdateResponse, PluginArchiveReadRequest,
-    PluginArchiveTextResponse, PluginCallRequest, PluginCallResult, PluginEnabledRequest,
-    PluginInstallRequest, PluginManifest, PluginMutationResponse, PlaylistDetail,
-    PlaylistItemRemoveRequest, PlaylistItemsAddRequest, PlaylistItemsOrderRequest,
-    PlaylistMembershipRequest, PlaylistMembershipSnapshot, PlaylistMutationRequest,
-    PlaylistMutationResponse, PlaylistSummary, RepositoryAction, RepositoryActionEnabledRequest,
+    FileImportRequest, FileMoveRequest, FilePreviewSourceResponse, FileReadRequest,
+    FileRenameRequest, HardlinkCandidateResponse, HardlinkConfirmRequest, HardlinkConfirmResponse,
+    MetadataUpdateRequest, MetadataUpdateResponse, PlaylistDetail, PlaylistItemRemoveRequest,
+    PlaylistItemsAddRequest, PlaylistItemsOrderRequest, PlaylistMembershipRequest,
+    PlaylistMembershipSnapshot, PlaylistMutationRequest, PlaylistMutationResponse, PlaylistSummary,
+    PluginArchiveReadRequest, PluginArchiveTextResponse, PluginCallRequest, PluginCallResult,
+    PluginConfigDeleteRequest, PluginConfigSetRequest, PluginConfigSnapshot,
+    PluginDataDirectoryResponse, PluginEnabledRequest, PluginInstallRequest, PluginManifest,
+    PluginMutationResponse, RepositoryAction, RepositoryActionEnabledRequest,
     RepositoryActionMutationResponse, RepositoryActionRunRequest, RepositoryActionRunResponse,
     RepositoryExportRequest, RepositoryExportResponse, RepositoryFolderRequest,
     RepositoryMutationRequest, RepositoryMutationResponse, RepositoryRelocateRequest,
@@ -323,6 +324,46 @@ async fn read_plugin_archive_text(
 ) -> Result<PluginArchiveTextResponse, String> {
     runtime
         .run_read(move |state| state.read_plugin_archive_text(request))
+        .await
+}
+
+#[tauri::command]
+async fn get_plugin_data_directory(
+    plugin_id: String,
+    runtime: tauri::State<'_, RepositoryRuntime>,
+) -> Result<PluginDataDirectoryResponse, String> {
+    runtime
+        .run_write(move |state| state.get_plugin_data_directory(plugin_id))
+        .await
+}
+
+#[tauri::command]
+async fn get_plugin_config(
+    plugin_id: String,
+    runtime: tauri::State<'_, RepositoryRuntime>,
+) -> Result<PluginConfigSnapshot, String> {
+    runtime
+        .run_write(move |state| state.get_plugin_config(plugin_id))
+        .await
+}
+
+#[tauri::command]
+async fn set_plugin_config_value(
+    request: PluginConfigSetRequest,
+    runtime: tauri::State<'_, RepositoryRuntime>,
+) -> Result<PluginConfigSnapshot, String> {
+    runtime
+        .run_write(move |state| state.set_plugin_config_value(request))
+        .await
+}
+
+#[tauri::command]
+async fn delete_plugin_config_value(
+    request: PluginConfigDeleteRequest,
+    runtime: tauri::State<'_, RepositoryRuntime>,
+) -> Result<PluginConfigSnapshot, String> {
+    runtime
+        .run_write(move |state| state.delete_plugin_config_value(request))
         .await
 }
 
@@ -627,10 +668,7 @@ async fn refresh_thumbnail_asset_scope(
     allow_thumbnail_asset_roots(app, runtime.repository_thumbnail_roots().await?)
 }
 
-fn allow_thumbnail_asset_roots(
-    app: &AppHandle,
-    paths: Vec<PathBuf>,
-) -> Result<(), String> {
+fn allow_thumbnail_asset_roots(app: &AppHandle, paths: Vec<PathBuf>) -> Result<(), String> {
     for path in paths {
         app.asset_protocol_scope()
             .allow_directory(path, true)
@@ -780,6 +818,10 @@ pub fn run() {
             prepare_preview_file_source,
             call_plugin,
             read_plugin_archive_text,
+            get_plugin_data_directory,
+            get_plugin_config,
+            set_plugin_config_value,
+            delete_plugin_config_value,
             write_binary_file,
             create_directory,
             create_file,

@@ -1,4 +1,5 @@
 use std::{
+    collections::BTreeMap,
     ffi::{CStr, CString},
     os::raw::c_char,
 };
@@ -10,6 +11,17 @@ use serde::{Deserialize, Serialize};
 pub struct PluginCallEnvelope {
     pub method: String,
     pub payload: serde_json::Value,
+    #[serde(default)]
+    pub runtime: PluginRuntimeContext,
+}
+
+#[derive(Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginRuntimeContext {
+    pub plugin_id: String,
+    pub plugin_data_dir: String,
+    #[serde(default)]
+    pub plugin_config: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

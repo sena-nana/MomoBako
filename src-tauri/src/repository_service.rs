@@ -958,6 +958,37 @@ pub struct PluginArchiveTextResponse {
     pub text: String,
 }
 
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginDataDirectoryResponse {
+    pub plugin_id: String,
+    pub path: String,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginConfigSnapshot {
+    pub plugin_id: String,
+    pub data_directory: String,
+    pub schema: serde_json::Value,
+    pub values: BTreeMap<String, serde_json::Value>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginConfigSetRequest {
+    pub plugin_id: String,
+    pub key: String,
+    pub value: serde_json::Value,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginConfigDeleteRequest {
+    pub plugin_id: String,
+    pub key: String,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BinaryFileWriteRequest {
@@ -1551,6 +1582,15 @@ pub struct PluginMutationResponse {
 struct PluginCallEnvelope {
     method: String,
     payload: serde_json::Value,
+    runtime: PluginCallHostRuntime,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PluginCallHostRuntime {
+    plugin_id: String,
+    plugin_data_dir: String,
+    plugin_config: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -2187,31 +2227,40 @@ impl RepositoryState {
             .transpose()?
             .unwrap_or_else(|| playlist_id_for(&request.repo_id, &request.name));
         let name = validate_playlist_name(&request.name)?;
-        let sort_order = next_playlist_sort_order(&connection, &request.repo_id).map_err(db_error)?;
+        let sort_order =
+            next_playlist_sort_order(&connection, &request.repo_id).map_err(db_error)?;
         let now = now_rfc3339();
-        connection.execute(
-            r#"
+        connection
+            .execute(
+                r#"
             INSERT INTO playlists (
               playlist_id, repo_id, name, player_type_id, player_plugin_id,
               player_label, file_class, sort_order, created_at, updated_at
             )
             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9)
             "#,
-            params![
-                playlist_id,
-                request.repo_id,
-                name,
-                player.player_type_id,
-                player.plugin_id,
-                player.label,
-                player.file_class,
-                sort_order,
-                now,
-            ],
-        ).map_err(db_error)?;
+                params![
+                    playlist_id,
+                    request.repo_id,
+                    name,
+                    player.player_type_id,
+                    player.plugin_id,
+                    player.label,
+                    player.file_class,
+                    sort_order,
+                    now,
+                ],
+            )
+            .map_err(db_error)?;
         let playlists = load_playlists(&connection, &request.repo_id).map_err(db_error)?;
-        let playlist = playlists.iter().find(|item| item.playlist_id == playlist_id).cloned();
-        Ok(PlaylistMutationResponse { playlists, playlist })
+        let playlist = playlists
+            .iter()
+            .find(|item| item.playlist_id == playlist_id)
+            .cloned();
+        Ok(PlaylistMutationResponse {
+            playlists,
+            playlist,
+        })
     }
 
     pub fn update_playlist(
@@ -2255,8 +2304,9 @@ impl RepositoryState {
             .transpose()?
             .unwrap_or(existing.name.clone());
         let now = now_rfc3339();
-        connection.execute(
-            r#"
+        connection
+            .execute(
+                r#"
             UPDATE playlists
             SET
               name = ?3,
@@ -2267,23 +2317,27 @@ impl RepositoryState {
               updated_at = ?8
             WHERE repo_id = ?1 AND playlist_id = ?2
             "#,
-            params![
-                request.repo_id,
-                request.playlist_id,
-                name,
-                player.player_type_id,
-                player.plugin_id,
-                player.label,
-                player.file_class,
-                now,
-            ],
-        ).map_err(db_error)?;
+                params![
+                    request.repo_id,
+                    request.playlist_id,
+                    name,
+                    player.player_type_id,
+                    player.plugin_id,
+                    player.label,
+                    player.file_class,
+                    now,
+                ],
+            )
+            .map_err(db_error)?;
         let playlists = load_playlists(&connection, &request.repo_id).map_err(db_error)?;
         let playlist = playlists
             .iter()
             .find(|item| item.playlist_id == request.playlist_id)
             .cloned();
-        Ok(PlaylistMutationResponse { playlists, playlist })
+        Ok(PlaylistMutationResponse {
+            playlists,
+            playlist,
+        })
     }
 
     pub fn delete_playlist(
@@ -2298,10 +2352,12 @@ impl RepositoryState {
             &repo.summary.path,
             &repo.backend_record,
         )?;
-        connection.execute(
-            "DELETE FROM playlists WHERE repo_id = ?1 AND playlist_id = ?2",
-            params![repo_id, validate_playlist_id(playlist_id)?],
-        ).map_err(db_error)?;
+        connection
+            .execute(
+                "DELETE FROM playlists WHERE repo_id = ?1 AND playlist_id = ?2",
+                params![repo_id, validate_playlist_id(playlist_id)?],
+            )
+            .map_err(db_error)?;
         let playlists = load_playlists(&connection, repo_id).map_err(db_error)?;
         Ok(PlaylistMutationResponse {
             playlists,
@@ -2309,7 +2365,11 @@ impl RepositoryState {
         })
     }
 
-    pub fn get_playlist_detail(&self, repo_id: &str, playlist_id: &str) -> Result<PlaylistDetail, String> {
+    pub fn get_playlist_detail(
+        &self,
+        repo_id: &str,
+        playlist_id: &str,
+    ) -> Result<PlaylistDetail, String> {
         self.ensure_initialized()?;
         let repo = self.load_repository_record(repo_id)?;
         let connection = self.open_repository_connection(
@@ -2317,11 +2377,20 @@ impl RepositoryState {
             &repo.summary.path,
             &repo.backend_record,
         )?;
-        load_playlist_detail(&connection, &repo, &backend_plugin_registry(&self.root), repo_id, playlist_id)
-            .map_err(db_error)
+        load_playlist_detail(
+            &connection,
+            &repo,
+            &backend_plugin_registry(&self.root),
+            repo_id,
+            playlist_id,
+        )
+        .map_err(db_error)
     }
 
-    pub fn add_playlist_items(&self, request: PlaylistItemsAddRequest) -> Result<PlaylistDetail, String> {
+    pub fn add_playlist_items(
+        &self,
+        request: PlaylistItemsAddRequest,
+    ) -> Result<PlaylistDetail, String> {
         self.ensure_initialized()?;
         let repo = self.load_repository_record(&request.repo_id)?;
         let mut connection = self.open_repository_connection(
@@ -2334,7 +2403,9 @@ impl RepositoryState {
             .ok_or_else(|| format!("playlist not found: {}", request.playlist_id))?;
         let registry = backend_plugin_registry(&self.root);
         let player = registry.playlist_player(&playlist.player_type_id);
-        let mut sort_order = next_playlist_item_sort_order(&connection, &request.repo_id, &request.playlist_id).map_err(db_error)?;
+        let mut sort_order =
+            next_playlist_item_sort_order(&connection, &request.repo_id, &request.playlist_id)
+                .map_err(db_error)?;
         let tx = connection.transaction().map_err(db_error)?;
         for asset_id in normalize_id_list(&request.asset_ids) {
             let asset = load_asset_summary_from_transaction(&tx, &request.repo_id, &asset_id)
@@ -2360,14 +2431,25 @@ impl RepositoryState {
                     sort_order,
                     now_rfc3339(),
                 ],
-            ).map_err(db_error)?;
+            )
+            .map_err(db_error)?;
             sort_order += 1;
         }
         tx.commit().map_err(db_error)?;
-        load_playlist_detail(&connection, &repo, &registry, &request.repo_id, &request.playlist_id).map_err(db_error)
+        load_playlist_detail(
+            &connection,
+            &repo,
+            &registry,
+            &request.repo_id,
+            &request.playlist_id,
+        )
+        .map_err(db_error)
     }
 
-    pub fn reorder_playlist_items(&self, request: PlaylistItemsOrderRequest) -> Result<PlaylistDetail, String> {
+    pub fn reorder_playlist_items(
+        &self,
+        request: PlaylistItemsOrderRequest,
+    ) -> Result<PlaylistDetail, String> {
         self.ensure_initialized()?;
         let repo = self.load_repository_record(&request.repo_id)?;
         let mut connection = self.open_repository_connection(
@@ -2384,7 +2466,8 @@ impl RepositoryState {
                 WHERE repo_id = ?1 AND playlist_id = ?2 AND playlist_item_id = ?3
                 "#,
                 params![request.repo_id, request.playlist_id, item_id, index as i64],
-            ).map_err(db_error)?;
+            )
+            .map_err(db_error)?;
         }
         tx.execute(
             r#"
@@ -2393,13 +2476,23 @@ impl RepositoryState {
             WHERE repo_id = ?1 AND playlist_id = ?2
             "#,
             params![request.repo_id, request.playlist_id, now_rfc3339()],
-        ).map_err(db_error)?;
+        )
+        .map_err(db_error)?;
         tx.commit().map_err(db_error)?;
-        load_playlist_detail(&connection, &repo, &backend_plugin_registry(&self.root), &request.repo_id, &request.playlist_id)
-            .map_err(db_error)
+        load_playlist_detail(
+            &connection,
+            &repo,
+            &backend_plugin_registry(&self.root),
+            &request.repo_id,
+            &request.playlist_id,
+        )
+        .map_err(db_error)
     }
 
-    pub fn remove_playlist_item(&self, request: PlaylistItemRemoveRequest) -> Result<PlaylistDetail, String> {
+    pub fn remove_playlist_item(
+        &self,
+        request: PlaylistItemRemoveRequest,
+    ) -> Result<PlaylistDetail, String> {
         self.ensure_initialized()?;
         let repo = self.load_repository_record(&request.repo_id)?;
         let connection = self.open_repository_connection(
@@ -2411,11 +2504,20 @@ impl RepositoryState {
             "DELETE FROM playlist_items WHERE repo_id = ?1 AND playlist_id = ?2 AND playlist_item_id = ?3",
             params![request.repo_id, request.playlist_id, request.playlist_item_id],
         ).map_err(db_error)?;
-        load_playlist_detail(&connection, &repo, &backend_plugin_registry(&self.root), &request.repo_id, &request.playlist_id)
-            .map_err(db_error)
+        load_playlist_detail(
+            &connection,
+            &repo,
+            &backend_plugin_registry(&self.root),
+            &request.repo_id,
+            &request.playlist_id,
+        )
+        .map_err(db_error)
     }
 
-    pub fn set_playlist_membership(&self, request: PlaylistMembershipRequest) -> Result<PlaylistMembershipSnapshot, String> {
+    pub fn set_playlist_membership(
+        &self,
+        request: PlaylistMembershipRequest,
+    ) -> Result<PlaylistMembershipSnapshot, String> {
         self.ensure_initialized()?;
         let repo = self.load_repository_record(&request.repo_id)?;
         let mut connection = self.open_repository_connection(
@@ -2438,8 +2540,13 @@ impl RepositoryState {
             if !playlist_player_supports_extension(&player, &asset.extension) {
                 continue;
             }
-            if valid_target_ids.iter().any(|item| item == &playlist.playlist_id) {
-                let sort_order = next_playlist_item_sort_order(&tx, &request.repo_id, &playlist.playlist_id).map_err(db_error)?;
+            if valid_target_ids
+                .iter()
+                .any(|item| item == &playlist.playlist_id)
+            {
+                let sort_order =
+                    next_playlist_item_sort_order(&tx, &request.repo_id, &playlist.playlist_id)
+                        .map_err(db_error)?;
                 tx.execute(
                     r#"
                     INSERT OR IGNORE INTO playlist_items (
@@ -2455,7 +2562,8 @@ impl RepositoryState {
                         sort_order,
                         now_rfc3339(),
                     ],
-                ).map_err(db_error)?;
+                )
+                .map_err(db_error)?;
                 kept.push(playlist.playlist_id);
             } else {
                 tx.execute(
@@ -2691,6 +2799,70 @@ impl RepositoryState {
             path: archive_entry_path,
             text,
         })
+    }
+
+    pub fn get_plugin_data_directory(
+        &self,
+        plugin_id: String,
+    ) -> Result<PluginDataDirectoryResponse, String> {
+        self.ensure_initialized()?;
+        let registry = plugin_management_registry(&self.root);
+        let normalized_plugin_id = registry.normalize_plugin_id(&plugin_id);
+        let registration = registry
+            .registration(&normalized_plugin_id)
+            .ok_or_else(|| format!("plugin not found: {plugin_id}"))?;
+        let data_dir = ensure_plugin_data_dir(&self.root, &registration.manifest.plugin_id)?;
+        Ok(PluginDataDirectoryResponse {
+            plugin_id: registration.manifest.plugin_id.clone(),
+            path: data_dir.to_string_lossy().to_string(),
+        })
+    }
+
+    pub fn get_plugin_config(&self, plugin_id: String) -> Result<PluginConfigSnapshot, String> {
+        self.ensure_initialized()?;
+        let (manifest, data_dir, values) = self.load_plugin_config_values(&plugin_id)?;
+        Ok(plugin_config_snapshot(&manifest, data_dir, values))
+    }
+
+    pub fn set_plugin_config_value(
+        &self,
+        request: PluginConfigSetRequest,
+    ) -> Result<PluginConfigSnapshot, String> {
+        self.ensure_initialized()?;
+        let key = normalize_plugin_config_key(&request.key)?;
+        let (manifest, data_dir, mut values) = self.load_plugin_config_values(&request.plugin_id)?;
+        let schema = plugin_settings_schema(&manifest);
+        validate_plugin_config_value(&schema, &key, &request.value)?;
+        values.insert(key, request.value);
+        save_plugin_config_values(&data_dir, &values)?;
+        Ok(plugin_config_snapshot(&manifest, data_dir, values))
+    }
+
+    pub fn delete_plugin_config_value(
+        &self,
+        request: PluginConfigDeleteRequest,
+    ) -> Result<PluginConfigSnapshot, String> {
+        self.ensure_initialized()?;
+        let key = normalize_plugin_config_key(&request.key)?;
+        let (manifest, data_dir, mut values) = self.load_plugin_config_values(&request.plugin_id)?;
+        values.remove(&key);
+        save_plugin_config_values(&data_dir, &values)?;
+        Ok(plugin_config_snapshot(&manifest, data_dir, values))
+    }
+
+    fn load_plugin_config_values(
+        &self,
+        plugin_id: &str,
+    ) -> Result<(PluginManifest, PathBuf, BTreeMap<String, serde_json::Value>), String> {
+        let registry = plugin_management_registry(&self.root);
+        let normalized_plugin_id = registry.normalize_plugin_id(plugin_id);
+        let registration = registry
+            .registration(&normalized_plugin_id)
+            .ok_or_else(|| format!("plugin not found: {plugin_id}"))?;
+        let manifest = registration.manifest.clone();
+        let data_dir = ensure_plugin_data_dir(&self.root, &manifest.plugin_id)?;
+        let values = load_plugin_config_values(&data_dir)?;
+        Ok((manifest, data_dir, values))
     }
 
     pub fn list_smart_folders(&self, repo_id: &str) -> Result<Vec<SmartFolderTreeNode>, String> {
@@ -5223,13 +5395,22 @@ fn resolve_playlist_item_status(
     asset_status: Option<&str>,
 ) -> (String, Option<String>) {
     let Some(path) = path else {
-        return ("missing".to_string(), Some("资源索引中已找不到该文件".to_string()));
+        return (
+            "missing".to_string(),
+            Some("资源索引中已找不到该文件".to_string()),
+        );
     };
     let Some(asset_status) = asset_status else {
-        return ("missing".to_string(), Some("资源索引中已找不到该文件".to_string()));
+        return (
+            "missing".to_string(),
+            Some("资源索引中已找不到该文件".to_string()),
+        );
     };
     if asset_status == "deleted" {
-        return ("trashed".to_string(), Some(format!("文件已移入回收站: {path}")));
+        return (
+            "trashed".to_string(),
+            Some(format!("文件已移入回收站: {path}")),
+        );
     }
     let Some(player) = player else {
         return (
@@ -5246,12 +5427,22 @@ fn resolve_playlist_item_status(
     ("ready".to_string(), None)
 }
 
-fn playlist_player_supports_extension(player: &PlaylistPlayerRegistration, extension: &str) -> bool {
+fn playlist_player_supports_extension(
+    player: &PlaylistPlayerRegistration,
+    extension: &str,
+) -> bool {
     let normalized = extension.trim().to_ascii_lowercase();
-    !normalized.is_empty() && player.supported_extensions.iter().any(|item| item == &normalized)
+    !normalized.is_empty()
+        && player
+            .supported_extensions
+            .iter()
+            .any(|item| item == &normalized)
 }
 
-fn next_playlist_sort_order(connection: &Connection, repo_id: &str) -> Result<i64, rusqlite::Error> {
+fn next_playlist_sort_order(
+    connection: &Connection,
+    repo_id: &str,
+) -> Result<i64, rusqlite::Error> {
     connection.query_row(
         "SELECT COALESCE(MAX(sort_order), -1) + 1 FROM playlists WHERE repo_id = ?1",
         [repo_id],
@@ -5288,7 +5479,10 @@ fn validate_playlist_id(id: &str) -> Result<String, String> {
 }
 
 fn playlist_id_for(repo_id: &str, name: &str) -> String {
-    format!("playlist-{}", sha256_hex(&[repo_id.as_bytes(), name.trim().as_bytes()]))
+    format!(
+        "playlist-{}",
+        sha256_hex(&[repo_id.as_bytes(), name.trim().as_bytes()])
+    )
 }
 
 fn playlist_item_id_for(playlist_id: &str, asset_id: &str) -> String {
@@ -6855,7 +7049,11 @@ fn sort_search_hits(results: &mut [SearchHit], sort: Option<&SearchSort>) {
     let field = sort.field.trim();
     let normalized_field = field.to_lowercase();
     if normalized_field == "random" {
-        sort_by_random_key(results, |hit| &hit.path, sort.direction.trim().eq_ignore_ascii_case("desc"));
+        sort_by_random_key(
+            results,
+            |hit| &hit.path,
+            sort.direction.trim().eq_ignore_ascii_case("desc"),
+        );
         return;
     }
     let descending = sort.direction.trim().eq_ignore_ascii_case("desc");
@@ -7477,7 +7675,11 @@ fn sort_file_browser_entries(entries: &mut [FileBrowserEntry], sort: Option<&Sea
     let field = sort.field.trim();
     let normalized_field = field.to_lowercase();
     if normalized_field == "random" {
-        sort_by_random_key(entries, |entry| &entry.path, sort.direction.trim().eq_ignore_ascii_case("desc"));
+        sort_by_random_key(
+            entries,
+            |entry| &entry.path,
+            sort.direction.trim().eq_ignore_ascii_case("desc"),
+        );
         return;
     }
     let descending = sort.direction.trim().eq_ignore_ascii_case("desc");
@@ -7735,12 +7937,14 @@ fn sync_repository_files(
         })
         .collect::<BTreeMap<_, _>>();
     let plugin_defaults_by_path =
-        metadata_defaults_for_files(service_root, &files, &existing_metadata_by_path).map_err(|error| {
-            rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                error,
-            )))
-        })?;
+        metadata_defaults_for_files(service_root, &files, &existing_metadata_by_path).map_err(
+            |error| {
+                rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    error,
+                )))
+            },
+        )?;
     let mut existing_by_path = existing
         .into_iter()
         .map(|(_asset_id, path, record)| (path, record))
@@ -8928,7 +9132,12 @@ fn thumbnail_bytes_from_request(request: &ThumbnailRequest) -> Result<Vec<u8>, S
         return Ok(bytes.clone());
     }
 
-    if let Some(source_url) = request.source_url.as_deref().map(str::trim).filter(|value| !value.is_empty()) {
+    if let Some(source_url) = request
+        .source_url
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
         if request.action.as_deref() != Some("save") {
             return Err("thumbnail sourceUrl can only be used with save action".to_string());
         }
@@ -9491,6 +9700,7 @@ struct BackendPluginRegistration {
 }
 
 struct BackendPluginRegistry {
+    service_root: PathBuf,
     registrations: BTreeMap<String, BackendPluginRegistration>,
     legacy_ids: BTreeMap<String, String>,
 }
@@ -9554,6 +9764,7 @@ impl BackendPluginRegistry {
         }
 
         Self {
+            service_root: service_root.to_path_buf(),
             registrations,
             legacy_ids,
         }
@@ -9652,8 +9863,16 @@ impl BackendPluginRegistry {
             ));
         }
         let runtime = plugin_call_runtime(&resolved_manifest);
+        let plugin_data_dir =
+            ensure_plugin_data_dir(&self.service_root, &resolved_manifest.plugin_id)?;
+        let plugin_config = load_plugin_config_values(&plugin_data_dir)?;
+        let runtime_context = PluginCallHostRuntime {
+            plugin_id: resolved_manifest.plugin_id.clone(),
+            plugin_data_dir: plugin_data_dir.to_string_lossy().to_string(),
+            plugin_config,
+        };
         let response = if let Some(native) = &registration.native {
-            native.call(method, payload)?
+            native.call(method, payload, runtime_context)?
         } else if embedded_local_filesystem_fallback_enabled(&registration.manifest.plugin_id) {
             call_builtin_local_filesystem(method, payload)?
         } else if let Some(error) = &registration.load_error {
@@ -9766,10 +9985,16 @@ impl BackendPluginRegistry {
 }
 
 impl NativePlugin {
-    fn call(&self, method: &str, payload: serde_json::Value) -> Result<serde_json::Value, String> {
+    fn call(
+        &self,
+        method: &str,
+        payload: serde_json::Value,
+        runtime: PluginCallHostRuntime,
+    ) -> Result<serde_json::Value, String> {
         let request = PluginCallEnvelope {
             method: method.to_string(),
             payload,
+            runtime,
         };
         let request_json = serde_json::to_string(&request).map_err(json_error)?;
         let request_cstring = CString::new(request_json)
@@ -10256,6 +10481,144 @@ fn runtime_plugins_dir(service_root: &Path) -> PathBuf {
     service_root.join("plugins")
 }
 
+fn plugin_data_root_dir(service_root: &Path) -> PathBuf {
+    service_root.join("plugin-data")
+}
+
+fn plugin_data_dir(service_root: &Path, plugin_id: &str) -> PathBuf {
+    plugin_data_root_dir(service_root).join(plugin_data_dir_name(plugin_id))
+}
+
+fn plugin_data_dir_name(plugin_id: &str) -> String {
+    let slug = slugify_ascii_component(plugin_id);
+    if slug.is_empty() {
+        format!("plugin-{}", hash_text_sha256(plugin_id))
+    } else {
+        slug
+    }
+}
+
+fn ensure_plugin_data_dir(service_root: &Path, plugin_id: &str) -> Result<PathBuf, String> {
+    let data_dir = plugin_data_dir(service_root, plugin_id);
+    fs::create_dir_all(&data_dir).map_err(io_error)?;
+    Ok(data_dir)
+}
+
+fn plugin_config_path(plugin_data_dir: &Path) -> PathBuf {
+    plugin_data_dir.join("config.json")
+}
+
+fn load_plugin_config_values(
+    plugin_data_dir: &Path,
+) -> Result<BTreeMap<String, serde_json::Value>, String> {
+    let path = plugin_config_path(plugin_data_dir);
+    if !path.is_file() {
+        return Ok(BTreeMap::new());
+    }
+    let raw = fs::read_to_string(&path).map_err(io_error)?;
+    if raw.trim().is_empty() {
+        return Ok(BTreeMap::new());
+    }
+    serde_json::from_str::<BTreeMap<String, serde_json::Value>>(&raw).map_err(json_error)
+}
+
+fn save_plugin_config_values(
+    plugin_data_dir: &Path,
+    values: &BTreeMap<String, serde_json::Value>,
+) -> Result<(), String> {
+    fs::create_dir_all(plugin_data_dir).map_err(io_error)?;
+    let raw = serde_json::to_string_pretty(values).map_err(json_error)?;
+    fs::write(plugin_config_path(plugin_data_dir), raw).map_err(io_error)
+}
+
+fn plugin_settings_schema(manifest: &PluginManifest) -> serde_json::Value {
+    manifest
+        .contributes
+        .as_object()
+        .and_then(|contributes| contributes.get("settings"))
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!({}))
+}
+
+fn plugin_config_snapshot(
+    manifest: &PluginManifest,
+    data_dir: PathBuf,
+    values: BTreeMap<String, serde_json::Value>,
+) -> PluginConfigSnapshot {
+    PluginConfigSnapshot {
+        plugin_id: manifest.plugin_id.clone(),
+        data_directory: data_dir.to_string_lossy().to_string(),
+        schema: plugin_settings_schema(manifest),
+        values,
+    }
+}
+
+fn normalize_plugin_config_key(key: &str) -> Result<String, String> {
+    let key = key.trim();
+    if key.is_empty() {
+        Err("plugin config key cannot be empty".to_string())
+    } else {
+        Ok(key.to_string())
+    }
+}
+
+fn validate_plugin_config_value(
+    schema: &serde_json::Value,
+    key: &str,
+    value: &serde_json::Value,
+) -> Result<(), String> {
+    let Some(field) = schema
+        .get("fields")
+        .and_then(|fields| fields.as_array())
+        .and_then(|fields| {
+            fields.iter().find(|field| {
+                field
+                    .get("key")
+                    .and_then(|field_key| field_key.as_str())
+                    == Some(key)
+            })
+        })
+    else {
+        return Ok(());
+    };
+
+    let field_type = field
+        .get("type")
+        .and_then(|value| value.as_str())
+        .unwrap_or("string");
+    match field_type {
+        "boolean" if !value.is_boolean() => Err(format!("plugin config value must be boolean: {key}")),
+        "number" if value.as_f64().is_none() => Err(format!("plugin config value must be number: {key}")),
+        "string" if !value.is_string() => Err(format!("plugin config value must be string: {key}")),
+        "select" => validate_plugin_select_config_value(field, key, value),
+        _ => Ok(()),
+    }
+}
+
+fn validate_plugin_select_config_value(
+    field: &serde_json::Value,
+    key: &str,
+    value: &serde_json::Value,
+) -> Result<(), String> {
+    if !(value.is_string() || value.is_number() || value.is_boolean()) {
+        return Err(format!("plugin config value must be a scalar option: {key}"));
+    }
+    let Some(options) = field.get("options").and_then(|options| options.as_array()) else {
+        return Ok(());
+    };
+    let valid = options.iter().any(|option| {
+        option
+            .get("value")
+            .map(|option_value| option_value == value)
+            .unwrap_or(false)
+    });
+    if valid {
+        Ok(())
+    } else {
+        Err(format!("plugin config value is not an allowed option: {key}"))
+    }
+}
+
 fn plugin_runtime_cache_dir(service_root: &Path) -> PathBuf {
     service_root.join("plugin-cache")
 }
@@ -10632,6 +10995,13 @@ fn hash_file_sha256(path: &Path) -> Result<String, String> {
     Ok(digest.iter().map(|byte| format!("{byte:02x}")).collect())
 }
 
+fn hash_text_sha256(value: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(value.as_bytes());
+    let digest = hasher.finalize();
+    digest.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
 fn default_cache_entries() -> Vec<CacheEntry> {
     vec![
         CacheEntry {
@@ -10718,8 +11088,18 @@ fn external_api_definitions() -> Vec<ApiDefinition> {
 
 fn core_tauri_api_definitions() -> Vec<ApiDefinition> {
     vec![
-        tauri_api_definition("Runtime API", "ping", "检测 Tauri 命令桥。", serde_json::json!({})),
-        tauri_api_definition("Repository API", "list_repositories", "列出所有仓库。", serde_json::json!({})),
+        tauri_api_definition(
+            "Runtime API",
+            "ping",
+            "检测 Tauri 命令桥。",
+            serde_json::json!({}),
+        ),
+        tauri_api_definition(
+            "Repository API",
+            "list_repositories",
+            "列出所有仓库。",
+            serde_json::json!({}),
+        ),
         tauri_api_definition(
             "Repository API",
             "get_repository_snapshot",
@@ -10771,7 +11151,12 @@ fn core_tauri_api_definitions() -> Vec<ApiDefinition> {
                 }
             }),
         ),
-        tauri_api_definition("Playlist API", "list_playlists", "列出仓库播放列表。", serde_json::json!({ "repoId": "<repoId>" })),
+        tauri_api_definition(
+            "Playlist API",
+            "list_playlists",
+            "列出仓库播放列表。",
+            serde_json::json!({ "repoId": "<repoId>" }),
+        ),
         tauri_api_definition(
             "Playlist API",
             "create_playlist",
@@ -10858,7 +11243,12 @@ fn core_tauri_api_definitions() -> Vec<ApiDefinition> {
                 }
             }),
         ),
-        tauri_api_definition("Smart Folder API", "list_smart_folders", "列出智能文件夹树。", serde_json::json!({ "repoId": "<repoId>" })),
+        tauri_api_definition(
+            "Smart Folder API",
+            "list_smart_folders",
+            "列出智能文件夹树。",
+            serde_json::json!({ "repoId": "<repoId>" }),
+        ),
         tauri_api_definition(
             "Smart Folder API",
             "create_smart_folder",
@@ -10899,7 +11289,12 @@ fn core_tauri_api_definitions() -> Vec<ApiDefinition> {
             "按智能文件夹条件查询虚拟文件列表。",
             serde_json::json!({ "repoId": "<repoId>", "smartFolderId": "<smartFolderId>" }),
         ),
-        tauri_api_definition("Repository Action API", "list_repository_actions", "列出仓库动作。", serde_json::json!({ "repoId": "<repoId>" })),
+        tauri_api_definition(
+            "Repository Action API",
+            "list_repository_actions",
+            "列出仓库动作。",
+            serde_json::json!({ "repoId": "<repoId>" }),
+        ),
         tauri_api_definition(
             "Repository Action API",
             "get_repository_action",
@@ -10960,6 +11355,41 @@ fn core_tauri_api_definitions() -> Vec<ApiDefinition> {
             "read_plugin_archive_text",
             "读取插件包内文本文件。",
             serde_json::json!({ "request": { "pluginId": "<pluginId>", "path": "manifest.json" } }),
+        ),
+        tauri_api_definition(
+            "Plugin API",
+            "get_plugin_data_directory",
+            "创建并读取插件自有数据目录。",
+            serde_json::json!({ "pluginId": "<pluginId>" }),
+        ),
+        tauri_api_definition(
+            "Plugin API",
+            "get_plugin_config",
+            "读取插件 key-value 配置快照。",
+            serde_json::json!({ "pluginId": "<pluginId>" }),
+        ),
+        tauri_api_definition(
+            "Plugin API",
+            "set_plugin_config_value",
+            "写入插件 key-value 配置项。",
+            serde_json::json!({
+                "request": {
+                    "pluginId": "<pluginId>",
+                    "key": "apiKey",
+                    "value": "<value>"
+                }
+            }),
+        ),
+        tauri_api_definition(
+            "Plugin API",
+            "delete_plugin_config_value",
+            "删除插件 key-value 配置项。",
+            serde_json::json!({
+                "request": {
+                    "pluginId": "<pluginId>",
+                    "key": "apiKey"
+                }
+            }),
         ),
         tauri_api_definition(
             "File API",
@@ -11098,7 +11528,12 @@ fn core_tauri_api_definitions() -> Vec<ApiDefinition> {
             "挂载仓库文件夹。",
             serde_json::json!({ "request": { "path": "<absolutePath>" } }),
         ),
-        tauri_api_definition("Repository API", "delete_repository", "删除仓库记录。", serde_json::json!({ "repoId": "<repoId>" })),
+        tauri_api_definition(
+            "Repository API",
+            "delete_repository",
+            "删除仓库记录。",
+            serde_json::json!({ "repoId": "<repoId>" }),
+        ),
         tauri_api_definition(
             "Repository API",
             "relocate_repository",
@@ -11124,7 +11559,12 @@ fn core_tauri_api_definitions() -> Vec<ApiDefinition> {
                 }
             }),
         ),
-        tauri_api_definition("Repository API", "sync_repository", "同步仓库文件状态。", serde_json::json!({ "request": { "repoId": "<repoId>" } })),
+        tauri_api_definition(
+            "Repository API",
+            "sync_repository",
+            "同步仓库文件状态。",
+            serde_json::json!({ "request": { "repoId": "<repoId>" } }),
+        ),
         tauri_api_definition(
             "Hardlink API",
             "list_hardlink_candidates",
@@ -11153,25 +11593,60 @@ fn core_tauri_api_definitions() -> Vec<ApiDefinition> {
                 }
             }),
         ),
-        tauri_api_definition("Revision API", "undo_last_revision", "回滚到上一版 metadata 状态。", serde_json::json!({ "request": { "repoId": "<repoId>", "assetId": "<assetId>" } })),
-        tauri_api_definition("Revision API", "redo_last_revision", "重做到下一版 metadata 状态。", serde_json::json!({ "request": { "repoId": "<repoId>", "assetId": "<assetId>" } })),
-        tauri_api_definition("Plugin API", "list_plugins", "列出插件与能力声明。", serde_json::json!({})),
+        tauri_api_definition(
+            "Revision API",
+            "undo_last_revision",
+            "回滚到上一版 metadata 状态。",
+            serde_json::json!({ "request": { "repoId": "<repoId>", "assetId": "<assetId>" } }),
+        ),
+        tauri_api_definition(
+            "Revision API",
+            "redo_last_revision",
+            "重做到下一版 metadata 状态。",
+            serde_json::json!({ "request": { "repoId": "<repoId>", "assetId": "<assetId>" } }),
+        ),
+        tauri_api_definition(
+            "Plugin API",
+            "list_plugins",
+            "列出插件与能力声明。",
+            serde_json::json!({}),
+        ),
         tauri_api_definition(
             "Plugin API",
             "set_plugin_enabled",
             "启用或停用插件。",
             serde_json::json!({ "request": { "pluginId": "<pluginId>", "enabled": true } }),
         ),
-        tauri_api_definition("Plugin API", "delete_plugin", "删除插件。", serde_json::json!({ "pluginId": "<pluginId>" })),
+        tauri_api_definition(
+            "Plugin API",
+            "delete_plugin",
+            "删除插件。",
+            serde_json::json!({ "pluginId": "<pluginId>" }),
+        ),
         tauri_api_definition(
             "Plugin API",
             "install_plugin_from_archive",
             "从插件包安装插件。",
             serde_json::json!({ "request": { "packagePath": "<absolutePackagePath>" } }),
         ),
-        tauri_api_definition("Cache API", "get_cache_snapshot", "读取缓存配置与状态。", serde_json::json!({})),
-        tauri_api_definition("Runtime API", "get_api_design_snapshot", "读取 API 调试契约快照。", serde_json::json!({})),
-        tauri_api_definition("Runtime API", "get_external_api_connection_status", "读取外部 API 连接信息。", serde_json::json!({})),
+        tauri_api_definition(
+            "Cache API",
+            "get_cache_snapshot",
+            "读取缓存配置与状态。",
+            serde_json::json!({}),
+        ),
+        tauri_api_definition(
+            "Runtime API",
+            "get_api_design_snapshot",
+            "读取 API 调试契约快照。",
+            serde_json::json!({}),
+        ),
+        tauri_api_definition(
+            "Runtime API",
+            "get_external_api_connection_status",
+            "读取外部 API 连接信息。",
+            serde_json::json!({}),
+        ),
     ]
 }
 
@@ -11189,7 +11664,9 @@ fn plugin_api_definitions(service_root: &Path) -> Vec<ApiDefinition> {
         };
 
         if let Some(raw_tests) = contributes.get("apiTests") {
-            if let Ok(tests) = serde_json::from_value::<Vec<PluginApiTestContribution>>(raw_tests.clone()) {
+            if let Ok(tests) =
+                serde_json::from_value::<Vec<PluginApiTestContribution>>(raw_tests.clone())
+            {
                 for test in tests {
                     if test.method.trim().is_empty() {
                         continue;
@@ -11275,7 +11752,10 @@ fn plugin_api_definitions(service_root: &Path) -> Vec<ApiDefinition> {
 fn plugin_manifest_can_be_called(manifest: &PluginManifest) -> bool {
     manifest.enabled
         && manifest.sdk == "backend"
-        && !matches!(manifest.status.as_str(), "disabled" | "error" | "unavailable")
+        && !matches!(
+            manifest.status.as_str(),
+            "disabled" | "error" | "unavailable"
+        )
 }
 
 fn external_api_definition(
@@ -15104,6 +15584,141 @@ mod tests {
     }
 
     #[test]
+    fn plugin_data_directory_uses_service_plugin_data_root_and_legacy_ids() {
+        let workspace = TestWorkspace::new("plugin-data-directory");
+        let service_root = workspace.path("service");
+        seed_standard_test_plugins(&service_root);
+        let state = RepositoryState::from_root(service_root.clone());
+
+        let response = state
+            .get_plugin_data_directory(LEGACY_LOCAL_FILESYSTEM_PLUGIN_ID.to_string())
+            .expect("plugin data directory should be returned");
+        let expected_path = plugin_data_dir(&service_root, LOCAL_FILESYSTEM_PLUGIN_ID);
+
+        assert_eq!(response.plugin_id, LOCAL_FILESYSTEM_PLUGIN_ID);
+        assert_eq!(PathBuf::from(response.path), expected_path);
+        assert!(expected_path.is_dir());
+        assert!(expected_path.starts_with(service_root.join("plugin-data")));
+    }
+
+    #[test]
+    fn plugin_config_api_persists_values_in_plugin_data_dir() {
+        let workspace = TestWorkspace::new("plugin-config");
+        let service_root = workspace.path("service");
+        seed_standard_test_plugins(&service_root);
+        let state = RepositoryState::from_root(service_root.clone());
+
+        let updated = state
+            .set_plugin_config_value(PluginConfigSetRequest {
+                plugin_id: LEGACY_LOCAL_FILESYSTEM_PLUGIN_ID.to_string(),
+                key: "apiKey".to_string(),
+                value: serde_json::json!("secret"),
+            })
+            .expect("plugin config value should be written");
+
+        assert_eq!(updated.plugin_id, LOCAL_FILESYSTEM_PLUGIN_ID);
+        assert_eq!(updated.values.get("apiKey"), Some(&serde_json::json!("secret")));
+        let data_dir = plugin_data_dir(&service_root, LOCAL_FILESYSTEM_PLUGIN_ID);
+        assert!(data_dir.join("config.json").is_file());
+
+        let loaded = state
+            .get_plugin_config(LOCAL_FILESYSTEM_PLUGIN_ID.to_string())
+            .expect("plugin config should be loaded");
+        assert_eq!(loaded.values.get("apiKey"), Some(&serde_json::json!("secret")));
+
+        let deleted = state
+            .delete_plugin_config_value(PluginConfigDeleteRequest {
+                plugin_id: LOCAL_FILESYSTEM_PLUGIN_ID.to_string(),
+                key: "apiKey".to_string(),
+            })
+            .expect("plugin config value should be deleted");
+        assert!(!deleted.values.contains_key("apiKey"));
+    }
+
+    #[test]
+    fn plugin_config_api_includes_schema_and_rejects_mismatched_values() {
+        let workspace = TestWorkspace::new("plugin-config-schema");
+        let plugin_root = workspace.path("service/plugins");
+        fs::create_dir_all(&plugin_root).expect("runtime plugin dir should be created");
+        write_test_plugin_archive_with_manifest(
+            &plugin_root.join("configurable.momoplug"),
+            test_plugin_manifest_json(
+                "user.configurable",
+                "Configurable Plugin",
+                serde_json::json!({
+                    "contributes": {
+                        "settings": {
+                            "schemaVersion": 1,
+                            "fields": [
+                                { "key": "enabled", "label": "Enabled", "type": "boolean" },
+                                {
+                                    "key": "mode",
+                                    "label": "Mode",
+                                    "type": "select",
+                                    "options": [
+                                        { "label": "Fast", "value": "fast" },
+                                        { "label": "Careful", "value": "careful" }
+                                    ]
+                                }
+                            ]
+                        }
+                    }
+                }),
+            ),
+        );
+        let state = RepositoryState::from_root(workspace.path("service"));
+
+        let snapshot = state
+            .get_plugin_config("user.configurable".to_string())
+            .expect("plugin config schema should load");
+        assert_eq!(
+            snapshot.schema["fields"][0]["key"],
+            serde_json::json!("enabled")
+        );
+
+        let error = state
+            .set_plugin_config_value(PluginConfigSetRequest {
+                plugin_id: "user.configurable".to_string(),
+                key: "enabled".to_string(),
+                value: serde_json::json!("yes"),
+            })
+            .expect_err("schema mismatch should be rejected");
+        assert!(error.contains("boolean"));
+
+        state
+            .set_plugin_config_value(PluginConfigSetRequest {
+                plugin_id: "user.configurable".to_string(),
+                key: "mode".to_string(),
+                value: serde_json::json!("fast"),
+            })
+            .expect("schema option should be accepted");
+    }
+
+    #[test]
+    fn plugin_call_envelope_serializes_runtime_config_snapshot() {
+        let envelope = PluginCallEnvelope {
+            method: "provider.lookupMetadataCandidate".to_string(),
+            payload: serde_json::json!({ "id": "RJ123456" }),
+            runtime: PluginCallHostRuntime {
+                plugin_id: "user.provider".to_string(),
+                plugin_data_dir: "C:/MomoBako/.service-data/plugin-data/user-provider".to_string(),
+                plugin_config: BTreeMap::from([(
+                    "apiKey".to_string(),
+                    serde_json::json!("secret"),
+                )]),
+            },
+        };
+
+        let value = serde_json::to_value(envelope).expect("envelope should serialize");
+
+        assert_eq!(value["runtime"]["pluginId"], serde_json::json!("user.provider"));
+        assert_eq!(
+            value["runtime"]["pluginConfig"]["apiKey"],
+            serde_json::json!("secret")
+        );
+    }
+
+    #[test]
     fn plugin_dependency_resolution_accepts_legacy_ids() {
         let workspace = TestWorkspace::new("plugin-legacy-dependency");
         let plugin_root = workspace.path("service/plugins");
@@ -15861,12 +16476,17 @@ mod tests {
                 "source": "system"
             }),
         );
-        if let (Some(base), Some(extra)) = (manifest.as_object_mut(), dependency_overrides.as_object()) {
+        if let (Some(base), Some(extra)) =
+            (manifest.as_object_mut(), dependency_overrides.as_object())
+        {
             for (key, value) in extra {
                 base.insert(key.clone(), value.clone());
             }
         }
-        write_test_plugin_archive_with_manifest(&plugin_root.join("local-filesystem.momoplug"), manifest);
+        write_test_plugin_archive_with_manifest(
+            &plugin_root.join("local-filesystem.momoplug"),
+            manifest,
+        );
     }
 
     fn test_list_files_plugin_call(plugin_id: &str, repo_root: PathBuf) -> PluginCallRequest {
@@ -16533,7 +17153,11 @@ mod tests {
             .load_repository_record(&repo_id)
             .expect("repository record should load");
         let mut connection = state
-            .open_repository_connection(&repo.summary.repo_id, &repo.summary.path, &repo.backend_record)
+            .open_repository_connection(
+                &repo.summary.repo_id,
+                &repo.summary.path,
+                &repo.backend_record,
+            )
             .expect("repository connection should open");
         let tx = connection
             .transaction()
@@ -16549,7 +17173,10 @@ mod tests {
             .expect("existing title should update");
         let plugin_defaults = BTreeMap::from([
             ("title".to_string(), serde_json::json!("Plugin Title")),
-            ("pluginDefault".to_string(), serde_json::json!("Plugin Value")),
+            (
+                "pluginDefault".to_string(),
+                serde_json::json!("Plugin Value"),
+            ),
         ]);
         ensure_default_metadata(
             &tx,
@@ -16567,14 +17194,18 @@ mod tests {
         tx.commit().expect("metadata transaction should commit");
 
         let metadata = metadata_for_asset_path(&state, &repo_id, "note.txt");
-        assert_eq!(metadata.get("title"), Some(&serde_json::json!("User Title")));
+        assert_eq!(
+            metadata.get("title"),
+            Some(&serde_json::json!("User Title"))
+        );
         assert_eq!(
             metadata.get("pluginDefault"),
             Some(&serde_json::json!("Plugin Value"))
         );
         drop(connection);
 
-        fs::write(repo_root.join("second.txt"), "second").expect("second test file should be written");
+        fs::write(repo_root.join("second.txt"), "second")
+            .expect("second test file should be written");
         state
             .sync_repository(SyncRequest {
                 repo_id: repo_id.clone(),
@@ -16584,7 +17215,11 @@ mod tests {
             .load_repository_record(&repo_id)
             .expect("repository record should reload");
         let mut second_connection = state
-            .open_repository_connection(&repo.summary.repo_id, &repo.summary.path, &repo.backend_record)
+            .open_repository_connection(
+                &repo.summary.repo_id,
+                &repo.summary.path,
+                &repo.backend_record,
+            )
             .expect("repository connection should reopen");
         let tx = second_connection
             .transaction()
@@ -18113,7 +18748,8 @@ mod tests {
     #[test]
     fn ensure_thumbnail_saves_remote_source_url_as_custom_thumbnail() {
         let (state, root, repo_root, thumbnail_root) = create_test_state("thumb-remote-source");
-        fs::write(repo_root.join("track.mp3"), b"fake audio").expect("track file should be written");
+        fs::write(repo_root.join("track.mp3"), b"fake audio")
+            .expect("track file should be written");
         let repo_id = create_repository_for_path(&state, &repo_root);
         let mut body = std::io::Cursor::new(Vec::new());
         image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(
@@ -18605,8 +19241,12 @@ mod tests {
         let source_path = Path::new("C:/Assets/track.mp3");
         let args = audio_cover_probe_args(source_path);
 
-        assert!(args.windows(2).any(|items| items == ["-select_streams", "v"]));
-        assert!(args.windows(2).any(|items| items == ["-show_entries", "stream=index"]));
+        assert!(args
+            .windows(2)
+            .any(|items| items == ["-select_streams", "v"]));
+        assert!(args
+            .windows(2)
+            .any(|items| items == ["-show_entries", "stream=index"]));
         assert!(args.windows(2).any(|items| items == ["-of", "json"]));
         assert_eq!(args.last(), Some(&source_path.as_os_str().to_os_string()));
     }
@@ -18615,13 +19255,14 @@ mod tests {
     fn audio_cover_probe_output_reports_missing_streams() {
         assert!(!audio_cover_probe_output_has_stream(br#"{"streams":[]}"#)
             .expect("probe output should parse"));
-        assert!(!audio_cover_probe_output_has_stream(br#"{}"#)
-            .expect("probe output should parse"));
+        assert!(!audio_cover_probe_output_has_stream(br#"{}"#).expect("probe output should parse"));
     }
 
     #[test]
     fn audio_cover_probe_output_reports_present_streams() {
-        assert!(audio_cover_probe_output_has_stream(br#"{"streams":[{"index":1}]}"#)
-            .expect("probe output should parse"));
+        assert!(
+            audio_cover_probe_output_has_stream(br#"{"streams":[{"index":1}]}"#)
+                .expect("probe output should parse")
+        );
     }
 }

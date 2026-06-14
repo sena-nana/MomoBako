@@ -480,6 +480,22 @@ function previewPluginModuleSource(pluginId: string) {
       "",
     ].join("\n");
   }
+  if (pluginId === "user.settings-page") {
+    return [
+      "export function register(ctx) {",
+      "  ctx.registerSettingsPage({",
+      "    label: 'Settings Page',",
+      "    description: 'Custom settings surface',",
+      "    component: {",
+      "      name: 'MockSettingsPage',",
+      "      template: '<section class=\"mock-settings-page\">Settings Page</section>',",
+      "      props: { manifest: { type: Object, default: null } },",
+      "    },",
+      "  });",
+      "}",
+      "",
+    ].join("\n");
+  }
 
   const definitionMap: Record<string, { extensions: string[]; thumbnail?: boolean; fileActions?: boolean }> = {
     "momobako.preview.three-model": {
@@ -1123,6 +1139,42 @@ vi.mock("@tauri-apps/api/core", () => ({
         pluginId,
         path: request?.path ?? "dist/register.js",
         text: previewPluginModuleSource(pluginId),
+      };
+    }
+    if (command === "get_plugin_data_directory") {
+      const pluginId = args?.pluginId ?? "momobako.preview.media";
+      return {
+        pluginId,
+        path: `C:/MomoBako/.service-data/plugin-data/${pluginId.replace(/[^a-z0-9]+/gi, "-")}`,
+      };
+    }
+    if (command === "get_plugin_config") {
+      const pluginId = args?.pluginId ?? "momobako.preview.media";
+      return {
+        pluginId,
+        dataDirectory: `C:/MomoBako/.service-data/plugin-data/${pluginId.replace(/[^a-z0-9]+/gi, "-")}`,
+        schema: {},
+        values: {},
+      };
+    }
+    if (command === "set_plugin_config_value") {
+      const request = args?.request as { pluginId?: string; key?: string; value?: unknown } | undefined;
+      const pluginId = request?.pluginId ?? "momobako.preview.media";
+      return {
+        pluginId,
+        dataDirectory: `C:/MomoBako/.service-data/plugin-data/${pluginId.replace(/[^a-z0-9]+/gi, "-")}`,
+        schema: {},
+        values: request?.key ? { [request.key]: request.value } : {},
+      };
+    }
+    if (command === "delete_plugin_config_value") {
+      const request = args?.request as { pluginId?: string } | undefined;
+      const pluginId = request?.pluginId ?? "momobako.preview.media";
+      return {
+        pluginId,
+        dataDirectory: `C:/MomoBako/.service-data/plugin-data/${pluginId.replace(/[^a-z0-9]+/gi, "-")}`,
+        schema: {},
+        values: {},
       };
     }
     if (command === "set_plugin_enabled") {

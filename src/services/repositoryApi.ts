@@ -26,6 +26,10 @@ import type {
   PluginCallResponse,
   PluginArchiveReadRequest,
   PluginArchiveTextResponse,
+  PluginConfigDeleteRequest,
+  PluginConfigSetRequest,
+  PluginConfigSnapshot,
+  PluginDataDirectoryResponse,
   PluginEnabledRequest,
   PluginInstallRequest,
   PlaylistDetail,
@@ -192,6 +196,22 @@ export function callPlugin<T = unknown>(request: PluginCallRequest) {
 
 export function readPluginArchiveText(request: PluginArchiveReadRequest) {
   return invoke<PluginArchiveTextResponse>("read_plugin_archive_text", { request });
+}
+
+export function getPluginDataDirectory(pluginId: string) {
+  return invoke<PluginDataDirectoryResponse>("get_plugin_data_directory", { pluginId });
+}
+
+export function getPluginConfig(pluginId: string) {
+  return invoke<PluginConfigSnapshot>("get_plugin_config", { pluginId });
+}
+
+export function setPluginConfigValue(request: PluginConfigSetRequest) {
+  return invoke<PluginConfigSnapshot>("set_plugin_config_value", { request });
+}
+
+export function deletePluginConfigValue(request: PluginConfigDeleteRequest) {
+  return invoke<PluginConfigSnapshot>("delete_plugin_config_value", { request });
 }
 
 export function writeBinaryFile(request: BinaryFileWriteRequest) {
