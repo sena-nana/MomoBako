@@ -10,6 +10,7 @@ import {
 import { frontendPluginRegistryVersion } from "../plugins/sdk";
 import { getPluginSettingsPage } from "../plugins/settingsPages";
 import type {
+  PluginCategory,
   PluginConfigField,
   PluginConfigFieldOption,
   PluginConfigSnapshot,
@@ -57,11 +58,41 @@ const pendingDeletePlugin = ref<PluginManifest | null>(null);
 const activeSettingsPluginId = ref<string | null>(null);
 const pluginConfigSnapshots = ref<Record<string, PluginConfigSnapshot>>({});
 const jsonDrafts = ref<Record<string, Record<string, string>>>({});
+const pluginCategoryOrder = ["source", "library-kind", "parser", "preview", "service"] as const satisfies readonly PluginCategory[];
+const pluginGroupOrder = [...pluginCategoryOrder, "unclassified"] as const;
+type PluginGroupCategory = (typeof pluginGroupOrder)[number];
 
 const filteredPlugins = computed(() => {
   const normalizedKeyword = keyword.value.trim().toLowerCase();
   if (!normalizedKeyword) return plugins.value;
   return plugins.value.filter((plugin) => pluginSearchText(plugin).includes(normalizedKeyword));
+});
+
+function isPluginGroupCategory(category: string): category is (typeof pluginCategoryOrder)[number] {
+  return (pluginCategoryOrder as readonly string[]).includes(category);
+}
+
+function pluginGroupCategory(plugin: PluginManifest): PluginGroupCategory {
+  const category = pluginCategory(plugin);
+  return isPluginGroupCategory(category) ? category : "unclassified";
+}
+
+const groupedPlugins = computed(() => {
+  const groups = new Map<PluginGroupCategory, PluginManifest[]>();
+  for (const plugin of filteredPlugins.value) {
+    const groupKey = pluginGroupCategory(plugin);
+    const group = groups.get(groupKey);
+    if (group) {
+      group.push(plugin);
+    } else {
+      groups.set(groupKey, [plugin]);
+    }
+  }
+
+  return pluginGroupOrder.flatMap((category) => {
+    const group = groups.get(category);
+    return group?.length ? [{ category, plugins: group }] : [];
+  });
 });
 
 function pluginSourceLabel(source: PluginManifest["source"]) {
@@ -460,184 +491,192 @@ async function confirmDeletePlugin() {
       <h2>{{ emptyTitle }}</h2>
       <p>{{ emptyDescription }}</p>
     </div>
-    <div v-else class="extensions-workbench__list">
-      <article v-for="plugin in filteredPlugins" :key="plugin.pluginId" class="extensions-workbench__card">
-        <div class="extensions-workbench__card-head">
-          <strong>{{ plugin.name }}</strong>
-          <span class="asset-card__pill" :class="pluginStatusClass(plugin)">
-            {{ pluginStatusLabel(plugin) }}
-          </span>
-        </div>
-        <p class="extensions-workbench__card-desc">{{ plugin.description }}</p>
-        <div class="plugin-manager__meta">
-          <span class="muted">{{ plugin.pluginId }}</span>
-          <span class="muted">v{{ plugin.version }}</span>
-        </div>
-        <div v-if="plugin.disableReason || plugin.degradationReason" class="plugin-manager__notices">
-          <p v-if="plugin.disableReason" class="plugin-manager__notice plugin-manager__notice--danger">
-            {{ plugin.disableReason }}
-          </p>
-          <p v-if="plugin.degradationReason" class="plugin-manager__notice">
-            {{ plugin.degradationReason }}
-          </p>
-        </div>
-        <div class="settings-list__chips">
-          <span class="workspace-hints__chip">{{ pluginCategoryLabel(pluginCategory(plugin)) }}</span>
-          <span class="workspace-hints__chip">{{ plugin.kind }}</span>
-          <span class="workspace-hints__chip">{{ pluginSourceLabel(plugin.source) }}</span>
-          <span class="workspace-hints__chip">{{ pluginRuntimeLabel(plugin.runtime) }}</span>
-          <span class="workspace-hints__chip">依赖 {{ dependencyLabel(plugin) }}</span>
-          <span v-for="capability in plugin.capabilities" :key="capability" class="workspace-hints__chip">
-            {{ capability }}
-          </span>
-        </div>
-        <div
-          v-if="plugin.dependencyStatus?.required.length || plugin.dependencyStatus?.optional.length"
-          class="plugin-manager__section"
-        >
-          <span class="plugin-manager__section-label">依赖</span>
-          <div class="plugin-manager__dependency-list">
-            <span
-              v-for="dependency in plugin.dependencyStatus?.required ?? []"
-              :key="`required-${dependency.pluginId}`"
-              class="plugin-manager__dependency"
-              :class="dependencyClass(dependency.status)"
-            >
-              必需 {{ dependency.name ?? dependency.pluginId }} · {{ dependencyStatusLabel(dependency.status) }}
-            </span>
-            <span
-              v-for="dependency in plugin.dependencyStatus?.optional ?? []"
-              :key="`optional-${dependency.pluginId}`"
-              class="plugin-manager__dependency"
-              :class="dependencyClass(dependency.status)"
-            >
-              可选 {{ dependency.name ?? dependency.pluginId }} · {{ dependencyStatusLabel(dependency.status) }}
-            </span>
-          </div>
-        </div>
-        <div v-if="plugin.permissions?.length" class="plugin-manager__section">
-          <span class="plugin-manager__section-label">权限</span>
-          <div class="plugin-manager__dependency-list">
-            <span v-for="permission in plugin.permissions" :key="permission" class="plugin-manager__dependency">
-              {{ permission }}
-            </span>
-          </div>
-        </div>
-        <div v-if="plugin.hooks?.length" class="plugin-manager__section">
-          <span class="plugin-manager__section-label">Hook</span>
-          <div class="plugin-manager__dependency-list">
-            <span v-for="hook in plugin.hooks" :key="`${hook.slot}-${hook.action}`" class="plugin-manager__dependency">
-              {{ hook.label ?? hook.action }} · {{ hook.slot }}
-            </span>
-          </div>
-        </div>
-        <div class="extensions-workbench__card-actions">
-          <button
-            type="button"
-            class="ghost"
-            :class="{ 'is-active': activeSettingsPluginId === plugin.pluginId }"
-            :disabled="isManagingPlugins"
-            @click="openPluginSettings(plugin)"
-          >
-            <Settings :size="14" aria-hidden="true" />
-            设置
-          </button>
-          <button type="button" class="ghost" :disabled="isManagingPlugins" @click="togglePlugin(plugin)">
-            <Power :size="14" aria-hidden="true" />
-            {{ plugin.enabled ? "禁用" : "启用" }}
-          </button>
-          <button
-            v-if="canDeletePlugin(plugin)"
-            type="button"
-            class="ghost danger"
-            :disabled="isManagingPlugins"
-            @click="requestDeletePlugin(plugin)"
-          >
-            <Trash2 :size="14" aria-hidden="true" />
-            删除
-          </button>
-        </div>
-        <section v-if="activeSettingsPluginId === plugin.pluginId" class="plugin-manager__settings">
-          <div class="plugin-manager__settings-head">
-            <div>
-              <strong>{{ pluginSettingsLabel(plugin) }}</strong>
-              <p v-if="pluginSettingsDescription(plugin)">{{ pluginSettingsDescription(plugin) }}</p>
-            </div>
-            <button type="button" class="ghost" :disabled="isManagingPlugins" @click="openPluginDataDirectory(plugin)">
-              <FolderOpen :size="14" aria-hidden="true" />
-              打开目录
-            </button>
-          </div>
-
-          <div v-if="settingsPageFor(plugin)" class="plugin-manager__custom-settings">
-            <component :is="settingsPageFor(plugin)?.component" :manifest="plugin" />
-          </div>
-
-          <div v-if="pluginSettingsFields(plugin).length" class="plugin-manager__settings-fields">
-            <label
-              v-for="field in pluginSettingsFields(plugin)"
-              :key="field.key"
-              class="plugin-manager__settings-field"
-              :class="{ 'plugin-manager__settings-field--boolean': field.type === 'boolean' }"
-            >
-              <span>
-                {{ field.label }}
-                <small v-if="field.description">{{ field.description }}</small>
+    <div v-else class="plugin-manager__groups">
+      <section v-for="group in groupedPlugins" :key="group.category" class="plugin-manager__group">
+        <header class="plugin-manager__group-head">
+          <h2 class="plugin-manager__group-title">{{ pluginCategoryLabel(group.category) }}</h2>
+          <span class="plugin-manager__group-count">{{ group.plugins.length }} 个插件</span>
+        </header>
+        <div class="extensions-workbench__list">
+          <article v-for="plugin in group.plugins" :key="plugin.pluginId" class="extensions-workbench__card">
+            <div class="extensions-workbench__card-head">
+              <strong>{{ plugin.name }}</strong>
+              <span class="asset-card__pill" :class="pluginStatusClass(plugin)">
+                {{ pluginStatusLabel(plugin) }}
               </span>
-
-              <input
-                v-if="field.type === 'boolean'"
-                type="checkbox"
-                :checked="fieldBooleanValue(plugin, field)"
-                :disabled="isManagingPlugins"
-                @change="updatePluginConfigValue(plugin, field, eventChecked($event))"
-              />
-              <select
-                v-else-if="field.type === 'select'"
-                :value="selectFieldValue(plugin, field)"
-                :disabled="isManagingPlugins"
-                @change="updatePluginConfigValue(plugin, field, eventValue($event))"
-              >
-                <option value=""></option>
-                <option
-                  v-for="option in field.options ?? []"
-                  :key="optionWireValue(option.value)"
-                  :value="optionWireValue(option.value)"
+            </div>
+            <p class="extensions-workbench__card-desc">{{ plugin.description }}</p>
+            <div class="plugin-manager__meta">
+              <span class="muted">{{ plugin.pluginId }}</span>
+              <span class="muted">v{{ plugin.version }}</span>
+            </div>
+            <div v-if="plugin.disableReason || plugin.degradationReason" class="plugin-manager__notices">
+              <p v-if="plugin.disableReason" class="plugin-manager__notice plugin-manager__notice--danger">
+                {{ plugin.disableReason }}
+              </p>
+              <p v-if="plugin.degradationReason" class="plugin-manager__notice">
+                {{ plugin.degradationReason }}
+              </p>
+            </div>
+            <div class="settings-list__chips">
+              <span class="workspace-hints__chip">{{ pluginCategoryLabel(pluginCategory(plugin)) }}</span>
+              <span class="workspace-hints__chip">{{ plugin.kind }}</span>
+              <span class="workspace-hints__chip">{{ pluginSourceLabel(plugin.source) }}</span>
+              <span class="workspace-hints__chip">{{ pluginRuntimeLabel(plugin.runtime) }}</span>
+              <span class="workspace-hints__chip">依赖 {{ dependencyLabel(plugin) }}</span>
+              <span v-for="capability in plugin.capabilities" :key="capability" class="workspace-hints__chip">
+                {{ capability }}
+              </span>
+            </div>
+            <div
+              v-if="plugin.dependencyStatus?.required.length || plugin.dependencyStatus?.optional.length"
+              class="plugin-manager__section"
+            >
+              <span class="plugin-manager__section-label">依赖</span>
+              <div class="plugin-manager__dependency-list">
+                <span
+                  v-for="dependency in plugin.dependencyStatus?.required ?? []"
+                  :key="`required-${dependency.pluginId}`"
+                  class="plugin-manager__dependency"
+                  :class="dependencyClass(dependency.status)"
                 >
-                  {{ option.label }}
-                </option>
-              </select>
-              <textarea
-                v-else-if="field.type === 'json'"
-                :value="jsonDraftValue(plugin, field)"
-                :placeholder="field.placeholder"
-                :disabled="isManagingPlugins"
-                rows="4"
-                @input="updateJsonDraft(plugin, field, eventValue($event))"
-                @blur="updateJsonConfigValue(plugin, field)"
-              />
-              <input
-                v-else
-                :type="field.type === 'number' ? 'number' : 'text'"
-                :value="fieldTextValue(plugin, field)"
-                :placeholder="field.placeholder"
-                :min="field.min"
-                :max="field.max"
-                :disabled="isManagingPlugins"
-                @change="updatePluginConfigValue(plugin, field, eventValue($event))"
-              />
+                  必需 {{ dependency.name ?? dependency.pluginId }} · {{ dependencyStatusLabel(dependency.status) }}
+                </span>
+                <span
+                  v-for="dependency in plugin.dependencyStatus?.optional ?? []"
+                  :key="`optional-${dependency.pluginId}`"
+                  class="plugin-manager__dependency"
+                  :class="dependencyClass(dependency.status)"
+                >
+                  可选 {{ dependency.name ?? dependency.pluginId }} · {{ dependencyStatusLabel(dependency.status) }}
+                </span>
+              </div>
+            </div>
+            <div v-if="plugin.permissions?.length" class="plugin-manager__section">
+              <span class="plugin-manager__section-label">权限</span>
+              <div class="plugin-manager__dependency-list">
+                <span v-for="permission in plugin.permissions" :key="permission" class="plugin-manager__dependency">
+                  {{ permission }}
+                </span>
+              </div>
+            </div>
+            <div v-if="plugin.hooks?.length" class="plugin-manager__section">
+              <span class="plugin-manager__section-label">Hook</span>
+              <div class="plugin-manager__dependency-list">
+                <span v-for="hook in plugin.hooks" :key="`${hook.slot}-${hook.action}`" class="plugin-manager__dependency">
+                  {{ hook.label ?? hook.action }} · {{ hook.slot }}
+                </span>
+              </div>
+            </div>
+            <div class="extensions-workbench__card-actions">
               <button
                 type="button"
                 class="ghost"
+                :class="{ 'is-active': activeSettingsPluginId === plugin.pluginId }"
                 :disabled="isManagingPlugins"
-                @click.prevent="resetPluginConfigValue(plugin, field)"
+                @click="openPluginSettings(plugin)"
               >
-                重置
+                <Settings :size="14" aria-hidden="true" />
+                设置
               </button>
-            </label>
-          </div>
-        </section>
-      </article>
+              <button type="button" class="ghost" :disabled="isManagingPlugins" @click="togglePlugin(plugin)">
+                <Power :size="14" aria-hidden="true" />
+                {{ plugin.enabled ? "禁用" : "启用" }}
+              </button>
+              <button
+                v-if="canDeletePlugin(plugin)"
+                type="button"
+                class="ghost danger"
+                :disabled="isManagingPlugins"
+                @click="requestDeletePlugin(plugin)"
+              >
+                <Trash2 :size="14" aria-hidden="true" />
+                删除
+              </button>
+            </div>
+            <section v-if="activeSettingsPluginId === plugin.pluginId" class="plugin-manager__settings">
+              <div class="plugin-manager__settings-head">
+                <div>
+                  <strong>{{ pluginSettingsLabel(plugin) }}</strong>
+                  <p v-if="pluginSettingsDescription(plugin)">{{ pluginSettingsDescription(plugin) }}</p>
+                </div>
+                <button type="button" class="ghost" :disabled="isManagingPlugins" @click="openPluginDataDirectory(plugin)">
+                  <FolderOpen :size="14" aria-hidden="true" />
+                  打开目录
+                </button>
+              </div>
+
+              <div v-if="settingsPageFor(plugin)" class="plugin-manager__custom-settings">
+                <component :is="settingsPageFor(plugin)?.component" :manifest="plugin" />
+              </div>
+
+              <div v-if="pluginSettingsFields(plugin).length" class="plugin-manager__settings-fields">
+                <label
+                  v-for="field in pluginSettingsFields(plugin)"
+                  :key="field.key"
+                  class="plugin-manager__settings-field"
+                  :class="{ 'plugin-manager__settings-field--boolean': field.type === 'boolean' }"
+                >
+                  <span>
+                    {{ field.label }}
+                    <small v-if="field.description">{{ field.description }}</small>
+                  </span>
+
+                  <input
+                    v-if="field.type === 'boolean'"
+                    type="checkbox"
+                    :checked="fieldBooleanValue(plugin, field)"
+                    :disabled="isManagingPlugins"
+                    @change="updatePluginConfigValue(plugin, field, eventChecked($event))"
+                  />
+                  <select
+                    v-else-if="field.type === 'select'"
+                    :value="selectFieldValue(plugin, field)"
+                    :disabled="isManagingPlugins"
+                    @change="updatePluginConfigValue(plugin, field, eventValue($event))"
+                  >
+                    <option value=""></option>
+                    <option
+                      v-for="option in field.options ?? []"
+                      :key="optionWireValue(option.value)"
+                      :value="optionWireValue(option.value)"
+                    >
+                      {{ option.label }}
+                    </option>
+                  </select>
+                  <textarea
+                    v-else-if="field.type === 'json'"
+                    :value="jsonDraftValue(plugin, field)"
+                    :placeholder="field.placeholder"
+                    :disabled="isManagingPlugins"
+                    rows="4"
+                    @input="updateJsonDraft(plugin, field, eventValue($event))"
+                    @blur="updateJsonConfigValue(plugin, field)"
+                  />
+                  <input
+                    v-else
+                    :type="field.type === 'number' ? 'number' : 'text'"
+                    :value="fieldTextValue(plugin, field)"
+                    :placeholder="field.placeholder"
+                    :min="field.min"
+                    :max="field.max"
+                    :disabled="isManagingPlugins"
+                    @change="updatePluginConfigValue(plugin, field, eventValue($event))"
+                  />
+                  <button
+                    type="button"
+                    class="ghost"
+                    :disabled="isManagingPlugins"
+                    @click.prevent="resetPluginConfigValue(plugin, field)"
+                  >
+                    重置
+                  </button>
+                </label>
+              </div>
+            </section>
+          </article>
+        </div>
+      </section>
     </div>
 
     <ConfirmDialog

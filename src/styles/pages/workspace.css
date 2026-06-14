@@ -1138,6 +1138,35 @@
   min-height: 100%;
 }
 
+.plugin-manager__groups {
+  display: grid;
+  gap: 16px;
+}
+
+.plugin-manager__group {
+  display: grid;
+  gap: 8px;
+}
+
+.plugin-manager__group-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 28px;
+}
+
+.plugin-manager__group-title {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.25;
+}
+
+.plugin-manager__group-count {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
 .plugin-manager__meta {
   display: inline-flex;
   gap: 10px;
