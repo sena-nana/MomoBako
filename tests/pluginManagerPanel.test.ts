@@ -1,3 +1,4 @@
+import { within } from "@testing-library/dom";
 import { fireEvent, render, screen } from "@testing-library/vue";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import PluginManagerPanel from "../src/components/PluginManagerPanel.vue";
@@ -67,6 +68,10 @@ function manifest(input: Partial<PluginManifest> & Pick<PluginManifest, "pluginI
 }
 
 describe("PluginManagerPanel", () => {
+  function group(name: string) {
+    return screen.getByRole("heading", { name }).closest(".plugin-manager__group") as HTMLElement;
+  }
+
   beforeEach(() => {
     plugins.value = [];
     error.value = "";
@@ -136,6 +141,114 @@ describe("PluginManagerPanel", () => {
     expect(screen.getByText("readMetadata")).toBeInTheDocument();
     expect(screen.getByText("network")).toBeInTheDocument();
     expect(screen.getByText("缺少必需依赖：Provider。")).toBeInTheDocument();
+  });
+
+  it("groups plugins by category while keeping card details visible", () => {
+    plugins.value = [
+      manifest({
+        pluginId: "user.source",
+        name: "Source Plugin",
+        category: "source",
+        kind: "filesystem",
+      }),
+      manifest({
+        pluginId: "user.library",
+        name: "Library Plugin",
+        category: "library-kind",
+        kind: "library-kind",
+      }),
+      manifest({
+        pluginId: "user.parser",
+        name: "Parser Plugin",
+        category: "parser",
+        kind: "parser",
+      }),
+      manifest({
+        pluginId: "user.preview",
+        name: "Preview Plugin",
+        category: "preview",
+        kind: "preview",
+      }),
+      manifest({
+        pluginId: "user.service",
+        name: "Service Plugin",
+        category: "service",
+        kind: "metadata",
+        permissions: ["network"],
+        requires: ["user.source"],
+        hooks: [{ slot: "search", action: "index", label: "Index" }],
+        dependencyStatus: {
+          required: [
+            {
+              pluginId: "user.source",
+              name: "Source Plugin",
+              status: "ready",
+              enabled: true,
+              available: true,
+            },
+          ],
+          optional: [],
+          missingRequired: [],
+          missingOptional: [],
+          disabledRequired: [],
+          disabledOptional: [],
+        },
+      }),
+    ];
+
+    render(PluginManagerPanel);
+
+    const groups = [
+      group("库来源"),
+      group("库类型"),
+      group("文件解析"),
+      group("预览渲染"),
+      group("基础服务"),
+    ];
+
+    expect(groups.map((group) => within(group as HTMLElement).getByText(/1 个插件/).textContent)).toEqual([
+      "1 个插件",
+      "1 个插件",
+      "1 个插件",
+      "1 个插件",
+      "1 个插件",
+    ]);
+
+    expect(within(groups[0] as HTMLElement).getByText("Source Plugin")).toBeInTheDocument();
+    expect(within(groups[1] as HTMLElement).getByText("Library Plugin")).toBeInTheDocument();
+    expect(within(groups[2] as HTMLElement).getByText("Parser Plugin")).toBeInTheDocument();
+    expect(within(groups[3] as HTMLElement).getByText("Preview Plugin")).toBeInTheDocument();
+
+    const serviceGroup = groups[4] as HTMLElement;
+    expect(within(serviceGroup).getByText("Service Plugin")).toBeInTheDocument();
+    expect(within(serviceGroup).getByText("network")).toBeInTheDocument();
+    expect(within(serviceGroup).getByText("必需 Source Plugin · 可用")).toBeInTheDocument();
+    expect(within(serviceGroup).getByText("Index · search")).toBeInTheDocument();
+  });
+
+  it("hides empty groups after filtering", async () => {
+    plugins.value = [
+      manifest({
+        pluginId: "user.source",
+        name: "Source Plugin",
+        category: "source",
+      }),
+      manifest({
+        pluginId: "user.parser",
+        name: "Parser Plugin",
+        category: "parser",
+      }),
+    ];
+
+    render(PluginManagerPanel);
+
+    const input = screen.getByRole("searchbox");
+    await fireEvent.update(input, "parser");
+
+    expect(screen.queryByRole("heading", { name: "库来源" })).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "文件解析" })).toBeInTheDocument();
+    expect(screen.getByText("Parser Plugin")).toBeInTheDocument();
+    expect(screen.queryByText("Source Plugin")).not.toBeInTheDocument();
   });
 
   it("opens the selected plugin settings directory from the settings panel", async () => {
