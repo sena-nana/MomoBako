@@ -517,6 +517,13 @@ export type PluginCallResponse<T = unknown> = {
   pluginId: string;
   method: string;
   payload: T;
+  runtime?: PluginCallRuntime;
+};
+
+export type PluginCallRuntime = {
+  degraded: boolean;
+  degradationReason?: string | null;
+  dependencyStatus: PluginDependencyStatus;
 };
 
 export type PluginArchiveReadRequest = {

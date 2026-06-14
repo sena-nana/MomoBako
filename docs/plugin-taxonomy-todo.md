@@ -14,7 +14,7 @@
 
 ## P0 插件运行时与编排
 
-- 插件依赖解析：已读取 manifest 的 `requires` / `optional` 并在插件管理中展示缺失依赖、禁用原因和降级结果；后续把解析结果接入实际 Hook 调度和运行记录。
+- 插件依赖解析：已读取 manifest 的 `requires` / `optional` 并在插件管理中展示缺失依赖、禁用原因和降级结果；当前已先接入通用插件调用入口，required 依赖不可用会拦截执行，optional 依赖不可用会在调用响应中记录降级。完整 Hook 调度器的运行记录仍待实现。
 - 权限授权：已在插件管理中展示 manifest `permissions`；后续按 `readRepository`、`readMetadata`、`readArchive`、`network`、`runCommand`、`deriveAI`、`useProvider`、`writeCandidates`、`suggestRename`、`suggestMove` 做核心授权。
 - Hook 调度器：把 `playlist`、`pip`、`progress`、`candidateQueue`、`batchOrganize`、`downloadQueue`、`metadataMerge`、`renameMove`、`auditLog`、`search` 接入核心动作表和运行记录。
 - 降级提示：缺 library-kind 回退通用库；缺 parser 只保留原始文件信息；缺 preview 显示不可预览；缺 service 禁用对应动作。

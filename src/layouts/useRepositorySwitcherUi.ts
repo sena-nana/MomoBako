@@ -70,7 +70,7 @@ export function useRepositorySwitcherUi(options: RepositorySwitcherUiOptions) {
   })));
   const selectedBackend = computed(() => (
     options.repositoryBackendOptions.value.find((item) => item.pluginId === backendPluginId.value)
-    ?? options.repositoryBackendOptions.value[0]
+    ?? options.repositoryBackendOptions.value.find((item) => item.enabled)
     ?? null
   ));
   const backendSubmitDisabled = computed(() => {
@@ -80,7 +80,7 @@ export function useRepositorySwitcherUi(options: RepositorySwitcherUiOptions) {
     return !backendUrl.value.trim();
   });
 
-  function resetBackendForm(pluginId = options.repositoryBackendOptions.value[0]?.pluginId ?? localFilesystemPluginId) {
+  function resetBackendForm(pluginId = options.repositoryBackendOptions.value.find((item) => item.enabled)?.pluginId ?? localFilesystemPluginId) {
     backendPluginId.value = pluginId;
     backendName.value = "";
     backendUrl.value = "";
