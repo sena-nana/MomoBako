@@ -7,7 +7,7 @@ import {
   listPlugins,
   setPluginEnabled,
 } from "../../services/repositoryApi";
-import { syncRegisteredPreviewPluginManifests } from "../../plugins/sdk";
+import { syncRegisteredFrontendPluginManifests } from "../../plugins/sdk";
 import type { PluginManifest } from "../../types/repository";
 import {
   apiDesign,
@@ -24,7 +24,7 @@ type SettingsDataLoadOptions = {
 };
 
 function syncPreviewPluginsInBackground(items: PluginManifest[]) {
-  void syncRegisteredPreviewPluginManifests(items).catch((cause) => {
+  void syncRegisteredFrontendPluginManifests(items).catch((cause) => {
     error.value = cause instanceof Error ? cause.message : String(cause);
   });
 }

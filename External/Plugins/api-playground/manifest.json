@@ -1,0 +1,45 @@
+{
+  "pluginId": "momobako.tool.api-playground",
+  "legacyPluginIds": [],
+  "name": "API Playground",
+  "version": "0.1.0",
+  "type": {
+    "layer": "integration-capability-hook",
+    "kind": "api-playground"
+  },
+  "kind": "api-playground",
+  "category": "service",
+  "description": "在 MomoBako 内调试后端命令、外部 HTTP API 和插件 API。",
+  "capabilities": ["tool-page", "api-playground", "external-api", "plugin-api"],
+  "enabled": true,
+  "sdk": "frontend",
+  "runtime": "vue-module",
+  "entry": {
+    "frontend": {
+      "module": "dist/register.js",
+      "export": "register"
+    }
+  },
+  "contributes": {
+    "toolPages": [
+      {
+        "toolPageId": "momobako.tool.api-playground",
+        "label": "API Playground",
+        "description": "调试后端与插件 API",
+        "order": 10
+      }
+    ]
+  },
+  "permissions": ["network:localhost", "external-api:read", "external-api:write"],
+  "requires": [],
+  "optional": [],
+  "hooks": [
+    { "slot": "toolPage", "action": "tool.apiPlayground.open", "label": "打开 API Playground" }
+  ],
+  "compat": {
+    "sdkVersion": "1",
+    "legacyPluginIds": []
+  },
+  "source": "builtin",
+  "status": "ready"
+}

@@ -1,0 +1,539 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mxfile host="app.diagrams.net" modified="2026-06-13T00:00:00.000Z" agent="Codex" version="26.0.0" type="device">
+  <diagram id="overview-runtime" name="01 项目总览">
+    <mxGraphModel dx="1600" dy="1000" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="1100" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+        <mxCell id="p1-title" value="MomoBako 项目总览与运行边界" style="text;html=1;strokeColor=none;fillColor=none;fontSize=24;fontStyle=1;fontColor=#1f2328;align=left;verticalAlign=top;" vertex="1" parent="1">
+          <mxGeometry x="40" y="24" width="720" height="44" as="geometry"/>
+        </mxCell>
+        <mxCell id="p1-note" value="桌面资源库工作台：Vue 3 + TypeScript 前端运行在 Tauri 2 WebView 中，Rust 侧负责仓库服务、SQLite、文件系统、插件运行时、本机 HTTP API 与预览源。" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f6f8fa;strokeColor=#d0d7de;fontColor=#57606a;arcSize=8;" vertex="1" parent="1">
+          <mxGeometry x="40" y="76" width="830" height="60" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="p1-user" value="用户桌面操作&#xa;窗口 / 文件拖拽 / 托盘 / 右键菜单" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff8c5;strokeColor=#d4a72c;fontColor=#3d2d00;arcSize=8;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="60" y="190" width="190" height="88" as="geometry"/>
+        </mxCell>
+        <mxCell id="p1-browser" value="浏览器扩展&#xa;External/BrowserExtension&#xa;右键发送图片 / 链接" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ddf4ff;strokeColor=#54aeef;fontColor=#0969da;arcSize=8;" vertex="1" parent="1">
+          <mxGeometry x="60" y="330" width="190" height="94" as="geometry"/>
+        </mxCell>
+        <mxCell id="p1-eagle" value="Eagle 转换工具&#xa;External/EagleLibraryChanger&#xa;生成可导入 Momo 仓库" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ddf4ff;strokeColor=#54aeef;fontColor=#0969da;arcSize=8;" vertex="1" parent="1">
+          <mxGeometry x="60" y="470" width="190" height="96" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="p1-app" value="Tauri 桌面应用进程&#xa;src-tauri + WebView" style="swimlane;whiteSpace=wrap;html=1;rounded=1;startSize=34;fillColor=#f6f8fa;strokeColor=#8c959f;fontColor=#24292f;arcSize=8;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="320" y="160" width="700" height="520" as="geometry"/>
+        </mxCell>
+        <mxCell id="p1-frontend" value="前端工作台&#xa;src/&#xa;Vue Router / AppShell / Workspace UI&#xa;组合式状态 + 页面组件 + 插件注册表" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dbeafe;strokeColor=#2f6feb;fontColor=#0a3069;arcSize=8;" vertex="1" parent="p1-app">
+          <mxGeometry x="40" y="70" width="250" height="150" as="geometry"/>
+        </mxCell>
+        <mxCell id="p1-api" value="命令与插件桥&#xa;src/services/repositoryApi.ts&#xa;Tauri invoke / dialog / opener / drag&#xa;统一 TS 数据契约" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#eaeef2;strokeColor=#6e7781;fontColor=#24292f;arcSize=8;" vertex="1" parent="p1-app">
+          <mxGeometry x="370" y="70" width="260" height="150" as="geometry"/>
+        </mxCell>
+        <mxCell id="p1-runtime" value="Rust 运行时&#xa;RepositoryRuntime&#xa;写锁 / 阻塞任务池 / 文件监听&#xa;预览 HTTP / 外部 HTTP API" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffebe9;strokeColor=#cf222e;fontColor=#82071e;arcSize=8;" vertex="1" parent="p1-app">
+          <mxGeometry x="40" y="290" width="250" height="160" as="geometry"/>
+        </mxCell>
+        <mxCell id="p1-service" value="仓库服务核心&#xa;RepositoryState&#xa;资源库 / 文件 / 同步 / 元数据 / 搜索&#xa;智能文件夹 / 播放列表 / 动作 / 缩略图" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff1e5;strokeColor=#fb8f44;fontColor=#9a3412;arcSize=8;" vertex="1" parent="p1-app">
+          <mxGeometry x="370" y="290" width="260" height="160" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="p1-storage" value="应用服务数据&#xa;.service-data/&#xa;repositories.db&#xa;plugins/*.momoplug&#xa;external-api.json / runtime cache" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dafbe1;strokeColor=#2da44e;fontColor=#116329;arcSize=8;" vertex="1" parent="1">
+          <mxGeometry x="1110" y="170" width="230" height="140" as="geometry"/>
+        </mxCell>
+        <mxCell id="p1-repo" value="用户资源库目录&#xa;用户文件保持原位&#xa;.momo/repository.json&#xa;.momo/metadata.db&#xa;.momo/thumbnails / trash / indexes" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dafbe1;strokeColor=#2da44e;fontColor=#116329;arcSize=8;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="1110" y="360" width="230" height="150" as="geometry"/>
+        </mxCell>
+        <mxCell id="p1-plugin-src" value="插件源码生态&#xa;External/Plugins/*&#xa;source / library-kind / parser / preview / service&#xa;独立构建与打包" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fbefff;strokeColor=#bf3989;fontColor=#6e1b50;arcSize=8;" vertex="1" parent="1">
+          <mxGeometry x="1110" y="560" width="230" height="132" as="geometry"/>
+        </mxCell>
+        <mxCell id="p1-docs-tests" value="工程支撑&#xa;docs/ API 与架构文档&#xa;tests/ Vitest&#xa;scripts/ Tauri 与插件脚本&#xa;yarn verify" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f6f8fa;strokeColor=#8c959f;fontColor=#24292f;arcSize=8;" vertex="1" parent="1">
+          <mxGeometry x="1110" y="740" width="230" height="132" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="p1-src-map" value="源码主干&#xa;index.html / vite.config.ts / package.json&#xa;src/ 前端应用&#xa;src-tauri/ Rust 桌面运行时&#xa;External/ 外部插件、扩展、转换工具&#xa;docs/ 设计与 API 文档&#xa;tests/ 前端行为测试" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d0d7de;fontColor=#24292f;arcSize=8;" vertex="1" parent="1">
+          <mxGeometry x="40" y="730" width="430" height="170" as="geometry"/>
+        </mxCell>
+        <mxCell id="p1-build" value="构建与产物&#xa;Vite: src → dist&#xa;Tauri: dist + src-tauri → 桌面包&#xa;External/Plugins: .packages/*.momoplug&#xa;运行时：复制到 &lt;serviceRoot&gt;/plugins" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d0d7de;fontColor=#24292f;arcSize=8;" vertex="1" parent="1">
+          <mxGeometry x="540" y="730" width="430" height="170" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="p1-e-user-front" value="操作 UI" style="endArrow=block;html=1;rounded=0;strokeWidth=2;strokeColor=#57606a;" edge="1" parent="1" source="p1-user" target="p1-frontend">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="p1-e-front-api" value="调用仓库 API" style="endArrow=block;html=1;rounded=0;strokeWidth=2;strokeColor=#57606a;" edge="1" parent="p1-app" source="p1-frontend" target="p1-api">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="p1-e-api-runtime" value="invoke commands" style="endArrow=block;html=1;rounded=0;strokeWidth=2;strokeColor=#57606a;" edge="1" parent="p1-app" source="p1-api" target="p1-runtime">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="p1-e-runtime-service" value="run_read / run_write" style="endArrow=block;html=1;rounded=0;strokeWidth=2;strokeColor=#57606a;" edge="1" parent="p1-app" source="p1-runtime" target="p1-service">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="p1-e-service-storage" value="注册表 / 插件包 / 连接文件" style="endArrow=block;html=1;rounded=0;strokeWidth=2;strokeColor=#2da44e;" edge="1" parent="1" source="p1-service" target="p1-storage">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="p1-e-service-repo" value="扫描 / 元数据 / 缩略图 / 回收站" style="endArrow=block;html=1;rounded=0;strokeWidth=2;strokeColor=#2da44e;" edge="1" parent="1" source="p1-service" target="p1-repo">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="p1-e-plugins" value=".momoplug 安装 / 发现" style="endArrow=block;html=1;rounded=0;strokeWidth=2;strokeColor=#bf3989;" edge="1" parent="1" source="p1-plugin-src" target="p1-storage">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="p1-e-browser" value="loopback HTTP /external/v1/assets:add" style="endArrow=block;html=1;rounded=0;strokeWidth=2;dashed=1;strokeColor=#0969da;" edge="1" parent="1" source="p1-browser" target="p1-runtime">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="p1-e-eagle" value="转换后导入" style="endArrow=block;html=1;rounded=0;strokeWidth=2;dashed=1;strokeColor=#0969da;" edge="1" parent="1" source="p1-eagle" target="p1-repo">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="p1-e-docs" value="约束实现与验证" style="endArrow=block;html=1;rounded=0;strokeWidth=2;dashed=1;strokeColor=#8c959f;" edge="1" parent="1" source="p1-docs-tests" target="p1-app">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+
+  <diagram id="frontend-workspace" name="02 前端工作台">
+    <mxGraphModel dx="1800" dy="1100" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1800" pageHeight="1200" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+        <mxCell id="p2-title" value="前端模块架构：Vue 工作台、状态门面与插件 UI 扩展" style="text;html=1;strokeColor=none;fillColor=none;fontSize=24;fontStyle=1;fontColor=#1f2328;align=left;verticalAlign=top;" vertex="1" parent="1">
+          <mxGeometry x="40" y="24" width="820" height="44" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="p2-entry" value="入口与路由&#xa;src/main.ts&#xa;安装 router / context menu / theme&#xa;App.vue: RouterView + ContextMenuHost&#xa;router.ts: AppShell / Home / Settings" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dbeafe;strokeColor=#2f6feb;fontColor=#0a3069;arcSize=8;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="60" y="110" width="260" height="160" as="geometry"/>
+        </mxCell>
+        <mxCell id="p2-shell" value="应用框架&#xa;layouts/AppShell.vue&#xa;TitleBar / SecondaryPanel / 主内容&#xa;侧栏宽度、本地状态、启动进度&#xa;播放列表播放器挂载点" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dbeafe;strokeColor=#2f6feb;fontColor=#0a3069;arcSize=8;" vertex="1" parent="1">
+          <mxGeometry x="410" y="110" width="280" height="160" as="geometry"/>
+        </mxCell>
+        <mxCell id="p2-home" value="工作台页面&#xa;pages/Home.vue&#xa;组合文件浏览、搜索、播放列表、动作、插件面板&#xa;拖拽、右键菜单、预览、元数据编辑" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dbeafe;strokeColor=#2f6feb;fontColor=#0a3069;arcSize=8;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="780" y="110" width="300" height="160" as="geometry"/>
+        </mxCell>
+        <mxCell id="p2-settings" value="设置页面&#xa;pages/Settings.vue&#xa;主题 / 仓库服务状态&#xa;外部 API 连接 JSON&#xa;PluginManagerPanel / 缓存 / API 设计" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dbeafe;strokeColor=#2f6feb;fontColor=#0a3069;arcSize=8;" vertex="1" parent="1">
+          <mxGeometry x="1170" y="110" width="300" height="160" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="p2-facade" value="工作台状态门面&#xa;composables/useRepositoryWorkspace.ts&#xa;facade.ts 聚合领域 hooks&#xa;对 UI 暴露只读状态 + 操作函数" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff1e5;strokeColor=#fb8f44;fontColor=#9a3412;arcSize=8;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="60" y="360" width="260" height="130" as="geometry"/>
+        </mxCell>
+        <mxCell id="p2-state" value="全局响应式状态&#xa;workspace/state.ts&#xa;repositories / activeRepo / snapshots&#xa;fileBrowser / selection / filters&#xa;plugins / cache / loading flags" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff1e5;strokeColor=#fb8f44;fontColor=#9a3412;arcSize=8;" vertex="1" parent="1">
+          <mxGeometry x="410" y="330" width="260" height="145" as="geometry"/>
+        </mxCell>
+        <mxCell id="p2-selectors" value="派生选择器&#xa;workspace/selectors.ts&#xa;activeRepository / visibleEntries&#xa;selectedEntries / breadcrumb&#xa;backend options / filter count" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff1e5;strokeColor=#fb8f44;fontColor=#9a3412;arcSize=8;" vertex="1" parent="1">
+          <mxGeometry x="710" y="330" width="250" height="145" as="geometry"/>
+        </mxCell>
+        <mxCell id="p2-lifecycle" value="启动与刷新&#xa;lifecycle / navigation / refresh&#xa;加载仓库列表 → snapshot → 首屏目录&#xa;空闲加载 playlists / smart folders / actions / tree&#xa;mutation 后局部刷新" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff1e5;strokeColor=#fb8f44;fontColor=#9a3412;arcSize=8;" vertex="1" parent="1">
+          <mxGeometry x="1000" y="330" width="300" height="145" as="geometry"/>
+        </mxCell>
+        <mxCell id="p2-api" value="仓库 API 门面&#xa;services/repositoryApi.ts&#xa;list/create/import/sync repositories&#xa;files / metadata / search / playlists&#xa;plugins / cache / external API / opener / drag" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#eaeef2;strokeColor=#6e7781;fontColor=#24292f;arcSize=8;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="1370" y="330" width="300" height="145" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="p2-domains" value="领域组合模块&#xa;workspace/*.ts" style="swimlane;whiteSpace=wrap;html=1;rounded=1;startSize=30;fillColor=#f6f8fa;strokeColor=#8c959f;fontColor=#24292f;arcSize=8;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="60" y="560" width="760" height="330" as="geometry"/>
+        </mxCell>
+        <mxCell id="p2-d1" value="repositories&#xa;创建 / 导入 / 挂载 / 迁移 / 导出 / 删除" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d0d7de;fontColor=#24292f;arcSize=8;" vertex="1" parent="p2-domains">
+          <mxGeometry x="30" y="60" width="210" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="p2-d2" value="files + fileOperations&#xa;浏览 / 新建 / 导入 / 复制 / 移动 / 重命名 / 回收站" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d0d7de;fontColor=#24292f;arcSize=8;" vertex="1" parent="p2-domains">
+          <mxGeometry x="270" y="60" width="210" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="p2-d3" value="search + filterInputs&#xa;文本、标签、格式、元数据、数值/日期、排除过滤" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d0d7de;fontColor=#24292f;arcSize=8;" vertex="1" parent="p2-domains">
+          <mxGeometry x="510" y="60" width="210" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="p2-d4" value="smartFolders&#xa;虚拟过滤模板树与查询" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d0d7de;fontColor=#24292f;arcSize=8;" vertex="1" parent="p2-domains">
+          <mxGeometry x="30" y="155" width="210" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="p2-d5" value="playlists + usePlaylistPlayer&#xa;队列、播放器类型、会话恢复、控制条" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d0d7de;fontColor=#24292f;arcSize=8;" vertex="1" parent="p2-domains">
+          <mxGeometry x="270" y="155" width="210" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="p2-d6" value="assetMetadata + repositoryActions&#xa;元数据保存、undo/redo、动作执行" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d0d7de;fontColor=#24292f;arcSize=8;" vertex="1" parent="p2-domains">
+          <mxGeometry x="510" y="155" width="210" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="p2-d7" value="thumbnails + sync&#xa;缩略图队列、生成保存、同步进度、硬链接候选" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d0d7de;fontColor=#24292f;arcSize=8;" vertex="1" parent="p2-domains">
+          <mxGeometry x="30" y="250" width="210" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="p2-d8" value="selection + drag state&#xa;多选、框选、拖拽 hover、外部拖入" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d0d7de;fontColor=#24292f;arcSize=8;" vertex="1" parent="p2-domains">
+          <mxGeometry x="270" y="250" width="210" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="p2-d9" value="settings&#xa;插件、缓存、API 设计、外部 API 连接状态" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d0d7de;fontColor=#24292f;arcSize=8;" vertex="1" parent="p2-domains">
+          <mxGeometry x="510" y="250" width="210" height="70" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="p2-pages" value="页面 UI 层&#xa;pages/workspace/* + components/* + layouts/*" style="swimlane;whiteSpace=wrap;html=1;rounded=1;startSize=30;fillColor=#f6f8fa;strokeColor=#8c959f;fontColor=#24292f;arcSize=8;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="910" y="560" width="760" height="330" as="geometry"/>
+        </mxCell>
+        <mxCell id="p2-u1" value="WorkspaceFilesSurface&#xa;文件网格/列表、面包屑、拖拽、操作按钮" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d0d7de;fontColor=#24292f;arcSize=8;" vertex="1" parent="p2-pages">
+          <mxGeometry x="30" y="60" width="220" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="p2-u2" value="FileBrowserPanel / FilePreviewPane&#xa;文件列表、插件预览、播放器预览" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d0d7de;fontColor=#24292f;arcSize=8;" vertex="1" parent="p2-pages">
+          <mxGeometry x="270" y="60" width="220" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="p2-u3" value="FileMetadataEditor&#xa;评分、标签、来源、通用 metadata、封面" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d0d7de;fontColor=#24292f;arcSize=8;" vertex="1" parent="p2-pages">
+          <mxGeometry x="510" y="60" width="220" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="p2-u4" value="WorkspaceFilterBar / SearchPanel&#xa;高级筛选与搜索结果" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d0d7de;fontColor=#24292f;arcSize=8;" vertex="1" parent="p2-pages">
+          <mxGeometry x="30" y="155" width="220" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="p2-u5" value="WorkspacePlaylistPage / PlayerBar&#xa;播放队列、拖拽排序、播放控制" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d0d7de;fontColor=#24292f;arcSize=8;" vertex="1" parent="p2-pages">
+          <mxGeometry x="270" y="155" width="220" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="p2-u6" value="RepositoryActionsPanel / ExtensionsPanel&#xa;动作执行与插件管理入口" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d0d7de;fontColor=#24292f;arcSize=8;" vertex="1" parent="p2-pages">
+          <mxGeometry x="510" y="155" width="220" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="p2-u7" value="SecondaryPanel / Sidebar 子组件&#xa;仓库切换、目录树、智能文件夹、快捷入口、播放列表" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d0d7de;fontColor=#24292f;arcSize=8;" vertex="1" parent="p2-pages">
+          <mxGeometry x="30" y="250" width="220" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="p2-u8" value="ContextMenuHost / ConfirmDialog / Dropdown&#xa;全局交互基础组件" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d0d7de;fontColor=#24292f;arcSize=8;" vertex="1" parent="p2-pages">
+          <mxGeometry x="270" y="250" width="220" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="p2-u9" value="lazyComponents + preload&#xa;重面板按需加载，切换前预热" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d0d7de;fontColor=#24292f;arcSize=8;" vertex="1" parent="p2-pages">
+          <mxGeometry x="510" y="250" width="220" height="70" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="p2-plugin-sdk" value="前端插件 SDK&#xa;src/plugins/sdk.ts&#xa;registerPreview / registerPlaylistPlayer / registerLibraryExtension&#xa;loadModule 从 .momoplug 读取 JS 并动态 import" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fbefff;strokeColor=#bf3989;fontColor=#6e1b50;arcSize=8;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="60" y="960" width="500" height="120" as="geometry"/>
+        </mxCell>
+        <mxCell id="p2-preview" value="预览插件&#xa;media / text / three model / office&#xa;生成缩略图、文件动作、预览组件" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fbefff;strokeColor=#bf3989;fontColor=#6e1b50;arcSize=8;" vertex="1" parent="1">
+          <mxGeometry x="630" y="960" width="280" height="120" as="geometry"/>
+        </mxCell>
+        <mxCell id="p2-library" value="Library 扩展&#xa;metadataPanel / previewPanel&#xa;fileSummary / searchShortcuts / playlist 行为" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fbefff;strokeColor=#bf3989;fontColor=#6e1b50;arcSize=8;" vertex="1" parent="1">
+          <mxGeometry x="970" y="960" width="280" height="120" as="geometry"/>
+        </mxCell>
+        <mxCell id="p2-player" value="播放列表播放器运行时&#xa;load / play / pause / seek / volume / configure&#xa;由插件贡献 playerTypeId" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fbefff;strokeColor=#bf3989;fontColor=#6e1b50;arcSize=8;" vertex="1" parent="1">
+          <mxGeometry x="1310" y="960" width="280" height="120" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="p2-e1" value="" style="endArrow=block;html=1;rounded=0;strokeWidth=2;strokeColor=#57606a;" edge="1" parent="1" source="p2-entry" target="p2-shell">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="p2-e2" value="" style="endArrow=block;html=1;rounded=0;strokeWidth=2;strokeColor=#57606a;" edge="1" parent="1" source="p2-shell" target="p2-home">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="p2-e3" value="" style="endArrow=block;html=1;rounded=0;strokeWidth=2;strokeColor=#57606a;" edge="1" parent="1" source="p2-shell" target="p2-settings">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="p2-e4" value="useRepositoryWorkspace" style="endArrow=block;html=1;rounded=0;strokeWidth=2;strokeColor=#fb8f44;" edge="1" parent="1" source="p2-home" target="p2-facade">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="p2-e5" value="settings hooks" style="endArrow=block;html=1;rounded=0;strokeWidth=2;strokeColor=#fb8f44;" edge="1" parent="1" source="p2-settings" target="p2-facade">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="p2-e6" value="" style="endArrow=block;html=1;rounded=0;strokeWidth=2;strokeColor=#fb8f44;" edge="1" parent="1" source="p2-facade" target="p2-state">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="p2-e7" value="" style="endArrow=block;html=1;rounded=0;strokeWidth=2;strokeColor=#fb8f44;" edge="1" parent="1" source="p2-state" target="p2-selectors">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="p2-e8" value="生命周期驱动状态" style="endArrow=block;html=1;rounded=0;strokeWidth=2;strokeColor=#fb8f44;" edge="1" parent="1" source="p2-lifecycle" target="p2-state">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="p2-e9" value="invoke" style="endArrow=block;html=1;rounded=0;strokeWidth=2;strokeColor=#6e7781;" edge="1" parent="1" source="p2-lifecycle" target="p2-api">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="p2-e10" value="领域操作调用 API" style="endArrow=block;html=1;rounded=0;strokeWidth=2;strokeColor=#6e7781;" edge="1" parent="1" source="p2-domains" target="p2-api">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="p2-e11" value="props / handlers" style="endArrow=block;html=1;rounded=0;strokeWidth=2;strokeColor=#2f6feb;" edge="1" parent="1" source="p2-facade" target="p2-pages">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="p2-e12" value="注册贡献" style="endArrow=block;html=1;rounded=0;strokeWidth=2;strokeColor=#bf3989;" edge="1" parent="1" source="p2-plugin-sdk" target="p2-preview">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="p2-e13" value="注册贡献" style="endArrow=block;html=1;rounded=0;strokeWidth=2;strokeColor=#bf3989;" edge="1" parent="1" source="p2-plugin-sdk" target="p2-library">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="p2-e14" value="注册贡献" style="endArrow=block;html=1;rounded=0;strokeWidth=2;strokeColor=#bf3989;" edge="1" parent="1" source="p2-plugin-sdk" target="p2-player">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="p2-e15" value="UI 查找插件能力" style="endArrow=block;html=1;rounded=0;strokeWidth=2;dashed=1;strokeColor=#bf3989;" edge="1" parent="1" source="p2-pages" target="p2-plugin-sdk">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+
+  <diagram id="backend-data" name="03 后端与数据">
+    <mxGraphModel dx="1800" dy="1100" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1800" pageHeight="1200" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+        <mxCell id="p3-title" value="Tauri / Rust 运行时与仓库数据层" style="text;html=1;strokeColor=none;fillColor=none;fontSize=24;fontStyle=1;fontColor=#1f2328;align=left;verticalAlign=top;" vertex="1" parent="1">
+          <mxGeometry x="40" y="24" width="720" height="44" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="p3-tauri" value="src-tauri/src/lib.rs&#xa;Tauri Builder&#xa;dialog / drag / opener / store 插件&#xa;无边框主窗口 + 托盘 + 窗口状态恢复&#xa;invoke_handler 暴露仓库命令" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffebe9;strokeColor=#cf222e;fontColor=#82071e;arcSize=8;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="60" y="110" width="300" height="160" as="geometry"/>
+        </mxCell>
+        <mxCell id="p3-commands" value="Tauri Commands&#xa;list/get/search/update/sync&#xa;file CRUD / trash / hardlink&#xa;playlist / smart folder / action&#xa;plugin / cache / API design / external status" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffebe9;strokeColor=#cf222e;fontColor=#82071e;arcSize=8;" vertex="1" parent="1">
+          <mxGeometry x="430" y="110" width="300" height="160" as="geometry"/>
+        </mxCell>
+        <mxCell id="p3-runtime" value="RepositoryRuntime&#xa;src-tauri/src/repository_runtime.rs&#xa;Arc&lt;RepositoryState&gt;&#xa;write_lock 串行写入&#xa;blocking task pool 执行重 IO / SQLite" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffebe9;strokeColor=#cf222e;fontColor=#82071e;arcSize=8;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="800" y="110" width="310" height="160" as="geometry"/>
+        </mxCell>
+        <mxCell id="p3-sidecars" value="运行时旁路服务&#xa;notify watcher: 本地仓库变更触发 sync&#xa;tiny_http preview: /preview/{token}, 支持 Range&#xa;tiny_http external: /external/v1/* + bearer token&#xa;external-api.json 写入 service root" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffebe9;strokeColor=#cf222e;fontColor=#82071e;arcSize=8;" vertex="1" parent="1">
+          <mxGeometry x="1180" y="110" width="360" height="160" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="p3-state" value="RepositoryState 服务核心&#xa;src-tauri/src/repository_service.rs" style="swimlane;whiteSpace=wrap;html=1;rounded=1;startSize=32;fillColor=#fff1e5;strokeColor=#fb8f44;fontColor=#9a3412;arcSize=8;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="60" y="340" width="1480" height="420" as="geometry"/>
+        </mxCell>
+        <mxCell id="p3-s1" value="资源库注册与目录&#xa;ensure_initialized&#xa;create/import/attach/relocate/delete&#xa;registry schema migration" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d0d7de;fontColor=#24292f;arcSize=8;" vertex="1" parent="p3-state">
+          <mxGeometry x="30" y="60" width="250" height="90" as="geometry"/>
+        </mxCell>
+        <mxCell id="p3-s2" value="文件与同步&#xa;load_file_browser / file CRUD&#xa;sync_repository 全量扫描&#xa;本地 backend / 插件 backend&#xa;trash restore / empty" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d0d7de;fontColor=#24292f;arcSize=8;" vertex="1" parent="p3-state">
+          <mxGeometry x="310" y="60" width="250" height="90" as="geometry"/>
+        </mxCell>
+        <mxCell id="p3-s3" value="资产索引与元数据&#xa;assets / metadata / tags&#xa;update_asset_metadata&#xa;revision before/after&#xa;alias group 同步传播" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d0d7de;fontColor=#24292f;arcSize=8;" vertex="1" parent="p3-state">
+          <mxGeometry x="590" y="60" width="250" height="90" as="geometry"/>
+        </mxCell>
+        <mxCell id="p3-s4" value="搜索与智能文件夹&#xa;search_assets&#xa;include → exclude → sort / limit&#xa;smart folder 继承过滤" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d0d7de;fontColor=#24292f;arcSize=8;" vertex="1" parent="p3-state">
+          <mxGeometry x="870" y="60" width="250" height="90" as="geometry"/>
+        </mxCell>
+        <mxCell id="p3-s5" value="播放列表与动作&#xa;playlist summaries/detail/membership/order&#xa;repository actions import/run&#xa;安全边界：导入不执行" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d0d7de;fontColor=#24292f;arcSize=8;" vertex="1" parent="p3-state">
+          <mxGeometry x="1150" y="60" width="250" height="90" as="geometry"/>
+        </mxCell>
+        <mxCell id="p3-s6" value="缩略图与预览源&#xa;ensure_thumbnail&#xa;image palette / ffmpeg video/audio cover&#xa;saveGenerated for 3D/text&#xa;prepare_preview_file_source token" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d0d7de;fontColor=#24292f;arcSize=8;" vertex="1" parent="p3-state">
+          <mxGeometry x="30" y="190" width="250" height="100" as="geometry"/>
+        </mxCell>
+        <mxCell id="p3-s7" value="硬链接与别名&#xa;content hash / candidates&#xa;hardlink_groups / members&#xa;copy fallback 记录状态&#xa;Eagle 多目录 alias" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d0d7de;fontColor=#24292f;arcSize=8;" vertex="1" parent="p3-state">
+          <mxGeometry x="310" y="190" width="250" height="100" as="geometry"/>
+        </mxCell>
+        <mxCell id="p3-s8" value="插件管理与调用&#xa;list_plugins / install / enable / delete&#xa;read_plugin_archive_text&#xa;native dylib C ABI call_plugin&#xa;dependencyStatus 解析" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d0d7de;fontColor=#24292f;arcSize=8;" vertex="1" parent="p3-state">
+          <mxGeometry x="590" y="190" width="250" height="100" as="geometry"/>
+        </mxCell>
+        <mxCell id="p3-s9" value="外部素材 API 落地&#xa;add_external_assets&#xa;remoteUrl 下载到 staging&#xa;导入本地仓库并写 metadata&#xa;统一错误码" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d0d7de;fontColor=#24292f;arcSize=8;" vertex="1" parent="p3-state">
+          <mxGeometry x="870" y="190" width="250" height="100" as="geometry"/>
+        </mxCell>
+        <mxCell id="p3-s10" value="导出与运维视图&#xa;archive zip/7z/tar&#xa;git export&#xa;cache snapshot&#xa;API design snapshot" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d0d7de;fontColor=#24292f;arcSize=8;" vertex="1" parent="p3-state">
+          <mxGeometry x="1150" y="190" width="250" height="100" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="p3-service-data" value="服务根目录 .service-data/&#xa;repositories.db 全局注册表&#xa;plugins/*.momoplug 运行时插件包&#xa;plugin settings / native cache&#xa;external-api.json 连接发现" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dafbe1;strokeColor=#2da44e;fontColor=#116329;arcSize=8;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="60" y="840" width="320" height="150" as="geometry"/>
+        </mxCell>
+        <mxCell id="p3-repo-layout" value="资源库目录布局&#xa;用户文件不搬家&#xa;.momo/repository.json&#xa;.momo/metadata.db SQLite WAL&#xa;.momo/cache / thumbnails / logs / indexes / trash" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dafbe1;strokeColor=#2da44e;fontColor=#116329;arcSize=8;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="450" y="840" width="340" height="150" as="geometry"/>
+        </mxCell>
+        <mxCell id="p3-tables" value="Repository SQLite 表族&#xa;assets / metadata / tags / revisions / events&#xa;smart_folders / playlists / playlist_items&#xa;repository_actions / action_steps / action_runs&#xa;hardlink_* / asset_alias_* / entry_thumbnails&#xa;repository_shortcuts / tag_groups / folder_metadata" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dafbe1;strokeColor=#2da44e;fontColor=#116329;arcSize=8;" vertex="1" parent="1">
+          <mxGeometry x="860" y="840" width="390" height="150" as="geometry"/>
+        </mxCell>
+        <mxCell id="p3-native" value="底层能力&#xa;rusqlite bundled + WAL&#xa;notify 文件监听&#xa;tiny_http loopback API&#xa;image palette / ffmpeg-sidecar thumbnails&#xa;libloading native plugins&#xa;zip / reqwest / sha2 / getrandom" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f6f8fa;strokeColor=#8c959f;fontColor=#24292f;arcSize=8;" vertex="1" parent="1">
+          <mxGeometry x="1320" y="840" width="300" height="150" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="p3-e1" value="invoke" style="endArrow=block;html=1;rounded=0;strokeWidth=2;strokeColor=#cf222e;" edge="1" parent="1" source="p3-tauri" target="p3-commands">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="p3-e2" value="run_read / run_write" style="endArrow=block;html=1;rounded=0;strokeWidth=2;strokeColor=#cf222e;" edge="1" parent="1" source="p3-commands" target="p3-runtime">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="p3-e3" value="启动" style="endArrow=block;html=1;rounded=0;strokeWidth=2;strokeColor=#cf222e;" edge="1" parent="1" source="p3-runtime" target="p3-sidecars">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="p3-e4" value="共享 RepositoryState" style="endArrow=block;html=1;rounded=0;strokeWidth=2;strokeColor=#fb8f44;" edge="1" parent="1" source="p3-runtime" target="p3-state">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="p3-e5" value="读写注册表 / 插件包" style="endArrow=block;html=1;rounded=0;strokeWidth=2;strokeColor=#2da44e;" edge="1" parent="1" source="p3-state" target="p3-service-data">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="p3-e6" value="读写仓库元数据与文件" style="endArrow=block;html=1;rounded=0;strokeWidth=2;strokeColor=#2da44e;" edge="1" parent="1" source="p3-state" target="p3-repo-layout">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="p3-e7" value="表结构" style="endArrow=block;html=1;rounded=0;strokeWidth=2;strokeColor=#2da44e;" edge="1" parent="1" source="p3-repo-layout" target="p3-tables">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="p3-e8" value="依赖库" style="endArrow=block;html=1;rounded=0;strokeWidth=2;strokeColor=#8c959f;" edge="1" parent="1" source="p3-state" target="p3-native">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+
+  <diagram id="plugins-external" name="04 插件与外部生态">
+    <mxGraphModel dx="1800" dy="1100" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1800" pageHeight="1200" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+        <mxCell id="p4-title" value="插件架构与外部集成生态" style="text;html=1;strokeColor=none;fillColor=none;fontSize=24;fontStyle=1;fontColor=#1f2328;align=left;verticalAlign=top;" vertex="1" parent="1">
+          <mxGeometry x="40" y="24" width="720" height="44" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="p4-plugin-src" value="插件源码工程&#xa;External/Plugins/*&#xa;每个插件独立 manifest.json / plugin.project.json&#xa;frontend-module / cargo-native / manifest-only&#xa;根仓库脚本仅转发构建、打包、stage" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fbefff;strokeColor=#bf3989;fontColor=#6e1b50;arcSize=8;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="60" y="110" width="330" height="150" as="geometry"/>
+        </mxCell>
+        <mxCell id="p4-build" value="插件工具链&#xa;External/Plugins/scripts/build.mjs&#xa;package.mjs / stage-dev.mjs&#xa;_sdk/backend-rust&#xa;template / example" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fbefff;strokeColor=#bf3989;fontColor=#6e1b50;arcSize=8;" vertex="1" parent="1">
+          <mxGeometry x="460" y="110" width="300" height="150" as="geometry"/>
+        </mxCell>
+        <mxCell id="p4-package" value=".momoplug 包&#xa;物理格式 zip，扩展名固定 .momoplug&#xa;单插件根目录 / manifest.json&#xa;dist/register.js 或 backend dylib&#xa;安装时复制，不持久解压" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fbefff;strokeColor=#bf3989;fontColor=#6e1b50;arcSize=8;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="830" y="110" width="320" height="150" as="geometry"/>
+        </mxCell>
+        <mxCell id="p4-runtime-dir" value="运行时插件目录&#xa;&lt;serviceRoot&gt;/plugins/*.momoplug&#xa;宿主启动与 GET /plugins 扫描&#xa;manifest 直读，删除/新增直接反映" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fbefff;strokeColor=#bf3989;fontColor=#6e1b50;arcSize=8;" vertex="1" parent="1">
+          <mxGeometry x="1220" y="110" width="320" height="150" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="p4-categories" value="Manifest 分类与职责" style="swimlane;whiteSpace=wrap;html=1;rounded=1;startSize=32;fillColor=#f6f8fa;strokeColor=#8c959f;fontColor=#24292f;arcSize=8;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="60" y="340" width="700" height="330" as="geometry"/>
+        </mxCell>
+        <mxCell id="p4-c1" value="source&#xa;仓库 IO 后端&#xa;local-filesystem / webdav / cloud-drive" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ddf4ff;strokeColor=#54aeef;fontColor=#0969da;arcSize=8;" vertex="1" parent="p4-categories">
+          <mxGeometry x="30" y="60" width="200" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="p4-c2" value="library-kind&#xa;资源语义、字段、视图、搜索快捷方式&#xa;image/audio/video/asmr/manga/font/model3d..." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ddf4ff;strokeColor=#54aeef;fontColor=#0969da;arcSize=8;" vertex="1" parent="p4-categories">
+          <mxGeometry x="250" y="60" width="200" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="p4-c3" value="parser&#xa;文件/容器解析候选&#xa;image/video/audio/ebook/archive/font/asmr-folder" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ddf4ff;strokeColor=#54aeef;fontColor=#0969da;arcSize=8;" vertex="1" parent="p4-categories">
+          <mxGeometry x="470" y="60" width="200" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="p4-c4" value="preview&#xa;预览与缩略图&#xa;media / text / three-model / office" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ddf4ff;strokeColor=#54aeef;fontColor=#0969da;arcSize=8;" vertex="1" parent="p4-categories">
+          <mxGeometry x="140" y="185" width="200" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="p4-c5" value="service&#xa;外部能力与后台服务&#xa;metadata providers / downloader / network-search / vector-index / watcher" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ddf4ff;strokeColor=#54aeef;fontColor=#0969da;arcSize=8;" vertex="1" parent="p4-categories">
+          <mxGeometry x="360" y="185" width="200" height="80" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="p4-flow" value="运行时加载流程" style="swimlane;whiteSpace=wrap;html=1;rounded=1;startSize=32;fillColor=#f6f8fa;strokeColor=#8c959f;fontColor=#24292f;arcSize=8;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="840" y="340" width="700" height="330" as="geometry"/>
+        </mxCell>
+        <mxCell id="p4-f1" value="GET /plugins&#xa;RepositoryState 读取 manifest&#xa;解析 legacy IDs / dependencyStatus / enabled" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d0d7de;fontColor=#24292f;arcSize=8;" vertex="1" parent="p4-flow">
+          <mxGeometry x="30" y="60" width="190" height="84" as="geometry"/>
+        </mxCell>
+        <mxCell id="p4-f2" value="前端 vue-module&#xa;read_plugin_archive_text&#xa;data:text/javascript URL&#xa;dynamic import + register(ctx)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d0d7de;fontColor=#24292f;arcSize=8;" vertex="1" parent="p4-flow">
+          <mxGeometry x="255" y="60" width="190" height="84" as="geometry"/>
+        </mxCell>
+        <mxCell id="p4-f3" value="注册表生效&#xa;previewPluginRegistry&#xa;playlistPlayerRegistry&#xa;libraryExtensionRegistry" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d0d7de;fontColor=#24292f;arcSize=8;" vertex="1" parent="p4-flow">
+          <mxGeometry x="480" y="60" width="190" height="84" as="geometry"/>
+        </mxCell>
+        <mxCell id="p4-f4" value="后端 native-dylib&#xa;从包内提取到受控临时缓存&#xa;libloading 加载" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d0d7de;fontColor=#24292f;arcSize=8;" vertex="1" parent="p4-flow">
+          <mxGeometry x="140" y="190" width="190" height="84" as="geometry"/>
+        </mxCell>
+        <mxCell id="p4-f5" value="C ABI + JSON envelope&#xa;momobako_plugin_manifest&#xa;momobako_plugin_call&#xa;momobako_plugin_free" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d0d7de;fontColor=#24292f;arcSize=8;" vertex="1" parent="p4-flow">
+          <mxGeometry x="370" y="190" width="190" height="84" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="p4-browser" value="浏览器采集扩展&#xa;Manifest V3 service-worker&#xa;contextMenus image/link&#xa;读取 baseUrl/token/repoId/parentPath&#xa;POST /external/v1/assets:add" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff8c5;strokeColor=#d4a72c;fontColor=#3d2d00;arcSize=8;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="60" y="760" width="330" height="140" as="geometry"/>
+        </mxCell>
+        <mxCell id="p4-external-api" value="MomoBako 外部 API&#xa;127.0.0.1 + 启动生成 bearer token&#xa;health / repositories / assets:add&#xa;remoteUrl 下载 → 本地导入 → metadata 写入" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffebe9;strokeColor=#cf222e;fontColor=#82071e;arcSize=8;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="470" y="760" width="340" height="140" as="geometry"/>
+        </mxCell>
+        <mxCell id="p4-eagle" value="EagleLibraryChanger&#xa;读取 Eagle metadata/tags/actions/images&#xa;输出 .momo/repository.json + metadata.db&#xa;迁移 tagsGroups / quickAccess / smartFolders / actions / trash" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff8c5;strokeColor=#d4a72c;fontColor=#3d2d00;arcSize=8;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="900" y="760" width="350" height="140" as="geometry"/>
+        </mxCell>
+        <mxCell id="p4-repo" value="目标资源库&#xa;本地文件系统后端当前是可写主路径&#xa;插件源后端可扩展为 WebDAV / cloud&#xa;所有写入仍走核心确认、审计与 revision 路径" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dafbe1;strokeColor=#2da44e;fontColor=#116329;arcSize=8;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="1330" y="760" width="310" height="140" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="p4-e1" value="build/package/stage" style="endArrow=block;html=1;rounded=0;strokeWidth=2;strokeColor=#bf3989;" edge="1" parent="1" source="p4-plugin-src" target="p4-build">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="p4-e2" value="产出" style="endArrow=block;html=1;rounded=0;strokeWidth=2;strokeColor=#bf3989;" edge="1" parent="1" source="p4-build" target="p4-package">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="p4-e3" value="安装复制" style="endArrow=block;html=1;rounded=0;strokeWidth=2;strokeColor=#bf3989;" edge="1" parent="1" source="p4-package" target="p4-runtime-dir">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="p4-e4" value="扫描" style="endArrow=block;html=1;rounded=0;strokeWidth=2;strokeColor=#bf3989;" edge="1" parent="1" source="p4-runtime-dir" target="p4-flow">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="p4-e5" value="" style="endArrow=block;html=1;rounded=0;strokeWidth=2;strokeColor=#57606a;" edge="1" parent="p4-flow" source="p4-f1" target="p4-f2">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="p4-e6" value="" style="endArrow=block;html=1;rounded=0;strokeWidth=2;strokeColor=#57606a;" edge="1" parent="p4-flow" source="p4-f2" target="p4-f3">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="p4-e7" value="" style="endArrow=block;html=1;rounded=0;strokeWidth=2;strokeColor=#57606a;" edge="1" parent="p4-flow" source="p4-f4" target="p4-f5">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="p4-e8" value="HTTP + bearer" style="endArrow=block;html=1;rounded=0;strokeWidth=2;strokeColor=#d4a72c;" edge="1" parent="1" source="p4-browser" target="p4-external-api">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="p4-e9" value="导入资产" style="endArrow=block;html=1;rounded=0;strokeWidth=2;strokeColor=#2da44e;" edge="1" parent="1" source="p4-external-api" target="p4-repo">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="p4-e10" value="转换输出" style="endArrow=block;html=1;rounded=0;strokeWidth=2;strokeColor=#2da44e;" edge="1" parent="1" source="p4-eagle" target="p4-repo">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+
+  <diagram id="contracts-verification" name="05 契约与验证">
+    <mxGraphModel dx="1600" dy="1000" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="1100" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+        <mxCell id="p5-title" value="数据契约、构建链路与验证面" style="text;html=1;strokeColor=none;fillColor=none;fontSize=24;fontStyle=1;fontColor=#1f2328;align=left;verticalAlign=top;" vertex="1" parent="1">
+          <mxGeometry x="40" y="24" width="620" height="44" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="p5-contract" value="跨端数据契约" style="swimlane;whiteSpace=wrap;html=1;rounded=1;startSize=32;fillColor=#f6f8fa;strokeColor=#8c959f;fontColor=#24292f;arcSize=8;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="60" y="110" width="660" height="360" as="geometry"/>
+        </mxCell>
+        <mxCell id="p5-types" value="src/types/repository.ts&#xa;前端 TS 类型&#xa;RepositorySummary / Snapshot / FileBrowserEntry&#xa;Search / SmartFolder / Playlist / PluginManifest&#xa;External API / Cache / Revision" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dbeafe;strokeColor=#2f6feb;fontColor=#0a3069;arcSize=8;fontStyle=1;" vertex="1" parent="p5-contract">
+          <mxGeometry x="40" y="70" width="250" height="130" as="geometry"/>
+        </mxCell>
+        <mxCell id="p5-rust-types" value="repository_service.rs&#xa;Rust serde structs&#xa;Tauri command request/response&#xa;SQLite 映射与 schema migration&#xa;插件 manifest / dependency status" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffebe9;strokeColor=#cf222e;fontColor=#82071e;arcSize=8;fontStyle=1;" vertex="1" parent="p5-contract">
+          <mxGeometry x="360" y="70" width="250" height="130" as="geometry"/>
+        </mxCell>
+        <mxCell id="p5-docs" value="docs/api-design.md&#xa;外部 API + Repository API&#xa;Asset / Metadata / Search / Smart Folder&#xa;Plugin / Cache 契约&#xa;变更时与 TS/Rust 同步" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d0d7de;fontColor=#24292f;arcSize=8;" vertex="1" parent="p5-contract">
+          <mxGeometry x="200" y="240" width="250" height="100" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="p5-build" value="构建与脚本" style="swimlane;whiteSpace=wrap;html=1;rounded=1;startSize=32;fillColor=#f6f8fa;strokeColor=#8c959f;fontColor=#24292f;arcSize=8;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="810" y="110" width="660" height="360" as="geometry"/>
+        </mxCell>
+        <mxCell id="p5-b1" value="开发&#xa;yarn dev → Vite dev server:1420&#xa;yarn tauri:dev → scripts/tauri-dev.mjs&#xa;yarn tauri:dev:with-plugins → build/package/stage plugins" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff1e5;strokeColor=#fb8f44;fontColor=#9a3412;arcSize=8;" vertex="1" parent="p5-build">
+          <mxGeometry x="40" y="70" width="260" height="110" as="geometry"/>
+        </mxCell>
+        <mxCell id="p5-b2" value="前端构建&#xa;yarn build&#xa;vue-tsc --noEmit + vite build&#xa;manualChunks 拆出 three / vrm 预览依赖" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff1e5;strokeColor=#fb8f44;fontColor=#9a3412;arcSize=8;" vertex="1" parent="p5-build">
+          <mxGeometry x="360" y="70" width="260" height="110" as="geometry"/>
+        </mxCell>
+        <mxCell id="p5-b3" value="桌面构建&#xa;yarn tauri:build&#xa;tauri.conf.json&#xa;dist + Rust binary + icons&#xa;protocol-asset 允许 .momo/thumbnails" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff1e5;strokeColor=#fb8f44;fontColor=#9a3412;arcSize=8;" vertex="1" parent="p5-build">
+          <mxGeometry x="40" y="220" width="260" height="110" as="geometry"/>
+        </mxCell>
+        <mxCell id="p5-b4" value="插件产物&#xa;yarn plugins:build/package/stage:dev&#xa;External/Plugins/.dist&#xa;External/Plugins/.packages/*.momoplug&#xa;复制到 runtime plugins/" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff1e5;strokeColor=#fb8f44;fontColor=#9a3412;arcSize=8;" vertex="1" parent="p5-build">
+          <mxGeometry x="360" y="220" width="260" height="110" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="p5-verify" value="验证面" style="swimlane;whiteSpace=wrap;html=1;rounded=1;startSize=32;fillColor=#f6f8fa;strokeColor=#8c959f;fontColor=#24292f;arcSize=8;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="60" y="560" width="1410" height="330" as="geometry"/>
+        </mxCell>
+        <mxCell id="p5-v1" value="yarn test&#xa;Vitest + jsdom + Testing Library&#xa;router / theme / tooling&#xa;file browser / drag behavior / metadata editor&#xa;preview plugins / media / 3D / playlist / plugin manager" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dafbe1;strokeColor=#2da44e;fontColor=#116329;arcSize=8;fontStyle=1;" vertex="1" parent="p5-verify">
+          <mxGeometry x="40" y="70" width="300" height="130" as="geometry"/>
+        </mxCell>
+        <mxCell id="p5-v2" value="yarn build&#xa;TypeScript + Vue SFC 类型检查&#xa;Vite 生产构建&#xa;前端入口、按需组件和依赖拆包验证" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dafbe1;strokeColor=#2da44e;fontColor=#116329;arcSize=8;" vertex="1" parent="p5-verify">
+          <mxGeometry x="390" y="70" width="300" height="130" as="geometry"/>
+        </mxCell>
+        <mxCell id="p5-v3" value="cargo check --manifest-path src-tauri/Cargo.toml&#xa;Rust/Tauri 编译检查&#xa;repository_service/runtime/window_state&#xa;依赖 crate 与命令签名" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dafbe1;strokeColor=#2da44e;fontColor=#116329;arcSize=8;" vertex="1" parent="p5-verify">
+          <mxGeometry x="740" y="70" width="300" height="130" as="geometry"/>
+        </mxCell>
+        <mxCell id="p5-v4" value="yarn verify&#xa;串行执行 test → build → cargo check&#xa;适用于逻辑调整、公共模块、持久化、Tauri 命令、关键路径改动" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dafbe1;strokeColor=#2da44e;fontColor=#116329;arcSize=8;fontStyle=1;" vertex="1" parent="p5-verify">
+          <mxGeometry x="1090" y="70" width="280" height="130" as="geometry"/>
+        </mxCell>
+        <mxCell id="p5-rule" value="AGENTS.md 变更顺序提示&#xa;跨端数据模型：先改 src/types/repository.ts 与 docs/api-design.md，再同步 repositoryApi.ts、repository_service.rs 和相关测试。&#xa;文档/图示低风险改动通常无需跑完整构建，但需确认文件可用。" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff8c5;strokeColor=#d4a72c;fontColor=#3d2d00;arcSize=8;" vertex="1" parent="p5-verify">
+          <mxGeometry x="210" y="230" width="960" height="70" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="p5-e1" value="双向同步" style="endArrow=block;startArrow=block;html=1;rounded=0;strokeWidth=2;strokeColor=#57606a;" edge="1" parent="p5-contract" source="p5-types" target="p5-rust-types">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="p5-e2" value="文档契约" style="endArrow=block;html=1;rounded=0;strokeWidth=2;strokeColor=#57606a;" edge="1" parent="p5-contract" source="p5-docs" target="p5-types">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="p5-e3" value="文档契约" style="endArrow=block;html=1;rounded=0;strokeWidth=2;strokeColor=#57606a;" edge="1" parent="p5-contract" source="p5-docs" target="p5-rust-types">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="p5-e4" value="verify 包含" style="endArrow=block;html=1;rounded=0;strokeWidth=2;strokeColor=#2da44e;" edge="1" parent="1" source="p5-v4" target="p5-v1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="p5-e5" value="verify 包含" style="endArrow=block;html=1;rounded=0;strokeWidth=2;strokeColor=#2da44e;" edge="1" parent="1" source="p5-v4" target="p5-v2">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="p5-e6" value="verify 包含" style="endArrow=block;html=1;rounded=0;strokeWidth=2;strokeColor=#2da44e;" edge="1" parent="1" source="p5-v4" target="p5-v3">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

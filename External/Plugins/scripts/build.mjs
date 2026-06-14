@@ -22,19 +22,39 @@ function dynamicLibraryFileName(libraryName) {
   return `lib${libraryName}.so`;
 }
 
+function createManifestOnlyProject(manifest) {
+  return {
+    pluginId: manifest.pluginId,
+    build: {
+      type: "manifest-only",
+    },
+  };
+}
+
+function pluginMatchesRequest(name, manifest, project) {
+  if (requestedPluginIds.size === 0) return true;
+  return [name, manifest.pluginId, project.pluginId]
+    .filter(Boolean)
+    .some((id) => requestedPluginIds.has(id));
+}
+
+function frontendSourcePath(pluginDir, project) {
+  const sourceDir = project.build?.sourceDir ?? "src";
+  const sourceEntry = project.build?.sourceEntry ?? join(sourceDir, "register.js");
+  return join(pluginDir, sourceEntry);
+}
+
+function nativeManifestPath(pluginDir, project) {
+  return join(pluginDir, project.build?.manifestPath ?? "Cargo.toml");
+}
+
 async function buildFrontendPlugin(pluginDir, outputDir, manifest, project) {
   const frontendEntry = manifest.entry?.frontend?.module;
   if (!frontendEntry) {
     throw new Error(`frontend plugin is missing entry.frontend.module: ${pluginDir}`);
   }
 
-  const sourceDir = project.build?.sourceDir ?? "src";
-  const sourceEntry = project.build?.sourceEntry ?? join(sourceDir, "register.js");
-  const sourcePath = join(pluginDir, sourceEntry);
-  if (!existsSync(sourcePath)) {
-    throw new Error(`missing frontend plugin source: ${sourcePath}`);
-  }
-
+  const sourcePath = frontendSourcePath(pluginDir, project);
   const entryPath = join(outputDir, frontendEntry);
   mkdirSync(dirname(entryPath), { recursive: true });
 
@@ -54,11 +74,8 @@ async function buildFrontendPlugin(pluginDir, outputDir, manifest, project) {
   });
 }
 
-function buildNativePlugin(pluginDir, manifest) {
-  const manifestPath = join(pluginDir, "Cargo.toml");
-  if (!existsSync(manifestPath)) {
-    throw new Error(`missing Cargo.toml for native plugin: ${pluginDir}`);
-  }
+function buildNativePlugin(pluginDir, manifest, project) {
+  const manifestPath = nativeManifestPath(pluginDir, project);
   const result = spawnSync(
     cargoCommand,
     ["build", "--release", "--manifest-path", manifestPath],
@@ -111,13 +128,12 @@ for (const name of readdirSync(pluginsRoot, { withFileTypes: true })) {
   const manifestPath = join(pluginDir, "manifest.json");
   const projectPath = join(pluginDir, "plugin.project.json");
   if (!existsSync(manifestPath)) continue;
-  if (!existsSync(projectPath)) {
-    throw new Error(`missing plugin.project.json: ${pluginDir}`);
-  }
 
   const manifest = readJson(manifestPath);
-  const project = readJson(projectPath);
-  if (requestedPluginIds.size > 0 && !requestedPluginIds.has(name.name) && !requestedPluginIds.has(project.pluginId)) {
+  const project = existsSync(projectPath)
+    ? readJson(projectPath)
+    : createManifestOnlyProject(manifest);
+  if (!pluginMatchesRequest(name.name, manifest, project)) {
     continue;
   }
   const outputDir = join(distRoot, name.name);
@@ -129,13 +145,24 @@ for (const name of readdirSync(pluginsRoot, { withFileTypes: true })) {
     cpSync(sdkRoot, join(outputDir, "_sdk"), { recursive: true });
   }
 
-  if (project.build?.type === "frontend-module") {
-    await buildFrontendPlugin(pluginDir, outputDir, manifest, project);
+  const buildType = project.build?.type;
+  if (buildType === "frontend-module") {
+    const sourcePath = frontendSourcePath(pluginDir, project);
+    if (existsSync(sourcePath)) {
+      await buildFrontendPlugin(pluginDir, outputDir, manifest, project);
+    } else {
+      console.log(`[build-external-plugins] skipped compile for ${name.name}: missing frontend source ${sourcePath}`);
+    }
   }
 
-  if (project.build?.type === "cargo-native") {
-    const { fileName, builtLibraryPath } = buildNativePlugin(pluginDir, manifest);
-    cpSync(builtLibraryPath, join(outputDir, fileName));
+  if (buildType === "cargo-native") {
+    const cargoManifestPath = nativeManifestPath(pluginDir, project);
+    if (existsSync(cargoManifestPath)) {
+      const { fileName, builtLibraryPath } = buildNativePlugin(pluginDir, manifest, project);
+      cpSync(builtLibraryPath, join(outputDir, fileName));
+    } else {
+      console.log(`[build-external-plugins] skipped compile for ${name.name}: missing native manifest ${cargoManifestPath}`);
+    }
   }
 
   console.log(`[build-external-plugins] prepared ${name.name}`);
