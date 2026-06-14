@@ -2,9 +2,10 @@ import { within } from "@testing-library/dom";
 import { fireEvent, render, screen } from "@testing-library/vue";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import PluginManagerPanel from "../src/components/PluginManagerPanel.vue";
-import type { PluginManifest } from "../src/types/repository";
+import type { PluginHookExecutionRecord, PluginManifest } from "../src/types/repository";
 
 const plugins = vi.hoisted(() => ({ value: [] as PluginManifest[] }));
+const pluginHookExecutions = vi.hoisted(() => ({ value: [] as PluginHookExecutionRecord[] }));
 const error = vi.hoisted(() => ({ value: "" }));
 const deletePluginConfigValueInWorkspace = vi.hoisted(() => vi.fn());
 const loadPluginConfigInWorkspace = vi.hoisted(() => vi.fn());
@@ -14,6 +15,7 @@ const setPluginConfigValueInWorkspace = vi.hoisted(() => vi.fn());
 vi.mock("../src/composables/useRepositoryWorkspace", () => ({
   useWorkspaceSettings: () => ({
     plugins,
+    pluginHookExecutions,
     deletePluginConfigValueInWorkspace,
     deletePluginInWorkspace: vi.fn(),
     installPluginArchiveInWorkspace: vi.fn(),
@@ -74,6 +76,7 @@ describe("PluginManagerPanel", () => {
 
   beforeEach(() => {
     plugins.value = [];
+    pluginHookExecutions.value = [];
     error.value = "";
     deletePluginConfigValueInWorkspace.mockReset();
     loadPluginConfigInWorkspace.mockReset();
@@ -224,6 +227,52 @@ describe("PluginManagerPanel", () => {
     expect(within(serviceGroup).getByText("network")).toBeInTheDocument();
     expect(within(serviceGroup).getByText("必需 Source Plugin · 可用")).toBeInTheDocument();
     expect(within(serviceGroup).getByText("Index · search")).toBeInTheDocument();
+  });
+
+  it("shows recent hook execution records under declared hooks", () => {
+    plugins.value = [
+      manifest({
+        pluginId: "user.service",
+        name: "Service Plugin",
+        hooks: [{ slot: "search", action: "service.search.index", label: "Index" }],
+      }),
+    ];
+    pluginHookExecutions.value = [
+      {
+        executionId: "plugin-hook-1",
+        pluginId: "user.service",
+        hookSlot: "search",
+        hookAction: "service.search.index",
+        hookLabel: "Index",
+        status: "success",
+        message: "插件 Hook 已执行。",
+        target: { query: "cover" },
+        startedAt: "2026-06-14T10:12:00Z",
+        finishedAt: "2026-06-14T10:12:01Z",
+        runtime: null,
+      },
+    ];
+
+    render(PluginManagerPanel);
+
+    expect(screen.getByText("执行记录")).toBeInTheDocument();
+    expect(screen.getByText("成功")).toBeInTheDocument();
+    expect(screen.getAllByText("Index")[0]).toBeInTheDocument();
+    expect(screen.getByText("插件 Hook 已执行。")).toBeInTheDocument();
+  });
+
+  it("does not render hook execution records when none exist", () => {
+    plugins.value = [
+      manifest({
+        pluginId: "user.service",
+        name: "Service Plugin",
+        hooks: [{ slot: "search", action: "service.search.index", label: "Index" }],
+      }),
+    ];
+
+    render(PluginManagerPanel);
+
+    expect(screen.queryByText("执行记录")).not.toBeInTheDocument();
   });
 
   it("hides empty groups after filtering", async () => {

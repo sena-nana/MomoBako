@@ -10,6 +10,7 @@ import type {
   HardlinkCandidate,
   PlaylistDetail,
   PlaylistSummary,
+  PluginHookExecutionRecord,
   PluginManifest,
   RepositoryAction,
   RepositorySnapshot,
@@ -130,6 +131,7 @@ export const filters = ref<WorkspaceFilterState>(createInitialFilters());
 export const hardlinkCandidates = shallowRef<HardlinkCandidate[]>([]);
 export const lastSyncResult = shallowRef<SyncResult | null>(null);
 export const plugins = shallowRef<PluginManifest[]>([]);
+export const pluginHookExecutions = shallowRef<PluginHookExecutionRecord[]>([]);
 export const cacheSnapshot = shallowRef<CacheSnapshot | null>(null);
 export const apiDesign = shallowRef<ApiDesignSnapshot | null>(null);
 export const externalApiConnection = shallowRef<ExternalApiConnectionStatus | null>(null);

@@ -1232,6 +1232,44 @@
   color: var(--err);
 }
 
+.plugin-manager__execution-list {
+  display: grid;
+  gap: 8px;
+}
+
+.plugin-manager__execution-item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+}
+
+.plugin-manager__execution-body {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.plugin-manager__execution-title {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: baseline;
+  font-size: 12px;
+}
+
+.plugin-manager__execution-message,
+.plugin-manager__execution-time {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.plugin-manager__execution-message {
+  color: var(--text-muted);
+}
+
 .plugin-manager__settings {
   display: grid;
   gap: 12px;

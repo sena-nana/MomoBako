@@ -7,6 +7,7 @@ import {
   getPluginConfig,
   getPluginDataDirectory,
   installPluginFromArchive,
+  listPluginHookExecutions,
   listPlugins,
   openRepositoryPath,
   setPluginConfigValue,
@@ -21,6 +22,7 @@ import {
   externalApiConnection,
   isLoadingSettingsData,
   isManagingPlugins,
+  pluginHookExecutions,
   plugins,
 } from "./state";
 
@@ -38,13 +40,15 @@ export async function loadSettingsData(options: SettingsDataLoadOptions = {}) {
   isLoadingSettingsData.value = true;
 
   try {
-    const [pluginItems, cache, api, externalApi] = await Promise.all([
+    const [pluginItems, hookExecutionResponse, cache, api, externalApi] = await Promise.all([
       listPlugins(),
+      listPluginHookExecutions({ limit: 200 }),
       getCacheSnapshot(),
       getApiDesignSnapshot(),
       getExternalApiConnectionStatus(),
     ]);
     plugins.value = pluginItems;
+    pluginHookExecutions.value = hookExecutionResponse.records;
     syncPreviewPluginsInBackground(pluginItems);
     cacheSnapshot.value = cache;
     apiDesign.value = api;

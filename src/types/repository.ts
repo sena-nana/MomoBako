@@ -526,6 +526,29 @@ export type PluginCallRuntime = {
   dependencyStatus: PluginDependencyStatus;
 };
 
+export type PluginHookExecutionRecord = {
+  executionId: string;
+  pluginId: string;
+  hookSlot: string;
+  hookAction: string;
+  hookLabel?: string | null;
+  status: "success" | "failed" | "blocked" | string;
+  message: string;
+  target: Record<string, unknown>;
+  startedAt: string;
+  finishedAt: string;
+  runtime?: PluginCallRuntime | null;
+};
+
+export type PluginHookExecutionListRequest = {
+  pluginId?: string;
+  limit?: number;
+};
+
+export type PluginHookExecutionListResponse = {
+  records: PluginHookExecutionRecord[];
+};
+
 export type PluginArchiveReadRequest = {
   pluginId: string;
   path: string;
