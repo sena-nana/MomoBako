@@ -45,10 +45,30 @@ export async function createNewRepository(
   path: string,
   backendPluginId?: string,
   backendConfig?: Record<string, unknown>,
+  repoId?: string,
+  options?: {
+    skipInitialSync?: boolean;
+  },
 ) {
-  const progressId = startOperationProgress("创建资源库", "初始化资源库并扫描文件", { initial: 8 });
+  const progressId = startOperationProgress(
+    "创建资源库",
+    options?.skipInitialSync ? "初始化资源库" : "初始化资源库并扫描文件",
+    { initial: 8 },
+  );
   try {
-    await createRepository({ name, path, backendPluginId, backendConfig });
+    await createRepository({
+      repoId,
+      name,
+      path,
+      backendPluginId,
+      backendConfig,
+      skipInitialSync: options?.skipInitialSync,
+    });
+    updateOperationProgress(progressId, {
+      detail: "刷新资源库列表",
+      value: options?.skipInitialSync ? 72 : 88,
+      indeterminate: false,
+    });
     await repositoryDependencies().loadRepositories();
     finishOperationProgress(progressId);
   } catch (cause) {

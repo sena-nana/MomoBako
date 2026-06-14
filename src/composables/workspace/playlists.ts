@@ -1,5 +1,6 @@
 import {
   addPlaylistItems,
+  addPlaylistItemsByPaths,
   createPlaylist,
   deletePlaylist,
   getPlaylistDetail,
@@ -126,6 +127,18 @@ export async function addPlaylistItemsInWorkspace(playlistId: string, assetIds: 
     repoId: activeRepoId.value,
     playlistId,
     assetIds,
+  });
+  activePlaylistDetail.value = detail;
+  await refreshPlaylists(activeRepoId.value);
+  return detail;
+}
+
+export async function addPlaylistItemsByPathsInWorkspace(playlistId: string, paths: string[]) {
+  if (!activeRepoId.value || !paths.length) return null;
+  const detail = await addPlaylistItemsByPaths({
+    repoId: activeRepoId.value,
+    playlistId,
+    paths,
   });
   activePlaylistDetail.value = detail;
   await refreshPlaylists(activeRepoId.value);

@@ -208,6 +208,14 @@
   overflow: auto;
 }
 
+.workspace-page__notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
 .workspace-page__body--fixed {
   overflow: hidden;
 }
@@ -215,6 +223,48 @@
 .workspace-page__body--fixed > .files-workbench,
 .workspace-page__body--fixed > .files-preview-page {
   height: 100%;
+}
+
+.repository-picker-dialog {
+  width: min(560px, 92vw);
+}
+
+.repository-picker-dialog__body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.repository-picker-dialog__item {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+  background: var(--bg);
+  color: var(--text);
+  text-align: left;
+}
+
+.repository-picker-dialog__item:hover:not(:disabled) {
+  border-color: var(--accent-weak);
+  background: var(--bg-hover);
+}
+
+.repository-picker-dialog__item strong,
+.repository-picker-dialog__item span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.repository-picker-dialog__item span {
+  color: var(--text-muted);
+  font-size: 12px;
 }
 
 .files-workbench {

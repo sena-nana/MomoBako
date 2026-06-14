@@ -47,8 +47,31 @@ let mockRepositoryActions: RepositoryAction[] = [];
 let mockPlugins: PluginManifest[] | null = null;
 let mockPlaylists: PlaylistSummary[] | null = null;
 let mockPlaylistDetails: Record<string, PlaylistDetail> = {};
+let mockPluginConfigValues: Record<string, Record<string, unknown>> = {};
+const pluginCallCalls: Array<{ pluginId: string; method: string; payload: unknown }> = [];
+const pluginCallMockResponses = new Map<string, unknown>();
 const invokeCalls: Array<{ command: string; args?: Record<string, unknown> }> = [];
 const openerCalls: Array<{ command: "openPath" | "openUrl" | "revealItemInDir"; path: string }> = [];
+
+globalThis.fetch = vi.fn(async (input: string | URL | Request) => {
+  const url = typeof input === "string"
+    ? input
+    : input instanceof URL
+      ? input.toString()
+      : input.url;
+  if (url === "asset://C:/Mock/Temp/theme-song.lrc") {
+    return {
+      ok: true,
+      status: 200,
+      text: async () => "[00:10.00]Mock lyric line 1\n[00:20.00]Mock lyric line 2",
+    } as Response;
+  }
+  return {
+    ok: false,
+    status: 404,
+    text: async () => "",
+  } as Response;
+}) as typeof fetch;
 
 
 let mockEntries: MockEntry[] = initialEntries();
@@ -125,6 +148,11 @@ function addMockEntry(path: string, kind: "directory" | "file") {
       modifiedAt: "2026-06-05T00:18:00Z",
       assetId: null,
       status: kind === "file" ? "synced" : null,
+      isVirtual: false,
+      providerId: null,
+      providerItemId: null,
+      sourcePayload: null,
+      localAbsolutePath: null,
     },
   ];
 }
@@ -426,6 +454,10 @@ function getMockEntriesForRepository(repoId: string) {
   return repoId === altSnapshot.repository.repoId ? altEntries : mockEntries;
 }
 
+function pluginCallKey(pluginId: string, method: string) {
+  return `${pluginId}:${method}`;
+}
+
 function getMockSnapshot(repoId: string) {
   return repoId === altSnapshot.repository.repoId ? altSnapshot : mockSnapshot;
 }
@@ -433,6 +465,7 @@ function getMockSnapshot(repoId: string) {
 function getMockFileBrowser(directoryPath = "", includeTree = true, specialLocation?: "trash", repoId = "repo-main-001") {
   const entries = specialLocation === "trash" ? mockTrashEntries : getMockEntriesForRepository(repoId);
   const snapshotSource = getMockSnapshot(repoId);
+  const repository = mockRepositories.find((item) => item.repoId === repoId) ?? snapshotSource.repository;
   const snapshot: {
     repoId: string;
     rootPath: string;
@@ -444,9 +477,9 @@ function getMockFileBrowser(directoryPath = "", includeTree = true, specialLocat
     entries: ReturnType<typeof getEntriesForDirectory>;
   } = {
     repoId,
-    rootPath: snapshotSource.repository.path,
-    backendPluginId: snapshotSource.repository.backend.pluginId,
-    backendKind: snapshotSource.repository.backend.kind,
+    rootPath: repository.path,
+    backendPluginId: repository.backend.pluginId,
+    backendKind: repository.backend.kind,
     currentPath: directoryPath,
     entries: getEntriesForDirectory(entries, directoryPath),
   };
@@ -461,6 +494,10 @@ function getMockFileBrowser(directoryPath = "", includeTree = true, specialLocat
 function previewPluginModuleSource(pluginId: string) {
   if (pluginId === "momobako.preview.media") {
     return mediaPreviewPluginSourceForTest();
+  }
+  if (pluginId === "momobako.library.netease-cloud-music") {
+    const sourcePath = resolve("External/Plugins/library-netease-cloud-music/src/register.js");
+    return readFileSync(sourcePath, "utf-8");
   }
   if (pluginId === "momobako.tool.api-playground") {
     return [
@@ -831,6 +868,58 @@ vi.mock("@tauri-apps/api/core", () => ({
         modifiedAt: "2026-06-05T00:18:00Z",
       };
     }
+    if (command === "prepare_entry_playback_source") {
+      const request = args?.request as { repoId?: string; path?: string } | undefined;
+      const path = request?.path ?? "model.glb";
+      const mediaType = path.endsWith(".glb") || path.endsWith(".vrm")
+        ? "model/gltf-binary"
+        : path.endsWith(".gltf")
+          ? "model/gltf+json"
+          : path.endsWith(".png")
+            ? "image/png"
+            : path.endsWith(".jpg") || path.endsWith(".jpeg")
+              ? "image/jpeg"
+              : path.endsWith(".webp")
+                ? "image/webp"
+                : path.endsWith(".gif")
+                  ? "image/gif"
+              : path.endsWith(".pdf")
+                ? "application/pdf"
+              : path.endsWith(".docx")
+                ? "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+              : path.endsWith(".docm")
+                ? "application/vnd.ms-word.document.macroenabled.12"
+              : path.endsWith(".xlsx")
+                ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                : path.endsWith(".xlsm")
+                  ? "application/vnd.ms-excel.sheet.macroenabled.12"
+                  : path.endsWith(".pptx")
+                    ? "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+                    : path.endsWith(".pptm")
+                      ? "application/vnd.ms-powerpoint.presentation.macroenabled.12"
+            : path.endsWith(".mp4") || path.endsWith(".m4v")
+              ? "video/mp4"
+              : path.endsWith(".webm")
+                ? "video/webm"
+                : path.endsWith(".mp3")
+                  ? "audio/mpeg"
+                  : path.endsWith(".wav")
+                    ? "audio/wav"
+                    : "application/octet-stream";
+      return {
+        repoId: request?.repoId ?? "repo-main-001",
+        path,
+        sourceUrl: `http://127.0.0.1:49152/playback/${"1".repeat(64)}`,
+        localPath: path.endsWith(".mp3") ? `C:/Mock/Temp/${path.split("/").at(-1)}` : null,
+        tempFilePath: path.endsWith(".mp3") ? `C:/Mock/Temp/${path.split("/").at(-1)}` : null,
+        lyricPath: path === "Music/theme-song.mp3" ? "C:/Mock/Temp/theme-song.lrc" : null,
+        wordLyricPath: null,
+        mediaType,
+        expiresAt: "2026-06-05T01:18:00Z",
+        sizeBytes: 1024,
+        modifiedAt: "2026-06-05T00:18:00Z",
+      };
+    }
     if (command === "create_directory") {
       const request = args?.request as { name?: string; parentPath?: string } | undefined;
       const name = request?.name ?? "NewFolder";
@@ -956,6 +1045,7 @@ vi.mock("@tauri-apps/api/core", () => ({
     }
     if (command === "create_repository" || command === "import_repository") {
       const request = args?.request as {
+        repoId?: string;
         name?: string;
         path?: string;
         backendPluginId?: string;
@@ -965,29 +1055,37 @@ vi.mock("@tauri-apps/api/core", () => ({
         ? "webdav"
         : backendPluginId === "momobako.cloud-drive"
           ? "cloud"
+          : backendPluginId === "momobako.source.netease-cloud-music"
+            ? "netease-cloud-music"
           : "filesystem";
       const backendName = backendPluginId === "momobako.webdav"
         ? "WebDAV"
         : backendPluginId === "momobako.cloud-drive"
           ? "Cloud Drive"
+          : backendPluginId === "momobako.source.netease-cloud-music"
+            ? "Netease Cloud Music"
           : "Local Filesystem";
+      const created = {
+        repoId: request?.repoId ?? "repo-created-001",
+        name: request?.name ?? "新资源库",
+        path: request?.path ?? "C:/Mock/NewRepo",
+        backend: {
+          pluginId: backendPluginId,
+          kind: backendKind,
+          name: backendName,
+          capabilities: ["browse", "read", "write", "sync"],
+        },
+        status: "ready",
+        assetCount: 0,
+        updatedAt: "2026-06-05T00:18:00Z",
+      };
       mockRepositories = [
+        ...mockRepositories.filter((repo) => repo.repoId !== created.repoId),
         {
-          repoId: "repo-created-001",
-          name: request?.name ?? "新资源库",
-          path: request?.path ?? "C:/Mock/NewRepo",
-          backend: {
-            pluginId: backendPluginId,
-            kind: backendKind,
-            name: backendName,
-            capabilities: ["browse", "read", "write", "sync"],
-          },
-          status: "ready",
-          assetCount: 0,
-          updatedAt: "2026-06-05T00:18:00Z",
+          ...created,
         },
       ];
-      return { repository: mockRepositories[0] };
+      return { repository: created };
     }
     if (command === "attach_repository_folder") {
       const request = args?.request as { path?: string } | undefined;
@@ -1034,6 +1132,15 @@ vi.mock("@tauri-apps/api/core", () => ({
         mockRepositories = [repository];
       }
       return { repository };
+    }
+    if (command === "update_repository_backend_config") {
+      const request = args?.request as { repoId?: string; backendConfig?: Record<string, unknown> } | undefined;
+      const repoId = request?.repoId ?? "";
+      const existing = mockRepositories.find((repo) => repo.repoId === repoId) ?? null;
+      if (!existing) {
+        throw new Error(`repository not found: ${repoId}`);
+      }
+      return { repository: existing };
     }
     if (command === "export_repository") {
       const request = args?.request as { target?: string; archive?: { outputPath?: string; format?: string; encrypt?: boolean }; git?: { remote?: string; branch?: string } } | undefined;
@@ -1116,12 +1223,24 @@ vi.mock("@tauri-apps/api/core", () => ({
     }
     if (command === "call_plugin") {
       const request = args?.request as { pluginId?: string; method?: string; payload?: { id?: string } } | undefined;
+      const pluginId = request?.pluginId ?? "momobako.service.provider.dlsite";
+      const method = request?.method ?? "provider.lookupMetadataCandidate";
+      const payload = request?.payload ?? {};
+      pluginCallCalls.push({ pluginId, method, payload });
+      const mockResponse = pluginCallMockResponses.get(pluginCallKey(pluginId, method));
+      if (mockResponse !== undefined) {
+        return {
+          pluginId,
+          method,
+          payload: typeof mockResponse === "function" ? mockResponse(payload) : mockResponse,
+        };
+      }
       const id = request?.payload?.id ?? "RJ123456";
       return {
-        pluginId: request?.pluginId ?? "momobako.service.provider.dlsite",
-        method: request?.method ?? "provider.lookupMetadataCandidate",
+        pluginId,
+        method,
         payload: {
-          source: request?.pluginId?.includes("asmr-one") ? "asmr-one" : "dlsite",
+          source: pluginId.includes("asmr-one") ? "asmr-one" : "dlsite",
           confidence: "external-id",
           fields: {
             workId: id,
@@ -1129,6 +1248,64 @@ vi.mock("@tauri-apps/api/core", () => ({
             workTitle: "Fetched Rain Voice",
             circle: "Fetched Circle",
           },
+        },
+      };
+    }
+    if (command === "download_playlist_with_progress") {
+      const request = args?.request as {
+        playlistId?: number;
+        playlistName?: string;
+        tracks?: Array<{
+          songId?: number;
+          songName?: string | null;
+        }>;
+        destination?: Record<string, unknown>;
+      } | undefined;
+      const progress = args?.progress as { onmessage?: ((payload: unknown) => void) | null } | undefined;
+      const tracks = request?.tracks ?? [];
+      progress?.onmessage?.({
+        phase: "start",
+        playlistId: request?.playlistId ?? 0,
+        playlistName: request?.playlistName ?? null,
+        total: tracks.length,
+        completed: 0,
+        failed: 0,
+      });
+      tracks.forEach((track, index) => {
+        const songId = track.songId ?? 0;
+        progress?.onmessage?.({
+          phase: "track",
+          playlistId: request?.playlistId ?? 0,
+          playlistName: request?.playlistName ?? null,
+          total: tracks.length,
+          completed: index + 1,
+          failed: 0,
+          currentSongId: songId,
+          currentSongName: track.songName ?? `song-${songId}`,
+        });
+      });
+      progress?.onmessage?.({
+        phase: "complete",
+        playlistId: request?.playlistId ?? 0,
+        playlistName: request?.playlistName ?? null,
+        total: tracks.length,
+        completed: tracks.length,
+        failed: 0,
+      });
+      return {
+        playlistId: request?.playlistId ?? 0,
+        playlistName: request?.playlistName ?? null,
+        completed: tracks.map((track) => ({
+          songId: track.songId ?? 0,
+          paths: [
+            `C:/Mock/.service-data/plugin-data/momobako-service-downloader/exports/repository-staging/${request?.destination && typeof request.destination === "object" && "repoId" in request.destination ? (request.destination as { repoId?: string }).repoId ?? "repository" : "repository"}/${track.songName ?? `song-${track.songId ?? 0}`}.mp3`,
+          ],
+        })),
+        failed: [],
+        summary: {
+          total: tracks.length,
+          succeeded: tracks.length,
+          failed: 0,
         },
       };
     }
@@ -1154,22 +1331,28 @@ vi.mock("@tauri-apps/api/core", () => ({
         pluginId,
         dataDirectory: `C:/MomoBako/.service-data/plugin-data/${pluginId.replace(/[^a-z0-9]+/gi, "-")}`,
         schema: {},
-        values: {},
+        values: { ...(mockPluginConfigValues[pluginId] ?? {}) },
       };
     }
     if (command === "set_plugin_config_value") {
       const request = args?.request as { pluginId?: string; key?: string; value?: unknown } | undefined;
       const pluginId = request?.pluginId ?? "momobako.preview.media";
+      const nextValues = {
+        ...(mockPluginConfigValues[pluginId] ?? {}),
+        ...(request?.key ? { [request.key]: request.value } : {}),
+      };
+      mockPluginConfigValues[pluginId] = nextValues;
       return {
         pluginId,
         dataDirectory: `C:/MomoBako/.service-data/plugin-data/${pluginId.replace(/[^a-z0-9]+/gi, "-")}`,
         schema: {},
-        values: request?.key ? { [request.key]: request.value } : {},
+        values: nextValues,
       };
     }
     if (command === "delete_plugin_config_value") {
       const request = args?.request as { pluginId?: string } | undefined;
       const pluginId = request?.pluginId ?? "momobako.preview.media";
+      mockPluginConfigValues[pluginId] = {};
       return {
         pluginId,
         dataDirectory: `C:/MomoBako/.service-data/plugin-data/${pluginId.replace(/[^a-z0-9]+/gi, "-")}`,
@@ -1241,6 +1424,40 @@ vi.mock("@tauri-apps/api/core", () => ({
             command: "list_repositories",
             summary: "列出所有仓库。",
             requestTemplate: {},
+          },
+          {
+            group: "Playlist API",
+            transport: "tauri-command",
+            method: "INVOKE",
+            path: "download_playlist_with_progress",
+            command: "download_playlist_with_progress",
+            summary: "下载歌单并通过进度通道回报逐首处理状态。",
+            requestTemplate: {
+              request: {
+                playlistId: 9001,
+                playlistName: "夜跑歌单",
+                tracks: [
+                  {
+                    songId: 2001,
+                    songName: "稻香",
+                    sourcePayload: {
+                      provider: "netease-cloud-music",
+                      songId: 2001,
+                    },
+                  },
+                ],
+                destination: {
+                  kind: "localFolder",
+                  path: "C:/Downloads/Playlist",
+                },
+                sourcePayload: {
+                  provider: "netease-cloud-music",
+                  playlistId: 9001,
+                },
+                level: "standard",
+              },
+              progress: "<Channel<DownloaderPlaylistProgressEvent>>",
+            },
           },
           {
             group: "Plugin API / DLsite Provider",
@@ -1321,11 +1538,14 @@ afterEach(() => {
   mockPlugins = null;
   mockPlaylists = null;
   mockPlaylistDetails = {};
+  mockPluginConfigValues = {};
   mockRepositories = [];
   mockEntries = initialEntries();
   mockTrashEntries = [];
   invokeCalls.length = 0;
   openerCalls.length = 0;
+  pluginCallCalls.length = 0;
+  pluginCallMockResponses.clear();
 });
 
 export function getInvokeCalls(command?: string) {
@@ -1402,6 +1622,29 @@ export function seedMockPlaylists(playlists: PlaylistSummary[], details: Record<
 
 export function seedMockPlugins(plugins: PluginManifest[]) {
   mockPlugins = plugins;
+}
+
+export function seedMockEntries(entries: MockEntry[]) {
+  mockEntries = entries;
+}
+
+export function seedMockRepositories(repositories: MockRepository[]) {
+  mockRepositories = repositories;
+}
+
+export function seedMockPluginConfig(pluginId: string, values: Record<string, unknown>) {
+  mockPluginConfigValues[pluginId] = { ...values };
+}
+
+export function mockPluginCallResponse(pluginId: string, method: string, payload: unknown) {
+  pluginCallMockResponses.set(pluginCallKey(pluginId, method), payload);
+}
+
+export function getPluginCallCalls(pluginId?: string, method?: string) {
+  return pluginCallCalls.filter((call) => (
+    (pluginId ? call.pluginId === pluginId : true)
+    && (method ? call.method === method : true)
+  ));
 }
 
 export function getRelocatedRepositoryPath() {

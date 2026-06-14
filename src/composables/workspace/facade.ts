@@ -168,6 +168,7 @@ import {
 } from "./sync";
 import {
   addPlaylistItemsInWorkspace,
+  addPlaylistItemsByPathsInWorkspace,
   createPlaylistInWorkspace,
   deletePlaylistInWorkspace,
   refreshPlaylists,
@@ -317,6 +318,7 @@ export function useWorkspacePlaylists() {
     createPlaylistInWorkspace,
     deletePlaylistInWorkspace,
     addPlaylistItemsInWorkspace,
+    addPlaylistItemsByPathsInWorkspace,
     reorderPlaylistItemsInWorkspace,
     removePlaylistItemInWorkspace,
     setPlaylistMembershipInWorkspace,

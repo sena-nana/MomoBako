@@ -42,6 +42,7 @@ export async function selectRepository(repoId: string) {
   if (!repoId) return;
 
   const isSwitchingRepository = activeRepoId.value !== repoId;
+  const previousDirectoryPath = !isSwitchingRepository ? currentDirectoryPath.value : "";
   isLoadingSnapshot.value = true;
   error.value = null;
   const progressId = startOperationProgress("加载资源库", "读取资源库快照", { initial: 10, indeterminate: true });
@@ -79,8 +80,13 @@ export async function selectRepository(repoId: string) {
     activeAssetId.value = defaultAssetId;
     activeAssetDetail.value = null;
 
-    currentDirectoryPath.value = "";
-    await loadFileBrowserForDirectory("", { includeTree: false });
+    const initialDirectoryPath = isSwitchingRepository ? "" : previousDirectoryPath;
+    currentDirectoryPath.value = initialDirectoryPath;
+    const browserSnapshot = await loadFileBrowserForDirectory(initialDirectoryPath, { includeTree: false });
+    if (!browserSnapshot && !isSwitchingRepository && previousDirectoryPath) {
+      currentDirectoryPath.value = "";
+      await loadFileBrowserForDirectory("", { includeTree: false });
+    }
     if (defaultAssetId) {
       void selectAsset(defaultAssetId);
     }

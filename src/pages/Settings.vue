@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { save as saveDialog } from "@tauri-apps/plugin-dialog";
 import {
   CheckCircle2,
@@ -12,6 +12,7 @@ import {
   Sun,
 } from "lucide-vue-next";
 import PluginManagerPanel from "../components/PluginManagerPanel.vue";
+import { onPluginEvent } from "../plugins/sdk";
 import { useTheme } from "../composables/useTheme";
 import {
   useWorkspaceRepository,
@@ -22,6 +23,7 @@ import { writeBinaryFile } from "../services/repositoryApi";
 const { theme, setTheme } = useTheme();
 const {
   repositories,
+  selectRepository,
 } = useWorkspaceRepository();
 const {
   cacheSnapshot,
@@ -122,6 +124,16 @@ async function exportExternalConnectionJson() {
 
 onMounted(() => {
   void loadSettingsData();
+});
+
+const disposeRepositorySelectEvent = onPluginEvent<{ repoId?: string }>("repository.select", (payload) => {
+  const repoId = typeof payload?.repoId === "string" ? payload.repoId.trim() : "";
+  if (!repoId) return;
+  void selectRepository(repoId);
+});
+
+onBeforeUnmount(() => {
+  disposeRepositorySelectEvent();
 });
 </script>
 

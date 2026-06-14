@@ -46,6 +46,7 @@ export function register(ctx) {
       const lyricsInset = ref(104);
       const lyricsViewport = ref(null);
       const lyricsItems = ref([]);
+      const preparedPlayback = ref(null);
       let objectUrl = null;
       let resizeObserver = null;
 
@@ -73,17 +74,21 @@ export function register(ctx) {
         sourceUrl.value = "";
         sourceMediaType.value = "";
         errorMessage.value = "";
+        preparedPlayback.value = null;
         revokeObjectUrl();
 
         try {
-          const response = await ctx.preparePreviewFileSource({
+          const response = await ctx.prepareEntryPlaybackSource({
             repoId: props.repoId,
             path: props.entry.path,
           });
-          if (!response.sourceUrl) {
+          const resolvedSourceUrl = response.sourceUrl
+            || (response.localPath ? ctx.fileSrc(response.localPath) : null);
+          if (!resolvedSourceUrl) {
             throw new Error("媒体预览源不可用");
           }
-          sourceUrl.value = response.sourceUrl;
+          preparedPlayback.value = response;
+          sourceUrl.value = resolvedSourceUrl;
           sourceMediaType.value = response.mediaType;
           state.value = "ready";
         } catch (cause) {
@@ -100,11 +105,17 @@ export function register(ctx) {
         }
         lyricsStatus.value = "loading";
         try {
-          const bytes = await ctx.readFile({
-            repoId: props.repoId,
-            path: siblingLrcPath(props.entry.path),
-          });
-          const parsed = parseLrcLyrics(decodeTextBytes(Uint8Array.from(bytes)));
+          let text = "";
+          if (preparedPlayback.value?.lyricPath) {
+            text = await readLocalTextFile(ctx.fileSrc(preparedPlayback.value.lyricPath));
+          } else {
+            const bytes = await ctx.readFile({
+              repoId: props.repoId,
+              path: siblingLrcPath(props.entry.path),
+            });
+            text = decodeTextBytes(Uint8Array.from(bytes));
+          }
+          const parsed = parseLrcLyrics(text);
           lyricsLines.value = parsed;
           lyricsStatus.value = parsed.length ? "ready" : "empty";
           await nextTick();
@@ -620,14 +631,19 @@ export function register(ctx) {
     }
 
     async function prepareSource(item) {
-      const response = await ctx.preparePreviewFileSource({
+      const response = await ctx.prepareEntryPlaybackSource({
         repoId: controller.repoId,
         path: item.path,
       });
-      if (!response.sourceUrl) {
+      const sourceUrl = response.sourceUrl
+        || (response.localPath ? ctx.fileSrc(response.localPath) : null);
+      if (!sourceUrl) {
         throw new Error("媒体播放源不可用");
       }
-      return response;
+      return {
+        ...response,
+        sourceUrl,
+      };
     }
 
     return {
@@ -801,6 +817,14 @@ function decodeTextBytes(bytes) {
     return new TextDecoder("utf-8").decode(bytes.slice(3));
   }
   return new TextDecoder("utf-8").decode(bytes);
+}
+
+async function readLocalTextFile(sourceUrl) {
+  const response = await fetch(sourceUrl);
+  if (!response.ok) {
+    throw new Error(`failed to read local text file: ${response.status}`);
+  }
+  return response.text();
 }
 
 function parseLrcLyrics(text) {
