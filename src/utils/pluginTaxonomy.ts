@@ -18,6 +18,14 @@ export function isSourcePlugin(plugin: Pick<PluginManifest, "category" | "kind">
   return pluginCategory(plugin) === "source";
 }
 
+export function isRepositoryBackendRuntimeAvailable(plugin: Pick<PluginManifest, "enabled" | "runtime" | "sdk" | "status">) {
+  return Boolean(plugin.enabled)
+    && plugin.sdk === "backend"
+    && plugin.runtime === "native-dylib"
+    && plugin.status !== "unavailable"
+    && plugin.status !== "error";
+}
+
 export function pluginCategoryLabel(category: PluginCategory | string | undefined) {
   if (category === "source") return "库来源";
   if (category === "library-kind") return "库类型";

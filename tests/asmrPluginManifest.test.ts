@@ -52,11 +52,14 @@ describe("ASMR plugin contracts", () => {
       "random",
     ]));
     expect(manifest.optional).toEqual(expect.arrayContaining([
+      "momobako.parser.audio",
       "momobako.parser.asmr-folder",
+      "momobako.service.network-search",
       "momobako.service.provider.dlsite",
       "momobako.service.provider.asmr-one",
       "momobako.preview.media",
     ]));
+    expect(manifest.optional).not.toEqual([]);
     expect(manifest.hooks.map((hook) => hook.slot)).toEqual(expect.arrayContaining([
       "playlist",
       "progress",
