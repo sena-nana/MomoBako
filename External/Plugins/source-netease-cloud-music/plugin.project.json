@@ -1,0 +1,9 @@
+{
+  "pluginId": "momobako.source.netease-cloud-music",
+  "build": {
+    "type": "cargo-native",
+    "sourceDir": "src",
+    "manifestPath": "Cargo.toml",
+    "outputDir": ".dist/source-netease-cloud-music"
+  }
+}

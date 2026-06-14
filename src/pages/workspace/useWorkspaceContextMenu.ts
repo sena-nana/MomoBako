@@ -14,10 +14,12 @@ import {
 } from "lucide-vue-next";
 import type { ContextMenuItem } from "../../composables/useContextMenu";
 import type { FileBrowserEntry } from "../../types/repository";
-import { getPreviewPluginFileActions } from "../../plugins/previewPlugins";
+import type { EntryActionDialogRequest, EntryActionDialogResultMap } from "../../plugins/sdk";
+import { getPluginEntryActions, getPreviewPluginFileActions } from "../../plugins/previewPlugins";
 
 type WorkspaceContextMenuOptions = {
   activeRepoId: ComputedRef<string | null>;
+  entryMap: ComputedRef<ReadonlyMap<string, FileBrowserEntry>>;
   hasMultipleSelection: ComputedRef<boolean>;
   isMutatingFiles: ComputedRef<boolean>;
   isSmartFolderPanel: ComputedRef<boolean>;
@@ -27,7 +29,11 @@ type WorkspaceContextMenuOptions = {
   chooseCustomThumbnail: (entry: FileBrowserEntry) => void | Promise<void>;
   clearCustomThumbnail: (entry: FileBrowserEntry) => void | Promise<void>;
   deleteContextSelection: (entry: FileBrowserEntry, contextSelectionPaths: string[]) => void | Promise<void>;
+  openEntryActionDialog: <TKind extends keyof EntryActionDialogResultMap>(
+    request: Extract<EntryActionDialogRequest, { kind: TKind }>,
+  ) => Promise<EntryActionDialogResultMap[TKind]>;
   playlistMenuItems?: (entry: FileBrowserEntry) => ContextMenuItem[];
+  refreshRepositoryWorkspace: () => Promise<void>;
   openCopyTargetDialog: (entry: FileBrowserEntry) => void | Promise<void>;
   openDirectory: (path: string) => void | Promise<void>;
   openWorkspaceEntry: (path: string) => void | Promise<void>;
@@ -51,6 +57,9 @@ export function useWorkspaceContextMenu(options: WorkspaceContextMenuOptions) {
     const contextSelectionPaths = options.selectedFilePathSet.value.has(entry.path)
       ? options.selectedFilePaths.value
       : [entry.path];
+    const contextEntries = contextSelectionPaths
+      .map((path) => options.entryMap.value.get(path))
+      .filter((item): item is FileBrowserEntry => Boolean(item));
     if (options.isSmartFolderPanel.value) {
       return [
         {
@@ -93,9 +102,25 @@ export function useWorkspaceContextMenu(options: WorkspaceContextMenuOptions) {
       : [];
     const playlistMenuItems = !options.isSmartFolderPanel.value
       && !options.isTrashPanel.value
-      && entry.kind === "file"
       && !options.hasMultipleSelection.value
       ? options.playlistMenuItems?.(entry) ?? []
+      : [];
+    const pluginEntryActions = options.activeRepoId.value && !options.isTrashPanel.value
+      ? getPluginEntryActions({
+        repoId: options.activeRepoId.value,
+        entry,
+        entries: contextEntries.length ? contextEntries : [entry],
+        refreshRepo: options.refreshRepositoryWorkspace,
+        openDialog: options.openEntryActionDialog,
+      }).map<ContextMenuItem>((action) => ({
+        id: action.id,
+        label: action.label,
+        icon: action.icon,
+        disabled: action.disabled,
+        danger: action.danger,
+        confirmLabel: action.confirmLabel,
+        onSelect: action.onSelect,
+      }))
       : [];
 
     return [
@@ -146,9 +171,10 @@ export function useWorkspaceContextMenu(options: WorkspaceContextMenuOptions) {
       },
       ...(playlistMenuItems.length ? [{
         id: "playlist-membership",
-        label: "添加到播放集",
+        label: entry.kind === "directory" ? "整个加入播放列表" : "加入播放列表",
         children: playlistMenuItems,
       } satisfies ContextMenuItem] : []),
+      ...pluginEntryActions,
       ...pluginActions,
       {
         id: "thumbnail",

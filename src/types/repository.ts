@@ -37,6 +37,11 @@ export type AssetSummary = {
   thumbnailPath?: string | null;
   hardlinkGroupId?: string | null;
   hardlinkState?: HardlinkState | null;
+  isVirtual?: boolean;
+  providerId?: string | null;
+  providerItemId?: string | null;
+  sourcePayload?: Record<string, unknown> | null;
+  localAbsolutePath?: string | null;
 };
 
 export type FolderSummary = {
@@ -97,6 +102,11 @@ export type PlaylistItem = {
   statusReason?: string | null;
   sortOrder: number;
   addedAt: string;
+  isVirtual?: boolean;
+  providerId?: string | null;
+  providerItemId?: string | null;
+  sourcePayload?: Record<string, unknown> | null;
+  localAbsolutePath?: string | null;
 };
 
 export type PlaylistDetail = {
@@ -152,6 +162,11 @@ export type FileBrowserEntry = {
   aliasPaths?: string[];
   folderMetadata?: FolderMetadata | null;
   metadata?: Record<string, unknown>;
+  isVirtual?: boolean;
+  providerId?: string | null;
+  providerItemId?: string | null;
+  sourcePayload?: Record<string, unknown> | null;
+  localAbsolutePath?: string | null;
 };
 
 export type MetadataTagGroup = string;
@@ -200,6 +215,11 @@ export type SearchHit = {
   status: string;
   tags: string[];
   metadata: Record<string, unknown>;
+  isVirtual?: boolean;
+  providerId?: string | null;
+  providerItemId?: string | null;
+  sourcePayload?: Record<string, unknown> | null;
+  localAbsolutePath?: string | null;
 };
 
 export type SearchResponse = {
@@ -401,6 +421,12 @@ export type PlaylistItemsAddRequest = {
   assetIds: string[];
 };
 
+export type PlaylistItemsByPathsAddRequest = {
+  repoId: string;
+  playlistId: string;
+  paths: string[];
+};
+
 export type PlaylistItemsOrderRequest = {
   repoId: string;
   playlistId: string;
@@ -450,6 +476,7 @@ export type RepositoryMutationRequest = {
   path: string;
   backendPluginId?: string;
   backendConfig?: Record<string, unknown>;
+  skipInitialSync?: boolean;
 };
 
 export type RepositoryFolderRequest = {
@@ -459,6 +486,11 @@ export type RepositoryFolderRequest = {
 export type RepositoryRelocateRequest = {
   repoId: string;
   path: string;
+};
+
+export type RepositoryBackendConfigUpdateRequest = {
+  repoId: string;
+  backendConfig: Record<string, unknown>;
 };
 
 export type RepositoryExportTarget = "archive" | "git";
@@ -511,6 +543,38 @@ export type PluginCallRequest = {
   pluginId: string;
   method: string;
   payload?: Record<string, unknown>;
+};
+
+export type DownloaderPlaylistProgressEvent = {
+  phase: "start" | "track" | "complete";
+  playlistId: number;
+  playlistName?: string | null;
+  total: number;
+  completed: number;
+  failed: number;
+  currentSongId?: number | null;
+  currentSongName?: string | null;
+  error?: string | null;
+};
+
+export type DownloaderPlaylistTrackRequest = {
+  songId: number;
+  songName?: string | null;
+  sourcePayload?: Record<string, unknown> | null;
+};
+
+export type DownloaderPlaylistRequest = {
+  playlistId: number;
+  playlistName?: string;
+  tracks: DownloaderPlaylistTrackRequest[];
+  destination: {
+    kind: string;
+    path?: string | null;
+    repoId?: string | null;
+    parentPath?: string | null;
+  };
+  sourcePayload?: Record<string, unknown> | null;
+  level?: string | null;
 };
 
 export type PluginCallResponse<T = unknown> = {
@@ -579,6 +643,25 @@ export type FilePreviewSourceResponse = {
   sourceUrl?: string | null;
   mediaType: string;
   sizeBytes: number;
+  modifiedAt?: string | null;
+};
+
+export type EntryPlaybackRequest = {
+  repoId: string;
+  path: string;
+};
+
+export type EntryPlaybackSourceResponse = {
+  repoId: string;
+  path: string;
+  mediaType: string;
+  sourceUrl?: string | null;
+  localPath?: string | null;
+  tempFilePath?: string | null;
+  lyricPath?: string | null;
+  wordLyricPath?: string | null;
+  expiresAt?: string | null;
+  sizeBytes?: number | null;
   modifiedAt?: string | null;
 };
 

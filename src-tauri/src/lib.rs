@@ -1,5 +1,6 @@
 use std::{fs, path::PathBuf};
 use tauri::{
+    ipc::Channel,
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     utils::config::Color,
@@ -18,11 +19,13 @@ mod window_state;
 use repository_runtime::{ExternalApiConnectionStatus, RepositoryRuntime};
 use repository_service::{
     ApiDesignSnapshot, AssetDetail, BinaryFileWriteRequest, BinaryFileWriteResponse, CacheSnapshot,
-    FileBrowserRequest, FileBrowserSnapshot, FileCopyRequest, FileCreateRequest, FileDeleteRequest,
-    FileImportRequest, FileMoveRequest, FilePreviewSourceResponse, FileReadRequest,
-    FileRenameRequest, HardlinkCandidateResponse, HardlinkConfirmRequest, HardlinkConfirmResponse,
-    MetadataUpdateRequest, MetadataUpdateResponse, PlaylistDetail, PlaylistItemRemoveRequest,
-    PlaylistItemsAddRequest, PlaylistItemsOrderRequest, PlaylistMembershipRequest,
+    DownloaderPlaylistProgressEvent, DownloaderPlaylistRequest, EntryPlaybackRequest,
+    EntryPlaybackSourceResponse, FileBrowserRequest, FileBrowserSnapshot,
+    FileCopyRequest, FileCreateRequest, FileDeleteRequest, FileImportRequest, FileMoveRequest,
+    FilePreviewSourceResponse, FileReadRequest, FileRenameRequest, HardlinkCandidateResponse,
+    HardlinkConfirmRequest, HardlinkConfirmResponse, MetadataUpdateRequest,
+    MetadataUpdateResponse, PlaylistDetail, PlaylistItemRemoveRequest, PlaylistItemsAddRequest,
+    PlaylistItemsByPathsAddRequest, PlaylistItemsOrderRequest, PlaylistMembershipRequest,
     PlaylistMembershipSnapshot, PlaylistMutationRequest, PlaylistMutationResponse, PlaylistSummary,
     PluginArchiveReadRequest, PluginArchiveTextResponse, PluginCallRequest, PluginCallResult,
     PluginConfigDeleteRequest, PluginConfigSetRequest, PluginConfigSnapshot,
@@ -173,6 +176,16 @@ async fn add_playlist_items(
 }
 
 #[tauri::command]
+async fn add_playlist_items_by_paths(
+    request: PlaylistItemsByPathsAddRequest,
+    runtime: tauri::State<'_, RepositoryRuntime>,
+) -> Result<PlaylistDetail, String> {
+    runtime
+        .run_write(move |state| state.add_playlist_items_by_paths(request))
+        .await
+}
+
+#[tauri::command]
 async fn reorder_playlist_items(
     request: PlaylistItemsOrderRequest,
     runtime: tauri::State<'_, RepositoryRuntime>,
@@ -308,6 +321,16 @@ async fn prepare_preview_file_source(
 }
 
 #[tauri::command]
+async fn prepare_entry_playback_source(
+    request: EntryPlaybackRequest,
+    runtime: tauri::State<'_, RepositoryRuntime>,
+) -> Result<EntryPlaybackSourceResponse, String> {
+    runtime
+        .run_read(move |state| state.prepare_entry_playback_source(request))
+        .await
+}
+
+#[tauri::command]
 async fn call_plugin(
     request: PluginCallRequest,
     runtime: tauri::State<'_, RepositoryRuntime>,
@@ -315,6 +338,124 @@ async fn call_plugin(
     runtime
         .run_read(move |state| state.call_plugin(request))
         .await
+}
+
+#[tauri::command]
+async fn download_playlist_with_progress(
+    request: DownloaderPlaylistRequest,
+    progress: Channel<DownloaderPlaylistProgressEvent>,
+    runtime: tauri::State<'_, RepositoryRuntime>,
+) -> Result<serde_json::Value, String> {
+    let service_root = runtime.service_root();
+    let mut emit = |event: DownloaderPlaylistProgressEvent| {
+        progress.send(event).map_err(|error| error.to_string())
+    };
+    execute_playlist_download_with_progress(&service_root, request, &mut emit)
+}
+
+fn execute_playlist_download_with_progress(
+    service_root: &std::path::Path,
+    request: DownloaderPlaylistRequest,
+    emit: &mut dyn FnMut(DownloaderPlaylistProgressEvent) -> Result<(), String>,
+) -> Result<serde_json::Value, String> {
+    let playlist_name = request.playlist_name.clone();
+    let total = request.tracks.len();
+    let default_level = request
+        .level
+        .clone()
+        .unwrap_or_else(|| "standard".to_string());
+    let default_source_payload = request.source_payload.clone();
+    let destination = request.destination.clone();
+
+    emit(DownloaderPlaylistProgressEvent {
+        phase: "start".to_string(),
+        playlist_id: request.playlist_id,
+        playlist_name: playlist_name.clone(),
+        total,
+        completed: 0,
+        failed: 0,
+        current_song_id: None,
+        current_song_name: None,
+        error: None,
+    })?;
+
+    let mut completed = Vec::new();
+    let mut failed = Vec::new();
+    for track in request.tracks {
+        let current_song_name = track.song_name.clone();
+        let source_payload = track
+            .source_payload
+            .clone()
+            .or_else(|| default_source_payload.clone())
+            .unwrap_or_else(|| serde_json::json!({}));
+        let payload = serde_json::json!({
+            "songId": track.song_id,
+            "level": default_level,
+            "destination": destination,
+            "sourcePayload": source_payload,
+        });
+        match repository_service::call_downloader_download_track_package(service_root, payload) {
+            Ok(value) => {
+                completed.push(value);
+                emit(DownloaderPlaylistProgressEvent {
+                    phase: "track".to_string(),
+                    playlist_id: request.playlist_id,
+                    playlist_name: playlist_name.clone(),
+                    total,
+                    completed: completed.len(),
+                    failed: failed.len(),
+                    current_song_id: Some(track.song_id),
+                    current_song_name,
+                    error: None,
+                })?;
+            }
+            Err(error) => {
+                failed.push(serde_json::json!({
+                    "songId": track.song_id,
+                    "error": error,
+                }));
+                emit(DownloaderPlaylistProgressEvent {
+                    phase: "track".to_string(),
+                    playlist_id: request.playlist_id,
+                    playlist_name: playlist_name.clone(),
+                    total,
+                    completed: completed.len(),
+                    failed: failed.len(),
+                    current_song_id: Some(track.song_id),
+                    current_song_name,
+                    error: failed
+                        .last()
+                        .and_then(|value| value.get("error"))
+                        .and_then(serde_json::Value::as_str)
+                        .map(str::to_string),
+                })?;
+            }
+        }
+    }
+
+    let response = serde_json::json!({
+        "playlistId": request.playlist_id,
+        "playlistName": playlist_name,
+        "completed": completed,
+        "failed": failed,
+        "summary": {
+            "total": total,
+            "succeeded": completed.len(),
+            "failed": failed.len()
+        }
+    });
+    emit(DownloaderPlaylistProgressEvent {
+        phase: "complete".to_string(),
+        playlist_id: request.playlist_id,
+        playlist_name: request.playlist_name,
+        total,
+        completed: completed.len(),
+        failed: failed.len(),
+        current_song_id: None,
+        current_song_name: None,
+        error: None,
+    })?;
+    Ok(response)
 }
 
 #[tauri::command]
@@ -526,6 +667,19 @@ async fn relocate_repository(
 ) -> Result<RepositoryMutationResponse, String> {
     let response = runtime
         .run_repository_collection_write(move |state| state.relocate_repository(request))
+        .await?;
+    refresh_thumbnail_asset_scope(&app, &runtime).await?;
+    Ok(response)
+}
+
+#[tauri::command]
+async fn update_repository_backend_config(
+    request: repository_service::RepositoryBackendConfigUpdateRequest,
+    app: AppHandle,
+    runtime: tauri::State<'_, RepositoryRuntime>,
+) -> Result<RepositoryMutationResponse, String> {
+    let response = runtime
+        .run_repository_collection_write(move |state| state.update_repository_backend_config(request))
         .await?;
     refresh_thumbnail_asset_scope(&app, &runtime).await?;
     Ok(response)
@@ -802,6 +956,7 @@ pub fn run() {
             delete_playlist,
             get_playlist_detail,
             add_playlist_items,
+            add_playlist_items_by_paths,
             reorder_playlist_items,
             remove_playlist_item,
             set_playlist_membership,
@@ -816,7 +971,9 @@ pub fn run() {
             run_repository_action,
             read_file,
             prepare_preview_file_source,
+            prepare_entry_playback_source,
             call_plugin,
+            download_playlist_with_progress,
             read_plugin_archive_text,
             get_plugin_data_directory,
             get_plugin_config,
@@ -836,6 +993,7 @@ pub fn run() {
             attach_repository_folder,
             delete_repository,
             relocate_repository,
+            update_repository_backend_config,
             export_repository,
             sync_repository,
             list_hardlink_candidates,
@@ -853,4 +1011,136 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::{Mutex, OnceLock};
+
+    static TRACK_PACKAGE_CALLS: OnceLock<Mutex<Vec<serde_json::Value>>> = OnceLock::new();
+
+    fn record_track_package_call(payload: serde_json::Value) -> Result<serde_json::Value, String> {
+        TRACK_PACKAGE_CALLS
+            .get_or_init(|| Mutex::new(Vec::new()))
+            .lock()
+            .expect("track package call log lock should succeed")
+            .push(payload.clone());
+        let song_id = payload
+            .get("songId")
+            .and_then(serde_json::Value::as_i64)
+            .unwrap_or_default();
+        if song_id == 2002 {
+            return Err("mock download failed".to_string());
+        }
+        Ok(serde_json::json!({
+            "songId": song_id,
+            "paths": [format!("C:/Mock/{song_id}.mp3")]
+        }))
+    }
+
+    #[test]
+    fn execute_playlist_download_with_progress_reports_events_and_partial_failures() {
+        crate::repository_service::set_test_downloader_track_package_hook(Some(
+            record_track_package_call,
+        ));
+        TRACK_PACKAGE_CALLS
+            .get_or_init(|| Mutex::new(Vec::new()))
+            .lock()
+            .expect("track package call log lock should succeed")
+            .clear();
+
+        let request = repository_service::DownloaderPlaylistRequest {
+            playlist_id: 9001,
+            playlist_name: Some("夜跑歌单".to_string()),
+            tracks: vec![
+                repository_service::DownloaderPlaylistTrackRequest {
+                    song_id: 2001,
+                    song_name: Some("稻香".to_string()),
+                    source_payload: Some(serde_json::json!({
+                        "songId": 2001,
+                        "songName": "稻香",
+                        "accountId": "123456"
+                    })),
+                },
+                repository_service::DownloaderPlaylistTrackRequest {
+                    song_id: 2002,
+                    song_name: Some("孤勇者".to_string()),
+                    source_payload: None,
+                },
+            ],
+            destination: repository_service::DownloaderDestinationRequest {
+                kind: "localFolder".to_string(),
+                path: Some("C:/Mock/Playlist".to_string()),
+                repo_id: None,
+                parent_path: None,
+            },
+            source_payload: Some(serde_json::json!({
+                "playlistId": 9001,
+                "accountId": "123456"
+            })),
+            level: Some("lossless".to_string()),
+        };
+
+        let mut events = Vec::new();
+        let response = execute_playlist_download_with_progress(
+            std::path::Path::new("C:/Mock/.service-data"),
+            request,
+            &mut |event| {
+                events.push(event);
+                Ok(())
+            },
+        )
+        .expect("playlist download should produce a partial-success response");
+
+        crate::repository_service::set_test_downloader_track_package_hook(None);
+
+        let calls = TRACK_PACKAGE_CALLS
+            .get_or_init(|| Mutex::new(Vec::new()))
+            .lock()
+            .expect("track package call log lock should succeed")
+            .clone();
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[0]["songId"], serde_json::json!(2001));
+        assert_eq!(calls[0]["level"], serde_json::json!("lossless"));
+        assert_eq!(
+            calls[0]["sourcePayload"]["songName"],
+            serde_json::json!("稻香")
+        );
+        assert_eq!(calls[1]["songId"], serde_json::json!(2002));
+        assert_eq!(calls[1]["level"], serde_json::json!("lossless"));
+        assert_eq!(
+            calls[1]["sourcePayload"]["playlistId"],
+            serde_json::json!(9001)
+        );
+        assert_eq!(
+            calls[1]["destination"]["path"],
+            serde_json::json!("C:/Mock/Playlist")
+        );
+
+        assert_eq!(events.len(), 4);
+        assert_eq!(events[0].phase, "start");
+        assert_eq!(events[0].total, 2);
+        assert_eq!(events[1].phase, "track");
+        assert_eq!(events[1].current_song_id, Some(2001));
+        assert_eq!(events[1].current_song_name.as_deref(), Some("稻香"));
+        assert_eq!(events[1].completed, 1);
+        assert_eq!(events[1].failed, 0);
+        assert_eq!(events[2].phase, "track");
+        assert_eq!(events[2].current_song_id, Some(2002));
+        assert_eq!(events[2].current_song_name.as_deref(), Some("孤勇者"));
+        assert_eq!(events[2].completed, 1);
+        assert_eq!(events[2].failed, 1);
+        assert_eq!(events[2].error.as_deref(), Some("mock download failed"));
+        assert_eq!(events[3].phase, "complete");
+        assert_eq!(events[3].completed, 1);
+        assert_eq!(events[3].failed, 1);
+
+        assert_eq!(response["playlistId"], serde_json::json!(9001));
+        assert_eq!(response["summary"]["total"], serde_json::json!(2));
+        assert_eq!(response["summary"]["succeeded"], serde_json::json!(1));
+        assert_eq!(response["summary"]["failed"], serde_json::json!(1));
+        assert_eq!(response["completed"].as_array().map(Vec::len), Some(1));
+        assert_eq!(response["failed"].as_array().map(Vec::len), Some(1));
+    }
 }

@@ -39,6 +39,7 @@ const {
   repositoryBackendOptions,
   activeRepoId,
   activeSnapshot,
+  refreshRepositoryWorkspace,
   selectRepository,
   createNewRepository,
   attachRepository,
@@ -121,7 +122,11 @@ const {
   isConfirmingRepositoryDelete,
   isRemovingRepository,
   isSubmittingBackend,
+  neteaseLoginMessage,
+  neteaseQrSession,
   openRepositorySwitcherFromEvent,
+  pollNeteaseQrSession,
+  createNeteaseQrSession,
   repositorySwitcherButtonRef,
   selectedBackend,
   selectBackend,
@@ -133,7 +138,9 @@ const {
   attachRepository,
   createNewRepository,
   removeRepository,
+  repositories,
   repositoryBackendOptions,
+  refreshRepositoryWorkspace,
   route,
   router,
   selectRepository,
@@ -388,11 +395,15 @@ const {
     :is-confirming-repository-delete="isConfirmingRepositoryDelete"
     :is-removing-repository="isRemovingRepository"
     :is-submitting-backend="isSubmittingBackend"
+    :netease-login-message="neteaseLoginMessage"
+    :netease-qr-session="neteaseQrSession"
     :position="addRepositoryPopoverPosition"
     :repositories="repositories"
     :selected-backend="selectedBackend"
     @close="closeAddRepositoryPopover"
+    @create-netease-qr-session="createNeteaseQrSession"
     @delete-active="deleteActiveRepositoryFromMenu"
+    @poll-netease-qr-session="pollNeteaseQrSession"
     @select-backend="selectBackend"
     @select-repository="selectRepositoryFromList"
     @set-popover-ref="(element) => { addRepositoryPopoverRef = element; }"

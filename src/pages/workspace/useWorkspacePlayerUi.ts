@@ -66,6 +66,11 @@ export function playlistItemToFileEntry(item: PlaylistItem) {
     assetId: item.assetId,
     status: item.status,
     thumbnailPath: item.thumbnailPath,
+    isVirtual: item.isVirtual,
+    providerId: item.providerId,
+    providerItemId: item.providerItemId,
+    sourcePayload: item.sourcePayload,
+    localAbsolutePath: item.localAbsolutePath,
   };
 }
 

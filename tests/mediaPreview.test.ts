@@ -39,18 +39,10 @@ describe("MediaPreview", () => {
     });
 
     await waitFor(() => {
-      expect(getInvokeCalls("prepare_preview_file_source").at(-1)?.args).toMatchObject({
+      expect(getInvokeCalls("prepare_entry_playback_source").at(-1)?.args).toMatchObject({
         request: {
           repoId: "repo-main-001",
           path: "Music/theme-song.mp3",
-        },
-      });
-    });
-    await waitFor(() => {
-      expect(getInvokeCalls("read_file").at(-1)?.args).toMatchObject({
-        request: {
-          repoId: "repo-main-001",
-          path: "Music/theme-song.lrc",
         },
       });
     });
@@ -87,10 +79,10 @@ describe("MediaPreview", () => {
     });
 
     await waitFor(() => {
-      expect(getInvokeCalls("read_file").at(-1)?.args).toMatchObject({
+      expect(getInvokeCalls("prepare_entry_playback_source").at(-1)?.args).toMatchObject({
         request: {
           repoId: "repo-main-001",
-          path: "Music/no-lyrics-track.lrc",
+          path: "Music/no-lyrics-track.mp3",
         },
       });
     });

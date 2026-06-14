@@ -28,6 +28,18 @@ const THUMBNAIL_SIZE: u32 = 256;
 const MAX_REMOTE_THUMBNAIL_BYTES: u64 = 10 * 1024 * 1024;
 
 static FFMPEG_READY: OnceLock<Result<(), String>> = OnceLock::new();
+#[cfg(test)]
+type TestDownloaderPlaybackHook =
+    fn(serde_json::Value) -> Result<serde_json::Value, String>;
+#[cfg(test)]
+static TEST_DOWNLOADER_PLAYBACK_HOOK: OnceLock<Mutex<Option<TestDownloaderPlaybackHook>>> =
+    OnceLock::new();
+#[cfg(test)]
+type TestDownloaderTrackPackageHook =
+    fn(serde_json::Value) -> Result<serde_json::Value, String>;
+#[cfg(test)]
+static TEST_DOWNLOADER_TRACK_PACKAGE_HOOK: OnceLock<Mutex<Option<TestDownloaderTrackPackageHook>>> =
+    OnceLock::new();
 const REGISTRY_SCHEMA_SQL: &str = r#"
 CREATE TABLE IF NOT EXISTS repositories (
   repo_id TEXT PRIMARY KEY,
@@ -52,6 +64,7 @@ ON CONFLICT(component) DO UPDATE SET version = excluded.version;
 
 const LOCAL_FILESYSTEM_PLUGIN_ID: &str = "momobako.local-filesystem";
 const LEGACY_LOCAL_FILESYSTEM_PLUGIN_ID: &str = "builtin.local-filesystem";
+const NETEASE_CLOUD_MUSIC_PLUGIN_ID: &str = "momobako.source.netease-cloud-music";
 const PLUGIN_SDK_VERSION: &str = "1";
 const MAX_PARALLEL_IMPORTS: usize = 4;
 
@@ -82,6 +95,11 @@ CREATE TABLE IF NOT EXISTS assets (
   version INTEGER NOT NULL DEFAULT 1,
   updated_at TEXT NOT NULL,
   thumbnail_path TEXT,
+  is_virtual INTEGER NOT NULL DEFAULT 0,
+  provider_id TEXT,
+  provider_item_id TEXT,
+  source_payload_json TEXT,
+  local_absolute_path TEXT,
   FOREIGN KEY(repo_id) REFERENCES repositories(repo_id)
 );
 
@@ -434,6 +452,11 @@ pub struct AssetSummary {
     pub thumbnail_path: Option<String>,
     pub hardlink_group_id: Option<String>,
     pub hardlink_state: Option<String>,
+    pub is_virtual: bool,
+    pub provider_id: Option<String>,
+    pub provider_item_id: Option<String>,
+    pub source_payload: Option<serde_json::Value>,
+    pub local_absolute_path: Option<String>,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -506,6 +529,11 @@ pub struct PlaylistItem {
     pub status_reason: Option<String>,
     pub sort_order: i64,
     pub added_at: String,
+    pub is_virtual: bool,
+    pub provider_id: Option<String>,
+    pub provider_item_id: Option<String>,
+    pub source_payload: Option<serde_json::Value>,
+    pub local_absolute_path: Option<String>,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -563,6 +591,11 @@ pub struct SearchHit {
     pub status: String,
     pub tags: Vec<String>,
     pub metadata: BTreeMap<String, serde_json::Value>,
+    pub is_virtual: bool,
+    pub provider_id: Option<String>,
+    pub provider_item_id: Option<String>,
+    pub source_payload: Option<serde_json::Value>,
+    pub local_absolute_path: Option<String>,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -709,6 +742,14 @@ pub struct PlaylistItemsAddRequest {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
+pub struct PlaylistItemsByPathsAddRequest {
+    pub repo_id: String,
+    pub playlist_id: String,
+    pub paths: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
 pub struct PlaylistItemsOrderRequest {
     pub repo_id: String,
     pub playlist_id: String,
@@ -766,6 +807,11 @@ pub struct FileBrowserEntry {
     pub alias_paths: Vec<String>,
     pub folder_metadata: Option<FolderMetadata>,
     pub metadata: BTreeMap<String, serde_json::Value>,
+    pub is_virtual: bool,
+    pub provider_id: Option<String>,
+    pub provider_item_id: Option<String>,
+    pub source_payload: Option<serde_json::Value>,
+    pub local_absolute_path: Option<String>,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -781,6 +827,29 @@ pub struct FileBrowserSnapshot {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tree: Option<Vec<FileTreeNode>>,
     pub entries: Vec<FileBrowserEntry>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct EntryPlaybackRequest {
+    pub repo_id: String,
+    pub path: String,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct EntryPlaybackSourceResponse {
+    pub repo_id: String,
+    pub path: String,
+    pub media_type: String,
+    pub source_url: Option<String>,
+    pub local_path: Option<String>,
+    pub temp_file_path: Option<String>,
+    pub lyric_path: Option<String>,
+    pub word_lyric_path: Option<String>,
+    pub expires_at: Option<String>,
+    pub size_bytes: Option<i64>,
+    pub modified_at: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -832,6 +901,8 @@ pub struct RepositoryMutationRequest {
     pub path: String,
     pub backend_plugin_id: Option<String>,
     pub backend_config: Option<serde_json::Value>,
+    #[serde(default)]
+    pub skip_initial_sync: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -845,6 +916,13 @@ pub struct RepositoryFolderRequest {
 pub struct RepositoryRelocateRequest {
     pub repo_id: String,
     pub path: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RepositoryBackendConfigUpdateRequest {
+    pub repo_id: String,
+    pub backend_config: serde_json::Value,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -915,6 +993,52 @@ pub struct PluginCallRequest {
     pub method: String,
     #[serde(default)]
     pub payload: serde_json::Value,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct DownloaderDestinationRequest {
+    pub kind: String,
+    pub path: Option<String>,
+    pub repo_id: Option<String>,
+    pub parent_path: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct DownloaderPlaylistTrackRequest {
+    pub song_id: i64,
+    #[serde(default)]
+    pub song_name: Option<String>,
+    #[serde(default)]
+    pub source_payload: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct DownloaderPlaylistRequest {
+    pub playlist_id: i64,
+    pub playlist_name: Option<String>,
+    pub tracks: Vec<DownloaderPlaylistTrackRequest>,
+    pub destination: DownloaderDestinationRequest,
+    #[serde(default)]
+    pub source_payload: Option<serde_json::Value>,
+    #[serde(default)]
+    pub level: Option<String>,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct DownloaderPlaylistProgressEvent {
+    pub phase: String,
+    pub playlist_id: i64,
+    pub playlist_name: Option<String>,
+    pub total: usize,
+    pub completed: usize,
+    pub failed: usize,
+    pub current_song_id: Option<i64>,
+    pub current_song_name: Option<String>,
+    pub error: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -1203,6 +1327,11 @@ struct AssetPathRecord {
     thumbnail_path: Option<String>,
     hardlink_group_id: Option<String>,
     hardlink_state: Option<String>,
+    is_virtual: bool,
+    provider_id: Option<String>,
+    provider_item_id: Option<String>,
+    source_payload: Option<serde_json::Value>,
+    local_absolute_path: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -1214,6 +1343,11 @@ struct ExistingAssetRecord {
     created_at: String,
     modified_at: String,
     hash: Option<String>,
+    is_virtual: bool,
+    provider_id: Option<String>,
+    provider_item_id: Option<String>,
+    source_payload: Option<serde_json::Value>,
+    local_absolute_path: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -1767,6 +1901,16 @@ struct FileSystemEntry {
     extension: Option<String>,
     size_bytes: Option<i64>,
     modified_at: Option<String>,
+    #[serde(default)]
+    is_virtual: bool,
+    #[serde(default)]
+    provider_id: Option<String>,
+    #[serde(default)]
+    provider_item_id: Option<String>,
+    #[serde(default)]
+    source_payload: Option<serde_json::Value>,
+    #[serde(default)]
+    local_absolute_path: Option<String>,
 }
 
 struct RuntimeFileSystemBackendAdapter {
@@ -1791,6 +1935,10 @@ impl RepositoryState {
             initialized: Mutex::new(false),
             preview_sources: Mutex::new(BTreeMap::new()),
         }
+    }
+
+    pub fn root_path(&self) -> PathBuf {
+        self.root.clone()
     }
 
     pub fn ensure_initialized(&self) -> Result<(), String> {
@@ -1873,6 +2021,9 @@ impl RepositoryState {
         self.ensure_initialized()?;
 
         let backend = parse_backend_request(&self.root, &request)?;
+        if let Some(repository) = self.find_existing_repository_for_backend(&backend)? {
+            return Ok(RepositoryMutationResponse { repository });
+        }
         let repo_id = request
             .repo_id
             .unwrap_or_else(|| slugify_repo_id(&request.name, &request.path));
@@ -1888,9 +2039,11 @@ impl RepositoryState {
 
         let registry = Connection::open(&self.registry_path).map_err(db_error)?;
         upsert_registry_entry(&registry, &repo_root, &seed, &backend)?;
-        self.sync_repository(SyncRequest {
-            repo_id: repo_id.clone(),
-        })?;
+        if !request.skip_initial_sync {
+            self.sync_repository(SyncRequest {
+                repo_id: repo_id.clone(),
+            })?;
+        }
 
         let repository = self.load_repository_record(&repo_id)?.summary;
         Ok(RepositoryMutationResponse { repository })
@@ -1903,6 +2056,9 @@ impl RepositoryState {
         self.ensure_initialized()?;
 
         let requested_backend = parse_backend_request(&self.root, &request)?;
+        if let Some(repository) = self.find_existing_repository_for_backend(&requested_backend)? {
+            return Ok(RepositoryMutationResponse { repository });
+        }
         let repo_root =
             normalize_repository_root_for_backend(&request.path, &requested_backend, true)?;
         migrate_legacy_meta_dir_if_needed(&repo_root, &requested_backend.plugin_id)?;
@@ -1981,6 +2137,7 @@ impl RepositoryState {
                 path: path.to_string(),
                 backend_plugin_id: None,
                 backend_config: None,
+                skip_initial_sync: false,
             },
         )?;
         let repo_root = normalize_repository_root_for_backend(path, &backend, true)?;
@@ -1997,6 +2154,7 @@ impl RepositoryState {
             path: path.to_string(),
             backend_plugin_id: Some(backend.plugin_id.clone()),
             backend_config: Some(backend.config.clone()),
+            skip_initial_sync: false,
         };
 
         if metadata_path.exists() {
@@ -2079,6 +2237,66 @@ impl RepositoryState {
         self.sync_repository(SyncRequest {
             repo_id: request.repo_id.clone(),
         })?;
+
+        let repository = self.load_repository_record(&request.repo_id)?.summary;
+        Ok(RepositoryMutationResponse { repository })
+    }
+
+    pub fn update_repository_backend_config(
+        &self,
+        request: RepositoryBackendConfigUpdateRequest,
+    ) -> Result<RepositoryMutationResponse, String> {
+        self.ensure_initialized()?;
+
+        if !request.backend_config.is_object() {
+            return Err("backend config must be a JSON object".to_string());
+        }
+
+        let repo = self.load_repository_record(&request.repo_id)?;
+        let repo_root =
+            normalize_repository_root_for_backend(&repo.summary.path, &repo.backend_record, true)?;
+        let metadata_path = repository_meta_dir(&repo_root).join(REPO_METADATA_FILE_NAME);
+        if metadata_path.exists() {
+            let raw = fs::read_to_string(&metadata_path).map_err(io_error)?;
+            let metadata =
+                serde_json::from_str::<RepositoryMetadataFileImport>(&raw).map_err(json_error)?;
+            let rewritten = RepositoryMetadataFile {
+                repo_id: metadata.repo_id,
+                name: metadata
+                    .name
+                    .clone()
+                    .unwrap_or_else(|| infer_repository_name(&repo_root)),
+                root_path: metadata
+                    .root_path
+                    .clone()
+                    .unwrap_or_else(|| repo_root.to_string_lossy().to_string()),
+                backend_plugin_id: metadata
+                    .backend_plugin_id
+                    .clone()
+                    .unwrap_or_else(|| repo.backend_record.plugin_id.clone()),
+                backend_config: request.backend_config.clone(),
+                created_at: metadata.created_at.clone().unwrap_or_else(now_rfc3339),
+                schema_version: metadata.schema_version.unwrap_or(REPO_SCHEMA_VERSION),
+            };
+            let metadata_json = serde_json::to_string_pretty(&rewritten).map_err(json_error)?;
+            fs::write(&metadata_path, metadata_json).map_err(io_error)?;
+        }
+
+        let registry = Connection::open(&self.registry_path).map_err(db_error)?;
+        registry
+            .execute(
+                r#"
+                UPDATE repositories
+                SET backend_config_json = ?2, updated_at = ?3
+                WHERE repo_id = ?1
+                "#,
+                params![
+                    request.repo_id.as_str(),
+                    request.backend_config.to_string(),
+                    now_rfc3339()
+                ],
+            )
+            .map_err(db_error)?;
 
         let repository = self.load_repository_record(&request.repo_id)?.summary;
         Ok(RepositoryMutationResponse { repository })
@@ -2446,6 +2664,62 @@ impl RepositoryState {
         .map_err(db_error)
     }
 
+    pub fn add_playlist_items_by_paths(
+        &self,
+        request: PlaylistItemsByPathsAddRequest,
+    ) -> Result<PlaylistDetail, String> {
+        self.ensure_initialized()?;
+        let repo = self.load_repository_record(&request.repo_id)?;
+        let connection = self.open_repository_connection(
+            &repo.summary.repo_id,
+            &repo.summary.path,
+            &repo.backend_record,
+        )?;
+
+        let normalized_paths = request
+            .paths
+            .iter()
+            .map(|path| normalize_entry_path(path))
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut asset_ids = Vec::<String>::new();
+
+        for path in normalized_paths {
+            let direct = connection
+                .query_row(
+                    "SELECT asset_id FROM assets WHERE repo_id = ?1 AND path = ?2 AND status != 'deleted'",
+                    params![request.repo_id, path],
+                    |row| row.get::<_, String>(0),
+                )
+                .optional()
+                .map_err(db_error)?;
+            if let Some(asset_id) = direct {
+                asset_ids.push(asset_id);
+                continue;
+            }
+
+            let prefix = format!("{path}/%");
+            let mut stmt = connection
+                .prepare(
+                    "SELECT asset_id FROM assets WHERE repo_id = ?1 AND status != 'deleted' AND path LIKE ?2 ORDER BY path COLLATE NOCASE",
+                )
+                .map_err(db_error)?;
+            let rows = stmt
+                .query_map(params![request.repo_id, prefix], |row| row.get::<_, String>(0))
+                .map_err(db_error)?;
+            for row in rows {
+                asset_ids.push(row.map_err(db_error)?);
+            }
+        }
+
+        asset_ids.sort();
+        asset_ids.dedup();
+        self.add_playlist_items(PlaylistItemsAddRequest {
+            repo_id: request.repo_id,
+            playlist_id: request.playlist_id,
+            asset_ids,
+        })
+    }
+
     pub fn reorder_playlist_items(
         &self,
         request: PlaylistItemsOrderRequest,
@@ -2741,6 +3015,104 @@ impl RepositoryState {
             media_type,
             size_bytes: metadata.len() as i64,
             modified_at,
+        })
+    }
+
+    pub fn prepare_entry_playback_source(
+        &self,
+        request: EntryPlaybackRequest,
+    ) -> Result<EntryPlaybackSourceResponse, String> {
+        self.ensure_initialized()?;
+
+        let repo = self.load_repository_record(&request.repo_id)?;
+        let entry_path = normalize_entry_path(&request.path)?;
+        let connection = self.open_repository_connection(
+            &repo.summary.repo_id,
+            &repo.summary.path,
+            &repo.backend_record,
+        )?;
+        let asset_map = load_asset_path_map(&connection, &request.repo_id).map_err(db_error)?;
+        let asset = asset_map
+            .get(&entry_path)
+            .ok_or_else(|| format!("asset not found: {entry_path}"))?;
+
+        if !asset.is_virtual {
+            let preview = self.prepare_preview_file_source(FileReadRequest {
+                repo_id: request.repo_id.clone(),
+                path: entry_path.clone(),
+            })?;
+            return Ok(EntryPlaybackSourceResponse {
+                repo_id: request.repo_id,
+                path: entry_path,
+                media_type: preview.media_type,
+                source_url: None,
+                local_path: asset.local_absolute_path.clone(),
+                temp_file_path: None,
+                lyric_path: None,
+                word_lyric_path: None,
+                expires_at: None,
+                size_bytes: Some(preview.size_bytes),
+                modified_at: preview.modified_at,
+            });
+        }
+
+        let metadata = load_metadata_map(&connection, &asset.asset_id).map_err(db_error)?;
+        let source_payload = asset
+            .source_payload
+            .clone()
+            .or_else(|| metadata.get("sourcePayload").cloned())
+            .unwrap_or_else(|| serde_json::json!({}));
+        let song_id = source_payload
+            .get("songId")
+            .or_else(|| metadata.get("songId"))
+            .and_then(serde_json::Value::as_i64)
+            .or_else(|| {
+                source_payload
+                    .get("songId")
+                    .or_else(|| metadata.get("songId"))
+                    .and_then(serde_json::Value::as_str)
+                    .and_then(|value| value.parse::<i64>().ok())
+            })
+            .ok_or_else(|| "virtual entry is missing songId".to_string())?;
+        let account_cookie = source_payload
+            .get("accountCookie")
+            .or_else(|| metadata.get("accountCookie"))
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default();
+        let backend_account_cookie = repo
+            .backend_record
+            .config
+            .get("cookie")
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or(account_cookie);
+        let payload = serde_json::json!({
+            "accountCookie": backend_account_cookie,
+            "songId": song_id,
+            "level": source_payload.get("level").cloned().unwrap_or_else(|| serde_json::json!("standard")),
+            "repoId": request.repo_id,
+            "entryPath": entry_path,
+            "sourcePayload": source_payload,
+        });
+        let response = call_downloader_prepare_track_playback(&self.root, payload)?;
+        let media_type = response
+            .get("mediaType")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("audio/mpeg")
+            .to_string();
+        Ok(EntryPlaybackSourceResponse {
+            repo_id: request.repo_id,
+            path: request.path,
+            media_type,
+            source_url: response.get("sourceUrl").and_then(serde_json::Value::as_str).map(str::to_string),
+            local_path: response.get("localPath").and_then(serde_json::Value::as_str).map(str::to_string),
+            temp_file_path: response.get("tempFilePath").and_then(serde_json::Value::as_str).map(str::to_string),
+            lyric_path: response.get("lyricPath").and_then(serde_json::Value::as_str).map(str::to_string),
+            word_lyric_path: response.get("wordLyricPath").and_then(serde_json::Value::as_str).map(str::to_string),
+            expires_at: response.get("expiresAt").and_then(serde_json::Value::as_str).map(str::to_string),
+            size_bytes: response.get("sizeBytes").and_then(serde_json::Value::as_i64),
+            modified_at: response.get("modifiedAt").and_then(serde_json::Value::as_str).map(str::to_string),
         })
     }
 
@@ -3696,13 +4068,18 @@ impl RepositoryState {
             existing_thumbnail_path,
         )?;
         let file = DiscoveredFile {
-            absolute_path: resolve_repository_relative_path(&repo_root, &entry_path)?,
+            absolute_path: Some(resolve_repository_relative_path(&repo_root, &entry_path)?),
             relative_path: entry_path.clone(),
             filename,
             extension,
             size_bytes,
             created_at: None,
             modified_at,
+            is_virtual: false,
+            provider_id: None,
+            provider_item_id: None,
+            source_payload: None,
+            local_absolute_path: None,
         };
         let existing_record =
             load_entry_thumbnail_record(&connection, &request.repo_id, &entry_path, kind)
@@ -4698,6 +5075,36 @@ impl RepositoryState {
         rows.collect::<Result<Vec<_>, _>>().map_err(db_error)
     }
 
+    fn find_existing_repository_for_backend(
+        &self,
+        backend: &RepositoryBackendRecord,
+    ) -> Result<Option<RepositorySummary>, String> {
+        if backend.plugin_id != NETEASE_CLOUD_MUSIC_PLUGIN_ID {
+            return Ok(None);
+        }
+        let account_id = backend
+            .config
+            .get("accountId")
+            .and_then(normalized_netease_account_id);
+        let Some(account_id) = account_id else {
+            return Ok(None);
+        };
+        Ok(self
+            .load_repository_records()?
+            .into_iter()
+            .find(|record| {
+                record.backend_record.plugin_id == NETEASE_CLOUD_MUSIC_PLUGIN_ID
+                    && record
+                        .backend_record
+                        .config
+                        .get("accountId")
+                        .and_then(normalized_netease_account_id)
+                        .as_deref()
+                        == Some(account_id.as_str())
+            })
+            .map(|record| record.summary))
+    }
+
     fn repository_backend_in_use(&self, plugin_id: &str) -> Result<bool, String> {
         let registry = Connection::open(&self.registry_path).map_err(db_error)?;
         let plugin_registry = backend_plugin_registry(&self.root);
@@ -4824,7 +5231,18 @@ fn load_asset_path_map(
 ) -> Result<BTreeMap<String, AssetPathRecord>, rusqlite::Error> {
     let mut stmt = connection.prepare(
         r#"
-        SELECT a.path, a.asset_id, a.status, a.thumbnail_path, hm.group_id, hm.link_state
+        SELECT
+          a.path,
+          a.asset_id,
+          a.status,
+          a.thumbnail_path,
+          hm.group_id,
+          hm.link_state,
+          a.is_virtual,
+          a.provider_id,
+          a.provider_item_id,
+          a.source_payload_json,
+          a.local_absolute_path
         FROM assets a
         LEFT JOIN hardlink_members hm ON hm.repo_id = a.repo_id AND hm.asset_id = a.asset_id
         WHERE a.repo_id = ?1
@@ -4839,12 +5257,29 @@ fn load_asset_path_map(
             row.get::<_, Option<String>>(3)?,
             row.get::<_, Option<String>>(4)?,
             row.get::<_, Option<String>>(5)?,
+            row.get::<_, i64>(6)?,
+            row.get::<_, Option<String>>(7)?,
+            row.get::<_, Option<String>>(8)?,
+            row.get::<_, Option<String>>(9)?,
+            row.get::<_, Option<String>>(10)?,
         ))
     })?;
 
     let mut map = BTreeMap::new();
     for row in rows {
-        let (path, asset_id, status, thumbnail_path, hardlink_group_id, hardlink_state) = row?;
+        let (
+            path,
+            asset_id,
+            status,
+            thumbnail_path,
+            hardlink_group_id,
+            hardlink_state,
+            is_virtual,
+            provider_id,
+            provider_item_id,
+            source_payload_json,
+            local_absolute_path,
+        ) = row?;
         map.insert(
             path,
             AssetPathRecord {
@@ -4853,6 +5288,11 @@ fn load_asset_path_map(
                 thumbnail_path,
                 hardlink_group_id,
                 hardlink_state,
+                is_virtual: is_virtual != 0,
+                provider_id,
+                provider_item_id,
+                source_payload: parse_json_column_nullable(source_payload_json)?,
+                local_absolute_path,
             },
         );
     }
@@ -5301,7 +5741,12 @@ fn load_playlist_detail(
           a.filename,
           a.extension,
           a.thumbnail_path,
-          a.status
+          a.status,
+          a.is_virtual,
+          a.provider_id,
+          a.provider_item_id,
+          a.source_payload_json,
+          a.local_absolute_path
         FROM playlist_items pi
         LEFT JOIN assets a
           ON a.repo_id = pi.repo_id AND a.asset_id = pi.asset_id
@@ -5321,6 +5766,11 @@ fn load_playlist_detail(
             row.get::<_, Option<String>>(7)?,
             row.get::<_, Option<String>>(8)?,
             row.get::<_, Option<String>>(9)?,
+            row.get::<_, Option<i64>>(10)?,
+            row.get::<_, Option<String>>(11)?,
+            row.get::<_, Option<String>>(12)?,
+            row.get::<_, Option<String>>(13)?,
+            row.get::<_, Option<String>>(14)?,
         ))
     })?;
 
@@ -5339,6 +5789,11 @@ fn load_playlist_detail(
                 extension,
                 thumbnail_path,
                 asset_status,
+                is_virtual,
+                provider_id,
+                provider_item_id,
+                source_payload_json,
+                local_absolute_path,
             ) = row;
             let extension = extension.unwrap_or_default();
             let path_value = path.clone().unwrap_or_default();
@@ -5380,6 +5835,11 @@ fn load_playlist_detail(
                 status_reason,
                 sort_order,
                 added_at,
+                is_virtual: is_virtual.unwrap_or(0) != 0,
+                provider_id,
+                provider_item_id,
+                source_payload: parse_json_column_nullable(source_payload_json)?,
+                local_absolute_path,
             })
         })
         .collect::<Result<Vec<_>, rusqlite::Error>>()?;
@@ -5868,7 +6328,12 @@ fn load_assets(
           a.version,
           a.thumbnail_path,
           hm.group_id,
-          hm.link_state
+          hm.link_state,
+          a.is_virtual,
+          a.provider_id,
+          a.provider_item_id,
+          a.source_payload_json,
+          a.local_absolute_path
         FROM assets a
         LEFT JOIN hardlink_members hm ON hm.repo_id = a.repo_id AND hm.asset_id = a.asset_id
         WHERE a.repo_id = ?1 AND a.status != 'deleted'
@@ -5890,6 +6355,11 @@ fn load_assets(
             row.get::<_, Option<String>>(9)?,
             row.get::<_, Option<String>>(10)?,
             row.get::<_, Option<String>>(11)?,
+            row.get::<_, i64>(12)?,
+            row.get::<_, Option<String>>(13)?,
+            row.get::<_, Option<String>>(14)?,
+            row.get::<_, Option<String>>(15)?,
+            row.get::<_, Option<String>>(16)?,
         ))
     })?;
 
@@ -5911,6 +6381,11 @@ fn load_assets(
                 thumbnail_path,
                 hardlink_group_id,
                 hardlink_state,
+                is_virtual,
+                provider_id,
+                provider_item_id,
+                source_payload_json,
+                local_absolute_path,
             )| {
                 let tags = load_tags(connection, &asset_id)?;
 
@@ -5929,6 +6404,11 @@ fn load_assets(
                     thumbnail_path,
                     hardlink_group_id,
                     hardlink_state,
+                    is_virtual: is_virtual != 0,
+                    provider_id,
+                    provider_item_id,
+                    source_payload: parse_json_column_nullable(source_payload_json)?,
+                    local_absolute_path,
                 })
             },
         )
@@ -6417,7 +6897,12 @@ fn load_asset_summary(
               a.version,
               a.thumbnail_path,
               hm.group_id,
-              hm.link_state
+              hm.link_state,
+              a.is_virtual,
+              a.provider_id,
+              a.provider_item_id,
+              a.source_payload_json,
+              a.local_absolute_path
             FROM assets a
             LEFT JOIN hardlink_members hm ON hm.repo_id = a.repo_id AND hm.asset_id = a.asset_id
             WHERE a.repo_id = ?1 AND a.asset_id = ?2
@@ -6437,6 +6922,11 @@ fn load_asset_summary(
                     row.get::<_, Option<String>>(9)?,
                     row.get::<_, Option<String>>(10)?,
                     row.get::<_, Option<String>>(11)?,
+                    row.get::<_, i64>(12)?,
+                    row.get::<_, Option<String>>(13)?,
+                    row.get::<_, Option<String>>(14)?,
+                    row.get::<_, Option<String>>(15)?,
+                    row.get::<_, Option<String>>(16)?,
                 ))
             },
         )
@@ -6455,6 +6945,11 @@ fn load_asset_summary(
                 thumbnail_path,
                 hardlink_group_id,
                 hardlink_state,
+                is_virtual,
+                provider_id,
+                provider_item_id,
+                source_payload_json,
+                local_absolute_path,
             )| {
                 let tags = load_tags(connection, &asset_id)?;
                 Ok(AssetSummary {
@@ -6472,6 +6967,11 @@ fn load_asset_summary(
                     thumbnail_path,
                     hardlink_group_id,
                     hardlink_state,
+                    is_virtual: is_virtual != 0,
+                    provider_id,
+                    provider_item_id,
+                    source_payload: parse_json_column_nullable(source_payload_json)?,
+                    local_absolute_path,
                 })
             },
         )
@@ -6498,7 +6998,12 @@ fn load_asset_summary_from_transaction(
               a.version,
               a.thumbnail_path,
               hm.group_id,
-              hm.link_state
+              hm.link_state,
+              a.is_virtual,
+              a.provider_id,
+              a.provider_item_id,
+              a.source_payload_json,
+              a.local_absolute_path
             FROM assets a
             LEFT JOIN hardlink_members hm ON hm.repo_id = a.repo_id AND hm.asset_id = a.asset_id
             WHERE a.repo_id = ?1 AND a.asset_id = ?2
@@ -6518,6 +7023,11 @@ fn load_asset_summary_from_transaction(
                     row.get::<_, Option<String>>(9)?,
                     row.get::<_, Option<String>>(10)?,
                     row.get::<_, Option<String>>(11)?,
+                    row.get::<_, i64>(12)?,
+                    row.get::<_, Option<String>>(13)?,
+                    row.get::<_, Option<String>>(14)?,
+                    row.get::<_, Option<String>>(15)?,
+                    row.get::<_, Option<String>>(16)?,
                 ))
             },
         )
@@ -6536,6 +7046,11 @@ fn load_asset_summary_from_transaction(
         thumbnail_path,
         hardlink_group_id,
         hardlink_state,
+        is_virtual,
+        provider_id,
+        provider_item_id,
+        source_payload_json,
+        local_absolute_path,
     )) = base
     else {
         return Ok(None);
@@ -6567,6 +7082,11 @@ fn load_asset_summary_from_transaction(
         thumbnail_path,
         hardlink_group_id,
         hardlink_state,
+        is_virtual: is_virtual != 0,
+        provider_id,
+        provider_item_id,
+        source_payload: parse_json_column_nullable(source_payload_json)?,
+        local_absolute_path,
     }))
 }
 
@@ -6597,6 +7117,11 @@ fn search_repository_assets(
             status: asset.status.clone(),
             tags: asset.tags.clone(),
             metadata,
+            is_virtual: asset.is_virtual,
+            provider_id: asset.provider_id.clone(),
+            provider_item_id: asset.provider_item_id.clone(),
+            source_payload: asset.source_payload.clone(),
+            local_absolute_path: asset.local_absolute_path.clone(),
         });
     }
 
@@ -7635,6 +8160,11 @@ fn query_smart_folder_entries(
                 .unwrap_or_default(),
             folder_metadata: None,
             metadata,
+            is_virtual: asset.is_virtual,
+            provider_id: asset.provider_id.clone(),
+            provider_item_id: asset.provider_item_id.clone(),
+            source_payload: asset.source_payload.clone(),
+            local_absolute_path: asset.local_absolute_path.clone(),
         });
     }
     sort_file_browser_entries(&mut results, filter.sort.as_ref());
@@ -7842,6 +8372,15 @@ fn parse_json_column_optional(
     }
 }
 
+fn parse_json_column_nullable(
+    value_json: Option<String>,
+) -> Result<Option<serde_json::Value>, rusqlite::Error> {
+    match value_json {
+        Some(value) => Ok(Some(parse_json_column(&value)?)),
+        None => Ok(None),
+    }
+}
+
 fn metadata_defaults_for_files(
     service_root: &Path,
     files: &[DiscoveredFile],
@@ -7901,7 +8440,20 @@ fn sync_repository_files(
 
     let mut existing_stmt = tx.prepare(
         r#"
-        SELECT asset_id, path, status, thumbnail_path, size_bytes, created_at, modified_at, hash
+        SELECT
+          asset_id,
+          path,
+          status,
+          thumbnail_path,
+          size_bytes,
+          created_at,
+          modified_at,
+          hash,
+          is_virtual,
+          provider_id,
+          provider_item_id,
+          source_payload_json,
+          local_absolute_path
         FROM assets
         WHERE repo_id = ?1
         "#,
@@ -7918,6 +8470,11 @@ fn sync_repository_files(
                 created_at: row.get::<_, String>(5)?,
                 modified_at: row.get::<_, String>(6)?,
                 hash: row.get::<_, Option<String>>(7)?,
+                is_virtual: row.get::<_, i64>(8)? != 0,
+                provider_id: row.get::<_, Option<String>>(9)?,
+                provider_item_id: row.get::<_, Option<String>>(10)?,
+                source_payload: parse_json_column_nullable(row.get::<_, Option<String>>(11)?)?,
+                local_absolute_path: row.get::<_, Option<String>>(12)?,
             },
         ))
     })?;
@@ -7960,12 +8517,20 @@ fn sync_repository_files(
         if let Some(existing_record) = existing_by_path.remove(&file.relative_path) {
             let asset_id = existing_record.asset_id;
             let asset_created_at = existing_record.created_at.clone();
-            let content_hash = if existing_record.size_bytes == file.size_bytes
+            let content_hash = if file.is_virtual {
+                existing_record.hash.unwrap_or_default()
+            } else if existing_record.size_bytes == file.size_bytes
                 && existing_record.modified_at == file.modified_at
             {
                 match existing_record.hash.filter(|hash| is_content_hash(hash)) {
                     Some(hash) => hash,
-                    None => file_sha256_hash(&file.absolute_path).map_err(|error| {
+                    None => file_sha256_hash(file.absolute_path.as_deref().ok_or_else(|| {
+                        rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::new(
+                            std::io::ErrorKind::Other,
+                            "missing absolute path for non-virtual file",
+                        )))
+                    })?)
+                    .map_err(|error| {
                         rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::new(
                             std::io::ErrorKind::Other,
                             error,
@@ -7973,7 +8538,13 @@ fn sync_repository_files(
                     })?,
                 }
             } else {
-                file_sha256_hash(&file.absolute_path).map_err(|error| {
+                file_sha256_hash(file.absolute_path.as_deref().ok_or_else(|| {
+                    rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::new(
+                        std::io::ErrorKind::Other,
+                        "missing absolute path for non-virtual file",
+                    )))
+                })?)
+                .map_err(|error| {
                     rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::new(
                         std::io::ErrorKind::Other,
                         error,
@@ -7983,7 +8554,9 @@ fn sync_repository_files(
             tx.execute(
                 r#"
                 UPDATE assets
-                SET filename = ?3, extension = ?4, size_bytes = ?5, modified_at = ?6, hash = ?7, status = 'synced', updated_at = ?8, thumbnail_path = ?9
+                SET filename = ?3, extension = ?4, size_bytes = ?5, modified_at = ?6, hash = ?7,
+                    status = 'synced', updated_at = ?8, thumbnail_path = ?9, is_virtual = ?10,
+                    provider_id = ?11, provider_item_id = ?12, source_payload_json = ?13, local_absolute_path = ?14
                 WHERE repo_id = ?1 AND asset_id = ?2
                 "#,
                 params![
@@ -7995,19 +8568,26 @@ fn sync_repository_files(
                     file.modified_at,
                     if content_hash.is_empty() { None } else { Some(content_hash.as_str()) },
                     now,
-                    existing_record.thumbnail_path
+                    existing_record.thumbnail_path,
+                    if file.is_virtual { 1 } else { 0 },
+                    file.provider_id,
+                    file.provider_item_id,
+                    file.source_payload.as_ref().map(|value| value.to_string()),
+                    file.local_absolute_path
                 ],
             )?;
             if existing_record.status == "deleted" {
                 created_events += 1;
             }
-            update_hardlink_member_verification(
-                tx,
-                &repo.summary.repo_id,
-                &asset_id,
-                &file.relative_path,
-                &content_hash,
-            )?;
+            if !file.is_virtual && !content_hash.is_empty() {
+                update_hardlink_member_verification(
+                    tx,
+                    &repo.summary.repo_id,
+                    &asset_id,
+                    &file.relative_path,
+                    &content_hash,
+                )?;
+            }
             ensure_default_metadata(
                 tx,
                 &asset_id,
@@ -8035,19 +8615,30 @@ fn sync_repository_files(
             created_events += 1;
         } else {
             let asset_id = asset_id_for_path(&repo.summary.repo_id, &file.relative_path);
-            let content_hash = file_sha256_hash(&file.absolute_path).map_err(|error| {
-                rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    error,
-                )))
-            })?;
+            let content_hash = if file.is_virtual {
+                String::new()
+            } else {
+                file_sha256_hash(file.absolute_path.as_deref().ok_or_else(|| {
+                    rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::new(
+                        std::io::ErrorKind::Other,
+                        "missing absolute path for non-virtual file",
+                    )))
+                })?)
+                .map_err(|error| {
+                    rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::new(
+                        std::io::ErrorKind::Other,
+                        error,
+                    )))
+                })?
+            };
             tx.execute(
                 r#"
                 INSERT INTO assets (
                   asset_id, repo_id, path, filename, extension, size_bytes,
-                  created_at, modified_at, hash, status, version, updated_at, thumbnail_path
+                  created_at, modified_at, hash, status, version, updated_at, thumbnail_path,
+                  is_virtual, provider_id, provider_item_id, source_payload_json, local_absolute_path
                 )
-                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 'synced', 1, ?10, ?11)
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 'synced', 1, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
                 "#,
                 params![
                     asset_id,
@@ -8060,10 +8651,15 @@ fn sync_repository_files(
                     file.modified_at,
                     content_hash,
                     now,
-                    Option::<String>::None
+                    Option::<String>::None,
+                    if file.is_virtual { 1 } else { 0 },
+                    file.provider_id,
+                    file.provider_item_id,
+                    file.source_payload.as_ref().map(|value| value.to_string()),
+                    file.local_absolute_path
                 ],
             )?;
-            if !skip_hardlink_candidate_paths.contains(&file.relative_path) {
+            if !file.is_virtual && !skip_hardlink_candidate_paths.contains(&file.relative_path) {
                 record_hardlink_candidate_for_new_asset(
                     tx,
                     &repo.summary.repo_id,
@@ -8073,7 +8669,19 @@ fn sync_repository_files(
                     file.size_bytes,
                 )?;
             }
-            let palette = extract_image_palette(&file.absolute_path, &file.extension);
+            let palette = if file.is_virtual {
+                Vec::new()
+            } else {
+                extract_image_palette(
+                    file.absolute_path.as_deref().ok_or_else(|| {
+                        rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::new(
+                            std::io::ErrorKind::Other,
+                            "missing absolute path for non-virtual file",
+                        )))
+                    })?,
+                    &file.extension,
+                )
+            };
             insert_default_metadata(
                 tx,
                 &asset_id,
@@ -9008,7 +9616,7 @@ fn collect_repository_files_recursive(
             .unwrap_or_default();
 
         files.push(DiscoveredFile {
-            absolute_path: path,
+            absolute_path: Some(path),
             relative_path: relative,
             filename: file_name.to_string(),
             extension,
@@ -9026,6 +9634,11 @@ fn collect_repository_files_recursive(
                 .transpose()
                 .map_err(|error| std::io::Error::new(std::io::ErrorKind::Other, error))?
                 .unwrap_or_else(now_rfc3339),
+            is_virtual: false,
+            provider_id: None,
+            provider_item_id: None,
+            source_payload: None,
+            local_absolute_path: None,
         });
     }
 
@@ -9591,13 +10204,23 @@ fn is_audio_extension(extension: &str) -> bool {
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct DiscoveredFile {
-    absolute_path: PathBuf,
+    absolute_path: Option<PathBuf>,
     relative_path: String,
     filename: String,
     extension: String,
     size_bytes: i64,
     created_at: Option<String>,
     modified_at: String,
+    #[serde(default)]
+    is_virtual: bool,
+    #[serde(default)]
+    provider_id: Option<String>,
+    #[serde(default)]
+    provider_item_id: Option<String>,
+    #[serde(default)]
+    source_payload: Option<serde_json::Value>,
+    #[serde(default)]
+    local_absolute_path: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -9610,15 +10233,30 @@ struct BackendDiscoveredFile {
     size_bytes: i64,
     created_at: Option<String>,
     modified_at: String,
+    #[serde(default)]
+    is_virtual: bool,
+    #[serde(default)]
+    provider_id: Option<String>,
+    #[serde(default)]
+    provider_item_id: Option<String>,
+    #[serde(default)]
+    source_payload: Option<serde_json::Value>,
+    #[serde(default)]
+    local_absolute_path: Option<String>,
 }
 
 impl BackendDiscoveredFile {
     fn into_discovered_file(self, repo_root: &Path) -> Result<DiscoveredFile, String> {
         let relative_path = normalize_entry_path(&self.relative_path)?;
-        let absolute_path = self
-            .absolute_path
-            .map(Ok)
-            .unwrap_or_else(|| resolve_repository_relative_path(repo_root, &relative_path))?;
+        let absolute_path = if self.is_virtual {
+            self.absolute_path
+        } else {
+            Some(
+                self.absolute_path
+                    .map(Ok)
+                    .unwrap_or_else(|| resolve_repository_relative_path(repo_root, &relative_path))?,
+            )
+        };
         Ok(DiscoveredFile {
             absolute_path,
             relative_path,
@@ -9627,6 +10265,11 @@ impl BackendDiscoveredFile {
             size_bytes: self.size_bytes,
             created_at: self.created_at,
             modified_at: self.modified_at,
+            is_virtual: self.is_virtual,
+            provider_id: self.provider_id,
+            provider_item_id: self.provider_item_id,
+            source_payload: self.source_payload,
+            local_absolute_path: self.local_absolute_path,
         })
     }
 }
@@ -9651,6 +10294,16 @@ struct MetadataDefaultsBatchResponse {
 
 fn slugify_repo_id(name: &str, path: &str) -> String {
     slugify_ascii_component(&format!("{name}-{path}"))
+}
+
+fn normalized_netease_account_id(value: &serde_json::Value) -> Option<String> {
+    value
+        .as_str()
+        .map(str::trim)
+        .filter(|item| !item.is_empty())
+        .map(ToOwned::to_owned)
+        .or_else(|| value.as_i64().map(|item| item.to_string()))
+        .or_else(|| value.as_u64().map(|item| item.to_string()))
 }
 
 fn asset_id_for_path(repo_id: &str, relative_path: &str) -> String {
@@ -10036,6 +10689,68 @@ fn backend_plugin_registry(service_root: &Path) -> BackendPluginRegistry {
 
 fn plugin_management_registry(service_root: &Path) -> BackendPluginRegistry {
     BackendPluginRegistry::load_for_management(service_root)
+}
+
+fn call_downloader_prepare_track_playback(
+    service_root: &Path,
+    payload: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    #[cfg(test)]
+    if let Some(hook) = TEST_DOWNLOADER_PLAYBACK_HOOK
+        .get_or_init(|| Mutex::new(None))
+        .lock()
+        .map_err(|_| "test downloader playback hook lock poisoned".to_string())?
+        .as_ref()
+        .copied()
+    {
+        return hook(payload);
+    }
+
+    backend_plugin_registry(service_root).call(
+        "momobako.service.downloader",
+        "downloader.prepareTrackPlayback",
+        payload,
+    )
+}
+
+pub(crate) fn call_downloader_download_track_package(
+    service_root: &Path,
+    payload: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    #[cfg(test)]
+    if let Some(hook) = TEST_DOWNLOADER_TRACK_PACKAGE_HOOK
+        .get_or_init(|| Mutex::new(None))
+        .lock()
+        .map_err(|_| "test downloader track package hook lock poisoned".to_string())?
+        .as_ref()
+        .copied()
+    {
+        return hook(payload);
+    }
+
+    backend_plugin_registry(service_root).call(
+        "momobako.service.downloader",
+        "downloader.downloadTrackPackage",
+        payload,
+    )
+}
+
+#[cfg(test)]
+pub(crate) fn set_test_downloader_playback_hook(hook: Option<TestDownloaderPlaybackHook>) {
+    *TEST_DOWNLOADER_PLAYBACK_HOOK
+        .get_or_init(|| Mutex::new(None))
+        .lock()
+        .expect("test downloader playback hook lock should succeed") = hook;
+}
+
+#[cfg(test)]
+pub(crate) fn set_test_downloader_track_package_hook(
+    hook: Option<TestDownloaderTrackPackageHook>,
+) {
+    *TEST_DOWNLOADER_TRACK_PACKAGE_HOOK
+        .get_or_init(|| Mutex::new(None))
+        .lock()
+        .expect("test downloader track package hook lock should succeed") = hook;
 }
 
 fn load_runtime_plugin_manifests(service_root: &Path) -> Vec<DiscoveredPluginManifest> {
@@ -11209,6 +11924,18 @@ fn core_tauri_api_definitions() -> Vec<ApiDefinition> {
         ),
         tauri_api_definition(
             "Playlist API",
+            "add_playlist_items_by_paths",
+            "按文件或目录路径向播放列表添加条目。",
+            serde_json::json!({
+                "request": {
+                    "repoId": "<repoId>",
+                    "playlistId": "<playlistId>",
+                    "paths": ["<path>"]
+                }
+            }),
+        ),
+        tauri_api_definition(
+            "Playlist API",
             "reorder_playlist_items",
             "重排播放列表条目。",
             serde_json::json!({
@@ -11337,6 +12064,43 @@ fn core_tauri_api_definitions() -> Vec<ApiDefinition> {
             "prepare_preview_file_source",
             "为本地文件预览准备流式读取源。",
             serde_json::json!({ "request": { "repoId": "<repoId>", "path": "<path>" } }),
+        ),
+        tauri_api_definition(
+            "Preview API",
+            "prepare_entry_playback_source",
+            "为本地或虚拟条目准备播放源。",
+            serde_json::json!({ "request": { "repoId": "<repoId>", "path": "<path>" } }),
+        ),
+        tauri_api_definition(
+            "Playlist API",
+            "download_playlist_with_progress",
+            "下载歌单并通过进度通道回报逐首处理状态。",
+            serde_json::json!({
+                "request": {
+                    "playlistId": 9001,
+                    "playlistName": "夜跑歌单",
+                    "tracks": [
+                        {
+                            "songId": 2001,
+                            "songName": "稻香",
+                            "sourcePayload": {
+                                "provider": "netease-cloud-music",
+                                "songId": 2001
+                            }
+                        }
+                    ],
+                    "destination": {
+                        "kind": "localFolder",
+                        "path": "C:/Downloads/Playlist"
+                    },
+                    "sourcePayload": {
+                        "provider": "netease-cloud-music",
+                        "playlistId": 9001
+                    },
+                    "level": "standard"
+                },
+                "progress": "<Channel<DownloaderPlaylistProgressEvent>>"
+            }),
         ),
         tauri_api_definition(
             "Plugin API",
@@ -11539,6 +12303,17 @@ fn core_tauri_api_definitions() -> Vec<ApiDefinition> {
             "relocate_repository",
             "重定位仓库路径。",
             serde_json::json!({ "request": { "repoId": "<repoId>", "path": "<absolutePath>" } }),
+        ),
+        tauri_api_definition(
+            "Repository API",
+            "update_repository_backend_config",
+            "更新仓库后端配置。",
+            serde_json::json!({
+                "request": {
+                    "repoId": "<repoId>",
+                    "backendConfig": {}
+                }
+            }),
         ),
         tauri_api_definition(
             "Repository API",
@@ -11993,6 +12768,24 @@ fn migrate_repository_schema(connection: &Connection) -> Result<(), rusqlite::Er
         .collect::<Result<Vec<_>, _>>()?;
     if !columns.iter().any(|column| column == "thumbnail_path") {
         connection.execute("ALTER TABLE assets ADD COLUMN thumbnail_path TEXT", [])?;
+    }
+    if !columns.iter().any(|column| column == "is_virtual") {
+        connection.execute(
+            "ALTER TABLE assets ADD COLUMN is_virtual INTEGER NOT NULL DEFAULT 0",
+            [],
+        )?;
+    }
+    if !columns.iter().any(|column| column == "provider_id") {
+        connection.execute("ALTER TABLE assets ADD COLUMN provider_id TEXT", [])?;
+    }
+    if !columns.iter().any(|column| column == "provider_item_id") {
+        connection.execute("ALTER TABLE assets ADD COLUMN provider_item_id TEXT", [])?;
+    }
+    if !columns.iter().any(|column| column == "source_payload_json") {
+        connection.execute("ALTER TABLE assets ADD COLUMN source_payload_json TEXT", [])?;
+    }
+    if !columns.iter().any(|column| column == "local_absolute_path") {
+        connection.execute("ALTER TABLE assets ADD COLUMN local_absolute_path TEXT", [])?;
     }
     connection.execute_batch(
         r#"
@@ -14436,6 +15229,19 @@ fn map_file_browser_entries(
             let hardlink_group_id =
                 asset_record.and_then(|record| record.hardlink_group_id.clone());
             let hardlink_state = asset_record.and_then(|record| record.hardlink_state.clone());
+            let is_virtual = asset_record.map(|record| record.is_virtual).unwrap_or(entry.is_virtual);
+            let provider_id = asset_record
+                .and_then(|record| record.provider_id.clone())
+                .or(entry.provider_id.clone());
+            let provider_item_id = asset_record
+                .and_then(|record| record.provider_item_id.clone())
+                .or(entry.provider_item_id.clone());
+            let source_payload = asset_record
+                .and_then(|record| record.source_payload.clone())
+                .or(entry.source_payload.clone());
+            let local_absolute_path = asset_record
+                .and_then(|record| record.local_absolute_path.clone())
+                .or(entry.local_absolute_path.clone());
             let entry_thumbnail = thumbnail_map.get(&(entry.path.clone(), kind.to_string()));
             let thumbnail_path = entry_thumbnail
                 .map(|record| record.path.clone())
@@ -14460,6 +15266,11 @@ fn map_file_browser_entries(
                 alias_paths: Vec::new(),
                 folder_metadata: folder_metadata.get(&entry.path).cloned(),
                 metadata: BTreeMap::new(),
+                is_virtual,
+                provider_id,
+                provider_item_id,
+                source_payload,
+                local_absolute_path,
             }
         })
         .collect()
@@ -14499,6 +15310,11 @@ fn map_trash_browser_entries(
             let hardlink_group_id =
                 asset_record.and_then(|record| record.hardlink_group_id.clone());
             let hardlink_state = asset_record.and_then(|record| record.hardlink_state.clone());
+            let is_virtual = asset_record.map(|record| record.is_virtual).unwrap_or(false);
+            let provider_id = asset_record.and_then(|record| record.provider_id.clone());
+            let provider_item_id = asset_record.and_then(|record| record.provider_item_id.clone());
+            let source_payload = asset_record.and_then(|record| record.source_payload.clone());
+            let local_absolute_path = asset_record.and_then(|record| record.local_absolute_path.clone());
             let entry_thumbnail = thumbnail_map.get(&(original_path.clone(), kind.to_string()));
             let thumbnail_path = entry_thumbnail
                 .map(|record| record.path.clone())
@@ -14534,6 +15350,11 @@ fn map_trash_browser_entries(
                 alias_paths: Vec::new(),
                 folder_metadata: None,
                 metadata,
+                is_virtual,
+                provider_id,
+                provider_item_id,
+                source_payload,
+                local_absolute_path,
             }
         })
         .collect()
@@ -14626,6 +15447,11 @@ fn local_directory_entries(
                 .map(system_time_to_rfc3339)
                 .transpose()
                 .map_err(time_error)?,
+            is_virtual: false,
+            provider_id: None,
+            provider_item_id: None,
+            source_payload: None,
+            local_absolute_path: Some(path.to_string_lossy().to_string()),
         });
     }
 
@@ -14971,6 +15797,11 @@ impl FileSystemBackendAdapter for LocalFileSystemBackend {
                 .map(system_time_to_rfc3339)
                 .transpose()
                 .map_err(time_error)?,
+            is_virtual: false,
+            provider_id: None,
+            provider_item_id: None,
+            source_payload: None,
+            local_absolute_path: Some(entry_abs.to_string_lossy().to_string()),
         })
     }
 
@@ -15454,6 +16285,7 @@ mod tests {
                 path: repo_root.to_string_lossy().to_string(),
                 backend_plugin_id: Some(LOCAL_FILESYSTEM_PLUGIN_ID.to_string()),
                 backend_config: None,
+                skip_initial_sync: false,
             })
             .expect("local repository should be created");
 
@@ -15464,6 +16296,343 @@ mod tests {
         for subdir in ["cache", "thumbnails", "logs", "indexes"] {
             assert!(metadata_dir.join(subdir).is_dir());
         }
+    }
+
+    #[test]
+    fn create_repository_can_skip_initial_sync() {
+        let workspace = TestWorkspace::new("repository-create-skip-sync");
+        let service_root = workspace.path("service");
+        let repo_root = workspace.path("repo");
+        install_local_filesystem_test_plugin_archive(&service_root);
+        fs::create_dir_all(&repo_root).expect("repository root should exist");
+        fs::write(repo_root.join("track.mp3"), b"demo").expect("test file should be written");
+        let state = RepositoryState::from_root(service_root);
+
+        let repo_id = state
+            .create_repository(RepositoryMutationRequest {
+                repo_id: Some("repo-skip-sync".to_string()),
+                name: "Skip Sync Repo".to_string(),
+                path: repo_root.to_string_lossy().to_string(),
+                backend_plugin_id: Some(LOCAL_FILESYSTEM_PLUGIN_ID.to_string()),
+                backend_config: None,
+                skip_initial_sync: true,
+            })
+            .expect("repository should be created without inline sync")
+            .repository
+            .repo_id;
+
+        let snapshot_before_sync = state
+            .load_snapshot(&repo_id)
+            .expect("snapshot should load before sync");
+        assert!(snapshot_before_sync.assets.is_empty());
+
+        state
+            .sync_repository(SyncRequest {
+                repo_id: repo_id.clone(),
+            })
+            .expect("repository should sync when triggered later");
+
+        let snapshot_after_sync = state
+            .load_snapshot(&repo_id)
+            .expect("snapshot should load after sync");
+        assert_eq!(snapshot_after_sync.assets.len(), 1);
+        assert_eq!(snapshot_after_sync.assets[0].path, "track.mp3");
+    }
+
+    #[test]
+    fn find_existing_repository_for_backend_matches_netease_account_id() {
+        let workspace = TestWorkspace::new("netease-repository-dedupe");
+        let service_root = workspace.path("service");
+        install_local_filesystem_test_plugin_archive(&service_root);
+        let state = RepositoryState::from_root(service_root.clone());
+        state.ensure_initialized().expect("state should initialize registry");
+        let registry = Connection::open(service_root.join(REGISTRY_FILE_NAME))
+            .expect("registry should open");
+        let backend = RepositoryBackendRecord {
+            plugin_id: NETEASE_CLOUD_MUSIC_PLUGIN_ID.to_string(),
+            config: serde_json::json!({
+                "accountId": "123",
+                "cookie": "MUSIC_U=test"
+            }),
+        };
+        let seed = RepositorySeed {
+            repo_id: "netease-one",
+            name: "网易云 A",
+            root_path: "",
+            status: "ready",
+            assets: &[],
+        };
+        upsert_registry_entry(
+            &registry,
+            Path::new("netease-cloud-music://account/123"),
+            &seed,
+            &backend,
+        )
+        .expect("registry entry should be stored");
+
+        let existing = state
+            .find_existing_repository_for_backend(&RepositoryBackendRecord {
+                plugin_id: NETEASE_CLOUD_MUSIC_PLUGIN_ID.to_string(),
+                config: serde_json::json!({
+                    "accountId": "123",
+                    "cookie": "MUSIC_U=other"
+                }),
+            })
+            .expect("lookup should succeed")
+            .expect("existing repository should be found");
+
+        assert_eq!(existing.repo_id, "netease-one");
+    }
+
+    #[test]
+    fn find_existing_repository_for_backend_matches_numeric_netease_account_id() {
+        let workspace = TestWorkspace::new("netease-repository-dedupe-numeric");
+        let service_root = workspace.path("service");
+        install_local_filesystem_test_plugin_archive(&service_root);
+        let state = RepositoryState::from_root(service_root.clone());
+        state.ensure_initialized().expect("state should initialize registry");
+        let registry = Connection::open(service_root.join(REGISTRY_FILE_NAME))
+            .expect("registry should open");
+        let backend = RepositoryBackendRecord {
+            plugin_id: NETEASE_CLOUD_MUSIC_PLUGIN_ID.to_string(),
+            config: serde_json::json!({
+                "accountId": 123,
+                "cookie": "MUSIC_U=test"
+            }),
+        };
+        let seed = RepositorySeed {
+            repo_id: "netease-one",
+            name: "网易云 A",
+            root_path: "",
+            status: "ready",
+            assets: &[],
+        };
+        upsert_registry_entry(
+            &registry,
+            Path::new("netease-cloud-music://account/123"),
+            &seed,
+            &backend,
+        )
+        .expect("registry entry should be stored");
+
+        let existing = state
+            .find_existing_repository_for_backend(&RepositoryBackendRecord {
+                plugin_id: NETEASE_CLOUD_MUSIC_PLUGIN_ID.to_string(),
+                config: serde_json::json!({
+                    "accountId": "123",
+                    "cookie": "MUSIC_U=other"
+                }),
+            })
+            .expect("lookup should succeed")
+            .expect("existing repository should be found");
+
+        assert_eq!(existing.repo_id, "netease-one");
+    }
+
+    #[test]
+    fn add_playlist_items_by_paths_expands_directories_and_deduplicates_files() {
+        let (state, root, repo_root, _thumbnail_root) =
+            create_test_state("playlist-items-by-paths");
+        fs::create_dir_all(repo_root.join("Albums/Disc 1"))
+            .expect("album directory should be created");
+        fs::create_dir_all(repo_root.join("Singles"))
+            .expect("singles directory should be created");
+        fs::write(repo_root.join("Albums/Disc 1/track-01.mp3"), b"track one")
+            .expect("first track should be written");
+        fs::write(repo_root.join("Albums/Disc 1/track-02.mp3"), b"track two")
+            .expect("second track should be written");
+        fs::write(repo_root.join("Singles/track-03.mp3"), b"track three")
+            .expect("third track should be written");
+        let repo_id = create_repository_without_initial_sync(&state, &repo_root);
+        state
+            .sync_repository(SyncRequest {
+                repo_id: repo_id.clone(),
+            })
+            .expect("repository should sync");
+
+        let repo = state
+            .load_repository_record(&repo_id)
+            .expect("repository record should load");
+        let connection = state
+            .open_repository_connection(
+                &repo.summary.repo_id,
+                &repo.summary.path,
+                &repo.backend_record,
+            )
+            .expect("repository connection should open");
+        let playlist_id = "playlist-by-paths";
+        let now = now_rfc3339();
+        connection
+            .execute(
+                r#"
+                INSERT INTO playlists (
+                  playlist_id, repo_id, name, player_type_id, player_plugin_id,
+                  player_label, file_class, sort_order, created_at, updated_at
+                )
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 0, ?8, ?8)
+                "#,
+                params![
+                    playlist_id,
+                    repo_id,
+                    "路径展开测试歌单",
+                    "momobako.playlist.audio-sequence",
+                    "momobako.preview.media",
+                    "音频顺序播放",
+                    "audio",
+                    now,
+                ],
+            )
+            .expect("playlist should be inserted");
+
+        {
+            let detail = state
+                .add_playlist_items_by_paths(PlaylistItemsByPathsAddRequest {
+                    repo_id: repo_id.clone(),
+                    playlist_id: playlist_id.to_string(),
+                    paths: vec![
+                        "Albums".to_string(),
+                        "Albums/Disc 1/track-01.mp3".to_string(),
+                        "Singles/track-03.mp3".to_string(),
+                    ],
+                })
+                .expect("playlist items should be added by paths");
+
+            let mut actual_paths = detail
+                .items
+                .iter()
+                .map(|item| item.path.clone())
+                .collect::<Vec<_>>();
+            actual_paths.sort();
+            assert_eq!(
+                actual_paths,
+                vec![
+                    "Albums/Disc 1/track-01.mp3".to_string(),
+                    "Albums/Disc 1/track-02.mp3".to_string(),
+                    "Singles/track-03.mp3".to_string(),
+                ]
+            );
+        }
+        drop(connection);
+
+        fs::remove_dir_all(root).expect("test temp root should be removed");
+    }
+
+    #[test]
+    fn add_playlist_items_by_paths_expands_virtual_playlist_folders() {
+        let (state, root, repo_root, _thumbnail_root) =
+            create_test_state("playlist-items-by-paths-virtual");
+        let repo_id = create_repository_without_initial_sync(&state, &repo_root);
+
+        let repo = state
+            .load_repository_record(&repo_id)
+            .expect("repository record should load");
+        let connection = state
+            .open_repository_connection(
+                &repo.summary.repo_id,
+                &repo.summary.path,
+                &repo.backend_record,
+            )
+            .expect("repository connection should open");
+        let playlist_id = "playlist-virtual-by-paths";
+        let now = now_rfc3339();
+        connection
+            .execute(
+                r#"
+                INSERT INTO playlists (
+                  playlist_id, repo_id, name, player_type_id, player_plugin_id,
+                  player_label, file_class, sort_order, created_at, updated_at
+                )
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 0, ?8, ?8)
+                "#,
+                params![
+                    playlist_id,
+                    repo_id,
+                    "网易云虚拟歌单",
+                    "momobako.playlist.audio-sequence",
+                    "momobako.preview.media",
+                    "音频顺序播放",
+                    "audio",
+                    now,
+                ],
+            )
+            .expect("playlist should be inserted");
+
+        for (asset_id, path, song_id, song_name) in [
+            (
+                asset_id_for_path(&repo_id, "创建的歌单/夜跑歌单/周杰伦 - 稻香.mp3"),
+                "创建的歌单/夜跑歌单/周杰伦 - 稻香.mp3",
+                2001_i64,
+                "稻香",
+            ),
+            (
+                asset_id_for_path(&repo_id, "创建的歌单/夜跑歌单/陈奕迅 - 孤勇者.mp3"),
+                "创建的歌单/夜跑歌单/陈奕迅 - 孤勇者.mp3",
+                2002_i64,
+                "孤勇者",
+            ),
+        ] {
+            connection
+                .execute(
+                    r#"
+                    INSERT INTO assets (
+                      asset_id, repo_id, path, filename, extension, size_bytes, created_at, modified_at,
+                      hash, status, version, updated_at, thumbnail_path, is_virtual, provider_id,
+                      provider_item_id, source_payload_json, local_absolute_path
+                    )
+                    VALUES (?1, ?2, ?3, ?4, 'mp3', 0, ?5, ?5, NULL, 'synced', 1, ?5, NULL, 1, ?6, ?7, ?8, NULL)
+                    "#,
+                    params![
+                        asset_id,
+                        repo_id,
+                        path,
+                        Path::new(path)
+                            .file_name()
+                            .expect("virtual asset path should contain a filename")
+                            .to_string_lossy()
+                            .to_string(),
+                        now,
+                        "netease-cloud-music",
+                        song_id.to_string(),
+                        serde_json::json!({
+                            "provider": "netease-cloud-music",
+                            "playlistId": 9001,
+                            "playlistName": "夜跑歌单",
+                            "playlistCategory": "created",
+                            "songId": song_id,
+                            "songName": song_name,
+                            "virtualEntry": true
+                        })
+                        .to_string(),
+                    ],
+                )
+                .expect("virtual asset should be inserted");
+        }
+
+        let detail = state
+            .add_playlist_items_by_paths(PlaylistItemsByPathsAddRequest {
+                repo_id: repo_id.clone(),
+                playlist_id: playlist_id.to_string(),
+                paths: vec!["创建的歌单/夜跑歌单".to_string()],
+            })
+            .expect("virtual playlist folder should expand into playable tracks");
+
+        let mut actual_paths = detail
+            .items
+            .iter()
+            .map(|item| item.path.clone())
+            .collect::<Vec<_>>();
+        actual_paths.sort();
+        assert_eq!(
+            actual_paths,
+            vec![
+                "创建的歌单/夜跑歌单/周杰伦 - 稻香.mp3".to_string(),
+                "创建的歌单/夜跑歌单/陈奕迅 - 孤勇者.mp3".to_string(),
+            ]
+        );
+        assert!(detail.items.iter().all(|item| item.is_virtual));
+
+        drop(connection);
+        fs::remove_dir_all(root).expect("test temp root should be removed");
     }
 
     #[test]
@@ -15698,7 +16867,7 @@ mod tests {
     fn plugin_call_envelope_serializes_runtime_config_snapshot() {
         let envelope = PluginCallEnvelope {
             method: "provider.lookupMetadataCandidate".to_string(),
-            payload: serde_json::json!({ "id": "RJ123456" }),
+            payload: serde_json::json!({ "id": "sample-123456" }),
             runtime: PluginCallHostRuntime {
                 plugin_id: "user.provider".to_string(),
                 plugin_data_dir: "C:/MomoBako/.service-data/plugin-data/user-provider".to_string(),
@@ -16577,6 +17746,7 @@ mod tests {
                 path: repo_root.to_string_lossy().to_string(),
                 backend_plugin_id: Some(TEST_WEBDAV_PLUGIN_ID.to_string()),
                 backend_config: None,
+                skip_initial_sync: false,
             })
             .expect_err("disabled manifest-only backend should not create a repository");
 
@@ -16601,6 +17771,7 @@ mod tests {
                 path: repo_root.to_string_lossy().to_string(),
                 backend_plugin_id: Some(LOCAL_FILESYSTEM_PLUGIN_ID.to_string()),
                 backend_config: None,
+                skip_initial_sync: false,
             })
             .expect("local filesystem backend should create")
             .repository
@@ -16638,6 +17809,50 @@ mod tests {
             .expect("runtime local backend should move a file to trash");
         assert!(!repo_root.join("renamed.txt").exists());
         assert!(repository_trash_dir(&repo_root).exists());
+    }
+
+    #[test]
+    fn update_repository_backend_config_persists_registry_and_repository_metadata() {
+        let (state, root, repo_root, _thumbnail_root) =
+            create_test_state("update-repo-backend-config");
+        let repo_id = create_repository_for_path(&state, &repo_root);
+
+        let response = state
+            .update_repository_backend_config(RepositoryBackendConfigUpdateRequest {
+                repo_id: repo_id.clone(),
+                backend_config: serde_json::json!({
+                    "cookie": "MUSIC_U=updated-cookie",
+                    "accountId": "123456"
+                }),
+            })
+            .expect("repository backend config should update");
+
+        assert_eq!(response.repository.repo_id, repo_id);
+
+        let repo = state
+            .load_repository_record(&repo_id)
+            .expect("repository record should load");
+        assert_eq!(
+            repo.backend_record.config,
+            serde_json::json!({
+                "cookie": "MUSIC_U=updated-cookie",
+                "accountId": "123456"
+            })
+        );
+
+        let metadata_path = repository_meta_dir(&repo_root).join(REPO_METADATA_FILE_NAME);
+        let metadata_raw = fs::read_to_string(metadata_path).expect("repository metadata should exist");
+        let metadata: RepositoryMetadataFileImport =
+            serde_json::from_str(&metadata_raw).expect("repository metadata should decode");
+        assert_eq!(
+            metadata.backend_config,
+            Some(serde_json::json!({
+                "cookie": "MUSIC_U=updated-cookie",
+                "accountId": "123456"
+            }))
+        );
+
+        fs::remove_dir_all(root).expect("test temp root should be removed");
     }
 
     #[test]
@@ -16823,6 +18038,7 @@ mod tests {
                 path: repo_root.to_string_lossy().to_string(),
                 backend_plugin_id: None,
                 backend_config: None,
+                skip_initial_sync: false,
             })
             .expect("repository should be created");
         response.repository.repo_id
@@ -17085,8 +18301,27 @@ mod tests {
         assert_eq!(file.relative_path, "notes/today.txt");
         assert_eq!(
             file.absolute_path,
-            repo_root.join("notes").join("today.txt")
+            Some(repo_root.join("notes").join("today.txt"))
         );
+    }
+
+    #[test]
+    fn filesystem_entry_decodes_legacy_payload_without_virtual_fields() {
+        let raw = serde_json::json!({
+            "path": "Albums",
+            "name": "Albums",
+            "kind": "directory",
+            "modifiedAt": "2026-06-09T00:00:00Z"
+        });
+        let entry = serde_json::from_value::<FileSystemEntry>(raw)
+            .expect("legacy filesystem entry payload should decode");
+
+        assert!(matches!(entry.kind, FileSystemEntryKind::Directory));
+        assert!(!entry.is_virtual);
+        assert_eq!(entry.provider_id, None);
+        assert_eq!(entry.provider_item_id, None);
+        assert_eq!(entry.source_payload, None);
+        assert_eq!(entry.local_absolute_path, None);
     }
 
     #[test]
@@ -17503,6 +18738,100 @@ mod tests {
 
         assert_eq!(response.results.len(), 1);
         assert_eq!(response.results[0].path, "cover.psd");
+
+        fs::remove_dir_all(root).expect("test temp root should be removed");
+    }
+
+    #[test]
+    fn search_assets_preserves_virtual_entry_markers() {
+        let (state, root, repo_root, _thumbnail_root) = create_test_state("search-virtual");
+        fs::write(repo_root.join("virtual-track.mp3"), b"track")
+            .expect("virtual track file should be written");
+        let repo_id = create_repository_for_path(&state, &repo_root);
+
+        let repo = state
+            .load_repository_record(&repo_id)
+            .expect("repository record should load");
+        let connection = state
+            .open_repository_connection(
+                &repo.summary.repo_id,
+                &repo.summary.path,
+                &repo.backend_record,
+            )
+            .expect("repository connection should open");
+        connection
+            .execute(
+                r#"
+                UPDATE assets
+                SET is_virtual = 1,
+                    provider_id = ?2,
+                    provider_item_id = ?3,
+                    source_payload_json = ?4,
+                    local_absolute_path = ?5
+                WHERE repo_id = ?1 AND path = 'virtual-track.mp3'
+                "#,
+                params![
+                    repo_id,
+                    "netease-cloud-music",
+                    "123456",
+                    serde_json::json!({
+                        "provider": "netease-cloud-music",
+                        "songId": 123456,
+                        "playlistId": 42,
+                    })
+                    .to_string(),
+                    Option::<String>::None,
+                ],
+            )
+            .expect("asset should be marked virtual");
+        drop(connection);
+
+        let response = state
+            .search_assets(SearchRequest {
+                query: "virtual-track".to_string(),
+                repo_id: Some(repo_id.clone()),
+                exclude_query: None,
+                metadata_key: None,
+                metadata_value: None,
+                tag: None,
+                tags: None,
+                metadata_filters: None,
+                formats: Some(vec!["mp3".to_string()]),
+                min_rating: None,
+                exclude_tags: None,
+                exclude_formats: None,
+                exclude_metadata_filters: None,
+                exclude_path_prefixes: None,
+                exclude_number_filters: None,
+                exclude_date_filters: None,
+                number_filters: None,
+                date_filters: None,
+                match_mode: None,
+                sort: None,
+                limit: None,
+            })
+            .expect("virtual search should complete");
+
+        assert_eq!(response.results.len(), 1);
+        assert_eq!(response.results[0].path, "virtual-track.mp3");
+        assert!(response.results[0].is_virtual);
+        assert_eq!(
+            response.results[0].provider_id.as_deref(),
+            Some("netease-cloud-music")
+        );
+        assert_eq!(
+            response.results[0].provider_item_id.as_deref(),
+            Some("123456")
+        );
+        assert_eq!(
+            response.results[0]
+                .source_payload
+                .as_ref()
+                .and_then(|value| value.get("songId"))
+                .and_then(serde_json::Value::as_i64),
+            Some(123456)
+        );
+        assert_eq!(response.results[0].local_absolute_path, None);
 
         fs::remove_dir_all(root).expect("test temp root should be removed");
     }
@@ -18906,6 +20235,223 @@ mod tests {
 
         assert_eq!(body, b"glb");
         assert_eq!(media_type, "model/gltf-binary");
+        fs::remove_dir_all(root).expect("test temp root should be removed");
+    }
+
+    #[test]
+    fn prepare_entry_playback_source_delegates_virtual_tracks_to_downloader() {
+        let (state, root, repo_root, _thumbnail_root) =
+            create_test_state("prepare-entry-playback-virtual");
+        let repo_id = create_repository_without_initial_sync(&state, &repo_root);
+        let repo = state
+            .load_repository_record(&repo_id)
+            .expect("repository record should load");
+        let connection = state
+            .open_repository_connection(
+                &repo.summary.repo_id,
+                &repo.summary.path,
+                &repo.backend_record,
+            )
+            .expect("repository connection should open");
+        let asset_id = asset_id_for_path(&repo_id, "Created/demo-track.mp3");
+        connection
+            .execute(
+                r#"
+                INSERT INTO assets (
+                  asset_id, repo_id, path, filename, extension, size_bytes, created_at, modified_at,
+                  hash, status, version, updated_at, thumbnail_path, is_virtual, provider_id,
+                  provider_item_id, source_payload_json, local_absolute_path
+                )
+                VALUES (?1, ?2, ?3, ?4, ?5, 0, ?6, ?6, NULL, 'synced', 1, ?6, NULL, 1, ?7, ?8, ?9, NULL)
+                "#,
+                params![
+                    asset_id,
+                    repo_id,
+                    "Created/demo-track.mp3",
+                    "demo-track.mp3",
+                    "mp3",
+                    "2026-06-14T00:00:00Z",
+                    "netease-cloud-music",
+                    "1001",
+                    serde_json::json!({
+                        "provider": "netease-cloud-music",
+                        "songId": 1001,
+                        "accountCookie": "MUSIC_U=test-cookie",
+                        "accountId": "42",
+                        "level": "lossless"
+                    })
+                    .to_string(),
+                ],
+            )
+            .expect("virtual asset should be inserted");
+        connection
+            .execute(
+                r#"
+                INSERT INTO metadata (
+                  asset_id, key, value_type, value_json, version, updated_at
+                )
+                VALUES (?1, 'songId', 'number', '1001', 1, ?2)
+                "#,
+                params![asset_id, "2026-06-14T00:00:00Z"],
+            )
+            .expect("song metadata should be inserted");
+        drop(connection);
+
+        let expected_repo_id = repo_id.clone();
+        fn test_hook(payload: serde_json::Value) -> Result<serde_json::Value, String> {
+            let expected_repo_id = std::env::var("MOMOBKO_TEST_EXPECTED_REPO_ID")
+                .expect("expected repo id should be provided");
+            assert_eq!(payload["songId"], serde_json::json!(1001));
+            assert_eq!(payload["accountCookie"], serde_json::json!("MUSIC_U=test-cookie"));
+            assert_eq!(payload["level"], serde_json::json!("lossless"));
+            assert_eq!(payload["repoId"], serde_json::json!(expected_repo_id));
+            assert_eq!(payload["entryPath"], serde_json::json!("Created/demo-track.mp3"));
+            Ok(serde_json::json!({
+                "localPath": "C:/Mock/Temp/demo-track.mp3",
+                "tempFilePath": "C:/Mock/Temp/demo-track.mp3",
+                "lyricPath": "C:/Mock/Temp/demo-track.lrc",
+                "wordLyricPath": "C:/Mock/Temp/demo-track.yrc",
+                "mediaType": "audio/mpeg",
+                "expiresAt": "2026-06-14T01:00:00Z",
+                "sizeBytes": 4096,
+                "modifiedAt": "2026-06-14T00:30:00Z"
+            }))
+        }
+
+        std::env::set_var("MOMOBKO_TEST_EXPECTED_REPO_ID", &expected_repo_id);
+        set_test_downloader_playback_hook(Some(test_hook));
+        let response = state
+            .prepare_entry_playback_source(EntryPlaybackRequest {
+                repo_id: repo_id.clone(),
+                path: "Created/demo-track.mp3".to_string(),
+            })
+            .expect("virtual playback source should resolve");
+        set_test_downloader_playback_hook(None);
+        std::env::remove_var("MOMOBKO_TEST_EXPECTED_REPO_ID");
+
+        assert_eq!(response.repo_id, repo_id);
+        assert_eq!(response.path, "Created/demo-track.mp3");
+        assert_eq!(response.media_type, "audio/mpeg");
+        assert_eq!(
+            response.local_path.as_deref(),
+            Some("C:/Mock/Temp/demo-track.mp3")
+        );
+        assert_eq!(
+            response.temp_file_path.as_deref(),
+            Some("C:/Mock/Temp/demo-track.mp3")
+        );
+        assert_eq!(
+            response.lyric_path.as_deref(),
+            Some("C:/Mock/Temp/demo-track.lrc")
+        );
+        assert_eq!(
+            response.word_lyric_path.as_deref(),
+            Some("C:/Mock/Temp/demo-track.yrc")
+        );
+        assert_eq!(
+            response.expires_at.as_deref(),
+            Some("2026-06-14T01:00:00Z")
+        );
+        assert_eq!(response.size_bytes, Some(4096));
+        assert_eq!(
+            response.modified_at.as_deref(),
+            Some("2026-06-14T00:30:00Z")
+        );
+
+        fs::remove_dir_all(root).expect("test temp root should be removed");
+    }
+
+    #[test]
+    fn prepare_entry_playback_source_prefers_repository_backend_cookie_over_stale_asset_payload() {
+        let (state, root, repo_root, _thumbnail_root) =
+            create_test_state("prepare-entry-playback-backend-cookie");
+        let repo_id = create_repository_without_initial_sync(&state, &repo_root);
+
+        {
+            let registry = Connection::open(&state.registry_path)
+                .expect("registry should open");
+            registry
+                .execute(
+                    "UPDATE repositories SET backend_config_json = ?2 WHERE repo_id = ?1",
+                    params![
+                        repo_id,
+                        serde_json::json!({
+                            "cookie": "MUSIC_U=fresh-cookie"
+                        })
+                        .to_string(),
+                    ],
+                )
+                .expect("repository backend config should update");
+        }
+
+        let repo = state
+            .load_repository_record(&repo_id)
+            .expect("repository record should load");
+        let connection = state
+            .open_repository_connection(
+                &repo.summary.repo_id,
+                &repo.summary.path,
+                &repo.backend_record,
+            )
+            .expect("repository connection should open");
+        let asset_id = asset_id_for_path(&repo_id, "Created/stale-track.mp3");
+        connection
+            .execute(
+                r#"
+                INSERT INTO assets (
+                  asset_id, repo_id, path, filename, extension, size_bytes, created_at, modified_at,
+                  hash, status, version, updated_at, thumbnail_path, is_virtual, provider_id,
+                  provider_item_id, source_payload_json, local_absolute_path
+                )
+                VALUES (?1, ?2, ?3, ?4, ?5, 0, ?6, ?6, NULL, 'synced', 1, ?6, NULL, 1, ?7, ?8, ?9, NULL)
+                "#,
+                params![
+                    asset_id,
+                    repo_id,
+                    "Created/stale-track.mp3",
+                    "stale-track.mp3",
+                    "mp3",
+                    "2026-06-14T00:00:00Z",
+                    "netease-cloud-music",
+                    "1002",
+                    serde_json::json!({
+                        "provider": "netease-cloud-music",
+                        "songId": 1002,
+                        "accountCookie": "MUSIC_U=stale-cookie",
+                        "accountId": "42",
+                        "level": "standard"
+                    })
+                    .to_string(),
+                ],
+            )
+            .expect("virtual asset should be inserted");
+        drop(connection);
+
+        fn test_hook(payload: serde_json::Value) -> Result<serde_json::Value, String> {
+            assert_eq!(payload["songId"], serde_json::json!(1002));
+            assert_eq!(payload["accountCookie"], serde_json::json!("MUSIC_U=fresh-cookie"));
+            Ok(serde_json::json!({
+                "localPath": "C:/Mock/Temp/stale-track.mp3",
+                "tempFilePath": "C:/Mock/Temp/stale-track.mp3",
+                "mediaType": "audio/mpeg"
+            }))
+        }
+
+        set_test_downloader_playback_hook(Some(test_hook));
+        let response = state
+            .prepare_entry_playback_source(EntryPlaybackRequest {
+                repo_id: repo_id.clone(),
+                path: "Created/stale-track.mp3".to_string(),
+            })
+            .expect("virtual playback source should resolve");
+        set_test_downloader_playback_hook(None);
+
+        assert_eq!(response.repo_id, repo_id);
+        assert_eq!(
+            response.local_path.as_deref(),
+            Some("C:/Mock/Temp/stale-track.mp3")
+        );
+
         fs::remove_dir_all(root).expect("test temp root should be removed");
     }
 

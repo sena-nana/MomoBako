@@ -5,41 +5,90 @@
   ],
   "name": "Download Service",
   "version": "0.1.0",
+  "type": {
+    "layer": "provider-service",
+    "kind": "download"
+  },
   "kind": "download",
   "category": "service",
-  "description": "声明下载队列、远程文件获取和下载结果候选的基础服务接入。",
+  "description": "提供播放临时下载、音频歌词导出与歌单批量下载能力。",
   "capabilities": [
     "download",
     "download-queue",
-    "candidate-results"
+    "playback-temp",
+    "lyrics"
   ],
-  "enabled": false,
+  "enabled": true,
   "sdk": "backend",
-  "entry": {},
-  "source": "builtin",
-  "runtime": "manifest-only",
+  "runtime": "native-dylib",
+  "entry": {
+    "backend": {
+      "library": "momobako_service_downloader"
+    }
+  },
   "permissions": [
     "network",
-    "writeCandidates"
+    "filesystem:write",
+    "filesystem:read"
   ],
   "requires": [],
   "optional": [],
-  "hooks": [
-    {
-      "slot": "downloadQueue",
-      "action": "service.downloader.enqueue",
-      "label": "加入下载队列"
-    },
-    {
-      "slot": "candidateQueue",
-      "action": "service.downloader.writeResultCandidates",
-      "label": "写入下载结果候选"
-    }
-  ],
+  "hooks": [],
   "contributes": {
-    "service": {
-      "type": "download",
-      "candidateOnly": true
+    "apiTests": [
+      {
+        "method": "downloader.prepareTrackPlayback",
+        "summary": "下载单曲到临时目录并返回可播放路径。",
+        "payload": {
+          "accountCookie": "",
+          "songId": 0,
+          "level": "standard",
+          "repoId": "repo-demo",
+          "entryPath": "Songs/demo.mp3",
+          "sourcePayload": {}
+        }
+      }
+    ],
+    "settings": {
+      "schemaVersion": 1,
+      "settingsPage": {
+        "label": "下载服务"
+      },
+      "fields": [
+        {
+          "key": "apiBaseUrl",
+          "label": "API Base URL",
+          "type": "string",
+          "description": "留空时使用 ncm-api-rs 内置的网易云官方域名；仅在需要自定义域名时填写。",
+          "default": ""
+        },
+        {
+          "key": "defaultLevel",
+          "label": "默认音质",
+          "type": "select",
+          "default": "standard",
+          "options": [
+            { "label": "标准", "value": "standard" },
+            { "label": "较高", "value": "higher" },
+            { "label": "极高", "value": "exhigh" },
+            { "label": "无损", "value": "lossless" }
+          ]
+        },
+        {
+          "key": "tempTtlMinutes",
+          "label": "临时缓存分钟数",
+          "type": "number",
+          "default": 120,
+          "min": 5,
+          "max": 1440
+        },
+        {
+          "key": "filenameTemplate",
+          "label": "文件名模板",
+          "type": "string",
+          "default": "{{artists}} - {{songName}}"
+        }
+      ]
     }
   },
   "compat": {
@@ -48,5 +97,6 @@
       "builtin.service-downloader"
     ]
   },
-  "status": "disabled"
+  "source": "builtin",
+  "status": "ready"
 }

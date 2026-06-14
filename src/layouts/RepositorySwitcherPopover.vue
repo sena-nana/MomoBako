@@ -18,6 +18,8 @@ defineProps<{
   isRemovingRepository: boolean;
   isSubmittingBackend: boolean;
   mode: RepositoryPopoverMode;
+  neteaseLoginMessage: string;
+  neteaseQrSession: { unikey?: string; qrurl?: string; qrimg?: string | null } | null;
   position: RepositoryPopoverPosition;
   repositories: RepositorySummary[];
   selectedBackend: RepositoryBackendOption | null;
@@ -32,7 +34,9 @@ const modeModel = defineModel<RepositoryPopoverMode>("mode", { required: true })
 
 const emit = defineEmits<{
   close: [];
+  createNeteaseQrSession: [];
   deleteActive: [];
+  pollNeteaseQrSession: [];
   selectBackend: [pluginId: string];
   selectRepository: [repoId: string];
   setPopoverRef: [element: HTMLElement | null];
@@ -125,7 +129,7 @@ const emit = defineEmits<{
           </p>
         </template>
 
-        <template v-else>
+        <template v-else-if="mode === 'form'">
           <header class="repository-add-popover__header">
             <span>{{ selectedBackend?.name ?? "添加资源库" }}</span>
             <button type="button" class="repository-add-popover__close" title="关闭" aria-label="关闭添加资源库" :disabled="isSubmittingBackend" @click="emit('close')">
@@ -178,6 +182,50 @@ const emit = defineEmits<{
             <button type="button" class="primary" :disabled="isSubmittingBackend || backendSubmitDisabled" @click="emit('submit')">
               <LoaderCircle v-if="isSubmittingBackend" class="spin" :size="13" aria-hidden="true" />
               {{ isSubmittingBackend ? "创建中" : "创建" }}
+            </button>
+          </div>
+        </template>
+
+        <template v-else>
+          <header class="repository-add-popover__header">
+            <span>登录网易云音乐</span>
+            <button type="button" class="repository-add-popover__close" title="关闭" aria-label="关闭添加资源库" :disabled="isSubmittingBackend" @click="emit('close')">
+              <X :size="13" aria-hidden="true" />
+            </button>
+          </header>
+
+          <div class="repository-add-popover__body">
+            <p class="repository-add-popover__summary">
+              创建资源库时登录网易云账号。每个账号对应一个资源库，成功后会自动扫描创建的歌单和收藏的歌单。
+            </p>
+
+            <div v-if="neteaseQrSession?.qrimg" class="file-metadata-card__candidate-import repository-add-popover__qr">
+              <img
+                :src="neteaseQrSession.qrimg"
+                alt="网易云二维码登录"
+                style="width: 180px; height: 180px; object-fit: contain; border-radius: 12px;"
+              />
+            </div>
+
+            <p v-if="neteaseLoginMessage" class="repository-add-popover__note">
+              {{ neteaseLoginMessage }}
+            </p>
+
+            <p v-if="addRepositoryError" class="repository-add-popover__error">
+              {{ addRepositoryError }}
+            </p>
+          </div>
+
+          <div class="repository-add-popover__actions">
+            <button type="button" class="ghost" :disabled="isSubmittingBackend" @click="modeModel = 'addMenu'">
+              返回
+            </button>
+            <button type="button" class="ghost" :disabled="isSubmittingBackend" @click="emit('createNeteaseQrSession')">
+              重新生成二维码
+            </button>
+            <button type="button" class="primary" :disabled="isSubmittingBackend || !neteaseQrSession?.unikey" @click="emit('pollNeteaseQrSession')">
+              <LoaderCircle v-if="isSubmittingBackend" class="spin" :size="13" aria-hidden="true" />
+              {{ isSubmittingBackend ? "检查中" : "检查扫码结果" }}
             </button>
           </div>
         </template>

@@ -20,6 +20,11 @@ struct DiscoveredFile {
     extension: String,
     size_bytes: i64,
     modified_at: String,
+    is_virtual: bool,
+    provider_id: Option<String>,
+    provider_item_id: Option<String>,
+    source_payload: Option<serde_json::Value>,
+    local_absolute_path: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -38,6 +43,11 @@ struct FileSystemEntry {
     extension: Option<String>,
     size_bytes: Option<i64>,
     modified_at: Option<String>,
+    is_virtual: bool,
+    provider_id: Option<String>,
+    provider_item_id: Option<String>,
+    source_payload: Option<serde_json::Value>,
+    local_absolute_path: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -266,6 +276,11 @@ fn collect_files_recursive(
                 .modified()
                 .map_err(io_error)
                 .and_then(system_time_to_rfc3339)?,
+            is_virtual: false,
+            provider_id: None,
+            provider_item_id: None,
+            source_payload: None,
+            local_absolute_path: Some(path.to_string_lossy().to_string()),
             relative_path,
         });
     }
@@ -361,6 +376,11 @@ fn local_directory_entries(
                 .ok()
                 .map(system_time_to_rfc3339)
                 .transpose()?,
+            is_virtual: false,
+            provider_id: None,
+            provider_item_id: None,
+            source_payload: None,
+            local_absolute_path: Some(path.to_string_lossy().to_string()),
         });
     }
     entries.sort_by(|left, right| {
@@ -407,6 +427,11 @@ fn stat_entry(repo_root: &Path, entry_path: &str) -> Result<FileSystemEntry, Str
             .ok()
             .map(system_time_to_rfc3339)
             .transpose()?,
+        is_virtual: false,
+        provider_id: None,
+        provider_item_id: None,
+        source_payload: None,
+        local_absolute_path: Some(entry_abs.to_string_lossy().to_string()),
     })
 }
 
@@ -453,4 +478,65 @@ fn system_time_to_rfc3339(value: std::time::SystemTime) -> Result<String, String
 
 fn io_error(error: std::io::Error) -> String {
     error.to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn discovered_file_serializes_virtual_compat_fields() {
+        let file = DiscoveredFile {
+            absolute_path: PathBuf::from("C:/Repo/demo.mp3"),
+            relative_path: "demo.mp3".to_string(),
+            filename: "demo.mp3".to_string(),
+            extension: "mp3".to_string(),
+            size_bytes: 12,
+            modified_at: "2026-06-14T00:00:00Z".to_string(),
+            is_virtual: false,
+            provider_id: None,
+            provider_item_id: None,
+            source_payload: None,
+            local_absolute_path: Some("C:/Repo/demo.mp3".to_string()),
+        };
+
+        let value = serde_json::to_value(file).expect("file should serialize");
+
+        assert_eq!(value.get("isVirtual"), Some(&serde_json::json!(false)));
+        assert_eq!(
+            value.get("localAbsolutePath"),
+            Some(&serde_json::json!("C:/Repo/demo.mp3"))
+        );
+        assert_eq!(value.get("providerId"), Some(&serde_json::Value::Null));
+        assert_eq!(value.get("providerItemId"), Some(&serde_json::Value::Null));
+        assert_eq!(value.get("sourcePayload"), Some(&serde_json::Value::Null));
+    }
+
+    #[test]
+    fn filesystem_entry_serializes_virtual_compat_fields() {
+        let entry = FileSystemEntry {
+            path: "Albums".to_string(),
+            name: "Albums".to_string(),
+            kind: FileSystemEntryKind::Directory,
+            extension: None,
+            size_bytes: None,
+            modified_at: Some("2026-06-14T00:00:00Z".to_string()),
+            is_virtual: false,
+            provider_id: None,
+            provider_item_id: None,
+            source_payload: None,
+            local_absolute_path: Some("C:/Repo/Albums".to_string()),
+        };
+
+        let value = serde_json::to_value(entry).expect("entry should serialize");
+
+        assert_eq!(value.get("isVirtual"), Some(&serde_json::json!(false)));
+        assert_eq!(
+            value.get("localAbsolutePath"),
+            Some(&serde_json::json!("C:/Repo/Albums"))
+        );
+        assert_eq!(value.get("providerId"), Some(&serde_json::Value::Null));
+        assert_eq!(value.get("providerItemId"), Some(&serde_json::Value::Null));
+        assert_eq!(value.get("sourcePayload"), Some(&serde_json::Value::Null));
+    }
 }

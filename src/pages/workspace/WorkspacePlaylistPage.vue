@@ -45,7 +45,7 @@ const emit = defineEmits<{
 
       <div v-if="!activePlaylistDetail.items.length" class="playlist-page__empty">
         <h2>播放集还是空的</h2>
-        <p>在文件浏览区右键文件，使用“添加到播放集”把内容加入这里。</p>
+        <p>在文件浏览区右键文件，使用“加入播放列表”把内容加入这里。</p>
       </div>
 
       <div v-else class="playlist-page__list" role="list" aria-label="播放集条目">
