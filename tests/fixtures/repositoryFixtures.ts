@@ -1,6 +1,7 @@
 import type {
   PluginManifest,
   RepositoryAction,
+  RepositoryLocalCacheStatus,
   SearchHit,
 } from "../../src/types/repository";
 
@@ -17,6 +18,7 @@ export type MockRepository = {
   status: string;
   assetCount: number;
   updatedAt: string;
+  localCache?: RepositoryLocalCacheStatus | null;
 };
 
 export type MockEntry = {

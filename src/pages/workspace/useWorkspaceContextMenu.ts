@@ -13,12 +13,13 @@ import {
   Trash2,
 } from "lucide-vue-next";
 import type { ContextMenuItem } from "../../composables/useContextMenu";
-import type { FileBrowserEntry } from "../../types/repository";
+import type { FileBrowserEntry, RepositorySummary } from "../../types/repository";
 import type { EntryActionDialogRequest, EntryActionDialogResultMap } from "../../plugins/sdk";
 import { getPluginEntryActions, getPreviewPluginFileActions } from "../../plugins/previewPlugins";
 
 type WorkspaceContextMenuOptions = {
   activeRepoId: ComputedRef<string | null>;
+  activeRepository?: ComputedRef<RepositorySummary | null>;
   entryMap: ComputedRef<ReadonlyMap<string, FileBrowserEntry>>;
   hasMultipleSelection: ComputedRef<boolean>;
   isMutatingFiles: ComputedRef<boolean>;
@@ -108,6 +109,7 @@ export function useWorkspaceContextMenu(options: WorkspaceContextMenuOptions) {
     const pluginEntryActions = options.activeRepoId.value && !options.isTrashPanel.value
       ? getPluginEntryActions({
         repoId: options.activeRepoId.value,
+        repository: options.activeRepository?.value ?? null,
         entry,
         entries: contextEntries.length ? contextEntries : [entry],
         refreshRepo: options.refreshRepositoryWorkspace,

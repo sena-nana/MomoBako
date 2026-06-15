@@ -124,6 +124,8 @@ const {
   isSubmittingBackend,
   neteaseLoginMessage,
   neteaseQrSession,
+  neteaseCachePath,
+  chooseNeteaseCacheFolder,
   openRepositorySwitcherFromEvent,
   pollNeteaseQrSession,
   createNeteaseQrSession,
@@ -397,10 +399,12 @@ const {
     :is-submitting-backend="isSubmittingBackend"
     :netease-login-message="neteaseLoginMessage"
     :netease-qr-session="neteaseQrSession"
+    :netease-cache-path="neteaseCachePath"
     :position="addRepositoryPopoverPosition"
     :repositories="repositories"
     :selected-backend="selectedBackend"
     @close="closeAddRepositoryPopover"
+    @choose-netease-cache-folder="chooseNeteaseCacheFolder"
     @create-netease-qr-session="createNeteaseQrSession"
     @delete-active="deleteActiveRepositoryFromMenu"
     @poll-netease-qr-session="pollNeteaseQrSession"

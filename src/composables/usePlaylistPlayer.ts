@@ -1,10 +1,12 @@
 import { computed, ref, watch } from "vue";
 import type {
+  FileBrowserEntry,
+  PlaylistItem,
   PlaylistFileClass,
   PlaylistDetail,
   PlaylistPlaybackMode,
 } from "../types/repository";
-import { getPlaylistPlayerByType } from "../plugins/playlistPlayers";
+import { getPlaylistPlayerByType, listPlaylistPlayers } from "../plugins/playlistPlayers";
 import type {
   PlaylistPlayerObjectFit,
   PlaylistPlayerController,
@@ -30,6 +32,13 @@ type PlayerSession = {
   isPlaying: boolean;
 };
 
+type PlaybackQueueItem = PlaylistItem & {
+  runtimePlayerTypeId: string;
+  playerLabel: string;
+  fileClass: PlaylistFileClass;
+  transient?: boolean;
+};
+
 const storageKeyPrefix = "momobako.playbackSession";
 const settingsStorageKey = "momobako.playbackSettings";
 const defaultSettings: PlaylistPlayerSettings = {
@@ -38,6 +47,7 @@ const defaultSettings: PlaylistPlayerSettings = {
 };
 const activeRepoId = ref<string | null>(null);
 const activePlaylist = ref<PlaylistDetail | null>(null);
+const playbackQueue = ref<PlaybackQueueItem[]>([]);
 const currentItemId = ref<string | null>(null);
 const currentTimeMs = ref(0);
 const durationMs = ref(0);
@@ -52,6 +62,7 @@ const visibleMountTarget = ref<HTMLElement | null>(null);
 const runtime = ref<PlaylistPlayerRuntimeApi | null>(null);
 const runtimeController = ref<PlaylistPlayerController | null>(null);
 const runtimeMountTarget = ref<HTMLElement | null>(null);
+const runtimePlayerTypeId = ref<string | null>(null);
 const shuffledOrder = ref<string[]>([]);
 const playbackHistory = ref<string[]>([]);
 const playbackSettings = ref<PlaylistPlayerSettings>(readPlaybackSettings());
@@ -128,6 +139,8 @@ function currentPlayerFileClass(): PlaylistFileClass | null {
 
 function currentSession(): PlayerSession | null {
   if (!activeRepoId.value || !activePlaylist.value || !currentItemId.value) return null;
+  const item = currentItem();
+  if (!item || item.transient) return null;
   return {
     repoId: activeRepoId.value,
     playlistId: activePlaylist.value.playlist.playlistId,
@@ -170,12 +183,77 @@ function readSession(repoId: string): PlayerSession | null {
   }
 }
 
+function queueItemFromPlaylistItem(item: PlaylistItem, playlist = activePlaylist.value): PlaybackQueueItem {
+  const playerTypeId = playlist?.playlist.playerTypeId ?? "";
+  return {
+    ...item,
+    runtimePlayerTypeId: playerTypeId,
+    playerLabel: playlist?.playlist.playerLabel ?? "",
+    fileClass: playlist?.playlist.fileClass ?? "",
+  };
+}
+
+function findPlayerForEntry(entry: FileBrowserEntry) {
+  const extension = (entry.extension ?? entry.name.split(".").pop() ?? "").toLowerCase();
+  return listPlaylistPlayers().find((player) => (
+    player.supportedExtensions.map((item) => item.toLowerCase()).includes(extension)
+    && (player.fileClass === "audio" || player.fileClass === "video")
+  )) ?? null;
+}
+
+function transientItemFromEntry(entry: FileBrowserEntry, playerTypeId: string): PlaybackQueueItem {
+  const player = getPlaylistPlayerByType(playerTypeId);
+  const now = new Date().toISOString();
+  const extension = (entry.extension ?? entry.name.split(".").pop() ?? "").toLowerCase();
+  return {
+    playlistItemId: `transient:${entry.assetId ?? entry.path}:${Date.now()}`,
+    playlistId: activePlaylist.value?.playlist.playlistId ?? "__transient__",
+    assetId: entry.assetId ?? entry.path,
+    path: entry.path,
+    filename: entry.name,
+    extension,
+    thumbnailPath: entry.thumbnailPath ?? null,
+    status: "ready",
+    statusReason: null,
+    sortOrder: -1,
+    addedAt: now,
+    isVirtual: entry.isVirtual,
+    providerId: entry.providerId,
+    providerItemId: entry.providerItemId,
+    sourcePayload: entry.sourcePayload,
+    localAbsolutePath: entry.localAbsolutePath,
+    runtimePlayerTypeId: playerTypeId,
+    playerLabel: player?.label ?? "",
+    fileClass: player?.fileClass ?? "",
+    transient: true,
+  };
+}
+
+function syncQueueFromActivePlaylist() {
+  const persistentItems = (activePlaylist.value?.items ?? []).map((item) => queueItemFromPlaylistItem(item));
+  const transientItems = playbackQueue.value.filter((item) => item.transient);
+  playbackQueue.value = [...persistentItems, ...transientItems.filter((item) => (
+    currentItemId.value === item.playlistItemId || playbackHistory.value.includes(item.playlistItemId)
+  ))];
+}
+
+function pruneInactiveTransientItems() {
+  const currentId = currentItemId.value;
+  const removedIds = new Set(playbackQueue.value
+    .filter((item) => item.transient && item.playlistItemId !== currentId)
+    .map((item) => item.playlistItemId));
+  if (!removedIds.size) return;
+  playbackQueue.value = playbackQueue.value.filter((item) => !removedIds.has(item.playlistItemId));
+  playbackHistory.value = playbackHistory.value.filter((itemId) => !removedIds.has(itemId));
+  shuffledOrder.value = shuffledOrder.value.filter((itemId) => !removedIds.has(itemId));
+}
+
 function readyItems() {
-  return (activePlaylist.value?.items ?? []).filter((item) => item.status === "ready");
+  return playbackQueue.value.filter((item) => item.status === "ready");
 }
 
 function currentItem() {
-  return activePlaylist.value?.items.find((item) => item.playlistItemId === currentItemId.value) ?? null;
+  return playbackQueue.value.find((item) => item.playlistItemId === currentItemId.value) ?? null;
 }
 
 function ensureShuffleOrder() {
@@ -199,6 +277,7 @@ async function disposeRuntime() {
   runtime.value = null;
   runtimeController.value = null;
   runtimeMountTarget.value = null;
+  runtimePlayerTypeId.value = null;
 }
 
 function setError(message: string | null) {
@@ -207,7 +286,7 @@ function setError(message: string | null) {
 }
 
 function currentPlayer() {
-  return getPlaylistPlayerByType(activePlaylist.value?.playlist.playerTypeId);
+  return getPlaylistPlayerByType(currentItem()?.runtimePlayerTypeId ?? activePlaylist.value?.playlist.playerTypeId);
 }
 
 function handleRuntimeEvent(event: PlaylistPlayerRuntimeEvent) {
@@ -236,10 +315,14 @@ function handleRuntimeEvent(event: PlaylistPlayerRuntimeEvent) {
 async function ensureRuntimeLoaded() {
   const player = currentPlayer();
   const target = activeMountTarget();
+  const playerTypeId = currentItem()?.runtimePlayerTypeId ?? activePlaylist.value?.playlist.playerTypeId ?? null;
   if (!player || !target || !activeRepoId.value) {
     canPlay.value = false;
     await disposeRuntime();
     return false;
+  }
+  if (runtime.value && runtimePlayerTypeId.value !== playerTypeId) {
+    await disposeRuntime();
   }
   if (!runtime.value) {
     const controller = {
@@ -250,6 +333,7 @@ async function ensureRuntimeLoaded() {
     runtimeController.value = controller;
     runtime.value = await player.createRuntime(controller);
     runtimeMountTarget.value = target;
+    runtimePlayerTypeId.value = playerTypeId;
     await configureRuntime();
   } else {
     moveMountedRuntimeNode(target);
@@ -301,6 +385,49 @@ async function playItem(playlistItemId: string, autoPlay = true) {
   await loadCurrentItem(autoPlay);
 }
 
+async function playEntry(repoId: string, entry: FileBrowserEntry) {
+  const player = findPlayerForEntry(entry);
+  if (!player) {
+    setError("没有可用于播放此媒体的插件");
+    return false;
+  }
+  if (activeRepoId.value && activeRepoId.value !== repoId) {
+    await stop(false);
+    activePlaylist.value = null;
+    currentItemId.value = null;
+    playbackQueue.value = [];
+    playbackHistory.value = [];
+    shuffledOrder.value = [];
+  }
+  activeRepoId.value = repoId;
+  const item = transientItemFromEntry(entry, player.playerTypeId);
+  const currentId = currentItemId.value;
+  const withoutSamePath = playbackQueue.value.filter((queueItem) => (
+    !queueItem.transient || queueItem.path !== entry.path
+  ));
+  const currentIndex = currentId
+    ? withoutSamePath.findIndex((queueItem) => queueItem.playlistItemId === currentId)
+    : -1;
+  if (currentIndex >= 0) {
+    withoutSamePath.splice(currentIndex + 1, 0, item);
+  } else {
+    withoutSamePath.push(item);
+  }
+  playbackQueue.value = withoutSamePath;
+  if (mode.value === "shuffle" && currentId) {
+    const order = shuffledOrder.value.filter((itemId) => (
+      playbackQueue.value.some((queueItem) => queueItem.playlistItemId === itemId)
+    ));
+    const orderIndex = order.findIndex((itemId) => itemId === currentId);
+    if (orderIndex >= 0) {
+      order.splice(orderIndex + 1, 0, item.playlistItemId);
+      shuffledOrder.value = order;
+    }
+  }
+  await playItem(item.playlistItemId, true);
+  return true;
+}
+
 function nextReadyItemId(naturalEnd = false) {
   const items = readyItems();
   if (!items.length) return null;
@@ -336,13 +463,18 @@ function previousReadyItemId() {
 }
 
 async function playNext(naturalEnd = false) {
+  const previousItem = currentItem();
   const nextItemId = nextReadyItemId(naturalEnd);
   if (!nextItemId) {
     isPlaying.value = false;
+    if (naturalEnd) pruneInactiveTransientItems();
     persistSession();
     return;
   }
   await playItem(nextItemId, true);
+  if (naturalEnd || previousItem?.transient) {
+    pruneInactiveTransientItems();
+  }
 }
 
 async function playPrevious() {
@@ -410,6 +542,9 @@ async function stop(clearStoredSession = true) {
   queueOpen.value = false;
   playbackHistory.value = [];
   shuffledOrder.value = [];
+  playbackQueue.value = activePlaylist.value
+    ? activePlaylist.value.items.map((item) => queueItemFromPlaylistItem(item))
+    : [];
   setError(null);
   await runtime.value?.pause();
   await disposeRuntime();
@@ -426,6 +561,7 @@ async function setActivePlaylist(repoId: string, playlist: PlaylistDetail | null
   activePlaylist.value = playlist;
   playbackHistory.value = [];
   shuffledOrder.value = [];
+  playbackQueue.value = playlist ? playlist.items.map((item) => queueItemFromPlaylistItem(item, playlist)) : [];
   if (!playlist) {
     currentItemId.value = null;
     return;
@@ -464,7 +600,7 @@ async function restoreSession(repoId: string, playlist: PlaylistDetail | null) {
 }
 
 async function moveRuntimeToActiveMountTarget() {
-  if (!runtime.value || !activeRepoId.value || !activePlaylist.value || !currentItemId.value) return;
+  if (!runtime.value || !activeRepoId.value || !currentItemId.value) return;
   const target = activeMountTarget();
   if (!target) return;
   if (moveMountedRuntimeNode(target)) return;
@@ -501,6 +637,7 @@ function attachVisibleMountTarget(element: HTMLElement | null) {
 function resetPlayerState() {
   activeRepoId.value = null;
   activePlaylist.value = null;
+  playbackQueue.value = [];
   currentItemId.value = null;
   currentTimeMs.value = 0;
   durationMs.value = 0;
@@ -515,6 +652,7 @@ function resetPlayerState() {
   runtime.value = null;
   runtimeController.value = null;
   runtimeMountTarget.value = null;
+  runtimePlayerTypeId.value = null;
   shuffledOrder.value = [];
   playbackHistory.value = [];
   playbackSettings.value = readPlaybackSettings();
@@ -523,6 +661,7 @@ function resetPlayerState() {
 watch(
   () => activePlaylist.value?.items.map((item) => `${item.playlistItemId}:${item.status}`).join("|") ?? "",
   () => {
+    syncQueueFromActivePlaylist();
     if (mode.value === "shuffle") ensureShuffleOrder();
   },
 );
@@ -531,6 +670,7 @@ export function usePlaylistPlayer() {
   return {
     activeRepoId: computed(() => activeRepoId.value),
     activePlaylist: computed(() => activePlaylist.value),
+    queueItems: computed(() => playbackQueue.value),
     currentItem: computed(() => currentItem()),
     currentItemId: computed(() => currentItemId.value),
     currentTimeMs: computed(() => currentTimeMs.value),
@@ -539,6 +679,8 @@ export function usePlaylistPlayer() {
     volume: computed(() => volume.value),
     playbackSettings: computed(() => playbackSettings.value),
     activeFileClass: computed(() => currentPlayerFileClass()),
+    currentPlayerLabel: computed(() => currentItem()?.playerLabel ?? activePlaylist.value?.playlist.playerLabel ?? null),
+    currentPlayerDefinition: computed(() => currentPlayer()),
     isPlaying: computed(() => isPlaying.value),
     canPlay: computed(() => canPlay.value),
     errorMessage: computed(() => errorMessage.value),
@@ -554,6 +696,7 @@ export function usePlaylistPlayer() {
     updatePlaybackSettings,
     setError,
     playItem,
+    playEntry,
     playPrevious,
     playNext,
     stop,

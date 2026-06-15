@@ -31,6 +31,7 @@ struct PrepareTrackPlaybackPayload {
     level: Option<String>,
     repo_id: Option<String>,
     entry_path: Option<String>,
+    managed_cache_root: Option<String>,
     source_payload: Option<serde_json::Value>,
 }
 
@@ -41,6 +42,7 @@ struct DownloadTrackPackagePayload {
     song_id: i64,
     level: Option<String>,
     destination: DownloadDestination,
+    managed_cache_root: Option<String>,
     source_payload: Option<serde_json::Value>,
 }
 
@@ -56,6 +58,7 @@ struct DownloadPlaylistPackagePayload {
     track_ids: Vec<i64>,
     level: Option<String>,
     destination: DownloadDestination,
+    managed_cache_root: Option<String>,
     source_payload: Option<serde_json::Value>,
 }
 
@@ -81,6 +84,7 @@ struct ResolveLyricsPayload {
 struct ClearTrackCachePayload {
     song_id: i64,
     level: Option<String>,
+    managed_cache_root: Option<String>,
     source_payload: Option<serde_json::Value>,
 }
 
@@ -291,7 +295,7 @@ fn prepare_track_playback(
         payload.source_payload.as_ref(),
     );
     let cache_key = hashed_cache_key(payload.song_id, level, &account_id);
-    let temp_root = runtime.plugin_data_dir.join("temp");
+    let temp_root = playback_cache_root(runtime, payload.managed_cache_root.as_deref())?;
     let audio_path = temp_root.join(format!("{cache_key}.mp3"));
     let lrc_path = temp_root.join(format!("{cache_key}.lrc"));
     let yrc_path = temp_root.join(format!("{cache_key}.yrc"));
@@ -368,7 +372,11 @@ fn download_track_package(
         &artists,
         song_detail.name.as_str(),
     );
-    let target_root = resolve_download_root(runtime, &payload.destination)?;
+    let target_root = resolve_download_root(
+        runtime,
+        &payload.destination,
+        payload.managed_cache_root.as_deref(),
+    )?;
     fs::create_dir_all(&target_root).map_err(io_error)?;
     let song_url = fetch_song_url(runtime, account_cookie.as_deref(), payload.song_id, &level)?;
     let audio_url = song_url
@@ -417,7 +425,11 @@ fn download_playlist_package(
             fetch_playlist_name(runtime, account_cookie.as_deref(), payload.playlist_id).ok()
         })
         .unwrap_or_else(|| format!("playlist-{}", payload.playlist_id));
-    let target_root = resolve_download_root(runtime, &payload.destination)?;
+    let target_root = resolve_download_root(
+        runtime,
+        &payload.destination,
+        payload.managed_cache_root.as_deref(),
+    )?;
     let playlist_dir = target_root.join(sanitize_file_name(&playlist_name));
     fs::create_dir_all(&playlist_dir).map_err(io_error)?;
 
@@ -441,6 +453,7 @@ fn download_playlist_package(
                     repo_id: None,
                     parent_path: None,
                 },
+                managed_cache_root: payload.managed_cache_root.clone(),
                 source_payload,
             },
         );
@@ -496,7 +509,7 @@ fn clear_track_cache(
         .and_then(value_to_string)
         .unwrap_or_else(|| "anonymous".to_string());
     let cache_key = hashed_cache_key(payload.song_id, level, &account_id);
-    let temp_root = runtime.plugin_data_dir.join("temp");
+    let temp_root = playback_cache_root(runtime, payload.managed_cache_root.as_deref())?;
     let paths = [
         temp_root.join(format!("{cache_key}.mp3")),
         temp_root.join(format!("{cache_key}.lrc")),
@@ -779,6 +792,7 @@ fn download_binary_to_path(url: &str, target_path: &Path) -> Result<(), String> 
 fn resolve_download_root(
     runtime: &RuntimeContext,
     destination: &DownloadDestination,
+    managed_cache_root: Option<&str>,
 ) -> Result<PathBuf, String> {
     match destination.kind.as_str() {
         "localFolder" => destination
@@ -801,11 +815,22 @@ fn resolve_download_root(
                         .map(sanitize_file_name)
                 })
                 .unwrap_or_else(|| "repository".to_string());
-            let repo_root = runtime
-                .plugin_data_dir
-                .join("exports")
-                .join("repository-staging")
-                .join(repo_key);
+            let repo_root = if let Some(root) = managed_cache_root
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+            {
+                PathBuf::from(root)
+                    .join(".momo")
+                    .join("cache")
+                    .join("download-staging")
+                    .join(repo_key)
+            } else {
+                runtime
+                    .plugin_data_dir
+                    .join("exports")
+                    .join("repository-staging")
+                    .join(repo_key)
+            };
             let parent_path = destination
                 .parent_path
                 .as_deref()
@@ -820,6 +845,26 @@ fn resolve_download_root(
         }
         other => Err(format!("unsupported destination kind: {other}")),
     }
+}
+
+fn playback_cache_root(
+    runtime: &RuntimeContext,
+    managed_cache_root: Option<&str>,
+) -> Result<PathBuf, String> {
+    if let Some(root) = managed_cache_root
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        let path = PathBuf::from(root)
+            .join(".momo")
+            .join("cache")
+            .join("netease-playback");
+        fs::create_dir_all(&path).map_err(io_error)?;
+        return Ok(path);
+    }
+    let path = runtime.plugin_data_dir.join("temp");
+    fs::create_dir_all(&path).map_err(io_error)?;
+    Ok(path)
 }
 
 fn clear_expired_temp_files(runtime: &RuntimeContext) -> Result<(), String> {
@@ -1122,6 +1167,7 @@ mod tests {
                     repo_id: None,
                     parent_path: None,
                 },
+                managed_cache_root: None,
                 source_payload: None,
             },
         )
@@ -1166,6 +1212,7 @@ mod tests {
                     repo_id: Some("repo-target".to_string()),
                     parent_path: Some("Imports/Netease".to_string()),
                 },
+                managed_cache_root: None,
                 source_payload: None,
             },
         )
@@ -1211,6 +1258,7 @@ mod tests {
                 level: Some("standard".to_string()),
                 repo_id: Some("repo-demo".to_string()),
                 entry_path: Some("Songs/demo.mp3".to_string()),
+                managed_cache_root: None,
                 source_payload: Some(serde_json::json!({
                     "accountId": "123456"
                 })),
@@ -1259,6 +1307,7 @@ mod tests {
                     repo_id: None,
                     parent_path: None,
                 },
+                managed_cache_root: None,
                 source_payload: Some(serde_json::json!({
                     "accountCookie": "MUSIC_U=payload-cookie"
                 })),
@@ -1301,6 +1350,7 @@ mod tests {
                     repo_id: None,
                     parent_path: None,
                 },
+                managed_cache_root: None,
                 source_payload: Some(serde_json::json!({
                     "accountCookie": "MUSIC_U=payload-cookie"
                 })),
@@ -1338,6 +1388,7 @@ mod tests {
                     repo_id: None,
                     parent_path: None,
                 },
+                managed_cache_root: None,
                 source_payload: None,
             },
         )
