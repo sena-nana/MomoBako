@@ -311,6 +311,7 @@ fn prepare_track_playback(
                     "mediaType": "audio/mpeg",
                     "expiresAt": expires_at.format(&Rfc3339).map_err(time_error)?,
                     "sizeBytes": metadata.len() as i64,
+                    "cached": true,
                     "lyricPath": if lrc_path.exists() { Some(lrc_path.to_string_lossy().to_string()) } else { None::<String> },
                     "wordLyricPath": if yrc_path.exists() { Some(yrc_path.to_string_lossy().to_string()) } else { None::<String> }
                 }));
@@ -341,6 +342,7 @@ fn prepare_track_playback(
         "expiresAt": expires_at.format(&Rfc3339).map_err(time_error)?,
         "sizeBytes": metadata.len() as i64,
         "bitrate": song_url.br,
+        "cached": false,
         "sourceUrl": serde_json::Value::Null,
         "lyricPath": if lrc_path.exists() { Some(lrc_path.to_string_lossy().to_string()) } else { None::<String> },
         "wordLyricPath": if yrc_path.exists() { Some(yrc_path.to_string_lossy().to_string()) } else { None::<String> }
@@ -743,7 +745,9 @@ fn normalize_ncm_domain(value: Option<&str>) -> String {
     if let Some((domain, _)) = normalized.split_once("/eapi/") {
         return domain.trim_end_matches('/').to_string();
     }
-    if normalized.ends_with("/api") || normalized.ends_with("/weapi") || normalized.ends_with("/eapi")
+    if normalized.ends_with("/api")
+        || normalized.ends_with("/weapi")
+        || normalized.ends_with("/eapi")
     {
         return normalized
             .rsplit_once('/')
@@ -966,12 +970,18 @@ mod tests {
 
     #[test]
     fn normalize_ncm_domain_removes_legacy_api_path_suffixes() {
-        assert_eq!(normalize_ncm_domain(Some("https://music.163.com/weapi")), "https://music.163.com");
+        assert_eq!(
+            normalize_ncm_domain(Some("https://music.163.com/weapi")),
+            "https://music.163.com"
+        );
         assert_eq!(
             normalize_ncm_domain(Some("https://interface.music.163.com/eapi/song/url")),
             "https://interface.music.163.com"
         );
-        assert_eq!(normalize_ncm_domain(Some("https://music.163.com/api")), "https://music.163.com");
+        assert_eq!(
+            normalize_ncm_domain(Some("https://music.163.com/api")),
+            "https://music.163.com"
+        );
     }
 
     fn serve_downloader_test_server() -> String {
@@ -1004,11 +1014,21 @@ mod tests {
                     ("200 OK", "application/json", body.to_string())
                 } else if path.starts_with("/weapi/v3/song/detail") {
                     let body = match song_detail_count {
-                        0 => r#"{"songs":[{"id":101,"name":"Song One","ar":[{"name":"Artist One"}]}]}"#,
-                        1 => r#"{"songs":[{"id":202,"name":"Song Two","ar":[{"name":"Artist Two"}]}]}"#,
-                        2 => r#"{"songs":[{"id":101,"name":"Song One","ar":[{"name":"Artist One"}]}]}"#,
-                        3 => r#"{"songs":[{"id":101,"name":"Song One","ar":[{"name":"Artist One"}]}]}"#,
-                        _ => r#"{"songs":[{"id":101,"name":"Song One","ar":[{"name":"Artist One"}]}]}"#,
+                        0 => {
+                            r#"{"songs":[{"id":101,"name":"Song One","ar":[{"name":"Artist One"}]}]}"#
+                        }
+                        1 => {
+                            r#"{"songs":[{"id":202,"name":"Song Two","ar":[{"name":"Artist Two"}]}]}"#
+                        }
+                        2 => {
+                            r#"{"songs":[{"id":101,"name":"Song One","ar":[{"name":"Artist One"}]}]}"#
+                        }
+                        3 => {
+                            r#"{"songs":[{"id":101,"name":"Song One","ar":[{"name":"Artist One"}]}]}"#
+                        }
+                        _ => {
+                            r#"{"songs":[{"id":101,"name":"Song One","ar":[{"name":"Artist One"}]}]}"#
+                        }
                     };
                     song_detail_count += 1;
                     ("200 OK", "application/json", body.to_string())
@@ -1029,16 +1049,24 @@ mod tests {
                     ("200 OK", "application/json", body)
                 } else if path.starts_with("/eapi/song/lyric/v1") {
                     let body = match lyric_new_count {
-                        0 => r#"{"lrc":{"lyric":"[00:01.00]Line 1"},"yrc":{"lyric":"[00:01.00](Line 1)"}}"#,
+                        0 => {
+                            r#"{"lrc":{"lyric":"[00:01.00]Line 1"},"yrc":{"lyric":"[00:01.00](Line 1)"}}"#
+                        }
                         1 => r#"{"lrc":{"lyric":"[00:02.00]Broken song"}}"#,
-                        2 => r#"{"lrc":{"lyric":"[00:01.00]Line 1"},"yrc":{"lyric":"[00:01.00](Line 1)"}}"#,
-                        _ => r#"{"lrc":{"lyric":"[00:01.00]Line 1"},"yrc":{"lyric":"[00:01.00](Line 1)"}}"#,
+                        2 => {
+                            r#"{"lrc":{"lyric":"[00:01.00]Line 1"},"yrc":{"lyric":"[00:01.00](Line 1)"}}"#
+                        }
+                        _ => {
+                            r#"{"lrc":{"lyric":"[00:01.00]Line 1"},"yrc":{"lyric":"[00:01.00](Line 1)"}}"#
+                        }
                     };
                     lyric_new_count += 1;
                     ("200 OK", "application/json", body.to_string())
                 } else if path.starts_with("/eapi/song/lyric") {
                     let body = match lyric_count {
-                        0 => r#"{"lrc":{"lyric":"[00:01.00]Line 1"},"klyric":{"lyric":"[00:01.00](Line 1)"}}"#,
+                        0 => {
+                            r#"{"lrc":{"lyric":"[00:01.00]Line 1"},"klyric":{"lyric":"[00:01.00](Line 1)"}}"#
+                        }
                         _ => r#"{"lrc":{"lyric":"[00:02.00]Broken song"}}"#,
                     };
                     lyric_count += 1;

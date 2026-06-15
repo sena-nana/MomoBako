@@ -19,18 +19,18 @@ mod window_state;
 use repository_runtime::{ExternalApiConnectionStatus, RepositoryRuntime};
 use repository_service::{
     ApiDesignSnapshot, AssetDetail, BinaryFileWriteRequest, BinaryFileWriteResponse, CacheSnapshot,
-    DownloaderPlaylistProgressEvent, DownloaderPlaylistRequest, EntryPlaybackRequest,
-    EntryPlaybackSourceResponse, FileBrowserRequest, FileBrowserSnapshot,
+    DownloaderPlaylistProgressEvent, DownloaderPlaylistRequest, EntryPlaybackProgressEvent,
+    EntryPlaybackRequest, EntryPlaybackSourceResponse, FileBrowserRequest, FileBrowserSnapshot,
     FileCopyRequest, FileCreateRequest, FileDeleteRequest, FileImportRequest, FileMoveRequest,
     FilePreviewSourceResponse, FileReadRequest, FileRenameRequest, HardlinkCandidateResponse,
-    HardlinkConfirmRequest, HardlinkConfirmResponse, MetadataUpdateRequest,
-    MetadataUpdateResponse, PlaylistDetail, PlaylistItemRemoveRequest, PlaylistItemsAddRequest,
-    PlaylistItemsByPathsAddRequest, PlaylistItemsOrderRequest, PlaylistMembershipRequest,
-    PlaylistMembershipSnapshot, PlaylistMutationRequest, PlaylistMutationResponse, PlaylistSummary,
-    PluginArchiveReadRequest, PluginArchiveTextResponse, PluginCallRequest, PluginCallResult,
-    PluginConfigDeleteRequest, PluginConfigSetRequest, PluginConfigSnapshot,
-    PluginDataDirectoryResponse, PluginEnabledRequest, PluginInstallRequest, PluginManifest,
-    PluginMutationResponse, RepositoryAction, RepositoryActionEnabledRequest,
+    HardlinkConfirmRequest, HardlinkConfirmResponse, MetadataUpdateRequest, MetadataUpdateResponse,
+    PlaylistDetail, PlaylistItemRemoveRequest, PlaylistItemsAddRequest,
+    PlaylistItemsByPathsAddRequest, PlaylistItemsOrderRequest, PlaylistMembershipIndex,
+    PlaylistMembershipRequest, PlaylistMembershipSnapshot, PlaylistMutationRequest,
+    PlaylistMutationResponse, PlaylistSummary, PluginArchiveReadRequest, PluginArchiveTextResponse,
+    PluginCallRequest, PluginCallResult, PluginConfigDeleteRequest, PluginConfigSetRequest,
+    PluginConfigSnapshot, PluginDataDirectoryResponse, PluginEnabledRequest, PluginInstallRequest,
+    PluginManifest, PluginMutationResponse, RepositoryAction, RepositoryActionEnabledRequest,
     RepositoryActionMutationResponse, RepositoryActionRunRequest, RepositoryActionRunResponse,
     RepositoryExportRequest, RepositoryExportResponse, RepositoryFolderRequest,
     RepositoryMutationRequest, RepositoryMutationResponse, RepositoryRelocateRequest,
@@ -120,6 +120,16 @@ async fn list_playlists(
 ) -> Result<Vec<PlaylistSummary>, String> {
     runtime
         .run_read(move |state| state.list_playlists(&repo_id))
+        .await
+}
+
+#[tauri::command]
+async fn list_playlist_memberships(
+    repo_id: String,
+    runtime: tauri::State<'_, RepositoryRuntime>,
+) -> Result<PlaylistMembershipIndex, String> {
+    runtime
+        .run_read(move |state| state.list_playlist_memberships(&repo_id))
         .await
 }
 
@@ -325,9 +335,70 @@ async fn prepare_entry_playback_source(
     request: EntryPlaybackRequest,
     runtime: tauri::State<'_, RepositoryRuntime>,
 ) -> Result<EntryPlaybackSourceResponse, String> {
-    runtime
+    let mut response = runtime
         .run_read(move |state| state.prepare_entry_playback_source(request))
-        .await
+        .await?;
+    attach_playback_preview_urls(&runtime, &mut response).await?;
+    Ok(response)
+}
+
+#[tauri::command]
+async fn prepare_entry_playback_source_with_progress(
+    request: EntryPlaybackRequest,
+    progress: Channel<EntryPlaybackProgressEvent>,
+    runtime: tauri::State<'_, RepositoryRuntime>,
+) -> Result<EntryPlaybackSourceResponse, String> {
+    let mut emit = move |event: EntryPlaybackProgressEvent| {
+        progress.send(event).map_err(|error| error.to_string())
+    };
+    let mut response = runtime
+        .run_read(move |state| {
+            state.prepare_entry_playback_source_with_progress(request, &mut emit)
+        })
+        .await?;
+    attach_playback_preview_urls(&runtime, &mut response).await?;
+    Ok(response)
+}
+
+async fn attach_playback_preview_urls(
+    runtime: &RepositoryRuntime,
+    response: &mut EntryPlaybackSourceResponse,
+) -> Result<(), String> {
+    if response.source_url.is_none() {
+        let source_path = response
+            .local_path
+            .as_deref()
+            .or(response.temp_file_path.as_deref())
+            .map(PathBuf::from);
+        if let Some(source_path) = source_path {
+            let media_type = response.media_type.clone();
+            let token = runtime
+                .run_read(move |state| state.register_preview_source_path(source_path, &media_type))
+                .await?;
+            response.source_url = Some(runtime.preview_source_url(&token));
+        }
+    }
+    if response.lyric_source_url.is_none() {
+        if let Some(lyric_path) = response.lyric_path.as_deref().map(PathBuf::from) {
+            let token = runtime
+                .run_read(move |state| {
+                    state.register_preview_source_path(lyric_path, "text/plain; charset=utf-8")
+                })
+                .await?;
+            response.lyric_source_url = Some(runtime.preview_source_url(&token));
+        }
+    }
+    if response.word_lyric_source_url.is_none() {
+        if let Some(word_lyric_path) = response.word_lyric_path.as_deref().map(PathBuf::from) {
+            let token = runtime
+                .run_read(move |state| {
+                    state.register_preview_source_path(word_lyric_path, "text/plain; charset=utf-8")
+                })
+                .await?;
+            response.word_lyric_source_url = Some(runtime.preview_source_url(&token));
+        }
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -679,7 +750,9 @@ async fn update_repository_backend_config(
     runtime: tauri::State<'_, RepositoryRuntime>,
 ) -> Result<RepositoryMutationResponse, String> {
     let response = runtime
-        .run_repository_collection_write(move |state| state.update_repository_backend_config(request))
+        .run_repository_collection_write(move |state| {
+            state.update_repository_backend_config(request)
+        })
         .await?;
     refresh_thumbnail_asset_scope(&app, &runtime).await?;
     Ok(response)
@@ -951,6 +1024,7 @@ pub fn run() {
             update_asset_metadata,
             get_file_browser,
             list_playlists,
+            list_playlist_memberships,
             create_playlist,
             update_playlist,
             delete_playlist,
@@ -972,6 +1046,7 @@ pub fn run() {
             read_file,
             prepare_preview_file_source,
             prepare_entry_playback_source,
+            prepare_entry_playback_source_with_progress,
             call_plugin,
             download_playlist_with_progress,
             read_plugin_archive_text,

@@ -43,6 +43,19 @@ function readPlaybackSession(repoId: string) {
   }
 }
 
+function readPlaybackPlaylistId(repoId: string) {
+  const raw = readPlaybackSession(repoId);
+  if (!raw) return null;
+  try {
+    const session = JSON.parse(raw) as { playlistId?: unknown };
+    return typeof session.playlistId === "string" && session.playlistId.trim()
+      ? session.playlistId
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 const sidebarCollapsed = ref(readStorage(COLLAPSED_STORAGE_KEY) === "1");
 const playerMountRef = ref<HTMLElement | null>(null);
 
@@ -88,13 +101,11 @@ watch(activeRepoId, async (repoId, previousRepoId) => {
 watch(
   [activeRepoId, playlists],
   async ([repoId, playlistItems]) => {
-    if (!repoId || !playlistItems.length || player.activeRepoId.value === repoId || !readPlaybackSession(repoId)) return;
-    const restored = await Promise.all(playlistItems.map(async (playlist) => {
-      const detail = await getPlaylistDetail(repoId, playlist.playlistId);
-      if (!detail) return false;
-      return player.restoreSession(repoId, detail);
-    }));
-    if (!restored.some(Boolean)) {
+    const playlistId = repoId ? readPlaybackPlaylistId(repoId) : null;
+    if (!repoId || !playlistId || !playlistItems.some((playlist) => playlist.playlistId === playlistId) || player.activeRepoId.value === repoId) return;
+    const detail = await getPlaylistDetail(repoId, playlistId);
+    const restored = await player.restoreSession(repoId, detail);
+    if (!restored) {
       player.clearSession(repoId);
     }
   },

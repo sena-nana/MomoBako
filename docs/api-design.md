@@ -104,6 +104,9 @@
   - `tagGroups` expose repository-level tag grouping metadata for the desktop tag editor; they do not replace per-asset searchable tags.
 - `GET /repositories/{repoId}/playlists`
   - Returns `PlaylistSummary[]` ordered by `sortOrder`, then `updatedAt`.
+- `GET /repositories/{repoId}/playlists:memberships`
+  - Returns a lightweight `PlaylistMembershipIndex` as `assetId -> playlistIds[]` for sidebar and context-menu checked states.
+  - Does not resolve playlist item status, thumbnails, or file metadata; use `GET /repositories/{repoId}/playlists/{playlistId}` for full queue contents.
 - `POST /repositories/{repoId}/playlists`
   - Creates a playlist with `name` and `playerTypeId`.
 - `PATCH /repositories/{repoId}/playlists/{playlistId}`
@@ -154,7 +157,12 @@
   - Request body includes repository-relative `path`.
   - Real local assets reuse the existing local preview preparation path and may return a direct `localPath`.
   - Virtual assets delegate to a download-capable backend plugin such as `momobako.service.downloader`, which can return `localPath`, optional `tempFilePath`, optional `expiresAt`, and media metadata for temporary playback sources.
+  - Response `sourceUrl` is the preferred browser-consumable playback URL. Temporary audio files and lyric files are registered with the in-process preview runtime; lyric files may also return `lyricSourceUrl` or `wordLyricSourceUrl`.
   - Frontend playlist players and virtual-source preview flows should prefer this endpoint over `files:preparePreviewSource` when a file may not exist locally.
+- `POST /repositories/{repoId}/entries:preparePlaybackWithProgress`
+  - Request body matches `entries:preparePlayback` and includes a Tauri progress channel.
+  - Emits `EntryPlaybackProgressEvent` phases for resolving the entry, downloading or reusing the temporary audio, preparing the preview source, and readiness.
+  - The media preview plugin waits for the command to finish before mounting the audio/video element, so playback starts only after the temporary download is complete.
 - `POST /repositories/{repoId}/playlists:downloadWithProgress`
   - Tauri command: `download_playlist_with_progress`
   - Request body includes:

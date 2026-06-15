@@ -450,6 +450,10 @@ export type PlaylistMembershipSnapshot = {
   playlistIds: string[];
 };
 
+export type PlaylistMembershipIndex = {
+  memberships: Record<string, string[]>;
+};
+
 export type SmartFolderResultSnapshot = {
   repoId: string;
   smartFolder: SmartFolder;
@@ -651,6 +655,17 @@ export type EntryPlaybackRequest = {
   path: string;
 };
 
+export type EntryPlaybackProgressEvent = {
+  phase: "resolve" | "download" | "preview" | "ready" | "error";
+  repoId: string;
+  path: string;
+  value: number;
+  detail: string;
+  indeterminate: boolean;
+  cached?: boolean | null;
+  error?: string | null;
+};
+
 export type EntryPlaybackSourceResponse = {
   repoId: string;
   path: string;
@@ -659,7 +674,9 @@ export type EntryPlaybackSourceResponse = {
   localPath?: string | null;
   tempFilePath?: string | null;
   lyricPath?: string | null;
+  lyricSourceUrl?: string | null;
   wordLyricPath?: string | null;
+  wordLyricSourceUrl?: string | null;
   expiresAt?: string | null;
   sizeBytes?: number | null;
   modifiedAt?: string | null;

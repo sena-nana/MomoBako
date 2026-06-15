@@ -29,16 +29,20 @@ const MAX_REMOTE_THUMBNAIL_BYTES: u64 = 10 * 1024 * 1024;
 
 static FFMPEG_READY: OnceLock<Result<(), String>> = OnceLock::new();
 #[cfg(test)]
-type TestDownloaderPlaybackHook =
-    fn(serde_json::Value) -> Result<serde_json::Value, String>;
+type TestDownloaderPlaybackHook = fn(serde_json::Value) -> Result<serde_json::Value, String>;
 #[cfg(test)]
 static TEST_DOWNLOADER_PLAYBACK_HOOK: OnceLock<Mutex<Option<TestDownloaderPlaybackHook>>> =
     OnceLock::new();
 #[cfg(test)]
-type TestDownloaderTrackPackageHook =
-    fn(serde_json::Value) -> Result<serde_json::Value, String>;
+type TestDownloaderTrackPackageHook = fn(serde_json::Value) -> Result<serde_json::Value, String>;
 #[cfg(test)]
 static TEST_DOWNLOADER_TRACK_PACKAGE_HOOK: OnceLock<Mutex<Option<TestDownloaderTrackPackageHook>>> =
+    OnceLock::new();
+#[cfg(test)]
+type TestBackendStatEntryHook =
+    fn(&RepositoryRecord, &Path, &str) -> Option<Result<FileSystemEntry, String>>;
+#[cfg(test)]
+static TEST_BACKEND_STAT_ENTRY_HOOK: OnceLock<Mutex<Option<TestBackendStatEntryHook>>> =
     OnceLock::new();
 const REGISTRY_SCHEMA_SQL: &str = r#"
 CREATE TABLE IF NOT EXISTS repositories (
@@ -779,6 +783,12 @@ pub struct PlaylistMembershipSnapshot {
     pub playlist_ids: Vec<String>,
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlaylistMembershipIndex {
+    pub memberships: BTreeMap<String, Vec<String>>,
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct FileTreeNode {
@@ -846,10 +856,25 @@ pub struct EntryPlaybackSourceResponse {
     pub local_path: Option<String>,
     pub temp_file_path: Option<String>,
     pub lyric_path: Option<String>,
+    pub lyric_source_url: Option<String>,
     pub word_lyric_path: Option<String>,
+    pub word_lyric_source_url: Option<String>,
     pub expires_at: Option<String>,
     pub size_bytes: Option<i64>,
     pub modified_at: Option<String>,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct EntryPlaybackProgressEvent {
+    pub phase: String,
+    pub repo_id: String,
+    pub path: String,
+    pub value: u8,
+    pub detail: String,
+    pub indeterminate: bool,
+    pub cached: Option<bool>,
+    pub error: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -2423,6 +2448,22 @@ impl RepositoryState {
         load_playlists(&connection, repo_id).map_err(db_error)
     }
 
+    pub fn list_playlist_memberships(
+        &self,
+        repo_id: &str,
+    ) -> Result<PlaylistMembershipIndex, String> {
+        self.ensure_initialized()?;
+        let repo = self.load_repository_record(repo_id)?;
+        let connection = self.open_repository_connection(
+            &repo.summary.repo_id,
+            &repo.summary.path,
+            &repo.backend_record,
+        )?;
+        Ok(PlaylistMembershipIndex {
+            memberships: load_playlist_memberships(&connection, repo_id).map_err(db_error)?,
+        })
+    }
+
     pub fn create_playlist(
         &self,
         request: PlaylistMutationRequest,
@@ -2704,7 +2745,9 @@ impl RepositoryState {
                 )
                 .map_err(db_error)?;
             let rows = stmt
-                .query_map(params![request.repo_id, prefix], |row| row.get::<_, String>(0))
+                .query_map(params![request.repo_id, prefix], |row| {
+                    row.get::<_, String>(0)
+                })
                 .map_err(db_error)?;
             for row in rows {
                 asset_ids.push(row.map_err(db_error)?);
@@ -3022,46 +3065,145 @@ impl RepositoryState {
         &self,
         request: EntryPlaybackRequest,
     ) -> Result<EntryPlaybackSourceResponse, String> {
+        self.prepare_entry_playback_source_internal(request, None)
+    }
+
+    pub fn prepare_entry_playback_source_with_progress(
+        &self,
+        request: EntryPlaybackRequest,
+        emit: &mut dyn FnMut(EntryPlaybackProgressEvent) -> Result<(), String>,
+    ) -> Result<EntryPlaybackSourceResponse, String> {
+        self.prepare_entry_playback_source_internal(request, Some(emit))
+    }
+
+    fn prepare_entry_playback_source_internal(
+        &self,
+        request: EntryPlaybackRequest,
+        mut emit: Option<&mut dyn FnMut(EntryPlaybackProgressEvent) -> Result<(), String>>,
+    ) -> Result<EntryPlaybackSourceResponse, String> {
         self.ensure_initialized()?;
 
         let repo = self.load_repository_record(&request.repo_id)?;
         let entry_path = normalize_entry_path(&request.path)?;
+        emit_entry_playback_progress(
+            &mut emit,
+            "resolve",
+            &request.repo_id,
+            &entry_path,
+            8,
+            "解析媒体条目",
+            false,
+            None,
+            None,
+        )?;
         let connection = self.open_repository_connection(
             &repo.summary.repo_id,
             &repo.summary.path,
             &repo.backend_record,
         )?;
         let asset_map = load_asset_path_map(&connection, &request.repo_id).map_err(db_error)?;
-        let asset = asset_map
-            .get(&entry_path)
-            .ok_or_else(|| format!("asset not found: {entry_path}"))?;
 
-        if !asset.is_virtual {
-            let preview = self.prepare_preview_file_source(FileReadRequest {
-                repo_id: request.repo_id.clone(),
-                path: entry_path.clone(),
-            })?;
-            return Ok(EntryPlaybackSourceResponse {
-                repo_id: request.repo_id,
-                path: entry_path,
-                media_type: preview.media_type,
-                source_url: None,
-                local_path: asset.local_absolute_path.clone(),
-                temp_file_path: None,
-                lyric_path: None,
-                word_lyric_path: None,
-                expires_at: None,
-                size_bytes: Some(preview.size_bytes),
-                modified_at: preview.modified_at,
-            });
+        if let Some(asset) = asset_map.get(&entry_path) {
+            if !asset.is_virtual {
+                emit_entry_playback_progress(
+                    &mut emit,
+                    "preview",
+                    &request.repo_id,
+                    &entry_path,
+                    82,
+                    "准备本地预览源",
+                    false,
+                    Some(true),
+                    None,
+                )?;
+                let preview = self.prepare_preview_file_source(FileReadRequest {
+                    repo_id: request.repo_id.clone(),
+                    path: entry_path.clone(),
+                })?;
+                let response = EntryPlaybackSourceResponse {
+                    repo_id: request.repo_id,
+                    path: entry_path,
+                    media_type: preview.media_type,
+                    source_url: None,
+                    local_path: asset.local_absolute_path.clone(),
+                    temp_file_path: None,
+                    lyric_path: None,
+                    lyric_source_url: None,
+                    word_lyric_path: None,
+                    word_lyric_source_url: None,
+                    expires_at: None,
+                    size_bytes: Some(preview.size_bytes),
+                    modified_at: preview.modified_at,
+                };
+                emit_entry_playback_progress(
+                    &mut emit,
+                    "ready",
+                    &response.repo_id,
+                    &response.path,
+                    100,
+                    "播放源已就绪",
+                    false,
+                    Some(true),
+                    None,
+                )?;
+                return Ok(response);
+            }
+
+            let metadata = load_metadata_map(&connection, &asset.asset_id).map_err(db_error)?;
+            let source_payload = asset
+                .source_payload
+                .clone()
+                .or_else(|| metadata.get("sourcePayload").cloned())
+                .unwrap_or_else(|| serde_json::json!({}));
+            return self.prepare_virtual_entry_playback_source(
+                &repo,
+                request.repo_id,
+                entry_path,
+                source_payload,
+                &metadata,
+                emit,
+            );
         }
 
-        let metadata = load_metadata_map(&connection, &asset.asset_id).map_err(db_error)?;
-        let source_payload = asset
+        emit_entry_playback_progress(
+            &mut emit,
+            "resolve",
+            &request.repo_id,
+            &entry_path,
+            18,
+            "从来源补取媒体信息",
+            true,
+            None,
+            None,
+        )?;
+        let repo_root = PathBuf::from(&repo.summary.path);
+        let entry = stat_backend_entry(&self.root, &repo, &repo_root, &entry_path)?;
+        if !entry.is_virtual {
+            return Err(format!("asset not found: {entry_path}"));
+        }
+        let metadata = BTreeMap::new();
+        let source_payload = entry
             .source_payload
-            .clone()
-            .or_else(|| metadata.get("sourcePayload").cloned())
             .unwrap_or_else(|| serde_json::json!({}));
+        self.prepare_virtual_entry_playback_source(
+            &repo,
+            request.repo_id,
+            entry_path,
+            source_payload,
+            &metadata,
+            emit,
+        )
+    }
+
+    fn prepare_virtual_entry_playback_source(
+        &self,
+        repo: &RepositoryRecord,
+        repo_id: String,
+        entry_path: String,
+        source_payload: serde_json::Value,
+        metadata: &BTreeMap<String, serde_json::Value>,
+        mut emit: Option<&mut dyn FnMut(EntryPlaybackProgressEvent) -> Result<(), String>>,
+    ) -> Result<EntryPlaybackSourceResponse, String> {
         let song_id = source_payload
             .get("songId")
             .or_else(|| metadata.get("songId"))
@@ -3087,33 +3229,97 @@ impl RepositoryState {
             .map(str::trim)
             .filter(|value| !value.is_empty())
             .unwrap_or(account_cookie);
+        emit_entry_playback_progress(
+            &mut emit,
+            "download",
+            &repo_id,
+            &entry_path,
+            28,
+            "下载临时音频",
+            true,
+            None,
+            None,
+        )?;
         let payload = serde_json::json!({
             "accountCookie": backend_account_cookie,
             "songId": song_id,
             "level": source_payload.get("level").cloned().unwrap_or_else(|| serde_json::json!("standard")),
-            "repoId": request.repo_id,
+            "repoId": repo_id,
             "entryPath": entry_path,
             "sourcePayload": source_payload,
         });
         let response = call_downloader_prepare_track_playback(&self.root, payload)?;
+        let cached = response.get("cached").and_then(serde_json::Value::as_bool);
+        emit_entry_playback_progress(
+            &mut emit,
+            "preview",
+            &repo_id,
+            &entry_path,
+            88,
+            if cached == Some(true) {
+                "使用已缓存音频"
+            } else {
+                "下载完成，准备预览源"
+            },
+            false,
+            cached,
+            None,
+        )?;
         let media_type = response
             .get("mediaType")
             .and_then(serde_json::Value::as_str)
             .unwrap_or("audio/mpeg")
             .to_string();
-        Ok(EntryPlaybackSourceResponse {
-            repo_id: request.repo_id,
-            path: request.path,
+        let playback = EntryPlaybackSourceResponse {
+            repo_id,
+            path: entry_path,
             media_type,
-            source_url: response.get("sourceUrl").and_then(serde_json::Value::as_str).map(str::to_string),
-            local_path: response.get("localPath").and_then(serde_json::Value::as_str).map(str::to_string),
-            temp_file_path: response.get("tempFilePath").and_then(serde_json::Value::as_str).map(str::to_string),
-            lyric_path: response.get("lyricPath").and_then(serde_json::Value::as_str).map(str::to_string),
-            word_lyric_path: response.get("wordLyricPath").and_then(serde_json::Value::as_str).map(str::to_string),
-            expires_at: response.get("expiresAt").and_then(serde_json::Value::as_str).map(str::to_string),
-            size_bytes: response.get("sizeBytes").and_then(serde_json::Value::as_i64),
-            modified_at: response.get("modifiedAt").and_then(serde_json::Value::as_str).map(str::to_string),
-        })
+            source_url: response
+                .get("sourceUrl")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string),
+            local_path: response
+                .get("localPath")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string),
+            temp_file_path: response
+                .get("tempFilePath")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string),
+            lyric_path: response
+                .get("lyricPath")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string),
+            lyric_source_url: None,
+            word_lyric_path: response
+                .get("wordLyricPath")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string),
+            word_lyric_source_url: None,
+            expires_at: response
+                .get("expiresAt")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string),
+            size_bytes: response
+                .get("sizeBytes")
+                .and_then(serde_json::Value::as_i64),
+            modified_at: response
+                .get("modifiedAt")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string),
+        };
+        emit_entry_playback_progress(
+            &mut emit,
+            "ready",
+            &playback.repo_id,
+            &playback.path,
+            100,
+            "播放源已就绪",
+            false,
+            cached,
+            None,
+        )?;
+        Ok(playback)
     }
 
     pub fn open_preview_file_source(&self, token: &str) -> Result<(File, String), String> {
@@ -3129,6 +3335,44 @@ impl RepositoryState {
         }
         let file = File::open(&source.path).map_err(io_error)?;
         Ok((file, source.media_type))
+    }
+
+    pub fn register_preview_source_path(
+        &self,
+        source_path: PathBuf,
+        media_type: &str,
+    ) -> Result<String, String> {
+        if !source_path.is_file() {
+            return Err(format!(
+                "preview source file is not available: {}",
+                source_path.to_string_lossy()
+            ));
+        }
+        let metadata = fs::metadata(&source_path).map_err(io_error)?;
+        let modified_at = metadata
+            .modified()
+            .ok()
+            .map(system_time_to_rfc3339)
+            .transpose()
+            .map_err(time_error)?;
+        let token = preview_file_token(
+            "playback",
+            &source_path.to_string_lossy(),
+            media_type,
+            metadata.len(),
+            modified_at.as_deref().unwrap_or_default(),
+        );
+        self.preview_sources
+            .lock()
+            .map_err(|_| "preview source lock poisoned".to_string())?
+            .insert(
+                token.clone(),
+                PreviewFileSource {
+                    path: source_path,
+                    media_type: media_type.to_string(),
+                },
+            );
+        Ok(token)
     }
 
     pub fn call_plugin(&self, request: PluginCallRequest) -> Result<PluginCallResult, String> {
@@ -3202,7 +3446,8 @@ impl RepositoryState {
     ) -> Result<PluginConfigSnapshot, String> {
         self.ensure_initialized()?;
         let key = normalize_plugin_config_key(&request.key)?;
-        let (manifest, data_dir, mut values) = self.load_plugin_config_values(&request.plugin_id)?;
+        let (manifest, data_dir, mut values) =
+            self.load_plugin_config_values(&request.plugin_id)?;
         let schema = plugin_settings_schema(&manifest);
         validate_plugin_config_value(&schema, &key, &request.value)?;
         values.insert(key, request.value);
@@ -3216,7 +3461,8 @@ impl RepositoryState {
     ) -> Result<PluginConfigSnapshot, String> {
         self.ensure_initialized()?;
         let key = normalize_plugin_config_key(&request.key)?;
-        let (manifest, data_dir, mut values) = self.load_plugin_config_values(&request.plugin_id)?;
+        let (manifest, data_dir, mut values) =
+            self.load_plugin_config_values(&request.plugin_id)?;
         values.remove(&key);
         save_plugin_config_values(&data_dir, &values)?;
         Ok(plugin_config_snapshot(&manifest, data_dir, values))
@@ -5717,6 +5963,31 @@ fn load_playlist_summary(
             .into_iter()
             .find(|item| item.playlist_id == playlist_id)
     })
+}
+
+fn load_playlist_memberships(
+    connection: &Connection,
+    repo_id: &str,
+) -> Result<BTreeMap<String, Vec<String>>, rusqlite::Error> {
+    let mut stmt = connection.prepare(
+        r#"
+        SELECT pi.asset_id, pi.playlist_id
+        FROM playlist_items pi
+        INNER JOIN playlists p
+          ON p.repo_id = pi.repo_id AND p.playlist_id = pi.playlist_id
+        WHERE pi.repo_id = ?1
+        ORDER BY pi.asset_id, p.sort_order, p.updated_at DESC, p.name COLLATE NOCASE
+        "#,
+    )?;
+    let rows = stmt.query_map([repo_id], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    })?;
+    let mut memberships = BTreeMap::<String, Vec<String>>::new();
+    for row in rows {
+        let (asset_id, playlist_id) = row?;
+        memberships.entry(asset_id).or_default().push(playlist_id);
+    }
+    Ok(memberships)
 }
 
 fn load_playlist_detail(
@@ -10248,15 +10519,14 @@ struct BackendDiscoveredFile {
 impl BackendDiscoveredFile {
     fn into_discovered_file(self, repo_root: &Path) -> Result<DiscoveredFile, String> {
         let relative_path = normalize_entry_path(&self.relative_path)?;
-        let absolute_path = if self.is_virtual {
-            self.absolute_path
-        } else {
-            Some(
+        let absolute_path =
+            if self.is_virtual {
                 self.absolute_path
-                    .map(Ok)
-                    .unwrap_or_else(|| resolve_repository_relative_path(repo_root, &relative_path))?,
-            )
-        };
+            } else {
+                Some(self.absolute_path.map(Ok).unwrap_or_else(|| {
+                    resolve_repository_relative_path(repo_root, &relative_path)
+                })?)
+            };
         Ok(DiscoveredFile {
             absolute_path,
             relative_path,
@@ -10744,13 +11014,19 @@ pub(crate) fn set_test_downloader_playback_hook(hook: Option<TestDownloaderPlayb
 }
 
 #[cfg(test)]
-pub(crate) fn set_test_downloader_track_package_hook(
-    hook: Option<TestDownloaderTrackPackageHook>,
-) {
+pub(crate) fn set_test_downloader_track_package_hook(hook: Option<TestDownloaderTrackPackageHook>) {
     *TEST_DOWNLOADER_TRACK_PACKAGE_HOOK
         .get_or_init(|| Mutex::new(None))
         .lock()
         .expect("test downloader track package hook lock should succeed") = hook;
+}
+
+#[cfg(test)]
+fn set_test_backend_stat_entry_hook(hook: Option<TestBackendStatEntryHook>) {
+    *TEST_BACKEND_STAT_ENTRY_HOOK
+        .get_or_init(|| Mutex::new(None))
+        .lock()
+        .expect("test backend stat entry hook lock should succeed") = hook;
 }
 
 fn load_runtime_plugin_manifests(service_root: &Path) -> Vec<DiscoveredPluginManifest> {
@@ -11287,10 +11563,7 @@ fn validate_plugin_config_value(
         .and_then(|fields| fields.as_array())
         .and_then(|fields| {
             fields.iter().find(|field| {
-                field
-                    .get("key")
-                    .and_then(|field_key| field_key.as_str())
-                    == Some(key)
+                field.get("key").and_then(|field_key| field_key.as_str()) == Some(key)
             })
         })
     else {
@@ -11302,8 +11575,12 @@ fn validate_plugin_config_value(
         .and_then(|value| value.as_str())
         .unwrap_or("string");
     match field_type {
-        "boolean" if !value.is_boolean() => Err(format!("plugin config value must be boolean: {key}")),
-        "number" if value.as_f64().is_none() => Err(format!("plugin config value must be number: {key}")),
+        "boolean" if !value.is_boolean() => {
+            Err(format!("plugin config value must be boolean: {key}"))
+        }
+        "number" if value.as_f64().is_none() => {
+            Err(format!("plugin config value must be number: {key}"))
+        }
         "string" if !value.is_string() => Err(format!("plugin config value must be string: {key}")),
         "select" => validate_plugin_select_config_value(field, key, value),
         _ => Ok(()),
@@ -11316,7 +11593,9 @@ fn validate_plugin_select_config_value(
     value: &serde_json::Value,
 ) -> Result<(), String> {
     if !(value.is_string() || value.is_number() || value.is_boolean()) {
-        return Err(format!("plugin config value must be a scalar option: {key}"));
+        return Err(format!(
+            "plugin config value must be a scalar option: {key}"
+        ));
     }
     let Some(options) = field.get("options").and_then(|options| options.as_array()) else {
         return Ok(());
@@ -11330,7 +11609,9 @@ fn validate_plugin_select_config_value(
     if valid {
         Ok(())
     } else {
-        Err(format!("plugin config value is not an allowed option: {key}"))
+        Err(format!(
+            "plugin config value is not an allowed option: {key}"
+        ))
     }
 }
 
@@ -11874,6 +12155,12 @@ fn core_tauri_api_definitions() -> Vec<ApiDefinition> {
         ),
         tauri_api_definition(
             "Playlist API",
+            "list_playlist_memberships",
+            "列出素材到播放列表的轻量成员关系索引。",
+            serde_json::json!({ "repoId": "<repoId>" }),
+        ),
+        tauri_api_definition(
+            "Playlist API",
             "create_playlist",
             "创建播放列表。",
             serde_json::json!({
@@ -12070,6 +12357,15 @@ fn core_tauri_api_definitions() -> Vec<ApiDefinition> {
             "prepare_entry_playback_source",
             "为本地或虚拟条目准备播放源。",
             serde_json::json!({ "request": { "repoId": "<repoId>", "path": "<path>" } }),
+        ),
+        tauri_api_definition(
+            "Preview API",
+            "prepare_entry_playback_source_with_progress",
+            "为本地或虚拟条目准备播放源，并通过进度通道回报准备与下载阶段。",
+            serde_json::json!({
+                "request": { "repoId": "<repoId>", "path": "<path>" },
+                "progress": "<Channel<EntryPlaybackProgressEvent>>"
+            }),
         ),
         tauri_api_definition(
             "Playlist API",
@@ -14913,12 +15209,50 @@ fn create_backend_file(
     )
 }
 
+#[allow(clippy::too_many_arguments)]
+fn emit_entry_playback_progress(
+    emit: &mut Option<&mut dyn FnMut(EntryPlaybackProgressEvent) -> Result<(), String>>,
+    phase: &str,
+    repo_id: &str,
+    path: &str,
+    value: u8,
+    detail: &str,
+    indeterminate: bool,
+    cached: Option<bool>,
+    error: Option<String>,
+) -> Result<(), String> {
+    if let Some(emit) = emit.as_deref_mut() {
+        emit(EntryPlaybackProgressEvent {
+            phase: phase.to_string(),
+            repo_id: repo_id.to_string(),
+            path: path.to_string(),
+            value: value.min(100),
+            detail: detail.to_string(),
+            indeterminate,
+            cached,
+            error,
+        })?;
+    }
+    Ok(())
+}
+
 fn stat_backend_entry(
     service_root: &Path,
     repo: &RepositoryRecord,
     repo_root: &Path,
     entry_path: &str,
 ) -> Result<FileSystemEntry, String> {
+    #[cfg(test)]
+    if let Some(result) = TEST_BACKEND_STAT_ENTRY_HOOK
+        .get_or_init(|| Mutex::new(None))
+        .lock()
+        .map_err(|_| "test backend stat entry hook lock poisoned".to_string())?
+        .as_ref()
+        .and_then(|hook| hook(repo, repo_root, entry_path))
+    {
+        return result;
+    }
+
     backend_adapter(service_root, repo).stat_entry(
         repo_root,
         entry_path,
@@ -15229,7 +15563,9 @@ fn map_file_browser_entries(
             let hardlink_group_id =
                 asset_record.and_then(|record| record.hardlink_group_id.clone());
             let hardlink_state = asset_record.and_then(|record| record.hardlink_state.clone());
-            let is_virtual = asset_record.map(|record| record.is_virtual).unwrap_or(entry.is_virtual);
+            let is_virtual = asset_record
+                .map(|record| record.is_virtual)
+                .unwrap_or(entry.is_virtual);
             let provider_id = asset_record
                 .and_then(|record| record.provider_id.clone())
                 .or(entry.provider_id.clone());
@@ -15310,11 +15646,14 @@ fn map_trash_browser_entries(
             let hardlink_group_id =
                 asset_record.and_then(|record| record.hardlink_group_id.clone());
             let hardlink_state = asset_record.and_then(|record| record.hardlink_state.clone());
-            let is_virtual = asset_record.map(|record| record.is_virtual).unwrap_or(false);
+            let is_virtual = asset_record
+                .map(|record| record.is_virtual)
+                .unwrap_or(false);
             let provider_id = asset_record.and_then(|record| record.provider_id.clone());
             let provider_item_id = asset_record.and_then(|record| record.provider_item_id.clone());
             let source_payload = asset_record.and_then(|record| record.source_payload.clone());
-            let local_absolute_path = asset_record.and_then(|record| record.local_absolute_path.clone());
+            let local_absolute_path =
+                asset_record.and_then(|record| record.local_absolute_path.clone());
             let entry_thumbnail = thumbnail_map.get(&(original_path.clone(), kind.to_string()));
             let thumbnail_path = entry_thumbnail
                 .map(|record| record.path.clone())
@@ -16240,9 +16579,11 @@ fn safe_prefix(value: &str, max_chars: usize) -> &str {
 mod tests {
     use super::*;
     use std::net::TcpListener;
+    use std::sync::MutexGuard;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     const TEST_WEBDAV_PLUGIN_ID: &str = "momobako.webdav";
+    static PLAYBACK_TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
     struct TestWorkspace {
         root: PathBuf,
@@ -16268,6 +16609,13 @@ mod tests {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.root);
         }
+    }
+
+    fn playback_test_lock() -> MutexGuard<'static, ()> {
+        PLAYBACK_TEST_LOCK
+            .get_or_init(|| Mutex::new(()))
+            .lock()
+            .expect("playback test lock should succeed")
     }
 
     #[test]
@@ -16345,9 +16693,11 @@ mod tests {
         let service_root = workspace.path("service");
         install_local_filesystem_test_plugin_archive(&service_root);
         let state = RepositoryState::from_root(service_root.clone());
-        state.ensure_initialized().expect("state should initialize registry");
-        let registry = Connection::open(service_root.join(REGISTRY_FILE_NAME))
-            .expect("registry should open");
+        state
+            .ensure_initialized()
+            .expect("state should initialize registry");
+        let registry =
+            Connection::open(service_root.join(REGISTRY_FILE_NAME)).expect("registry should open");
         let backend = RepositoryBackendRecord {
             plugin_id: NETEASE_CLOUD_MUSIC_PLUGIN_ID.to_string(),
             config: serde_json::json!({
@@ -16390,9 +16740,11 @@ mod tests {
         let service_root = workspace.path("service");
         install_local_filesystem_test_plugin_archive(&service_root);
         let state = RepositoryState::from_root(service_root.clone());
-        state.ensure_initialized().expect("state should initialize registry");
-        let registry = Connection::open(service_root.join(REGISTRY_FILE_NAME))
-            .expect("registry should open");
+        state
+            .ensure_initialized()
+            .expect("state should initialize registry");
+        let registry =
+            Connection::open(service_root.join(REGISTRY_FILE_NAME)).expect("registry should open");
         let backend = RepositoryBackendRecord {
             plugin_id: NETEASE_CLOUD_MUSIC_PLUGIN_ID.to_string(),
             config: serde_json::json!({
@@ -16435,8 +16787,7 @@ mod tests {
             create_test_state("playlist-items-by-paths");
         fs::create_dir_all(repo_root.join("Albums/Disc 1"))
             .expect("album directory should be created");
-        fs::create_dir_all(repo_root.join("Singles"))
-            .expect("singles directory should be created");
+        fs::create_dir_all(repo_root.join("Singles")).expect("singles directory should be created");
         fs::write(repo_root.join("Albums/Disc 1/track-01.mp3"), b"track one")
             .expect("first track should be written");
         fs::write(repo_root.join("Albums/Disc 1/track-02.mp3"), b"track two")
@@ -16786,14 +17137,20 @@ mod tests {
             .expect("plugin config value should be written");
 
         assert_eq!(updated.plugin_id, LOCAL_FILESYSTEM_PLUGIN_ID);
-        assert_eq!(updated.values.get("apiKey"), Some(&serde_json::json!("secret")));
+        assert_eq!(
+            updated.values.get("apiKey"),
+            Some(&serde_json::json!("secret"))
+        );
         let data_dir = plugin_data_dir(&service_root, LOCAL_FILESYSTEM_PLUGIN_ID);
         assert!(data_dir.join("config.json").is_file());
 
         let loaded = state
             .get_plugin_config(LOCAL_FILESYSTEM_PLUGIN_ID.to_string())
             .expect("plugin config should be loaded");
-        assert_eq!(loaded.values.get("apiKey"), Some(&serde_json::json!("secret")));
+        assert_eq!(
+            loaded.values.get("apiKey"),
+            Some(&serde_json::json!("secret"))
+        );
 
         let deleted = state
             .delete_plugin_config_value(PluginConfigDeleteRequest {
@@ -16880,7 +17237,10 @@ mod tests {
 
         let value = serde_json::to_value(envelope).expect("envelope should serialize");
 
-        assert_eq!(value["runtime"]["pluginId"], serde_json::json!("user.provider"));
+        assert_eq!(
+            value["runtime"]["pluginId"],
+            serde_json::json!("user.provider")
+        );
         assert_eq!(
             value["runtime"]["pluginConfig"]["apiKey"],
             serde_json::json!("secret")
@@ -17841,7 +18201,8 @@ mod tests {
         );
 
         let metadata_path = repository_meta_dir(&repo_root).join(REPO_METADATA_FILE_NAME);
-        let metadata_raw = fs::read_to_string(metadata_path).expect("repository metadata should exist");
+        let metadata_raw =
+            fs::read_to_string(metadata_path).expect("repository metadata should exist");
         let metadata: RepositoryMetadataFileImport =
             serde_json::from_str(&metadata_raw).expect("repository metadata should decode");
         assert_eq!(
@@ -20239,7 +20600,47 @@ mod tests {
     }
 
     #[test]
+    fn register_preview_source_path_serves_temporary_playback_files() {
+        let (state, root, repo_root, _thumbnail_root) = create_test_state("preview-register-temp");
+        let audio_path = repo_root.join("temp-track.mp3");
+        let lyric_path = repo_root.join("temp-track.lrc");
+        fs::write(&audio_path, b"audio").expect("temporary audio should be written");
+        fs::write(&lyric_path, "[00:01.00]line").expect("temporary lyric should be written");
+
+        let audio_token = state
+            .register_preview_source_path(audio_path, "audio/mpeg")
+            .expect("audio source should register");
+        let lyric_token = state
+            .register_preview_source_path(lyric_path, "text/plain; charset=utf-8")
+            .expect("lyric source should register");
+
+        let (mut audio_file, audio_media_type) = state
+            .open_preview_file_source(&audio_token)
+            .expect("registered audio source should open");
+        let mut audio_body = Vec::new();
+        use std::io::Read;
+        audio_file
+            .read_to_end(&mut audio_body)
+            .expect("audio source should read");
+        assert_eq!(audio_body, b"audio");
+        assert_eq!(audio_media_type, "audio/mpeg");
+
+        let (mut lyric_file, lyric_media_type) = state
+            .open_preview_file_source(&lyric_token)
+            .expect("registered lyric source should open");
+        let mut lyric_text = String::new();
+        lyric_file
+            .read_to_string(&mut lyric_text)
+            .expect("lyric source should read");
+        assert_eq!(lyric_text, "[00:01.00]line");
+        assert_eq!(lyric_media_type, "text/plain; charset=utf-8");
+
+        fs::remove_dir_all(root).expect("test temp root should be removed");
+    }
+
+    #[test]
     fn prepare_entry_playback_source_delegates_virtual_tracks_to_downloader() {
+        let _lock = playback_test_lock();
         let (state, root, repo_root, _thumbnail_root) =
             create_test_state("prepare-entry-playback-virtual");
         let repo_id = create_repository_without_initial_sync(&state, &repo_root);
@@ -20302,10 +20703,16 @@ mod tests {
             let expected_repo_id = std::env::var("MOMOBKO_TEST_EXPECTED_REPO_ID")
                 .expect("expected repo id should be provided");
             assert_eq!(payload["songId"], serde_json::json!(1001));
-            assert_eq!(payload["accountCookie"], serde_json::json!("MUSIC_U=test-cookie"));
+            assert_eq!(
+                payload["accountCookie"],
+                serde_json::json!("MUSIC_U=test-cookie")
+            );
             assert_eq!(payload["level"], serde_json::json!("lossless"));
             assert_eq!(payload["repoId"], serde_json::json!(expected_repo_id));
-            assert_eq!(payload["entryPath"], serde_json::json!("Created/demo-track.mp3"));
+            assert_eq!(
+                payload["entryPath"],
+                serde_json::json!("Created/demo-track.mp3")
+            );
             Ok(serde_json::json!({
                 "localPath": "C:/Mock/Temp/demo-track.mp3",
                 "tempFilePath": "C:/Mock/Temp/demo-track.mp3",
@@ -20348,10 +20755,7 @@ mod tests {
             response.word_lyric_path.as_deref(),
             Some("C:/Mock/Temp/demo-track.yrc")
         );
-        assert_eq!(
-            response.expires_at.as_deref(),
-            Some("2026-06-14T01:00:00Z")
-        );
+        assert_eq!(response.expires_at.as_deref(), Some("2026-06-14T01:00:00Z"));
         assert_eq!(response.size_bytes, Some(4096));
         assert_eq!(
             response.modified_at.as_deref(),
@@ -20362,14 +20766,189 @@ mod tests {
     }
 
     #[test]
+    fn prepare_entry_playback_source_with_progress_emits_download_and_ready_events() {
+        let _lock = playback_test_lock();
+        let (state, root, repo_root, _thumbnail_root) =
+            create_test_state("prepare-entry-playback-progress");
+        let repo_id = create_repository_without_initial_sync(&state, &repo_root);
+        let repo = state
+            .load_repository_record(&repo_id)
+            .expect("repository record should load");
+        let connection = state
+            .open_repository_connection(
+                &repo.summary.repo_id,
+                &repo.summary.path,
+                &repo.backend_record,
+            )
+            .expect("repository connection should open");
+        let asset_id = asset_id_for_path(&repo_id, "Created/progress-track.mp3");
+        connection
+            .execute(
+                r#"
+                INSERT INTO assets (
+                  asset_id, repo_id, path, filename, extension, size_bytes, created_at, modified_at,
+                  hash, status, version, updated_at, thumbnail_path, is_virtual, provider_id,
+                  provider_item_id, source_payload_json, local_absolute_path
+                )
+                VALUES (?1, ?2, ?3, ?4, ?5, 0, ?6, ?6, NULL, 'synced', 1, ?6, NULL, 1, ?7, ?8, ?9, NULL)
+                "#,
+                params![
+                    asset_id,
+                    repo_id,
+                    "Created/progress-track.mp3",
+                    "progress-track.mp3",
+                    "mp3",
+                    "2026-06-14T00:00:00Z",
+                    "netease-cloud-music",
+                    "4001",
+                    serde_json::json!({
+                        "provider": "netease-cloud-music",
+                        "songId": 4001,
+                        "accountCookie": "MUSIC_U=progress-cookie",
+                        "accountId": "42",
+                        "level": "standard"
+                    })
+                    .to_string(),
+                ],
+            )
+            .expect("virtual asset should be inserted");
+        drop(connection);
+
+        fn test_hook(payload: serde_json::Value) -> Result<serde_json::Value, String> {
+            assert_eq!(payload["songId"], serde_json::json!(4001));
+            Ok(serde_json::json!({
+                "localPath": "C:/Mock/Temp/progress-track.mp3",
+                "tempFilePath": "C:/Mock/Temp/progress-track.mp3",
+                "mediaType": "audio/mpeg",
+                "cached": false
+            }))
+        }
+
+        set_test_downloader_playback_hook(Some(test_hook));
+        let mut events = Vec::new();
+        let response = state
+            .prepare_entry_playback_source_with_progress(
+                EntryPlaybackRequest {
+                    repo_id: repo_id.clone(),
+                    path: "Created/progress-track.mp3".to_string(),
+                },
+                &mut |event| {
+                    events.push(event);
+                    Ok(())
+                },
+            )
+            .expect("virtual playback source should resolve with progress");
+        set_test_downloader_playback_hook(None);
+
+        assert_eq!(response.repo_id, repo_id);
+        assert_eq!(
+            events
+                .iter()
+                .map(|event| event.phase.as_str())
+                .collect::<Vec<_>>(),
+            vec!["resolve", "download", "preview", "ready"]
+        );
+        assert_eq!(events.last().map(|event| event.value), Some(100));
+        assert_eq!(events.last().and_then(|event| event.cached), Some(false));
+
+        fs::remove_dir_all(root).expect("test temp root should be removed");
+    }
+
+    #[test]
+    fn prepare_entry_playback_source_uses_backend_stat_for_unindexed_virtual_tracks() {
+        let _lock = playback_test_lock();
+        let (state, root, repo_root, _thumbnail_root) =
+            create_test_state("prepare-entry-playback-unindexed-virtual");
+        let repo_id = create_repository_without_initial_sync(&state, &repo_root);
+        let expected_repo_id = repo_id.clone();
+
+        fn stat_hook(
+            _repo: &RepositoryRecord,
+            _repo_root: &Path,
+            entry_path: &str,
+        ) -> Option<Result<FileSystemEntry, String>> {
+            if entry_path != "Created/lazy-track.mp3" {
+                return None;
+            }
+            Some(Ok(FileSystemEntry {
+                path: entry_path.to_string(),
+                name: "lazy-track.mp3".to_string(),
+                kind: FileSystemEntryKind::File,
+                extension: Some("mp3".to_string()),
+                size_bytes: None,
+                modified_at: Some("2026-06-14T00:00:00Z".to_string()),
+                is_virtual: true,
+                provider_id: Some("netease-cloud-music".to_string()),
+                provider_item_id: Some("3001".to_string()),
+                source_payload: Some(serde_json::json!({
+                    "provider": "netease-cloud-music",
+                    "songId": "3001",
+                    "accountCookie": "MUSIC_U=lazy-cookie",
+                    "accountId": "42",
+                    "level": "exhigh"
+                })),
+                local_absolute_path: None,
+            }))
+        }
+
+        fn playback_hook(payload: serde_json::Value) -> Result<serde_json::Value, String> {
+            let expected_repo_id = std::env::var("MOMOBKO_TEST_EXPECTED_REPO_ID")
+                .expect("expected repo id should be provided");
+            assert_eq!(payload["songId"], serde_json::json!(3001));
+            assert_eq!(
+                payload["accountCookie"],
+                serde_json::json!("MUSIC_U=lazy-cookie")
+            );
+            assert_eq!(payload["level"], serde_json::json!("exhigh"));
+            assert_eq!(payload["repoId"], serde_json::json!(expected_repo_id));
+            assert_eq!(
+                payload["entryPath"],
+                serde_json::json!("Created/lazy-track.mp3")
+            );
+            assert_eq!(
+                payload["sourcePayload"]["provider"],
+                serde_json::json!("netease-cloud-music")
+            );
+            Ok(serde_json::json!({
+                "localPath": "C:/Mock/Temp/lazy-track.mp3",
+                "tempFilePath": "C:/Mock/Temp/lazy-track.mp3",
+                "mediaType": "audio/mpeg"
+            }))
+        }
+
+        std::env::set_var("MOMOBKO_TEST_EXPECTED_REPO_ID", &expected_repo_id);
+        set_test_backend_stat_entry_hook(Some(stat_hook));
+        set_test_downloader_playback_hook(Some(playback_hook));
+        let response = state
+            .prepare_entry_playback_source(EntryPlaybackRequest {
+                repo_id: repo_id.clone(),
+                path: "Created/lazy-track.mp3".to_string(),
+            })
+            .expect("unindexed virtual playback source should resolve from backend stat");
+        set_test_downloader_playback_hook(None);
+        set_test_backend_stat_entry_hook(None);
+        std::env::remove_var("MOMOBKO_TEST_EXPECTED_REPO_ID");
+
+        assert_eq!(response.repo_id, repo_id);
+        assert_eq!(response.path, "Created/lazy-track.mp3");
+        assert_eq!(response.media_type, "audio/mpeg");
+        assert_eq!(
+            response.local_path.as_deref(),
+            Some("C:/Mock/Temp/lazy-track.mp3")
+        );
+
+        fs::remove_dir_all(root).expect("test temp root should be removed");
+    }
+
+    #[test]
     fn prepare_entry_playback_source_prefers_repository_backend_cookie_over_stale_asset_payload() {
+        let _lock = playback_test_lock();
         let (state, root, repo_root, _thumbnail_root) =
             create_test_state("prepare-entry-playback-backend-cookie");
         let repo_id = create_repository_without_initial_sync(&state, &repo_root);
 
         {
-            let registry = Connection::open(&state.registry_path)
-                .expect("registry should open");
+            let registry = Connection::open(&state.registry_path).expect("registry should open");
             registry
                 .execute(
                     "UPDATE repositories SET backend_config_json = ?2 WHERE repo_id = ?1",
@@ -20429,7 +21008,10 @@ mod tests {
 
         fn test_hook(payload: serde_json::Value) -> Result<serde_json::Value, String> {
             assert_eq!(payload["songId"], serde_json::json!(1002));
-            assert_eq!(payload["accountCookie"], serde_json::json!("MUSIC_U=fresh-cookie"));
+            assert_eq!(
+                payload["accountCookie"],
+                serde_json::json!("MUSIC_U=fresh-cookie")
+            );
             Ok(serde_json::json!({
                 "localPath": "C:/Mock/Temp/stale-track.mp3",
                 "tempFilePath": "C:/Mock/Temp/stale-track.mp3",

@@ -59,7 +59,10 @@ globalThis.fetch = vi.fn(async (input: string | URL | Request) => {
     : input instanceof URL
       ? input.toString()
       : input.url;
-  if (url === "asset://C:/Mock/Temp/theme-song.lrc") {
+  if (
+    url === "asset://C:/Mock/Temp/theme-song.lrc"
+    || url === `http://127.0.0.1:49152/preview/${"2".repeat(64)}`
+  ) {
     return {
       ok: true,
       status: 200,
@@ -597,7 +600,7 @@ vi.mock("@tauri-apps/api/core", () => ({
   convertFileSrc: (path: string) => `asset://${path}`,
   invoke: async (command: string, args?: Record<string, unknown>) => {
     invokeCalls.push({ command, args });
-    if (mockInvokeDelay?.command === command) {
+    if (mockInvokeDelay?.command === command && command !== "prepare_entry_playback_source_with_progress") {
       await mockInvokeDelay.promise;
       mockInvokeDelay = null;
     }
@@ -665,6 +668,18 @@ vi.mock("@tauri-apps/api/core", () => ({
         ...playlist,
         repoId,
       }));
+    }
+    if (command === "list_playlist_memberships") {
+      const repoId = typeof args?.repoId === "string" ? args.repoId : "repo-main-001";
+      const memberships: Record<string, string[]> = {};
+      for (const detail of Object.values(mockPlaylistDetails)) {
+        if (detail.playlist.repoId !== repoId) continue;
+        for (const item of detail.items) {
+          memberships[item.assetId] = memberships[item.assetId] ?? [];
+          memberships[item.assetId].push(detail.playlist.playlistId);
+        }
+      }
+      return { memberships };
     }
     if (command === "get_playlist_detail") {
       const repoId = typeof args?.repoId === "string" ? args.repoId : "repo-main-001";
@@ -913,7 +928,74 @@ vi.mock("@tauri-apps/api/core", () => ({
         localPath: path.endsWith(".mp3") ? `C:/Mock/Temp/${path.split("/").at(-1)}` : null,
         tempFilePath: path.endsWith(".mp3") ? `C:/Mock/Temp/${path.split("/").at(-1)}` : null,
         lyricPath: path === "Music/theme-song.mp3" ? "C:/Mock/Temp/theme-song.lrc" : null,
+        lyricSourceUrl: path === "Music/theme-song.mp3" ? `http://127.0.0.1:49152/preview/${"2".repeat(64)}` : null,
         wordLyricPath: null,
+        wordLyricSourceUrl: null,
+        mediaType,
+        expiresAt: "2026-06-05T01:18:00Z",
+        sizeBytes: 1024,
+        modifiedAt: "2026-06-05T00:18:00Z",
+      };
+    }
+    if (command === "prepare_entry_playback_source_with_progress") {
+      const request = args?.request as { repoId?: string; path?: string } | undefined;
+      const progress = args?.progress as { onmessage?: ((payload: unknown) => void) | null } | undefined;
+      const path = request?.path ?? "model.glb";
+      progress?.onmessage?.({
+        phase: "resolve",
+        repoId: request?.repoId ?? "repo-main-001",
+        path,
+        value: 8,
+        detail: "解析媒体条目",
+        indeterminate: false,
+        cached: null,
+        error: null,
+      });
+      progress?.onmessage?.({
+        phase: "download",
+        repoId: request?.repoId ?? "repo-main-001",
+        path,
+        value: 42,
+        detail: "下载临时音频",
+        indeterminate: true,
+        cached: null,
+        error: null,
+      });
+      if (mockInvokeDelay?.command === command) {
+        await mockInvokeDelay.promise;
+        mockInvokeDelay = null;
+      }
+      progress?.onmessage?.({
+        phase: "ready",
+        repoId: request?.repoId ?? "repo-main-001",
+        path,
+        value: 100,
+        detail: "播放源已就绪",
+        indeterminate: false,
+        cached: path.endsWith(".mp3"),
+        error: null,
+      });
+      const mediaType = path.endsWith(".png")
+        ? "image/png"
+        : path.endsWith(".jpg") || path.endsWith(".jpeg")
+          ? "image/jpeg"
+          : path.endsWith(".mp4") || path.endsWith(".m4v")
+            ? "video/mp4"
+            : path.endsWith(".webm")
+              ? "video/webm"
+              : path.endsWith(".mp3")
+                ? "audio/mpeg"
+                : "application/octet-stream";
+      return {
+        repoId: request?.repoId ?? "repo-main-001",
+        path,
+        sourceUrl: `http://127.0.0.1:49152/playback/${"1".repeat(64)}`,
+        localPath: path.endsWith(".mp3") ? `C:/Mock/Temp/${path.split("/").at(-1)}` : null,
+        tempFilePath: path.endsWith(".mp3") ? `C:/Mock/Temp/${path.split("/").at(-1)}` : null,
+        lyricPath: path === "Music/theme-song.mp3" ? "C:/Mock/Temp/theme-song.lrc" : null,
+        lyricSourceUrl: path === "Music/theme-song.mp3" ? `http://127.0.0.1:49152/preview/${"2".repeat(64)}` : null,
+        wordLyricPath: null,
+        wordLyricSourceUrl: null,
         mediaType,
         expiresAt: "2026-06-05T01:18:00Z",
         sizeBytes: 1024,
@@ -1457,6 +1539,21 @@ vi.mock("@tauri-apps/api/core", () => ({
                 level: "standard",
               },
               progress: "<Channel<DownloaderPlaylistProgressEvent>>",
+            },
+          },
+          {
+            group: "Preview API",
+            transport: "tauri-command",
+            method: "INVOKE",
+            path: "prepare_entry_playback_source_with_progress",
+            command: "prepare_entry_playback_source_with_progress",
+            summary: "为本地或虚拟条目准备播放源，并通过进度通道回报准备与下载阶段。",
+            requestTemplate: {
+              request: {
+                repoId: "repo-main-001",
+                path: "Music/theme-song.mp3",
+              },
+              progress: "<Channel<EntryPlaybackProgressEvent>>",
             },
           },
           {

@@ -13,6 +13,7 @@ import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { save as saveDialog } from "@tauri-apps/plugin-dialog";
 import type {
   FileBrowserEntry,
+  EntryPlaybackProgressEvent,
   PlaylistItem,
   PlaylistPlayerContribution,
   PluginConfigSnapshot,
@@ -32,6 +33,7 @@ import {
   getPluginConfig,
   getPluginDataDirectory,
   prepareEntryPlaybackSource,
+  prepareEntryPlaybackSourceWithProgress,
   preparePreviewFileSource,
   readFile,
   readPluginArchiveText,
@@ -124,7 +126,13 @@ export type FilePreviewPlugin = {
 };
 
 export type PlaylistPlayerRuntimeEvent =
-  | { type: "state"; canPlay?: boolean; isPlaying?: boolean }
+  | {
+      type: "state";
+      canPlay?: boolean;
+      isPlaying?: boolean;
+      loading?: boolean;
+      progress?: EntryPlaybackProgressEvent;
+    }
   | { type: "time"; currentTimeMs: number; durationMs?: number }
   | { type: "ended" }
   | { type: "error"; message: string };
@@ -273,6 +281,7 @@ export type FrontendPluginContext = {
   callPlugin: typeof callPlugin;
   downloadPlaylistWithProgress: typeof downloadPlaylistWithProgress;
   prepareEntryPlaybackSource: typeof prepareEntryPlaybackSource;
+  prepareEntryPlaybackSourceWithProgress: typeof prepareEntryPlaybackSourceWithProgress;
   preparePreviewFileSource: typeof preparePreviewFileSource;
   readFile: typeof readFile;
   ensureThumbnail: typeof ensureThumbnail;
@@ -562,6 +571,7 @@ function createFrontendPluginContext(manifest: PluginManifest): FrontendPluginCo
     callPlugin,
     downloadPlaylistWithProgress,
     prepareEntryPlaybackSource,
+    prepareEntryPlaybackSourceWithProgress,
     preparePreviewFileSource,
     readFile,
     ensureThumbnail,

@@ -602,8 +602,8 @@ fn list_files(runtime: &RuntimeContext) -> Result<serde_json::Value, String> {
 }
 
 fn list_tree(runtime: &RuntimeContext) -> Result<serde_json::Value, String> {
-    let folders = match discover_playlist_folders(runtime) {
-        Ok(folders) => folders,
+    let folders = match discover_playlist_folder_summaries(runtime) {
+        Ok((_config, folders)) => folders,
         Err(_error) if current_login_expired(runtime) => {
             let tree = vec![
                 FileTreeNode {
@@ -655,100 +655,85 @@ fn list_directory(
     directory_path: &str,
 ) -> Result<serde_json::Value, String> {
     let normalized = normalize_path(directory_path);
-    let folders = match discover_playlist_folders(runtime) {
-        Ok(folders) => folders,
-        Err(_error) if current_login_expired(runtime) => {
-            let entries = if normalized.is_empty() {
-                vec![
-                    category_entry(CREATED_CATEGORY_PATH, "created", true),
-                    category_entry(SUBSCRIBED_CATEGORY_PATH, "subscribed", true),
-                ]
-            } else if normalized == CREATED_CATEGORY_PATH || normalized == SUBSCRIBED_CATEGORY_PATH
-            {
-                Vec::new()
-            } else {
-                Vec::new()
-            };
-            return serde_json::to_value(entries).map_err(|encode_error| encode_error.to_string());
-        }
-        Err(error) => return Err(error),
-    };
     let entries = if normalized.is_empty() {
+        let login_expired = current_login_expired(runtime);
         vec![
-            category_entry(CREATED_CATEGORY_PATH, "created", false),
-            category_entry(SUBSCRIBED_CATEGORY_PATH, "subscribed", false),
+            category_entry(CREATED_CATEGORY_PATH, "created", login_expired),
+            category_entry(SUBSCRIBED_CATEGORY_PATH, "subscribed", login_expired),
         ]
     } else if normalized == CREATED_CATEGORY_PATH || normalized == SUBSCRIBED_CATEGORY_PATH {
+        let folders = match discover_playlist_folder_summaries(runtime) {
+            Ok((_config, folders)) => folders,
+            Err(_error) if current_login_expired(runtime) => Vec::new(),
+            Err(error) => return Err(error),
+        };
         folders
             .iter()
             .filter(|folder| folder.category_path == normalized)
             .map(folder_entry)
             .collect::<Vec<_>>()
-    } else if let Some(folder) = folders
-        .iter()
-        .find(|folder| folder.folder_path == normalized)
-    {
+    } else if let Some(folder) = match discover_playlist_folder(runtime, &normalized) {
+        Ok(folder) => Some(folder),
+        Err(_error) if current_login_expired(runtime) => None,
+        Err(error) => return Err(error),
+    } {
         folder.tracks.iter().map(track_entry).collect::<Vec<_>>()
     } else {
-        return Err(format!("directory not found: {directory_path}"));
+        Vec::new()
     };
     serde_json::to_value(entries).map_err(|error| error.to_string())
 }
 
 fn stat_entry(runtime: &RuntimeContext, entry_path: &str) -> Result<serde_json::Value, String> {
     let normalized = normalize_path(entry_path);
-    let folders = match discover_playlist_folders(runtime) {
-        Ok(folders) => folders,
-        Err(error) if current_login_expired(runtime) => {
-            if normalized == CREATED_CATEGORY_PATH {
-                return serde_json::to_value(category_entry(
-                    CREATED_CATEGORY_PATH,
-                    "created",
-                    true,
-                ))
-                .map_err(|encode_error| encode_error.to_string());
-            }
-            if normalized == SUBSCRIBED_CATEGORY_PATH {
-                return serde_json::to_value(category_entry(
-                    SUBSCRIBED_CATEGORY_PATH,
-                    "subscribed",
-                    true,
-                ))
-                .map_err(|encode_error| encode_error.to_string());
-            }
-            return Err(error);
-        }
-        Err(error) => return Err(error),
-    };
     if normalized == CREATED_CATEGORY_PATH {
-        return serde_json::to_value(category_entry(CREATED_CATEGORY_PATH, "created", false))
-            .map_err(|error| error.to_string());
+        return serde_json::to_value(category_entry(
+            CREATED_CATEGORY_PATH,
+            "created",
+            current_login_expired(runtime),
+        ))
+        .map_err(|error| error.to_string());
     }
     if normalized == SUBSCRIBED_CATEGORY_PATH {
         return serde_json::to_value(category_entry(
             SUBSCRIBED_CATEGORY_PATH,
             "subscribed",
-            false,
+            current_login_expired(runtime),
         ))
         .map_err(|error| error.to_string());
     }
+
+    let folders = match discover_playlist_folder_summaries(runtime) {
+        Ok((_config, folders)) => folders,
+        Err(error) => return Err(error),
+    };
     if let Some(folder) = folders
         .iter()
         .find(|folder| folder.folder_path == normalized)
     {
         return serde_json::to_value(folder_entry(folder)).map_err(|error| error.to_string());
     }
-    if let Some(track) = folders
+
+    let folder_path = folders
         .iter()
-        .flat_map(|folder| folder.tracks.iter())
-        .find(|track| track.relative_path == normalized)
-    {
-        return serde_json::to_value(track_entry(track)).map_err(|error| error.to_string());
+        .find(|folder| normalized.starts_with(&format!("{}/", folder.folder_path)))
+        .map(|folder| folder.folder_path.clone());
+    if let Some(folder_path) = folder_path {
+        let folder = discover_playlist_folder(runtime, &folder_path)?;
+        if let Some(track) = folder
+            .tracks
+            .iter()
+            .find(|track| track.relative_path == normalized)
+        {
+            return serde_json::to_value(track_entry(track)).map_err(|error| error.to_string());
+        }
     }
     Err(format!("entry not found: {entry_path}"))
 }
 
-fn discover_playlist_folders(runtime: &RuntimeContext) -> Result<Vec<PlaylistFolder>, String> {
+fn discover_playlist_folder_summaries(
+    runtime: &RuntimeContext,
+) -> Result<(RepoConfig, Vec<PlaylistFolder>), String> {
     let config = repo_config(runtime)?;
     ensure_login_valid(runtime, &config.cookie)?;
     let playlist_items = fetch_user_playlists(runtime, &config)?;
@@ -756,7 +741,7 @@ fn discover_playlist_folders(runtime: &RuntimeContext) -> Result<Vec<PlaylistFol
     let mut created_names = std::collections::BTreeSet::new();
     let mut subscribed_names = std::collections::BTreeSet::new();
 
-    for playlist in playlist_items {
+    for playlist in &playlist_items {
         let is_created = playlist
             .creator
             .as_ref()
@@ -781,47 +766,78 @@ fn discover_playlist_folders(runtime: &RuntimeContext) -> Result<Vec<PlaylistFol
             },
         );
         let folder_path = join_path(&category_path, &unique_folder_name);
-        match fetch_playlist_detail(runtime, &config.cookie, playlist.id) {
+        folders.push(PlaylistFolder {
+            category_path,
+            folder_path,
+            playlist_id: playlist.id,
+            playlist_name: unique_folder_name,
+            playlist_category,
+            playlist_track_count: playlist.track_count,
+            modified_at: millis_to_rfc3339(playlist.update_time)?,
+            account_id: config.account_id,
+            account_cookie: config.cookie.clone(),
+            load_error: None,
+            tracks: Vec::new(),
+        });
+    }
+
+    Ok((config, folders))
+}
+
+fn discover_playlist_folder(
+    runtime: &RuntimeContext,
+    folder_path: &str,
+) -> Result<PlaylistFolder, String> {
+    let (config, folders) = discover_playlist_folder_summaries(runtime)?;
+    let mut folder = folders
+        .into_iter()
+        .find(|folder| folder.folder_path == folder_path)
+        .ok_or_else(|| format!("directory not found: {folder_path}"))?;
+    match fetch_playlist_detail(runtime, &config.cookie, folder.playlist_id) {
+        Ok(detail) => {
+            folder.playlist_track_count = detail.track_count;
+            if detail.update_time.is_some() {
+                folder.modified_at = millis_to_rfc3339(detail.update_time)?;
+            }
+            folder.tracks = hydrate_playlist_tracks(
+                runtime,
+                &config,
+                &detail,
+                folder.playlist_category,
+                &folder.playlist_name,
+            )?;
+        }
+        Err(error) => {
+            folder.load_error = Some(error);
+            folder.tracks = Vec::new();
+        }
+    }
+    Ok(folder)
+}
+
+fn discover_playlist_folders(runtime: &RuntimeContext) -> Result<Vec<PlaylistFolder>, String> {
+    let (config, mut folders) = discover_playlist_folder_summaries(runtime)?;
+    for folder in &mut folders {
+        match fetch_playlist_detail(runtime, &config.cookie, folder.playlist_id) {
             Ok(detail) => {
-                let tracks = hydrate_playlist_tracks(
+                folder.playlist_track_count = detail.track_count;
+                if detail.update_time.is_some() {
+                    folder.modified_at = millis_to_rfc3339(detail.update_time)?;
+                }
+                folder.tracks = hydrate_playlist_tracks(
                     runtime,
                     &config,
                     &detail,
-                    playlist_category,
-                    &unique_folder_name,
+                    folder.playlist_category,
+                    &folder.playlist_name,
                 )?;
-                folders.push(PlaylistFolder {
-                    category_path,
-                    folder_path,
-                    playlist_id: playlist.id,
-                    playlist_name: unique_folder_name,
-                    playlist_category,
-                    playlist_track_count: detail.track_count,
-                    modified_at: millis_to_rfc3339(detail.update_time.or(playlist.update_time))?,
-                    account_id: config.account_id,
-                    account_cookie: config.cookie.clone(),
-                    load_error: None,
-                    tracks,
-                });
             }
             Err(error) => {
-                folders.push(PlaylistFolder {
-                    category_path,
-                    folder_path,
-                    playlist_id: playlist.id,
-                    playlist_name: unique_folder_name,
-                    playlist_category,
-                    playlist_track_count: playlist.track_count,
-                    modified_at: millis_to_rfc3339(playlist.update_time)?,
-                    account_id: config.account_id,
-                    account_cookie: config.cookie.clone(),
-                    load_error: Some(error),
-                    tracks: Vec::new(),
-                });
+                folder.load_error = Some(error);
+                folder.tracks = Vec::new();
             }
         }
     }
-
     Ok(folders)
 }
 
@@ -1114,7 +1130,9 @@ fn normalize_ncm_domain(value: Option<&str>) -> String {
     if let Some((domain, _)) = normalized.split_once("/eapi/") {
         return domain.trim_end_matches('/').to_string();
     }
-    if normalized.ends_with("/api") || normalized.ends_with("/weapi") || normalized.ends_with("/eapi")
+    if normalized.ends_with("/api")
+        || normalized.ends_with("/weapi")
+        || normalized.ends_with("/eapi")
     {
         return normalized
             .rsplit_once('/')
@@ -1450,12 +1468,18 @@ mod tests {
 
     #[test]
     fn normalize_ncm_domain_removes_legacy_api_path_suffixes() {
-        assert_eq!(normalize_ncm_domain(Some("https://music.163.com/weapi")), "https://music.163.com");
+        assert_eq!(
+            normalize_ncm_domain(Some("https://music.163.com/weapi")),
+            "https://music.163.com"
+        );
         assert_eq!(
             normalize_ncm_domain(Some("https://interface.music.163.com/eapi/song/lyric")),
             "https://interface.music.163.com"
         );
-        assert_eq!(normalize_ncm_domain(Some("https://music.163.com/api")), "https://music.163.com");
+        assert_eq!(
+            normalize_ncm_domain(Some("https://music.163.com/api")),
+            "https://music.163.com"
+        );
     }
 
     fn serve_json_once(body: &'static str) -> String {
@@ -1570,7 +1594,8 @@ mod tests {
                 let request = String::from_utf8_lossy(&buffer[..size]);
                 let line = request.lines().next().unwrap_or_default();
                 let path = line.split_whitespace().nth(1).unwrap_or("/");
-                let (status, content_type, body) = if path.starts_with("/weapi/w/nuser/account/get") {
+                let (status, content_type, body) = if path.starts_with("/weapi/w/nuser/account/get")
+                {
                     (
                         "200 OK",
                         "application/json",
@@ -1590,9 +1615,15 @@ mod tests {
                     )
                 } else if path.starts_with("/eapi/v6/playlist/detail") {
                     let body = match playlist_detail_count % 3 {
-                        0 => r#"{"playlist":{"id":9001,"name":"夜跑歌单","trackCount":2,"tracks":[],"trackIds":[{"id":2001},{"id":2002}],"updateTime":1718323200000}}"#,
-                        1 => r#"{"playlist":{"id":9002,"name":"夜跑歌单","trackCount":1,"tracks":[{"id":2101,"name":"晴天","ar":[{"name":"周杰伦"}],"al":{"name":"叶惠美","picUrl":"https://example.test/cover-2101.jpg"},"dt":269000,"privilege":{"st":0}}],"trackIds":[{"id":2101}],"updateTime":1718323200000}}"#,
-                        _ => r#"{"playlist":{"id":9101,"name":"收藏歌单","trackCount":1,"tracks":[{"id":2201,"name":"富士山下","ar":[{"name":"陈奕迅"}],"al":{"name":"What's Going On...?","picUrl":"https://example.test/cover-2201.jpg"},"dt":259000,"privilege":{"fee":0}}],"trackIds":[{"id":2201}],"updateTime":1718323200000}}"#,
+                        0 => {
+                            r#"{"playlist":{"id":9001,"name":"夜跑歌单","trackCount":2,"tracks":[],"trackIds":[{"id":2001},{"id":2002}],"updateTime":1718323200000}}"#
+                        }
+                        1 => {
+                            r#"{"playlist":{"id":9002,"name":"夜跑歌单","trackCount":1,"tracks":[{"id":2101,"name":"晴天","ar":[{"name":"周杰伦"}],"al":{"name":"叶惠美","picUrl":"https://example.test/cover-2101.jpg"},"dt":269000,"privilege":{"st":0}}],"trackIds":[{"id":2101}],"updateTime":1718323200000}}"#
+                        }
+                        _ => {
+                            r#"{"playlist":{"id":9101,"name":"收藏歌单","trackCount":1,"tracks":[{"id":2201,"name":"富士山下","ar":[{"name":"陈奕迅"}],"al":{"name":"What's Going On...?","picUrl":"https://example.test/cover-2201.jpg"},"dt":259000,"privilege":{"fee":0}}],"trackIds":[{"id":2201}],"updateTime":1718323200000}}"#
+                        }
                     };
                     playlist_detail_count += 1;
                     ("200 OK", "application/json", body.to_string())
@@ -1626,7 +1657,6 @@ mod tests {
             .local_addr()
             .expect("test server address should resolve");
         thread::spawn(move || {
-            let mut playlist_detail_count = 0;
             for _ in 0..64 {
                 let Ok((mut stream, _)) = listener.accept() else {
                     break;
@@ -1636,7 +1666,8 @@ mod tests {
                 let request = String::from_utf8_lossy(&buffer[..size]);
                 let line = request.lines().next().unwrap_or_default();
                 let path = line.split_whitespace().nth(1).unwrap_or("/");
-                let (status, content_type, body) = if path.starts_with("/weapi/w/nuser/account/get") {
+                let (status, content_type, body) = if path.starts_with("/weapi/w/nuser/account/get")
+                {
                     (
                         "200 OK",
                         "application/json",
@@ -1654,19 +1685,11 @@ mod tests {
                             .to_string(),
                     )
                 } else if path.starts_with("/eapi/v6/playlist/detail") {
-                    let body = if playlist_detail_count == 0 {
-                        r#"{"playlist":{"id":9001,"name":"夜跑歌单","trackCount":2,"tracks":[],"trackIds":[{"id":2001},{"id":2002}],"updateTime":1718323200000}}"#
-                            .to_string()
-                    } else {
-                        r#"{"code":404,"msg":"歌单涉嫌违规，审核中"}"#.to_string()
-                    };
-                    let status = if playlist_detail_count == 0 {
-                        "200 OK"
-                    } else {
-                        "404 Not Found"
-                    };
-                    playlist_detail_count += 1;
-                    (status, "application/json", body)
+                    (
+                        "404 Not Found",
+                        "application/json",
+                        r#"{"code":404,"msg":"歌单涉嫌违规，审核中"}"#.to_string(),
+                    )
                 } else if path.starts_with("/weapi/v3/song/detail") {
                     (
                         "200 OK",
@@ -1689,6 +1712,92 @@ mod tests {
             }
         });
         format!("http://{addr}")
+    }
+
+    fn serve_ncm_summary_only_test_server() -> String {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("test server should bind");
+        let addr = listener
+            .local_addr()
+            .expect("test server address should resolve");
+        thread::spawn(move || {
+            for _ in 0..8 {
+                let Ok((mut stream, _)) = listener.accept() else {
+                    break;
+                };
+                let mut buffer = [0_u8; 4096];
+                let size = stream.read(&mut buffer).unwrap_or(0);
+                let request = String::from_utf8_lossy(&buffer[..size]);
+                let line = request.lines().next().unwrap_or_default();
+                let path = line.split_whitespace().nth(1).unwrap_or("/");
+                let (status, content_type, body) = if path.starts_with("/weapi/w/nuser/account/get")
+                {
+                    (
+                        "200 OK",
+                        "application/json",
+                        r#"{"account":{"id":123456,"userName":"Aura"},"profile":{"nickname":"云村 Aura"}}"#
+                            .to_string(),
+                    )
+                } else if path.starts_with("/weapi/user/playlist") {
+                    (
+                        "200 OK",
+                        "application/json",
+                        r#"{"playlist":[
+                            {"id":9001,"name":"夜跑歌单","trackCount":2,"subscribed":false,"userId":123456,"creator":{"userId":123456},"updateTime":1718323200000},
+                            {"id":9101,"name":"收藏歌单","trackCount":1,"subscribed":true,"userId":987654,"creator":{"userId":987654},"updateTime":1718323200000}
+                        ]}"#
+                            .to_string(),
+                    )
+                } else if path.starts_with("/eapi/v6/playlist/detail") {
+                    (
+                        "500 Internal Server Error",
+                        "application/json",
+                        r#"{"code":500,"msg":"playlist detail should not be called"}"#.to_string(),
+                    )
+                } else {
+                    ("404 Not Found", "text/plain", "not-found".to_string())
+                };
+                let response = format!(
+                    "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+                let _ = stream.write_all(response.as_bytes());
+            }
+        });
+        format!("http://{addr}")
+    }
+
+    #[test]
+    fn list_directory_loads_playlist_folder_summaries_without_track_details() {
+        let workspace = TestWorkspace::new("summary-only");
+        let runtime = RuntimeContext {
+            plugin_data_dir: workspace.root.clone(),
+            api_base_url: serve_ncm_summary_only_test_server(),
+            default_level: "standard".to_string(),
+            repo_backend_config: RepoBackendConfigOverride {
+                cookie: Some("MUSIC_U=repo-cookie".to_string()),
+                account_id: Some(123456),
+                nickname: Some("云村 Aura".to_string()),
+                user_name: Some("Aura".to_string()),
+            },
+        };
+
+        let created = list_directory(&runtime, CREATED_CATEGORY_PATH)
+            .expect("created playlist summaries should load without playlist detail")
+            .as_array()
+            .cloned()
+            .expect("created playlists should serialize as array");
+
+        assert_eq!(created.len(), 1);
+        assert_eq!(created[0]["path"], serde_json::json!("创建的歌单/夜跑歌单"));
+        assert_eq!(
+            created[0]["sourcePayload"]["playlistTrackCount"],
+            serde_json::json!(2)
+        );
+        assert_eq!(
+            created[0]["sourcePayload"]["playlistLoadError"],
+            serde_json::Value::Null
+        );
     }
 
     #[test]
@@ -1867,7 +1976,7 @@ mod tests {
         );
         assert_eq!(
             subscribed[0]["sourcePayload"]["playlistLoadError"],
-            serde_json::json!("API error (code=404): 歌单涉嫌违规，审核中")
+            serde_json::Value::Null
         );
 
         let blocked_tracks = list_directory(&runtime, "收藏的歌单/收藏歌单")
