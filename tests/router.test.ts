@@ -2030,7 +2030,7 @@ describe("文件管理冒烟", () => {
     expect(await screen.findByRole("heading", { name: "target-preview.png" })).toBeInTheDocument();
     expect(screen.getByText("Reference/Paint/target-preview.png")).toBeInTheDocument();
     await waitFor(() => {
-      expect(getInvokeCalls("prepare_entry_playback_source").at(-1)?.args).toMatchObject({
+      expect(getInvokeCalls("prepare_entry_playback_source_with_progress").at(-1)?.args).toMatchObject({
         request: {
           repoId: "repo-alt-001",
           path: "Reference/Paint/target-preview.png",

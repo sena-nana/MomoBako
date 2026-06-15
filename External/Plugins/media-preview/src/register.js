@@ -47,6 +47,12 @@ export function register(ctx) {
       const lyricsViewport = ref(null);
       const lyricsItems = ref([]);
       const preparedPlayback = ref(null);
+      const playbackProgress = ref({
+        value: 0,
+        detail: "准备媒体",
+        indeterminate: true,
+        cached: null,
+      });
       let objectUrl = null;
       let resizeObserver = null;
 
@@ -57,7 +63,9 @@ export function register(ctx) {
         props.entry?.extension?.toUpperCase() || (mediaKind.value === "image" ? "IMAGE" : mediaKind.value === "video" ? "VIDEO" : "AUDIO")
       ));
       const audioArtworkUrl = computed(() => (
-        audioArtworkPath.value ? ctx.fileSrc(audioArtworkPath.value) : null
+        audioArtworkPath.value
+          ? ctx.fileSrc(audioArtworkPath.value)
+          : sourcePayloadString(props.entry, "coverUrl")
       ));
       const lyricsPlaceholder = computed(() => (
         lyricsStatus.value === "loading" ? "读取歌词..." : "暂无歌词"
@@ -75,19 +83,42 @@ export function register(ctx) {
         sourceMediaType.value = "";
         errorMessage.value = "";
         preparedPlayback.value = null;
+        playbackProgress.value = {
+          value: 6,
+          detail: "准备媒体",
+          indeterminate: true,
+          cached: null,
+        };
         revokeObjectUrl();
 
         try {
-          const response = await ctx.prepareEntryPlaybackSource({
+          const request = {
             repoId: props.repoId,
             path: props.entry.path,
-          });
+          };
+          const response = ctx.prepareEntryPlaybackSourceWithProgress
+            ? await ctx.prepareEntryPlaybackSourceWithProgress(request, (event) => {
+                if (event.path !== props.entry.path) return;
+                playbackProgress.value = {
+                  value: event.value ?? playbackProgress.value.value,
+                  detail: event.detail || playbackProgress.value.detail,
+                  indeterminate: Boolean(event.indeterminate),
+                  cached: event.cached ?? playbackProgress.value.cached,
+                };
+              })
+            : await ctx.prepareEntryPlaybackSource(request);
           const resolvedSourceUrl = response.sourceUrl
             || (response.localPath ? ctx.fileSrc(response.localPath) : null);
           if (!resolvedSourceUrl) {
             throw new Error("媒体预览源不可用");
           }
           preparedPlayback.value = response;
+          playbackProgress.value = {
+            value: 100,
+            detail: "播放源已就绪",
+            indeterminate: false,
+            cached: response.cached ?? playbackProgress.value.cached,
+          };
           sourceUrl.value = resolvedSourceUrl;
           sourceMediaType.value = response.mediaType;
           state.value = "ready";
@@ -106,8 +137,10 @@ export function register(ctx) {
         lyricsStatus.value = "loading";
         try {
           let text = "";
-          if (preparedPlayback.value?.lyricPath) {
-            text = await readLocalTextFile(ctx.fileSrc(preparedPlayback.value.lyricPath));
+          if (preparedPlayback.value?.lyricSourceUrl || preparedPlayback.value?.lyricPath) {
+            text = await readLocalTextFile(
+              preparedPlayback.value.lyricSourceUrl || ctx.fileSrc(preparedPlayback.value.lyricPath),
+            );
           } else {
             const bytes = await ctx.readFile({
               repoId: props.repoId,
@@ -208,6 +241,7 @@ export function register(ctx) {
         lyricsStatus,
         lyricsViewport,
         mediaKind,
+        playbackProgress,
         setLyricItemRef,
         sourceMediaType,
         sourceUrl,
@@ -231,9 +265,24 @@ export function register(ctx) {
     },
     render() {
       if (this.state === "loading") {
+        const progressValue = Math.max(0, Math.min(100, Math.round(this.playbackProgress.value || 0)));
         return h("div", { class: "media-preview__status" }, [
-          h("span", "读取媒体"),
-          h("span", this.entry?.sizeLabel ? `准备 ${this.entry.sizeLabel}` : "建立预览流"),
+          h("span", this.playbackProgress.cached ? "读取缓存" : "准备播放"),
+          h("span", this.playbackProgress.detail || (this.entry?.sizeLabel ? `准备 ${this.entry.sizeLabel}` : "建立预览流")),
+          h("div", {
+            class: [
+              "media-preview__download-progress",
+              { "media-preview__download-progress--indeterminate": this.playbackProgress.indeterminate },
+            ],
+            role: "progressbar",
+            "aria-label": "下载进度",
+            "aria-valuemin": 0,
+            "aria-valuemax": 100,
+            "aria-valuenow": this.playbackProgress.indeterminate ? undefined : progressValue,
+          }, [
+            h("span", { style: { width: `${progressValue}%` } }),
+          ]),
+          this.playbackProgress.indeterminate ? null : h("span", `${progressValue}%`),
         ]);
       }
       if (this.state === "error") {
@@ -483,10 +532,11 @@ export function register(ctx) {
     function createAudioArtwork(item) {
       const wrapper = document.createElement("div");
       wrapper.className = "media-preview__audio-art media-playlist-runtime__audio-art";
-      if (item.thumbnailPath) {
+      const artworkUrl = item.thumbnailPath ? ctx.fileSrc(item.thumbnailPath) : sourcePayloadString(item, "coverUrl");
+      if (artworkUrl) {
         const cover = document.createElement("img");
         cover.className = "media-preview__audio-cover";
-        cover.src = ctx.fileSrc(item.thumbnailPath);
+        cover.src = artworkUrl;
         cover.alt = "";
         wrapper.append(cover);
       } else {
@@ -574,14 +624,21 @@ export function register(ctx) {
       updateRuntimeLyrics();
     }
 
-    async function loadRuntimeLyrics(item) {
+    async function loadRuntimeLyrics(item, playback = null) {
       if (kind !== "audio") return;
       try {
-        const bytes = await ctx.readFile({
-          repoId: controller.repoId,
-          path: siblingLrcPath(item.path),
-        });
-        lyricLines = parseLrcLyrics(decodeTextBytes(Uint8Array.from(bytes)));
+        if (playback?.lyricSourceUrl || playback?.lyricPath) {
+          const text = await readLocalTextFile(
+            playback.lyricSourceUrl || ctx.fileSrc(playback.lyricPath),
+          );
+          lyricLines = parseLrcLyrics(text);
+        } else {
+          const bytes = await ctx.readFile({
+            repoId: controller.repoId,
+            path: siblingLrcPath(item.path),
+          });
+          lyricLines = parseLrcLyrics(decodeTextBytes(Uint8Array.from(bytes)));
+        }
       } catch {
         lyricLines = [];
       }
@@ -630,11 +687,62 @@ export function register(ctx) {
       applyObjectFit();
     }
 
-    async function prepareSource(item) {
-      const response = await ctx.prepareEntryPlaybackSource({
+    function clampProgress(value) {
+      return Math.max(0, Math.min(100, Math.round(Number(value) || 0)));
+    }
+
+    function createProgressNode(item) {
+      const wrapper = document.createElement("div");
+      wrapper.className = "media-playlist-runtime__loading";
+      const title = document.createElement("strong");
+      title.textContent = item.name || item.filename || "准备播放";
+      const detail = document.createElement("span");
+      detail.className = "media-playlist-runtime__loading-detail";
+      detail.textContent = "准备媒体";
+      const bar = document.createElement("div");
+      bar.className = "media-preview__download-progress media-preview__download-progress--indeterminate";
+      bar.setAttribute("role", "progressbar");
+      bar.setAttribute("aria-label", "下载进度");
+      bar.setAttribute("aria-valuemin", "0");
+      bar.setAttribute("aria-valuemax", "100");
+      const fill = document.createElement("span");
+      fill.style.width = "0%";
+      bar.append(fill);
+      wrapper.append(title, detail, bar);
+      return {
+        node: wrapper,
+        update(event) {
+          const value = clampProgress(event.value);
+          detail.textContent = event.detail || detail.textContent;
+          bar.classList.toggle("media-preview__download-progress--indeterminate", Boolean(event.indeterminate));
+          if (event.indeterminate) {
+            bar.removeAttribute("aria-valuenow");
+          } else {
+            bar.setAttribute("aria-valuenow", String(value));
+          }
+          fill.style.width = `${value}%`;
+        },
+      };
+    }
+
+    async function prepareSource(item, onProgress = null) {
+      const request = {
         repoId: controller.repoId,
         path: item.path,
-      });
+      };
+      const response = ctx.prepareEntryPlaybackSourceWithProgress
+        ? await ctx.prepareEntryPlaybackSourceWithProgress(request, (event) => {
+            if (event.path !== item.path) return;
+            onProgress?.(event);
+            controller.onEvent({
+              type: "state",
+              canPlay: false,
+              isPlaying: false,
+              loading: true,
+              progress: event,
+            });
+          })
+        : await ctx.prepareEntryPlaybackSource(request);
       const sourceUrl = response.sourceUrl
         || (response.localPath ? ctx.fileSrc(response.localPath) : null);
       if (!sourceUrl) {
@@ -657,7 +765,9 @@ export function register(ctx) {
         resetRuntimeLyrics();
 
         try {
-          const response = await prepareSource(item);
+          const progress = createProgressNode(item);
+          mountNode(progress.node);
+          const response = await prepareSource(item, (event) => progress.update(event));
           if (kind === "image") {
             imageElement = document.createElement("img");
             imageElement.className = "media-preview__image media-playlist-runtime__media";
@@ -673,7 +783,7 @@ export function register(ctx) {
             mediaElement.dataset.path = item.path;
             mountNode(kind === "audio" ? createAudioShell(item, mediaElement) : mediaElement);
             if (kind === "audio") {
-              void loadRuntimeLyrics(item);
+              void loadRuntimeLyrics(item, response);
             }
           }
         } catch (cause) {
@@ -810,6 +920,11 @@ export function register(ctx) {
 function siblingLrcPath(path) {
   const extensionIndex = path.lastIndexOf(".");
   return extensionIndex >= 0 ? `${path.slice(0, extensionIndex)}.lrc` : `${path}.lrc`;
+}
+
+function sourcePayloadString(entry, key) {
+  const value = entry?.sourcePayload?.[key];
+  return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
 function decodeTextBytes(bytes) {

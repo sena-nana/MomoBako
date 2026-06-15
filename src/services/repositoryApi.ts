@@ -9,6 +9,7 @@ import type {
   ExternalApiConnectionStatus,
   DownloaderPlaylistProgressEvent,
   DownloaderPlaylistRequest,
+  EntryPlaybackProgressEvent,
   EntryPlaybackRequest,
   EntryPlaybackSourceResponse,
   FileBrowserRequest,
@@ -41,6 +42,7 @@ import type {
   PlaylistItemsByPathsAddRequest,
   PlaylistItemsOrderRequest,
   PlaylistMembershipRequest,
+  PlaylistMembershipIndex,
   PlaylistMembershipSnapshot,
   PlaylistMutationRequest,
   PlaylistMutationResponse,
@@ -118,6 +120,10 @@ export function listSmartFolders(repoId: string) {
 
 export function listPlaylists(repoId: string) {
   return invoke<PlaylistSummary[]>("list_playlists", { repoId });
+}
+
+export function listPlaylistMemberships(repoId: string) {
+  return invoke<PlaylistMembershipIndex>("list_playlist_memberships", { repoId });
 }
 
 export function createPlaylist(request: PlaylistMutationRequest) {
@@ -202,6 +208,18 @@ export function preparePreviewFileSource(request: FileReadRequest) {
 
 export function prepareEntryPlaybackSource(request: EntryPlaybackRequest) {
   return invoke<EntryPlaybackSourceResponse>("prepare_entry_playback_source", { request });
+}
+
+export function prepareEntryPlaybackSourceWithProgress(
+  request: EntryPlaybackRequest,
+  onEvent: (event: EntryPlaybackProgressEvent) => void,
+) {
+  const progress = new Channel<EntryPlaybackProgressEvent>();
+  progress.onmessage = onEvent;
+  return invoke<EntryPlaybackSourceResponse>("prepare_entry_playback_source_with_progress", {
+    request,
+    progress,
+  });
 }
 
 export function callPlugin<T = unknown>(request: PluginCallRequest) {

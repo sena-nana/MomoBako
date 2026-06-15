@@ -4,6 +4,7 @@ import {
   createPlaylist,
   deletePlaylist,
   getPlaylistDetail,
+  listPlaylistMemberships,
   listPlaylists,
   removePlaylistItem,
   reorderPlaylistItems,
@@ -52,23 +53,26 @@ export async function syncPlaylistMemberships(
     return [];
   }
 
-  const details = (await Promise.all(
-    playlistItems.map(async (playlist) => {
-      try {
-        return await getPlaylistDetail(repoId, playlist.playlistId);
-      } catch {
-        return null;
-      }
-    }),
-  )).filter((detail): detail is PlaylistDetail => Boolean(detail));
-
-  rebuildPlaylistMemberships(details);
-
-  if (activePlaylistId.value) {
-    activePlaylistDetail.value = details.find((detail) => detail.playlist.playlistId === activePlaylistId.value) ?? null;
+  try {
+    const snapshot = await listPlaylistMemberships(repoId);
+    playlistMemberships.value = snapshot.memberships;
+  } catch {
+    playlistMemberships.value = {};
   }
 
-  return details;
+  if (activePlaylistId.value) {
+    const activePlaylist = playlistItems.find((item) => item.playlistId === activePlaylistId.value);
+    if (!activePlaylist) {
+      activePlaylistDetail.value = null;
+    } else if (activePlaylistDetail.value?.playlist.playlistId === activePlaylist.playlistId) {
+      activePlaylistDetail.value = {
+        ...activePlaylistDetail.value,
+        playlist: activePlaylist,
+      };
+    }
+  }
+
+  return playlistMemberships.value;
 }
 
 export async function refreshPlaylists(repoId = activeRepoId.value) {
