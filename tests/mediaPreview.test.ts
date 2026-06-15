@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getPreviewPluginForEntry } from "../src/plugins/previewPlugins";
 import { clearPreviewPluginRegistry, onPluginEvent, syncRegisteredPreviewPluginManifests } from "../src/plugins/sdk";
 import { listPlugins } from "../src/services/repositoryApi";
-import { getInvokeCalls } from "./setupTests";
+import { delayNextInvoke, getInvokeCalls } from "./setupTests";
 
 const audioEntry = {
   path: "Music/theme-song.mp3",
@@ -39,18 +39,10 @@ describe("MediaPreview", () => {
     });
 
     await waitFor(() => {
-      expect(getInvokeCalls("prepare_preview_file_source").at(-1)?.args).toMatchObject({
+      expect(getInvokeCalls("prepare_entry_playback_source_with_progress").at(-1)?.args).toMatchObject({
         request: {
           repoId: "repo-main-001",
           path: "Music/theme-song.mp3",
-        },
-      });
-    });
-    await waitFor(() => {
-      expect(getInvokeCalls("read_file").at(-1)?.args).toMatchObject({
-        request: {
-          repoId: "repo-main-001",
-          path: "Music/theme-song.lrc",
         },
       });
     });
@@ -60,11 +52,63 @@ describe("MediaPreview", () => {
       expect(lyricsRegion).toHaveTextContent("Mock lyric line 1");
       expect(lyricsRegion).toHaveTextContent("Mock lyric line 2");
     });
+    await waitFor(() => {
+      const audioSource = document.querySelector<HTMLSourceElement>(".media-preview__audio-control source");
+      expect(audioSource?.getAttribute("src")).toBe(`http://127.0.0.1:49152/playback/${"1".repeat(64)}`);
+      expect(audioSource?.getAttribute("src")).not.toContain("asset://");
+    });
 
     const lyricButtons = screen.getAllByRole("button").filter((element) => (
       element.classList.contains("media-preview__audio-lyric")
     ));
     expect(lyricButtons).toHaveLength(2);
+  });
+
+  it("音频预览使用来源封面作为缩略图兜底", async () => {
+    const plugin = getPreviewPluginForEntry({
+      ...audioEntry,
+      thumbnailPath: null,
+      sourcePayload: {
+        coverUrl: "https://img.example.test/theme-song.jpg",
+      },
+    });
+    expect(plugin).not.toBeNull();
+
+    render(plugin!.component, {
+      props: {
+        repoId: "repo-main-001",
+        entry: {
+          ...audioEntry,
+          thumbnailPath: null,
+          sourcePayload: {
+            coverUrl: "https://img.example.test/theme-song.jpg",
+          },
+        },
+      },
+    });
+
+    await waitFor(() => {
+      const cover = document.querySelector<HTMLImageElement>(".media-preview__audio-cover");
+      expect(cover?.getAttribute("src")).toBe("https://img.example.test/theme-song.jpg");
+    });
+  });
+
+  it("准备音频播放源时显示下载进度条", async () => {
+    const plugin = getPreviewPluginForEntry(audioEntry);
+    expect(plugin).not.toBeNull();
+    const delayedPlayback = delayNextInvoke("prepare_entry_playback_source_with_progress");
+
+    render(plugin!.component, {
+      props: {
+        repoId: "repo-main-001",
+        entry: audioEntry,
+      },
+    });
+
+    const progress = await screen.findByRole("progressbar", { name: "下载进度" });
+    expect(progress).toBeInTheDocument();
+    expect(await screen.findByText("下载临时音频")).toBeInTheDocument();
+    delayedPlayback.resolve();
   });
 
   it("同名 lrc 不存在时显示暂无歌词", async () => {
@@ -87,10 +131,10 @@ describe("MediaPreview", () => {
     });
 
     await waitFor(() => {
-      expect(getInvokeCalls("read_file").at(-1)?.args).toMatchObject({
+      expect(getInvokeCalls("prepare_entry_playback_source_with_progress").at(-1)?.args).toMatchObject({
         request: {
           repoId: "repo-main-001",
-          path: "Music/no-lyrics-track.lrc",
+          path: "Music/no-lyrics-track.mp3",
         },
       });
     });

@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, ref, watch } from "vue";
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { callPlugin } from "../services/repositoryApi";
 import ConfirmDialog from "../components/ConfirmDialog.vue";
 import {
   useWorkspaceAssetMetadata,
@@ -50,6 +52,9 @@ import {
 import MissingRepositoryState from "./workspace/MissingRepositoryState.vue";
 import EmptyRepositoryState from "./workspace/EmptyRepositoryState.vue";
 import type { FileBrowserEntry } from "../types/repository";
+import type { EntryActionDialogRequest, EntryActionDialogResultMap } from "../plugins/sdk";
+
+const NETEASE_SOURCE_PLUGIN_ID = "momobako.source.netease-cloud-music";
 
 const {
   activeAssetId,
@@ -137,6 +142,7 @@ const {
 const {
   activePlaylistDetail,
   activePlaylistId,
+  addPlaylistItemsByPathsInWorkspace,
   playlistMemberships,
   playlists,
   removePlaylistItemInWorkspace,
@@ -471,12 +477,140 @@ const {
   revealWorkspaceEntry,
 });
 const { playlistMenuItems } = useWorkspacePlaylistMembershipUi({
+  addPlaylistItemsByPathsInWorkspace,
   playlistMemberships,
   playlists,
   setPlaylistMembershipInWorkspace,
 });
+
+const entryActionRepositoryDialogOpen = ref(false);
+const entryActionRepositoryDialogTitle = ref("选择目标资源库");
+const entryActionRepositoryCandidates = ref<typeof repositories.value>([]);
+const entryActionRepositoryResolve = ref<((value: EntryActionDialogResultMap["repository"]) => void) | null>(null);
+const neteaseLoginStatus = ref<{ loggedIn?: boolean; loginExpired?: boolean; error?: string | null } | null>(null);
+const isRefreshingNeteaseLogin = ref(false);
+
+const isActiveNeteaseRepository = computed(() => activeSnapshot.value?.repository.backend.pluginId === NETEASE_SOURCE_PLUGIN_ID);
+const activeNeteaseSourceConfig = computed(() => {
+  const payload = [
+    ...(fileBrowser.value?.entries ?? []),
+    ...(activeSnapshot.value?.assets ?? []),
+  ].map((entry) => entry.sourcePayload).find((payload) => (
+    payload?.provider === "netease-cloud-music" && typeof payload.accountCookie === "string"
+  ));
+  if (!payload) return null;
+  return {
+    cookie: payload.accountCookie,
+    accountId: payload.accountId,
+  };
+});
+const activeNeteaseLoginExpired = computed(() => {
+  if (!isActiveNeteaseRepository.value) return false;
+  if (neteaseLoginStatus.value?.loginExpired) return true;
+  return (fileBrowser.value?.entries ?? []).some((entry) => (
+    entry.sourcePayload?.loginExpired === true
+    || entry.metadata?.loginExpired === true
+  )) || (activeSnapshot.value?.assets ?? []).some((entry) => entry.sourcePayload?.loginExpired === true);
+});
+
+async function openEntryActionDialog<TKind extends keyof EntryActionDialogResultMap>(
+  request: Extract<EntryActionDialogRequest, { kind: TKind }>,
+): Promise<EntryActionDialogResultMap[TKind]> {
+  const dialogRequest = request as EntryActionDialogRequest;
+  if (dialogRequest.kind === "directory") {
+    const selected = await openDialog({
+      title: dialogRequest.title ?? "选择目录",
+      directory: true,
+      multiple: false,
+      defaultPath: dialogRequest.defaultPath ?? undefined,
+    });
+    return (typeof selected === "string" && selected.trim() ? selected : null) as EntryActionDialogResultMap[TKind];
+  }
+
+  const candidates = repositories.value.filter((repo) => {
+    if (dialogRequest.requireReady !== false && repo.status !== "ready") return false;
+    if (dialogRequest.requireWritable && !repo.backend.capabilities.includes("write")) return false;
+    if (dialogRequest.backendPluginIds?.length && !dialogRequest.backendPluginIds.includes(repo.backend.pluginId)) return false;
+    if (dialogRequest.backendKinds?.length && !dialogRequest.backendKinds.includes(repo.backend.kind)) return false;
+    if (activeRepoId.value && repo.repoId === activeRepoId.value) return false;
+    return true;
+  });
+  if (!candidates.length) {
+    return null as EntryActionDialogResultMap[TKind];
+  }
+  if (candidates.length === 1) {
+    return candidates[0] as EntryActionDialogResultMap[TKind];
+  }
+  entryActionRepositoryDialogTitle.value = dialogRequest.title ?? "选择目标资源库";
+  entryActionRepositoryCandidates.value = candidates;
+  entryActionRepositoryDialogOpen.value = true;
+  return await new Promise<EntryActionDialogResultMap[TKind]>((resolve) => {
+    entryActionRepositoryResolve.value = resolve as (value: EntryActionDialogResultMap["repository"]) => void;
+  });
+}
+
+function closeEntryActionRepositoryDialog(result: EntryActionDialogResultMap["repository"] = null) {
+  entryActionRepositoryDialogOpen.value = false;
+  entryActionRepositoryCandidates.value = [];
+  const resolve = entryActionRepositoryResolve.value;
+  entryActionRepositoryResolve.value = null;
+  resolve?.(result);
+}
+
+async function refreshActiveNeteaseLoginStatus() {
+  if (!isActiveNeteaseRepository.value) {
+    neteaseLoginStatus.value = null;
+    return;
+  }
+  const config = activeNeteaseSourceConfig.value;
+  if (!config) {
+    neteaseLoginStatus.value = null;
+    return;
+  }
+  isRefreshingNeteaseLogin.value = true;
+  try {
+    const response = await callPlugin<{
+      loggedIn?: boolean;
+      loginExpired?: boolean;
+      error?: string;
+    }>({
+      pluginId: NETEASE_SOURCE_PLUGIN_ID,
+      method: "auth.getLoginStatus",
+      payload: { config },
+    });
+    neteaseLoginStatus.value = response.payload ?? null;
+  } catch (cause) {
+    neteaseLoginStatus.value = {
+      loggedIn: false,
+      loginExpired: true,
+      error: cause instanceof Error ? cause.message : String(cause),
+    };
+  } finally {
+    isRefreshingNeteaseLogin.value = false;
+  }
+}
+
+function requestActiveNeteaseRelogin() {
+  if (!activeRepoId.value) return;
+  window.dispatchEvent(new CustomEvent("momo:netease-relogin", {
+    detail: {
+      repoId: activeRepoId.value,
+      accountId: activeNeteaseSourceConfig.value?.accountId,
+    },
+  }));
+}
+
+watch(
+  () => [activeRepoId.value, activeSnapshot.value?.repository.backend.pluginId] as const,
+  () => {
+    void refreshActiveNeteaseLoginStatus();
+  },
+  { immediate: true },
+);
+
 const { fileEntryContextMenu } = useWorkspaceContextMenu({
   activeRepoId,
+  entryMap: fileBrowserEntryMap,
   hasMultipleSelection,
   isMutatingFiles,
   isSmartFolderPanel,
@@ -486,7 +620,9 @@ const { fileEntryContextMenu } = useWorkspaceContextMenu({
   chooseCustomThumbnail,
   clearCustomThumbnail,
   deleteContextSelection,
+  openEntryActionDialog,
   playlistMenuItems,
+  refreshRepositoryWorkspace,
   openCopyTargetDialog,
   openDirectory,
   openWorkspaceEntry,
@@ -648,6 +784,19 @@ useWorkspaceComponentPreload({
     class="workspace-page__body"
     :class="{ 'workspace-page__body--fixed': hasRepository && isFileBrowserPanel }"
   >
+    <div
+      v-if="activeNeteaseLoginExpired"
+      class="asset-browser__state asset-browser__state--error workspace-page__notice"
+    >
+      <span>登录已失效，请重新登录后再刷新或播放。</span>
+      <button type="button" class="ghost" :disabled="isRefreshingNeteaseLogin" @click="refreshActiveNeteaseLoginStatus">
+        刷新状态
+      </button>
+      <button type="button" class="primary" :disabled="isRefreshingNeteaseLogin" @click="requestActiveNeteaseRelogin">
+        重新登录
+      </button>
+    </div>
+
     <MissingRepositoryState
       v-if="isMissingRepository"
       :active-repository="activeRepository"
@@ -740,4 +889,39 @@ useWorkspaceComponentPreload({
     @confirm="confirmMissingRepositoryDelete"
     @cancel="closeMissingRepositoryDeleteDialog"
   />
+  <Teleport to="body">
+    <Transition name="modal">
+      <div
+        v-if="entryActionRepositoryDialogOpen"
+        class="modal-overlay"
+        role="dialog"
+        aria-modal="true"
+        :aria-label="entryActionRepositoryDialogTitle"
+        @click.self="closeEntryActionRepositoryDialog()"
+      >
+        <div class="modal-card dialog-card repository-picker-dialog">
+          <div class="dialog-card__header">
+            <span>{{ entryActionRepositoryDialogTitle }}</span>
+          </div>
+          <div class="dialog-card__body repository-picker-dialog__body">
+            <button
+              v-for="repository in entryActionRepositoryCandidates"
+              :key="repository.repoId"
+              type="button"
+              class="repository-picker-dialog__item"
+              @click="closeEntryActionRepositoryDialog(repository)"
+            >
+              <strong>{{ repository.name }}</strong>
+              <span>{{ repository.path }}</span>
+            </button>
+          </div>
+          <div class="dialog-card__actions">
+            <button type="button" class="ghost" @click="closeEntryActionRepositoryDialog()">
+              取消
+            </button>
+          </div>
+        </div>
+      </div>
+    </Transition>
+  </Teleport>
 </template>

@@ -137,6 +137,10 @@ impl RepositoryRuntime {
             ..self.external_connection.clone()
         }
     }
+
+    pub fn service_root(&self) -> PathBuf {
+        self.repository_state.root_path()
+    }
 }
 
 fn start_preview_server(repository_state: Arc<RepositoryState>) -> Result<String, String> {
@@ -777,6 +781,7 @@ mod tests {
                 path: repo_root.to_string_lossy().to_string(),
                 backend_plugin_id: None,
                 backend_config: None,
+                skip_initial_sync: false,
             })
             .expect("repository should be created")
             .repository
@@ -915,6 +920,7 @@ mod tests {
                 path: repo_root.to_string_lossy().to_string(),
                 backend_plugin_id: None,
                 backend_config: None,
+                skip_initial_sync: false,
             })
             .expect("repository should be created")
             .repository

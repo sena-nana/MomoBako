@@ -1,0 +1,47 @@
+{
+  "pluginId": "momobako.library.netease-cloud-music",
+  "name": "Netease Cloud Music Library",
+  "version": "0.1.0",
+  "type": {
+    "layer": "library-kind",
+    "kind": "netease-cloud-music"
+  },
+  "kind": "netease-cloud-music",
+  "category": "library-kind",
+  "description": "为网易云音乐资源库提供登录状态页、右键动作和歌单浏览体验。",
+  "capabilities": [
+    "entry-actions",
+    "settings-page",
+    "library-extension"
+  ],
+  "enabled": true,
+  "sdk": "frontend",
+  "runtime": "vue-module",
+  "entry": {
+    "frontend": {
+      "module": "dist/register.js",
+      "export": "register"
+    }
+  },
+  "permissions": [],
+  "requires": [
+    "momobako.source.netease-cloud-music",
+    "momobako.service.downloader"
+  ],
+  "optional": [],
+  "hooks": [],
+  "contributes": {
+    "settings": {
+      "schemaVersion": 1,
+      "settingsPage": {
+        "label": "网易云音乐"
+      }
+    }
+  },
+  "compat": {
+    "sdkVersion": "1",
+    "legacyPluginIds": []
+  },
+  "source": "builtin",
+  "status": "ready"
+}

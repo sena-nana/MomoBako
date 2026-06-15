@@ -38,6 +38,11 @@ export type MockEntry = {
     passwordTip?: string | null;
   } | null;
   metadata?: Record<string, unknown>;
+  isVirtual?: boolean;
+  providerId?: string | null;
+  providerItemId?: string | null;
+  sourcePayload?: Record<string, unknown> | null;
+  localAbsolutePath?: string | null;
 };
 
 export const defaultSearchHits = (): SearchHit[] => [

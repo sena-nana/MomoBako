@@ -1,0 +1,96 @@
+{
+  "pluginId": "momobako.source.netease-cloud-music",
+  "name": "Netease Cloud Music Source",
+  "version": "0.1.0",
+  "type": {
+    "layer": "source",
+    "kind": "netease-cloud-music"
+  },
+  "kind": "netease-cloud-music",
+  "category": "source",
+  "description": "通过网易云音乐账号登录并把创建/收藏歌单映射为虚拟资源库。",
+  "capabilities": [
+    "browse",
+    "read",
+    "sync",
+    "virtual-entries",
+    "login"
+  ],
+  "enabled": true,
+  "sdk": "backend",
+  "runtime": "native-dylib",
+  "entry": {
+    "backend": {
+      "library": "momobako_source_netease_cloud_music"
+    }
+  },
+  "permissions": [
+    "network",
+    "filesystem:read",
+    "filesystem:write"
+  ],
+  "requires": [
+    "momobako.service.downloader"
+  ],
+  "optional": [],
+  "hooks": [],
+  "contributes": {
+    "apiTests": [
+      {
+        "method": "auth.createQrSession",
+        "summary": "创建二维码登录会话。",
+        "payload": {}
+      },
+      {
+        "method": "filesystem.listDirectory",
+        "summary": "列出网易云虚拟目录。",
+        "payload": {
+          "repoRoot": "netease-cloud-music://account/demo",
+          "directoryPath": "",
+          "config": {
+            "apiBaseUrl": "",
+            "accountId": "0",
+            "cookie": ""
+          }
+        }
+      }
+    ],
+    "settings": {
+      "schemaVersion": 1,
+      "settingsPage": {
+        "label": "网易云音乐"
+      },
+      "fields": [
+        {
+          "key": "apiBaseUrl",
+          "label": "API Base URL",
+          "type": "string",
+          "description": "留空时使用 ncm-api-rs 内置的网易云官方域名；仅在需要自定义域名时填写。",
+          "default": ""
+        },
+        {
+          "key": "defaultLevel",
+          "label": "默认音质",
+          "type": "select",
+          "default": "standard",
+          "options": [
+            { "label": "标准", "value": "standard" },
+            { "label": "较高", "value": "higher" },
+            { "label": "极高", "value": "exhigh" },
+            { "label": "无损", "value": "lossless" }
+          ]
+        }
+      ]
+    },
+    "source": {
+      "operations": ["list", "read", "sync"],
+      "dangerousOperations": []
+    }
+  },
+  "compat": {
+    "sdkVersion": "1",
+    "legacyPluginIds": []
+  },
+  "source": "builtin",
+  "status": "ready"
+}

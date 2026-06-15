@@ -118,6 +118,10 @@ describe("API design snapshot contract", () => {
         pluginId: "momobako.local-filesystem",
         pluginMethod: "filesystem.listFiles",
       }),
+      expect.objectContaining({
+        transport: "tauri-command",
+        command: "download_playlist_with_progress",
+      }),
     ]));
   });
 });
