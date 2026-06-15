@@ -341,6 +341,11 @@
   - Native plugin call envelopes include `runtime.pluginId`, `runtime.pluginDataDir`, and `runtime.pluginConfig`; `pluginDataDir` points to the plugin's own persistent directory and is created before dispatch, while `pluginConfig` is the current host-managed key-value config from `config.json`.
   - Runtime plugin calls resolve `requires` and `optional` before dispatch. Missing or disabled required dependencies reject the call with the plugin disable reason; missing or disabled optional dependencies keep the call usable and return `runtime.degraded`, `runtime.degradationReason`, and `runtime.dependencyStatus` alongside the plugin payload.
   - The 网易云 source and downloader backends currently use `ncm-api-rs` directly for login, playlist, song URL, detail, and lyric requests; any `apiBaseUrl` setting is treated as an optional SDK domain override rather than a host-managed proxy endpoint.
+- `GET /plugins:hook-executions`
+  - Tauri command: `list_plugin_hook_executions`
+  - Returns host-side execution records for declared hook actions; the host only records calls whose method matches a manifest `hooks[].action`
+  - Supports optional `pluginId` filtering and `limit`; records are returned newest-first and default to the most recent 50 entries
+  - Each record includes `executionId`, `pluginId`, `hookSlot`, `hookAction`, `hookLabel`, `status`, `message`, `target`, `startedAt`, `finishedAt`, and optional `runtime`
 - `GET /plugins/{pluginId}:data-directory`
   - Tauri command: `get_plugin_data_directory`
   - Creates and returns the plugin data directory as `{ pluginId, path }`

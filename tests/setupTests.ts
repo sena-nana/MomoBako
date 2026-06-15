@@ -1376,6 +1376,9 @@ vi.mock("@tauri-apps/api/core", () => ({
       mockPlugins ??= createMockPlugins();
       return mockPlugins;
     }
+    if (command === "list_plugin_hook_executions") {
+      return { records: [] };
+    }
     if (command === "call_plugin") {
       const request = args?.request as { pluginId?: string; method?: string; payload?: { id?: string } } | undefined;
       const pluginId = request?.pluginId ?? "momobako.service.provider.dlsite";

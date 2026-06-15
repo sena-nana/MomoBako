@@ -27,6 +27,7 @@ const REPO_DB_FILE_NAME: &str = "metadata.db";
 const REPO_SCHEMA_VERSION: i64 = 1;
 const THUMBNAIL_SIZE: u32 = 256;
 const MAX_REMOTE_THUMBNAIL_BYTES: u64 = 10 * 1024 * 1024;
+const PLUGIN_HOOK_EXECUTIONS_FILE_NAME: &str = "plugin-hook-executions.jsonl";
 
 static FFMPEG_READY: OnceLock<Result<(), String>> = OnceLock::new();
 #[cfg(test)]
@@ -1125,13 +1126,42 @@ pub struct PluginCallResult {
     pub runtime: Option<PluginCallRuntime>,
 }
 
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct PluginCallRuntime {
     pub degraded: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub degradation_reason: Option<String>,
     pub dependency_status: PluginDependencyStatus,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginHookExecutionRecord {
+    pub execution_id: String,
+    pub plugin_id: String,
+    pub hook_slot: String,
+    pub hook_action: String,
+    pub hook_label: Option<String>,
+    pub status: String,
+    pub message: String,
+    pub target: serde_json::Value,
+    pub started_at: String,
+    pub finished_at: String,
+    pub runtime: Option<PluginCallRuntime>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginHookExecutionListRequest {
+    pub plugin_id: Option<String>,
+    pub limit: Option<usize>,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginHookExecutionListResponse {
+    pub records: Vec<PluginHookExecutionRecord>,
 }
 
 #[derive(Debug)]
@@ -3528,11 +3558,50 @@ impl RepositoryState {
         } else {
             request.payload
         };
+        let hook_context =
+            plugin_hook_execution_context(&self.root, &request.plugin_id, &request.method);
+        let started_at = now_rfc3339();
+        let target = plugin_hook_execution_target(&payload);
         let response = backend_plugin_registry(&self.root).call_with_runtime(
             &request.plugin_id,
             &request.method,
             payload,
-        )?;
+        );
+        if let Some((plugin_id, hook)) = hook_context {
+            let (status, message, runtime) = match &response {
+                Ok(result) => (
+                    "success".to_string(),
+                    "插件 Hook 已执行。".to_string(),
+                    result.runtime.clone(),
+                ),
+                Err(error) if is_plugin_call_blocked_error(error) => {
+                    ("blocked".to_string(), error.clone(), None)
+                }
+                Err(error) => ("failed".to_string(), error.clone(), None),
+            };
+            append_plugin_hook_execution_record(
+                &self.root,
+                PluginHookExecutionRecord {
+                    execution_id: plugin_hook_execution_id(
+                        &plugin_id,
+                        &hook.slot,
+                        &hook.action,
+                        &started_at,
+                    ),
+                    plugin_id,
+                    hook_slot: hook.slot,
+                    hook_action: hook.action,
+                    hook_label: hook.label,
+                    status,
+                    message,
+                    target,
+                    started_at,
+                    finished_at: now_rfc3339(),
+                    runtime,
+                },
+            )?;
+        }
+        let response = response?;
         Ok(PluginCallResult {
             plugin_id: response.plugin_id,
             method: request.method,
@@ -5283,6 +5352,25 @@ impl RepositoryState {
     pub fn list_plugins(&self) -> Result<Vec<PluginManifest>, String> {
         self.ensure_initialized()?;
         Ok(default_plugins(&self.root))
+    }
+
+    pub fn list_plugin_hook_executions(
+        &self,
+        request: PluginHookExecutionListRequest,
+    ) -> Result<PluginHookExecutionListResponse, String> {
+        self.ensure_initialized()?;
+        let registry = plugin_management_registry(&self.root);
+        let plugin_id = request
+            .plugin_id
+            .as_deref()
+            .map(|value| registry.normalize_plugin_id(value));
+        Ok(PluginHookExecutionListResponse {
+            records: load_plugin_hook_execution_records(
+                &self.root,
+                plugin_id.as_deref(),
+                request.limit,
+            )?,
+        })
     }
 
     pub fn set_plugin_enabled(
@@ -11648,6 +11736,119 @@ fn plugin_data_dir_name(plugin_id: &str) -> String {
     }
 }
 
+fn plugin_hook_executions_path(service_root: &Path) -> PathBuf {
+    service_root.join(PLUGIN_HOOK_EXECUTIONS_FILE_NAME)
+}
+
+fn plugin_hook_execution_context(
+    service_root: &Path,
+    plugin_id: &str,
+    method: &str,
+) -> Option<(String, PluginHook)> {
+    let registry = plugin_management_registry(service_root);
+    let normalized_plugin_id = registry.normalize_plugin_id(plugin_id);
+    let manifest = registry.resolved_manifest(&normalized_plugin_id)?;
+    manifest
+        .hooks
+        .iter()
+        .find(|hook| hook.action == method)
+        .cloned()
+        .map(|hook| (manifest.plugin_id, hook))
+}
+
+fn plugin_hook_execution_target(payload: &serde_json::Value) -> serde_json::Value {
+    const TARGET_KEYS: [&str; 8] = [
+        "repoId",
+        "assetId",
+        "assetIds",
+        "path",
+        "paths",
+        "playlistId",
+        "query",
+        "id",
+    ];
+    let Some(object) = payload.as_object() else {
+        return serde_json::json!({});
+    };
+    let mut target = serde_json::Map::new();
+    for key in TARGET_KEYS {
+        if let Some(value) = object.get(key) {
+            target.insert(key.to_string(), value.clone());
+        }
+    }
+    serde_json::Value::Object(target)
+}
+
+fn plugin_hook_execution_id(
+    plugin_id: &str,
+    hook_slot: &str,
+    hook_action: &str,
+    started_at: &str,
+) -> String {
+    format!(
+        "plugin-hook-{}",
+        hash_text_sha256(&format!(
+            "{plugin_id}\n{hook_slot}\n{hook_action}\n{started_at}"
+        ))
+    )
+}
+
+fn is_plugin_call_blocked_error(error: &str) -> bool {
+    error.contains("plugin call blocked by dependency status")
+        || error.contains("plugin is disabled")
+        || error.contains("插件不可用")
+}
+
+fn append_plugin_hook_execution_record(
+    service_root: &Path,
+    record: PluginHookExecutionRecord,
+) -> Result<(), String> {
+    fs::create_dir_all(service_root).map_err(io_error)?;
+    let raw = serde_json::to_string(&record).map_err(json_error)?;
+    let mut file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(plugin_hook_executions_path(service_root))
+        .map_err(io_error)?;
+    writeln!(file, "{raw}").map_err(io_error)
+}
+
+fn load_plugin_hook_execution_records(
+    service_root: &Path,
+    plugin_id: Option<&str>,
+    limit: Option<usize>,
+) -> Result<Vec<PluginHookExecutionRecord>, String> {
+    let path = plugin_hook_executions_path(service_root);
+    if !path.is_file() {
+        return Ok(Vec::new());
+    }
+    let limit = limit.unwrap_or(50).clamp(1, 200);
+    let raw = fs::read_to_string(path).map_err(io_error)?;
+    let mut records = raw
+        .lines()
+        .filter_map(|line| {
+            let line = line.trim();
+            if line.is_empty() {
+                return None;
+            }
+            serde_json::from_str::<PluginHookExecutionRecord>(line).ok()
+        })
+        .filter(|record| {
+            plugin_id
+                .map(|expected| record.plugin_id == expected)
+                .unwrap_or(true)
+        })
+        .collect::<Vec<_>>();
+    records.sort_by(|left, right| {
+        right
+            .started_at
+            .cmp(&left.started_at)
+            .then_with(|| right.execution_id.cmp(&left.execution_id))
+    });
+    records.truncate(limit);
+    Ok(records)
+}
+
 fn ensure_plugin_data_dir(service_root: &Path, plugin_id: &str) -> Result<PathBuf, String> {
     let data_dir = plugin_data_dir(service_root, plugin_id);
     fs::create_dir_all(&data_dir).map_err(io_error)?;
@@ -12852,6 +13053,12 @@ fn core_tauri_api_definitions() -> Vec<ApiDefinition> {
             "list_plugins",
             "列出插件与能力声明。",
             serde_json::json!({}),
+        ),
+        tauri_api_definition(
+            "Plugin API",
+            "list_plugin_hook_executions",
+            "列出插件 Hook 执行记录。",
+            serde_json::json!({ "request": { "pluginId": "<pluginId>", "limit": 50 } }),
         ),
         tauri_api_definition(
             "Plugin API",
@@ -18061,6 +18268,69 @@ mod tests {
 
         assert_eq!(response.plugin_id, LOCAL_FILESYSTEM_PLUGIN_ID);
         assert!(response.runtime.is_none());
+    }
+
+    #[test]
+    fn plugin_hook_execution_records_declared_hook_calls() {
+        let workspace = TestWorkspace::new("plugin-hook-execution-records");
+        let service_root = workspace.path("service");
+        let repo_root = workspace.path("repo");
+        fs::create_dir_all(&repo_root).expect("repo root should be created");
+        fs::write(repo_root.join("note.txt"), b"note").expect("test file should be written");
+        let plugin_root = runtime_plugins_dir(&service_root);
+        write_test_local_filesystem_plugin_archive(
+            &plugin_root,
+            serde_json::json!({
+                "hooks": [
+                    {
+                        "slot": "auditLog",
+                        "action": "filesystem.listFiles",
+                        "label": "记录文件列表"
+                    }
+                ]
+            }),
+        );
+        let state = RepositoryState::from_root(service_root);
+
+        state
+            .call_plugin(test_list_files_plugin_call(
+                LEGACY_LOCAL_FILESYSTEM_PLUGIN_ID,
+                repo_root,
+            ))
+            .expect("declared hook plugin call should succeed");
+        let all_records = state
+            .list_plugin_hook_executions(PluginHookExecutionListRequest::default())
+            .expect("hook execution records should load");
+
+        assert_eq!(all_records.records.len(), 1);
+        let record = &all_records.records[0];
+        assert_eq!(record.plugin_id, LOCAL_FILESYSTEM_PLUGIN_ID);
+        assert_eq!(record.hook_slot, "auditLog");
+        assert_eq!(record.hook_action, "filesystem.listFiles");
+        assert_eq!(record.hook_label.as_deref(), Some("记录文件列表"));
+        assert_eq!(record.status, "success");
+        assert_eq!(record.target.get("repoRoot"), None);
+        assert_eq!(record.target.get("config"), None);
+
+        state
+            .call_plugin(PluginCallRequest {
+                plugin_id: LOCAL_FILESYSTEM_PLUGIN_ID.to_string(),
+                method: "filesystem.listTree".to_string(),
+                payload: serde_json::json!({
+                    "repoRoot": workspace.path("repo"),
+                    "path": "note.txt"
+                }),
+            })
+            .expect("non-hook plugin call should succeed");
+        let filtered = state
+            .list_plugin_hook_executions(PluginHookExecutionListRequest {
+                plugin_id: Some(LEGACY_LOCAL_FILESYSTEM_PLUGIN_ID.to_string()),
+                limit: Some(1),
+            })
+            .expect("filtered hook execution records should load");
+
+        assert_eq!(filtered.records.len(), 1);
+        assert_eq!(filtered.records[0].hook_action, "filesystem.listFiles");
     }
 
     #[test]

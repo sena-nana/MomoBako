@@ -1188,6 +1188,35 @@
   min-height: 100%;
 }
 
+.plugin-manager__groups {
+  display: grid;
+  gap: 16px;
+}
+
+.plugin-manager__group {
+  display: grid;
+  gap: 8px;
+}
+
+.plugin-manager__group-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 28px;
+}
+
+.plugin-manager__group-title {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.25;
+}
+
+.plugin-manager__group-count {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
 .plugin-manager__meta {
   display: inline-flex;
   gap: 10px;
@@ -1251,6 +1280,44 @@
 .plugin-manager__dependency--danger {
   background: var(--err-soft);
   color: var(--err);
+}
+
+.plugin-manager__execution-list {
+  display: grid;
+  gap: 8px;
+}
+
+.plugin-manager__execution-item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+}
+
+.plugin-manager__execution-body {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.plugin-manager__execution-title {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: baseline;
+  font-size: 12px;
+}
+
+.plugin-manager__execution-message,
+.plugin-manager__execution-time {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.plugin-manager__execution-message {
+  color: var(--text-muted);
 }
 
 .plugin-manager__settings {
