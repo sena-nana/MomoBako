@@ -1,5 +1,6 @@
 import {
   attachRepositoryFolder,
+  configureNeteaseRepositoryCache,
   createRepository,
   deleteRepository,
   exportRepository,
@@ -111,6 +112,27 @@ export async function relocateMissingRepository(repoId: string, path: string) {
   try {
     const response = await relocateRepository({ repoId, path });
     updateOperationProgress(progressId, { detail: "刷新资源库列表", value: 64 });
+    await repositoryDependencies().loadRepositories();
+    if (activeRepoId.value !== response.repository.repoId || !activeSnapshot.value) {
+      await repositoryDependencies().selectRepository(response.repository.repoId);
+    }
+    finishOperationProgress(progressId);
+    return response;
+  } catch (cause) {
+    cancelOperationProgress(progressId);
+    throw cause;
+  }
+}
+
+export async function configureNeteaseRepositoryCacheInWorkspace(repoId: string, path: string) {
+  const progressId = startOperationProgress("配置网易云缓存", "初始化缓存目录并迁移本机状态", { initial: 12 });
+  try {
+    const response = await configureNeteaseRepositoryCache({
+      repoId,
+      path,
+      migrateLegacyCache: true,
+    });
+    updateOperationProgress(progressId, { detail: "刷新资源库列表", value: 72 });
     await repositoryDependencies().loadRepositories();
     if (activeRepoId.value !== response.repository.repoId || !activeSnapshot.value) {
       await repositoryDependencies().selectRepository(response.repository.repoId);

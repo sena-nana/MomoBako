@@ -79,11 +79,11 @@ export function useWorkspacePlayerUi(options: WorkspacePlayerUiOptions) {
 
   const activePlaylistPlayer = computed(() => getPlaylistPlayerByType(options.activePlaylistDetail.value?.playlist.playerTypeId));
   const workspacePlayerDefinition = computed(() => (
-    getPlaylistPlayerByType(options.playlistPlayer.activePlaylist.value?.playlist.playerTypeId)
+    options.playlistPlayer.currentPlayerDefinition.value
   ));
   const showWorkspacePlayer = computed(() => Boolean(options.activeRepoId.value));
   const playerQueueItems = computed<PlaylistItem[]>(() => (
-    (options.playlistPlayer.activePlaylist.value?.items ?? []).map((item) => ({
+    (options.playlistPlayer.queueItems.value ?? []).map((item) => ({
       ...item,
       thumbnailPath: item.thumbnailPath ? convertFileSrc(item.thumbnailPath) : null,
     }))
@@ -161,7 +161,7 @@ export function useWorkspacePlayerUi(options: WorkspacePlayerUiOptions) {
 
   const workspacePlayerBarProps = computed(() => ({
     item: currentPlayerItem.value,
-    playerLabel: options.playlistPlayer.activePlaylist.value?.playlist.playerLabel,
+    playerLabel: options.playlistPlayer.currentPlayerLabel.value,
     fileClass: workspacePlayerDefinition.value?.fileClass,
     supportsSeek: workspacePlayerDefinition.value?.supportsSeek ?? false,
     supportsVolume: workspacePlayerDefinition.value?.supportsVolume ?? false,

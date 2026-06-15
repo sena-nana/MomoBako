@@ -686,13 +686,48 @@ vi.mock("@tauri-apps/api/core", () => ({
       const playlistId = typeof args?.playlistId === "string" ? args.playlistId : "playlist-mock";
       return mockPlaylistDetails[playlistId] ?? defaultPlaylistDetail(repoId, playlistId);
     }
-    if (command === "create_playlist" || command === "update_playlist" || command === "delete_playlist") {
+    if (command === "create_playlist") {
+      const request = args?.request as {
+        repoId?: string;
+        playlistId?: string;
+        name?: string;
+        playerTypeId?: string;
+      } | undefined;
+      const repoId = request?.repoId ?? "repo-main-001";
+      const playlistId = request?.playlistId ?? "playlist-created";
+      const playlist: PlaylistSummary = {
+        playlistId,
+        repoId,
+        name: request?.name ?? "新播放集",
+        playerTypeId: request?.playerTypeId ?? "momobako.playlist.audio-sequence",
+        playerPluginId: "momobako.preview.media",
+        playerLabel: "音频顺序播放",
+        fileClass: "audio",
+        itemCount: 0,
+        sortOrder: (mockPlaylists ?? []).length,
+        createdAt: "2026-06-05T00:18:00Z",
+        updatedAt: "2026-06-05T00:18:00Z",
+      };
+      mockPlaylists = [
+        ...(mockPlaylists ?? []).filter((item) => item.playlistId !== playlistId),
+        playlist,
+      ];
+      mockPlaylistDetails[playlistId] = {
+        playlist,
+        items: [],
+      };
+      return {
+        playlists: mockPlaylists,
+        playlist,
+      };
+    }
+    if (command === "update_playlist" || command === "delete_playlist") {
       return {
         playlists: mockPlaylists ?? [],
         playlist: null,
       };
     }
-    if (command === "add_playlist_items" || command === "reorder_playlist_items" || command === "remove_playlist_item") {
+    if (command === "add_playlist_items" || command === "add_playlist_items_by_paths" || command === "reorder_playlist_items" || command === "remove_playlist_item") {
       const request = args?.request as { repoId?: string; playlistId?: string } | undefined;
       return mockPlaylistDetails[request?.playlistId ?? "playlist-mock"] ?? defaultPlaylistDetail(request?.repoId ?? "repo-main-001", request?.playlistId ?? "playlist-mock");
     }
@@ -1160,6 +1195,13 @@ vi.mock("@tauri-apps/api/core", () => ({
         status: "ready",
         assetCount: 0,
         updatedAt: "2026-06-05T00:18:00Z",
+        localCache: backendPluginId === "momobako.source.netease-cloud-music"
+          ? {
+            required: true,
+            path: request?.path ?? "C:/Mock/NewRepo",
+            status: "ready",
+          }
+          : null,
       };
       mockRepositories = [
         ...mockRepositories.filter((repo) => repo.repoId !== created.repoId),
@@ -1223,6 +1265,37 @@ vi.mock("@tauri-apps/api/core", () => ({
         throw new Error(`repository not found: ${repoId}`);
       }
       return { repository: existing };
+    }
+    if (command === "configure_netease_repository_cache") {
+      const request = args?.request as { repoId?: string; path?: string } | undefined;
+      const repoId = request?.repoId ?? "";
+      const path = request?.path ?? "C:/Mock/NeteaseCache";
+      const existing = mockRepositories.find((repo) => repo.repoId === repoId) ?? null;
+      if (!existing) {
+        throw new Error(`repository not found: ${repoId}`);
+      }
+      const repository = {
+        ...existing,
+        path,
+        status: "ready",
+        localCache: {
+          required: true,
+          path,
+          status: "ready",
+        },
+      };
+      mockRepositories = mockRepositories.map((repo) => (
+        repo.repoId === repoId ? repository : repo
+      ));
+      return {
+        repository,
+        migration: {
+          movedStateFiles: 0,
+          migratedPlaybackCacheFiles: 0,
+          skippedPlaybackCacheFiles: 0,
+          failedPlaybackCacheFiles: 0,
+        },
+      };
     }
     if (command === "export_repository") {
       const request = args?.request as { target?: string; archive?: { outputPath?: string; format?: string; encrypt?: boolean }; git?: { remote?: string; branch?: string } } | undefined;

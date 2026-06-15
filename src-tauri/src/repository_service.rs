@@ -1,5 +1,6 @@
 use rusqlite::{params, types::Type, Connection, OptionalExtension, Transaction};
 use serde::{Deserialize, Serialize};
+use sha1::{Digest as Sha1Digest, Sha1};
 use sha2::{Digest, Sha256};
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
@@ -437,6 +438,16 @@ pub struct RepositorySummary {
     pub status: String,
     pub asset_count: i64,
     pub updated_at: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub local_cache: Option<RepositoryLocalCacheStatus>,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct RepositoryLocalCacheStatus {
+    pub required: bool,
+    pub path: Option<String>,
+    pub status: String,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -952,6 +963,42 @@ pub struct RepositoryBackendConfigUpdateRequest {
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct NeteaseRepositoryCacheConfigureRequest {
+    pub repo_id: String,
+    pub path: String,
+    #[serde(default)]
+    pub migrate_legacy_cache: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NeteaseRepositoryCacheMigrationSummary {
+    pub moved_state_files: usize,
+    pub migrated_playback_cache_files: usize,
+    pub skipped_playback_cache_files: usize,
+    pub failed_playback_cache_files: usize,
+}
+
+impl NeteaseRepositoryCacheMigrationSummary {
+    fn empty() -> Self {
+        Self {
+            moved_state_files: 0,
+            migrated_playback_cache_files: 0,
+            skipped_playback_cache_files: 0,
+            failed_playback_cache_files: 0,
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NeteaseRepositoryCacheConfigureResponse {
+    pub repository: RepositorySummary,
+    pub migration: NeteaseRepositoryCacheMigrationSummary,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RepositoryArchiveExportOptions {
     pub format: String,
     pub output_path: String,
@@ -1046,6 +1093,8 @@ pub struct DownloaderPlaylistRequest {
     pub playlist_name: Option<String>,
     pub tracks: Vec<DownloaderPlaylistTrackRequest>,
     pub destination: DownloaderDestinationRequest,
+    #[serde(default)]
+    pub managed_cache_root: Option<String>,
     #[serde(default)]
     pub source_payload: Option<serde_json::Value>,
     #[serde(default)]
@@ -2020,11 +2069,12 @@ impl RepositoryState {
                 Ok(RepositorySummary {
                     repo_id,
                     name: row.get(1)?,
-                    path,
+                    path: path.clone(),
                     backend: backend_summary_from_registry(&plugin_registry, &backend_plugin_id),
                     status,
                     asset_count,
                     updated_at: row.get(6)?,
+                    local_cache: repository_local_cache_status(&path, &backend_plugin_id),
                 })
             })
             .map_err(db_error)?;
@@ -2278,6 +2328,8 @@ impl RepositoryState {
         }
 
         let repo = self.load_repository_record(&request.repo_id)?;
+        let mut next_backend_config = request.backend_config.clone();
+        preserve_netease_cache_config(&repo.backend_record, &mut next_backend_config);
         let repo_root =
             normalize_repository_root_for_backend(&repo.summary.path, &repo.backend_record, true)?;
         let metadata_path = repository_meta_dir(&repo_root).join(REPO_METADATA_FILE_NAME);
@@ -2299,7 +2351,7 @@ impl RepositoryState {
                     .backend_plugin_id
                     .clone()
                     .unwrap_or_else(|| repo.backend_record.plugin_id.clone()),
-                backend_config: request.backend_config.clone(),
+                backend_config: next_backend_config.clone(),
                 created_at: metadata.created_at.clone().unwrap_or_else(now_rfc3339),
                 schema_version: metadata.schema_version.unwrap_or(REPO_SCHEMA_VERSION),
             };
@@ -2317,7 +2369,7 @@ impl RepositoryState {
                 "#,
                 params![
                     request.repo_id.as_str(),
-                    request.backend_config.to_string(),
+                    next_backend_config.to_string(),
                     now_rfc3339()
                 ],
             )
@@ -2325,6 +2377,94 @@ impl RepositoryState {
 
         let repository = self.load_repository_record(&request.repo_id)?.summary;
         Ok(RepositoryMutationResponse { repository })
+    }
+
+    pub fn configure_netease_repository_cache(
+        &self,
+        request: NeteaseRepositoryCacheConfigureRequest,
+    ) -> Result<NeteaseRepositoryCacheConfigureResponse, String> {
+        self.ensure_initialized()?;
+
+        let repo = self.load_repository_record(&request.repo_id)?;
+        if repo.backend_record.plugin_id != NETEASE_CLOUD_MUSIC_PLUGIN_ID {
+            return Err(
+                "only netease cloud music repositories support cache configuration".to_string(),
+            );
+        }
+
+        let selected = request.path.trim();
+        if selected.is_empty() {
+            return Err("cache directory cannot be empty".to_string());
+        }
+        let cache_root = normalize_external_cache_root(selected)?;
+        fs::create_dir_all(&cache_root).map_err(io_error)?;
+        let storage_paths = ensure_repository_storage_paths(
+            &self.root,
+            &repo.summary.repo_id,
+            &cache_root,
+            &repo.backend_record.plugin_id,
+        )?;
+        hide_repository_meta_dir(&storage_paths.metadata_dir);
+
+        let old_state_dir = repository_state_storage_dir(&self.root, &repo.summary.repo_id);
+        let old_metadata_dir = old_state_dir.join(REPO_META_DIR);
+        let mut migration = NeteaseRepositoryCacheMigrationSummary::empty();
+        if old_metadata_dir.exists() && old_metadata_dir != storage_paths.metadata_dir {
+            migration.moved_state_files +=
+                merge_netease_cache_state_contents(&old_metadata_dir, &storage_paths.metadata_dir)?;
+        }
+
+        let mut backend_config = repo.backend_record.config.clone();
+        if !backend_config.is_object() {
+            backend_config = serde_json::json!({});
+        }
+        if let Some(object) = backend_config.as_object_mut() {
+            object
+                .entry("sourceUri".to_string())
+                .or_insert_with(|| serde_json::json!(netease_source_uri_for_repo(&repo)));
+            object.insert(
+                "localCachePath".to_string(),
+                serde_json::json!(cache_root.to_string_lossy().to_string()),
+            );
+        }
+
+        write_repository_metadata(
+            &storage_paths.metadata_dir,
+            &repo.summary.repo_id,
+            &repo.summary.name,
+            &cache_root,
+            &repo.backend_record.plugin_id,
+            &backend_config,
+            None,
+        )?;
+
+        let registry = Connection::open(&self.registry_path).map_err(db_error)?;
+        registry
+            .execute(
+                r#"
+                UPDATE repositories
+                SET path = ?2, backend_config_json = ?3, status = 'ready', updated_at = ?4
+                WHERE repo_id = ?1
+                "#,
+                params![
+                    repo.summary.repo_id.as_str(),
+                    cache_root.to_string_lossy().to_string(),
+                    backend_config.to_string(),
+                    now_rfc3339(),
+                ],
+            )
+            .map_err(db_error)?;
+
+        if request.migrate_legacy_cache {
+            let updated_repo = self.load_repository_record(&request.repo_id)?;
+            migrate_netease_playback_cache(&self.root, &updated_repo, &cache_root, &mut migration)?;
+        }
+
+        let repository = self.load_repository_record(&request.repo_id)?.summary;
+        Ok(NeteaseRepositoryCacheConfigureResponse {
+            repository,
+            migration,
+        })
     }
 
     pub fn export_repository(
@@ -3240,12 +3380,18 @@ impl RepositoryState {
             None,
             None,
         )?;
+        let managed_cache_root = if repo.backend_record.plugin_id == NETEASE_CLOUD_MUSIC_PLUGIN_ID {
+            Some(ensure_netease_cache_ready(repo)?)
+        } else {
+            None
+        };
         let payload = serde_json::json!({
             "accountCookie": backend_account_cookie,
             "songId": song_id,
             "level": source_payload.get("level").cloned().unwrap_or_else(|| serde_json::json!("standard")),
             "repoId": repo_id,
             "entryPath": entry_path,
+            "managedCacheRoot": managed_cache_root.as_ref().map(|path| path.to_string_lossy().to_string()),
             "sourcePayload": source_payload,
         });
         let response = call_downloader_prepare_track_playback(&self.root, payload)?;
@@ -5253,17 +5399,25 @@ impl RepositoryState {
                 |row| {
                     let backend_plugin_id: String = row.get(3)?;
                     let backend_plugin_id = plugin_registry.normalize_plugin_id(&backend_plugin_id);
+                    let path: String = row.get(2)?;
+                    let stored_status: String = row.get(5)?;
+                    let status = repository_runtime_status(
+                        &path,
+                        &backend_plugin_id,
+                        stored_status.as_str(),
+                    );
                     let backend_config_json: String = row.get(4)?;
                     let backend_config = parse_backend_config_json(&backend_config_json).map_err(to_from_sql_error)?;
                     Ok(RepositoryRecord {
                         summary: RepositorySummary {
                             repo_id: row.get(0)?,
                             name: row.get(1)?,
-                            path: row.get(2)?,
+                            path: path.clone(),
                             backend: backend_summary_from_registry(&plugin_registry, &backend_plugin_id),
-                            status: row.get(5)?,
+                            status,
                             asset_count: 0,
                             updated_at: row.get(6)?,
+                            local_cache: repository_local_cache_status(&path, &backend_plugin_id),
                         },
                         backend_record: RepositoryBackendRecord {
                             plugin_id: backend_plugin_id,
@@ -5294,6 +5448,10 @@ impl RepositoryState {
             .query_map([], |row| {
                 let backend_plugin_id: String = row.get(3)?;
                 let backend_plugin_id = plugin_registry.normalize_plugin_id(&backend_plugin_id);
+                let path: String = row.get(2)?;
+                let stored_status: String = row.get(5)?;
+                let status =
+                    repository_runtime_status(&path, &backend_plugin_id, stored_status.as_str());
                 let backend_config_json: String = row.get(4)?;
                 let backend_config =
                     parse_backend_config_json(&backend_config_json).map_err(to_from_sql_error)?;
@@ -5301,14 +5459,15 @@ impl RepositoryState {
                     summary: RepositorySummary {
                         repo_id: row.get(0)?,
                         name: row.get(1)?,
-                        path: row.get(2)?,
+                        path: path.clone(),
                         backend: backend_summary_from_registry(
                             &plugin_registry,
                             &backend_plugin_id,
                         ),
-                        status: row.get(5)?,
+                        status,
                         asset_count: 0,
                         updated_at: row.get(6)?,
+                        local_cache: repository_local_cache_status(&path, &backend_plugin_id),
                     },
                     backend_record: RepositoryBackendRecord {
                         plugin_id: backend_plugin_id,
@@ -12613,6 +12772,18 @@ fn core_tauri_api_definitions() -> Vec<ApiDefinition> {
         ),
         tauri_api_definition(
             "Repository API",
+            "configure_netease_repository_cache",
+            "配置网易云资源库本地缓存目录并迁移可识别旧缓存。",
+            serde_json::json!({
+                "request": {
+                    "repoId": "<repoId>",
+                    "path": "<absolutePath>",
+                    "migrateLegacyCache": true
+                }
+            }),
+        ),
+        tauri_api_definition(
+            "Repository API",
             "export_repository",
             "导出仓库元数据。",
             serde_json::json!({
@@ -12914,15 +13085,62 @@ fn backend_summary_from_registry(
 }
 
 fn repository_runtime_status(path: &str, backend_plugin_id: &str, stored_status: &str) -> String {
-    if backend_plugin_id == LOCAL_FILESYSTEM_PLUGIN_ID {
+    if backend_plugin_id == LOCAL_FILESYSTEM_PLUGIN_ID
+        || netease_cache_root_path(path, backend_plugin_id).is_some()
+    {
         if Path::new(path).is_dir() {
             "ready".to_string()
         } else {
             "missing".to_string()
         }
+    } else if backend_plugin_id == NETEASE_CLOUD_MUSIC_PLUGIN_ID {
+        "missing".to_string()
     } else {
         stored_status.to_string()
     }
+}
+
+fn netease_cache_root_path(path: &str, backend_plugin_id: &str) -> Option<PathBuf> {
+    if backend_plugin_id != NETEASE_CLOUD_MUSIC_PLUGIN_ID {
+        return None;
+    }
+    let trimmed = path.trim();
+    if trimmed.is_empty() || trimmed.starts_with("netease-cloud-music://") {
+        return None;
+    }
+    Some(PathBuf::from(trimmed))
+}
+
+fn repository_local_cache_status(
+    path: &str,
+    backend_plugin_id: &str,
+) -> Option<RepositoryLocalCacheStatus> {
+    if backend_plugin_id != NETEASE_CLOUD_MUSIC_PLUGIN_ID {
+        return None;
+    }
+    let cache_root = netease_cache_root_path(path, backend_plugin_id);
+    let status = match cache_root.as_ref() {
+        Some(root) if root.is_dir() => "ready",
+        Some(_) => "missing",
+        None => "unconfigured",
+    };
+    Some(RepositoryLocalCacheStatus {
+        required: true,
+        path: cache_root.map(|path| path.to_string_lossy().to_string()),
+        status: status.to_string(),
+    })
+}
+
+fn ensure_netease_cache_ready(repo: &RepositoryRecord) -> Result<PathBuf, String> {
+    if repo.backend_record.plugin_id != NETEASE_CLOUD_MUSIC_PLUGIN_ID {
+        return Err("repository is not a netease cloud music repository".to_string());
+    }
+    let cache_root = netease_cache_root_path(&repo.summary.path, &repo.backend_record.plugin_id)
+        .ok_or_else(|| "网易云资源库缺少本地缓存目录，请先指定缓存目录".to_string())?;
+    if !cache_root.is_dir() {
+        return Err("网易云资源库缓存目录不可用，请重新指定缓存目录".to_string());
+    }
+    Ok(cache_root)
 }
 
 fn parse_backend_request(
@@ -13030,6 +13248,38 @@ fn parse_backend_config_json(value: &str) -> Result<serde_json::Value, serde_jso
     } else {
         Ok(serde_json::json!({}))
     }
+}
+
+fn preserve_netease_cache_config(
+    existing: &RepositoryBackendRecord,
+    next_backend_config: &mut serde_json::Value,
+) {
+    if existing.plugin_id != NETEASE_CLOUD_MUSIC_PLUGIN_ID {
+        return;
+    }
+    let Some(next_object) = next_backend_config.as_object_mut() else {
+        return;
+    };
+    for key in ["sourceUri", "localCachePath"] {
+        if next_object.contains_key(key) {
+            continue;
+        }
+        if let Some(value) = existing.config.get(key) {
+            next_object.insert(key.to_string(), value.clone());
+        }
+    }
+}
+
+fn netease_source_uri_for_repo(repo: &RepositoryRecord) -> String {
+    if repo.summary.path.starts_with("netease-cloud-music://") {
+        return repo.summary.path.clone();
+    }
+    repo.backend_record
+        .config
+        .get("accountId")
+        .and_then(normalized_netease_account_id)
+        .map(|account_id| format!("netease-cloud-music://account/{account_id}"))
+        .unwrap_or_else(|| repo.summary.path.clone())
 }
 
 fn to_from_sql_error(error: serde_json::Error) -> rusqlite::Error {
@@ -13535,7 +13785,9 @@ fn ensure_repository_storage_paths(
     repo_root: &Path,
     backend_plugin_id: &str,
 ) -> Result<RepositoryStoragePaths, String> {
-    let metadata_dir = if backend_plugin_id == LOCAL_FILESYSTEM_PLUGIN_ID {
+    let metadata_dir = if backend_plugin_id == LOCAL_FILESYSTEM_PLUGIN_ID
+        || netease_cache_root_path(&repo_root.to_string_lossy(), backend_plugin_id).is_some()
+    {
         migrate_legacy_meta_dir_if_needed(repo_root, backend_plugin_id)?;
         let metadata_dir = repository_meta_dir(repo_root);
         if repo_root.exists() {
@@ -13562,6 +13814,194 @@ fn ensure_repository_metadata_dirs(metadata_dir: &Path) -> Result<(), String> {
         fs::create_dir_all(metadata_dir.join(subdir)).map_err(io_error)?;
     }
     Ok(())
+}
+
+fn write_repository_metadata(
+    metadata_dir: &Path,
+    repo_id: &str,
+    name: &str,
+    repo_root: &Path,
+    backend_plugin_id: &str,
+    backend_config: &serde_json::Value,
+    created_at: Option<String>,
+) -> Result<(), String> {
+    fs::create_dir_all(metadata_dir).map_err(io_error)?;
+    let metadata = RepositoryMetadataFile {
+        repo_id: repo_id.to_string(),
+        name: name.to_string(),
+        root_path: repo_root.to_string_lossy().to_string(),
+        backend_plugin_id: backend_plugin_id.to_string(),
+        backend_config: backend_config.clone(),
+        created_at: created_at.unwrap_or_else(now_rfc3339),
+        schema_version: REPO_SCHEMA_VERSION,
+    };
+    let metadata_json = serde_json::to_string_pretty(&metadata).map_err(json_error)?;
+    fs::write(metadata_dir.join(REPO_METADATA_FILE_NAME), metadata_json).map_err(io_error)
+}
+
+fn normalize_external_cache_root(path: &str) -> Result<PathBuf, String> {
+    let cache_root = PathBuf::from(path);
+    if cache_root.exists() {
+        return canonicalize_local_path(&cache_root);
+    }
+    if let Some(parent) = cache_root.parent() {
+        if parent.exists() {
+            let parent = canonicalize_local_path(parent)?;
+            if let Some(name) = cache_root.file_name() {
+                return Ok(parent.join(name));
+            }
+        }
+    }
+    if cache_root.is_relative() {
+        return Ok(std::env::current_dir().map_err(io_error)?.join(cache_root));
+    }
+    Ok(cache_root)
+}
+
+fn merge_netease_cache_state_contents(source: &Path, target: &Path) -> Result<usize, String> {
+    fs::create_dir_all(target).map_err(io_error)?;
+    if !source.exists() {
+        return Ok(0);
+    }
+    let mut moved = 0;
+    for entry in fs::read_dir(source).map_err(io_error)? {
+        let entry = entry.map_err(io_error)?;
+        let file_name = entry.file_name();
+        let source_path = entry.path();
+        let target_path = target.join(&file_name);
+        if target_path.exists() {
+            if source_path.is_dir() && target_path.is_dir() {
+                moved += merge_netease_cache_state_contents(&source_path, &target_path)?;
+            }
+            continue;
+        }
+        fs::rename(&source_path, &target_path).map_err(io_error)?;
+        moved += 1;
+    }
+    Ok(moved)
+}
+
+fn netease_playback_cache_dir(cache_root: &Path) -> PathBuf {
+    repository_meta_dir(cache_root)
+        .join("cache")
+        .join("netease-playback")
+}
+
+fn downloader_legacy_temp_dir(service_root: &Path) -> PathBuf {
+    plugin_data_dir(service_root, "momobako.service.downloader").join("temp")
+}
+
+fn netease_downloader_cache_key(song_id: i64, level: &str, account_id: &str) -> String {
+    let mut hasher = Sha1::new();
+    hasher.update(format!("{song_id}:{level}:{account_id}"));
+    format!("{:x}", Sha1Digest::finalize(hasher))
+}
+
+fn value_as_string(value: &serde_json::Value) -> Option<String> {
+    match value {
+        serde_json::Value::String(text) => {
+            let trimmed = text.trim();
+            (!trimmed.is_empty()).then(|| trimmed.to_string())
+        }
+        serde_json::Value::Number(number) => Some(number.to_string()),
+        _ => None,
+    }
+}
+
+fn migrate_netease_playback_cache(
+    service_root: &Path,
+    repo: &RepositoryRecord,
+    cache_root: &Path,
+    migration: &mut NeteaseRepositoryCacheMigrationSummary,
+) -> Result<(), String> {
+    let legacy_temp_dir = downloader_legacy_temp_dir(service_root);
+    if !legacy_temp_dir.exists() {
+        return Ok(());
+    }
+    let account_id = repo
+        .backend_record
+        .config
+        .get("accountId")
+        .and_then(value_as_string)
+        .unwrap_or_else(|| "anonymous".to_string());
+    let default_level = repo
+        .backend_record
+        .config
+        .get("defaultLevel")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("standard");
+    let connection =
+        match self_open_repository_connection_for_cache_migration(service_root, repo, cache_root) {
+            Ok(connection) => connection,
+            Err(_) => return Ok(()),
+        };
+    let asset_map = load_asset_path_map(&connection, &repo.summary.repo_id).map_err(db_error)?;
+    let target_dir = netease_playback_cache_dir(cache_root);
+    fs::create_dir_all(&target_dir).map_err(io_error)?;
+
+    for asset in asset_map.values() {
+        if asset.provider_id.as_deref() != Some("netease-cloud-music") {
+            continue;
+        }
+        let Some(payload) = asset.source_payload.as_ref() else {
+            migration.skipped_playback_cache_files += 1;
+            continue;
+        };
+        let song_id = payload
+            .get("songId")
+            .and_then(serde_json::Value::as_i64)
+            .or_else(|| {
+                payload
+                    .get("songId")
+                    .and_then(serde_json::Value::as_str)
+                    .and_then(|value| value.parse::<i64>().ok())
+            });
+        let Some(song_id) = song_id else {
+            migration.skipped_playback_cache_files += 1;
+            continue;
+        };
+        let level = payload
+            .get("level")
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or(default_level);
+        let cache_key = netease_downloader_cache_key(song_id, level, &account_id);
+        for extension in ["mp3", "lrc", "yrc"] {
+            let source_path = legacy_temp_dir.join(format!("{cache_key}.{extension}"));
+            if !source_path.exists() {
+                continue;
+            }
+            let target_path = target_dir.join(format!("{cache_key}.{extension}"));
+            if target_path.exists() {
+                migration.skipped_playback_cache_files += 1;
+                continue;
+            }
+            match fs::rename(&source_path, &target_path) {
+                Ok(()) => migration.migrated_playback_cache_files += 1,
+                Err(_) => migration.failed_playback_cache_files += 1,
+            }
+        }
+    }
+    Ok(())
+}
+
+fn self_open_repository_connection_for_cache_migration(
+    service_root: &Path,
+    repo: &RepositoryRecord,
+    cache_root: &Path,
+) -> Result<Connection, String> {
+    let storage_paths = ensure_repository_storage_paths(
+        service_root,
+        &repo.summary.repo_id,
+        cache_root,
+        &repo.backend_record.plugin_id,
+    )?;
+    let connection = Connection::open(storage_paths.database_path).map_err(db_error)?;
+    migrate_repository_schema(&connection).map_err(db_error)?;
+    Ok(connection)
 }
 
 fn infer_repository_name(repo_root: &Path) -> String {
@@ -16779,6 +17219,187 @@ mod tests {
             .expect("existing repository should be found");
 
         assert_eq!(existing.repo_id, "netease-one");
+    }
+
+    #[test]
+    fn list_repositories_reports_netease_local_cache_statuses() {
+        let workspace = TestWorkspace::new("netease-cache-status");
+        let service_root = workspace.path("service");
+        let ready_cache = workspace.path("ready-cache");
+        let missing_cache = workspace.path("missing-cache");
+        fs::create_dir_all(&ready_cache).expect("ready cache should be created");
+        install_local_filesystem_test_plugin_archive(&service_root);
+        let state = RepositoryState::from_root(service_root.clone());
+        state
+            .ensure_initialized()
+            .expect("state should initialize registry");
+        let registry =
+            Connection::open(service_root.join(REGISTRY_FILE_NAME)).expect("registry should open");
+        let backend = RepositoryBackendRecord {
+            plugin_id: NETEASE_CLOUD_MUSIC_PLUGIN_ID.to_string(),
+            config: serde_json::json!({
+                "accountId": "123",
+                "cookie": "MUSIC_U=test"
+            }),
+        };
+        for (repo_id, name, path) in [
+            (
+                "netease-ready",
+                "网易云 Ready",
+                ready_cache.to_string_lossy().to_string(),
+            ),
+            (
+                "netease-missing",
+                "网易云 Missing",
+                missing_cache.to_string_lossy().to_string(),
+            ),
+            (
+                "netease-unconfigured",
+                "网易云 Legacy",
+                "netease-cloud-music://account/123".to_string(),
+            ),
+        ] {
+            let seed = RepositorySeed {
+                repo_id,
+                name,
+                root_path: "",
+                status: "ready",
+                assets: &[],
+            };
+            upsert_registry_entry(&registry, Path::new(&path), &seed, &backend)
+                .expect("registry entry should be stored");
+        }
+
+        let repositories = state.list_repositories().expect("repositories should list");
+        let ready = repositories
+            .iter()
+            .find(|repo| repo.repo_id == "netease-ready")
+            .expect("ready repo should exist");
+        assert_eq!(ready.status, "ready");
+        assert_eq!(
+            ready
+                .local_cache
+                .as_ref()
+                .map(|cache| cache.status.as_str()),
+            Some("ready")
+        );
+        let missing = repositories
+            .iter()
+            .find(|repo| repo.repo_id == "netease-missing")
+            .expect("missing repo should exist");
+        assert_eq!(missing.status, "missing");
+        assert_eq!(
+            missing
+                .local_cache
+                .as_ref()
+                .map(|cache| cache.status.as_str()),
+            Some("missing")
+        );
+        let unconfigured = repositories
+            .iter()
+            .find(|repo| repo.repo_id == "netease-unconfigured")
+            .expect("legacy repo should exist");
+        assert_eq!(unconfigured.status, "missing");
+        assert_eq!(
+            unconfigured
+                .local_cache
+                .as_ref()
+                .map(|cache| cache.status.as_str()),
+            Some("unconfigured")
+        );
+        assert_eq!(
+            unconfigured
+                .local_cache
+                .as_ref()
+                .and_then(|cache| cache.path.as_deref()),
+            None
+        );
+    }
+
+    #[test]
+    fn configure_netease_repository_cache_updates_registry_metadata_and_moves_state() {
+        let workspace = TestWorkspace::new("netease-cache-configure");
+        let service_root = workspace.path("service");
+        let cache_root = workspace.path("netease-cache");
+        install_local_filesystem_test_plugin_archive(&service_root);
+        let state = RepositoryState::from_root(service_root.clone());
+        state
+            .ensure_initialized()
+            .expect("state should initialize registry");
+        let registry =
+            Connection::open(service_root.join(REGISTRY_FILE_NAME)).expect("registry should open");
+        let backend = RepositoryBackendRecord {
+            plugin_id: NETEASE_CLOUD_MUSIC_PLUGIN_ID.to_string(),
+            config: serde_json::json!({
+                "accountId": "123",
+                "cookie": "MUSIC_U=test-cookie"
+            }),
+        };
+        let seed = RepositorySeed {
+            repo_id: "netease-one",
+            name: "网易云 A",
+            root_path: "",
+            status: "ready",
+            assets: &[],
+        };
+        upsert_registry_entry(
+            &registry,
+            Path::new("netease-cloud-music://account/123"),
+            &seed,
+            &backend,
+        )
+        .expect("registry entry should be stored");
+        let old_meta_dir =
+            repository_state_storage_dir(&service_root, "netease-one").join(REPO_META_DIR);
+        fs::create_dir_all(old_meta_dir.join("indexes")).expect("old index dir should be created");
+        fs::write(old_meta_dir.join("indexes").join("legacy.json"), "{}")
+            .expect("old index should be written");
+
+        let response = state
+            .configure_netease_repository_cache(NeteaseRepositoryCacheConfigureRequest {
+                repo_id: "netease-one".to_string(),
+                path: cache_root.to_string_lossy().to_string(),
+                migrate_legacy_cache: true,
+            })
+            .expect("cache should configure");
+
+        assert_eq!(response.repository.path, cache_root.to_string_lossy());
+        assert_eq!(response.repository.status, "ready");
+        assert_eq!(
+            response
+                .repository
+                .local_cache
+                .as_ref()
+                .map(|cache| cache.status.as_str()),
+            Some("ready")
+        );
+        assert!(response.migration.moved_state_files >= 1);
+        let metadata_path = cache_root.join(REPO_META_DIR).join(REPO_METADATA_FILE_NAME);
+        let metadata_raw = fs::read_to_string(metadata_path).expect("metadata should be written");
+        let metadata: RepositoryMetadataFileImport =
+            serde_json::from_str(&metadata_raw).expect("metadata should parse");
+        assert_eq!(metadata.repo_id, "netease-one");
+        assert_eq!(
+            metadata
+                .backend_config
+                .as_ref()
+                .and_then(|config| config.get("sourceUri"))
+                .and_then(serde_json::Value::as_str),
+            Some("netease-cloud-music://account/123")
+        );
+        assert_eq!(
+            metadata
+                .backend_config
+                .as_ref()
+                .and_then(|config| config.get("localCachePath"))
+                .and_then(serde_json::Value::as_str),
+            Some(cache_root.to_string_lossy().as_ref())
+        );
+        assert!(cache_root
+            .join(REPO_META_DIR)
+            .join("indexes")
+            .join("legacy.json")
+            .is_file());
     }
 
     #[test]

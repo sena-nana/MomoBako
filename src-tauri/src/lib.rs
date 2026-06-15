@@ -24,6 +24,7 @@ use repository_service::{
     FileCopyRequest, FileCreateRequest, FileDeleteRequest, FileImportRequest, FileMoveRequest,
     FilePreviewSourceResponse, FileReadRequest, FileRenameRequest, HardlinkCandidateResponse,
     HardlinkConfirmRequest, HardlinkConfirmResponse, MetadataUpdateRequest, MetadataUpdateResponse,
+    NeteaseRepositoryCacheConfigureRequest, NeteaseRepositoryCacheConfigureResponse,
     PlaylistDetail, PlaylistItemRemoveRequest, PlaylistItemsAddRequest,
     PlaylistItemsByPathsAddRequest, PlaylistItemsOrderRequest, PlaylistMembershipIndex,
     PlaylistMembershipRequest, PlaylistMembershipSnapshot, PlaylistMutationRequest,
@@ -436,6 +437,7 @@ fn execute_playlist_download_with_progress(
         .clone()
         .unwrap_or_else(|| "standard".to_string());
     let default_source_payload = request.source_payload.clone();
+    let managed_cache_root = request.managed_cache_root.clone();
     let destination = request.destination.clone();
 
     emit(DownloaderPlaylistProgressEvent {
@@ -463,6 +465,7 @@ fn execute_playlist_download_with_progress(
             "songId": track.song_id,
             "level": default_level,
             "destination": destination,
+            "managedCacheRoot": managed_cache_root.clone(),
             "sourcePayload": source_payload,
         });
         match repository_service::call_downloader_download_track_package(service_root, payload) {
@@ -752,6 +755,21 @@ async fn update_repository_backend_config(
     let response = runtime
         .run_repository_collection_write(move |state| {
             state.update_repository_backend_config(request)
+        })
+        .await?;
+    refresh_thumbnail_asset_scope(&app, &runtime).await?;
+    Ok(response)
+}
+
+#[tauri::command]
+async fn configure_netease_repository_cache(
+    request: NeteaseRepositoryCacheConfigureRequest,
+    app: AppHandle,
+    runtime: tauri::State<'_, RepositoryRuntime>,
+) -> Result<NeteaseRepositoryCacheConfigureResponse, String> {
+    let response = runtime
+        .run_repository_collection_write(move |state| {
+            state.configure_netease_repository_cache(request)
         })
         .await?;
     refresh_thumbnail_asset_scope(&app, &runtime).await?;
@@ -1069,6 +1087,7 @@ pub fn run() {
             delete_repository,
             relocate_repository,
             update_repository_backend_config,
+            configure_netease_repository_cache,
             export_repository,
             sync_repository,
             list_hardlink_candidates,
@@ -1154,6 +1173,7 @@ mod tests {
                 "playlistId": 9001,
                 "accountId": "123456"
             })),
+            managed_cache_root: Some("C:/Mock/NeteaseCache".to_string()),
             level: Some("lossless".to_string()),
         };
 
@@ -1178,6 +1198,10 @@ mod tests {
         assert_eq!(calls.len(), 2);
         assert_eq!(calls[0]["songId"], serde_json::json!(2001));
         assert_eq!(calls[0]["level"], serde_json::json!("lossless"));
+        assert_eq!(
+            calls[0]["managedCacheRoot"],
+            serde_json::json!("C:/Mock/NeteaseCache")
+        );
         assert_eq!(
             calls[0]["sourcePayload"]["songName"],
             serde_json::json!("稻香")

@@ -102,6 +102,19 @@ function buildDownloadDestinationPayload(target) {
   };
 }
 
+function managedCacheRootFromContext(context) {
+  const cache = context.repository?.localCache;
+  if (cache?.status === "ready" && typeof cache.path === "string" && cache.path.trim()) {
+    return cache.path.trim();
+  }
+  return null;
+}
+
+function cacheUnavailable(context) {
+  return context.repository?.backend?.pluginId === SOURCE_PLUGIN_ID
+    && context.repository?.localCache?.status !== "ready";
+}
+
 function sanitizeFileName(value) {
   const normalized = String(value ?? "")
     .replace(/[<>:"/\\|?*]/g, "_")
@@ -219,7 +232,7 @@ function playlistTrackDestination(target, playlistName) {
   };
 }
 
-async function downloadTrackWithProgress(ctx, entry, target, label) {
+async function downloadTrackWithProgress(ctx, context, entry, target, label) {
   const progressId = ctx.startOperationProgress(label, "准备下载歌曲", { initial: 12 });
   try {
     ctx.updateOperationProgress(progressId, {
@@ -231,6 +244,7 @@ async function downloadTrackWithProgress(ctx, entry, target, label) {
       songId: songIdFromEntry(entry),
       level: entry.sourcePayload?.level ?? "standard",
       destination: buildDownloadDestinationPayload(target),
+      managedCacheRoot: managedCacheRootFromContext(context),
       sourcePayload: entry.sourcePayload ?? {},
     });
     if (typeof target !== "string") {
@@ -271,6 +285,7 @@ async function downloadPlaylistWithProgress(ctx, context, target) {
         })
         .filter(Boolean),
       destination,
+      managedCacheRoot: managedCacheRootFromContext(context),
       sourcePayload: context.entry.sourcePayload ?? {},
       level: context.entry.sourcePayload?.level ?? "standard",
     }, (event) => {
@@ -320,6 +335,33 @@ async function downloadPlaylistWithProgress(ctx, context, target) {
   }
 }
 
+async function createPlaylistFromNeteaseFolder(ctx, context) {
+  const playlistId = playlistIdFromEntry(context.entry);
+  if (!Number.isFinite(playlistId)) return;
+  const targetPlaylistId = `netease-cloud-music-${playlistId}`;
+  const playlistName = context.entry.sourcePayload?.playlistName ?? context.entry.name;
+  const existing = await ctx.invokeCommand("list_playlists", { repoId: context.repoId });
+  const found = (existing ?? []).find((playlist) => playlist.playlistId === targetPlaylistId);
+  if (!found) {
+    await ctx.invokeCommand("create_playlist", {
+      request: {
+        repoId: context.repoId,
+        playlistId: targetPlaylistId,
+        name: playlistName,
+        playerTypeId: "momobako.playlist.audio-sequence",
+      },
+    });
+  }
+  await ctx.invokeCommand("add_playlist_items_by_paths", {
+    request: {
+      repoId: context.repoId,
+      playlistId: targetPlaylistId,
+      paths: [context.entry.path],
+    },
+  });
+  await context.refreshRepo();
+}
+
 function register(ctx) {
   ctx.registerSettingsPage({
     component: createSettingsPage(ctx),
@@ -347,7 +389,9 @@ function register(ctx) {
     matchEntry: isNeteaseEntry,
     getEntryActions(context) {
       const disabled = loginExpired(context.entry);
-      const disabledLabel = "登录已失效，请重新登录";
+      const missingCache = cacheUnavailable(context);
+      const disabledLabel = disabled ? "登录已失效，请重新登录" : "请先指定网易云缓存目录";
+      const localWriteDisabled = disabled || missingCache;
       if (isTrackEntry(context.entry)) {
         return [
           {
@@ -360,33 +404,34 @@ function register(ctx) {
               await ensureLoginReady(ctx, context.entry);
               const folder = await chooseLocalFolder(context);
               if (!folder) return;
-              await downloadTrackWithProgress(ctx, context.entry, folder, "下载歌曲到本地");
+              await downloadTrackWithProgress(ctx, context, context.entry, folder, "下载歌曲到本地");
             },
           },
           {
             id: "netease-download-repository",
             label: "下载到其他资源库",
-            disabled,
-            confirmLabel: disabled ? disabledLabel : undefined,
+            disabled: localWriteDisabled,
+            confirmLabel: localWriteDisabled ? disabledLabel : undefined,
             onSelect: async () => {
-              if (disabled) return;
+              if (localWriteDisabled) return;
               await ensureLoginReady(ctx, context.entry);
               const repo = await chooseRepository(context);
               if (!repo) return;
-              await downloadTrackWithProgress(ctx, context.entry, repo, "下载歌曲到资源库");
+              await downloadTrackWithProgress(ctx, context, context.entry, repo, "下载歌曲到资源库");
               await syncDownloadedRepository(ctx, repo, context);
             },
           },
           {
             id: "netease-clear-playback-cache",
             label: "重新获取播放资源",
-            disabled,
-            confirmLabel: disabled ? disabledLabel : undefined,
+            disabled: localWriteDisabled,
+            confirmLabel: localWriteDisabled ? disabledLabel : undefined,
             onSelect: async () => {
-              if (disabled) return;
+              if (localWriteDisabled) return;
               await callDownloader(ctx, "downloader.clearTrackCache", {
                 songId: songIdFromEntry(context.entry),
                 level: context.entry.sourcePayload?.level ?? "standard",
+                managedCacheRoot: managedCacheRootFromContext(context),
                 sourcePayload: context.entry.sourcePayload ?? {},
               });
             },
@@ -396,6 +441,17 @@ function register(ctx) {
 
       if (isPlaylistFolder(context.entry)) {
         return [
+          {
+            id: "netease-playlist-create-playlist",
+            label: "创建播放集",
+            disabled: localWriteDisabled,
+            confirmLabel: localWriteDisabled ? disabledLabel : undefined,
+            onSelect: async () => {
+              if (localWriteDisabled) return;
+              await ensureLoginReady(ctx, context.entry);
+              await createPlaylistFromNeteaseFolder(ctx, context);
+            },
+          },
           {
             id: "netease-playlist-download-local",
             label: "下载歌单到本地",
@@ -412,10 +468,10 @@ function register(ctx) {
           {
             id: "netease-playlist-download-repository",
             label: "下载歌单到其他资源库",
-            disabled,
-            confirmLabel: disabled ? disabledLabel : undefined,
+            disabled: localWriteDisabled,
+            confirmLabel: localWriteDisabled ? disabledLabel : undefined,
             onSelect: async () => {
-              if (disabled) return;
+              if (localWriteDisabled) return;
               await ensureLoginReady(ctx, context.entry);
               const repo = await chooseRepository(context);
               if (!repo) return;

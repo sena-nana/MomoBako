@@ -1,8 +1,31 @@
-import { fireEvent, render, screen, within } from "@testing-library/vue";
-import { describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/vue";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { h } from "vue";
-import FilePreviewPane from "../src/pages/workspace/FilePreviewPane.vue";
 import type { FileBrowserEntry } from "../src/types/repository";
+
+const playlistPlayerMock = vi.hoisted(() => ({
+  activeRepoId: null as string | null,
+  currentItem: null as { path: string } | null,
+  activeFileClass: null as string | null,
+  isPlaying: false,
+  playEntry: vi.fn(),
+  attachVisibleMountTarget: vi.fn(),
+  setPlaybackState: vi.fn(),
+}));
+
+vi.mock("../src/composables/usePlaylistPlayer", () => ({
+  usePlaylistPlayer: () => ({
+    activeRepoId: { get value() { return playlistPlayerMock.activeRepoId; } },
+    currentItem: { get value() { return playlistPlayerMock.currentItem; } },
+    activeFileClass: { get value() { return playlistPlayerMock.activeFileClass; } },
+    isPlaying: { get value() { return playlistPlayerMock.isPlaying; } },
+    playEntry: playlistPlayerMock.playEntry,
+    attachVisibleMountTarget: playlistPlayerMock.attachVisibleMountTarget,
+    setPlaybackState: playlistPlayerMock.setPlaybackState,
+  }),
+}));
+
+import FilePreviewPane from "../src/pages/workspace/FilePreviewPane.vue";
 
 function asmrEntry(path: string, trackTitle: string): FileBrowserEntry {
   return {
@@ -32,6 +55,8 @@ function asmrEntry(path: string, trackTitle: string): FileBrowserEntry {
 function renderPane(options: {
   entry?: FileBrowserEntry;
   playlistEntries?: FileBrowserEntry[];
+  isAudioEntry?: (entry: FileBrowserEntry) => boolean;
+  isVideoEntry?: (entry: FileBrowserEntry) => boolean;
 } = {}) {
   const entry = options.entry ?? asmrEntry("Voice/RJ123456 Rain Voice/01.mp3", "01 intro");
   const secondEntry = asmrEntry("Voice/RJ123456 Rain Voice/02.mp3", "02 rain");
@@ -46,8 +71,8 @@ function renderPane(options: {
       },
       repoId: "repo-main-001",
       thumbnailSrc: () => null,
-      isVideoEntry: () => false,
-      isAudioEntry: () => true,
+      isVideoEntry: options.isVideoEntry ?? (() => false),
+      isAudioEntry: options.isAudioEntry ?? (() => true),
       hardlinkStateLabel: () => "",
       statusLabel: (status: string) => status,
       isSavingMetadata: false,
@@ -81,6 +106,16 @@ function renderPane(options: {
   });
 }
 
+beforeEach(() => {
+  playlistPlayerMock.activeRepoId = null;
+  playlistPlayerMock.currentItem = null;
+  playlistPlayerMock.activeFileClass = null;
+  playlistPlayerMock.isPlaying = false;
+  playlistPlayerMock.playEntry.mockReset();
+  playlistPlayerMock.attachVisibleMountTarget.mockReset();
+  playlistPlayerMock.setPlaybackState.mockReset();
+});
+
 describe("FilePreviewPane library extensions", () => {
   it("渲染库扩展预览面板并转发预览回调", async () => {
     const { emitted } = renderPane();
@@ -91,5 +126,63 @@ describe("FilePreviewPane library extensions", () => {
     expect(emitted("preview")?.[0][0]).toMatchObject({
       path: "Voice/RJ123456 Rain Voice/02.mp3",
     });
+  });
+});
+
+describe("FilePreviewPane unified media playback", () => {
+  it("音频预览进入后直接调用统一播放且不显示本地播放按钮", async () => {
+    const entry = asmrEntry("Voice/RJ123456 Rain Voice/01.mp3", "01 intro");
+    renderPane({ entry });
+
+    expect(screen.queryByRole("button", { name: "播放" })).not.toBeInTheDocument();
+    expect(screen.getByLabelText("当前播放画面")).toBeInTheDocument();
+    expect(document.querySelector(".files-preview-page__preview input[type='range']")).toBeNull();
+    await waitFor(() => {
+      expect(playlistPlayerMock.playEntry).toHaveBeenCalledWith("repo-main-001", entry);
+    });
+    expect(playlistPlayerMock.playEntry).toHaveBeenCalledTimes(1);
+    expect(playlistPlayerMock.attachVisibleMountTarget).toHaveBeenLastCalledWith(expect.any(HTMLElement));
+  });
+
+  it("当前条目已在统一播放器中播放时只挂载画面不重复插入", async () => {
+    const entry = asmrEntry("Voice/RJ123456 Rain Voice/01.mp3", "01 intro");
+    playlistPlayerMock.activeRepoId = "repo-main-001";
+    playlistPlayerMock.currentItem = { path: entry.path };
+
+    renderPane({ entry });
+
+    expect(screen.getByLabelText("当前播放画面")).toBeInTheDocument();
+    expect(playlistPlayerMock.playEntry).not.toHaveBeenCalled();
+    await waitFor(() => {
+      expect(playlistPlayerMock.attachVisibleMountTarget).toHaveBeenLastCalledWith(expect.any(HTMLElement));
+    });
+  });
+
+  it("预览页卸载时只解绑可见挂载点", async () => {
+    const { unmount } = renderPane();
+    await waitFor(() => {
+      expect(playlistPlayerMock.attachVisibleMountTarget).toHaveBeenLastCalledWith(expect.any(HTMLElement));
+    });
+
+    unmount();
+
+    expect(playlistPlayerMock.attachVisibleMountTarget).toHaveBeenLastCalledWith(null);
+    expect(playlistPlayerMock.setPlaybackState).not.toHaveBeenCalled();
+  });
+
+  it("切换到新的音频预览会再次进入统一播放", async () => {
+    const firstEntry = asmrEntry("Voice/RJ123456 Rain Voice/01.mp3", "01 intro");
+    const secondEntry = asmrEntry("Voice/RJ123456 Rain Voice/02.mp3", "02 rain");
+    const view = renderPane({ entry: firstEntry });
+    await waitFor(() => {
+      expect(playlistPlayerMock.playEntry).toHaveBeenCalledWith("repo-main-001", firstEntry);
+    });
+
+    await view.rerender({ entry: secondEntry });
+
+    await waitFor(() => {
+      expect(playlistPlayerMock.playEntry).toHaveBeenCalledWith("repo-main-001", secondEntry);
+    });
+    expect(playlistPlayerMock.playEntry).toHaveBeenCalledTimes(2);
   });
 });

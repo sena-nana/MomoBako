@@ -501,7 +501,7 @@ export function register(ctx) {
       element.className = tagName === "video"
         ? "media-preview__video media-playlist-runtime__media"
         : "media-preview__audio-control media-playlist-runtime__media";
-      element.controls = true;
+      element.controls = false;
       element.preload = "metadata";
       element.src = sourceUrl;
       if (tagName === "video") {

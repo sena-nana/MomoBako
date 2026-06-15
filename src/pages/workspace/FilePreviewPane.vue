@@ -38,10 +38,14 @@ const emit = defineEmits<{
 
 const playlistPlayer = usePlaylistPlayer();
 const playerPreviewMount = ref<HTMLElement | null>(null);
+const lastAutoPlayKey = ref<string | null>(null);
 const isCurrentPlaylistItem = computed(() => (
   playlistPlayer.activeRepoId.value === props.repoId
   && playlistPlayer.currentItem.value?.path === props.entry.path
 ));
+const isUnifiedPlayableMedia = computed(() => props.isAudioEntry(props.entry) || props.isVideoEntry(props.entry));
+const shouldUsePlayerMount = computed(() => isUnifiedPlayableMedia.value || isCurrentPlaylistItem.value);
+const previewPlaybackKey = computed(() => `${props.repoId}:${props.entry.assetId ?? props.entry.path}`);
 
 function handlePreviewMediaPlay(event: Event) {
   if (isCurrentPlaylistItem.value) return;
@@ -51,9 +55,24 @@ function handlePreviewMediaPlay(event: Event) {
 }
 
 watch(
-  [isCurrentPlaylistItem, playerPreviewMount],
-  ([active, element]) => {
-    playlistPlayer.attachVisibleMountTarget(active ? element : null);
+  [shouldUsePlayerMount, playerPreviewMount],
+  ([useMount, element]) => {
+    playlistPlayer.attachVisibleMountTarget(useMount ? element : null);
+  },
+  { immediate: true },
+);
+
+watch(
+  [isUnifiedPlayableMedia, playerPreviewMount, isCurrentPlaylistItem, previewPlaybackKey],
+  ([playable, element, current, playKey]) => {
+    if (!playable || !element) return;
+    if (current) {
+      lastAutoPlayKey.value = playKey;
+      return;
+    }
+    if (lastAutoPlayKey.value === playKey) return;
+    lastAutoPlayKey.value = playKey;
+    void playlistPlayer.playEntry(props.repoId, props.entry);
   },
   { immediate: true },
 );
@@ -90,18 +109,18 @@ onBeforeUnmount(() => {
     <div class="files-preview-page__preview-shell">
       <div
         class="files-preview-page__preview"
-        :class="{ 'files-preview-page__preview--plugin': plugin }"
+        :class="{ 'files-preview-page__preview--plugin': plugin && !shouldUsePlayerMount }"
         @play.capture="handlePreviewMediaPlay"
       >
         <div
-          v-if="isCurrentPlaylistItem"
+          v-if="shouldUsePlayerMount"
           ref="playerPreviewMount"
           class="files-preview-page__player-mount"
           aria-label="当前播放画面"
         ></div>
         <component
           :is="plugin.component"
-          v-else-if="plugin"
+          v-else-if="plugin && !shouldUsePlayerMount"
           :entry="entry"
           :repo-id="repoId"
           :save-metadata="saveMetadata"

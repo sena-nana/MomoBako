@@ -20,6 +20,7 @@ defineProps<{
   mode: RepositoryPopoverMode;
   neteaseLoginMessage: string;
   neteaseQrSession: { unikey?: string; qrurl?: string; qrimg?: string | null } | null;
+  neteaseCachePath: string;
   position: RepositoryPopoverPosition;
   repositories: RepositorySummary[];
   selectedBackend: RepositoryBackendOption | null;
@@ -34,6 +35,7 @@ const modeModel = defineModel<RepositoryPopoverMode>("mode", { required: true })
 
 const emit = defineEmits<{
   close: [];
+  chooseNeteaseCacheFolder: [];
   createNeteaseQrSession: [];
   deleteActive: [];
   pollNeteaseQrSession: [];
@@ -196,7 +198,17 @@ const emit = defineEmits<{
 
           <div class="repository-add-popover__body">
             <p class="repository-add-popover__summary">
-              创建资源库时登录网易云账号。每个账号对应一个资源库，成功后会自动扫描创建的歌单和收藏的歌单。
+              创建资源库时登录网易云账号，并指定本地缓存目录。每个账号对应一个资源库，成功后会自动扫描创建的歌单和收藏的歌单。
+            </p>
+
+            <label class="repository-add-popover__field">
+              <span>本地缓存目录</span>
+              <button type="button" class="ghost" :disabled="isSubmittingBackend" @click="emit('chooseNeteaseCacheFolder')">
+                {{ neteaseCachePath ? "重新选择目录" : "选择目录" }}
+              </button>
+            </label>
+            <p v-if="neteaseCachePath" class="repository-add-popover__note">
+              {{ neteaseCachePath }}
             </p>
 
             <div v-if="neteaseQrSession?.qrimg" class="file-metadata-card__candidate-import repository-add-popover__qr">
@@ -223,7 +235,7 @@ const emit = defineEmits<{
             <button type="button" class="ghost" :disabled="isSubmittingBackend" @click="emit('createNeteaseQrSession')">
               重新生成二维码
             </button>
-            <button type="button" class="primary" :disabled="isSubmittingBackend || !neteaseQrSession?.unikey" @click="emit('pollNeteaseQrSession')">
+            <button type="button" class="primary" :disabled="isSubmittingBackend || !neteaseQrSession?.unikey || !neteaseCachePath" @click="emit('pollNeteaseQrSession')">
               <LoaderCircle v-if="isSubmittingBackend" class="spin" :size="13" aria-hidden="true" />
               {{ isSubmittingBackend ? "检查中" : "检查扫码结果" }}
             </button>

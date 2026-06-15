@@ -27,6 +27,8 @@ import type {
   HardlinkConfirmResponse,
   MetadataUpdateRequest,
   MetadataUpdateResponse,
+  NeteaseRepositoryCacheConfigureRequest,
+  NeteaseRepositoryCacheConfigureResponse,
   PluginCallRequest,
   PluginCallResponse,
   PluginArchiveReadRequest,
@@ -313,6 +315,10 @@ export function relocateRepository(request: RepositoryRelocateRequest) {
 
 export function updateRepositoryBackendConfig(request: RepositoryBackendConfigUpdateRequest) {
   return invoke<RepositoryMutationResponse>("update_repository_backend_config", { request });
+}
+
+export function configureNeteaseRepositoryCache(request: NeteaseRepositoryCacheConfigureRequest) {
+  return invoke<NeteaseRepositoryCacheConfigureResponse>("configure_netease_repository_cache", { request });
 }
 
 export function exportRepository(request: RepositoryExportRequest) {
