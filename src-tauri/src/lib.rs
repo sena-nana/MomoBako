@@ -30,7 +30,8 @@ use repository_service::{
     PlaylistMembershipRequest, PlaylistMembershipSnapshot, PlaylistMutationRequest,
     PlaylistMutationResponse, PlaylistSummary, PluginArchiveReadRequest, PluginArchiveTextResponse,
     PluginCallRequest, PluginCallResult, PluginConfigDeleteRequest, PluginConfigSetRequest,
-    PluginConfigSnapshot, PluginDataDirectoryResponse, PluginEnabledRequest, PluginInstallRequest,
+    PluginConfigSnapshot, PluginDataDirectoryResponse, PluginEnabledRequest,
+    PluginHookExecutionListRequest, PluginHookExecutionListResponse, PluginInstallRequest,
     PluginManifest, PluginMutationResponse, RepositoryAction, RepositoryActionEnabledRequest,
     RepositoryActionMutationResponse, RepositoryActionRunRequest, RepositoryActionRunResponse,
     RepositoryExportRequest, RepositoryExportResponse, RepositoryFolderRequest,
@@ -854,6 +855,16 @@ async fn list_plugins(
 }
 
 #[tauri::command]
+async fn list_plugin_hook_executions(
+    request: Option<PluginHookExecutionListRequest>,
+    runtime: tauri::State<'_, RepositoryRuntime>,
+) -> Result<PluginHookExecutionListResponse, String> {
+    runtime
+        .run_read(move |state| state.list_plugin_hook_executions(request.unwrap_or_default()))
+        .await
+}
+
+#[tauri::command]
 async fn set_plugin_enabled(
     request: PluginEnabledRequest,
     runtime: tauri::State<'_, RepositoryRuntime>,
@@ -1096,6 +1107,7 @@ pub fn run() {
             undo_last_revision,
             redo_last_revision,
             list_plugins,
+            list_plugin_hook_executions,
             set_plugin_enabled,
             delete_plugin,
             install_plugin_from_archive,
