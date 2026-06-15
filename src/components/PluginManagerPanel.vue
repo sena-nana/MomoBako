@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, inject, ref, watch } from "vue";
 import { open } from "@tauri-apps/plugin-dialog";
 import { FolderOpen, Power, RefreshCw, Settings, Trash2, Upload } from "lucide-vue-next";
+import { routeLocationKey, type RouteLocationNormalizedLoaded } from "vue-router";
 import ConfirmDialog from "./ConfirmDialog.vue";
 import {
   useWorkspaceProgress,
@@ -51,6 +52,7 @@ const {
   isManagingPlugins,
   error,
 } = useWorkspaceProgress();
+const route = inject(routeLocationKey, null) as RouteLocationNormalizedLoaded | null;
 
 const keyword = ref("");
 const actionError = ref("");
@@ -400,6 +402,16 @@ async function openPluginSettings(plugin: PluginManifest) {
   }
 }
 
+async function openPluginSettingsById(pluginId: string | null | undefined) {
+  if (!pluginId) return;
+  const plugin = plugins.value.find((item) => item.pluginId === pluginId);
+  if (!plugin) return;
+  if (activeSettingsPluginId.value === plugin.pluginId && pluginConfigSnapshots.value[plugin.pluginId]) {
+    return;
+  }
+  await openPluginSettings(plugin);
+}
+
 async function openPluginDataDirectory(plugin: PluginManifest) {
   resetActionState();
   const response = await openPluginDataDirectoryInWorkspace(plugin.pluginId);
@@ -492,6 +504,15 @@ async function confirmDeletePlugin() {
     actionError.value = error.value ?? "插件删除失败。";
   }
 }
+
+watch(
+  () => route?.query.plugin,
+  (pluginId) => {
+    if (typeof pluginId !== "string" || !pluginId.trim()) return;
+    void openPluginSettingsById(pluginId);
+  },
+  { immediate: true },
+);
 </script>
 
 <template>

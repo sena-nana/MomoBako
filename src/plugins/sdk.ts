@@ -13,28 +13,39 @@ import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { save as saveDialog } from "@tauri-apps/plugin-dialog";
 import type {
   FileBrowserEntry,
+  EntryPlaybackProgressEvent,
   PlaylistItem,
   PlaylistPlayerContribution,
   PluginConfigSnapshot,
   PluginManifest,
   PluginSettingsPageContribution,
+  RepositorySummary,
   SearchSort,
   ToolPageContribution,
 } from "../types/repository";
 import {
   callPlugin,
   deletePluginConfigValue,
+  downloadPlaylistWithProgress,
   ensureThumbnail,
   getApiDesignSnapshot,
   getExternalApiConnectionStatus,
   getPluginConfig,
   getPluginDataDirectory,
+  prepareEntryPlaybackSource,
+  prepareEntryPlaybackSourceWithProgress,
   preparePreviewFileSource,
   readFile,
   readPluginArchiveText,
   setPluginConfigValue,
   writeBinaryFile,
 } from "../services/repositoryApi";
+import {
+  cancelOperationProgress,
+  finishOperationProgress,
+  startOperationProgress,
+  updateOperationProgress,
+} from "../composables/workspace/tasks";
 
 export type PreviewPluginFileAction = {
   id: string;
@@ -44,6 +55,57 @@ export type PreviewPluginFileAction = {
   danger?: boolean;
   confirmLabel?: string;
   onSelect: () => Promise<void> | void;
+};
+
+export type EntryActionDialogRequest =
+  | {
+      kind: "directory";
+      title?: string;
+      defaultPath?: string | null;
+    }
+  | {
+      kind: "repository";
+      title?: string;
+      requireReady?: boolean;
+      requireWritable?: boolean;
+      backendPluginIds?: string[];
+      backendKinds?: string[];
+    };
+
+export type EntryActionDialogResultMap = {
+  directory: string | null;
+  repository: RepositorySummary | null;
+};
+
+export type EntryAction = {
+  id: string;
+  label: string;
+  icon?: Component;
+  disabled?: boolean;
+  danger?: boolean;
+  confirmLabel?: string;
+  onSelect: () => Promise<void> | void;
+};
+
+export type EntryActionContext = {
+  repoId: string;
+  entry: FileBrowserEntry;
+  entries: FileBrowserEntry[];
+  refreshRepo: () => Promise<void>;
+  openDialog: <TKind extends keyof EntryActionDialogResultMap>(
+    request: Extract<EntryActionDialogRequest, { kind: TKind }>,
+  ) => Promise<EntryActionDialogResultMap[TKind]>;
+};
+
+export type EntryActionProviderDefinition = {
+  matchEntry?: (entry: FileBrowserEntry) => boolean;
+  getEntryActions: (context: EntryActionContext) => EntryAction[];
+};
+
+export type RegisteredEntryActionProvider = EntryActionProviderDefinition & {
+  pluginId: string;
+  pluginName: string;
+  manifest?: PluginManifest;
 };
 
 export type FilePreviewPlugin = {
@@ -64,7 +126,13 @@ export type FilePreviewPlugin = {
 };
 
 export type PlaylistPlayerRuntimeEvent =
-  | { type: "state"; canPlay?: boolean; isPlaying?: boolean }
+  | {
+      type: "state";
+      canPlay?: boolean;
+      isPlaying?: boolean;
+      loading?: boolean;
+      progress?: EntryPlaybackProgressEvent;
+    }
   | { type: "time"; currentTimeMs: number; durationMs?: number }
   | { type: "ended" }
   | { type: "error"; message: string };
@@ -196,6 +264,9 @@ export type FrontendPluginContext = {
   registerSettingsPage: (definition: PluginSettingsPageContribution & {
     component: Component;
   }) => RegisteredPluginSettingsPage;
+  registerEntryActionProvider: (
+    definition: EntryActionProviderDefinition,
+  ) => RegisteredEntryActionProvider;
   defineLazyComponent: <T extends Component | DefineComponent>(
     loader: () => Promise<T | { default: T }>,
   ) => Component;
@@ -208,6 +279,9 @@ export type FrontendPluginContext = {
   deletePluginConfigValue: (key: string) => Promise<PluginConfigSnapshot>;
   invokeCommand: typeof invoke;
   callPlugin: typeof callPlugin;
+  downloadPlaylistWithProgress: typeof downloadPlaylistWithProgress;
+  prepareEntryPlaybackSource: typeof prepareEntryPlaybackSource;
+  prepareEntryPlaybackSourceWithProgress: typeof prepareEntryPlaybackSourceWithProgress;
   preparePreviewFileSource: typeof preparePreviewFileSource;
   readFile: typeof readFile;
   ensureThumbnail: typeof ensureThumbnail;
@@ -220,6 +294,10 @@ export type FrontendPluginContext = {
   writeBinaryFile: typeof writeBinaryFile;
   saveFileDialog: typeof saveDialog;
   fileSrc: typeof convertFileSrc;
+  startOperationProgress: typeof startOperationProgress;
+  updateOperationProgress: typeof updateOperationProgress;
+  finishOperationProgress: typeof finishOperationProgress;
+  cancelOperationProgress: typeof cancelOperationProgress;
   emitPluginEvent: <T = unknown>(eventName: string, payload: T) => void;
   onPluginEvent: <T = unknown>(eventName: string, handler: PluginEventHandler<T>) => () => void;
   vue: {
@@ -238,6 +316,7 @@ const playlistPlayerRegistry = new Map<string, RegisteredPlaylistPlayer>();
 const libraryExtensionRegistry = new Map<string, RegisteredLibraryExtension>();
 const toolPageRegistry = new Map<string, RegisteredToolPage>();
 const settingsPageRegistry = new Map<string, RegisteredPluginSettingsPage>();
+const entryActionProviderRegistry = new Map<string, RegisteredEntryActionProvider>();
 const pluginEventHandlers = new Map<string, Set<PluginEventHandler>>();
 const loadedPluginModules = new Map<string, Promise<void>>();
 const pluginModuleUrls = new Map<string, string>();
@@ -298,6 +377,12 @@ export function registerPluginSettingsPage(page: RegisteredPluginSettingsPage) {
   return page;
 }
 
+export function registerEntryActionProvider(provider: RegisteredEntryActionProvider) {
+  entryActionProviderRegistry.set(`${provider.pluginId}:${entryActionProviderRegistry.size}`, provider);
+  bumpFrontendPluginRegistry();
+  return provider;
+}
+
 export function listRegisteredPreviewPlugins() {
   return [...previewPluginRegistry.values()];
 }
@@ -353,6 +438,17 @@ export function getRegisteredPluginSettingsPage(pluginId: string | null | undefi
   const page = settingsPageRegistry.get(pluginId);
   if (!page) return null;
   return (page.manifest?.enabled ?? true) ? page : null;
+}
+
+export function listRegisteredEntryActionProviders() {
+  return [...entryActionProviderRegistry.values()]
+    .filter((provider) => provider.manifest?.enabled ?? true);
+}
+
+export function getRegisteredEntryActions(context: EntryActionContext) {
+  return listRegisteredEntryActionProviders()
+    .filter((provider) => provider.matchEntry?.(context.entry) ?? true)
+    .flatMap((provider) => provider.getEntryActions(context));
 }
 
 export function emitPluginEvent<T = unknown>(eventName: string, payload: T) {
@@ -441,6 +537,16 @@ function createFrontendPluginContext(manifest: PluginManifest): FrontendPluginCo
       registerPluginSettingsPage(page);
       return page;
     },
+    registerEntryActionProvider(definition) {
+      const provider: RegisteredEntryActionProvider = {
+        ...definition,
+        pluginId: manifest.pluginId,
+        pluginName: manifest.name,
+        manifest,
+      };
+      registerEntryActionProvider(provider);
+      return provider;
+    },
     defineLazyComponent(loader) {
       return defineAsyncComponent(loader);
     },
@@ -463,6 +569,9 @@ function createFrontendPluginContext(manifest: PluginManifest): FrontendPluginCo
     },
     invokeCommand: invoke,
     callPlugin,
+    downloadPlaylistWithProgress,
+    prepareEntryPlaybackSource,
+    prepareEntryPlaybackSourceWithProgress,
     preparePreviewFileSource,
     readFile,
     ensureThumbnail,
@@ -478,6 +587,10 @@ function createFrontendPluginContext(manifest: PluginManifest): FrontendPluginCo
     writeBinaryFile,
     saveFileDialog: saveDialog,
     fileSrc: convertFileSrc,
+    startOperationProgress,
+    updateOperationProgress,
+    finishOperationProgress,
+    cancelOperationProgress,
     emitPluginEvent,
     onPluginEvent,
     vue: {
@@ -551,6 +664,15 @@ export async function syncRegisteredPreviewPluginManifests(manifests: PluginMani
     }
     page.manifest = manifest;
   }
+  for (const [providerId, provider] of entryActionProviderRegistry) {
+    const manifest = manifestMap.get(provider.pluginId);
+    if (!manifest) {
+      entryActionProviderRegistry.delete(providerId);
+      loadedPluginModules.delete(provider.pluginId);
+      continue;
+    }
+    provider.manifest = manifest;
+  }
 
   for (const manifest of manifests) {
     if (manifest.sdk !== "frontend" || manifest.runtime !== "vue-module") continue;
@@ -561,6 +683,7 @@ export async function syncRegisteredPreviewPluginManifests(manifests: PluginMani
       || [...libraryExtensionRegistry.values()].some((extension) => extension.pluginId === manifest.pluginId)
       || [...toolPageRegistry.values()].some((page) => page.pluginId === manifest.pluginId)
       || settingsPageRegistry.has(manifest.pluginId)
+      || [...entryActionProviderRegistry.values()].some((provider) => provider.pluginId === manifest.pluginId)
     ) {
       const plugin = previewPluginRegistry.get(manifest.pluginId);
       if (plugin) plugin.manifest = manifest;
@@ -581,6 +704,11 @@ export async function syncRegisteredPreviewPluginManifests(manifests: PluginMani
       }
       const settingsPage = settingsPageRegistry.get(manifest.pluginId);
       if (settingsPage) settingsPage.manifest = manifest;
+      for (const provider of entryActionProviderRegistry.values()) {
+        if (provider.pluginId === manifest.pluginId) {
+          provider.manifest = manifest;
+        }
+      }
       continue;
     }
     if (!loadedPluginModules.has(manifest.pluginId)) {
@@ -613,6 +741,7 @@ export function clearPreviewPluginRegistry() {
   libraryExtensionRegistry.clear();
   toolPageRegistry.clear();
   settingsPageRegistry.clear();
+  entryActionProviderRegistry.clear();
   pluginEventHandlers.clear();
   loadedPluginModules.clear();
   pluginModuleUrls.clear();

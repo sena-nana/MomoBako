@@ -44,11 +44,19 @@
   - Local filesystem repositories return `status: "ready"` when the registered path exists and `status: "missing"` when the local directory cannot be found.
 - `POST /repositories`
   - Create a new repository or import an existing folder with `.momo`
+  - Request fields include `name`, `path`, optional `repoId`, optional `backendPluginId`, optional `backendConfig`, and optional `skipInitialSync`.
+  - `skipInitialSync: true` creates the repository metadata and registry entry without running an inline first sync. This is intended for account-backed or slow virtual sources such as 网易云音乐 so the desktop login flow can finish first and trigger sync in the background.
 - `POST /repositories/{repoId}:relocate`
   - Repair a missing local filesystem repository by pointing the existing `repoId` at a new local folder.
   - Request includes `repoId` and `path`.
   - The selected folder must contain `.momo/repository.json` whose `repoId` matches the request; folders without metadata or with a different `repoId` are rejected.
   - A successful response returns the updated repository summary and preserves existing repository identity, metadata and smart folders.
+- `POST /repositories/{repoId}:backendConfig`
+  - Update the persisted backend config for an existing repository without changing its `repoId`, path, or backend plugin.
+  - Request includes `repoId` and `backendConfig`.
+  - `backendConfig` must be a JSON object and is stored both in the registry row and repository metadata file when that metadata is host-managed.
+  - Intended for account-backed remote sources such as网易云音乐 after re-login refreshes credentials.
+  - For the 网易云 source/downloader pair, `backendConfig.apiBaseUrl` is an optional SDK domain override passed into `ncm-api-rs`; leaving it empty uses the SDK's built-in official domains instead of a separate HTTP wrapper service.
 - `DELETE /repositories/{repoId}`
   - Remove a repository from registry without deleting user files.
   - Also clears application-managed state for that `repoId` when it lives under MomoBako's service storage.
@@ -96,6 +104,9 @@
   - `tagGroups` expose repository-level tag grouping metadata for the desktop tag editor; they do not replace per-asset searchable tags.
 - `GET /repositories/{repoId}/playlists`
   - Returns `PlaylistSummary[]` ordered by `sortOrder`, then `updatedAt`.
+- `GET /repositories/{repoId}/playlists:memberships`
+  - Returns a lightweight `PlaylistMembershipIndex` as `assetId -> playlistIds[]` for sidebar and context-menu checked states.
+  - Does not resolve playlist item status, thumbnails, or file metadata; use `GET /repositories/{repoId}/playlists/{playlistId}` for full queue contents.
 - `POST /repositories/{repoId}/playlists`
   - Creates a playlist with `name` and `playerTypeId`.
 - `PATCH /repositories/{repoId}/playlists/{playlistId}`
@@ -106,6 +117,11 @@
   - Returns `PlaylistDetail` including resolved item status, current file path, and thumbnail.
 - `POST /repositories/{repoId}/playlists/{playlistId}:items`
   - Appends asset IDs to the end of the playlist, deduplicated within the same playlist.
+- `POST /repositories/{repoId}/playlists/{playlistId}:itemsByPaths`
+  - Request body includes repository-relative `paths[]`.
+  - File paths resolve to a single indexed asset.
+  - Directory paths recursively expand to all playable files under that directory using current repository indexes, then append them to the playlist with the same deduplication rules as `:items`.
+  - Supports mixed file and directory paths in one request.
 - `PATCH /repositories/{repoId}/playlists/{playlistId}:itemsOrder`
   - Replaces item sort order using ordered `itemIds`.
 - `DELETE /repositories/{repoId}/playlists/{playlistId}/items/{playlistItemId}`
@@ -137,6 +153,36 @@
   - Request body includes repository-relative `path`
   - Response returns a session-scoped local preview `sourceUrl` backed by the in-process repository runtime
   - 3D and text previews use this source instead of returning full file bytes through the desktop command bridge
+- `POST /repositories/{repoId}/entries:preparePlayback`
+  - Request body includes repository-relative `path`.
+  - Real local assets reuse the existing local preview preparation path and may return a direct `localPath`.
+  - Virtual assets delegate to a download-capable backend plugin such as `momobako.service.downloader`, which can return `localPath`, optional `tempFilePath`, optional `expiresAt`, and media metadata for temporary playback sources.
+  - Response `sourceUrl` is the preferred browser-consumable playback URL. Temporary audio files and lyric files are registered with the in-process preview runtime; lyric files may also return `lyricSourceUrl` or `wordLyricSourceUrl`.
+  - Frontend playlist players and virtual-source preview flows should prefer this endpoint over `files:preparePreviewSource` when a file may not exist locally.
+- `POST /repositories/{repoId}/entries:preparePlaybackWithProgress`
+  - Request body matches `entries:preparePlayback` and includes a Tauri progress channel.
+  - Emits `EntryPlaybackProgressEvent` phases for resolving the entry, downloading or reusing the temporary audio, preparing the preview source, and readiness.
+  - The media preview plugin waits for the command to finish before mounting the audio/video element, so playback starts only after the temporary download is complete.
+- `POST /repositories/{repoId}/playlists:downloadWithProgress`
+  - Tauri command: `download_playlist_with_progress`
+  - Request body includes:
+    - `playlistId`
+    - optional `playlistName`
+    - `tracks[]`: `{ songId, optional songName, optional sourcePayload }`
+    - `destination`: `{ kind, path?, repoId?, parentPath? }`
+    - optional playlist-level `sourcePayload`
+    - optional `level`
+  - The desktop runtime sends progress events over a Tauri `Channel` with:
+    - `phase`: `start` | `track` | `complete`
+    - `playlistId`
+    - optional `playlistName`
+    - `total`
+    - `completed`
+    - `failed`
+    - optional `currentSongId`
+    - optional `currentSongName`
+    - optional `error`
+  - The runtime delegates each track export to `momobako.service.downloader` and returns a partial-success summary when some tracks fail instead of aborting the whole playlist export.
 ## Desktop Runtime State
 
 - Workspace startup progress is a desktop UI state, not a repository service endpoint
@@ -148,6 +194,13 @@
 - `GET /repositories/{repoId}/assets/{assetId}`
   - Read asset summary, metadata and revision history
   - File browser and asset detail payloads may include `tags`, `aliasPaths`, `hardlinkGroupId`, `hardlinkState`, and `folderMetadata`.
+  - Asset/file browser/playlists may also include virtual-entry fields:
+    - `isVirtual`
+    - `providerId`
+    - `providerItemId`
+    - `sourcePayload`
+    - `localAbsolutePath`
+  - Virtual entries are indexed, searchable, and playlist-compatible even when there is no real source file under the repository root.
   - `aliasPaths` lists additional repository-relative locations for Eagle multi-folder aliases; every alias remains a normal asset row and may be linked by hardlink or fallback copy.
   - `folderMetadata` currently carries `protected` and optional `passwordTip` as migration hints only; MomoBako does not store Eagle plaintext passwords and does not block folder access.
 - `POST /repositories/{repoId}/assets/{assetId}:undo`
@@ -200,6 +253,12 @@
   - `sort.field` accepts core fields such as `filename`, `path`, `rating`, `sizeBytes`, `modifiedAt`, and `random`, plus metadata fields such as `metadata.width`, `metadata.fileCreatedAt`, and `metadata.addedToLibraryAt`.
   - `limit` truncates the result set after sorting.
   - Desktop resource filtering sends the current `repoId` and may search with an empty free text query.
+  - Search results may include the same virtual-entry fields used by file browser and playlists:
+    - `isVirtual`
+    - `providerId`
+    - `providerItemId`
+    - `sourcePayload`
+    - `localAbsolutePath`
 
 ## Smart Folder API
 
@@ -262,6 +321,7 @@
   - Used by frontend preview or codec plugins to invoke native plugin capabilities without adding file-format-specific commands to the core runtime
   - Native plugin call envelopes include `runtime.pluginId`, `runtime.pluginDataDir`, and `runtime.pluginConfig`; `pluginDataDir` points to the plugin's own persistent directory and is created before dispatch, while `pluginConfig` is the current host-managed key-value config from `config.json`.
   - Runtime plugin calls resolve `requires` and `optional` before dispatch. Missing or disabled required dependencies reject the call with the plugin disable reason; missing or disabled optional dependencies keep the call usable and return `runtime.degraded`, `runtime.degradationReason`, and `runtime.dependencyStatus` alongside the plugin payload.
+  - The 网易云 source and downloader backends currently use `ncm-api-rs` directly for login, playlist, song URL, detail, and lyric requests; any `apiBaseUrl` setting is treated as an optional SDK domain override rather than a host-managed proxy endpoint.
 - `GET /plugins:hook-executions`
   - Tauri command: `list_plugin_hook_executions`
   - Returns host-side execution records for declared hook actions; the host only records calls whose method matches a manifest `hooks[].action`

@@ -7,6 +7,11 @@ import type {
   BinaryFileWriteRequest,
   BinaryFileWriteResponse,
   ExternalApiConnectionStatus,
+  DownloaderPlaylistProgressEvent,
+  DownloaderPlaylistRequest,
+  EntryPlaybackProgressEvent,
+  EntryPlaybackRequest,
+  EntryPlaybackSourceResponse,
   FileBrowserRequest,
   FileBrowserSnapshot,
   FileCopyRequest,
@@ -36,8 +41,10 @@ import type {
   PluginInstallRequest,
   PlaylistDetail,
   PlaylistItemsAddRequest,
+  PlaylistItemsByPathsAddRequest,
   PlaylistItemsOrderRequest,
   PlaylistMembershipRequest,
+  PlaylistMembershipIndex,
   PlaylistMembershipSnapshot,
   PlaylistMutationRequest,
   PlaylistMutationResponse,
@@ -51,6 +58,7 @@ import type {
   RepositoryExportRequest,
   RepositoryExportResponse,
   RepositoryFolderRequest,
+  RepositoryBackendConfigUpdateRequest,
   RepositoryRelocateRequest,
   PluginManifest,
   PluginMutationResponse,
@@ -116,6 +124,10 @@ export function listPlaylists(repoId: string) {
   return invoke<PlaylistSummary[]>("list_playlists", { repoId });
 }
 
+export function listPlaylistMemberships(repoId: string) {
+  return invoke<PlaylistMembershipIndex>("list_playlist_memberships", { repoId });
+}
+
 export function createPlaylist(request: PlaylistMutationRequest) {
   return invoke<PlaylistMutationResponse>("create_playlist", { request });
 }
@@ -134,6 +146,10 @@ export function getPlaylistDetail(repoId: string, playlistId: string) {
 
 export function addPlaylistItems(request: PlaylistItemsAddRequest) {
   return invoke<PlaylistDetail>("add_playlist_items", { request });
+}
+
+export function addPlaylistItemsByPaths(request: PlaylistItemsByPathsAddRequest) {
+  return invoke<PlaylistDetail>("add_playlist_items_by_paths", { request });
 }
 
 export function reorderPlaylistItems(request: PlaylistItemsOrderRequest) {
@@ -192,8 +208,33 @@ export function preparePreviewFileSource(request: FileReadRequest) {
   return invoke<FilePreviewSourceResponse>("prepare_preview_file_source", { request });
 }
 
+export function prepareEntryPlaybackSource(request: EntryPlaybackRequest) {
+  return invoke<EntryPlaybackSourceResponse>("prepare_entry_playback_source", { request });
+}
+
+export function prepareEntryPlaybackSourceWithProgress(
+  request: EntryPlaybackRequest,
+  onEvent: (event: EntryPlaybackProgressEvent) => void,
+) {
+  const progress = new Channel<EntryPlaybackProgressEvent>();
+  progress.onmessage = onEvent;
+  return invoke<EntryPlaybackSourceResponse>("prepare_entry_playback_source_with_progress", {
+    request,
+    progress,
+  });
+}
+
 export function callPlugin<T = unknown>(request: PluginCallRequest) {
   return invoke<PluginCallResponse<T>>("call_plugin", { request });
+}
+
+export function downloadPlaylistWithProgress(request: DownloaderPlaylistRequest, onEvent: (event: DownloaderPlaylistProgressEvent) => void) {
+  const progress = new Channel<DownloaderPlaylistProgressEvent>();
+  progress.onmessage = onEvent;
+  return invoke<Record<string, unknown>>("download_playlist_with_progress", {
+    request,
+    progress,
+  });
 }
 
 export function readPluginArchiveText(request: PluginArchiveReadRequest) {
@@ -270,6 +311,10 @@ export function deleteRepository(repoId: string) {
 
 export function relocateRepository(request: RepositoryRelocateRequest) {
   return invoke<RepositoryMutationResponse>("relocate_repository", { request });
+}
+
+export function updateRepositoryBackendConfig(request: RepositoryBackendConfigUpdateRequest) {
+  return invoke<RepositoryMutationResponse>("update_repository_backend_config", { request });
 }
 
 export function exportRepository(request: RepositoryExportRequest) {
