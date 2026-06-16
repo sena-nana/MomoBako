@@ -161,7 +161,7 @@
   - Response fields: `repoId`, `path`, `assetId`, `kind`, `thumbnailPath`, `thumbnailCustom`, optional `metadata`
 - `POST /repositories/{repoId}/files:preparePreviewSource`
   - Request body includes repository-relative `path`
-  - Response returns a session-scoped local preview `sourceUrl` backed by the in-process repository runtime
+  - Response returns a session-scoped local preview `sourceUrl` backed by the in-process repository runtime and may include `localPath` for frontend plugins that delegate local-file processing to a native service plugin.
   - 3D and text previews use this source instead of returning full file bytes through the desktop command bridge
 - `POST /repositories/{repoId}/entries:preparePlayback`
   - Request body includes repository-relative `path`.
@@ -317,6 +317,7 @@
   - `parser` plugins declare extraction targets and normalized candidate outputs for concrete file/container types; parser output enters the candidate queue rather than directly writing metadata.
   - Backend parser or library-support plugins may contribute `metadataDefaults` with action `metadata.defaults.batch`. During local sync, the host passes `{ entries: [{ path, name, extension, kind, metadata? }] }`; the plugin returns `{ defaultsByPath }`. The host inserts returned keys only when they are missing, so plugin defaults cannot overwrite user or provider metadata.
   - `preview` plugins render file previews and thumbnails independently of library-kind semantics.
+  - `momobako.preview.archive` previews `.zip`, `.cbz`, `.7z`, `.rar`, and `.cbr` files as read-only containers inside the file preview pane. It calls `momobako.service.archive-preview` through `POST /plugins:call` to prepare a session cache, list internal directories, and expose internal files for preview without indexing them as repository assets.
   - `service` plugins expose shared capabilities such as metadata providers, network search, download queues, filesystem watching and vector search. External/network services are manual-trigger and candidate-only unless a future runtime implementation changes the contract.
   - Metadata provider plugins expose `provider.lookupMetadataCandidate` through `POST /plugins:call`. The input is `{ id, sourceUrl? }`; the output is `{ source, confidence?, fields }`. Provider results are candidate-only unless a frontend library extension or another user-confirmed flow applies selected fields through the normal metadata API.
   - `hooks` declare how plugins attach to core-hosted capabilities such as playlist, PiP, progress, candidate queue, batch organize, download queue, metadata merge, rename/move execution, audit log and unified search.
@@ -339,6 +340,7 @@
   - Request body includes `pluginId`, `method`, and arbitrary JSON `payload`
   - Used by frontend preview or codec plugins to invoke native plugin capabilities without adding file-format-specific commands to the core runtime
   - Native plugin call envelopes include `runtime.pluginId`, `runtime.pluginDataDir`, and `runtime.pluginConfig`; `pluginDataDir` points to the plugin's own persistent directory and is created before dispatch, while `pluginConfig` is the current host-managed key-value config from `config.json`.
+  - `momobako.service.archive-preview` exposes `archive.ensurePrepared`, `archive.listDirectory`, and `archive.prepareEntryPreview`. Payloads use `archivePath` for the local source archive and `directoryPath`/`entryPath` for normalized internal paths; responses are read-only and backed by session temporary extraction cache.
   - Runtime plugin calls resolve `requires` and `optional` before dispatch. Missing or disabled required dependencies reject the call with the plugin disable reason; missing or disabled optional dependencies keep the call usable and return `runtime.degraded`, `runtime.degradationReason`, and `runtime.dependencyStatus` alongside the plugin payload.
   - The 网易云 source and downloader backends currently use `ncm-api-rs` directly for login, playlist, song URL, detail, and lyric requests; any `apiBaseUrl` setting is treated as an optional SDK domain override rather than a host-managed proxy endpoint.
 - `GET /plugins:hook-executions`

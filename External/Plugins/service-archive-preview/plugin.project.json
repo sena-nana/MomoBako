@@ -1,0 +1,9 @@
+{
+  "pluginId": "momobako.service.archive-preview",
+  "build": {
+    "type": "cargo-native",
+    "sourceDir": "src",
+    "manifestPath": "Cargo.toml",
+    "outputDir": ".dist/service-archive-preview"
+  }
+}

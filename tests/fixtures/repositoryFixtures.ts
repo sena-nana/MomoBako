@@ -423,6 +423,7 @@ export function pluginManifest(
     : pluginId === "momobako.preview.media" ? ["png", "jpg", "jpeg", "webp", "gif", "bmp", "avif", "svg", "mp4", "mov", "mkv", "webm", "avi", "m4v", "mp3", "wav", "ogg", "flac", "m4a", "aac", "opus"]
     : pluginId === "momobako.preview.text" ? ["txt", "md", "markdown", "json", "yaml", "yml", "csv"]
     : pluginId === "momobako.preview.office" ? ["pdf", "doc", "docx", "docm", "xls", "xlsx", "xlsm", "ppt", "pptx", "pptm"]
+    : pluginId === "momobako.preview.archive" ? ["zip", "cbz", "7z", "rar", "cbr"]
     : [];
   const hooks =
     pluginId === "momobako.preview.media"
@@ -440,6 +441,9 @@ export function pluginManifest(
       : pluginId === "momobako.tool.api-playground"
         ? [{ slot: "toolPage", action: "tool.apiPlayground.open", label: "打开 API Playground" }]
       : [];
+  const requires =
+    pluginId === "momobako.preview.archive" ? ["momobako.service.archive-preview"]
+    : [];
   const optional =
     pluginId === "momobako.local-filesystem" ? ["momobako.filesystem-watcher"]
     : pluginId === "momobako.preview.media" ? ["momobako.parser.image", "momobako.parser.audio", "momobako.parser.video"]
@@ -551,7 +555,7 @@ export function pluginManifest(
     source,
     runtime,
     permissions,
-    requires: [],
+    requires,
     optional,
     hooks,
     contributes,
@@ -573,6 +577,8 @@ export function pluginManifest(
 
 export function createMockPlugins() {
   return [
+    pluginManifest("momobako.service.archive-preview", [], "Archive Preview Service", "0.1.0", "provider-service", "archive-preview", "Provides read-only archive extraction and internal file preview support.", ["archive", "preview", "read", "readonly"], true, "backend", "native-dylib"),
+    pluginManifest("momobako.preview.archive", [], "Archive Preview", "0.1.0", "library-kind", "preview", "Previews ZIP, CBZ, 7Z, RAR and CBR archives as read-only containers.", ["preview", "archive", "readonly"], true, "frontend", "vue-module"),
     pluginManifest("momobako.local-filesystem", ["builtin.local-filesystem"], "Local Filesystem", "1.0.0", "source", "filesystem", "使用本地目录作为仓库文件管理后端。", ["browse", "read", "write", "watch", "sync"], true, "backend", "native-dylib"),
     pluginManifest("momobako.webdav", ["builtin.webdav"], "WebDAV", "0.1.0", "source", "webdav", "通过 WebDAV 适配远程文件管理服务。", ["browse", "read", "write", "sync"], false, "backend", "manifest-only"),
     pluginManifest("momobako.cloud-drive", ["builtin.cloud-drive"], "Cloud Drive", "0.1.0", "source", "cloud", "预留云盘文件系统接入点，如对象存储或网盘。", ["browse", "read", "write", "sync"], false, "backend", "manifest-only"),

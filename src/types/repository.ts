@@ -694,6 +694,7 @@ export type FilePreviewSourceResponse = {
   path: string;
   token: string;
   sourceUrl?: string | null;
+  localPath?: string | null;
   mediaType: string;
   sizeBytes: number;
   modifiedAt?: string | null;

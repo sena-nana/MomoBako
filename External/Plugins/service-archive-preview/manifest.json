@@ -1,0 +1,65 @@
+{
+  "pluginId": "momobako.service.archive-preview",
+  "name": "Archive Preview Service",
+  "version": "0.1.0",
+  "type": {
+    "layer": "provider-service",
+    "kind": "archive-preview"
+  },
+  "kind": "archive-preview",
+  "category": "service",
+  "description": "Provides read-only archive extraction and internal file preview support.",
+  "capabilities": ["archive", "preview", "read", "readonly"],
+  "enabled": true,
+  "sdk": "backend",
+  "runtime": "native-dylib",
+  "entry": {
+    "backend": {
+      "library": "momobako_service_archive_preview"
+    }
+  },
+  "permissions": ["filesystem:read"],
+  "requires": [],
+  "optional": [],
+  "hooks": [],
+  "contributes": {
+    "apiTests": [
+      {
+        "method": "archive.ensurePrepared",
+        "summary": "Prepare a local archive file for read-only preview.",
+        "payload": {
+          "archivePath": "<absoluteArchivePath>",
+          "config": {}
+        }
+      },
+      {
+        "method": "archive.listDirectory",
+        "summary": "List a prepared archive directory.",
+        "payload": {
+          "archivePath": "<absoluteArchivePath>",
+          "directoryPath": "",
+          "config": {}
+        }
+      },
+      {
+        "method": "archive.prepareEntryPreview",
+        "summary": "Return a local preview source for an internal archive file.",
+        "payload": {
+          "archivePath": "<absoluteArchivePath>",
+          "entryPath": "page01.png",
+          "config": {}
+        }
+      }
+    ],
+    "service": {
+      "type": "archive-preview",
+      "methods": ["archive.ensurePrepared", "archive.listDirectory", "archive.prepareEntryPreview"]
+    }
+  },
+  "compat": {
+    "sdkVersion": "1",
+    "legacyPluginIds": []
+  },
+  "source": "builtin",
+  "status": "ready"
+}

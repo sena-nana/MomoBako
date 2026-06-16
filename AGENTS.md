@@ -29,3 +29,5 @@
 - 按影响范围运行最小必要验证: `yarn test`、`yarn build`、`cargo check --manifest-path src-tauri/Cargo.toml` 或 `yarn verify`。
 - 文档、注释、配置说明等低风险改动可不跑测试;涉及数据模型、持久化、文件同步、Tauri 命令、构建配置或用户关键路径时,优先运行最小必要验证。
 - 若未运行测试、构建或验证,在最终说明里写清楚原因;若验证无法运行,写清楚阻塞原因和剩余风险。
+
+@RTK.md

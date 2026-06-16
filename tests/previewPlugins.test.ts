@@ -111,6 +111,15 @@ describe("previewPlugins", () => {
     expect(officePlugin?.generateThumbnail).toBeTypeOf("function");
   });
 
+  it("routes archive files to the archive preview plugin", async () => {
+    await syncRegisteredPreviewPluginManifests(await listPlugins());
+    expect(getPreviewPluginForEntry(fileEntry("zip"))?.pluginId).toBe("momobako.preview.archive");
+    expect(getPreviewPluginForEntry(fileEntry("cbz"))?.pluginId).toBe("momobako.preview.archive");
+    expect(getPreviewPluginForEntry(fileEntry("7z"))?.pluginId).toBe("momobako.preview.archive");
+    expect(getPreviewPluginForEntry(fileEntry("rar"))?.pluginId).toBe("momobako.preview.archive");
+    expect(getPreviewPluginForEntry(fileEntry("cbr"))?.pluginId).toBe("momobako.preview.archive");
+  });
+
   it("exposes office preview extensions through plugin manifests instead of host-side static imports", async () => {
     await syncRegisteredPreviewPluginManifests(await listPlugins());
     const officePlugin = listPreviewPlugins().find((plugin) => plugin.pluginId === "momobako.preview.office");
