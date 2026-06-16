@@ -111,3 +111,11 @@
 - Plugin configuration uses the same directory and plugin ID normalization path. `contributes.settings` declares optional schema fields and a settings page contribution; the plugin manager opens one settings entry per plugin, renders a registered custom Vue page when available, falls back to the schema form, and stores host-managed key-value config in `config.json`.
 - The runtime infers `category` for legacy manifests that only declare `kind`, normalizes legacy IDs such as `builtin.local-filesystem`, and reflects runtime plugin directory changes directly in `GET /plugins`.
 - Filesystem backend `listFiles` responses carry both repository-relative paths and absolute local paths so the repository scanner can hash file content after plugin discovery. The runtime still resolves legacy responses that only include `relativePath`.
+
+## Refactor Slices
+
+- Workspace pages follow an MVVM-oriented split: page SFCs keep visual composition, while `src/pages/workspace/*ViewModel.ts` files own state assembly, dialog promises, auth status and component bindings.
+- `Home.vue` is the workspace view shell. `useWorkspaceHomeViewModel` composes repository, file, playlist, search, action and dialog state without changing Tauri command names or serialized DTO fields.
+- File browser pointer selection, drag intent and selection summaries live in `useFileBrowserPanelViewModel`; `FileBrowserPanel.vue` keeps its props, emits and template surface.
+- Repository API transport is grouped under `src/services/repositoryApi/` by domain and re-exported through `src/services/repositoryApi.ts` for existing imports.
+- `src-tauri/src/repository_service.rs` remains the public facade for commands. Plugin-facing `RepositoryState` behavior is delegated to `repository_service/plugins.rs` as the first backend domain slice.
