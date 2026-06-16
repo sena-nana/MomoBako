@@ -1,0 +1,37 @@
+{
+  "pluginId": "momobako.preview.archive",
+  "name": "Archive Preview",
+  "version": "0.1.0",
+  "type": {
+    "layer": "library-kind",
+    "kind": "preview"
+  },
+  "kind": "preview",
+  "category": "preview",
+  "description": "Previews ZIP, CBZ, 7Z, RAR and CBR archives as read-only containers.",
+  "capabilities": ["preview", "archive", "readonly"],
+  "enabled": true,
+  "sdk": "frontend",
+  "runtime": "vue-module",
+  "entry": {
+    "frontend": {
+      "module": "dist/register.js",
+      "export": "register"
+    }
+  },
+  "contributes": {
+    "preview": {
+      "extensions": ["zip", "cbz", "7z", "rar", "cbr"]
+    }
+  },
+  "permissions": ["preview:read", "filesystem:read"],
+  "requires": ["momobako.service.archive-preview"],
+  "optional": [],
+  "hooks": [],
+  "compat": {
+    "sdkVersion": "1",
+    "legacyPluginIds": []
+  },
+  "source": "builtin",
+  "status": "ready"
+}

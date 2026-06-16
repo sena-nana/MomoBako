@@ -549,6 +549,9 @@ function previewPluginModuleSource(pluginId: string) {
       extensions: ["pdf", "doc", "docx", "docm", "xls", "xlsx", "xlsm", "ppt", "pptx", "pptm"],
       thumbnail: true,
     },
+    "momobako.preview.archive": {
+      extensions: ["zip", "cbz", "7z", "rar", "cbr"],
+    },
   };
   const definition = definitionMap[pluginId];
   if (!definition) {

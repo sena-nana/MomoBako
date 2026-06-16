@@ -1,0 +1,9 @@
+{
+  "pluginId": "momobako.preview.archive",
+  "build": {
+    "type": "frontend-module",
+    "sourceDir": "src",
+    "entry": "dist/register.js",
+    "outputDir": ".dist/preview-archive"
+  }
+}

@@ -1239,6 +1239,8 @@ pub struct FilePreviewSourceResponse {
     pub token: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub local_path: Option<String>,
     pub media_type: String,
     pub size_bytes: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -3225,6 +3227,7 @@ impl RepositoryState {
             path: entry_path,
             token,
             source_url: None,
+            local_path: Some(file_path.to_string_lossy().to_string()),
             media_type,
             size_bytes: metadata.len() as i64,
             modified_at,
