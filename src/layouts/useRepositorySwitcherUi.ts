@@ -1,7 +1,12 @@
 import { computed, onBeforeUnmount, onMounted, ref, type ComputedRef } from "vue";
 import { open } from "@tauri-apps/plugin-dialog";
 import type { RouteLocationNormalizedLoadedGeneric, Router } from "vue-router";
-import { callPlugin, syncRepository, updateRepositoryBackendConfig } from "../services/repositoryApi";
+import {
+  callPlugin,
+  configureNeteaseRepositoryCache,
+  syncRepository,
+  updateRepositoryBackendConfig,
+} from "../services/repositoryApi";
 import type { RepositoryBackendOption, RepositorySummary } from "../types/repository";
 
 export type RepositoryPopoverMode = "closed" | "switcher" | "addMenu" | "form" | "neteaseLogin";
@@ -97,6 +102,7 @@ export function useRepositorySwitcherUi(options: RepositorySwitcherUiOptions) {
   const neteaseLoginMessage = ref("");
   const neteaseLoginTargetRepoId = ref<string | null>(null);
   const neteaseExpectedAccountId = ref<string | null>(null);
+  const neteaseCachePath = ref("");
 
   const backendOptions = computed(() => options.repositoryBackendOptions.value.map((item) => ({
     value: item.pluginId,
@@ -299,6 +305,7 @@ export function useRepositorySwitcherUi(options: RepositorySwitcherUiOptions) {
     neteaseExpectedAccountId.value = accountIdFromValue(detail?.accountId)
       ?? accountIdFromRepoId(detail?.repoId)
       ?? null;
+    neteaseCachePath.value = "";
     addRepositoryPopoverMode.value = "neteaseLogin";
     addRepositoryPopoverPosition.value = getPopoverPosition(detail?.anchor, "neteaseLogin");
     await createNeteaseQrSession();
@@ -307,6 +314,11 @@ export function useRepositorySwitcherUi(options: RepositorySwitcherUiOptions) {
   async function pollNeteaseQrSession() {
     const key = neteaseQrSession.value?.unikey;
     if (!key || isSubmittingBackend.value) return;
+    const cachePath = neteaseCachePath.value.trim();
+    if (!cachePath) {
+      addRepositoryError.value = "请先选择网易云资源库的本地缓存目录。";
+      return;
+    }
     isSubmittingBackend.value = true;
     addRepositoryError.value = "";
     neteaseLoginMessage.value = "正在检查扫码结果...";
@@ -314,7 +326,7 @@ export function useRepositorySwitcherUi(options: RepositorySwitcherUiOptions) {
       const response = await callPlugin<NeteaseLoginResult>({
         pluginId: neteaseSourcePluginId,
         method: "auth.pollQrSession",
-        payload: { key, timestamp: Date.now() },
+        payload: { key, timestamp: Date.now(), persistSession: false },
       });
       const result = response.payload ?? {};
       if (!result.backendConfig) {
@@ -330,10 +342,21 @@ export function useRepositorySwitcherUi(options: RepositorySwitcherUiOptions) {
       }
 
       const repoId = neteaseLoginTargetRepoId.value || `netease-cloud-music-${accountId}`;
-      const backendConfig = backendConfigWithSyncTime(result.backendConfig, accountId);
+      const backendConfig = backendConfigWithSyncTime({
+        ...result.backendConfig,
+        sourceUri: `netease-cloud-music://account/${accountId}`,
+        localCachePath: cachePath,
+      }, accountId);
       const existing = options.repositories.value.find((repo) => repo.repoId === repoId);
       if (existing) {
         await updateRepositoryBackendConfig({ repoId, backendConfig });
+        if (existing.localCache?.status !== "ready" || existing.path !== cachePath) {
+          await configureNeteaseRepositoryCache({
+            repoId,
+            path: cachePath,
+            migrateLegacyCache: true,
+          });
+        }
         await options.selectRepository(repoId);
         neteaseLoginMessage.value = `已更新登录状态，正在后台同步歌单：${existing.name}`;
         addRepositoryPopoverMode.value = "closed";
@@ -344,7 +367,7 @@ export function useRepositorySwitcherUi(options: RepositorySwitcherUiOptions) {
       const name = neteaseRepositoryName(result, accountId);
       await options.createNewRepository(
         name,
-        `netease-cloud-music://account/${accountId}`,
+        cachePath,
         neteaseSourcePluginId,
         backendConfig,
         repoId,
@@ -391,6 +414,19 @@ export function useRepositorySwitcherUi(options: RepositorySwitcherUiOptions) {
     }
     backendPluginId.value = pluginId;
     addRepositoryPopoverMode.value = "form";
+  }
+
+  async function chooseNeteaseCacheFolder() {
+    if (isSubmittingBackend.value) return;
+    addRepositoryError.value = "";
+    const selected = await open({
+      directory: true,
+      multiple: false,
+      title: "选择网易云缓存目录",
+    });
+    if (typeof selected === "string" && selected.trim()) {
+      neteaseCachePath.value = selected.trim();
+    }
   }
 
   async function submitAddRepositoryForm() {
@@ -474,6 +510,8 @@ export function useRepositorySwitcherUi(options: RepositorySwitcherUiOptions) {
     isSubmittingBackend,
     neteaseLoginMessage,
     neteaseQrSession,
+    neteaseCachePath,
+    chooseNeteaseCacheFolder,
     openRepositorySwitcherFromEvent,
     pollNeteaseQrSession,
     createNeteaseQrSession,

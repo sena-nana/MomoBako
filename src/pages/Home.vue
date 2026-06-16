@@ -66,6 +66,7 @@ const {
   selectRepository,
   selectAsset,
   attachRepository,
+  configureNeteaseRepositoryCacheInWorkspace,
   removeRepository,
   relocateMissingRepository,
 } = useWorkspaceRepository();
@@ -345,6 +346,8 @@ const {
   confirmMissingRepositoryDelete,
 } = useMissingRepositoryActions({
   activeRepoId,
+  activeRepository,
+  configureNeteaseRepositoryCache: configureNeteaseRepositoryCacheInWorkspace,
   refreshRepositoryWorkspace,
   relocateMissingRepository,
   removeRepository,
@@ -610,6 +613,7 @@ watch(
 
 const { fileEntryContextMenu } = useWorkspaceContextMenu({
   activeRepoId,
+  activeRepository,
   entryMap: fileBrowserEntryMap,
   hasMultipleSelection,
   isMutatingFiles,

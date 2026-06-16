@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { RouterView } from "vue-router";
 import { RefreshCw } from "lucide-vue-next";
 import TitleBar from "../components/TitleBar.vue";
@@ -10,6 +10,7 @@ import {
   useWorkspaceRepository,
 } from "../composables/useRepositoryWorkspace";
 import { usePlaylistPlayer } from "../composables/usePlaylistPlayer";
+import { useSystemMediaSession } from "../composables/useSystemMediaSession";
 import { useResizablePane } from "../composables/useResizablePane";
 import { getPlaylistDetail } from "../services/repositoryApi";
 
@@ -66,6 +67,7 @@ const {
 const { playlists } = useWorkspacePlaylists();
 const { workspaceStartup } = useWorkspaceProgress();
 const player = usePlaylistPlayer();
+const systemMediaSession = useSystemMediaSession(player);
 
 const isWorkspaceReady = computed(() => workspaceStartup.value.status === "ready");
 const isWorkspaceStartupError = computed(() => workspaceStartup.value.status === "error");
@@ -114,6 +116,10 @@ watch(
 
 onMounted(() => {
   void ensureRepositoryWorkspace();
+});
+
+onBeforeUnmount(() => {
+  systemMediaSession.dispose();
 });
 </script>
 

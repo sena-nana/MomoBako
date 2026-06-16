@@ -42,15 +42,25 @@
 - `GET /repositories`
   - List registered repositories from `MetaHub/repositories.db`
   - Local filesystem repositories return `status: "ready"` when the registered path exists and `status: "missing"` when the local directory cannot be found.
+  - Account-backed repositories that require a local managed cache, currently 网易云音乐, include `localCache: { required, path, status }`.
+  - 网易云 `localCache.required` is always `true`; `status` is `"ready"` when the configured cache directory exists, `"missing"` when a configured directory is gone, and `"unconfigured"` for legacy URI-style repositories that have not selected a local cache directory.
 - `POST /repositories`
   - Create a new repository or import an existing folder with `.momo`
   - Request fields include `name`, `path`, optional `repoId`, optional `backendPluginId`, optional `backendConfig`, and optional `skipInitialSync`.
   - `skipInitialSync: true` creates the repository metadata and registry entry without running an inline first sync. This is intended for account-backed or slow virtual sources such as 网易云音乐 so the desktop login flow can finish first and trigger sync in the background.
+  - Creating a 网易云 repository uses the selected local cache directory as `path`; `backendConfig` keeps account credentials and defaults, and stores a non-secret `sourceUri: "netease-cloud-music://account/{accountId}"` for provenance.
+  - The frontend receives only repository summaries and must not depend on the full persisted `backendConfig`, because it may contain cookies or other account secrets.
 - `POST /repositories/{repoId}:relocate`
   - Repair a missing local filesystem repository by pointing the existing `repoId` at a new local folder.
   - Request includes `repoId` and `path`.
   - The selected folder must contain `.momo/repository.json` whose `repoId` matches the request; folders without metadata or with a different `repoId` are rejected.
   - A successful response returns the updated repository summary and preserves existing repository identity, metadata and smart folders.
+- `POST /repositories/{repoId}:configureNeteaseCache`
+  - Tauri command: `configure_netease_repository_cache`
+  - Request includes `repoId`, `path`, and optional `migrateLegacyCache` (default frontend flow uses `true`).
+  - Creates the selected cache directory, initializes the normal local repository structure under `.momo`, updates the registry path and repository metadata, and preserves `sourceUri`/account backend config.
+  - Response includes `{ repository, migration }`; `migration` reports moved host-managed state files and identifiable old playback cache files, plus skipped and failed playback cache counts.
+  - Legacy `.momo` state that was stored under service-managed repository storage is merged into the new cache directory. Old downloader temp files are migrated only when they can be matched to current indexed 网易云 song IDs and cache keys; unrecognized files are left for the existing cleanup path.
 - `POST /repositories/{repoId}:backendConfig`
   - Update the persisted backend config for an existing repository without changing its `repoId`, path, or backend plugin.
   - Request includes `repoId` and `backendConfig`.
@@ -151,12 +161,13 @@
   - Response fields: `repoId`, `path`, `assetId`, `kind`, `thumbnailPath`, `thumbnailCustom`, optional `metadata`
 - `POST /repositories/{repoId}/files:preparePreviewSource`
   - Request body includes repository-relative `path`
-  - Response returns a session-scoped local preview `sourceUrl` backed by the in-process repository runtime
+  - Response returns a session-scoped local preview `sourceUrl` backed by the in-process repository runtime and may include `localPath` for frontend plugins that delegate local-file processing to a native service plugin.
   - 3D and text previews use this source instead of returning full file bytes through the desktop command bridge
 - `POST /repositories/{repoId}/entries:preparePlayback`
   - Request body includes repository-relative `path`.
   - Real local assets reuse the existing local preview preparation path and may return a direct `localPath`.
   - Virtual assets delegate to a download-capable backend plugin such as `momobako.service.downloader`, which can return `localPath`, optional `tempFilePath`, optional `expiresAt`, and media metadata for temporary playback sources.
+  - 网易云 virtual playback is rejected until `localCache.status === "ready"`. When ready, the core passes `managedCacheRoot` to the downloader and all managed playback files are written under `{cacheRoot}/.momo/cache/netease-playback`.
   - Response `sourceUrl` is the preferred browser-consumable playback URL. Temporary audio files and lyric files are registered with the in-process preview runtime; lyric files may also return `lyricSourceUrl` or `wordLyricSourceUrl`.
   - Frontend playlist players and virtual-source preview flows should prefer this endpoint over `files:preparePreviewSource` when a file may not exist locally.
 - `POST /repositories/{repoId}/entries:preparePlaybackWithProgress`
@@ -170,6 +181,7 @@
     - optional `playlistName`
     - `tracks[]`: `{ songId, optional songName, optional sourcePayload }`
     - `destination`: `{ kind, path?, repoId?, parentPath? }`
+    - optional `managedCacheRoot` for source repositories whose MomoBako-managed local state lives in a selected cache directory
     - optional playlist-level `sourcePayload`
     - optional `level`
   - The desktop runtime sends progress events over a Tauri `Channel` with:
@@ -183,6 +195,13 @@
     - optional `currentSongName`
     - optional `error`
   - The runtime delegates each track export to `momobako.service.downloader` and returns a partial-success summary when some tracks fail instead of aborting the whole playlist export.
+
+## Managed Cache Layout
+
+- Local filesystem repositories and configured 网易云 repositories use the same root layout: `.momo/repository.json`, repository indexes/databases, `cache`, `thumbnails`, `logs`, `indexes`, and `trash`.
+- For 网易云, MomoBako-managed local data must stay inside the selected cache root. Playback audio, lyrics, reusable playback cache, thumbnail cache, indexes, and download-to-repository staging files live below `{cacheRoot}/.momo/...`.
+- User-selected “download to local folder” targets remain explicit export destinations. Those exports are not treated as managed cache.
+- Downloader/source plugin global data directories remain available for non-网易云 or legacy compatibility, but new 网易云 create/re-login flows pass `persistSession: false` and use repository-scoped managed cache paths instead of writing account sessions globally.
 ## Desktop Runtime State
 
 - Workspace startup progress is a desktop UI state, not a repository service endpoint
@@ -298,6 +317,7 @@
   - `parser` plugins declare extraction targets and normalized candidate outputs for concrete file/container types; parser output enters the candidate queue rather than directly writing metadata.
   - Backend parser or library-support plugins may contribute `metadataDefaults` with action `metadata.defaults.batch`. During local sync, the host passes `{ entries: [{ path, name, extension, kind, metadata? }] }`; the plugin returns `{ defaultsByPath }`. The host inserts returned keys only when they are missing, so plugin defaults cannot overwrite user or provider metadata.
   - `preview` plugins render file previews and thumbnails independently of library-kind semantics.
+  - `momobako.preview.archive` previews `.zip`, `.cbz`, `.7z`, `.rar`, and `.cbr` files as read-only containers inside the file preview pane. It calls `momobako.service.archive-preview` through `POST /plugins:call` to prepare a session cache, list internal directories, and expose internal files for preview without indexing them as repository assets.
   - `service` plugins expose shared capabilities such as metadata providers, network search, download queues, filesystem watching and vector search. External/network services are manual-trigger and candidate-only unless a future runtime implementation changes the contract.
   - Metadata provider plugins expose `provider.lookupMetadataCandidate` through `POST /plugins:call`. The input is `{ id, sourceUrl? }`; the output is `{ source, confidence?, fields }`. Provider results are candidate-only unless a frontend library extension or another user-confirmed flow applies selected fields through the normal metadata API.
   - `hooks` declare how plugins attach to core-hosted capabilities such as playlist, PiP, progress, candidate queue, batch organize, download queue, metadata merge, rename/move execution, audit log and unified search.
@@ -320,6 +340,7 @@
   - Request body includes `pluginId`, `method`, and arbitrary JSON `payload`
   - Used by frontend preview or codec plugins to invoke native plugin capabilities without adding file-format-specific commands to the core runtime
   - Native plugin call envelopes include `runtime.pluginId`, `runtime.pluginDataDir`, and `runtime.pluginConfig`; `pluginDataDir` points to the plugin's own persistent directory and is created before dispatch, while `pluginConfig` is the current host-managed key-value config from `config.json`.
+  - `momobako.service.archive-preview` exposes `archive.ensurePrepared`, `archive.listDirectory`, and `archive.prepareEntryPreview`. Payloads use `archivePath` for the local source archive and `directoryPath`/`entryPath` for normalized internal paths; responses are read-only and backed by session temporary extraction cache.
   - Runtime plugin calls resolve `requires` and `optional` before dispatch. Missing or disabled required dependencies reject the call with the plugin disable reason; missing or disabled optional dependencies keep the call usable and return `runtime.degraded`, `runtime.degradationReason`, and `runtime.dependencyStatus` alongside the plugin payload.
   - The 网易云 source and downloader backends currently use `ncm-api-rs` directly for login, playlist, song URL, detail, and lyric requests; any `apiBaseUrl` setting is treated as an optional SDK domain override rather than a host-managed proxy endpoint.
 - `GET /plugins:hook-executions`

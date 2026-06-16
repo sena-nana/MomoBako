@@ -124,6 +124,8 @@ describe("usePlaylistPlayer", () => {
 
     const video = mount.querySelector<HTMLVideoElement>("video");
     expect(video).toBeInstanceOf(HTMLVideoElement);
+    expect(video?.controls).toBe(false);
+    expect(video?.hasAttribute("controls")).toBe(false);
     expect(video?.style.objectFit).toBe("cover");
 
     await player.setPlaybackState({ currentTimeMs: 42000, volume: 0.35 });
@@ -134,5 +136,21 @@ describe("usePlaylistPlayer", () => {
     await waitFor(() => {
       expect(player.currentItemId.value).toBe("video-item-2");
     });
+  });
+
+  it("keeps audio runtime controlled by the workspace player bar", async () => {
+    await registerMediaPlugin();
+    const player = usePlaylistPlayer();
+    const mount = document.createElement("div");
+    document.body.append(mount);
+    player.attachMountTarget(mount);
+
+    await player.setActivePlaylist("repo-main-001", playlistDetail("audio"), "audio-item-1");
+
+    const audio = mount.querySelector<HTMLAudioElement>("audio");
+    expect(audio).toBeInstanceOf(HTMLAudioElement);
+    expect(audio?.controls).toBe(false);
+    expect(audio?.hasAttribute("controls")).toBe(false);
+    expect(mount.querySelector(".media-preview__download-progress")).toBeNull();
   });
 });

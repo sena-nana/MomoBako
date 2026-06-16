@@ -111,6 +111,7 @@ import {
 } from "./settings";
 import {
   attachRepository,
+  configureNeteaseRepositoryCacheInWorkspace,
   createNewRepository,
   exportCurrentRepository,
   importExistingRepository,
@@ -210,6 +211,7 @@ export function useWorkspaceRepository() {
     attachRepository,
     removeRepository,
     relocateMissingRepository,
+    configureNeteaseRepositoryCacheInWorkspace,
     exportCurrentRepository,
   };
 }

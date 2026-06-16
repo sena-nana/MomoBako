@@ -2625,6 +2625,7 @@
 .media-playlist-runtime__audio-shell.media-preview--audio {
   width: min(920px, 100%);
   height: 100%;
+  grid-template-rows: minmax(0, 1fr);
 }
 
 .media-playlist-runtime__audio-main,
@@ -2895,8 +2896,11 @@
 }
 
 .media-preview__audio-control.media-playlist-runtime__media {
-  height: 36px;
-  min-height: 32px;
+  display: none;
+}
+
+.media-playlist-runtime__audio-shell .media-preview__audio-control-bar {
+  display: none;
 }
 
 .media-preview__status,

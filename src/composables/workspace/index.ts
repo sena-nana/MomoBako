@@ -48,6 +48,7 @@ export {
 } from "./settings";
 export {
   attachRepository,
+  configureNeteaseRepositoryCacheInWorkspace,
   createNewRepository,
   exportCurrentRepository,
   importExistingRepository,

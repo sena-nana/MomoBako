@@ -190,9 +190,9 @@ function setImageDurationFromInput(event: Event) {
       </div>
     </div>
 
-    <div v-if="queueOpen" class="workspace-player__queue" role="dialog" aria-label="当前播放列表">
+    <div v-if="queueOpen" class="workspace-player__queue" role="dialog" aria-label="当前队列">
       <header class="workspace-player__queue-head">
-        <strong>当前播放列表</strong>
+        <strong>当前队列</strong>
         <span>{{ queueItems.length }} 项</span>
       </header>
       <div class="workspace-player__queue-list">
