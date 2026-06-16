@@ -17,8 +17,10 @@ use std::{
 };
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 
+mod file_browser;
 mod plugins;
 mod repository_management;
+mod repository_query;
 
 const REGISTRY_FILE_NAME: &str = "repositories.db";
 const REPO_META_DIR: &str = ".momo";
@@ -2198,66 +2200,11 @@ impl RepositoryState {
     }
 
     pub fn load_snapshot(&self, repo_id: &str) -> Result<RepositorySnapshot, String> {
-        self.ensure_initialized()?;
-
-        let repo = self.load_repository_record(repo_id)?;
-        let repo_root = PathBuf::from(&repo.summary.path);
-        let connection = self.open_repository_connection(
-            &repo.summary.repo_id,
-            &repo.summary.path,
-            &repo.backend_record,
-        )?;
-        let asset_count: i64 = connection
-            .query_row(
-                "SELECT COUNT(*) FROM assets WHERE status != 'deleted'",
-                [],
-                |row| row.get(0),
-            )
-            .map_err(db_error)?;
-
-        let thumbnail_root = self.repository_thumbnail_root(&repo)?;
-        let folders = load_folder_summaries(&connection, repo_id).map_err(db_error)?;
-        let assets = normalize_asset_summaries(
-            &connection,
-            &repo,
-            &thumbnail_root,
-            load_assets(&connection, repo_id).map_err(db_error)?,
-        )?;
-        let quick_access = load_repository_shortcuts(&connection, repo_id).map_err(db_error)?;
-        let tag_groups = load_repository_tag_groups(&connection, repo_id).map_err(db_error)?;
-        let playlists = load_playlists(&connection, repo_id).map_err(db_error)?;
-        let metadata_fields = load_metadata_fields(&connection).map_err(db_error)?;
-        let recent_revision_count: i64 = connection
-            .query_row("SELECT COUNT(*) FROM revisions", [], |row| row.get(0))
-            .map_err(db_error)?;
-        let overview = build_repository_overview(&repo_root, &assets)?;
-
-        Ok(RepositorySnapshot {
-            repository: RepositorySummary {
-                asset_count,
-                ..repo.summary
-            },
-            folder_label: dominant_folder_label(&folders, &assets),
-            folders,
-            assets,
-            playlists,
-            quick_access,
-            tag_groups,
-            metadata_fields,
-            recent_revision_count,
-            overview,
-        })
+        repository_query::load_snapshot(self, repo_id)
     }
 
     pub fn load_asset_detail(&self, repo_id: &str, asset_id: &str) -> Result<AssetDetail, String> {
-        self.ensure_initialized()?;
-        let repo = self.load_repository_record(repo_id)?;
-        let connection = self.open_repository_connection(
-            &repo.summary.repo_id,
-            &repo.summary.path,
-            &repo.backend_record,
-        )?;
-        load_asset_detail_from_connection(&connection, repo_id, asset_id).map_err(db_error)
+        repository_query::load_asset_detail(self, repo_id, asset_id)
     }
 
     pub fn list_playlists(&self, repo_id: &str) -> Result<Vec<PlaylistSummary>, String> {
@@ -2724,172 +2671,25 @@ impl RepositoryState {
         &self,
         request: FileBrowserRequest,
     ) -> Result<FileBrowserSnapshot, String> {
-        self.ensure_initialized()?;
-
-        let repo = self.load_repository_record(&request.repo_id)?;
-        let repo_root = PathBuf::from(&repo.summary.path);
-        let connection = self.open_repository_connection(
-            &repo.summary.repo_id,
-            &repo.summary.path,
-            &repo.backend_record,
-        )?;
-        let thumbnail_root = self.repository_thumbnail_root(&repo)?;
-        let asset_map = normalize_asset_thumbnail_map(
-            &connection,
-            &repo,
-            &thumbnail_root,
-            load_asset_path_map(&connection, &request.repo_id).map_err(db_error)?,
-        )?;
-        let thumbnail_map = normalize_entry_thumbnail_map(
-            &connection,
-            &repo,
-            &thumbnail_root,
-            load_entry_thumbnail_map(&connection, &request.repo_id).map_err(db_error)?,
-        )?;
-        let folder_metadata =
-            load_folder_metadata_map(&connection, &request.repo_id).map_err(db_error)?;
-        let special_location = normalize_special_location(request.special_location.as_deref())?;
-        if special_location.is_some() && repo.backend_record.plugin_id != LOCAL_FILESYSTEM_PLUGIN_ID
-        {
-            return Err(format!(
-                "trash browser is only supported for local filesystem repositories, got: {}",
-                repo.backend_record.plugin_id
-            ));
-        }
-        let current_path =
-            normalize_directory_path(request.directory_path.as_deref().unwrap_or_default())?;
-        let tree = if special_location.is_some() {
-            None
-        } else if request.include_tree.unwrap_or(true) {
-            Some(list_backend_tree(&self.root, &repo, &repo_root)?)
-        } else {
-            None
-        };
-        let entries = if special_location.as_deref() == Some("trash") {
-            list_trash_directory_entries(&repo_root, &current_path, &asset_map, &thumbnail_map)?
-        } else {
-            list_backend_directory_entries(
-                &self.root,
-                &repo,
-                &repo_root,
-                &current_path,
-                &asset_map,
-                &thumbnail_map,
-                &folder_metadata,
-            )?
-        };
-        let entries = attach_browser_entry_metadata(&connection, &request.repo_id, entries)
-            .map_err(db_error)?;
-
-        Ok(FileBrowserSnapshot {
-            repo_id: request.repo_id,
-            root_path: repo.summary.path,
-            backend_plugin_id: repo.backend_record.plugin_id.clone(),
-            backend_kind: repo.summary.backend.kind,
-            current_path,
-            special_location,
-            tree,
-            entries,
-        })
+        file_browser::load_file_browser(self, request)
     }
 
     pub fn read_file(&self, request: FileReadRequest) -> Result<Vec<u8>, String> {
-        self.ensure_initialized()?;
-
-        let repo = self.load_repository_record(&request.repo_id)?;
-        if repo.backend_record.plugin_id != LOCAL_FILESYSTEM_PLUGIN_ID {
-            return Err(format!(
-                "file preview read is not available for backend: {}",
-                repo.backend_record.plugin_id
-            ));
-        }
-
-        let entry_path = normalize_entry_path(&request.path)?;
-        let repo_root = PathBuf::from(&repo.summary.path);
-        let file_path = resolve_repository_relative_path(&repo_root, &entry_path)?;
-        if !file_path.exists() {
-            return Err(format!("file not found: {entry_path}"));
-        }
-        if !file_path.is_file() {
-            return Err(format!("path is not a file: {entry_path}"));
-        }
-
-        fs::read(file_path).map_err(io_error)
+        repository_query::read_file(self, request)
     }
 
     pub fn prepare_preview_file_source(
         &self,
         request: FileReadRequest,
     ) -> Result<FilePreviewSourceResponse, String> {
-        self.ensure_initialized()?;
-
-        let repo = self.load_repository_record(&request.repo_id)?;
-        if repo.backend_record.plugin_id != LOCAL_FILESYSTEM_PLUGIN_ID {
-            return Err(format!(
-                "file preview source is not available for backend: {}",
-                repo.backend_record.plugin_id
-            ));
-        }
-
-        let entry_path = normalize_entry_path(&request.path)?;
-        let repo_root = PathBuf::from(&repo.summary.path);
-        let file_path = resolve_repository_relative_path(&repo_root, &entry_path)?;
-        if !file_path.exists() {
-            return Err(format!("file not found: {entry_path}"));
-        }
-        if !file_path.is_file() {
-            return Err(format!("path is not a file: {entry_path}"));
-        }
-
-        let metadata = fs::metadata(&file_path).map_err(io_error)?;
-        let modified_at = metadata
-            .modified()
-            .ok()
-            .map(system_time_to_rfc3339)
-            .transpose()
-            .map_err(time_error)?;
-        let extension = file_path
-            .extension()
-            .map(|value| value.to_string_lossy().to_lowercase())
-            .unwrap_or_default();
-        let source_path = file_path.clone();
-        let media_type = preview_media_type_for_extension(&extension).to_string();
-        let token = preview_file_token(
-            &repo.summary.repo_id,
-            &repo.summary.path,
-            &entry_path,
-            metadata.len(),
-            modified_at.as_deref().unwrap_or_default(),
-        );
-
-        self.preview_sources
-            .lock()
-            .map_err(|_| "preview source lock poisoned".to_string())?
-            .insert(
-                token.clone(),
-                PreviewFileSource {
-                    path: source_path,
-                    media_type: media_type.clone(),
-                },
-            );
-
-        Ok(FilePreviewSourceResponse {
-            repo_id: request.repo_id,
-            path: entry_path,
-            token,
-            source_url: None,
-            local_path: Some(file_path.to_string_lossy().to_string()),
-            media_type,
-            size_bytes: metadata.len() as i64,
-            modified_at,
-        })
+        repository_query::prepare_preview_file_source(self, request)
     }
 
     pub fn prepare_entry_playback_source(
         &self,
         request: EntryPlaybackRequest,
     ) -> Result<EntryPlaybackSourceResponse, String> {
-        self.prepare_entry_playback_source_internal(request, None)
+        repository_query::prepare_entry_playback_source(self, request)
     }
 
     pub fn prepare_entry_playback_source_with_progress(
@@ -2897,259 +2697,7 @@ impl RepositoryState {
         request: EntryPlaybackRequest,
         emit: &mut dyn FnMut(EntryPlaybackProgressEvent) -> Result<(), String>,
     ) -> Result<EntryPlaybackSourceResponse, String> {
-        self.prepare_entry_playback_source_internal(request, Some(emit))
-    }
-
-    fn prepare_entry_playback_source_internal(
-        &self,
-        request: EntryPlaybackRequest,
-        mut emit: Option<&mut dyn FnMut(EntryPlaybackProgressEvent) -> Result<(), String>>,
-    ) -> Result<EntryPlaybackSourceResponse, String> {
-        self.ensure_initialized()?;
-
-        let repo = self.load_repository_record(&request.repo_id)?;
-        let entry_path = normalize_entry_path(&request.path)?;
-        emit_entry_playback_progress(
-            &mut emit,
-            "resolve",
-            &request.repo_id,
-            &entry_path,
-            8,
-            "解析媒体条目",
-            false,
-            None,
-            None,
-        )?;
-        let connection = self.open_repository_connection(
-            &repo.summary.repo_id,
-            &repo.summary.path,
-            &repo.backend_record,
-        )?;
-        let asset_map = load_asset_path_map(&connection, &request.repo_id).map_err(db_error)?;
-
-        if let Some(asset) = asset_map.get(&entry_path) {
-            if !asset.is_virtual {
-                emit_entry_playback_progress(
-                    &mut emit,
-                    "preview",
-                    &request.repo_id,
-                    &entry_path,
-                    82,
-                    "准备本地预览源",
-                    false,
-                    Some(true),
-                    None,
-                )?;
-                let preview = self.prepare_preview_file_source(FileReadRequest {
-                    repo_id: request.repo_id.clone(),
-                    path: entry_path.clone(),
-                })?;
-                let response = EntryPlaybackSourceResponse {
-                    repo_id: request.repo_id,
-                    path: entry_path,
-                    media_type: preview.media_type,
-                    source_url: None,
-                    local_path: asset.local_absolute_path.clone(),
-                    temp_file_path: None,
-                    lyric_path: None,
-                    lyric_source_url: None,
-                    word_lyric_path: None,
-                    word_lyric_source_url: None,
-                    expires_at: None,
-                    size_bytes: Some(preview.size_bytes),
-                    modified_at: preview.modified_at,
-                };
-                emit_entry_playback_progress(
-                    &mut emit,
-                    "ready",
-                    &response.repo_id,
-                    &response.path,
-                    100,
-                    "播放源已就绪",
-                    false,
-                    Some(true),
-                    None,
-                )?;
-                return Ok(response);
-            }
-
-            let metadata = load_metadata_map(&connection, &asset.asset_id).map_err(db_error)?;
-            let source_payload = asset
-                .source_payload
-                .clone()
-                .or_else(|| metadata.get("sourcePayload").cloned())
-                .unwrap_or_else(|| serde_json::json!({}));
-            return self.prepare_virtual_entry_playback_source(
-                &repo,
-                request.repo_id,
-                entry_path,
-                source_payload,
-                &metadata,
-                emit,
-            );
-        }
-
-        emit_entry_playback_progress(
-            &mut emit,
-            "resolve",
-            &request.repo_id,
-            &entry_path,
-            18,
-            "从来源补取媒体信息",
-            true,
-            None,
-            None,
-        )?;
-        let repo_root = PathBuf::from(&repo.summary.path);
-        let entry = stat_backend_entry(&self.root, &repo, &repo_root, &entry_path)?;
-        if !entry.is_virtual {
-            return Err(format!("asset not found: {entry_path}"));
-        }
-        let metadata = BTreeMap::new();
-        let source_payload = entry
-            .source_payload
-            .unwrap_or_else(|| serde_json::json!({}));
-        self.prepare_virtual_entry_playback_source(
-            &repo,
-            request.repo_id,
-            entry_path,
-            source_payload,
-            &metadata,
-            emit,
-        )
-    }
-
-    fn prepare_virtual_entry_playback_source(
-        &self,
-        repo: &RepositoryRecord,
-        repo_id: String,
-        entry_path: String,
-        source_payload: serde_json::Value,
-        metadata: &BTreeMap<String, serde_json::Value>,
-        mut emit: Option<&mut dyn FnMut(EntryPlaybackProgressEvent) -> Result<(), String>>,
-    ) -> Result<EntryPlaybackSourceResponse, String> {
-        let song_id = source_payload
-            .get("songId")
-            .or_else(|| metadata.get("songId"))
-            .and_then(serde_json::Value::as_i64)
-            .or_else(|| {
-                source_payload
-                    .get("songId")
-                    .or_else(|| metadata.get("songId"))
-                    .and_then(serde_json::Value::as_str)
-                    .and_then(|value| value.parse::<i64>().ok())
-            })
-            .ok_or_else(|| "virtual entry is missing songId".to_string())?;
-        let account_cookie = source_payload
-            .get("accountCookie")
-            .or_else(|| metadata.get("accountCookie"))
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or_default();
-        let backend_account_cookie = repo
-            .backend_record
-            .config
-            .get("cookie")
-            .and_then(serde_json::Value::as_str)
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .unwrap_or(account_cookie);
-        emit_entry_playback_progress(
-            &mut emit,
-            "download",
-            &repo_id,
-            &entry_path,
-            28,
-            "下载临时音频",
-            true,
-            None,
-            None,
-        )?;
-        let managed_cache_root = if repo.backend_record.plugin_id == NETEASE_CLOUD_MUSIC_PLUGIN_ID {
-            Some(ensure_netease_cache_ready(repo)?)
-        } else {
-            None
-        };
-        let payload = serde_json::json!({
-            "accountCookie": backend_account_cookie,
-            "songId": song_id,
-            "level": source_payload.get("level").cloned().unwrap_or_else(|| serde_json::json!("standard")),
-            "repoId": repo_id,
-            "entryPath": entry_path,
-            "managedCacheRoot": managed_cache_root.as_ref().map(|path| path.to_string_lossy().to_string()),
-            "sourcePayload": source_payload,
-        });
-        let response = call_downloader_prepare_track_playback(&self.root, payload)?;
-        let cached = response.get("cached").and_then(serde_json::Value::as_bool);
-        emit_entry_playback_progress(
-            &mut emit,
-            "preview",
-            &repo_id,
-            &entry_path,
-            88,
-            if cached == Some(true) {
-                "使用已缓存音频"
-            } else {
-                "下载完成，准备预览源"
-            },
-            false,
-            cached,
-            None,
-        )?;
-        let media_type = response
-            .get("mediaType")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or("audio/mpeg")
-            .to_string();
-        let playback = EntryPlaybackSourceResponse {
-            repo_id,
-            path: entry_path,
-            media_type,
-            source_url: response
-                .get("sourceUrl")
-                .and_then(serde_json::Value::as_str)
-                .map(str::to_string),
-            local_path: response
-                .get("localPath")
-                .and_then(serde_json::Value::as_str)
-                .map(str::to_string),
-            temp_file_path: response
-                .get("tempFilePath")
-                .and_then(serde_json::Value::as_str)
-                .map(str::to_string),
-            lyric_path: response
-                .get("lyricPath")
-                .and_then(serde_json::Value::as_str)
-                .map(str::to_string),
-            lyric_source_url: None,
-            word_lyric_path: response
-                .get("wordLyricPath")
-                .and_then(serde_json::Value::as_str)
-                .map(str::to_string),
-            word_lyric_source_url: None,
-            expires_at: response
-                .get("expiresAt")
-                .and_then(serde_json::Value::as_str)
-                .map(str::to_string),
-            size_bytes: response
-                .get("sizeBytes")
-                .and_then(serde_json::Value::as_i64),
-            modified_at: response
-                .get("modifiedAt")
-                .and_then(serde_json::Value::as_str)
-                .map(str::to_string),
-        };
-        emit_entry_playback_progress(
-            &mut emit,
-            "ready",
-            &playback.repo_id,
-            &playback.path,
-            100,
-            "播放源已就绪",
-            false,
-            cached,
-            None,
-        )?;
-        Ok(playback)
+        repository_query::prepare_entry_playback_source_with_progress(self, request, emit)
     }
 
     pub fn open_preview_file_source(&self, token: &str) -> Result<(File, String), String> {
@@ -3685,110 +3233,7 @@ impl RepositoryState {
     }
 
     pub fn search_assets(&self, request: SearchRequest) -> Result<SearchResponse, String> {
-        self.ensure_initialized()?;
-
-        let normalized_query = request.query.trim().to_lowercase();
-        if normalized_query.is_empty()
-            && request.tag.is_none()
-            && request
-                .tags
-                .as_ref()
-                .map(|items| items.iter().all(|item| item.trim().is_empty()))
-                .unwrap_or(true)
-            && request.metadata_key.is_none()
-            && request
-                .exclude_query
-                .as_ref()
-                .map(|item| item.trim().is_empty())
-                .unwrap_or(true)
-            && request
-                .exclude_path_prefixes
-                .as_ref()
-                .map(|items| items.iter().all(|item| item.trim().is_empty()))
-                .unwrap_or(true)
-            && request
-                .exclude_tags
-                .as_ref()
-                .map(|items| items.iter().all(|item| item.trim().is_empty()))
-                .unwrap_or(true)
-            && request
-                .exclude_formats
-                .as_ref()
-                .map(|items| items.iter().all(|item| item.trim().is_empty()))
-                .unwrap_or(true)
-            && request
-                .exclude_metadata_filters
-                .as_ref()
-                .map(|items| {
-                    items
-                        .iter()
-                        .all(|item| item.key.trim().is_empty() || item.value.trim().is_empty())
-                })
-                .unwrap_or(true)
-            && request
-                .exclude_number_filters
-                .as_ref()
-                .map(|items| {
-                    items.iter().all(|item| {
-                        item.key.trim().is_empty() || (item.min.is_none() && item.max.is_none())
-                    })
-                })
-                .unwrap_or(true)
-            && request
-                .exclude_date_filters
-                .as_ref()
-                .map(|items| {
-                    items.iter().all(|item| {
-                        item.key.trim().is_empty() || (item.from.is_none() && item.to.is_none())
-                    })
-                })
-                .unwrap_or(true)
-            && request
-                .metadata_filters
-                .as_ref()
-                .map(|items| {
-                    items
-                        .iter()
-                        .all(|item| item.key.trim().is_empty() || item.value.trim().is_empty())
-                })
-                .unwrap_or(true)
-            && request
-                .formats
-                .as_ref()
-                .map(|items| items.iter().all(|item| item.trim().is_empty()))
-                .unwrap_or(true)
-            && request.min_rating.is_none()
-        {
-            return Ok(SearchResponse {
-                query: request.query,
-                results: Vec::new(),
-            });
-        }
-
-        let repositories = self.load_repository_records()?;
-        let mut results = Vec::new();
-
-        for repo in repositories {
-            if let Some(filter_repo_id) = &request.repo_id {
-                if &repo.summary.repo_id != filter_repo_id {
-                    continue;
-                }
-            }
-            let connection = self.open_repository_connection(
-                &repo.summary.repo_id,
-                &repo.summary.path,
-                &repo.backend_record,
-            )?;
-            let repo_results =
-                search_repository_assets(&connection, &repo.summary, &normalized_query, &request)
-                    .map_err(db_error)?;
-            results.extend(repo_results);
-        }
-
-        Ok(SearchResponse {
-            query: request.query,
-            results,
-        })
+        repository_query::search_assets(self, request)
     }
 
     pub fn list_hardlink_candidates(
@@ -3885,51 +3330,7 @@ impl RepositoryState {
         &self,
         request: MetadataUpdateRequest,
     ) -> Result<MetadataUpdateResponse, String> {
-        self.ensure_initialized()?;
-        let repo = self.load_repository_record(&request.repo_id)?;
-        let mut connection = self.open_repository_connection(
-            &repo.summary.repo_id,
-            &repo.summary.path,
-            &repo.backend_record,
-        )?;
-        let tx = connection.transaction().map_err(db_error)?;
-
-        let current_version: i64 = tx
-            .query_row(
-                "SELECT version FROM assets WHERE repo_id = ?1 AND asset_id = ?2",
-                params![request.repo_id, request.asset_id],
-                |row| row.get(0),
-            )
-            .optional()
-            .map_err(db_error)?
-            .ok_or_else(|| format!("asset not found: {}", request.asset_id))?;
-
-        if current_version != request.expected_version {
-            let asset =
-                load_asset_detail_from_transaction(&tx, &request.repo_id, &request.asset_id)
-                    .map_err(db_error)?;
-            return Ok(MetadataUpdateResponse {
-                outcome: "conflict".to_string(),
-                asset,
-            });
-        }
-
-        let source = request.source.unwrap_or_else(|| "desktop".to_string());
-        update_metadata_for_asset_in_transaction(
-            &tx,
-            &request.repo_id,
-            &request.asset_id,
-            &request.metadata,
-            &source,
-        )
-        .map_err(db_error)?;
-        tx.commit().map_err(db_error)?;
-        let asset = self.load_asset_detail(&request.repo_id, &request.asset_id)?;
-
-        Ok(MetadataUpdateResponse {
-            outcome: "success".to_string(),
-            asset,
-        })
+        repository_query::update_asset_metadata(self, request)
     }
 
     pub fn sync_repository(&self, request: SyncRequest) -> Result<SyncResult, String> {
@@ -4208,61 +3609,18 @@ impl RepositoryState {
         &self,
         request: FileCreateRequest,
     ) -> Result<FileBrowserSnapshot, String> {
-        self.ensure_initialized()?;
-        let repo = self.load_repository_record(&request.repo_id)?;
-        let repo_root = PathBuf::from(&repo.summary.path);
-        let parent_path =
-            normalize_directory_path(request.parent_path.as_deref().unwrap_or_default())?;
-        let name = validate_new_entry_name(&request.name)?;
-        create_backend_directory(&self.root, &repo, &repo_root, &parent_path, &name)?;
-        self.load_file_browser(FileBrowserRequest {
-            repo_id: request.repo_id,
-            directory_path: Some(parent_path),
-            include_tree: Some(true),
-            special_location: None,
-        })
+        file_browser::create_directory(self, request)
     }
 
     pub fn create_file(&self, request: FileCreateRequest) -> Result<FileBrowserSnapshot, String> {
-        self.ensure_initialized()?;
-        let repo = self.load_repository_record(&request.repo_id)?;
-        let repo_root = PathBuf::from(&repo.summary.path);
-        let parent_path =
-            normalize_directory_path(request.parent_path.as_deref().unwrap_or_default())?;
-        let name = validate_new_entry_name(&request.name)?;
-        create_backend_file(&self.root, &repo, &repo_root, &parent_path, &name)?;
-        let _ = self.sync_repository(SyncRequest {
-            repo_id: request.repo_id.clone(),
-        })?;
-
-        self.load_file_browser(FileBrowserRequest {
-            repo_id: request.repo_id,
-            directory_path: Some(parent_path),
-            include_tree: Some(false),
-            special_location: None,
-        })
+        file_browser::create_file(self, request)
     }
 
     pub fn import_entries(
         &self,
         request: FileImportRequest,
     ) -> Result<FileBrowserSnapshot, String> {
-        self.ensure_initialized()?;
-        let repo = self.load_repository_record(&request.repo_id)?;
-        ensure_local_filesystem_repository(&repo, "importing files")?;
-
-        let repo_root = PathBuf::from(&repo.summary.path);
-        let (parent_path, target_dir) = resolve_file_copy_target(
-            &repo_root,
-            request.parent_path.as_deref(),
-            &request.source_paths,
-        )?;
-
-        let import_plan =
-            validate_external_import_entries(&request.source_paths, &repo_root, &target_dir)?;
-        let include_tree = import_plan.iter().any(|entry| entry.is_directory);
-        let outcomes = copy_external_entries_parallel(import_plan, true)?;
-        self.finish_file_copy_operation(&request.repo_id, parent_path, include_tree, outcomes)
+        file_browser::import_entries(self, request)
     }
 
     pub fn add_external_assets(
@@ -4495,90 +3853,11 @@ impl RepositoryState {
     }
 
     pub fn copy_entries(&self, request: FileCopyRequest) -> Result<FileBrowserSnapshot, String> {
-        self.ensure_initialized()?;
-        let repo = self.load_repository_record(&request.repo_id)?;
-        ensure_local_filesystem_repository(&repo, "copying files")?;
-
-        let repo_root = PathBuf::from(&repo.summary.path);
-        let (parent_path, target_dir) = resolve_file_copy_target(
-            &repo_root,
-            request.parent_path.as_deref(),
-            &request.source_paths,
-        )?;
-
-        let copy_plan =
-            validate_repository_copy_entries(&request.source_paths, &repo_root, &target_dir)?;
-        let include_tree = copy_plan.iter().any(|entry| entry.is_directory);
-        let hardlink_preferred =
-            request.mode.as_deref().unwrap_or("hardlinkPreferred") == "hardlinkPreferred";
-        let outcomes = copy_external_entries_parallel(copy_plan, hardlink_preferred)?;
-        self.finish_file_copy_operation(&request.repo_id, parent_path, include_tree, outcomes)
+        file_browser::copy_entries(self, request)
     }
 
     pub fn move_entries(&self, request: FileMoveRequest) -> Result<FileBrowserSnapshot, String> {
-        self.ensure_initialized()?;
-        let repo = self.load_repository_record(&request.repo_id)?;
-        ensure_local_filesystem_repository(&repo, "moving files")?;
-
-        let repo_root = PathBuf::from(&repo.summary.path);
-        let parent_path = normalize_directory_path(&request.parent_path)?;
-        let target_dir = resolve_repository_relative_path(&repo_root, &parent_path)?;
-        if !target_dir.exists() || !target_dir.is_dir() {
-            return Err(format!("directory not found: {parent_path}"));
-        }
-        if request.source_paths.is_empty() {
-            return Err("no source files were provided".to_string());
-        }
-
-        let move_plan =
-            validate_repository_move_entries(&request.source_paths, &repo_root, &target_dir)?;
-        let include_tree = move_plan.iter().any(|entry| entry.is_directory);
-        let mut connection = self.open_repository_connection(
-            &repo.summary.repo_id,
-            &repo.summary.path,
-            &repo.backend_record,
-        )?;
-        let tx = connection.transaction().map_err(db_error)?;
-
-        for entry in &move_plan {
-            let moved = move_backend_entry(
-                &self.root,
-                &repo,
-                &repo_root,
-                &entry.source_relative_path,
-                &parent_path,
-            )?;
-            if entry.is_directory {
-                rename_directory_asset_records(
-                    &tx,
-                    &request.repo_id,
-                    &entry.source_relative_path,
-                    &entry.target_relative_path,
-                )
-                .map_err(db_error)?;
-            } else {
-                let extension = moved.extension.unwrap_or_default();
-                let modified_at = moved.modified_at.unwrap_or_else(now_rfc3339);
-                rename_file_asset_record(
-                    &tx,
-                    &request.repo_id,
-                    &entry.source_relative_path,
-                    &entry.target_relative_path,
-                    &entry.target_name,
-                    &extension,
-                    &modified_at,
-                )
-                .map_err(db_error)?;
-            }
-        }
-        tx.commit().map_err(db_error)?;
-
-        self.load_file_browser(FileBrowserRequest {
-            repo_id: request.repo_id,
-            directory_path: Some(parent_path),
-            include_tree: Some(include_tree),
-            special_location: None,
-        })
+        file_browser::move_entries(self, request)
     }
 
     fn finish_file_copy_operation(
@@ -4662,180 +3941,18 @@ impl RepositoryState {
     }
 
     pub fn rename_entry(&self, request: FileRenameRequest) -> Result<FileBrowserSnapshot, String> {
-        self.ensure_initialized()?;
-        let repo = self.load_repository_record(&request.repo_id)?;
-        let repo_root = PathBuf::from(&repo.summary.path);
-        let source_path = normalize_entry_path(&request.path)?;
-        let new_name = validate_new_entry_name(&request.new_name)?;
-        let parent_path = parent_relative_path(&source_path);
-        let target_path = join_relative_path(&parent_path, &new_name);
-        let renamed = rename_backend_entry(&self.root, &repo, &repo_root, &source_path, &new_name)?;
-
-        let is_directory = matches!(renamed.kind, FileSystemEntryKind::Directory);
-        if !is_directory {
-            let extension = renamed.extension.unwrap_or_default();
-            let modified_at = renamed.modified_at.unwrap_or_else(now_rfc3339);
-            let mut connection = self.open_repository_connection(
-                &repo.summary.repo_id,
-                &repo.summary.path,
-                &repo.backend_record,
-            )?;
-            let tx = connection.transaction().map_err(db_error)?;
-            rename_file_asset_record(
-                &tx,
-                &request.repo_id,
-                &source_path,
-                &target_path,
-                &new_name,
-                &extension,
-                &modified_at,
-            )
-            .map_err(db_error)?;
-            tx.commit().map_err(db_error)?;
-        } else {
-            let mut connection = self.open_repository_connection(
-                &repo.summary.repo_id,
-                &repo.summary.path,
-                &repo.backend_record,
-            )?;
-            let tx = connection.transaction().map_err(db_error)?;
-            rename_directory_asset_records(&tx, &request.repo_id, &source_path, &target_path)
-                .map_err(db_error)?;
-            tx.commit().map_err(db_error)?;
-        }
-
-        self.load_file_browser(FileBrowserRequest {
-            repo_id: request.repo_id,
-            directory_path: Some(parent_path),
-            include_tree: Some(is_directory),
-            special_location: None,
-        })
+        file_browser::rename_entry(self, request)
     }
 
     pub fn delete_entry(&self, request: FileDeleteRequest) -> Result<FileBrowserSnapshot, String> {
-        self.ensure_initialized()?;
-        let repo = self.load_repository_record(&request.repo_id)?;
-        let repo_root = PathBuf::from(&repo.summary.path);
-        let delete_mode = request.mode.as_deref().unwrap_or("delete");
-
-        if delete_mode == "permanentDelete" {
-            if repo.backend_record.plugin_id != LOCAL_FILESYSTEM_PLUGIN_ID {
-                return Err(format!(
-                    "permanent trash delete is only supported for local filesystem repositories, got: {}",
-                    repo.backend_record.plugin_id
-                ));
-            }
-            let trash_path = normalize_trash_relative_path(&request.path, false)?;
-            let parent_path = parent_relative_path(&trash_path);
-            delete_trash_entry(&repo_root, &trash_path)?;
-            return self.load_file_browser(FileBrowserRequest {
-                repo_id: request.repo_id,
-                directory_path: Some(parent_path),
-                include_tree: Some(false),
-                special_location: Some("trash".to_string()),
-            });
-        }
-
-        let entry_path = normalize_entry_path(&request.path)?;
-        let parent_path = parent_relative_path(&entry_path);
-        let entry = stat_backend_entry(&self.root, &repo, &repo_root, &entry_path)?;
-
-        let is_directory = matches!(entry.kind, FileSystemEntryKind::Directory);
-        if is_directory {
-            if delete_mode == "moveToParent" {
-                move_directory_contents_to_parent(
-                    &self.root,
-                    &repo,
-                    &repo_root,
-                    &request.repo_id,
-                    &entry_path,
-                )?;
-            } else {
-                if repo.backend_record.plugin_id != LOCAL_FILESYSTEM_PLUGIN_ID {
-                    return Err(format!(
-                        "trash delete is only supported for local filesystem repositories, got: {}",
-                        repo.backend_record.plugin_id
-                    ));
-                }
-                move_entry_to_trash(&repo_root, &entry_path, is_directory)?;
-                let mut connection = self.open_repository_connection(
-                    &repo.summary.repo_id,
-                    &repo.summary.path,
-                    &repo.backend_record,
-                )?;
-                let tx = connection.transaction().map_err(db_error)?;
-                mark_directory_assets_deleted(&tx, &request.repo_id, &entry_path)
-                    .map_err(db_error)?;
-                tx.commit().map_err(db_error)?;
-            }
-        } else {
-            if repo.backend_record.plugin_id != LOCAL_FILESYSTEM_PLUGIN_ID {
-                return Err(format!(
-                    "trash delete is only supported for local filesystem repositories, got: {}",
-                    repo.backend_record.plugin_id
-                ));
-            }
-            move_entry_to_trash(&repo_root, &entry_path, is_directory)?;
-            let mut connection = self.open_repository_connection(
-                &repo.summary.repo_id,
-                &repo.summary.path,
-                &repo.backend_record,
-            )?;
-            let tx = connection.transaction().map_err(db_error)?;
-            mark_file_asset_deleted(&tx, &request.repo_id, &entry_path).map_err(db_error)?;
-            tx.commit().map_err(db_error)?;
-        }
-
-        self.load_file_browser(FileBrowserRequest {
-            repo_id: request.repo_id,
-            directory_path: Some(parent_path),
-            include_tree: Some(is_directory),
-            special_location: None,
-        })
+        file_browser::delete_entry(self, request)
     }
 
     pub fn mutate_trash(
         &self,
         request: TrashMutationRequest,
     ) -> Result<FileBrowserSnapshot, String> {
-        self.ensure_initialized()?;
-        let repo = self.load_repository_record(&request.repo_id)?;
-        if repo.backend_record.plugin_id != LOCAL_FILESYSTEM_PLUGIN_ID {
-            return Err(format!(
-                "trash operations are only supported for local filesystem repositories, got: {}",
-                repo.backend_record.plugin_id
-            ));
-        }
-        let repo_root = PathBuf::from(&repo.summary.path);
-
-        match request.action.as_str() {
-            "restore" => {
-                let trash_path = request
-                    .path
-                    .as_deref()
-                    .ok_or_else(|| "trash restore requires a path".to_string())
-                    .and_then(|path| normalize_trash_relative_path(path, false))?;
-                restore_trash_entry(&repo_root, &trash_path)?;
-            }
-            "restoreAll" => {
-                restore_all_trash_entries(&repo_root)?;
-            }
-            "empty" => {
-                empty_trash(&repo_root)?;
-            }
-            value => return Err(format!("unsupported trash action: {value}")),
-        }
-
-        let _ = self.sync_repository(SyncRequest {
-            repo_id: request.repo_id.clone(),
-        })?;
-
-        self.load_file_browser(FileBrowserRequest {
-            repo_id: request.repo_id,
-            directory_path: Some(String::new()),
-            include_tree: Some(false),
-            special_location: Some("trash".to_string()),
-        })
+        file_browser::mutate_trash(self, request)
     }
 
     pub fn undo_last_revision(

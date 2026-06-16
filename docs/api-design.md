@@ -8,6 +8,7 @@
 - Rust backend layering:
   - `lib.rs` acts as the View layer for Tauri command entrypoints and app-facing side effects.
   - `repository_view_model.rs` acts as the ViewModel layer for repository-management command orchestration.
+  - `repository_query_view_model.rs`, `file_browser_view_model.rs`, `plugin_view_model.rs`, and `repository_interaction_view_model.rs` split repository queries, file browsing, plugin/cache flows, and repository interaction flows into domain ViewModels.
   - `repository_service.rs` and its submodules act as the Model/Service layer for repository domain logic and persistence.
 
 ## External Asset API
@@ -46,7 +47,9 @@
 - Current repository-management implementation follows the backend MVVM split above:
   - command entrypoints stay transport-stable
   - repository-management orchestration lives in the dedicated ViewModel
+  - repository query, file-browser, playback/preview, plugin/cache, playlist/smart-folder/revision/action flows are routed through domain ViewModels before entering the repository runtime
   - create/import/attach/delete/relocate/backend-config/cache-config/export/sync logic lives in the repository-management service module
+  - snapshot/search/playback/file-browser logic now lives in dedicated `repository_service` submodules instead of `lib.rs`
 
 - `GET /repositories`
   - List registered repositories from `MetaHub/repositories.db`
