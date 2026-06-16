@@ -12,6 +12,12 @@ export type RepositoryBackendOption = RepositoryBackendSummary & {
 
 export type RepositoryStatus = "ready" | "missing";
 
+export type RepositoryLocalCacheStatus = {
+  required: boolean;
+  path?: string | null;
+  status: "ready" | "missing" | "unconfigured";
+};
+
 export type RepositorySummary = {
   repoId: string;
   name: string;
@@ -20,6 +26,7 @@ export type RepositorySummary = {
   status: RepositoryStatus;
   assetCount: number;
   updatedAt: string;
+  localCache?: RepositoryLocalCacheStatus | null;
 };
 
 export type AssetSummary = {
@@ -497,6 +504,24 @@ export type RepositoryBackendConfigUpdateRequest = {
   backendConfig: Record<string, unknown>;
 };
 
+export type NeteaseRepositoryCacheConfigureRequest = {
+  repoId: string;
+  path: string;
+  migrateLegacyCache?: boolean;
+};
+
+export type NeteaseRepositoryCacheMigrationSummary = {
+  movedStateFiles: number;
+  migratedPlaybackCacheFiles: number;
+  skippedPlaybackCacheFiles: number;
+  failedPlaybackCacheFiles: number;
+};
+
+export type NeteaseRepositoryCacheConfigureResponse = {
+  repository: RepositorySummary;
+  migration: NeteaseRepositoryCacheMigrationSummary;
+};
+
 export type RepositoryExportTarget = "archive" | "git";
 
 export type RepositoryArchiveFormat = "zip" | "7z" | "tar";
@@ -577,6 +602,7 @@ export type DownloaderPlaylistRequest = {
     repoId?: string | null;
     parentPath?: string | null;
   };
+  managedCacheRoot?: string | null;
   sourcePayload?: Record<string, unknown> | null;
   level?: string | null;
 };
@@ -668,6 +694,7 @@ export type FilePreviewSourceResponse = {
   path: string;
   token: string;
   sourceUrl?: string | null;
+  localPath?: string | null;
   mediaType: string;
   sizeBytes: number;
   modifiedAt?: string | null;

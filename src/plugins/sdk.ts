@@ -89,6 +89,7 @@ export type EntryAction = {
 
 export type EntryActionContext = {
   repoId: string;
+  repository?: RepositorySummary | null;
   entry: FileBrowserEntry;
   entries: FileBrowserEntry[];
   refreshRepo: () => Promise<void>;

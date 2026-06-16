@@ -247,7 +247,7 @@ function neteaseRepository(): MockRepository {
   return {
     repoId: "netease-cloud-music-123456",
     name: "云村 Aura",
-    path: "netease-cloud-music://account/123456",
+    path: "C:/Mock/NeteaseCache",
     backend: {
       pluginId: "momobako.source.netease-cloud-music",
       kind: "netease-cloud-music",
@@ -257,6 +257,24 @@ function neteaseRepository(): MockRepository {
     status: "ready",
     assetCount: 2,
     updatedAt: "2026-06-14T00:00:00Z",
+    localCache: {
+      required: true,
+      path: "C:/Mock/NeteaseCache",
+      status: "ready",
+    },
+  };
+}
+
+function legacyNeteaseRepositoryWithoutCache(): MockRepository {
+  return {
+    ...neteaseRepository(),
+    path: "netease-cloud-music://account/123456",
+    status: "missing",
+    localCache: {
+      required: true,
+      path: null,
+      status: "unconfigured",
+    },
   };
 }
 
@@ -573,6 +591,28 @@ describe("文件管理冒烟", () => {
     expect(getInvokeCalls("get_repository_snapshot").at(-1)?.args).toMatchObject({
       repoId: "repo-main-001",
     });
+  });
+
+  it("旧网易云资源库缺少缓存目录时要求指定缓存目录", async () => {
+    seedMockPlugins(neteasePlugins());
+    seedMockRepositories([legacyNeteaseRepositoryWithoutCache()]);
+    selectMockFolder("C:/Mock/NeteaseCacheMigrated");
+
+    await renderApp();
+
+    expect(await screen.findByText("这个网易云资源库需要指定本地缓存目录。缓存目录会保存索引、缩略图、播放缓存和下载暂存。")).toBeInTheDocument();
+    await fireEvent.click(screen.getByRole("button", { name: "指定缓存目录" }));
+
+    await waitFor(() => {
+      expect(getInvokeCalls("configure_netease_repository_cache").at(-1)?.args).toMatchObject({
+        request: {
+          repoId: "netease-cloud-music-123456",
+          path: "C:/Mock/NeteaseCacheMigrated",
+          migrateLegacyCache: true,
+        },
+      });
+    });
+    expect(await screen.findByRole("button", { name: "资源库" })).toBeInTheDocument();
   });
 
   it("启动后会恢复当前资源库的播放会话且不切走文件浏览页", async () => {
@@ -1062,6 +1102,8 @@ describe("文件管理冒烟", () => {
 
     expect(await screen.findByText("登录网易云音乐")).toBeInTheDocument();
     expect(await screen.findByAltText("网易云二维码登录")).toBeInTheDocument();
+    selectMockFolder("C:/Mock/NeteaseCache");
+    await fireEvent.click(screen.getByRole("button", { name: "本地缓存目录" }));
     await fireEvent.click(screen.getByRole("button", { name: "检查扫码结果" }));
 
     await waitFor(() => {
@@ -1069,13 +1111,15 @@ describe("文件管理冒烟", () => {
         request: {
           repoId: "netease-cloud-music-123456",
           name: "云村 Aura",
-          path: "netease-cloud-music://account/123456",
+          path: "C:/Mock/NeteaseCache",
           backendPluginId: "momobako.source.netease-cloud-music",
           backendConfig: {
             apiBaseUrl: "https://mock.api",
             accountId: "123456",
             cookie: "MUSIC_U=mock-cookie",
             defaultLevel: "standard",
+            sourceUri: "netease-cloud-music://account/123456",
+            localCachePath: "C:/Mock/NeteaseCache",
             lastSyncAt: expect.any(String),
           },
         },
@@ -1111,6 +1155,8 @@ describe("文件管理冒烟", () => {
     await fireEvent.click(screen.getByRole("button", { name: "资源库" }));
     await fireEvent.click(await screen.findByRole("button", { name: "添加资源库" }));
     await fireEvent.click(await screen.findByRole("button", { name: "网易云音乐" }));
+    selectMockFolder("C:/Mock/NeteaseCache");
+    await fireEvent.click(await screen.findByRole("button", { name: "本地缓存目录" }));
     await fireEvent.click(await screen.findByRole("button", { name: "检查扫码结果" }));
 
     await waitFor(() => {
@@ -1534,6 +1580,60 @@ describe("文件管理冒烟", () => {
       ));
       expect(syncCalls).toHaveLength(1);
     });
+  });
+
+  it("网易云歌单目录支持创建并复用音频播放集", async () => {
+    const plugins = neteasePlugins();
+    seedMockPlugins(plugins);
+    seedMockRepositories([neteaseRepository()]);
+    seedMockEntries(neteaseVirtualEntries());
+    seedMockPlaylists([], {});
+    mockPluginCallResponse("momobako.source.netease-cloud-music", "auth.getLoginStatus", {
+      loggedIn: true,
+      loginExpired: false,
+    });
+
+    await syncRegisteredFrontendPluginManifests(plugins);
+    await renderApp();
+
+    await fireEvent.dblClick(fileListItem("创建的歌单"));
+    await fireEvent.contextMenu(fileListItem("创建的歌单/夜跑歌单"));
+    await fireEvent.click(await screen.findByRole("menuitem", { name: "创建播放集", hidden: true }));
+
+    await waitFor(() => {
+      expect(getInvokeCalls("create_playlist").at(-1)?.args).toMatchObject({
+        request: {
+          repoId: "netease-cloud-music-123456",
+          playlistId: "netease-cloud-music-9001",
+          name: "夜跑歌单",
+          playerTypeId: "momobako.playlist.audio-sequence",
+        },
+      });
+    });
+    await waitFor(() => {
+      expect(getInvokeCalls("add_playlist_items_by_paths").at(-1)?.args).toMatchObject({
+        request: {
+          repoId: "netease-cloud-music-123456",
+          playlistId: "netease-cloud-music-9001",
+          paths: ["创建的歌单/夜跑歌单"],
+        },
+      });
+    });
+
+    await fireEvent.click(document.body);
+    await useRepositoryWorkspace().loadFileBrowserForDirectory("创建的歌单");
+    await waitForFileBrowserDerivedState();
+    await fireEvent.contextMenu(fileListItem("创建的歌单/夜跑歌单"));
+    await fireEvent.click(await screen.findByRole("menuitem", { name: "创建播放集", hidden: true }));
+
+    await waitFor(() => {
+      expect(getInvokeCalls("add_playlist_items_by_paths").filter((call) => (
+        (call.args?.request as { playlistId?: string } | undefined)?.playlistId === "netease-cloud-music-9001"
+      ))).toHaveLength(2);
+    });
+    expect(getInvokeCalls("create_playlist").filter((call) => (
+      (call.args?.request as { playlistId?: string } | undefined)?.playlistId === "netease-cloud-music-9001"
+    ))).toHaveLength(1);
   });
 
   it("网易云歌单目录支持下载到本地并携带展开后的歌曲列表", async () => {

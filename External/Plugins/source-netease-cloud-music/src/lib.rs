@@ -37,6 +37,8 @@ struct PluginPayload {
     #[serde(default)]
     qrimg: Option<bool>,
     #[serde(default)]
+    persist_session: Option<bool>,
+    #[serde(default)]
     timestamp: Option<i64>,
     #[serde(default)]
     cookie: Option<String>,
@@ -327,7 +329,17 @@ fn handle_call(input: *const c_char) -> Result<serde_json::Value, String> {
         "auth.getLoginStatus" => auth_get_login_status(&runtime, payload),
         "auth.clearLogin" => auth_clear_login(&runtime),
         "filesystem.ensureAttachable" => Ok(serde_json::json!({})),
-        "filesystem.prepareRepositoryRoot" => Ok(serde_json::json!({})),
+        "filesystem.prepareRepositoryRoot" => {
+            if let Some(repo_root) = payload
+                .repo_root
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+            {
+                fs::create_dir_all(repo_root).map_err(io_error)?;
+            }
+            Ok(serde_json::json!({}))
+        }
         "filesystem.listFiles" => list_files(&runtime),
         "filesystem.listTree" => list_tree(&runtime),
         "filesystem.listDirectory" => list_directory(
@@ -515,7 +527,9 @@ fn auth_poll_qr_session(
         avatar_url: profile.as_ref().and_then(|value| value.avatar_url.clone()),
         fetched_at: now_rfc3339()?,
     };
-    save_session(runtime, &session)?;
+    if payload.persist_session.unwrap_or(true) {
+        save_session(runtime, &session)?;
+    }
     Ok(serde_json::json!({
         "code": response.code,
         "cookie": cookie,
@@ -1444,6 +1458,7 @@ mod tests {
                 config: None,
                 key: None,
                 qrimg: None,
+                persist_session: None,
                 timestamp: None,
                 cookie: None,
             },
