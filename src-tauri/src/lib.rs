@@ -12,11 +12,19 @@ const TRAY_OPEN_ID: &str = "tray-open";
 const TRAY_QUIT_ID: &str = "tray-quit";
 const BG: Color = Color(0x18, 0x18, 0x18, 0xFF);
 
+mod file_browser_view_model;
+mod plugin_view_model;
+mod repository_interaction_view_model;
+mod repository_query_view_model;
 mod repository_runtime;
 mod repository_service;
 mod repository_view_model;
 mod window_state;
 
+use file_browser_view_model::FileBrowserViewModel;
+use plugin_view_model::PluginViewModel;
+use repository_interaction_view_model::RepositoryInteractionViewModel;
+use repository_query_view_model::RepositoryQueryViewModel;
 use repository_runtime::{ExternalApiConnectionStatus, RepositoryRuntime};
 use repository_service::{
     ApiDesignSnapshot, AssetDetail, BinaryFileWriteRequest, BinaryFileWriteResponse, CacheSnapshot,
@@ -52,120 +60,102 @@ async fn ping() -> Result<String, String> {
 
 #[tauri::command]
 async fn list_repositories(
-    runtime: tauri::State<'_, RepositoryRuntime>,
+    repository_query: tauri::State<'_, RepositoryQueryViewModel>,
 ) -> Result<Vec<RepositorySummary>, String> {
-    runtime.run_read(|state| state.list_repositories()).await
+    repository_query.list_repositories().await
 }
 
 #[tauri::command]
 async fn get_repository_snapshot(
     repo_id: String,
-    runtime: tauri::State<'_, RepositoryRuntime>,
+    repository_query: tauri::State<'_, RepositoryQueryViewModel>,
 ) -> Result<RepositorySnapshot, String> {
-    runtime
-        .run_read(move |state| state.load_snapshot(&repo_id))
-        .await
+    repository_query.get_repository_snapshot(repo_id).await
 }
 
 #[tauri::command]
 async fn get_asset_detail(
     repo_id: String,
     asset_id: String,
-    runtime: tauri::State<'_, RepositoryRuntime>,
+    repository_query: tauri::State<'_, RepositoryQueryViewModel>,
 ) -> Result<AssetDetail, String> {
-    runtime
-        .run_read(move |state| state.load_asset_detail(&repo_id, &asset_id))
-        .await
+    repository_query.get_asset_detail(repo_id, asset_id).await
 }
 
 #[tauri::command]
 async fn search_assets(
     request: SearchRequest,
-    runtime: tauri::State<'_, RepositoryRuntime>,
+    repository_query: tauri::State<'_, RepositoryQueryViewModel>,
 ) -> Result<SearchResponse, String> {
-    runtime
-        .run_read(move |state| state.search_assets(request))
-        .await
+    repository_query.search_assets(request).await
 }
 
 #[tauri::command]
 async fn update_asset_metadata(
     request: MetadataUpdateRequest,
-    runtime: tauri::State<'_, RepositoryRuntime>,
+    repository_query: tauri::State<'_, RepositoryQueryViewModel>,
 ) -> Result<MetadataUpdateResponse, String> {
-    runtime
-        .run_write(move |state| state.update_asset_metadata(request))
-        .await
+    repository_query.update_asset_metadata(request).await
 }
 
 #[tauri::command]
 async fn get_file_browser(
     request: FileBrowserRequest,
-    runtime: tauri::State<'_, RepositoryRuntime>,
+    file_browser: tauri::State<'_, FileBrowserViewModel>,
 ) -> Result<FileBrowserSnapshot, String> {
-    runtime
-        .run_read(move |state| state.load_file_browser(request))
-        .await
+    file_browser.get_file_browser(request).await
 }
 
 #[tauri::command]
 async fn list_smart_folders(
     repo_id: String,
-    runtime: tauri::State<'_, RepositoryRuntime>,
+    repository_interaction: tauri::State<'_, RepositoryInteractionViewModel>,
 ) -> Result<Vec<SmartFolderTreeNode>, String> {
-    runtime
-        .run_read(move |state| state.list_smart_folders(&repo_id))
-        .await
+    repository_interaction.list_smart_folders(repo_id).await
 }
 
 #[tauri::command]
 async fn list_playlists(
     repo_id: String,
-    runtime: tauri::State<'_, RepositoryRuntime>,
+    repository_interaction: tauri::State<'_, RepositoryInteractionViewModel>,
 ) -> Result<Vec<PlaylistSummary>, String> {
-    runtime
-        .run_read(move |state| state.list_playlists(&repo_id))
-        .await
+    repository_interaction.list_playlists(repo_id).await
 }
 
 #[tauri::command]
 async fn list_playlist_memberships(
     repo_id: String,
-    runtime: tauri::State<'_, RepositoryRuntime>,
+    repository_interaction: tauri::State<'_, RepositoryInteractionViewModel>,
 ) -> Result<PlaylistMembershipIndex, String> {
-    runtime
-        .run_read(move |state| state.list_playlist_memberships(&repo_id))
+    repository_interaction
+        .list_playlist_memberships(repo_id)
         .await
 }
 
 #[tauri::command]
 async fn create_playlist(
     request: PlaylistMutationRequest,
-    runtime: tauri::State<'_, RepositoryRuntime>,
+    repository_interaction: tauri::State<'_, RepositoryInteractionViewModel>,
 ) -> Result<PlaylistMutationResponse, String> {
-    runtime
-        .run_write(move |state| state.create_playlist(request))
-        .await
+    repository_interaction.create_playlist(request).await
 }
 
 #[tauri::command]
 async fn update_playlist(
     request: repository_service::PlaylistUpdateRequest,
-    runtime: tauri::State<'_, RepositoryRuntime>,
+    repository_interaction: tauri::State<'_, RepositoryInteractionViewModel>,
 ) -> Result<PlaylistMutationResponse, String> {
-    runtime
-        .run_write(move |state| state.update_playlist(request))
-        .await
+    repository_interaction.update_playlist(request).await
 }
 
 #[tauri::command]
 async fn delete_playlist(
     repo_id: String,
     playlist_id: String,
-    runtime: tauri::State<'_, RepositoryRuntime>,
+    repository_interaction: tauri::State<'_, RepositoryInteractionViewModel>,
 ) -> Result<PlaylistMutationResponse, String> {
-    runtime
-        .run_write(move |state| state.delete_playlist(&repo_id, &playlist_id))
+    repository_interaction
+        .delete_playlist(repo_id, playlist_id)
         .await
 }
 
@@ -173,91 +163,81 @@ async fn delete_playlist(
 async fn get_playlist_detail(
     repo_id: String,
     playlist_id: String,
-    runtime: tauri::State<'_, RepositoryRuntime>,
+    repository_interaction: tauri::State<'_, RepositoryInteractionViewModel>,
 ) -> Result<PlaylistDetail, String> {
-    runtime
-        .run_read(move |state| state.get_playlist_detail(&repo_id, &playlist_id))
+    repository_interaction
+        .get_playlist_detail(repo_id, playlist_id)
         .await
 }
 
 #[tauri::command]
 async fn add_playlist_items(
     request: PlaylistItemsAddRequest,
-    runtime: tauri::State<'_, RepositoryRuntime>,
+    repository_interaction: tauri::State<'_, RepositoryInteractionViewModel>,
 ) -> Result<PlaylistDetail, String> {
-    runtime
-        .run_write(move |state| state.add_playlist_items(request))
-        .await
+    repository_interaction.add_playlist_items(request).await
 }
 
 #[tauri::command]
 async fn add_playlist_items_by_paths(
     request: PlaylistItemsByPathsAddRequest,
-    runtime: tauri::State<'_, RepositoryRuntime>,
+    repository_interaction: tauri::State<'_, RepositoryInteractionViewModel>,
 ) -> Result<PlaylistDetail, String> {
-    runtime
-        .run_write(move |state| state.add_playlist_items_by_paths(request))
+    repository_interaction
+        .add_playlist_items_by_paths(request)
         .await
 }
 
 #[tauri::command]
 async fn reorder_playlist_items(
     request: PlaylistItemsOrderRequest,
-    runtime: tauri::State<'_, RepositoryRuntime>,
+    repository_interaction: tauri::State<'_, RepositoryInteractionViewModel>,
 ) -> Result<PlaylistDetail, String> {
-    runtime
-        .run_write(move |state| state.reorder_playlist_items(request))
-        .await
+    repository_interaction.reorder_playlist_items(request).await
 }
 
 #[tauri::command]
 async fn remove_playlist_item(
     request: PlaylistItemRemoveRequest,
-    runtime: tauri::State<'_, RepositoryRuntime>,
+    repository_interaction: tauri::State<'_, RepositoryInteractionViewModel>,
 ) -> Result<PlaylistDetail, String> {
-    runtime
-        .run_write(move |state| state.remove_playlist_item(request))
-        .await
+    repository_interaction.remove_playlist_item(request).await
 }
 
 #[tauri::command]
 async fn set_playlist_membership(
     request: PlaylistMembershipRequest,
-    runtime: tauri::State<'_, RepositoryRuntime>,
+    repository_interaction: tauri::State<'_, RepositoryInteractionViewModel>,
 ) -> Result<PlaylistMembershipSnapshot, String> {
-    runtime
-        .run_write(move |state| state.set_playlist_membership(request))
+    repository_interaction
+        .set_playlist_membership(request)
         .await
 }
 
 #[tauri::command]
 async fn create_smart_folder(
     request: SmartFolderMutationRequest,
-    runtime: tauri::State<'_, RepositoryRuntime>,
+    repository_interaction: tauri::State<'_, RepositoryInteractionViewModel>,
 ) -> Result<SmartFolderMutationResponse, String> {
-    runtime
-        .run_write(move |state| state.create_smart_folder(request))
-        .await
+    repository_interaction.create_smart_folder(request).await
 }
 
 #[tauri::command]
 async fn update_smart_folder(
     request: SmartFolderUpdateRequest,
-    runtime: tauri::State<'_, RepositoryRuntime>,
+    repository_interaction: tauri::State<'_, RepositoryInteractionViewModel>,
 ) -> Result<SmartFolderMutationResponse, String> {
-    runtime
-        .run_write(move |state| state.update_smart_folder(request))
-        .await
+    repository_interaction.update_smart_folder(request).await
 }
 
 #[tauri::command]
 async fn delete_smart_folder(
     repo_id: String,
     smart_folder_id: String,
-    runtime: tauri::State<'_, RepositoryRuntime>,
+    repository_interaction: tauri::State<'_, RepositoryInteractionViewModel>,
 ) -> Result<SmartFolderMutationResponse, String> {
-    runtime
-        .run_write(move |state| state.delete_smart_folder(&repo_id, &smart_folder_id))
+    repository_interaction
+        .delete_smart_folder(repo_id, smart_folder_id)
         .await
 }
 
@@ -265,20 +245,20 @@ async fn delete_smart_folder(
 async fn query_smart_folder(
     repo_id: String,
     smart_folder_id: String,
-    runtime: tauri::State<'_, RepositoryRuntime>,
+    repository_interaction: tauri::State<'_, RepositoryInteractionViewModel>,
 ) -> Result<SmartFolderResultSnapshot, String> {
-    runtime
-        .run_read(move |state| state.query_smart_folder(&repo_id, &smart_folder_id))
+    repository_interaction
+        .query_smart_folder(repo_id, smart_folder_id)
         .await
 }
 
 #[tauri::command]
 async fn list_repository_actions(
     repo_id: String,
-    runtime: tauri::State<'_, RepositoryRuntime>,
+    repository_interaction: tauri::State<'_, RepositoryInteractionViewModel>,
 ) -> Result<Vec<RepositoryAction>, String> {
-    runtime
-        .run_read(move |state| state.list_repository_actions(&repo_id))
+    repository_interaction
+        .list_repository_actions(repo_id)
         .await
 }
 
@@ -286,134 +266,74 @@ async fn list_repository_actions(
 async fn get_repository_action(
     repo_id: String,
     action_id: String,
-    runtime: tauri::State<'_, RepositoryRuntime>,
+    repository_interaction: tauri::State<'_, RepositoryInteractionViewModel>,
 ) -> Result<RepositoryAction, String> {
-    runtime
-        .run_read(move |state| state.get_repository_action(&repo_id, &action_id))
+    repository_interaction
+        .get_repository_action(repo_id, action_id)
         .await
 }
 
 #[tauri::command]
 async fn set_repository_action_enabled(
     request: RepositoryActionEnabledRequest,
-    runtime: tauri::State<'_, RepositoryRuntime>,
+    repository_interaction: tauri::State<'_, RepositoryInteractionViewModel>,
 ) -> Result<RepositoryActionMutationResponse, String> {
-    runtime
-        .run_write(move |state| state.set_repository_action_enabled(request))
+    repository_interaction
+        .set_repository_action_enabled(request)
         .await
 }
 
 #[tauri::command]
 async fn run_repository_action(
     request: RepositoryActionRunRequest,
-    runtime: tauri::State<'_, RepositoryRuntime>,
+    repository_interaction: tauri::State<'_, RepositoryInteractionViewModel>,
 ) -> Result<RepositoryActionRunResponse, String> {
-    runtime
-        .run_write(move |state| state.run_repository_action(request))
-        .await
+    repository_interaction.run_repository_action(request).await
 }
 
 #[tauri::command]
 async fn read_file(
     request: FileReadRequest,
-    runtime: tauri::State<'_, RepositoryRuntime>,
+    repository_query: tauri::State<'_, RepositoryQueryViewModel>,
 ) -> Result<Vec<u8>, String> {
-    runtime
-        .run_read(move |state| state.read_file(request))
-        .await
+    repository_query.read_file(request).await
 }
 
 #[tauri::command]
 async fn prepare_preview_file_source(
     request: FileReadRequest,
-    runtime: tauri::State<'_, RepositoryRuntime>,
+    repository_query: tauri::State<'_, RepositoryQueryViewModel>,
 ) -> Result<FilePreviewSourceResponse, String> {
-    let mut response = runtime
-        .run_read(move |state| state.prepare_preview_file_source(request))
-        .await?;
-    response.source_url = Some(runtime.preview_source_url(&response.token));
-    Ok(response)
+    repository_query.prepare_preview_file_source(request).await
 }
 
 #[tauri::command]
 async fn prepare_entry_playback_source(
     request: EntryPlaybackRequest,
-    runtime: tauri::State<'_, RepositoryRuntime>,
+    repository_query: tauri::State<'_, RepositoryQueryViewModel>,
 ) -> Result<EntryPlaybackSourceResponse, String> {
-    let mut response = runtime
-        .run_read(move |state| state.prepare_entry_playback_source(request))
-        .await?;
-    attach_playback_preview_urls(&runtime, &mut response).await?;
-    Ok(response)
+    repository_query
+        .prepare_entry_playback_source(request)
+        .await
 }
 
 #[tauri::command]
 async fn prepare_entry_playback_source_with_progress(
     request: EntryPlaybackRequest,
     progress: Channel<EntryPlaybackProgressEvent>,
-    runtime: tauri::State<'_, RepositoryRuntime>,
+    repository_query: tauri::State<'_, RepositoryQueryViewModel>,
 ) -> Result<EntryPlaybackSourceResponse, String> {
-    let mut emit = move |event: EntryPlaybackProgressEvent| {
-        progress.send(event).map_err(|error| error.to_string())
-    };
-    let mut response = runtime
-        .run_read(move |state| {
-            state.prepare_entry_playback_source_with_progress(request, &mut emit)
-        })
-        .await?;
-    attach_playback_preview_urls(&runtime, &mut response).await?;
-    Ok(response)
-}
-
-async fn attach_playback_preview_urls(
-    runtime: &RepositoryRuntime,
-    response: &mut EntryPlaybackSourceResponse,
-) -> Result<(), String> {
-    if response.source_url.is_none() {
-        let source_path = response
-            .local_path
-            .as_deref()
-            .or(response.temp_file_path.as_deref())
-            .map(PathBuf::from);
-        if let Some(source_path) = source_path {
-            let media_type = response.media_type.clone();
-            let token = runtime
-                .run_read(move |state| state.register_preview_source_path(source_path, &media_type))
-                .await?;
-            response.source_url = Some(runtime.preview_source_url(&token));
-        }
-    }
-    if response.lyric_source_url.is_none() {
-        if let Some(lyric_path) = response.lyric_path.as_deref().map(PathBuf::from) {
-            let token = runtime
-                .run_read(move |state| {
-                    state.register_preview_source_path(lyric_path, "text/plain; charset=utf-8")
-                })
-                .await?;
-            response.lyric_source_url = Some(runtime.preview_source_url(&token));
-        }
-    }
-    if response.word_lyric_source_url.is_none() {
-        if let Some(word_lyric_path) = response.word_lyric_path.as_deref().map(PathBuf::from) {
-            let token = runtime
-                .run_read(move |state| {
-                    state.register_preview_source_path(word_lyric_path, "text/plain; charset=utf-8")
-                })
-                .await?;
-            response.word_lyric_source_url = Some(runtime.preview_source_url(&token));
-        }
-    }
-    Ok(())
+    repository_query
+        .prepare_entry_playback_source_with_progress(request, progress)
+        .await
 }
 
 #[tauri::command]
 async fn call_plugin(
     request: PluginCallRequest,
-    runtime: tauri::State<'_, RepositoryRuntime>,
+    plugin_vm: tauri::State<'_, PluginViewModel>,
 ) -> Result<PluginCallResult, String> {
-    runtime
-        .run_read(move |state| state.call_plugin(request))
-        .await
+    plugin_vm.call_plugin(request).await
 }
 
 #[tauri::command]
@@ -539,63 +459,51 @@ fn execute_playlist_download_with_progress(
 #[tauri::command]
 async fn read_plugin_archive_text(
     request: PluginArchiveReadRequest,
-    runtime: tauri::State<'_, RepositoryRuntime>,
+    plugin_vm: tauri::State<'_, PluginViewModel>,
 ) -> Result<PluginArchiveTextResponse, String> {
-    runtime
-        .run_read(move |state| state.read_plugin_archive_text(request))
-        .await
+    plugin_vm.read_plugin_archive_text(request).await
 }
 
 #[tauri::command]
 async fn get_plugin_data_directory(
     plugin_id: String,
-    runtime: tauri::State<'_, RepositoryRuntime>,
+    plugin_vm: tauri::State<'_, PluginViewModel>,
 ) -> Result<PluginDataDirectoryResponse, String> {
-    runtime
-        .run_write(move |state| state.get_plugin_data_directory(plugin_id))
-        .await
+    plugin_vm.get_plugin_data_directory(plugin_id).await
 }
 
 #[tauri::command]
 async fn prepare_plugin_data_file_preview_source(
     request: PluginDataFilePreviewSourceRequest,
-    runtime: tauri::State<'_, RepositoryRuntime>,
+    plugin_vm: tauri::State<'_, PluginViewModel>,
 ) -> Result<PluginDataFilePreviewSourceResponse, String> {
-    let mut response = runtime
-        .run_read(move |state| state.prepare_plugin_data_file_preview_source(request))
-        .await?;
-    response.source_url = Some(runtime.preview_source_url(&response.token));
-    Ok(response)
+    plugin_vm
+        .prepare_plugin_data_file_preview_source(request)
+        .await
 }
 
 #[tauri::command]
 async fn get_plugin_config(
     plugin_id: String,
-    runtime: tauri::State<'_, RepositoryRuntime>,
+    plugin_vm: tauri::State<'_, PluginViewModel>,
 ) -> Result<PluginConfigSnapshot, String> {
-    runtime
-        .run_write(move |state| state.get_plugin_config(plugin_id))
-        .await
+    plugin_vm.get_plugin_config(plugin_id).await
 }
 
 #[tauri::command]
 async fn set_plugin_config_value(
     request: PluginConfigSetRequest,
-    runtime: tauri::State<'_, RepositoryRuntime>,
+    plugin_vm: tauri::State<'_, PluginViewModel>,
 ) -> Result<PluginConfigSnapshot, String> {
-    runtime
-        .run_write(move |state| state.set_plugin_config_value(request))
-        .await
+    plugin_vm.set_plugin_config_value(request).await
 }
 
 #[tauri::command]
 async fn delete_plugin_config_value(
     request: PluginConfigDeleteRequest,
-    runtime: tauri::State<'_, RepositoryRuntime>,
+    plugin_vm: tauri::State<'_, PluginViewModel>,
 ) -> Result<PluginConfigSnapshot, String> {
-    runtime
-        .run_write(move |state| state.delete_plugin_config_value(request))
-        .await
+    plugin_vm.delete_plugin_config_value(request).await
 }
 
 #[tauri::command]
@@ -621,81 +529,65 @@ async fn write_binary_file(
 #[tauri::command]
 async fn create_directory(
     request: FileCreateRequest,
-    runtime: tauri::State<'_, RepositoryRuntime>,
+    file_browser: tauri::State<'_, FileBrowserViewModel>,
 ) -> Result<FileBrowserSnapshot, String> {
-    runtime
-        .run_write(move |state| state.create_directory(request))
-        .await
+    file_browser.create_directory(request).await
 }
 
 #[tauri::command]
 async fn create_file(
     request: FileCreateRequest,
-    runtime: tauri::State<'_, RepositoryRuntime>,
+    file_browser: tauri::State<'_, FileBrowserViewModel>,
 ) -> Result<FileBrowserSnapshot, String> {
-    runtime
-        .run_write(move |state| state.create_file(request))
-        .await
+    file_browser.create_file(request).await
 }
 
 #[tauri::command]
 async fn import_entries(
     request: FileImportRequest,
-    runtime: tauri::State<'_, RepositoryRuntime>,
+    file_browser: tauri::State<'_, FileBrowserViewModel>,
 ) -> Result<FileBrowserSnapshot, String> {
-    runtime
-        .run_write(move |state| state.import_entries(request))
-        .await
+    file_browser.import_entries(request).await
 }
 
 #[tauri::command]
 async fn copy_entries(
     request: FileCopyRequest,
-    runtime: tauri::State<'_, RepositoryRuntime>,
+    file_browser: tauri::State<'_, FileBrowserViewModel>,
 ) -> Result<FileBrowserSnapshot, String> {
-    runtime
-        .run_write(move |state| state.copy_entries(request))
-        .await
+    file_browser.copy_entries(request).await
 }
 
 #[tauri::command]
 async fn move_entries(
     request: FileMoveRequest,
-    runtime: tauri::State<'_, RepositoryRuntime>,
+    file_browser: tauri::State<'_, FileBrowserViewModel>,
 ) -> Result<FileBrowserSnapshot, String> {
-    runtime
-        .run_write(move |state| state.move_entries(request))
-        .await
+    file_browser.move_entries(request).await
 }
 
 #[tauri::command]
 async fn rename_entry(
     request: FileRenameRequest,
-    runtime: tauri::State<'_, RepositoryRuntime>,
+    file_browser: tauri::State<'_, FileBrowserViewModel>,
 ) -> Result<FileBrowserSnapshot, String> {
-    runtime
-        .run_write(move |state| state.rename_entry(request))
-        .await
+    file_browser.rename_entry(request).await
 }
 
 #[tauri::command]
 async fn delete_entry(
     request: FileDeleteRequest,
-    runtime: tauri::State<'_, RepositoryRuntime>,
+    file_browser: tauri::State<'_, FileBrowserViewModel>,
 ) -> Result<FileBrowserSnapshot, String> {
-    runtime
-        .run_write(move |state| state.delete_entry(request))
-        .await
+    file_browser.delete_entry(request).await
 }
 
 #[tauri::command]
 async fn mutate_trash(
     request: TrashMutationRequest,
-    runtime: tauri::State<'_, RepositoryRuntime>,
+    file_browser: tauri::State<'_, FileBrowserViewModel>,
 ) -> Result<FileBrowserSnapshot, String> {
-    runtime
-        .run_write(move |state| state.mutate_trash(request))
-        .await
+    file_browser.mutate_trash(request).await
 }
 
 #[tauri::command]
@@ -799,114 +691,98 @@ async fn sync_repository(
 #[tauri::command]
 async fn list_hardlink_candidates(
     repo_id: String,
-    runtime: tauri::State<'_, RepositoryRuntime>,
+    repository_interaction: tauri::State<'_, RepositoryInteractionViewModel>,
 ) -> Result<HardlinkCandidateResponse, String> {
-    runtime
-        .run_read(move |state| state.list_hardlink_candidates(&repo_id))
+    repository_interaction
+        .list_hardlink_candidates(repo_id)
         .await
 }
 
 #[tauri::command]
 async fn confirm_hardlink_candidate(
     request: HardlinkConfirmRequest,
-    runtime: tauri::State<'_, RepositoryRuntime>,
+    repository_interaction: tauri::State<'_, RepositoryInteractionViewModel>,
 ) -> Result<HardlinkConfirmResponse, String> {
-    runtime
-        .run_write(move |state| state.confirm_hardlink_candidate(request))
+    repository_interaction
+        .confirm_hardlink_candidate(request)
         .await
 }
 
 #[tauri::command]
 async fn ensure_thumbnail(
     request: ThumbnailRequest,
-    runtime: tauri::State<'_, RepositoryRuntime>,
+    repository_interaction: tauri::State<'_, RepositoryInteractionViewModel>,
 ) -> Result<ThumbnailResponse, String> {
-    runtime
-        .run_write(move |state| state.ensure_thumbnail(request))
-        .await
+    repository_interaction.ensure_thumbnail(request).await
 }
 
 #[tauri::command]
 async fn undo_last_revision(
     request: RevisionActionRequest,
-    runtime: tauri::State<'_, RepositoryRuntime>,
+    repository_interaction: tauri::State<'_, RepositoryInteractionViewModel>,
 ) -> Result<RevisionActionResponse, String> {
-    runtime
-        .run_write(move |state| state.undo_last_revision(request))
-        .await
+    repository_interaction.undo_last_revision(request).await
 }
 
 #[tauri::command]
 async fn redo_last_revision(
     request: RevisionActionRequest,
-    runtime: tauri::State<'_, RepositoryRuntime>,
+    repository_interaction: tauri::State<'_, RepositoryInteractionViewModel>,
 ) -> Result<RevisionActionResponse, String> {
-    runtime
-        .run_write(move |state| state.redo_last_revision(request))
-        .await
+    repository_interaction.redo_last_revision(request).await
 }
 
 #[tauri::command]
 async fn list_plugins(
-    runtime: tauri::State<'_, RepositoryRuntime>,
+    plugin_vm: tauri::State<'_, PluginViewModel>,
 ) -> Result<Vec<PluginManifest>, String> {
-    runtime.run_read(|state| state.list_plugins()).await
+    plugin_vm.list_plugins().await
 }
 
 #[tauri::command]
 async fn list_plugin_hook_executions(
     request: Option<PluginHookExecutionListRequest>,
-    runtime: tauri::State<'_, RepositoryRuntime>,
+    plugin_vm: tauri::State<'_, PluginViewModel>,
 ) -> Result<PluginHookExecutionListResponse, String> {
-    runtime
-        .run_read(move |state| state.list_plugin_hook_executions(request.unwrap_or_default()))
-        .await
+    plugin_vm.list_plugin_hook_executions(request).await
 }
 
 #[tauri::command]
 async fn set_plugin_enabled(
     request: PluginEnabledRequest,
-    runtime: tauri::State<'_, RepositoryRuntime>,
+    plugin_vm: tauri::State<'_, PluginViewModel>,
 ) -> Result<PluginMutationResponse, String> {
-    runtime
-        .run_write(move |state| state.set_plugin_enabled(request))
-        .await
+    plugin_vm.set_plugin_enabled(request).await
 }
 
 #[tauri::command]
 async fn delete_plugin(
     plugin_id: String,
-    runtime: tauri::State<'_, RepositoryRuntime>,
+    plugin_vm: tauri::State<'_, PluginViewModel>,
 ) -> Result<PluginMutationResponse, String> {
-    runtime
-        .run_write(move |state| state.delete_plugin(plugin_id))
-        .await
+    plugin_vm.delete_plugin(plugin_id).await
 }
 
 #[tauri::command]
 async fn install_plugin_from_archive(
     request: PluginInstallRequest,
-    runtime: tauri::State<'_, RepositoryRuntime>,
+    plugin_vm: tauri::State<'_, PluginViewModel>,
 ) -> Result<PluginMutationResponse, String> {
-    runtime
-        .run_write(move |state| state.install_plugin_from_archive(request))
-        .await
+    plugin_vm.install_plugin_from_archive(request).await
 }
 
 #[tauri::command]
 async fn get_cache_snapshot(
-    runtime: tauri::State<'_, RepositoryRuntime>,
+    plugin_vm: tauri::State<'_, PluginViewModel>,
 ) -> Result<CacheSnapshot, String> {
-    runtime.run_read(|state| state.get_cache_snapshot()).await
+    plugin_vm.get_cache_snapshot().await
 }
 
 #[tauri::command]
 async fn get_api_design_snapshot(
-    runtime: tauri::State<'_, RepositoryRuntime>,
+    plugin_vm: tauri::State<'_, PluginViewModel>,
 ) -> Result<ApiDesignSnapshot, String> {
-    runtime
-        .run_read(|state| state.get_api_design_snapshot())
-        .await
+    plugin_vm.get_api_design_snapshot().await
 }
 
 #[tauri::command]
@@ -995,12 +871,20 @@ pub fn run() {
         .manage(window_state::MainWindowStateCache::default())
         .setup(|app| {
             let runtime = RepositoryRuntime::start()?;
+            let file_browser = FileBrowserViewModel::new(runtime.clone());
+            let plugin_vm = PluginViewModel::new(runtime.clone());
+            let repository_interaction = RepositoryInteractionViewModel::new(runtime.clone());
+            let repository_query = RepositoryQueryViewModel::new(runtime.clone());
             let repository_management = RepositoryManagementViewModel::new(runtime.clone());
             allow_thumbnail_asset_roots(
                 app.handle(),
                 tauri::async_runtime::block_on(runtime.repository_thumbnail_roots())?,
             )?;
             app.manage(runtime);
+            app.manage(file_browser);
+            app.manage(plugin_vm);
+            app.manage(repository_interaction);
+            app.manage(repository_query);
             app.manage(repository_management);
             setup_tray(app.handle())?;
 
