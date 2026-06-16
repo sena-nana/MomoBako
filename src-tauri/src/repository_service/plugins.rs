@@ -310,7 +310,9 @@ pub(super) fn get_cache_snapshot(state: &RepositoryState) -> Result<CacheSnapsho
     })
 }
 
-pub(super) fn get_api_design_snapshot(state: &RepositoryState) -> Result<ApiDesignSnapshot, String> {
+pub(super) fn get_api_design_snapshot(
+    state: &RepositoryState,
+) -> Result<ApiDesignSnapshot, String> {
     state.ensure_initialized()?;
     Ok(ApiDesignSnapshot {
         transport: "REST over local repository service, gRPC-ready contract design".to_string(),

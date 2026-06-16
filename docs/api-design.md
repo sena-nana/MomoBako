@@ -5,6 +5,10 @@
 - Primary transport: Tauri commands backed by an in-process repository runtime
 - Runtime execution: blocking repository work runs on Tauri's blocking task pool
 - External client transport: a loopback HTTP API bound to `127.0.0.1` with a startup-generated bearer token written to the service connection file. The external API is source-neutral; browser extensions, native tools and other local clients all call the same contract.
+- Rust backend layering:
+  - `lib.rs` acts as the View layer for Tauri command entrypoints and app-facing side effects.
+  - `repository_view_model.rs` acts as the ViewModel layer for repository-management command orchestration.
+  - `repository_service.rs` and its submodules act as the Model/Service layer for repository domain logic and persistence.
 
 ## External Asset API
 
@@ -38,6 +42,11 @@
   - Boundary error codes: `unauthorized`, `notReady`, `repoNotFound`, `repoUnavailable`, `unsupportedRepositoryBackend`, `invalidTargetPath`, `invalidInput`, `downloadFailed`, `duplicateTarget`, `importRejected`, `internalError`.
 
 ## Repository API
+
+- Current repository-management implementation follows the backend MVVM split above:
+  - command entrypoints stay transport-stable
+  - repository-management orchestration lives in the dedicated ViewModel
+  - create/import/attach/delete/relocate/backend-config/cache-config/export/sync logic lives in the repository-management service module
 
 - `GET /repositories`
   - List registered repositories from `MetaHub/repositories.db`
