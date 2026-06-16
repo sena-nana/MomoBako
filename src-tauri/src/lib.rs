@@ -14,6 +14,7 @@ const BG: Color = Color(0x18, 0x18, 0x18, 0xFF);
 
 mod repository_runtime;
 mod repository_service;
+mod repository_view_model;
 mod window_state;
 
 use repository_runtime::{ExternalApiConnectionStatus, RepositoryRuntime};
@@ -31,17 +32,18 @@ use repository_service::{
     PlaylistMutationResponse, PlaylistSummary, PluginArchiveReadRequest, PluginArchiveTextResponse,
     PluginCallRequest, PluginCallResult, PluginConfigDeleteRequest, PluginConfigSetRequest,
     PluginConfigSnapshot, PluginDataDirectoryResponse, PluginDataFilePreviewSourceRequest,
-    PluginDataFilePreviewSourceResponse, PluginEnabledRequest,
-    PluginHookExecutionListRequest, PluginHookExecutionListResponse, PluginInstallRequest,
-    PluginManifest, PluginMutationResponse, RepositoryAction, RepositoryActionEnabledRequest,
-    RepositoryActionMutationResponse, RepositoryActionRunRequest, RepositoryActionRunResponse,
-    RepositoryExportRequest, RepositoryExportResponse, RepositoryFolderRequest,
-    RepositoryMutationRequest, RepositoryMutationResponse, RepositoryRelocateRequest,
-    RepositorySnapshot, RepositorySummary, RevisionActionRequest, RevisionActionResponse,
-    SearchRequest, SearchResponse, SmartFolderMutationRequest, SmartFolderMutationResponse,
-    SmartFolderResultSnapshot, SmartFolderTreeNode, SmartFolderUpdateRequest, SyncRequest,
-    SyncResult, ThumbnailRequest, ThumbnailResponse, TrashMutationRequest,
+    PluginDataFilePreviewSourceResponse, PluginEnabledRequest, PluginHookExecutionListRequest,
+    PluginHookExecutionListResponse, PluginInstallRequest, PluginManifest, PluginMutationResponse,
+    RepositoryAction, RepositoryActionEnabledRequest, RepositoryActionMutationResponse,
+    RepositoryActionRunRequest, RepositoryActionRunResponse, RepositoryExportRequest,
+    RepositoryExportResponse, RepositoryFolderRequest, RepositoryMutationRequest,
+    RepositoryMutationResponse, RepositoryRelocateRequest, RepositorySnapshot, RepositorySummary,
+    RevisionActionRequest, RevisionActionResponse, SearchRequest, SearchResponse,
+    SmartFolderMutationRequest, SmartFolderMutationResponse, SmartFolderResultSnapshot,
+    SmartFolderTreeNode, SmartFolderUpdateRequest, SyncRequest, SyncResult, ThumbnailRequest,
+    ThumbnailResponse, TrashMutationRequest,
 };
+use repository_view_model::RepositoryManagementViewModel;
 
 #[tauri::command]
 async fn ping() -> Result<String, String> {
@@ -700,12 +702,10 @@ async fn mutate_trash(
 async fn create_repository(
     request: RepositoryMutationRequest,
     app: AppHandle,
-    runtime: tauri::State<'_, RepositoryRuntime>,
+    repository_management: tauri::State<'_, RepositoryManagementViewModel>,
 ) -> Result<RepositoryMutationResponse, String> {
-    let response = runtime
-        .run_repository_collection_write(move |state| state.create_repository(request))
-        .await?;
-    refresh_thumbnail_asset_scope(&app, &runtime).await?;
+    let response = repository_management.create_repository(request).await?;
+    repository_management.refresh_thumbnail_scope(&app).await?;
     Ok(response)
 }
 
@@ -713,12 +713,10 @@ async fn create_repository(
 async fn import_repository(
     request: RepositoryMutationRequest,
     app: AppHandle,
-    runtime: tauri::State<'_, RepositoryRuntime>,
+    repository_management: tauri::State<'_, RepositoryManagementViewModel>,
 ) -> Result<RepositoryMutationResponse, String> {
-    let response = runtime
-        .run_repository_collection_write(move |state| state.import_repository(request))
-        .await?;
-    refresh_thumbnail_asset_scope(&app, &runtime).await?;
+    let response = repository_management.import_repository(request).await?;
+    repository_management.refresh_thumbnail_scope(&app).await?;
     Ok(response)
 }
 
@@ -726,12 +724,12 @@ async fn import_repository(
 async fn attach_repository_folder(
     request: RepositoryFolderRequest,
     app: AppHandle,
-    runtime: tauri::State<'_, RepositoryRuntime>,
+    repository_management: tauri::State<'_, RepositoryManagementViewModel>,
 ) -> Result<RepositoryMutationResponse, String> {
-    let response = runtime
-        .run_repository_collection_write(move |state| state.attach_repository_folder(request))
+    let response = repository_management
+        .attach_repository_folder(request)
         .await?;
-    refresh_thumbnail_asset_scope(&app, &runtime).await?;
+    repository_management.refresh_thumbnail_scope(&app).await?;
     Ok(response)
 }
 
@@ -739,24 +737,20 @@ async fn attach_repository_folder(
 async fn delete_repository(
     repo_id: String,
     app: AppHandle,
-    runtime: tauri::State<'_, RepositoryRuntime>,
+    repository_management: tauri::State<'_, RepositoryManagementViewModel>,
 ) -> Result<(), String> {
-    runtime
-        .run_repository_collection_write(move |state| state.delete_repository(&repo_id))
-        .await?;
-    refresh_thumbnail_asset_scope(&app, &runtime).await
+    repository_management.delete_repository(repo_id).await?;
+    repository_management.refresh_thumbnail_scope(&app).await
 }
 
 #[tauri::command]
 async fn relocate_repository(
     request: RepositoryRelocateRequest,
     app: AppHandle,
-    runtime: tauri::State<'_, RepositoryRuntime>,
+    repository_management: tauri::State<'_, RepositoryManagementViewModel>,
 ) -> Result<RepositoryMutationResponse, String> {
-    let response = runtime
-        .run_repository_collection_write(move |state| state.relocate_repository(request))
-        .await?;
-    refresh_thumbnail_asset_scope(&app, &runtime).await?;
+    let response = repository_management.relocate_repository(request).await?;
+    repository_management.refresh_thumbnail_scope(&app).await?;
     Ok(response)
 }
 
@@ -764,14 +758,12 @@ async fn relocate_repository(
 async fn update_repository_backend_config(
     request: repository_service::RepositoryBackendConfigUpdateRequest,
     app: AppHandle,
-    runtime: tauri::State<'_, RepositoryRuntime>,
+    repository_management: tauri::State<'_, RepositoryManagementViewModel>,
 ) -> Result<RepositoryMutationResponse, String> {
-    let response = runtime
-        .run_repository_collection_write(move |state| {
-            state.update_repository_backend_config(request)
-        })
+    let response = repository_management
+        .update_repository_backend_config(request)
         .await?;
-    refresh_thumbnail_asset_scope(&app, &runtime).await?;
+    repository_management.refresh_thumbnail_scope(&app).await?;
     Ok(response)
 }
 
@@ -779,35 +771,29 @@ async fn update_repository_backend_config(
 async fn configure_netease_repository_cache(
     request: NeteaseRepositoryCacheConfigureRequest,
     app: AppHandle,
-    runtime: tauri::State<'_, RepositoryRuntime>,
+    repository_management: tauri::State<'_, RepositoryManagementViewModel>,
 ) -> Result<NeteaseRepositoryCacheConfigureResponse, String> {
-    let response = runtime
-        .run_repository_collection_write(move |state| {
-            state.configure_netease_repository_cache(request)
-        })
+    let response = repository_management
+        .configure_netease_repository_cache(request)
         .await?;
-    refresh_thumbnail_asset_scope(&app, &runtime).await?;
+    repository_management.refresh_thumbnail_scope(&app).await?;
     Ok(response)
 }
 
 #[tauri::command]
 async fn export_repository(
     request: RepositoryExportRequest,
-    runtime: tauri::State<'_, RepositoryRuntime>,
+    repository_management: tauri::State<'_, RepositoryManagementViewModel>,
 ) -> Result<RepositoryExportResponse, String> {
-    runtime
-        .run_write(move |state| state.export_repository(request))
-        .await
+    repository_management.export_repository(request).await
 }
 
 #[tauri::command]
 async fn sync_repository(
     request: SyncRequest,
-    runtime: tauri::State<'_, RepositoryRuntime>,
+    repository_management: tauri::State<'_, RepositoryManagementViewModel>,
 ) -> Result<SyncResult, String> {
-    runtime
-        .run_write(move |state| state.sync_repository(request))
-        .await
+    repository_management.sync_repository(request).await
 }
 
 #[tauri::command]
@@ -930,13 +916,6 @@ async fn get_external_api_connection_status(
     Ok(runtime.external_api_connection_status())
 }
 
-async fn refresh_thumbnail_asset_scope(
-    app: &AppHandle,
-    runtime: &RepositoryRuntime,
-) -> Result<(), String> {
-    allow_thumbnail_asset_roots(app, runtime.repository_thumbnail_roots().await?)
-}
-
 fn allow_thumbnail_asset_roots(app: &AppHandle, paths: Vec<PathBuf>) -> Result<(), String> {
     for path in paths {
         app.asset_protocol_scope()
@@ -1016,11 +995,13 @@ pub fn run() {
         .manage(window_state::MainWindowStateCache::default())
         .setup(|app| {
             let runtime = RepositoryRuntime::start()?;
+            let repository_management = RepositoryManagementViewModel::new(runtime.clone());
             allow_thumbnail_asset_roots(
                 app.handle(),
                 tauri::async_runtime::block_on(runtime.repository_thumbnail_roots())?,
             )?;
             app.manage(runtime);
+            app.manage(repository_management);
             setup_tray(app.handle())?;
 
             if let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
