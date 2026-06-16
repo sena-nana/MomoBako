@@ -34,6 +34,7 @@ import {
   getPluginDataDirectory,
   prepareEntryPlaybackSource,
   prepareEntryPlaybackSourceWithProgress,
+  preparePluginDataFilePreviewSource,
   preparePreviewFileSource,
   readFile,
   readPluginArchiveText,
@@ -281,6 +282,7 @@ export type FrontendPluginContext = {
   invokeCommand: typeof invoke;
   callPlugin: typeof callPlugin;
   downloadPlaylistWithProgress: typeof downloadPlaylistWithProgress;
+  preparePluginDataFilePreviewSource: typeof preparePluginDataFilePreviewSource;
   prepareEntryPlaybackSource: typeof prepareEntryPlaybackSource;
   prepareEntryPlaybackSourceWithProgress: typeof prepareEntryPlaybackSourceWithProgress;
   preparePreviewFileSource: typeof preparePreviewFileSource;
@@ -571,6 +573,7 @@ function createFrontendPluginContext(manifest: PluginManifest): FrontendPluginCo
     invokeCommand: invoke,
     callPlugin,
     downloadPlaylistWithProgress,
+    preparePluginDataFilePreviewSource,
     prepareEntryPlaybackSource,
     prepareEntryPlaybackSourceWithProgress,
     preparePreviewFileSource,

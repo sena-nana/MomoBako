@@ -30,7 +30,8 @@ use repository_service::{
     PlaylistMembershipRequest, PlaylistMembershipSnapshot, PlaylistMutationRequest,
     PlaylistMutationResponse, PlaylistSummary, PluginArchiveReadRequest, PluginArchiveTextResponse,
     PluginCallRequest, PluginCallResult, PluginConfigDeleteRequest, PluginConfigSetRequest,
-    PluginConfigSnapshot, PluginDataDirectoryResponse, PluginEnabledRequest,
+    PluginConfigSnapshot, PluginDataDirectoryResponse, PluginDataFilePreviewSourceRequest,
+    PluginDataFilePreviewSourceResponse, PluginEnabledRequest,
     PluginHookExecutionListRequest, PluginHookExecutionListResponse, PluginInstallRequest,
     PluginManifest, PluginMutationResponse, RepositoryAction, RepositoryActionEnabledRequest,
     RepositoryActionMutationResponse, RepositoryActionRunRequest, RepositoryActionRunResponse,
@@ -551,6 +552,18 @@ async fn get_plugin_data_directory(
     runtime
         .run_write(move |state| state.get_plugin_data_directory(plugin_id))
         .await
+}
+
+#[tauri::command]
+async fn prepare_plugin_data_file_preview_source(
+    request: PluginDataFilePreviewSourceRequest,
+    runtime: tauri::State<'_, RepositoryRuntime>,
+) -> Result<PluginDataFilePreviewSourceResponse, String> {
+    let mut response = runtime
+        .run_read(move |state| state.prepare_plugin_data_file_preview_source(request))
+        .await?;
+    response.source_url = Some(runtime.preview_source_url(&response.token));
+    Ok(response)
 }
 
 #[tauri::command]
@@ -1080,6 +1093,7 @@ pub fn run() {
             download_playlist_with_progress,
             read_plugin_archive_text,
             get_plugin_data_directory,
+            prepare_plugin_data_file_preview_source,
             get_plugin_config,
             set_plugin_config_value,
             delete_plugin_config_value,

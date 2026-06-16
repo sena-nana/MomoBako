@@ -352,6 +352,11 @@
   - Tauri command: `get_plugin_data_directory`
   - Creates and returns the plugin data directory as `{ pluginId, path }`
   - The frontend plugin manager exposes this from the plugin settings entry and opens the returned directory in the system file manager.
+- `POST /plugins/{pluginId}:data-file-preview-source`
+  - Tauri command: `prepare_plugin_data_file_preview_source`
+  - Request body includes `{ pluginId, path, mediaType }`, where `path` must be an absolute file path inside that plugin's host-owned data directory.
+  - Registers the file with the host preview source server and returns `{ pluginId, path, token, sourceUrl, mediaType, sizeBytes, modifiedAt }`.
+  - Used by frontend plugins when a backend service has prepared plugin-owned cache files that need text/media preview without widening the Tauri asset protocol scope.
 - `GET /plugins/{pluginId}:config`
   - Tauri command: `get_plugin_config`
   - Creates the plugin data directory if needed and returns `{ pluginId, dataDirectory, schema, values }`

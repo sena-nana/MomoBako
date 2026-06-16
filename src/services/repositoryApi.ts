@@ -37,6 +37,8 @@ import type {
   PluginConfigSetRequest,
   PluginConfigSnapshot,
   PluginDataDirectoryResponse,
+  PluginDataFilePreviewSourceRequest,
+  PluginDataFilePreviewSourceResponse,
   PluginEnabledRequest,
   PluginHookExecutionListRequest,
   PluginHookExecutionListResponse,
@@ -245,6 +247,10 @@ export function readPluginArchiveText(request: PluginArchiveReadRequest) {
 
 export function getPluginDataDirectory(pluginId: string) {
   return invoke<PluginDataDirectoryResponse>("get_plugin_data_directory", { pluginId });
+}
+
+export function preparePluginDataFilePreviewSource(request: PluginDataFilePreviewSourceRequest) {
+  return invoke<PluginDataFilePreviewSourceResponse>("prepare_plugin_data_file_preview_source", { request });
 }
 
 export function getPluginConfig(pluginId: string) {
