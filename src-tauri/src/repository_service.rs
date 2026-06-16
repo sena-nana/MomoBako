@@ -17,6 +17,8 @@ use std::{
 };
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 
+mod plugins;
+
 const REGISTRY_FILE_NAME: &str = "repositories.db";
 const REPO_META_DIR: &str = ".momo";
 const LEGACY_REPO_META_DIR: &str = ".meta";
@@ -3575,189 +3577,46 @@ impl RepositoryState {
     }
 
     pub fn call_plugin(&self, request: PluginCallRequest) -> Result<PluginCallResult, String> {
-        self.ensure_initialized()?;
-        let payload = if request.payload.is_null() {
-            serde_json::json!({})
-        } else {
-            request.payload
-        };
-        let hook_context =
-            plugin_hook_execution_context(&self.root, &request.plugin_id, &request.method);
-        let started_at = now_rfc3339();
-        let target = plugin_hook_execution_target(&payload);
-        let response = backend_plugin_registry(&self.root).call_with_runtime(
-            &request.plugin_id,
-            &request.method,
-            payload,
-        );
-        if let Some((plugin_id, hook)) = hook_context {
-            let (status, message, runtime) = match &response {
-                Ok(result) => (
-                    "success".to_string(),
-                    "插件 Hook 已执行。".to_string(),
-                    result.runtime.clone(),
-                ),
-                Err(error) if is_plugin_call_blocked_error(error) => {
-                    ("blocked".to_string(), error.clone(), None)
-                }
-                Err(error) => ("failed".to_string(), error.clone(), None),
-            };
-            append_plugin_hook_execution_record(
-                &self.root,
-                PluginHookExecutionRecord {
-                    execution_id: plugin_hook_execution_id(
-                        &plugin_id,
-                        &hook.slot,
-                        &hook.action,
-                        &started_at,
-                    ),
-                    plugin_id,
-                    hook_slot: hook.slot,
-                    hook_action: hook.action,
-                    hook_label: hook.label,
-                    status,
-                    message,
-                    target,
-                    started_at,
-                    finished_at: now_rfc3339(),
-                    runtime,
-                },
-            )?;
-        }
-        let response = response?;
-        Ok(PluginCallResult {
-            plugin_id: response.plugin_id,
-            method: request.method,
-            payload: response.payload,
-            runtime: response.runtime,
-        })
+        plugins::call_plugin(self, request)
     }
 
     pub fn read_plugin_archive_text(
         &self,
         request: PluginArchiveReadRequest,
     ) -> Result<PluginArchiveTextResponse, String> {
-        self.ensure_initialized()?;
-        let registry = plugin_management_registry(&self.root);
-        let normalized_plugin_id = registry.normalize_plugin_id(&request.plugin_id);
-        let registration = registry
-            .registration(&normalized_plugin_id)
-            .ok_or_else(|| format!("plugin not found: {}", request.plugin_id))?;
-        let archive_path = registration.archive_path.as_path();
-        let relative_path = safe_zip_relative_path(request.path.trim())?;
-        let archive_entry_path =
-            plugin_archive_entry_path(&registration.manifest_prefix, &relative_path);
-        let text = read_plugin_archive_text_entry(archive_path, &archive_entry_path)?;
-        Ok(PluginArchiveTextResponse {
-            plugin_id: registration.manifest.plugin_id.clone(),
-            path: archive_entry_path,
-            text,
-        })
+        plugins::read_plugin_archive_text(self, request)
     }
 
     pub fn get_plugin_data_directory(
         &self,
         plugin_id: String,
     ) -> Result<PluginDataDirectoryResponse, String> {
-        self.ensure_initialized()?;
-        let registry = plugin_management_registry(&self.root);
-        let normalized_plugin_id = registry.normalize_plugin_id(&plugin_id);
-        let registration = registry
-            .registration(&normalized_plugin_id)
-            .ok_or_else(|| format!("plugin not found: {plugin_id}"))?;
-        let data_dir = ensure_plugin_data_dir(&self.root, &registration.manifest.plugin_id)?;
-        Ok(PluginDataDirectoryResponse {
-            plugin_id: registration.manifest.plugin_id.clone(),
-            path: data_dir.to_string_lossy().to_string(),
-        })
+        plugins::get_plugin_data_directory(self, plugin_id)
     }
 
     pub fn prepare_plugin_data_file_preview_source(
         &self,
         request: PluginDataFilePreviewSourceRequest,
     ) -> Result<PluginDataFilePreviewSourceResponse, String> {
-        self.ensure_initialized()?;
-        let registry = plugin_management_registry(&self.root);
-        let normalized_plugin_id = registry.normalize_plugin_id(&request.plugin_id);
-        let registration = registry
-            .registration(&normalized_plugin_id)
-            .ok_or_else(|| format!("plugin not found: {}", request.plugin_id))?;
-        let data_dir = ensure_plugin_data_dir(&self.root, &registration.manifest.plugin_id)?;
-        let canonical_data_dir = data_dir.canonicalize().map_err(io_error)?;
-        let source_path = PathBuf::from(request.path.trim());
-        if !source_path.is_absolute() {
-            return Err("plugin data preview path must be absolute".to_string());
-        }
-        if !source_path.is_file() {
-            return Err(format!(
-                "plugin data preview file is not available: {}",
-                source_path.to_string_lossy()
-            ));
-        }
-        let canonical_source_path = source_path.canonicalize().map_err(io_error)?;
-        if !canonical_source_path.starts_with(&canonical_data_dir) {
-            return Err(format!(
-                "plugin data preview path is outside plugin data directory: {}",
-                source_path.to_string_lossy()
-            ));
-        }
-        let media_type = request.media_type.trim();
-        let media_type = if media_type.is_empty() {
-            "application/octet-stream"
-        } else {
-            media_type
-        };
-        let metadata = fs::metadata(&canonical_source_path).map_err(io_error)?;
-        let modified_at = metadata
-            .modified()
-            .ok()
-            .map(system_time_to_rfc3339)
-            .transpose()
-            .map_err(time_error)?;
-        let token = self.register_preview_source_path(canonical_source_path.clone(), media_type)?;
-        Ok(PluginDataFilePreviewSourceResponse {
-            plugin_id: registration.manifest.plugin_id.clone(),
-            path: canonical_source_path.to_string_lossy().to_string(),
-            token,
-            source_url: None,
-            media_type: media_type.to_string(),
-            size_bytes: metadata.len() as i64,
-            modified_at,
-        })
+        plugins::prepare_plugin_data_file_preview_source(self, request)
     }
 
     pub fn get_plugin_config(&self, plugin_id: String) -> Result<PluginConfigSnapshot, String> {
-        self.ensure_initialized()?;
-        let (manifest, data_dir, values) = self.load_plugin_config_values(&plugin_id)?;
-        Ok(plugin_config_snapshot(&manifest, data_dir, values))
+        plugins::get_plugin_config(self, plugin_id)
     }
 
     pub fn set_plugin_config_value(
         &self,
         request: PluginConfigSetRequest,
     ) -> Result<PluginConfigSnapshot, String> {
-        self.ensure_initialized()?;
-        let key = normalize_plugin_config_key(&request.key)?;
-        let (manifest, data_dir, mut values) =
-            self.load_plugin_config_values(&request.plugin_id)?;
-        let schema = plugin_settings_schema(&manifest);
-        validate_plugin_config_value(&schema, &key, &request.value)?;
-        values.insert(key, request.value);
-        save_plugin_config_values(&data_dir, &values)?;
-        Ok(plugin_config_snapshot(&manifest, data_dir, values))
+        plugins::set_plugin_config_value(self, request)
     }
 
     pub fn delete_plugin_config_value(
         &self,
         request: PluginConfigDeleteRequest,
     ) -> Result<PluginConfigSnapshot, String> {
-        self.ensure_initialized()?;
-        let key = normalize_plugin_config_key(&request.key)?;
-        let (manifest, data_dir, mut values) =
-            self.load_plugin_config_values(&request.plugin_id)?;
-        values.remove(&key);
-        save_plugin_config_values(&data_dir, &values)?;
-        Ok(plugin_config_snapshot(&manifest, data_dir, values))
+        plugins::delete_plugin_config_value(self, request)
     }
 
     fn load_plugin_config_values(
@@ -5427,127 +5286,40 @@ impl RepositoryState {
     }
 
     pub fn list_plugins(&self) -> Result<Vec<PluginManifest>, String> {
-        self.ensure_initialized()?;
-        Ok(default_plugins(&self.root))
+        plugins::list_plugins(self)
     }
 
     pub fn list_plugin_hook_executions(
         &self,
         request: PluginHookExecutionListRequest,
     ) -> Result<PluginHookExecutionListResponse, String> {
-        self.ensure_initialized()?;
-        let registry = plugin_management_registry(&self.root);
-        let plugin_id = request
-            .plugin_id
-            .as_deref()
-            .map(|value| registry.normalize_plugin_id(value));
-        Ok(PluginHookExecutionListResponse {
-            records: load_plugin_hook_execution_records(
-                &self.root,
-                plugin_id.as_deref(),
-                request.limit,
-            )?,
-        })
+        plugins::list_plugin_hook_executions(self, request)
     }
 
     pub fn set_plugin_enabled(
         &self,
         request: PluginEnabledRequest,
     ) -> Result<PluginMutationResponse, String> {
-        self.ensure_initialized()?;
-        let registry = plugin_management_registry(&self.root);
-        let normalized_plugin_id = registry.normalize_plugin_id(&request.plugin_id);
-        let manifest = registry
-            .manifest(&normalized_plugin_id)
-            .ok_or_else(|| format!("plugin not found: {}", request.plugin_id))?;
-
-        if !request.enabled
-            && is_repository_backend_plugin(manifest)
-            && self.repository_backend_in_use(&normalized_plugin_id)?
-        {
-            return Err(format!(
-                "plugin is used by an existing repository: {}",
-                manifest.plugin_id
-            ));
-        }
-
-        let mut settings = load_plugin_settings(&self.root)?;
-        settings
-            .plugins
-            .entry(normalized_plugin_id)
-            .or_default()
-            .enabled = Some(request.enabled);
-        save_plugin_settings(&self.root, &settings)?;
-
-        Ok(PluginMutationResponse {
-            plugins: default_plugins(&self.root),
-        })
+        plugins::set_plugin_enabled(self, request)
     }
 
     pub fn delete_plugin(&self, plugin_id: String) -> Result<PluginMutationResponse, String> {
-        self.ensure_initialized()?;
-        let registry = plugin_management_registry(&self.root);
-        let normalized_plugin_id = registry.normalize_plugin_id(&plugin_id);
-        let registration = registry
-            .registration(&normalized_plugin_id)
-            .ok_or_else(|| format!("plugin not found: {plugin_id}"))?;
-        if registration.manifest.source != "user" {
-            return Err(format!(
-                "built-in plugins cannot be deleted: {}",
-                registration.manifest.plugin_id
-            ));
-        }
-        if is_repository_backend_plugin(&registration.manifest)
-            && self.repository_backend_in_use(&normalized_plugin_id)?
-        {
-            return Err(format!(
-                "plugin is used by an existing repository: {}",
-                registration.manifest.plugin_id
-            ));
-        }
-
-        ensure_runtime_plugin_archive(&self.root, &registration.archive_path)?;
-        fs::remove_file(&registration.archive_path).map_err(io_error)?;
-
-        let mut settings = load_plugin_settings(&self.root)?;
-        settings.plugins.remove(&normalized_plugin_id);
-        save_plugin_settings(&self.root, &settings)?;
-
-        Ok(PluginMutationResponse {
-            plugins: default_plugins(&self.root),
-        })
+        plugins::delete_plugin(self, plugin_id)
     }
 
     pub fn install_plugin_from_archive(
         &self,
         request: PluginInstallRequest,
     ) -> Result<PluginMutationResponse, String> {
-        self.ensure_initialized()?;
-        install_plugin_archive(&self.root, Path::new(request.package_path.trim()))?;
-
-        Ok(PluginMutationResponse {
-            plugins: default_plugins(&self.root),
-        })
+        plugins::install_plugin_from_archive(self, request)
     }
 
     pub fn get_cache_snapshot(&self) -> Result<CacheSnapshot, String> {
-        self.ensure_initialized()?;
-        Ok(CacheSnapshot {
-            config: CacheConfig {
-                metadata_capacity: 2_048,
-                thumbnail_capacity: 512,
-                query_capacity: 128,
-            },
-            entries: default_cache_entries(),
-        })
+        plugins::get_cache_snapshot(self)
     }
 
     pub fn get_api_design_snapshot(&self) -> Result<ApiDesignSnapshot, String> {
-        self.ensure_initialized()?;
-        Ok(ApiDesignSnapshot {
-            transport: "REST over local repository service, gRPC-ready contract design".to_string(),
-            endpoints: default_api_definitions(&self.root),
-        })
+        plugins::get_api_design_snapshot(self)
     }
 
     fn load_repository_record(&self, repo_id: &str) -> Result<RepositoryRecord, String> {

@@ -14,7 +14,7 @@ type BoxSelectionMode = "replace" | "append";
 
 type ReadonlyRef<T> = Pick<Ref<T>, "value">;
 
-type WorkspaceFilesSurfaceBindingOptions = {
+export type WorkspaceFilesSurfaceBindingOptions = {
   activeFileEntries: ReadonlyRef<FileBrowserEntry[]>;
   activeRepoId: ReadonlyRef<string | null>;
   activeSnapshotTagGroups: ReadonlyRef<RepositoryTagGroup[]>;

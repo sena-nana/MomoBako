@@ -1,0 +1,1 @@
+export { ensureThumbnail } from "./core";
