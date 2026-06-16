@@ -1193,6 +1193,26 @@ pub struct PluginDataDirectoryResponse {
     pub path: String,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginDataFilePreviewSourceRequest {
+    pub plugin_id: String,
+    pub path: String,
+    pub media_type: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginDataFilePreviewSourceResponse {
+    pub plugin_id: String,
+    pub path: String,
+    pub token: String,
+    pub source_url: Option<String>,
+    pub media_type: String,
+    pub size_bytes: i64,
+    pub modified_at: Option<String>,
+}
+
 #[derive(Debug, Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct PluginConfigSnapshot {
@@ -3649,6 +3669,60 @@ impl RepositoryState {
         Ok(PluginDataDirectoryResponse {
             plugin_id: registration.manifest.plugin_id.clone(),
             path: data_dir.to_string_lossy().to_string(),
+        })
+    }
+
+    pub fn prepare_plugin_data_file_preview_source(
+        &self,
+        request: PluginDataFilePreviewSourceRequest,
+    ) -> Result<PluginDataFilePreviewSourceResponse, String> {
+        self.ensure_initialized()?;
+        let registry = plugin_management_registry(&self.root);
+        let normalized_plugin_id = registry.normalize_plugin_id(&request.plugin_id);
+        let registration = registry
+            .registration(&normalized_plugin_id)
+            .ok_or_else(|| format!("plugin not found: {}", request.plugin_id))?;
+        let data_dir = ensure_plugin_data_dir(&self.root, &registration.manifest.plugin_id)?;
+        let canonical_data_dir = data_dir.canonicalize().map_err(io_error)?;
+        let source_path = PathBuf::from(request.path.trim());
+        if !source_path.is_absolute() {
+            return Err("plugin data preview path must be absolute".to_string());
+        }
+        if !source_path.is_file() {
+            return Err(format!(
+                "plugin data preview file is not available: {}",
+                source_path.to_string_lossy()
+            ));
+        }
+        let canonical_source_path = source_path.canonicalize().map_err(io_error)?;
+        if !canonical_source_path.starts_with(&canonical_data_dir) {
+            return Err(format!(
+                "plugin data preview path is outside plugin data directory: {}",
+                source_path.to_string_lossy()
+            ));
+        }
+        let media_type = request.media_type.trim();
+        let media_type = if media_type.is_empty() {
+            "application/octet-stream"
+        } else {
+            media_type
+        };
+        let metadata = fs::metadata(&canonical_source_path).map_err(io_error)?;
+        let modified_at = metadata
+            .modified()
+            .ok()
+            .map(system_time_to_rfc3339)
+            .transpose()
+            .map_err(time_error)?;
+        let token = self.register_preview_source_path(canonical_source_path.clone(), media_type)?;
+        Ok(PluginDataFilePreviewSourceResponse {
+            plugin_id: registration.manifest.plugin_id.clone(),
+            path: canonical_source_path.to_string_lossy().to_string(),
+            token,
+            source_url: None,
+            media_type: media_type.to_string(),
+            size_bytes: metadata.len() as i64,
+            modified_at,
         })
     }
 
@@ -12787,6 +12861,18 @@ fn core_tauri_api_definitions() -> Vec<ApiDefinition> {
         ),
         tauri_api_definition(
             "Plugin API",
+            "prepare_plugin_data_file_preview_source",
+            "将插件数据目录内文件注册为受控预览源。",
+            serde_json::json!({
+                "request": {
+                    "pluginId": "<pluginId>",
+                    "path": "<absolutePluginDataFilePath>",
+                    "mediaType": "text/plain; charset=utf-8"
+                }
+            }),
+        ),
+        tauri_api_definition(
+            "Plugin API",
             "get_plugin_config",
             "读取插件 key-value 配置快照。",
             serde_json::json!({ "pluginId": "<pluginId>" }),
@@ -17950,6 +18036,43 @@ mod tests {
         assert_eq!(PathBuf::from(response.path), expected_path);
         assert!(expected_path.is_dir());
         assert!(expected_path.starts_with(service_root.join("plugin-data")));
+    }
+
+    #[test]
+    fn plugin_data_file_preview_source_is_limited_to_plugin_data_dir() {
+        let workspace = TestWorkspace::new("plugin-data-preview-source");
+        let service_root = workspace.path("service");
+        seed_standard_test_plugins(&service_root);
+        let state = RepositoryState::from_root(service_root.clone());
+        let data_dir = plugin_data_dir(&service_root, LOCAL_FILESYSTEM_PLUGIN_ID);
+        fs::create_dir_all(&data_dir).expect("plugin data directory should be created");
+        let preview_file = data_dir.join("preview.txt");
+        fs::write(&preview_file, b"hello").expect("preview file should be written");
+        let outside_file = service_root.join("outside.txt");
+        fs::write(&outside_file, b"outside").expect("outside file should be written");
+
+        let response = state
+            .prepare_plugin_data_file_preview_source(PluginDataFilePreviewSourceRequest {
+                plugin_id: LEGACY_LOCAL_FILESYSTEM_PLUGIN_ID.to_string(),
+                path: preview_file.to_string_lossy().to_string(),
+                media_type: "text/plain; charset=utf-8".to_string(),
+            })
+            .expect("plugin data preview source should register");
+
+        assert_eq!(response.plugin_id, LOCAL_FILESYSTEM_PLUGIN_ID);
+        assert_eq!(response.media_type, "text/plain; charset=utf-8");
+        assert_eq!(response.size_bytes, 5);
+        assert!(state.open_preview_file_source(&response.token).is_ok());
+
+        let error = state
+            .prepare_plugin_data_file_preview_source(PluginDataFilePreviewSourceRequest {
+                plugin_id: LOCAL_FILESYSTEM_PLUGIN_ID.to_string(),
+                path: outside_file.to_string_lossy().to_string(),
+                media_type: "text/plain".to_string(),
+            })
+            .expect_err("outside plugin data files should be rejected");
+
+        assert!(error.contains("outside plugin data directory"));
     }
 
     #[test]

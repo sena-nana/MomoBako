@@ -227,9 +227,13 @@ export function register(ctx) {
             entryPath: entry.path,
           });
           if (token !== previewToken) return;
-          selectedPreview.value = preview;
-          const sourceUrl = preview.sourceUrl || (preview.localPath ? ctx.fileSrc(preview.localPath) : "");
           const kind = previewKind(entry.extension, preview.mediaType);
+          const sourceUrl = await resolvePreviewSourceUrl(ctx, preview);
+          if (token !== previewToken) return;
+          selectedPreview.value = {
+            ...preview,
+            sourceUrl,
+          };
           if (kind === "text" && sourceUrl) {
             textContent.value = await fetchTextPreview(sourceUrl, preview.sizeBytes);
           } else if (!sourceUrl && kind !== "binary") {
@@ -428,6 +432,20 @@ function previewKind(extension, mediaType = "") {
   if (audioExtensions.includes(ext) || type.startsWith("audio/")) return "audio";
   if (textExtensions.includes(ext) || type.startsWith("text/") || type === "application/json") return "text";
   return "binary";
+}
+
+async function resolvePreviewSourceUrl(ctx, preview) {
+  if (preview?.sourceUrl) return preview.sourceUrl;
+  if (!preview?.localPath) return "";
+  if (ctx.preparePluginDataFilePreviewSource) {
+    const response = await ctx.preparePluginDataFilePreviewSource({
+      pluginId: archiveServicePluginId,
+      path: preview.localPath,
+      mediaType: preview.mediaType || "application/octet-stream",
+    });
+    if (response.sourceUrl) return response.sourceUrl;
+  }
+  return ctx.fileSrc(preview.localPath);
 }
 
 function fileKindLabel(extension) {

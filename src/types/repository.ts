@@ -659,6 +659,22 @@ export type PluginDataDirectoryResponse = {
   path: string;
 };
 
+export type PluginDataFilePreviewSourceRequest = {
+  pluginId: string;
+  path: string;
+  mediaType: string;
+};
+
+export type PluginDataFilePreviewSourceResponse = {
+  pluginId: string;
+  path: string;
+  token: string;
+  sourceUrl?: string | null;
+  mediaType: string;
+  sizeBytes: number;
+  modifiedAt?: string | null;
+};
+
 export type PluginConfigValue = unknown;
 
 export type PluginConfigSnapshot = {
