@@ -376,4 +376,76 @@ describe("PluginManagerPanel", () => {
     );
     expect(screen.getByText("插件设置已保存。")).toBeInTheDocument();
   });
+
+  it("saves local filesystem file search mode from the settings select", async () => {
+    loadPluginConfigInWorkspace.mockResolvedValue({
+      pluginId: "momobako.local-filesystem",
+      dataDirectory: "C:/MomoBako/.service-data/plugin-data/momobako-local-filesystem",
+      schema: {},
+      values: {},
+    });
+    deletePluginConfigValueInWorkspace.mockResolvedValue({
+      pluginId: "momobako.local-filesystem",
+      dataDirectory: "C:/MomoBako/.service-data/plugin-data/momobako-local-filesystem",
+      schema: {},
+      values: {},
+    });
+    setPluginConfigValueInWorkspace.mockImplementation(async (_pluginId, _key, value) => ({
+      pluginId: "momobako.local-filesystem",
+      dataDirectory: "C:/MomoBako/.service-data/plugin-data/momobako-local-filesystem",
+      schema: {},
+      values: { fileSearchMode: value },
+    }));
+    plugins.value = [
+      manifest({
+        pluginId: "momobako.local-filesystem",
+        name: "Local Filesystem",
+        category: "source",
+        kind: "filesystem",
+        contributes: {
+          settings: {
+            fields: [
+              {
+                key: "fileSearchMode",
+                label: "文件检索方式",
+                type: "select",
+                default: "recursive",
+                options: [
+                  { label: "现有扫描", value: "recursive" },
+                  { label: "NTFS 索引", value: "ntfs" },
+                  { label: "Everything 索引", value: "everything" },
+                ],
+              },
+            ],
+          },
+        },
+      }),
+    ];
+
+    render(PluginManagerPanel);
+    await fireEvent.click(screen.getByRole("button", { name: "设置" }));
+    const select = await screen.findByRole("combobox");
+    expect(select).toHaveValue(JSON.stringify("recursive"));
+
+    await fireEvent.update(select, JSON.stringify("ntfs"));
+    expect(setPluginConfigValueInWorkspace).toHaveBeenLastCalledWith(
+      "momobako.local-filesystem",
+      "fileSearchMode",
+      "ntfs",
+    );
+
+    await fireEvent.update(select, JSON.stringify("everything"));
+    expect(setPluginConfigValueInWorkspace).toHaveBeenLastCalledWith(
+      "momobako.local-filesystem",
+      "fileSearchMode",
+      "everything",
+    );
+
+    await fireEvent.click(screen.getByRole("button", { name: "重置" }));
+    expect(deletePluginConfigValueInWorkspace).toHaveBeenLastCalledWith(
+      "momobako.local-filesystem",
+      "fileSearchMode",
+    );
+    expect(select).toHaveValue(JSON.stringify("recursive"));
+  });
 });

@@ -506,6 +506,32 @@ export function pluginManifest(
         operations: ["list", "read", "write", "move", "delete", "watch"],
         dangerousOperations: ["write", "move", "delete"],
       },
+      ...(pluginId === "momobako.local-filesystem"
+        ? {
+            settings: {
+              schemaVersion: 1,
+              settingsPage: {
+                label: "本地文件系统",
+                description: "配置本地资源库的文件检索方式。",
+                order: 10,
+              },
+              fields: [
+                {
+                  key: "fileSearchMode",
+                  label: "文件检索方式",
+                  type: "select",
+                  description: "NTFS 与 Everything 不可用时会自动回退到现有扫描。",
+                  default: "recursive",
+                  options: [
+                    { label: "现有扫描", value: "recursive" },
+                    { label: "NTFS 索引", value: "ntfs" },
+                    { label: "Everything 索引", value: "everything" },
+                  ],
+                },
+              ],
+            },
+          }
+        : {}),
     }
     : pluginId === "momobako.filesystem-watcher" ? {
       service: {

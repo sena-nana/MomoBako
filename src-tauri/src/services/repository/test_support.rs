@@ -33,8 +33,7 @@ static TEST_BACKEND_STAT_ENTRY_HOOK: OnceLock<Mutex<Option<TestBackendStatEntryH
 static PLAYBACK_TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
 #[cfg(test)]
-pub(crate) fn downloader_playback_hook(
-) -> Result<Option<TestDownloaderPlaybackHook>, String> {
+pub(crate) fn downloader_playback_hook() -> Result<Option<TestDownloaderPlaybackHook>, String> {
     TEST_DOWNLOADER_PLAYBACK_HOOK
         .get_or_init(|| Mutex::new(None))
         .lock()
@@ -61,7 +60,11 @@ pub(crate) fn backend_stat_entry_hook(
     TEST_BACKEND_STAT_ENTRY_HOOK
         .get_or_init(|| Mutex::new(None))
         .lock()
-        .map(|guard| guard.as_ref().and_then(|hook| hook(repo, repo_root, entry_path)))
+        .map(|guard| {
+            guard
+                .as_ref()
+                .and_then(|hook| hook(repo, repo_root, entry_path))
+        })
         .map_err(|_| "test backend stat entry hook lock poisoned".to_string())
 }
 
@@ -101,10 +104,8 @@ impl TestWorkspace {
             .duration_since(UNIX_EPOCH)
             .expect("system clock must be after unix epoch")
             .as_nanos();
-        let root = std::env::temp_dir().join(format!(
-            "momobako-{name}-{}-{unique}",
-            std::process::id()
-        ));
+        let root =
+            std::env::temp_dir().join(format!("momobako-{name}-{}-{unique}", std::process::id()));
         Self { root }
     }
 
@@ -221,7 +222,31 @@ pub(crate) fn create_local_repository_record_for_external_tests(
                 },
                 "capabilities": ["listFiles", "readFile", "writeFile", "moveFile", "deleteFile"],
                 "runtime": "manifest-only",
-                "source": "system"
+                "source": "system",
+                "contributes": {
+                    "settings": {
+                        "schemaVersion": 1,
+                        "settingsPage": {
+                            "label": "本地文件系统",
+                            "description": "配置本地资源库的文件检索方式。",
+                            "order": 10
+                        },
+                        "fields": [
+                            {
+                                "key": "fileSearchMode",
+                                "label": "文件检索方式",
+                                "type": "select",
+                                "description": "NTFS 与 Everything 不可用时会自动回退到现有扫描。",
+                                "default": "recursive",
+                                "options": [
+                                    { "label": "现有扫描", "value": "recursive" },
+                                    { "label": "NTFS 索引", "value": "ntfs" },
+                                    { "label": "Everything 索引", "value": "everything" }
+                                ]
+                            }
+                        ]
+                    }
+                }
             }),
         ),
     );

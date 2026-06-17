@@ -1,15 +1,18 @@
 use std::{
+    collections::HashSet,
     ffi::CString,
     fs::{self, OpenOptions},
     os::raw::c_char,
-    path::{Path, PathBuf},
+    path::{Component, Path, PathBuf},
 };
 
 use momobako_backend_plugin_sdk::{free_c_string, read_request, response_error, response_ok};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 
 const MANIFEST: &str = include_str!("../manifest.json");
+const FILE_SEARCH_MODE_KEY: &str = "fileSearchMode";
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -72,6 +75,13 @@ struct FileSystemPayload {
     recursive: Option<bool>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FileSearchMode {
+    Recursive,
+    Ntfs,
+    Everything,
+}
+
 #[no_mangle]
 pub extern "C" fn momobako_plugin_manifest() -> *mut c_char {
     CString::new(MANIFEST)
@@ -94,6 +104,8 @@ pub unsafe extern "C" fn momobako_plugin_free(value: *mut c_char) {
 
 fn handle_call(input: *const c_char) -> Result<serde_json::Value, String> {
     let request = read_request(input)?;
+    let file_search_mode =
+        file_search_mode_from_config(request.runtime.plugin_config.get(FILE_SEARCH_MODE_KEY));
     let payload: FileSystemPayload =
         serde_json::from_value(request.payload).map_err(|error| error.to_string())?;
     match request.method.as_str() {
@@ -106,7 +118,7 @@ fn handle_call(input: *const c_char) -> Result<serde_json::Value, String> {
             Ok(serde_json::json!({}))
         }
         "filesystem.listFiles" => {
-            let files = collect_files(&payload.repo_root)?;
+            let files = collect_files_with_mode(&payload.repo_root, file_search_mode)?;
             serde_json::to_value(files).map_err(|error| error.to_string())
         }
         "filesystem.listTree" => {
@@ -238,6 +250,239 @@ fn collect_files(repo_root: &Path) -> Result<Vec<DiscoveredFile>, String> {
     let mut files = Vec::new();
     collect_files_recursive(repo_root, repo_root, &mut files)?;
     Ok(files)
+}
+
+fn collect_files_with_mode(
+    repo_root: &Path,
+    mode: FileSearchMode,
+) -> Result<Vec<DiscoveredFile>, String> {
+    match mode {
+        FileSearchMode::Recursive => collect_files(repo_root),
+        FileSearchMode::Ntfs => collect_files_with_fallback(repo_root, "NTFS", collect_files_ntfs),
+        FileSearchMode::Everything => {
+            collect_files_with_fallback(repo_root, "Everything", collect_files_everything)
+        }
+    }
+}
+
+fn collect_files_with_fallback(
+    repo_root: &Path,
+    label: &str,
+    collect: fn(&Path) -> Result<Vec<DiscoveredFile>, String>,
+) -> Result<Vec<DiscoveredFile>, String> {
+    match collect(repo_root) {
+        Ok(files) => Ok(files),
+        Err(error) => {
+            eprintln!(
+                "[local-filesystem] {label} file search unavailable for {}: {error}; falling back to recursive scan",
+                repo_root.to_string_lossy()
+            );
+            collect_files(repo_root)
+        }
+    }
+}
+
+fn file_search_mode_from_config(value: Option<&Value>) -> FileSearchMode {
+    match value.and_then(Value::as_str).map(str::trim) {
+        Some("ntfs") => FileSearchMode::Ntfs,
+        Some("everything") => FileSearchMode::Everything,
+        _ => FileSearchMode::Recursive,
+    }
+}
+
+fn collect_files_everything(repo_root: &Path) -> Result<Vec<DiscoveredFile>, String> {
+    collect_files_everything_impl(repo_root)
+}
+
+#[cfg(windows)]
+fn collect_files_everything_impl(repo_root: &Path) -> Result<Vec<DiscoveredFile>, String> {
+    use std::time::Duration;
+
+    use everything_ipc::{
+        search::normalize_path_ev,
+        wm::{EverythingClient, RequestFlags},
+    };
+
+    let query_root = canonical_index_root(repo_root);
+    let search_root = normalize_path_ev(&query_root).display().to_string();
+    let query = format!(r#"file: path:"{search_root}\*""#);
+    let everything = EverythingClient::new().map_err(|error| error.to_string())?;
+    let list = everything
+        .query_wait(&query)
+        .request_flags(RequestFlags::FullPathAndFileName)
+        .timeout(Duration::from_secs(10))
+        .call()
+        .map_err(|error| error.to_string())?;
+    let mut files = Vec::new();
+    for item in list.iter() {
+        let path = item
+            .get_string(RequestFlags::FullPathAndFileName)
+            .map(PathBuf::from)
+            .ok_or_else(|| "Everything result is missing full path".to_string())?;
+        push_discovered_file(&query_root, &path, &mut files)?;
+    }
+    finalize_discovered_files(files)
+}
+
+#[cfg(not(windows))]
+fn collect_files_everything_impl(_repo_root: &Path) -> Result<Vec<DiscoveredFile>, String> {
+    Err("Everything file search is only available on Windows".to_string())
+}
+
+#[cfg(windows)]
+fn collect_files_ntfs(repo_root: &Path) -> Result<Vec<DiscoveredFile>, String> {
+    use ntfs_reader::{file_info::FileInfo, mft::Mft, volume::Volume};
+
+    let volume_name = windows_volume_name(repo_root)
+        .ok_or_else(|| "repository path has no Windows drive prefix".to_string())?;
+    let query_root = canonical_index_root(repo_root);
+    let volume = Volume::new(format!(r"\\.\{volume_name}:")).map_err(|error| error.to_string())?;
+    let mft = Mft::new(volume).map_err(|error| error.to_string())?;
+    let mut files = Vec::new();
+    for file in mft.files() {
+        let info = FileInfo::new(&mft, &file);
+        let path = normalize_ntfs_info_path(&info.path, &volume_name);
+        if info.is_directory || !path_is_under_root(&query_root, &path) {
+            continue;
+        }
+        push_discovered_file(&query_root, &path, &mut files)?;
+    }
+    finalize_discovered_files(files)
+}
+
+#[cfg(not(windows))]
+fn collect_files_ntfs(_repo_root: &Path) -> Result<Vec<DiscoveredFile>, String> {
+    Err("NTFS file search is only available on Windows".to_string())
+}
+
+fn push_discovered_file(
+    repo_root: &Path,
+    path: &Path,
+    files: &mut Vec<DiscoveredFile>,
+) -> Result<(), String> {
+    if !path.is_file()
+        || !path_is_under_root(repo_root, path)
+        || is_inside_internal_repository_dir(repo_root, path)
+    {
+        return Ok(());
+    }
+    let metadata = fs::metadata(path).map_err(io_error)?;
+    let relative_path = indexed_relative_path(repo_root, path)?;
+    files.push(DiscoveredFile {
+        absolute_path: path.to_path_buf(),
+        filename: path
+            .file_name()
+            .map(|value| value.to_string_lossy().to_string())
+            .unwrap_or_else(|| relative_path.clone()),
+        extension: path
+            .extension()
+            .map(|value| value.to_string_lossy().to_string())
+            .unwrap_or_default(),
+        size_bytes: metadata.len() as i64,
+        modified_at: metadata
+            .modified()
+            .map_err(io_error)
+            .and_then(system_time_to_rfc3339)?,
+        is_virtual: false,
+        provider_id: None,
+        provider_item_id: None,
+        source_payload: None,
+        local_absolute_path: Some(path.to_string_lossy().to_string()),
+        relative_path,
+    });
+    Ok(())
+}
+
+fn is_inside_internal_repository_dir(repo_root: &Path, path: &Path) -> bool {
+    indexed_relative_path(repo_root, path)
+        .map(|relative| {
+            Path::new(&relative).components().any(|component| {
+                matches!(component, Component::Normal(name) if is_internal_repository_dir(&name.to_string_lossy()))
+            })
+        })
+        .unwrap_or(false)
+}
+
+#[cfg(windows)]
+fn windows_volume_name(path: &Path) -> Option<String> {
+    use std::path::Prefix;
+
+    for component in path.components() {
+        if let Component::Prefix(prefix) = component {
+            if let Prefix::Disk(value) = prefix.kind() {
+                return Some((value as char).to_string());
+            }
+        }
+    }
+    None
+}
+
+#[cfg(windows)]
+fn normalize_ntfs_info_path(path: &Path, volume_name: &str) -> PathBuf {
+    let text = path.to_string_lossy();
+    let prefix = format!(r"\\.\{volume_name}:");
+    if let Some(rest) = text.strip_prefix(&prefix) {
+        return PathBuf::from(format!("{volume_name}:{rest}"));
+    }
+    path.to_path_buf()
+}
+
+fn canonical_index_root(repo_root: &Path) -> PathBuf {
+    let root = repo_root
+        .canonicalize()
+        .unwrap_or_else(|_| repo_root.to_path_buf());
+    normalize_verbatim_path(&root)
+}
+
+fn normalize_verbatim_path(path: &Path) -> PathBuf {
+    #[cfg(windows)]
+    {
+        let text = path.to_string_lossy();
+        if let Some(rest) = text.strip_prefix("\\\\?\\UNC\\") {
+            return PathBuf::from(format!("\\\\{rest}"));
+        }
+        if let Some(rest) = text.strip_prefix("\\\\?\\") {
+            return PathBuf::from(rest);
+        }
+    }
+
+    path.to_path_buf()
+}
+
+fn path_is_under_root(repo_root: &Path, path: &Path) -> bool {
+    indexed_relative_path(repo_root, path).is_ok()
+}
+
+fn indexed_relative_path(repo_root: &Path, path: &Path) -> Result<String, String> {
+    #[cfg(windows)]
+    {
+        let root_text = repo_root.to_string_lossy().replace('\\', "/");
+        let path_text = path.to_string_lossy().replace('\\', "/");
+        let root_text = root_text.trim_end_matches('/');
+        let root_cmp = root_text.to_lowercase();
+        let path_cmp = path_text.to_lowercase();
+        if path_cmp == root_cmp {
+            return Ok(String::new());
+        }
+        let prefix = format!("{root_cmp}/");
+        if path_cmp.starts_with(&prefix) {
+            return Ok(path_text[root_text.len() + 1..].to_string());
+        }
+    }
+
+    relative_path(repo_root, path)
+}
+
+fn finalize_discovered_files(files: Vec<DiscoveredFile>) -> Result<Vec<DiscoveredFile>, String> {
+    let mut seen = HashSet::new();
+    let mut unique = Vec::new();
+    for file in files {
+        if seen.insert(file.relative_path.clone()) {
+            unique.push(file);
+        }
+    }
+    unique.sort_by(|left, right| left.relative_path.cmp(&right.relative_path));
+    Ok(unique)
 }
 
 fn collect_files_recursive(
@@ -483,6 +728,29 @@ fn io_error(error: std::io::Error) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    struct TestWorkspace {
+        root: PathBuf,
+    }
+
+    impl TestWorkspace {
+        fn new(name: &str) -> Self {
+            let unique = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("system clock must be after unix epoch")
+                .as_nanos();
+            let root = std::env::temp_dir().join(format!("momobako-plugin-{name}-{unique}"));
+            fs::create_dir_all(&root).expect("test root should be created");
+            Self { root }
+        }
+    }
+
+    impl Drop for TestWorkspace {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.root);
+        }
+    }
 
     #[test]
     fn discovered_file_serializes_virtual_compat_fields() {
@@ -538,5 +806,66 @@ mod tests {
         assert_eq!(value.get("providerId"), Some(&serde_json::Value::Null));
         assert_eq!(value.get("providerItemId"), Some(&serde_json::Value::Null));
         assert_eq!(value.get("sourcePayload"), Some(&serde_json::Value::Null));
+    }
+
+    #[test]
+    fn file_search_mode_config_defaults_to_recursive() {
+        assert_eq!(
+            file_search_mode_from_config(None),
+            FileSearchMode::Recursive
+        );
+        assert_eq!(
+            file_search_mode_from_config(Some(&serde_json::json!("unknown"))),
+            FileSearchMode::Recursive
+        );
+        assert_eq!(
+            file_search_mode_from_config(Some(&serde_json::json!("ntfs"))),
+            FileSearchMode::Ntfs
+        );
+        assert_eq!(
+            file_search_mode_from_config(Some(&serde_json::json!("everything"))),
+            FileSearchMode::Everything
+        );
+    }
+
+    #[test]
+    fn recursive_search_keeps_existing_file_metadata_semantics() {
+        let workspace = TestWorkspace::new("recursive-search");
+        let repo_root = &workspace.root;
+        fs::create_dir_all(repo_root.join("music")).expect("music dir should be created");
+        fs::create_dir_all(repo_root.join(".momo")).expect("meta dir should be created");
+        fs::create_dir_all(repo_root.join(".meta")).expect("legacy meta dir should be created");
+        fs::write(repo_root.join("music").join("demo.flac"), b"audio")
+            .expect("file should be written");
+        fs::write(repo_root.join(".momo").join("hidden.flac"), b"skip")
+            .expect("hidden file should be written");
+        fs::write(repo_root.join(".meta").join("legacy.flac"), b"skip")
+            .expect("legacy file should be written");
+
+        let files = collect_files_with_mode(repo_root, FileSearchMode::Recursive)
+            .expect("recursive search should succeed");
+
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].relative_path, "music/demo.flac");
+        assert_eq!(files[0].filename, "demo.flac");
+        assert_eq!(files[0].extension, "flac");
+        assert_eq!(files[0].size_bytes, 5);
+        assert!(files[0].modified_at.contains('T'));
+    }
+
+    #[test]
+    fn unavailable_index_search_falls_back_to_recursive_scan() {
+        fn unavailable(_repo_root: &Path) -> Result<Vec<DiscoveredFile>, String> {
+            Err("not available".to_string())
+        }
+
+        let workspace = TestWorkspace::new("fallback-search");
+        fs::write(workspace.root.join("demo.mp3"), b"audio").expect("file should be written");
+
+        let files = collect_files_with_fallback(&workspace.root, "Test", unavailable)
+            .expect("fallback search should succeed");
+
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].relative_path, "demo.mp3");
     }
 }
