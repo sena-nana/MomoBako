@@ -37,12 +37,13 @@
   --err-soft: rgba(244, 113, 116, 0.14);
   --thumbnail-placeholder-bg: #3a3a3a;
   --app-corner-shape: squircle;
-  --radius-xs: 4px;
-  --radius-sm: 6px;
-  --radius-md: 8px;
-  --radius-lg: 10px;
-  --radius-xl: 12px;
-  --radius-2xl: 16px;
+  --app-corner-radius: 8px;
+  --radius-xs: calc(var(--app-corner-radius) * 0.5);
+  --radius-sm: calc(var(--app-corner-radius) * 0.75);
+  --radius-md: var(--app-corner-radius);
+  --radius-lg: calc(var(--app-corner-radius) * 1.25);
+  --radius-xl: calc(var(--app-corner-radius) * 1.5);
+  --radius-2xl: calc(var(--app-corner-radius) * 2);
   --radius-pill: 999px;
   font-family: var(--font-sans);
   font-size: 14px;
@@ -77,6 +78,10 @@
   --warn-soft: rgba(184, 119, 28, 0.12);
   --err-soft: rgba(201, 60, 60, 0.10);
   --thumbnail-placeholder-bg: #d8dce2;
+}
+
+:root[data-corners="round"] {
+  --app-corner-shape: round;
 }
 
 * {

@@ -117,6 +117,25 @@
   margin-top: 12px;
 }
 
+.radius-control {
+  display: grid;
+  grid-template-columns: minmax(140px, 220px) 44px;
+  align-items: center;
+  gap: 10px;
+}
+
+.radius-control input {
+  width: 100%;
+  height: auto;
+  padding-inline: 0;
+}
+
+.radius-control output {
+  color: var(--text-muted);
+  font-size: 12px;
+  text-align: right;
+}
+
 .settings-notice {
   margin: 10px 0 0;
   color: var(--text-muted);
@@ -4492,6 +4511,11 @@
   .settings-row {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .radius-control {
+    width: 100%;
+    grid-template-columns: minmax(0, 1fr) 44px;
   }
 }
 
