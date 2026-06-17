@@ -1,0 +1,39 @@
+//! Stable repository-facing DTO re-exports.
+
+#![allow(unused_imports)]
+
+pub use crate::services::repository::{
+    ApiDefinition, ApiDesignSnapshot, AssetDetail, AssetSummary, BinaryFileWriteRequest,
+    BinaryFileWriteResponse, CacheEntry, CacheSnapshot, DownloaderDestinationRequest,
+    DownloaderPlaylistProgressEvent, DownloaderPlaylistRequest, DownloaderPlaylistTrackRequest,
+    EntryPlaybackProgressEvent, EntryPlaybackRequest, EntryPlaybackSourceResponse,
+    ExternalAddAssetClient, ExternalAddAssetFailure, ExternalAddAssetRequest,
+    ExternalAddAssetResponse, ExternalImportedAsset,
+    FileBrowserEntry, FileBrowserRequest, FileBrowserSnapshot, FileCopyRequest, FileCreateRequest,
+    FileDeleteRequest, FileImportRequest, FileMoveRequest, FilePreviewSourceResponse,
+    FileReadRequest, FileRenameRequest, FileTreeNode, FolderMetadata, FolderSummary,
+    HardlinkCandidateResponse, HardlinkConfirmRequest, HardlinkConfirmResponse, MetadataEntry,
+    MetadataUpdateRequest, MetadataUpdateResponse, NeteaseRepositoryCacheConfigureRequest,
+    NeteaseRepositoryCacheConfigureResponse, NeteaseRepositoryCacheMigrationSummary,
+    PlaylistDetail, PlaylistItem, PlaylistItemsAddRequest, PlaylistItemsByPathsAddRequest,
+    PlaylistItemsOrderRequest, PlaylistItemRemoveRequest, PlaylistMembershipIndex,
+    PlaylistMembershipRequest, PlaylistMembershipSnapshot, PlaylistMutationRequest,
+    PlaylistMutationResponse, PlaylistSummary, PlaylistUpdateRequest, PluginArchiveReadRequest,
+    PluginArchiveTextResponse, PluginCallRequest, PluginCallResult, PluginConfigDeleteRequest,
+    PluginConfigSetRequest, PluginConfigSnapshot, PluginDataDirectoryResponse,
+    PluginDataFilePreviewSourceRequest, PluginDataFilePreviewSourceResponse,
+    PluginEnabledRequest, PluginHookExecutionListRequest, PluginHookExecutionListResponse,
+    PluginHookExecutionRecord, PluginManifest, PluginMutationResponse, PluginInstallRequest,
+    RepositoryAction, RepositoryActionEnabledRequest, RepositoryActionMutationResponse,
+    RepositoryActionRun, RepositoryActionRunRequest, RepositoryActionRunResponse,
+    RepositoryActionStep, RepositoryArchiveExportOptions, RepositoryBackendConfigUpdateRequest,
+    RepositoryBackendSummary, RepositoryExportRequest, RepositoryExportResponse,
+    RepositoryFolderRequest, RepositoryLocalCacheStatus, RepositoryMutationRequest,
+    RepositoryMutationResponse, RepositoryOverview, RepositoryRelocateRequest, RepositoryShortcut,
+    RepositorySnapshot, RepositorySummary, RepositoryTagGroup, RevisionActionRequest,
+    RevisionActionResponse, RevisionEntry, SearchHit, SearchRequest, SearchResponse,
+    SmartFolderMutationRequest, SmartFolderMutationResponse, SmartFolderResultSnapshot,
+    SmartFolderTreeNode, SmartFolderUpdateRequest, SyncRequest, SyncResult, ThumbnailRequest,
+    ThumbnailResponse, TrashMutationRequest,
+};
+pub use crate::services::runtime::ExternalApiConnectionStatus;

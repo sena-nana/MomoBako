@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/vue";
 import { describe, expect, it, vi } from "vitest";
-import FileBrowserPanel from "../src/pages/workspace/FileBrowserPanel.vue";
+import FileBrowserPanel from "../src/pages/workspace/files/FileBrowserPanel.vue";
 import type { RegisteredLibraryExtension } from "../src/plugins/sdk";
 import type { FileBrowserEntry } from "../src/types/repository";
 import { fileSummary, matchAsmrEntry } from "../External/Plugins/library-asmr/src/asmrLibrary";

@@ -18,14 +18,14 @@ type WorkspacePreloadHandle = {
 export const workspaceComponentLoaders = {
   CopyTargetDialog: () => import("./CopyTargetDialog.vue"),
   ExtensionsPanel: () => import("./ExtensionsPanel.vue"),
-  FileBrowserPanel: () => import("./FileBrowserPanel.vue"),
-  FilePreviewPane: () => import("./FilePreviewPane.vue"),
+  FileBrowserPanel: () => import("./files/FileBrowserPanel.vue"),
+  FilePreviewPane: () => import("./preview/FilePreviewPane.vue"),
   HardlinkCandidateDialog: () => import("./HardlinkCandidateDialog.vue"),
-  RepositoryActionsPanel: () => import("./RepositoryActionsPanel.vue"),
+  RepositoryActionsPanel: () => import("./repository/RepositoryActionsPanel.vue"),
   SearchPanel: () => import("./SearchPanel.vue"),
-  WorkspaceFilterBar: () => import("./WorkspaceFilterBar.vue"),
+  WorkspaceFilterBar: () => import("./search/WorkspaceFilterBar.vue"),
   WorkspaceFilesSurface: () => import("./WorkspaceFilesSurface.vue"),
-  WorkspacePlaylistPage: () => import("./WorkspacePlaylistPage.vue"),
+  WorkspacePlaylistPage: () => import("./playlists/WorkspacePlaylistPage.vue"),
 };
 
 export const CopyTargetDialog = defineAsyncComponent(workspaceComponentLoaders.CopyTargetDialog);

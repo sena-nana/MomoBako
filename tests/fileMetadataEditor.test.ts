@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, within } from "@testing-library/vue";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { h, computed, reactive, ref, watch } from "vue";
-import FileMetadataEditor from "../src/pages/workspace/FileMetadataEditor.vue";
+import FileMetadataEditor from "../src/pages/workspace/files/FileMetadataEditor.vue";
 import type { RegisteredLibraryExtension } from "../src/plugins/sdk";
 import type { FileBrowserEntry } from "../src/types/repository";
 import { callPlugin } from "../src/services/repositoryApi";

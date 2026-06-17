@@ -6,7 +6,7 @@ import type { ContextMenuItem } from "../../composables/useContextMenu";
 import type { RegisteredLibraryExtension } from "../../plugins/sdk";
 import type { FileBrowserEntry, RepositoryTagGroup } from "../../types/repository";
 import type { FileDisplayMode } from "./useWorkspaceViewState";
-import type { WorkspacePlayerBarHandlers, WorkspacePlayerBarProps } from "./useWorkspacePlayerUi";
+import type { WorkspacePlayerBarHandlers, WorkspacePlayerBarProps } from "./playlists/usePlayerUi";
 
 type BreadcrumbSegment = {
   label: string;
