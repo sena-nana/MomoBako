@@ -86,6 +86,7 @@
 
 * {
   box-sizing: border-box;
+  scrollbar-width: none;
 }
 
 @supports (corner-shape: squircle) {
@@ -130,15 +131,48 @@ kbd {
 }
 
 ::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
+  width: 0;
+  height: 0;
 }
 
-::-webkit-scrollbar-thumb {
-  background: var(--border-strong);
+.global-scrollbar-overlay {
+  position: fixed;
+  z-index: 2147483647;
+  pointer-events: auto;
+  cursor: default;
+  opacity: 0;
+  transition: opacity 0.48s ease;
+}
+
+.global-scrollbar-overlay::before {
+  content: "";
+  position: absolute;
   border-radius: var(--radius-pill);
+  background: var(--border-strong);
 }
 
-::-webkit-scrollbar-track {
-  background: transparent;
+.global-scrollbar-overlay.is-visible {
+  opacity: 1;
+}
+
+.global-scrollbar-overlay--vertical {
+  width: 12px;
+}
+
+.global-scrollbar-overlay--vertical::before {
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 4px;
+}
+
+.global-scrollbar-overlay--horizontal {
+  height: 12px;
+}
+
+.global-scrollbar-overlay--horizontal::before {
+  right: 0;
+  bottom: 4px;
+  left: 0;
+  height: 4px;
 }
