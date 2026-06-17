@@ -19,7 +19,7 @@
   height: 34px;
   padding: 0 12px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text-muted);
   cursor: pointer;
@@ -34,7 +34,7 @@
 .view-tabs__tab {
   margin-bottom: -1px;
   border-bottom: 2px solid transparent;
-  border-radius: 6px 6px 0 0;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
 }
 
 .ui-tabs__tab:hover:not(:disabled):not(.is-active),
@@ -79,7 +79,7 @@
 .card {
   background: var(--bg-elev);
   border: 1px solid transparent;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   padding: 14px 16px;
   margin-bottom: 12px;
   overflow: hidden;
@@ -101,7 +101,7 @@ select,
   font: inherit;
   height: 32px;
   padding: 6px 10px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--border-strong);
   background: var(--bg-subtle);
   color: var(--text);
@@ -121,7 +121,7 @@ button,
   height: 32px;
   padding: 6px 10px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text);
   cursor: pointer;
@@ -225,7 +225,7 @@ button.ghost.danger:hover {
 .ui-list-item {
   display: flex;
   align-items: center;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: var(--bg-elev);
   color: var(--text);
   text-decoration: none;
@@ -247,7 +247,7 @@ button.ghost.danger:hover {
   height: 22px;
   padding: 0 8px;
   border: 1px solid var(--border-strong);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   color: var(--text-muted);
   font-size: 12px;
   display: inline-flex;
@@ -269,7 +269,7 @@ button.ghost.danger:hover {
   min-height: 20px;
   padding: 1px 7px;
   border: 1px solid var(--border-strong);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   color: var(--text-muted);
   font-size: 11px;
   font-weight: 500;
@@ -305,7 +305,7 @@ button.ghost.danger:hover {
   display: inline-flex;
   background: var(--bg);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   padding: 2px;
   gap: 2px;
   height: 34px;
@@ -319,7 +319,7 @@ button.ghost.danger:hover {
   border: 0;
   height: 28px;
   padding: 0 12px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   font-weight: 500;
   display: inline-flex;
   align-items: center;
@@ -347,7 +347,7 @@ button.ghost.danger:hover {
   height: 28px;
   padding: 0 10px;
   border: 1px solid var(--border);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--bg-subtle);
   color: var(--text-muted);
   cursor: pointer;
@@ -384,7 +384,7 @@ button.ghost.danger:hover {
   max-width: 280px;
   background: var(--bg-elev);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   padding: 4px;
   display: flex;
   flex-direction: column;
@@ -408,7 +408,7 @@ button.ghost.danger:hover {
   gap: 2px;
   padding: 6px 10px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text);
   cursor: pointer;

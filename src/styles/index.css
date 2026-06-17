@@ -36,6 +36,14 @@
   --warn-soft: rgba(212, 168, 91, 0.16);
   --err-soft: rgba(244, 113, 116, 0.14);
   --thumbnail-placeholder-bg: #3a3a3a;
+  --app-corner-shape: squircle;
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 10px;
+  --radius-xl: 12px;
+  --radius-2xl: 16px;
+  --radius-pill: 999px;
   font-family: var(--font-sans);
   font-size: 14px;
   line-height: 1.55;
@@ -75,6 +83,12 @@
   box-sizing: border-box;
 }
 
+@supports (corner-shape: squircle) {
+  * {
+    corner-shape: var(--app-corner-shape);
+  }
+}
+
 html,
 body,
 #root {
@@ -99,7 +113,7 @@ code,
 kbd {
   font-size: 0.92em;
   padding: 1px 6px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   background: var(--bg-subtle);
   border: 1px solid var(--border-soft);
   color: var(--text);
@@ -117,7 +131,7 @@ kbd {
 
 ::-webkit-scrollbar-thumb {
   background: var(--border-strong);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
 }
 
 ::-webkit-scrollbar-track {
