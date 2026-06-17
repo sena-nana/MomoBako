@@ -215,7 +215,7 @@ const emit = defineEmits<{
               <img
                 :src="neteaseQrSession.qrimg"
                 alt="网易云二维码登录"
-                style="width: 180px; height: 180px; object-fit: contain; border-radius: 12px;"
+                style="width: 180px; height: 180px; object-fit: contain; border-radius: var(--radius-xl);"
               />
             </div>
 
