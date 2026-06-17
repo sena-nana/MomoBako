@@ -18,7 +18,7 @@ import {
   resolveWorkspaceDropTarget,
   shouldDelegateToExternalDrag as shouldDelegateToExternalWorkspaceDrag,
 } from "./dragBehavior";
-import { createExternalDragIcon } from "./thumbnailUi";
+import { createExternalDragIcon } from "./preview/thumbnailUi";
 
 type InternalWorkspaceDragSession = {
   startX: number;

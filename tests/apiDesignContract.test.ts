@@ -13,21 +13,21 @@ function tauriHandlerCommands() {
 }
 
 function apiDefinitionCommands() {
-  const source = readFileSync(resolve("src-tauri/src/repository_service.rs"), "utf-8");
+  const source = readFileSync(resolve("src-tauri/src/services/repository/mod.rs"), "utf-8");
   return [...source.matchAll(/tauri_api_definition\([^,]+,\s*"([^"]+)"/g)]
     .map((match) => match[1])
     .filter(Boolean);
 }
 
 function externalRuntimeRoutes() {
-  const source = readFileSync(resolve("src-tauri/src/repository_runtime.rs"), "utf-8");
+  const source = readFileSync(resolve("src-tauri/src/services/runtime/external_api.rs"), "utf-8");
   return [...source.matchAll(/\(&Method::([A-Za-z]+),\s*"([^"]+)"\)\s*=>/g)]
     .map((match) => `${match[1].toUpperCase()} ${match[2]}`)
     .filter((route) => route.includes(" /external/v1/"));
 }
 
 function externalDefinitionRoutes() {
-  const source = readFileSync(resolve("src-tauri/src/repository_service.rs"), "utf-8");
+  const source = readFileSync(resolve("src-tauri/src/services/repository/mod.rs"), "utf-8");
   return [...source.matchAll(/external_api_definition\(\s*"([^"]+)",\s*"([^"]+)"/g)]
     .map((match) => `${match[1].toUpperCase()} ${match[2]}`);
 }
@@ -42,7 +42,7 @@ function backendPluginMethods(pluginDir: string) {
 }
 
 function embeddedLocalFilesystemMethods() {
-  const source = readFileSync(resolve("src-tauri/src/repository_service.rs"), "utf-8");
+  const source = readFileSync(resolve("src-tauri/src/services/repository/mod.rs"), "utf-8");
   const fallback = source.match(/fn call_builtin_local_filesystem\([\s\S]*?\n}\n\nfn list_backend_files/)?.[0] ?? "";
   return [...fallback.matchAll(/"([^"]+)"\s*=>/g)]
     .map((match) => match[1])

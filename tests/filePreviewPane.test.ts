@@ -25,7 +25,7 @@ vi.mock("../src/composables/usePlaylistPlayer", () => ({
   }),
 }));
 
-import FilePreviewPane from "../src/pages/workspace/FilePreviewPane.vue";
+import FilePreviewPane from "../src/pages/workspace/preview/FilePreviewPane.vue";
 
 function asmrEntry(path: string, trackTitle: string): FileBrowserEntry {
   return {

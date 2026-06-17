@@ -12,7 +12,7 @@ import {
 } from "./workspace/lazyComponents";
 import MissingRepositoryState from "./workspace/MissingRepositoryState.vue";
 import EmptyRepositoryState from "./workspace/EmptyRepositoryState.vue";
-import { useWorkspaceHomeViewModel } from "./workspace/useWorkspaceHomeViewModel";
+import { useWorkspaceHomeViewModel } from "./workspace/repository/useWorkspaceHomeViewModel";
 
 const vm = useWorkspaceHomeViewModel();
 </script>
