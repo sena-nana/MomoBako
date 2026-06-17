@@ -21,11 +21,16 @@ use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 
 mod browser;
 mod action;
+mod external_assets;
+mod playback;
 mod management;
 mod playlist;
 mod plugin;
 mod query;
 mod smart_folder;
+mod test_support;
+
+pub(crate) use playback::download_playlist_with_progress;
 
 const REGISTRY_FILE_NAME: &str = "repositories.db";
 const REPO_META_DIR: &str = ".momo";
@@ -40,22 +45,6 @@ const MAX_REMOTE_THUMBNAIL_BYTES: u64 = 10 * 1024 * 1024;
 const PLUGIN_HOOK_EXECUTIONS_FILE_NAME: &str = "plugin-hook-executions.jsonl";
 
 static FFMPEG_READY: OnceLock<Result<(), String>> = OnceLock::new();
-#[cfg(test)]
-type TestDownloaderPlaybackHook = fn(serde_json::Value) -> Result<serde_json::Value, String>;
-#[cfg(test)]
-static TEST_DOWNLOADER_PLAYBACK_HOOK: OnceLock<Mutex<Option<TestDownloaderPlaybackHook>>> =
-    OnceLock::new();
-#[cfg(test)]
-type TestDownloaderTrackPackageHook = fn(serde_json::Value) -> Result<serde_json::Value, String>;
-#[cfg(test)]
-static TEST_DOWNLOADER_TRACK_PACKAGE_HOOK: OnceLock<Mutex<Option<TestDownloaderTrackPackageHook>>> =
-    OnceLock::new();
-#[cfg(test)]
-type TestBackendStatEntryHook =
-    fn(&RepositoryRecord, &Path, &str) -> Option<Result<FileSystemEntry, String>>;
-#[cfg(test)]
-static TEST_BACKEND_STAT_ENTRY_HOOK: OnceLock<Mutex<Option<TestBackendStatEntryHook>>> =
-    OnceLock::new();
 const REGISTRY_SCHEMA_SQL: &str = r#"
 CREATE TABLE IF NOT EXISTS repositories (
   repo_id TEXT PRIMARY KEY,
@@ -2888,228 +2877,7 @@ impl RepositoryState {
         request_id: String,
         request: ExternalAddAssetRequest,
     ) -> ExternalAddAssetResponse {
-        let total = request.items.len();
-        let mut imported = Vec::new();
-        let mut failed = Vec::new();
-
-        if request.items.is_empty() {
-            failed.push(external_failure(
-                0,
-                "invalidInput",
-                "items cannot be empty".to_string(),
-                false,
-                None,
-            ));
-            return external_add_asset_response(request_id, imported, failed, total);
-        }
-
-        let context = match self.external_asset_import_context(&request_id, &request) {
-            Ok(context) => context,
-            Err(error) => {
-                failed.extend((0..total).map(|item_index| {
-                    external_failure(
-                        item_index,
-                        error.code,
-                        error.message.clone(),
-                        error.retryable,
-                        None,
-                    )
-                }));
-                return external_add_asset_response(request_id, imported, failed, total);
-            }
-        };
-
-        let mut staged_assets = Vec::<PlannedExternalAsset>::new();
-        let mut planned_targets = HashSet::<String>::new();
-
-        for (item_index, item) in request.items.iter().enumerate() {
-            match stage_external_asset_item(item_index, item, &context, &mut planned_targets) {
-                Ok(staged) => staged_assets.push(staged),
-                Err(failure) => failed.push(failure),
-            }
-        }
-
-        if !staged_assets.is_empty() {
-            let source_paths = staged_assets
-                .iter()
-                .map(|asset| asset.source_path.clone())
-                .collect::<Vec<_>>();
-            let metadata_by_target_path = staged_assets
-                .iter()
-                .filter_map(|asset| {
-                    asset
-                        .metadata
-                        .as_ref()
-                        .map(|metadata| (asset.target_path.clone(), metadata.clone()))
-                })
-                .collect::<BTreeMap<_, _>>();
-            let import_result = self.import_entries(FileImportRequest {
-                repo_id: request.repo_id.clone(),
-                parent_path: Some(context.parent_path.clone()),
-                source_paths,
-            });
-            match import_result {
-                Ok(_) => {
-                    if let Err(error) = self.apply_external_asset_metadata(
-                        &request.repo_id,
-                        &metadata_by_target_path,
-                        request.client.as_ref(),
-                    ) {
-                        failed.extend(staged_assets.iter().map(|asset| {
-                            external_failure(
-                                asset.item_index,
-                                "internalError",
-                                error.clone(),
-                                true,
-                                None,
-                            )
-                        }));
-                    } else {
-                        for asset in staged_assets {
-                            imported.push(ExternalImportedAsset {
-                                item_index: asset.item_index,
-                                asset_id: Some(asset_id_for_path(
-                                    &request.repo_id,
-                                    &asset.target_path,
-                                )),
-                                path: asset.target_path,
-                            });
-                        }
-                    }
-                }
-                Err(error) => {
-                    let code = external_import_error_code(&error);
-                    failed.extend(staged_assets.iter().map(|asset| {
-                        external_failure(asset.item_index, code, error.clone(), false, None)
-                    }));
-                }
-            }
-        }
-
-        let _ = fs::remove_dir_all(&context.staging_root);
-        external_add_asset_response(request_id, imported, failed, total)
-    }
-
-    fn external_asset_import_context(
-        &self,
-        request_id: &str,
-        request: &ExternalAddAssetRequest,
-    ) -> Result<ExternalAssetImportContext, ExternalRequestError> {
-        if let Err(error) = self.ensure_initialized() {
-            return Err(ExternalRequestError {
-                code: "notReady",
-                message: error,
-                retryable: true,
-            });
-        }
-
-        let repo = self
-            .load_repository_record(&request.repo_id)
-            .map_err(|error| {
-                let code = if error.contains("repository not found") {
-                    "repoNotFound"
-                } else {
-                    "internalError"
-                };
-                ExternalRequestError {
-                    code,
-                    message: error,
-                    retryable: false,
-                }
-            })?;
-        if repo.summary.status != "ready" {
-            return Err(ExternalRequestError {
-                code: "repoUnavailable",
-                message: format!("repository is not ready: {}", repo.summary.status),
-                retryable: true,
-            });
-        }
-        if let Err(error) = ensure_local_filesystem_repository(&repo, "adding external assets") {
-            return Err(ExternalRequestError {
-                code: "unsupportedRepositoryBackend",
-                message: error,
-                retryable: false,
-            });
-        }
-
-        let repo_root = PathBuf::from(&repo.summary.path);
-        let parent_path = normalize_directory_path(
-            request.parent_path.as_deref().unwrap_or_default(),
-        )
-        .map_err(|error| ExternalRequestError {
-            code: "invalidTargetPath",
-            message: error,
-            retryable: false,
-        })?;
-        let target_dir = match resolve_repository_relative_path(&repo_root, &parent_path) {
-            Ok(value) if value.exists() && value.is_dir() => value,
-            Ok(_) => {
-                return Err(ExternalRequestError {
-                    code: "invalidTargetPath",
-                    message: format!("directory not found: {parent_path}"),
-                    retryable: false,
-                });
-            }
-            Err(error) => {
-                return Err(ExternalRequestError {
-                    code: "invalidTargetPath",
-                    message: error,
-                    retryable: false,
-                });
-            }
-        };
-
-        let staging_root = self
-            .root
-            .join("external-imports")
-            .join(sanitize_external_component(request_id));
-        fs::create_dir_all(&staging_root)
-            .map_err(io_error)
-            .map_err(|error| ExternalRequestError {
-                code: "internalError",
-                message: error,
-                retryable: true,
-            })?;
-
-        Ok(ExternalAssetImportContext {
-            parent_path,
-            target_dir,
-            staging_root,
-        })
-    }
-
-    fn apply_external_asset_metadata(
-        &self,
-        repo_id: &str,
-        metadata_by_path: &BTreeMap<String, BTreeMap<String, serde_json::Value>>,
-        client: Option<&ExternalAddAssetClient>,
-    ) -> Result<(), String> {
-        if metadata_by_path.is_empty() {
-            return Ok(());
-        }
-        let repo = self.load_repository_record(repo_id)?;
-        let mut connection = self.open_repository_connection(
-            &repo.summary.repo_id,
-            &repo.summary.path,
-            &repo.backend_record,
-        )?;
-        let tx = connection.transaction().map_err(db_error)?;
-        let source = external_metadata_source(client);
-        for (path, metadata) in metadata_by_path {
-            let asset_id = tx
-                .query_row(
-                    "SELECT asset_id FROM assets WHERE repo_id = ?1 AND path = ?2 AND status != 'deleted'",
-                    params![repo_id, path],
-                    |row| row.get::<_, String>(0),
-                )
-                .optional()
-                .map_err(db_error)?
-                .ok_or_else(|| format!("imported asset not found: {path}"))?;
-            update_metadata_for_asset_in_transaction(&tx, repo_id, &asset_id, metadata, &source)
-                .map_err(db_error)?;
-        }
-        tx.commit().map_err(db_error)?;
-        Ok(())
+        external_assets::add_external_assets(self, request_id, request)
     }
 
     pub fn copy_entries(&self, request: FileCopyRequest) -> Result<FileBrowserSnapshot, String> {
@@ -9060,13 +8828,7 @@ fn call_downloader_prepare_track_playback(
     payload: serde_json::Value,
 ) -> Result<serde_json::Value, String> {
     #[cfg(test)]
-    if let Some(hook) = TEST_DOWNLOADER_PLAYBACK_HOOK
-        .get_or_init(|| Mutex::new(None))
-        .lock()
-        .map_err(|_| "test downloader playback hook lock poisoned".to_string())?
-        .as_ref()
-        .copied()
-    {
+    if let Some(hook) = test_support::downloader_playback_hook()? {
         return hook(payload);
     }
 
@@ -9082,13 +8844,7 @@ pub(crate) fn call_downloader_download_track_package(
     payload: serde_json::Value,
 ) -> Result<serde_json::Value, String> {
     #[cfg(test)]
-    if let Some(hook) = TEST_DOWNLOADER_TRACK_PACKAGE_HOOK
-        .get_or_init(|| Mutex::new(None))
-        .lock()
-        .map_err(|_| "test downloader track package hook lock poisoned".to_string())?
-        .as_ref()
-        .copied()
-    {
+    if let Some(hook) = test_support::downloader_track_package_hook()? {
         return hook(payload);
     }
 
@@ -9100,27 +8856,24 @@ pub(crate) fn call_downloader_download_track_package(
 }
 
 #[cfg(test)]
-pub(crate) fn set_test_downloader_playback_hook(hook: Option<TestDownloaderPlaybackHook>) {
-    *TEST_DOWNLOADER_PLAYBACK_HOOK
-        .get_or_init(|| Mutex::new(None))
-        .lock()
-        .expect("test downloader playback hook lock should succeed") = hook;
+pub(crate) fn set_test_downloader_playback_hook(
+    hook: Option<fn(serde_json::Value) -> Result<serde_json::Value, String>>,
+) {
+    test_support::set_test_downloader_playback_hook(hook);
 }
 
 #[cfg(test)]
-pub(crate) fn set_test_downloader_track_package_hook(hook: Option<TestDownloaderTrackPackageHook>) {
-    *TEST_DOWNLOADER_TRACK_PACKAGE_HOOK
-        .get_or_init(|| Mutex::new(None))
-        .lock()
-        .expect("test downloader track package hook lock should succeed") = hook;
+pub(crate) fn set_test_downloader_track_package_hook(
+    hook: Option<fn(serde_json::Value) -> Result<serde_json::Value, String>>,
+) {
+    test_support::set_test_downloader_track_package_hook(hook);
 }
 
 #[cfg(test)]
-fn set_test_backend_stat_entry_hook(hook: Option<TestBackendStatEntryHook>) {
-    *TEST_BACKEND_STAT_ENTRY_HOOK
-        .get_or_init(|| Mutex::new(None))
-        .lock()
-        .expect("test backend stat entry hook lock should succeed") = hook;
+fn set_test_backend_stat_entry_hook(
+    hook: Option<fn(&RepositoryRecord, &Path, &str) -> Option<Result<FileSystemEntry, String>>>,
+) {
+    test_support::set_test_backend_stat_entry_hook(hook);
 }
 
 fn load_runtime_plugin_manifests(service_root: &Path) -> Vec<DiscoveredPluginManifest> {
@@ -13749,13 +13502,7 @@ fn stat_backend_entry(
     entry_path: &str,
 ) -> Result<FileSystemEntry, String> {
     #[cfg(test)]
-    if let Some(result) = TEST_BACKEND_STAT_ENTRY_HOOK
-        .get_or_init(|| Mutex::new(None))
-        .lock()
-        .map_err(|_| "test backend stat entry hook lock poisoned".to_string())?
-        .as_ref()
-        .and_then(|hook| hook(repo, repo_root, entry_path))
-    {
+    if let Some(result) = test_support::backend_stat_entry_hook(repo, repo_root, entry_path)? {
         return result;
     }
 
