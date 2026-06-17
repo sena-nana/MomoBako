@@ -6,10 +6,11 @@
 - Runtime execution: blocking repository work runs on Tauri's blocking task pool
 - External client transport: a loopback HTTP API bound to `127.0.0.1` with a startup-generated bearer token written to the service connection file. The external API is source-neutral; browser extensions, native tools and other local clients all call the same contract.
 - Rust backend layering:
-  - `lib.rs` acts as the View layer for Tauri command entrypoints and app-facing side effects.
-  - `repository_view_model.rs` acts as the ViewModel layer for repository-management command orchestration.
-  - `repository_query_view_model.rs`, `file_browser_view_model.rs`, `plugin_view_model.rs`, and `repository_interaction_view_model.rs` split repository queries, file browsing, plugin/cache flows, and repository interaction flows into domain ViewModels.
-  - `repository_service.rs` and its submodules act as the Model/Service layer for repository domain logic and persistence.
+  - `lib.rs` acts as the View command facade and keeps only Tauri command entrypoints plus invoke registration.
+  - `app_shell.rs` owns desktop bootstrap, tray behavior, main-window lifecycle, ViewModel registration, and startup-only UI side effects such as thumbnail scope initialization.
+  - `viewmodels/repository/{management,query,browser,interaction,playback}.rs`, `viewmodels/plugin.rs`, and `viewmodels/system.rs` act as the ViewModel layer for repository management, read/query flows, file browsing, repository interactions, playback/download progress, plugin/cache commands, and desktop-system helpers.
+  - `services/repository/mod.rs` now acts as a stable facade over feature modules; playback download orchestration, external asset import, and test hooks have started moving into dedicated service files while keeping `crate::services::repository::*` stable for callers.
+  - `services/runtime/` remains the runtime shell for execution, watcher refresh, preview hosting, and the loopback external API server.
 
 ## External Asset API
 

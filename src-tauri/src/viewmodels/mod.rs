@@ -2,9 +2,11 @@
 
 pub mod plugin;
 pub mod repository;
+pub mod system;
 
 pub use plugin::PluginViewModel;
 pub use repository::{
     FileBrowserViewModel, RepositoryInteractionViewModel, RepositoryManagementViewModel,
-    RepositoryQueryViewModel,
+    RepositoryPlaybackViewModel, RepositoryQueryViewModel,
 };
+pub use system::SystemViewModel;
