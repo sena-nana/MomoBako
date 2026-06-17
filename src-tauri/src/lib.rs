@@ -1,17 +1,6 @@
-use std::{fs, path::PathBuf};
-use tauri::{
-    ipc::Channel,
-    menu::{Menu, MenuItem},
-    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    utils::config::Color,
-    AppHandle, Manager, WindowEvent,
-};
+use tauri::{ipc::Channel, AppHandle};
 
-const MAIN_WINDOW_LABEL: &str = "main";
-const TRAY_OPEN_ID: &str = "tray-open";
-const TRAY_QUIT_ID: &str = "tray-quit";
-const BG: Color = Color(0x18, 0x18, 0x18, 0xFF);
-
+mod app_shell;
 mod models;
 mod services;
 #[cfg(test)]
@@ -45,10 +34,11 @@ use services::repository::{
     SmartFolderTreeNode, SmartFolderUpdateRequest, SyncRequest, SyncResult, ThumbnailRequest,
     ThumbnailResponse, TrashMutationRequest,
 };
-use services::runtime::{ExternalApiConnectionStatus, RepositoryRuntime};
+use services::runtime::ExternalApiConnectionStatus;
 use viewmodels::{
     FileBrowserViewModel, PluginViewModel, RepositoryInteractionViewModel,
-    RepositoryManagementViewModel, RepositoryQueryViewModel,
+    RepositoryManagementViewModel, RepositoryPlaybackViewModel, RepositoryQueryViewModel,
+    SystemViewModel,
 };
 
 #[tauri::command]
@@ -308,9 +298,9 @@ async fn prepare_preview_file_source(
 #[tauri::command]
 async fn prepare_entry_playback_source(
     request: EntryPlaybackRequest,
-    repository_query: tauri::State<'_, RepositoryQueryViewModel>,
+    repository_playback: tauri::State<'_, RepositoryPlaybackViewModel>,
 ) -> Result<EntryPlaybackSourceResponse, String> {
-    repository_query
+    repository_playback
         .prepare_entry_playback_source(request)
         .await
 }
@@ -319,9 +309,9 @@ async fn prepare_entry_playback_source(
 async fn prepare_entry_playback_source_with_progress(
     request: EntryPlaybackRequest,
     progress: Channel<EntryPlaybackProgressEvent>,
-    repository_query: tauri::State<'_, RepositoryQueryViewModel>,
+    repository_playback: tauri::State<'_, RepositoryPlaybackViewModel>,
 ) -> Result<EntryPlaybackSourceResponse, String> {
-    repository_query
+    repository_playback
         .prepare_entry_playback_source_with_progress(request, progress)
         .await
 }
@@ -338,120 +328,11 @@ async fn call_plugin(
 async fn download_playlist_with_progress(
     request: DownloaderPlaylistRequest,
     progress: Channel<DownloaderPlaylistProgressEvent>,
-    runtime: tauri::State<'_, RepositoryRuntime>,
+    repository_playback: tauri::State<'_, RepositoryPlaybackViewModel>,
 ) -> Result<serde_json::Value, String> {
-    let service_root = runtime.service_root();
-    let mut emit = |event: DownloaderPlaylistProgressEvent| {
-        progress.send(event).map_err(|error| error.to_string())
-    };
-    execute_playlist_download_with_progress(&service_root, request, &mut emit)
-}
-
-fn execute_playlist_download_with_progress(
-    service_root: &std::path::Path,
-    request: DownloaderPlaylistRequest,
-    emit: &mut dyn FnMut(DownloaderPlaylistProgressEvent) -> Result<(), String>,
-) -> Result<serde_json::Value, String> {
-    let playlist_name = request.playlist_name.clone();
-    let total = request.tracks.len();
-    let default_level = request
-        .level
-        .clone()
-        .unwrap_or_else(|| "standard".to_string());
-    let default_source_payload = request.source_payload.clone();
-    let managed_cache_root = request.managed_cache_root.clone();
-    let destination = request.destination.clone();
-
-    emit(DownloaderPlaylistProgressEvent {
-        phase: "start".to_string(),
-        playlist_id: request.playlist_id,
-        playlist_name: playlist_name.clone(),
-        total,
-        completed: 0,
-        failed: 0,
-        current_song_id: None,
-        current_song_name: None,
-        error: None,
-    })?;
-
-    let mut completed = Vec::new();
-    let mut failed = Vec::new();
-    for track in request.tracks {
-        let current_song_name = track.song_name.clone();
-        let source_payload = track
-            .source_payload
-            .clone()
-            .or_else(|| default_source_payload.clone())
-            .unwrap_or_else(|| serde_json::json!({}));
-        let payload = serde_json::json!({
-            "songId": track.song_id,
-            "level": default_level,
-            "destination": destination,
-            "managedCacheRoot": managed_cache_root.clone(),
-            "sourcePayload": source_payload,
-        });
-        match repository_service::call_downloader_download_track_package(service_root, payload) {
-            Ok(value) => {
-                completed.push(value);
-                emit(DownloaderPlaylistProgressEvent {
-                    phase: "track".to_string(),
-                    playlist_id: request.playlist_id,
-                    playlist_name: playlist_name.clone(),
-                    total,
-                    completed: completed.len(),
-                    failed: failed.len(),
-                    current_song_id: Some(track.song_id),
-                    current_song_name,
-                    error: None,
-                })?;
-            }
-            Err(error) => {
-                failed.push(serde_json::json!({
-                    "songId": track.song_id,
-                    "error": error,
-                }));
-                emit(DownloaderPlaylistProgressEvent {
-                    phase: "track".to_string(),
-                    playlist_id: request.playlist_id,
-                    playlist_name: playlist_name.clone(),
-                    total,
-                    completed: completed.len(),
-                    failed: failed.len(),
-                    current_song_id: Some(track.song_id),
-                    current_song_name,
-                    error: failed
-                        .last()
-                        .and_then(|value| value.get("error"))
-                        .and_then(serde_json::Value::as_str)
-                        .map(str::to_string),
-                })?;
-            }
-        }
-    }
-
-    let response = serde_json::json!({
-        "playlistId": request.playlist_id,
-        "playlistName": playlist_name,
-        "completed": completed,
-        "failed": failed,
-        "summary": {
-            "total": total,
-            "succeeded": completed.len(),
-            "failed": failed.len()
-        }
-    });
-    emit(DownloaderPlaylistProgressEvent {
-        phase: "complete".to_string(),
-        playlist_id: request.playlist_id,
-        playlist_name: request.playlist_name,
-        total,
-        completed: completed.len(),
-        failed: failed.len(),
-        current_song_id: None,
-        current_song_name: None,
-        error: None,
-    })?;
-    Ok(response)
+    repository_playback
+        .download_playlist_with_progress(request, progress)
+        .await
 }
 
 #[tauri::command]
@@ -507,21 +388,9 @@ async fn delete_plugin_config_value(
 #[tauri::command]
 async fn write_binary_file(
     request: BinaryFileWriteRequest,
+    system_vm: tauri::State<'_, SystemViewModel>,
 ) -> Result<BinaryFileWriteResponse, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        let output_path = PathBuf::from(&request.path);
-        if let Some(parent) = output_path.parent() {
-            fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-        }
-        fs::write(&output_path, &request.bytes).map_err(|error| error.to_string())?;
-        Ok(BinaryFileWriteResponse {
-            path: request.path,
-            size_bytes: i64::try_from(request.bytes.len())
-                .map_err(|_| "written file is too large".to_string())?,
-        })
-    })
-    .await
-    .map_err(|error| error.to_string())?
+    system_vm.write_binary_file(request).await
 }
 
 #[tauri::command]
@@ -785,141 +654,14 @@ async fn get_api_design_snapshot(
 
 #[tauri::command]
 async fn get_external_api_connection_status(
-    runtime: tauri::State<'_, RepositoryRuntime>,
+    system_vm: tauri::State<'_, SystemViewModel>,
 ) -> Result<ExternalApiConnectionStatus, String> {
-    Ok(runtime.external_api_connection_status())
-}
-
-fn allow_thumbnail_asset_roots(app: &AppHandle, paths: Vec<PathBuf>) -> Result<(), String> {
-    for path in paths {
-        app.asset_protocol_scope()
-            .allow_directory(path, true)
-            .map_err(|error| error.to_string())?;
-    }
-    Ok(())
-}
-
-fn show_main_window(app: &AppHandle) {
-    if let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
-        let _ = window.show();
-        let _ = window.unminimize();
-        let _ = window.set_focus();
-    }
-}
-
-fn persist_main_window_state(app: &AppHandle) {
-    let cache = app.state::<window_state::MainWindowStateCache>();
-    if let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
-        window_state::persist_main_window_state(app, &cache, &window);
-    } else {
-        window_state::persist_cached_main_window_state(app, &cache);
-    }
-}
-
-fn quit_app(app: &AppHandle) {
-    persist_main_window_state(app);
-    app.exit(0);
-}
-
-fn setup_tray(app: &AppHandle) -> Result<(), tauri::Error> {
-    let open = MenuItem::with_id(app, TRAY_OPEN_ID, "打开 MomoBako", true, None::<&str>)?;
-    let quit = MenuItem::with_id(app, TRAY_QUIT_ID, "退出", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&open, &quit])?;
-    let icon = app.default_window_icon().cloned();
-    let tray = TrayIconBuilder::with_id("main-tray")
-        .menu(&menu)
-        .tooltip("MomoBako")
-        .show_menu_on_left_click(false)
-        .on_menu_event(|app, event| match event.id().as_ref() {
-            TRAY_OPEN_ID => show_main_window(app),
-            TRAY_QUIT_ID => quit_app(app),
-            _ => {}
-        })
-        .on_tray_icon_event(|tray, event| {
-            if matches!(
-                event,
-                TrayIconEvent::Click {
-                    button: MouseButton::Left,
-                    button_state: MouseButtonState::Up,
-                    ..
-                } | TrayIconEvent::DoubleClick {
-                    button: MouseButton::Left,
-                    ..
-                }
-            ) {
-                show_main_window(tray.app_handle());
-            }
-        });
-
-    if let Some(icon) = icon {
-        tray.icon(icon).build(app)?;
-    } else {
-        tray.build(app)?;
-    }
-    Ok(())
+    system_vm.get_external_api_connection_status().await
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
-        .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_drag::init())
-        .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_store::Builder::default().build())
-        .manage(window_state::MainWindowStateCache::default())
-        .setup(|app| {
-            let runtime = RepositoryRuntime::start()?;
-            let file_browser = FileBrowserViewModel::new(runtime.clone());
-            let plugin_vm = PluginViewModel::new(runtime.clone());
-            let repository_interaction = RepositoryInteractionViewModel::new(runtime.clone());
-            let repository_query = RepositoryQueryViewModel::new(runtime.clone());
-            let repository_management = RepositoryManagementViewModel::new(runtime.clone());
-            allow_thumbnail_asset_roots(
-                app.handle(),
-                tauri::async_runtime::block_on(runtime.repository_thumbnail_roots())?,
-            )?;
-            app.manage(runtime);
-            app.manage(file_browser);
-            app.manage(plugin_vm);
-            app.manage(repository_interaction);
-            app.manage(repository_query);
-            app.manage(repository_management);
-            setup_tray(app.handle())?;
-
-            if let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
-                let _ = window.set_background_color(Some(BG));
-                if let Some(state) = window_state::load_main_window_state(app.handle()) {
-                    window_state::restore_main_window_state(&window, state);
-                }
-                let _ = window.show();
-                let cache = app.state::<window_state::MainWindowStateCache>();
-                window_state::remember_main_window_state(&cache, &window);
-            }
-            Ok(())
-        })
-        .on_window_event(|window, event| {
-            if window.label() != MAIN_WINDOW_LABEL {
-                return;
-            }
-            let app_handle = window.app_handle();
-            let cache = app_handle.state::<window_state::MainWindowStateCache>();
-            match event {
-                WindowEvent::Moved(_)
-                | WindowEvent::Resized(_)
-                | WindowEvent::ScaleFactorChanged { .. } => {
-                    if let Some(webview_window) = window.get_webview_window(MAIN_WINDOW_LABEL) {
-                        window_state::remember_main_window_state(&cache, &webview_window);
-                    }
-                }
-                WindowEvent::CloseRequested { .. } => {
-                    quit_app(&app_handle);
-                }
-                WindowEvent::Destroyed => {
-                    persist_main_window_state(&app_handle);
-                }
-                _ => {}
-            }
-        })
+    app_shell::builder()
         .invoke_handler(tauri::generate_handler![
             ping,
             list_repositories,

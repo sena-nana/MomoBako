@@ -1,4 +1,4 @@
-use crate::{execute_playlist_download_with_progress, services::repository as repository_service};
+use crate::services::repository as repository_service;
 use std::sync::{Mutex, OnceLock};
 
 static TRACK_PACKAGE_CALLS: OnceLock<Mutex<Vec<serde_json::Value>>> = OnceLock::new();
@@ -67,7 +67,7 @@ fn execute_playlist_download_with_progress_reports_events_and_partial_failures()
     };
 
     let mut events = Vec::new();
-    let response = execute_playlist_download_with_progress(
+    let response = repository_service::download_playlist_with_progress(
         std::path::Path::new("C:/Mock/.service-data"),
         request,
         &mut |event| {
