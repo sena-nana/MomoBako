@@ -33,3 +33,7 @@ getrandom = "0.3"
 libloading = "0.9"
 zip = { version = "8.6", default-features = false, features = ["deflate"] }
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
+
+[target.'cfg(windows)'.dependencies]
+everything-ipc = "0.1.3"
+ntfs-reader = "0.4.5"
