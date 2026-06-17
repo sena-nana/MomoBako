@@ -6,10 +6,14 @@
 - Runtime execution: blocking repository work runs on Tauri's blocking task pool
 - External client transport: a loopback HTTP API bound to `127.0.0.1` with a startup-generated bearer token written to the service connection file. The external API is source-neutral; browser extensions, native tools and other local clients all call the same contract.
 - Rust backend layering:
-  - `lib.rs` acts as the View layer for Tauri command entrypoints and app-facing side effects.
-  - `repository_view_model.rs` acts as the ViewModel layer for repository-management command orchestration.
-  - `repository_query_view_model.rs`, `file_browser_view_model.rs`, `plugin_view_model.rs`, and `repository_interaction_view_model.rs` split repository queries, file browsing, plugin/cache flows, and repository interaction flows into domain ViewModels.
-  - `repository_service.rs` and its submodules act as the Model/Service layer for repository domain logic and persistence.
+  - `lib.rs` acts as the View command facade and keeps only Tauri command entrypoints plus invoke registration.
+  - `app_shell.rs` owns desktop bootstrap, tray behavior, main-window lifecycle, ViewModel registration, and startup-only UI side effects such as thumbnail scope initialization.
+  - `viewmodels/repository/{management,query,browser,interaction,playback}.rs`, `viewmodels/plugin.rs`, and `viewmodels/system.rs` act as the ViewModel layer for repository management, read/query flows, file browsing, repository interactions, playback/download progress, plugin/cache commands, and desktop-system helpers.
+  - `services/repository/mod.rs` now acts as a stable facade over feature modules and compatibility re-exports.
+  - `services/repository/state.rs` owns the `RepositoryState` shell, initialization, preview-source registration, and other cross-feature state entrypoints.
+  - `services/repository/plugin.rs` now owns plugin manifest normalization, dependency resolution, plugin config storage, runtime plugin archive handling, native library loading, and plugin hook execution records.
+  - `services/repository/test_support.rs` carries repository-domain test seams and shared fixture setup used by centralized backend tests.
+  - `services/runtime/` remains the runtime shell for execution, watcher refresh, preview hosting, and the loopback external API server.
 
 ## External Asset API
 
@@ -49,7 +53,8 @@
   - repository-management orchestration lives in the dedicated ViewModel
   - repository query, file-browser, playback/preview, plugin/cache, playlist/smart-folder/revision/action flows are routed through domain ViewModels before entering the repository runtime
   - create/import/attach/delete/relocate/backend-config/cache-config/export/sync logic lives in the repository-management service module
-  - snapshot/search/playback/file-browser logic now lives in dedicated `repository_service` submodules instead of `lib.rs`
+  - snapshot/search/playback/file-browser logic now lives in dedicated `services/repository/*` modules instead of `lib.rs`
+  - repository-domain regression tests are being migrated out of the facade implementation into `src-tauri/src/tests/repository/*`; external asset import and playback preparation now run from the centralized test tree instead of `services/repository/mod.rs`
 
 - `GET /repositories`
   - List registered repositories from `MetaHub/repositories.db`

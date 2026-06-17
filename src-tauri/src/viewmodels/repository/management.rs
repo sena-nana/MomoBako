@@ -101,6 +101,6 @@ impl RepositoryManagementViewModel {
 
     pub async fn refresh_thumbnail_scope(&self, app: &AppHandle) -> Result<(), String> {
         let paths = self.runtime.repository_thumbnail_roots().await?;
-        crate::allow_thumbnail_asset_roots(app, paths)
+        crate::app_shell::allow_thumbnail_asset_roots(app, paths)
     }
 }
