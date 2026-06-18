@@ -1599,7 +1599,6 @@
 
 .ctx-menu {
   position: fixed;
-  z-index: 2000;
   min-width: 180px;
   max-width: min(320px, calc(100vw - 8px));
   padding: 4px;
@@ -1612,6 +1611,8 @@
   flex-direction: column;
   gap: 1px;
   user-select: none;
+  transform-origin: var(--sb-menu-origin-x, 0px) var(--sb-menu-origin-y, 0px);
+  will-change: transform, opacity;
 }
 
 .ctx-menu__item {
@@ -1691,7 +1692,7 @@
 .modal-overlay {
   position: fixed;
   inset: 0;
-  z-index: 1800;
+  z-index: var(--z-dialog);
   display: flex;
   align-items: flex-start;
   justify-content: center;
