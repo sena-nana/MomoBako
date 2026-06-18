@@ -1,14 +1,13 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch, type ComponentPublicInstance } from "vue";
+import { computed, watch, type ComponentPublicInstance } from "vue";
 import { Check, LoaderCircle, Plus, Trash2, X } from "lucide-vue-next";
 import type { RepositoryBackendOption, RepositorySummary } from "../types/repository";
 import {
   SB_LAYER_Z_INDEX,
   SB_MENU_POP_TRANSITION_MS,
-  clampAnchoredMenuPosition,
   createAnchoredMenuPosition,
-  resolveMenuTransformOrigin,
 } from "../composables/menuMotion";
+import { useAnchoredMenuSurface } from "../composables/useAnchoredMenuSurface";
 import type { RepositoryPopoverMode } from "./useRepositorySwitcherUi";
 
 type RepositoryPopoverPosition = {
@@ -56,10 +55,14 @@ const emit = defineEmits<{
   submit: [];
 }>();
 
-const popoverEl = ref<HTMLElement | null>(null);
-const renderedPosition = ref({ left: 0, top: 0 });
-const popoverOrigin = ref({ x: 0, y: 0 });
 const isMenuMode = computed(() => props.mode === "switcher" || props.mode === "addMenu");
+const {
+  surfaceEl: popoverEl,
+  position: popoverPosition,
+  origin: popoverOrigin,
+  setPosition,
+  syncPosition,
+} = useAnchoredMenuSurface();
 
 function setPopoverElement(element: Element | ComponentPublicInstance | null) {
   const domElement = element instanceof HTMLElement ? element : null;
@@ -68,35 +71,20 @@ function setPopoverElement(element: Element | ComponentPublicInstance | null) {
 }
 
 async function updatePopoverGeometry() {
-  if (props.mode === "closed") return;
-  const initialPosition = createAnchoredMenuPosition(
+  const nextPosition = createAnchoredMenuPosition(
     props.position.left,
     props.position.top,
     props.position.anchorX,
     props.position.anchorY,
   );
-  popoverOrigin.value = resolveMenuTransformOrigin(initialPosition);
-  await nextTick();
-  const element = popoverEl.value;
-  if (!element) return;
-  const clampedPosition = clampAnchoredMenuPosition(
-    initialPosition,
-    element.offsetWidth,
-    element.offsetHeight,
-  );
-  renderedPosition.value = { left: clampedPosition.x, top: clampedPosition.y };
-  popoverOrigin.value = resolveMenuTransformOrigin(
-    clampedPosition,
-    element.offsetWidth,
-    element.offsetHeight,
-  );
+  setPosition(nextPosition);
+  await syncPosition(nextPosition);
 }
 
 watch(
   () => [props.mode, props.position.left, props.position.top, props.position.anchorX, props.position.anchorY] as const,
   async ([mode]) => {
     if (mode === "closed") return;
-    renderedPosition.value = { left: props.position.left, top: props.position.top };
     await updatePopoverGeometry();
   },
   { immediate: true },
@@ -116,8 +104,8 @@ watch(
           'repository-add-popover--switcher': mode === 'switcher',
         }"
         :style="{
-          left: `${renderedPosition.left}px`,
-          top: `${renderedPosition.top}px`,
+          left: `${popoverPosition.x}px`,
+          top: `${popoverPosition.y}px`,
           width: mode === 'switcher' ? `${position.width}px` : undefined,
           zIndex: String(SB_LAYER_Z_INDEX.popover),
           '--sb-menu-origin-x': `${popoverOrigin.x}px`,

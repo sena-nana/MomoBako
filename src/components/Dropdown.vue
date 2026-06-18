@@ -4,11 +4,9 @@ import { ChevronDown } from "lucide-vue-next";
 import {
   SB_LAYER_Z_INDEX,
   SB_MENU_POP_TRANSITION_MS,
-  clampAnchoredMenuPosition,
-  createAnchoredMenuPosition,
   createPlacedAnchoredMenuPosition,
-  resolveMenuTransformOrigin,
 } from "../composables/menuMotion";
+import { useAnchoredMenuSurface } from "../composables/useAnchoredMenuSurface";
 
 interface Option {
   value: T;
@@ -30,11 +28,15 @@ const emit = defineEmits<{ "update:modelValue": [value: T] }>();
 const open = ref(false);
 const root = ref<HTMLElement | null>(null);
 const triggerEl = ref<HTMLElement | null>(null);
-const menuEl = ref<HTMLElement | null>(null);
 const placement = computed(() => props.placement === "bottom" ? "bottom" : "top");
-const pos = ref(createAnchoredMenuPosition(0, 0));
-const origin = ref({ x: 0, y: 0 });
 const anchorX = ref<number | null>(null);
+const {
+  surfaceEl: menuEl,
+  position: menuPosition,
+  origin,
+  setPosition,
+  syncPosition,
+} = useAnchoredMenuSurface();
 
 const current = computed(() =>
   props.options.find((option) => option.value === props.modelValue),
@@ -76,31 +78,28 @@ function closeMenu() {
   open.value = false;
 }
 
-function updatePosition(width = 0, height = 0) {
+function updatePosition(height = 0) {
   const trigger = triggerEl.value ?? root.value;
-  if (!trigger) return;
-  const nextPos = createPlacedAnchoredMenuPosition(
+  if (!trigger) return null;
+  return createPlacedAnchoredMenuPosition(
     trigger.getBoundingClientRect(),
     placement.value,
     height,
     anchorX.value ?? undefined,
   );
-  pos.value = width > 0 && height > 0
-    ? clampAnchoredMenuPosition(nextPos, width, height)
-    : nextPos;
-  origin.value = resolveMenuTransformOrigin(
-    pos.value,
-    width > 0 ? width : Number.POSITIVE_INFINITY,
-    height > 0 ? height : Number.POSITIVE_INFINITY,
-  );
 }
 
 watch(open, async (value) => {
   if (value) {
-    updatePosition();
-    await nextTick();
-    const element = menuEl.value;
-    if (element) updatePosition(element.offsetWidth, element.offsetHeight);
+    const nextPosition = updatePosition();
+    if (nextPosition) {
+      setPosition(nextPosition);
+      await nextTick();
+      const measuredPosition = updatePosition(menuEl.value?.offsetHeight ?? 0) ?? nextPosition;
+      await syncPosition(measuredPosition);
+    } else {
+      await nextTick();
+    }
     document.addEventListener("pointerdown", onDocPointer, true);
     document.addEventListener("keydown", onKey);
     window.addEventListener("scroll", closeMenu, true);
@@ -151,8 +150,8 @@ onBeforeUnmount(() => {
         class="dd__menu"
         role="listbox"
         :style="{
-          left: `${pos.x}px`,
-          top: `${pos.y}px`,
+          left: `${menuPosition.x}px`,
+          top: `${menuPosition.y}px`,
           zIndex: String(SB_LAYER_Z_INDEX.dropdown),
           '--sb-menu-origin-x': `${origin.x}px`,
           '--sb-menu-origin-y': `${origin.y}px`,
