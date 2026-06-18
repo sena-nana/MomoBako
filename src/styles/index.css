@@ -36,6 +36,7 @@
   --warn-soft: rgba(212, 168, 91, 0.16);
   --err-soft: rgba(244, 113, 116, 0.14);
   --thumbnail-placeholder-bg: #3a3a3a;
+  --z-dialog: 1800;
   --app-corner-shape: squircle;
   --app-corner-radius: 8px;
   --radius-xs: calc(var(--app-corner-radius) * 0.5);
