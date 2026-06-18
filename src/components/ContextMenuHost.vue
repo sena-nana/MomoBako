@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { nextTick, ref, watch } from "vue";
+import { ref, watch, type ComponentPublicInstance } from "vue";
 import { Check } from "lucide-vue-next";
 import {
   finalizeClosedContextMenu,
@@ -11,17 +11,20 @@ import {
 import {
   SB_LAYER_Z_INDEX,
   SB_MENU_POP_TRANSITION_MS,
-  clampAnchoredMenuPosition,
   createAnchoredMenuPosition,
-  resolveMenuTransformOrigin,
 } from "../composables/menuMotion";
+import { useAnchoredMenuSurface } from "../composables/useAnchoredMenuSurface";
 
 const { state } = useContextMenu();
 
-const menuEl = ref<HTMLElement | null>(null);
 const rendered = ref(false);
-const pos = ref(createAnchoredMenuPosition(0, 0));
-const origin = ref({ x: 0, y: 0 });
+const menuSurface = useAnchoredMenuSurface(createAnchoredMenuPosition(0, 0));
+const menuPosition = menuSurface.position;
+const menuOrigin = menuSurface.origin;
+
+function setMenuElement(element: Element | ComponentPublicInstance | null) {
+  menuSurface.surfaceEl.value = element instanceof HTMLElement ? element : null;
+}
 
 function displayLabel(item: ContextMenuItem) {
   return isContextMenuItemPending(item) ? item.confirmLabel : item.label;
@@ -36,20 +39,12 @@ function hasChildren(item: ContextMenuItem) {
 }
 
 async function updateGeometry() {
-  const initialPos = createAnchoredMenuPosition(
+  await menuSurface.syncPosition(createAnchoredMenuPosition(
     state.x,
     state.y,
     state.anchorX,
     state.anchorY,
-  );
-  pos.value = initialPos;
-  origin.value = resolveMenuTransformOrigin(initialPos);
-  await nextTick();
-  const element = menuEl.value;
-  if (!element) return;
-  const clampedPos = clampAnchoredMenuPosition(initialPos, element.offsetWidth, element.offsetHeight);
-  pos.value = clampedPos;
-  origin.value = resolveMenuTransformOrigin(clampedPos, element.offsetWidth, element.offsetHeight);
+  ));
 }
 
 function onAfterLeave() {
@@ -79,15 +74,15 @@ watch(
     >
       <div
         v-if="rendered"
-        ref="menuEl"
+        :ref="setMenuElement"
         class="ctx-menu"
         role="menu"
         :style="{
-          left: `${pos.x}px`,
-          top: `${pos.y}px`,
+          left: `${menuPosition.x}px`,
+          top: `${menuPosition.y}px`,
           zIndex: String(SB_LAYER_Z_INDEX.contextMenu),
-          '--sb-menu-origin-x': `${origin.x}px`,
-          '--sb-menu-origin-y': `${origin.y}px`,
+          '--sb-menu-origin-x': `${menuOrigin.x}px`,
+          '--sb-menu-origin-y': `${menuOrigin.y}px`,
         }"
       >
         <div

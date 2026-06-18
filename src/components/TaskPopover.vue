@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
+import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { ClipboardList, X } from "lucide-vue-next";
 import ProgressBar from "./ProgressBar.vue";
 import { useWorkspaceProgress } from "../composables/useRepositoryWorkspace";
@@ -7,16 +7,18 @@ import { useTaskCenter, type TaskProgress } from "../composables/useTaskCenter";
 import {
   SB_LAYER_Z_INDEX,
   SB_MENU_POP_TRANSITION_MS,
-  clampAnchoredMenuPosition,
   createAnchoredMenuPosition,
-  resolveMenuTransformOrigin,
 } from "../composables/menuMotion";
+import { useAnchoredMenuSurface } from "../composables/useAnchoredMenuSurface";
 
 const popoverOpen = ref(false);
-const popoverPosition = ref(createAnchoredMenuPosition(8, 8));
-const popoverRef = ref<HTMLElement | null>(null);
 const buttonRef = ref<HTMLElement | null>(null);
-const popoverOrigin = ref({ x: 0, y: 0 });
+const {
+  surfaceEl: popoverRef,
+  position: popoverPosition,
+  origin: popoverOrigin,
+  syncPosition,
+} = useAnchoredMenuSurface(createAnchoredMenuPosition(8, 8));
 
 const { operationProgress } = useWorkspaceProgress();
 const { tasks: registeredTasks } = useTaskCenter();
@@ -52,27 +54,10 @@ function updatePopoverPosition() {
   const top = Math.max(8, Math.min(anchorTop - height - 8, window.innerHeight - height - 8));
   const anchorX = rect ? rect.left + rect.width / 2 : left + width / 2;
   const anchorY = rect ? rect.top : anchorTop;
-  popoverPosition.value = createAnchoredMenuPosition(left, top, anchorX, anchorY);
-}
-
-async function updatePopoverGeometry() {
-  const element = popoverRef.value;
-  if (!element) return;
-  const clampedPosition = clampAnchoredMenuPosition(
-    popoverPosition.value,
-    element.offsetWidth,
-    element.offsetHeight,
-  );
-  popoverPosition.value = clampedPosition;
-  popoverOrigin.value = resolveMenuTransformOrigin(
-    clampedPosition,
-    element.offsetWidth,
-    element.offsetHeight,
-  );
+  return createAnchoredMenuPosition(left, top, anchorX, anchorY);
 }
 
 function openPopover() {
-  updatePopoverPosition();
   popoverOpen.value = true;
   document.addEventListener("pointerdown", handleDocumentPointerDown, true);
   document.addEventListener("keydown", handleDocumentKeydown);
@@ -107,9 +92,7 @@ function handleDocumentKeydown(event: KeyboardEvent) {
 
 watch(popoverOpen, async (open) => {
   if (!open) return;
-  popoverOrigin.value = resolveMenuTransformOrigin(popoverPosition.value);
-  await nextTick();
-  await updatePopoverGeometry();
+  await syncPosition(updatePopoverPosition());
 });
 
 onBeforeUnmount(() => {
