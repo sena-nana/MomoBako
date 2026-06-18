@@ -85,7 +85,7 @@ function getAnchorFromElement(element: EventTarget | null): RepositoryPopoverAnc
 
 export function useRepositorySwitcherUi(options: RepositorySwitcherUiOptions) {
   const addRepositoryPopoverMode = ref<RepositoryPopoverMode>("closed");
-  const addRepositoryPopoverPosition = ref({ left: 0, top: 0, width: 0 });
+  const addRepositoryPopoverPosition = ref({ left: 0, top: 0, width: 0, anchorX: 0, anchorY: 0 });
   const addRepositoryPopoverRef = ref<HTMLElement | null>(null);
   const repositorySwitcherButtonRef = ref<HTMLElement | null>(null);
   const backendPluginId = ref(localFilesystemPluginId);
@@ -149,7 +149,14 @@ export function useRepositorySwitcherUi(options: RepositorySwitcherUiOptions) {
     const maxLeft = Math.max(8, window.innerWidth - width - 8);
     const left = Math.max(8, Math.min(current.left, maxLeft));
     const top = Math.max(8, Math.min(current.bottom + 6, window.innerHeight - 80));
-    return { left, top, width };
+    const anchorWidth = Math.min(current.width, width);
+    return {
+      left,
+      top,
+      width,
+      anchorX: current.left + anchorWidth / 2,
+      anchorY: current.bottom,
+    };
   }
 
   function showAddRepositoryMenu() {

@@ -424,7 +424,6 @@
 
 .task-popover {
   position: fixed;
-  z-index: 1900;
   width: min(340px, calc(100vw - 16px));
   max-height: min(360px, calc(100vh - 16px));
   display: flex;
@@ -436,6 +435,8 @@
   border-radius: var(--radius-md);
   background: var(--bg-elev);
   box-shadow: 0 12px 32px -12px rgba(0, 0, 0, 0.62);
+  transform-origin: var(--sb-menu-origin-x, 0px) var(--sb-menu-origin-y, 0px);
+  will-change: transform, opacity;
 }
 
 .task-popover__header {
@@ -823,7 +824,6 @@
 
 .repository-add-popover {
   position: fixed;
-  z-index: 1900;
   width: min(320px, calc(100vw - 16px));
   max-height: min(560px, calc(100vh - 16px));
   display: flex;
@@ -835,6 +835,8 @@
   border-radius: var(--radius-md);
   background: var(--bg-elev);
   box-shadow: 0 12px 32px -12px rgba(0, 0, 0, 0.62);
+  transform-origin: var(--sb-menu-origin-x, 0px) var(--sb-menu-origin-y, 0px);
+  will-change: transform, opacity;
 }
 
 .repository-add-popover--menu {

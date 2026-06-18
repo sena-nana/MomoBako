@@ -20,6 +20,7 @@ export const SB_MENU_GAP = 6;
 export const SB_MENU_POP_TRANSITION_MS = 180;
 export const SB_LAYER_Z_INDEX = {
   dropdown: 1900,
+  popover: 1900,
   contextMenu: 2000,
 } as const;
 
