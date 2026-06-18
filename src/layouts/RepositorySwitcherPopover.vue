@@ -1,15 +1,25 @@
 <script setup lang="ts">
+import { computed, nextTick, ref, watch, type ComponentPublicInstance } from "vue";
 import { Check, LoaderCircle, Plus, Trash2, X } from "lucide-vue-next";
 import type { RepositoryBackendOption, RepositorySummary } from "../types/repository";
+import {
+  SB_LAYER_Z_INDEX,
+  SB_MENU_POP_TRANSITION_MS,
+  clampAnchoredMenuPosition,
+  createAnchoredMenuPosition,
+  resolveMenuTransformOrigin,
+} from "../composables/menuMotion";
 import type { RepositoryPopoverMode } from "./useRepositorySwitcherUi";
 
 type RepositoryPopoverPosition = {
   left: number;
   top: number;
   width: number;
+  anchorX: number;
+  anchorY: number;
 };
 
-defineProps<{
+const props = defineProps<{
   activeRepoId: string | null;
   addRepositoryError: string;
   backendOptions: Array<{ value: string; label: string; enabled: boolean }>;
@@ -45,14 +55,60 @@ const emit = defineEmits<{
   showAddMenu: [];
   submit: [];
 }>();
+
+const popoverEl = ref<HTMLElement | null>(null);
+const renderedPosition = ref({ left: 0, top: 0 });
+const popoverOrigin = ref({ x: 0, y: 0 });
+const isMenuMode = computed(() => props.mode === "switcher" || props.mode === "addMenu");
+
+function setPopoverElement(element: Element | ComponentPublicInstance | null) {
+  const domElement = element instanceof HTMLElement ? element : null;
+  popoverEl.value = domElement;
+  emit("setPopoverRef", domElement);
+}
+
+async function updatePopoverGeometry() {
+  if (props.mode === "closed") return;
+  const initialPosition = createAnchoredMenuPosition(
+    props.position.left,
+    props.position.top,
+    props.position.anchorX,
+    props.position.anchorY,
+  );
+  popoverOrigin.value = resolveMenuTransformOrigin(initialPosition);
+  await nextTick();
+  const element = popoverEl.value;
+  if (!element) return;
+  const clampedPosition = clampAnchoredMenuPosition(
+    initialPosition,
+    element.offsetWidth,
+    element.offsetHeight,
+  );
+  renderedPosition.value = { left: clampedPosition.x, top: clampedPosition.y };
+  popoverOrigin.value = resolveMenuTransformOrigin(
+    clampedPosition,
+    element.offsetWidth,
+    element.offsetHeight,
+  );
+}
+
+watch(
+  () => [props.mode, props.position.left, props.position.top, props.position.anchorX, props.position.anchorY] as const,
+  async ([mode]) => {
+    if (mode === "closed") return;
+    renderedPosition.value = { left: props.position.left, top: props.position.top };
+    await updatePopoverGeometry();
+  },
+  { immediate: true },
+);
 </script>
 
 <template>
   <Teleport to="body">
-    <Transition name="panel">
+    <Transition :name="isMenuMode ? 'sb-menu-pop' : 'panel'" :duration="isMenuMode ? SB_MENU_POP_TRANSITION_MS : undefined">
       <section
         v-if="mode !== 'closed'"
-        :ref="(element) => emit('setPopoverRef', element as HTMLElement | null)"
+        :ref="setPopoverElement"
         class="repository-add-popover"
         :class="{
           'ctx-menu': mode === 'addMenu',
@@ -60,9 +116,12 @@ const emit = defineEmits<{
           'repository-add-popover--switcher': mode === 'switcher',
         }"
         :style="{
-          left: `${position.left}px`,
-          top: `${position.top}px`,
+          left: `${renderedPosition.left}px`,
+          top: `${renderedPosition.top}px`,
           width: mode === 'switcher' ? `${position.width}px` : undefined,
+          zIndex: String(SB_LAYER_Z_INDEX.popover),
+          '--sb-menu-origin-x': `${popoverOrigin.x}px`,
+          '--sb-menu-origin-y': `${popoverOrigin.y}px`,
         }"
         :aria-label="mode === 'switcher' ? '切换资源库' : '添加资源库'"
       >

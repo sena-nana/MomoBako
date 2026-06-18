@@ -1,14 +1,22 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref } from "vue";
+import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import { ClipboardList, X } from "lucide-vue-next";
 import ProgressBar from "./ProgressBar.vue";
 import { useWorkspaceProgress } from "../composables/useRepositoryWorkspace";
 import { useTaskCenter, type TaskProgress } from "../composables/useTaskCenter";
+import {
+  SB_LAYER_Z_INDEX,
+  SB_MENU_POP_TRANSITION_MS,
+  clampAnchoredMenuPosition,
+  createAnchoredMenuPosition,
+  resolveMenuTransformOrigin,
+} from "../composables/menuMotion";
 
 const popoverOpen = ref(false);
-const popoverPosition = ref({ left: 8, top: 8 });
+const popoverPosition = ref(createAnchoredMenuPosition(8, 8));
 const popoverRef = ref<HTMLElement | null>(null);
 const buttonRef = ref<HTMLElement | null>(null);
+const popoverOrigin = ref({ x: 0, y: 0 });
 
 const { operationProgress } = useWorkspaceProgress();
 const { tasks: registeredTasks } = useTaskCenter();
@@ -42,7 +50,25 @@ function updatePopoverPosition() {
   const left = Math.max(8, Math.min(rect ? rect.left : 8, window.innerWidth - width - 8));
   const anchorTop = rect ? rect.top : window.innerHeight - 40;
   const top = Math.max(8, Math.min(anchorTop - height - 8, window.innerHeight - height - 8));
-  popoverPosition.value = { left, top };
+  const anchorX = rect ? rect.left + rect.width / 2 : left + width / 2;
+  const anchorY = rect ? rect.top : anchorTop;
+  popoverPosition.value = createAnchoredMenuPosition(left, top, anchorX, anchorY);
+}
+
+async function updatePopoverGeometry() {
+  const element = popoverRef.value;
+  if (!element) return;
+  const clampedPosition = clampAnchoredMenuPosition(
+    popoverPosition.value,
+    element.offsetWidth,
+    element.offsetHeight,
+  );
+  popoverPosition.value = clampedPosition;
+  popoverOrigin.value = resolveMenuTransformOrigin(
+    clampedPosition,
+    element.offsetWidth,
+    element.offsetHeight,
+  );
 }
 
 function openPopover() {
@@ -79,6 +105,13 @@ function handleDocumentKeydown(event: KeyboardEvent) {
   }
 }
 
+watch(popoverOpen, async (open) => {
+  if (!open) return;
+  popoverOrigin.value = resolveMenuTransformOrigin(popoverPosition.value);
+  await nextTick();
+  await updatePopoverGeometry();
+});
+
 onBeforeUnmount(() => {
   closePopover();
 });
@@ -100,12 +133,18 @@ onBeforeUnmount(() => {
   </button>
 
   <Teleport to="body">
-    <Transition name="panel">
+    <Transition name="sb-menu-pop" :duration="SB_MENU_POP_TRANSITION_MS">
       <section
         v-if="popoverOpen"
         ref="popoverRef"
         class="task-popover"
-        :style="{ left: `${popoverPosition.left}px`, top: `${popoverPosition.top}px` }"
+        :style="{
+          left: `${popoverPosition.x}px`,
+          top: `${popoverPosition.y}px`,
+          zIndex: String(SB_LAYER_Z_INDEX.popover),
+          '--sb-menu-origin-x': `${popoverOrigin.x}px`,
+          '--sb-menu-origin-y': `${popoverOrigin.y}px`,
+        }"
         aria-label="任务进度"
       >
         <header class="task-popover__header">
