@@ -121,6 +121,25 @@ pub(super) fn load_file_browser(
     })
 }
 
+pub(super) fn load_repository_tree(
+    state: &RepositoryState,
+    repo_id: &str,
+) -> Result<RepositoryTreeSnapshot, String> {
+    state.ensure_initialized()?;
+
+    let repo = state.load_repository_record(repo_id)?;
+    let repo_root = PathBuf::from(&repo.summary.path);
+    let tree = list_backend_tree(&state.root, &repo, &repo_root)?;
+
+    Ok(RepositoryTreeSnapshot {
+        repo_id: repo.summary.repo_id.clone(),
+        root_path: repo.summary.path.clone(),
+        backend_plugin_id: repo.backend_record.plugin_id.clone(),
+        backend_kind: repo.summary.backend.kind.clone(),
+        tree,
+    })
+}
+
 pub(super) fn create_directory(
     state: &RepositoryState,
     request: FileCreateRequest,

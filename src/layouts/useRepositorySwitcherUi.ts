@@ -380,7 +380,6 @@ export function useRepositorySwitcherUi(options: RepositorySwitcherUiOptions) {
         repoId,
         { skipInitialSync: true },
       );
-      await options.selectRepository(repoId);
       neteaseLoginMessage.value = `已创建资源库，正在后台同步歌单：${name}`;
       addRepositoryPopoverMode.value = "closed";
       syncNeteaseRepositoryInBackground(repoId);

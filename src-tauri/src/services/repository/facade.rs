@@ -147,6 +147,10 @@ impl RepositoryState {
         browser::load_file_browser(self, request)
     }
 
+    pub fn load_repository_tree(&self, repo_id: &str) -> Result<RepositoryTreeSnapshot, String> {
+        browser::load_repository_tree(self, repo_id)
+    }
+
     pub fn read_file(&self, request: FileReadRequest) -> Result<Vec<u8>, String> {
         query::read_file(self, request)
     }

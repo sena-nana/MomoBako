@@ -15,7 +15,9 @@ import {
   activeRepoId,
   activeSnapshot,
   error,
+  repositories,
 } from "./state";
+import { resetWorkspaceSelection } from "./lifecycle";
 import {
   cancelOperationProgress,
   finishOperationProgress,
@@ -41,6 +43,31 @@ function repositoryDependencies() {
   return dependencies;
 }
 
+function sortRepositories(items: typeof repositories.value) {
+  return [...items].sort((left, right) => left.name.localeCompare(right.name, "zh-CN"));
+}
+
+function upsertRepositorySummary(repository: (typeof repositories.value)[number]) {
+  repositories.value = sortRepositories([
+    ...repositories.value.filter((item) => item.repoId !== repository.repoId),
+    repository,
+  ]);
+}
+
+function removeRepositorySummary(repoId: string) {
+  repositories.value = repositories.value.filter((item) => item.repoId !== repoId);
+}
+
+function selectNextRepositoryAfterRemoval(removedRepoId: string) {
+  const items = repositories.value;
+  if (!items.length) {
+    resetWorkspaceSelection();
+    return null;
+  }
+  const next = items.find((item) => item.repoId !== removedRepoId) ?? items[0];
+  return next.repoId;
+}
+
 export async function createNewRepository(
   name: string,
   path: string,
@@ -57,7 +84,7 @@ export async function createNewRepository(
     { initial: 8 },
   );
   try {
-    await createRepository({
+    const response = await createRepository({
       repoId,
       name,
       path,
@@ -66,12 +93,14 @@ export async function createNewRepository(
       skipInitialSync: options?.skipInitialSync,
     });
     updateOperationProgress(progressId, {
-      detail: "刷新资源库列表",
+      detail: "切换到新资源库",
       value: options?.skipInitialSync ? 72 : 88,
       indeterminate: false,
     });
-    await repositoryDependencies().loadRepositories();
+    upsertRepositorySummary(response.repository);
+    await repositoryDependencies().selectRepository(response.repository.repoId);
     finishOperationProgress(progressId);
+    return response;
   } catch (cause) {
     cancelOperationProgress(progressId);
     throw cause;
@@ -81,9 +110,11 @@ export async function createNewRepository(
 export async function importExistingRepository(name: string, path: string) {
   const progressId = startOperationProgress("导入资源库", "读取资源库元数据并扫描文件", { initial: 8 });
   try {
-    await importRepository({ name, path });
-    await repositoryDependencies().loadRepositories();
+    const response = await importRepository({ name, path });
+    upsertRepositorySummary(response.repository);
+    await repositoryDependencies().selectRepository(response.repository.repoId);
     finishOperationProgress(progressId);
+    return response;
   } catch (cause) {
     cancelOperationProgress(progressId);
     throw cause;
@@ -93,9 +124,11 @@ export async function importExistingRepository(name: string, path: string) {
 export async function attachRepository(path: string) {
   const progressId = startOperationProgress("挂载资源库", "检查文件夹并读取索引", { initial: 8 });
   try {
-    await attachRepositoryFolder({ path });
-    await repositoryDependencies().loadRepositories();
+    const response = await attachRepositoryFolder({ path });
+    upsertRepositorySummary(response.repository);
+    await repositoryDependencies().selectRepository(response.repository.repoId);
     finishOperationProgress(progressId);
+    return response;
   } catch (cause) {
     cancelOperationProgress(progressId);
     throw cause;
@@ -104,15 +137,20 @@ export async function attachRepository(path: string) {
 
 export async function removeRepository(repoId: string) {
   await deleteRepository(repoId);
-  await repositoryDependencies().loadRepositories();
+  removeRepositorySummary(repoId);
+  if (activeRepoId.value !== repoId) return;
+  const nextRepoId = selectNextRepositoryAfterRemoval(repoId);
+  if (nextRepoId) {
+    await repositoryDependencies().selectRepository(nextRepoId);
+  }
 }
 
 export async function relocateMissingRepository(repoId: string, path: string) {
   const progressId = startOperationProgress("重定向资源库", "校验资源库位置", { initial: 12 });
   try {
     const response = await relocateRepository({ repoId, path });
-    updateOperationProgress(progressId, { detail: "刷新资源库列表", value: 64 });
-    await repositoryDependencies().loadRepositories();
+    updateOperationProgress(progressId, { detail: "更新资源库状态", value: 64 });
+    upsertRepositorySummary(response.repository);
     if (activeRepoId.value !== response.repository.repoId || !activeSnapshot.value) {
       await repositoryDependencies().selectRepository(response.repository.repoId);
     }
@@ -132,8 +170,8 @@ export async function configureNeteaseRepositoryCacheInWorkspace(repoId: string,
       path,
       migrateLegacyCache: true,
     });
-    updateOperationProgress(progressId, { detail: "刷新资源库列表", value: 72 });
-    await repositoryDependencies().loadRepositories();
+    updateOperationProgress(progressId, { detail: "更新资源库状态", value: 72 });
+    upsertRepositorySummary(response.repository);
     if (activeRepoId.value !== response.repository.repoId || !activeSnapshot.value) {
       await repositoryDependencies().selectRepository(response.repository.repoId);
     }

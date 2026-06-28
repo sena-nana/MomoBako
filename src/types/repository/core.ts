@@ -151,6 +151,14 @@ export type FileTreeNode = {
   children: FileTreeNode[];
 };
 
+export type RepositoryTreeSnapshot = {
+  repoId: string;
+  rootPath: string;
+  backendPluginId: string;
+  backendKind: string;
+  tree: FileTreeNode[];
+};
+
 export type FileBrowserEntry = {
   path: string;
   name: string;

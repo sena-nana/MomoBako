@@ -132,6 +132,12 @@ pub(super) fn core_tauri_api_definitions() -> Vec<ApiDefinition> {
             }),
         ),
         tauri_api_definition(
+            "File API",
+            "get_repository_tree",
+            "只读取仓库目录树结构。",
+            serde_json::json!({ "repoId": "<repoId>" }),
+        ),
+        tauri_api_definition(
             "Playlist API",
             "list_playlists",
             "列出仓库播放列表。",

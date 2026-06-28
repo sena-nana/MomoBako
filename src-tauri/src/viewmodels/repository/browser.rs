@@ -2,7 +2,8 @@
 
 use crate::services::repository::{
     FileBrowserRequest, FileBrowserSnapshot, FileCopyRequest, FileCreateRequest, FileDeleteRequest,
-    FileImportRequest, FileMoveRequest, FileRenameRequest, TrashMutationRequest,
+    FileImportRequest, FileMoveRequest, FileRenameRequest, RepositoryTreeSnapshot,
+    TrashMutationRequest,
 };
 use crate::services::runtime::RepositoryRuntime;
 
@@ -22,6 +23,15 @@ impl FileBrowserViewModel {
     ) -> Result<FileBrowserSnapshot, String> {
         self.runtime
             .run_read(move |state| state.load_file_browser(request))
+            .await
+    }
+
+    pub async fn get_repository_tree(
+        &self,
+        repo_id: String,
+    ) -> Result<RepositoryTreeSnapshot, String> {
+        self.runtime
+            .run_read(move |state| state.load_repository_tree(&repo_id))
             .await
     }
 

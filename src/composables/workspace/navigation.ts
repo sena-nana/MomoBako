@@ -15,6 +15,7 @@ import {
   currentDirectoryPath,
   error,
   fileBrowser,
+  isLoadingFileBrowser,
   isLoadingAssetDetail,
   isLoadingSnapshot,
   playlists,
@@ -31,6 +32,7 @@ import {
 } from "./tasks";
 import { loadFileBrowserForDirectory } from "./files";
 import {
+  applyRepositorySnapshotAsPresetRoot,
   ensureRepositoryWorkspace as ensureRepositoryWorkspaceLifecycle,
   loadRepositories as loadRepositoriesLifecycle,
   queueRepositoryBackgroundLoads,
@@ -43,6 +45,10 @@ export async function selectRepository(repoId: string) {
 
   const isSwitchingRepository = activeRepoId.value !== repoId;
   const previousDirectoryPath = !isSwitchingRepository ? currentDirectoryPath.value : "";
+  if (isSwitchingRepository) {
+    resetActiveRepositoryContent();
+    isLoadingFileBrowser.value = true;
+  }
   isLoadingSnapshot.value = true;
   error.value = null;
   const progressId = startOperationProgress("加载资源库", "读取资源库快照", { initial: 10, indeterminate: true });
@@ -59,11 +65,25 @@ export async function selectRepository(repoId: string) {
       return;
     }
 
-    const snapshot = await getRepositorySnapshot(repoId);
+    if (isSwitchingRepository) {
+      await applyRepositorySnapshotAsPresetRoot(repoId, selectAsset);
+    } else {
+      const snapshot = await getRepositorySnapshot(repoId);
+      activeRepoId.value = repoId;
+      activeSnapshot.value = snapshot;
+      playlists.value = snapshot.playlists ?? [];
+
+      const defaultAssetId = activeAssetId.value && snapshot.assets.some((item) => item.assetId === activeAssetId.value)
+        ? activeAssetId.value
+        : snapshot.assets[0]?.assetId ?? null;
+      activeAssetId.value = defaultAssetId;
+      activeAssetDetail.value = null;
+
+      if (defaultAssetId) {
+        void selectAsset(defaultAssetId);
+      }
+    }
     updateOperationProgress(progressId, { detail: "加载资源索引", value: 46 });
-    activeRepoId.value = repoId;
-    activeSnapshot.value = snapshot;
-    playlists.value = snapshot.playlists ?? [];
     if (isSwitchingRepository) {
       resetSearchState();
       activePlaylistId.value = null;
@@ -73,22 +93,17 @@ export async function selectRepository(repoId: string) {
       smartFolderResult.value = null;
     }
 
-    const defaultAssetId = activeAssetId.value && snapshot.assets.some((item) => item.assetId === activeAssetId.value)
-      ? activeAssetId.value
-      : snapshot.assets[0]?.assetId ?? null;
-
-    activeAssetId.value = defaultAssetId;
-    activeAssetDetail.value = null;
-
     const initialDirectoryPath = isSwitchingRepository ? "" : previousDirectoryPath;
     currentDirectoryPath.value = initialDirectoryPath;
-    const browserSnapshot = await loadFileBrowserForDirectory(initialDirectoryPath, { includeTree: false });
-    if (!browserSnapshot && !isSwitchingRepository && previousDirectoryPath) {
-      currentDirectoryPath.value = "";
-      await loadFileBrowserForDirectory("", { includeTree: false });
+    if (!isSwitchingRepository) {
+      const browserSnapshot = await loadFileBrowserForDirectory(initialDirectoryPath, { includeTree: false });
+      if (!browserSnapshot && previousDirectoryPath) {
+        currentDirectoryPath.value = "";
+        await loadFileBrowserForDirectory("", { includeTree: false });
+      }
     }
-    if (defaultAssetId) {
-      void selectAsset(defaultAssetId);
+    if (!isSwitchingRepository && previousDirectoryPath && currentDirectoryPath.value !== previousDirectoryPath) {
+      currentDirectoryPath.value = "";
     }
     queueRepositoryBackgroundLoads(repoId);
     finishOperationProgress(progressId);
@@ -97,6 +112,9 @@ export async function selectRepository(repoId: string) {
     cancelOperationProgress(progressId);
   } finally {
     isLoadingSnapshot.value = false;
+    if (isSwitchingRepository) {
+      isLoadingFileBrowser.value = false;
+    }
   }
 }
 

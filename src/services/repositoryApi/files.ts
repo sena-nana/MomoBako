@@ -17,6 +17,7 @@ import type {
   HardlinkCandidateResponse,
   HardlinkConfirmRequest,
   HardlinkConfirmResponse,
+  RepositoryTreeSnapshot,
   TrashMutationRequest,
 } from "../../types/repository";
 import {
@@ -32,6 +33,10 @@ export { openExternalUrl, openRepositoryPath, revealRepositoryPath, startExterna
 
 export function getFileBrowser(request: FileBrowserRequest) {
   return invokeCommand<FileBrowserSnapshot>("get_file_browser", { request });
+}
+
+export function getRepositoryTree(repoId: string) {
+  return invokeCommand<RepositoryTreeSnapshot>("get_repository_tree", { repoId });
 }
 
 export function readFile(request: FileReadRequest) {

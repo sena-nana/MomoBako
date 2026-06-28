@@ -29,6 +29,7 @@ use services::repository::{
     RepositoryActionRunRequest, RepositoryActionRunResponse, RepositoryExportRequest,
     RepositoryExportResponse, RepositoryFolderRequest, RepositoryMutationRequest,
     RepositoryMutationResponse, RepositoryRelocateRequest, RepositorySnapshot, RepositorySummary,
+    RepositoryTreeSnapshot,
     RevisionActionRequest, RevisionActionResponse, SearchRequest, SearchResponse,
     SmartFolderMutationRequest, SmartFolderMutationResponse, SmartFolderResultSnapshot,
     SmartFolderTreeNode, SmartFolderUpdateRequest, SyncRequest, SyncResult, ThumbnailRequest,
@@ -92,6 +93,14 @@ async fn get_file_browser(
     file_browser: tauri::State<'_, FileBrowserViewModel>,
 ) -> Result<FileBrowserSnapshot, String> {
     file_browser.get_file_browser(request).await
+}
+
+#[tauri::command]
+async fn get_repository_tree(
+    repo_id: String,
+    file_browser: tauri::State<'_, FileBrowserViewModel>,
+) -> Result<RepositoryTreeSnapshot, String> {
+    file_browser.get_repository_tree(repo_id).await
 }
 
 #[tauri::command]
@@ -670,6 +679,7 @@ pub fn run() {
             search_assets,
             update_asset_metadata,
             get_file_browser,
+            get_repository_tree,
             list_playlists,
             list_playlist_memberships,
             create_playlist,

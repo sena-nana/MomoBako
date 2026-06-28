@@ -2086,7 +2086,7 @@ describe("文件管理冒烟", () => {
       expect(browserCalls.at(-1)?.args).toMatchObject({
         request: {
           directoryPath: "Campaigns",
-          includeTree: true,
+          includeTree: false,
         },
       });
     });
