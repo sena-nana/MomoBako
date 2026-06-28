@@ -38,6 +38,7 @@ const props = defineProps<{
   canRenameSelected: boolean;
   canRestoreSelected: boolean;
   currentFileEntry: FileBrowserEntry | null;
+  allEntries: FileBrowserEntry[];
   directoryEntries: FileBrowserEntry[];
   displayModeClass: string;
   displayModeOptions: Array<{ value: FileDisplayMode; label: string }>;
@@ -55,11 +56,13 @@ const props = defineProps<{
   isDraggingFiles: boolean;
   isDragActive: boolean;
   isLoadingFileBrowser: boolean;
+  isLoadingFileBrowserMore?: boolean;
   isModelEntry: (entry: FileBrowserEntry) => boolean;
   isMutatingFiles: boolean;
   isReadOnlyVirtual?: boolean;
   isTrashPanel: boolean;
   isVideoEntry: (entry: FileBrowserEntry) => boolean;
+  hasMoreEntries?: boolean;
   openSelectedLabel: string;
   renameTargetPath: string | null;
   selectedEntries: FileBrowserEntry[];
@@ -93,6 +96,7 @@ const emit = defineEmits<{
   entryDragStart: [entry: FileBrowserEntry, event: PointerEvent];
   hoverFolder: [path: string];
   leaveFolder: [path: string];
+  loadMore: [];
   markThumbnailFailed: [entry: FileBrowserEntry];
   openDirectory: [path: string];
   openSelected: [];
@@ -106,6 +110,7 @@ const emit = defineEmits<{
   startRename: [];
   submitRename: [];
   thumbnailLoaded: [entry: FileBrowserEntry, event: Event];
+  visibleEntriesChange: [entries: FileBrowserEntry[]];
 }>();
 
 const filesListRef = ref<HTMLElement | null>(null);
@@ -319,6 +324,15 @@ const {
                 <span>{{ entryModifiedAtLabel(entry) }}</span>
               </div>
             </button>
+          </div>
+
+          <div
+            v-if="hasMoreEntries || isLoadingFileBrowserMore"
+            class="files-list__load-more"
+            data-load-more-sentinel="true"
+          >
+            <LoaderCircle v-if="isLoadingFileBrowserMore" class="spin" :size="14" aria-hidden="true" />
+            <span>{{ isLoadingFileBrowserMore ? "继续读取目录..." : "滚动继续加载" }}</span>
           </div>
 
           <div v-if="selectionBoxStyle" class="files-list__selection-box" :style="selectionBoxStyle"></div>

@@ -55,6 +55,9 @@ export type FileBrowserDerivedState = {
   visibleEntries: FileBrowserEntry[];
 };
 
+export const FILE_BROWSER_INITIAL_PAGE_SIZE = 80;
+export const FILE_BROWSER_APPEND_PAGE_SIZE = 160;
+
 export function createEmptyFileBrowserDerivedState(): FileBrowserDerivedState {
   return {
     entryMap: new Map(),
@@ -112,6 +115,7 @@ export const currentDirectoryPath = ref("");
 export const fileBrowser = shallowRef<FileBrowserSnapshot | null>(null);
 export const fileBrowserDerived = shallowRef<FileBrowserDerivedState>(createEmptyFileBrowserDerivedState());
 export const fileTree = shallowRef<FileTreeNode[]>([]);
+export const isLoadingFileBrowserMore = ref(false);
 export const selectedFilePath = ref<string | null>(null);
 export const selectedFilePaths = ref<string[]>([]);
 export const selectionAnchorPath = ref<string | null>(null);

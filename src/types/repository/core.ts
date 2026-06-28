@@ -184,6 +184,10 @@ export type FileBrowserSnapshot = {
   backendPluginId: string;
   backendKind: string;
   currentPath: string;
+  totalEntries: number;
+  loadedCount: number;
+  nextOffset?: number | null;
+  hasMore: boolean;
   specialLocation?: "trash" | null;
   tree?: FileTreeNode[];
   entries: FileBrowserEntry[];
@@ -561,6 +565,8 @@ export type FileBrowserRequest = {
   directoryPath?: string;
   includeTree?: boolean;
   specialLocation?: "trash";
+  offset?: number;
+  limit?: number;
 };
 
 export type FileReadRequest = {

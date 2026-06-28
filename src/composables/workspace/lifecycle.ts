@@ -17,6 +17,7 @@ import {
   activeSnapshot,
   apiDesign,
   cacheSnapshot,
+  FILE_BROWSER_INITIAL_PAGE_SIZE,
   createInitialWorkspaceStartup,
   currentDirectoryPath,
   createEmptyFileBrowserDerivedState,
@@ -30,6 +31,7 @@ import {
   playlistMemberships,
   isLoadingAssetDetail,
   isLoadingFileBrowser,
+  isLoadingFileBrowserMore,
   isLoadingSmartFolder,
   isLoadingRepositories,
   isLoadingSettingsData,
@@ -90,6 +92,7 @@ export function resetActiveRepositoryContent() {
   fileBrowser.value = null;
   fileBrowserDerived.value = createEmptyFileBrowserDerivedState();
   fileTree.value = [];
+  isLoadingFileBrowserMore.value = false;
   playlists.value = [];
   playlistMemberships.value = {};
   activePlaylistId.value = null;
@@ -166,6 +169,8 @@ async function loadInitialRepository(
     repoId: nextRepoId,
     directoryPath: "",
     includeTree: false,
+    offset: 0,
+    limit: FILE_BROWSER_INITIAL_PAGE_SIZE,
   });
   const playlistItems = snapshot.playlists ?? await listPlaylists(nextRepoId);
   playlists.value = playlistItems;
@@ -319,6 +324,7 @@ export function resetRepositoryWorkspaceForTests() {
   isLoadingSnapshot.value = false;
   isLoadingAssetDetail.value = false;
   isLoadingFileBrowser.value = false;
+  isLoadingFileBrowserMore.value = false;
   isLoadingSmartFolder.value = false;
   isSearching.value = false;
   isMutatingSmartFolder.value = false;

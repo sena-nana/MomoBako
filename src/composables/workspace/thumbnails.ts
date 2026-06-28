@@ -13,22 +13,18 @@ export type ThumbnailQueueItem = {
 };
 
 let thumbnailDirectoryToken = 0;
+const queuedThumbnailKeys = new Set<string>();
 
 export function invalidateThumbnailQueue() {
   thumbnailDirectoryToken += 1;
+  queuedThumbnailKeys.clear();
 }
 
 export function loadThumbnailsForSnapshot(snapshot: FileBrowserSnapshot) {
   if (snapshot.specialLocation === "trash") return;
   const token = ++thumbnailDirectoryToken;
-  const queue: ThumbnailQueueItem[] = snapshot.entries
-    .filter((entry) => entry.kind === "file" && !entry.thumbnailPath)
-    .map((entry) => ({
-      repoId: snapshot.repoId,
-      directoryPath: snapshot.currentPath,
-      entry,
-    }))
-    .sort((left, right) => thumbnailPriority(left.entry) - thumbnailPriority(right.entry));
+  queuedThumbnailKeys.clear();
+  const queue = createThumbnailQueue(snapshot.repoId, snapshot.currentPath, snapshot.entries);
   let cursor = 0;
 
   async function worker() {
@@ -42,6 +38,41 @@ export function loadThumbnailsForSnapshot(snapshot: FileBrowserSnapshot) {
   void Promise.all(
     Array.from({ length: Math.min(THUMBNAIL_LOAD_CONCURRENCY, queue.length) }, () => worker()),
   );
+}
+
+export function loadThumbnailsForEntries(repoId: string, directoryPath: string, entries: FileBrowserEntry[]) {
+  const token = thumbnailDirectoryToken;
+  const queue = createThumbnailQueue(repoId, directoryPath, entries);
+  let cursor = 0;
+
+  async function worker() {
+    while (cursor < queue.length) {
+      const item = queue[cursor++];
+      await yieldToUi();
+      await loadThumbnailForQueueItem(item, token);
+    }
+  }
+
+  void Promise.all(
+    Array.from({ length: Math.min(THUMBNAIL_LOAD_CONCURRENCY, queue.length) }, () => worker()),
+  );
+}
+
+function createThumbnailQueue(repoId: string, directoryPath: string, entries: FileBrowserEntry[]) {
+  return entries
+    .filter((entry) => entry.kind === "file" && !entry.thumbnailPath)
+    .filter((entry) => {
+      const key = `${repoId}:${directoryPath}:${entry.path}`;
+      if (queuedThumbnailKeys.has(key)) return false;
+      queuedThumbnailKeys.add(key);
+      return true;
+    })
+    .map((entry) => ({
+      repoId,
+      directoryPath,
+      entry,
+    }))
+    .sort((left, right) => thumbnailPriority(left.entry) - thumbnailPriority(right.entry));
 }
 
 function thumbnailPriority(entry: FileBrowserEntry) {

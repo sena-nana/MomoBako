@@ -5,11 +5,14 @@ import {
   activeRepoId,
   activeSnapshot,
   currentDirectoryPath,
+  FILE_BROWSER_APPEND_PAGE_SIZE,
+  FILE_BROWSER_INITIAL_PAGE_SIZE,
   createEmptyFileBrowserDerivedState,
   error,
   fileBrowser,
   fileBrowserDerived,
   fileTree,
+  isLoadingFileBrowserMore,
   isLoadingFileBrowser,
   selectedFilePaths,
   selectionAnchorPath,
@@ -21,13 +24,15 @@ import {
   startOperationProgress,
   updateOperationProgress,
 } from "./tasks";
-import { loadThumbnailsForSnapshot } from "./thumbnails";
+import { loadThumbnailsForEntries, loadThumbnailsForSnapshot } from "./thumbnails";
 import { joinRepositoryPath } from "./paths";
 import { shouldYieldEvery, yieldEvery } from "./scheduler";
 
 export type FileBrowserLoadOptions = {
   includeTree?: boolean;
   specialLocation?: "trash";
+  append?: boolean;
+  limit?: number;
 };
 
 export { entryNameFromPath } from "./paths";
@@ -113,6 +118,38 @@ export function applyFileBrowserSnapshot(snapshot: FileBrowserSnapshot) {
   loadThumbnailsForSnapshot(snapshot);
 }
 
+export function appendFileBrowserSnapshot(snapshot: FileBrowserSnapshot) {
+  const current = fileBrowser.value;
+  if (!current) {
+    applyFileBrowserSnapshot(snapshot);
+    return;
+  }
+
+  const requestId = ++derivedRequestId;
+  const existingEntries = current.entries;
+  const existingPathSet = new Set(existingEntries.map((entry) => `${entry.kind}:${entry.path}`));
+  const appendedEntries = snapshot.entries.filter((entry) => !existingPathSet.has(`${entry.kind}:${entry.path}`));
+  const mergedSnapshot: FileBrowserSnapshot = {
+    ...snapshot,
+    tree: snapshot.tree ?? current.tree,
+    entries: [...existingEntries, ...appendedEntries],
+  };
+  fileBrowser.value = mergedSnapshot;
+  if (mergedSnapshot.tree) {
+    fileTree.value = mergedSnapshot.tree;
+  }
+  currentDirectoryPath.value = mergedSnapshot.currentPath;
+  latestDerivedPromise = buildFileBrowserDerivedState(mergedSnapshot, requestId);
+  void latestDerivedPromise;
+  if (appendedEntries.length) {
+    loadThumbnailsForEntries(
+      mergedSnapshot.repoId,
+      mergedSnapshot.currentPath,
+      appendedEntries,
+    );
+  }
+}
+
 export function waitForFileBrowserDerivedState() {
   return latestDerivedPromise;
 }
@@ -120,11 +157,25 @@ export function waitForFileBrowserDerivedState() {
 export async function loadFileBrowserForDirectory(directoryPath = "", options: FileBrowserLoadOptions = {}) {
   if (!activeRepoId.value) return null;
 
+  const append = options.append ?? false;
   const includeTree = options.includeTree ?? false;
   const specialLocation = options.specialLocation ?? (activePanel.value === "deleted" ? "trash" : undefined);
-  isLoadingFileBrowser.value = true;
-  error.value = null;
-  const progressId = startOperationProgress(
+  const currentSnapshot = fileBrowser.value;
+  const offset = append
+    ? currentSnapshot?.currentPath === directoryPath && currentSnapshot.specialLocation === (specialLocation ?? null)
+      ? currentSnapshot.nextOffset ?? currentSnapshot.entries.length
+      : 0
+    : 0;
+  const limit = options.limit ?? (append ? FILE_BROWSER_APPEND_PAGE_SIZE : FILE_BROWSER_INITIAL_PAGE_SIZE);
+
+  if (append) {
+    if (!currentSnapshot?.hasMore) return currentSnapshot;
+    isLoadingFileBrowserMore.value = true;
+  } else {
+    isLoadingFileBrowser.value = true;
+    error.value = null;
+  }
+  const progressId = append ? null : startOperationProgress(
     specialLocation === "trash" ? "读取回收站" : includeTree ? "读取文件树" : "读取目录",
     directoryPath ? `正在读取 ${directoryPath}` : specialLocation === "trash" ? "正在读取回收站" : "正在读取根目录",
     { initial: 14, indeterminate: true },
@@ -135,17 +186,29 @@ export async function loadFileBrowserForDirectory(directoryPath = "", options: F
       directoryPath,
       includeTree,
       specialLocation,
+      offset,
+      limit,
     });
-    updateOperationProgress(progressId, { detail: "整理目录条目", value: 92 });
-    applyFileBrowserSnapshot(snapshot);
-    finishOperationProgress(progressId);
+    if (append) {
+      appendFileBrowserSnapshot(snapshot);
+    } else {
+      updateOperationProgress(progressId!, { detail: "整理目录条目", value: 92 });
+      applyFileBrowserSnapshot(snapshot);
+      finishOperationProgress(progressId!);
+    }
     return snapshot;
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : String(cause);
-    cancelOperationProgress(progressId);
+    if (progressId != null) {
+      cancelOperationProgress(progressId);
+    }
     return null;
   } finally {
-    isLoadingFileBrowser.value = false;
+    if (append) {
+      isLoadingFileBrowserMore.value = false;
+    } else {
+      isLoadingFileBrowser.value = false;
+    }
   }
 }
 

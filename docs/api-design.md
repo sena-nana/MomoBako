@@ -106,6 +106,8 @@
   - Newly discovered image assets automatically receive `metadata.color` as the primary `#RRGGBB` color and `metadata.palette` as up to five dominant `#RRGGBB` colors. Palette extraction failures are ignored so imports and syncs can continue.
   - Local filesystem scans store real `sha256:<hex>` content hashes on assets. When a newly discovered file has the same content hash as an existing active asset and is not already in a hardlink group, sync records a pending hardlink candidate instead of auto-linking it.
 - File browser requests may include `specialLocation: "trash"` to browse `.momo/trash` without exposing internal repository directories in normal browsing.
+- File browser requests may include optional `offset` and `limit` for incremental directory loading. Desktop首屏默认先请求首批结构，后续滚动再追加更多条目。
+- File browser responses include `totalEntries`, `loadedCount`, optional `nextOffset`, and `hasMore` so the frontend can append later batches without losing current selection or tree state.
 - Trash browser entries include `metadata.deletedAt` and `metadata.originalPath` when they were moved by MomoBako.
 - `deleteEntry` moves files or recursive directory deletes to `.momo/trash` by default. Use `mode: "permanentDelete"` only for deleting entries already shown from the trash view.
 - `mutateTrash` supports `action: "restore" | "restoreAll" | "empty"` to restore a selected trash item, restore all tracked trash items, or clear `.momo/trash`.

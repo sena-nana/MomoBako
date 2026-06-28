@@ -1925,12 +1925,12 @@ describe("文件管理冒烟", () => {
 
     await waitFor(() => {
       const browserCalls = getInvokeCalls("get_file_browser");
-      expect(browserCalls.at(-1)?.args).toMatchObject({
-        request: {
-          directoryPath: "",
-          includeTree: true,
-        },
-      });
+      expect(browserCalls.some((call) => (
+        (call.args?.request as { directoryPath?: string; includeTree?: boolean; offset?: number; limit?: number } | undefined)?.directoryPath === ""
+        && (call.args?.request as { includeTree?: boolean } | undefined)?.includeTree === false
+        && (call.args?.request as { offset?: number } | undefined)?.offset === 0
+        && (call.args?.request as { limit?: number } | undefined)?.limit === 80
+      ))).toBe(true);
     });
 
     await fireEvent.update(screen.getByRole("searchbox", { name: "全局搜索" }), "cover");
