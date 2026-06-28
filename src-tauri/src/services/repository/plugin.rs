@@ -322,6 +322,7 @@ pub(super) fn get_api_design_snapshot(
     })
 }
 
+#[allow(dead_code)]
 pub(crate) fn parse_plugin_manifest(raw: &str) -> Result<PluginManifest, String> {
     parse_plugin_manifest_with_source(raw, None)
 }
@@ -1033,6 +1034,7 @@ fn find_zip_plugin_manifest<R: Read + std::io::Seek>(
     Err("plugin archive contains multiple manifest roots".to_string())
 }
 
+#[allow(dead_code)]
 pub(crate) fn extract_zip_plugin<R: Read + std::io::Seek>(
     archive: &mut zip::ZipArchive<R>,
     manifest_prefix: &str,
