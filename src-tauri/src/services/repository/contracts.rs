@@ -393,6 +393,16 @@ pub struct FileTreeNode {
 
 #[derive(Debug, Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
+pub struct RepositoryTreeSnapshot {
+    pub repo_id: String,
+    pub root_path: String,
+    pub backend_plugin_id: String,
+    pub backend_kind: String,
+    pub tree: Vec<FileTreeNode>,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
 pub struct FileBrowserEntry {
     pub path: String,
     pub name: String,

@@ -13,7 +13,7 @@ function tauriHandlerCommands() {
 }
 
 function apiDefinitionCommands() {
-  const source = readFileSync(resolve("src-tauri/src/services/repository/mod.rs"), "utf-8");
+  const source = readFileSync(resolve("src-tauri/src/services/repository/api_design.rs"), "utf-8");
   return [...source.matchAll(/tauri_api_definition\([^,]+,\s*"([^"]+)"/g)]
     .map((match) => match[1])
     .filter(Boolean);
@@ -27,7 +27,7 @@ function externalRuntimeRoutes() {
 }
 
 function externalDefinitionRoutes() {
-  const source = readFileSync(resolve("src-tauri/src/services/repository/mod.rs"), "utf-8");
+  const source = readFileSync(resolve("src-tauri/src/services/repository/api_design.rs"), "utf-8");
   return [...source.matchAll(/external_api_definition\(\s*"([^"]+)",\s*"([^"]+)"/g)]
     .map((match) => `${match[1].toUpperCase()} ${match[2]}`);
 }

@@ -108,6 +108,7 @@
 - File browser requests may include `specialLocation: "trash"` to browse `.momo/trash` without exposing internal repository directories in normal browsing.
 - File browser requests may include optional `offset` and `limit` for incremental directory loading. Desktop首屏默认先请求首批结构，后续滚动再追加更多条目。
 - File browser responses include `totalEntries`, `loadedCount`, optional `nextOffset`, and `hasMore` so the frontend can append later batches without losing current selection or tree state.
+- `get_repository_tree(repoId)` returns only `FileTreeNode[]`-style directory structure for background tree sync and does not include directory entries.
 - Trash browser entries include `metadata.deletedAt` and `metadata.originalPath` when they were moved by MomoBako.
 - `deleteEntry` moves files or recursive directory deletes to `.momo/trash` by default. Use `mode: "permanentDelete"` only for deleting entries already shown from the trash view.
 - `mutateTrash` supports `action: "restore" | "restoreAll" | "empty"` to restore a selected trash item, restore all tracked trash items, or clear `.momo/trash`.

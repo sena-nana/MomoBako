@@ -1,5 +1,10 @@
 import { getFileBrowser } from "../../services/repositoryApi";
-import type { FileBrowserEntry, FileBrowserSnapshot } from "../../types/repository";
+import type {
+  FileBrowserEntry,
+  FileBrowserSnapshot,
+  FileTreeNode,
+  RepositorySnapshot,
+} from "../../types/repository";
 import {
   activePanel,
   activeRepoId,
@@ -41,6 +46,81 @@ export function getDefaultFileBrowserSelection(snapshot: FileBrowserSnapshot) {
   return snapshot.entries.find((entry) => entry.kind === "file")?.path
     ?? snapshot.entries[0]?.path
     ?? null;
+}
+
+function folderLabelFromPath(path: string, fallback: string) {
+  const segments = path.split("/").filter(Boolean);
+  return segments[segments.length - 1] ?? fallback;
+}
+
+function appendTreeNode(nodes: FileTreeNode[], path: string, label: string) {
+  const segments = path.split("/").filter(Boolean);
+  if (!segments.length) return;
+
+  let cursor = "";
+  let currentNodes = nodes;
+  for (let index = 0; index < segments.length; index += 1) {
+    const segment = segments[index];
+    cursor = cursor ? `${cursor}/${segment}` : segment;
+    let node = currentNodes.find((item) => item.path === cursor);
+    if (!node) {
+      node = {
+        path: cursor,
+        label: index === segments.length - 1 ? label : segment,
+        children: [],
+      };
+      currentNodes.push(node);
+    }
+    currentNodes = node.children;
+  }
+}
+
+function buildPresetFileTree(snapshot: RepositorySnapshot) {
+  const nodes: FileTreeNode[] = [];
+  for (const folder of snapshot.folders) {
+    appendTreeNode(nodes, folder.path, folderLabelFromPath(folder.path, folder.label));
+  }
+  return nodes;
+}
+
+export function buildPresetRootFileBrowserSnapshot(snapshot: RepositorySnapshot): FileBrowserSnapshot {
+  const tree = buildPresetFileTree(snapshot);
+  return {
+    repoId: snapshot.repository.repoId,
+    rootPath: snapshot.repository.path,
+    backendPluginId: snapshot.repository.backend.pluginId,
+    backendKind: snapshot.repository.backend.kind,
+    currentPath: "",
+    totalEntries: tree.length,
+    loadedCount: tree.length,
+    nextOffset: null,
+    hasMore: false,
+    tree,
+    entries: tree.map((node) => ({
+      path: node.path,
+      name: node.label,
+      kind: "directory",
+      extension: null,
+      sizeBytes: null,
+      sizeLabel: null,
+      modifiedAt: null,
+      assetId: null,
+      status: null,
+      thumbnailPath: null,
+      thumbnailCustom: false,
+      hardlinkGroupId: null,
+      hardlinkState: null,
+      tags: [],
+      aliasPaths: [],
+      folderMetadata: null,
+      metadata: {},
+      isVirtual: false,
+      providerId: null,
+      providerItemId: null,
+      sourcePayload: null,
+      localAbsolutePath: null,
+    })),
+  };
 }
 
 let derivedRequestId = 0;

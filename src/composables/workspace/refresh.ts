@@ -1,5 +1,6 @@
 import {
   getRepositorySnapshot,
+  getRepositoryTree,
   listHardlinkCandidates,
   listRepositories,
 } from "../../services/repositoryApi";
@@ -7,6 +8,7 @@ import {
   activeRepoId,
   activeSnapshot,
   currentDirectoryPath,
+  fileTree,
   hardlinkCandidates,
   repositories,
 } from "./state";
@@ -39,6 +41,13 @@ export async function refreshRepositorySnapshot(repoId: string) {
   activeSnapshot.value = snapshot;
 }
 
+export async function refreshRepositoryTree(repoId: string) {
+  const snapshot = await getRepositoryTree(repoId);
+  if (activeRepoId.value === repoId) {
+    fileTree.value = snapshot.tree;
+  }
+}
+
 export async function refreshWorkspaceAfterMutation(
   repoId: string,
   plan: WorkspaceRefreshPlan,
@@ -54,12 +63,15 @@ export async function refreshWorkspaceAfterMutation(
   if (plan.hardlinkCandidates) {
     tasks.push(refreshHardlinkCandidates(repoId));
   }
+  if (plan.directory === "currentWithTree") {
+    tasks.push(refreshRepositoryTree(repoId));
+  }
   await Promise.all(tasks);
 
   if (plan.directory === "current") {
     await loadDirectory(currentDirectoryPath.value, { includeTree: false });
   } else if (plan.directory === "currentWithTree") {
-    await loadDirectory(currentDirectoryPath.value, { includeTree: true });
+    await loadDirectory(currentDirectoryPath.value, { includeTree: false });
   } else if (plan.directory === "trash") {
     await loadDirectory(currentDirectoryPath.value, { specialLocation: "trash" });
   }

@@ -8,6 +8,7 @@ import type {
   PlaylistDetail,
   PlaylistSummary,
   PluginManifest,
+  RepositorySummary,
   RepositoryAction,
   SearchHit,
   SearchRequest,
@@ -465,10 +466,14 @@ function getMockSnapshot(repoId: string) {
   return repoId === altSnapshot.repository.repoId ? altSnapshot : mockSnapshot;
 }
 
+function getMockRepositorySummary(repoId: string): RepositorySummary {
+  return mockRepositories.find((item) => item.repoId === repoId)
+    ?? getMockSnapshot(repoId).repository;
+}
+
 function getMockFileBrowser(directoryPath = "", includeTree = true, specialLocation?: "trash", repoId = "repo-main-001") {
   const entries = specialLocation === "trash" ? mockTrashEntries : getMockEntriesForRepository(repoId);
-  const snapshotSource = getMockSnapshot(repoId);
-  const repository = mockRepositories.find((item) => item.repoId === repoId) ?? snapshotSource.repository;
+  const repository = getMockRepositorySummary(repoId);
   const snapshot: {
     repoId: string;
     rootPath: string;
@@ -618,7 +623,7 @@ vi.mock("@tauri-apps/api/core", () => ({
       const snapshot = getMockSnapshot(repoId);
       return {
         ...snapshot,
-        repository: mockRepositories.find((item) => item.repoId === repoId) ?? snapshot.repository,
+        repository: getMockRepositorySummary(repoId),
       };
     }
     if (command === "get_asset_detail") {
@@ -664,6 +669,17 @@ vi.mock("@tauri-apps/api/core", () => ({
         request?.specialLocation,
         request?.repoId ?? "repo-main-001",
       );
+    }
+    if (command === "get_repository_tree") {
+      const repoId = typeof args?.repoId === "string" ? args.repoId : "repo-main-001";
+      const repository = getMockRepositorySummary(repoId);
+      return {
+        repoId,
+        rootPath: repository.path,
+        backendPluginId: repository.backend.pluginId,
+        backendKind: repository.backend.kind,
+        tree: buildTree(getMockEntriesForRepository(repoId)),
+      };
     }
     if (command === "list_playlists") {
       const repoId = typeof args?.repoId === "string" ? args.repoId : "repo-main-001";
@@ -1585,6 +1601,17 @@ vi.mock("@tauri-apps/api/core", () => ({
             command: "list_repositories",
             summary: "列出所有仓库。",
             requestTemplate: {},
+          },
+          {
+            group: "File API",
+            transport: "tauri-command",
+            method: "INVOKE",
+            path: "get_repository_tree",
+            command: "get_repository_tree",
+            summary: "读取仓库目录树。",
+            requestTemplate: {
+              repoId: "repo-main-001",
+            },
           },
           {
             group: "Playlist API",

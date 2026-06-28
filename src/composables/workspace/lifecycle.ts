@@ -1,5 +1,6 @@
 import {
   getFileBrowser,
+  getRepositoryTree,
   getRepositorySnapshot,
   listPlaylists,
   listHardlinkCandidates,
@@ -61,7 +62,7 @@ import {
   repositoryActions,
   activeRepositoryActionId,
 } from "./state";
-import { applyFileBrowserSnapshot } from "./files";
+import { applyFileBrowserSnapshot, buildPresetRootFileBrowserSnapshot } from "./files";
 import { resetSearchState } from "./search";
 import {
   cancelOperationProgress,
@@ -77,6 +78,8 @@ import { scheduleIdleTask } from "./scheduler";
 import { syncPlaylistMemberships } from "./playlists";
 
 let startupPromise: Promise<void> | null = null;
+let repositoryBackgroundToken = 0;
+let cancelRepositoryBackgroundTask: (() => void) | null = null;
 
 export function resetWorkspaceSelection() {
   activeRepoId.value = null;
@@ -84,6 +87,7 @@ export function resetWorkspaceSelection() {
 }
 
 export function resetActiveRepositoryContent() {
+  invalidateRepositoryBackgroundLoads();
   invalidateThumbnailQueue();
   activeSnapshot.value = null;
   activeAssetId.value = null;
@@ -109,6 +113,46 @@ export function resetActiveRepositoryContent() {
   draggedWorkspacePaths.value = [];
   dragHoverFolderPath.value = null;
   resetSearchState();
+}
+
+function nextRepositoryBackgroundToken() {
+  repositoryBackgroundToken += 1;
+  return repositoryBackgroundToken;
+}
+
+export function invalidateRepositoryBackgroundLoads() {
+  repositoryBackgroundToken += 1;
+  cancelRepositoryBackgroundTask?.();
+  cancelRepositoryBackgroundTask = null;
+}
+
+function isRepositoryBackgroundTokenActive(repoId: string, token: number) {
+  return activeRepoId.value === repoId && repositoryBackgroundToken === token;
+}
+
+async function applyRepositorySnapshotState(
+  repoId: string,
+  selectAsset: (assetId: string) => Promise<unknown>,
+) {
+  const snapshot = await getRepositorySnapshot(repoId);
+  activeRepoId.value = repoId;
+  activeSnapshot.value = snapshot;
+  playlists.value = snapshot.playlists ?? [];
+
+  const defaultAssetId = activeAssetId.value && snapshot.assets.some((item) => item.assetId === activeAssetId.value)
+    ? activeAssetId.value
+    : snapshot.assets[0]?.assetId ?? null;
+  activeAssetId.value = defaultAssetId;
+  activeAssetDetail.value = null;
+
+  applyFileBrowserSnapshot(buildPresetRootFileBrowserSnapshot(snapshot));
+  currentDirectoryPath.value = "";
+
+  if (defaultAssetId) {
+    void selectAsset(defaultAssetId);
+  }
+
+  return { defaultAssetId, snapshot };
 }
 
 function setStartupProgress(currentStep: number, stepLabel: string) {
@@ -151,64 +195,43 @@ async function loadInitialRepository(
   }
 
   setStartupProgress(2, "读取仓库摘要");
-  const snapshot = await getRepositorySnapshot(nextRepoId);
-  activeRepoId.value = nextRepoId;
-  activeSnapshot.value = snapshot;
-  playlists.value = snapshot.playlists ?? [];
-
-  const defaultAssetId = activeAssetId.value && snapshot.assets.some((item) => item.assetId === activeAssetId.value)
-    ? activeAssetId.value
-    : snapshot.assets[0]?.assetId ?? null;
-
-  activeAssetId.value = defaultAssetId;
-  activeAssetDetail.value = null;
+  const { snapshot } = await applyRepositorySnapshotState(nextRepoId, selectAsset);
 
   setStartupProgress(3, "读取首屏目录");
-  currentDirectoryPath.value = "";
+  const playlistItems = snapshot.playlists ?? await listPlaylists(nextRepoId);
+  playlists.value = playlistItems;
+  await syncPlaylistMemberships(nextRepoId, playlistItems);
+  queueRepositoryBackgroundLoads(nextRepoId);
+}
+
+async function loadRepositoryPrimaryDirectory(repoId: string, token: number) {
   const browserSnapshot = await getFileBrowser({
-    repoId: nextRepoId,
+    repoId,
     directoryPath: "",
     includeTree: false,
     offset: 0,
     limit: FILE_BROWSER_INITIAL_PAGE_SIZE,
   });
-  const playlistItems = snapshot.playlists ?? await listPlaylists(nextRepoId);
-  playlists.value = playlistItems;
-  await syncPlaylistMemberships(nextRepoId, playlistItems);
-  applyFileBrowserSnapshot(browserSnapshot);
-
-  if (defaultAssetId) {
-    void selectAsset(defaultAssetId);
+  if (!isRepositoryBackgroundTokenActive(repoId, token) || currentDirectoryPath.value !== "") {
+    return;
   }
-  queueRepositoryBackgroundLoads(nextRepoId);
+  applyFileBrowserSnapshot(browserSnapshot);
 }
 
-export function queueRepositoryBackgroundLoads(repoId: string) {
-  scheduleIdleTask(() => {
-    void loadRepositorySecondaryData(repoId);
-  }, 250);
-}
-
-async function loadRepositorySecondaryData(repoId: string) {
+async function loadRepositoryMetadataBackground(repoId: string, token: number) {
   const [
     playlistItems,
     smartFolderItems,
     actionItems,
     hardlinkResponse,
-    treeSnapshot,
   ] = await Promise.allSettled([
     listPlaylists(repoId),
     listSmartFolders(repoId),
     listRepositoryActions(repoId),
     listHardlinkCandidates(repoId),
-    getFileBrowser({
-      repoId,
-      directoryPath: currentDirectoryPath.value,
-      includeTree: true,
-    }),
   ]);
 
-  if (activeRepoId.value !== repoId) return;
+  if (!isRepositoryBackgroundTokenActive(repoId, token)) return;
 
   if (playlistItems.status === "fulfilled") {
     playlists.value = playlistItems.value;
@@ -227,9 +250,53 @@ async function loadRepositorySecondaryData(repoId: string) {
   if (hardlinkResponse.status === "fulfilled") {
     hardlinkCandidates.value = hardlinkResponse.value.candidates;
   }
-  if (treeSnapshot.status === "fulfilled" && treeSnapshot.value.tree) {
+}
+
+async function loadRepositoryStructureBackground(repoId: string, token: number) {
+  const [treeSnapshot, rootDirectorySnapshot] = await Promise.allSettled([
+    getRepositoryTree(repoId),
+    getFileBrowser({
+      repoId,
+      directoryPath: "",
+      includeTree: false,
+      offset: 0,
+      limit: FILE_BROWSER_INITIAL_PAGE_SIZE,
+    }),
+  ]);
+
+  if (!isRepositoryBackgroundTokenActive(repoId, token)) return;
+
+  if (treeSnapshot.status === "fulfilled") {
     fileTree.value = treeSnapshot.value.tree;
   }
+  if (
+    rootDirectorySnapshot.status === "fulfilled"
+    && currentDirectoryPath.value === ""
+  ) {
+    applyFileBrowserSnapshot(rootDirectorySnapshot.value);
+  }
+}
+
+export function queueRepositoryBackgroundLoads(repoId: string) {
+  const token = nextRepositoryBackgroundToken();
+  cancelRepositoryBackgroundTask?.();
+  void loadRepositoryStructureBackground(repoId, token);
+  cancelRepositoryBackgroundTask = scheduleIdleTask(() => {
+    void loadRepositoryMetadataBackground(repoId, token);
+  }, 250);
+}
+
+export async function applyRepositorySnapshotAsPresetRoot(
+  repoId: string,
+  selectAsset: (assetId: string) => Promise<unknown>,
+) {
+  return applyRepositorySnapshotState(repoId, selectAsset);
+}
+
+export async function loadRepositoryRootDirectoryImmediately(repoId: string) {
+  const token = nextRepositoryBackgroundToken();
+  await loadRepositoryPrimaryDirectory(repoId, token);
+  return token;
 }
 
 export async function loadRepositories(
