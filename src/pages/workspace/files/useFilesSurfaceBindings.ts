@@ -16,6 +16,7 @@ type ReadonlyRef<T> = Pick<Ref<T>, "value">;
 
 export type WorkspaceFilesSurfaceBindingOptions = {
   activeFileEntries: ReadonlyRef<FileBrowserEntry[]>;
+  allEntries: ReadonlyRef<FileBrowserEntry[]>;
   activeRepoId: ReadonlyRef<string | null>;
   activeSnapshotTagGroups: ReadonlyRef<RepositoryTagGroup[]>;
   activeDirectoryEntries: ReadonlyRef<FileBrowserEntry[]>;
@@ -40,12 +41,14 @@ export type WorkspaceFilesSurfaceBindingOptions = {
   isDragActive: ReadonlyRef<boolean>;
   isDraggingFiles: ReadonlyRef<boolean>;
   isActiveBrowserLoading: ReadonlyRef<boolean>;
+  isLoadingFileBrowserMore: ReadonlyRef<boolean>;
   isModelEntry: (entry: FileBrowserEntry) => boolean;
   isMutatingFiles: ReadonlyRef<boolean>;
   isSmartFolderPanel: ReadonlyRef<boolean>;
   isSavingMetadata: ReadonlyRef<boolean>;
   isTrashPanel: ReadonlyRef<boolean>;
   isVideoEntry: (entry: FileBrowserEntry) => boolean;
+  hasMoreEntries: ReadonlyRef<boolean>;
   openSelectedLabel: ReadonlyRef<string>;
   previewFileEntry: ReadonlyRef<FileBrowserEntry | null>;
   previewLibraryExtensions: ReadonlyRef<RegisteredLibraryExtension[]>;
@@ -80,6 +83,7 @@ export type WorkspaceFilesSurfaceBindingOptions = {
   handleEntryDragStart: (entry: FileBrowserEntry, event: PointerEvent) => void;
   handleFolderDropHover: (path: string) => void;
   handleFolderDropLeave: (path: string) => void;
+  loadMoreEntries: () => void | Promise<unknown>;
   markThumbnailFailed: (entry: FileBrowserEntry) => void;
   openDirectory: (path: string) => void | Promise<unknown>;
   openWorkspaceEntry: (path: string) => void | Promise<unknown>;
@@ -94,11 +98,13 @@ export type WorkspaceFilesSurfaceBindingOptions = {
   startRenameSelected: () => void;
   submitRenameSelected: () => void | Promise<unknown>;
   updateThumbnailAspectRatio: (entry: FileBrowserEntry, event: Event) => void;
+  updateVisibleThumbnailEntries: (entries: FileBrowserEntry[]) => void;
 };
 
 export function useFilesSurfaceBindings(options: WorkspaceFilesSurfaceBindingOptions) {
   const filesSurfaceProps = computed(() => ({
     activeFileEntries: options.activeFileEntries.value,
+    allEntries: options.allEntries.value,
     activeRepoId: options.activeRepoId.value,
     availableTags: options.tagFilterOptions.value,
     breadcrumbs: options.breadcrumbSegments.value,
@@ -125,12 +131,14 @@ export function useFilesSurfaceBindings(options: WorkspaceFilesSurfaceBindingOpt
     isDragActive: options.isDragActive.value,
     isDraggingFiles: options.isDraggingFiles.value,
     isLoadingFileBrowser: options.isActiveBrowserLoading.value,
+    isLoadingFileBrowserMore: options.isLoadingFileBrowserMore.value,
     isModelEntry: options.isModelEntry,
     isMutatingFiles: options.isMutatingFiles.value,
     isReadOnlyVirtual: options.isSmartFolderPanel.value,
     isSavingMetadata: options.isSavingMetadata.value,
     isTrashPanel: options.isTrashPanel.value,
     isVideoEntry: options.isVideoEntry,
+    hasMoreEntries: options.hasMoreEntries.value,
     libraryExtensions: options.currentLibraryExtensions.value,
     openSelectedLabel: options.openSelectedLabel.value,
     previewFileEntry: options.previewFileEntry.value,
@@ -167,6 +175,7 @@ export function useFilesSurfaceBindings(options: WorkspaceFilesSurfaceBindingOpt
     entryDragStart: options.handleEntryDragStart,
     hoverFolder: options.handleFolderDropHover,
     leaveFolder: options.handleFolderDropLeave,
+    loadMore: options.loadMoreEntries,
     markThumbnailFailed: options.markThumbnailFailed,
     openDirectory: options.openDirectory,
     openEntry: options.openWorkspaceEntry,
@@ -182,6 +191,7 @@ export function useFilesSurfaceBindings(options: WorkspaceFilesSurfaceBindingOpt
     submitRename: options.submitRenameSelected,
     thumbnailError: options.markThumbnailFailed,
     thumbnailLoaded: options.updateThumbnailAspectRatio,
+    visibleEntriesChange: options.updateVisibleThumbnailEntries,
   };
 
   return {

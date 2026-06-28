@@ -133,6 +133,90 @@ pub(super) fn load_asset_path_map(
     Ok(map)
 }
 
+pub(super) fn load_asset_path_map_for_paths(
+    connection: &Connection,
+    repo_id: &str,
+    paths: &[String],
+) -> Result<BTreeMap<String, AssetPathRecord>, rusqlite::Error> {
+    if paths.is_empty() {
+        return Ok(BTreeMap::new());
+    }
+
+    let placeholders = std::iter::repeat("?")
+        .take(paths.len())
+        .collect::<Vec<_>>()
+        .join(", ");
+    let mut stmt = connection.prepare(&format!(
+        r#"
+        SELECT
+          a.path,
+          a.asset_id,
+          a.status,
+          a.thumbnail_path,
+          hm.group_id,
+          hm.link_state,
+          a.is_virtual,
+          a.provider_id,
+          a.provider_item_id,
+          a.source_payload_json,
+          a.local_absolute_path
+        FROM assets a
+        LEFT JOIN hardlink_members hm ON hm.repo_id = a.repo_id AND hm.asset_id = a.asset_id
+        WHERE a.repo_id = ?1
+          AND a.path IN ({placeholders})
+        "#
+    ))?;
+    let params = std::iter::once(repo_id).chain(paths.iter().map(String::as_str));
+    let rows = stmt.query_map(rusqlite::params_from_iter(params), |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+            row.get::<_, Option<String>>(3)?,
+            row.get::<_, Option<String>>(4)?,
+            row.get::<_, Option<String>>(5)?,
+            row.get::<_, i64>(6)?,
+            row.get::<_, Option<String>>(7)?,
+            row.get::<_, Option<String>>(8)?,
+            row.get::<_, Option<String>>(9)?,
+            row.get::<_, Option<String>>(10)?,
+        ))
+    })?;
+
+    let mut map = BTreeMap::new();
+    for row in rows {
+        let (
+            path,
+            asset_id,
+            status,
+            thumbnail_path,
+            hardlink_group_id,
+            hardlink_state,
+            is_virtual,
+            provider_id,
+            provider_item_id,
+            source_payload_json,
+            local_absolute_path,
+        ) = row?;
+        map.insert(
+            path,
+            AssetPathRecord {
+                asset_id,
+                status,
+                thumbnail_path,
+                hardlink_group_id,
+                hardlink_state,
+                is_virtual: is_virtual != 0,
+                provider_id,
+                provider_item_id,
+                source_payload: parse_json_column_nullable(source_payload_json)?,
+                local_absolute_path,
+            },
+        );
+    }
+    Ok(map)
+}
+
 pub(super) fn load_entry_thumbnail_map(
     connection: &Connection,
     repo_id: &str,
@@ -146,6 +230,53 @@ pub(super) fn load_entry_thumbnail_map(
     )?;
 
     let rows = stmt.query_map([repo_id], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+            row.get::<_, i64>(3)?,
+        ))
+    })?;
+
+    let mut map = BTreeMap::new();
+    for row in rows {
+        let (path, kind, thumbnail_path, custom) = row?;
+        map.insert(
+            (path, kind),
+            ThumbnailRecord {
+                path: thumbnail_path,
+                custom: custom != 0,
+            },
+        );
+    }
+    Ok(map)
+}
+
+pub(super) fn load_entry_thumbnail_map_for_paths(
+    connection: &Connection,
+    repo_id: &str,
+    entries: &[(String, String)],
+) -> Result<BTreeMap<(String, String), ThumbnailRecord>, rusqlite::Error> {
+    if entries.is_empty() {
+        return Ok(BTreeMap::new());
+    }
+
+    let tuple_placeholders = std::iter::repeat("(?, ?)")
+        .take(entries.len())
+        .collect::<Vec<_>>()
+        .join(", ");
+    let mut stmt = connection.prepare(&format!(
+        r#"
+        SELECT path, kind, thumbnail_path, custom
+        FROM entry_thumbnails
+        WHERE repo_id = ?
+          AND (path, kind) IN ({tuple_placeholders})
+        "#
+    ))?;
+    let params = std::iter::once(repo_id).chain(entries.iter().flat_map(|(path, kind)| {
+        [path.as_str(), kind.as_str()]
+    }));
+    let rows = stmt.query_map(rusqlite::params_from_iter(params), |row| {
         Ok((
             row.get::<_, String>(0)?,
             row.get::<_, String>(1)?,
@@ -1421,18 +1552,29 @@ pub(super) fn load_alias_paths_for_assets(
     Ok(map)
 }
 
-pub(super) fn load_folder_metadata_map(
+pub(super) fn load_folder_metadata_map_for_paths(
     connection: &Connection,
     repo_id: &str,
+    paths: &[String],
 ) -> Result<BTreeMap<String, FolderMetadata>, rusqlite::Error> {
-    let mut stmt = connection.prepare(
+    if paths.is_empty() {
+        return Ok(BTreeMap::new());
+    }
+
+    let placeholders = std::iter::repeat("?")
+        .take(paths.len())
+        .collect::<Vec<_>>()
+        .join(", ");
+    let mut stmt = connection.prepare(&format!(
         r#"
         SELECT path, protected, password_tip
         FROM folder_metadata
         WHERE repo_id = ?1
-        "#,
-    )?;
-    let rows = stmt.query_map([repo_id], |row| {
+          AND path IN ({placeholders})
+        "#
+    ))?;
+    let params = std::iter::once(repo_id).chain(paths.iter().map(String::as_str));
+    let rows = stmt.query_map(rusqlite::params_from_iter(params), |row| {
         Ok((
             row.get::<_, String>(0)?,
             FolderMetadata {
@@ -1442,6 +1584,38 @@ pub(super) fn load_folder_metadata_map(
         ))
     })?;
     rows.collect::<Result<BTreeMap<_, _>, _>>()
+}
+
+pub(super) fn load_tags_for_assets(
+    connection: &Connection,
+    asset_ids: &[String],
+) -> Result<BTreeMap<String, Vec<String>>, rusqlite::Error> {
+    if asset_ids.is_empty() {
+        return Ok(BTreeMap::new());
+    }
+
+    let placeholders = std::iter::repeat("?")
+        .take(asset_ids.len())
+        .collect::<Vec<_>>()
+        .join(", ");
+    let mut stmt = connection.prepare(&format!(
+        r#"
+        SELECT asset_id, tag
+        FROM tags
+        WHERE asset_id IN ({placeholders})
+        ORDER BY normalized_tag COLLATE NOCASE
+        "#
+    ))?;
+    let rows = stmt.query_map(rusqlite::params_from_iter(asset_ids.iter()), |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    })?;
+
+    let mut map = BTreeMap::new();
+    for row in rows {
+        let (asset_id, tag) = row?;
+        map.entry(asset_id).or_insert_with(Vec::new).push(tag);
+    }
+    Ok(map)
 }
 
 pub(super) fn load_metadata_map_from_transaction(

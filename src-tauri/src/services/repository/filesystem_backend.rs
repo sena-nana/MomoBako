@@ -261,26 +261,24 @@ pub(super) fn list_backend_tree(
     backend_adapter(service_root, repo).list_tree(repo_root, &repo.backend_record.config)
 }
 
-pub(super) fn list_backend_directory_entries(
-    service_root: &Path,
-    repo: &RepositoryRecord,
-    repo_root: &Path,
-    current_path: &str,
-    asset_map: &BTreeMap<String, AssetPathRecord>,
-    thumbnail_map: &BTreeMap<(String, String), ThumbnailRecord>,
-    folder_metadata: &BTreeMap<String, FolderMetadata>,
-) -> Result<Vec<FileBrowserEntry>, String> {
-    let entries = backend_adapter(service_root, repo).list_directory_entries(
-        repo_root,
-        current_path,
-        &repo.backend_record.config,
-    )?;
-    Ok(map_file_browser_entries(
-        entries,
-        asset_map,
-        thumbnail_map,
-        folder_metadata,
-    ))
+pub(super) fn paginate_file_browser_entries(
+    mut entries: Vec<FileBrowserEntry>,
+    offset: usize,
+    limit: Option<usize>,
+) -> (Vec<FileBrowserEntry>, usize, usize, Option<usize>, bool) {
+    let total_entries = entries.len();
+    let start = offset.min(total_entries);
+    let limit = limit.unwrap_or(total_entries.saturating_sub(start));
+    let end = start.saturating_add(limit).min(total_entries);
+    let paged_entries = if start == 0 && end == total_entries {
+        entries
+    } else {
+        entries.drain(start..end).collect()
+    };
+    let loaded_count = end;
+    let has_more = loaded_count < total_entries;
+    let next_offset = has_more.then_some(loaded_count);
+    (paged_entries, total_entries, loaded_count, next_offset, has_more)
 }
 
 pub(super) fn list_trash_directory_entries(
@@ -831,19 +829,19 @@ pub(super) fn attach_browser_entry_metadata(
         .collect::<Vec<_>>();
     let metadata_by_asset = load_metadata_maps_for_assets(connection, &asset_ids)?;
     let alias_paths_by_asset = load_alias_paths_for_assets(connection, repo_id, &asset_ids)?;
+    let tags_by_asset = load_tags_for_assets(connection, &asset_ids)?;
 
     for entry in &mut entries {
         let Some(asset_id) = &entry.asset_id else {
             continue;
         };
-        let Some(metadata) = metadata_by_asset.get(asset_id) else {
-            continue;
-        };
-        let mut merged = metadata.clone();
-        merged.extend(entry.metadata.clone());
-        normalize_loaded_metadata(&mut merged);
-        entry.metadata = merged;
-        entry.tags = load_tags(connection, asset_id)?;
+        if let Some(metadata) = metadata_by_asset.get(asset_id) {
+            let mut merged = metadata.clone();
+            merged.extend(entry.metadata.clone());
+            normalize_loaded_metadata(&mut merged);
+            entry.metadata = merged;
+        }
+        entry.tags = tags_by_asset.get(asset_id).cloned().unwrap_or_default();
         entry.alias_paths = alias_paths_by_asset
             .get(asset_id)
             .cloned()

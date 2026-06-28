@@ -1,4 +1,4 @@
-import { computed, ref, type Ref } from "vue";
+import { computed, onBeforeUnmount, ref, watch, type Ref } from "vue";
 import type { RegisteredLibraryExtension } from "../../../plugins/sdk";
 import type { FileBrowserEntry } from "../../../types/repository";
 
@@ -23,6 +23,7 @@ type BoxSelectionState = {
 type FileBrowserPanelViewModelOptions = {
   filesListRef: Ref<HTMLElement | null>;
   props: {
+    allEntries: FileBrowserEntry[];
     canDragEntries: boolean;
     dropTargetPath: string | null;
     libraryExtensions: RegisteredLibraryExtension[];
@@ -34,7 +35,9 @@ type FileBrowserPanelViewModelOptions = {
     (event: "entryDragMove", value: PointerEvent): void;
     (event: "entryDragStart", entry: FileBrowserEntry, value: PointerEvent): void;
     (event: "openDirectory", path: string): void;
+    (event: "loadMore"): void;
     (event: "previewFile", entry: FileBrowserEntry): void;
+    (event: "visibleEntriesChange", entries: FileBrowserEntry[]): void;
     (event: "selectEntries", paths: string[], mode: BoxSelectionMode): void;
     (event: "selectEntry", entry: FileBrowserEntry, mode: SelectionMode): void;
   };
@@ -47,6 +50,8 @@ export function useFileBrowserPanelViewModel(options: FileBrowserPanelViewModelO
   let activeDragPointerId: number | null = null;
   let suppressClickPath: string | null = null;
   const boxSelection = ref<BoxSelectionState | null>(null);
+  let visibleObserver: IntersectionObserver | null = null;
+  let loadMoreObserver: IntersectionObserver | null = null;
 
   const selectedPathSet = computed(() => new Set(options.props.selectedFilePaths));
   const dropTargetPathSet = computed(() => (
@@ -106,6 +111,59 @@ export function useFileBrowserPanelViewModel(options: FileBrowserPanelViewModelO
       return;
     }
     options.emit("previewFile", entry);
+  }
+
+  function observeVisibleEntries() {
+    const container = options.filesListRef.value;
+    if (!container) return;
+    if (typeof IntersectionObserver === "undefined") {
+      options.emit("visibleEntriesChange", options.props.allEntries);
+      return;
+    }
+
+    visibleObserver?.disconnect();
+    loadMoreObserver?.disconnect();
+
+    const visible = new Map<string, FileBrowserEntry>();
+    visibleObserver = new IntersectionObserver((changes) => {
+      for (const change of changes) {
+        const element = change.target as HTMLElement;
+        const path = element.dataset.entryPath ?? "";
+        const entry = options.props.allEntries
+          .find((item) => item.path === path)
+          ?? undefined;
+        if (!entry) continue;
+        if (change.isIntersecting) {
+          visible.set(path, entry);
+        } else {
+          visible.delete(path);
+        }
+      }
+      options.emit("visibleEntriesChange", Array.from(visible.values()));
+    }, {
+      root: container,
+      rootMargin: "240px 0px",
+      threshold: 0.01,
+    });
+
+    loadMoreObserver = new IntersectionObserver((changes) => {
+      if (changes.some((change) => change.isIntersecting)) {
+        options.emit("loadMore");
+      }
+    }, {
+      root: container,
+      rootMargin: "320px 0px",
+      threshold: 0.01,
+    });
+
+    const items = Array.from(container.querySelectorAll<HTMLElement>(".files-list__item[data-entry-path]"));
+    for (const item of items) {
+      visibleObserver.observe(item);
+    }
+    const sentinel = container.querySelector<HTMLElement>("[data-load-more-sentinel='true']");
+    if (sentinel) {
+      loadMoreObserver.observe(sentinel);
+    }
   }
 
   function handleListPointerDown(event: PointerEvent) {
@@ -233,6 +291,22 @@ export function useFileBrowserPanelViewModel(options: FileBrowserPanelViewModelO
     releaseEntryPointer(event);
   }
 
+  watch(options.filesListRef, () => {
+    queueMicrotask(observeVisibleEntries);
+  });
+
+  watch(() => [
+    options.props.allEntries.map((entry) => `${entry.kind}:${entry.path}`).join("|"),
+    options.props.selectedFilePaths.join("|"),
+  ], () => {
+    queueMicrotask(observeVisibleEntries);
+  });
+
+  onBeforeUnmount(() => {
+    visibleObserver?.disconnect();
+    loadMoreObserver?.disconnect();
+  });
+
   return {
     boxSelection,
     dropTargetPathSet,
@@ -248,6 +322,7 @@ export function useFileBrowserPanelViewModel(options: FileBrowserPanelViewModelO
     handleEntryPointerMove,
     handleListPointerDown,
     librarySummary,
+    observeVisibleEntries,
     updateBoxSelection,
   };
 }

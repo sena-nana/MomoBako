@@ -48,6 +48,7 @@ function renderPanel(entry = asmrEntry()) {
       canRenameSelected: true,
       canRestoreSelected: false,
       currentFileEntry: entry,
+      allEntries: [entry],
       directoryEntries: [],
       displayModeClass: "files-list__files--list",
       displayModeOptions: [{ value: "list", label: "列表" }],

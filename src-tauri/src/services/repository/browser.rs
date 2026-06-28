@@ -16,20 +16,6 @@ pub(super) fn load_file_browser(
         &repo.backend_record,
     )?;
     let thumbnail_root = state.repository_thumbnail_root(&repo)?;
-    let asset_map = normalize_asset_thumbnail_map(
-        &connection,
-        &repo,
-        &thumbnail_root,
-        load_asset_path_map(&connection, &request.repo_id).map_err(db_error)?,
-    )?;
-    let thumbnail_map = normalize_entry_thumbnail_map(
-        &connection,
-        &repo,
-        &thumbnail_root,
-        load_entry_thumbnail_map(&connection, &request.repo_id).map_err(db_error)?,
-    )?;
-    let folder_metadata =
-        load_folder_metadata_map(&connection, &request.repo_id).map_err(db_error)?;
     let special_location = normalize_special_location(request.special_location.as_deref())?;
     if special_location.is_some() && repo.backend_record.plugin_id != LOCAL_FILESYSTEM_PLUGIN_ID {
         return Err(format!(
@@ -46,19 +32,76 @@ pub(super) fn load_file_browser(
     } else {
         None
     };
-    let entries = if special_location.as_deref() == Some("trash") {
+    let offset = request.offset.unwrap_or(0);
+    let limit = request.limit.filter(|value| *value > 0);
+    let raw_entries = if special_location.as_deref() == Some("trash") {
+        let asset_map = normalize_asset_thumbnail_map(
+            &connection,
+            &repo,
+            &thumbnail_root,
+            load_asset_path_map(&connection, &request.repo_id).map_err(db_error)?,
+        )?;
+        let thumbnail_map = normalize_entry_thumbnail_map(
+            &connection,
+            &repo,
+            &thumbnail_root,
+            load_entry_thumbnail_map(&connection, &request.repo_id).map_err(db_error)?,
+        )?;
         list_trash_directory_entries(&repo_root, &current_path, &asset_map, &thumbnail_map)?
     } else {
-        list_backend_directory_entries(
-            &state.root,
-            &repo,
+        let listed_entries = backend_adapter(&state.root, &repo).list_directory_entries(
             &repo_root,
             &current_path,
+            &repo.backend_record.config,
+        )?;
+        let entry_paths = listed_entries
+            .iter()
+            .map(|entry| entry.path.clone())
+            .collect::<Vec<_>>();
+        let entry_thumbnail_keys = listed_entries
+            .iter()
+            .map(|entry| {
+                let kind = match entry.kind {
+                    FileSystemEntryKind::Directory => "directory".to_string(),
+                    FileSystemEntryKind::File => "file".to_string(),
+                };
+                (entry.path.clone(), kind)
+            })
+            .collect::<Vec<_>>();
+        let directory_paths = listed_entries
+            .iter()
+            .filter(|entry| matches!(entry.kind, FileSystemEntryKind::Directory))
+            .map(|entry| entry.path.clone())
+            .collect::<Vec<_>>();
+        let asset_map = normalize_asset_thumbnail_map(
+            &connection,
+            &repo,
+            &thumbnail_root,
+            load_asset_path_map_for_paths(&connection, &request.repo_id, &entry_paths)
+                .map_err(db_error)?,
+        )?;
+        let thumbnail_map = normalize_entry_thumbnail_map(
+            &connection,
+            &repo,
+            &thumbnail_root,
+            load_entry_thumbnail_map_for_paths(&connection, &request.repo_id, &entry_thumbnail_keys)
+                .map_err(db_error)?,
+        )?;
+        let folder_metadata = load_folder_metadata_map_for_paths(
+            &connection,
+            &request.repo_id,
+            &directory_paths,
+        )
+        .map_err(db_error)?;
+        map_file_browser_entries(
+            listed_entries,
             &asset_map,
             &thumbnail_map,
             &folder_metadata,
-        )?
+        )
     };
+    let (entries, total_entries, loaded_count, next_offset, has_more) =
+        paginate_file_browser_entries(raw_entries, offset, limit);
     let entries =
         attach_browser_entry_metadata(&connection, &request.repo_id, entries).map_err(db_error)?;
 
@@ -68,6 +111,10 @@ pub(super) fn load_file_browser(
         backend_plugin_id: repo.backend_record.plugin_id.clone(),
         backend_kind: repo.summary.backend.kind,
         current_path,
+        total_entries,
+        loaded_count,
+        next_offset,
+        has_more,
         special_location,
         tree,
         entries,
@@ -91,6 +138,8 @@ pub(super) fn create_directory(
             directory_path: Some(parent_path),
             include_tree: Some(true),
             special_location: None,
+            offset: None,
+            limit: None,
         },
     )
 }
@@ -116,6 +165,8 @@ pub(super) fn create_file(
             directory_path: Some(parent_path),
             include_tree: Some(false),
             special_location: None,
+            offset: None,
+            limit: None,
         },
     )
 }
@@ -234,6 +285,8 @@ pub(super) fn move_entries(
             directory_path: Some(parent_path),
             include_tree: Some(include_tree),
             special_location: None,
+            offset: None,
+            limit: None,
         },
     )
 }
@@ -291,6 +344,8 @@ pub(super) fn rename_entry(
             directory_path: Some(parent_path),
             include_tree: Some(is_directory),
             special_location: None,
+            offset: None,
+            limit: None,
         },
     )
 }
@@ -321,6 +376,8 @@ pub(super) fn delete_entry(
                 directory_path: Some(parent_path),
                 include_tree: Some(false),
                 special_location: Some("trash".to_string()),
+                offset: None,
+                limit: None,
             },
         );
     }
@@ -381,6 +438,8 @@ pub(super) fn delete_entry(
             directory_path: Some(parent_path),
             include_tree: Some(is_directory),
             special_location: None,
+            offset: None,
+            limit: None,
         },
     )
 }
@@ -428,6 +487,8 @@ pub(super) fn mutate_trash(
             directory_path: Some(String::new()),
             include_tree: Some(false),
             special_location: Some("trash".to_string()),
+            offset: None,
+            limit: None,
         },
     )
 }

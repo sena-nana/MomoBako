@@ -426,6 +426,14 @@ pub struct FileBrowserSnapshot {
     pub backend_plugin_id: String,
     pub backend_kind: String,
     pub current_path: String,
+    #[serde(default)]
+    pub total_entries: usize,
+    #[serde(default)]
+    pub loaded_count: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_offset: Option<usize>,
+    #[serde(default)]
+    pub has_more: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub special_location: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -632,6 +640,8 @@ pub struct FileBrowserRequest {
     pub directory_path: Option<String>,
     pub include_tree: Option<bool>,
     pub special_location: Option<String>,
+    pub offset: Option<usize>,
+    pub limit: Option<usize>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

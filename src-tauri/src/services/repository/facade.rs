@@ -714,6 +714,8 @@ impl RepositoryState {
             directory_path: Some(parent_path),
             include_tree: Some(include_tree),
             special_location: None,
+            offset: None,
+            limit: None,
         })
     }
 

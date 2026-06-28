@@ -18,6 +18,7 @@ type BoxSelectionMode = "replace" | "append";
 
 defineProps<{
   activeFileEntries: FileBrowserEntry[];
+  allEntries: FileBrowserEntry[];
   activeRepoId: string | null;
   availableTags: string[];
   breadcrumbs: BreadcrumbSegment[];
@@ -44,12 +45,14 @@ defineProps<{
   isDragActive: boolean;
   isDraggingFiles: boolean;
   isLoadingFileBrowser: boolean;
+  isLoadingFileBrowserMore?: boolean;
   isModelEntry: (entry: FileBrowserEntry) => boolean;
   isMutatingFiles: boolean;
   isReadOnlyVirtual: boolean;
   isSavingMetadata: boolean;
   isTrashPanel: boolean;
   isVideoEntry: (entry: FileBrowserEntry) => boolean;
+  hasMoreEntries?: boolean;
   libraryExtensions: RegisteredLibraryExtension[];
   openSelectedLabel: string;
   previewFileEntry: FileBrowserEntry | null;
@@ -90,6 +93,7 @@ const emit = defineEmits<{
   entryDragStart: [entry: FileBrowserEntry, event: PointerEvent];
   hoverFolder: [path: string];
   leaveFolder: [path: string];
+  loadMore: [];
   markThumbnailFailed: [entry: FileBrowserEntry];
   openDirectory: [path: string];
   openEntry: [path: string];
@@ -105,6 +109,7 @@ const emit = defineEmits<{
   submitRename: [];
   thumbnailError: [entry: FileBrowserEntry];
   thumbnailLoaded: [entry: FileBrowserEntry, event: Event];
+  visibleEntriesChange: [entries: FileBrowserEntry[]];
 }>();
 </script>
 
@@ -150,6 +155,7 @@ const emit = defineEmits<{
       :can-rename-selected="canRenameSelected"
       :can-restore-selected="canRestoreSelected"
       :current-file-entry="currentFileEntry"
+      :all-entries="allEntries"
       :directory-entries="directoryEntries"
       :display-mode-class="displayModeClass"
       :display-mode-options="displayModeOptions"
@@ -167,11 +173,13 @@ const emit = defineEmits<{
       :is-drag-active="isDragActive"
       :is-dragging-files="isDraggingFiles"
       :is-loading-file-browser="isLoadingFileBrowser"
+      :is-loading-file-browser-more="isLoadingFileBrowserMore"
       :is-model-entry="isModelEntry"
       :is-mutating-files="isMutatingFiles"
       :is-read-only-virtual="isReadOnlyVirtual"
       :is-trash-panel="isTrashPanel"
       :is-video-entry="isVideoEntry"
+      :has-more-entries="hasMoreEntries"
       :open-selected-label="openSelectedLabel"
       :rename-target-path="renameTargetPath"
       :is-saving-metadata="isSavingMetadata"
@@ -197,6 +205,7 @@ const emit = defineEmits<{
       @entry-drag-move="emit('entryDragMove', $event)"
       @entry-drag-start="(entry, event) => emit('entryDragStart', entry, event)"
       @hover-folder="emit('hoverFolder', $event)"
+      @load-more="emit('loadMore')"
       @mark-thumbnail-failed="emit('markThumbnailFailed', $event)"
       @leave-folder="emit('leaveFolder', $event)"
       @drop-on-folder="(path, dragEvent) => emit('dropOnFolder', path, dragEvent)"
@@ -211,6 +220,7 @@ const emit = defineEmits<{
       @start-rename="emit('startRename')"
       @submit-rename="emit('submitRename')"
       @thumbnail-loaded="(entry, event) => emit('thumbnailLoaded', entry, event)"
+      @visible-entries-change="emit('visibleEntriesChange', $event)"
     >
       <template #player>
         <WorkspacePlayerBar v-if="showWorkspacePlayer" v-bind="workspacePlayerBarProps" v-on="workspacePlayerBarHandlers" />

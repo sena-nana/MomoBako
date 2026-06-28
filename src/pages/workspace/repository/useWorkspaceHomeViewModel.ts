@@ -38,6 +38,7 @@ import {
   statusLabel,
 } from "../files/filePresentation";
 import type { FileBrowserEntry } from "../../../types/repository";
+import { loadThumbnailsForEntries } from "../../../composables/workspace/thumbnails";
 
 export function useWorkspaceHomeViewModel() {
   const {
@@ -64,7 +65,9 @@ export function useWorkspaceHomeViewModel() {
     fileEntries,
     hasSplitFileGroups,
     hardlinkCandidates,
+    isLoadingFileBrowserMore,
     loadFileBrowserForDirectory,
+    visibleEntries,
     createFileInWorkspace,
     copyWorkspaceEntries,
     moveWorkspaceEntries,
@@ -229,6 +232,24 @@ export function useWorkspaceHomeViewModel() {
     smartFolderResult,
   });
   const ratingFilterOptions = [1, 2, 3, 4, 5];
+  const hasMoreEntries = computed(() => Boolean(fileBrowser.value?.hasMore));
+
+  function updateVisibleThumbnailEntries(entries: FileBrowserEntry[]) {
+    if (!fileBrowser.value || !entries.length) return;
+    loadThumbnailsForEntries(
+      fileBrowser.value.repoId,
+      fileBrowser.value.currentPath,
+      entries.filter((entry) => entry.kind === "file"),
+    );
+  }
+
+  async function loadMoreEntries() {
+    if (!fileBrowser.value?.hasMore || isLoadingFileBrowserMore.value) return;
+    await loadFileBrowserForDirectory(fileBrowser.value.currentPath, {
+      append: true,
+      specialLocation: isTrashPanel.value ? "trash" : undefined,
+    });
+  }
   const {
     colorFilterInput,
     shapeFilterInput,
@@ -526,6 +547,7 @@ export function useWorkspaceHomeViewModel() {
   const { filesSurfaceHandlers, filesSurfaceProps } = useWorkspaceFilesSurfaceViewModel({
     activeDirectoryEntries,
     activeFileEntries,
+    allEntries: visibleEntries,
     activeRepoId,
     activeSnapshotTagGroups: computed(() => activeSnapshot.value?.tagGroups ?? []),
     breadcrumbSegments,
@@ -560,16 +582,19 @@ export function useWorkspaceHomeViewModel() {
     handleFolderDropLeave,
     handleRestoreAllTrash,
     hasActiveSplitFileGroups,
+    hasMoreEntries,
     isActiveBrowserLoading,
     isAudioEntry,
     isDragActive: computed(() => isExternalDragActive.value || isInternalDragActive.value),
     isDraggingFiles,
+    isLoadingFileBrowserMore,
     isModelEntry,
     isMutatingFiles,
     isSavingMetadata,
     isSmartFolderPanel,
     isTrashPanel,
     isVideoEntry,
+    loadMoreEntries,
     markThumbnailFailed,
     openDirectory,
     openSelectedEntry,
@@ -599,6 +624,7 @@ export function useWorkspaceHomeViewModel() {
     thumbnailPalette: thumbnailPaletteColors,
     thumbnailSrc,
     updateThumbnailAspectRatio,
+    updateVisibleThumbnailEntries,
     workspacePlayerBarHandlers,
     workspacePlayerBarProps,
     deleteSelectedEntry,

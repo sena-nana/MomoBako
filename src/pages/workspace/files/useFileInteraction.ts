@@ -9,6 +9,8 @@ import type {
 type FileBrowserLoadOptions = {
   includeTree?: boolean;
   specialLocation?: "trash";
+  append?: boolean;
+  limit?: number;
 };
 
 type WorkspaceFileInteractionOptions = {
