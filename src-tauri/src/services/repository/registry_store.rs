@@ -281,6 +281,19 @@ pub(super) fn migrate_repository_schema(connection: &Connection) -> Result<(), r
     }
     connection.execute_batch(
         r#"
+        CREATE TABLE IF NOT EXISTS directories (
+          repo_id TEXT NOT NULL,
+          path TEXT NOT NULL,
+          parent_path TEXT NOT NULL,
+          name TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          PRIMARY KEY(repo_id, path),
+          FOREIGN KEY(repo_id) REFERENCES repositories(repo_id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_directories_repo_parent
+        ON directories(repo_id, parent_path, name);
+
         CREATE INDEX IF NOT EXISTS idx_assets_repo_hash ON assets(repo_id, hash);
 
         CREATE TABLE IF NOT EXISTS entry_thumbnails (

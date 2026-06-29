@@ -1,15 +1,23 @@
 //! Filesystem watcher lifecycle and repository watch-set synchronization.
 
-use crate::services::repository::{RepositoryState, SyncRequest};
+use crate::services::repository::{
+    RepositoryState, RepositoryStructureRefreshRequest, RepositoryStructureUpdatedEvent,
+    SyncRequest,
+};
 use notify::{Config, Event, RecommendedWatcher, RecursiveMode, Watcher};
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeMap, BTreeSet},
     path::{Path, PathBuf},
-    sync::{mpsc::channel, Arc, Mutex},
+    sync::{
+        mpsc::{channel, Receiver, Sender},
+        Arc, Mutex,
+    },
     thread,
+    time::{Duration, Instant},
 };
 
 const LOCAL_FILESYSTEM_PLUGIN_ID: &str = "momobako.local-filesystem";
+const STRUCTURE_REFRESH_DEBOUNCE_MS: u64 = 400;
 
 #[derive(Debug)]
 pub(crate) struct RepositoryWatcher {
@@ -21,7 +29,7 @@ impl RepositoryWatcher {
     /// Starts the shared filesystem watcher and synchronizes the initial watch-set.
     pub(crate) fn start(
         repository_state: Arc<RepositoryState>,
-        write_lock: Arc<Mutex<()>>,
+        _write_lock: Arc<Mutex<()>>,
     ) -> Result<Arc<Mutex<Self>>, String> {
         let (tx, rx) = channel::<notify::Result<Event>>();
         let watcher = RecommendedWatcher::new(
@@ -41,7 +49,7 @@ impl RepositoryWatcher {
         thread::spawn(move || {
             while let Ok(event) = rx.recv() {
                 if let Ok(event) = event {
-                    handle_fs_event(&repository_state_for_thread, &write_lock, event);
+                    handle_fs_event(&repository_state_for_thread, event);
                 }
             }
         });
@@ -49,6 +57,17 @@ impl RepositoryWatcher {
         sync_watched_paths(&repository_state, &handle)?;
         Ok(handle)
     }
+}
+
+pub(crate) fn start_structure_refresh_worker(
+    repository_state: Arc<RepositoryState>,
+    write_lock: Arc<Mutex<()>>,
+) -> Result<Sender<RepositoryStructureRefreshRequest>, String> {
+    let (tx, rx) = channel::<RepositoryStructureRefreshRequest>();
+    thread::spawn(move || {
+        run_structure_refresh_worker(repository_state, write_lock, rx);
+    });
+    Ok(tx)
 }
 
 /// Reconciles the runtime watch-set with currently attached local repositories.
@@ -88,7 +107,6 @@ pub(crate) fn sync_watched_paths(
 
 fn handle_fs_event(
     repository_state: &Arc<RepositoryState>,
-    write_lock: &Arc<Mutex<()>>,
     event: Event,
 ) {
     let Ok(repositories) = repository_state.list_repositories() else {
@@ -101,12 +119,59 @@ fn handle_fs_event(
             .iter()
             .find(|repo| normalized_path.starts_with(&normalize_path(Path::new(&repo.path))))
         {
+            repository_state.queue_repository_structure_refresh(
+                repository.repo_id.clone(),
+                "watcher",
+            );
+        }
+    }
+}
+
+fn run_structure_refresh_worker(
+    repository_state: Arc<RepositoryState>,
+    write_lock: Arc<Mutex<()>>,
+    rx: Receiver<RepositoryStructureRefreshRequest>,
+) {
+    let mut pending = BTreeMap::<String, (String, Instant)>::new();
+    loop {
+        match rx.recv_timeout(Duration::from_millis(100)) {
+            Ok(request) => {
+                pending.insert(request.repo_id, (request.reason, Instant::now()));
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+        }
+
+        let now = Instant::now();
+        let ready = pending
+            .iter()
+            .filter_map(|(repo_id, (reason, queued_at))| {
+                (now.duration_since(*queued_at).as_millis() >= u128::from(STRUCTURE_REFRESH_DEBOUNCE_MS))
+                    .then_some((repo_id.clone(), reason.clone()))
+            })
+            .collect::<Vec<_>>();
+
+        for (repo_id, reason) in ready {
+            pending.remove(&repo_id);
             let Ok(_guard) = write_lock.lock() else {
                 return;
             };
-            let _ = repository_state.sync_repository(SyncRequest {
-                repo_id: repository.repo_id.clone(),
+            let _ = repository_state.set_repository_structure_refreshing(&repo_id, true);
+            let sync_result = repository_state.sync_repository(SyncRequest {
+                repo_id: repo_id.clone(),
             });
+            let indexed_at = repository_state
+                .repository_structure_indexed_at(&repo_id)
+                .ok()
+                .flatten();
+            let _ = repository_state.set_repository_structure_refreshing(&repo_id, false);
+            if sync_result.is_ok() {
+                repository_state.emit_repository_structure_updated(RepositoryStructureUpdatedEvent {
+                    repo_id,
+                    reason,
+                    indexed_at,
+                });
+            }
         }
     }
 }

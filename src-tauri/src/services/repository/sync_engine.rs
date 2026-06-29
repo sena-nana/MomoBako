@@ -2,6 +2,106 @@
 
 use super::*;
 
+pub(super) fn build_directory_records_from_files(
+    repo_root: &Path,
+    files: &[DiscoveredFile],
+) -> Result<Vec<DirectoryRecord>, String> {
+    let mut directories = BTreeMap::<String, DirectoryRecord>::new();
+    collect_directory_records(repo_root, repo_root, &mut directories)?;
+    for file in files {
+        let mut current = Path::new(&file.relative_path).parent();
+        while let Some(parent) = current {
+            let raw = parent.to_string_lossy().replace('\\', "/");
+            let path = if raw == "." { String::new() } else { raw };
+            let parent_path = parent_relative_path(&path);
+            let name = if path.is_empty() {
+                String::new()
+            } else {
+                Path::new(&path)
+                    .file_name()
+                    .map(|value| value.to_string_lossy().to_string())
+                    .unwrap_or_default()
+            };
+            directories
+                .entry(path.clone())
+                .and_modify(|record| {
+                    if record.updated_at < file.modified_at {
+                        record.updated_at = file.modified_at.clone();
+                    }
+                })
+                .or_insert_with(|| DirectoryRecord {
+                    path: path.clone(),
+                    parent_path,
+                    name,
+                    updated_at: file.modified_at.clone(),
+                });
+            current = parent.parent();
+        }
+    }
+    let mut values = directories.into_values().collect::<Vec<_>>();
+    values.sort_by(|left, right| left.path.cmp(&right.path));
+    Ok(values)
+}
+
+fn collect_directory_records(
+    repo_root: &Path,
+    current_dir: &Path,
+    directories: &mut BTreeMap<String, DirectoryRecord>,
+) -> Result<(), String> {
+    let relative = current_dir
+        .strip_prefix(repo_root)
+        .map_err(|error| error.to_string())?
+        .to_string_lossy()
+        .replace('\\', "/");
+    let path = if relative == "." { String::new() } else { relative };
+    let parent_path = parent_relative_path(&path);
+    let name = if path.is_empty() {
+        String::new()
+    } else {
+        Path::new(&path)
+            .file_name()
+            .map(|value| value.to_string_lossy().to_string())
+            .unwrap_or_default()
+    };
+    let updated_at = fs::metadata(current_dir)
+        .and_then(|metadata| metadata.modified())
+        .ok()
+        .map(system_time_to_rfc3339)
+        .transpose()
+        .map_err(time_error)?
+        .unwrap_or_else(now_rfc3339);
+    directories.insert(
+        path.clone(),
+        DirectoryRecord {
+            path,
+            parent_path,
+            name,
+            updated_at,
+        },
+    );
+    for entry in fs::read_dir(current_dir).map_err(io_error)? {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(error) if is_skippable_filesystem_error(&error) => continue,
+            Err(error) => return Err(io_error(error)),
+        };
+        let metadata = match entry.metadata() {
+            Ok(metadata) => metadata,
+            Err(error) if is_skippable_filesystem_error(&error) => continue,
+            Err(error) => return Err(io_error(error)),
+        };
+        if !metadata.is_dir() {
+            continue;
+        }
+        let name = entry.file_name().to_string_lossy().to_string();
+        if is_internal_repository_dir(&name) {
+            continue;
+        }
+        collect_directory_records(repo_root, &entry.path(), directories)?;
+    }
+    Ok(())
+}
+
 pub(super) fn metadata_defaults_for_files(
     service_root: &Path,
     files: &[DiscoveredFile],
@@ -127,6 +227,14 @@ pub(super) fn sync_repository_files(
         .into_iter()
         .map(|(_asset_id, path, record)| (path, record))
         .collect::<BTreeMap<_, _>>();
+    let directory_records = build_directory_records_from_files(&repo_root, &files).map_err(
+        |error| {
+            rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                error,
+            )))
+        },
+    )?;
 
     let now = now_rfc3339();
     let mut created_assets = 0_i64;
@@ -358,6 +466,7 @@ pub(super) fn sync_repository_files(
 
     let hardlink_candidates =
         count_pending_hardlink_candidates(tx, &repo.summary.repo_id).unwrap_or(0);
+    replace_directory_records(tx, &repo.summary.repo_id, &directory_records)?;
 
     Ok(SyncResult {
         repo_id: repo.summary.repo_id.clone(),

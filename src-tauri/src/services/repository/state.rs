@@ -1,6 +1,15 @@
 //! Repository state shell and shared entry points.
 
 use super::*;
+use std::collections::BTreeSet;
+use std::sync::mpsc::Sender;
+use tauri::{AppHandle, Emitter};
+
+#[derive(Clone)]
+pub(crate) struct RepositoryStructureRefreshRequest {
+    pub repo_id: String,
+    pub reason: String,
+}
 
 /// Shared repository runtime state used by ViewModels, runtime services, and repository feature modules.
 pub struct RepositoryState {
@@ -8,6 +17,9 @@ pub struct RepositoryState {
     pub(super) registry_path: PathBuf,
     pub(super) initialized: Mutex<bool>,
     pub(super) preview_sources: Mutex<BTreeMap<String, PreviewFileSource>>,
+    pub(super) structure_refresh_tx: Mutex<Option<Sender<RepositoryStructureRefreshRequest>>>,
+    pub(super) refreshing_repo_ids: Mutex<BTreeSet<String>>,
+    pub(super) app_handle: Mutex<Option<AppHandle>>,
 }
 
 impl RepositoryState {
@@ -19,12 +31,91 @@ impl RepositoryState {
             registry_path,
             initialized: Mutex::new(false),
             preview_sources: Mutex::new(BTreeMap::new()),
+            structure_refresh_tx: Mutex::new(None),
+            refreshing_repo_ids: Mutex::new(BTreeSet::new()),
+            app_handle: Mutex::new(None),
         }
     }
 
     /// Returns the service root used by repository runtime state.
     pub fn root_path(&self) -> PathBuf {
         self.root.clone()
+    }
+
+    pub fn set_structure_refresh_sender(
+        &self,
+        sender: Sender<RepositoryStructureRefreshRequest>,
+    ) -> Result<(), String> {
+        let mut slot = self
+            .structure_refresh_tx
+            .lock()
+            .map_err(|_| "structure refresh sender lock poisoned".to_string())?;
+        *slot = Some(sender);
+        Ok(())
+    }
+
+    pub fn set_app_handle(&self, app: AppHandle) -> Result<(), String> {
+        let mut slot = self
+            .app_handle
+            .lock()
+            .map_err(|_| "app handle lock poisoned".to_string())?;
+        *slot = Some(app);
+        Ok(())
+    }
+
+    pub fn queue_repository_structure_refresh(&self, repo_id: String, reason: &str) {
+        let Ok(sender) = self.structure_refresh_tx.lock() else {
+            return;
+        };
+        if let Some(sender) = sender.as_ref() {
+            let _ = sender.send(RepositoryStructureRefreshRequest {
+                repo_id,
+                reason: reason.to_string(),
+            });
+        }
+    }
+
+    pub fn set_repository_structure_refreshing(
+        &self,
+        repo_id: &str,
+        refreshing: bool,
+    ) -> Result<(), String> {
+        let mut refreshing_repo_ids = self
+            .refreshing_repo_ids
+            .lock()
+            .map_err(|_| "structure refreshing set lock poisoned".to_string())?;
+        if refreshing {
+            refreshing_repo_ids.insert(repo_id.to_string());
+        } else {
+            refreshing_repo_ids.remove(repo_id);
+        }
+        Ok(())
+    }
+
+    pub fn repository_structure_refresh_in_progress(&self, repo_id: &str) -> bool {
+        self.refreshing_repo_ids
+            .lock()
+            .map(|set| set.contains(repo_id))
+            .unwrap_or(false)
+    }
+
+    pub fn emit_repository_structure_updated(&self, event: RepositoryStructureUpdatedEvent) {
+        let Ok(app_handle) = self.app_handle.lock() else {
+            return;
+        };
+        if let Some(app_handle) = app_handle.as_ref() {
+            let _ = app_handle.emit("repository://structure-updated", event);
+        }
+    }
+
+    pub fn repository_structure_indexed_at(&self, repo_id: &str) -> Result<Option<String>, String> {
+        let repo = self.load_repository_record(repo_id)?;
+        let connection = self.open_repository_connection(
+            &repo.summary.repo_id,
+            &repo.summary.path,
+            &repo.backend_record,
+        )?;
+        latest_directory_indexed_at(&connection, repo_id).map_err(db_error)
     }
 
     /// Initializes registry storage lazily before repository operations run.

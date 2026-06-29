@@ -106,9 +106,12 @@
   - Newly discovered image assets automatically receive `metadata.color` as the primary `#RRGGBB` color and `metadata.palette` as up to five dominant `#RRGGBB` colors. Palette extraction failures are ignored so imports and syncs can continue.
   - Local filesystem scans store real `sha256:<hex>` content hashes on assets. When a newly discovered file has the same content hash as an existing active asset and is not already in a hardlink group, sync records a pending hardlink candidate instead of auto-linking it.
 - File browser requests may include `specialLocation: "trash"` to browse `.momo/trash` without exposing internal repository directories in normal browsing.
+- Local filesystem `get_file_browser` responses are cache-first and include `cacheState: "warming" | "ready" | "refreshing"` plus `indexedAt`. Cold-cache reads return immediately and schedule background sync rather than blocking on filesystem tree scans.
 - File browser requests may include optional `offset` and `limit` for incremental directory loading. Desktop首屏默认先请求首批结构，后续滚动再追加更多条目。
 - File browser responses include `totalEntries`, `loadedCount`, optional `nextOffset`, and `hasMore` so the frontend can append later batches without losing current selection or tree state.
 - `get_repository_tree(repoId)` returns only `FileTreeNode[]`-style directory structure for background tree sync and does not include directory entries.
+- Local filesystem `get_repository_tree` responses also include `cacheState` and `indexedAt`, and the tree is sourced from the SQLite `directories` cache.
+- Runtime emits `repository://structure-updated` with `{ repoId, reason, indexedAt }` after watcher-driven or cold-cache refresh completes so the desktop can silently refresh the active directory and tree.
 - Trash browser entries include `metadata.deletedAt` and `metadata.originalPath` when they were moved by MomoBako.
 - `deleteEntry` moves files or recursive directory deletes to `.momo/trash` by default. Use `mode: "permanentDelete"` only for deleting entries already shown from the trash view.
 - `mutateTrash` supports `action: "restore" | "restoreAll" | "empty"` to restore a selected trash item, restore all tracked trash items, or clear `.momo/trash`.

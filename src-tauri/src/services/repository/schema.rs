@@ -9,7 +9,7 @@ pub(super) const REPO_TRASH_DIR: &str = "trash";
 pub(super) const REPO_TRASH_MANIFEST_FILE_NAME: &str = "trash.json";
 pub(super) const REPO_METADATA_FILE_NAME: &str = "repository.json";
 pub(super) const REPO_DB_FILE_NAME: &str = "metadata.db";
-pub(super) const REPO_SCHEMA_VERSION: i64 = 1;
+pub(super) const REPO_SCHEMA_VERSION: i64 = 2;
 pub(super) const THUMBNAIL_SIZE: u32 = 256;
 pub(super) const MAX_REMOTE_THUMBNAIL_BYTES: u64 = 10 * 1024 * 1024;
 pub(super) const PLUGIN_HOOK_EXECUTIONS_FILE_NAME: &str = "plugin-hook-executions.jsonl";
@@ -200,6 +200,19 @@ CREATE TABLE IF NOT EXISTS folder_metadata (
   PRIMARY KEY(repo_id, path),
   FOREIGN KEY(repo_id) REFERENCES repositories(repo_id)
 );
+
+CREATE TABLE IF NOT EXISTS directories (
+  repo_id TEXT NOT NULL,
+  path TEXT NOT NULL,
+  parent_path TEXT NOT NULL,
+  name TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY(repo_id, path),
+  FOREIGN KEY(repo_id) REFERENCES repositories(repo_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_directories_repo_parent
+ON directories(repo_id, parent_path, name);
 
 CREATE TABLE IF NOT EXISTS entry_thumbnails (
   repo_id TEXT NOT NULL,

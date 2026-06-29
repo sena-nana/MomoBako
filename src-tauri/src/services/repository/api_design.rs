@@ -84,7 +84,13 @@ pub(super) fn core_tauri_api_definitions() -> Vec<ApiDefinition> {
             "Repository API",
             "get_repository_snapshot",
             "读取仓库总览、文件树和基础状态。",
-            serde_json::json!({ "repoId": "<repoId>" }),
+            serde_json::json!({
+                "repoId": "<repoId>",
+                "response": {
+                    "cacheState": "ready",
+                    "indexedAt": "2026-06-29T10:00:00Z"
+                }
+            }),
         ),
         tauri_api_definition(
             "Asset API",
@@ -128,6 +134,10 @@ pub(super) fn core_tauri_api_definitions() -> Vec<ApiDefinition> {
                     "directoryPath": "",
                     "includeTree": true,
                     "specialLocation": null
+                },
+                "response": {
+                    "cacheState": "ready",
+                    "indexedAt": "2026-06-29T10:00:00Z"
                 }
             }),
         ),
