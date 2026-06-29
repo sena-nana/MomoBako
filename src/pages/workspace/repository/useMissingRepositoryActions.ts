@@ -8,7 +8,7 @@ type MissingRepositoryActionsOptions = {
   activeRepoId: ComputedRef<string | null>;
   activeRepository: ComputedRef<RepositorySummary | null>;
   configureNeteaseRepositoryCache?: (repoId: string, path: string) => Promise<unknown>;
-  refreshRepositoryWorkspace: () => Promise<unknown>;
+  refreshRepositoryWorkspaceSilently: () => Promise<unknown>;
   relocateMissingRepository: (repoId: string, path: string) => Promise<unknown>;
   removeRepository: (repoId: string) => Promise<unknown>;
 };
@@ -63,7 +63,7 @@ export function useMissingRepositoryActions(options: MissingRepositoryActionsOpt
     if (isMissingRepositoryBusy.value) return;
     missingRepositoryError.value = "";
     try {
-      await options.refreshRepositoryWorkspace();
+      await options.refreshRepositoryWorkspaceSilently();
     } catch (cause) {
       missingRepositoryError.value = cause instanceof Error ? cause.message : String(cause);
     }

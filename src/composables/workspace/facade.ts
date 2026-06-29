@@ -74,6 +74,7 @@ import {
 import {
   ensureRepositoryWorkspace,
   refreshRepositoryWorkspace,
+  refreshActiveRepositoryWorkspaceSilently,
   selectAsset,
   selectRepository,
   setActivePanel,
@@ -205,6 +206,7 @@ export function useWorkspaceRepository() {
     libraryOverview,
     ensureRepositoryWorkspace,
     refreshRepositoryWorkspace,
+    refreshActiveRepositoryWorkspaceSilently,
     selectRepository,
     selectAsset,
     createNewRepository,

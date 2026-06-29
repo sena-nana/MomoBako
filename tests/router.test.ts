@@ -11,6 +11,7 @@ import { installContextMenu, vContextMenu } from "../src/ui/core";
 import {
   createDirectoryOnNextSync,
   delayNextInvoke,
+  emitMockTauriEvent,
   failNextInvoke,
   failNextOpenerCall,
   getPluginCallCalls,
@@ -21,6 +22,8 @@ import {
   seedCrossRepositorySearchHit,
   seedMockEntries,
   seedMockRepositories,
+  seedMockRepositoryActions,
+  seedMockSmartFolders,
   seedMissingMockRepository,
   seedMixedMockRepositories,
   seedLargeMockDirectory,
@@ -32,9 +35,9 @@ import {
   selectMockFolder,
 } from "./setupTests";
 import { getPreviewPluginForEntry } from "../src/plugins/previewPlugins";
-import type { FileBrowserEntry, PlaylistDetail, PlaylistSummary } from "../src/types/repository";
+import type { FileBrowserEntry, PlaylistDetail, PlaylistSummary, SmartFolder } from "../src/types/repository";
 import type { MockEntry, MockRepository } from "./fixtures/repositoryFixtures";
-import { createMockPlugins, mockSnapshot, pluginManifest } from "./fixtures/repositoryFixtures";
+import { createMockPlugins, defaultRepositoryActions, initialEntries, mockSnapshot, pluginManifest } from "./fixtures/repositoryFixtures";
 
 async function renderApp() {
   resetRepositoryWorkspaceForTests();
@@ -198,6 +201,23 @@ function previewEntry(extension: string): FileBrowserEntry {
     thumbnailPath: null,
     thumbnailCustom: false,
     metadata: {},
+  };
+}
+
+function smartFolderFixture(
+  smartFolderId: string,
+  name: string,
+  filter: SmartFolder["filter"] = {},
+): SmartFolder {
+  return {
+    smartFolderId,
+    repoId: "repo-main-001",
+    parentId: null,
+    name,
+    filter,
+    sortOrder: 0,
+    createdAt: "2026-06-05T00:18:00Z",
+    updatedAt: "2026-06-05T00:18:00Z",
   };
 }
 
@@ -690,6 +710,185 @@ describe("文件管理冒烟", () => {
       });
     });
     expect(await screen.findByRole("button", { name: "资源库" })).toBeInTheDocument();
+  });
+
+  it("缺失资源库手动刷新走静默链路且不显示任务", async () => {
+    seedMissingMockRepository();
+    await renderApp();
+
+    const workspace = useRepositoryWorkspace();
+    await waitFor(() => {
+      expect(workspace.operationProgress.value).toBeNull();
+    });
+    const delayedRefresh = delayNextInvoke("list_repositories");
+    await fireEvent.click(screen.getByRole("button", { name: "刷新" }));
+
+    await waitFor(() => {
+      expect(getInvokeCalls("list_repositories").length).toBeGreaterThan(1);
+      expect(workspace.operationProgress.value).toBeNull();
+    });
+    expect(document.querySelector(".task-button__badge")).not.toBeInTheDocument();
+
+    seedMockRepositories([{ ...mockSnapshot.repository }]);
+    delayedRefresh.resolve();
+
+    await waitFor(() => {
+      expect(document.querySelector(".missing-repository-page")).not.toBeInTheDocument();
+      expect(document.querySelector(".files-browser")).toBeInTheDocument();
+      expect(workspace.operationProgress.value).toBeNull();
+    });
+    expect(document.querySelector(".task-button__badge")).not.toBeInTheDocument();
+  });
+
+  it("后台结构刷新会按当前面板静默更新侧栏与当前视图", async () => {
+    const initialPlaylist = audioPlaylist();
+    const initialPlaylistDetail = audioPlaylistDetail();
+    const initialAction = defaultRepositoryActions()[0];
+    seedMockRepository();
+    seedMockPlaylists([initialPlaylist], {
+      [initialPlaylist.playlistId]: initialPlaylistDetail,
+    });
+    seedMockRepositoryActions([initialAction]);
+    seedMockSmartFolders([
+      smartFolderFixture("smart-1", "封面结果", { query: "cover" }),
+    ]);
+
+    await renderApp();
+
+    const workspace = useRepositoryWorkspace();
+    await workspace.loadFileBrowserForDirectory("Campaigns");
+    await waitFor(() => {
+      expect(workspace.fileBrowser.value?.currentPath).toBe("Campaigns");
+    });
+
+    seedMockRepositories([{
+      ...mockSnapshot.repository,
+      assetCount: 99,
+      updatedAt: "2026-06-29T01:00:00Z",
+    }]);
+    seedMockEntries([
+      ...initialEntries(),
+      {
+        path: "Campaigns/Winter",
+        name: "Winter",
+        kind: "directory",
+        extension: null,
+        sizeBytes: null,
+        sizeLabel: null,
+        modifiedAt: "2026-06-29T01:00:00Z",
+        assetId: null,
+        status: null,
+      },
+    ]);
+    const fileBrowserCallsBefore = getInvokeCalls("get_file_browser").length;
+    await emitMockTauriEvent("repository://structure-updated", {
+      repoId: "repo-main-001",
+      reason: "watcher",
+      indexedAt: "2026-06-29T01:00:00Z",
+    });
+
+    await waitFor(() => {
+      expect(workspace.repositories.value[0]?.assetCount).toBe(99);
+      expect(workspace.activeSnapshot.value?.repository.assetCount).toBe(99);
+      expect(workspace.fileBrowser.value?.entries.some((entry) => entry.path === "Campaigns/Winter")).toBe(true);
+    });
+    expect(getInvokeCalls("get_file_browser").length).toBeGreaterThan(fileBrowserCallsBefore);
+    expect(getInvokeCalls("get_file_browser").at(-1)?.args).toMatchObject({
+      request: {
+        directoryPath: "Campaigns",
+      },
+    });
+
+    workspace.setActivePanel("deleted");
+    await waitFor(() => {
+      expect(workspace.fileBrowser.value?.specialLocation).toBe("trash");
+    });
+    const trashCallsBefore = getInvokeCalls("get_file_browser").length;
+    await emitMockTauriEvent("repository://structure-updated", {
+      repoId: "repo-main-001",
+      reason: "watcher",
+      indexedAt: "2026-06-29T01:01:00Z",
+    });
+    await waitFor(() => {
+      expect(getInvokeCalls("get_file_browser").length).toBeGreaterThan(trashCallsBefore);
+    });
+    expect(getInvokeCalls("get_file_browser").at(-1)?.args).toMatchObject({
+      request: {
+        specialLocation: "trash",
+      },
+    });
+
+    await workspace.selectPlaylist(initialPlaylist.playlistId);
+    const refreshedPlaylist: PlaylistSummary = {
+      ...initialPlaylist,
+      name: "更新后的播放集",
+      itemCount: 2,
+      updatedAt: "2026-06-29T01:02:00Z",
+    };
+    const refreshedPlaylistDetail: PlaylistDetail = {
+      playlist: refreshedPlaylist,
+      items: [
+        ...initialPlaylistDetail.items,
+        {
+          playlistItemId: "playlist-item-02",
+          playlistId: refreshedPlaylist.playlistId,
+          assetId: "asset-02",
+          path: "Backgrounds/scene-forest-03.png",
+          filename: "scene-forest-03.png",
+          extension: "png",
+          thumbnailPath: null,
+          status: "ready",
+          statusReason: null,
+          sortOrder: 1,
+          addedAt: "2026-06-29T01:02:00Z",
+        },
+      ],
+    };
+    seedMockPlaylists([refreshedPlaylist], {
+      [refreshedPlaylist.playlistId]: refreshedPlaylistDetail,
+    });
+    const playlistDetailCallsBefore = getInvokeCalls("get_playlist_detail").length;
+    await emitMockTauriEvent("repository://structure-updated", {
+      repoId: "repo-main-001",
+      reason: "watcher",
+      indexedAt: "2026-06-29T01:02:00Z",
+    });
+    await waitFor(() => {
+      expect(workspace.activePlaylistDetail.value?.playlist.name).toBe("更新后的播放集");
+      expect(workspace.activePlaylistDetail.value?.items).toHaveLength(2);
+    });
+    expect(getInvokeCalls("get_playlist_detail").length).toBeGreaterThan(playlistDetailCallsBefore);
+
+    await workspace.selectSmartFolder("smart-1");
+    seedMockSmartFolders([
+      smartFolderFixture("smart-1", "更新后的智能文件夹", { query: "scene" }),
+    ]);
+    const smartFolderCallsBefore = getInvokeCalls("query_smart_folder").length;
+    await emitMockTauriEvent("repository://structure-updated", {
+      repoId: "repo-main-001",
+      reason: "watcher",
+      indexedAt: "2026-06-29T01:03:00Z",
+    });
+    await waitFor(() => {
+      expect(workspace.smartFolderResult.value?.smartFolder?.name).toBe("更新后的智能文件夹");
+      expect(workspace.smartFolderResult.value?.results[0]?.path).toContain("scene");
+    });
+    expect(getInvokeCalls("query_smart_folder").length).toBeGreaterThan(smartFolderCallsBefore);
+
+    workspace.setActivePanel("actions");
+    seedMockRepositoryActions([{
+      ...initialAction,
+      name: "重新整理标签",
+      updatedAt: "2026-06-29T01:04:00Z",
+    }]);
+    await emitMockTauriEvent("repository://structure-updated", {
+      repoId: "repo-main-001",
+      reason: "watcher",
+      indexedAt: "2026-06-29T01:04:00Z",
+    });
+    await waitFor(() => {
+      expect(workspace.repositoryActions.value[0]?.name).toBe("重新整理标签");
+    });
   });
 
   it("启动后会恢复当前资源库的播放会话且不切走文件浏览页", async () => {
@@ -1256,6 +1455,62 @@ describe("文件管理冒烟", () => {
       ))).toBe(true);
     });
     expect(getInvokeCalls("create_repository")).toHaveLength(0);
+  });
+
+  it("网易云后台同步完成后保持无感刷新且不显示任务", async () => {
+    seedMockRepository();
+    seedMockPlugins(neteasePlugins());
+    seedMockRepositories([neteaseRepository()]);
+    mockPluginCallResponse("momobako.source.netease-cloud-music", "auth.createQrSession", {
+      unikey: "qr-key-1",
+      qrimg: "data:image/png;base64,mock-qr",
+    });
+    mockPluginCallResponse("momobako.source.netease-cloud-music", "auth.pollQrSession", {
+      code: 803,
+      backendConfig: {
+        accountId: "123456",
+        cookie: "MUSIC_U=mock-cookie",
+      },
+      account: { id: 123456, userName: "Aura" },
+      profile: { nickname: "云村 Aura" },
+    });
+
+    await renderApp();
+
+    const workspace = useRepositoryWorkspace();
+    await waitFor(() => {
+      expect(workspace.operationProgress.value).toBeNull();
+    });
+    const delayedSync = delayNextInvoke("sync_repository");
+    await fireEvent.click(screen.getByRole("button", { name: "资源库" }));
+    await fireEvent.click(await screen.findByRole("button", { name: "添加资源库" }));
+    await fireEvent.click(await screen.findByRole("button", { name: "网易云音乐" }));
+    selectMockFolder("C:/Mock/NeteaseCache");
+    await fireEvent.click(await screen.findByRole("button", { name: "本地缓存目录" }));
+    await fireEvent.click(await screen.findByRole("button", { name: "检查扫码结果" }));
+
+    await waitFor(() => {
+      expect(getInvokeCalls("sync_repository").some((call) => (
+        call.args?.request && (call.args.request as { repoId?: string }).repoId === "netease-cloud-music-123456"
+      ))).toBe(true);
+      expect(workspace.operationProgress.value).toBeNull();
+    });
+    expect(document.querySelector(".task-button__badge")).not.toBeInTheDocument();
+
+    const delayedRefresh = delayNextInvoke("list_repositories");
+    delayedSync.resolve();
+
+    await waitFor(() => {
+      expect(getInvokeCalls("list_repositories").length).toBeGreaterThan(1);
+      expect(workspace.operationProgress.value).toBeNull();
+    });
+    expect(document.querySelector(".task-button__badge")).not.toBeInTheDocument();
+
+    delayedRefresh.resolve();
+    await waitFor(() => {
+      expect(workspace.operationProgress.value).toBeNull();
+    });
+    expect(document.querySelector(".task-button__badge")).not.toBeInTheDocument();
   });
 
   it("空状态拖入本地文件夹时挂载已有目录而不是创建新仓库", async () => {
