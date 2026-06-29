@@ -472,6 +472,76 @@ function neteaseVirtualEntries(): MockEntry[] {
   ];
 }
 
+function neteaseVirtualEntriesWithSecondPlaylist(): MockEntry[] {
+  return [
+    ...neteaseVirtualEntries(),
+    {
+      path: "创建的歌单/通勤歌单",
+      name: "通勤歌单",
+      kind: "directory",
+      extension: null,
+      sizeBytes: null,
+      sizeLabel: null,
+      modifiedAt: "2026-06-14T00:00:00Z",
+      assetId: null,
+      status: null,
+      thumbnailPath: null,
+      thumbnailCustom: false,
+      isVirtual: true,
+      providerId: "netease-cloud-music",
+      providerItemId: "9002",
+      sourcePayload: {
+        provider: "netease-cloud-music",
+        entryKind: "playlist-folder",
+        playlistId: 9002,
+        playlistName: "通勤歌单",
+        playlistCoverUrl: "https://example.test/playlist-9002.jpg",
+        playlistCategory: "created",
+        loginExpired: false,
+      },
+      metadata: {
+        provider: "netease-cloud-music",
+        entryKind: "playlist-folder",
+        playlistId: 9002,
+      },
+    },
+    {
+      path: "创建的歌单/通勤歌单/孙燕姿 - 遇见.mp3",
+      name: "孙燕姿 - 遇见.mp3",
+      kind: "file",
+      extension: "mp3",
+      sizeBytes: null,
+      sizeLabel: null,
+      modifiedAt: "2026-06-14T00:00:00Z",
+      assetId: "virtual-song-3",
+      status: "ready",
+      thumbnailPath: null,
+      thumbnailCustom: false,
+      isVirtual: true,
+      providerId: "netease-cloud-music",
+      providerItemId: "3001",
+      sourcePayload: {
+        provider: "netease-cloud-music",
+        accountId: "123456",
+        playlistId: 9002,
+        playlistName: "通勤歌单",
+        playlistCategory: "created",
+        songId: 3001,
+        songName: "遇见",
+        artists: ["孙燕姿"],
+        albumName: "The Moment",
+        coverUrl: "https://example.test/cover-3001.jpg",
+        level: "standard",
+        loginExpired: false,
+      },
+      metadata: {
+        provider: "netease-cloud-music",
+        songId: 3001,
+      },
+    },
+  ];
+}
+
 function neteaseExpiredEntries(): MockEntry[] {
   return neteaseVirtualEntries().map((entry) => ({
     ...entry,
@@ -1474,6 +1544,52 @@ describe("文件管理冒烟", () => {
       expect(entries.find((entry) => entry.path === "创建的歌单/夜跑歌单/陈奕迅 - 孤勇者.mp3")?.thumbnailPath).toBe(
         "C:/Mock/Thumbs/创建的歌单__夜跑歌单__陈奕迅 - 孤勇者.mp3.jpg",
       );
+    });
+  });
+
+  it("网易云资源库隐藏文件夹树，并为后续歌单目录与歌曲分别回填封面", async () => {
+    const plugins = neteasePlugins();
+    seedMockPlugins(plugins);
+    seedMockRepositories([neteaseRepository()]);
+    seedMockEntries(neteaseVirtualEntriesWithSecondPlaylist());
+    mockPluginCallResponse("momobako.source.netease-cloud-music", "auth.getLoginStatus", {
+      loggedIn: true,
+      loginExpired: false,
+      account: { id: 123456, userName: "Aura" },
+      profile: { nickname: "云村 Aura" },
+    });
+
+    await syncRegisteredFrontendPluginManifests(plugins);
+    await renderApp();
+
+    const sidebar = document.querySelector(".workspace-sidebar");
+    expect(sidebar).not.toBeNull();
+    expect(within(sidebar as HTMLElement).queryByText("文件夹")).not.toBeInTheDocument();
+
+    await fireEvent.dblClick(fileListItem("创建的歌单"));
+
+    await waitFor(() => {
+      expect(getInvokeCalls("ensure_thumbnail").some((call) => (
+        call.args?.request?.path === "创建的歌单/通勤歌单"
+        && call.args?.request?.action === "save"
+        && call.args?.request?.sourceUrl === "https://example.test/playlist-9002.jpg"
+      ))).toBe(true);
+    });
+    await waitFor(() => {
+      expect(fileListItem("创建的歌单/通勤歌单").querySelector("img")).toBeInTheDocument();
+    });
+
+    await fireEvent.dblClick(fileListItem("创建的歌单/通勤歌单"));
+
+    await waitFor(() => {
+      expect(getInvokeCalls("ensure_thumbnail").some((call) => (
+        call.args?.request?.path === "创建的歌单/通勤歌单/孙燕姿 - 遇见.mp3"
+        && call.args?.request?.action === "save"
+        && call.args?.request?.sourceUrl === "https://example.test/cover-3001.jpg"
+      ))).toBe(true);
+    });
+    await waitFor(() => {
+      expect(fileListItem("创建的歌单/通勤歌单/孙燕姿 - 遇见.mp3").querySelector("img")).toBeInTheDocument();
     });
   });
 

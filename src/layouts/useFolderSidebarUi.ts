@@ -3,6 +3,10 @@ import { normalizeWorkspaceMovePaths } from "../pages/workspace/dragBehavior";
 import { scheduleIdleTask } from "../composables/workspace/scheduler";
 import type { FileBrowserSnapshot, FileDeleteMode, FileTreeNode } from "../types/repository";
 
+type FolderBrowserLoadOptions = {
+  silent?: boolean;
+};
+
 type FolderSidebarUiOptions = {
   activeRepoId: ComputedRef<string | null>;
   activePanel: ComputedRef<string>;
@@ -17,7 +21,7 @@ type FolderSidebarUiOptions = {
   isExternalDragActive: ComputedRef<boolean>;
   isInternalDragActive: ComputedRef<boolean>;
   isMutatingFiles: ComputedRef<boolean>;
-  loadFileBrowserForDirectory: (directoryPath?: string) => Promise<unknown>;
+  loadFileBrowserForDirectory: (directoryPath?: string, options?: FolderBrowserLoadOptions) => Promise<unknown>;
   moveWorkspaceEntries: (sourcePaths: string[], targetPath: string) => Promise<FileBrowserSnapshot | null>;
   renameWorkspaceEntry: (path: string, nextName: string) => Promise<FileBrowserSnapshot | null>;
   setActivePanel: (panel: "files") => void;
@@ -63,7 +67,7 @@ export function useFolderSidebarUi(options: FolderSidebarUiOptions) {
 
   function openFolder(path: string) {
     options.setActivePanel("files");
-    void options.loadFileBrowserForDirectory(path);
+    void options.loadFileBrowserForDirectory(path, { silent: true });
   }
 
   function ensureFolderExpanded(path: string) {

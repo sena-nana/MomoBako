@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import {
   useWorkspaceActions,
@@ -28,6 +29,8 @@ import RepositorySwitcherPopover from "./RepositorySwitcherPopover.vue";
 import WorkspaceSidebarFolderDialogs from "./WorkspaceSidebarFolderDialogs.vue";
 import WorkspaceSidebarPlaylistDialog from "./WorkspaceSidebarPlaylistDialog.vue";
 import WorkspaceSidebarSmartFolderDialogs from "./WorkspaceSidebarSmartFolderDialogs.vue";
+
+const NETEASE_SOURCE_PLUGIN_ID = "momobako.source.netease-cloud-music";
 
 const route = useRoute();
 const router = useRouter();
@@ -294,6 +297,10 @@ const {
   setActivePanel,
 });
 
+const showFolderSidebar = computed(() => (
+  activeSnapshot.value?.repository.backend.pluginId !== NETEASE_SOURCE_PLUGIN_ID
+));
+
 </script>
 
 <template>
@@ -343,6 +350,7 @@ const {
         />
 
         <WorkspaceSidebarFolders
+          v-if="showFolderSidebar"
           :active-repo-id="activeRepoId"
           :current-directory-path="currentDirectoryPath"
           :drag-hover-folder-path="dragHoverFolderPath"

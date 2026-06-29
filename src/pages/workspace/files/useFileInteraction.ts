@@ -11,6 +11,7 @@ type FileBrowserLoadOptions = {
   specialLocation?: "trash";
   append?: boolean;
   limit?: number;
+  silent?: boolean;
 };
 
 type WorkspaceFileInteractionOptions = {
@@ -40,7 +41,9 @@ type WorkspaceFileInteractionOptions = {
 export function useFileInteraction(options: WorkspaceFileInteractionOptions) {
   function openDirectory(path: string) {
     options.setDragHoverFolderPath(null);
-    void options.loadFileBrowserForDirectory(path, options.isTrashPanel.value ? { specialLocation: "trash" } : {});
+    void options.loadFileBrowserForDirectory(path, options.isTrashPanel.value
+      ? { specialLocation: "trash", silent: true }
+      : { silent: true });
   }
 
   function selectFileEntry(entry: FileBrowserEntry, mode: "replace" | "toggle" | "range") {

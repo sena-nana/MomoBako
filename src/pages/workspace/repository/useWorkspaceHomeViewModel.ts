@@ -239,7 +239,7 @@ export function useWorkspaceHomeViewModel() {
     loadThumbnailsForEntries(
       fileBrowser.value.repoId,
       fileBrowser.value.currentPath,
-      entries.filter((entry) => entry.kind === "file"),
+      entries,
     );
   }
 

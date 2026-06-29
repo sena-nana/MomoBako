@@ -133,33 +133,50 @@ let latestDerivedPromise: Promise<void> = Promise.resolve();
 let cancelNeteaseThumbnailPrefetch: (() => void) | null = null;
 const queuedNeteaseThumbnailPrefetchKeys = new Set<string>();
 
-async function buildFileBrowserDerivedState(snapshot: FileBrowserSnapshot, requestId: number) {
+function resolveLiveFileBrowserSnapshot(snapshot: FileBrowserSnapshot) {
+  const current = fileBrowser.value;
+  if (!current) return snapshot;
+  if (current.repoId !== snapshot.repoId) return snapshot;
+  if (current.currentPath !== snapshot.currentPath) return snapshot;
+  if ((current.specialLocation ?? null) !== (snapshot.specialLocation ?? null)) return snapshot;
+  return current;
+}
+
+function createDerivedStateFromSnapshot(snapshot: FileBrowserSnapshot) {
   const entryMap = new Map<string, FileBrowserEntry>();
   const directories: FileBrowserEntry[] = [];
   const files: FileBrowserEntry[] = [];
 
-  for (let index = 0; index < snapshot.entries.length; index += 1) {
-    const entry = snapshot.entries[index];
+  for (const entry of snapshot.entries) {
     entryMap.set(entry.path, entry);
     if (entry.kind === "directory") {
       directories.push(entry);
     } else {
       files.push(entry);
     }
+  }
+
+  return {
+    entryMap,
+    directories,
+    files,
+    visibleEntries: [...directories, ...files],
+  };
+}
+
+async function buildFileBrowserDerivedState(snapshot: FileBrowserSnapshot, requestId: number) {
+  for (let index = 0; index < snapshot.entries.length; index += 1) {
     if (shouldYieldEvery(index)) {
       await yieldEvery(index);
     }
     if (requestId !== derivedRequestId) return;
   }
 
+  const finalSnapshot = resolveLiveFileBrowserSnapshot(snapshot);
   if (requestId !== derivedRequestId) return;
-  fileBrowserDerived.value = {
-    entryMap,
-    directories,
-    files,
-    visibleEntries: [...directories, ...files],
-  };
-  applySelectionForEntryMap(snapshot, entryMap);
+  const derivedState = createDerivedStateFromSnapshot(finalSnapshot);
+  fileBrowserDerived.value = derivedState;
+  applySelectionForEntryMap(finalSnapshot, derivedState.entryMap);
 }
 
 function applySelectionForEntryMap(snapshot: FileBrowserSnapshot, entryMap: ReadonlyMap<string, FileBrowserEntry>) {
