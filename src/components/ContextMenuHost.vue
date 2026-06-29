@@ -1,6 +1,6 @@
 <script setup lang="ts">
+import { Check } from "@lucide/vue";
 import { ref, watch, type ComponentPublicInstance } from "vue";
-import { Check } from "lucide-vue-next";
 import {
   finalizeClosedContextMenu,
   isContextMenuItemPending,
@@ -16,7 +16,6 @@ import {
 import { useAnchoredMenuSurface } from "../composables/useAnchoredMenuSurface";
 
 const { state } = useContextMenu();
-
 const rendered = ref(false);
 const menuSurface = useAnchoredMenuSurface(createAnchoredMenuPosition(0, 0));
 const menuPosition = menuSurface.position;
@@ -39,12 +38,9 @@ function hasChildren(item: ContextMenuItem) {
 }
 
 async function updateGeometry() {
-  await menuSurface.syncPosition(createAnchoredMenuPosition(
-    state.x,
-    state.y,
-    state.anchorX,
-    state.anchorY,
-  ));
+  await menuSurface.syncPosition(
+    createAnchoredMenuPosition(state.x, state.y, state.anchorX, state.anchorY),
+  );
 }
 
 function onAfterLeave() {

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { GripVertical, Play, Trash2 } from "lucide-vue-next";
+import { GripVertical, Play, Trash2 } from "@lucide/vue";
 import WorkspacePlayerBar from "../../../components/WorkspacePlayerBar.vue";
 import type { PlaylistDetail, PlaylistItem } from "../../../types/repository";
 import type { WorkspacePlayerBarHandlers, WorkspacePlayerBarProps } from "./usePlayerUi";

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Archive, Download, GitBranch, LoaderCircle, X } from "lucide-vue-next";
+import { Archive, Download, GitBranch, LoaderCircle, X } from "@lucide/vue";
 import type {
   RepositoryArchiveFormat,
   RepositoryCompressionLevel,

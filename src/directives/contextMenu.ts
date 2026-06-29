@@ -1,3 +1,7 @@
+/**
+ * 右键菜单指令兼容层。
+ * 继续复用 MomoBako 现有菜单注册能力，并通过核心入口对外暴露。
+ */
 import type { Directive } from "vue";
 import {
   registerContextMenu,
@@ -14,8 +18,10 @@ function rebind(element: Element, value: ContextMenuValue) {
   cleanups.delete(element);
 
   if (!value) return;
-  const provider: ContextMenuProvider =
-    typeof value === "function" ? value : () => value;
+
+  const provider: ContextMenuProvider = typeof value === "function"
+    ? value
+    : () => value;
   cleanups.set(element, registerContextMenu(element, provider));
 }
 

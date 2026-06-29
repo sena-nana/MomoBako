@@ -1,5 +1,5 @@
 import { computed, type Component, type Ref } from "vue";
-import type { ContextMenuItem } from "../../../composables/useContextMenu";
+import type { ContextMenuItem } from "../../../ui/core";
 import type { RegisteredLibraryExtension } from "../../../plugins/sdk";
 import type { FileBrowserEntry, RepositoryTagGroup, SmartFolderResultSnapshot } from "../../../types/repository";
 import type { FileDisplayMode } from "../useWorkspaceViewState";

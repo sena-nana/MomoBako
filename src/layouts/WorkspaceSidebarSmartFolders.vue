@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Plus } from "lucide-vue-next";
+import { Plus } from "@lucide/vue";
 import SmartFolderTreeNode from "../components/SmartFolderTreeNode.vue";
 import type { SmartFolderTreeNode as SmartFolderNode } from "../types/repository";
 

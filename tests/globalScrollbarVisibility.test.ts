@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   installGlobalScrollbarVisibility,
   uninstallGlobalScrollbarVisibility,
-} from "../src/composables/useGlobalScrollbarVisibility";
+} from "../src/ui/core";
 
 function createScroller(input: {
   scrollHeight?: number;

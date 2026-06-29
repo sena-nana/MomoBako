@@ -10,6 +10,12 @@ const port = Number(process.env.PORT) || 1420;
 export default defineConfig(() => ({
   plugins: [vue()],
   clearScreen: false,
+  optimizeDeps: {
+    exclude: ["@lilia/ui"],
+  },
+  ssr: {
+    noExternal: ["@lilia/ui"],
+  },
   server: {
     port,
     strictPort: true,
@@ -27,6 +33,11 @@ export default defineConfig(() => ({
   test: {
     environment: "jsdom",
     setupFiles: ["./tests/setupTests.ts"],
+    server: {
+      deps: {
+        inline: ["@lilia/ui"],
+      },
+    },
   },
   build: {
     rollupOptions: {

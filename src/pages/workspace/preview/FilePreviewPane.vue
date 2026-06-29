@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ArrowLeft, Eye, FileAudio, FileImage, FileVideo, FolderOpen } from "lucide-vue-next";
+import { ArrowLeft, Eye, FileAudio, FileImage, FileVideo, FolderOpen } from "@lucide/vue";
 import type { Component } from "vue";
 import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { usePlaylistPlayer } from "../../../composables/usePlaylistPlayer";
@@ -91,7 +91,7 @@ onBeforeUnmount(() => {
     <div>
       <p class="asset-browser__eyebrow">文件预览</p>
       <h1>{{ entry.name }}</h1>
-      <p class="files-preview-page__subline">{{ entry.path }}</p>
+      <p v-if="entry.path !== entry.name" class="files-preview-page__subline">{{ entry.path }}</p>
     </div>
     <div class="files-preview-page__actions">
       <button type="button" class="ghost" @click="emit('open', entry.path)">

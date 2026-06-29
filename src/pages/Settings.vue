@@ -12,15 +12,15 @@ import {
   ServerCog,
   SquareRoundCorner,
   Sun,
-} from "lucide-vue-next";
+} from "@lucide/vue";
 import PluginManagerPanel from "../components/PluginManagerPanel.vue";
 import { onPluginEvent } from "../plugins/sdk";
 import {
   CORNER_RADIUS_MAX,
   CORNER_RADIUS_MIN,
   useCornerStyle,
-} from "../composables/useCornerStyle";
-import { useTheme } from "../composables/useTheme";
+} from "../ui/core";
+import { useTheme } from "../ui/core";
 import {
   useWorkspaceRepository,
   useWorkspaceSettings,

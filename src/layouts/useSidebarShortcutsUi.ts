@@ -7,7 +7,7 @@ import {
   FolderTree,
   Tag,
   Trash2,
-} from "lucide-vue-next";
+} from "@lucide/vue";
 import { getWorkspaceParentPath } from "../pages/workspace/dragBehavior";
 import { scheduleIdleTask } from "../composables/workspace/scheduler";
 import type { RepositoryShortcut, RepositorySnapshot } from "../types/repository";

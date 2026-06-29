@@ -31,6 +31,9 @@ describe("MomoBako 工具链", () => {
     expect(deps.jszip).toBeUndefined();
     expect(pkg.dependencies.three).toBeDefined();
     expect(pkg.dependencies["@pixiv/three-vrm"]).toBeDefined();
+    expect(pkg.dependencies["@lilia/ui"]).toContain("github:sena-nana/LiliaUI#workspace=@lilia/ui&head=main");
+    expect(pkg.dependencies["@lucide/vue"]).toBeDefined();
+    expect(pkg.dependencies["lucide-vue-next"]).toBeUndefined();
     expect(pkg.devDependencies["@types/three"]).toBeDefined();
   });
 
@@ -115,18 +118,27 @@ describe("MomoBako 工具链", () => {
   it("全局滚动条使用隐藏原生条和 overlay 显隐样式", () => {
     const styles = read("src/styles/index.css").replace(/\r\n/g, "\n");
     const main = read("src/main.ts");
-    const scrollbars = read("src/composables/useGlobalScrollbarVisibility.ts");
+    const scrollbars = read("src/ui/core/index.ts");
 
-    expect(styles).toContain("scrollbar-width: none");
-    expect(styles).toContain("::-webkit-scrollbar {\n  width: 0;\n  height: 0;");
-    expect(styles).toContain(".global-scrollbar-overlay");
-    expect(styles).toContain("transition: opacity 0.48s ease");
-    expect(styles).toContain(".global-scrollbar-overlay.is-visible");
-    expect(styles).toContain(".global-scrollbar-overlay--vertical::before {\n  top: 0;\n  right: 0;");
+    expect(styles).toContain('@import "@lilia/ui/styles.css";');
     expect(main).toContain(
-      'import { installGlobalScrollbarVisibility } from "./composables/useGlobalScrollbarVisibility"',
+      'installGlobalScrollbarVisibility',
     );
-    expect(scrollbars).toContain("export function installGlobalScrollbarVisibility()");
-    expect(scrollbars).toContain("export function uninstallGlobalScrollbarVisibility()");
+    expect(main).toContain('from "./ui/core"');
+    expect(scrollbars).toContain("installGlobalScrollbarVisibility");
+    expect(scrollbars).toContain("uninstallGlobalScrollbarVisibility");
+  });
+
+  it("LiliaUI 字体资源随样式入口一起提供", () => {
+    const fonts = [
+      "public/fonts/noto-sans-sc-chinese-simplified-400-normal.woff2",
+      "public/fonts/noto-sans-sc-chinese-simplified-500-normal.woff2",
+      "public/fonts/noto-sans-sc-chinese-simplified-600-normal.woff2",
+      "public/fonts/noto-sans-sc-chinese-simplified-700-normal.woff2",
+    ];
+
+    for (const fontPath of fonts) {
+      expect(readFileSync(resolve(fontPath))).toBeDefined();
+    }
   });
 });

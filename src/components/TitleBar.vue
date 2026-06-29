@@ -8,7 +8,7 @@ import {
   SlidersHorizontal,
   Square,
   X,
-} from "lucide-vue-next";
+} from "@lucide/vue";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useRoute, useRouter } from "vue-router";
 import {

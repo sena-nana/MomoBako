@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { RouterLink } from "vue-router";
-import { Puzzle, Settings } from "lucide-vue-next";
+import { Puzzle, Settings } from "@lucide/vue";
 import TaskPopover from "../components/TaskPopover.vue";
 import type { WorkspacePanelKey } from "../composables/useRepositoryWorkspace";
 

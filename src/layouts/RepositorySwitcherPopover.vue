@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, watch, type ComponentPublicInstance } from "vue";
-import { Check, LoaderCircle, Plus, Trash2, X } from "lucide-vue-next";
+import { Check, LoaderCircle, Plus, Trash2, X } from "@lucide/vue";
 import type { RepositoryBackendOption, RepositorySummary } from "../types/repository";
 import {
   SB_LAYER_Z_INDEX,

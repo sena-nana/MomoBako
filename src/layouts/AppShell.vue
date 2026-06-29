@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { RouterView } from "vue-router";
-import { RefreshCw } from "lucide-vue-next";
+import { RefreshCw } from "@lucide/vue";
 import TitleBar from "../components/TitleBar.vue";
 import SecondaryPanel from "./SecondaryPanel.vue";
 import {
@@ -11,7 +11,8 @@ import {
 } from "../composables/useRepositoryWorkspace";
 import { usePlaylistPlayer } from "../composables/usePlaylistPlayer";
 import { useSystemMediaSession } from "../composables/useSystemMediaSession";
-import { useResizablePane } from "../composables/useResizablePane";
+import { getCachedPlaylistDetail } from "../composables/workspace/playlists";
+import { useResizablePane } from "../ui/core";
 import { getPlaylistDetail } from "../services/repositoryApi";
 
 const MIN_WIDTH = 220;
@@ -105,6 +106,10 @@ watch(
   async ([repoId, playlistItems]) => {
     const playlistId = repoId ? readPlaybackPlaylistId(repoId) : null;
     if (!repoId || !playlistId || !playlistItems.some((playlist) => playlist.playlistId === playlistId) || player.activeRepoId.value === repoId) return;
+    const cachedDetail = getCachedPlaylistDetail(repoId, playlistId);
+    if (cachedDetail) {
+      await player.restoreSession(repoId, cachedDetail);
+    }
     const detail = await getPlaylistDetail(repoId, playlistId);
     const restored = await player.restoreSession(repoId, detail);
     if (!restored) {

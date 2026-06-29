@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { RouterView } from "vue-router";
-import ContextMenuHost from "./components/ContextMenuHost.vue";
+import { ContextMenuHost } from "./ui/core";
 </script>
 
 <template>

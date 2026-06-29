@@ -1,13 +1,19 @@
 import { createApp } from "vue";
 import App from "./App.vue";
 import { router } from "./router";
-import "./composables/useTheme";
-import "./composables/useCornerStyle";
-import { installContextMenu } from "./composables/useContextMenu";
-import { installGlobalScrollbarVisibility } from "./composables/useGlobalScrollbarVisibility";
-import { vContextMenu } from "./directives/contextMenu";
+import {
+  configureMomoBakoUiCore,
+  installContextMenu,
+  installGlobalScrollbarVisibility,
+  useCornerStyle,
+  useTheme,
+  vContextMenu,
+} from "./ui/core";
 import "./styles/index.css";
 
+configureMomoBakoUiCore();
+useTheme();
+useCornerStyle();
 installContextMenu();
 installGlobalScrollbarVisibility();
 

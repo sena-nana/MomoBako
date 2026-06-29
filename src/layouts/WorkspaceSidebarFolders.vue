@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { LoaderCircle, Plus, RefreshCw } from "lucide-vue-next";
+import { LoaderCircle, Plus, RefreshCw } from "@lucide/vue";
 import FolderTreeNode from "../components/FolderTreeNode.vue";
 import type { FileTreeNode } from "../types/repository";
 

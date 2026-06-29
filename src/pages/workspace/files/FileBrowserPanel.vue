@@ -13,11 +13,11 @@ import {
   Plus,
   RotateCcw,
   Trash2,
-} from "lucide-vue-next";
+} from "@lucide/vue";
 import FileMetadataEditor from "./FileMetadataEditor.vue";
 import ThumbnailPalette from "../../../components/ThumbnailPalette.vue";
-import type { ContextMenuItem } from "../../../composables/useContextMenu";
-import { vContextMenu } from "../../../directives/contextMenu";
+import type { ContextMenuItem } from "../../../ui/core";
+import { vContextMenu } from "../../../ui/core";
 import type { RegisteredLibraryExtension } from "../../../plugins/sdk";
 import type { FileBrowserEntry, RepositoryTagGroup } from "../../../types/repository";
 import { useFileBrowserPanelViewModel } from "./useFileBrowserPanelViewModel";
@@ -406,8 +406,10 @@ const {
 
       <div class="files-detail__section">
         <p class="asset-browser__eyebrow">选中项</p>
-        <h2>{{ currentFileEntry.name }}</h2>
-        <p class="files-detail__subline">{{ currentFileEntry.path }}</p>
+        <h2>{{ `已选中 ${currentFileEntry.name}` }}</h2>
+        <p v-if="currentFileEntry.path !== currentFileEntry.name" class="files-detail__subline">
+          {{ currentFileEntry.path }}
+        </p>
       </div>
 
       <div class="files-detail__section">

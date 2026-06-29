@@ -1704,6 +1704,14 @@ vi.mock("@tauri-apps/api/core", () => ({
   },
 }));
 
+vi.mock("@tauri-apps/api/event", () => ({
+  TauriEvent: {},
+  emit: async () => undefined,
+  emitTo: async () => undefined,
+  listen: async () => async () => undefined,
+  once: async () => async () => undefined,
+}));
+
 vi.mock("@tauri-apps/plugin-dialog", () => ({
   open: async (options?: { filters?: unknown[] }) => {
     if (options?.filters) return mockSelectedFile;

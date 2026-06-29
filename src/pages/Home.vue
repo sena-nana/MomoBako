@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import ConfirmDialog from "../components/ConfirmDialog.vue";
+import { ConfirmDialog } from "../ui/core";
 import {
   CopyTargetDialog,
   ExtensionsPanel,

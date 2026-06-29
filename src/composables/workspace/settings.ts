@@ -30,10 +30,12 @@ type SettingsDataLoadOptions = {
   failFast?: boolean;
 };
 
-function syncPreviewPluginsInBackground(items: PluginManifest[]) {
-  void syncRegisteredFrontendPluginManifests(items).catch((cause) => {
+async function syncPreviewPlugins(items: PluginManifest[]) {
+  try {
+    await syncRegisteredFrontendPluginManifests(items);
+  } catch (cause) {
     error.value = cause instanceof Error ? cause.message : String(cause);
-  });
+  }
 }
 
 export async function loadSettingsData(options: SettingsDataLoadOptions = {}) {
@@ -49,7 +51,7 @@ export async function loadSettingsData(options: SettingsDataLoadOptions = {}) {
     ]);
     plugins.value = pluginItems;
     pluginHookExecutions.value = hookExecutionResponse.records;
-    syncPreviewPluginsInBackground(pluginItems);
+    await syncPreviewPlugins(pluginItems);
     cacheSnapshot.value = cache;
     apiDesign.value = api;
     externalApiConnection.value = externalApi;
@@ -69,7 +71,7 @@ async function applyPluginMutation(action: () => Promise<{ plugins: PluginManife
   try {
     const response = await action();
     plugins.value = response.plugins;
-    syncPreviewPluginsInBackground(response.plugins);
+    await syncPreviewPlugins(response.plugins);
     return response;
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : String(cause);
