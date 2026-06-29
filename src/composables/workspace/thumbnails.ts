@@ -1,7 +1,7 @@
 import { ensureThumbnail } from "../../services/repositoryApi";
 import { getPreviewPluginForEntry } from "../../plugins/previewPlugins";
 import type { FileBrowserEntry, FileBrowserSnapshot, ThumbnailResponse } from "../../types/repository";
-import { activeRepoId, currentDirectoryPath, error, fileBrowser, selectedFilePath } from "./state";
+import { activeRepoId, currentDirectoryPath, error, fileBrowser, fileBrowserDerived, selectedFilePath } from "./state";
 import { yieldToUi } from "./scheduler";
 
 const THUMBNAIL_LOAD_CONCURRENCY = 3;
@@ -155,19 +155,32 @@ export function applyThumbnailResponse(response: ThumbnailResponse, expectedDire
   if (!current || current.repoId !== response.repoId || current.currentPath !== expectedDirectoryPath) return;
   if (!current.entries.some((item) => item.path === response.path && item.kind === response.kind)) return;
 
+  const patchEntry = (item: FileBrowserEntry): FileBrowserEntry => (
+    item.path === response.path && item.kind === response.kind
+      ? {
+          ...item,
+          assetId: response.assetId || item.assetId,
+          thumbnailPath: response.thumbnailPath ?? null,
+          thumbnailCustom: response.thumbnailCustom,
+          metadata: response.metadata ?? item.metadata,
+        }
+      : item
+  );
+
   fileBrowser.value = {
     ...current,
-    entries: current.entries.map((item) => (
-      item.path === response.path && item.kind === response.kind
-        ? {
-            ...item,
-            assetId: response.assetId || item.assetId,
-            thumbnailPath: response.thumbnailPath ?? null,
-            thumbnailCustom: response.thumbnailCustom,
-            metadata: response.metadata ?? item.metadata,
-          }
-        : item
-    )),
+    entries: current.entries.map(patchEntry),
+  };
+
+  if (!fileBrowserDerived.value.entryMap.has(response.path)) return;
+
+  fileBrowserDerived.value = {
+    entryMap: new Map(
+      Array.from(fileBrowserDerived.value.entryMap.entries(), ([path, item]) => [path, patchEntry(item)]),
+    ),
+    directories: fileBrowserDerived.value.directories.map(patchEntry),
+    files: fileBrowserDerived.value.files.map(patchEntry),
+    visibleEntries: fileBrowserDerived.value.visibleEntries.map(patchEntry),
   };
 }
 
