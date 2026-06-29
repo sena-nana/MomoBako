@@ -31,7 +31,9 @@ import {
 } from "./tasks";
 import { loadThumbnailsForEntries, loadThumbnailsForSnapshot } from "./thumbnails";
 import { joinRepositoryPath } from "./paths";
-import { shouldYieldEvery, yieldEvery } from "./scheduler";
+import { scheduleIdleTask, shouldYieldEvery, yieldEvery } from "./scheduler";
+
+const NETEASE_SOURCE_PLUGIN_ID = "momobako.source.netease-cloud-music";
 
 export type FileBrowserLoadOptions = {
   includeTree?: boolean;
@@ -128,6 +130,8 @@ export function buildPresetRootFileBrowserSnapshot(snapshot: RepositorySnapshot)
 
 let derivedRequestId = 0;
 let latestDerivedPromise: Promise<void> = Promise.resolve();
+let cancelNeteaseThumbnailPrefetch: (() => void) | null = null;
+const queuedNeteaseThumbnailPrefetchKeys = new Set<string>();
 
 async function buildFileBrowserDerivedState(snapshot: FileBrowserSnapshot, requestId: number) {
   const entryMap = new Map<string, FileBrowserEntry>();
@@ -199,6 +203,7 @@ export function applyFileBrowserSnapshot(snapshot: FileBrowserSnapshot) {
   latestDerivedPromise = buildFileBrowserDerivedState(snapshot, requestId);
   void latestDerivedPromise;
   loadThumbnailsForSnapshot(snapshot);
+  queueNeteaseThumbnailPrefetch(snapshot);
 }
 
 export function appendFileBrowserSnapshot(snapshot: FileBrowserSnapshot) {
@@ -230,6 +235,51 @@ export function appendFileBrowserSnapshot(snapshot: FileBrowserSnapshot) {
       mergedSnapshot.currentPath,
       appendedEntries,
     );
+  }
+  queueNeteaseThumbnailPrefetch(mergedSnapshot);
+}
+
+function queueNeteaseThumbnailPrefetch(snapshot: FileBrowserSnapshot) {
+  cancelNeteaseThumbnailPrefetch?.();
+  cancelNeteaseThumbnailPrefetch = null;
+  if (
+    snapshot.backendPluginId !== NETEASE_SOURCE_PLUGIN_ID
+    || !snapshot.hasMore
+    || snapshot.nextOffset == null
+  ) {
+    return;
+  }
+  const key = `${snapshot.repoId}:${snapshot.currentPath}:${snapshot.nextOffset}`;
+  if (queuedNeteaseThumbnailPrefetchKeys.has(key)) return;
+  cancelNeteaseThumbnailPrefetch = scheduleIdleTask(() => {
+    queuedNeteaseThumbnailPrefetchKeys.add(key);
+    void prefetchNeteaseThumbnailPage(snapshot, key);
+  }, 420);
+}
+
+async function prefetchNeteaseThumbnailPage(snapshot: FileBrowserSnapshot, key: string) {
+  try {
+    const preload = await getFileBrowser({
+      repoId: snapshot.repoId,
+      directoryPath: snapshot.currentPath,
+      includeTree: false,
+      specialLocation: snapshot.specialLocation ?? undefined,
+      offset: snapshot.nextOffset ?? snapshot.loadedCount,
+      limit: FILE_BROWSER_APPEND_PAGE_SIZE,
+    });
+    if (
+      fileBrowser.value?.repoId !== snapshot.repoId
+      || fileBrowser.value?.currentPath !== snapshot.currentPath
+      || fileBrowser.value?.specialLocation !== (snapshot.specialLocation ?? null)
+    ) {
+      return;
+    }
+    loadThumbnailsForEntries(preload.repoId, preload.currentPath, preload.entries);
+  } finally {
+    if (cancelNeteaseThumbnailPrefetch) {
+      cancelNeteaseThumbnailPrefetch = null;
+    }
+    queuedNeteaseThumbnailPrefetchKeys.delete(key);
   }
 }
 

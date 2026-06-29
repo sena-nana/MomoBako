@@ -1076,6 +1076,19 @@ pub(super) struct DirectoryRecord {
     pub(super) updated_at: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct DirectoryPageResult {
+    pub(super) entries: Vec<FileSystemEntry>,
+    pub(super) total_entries: usize,
+}
+
+#[derive(Debug, Clone)]
+pub(super) struct NeteaseDirectoryCacheRecord {
+    pub(super) total_entries: usize,
+    pub(super) refreshed_at: String,
+}
+
 #[derive(Debug, Clone)]
 pub(super) struct RepositoryStructureCacheSnapshot {
     pub(super) cache_state: RepositoryStructureCacheState,

@@ -329,6 +329,12 @@ pub(super) fn sync_repository_files(
                 plugin_defaults_by_path.get(&file.relative_path),
                 false,
             )?;
+            sync_netease_source_metadata(
+                tx,
+                &asset_id,
+                file.provider_id.as_deref(),
+                file.source_payload.as_ref(),
+            )?;
             updated_assets += 1;
             insert_event(
                 tx,
@@ -422,6 +428,12 @@ pub(super) fn sync_repository_files(
                 &palette,
                 plugin_defaults_by_path.get(&file.relative_path),
             )?;
+            sync_netease_source_metadata(
+                tx,
+                &asset_id,
+                file.provider_id.as_deref(),
+                file.source_payload.as_ref(),
+            )?;
             insert_event(
                 tx,
                 &repo.summary,
@@ -467,6 +479,7 @@ pub(super) fn sync_repository_files(
     let hardlink_candidates =
         count_pending_hardlink_candidates(tx, &repo.summary.repo_id).unwrap_or(0);
     replace_directory_records(tx, &repo.summary.repo_id, &directory_records)?;
+    rebuild_netease_directory_cache(tx, &repo.summary.repo_id, &files)?;
 
     Ok(SyncResult {
         repo_id: repo.summary.repo_id.clone(),
@@ -544,6 +557,94 @@ pub(super) fn apply_revision_state(
         ],
     )?;
 
+    Ok(())
+}
+
+pub(super) fn sync_netease_source_metadata(
+    connection: &Connection,
+    asset_id: &str,
+    provider_id: Option<&str>,
+    source_payload: Option<&serde_json::Value>,
+) -> Result<(), rusqlite::Error> {
+    if provider_id != Some(NETEASE_CLOUD_MUSIC_PROVIDER_ID) {
+        return Ok(());
+    }
+    let Some(source_payload) = source_payload else {
+        return Ok(());
+    };
+    for (key, value) in netease_source_metadata_patch(source_payload) {
+        upsert_metadata_value(connection, asset_id, &key, &value)?;
+    }
+    Ok(())
+}
+
+fn netease_source_metadata_patch(
+    source_payload: &serde_json::Value,
+) -> BTreeMap<String, serde_json::Value> {
+    const KEYS: &[&str] = &[
+        "songId",
+        "songName",
+        "artists",
+        "albumName",
+        "coverUrl",
+        "durationMs",
+        "playlistId",
+        "playlistName",
+        "playlistCategory",
+        "provider",
+        "accountId",
+    ];
+    KEYS.iter()
+        .filter_map(|key| {
+            source_payload
+                .get(*key)
+                .cloned()
+                .map(|value| ((*key).to_string(), value))
+        })
+        .collect()
+}
+
+fn rebuild_netease_directory_cache(
+    connection: &Connection,
+    repo_id: &str,
+    files: &[DiscoveredFile],
+) -> Result<(), rusqlite::Error> {
+    clear_netease_directory_cache(connection, repo_id)?;
+    let mut groups = BTreeMap::<String, Vec<FileSystemEntry>>::new();
+    for file in files {
+        if file.provider_id.as_deref() != Some(NETEASE_CLOUD_MUSIC_PROVIDER_ID) {
+            continue;
+        }
+        let directory_path = parent_relative_path(&file.relative_path);
+        if directory_path.is_empty() {
+            continue;
+        }
+        groups.entry(directory_path).or_default().push(FileSystemEntry {
+            path: file.relative_path.clone(),
+            name: file.filename.clone(),
+            kind: FileSystemEntryKind::File,
+            extension: Some(file.extension.clone()),
+            size_bytes: Some(file.size_bytes),
+            modified_at: Some(file.modified_at.clone()),
+            is_virtual: file.is_virtual,
+            provider_id: file.provider_id.clone(),
+            provider_item_id: file.provider_item_id.clone(),
+            source_payload: file.source_payload.clone(),
+            local_absolute_path: file.local_absolute_path.clone(),
+        });
+    }
+    let refreshed_at = now_rfc3339();
+    for (directory_path, entries) in groups {
+        replace_netease_directory_cache_page(
+            connection,
+            repo_id,
+            &directory_path,
+            0,
+            &entries,
+            entries.len(),
+            &refreshed_at,
+        )?;
+    }
     Ok(())
 }
 

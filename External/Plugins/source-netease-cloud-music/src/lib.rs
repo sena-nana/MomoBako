@@ -29,6 +29,10 @@ struct PluginPayload {
     #[serde(default)]
     directory_path: Option<String>,
     #[serde(default)]
+    offset: Option<usize>,
+    #[serde(default)]
+    limit: Option<usize>,
+    #[serde(default)]
     entry_path: Option<String>,
     #[serde(default)]
     config: Option<serde_json::Value>,
@@ -101,6 +105,13 @@ struct FileTreeNode {
     path: String,
     label: String,
     children: Vec<FileTreeNode>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DirectoryPageResponse {
+    entries: Vec<FileSystemEntry>,
+    total_entries: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -345,6 +356,12 @@ fn handle_call(input: *const c_char) -> Result<serde_json::Value, String> {
         "filesystem.listDirectory" => list_directory(
             &runtime,
             payload.directory_path.as_deref().unwrap_or_default(),
+        ),
+        "filesystem.listDirectoryPage" => list_directory_page(
+            &runtime,
+            payload.directory_path.as_deref().unwrap_or_default(),
+            payload.offset.unwrap_or(0),
+            payload.limit,
         ),
         "filesystem.statEntry" => {
             stat_entry(&runtime, payload.entry_path.as_deref().unwrap_or_default())
@@ -668,34 +685,119 @@ fn list_directory(
     runtime: &RuntimeContext,
     directory_path: &str,
 ) -> Result<serde_json::Value, String> {
+    let entries = list_directory_entries(runtime, directory_path)?;
+    serde_json::to_value(entries).map_err(|error| error.to_string())
+}
+
+fn list_directory_page(
+    runtime: &RuntimeContext,
+    directory_path: &str,
+    offset: usize,
+    limit: Option<usize>,
+) -> Result<serde_json::Value, String> {
     let normalized = normalize_path(directory_path);
-    let entries = if normalized.is_empty() {
+    let Some(limit) = limit.filter(|value| *value > 0) else {
+        let entries = list_directory_entries(runtime, directory_path)?;
+        return serde_json::to_value(DirectoryPageResponse {
+            total_entries: entries.len(),
+            entries,
+        })
+        .map_err(|error| error.to_string());
+    };
+    let page = if normalized.is_empty()
+        || normalized == CREATED_CATEGORY_PATH
+        || normalized == SUBSCRIBED_CATEGORY_PATH
+    {
+        let entries = list_directory_entries(runtime, directory_path)?;
+        DirectoryPageResponse {
+            total_entries: entries.len(),
+            entries: paginate_directory_entries(entries, offset, limit),
+        }
+    } else {
+        list_playlist_directory_page(runtime, &normalized, offset, limit)?
+    };
+    serde_json::to_value(page).map_err(|error| error.to_string())
+}
+
+fn list_directory_entries(
+    runtime: &RuntimeContext,
+    directory_path: &str,
+) -> Result<Vec<FileSystemEntry>, String> {
+    let normalized = normalize_path(directory_path);
+    if normalized.is_empty() {
         let login_expired = current_login_expired(runtime);
-        vec![
+        Ok(vec![
             category_entry(CREATED_CATEGORY_PATH, "created", login_expired),
             category_entry(SUBSCRIBED_CATEGORY_PATH, "subscribed", login_expired),
-        ]
+        ])
     } else if normalized == CREATED_CATEGORY_PATH || normalized == SUBSCRIBED_CATEGORY_PATH {
         let folders = match discover_playlist_folder_summaries(runtime) {
             Ok((_config, folders)) => folders,
-            Err(_error) if current_login_expired(runtime) => Vec::new(),
+            Err(_error) if current_login_expired(runtime) => return Ok(Vec::new()),
             Err(error) => return Err(error),
         };
-        folders
+        Ok(folders
             .iter()
             .filter(|folder| folder.category_path == normalized)
             .map(folder_entry)
-            .collect::<Vec<_>>()
+            .collect::<Vec<_>>())
     } else if let Some(folder) = match discover_playlist_folder(runtime, &normalized) {
         Ok(folder) => Some(folder),
-        Err(_error) if current_login_expired(runtime) => None,
+        Err(_error) if current_login_expired(runtime) => return Ok(Vec::new()),
         Err(error) => return Err(error),
     } {
-        folder.tracks.iter().map(track_entry).collect::<Vec<_>>()
+        Ok(folder.tracks.iter().map(track_entry).collect::<Vec<_>>())
     } else {
-        Vec::new()
-    };
-    serde_json::to_value(entries).map_err(|error| error.to_string())
+        Ok(Vec::new())
+    }
+}
+
+fn paginate_directory_entries(
+    entries: Vec<FileSystemEntry>,
+    offset: usize,
+    limit: usize,
+) -> Vec<FileSystemEntry> {
+    let start = offset.min(entries.len());
+    entries.into_iter().skip(start).take(limit).collect()
+}
+
+fn list_playlist_directory_page(
+    runtime: &RuntimeContext,
+    folder_path: &str,
+    offset: usize,
+    limit: usize,
+) -> Result<DirectoryPageResponse, String> {
+    let (config, folders) = discover_playlist_folder_summaries(runtime)?;
+    let folder = folders
+        .into_iter()
+        .find(|folder| folder.folder_path == folder_path)
+        .ok_or_else(|| format!("directory not found: {folder_path}"))?;
+    match fetch_playlist_detail(runtime, &config.cookie, folder.playlist_id) {
+        Ok(detail) => {
+            let total_entries = playlist_track_total(&detail);
+            let tracks = hydrate_playlist_track_page(
+                runtime,
+                &config,
+                &detail,
+                folder.playlist_category,
+                &folder.playlist_name,
+                offset,
+                limit,
+            )?;
+            Ok(DirectoryPageResponse {
+                total_entries,
+                entries: tracks.iter().map(track_entry).collect(),
+            })
+        }
+        Err(_error) if current_login_expired(runtime) => Ok(DirectoryPageResponse {
+            total_entries: 0,
+            entries: Vec::new(),
+        }),
+        Err(_error) => Ok(DirectoryPageResponse {
+            total_entries: 0,
+            entries: Vec::new(),
+        }),
+    }
 }
 
 fn stat_entry(runtime: &RuntimeContext, entry_path: &str) -> Result<serde_json::Value, String> {
@@ -855,6 +957,14 @@ fn discover_playlist_folders(runtime: &RuntimeContext) -> Result<Vec<PlaylistFol
     Ok(folders)
 }
 
+fn playlist_track_total(detail: &PlaylistDetailItem) -> usize {
+    detail
+        .track_ids
+        .len()
+        .max(detail.tracks.len())
+        .max(detail.track_count.max(0) as usize)
+}
+
 fn hydrate_playlist_tracks(
     runtime: &RuntimeContext,
     config: &RepoConfig,
@@ -862,19 +972,7 @@ fn hydrate_playlist_tracks(
     playlist_category: &str,
     unique_folder_name: &str,
 ) -> Result<Vec<DiscoveredSong>, String> {
-    let mut songs = if detail.tracks.len() >= detail.track_count as usize {
-        detail.tracks.clone()
-    } else {
-        fetch_song_details(
-            runtime,
-            &config.cookie,
-            &detail
-                .track_ids
-                .iter()
-                .map(|item| item.id)
-                .collect::<Vec<_>>(),
-        )?
-    };
+    let mut songs = load_playlist_songs_until(runtime, config, detail, playlist_track_total(detail))?;
     let folder_path = join_path(
         if playlist_category == "created" {
             CREATED_CATEGORY_PATH
@@ -931,6 +1029,130 @@ fn hydrate_playlist_tracks(
         });
     }
     Ok(tracks)
+}
+
+fn hydrate_playlist_track_page(
+    runtime: &RuntimeContext,
+    config: &RepoConfig,
+    detail: &PlaylistDetailItem,
+    playlist_category: &str,
+    unique_folder_name: &str,
+    offset: usize,
+    limit: usize,
+) -> Result<Vec<DiscoveredSong>, String> {
+    let total = playlist_track_total(detail);
+    if offset >= total || limit == 0 {
+        return Ok(Vec::new());
+    }
+    let end = offset.saturating_add(limit).min(total);
+    let songs = load_playlist_songs_until(runtime, config, detail, end)?;
+    let folder_path = join_path(
+        if playlist_category == "created" {
+            CREATED_CATEGORY_PATH
+        } else {
+            SUBSCRIBED_CATEGORY_PATH
+        },
+        unique_folder_name,
+    );
+    let modified_at = millis_to_rfc3339(detail.update_time)?;
+    let mut names = std::collections::BTreeSet::new();
+    let mut tracks = Vec::new();
+    for (index, song) in songs.into_iter().enumerate() {
+        let track = build_discovered_song(
+            runtime,
+            config,
+            detail,
+            playlist_category,
+            &folder_path,
+            &modified_at,
+            &mut names,
+            song,
+        )?;
+        if index >= offset {
+            tracks.push(track);
+        }
+    }
+    Ok(tracks)
+}
+
+fn load_playlist_songs_until(
+    runtime: &RuntimeContext,
+    config: &RepoConfig,
+    detail: &PlaylistDetailItem,
+    end: usize,
+) -> Result<Vec<SongItem>, String> {
+    let end = end.min(playlist_track_total(detail));
+    if end == 0 {
+        return Ok(Vec::new());
+    }
+    if detail.tracks.len() >= end {
+        return Ok(detail.tracks.iter().take(end).cloned().collect());
+    }
+    if detail.track_ids.is_empty() {
+        return Ok(detail.tracks.iter().take(end).cloned().collect());
+    }
+    let ids = detail
+        .track_ids
+        .iter()
+        .take(end)
+        .map(|item| item.id)
+        .collect::<Vec<_>>();
+    fetch_song_details(runtime, &config.cookie, &ids)
+}
+
+fn build_discovered_song(
+    runtime: &RuntimeContext,
+    config: &RepoConfig,
+    detail: &PlaylistDetailItem,
+    playlist_category: &str,
+    folder_path: &str,
+    modified_at: &str,
+    names: &mut std::collections::BTreeSet<String>,
+    song: SongItem,
+) -> Result<DiscoveredSong, String> {
+    let artists = song
+        .ar
+        .iter()
+        .map(|artist| artist.name.clone())
+        .collect::<Vec<_>>();
+    let display_name = unique_name(
+        &sanitize_name(&format!(
+            "{} - {}.mp3",
+            if artists.is_empty() {
+                "Unknown Artist".to_string()
+            } else {
+                artists.join(", ")
+            },
+            song.name
+        )),
+        song.id,
+        names,
+    );
+    let relative_path = join_path(folder_path, &display_name);
+    let payload = serde_json::json!({
+        "provider": PROVIDER_ID,
+        "accountId": config.account_id.to_string(),
+        "accountCookie": config.cookie,
+        "playlistId": detail.id,
+        "playlistName": detail.name,
+        "playlistCategory": playlist_category,
+        "songId": song.id,
+        "songName": song.name,
+        "artists": artists,
+        "albumName": song.al.as_ref().and_then(|value| value.name.clone()),
+        "durationMs": song.dt,
+        "coverUrl": song.al.as_ref().and_then(|value| value.pic_url.clone()),
+        "audioLevelAvailability": runtime.default_level,
+        "privilege": song.privilege,
+        "virtualEntry": true,
+        "level": config.default_level
+    });
+    Ok(DiscoveredSong {
+        relative_path,
+        filename: display_name,
+        modified_at: modified_at.to_string(),
+        payload,
+    })
 }
 
 fn fetch_user_playlists(
@@ -1454,6 +1676,8 @@ mod tests {
             PluginPayload {
                 repo_root: None,
                 directory_path: None,
+                offset: None,
+                limit: None,
                 entry_path: None,
                 config: None,
                 key: None,
@@ -1782,6 +2006,80 @@ mod tests {
         format!("http://{addr}")
     }
 
+    fn serve_ncm_paged_playlist_test_server() -> String {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("test server should bind");
+        let addr = listener
+            .local_addr()
+            .expect("test server address should resolve");
+        thread::spawn(move || {
+            for _ in 0..32 {
+                let Ok((mut stream, _)) = listener.accept() else {
+                    break;
+                };
+                let mut buffer = [0_u8; 4096];
+                let size = stream.read(&mut buffer).unwrap_or(0);
+                let request = String::from_utf8_lossy(&buffer[..size]);
+                let line = request.lines().next().unwrap_or_default();
+                let path = line.split_whitespace().nth(1).unwrap_or("/");
+                let (status, content_type, body) = if path.starts_with("/weapi/w/nuser/account/get")
+                {
+                    (
+                        "200 OK",
+                        "application/json",
+                        r#"{"account":{"id":123456,"userName":"Aura"},"profile":{"nickname":"云村 Aura"}}"#
+                            .to_string(),
+                    )
+                } else if path.starts_with("/weapi/user/playlist") {
+                    (
+                        "200 OK",
+                        "application/json",
+                        r#"{"playlist":[
+                            {"id":9201,"name":"分页歌单","trackCount":3,"subscribed":false,"userId":123456,"creator":{"userId":123456},"updateTime":1718323200000}
+                        ]}"#
+                            .to_string(),
+                    )
+                } else if path.starts_with("/eapi/v6/playlist/detail") {
+                    (
+                        "200 OK",
+                        "application/json",
+                        r#"{"playlist":{"id":9201,"name":"分页歌单","trackCount":3,"tracks":[],"trackIds":[{"id":3301},{"id":3302},{"id":3303}],"updateTime":1718323200000}}"#
+                            .to_string(),
+                    )
+                } else if path.starts_with("/weapi/v3/song/detail") && request.contains("3303") {
+                    (
+                        "200 OK",
+                        "application/json",
+                        r#"{"songs":[
+                            {"id":3301,"name":"第一页","ar":[{"name":"歌手 A"}],"al":{"name":"专辑 A","picUrl":"https://example.test/cover-3301.jpg"},"dt":180000,"privilege":{"st":0}},
+                            {"id":3302,"name":"第二页前","ar":[{"name":"歌手 B"}],"al":{"name":"专辑 B","picUrl":"https://example.test/cover-3302.jpg"},"dt":190000,"privilege":{"st":0}},
+                            {"id":3303,"name":"第二页后","ar":[{"name":"歌手 C"}],"al":{"name":"专辑 C","picUrl":"https://example.test/cover-3303.jpg"},"dt":200000,"privilege":{"st":0}}
+                        ]}"#
+                            .to_string(),
+                    )
+                } else if path.starts_with("/weapi/v3/song/detail") {
+                    (
+                        "200 OK",
+                        "application/json",
+                        r#"{"songs":[
+                            {"id":3301,"name":"第一页","ar":[{"name":"歌手 A"}],"al":{"name":"专辑 A","picUrl":"https://example.test/cover-3301.jpg"},"dt":180000,"privilege":{"st":0}},
+                            {"id":3302,"name":"第二页前","ar":[{"name":"歌手 B"}],"al":{"name":"专辑 B","picUrl":"https://example.test/cover-3302.jpg"},"dt":190000,"privilege":{"st":0}}
+                        ]}"#
+                            .to_string(),
+                    )
+                } else {
+                    ("404 Not Found", "text/plain", "not-found".to_string())
+                };
+                let response = format!(
+                    "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+                let _ = stream.write_all(response.as_bytes());
+            }
+        });
+        format!("http://{addr}")
+    }
+
     #[test]
     fn list_directory_loads_playlist_folder_summaries_without_track_details() {
         let workspace = TestWorkspace::new("summary-only");
@@ -1958,6 +2256,43 @@ mod tests {
             tracks[0]["sourcePayload"]["virtualEntry"],
             serde_json::json!(true)
         );
+    }
+
+    #[test]
+    fn list_directory_page_returns_playlist_tracks_by_page_without_full_song_fetch() {
+        let workspace = TestWorkspace::new("paged-track-list");
+        let runtime = RuntimeContext {
+            plugin_data_dir: workspace.root.clone(),
+            api_base_url: serve_ncm_paged_playlist_test_server(),
+            default_level: "standard".to_string(),
+            repo_backend_config: RepoBackendConfigOverride {
+                cookie: Some("MUSIC_U=repo-cookie".to_string()),
+                account_id: Some(123456),
+                nickname: Some("云村 Aura".to_string()),
+                user_name: Some("Aura".to_string()),
+            },
+        };
+
+        let first_page = list_directory_page(&runtime, "创建的歌单/分页歌单", 0, Some(2))
+            .expect("first page should load")
+            .as_object()
+            .cloned()
+            .expect("page response should serialize as object");
+        let first_entries = first_page["entries"]
+            .as_array()
+            .cloned()
+            .expect("entries should serialize as array");
+        assert_eq!(first_page["totalEntries"], serde_json::json!(3));
+        assert_eq!(first_entries.len(), 2);
+        assert_eq!(
+            first_entries[0]["path"],
+            serde_json::json!("创建的歌单/分页歌单/歌手 A - 第一页.mp3")
+        );
+        assert_eq!(
+            first_entries[1]["path"],
+            serde_json::json!("创建的歌单/分页歌单/歌手 B - 第二页前.mp3")
+        );
+
     }
 
     #[test]

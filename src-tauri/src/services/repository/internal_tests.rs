@@ -2263,6 +2263,55 @@ mod tests {
         repo_id
     }
 
+    fn create_netease_repository_without_initial_sync(
+        state: &RepositoryState,
+        repo_root: &Path,
+        backend_config: serde_json::Value,
+    ) -> String {
+        let repo_id = format!(
+            "netease-{}",
+            slugify_repo_id("netease", &repo_root.to_string_lossy())
+        );
+        state
+            .ensure_initialized()
+            .expect("repository state should initialize");
+        install_local_filesystem_test_plugin_archive(&state.root);
+        let repo_path = repo_root.to_string_lossy().to_string();
+        let backend = RepositoryBackendRecord {
+            plugin_id: NETEASE_CLOUD_MUSIC_PLUGIN_ID.to_string(),
+            config: backend_config.clone(),
+        };
+        let seed = RepositorySeed {
+            repo_id: &repo_id,
+            name: "Netease Test Repo",
+            root_path: "",
+            status: "ready",
+            assets: &[],
+        };
+        initialize_repository_directory(&state.root, repo_root, &seed, &backend)
+            .expect("repository files should be prepared");
+        let registry = Connection::open(&state.registry_path).expect("registry should open");
+        registry
+            .execute(
+                r#"
+                INSERT OR REPLACE INTO repositories (
+                  repo_id, name, path, backend_plugin_id, backend_config_json, status, created_at, updated_at
+                )
+                VALUES (?1, ?2, ?3, ?4, ?5, 'ready', ?6, ?6)
+                "#,
+                params![
+                    &repo_id,
+                    "Netease Test Repo",
+                    &repo_path,
+                    NETEASE_CLOUD_MUSIC_PLUGIN_ID,
+                    backend_config.to_string(),
+                    now_rfc3339()
+                ],
+            )
+            .expect("repository should be registered");
+        repo_id
+    }
+
     fn create_local_repository_record_for_external_tests(
         state: &RepositoryState,
         repo_root: &Path,
@@ -2520,6 +2569,8 @@ mod tests {
                 directory_path: Some(String::new()),
                 include_tree: Some(false),
                 special_location: None,
+                offset: None,
+                limit: None,
             })
             .expect("file browser should load");
         let entry = snapshot
@@ -2540,6 +2591,223 @@ mod tests {
             .get("addedToLibraryAt")
             .and_then(serde_json::Value::as_str)
             .is_some());
+
+        fs::remove_dir_all(root).expect("test temp root should be removed");
+    }
+
+    #[test]
+    fn sync_netease_source_metadata_mirrors_system_fields_without_touching_user_fields() {
+        let (state, root, repo_root, _thumbnail_root) =
+            create_test_state("netease-system-metadata");
+        let repo_id = create_netease_repository_without_initial_sync(
+            &state,
+            &repo_root,
+            serde_json::json!({
+                "accountId": "123456",
+                "cookie": "MUSIC_U=test"
+            }),
+        );
+        let repo = state
+            .load_repository_record(&repo_id)
+            .expect("repository record should load");
+        let mut connection = state
+            .open_repository_connection(
+                &repo.summary.repo_id,
+                &repo.summary.path,
+                &repo.backend_record,
+            )
+            .expect("repository connection should open");
+        let tx = connection.transaction().expect("transaction should start");
+        let asset_id = asset_id_for_path(&repo_id, "创建的歌单/分页歌单/歌手 A - 第一页.mp3");
+        tx.execute(
+            r#"
+            INSERT INTO assets (
+              asset_id, repo_id, path, filename, extension, size_bytes, created_at, modified_at,
+              hash, status, version, updated_at, thumbnail_path, is_virtual, provider_id,
+              provider_item_id, source_payload_json, local_absolute_path
+            )
+            VALUES (?1, ?2, ?3, ?4, 'mp3', 0, ?5, ?5, NULL, 'synced', 1, ?5, NULL, 1, ?6, ?7, ?8, NULL)
+            "#,
+            params![
+                &asset_id,
+                &repo_id,
+                "创建的歌单/分页歌单/歌手 A - 第一页.mp3",
+                "歌手 A - 第一页.mp3",
+                now_rfc3339(),
+                NETEASE_CLOUD_MUSIC_PROVIDER_ID,
+                "3301",
+                serde_json::json!({
+                    "provider": "netease-cloud-music",
+                    "accountId": "123456",
+                    "playlistId": 9201,
+                    "playlistName": "分页歌单",
+                    "playlistCategory": "created",
+                    "songId": 3301,
+                    "songName": "第一页",
+                    "artists": ["歌手 A"],
+                    "albumName": "专辑 A",
+                    "coverUrl": "https://example.test/cover-3301.jpg",
+                    "durationMs": 180000
+                }).to_string()
+            ],
+        )
+        .expect("virtual asset should insert");
+        ensure_default_metadata(
+            &tx,
+            &asset_id,
+            "创建的歌单/分页歌单/歌手 A - 第一页.mp3",
+            "歌手 A - 第一页.mp3",
+            "mp3",
+            &now_rfc3339(),
+            None,
+            &[],
+            None,
+            false,
+        )
+        .expect("default metadata should seed");
+        upsert_metadata_value(&tx, &asset_id, "rating", &serde_json::json!(4))
+            .expect("user rating should update");
+        sync_netease_source_metadata(
+            &tx,
+            &asset_id,
+            Some(NETEASE_CLOUD_MUSIC_PROVIDER_ID),
+            Some(&serde_json::json!({
+                "provider": "netease-cloud-music",
+                "accountId": "123456",
+                "playlistId": 9201,
+                "playlistName": "分页歌单",
+                "playlistCategory": "created",
+                "songId": 3301,
+                "songName": "第一页",
+                "artists": ["歌手 A"],
+                "albumName": "专辑 A",
+                "coverUrl": "https://example.test/cover-3301.jpg",
+                "durationMs": 180000
+            })),
+        )
+        .expect("netease metadata should sync");
+        tx.commit().expect("transaction should commit");
+
+        let metadata = metadata_for_asset_path(&state, &repo_id, "创建的歌单/分页歌单/歌手 A - 第一页.mp3");
+        assert_eq!(metadata.get("rating"), Some(&serde_json::json!(4)));
+        assert_eq!(metadata.get("songId"), Some(&serde_json::json!(3301)));
+        assert_eq!(metadata.get("songName"), Some(&serde_json::json!("第一页")));
+        assert_eq!(metadata.get("artists"), Some(&serde_json::json!(["歌手 A"])));
+        assert_eq!(
+            metadata.get("coverUrl"),
+            Some(&serde_json::json!("https://example.test/cover-3301.jpg"))
+        );
+
+        fs::remove_dir_all(root).expect("test temp root should be removed");
+    }
+
+    #[test]
+    fn load_file_browser_uses_netease_cached_page_without_backend_roundtrip() {
+        let (state, root, repo_root, _thumbnail_root) =
+            create_test_state("netease-browser-cache-hit");
+        let repo_id = create_netease_repository_without_initial_sync(
+            &state,
+            &repo_root,
+            serde_json::json!({
+                "accountId": "123456",
+                "cookie": "MUSIC_U=test"
+            }),
+        );
+        let repo = state
+            .load_repository_record(&repo_id)
+            .expect("repository record should load");
+        let connection = state
+            .open_repository_connection(
+                &repo.summary.repo_id,
+                &repo.summary.path,
+                &repo.backend_record,
+            )
+            .expect("repository connection should open");
+        let refreshed_at = now_rfc3339();
+        let entries = vec![
+            FileSystemEntry {
+                path: "创建的歌单/分页歌单/歌手 A - 第一页.mp3".to_string(),
+                name: "歌手 A - 第一页.mp3".to_string(),
+                kind: FileSystemEntryKind::File,
+                extension: Some("mp3".to_string()),
+                size_bytes: Some(0),
+                modified_at: Some(refreshed_at.clone()),
+                is_virtual: true,
+                provider_id: Some(NETEASE_CLOUD_MUSIC_PROVIDER_ID.to_string()),
+                provider_item_id: Some("3301".to_string()),
+                source_payload: Some(serde_json::json!({
+                    "provider": "netease-cloud-music",
+                    "accountId": "123456",
+                    "playlistId": 9201,
+                    "playlistName": "分页歌单",
+                    "playlistCategory": "created",
+                    "songId": 3301,
+                    "songName": "第一页",
+                    "artists": ["歌手 A"],
+                    "albumName": "专辑 A",
+                    "coverUrl": "https://example.test/cover-3301.jpg",
+                    "durationMs": 180000
+                })),
+                local_absolute_path: None,
+            },
+            FileSystemEntry {
+                path: "创建的歌单/分页歌单/歌手 B - 第二页前.mp3".to_string(),
+                name: "歌手 B - 第二页前.mp3".to_string(),
+                kind: FileSystemEntryKind::File,
+                extension: Some("mp3".to_string()),
+                size_bytes: Some(0),
+                modified_at: Some(refreshed_at.clone()),
+                is_virtual: true,
+                provider_id: Some(NETEASE_CLOUD_MUSIC_PROVIDER_ID.to_string()),
+                provider_item_id: Some("3302".to_string()),
+                source_payload: Some(serde_json::json!({
+                    "provider": "netease-cloud-music",
+                    "accountId": "123456",
+                    "playlistId": 9201,
+                    "playlistName": "分页歌单",
+                    "playlistCategory": "created",
+                    "songId": 3302,
+                    "songName": "第二页前",
+                    "artists": ["歌手 B"],
+                    "albumName": "专辑 B",
+                    "coverUrl": "https://example.test/cover-3302.jpg",
+                    "durationMs": 190000
+                })),
+                local_absolute_path: None,
+            },
+        ];
+        replace_netease_directory_cache_page(
+            &connection,
+            &repo_id,
+            "创建的歌单/分页歌单",
+            0,
+            &entries,
+            3,
+            &refreshed_at,
+        )
+        .expect("directory cache page should persist");
+
+        let snapshot = state
+            .load_file_browser(FileBrowserRequest {
+                repo_id,
+                directory_path: Some("创建的歌单/分页歌单".to_string()),
+                include_tree: Some(false),
+                special_location: None,
+                offset: Some(0),
+                limit: Some(2),
+            })
+            .expect("netease cached browser page should load");
+
+        assert_eq!(snapshot.entries.len(), 2);
+        assert_eq!(snapshot.total_entries, 3);
+        assert_eq!(snapshot.loaded_count, 2);
+        assert_eq!(snapshot.next_offset, Some(2));
+        assert!(snapshot.has_more);
+        assert_eq!(
+            snapshot.entries[0].source_payload.as_ref().and_then(|value| value.get("songId")),
+            Some(&serde_json::json!(3301))
+        );
+        assert!(snapshot.entries[0].asset_id.is_some());
 
         fs::remove_dir_all(root).expect("test temp root should be removed");
     }
@@ -3607,6 +3875,8 @@ mod tests {
                 directory_path: Some("Copies".to_string()),
                 include_tree: Some(false),
                 special_location: None,
+                offset: None,
+                limit: None,
             })
             .expect("browser should load");
         let copied = snapshot
@@ -3622,6 +3892,8 @@ mod tests {
                 directory_path: Some(String::new()),
                 include_tree: Some(false),
                 special_location: None,
+                offset: None,
+                limit: None,
             })
             .expect("root browser should load");
         let source = root_snapshot
@@ -3761,6 +4033,8 @@ mod tests {
                 directory_path: Some("Copies".to_string()),
                 include_tree: Some(false),
                 special_location: None,
+                offset: None,
+                limit: None,
             })
             .expect("browser should load");
         let copied = snapshot
@@ -3780,6 +4054,8 @@ mod tests {
                 directory_path: Some("Copies".to_string()),
                 include_tree: Some(false),
                 special_location: None,
+                offset: None,
+                limit: None,
             })
             .expect("browser should load after sync");
         let synced_copy = synced_snapshot
@@ -4170,6 +4446,8 @@ mod tests {
                 directory_path: Some(String::new()),
                 include_tree: Some(false),
                 special_location: None,
+                offset: None,
+                limit: None,
             })
             .expect("file browser should load");
         let entry = snapshot
@@ -4222,6 +4500,8 @@ mod tests {
                 directory_path: Some(String::new()),
                 include_tree: Some(false),
                 special_location: None,
+                offset: None,
+                limit: None,
             })
             .expect("file browser should load");
         let entry = snapshot
@@ -4479,6 +4759,8 @@ mod tests {
                 directory_path: Some(String::new()),
                 include_tree: Some(false),
                 special_location: Some("trash".to_string()),
+                offset: None,
+                limit: None,
             })
             .expect("trash browser should load");
         let trash_entry = trash_snapshot
@@ -4570,6 +4852,8 @@ mod tests {
                 directory_path: Some("Scenes/Act1".to_string()),
                 include_tree: Some(false),
                 special_location: Some("trash".to_string()),
+                offset: None,
+                limit: None,
             })
             .expect("nested trash browser should load");
         let nested_entry = nested_trash_snapshot
