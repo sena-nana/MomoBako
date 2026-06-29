@@ -38,6 +38,7 @@ export type FileBrowserLoadOptions = {
   specialLocation?: "trash";
   append?: boolean;
   limit?: number;
+  silent?: boolean;
 };
 
 export { entryNameFromPath } from "./paths";
@@ -90,6 +91,8 @@ export function buildPresetRootFileBrowserSnapshot(snapshot: RepositorySnapshot)
     rootPath: snapshot.repository.path,
     backendPluginId: snapshot.repository.backend.pluginId,
     backendKind: snapshot.repository.backend.kind,
+    cacheState: "ready",
+    indexedAt: null,
     currentPath: "",
     totalEntries: tree.length,
     loadedCount: tree.length,
@@ -239,6 +242,7 @@ export async function loadFileBrowserForDirectory(directoryPath = "", options: F
 
   const append = options.append ?? false;
   const includeTree = options.includeTree ?? false;
+  const silent = options.silent ?? false;
   const specialLocation = options.specialLocation ?? (activePanel.value === "deleted" ? "trash" : undefined);
   const currentSnapshot = fileBrowser.value;
   const offset = append
@@ -253,9 +257,11 @@ export async function loadFileBrowserForDirectory(directoryPath = "", options: F
     isLoadingFileBrowserMore.value = true;
   } else {
     isLoadingFileBrowser.value = true;
-    error.value = null;
+    if (!silent) {
+      error.value = null;
+    }
   }
-  const progressId = append ? null : startOperationProgress(
+  const progressId = append || silent ? null : startOperationProgress(
     specialLocation === "trash" ? "读取回收站" : includeTree ? "读取文件树" : "读取目录",
     directoryPath ? `正在读取 ${directoryPath}` : specialLocation === "trash" ? "正在读取回收站" : "正在读取根目录",
     { initial: 14, indeterminate: true },
@@ -272,13 +278,19 @@ export async function loadFileBrowserForDirectory(directoryPath = "", options: F
     if (append) {
       appendFileBrowserSnapshot(snapshot);
     } else {
-      updateOperationProgress(progressId!, { detail: "整理目录条目", value: 92 });
+      if (progressId != null) {
+        updateOperationProgress(progressId, { detail: "整理目录条目", value: 92 });
+      }
       applyFileBrowserSnapshot(snapshot);
-      finishOperationProgress(progressId!);
+      if (progressId != null) {
+        finishOperationProgress(progressId);
+      }
     }
     return snapshot;
   } catch (cause) {
-    error.value = cause instanceof Error ? cause.message : String(cause);
+    if (!silent) {
+      error.value = cause instanceof Error ? cause.message : String(cause);
+    }
     if (progressId != null) {
       cancelOperationProgress(progressId);
     }

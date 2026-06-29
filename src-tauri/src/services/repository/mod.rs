@@ -84,6 +84,7 @@ use self::registry_store::*;
 use self::schema::*;
 use self::search_engine::*;
 pub use self::state::RepositoryState;
+pub(crate) use self::state::RepositoryStructureRefreshRequest;
 use self::sync_engine::*;
 use self::thumbnail::*;
 use self::trash::*;

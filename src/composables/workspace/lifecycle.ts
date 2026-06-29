@@ -1,3 +1,4 @@
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import {
   getFileBrowser,
   getRepositoryTree,
@@ -8,7 +9,10 @@ import {
   listSmartFolders,
   listRepositories,
 } from "../../services/repositoryApi";
-import type { RepositorySummary } from "../../types/repository";
+import type {
+  RepositoryStructureUpdatedEvent,
+  RepositorySummary,
+} from "../../types/repository";
 import {
   activeAssetDetail,
   activeAssetId,
@@ -63,6 +67,7 @@ import {
   activeRepositoryActionId,
 } from "./state";
 import { applyFileBrowserSnapshot, buildPresetRootFileBrowserSnapshot } from "./files";
+import { loadFileBrowserForDirectory } from "./files";
 import { resetSearchState } from "./search";
 import {
   cancelOperationProgress,
@@ -80,6 +85,16 @@ import { syncPlaylistMemberships } from "./playlists";
 let startupPromise: Promise<void> | null = null;
 let repositoryBackgroundToken = 0;
 let cancelRepositoryBackgroundTask: (() => void) | null = null;
+let unlistenStructureUpdated: UnlistenFn | null = null;
+
+async function handleRepositoryStructureUpdated(event: RepositoryStructureUpdatedEvent) {
+  if (!activeRepoId.value || event.repoId !== activeRepoId.value) return;
+  if (activePanel.value !== "files") return;
+  await loadFileBrowserForDirectory(currentDirectoryPath.value, {
+    includeTree: true,
+    silent: true,
+  });
+}
 
 export function resetWorkspaceSelection() {
   activeRepoId.value = null;
@@ -342,6 +357,14 @@ export function ensureRepositoryWorkspace(
     workspaceStartup.value = { ...createInitialWorkspaceStartup(), status: "loading" };
     error.value = null;
     setStartupLoadingFlags(true);
+    if (!unlistenStructureUpdated) {
+      unlistenStructureUpdated = await listen<RepositoryStructureUpdatedEvent>(
+        "repository://structure-updated",
+        ({ payload }) => {
+          void handleRepositoryStructureUpdated(payload);
+        },
+      );
+    }
 
     try {
       setStartupProgress(1, "加载仓库列表");
@@ -403,5 +426,7 @@ export function resetRepositoryWorkspaceForTests() {
   workspaceStartup.value = createInitialWorkspaceStartup();
   syncProgress.value = createInitialSyncProgress();
   setSyncProgress("idle", "", 0);
+  unlistenStructureUpdated?.();
+  unlistenStructureUpdated = null;
   startupPromise = null;
 }

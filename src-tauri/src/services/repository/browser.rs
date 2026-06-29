@@ -2,6 +2,124 @@
 
 use super::*;
 
+fn local_repository_cache_snapshot(
+    connection: &Connection,
+    repo_id: &str,
+    refreshing: bool,
+) -> Result<RepositoryStructureCacheSnapshot, String> {
+    let has_cache = has_directory_cache(connection, repo_id).map_err(db_error)?;
+    let indexed_at = latest_directory_indexed_at(connection, repo_id).map_err(db_error)?;
+    Ok(RepositoryStructureCacheSnapshot {
+        cache_state: if !has_cache {
+            RepositoryStructureCacheState::Warming
+        } else if refreshing {
+            RepositoryStructureCacheState::Refreshing
+        } else {
+            RepositoryStructureCacheState::Ready
+        },
+        indexed_at,
+    })
+}
+
+fn build_tree_from_directory_records(records: Vec<DirectoryRecord>) -> Vec<FileTreeNode> {
+    let mut grouped = BTreeMap::<String, Vec<DirectoryRecord>>::new();
+    for record in records.into_iter().filter(|record| !record.path.is_empty()) {
+        grouped
+            .entry(record.parent_path.clone())
+            .or_default()
+            .push(record);
+    }
+
+    fn build_nodes(
+        parent_path: &str,
+        grouped: &mut BTreeMap<String, Vec<DirectoryRecord>>,
+    ) -> Vec<FileTreeNode> {
+        let mut children = grouped.remove(parent_path).unwrap_or_default();
+        children.sort_by(|left, right| left.name.to_lowercase().cmp(&right.name.to_lowercase()));
+        children
+            .into_iter()
+            .map(|record| FileTreeNode {
+                path: record.path.clone(),
+                label: record.name.clone(),
+                children: build_nodes(&record.path, grouped),
+            })
+            .collect()
+    }
+
+    build_nodes("", &mut grouped)
+}
+
+fn load_cached_directory_entries(
+    connection: &Connection,
+    repo_id: &str,
+    current_path: &str,
+) -> Result<Vec<FileSystemEntry>, String> {
+    let directory_entries = load_directory_records_for_parent(connection, repo_id, current_path)
+        .map_err(db_error)?
+        .into_iter()
+        .map(|record| FileSystemEntry {
+            path: record.path,
+            name: record.name,
+            kind: FileSystemEntryKind::Directory,
+            extension: None,
+            size_bytes: None,
+            modified_at: Some(record.updated_at),
+            is_virtual: false,
+            provider_id: None,
+            provider_item_id: None,
+            source_payload: None,
+            local_absolute_path: None,
+        })
+        .collect::<Vec<_>>();
+
+    let mut stmt = connection.prepare(
+        r#"
+        SELECT
+          path,
+          filename,
+          extension,
+          size_bytes,
+          modified_at,
+          is_virtual,
+          provider_id,
+          provider_item_id,
+          source_payload_json,
+          local_absolute_path
+        FROM assets
+        WHERE repo_id = ?1
+          AND status != 'deleted'
+          AND (
+            (?2 = '' AND INSTR(path, '/') = 0)
+            OR (?2 != '' AND path LIKE (?2 || '/%') AND SUBSTR(path, LENGTH(?2) + 2) NOT LIKE '%/%')
+          )
+        ORDER BY filename COLLATE NOCASE
+        "#,
+    ).map_err(db_error)?;
+    let file_entries = stmt
+        .query_map(params![repo_id, current_path], |row| {
+            Ok(FileSystemEntry {
+                path: row.get(0)?,
+                name: row.get(1)?,
+                kind: FileSystemEntryKind::File,
+                extension: row.get(2)?,
+                size_bytes: row.get(3)?,
+                modified_at: row.get(4)?,
+                is_virtual: row.get::<_, i64>(5)? != 0,
+                provider_id: row.get(6)?,
+                provider_item_id: row.get(7)?,
+                source_payload: parse_json_column_nullable(row.get::<_, Option<String>>(8)?)?,
+                local_absolute_path: row.get(9)?,
+            })
+        })
+        .map_err(db_error)?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(db_error)?;
+
+    let mut entries = directory_entries;
+    entries.extend(file_entries);
+    Ok(entries)
+}
+
 pub(super) fn load_file_browser(
     state: &RepositoryState,
     request: FileBrowserRequest,
@@ -25,10 +143,32 @@ pub(super) fn load_file_browser(
     }
     let current_path =
         normalize_directory_path(request.directory_path.as_deref().unwrap_or_default())?;
+    let cache_snapshot = if repo.backend_record.plugin_id == LOCAL_FILESYSTEM_PLUGIN_ID {
+        let snapshot = local_repository_cache_snapshot(
+            &connection,
+            &request.repo_id,
+            state.repository_structure_refresh_in_progress(&request.repo_id),
+        )?;
+        if matches!(snapshot.cache_state, RepositoryStructureCacheState::Warming) {
+            state.queue_repository_structure_refresh(request.repo_id.clone(), "cache-miss");
+        }
+        snapshot
+    } else {
+        RepositoryStructureCacheSnapshot {
+            cache_state: RepositoryStructureCacheState::Ready,
+            indexed_at: None,
+        }
+    };
     let tree = if special_location.is_some() {
         None
     } else if request.include_tree.unwrap_or(true) {
-        Some(list_backend_tree(&state.root, &repo, &repo_root)?)
+        Some(if repo.backend_record.plugin_id == LOCAL_FILESYSTEM_PLUGIN_ID {
+            build_tree_from_directory_records(
+                load_directory_records(&connection, &request.repo_id).map_err(db_error)?,
+            )
+        } else {
+            list_backend_tree(&state.root, &repo, &repo_root)?
+        })
     } else {
         None
     };
@@ -49,11 +189,15 @@ pub(super) fn load_file_browser(
         )?;
         list_trash_directory_entries(&repo_root, &current_path, &asset_map, &thumbnail_map)?
     } else {
-        let listed_entries = backend_adapter(&state.root, &repo).list_directory_entries(
-            &repo_root,
-            &current_path,
-            &repo.backend_record.config,
-        )?;
+        let listed_entries = if repo.backend_record.plugin_id == LOCAL_FILESYSTEM_PLUGIN_ID {
+            load_cached_directory_entries(&connection, &request.repo_id, &current_path)?
+        } else {
+            backend_adapter(&state.root, &repo).list_directory_entries(
+                &repo_root,
+                &current_path,
+                &repo.backend_record.config,
+            )?
+        };
         let entry_paths = listed_entries
             .iter()
             .map(|entry| entry.path.clone())
@@ -110,6 +254,8 @@ pub(super) fn load_file_browser(
         root_path: repo.summary.path,
         backend_plugin_id: repo.backend_record.plugin_id.clone(),
         backend_kind: repo.summary.backend.kind,
+        cache_state: cache_snapshot.cache_state,
+        indexed_at: cache_snapshot.indexed_at,
         current_path,
         total_entries,
         loaded_count,
@@ -129,13 +275,40 @@ pub(super) fn load_repository_tree(
 
     let repo = state.load_repository_record(repo_id)?;
     let repo_root = PathBuf::from(&repo.summary.path);
-    let tree = list_backend_tree(&state.root, &repo, &repo_root)?;
+    let connection = state.open_repository_connection(
+        &repo.summary.repo_id,
+        &repo.summary.path,
+        &repo.backend_record,
+    )?;
+    let cache_snapshot = if repo.backend_record.plugin_id == LOCAL_FILESYSTEM_PLUGIN_ID {
+        let snapshot = local_repository_cache_snapshot(
+            &connection,
+            repo_id,
+            state.repository_structure_refresh_in_progress(repo_id),
+        )?;
+        if matches!(snapshot.cache_state, RepositoryStructureCacheState::Warming) {
+            state.queue_repository_structure_refresh(repo_id.to_string(), "cache-miss");
+        }
+        snapshot
+    } else {
+        RepositoryStructureCacheSnapshot {
+            cache_state: RepositoryStructureCacheState::Ready,
+            indexed_at: None,
+        }
+    };
+    let tree = if repo.backend_record.plugin_id == LOCAL_FILESYSTEM_PLUGIN_ID {
+        build_tree_from_directory_records(load_directory_records(&connection, repo_id).map_err(db_error)?)
+    } else {
+        list_backend_tree(&state.root, &repo, &repo_root)?
+    };
 
     Ok(RepositoryTreeSnapshot {
         repo_id: repo.summary.repo_id.clone(),
         root_path: repo.summary.path.clone(),
         backend_plugin_id: repo.backend_record.plugin_id.clone(),
         backend_kind: repo.summary.backend.kind.clone(),
+        cache_state: cache_snapshot.cache_state,
+        indexed_at: cache_snapshot.indexed_at,
         tree,
     })
 }
@@ -150,6 +323,16 @@ pub(super) fn create_directory(
     let parent_path = normalize_directory_path(request.parent_path.as_deref().unwrap_or_default())?;
     let name = validate_new_entry_name(&request.name)?;
     create_backend_directory(&state.root, &repo, &repo_root, &parent_path, &name)?;
+    if repo.backend_record.plugin_id == LOCAL_FILESYSTEM_PLUGIN_ID {
+        let connection = state.open_repository_connection(
+            &repo.summary.repo_id,
+            &repo.summary.path,
+            &repo.backend_record,
+        )?;
+        let path = join_relative_path(&parent_path, &name);
+        upsert_directory_record(&connection, &request.repo_id, &path, &parent_path, &name)
+            .map_err(db_error)?;
+    }
     load_file_browser(
         state,
         FileBrowserRequest {
@@ -296,6 +479,11 @@ pub(super) fn move_entries(
         }
     }
     tx.commit().map_err(db_error)?;
+    if include_tree {
+        let _ = state.sync_repository(SyncRequest {
+            repo_id: request.repo_id.clone(),
+        })?;
+    }
 
     load_file_browser(
         state,
@@ -354,6 +542,9 @@ pub(super) fn rename_entry(
         rename_directory_asset_records(&tx, &request.repo_id, &source_path, &target_path)
             .map_err(db_error)?;
         tx.commit().map_err(db_error)?;
+        let _ = state.sync_repository(SyncRequest {
+            repo_id: request.repo_id.clone(),
+        })?;
     }
 
     load_file_browser(
@@ -431,6 +622,9 @@ pub(super) fn delete_entry(
             let tx = connection.transaction().map_err(db_error)?;
             mark_directory_assets_deleted(&tx, &request.repo_id, &entry_path).map_err(db_error)?;
             tx.commit().map_err(db_error)?;
+            let _ = state.sync_repository(SyncRequest {
+                repo_id: request.repo_id.clone(),
+            })?;
         }
     } else {
         if repo.backend_record.plugin_id != LOCAL_FILESYSTEM_PLUGIN_ID {

@@ -391,6 +391,22 @@ pub struct FileTreeNode {
     pub children: Vec<FileTreeNode>,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum RepositoryStructureCacheState {
+    Warming,
+    Ready,
+    Refreshing,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct RepositoryStructureUpdatedEvent {
+    pub repo_id: String,
+    pub reason: String,
+    pub indexed_at: Option<String>,
+}
+
 #[derive(Debug, Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct RepositoryTreeSnapshot {
@@ -398,6 +414,8 @@ pub struct RepositoryTreeSnapshot {
     pub root_path: String,
     pub backend_plugin_id: String,
     pub backend_kind: String,
+    pub cache_state: RepositoryStructureCacheState,
+    pub indexed_at: Option<String>,
     pub tree: Vec<FileTreeNode>,
 }
 
@@ -435,6 +453,8 @@ pub struct FileBrowserSnapshot {
     pub root_path: String,
     pub backend_plugin_id: String,
     pub backend_kind: String,
+    pub cache_state: RepositoryStructureCacheState,
+    pub indexed_at: Option<String>,
     pub current_path: String,
     #[serde(default)]
     pub total_entries: usize,
@@ -1046,6 +1066,20 @@ pub(super) struct TrashManifestEntry {
 pub(super) struct ThumbnailRecord {
     pub(super) path: String,
     pub(super) custom: bool,
+}
+
+#[derive(Debug, Clone)]
+pub(super) struct DirectoryRecord {
+    pub(super) path: String,
+    pub(super) parent_path: String,
+    pub(super) name: String,
+    pub(super) updated_at: String,
+}
+
+#[derive(Debug, Clone)]
+pub(super) struct RepositoryStructureCacheSnapshot {
+    pub(super) cache_state: RepositoryStructureCacheState,
+    pub(super) indexed_at: Option<String>,
 }
 
 #[derive(Debug, Clone)]

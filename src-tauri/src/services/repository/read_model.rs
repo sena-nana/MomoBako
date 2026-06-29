@@ -2,6 +2,186 @@
 
 use super::*;
 
+pub(super) fn load_directory_records(
+    connection: &Connection,
+    repo_id: &str,
+) -> Result<Vec<DirectoryRecord>, rusqlite::Error> {
+    let mut stmt = connection.prepare(
+        r#"
+        SELECT path, parent_path, name, updated_at
+        FROM directories
+        WHERE repo_id = ?1
+        ORDER BY CASE WHEN path = '' THEN 0 ELSE 1 END, parent_path, name COLLATE NOCASE
+        "#,
+    )?;
+    let rows = stmt.query_map([repo_id], |row| {
+        Ok(DirectoryRecord {
+            path: row.get(0)?,
+            parent_path: row.get(1)?,
+            name: row.get(2)?,
+            updated_at: row.get(3)?,
+        })
+    })?;
+    rows.collect::<Result<Vec<_>, _>>()
+}
+
+pub(super) fn load_directory_records_for_parent(
+    connection: &Connection,
+    repo_id: &str,
+    parent_path: &str,
+) -> Result<Vec<DirectoryRecord>, rusqlite::Error> {
+    let mut stmt = connection.prepare(
+        r#"
+        SELECT path, parent_path, name, updated_at
+        FROM directories
+        WHERE repo_id = ?1 AND parent_path = ?2 AND path != ''
+        ORDER BY name COLLATE NOCASE
+        "#,
+    )?;
+    let rows = stmt.query_map(params![repo_id, parent_path], |row| {
+        Ok(DirectoryRecord {
+            path: row.get(0)?,
+            parent_path: row.get(1)?,
+            name: row.get(2)?,
+            updated_at: row.get(3)?,
+        })
+    })?;
+    rows.collect::<Result<Vec<_>, _>>()
+}
+
+pub(super) fn has_directory_cache(
+    connection: &Connection,
+    repo_id: &str,
+) -> Result<bool, rusqlite::Error> {
+    connection.query_row(
+        "SELECT EXISTS(SELECT 1 FROM directories WHERE repo_id = ?1 LIMIT 1)",
+        [repo_id],
+        |row| row.get::<_, i64>(0),
+    ).map(|value| value != 0)
+}
+
+pub(super) fn latest_directory_indexed_at(
+    connection: &Connection,
+    repo_id: &str,
+) -> Result<Option<String>, rusqlite::Error> {
+    connection
+        .query_row(
+            "SELECT MAX(updated_at) FROM directories WHERE repo_id = ?1",
+            [repo_id],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .optional()
+        .map(|value| value.flatten())
+}
+
+pub(super) fn replace_directory_records(
+    tx: &Transaction<'_>,
+    repo_id: &str,
+    directories: &[DirectoryRecord],
+) -> Result<(), rusqlite::Error> {
+    tx.execute("DELETE FROM directories WHERE repo_id = ?1", [repo_id])?;
+    let mut stmt = tx.prepare(
+        r#"
+        INSERT INTO directories (repo_id, path, parent_path, name, updated_at)
+        VALUES (?1, ?2, ?3, ?4, ?5)
+        "#,
+    )?;
+    for directory in directories {
+        stmt.execute(params![
+            repo_id,
+            directory.path,
+            directory.parent_path,
+            directory.name,
+            directory.updated_at
+        ])?;
+    }
+    Ok(())
+}
+
+pub(super) fn upsert_directory_record(
+    connection: &Connection,
+    repo_id: &str,
+    path: &str,
+    parent_path: &str,
+    name: &str,
+) -> Result<(), rusqlite::Error> {
+    connection.execute(
+        r#"
+        INSERT INTO directories (repo_id, path, parent_path, name, updated_at)
+        VALUES (?1, ?2, ?3, ?4, ?5)
+        ON CONFLICT(repo_id, path)
+        DO UPDATE SET
+          parent_path = excluded.parent_path,
+          name = excluded.name,
+          updated_at = excluded.updated_at
+        "#,
+        params![repo_id, path, parent_path, name, now_rfc3339()],
+    )?;
+    Ok(())
+}
+
+#[allow(dead_code)]
+pub(super) fn delete_directory_record(
+    connection: &Connection,
+    repo_id: &str,
+    path: &str,
+) -> Result<(), rusqlite::Error> {
+    connection.execute(
+        "DELETE FROM directories WHERE repo_id = ?1 AND path = ?2",
+        params![repo_id, path],
+    )?;
+    Ok(())
+}
+
+#[allow(dead_code)]
+pub(super) fn rename_directory_records(
+    tx: &Transaction<'_>,
+    repo_id: &str,
+    source_path: &str,
+    target_path: &str,
+) -> Result<(), rusqlite::Error> {
+    let prefix = format!("{source_path}/%");
+    let mut stmt = tx.prepare(
+        r#"
+        SELECT path, parent_path, name
+        FROM directories
+        WHERE repo_id = ?1 AND (path = ?2 OR path LIKE ?3)
+        ORDER BY LENGTH(path) ASC
+        "#,
+    )?;
+    let rows = stmt.query_map(params![repo_id, source_path, prefix], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+        ))
+    })?;
+    let rows = rows.collect::<Result<Vec<_>, _>>()?;
+    let now = now_rfc3339();
+    for (old_path, _old_parent_path, _old_name) in rows {
+        let suffix = old_path.strip_prefix(source_path).unwrap_or("");
+        let new_path = format!("{target_path}{suffix}");
+        let new_parent_path = parent_relative_path(&new_path);
+        let new_name = if new_path.is_empty() {
+            String::new()
+        } else {
+            Path::new(&new_path)
+                .file_name()
+                .map(|value| value.to_string_lossy().to_string())
+                .unwrap_or_default()
+        };
+        tx.execute(
+            r#"
+            UPDATE directories
+            SET path = ?3, parent_path = ?4, name = ?5, updated_at = ?6
+            WHERE repo_id = ?1 AND path = ?2
+            "#,
+            params![repo_id, old_path, new_path, new_parent_path, new_name, now],
+        )?;
+    }
+    Ok(())
+}
+
 pub(super) fn dominant_folder_label(folders: &[FolderSummary], assets: &[AssetSummary]) -> String {
     if let Some(folder) = folders.first() {
         return folder.label.clone();

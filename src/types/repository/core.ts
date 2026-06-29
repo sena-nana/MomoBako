@@ -151,11 +151,21 @@ export type FileTreeNode = {
   children: FileTreeNode[];
 };
 
+export type RepositoryStructureCacheState = "warming" | "ready" | "refreshing";
+
+export type RepositoryStructureUpdatedEvent = {
+  repoId: string;
+  reason: "watcher" | "cache-miss" | "manual";
+  indexedAt: string | null;
+};
+
 export type RepositoryTreeSnapshot = {
   repoId: string;
   rootPath: string;
   backendPluginId: string;
   backendKind: string;
+  cacheState: RepositoryStructureCacheState;
+  indexedAt: string | null;
   tree: FileTreeNode[];
 };
 
@@ -191,6 +201,8 @@ export type FileBrowserSnapshot = {
   rootPath: string;
   backendPluginId: string;
   backendKind: string;
+  cacheState: RepositoryStructureCacheState;
+  indexedAt: string | null;
   currentPath: string;
   totalEntries: number;
   loadedCount: number;

@@ -31,6 +31,7 @@ pub fn builder() -> Builder<tauri::Wry> {
         .manage(window_state::MainWindowStateCache::default())
         .setup(|app| {
             let runtime = RepositoryRuntime::start()?;
+            runtime.set_app_handle(app.handle().clone())?;
             let file_browser = FileBrowserViewModel::new(runtime.clone());
             let plugin_vm = PluginViewModel::new(runtime.clone());
             let repository_interaction = RepositoryInteractionViewModel::new(runtime.clone());

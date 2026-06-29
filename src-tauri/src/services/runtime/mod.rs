@@ -17,7 +17,7 @@ pub(crate) use external_api::{
     write_external_connection_file,
 };
 pub(crate) use preview_server::start_preview_server;
-pub(crate) use watcher::{sync_watched_paths, RepositoryWatcher};
+pub(crate) use watcher::{start_structure_refresh_worker, sync_watched_paths, RepositoryWatcher};
 
 const PREVIEW_HOST: &str = "127.0.0.1";
 
@@ -40,6 +40,9 @@ impl RepositoryRuntime {
         let repository_state = Arc::new(RepositoryState::from_root(root.clone()));
         let write_lock = Arc::new(Mutex::new(()));
         repository_state.ensure_initialized()?;
+        let structure_refresh_tx =
+            start_structure_refresh_worker(repository_state.clone(), write_lock.clone())?;
+        repository_state.set_structure_refresh_sender(structure_refresh_tx)?;
 
         let watcher_handle = RepositoryWatcher::start(repository_state.clone(), write_lock.clone())?;
         let preview_addr = start_preview_server(repository_state.clone())?;
@@ -79,5 +82,9 @@ impl RepositoryRuntime {
             ready: self.repository_state.ensure_initialized().is_ok(),
             ..self.external_connection.clone()
         }
+    }
+
+    pub fn set_app_handle(&self, app: tauri::AppHandle) -> Result<(), String> {
+        self.repository_state.set_app_handle(app)
     }
 }
