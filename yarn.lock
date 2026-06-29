@@ -789,6 +789,27 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@lilia/ui@github:sena-nana/LiliaUI#workspace=@lilia/ui&head=main":
+  version: 0.1.0
+  resolution: "@lilia/ui@https://github.com/sena-nana/LiliaUI.git#workspace=%40lilia%2Fui&commit=e31132038336e5c605d4fecbad8638d5932e7013"
+  peerDependencies:
+    "@lucide/vue": ^1.17.0
+    "@tauri-apps/api": ^2.11.0
+    vue: ^3.5.35
+    vue-router: ^5.1.0
+  checksum: 10c0/1f28912a04e31e818b2c446c251ca73be0ff1d83d71866a325d279e03fffe136906dd77e2e547f7035a604fe9afe24252e3ff455dfe5155a864540bfc4841091
+  languageName: node
+  linkType: hard
+
+"@lucide/vue@npm:^1.17.0":
+  version: 1.22.0
+  resolution: "@lucide/vue@npm:1.22.0"
+  peerDependencies:
+    vue: ">=3.0.1"
+  checksum: 10c0/95218fccd00b2936442a02539114aad1dc129a657d16928deaaaac5991b4c7e7f006dce036f2323bb96bd09c5f268629932cf312ebfdf39cd66ab1be2ee7a776
+  languageName: node
+  linkType: hard
+
 "@napi-rs/wasm-runtime@npm:^1.1.4":
   version: 1.1.4
   resolution: "@napi-rs/wasm-runtime@npm:1.1.4"
@@ -3724,15 +3745,6 @@ __metadata:
   languageName: node
   linkType: hard
 
-"lucide-vue-next@npm:^1.0.0":
-  version: 1.0.0
-  resolution: "lucide-vue-next@npm:1.0.0"
-  peerDependencies:
-    vue: ">=3.0.1"
-  checksum: 10c0/28f6a7d83e5d06db34006214f1ee3fe2c67ba0ca58f6e8af0d9032c495bb419f5c632b2db66e10ba90a6376e9f8aa913bc2e56be7c3aa06089d6ad2a472d93aa
-  languageName: node
-  linkType: hard
-
 "lz-string@npm:^1.5.0":
   version: 1.5.0
   resolution: "lz-string@npm:1.5.0"
@@ -3909,6 +3921,8 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "momobako@workspace:."
   dependencies:
+    "@lilia/ui": "github:sena-nana/LiliaUI#workspace=@lilia/ui&head=main"
+    "@lucide/vue": "npm:^1.17.0"
     "@pixiv/three-vrm": "npm:^3.4.5"
     "@tauri-apps/api": "npm:^2"
     "@tauri-apps/cli": "npm:^2"
@@ -3922,7 +3936,6 @@ __metadata:
     "@vitejs/plugin-vue": "npm:^6.0.7"
     "@vue/compiler-sfc": "npm:^3.5.35"
     jsdom: "npm:^29.1.1"
-    lucide-vue-next: "npm:^1.0.0"
     three: "npm:^0.184.0"
     typescript: "npm:~6.0.3"
     vite: "npm:^8.0.16"

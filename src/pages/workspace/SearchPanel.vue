@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { FileImage, LoaderCircle } from "lucide-vue-next";
+import { FileImage, LoaderCircle } from "@lucide/vue";
 import type { SearchHit } from "../../types/repository";
 
 defineProps<{

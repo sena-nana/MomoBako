@@ -1,5 +1,6 @@
 import { defineAsyncComponent } from "vue";
 import type { WorkspacePanelKey } from "../../composables/useRepositoryWorkspace";
+import WorkspacePlaylistPage from "./playlists/WorkspacePlaylistPage.vue";
 
 type IdlePreloadWindow = Window & {
   requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number;
@@ -37,7 +38,7 @@ export const RepositoryActionsPanel = defineAsyncComponent(workspaceComponentLoa
 export const SearchPanel = defineAsyncComponent(workspaceComponentLoaders.SearchPanel);
 export const WorkspaceFilterBar = defineAsyncComponent(workspaceComponentLoaders.WorkspaceFilterBar);
 export const WorkspaceFilesSurface = defineAsyncComponent(workspaceComponentLoaders.WorkspaceFilesSurface);
-export const WorkspacePlaylistPage = defineAsyncComponent(workspaceComponentLoaders.WorkspacePlaylistPage);
+export { WorkspacePlaylistPage };
 
 function currentPanelLoaders(activePanel: WorkspacePanelKey) {
   return activePanel === "search"
@@ -90,6 +91,10 @@ export function queueWorkspaceComponentPreload(
   existingHandle: WorkspacePreloadHandle | null,
 ) {
   if (existingHandle) return existingHandle;
+  preloadWorkspaceComponents([
+    ...currentPanelLoaders(activePanel),
+    workspaceComponentLoaders.WorkspacePlaylistPage,
+  ]);
 
   return {
     primary: schedulePreload(() => preloadWorkspaceComponents(currentPanelLoaders(activePanel)), 800, 120),

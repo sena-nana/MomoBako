@@ -2,13 +2,12 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { createMemoryHistory } from "vue-router";
 import { describe, expect, it, vi } from "vitest";
 import App from "../src/App.vue";
-import { installContextMenu } from "../src/composables/useContextMenu";
 import { resetRepositoryWorkspaceForTests, useRepositoryWorkspace } from "../src/composables/useRepositoryWorkspace";
 import { usePlaylistPlayer } from "../src/composables/usePlaylistPlayer";
 import { waitForFileBrowserDerivedState } from "../src/composables/workspace/files";
-import { vContextMenu } from "../src/directives/contextMenu";
 import { syncRegisteredFrontendPluginManifests } from "../src/plugins/sdk";
 import { createMomoBakoRouter } from "../src/router";
+import { installContextMenu, vContextMenu } from "../src/ui/core";
 import {
   createDirectoryOnNextSync,
   delayNextInvoke,
@@ -717,7 +716,9 @@ describe("文件管理冒烟", () => {
     });
     expect(document.querySelector(".files-browser")).toBeInTheDocument();
     expect(document.querySelector(".workspace-player")).toBeInTheDocument();
-    expect(screen.getByText("asset-01.mp3")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getAllByText("asset-01.mp3").length).toBeGreaterThan(0);
+    });
     expect(screen.getByText(/音频顺序播放/)).toBeInTheDocument();
   });
 
@@ -1401,7 +1402,9 @@ describe("文件管理冒烟", () => {
     expect(document.querySelector(".files-browser")).toBeInTheDocument();
     expect(document.querySelector(".playlist-page")).not.toBeInTheDocument();
     expect(document.querySelector(".workspace-player")).toBeInTheDocument();
-    expect(screen.getByText("asset-01.mp3")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getAllByText("asset-01.mp3").length).toBeGreaterThan(0);
+    });
   });
 
   it("播放集侧栏默认折叠，展开后显示列表", async () => {

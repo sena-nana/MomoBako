@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, reactive, ref, watch } from "vue";
-import { ChevronDown, ChevronRight, Copy, ExternalLink, Link2, MessageSquareText, Plus, Star } from "lucide-vue-next";
+import { ChevronDown, ChevronRight, Copy, ExternalLink, Link2, MessageSquareText, Plus, Star } from "@lucide/vue";
 import { openExternalUrl } from "../../../services/repositoryApi";
 import type { RegisteredLibraryExtension } from "../../../plugins/sdk";
 import type { FileBrowserEntry, RepositoryTagGroup } from "../../../types/repository";

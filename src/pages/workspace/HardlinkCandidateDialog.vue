@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Copy } from "lucide-vue-next";
+import { Copy } from "@lucide/vue";
 import type { HardlinkCandidate } from "../../types/repository";
 
 defineProps<{

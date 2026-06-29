@@ -9,7 +9,7 @@ import {
   SkipBack,
   SkipForward,
   Volume2,
-} from "lucide-vue-next";
+} from "@lucide/vue";
 import type { PlaylistItem, PlaylistPlaybackMode } from "../types/repository";
 import type { PlaylistPlayerObjectFit } from "../plugins/sdk";
 
@@ -105,7 +105,7 @@ function setImageDurationFromInput(event: Event) {
           <span v-else>{{ item?.extension?.toUpperCase() ?? "—" }}</span>
         </span>
         <span class="workspace-player__meta">
-          <strong>{{ item?.filename ?? "未选择播放内容" }}</strong>
+          <strong>{{ item?.filename ? `正在播放 ${item.filename}` : "未选择播放内容" }}</strong>
           <small v-if="errorMessage">{{ errorMessage }}</small>
           <small v-else>{{ playerLabel ? `${playerLabel} · ${item?.path ?? ""}` : (item?.path ?? "选择播放集后可开始播放") }}</small>
         </span>

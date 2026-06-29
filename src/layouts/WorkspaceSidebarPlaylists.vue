@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Play, Plus, Trash2 } from "lucide-vue-next";
+import { Play, Plus, Trash2 } from "@lucide/vue";
 import type { PlaylistSummary } from "../types/repository";
 
 defineProps<{
@@ -48,7 +48,19 @@ const emit = defineEmits<{
         </button>
       </div>
     </div>
-    <div v-if="!playlistsExpanded" class="workspace-playlists workspace-playlists--collapsed"></div>
+    <div v-if="!playlistsExpanded" class="workspace-playlists workspace-playlists--collapsed">
+      <button
+        v-for="playlist in playlistItems"
+        :key="playlist.playlistId"
+        type="button"
+        class="workspace-playlists__collapsed-item"
+        :aria-label="playlist.name"
+        :title="playlist.name"
+        @click="emit('open', playlist.playlistId)"
+      >
+        <Play :size="13" aria-hidden="true" />
+      </button>
+    </div>
     <div v-else-if="!activeRepoId" class="workspace-empty workspace-empty--compact">
       <p class="workspace-empty__text">先选择或添加一个资源库。</p>
     </div>

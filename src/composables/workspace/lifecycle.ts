@@ -80,12 +80,17 @@ import {
 } from "./tasks";
 import { invalidateThumbnailQueue } from "./thumbnails";
 import { scheduleIdleTask } from "./scheduler";
-import { syncPlaylistMemberships } from "./playlists";
+import {
+  clearPlaylistDetailCache,
+  primePlaylistDetailCache,
+  syncPlaylistMemberships,
+} from "./playlists";
 
 let startupPromise: Promise<void> | null = null;
 let repositoryBackgroundToken = 0;
 let cancelRepositoryBackgroundTask: (() => void) | null = null;
 let unlistenStructureUpdated: UnlistenFn | null = null;
+let structureUpdatedListenerPromise: Promise<void> | null = null;
 
 async function handleRepositoryStructureUpdated(event: RepositoryStructureUpdatedEvent) {
   if (!activeRepoId.value || event.repoId !== activeRepoId.value) return;
@@ -96,6 +101,22 @@ async function handleRepositoryStructureUpdated(event: RepositoryStructureUpdate
   });
 }
 
+function ensureStructureUpdatedListener() {
+  if (unlistenStructureUpdated || structureUpdatedListenerPromise) return;
+  structureUpdatedListenerPromise = listen<RepositoryStructureUpdatedEvent>(
+    "repository://structure-updated",
+    ({ payload }) => {
+      void handleRepositoryStructureUpdated(payload);
+    },
+  )
+    .then((unlisten) => {
+      unlistenStructureUpdated = unlisten;
+    })
+    .finally(() => {
+      structureUpdatedListenerPromise = null;
+    });
+}
+
 export function resetWorkspaceSelection() {
   activeRepoId.value = null;
   resetActiveRepositoryContent();
@@ -104,6 +125,7 @@ export function resetWorkspaceSelection() {
 export function resetActiveRepositoryContent() {
   invalidateRepositoryBackgroundLoads();
   invalidateThumbnailQueue();
+  clearPlaylistDetailCache(activeRepoId.value);
   activeSnapshot.value = null;
   activeAssetId.value = null;
   activeAssetDetail.value = null;
@@ -152,7 +174,8 @@ async function applyRepositorySnapshotState(
   const snapshot = await getRepositorySnapshot(repoId);
   activeRepoId.value = repoId;
   activeSnapshot.value = snapshot;
-  playlists.value = snapshot.playlists ?? [];
+  const snapshotPlaylists = snapshot.playlists ?? [];
+  playlists.value = snapshotPlaylists.length ? snapshotPlaylists : await listPlaylists(repoId);
 
   const defaultAssetId = activeAssetId.value && snapshot.assets.some((item) => item.assetId === activeAssetId.value)
     ? activeAssetId.value
@@ -210,11 +233,12 @@ async function loadInitialRepository(
   }
 
   setStartupProgress(2, "读取仓库摘要");
-  const { snapshot } = await applyRepositorySnapshotState(nextRepoId, selectAsset);
+  await applyRepositorySnapshotState(nextRepoId, selectAsset);
 
   setStartupProgress(3, "读取首屏目录");
-  const playlistItems = snapshot.playlists ?? await listPlaylists(nextRepoId);
+  const playlistItems = playlists.value;
   playlists.value = playlistItems;
+  await primePlaylistDetailCache(nextRepoId, playlistItems);
   await syncPlaylistMemberships(nextRepoId, playlistItems);
   queueRepositoryBackgroundLoads(nextRepoId);
 }
@@ -357,14 +381,7 @@ export function ensureRepositoryWorkspace(
     workspaceStartup.value = { ...createInitialWorkspaceStartup(), status: "loading" };
     error.value = null;
     setStartupLoadingFlags(true);
-    if (!unlistenStructureUpdated) {
-      unlistenStructureUpdated = await listen<RepositoryStructureUpdatedEvent>(
-        "repository://structure-updated",
-        ({ payload }) => {
-          void handleRepositoryStructureUpdated(payload);
-        },
-      );
-    }
+    ensureStructureUpdatedListener();
 
     try {
       setStartupProgress(1, "加载仓库列表");
@@ -372,6 +389,7 @@ export function ensureRepositoryWorkspace(
       repositories.value = items;
 
       await loadInitialRepository(items, selectAsset);
+      await loadSettingsData();
 
       workspaceStartup.value = {
         status: "ready",
@@ -381,7 +399,6 @@ export function ensureRepositoryWorkspace(
         percent: 100,
         error: null,
       };
-      void loadSettingsData();
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : String(cause);
       error.value = message;
@@ -401,6 +418,7 @@ export function ensureRepositoryWorkspace(
 }
 
 export function resetRepositoryWorkspaceForTests() {
+  clearPlaylistDetailCache();
   repositories.value = [];
   resetWorkspaceSelection();
   activePanel.value = "files";
@@ -428,5 +446,6 @@ export function resetRepositoryWorkspaceForTests() {
   setSyncProgress("idle", "", 0);
   unlistenStructureUpdated?.();
   unlistenStructureUpdated = null;
+  structureUpdatedListenerPromise = null;
   startupPromise = null;
 }

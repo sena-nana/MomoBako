@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { LoaderCircle, Play, ShieldAlert } from "lucide-vue-next";
+import { LoaderCircle, Play, ShieldAlert } from "@lucide/vue";
 import type { RepositoryAction } from "../../../types/repository";
 
 const props = defineProps<{

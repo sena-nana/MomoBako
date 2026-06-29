@@ -6,7 +6,7 @@ import {
   FolderPlus,
   PencilLine,
   Trash2,
-} from "lucide-vue-next";
+} from "@lucide/vue";
 import type { SmartFolderTreeNode } from "../types/repository";
 
 defineOptions({

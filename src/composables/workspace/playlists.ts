@@ -25,6 +25,47 @@ import {
   playlists,
 } from "./state";
 
+const playlistDetailCache = new Map<string, PlaylistDetail>();
+
+function playlistDetailCacheKey(repoId: string, playlistId: string) {
+  return `${repoId}:${playlistId}`;
+}
+
+export function getCachedPlaylistDetail(repoId: string, playlistId: string) {
+  return playlistDetailCache.get(playlistDetailCacheKey(repoId, playlistId)) ?? null;
+}
+
+export function cachePlaylistDetail(detail: PlaylistDetail) {
+  playlistDetailCache.set(
+    playlistDetailCacheKey(detail.playlist.repoId, detail.playlist.playlistId),
+    detail,
+  );
+  return detail;
+}
+
+export function clearPlaylistDetailCache(repoId?: string | null) {
+  if (!repoId) {
+    playlistDetailCache.clear();
+    return;
+  }
+
+  for (const key of playlistDetailCache.keys()) {
+    if (key.startsWith(`${repoId}:`)) {
+      playlistDetailCache.delete(key);
+    }
+  }
+}
+
+export async function primePlaylistDetailCache(repoId: string, playlistItems: PlaylistSummary[]) {
+  if (!repoId || !playlistItems.length) return [];
+
+  const details = await Promise.all(
+    playlistItems.map((playlist) => getPlaylistDetail(repoId, playlist.playlistId)),
+  );
+  details.forEach(cachePlaylistDetail);
+  return details;
+}
+
 export function rebuildPlaylistMemberships(details: PlaylistDetail[]) {
   const nextMemberships: Record<string, string[]> = {};
 
@@ -82,6 +123,9 @@ export async function refreshPlaylists(repoId = activeRepoId.value) {
     return items;
   }
   playlists.value = items;
+  if (!items.length) {
+    clearPlaylistDetailCache(repoId);
+  }
   await syncPlaylistMemberships(repoId, items);
   if (activePlaylistId.value && !items.some((item) => item.playlistId === activePlaylistId.value)) {
     activePlaylistId.value = null;
@@ -97,7 +141,13 @@ export async function selectPlaylist(playlistId: string) {
   if (!activeRepoId.value) return null;
   activePanel.value = "playlist";
   activePlaylistId.value = playlistId;
-  activePlaylistDetail.value = await getPlaylistDetail(activeRepoId.value, playlistId);
+  const cachedDetail = getCachedPlaylistDetail(activeRepoId.value, playlistId);
+  if (cachedDetail) {
+    activePlaylistDetail.value = cachedDetail;
+  }
+  activePlaylistDetail.value = cachePlaylistDetail(
+    await getPlaylistDetail(activeRepoId.value, playlistId),
+  );
   return activePlaylistDetail.value;
 }
 
@@ -132,7 +182,7 @@ export async function addPlaylistItemsInWorkspace(playlistId: string, assetIds: 
     playlistId,
     assetIds,
   });
-  activePlaylistDetail.value = detail;
+  activePlaylistDetail.value = cachePlaylistDetail(detail);
   await refreshPlaylists(activeRepoId.value);
   return detail;
 }
@@ -144,7 +194,7 @@ export async function addPlaylistItemsByPathsInWorkspace(playlistId: string, pat
     playlistId,
     paths,
   });
-  activePlaylistDetail.value = detail;
+  activePlaylistDetail.value = cachePlaylistDetail(detail);
   await refreshPlaylists(activeRepoId.value);
   return detail;
 }
@@ -156,7 +206,7 @@ export async function reorderPlaylistItemsInWorkspace(playlistId: string, itemId
     playlistId,
     itemIds,
   });
-  activePlaylistDetail.value = detail;
+  activePlaylistDetail.value = cachePlaylistDetail(detail);
   await refreshPlaylists(activeRepoId.value);
   return detail;
 }
@@ -168,7 +218,7 @@ export async function removePlaylistItemInWorkspace(playlistId: string, playlist
     playlistId,
     playlistItemId,
   });
-  activePlaylistDetail.value = detail;
+  activePlaylistDetail.value = cachePlaylistDetail(detail);
   await refreshPlaylists(activeRepoId.value);
   return detail;
 }

@@ -1,5 +1,5 @@
 import type { ComputedRef } from "vue";
-import type { ContextMenuItem } from "../../../composables/useContextMenu";
+import type { ContextMenuItem } from "../../../ui/core";
 import { getPlaylistPlayerByType } from "../../../plugins/playlistPlayers";
 import type { FileBrowserEntry, PlaylistSummary } from "../../../types/repository";
 

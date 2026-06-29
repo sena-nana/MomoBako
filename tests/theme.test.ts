@@ -3,7 +3,7 @@ import { nextTick } from "vue";
 
 async function loadTheme() {
   vi.resetModules();
-  return import("../src/composables/useTheme");
+  return import("../src/ui/core");
 }
 
 afterEach(() => {

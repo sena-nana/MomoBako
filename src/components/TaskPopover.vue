@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from "vue";
-import { ClipboardList, X } from "lucide-vue-next";
+import { ClipboardList, X } from "@lucide/vue";
 import ProgressBar from "./ProgressBar.vue";
 import { useWorkspaceProgress } from "../composables/useRepositoryWorkspace";
 import { useTaskCenter, type TaskProgress } from "../composables/useTaskCenter";

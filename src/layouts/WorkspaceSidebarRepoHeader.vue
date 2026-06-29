@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ChevronsUpDown } from "lucide-vue-next";
+import { ChevronsUpDown } from "@lucide/vue";
 import type { RepositorySummary } from "../types/repository";
 
 defineProps<{

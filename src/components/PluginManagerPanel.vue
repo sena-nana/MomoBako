@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { computed, inject, ref, watch } from "vue";
 import { open } from "@tauri-apps/plugin-dialog";
-import { FolderOpen, Power, RefreshCw, Settings, Trash2, Upload } from "lucide-vue-next";
+import { FolderOpen, Power, RefreshCw, Settings, Trash2, Upload } from "@lucide/vue";
 import { routeLocationKey, type RouteLocationNormalizedLoaded } from "vue-router";
-import ConfirmDialog from "./ConfirmDialog.vue";
+import { ConfirmDialog } from "../ui/core";
 import {
   useWorkspaceProgress,
   useWorkspaceSettings,

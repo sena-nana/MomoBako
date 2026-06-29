@@ -23,12 +23,13 @@
     "verify": "yarn test && yarn build && cargo check --manifest-path src-tauri/Cargo.toml"
   },
   "dependencies": {
+    "@lilia/ui": "github:sena-nana/LiliaUI#workspace=@lilia/ui&head=main",
+    "@lucide/vue": "^1.17.0",
     "@pixiv/three-vrm": "^3.4.5",
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-dialog": "^2",
     "@tauri-apps/plugin-opener": "^2",
     "@tauri-apps/plugin-store": "^2",
-    "lucide-vue-next": "^1.0.0",
     "three": "^0.184.0",
     "vue": "^3.5.35",
     "vue-demi": "^0.14.10",

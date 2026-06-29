@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ClipboardList } from "lucide-vue-next";
+import { ClipboardList } from "@lucide/vue";
 import type { Component } from "vue";
 import type { RepositoryShortcut } from "../types/repository";
 import type { ShortcutItem, ShortcutKey } from "./useSidebarShortcutsUi";

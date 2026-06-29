@@ -11,8 +11,8 @@ import {
   RefreshCw,
   RotateCcw,
   Trash2,
-} from "lucide-vue-next";
-import type { ContextMenuItem } from "../../composables/useContextMenu";
+} from "@lucide/vue";
+import type { ContextMenuItem } from "../../ui/core";
 import type { FileBrowserEntry, RepositorySummary } from "../../types/repository";
 import type { EntryActionDialogRequest, EntryActionDialogResultMap } from "../../plugins/sdk";
 import { getPluginEntryActions, getPreviewPluginFileActions } from "../../plugins/previewPlugins";
