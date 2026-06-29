@@ -2,6 +2,8 @@
 
 use super::*;
 
+const NETEASE_DIRECTORY_CACHE_TTL_SECS: i64 = 24 * 60 * 60;
+
 fn local_repository_cache_snapshot(
     connection: &Connection,
     repo_id: &str,
@@ -120,6 +122,182 @@ fn load_cached_directory_entries(
     Ok(entries)
 }
 
+fn paginate_listed_entries(
+    entries: Vec<FileSystemEntry>,
+    offset: usize,
+    limit: Option<usize>,
+) -> (Vec<FileSystemEntry>, usize, usize, Option<usize>, bool) {
+    let total_entries = entries.len();
+    let start = offset.min(total_entries);
+    let limit = limit.unwrap_or(total_entries.saturating_sub(start));
+    let paged_entries = entries.into_iter().skip(start).take(limit).collect::<Vec<_>>();
+    let loaded_count = start.saturating_add(paged_entries.len()).min(total_entries);
+    let has_more = loaded_count < total_entries;
+    let next_offset = has_more.then_some(loaded_count);
+    (paged_entries, total_entries, loaded_count, next_offset, has_more)
+}
+
+fn netease_cache_fresh(record: &NeteaseDirectoryCacheRecord) -> bool {
+    let Ok(refreshed_at) = OffsetDateTime::parse(&record.refreshed_at, &Rfc3339) else {
+        return false;
+    };
+    let age = OffsetDateTime::now_utc() - refreshed_at;
+    age.whole_seconds() <= NETEASE_DIRECTORY_CACHE_TTL_SECS
+}
+
+fn mirror_netease_entries_to_assets(
+    tx: &Transaction<'_>,
+    repo_id: &str,
+    entries: &[FileSystemEntry],
+    synced_at: &str,
+) -> Result<(), rusqlite::Error> {
+    for entry in entries {
+        if !matches!(entry.kind, FileSystemEntryKind::File) {
+            continue;
+        }
+        if entry.provider_id.as_deref() != Some(NETEASE_CLOUD_MUSIC_PROVIDER_ID) {
+            continue;
+        }
+        let asset_id = asset_id_for_path(repo_id, &entry.path);
+        let extension = entry
+            .extension
+            .clone()
+            .unwrap_or_else(|| "mp3".to_string());
+        let modified_at = entry
+            .modified_at
+            .clone()
+            .unwrap_or_else(|| synced_at.to_string());
+        tx.execute(
+            r#"
+            INSERT INTO assets (
+              asset_id, repo_id, path, filename, extension, size_bytes,
+              created_at, modified_at, hash, status, version, updated_at, thumbnail_path,
+              is_virtual, provider_id, provider_item_id, source_payload_json, local_absolute_path
+            )
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, NULL, 'synced', 1, ?9, NULL, ?10, ?11, ?12, ?13, ?14)
+            ON CONFLICT(repo_id, path)
+            DO UPDATE SET
+              filename = excluded.filename,
+              extension = excluded.extension,
+              size_bytes = excluded.size_bytes,
+              modified_at = excluded.modified_at,
+              status = 'synced',
+              updated_at = excluded.updated_at,
+              is_virtual = excluded.is_virtual,
+              provider_id = excluded.provider_id,
+              provider_item_id = excluded.provider_item_id,
+              source_payload_json = excluded.source_payload_json,
+              local_absolute_path = excluded.local_absolute_path
+            "#,
+            params![
+                asset_id,
+                repo_id,
+                entry.path,
+                entry.name,
+                extension,
+                entry.size_bytes.unwrap_or(0),
+                synced_at,
+                modified_at,
+                synced_at,
+                if entry.is_virtual { 1 } else { 0 },
+                entry.provider_id,
+                entry.provider_item_id,
+                entry.source_payload.as_ref().map(|value| value.to_string()),
+                entry.local_absolute_path
+            ],
+        )?;
+        ensure_default_metadata(
+            tx,
+            &asset_id,
+            &entry.path,
+            &entry.name,
+            &extension,
+            synced_at,
+            Some(&modified_at),
+            &[],
+            None,
+            false,
+        )?;
+        sync_netease_source_metadata(
+            tx,
+            &asset_id,
+            entry.provider_id.as_deref(),
+            entry.source_payload.as_ref(),
+        )
+        ?;
+    }
+    Ok(())
+}
+
+fn load_netease_directory_page(
+    state: &RepositoryState,
+    connection: &mut Connection,
+    repo: &RepositoryRecord,
+    repo_root: &Path,
+    directory_path: &str,
+    offset: usize,
+    limit: usize,
+) -> Result<DirectoryPageResult, String> {
+    let cache_record = load_netease_directory_cache(connection, &repo.summary.repo_id, directory_path)
+        .map_err(db_error)?;
+    let cache_entries = load_netease_directory_entries_page(
+        connection,
+        &repo.summary.repo_id,
+        directory_path,
+        offset,
+        limit,
+    )
+    .map_err(db_error)?;
+    let cache_fresh = cache_record
+        .as_ref()
+        .is_some_and(netease_cache_fresh);
+    let has_full_page = if let Some(record) = &cache_record {
+        if offset >= record.total_entries {
+            true
+        } else {
+            cache_entries.len() == limit.min(record.total_entries.saturating_sub(offset))
+        }
+    } else {
+        false
+    };
+    if cache_fresh && has_full_page {
+        return Ok(DirectoryPageResult {
+            entries: cache_entries.into_iter().map(|(_, entry)| entry).collect(),
+            total_entries: cache_record.map(|record| record.total_entries).unwrap_or(0),
+        });
+    }
+
+    if !cache_fresh {
+        clear_netease_directory_cache_for_directory(connection, &repo.summary.repo_id, directory_path)
+            .map_err(db_error)?;
+    }
+
+    let page = list_backend_directory_entries_page(
+        &state.root,
+        repo,
+        repo_root,
+        directory_path,
+        offset,
+        limit,
+    )?;
+    let refreshed_at = now_rfc3339();
+    let tx = connection.transaction().map_err(db_error)?;
+    replace_netease_directory_cache_page(
+        &tx,
+        &repo.summary.repo_id,
+        directory_path,
+        offset,
+        &page.entries,
+        page.total_entries,
+        &refreshed_at,
+    )
+    .map_err(db_error)?;
+    mirror_netease_entries_to_assets(&tx, &repo.summary.repo_id, &page.entries, &refreshed_at)
+        .map_err(db_error)?;
+    tx.commit().map_err(db_error)?;
+    Ok(page)
+}
+
 pub(super) fn load_file_browser(
     state: &RepositoryState,
     request: FileBrowserRequest,
@@ -128,7 +306,7 @@ pub(super) fn load_file_browser(
 
     let repo = state.load_repository_record(&request.repo_id)?;
     let repo_root = PathBuf::from(&repo.summary.path);
-    let connection = state.open_repository_connection(
+    let mut connection = state.open_repository_connection(
         &repo.summary.repo_id,
         &repo.summary.path,
         &repo.backend_record,
@@ -174,7 +352,8 @@ pub(super) fn load_file_browser(
     };
     let offset = request.offset.unwrap_or(0);
     let limit = request.limit.filter(|value| *value > 0);
-    let raw_entries = if special_location.as_deref() == Some("trash") {
+    let (raw_entries, total_entries, loaded_count, next_offset, has_more) =
+        if special_location.as_deref() == Some("trash") {
         let asset_map = normalize_asset_thumbnail_map(
             &connection,
             &repo,
@@ -187,17 +366,44 @@ pub(super) fn load_file_browser(
             &thumbnail_root,
             load_entry_thumbnail_map(&connection, &request.repo_id).map_err(db_error)?,
         )?;
-        list_trash_directory_entries(&repo_root, &current_path, &asset_map, &thumbnail_map)?
+        let entries = list_trash_directory_entries(&repo_root, &current_path, &asset_map, &thumbnail_map)?;
+        let (entries, total_entries, loaded_count, next_offset, has_more) =
+            paginate_file_browser_entries(entries, offset, limit);
+        (entries, total_entries, loaded_count, next_offset, has_more)
     } else {
-        let listed_entries = if repo.backend_record.plugin_id == LOCAL_FILESYSTEM_PLUGIN_ID {
-            load_cached_directory_entries(&connection, &request.repo_id, &current_path)?
-        } else {
-            backend_adapter(&state.root, &repo).list_directory_entries(
-                &repo_root,
-                &current_path,
-                &repo.backend_record.config,
-            )?
-        };
+        let (listed_entries, total_entries, loaded_count, next_offset, has_more) =
+            if repo.backend_record.plugin_id == LOCAL_FILESYSTEM_PLUGIN_ID {
+                let entries = load_cached_directory_entries(&connection, &request.repo_id, &current_path)?;
+                paginate_listed_entries(entries, offset, limit)
+            } else if repo.backend_record.plugin_id == NETEASE_CLOUD_MUSIC_PLUGIN_ID
+                && limit.is_some()
+            {
+                let page = load_netease_directory_page(
+                    state,
+                    &mut connection,
+                    &repo,
+                    &repo_root,
+                    &current_path,
+                    offset,
+                    limit.unwrap_or_default(),
+                )?;
+                let loaded_count = offset.saturating_add(page.entries.len()).min(page.total_entries);
+                let has_more = loaded_count < page.total_entries;
+                (
+                    page.entries,
+                    page.total_entries,
+                    loaded_count,
+                    has_more.then_some(loaded_count),
+                    has_more,
+                )
+            } else {
+                let entries = backend_adapter(&state.root, &repo).list_directory_entries(
+                    &repo_root,
+                    &current_path,
+                    &repo.backend_record.config,
+                )?;
+                paginate_listed_entries(entries, offset, limit)
+            };
         let entry_paths = listed_entries
             .iter()
             .map(|entry| entry.path.clone())
@@ -237,17 +443,21 @@ pub(super) fn load_file_browser(
             &directory_paths,
         )
         .map_err(db_error)?;
-        map_file_browser_entries(
-            listed_entries,
-            &asset_map,
-            &thumbnail_map,
-            &folder_metadata,
+        (
+            map_file_browser_entries(
+                listed_entries,
+                &asset_map,
+                &thumbnail_map,
+                &folder_metadata,
+            ),
+            total_entries,
+            loaded_count,
+            next_offset,
+            has_more,
         )
     };
-    let (entries, total_entries, loaded_count, next_offset, has_more) =
-        paginate_file_browser_entries(raw_entries, offset, limit);
     let entries =
-        attach_browser_entry_metadata(&connection, &request.repo_id, entries).map_err(db_error)?;
+        attach_browser_entry_metadata(&connection, &request.repo_id, raw_entries).map_err(db_error)?;
 
     Ok(FileBrowserSnapshot {
         repo_id: request.repo_id,

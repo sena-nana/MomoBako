@@ -31,6 +31,15 @@ pub(super) trait FileSystemBackendAdapter {
         config: &serde_json::Value,
     ) -> Result<Vec<FileSystemEntry>, String>;
 
+    fn list_directory_entries_page(
+        &self,
+        repo_root: &Path,
+        directory_path: &str,
+        offset: usize,
+        limit: usize,
+        config: &serde_json::Value,
+    ) -> Result<DirectoryPageResult, String>;
+
     fn create_directory(
         &self,
         repo_root: &Path,
@@ -173,6 +182,25 @@ pub(super) fn call_builtin_local_filesystem(
             let entries = backend.list_directory_entries(&repo_root, directory_path, &config)?;
             serde_json::to_value(entries).map_err(json_error)
         }
+        "filesystem.listDirectoryPage" => {
+            let directory_path = payload
+                .get("directoryPath")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default();
+            let offset = payload
+                .get("offset")
+                .and_then(serde_json::Value::as_u64)
+                .and_then(|value| usize::try_from(value).ok())
+                .unwrap_or(0);
+            let limit = payload
+                .get("limit")
+                .and_then(serde_json::Value::as_u64)
+                .and_then(|value| usize::try_from(value).ok())
+                .unwrap_or(usize::MAX);
+            let page =
+                backend.list_directory_entries_page(&repo_root, directory_path, offset, limit, &config)?;
+            serde_json::to_value(page).map_err(json_error)
+        }
         "filesystem.createDirectory" => {
             let parent_path = payload
                 .get("parentPath")
@@ -259,6 +287,23 @@ pub(super) fn list_backend_tree(
     repo_root: &Path,
 ) -> Result<Vec<FileTreeNode>, String> {
     backend_adapter(service_root, repo).list_tree(repo_root, &repo.backend_record.config)
+}
+
+pub(super) fn list_backend_directory_entries_page(
+    service_root: &Path,
+    repo: &RepositoryRecord,
+    repo_root: &Path,
+    directory_path: &str,
+    offset: usize,
+    limit: usize,
+) -> Result<DirectoryPageResult, String> {
+    backend_adapter(service_root, repo).list_directory_entries_page(
+        repo_root,
+        directory_path,
+        offset,
+        limit,
+        &repo.backend_record.config,
+    )
 }
 
 pub(super) fn paginate_file_browser_entries(
@@ -1003,6 +1048,42 @@ impl FileSystemBackendAdapter for RuntimeFileSystemBackendAdapter {
         serde_json::from_value(response).map_err(json_error)
     }
 
+    fn list_directory_entries_page(
+        &self,
+        repo_root: &Path,
+        directory_path: &str,
+        offset: usize,
+        limit: usize,
+        config: &serde_json::Value,
+    ) -> Result<DirectoryPageResult, String> {
+        let response = backend_plugin_registry(&self.service_root).call(
+            &self.plugin_id,
+            "filesystem.listDirectoryPage",
+            serde_json::json!({
+                "repoRoot": repo_root,
+                "directoryPath": directory_path,
+                "offset": offset,
+                "limit": limit,
+                "config": config,
+            }),
+        );
+        match response {
+            Ok(value) => serde_json::from_value(value).map_err(json_error),
+            Err(error)
+                if error.contains("unsupported method")
+                    || error.contains("unsupported filesystem plugin method") =>
+            {
+                let entries = self.list_directory_entries(repo_root, directory_path, config)?;
+                let total_entries = entries.len();
+                Ok(DirectoryPageResult {
+                    entries: entries.into_iter().skip(offset).take(limit).collect(),
+                    total_entries,
+                })
+            }
+            Err(error) => Err(error),
+        }
+    }
+
     fn create_directory(
         &self,
         repo_root: &Path,
@@ -1178,6 +1259,22 @@ impl FileSystemBackendAdapter for LocalFileSystemBackend {
             return Err(format!("directory not found: {directory_path}"));
         }
         local_directory_entries(repo_root, &current_dir)
+    }
+
+    fn list_directory_entries_page(
+        &self,
+        repo_root: &Path,
+        directory_path: &str,
+        offset: usize,
+        limit: usize,
+        config: &serde_json::Value,
+    ) -> Result<DirectoryPageResult, String> {
+        let entries = self.list_directory_entries(repo_root, directory_path, config)?;
+        let total_entries = entries.len();
+        Ok(DirectoryPageResult {
+            entries: entries.into_iter().skip(offset).take(limit).collect(),
+            total_entries,
+        })
     }
 
     fn create_directory(

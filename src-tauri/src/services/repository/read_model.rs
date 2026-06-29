@@ -120,6 +120,196 @@ pub(super) fn upsert_directory_record(
     Ok(())
 }
 
+pub(super) fn load_netease_directory_cache(
+    connection: &Connection,
+    repo_id: &str,
+    directory_path: &str,
+) -> Result<Option<NeteaseDirectoryCacheRecord>, rusqlite::Error> {
+    connection
+        .query_row(
+            r#"
+            SELECT total_entries, refreshed_at
+            FROM netease_directory_cache
+            WHERE repo_id = ?1 AND directory_path = ?2
+            "#,
+            params![repo_id, directory_path],
+            |row| {
+                Ok(NeteaseDirectoryCacheRecord {
+                    total_entries: row.get::<_, i64>(0)?.max(0) as usize,
+                    refreshed_at: row.get(1)?,
+                })
+            },
+        )
+        .optional()
+}
+
+pub(super) fn load_netease_directory_entries_page(
+    connection: &Connection,
+    repo_id: &str,
+    directory_path: &str,
+    offset: usize,
+    limit: usize,
+) -> Result<Vec<(usize, FileSystemEntry)>, rusqlite::Error> {
+    if limit == 0 {
+        return Ok(Vec::new());
+    }
+    let mut stmt = connection.prepare(
+        r#"
+        SELECT
+          order_index,
+          path,
+          name,
+          kind,
+          extension,
+          size_bytes,
+          modified_at,
+          is_virtual,
+          provider_id,
+          provider_item_id,
+          source_payload_json,
+          local_absolute_path
+        FROM netease_directory_entries
+        WHERE repo_id = ?1
+          AND directory_path = ?2
+          AND order_index >= ?3
+          AND order_index < ?4
+        ORDER BY order_index ASC
+        "#,
+    )?;
+    let rows = stmt.query_map(
+        params![
+            repo_id,
+            directory_path,
+            offset.min(i64::MAX as usize) as i64,
+            offset
+                .saturating_add(limit)
+                .min(i64::MAX as usize) as i64
+        ],
+        |row| {
+            let kind = match row.get::<_, String>(3)?.as_str() {
+                "directory" => FileSystemEntryKind::Directory,
+                _ => FileSystemEntryKind::File,
+            };
+            Ok((
+                row.get::<_, i64>(0)?.max(0) as usize,
+                FileSystemEntry {
+                    path: row.get(1)?,
+                    name: row.get(2)?,
+                    kind,
+                    extension: row.get(4)?,
+                    size_bytes: row.get(5)?,
+                    modified_at: row.get(6)?,
+                    is_virtual: row.get::<_, i64>(7)? != 0,
+                    provider_id: row.get(8)?,
+                    provider_item_id: row.get(9)?,
+                    source_payload: parse_json_column_nullable(row.get::<_, Option<String>>(10)?)?,
+                    local_absolute_path: row.get(11)?,
+                },
+            ))
+        },
+    )?;
+    rows.collect::<Result<Vec<_>, _>>()
+}
+
+pub(super) fn clear_netease_directory_cache(
+    connection: &Connection,
+    repo_id: &str,
+) -> Result<(), rusqlite::Error> {
+    connection.execute(
+        "DELETE FROM netease_directory_entries WHERE repo_id = ?1",
+        [repo_id],
+    )?;
+    connection.execute(
+        "DELETE FROM netease_directory_cache WHERE repo_id = ?1",
+        [repo_id],
+    )?;
+    Ok(())
+}
+
+pub(super) fn clear_netease_directory_cache_for_directory(
+    connection: &Connection,
+    repo_id: &str,
+    directory_path: &str,
+) -> Result<(), rusqlite::Error> {
+    connection.execute(
+        "DELETE FROM netease_directory_entries WHERE repo_id = ?1 AND directory_path = ?2",
+        params![repo_id, directory_path],
+    )?;
+    connection.execute(
+        "DELETE FROM netease_directory_cache WHERE repo_id = ?1 AND directory_path = ?2",
+        params![repo_id, directory_path],
+    )?;
+    Ok(())
+}
+
+pub(super) fn replace_netease_directory_cache_page(
+    connection: &Connection,
+    repo_id: &str,
+    directory_path: &str,
+    offset: usize,
+    entries: &[FileSystemEntry],
+    total_entries: usize,
+    refreshed_at: &str,
+) -> Result<(), rusqlite::Error> {
+    connection.execute(
+        r#"
+        INSERT INTO netease_directory_cache (repo_id, directory_path, total_entries, refreshed_at)
+        VALUES (?1, ?2, ?3, ?4)
+        ON CONFLICT(repo_id, directory_path)
+        DO UPDATE SET
+          total_entries = excluded.total_entries,
+          refreshed_at = excluded.refreshed_at
+        "#,
+        params![repo_id, directory_path, total_entries as i64, refreshed_at],
+    )?;
+    connection.execute(
+        r#"
+        DELETE FROM netease_directory_entries
+        WHERE repo_id = ?1
+          AND directory_path = ?2
+          AND order_index >= ?3
+          AND order_index < ?4
+        "#,
+        params![
+            repo_id,
+            directory_path,
+            offset as i64,
+            offset.saturating_add(entries.len()) as i64
+        ],
+    )?;
+    let mut stmt = connection.prepare(
+        r#"
+        INSERT INTO netease_directory_entries (
+          repo_id, directory_path, order_index, path, name, kind, extension, size_bytes,
+          modified_at, is_virtual, provider_id, provider_item_id, source_payload_json, local_absolute_path
+        )
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+        "#,
+    )?;
+    for (index, entry) in entries.iter().enumerate() {
+        stmt.execute(params![
+            repo_id,
+            directory_path,
+            offset.saturating_add(index) as i64,
+            entry.path,
+            entry.name,
+            match entry.kind {
+                FileSystemEntryKind::Directory => "directory",
+                FileSystemEntryKind::File => "file",
+            },
+            entry.extension,
+            entry.size_bytes,
+            entry.modified_at,
+            if entry.is_virtual { 1 } else { 0 },
+            entry.provider_id,
+            entry.provider_item_id,
+            entry.source_payload.as_ref().map(|value| value.to_string()),
+            entry.local_absolute_path
+        ])?;
+    }
+    Ok(())
+}
+
 #[allow(dead_code)]
 pub(super) fn delete_directory_record(
     connection: &Connection,

@@ -109,6 +109,9 @@
 - Local filesystem `get_file_browser` responses are cache-first and include `cacheState: "warming" | "ready" | "refreshing"` plus `indexedAt`. Cold-cache reads return immediately and schedule background sync rather than blocking on filesystem tree scans.
 - File browser requests may include optional `offset` and `limit` for incremental directory loading. Desktop首屏默认先请求首批结构，后续滚动再追加更多条目。
 - File browser responses include `totalEntries`, `loadedCount`, optional `nextOffset`, and `hasMore` so the frontend can append later batches without losing current selection or tree state.
+- 网易云歌单目录在请求携带 `offset/limit` 时优先走分页链路：源插件内部方法 `filesystem.listDirectoryPage` 返回 `{ entries, totalEntries }`，仓库层继续输出既有 `FileBrowserSnapshot`。
+- 网易云分页目录缓存保存在仓库 `metadata.db` 的 `netease_directory_cache` 与 `netease_directory_entries` 表中，TTL 固定为 24 小时。缓存命中直接返回，缓存缺失、过期或当前页缺口会回源当前页并写回缓存。
+- 网易云分页回源与全量同步都会把 `songId`、`songName`、`artists`、`albumName`、`coverUrl`、`durationMs`、`playlistId`、`playlistName`、`playlistCategory`、`provider`、`accountId` 镜像到资产 metadata，并同步更新 `assets.source_payload_json`。用户字段如 `rating`、`comment`、`link`、`tagGroups` 保持原行为。
 - `get_repository_tree(repoId)` returns only `FileTreeNode[]`-style directory structure for background tree sync and does not include directory entries.
 - Local filesystem `get_repository_tree` responses also include `cacheState` and `indexedAt`, and the tree is sourced from the SQLite `directories` cache.
 - Runtime emits `repository://structure-updated` with `{ repoId, reason, indexedAt }` after watcher-driven or cold-cache refresh completes so the desktop can silently refresh the active directory and tree.
@@ -178,6 +181,7 @@
   - Reuse an existing valid thumbnail cache entry or generate one for supported local image/video files
   - Optional `action`: `ensure`, `refresh`, `save`, `saveGenerated`, `clear`
   - `save` accepts local `sourcePath`, remote HTTP(S) `sourceUrl`, or `imageBytes` for custom file/folder thumbnails; `sourceUrl` is downloaded by the backend so provider cover candidates do not depend on frontend CORS
+  - 网易云歌曲条目会优先使用 `sourcePayload.coverUrl` 通过 `save + sourceUrl` 预取封面；当前页优先，下一页在空闲时预热
   - `saveGenerated` accepts frontend-generated image bytes, used by 3D and text previews
   - Thumbnail cache files live under repository `.momo/thumbnails/` and use sha256 hex filenames
   - File thumbnails also backfill derived metadata such as `thumbnailPalette`

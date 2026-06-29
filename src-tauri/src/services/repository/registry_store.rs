@@ -306,6 +306,37 @@ pub(super) fn migrate_repository_schema(connection: &Connection) -> Result<(), r
           PRIMARY KEY(repo_id, path, kind)
         );
 
+        CREATE TABLE IF NOT EXISTS netease_directory_cache (
+          repo_id TEXT NOT NULL,
+          directory_path TEXT NOT NULL,
+          total_entries INTEGER NOT NULL,
+          refreshed_at TEXT NOT NULL,
+          PRIMARY KEY(repo_id, directory_path),
+          FOREIGN KEY(repo_id) REFERENCES repositories(repo_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS netease_directory_entries (
+          repo_id TEXT NOT NULL,
+          directory_path TEXT NOT NULL,
+          order_index INTEGER NOT NULL,
+          path TEXT NOT NULL,
+          name TEXT NOT NULL,
+          kind TEXT NOT NULL,
+          extension TEXT,
+          size_bytes INTEGER,
+          modified_at TEXT,
+          is_virtual INTEGER NOT NULL DEFAULT 0,
+          provider_id TEXT,
+          provider_item_id TEXT,
+          source_payload_json TEXT,
+          local_absolute_path TEXT,
+          PRIMARY KEY(repo_id, directory_path, order_index),
+          FOREIGN KEY(repo_id) REFERENCES repositories(repo_id)
+        );
+
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_netease_directory_entries_repo_path
+        ON netease_directory_entries(repo_id, path);
+
         CREATE TABLE IF NOT EXISTS hardlink_groups (
           group_id TEXT PRIMARY KEY,
           repo_id TEXT NOT NULL,

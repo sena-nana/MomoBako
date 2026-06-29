@@ -5,6 +5,7 @@ import { activeRepoId, currentDirectoryPath, error, fileBrowser, selectedFilePat
 import { yieldToUi } from "./scheduler";
 
 const THUMBNAIL_LOAD_CONCURRENCY = 3;
+const NETEASE_PROVIDER_ID = "netease-cloud-music";
 
 export type ThumbnailQueueItem = {
   repoId: string;
@@ -95,7 +96,35 @@ async function loadThumbnailForQueueItem(item: ThumbnailQueueItem, token: number
     if (token !== thumbnailDirectoryToken) return;
     applyThumbnailResponse(response, item.directoryPath);
   } catch {
-    await loadGeneratedThumbnailForQueueItem(item, token);
+    return;
+  }
+
+  const sourceResponse = await loadRemoteSourceThumbnailForQueueItem(item, token);
+  if (sourceResponse) return;
+  await loadGeneratedThumbnailForQueueItem(item, token);
+}
+
+function neteaseCoverUrl(entry: FileBrowserEntry) {
+  if (entry.sourcePayload?.provider !== NETEASE_PROVIDER_ID) return "";
+  const value = entry.sourcePayload?.coverUrl;
+  return typeof value === "string" && /^https?:\/\//i.test(value) ? value : "";
+}
+
+async function loadRemoteSourceThumbnailForQueueItem(item: ThumbnailQueueItem, token: number) {
+  const sourceUrl = neteaseCoverUrl(item.entry);
+  if (!sourceUrl) return null;
+  try {
+    const response = await ensureThumbnail({
+      repoId: item.repoId,
+      path: item.entry.path,
+      action: "save",
+      sourceUrl,
+    });
+    if (!response.thumbnailPath || token !== thumbnailDirectoryToken) return response;
+    applyThumbnailResponse(response, item.directoryPath);
+    return response;
+  } catch {
+    return null;
   }
 }
 

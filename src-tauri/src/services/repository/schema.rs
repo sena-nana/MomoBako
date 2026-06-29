@@ -41,6 +41,7 @@ pub(super) const LOCAL_FILESYSTEM_PLUGIN_ID: &str = "momobako.local-filesystem";
 pub(super) const LEGACY_LOCAL_FILESYSTEM_PLUGIN_ID: &str = "builtin.local-filesystem";
 pub(super) const LOCAL_FILESYSTEM_FILE_SEARCH_MODE_KEY: &str = "fileSearchMode";
 pub(super) const NETEASE_CLOUD_MUSIC_PLUGIN_ID: &str = "momobako.source.netease-cloud-music";
+pub(super) const NETEASE_CLOUD_MUSIC_PROVIDER_ID: &str = "netease-cloud-music";
 pub(super) const PLUGIN_SDK_VERSION: &str = "1";
 pub(super) const MAX_PARALLEL_IMPORTS: usize = 4;
 
@@ -223,6 +224,37 @@ CREATE TABLE IF NOT EXISTS entry_thumbnails (
   updated_at TEXT NOT NULL,
   PRIMARY KEY(repo_id, path, kind)
 );
+
+CREATE TABLE IF NOT EXISTS netease_directory_cache (
+  repo_id TEXT NOT NULL,
+  directory_path TEXT NOT NULL,
+  total_entries INTEGER NOT NULL,
+  refreshed_at TEXT NOT NULL,
+  PRIMARY KEY(repo_id, directory_path),
+  FOREIGN KEY(repo_id) REFERENCES repositories(repo_id)
+);
+
+CREATE TABLE IF NOT EXISTS netease_directory_entries (
+  repo_id TEXT NOT NULL,
+  directory_path TEXT NOT NULL,
+  order_index INTEGER NOT NULL,
+  path TEXT NOT NULL,
+  name TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  extension TEXT,
+  size_bytes INTEGER,
+  modified_at TEXT,
+  is_virtual INTEGER NOT NULL DEFAULT 0,
+  provider_id TEXT,
+  provider_item_id TEXT,
+  source_payload_json TEXT,
+  local_absolute_path TEXT,
+  PRIMARY KEY(repo_id, directory_path, order_index),
+  FOREIGN KEY(repo_id) REFERENCES repositories(repo_id)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_netease_directory_entries_repo_path
+ON netease_directory_entries(repo_id, path);
 
 CREATE TABLE IF NOT EXISTS smart_folders (
   smart_folder_id TEXT PRIMARY KEY,
