@@ -36,6 +36,7 @@ import {
   ensureRepositoryWorkspace as ensureRepositoryWorkspaceLifecycle,
   loadRepositories as loadRepositoriesLifecycle,
   queueRepositoryBackgroundLoads,
+  refreshActiveRepositoryWorkspaceSilently as refreshActiveRepositoryWorkspaceSilentlyLifecycle,
   resetActiveRepositoryContent,
 } from "./lifecycle";
 import { loadSettingsData } from "./settings";
@@ -158,4 +159,8 @@ export function ensureRepositoryWorkspace() {
 
 export function refreshRepositoryWorkspace() {
   return loadRepositories();
+}
+
+export function refreshActiveRepositoryWorkspaceSilently() {
+  return refreshActiveRepositoryWorkspaceSilentlyLifecycle();
 }

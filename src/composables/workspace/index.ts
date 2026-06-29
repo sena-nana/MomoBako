@@ -16,6 +16,7 @@ export { resetRepositoryWorkspaceForTests } from "./lifecycle";
 export {
   ensureRepositoryWorkspace,
   loadRepositories,
+  refreshActiveRepositoryWorkspaceSilently,
   refreshRepositoryWorkspace,
   selectAsset,
   selectRepository,

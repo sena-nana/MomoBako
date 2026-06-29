@@ -47,6 +47,7 @@ export function useWorkspaceHomeViewModel() {
     activeRepository,
     activeRepoId,
     repositories,
+    refreshActiveRepositoryWorkspaceSilently,
     refreshRepositoryWorkspace,
     selectRepository,
     selectAsset,
@@ -353,7 +354,7 @@ export function useWorkspaceHomeViewModel() {
     activeRepoId,
     activeRepository,
     configureNeteaseRepositoryCache: configureNeteaseRepositoryCacheInWorkspace,
-    refreshRepositoryWorkspace,
+    refreshRepositoryWorkspaceSilently: refreshActiveRepositoryWorkspaceSilently,
     relocateMissingRepository,
     removeRepository,
   });

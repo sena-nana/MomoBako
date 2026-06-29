@@ -82,9 +82,14 @@ import { invalidateThumbnailQueue } from "./thumbnails";
 import { scheduleIdleTask } from "./scheduler";
 import {
   clearPlaylistDetailCache,
+  refreshPlaylists,
   primePlaylistDetailCache,
+  selectPlaylist,
   syncPlaylistMemberships,
 } from "./playlists";
+import { refreshRepositoryActions } from "./repositoryActions";
+import { refreshHardlinkCandidates, refreshRepositorySnapshot, refreshRepositorySummaries, refreshRepositoryTree } from "./refresh";
+import { refreshSmartFolders, selectSmartFolder } from "./smartFolders";
 
 let startupPromise: Promise<void> | null = null;
 let repositoryBackgroundToken = 0;
@@ -94,10 +99,9 @@ let structureUpdatedListenerPromise: Promise<void> | null = null;
 
 async function handleRepositoryStructureUpdated(event: RepositoryStructureUpdatedEvent) {
   if (!activeRepoId.value || event.repoId !== activeRepoId.value) return;
-  if (activePanel.value !== "files") return;
-  await loadFileBrowserForDirectory(currentDirectoryPath.value, {
-    includeTree: true,
-    silent: true,
+  await refreshActiveRepositoryWorkspaceSilently({
+    reason: event.reason,
+    refreshCurrentPanel: true,
   });
 }
 
@@ -161,6 +165,96 @@ export function invalidateRepositoryBackgroundLoads() {
   repositoryBackgroundToken += 1;
   cancelRepositoryBackgroundTask?.();
   cancelRepositoryBackgroundTask = null;
+}
+
+type SilentRepositoryRefreshOptions = {
+  reason?: RepositoryStructureUpdatedEvent["reason"] | "user";
+  refreshCurrentPanel?: boolean;
+};
+
+async function syncSilentRepositoryBaseState(repoId: string) {
+  const currentAssetId = activeAssetId.value;
+  await Promise.all([
+    refreshRepositorySummaries(),
+    refreshRepositorySnapshot(repoId),
+    refreshRepositoryTree(repoId),
+    refreshPlaylists(repoId),
+    refreshSmartFolders(repoId),
+    refreshRepositoryActions(repoId),
+    refreshHardlinkCandidates(repoId),
+  ]);
+
+  if (activeRepoId.value !== repoId) return false;
+
+  const activeSummary = repositories.value.find((item) => item.repoId === repoId) ?? null;
+  if (!activeSummary) {
+    resetWorkspaceSelection();
+    return false;
+  }
+
+  if (activeSummary.status === "missing") {
+    resetActiveRepositoryContent();
+    activeRepoId.value = repoId;
+    return false;
+  }
+
+  if (currentAssetId && !activeSnapshot.value?.assets.some((item) => item.assetId === currentAssetId)) {
+    activeAssetId.value = null;
+    activeAssetDetail.value = null;
+  }
+
+  return true;
+}
+
+async function refreshCurrentPanelAfterSilentRefresh(repoId: string) {
+  if (activeRepoId.value !== repoId) return;
+
+  if (activePanel.value === "files") {
+    await loadFileBrowserForDirectory(currentDirectoryPath.value, {
+      includeTree: false,
+      silent: true,
+    });
+    return;
+  }
+
+  if (activePanel.value === "deleted") {
+    await loadFileBrowserForDirectory(currentDirectoryPath.value, {
+      specialLocation: "trash",
+      silent: true,
+    });
+    return;
+  }
+
+  if (activePanel.value === "playlist" && activePlaylistId.value) {
+    await selectPlaylist(activePlaylistId.value);
+    return;
+  }
+
+  if (activePanel.value === "smartFolder" && activeSmartFolderId.value) {
+    await selectSmartFolder(activeSmartFolderId.value);
+  }
+}
+
+/**
+ * 静默刷新当前资源库，更新侧栏与当前面板可见状态，不触发完整工作区重载。
+ */
+export async function refreshActiveRepositoryWorkspaceSilently(
+  options: SilentRepositoryRefreshOptions = {},
+) {
+  const repoId = activeRepoId.value;
+  if (!repoId) return null;
+
+  const stillActive = await syncSilentRepositoryBaseState(repoId);
+  if (!stillActive) return null;
+
+  if (options.refreshCurrentPanel ?? true) {
+    await refreshCurrentPanelAfterSilentRefresh(repoId);
+  }
+
+  return {
+    repoId,
+    reason: options.reason ?? "user",
+  };
 }
 
 function isRepositoryBackgroundTokenActive(repoId: string, token: number) {

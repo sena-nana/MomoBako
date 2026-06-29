@@ -53,6 +53,7 @@ const pluginCallCalls: Array<{ pluginId: string; method: string; payload: unknow
 const pluginCallMockResponses = new Map<string, unknown>();
 const invokeCalls: Array<{ command: string; args?: Record<string, unknown> }> = [];
 const openerCalls: Array<{ command: "openPath" | "openUrl" | "revealItemInDir"; path: string }> = [];
+const tauriEventListeners = new Map<string, Set<(event: { event: string; payload: unknown }) => void>>();
 
 globalThis.fetch = vi.fn(async (input: string | URL | Request) => {
   const url = typeof input === "string"
@@ -1708,7 +1709,18 @@ vi.mock("@tauri-apps/api/event", () => ({
   TauriEvent: {},
   emit: async () => undefined,
   emitTo: async () => undefined,
-  listen: async () => async () => undefined,
+  listen: async (event: string, handler: (payload: { event: string; payload: unknown }) => void) => {
+    const listeners = tauriEventListeners.get(event) ?? new Set();
+    listeners.add(handler);
+    tauriEventListeners.set(event, listeners);
+    return async () => {
+      const current = tauriEventListeners.get(event);
+      current?.delete(handler);
+      if (!current?.size) {
+        tauriEventListeners.delete(event);
+      }
+    };
+  },
   once: async () => async () => undefined,
 }));
 
@@ -1757,6 +1769,7 @@ afterEach(() => {
   openerCalls.length = 0;
   pluginCallCalls.length = 0;
   pluginCallMockResponses.clear();
+  tauriEventListeners.clear();
 });
 
 export function getInvokeCalls(command?: string) {
@@ -1843,6 +1856,10 @@ export function seedMockRepositories(repositories: MockRepository[]) {
   mockRepositories = repositories;
 }
 
+export function seedMockSmartFolders(smartFolders: SmartFolder[]) {
+  mockSmartFolders = smartFolders;
+}
+
 export function seedMockPluginConfig(pluginId: string, values: Record<string, unknown>) {
   mockPluginConfigValues[pluginId] = { ...values };
 }
@@ -1856,6 +1873,13 @@ export function getPluginCallCalls(pluginId?: string, method?: string) {
     (pluginId ? call.pluginId === pluginId : true)
     && (method ? call.method === method : true)
   ));
+}
+
+export async function emitMockTauriEvent<TPayload>(event: string, payload: TPayload) {
+  const listeners = Array.from(tauriEventListeners.get(event) ?? []);
+  await Promise.all(listeners.map(async (listener) => {
+    await listener({ event, payload });
+  }));
 }
 
 export function getRelocatedRepositoryPath() {

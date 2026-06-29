@@ -57,7 +57,7 @@ type RepositorySwitcherUiOptions = {
   removeRepository: (repoId: string) => Promise<unknown>;
   repositories: ComputedRef<RepositorySummary[]>;
   repositoryBackendOptions: ComputedRef<RepositoryBackendOption[]>;
-  refreshRepositoryWorkspace: () => Promise<unknown>;
+  refreshRepositoryWorkspaceSilently: () => Promise<unknown>;
   route: RouteLocationNormalizedLoadedGeneric;
   router: Router;
   selectRepository: (repoId: string) => Promise<unknown>;
@@ -274,7 +274,7 @@ export function useRepositorySwitcherUi(options: RepositorySwitcherUiOptions) {
     void (async () => {
       try {
         await syncRepository({ repoId });
-        await options.refreshRepositoryWorkspace();
+        await options.refreshRepositoryWorkspaceSilently();
       } catch (cause) {
         const message = cause instanceof Error ? cause.message : String(cause);
         console.error(`failed to sync netease repository ${repoId}`, cause);

@@ -6,6 +6,7 @@ export {
   loadPluginConfigInWorkspace,
   loadSettingsData,
   openPluginDataDirectoryInWorkspace,
+  refreshActiveRepositoryWorkspaceSilently,
   refreshRepositoryWorkspace,
   resetRepositoryWorkspaceForTests,
   setPluginConfigValueInWorkspace,
