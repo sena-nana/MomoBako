@@ -205,12 +205,14 @@ const {
   openPlaylistDialog,
   playlistDialogDisabled,
   playlistItems,
+  playlistsExpanded,
   playlistName,
   playlistPlayerTypeId,
   playPlaylist,
   removePlaylist,
   showPlaylistDialog,
   submitPlaylistDialog,
+  togglePlaylistsExpanded,
 } = usePlaylistSidebarUi({
   activePlaylistDetail,
   activePlaylistId,
@@ -332,10 +334,12 @@ const {
           :available-playlist-players-count="availablePlaylistPlayers.length"
           :is-active-repository-missing="isActiveRepositoryMissing"
           :playlist-items="playlistItems"
+          :playlists-expanded="playlistsExpanded"
           @create="openPlaylistDialog"
           @open="openPlaylist"
           @play="playPlaylist"
           @remove="removePlaylist"
+          @toggle-expanded="togglePlaylistsExpanded"
         />
 
         <WorkspaceSidebarFolders

@@ -254,7 +254,18 @@ const {
               @drop.stop.prevent="emit('dropOnFolder', entry.path, $event)"
             >
               <div class="files-list__preview" :style="{ background: fileTone(entry) }">
-                <Folder :size="24" aria-hidden="true" />
+                <img
+                  v-if="thumbnailSrc(entry)"
+                  :src="thumbnailSrc(entry) ?? undefined"
+                  alt=""
+                  crossorigin="anonymous"
+                  draggable="false"
+                  loading="lazy"
+                  @load="emit('thumbnailLoaded', entry, $event)"
+                  @dragstart.prevent
+                  @error="emit('markThumbnailFailed', entry)"
+                />
+                <Folder v-else :size="24" aria-hidden="true" />
               </div>
               <div class="files-list__body">
                 <strong>{{ entry.name }}</strong>

@@ -123,6 +123,11 @@ function fileListItem(path: string) {
   return item as HTMLElement;
 }
 
+async function expandSidebarPlaylists() {
+  const toggle = await screen.findByRole("button", { name: "展开播放集" });
+  await fireEvent.click(toggle);
+}
+
 function setPlaybackSession(repoId: string, session: Record<string, unknown>) {
   window.localStorage.setItem(`momobako.playbackSession:${repoId}`, JSON.stringify(session));
 }
@@ -386,6 +391,7 @@ function neteaseVirtualEntries(): MockEntry[] {
         entryKind: "playlist-folder",
         playlistId: 9001,
         playlistName: "夜跑歌单",
+        playlistCoverUrl: "https://example.test/playlist-9001.jpg",
         playlistCategory: "created",
         loginExpired: false,
       },
@@ -420,6 +426,7 @@ function neteaseVirtualEntries(): MockEntry[] {
         songName: "稻香",
         artists: ["周杰伦"],
         albumName: "魔杰座",
+        coverUrl: "https://example.test/cover-2001.jpg",
         level: "standard",
         loginExpired: false,
       },
@@ -453,6 +460,7 @@ function neteaseVirtualEntries(): MockEntry[] {
         songName: "孤勇者",
         artists: ["陈奕迅"],
         albumName: "孤勇者",
+        coverUrl: "https://example.test/cover-2002.jpg",
         level: "standard",
         loginExpired: false,
       },
@@ -1288,6 +1296,7 @@ describe("文件管理冒烟", () => {
 
     await renderApp();
 
+    await expandSidebarPlaylists();
     expect(await screen.findByText("Mock Playlist")).toBeInTheDocument();
     const sidebarPlayButtons = screen.getAllByRole("button", { name: "播放播放集" });
     expect(sidebarPlayButtons[0]).toBeDisabled();
@@ -1310,6 +1319,7 @@ describe("文件管理冒烟", () => {
 
     await renderApp();
 
+    await expandSidebarPlaylists();
     await fireEvent.click(await screen.findByRole("button", { name: "播放播放集" }));
 
     await waitFor(() => {
@@ -1322,6 +1332,23 @@ describe("文件管理冒烟", () => {
     expect(document.querySelector(".playlist-page")).not.toBeInTheDocument();
     expect(document.querySelector(".workspace-player")).toBeInTheDocument();
     expect(screen.getByText("asset-01.mp3")).toBeInTheDocument();
+  });
+
+  it("播放集侧栏默认折叠，展开后显示列表", async () => {
+    seedMockRepository();
+    seedMockPlaylists([audioPlaylist()], {
+      "playlist-mock": audioPlaylistDetail(),
+    });
+
+    await renderApp();
+
+    expect(screen.queryByText("Mock Playlist")).not.toBeInTheDocument();
+    await fireEvent.click(screen.getByRole("button", { name: "展开播放集" }));
+    expect(await screen.findByText("Mock Playlist")).toBeInTheDocument();
+    await fireEvent.click(screen.getByRole("button", { name: "收起播放集" }));
+    await waitFor(() => {
+      expect(screen.queryByText("Mock Playlist")).not.toBeInTheDocument();
+    });
   });
 
   it("文件右键菜单支持通过复选项设置播放集成员关系", async () => {
@@ -1387,6 +1414,66 @@ describe("文件管理冒烟", () => {
     await waitFor(() => {
       expect(workspace.currentDirectoryPath.value).toBe("创建的歌单/夜跑歌单");
       expect(workspace.selectedFilePaths.value).toEqual(["创建的歌单/夜跑歌单/周杰伦 - 稻香.mp3"]);
+    });
+  });
+
+  it("网易云歌单文件夹显示官方封面，并在进入后即时回填歌曲封面", async () => {
+    const plugins = neteasePlugins();
+    seedMockPlugins(plugins);
+    seedMockRepositories([neteaseRepository()]);
+    seedMockEntries(neteaseVirtualEntries());
+    mockPluginCallResponse("momobako.source.netease-cloud-music", "auth.getLoginStatus", {
+      loggedIn: true,
+      loginExpired: false,
+      account: { id: 123456, userName: "Aura" },
+      profile: { nickname: "云村 Aura" },
+    });
+
+    await syncRegisteredFrontendPluginManifests(plugins);
+    await renderApp();
+    const workspace = useRepositoryWorkspace();
+
+    await fireEvent.dblClick(fileListItem("创建的歌单"));
+
+    await waitFor(() => {
+      expect(getInvokeCalls("ensure_thumbnail").some((call) => (
+        call.args?.request?.path === "创建的歌单/夜跑歌单"
+        && call.args?.request?.action === "save"
+        && call.args?.request?.sourceUrl === "https://example.test/playlist-9001.jpg"
+      ))).toBe(true);
+    });
+    await waitFor(() => {
+      expect(
+        workspace.fileBrowser.value?.entries.find((entry) => entry.path === "创建的歌单/夜跑歌单")?.thumbnailPath,
+      ).toBe("C:/Mock/Thumbs/创建的歌单__夜跑歌单.jpg");
+    });
+    await waitFor(() => {
+      expect(fileListItem("创建的歌单/夜跑歌单").querySelector("img")).toBeInTheDocument();
+    });
+
+    await fireEvent.dblClick(fileListItem("创建的歌单/夜跑歌单"));
+
+    await waitFor(() => {
+      const calls = getInvokeCalls("ensure_thumbnail");
+      expect(calls.some((call) => (
+        call.args?.request?.path === "创建的歌单/夜跑歌单/周杰伦 - 稻香.mp3"
+        && call.args?.request?.action === "save"
+        && call.args?.request?.sourceUrl === "https://example.test/cover-2001.jpg"
+      ))).toBe(true);
+      expect(calls.some((call) => (
+        call.args?.request?.path === "创建的歌单/夜跑歌单/陈奕迅 - 孤勇者.mp3"
+        && call.args?.request?.action === "save"
+        && call.args?.request?.sourceUrl === "https://example.test/cover-2002.jpg"
+      ))).toBe(true);
+    });
+    await waitFor(() => {
+      const entries = workspace.fileBrowser.value?.entries ?? [];
+      expect(entries.find((entry) => entry.path === "创建的歌单/夜跑歌单/周杰伦 - 稻香.mp3")?.thumbnailPath).toBe(
+        "C:/Mock/Thumbs/创建的歌单__夜跑歌单__周杰伦 - 稻香.mp3.jpg",
+      );
+      expect(entries.find((entry) => entry.path === "创建的歌单/夜跑歌单/陈奕迅 - 孤勇者.mp3")?.thumbnailPath).toBe(
+        "C:/Mock/Thumbs/创建的歌单__夜跑歌单__陈奕迅 - 孤勇者.mp3.jpg",
+      );
     });
   });
 
