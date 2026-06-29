@@ -61,7 +61,8 @@ export function loadThumbnailsForEntries(repoId: string, directoryPath: string, 
 
 function createThumbnailQueue(repoId: string, directoryPath: string, entries: FileBrowserEntry[]) {
   return entries
-    .filter((entry) => entry.kind === "file" && !entry.thumbnailPath)
+    .filter((entry) => !entry.thumbnailPath)
+    .filter((entry) => entry.kind === "file" || Boolean(neteasePlaylistCoverUrl(entry)))
     .filter((entry) => {
       const key = `${repoId}:${directoryPath}:${entry.path}`;
       if (queuedThumbnailKeys.has(key)) return false;
@@ -103,6 +104,13 @@ async function loadThumbnailForQueueItem(item: ThumbnailQueueItem, token: number
   }
 }
 
+function neteasePlaylistCoverUrl(entry: FileBrowserEntry) {
+  if (entry.sourcePayload?.provider !== NETEASE_PROVIDER_ID) return "";
+  if (entry.sourcePayload?.entryKind !== "playlist-folder") return "";
+  const value = entry.sourcePayload?.playlistCoverUrl;
+  return typeof value === "string" && /^https?:\/\//i.test(value) ? value : "";
+}
+
 function neteaseCoverUrl(entry: FileBrowserEntry) {
   if (entry.sourcePayload?.provider !== NETEASE_PROVIDER_ID) return "";
   const value = entry.sourcePayload?.coverUrl;
@@ -110,7 +118,9 @@ function neteaseCoverUrl(entry: FileBrowserEntry) {
 }
 
 async function loadRemoteSourceThumbnailForQueueItem(item: ThumbnailQueueItem, token: number) {
-  const sourceUrl = neteaseCoverUrl(item.entry);
+  const sourceUrl = item.entry.kind === "directory"
+    ? neteasePlaylistCoverUrl(item.entry)
+    : neteaseCoverUrl(item.entry);
   if (!sourceUrl) return null;
   try {
     const response = await ensureThumbnail({

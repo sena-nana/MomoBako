@@ -210,6 +210,8 @@ struct PlaylistSummaryItem {
     name: String,
     track_count: i64,
     #[serde(default)]
+    cover_img_url: Option<String>,
+    #[serde(default)]
     subscribed: bool,
     #[serde(default)]
     user_id: Option<i64>,
@@ -293,6 +295,7 @@ struct PlaylistFolder {
     playlist_name: String,
     playlist_category: &'static str,
     playlist_track_count: i64,
+    playlist_cover_url: Option<String>,
     modified_at: String,
     account_id: i64,
     account_cookie: String,
@@ -889,6 +892,7 @@ fn discover_playlist_folder_summaries(
             playlist_name: unique_folder_name,
             playlist_category,
             playlist_track_count: playlist.track_count,
+            playlist_cover_url: playlist.cover_img_url.clone(),
             modified_at: millis_to_rfc3339(playlist.update_time)?,
             account_id: config.account_id,
             account_cookie: config.cookie.clone(),
@@ -1446,6 +1450,7 @@ fn folder_entry(folder: &PlaylistFolder) -> FileSystemEntry {
             "playlistId": folder.playlist_id,
             "playlistName": folder.playlist_name,
             "playlistTrackCount": folder.playlist_track_count,
+            "playlistCoverUrl": folder.playlist_cover_url,
             "playlistCategory": folder.playlist_category,
             "playlistLoadError": folder.load_error
         })),
@@ -1846,9 +1851,9 @@ mod tests {
                         "200 OK",
                         "application/json",
                         r#"{"playlist":[
-                            {"id":9001,"name":"夜跑歌单","trackCount":2,"subscribed":false,"userId":123456,"creator":{"userId":123456},"updateTime":1718323200000},
-                            {"id":9002,"name":"夜跑歌单","trackCount":1,"subscribed":false,"userId":123456,"creator":{"userId":123456},"updateTime":1718323200000},
-                            {"id":9101,"name":"收藏歌单","trackCount":1,"subscribed":true,"userId":987654,"creator":{"userId":987654},"updateTime":1718323200000}
+                            {"id":9001,"name":"夜跑歌单","trackCount":2,"coverImgUrl":"https://example.test/playlist-9001.jpg","subscribed":false,"userId":123456,"creator":{"userId":123456},"updateTime":1718323200000},
+                            {"id":9002,"name":"夜跑歌单","trackCount":1,"coverImgUrl":"https://example.test/playlist-9002.jpg","subscribed":false,"userId":123456,"creator":{"userId":123456},"updateTime":1718323200000},
+                            {"id":9101,"name":"收藏歌单","trackCount":1,"coverImgUrl":"https://example.test/playlist-9101.jpg","subscribed":true,"userId":987654,"creator":{"userId":987654},"updateTime":1718323200000}
                         ]}"#
                             .to_string(),
                     )
@@ -1918,8 +1923,8 @@ mod tests {
                         "200 OK",
                         "application/json",
                         r#"{"playlist":[
-                            {"id":9001,"name":"夜跑歌单","trackCount":2,"subscribed":false,"userId":123456,"creator":{"userId":123456},"updateTime":1718323200000},
-                            {"id":9101,"name":"收藏歌单","trackCount":1,"subscribed":true,"userId":987654,"creator":{"userId":987654},"updateTime":1718323200000}
+                            {"id":9001,"name":"夜跑歌单","trackCount":2,"coverImgUrl":"https://example.test/playlist-9001.jpg","subscribed":false,"userId":123456,"creator":{"userId":123456},"updateTime":1718323200000},
+                            {"id":9101,"name":"收藏歌单","trackCount":1,"coverImgUrl":"https://example.test/playlist-9101.jpg","subscribed":true,"userId":987654,"creator":{"userId":987654},"updateTime":1718323200000}
                         ]}"#
                             .to_string(),
                     )
@@ -1981,8 +1986,8 @@ mod tests {
                         "200 OK",
                         "application/json",
                         r#"{"playlist":[
-                            {"id":9001,"name":"夜跑歌单","trackCount":2,"subscribed":false,"userId":123456,"creator":{"userId":123456},"updateTime":1718323200000},
-                            {"id":9101,"name":"收藏歌单","trackCount":1,"subscribed":true,"userId":987654,"creator":{"userId":987654},"updateTime":1718323200000}
+                            {"id":9001,"name":"夜跑歌单","trackCount":2,"coverImgUrl":"https://example.test/playlist-9001.jpg","subscribed":false,"userId":123456,"creator":{"userId":123456},"updateTime":1718323200000},
+                            {"id":9101,"name":"收藏歌单","trackCount":1,"coverImgUrl":"https://example.test/playlist-9101.jpg","subscribed":true,"userId":987654,"creator":{"userId":987654},"updateTime":1718323200000}
                         ]}"#
                             .to_string(),
                     )
@@ -2034,7 +2039,7 @@ mod tests {
                         "200 OK",
                         "application/json",
                         r#"{"playlist":[
-                            {"id":9201,"name":"分页歌单","trackCount":3,"subscribed":false,"userId":123456,"creator":{"userId":123456},"updateTime":1718323200000}
+                            {"id":9201,"name":"分页歌单","trackCount":3,"coverImgUrl":"https://example.test/playlist-9201.jpg","subscribed":false,"userId":123456,"creator":{"userId":123456},"updateTime":1718323200000}
                         ]}"#
                             .to_string(),
                     )
@@ -2104,6 +2109,10 @@ mod tests {
         assert_eq!(created.len(), 1);
         assert_eq!(created[0]["path"], serde_json::json!("创建的歌单/夜跑歌单"));
         assert_eq!(
+            created[0]["sourcePayload"]["playlistCoverUrl"],
+            serde_json::json!("https://example.test/playlist-9001.jpg")
+        );
+        assert_eq!(
             created[0]["sourcePayload"]["playlistTrackCount"],
             serde_json::json!(2)
         );
@@ -2159,6 +2168,10 @@ mod tests {
         assert_eq!(
             created[0]["sourcePayload"]["playlistTrackCount"],
             serde_json::json!(2)
+        );
+        assert_eq!(
+            created[0]["sourcePayload"]["playlistCoverUrl"],
+            serde_json::json!("https://example.test/playlist-9001.jpg")
         );
         assert_eq!(
             created[0]["sourcePayload"]["playlistCategory"],

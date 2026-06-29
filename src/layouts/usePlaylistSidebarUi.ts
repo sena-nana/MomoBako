@@ -24,6 +24,7 @@ type PlaylistSidebarUiOptions = {
 
 export function usePlaylistSidebarUi(options: PlaylistSidebarUiOptions) {
   const showPlaylistDialog = ref(false);
+  const playlistsExpanded = ref(false);
   const playlistName = ref("");
   const playlistPlayerTypeId = ref("");
 
@@ -32,6 +33,10 @@ export function usePlaylistSidebarUi(options: PlaylistSidebarUiOptions) {
   const playlistItems = computed(() => options.playlists.value ?? []);
   const activePlaylist = computed(() => playlistItems.value.find((item) => item.playlistId === options.activePlaylistId.value) ?? null);
   const availablePlaylistPlayerTypeIds = computed(() => new Set(availablePlaylistPlayers.value.map((player) => player.playerTypeId)));
+
+  function togglePlaylistsExpanded() {
+    playlistsExpanded.value = !playlistsExpanded.value;
+  }
 
   function openPlaylistDialog() {
     if (!options.activeRepoId.value || options.isActiveRepositoryMissing.value) return;
@@ -85,11 +90,13 @@ export function usePlaylistSidebarUi(options: PlaylistSidebarUiOptions) {
     openPlaylistDialog,
     playlistDialogDisabled,
     playlistItems,
+    playlistsExpanded,
     playlistName,
     playlistPlayerTypeId,
     playPlaylist,
     removePlaylist,
     showPlaylistDialog,
     submitPlaylistDialog,
+    togglePlaylistsExpanded,
   };
 }

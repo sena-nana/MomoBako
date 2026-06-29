@@ -10,6 +10,7 @@ defineProps<{
   availablePlaylistPlayersCount: number;
   isActiveRepositoryMissing: boolean;
   playlistItems: PlaylistSummary[];
+  playlistsExpanded: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -17,13 +18,23 @@ const emit = defineEmits<{
   open: [playlistId: string];
   play: [playlist: PlaylistSummary];
   remove: [playlistId: string];
+  toggleExpanded: [];
 }>();
 </script>
 
 <template>
   <section class="workspace-group workspace-group--tree">
     <div class="workspace-group__header">
-      <span>播放集</span>
+      <button
+        type="button"
+        class="workspace-group__title-btn"
+        :aria-expanded="playlistsExpanded"
+        :aria-label="playlistsExpanded ? '收起播放集' : '展开播放集'"
+        @click="emit('toggleExpanded')"
+      >
+        <span>播放集</span>
+        <small>{{ playlistItems.length }}</small>
+      </button>
       <div class="workspace-group__actions">
         <button
           type="button"
@@ -37,13 +48,14 @@ const emit = defineEmits<{
         </button>
       </div>
     </div>
-    <div v-if="!activeRepoId" class="workspace-empty workspace-empty--compact">
+    <div v-if="!playlistsExpanded" class="workspace-playlists workspace-playlists--collapsed"></div>
+    <div v-else-if="!activeRepoId" class="workspace-empty workspace-empty--compact">
       <p class="workspace-empty__text">先选择或添加一个资源库。</p>
     </div>
     <div v-else-if="isActiveRepositoryMissing" class="workspace-empty workspace-empty--compact">
       <p class="workspace-empty__text">资源库修复后可继续使用播放集。</p>
     </div>
-    <div v-else-if="playlistItems.length" class="workspace-playlists">
+    <div v-else-if="playlistItems.length" class="workspace-playlists workspace-playlists--expanded">
       <article
         v-for="playlist in playlistItems"
         :key="playlist.playlistId"

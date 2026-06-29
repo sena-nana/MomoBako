@@ -1373,7 +1373,7 @@ vi.mock("@tauri-apps/api/core", () => ({
       } else if (entry && action === "refresh") {
         entry.thumbnailPath = entry.kind === "file" ? `C:/Mock/Thumbs/${path.replace(/[\\/]/g, "__")}.jpg` : null;
         entry.thumbnailCustom = false;
-      } else if (entry && !entry.thumbnailPath && entry.kind === "file") {
+      } else if (entry && !entry.thumbnailPath && entry.kind === "file" && entry.providerId !== "netease-cloud-music") {
         entry.thumbnailPath = `C:/Mock/Thumbs/${path.replace(/[\\/]/g, "__")}.jpg`;
       }
       return {

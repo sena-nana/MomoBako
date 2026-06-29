@@ -155,6 +155,7 @@
 }
 
 .workspace-sidebar__repo-current:focus-visible,
+.workspace-group__title-btn:focus-visible,
 .workspace-panel__refresh:focus-visible,
 .workspace-list__item:focus-visible,
 .workspace-shortcuts__item:focus-visible,
@@ -168,6 +169,7 @@
 }
 
 .workspace-sidebar__repo-current:hover,
+.workspace-group__title-btn:hover,
 .workspace-panel__refresh:hover,
 .workspace-list__item:hover,
 .workspace-shortcuts__item:hover,
@@ -298,6 +300,28 @@
   text-transform: uppercase;
 }
 
+.workspace-group__title-btn {
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  cursor: pointer;
+}
+
+.workspace-group__title-btn small {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0;
+}
+
 .workspace-shortcuts,
 .workspace-extension-list {
   display: flex;
@@ -309,6 +333,16 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
+}
+
+.workspace-playlists--expanded {
+  max-height: 220px;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.workspace-playlists--collapsed {
+  display: none;
 }
 
 .workspace-playlists__item {
