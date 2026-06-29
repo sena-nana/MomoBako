@@ -90,18 +90,17 @@ async function loadThumbnailForQueueItem(item: ThumbnailQueueItem, token: number
       action: "ensure",
     });
     if (!response.thumbnailPath) {
+      const sourceResponse = await loadRemoteSourceThumbnailForQueueItem(item, token);
+      if (sourceResponse) return;
       await loadGeneratedThumbnailForQueueItem(item, token);
       return;
     }
     if (token !== thumbnailDirectoryToken) return;
     applyThumbnailResponse(response, item.directoryPath);
+    return;
   } catch {
     return;
   }
-
-  const sourceResponse = await loadRemoteSourceThumbnailForQueueItem(item, token);
-  if (sourceResponse) return;
-  await loadGeneratedThumbnailForQueueItem(item, token);
 }
 
 function neteaseCoverUrl(entry: FileBrowserEntry) {
