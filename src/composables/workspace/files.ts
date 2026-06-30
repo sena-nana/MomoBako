@@ -312,8 +312,12 @@ export async function loadFileBrowserForDirectory(directoryPath = "", options: F
   const silent = options.silent ?? false;
   const specialLocation = options.specialLocation ?? (activePanel.value === "deleted" ? "trash" : undefined);
   const currentSnapshot = fileBrowser.value;
+  const normalizedSpecialLocation = specialLocation ?? null;
+  const keepsCurrentViewVisible = silent
+    && currentSnapshot?.currentPath === directoryPath
+    && (currentSnapshot.specialLocation ?? null) === normalizedSpecialLocation;
   const offset = append
-    ? currentSnapshot?.currentPath === directoryPath && currentSnapshot.specialLocation === (specialLocation ?? null)
+    ? currentSnapshot?.currentPath === directoryPath && (currentSnapshot.specialLocation ?? null) === normalizedSpecialLocation
       ? currentSnapshot.nextOffset ?? currentSnapshot.entries.length
       : 0
     : 0;
@@ -323,7 +327,7 @@ export async function loadFileBrowserForDirectory(directoryPath = "", options: F
     if (!currentSnapshot?.hasMore) return currentSnapshot;
     isLoadingFileBrowserMore.value = true;
   } else {
-    isLoadingFileBrowser.value = true;
+    isLoadingFileBrowser.value = !keepsCurrentViewVisible;
     if (!silent) {
       error.value = null;
     }
@@ -366,7 +370,9 @@ export async function loadFileBrowserForDirectory(directoryPath = "", options: F
     if (append) {
       isLoadingFileBrowserMore.value = false;
     } else {
-      isLoadingFileBrowser.value = false;
+      if (!keepsCurrentViewVisible) {
+        isLoadingFileBrowser.value = false;
+      }
     }
   }
 }
