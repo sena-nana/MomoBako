@@ -813,11 +813,20 @@ describe("文件管理冒烟", () => {
       },
     ]);
     const fileBrowserCallsBefore = getInvokeCalls("get_file_browser").length;
+    const delayedDirectoryRefresh = delayNextInvoke("get_file_browser");
     await emitMockTauriEvent("repository://structure-updated", {
       repoId: "repo-main-001",
       reason: "watcher",
       indexedAt: "2026-06-29T01:00:00Z",
     });
+
+    await waitFor(() => {
+      expect(getInvokeCalls("get_file_browser").length).toBeGreaterThan(fileBrowserCallsBefore);
+    });
+    expect(screen.queryByText("正在读取目录")).not.toBeInTheDocument();
+    expect(document.querySelector('.files-list__item[data-entry-path="Campaigns/Summer"]')).toBeInTheDocument();
+
+    delayedDirectoryRefresh.resolve();
 
     await waitFor(() => {
       expect(workspace.repositories.value[0]?.assetCount).toBe(99);
