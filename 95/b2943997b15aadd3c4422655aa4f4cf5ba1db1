@@ -1,0 +1,21 @@
+src/composables/workspace/files.ts
+  s_008e32b6399178::t_9996216e103aa2 315-318,320,330,373-375
+tests/router.test.ts
+  s_008e32b6399178::t_ef69df9debf316 816,823-830
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.5",
+  "base_commit_sha": "95b2943997b15aadd3c4422655aa4f4cf5ba1db1",
+  "prompts": {},
+  "sessions": {
+    "s_008e32b6399178": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f1886-08e3-73a2-9867-617739306718",
+        "model": "unknown"
+      },
+      "human_author": "AuraElicase <auraelicase@outlook.com>"
+    }
+  }
+}
