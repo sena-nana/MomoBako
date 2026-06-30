@@ -1,0 +1,43 @@
+src/composables/workspace/navigation.ts
+  s_e8ec67eacf0b20::t_c40e8ae5254003 38-39,42,45,54,56-58,70,73,80,98,121-124,126,128,133,135
+  s_e8ec67eacf0b20::t_25c1e9eb0d6a0a 37
+  s_e8ec67eacf0b20::t_c256ab5ec46ced 127
+  s_e8ec67eacf0b20::t_2d846d5c87cb03 131-132
+  s_e8ec67eacf0b20::t_b3e52ae5735c1c 134
+src/composables/workspace/lifecycle.ts
+  s_e8ec67eacf0b20::t_c5035ab7a8c913 120
+  s_e8ec67eacf0b20::t_7d8a5f02f9c785 105,109-111,319
+  s_e8ec67eacf0b20::t_941533f8a96890 102,106-108,114-117,123,320-322,343,352
+  s_e8ec67eacf0b20::t_95dca623d4cd38 99-101
+  s_e8ec67eacf0b20::t_673a3a27633c79 103-104
+  s_e8ec67eacf0b20::t_de687e2cf1aa27 112-113
+  s_e8ec67eacf0b20::t_1f5e46084b0d9f 118-119
+  s_e8ec67eacf0b20::t_8ad2b339136b2b 121-122
+  s_e8ec67eacf0b20::t_da75ac1bc00324 323
+  s_e8ec67eacf0b20::t_09ec47706b00d2 340-342
+  s_e8ec67eacf0b20::t_4ce32b0f3512ca 344-346,349-351
+  s_e8ec67eacf0b20::t_298cb385eb9d7a 353
+  s_e8ec67eacf0b20::t_ebd6d6582241c3 149-150,152-155,158,161,334-339,347-348,366,370,373-375,381,385,387,389,505,538,545,549
+src/composables/workspace/repositories.ts
+  s_e8ec67eacf0b20::t_324527b3c7566f 64
+src/layouts/AppShell.vue
+  s_e8ec67eacf0b20::t_3eb49682860d13 72,99-104,153-161,205-211
+tests/router.test.ts
+  s_e8ec67eacf0b20::t_8ce4af4dda98db 40-42,614-624,653-671
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.5",
+  "base_commit_sha": "d15e3ac43fc637e7bef5a6ae8ccd77e0bd2f2772",
+  "prompts": {},
+  "sessions": {
+    "s_e8ec67eacf0b20": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f1879-9db9-7293-8e8f-5cf9630016ad",
+        "model": "gpt-5.4"
+      },
+      "human_author": "AuraElicase <auraelicase@outlook.com>"
+    }
+  }
+}
