@@ -23,7 +23,7 @@
     "verify": "yarn test && yarn build && cargo check --manifest-path src-tauri/Cargo.toml"
   },
   "dependencies": {
-    "@lilia/ui": "github:sena-nana/LiliaUI#workspace=@lilia/ui&head=main",
+    "@lilia/ui": "github:sena-nana/LiliaUI#workspace=@lilia/ui&commit=d8baeb0b97251ce973063c480f86b70f96b1ec07",
     "@lucide/vue": "^1.17.0",
     "@pixiv/three-vrm": "^3.4.5",
     "@tauri-apps/api": "^2",

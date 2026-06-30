@@ -13,23 +13,20 @@ afterEach(() => {
 });
 
 describe("useTheme", () => {
-  it("loads the legacy theme key for existing users", async () => {
-    localStorage.setItem("tauri-template.theme", "light");
+  it("reads the MomoBako theme key", async () => {
+    localStorage.setItem("momobako.theme", "light");
 
     const { useTheme } = await loadTheme();
 
     expect(useTheme().theme.value).toBe("light");
     expect(document.documentElement.dataset.theme).toBe("light");
-    expect(localStorage.getItem("momobako.theme")).toBe("light");
   });
 
-  it("prefers the MomoBako theme key over the legacy key", async () => {
-    localStorage.setItem("tauri-template.theme", "light");
-    localStorage.setItem("momobako.theme", "dark");
-
+  it("falls back to the LiliaUI default theme", async () => {
     const { useTheme } = await loadTheme();
 
     expect(useTheme().theme.value).toBe("dark");
+    expect(document.documentElement.dataset.theme).toBe("dark");
   });
 
   it("persists updates to the MomoBako theme key", async () => {
