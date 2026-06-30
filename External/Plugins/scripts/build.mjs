@@ -8,7 +8,6 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const pluginsRoot = resolve(__dirname, "..");
 const repoRoot = resolve(pluginsRoot, "..", "..");
 const distRoot = join(pluginsRoot, ".dist");
-const sdkRoot = join(pluginsRoot, "_sdk");
 const cargoCommand = process.platform === "win32" ? "cargo.exe" : "cargo";
 const requestedPluginIds = new Set(process.argv.slice(2).filter(Boolean));
 
@@ -139,11 +138,8 @@ for (const name of readdirSync(pluginsRoot, { withFileTypes: true })) {
   const outputDir = join(distRoot, name.name);
   rmSync(outputDir, { recursive: true, force: true });
   mkdirSync(outputDir, { recursive: true });
+  // 分发产物只保留插件自身运行时文件，开发 SDK 继续留在源码目录参与编译。
   copyPluginProject(pluginDir, outputDir);
-
-  if (existsSync(sdkRoot)) {
-    cpSync(sdkRoot, join(outputDir, "_sdk"), { recursive: true });
-  }
 
   const buildType = project.build?.type;
   if (buildType === "frontend-module") {
