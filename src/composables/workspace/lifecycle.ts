@@ -96,6 +96,31 @@ let repositoryBackgroundToken = 0;
 let cancelRepositoryBackgroundTask: (() => void) | null = null;
 let unlistenStructureUpdated: UnlistenFn | null = null;
 let structureUpdatedListenerPromise: Promise<void> | null = null;
+const LAST_ACTIVE_REPOSITORY_STORAGE_KEY = "momobako.lastActiveRepositoryId";
+
+function readLastActiveRepositoryId() {
+  try {
+    const repoId = window.localStorage.getItem(LAST_ACTIVE_REPOSITORY_STORAGE_KEY)?.trim();
+    return repoId || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 记录上次打开的资源库，供下次启动时直接恢复到用户离开前的工作区。
+ */
+export function rememberLastActiveRepository(repoId?: string | null) {
+  try {
+    if (!repoId?.trim()) {
+      window.localStorage.removeItem(LAST_ACTIVE_REPOSITORY_STORAGE_KEY);
+      return;
+    }
+    window.localStorage.setItem(LAST_ACTIVE_REPOSITORY_STORAGE_KEY, repoId.trim());
+  } catch {
+    /* 忽略无痕模式或配额限制 */
+  }
+}
 
 async function handleRepositoryStructureUpdated(event: RepositoryStructureUpdatedEvent) {
   if (!activeRepoId.value || event.repoId !== activeRepoId.value) return;
@@ -121,15 +146,19 @@ function ensureStructureUpdatedListener() {
     });
 }
 
-export function resetWorkspaceSelection() {
+export function resetWorkspaceSelection(options: { clearRememberedRepository?: boolean } = {}) {
+  const previousRepoId = activeRepoId.value;
   activeRepoId.value = null;
-  resetActiveRepositoryContent();
+  resetActiveRepositoryContent(previousRepoId);
+  if (options.clearRememberedRepository) {
+    rememberLastActiveRepository(null);
+  }
 }
 
-export function resetActiveRepositoryContent() {
+export function resetActiveRepositoryContent(repoIdToClear = activeRepoId.value) {
   invalidateRepositoryBackgroundLoads();
   invalidateThumbnailQueue();
-  clearPlaylistDetailCache(activeRepoId.value);
+  clearPlaylistDetailCache(repoIdToClear);
   activeSnapshot.value = null;
   activeAssetId.value = null;
   activeAssetDetail.value = null;
@@ -287,8 +316,11 @@ async function applyRepositorySnapshotState(
   return { defaultAssetId, snapshot };
 }
 
-function setStartupProgress(currentStep: number, stepLabel: string) {
-  const totalSteps = workspaceStartup.value.totalSteps || 4;
+/**
+ * 统一驱动首屏加载页，启动和切换资源库都复用同一套状态展示。
+ */
+export function setWorkspaceStartupProgress(currentStep: number, stepLabel: string) {
+  const totalSteps = workspaceStartup.value.totalSteps || STARTUP_TOTAL_STEPS;
   workspaceStartup.value = {
     status: "loading",
     stepLabel,
@@ -296,6 +328,26 @@ function setStartupProgress(currentStep: number, stepLabel: string) {
     totalSteps,
     percent: Math.round((currentStep / totalSteps) * 100),
     error: null,
+  };
+}
+
+export function finishWorkspaceStartup() {
+  workspaceStartup.value = {
+    status: "ready",
+    stepLabel: "加载完成",
+    currentStep: STARTUP_TOTAL_STEPS,
+    totalSteps: STARTUP_TOTAL_STEPS,
+    percent: 100,
+    error: null,
+  };
+}
+
+export function failWorkspaceStartup(message: string) {
+  workspaceStartup.value = {
+    ...workspaceStartup.value,
+    status: "error",
+    stepLabel: "加载失败",
+    error: message,
   };
 }
 
@@ -311,25 +363,30 @@ async function loadInitialRepository(
   selectAsset: (assetId: string) => Promise<unknown>,
 ) {
   if (!items.length) {
-    resetWorkspaceSelection();
+    resetWorkspaceSelection({ clearRememberedRepository: true });
     return;
   }
 
+  const lastActiveRepoId = readLastActiveRepositoryId();
   const nextRepoId = activeRepoId.value && items.some((item) => item.repoId === activeRepoId.value)
     ? activeRepoId.value
-    : items[0].repoId;
+    : lastActiveRepoId && items.some((item) => item.repoId === lastActiveRepoId)
+      ? lastActiveRepoId
+      : items[0].repoId;
   const nextRepository = items.find((item) => item.repoId === nextRepoId);
 
   if (nextRepository?.status === "missing") {
     activeRepoId.value = nextRepoId;
     resetActiveRepositoryContent();
+    rememberLastActiveRepository(nextRepoId);
     return;
   }
 
-  setStartupProgress(2, "读取仓库摘要");
+  setWorkspaceStartupProgress(2, "读取仓库摘要");
   await applyRepositorySnapshotState(nextRepoId, selectAsset);
+  rememberLastActiveRepository(nextRepoId);
 
-  setStartupProgress(3, "读取首屏目录");
+  setWorkspaceStartupProgress(3, "读取首屏目录");
   const playlistItems = playlists.value;
   playlists.value = playlistItems;
   await primePlaylistDetailCache(nextRepoId, playlistItems);
@@ -445,7 +502,7 @@ export async function loadRepositories(
     repositories.value = items;
 
     if (!items.length) {
-      resetWorkspaceSelection();
+      resetWorkspaceSelection({ clearRememberedRepository: true });
       finishOperationProgress(progressId);
       return;
     }
@@ -478,30 +535,18 @@ export function ensureRepositoryWorkspace(
     ensureStructureUpdatedListener();
 
     try {
-      setStartupProgress(1, "加载仓库列表");
+      setWorkspaceStartupProgress(1, "加载仓库列表");
       const items = await listRepositories();
       repositories.value = items;
 
       await loadInitialRepository(items, selectAsset);
       await loadSettingsData();
 
-      workspaceStartup.value = {
-        status: "ready",
-        stepLabel: "加载完成",
-        currentStep: STARTUP_TOTAL_STEPS,
-        totalSteps: STARTUP_TOTAL_STEPS,
-        percent: 100,
-        error: null,
-      };
+      finishWorkspaceStartup();
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : String(cause);
       error.value = message;
-      workspaceStartup.value = {
-        ...workspaceStartup.value,
-        status: "error",
-        stepLabel: "加载失败",
-        error: message,
-      };
+      failWorkspaceStartup(message);
     } finally {
       setStartupLoadingFlags(false);
       startupPromise = null;

@@ -37,7 +37,9 @@ import {
 import { getPreviewPluginForEntry } from "../src/plugins/previewPlugins";
 import type { FileBrowserEntry, PlaylistDetail, PlaylistSummary, SmartFolder } from "../src/types/repository";
 import type { MockEntry, MockRepository } from "./fixtures/repositoryFixtures";
-import { createMockPlugins, defaultRepositoryActions, initialEntries, mockSnapshot, pluginManifest } from "./fixtures/repositoryFixtures";
+import { altRepository, createMockPlugins, defaultRepositoryActions, initialEntries, mockSnapshot, pluginManifest } from "./fixtures/repositoryFixtures";
+
+const LAST_ACTIVE_REPOSITORY_STORAGE_KEY = "momobako.lastActiveRepositoryId";
 
 async function renderApp() {
   resetRepositoryWorkspaceForTests();
@@ -609,6 +611,17 @@ describe("文件管理冒烟", () => {
     expect(workspace.workspaceStartup.value.status).toBe("ready");
   });
 
+  it("启动后自动恢复上次打开的资源库", async () => {
+    seedMockRepositories([mockSnapshot.repository, altRepository]);
+    window.localStorage.setItem(LAST_ACTIVE_REPOSITORY_STORAGE_KEY, "repo-alt-001");
+
+    await renderApp();
+
+    const workspace = useRepositoryWorkspace();
+    expect(workspace.activeRepoId.value).toBe("repo-alt-001");
+    expect(workspace.activeSnapshot.value?.repository.name).toBe("参考资源库");
+  });
+
   it("启动失败显示错误并允许重试", async () => {
     seedMockRepository();
     failNextInvoke("list_repositories", "仓库注册表读取失败");
@@ -635,6 +648,25 @@ describe("文件管理冒烟", () => {
     expect(screen.getByRole("button", { name: "刷新文件夹树" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "新建智能文件夹" })).toBeDisabled();
     expect(getInvokeCalls("get_repository_snapshot")).toHaveLength(0);
+  });
+
+  it("切换资源库时重新进入首屏加载页", async () => {
+    seedMockRepositories([mockSnapshot.repository, altRepository]);
+    await renderApp();
+
+    const workspace = useRepositoryWorkspace();
+    const delay = delayNextInvoke("get_repository_snapshot");
+    const switching = workspace.selectRepository("repo-alt-001");
+
+    expect(await screen.findByRole("heading", { name: "读取仓库摘要" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "资源库" })).not.toBeInTheDocument();
+
+    delay.resolve();
+    await switching;
+    await waitForCurrentWorkspaceView();
+
+    expect(workspace.activeRepoId.value).toBe("repo-alt-001");
+    expect(window.localStorage.getItem(LAST_ACTIVE_REPOSITORY_STORAGE_KEY)).toBe("repo-alt-001");
   });
 
   it("资源库切换器标记丢失资源库，并允许切换到丢失态", async () => {

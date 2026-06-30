@@ -61,7 +61,7 @@ function removeRepositorySummary(repoId: string) {
 function selectNextRepositoryAfterRemoval(removedRepoId: string) {
   const items = repositories.value;
   if (!items.length) {
-    resetWorkspaceSelection();
+    resetWorkspaceSelection({ clearRememberedRepository: true });
     return null;
   }
   const next = items.find((item) => item.repoId !== removedRepoId) ?? items[0];
