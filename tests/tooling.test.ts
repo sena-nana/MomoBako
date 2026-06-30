@@ -31,7 +31,9 @@ describe("MomoBako 工具链", () => {
     expect(deps.jszip).toBeUndefined();
     expect(pkg.dependencies.three).toBeDefined();
     expect(pkg.dependencies["@pixiv/three-vrm"]).toBeDefined();
-    expect(pkg.dependencies["@lilia/ui"]).toContain("github:sena-nana/LiliaUI#workspace=@lilia/ui&head=main");
+    expect(pkg.dependencies["@lilia/ui"]).toBe(
+      "github:sena-nana/LiliaUI#workspace=@lilia/ui&commit=d8baeb0b97251ce973063c480f86b70f96b1ec07",
+    );
     expect(pkg.dependencies["@lucide/vue"]).toBeDefined();
     expect(pkg.dependencies["lucide-vue-next"]).toBeUndefined();
     expect(pkg.devDependencies["@types/three"]).toBeDefined();

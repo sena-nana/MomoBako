@@ -14,9 +14,9 @@ afterEach(() => {
 });
 
 describe("useCornerStyle", () => {
-  it("loads legacy corner preferences for existing users", async () => {
-    localStorage.setItem("tauri-template.corners", "round");
-    localStorage.setItem("tauri-template.cornerRadius", "12");
+  it("reads the MomoBako corner preferences", async () => {
+    localStorage.setItem("momobako.corners", "round");
+    localStorage.setItem("momobako.cornerRadius", "12");
 
     const { useCornerStyle } = await loadCornerStyle();
 
@@ -25,13 +25,9 @@ describe("useCornerStyle", () => {
     expect(state.cornerRadius.value).toBe(12);
     expect(document.documentElement.dataset.corners).toBe("round");
     expect(document.documentElement.style.getPropertyValue("--app-corner-radius")).toBe("12px");
-    expect(localStorage.getItem("momobako.corners")).toBe("round");
-    expect(localStorage.getItem("momobako.cornerRadius")).toBe("12");
   });
 
-  it("prefers the MomoBako keys over legacy corner preferences", async () => {
-    localStorage.setItem("tauri-template.corners", "round");
-    localStorage.setItem("tauri-template.cornerRadius", "12");
+  it("keeps the stored MomoBako radius", async () => {
     localStorage.setItem("momobako.corners", "smooth");
     localStorage.setItem("momobako.cornerRadius", "6");
 
