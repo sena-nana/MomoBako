@@ -1,0 +1,19 @@
+External/Plugins/scripts/build.mjs
+  s_f52d388dcaec0a::t_dd44ec2ec1bc98 141
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.5",
+  "base_commit_sha": "88ee44ec8df8e0e591fdde500d70612ef9fe262b",
+  "prompts": {},
+  "sessions": {
+    "s_f52d388dcaec0a": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f1862-ba2a-7590-86e6-62fba1b692a7",
+        "model": "gpt-5.4"
+      },
+      "human_author": "AuraElicase <auraelicase@outlook.com>"
+    }
+  }
+}
