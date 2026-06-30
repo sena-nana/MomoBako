@@ -1,0 +1,31 @@
+src/ui/core/useTheme.ts
+  s_62d8ff77160b77::t_d9ecf9b58c81ea 2-3
+src/ui/core/useCornerStyle.ts
+  s_62d8ff77160b77::t_d9ecf9b58c81ea 2-3,19
+tests/cornerStyle.test.ts
+  s_62d8ff77160b77::t_d9ecf9b58c81ea 17-19,30
+package.json
+  s_62d8ff77160b77::t_581c9bd55b004b 26
+yarn.lock
+  s_62d8ff77160b77::t_d866e32e9cc9ef 792,794,800,3924
+tests/theme.test.ts
+  s_62d8ff77160b77::t_d9f00e9a6dbaf5 16-17,25,29
+tests/tooling.test.ts
+  s_62d8ff77160b77::t_11819f3f0acd0c 34-36
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.5",
+  "base_commit_sha": "4bde783a77084e1d54b11e45d5fbb5b884743e95",
+  "prompts": {},
+  "sessions": {
+    "s_62d8ff77160b77": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f1852-0a46-70e3-9d58-3e43098efecf",
+        "model": "gpt-5.4"
+      },
+      "human_author": "AuraElicase <auraelicase@outlook.com>"
+    }
+  }
+}
