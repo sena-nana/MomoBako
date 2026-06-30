@@ -34,10 +34,15 @@ import { loadFileBrowserForDirectory } from "./files";
 import {
   applyRepositorySnapshotAsPresetRoot,
   ensureRepositoryWorkspace as ensureRepositoryWorkspaceLifecycle,
+  failWorkspaceStartup,
+  finishWorkspaceStartup,
+  loadRepositoryRootDirectoryImmediately,
   loadRepositories as loadRepositoriesLifecycle,
   queueRepositoryBackgroundLoads,
+  rememberLastActiveRepository,
   refreshActiveRepositoryWorkspaceSilently as refreshActiveRepositoryWorkspaceSilentlyLifecycle,
   resetActiveRepositoryContent,
+  setWorkspaceStartupProgress,
 } from "./lifecycle";
 import { loadSettingsData } from "./settings";
 
@@ -46,8 +51,11 @@ export async function selectRepository(repoId: string) {
 
   const isSwitchingRepository = activeRepoId.value !== repoId;
   const previousDirectoryPath = !isSwitchingRepository ? currentDirectoryPath.value : "";
+  const previousRepoId = activeRepoId.value;
   if (isSwitchingRepository) {
-    resetActiveRepositoryContent();
+    setWorkspaceStartupProgress(1, "切换资源库");
+    resetActiveRepositoryContent(previousRepoId);
+    activeRepoId.value = repoId;
     isLoadingFileBrowser.value = true;
   }
   isLoadingSnapshot.value = true;
@@ -59,14 +67,17 @@ export async function selectRepository(repoId: string) {
     if (repository?.status === "missing") {
       activeRepoId.value = repoId;
       resetActiveRepositoryContent();
+      rememberLastActiveRepository(repoId);
       if (isSwitchingRepository) {
         resetSearchState();
+        finishWorkspaceStartup();
       }
       finishOperationProgress(progressId);
       return;
     }
 
     if (isSwitchingRepository) {
+      setWorkspaceStartupProgress(2, "读取仓库摘要");
       await applyRepositorySnapshotAsPresetRoot(repoId, selectAsset);
     } else {
       const snapshot = await getRepositorySnapshot(repoId);
@@ -84,6 +95,7 @@ export async function selectRepository(repoId: string) {
         void selectAsset(defaultAssetId);
       }
     }
+    rememberLastActiveRepository(repoId);
     updateOperationProgress(progressId, { detail: "加载资源索引", value: 46 });
     if (isSwitchingRepository) {
       resetSearchState();
@@ -106,10 +118,21 @@ export async function selectRepository(repoId: string) {
     if (!isSwitchingRepository && previousDirectoryPath && currentDirectoryPath.value !== previousDirectoryPath) {
       currentDirectoryPath.value = "";
     }
+    if (isSwitchingRepository) {
+      setWorkspaceStartupProgress(3, "读取首屏目录");
+      await loadRepositoryRootDirectoryImmediately(repoId);
+    }
     queueRepositoryBackgroundLoads(repoId);
+    if (isSwitchingRepository) {
+      finishWorkspaceStartup();
+    }
     finishOperationProgress(progressId);
   } catch (cause) {
-    error.value = cause instanceof Error ? cause.message : String(cause);
+    const message = cause instanceof Error ? cause.message : String(cause);
+    error.value = message;
+    if (isSwitchingRepository) {
+      failWorkspaceStartup(message);
+    }
     cancelOperationProgress(progressId);
   } finally {
     isLoadingSnapshot.value = false;

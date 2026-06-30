@@ -69,6 +69,7 @@ const { playlists } = useWorkspacePlaylists();
 const { workspaceStartup } = useWorkspaceProgress();
 const player = usePlaylistPlayer();
 const systemMediaSession = useSystemMediaSession(player);
+const hasRenderedWorkspace = ref(false);
 
 const isWorkspaceReady = computed(() => workspaceStartup.value.status === "ready");
 const isWorkspaceStartupError = computed(() => workspaceStartup.value.status === "error");
@@ -93,6 +94,12 @@ function retryWorkspaceStartup() {
 
 watch(playerMountRef, (element) => {
   player.attachMountTarget(element);
+}, { immediate: true });
+
+watch(isWorkspaceReady, (ready) => {
+  if (ready) {
+    hasRenderedWorkspace.value = true;
+  }
 }, { immediate: true });
 
 watch(activeRepoId, async (repoId, previousRepoId) => {
@@ -142,9 +149,16 @@ onBeforeUnmount(() => {
       :left-sidebar-collapsed="sidebarCollapsed"
       @toggle-left-sidebar="toggleSidebarCollapsed"
     />
-    <SecondaryPanel v-if="isWorkspaceReady" />
     <div
-      v-if="isWorkspaceReady"
+      v-if="hasRenderedWorkspace"
+      class="shell__workspace-layer"
+      :style="{ display: isWorkspaceReady ? 'contents' : 'none' }"
+    >
+      <SecondaryPanel />
+    </div>
+    <div
+      v-if="hasRenderedWorkspace"
+      :style="{ display: isWorkspaceReady ? '' : 'none' }"
       class="shell__resizer"
       role="separator"
       aria-orientation="vertical"
@@ -188,7 +202,13 @@ onBeforeUnmount(() => {
           </button>
         </div>
       </section>
-      <RouterView v-else />
+      <div
+        v-if="hasRenderedWorkspace"
+        class="shell__workspace-layer"
+        :style="{ display: isWorkspaceReady ? 'contents' : 'none' }"
+      >
+        <RouterView />
+      </div>
     </main>
 
     <div ref="playerMountRef" class="workspace-player-host" aria-hidden="true"></div>
