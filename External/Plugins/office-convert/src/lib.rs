@@ -225,11 +225,7 @@ fn ensure_preview_pdf(
     runtime: &RuntimeContext,
     payload: EnsurePreviewPdfPayload,
 ) -> Result<serde_json::Value, String> {
-    let source_path = payload
-        .source_path
-        .as_deref()
-        .map(PathBuf::from)
-        .ok_or_else(|| "missing sourcePath".to_string())?;
+    let source_path = resolve_preview_source_path(runtime, &payload)?;
     if !source_path.is_file() {
         return Err(format!(
             "source file is not available: {}",
@@ -288,6 +284,40 @@ fn ensure_preview_pdf(
         "sizeBytes": metadata.len() as i64,
         "modifiedAt": modified_at
     }))
+}
+
+fn resolve_preview_source_path(
+    runtime: &RuntimeContext,
+    payload: &EnsurePreviewPdfPayload,
+) -> Result<PathBuf, String> {
+    if let Some(source_path) = payload
+        .source_path
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        return Ok(PathBuf::from(source_path));
+    }
+    let repo_root = repository_root_for_id(runtime, &payload.repo_id)?;
+    let normalized_entry_path = normalize_repository_entry_path(&payload.entry_path)?;
+    Ok(repo_root.join(normalized_entry_path))
+}
+
+fn normalize_repository_entry_path(path: &str) -> Result<PathBuf, String> {
+    let normalized = path.trim().replace('\\', "/");
+    let normalized = normalized.trim_matches('/');
+    if normalized.is_empty() {
+        return Err("entryPath is required".to_string());
+    }
+    let mut resolved = PathBuf::new();
+    for segment in normalized.split('/') {
+        let segment = segment.trim();
+        if segment.is_empty() || segment == "." || segment == ".." {
+            return Err(format!("invalid entryPath: {path}"));
+        }
+        resolved.push(segment);
+    }
+    Ok(resolved)
 }
 
 fn get_runtime_status(runtime: &RuntimeContext) -> Result<RuntimeStatusResponse, String> {
@@ -1994,6 +2024,63 @@ mod tests {
         assert_eq!(
             repository_cache_dir(&repo_root),
             PathBuf::from("C:/Repo/.momo/cache/office-preview")
+        );
+    }
+
+    #[test]
+    fn normalize_repository_entry_path_rejects_parent_segments() {
+        assert!(normalize_repository_entry_path("../Secrets/demo.docx").is_err());
+        assert!(normalize_repository_entry_path("Docs/./demo.docx").is_err());
+    }
+
+    #[test]
+    fn resolve_preview_source_path_falls_back_to_repo_relative_entry_path() {
+        let workspace = TestWorkspace::new("resolve-preview-source");
+        let service_root = workspace.path("service-root");
+        let plugin_data_dir = workspace.path("plugin-data");
+        let repo_root = workspace.path("repo");
+        fs::create_dir_all(&service_root).expect("service root should be created");
+        fs::create_dir_all(&plugin_data_dir).expect("plugin data dir should be created");
+        fs::create_dir_all(repo_root.join("Docs")).expect("repo docs dir should be created");
+        let source_path = repo_root.join("Docs").join("demo.docx");
+        fs::write(&source_path, b"docx").expect("source file should be written");
+
+        let connection = Connection::open(service_root.join(REGISTRY_FILE_NAME))
+            .expect("registry should be created");
+        connection
+            .execute(
+                "CREATE TABLE repositories (repo_id TEXT PRIMARY KEY, path TEXT NOT NULL)",
+                [],
+            )
+            .expect("repositories table should be created");
+        connection
+            .execute(
+                "INSERT INTO repositories (repo_id, path) VALUES (?1, ?2)",
+                params!["repo-demo", repo_root.to_string_lossy().to_string()],
+            )
+            .expect("repository row should be inserted");
+
+        let runtime = RuntimeContext {
+            plugin_data_dir,
+            service_root_dir: service_root,
+            plugin_runtime_dir: workspace.path("runtime"),
+            config: PluginConfig {
+                converter_mode: ConverterMode::Auto,
+                auto_download_libreoffice: true,
+            },
+        };
+        let payload = EnsurePreviewPdfPayload {
+            repo_id: "repo-demo".to_string(),
+            entry_path: "Docs/demo.docx".to_string(),
+            extension: "docx".to_string(),
+            source_path: None,
+            source_modified_at: None,
+            source_size_bytes: None,
+        };
+
+        assert_eq!(
+            resolve_preview_source_path(&runtime, &payload).expect("source path should resolve"),
+            source_path
         );
     }
 
