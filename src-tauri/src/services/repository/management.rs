@@ -176,8 +176,8 @@ pub(super) fn relocate_repository(
     state.ensure_initialized()?;
 
     let repo = state.load_repository_record(&request.repo_id)?;
-    if repo.backend_record.plugin_id != LOCAL_FILESYSTEM_PLUGIN_ID {
-        return Err("only local filesystem repositories can be relocated".to_string());
+    if !repository_supports_local_write_access(&repo) {
+        return Err("only repositories with local write access can be relocated".to_string());
     }
 
     let next_path = request.path.trim();

@@ -333,15 +333,15 @@ pub(super) fn load_file_browser(
     )?;
     let thumbnail_root = state.repository_thumbnail_root(&repo)?;
     let special_location = normalize_special_location(request.special_location.as_deref())?;
-    if special_location.is_some() && repo.backend_record.plugin_id != LOCAL_FILESYSTEM_PLUGIN_ID {
+    if special_location.is_some() && !repository_supports_local_root_access(&repo) {
         return Err(format!(
-            "trash browser is only supported for local filesystem repositories, got: {}",
-            repo.backend_record.plugin_id
+            "trash browser is only supported for repositories with local root access, got: {}",
+            repo.summary.backend.plugin_id
         ));
     }
     let current_path =
         normalize_directory_path(request.directory_path.as_deref().unwrap_or_default())?;
-    let cache_snapshot = if repo.backend_record.plugin_id == LOCAL_FILESYSTEM_PLUGIN_ID {
+    let cache_snapshot = if repository_supports_local_root_access(&repo) {
         let snapshot = local_repository_cache_snapshot(
             &connection,
             &request.repo_id,
@@ -360,15 +360,13 @@ pub(super) fn load_file_browser(
     let tree = if special_location.is_some() {
         None
     } else if request.include_tree.unwrap_or(true) {
-        Some(
-            if repo.backend_record.plugin_id == LOCAL_FILESYSTEM_PLUGIN_ID {
-                build_tree_from_directory_records(
-                    load_directory_records(&connection, &request.repo_id).map_err(db_error)?,
-                )
-            } else {
-                list_backend_tree(&state.root, &repo, &repo_root)?
-            },
-        )
+        Some(if repository_supports_local_root_access(&repo) {
+            build_tree_from_directory_records(
+                load_directory_records(&connection, &request.repo_id).map_err(db_error)?,
+            )
+        } else {
+            list_backend_tree(&state.root, &repo, &repo_root)?
+        })
     } else {
         None
     };
@@ -397,7 +395,7 @@ pub(super) fn load_file_browser(
         (entries, total_entries, loaded_count, next_offset, has_more)
     } else {
         let (listed_entries, total_entries, loaded_count, next_offset, has_more) =
-            if repo.backend_record.plugin_id == LOCAL_FILESYSTEM_PLUGIN_ID {
+            if repository_supports_local_root_access(&repo) {
                 let entries =
                     load_cached_directory_entries(&connection, &request.repo_id, &current_path)?;
                 paginate_listed_entries(entries, offset, limit)
@@ -514,7 +512,7 @@ pub(super) fn load_repository_tree(
         &repo.summary.path,
         &repo.backend_record,
     )?;
-    let cache_snapshot = if repo.backend_record.plugin_id == LOCAL_FILESYSTEM_PLUGIN_ID {
+    let cache_snapshot = if repository_supports_local_root_access(&repo) {
         let snapshot = local_repository_cache_snapshot(
             &connection,
             repo_id,
@@ -530,7 +528,7 @@ pub(super) fn load_repository_tree(
             indexed_at: None,
         }
     };
-    let tree = if repo.backend_record.plugin_id == LOCAL_FILESYSTEM_PLUGIN_ID {
+    let tree = if repository_supports_local_root_access(&repo) {
         build_tree_from_directory_records(
             load_directory_records(&connection, repo_id).map_err(db_error)?,
         )
@@ -559,7 +557,7 @@ pub(super) fn create_directory(
     let parent_path = normalize_directory_path(request.parent_path.as_deref().unwrap_or_default())?;
     let name = validate_new_entry_name(&request.name)?;
     create_backend_directory(&state.root, &repo, &repo_root, &parent_path, &name)?;
-    if repo.backend_record.plugin_id == LOCAL_FILESYSTEM_PLUGIN_ID {
+    if repository_supports_local_root_access(&repo) {
         let connection = state.open_repository_connection(
             &repo.summary.repo_id,
             &repo.summary.path,
@@ -615,7 +613,7 @@ pub(super) fn import_entries(
 ) -> Result<FileBrowserSnapshot, String> {
     state.ensure_initialized()?;
     let repo = state.load_repository_record(&request.repo_id)?;
-    ensure_local_filesystem_repository(&repo, "importing files")?;
+    ensure_repository_supports_local_write_access(&repo, "importing files")?;
 
     let repo_root = PathBuf::from(&repo.summary.path);
     let (parent_path, target_dir) = resolve_file_copy_target(
@@ -637,7 +635,7 @@ pub(super) fn copy_entries(
 ) -> Result<FileBrowserSnapshot, String> {
     state.ensure_initialized()?;
     let repo = state.load_repository_record(&request.repo_id)?;
-    ensure_local_filesystem_repository(&repo, "copying files")?;
+    ensure_repository_supports_local_write_access(&repo, "copying files")?;
 
     let repo_root = PathBuf::from(&repo.summary.path);
     let (parent_path, target_dir) = resolve_file_copy_target(
@@ -661,7 +659,7 @@ pub(super) fn move_entries(
 ) -> Result<FileBrowserSnapshot, String> {
     state.ensure_initialized()?;
     let repo = state.load_repository_record(&request.repo_id)?;
-    ensure_local_filesystem_repository(&repo, "moving files")?;
+    ensure_repository_supports_local_write_access(&repo, "moving files")?;
 
     let repo_root = PathBuf::from(&repo.summary.path);
     let parent_path = normalize_directory_path(&request.parent_path)?;
@@ -806,10 +804,10 @@ pub(super) fn delete_entry(
     let delete_mode = request.mode.as_deref().unwrap_or("delete");
 
     if delete_mode == "permanentDelete" {
-        if repo.backend_record.plugin_id != LOCAL_FILESYSTEM_PLUGIN_ID {
+        if !repository_supports_local_write_access(&repo) {
             return Err(format!(
-                "permanent trash delete is only supported for local filesystem repositories, got: {}",
-                repo.backend_record.plugin_id
+                "permanent trash delete is only supported for repositories with local write access, got: {}",
+                repo.summary.backend.plugin_id
             ));
         }
         let trash_path = normalize_trash_relative_path(&request.path, false)?;
@@ -843,10 +841,10 @@ pub(super) fn delete_entry(
                 &entry_path,
             )?;
         } else {
-            if repo.backend_record.plugin_id != LOCAL_FILESYSTEM_PLUGIN_ID {
+            if !repository_supports_local_write_access(&repo) {
                 return Err(format!(
-                    "trash delete is only supported for local filesystem repositories, got: {}",
-                    repo.backend_record.plugin_id
+                    "trash delete is only supported for repositories with local write access, got: {}",
+                    repo.summary.backend.plugin_id
                 ));
             }
             move_entry_to_trash(&repo_root, &entry_path, is_directory)?;
@@ -863,10 +861,10 @@ pub(super) fn delete_entry(
             })?;
         }
     } else {
-        if repo.backend_record.plugin_id != LOCAL_FILESYSTEM_PLUGIN_ID {
+        if !repository_supports_local_write_access(&repo) {
             return Err(format!(
-                "trash delete is only supported for local filesystem repositories, got: {}",
-                repo.backend_record.plugin_id
+                "trash delete is only supported for repositories with local write access, got: {}",
+                repo.summary.backend.plugin_id
             ));
         }
         move_entry_to_trash(&repo_root, &entry_path, is_directory)?;
@@ -899,10 +897,10 @@ pub(super) fn mutate_trash(
 ) -> Result<FileBrowserSnapshot, String> {
     state.ensure_initialized()?;
     let repo = state.load_repository_record(&request.repo_id)?;
-    if repo.backend_record.plugin_id != LOCAL_FILESYSTEM_PLUGIN_ID {
+    if !repository_supports_local_write_access(&repo) {
         return Err(format!(
-            "trash operations are only supported for local filesystem repositories, got: {}",
-            repo.backend_record.plugin_id
+            "trash operations are only supported for repositories with local write access, got: {}",
+            repo.summary.backend.plugin_id
         ));
     }
     let repo_root = PathBuf::from(&repo.summary.path);

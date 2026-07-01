@@ -323,9 +323,9 @@ impl RepositoryState {
     ) -> Result<HardlinkConfirmResponse, String> {
         self.ensure_initialized()?;
         let repo = self.load_repository_record(&request.repo_id)?;
-        if repo.backend_record.plugin_id != LOCAL_FILESYSTEM_PLUGIN_ID {
+        if !repository_supports_local_write_access(&repo) {
             return Err(
-                "hardlink confirmation is only supported for local filesystem repositories"
+                "hardlink confirmation is only supported for repositories with local write access"
                     .to_string(),
             );
         }

@@ -61,11 +61,20 @@ struct FileTreeNode {
     children: Vec<FileTreeNode>,
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DirectoryPageResult {
+    entries: Vec<FileSystemEntry>,
+    total_entries: usize,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct FileSystemPayload {
     repo_root: PathBuf,
     directory_path: Option<String>,
+    offset: Option<usize>,
+    limit: Option<usize>,
     parent_path: Option<String>,
     target_parent_path: Option<String>,
     entry_path: Option<String>,
@@ -133,6 +142,22 @@ fn handle_call(input: *const c_char) -> Result<serde_json::Value, String> {
             }
             let entries = local_directory_entries(&payload.repo_root, &current_dir)?;
             serde_json::to_value(entries).map_err(|error| error.to_string())
+        }
+        "filesystem.listDirectoryPage" => {
+            let directory_path = payload.directory_path.as_deref().unwrap_or_default();
+            let current_dir = resolve_relative_path(&payload.repo_root, directory_path)?;
+            if !current_dir.exists() || !current_dir.is_dir() {
+                return Err(format!("directory not found: {directory_path}"));
+            }
+            let entries = local_directory_entries(&payload.repo_root, &current_dir)?;
+            let total_entries = entries.len();
+            let offset = payload.offset.unwrap_or(0).min(total_entries);
+            let limit = payload.limit.unwrap_or(usize::MAX);
+            let page = DirectoryPageResult {
+                entries: entries.into_iter().skip(offset).take(limit).collect(),
+                total_entries,
+            };
+            serde_json::to_value(page).map_err(|error| error.to_string())
         }
         "filesystem.createDirectory" => {
             let parent_path = payload.parent_path.as_deref().unwrap_or_default();
@@ -851,6 +876,31 @@ mod tests {
         assert_eq!(files[0].extension, "flac");
         assert_eq!(files[0].size_bytes, 5);
         assert!(files[0].modified_at.contains('T'));
+    }
+
+    #[test]
+    fn list_directory_page_returns_paginated_entries() {
+        let workspace = TestWorkspace::new("directory-page");
+        fs::create_dir_all(workspace.root.join("albums")).expect("albums dir should be created");
+        fs::write(workspace.root.join("albums").join("b.flac"), b"b").expect("b should be written");
+        fs::write(workspace.root.join("albums").join("a.flac"), b"a").expect("a should be written");
+
+        let entries = local_directory_entries(&workspace.root, &workspace.root.join("albums"))
+            .expect("directory entries should load");
+        let total_entries = entries.len();
+        let page = DirectoryPageResult {
+            entries: entries.into_iter().skip(1).take(1).collect(),
+            total_entries,
+        };
+
+        let value = serde_json::to_value(page).expect("page should serialize");
+
+        assert_eq!(value.get("totalEntries"), Some(&serde_json::json!(2)));
+        let entries = value
+            .get("entries")
+            .and_then(serde_json::Value::as_array)
+            .expect("entries should be an array");
+        assert_eq!(entries.len(), 1);
     }
 
     #[test]

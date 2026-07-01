@@ -540,7 +540,7 @@ pub fn install_local_filesystem_test_plugin_archive(service_root: &Path) {
                 "kind": "filesystem",
                 "category": "source",
                 "description": "Test local filesystem backend.",
-                "capabilities": ["listFiles", "readFile", "writeFile", "moveFile", "deleteFile"],
+                "capabilities": ["browse", "read", "write", "watch", "sync", "localRootPath"],
                 "enabled": true,
                 "sdk": "backend",
                 "entry": {},

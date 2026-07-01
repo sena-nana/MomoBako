@@ -2,7 +2,7 @@
 
 use crate::services::repository::{
     RepositoryState, RepositoryStructureRefreshRequest, RepositoryStructureUpdatedEvent,
-    SyncRequest,
+    RepositorySummary, SyncRequest, LOCAL_ROOT_PATH_CAPABILITY,
 };
 use notify::{Config, Event, RecommendedWatcher, RecursiveMode, Watcher};
 use std::{
@@ -16,8 +16,22 @@ use std::{
     time::{Duration, Instant},
 };
 
-const LOCAL_FILESYSTEM_PLUGIN_ID: &str = "momobako.local-filesystem";
 const STRUCTURE_REFRESH_DEBOUNCE_MS: u64 = 400;
+
+fn repository_supports_local_watch(summary: &RepositorySummary) -> bool {
+    summary.backend.kind == "filesystem"
+        && summary
+            .backend
+            .capabilities
+            .iter()
+            .any(|value| value == LOCAL_ROOT_PATH_CAPABILITY)
+        && summary
+            .backend
+            .capabilities
+            .iter()
+            .any(|value| value == "watch")
+        && Path::new(&summary.path).is_absolute()
+}
 
 #[derive(Debug)]
 pub(crate) struct RepositoryWatcher {
@@ -78,7 +92,7 @@ pub(crate) fn sync_watched_paths(
     let repositories = repository_state.list_repositories()?;
     let desired_paths = repositories
         .into_iter()
-        .filter(|repository| repository.backend.plugin_id == LOCAL_FILESYSTEM_PLUGIN_ID)
+        .filter(repository_supports_local_watch)
         .map(|repository| PathBuf::from(repository.path))
         .collect::<BTreeSet<_>>();
 
@@ -105,10 +119,7 @@ pub(crate) fn sync_watched_paths(
     Ok(())
 }
 
-fn handle_fs_event(
-    repository_state: &Arc<RepositoryState>,
-    event: Event,
-) {
+fn handle_fs_event(repository_state: &Arc<RepositoryState>, event: Event) {
     let Ok(repositories) = repository_state.list_repositories() else {
         return;
     };
@@ -119,10 +130,8 @@ fn handle_fs_event(
             .iter()
             .find(|repo| normalized_path.starts_with(&normalize_path(Path::new(&repo.path))))
         {
-            repository_state.queue_repository_structure_refresh(
-                repository.repo_id.clone(),
-                "watcher",
-            );
+            repository_state
+                .queue_repository_structure_refresh(repository.repo_id.clone(), "watcher");
         }
     }
 }
@@ -146,8 +155,9 @@ fn run_structure_refresh_worker(
         let ready = pending
             .iter()
             .filter_map(|(repo_id, (reason, queued_at))| {
-                (now.duration_since(*queued_at).as_millis() >= u128::from(STRUCTURE_REFRESH_DEBOUNCE_MS))
-                    .then_some((repo_id.clone(), reason.clone()))
+                (now.duration_since(*queued_at).as_millis()
+                    >= u128::from(STRUCTURE_REFRESH_DEBOUNCE_MS))
+                .then_some((repo_id.clone(), reason.clone()))
             })
             .collect::<Vec<_>>();
 
@@ -166,11 +176,13 @@ fn run_structure_refresh_worker(
                 .flatten();
             let _ = repository_state.set_repository_structure_refreshing(&repo_id, false);
             if sync_result.is_ok() {
-                repository_state.emit_repository_structure_updated(RepositoryStructureUpdatedEvent {
-                    repo_id,
-                    reason,
-                    indexed_at,
-                });
+                repository_state.emit_repository_structure_updated(
+                    RepositoryStructureUpdatedEvent {
+                        repo_id,
+                        reason,
+                        indexed_at,
+                    },
+                );
             }
         }
     }

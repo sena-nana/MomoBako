@@ -2,15 +2,36 @@
 
 use super::*;
 
-pub(super) fn ensure_local_filesystem_repository(
+pub(crate) const LOCAL_ROOT_PATH_CAPABILITY: &str = "localRootPath";
+
+pub(super) fn backend_has_capability(backend: &RepositoryBackendSummary, capability: &str) -> bool {
+    backend.capabilities.iter().any(|value| value == capability)
+}
+
+pub(super) fn repository_supports_local_root_access(repo: &RepositoryRecord) -> bool {
+    repo.summary.backend.kind == "filesystem"
+        && backend_has_capability(&repo.summary.backend, LOCAL_ROOT_PATH_CAPABILITY)
+}
+
+pub(super) fn repository_supports_local_read_access(repo: &RepositoryRecord) -> bool {
+    repository_supports_local_root_access(repo)
+        && backend_has_capability(&repo.summary.backend, "read")
+}
+
+pub(super) fn repository_supports_local_write_access(repo: &RepositoryRecord) -> bool {
+    repository_supports_local_root_access(repo)
+        && backend_has_capability(&repo.summary.backend, "write")
+}
+
+pub(super) fn ensure_repository_supports_local_write_access(
     repo: &RepositoryRecord,
     action: &str,
 ) -> Result<(), String> {
-    if repo.backend_record.plugin_id == LOCAL_FILESYSTEM_PLUGIN_ID {
+    if repository_supports_local_write_access(repo) {
         Ok(())
     } else {
         Err(format!(
-            "{action} is only supported for local filesystem repositories"
+            "{action} is only supported for repositories with local write access"
         ))
     }
 }

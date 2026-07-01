@@ -8,7 +8,7 @@ pub(super) fn generate_thumbnail_for_file(
     thumbnail_root: &Path,
     file: &DiscoveredFile,
 ) -> Result<Option<String>, String> {
-    if repo.backend_record.plugin_id != LOCAL_FILESYSTEM_PLUGIN_ID {
+    if !repository_supports_local_read_access(repo) {
         return Ok(None);
     }
 

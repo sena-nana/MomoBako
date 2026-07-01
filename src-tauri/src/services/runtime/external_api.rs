@@ -1,7 +1,9 @@
 //! Loopback external API server and connection-file helpers.
 
 use super::PREVIEW_HOST;
-use crate::services::repository::{ExternalAddAssetRequest, RepositoryState};
+use crate::services::repository::{
+    ExternalAddAssetRequest, RepositoryState, RepositorySummary, LOCAL_ROOT_PATH_CAPABILITY,
+};
 use serde::Serialize;
 use std::{
     fs,
@@ -14,7 +16,21 @@ use tiny_http::{Method, Request, Response, Server, StatusCode};
 
 const EXTERNAL_PATH_PREFIX: &str = "/external/v1/";
 const EXTERNAL_CONNECTION_FILE_NAME: &str = "external-api.json";
-const LOCAL_FILESYSTEM_PLUGIN_ID: &str = "momobako.local-filesystem";
+fn repository_supports_external_add_assets(summary: &RepositorySummary) -> bool {
+    summary.status == "ready"
+        && summary.backend.kind == "filesystem"
+        && summary
+            .backend
+            .capabilities
+            .iter()
+            .any(|value| value == LOCAL_ROOT_PATH_CAPABILITY)
+        && summary
+            .backend
+            .capabilities
+            .iter()
+            .any(|value| value == "write")
+        && Path::new(&summary.path).is_absolute()
+}
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -192,10 +208,7 @@ fn handle_external_api_request(
                 Ok(repositories) => {
                     let repositories = repositories
                         .into_iter()
-                        .filter(|repo| {
-                            repo.status == "ready"
-                                && repo.backend.plugin_id == LOCAL_FILESYSTEM_PLUGIN_ID
-                        })
+                        .filter(repository_supports_external_add_assets)
                         .collect::<Vec<_>>();
                     respond_json(request, StatusCode(200), &repositories);
                 }
