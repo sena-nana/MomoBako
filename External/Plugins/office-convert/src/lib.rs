@@ -2042,6 +2042,23 @@ mod tests {
     }
 
     #[test]
+    fn converter_mode_from_config_supports_all_declared_values() {
+        assert!(matches!(ConverterMode::from_config(Some("auto")), ConverterMode::Auto));
+        assert!(matches!(
+            ConverterMode::from_config(Some("microsoft-office")),
+            ConverterMode::MicrosoftOffice
+        ));
+        assert!(matches!(
+            ConverterMode::from_config(Some("libreoffice")),
+            ConverterMode::LibreOffice
+        ));
+        assert!(matches!(
+            ConverterMode::from_config(Some("unexpected-value")),
+            ConverterMode::Auto
+        ));
+    }
+
+    #[test]
     fn normalize_repository_entry_path_rejects_parent_segments() {
         assert!(normalize_repository_entry_path("../Secrets/demo.docx").is_err());
         assert!(normalize_repository_entry_path("Docs/./demo.docx").is_err());
@@ -2169,6 +2186,30 @@ mod tests {
             runtime.service_root_dir,
             PathBuf::from("C:/Service")
         );
+    }
+
+    #[test]
+    fn runtime_status_response_keeps_mode_and_download_configuration_fields() {
+        let workspace = TestWorkspace::new("runtime-status-shape");
+        let runtime = RuntimeContext {
+            plugin_data_dir: workspace.path("plugin-data"),
+            service_root_dir: workspace.path("service-root"),
+            plugin_runtime_dir: workspace.path("runtime"),
+            config: PluginConfig {
+                converter_mode: ConverterMode::LibreOffice,
+                auto_download_libreoffice: false,
+            },
+        };
+
+        let status = get_runtime_status(&runtime).expect("runtime status should resolve");
+
+        assert_eq!(status.converter_mode, "libreoffice");
+        assert!(!status.auto_download_libre_office);
+        assert_eq!(status.bundled_download_url, DEFAULT_LIBREOFFICE_DOWNLOAD_URL);
+        assert!(status.microsoft_office.reason.is_some() || status.microsoft_office.available);
+        assert!(status.libreoffice_system.reason.is_some() || status.libreoffice_system.available);
+        assert!(status.libreoffice_bundle.reason.is_some() || status.libreoffice_bundle.available);
+        assert!(status.daemon.is_object());
     }
 
     #[test]
