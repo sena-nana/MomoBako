@@ -1,0 +1,21 @@
+tests/apiDesignContract.test.ts
+  s_2d5a17782b6bfd::t_93db5cb727dce6 141-155,161-165,171-175
+tests/setupTests.ts
+  s_2d5a17782b6bfd::t_c48c16a3bbf09a 1871-1902,1913-1928,1941-1952
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.5",
+  "base_commit_sha": "9092c3ad17f64a8313221a5f120f91fc0eedb88b",
+  "prompts": {},
+  "sessions": {
+    "s_2d5a17782b6bfd": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f1cad-dea8-7323-b604-a3effbaf235c",
+        "model": "unknown"
+      },
+      "human_author": "AuraElicase <auraelicase@outlook.com>"
+    }
+  }
+}
