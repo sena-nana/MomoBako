@@ -1,0 +1,21 @@
+External/Plugins/service-downloader/manifest.json
+  s_2d5a17782b6bfd::t_6303828c4b4ee0 52-96,101-130
+docs/api-design.md
+  s_2d5a17782b6bfd::t_fb8b7c38ac4cb9 401-407,428
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.5",
+  "base_commit_sha": "34717bc0ed316769202e1b7700724e892cb3e955",
+  "prompts": {},
+  "sessions": {
+    "s_2d5a17782b6bfd": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f1cad-dea8-7323-b604-a3effbaf235c",
+        "model": "unknown"
+      },
+      "human_author": "AuraElicase <auraelicase@outlook.com>"
+    }
+  }
+}
