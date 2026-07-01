@@ -37,10 +37,13 @@ function createSettingsPage(ctx) {
         void loadAll();
       });
 
-      async function loadAll() {
+      async function loadAll(options = {}) {
+        const { preserveMessage = false } = options;
         loading.value = true;
         error.value = "";
-        message.value = "";
+        if (!preserveMessage) {
+          message.value = "";
+        }
         try {
           const [runtimeResponse, repoList] = await Promise.all([
             ctx.callPlugin({
@@ -77,7 +80,7 @@ function createSettingsPage(ctx) {
           });
           const removed = response.payload?.removed ?? 0;
           message.value = `已清理 ${removed} 个缓存文件`;
-          await loadAll();
+          await loadAll({ preserveMessage: true });
         } catch (cause) {
           error.value = cause instanceof Error ? cause.message : String(cause);
         } finally {
@@ -99,7 +102,7 @@ function createSettingsPage(ctx) {
           message.value = response.payload?.stopped
             ? "LibreOffice 守护进程已关闭"
             : "当前没有运行中的 LibreOffice 守护进程";
-          await loadAll();
+          await loadAll({ preserveMessage: true });
         } catch (cause) {
           error.value = cause instanceof Error ? cause.message : String(cause);
         } finally {
@@ -120,7 +123,7 @@ function createSettingsPage(ctx) {
           });
           const ok = response.payload?.ok === true;
           message.value = ok ? "运行时自检通过" : (response.payload?.error || "运行时自检失败");
-          await loadAll();
+          await loadAll({ preserveMessage: true });
         } catch (cause) {
           error.value = cause instanceof Error ? cause.message : String(cause);
         } finally {

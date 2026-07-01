@@ -1460,6 +1460,42 @@ vi.mock("@tauri-apps/api/core", () => ({
           },
         };
       }
+      if (pluginId === "momobako.service.office-convert" && method === "officeConvert.clearPreviewCache") {
+        return {
+          pluginId,
+          method,
+          payload: {
+            repoId: request?.payload?.repoId ?? "repo-main-001",
+            removed: 0,
+          },
+        };
+      }
+      if (pluginId === "momobako.service.office-convert" && method === "officeConvert.runRuntimeSelfCheck") {
+        return {
+          pluginId,
+          method,
+          payload: {
+            ok: true,
+            converter: "microsoft-office",
+            converterPath: "C:/Program Files/Microsoft Office/root/Office16/WINWORD.EXE",
+            conversionMode: "microsoft-office",
+            samplePath: "C:/Mock/office/self-check.docx",
+            pdfPath: "C:/Mock/office/self-check.pdf",
+            pdfSizeBytes: 4096,
+            durationMs: 1200,
+          },
+        };
+      }
+      if (pluginId === "momobako.service.office-convert" && method === "officeConvert.shutdownDaemon") {
+        return {
+          pluginId,
+          method,
+          payload: {
+            stopped: false,
+            reason: "当前没有运行中的 LibreOffice 守护进程",
+          },
+        };
+      }
       if (pluginId === "momobako.service.downloader" && method === "downloader.getRuntimeStatus") {
         return {
           pluginId,
@@ -1468,6 +1504,7 @@ vi.mock("@tauri-apps/api/core", () => ({
             runtime: "aria2",
             aria2: {
               running: false,
+              rpcUrl: "http://127.0.0.1:6800/jsonrpc",
             },
             queueSize: 0,
             downloadsDir: "C:/MomoBako/.service-data/plugin-data/momobako-service-downloader/downloads",
