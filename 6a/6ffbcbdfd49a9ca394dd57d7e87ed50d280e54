@@ -1,0 +1,29 @@
+External/Plugins/media-preview/src/register.js
+  s_f415b04d324453::t_957ba5ce68e62f 178
+External/Plugins/office-preview/src/register.js
+  s_f415b04d324453::t_2678d288f502bf 55
+External/Plugins/preview-archive/src/register.js
+  s_f415b04d324453::t_1bd670a68c674f 113
+External/Plugins/text-preview/src/register.js
+  s_f415b04d324453::t_131cc431849010 103
+External/Plugins/three-model-preview/src/register.js
+  s_f415b04d324453::t_14e12d61e17486 44
+tests/threeModelPreview.test.ts
+  s_f415b04d324453::t_e9b4e2b74fbcf5 441-468
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.5",
+  "base_commit_sha": "6a6ffbcbdfd49a9ca394dd57d7e87ed50d280e54",
+  "prompts": {},
+  "sessions": {
+    "s_f415b04d324453": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f1c64-9e32-7502-a290-db97e8eacc2e",
+        "model": "unknown"
+      },
+      "human_author": "AuraElicase <auraelicase@outlook.com>"
+    }
+  }
+}
