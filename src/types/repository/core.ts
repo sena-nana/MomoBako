@@ -819,6 +819,9 @@ export type OfficeConvertDaemonStatus = {
   pid?: number | null;
   sofficeReady?: boolean | null;
   sofficePid?: number | null;
+  unoAvailable?: boolean | null;
+  pythonValid?: boolean | null;
+  pythonPath?: string | null;
   path?: string | null;
   updatedAt?: string | null;
   error?: string | null;

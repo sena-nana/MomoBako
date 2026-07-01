@@ -130,6 +130,7 @@ fn main() -> Result<(), String> {
             (&Method::Get, "/health") => {
                 let healthy = state.ensure_soffice_ready().is_ok();
                 let soffice_pid = state.soffice_pid();
+                let python_path = libreoffice_python_path(&state.args.soffice_path);
                 let _ = request.respond(json_response(
                     if healthy {
                         StatusCode(200)
@@ -141,6 +142,9 @@ fn main() -> Result<(), String> {
                         "runtime": "office-convert-helper",
                         "sofficeReady": healthy,
                         "sofficePid": soffice_pid,
+                        "unoAvailable": python_path.is_some(),
+                        "pythonValid": python_path.as_ref().map(|value| value.is_file()).unwrap_or(false),
+                        "pythonPath": python_path.map(|value| value.to_string_lossy().to_string()),
                     }),
                 ));
             }

@@ -147,6 +147,9 @@ function createSettingsPage(ctx) {
               row("健康检查", status.value.daemon?.healthy ? "通过" : "未通过"),
               row("Soffice 就绪", sofficeReadyText(status.value.daemon)),
               row("Soffice PID", status.value.daemon?.sofficePid ? String(status.value.daemon.sofficePid) : "未上报"),
+              row("UNO 可用", booleanText(status.value.daemon?.unoAvailable)),
+              row("Python 有效", booleanText(status.value.daemon?.pythonValid)),
+              row("Python 路径", status.value.daemon?.pythonPath || "未上报"),
               row("控制方式", daemonControlText(status.value.daemon)),
               row("最近转换", daemonConvertText(status.value.daemon)),
             ])
@@ -216,6 +219,12 @@ function daemonText(daemon) {
 function sofficeReadyText(daemon) {
   if (daemon?.sofficeReady === true) return "已就绪";
   if (daemon?.sofficeReady === false) return "未就绪";
+  return "未上报";
+}
+
+function booleanText(value) {
+  if (value === true) return "是";
+  if (value === false) return "否";
   return "未上报";
 }
 
