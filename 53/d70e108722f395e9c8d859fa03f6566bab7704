@@ -1,0 +1,31 @@
+External/Plugins/office-convert/src/lib.rs
+  s_2d5a17782b6bfd::t_7e2ae893d3460e 16-17,34,139-146,663-673,675-709,712,1201,1211-1212
+src-tauri/src/services/repository/contracts.rs
+  s_f0abc17e5269b6::t_0cf85bb1ad0749 1537-1545
+src-tauri/src/services/repository/plugin_runtime.rs
+  s_f0abc17e5269b6::t_9e7255639a36a1 8-11,355-407
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.5",
+  "base_commit_sha": "53d70e108722f395e9c8d859fa03f6566bab7704",
+  "prompts": {},
+  "sessions": {
+    "s_2d5a17782b6bfd": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f1cad-dea8-7323-b604-a3effbaf235c",
+        "model": "unknown"
+      },
+      "human_author": "AuraElicase <auraelicase@outlook.com>"
+    },
+    "s_f0abc17e5269b6": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f0caa-72ab-7720-90c5-6cba6822b374",
+        "model": "unknown"
+      },
+      "human_author": "AuraElicase <auraelicase@outlook.com>"
+    }
+  }
+}
