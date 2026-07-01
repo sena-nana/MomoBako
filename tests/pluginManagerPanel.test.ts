@@ -2,6 +2,7 @@ import { within } from "@testing-library/dom";
 import { fireEvent, render, screen } from "@testing-library/vue";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import PluginManagerPanel from "../src/components/PluginManagerPanel.vue";
+import { clearPreviewPluginRegistry, syncRegisteredFrontendPluginManifests } from "../src/plugins/sdk";
 import type { PluginHookExecutionRecord, PluginManifest } from "../src/types/repository";
 
 const plugins = vi.hoisted(() => ({ value: [] as PluginManifest[] }));
@@ -34,6 +35,7 @@ vi.mock("../src/composables/useRepositoryWorkspace", () => ({
 
 vi.mock("@tauri-apps/plugin-dialog", () => ({
   open: vi.fn(),
+  save: vi.fn(),
 }));
 
 function manifest(input: Partial<PluginManifest> & Pick<PluginManifest, "pluginId" | "name">): PluginManifest {
@@ -75,6 +77,7 @@ describe("PluginManagerPanel", () => {
   }
 
   beforeEach(() => {
+    clearPreviewPluginRegistry();
     plugins.value = [];
     pluginHookExecutions.value = [];
     error.value = "";
@@ -375,6 +378,86 @@ describe("PluginManagerPanel", () => {
       "new-key",
     );
     expect(screen.getByText("插件设置已保存。")).toBeInTheDocument();
+  });
+
+  it("renders downloader custom status page together with manifest config fields", async () => {
+    loadPluginConfigInWorkspace.mockResolvedValue({
+      pluginId: "momobako.service.downloader",
+      dataDirectory: "C:/MomoBako/.service-data/plugin-data/momobako-service-downloader",
+      schema: {},
+      values: {
+        defaultLevel: "standard",
+        tempTtlMinutes: 120,
+      },
+    });
+    setPluginConfigValueInWorkspace.mockResolvedValue({
+      pluginId: "momobako.service.downloader",
+      dataDirectory: "C:/MomoBako/.service-data/plugin-data/momobako-service-downloader",
+      schema: {},
+      values: {
+        defaultLevel: "lossless",
+        tempTtlMinutes: 120,
+      },
+    });
+
+    const manifestWithSettings = manifest({
+      pluginId: "momobako.service.downloader",
+      name: "Download Service",
+      category: "service",
+      kind: "download",
+      sdk: "frontend",
+      runtime: "vue-module",
+      entry: {
+        frontend: {
+          module: "dist/register.js",
+          export: "register",
+        },
+      },
+      contributes: {
+        settings: {
+          settingsPage: {
+            label: "下载服务",
+          },
+          fields: [
+            {
+              key: "defaultLevel",
+              label: "默认音质",
+              type: "select",
+              default: "standard",
+              options: [
+                { label: "标准", value: "standard" },
+                { label: "无损", value: "lossless" },
+              ],
+            },
+            {
+              key: "tempTtlMinutes",
+              label: "临时缓存分钟数",
+              type: "number",
+              default: 120,
+            },
+          ],
+        },
+      },
+    });
+    plugins.value = [manifestWithSettings];
+
+    await syncRegisteredFrontendPluginManifests([manifestWithSettings]);
+    render(PluginManagerPanel);
+
+    await fireEvent.click(screen.getByRole("button", { name: "设置" }));
+
+    expect(await screen.findByText("aria2 运行状态")).toBeInTheDocument();
+    expect(screen.getByText("默认音质")).toBeInTheDocument();
+
+    const defaultLevelField = screen.getByText("默认音质").closest("label") as HTMLElement;
+    const select = within(defaultLevelField).getByRole("combobox");
+    await fireEvent.update(select, JSON.stringify("lossless"));
+
+    expect(setPluginConfigValueInWorkspace).toHaveBeenCalledWith(
+      "momobako.service.downloader",
+      "defaultLevel",
+      "lossless",
+    );
   });
 
   it("saves local filesystem file search mode from the settings select", async () => {
