@@ -8,6 +8,7 @@ import { getPluginSettingsPage, listPluginSettingsPages } from "../src/plugins/s
 import type { PluginManifest } from "../src/types/repository";
 import {
   getInvokeCalls,
+  mockPluginCallResponse,
   getPluginCallCalls,
   seedMockPlugins,
   seedMockRepositories,
@@ -250,6 +251,100 @@ describe("plugin settings pages", () => {
 
     expect(await screen.findByText("已清理 0 个缓存文件")).toBeInTheDocument();
     expect(screen.getByText("转换模式与自动下载选项沿用下方插件通用配置字段保存。")).toBeInTheDocument();
+  });
+
+  it("allows shutting down a running office daemon and refreshes runtime status", async () => {
+    const manifest = officeConvertSettingsManifest();
+    let runtimeStatusReads = 0;
+    let daemonRunning = true;
+    mockPluginCallResponse("momobako.service.office-convert", "officeConvert.getRuntimeStatus", () => {
+      runtimeStatusReads += 1;
+      return {
+        converterMode: "auto",
+        autoDownloadLibreOffice: true,
+        bundledDownloadUrl: "https://example.test/libreoffice.msi",
+        microsoftOffice: {
+          available: true,
+          path: "C:/Program Files/Microsoft Office/root/Office16/WINWORD.EXE",
+        },
+        libreofficeSystem: {
+          available: false,
+          reason: "未探测到系统 LibreOffice 安装。",
+        },
+        libreofficeBundle: {
+          available: true,
+          path: "C:/MomoBako/.service-data/plugin-data/momobako-service-office-convert/runtime/program/soffice.exe",
+          version: "25.8.3",
+        },
+        daemon: daemonRunning
+          ? {
+              running: true,
+              healthy: true,
+              helperType: "bundled",
+              pid: 23119,
+              sofficeReady: true,
+              updatedAt: "2026-07-01T08:00:00Z",
+            }
+          : {
+              running: false,
+              healthy: false,
+              helperType: "bundled",
+              error: "守护进程已停止",
+              updatedAt: "2026-07-01T08:02:00Z",
+            },
+      };
+    });
+    mockPluginCallResponse("momobako.service.office-convert", "officeConvert.shutdownDaemon", () => {
+      daemonRunning = false;
+      return {
+        stopped: true,
+        pid: 23119,
+      };
+    });
+    seedMockRepositories([{
+      repoId: "repo-main-001",
+      name: "Mock Anime Repo",
+      path: "C:/Mock/AnimeAssets",
+      backend: {
+        pluginId: "momobako.local-filesystem",
+        kind: "filesystem",
+        name: "Local Filesystem",
+        capabilities: ["browse"],
+      },
+      status: "ready",
+      assetCount: 12,
+      updatedAt: "2026-07-01T08:00:00Z",
+    }]);
+    seedMockPlugins([manifest]);
+
+    await syncRegisteredFrontendPluginManifests([manifest]);
+    const page = getPluginSettingsPage(manifest.pluginId);
+    expect(page?.component).toBeDefined();
+
+    render(page!.component, {
+      props: {
+        manifest,
+      },
+    });
+
+    expect(await screen.findByText(/WINWORD\.EXE/)).toBeInTheDocument();
+    expect(await screen.findByText("PID 23119 | Soffice 已就绪 | 更新于 2026-07-01T08:00:00Z")).toBeInTheDocument();
+
+    const shutdownButton = screen.getByRole("button", { name: "关闭守护进程" });
+    expect(shutdownButton).toBeEnabled();
+
+    await fireEvent.click(shutdownButton);
+
+    await waitFor(() => {
+      expect(getPluginCallCalls("momobako.service.office-convert", "officeConvert.shutdownDaemon")).toHaveLength(1);
+    });
+    await waitFor(() => {
+      expect(getPluginCallCalls("momobako.service.office-convert", "officeConvert.getRuntimeStatus").length).toBeGreaterThanOrEqual(2);
+    });
+
+    expect(await screen.findByText("LibreOffice 守护进程已关闭")).toBeInTheDocument();
+    expect(await screen.findByText("守护进程已停止")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "关闭守护进程" })).toBeDisabled();
   });
 
   it("renders downloader runtime status page", async () => {
