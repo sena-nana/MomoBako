@@ -1,10 +1,10 @@
 import { ref } from "vue";
-import { convertFileSrc } from "@tauri-apps/api/core";
 import type { FileBrowserEntry } from "../../../types/repository";
 import { getPreviewPluginForEntry } from "../../../plugins/previewPlugins";
 import { isAudioExtension, isVideoExtension } from "../../../utils/filePreviewExtensions";
 import { metadataPalette } from "../../../utils/fileMetadata";
 import { extractPaletteFromImageElement } from "./thumbnailUi";
+import { resolveThumbnailSrc } from "../../../utils/thumbnailSrc";
 
 export function usePreviewUi() {
   const failedThumbnailPaths = ref<Set<string>>(new Set());
@@ -35,7 +35,8 @@ export function usePreviewUi() {
     if (!entry.thumbnailPath || failedThumbnailPaths.value.has(entry.path)) return null;
     const cached = thumbnailSourceCache.get(entry.thumbnailPath);
     if (cached) return cached;
-    const src = convertFileSrc(entry.thumbnailPath);
+    const src = resolveThumbnailSrc(entry.thumbnailPath);
+    if (!src) return null;
     thumbnailSourceCache.set(entry.thumbnailPath, src);
     return src;
   }

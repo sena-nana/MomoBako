@@ -64,7 +64,7 @@ export function register(ctx) {
       ));
       const audioArtworkUrl = computed(() => (
         audioArtworkPath.value
-          ? ctx.fileSrc(audioArtworkPath.value)
+          ? resolveArtworkUrl(audioArtworkPath.value, ctx.fileSrc)
           : sourcePayloadString(props.entry, "coverUrl")
       ));
       const lyricsPlaceholder = computed(() => (
@@ -532,7 +532,7 @@ export function register(ctx) {
     function createAudioArtwork(item) {
       const wrapper = document.createElement("div");
       wrapper.className = "media-preview__audio-art media-playlist-runtime__audio-art";
-      const artworkUrl = item.thumbnailPath ? ctx.fileSrc(item.thumbnailPath) : sourcePayloadString(item, "coverUrl");
+      const artworkUrl = item.thumbnailPath ? resolveArtworkUrl(item.thumbnailPath, ctx.fileSrc) : sourcePayloadString(item, "coverUrl");
       if (artworkUrl) {
         const cover = document.createElement("img");
         cover.className = "media-preview__audio-cover";
@@ -925,6 +925,12 @@ function siblingLrcPath(path) {
 function sourcePayloadString(entry, key) {
   const value = entry?.sourcePayload?.[key];
   return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function resolveArtworkUrl(path, fileSrc) {
+  if (!path) return "";
+  if (/^https?:\/\//i.test(path)) return path;
+  return fileSrc(path);
 }
 
 function decodeTextBytes(bytes) {

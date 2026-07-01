@@ -15,6 +15,7 @@ import type {
   WorkspacePlayerBarEmitMap,
   WorkspacePlayerBarProps,
 } from "./workspacePlayerBar.contract";
+import { resolveThumbnailSrc } from "../utils/thumbnailSrc";
 
 const props = defineProps<WorkspacePlayerBarProps>();
 
@@ -74,7 +75,7 @@ function setImageDurationFromInput(event: Event) {
     <div class="workspace-player__body">
       <button type="button" class="workspace-player__media" :disabled="!item" @click="emit('openPreview')">
         <span class="workspace-player__thumb" aria-hidden="true">
-          <img v-if="item?.thumbnailPath" :src="item.thumbnailPath" alt="" />
+          <img v-if="resolveThumbnailSrc(item?.thumbnailPath)" :src="resolveThumbnailSrc(item?.thumbnailPath) ?? undefined" alt="" />
           <span v-else>{{ item?.extension?.toUpperCase() ?? "—" }}</span>
         </span>
         <span class="workspace-player__meta">
@@ -179,7 +180,7 @@ function setImageDurationFromInput(event: Event) {
           @click="emit('selectQueueItem', queueItem.playlistItemId)"
         >
           <span class="workspace-player__queue-thumb">
-            <img v-if="queueItem.thumbnailPath" :src="queueItem.thumbnailPath" alt="" />
+            <img v-if="resolveThumbnailSrc(queueItem.thumbnailPath)" :src="resolveThumbnailSrc(queueItem.thumbnailPath) ?? undefined" alt="" />
             <span v-else>{{ queueItem.extension.toUpperCase() }}</span>
           </span>
           <span class="workspace-player__queue-meta">

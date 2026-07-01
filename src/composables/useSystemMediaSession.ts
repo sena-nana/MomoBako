@@ -1,5 +1,6 @@
 import { computed, watch, type WatchStopHandle } from "vue";
 import type { usePlaylistPlayer } from "./usePlaylistPlayer";
+import { resolveThumbnailSrc } from "../utils/thumbnailSrc";
 
 type PlaylistPlayerController = ReturnType<typeof usePlaylistPlayer>;
 
@@ -8,9 +9,10 @@ function mediaSession() {
 }
 
 function artworkForItem(item: PlaylistPlayerController["currentItem"]["value"]) {
-  if (!item?.thumbnailPath) return [];
+  const src = resolveThumbnailSrc(item?.thumbnailPath);
+  if (!src) return [];
   return [{
-    src: item.thumbnailPath,
+    src,
     sizes: "512x512",
     type: "image/png",
   }];
