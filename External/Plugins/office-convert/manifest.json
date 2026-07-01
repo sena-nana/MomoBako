@@ -1,0 +1,83 @@
+{
+  "pluginId": "momobako.service.office-convert",
+  "name": "Office Convert Service",
+  "version": "0.1.0",
+  "type": {
+    "layer": "provider-service",
+    "kind": "office-convert"
+  },
+  "kind": "office-convert",
+  "category": "service",
+  "description": "负责 Office 文档转 PDF、转换器探测与缓存管理。",
+  "capabilities": [
+    "office",
+    "convert",
+    "pdf",
+    "preview-cache"
+  ],
+  "enabled": true,
+  "sdk": "backend",
+  "runtime": "native-dylib",
+  "entry": {
+    "backend": {
+      "library": "momobako_service_office_convert"
+    }
+  },
+  "permissions": [
+    "filesystem:read",
+    "filesystem:write",
+    "network",
+    "process"
+  ],
+  "requires": ["momobako.service.downloader"],
+  "optional": [],
+  "hooks": [],
+  "contributes": {
+    "apiTests": [
+      {
+        "method": "officeConvert.getRuntimeStatus",
+        "summary": "读取 Office 转换服务运行状态。",
+        "payload": {}
+      }
+    ],
+    "settings": {
+      "schemaVersion": 1,
+      "settingsPage": {
+        "label": "Office 转换"
+      },
+      "fields": [
+        {
+          "key": "converterMode",
+          "label": "转换器模式",
+          "type": "select",
+          "default": "auto",
+          "options": [
+            { "label": "自动", "value": "auto" },
+            { "label": "Microsoft Office", "value": "microsoft-office" },
+            { "label": "LibreOffice", "value": "libreoffice" }
+          ]
+        },
+        {
+          "key": "autoDownloadLibreOffice",
+          "label": "自动下载 LibreOffice",
+          "type": "boolean",
+          "default": true
+        }
+      ]
+    },
+    "service": {
+      "type": "office-convert",
+      "methods": [
+        "officeConvert.ensurePreviewPdf",
+        "officeConvert.getRuntimeStatus",
+        "officeConvert.clearPreviewCache"
+      ]
+    }
+  },
+  "compat": {
+    "sdkVersion": "1",
+    "legacyPluginIds": []
+  },
+  "source": "builtin",
+  "status": "ready"
+}

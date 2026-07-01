@@ -1,0 +1,9 @@
+{
+  "pluginId": "momobako.service.office-convert",
+  "build": {
+    "type": "cargo-native",
+    "sourceDir": "src",
+    "manifestPath": "Cargo.toml",
+    "outputDir": ".dist/office-convert"
+  }
+}

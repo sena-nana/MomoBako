@@ -17,6 +17,8 @@ import type {
   PluginInstallRequest,
   PluginManifest,
   PluginMutationResponse,
+  RepositoryCacheFilePreviewSourceRequest,
+  RepositoryCacheFilePreviewSourceResponse,
 } from "../../types/repository";
 import { invokeCommand } from "./core";
 
@@ -35,6 +37,15 @@ export function getPluginDataDirectory(pluginId: string) {
 export function preparePluginDataFilePreviewSource(request: PluginDataFilePreviewSourceRequest) {
   return invokeCommand<PluginDataFilePreviewSourceResponse>(
     "prepare_plugin_data_file_preview_source",
+    { request },
+  );
+}
+
+export function prepareRepositoryCacheFilePreviewSource(
+  request: RepositoryCacheFilePreviewSourceRequest,
+) {
+  return invokeCommand<RepositoryCacheFilePreviewSourceResponse>(
+    "prepare_repository_cache_file_preview_source",
     { request },
   );
 }

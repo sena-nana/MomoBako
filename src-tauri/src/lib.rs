@@ -29,7 +29,8 @@ use services::repository::{
     RepositoryActionRunRequest, RepositoryActionRunResponse, RepositoryExportRequest,
     RepositoryExportResponse, RepositoryFolderRequest, RepositoryMutationRequest,
     RepositoryMutationResponse, RepositoryRelocateRequest, RepositorySnapshot, RepositorySummary,
-    RepositoryTreeSnapshot,
+    RepositoryTreeSnapshot, RepositoryCacheFilePreviewSourceRequest,
+    RepositoryCacheFilePreviewSourceResponse,
     RevisionActionRequest, RevisionActionResponse, SearchRequest, SearchResponse,
     SmartFolderMutationRequest, SmartFolderMutationResponse, SmartFolderResultSnapshot,
     SmartFolderTreeNode, SmartFolderUpdateRequest, SyncRequest, SyncResult, ThumbnailRequest,
@@ -367,6 +368,16 @@ async fn prepare_plugin_data_file_preview_source(
 ) -> Result<PluginDataFilePreviewSourceResponse, String> {
     plugin_vm
         .prepare_plugin_data_file_preview_source(request)
+        .await
+}
+
+#[tauri::command]
+async fn prepare_repository_cache_file_preview_source(
+    request: RepositoryCacheFilePreviewSourceRequest,
+    plugin_vm: tauri::State<'_, PluginViewModel>,
+) -> Result<RepositoryCacheFilePreviewSourceResponse, String> {
+    plugin_vm
+        .prepare_repository_cache_file_preview_source(request)
         .await
 }
 
@@ -709,6 +720,7 @@ pub fn run() {
             read_plugin_archive_text,
             get_plugin_data_directory,
             prepare_plugin_data_file_preview_source,
+            prepare_repository_cache_file_preview_source,
             get_plugin_config,
             set_plugin_config_value,
             delete_plugin_config_value,

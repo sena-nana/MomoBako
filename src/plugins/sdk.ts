@@ -35,6 +35,7 @@ import {
   prepareEntryPlaybackSource,
   prepareEntryPlaybackSourceWithProgress,
   preparePluginDataFilePreviewSource,
+  prepareRepositoryCacheFilePreviewSource,
   preparePreviewFileSource,
   readFile,
   readPluginArchiveText,
@@ -283,6 +284,7 @@ export type FrontendPluginContext = {
   callPlugin: typeof callPlugin;
   downloadPlaylistWithProgress: typeof downloadPlaylistWithProgress;
   preparePluginDataFilePreviewSource: typeof preparePluginDataFilePreviewSource;
+  prepareRepositoryCacheFilePreviewSource: typeof prepareRepositoryCacheFilePreviewSource;
   prepareEntryPlaybackSource: typeof prepareEntryPlaybackSource;
   prepareEntryPlaybackSourceWithProgress: typeof prepareEntryPlaybackSourceWithProgress;
   preparePreviewFileSource: typeof preparePreviewFileSource;
@@ -574,6 +576,7 @@ function createFrontendPluginContext(manifest: PluginManifest): FrontendPluginCo
     callPlugin,
     downloadPlaylistWithProgress,
     preparePluginDataFilePreviewSource,
+    prepareRepositoryCacheFilePreviewSource,
     prepareEntryPlaybackSource,
     prepareEntryPlaybackSourceWithProgress,
     preparePreviewFileSource,

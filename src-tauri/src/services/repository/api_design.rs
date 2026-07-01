@@ -436,6 +436,18 @@ pub(super) fn core_tauri_api_definitions() -> Vec<ApiDefinition> {
         ),
         tauri_api_definition(
             "Plugin API",
+            "prepare_repository_cache_file_preview_source",
+            "将资源库缓存目录内文件注册为受控预览源。",
+            serde_json::json!({
+                "request": {
+                    "repoId": "<repoId>",
+                    "path": "<absoluteRepositoryCacheFilePath>",
+                    "mediaType": "application/pdf"
+                }
+            }),
+        ),
+        tauri_api_definition(
+            "Plugin API",
             "get_plugin_config",
             "读取插件 key-value 配置快照。",
             serde_json::json!({ "pluginId": "<pluginId>" }),

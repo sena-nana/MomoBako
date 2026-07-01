@@ -72,6 +72,7 @@ use self::plugin::{
     load_native_plugin, load_plugin_config_values, load_plugin_settings,
     parse_plugin_manifest_with_source, plugin_data_dir, plugin_legacy_ids,
     read_plugin_manifest_from_archive, resolve_plugin_manifest_dependencies, runtime_plugins_dir,
+    shutdown_helper_state_dir,
 };
 #[cfg(test)]
 use self::plugin::{is_repository_backend_plugin, parse_plugin_manifest};

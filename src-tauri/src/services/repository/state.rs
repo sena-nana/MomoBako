@@ -1,6 +1,7 @@
 //! Repository state shell and shared entry points.
 
 use super::*;
+use crate::services::repository::plugin::plugin_data_root_dir;
 use std::collections::BTreeSet;
 use std::sync::mpsc::Sender;
 use tauri::{AppHandle, Emitter};
@@ -246,5 +247,22 @@ impl RepositoryState {
                 },
             );
         Ok(token)
+    }
+
+    /// Stops helper processes whose pid/status files live under plugin data directories.
+    pub fn shutdown_runtime_helpers(&self) -> Result<(), String> {
+        self.ensure_initialized()?;
+        let plugin_root = plugin_data_root_dir(&self.root);
+        if !plugin_root.is_dir() {
+            return Ok(());
+        }
+        for entry in fs::read_dir(plugin_root).map_err(io_error)? {
+            let entry = entry.map_err(io_error)?;
+            if !entry.path().is_dir() {
+                continue;
+            }
+            shutdown_helper_state_dir(&entry.path())?;
+        }
+        Ok(())
     }
 }
