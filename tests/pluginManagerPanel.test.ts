@@ -460,6 +460,87 @@ describe("PluginManagerPanel", () => {
     );
   });
 
+  it("keeps office convert runtime page and manifest config fields separated", async () => {
+    loadPluginConfigInWorkspace.mockResolvedValue({
+      pluginId: "momobako.service.office-convert",
+      dataDirectory: "C:/MomoBako/.service-data/plugin-data/momobako-service-office-convert",
+      schema: {},
+      values: {
+        converterMode: "auto",
+        autoDownloadLibreOffice: true,
+      },
+    });
+    setPluginConfigValueInWorkspace.mockResolvedValue({
+      pluginId: "momobako.service.office-convert",
+      dataDirectory: "C:/MomoBako/.service-data/plugin-data/momobako-service-office-convert",
+      schema: {},
+      values: {
+        converterMode: "libreoffice",
+        autoDownloadLibreOffice: true,
+      },
+    });
+
+    const manifestWithSettings = manifest({
+      pluginId: "momobako.service.office-convert",
+      name: "Office Convert Service",
+      category: "service",
+      kind: "office-convert",
+      sdk: "frontend",
+      runtime: "vue-module",
+      entry: {
+        frontend: {
+          module: "dist/register.js",
+          export: "register",
+        },
+      },
+      contributes: {
+        settings: {
+          settingsPage: {
+            label: "Office 转换",
+          },
+          fields: [
+            {
+              key: "converterMode",
+              label: "转换器模式",
+              type: "select",
+              default: "auto",
+              options: [
+                { label: "自动", value: "auto" },
+                { label: "LibreOffice", value: "libreoffice" },
+              ],
+            },
+            {
+              key: "autoDownloadLibreOffice",
+              label: "自动下载 LibreOffice",
+              type: "boolean",
+              default: true,
+            },
+          ],
+        },
+      },
+    });
+    plugins.value = [manifestWithSettings];
+
+    await syncRegisteredFrontendPluginManifests([manifestWithSettings]);
+    render(PluginManagerPanel);
+
+    await fireEvent.click(screen.getByRole("button", { name: "设置" }));
+
+    expect(await screen.findByText("运行状态与缓存")).toBeInTheDocument();
+    expect(screen.getByText("转换模式与自动下载选项沿用下方插件通用配置字段保存。")).toBeInTheDocument();
+    expect(screen.getByText("转换器模式")).toBeInTheDocument();
+
+    const converterModeField = screen.getByText("转换器模式").closest("label") as HTMLElement;
+    const select = within(converterModeField).getByRole("combobox");
+    await fireEvent.update(select, JSON.stringify("libreoffice"));
+
+    expect(setPluginConfigValueInWorkspace).toHaveBeenCalledWith(
+      "momobako.service.office-convert",
+      "converterMode",
+      "libreoffice",
+    );
+  });
+
   it("saves local filesystem file search mode from the settings select", async () => {
     loadPluginConfigInWorkspace.mockResolvedValue({
       pluginId: "momobako.local-filesystem",
