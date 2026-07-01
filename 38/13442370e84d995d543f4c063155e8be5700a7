@@ -1,0 +1,23 @@
+src-tauri/src/services/repository/api_design.rs
+  s_f0abc17e5269b6::t_6915161ca4526c 437-448
+src-tauri/src/services/repository/contracts.rs
+  s_f0abc17e5269b6::t_ef44425ba45a65 826-833,846-857
+src-tauri/src/services/repository/facade.rs
+  s_f0abc17e5269b6::t_c8208332cb5cfb 205-211
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.5",
+  "base_commit_sha": "3813442370e84d995d543f4c063155e8be5700a7",
+  "prompts": {},
+  "sessions": {
+    "s_f0abc17e5269b6": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f0caa-72ab-7720-90c5-6cba6822b374",
+        "model": "unknown"
+      },
+      "human_author": "AuraElicase <auraelicase@outlook.com>"
+    }
+  }
+}
