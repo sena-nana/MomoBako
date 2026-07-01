@@ -140,13 +140,38 @@ describe("API design snapshot contract", () => {
       }),
       expect.objectContaining({
         transport: "plugin-call",
+        pluginId: "momobako.service.office-convert",
+        pluginMethod: "officeConvert.clearPreviewCache",
+      }),
+      expect.objectContaining({
+        transport: "plugin-call",
+        pluginId: "momobako.service.office-convert",
+        pluginMethod: "officeConvert.runRuntimeSelfCheck",
+      }),
+      expect.objectContaining({
+        transport: "plugin-call",
+        pluginId: "momobako.service.office-convert",
+        pluginMethod: "officeConvert.shutdownDaemon",
+      }),
+      expect.objectContaining({
+        transport: "plugin-call",
         pluginId: "momobako.service.downloader",
         pluginMethod: "downloader.ensureRuntime",
       }),
       expect.objectContaining({
         transport: "plugin-call",
         pluginId: "momobako.service.downloader",
+        pluginMethod: "downloader.enqueueDownload",
+      }),
+      expect.objectContaining({
+        transport: "plugin-call",
+        pluginId: "momobako.service.downloader",
         pluginMethod: "downloader.awaitDownload",
+      }),
+      expect.objectContaining({
+        transport: "plugin-call",
+        pluginId: "momobako.service.downloader",
+        pluginMethod: "downloader.removeDownload",
       }),
     ]));
   });
