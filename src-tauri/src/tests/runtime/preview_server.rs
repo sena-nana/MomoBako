@@ -3,14 +3,20 @@ use crate::services::{
         install_local_filesystem_test_plugin_archive, FileReadRequest, RepositoryMutationRequest,
         RepositoryState,
     },
-    runtime::preview_server::{parse_byte_range, preview_token_from_url, start_preview_server, ByteRange},
+    runtime::preview_server::{
+        ByteRange, parse_byte_range, preview_token_from_url, start_preview_server,
+    },
 };
+use crate::services::runtime::{
+    RepositoryWatcher, build_external_connection_status, start_structure_refresh_worker,
+};
+use crate::viewmodels::RepositoryQueryViewModel;
 use std::{
     fs,
     io::{Read, Write},
     net::TcpStream,
     path::PathBuf,
-    sync::Arc,
+    sync::{Arc, Mutex},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
@@ -81,8 +87,7 @@ fn preview_server_serves_registered_source_file() {
     let service_root = root.join("state");
     let repo_root = root.join("repo");
     fs::create_dir_all(&repo_root).expect("repo root should be created");
-    fs::write(repo_root.join("model.glb"), b"glb-body")
-        .expect("preview source should be written");
+    fs::write(repo_root.join("model.glb"), b"glb-body").expect("preview source should be written");
     install_local_filesystem_test_plugin_archive(&service_root);
 
     let state = RepositoryState::from_root(service_root);
@@ -179,5 +184,71 @@ fn preview_server_serves_registered_source_file_range() {
     assert!(raw.contains("Content-Type: video/mp4"));
     assert!(raw.contains("Content-Range: bytes 6-9/10"));
     assert!(raw.ends_with("body"));
+    fs::remove_dir_all(root).expect("test temp root should be removed");
+}
+
+#[test]
+fn repository_query_prepare_preview_file_source_returns_preview_url() {
+    let root = unique_temp_dir("preview-viewmodel-url");
+    let service_root = root.join("state");
+    let repo_root = root.join("repo");
+    fs::create_dir_all(&repo_root).expect("repo root should be created");
+    fs::write(repo_root.join("model.glb"), b"glb-body")
+        .expect("preview source should be written");
+    install_local_filesystem_test_plugin_archive(&service_root);
+
+    let repository_state = Arc::new(RepositoryState::from_root(service_root.clone()));
+    repository_state
+        .ensure_initialized()
+        .expect("repository state should initialize");
+    let write_lock = Arc::new(Mutex::new(()));
+    let structure_refresh_tx =
+        start_structure_refresh_worker(repository_state.clone(), write_lock.clone())
+            .expect("structure refresh worker should start");
+    repository_state
+        .set_structure_refresh_sender(structure_refresh_tx)
+        .expect("structure refresh sender should register");
+    let watcher_handle = RepositoryWatcher::start(repository_state.clone(), write_lock.clone())
+        .expect("repository watcher should start");
+    let preview_addr =
+        start_preview_server(repository_state.clone()).expect("preview server should start");
+    let runtime = crate::services::runtime::RepositoryRuntime {
+        repository_state,
+        watcher_handle,
+        write_lock,
+        preview_addr: preview_addr.clone(),
+        external_connection: build_external_connection_status(
+            &service_root,
+            "127.0.0.1:0",
+            "test-token",
+            "0",
+        ),
+    };
+    let view_model = RepositoryQueryViewModel::new(runtime.clone());
+
+    let repo_id = runtime
+        .repository_state
+        .create_repository(RepositoryMutationRequest {
+            repo_id: Some("repo-preview-viewmodel".to_string()),
+            name: "Preview ViewModel".to_string(),
+            path: repo_root.to_string_lossy().to_string(),
+            backend_plugin_id: None,
+            backend_config: None,
+            skip_initial_sync: false,
+        })
+        .expect("repository should be created")
+        .repository
+        .repo_id;
+    let response =
+        tauri::async_runtime::block_on(view_model.prepare_preview_file_source(FileReadRequest {
+            repo_id,
+            path: "model.glb".to_string(),
+        }))
+        .expect("preview source should be prepared");
+
+    assert_eq!(
+        response.source_url.as_deref(),
+        Some(format!("http://{preview_addr}/preview/{}", response.token).as_str())
+    );
     fs::remove_dir_all(root).expect("test temp root should be removed");
 }
