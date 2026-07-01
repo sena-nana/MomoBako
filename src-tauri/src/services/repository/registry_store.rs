@@ -105,10 +105,13 @@ pub(super) fn parse_backend_request(
     let plugin_id = request
         .backend_plugin_id
         .as_deref()
-        .unwrap_or(LOCAL_FILESYSTEM_PLUGIN_ID)
-        .trim();
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| value.to_string())
+        .map(Ok)
+        .unwrap_or_else(|| infer_backend_plugin_id_for_path(service_root, &request.path))?;
     let registry = backend_plugin_registry(service_root);
-    let normalized_plugin_id = registry.normalize_plugin_id(plugin_id);
+    let normalized_plugin_id = registry.normalize_plugin_id(&plugin_id);
     let registration = registry
         .registration(&normalized_plugin_id)
         .ok_or_else(|| format!("unsupported filesystem backend plugin: {plugin_id}"))?;
@@ -136,13 +139,24 @@ pub(super) fn parse_backend_request(
 pub(super) fn import_backend_record(
     service_root: &Path,
     metadata: &RepositoryMetadataFileImport,
+    repo_root: &Path,
 ) -> Option<RepositoryBackendRecord> {
-    let plugin_id = metadata
-        .backend_plugin_id
-        .as_deref()
-        .unwrap_or(LOCAL_FILESYSTEM_PLUGIN_ID);
+    let fallback_root_path = repo_root.to_string_lossy().to_string();
+    let plugin_id = metadata.backend_plugin_id.as_deref().and_then(|value| {
+        let trimmed = value.trim();
+        (!trimmed.is_empty()).then_some(trimmed)
+    }).map(str::to_string).or_else(|| {
+        infer_backend_plugin_id_for_path(
+            service_root,
+            metadata
+                .root_path
+                .as_deref()
+                .unwrap_or(fallback_root_path.as_str()),
+        )
+        .ok()
+    })?;
     let registry = backend_plugin_registry(service_root);
-    let normalized_plugin_id = registry.normalize_plugin_id(plugin_id);
+    let normalized_plugin_id = registry.normalize_plugin_id(&plugin_id);
     registry
         .manifest(&normalized_plugin_id)
         .map(|manifest| RepositoryBackendRecord {
@@ -161,15 +175,18 @@ pub(super) fn rewrite_repository_metadata_if_needed(
     repo_root: &Path,
     next_root_path: Option<&Path>,
 ) -> Result<(), String> {
-    let normalized_plugin_id = metadata
-        .backend_plugin_id
-        .as_deref()
-        .map(|plugin_id| backend_plugin_registry(service_root).normalize_plugin_id(plugin_id))
-        .unwrap_or_else(|| LOCAL_FILESYSTEM_PLUGIN_ID.to_string());
     let root_path = next_root_path
         .map(|path| path.to_string_lossy().to_string())
         .or_else(|| metadata.root_path.clone())
         .unwrap_or_else(|| repo_root.to_string_lossy().to_string());
+    let normalized_plugin_id = metadata
+        .backend_plugin_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|plugin_id| backend_plugin_registry(service_root).normalize_plugin_id(plugin_id))
+        .map(Ok)
+        .unwrap_or_else(|| infer_backend_plugin_id_for_path(service_root, &root_path))?;
 
     if metadata.root_path.as_deref() == Some(root_path.as_str())
         && metadata.backend_plugin_id.as_deref() == Some(normalized_plugin_id.as_str())
@@ -261,6 +278,48 @@ pub(super) fn migrate_registry_schema(registry: &Connection) -> Result<(), rusql
         )?;
     }
     Ok(())
+}
+
+fn infer_backend_plugin_id_for_path(service_root: &Path, path: &str) -> Result<String, String> {
+    let trimmed = path.trim();
+    let requires_local_root = !trimmed.contains("://");
+    let registry = backend_plugin_registry(service_root);
+    let mut candidates = registry
+        .list_manifests()
+        .into_iter()
+        .filter(is_source_plugin)
+        .filter(|manifest| {
+            manifest
+                .capabilities
+                .iter()
+                .any(|value| value == LOCAL_ROOT_PATH_CAPABILITY)
+                == requires_local_root
+        })
+        .filter(|manifest| {
+            registry
+                .registration(&manifest.plugin_id)
+                .is_some_and(|registration| ensure_repository_backend_runtime_available(registration).is_ok())
+        })
+        .collect::<Vec<_>>();
+    candidates.sort_by(|left, right| left.plugin_id.cmp(&right.plugin_id));
+
+    match candidates.as_slice() {
+        [manifest] => Ok(manifest.plugin_id.clone()),
+        [] if requires_local_root => Err(
+            "no installed repository source plugin supports local repository roots".to_string(),
+        ),
+        [] => Err(
+            "backend plugin id is required for non-local repository paths".to_string(),
+        ),
+        _ => Err(format!(
+            "multiple repository source plugins match this path, backend plugin id is required: {}",
+            candidates
+                .iter()
+                .map(|manifest| manifest.plugin_id.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        )),
+    }
 }
 
 pub(super) fn migrate_repository_schema(connection: &Connection) -> Result<(), rusqlite::Error> {
