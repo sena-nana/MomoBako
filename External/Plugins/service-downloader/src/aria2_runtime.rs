@@ -283,11 +283,11 @@ pub fn remove_download(config: &Aria2Config<'_>, task_id: &str) -> Result<(), St
 }
 
 pub fn download_via_aria2(
-    config: &Aria2Config<'_>,
+    _config: &Aria2Config<'_>,
     url: &str,
     destination_path: &Path,
     metadata: Option<serde_json::Value>,
-    timeout: Duration,
+    _timeout: Duration,
 ) -> Result<DownloadTaskRecord, String> {
     #[cfg(test)]
     {
@@ -935,5 +935,46 @@ mod tests {
 
         assert!(!paths.pid_path.exists());
         assert!(!paths.status_path.exists());
+    }
+
+    #[test]
+    fn download_via_aria2_test_fallback_writes_file_and_preserves_metadata() {
+        let workspace = TestWorkspace::new("http-fallback");
+        let destination_path = workspace.path("downloads/mock.bin");
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("test server should bind");
+        let addr = listener.local_addr().expect("test server address should resolve");
+        std::thread::spawn(move || {
+            if let Ok((mut stream, _)) = listener.accept() {
+                let mut buffer = [0_u8; 1024];
+                let _ = stream.read(&mut buffer);
+                let body = b"mock-download";
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    body.len()
+                );
+                let _ = stream.write_all(response.as_bytes());
+                let _ = stream.write_all(body);
+            }
+        });
+
+        let record = download_via_aria2(
+            &Aria2Config {
+                plugin_data_dir: &workspace.path("plugin-data"),
+                download_url: "https://example.test/aria2.zip",
+            },
+            &format!("http://{addr}/download.bin"),
+            &destination_path,
+            Some(serde_json::json!({ "kind": "runtime-test" })),
+            Duration::from_secs(5),
+        )
+        .expect("http fallback should download file");
+
+        assert_eq!(record.status, "completed");
+        assert_eq!(record.destination_path, destination_path.to_string_lossy().to_string());
+        assert_eq!(record.metadata, Some(serde_json::json!({ "kind": "runtime-test" })));
+        assert!(record.finished_at.is_some());
+        assert_eq!(record.total_length, Some(13));
+        assert_eq!(record.completed_length, Some(13));
+        assert_eq!(fs::read(&destination_path).expect("downloaded file should read"), b"mock-download");
     }
 }
