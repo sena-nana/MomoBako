@@ -2490,6 +2490,131 @@ mod tests {
     }
 
     #[test]
+    fn ensure_preview_pdf_returns_cached_true_when_matching_pdf_already_exists() {
+        let _guard = DetectorOverrideGuard::new();
+        let workspace = TestWorkspace::new("ensure-preview-pdf-cache-hit");
+        let service_root = workspace.path("service-root");
+        let plugin_data_dir = workspace.path("plugin-data");
+        let repo_root = workspace.path("repo");
+        let docs_dir = repo_root.join("Docs");
+        fs::create_dir_all(&service_root).expect("service root should be created");
+        fs::create_dir_all(&plugin_data_dir).expect("plugin data dir should be created");
+        fs::create_dir_all(&docs_dir).expect("docs dir should be created");
+        let source_path = docs_dir.join("demo.docx");
+        fs::write(&source_path, b"docx").expect("source file should be written");
+
+        let connection = Connection::open(service_root.join(REGISTRY_FILE_NAME))
+            .expect("registry should be created");
+        connection
+            .execute(
+                "CREATE TABLE repositories (repo_id TEXT PRIMARY KEY, path TEXT NOT NULL)",
+                [],
+            )
+            .expect("repositories table should be created");
+        connection
+            .execute(
+                "INSERT INTO repositories (repo_id, path) VALUES (?1, ?2)",
+                params!["repo-demo", repo_root.to_string_lossy().to_string()],
+            )
+            .expect("repository row should be inserted");
+
+        let runtime = RuntimeContext {
+            plugin_data_dir,
+            service_root_dir: service_root,
+            plugin_runtime_dir: workspace.path("runtime"),
+            config: PluginConfig {
+                converter_mode: ConverterMode::Auto,
+                auto_download_libreoffice: true,
+            },
+        };
+
+        set_test_microsoft_office_family_status(
+            OfficeFamily::Word,
+            Some(available_status(
+                "C:/Program Files/Microsoft Office/root/Office16/WINWORD.EXE",
+                "Office16",
+            )),
+        );
+
+        let source_metadata = fs::metadata(&source_path).expect("source metadata should exist");
+        let source_modified_at = source_metadata
+            .modified()
+            .ok()
+            .and_then(|value| system_time_to_rfc3339(value).ok())
+            .expect("source modified time should resolve");
+        let cache_key = preview_cache_key(
+            "repo-demo",
+            "Docs/demo.docx",
+            &source_path,
+            source_metadata.len() as i64,
+            &source_modified_at,
+            "docx",
+            "microsoft-office",
+            "Office16",
+        );
+        let pdf_path = repository_cache_dir(&repo_root).join(format!("{cache_key}.pdf"));
+        fs::create_dir_all(pdf_path.parent().expect("cache dir should exist"))
+            .expect("cache dir should be created");
+        fs::write(&pdf_path, b"%PDF-1.4 cached").expect("cached pdf should be written");
+
+        let value = ensure_preview_pdf(
+            &runtime,
+            EnsurePreviewPdfPayload {
+                repo_id: "repo-demo".to_string(),
+                entry_path: "Docs/demo.docx".to_string(),
+                extension: "docx".to_string(),
+                source_path: Some(source_path.to_string_lossy().to_string()),
+                source_modified_at: Some(source_modified_at),
+                source_size_bytes: Some(source_metadata.len() as i64),
+            },
+        )
+        .expect("ensure preview pdf should reuse cache");
+
+        assert_eq!(value["cached"], serde_json::json!(true));
+        assert_eq!(value["converter"], serde_json::json!("microsoft-office"));
+        assert_eq!(value["pdfPath"], serde_json::json!(pdf_path.to_string_lossy().to_string()));
+        assert_eq!(value["cacheKey"], serde_json::json!(cache_key));
+        assert_eq!(value["sizeBytes"], serde_json::json!(15));
+    }
+
+    #[test]
+    fn explicit_microsoft_office_mode_returns_diagnostic_error_when_office_is_missing() {
+        let _guard = DetectorOverrideGuard::new();
+        let workspace = TestWorkspace::new("missing-microsoft-office");
+        let runtime = runtime_for_converter_test(&workspace, ConverterMode::MicrosoftOffice);
+
+        set_test_microsoft_office_family_status(
+            OfficeFamily::Word,
+            Some(unavailable_status("未探测到适用于当前文档类型的 Microsoft Office 安装。")),
+        );
+
+        let error = select_converter(&runtime, OfficeFamily::Word)
+            .expect_err("explicit microsoft office mode should fail when office is missing");
+
+        assert_eq!(error, "未探测到适用于当前文档类型的 Microsoft Office 安装。");
+    }
+
+    #[test]
+    fn explicit_libreoffice_mode_returns_diagnostic_error_when_libreoffice_is_missing() {
+        let _guard = DetectorOverrideGuard::new();
+        let workspace = TestWorkspace::new("missing-libreoffice");
+        let runtime = runtime_for_converter_test(&workspace, ConverterMode::LibreOffice);
+
+        test_support::set_test_system_libreoffice_status(
+            Some(unavailable_status("未探测到系统 LibreOffice 安装。")),
+        );
+        test_support::set_test_bundled_libreoffice_status(
+            Some(unavailable_status("未发现已下载的 LibreOffice 运行时。")),
+        );
+        test_support::set_test_ensured_bundled_libreoffice_path(None);
+
+        let error = select_converter(&runtime, OfficeFamily::Word)
+            .expect_err("explicit libreoffice mode should fail when libreoffice is missing");
+
+        assert_eq!(error, "未探测到系统 LibreOffice 安装。");
+    }
+
+    #[test]
     fn clear_preview_cache_removes_files_only_under_repository_cache_namespace() {
         let workspace = TestWorkspace::new("clear-preview-cache");
         let service_root = workspace.path("service-root");
