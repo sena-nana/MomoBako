@@ -854,6 +854,94 @@ mod tests {
         }
     }
 
+    fn start_mock_aria2_rpc_server(
+        handler: impl Fn(&serde_json::Value) -> serde_json::Value + Send + 'static,
+    ) -> String {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("mock rpc server should bind");
+        let address = listener.local_addr().expect("mock rpc server address should resolve");
+        std::thread::spawn(move || {
+            for _ in 0..4 {
+                let Ok((mut stream, _)) = listener.accept() else {
+                    break;
+                };
+                let mut request = Vec::new();
+                let mut buffer = [0_u8; 4096];
+                loop {
+                    let read = stream.read(&mut buffer).unwrap_or(0);
+                    if read == 0 {
+                        break;
+                    }
+                    request.extend_from_slice(&buffer[..read]);
+                    if request.windows(4).any(|window| window == b"\r\n\r\n") {
+                        break;
+                    }
+                }
+                let request_text = String::from_utf8_lossy(&request);
+                let content_length = request_text
+                    .lines()
+                    .find_map(|line| line.strip_prefix("Content-Length: "))
+                    .and_then(|value| value.trim().parse::<usize>().ok())
+                    .unwrap_or(0);
+                let header_end = request
+                    .windows(4)
+                    .position(|window| window == b"\r\n\r\n")
+                    .map(|index| index + 4)
+                    .unwrap_or(request.len());
+                let mut body = request[header_end..].to_vec();
+                while body.len() < content_length {
+                    let read = stream.read(&mut buffer).unwrap_or(0);
+                    if read == 0 {
+                        break;
+                    }
+                    body.extend_from_slice(&buffer[..read]);
+                }
+                let payload = serde_json::from_slice::<serde_json::Value>(&body)
+                    .expect("mock rpc request body should decode");
+                let response_body = serde_json::to_vec(&handler(&payload))
+                    .expect("mock rpc response should encode");
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    response_body.len()
+                );
+                let _ = stream.write_all(response.as_bytes());
+                let _ = stream.write_all(&response_body);
+            }
+        });
+        format!("http://{}/jsonrpc", address)
+    }
+
+    fn write_mock_running_status(
+        paths: &Aria2Paths,
+        plugin_data_dir: &Path,
+        rpc_url: &str,
+    ) {
+        fs::create_dir_all(&paths.helper_dir).expect("helper dir should be created");
+        fs::write(&paths.pid_path, std::process::id().to_string()).expect("pid file should be written");
+        save_status(
+            &paths.status_path,
+            &Aria2StatusRecord {
+                running: true,
+                pid: Some(std::process::id()),
+                executable_path: Some("C:/Mock/aria2c.exe".to_string()),
+                version: Some("1.37.0".to_string()),
+                rpc_url: Some(rpc_url.to_string()),
+                secret: Some("secret".to_string()),
+                source: Some("test".to_string()),
+                updated_at: Some("2026-07-01T10:00:00Z".to_string()),
+                error: None,
+                download_url: "https://example.test/aria2.zip".to_string(),
+                bundled_archive_path: Some(
+                    plugin_data_dir
+                        .join("downloads")
+                        .join("aria2-runtime.zip")
+                        .to_string_lossy()
+                        .to_string(),
+                ),
+            },
+        )
+        .expect("status should be written");
+    }
+
     #[test]
     fn update_task_from_status_payload_maps_complete_to_completed() {
         let mut record = DownloadTaskRecord {
@@ -1107,5 +1195,110 @@ mod tests {
             "https://example.test/runtime.zip",
             destination_path,
         ));
+    }
+
+    #[test]
+    fn remove_download_deletes_persisted_task_record() {
+        let workspace = TestWorkspace::new("remove-task-record");
+        let plugin_data_dir = workspace.path("plugin-data");
+        let paths = runtime_paths(&plugin_data_dir);
+        fs::create_dir_all(&paths.tasks_dir).expect("tasks dir should be created");
+        let rpc_url = start_mock_aria2_rpc_server(|payload| {
+            let method = payload
+                .get("method")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default();
+            let result = if method == "aria2.getVersion" {
+                serde_json::json!({ "version": "1.37.0" })
+            } else {
+                serde_json::json!("ok")
+            };
+            serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": "momobako",
+                "result": result,
+            })
+        });
+        write_mock_running_status(&paths, &plugin_data_dir, &rpc_url);
+        let task_id = "task-remove";
+        let task_path = task_path(&paths.tasks_dir, task_id);
+        fs::write(
+            &task_path,
+            r#"{"taskId":"task-remove","gid":"gid-remove","url":"http://127.0.0.1/file.zip","destinationPath":"C:/Temp/file.zip","status":"queued","createdAt":"2026-07-01T10:00:00Z"}"#,
+        )
+        .expect("task file should be written");
+
+        let config = Aria2Config {
+            plugin_data_dir: &plugin_data_dir,
+            download_url: "https://example.test/aria2.zip",
+        };
+
+        remove_download(&config, task_id).expect("remove download should succeed");
+
+        assert!(!task_path.exists());
+    }
+
+    #[test]
+    fn await_download_marks_task_failed_when_timeout_is_reached() {
+        let workspace = TestWorkspace::new("await-download-timeout");
+        let plugin_data_dir = workspace.path("plugin-data");
+        let paths = runtime_paths(&plugin_data_dir);
+        fs::create_dir_all(&paths.tasks_dir).expect("tasks dir should be created");
+        let task_id = "task-timeout";
+        let record = DownloadTaskRecord {
+            task_id: task_id.to_string(),
+            gid: "gid-timeout".to_string(),
+            url: "http://127.0.0.1/file.zip".to_string(),
+            destination_path: "C:/Temp/file.zip".to_string(),
+            metadata: Some(serde_json::json!({ "kind": "timeout-test" })),
+            status: "active".to_string(),
+            created_at: "2026-07-01T10:00:00Z".to_string(),
+            finished_at: None,
+            total_length: None,
+            completed_length: None,
+            error: None,
+        };
+        save_task(&paths.tasks_dir, &record).expect("task should be persisted");
+        let rpc_url = start_mock_aria2_rpc_server(|payload| {
+            let method = payload
+                .get("method")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default();
+            let result = if method == "aria2.getVersion" {
+                serde_json::json!({ "version": "1.37.0" })
+            } else {
+                serde_json::json!({
+                    "gid": "gid-timeout",
+                    "status": "active",
+                    "totalLength": "100",
+                    "completedLength": "20"
+                })
+            };
+            serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": "momobako",
+                "result": result,
+            })
+        });
+        write_mock_running_status(&paths, &plugin_data_dir, &rpc_url);
+
+        let result = await_download(
+            &Aria2Config {
+                plugin_data_dir: &plugin_data_dir,
+                download_url: "https://example.test/aria2.zip",
+            },
+            task_id,
+            Duration::from_millis(0),
+        )
+        .expect("await download should return timeout record");
+
+        assert_eq!(result.status, "failed");
+        assert_eq!(result.error.as_deref(), Some("download task timed out: task-timeout"));
+        assert!(result.finished_at.is_some());
+
+        let persisted = load_task(&paths.tasks_dir, task_id).expect("timed out task should persist");
+        assert_eq!(persisted.status, "failed");
+        assert_eq!(persisted.error.as_deref(), Some("download task timed out: task-timeout"));
+        assert!(persisted.finished_at.is_some());
     }
 }
