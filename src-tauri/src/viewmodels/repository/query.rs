@@ -66,8 +66,11 @@ impl RepositoryQueryViewModel {
         &self,
         request: FileReadRequest,
     ) -> Result<FilePreviewSourceResponse, String> {
-        self.runtime
+        let mut response = self
+            .runtime
             .run_read(move |state| state.prepare_preview_file_source(request))
-            .await
+            .await?;
+        response.source_url = Some(self.runtime.preview_source_url(&response.token));
+        Ok(response)
     }
 }
