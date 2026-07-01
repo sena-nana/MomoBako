@@ -5,6 +5,7 @@
 use std::{
     ffi::{c_char, CString},
     fs,
+    net::TcpListener,
     os::raw::c_char as raw_c_char,
     path::{Path, PathBuf},
     process::{Command, Output, Stdio},
@@ -16,6 +17,7 @@ use momobako_backend_plugin_sdk::{
     call_host_plugin, free_c_string, read_request, register_host_plugin_api, response_error,
     response_ok, HostPluginCallFn, HostPluginFreeFn, PluginRuntimeContext,
 };
+use reqwest::blocking::Client;
 use rusqlite::{Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -32,6 +34,8 @@ const DEFAULT_LIBREOFFICE_VERSION: &str = "25.8.3";
 const DEFAULT_LIBREOFFICE_DOWNLOAD_URL: &str =
     "https://download.documentfoundation.org/libreoffice/stable/25.8.3/win/x86_64/LibreOffice_25.8.3_Win_x86-64.msi";
 const DOWNLOADER_PLUGIN_ID: &str = "momobako.service.downloader";
+const LIBREOFFICE_HELPER_HEALTH_TIMEOUT_SECS: u64 = 3;
+const LIBREOFFICE_HELPER_STARTUP_RETRIES: usize = 20;
 
 #[cfg(target_os = "windows")]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
@@ -775,25 +779,15 @@ fn convert_with_libreoffice(
         let _ = fs::remove_dir_all(&output_dir);
     }
     fs::create_dir_all(&output_dir).map_err(io_error)?;
-    let profile_dir = libreoffice_profile_dir(runtime);
-    let output = run_command(
-        with_no_window(
-            Command::new(&converter.executable_path)
-                .arg("--headless")
-                .arg("--nologo")
-                .arg("--nofirststartwizard")
-                .arg("--convert-to")
-                .arg("pdf")
-                .arg("--outdir")
-                .arg(&output_dir)
-                .arg(source_path)
-                .arg(format!(
-                    "-env:UserInstallation={}",
-                    libreoffice_profile_uri(&profile_dir)
-                )),
-        ),
-        "convert office document with LibreOffice",
-    )?;
+    let helper_port = helper_port(runtime)?;
+    let convert_result = helper_convert(
+        runtime,
+        &converter.executable_path,
+        helper_port,
+        source_path,
+        &output_dir,
+        pdf_path,
+    );
     let generated_path = output_dir.join(format!(
         "{}.pdf",
         source_path
@@ -802,18 +796,25 @@ fn convert_with_libreoffice(
             .filter(|value| !value.is_empty())
             .ok_or_else(|| format!("invalid source file name: {}", source_path.display()))?
     ));
-    if !output.status.success() || !generated_path.is_file() {
+    if let Err(error) = convert_result {
         write_libreoffice_conversion_status(
             runtime,
             source_path,
             pdf_path,
             "failed",
-            Some(command_output_message(&output)),
+            Some(error.clone()),
         )?;
-        return Err(format!(
-            "LibreOffice 转换失败：{}",
-            command_output_message(&output)
-        ));
+        return Err(format!("LibreOffice 转换失败：{error}"));
+    }
+    if !generated_path.is_file() {
+        write_libreoffice_conversion_status(
+            runtime,
+            source_path,
+            pdf_path,
+            "failed",
+            Some(format!("转换结果缺失：{}", generated_path.display())),
+        )?;
+        return Err(format!("LibreOffice 转换失败：未找到输出文件 {}", generated_path.display()));
     }
     fs::copy(&generated_path, pdf_path).map_err(io_error)?;
     write_libreoffice_conversion_status(
@@ -830,13 +831,32 @@ fn ensure_libreoffice_daemon(runtime: &RuntimeContext, executable_path: &Path) -
     let helper_dir = libreoffice_helper_dir(runtime);
     fs::create_dir_all(&helper_dir).map_err(io_error)?;
     let pid_path = helper_dir.join("pid.txt");
+    let port = helper_port(runtime)?;
     if let Some(pid) = read_pid(&pid_path)? {
         if process_is_running(pid) {
-            write_libreoffice_status(runtime, Some(pid), executable_path, true, None)?;
-            return Ok(());
+            if helper_health(port) {
+                write_libreoffice_status(runtime, Some(pid), executable_path, true, None)?;
+                return Ok(());
+            }
+            let _ = stop_process(pid);
+            cleanup_stale_libreoffice_state(&runtime.plugin_data_dir)?;
         }
-        cleanup_stale_libreoffice_state(&runtime.plugin_data_dir)?;
     }
+    #[cfg(not(target_os = "windows"))]
+    {
+        start_legacy_libreoffice_daemon(runtime, executable_path)
+    }
+    #[cfg(target_os = "windows")]
+    {
+        start_windows_libreoffice_helper(runtime, executable_path, port)
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn start_legacy_libreoffice_daemon(
+    runtime: &RuntimeContext,
+    executable_path: &Path,
+) -> Result<(), String> {
     let profile_dir = libreoffice_profile_dir(runtime);
     fs::create_dir_all(&profile_dir).map_err(io_error)?;
     let child = {
@@ -870,6 +890,55 @@ fn ensure_libreoffice_daemon(runtime: &RuntimeContext, executable_path: &Path) -
     } else {
         Err("LibreOffice 守护进程启动失败。".to_string())
     }
+}
+
+#[cfg(target_os = "windows")]
+fn start_windows_libreoffice_helper(
+    runtime: &RuntimeContext,
+    executable_path: &Path,
+    port: u16,
+) -> Result<(), String> {
+    let helper_dir = libreoffice_helper_dir(runtime);
+    let script_path = helper_dir.join("office-convert-helper.ps1");
+    fs::write(&script_path, libreoffice_helper_script()).map_err(io_error)?;
+    let profile_dir = libreoffice_profile_dir(runtime);
+    fs::create_dir_all(&profile_dir).map_err(io_error)?;
+    let child = with_no_window(
+        Command::new("powershell.exe")
+            .arg("-NoProfile")
+            .arg("-NonInteractive")
+            .arg("-ExecutionPolicy")
+            .arg("Bypass")
+            .arg("-File")
+            .arg(&script_path)
+            .arg("-SofficePath")
+            .arg(executable_path)
+            .arg("-Port")
+            .arg(port.to_string())
+            .arg("-ProfileUri")
+            .arg(libreoffice_profile_uri(&profile_dir))
+            .stdout(Stdio::null())
+            .stderr(Stdio::null()),
+    )
+    .spawn()
+    .map_err(|error| format!("failed to start LibreOffice helper: {error}"))?;
+    let pid = child.id();
+    fs::write(helper_dir.join("pid.txt"), pid.to_string()).map_err(io_error)?;
+    for _ in 0..LIBREOFFICE_HELPER_STARTUP_RETRIES {
+        thread::sleep(Duration::from_millis(250));
+        if process_is_running(pid) && helper_health(port) {
+            write_libreoffice_status(runtime, Some(pid), executable_path, true, None)?;
+            return Ok(());
+        }
+    }
+    write_libreoffice_status(
+        runtime,
+        Some(pid),
+        executable_path,
+        false,
+        Some("LibreOffice helper 启动后未通过健康检查。".to_string()),
+    )?;
+    Err("LibreOffice 守护进程启动失败。".to_string())
 }
 
 fn read_helper_status(path: &Path) -> serde_json::Value {
@@ -939,6 +1008,10 @@ fn shutdown_libreoffice_daemon(runtime: &RuntimeContext) -> Result<serde_json::V
             "reason": "daemon-not-running"
         }));
     };
+    let port = helper_port(runtime)?;
+    if helper_health(port) {
+        let _ = helper_shutdown(port);
+    }
     stop_process(pid)?;
     let _ = fs::remove_file(pid_path);
     let status = serde_json::json!({
@@ -962,6 +1035,116 @@ fn shutdown_libreoffice_daemon(runtime: &RuntimeContext) -> Result<serde_json::V
         "stopped": true,
         "pid": pid
     }))
+}
+
+fn helper_port(runtime: &RuntimeContext) -> Result<u16, String> {
+    let port_path = libreoffice_helper_dir(runtime).join("port.txt");
+    if let Ok(raw) = fs::read_to_string(&port_path) {
+        if let Ok(value) = raw.trim().parse::<u16>() {
+            if value > 0 {
+                return Ok(value);
+            }
+        }
+    }
+    let port = reserve_local_port()?;
+    fs::write(&port_path, port.to_string()).map_err(io_error)?;
+    Ok(port)
+}
+
+fn reserve_local_port() -> Result<u16, String> {
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .map_err(|error| format!("failed to reserve helper port: {error}"))?;
+    let port = listener
+        .local_addr()
+        .map_err(|error| format!("failed to read helper port: {error}"))?
+        .port();
+    drop(listener);
+    Ok(port)
+}
+
+fn helper_base_url(port: u16) -> String {
+    format!("http://127.0.0.1:{port}")
+}
+
+fn helper_http_client() -> Result<Client, String> {
+    Client::builder()
+        .timeout(Duration::from_secs(LIBREOFFICE_HELPER_HEALTH_TIMEOUT_SECS))
+        .build()
+        .map_err(|error| error.to_string())
+}
+
+fn helper_health(port: u16) -> bool {
+    let Ok(client) = helper_http_client() else {
+        return false;
+    };
+    client
+        .get(format!("{}/health", helper_base_url(port)))
+        .send()
+        .ok()
+        .filter(|response| response.status().is_success())
+        .is_some()
+}
+
+fn helper_shutdown(port: u16) -> Result<(), String> {
+    let client = helper_http_client()?;
+    client
+        .post(format!("{}/shutdown", helper_base_url(port)))
+        .send()
+        .map_err(|error| format!("failed to request LibreOffice helper shutdown: {error}"))?;
+    Ok(())
+}
+
+fn helper_convert(
+    _runtime: &RuntimeContext,
+    _executable_path: &Path,
+    port: u16,
+    source_path: &Path,
+    output_dir: &Path,
+    pdf_path: &Path,
+) -> Result<(), String> {
+    #[cfg(not(target_os = "windows"))]
+    {
+        let profile_dir = libreoffice_profile_dir(runtime);
+        let output = run_command(
+            with_no_window(
+                Command::new(_executable_path)
+                    .arg("--headless")
+                    .arg("--nologo")
+                    .arg("--nofirststartwizard")
+                    .arg("--convert-to")
+                    .arg("pdf")
+                    .arg("--outdir")
+                    .arg(output_dir)
+                    .arg(source_path)
+                    .arg(format!(
+                        "-env:UserInstallation={}",
+                        libreoffice_profile_uri(&profile_dir)
+                    )),
+            ),
+            "convert office document with LibreOffice",
+        )?;
+        if output.status.success() {
+            return Ok(());
+        }
+        return Err(command_output_message(&output));
+    }
+    #[cfg(target_os = "windows")]
+    {
+        let client = helper_http_client()?;
+        let response = client
+            .post(format!("{}/convert", helper_base_url(port)))
+            .json(&serde_json::json!({
+                "sourcePath": source_path.to_string_lossy().to_string(),
+                "outputDir": output_dir.to_string_lossy().to_string(),
+                "pdfPath": pdf_path.to_string_lossy().to_string()
+            }))
+            .send()
+            .map_err(|error| format!("failed to request LibreOffice helper convert: {error}"))?;
+        if response.status().is_success() {
+            return Ok(());
+        }
+        Err(response.text().unwrap_or_else(|_| "helper convert request failed".to_string()))
+    }
 }
 
 fn write_libreoffice_status(
@@ -1186,6 +1369,95 @@ fn libreoffice_profile_dir(runtime: &RuntimeContext) -> PathBuf {
 
 fn libreoffice_profile_uri(path: &Path) -> String {
     format!("file:///{}", path.to_string_lossy().replace('\\', "/"))
+}
+
+#[cfg(target_os = "windows")]
+fn libreoffice_helper_script() -> &'static str {
+    r#"
+param(
+  [Parameter(Mandatory = $true)][string]$SofficePath,
+  [Parameter(Mandatory = $true)][int]$Port,
+  [Parameter(Mandatory = $true)][string]$ProfileUri
+)
+
+Add-Type -AssemblyName System.Net
+Add-Type -AssemblyName System.Web
+
+$listener = [System.Net.HttpListener]::new()
+$listener.Prefixes.Add("http://127.0.0.1:$Port/")
+$listener.Start()
+
+function Write-JsonResponse {
+  param(
+    [Parameter(Mandatory = $true)]$Context,
+    [Parameter(Mandatory = $true)][int]$StatusCode,
+    [Parameter(Mandatory = $true)]$Body
+  )
+  $json = [System.Text.Json.JsonSerializer]::Serialize($Body)
+  $bytes = [System.Text.Encoding]::UTF8.GetBytes($json)
+  $Context.Response.StatusCode = $StatusCode
+  $Context.Response.ContentType = "application/json; charset=utf-8"
+  $Context.Response.OutputStream.Write($bytes, 0, $bytes.Length)
+  $Context.Response.Close()
+}
+
+while ($listener.IsListening) {
+  try {
+    $context = $listener.GetContext()
+    $path = $context.Request.Url.AbsolutePath
+    if ($path -eq "/health") {
+      Write-JsonResponse -Context $context -StatusCode 200 -Body @{
+        ok = $true
+        runtime = "libreoffice-helper"
+      }
+      continue
+    }
+    if ($path -eq "/shutdown") {
+      Write-JsonResponse -Context $context -StatusCode 200 -Body @{
+        ok = $true
+        stopped = $true
+      }
+      $listener.Stop()
+      break
+    }
+    if ($path -eq "/convert") {
+      $reader = New-Object System.IO.StreamReader($context.Request.InputStream, $context.Request.ContentEncoding)
+      $body = $reader.ReadToEnd()
+      $payload = [System.Text.Json.JsonSerializer]::Deserialize($body, [System.Collections.Generic.Dictionary[string, object]])
+      $sourcePath = [string]$payload["sourcePath"]
+      $outputDir = [string]$payload["outputDir"]
+      $process = Start-Process -FilePath $SofficePath -ArgumentList @(
+        "--headless",
+        "--nologo",
+        "--nofirststartwizard",
+        "--convert-to", "pdf",
+        "--outdir", $outputDir,
+        $sourcePath,
+        "-env:UserInstallation=$ProfileUri"
+      ) -Wait -PassThru -WindowStyle Hidden
+      if ($process.ExitCode -eq 0) {
+        Write-JsonResponse -Context $context -StatusCode 200 -Body @{ ok = $true }
+      } else {
+        Write-JsonResponse -Context $context -StatusCode 500 -Body @{
+          ok = $false
+          error = "LibreOffice convert exited with code $($process.ExitCode)"
+        }
+      }
+      continue
+    }
+    Write-JsonResponse -Context $context -StatusCode 404 -Body @{ ok = $false; error = "Not Found" }
+  } catch {
+    try {
+      if ($context) {
+        Write-JsonResponse -Context $context -StatusCode 500 -Body @{
+          ok = $false
+          error = $_.Exception.Message
+        }
+      }
+    } catch {}
+  }
+}
+"#
 }
 
 #[cfg(target_os = "windows")]
