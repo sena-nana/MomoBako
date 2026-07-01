@@ -2578,6 +2578,103 @@ mod tests {
     }
 
     #[test]
+    fn ensure_preview_pdf_recomputes_cache_key_when_source_metadata_changes() {
+        let _guard = DetectorOverrideGuard::new();
+        let workspace = TestWorkspace::new("ensure-preview-pdf-cache-miss-on-source-change");
+        let service_root = workspace.path("service-root");
+        let plugin_data_dir = workspace.path("plugin-data");
+        let repo_root = workspace.path("repo");
+        let docs_dir = repo_root.join("Docs");
+        fs::create_dir_all(&service_root).expect("service root should be created");
+        fs::create_dir_all(&plugin_data_dir).expect("plugin data dir should be created");
+        fs::create_dir_all(&docs_dir).expect("docs dir should be created");
+        let source_path = docs_dir.join("demo.docx");
+        fs::write(&source_path, b"docx").expect("source file should be written");
+
+        let connection = Connection::open(service_root.join(REGISTRY_FILE_NAME))
+            .expect("registry should be created");
+        connection
+            .execute(
+                "CREATE TABLE repositories (repo_id TEXT PRIMARY KEY, path TEXT NOT NULL)",
+                [],
+            )
+            .expect("repositories table should be created");
+        connection
+            .execute(
+                "INSERT INTO repositories (repo_id, path) VALUES (?1, ?2)",
+                params!["repo-demo", repo_root.to_string_lossy().to_string()],
+            )
+            .expect("repository row should be inserted");
+
+        let runtime = RuntimeContext {
+            plugin_data_dir,
+            service_root_dir: service_root,
+            plugin_runtime_dir: workspace.path("runtime"),
+            config: PluginConfig {
+                converter_mode: ConverterMode::Auto,
+                auto_download_libreoffice: true,
+            },
+        };
+
+        set_test_microsoft_office_family_status(
+            OfficeFamily::Word,
+            Some(available_status(
+                "C:/Program Files/Microsoft Office/root/Office16/WINWORD.EXE",
+                "Office16",
+            )),
+        );
+
+        let original_cache_key = preview_cache_key(
+            "repo-demo",
+            "Docs/demo.docx",
+            &source_path,
+            4,
+            "2026-07-01T08:00:00Z",
+            "docx",
+            "microsoft-office",
+            "Office16",
+        );
+        let original_pdf_path = repository_cache_dir(&repo_root).join(format!("{original_cache_key}.pdf"));
+        fs::create_dir_all(original_pdf_path.parent().expect("cache dir should exist"))
+            .expect("cache dir should be created");
+        fs::write(&original_pdf_path, b"%PDF-1.4 cached").expect("original cached pdf should be written");
+
+        let changed_modified_at = "2026-07-02T09:30:00Z".to_string();
+        let changed_size_bytes = 6_i64;
+        let changed_cache_key = preview_cache_key(
+            "repo-demo",
+            "Docs/demo.docx",
+            &source_path,
+            changed_size_bytes,
+            &changed_modified_at,
+            "docx",
+            "microsoft-office",
+            "Office16",
+        );
+        let changed_pdf_path = repository_cache_dir(&repo_root).join(format!("{changed_cache_key}.pdf"));
+        fs::write(&changed_pdf_path, b"%PDF-1.4 new").expect("changed cached pdf should be written");
+
+        let value = ensure_preview_pdf(
+            &runtime,
+            EnsurePreviewPdfPayload {
+                repo_id: "repo-demo".to_string(),
+                entry_path: "Docs/demo.docx".to_string(),
+                extension: "docx".to_string(),
+                source_path: Some(source_path.to_string_lossy().to_string()),
+                source_modified_at: Some(changed_modified_at),
+                source_size_bytes: Some(changed_size_bytes),
+            },
+        )
+        .expect("ensure preview pdf should use the changed cache key");
+
+        assert_ne!(original_cache_key, changed_cache_key);
+        assert_eq!(value["cached"], serde_json::json!(true));
+        assert_eq!(value["pdfPath"], serde_json::json!(changed_pdf_path.to_string_lossy().to_string()));
+        assert_eq!(value["cacheKey"], serde_json::json!(changed_cache_key));
+        assert_ne!(value["pdfPath"], serde_json::json!(original_pdf_path.to_string_lossy().to_string()));
+    }
+
+    #[test]
     fn explicit_microsoft_office_mode_returns_diagnostic_error_when_office_is_missing() {
         let _guard = DetectorOverrideGuard::new();
         let workspace = TestWorkspace::new("missing-microsoft-office");
