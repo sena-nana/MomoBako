@@ -1,0 +1,23 @@
+External/Plugins/office-convert/Cargo.lock
+  s_2d5a17782b6bfd::t_f493e73fc20a7d 5-19,90-104,121-131,153-158,177-186,297-302,309,513-522,587-596,625,628,853,980-990,1008-1013,1693-1709,1715-1726
+External/Plugins/office-convert/Cargo.toml
+  s_2d5a17782b6bfd::t_f21630621b8e84 15,18
+External/Plugins/office-convert/src/lib.rs
+  s_2d5a17782b6bfd::t_d5f50042ba3487 5-7,34,600,646-650,657-677,682-688,1170-1185
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.5",
+  "base_commit_sha": "424b38a474bcc05377e0bbe8c6ed688d7c86fea7",
+  "prompts": {},
+  "sessions": {
+    "s_2d5a17782b6bfd": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f1cad-dea8-7323-b604-a3effbaf235c",
+        "model": "unknown"
+      },
+      "human_author": "AuraElicase <auraelicase@outlook.com>"
+    }
+  }
+}
