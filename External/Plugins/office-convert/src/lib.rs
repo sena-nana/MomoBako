@@ -1965,8 +1965,63 @@ impl SelectedConverter {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use momobako_backend_plugin_sdk::{
+        free_c_string, register_host_plugin_api, response_ok, HostPluginCallEnvelope,
+    };
     use rusqlite::params;
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::{
+        collections::VecDeque,
+        ffi::CStr,
+        os::raw::c_char,
+        sync::{Mutex, OnceLock},
+        time::{SystemTime, UNIX_EPOCH},
+    };
+
+    static HOST_PLUGIN_CALLS: OnceLock<Mutex<Vec<HostPluginCallEnvelope>>> = OnceLock::new();
+    static HOST_PLUGIN_RESPONSES: OnceLock<Mutex<VecDeque<serde_json::Value>>> = OnceLock::new();
+
+    unsafe extern "C" fn test_host_plugin_call(input: *const c_char) -> *mut c_char {
+        let raw = unsafe { CStr::from_ptr(input) }
+            .to_str()
+            .expect("host bridge request should be utf-8")
+            .to_string();
+        let envelope: HostPluginCallEnvelope =
+            serde_json::from_str(&raw).expect("host bridge request should decode");
+        if envelope.method == "downloader.awaitDownload" {
+            if let Some(destination_path) = HOST_PLUGIN_CALLS
+                .get_or_init(|| Mutex::new(Vec::new()))
+                .lock()
+                .expect("host bridge call log should lock")
+                .iter()
+                .find(|call| call.method == "downloader.enqueueDownload")
+                .and_then(|call| call.payload.get("destinationPath"))
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string)
+            {
+                let path = PathBuf::from(destination_path);
+                if let Some(parent) = path.parent() {
+                    let _ = fs::create_dir_all(parent);
+                }
+                let _ = fs::write(path, b"msi");
+            }
+        }
+        HOST_PLUGIN_CALLS
+            .get_or_init(|| Mutex::new(Vec::new()))
+            .lock()
+            .expect("host bridge call log should lock")
+            .push(envelope);
+        let response = HOST_PLUGIN_RESPONSES
+            .get_or_init(|| Mutex::new(VecDeque::new()))
+            .lock()
+            .expect("host bridge response queue should lock")
+            .pop_front()
+            .unwrap_or_else(|| serde_json::json!({}));
+        response_ok(response)
+    }
+
+    unsafe extern "C" fn test_host_plugin_free(value: *mut c_char) {
+        unsafe { free_c_string(value) };
+    }
 
     struct TestWorkspace {
         root: PathBuf,
@@ -2056,6 +2111,71 @@ mod tests {
             ConverterMode::from_config(Some("unexpected-value")),
             ConverterMode::Auto
         ));
+    }
+
+    #[test]
+    fn download_runtime_via_downloader_uses_expected_host_plugin_sequence() {
+        let workspace = TestWorkspace::new("runtime-download-bridge");
+        let runtime = RuntimeContext {
+            plugin_data_dir: workspace.path("plugin-data"),
+            service_root_dir: workspace.path("service-root"),
+            plugin_runtime_dir: workspace.path("runtime"),
+            config: PluginConfig {
+                converter_mode: ConverterMode::Auto,
+                auto_download_libreoffice: true,
+            },
+        };
+        let target_path = workspace.path("plugin-data/downloads/LibreOffice/runtime.msi");
+
+        HOST_PLUGIN_CALLS
+            .get_or_init(|| Mutex::new(Vec::new()))
+            .lock()
+            .expect("host bridge call log should lock")
+            .clear();
+        let responses = HOST_PLUGIN_RESPONSES.get_or_init(|| Mutex::new(VecDeque::new()));
+        {
+            let mut guard = responses.lock().expect("host bridge response queue should lock");
+            guard.clear();
+            guard.push_back(serde_json::json!({
+                "runtime": "aria2",
+                "queueSize": 0
+            }));
+            guard.push_back(serde_json::json!({
+                "taskId": "task-demo"
+            }));
+            guard.push_back(serde_json::json!({
+                "status": "completed",
+                "destinationPath": target_path.to_string_lossy().to_string()
+            }));
+        }
+        register_host_plugin_api(Some(test_host_plugin_call), Some(test_host_plugin_free));
+
+        let result = download_runtime_via_downloader(
+            &runtime,
+            DEFAULT_LIBREOFFICE_DOWNLOAD_URL,
+            &target_path,
+        );
+
+        register_host_plugin_api(None, None);
+        result.expect("host plugin bridge should download bundled runtime");
+
+        let calls = HOST_PLUGIN_CALLS
+            .get_or_init(|| Mutex::new(Vec::new()))
+            .lock()
+            .expect("host bridge call log should lock")
+            .clone();
+        assert_eq!(calls.len(), 3);
+        assert_eq!(calls[0].plugin_id, DOWNLOADER_PLUGIN_ID);
+        assert_eq!(calls[0].method, "downloader.ensureRuntime");
+        assert_eq!(calls[1].method, "downloader.enqueueDownload");
+        assert_eq!(calls[1].payload["url"], serde_json::json!(DEFAULT_LIBREOFFICE_DOWNLOAD_URL));
+        assert_eq!(calls[1].payload["destinationPath"], serde_json::json!(target_path.to_string_lossy().to_string()));
+        assert_eq!(calls[1].payload["metadata"]["kind"], serde_json::json!("office-runtime"));
+        assert_eq!(calls[1].payload["metadata"]["pluginId"], serde_json::json!("momobako.service.office-convert"));
+        assert_eq!(calls[1].payload["metadata"]["runtime"], serde_json::json!("libreoffice"));
+        assert_eq!(calls[1].payload["metadata"]["version"], serde_json::json!(DEFAULT_LIBREOFFICE_VERSION));
+        assert_eq!(calls[2].method, "downloader.awaitDownload");
+        assert_eq!(calls[2].payload["taskId"], serde_json::json!("task-demo"));
     }
 
     #[test]
