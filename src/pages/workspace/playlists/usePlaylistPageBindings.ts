@@ -1,6 +1,6 @@
 import { computed, type ComputedRef } from "vue";
+import type { WorkspacePlayerBarHandlers, WorkspacePlayerBarProps } from "../../../components/workspacePlayerBar.contract";
 import type { PlaylistDetail, PlaylistItem } from "../../../types/repository";
-import type { WorkspacePlayerBarHandlers, WorkspacePlayerBarProps } from "./usePlayerUi";
 
 type WorkspacePlaylistPageBindingOptions = {
   activePlaylistDetail: ComputedRef<PlaylistDetail | null>;

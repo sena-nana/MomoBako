@@ -1,43 +1,15 @@
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { computed, ref, type ComputedRef } from "vue";
+import type {
+  WorkspacePlayerBarHandlers,
+  WorkspacePlayerBarProps,
+} from "../../../components/workspacePlayerBar.contract";
 import { getPlaylistPlayerByType } from "../../../plugins/playlistPlayers";
-import type { PlaylistDetail, PlaylistItem, PlaylistPlaybackMode } from "../../../types/repository";
+import type { PlaylistDetail, PlaylistItem } from "../../../types/repository";
 import type { usePlaylistPlayer } from "../../../composables/usePlaylistPlayer";
 import type { PlaylistPlayerObjectFit } from "../../../plugins/sdk";
 
 type PlaylistPlayerController = ReturnType<typeof usePlaylistPlayer>;
-export type WorkspacePlayerBarProps = {
-  item: PlaylistItem | null;
-  playerLabel?: string | null;
-  fileClass?: string | null;
-  supportsSeek?: boolean;
-  supportsVolume?: boolean;
-  canPlay?: boolean;
-  mode: PlaylistPlaybackMode;
-  currentTimeMs: number;
-  durationMs: number;
-  volume: number;
-  imageDurationMs: number;
-  objectFit: PlaylistPlayerObjectFit;
-  isPlaying: boolean;
-  errorMessage?: string | null;
-  queueOpen: boolean;
-  queueItems: PlaylistItem[];
-  currentItemId: string | null;
-};
-export type WorkspacePlayerBarHandlers = {
-  togglePlay: () => void | Promise<unknown>;
-  previous: () => void | Promise<unknown>;
-  next: () => void | Promise<unknown>;
-  cycleMode: () => void | Promise<unknown>;
-  openQueue: () => void | Promise<unknown>;
-  openPreview: () => void | Promise<unknown>;
-  setVolume: (value: number) => void | Promise<unknown>;
-  selectQueueItem: (playlistItemId: string) => void | Promise<unknown>;
-  seek: (timeMs: number) => void | Promise<unknown>;
-  setImageDuration: (value: number) => void | Promise<unknown>;
-  setObjectFit: (value: PlaylistPlayerObjectFit) => void | Promise<unknown>;
-};
 
 type WorkspacePlayerUiOptions = {
   activePlaylistDetail: ComputedRef<PlaylistDetail | null>;
@@ -159,7 +131,7 @@ export function usePlayerUi(options: WorkspacePlayerUiOptions) {
     await options.reorderPlaylistItemsInWorkspace(options.activePlaylistId.value, items.map((entry) => entry.playlistItemId));
   }
 
-  const workspacePlayerBarProps = computed(() => ({
+  const workspacePlayerBarProps = computed<WorkspacePlayerBarProps>(() => ({
     item: currentPlayerItem.value,
     playerLabel: options.playlistPlayer.currentPlayerLabel.value,
     fileClass: workspacePlayerDefinition.value?.fileClass,
@@ -179,7 +151,7 @@ export function usePlayerUi(options: WorkspacePlayerUiOptions) {
     currentItemId: options.playlistPlayer.currentItemId.value,
   }));
 
-  const workspacePlayerBarHandlers = {
+  const workspacePlayerBarHandlers: WorkspacePlayerBarHandlers = {
     togglePlay: () => options.playlistPlayer.setPlaybackState({ isPlaying: !options.playlistPlayer.isPlaying.value }),
     previous: () => options.playlistPlayer.playPrevious(),
     next: () => options.playlistPlayer.playNext(false),

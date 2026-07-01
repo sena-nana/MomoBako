@@ -10,42 +10,15 @@ import {
   SkipForward,
   Volume2,
 } from "@lucide/vue";
-import type { PlaylistItem, PlaylistPlaybackMode } from "../types/repository";
-import type { PlaylistPlayerObjectFit } from "../plugins/sdk";
+import type { PlaylistPlaybackMode } from "../types/repository";
+import type {
+  WorkspacePlayerBarEmitMap,
+  WorkspacePlayerBarProps,
+} from "./workspacePlayerBar.contract";
 
-const props = defineProps<{
-  item: PlaylistItem | null;
-  playerLabel?: string | null;
-  fileClass?: string | null;
-  supportsSeek?: boolean;
-  supportsVolume?: boolean;
-  canPlay?: boolean;
-  mode: PlaylistPlaybackMode;
-  currentTimeMs: number;
-  durationMs: number;
-  volume: number;
-  imageDurationMs: number;
-  objectFit: PlaylistPlayerObjectFit;
-  isPlaying: boolean;
-  errorMessage?: string | null;
-  queueOpen: boolean;
-  queueItems: PlaylistItem[];
-  currentItemId: string | null;
-}>();
+const props = defineProps<WorkspacePlayerBarProps>();
 
-const emit = defineEmits<{
-  togglePlay: [];
-  previous: [];
-  next: [];
-  cycleMode: [];
-  openQueue: [];
-  openPreview: [];
-  setVolume: [value: number];
-  selectQueueItem: [playlistItemId: string];
-  seek: [timeMs: number];
-  setImageDuration: [value: number];
-  setObjectFit: [value: PlaylistPlayerObjectFit];
-}>();
+const emit = defineEmits<WorkspacePlayerBarEmitMap>();
 
 function formatTime(value: number) {
   const totalSeconds = Math.max(0, Math.floor(value / 1000));

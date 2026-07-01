@@ -1,9 +1,9 @@
 import { computed, type Component, type Ref } from "vue";
+import type { WorkspacePlayerBarHandlers, WorkspacePlayerBarProps } from "../../../components/workspacePlayerBar.contract";
 import type { ContextMenuItem } from "../../../ui/core";
 import type { RegisteredLibraryExtension } from "../../../plugins/sdk";
 import type { FileBrowserEntry, RepositoryTagGroup, SmartFolderResultSnapshot } from "../../../types/repository";
 import type { FileDisplayMode } from "../useWorkspaceViewState";
-import type { WorkspacePlayerBarHandlers, WorkspacePlayerBarProps } from "../playlists/usePlayerUi";
 
 type BreadcrumbSegment = {
   label: string;
