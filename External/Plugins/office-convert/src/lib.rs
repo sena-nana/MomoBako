@@ -980,11 +980,12 @@ fn current_libreoffice_daemon_status(runtime: &RuntimeContext) -> Result<serde_j
     let pid = read_pid(&pid_path)?;
     let running = pid.map(process_is_running).unwrap_or(false);
     let port = helper_port(runtime).ok();
+    let helper_runtime = port.and_then(helper_runtime_status);
     if let Some(object) = status.as_object_mut() {
         object.insert("running".to_string(), serde_json::Value::Bool(running));
         object.insert(
             "healthy".to_string(),
-            serde_json::Value::Bool(port.map(helper_health).unwrap_or(false)),
+            serde_json::Value::Bool(helper_runtime.as_ref().map(|value| value.healthy).unwrap_or(false)),
         );
         object.insert(
             "helperType".to_string(),
@@ -1006,6 +1007,21 @@ fn current_libreoffice_daemon_status(runtime: &RuntimeContext) -> Result<serde_j
                 "convert": "http-local",
                 "shutdown": "plugin-call"
             }),
+        );
+        object.insert(
+            "sofficeReady".to_string(),
+            helper_runtime
+                .as_ref()
+                .map(|value| serde_json::Value::Bool(value.soffice_ready))
+                .unwrap_or(serde_json::Value::Null),
+        );
+        object.insert(
+            "sofficePid".to_string(),
+            helper_runtime
+                .as_ref()
+                .and_then(|value| value.soffice_pid)
+                .map(serde_json::Value::from)
+                .unwrap_or(serde_json::Value::Null),
         );
         if !running {
             object.insert(
@@ -1141,16 +1157,42 @@ fn helper_http_client() -> Result<Client, String> {
         .map_err(|error| error.to_string())
 }
 
+#[derive(Debug, Default)]
+struct HelperRuntimeStatus {
+    healthy: bool,
+    soffice_ready: bool,
+    soffice_pid: Option<u32>,
+}
+
 fn helper_health(port: u16) -> bool {
+    helper_runtime_status(port)
+        .map(|status| status.healthy)
+        .unwrap_or(false)
+}
+
+fn helper_runtime_status(port: u16) -> Option<HelperRuntimeStatus> {
     let Ok(client) = helper_http_client() else {
-        return false;
+        return None;
     };
-    client
+    let response = client
         .get(format!("{}/health", helper_base_url(port)))
         .send()
-        .ok()
-        .filter(|response| response.status().is_success())
-        .is_some()
+        .ok()?;
+    let healthy = response.status().is_success();
+    let payload = response.json::<serde_json::Value>().ok();
+    Some(HelperRuntimeStatus {
+        healthy,
+        soffice_ready: payload
+            .as_ref()
+            .and_then(|value| value.get("sofficeReady"))
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(healthy),
+        soffice_pid: payload
+            .as_ref()
+            .and_then(|value| value.get("sofficePid"))
+            .and_then(serde_json::Value::as_u64)
+            .and_then(|value| u32::try_from(value).ok()),
+    })
 }
 
 fn helper_shutdown(port: u16) -> Result<(), String> {
@@ -1814,5 +1856,30 @@ mod tests {
         } else {
             assert_eq!(helper_type_label(&runtime), "native-cli-fallback");
         }
+    }
+
+    #[test]
+    fn helper_runtime_status_reads_soffice_fields() {
+        let payload = serde_json::json!({
+            "ok": true,
+            "runtime": "office-convert-helper",
+            "sofficeReady": true,
+            "sofficePid": 4567
+        });
+        let status = HelperRuntimeStatus {
+            healthy: true,
+            soffice_ready: payload
+                .get("sofficeReady")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false),
+            soffice_pid: payload
+                .get("sofficePid")
+                .and_then(serde_json::Value::as_u64)
+                .and_then(|value| u32::try_from(value).ok()),
+        };
+
+        assert!(status.healthy);
+        assert!(status.soffice_ready);
+        assert_eq!(status.soffice_pid, Some(4567));
     }
 }

@@ -816,6 +816,8 @@ export type OfficeConvertDaemonStatus = {
   port?: number | null;
   baseUrl?: string | null;
   pid?: number | null;
+  sofficeReady?: boolean | null;
+  sofficePid?: number | null;
   path?: string | null;
   updatedAt?: string | null;
   error?: string | null;
