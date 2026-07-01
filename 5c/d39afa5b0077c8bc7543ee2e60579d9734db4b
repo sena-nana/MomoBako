@@ -1,0 +1,19 @@
+tests/pluginManagerPanel.test.ts
+  s_2d5a17782b6bfd::t_c7e6e1b81df09a 5,38,80,383-462
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.5",
+  "base_commit_sha": "5cd39afa5b0077c8bc7543ee2e60579d9734db4b",
+  "prompts": {},
+  "sessions": {
+    "s_2d5a17782b6bfd": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f1cad-dea8-7323-b604-a3effbaf235c",
+        "model": "unknown"
+      },
+      "human_author": "AuraElicase <auraelicase@outlook.com>"
+    }
+  }
+}
