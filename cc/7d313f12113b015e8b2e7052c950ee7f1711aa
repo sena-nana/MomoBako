@@ -1,0 +1,31 @@
+src/components/WorkspacePlayerBar.vue
+  s_c384b5a21cbeb4::t_802f415fbd6b50 13-17,19,21
+src/components/workspacePlayerBar.contract.ts
+  s_c384b5a21cbeb4::t_c07c26341187c2 1-45
+src/pages/workspace/WorkspaceFilesSurface.vue
+  s_c384b5a21cbeb4::t_60a0975de1c0c6 4
+src/pages/workspace/files/useFilesSurfaceBindings.ts
+  s_c384b5a21cbeb4::t_9e65468073ca69 2
+src/pages/workspace/playlists/WorkspacePlaylistPage.vue
+  s_c384b5a21cbeb4::t_91588f1a2ee23b 4,7,24-27,72
+src/pages/workspace/playlists/usePlayerUi.ts
+  s_c384b5a21cbeb4::t_189469eb285a49 3-6,8,134,154
+src/pages/workspace/playlists/usePlaylistPageBindings.ts
+  s_c384b5a21cbeb4::t_e18a37bfb31c35 2
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.5",
+  "base_commit_sha": "cc7d313f12113b015e8b2e7052c950ee7f1711aa",
+  "prompts": {},
+  "sessions": {
+    "s_c384b5a21cbeb4": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f1c58-9d3c-70e3-8d20-1accaf35e59a",
+        "model": "unknown"
+      },
+      "human_author": "AuraElicase <auraelicase@outlook.com>"
+    }
+  }
+}
