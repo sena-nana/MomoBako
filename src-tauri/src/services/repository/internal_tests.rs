@@ -817,6 +817,58 @@ mod tests {
     }
 
     #[test]
+    fn shutdown_runtime_helpers_cleans_office_helper_state_files() {
+        let workspace = TestWorkspace::new("shutdown-office-helper-state");
+        let service_root = workspace.path("service");
+        seed_standard_test_plugins(&service_root);
+        let state = RepositoryState::from_root(service_root.clone());
+
+        let plugin_dir = plugin_data_dir(&service_root, "momobako.service.office-convert");
+        let helper_dir = plugin_dir.join("helpers").join("libreoffice");
+        fs::create_dir_all(&helper_dir).expect("office helper dir should be created");
+        fs::write(helper_dir.join("pid.txt"), "invalid").expect("pid state should be written");
+        fs::write(helper_dir.join("status.json"), "{}").expect("status state should be written");
+        fs::write(helper_dir.join("port.txt"), "23119").expect("port state should be written");
+        fs::write(helper_dir.join("session.txt"), "office").expect("session state should be written");
+        fs::write(helper_dir.join("office-convert-helper.ps1"), "Write-Host helper")
+            .expect("helper script should be written");
+
+        state
+            .shutdown_runtime_helpers()
+            .expect("helper shutdown should clean stale office state");
+
+        assert!(!helper_dir.join("pid.txt").exists());
+        assert!(!helper_dir.join("status.json").exists());
+        assert!(!helper_dir.join("port.txt").exists());
+        assert!(!helper_dir.join("session.txt").exists());
+        assert!(!helper_dir.join("office-convert-helper.ps1").exists());
+    }
+
+    #[test]
+    fn shutdown_runtime_helpers_cleans_aria2_helper_state_files() {
+        let workspace = TestWorkspace::new("shutdown-aria2-helper-state");
+        let service_root = workspace.path("service");
+        seed_standard_test_plugins(&service_root);
+        let state = RepositoryState::from_root(service_root.clone());
+
+        let plugin_dir = plugin_data_dir(&service_root, "momobako.service.downloader");
+        let helper_dir = plugin_dir.join("helpers").join("aria2");
+        fs::create_dir_all(&helper_dir).expect("aria2 helper dir should be created");
+        fs::write(helper_dir.join("pid.txt"), "invalid").expect("pid state should be written");
+        fs::write(helper_dir.join("status.json"), "{}").expect("status state should be written");
+        fs::write(helper_dir.join("session.txt"), "aria2-session")
+            .expect("session state should be written");
+
+        state
+            .shutdown_runtime_helpers()
+            .expect("helper shutdown should clean stale aria2 state");
+
+        assert!(!helper_dir.join("pid.txt").exists());
+        assert!(!helper_dir.join("status.json").exists());
+        assert!(!helper_dir.join("session.txt").exists());
+    }
+
+    #[test]
     fn plugin_config_api_persists_values_in_plugin_data_dir() {
         let workspace = TestWorkspace::new("plugin-config");
         let service_root = workspace.path("service");

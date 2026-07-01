@@ -835,6 +835,10 @@ pub(super) fn shutdown_helper_state_dir(plugin_data_dir: &Path) -> Result<(), St
         let pid_raw = fs::read_to_string(&pid_path).map_err(io_error)?;
         let Some(pid) = pid_raw.trim().parse::<u32>().ok() else {
             let _ = fs::remove_file(&pid_path);
+            let _ = fs::remove_file(state_dir.join("status.json"));
+            let _ = fs::remove_file(state_dir.join("port.txt"));
+            let _ = fs::remove_file(state_dir.join("session.txt"));
+            let _ = fs::remove_file(state_dir.join("office-convert-helper.ps1"));
             continue;
         };
         #[cfg(target_os = "windows")]
@@ -852,6 +856,7 @@ pub(super) fn shutdown_helper_state_dir(plugin_data_dir: &Path) -> Result<(), St
         let _ = fs::remove_file(&pid_path);
         let _ = fs::remove_file(state_dir.join("status.json"));
         let _ = fs::remove_file(state_dir.join("port.txt"));
+        let _ = fs::remove_file(state_dir.join("session.txt"));
         let _ = fs::remove_file(state_dir.join("office-convert-helper.ps1"));
     }
     Ok(())
