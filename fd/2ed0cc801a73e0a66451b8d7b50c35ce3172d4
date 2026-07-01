@@ -1,0 +1,39 @@
+External/Plugins/_sdk/backend-rust/src/lib.rs
+  s_2d5a17782b6bfd::t_e47479564976c0 24-25
+External/Plugins/office-convert/Cargo.lock
+  s_2d5a17782b6bfd::t_6b704ecfaf0500 112-123,130-135,231-248,479-489,539,570-575,762-786,934-945,1194-1199
+External/Plugins/office-convert/Cargo.toml
+  s_2d5a17782b6bfd::t_2c7823bf1a81f0 12
+External/Plugins/office-convert/src/lib.rs
+  s_2d5a17782b6bfd::t_ce0151e0c57fd7 1-4,8,11-13,19-20,25-27,29-32,36-38,42,59-80,162-165,168,184,238-240,248-249,251,254,256,267-268,298-316,318,321,324,332-336,339,342,345-346,348,361,377-378,382-385,387,392-401,404-482,485-500,502,505-510,520,538,552-573,583-814,819-1065,1091-1155
+src-tauri/src/services/repository/contracts.rs
+  s_2d5a17782b6bfd::t_de0c6ffc131aa7 1524-1525
+src-tauri/src/services/repository/internal_tests.rs
+  s_f0abc17e5269b6::t_0ad2c1c4b63862 769-818,926,940-943
+src-tauri/src/services/repository/plugin_runtime.rs
+  s_2d5a17782b6bfd::t_a93eba4d875e49 199
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.5",
+  "base_commit_sha": "fd2ed0cc801a73e0a66451b8d7b50c35ce3172d4",
+  "prompts": {},
+  "sessions": {
+    "s_2d5a17782b6bfd": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f1cad-dea8-7323-b604-a3effbaf235c",
+        "model": "unknown"
+      },
+      "human_author": "AuraElicase <auraelicase@outlook.com>"
+    },
+    "s_f0abc17e5269b6": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f0caa-72ab-7720-90c5-6cba6822b374",
+        "model": "unknown"
+      },
+      "human_author": "AuraElicase <auraelicase@outlook.com>"
+    }
+  }
+}
