@@ -778,6 +778,13 @@ export type DownloaderEnqueueResponse = {
   destinationPath: string;
 };
 
+export type DownloaderAwaitResponse = DownloaderTaskRecord;
+
+export type DownloaderRemoveResponse = {
+  taskId: string;
+  removed: true;
+};
+
 export type OfficeConverterStatus = {
   available: boolean;
   path?: string | null;
@@ -871,6 +878,12 @@ export type OfficeConvertRunRuntimeSelfCheckResponse = {
   pdfSizeBytes?: number | null;
   durationMs: number;
   error?: string | null;
+};
+
+export type OfficeConvertShutdownDaemonResponse = {
+  stopped: boolean;
+  pid?: number | null;
+  reason?: string | null;
 };
 
 export type PluginConfigValue = unknown;
