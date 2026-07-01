@@ -178,6 +178,7 @@ function createSettingsPage(ctx) {
               row("自检样本", status.value.daemon?.lastSelfCheck?.samplePath || "未记录"),
               row("自检输出", status.value.daemon?.lastSelfCheck?.pdfPath || "未记录"),
               row("自检转换器", selfCheckConverterText(status.value.daemon?.lastSelfCheck)),
+              row("自检错误", status.value.daemon?.lastSelfCheck?.error || "无"),
             ])
           : h("p", { class: "repository-add-popover__note" }, "读取当前转换器、自带运行时与守护进程状态。"),
         h("div", { class: "file-metadata-card__source-row", style: "gap: 8px; margin-top: 8px;" }, [
