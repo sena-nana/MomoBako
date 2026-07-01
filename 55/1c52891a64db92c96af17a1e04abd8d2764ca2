@@ -1,0 +1,19 @@
+tests/officePreviewPlugin.test.ts
+  s_2d5a17782b6bfd::t_4664b517b2bffd 8,185-283
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.5",
+  "base_commit_sha": "551c52891a64db92c96af17a1e04abd8d2764ca2",
+  "prompts": {},
+  "sessions": {
+    "s_2d5a17782b6bfd": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f1cad-dea8-7323-b604-a3effbaf235c",
+        "model": "unknown"
+      },
+      "human_author": "AuraElicase <auraelicase@outlook.com>"
+    }
+  }
+}
