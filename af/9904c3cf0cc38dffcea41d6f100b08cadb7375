@@ -1,0 +1,19 @@
+External/Plugins/office-convert/src/register.js
+  s_2d5a17782b6bfd::t_9ca75703840a10 23-26,33,53,60,64-73,84-127,222-250,323-342
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.5",
+  "base_commit_sha": "af9904c3cf0cc38dffcea41d6f100b08cadb7375",
+  "prompts": {},
+  "sessions": {
+    "s_2d5a17782b6bfd": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f1cad-dea8-7323-b604-a3effbaf235c",
+        "model": "unknown"
+      },
+      "human_author": "AuraElicase <auraelicase@outlook.com>"
+    }
+  }
+}
