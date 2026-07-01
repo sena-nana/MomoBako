@@ -1255,6 +1255,13 @@ fn native_plugin_library_path(
     ));
     let output_path = cache_dir.join(&file_name);
     if output_path.is_file() {
+        extract_runtime_sidecars(
+            archive_path,
+            manifest_prefix,
+            &mut zip::ZipArchive::new(File::open(archive_path).map_err(io_error)?)
+                .map_err(|error| error.to_string())?,
+            &cache_dir,
+        )?;
         return Ok((output_path, cache_dir));
     }
     fs::create_dir_all(&cache_dir).map_err(io_error)?;
@@ -1282,16 +1289,49 @@ fn native_plugin_library_path(
         prefixed_dist_library,
     ];
     for candidate_name in candidate_names {
-        if let Ok(mut entry) = archive.by_name(&candidate_name) {
+        let extracted = if let Ok(mut entry) = archive.by_name(&candidate_name) {
             let mut output = File::create(&output_path).map_err(io_error)?;
             std::io::copy(&mut entry, &mut output).map_err(io_error)?;
             output.flush().map_err(io_error)?;
+            true
+        } else {
+            false
+        };
+        if extracted {
+            extract_runtime_sidecars(archive_path, manifest_prefix, &mut archive, &cache_dir)?;
             return Ok((output_path, cache_dir));
         }
     }
     Err(format!(
         "native plugin library not found in archive: {library_name}"
     ))
+}
+
+fn extract_runtime_sidecars(
+    _archive_path: &Path,
+    manifest_prefix: &str,
+    archive: &mut zip::ZipArchive<File>,
+    cache_dir: &Path,
+) -> Result<(), String> {
+    let sidecars = if cfg!(target_os = "windows") {
+        vec!["office-convert-helper.exe"]
+    } else {
+        vec!["office-convert-helper"]
+    };
+    for sidecar in sidecars {
+        let direct = plugin_archive_entry_path(manifest_prefix, Path::new(sidecar));
+        let dist = plugin_archive_entry_path(manifest_prefix, Path::new(&format!("dist/{sidecar}")));
+        for candidate_name in [sidecar.to_string(), format!("dist/{sidecar}"), direct, dist] {
+            if let Ok(mut entry) = archive.by_name(&candidate_name) {
+                let output_path = cache_dir.join(sidecar);
+                let mut output = File::create(&output_path).map_err(io_error)?;
+                std::io::copy(&mut entry, &mut output).map_err(io_error)?;
+                output.flush().map_err(io_error)?;
+                break;
+            }
+        }
+    }
+    Ok(())
 }
 
 fn native_plugin_library_file_name(library_name: &str) -> String {

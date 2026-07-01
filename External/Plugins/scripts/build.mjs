@@ -102,14 +102,51 @@ function buildNativePlugin(pluginDir, manifest, project) {
   };
 }
 
-function copyPluginProject(pluginDir, outputDir) {
-  for (const entry of readdirSync(pluginDir, { withFileTypes: true })) {
-    if (["target", ".dist", ".packages", "node_modules"].includes(entry.name)) continue;
+function binaryFileName(binaryName) {
+  if (process.platform === "win32") return `${binaryName}.exe`;
+  return binaryName;
+}
+
+function buildExtraNativeBinary(pluginDir, definition) {
+  const manifestPath = join(pluginDir, definition.manifestPath);
+  const binaryRoot = dirname(manifestPath);
+  const result = spawnSync(
+    cargoCommand,
+    ["build", "--release", "--manifest-path", manifestPath],
+    {
+      cwd: repoRoot,
+      stdio: "inherit",
+    },
+  );
+  if (result.status !== 0) {
+    process.exit(result.status ?? 1);
+  }
+  const fileName = definition.outputName || binaryFileName(definition.binaryName);
+  const builtBinaryPath = join(binaryRoot, "target", "release", binaryFileName(definition.binaryName));
+  if (!existsSync(builtBinaryPath)) {
+    throw new Error(`missing built binary: ${builtBinaryPath}`);
+  }
+  return {
+    fileName,
+    builtBinaryPath,
+  };
+}
+
+function shouldSkipCopy(name) {
+  return ["target", ".dist", ".packages", "node_modules"].includes(name);
+}
+
+function copyPluginProject(sourceDir, outputDir) {
+  mkdirSync(outputDir, { recursive: true });
+  for (const entry of readdirSync(sourceDir, { withFileTypes: true })) {
+    if (shouldSkipCopy(entry.name)) continue;
+    const sourcePath = join(sourceDir, entry.name);
+    const targetPath = join(outputDir, entry.name);
     if (entry.isDirectory()) {
-      cpSync(join(pluginDir, entry.name), join(outputDir, entry.name), { recursive: true });
+      copyPluginProject(sourcePath, targetPath);
       continue;
     }
-    cpSync(join(pluginDir, entry.name), join(outputDir, entry.name));
+    cpSync(sourcePath, targetPath);
   }
 }
 
@@ -156,6 +193,10 @@ for (const name of readdirSync(pluginsRoot, { withFileTypes: true })) {
     if (existsSync(cargoManifestPath)) {
       const { fileName, builtLibraryPath } = buildNativePlugin(pluginDir, manifest, project);
       cpSync(builtLibraryPath, join(outputDir, fileName));
+      for (const definition of project.build?.extraBinaries ?? []) {
+        const { fileName: extraFileName, builtBinaryPath } = buildExtraNativeBinary(pluginDir, definition);
+        cpSync(builtBinaryPath, join(outputDir, extraFileName));
+      }
     } else {
       console.log(`[build-external-plugins] skipped compile for ${name.name}: missing native manifest ${cargoManifestPath}`);
     }
