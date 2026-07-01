@@ -156,6 +156,11 @@ describe("API design snapshot contract", () => {
       expect.objectContaining({
         transport: "plugin-call",
         pluginId: "momobako.service.downloader",
+        pluginMethod: "downloader.getRuntimeStatus",
+      }),
+      expect.objectContaining({
+        transport: "plugin-call",
+        pluginId: "momobako.service.downloader",
         pluginMethod: "downloader.ensureRuntime",
       }),
       expect.objectContaining({
