@@ -1,0 +1,19 @@
+External/Plugins/office-preview/manifest.json
+  s_40697799f782f2::t_5469aca679c141 23-24
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.5",
+  "base_commit_sha": "bd835fb282fe678ee815518539924a2cb790b045",
+  "prompts": {},
+  "sessions": {
+    "s_40697799f782f2": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f1e55-be33-7dd2-8ec8-7f563c7e07c6",
+        "model": "unknown"
+      },
+      "human_author": "AuraElicase <auraelicase@outlook.com>"
+    }
+  }
+}
