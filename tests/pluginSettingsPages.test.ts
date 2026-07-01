@@ -1,12 +1,17 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { render, screen } from "@testing-library/vue";
+import { fireEvent, render, screen, waitFor } from "@testing-library/vue";
 import {
   clearPreviewPluginRegistry,
   syncRegisteredFrontendPluginManifests,
 } from "../src/plugins/sdk";
 import { getPluginSettingsPage, listPluginSettingsPages } from "../src/plugins/settingsPages";
 import type { PluginManifest } from "../src/types/repository";
-import { getInvokeCalls, getPluginCallCalls } from "./setupTests";
+import {
+  getInvokeCalls,
+  getPluginCallCalls,
+  seedMockPlugins,
+  seedMockRepositories,
+} from "./setupTests";
 import { pluginManifest } from "./fixtures/repositoryFixtures";
 
 function settingsPageManifest(enabled = true): PluginManifest {
@@ -70,6 +75,94 @@ function neteaseSettingsManifest(): PluginManifest {
   );
 }
 
+function officeConvertSettingsManifest(): PluginManifest {
+  return {
+    pluginId: "momobako.service.office-convert",
+    name: "Office Convert Service",
+    version: "0.1.0",
+    kind: "office-convert",
+    category: "service",
+    description: "Office 转换服务设置页。",
+    capabilities: ["office", "convert", "settings"],
+    enabled: true,
+    sdk: "frontend",
+    entry: {
+      frontend: {
+        module: "dist/register.js",
+        export: "register",
+      },
+    },
+    source: "builtin",
+    runtime: "vue-module",
+    permissions: [],
+    requires: [],
+    optional: [],
+    hooks: [],
+    contributes: {
+      settings: {
+        settingsPage: {
+          label: "Office 转换",
+        },
+      },
+    },
+    compat: { sdkVersion: "1", legacyPluginIds: [] },
+    status: "ready",
+    dependencyStatus: {
+      required: [],
+      optional: [],
+      missingRequired: [],
+      missingOptional: [],
+      disabledRequired: [],
+      disabledOptional: [],
+    },
+    degraded: false,
+  };
+}
+
+function downloaderSettingsManifest(): PluginManifest {
+  return {
+    pluginId: "momobako.service.downloader",
+    name: "Download Service",
+    version: "0.1.0",
+    kind: "download",
+    category: "service",
+    description: "下载服务设置页。",
+    capabilities: ["download", "settings"],
+    enabled: true,
+    sdk: "frontend",
+    entry: {
+      frontend: {
+        module: "dist/register.js",
+        export: "register",
+      },
+    },
+    source: "builtin",
+    runtime: "vue-module",
+    permissions: [],
+    requires: [],
+    optional: [],
+    hooks: [],
+    contributes: {
+      settings: {
+        settingsPage: {
+          label: "下载服务",
+        },
+      },
+    },
+    compat: { sdkVersion: "1", legacyPluginIds: [] },
+    status: "ready",
+    dependencyStatus: {
+      required: [],
+      optional: [],
+      missingRequired: [],
+      missingOptional: [],
+      disabledRequired: [],
+      disabledOptional: [],
+    },
+    degraded: false,
+  };
+}
+
 describe("plugin settings pages", () => {
   afterEach(() => {
     clearPreviewPluginRegistry();
@@ -109,5 +202,71 @@ describe("plugin settings pages", () => {
     expect(getInvokeCalls("create_repository")).toHaveLength(0);
     expect(getInvokeCalls("set_plugin_config_value")).toHaveLength(0);
     expect(getPluginCallCalls("momobako.source.netease-cloud-music")).toHaveLength(0);
+  });
+
+  it("renders office convert status page and triggers runtime actions", async () => {
+    const manifest = officeConvertSettingsManifest();
+    seedMockRepositories([{
+      repoId: "repo-main-001",
+      name: "Mock Anime Repo",
+      path: "C:/Mock/AnimeAssets",
+      backend: {
+        pluginId: "momobako.local-filesystem",
+        kind: "filesystem",
+        name: "Local Filesystem",
+        capabilities: ["browse"],
+      },
+      status: "ready",
+      assetCount: 12,
+      updatedAt: "2026-07-01T08:00:00Z",
+    }]);
+    seedMockPlugins([manifest]);
+
+    await syncRegisteredFrontendPluginManifests([manifest]);
+    const page = getPluginSettingsPage(manifest.pluginId);
+    expect(page?.component).toBeDefined();
+
+    render(page!.component, {
+      props: {
+        manifest,
+      },
+    });
+
+    expect(await screen.findByText("运行状态与缓存")).toBeInTheDocument();
+    expect(await screen.findByText(/WINWORD\.EXE/)).toBeInTheDocument();
+    expect((await screen.findAllByText("Mock Anime Repo")).length).toBeGreaterThan(0);
+    expect(getPluginCallCalls("momobako.service.office-convert", "officeConvert.getRuntimeStatus")).toHaveLength(1);
+    expect(getInvokeCalls("list_repositories")).toHaveLength(1);
+
+    await fireEvent.click(screen.getByRole("button", { name: "运行自检" }));
+    await waitFor(() => {
+      expect(getPluginCallCalls("momobako.service.office-convert", "officeConvert.runRuntimeSelfCheck").length).toBeGreaterThan(0);
+    });
+
+    await fireEvent.click(screen.getByRole("button", { name: "清理缓存" }));
+    await waitFor(() => {
+      expect(getPluginCallCalls("momobako.service.office-convert", "officeConvert.clearPreviewCache").length).toBeGreaterThan(0);
+    });
+
+    expect(await screen.findByText("已清理 0 个缓存文件")).toBeInTheDocument();
+  });
+
+  it("renders downloader runtime status page", async () => {
+    const manifest = downloaderSettingsManifest();
+    seedMockPlugins([manifest]);
+
+    await syncRegisteredFrontendPluginManifests([manifest]);
+    const page = getPluginSettingsPage(manifest.pluginId);
+    expect(page?.component).toBeDefined();
+
+    render(page!.component, {
+      props: {
+        manifest,
+      },
+    });
+
+    expect(await screen.findByText("aria2 运行状态")).toBeInTheDocument();
+    expect(await screen.findByText("http://127.0.0.1:6800/jsonrpc")).toBeInTheDocument();
+    expect(getPluginCallCalls("momobako.service.downloader", "downloader.getRuntimeStatus")).toHaveLength(1);
   });
 });
