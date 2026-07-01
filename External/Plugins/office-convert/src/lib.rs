@@ -1162,22 +1162,46 @@ fn shutdown_libreoffice_daemon(runtime: &RuntimeContext) -> Result<serde_json::V
     }
     stop_process(pid)?;
     let _ = fs::remove_file(pid_path);
-    let status = serde_json::json!({
-        "running": false,
-        "healthy": false,
-        "helperType": helper_type_label(runtime),
-        "port": port,
-        "baseUrl": helper_base_url(port),
-        "pid": pid,
-        "path": read_helper_status(&status_path).get("path").cloned().unwrap_or(serde_json::Value::Null),
-        "updatedAt": OffsetDateTime::now_utc().format(&Rfc3339).map_err(time_error)?,
-        "error": "LibreOffice 守护进程已关闭。",
-        "control": {
-            "health": "http-local",
-            "convert": "http-local",
-            "shutdown": "plugin-call"
-        }
-    });
+    let mut status = read_helper_status(&status_path);
+    if let Some(object) = status.as_object_mut() {
+        object.insert("running".to_string(), serde_json::Value::Bool(false));
+        object.insert("healthy".to_string(), serde_json::Value::Bool(false));
+        object.insert(
+            "helperType".to_string(),
+            serde_json::Value::String(helper_type_label(runtime).to_string()),
+        );
+        object.insert("port".to_string(), serde_json::Value::from(port));
+        object.insert(
+            "baseUrl".to_string(),
+            serde_json::Value::String(helper_base_url(port)),
+        );
+        object.insert("pid".to_string(), serde_json::Value::from(pid));
+        object.insert(
+            "path".to_string(),
+            read_helper_status(&status_path)
+                .get("path")
+                .cloned()
+                .unwrap_or(serde_json::Value::Null),
+        );
+        object.insert(
+            "updatedAt".to_string(),
+            serde_json::Value::String(
+                OffsetDateTime::now_utc().format(&Rfc3339).map_err(time_error)?,
+            ),
+        );
+        object.insert(
+            "error".to_string(),
+            serde_json::Value::String("LibreOffice 守护进程已关闭。".to_string()),
+        );
+        object.insert(
+            "control".to_string(),
+            serde_json::json!({
+                "health": "http-local",
+                "convert": "http-local",
+                "shutdown": "plugin-call"
+            }),
+        );
+    }
     fs::write(
         &status_path,
         serde_json::to_string_pretty(&status).map_err(|error| error.to_string())?,
@@ -1385,16 +1409,26 @@ fn write_libreoffice_status(
     error: Option<String>,
 ) -> Result<(), String> {
     let status_path = libreoffice_helper_dir(runtime).join("status.json");
+    let mut payload = read_helper_status(&status_path);
     let updated_at = OffsetDateTime::now_utc()
         .format(&Rfc3339)
         .map_err(time_error)?;
-    let payload = serde_json::json!({
-        "running": running,
-        "pid": pid,
-        "path": executable_path.to_string_lossy().to_string(),
-        "updatedAt": updated_at,
-        "error": error,
-    });
+    if let Some(object) = payload.as_object_mut() {
+        object.insert("running".to_string(), serde_json::Value::Bool(running));
+        object.insert(
+            "pid".to_string(),
+            pid.map(serde_json::Value::from).unwrap_or(serde_json::Value::Null),
+        );
+        object.insert(
+            "path".to_string(),
+            serde_json::Value::String(executable_path.to_string_lossy().to_string()),
+        );
+        object.insert("updatedAt".to_string(), serde_json::Value::String(updated_at));
+        object.insert(
+            "error".to_string(),
+            error.map(serde_json::Value::String).unwrap_or(serde_json::Value::Null),
+        );
+    }
     fs::write(
         status_path,
         serde_json::to_string_pretty(&payload).map_err(|error| error.to_string())?,
@@ -2132,5 +2166,54 @@ mod tests {
         assert_eq!(payload.get("converterPath"), Some(&serde_json::json!("C:/LibreOffice/program/soffice.exe")));
         assert_eq!(payload.get("pdfSizeBytes"), Some(&serde_json::json!(2048)));
         assert_eq!(payload.get("durationMs"), Some(&serde_json::json!(1234)));
+    }
+
+    #[test]
+    fn write_libreoffice_status_keeps_existing_diagnostics() {
+        let workspace = TestWorkspace::new("status-merge");
+        let runtime = RuntimeContext {
+            plugin_data_dir: workspace.path("plugin-data"),
+            service_root_dir: workspace.path("service-root"),
+            plugin_runtime_dir: workspace.path("runtime"),
+            config: PluginConfig {
+                converter_mode: ConverterMode::Auto,
+                auto_download_libreoffice: true,
+            },
+        };
+        let helper_dir = libreoffice_helper_dir(&runtime);
+        fs::create_dir_all(&helper_dir).expect("helper dir should be created");
+        let status_path = helper_dir.join("status.json");
+        fs::write(
+            &status_path,
+            serde_json::to_string_pretty(&serde_json::json!({
+                "lastConvert": { "conversionMode": "uno" },
+                "lastSelfCheck": { "ok": true }
+            }))
+            .expect("status json should encode"),
+        )
+        .expect("status json should write");
+
+        write_libreoffice_status(
+            &runtime,
+            Some(123),
+            Path::new("C:/LibreOffice/program/soffice.exe"),
+            true,
+            None,
+        )
+        .expect("status merge should succeed");
+
+        let merged: serde_json::Value = serde_json::from_str(
+            &fs::read_to_string(status_path).expect("merged status should read"),
+        )
+        .expect("merged status should decode");
+        assert_eq!(
+            merged.get("lastConvert").and_then(|value| value.get("conversionMode")),
+            Some(&serde_json::json!("uno"))
+        );
+        assert_eq!(
+            merged.get("lastSelfCheck").and_then(|value| value.get("ok")),
+            Some(&serde_json::json!(true))
+        );
+        assert_eq!(merged.get("pid"), Some(&serde_json::json!(123)));
     }
 }
