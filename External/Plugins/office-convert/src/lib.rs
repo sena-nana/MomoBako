@@ -100,7 +100,7 @@ struct ClearPreviewCachePayload {
     repo_id: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ConverterStatus {
     available: bool,
@@ -404,6 +404,10 @@ fn run_runtime_self_check(runtime: &RuntimeContext) -> Result<serde_json::Value,
 }
 
 fn detect_microsoft_office() -> ConverterStatus {
+    #[cfg(test)]
+    if let Some(status) = test_support::test_detect_microsoft_office() {
+        return status;
+    }
     for family in [
         OfficeFamily::Word,
         OfficeFamily::Spreadsheet,
@@ -588,6 +592,10 @@ fn select_libreoffice(
 }
 
 fn detect_microsoft_office_for_family(family: OfficeFamily) -> ConverterStatus {
+    #[cfg(test)]
+    if let Some(status) = test_support::test_detect_microsoft_office_for_family(family) {
+        return status;
+    }
     #[cfg(target_os = "windows")]
     {
         let executable_names = match family {
@@ -630,6 +638,10 @@ fn detect_microsoft_office_for_family(family: OfficeFamily) -> ConverterStatus {
 }
 
 fn detect_system_libreoffice() -> ConverterStatus {
+    #[cfg(test)]
+    if let Some(status) = test_support::test_detect_system_libreoffice() {
+        return status;
+    }
     let candidates = if cfg!(target_os = "windows") {
         vec![
             PathBuf::from(r"C:\Program Files\LibreOffice\program\soffice.exe"),
@@ -657,6 +669,10 @@ fn detect_system_libreoffice() -> ConverterStatus {
 }
 
 fn detect_bundled_libreoffice(runtime: &RuntimeContext) -> ConverterStatus {
+    #[cfg(test)]
+    if let Some(status) = test_support::test_detect_bundled_libreoffice() {
+        return status;
+    }
     let runtime_dir = bundled_libreoffice_runtime_dir(runtime);
     let executable = bundled_libreoffice_executable_path(runtime);
     let installer = bundled_libreoffice_installer_path(runtime);
@@ -689,6 +705,10 @@ fn detect_bundled_libreoffice(runtime: &RuntimeContext) -> ConverterStatus {
 }
 
 fn ensure_bundled_libreoffice(runtime: &RuntimeContext) -> Result<Option<PathBuf>, String> {
+    #[cfg(test)]
+    if let Some(path) = test_support::test_ensure_bundled_libreoffice_path() {
+        return Ok(path.map(PathBuf::from));
+    }
     let executable = bundled_libreoffice_executable_path(runtime);
     if executable.is_file() {
         return Ok(Some(executable));
@@ -1963,8 +1983,101 @@ impl SelectedConverter {
 }
 
 #[cfg(test)]
+mod test_support {
+    use super::{ConverterStatus, OfficeFamily};
+    use std::{cell::RefCell, path::PathBuf};
+
+    thread_local! {
+        static TEST_MICROSOFT_OFFICE: RefCell<Option<Option<ConverterStatus>>> = const { RefCell::new(None) };
+        static TEST_MICROSOFT_OFFICE_WORD: RefCell<Option<Option<ConverterStatus>>> = const { RefCell::new(None) };
+        static TEST_MICROSOFT_OFFICE_SPREADSHEET: RefCell<Option<Option<ConverterStatus>>> = const { RefCell::new(None) };
+        static TEST_MICROSOFT_OFFICE_PRESENTATION: RefCell<Option<Option<ConverterStatus>>> = const { RefCell::new(None) };
+        static TEST_SYSTEM_LIBREOFFICE: RefCell<Option<Option<ConverterStatus>>> = const { RefCell::new(None) };
+        static TEST_BUNDLED_LIBREOFFICE: RefCell<Option<Option<ConverterStatus>>> = const { RefCell::new(None) };
+        static TEST_ENSURED_BUNDLED_PATH: RefCell<Option<Option<PathBuf>>> = const { RefCell::new(None) };
+    }
+
+    fn test_status_from(
+        cell: &'static std::thread::LocalKey<RefCell<Option<Option<ConverterStatus>>>>,
+    ) -> Option<Option<ConverterStatus>> {
+        cell.with(|value| value.borrow().clone())
+    }
+
+    fn set_test_option(
+        cell: &'static std::thread::LocalKey<RefCell<Option<Option<ConverterStatus>>>>,
+        value: Option<ConverterStatus>,
+    ) {
+        cell.with(|slot| {
+            *slot.borrow_mut() = Some(value);
+        });
+    }
+
+    pub fn reset_test_detector_overrides() {
+        TEST_MICROSOFT_OFFICE.with(|slot| *slot.borrow_mut() = None);
+        TEST_MICROSOFT_OFFICE_WORD.with(|slot| *slot.borrow_mut() = None);
+        TEST_MICROSOFT_OFFICE_SPREADSHEET.with(|slot| *slot.borrow_mut() = None);
+        TEST_MICROSOFT_OFFICE_PRESENTATION.with(|slot| *slot.borrow_mut() = None);
+        TEST_SYSTEM_LIBREOFFICE.with(|slot| *slot.borrow_mut() = None);
+        TEST_BUNDLED_LIBREOFFICE.with(|slot| *slot.borrow_mut() = None);
+        TEST_ENSURED_BUNDLED_PATH.with(|slot| *slot.borrow_mut() = None);
+    }
+
+    pub fn set_test_microsoft_office_family_status(
+        family: OfficeFamily,
+        value: Option<ConverterStatus>,
+    ) {
+        let cell = match family {
+            OfficeFamily::Word => &TEST_MICROSOFT_OFFICE_WORD,
+            OfficeFamily::Spreadsheet => &TEST_MICROSOFT_OFFICE_SPREADSHEET,
+            OfficeFamily::Presentation => &TEST_MICROSOFT_OFFICE_PRESENTATION,
+        };
+        set_test_option(cell, value);
+    }
+
+    pub fn set_test_system_libreoffice_status(value: Option<ConverterStatus>) {
+        set_test_option(&TEST_SYSTEM_LIBREOFFICE, value);
+    }
+
+    pub fn set_test_bundled_libreoffice_status(value: Option<ConverterStatus>) {
+        set_test_option(&TEST_BUNDLED_LIBREOFFICE, value);
+    }
+
+    pub fn set_test_ensured_bundled_libreoffice_path(value: Option<PathBuf>) {
+        TEST_ENSURED_BUNDLED_PATH.with(|slot| {
+            *slot.borrow_mut() = Some(value);
+        });
+    }
+
+    pub fn test_detect_microsoft_office() -> Option<ConverterStatus> {
+        test_status_from(&TEST_MICROSOFT_OFFICE).flatten()
+    }
+
+    pub fn test_detect_microsoft_office_for_family(family: OfficeFamily) -> Option<ConverterStatus> {
+        let cell = match family {
+            OfficeFamily::Word => &TEST_MICROSOFT_OFFICE_WORD,
+            OfficeFamily::Spreadsheet => &TEST_MICROSOFT_OFFICE_SPREADSHEET,
+            OfficeFamily::Presentation => &TEST_MICROSOFT_OFFICE_PRESENTATION,
+        };
+        test_status_from(cell).flatten()
+    }
+
+    pub fn test_detect_system_libreoffice() -> Option<ConverterStatus> {
+        test_status_from(&TEST_SYSTEM_LIBREOFFICE).flatten()
+    }
+
+    pub fn test_detect_bundled_libreoffice() -> Option<ConverterStatus> {
+        test_status_from(&TEST_BUNDLED_LIBREOFFICE).flatten()
+    }
+
+    pub fn test_ensure_bundled_libreoffice_path() -> Option<Option<PathBuf>> {
+        TEST_ENSURED_BUNDLED_PATH.with(|slot| slot.borrow().clone())
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support;
     use momobako_backend_plugin_sdk::{
         free_c_string, register_host_plugin_api, response_ok, HostPluginCallEnvelope,
     };
@@ -1979,6 +2092,43 @@ mod tests {
 
     static HOST_PLUGIN_CALLS: OnceLock<Mutex<Vec<HostPluginCallEnvelope>>> = OnceLock::new();
     static HOST_PLUGIN_RESPONSES: OnceLock<Mutex<VecDeque<serde_json::Value>>> = OnceLock::new();
+    fn unavailable_status(reason: &str) -> ConverterStatus {
+        ConverterStatus {
+            available: false,
+            path: None,
+            version: None,
+            reason: Some(reason.to_string()),
+        }
+    }
+
+    fn available_status(path: &str, version: &str) -> ConverterStatus {
+        ConverterStatus {
+            available: true,
+            path: Some(path.to_string()),
+            version: Some(version.to_string()),
+            reason: None,
+        }
+    }
+
+    fn reset_test_detector_overrides() {
+        test_support::reset_test_detector_overrides();
+    }
+
+    fn set_test_microsoft_office_family_status(family: OfficeFamily, value: Option<ConverterStatus>) {
+        test_support::set_test_microsoft_office_family_status(family, value);
+    }
+
+    fn runtime_for_converter_test(workspace: &TestWorkspace, mode: ConverterMode) -> RuntimeContext {
+        RuntimeContext {
+            plugin_data_dir: workspace.path("plugin-data"),
+            service_root_dir: workspace.path("service-root"),
+            plugin_runtime_dir: workspace.path("runtime"),
+            config: PluginConfig {
+                converter_mode: mode,
+                auto_download_libreoffice: true,
+            },
+        }
+    }
 
     unsafe extern "C" fn test_host_plugin_call(input: *const c_char) -> *mut c_char {
         let raw = unsafe { CStr::from_ptr(input) }
@@ -2050,6 +2200,21 @@ mod tests {
         }
     }
 
+    struct DetectorOverrideGuard;
+
+    impl DetectorOverrideGuard {
+        fn new() -> Self {
+            reset_test_detector_overrides();
+            Self
+        }
+    }
+
+    impl Drop for DetectorOverrideGuard {
+        fn drop(&mut self) {
+            reset_test_detector_overrides();
+        }
+    }
+
     #[test]
     fn office_family_from_extension_supports_legacy_and_openxml_formats() {
         assert_eq!(office_family_from_extension("doc"), Some(OfficeFamily::Word));
@@ -2111,6 +2276,95 @@ mod tests {
             ConverterMode::from_config(Some("unexpected-value")),
             ConverterMode::Auto
         ));
+    }
+
+    #[test]
+    fn auto_mode_prefers_microsoft_office_before_libreoffice() {
+        let _guard = DetectorOverrideGuard::new();
+        let workspace = TestWorkspace::new("auto-prefers-microsoft");
+        let runtime = runtime_for_converter_test(&workspace, ConverterMode::Auto);
+        set_test_microsoft_office_family_status(
+            OfficeFamily::Word,
+            Some(available_status(
+                "C:/Program Files/Microsoft Office/root/Office16/WINWORD.EXE",
+                "Office16",
+            )),
+        );
+        test_support::set_test_system_libreoffice_status(
+            Some(available_status(
+                "C:/Program Files/LibreOffice/program/soffice.exe",
+                "25.8.3",
+            )),
+        );
+
+        let selected = select_converter(&runtime, OfficeFamily::Word)
+            .expect("auto mode should choose microsoft office");
+
+        assert_eq!(selected.kind, ConverterKind::MicrosoftOffice);
+        assert_eq!(
+            selected.executable_path,
+            PathBuf::from("C:/Program Files/Microsoft Office/root/Office16/WINWORD.EXE")
+        );
+    }
+
+    #[test]
+    fn auto_mode_falls_back_to_system_libreoffice_when_microsoft_office_is_missing() {
+        let _guard = DetectorOverrideGuard::new();
+        let workspace = TestWorkspace::new("auto-falls-back-system-libreoffice");
+        let runtime = runtime_for_converter_test(&workspace, ConverterMode::Auto);
+        set_test_microsoft_office_family_status(
+            OfficeFamily::Word,
+            Some(unavailable_status("未探测到适用于当前文档类型的 Microsoft Office 安装。")),
+        );
+        test_support::set_test_system_libreoffice_status(
+            Some(available_status(
+                "C:/Program Files/LibreOffice/program/soffice.exe",
+                "25.8.3",
+            )),
+        );
+
+        let selected = select_converter(&runtime, OfficeFamily::Word)
+            .expect("auto mode should choose system libreoffice");
+
+        assert_eq!(selected.kind, ConverterKind::LibreOfficeSystem);
+        assert_eq!(
+            selected.executable_path,
+            PathBuf::from("C:/Program Files/LibreOffice/program/soffice.exe")
+        );
+    }
+
+    #[test]
+    fn auto_mode_falls_back_to_bundled_libreoffice_when_system_converters_are_missing() {
+        let _guard = DetectorOverrideGuard::new();
+        let workspace = TestWorkspace::new("auto-falls-back-bundled-libreoffice");
+        let runtime = runtime_for_converter_test(&workspace, ConverterMode::Auto);
+        set_test_microsoft_office_family_status(
+            OfficeFamily::Word,
+            Some(unavailable_status("未探测到适用于当前文档类型的 Microsoft Office 安装。")),
+        );
+        test_support::set_test_system_libreoffice_status(
+            Some(unavailable_status("未探测到系统 LibreOffice 安装。")),
+        );
+        test_support::set_test_bundled_libreoffice_status(
+            Some(available_status(
+                "C:/MomoBako/.service-data/plugin-data/momobako-service-office-convert/runtime/program/soffice.exe",
+                "25.8.3",
+            )),
+        );
+        test_support::set_test_ensured_bundled_libreoffice_path(Some(PathBuf::from(
+            "C:/MomoBako/.service-data/plugin-data/momobako-service-office-convert/runtime/program/soffice.exe",
+        )));
+
+        let selected = select_converter(&runtime, OfficeFamily::Word)
+            .expect("auto mode should choose bundled libreoffice");
+
+        assert_eq!(selected.kind, ConverterKind::LibreOfficeBundled);
+        assert_eq!(
+            selected.executable_path,
+            PathBuf::from(
+                "C:/MomoBako/.service-data/plugin-data/momobako-service-office-convert/runtime/program/soffice.exe"
+            )
+        );
     }
 
     #[test]
