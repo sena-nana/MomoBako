@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { GripVertical, Play, Trash2 } from "@lucide/vue";
 import WorkspacePlayerBar from "../../../components/WorkspacePlayerBar.vue";
+import type { WorkspacePlayerBarHandlers, WorkspacePlayerBarProps } from "../../../components/workspacePlayerBar.contract";
 import type { PlaylistDetail, PlaylistItem } from "../../../types/repository";
-import type { WorkspacePlayerBarHandlers, WorkspacePlayerBarProps } from "./usePlayerUi";
 
-defineProps<{
+const props = defineProps<{
   activePlaylistDetail: PlaylistDetail | null;
   hasPlayer: boolean;
   playlistStatusLabel: string;
@@ -21,6 +21,10 @@ const emit = defineEmits<{
   play: [item?: PlaylistItem | null];
   remove: [item: PlaylistItem];
 }>();
+
+function resolvePlaylistItemThumbnail(item: PlaylistItem) {
+  return props.playlistItemThumbnailSrc(item) ?? undefined;
+}
 </script>
 
 <template>
@@ -65,7 +69,7 @@ const emit = defineEmits<{
             <GripVertical :size="16" aria-hidden="true" />
           </button>
           <button type="button" class="playlist-page__preview" @click="emit('openPreview', item)">
-            <img v-if="playlistItemThumbnailSrc(item)" :src="playlistItemThumbnailSrc(item) ?? undefined" alt="" />
+            <img v-if="resolvePlaylistItemThumbnail(item)" :src="resolvePlaylistItemThumbnail(item)" alt="" />
             <span v-else>{{ item.extension.toUpperCase() }}</span>
           </button>
           <div class="playlist-page__meta">
