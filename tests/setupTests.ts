@@ -504,6 +504,34 @@ function previewPluginModuleSource(pluginId: string) {
   if (pluginId === "momobako.preview.media") {
     return mediaPreviewPluginSourceForTest();
   }
+  if (pluginId === "user.repository-cache-preview-source-tool") {
+    return [
+      "export function register(ctx) {",
+      "  ctx.registerToolPage({",
+      "    toolPageId: 'user.repository-cache-preview-source-tool',",
+      "    label: 'Repository Cache Preview Tool',",
+      "    description: '验证资源库缓存预览源桥接。',",
+      "    component: {",
+      "      name: 'RepositoryCachePreviewSourceTool',",
+      "      template: '<section class=\"mock-repository-cache-preview-tool\"><p v-if=\"ready\">context-ready</p><p>{{ token }}</p><p>{{ sourceUrl }}</p></section>',",
+      "      props: { manifest: { type: Object, default: null } },",
+      "      data() { return { ready: false, token: '', sourceUrl: '' }; },",
+      "      async mounted() {",
+      "        const response = await ctx.prepareRepositoryCacheFilePreviewSource({",
+      "          repoId: 'repo-main-001',",
+      "          path: 'C:/Mock/AnimeAssets/.momo/cache/office-preview/tool-preview.pdf',",
+      "          mediaType: 'application/pdf',",
+      "        });",
+      "        this.ready = typeof ctx.prepareRepositoryCacheFilePreviewSource === 'function';",
+      "        this.token = response.token ?? '';",
+      "        this.sourceUrl = response.sourceUrl ?? '';",
+      "      },",
+      "    },",
+      "  });",
+      "}",
+      "",
+    ].join("\n");
+  }
   if (pluginId === "momobako.service.office-convert") {
     const sourcePath = resolve("External/Plugins/office-convert/src/register.js");
     return readFileSync(sourcePath, "utf-8");
