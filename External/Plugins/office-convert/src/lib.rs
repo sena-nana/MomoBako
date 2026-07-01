@@ -959,16 +959,31 @@ fn current_libreoffice_daemon_status(runtime: &RuntimeContext) -> Result<serde_j
     let mut status = read_helper_status(&status_path);
     let pid = read_pid(&pid_path)?;
     let running = pid.map(process_is_running).unwrap_or(false);
+    let port = helper_port(runtime).ok();
     if let Some(object) = status.as_object_mut() {
         object.insert("running".to_string(), serde_json::Value::Bool(running));
         object.insert(
             "healthy".to_string(),
-            serde_json::Value::Bool(running),
+            serde_json::Value::Bool(port.map(helper_health).unwrap_or(false)),
+        );
+        object.insert(
+            "helperType".to_string(),
+            serde_json::Value::String(helper_type_label().to_string()),
+        );
+        object.insert(
+            "port".to_string(),
+            port.map(serde_json::Value::from).unwrap_or(serde_json::Value::Null),
+        );
+        object.insert(
+            "baseUrl".to_string(),
+            port.map(|value| serde_json::Value::String(helper_base_url(value)))
+                .unwrap_or(serde_json::Value::Null),
         );
         object.insert(
             "control".to_string(),
             serde_json::json!({
-                "health": "pid-status",
+                "health": "http-local",
+                "convert": "http-local",
                 "shutdown": "plugin-call"
             }),
         );
@@ -1017,12 +1032,16 @@ fn shutdown_libreoffice_daemon(runtime: &RuntimeContext) -> Result<serde_json::V
     let status = serde_json::json!({
         "running": false,
         "healthy": false,
+        "helperType": helper_type_label(),
+        "port": port,
+        "baseUrl": helper_base_url(port),
         "pid": pid,
         "path": read_helper_status(&status_path).get("path").cloned().unwrap_or(serde_json::Value::Null),
         "updatedAt": OffsetDateTime::now_utc().format(&Rfc3339).map_err(time_error)?,
         "error": "LibreOffice 守护进程已关闭。",
         "control": {
-            "health": "pid-status",
+            "health": "http-local",
+            "convert": "http-local",
             "shutdown": "plugin-call"
         }
     });
@@ -1064,6 +1083,14 @@ fn reserve_local_port() -> Result<u16, String> {
 
 fn helper_base_url(port: u16) -> String {
     format!("http://127.0.0.1:{port}")
+}
+
+fn helper_type_label() -> &'static str {
+    if cfg!(target_os = "windows") {
+        "powershell-http"
+    } else {
+        "native-cli-fallback"
+    }
 }
 
 fn helper_http_client() -> Result<Client, String> {
