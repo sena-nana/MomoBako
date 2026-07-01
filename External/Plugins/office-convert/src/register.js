@@ -175,6 +175,9 @@ function createSettingsPage(ctx) {
               row("控制方式", daemonControlText(status.value.daemon)),
               row("最近转换", daemonConvertText(status.value.daemon)),
               row("最近自检", daemonSelfCheckText(status.value.daemon)),
+              row("自检样本", status.value.daemon?.lastSelfCheck?.samplePath || "未记录"),
+              row("自检输出", status.value.daemon?.lastSelfCheck?.pdfPath || "未记录"),
+              row("自检转换器", selfCheckConverterText(status.value.daemon?.lastSelfCheck)),
             ])
           : h("p", { class: "repository-add-popover__note" }, "读取当前转换器、自带运行时与守护进程状态。"),
         h("div", { class: "file-metadata-card__source-row", style: "gap: 8px; margin-top: 8px;" }, [
@@ -288,4 +291,13 @@ function daemonSelfCheckText(daemon) {
   if (typeof lastSelfCheck.durationMs === "number") parts.push(`${lastSelfCheck.durationMs} ms`);
   if (lastSelfCheck.completedAt) parts.push(lastSelfCheck.completedAt);
   return parts.join(" | ");
+}
+
+function selfCheckConverterText(lastSelfCheck) {
+  if (!lastSelfCheck) return "未记录";
+  const parts = [];
+  if (lastSelfCheck.converter) parts.push(lastSelfCheck.converter);
+  if (lastSelfCheck.converterVersion) parts.push(lastSelfCheck.converterVersion);
+  if (lastSelfCheck.converterPath) parts.push(lastSelfCheck.converterPath);
+  return parts.join(" | ") || "未记录";
 }
