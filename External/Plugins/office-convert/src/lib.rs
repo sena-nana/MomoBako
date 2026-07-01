@@ -335,6 +335,9 @@ fn run_runtime_self_check(runtime: &RuntimeContext) -> Result<serde_json::Value,
     let completed_at = OffsetDateTime::now_utc()
         .format(&Rfc3339)
         .map_err(time_error)?;
+    let duration_ms = (OffsetDateTime::now_utc() - OffsetDateTime::parse(&started_at, &Rfc3339).map_err(time_error)?)
+        .whole_milliseconds();
+    let pdf_size_bytes = fs::metadata(&pdf_path).ok().map(|value| value.len() as i64);
     let (ok, error, conversion_mode) = match result {
         Ok(mode) => (pdf_path.is_file(), None, mode),
         Err(error) => (false, Some(error), None),
@@ -344,18 +347,28 @@ fn run_runtime_self_check(runtime: &RuntimeContext) -> Result<serde_json::Value,
         serde_json::json!({
             "startedAt": started_at,
             "completedAt": completed_at,
+            "durationMs": duration_ms,
             "ok": ok,
             "converter": converter.result_label(),
+            "converterPath": converter.executable_path.to_string_lossy().to_string(),
+            "converterVersion": converter.version.clone(),
             "conversionMode": conversion_mode,
+            "samplePath": source_path.to_string_lossy().to_string(),
             "pdfPath": if ok { Some(pdf_path.to_string_lossy().to_string()) } else { None::<String> },
+            "pdfSizeBytes": pdf_size_bytes,
             "error": error,
         }),
     )?;
     Ok(serde_json::json!({
         "ok": ok,
         "converter": converter.result_label(),
+        "converterPath": converter.executable_path.to_string_lossy().to_string(),
+        "converterVersion": converter.version.clone(),
         "conversionMode": conversion_mode,
+        "samplePath": source_path.to_string_lossy().to_string(),
         "pdfPath": if ok { Some(pdf_path.to_string_lossy().to_string()) } else { None::<String> },
+        "pdfSizeBytes": pdf_size_bytes,
+        "durationMs": duration_ms,
         "error": error,
     }))
 }
@@ -2100,5 +2113,24 @@ mod tests {
         let mut archive = zip::ZipArchive::new(file).expect("docx should be a zip archive");
         assert!(archive.by_name("[Content_Types].xml").is_ok());
         assert!(archive.by_name("word/document.xml").is_ok());
+    }
+
+    #[test]
+    fn runtime_self_check_payload_keeps_diagnostic_fields() {
+        let payload = serde_json::json!({
+            "ok": true,
+            "converter": "libreoffice-bundled",
+            "converterPath": "C:/LibreOffice/program/soffice.exe",
+            "converterVersion": "25.8.3",
+            "conversionMode": "uno",
+            "samplePath": "C:/tmp/self-check.docx",
+            "pdfPath": "C:/tmp/self-check.pdf",
+            "pdfSizeBytes": 2048,
+            "durationMs": 1234
+        });
+
+        assert_eq!(payload.get("converterPath"), Some(&serde_json::json!("C:/LibreOffice/program/soffice.exe")));
+        assert_eq!(payload.get("pdfSizeBytes"), Some(&serde_json::json!(2048)));
+        assert_eq!(payload.get("durationMs"), Some(&serde_json::json!(1234)));
     }
 }

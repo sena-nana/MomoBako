@@ -813,10 +813,15 @@ export type OfficeConvertDaemonLastConvert = {
 export type OfficeConvertDaemonLastSelfCheck = {
   startedAt?: string | null;
   completedAt?: string | null;
+  durationMs?: number | null;
   ok?: boolean | null;
   converter?: string | null;
+  converterPath?: string | null;
+  converterVersion?: string | null;
   conversionMode?: string | null;
+  samplePath?: string | null;
   pdfPath?: string | null;
+  pdfSizeBytes?: number | null;
   error?: string | null;
 };
 

@@ -282,7 +282,10 @@ function daemonSelfCheckText(daemon) {
   const parts = [];
   parts.push(lastSelfCheck.ok ? "通过" : "失败");
   if (lastSelfCheck.converter) parts.push(lastSelfCheck.converter);
+  if (lastSelfCheck.converterVersion) parts.push(lastSelfCheck.converterVersion);
   if (lastSelfCheck.conversionMode) parts.push(lastSelfCheck.conversionMode);
+  if (typeof lastSelfCheck.pdfSizeBytes === "number") parts.push(`${lastSelfCheck.pdfSizeBytes} bytes`);
+  if (typeof lastSelfCheck.durationMs === "number") parts.push(`${lastSelfCheck.durationMs} ms`);
   if (lastSelfCheck.completedAt) parts.push(lastSelfCheck.completedAt);
   return parts.join(" | ");
 }
