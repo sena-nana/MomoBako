@@ -851,6 +851,8 @@ pub(super) fn shutdown_helper_state_dir(plugin_data_dir: &Path) -> Result<(), St
         }
         let _ = fs::remove_file(&pid_path);
         let _ = fs::remove_file(state_dir.join("status.json"));
+        let _ = fs::remove_file(state_dir.join("port.txt"));
+        let _ = fs::remove_file(state_dir.join("office-convert-helper.ps1"));
     }
     Ok(())
 }

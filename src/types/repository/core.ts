@@ -795,12 +795,40 @@ export type OfficeConvertPreviewResult = {
   modifiedAt?: string | null;
 };
 
+export type OfficeConvertDaemonControl = {
+  health?: string | null;
+  convert?: string | null;
+  shutdown?: string | null;
+};
+
+export type OfficeConvertDaemonLastConvert = {
+  phase?: string | null;
+  sourcePath?: string | null;
+  pdfPath?: string | null;
+  updatedAt?: string | null;
+  error?: string | null;
+};
+
+export type OfficeConvertDaemonStatus = {
+  running: boolean;
+  healthy?: boolean | null;
+  helperType?: string | null;
+  port?: number | null;
+  baseUrl?: string | null;
+  pid?: number | null;
+  path?: string | null;
+  updatedAt?: string | null;
+  error?: string | null;
+  control?: OfficeConvertDaemonControl | null;
+  lastConvert?: OfficeConvertDaemonLastConvert | null;
+};
+
 export type OfficeConvertRuntimeStatus = {
   converterMode: "auto" | "microsoft-office" | "libreoffice" | string;
   microsoftOffice: OfficeConverterStatus;
   libreofficeSystem: OfficeConverterStatus;
   libreofficeBundle: OfficeConverterStatus;
-  daemon: Record<string, unknown>;
+  daemon: OfficeConvertDaemonStatus;
   autoDownloadLibreOffice: boolean;
   bundledDownloadUrl: string;
 };
