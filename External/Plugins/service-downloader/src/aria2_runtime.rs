@@ -781,6 +781,40 @@ fn command_output_message(output: &Output) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::{
+        fs,
+        path::PathBuf,
+        time::{SystemTime, UNIX_EPOCH},
+    };
+
+    struct TestWorkspace {
+        root: PathBuf,
+    }
+
+    impl TestWorkspace {
+        fn new(name: &str) -> Self {
+            let unique = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("system time should be after unix epoch")
+                .as_nanos();
+            let root = std::env::temp_dir().join(format!(
+                "momobako-aria2-runtime-{name}-{}-{unique}",
+                std::process::id()
+            ));
+            fs::create_dir_all(&root).expect("test root should be created");
+            Self { root }
+        }
+
+        fn path(&self, child: &str) -> PathBuf {
+            self.root.join(child)
+        }
+    }
+
+    impl Drop for TestWorkspace {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.root);
+        }
+    }
 
     #[test]
     fn update_task_from_status_payload_maps_complete_to_completed() {
@@ -842,5 +876,64 @@ mod tests {
         assert_eq!(record.completed_length, Some(12));
         assert_eq!(record.error.as_deref(), Some("network failed"));
         assert!(record.finished_at.is_some());
+    }
+
+    #[test]
+    fn runtime_status_returns_idle_snapshot_and_counts_persisted_tasks() {
+        let workspace = TestWorkspace::new("idle-snapshot");
+        let plugin_data_dir = workspace.path("plugin-data");
+        let paths = runtime_paths(&plugin_data_dir);
+        fs::create_dir_all(&paths.tasks_dir).expect("tasks dir should be created");
+        fs::write(
+            task_path(&paths.tasks_dir, "task-1"),
+            r#"{"taskId":"task-1","gid":"gid-1","url":"http://127.0.0.1/file-1.zip","destinationPath":"C:/Temp/file-1.zip","status":"queued","createdAt":"2026-07-01T10:00:00Z"}"#,
+        )
+        .expect("first task should be written");
+        fs::write(
+            task_path(&paths.tasks_dir, "task-2"),
+            r#"{"taskId":"task-2","gid":"gid-2","url":"http://127.0.0.1/file-2.zip","destinationPath":"C:/Temp/file-2.zip","status":"active","createdAt":"2026-07-01T10:01:00Z"}"#,
+        )
+        .expect("second task should be written");
+
+        let snapshot = runtime_status(&Aria2Config {
+            plugin_data_dir: &plugin_data_dir,
+            download_url: "https://example.test/aria2.zip",
+        })
+        .expect("runtime status should resolve idle snapshot");
+
+        assert_eq!(snapshot.queue_size, 2);
+        assert_eq!(snapshot.downloads_dir, plugin_data_dir.join("downloads"));
+        assert_eq!(snapshot.helper_dir, plugin_data_dir.join("helpers").join("aria2"));
+        assert!(!snapshot.status.running);
+        assert_eq!(snapshot.status.download_url, "https://example.test/aria2.zip");
+        assert_eq!(
+            snapshot.status.bundled_archive_path.as_deref(),
+            Some(
+                plugin_data_dir
+                    .join("downloads")
+                    .join("aria2-runtime.zip")
+                    .to_string_lossy()
+                    .as_ref()
+            )
+        );
+    }
+
+    #[test]
+    fn cleanup_stale_state_removes_pid_and_status_for_dead_process() {
+        let workspace = TestWorkspace::new("cleanup-stale");
+        let plugin_data_dir = workspace.path("plugin-data");
+        let paths = runtime_paths(&plugin_data_dir);
+        fs::create_dir_all(&paths.helper_dir).expect("helper dir should be created");
+        fs::write(&paths.pid_path, "999999").expect("pid file should be written");
+        fs::write(
+            &paths.status_path,
+            r#"{"running":true,"pid":999999,"rpcUrl":"http://127.0.0.1:16831/jsonrpc","secret":"secret","downloadUrl":"https://example.test/aria2.zip"}"#,
+        )
+        .expect("status file should be written");
+
+        cleanup_stale_state(&paths).expect("cleanup should remove stale process state");
+
+        assert!(!paths.pid_path.exists());
+        assert!(!paths.status_path.exists());
     }
 }
