@@ -1,0 +1,21 @@
+External/Plugins/office-convert/src/lib.rs
+  s_2d5a17782b6bfd::t_e3b76bced79ec4 805-817
+External/Plugins/service-downloader/src/aria2_runtime.rs
+  s_2d5a17782b6bfd::t_550ff59f6d7649 248-249,252-258,292-298,300-356,624,639,814-845
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.5",
+  "base_commit_sha": "e7c48b81134b12457c2442e89508628d9602d1a8",
+  "prompts": {},
+  "sessions": {
+    "s_2d5a17782b6bfd": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f1cad-dea8-7323-b604-a3effbaf235c",
+        "model": "unknown"
+      },
+      "human_author": "AuraElicase <auraelicase@outlook.com>"
+    }
+  }
+}
