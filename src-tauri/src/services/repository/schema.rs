@@ -40,7 +40,6 @@ ON CONFLICT(component) DO UPDATE SET version = excluded.version;
 pub(super) const LOCAL_FILESYSTEM_PLUGIN_ID: &str = "momobako.local-filesystem";
 pub(super) const LEGACY_LOCAL_FILESYSTEM_PLUGIN_ID: &str = "builtin.local-filesystem";
 pub(super) const LOCAL_FILESYSTEM_FILE_SEARCH_MODE_KEY: &str = "fileSearchMode";
-pub(super) const EMBEDDED_RUNTIME_FALLBACK_CAPABILITY: &str = "embeddedRuntimeFallback";
 pub(super) const NETEASE_CLOUD_MUSIC_PLUGIN_ID: &str = "momobako.source.netease-cloud-music";
 pub(super) const NETEASE_CLOUD_MUSIC_PROVIDER_ID: &str = "netease-cloud-music";
 pub(super) const PLUGIN_SDK_VERSION: &str = "1";

@@ -967,27 +967,28 @@ mod tests {
     }
 
     #[test]
-    fn builtin_local_filesystem_reads_runtime_file_search_mode_config() {
-        let workspace = TestWorkspace::new("builtin-runtime-file-search-mode");
-        let repo_root = workspace.path("repo");
-        fs::create_dir_all(&repo_root).expect("repo root should be created");
-        fs::write(repo_root.join("demo.mp3"), b"audio").expect("file should be written");
-        let plugin_config = BTreeMap::from([(
-            LOCAL_FILESYSTEM_FILE_SEARCH_MODE_KEY.to_string(),
-            serde_json::json!("invalid"),
-        )]);
+    fn native_dylib_source_plugin_without_library_is_marked_unavailable() {
+        let workspace = TestWorkspace::new("native-dylib-source-unavailable");
+        let service_root = workspace.path("service");
+        let plugin_root = runtime_plugins_dir(&service_root);
+        write_test_local_filesystem_plugin_archive(&plugin_root, serde_json::json!({}));
+        let state = RepositoryState::from_root(service_root);
 
-        let value = call_builtin_local_filesystem(
-            "filesystem.listFiles",
-            serde_json::json!({ "repoRoot": repo_root, "config": {} }),
-            &plugin_config,
-        )
-        .expect("builtin fallback should list files");
-        let files: Vec<DiscoveredFile> =
-            serde_json::from_value(value).expect("files should deserialize");
+        let plugin = state
+            .list_plugins()
+            .expect("plugins should load")
+            .into_iter()
+            .find(|manifest| manifest.plugin_id == LOCAL_FILESYSTEM_PLUGIN_ID)
+            .expect("local filesystem plugin should exist");
 
-        assert_eq!(files.len(), 1);
-        assert_eq!(files[0].relative_path, "demo.mp3");
+        assert_eq!(plugin.status, "unavailable");
+        assert!(
+            plugin
+                .disable_reason
+                .as_deref()
+                .unwrap_or_default()
+                .contains("原生运行时不可用")
+        );
     }
 
     #[test]
@@ -1555,7 +1556,7 @@ mod tests {
                     "layer": "source",
                     "kind": "filesystem"
                 },
-                "capabilities": ["browse", "read", "write", "watch", "sync", "localRootPath", EMBEDDED_RUNTIME_FALLBACK_CAPABILITY],
+                "capabilities": ["browse", "read", "write", "watch", "sync", "localRootPath"],
                 "sdk": "backend",
                 "runtime": "native-dylib",
                 "source": "system"
@@ -1848,7 +1849,7 @@ mod tests {
                     "layer": "source",
                     "kind": "filesystem"
                 },
-                "capabilities": ["browse", "read", "write", "watch", "sync", "localRootPath", EMBEDDED_RUNTIME_FALLBACK_CAPABILITY],
+                "capabilities": ["browse", "read", "write", "watch", "sync", "localRootPath"],
                 "sdk": "backend",
                 "runtime": "native-dylib",
                 "source": "system"
@@ -1966,14 +1967,14 @@ mod tests {
     }
 
     #[test]
-    fn local_filesystem_backend_runs_through_runtime_registry() {
+    fn local_filesystem_backend_without_native_runtime_is_rejected() {
         let workspace = TestWorkspace::new("runtime-local-backend");
         let service_root = workspace.path("service");
         let repo_root = workspace.path("repo");
         install_local_filesystem_test_plugin_archive(&service_root);
         let state = RepositoryState::from_root(service_root);
 
-        let repo_id = state
+        let error = state
             .create_repository(RepositoryMutationRequest {
                 repo_id: Some("repo-runtime".to_string()),
                 name: "Runtime Repo".to_string(),
@@ -1982,46 +1983,14 @@ mod tests {
                 backend_config: None,
                 skip_initial_sync: false,
             })
-            .expect("local filesystem backend should create")
-            .repository
-            .repo_id;
+            .expect_err("local filesystem backend should require native runtime");
 
-        let record = state
-            .load_repository_record(&repo_id)
-            .expect("repository record should load");
-        assert_eq!(record.backend_record.plugin_id, LOCAL_FILESYSTEM_PLUGIN_ID);
-
-        state
-            .create_file(FileCreateRequest {
-                repo_id: repo_id.clone(),
-                parent_path: None,
-                name: "note.txt".to_string(),
-            })
-            .expect("runtime local backend should create a file");
-        assert!(repo_root.join("note.txt").is_file());
-
-        state
-            .rename_entry(FileRenameRequest {
-                repo_id: repo_id.clone(),
-                path: "note.txt".to_string(),
-                new_name: "renamed.txt".to_string(),
-            })
-            .expect("runtime local backend should rename a file");
-        assert!(repo_root.join("renamed.txt").is_file());
-
-        state
-            .delete_entry(FileDeleteRequest {
-                repo_id,
-                path: "renamed.txt".to_string(),
-                mode: None,
-            })
-            .expect("runtime local backend should move a file to trash");
-        assert!(!repo_root.join("renamed.txt").exists());
-        assert!(repository_trash_dir(&repo_root).exists());
+        assert!(error.contains(LOCAL_FILESYSTEM_PLUGIN_ID));
+        assert!(error.contains("plugin runtime is not available"));
     }
 
     #[test]
-    fn custom_system_filesystem_backend_with_embedded_fallback_runs_through_runtime_registry() {
+    fn custom_system_filesystem_backend_without_native_runtime_is_rejected() {
         let workspace = TestWorkspace::new("runtime-custom-local-backend");
         let service_root = workspace.path("service");
         let repo_root = workspace.path("repo");
@@ -2039,7 +2008,7 @@ mod tests {
                         "layer": "source",
                         "kind": "filesystem"
                     },
-                    "capabilities": ["browse", "read", "write", "watch", "sync", "localRootPath", EMBEDDED_RUNTIME_FALLBACK_CAPABILITY],
+                    "capabilities": ["browse", "read", "write", "watch", "sync", "localRootPath"],
                     "sdk": "backend",
                     "runtime": "native-dylib",
                     "source": "system"
@@ -2048,7 +2017,7 @@ mod tests {
         );
         let state = RepositoryState::from_root(service_root);
 
-        let repo_id = state
+        let error = state
             .create_repository(RepositoryMutationRequest {
                 repo_id: Some("repo-runtime-custom".to_string()),
                 name: "Runtime Custom Repo".to_string(),
@@ -2057,23 +2026,10 @@ mod tests {
                 backend_config: None,
                 skip_initial_sync: false,
             })
-            .expect("custom filesystem backend should create")
-            .repository
-            .repo_id;
+            .expect_err("custom filesystem backend should require native runtime");
 
-        let record = state
-            .load_repository_record(&repo_id)
-            .expect("repository record should load");
-        assert_eq!(record.backend_record.plugin_id, plugin_id);
-
-        state
-            .create_file(FileCreateRequest {
-                repo_id,
-                parent_path: None,
-                name: "note.txt".to_string(),
-            })
-            .expect("custom filesystem backend should create a file through embedded fallback");
-        assert!(repo_root.join("note.txt").is_file());
+        assert!(error.contains(plugin_id));
+        assert!(error.contains("plugin runtime is not available"));
     }
 
     #[test]
@@ -2095,7 +2051,7 @@ mod tests {
                         "layer": "source",
                         "kind": "filesystem"
                     },
-                    "capabilities": ["browse", "read", "write", "watch", "sync", "localRootPath", EMBEDDED_RUNTIME_FALLBACK_CAPABILITY],
+                    "capabilities": ["browse", "read", "write", "watch", "sync", "localRootPath"],
                     "sdk": "backend",
                     "runtime": "native-dylib",
                     "source": "system"
@@ -2104,7 +2060,7 @@ mod tests {
         );
         let state = RepositoryState::from_root(service_root);
 
-        let repo = state
+        let error = state
             .create_repository(RepositoryMutationRequest {
                 repo_id: Some("repo-infer-custom".to_string()),
                 name: "Infer Custom Repo".to_string(),
@@ -2113,10 +2069,10 @@ mod tests {
                 backend_config: None,
                 skip_initial_sync: false,
             })
-            .expect("custom local backend should be inferred")
-            .repository;
+            .expect_err("custom local backend should be inferred before runtime validation");
 
-        assert_eq!(repo.backend.plugin_id, plugin_id);
+        assert!(error.contains(plugin_id));
+        assert!(error.contains("plugin runtime is not available"));
     }
 
     #[test]
@@ -2501,7 +2457,7 @@ mod tests {
                     "layer": "source",
                     "kind": "filesystem"
                 },
-                "capabilities": ["browse", "read", "write", "watch", "sync", "localRootPath", EMBEDDED_RUNTIME_FALLBACK_CAPABILITY],
+                "capabilities": ["browse", "read", "write", "watch", "sync", "localRootPath"],
                 "runtime": "manifest-only",
                 "source": "system"
             }),

@@ -220,7 +220,7 @@ pub(crate) fn create_local_repository_record_for_external_tests(
                     "layer": "source",
                     "kind": "filesystem"
                 },
-                "capabilities": ["browse", "read", "write", "watch", "sync", "localRootPath", EMBEDDED_RUNTIME_FALLBACK_CAPABILITY],
+                "capabilities": ["browse", "read", "write", "watch", "sync", "localRootPath"],
                 "runtime": "manifest-only",
                 "source": "system",
                 "contributes": {
