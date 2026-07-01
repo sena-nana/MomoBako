@@ -34,6 +34,13 @@ struct ConvertRequest {
     pdf_path: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OfficeFamily {
+    Word,
+    Spreadsheet,
+    Presentation,
+}
+
 #[cfg(target_os = "windows")]
 const HELPER_PIPE_NAME: &str = "momobako-office-convert";
 
@@ -297,6 +304,8 @@ fn convert_with_managed_runtime(args: &Args, payload: &ConvertRequest) -> Result
     let python_path = libreoffice_python_path(&args.soffice_path)
         .ok_or_else(|| "LibreOffice Python runtime is unavailable".to_string())?;
     let script_path = write_uno_bridge_script()?;
+    let family = office_family_from_path(&payload.source_path)
+        .ok_or_else(|| format!("unsupported office extension: {}", payload.source_path))?;
     let status = with_no_window(
         Command::new(&python_path)
             .arg(&script_path)
@@ -305,6 +314,7 @@ fn convert_with_managed_runtime(args: &Args, payload: &ConvertRequest) -> Result
             .arg(&payload.pdf_path)
             .arg(&args.profile_uri)
             .arg(HELPER_PIPE_NAME)
+            .arg(uno_pdf_filter_name(family))
             .stdout(Stdio::null())
             .stderr(Stdio::null()),
     )
@@ -369,6 +379,7 @@ output_dir = Path(sys.argv[2]).resolve()
 pdf_path = Path(sys.argv[3]).resolve()
 profile_uri = sys.argv[4]
 pipe_name = sys.argv[5]
+filter_name = sys.argv[6]
 
 local_context = uno.getComponentContext()
 resolver = local_context.ServiceManager.createInstanceWithContext(
@@ -391,7 +402,7 @@ load_props = (
     prop("ReadOnly", True),
 )
 store_props = (
-    prop("FilterName", "writer_pdf_Export"),
+    prop("FilterName", filter_name),
 )
 
 document = desktop.loadComponentFromURL(
@@ -408,6 +419,31 @@ try:
 finally:
     document.close(True)
 "#
+}
+
+fn office_family_from_path(path: &str) -> Option<OfficeFamily> {
+    let extension = PathBuf::from(path)
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(str::to_ascii_lowercase)?;
+    match extension.as_str() {
+        "doc" | "docx" | "docm" | "dot" | "dotx" | "dotm" => Some(OfficeFamily::Word),
+        "xls" | "xlsx" | "xlsm" | "xlsb" | "xlt" | "xltx" | "xltm" => {
+            Some(OfficeFamily::Spreadsheet)
+        }
+        "ppt" | "pptx" | "pptm" | "pps" | "ppsx" | "ppsm" | "pot" | "potx" | "potm" => {
+            Some(OfficeFamily::Presentation)
+        }
+        _ => None,
+    }
+}
+
+fn uno_pdf_filter_name(family: OfficeFamily) -> &'static str {
+    match family {
+        OfficeFamily::Word => "writer_pdf_Export",
+        OfficeFamily::Spreadsheet => "calc_pdf_Export",
+        OfficeFamily::Presentation => "impress_pdf_Export",
+    }
 }
 
 #[cfg(target_os = "windows")]
@@ -480,5 +516,20 @@ mod tests {
         {
             let _ = "non-windows";
         }
+    }
+
+    #[test]
+    fn office_family_from_path_supports_word_excel_powerpoint() {
+        assert_eq!(office_family_from_path("C:/repo/demo.docx"), Some(OfficeFamily::Word));
+        assert_eq!(office_family_from_path("C:/repo/demo.xlsx"), Some(OfficeFamily::Spreadsheet));
+        assert_eq!(office_family_from_path("C:/repo/demo.pptx"), Some(OfficeFamily::Presentation));
+        assert_eq!(office_family_from_path("C:/repo/demo.txt"), None);
+    }
+
+    #[test]
+    fn uno_pdf_filter_name_matches_office_family() {
+        assert_eq!(uno_pdf_filter_name(OfficeFamily::Word), "writer_pdf_Export");
+        assert_eq!(uno_pdf_filter_name(OfficeFamily::Spreadsheet), "calc_pdf_Export");
+        assert_eq!(uno_pdf_filter_name(OfficeFamily::Presentation), "impress_pdf_Export");
     }
 }
