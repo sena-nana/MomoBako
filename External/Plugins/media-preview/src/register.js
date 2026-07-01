@@ -175,7 +175,7 @@ export function register(ctx) {
       }
 
       watch(
-        () => [props.repoId, props.entry?.path, props.entry?.extension],
+        [() => props.repoId, () => props.entry?.path, () => props.entry?.extension],
         async () => {
           audioArtworkPath.value = props.entry?.thumbnailPath ?? null;
           await loadMediaSource();

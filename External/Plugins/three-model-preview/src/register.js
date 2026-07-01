@@ -41,7 +41,7 @@ export function register(ctx) {
       let previousFrameTime = 0;
 
       watch(
-        () => [props.repoId, props.entry?.path],
+        [() => props.repoId, () => props.entry?.path],
         () => {
           void loadModel();
         },

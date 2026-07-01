@@ -52,7 +52,7 @@ export function register(ctx) {
       });
 
       watch(
-        () => [props.repoId, props.entry?.path],
+        [() => props.repoId, () => props.entry?.path],
         () => {
           void loadPreview();
         },
