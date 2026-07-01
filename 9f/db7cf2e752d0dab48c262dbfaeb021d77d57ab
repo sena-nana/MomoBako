@@ -1,0 +1,19 @@
+src/types/repository/core.ts
+  s_2d5a17782b6bfd::t_2a56b7cbc60845 781-787,883-888
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.5",
+  "base_commit_sha": "9fdb7cf2e752d0dab48c262dbfaeb021d77d57ab",
+  "prompts": {},
+  "sessions": {
+    "s_2d5a17782b6bfd": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f1cad-dea8-7323-b604-a3effbaf235c",
+        "model": "unknown"
+      },
+      "human_author": "AuraElicase <auraelicase@outlook.com>"
+    }
+  }
+}
