@@ -1,6 +1,6 @@
 //! Office Convert 独立 helper。
 //!
-//! 当前提供本地 HTTP 控制接口：
+//! 提供本地 HTTP 控制接口，并在 Windows 上托管后台 Headless LibreOffice 进程：
 //! - GET /health
 //! - POST /convert
 //! - POST /shutdown
@@ -8,11 +8,12 @@
 use std::{
     env,
     path::PathBuf,
-    process::{Command, Stdio},
+    process::{Child, Command, Stdio},
     sync::{
         atomic::{AtomicBool, Ordering},
-        Arc,
+        Arc, Mutex,
     },
+    time::Duration,
 };
 
 use serde::Deserialize;
@@ -33,31 +34,116 @@ struct ConvertRequest {
     pdf_path: String,
 }
 
+struct HelperState {
+    args: Args,
+    soffice: Mutex<Option<Child>>,
+}
+
+impl HelperState {
+    fn new(args: Args) -> Result<Self, String> {
+        let state = Self {
+            args,
+            soffice: Mutex::new(None),
+        };
+        state.ensure_soffice_ready()?;
+        Ok(state)
+    }
+
+    fn ensure_soffice_ready(&self) -> Result<(), String> {
+        #[cfg(target_os = "windows")]
+        {
+            let mut guard = self
+                .soffice
+                .lock()
+                .map_err(|_| "helper soffice lock poisoned".to_string())?;
+            let restart = match guard.as_mut() {
+                Some(child) => match child.try_wait() {
+                    Ok(Some(_)) => true,
+                    Ok(None) => false,
+                    Err(error) => {
+                        return Err(format!("failed to query LibreOffice process state: {error}"));
+                    }
+                },
+                None => true,
+            };
+            if restart {
+                if let Some(mut child) = guard.take() {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                }
+                *guard = Some(spawn_soffice_server(&self.args)?);
+            }
+            let pid = soffice_pid(&guard).ok_or_else(|| "LibreOffice process is missing".to_string())?;
+            drop(guard);
+            wait_for_soffice_ready()
+                .map_err(|error| format!("LibreOffice helper failed to prepare soffice pid {pid}: {error}"))
+        }
+
+        #[cfg(not(target_os = "windows"))]
+        {
+            Ok(())
+        }
+    }
+
+    fn soffice_pid(&self) -> Option<u32> {
+        self.soffice
+            .lock()
+            .ok()
+            .and_then(|guard| soffice_pid(&guard))
+    }
+
+    fn shutdown_soffice(&self) {
+        if let Ok(mut guard) = self.soffice.lock() {
+            if let Some(mut child) = guard.take() {
+                let _ = child.kill();
+                let _ = child.wait();
+            }
+        }
+    }
+}
+
 fn main() -> Result<(), String> {
     let args = parse_args()?;
-    let server = Server::http(format!("127.0.0.1:{}", args.port))
+    let state = Arc::new(HelperState::new(args)?);
+    let server = Server::http(format!("127.0.0.1:{}", state.args.port))
         .map_err(|error| format!("failed to start helper server: {error}"))?;
     let shutdown = Arc::new(AtomicBool::new(false));
     while !shutdown.load(Ordering::SeqCst) {
-        let Some(request) = server.recv_timeout(std::time::Duration::from_millis(250)).ok().flatten() else {
+        let Some(request) = server
+            .recv_timeout(Duration::from_millis(250))
+            .ok()
+            .flatten()
+        else {
             continue;
         };
         match (request.method(), request.url()) {
             (&Method::Get, "/health") => {
+                let healthy = state.ensure_soffice_ready().is_ok();
+                let soffice_pid = state.soffice_pid();
                 let _ = request.respond(json_response(
-                    StatusCode(200),
-                    serde_json::json!({ "ok": true, "runtime": "office-convert-helper" }),
+                    if healthy {
+                        StatusCode(200)
+                    } else {
+                        StatusCode(503)
+                    },
+                    serde_json::json!({
+                        "ok": healthy,
+                        "runtime": "office-convert-helper",
+                        "sofficeReady": healthy,
+                        "sofficePid": soffice_pid,
+                    }),
                 ));
             }
             (&Method::Post, "/shutdown") => {
                 shutdown.store(true, Ordering::SeqCst);
+                state.shutdown_soffice();
                 let _ = request.respond(json_response(
                     StatusCode(200),
                     serde_json::json!({ "ok": true, "stopped": true }),
                 ));
             }
             (&Method::Post, "/convert") => {
-                let result = handle_convert(request, &args);
+                let result = handle_convert(request, &state);
                 if let Err(error) = result {
                     eprintln!("{error}");
                 }
@@ -70,14 +156,22 @@ fn main() -> Result<(), String> {
             }
         }
     }
+    state.shutdown_soffice();
     Ok(())
 }
 
 fn parse_args() -> Result<Args, String> {
+    parse_args_from(env::args())
+}
+
+fn parse_args_from<I>(args: I) -> Result<Args, String>
+where
+    I: IntoIterator<Item = String>,
+{
     let mut soffice_path = None;
     let mut port = None;
     let mut profile_uri = None;
-    let mut args = env::args().skip(1);
+    let mut args = args.into_iter().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--soffice-path" => soffice_path = args.next().map(PathBuf::from),
@@ -93,18 +187,19 @@ fn parse_args() -> Result<Args, String> {
     })
 }
 
-fn handle_convert(mut request: tiny_http::Request, args: &Args) -> Result<(), String> {
+fn handle_convert(mut request: tiny_http::Request, state: &Arc<HelperState>) -> Result<(), String> {
     let mut body = String::new();
     request
         .as_reader()
         .read_to_string(&mut body)
         .map_err(|error| format!("failed to read convert request: {error}"))?;
-    let payload: ConvertRequest =
-        serde_json::from_str(&body).map_err(|error| format!("failed to decode convert request: {error}"))?;
+    let payload: ConvertRequest = serde_json::from_str(&body)
+        .map_err(|error| format!("failed to decode convert request: {error}"))?;
 
     #[cfg(target_os = "windows")]
     {
-        let status = Command::new(&args.soffice_path)
+        state.ensure_soffice_ready()?;
+        let status = Command::new(&state.args.soffice_path)
             .arg("--headless")
             .arg("--nologo")
             .arg("--nofirststartwizard")
@@ -113,7 +208,7 @@ fn handle_convert(mut request: tiny_http::Request, args: &Args) -> Result<(), St
             .arg("--outdir")
             .arg(&payload.output_dir)
             .arg(&payload.source_path)
-            .arg(format!("-env:UserInstallation={}", args.profile_uri))
+            .arg(format!("-env:UserInstallation={}", state.args.profile_uri))
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .status()
@@ -148,15 +243,101 @@ fn handle_convert(mut request: tiny_http::Request, args: &Args) -> Result<(), St
             }),
         ));
         let _ = payload;
+        let _ = state;
         Ok(())
     }
 }
 
-fn json_response(status: StatusCode, value: serde_json::Value) -> Response<std::io::Cursor<Vec<u8>>> {
+#[cfg(target_os = "windows")]
+fn spawn_soffice_server(args: &Args) -> Result<Child, String> {
+    let mut command = Command::new(&args.soffice_path);
+    with_no_window(
+        command
+            .arg("--headless")
+            .arg("--nologo")
+            .arg("--nodefault")
+            .arg("--nofirststartwizard")
+            .arg("--norestore")
+            .arg("--invisible")
+            .arg("--accept=pipe,name=momobako-office-convert;urp;StarOffice.ComponentContext")
+            .arg(format!("-env:UserInstallation={}", args.profile_uri))
+            .stdout(Stdio::null())
+            .stderr(Stdio::null()),
+    )
+    .spawn()
+    .map_err(|error| format!("failed to start LibreOffice background process: {error}"))
+}
+
+#[cfg(target_os = "windows")]
+fn wait_for_soffice_ready() -> Result<(), String> {
+    let pipe_name = windows_named_pipe_name();
+    for _ in 0..20 {
+        if windows_named_pipe_exists(&pipe_name) {
+            return Ok(());
+        }
+        std::thread::sleep(Duration::from_millis(150));
+    }
+    Err("LibreOffice background process did not reach ready state".to_string())
+}
+
+#[cfg(target_os = "windows")]
+fn windows_named_pipe_name() -> String {
+    r"\\.\pipe\momobako-office-convert".to_string()
+}
+
+#[cfg(target_os = "windows")]
+fn windows_named_pipe_exists(name: &str) -> bool {
+    std::fs::OpenOptions::new().read(true).open(name).is_ok()
+}
+
+#[cfg(target_os = "windows")]
+fn with_no_window(command: &mut Command) -> &mut Command {
+    use std::os::windows::process::CommandExt;
+
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
+    command.creation_flags(CREATE_NO_WINDOW)
+}
+
+#[cfg(not(target_os = "windows"))]
+fn with_no_window(command: &mut Command) -> &mut Command {
+    command
+}
+
+fn json_response(
+    status: StatusCode,
+    value: serde_json::Value,
+) -> Response<std::io::Cursor<Vec<u8>>> {
     Response::from_data(serde_json::to_vec(&value).unwrap_or_else(|_| b"{}".to_vec()))
         .with_status_code(status)
         .with_header(
             tiny_http::Header::from_bytes("Content-Type", "application/json; charset=utf-8")
                 .expect("content-type header should be valid"),
         )
+}
+
+fn soffice_pid(guard: &Option<Child>) -> Option<u32> {
+    guard.as_ref().map(Child::id)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_args_requires_mandatory_fields() {
+        let error = parse_args_from(["helper", "--port", "8080"].into_iter().map(String::from))
+            .expect_err("missing soffice path should fail");
+        assert!(error.contains("--soffice-path"));
+    }
+
+    #[test]
+    fn windows_named_pipe_name_uses_fixed_helper_channel() {
+        #[cfg(target_os = "windows")]
+        assert_eq!(windows_named_pipe_name(), r"\\.\pipe\momobako-office-convert");
+
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = "non-windows";
+        }
+    }
 }
