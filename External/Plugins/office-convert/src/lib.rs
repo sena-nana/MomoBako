@@ -760,6 +760,13 @@ fn convert_with_libreoffice(
     temp_dir: &Path,
 ) -> Result<(), String> {
     ensure_libreoffice_daemon(runtime, &converter.executable_path)?;
+    write_libreoffice_conversion_status(
+        runtime,
+        source_path,
+        pdf_path,
+        "running",
+        None,
+    )?;
     let output_dir = temp_dir.join(format!(
         "pdf-{}",
         preview_cache_temp_key(source_path, pdf_path)
@@ -796,12 +803,26 @@ fn convert_with_libreoffice(
             .ok_or_else(|| format!("invalid source file name: {}", source_path.display()))?
     ));
     if !output.status.success() || !generated_path.is_file() {
+        write_libreoffice_conversion_status(
+            runtime,
+            source_path,
+            pdf_path,
+            "failed",
+            Some(command_output_message(&output)),
+        )?;
         return Err(format!(
             "LibreOffice 转换失败：{}",
             command_output_message(&output)
         ));
     }
     fs::copy(&generated_path, pdf_path).map_err(io_error)?;
+    write_libreoffice_conversion_status(
+        runtime,
+        source_path,
+        pdf_path,
+        "completed",
+        None,
+    )?;
     Ok(())
 }
 
@@ -964,6 +985,44 @@ fn write_libreoffice_status(
     fs::write(
         status_path,
         serde_json::to_string_pretty(&payload).map_err(|error| error.to_string())?,
+    )
+    .map_err(io_error)
+}
+
+fn write_libreoffice_conversion_status(
+    runtime: &RuntimeContext,
+    source_path: &Path,
+    pdf_path: &Path,
+    phase: &str,
+    error: Option<String>,
+) -> Result<(), String> {
+    let status_path = libreoffice_helper_dir(runtime).join("status.json");
+    let mut status = read_helper_status(&status_path);
+    let updated_at = OffsetDateTime::now_utc()
+        .format(&Rfc3339)
+        .map_err(time_error)?;
+    let last_convert = serde_json::json!({
+        "phase": phase,
+        "sourcePath": source_path.to_string_lossy().to_string(),
+        "pdfPath": pdf_path.to_string_lossy().to_string(),
+        "updatedAt": updated_at,
+        "error": error,
+    });
+    let phase_error = last_convert
+        .get("error")
+        .cloned()
+        .unwrap_or_else(|| serde_json::Value::String("LibreOffice 转换失败。".to_string()));
+    if let Some(object) = status.as_object_mut() {
+        object.insert("lastConvert".to_string(), last_convert);
+        if phase == "failed" {
+            object.insert("error".to_string(), phase_error);
+        } else if phase == "completed" {
+            object.insert("error".to_string(), serde_json::Value::Null);
+        }
+    }
+    fs::write(
+        status_path,
+        serde_json::to_string_pretty(&status).map_err(|error| error.to_string())?,
     )
     .map_err(io_error)
 }
