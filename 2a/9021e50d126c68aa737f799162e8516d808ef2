@@ -1,0 +1,21 @@
+src-tauri/src/services/runtime/mod.rs
+  s_2d5a17782b6bfd::t_6e675e1c32e661 43
+src-tauri/src/tests/runtime/preview_server.rs
+  s_2d5a17782b6bfd::t_40950f90a1c220 23-26,259-318
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.5",
+  "base_commit_sha": "2a9021e50d126c68aa737f799162e8516d808ef2",
+  "prompts": {},
+  "sessions": {
+    "s_2d5a17782b6bfd": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f1cad-dea8-7323-b604-a3effbaf235c",
+        "model": "unknown"
+      },
+      "human_author": "AuraElicase <auraelicase@outlook.com>"
+    }
+  }
+}
