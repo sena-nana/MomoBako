@@ -4,6 +4,13 @@
     "type": "cargo-native",
     "sourceDir": "src",
     "manifestPath": "Cargo.toml",
-    "outputDir": ".dist/office-convert"
+    "outputDir": ".dist/office-convert",
+    "extraBinaries": [
+      {
+        "manifestPath": "helper/Cargo.toml",
+        "binaryName": "office-convert-helper",
+        "outputName": "office-convert-helper.exe"
+      }
+    ]
   }
 }

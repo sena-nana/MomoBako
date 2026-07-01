@@ -988,7 +988,7 @@ fn current_libreoffice_daemon_status(runtime: &RuntimeContext) -> Result<serde_j
         );
         object.insert(
             "helperType".to_string(),
-            serde_json::Value::String(helper_type_label().to_string()),
+            serde_json::Value::String(helper_type_label(runtime).to_string()),
         );
         object.insert(
             "port".to_string(),
@@ -1052,7 +1052,7 @@ fn shutdown_libreoffice_daemon(runtime: &RuntimeContext) -> Result<serde_json::V
     let status = serde_json::json!({
         "running": false,
         "healthy": false,
-        "helperType": helper_type_label(),
+        "helperType": helper_type_label(runtime),
         "port": port,
         "baseUrl": helper_base_url(port),
         "pid": pid,
@@ -1105,9 +1105,13 @@ fn helper_base_url(port: u16) -> String {
     format!("http://127.0.0.1:{port}")
 }
 
-fn helper_type_label() -> &'static str {
+fn helper_type_label(runtime: &RuntimeContext) -> &'static str {
     if cfg!(target_os = "windows") {
-        "powershell-http"
+        if bundled_helper_path(runtime).is_some() {
+            "native-http"
+        } else {
+            "powershell-http"
+        }
     } else {
         "native-cli-fallback"
     }
