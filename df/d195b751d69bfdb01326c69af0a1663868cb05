@@ -1,0 +1,23 @@
+External/Plugins/service-downloader/Cargo.toml
+  s_2d5a17782b6bfd::t_ba003a813ac10f 18
+External/Plugins/service-downloader/src/aria2_runtime.rs
+  s_2d5a17782b6bfd::t_af119b62bba613 1-751
+External/Plugins/service-downloader/src/lib.rs
+  s_2d5a17782b6bfd::t_b9ab03703043aa 1-6,16,332,335-339,347-352,354-357,365-370,377,385,388-390,449-459,515-524,900-917,919,1095-1101,1426-1447
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.5",
+  "base_commit_sha": "dfd195b751d69bfdb01326c69af0a1663868cb05",
+  "prompts": {},
+  "sessions": {
+    "s_2d5a17782b6bfd": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f1cad-dea8-7323-b604-a3effbaf235c",
+        "model": "unknown"
+      },
+      "human_author": "AuraElicase <auraelicase@outlook.com>"
+    }
+  }
+}
