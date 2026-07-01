@@ -110,7 +110,7 @@ export function register(ctx) {
       const directoryLabel = computed(() => currentDirectory.value || "根目录");
 
       watch(
-        () => [props.repoId, props.entry?.path],
+        [() => props.repoId, () => props.entry?.path],
         () => {
           void loadArchive();
         },

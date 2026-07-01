@@ -438,4 +438,32 @@ describe("ThreeModelPreview", () => {
     );
     expect(mocks.deepDispose).toHaveBeenCalledWith(staleObject);
   });
+
+  it("does not reload the same model when the parent rerenders with the same path", async () => {
+    const entry = fileEntry("Characters/avatar.glb", "glb");
+    const { rerender } = render(ThreeModelPreview, {
+      props: {
+        entry,
+        repoId: "repo-main-001",
+      },
+    });
+
+    await waitFor(() => expect(screen.getByText("GLB")).toBeInTheDocument());
+    expect(mocks.preparePreviewFileSource).toHaveBeenCalledTimes(1);
+    expect(mocks.rendererInstances[0]?.init).toHaveBeenCalledTimes(1);
+
+    await rerender({
+      entry: {
+        ...entry,
+        sizeLabel: "1.0 KB",
+        metadata: { refreshed: true },
+      },
+      repoId: "repo-main-001",
+    });
+    await flushPreview();
+
+    expect(mocks.preparePreviewFileSource).toHaveBeenCalledTimes(1);
+    expect(mocks.rendererInstances).toHaveLength(1);
+    expect(mocks.rendererInstances[0]?.init).toHaveBeenCalledTimes(1);
+  });
 });
