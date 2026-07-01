@@ -20,12 +20,17 @@ function createSettingsPage(ctx) {
     props: ["manifest"],
     setup() {
       const status = ref(null);
+      const config = ref({
+        converterMode: "auto",
+        autoDownloadLibreOffice: true,
+      });
       const repositories = ref([]);
       const selectedRepoId = ref("");
       const clearing = ref(false);
       const stoppingDaemon = ref(false);
       const selfChecking = ref(false);
       const loading = ref(false);
+      const savingConfig = ref(false);
       const message = ref("");
       const error = ref("");
 
@@ -45,16 +50,27 @@ function createSettingsPage(ctx) {
           message.value = "";
         }
         try {
-          const [runtimeResponse, repoList] = await Promise.all([
+          const [runtimeResponse, repoList, configSnapshot] = await Promise.all([
             ctx.callPlugin({
               pluginId: OFFICE_CONVERT_PLUGIN_ID,
               method: "officeConvert.getRuntimeStatus",
               payload: {},
             }),
             ctx.invokeCommand("list_repositories"),
+            ctx.getPluginConfig(),
           ]);
           status.value = runtimeResponse.payload ?? null;
           repositories.value = Array.isArray(repoList) ? repoList : [];
+          config.value = {
+            converterMode: normalizeConverterMode(
+              configSnapshot?.values?.converterMode ?? runtimeResponse.payload?.converterMode,
+            ),
+            autoDownloadLibreOffice: normalizeBooleanValue(
+              configSnapshot?.values?.autoDownloadLibreOffice,
+              runtimeResponse.payload?.autoDownloadLibreOffice,
+              true,
+            ),
+          };
           if (!selectedRepoId.value && repositories.value.length > 0) {
             selectedRepoId.value = repositories.value[0].repoId;
           }
@@ -62,6 +78,50 @@ function createSettingsPage(ctx) {
           error.value = cause instanceof Error ? cause.message : String(cause);
         } finally {
           loading.value = false;
+        }
+      }
+
+      async function saveConfigValue(key, value) {
+        if (savingConfig.value) return;
+        const previous = { ...config.value };
+        config.value = {
+          ...config.value,
+          [key]: value,
+        };
+        savingConfig.value = true;
+        error.value = "";
+        message.value = "";
+        try {
+          const snapshot = await ctx.setPluginConfigValue(key, value);
+          config.value = {
+            converterMode: normalizeConverterMode(snapshot?.values?.converterMode),
+            autoDownloadLibreOffice: normalizeBooleanValue(
+              snapshot?.values?.autoDownloadLibreOffice,
+              undefined,
+              true,
+            ),
+          };
+          message.value = "转换配置已保存";
+          await loadAll({ preserveMessage: true });
+        } catch (cause) {
+          config.value = previous;
+          error.value = cause instanceof Error ? cause.message : String(cause);
+        } finally {
+          savingConfig.value = false;
+        }
+      }
+
+      function onConverterModeChange(event) {
+        const nextValue = normalizeConverterMode(event?.target?.value);
+        if (nextValue !== config.value.converterMode) {
+          void saveConfigValue("converterMode", nextValue);
+        }
+      }
+
+      function onAutoDownloadChange(event) {
+        const nextValue = normalizeBooleanSelection(event?.target?.value, config.value.autoDownloadLibreOffice);
+        if (nextValue !== config.value.autoDownloadLibreOffice) {
+          void saveConfigValue("autoDownloadLibreOffice", nextValue);
         }
       }
 
@@ -159,6 +219,35 @@ function createSettingsPage(ctx) {
           : null,
         status.value
           ? h("div", { class: "file-metadata-card__source-grid" }, [
+              h("div", { class: "asset-meta__row file-metadata-card__source-row" }, [
+                h("span", "模式设置"),
+                h("select", {
+                  class: "plugin-manager__field-input",
+                  "aria-label": "转换器模式设置",
+                  value: config.value.converterMode,
+                  disabled: savingConfig.value,
+                  onChange: onConverterModeChange,
+                }, [
+                  h("option", { value: "auto" }, "自动"),
+                  h("option", { value: "microsoft-office" }, "Microsoft Office"),
+                  h("option", { value: "libreoffice" }, "LibreOffice"),
+                ]),
+              ]),
+              h("div", { class: "asset-meta__row file-metadata-card__source-row" }, [
+                h("span", "自动下载"),
+                h("label", { class: "asset-meta__value", style: "display: inline-flex; align-items: center; gap: 8px;" }, [
+                  h("select", {
+                    class: "plugin-manager__field-input",
+                    "aria-label": "自动下载 LibreOffice 设置",
+                    value: String(config.value.autoDownloadLibreOffice),
+                    disabled: savingConfig.value,
+                    onChange: onAutoDownloadChange,
+                  }, [
+                    h("option", { value: "true" }, "开启"),
+                    h("option", { value: "false" }, "关闭"),
+                  ]),
+                ]),
+              ]),
               row("模式", status.value.converterMode ?? "auto"),
               row("自动下载", status.value.autoDownloadLibreOffice ? "开启" : "关闭"),
               row("Microsoft Office", statusText(status.value.microsoftOffice)),
@@ -229,6 +318,26 @@ function createSettingsPage(ctx) {
       ]);
     },
   };
+}
+
+function normalizeConverterMode(value) {
+  const normalized = String(value ?? "").trim();
+  if (normalized === "microsoft-office" || normalized === "libreoffice") {
+    return normalized;
+  }
+  return "auto";
+}
+
+function normalizeBooleanValue(value, fallback, defaultValue) {
+  if (typeof value === "boolean") return value;
+  if (typeof fallback === "boolean") return fallback;
+  return defaultValue;
+}
+
+function normalizeBooleanSelection(value, fallback) {
+  if (value === "true") return true;
+  if (value === "false") return false;
+  return fallback;
 }
 
 function statusText(status) {
