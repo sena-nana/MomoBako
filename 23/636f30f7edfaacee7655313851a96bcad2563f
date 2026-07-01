@@ -1,0 +1,23 @@
+External/Plugins/office-convert/helper/src/main.rs
+  s_2d5a17782b6bfd::t_2203fda4510e5e 212-213,215-221,223,242,252
+External/Plugins/office-convert/src/lib.rs
+  s_2d5a17782b6bfd::t_60c21c099c2f97 777,804-817,824,835,1221,1244,1261-1266,1302,1315,1899-1910
+External/Plugins/office-convert/src/register.js
+  s_2d5a17782b6bfd::t_2da1f64b7740ac 235
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.5",
+  "base_commit_sha": "23636f30f7edfaacee7655313851a96bcad2563f",
+  "prompts": {},
+  "sessions": {
+    "s_2d5a17782b6bfd": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f1cad-dea8-7323-b604-a3effbaf235c",
+        "model": "unknown"
+      },
+      "human_author": "AuraElicase <auraelicase@outlook.com>"
+    }
+  }
+}
