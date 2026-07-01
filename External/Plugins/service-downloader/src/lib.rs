@@ -1,3 +1,9 @@
+//! 下载服务插件。
+//!
+//! 提供网易云播放临时下载、导出与 aria2 通用下载能力。
+
+mod aria2_runtime;
+
 use std::{
     ffi::{c_char, CString},
     fs,
@@ -7,12 +13,11 @@ use std::{
     time::Duration,
 };
 
+use aria2_runtime::Aria2Config;
 use momobako_backend_plugin_sdk::{
     free_c_string, read_request, response_error, response_ok, PluginRuntimeContext,
 };
 use ncm_api_rs::{create_client, ApiResponse, Query};
-use reqwest::blocking::Client;
-use reqwest::header::{LOCATION, USER_AGENT};
 use serde::Deserialize;
 use sha1::{Digest, Sha1};
 use time::{format_description::well_known::Rfc3339, Duration as TimeDuration, OffsetDateTime};
@@ -324,28 +329,14 @@ fn runtime_context(runtime: PluginRuntimeContext) -> Result<RuntimeContext, Stri
 }
 
 fn ensure_runtime(runtime: &RuntimeContext) -> Result<serde_json::Value, String> {
-    let downloads_dir = runtime.plugin_data_dir.join("downloads");
-    let helpers_dir = runtime.plugin_data_dir.join("helpers").join("aria2");
-    fs::create_dir_all(&downloads_dir).map_err(io_error)?;
-    fs::create_dir_all(&helpers_dir).map_err(io_error)?;
-    let status_path = helpers_dir.join("status.json");
-    if !status_path.is_file() {
-        fs::write(
-            &status_path,
-            serde_json::to_string_pretty(&serde_json::json!({
-                "running": false,
-                "downloadUrl": DEFAULT_ARIA2_DOWNLOAD_URL,
-                "updatedAt": OffsetDateTime::now_utc().format(&Rfc3339).map_err(time_error)?,
-            }))
-            .map_err(|error| error.to_string())?,
-        )
-        .map_err(io_error)?;
-    }
+    let snapshot = aria2_runtime::ensure_runtime(&aria2_config(runtime))?;
     Ok(serde_json::json!({
         "runtime": "aria2",
-        "downloadsDir": downloads_dir.to_string_lossy().to_string(),
-        "helperDir": helpers_dir.to_string_lossy().to_string(),
-        "downloadUrl": DEFAULT_ARIA2_DOWNLOAD_URL
+        "downloadsDir": snapshot.downloads_dir.to_string_lossy().to_string(),
+        "helperDir": snapshot.helper_dir.to_string_lossy().to_string(),
+        "downloadUrl": DEFAULT_ARIA2_DOWNLOAD_URL,
+        "aria2": snapshot.status,
+        "queueSize": snapshot.queue_size
     }))
 }
 
@@ -353,32 +344,17 @@ fn enqueue_download(
     runtime: &RuntimeContext,
     payload: EnqueueDownloadPayload,
 ) -> Result<serde_json::Value, String> {
-    ensure_runtime(runtime)?;
-    let task_id = format!("{:x}", Sha1::digest(format!("{}\n{}", payload.url, payload.destination_path)));
-    let task_path = runtime
-        .plugin_data_dir
-        .join("helpers")
-        .join("aria2")
-        .join(format!("{task_id}.json"));
-    if let Some(parent) = task_path.parent() {
-        fs::create_dir_all(parent).map_err(io_error)?;
-    }
-    fs::write(
-        &task_path,
-        serde_json::to_string_pretty(&serde_json::json!({
-            "taskId": task_id,
-            "url": payload.url,
-            "destinationPath": payload.destination_path,
-            "metadata": payload.metadata,
-            "status": "queued",
-            "createdAt": OffsetDateTime::now_utc().format(&Rfc3339).map_err(time_error)?,
-        }))
-        .map_err(|error| error.to_string())?,
-    )
-    .map_err(io_error)?;
+    let record = aria2_runtime::enqueue_download(
+        &aria2_config(runtime),
+        &payload.url,
+        Path::new(payload.destination_path.as_str()),
+        payload.metadata,
+    )?;
     Ok(serde_json::json!({
-        "taskId": task_id,
-        "status": "queued"
+        "taskId": record.task_id,
+        "gid": record.gid,
+        "status": record.status,
+        "destinationPath": record.destination_path
     }))
 }
 
@@ -386,40 +362,19 @@ fn await_download(
     runtime: &RuntimeContext,
     payload: AwaitDownloadPayload,
 ) -> Result<serde_json::Value, String> {
-    let task_path = runtime
-        .plugin_data_dir
-        .join("helpers")
-        .join("aria2")
-        .join(format!("{}.json", payload.task_id));
-    if !task_path.is_file() {
-        return Err(format!("download task not found: {}", payload.task_id));
-    }
-    let raw = fs::read_to_string(&task_path).map_err(io_error)?;
-    let mut value =
-        serde_json::from_str::<serde_json::Value>(&raw).map_err(|error| error.to_string())?;
-    value["status"] = serde_json::json!("completed");
-    value["finishedAt"] =
-        serde_json::json!(OffsetDateTime::now_utc().format(&Rfc3339).map_err(time_error)?);
-    fs::write(
-        &task_path,
-        serde_json::to_string_pretty(&value).map_err(|error| error.to_string())?,
-    )
-    .map_err(io_error)?;
-    Ok(value)
+    let record = aria2_runtime::await_download(
+        &aria2_config(runtime),
+        &payload.task_id,
+        Duration::from_secs(300),
+    )?;
+    serde_json::to_value(record).map_err(|error| error.to_string())
 }
 
 fn remove_download(
     runtime: &RuntimeContext,
     payload: RemoveDownloadPayload,
 ) -> Result<serde_json::Value, String> {
-    let task_path = runtime
-        .plugin_data_dir
-        .join("helpers")
-        .join("aria2")
-        .join(format!("{}.json", payload.task_id));
-    if task_path.is_file() {
-        fs::remove_file(task_path).map_err(io_error)?;
-    }
+    aria2_runtime::remove_download(&aria2_config(runtime), &payload.task_id)?;
     Ok(serde_json::json!({
         "taskId": payload.task_id,
         "removed": true
@@ -427,31 +382,12 @@ fn remove_download(
 }
 
 fn get_runtime_status(runtime: &RuntimeContext) -> Result<serde_json::Value, String> {
-    let helpers_dir = runtime.plugin_data_dir.join("helpers").join("aria2");
-    let status_path = helpers_dir.join("status.json");
-    let status = if status_path.is_file() {
-        serde_json::from_str::<serde_json::Value>(&fs::read_to_string(&status_path).map_err(io_error)?)
-            .map_err(|error| error.to_string())?
-    } else {
-        serde_json::json!({
-            "running": false
-        })
-    };
-    let queue_size = if helpers_dir.is_dir() {
-        fs::read_dir(&helpers_dir)
-            .map_err(io_error)?
-            .filter_map(Result::ok)
-            .filter(|entry| entry.path().extension().and_then(|value| value.to_str()) == Some("json"))
-            .count()
-            .saturating_sub(1)
-    } else {
-        0
-    };
+    let snapshot = aria2_runtime::runtime_status(&aria2_config(runtime))?;
     Ok(serde_json::json!({
         "runtime": "aria2",
-        "aria2": status,
-        "queueSize": queue_size,
-        "downloadsDir": runtime.plugin_data_dir.join("downloads").to_string_lossy().to_string(),
+        "aria2": snapshot.status,
+        "queueSize": snapshot.queue_size,
+        "downloadsDir": snapshot.downloads_dir.to_string_lossy().to_string(),
         "downloadUrl": DEFAULT_ARIA2_DOWNLOAD_URL
     }))
 }
@@ -510,7 +446,17 @@ fn prepare_track_playback(
         .as_deref()
         .filter(|value| !value.trim().is_empty())
         .ok_or_else(|| "未获取到可播放音频地址".to_string())?;
-    download_binary_to_path(audio_url, &audio_path)?;
+    download_binary_to_path(
+        runtime,
+        audio_url,
+        &audio_path,
+        Some(serde_json::json!({
+            "kind": "playback-temp",
+            "songId": payload.song_id,
+            "repoId": payload.repo_id,
+            "entryPath": payload.entry_path,
+        })),
+    )?;
     let lyrics = fetch_lyrics(runtime, account_cookie.as_deref(), payload.song_id)?;
     if let Some(lrc) = lyrics.0 {
         fs::write(&lrc_path, lrc).map_err(io_error)?;
@@ -566,7 +512,16 @@ fn download_track_package(
         .filter(|value| !value.trim().is_empty())
         .ok_or_else(|| "未获取到可下载音频地址".to_string())?;
     let audio_path = target_root.join(format!("{base_name}.mp3"));
-    download_binary_to_path(audio_url, &audio_path)?;
+    download_binary_to_path(
+        runtime,
+        audio_url,
+        &audio_path,
+        Some(serde_json::json!({
+            "kind": "track-package",
+            "songId": payload.song_id,
+            "destination": payload.destination.kind,
+        })),
+    )?;
     let lyrics = fetch_lyrics(runtime, account_cookie.as_deref(), payload.song_id)?;
     let mut outputs = vec![audio_path.to_string_lossy().to_string()];
     if let Some(lrc) = lyrics.0 {
@@ -868,15 +823,6 @@ fn fetch_lyrics(
     Ok((lrc, yrc))
 }
 
-fn http_client() -> Result<Client, String> {
-    Client::builder()
-        .timeout(Duration::from_secs(30))
-        .redirect(reqwest::redirect::Policy::limited(5))
-        .user_agent("MomoBakoDownloader/1")
-        .build()
-        .map_err(http_error)
-}
-
 fn ncm_call<F, Fut>(
     runtime: &RuntimeContext,
     cookie: Option<&str>,
@@ -951,23 +897,26 @@ fn normalize_ncm_domain(value: Option<&str>) -> String {
     normalized.to_string()
 }
 
-fn download_binary_to_path(url: &str, target_path: &Path) -> Result<(), String> {
-    let client = http_client()?;
-    let response = client
-        .get(url)
-        .header(USER_AGENT, "Mozilla/5.0")
-        .header(LOCATION, "")
-        .send()
-        .map_err(http_error)?;
-    let status = response.status();
-    if !status.is_success() {
-        return Err(format!("下载资源失败: HTTP {}", status));
+fn download_binary_to_path(
+    runtime: &RuntimeContext,
+    url: &str,
+    target_path: &Path,
+    metadata: Option<serde_json::Value>,
+) -> Result<(), String> {
+    let record = aria2_runtime::download_via_aria2(
+        &aria2_config(runtime),
+        url,
+        target_path,
+        metadata,
+        Duration::from_secs(300),
+    )?;
+    if !Path::new(&record.destination_path).is_file() {
+        return Err(format!(
+            "download completed but destination file is missing: {}",
+            record.destination_path
+        ));
     }
-    let bytes = response.bytes().map_err(http_error)?;
-    if let Some(parent) = target_path.parent() {
-        fs::create_dir_all(parent).map_err(io_error)?;
-    }
-    fs::write(target_path, bytes).map_err(io_error)
+    Ok(())
 }
 
 fn resolve_download_root(
@@ -1141,6 +1090,13 @@ fn http_error(error: impl ToString) -> String {
 
 fn time_error(error: impl ToString) -> String {
     error.to_string()
+}
+
+fn aria2_config(runtime: &RuntimeContext) -> Aria2Config<'_> {
+    Aria2Config {
+        plugin_data_dir: runtime.plugin_data_dir.as_path(),
+        download_url: DEFAULT_ARIA2_DOWNLOAD_URL,
+    }
 }
 
 #[cfg(test)]
@@ -1465,6 +1421,28 @@ mod tests {
         );
         assert_eq!(value["mediaType"], serde_json::json!("audio/mpeg"));
         assert_eq!(value["sizeBytes"], serde_json::json!(12));
+    }
+
+    #[test]
+    fn generic_download_response_contains_completed_status_shape() {
+        let record = aria2_runtime::DownloadTaskRecord {
+            task_id: "gid-1".to_string(),
+            gid: "gid-1".to_string(),
+            url: "http://127.0.0.1:8080/test.mp3".to_string(),
+            destination_path: "C:/Temp/test.mp3".to_string(),
+            metadata: Some(serde_json::json!({ "kind": "test" })),
+            status: "completed".to_string(),
+            created_at: "2026-07-01T10:00:00Z".to_string(),
+            finished_at: Some("2026-07-01T10:01:00Z".to_string()),
+            total_length: Some(8),
+            completed_length: Some(8),
+            error: None,
+        };
+        let value = serde_json::to_value(&record).expect("task record should serialize");
+        assert_eq!(value["status"], serde_json::json!("completed"));
+        assert_eq!(value["totalLength"], serde_json::json!(8));
+        assert_eq!(value["completedLength"], serde_json::json!(8));
+        assert_eq!(value["metadata"]["kind"], serde_json::json!("test"));
     }
 
     #[test]
