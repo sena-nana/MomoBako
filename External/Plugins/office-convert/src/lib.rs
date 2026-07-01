@@ -1030,6 +1030,28 @@ fn current_libreoffice_daemon_status(runtime: &RuntimeContext) -> Result<serde_j
                 .map(serde_json::Value::from)
                 .unwrap_or(serde_json::Value::Null),
         );
+        object.insert(
+            "unoAvailable".to_string(),
+            helper_runtime
+                .as_ref()
+                .map(|value| serde_json::Value::Bool(value.uno_available))
+                .unwrap_or(serde_json::Value::Null),
+        );
+        object.insert(
+            "pythonValid".to_string(),
+            helper_runtime
+                .as_ref()
+                .map(|value| serde_json::Value::Bool(value.python_valid))
+                .unwrap_or(serde_json::Value::Null),
+        );
+        object.insert(
+            "pythonPath".to_string(),
+            helper_runtime
+                .as_ref()
+                .and_then(|value| value.python_path.as_ref())
+                .map(|value| serde_json::Value::String(value.clone()))
+                .unwrap_or(serde_json::Value::Null),
+        );
         if !running {
             object.insert(
                 "error".to_string(),
@@ -1169,6 +1191,9 @@ struct HelperRuntimeStatus {
     healthy: bool,
     soffice_ready: bool,
     soffice_pid: Option<u32>,
+    uno_available: bool,
+    python_valid: bool,
+    python_path: Option<String>,
 }
 
 fn helper_health(port: u16) -> bool {
@@ -1199,6 +1224,21 @@ fn helper_runtime_status(port: u16) -> Option<HelperRuntimeStatus> {
             .and_then(|value| value.get("sofficePid"))
             .and_then(serde_json::Value::as_u64)
             .and_then(|value| u32::try_from(value).ok()),
+        uno_available: payload
+            .as_ref()
+            .and_then(|value| value.get("unoAvailable"))
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false),
+        python_valid: payload
+            .as_ref()
+            .and_then(|value| value.get("pythonValid"))
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false),
+        python_path: payload
+            .as_ref()
+            .and_then(|value| value.get("pythonPath"))
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string),
     })
 }
 
@@ -1878,7 +1918,10 @@ mod tests {
             "ok": true,
             "runtime": "office-convert-helper",
             "sofficeReady": true,
-            "sofficePid": 4567
+            "sofficePid": 4567,
+            "unoAvailable": true,
+            "pythonValid": true,
+            "pythonPath": "C:/LibreOffice/program/python.exe"
         });
         let status = HelperRuntimeStatus {
             healthy: true,
@@ -1890,11 +1933,26 @@ mod tests {
                 .get("sofficePid")
                 .and_then(serde_json::Value::as_u64)
                 .and_then(|value| u32::try_from(value).ok()),
+            uno_available: payload
+                .get("unoAvailable")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false),
+            python_valid: payload
+                .get("pythonValid")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false),
+            python_path: payload
+                .get("pythonPath")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string),
         };
 
         assert!(status.healthy);
         assert!(status.soffice_ready);
         assert_eq!(status.soffice_pid, Some(4567));
+        assert!(status.uno_available);
+        assert!(status.python_valid);
+        assert_eq!(status.python_path.as_deref(), Some("C:/LibreOffice/program/python.exe"));
     }
 
     #[test]

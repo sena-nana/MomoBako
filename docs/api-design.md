@@ -378,7 +378,7 @@
       - Converts Office files to PDF, stores the result under `{repoRoot}/.momo/cache/office-preview`, and returns the cached PDF file path.
     - `officeConvert.getRuntimeStatus`
       - Response: `{ converterMode, microsoftOffice, libreofficeSystem, libreofficeBundle, daemon, autoDownloadLibreOffice, bundledDownloadUrl }`
-      - `daemon` currently includes `running`, `healthy`, `helperType`, `port`, `baseUrl`, `pid`, `sofficeReady`, `sofficePid`, `path`, `updatedAt`, `error`, `control`, and optional `lastConvert`.
+      - `daemon` currently includes `running`, `healthy`, `helperType`, `port`, `baseUrl`, `pid`, `sofficeReady`, `sofficePid`, `unoAvailable`, `pythonValid`, `pythonPath`, `path`, `updatedAt`, `error`, `control`, and optional `lastConvert`.
       - `daemon.lastConvert` may include `conversionMode`, so the host settings page can distinguish `uno` and `cli-fallback` conversion paths.
       - Windows helper control currently uses a local HTTP control plane for `health` and `convert`, while shutdown remains exposed through the plugin call.
       - Bundled helper health now also reports whether the managed background Headless LibreOffice process is ready and exposes its process id when available.
