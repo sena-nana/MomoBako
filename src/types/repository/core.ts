@@ -717,6 +717,99 @@ export type RepositoryCacheFilePreviewSourceResponse = {
   modifiedAt?: string | null;
 };
 
+export type DownloaderTaskStatus =
+  | "queued"
+  | "active"
+  | "completed"
+  | "failed"
+  | "removed"
+  | string;
+
+export type DownloaderTaskRecord = {
+  taskId: string;
+  gid: string;
+  url: string;
+  destinationPath: string;
+  metadata?: Record<string, unknown> | null;
+  status: DownloaderTaskStatus;
+  createdAt: string;
+  finishedAt?: string | null;
+  totalLength?: number | null;
+  completedLength?: number | null;
+  error?: string | null;
+};
+
+export type DownloaderAria2Status = {
+  running: boolean;
+  pid?: number | null;
+  executablePath?: string | null;
+  version?: string | null;
+  rpcUrl?: string | null;
+  secret?: string | null;
+  source?: string | null;
+  updatedAt?: string | null;
+  error?: string | null;
+  downloadUrl: string;
+  bundledArchivePath?: string | null;
+};
+
+export type DownloaderRuntimeStatus = {
+  runtime: string;
+  aria2: DownloaderAria2Status;
+  queueSize: number;
+  downloadsDir: string;
+  downloadUrl: string;
+  helperDir?: string;
+};
+
+export type DownloaderEnsureRuntimeResponse = {
+  runtime: string;
+  downloadsDir: string;
+  helperDir: string;
+  downloadUrl: string;
+  aria2: DownloaderAria2Status;
+  queueSize: number;
+};
+
+export type DownloaderEnqueueResponse = {
+  taskId: string;
+  gid: string;
+  status: DownloaderTaskStatus;
+  destinationPath: string;
+};
+
+export type OfficeConverterStatus = {
+  available: boolean;
+  path?: string | null;
+  version?: string | null;
+  reason?: string | null;
+};
+
+export type OfficeConvertPreviewResult = {
+  pdfPath: string;
+  cached: boolean;
+  converter: string;
+  cacheKey: string;
+  mediaType: "application/pdf";
+  sizeBytes: number;
+  modifiedAt?: string | null;
+};
+
+export type OfficeConvertRuntimeStatus = {
+  converterMode: "auto" | "microsoft-office" | "libreoffice" | string;
+  microsoftOffice: OfficeConverterStatus;
+  libreofficeSystem: OfficeConverterStatus;
+  libreofficeBundle: OfficeConverterStatus;
+  daemon: Record<string, unknown>;
+  autoDownloadLibreOffice: boolean;
+  bundledDownloadUrl: string;
+};
+
+export type OfficeConvertClearPreviewCacheResponse = {
+  repoId: string;
+  removed: number;
+};
+
 export type PluginConfigValue = unknown;
 
 export type PluginConfigSnapshot = {
