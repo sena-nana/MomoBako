@@ -422,7 +422,13 @@ export function pluginManifest(
     pluginId === "momobako.preview.three-model" ? ["fbx", "obj", "glb", "gltf", "vrm", "stl", "3mf", "blend"]
     : pluginId === "momobako.preview.media" ? ["png", "jpg", "jpeg", "webp", "gif", "bmp", "avif", "svg", "mp4", "mov", "mkv", "webm", "avi", "m4v", "mp3", "wav", "ogg", "flac", "m4a", "aac", "opus"]
     : pluginId === "momobako.preview.text" ? ["txt", "md", "markdown", "json", "yaml", "yml", "csv"]
-    : pluginId === "momobako.preview.office" ? ["pdf", "doc", "docx", "docm", "xls", "xlsx", "xlsm", "ppt", "pptx", "pptm"]
+    : pluginId === "momobako.preview.office"
+      ? [
+          "pdf",
+          "doc", "docx", "docm", "dotx", "dotm", "dot",
+          "xls", "xlsx", "xlsm", "xlsb", "xltx", "xltm", "xlt",
+          "ppt", "pptx", "pptm", "ppsx", "ppsm", "pps", "potx", "potm", "pot",
+        ]
     : pluginId === "momobako.preview.archive" ? ["zip", "cbz", "7z", "rar", "cbr"]
     : [];
   const hooks =

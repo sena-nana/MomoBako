@@ -98,16 +98,27 @@ describe("previewPlugins", () => {
   it("routes Office and PDF files to the built-in document preview", async () => {
     await syncRegisteredPreviewPluginManifests(await listPlugins());
     expect(getPreviewPluginForEntry(fileEntry("pdf"))?.pluginId).toBe("momobako.preview.office");
+    expect(getPreviewPluginForEntry(fileEntry("doc"))?.pluginId).toBe("momobako.preview.office");
     expect(getPreviewPluginForEntry(fileEntry("docx"))?.pluginId).toBe("momobako.preview.office");
+    expect(getPreviewPluginForEntry(fileEntry("dot"))?.pluginId).toBe("momobako.preview.office");
     expect(getPreviewPluginForEntry(fileEntry("xlsx"))?.pluginId).toBe("momobako.preview.office");
+    expect(getPreviewPluginForEntry(fileEntry("xlsb"))?.pluginId).toBe("momobako.preview.office");
+    expect(getPreviewPluginForEntry(fileEntry("xlt"))?.pluginId).toBe("momobako.preview.office");
     expect(getPreviewPluginForEntry(fileEntry("pptx"))?.pluginId).toBe("momobako.preview.office");
+    expect(getPreviewPluginForEntry(fileEntry("pps"))?.pluginId).toBe("momobako.preview.office");
+    expect(getPreviewPluginForEntry(fileEntry("pot"))?.pluginId).toBe("momobako.preview.office");
     expect(getPreviewPluginForEntry(fileEntry("docm"))?.pluginId).toBe("momobako.preview.office");
     expect(getPreviewPluginForEntry(fileEntry("xlsm"))?.pluginId).toBe("momobako.preview.office");
     expect(getPreviewPluginForEntry(fileEntry("pptm"))?.pluginId).toBe("momobako.preview.office");
     expect(getPreviewPluginForEntry(fileEntry("csv"))?.pluginId).toBe("momobako.preview.text");
     const officePlugin = listPreviewPlugins().find((plugin) => plugin.pluginId === "momobako.preview.office");
     expect(officePlugin?.supportedExtensions).toContain("doc");
+    expect(officePlugin?.supportedExtensions).toContain("dot");
+    expect(officePlugin?.supportedExtensions).toContain("xlsb");
+    expect(officePlugin?.supportedExtensions).toContain("xlt");
     expect(officePlugin?.supportedExtensions).toContain("ppt");
+    expect(officePlugin?.supportedExtensions).toContain("pps");
+    expect(officePlugin?.supportedExtensions).toContain("pot");
     expect(officePlugin?.generateThumbnail).toBeTypeOf("function");
   });
 
@@ -126,12 +137,22 @@ describe("previewPlugins", () => {
 
     expect(officePlugin).toBeDefined();
     expect(officePlugin?.supportedExtensions).toContain("pdf");
+    expect(officePlugin?.supportedExtensions).toContain("doc");
     expect(officePlugin?.supportedExtensions).toContain("docx");
+    expect(officePlugin?.supportedExtensions).toContain("dot");
     expect(officePlugin?.supportedExtensions).toContain("xlsx");
+    expect(officePlugin?.supportedExtensions).toContain("xlsb");
+    expect(officePlugin?.supportedExtensions).toContain("xlt");
     expect(officePlugin?.supportedExtensions).toContain("pptx");
+    expect(officePlugin?.supportedExtensions).toContain("pps");
+    expect(officePlugin?.supportedExtensions).toContain("pot");
     expect(officePlugin?.supportedExtensions).toContain("docm");
     expect(officePlugin?.supportedExtensions).toContain("xlsm");
     expect(officePlugin?.supportedExtensions).toContain("pptm");
+    expect(officePlugin?.supportedExtensions).toContain("ppsx");
+    expect(officePlugin?.supportedExtensions).toContain("ppsm");
+    expect(officePlugin?.supportedExtensions).toContain("potx");
+    expect(officePlugin?.supportedExtensions).toContain("potm");
   });
 
   it("skips disabled preview plugins after manifest sync", async () => {
