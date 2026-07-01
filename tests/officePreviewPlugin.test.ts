@@ -5,6 +5,7 @@
  * 确保前端统一走 PDF 预览与缩略图生成逻辑。
  */
 import { describe, expect, it, vi, afterEach, beforeEach } from "vitest";
+import { render, screen } from "@testing-library/vue";
 import type { FileBrowserEntry } from "../src/types/repository";
 const pdfjsState = vi.hoisted(() => {
   const getDocument = vi.fn((url: string) => ({
@@ -180,5 +181,104 @@ describe("office preview plugin", () => {
       mediaType: "application/pdf",
     });
     expect(pdfjsState.getDocument).toHaveBeenCalledWith("http://127.0.0.1:49152/preview/office-cache-token");
+  });
+
+  it("renders a clear error when office conversion fails", async () => {
+    let component: unknown;
+    const preparePreviewFileSource = vi.fn();
+    const callPlugin = vi.fn(async () => {
+      throw new Error("LibreOffice 转换失败：守护进程不可用");
+    });
+    const prepareRepositoryCacheFilePreviewSource = vi.fn();
+
+    const { register } = await import("../External/Plugins/office-preview/src/register.js");
+    register({
+      preparePreviewFileSource,
+      callPlugin,
+      prepareRepositoryCacheFilePreviewSource,
+      registerPreview: (definition: { component?: unknown }) => {
+        component = definition.component;
+        return definition;
+      },
+      pdfRuntime: pdfjsState,
+      vue: await import("vue"),
+    });
+
+    render(component as never, {
+      props: {
+        repoId: "repo-main-001",
+        entry: fileEntry("pptx"),
+      },
+    });
+
+    expect(await screen.findByText("无法预览该文档")).toBeInTheDocument();
+    expect(await screen.findByText("LibreOffice 转换失败：守护进程不可用")).toBeInTheDocument();
+    expect(callPlugin).toHaveBeenCalledWith({
+      pluginId: "momobako.service.office-convert",
+      method: "officeConvert.ensurePreviewPdf",
+      payload: {
+        repoId: "repo-main-001",
+        entryPath: "Docs/demo.pptx",
+        extension: "pptx",
+        sourcePath: "C:/Mock/Repo/Docs/demo.pptx",
+        sourceModifiedAt: "2026-07-01T08:00:00Z",
+        sourceSizeBytes: 8192,
+      },
+    });
+    expect(prepareRepositoryCacheFilePreviewSource).not.toHaveBeenCalled();
+  });
+
+  it("renders a clear error when cached pdf preview source is unavailable", async () => {
+    let component: unknown;
+    const preparePreviewFileSource = vi.fn();
+    const callPlugin = vi.fn(async () => ({
+      payload: {
+        pdfPath: "C:/Mock/Repo/.momo/cache/office-preview/demo.pdf",
+        cached: false,
+        converter: "microsoft-office",
+        cacheKey: "office-preview-cache",
+        mediaType: "application/pdf",
+        sizeBytes: 4096,
+        modifiedAt: "2026-07-01T08:00:00Z",
+      },
+    }));
+    const prepareRepositoryCacheFilePreviewSource = vi.fn(async () => ({
+      repoId: "repo-main-001",
+      path: "C:/Mock/Repo/.momo/cache/office-preview/demo.pdf",
+      token: "1".repeat(64),
+      sourceUrl: null,
+      mediaType: "application/pdf",
+      sizeBytes: 4096,
+      modifiedAt: "2026-07-01T08:00:00Z",
+    }));
+
+    const { register } = await import("../External/Plugins/office-preview/src/register.js");
+    register({
+      preparePreviewFileSource,
+      callPlugin,
+      prepareRepositoryCacheFilePreviewSource,
+      registerPreview: (definition: { component?: unknown }) => {
+        component = definition.component;
+        return definition;
+      },
+      pdfRuntime: pdfjsState,
+      vue: await import("vue"),
+    });
+
+    render(component as never, {
+      props: {
+        repoId: "repo-main-001",
+        entry: fileEntry("xlsx"),
+      },
+    });
+
+    expect(await screen.findByText("无法预览该文档")).toBeInTheDocument();
+    expect(await screen.findByText("转换后的 PDF 预览源不可用")).toBeInTheDocument();
+    expect(prepareRepositoryCacheFilePreviewSource).toHaveBeenCalledWith({
+      repoId: "repo-main-001",
+      path: "C:/Mock/Repo/.momo/cache/office-preview/demo.pdf",
+      mediaType: "application/pdf",
+    });
+    expect(pdfjsState.getDocument).not.toHaveBeenCalled();
   });
 });
