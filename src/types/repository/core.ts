@@ -860,6 +860,19 @@ export type OfficeConvertClearPreviewCacheResponse = {
   removed: number;
 };
 
+export type OfficeConvertRunRuntimeSelfCheckResponse = {
+  ok: boolean;
+  converter: string;
+  converterPath: string;
+  converterVersion?: string | null;
+  conversionMode?: string | null;
+  samplePath: string;
+  pdfPath?: string | null;
+  pdfSizeBytes?: number | null;
+  durationMs: number;
+  error?: string | null;
+};
+
 export type PluginConfigValue = unknown;
 
 export type PluginConfigSnapshot = {
