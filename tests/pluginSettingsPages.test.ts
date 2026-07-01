@@ -10,6 +10,7 @@ import {
   getInvokeCalls,
   getPluginCallCalls,
   seedMockPlugins,
+  seedMockPluginConfig,
   seedMockRepositories,
 } from "./setupTests";
 import { pluginManifest } from "./fixtures/repositoryFixtures";
@@ -206,6 +207,10 @@ describe("plugin settings pages", () => {
 
   it("renders office convert status page and triggers runtime actions", async () => {
     const manifest = officeConvertSettingsManifest();
+    seedMockPluginConfig("momobako.service.office-convert", {
+      converterMode: "auto",
+      autoDownloadLibreOffice: true,
+    });
     seedMockRepositories([{
       repoId: "repo-main-001",
       name: "Mock Anime Repo",
@@ -249,6 +254,34 @@ describe("plugin settings pages", () => {
     });
 
     expect(await screen.findByText("已清理 0 个缓存文件")).toBeInTheDocument();
+
+    const modeSelect = screen.getByRole("combobox", { name: "转换器模式设置" });
+    await fireEvent.update(modeSelect, "libreoffice");
+    await waitFor(() => {
+      const calls = getInvokeCalls("set_plugin_config_value");
+      expect(calls.length).toBeGreaterThan(0);
+      expect(calls.at(-1)?.args?.request).toMatchObject({
+        pluginId: "momobako.service.office-convert",
+        key: "converterMode",
+        value: "libreoffice",
+      });
+    });
+    expect(await screen.findByText("转换配置已保存")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(modeSelect).not.toBeDisabled();
+    });
+
+    const autoDownloadSelect = screen.getByRole("combobox", { name: "自动下载 LibreOffice 设置" });
+    await fireEvent.update(autoDownloadSelect, "false");
+    await waitFor(() => {
+      const calls = getInvokeCalls("set_plugin_config_value");
+      expect(calls.some((call) => {
+        const request = call.args?.request as Record<string, unknown> | undefined;
+        return request?.pluginId === "momobako.service.office-convert"
+          && request?.key === "autoDownloadLibreOffice"
+          && request?.value === false;
+      })).toBe(true);
+    });
   });
 
   it("renders downloader runtime status page", async () => {
