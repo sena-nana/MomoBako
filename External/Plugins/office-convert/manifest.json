@@ -35,13 +35,37 @@
   "contributes": {
     "apiTests": [
       {
+        "method": "officeConvert.ensurePreviewPdf",
+        "summary": "确保 Office 文档存在可复用的 PDF 预览缓存。",
+        "payload": {
+          "repoId": "repo-demo",
+          "entryPath": "Docs/demo.docx",
+          "extension": "docx",
+          "sourcePath": "C:/Mock/Repo/Docs/demo.docx",
+          "sourceModifiedAt": "2026-07-01T08:00:00Z",
+          "sourceSizeBytes": 8192
+        }
+      },
+      {
         "method": "officeConvert.getRuntimeStatus",
         "summary": "读取 Office 转换服务运行状态。",
         "payload": {}
       },
       {
+        "method": "officeConvert.clearPreviewCache",
+        "summary": "清理当前资源库下的 Office PDF 预览缓存。",
+        "payload": {
+          "repoId": "repo-demo"
+        }
+      },
+      {
         "method": "officeConvert.runRuntimeSelfCheck",
         "summary": "执行一次真实 Office 转换运行时自检。",
+        "payload": {}
+      },
+      {
+        "method": "officeConvert.shutdownDaemon",
+        "summary": "关闭当前 LibreOffice 守护进程。",
         "payload": {}
       }
     ],

@@ -20,6 +20,7 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
 ).toString();
 
 export function register(ctx) {
+  const pdfRuntime = ctx.pdfRuntime ?? pdfjsLib;
   const {
     computed,
     h,
@@ -110,7 +111,7 @@ export function register(ctx) {
       }
 
       async function loadPdfDocument(token, url) {
-        const task = pdfjsLib.getDocument(url);
+        const task = pdfRuntime.getDocument(url);
         const document = await task.promise;
         if (token !== loadToken) {
           await document.destroy();
@@ -281,7 +282,7 @@ export function register(ctx) {
     component: OfficePreviewPlugin,
     generateThumbnail: async ({ repoId, entry }) => {
       const preview = await resolvePreviewPdf(ctx, repoId, entry);
-      const task = pdfjsLib.getDocument(preview.sourceUrl);
+      const task = pdfRuntime.getDocument(preview.sourceUrl);
       const document = await task.promise;
       try {
         const page = await document.getPage(1);
