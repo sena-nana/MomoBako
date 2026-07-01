@@ -2,6 +2,7 @@ import { computed, ref, watch, type ComputedRef } from "vue";
 import { getPreviewPluginForEntry } from "../../plugins/previewPlugins";
 import { getRegisteredLibraryExtensionsForEntry, listRegisteredLibraryExtensions } from "../../plugins/sdk";
 import type {
+  AssetDetail,
   FileBrowserEntry,
   FileBrowserSnapshot,
   PlaylistDetail,
@@ -9,11 +10,14 @@ import type {
   SearchHit,
   SmartFolderResultSnapshot,
 } from "../../types/repository";
-import type { WorkspacePanelKey } from "../../composables/useRepositoryWorkspace";
+import type { WorkspaceLibraryCategoryKey, WorkspacePanelKey } from "../../composables/useRepositoryWorkspace";
 
 export type FileDisplayMode = "adaptive" | "masonry" | "grid" | "list";
 
 type WorkspaceViewStateOptions = {
+  activeAssetDetail: ComputedRef<AssetDetail | null>;
+  activeLibraryCategory: ComputedRef<WorkspaceLibraryCategoryKey>;
+  activeLibraryCategoryLabel: ComputedRef<string>;
   activePanel: ComputedRef<WorkspacePanelKey>;
   activePlaylistDetail: ComputedRef<PlaylistDetail | null>;
   activePreviewPath: ComputedRef<string | null>;
@@ -31,8 +35,10 @@ type WorkspaceViewStateOptions = {
   selectedEntry: ComputedRef<FileBrowserEntry | null>;
   selectedFilePath: ComputedRef<string | null>;
   smartFolderResult: ComputedRef<SmartFolderResultSnapshot | null>;
+  isLibraryCategoryVirtualView: ComputedRef<boolean>;
   isLoadingFileBrowser: ComputedRef<boolean>;
   isLoadingSmartFolder: ComputedRef<boolean>;
+  libraryCategorySummary: ComputedRef<string>;
 };
 
 export const fileDisplayModeStorageKey = "momobako.fileDisplayMode";
@@ -68,6 +74,17 @@ function searchHitToFileEntry(result: SearchHit): FileBrowserEntry {
   };
 }
 
+function withActiveAssetMetadata(entry: FileBrowserEntry | null, assetDetail: AssetDetail | null) {
+  if (!entry || !assetDetail || entry.assetId !== assetDetail.summary.assetId) return entry;
+  return {
+    ...entry,
+    metadata: {
+      ...(entry.metadata ?? {}),
+      ...Object.fromEntries(assetDetail.metadata.map((item) => [item.key, item.value])),
+    },
+  };
+}
+
 export function useWorkspaceViewState(options: WorkspaceViewStateOptions) {
   const previewFilePath = ref<string | null>(null);
   const fileDisplayMode = ref<FileDisplayMode>(readInitialFileDisplayMode());
@@ -75,21 +92,25 @@ export function useWorkspaceViewState(options: WorkspaceViewStateOptions) {
   const hasRepository = computed(() => Boolean(options.activeSnapshot.value));
   const isMissingRepository = computed(() => options.activeRepositoryStatus.value === "missing");
   const isFilesPanel = computed(() => options.activePanel.value === "files");
-  const isTrashPanel = computed(() => options.activePanel.value === "deleted");
+  const isTrashPanel = computed(() => options.activePanel.value === "trash");
   const isSearchPanel = computed(() => options.activePanel.value === "search");
   const isSmartFolderPanel = computed(() => options.activePanel.value === "smartFolder");
   const isActionsPanel = computed(() => options.activePanel.value === "actions");
   const isExtensionsPanel = computed(() => options.activePanel.value === "extensions");
   const isPlaylistPanel = computed(() => options.activePanel.value === "playlist");
+  const isVirtualView = computed(() => isSmartFolderPanel.value || options.isLibraryCategoryVirtualView.value);
   const isFileBrowserPanel = computed(() => isFilesPanel.value || isTrashPanel.value || isSmartFolderPanel.value);
   const smartFolderEntryMap = computed<ReadonlyMap<string, FileBrowserEntry>>(() => (
     new Map((options.smartFolderResult.value?.results ?? []).map((entry) => [entry.path, entry]))
   ));
   const currentFileEntry = computed(() => {
     if (isSmartFolderPanel.value) {
-      return options.selectedFilePath.value ? smartFolderEntryMap.value.get(options.selectedFilePath.value) ?? null : null;
+      return withActiveAssetMetadata(
+        options.selectedFilePath.value ? smartFolderEntryMap.value.get(options.selectedFilePath.value) ?? null : null,
+        options.activeAssetDetail.value,
+      );
     }
-    return options.selectedEntry.value;
+    return withActiveAssetMetadata(options.selectedEntry.value, options.activeAssetDetail.value);
   });
   const isRepositoryWritable = computed(() => hasRepository.value && !isMissingRepository.value);
   const canRenameSelected = computed(() => options.selectedEntries.value.length === 1 && isRepositoryWritable.value && !isTrashPanel.value && !isSmartFolderPanel.value);
@@ -112,10 +133,10 @@ export function useWorkspaceViewState(options: WorkspaceViewStateOptions) {
   const previewLibraryExtensions = computed(() => getRegisteredLibraryExtensionsForEntry(previewFileEntry.value));
   const currentLibraryExtensions = computed(() => getRegisteredLibraryExtensionsForEntry(currentFileEntry.value));
   const fileDisplayModeClass = computed(() => `files-list__files--${fileDisplayMode.value}`);
-  const activeDirectoryEntries = computed(() => (isSmartFolderPanel.value ? [] : options.directoryEntries.value));
+  const activeDirectoryEntries = computed(() => (isVirtualView.value ? [] : options.directoryEntries.value));
   const activeFileEntries = computed(() => (isSmartFolderPanel.value ? options.smartFolderResult.value?.results ?? [] : options.fileEntries.value));
   const hasActiveSplitFileGroups = computed(() => (
-    isSmartFolderPanel.value ? false : options.hasSplitFileGroups.value
+    isVirtualView.value ? false : options.hasSplitFileGroups.value
   ));
   const isActiveBrowserLoading = computed(() => (
     isSmartFolderPanel.value ? options.isLoadingSmartFolder.value : options.isLoadingFileBrowser.value
@@ -136,7 +157,7 @@ export function useWorkspaceViewState(options: WorkspaceViewStateOptions) {
     return `${options.smartFolderResult.value.results.length} 条结果${parts.length ? ` · ${parts.join(" · ")}` : ""}`;
   });
   const activeLibrarySearchShortcuts = computed(() => {
-    const entries = options.fileBrowser.value?.entries ?? [];
+    const entries = isSmartFolderPanel.value ? options.smartFolderResult.value?.results ?? [] : options.fileEntries.value;
     const results = options.searchResults.value;
     return libraryExtensions.value.flatMap((extension) => {
       if (!extension.searchShortcuts?.length) return [];
@@ -175,6 +196,8 @@ export function useWorkspaceViewState(options: WorkspaceViewStateOptions) {
   }
 
   return {
+    activeLibraryCategory: options.activeLibraryCategory,
+    activeLibraryCategoryLabel: options.activeLibraryCategoryLabel,
     activeDirectoryEntries,
     activeFileEntries,
     activeLibrarySearchShortcuts,
@@ -195,8 +218,10 @@ export function useWorkspaceViewState(options: WorkspaceViewStateOptions) {
     isExtensionsPanel,
     isFileBrowserPanel,
     isFilesPanel,
+    isVirtualView,
     isMissingRepository,
     isPlaylistPanel,
+    isReadOnlyVirtualView: isSmartFolderPanel,
     isRepositoryWritable,
     isSearchPanel,
     isSmartFolderPanel,
@@ -207,6 +232,14 @@ export function useWorkspaceViewState(options: WorkspaceViewStateOptions) {
     previewLibraryExtensions,
     previewPlugin,
     setPreviewFilePath,
+    virtualViewSummary: computed(() => (
+      isSmartFolderPanel.value ? smartFolderSummary.value : options.libraryCategorySummary.value
+    )),
+    virtualViewTitle: computed(() => (
+      isSmartFolderPanel.value
+        ? options.smartFolderResult.value?.smartFolder.name ?? "智能文件夹"
+        : options.activeLibraryCategoryLabel.value
+    )),
     smartFolderSummary,
   };
 }

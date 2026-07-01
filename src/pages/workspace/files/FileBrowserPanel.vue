@@ -61,6 +61,7 @@ const props = defineProps<{
   isMutatingFiles: boolean;
   isReadOnlyVirtual?: boolean;
   isTrashPanel: boolean;
+  isVirtualView?: boolean;
   isVideoEntry: (entry: FileBrowserEntry) => boolean;
   hasMoreEntries?: boolean;
   openSelectedLabel: string;
@@ -147,18 +148,18 @@ const {
     >
       <header class="files-browser__header">
         <div>
-          <p class="asset-browser__eyebrow">{{ isReadOnlyVirtual ? "智能文件夹" : isTrashPanel ? "回收站" : "当前目录" }}</p>
+          <p class="asset-browser__eyebrow">{{ isVirtualView ? "分类视图" : isTrashPanel ? "回收站" : "当前目录" }}</p>
           <div class="files-breadcrumbs">
             <button
               type="button"
               class="files-breadcrumbs__item"
-              :disabled="isReadOnlyVirtual"
+              :disabled="isVirtualView"
               @click="emit('openDirectory', '')"
             >
-              {{ isReadOnlyVirtual ? virtualTitle || "智能文件夹" : isTrashPanel ? "回收站" : "根目录" }}
+              {{ isVirtualView ? virtualTitle || "分类视图" : isTrashPanel ? "回收站" : "根目录" }}
             </button>
             <button
-              v-if="!isReadOnlyVirtual"
+              v-if="!isVirtualView"
               v-for="segment in breadcrumbs"
               :key="segment.path"
               type="button"
@@ -168,7 +169,7 @@ const {
               {{ segment.label }}
             </button>
           </div>
-          <p v-if="isReadOnlyVirtual && virtualSubline" class="files-browser__subline">{{ virtualSubline }}</p>
+          <p v-if="isVirtualView && virtualSubline" class="files-browser__subline">{{ virtualSubline }}</p>
         </div>
 
         <div class="files-toolbar">
@@ -181,7 +182,7 @@ const {
             </select>
           </label>
 
-          <template v-if="!isTrashPanel && !isReadOnlyVirtual">
+          <template v-if="!isTrashPanel && !isVirtualView">
             <label class="files-toolbar__field">
               <Plus :size="14" aria-hidden="true" />
               <input v-model="createFileName" type="text" placeholder="新建空文件，例如 note.txt" />

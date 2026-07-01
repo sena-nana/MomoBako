@@ -22,7 +22,9 @@ import type {
   WorkspaceStartupState,
 } from "../../types/repository";
 
-export type WorkspacePanelKey = "files" | "deleted" | "search" | "smartFolder" | "playlist" | "actions" | "extensions";
+export type WorkspacePanelKey = "files" | "trash" | "search" | "smartFolder" | "playlist" | "actions" | "extensions";
+
+export type WorkspaceLibraryCategoryKey = "all" | "uncategorized" | "untagged" | "recent";
 
 export type WorkspaceFilterState = {
   tags: string[];
@@ -111,6 +113,7 @@ export const activeAssetId = ref<string | null>(null);
 export const activeAssetDetail = shallowRef<AssetDetail | null>(null);
 export const activePreviewPath = ref<string | null>(null);
 export const activePanel = ref<WorkspacePanelKey>("files");
+export const activeLibraryCategory = ref<WorkspaceLibraryCategoryKey>("all");
 export const currentDirectoryPath = ref("");
 export const fileBrowser = shallowRef<FileBrowserSnapshot | null>(null);
 export const fileBrowserDerived = shallowRef<FileBrowserDerivedState>(createEmptyFileBrowserDerivedState());
@@ -159,3 +162,24 @@ export const isInternalDragActive = ref(false);
 export const draggedWorkspacePaths = ref<string[]>([]);
 export const dragHoverFolderPath = ref<string | null>(null);
 export const error = ref<string | null>(null);
+
+export function patchActiveSnapshotAssetAccess(
+  repoId: string,
+  path: string,
+  recordedAt: string,
+) {
+  if (!activeSnapshot.value || activeSnapshot.value.repository.repoId !== repoId) return;
+  if (!activeSnapshot.value.assets.some((asset) => asset.path === path)) return;
+
+  activeSnapshot.value = {
+    ...activeSnapshot.value,
+    assets: activeSnapshot.value.assets.map((asset) => (
+      asset.path === path
+        ? {
+            ...asset,
+            lastAccessedAt: recordedAt,
+          }
+        : asset
+    )),
+  };
+}

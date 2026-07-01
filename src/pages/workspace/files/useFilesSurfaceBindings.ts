@@ -2,7 +2,7 @@ import { computed, type Component, type Ref } from "vue";
 import type { WorkspacePlayerBarHandlers, WorkspacePlayerBarProps } from "../../../components/workspacePlayerBar.contract";
 import type { ContextMenuItem } from "../../../ui/core";
 import type { RegisteredLibraryExtension } from "../../../plugins/sdk";
-import type { FileBrowserEntry, RepositoryTagGroup, SmartFolderResultSnapshot } from "../../../types/repository";
+import type { FileBrowserEntry, RepositoryTagGroup } from "../../../types/repository";
 import type { FileDisplayMode } from "../useWorkspaceViewState";
 
 type BreadcrumbSegment = {
@@ -44,9 +44,10 @@ export type WorkspaceFilesSurfaceBindingOptions = {
   isLoadingFileBrowserMore: ReadonlyRef<boolean>;
   isModelEntry: (entry: FileBrowserEntry) => boolean;
   isMutatingFiles: ReadonlyRef<boolean>;
-  isSmartFolderPanel: ReadonlyRef<boolean>;
+  isReadOnlyVirtualView: ReadonlyRef<boolean>;
   isSavingMetadata: ReadonlyRef<boolean>;
   isTrashPanel: ReadonlyRef<boolean>;
+  isVirtualView: ReadonlyRef<boolean>;
   isVideoEntry: (entry: FileBrowserEntry) => boolean;
   hasMoreEntries: ReadonlyRef<boolean>;
   openSelectedLabel: ReadonlyRef<string>;
@@ -60,12 +61,12 @@ export type WorkspaceFilesSurfaceBindingOptions = {
   selectedFilePath: ReadonlyRef<string | null>;
   selectedFilePaths: ReadonlyRef<string[]>;
   showWorkspacePlayer: ReadonlyRef<boolean>;
-  smartFolderResult: ReadonlyRef<SmartFolderResultSnapshot | null>;
-  smartFolderSummary: ReadonlyRef<string>;
   statusLabel: (status: string) => string;
   tagFilterOptions: ReadonlyRef<string[]>;
   thumbnailPalette: (entry: FileBrowserEntry) => string[];
   thumbnailSrc: (entry: FileBrowserEntry) => string | null;
+  virtualViewSummary: ReadonlyRef<string>;
+  virtualViewTitle: ReadonlyRef<string>;
   workspacePlayerBarHandlers: WorkspacePlayerBarHandlers;
   workspacePlayerBarProps: ReadonlyRef<WorkspacePlayerBarProps>;
   entryDeletedAtLabel: (entry: FileBrowserEntry) => string | null;
@@ -134,9 +135,10 @@ export function useFilesSurfaceBindings(options: WorkspaceFilesSurfaceBindingOpt
     isLoadingFileBrowserMore: options.isLoadingFileBrowserMore.value,
     isModelEntry: options.isModelEntry,
     isMutatingFiles: options.isMutatingFiles.value,
-    isReadOnlyVirtual: options.isSmartFolderPanel.value,
+    isReadOnlyVirtual: options.isReadOnlyVirtualView.value,
     isSavingMetadata: options.isSavingMetadata.value,
     isTrashPanel: options.isTrashPanel.value,
+    isVirtualView: options.isVirtualView.value,
     isVideoEntry: options.isVideoEntry,
     hasMoreEntries: options.hasMoreEntries.value,
     libraryExtensions: options.currentLibraryExtensions.value,
@@ -155,8 +157,8 @@ export function useFilesSurfaceBindings(options: WorkspaceFilesSurfaceBindingOpt
     tagGroups: options.activeSnapshotTagGroups.value,
     thumbnailPalette: options.thumbnailPalette,
     thumbnailSrc: options.thumbnailSrc,
-    virtualSubline: options.smartFolderSummary.value,
-    virtualTitle: options.smartFolderResult.value?.smartFolder.name,
+    virtualSubline: options.virtualViewSummary.value,
+    virtualTitle: options.virtualViewTitle.value,
     workspacePlayerBarHandlers: options.workspacePlayerBarHandlers,
     workspacePlayerBarProps: options.workspacePlayerBarProps.value,
   }));

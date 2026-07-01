@@ -7,6 +7,7 @@ import {
   moveEntries,
   mutateTrash,
   openRepositoryPath,
+  recordEntryAccess,
   renameEntry,
   revealRepositoryPath,
   startExternalFileDrag,
@@ -16,6 +17,7 @@ import type {
   FileDeleteMode,
 } from "../../types/repository";
 import {
+  activeLibraryCategory,
   activePanel,
   activeRepoId,
   activeSnapshot,
@@ -50,7 +52,7 @@ import {
 } from "./refresh";
 
 function defaultDirectoryRefreshPlan(paths: string[]): WorkspaceRefreshPlan["directory"] {
-  if (activePanel.value === "deleted") return "trash";
+  if (activePanel.value === "trash") return "trash";
   const selectedPaths = new Set(paths);
   const includesDirectory = visibleEntries.value.some((entry) => (
     entry.kind === "directory" && selectedPaths.has(entry.path)
@@ -63,6 +65,14 @@ function resolveBatchMutationPrimaryPath(excludedPaths: string[]) {
   return visibleEntries.value.find((entry) => !excluded.has(entry.path))?.path ?? null;
 }
 
+function isLibraryCategoryView() {
+  return activePanel.value === "files" && activeLibraryCategory.value !== "all";
+}
+
+function canApplyDirectorySnapshot(snapshot: FileBrowserSnapshot) {
+  return !isLibraryCategoryView() || currentDirectoryPath.value === snapshot.currentPath;
+}
+
 async function refreshAfterFileMutation(repoId: string, plan: WorkspaceRefreshPlan) {
   await refreshWorkspaceAfterMutation(repoId, plan, loadFileBrowserForDirectory);
 }
@@ -72,13 +82,15 @@ async function finishFileTransfer(
   snapshot: FileBrowserSnapshot,
   sourcePaths: string[],
 ) {
-  applyFileBrowserSnapshot(snapshot);
-  const sourceNames = new Set(sourcePaths.map(entryNameFromPath));
-  const nextSelection = snapshot.entries
-    .filter((entry) => sourceNames.has(entry.name))
-    .map((entry) => entry.path);
-  if (nextSelection.length) {
-    applyWorkspaceSelection(nextSelection, nextSelection[0], nextSelection[0]);
+  if (canApplyDirectorySnapshot(snapshot)) {
+    applyFileBrowserSnapshot(snapshot);
+    const sourceNames = new Set(sourcePaths.map(entryNameFromPath));
+    const nextSelection = snapshot.entries
+      .filter((entry) => sourceNames.has(entry.name))
+      .map((entry) => entry.path);
+    if (nextSelection.length) {
+      applyWorkspaceSelection(nextSelection, nextSelection[0], nextSelection[0]);
+    }
   }
   await refreshAfterFileMutation(repoId, { hardlinkCandidates: true, repositorySnapshot: true });
 }
@@ -240,8 +252,10 @@ export async function renameWorkspaceEntry(path: string, newName: string) {
       path,
       newName,
     });
-    applyFileBrowserSnapshot(snapshot);
     const renamedPath = snapshot.entries.find((entry) => entry.name === newName)?.path ?? null;
+    if (canApplyDirectorySnapshot(snapshot)) {
+      applyFileBrowserSnapshot(snapshot);
+    }
     if (renamedPath) {
       applyWorkspaceSelection([renamedPath], renamedPath, renamedPath);
     }
@@ -260,16 +274,21 @@ export async function deleteWorkspaceEntry(path: string, mode?: FileDeleteMode) 
   isMutatingFiles.value = true;
   error.value = null;
   try {
-    const deleteMode = mode ?? (activePanel.value === "deleted" ? "permanentDelete" : undefined);
+    const deleteMode = mode ?? (activePanel.value === "trash" ? "permanentDelete" : undefined);
     const snapshot = await deleteEntry({
       repoId: activeRepoId.value,
       path,
       mode: deleteMode,
     });
     const shouldSelectDefault = selectedFilePath.value === path;
-    applyFileBrowserSnapshot(snapshot);
-    if (shouldSelectDefault) {
-      selectedFilePath.value = getDefaultFileBrowserSelection(snapshot);
+    if (canApplyDirectorySnapshot(snapshot)) {
+      applyFileBrowserSnapshot(snapshot);
+      if (shouldSelectDefault) {
+        selectedFilePath.value = getDefaultFileBrowserSelection(snapshot);
+      }
+    } else if (shouldSelectDefault) {
+      const nextPrimaryPath = resolveBatchMutationPrimaryPath([path]);
+      applyWorkspaceSelection(nextPrimaryPath ? [nextPrimaryPath] : [], nextPrimaryPath, nextPrimaryPath);
     }
     await refreshAfterFileMutation(activeRepoId.value, { repositorySnapshot: true });
     return snapshot;
@@ -290,7 +309,7 @@ export async function deleteWorkspaceEntries(paths: string[], mode?: FileDeleteM
   error.value = null;
   const progressId = startOperationProgress("删除文件", `准备处理 ${nextPaths.length} 个条目`, { initial: 10 });
   try {
-    const deleteMode = mode ?? (activePanel.value === "deleted" ? "permanentDelete" : undefined);
+    const deleteMode = mode ?? (activePanel.value === "trash" ? "permanentDelete" : undefined);
     const nextPrimaryPath = resolveBatchMutationPrimaryPath(nextPaths);
     for (const [index, path] of nextPaths.entries()) {
       updateOperationProgress(progressId, {
@@ -433,10 +452,12 @@ export async function emptyTrash() {
 }
 
 export async function openWorkspaceEntry(path: string) {
+  const repoId = activeRepoId.value;
   const absolutePath = joinActiveRepositoryPath(path);
-  if (!absolutePath) return;
+  if (!repoId || !absolutePath) return;
   error.value = null;
   try {
+    await recordEntryAccess({ repoId, path });
     await openRepositoryPath(absolutePath);
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : String(cause);

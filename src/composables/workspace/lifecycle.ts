@@ -14,6 +14,7 @@ import type {
   RepositorySummary,
 } from "../../types/repository";
 import {
+  activeLibraryCategory,
   activeAssetDetail,
   activeAssetId,
   activePreviewPath,
@@ -163,6 +164,7 @@ export function resetActiveRepositoryContent(repoIdToClear = activeRepoId.value)
   activeAssetId.value = null;
   activeAssetDetail.value = null;
   activePreviewPath.value = null;
+  activeLibraryCategory.value = "all";
   fileBrowser.value = null;
   fileBrowserDerived.value = createEmptyFileBrowserDerivedState();
   fileTree.value = [];
@@ -246,7 +248,7 @@ async function refreshCurrentPanelAfterSilentRefresh(repoId: string) {
     return;
   }
 
-  if (activePanel.value === "deleted") {
+  if (activePanel.value === "trash") {
     await loadFileBrowserForDirectory(currentDirectoryPath.value, {
       specialLocation: "trash",
       silent: true,
@@ -561,6 +563,7 @@ export function resetRepositoryWorkspaceForTests() {
   repositories.value = [];
   resetWorkspaceSelection();
   activePanel.value = "files";
+  activeLibraryCategory.value = "all";
   hardlinkCandidates.value = [];
   lastSyncResult.value = null;
   plugins.value = [];

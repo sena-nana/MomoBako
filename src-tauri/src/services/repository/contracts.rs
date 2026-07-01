@@ -45,6 +45,7 @@ pub struct AssetSummary {
     pub size_label: String,
     pub status: String,
     pub modified_at: String,
+    pub last_accessed_at: Option<String>,
     pub version: i64,
     pub tags: Vec<String>,
     pub thumbnail_path: Option<String>,
@@ -225,6 +226,7 @@ pub struct RepositoryOverview {
     pub total_size_label: String,
     pub file_count: i64,
     pub folder_count: i64,
+    pub trash_count: i64,
     pub readme_content: Option<String>,
 }
 
@@ -679,6 +681,21 @@ pub struct FileBrowserRequest {
 pub struct FileReadRequest {
     pub repo_id: String,
     pub path: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EntryAccessRecordRequest {
+    pub repo_id: String,
+    pub path: String,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct EntryAccessRecordResponse {
+    pub repo_id: String,
+    pub path: String,
+    pub recorded_at: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

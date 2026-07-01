@@ -3,6 +3,7 @@ import {
   getRepositorySnapshot,
 } from "../../services/repositoryApi";
 import {
+  activeLibraryCategory,
   activeAssetDetail,
   activeAssetId,
   activePanel,
@@ -21,6 +22,7 @@ import {
   playlists,
   repositories,
   smartFolderResult,
+  type WorkspaceLibraryCategoryKey,
   type WorkspacePanelKey,
 } from "./state";
 import { resetSearchState } from "./search";
@@ -99,6 +101,7 @@ export async function selectRepository(repoId: string) {
     updateOperationProgress(progressId, { detail: "加载资源索引", value: 46 });
     if (isSwitchingRepository) {
       resetSearchState();
+      activeLibraryCategory.value = "all";
       activePlaylistId.value = null;
       activePlaylistDetail.value = null;
       activePreviewPath.value = null;
@@ -163,9 +166,13 @@ export function setActivePanel(panel: WorkspacePanelKey) {
   if (panel === "files" && activeRepoId.value && fileBrowser.value?.specialLocation === "trash") {
     void loadFileBrowserForDirectory("", { includeTree: false });
   }
-  if (panel === "deleted" && activeRepoId.value) {
+  if (panel === "trash" && activeRepoId.value) {
     void loadFileBrowserForDirectory("", { specialLocation: "trash" });
   }
+}
+
+export function setActiveLibraryCategory(category: WorkspaceLibraryCategoryKey) {
+  activeLibraryCategory.value = category;
 }
 
 export function setActivePreviewPath(path: string | null) {

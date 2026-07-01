@@ -24,6 +24,7 @@ import {
   defaultRepositoryActions,
   defaultSearchHits,
   initialEntries,
+  initialTrashEntries,
   mockAssetDetail,
   mockSnapshot,
   pluginManifest,
@@ -80,7 +81,23 @@ globalThis.fetch = vi.fn(async (input: string | URL | Request) => {
 
 
 let mockEntries: MockEntry[] = initialEntries();
-let mockTrashEntries: MockEntry[] = [];
+let mockTrashEntries: MockEntry[] = initialTrashEntries();
+
+function cloneSnapshot<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
+}
+
+function updateSnapshotAssetAccess(repoId: string, path: string, recordedAt: string) {
+  const snapshot = repoId === altSnapshot.repository.repoId ? altSnapshot : mockSnapshot;
+  const asset = snapshot.assets.find((item) => item.path === path);
+  if (!asset) return;
+  asset.lastAccessedAt = recordedAt;
+}
+
+function getTrashAssetCount(repoId: string) {
+  if (repoId !== mockSnapshot.repository.repoId) return 0;
+  return mockTrashEntries.filter((entry) => entry.kind === "file").length;
+}
 
 function defaultPlaylistSummary(repoId = "repo-main-001"): PlaylistSummary {
   return {
@@ -464,7 +481,10 @@ function pluginCallKey(pluginId: string, method: string) {
 }
 
 function getMockSnapshot(repoId: string) {
-  return repoId === altSnapshot.repository.repoId ? altSnapshot : mockSnapshot;
+  const baseSnapshot = repoId === altSnapshot.repository.repoId ? altSnapshot : mockSnapshot;
+  const snapshot = cloneSnapshot(baseSnapshot);
+  snapshot.overview.trashCount = getTrashAssetCount(repoId);
+  return snapshot;
 }
 
 function getMockRepositorySummary(repoId: string): RepositorySummary {
@@ -935,8 +955,10 @@ vi.mock("@tauri-apps/api/core", () => ({
     if (command === "prepare_preview_file_source") {
       const request = args?.request as { repoId?: string; path?: string } | undefined;
       const path = request?.path ?? "model.glb";
+      const repoId = request?.repoId ?? "repo-main-001";
+      updateSnapshotAssetAccess(repoId, path, new Date().toISOString());
       return {
-        repoId: request?.repoId ?? "repo-main-001",
+        repoId,
         path,
         token: "0".repeat(64),
         sourceUrl: `http://127.0.0.1:49152/preview/${"0".repeat(64)}`,
@@ -982,6 +1004,8 @@ vi.mock("@tauri-apps/api/core", () => ({
     if (command === "prepare_entry_playback_source") {
       const request = args?.request as { repoId?: string; path?: string } | undefined;
       const path = request?.path ?? "model.glb";
+      const repoId = request?.repoId ?? "repo-main-001";
+      updateSnapshotAssetAccess(repoId, path, new Date().toISOString());
       const mediaType = path.endsWith(".glb") || path.endsWith(".vrm")
         ? "model/gltf-binary"
         : path.endsWith(".gltf")
@@ -1018,7 +1042,7 @@ vi.mock("@tauri-apps/api/core", () => ({
                     ? "audio/wav"
                     : "application/octet-stream";
       return {
-        repoId: request?.repoId ?? "repo-main-001",
+        repoId,
         path,
         sourceUrl: `http://127.0.0.1:49152/playback/${"1".repeat(64)}`,
         localPath: path.endsWith(".mp3") ? `C:/Mock/Temp/${path.split("/").at(-1)}` : null,
@@ -1037,9 +1061,10 @@ vi.mock("@tauri-apps/api/core", () => ({
       const request = args?.request as { repoId?: string; path?: string } | undefined;
       const progress = args?.progress as { onmessage?: ((payload: unknown) => void) | null } | undefined;
       const path = request?.path ?? "model.glb";
+      const repoId = request?.repoId ?? "repo-main-001";
       progress?.onmessage?.({
         phase: "resolve",
-        repoId: request?.repoId ?? "repo-main-001",
+        repoId,
         path,
         value: 8,
         detail: "解析媒体条目",
@@ -1049,7 +1074,7 @@ vi.mock("@tauri-apps/api/core", () => ({
       });
       progress?.onmessage?.({
         phase: "download",
-        repoId: request?.repoId ?? "repo-main-001",
+        repoId,
         path,
         value: 42,
         detail: "下载临时音频",
@@ -1061,9 +1086,10 @@ vi.mock("@tauri-apps/api/core", () => ({
         await mockInvokeDelay.promise;
         mockInvokeDelay = null;
       }
+      updateSnapshotAssetAccess(repoId, path, new Date().toISOString());
       progress?.onmessage?.({
         phase: "ready",
-        repoId: request?.repoId ?? "repo-main-001",
+        repoId,
         path,
         value: 100,
         detail: "播放源已就绪",
@@ -1083,7 +1109,7 @@ vi.mock("@tauri-apps/api/core", () => ({
                 ? "audio/mpeg"
                 : "application/octet-stream";
       return {
-        repoId: request?.repoId ?? "repo-main-001",
+        repoId,
         path,
         sourceUrl: `http://127.0.0.1:49152/playback/${"1".repeat(64)}`,
         localPath: path.endsWith(".mp3") ? `C:/Mock/Temp/${path.split("/").at(-1)}` : null,
@@ -1096,6 +1122,18 @@ vi.mock("@tauri-apps/api/core", () => ({
         expiresAt: "2026-06-05T01:18:00Z",
         sizeBytes: 1024,
         modifiedAt: "2026-06-05T00:18:00Z",
+      };
+    }
+    if (command === "record_entry_access") {
+      const request = args?.request as { repoId?: string; path?: string } | undefined;
+      const repoId = request?.repoId ?? "repo-main-001";
+      const path = request?.path ?? "";
+      const recordedAt = new Date().toISOString();
+      updateSnapshotAssetAccess(repoId, path, recordedAt);
+      return {
+        repoId,
+        path,
+        recordedAt,
       };
     }
     if (command === "create_directory") {
@@ -2054,7 +2092,7 @@ afterEach(() => {
   mockPluginConfigValues = {};
   mockRepositories = [];
   mockEntries = initialEntries();
-  mockTrashEntries = [];
+  mockTrashEntries = initialTrashEntries();
   invokeCalls.length = 0;
   openerCalls.length = 0;
   pluginCallCalls.length = 0;

@@ -19,6 +19,7 @@ type WorkspacePlayerUiOptions = {
   removePlaylistItemInWorkspace: (playlistId: string, playlistItemId: string) => Promise<unknown>;
   reorderPlaylistItemsInWorkspace: (playlistId: string, itemIds: string[]) => Promise<unknown>;
   selectWorkspaceEntry: (path: string) => void;
+  setActiveLibraryCategory: (category: "all") => void;
   setActivePanel: (panel: "files") => void;
   setActivePreviewPath: (path: string | null) => void;
   setPreviewFilePath: (path: string | null) => void;
@@ -71,6 +72,7 @@ export function usePlayerUi(options: WorkspacePlayerUiOptions) {
   });
 
   function openPlaylistItemPreview(item: PlaylistItem) {
+    options.setActiveLibraryCategory("all");
     options.setPreviewFilePath(item.path);
     options.setActivePreviewPath(item.path);
     options.selectWorkspaceEntry(item.path);

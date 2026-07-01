@@ -22,6 +22,11 @@ pub(super) fn load_snapshot(
             |row| row.get(0),
         )
         .map_err(db_error)?;
+    let trash_count: i64 = connection
+        .query_row("SELECT COUNT(*) FROM assets WHERE status = 'deleted'", [], |row| {
+            row.get(0)
+        })
+        .map_err(db_error)?;
 
     let thumbnail_root = state.repository_thumbnail_root(&repo)?;
     let folders = load_folder_summaries(&connection, repo_id).map_err(db_error)?;
@@ -38,7 +43,7 @@ pub(super) fn load_snapshot(
     let recent_revision_count: i64 = connection
         .query_row("SELECT COUNT(*) FROM revisions", [], |row| row.get(0))
         .map_err(db_error)?;
-    let overview = build_repository_overview(&repo_root, &assets)?;
+    let overview = build_repository_overview(&repo_root, &assets, trash_count)?;
 
     Ok(RepositorySnapshot {
         repository: RepositorySummary {
@@ -114,6 +119,11 @@ pub(super) fn prepare_preview_file_source(
     }
 
     let entry_path = normalize_entry_path(&request.path)?;
+    let connection = state.open_repository_connection(
+        &repo.summary.repo_id,
+        &repo.summary.path,
+        &repo.backend_record,
+    )?;
     let repo_root = PathBuf::from(&repo.summary.path);
     let file_path = resolve_repository_relative_path(&repo_root, &entry_path)?;
     if !file_path.exists() {
@@ -122,6 +132,8 @@ pub(super) fn prepare_preview_file_source(
     if !file_path.is_file() {
         return Err(format!("path is not a file: {entry_path}"));
     }
+    record_entry_access_in_connection(&connection, &request.repo_id, &entry_path)
+        .map_err(db_error)?;
 
     let metadata = fs::metadata(&file_path).map_err(io_error)?;
     let modified_at = metadata
@@ -165,6 +177,30 @@ pub(super) fn prepare_preview_file_source(
         media_type,
         size_bytes: metadata.len() as i64,
         modified_at,
+    })
+}
+
+pub(super) fn record_entry_access(
+    state: &RepositoryState,
+    request: EntryAccessRecordRequest,
+) -> Result<EntryAccessRecordResponse, String> {
+    state.ensure_initialized()?;
+
+    let repo = state.load_repository_record(&request.repo_id)?;
+    let connection = state.open_repository_connection(
+        &repo.summary.repo_id,
+        &repo.summary.path,
+        &repo.backend_record,
+    )?;
+    let entry_path = normalize_entry_path(&request.path)?;
+    let recorded_at =
+        record_entry_access_in_connection(&connection, &request.repo_id, &entry_path)
+            .map_err(db_error)?;
+
+    Ok(EntryAccessRecordResponse {
+        repo_id: request.repo_id,
+        path: entry_path,
+        recorded_at,
     })
 }
 
@@ -418,6 +454,8 @@ impl RepositoryState {
             }
 
             let metadata = load_metadata_map(&connection, &asset.asset_id).map_err(db_error)?;
+            record_entry_access_in_connection(&connection, &request.repo_id, &entry_path)
+                .map_err(db_error)?;
             let source_payload = asset
                 .source_payload
                 .clone()
@@ -595,4 +633,21 @@ impl RepositoryState {
         )?;
         Ok(playback)
     }
+}
+
+fn record_entry_access_in_connection(
+    connection: &Connection,
+    repo_id: &str,
+    entry_path: &str,
+) -> Result<String, rusqlite::Error> {
+    let recorded_at = now_rfc3339();
+    connection.execute(
+        r#"
+        UPDATE assets
+        SET last_accessed_at = ?3
+        WHERE repo_id = ?1 AND path = ?2 AND status != 'deleted'
+        "#,
+        params![repo_id, entry_path, recorded_at],
+    )?;
+    Ok(recorded_at)
 }

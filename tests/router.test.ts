@@ -643,8 +643,9 @@ describe("文件管理冒烟", () => {
     expect(screen.getByRole("button", { name: "重定向" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "删除资源库" })).toBeInTheDocument();
     expect(await screen.findByRole("button", { name: "资源库" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /全部/ })).toBeDisabled();
-    expect(screen.getByRole("button", { name: /已删除/ })).toBeDisabled();
+    for (const label of ["全部", "未分类", "未标签", "最近使用", "回收站"]) {
+      expect(screen.getByRole("button", { name: new RegExp(label) })).toBeDisabled();
+    }
     expect(screen.getByRole("button", { name: "刷新文件夹树" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "新建智能文件夹" })).toBeDisabled();
     expect(getInvokeCalls("get_repository_snapshot")).toHaveLength(0);
@@ -840,7 +841,7 @@ describe("文件管理冒烟", () => {
       },
     });
 
-    workspace.setActivePanel("deleted");
+    workspace.setActivePanel("trash");
     await waitFor(() => {
       expect(workspace.fileBrowser.value?.specialLocation).toBe("trash");
     });
@@ -2411,6 +2412,82 @@ describe("文件管理冒烟", () => {
 
     expect(localStorage.getItem("momobako.playbackSettings")).toContain("\"imageDurationMs\":7000");
     expect(localStorage.getItem("momobako.playbackSettings")).toContain("\"objectFit\":\"cover\"");
+  });
+
+  it("分类快捷入口支持未分类过滤并在返回全部后恢复原目录", async () => {
+    seedMockRepository();
+    await renderApp();
+
+    await fireEvent.click(screen.getAllByText("Campaigns")[0]);
+    expect((await screen.findAllByText("Summer")).length).toBeGreaterThan(0);
+
+    await fireEvent.click(screen.getByRole("button", { name: /未分类/ }));
+    await waitFor(() => {
+      expect(fileListItems().map((item) => item.dataset.entryPath)).toEqual(["loose-note.txt"]);
+    });
+
+    await fireEvent.click(screen.getByRole("button", { name: /全部/ }));
+    expect((await screen.findAllByText("Summer")).length).toBeGreaterThan(0);
+  });
+
+  it("分类快捷入口支持未标签、最近使用和回收站视图", async () => {
+    seedMockRepository();
+    await renderApp();
+
+    await fireEvent.click(screen.getByRole("button", { name: /未标签/ }));
+    await waitFor(() => {
+      expect(fileListItems().map((item) => item.dataset.entryPath)).toEqual(["loose-note.txt"]);
+    });
+
+    await fireEvent.click(screen.getByRole("button", { name: /最近使用/ }));
+    await waitFor(() => {
+      expect(fileListItems().map((item) => item.dataset.entryPath)).toEqual([
+        "Campaigns/Summer/cover-final.psd",
+        "Backgrounds/scene-forest-03.png",
+      ]);
+    });
+
+    await fireEvent.click(screen.getByRole("button", { name: /回收站/ }));
+    await waitFor(() => {
+      expect(getInvokeCalls("get_file_browser").at(-1)?.args).toMatchObject({
+        request: {
+          specialLocation: "trash",
+        },
+      });
+    });
+    const workspace = useRepositoryWorkspace();
+    expect(workspace.activePanel.value).toBe("trash");
+    expect(workspace.fileBrowser.value?.specialLocation).toBe("trash");
+  });
+
+  it("最近使用分类会在打开文件后立即更新排序", async () => {
+    seedMockRepository();
+    await renderApp();
+
+    await fireEvent.click(screen.getByRole("button", { name: /最近使用/ }));
+    await waitFor(() => {
+      expect(fileListItems().map((item) => item.dataset.entryPath)).toEqual([
+        "Campaigns/Summer/cover-final.psd",
+        "Backgrounds/scene-forest-03.png",
+      ]);
+    });
+
+    const workspace = useRepositoryWorkspace();
+    await workspace.openWorkspaceEntry("loose-note.txt");
+
+    await waitFor(() => {
+      expect(getInvokeCalls("record_entry_access").at(-1)?.args).toMatchObject({
+        request: {
+          repoId: "repo-main-001",
+          path: "loose-note.txt",
+        },
+      });
+      expect(fileListItems().map((item) => item.dataset.entryPath)).toEqual([
+        "loose-note.txt",
+        "Campaigns/Summer/cover-final.psd",
+        "Backgrounds/scene-forest-03.png",
+      ]);
+    });
   });
 
   it("保留目录按需加载，并在结构变化后刷新文件夹树", async () => {

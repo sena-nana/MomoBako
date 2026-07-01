@@ -24,6 +24,7 @@ export {
   useWorkspaceSettings,
   useWorkspaceSmartFolders,
   type WorkspaceFilterState,
+  type WorkspaceLibraryCategoryKey,
   type WorkspaceOperationProgress,
   type WorkspacePanelKey,
 } from "./workspace";

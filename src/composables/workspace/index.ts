@@ -6,6 +6,7 @@ import {
 
 export type {
   WorkspaceFilterState,
+  WorkspaceLibraryCategoryKey,
   WorkspacePanelKey,
 } from "./state";
 export type {
@@ -20,6 +21,7 @@ export {
   refreshRepositoryWorkspace,
   selectAsset,
   selectRepository,
+  setActiveLibraryCategory,
   setActivePanel,
   setActivePreviewPath,
 } from "./navigation";

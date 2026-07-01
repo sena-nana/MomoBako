@@ -1,6 +1,8 @@
 import type {
   BinaryFileWriteRequest,
   BinaryFileWriteResponse,
+  EntryAccessRecordRequest,
+  EntryAccessRecordResponse,
   EntryPlaybackProgressEvent,
   EntryPlaybackRequest,
   EntryPlaybackSourceResponse,
@@ -31,6 +33,31 @@ import {
 
 export { openExternalUrl, openRepositoryPath, revealRepositoryPath, startExternalFileDrag };
 
+type RepositoryEntryAccessListener = (event: {
+  repoId: string;
+  path: string;
+  recordedAt: string;
+}) => void;
+
+const repositoryEntryAccessListeners = new Set<RepositoryEntryAccessListener>();
+
+function emitRepositoryEntryAccess(event: {
+  repoId: string;
+  path: string;
+  recordedAt: string;
+}) {
+  for (const listener of repositoryEntryAccessListeners) {
+    listener(event);
+  }
+}
+
+export function onRepositoryEntryAccess(listener: RepositoryEntryAccessListener) {
+  repositoryEntryAccessListeners.add(listener);
+  return () => {
+    repositoryEntryAccessListeners.delete(listener);
+  };
+}
+
 export function getFileBrowser(request: FileBrowserRequest) {
   return invokeCommand<FileBrowserSnapshot>("get_file_browser", { request });
 }
@@ -44,11 +71,25 @@ export function readFile(request: FileReadRequest) {
 }
 
 export function preparePreviewFileSource(request: FileReadRequest) {
-  return invokeCommand<FilePreviewSourceResponse>("prepare_preview_file_source", { request });
+  return invokeCommand<FilePreviewSourceResponse>("prepare_preview_file_source", { request }).then((response) => {
+    emitRepositoryEntryAccess({
+      repoId: request.repoId,
+      path: request.path,
+      recordedAt: new Date().toISOString(),
+    });
+    return response;
+  });
 }
 
 export function prepareEntryPlaybackSource(request: EntryPlaybackRequest) {
-  return invokeCommand<EntryPlaybackSourceResponse>("prepare_entry_playback_source", { request });
+  return invokeCommand<EntryPlaybackSourceResponse>("prepare_entry_playback_source", { request }).then((response) => {
+    emitRepositoryEntryAccess({
+      repoId: request.repoId,
+      path: request.path,
+      recordedAt: new Date().toISOString(),
+    });
+    return response;
+  });
 }
 
 export function prepareEntryPlaybackSourceWithProgress(
@@ -59,7 +100,21 @@ export function prepareEntryPlaybackSourceWithProgress(
     "prepare_entry_playback_source_with_progress",
     { request },
     onEvent,
-  );
+  ).then((response) => {
+    emitRepositoryEntryAccess({
+      repoId: request.repoId,
+      path: request.path,
+      recordedAt: new Date().toISOString(),
+    });
+    return response;
+  });
+}
+
+export function recordEntryAccess(request: EntryAccessRecordRequest) {
+  return invokeCommand<EntryAccessRecordResponse>("record_entry_access", { request }).then((response) => {
+    emitRepositoryEntryAccess(response);
+    return response;
+  });
 }
 
 export function writeBinaryFile(request: BinaryFileWriteRequest) {
