@@ -38,6 +38,11 @@
         "method": "officeConvert.getRuntimeStatus",
         "summary": "读取 Office 转换服务运行状态。",
         "payload": {}
+      },
+      {
+        "method": "officeConvert.runRuntimeSelfCheck",
+        "summary": "执行一次真实 Office 转换运行时自检。",
+        "payload": {}
       }
     ],
     "settings": {
