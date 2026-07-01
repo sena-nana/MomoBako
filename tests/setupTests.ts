@@ -560,7 +560,12 @@ function previewPluginModuleSource(pluginId: string) {
       thumbnail: true,
     },
     "momobako.preview.office": {
-      extensions: ["pdf", "doc", "docx", "docm", "xls", "xlsx", "xlsm", "ppt", "pptx", "pptm"],
+      extensions: [
+        "pdf",
+        "doc", "docx", "docm", "dotx", "dotm", "dot",
+        "xls", "xlsx", "xlsm", "xlsb", "xltx", "xltm", "xlt",
+        "ppt", "pptx", "pptm", "ppsx", "ppsm", "pps", "potx", "potm", "pot",
+      ],
       thumbnail: true,
     },
     "momobako.preview.archive": {
