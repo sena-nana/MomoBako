@@ -35,6 +35,8 @@ pub struct PluginRuntimeContext {
     #[serde(default)]
     pub service_root_dir: String,
     #[serde(default)]
+    pub plugin_runtime_dir: String,
+    #[serde(default)]
     pub plugin_config: BTreeMap<String, serde_json::Value>,
 }
 
@@ -202,6 +204,7 @@ mod tests {
             plugin_id: "momobako.service.office-convert".to_string(),
             plugin_data_dir: "C:/Service/plugin-data/momobako-service-office-convert".to_string(),
             service_root_dir: "C:/Service".to_string(),
+            plugin_runtime_dir: "C:/Service/runtime/plugins/office-convert".to_string(),
             plugin_config: BTreeMap::new(),
         };
         let response = call_host_plugin(

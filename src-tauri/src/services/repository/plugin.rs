@@ -1200,7 +1200,7 @@ pub(super) fn load_native_plugin(
                 manifest.plugin_id
             )
         })?;
-    let library_path =
+    let (library_path, runtime_dir) =
         native_plugin_library_path(service_root, archive_path, manifest_prefix, library_name)?;
     let library = unsafe { libloading::Library::new(&library_path) }.map_err(|error| {
         format!(
@@ -1232,6 +1232,7 @@ pub(super) fn load_native_plugin(
     };
     Ok(NativePlugin {
         _library: library,
+        runtime_dir,
         call,
         free,
     })
@@ -1242,7 +1243,7 @@ fn native_plugin_library_path(
     archive_path: &Path,
     manifest_prefix: &str,
     library_name: &str,
-) -> Result<PathBuf, String> {
+) -> Result<(PathBuf, PathBuf), String> {
     let file_name = native_plugin_library_file_name(library_name);
     let cache_root = plugin_runtime_cache_dir(service_root);
     fs::create_dir_all(&cache_root).map_err(io_error)?;
@@ -1254,7 +1255,7 @@ fn native_plugin_library_path(
     ));
     let output_path = cache_dir.join(&file_name);
     if output_path.is_file() {
-        return Ok(output_path);
+        return Ok((output_path, cache_dir));
     }
     fs::create_dir_all(&cache_dir).map_err(io_error)?;
     let file = File::open(archive_path).map_err(io_error)?;
@@ -1285,7 +1286,7 @@ fn native_plugin_library_path(
             let mut output = File::create(&output_path).map_err(io_error)?;
             std::io::copy(&mut entry, &mut output).map_err(io_error)?;
             output.flush().map_err(io_error)?;
-            return Ok(output_path);
+            return Ok((output_path, cache_dir));
         }
     }
     Err(format!(

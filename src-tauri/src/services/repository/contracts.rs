@@ -1523,6 +1523,8 @@ pub(super) struct PluginCallHostRuntime {
     pub(super) plugin_data_dir: String,
     #[serde(default)]
     pub(super) service_root_dir: String,
+    #[serde(default)]
+    pub(super) plugin_runtime_dir: String,
     pub(super) plugin_config: BTreeMap<String, serde_json::Value>,
 }
 
