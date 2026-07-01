@@ -1965,6 +1965,7 @@ impl SelectedConverter {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rusqlite::params;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     struct TestWorkspace {
@@ -2095,6 +2096,62 @@ mod tests {
             resolve_preview_source_path(&runtime, &payload).expect("source path should resolve"),
             source_path
         );
+    }
+
+    #[test]
+    fn clear_preview_cache_removes_files_only_under_repository_cache_namespace() {
+        let workspace = TestWorkspace::new("clear-preview-cache");
+        let service_root = workspace.path("service-root");
+        let plugin_data_dir = workspace.path("plugin-data");
+        let repo_root = workspace.path("repo");
+        let cache_dir = repository_cache_dir(&repo_root);
+        let nested_dir = cache_dir.join("nested");
+        let sibling_file = repo_root.join("outside.pdf");
+        fs::create_dir_all(&service_root).expect("service root should be created");
+        fs::create_dir_all(&plugin_data_dir).expect("plugin data dir should be created");
+        fs::create_dir_all(&nested_dir).expect("cache dir should be created");
+        fs::write(cache_dir.join("preview-a.pdf"), b"%PDF-1.4").expect("cache file should be written");
+        fs::write(nested_dir.join("preview-b.pdf"), b"%PDF-1.4").expect("nested cache file should be written");
+        fs::write(&sibling_file, b"%PDF-1.4").expect("outside file should be written");
+
+        let connection = Connection::open(service_root.join(REGISTRY_FILE_NAME))
+            .expect("registry should be created");
+        connection
+            .execute(
+                "CREATE TABLE repositories (repo_id TEXT PRIMARY KEY, path TEXT NOT NULL)",
+                [],
+            )
+            .expect("repositories table should be created");
+        connection
+            .execute(
+                "INSERT INTO repositories (repo_id, path) VALUES (?1, ?2)",
+                params!["repo-demo", repo_root.to_string_lossy().to_string()],
+            )
+            .expect("repository row should be inserted");
+
+        let runtime = RuntimeContext {
+            plugin_data_dir,
+            service_root_dir: service_root,
+            plugin_runtime_dir: workspace.path("runtime"),
+            config: PluginConfig {
+                converter_mode: ConverterMode::Auto,
+                auto_download_libreoffice: true,
+            },
+        };
+
+        let value = clear_preview_cache(
+            &runtime,
+            ClearPreviewCachePayload {
+                repo_id: "repo-demo".to_string(),
+            },
+        )
+        .expect("cache clear should succeed");
+
+        assert_eq!(value["repoId"], serde_json::json!("repo-demo"));
+        assert_eq!(value["removed"], serde_json::json!(2));
+        assert!(!cache_dir.join("preview-a.pdf").exists());
+        assert!(!nested_dir.join("preview-b.pdf").exists());
+        assert!(sibling_file.exists());
     }
 
     #[test]
