@@ -34,6 +34,9 @@ struct ConvertRequest {
     pdf_path: String,
 }
 
+#[cfg(target_os = "windows")]
+const HELPER_PIPE_NAME: &str = "momobako-office-convert";
+
 struct HelperState {
     args: Args,
     soffice: Mutex<Option<Child>>,
@@ -199,20 +202,27 @@ fn handle_convert(mut request: tiny_http::Request, state: &Arc<HelperState>) -> 
     #[cfg(target_os = "windows")]
     {
         state.ensure_soffice_ready()?;
-        let status = Command::new(&state.args.soffice_path)
-            .arg("--headless")
-            .arg("--nologo")
-            .arg("--nofirststartwizard")
-            .arg("--convert-to")
-            .arg("pdf")
-            .arg("--outdir")
-            .arg(&payload.output_dir)
-            .arg(&payload.source_path)
-            .arg(format!("-env:UserInstallation={}", state.args.profile_uri))
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .map_err(|error| format!("failed to run soffice convert: {error}"))?;
+        let status = convert_with_managed_runtime(&state.args, &payload)
+            .or_else(|uno_error| {
+                convert_with_cli_fallback(&state.args, &payload).map_err(|fallback_error| {
+                    format!(
+                        "managed LibreOffice convert failed: {uno_error}; fallback convert failed: {fallback_error}"
+                    )
+                })
+            });
+        let status = match status {
+            Ok(value) => value,
+            Err(error) => {
+                let _ = request.respond(json_response(
+                    StatusCode(500),
+                    serde_json::json!({
+                        "ok": false,
+                        "error": error,
+                    }),
+                ));
+                return Ok(());
+            }
+        };
         if status.success() {
             let _ = request.respond(json_response(
                 StatusCode(200),
@@ -259,7 +269,9 @@ fn spawn_soffice_server(args: &Args) -> Result<Child, String> {
             .arg("--nofirststartwizard")
             .arg("--norestore")
             .arg("--invisible")
-            .arg("--accept=pipe,name=momobako-office-convert;urp;StarOffice.ComponentContext")
+            .arg(format!(
+                "--accept=pipe,name={HELPER_PIPE_NAME};urp;StarOffice.ComponentContext"
+            ))
             .arg(format!("-env:UserInstallation={}", args.profile_uri))
             .stdout(Stdio::null())
             .stderr(Stdio::null()),
@@ -281,8 +293,126 @@ fn wait_for_soffice_ready() -> Result<(), String> {
 }
 
 #[cfg(target_os = "windows")]
+fn convert_with_managed_runtime(args: &Args, payload: &ConvertRequest) -> Result<std::process::ExitStatus, String> {
+    let python_path = libreoffice_python_path(&args.soffice_path)
+        .ok_or_else(|| "LibreOffice Python runtime is unavailable".to_string())?;
+    let script_path = write_uno_bridge_script()?;
+    let status = with_no_window(
+        Command::new(&python_path)
+            .arg(&script_path)
+            .arg(&payload.source_path)
+            .arg(&payload.output_dir)
+            .arg(&payload.pdf_path)
+            .arg(&args.profile_uri)
+            .arg(HELPER_PIPE_NAME)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null()),
+    )
+    .status()
+    .map_err(|error| format!("failed to run LibreOffice UNO bridge: {error}"))?;
+    Ok(status)
+}
+
+#[cfg(target_os = "windows")]
+fn convert_with_cli_fallback(args: &Args, payload: &ConvertRequest) -> Result<std::process::ExitStatus, String> {
+    Command::new(&args.soffice_path)
+        .arg("--headless")
+        .arg("--nologo")
+        .arg("--nofirststartwizard")
+        .arg("--convert-to")
+        .arg("pdf")
+        .arg("--outdir")
+        .arg(&payload.output_dir)
+        .arg(&payload.source_path)
+        .arg(format!("-env:UserInstallation={}", args.profile_uri))
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map_err(|error| format!("failed to run soffice convert: {error}"))
+}
+
+#[cfg(target_os = "windows")]
+fn libreoffice_python_path(soffice_path: &PathBuf) -> Option<PathBuf> {
+    let program_dir = soffice_path.parent()?;
+    for candidate in [
+        program_dir.join("python.exe"),
+        program_dir.join("python-core-3.11.11").join("bin").join("python.exe"),
+    ] {
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+    }
+    None
+}
+
+#[cfg(target_os = "windows")]
+fn write_uno_bridge_script() -> Result<PathBuf, String> {
+    let dir = std::env::temp_dir().join("momobako-office-convert-helper");
+    std::fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
+    let path = dir.join("uno_convert.py");
+    std::fs::write(&path, uno_bridge_script()).map_err(|error| error.to_string())?;
+    Ok(path)
+}
+
+#[cfg(target_os = "windows")]
+fn uno_bridge_script() -> &'static str {
+    r#"
+import os
+import sys
+from pathlib import Path
+
+import uno
+from com.sun.star.beans import PropertyValue
+
+source_path = Path(sys.argv[1]).resolve()
+output_dir = Path(sys.argv[2]).resolve()
+pdf_path = Path(sys.argv[3]).resolve()
+profile_uri = sys.argv[4]
+pipe_name = sys.argv[5]
+
+local_context = uno.getComponentContext()
+resolver = local_context.ServiceManager.createInstanceWithContext(
+    "com.sun.star.bridge.UnoUrlResolver",
+    local_context,
+)
+context = resolver.resolve(
+    f"uno:pipe,name={pipe_name};urp;StarOffice.ComponentContext"
+)
+desktop = context.ServiceManager.createInstanceWithContext("com.sun.star.frame.Desktop", context)
+
+def prop(name, value):
+    item = PropertyValue()
+    item.Name = name
+    item.Value = value
+    return item
+
+load_props = (
+    prop("Hidden", True),
+    prop("ReadOnly", True),
+)
+store_props = (
+    prop("FilterName", "writer_pdf_Export"),
+)
+
+document = desktop.loadComponentFromURL(
+    uno.systemPathToFileUrl(str(source_path)),
+    "_blank",
+    0,
+    load_props,
+)
+try:
+    document.storeToURL(
+        uno.systemPathToFileUrl(str(pdf_path)),
+        store_props,
+    )
+finally:
+    document.close(True)
+"#
+}
+
+#[cfg(target_os = "windows")]
 fn windows_named_pipe_name() -> String {
-    r"\\.\pipe\momobako-office-convert".to_string()
+    format!(r"\\.\pipe\{HELPER_PIPE_NAME}")
 }
 
 #[cfg(target_os = "windows")]
@@ -334,6 +464,17 @@ mod tests {
     fn windows_named_pipe_name_uses_fixed_helper_channel() {
         #[cfg(target_os = "windows")]
         assert_eq!(windows_named_pipe_name(), r"\\.\pipe\momobako-office-convert");
+
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = "non-windows";
+        }
+    }
+
+    #[test]
+    fn uno_bridge_script_mentions_managed_pipe_name() {
+        #[cfg(target_os = "windows")]
+        assert!(uno_bridge_script().contains("uno:pipe,name="));
 
         #[cfg(not(target_os = "windows"))]
         {
