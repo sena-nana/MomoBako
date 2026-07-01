@@ -76,7 +76,9 @@ describe("API design snapshot contract", () => {
   it("keeps backend plugin call methods represented in manifest apiTests", () => {
     const pluginDirs = [
       "local-filesystem",
+      "office-convert",
       "parser-asmr-folder",
+      "service-downloader",
       "service-provider-asmr-one",
       "service-provider-dlsite",
     ];
@@ -121,6 +123,30 @@ describe("API design snapshot contract", () => {
       expect.objectContaining({
         transport: "tauri-command",
         command: "download_playlist_with_progress",
+      }),
+      expect.objectContaining({
+        transport: "tauri-command",
+        command: "prepare_repository_cache_file_preview_source",
+      }),
+      expect.objectContaining({
+        transport: "plugin-call",
+        pluginId: "momobako.service.office-convert",
+        pluginMethod: "officeConvert.ensurePreviewPdf",
+      }),
+      expect.objectContaining({
+        transport: "plugin-call",
+        pluginId: "momobako.service.office-convert",
+        pluginMethod: "officeConvert.getRuntimeStatus",
+      }),
+      expect.objectContaining({
+        transport: "plugin-call",
+        pluginId: "momobako.service.downloader",
+        pluginMethod: "downloader.ensureRuntime",
+      }),
+      expect.objectContaining({
+        transport: "plugin-call",
+        pluginId: "momobako.service.downloader",
+        pluginMethod: "downloader.awaitDownload",
       }),
     ]));
   });
