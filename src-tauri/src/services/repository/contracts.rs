@@ -823,10 +823,30 @@ pub struct PluginDataFilePreviewSourceRequest {
     pub media_type: String,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RepositoryCacheFilePreviewSourceRequest {
+    pub repo_id: String,
+    pub path: String,
+    pub media_type: String,
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PluginDataFilePreviewSourceResponse {
     pub plugin_id: String,
+    pub path: String,
+    pub token: String,
+    pub source_url: Option<String>,
+    pub media_type: String,
+    pub size_bytes: i64,
+    pub modified_at: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RepositoryCacheFilePreviewSourceResponse {
+    pub repo_id: String,
     pub path: String,
     pub token: String,
     pub source_url: Option<String>,

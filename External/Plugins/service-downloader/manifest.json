@@ -16,7 +16,8 @@
     "download",
     "download-queue",
     "playback-temp",
-    "lyrics"
+    "lyrics",
+    "runtime"
   ],
   "enabled": true,
   "sdk": "backend",
@@ -47,6 +48,11 @@
           "entryPath": "Songs/demo.mp3",
           "sourcePayload": {}
         }
+      },
+      {
+        "method": "downloader.getRuntimeStatus",
+        "summary": "读取下载运行时状态。",
+        "payload": {}
       }
     ],
     "settings": {

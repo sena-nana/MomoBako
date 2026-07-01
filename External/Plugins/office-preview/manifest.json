@@ -20,7 +20,7 @@
     }
   },
   "permissions": ["preview:read", "thumbnail:write"],
-  "requires": [],
+  "requires": ["momobako.service.office-convert"],
   "optional": ["momobako.parser.ebook"],
   "hooks": [
     { "slot": "progress", "action": "preview.office.reportReadPosition", "label": "更新阅读进度" }

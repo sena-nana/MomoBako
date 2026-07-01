@@ -30,6 +30,7 @@
     "@tauri-apps/plugin-dialog": "^2",
     "@tauri-apps/plugin-opener": "^2",
     "@tauri-apps/plugin-store": "^2",
+    "pdfjs-dist": "^4.10.38",
     "three": "^0.184.0",
     "vue": "^3.5.35",
     "vue-demi": "^0.14.10",

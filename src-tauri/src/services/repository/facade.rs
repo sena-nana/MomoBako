@@ -202,6 +202,13 @@ impl RepositoryState {
         plugin::prepare_plugin_data_file_preview_source(self, request)
     }
 
+    pub fn prepare_repository_cache_file_preview_source(
+        &self,
+        request: RepositoryCacheFilePreviewSourceRequest,
+    ) -> Result<RepositoryCacheFilePreviewSourceResponse, String> {
+        plugin::prepare_repository_cache_file_preview_source(self, request)
+    }
+
     pub fn get_plugin_config(&self, plugin_id: String) -> Result<PluginConfigSnapshot, String> {
         plugin::get_plugin_config(self, plugin_id)
     }

@@ -6,6 +6,7 @@ use crate::services::repository::{
     PluginConfigSnapshot, PluginDataDirectoryResponse, PluginDataFilePreviewSourceRequest,
     PluginDataFilePreviewSourceResponse, PluginEnabledRequest, PluginHookExecutionListRequest,
     PluginHookExecutionListResponse, PluginInstallRequest, PluginManifest, PluginMutationResponse,
+    RepositoryCacheFilePreviewSourceRequest, RepositoryCacheFilePreviewSourceResponse,
 };
 use crate::services::runtime::RepositoryRuntime;
 
@@ -53,6 +54,18 @@ impl PluginViewModel {
         let mut response = self
             .runtime
             .run_read(move |state| state.prepare_plugin_data_file_preview_source(request))
+            .await?;
+        response.source_url = Some(self.runtime.preview_source_url(&response.token));
+        Ok(response)
+    }
+
+    pub async fn prepare_repository_cache_file_preview_source(
+        &self,
+        request: RepositoryCacheFilePreviewSourceRequest,
+    ) -> Result<RepositoryCacheFilePreviewSourceResponse, String> {
+        let mut response = self
+            .runtime
+            .run_read(move |state| state.prepare_repository_cache_file_preview_source(request))
             .await?;
         response.source_url = Some(self.runtime.preview_source_url(&response.token));
         Ok(response)

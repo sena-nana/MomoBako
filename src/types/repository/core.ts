@@ -691,8 +691,24 @@ export type PluginDataFilePreviewSourceRequest = {
   mediaType: string;
 };
 
+export type RepositoryCacheFilePreviewSourceRequest = {
+  repoId: string;
+  path: string;
+  mediaType: string;
+};
+
 export type PluginDataFilePreviewSourceResponse = {
   pluginId: string;
+  path: string;
+  token: string;
+  sourceUrl?: string | null;
+  mediaType: string;
+  sizeBytes: number;
+  modifiedAt?: string | null;
+};
+
+export type RepositoryCacheFilePreviewSourceResponse = {
+  repoId: string;
   path: string;
   token: string;
   sourceUrl?: string | null;

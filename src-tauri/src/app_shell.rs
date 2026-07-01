@@ -125,6 +125,9 @@ fn persist_main_window_state(app: &AppHandle) {
 
 fn quit_app(app: &AppHandle) {
     persist_main_window_state(app);
+    if let Some(runtime) = app.try_state::<RepositoryRuntime>() {
+        runtime.shutdown_helpers();
+    }
     app.exit(0);
 }
 

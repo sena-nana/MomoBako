@@ -504,6 +504,14 @@ function previewPluginModuleSource(pluginId: string) {
   if (pluginId === "momobako.preview.media") {
     return mediaPreviewPluginSourceForTest();
   }
+  if (pluginId === "momobako.service.office-convert") {
+    const sourcePath = resolve("External/Plugins/office-convert/src/register.js");
+    return readFileSync(sourcePath, "utf-8");
+  }
+  if (pluginId === "momobako.service.downloader") {
+    const sourcePath = resolve("External/Plugins/service-downloader/src/register.js");
+    return readFileSync(sourcePath, "utf-8");
+  }
   if (pluginId === "momobako.library.netease-cloud-music") {
     const sourcePath = resolve("External/Plugins/library-netease-cloud-music/src/register.js");
     return readFileSync(sourcePath, "utf-8");
@@ -1413,6 +1421,59 @@ vi.mock("@tauri-apps/api/core", () => ({
           payload: typeof mockResponse === "function" ? mockResponse(payload) : mockResponse,
         };
       }
+      if (pluginId === "momobako.service.office-convert" && method === "officeConvert.ensurePreviewPdf") {
+        return {
+          pluginId,
+          method,
+          payload: {
+            pdfPath: "C:/Mock/AnimeAssets/.momo/cache/office-preview/mock-preview.pdf",
+            cached: true,
+            converter: "microsoft-office",
+            cacheKey: "mock-office-cache-key",
+            mediaType: "application/pdf",
+            sizeBytes: 4096,
+            modifiedAt: "2026-07-01T08:00:00Z",
+          },
+        };
+      }
+      if (pluginId === "momobako.service.office-convert" && method === "officeConvert.getRuntimeStatus") {
+        return {
+          pluginId,
+          method,
+          payload: {
+            converterMode: "auto",
+            microsoftOffice: {
+              available: true,
+              path: "C:/Program Files/Microsoft Office/root/Office16/WINWORD.EXE",
+            },
+            libreofficeSystem: {
+              available: false,
+              reason: "未探测到系统 LibreOffice 安装。",
+            },
+            libreofficeBundle: {
+              available: false,
+              reason: "未发现已下载的 LibreOffice 运行时。",
+            },
+            daemon: {
+              running: false,
+            },
+          },
+        };
+      }
+      if (pluginId === "momobako.service.downloader" && method === "downloader.getRuntimeStatus") {
+        return {
+          pluginId,
+          method,
+          payload: {
+            runtime: "aria2",
+            aria2: {
+              running: false,
+            },
+            queueSize: 0,
+            downloadsDir: "C:/MomoBako/.service-data/plugin-data/momobako-service-downloader/downloads",
+          },
+        };
+      }
       const id = request?.payload?.id ?? "RJ123456";
       return {
         pluginId,
@@ -1501,6 +1562,28 @@ vi.mock("@tauri-apps/api/core", () => ({
       return {
         pluginId,
         path: `C:/MomoBako/.service-data/plugin-data/${pluginId.replace(/[^a-z0-9]+/gi, "-")}`,
+      };
+    }
+    if (command === "prepare_plugin_data_file_preview_source") {
+      return {
+        pluginId: args?.request?.pluginId ?? "momobako.preview.media",
+        path: args?.request?.path ?? "C:/MomoBako/.service-data/plugin-data/example/file.bin",
+        token: "plugin-data-preview-token",
+        sourceUrl: "http://127.0.0.1:49152/preview/plugin-data-preview-token",
+        mediaType: args?.request?.mediaType ?? "application/octet-stream",
+        sizeBytes: 4096,
+        modifiedAt: "2026-07-01T08:00:00Z",
+      };
+    }
+    if (command === "prepare_repository_cache_file_preview_source") {
+      return {
+        repoId: args?.request?.repoId ?? "repo-main-001",
+        path: args?.request?.path ?? "C:/Mock/AnimeAssets/.momo/cache/office-preview/mock-preview.pdf",
+        token: "repository-cache-preview-token",
+        sourceUrl: "http://127.0.0.1:49152/preview/repository-cache-preview-token",
+        mediaType: args?.request?.mediaType ?? "application/pdf",
+        sizeBytes: 4096,
+        modifiedAt: "2026-07-01T08:00:00Z",
       };
     }
     if (command === "get_plugin_config") {

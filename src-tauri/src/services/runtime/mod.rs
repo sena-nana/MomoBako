@@ -87,4 +87,12 @@ impl RepositoryRuntime {
     pub fn set_app_handle(&self, app: tauri::AppHandle) -> Result<(), String> {
         self.repository_state.set_app_handle(app)
     }
+
+    /// Performs best-effort cleanup for long-lived helper processes before app shutdown.
+    pub fn shutdown_helpers(&self) {
+        let _ = self
+            .repository_state
+            .shutdown_runtime_helpers()
+            .map_err(|error| eprintln!("runtime helper shutdown failed: {error}"));
+    }
 }

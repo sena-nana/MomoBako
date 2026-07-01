@@ -158,6 +158,57 @@ pub(super) fn prepare_plugin_data_file_preview_source(
     })
 }
 
+pub(super) fn prepare_repository_cache_file_preview_source(
+    state: &RepositoryState,
+    request: RepositoryCacheFilePreviewSourceRequest,
+) -> Result<RepositoryCacheFilePreviewSourceResponse, String> {
+    state.ensure_initialized()?;
+    let repo = state.load_repository_record(&request.repo_id)?;
+    let repo_root = PathBuf::from(&repo.summary.path);
+    let cache_root = repository_meta_dir(&repo_root).join("cache");
+    let canonical_cache_root = cache_root.canonicalize().map_err(io_error)?;
+    let source_path = PathBuf::from(request.path.trim());
+    if !source_path.is_absolute() {
+        return Err("repository cache preview path must be absolute".to_string());
+    }
+    if !source_path.is_file() {
+        return Err(format!(
+            "repository cache preview file is not available: {}",
+            source_path.to_string_lossy()
+        ));
+    }
+    let canonical_source_path = source_path.canonicalize().map_err(io_error)?;
+    if !canonical_source_path.starts_with(&canonical_cache_root) {
+        return Err(format!(
+            "repository cache preview path is outside repository cache directory: {}",
+            source_path.to_string_lossy()
+        ));
+    }
+    let media_type = request.media_type.trim();
+    let media_type = if media_type.is_empty() {
+        "application/octet-stream"
+    } else {
+        media_type
+    };
+    let metadata = fs::metadata(&canonical_source_path).map_err(io_error)?;
+    let modified_at = metadata
+        .modified()
+        .ok()
+        .map(system_time_to_rfc3339)
+        .transpose()
+        .map_err(time_error)?;
+    let token = state.register_preview_source_path(canonical_source_path.clone(), media_type)?;
+    Ok(RepositoryCacheFilePreviewSourceResponse {
+        repo_id: repo.summary.repo_id,
+        path: canonical_source_path.to_string_lossy().to_string(),
+        token,
+        source_url: None,
+        media_type: media_type.to_string(),
+        size_bytes: metadata.len() as i64,
+        modified_at,
+    })
+}
+
 pub(super) fn get_plugin_config(
     state: &RepositoryState,
     plugin_id: String,
@@ -630,7 +681,7 @@ pub(crate) fn runtime_plugins_dir(service_root: &Path) -> PathBuf {
     service_root.join("plugins")
 }
 
-pub(super) fn plugin_data_root_dir(service_root: &Path) -> PathBuf {
+pub(crate) fn plugin_data_root_dir(service_root: &Path) -> PathBuf {
     service_root.join("plugin-data")
 }
 
@@ -764,6 +815,44 @@ pub(super) fn ensure_plugin_data_dir(service_root: &Path, plugin_id: &str) -> Re
     let data_dir = plugin_data_dir(service_root, plugin_id);
     fs::create_dir_all(&data_dir).map_err(io_error)?;
     Ok(data_dir)
+}
+
+pub(super) fn shutdown_helper_state_dir(plugin_data_dir: &Path) -> Result<(), String> {
+    let helper_root = plugin_data_dir.join("helpers");
+    if !helper_root.is_dir() {
+        return Ok(());
+    }
+    for entry in fs::read_dir(&helper_root).map_err(io_error)? {
+        let entry = entry.map_err(io_error)?;
+        let state_dir = entry.path();
+        if !state_dir.is_dir() {
+            continue;
+        }
+        let pid_path = state_dir.join("pid.txt");
+        if !pid_path.is_file() {
+            continue;
+        }
+        let pid_raw = fs::read_to_string(&pid_path).map_err(io_error)?;
+        let Some(pid) = pid_raw.trim().parse::<u32>().ok() else {
+            let _ = fs::remove_file(&pid_path);
+            continue;
+        };
+        #[cfg(target_os = "windows")]
+        {
+            let _ = Command::new("taskkill")
+                .args(["/PID", &pid.to_string(), "/T", "/F"])
+                .status();
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = Command::new("kill")
+                .args(["-TERM", &pid.to_string()])
+                .status();
+        }
+        let _ = fs::remove_file(&pid_path);
+        let _ = fs::remove_file(state_dir.join("status.json"));
+    }
+    Ok(())
 }
 
 fn plugin_config_path(plugin_data_dir: &Path) -> PathBuf {
