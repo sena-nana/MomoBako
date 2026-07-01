@@ -375,6 +375,7 @@
     - `officeConvert.ensurePreviewPdf`
       - Request: `{ repoId, entryPath, extension, sourcePath?, sourceModifiedAt?, sourceSizeBytes? }`
       - Response: `{ pdfPath, cached, converter, cacheKey, mediaType: "application/pdf", sizeBytes, modifiedAt }`
+      - When `sourcePath` is omitted, the service resolves the source file from `repoId + entryPath` inside the current repository root and keeps path traversal guarded on the relative `entryPath`.
       - Converts Office files to PDF, stores the result under `{repoRoot}/.momo/cache/office-preview`, and returns the cached PDF file path.
     - `officeConvert.getRuntimeStatus`
       - Response: `{ converterMode, microsoftOffice, libreofficeSystem, libreofficeBundle, daemon, autoDownloadLibreOffice, bundledDownloadUrl }`
