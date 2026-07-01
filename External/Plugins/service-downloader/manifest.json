@@ -50,9 +50,84 @@
         }
       },
       {
+        "method": "downloader.downloadTrackPackage",
+        "summary": "下载单曲与歌词到目标目录。",
+        "payload": {
+          "accountCookie": "",
+          "songId": 0,
+          "level": "standard",
+          "destination": {
+            "kind": "directory",
+            "path": "./tmp/momobako-track-package"
+          },
+          "sourcePayload": {}
+        }
+      },
+      {
+        "method": "downloader.downloadPlaylistPackage",
+        "summary": "批量下载歌单到目标目录。",
+        "payload": {
+          "accountCookie": "",
+          "playlistId": 0,
+          "tracks": [],
+          "level": "standard",
+          "destination": {
+            "kind": "directory",
+            "path": "./tmp/momobako-playlist-package"
+          },
+          "sourcePayload": {}
+        }
+      },
+      {
+        "method": "downloader.resolveLyrics",
+        "summary": "读取单曲歌词与逐字歌词。",
+        "payload": {
+          "accountCookie": "",
+          "songId": 0
+        }
+      },
+      {
+        "method": "downloader.clearTrackCache",
+        "summary": "清理单曲临时缓存。",
+        "payload": {
+          "songId": 0,
+          "level": "standard"
+        }
+      },
+      {
         "method": "downloader.getRuntimeStatus",
         "summary": "读取下载运行时状态。",
         "payload": {}
+      },
+      {
+        "method": "downloader.ensureRuntime",
+        "summary": "确保 aria2 下载运行时可用。",
+        "payload": {}
+      },
+      {
+        "method": "downloader.enqueueDownload",
+        "summary": "创建一个通用下载任务。",
+        "payload": {
+          "url": "https://example.invalid/archive.zip",
+          "destinationPath": "./tmp/momobako-downloader-test.zip",
+          "metadata": {
+            "kind": "api-test"
+          }
+        }
+      },
+      {
+        "method": "downloader.awaitDownload",
+        "summary": "等待一个通用下载任务完成。",
+        "payload": {
+          "taskId": "task-demo"
+        }
+      },
+      {
+        "method": "downloader.removeDownload",
+        "summary": "移除一个通用下载任务。",
+        "payload": {
+          "taskId": "task-demo"
+        }
       }
     ],
     "settings": {
