@@ -79,10 +79,10 @@ pub(super) fn read_file(
     state.ensure_initialized()?;
 
     let repo = state.load_repository_record(&request.repo_id)?;
-    if repo.backend_record.plugin_id != LOCAL_FILESYSTEM_PLUGIN_ID {
+    if !repository_supports_local_read_access(&repo) {
         return Err(format!(
             "file preview read is not available for backend: {}",
-            repo.backend_record.plugin_id
+            repo.summary.backend.plugin_id
         ));
     }
 
@@ -106,10 +106,10 @@ pub(super) fn prepare_preview_file_source(
     state.ensure_initialized()?;
 
     let repo = state.load_repository_record(&request.repo_id)?;
-    if repo.backend_record.plugin_id != LOCAL_FILESYSTEM_PLUGIN_ID {
+    if !repository_supports_local_read_access(&repo) {
         return Err(format!(
             "file preview source is not available for backend: {}",
-            repo.backend_record.plugin_id
+            repo.summary.backend.plugin_id
         ));
     }
 

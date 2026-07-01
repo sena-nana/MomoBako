@@ -58,6 +58,7 @@ use self::asset_mutation::*;
 pub use self::contracts::*;
 use self::discovery::*;
 use self::export::*;
+pub(crate) use self::file_transfer::LOCAL_ROOT_PATH_CAPABILITY;
 use self::file_transfer::*;
 use self::filesystem_backend::*;
 use self::local_index::*;

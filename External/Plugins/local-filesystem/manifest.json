@@ -10,7 +10,7 @@
   "kind": "filesystem",
   "category": "source",
   "description": "使用本地目录作为仓库文件管理后端。",
-  "capabilities": ["browse", "read", "write", "watch", "sync"],
+  "capabilities": ["browse", "read", "write", "watch", "sync", "localRootPath"],
   "enabled": true,
   "sdk": "backend",
   "runtime": "native-dylib",
@@ -85,6 +85,17 @@
         "payload": {
           "repoRoot": "<absoluteRepositoryPath>",
           "directoryPath": "",
+          "config": {}
+        }
+      },
+      {
+        "method": "filesystem.listDirectoryPage",
+        "summary": "分页列出本地仓库单个目录。",
+        "payload": {
+          "repoRoot": "<absoluteRepositoryPath>",
+          "directoryPath": "",
+          "offset": 0,
+          "limit": 100,
           "config": {}
         }
       },

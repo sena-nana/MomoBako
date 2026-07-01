@@ -141,7 +141,9 @@ fn external_asset_import_context(
             retryable: true,
         });
     }
-    if let Err(error) = ensure_local_filesystem_repository(&repo, "adding external assets") {
+    if let Err(error) =
+        ensure_repository_supports_local_write_access(&repo, "adding external assets")
+    {
         return Err(ExternalRequestError {
             code: "unsupportedRepositoryBackend",
             message: error,
