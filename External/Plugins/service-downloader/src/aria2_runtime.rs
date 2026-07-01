@@ -290,18 +290,17 @@ pub fn remove_download(config: &Aria2Config<'_>, task_id: &str) -> Result<(), St
 }
 
 pub fn download_via_aria2(
-    _config: &Aria2Config<'_>,
+    config: &Aria2Config<'_>,
     url: &str,
     destination_path: &Path,
     metadata: Option<serde_json::Value>,
-    _timeout: Duration,
+    timeout: Duration,
 ) -> Result<DownloadTaskRecord, String> {
     #[cfg(test)]
     {
+        let _ = (config, timeout);
         return download_via_http_for_test(url, destination_path, metadata);
     }
-    #[cfg(not(test))]
-    let _ = metadata;
     #[cfg(not(test))]
     let record = enqueue_download(config, url, destination_path, metadata)?;
     #[cfg(not(test))]
