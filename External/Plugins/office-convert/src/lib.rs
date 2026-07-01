@@ -2,10 +2,12 @@
 //!
 //! 负责把 Office 文档转换为 PDF 并缓存到资源库缓存目录。
 
+#[path = "../../service-downloader/src/aria2_runtime.rs"]
+mod aria2_runtime;
+
 use std::{
     ffi::{c_char, CString},
     fs,
-    io::{Read, Write},
     os::raw::c_char as raw_c_char,
     path::{Path, PathBuf},
     process::{Command, Output, Stdio},
@@ -16,7 +18,6 @@ use std::{
 use momobako_backend_plugin_sdk::{
     free_c_string, read_request, response_error, response_ok, PluginRuntimeContext,
 };
-use reqwest::blocking::Client;
 use rusqlite::{Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -30,6 +31,7 @@ const REGISTRY_FILE_NAME: &str = "repositories.db";
 const REPO_META_DIR: &str = ".momo";
 const OFFICE_CACHE_NAMESPACE: &str = "office-preview";
 const DEFAULT_LIBREOFFICE_VERSION: &str = "25.8.3";
+const DOWNLOADER_PLUGIN_DATA_DIR_NAME: &str = "momobako-service-downloader";
 const DEFAULT_LIBREOFFICE_DOWNLOAD_URL: &str =
     "https://download.documentfoundation.org/libreoffice/stable/25.8.3/win/x86_64/LibreOffice_25.8.3_Win_x86-64.msi";
 
@@ -595,7 +597,7 @@ fn ensure_bundled_libreoffice(runtime: &RuntimeContext) -> Result<Option<PathBuf
     #[cfg(target_os = "windows")]
     {
         let installer_path = bundled_libreoffice_installer_path(runtime);
-        download_runtime_if_missing(DEFAULT_LIBREOFFICE_DOWNLOAD_URL, &installer_path)?;
+        download_runtime_via_downloader(runtime, DEFAULT_LIBREOFFICE_DOWNLOAD_URL, &installer_path)?;
         extract_libreoffice_installer(runtime, &installer_path)?;
         if executable.is_file() {
             return Ok(Some(executable));
@@ -641,34 +643,47 @@ fn extract_libreoffice_installer(
     Err("当前仅支持在 Windows 上解压自带 LibreOffice 运行时。".to_string())
 }
 
-fn download_runtime_if_missing(url: &str, target_path: &Path) -> Result<(), String> {
+fn download_runtime_via_downloader(
+    runtime: &RuntimeContext,
+    url: &str,
+    target_path: &Path,
+) -> Result<(), String> {
     if target_path.is_file() {
         return Ok(());
     }
     if let Some(parent) = target_path.parent() {
         fs::create_dir_all(parent).map_err(io_error)?;
     }
-    let temp_path = target_path.with_extension("download");
-    let client = Client::builder()
-        .build()
-        .map_err(|error| error.to_string())?;
-    let mut response = client
-        .get(url)
-        .send()
-        .and_then(|response| response.error_for_status())
-        .map_err(|error| format!("failed to download runtime {url}: {error}"))?;
-    let mut file = fs::File::create(&temp_path).map_err(io_error)?;
-    let mut buffer = [0_u8; 16 * 1024];
-    loop {
-        let read = response.read(&mut buffer).map_err(io_error)?;
-        if read == 0 {
-            break;
-        }
-        file.write_all(&buffer[..read]).map_err(io_error)?;
+    let downloader_plugin_data_dir = downloader_plugin_data_dir(runtime);
+    let record = aria2_runtime::download_via_aria2(
+        &aria2_runtime::Aria2Config {
+            plugin_data_dir: downloader_plugin_data_dir.as_path(),
+            download_url: DEFAULT_LIBREOFFICE_DOWNLOAD_URL,
+        },
+        url,
+        target_path,
+        Some(serde_json::json!({
+            "kind": "office-runtime",
+            "pluginId": "momobako.service.office-convert",
+            "runtime": "libreoffice",
+            "version": DEFAULT_LIBREOFFICE_VERSION,
+        })),
+        Duration::from_secs(60 * 30),
+    )?;
+    if !Path::new(record.destination_path.as_str()).is_file() {
+        return Err(format!(
+            "LibreOffice runtime download completed but destination file is missing: {}",
+            record.destination_path
+        ));
     }
-    file.flush().map_err(io_error)?;
-    fs::rename(&temp_path, target_path).map_err(io_error)?;
     Ok(())
+}
+
+fn downloader_plugin_data_dir(runtime: &RuntimeContext) -> PathBuf {
+    runtime
+        .service_root_dir
+        .join("plugin-data")
+        .join(DOWNLOADER_PLUGIN_DATA_DIR_NAME)
 }
 
 fn convert_with_microsoft_office(
@@ -1150,6 +1165,22 @@ mod tests {
         assert_eq!(
             repository_cache_dir(&repo_root),
             PathBuf::from("C:/Repo/.momo/cache/office-preview")
+        );
+    }
+
+    #[test]
+    fn downloader_plugin_data_dir_reuses_service_downloader_runtime_root() {
+        let runtime = RuntimeContext {
+            plugin_data_dir: PathBuf::from("C:/Service/plugin-data/momobako-service-office-convert"),
+            service_root_dir: PathBuf::from("C:/Service"),
+            config: PluginConfig {
+                converter_mode: ConverterMode::Auto,
+                auto_download_libreoffice: true,
+            },
+        };
+        assert_eq!(
+            downloader_plugin_data_dir(&runtime),
+            PathBuf::from("C:/Service/plugin-data/momobako-service-downloader")
         );
     }
 }
