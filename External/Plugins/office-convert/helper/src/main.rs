@@ -209,15 +209,18 @@ fn handle_convert(mut request: tiny_http::Request, state: &Arc<HelperState>) -> 
     #[cfg(target_os = "windows")]
     {
         state.ensure_soffice_ready()?;
-        let status = convert_with_managed_runtime(&state.args, &payload)
+        let result = convert_with_managed_runtime(&state.args, &payload)
+            .map(|status| (status, "uno"))
             .or_else(|uno_error| {
-                convert_with_cli_fallback(&state.args, &payload).map_err(|fallback_error| {
-                    format!(
-                        "managed LibreOffice convert failed: {uno_error}; fallback convert failed: {fallback_error}"
-                    )
-                })
+                convert_with_cli_fallback(&state.args, &payload)
+                    .map(|status| (status, "cli-fallback"))
+                    .map_err(|fallback_error| {
+                        format!(
+                            "managed LibreOffice convert failed: {uno_error}; fallback convert failed: {fallback_error}"
+                        )
+                    })
             });
-        let status = match status {
+        let (status, conversion_mode) = match result {
             Ok(value) => value,
             Err(error) => {
                 let _ = request.respond(json_response(
@@ -236,6 +239,7 @@ fn handle_convert(mut request: tiny_http::Request, state: &Arc<HelperState>) -> 
                 serde_json::json!({
                     "ok": true,
                     "pdfPath": payload.pdf_path,
+                    "conversionMode": conversion_mode,
                 }),
             ));
             return Ok(());
@@ -245,6 +249,7 @@ fn handle_convert(mut request: tiny_http::Request, state: &Arc<HelperState>) -> 
             serde_json::json!({
                 "ok": false,
                 "error": format!("LibreOffice convert exited with status {}", status),
+                "conversionMode": conversion_mode,
             }),
         ));
         return Ok(());

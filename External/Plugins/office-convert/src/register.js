@@ -232,6 +232,7 @@ function daemonConvertText(daemon) {
   if (!lastConvert) return "暂无记录";
   const parts = [];
   if (lastConvert.phase) parts.push(lastConvert.phase);
+  if (lastConvert.conversionMode) parts.push(lastConvert.conversionMode);
   if (lastConvert.sourcePath) parts.push(lastConvert.sourcePath);
   if (lastConvert.updatedAt) parts.push(lastConvert.updatedAt);
   return parts.join(" | ");
