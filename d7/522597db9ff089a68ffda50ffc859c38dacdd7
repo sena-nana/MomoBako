@@ -1,0 +1,21 @@
+External/Plugins/office-convert/manifest.json
+  s_2d5a17782b6bfd::t_241e02c28dcfdf 37-48,54-60,65-69
+External/Plugins/office-preview/src/register.js
+  s_2d5a17782b6bfd::t_afc5268d9b0334 23,114,285
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.5",
+  "base_commit_sha": "d7522597db9ff089a68ffda50ffc859c38dacdd7",
+  "prompts": {},
+  "sessions": {
+    "s_2d5a17782b6bfd": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f1cad-dea8-7323-b604-a3effbaf235c",
+        "model": "unknown"
+      },
+      "human_author": "AuraElicase <auraelicase@outlook.com>"
+    }
+  }
+}
