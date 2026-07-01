@@ -924,6 +924,8 @@ mod tests {
                 plugin_id: "user.provider".to_string(),
                 plugin_data_dir: "C:/MomoBako/.service-data/plugin-data/user-provider".to_string(),
                 service_root_dir: "C:/MomoBako/.service-data".to_string(),
+                plugin_runtime_dir: "C:/MomoBako/.service-data/runtime-cache/user-provider"
+                    .to_string(),
                 plugin_config: BTreeMap::from([(
                     "apiKey".to_string(),
                     serde_json::json!("secret"),
@@ -940,6 +942,10 @@ mod tests {
         assert_eq!(
             value["runtime"]["serviceRootDir"],
             serde_json::json!("C:/MomoBako/.service-data")
+        );
+        assert_eq!(
+            value["runtime"]["pluginRuntimeDir"],
+            serde_json::json!("C:/MomoBako/.service-data/runtime-cache/user-provider")
         );
         assert_eq!(
             value["runtime"]["pluginConfig"]["apiKey"],

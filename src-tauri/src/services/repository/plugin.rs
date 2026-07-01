@@ -1404,3 +1404,182 @@ fn hash_text_sha256(value: &str) -> String {
     let digest = hasher.finalize();
     digest.iter().map(|byte| format!("{byte:02x}")).collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    struct TestWorkspace {
+        root: PathBuf,
+    }
+
+    impl TestWorkspace {
+        fn new(name: &str) -> Self {
+            let unique = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("system clock must be after unix epoch")
+                .as_nanos();
+            let root = std::env::temp_dir()
+                .join(format!("momobako-plugin-{name}-{}-{unique}", std::process::id()));
+            fs::create_dir_all(&root).expect("test workspace root should be created");
+            Self { root }
+        }
+
+        fn path(&self, child: &str) -> PathBuf {
+            self.root.join(child)
+        }
+    }
+
+    impl Drop for TestWorkspace {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.root);
+        }
+    }
+
+    #[test]
+    fn native_plugin_library_path_extracts_runtime_sidecars() {
+        let workspace = TestWorkspace::new("native-sidecar-extract");
+        let archive_path = workspace.path("office-convert.momoplug");
+        let library_name = "momobako_service_office_convert";
+        let sidecar_name = if cfg!(target_os = "windows") {
+            "office-convert-helper.exe"
+        } else {
+            "office-convert-helper"
+        };
+        write_native_plugin_archive(
+            &archive_path,
+            library_name,
+            vec![
+                (
+                    native_plugin_library_file_name(library_name),
+                    "stub native library".to_string(),
+                ),
+                (sidecar_name.to_string(), "helper binary payload".to_string()),
+            ],
+        );
+
+        let (library_path, runtime_dir) = native_plugin_library_path(
+            &workspace.root,
+            &archive_path,
+            "momobako-service-office-convert-0.1.0/",
+            library_name,
+        )
+        .expect("native plugin runtime should extract");
+
+        assert!(library_path.is_file());
+        assert_eq!(library_path.parent(), Some(runtime_dir.as_path()));
+        let sidecar_path = runtime_dir.join(sidecar_name);
+        assert!(sidecar_path.is_file());
+        assert_eq!(
+            fs::read_to_string(sidecar_path).expect("sidecar should be readable"),
+            "helper binary payload"
+        );
+    }
+
+    #[test]
+    fn native_plugin_library_path_restores_missing_sidecar_from_cached_runtime() {
+        let workspace = TestWorkspace::new("native-sidecar-restore");
+        let archive_path = workspace.path("office-convert.momoplug");
+        let library_name = "momobako_service_office_convert";
+        let sidecar_name = if cfg!(target_os = "windows") {
+            "office-convert-helper.exe"
+        } else {
+            "office-convert-helper"
+        };
+        write_native_plugin_archive(
+            &archive_path,
+            library_name,
+            vec![
+                (
+                    native_plugin_library_file_name(library_name),
+                    "stub native library".to_string(),
+                ),
+                (sidecar_name.to_string(), "helper binary payload".to_string()),
+            ],
+        );
+
+        let (_, runtime_dir) = native_plugin_library_path(
+            &workspace.root,
+            &archive_path,
+            "momobako-service-office-convert-0.1.0/",
+            library_name,
+        )
+        .expect("initial runtime extraction should succeed");
+        let sidecar_path = runtime_dir.join(sidecar_name);
+        fs::remove_file(&sidecar_path).expect("sidecar should be removed");
+
+        let (_, second_runtime_dir) = native_plugin_library_path(
+            &workspace.root,
+            &archive_path,
+            "momobako-service-office-convert-0.1.0/",
+            library_name,
+        )
+        .expect("cached runtime should restore missing sidecar");
+
+        assert_eq!(runtime_dir, second_runtime_dir);
+        assert!(sidecar_path.is_file());
+    }
+
+    fn write_native_plugin_archive(
+        path: &Path,
+        library_name: &str,
+        extra_files: Vec<(String, String)>,
+    ) {
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).expect("archive parent should be created");
+        }
+        let root_dir = "momobako-service-office-convert-0.1.0";
+        let manifest = serde_json::json!({
+            "pluginId": "momobako.service.office-convert",
+            "legacyPluginIds": [],
+            "name": "Office Convert",
+            "version": "0.1.0",
+            "kind": "service",
+            "description": "Test native plugin archive.",
+            "capabilities": ["service"],
+            "enabled": true,
+            "sdk": "backend",
+            "runtime": "native-dylib",
+            "source": "builtin",
+            "permissions": [],
+            "compat": {
+                "sdkVersion": "1",
+                "legacyPluginIds": []
+            },
+            "status": "ready",
+            "entry": {
+                "backend": {
+                    "library": library_name
+                }
+            }
+        });
+        let file = File::create(path).expect("plugin archive should be created");
+        let mut archive = zip::ZipWriter::new(file);
+        archive
+            .start_file(
+                format!("{root_dir}/manifest.json"),
+                zip::write::SimpleFileOptions::default(),
+            )
+            .expect("manifest entry should start");
+        archive
+            .write_all(
+                serde_json::to_string_pretty(&manifest)
+                    .expect("manifest should encode")
+                    .as_bytes(),
+            )
+            .expect("manifest should write");
+        for (relative_path, content) in extra_files {
+            archive
+                .start_file(
+                    format!("{root_dir}/{relative_path}"),
+                    zip::write::SimpleFileOptions::default(),
+                )
+                .expect("archive entry should start");
+            archive
+                .write_all(content.as_bytes())
+                .expect("archive entry should write");
+        }
+        archive.finish().expect("archive should finish");
+    }
+}

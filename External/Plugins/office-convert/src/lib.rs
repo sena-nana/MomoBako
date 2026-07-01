@@ -1655,6 +1655,34 @@ impl SelectedConverter {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    struct TestWorkspace {
+        root: PathBuf,
+    }
+
+    impl TestWorkspace {
+        fn new(name: &str) -> Self {
+            let unique = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("system clock must be after unix epoch")
+                .as_nanos();
+            let root = std::env::temp_dir()
+                .join(format!("momobako-office-convert-{name}-{}-{unique}", std::process::id()));
+            fs::create_dir_all(&root).expect("test workspace root should be created");
+            Self { root }
+        }
+
+        fn path(&self, child: &str) -> PathBuf {
+            self.root.join(child)
+        }
+    }
+
+    impl Drop for TestWorkspace {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.root);
+        }
+    }
 
     #[test]
     fn office_family_from_extension_supports_legacy_and_openxml_formats() {
@@ -1717,5 +1745,74 @@ mod tests {
             runtime.service_root_dir,
             PathBuf::from("C:/Service")
         );
+    }
+
+    #[test]
+    fn bundled_helper_path_prefers_runtime_sidecar_when_present() {
+        let workspace = TestWorkspace::new("bundled-helper");
+        let helper_name = if cfg!(target_os = "windows") {
+            "office-convert-helper.exe"
+        } else {
+            "office-convert-helper"
+        };
+        let helper_path = workspace.path(helper_name);
+        fs::write(&helper_path, b"helper").expect("helper sidecar should be written");
+        let runtime = RuntimeContext {
+            plugin_data_dir: workspace.path("plugin-data"),
+            service_root_dir: workspace.path("service-root"),
+            plugin_runtime_dir: workspace.root.clone(),
+            config: PluginConfig {
+                converter_mode: ConverterMode::Auto,
+                auto_download_libreoffice: true,
+            },
+        };
+
+        assert_eq!(bundled_helper_path(&runtime), Some(helper_path));
+    }
+
+    #[test]
+    fn helper_type_label_reports_native_http_when_bundled_helper_exists() {
+        let workspace = TestWorkspace::new("helper-type-native");
+        let helper_name = if cfg!(target_os = "windows") {
+            "office-convert-helper.exe"
+        } else {
+            "office-convert-helper"
+        };
+        fs::write(workspace.path(helper_name), b"helper").expect("helper should be written");
+        let runtime = RuntimeContext {
+            plugin_data_dir: workspace.path("plugin-data"),
+            service_root_dir: workspace.path("service-root"),
+            plugin_runtime_dir: workspace.root.clone(),
+            config: PluginConfig {
+                converter_mode: ConverterMode::Auto,
+                auto_download_libreoffice: true,
+            },
+        };
+
+        if cfg!(target_os = "windows") {
+            assert_eq!(helper_type_label(&runtime), "native-http");
+        } else {
+            assert_eq!(helper_type_label(&runtime), "native-cli-fallback");
+        }
+    }
+
+    #[test]
+    fn helper_type_label_reports_fallback_without_bundled_helper() {
+        let workspace = TestWorkspace::new("helper-type-fallback");
+        let runtime = RuntimeContext {
+            plugin_data_dir: workspace.path("plugin-data"),
+            service_root_dir: workspace.path("service-root"),
+            plugin_runtime_dir: workspace.path("runtime"),
+            config: PluginConfig {
+                converter_mode: ConverterMode::Auto,
+                auto_download_libreoffice: true,
+            },
+        };
+
+        if cfg!(target_os = "windows") {
+            assert_eq!(helper_type_label(&runtime), "powershell-http");
+        } else {
+            assert_eq!(helper_type_label(&runtime), "native-cli-fallback");
+        }
     }
 }
