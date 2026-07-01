@@ -135,6 +135,8 @@
   - Confirms a pending candidate and joins both assets into the same hardlink group only when their stored content hashes and sizes still match.
 - `GET /repositories/{repoId}/snapshot`
   - `RepositorySnapshot` returns repository summary, folder summaries, indexed asset summaries, metadata field registry, overview, optional `playlists`, optional `quickAccess`, and optional `tagGroups`.
+  - `assets[].lastAccessedAt` records the latest successful open, preview, or playback access time for each asset and powers the desktop "最近使用" category.
+  - `overview.trashCount` returns the current deleted-asset count for the dedicated trash view and sidebar badge.
   - `playlists` returns repository-scoped playlist summaries for sidebar and workspace entry points; full queue contents are loaded from the playlist API.
   - `quickAccess` entries expose `shortcutId`, `label`, `targetKind`, optional `targetPath`, and optional `targetId`, and can point to files, folders, or smart folders imported from Eagle.
   - `tagGroups` expose repository-level tag grouping metadata for the desktop tag editor; they do not replace per-asset searchable tags.
@@ -189,6 +191,7 @@
 - `POST /repositories/{repoId}/files:preparePreviewSource`
   - Request body includes repository-relative `path`
   - Response returns a session-scoped local preview `sourceUrl` backed by the in-process repository runtime and may include `localPath` for frontend plugins that delegate local-file processing to a native service plugin.
+  - A successful preview-source preparation updates `assets.last_accessed_at` without creating a revision entry.
   - 3D and text previews use this source instead of returning full file bytes through the desktop command bridge
 - `POST /repositories/{repoId}/entries:preparePlayback`
   - Request body includes repository-relative `path`.
@@ -196,7 +199,13 @@
   - Virtual assets delegate to a download-capable backend plugin such as `momobako.service.downloader`, which can return `localPath`, optional `tempFilePath`, optional `expiresAt`, and media metadata for temporary playback sources.
   - 网易云 virtual playback is rejected until `localCache.status === "ready"`. When ready, the core passes `managedCacheRoot` to the downloader and all managed playback files are written under `{cacheRoot}/.momo/cache/netease-playback`.
   - Response `sourceUrl` is the preferred browser-consumable playback URL. Temporary audio files and lyric files are registered with the in-process preview runtime; lyric files may also return `lyricSourceUrl` or `wordLyricSourceUrl`.
+  - A successful playback-source preparation updates `assets.last_accessed_at` without creating a revision entry.
   - Frontend playlist players and virtual-source preview flows should prefer this endpoint over `files:preparePreviewSource` when a file may not exist locally.
+- `POST /repositories/{repoId}/files:recordAccess`
+  - Tauri command: `record_entry_access`
+  - Request body includes repository-relative `path`
+  - Response returns `{ repoId, path, recordedAt }`
+  - Used by direct open flows that hand control to the host OS so the desktop can keep the "最近使用" category in sync without refreshing the whole snapshot.
 - `POST /repositories/{repoId}/entries:preparePlaybackWithProgress`
   - Request body matches `entries:preparePlayback` and includes a Tauri progress channel.
   - Emits `EntryPlaybackProgressEvent` phases for resolving the entry, downloading or reusing the temporary audio, preparing the preview source, and readiness.

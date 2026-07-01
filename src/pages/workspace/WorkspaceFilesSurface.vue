@@ -51,6 +51,7 @@ defineProps<{
   isReadOnlyVirtual: boolean;
   isSavingMetadata: boolean;
   isTrashPanel: boolean;
+  isVirtualView: boolean;
   isVideoEntry: (entry: FileBrowserEntry) => boolean;
   hasMoreEntries?: boolean;
   libraryExtensions: RegisteredLibraryExtension[];
@@ -178,6 +179,7 @@ const emit = defineEmits<{
       :is-mutating-files="isMutatingFiles"
       :is-read-only-virtual="isReadOnlyVirtual"
       :is-trash-panel="isTrashPanel"
+      :is-virtual-view="isVirtualView"
       :is-video-entry="isVideoEntry"
       :has-more-entries="hasMoreEntries"
       :open-selected-label="openSelectedLabel"

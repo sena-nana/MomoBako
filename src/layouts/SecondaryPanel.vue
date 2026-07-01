@@ -50,6 +50,8 @@ const {
 } = useWorkspaceRepository();
 const {
   activePanel,
+  activeLibraryCategory,
+  setActiveLibraryCategory,
   setActivePanel,
 } = useWorkspaceNavigation();
 const {
@@ -276,6 +278,7 @@ const {
   moveWorkspaceEntries,
   renameWorkspaceEntry,
   setActivePanel,
+  setActiveLibraryCategory,
   setDragHoverFolderPath,
 });
 const {
@@ -294,6 +297,7 @@ const {
   router,
   selectSmartFolder,
   selectWorkspaceEntry,
+  setActiveLibraryCategory,
   setActivePanel,
 });
 
@@ -323,6 +327,7 @@ const showFolderSidebar = computed(() => (
 
         <WorkspaceSidebarShortcuts
           :active-panel="activePanel"
+          :active-library-category="activeLibraryCategory"
           :is-active-repository-missing="isActiveRepositoryMissing"
           :quick-access="quickAccess"
           :repository-actions-count="repositoryActions.length"

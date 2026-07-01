@@ -42,6 +42,7 @@ import { loadThumbnailsForEntries } from "../../../composables/workspace/thumbna
 
 export function useWorkspaceHomeViewModel() {
   const {
+    activeAssetDetail,
     activeAssetId,
     activeSnapshot,
     activeRepository,
@@ -58,6 +59,7 @@ export function useWorkspaceHomeViewModel() {
   } = useWorkspaceRepository();
   const {
     activePreviewPath,
+    activeLibraryCategoryLabel: fileCategoryLabel,
     currentDirectoryPath,
     fileBrowser,
     breadcrumbSegments,
@@ -66,7 +68,9 @@ export function useWorkspaceHomeViewModel() {
     fileEntries,
     hasSplitFileGroups,
     hardlinkCandidates,
+    isLibraryCategoryVirtualView,
     isLoadingFileBrowserMore,
+    libraryCategorySummary,
     loadFileBrowserForDirectory,
     visibleEntries,
     createFileInWorkspace,
@@ -125,6 +129,8 @@ export function useWorkspaceHomeViewModel() {
     runFilteredSearch,
   } = useWorkspaceSearch();
   const {
+    activeLibraryCategory,
+    setActiveLibraryCategory,
     activePanel,
     setActivePanel,
   } = useWorkspaceNavigation();
@@ -201,17 +207,23 @@ export function useWorkspaceHomeViewModel() {
     isFilesPanel,
     isMissingRepository,
     isPlaylistPanel,
+    isReadOnlyVirtualView,
     isRepositoryWritable,
     isSearchPanel,
     isSmartFolderPanel,
     isTrashPanel,
+    isVirtualView,
     openSelectedLabel,
     previewFileEntry,
     previewLibraryExtensions,
     previewPlugin,
     setPreviewFilePath,
-    smartFolderSummary,
+    virtualViewSummary,
+    virtualViewTitle,
   } = useWorkspaceViewState({
+    activeAssetDetail,
+    activeLibraryCategory,
+    activeLibraryCategoryLabel: fileCategoryLabel,
     activePanel,
     activePlaylistDetail,
     activePreviewPath,
@@ -223,8 +235,10 @@ export function useWorkspaceHomeViewModel() {
     fileEntries,
     hasMultipleSelection,
     hasSplitFileGroups,
+    isLibraryCategoryVirtualView,
     isLoadingFileBrowser,
     isLoadingSmartFolder,
+    libraryCategorySummary,
     playlistPreviewEntryMap,
     searchResults,
     selectedEntries,
@@ -233,7 +247,7 @@ export function useWorkspaceHomeViewModel() {
     smartFolderResult,
   });
   const ratingFilterOptions = [1, 2, 3, 4, 5];
-  const hasMoreEntries = computed(() => Boolean(fileBrowser.value?.hasMore));
+  const hasMoreEntries = computed(() => !isVirtualView.value && Boolean(fileBrowser.value?.hasMore));
 
   function updateVisibleThumbnailEntries(entries: FileBrowserEntry[]) {
     if (!fileBrowser.value || !entries.length) return;
@@ -245,7 +259,7 @@ export function useWorkspaceHomeViewModel() {
   }
 
   async function loadMoreEntries() {
-    if (!fileBrowser.value?.hasMore || isLoadingFileBrowserMore.value) return;
+    if (isVirtualView.value || !fileBrowser.value?.hasMore || isLoadingFileBrowserMore.value) return;
     await loadFileBrowserForDirectory(fileBrowser.value.currentPath, {
       append: true,
       specialLocation: isTrashPanel.value ? "trash" : undefined,
@@ -313,6 +327,7 @@ export function useWorkspaceHomeViewModel() {
     removePlaylistItemInWorkspace,
     reorderPlaylistItemsInWorkspace,
     selectWorkspaceEntry,
+    setActiveLibraryCategory,
     setActivePanel,
     setActivePreviewPath,
     setPreviewFilePath,
@@ -434,6 +449,7 @@ export function useWorkspaceHomeViewModel() {
     selectRepository,
     selectWorkspaceEntry,
     selectWorkspaceEntries,
+    setActiveLibraryCategory,
     setActivePanel,
     setActivePreviewPath,
     setDragHoverFolderPath,
@@ -592,8 +608,9 @@ export function useWorkspaceHomeViewModel() {
     isModelEntry,
     isMutatingFiles,
     isSavingMetadata,
-    isSmartFolderPanel,
+    isReadOnlyVirtualView,
     isTrashPanel,
+    isVirtualView,
     isVideoEntry,
     loadMoreEntries,
     markThumbnailFailed,
@@ -616,8 +633,6 @@ export function useWorkspaceHomeViewModel() {
     selectedFilePath,
     selectedFilePaths,
     showWorkspacePlayer,
-    smartFolderResult,
-    smartFolderSummary,
     startRenameSelected,
     statusLabel,
     submitRenameSelected,
@@ -626,6 +641,8 @@ export function useWorkspaceHomeViewModel() {
     thumbnailSrc,
     updateThumbnailAspectRatio,
     updateVisibleThumbnailEntries,
+    virtualViewSummary,
+    virtualViewTitle,
     workspacePlayerBarHandlers,
     workspacePlayerBarProps,
     deleteSelectedEntry,

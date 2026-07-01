@@ -3,10 +3,11 @@ import { ClipboardList } from "@lucide/vue";
 import type { Component } from "vue";
 import type { RepositoryShortcut } from "../types/repository";
 import type { ShortcutItem, ShortcutKey } from "./useSidebarShortcutsUi";
-import type { WorkspacePanelKey } from "../composables/useRepositoryWorkspace";
+import type { WorkspaceLibraryCategoryKey, WorkspacePanelKey } from "../composables/useRepositoryWorkspace";
 
 defineProps<{
   activePanel: WorkspacePanelKey;
+  activeLibraryCategory: WorkspaceLibraryCategoryKey;
   isActiveRepositoryMissing: boolean;
   quickAccess: RepositoryShortcut[];
   repositoryActionsCount: number;
@@ -29,7 +30,7 @@ const emit = defineEmits<{
         :key="item.id"
         type="button"
         class="workspace-shortcuts__item"
-        :class="{ 'is-active': activePanel === item.id || (item.id === 'all' && activePanel === 'files') }"
+        :class="{ 'is-active': item.id === 'trash' ? activePanel === 'trash' : activePanel === 'files' && activeLibraryCategory === item.id }"
         :disabled="isActiveRepositoryMissing"
         @click="emit('selectShortcut', item.id)"
       >

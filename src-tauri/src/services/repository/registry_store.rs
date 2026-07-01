@@ -349,6 +349,9 @@ pub(super) fn migrate_repository_schema(connection: &Connection) -> Result<(), r
     if !columns.iter().any(|column| column == "local_absolute_path") {
         connection.execute("ALTER TABLE assets ADD COLUMN local_absolute_path TEXT", [])?;
     }
+    if !columns.iter().any(|column| column == "last_accessed_at") {
+        connection.execute("ALTER TABLE assets ADD COLUMN last_accessed_at TEXT", [])?;
+    }
     connection.execute_batch(
         r#"
         CREATE TABLE IF NOT EXISTS directories (

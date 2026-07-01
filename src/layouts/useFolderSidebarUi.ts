@@ -25,6 +25,7 @@ type FolderSidebarUiOptions = {
   moveWorkspaceEntries: (sourcePaths: string[], targetPath: string) => Promise<FileBrowserSnapshot | null>;
   renameWorkspaceEntry: (path: string, nextName: string) => Promise<FileBrowserSnapshot | null>;
   setActivePanel: (panel: "files") => void;
+  setActiveLibraryCategory: (category: "all") => void;
   setDragHoverFolderPath: (path: string | null) => void;
 };
 
@@ -46,7 +47,7 @@ export function useFolderSidebarUi(options: FolderSidebarUiOptions) {
   const pendingDeleteFolderPath = ref("");
   const pendingDeleteFolderLabel = ref("");
 
-  const isTrashPanel = computed(() => options.activePanel.value === "deleted");
+  const isTrashPanel = computed(() => options.activePanel.value === "trash");
   const isFolderDragActive = computed(() => options.isExternalDragActive.value || options.isInternalDragActive.value);
   const expandedFolderPathSet = computed(() => new Set(expandedFolderPaths.value));
   const fileTreeNodes = computed(() => options.fileTree.value);
@@ -67,6 +68,7 @@ export function useFolderSidebarUi(options: FolderSidebarUiOptions) {
 
   function openFolder(path: string) {
     options.setActivePanel("files");
+    options.setActiveLibraryCategory("all");
     void options.loadFileBrowserForDirectory(path, { silent: true });
   }
 

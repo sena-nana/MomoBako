@@ -39,6 +39,7 @@ export type AssetSummary = {
   sizeLabel: string;
   status: string;
   modifiedAt: string;
+  lastAccessedAt?: string | null;
   version: number;
   tags: string[];
   thumbnailPath?: string | null;
@@ -141,6 +142,7 @@ export type RepositorySnapshot = {
     totalSizeLabel: string;
     fileCount: number;
     folderCount: number;
+    trashCount: number;
     readmeContent: string | null;
   };
 };
@@ -592,6 +594,17 @@ export type FileBrowserRequest = {
 export type FileReadRequest = {
   repoId: string;
   path: string;
+};
+
+export type EntryAccessRecordRequest = {
+  repoId: string;
+  path: string;
+};
+
+export type EntryAccessRecordResponse = {
+  repoId: string;
+  path: string;
+  recordedAt: string;
 };
 
 export type PluginCallRequest = {

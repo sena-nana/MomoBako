@@ -1,5 +1,6 @@
 import { computed, type Ref } from "vue";
 import {
+  activeLibraryCategory,
   activeAssetDetail,
   activeAssetId,
   activePanel,
@@ -46,6 +47,7 @@ import {
   plugins,
   repositories,
   repositoryActions,
+  patchActiveSnapshotAssetAccess,
   searchQuery,
   searchResults,
   selectedFilePath,
@@ -54,8 +56,10 @@ import {
   smartFolders,
   workspaceStartup,
 } from "./state";
+import { onRepositoryEntryAccess } from "../../services/repositoryApi";
 import {
   activeFilterCount,
+  activeLibraryCategoryLabel,
   activeRepository,
   breadcrumbSegments,
   directoryEntries,
@@ -64,6 +68,8 @@ import {
   hasActiveFilters,
   hasMultipleSelection,
   hasSplitFileGroups,
+  isLibraryCategoryVirtualView,
+  libraryCategorySummary,
   libraryOverview,
   repositoryBackendOptions,
   selectedEntries,
@@ -77,6 +83,7 @@ import {
   refreshActiveRepositoryWorkspaceSilently,
   selectAsset,
   selectRepository,
+  setActiveLibraryCategory,
   setActivePanel,
   setActivePreviewPath,
 } from "./navigation";
@@ -194,6 +201,16 @@ function readonlyRecordRef<T extends Record<string, unknown>>(source: Ref<T>) {
   return computed(() => source.value ?? {});
 }
 
+let hasBoundRepositoryEntryAccess = false;
+
+function ensureRepositoryEntryAccessBinding() {
+  if (hasBoundRepositoryEntryAccess) return;
+  hasBoundRepositoryEntryAccess = true;
+  onRepositoryEntryAccess(({ repoId, path, recordedAt }) => {
+    patchActiveSnapshotAssetAccess(repoId, path, recordedAt);
+  });
+}
+
 export function useWorkspaceRepository() {
   return {
     repositories: readonlyArrayRef(repositories),
@@ -230,6 +247,9 @@ export function useWorkspaceFiles() {
     directoryEntries,
     fileEntries,
     hasSplitFileGroups,
+    isLibraryCategoryVirtualView,
+    libraryCategorySummary,
+    activeLibraryCategoryLabel,
     isLoadingFileBrowserMore: readonlyRef(isLoadingFileBrowserMore),
     breadcrumbSegments,
     hardlinkCandidates: readonlyArrayRef(hardlinkCandidates),
@@ -291,6 +311,8 @@ export function useWorkspaceSelection() {
 export function useWorkspaceNavigation() {
   return {
     activePanel: readonlyRef(activePanel),
+    activeLibraryCategory: readonlyRef(activeLibraryCategory),
+    setActiveLibraryCategory,
     setActivePanel,
   };
 }
@@ -410,6 +432,7 @@ export function useWorkspaceProgress() {
 }
 
 export function useRepositoryWorkspace() {
+  ensureRepositoryEntryAccessBinding();
   return {
     ...useWorkspaceRepository(),
     ...useWorkspaceNavigation(),

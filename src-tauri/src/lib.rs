@@ -12,8 +12,9 @@ use services::repository as repository_service;
 use services::repository::{
     ApiDesignSnapshot, AssetDetail, BinaryFileWriteRequest, BinaryFileWriteResponse, CacheSnapshot,
     DownloaderPlaylistProgressEvent, DownloaderPlaylistRequest, EntryPlaybackProgressEvent,
-    EntryPlaybackRequest, EntryPlaybackSourceResponse, FileBrowserRequest, FileBrowserSnapshot,
-    FileCopyRequest, FileCreateRequest, FileDeleteRequest, FileImportRequest, FileMoveRequest,
+    EntryAccessRecordRequest, EntryAccessRecordResponse, EntryPlaybackRequest,
+    EntryPlaybackSourceResponse, FileBrowserRequest, FileBrowserSnapshot, FileCopyRequest,
+    FileCreateRequest, FileDeleteRequest, FileImportRequest, FileMoveRequest,
     FilePreviewSourceResponse, FileReadRequest, FileRenameRequest, HardlinkCandidateResponse,
     HardlinkConfirmRequest, HardlinkConfirmResponse, MetadataUpdateRequest, MetadataUpdateResponse,
     NeteaseRepositoryCacheConfigureRequest, NeteaseRepositoryCacheConfigureResponse,
@@ -303,6 +304,14 @@ async fn prepare_preview_file_source(
     repository_query: tauri::State<'_, RepositoryQueryViewModel>,
 ) -> Result<FilePreviewSourceResponse, String> {
     repository_query.prepare_preview_file_source(request).await
+}
+
+#[tauri::command]
+async fn record_entry_access(
+    request: EntryAccessRecordRequest,
+    repository_interaction: tauri::State<'_, RepositoryInteractionViewModel>,
+) -> Result<EntryAccessRecordResponse, String> {
+    repository_interaction.record_entry_access(request).await
 }
 
 #[tauri::command]
@@ -713,6 +722,7 @@ pub fn run() {
             run_repository_action,
             read_file,
             prepare_preview_file_source,
+            record_entry_access,
             prepare_entry_playback_source,
             prepare_entry_playback_source_with_progress,
             call_plugin,

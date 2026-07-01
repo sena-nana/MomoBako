@@ -32,6 +32,7 @@ type WorkspaceFileInteractionOptions = {
     paths: string[],
     options?: { primaryPath?: string | null; anchorPath?: string | null },
   ) => void;
+  setActiveLibraryCategory: (category: "all") => void;
   setActivePanel: (panel: "files") => void;
   setActivePreviewPath: (path: string | null) => void;
   setDragHoverFolderPath: (path: string | null) => void;
@@ -41,6 +42,7 @@ type WorkspaceFileInteractionOptions = {
 export function useFileInteraction(options: WorkspaceFileInteractionOptions) {
   function openDirectory(path: string) {
     options.setDragHoverFolderPath(null);
+    options.setActiveLibraryCategory("all");
     void options.loadFileBrowserForDirectory(path, options.isTrashPanel.value
       ? { specialLocation: "trash", silent: true }
       : { silent: true });
@@ -72,6 +74,7 @@ export function useFileInteraction(options: WorkspaceFileInteractionOptions) {
 
   async function openSearchHit(result: SearchHit) {
     options.setPreviewFilePath(null);
+    options.setActiveLibraryCategory("all");
     options.setActivePanel("files");
 
     if (options.activeRepoId.value !== result.repoId) {

@@ -1,6 +1,7 @@
 //! Command orchestration for repository interactions such as playlists, smart folders, and revisions.
 
 use crate::services::repository::{
+    EntryAccessRecordRequest, EntryAccessRecordResponse,
     HardlinkCandidateResponse, HardlinkConfirmRequest, HardlinkConfirmResponse, PlaylistDetail,
     PlaylistItemRemoveRequest, PlaylistItemsAddRequest, PlaylistItemsByPathsAddRequest,
     PlaylistItemsOrderRequest, PlaylistMembershipIndex, PlaylistMembershipRequest,
@@ -229,6 +230,15 @@ impl RepositoryInteractionViewModel {
     ) -> Result<ThumbnailResponse, String> {
         self.runtime
             .run_write(move |state| state.ensure_thumbnail(request))
+            .await
+    }
+
+    pub async fn record_entry_access(
+        &self,
+        request: EntryAccessRecordRequest,
+    ) -> Result<EntryAccessRecordResponse, String> {
+        self.runtime
+            .run_write(move |state| state.record_entry_access(request))
             .await
     }
 

@@ -25,7 +25,7 @@ impl RepositoryPlaybackViewModel {
     ) -> Result<EntryPlaybackSourceResponse, String> {
         let mut response = self
             .runtime
-            .run_read(move |state| state.prepare_entry_playback_source(request))
+            .run_write(move |state| state.prepare_entry_playback_source(request))
             .await?;
         self.attach_playback_preview_urls(&mut response).await?;
         Ok(response)
@@ -42,7 +42,7 @@ impl RepositoryPlaybackViewModel {
         };
         let mut response = self
             .runtime
-            .run_read(move |state| {
+            .run_write(move |state| {
                 state.prepare_entry_playback_source_with_progress(request, &mut emit)
             })
             .await?;

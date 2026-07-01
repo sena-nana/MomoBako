@@ -310,7 +310,7 @@ export async function loadFileBrowserForDirectory(directoryPath = "", options: F
   const append = options.append ?? false;
   const includeTree = options.includeTree ?? false;
   const silent = options.silent ?? false;
-  const specialLocation = options.specialLocation ?? (activePanel.value === "deleted" ? "trash" : undefined);
+  const specialLocation = options.specialLocation ?? (activePanel.value === "trash" ? "trash" : undefined);
   const currentSnapshot = fileBrowser.value;
   const normalizedSpecialLocation = specialLocation ?? null;
   const keepsCurrentViewVisible = silent

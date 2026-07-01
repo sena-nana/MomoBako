@@ -2,6 +2,7 @@ import { computed, type ComputedRef } from "vue";
 import type { FileBrowserEntry, RepositoryBackendOption } from "../../types/repository";
 import { isRepositoryBackendRuntimeAvailable, isSourcePlugin } from "../../utils/pluginTaxonomy";
 import {
+  activeLibraryCategory,
   activeRepoId,
   activeSnapshot,
   currentDirectoryPath,
@@ -15,7 +16,10 @@ import {
 
 export type WorkspaceSelectors = {
   activeRepository: ComputedRef<(typeof repositories.value)[number] | null>;
+  activeLibraryCategoryLabel: ComputedRef<string>;
   fileBrowserEntryMap: ComputedRef<ReadonlyMap<string, FileBrowserEntry>>;
+  isLibraryCategoryVirtualView: ComputedRef<boolean>;
+  libraryCategorySummary: ComputedRef<string>;
   visibleEntries: ComputedRef<FileBrowserEntry[]>;
   selectedEntry: ComputedRef<FileBrowserEntry | null>;
   selectedEntries: ComputedRef<FileBrowserEntry[]>;
@@ -33,8 +37,89 @@ export const activeRepository = computed(() => (
   repositories.value.find((item) => item.repoId === activeRepoId.value) ?? null
 ));
 
+function compareDescendingDate(left: string | null | undefined, right: string | null | undefined) {
+  const leftValue = left ?? "";
+  const rightValue = right ?? "";
+  return rightValue.localeCompare(leftValue);
+}
+
+function assetSummaryToFileEntry(asset: NonNullable<typeof activeSnapshot.value>["assets"][number]): FileBrowserEntry {
+  return {
+    path: asset.path,
+    name: asset.filename,
+    kind: "file",
+    extension: asset.extension,
+    sizeBytes: asset.sizeBytes,
+    sizeLabel: asset.sizeLabel,
+    modifiedAt: asset.modifiedAt,
+    assetId: asset.assetId,
+    status: asset.status,
+    thumbnailPath: asset.thumbnailPath ?? null,
+    hardlinkGroupId: asset.hardlinkGroupId ?? null,
+    hardlinkState: asset.hardlinkState ?? null,
+    tags: asset.tags,
+    aliasPaths: [asset.path],
+    metadata: {},
+    isVirtual: asset.isVirtual ?? false,
+    providerId: asset.providerId ?? null,
+    providerItemId: asset.providerItemId ?? null,
+    sourcePayload: asset.sourcePayload ?? null,
+    localAbsolutePath: asset.localAbsolutePath ?? null,
+  };
+}
+
+export const activeLibraryCategoryLabel = computed(() => {
+  switch (activeLibraryCategory.value) {
+    case "uncategorized":
+      return "未分类";
+    case "untagged":
+      return "未标签";
+    case "recent":
+      return "最近使用";
+    default:
+      return "全部";
+  }
+});
+
+export const isLibraryCategoryVirtualView = computed(() => activeLibraryCategory.value !== "all");
+
+const activeLibraryAssets = computed(() => (
+  (activeSnapshot.value?.assets ?? []).filter((asset) => asset.status !== "deleted")
+));
+
+const libraryCategoryEntries = computed<FileBrowserEntry[]>(() => {
+  const assets = activeLibraryAssets.value;
+  const filteredAssets = activeLibraryCategory.value === "uncategorized"
+    ? assets.filter((asset) => !asset.path.includes("/"))
+    : activeLibraryCategory.value === "untagged"
+      ? assets.filter((asset) => asset.tags.length === 0)
+      : activeLibraryCategory.value === "recent"
+        ? assets
+          .filter((asset) => Boolean(asset.lastAccessedAt))
+          .slice()
+          .sort((left, right) => (
+            compareDescendingDate(left.lastAccessedAt, right.lastAccessedAt)
+            || compareDescendingDate(left.modifiedAt, right.modifiedAt)
+            || left.filename.localeCompare(right.filename, "zh-CN")
+          ))
+        : assets;
+
+  return filteredAssets.map(assetSummaryToFileEntry);
+});
+
+export const libraryCategorySummary = computed(() => {
+  if (activeLibraryCategory.value === "all") return "";
+  const count = libraryCategoryEntries.value.length;
+  if (activeLibraryCategory.value === "recent") {
+    return `按最近访问时间排序，共 ${count} 项。`;
+  }
+  return `${activeLibraryCategoryLabel.value}共 ${count} 项。`;
+});
+
 export const fileBrowserEntryMap = computed<ReadonlyMap<string, FileBrowserEntry>>(() => (
-  fileBrowserDerived.value.entryMap
+  isLibraryCategoryVirtualView.value
+    ? new Map(libraryCategoryEntries.value.map((entry) => [entry.path, entry]))
+    : fileBrowserDerived.value.entryMap
 ));
 
 export const selectedEntry = computed(() => {
@@ -43,15 +128,15 @@ export const selectedEntry = computed(() => {
 });
 
 export const directoryEntries = computed(() => (
-  fileBrowserDerived.value.directories
+  isLibraryCategoryVirtualView.value ? [] : fileBrowserDerived.value.directories
 ));
 
 export const fileEntries = computed(() => (
-  fileBrowserDerived.value.files
+  isLibraryCategoryVirtualView.value ? libraryCategoryEntries.value : fileBrowserDerived.value.files
 ));
 
 export const visibleEntries = computed(() => (
-  fileBrowserDerived.value.visibleEntries
+  isLibraryCategoryVirtualView.value ? libraryCategoryEntries.value : fileBrowserDerived.value.visibleEntries
 ));
 
 export const selectedFilePathSet = computed<ReadonlySet<string>>(() => (
@@ -67,7 +152,7 @@ export const selectedEntries = computed(() => (
 export const hasMultipleSelection = computed(() => selectedEntries.value.length > 1);
 
 export const hasSplitFileGroups = computed(() => (
-  directoryEntries.value.length > 0 && fileEntries.value.length > 0
+  !isLibraryCategoryVirtualView.value && directoryEntries.value.length > 0 && fileEntries.value.length > 0
 ));
 
 export const libraryOverview = computed(() => activeSnapshot.value?.overview ?? null);

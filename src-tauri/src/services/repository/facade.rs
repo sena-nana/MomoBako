@@ -155,6 +155,13 @@ impl RepositoryState {
         query::read_file(self, request)
     }
 
+    pub fn record_entry_access(
+        &self,
+        request: EntryAccessRecordRequest,
+    ) -> Result<EntryAccessRecordResponse, String> {
+        query::record_entry_access(self, request)
+    }
+
     pub fn prepare_preview_file_source(
         &self,
         request: FileReadRequest,

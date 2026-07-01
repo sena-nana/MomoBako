@@ -9,7 +9,7 @@ pub(super) const REPO_TRASH_DIR: &str = "trash";
 pub(super) const REPO_TRASH_MANIFEST_FILE_NAME: &str = "trash.json";
 pub(super) const REPO_METADATA_FILE_NAME: &str = "repository.json";
 pub(super) const REPO_DB_FILE_NAME: &str = "metadata.db";
-pub(super) const REPO_SCHEMA_VERSION: i64 = 2;
+pub(super) const REPO_SCHEMA_VERSION: i64 = 3;
 pub(super) const THUMBNAIL_SIZE: u32 = 256;
 pub(super) const MAX_REMOTE_THUMBNAIL_BYTES: u64 = 10 * 1024 * 1024;
 pub(super) const PLUGIN_HOOK_EXECUTIONS_FILE_NAME: &str = "plugin-hook-executions.jsonl";
@@ -71,6 +71,7 @@ CREATE TABLE IF NOT EXISTS assets (
   status TEXT NOT NULL,
   version INTEGER NOT NULL DEFAULT 1,
   updated_at TEXT NOT NULL,
+  last_accessed_at TEXT,
   thumbnail_path TEXT,
   is_virtual INTEGER NOT NULL DEFAULT 0,
   provider_id TEXT,

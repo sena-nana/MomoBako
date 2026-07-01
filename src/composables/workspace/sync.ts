@@ -82,7 +82,7 @@ export async function syncActiveRepository() {
     await refreshWorkspace(activeRepoId.value, {
       directory: activePanel.value === "files"
         ? "currentWithTree"
-        : activePanel.value === "deleted" ? "trash" : undefined,
+        : activePanel.value === "trash" ? "trash" : undefined,
       hardlinkCandidates: true,
       repositorySnapshot: true,
       repositorySummary: true,
@@ -114,7 +114,7 @@ export async function refreshFileBrowserTree() {
     lastSyncResult.value = result;
     setSyncProgress("refreshing", "刷新文件夹树", 3);
     await refreshWorkspace(activeRepoId.value, {
-      directory: activePanel.value === "deleted" ? "trash" : "currentWithTree",
+      directory: activePanel.value === "trash" ? "trash" : "currentWithTree",
       hardlinkCandidates: true,
       repositorySnapshot: true,
     });
