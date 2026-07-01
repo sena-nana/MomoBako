@@ -2,7 +2,8 @@
 
 use super::PREVIEW_HOST;
 use crate::services::repository::{
-    ExternalAddAssetRequest, RepositoryState, RepositorySummary, LOCAL_ROOT_PATH_CAPABILITY,
+    backend_summary_supports_local_write_access, ExternalAddAssetRequest, RepositoryState,
+    RepositorySummary,
 };
 use serde::Serialize;
 use std::{
@@ -18,17 +19,7 @@ const EXTERNAL_PATH_PREFIX: &str = "/external/v1/";
 const EXTERNAL_CONNECTION_FILE_NAME: &str = "external-api.json";
 fn repository_supports_external_add_assets(summary: &RepositorySummary) -> bool {
     summary.status == "ready"
-        && summary.backend.kind == "filesystem"
-        && summary
-            .backend
-            .capabilities
-            .iter()
-            .any(|value| value == LOCAL_ROOT_PATH_CAPABILITY)
-        && summary
-            .backend
-            .capabilities
-            .iter()
-            .any(|value| value == "write")
+        && backend_summary_supports_local_write_access(&summary.backend)
         && Path::new(&summary.path).is_absolute()
 }
 

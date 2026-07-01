@@ -15,7 +15,7 @@ pub(super) fn create_repository(
     let repo_id = request
         .repo_id
         .unwrap_or_else(|| slugify_repo_id(&request.name, &request.path));
-    let repo_root = normalize_repository_root_for_backend(&request.path, &backend, false)?;
+    let repo_root = normalize_repository_root_for_backend(&state.root, &request.path, &backend, false)?;
     let seed = RepositorySeed {
         repo_id: &repo_id,
         name: &request.name,
@@ -50,7 +50,7 @@ pub(super) fn import_repository(
     if let Some(repository) = state.find_existing_repository_for_backend(&requested_backend)? {
         return Ok(RepositoryMutationResponse { repository });
     }
-    let repo_root = normalize_repository_root_for_backend(&request.path, &requested_backend, true)?;
+    let repo_root = normalize_repository_root_for_backend(&state.root, &request.path, &requested_backend, true)?;
     migrate_legacy_meta_dir_if_needed(&repo_root, &requested_backend.plugin_id)?;
     let metadata_path = repository_meta_dir(&repo_root).join(REPO_METADATA_FILE_NAME);
     let imported_metadata = if metadata_path.exists() {
@@ -132,7 +132,7 @@ pub(super) fn attach_repository_folder(
             skip_initial_sync: false,
         },
     )?;
-    let repo_root = normalize_repository_root_for_backend(path, &backend, true)?;
+    let repo_root = normalize_repository_root_for_backend(&state.root, path, &backend, true)?;
     ensure_backend_path_is_attachable(&state.root, &backend, &repo_root)?;
     let name = infer_repository_name(&repo_root);
     let metadata_path = if repository_meta_dir(&repo_root).exists() {
@@ -185,7 +185,8 @@ pub(super) fn relocate_repository(
         return Err("repository path cannot be empty".to_string());
     }
 
-    let repo_root = normalize_repository_root_for_backend(next_path, &repo.backend_record, true)?;
+    let repo_root =
+        normalize_repository_root_for_backend(&state.root, next_path, &repo.backend_record, true)?;
     if !repo_root.is_dir() {
         return Err("repository path is not a directory".to_string());
     }
@@ -250,7 +251,7 @@ pub(super) fn update_repository_backend_config(
     let mut next_backend_config = request.backend_config.clone();
     preserve_netease_cache_config(&repo.backend_record, &mut next_backend_config);
     let repo_root =
-        normalize_repository_root_for_backend(&repo.summary.path, &repo.backend_record, true)?;
+        normalize_repository_root_for_backend(&state.root, &repo.summary.path, &repo.backend_record, true)?;
     let metadata_path = repository_meta_dir(&repo_root).join(REPO_METADATA_FILE_NAME);
     if metadata_path.exists() {
         let raw = fs::read_to_string(&metadata_path).map_err(io_error)?;

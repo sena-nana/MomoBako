@@ -1,8 +1,9 @@
 //! Filesystem watcher lifecycle and repository watch-set synchronization.
 
 use crate::services::repository::{
-    RepositoryState, RepositoryStructureRefreshRequest, RepositoryStructureUpdatedEvent,
-    RepositorySummary, SyncRequest, LOCAL_ROOT_PATH_CAPABILITY,
+    backend_summary_supports_local_root_access, RepositoryState,
+    RepositoryStructureRefreshRequest, RepositoryStructureUpdatedEvent, RepositorySummary,
+    SyncRequest,
 };
 use notify::{Config, Event, RecommendedWatcher, RecursiveMode, Watcher};
 use std::{
@@ -19,12 +20,7 @@ use std::{
 const STRUCTURE_REFRESH_DEBOUNCE_MS: u64 = 400;
 
 fn repository_supports_local_watch(summary: &RepositorySummary) -> bool {
-    summary.backend.kind == "filesystem"
-        && summary
-            .backend
-            .capabilities
-            .iter()
-            .any(|value| value == LOCAL_ROOT_PATH_CAPABILITY)
+    backend_summary_supports_local_root_access(&summary.backend)
         && summary
             .backend
             .capabilities

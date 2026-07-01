@@ -4,23 +4,41 @@ use super::*;
 
 pub(crate) const LOCAL_ROOT_PATH_CAPABILITY: &str = "localRootPath";
 
-pub(super) fn backend_has_capability(backend: &RepositoryBackendSummary, capability: &str) -> bool {
+pub(crate) fn backend_has_capability(
+    backend: &RepositoryBackendSummary,
+    capability: &str,
+) -> bool {
     backend.capabilities.iter().any(|value| value == capability)
 }
 
+pub(crate) fn backend_summary_supports_local_root_access(
+    backend: &RepositoryBackendSummary,
+) -> bool {
+    backend.kind == "filesystem" && backend_has_capability(backend, LOCAL_ROOT_PATH_CAPABILITY)
+}
+
+pub(crate) fn backend_summary_supports_local_read_access(
+    backend: &RepositoryBackendSummary,
+) -> bool {
+    backend_summary_supports_local_root_access(backend) && backend_has_capability(backend, "read")
+}
+
+pub(crate) fn backend_summary_supports_local_write_access(
+    backend: &RepositoryBackendSummary,
+) -> bool {
+    backend_summary_supports_local_root_access(backend) && backend_has_capability(backend, "write")
+}
+
 pub(super) fn repository_supports_local_root_access(repo: &RepositoryRecord) -> bool {
-    repo.summary.backend.kind == "filesystem"
-        && backend_has_capability(&repo.summary.backend, LOCAL_ROOT_PATH_CAPABILITY)
+    backend_summary_supports_local_root_access(&repo.summary.backend)
 }
 
 pub(super) fn repository_supports_local_read_access(repo: &RepositoryRecord) -> bool {
-    repository_supports_local_root_access(repo)
-        && backend_has_capability(&repo.summary.backend, "read")
+    backend_summary_supports_local_read_access(&repo.summary.backend)
 }
 
 pub(super) fn repository_supports_local_write_access(repo: &RepositoryRecord) -> bool {
-    repository_supports_local_root_access(repo)
-        && backend_has_capability(&repo.summary.backend, "write")
+    backend_summary_supports_local_write_access(&repo.summary.backend)
 }
 
 pub(super) fn ensure_repository_supports_local_write_access(

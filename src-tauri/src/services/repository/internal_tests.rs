@@ -4272,6 +4272,42 @@ mod tests {
     }
 
     #[test]
+    fn ensure_repository_storage_paths_use_local_root_capability_for_custom_filesystem_plugin() {
+        let (state, root, repo_root, _thumbnail_root) = create_test_state("custom-local-root");
+        let runtime_root = runtime_plugins_dir(&state.root);
+        write_test_plugin_archive_with_manifest(
+            &runtime_root.join("custom-local-root.momoplug"),
+            test_plugin_manifest_json(
+                "user.custom-local-root",
+                "Custom Local Root",
+                serde_json::json!({
+                    "kind": "filesystem",
+                    "category": "source",
+                    "type": {
+                        "layer": "source",
+                        "kind": "filesystem"
+                    },
+                    "capabilities": ["browse", "read", "write", "localRootPath"],
+                    "runtime": "manifest-only",
+                    "source": "user"
+                }),
+            ),
+        );
+
+        let storage_paths = ensure_repository_storage_paths(
+            &state.root,
+            "repo-custom-local-root",
+            &repo_root,
+            "user.custom-local-root",
+        )
+        .expect("storage paths should resolve");
+
+        assert_eq!(storage_paths.metadata_dir, repo_root.join(REPO_META_DIR));
+
+        fs::remove_dir_all(root).expect("test temp root should be removed");
+    }
+
+    #[test]
     fn ensure_thumbnail_migrates_existing_cache_path_to_repository_metadata_dir() {
         let (state, root, repo_root, thumbnail_root) = create_test_state("thumb-migrate");
         write_test_image(&repo_root.join("cover.png"));
