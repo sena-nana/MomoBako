@@ -767,6 +767,56 @@ mod tests {
     }
 
     #[test]
+    fn repository_cache_file_preview_source_is_limited_to_repository_cache_dir() {
+        let workspace = TestWorkspace::new("repository-cache-preview-source");
+        let service_root = workspace.path("service");
+        let repo_root = workspace.path("repo");
+        install_local_filesystem_test_plugin_archive(&service_root);
+        let state = RepositoryState::from_root(service_root);
+
+        state
+            .create_repository(RepositoryMutationRequest {
+                repo_id: Some("repo-preview-cache".to_string()),
+                name: "缓存预览测试".to_string(),
+                path: repo_root.to_string_lossy().to_string(),
+                backend_plugin_id: Some(LOCAL_FILESYSTEM_PLUGIN_ID.to_string()),
+                backend_config: None,
+                skip_initial_sync: true,
+            })
+            .expect("repository should be created");
+
+        let cache_dir = repo_root.join(REPO_META_DIR).join("cache").join("office-preview");
+        fs::create_dir_all(&cache_dir).expect("repository cache dir should be created");
+        let preview_file = cache_dir.join("preview.pdf");
+        fs::write(&preview_file, b"%PDF-1.4").expect("preview cache file should be written");
+        let outside_file = repo_root.join("outside.pdf");
+        fs::write(&outside_file, b"%PDF-1.4").expect("outside file should be written");
+
+        let response = state
+            .prepare_repository_cache_file_preview_source(RepositoryCacheFilePreviewSourceRequest {
+                repo_id: "repo-preview-cache".to_string(),
+                path: preview_file.to_string_lossy().to_string(),
+                media_type: "application/pdf".to_string(),
+            })
+            .expect("repository cache preview source should register");
+
+        assert_eq!(response.repo_id, "repo-preview-cache");
+        assert_eq!(response.media_type, "application/pdf");
+        assert_eq!(response.size_bytes, 8);
+        assert!(state.open_preview_file_source(&response.token).is_ok());
+
+        let error = state
+            .prepare_repository_cache_file_preview_source(RepositoryCacheFilePreviewSourceRequest {
+                repo_id: "repo-preview-cache".to_string(),
+                path: outside_file.to_string_lossy().to_string(),
+                media_type: "application/pdf".to_string(),
+            })
+            .expect_err("outside repository cache files should be rejected");
+
+        assert!(error.contains("outside repository cache directory"));
+    }
+
+    #[test]
     fn plugin_config_api_persists_values_in_plugin_data_dir() {
         let workspace = TestWorkspace::new("plugin-config");
         let service_root = workspace.path("service");
@@ -873,6 +923,7 @@ mod tests {
             runtime: PluginCallHostRuntime {
                 plugin_id: "user.provider".to_string(),
                 plugin_data_dir: "C:/MomoBako/.service-data/plugin-data/user-provider".to_string(),
+                service_root_dir: "C:/MomoBako/.service-data".to_string(),
                 plugin_config: BTreeMap::from([(
                     "apiKey".to_string(),
                     serde_json::json!("secret"),
@@ -885,6 +936,10 @@ mod tests {
         assert_eq!(
             value["runtime"]["pluginId"],
             serde_json::json!("user.provider")
+        );
+        assert_eq!(
+            value["runtime"]["serviceRootDir"],
+            serde_json::json!("C:/MomoBako/.service-data")
         );
         assert_eq!(
             value["runtime"]["pluginConfig"]["apiKey"],

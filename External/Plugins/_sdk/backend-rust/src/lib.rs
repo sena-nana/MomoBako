@@ -21,6 +21,8 @@ pub struct PluginRuntimeContext {
     pub plugin_id: String,
     pub plugin_data_dir: String,
     #[serde(default)]
+    pub service_root_dir: String,
+    #[serde(default)]
     pub plugin_config: BTreeMap<String, serde_json::Value>,
 }
 

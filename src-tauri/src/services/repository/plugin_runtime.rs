@@ -196,6 +196,7 @@ impl BackendPluginRegistry {
         let runtime_context = PluginCallHostRuntime {
             plugin_id: resolved_manifest.plugin_id.clone(),
             plugin_data_dir: plugin_data_dir.to_string_lossy().to_string(),
+            service_root_dir: self.service_root.to_string_lossy().to_string(),
             plugin_config,
         };
         let response = if let Some(native) = &registration.native {
