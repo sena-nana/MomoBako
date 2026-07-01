@@ -417,7 +417,7 @@
     - `downloader.awaitDownload`
       - Request: `{ taskId }`
       - Response: `DownloadTaskRecord`
-      - Waits for a managed download task to finish and returns final task state.
+      - Waits for a managed download task to finish and returns final task state. Terminal failures are returned as task records with `status="failed"` and an `error` message, so callers can inspect the final state without losing task metadata.
     - `downloader.removeDownload`
       - Request: `{ taskId }`
       - Response: `{ taskId, removed: true }`
