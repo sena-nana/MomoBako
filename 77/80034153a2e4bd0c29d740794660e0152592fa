@@ -1,0 +1,19 @@
+External/Plugins/office-convert/src/lib.rs
+  s_2d5a17782b6bfd::t_24e9c0d8a82ded 1968-1970,1972-2024,2116-2180
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.5",
+  "base_commit_sha": "7780034153a2e4bd0c29d740794660e0152592fa",
+  "prompts": {},
+  "sessions": {
+    "s_2d5a17782b6bfd": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f1cad-dea8-7323-b604-a3effbaf235c",
+        "model": "unknown"
+      },
+      "human_author": "AuraElicase <auraelicase@outlook.com>"
+    }
+  }
+}
