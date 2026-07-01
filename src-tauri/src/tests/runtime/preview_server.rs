@@ -20,6 +20,10 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
+fn plugin_data_dir(service_root: &std::path::Path, plugin_id: &str) -> PathBuf {
+    service_root.join("plugin-data").join(plugin_id.replace('.', "-"))
+}
+
 fn unique_temp_dir(label: &str) -> PathBuf {
     let unique = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -250,5 +254,65 @@ fn repository_query_prepare_preview_file_source_returns_preview_url() {
         response.source_url.as_deref(),
         Some(format!("http://{preview_addr}/preview/{}", response.token).as_str())
     );
+    fs::remove_dir_all(root).expect("test temp root should be removed");
+}
+
+#[test]
+fn repository_runtime_start_cleans_stale_office_helper_state() {
+    let root = unique_temp_dir("runtime-start-office-helper");
+    let previous = std::env::current_dir().expect("cwd should resolve");
+    std::env::set_current_dir(&root).expect("cwd should switch to temp root");
+
+    let service_root = root.join(".service-data");
+    install_local_filesystem_test_plugin_archive(&service_root);
+    let plugin_dir = plugin_data_dir(&service_root, "momobako.service.office-convert");
+    let helper_dir = plugin_dir.join("helpers").join("libreoffice");
+    fs::create_dir_all(&helper_dir).expect("office helper dir should be created");
+    fs::write(helper_dir.join("pid.txt"), "invalid").expect("pid state should be written");
+    fs::write(helper_dir.join("status.json"), "{}").expect("status state should be written");
+    fs::write(helper_dir.join("port.txt"), "23119").expect("port state should be written");
+    fs::write(helper_dir.join("session.txt"), "office").expect("session state should be written");
+    fs::write(helper_dir.join("office-convert-helper.ps1"), "Write-Host helper")
+        .expect("helper script should be written");
+
+    let runtime = crate::services::runtime::RepositoryRuntime::start()
+        .expect("repository runtime should start");
+
+    assert!(!helper_dir.join("pid.txt").exists());
+    assert!(!helper_dir.join("status.json").exists());
+    assert!(!helper_dir.join("port.txt").exists());
+    assert!(!helper_dir.join("session.txt").exists());
+    assert!(!helper_dir.join("office-convert-helper.ps1").exists());
+
+    runtime.shutdown_helpers();
+    std::env::set_current_dir(previous).expect("cwd should restore");
+    fs::remove_dir_all(root).expect("test temp root should be removed");
+}
+
+#[test]
+fn repository_runtime_start_cleans_stale_aria2_helper_state() {
+    let root = unique_temp_dir("runtime-start-aria2-helper");
+    let previous = std::env::current_dir().expect("cwd should resolve");
+    std::env::set_current_dir(&root).expect("cwd should switch to temp root");
+
+    let service_root = root.join(".service-data");
+    install_local_filesystem_test_plugin_archive(&service_root);
+    let plugin_dir = plugin_data_dir(&service_root, "momobako.service.downloader");
+    let helper_dir = plugin_dir.join("helpers").join("aria2");
+    fs::create_dir_all(&helper_dir).expect("aria2 helper dir should be created");
+    fs::write(helper_dir.join("pid.txt"), "invalid").expect("pid state should be written");
+    fs::write(helper_dir.join("status.json"), "{}").expect("status state should be written");
+    fs::write(helper_dir.join("session.txt"), "aria2-session")
+        .expect("session state should be written");
+
+    let runtime = crate::services::runtime::RepositoryRuntime::start()
+        .expect("repository runtime should start");
+
+    assert!(!helper_dir.join("pid.txt").exists());
+    assert!(!helper_dir.join("status.json").exists());
+    assert!(!helper_dir.join("session.txt").exists());
+
+    runtime.shutdown_helpers();
+    std::env::set_current_dir(previous).expect("cwd should restore");
     fs::remove_dir_all(root).expect("test temp root should be removed");
 }

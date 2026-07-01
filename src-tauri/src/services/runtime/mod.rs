@@ -40,6 +40,7 @@ impl RepositoryRuntime {
         let repository_state = Arc::new(RepositoryState::from_root(root.clone()));
         let write_lock = Arc::new(Mutex::new(()));
         repository_state.ensure_initialized()?;
+        repository_state.shutdown_runtime_helpers()?;
         let structure_refresh_tx =
             start_structure_refresh_worker(repository_state.clone(), write_lock.clone())?;
         repository_state.set_structure_refresh_sender(structure_refresh_tx)?;
