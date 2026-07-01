@@ -161,6 +161,7 @@ fn handle_call(input: *const c_char) -> Result<serde_json::Value, String> {
                 serde_json::from_value(request.payload).map_err(|error| error.to_string())?;
             clear_preview_cache(&runtime, payload)
         }
+        "officeConvert.shutdownDaemon" => shutdown_libreoffice_daemon(&runtime),
         method => Err(format!("unsupported method: {method}")),
     }
 }
@@ -285,13 +286,7 @@ fn get_runtime_status(runtime: &RuntimeContext) -> Result<RuntimeStatusResponse,
     let microsoft_office = detect_microsoft_office();
     let libreoffice_system = detect_system_libreoffice();
     let libreoffice_bundle = detect_bundled_libreoffice(runtime);
-    let daemon_status = read_helper_status(
-        &runtime
-            .plugin_data_dir
-            .join("helpers")
-            .join("libreoffice")
-            .join("status.json"),
-    );
+    let daemon_status = current_libreoffice_daemon_status(runtime)?;
     Ok(RuntimeStatusResponse {
         converter_mode: runtime.config.converter_mode.as_str().to_string(),
         microsoft_office,
@@ -868,6 +863,86 @@ fn read_helper_status(path: &Path) -> serde_json::Value {
         })
 }
 
+fn current_libreoffice_daemon_status(runtime: &RuntimeContext) -> Result<serde_json::Value, String> {
+    let status_path = libreoffice_helper_dir(runtime).join("status.json");
+    let pid_path = libreoffice_helper_dir(runtime).join("pid.txt");
+    let mut status = read_helper_status(&status_path);
+    let pid = read_pid(&pid_path)?;
+    let running = pid.map(process_is_running).unwrap_or(false);
+    if let Some(object) = status.as_object_mut() {
+        object.insert("running".to_string(), serde_json::Value::Bool(running));
+        object.insert(
+            "healthy".to_string(),
+            serde_json::Value::Bool(running),
+        );
+        object.insert(
+            "control".to_string(),
+            serde_json::json!({
+                "health": "pid-status",
+                "shutdown": "plugin-call"
+            }),
+        );
+        if !running {
+            object.insert(
+                "error".to_string(),
+                serde_json::Value::String("LibreOffice 守护进程未运行。".to_string()),
+            );
+        }
+    }
+    if let Some(path) = status.get("path").and_then(serde_json::Value::as_str) {
+        write_libreoffice_status(
+            runtime,
+            pid,
+            Path::new(path),
+            running,
+            if running {
+                None
+            } else {
+                Some("LibreOffice 守护进程未运行。".to_string())
+            },
+        )?;
+        return Ok(read_helper_status(&status_path));
+    }
+    Ok(status)
+}
+
+fn shutdown_libreoffice_daemon(runtime: &RuntimeContext) -> Result<serde_json::Value, String> {
+    let helper_dir = libreoffice_helper_dir(runtime);
+    let pid_path = helper_dir.join("pid.txt");
+    let status_path = helper_dir.join("status.json");
+    let pid = read_pid(&pid_path)?;
+    let Some(pid) = pid else {
+        let _ = fs::remove_file(status_path);
+        return Ok(serde_json::json!({
+            "stopped": false,
+            "reason": "daemon-not-running"
+        }));
+    };
+    stop_process(pid)?;
+    let _ = fs::remove_file(pid_path);
+    let status = serde_json::json!({
+        "running": false,
+        "healthy": false,
+        "pid": pid,
+        "path": read_helper_status(&status_path).get("path").cloned().unwrap_or(serde_json::Value::Null),
+        "updatedAt": OffsetDateTime::now_utc().format(&Rfc3339).map_err(time_error)?,
+        "error": "LibreOffice 守护进程已关闭。",
+        "control": {
+            "health": "pid-status",
+            "shutdown": "plugin-call"
+        }
+    });
+    fs::write(
+        &status_path,
+        serde_json::to_string_pretty(&status).map_err(|error| error.to_string())?,
+    )
+    .map_err(io_error)?;
+    Ok(serde_json::json!({
+        "stopped": true,
+        "pid": pid
+    }))
+}
+
 fn write_libreoffice_status(
     runtime: &RuntimeContext,
     pid: Option<u32>,
@@ -937,6 +1012,37 @@ fn process_is_running(pid: u32) -> bool {
             .status()
             .map(|status| status.success())
             .unwrap_or(false)
+    }
+}
+
+fn stop_process(pid: u32) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        let output = Command::new("taskkill")
+            .args(["/PID", &pid.to_string(), "/T", "/F"])
+            .output()
+            .map_err(|error| format!("failed to stop LibreOffice daemon: {error}"))?;
+        if output.status.success() {
+            return Ok(());
+        }
+        return Err(format!(
+            "failed to stop LibreOffice daemon: {}",
+            command_output_message(&output)
+        ));
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let output = Command::new("kill")
+            .args(["-TERM", &pid.to_string()])
+            .output()
+            .map_err(|error| format!("failed to stop LibreOffice daemon: {error}"))?;
+        if output.status.success() {
+            return Ok(());
+        }
+        Err(format!(
+            "failed to stop LibreOffice daemon: {}",
+            command_output_message(&output)
+        ))
     }
 }
 

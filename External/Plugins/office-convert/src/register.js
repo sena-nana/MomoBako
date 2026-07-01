@@ -23,6 +23,7 @@ function createSettingsPage(ctx) {
       const repositories = ref([]);
       const selectedRepoId = ref("");
       const clearing = ref(false);
+      const stoppingDaemon = ref(false);
       const loading = ref(false);
       const message = ref("");
       const error = ref("");
@@ -83,6 +84,28 @@ function createSettingsPage(ctx) {
         }
       }
 
+      async function shutdownDaemon() {
+        if (stoppingDaemon.value) return;
+        stoppingDaemon.value = true;
+        error.value = "";
+        message.value = "";
+        try {
+          const response = await ctx.callPlugin({
+            pluginId: OFFICE_CONVERT_PLUGIN_ID,
+            method: "officeConvert.shutdownDaemon",
+            payload: {},
+          });
+          message.value = response.payload?.stopped
+            ? "LibreOffice 守护进程已关闭"
+            : "当前没有运行中的 LibreOffice 守护进程";
+          await loadAll();
+        } catch (cause) {
+          error.value = cause instanceof Error ? cause.message : String(cause);
+        } finally {
+          stoppingDaemon.value = false;
+        }
+      }
+
       function row(label, value) {
         return h("div", { class: "asset-meta__row file-metadata-card__source-row" }, [
           h("span", label),
@@ -118,8 +141,18 @@ function createSettingsPage(ctx) {
               row("自带 LibreOffice", statusText(status.value.libreofficeBundle)),
               row("自带下载地址", status.value.bundledDownloadUrl || "未配置"),
               row("守护进程", daemonText(status.value.daemon)),
+              row("健康检查", status.value.daemon?.healthy ? "通过" : "未通过"),
+              row("控制方式", daemonControlText(status.value.daemon)),
             ])
           : h("p", { class: "repository-add-popover__note" }, "读取当前转换器、自带运行时与守护进程状态。"),
+        h("div", { class: "file-metadata-card__source-row", style: "gap: 8px; margin-top: 8px;" }, [
+          h("button", {
+            type: "button",
+            class: "repository-add-popover__action",
+            disabled: stoppingDaemon.value || !status.value?.daemon?.running,
+            onClick: shutdownDaemon,
+          }, stoppingDaemon.value ? "关闭中" : "关闭守护进程"),
+        ]),
         h("div", { class: "file-metadata-card__source-head", style: "margin-top: 12px;" }, [
           h("div", [
             h("p", { class: "asset-browser__eyebrow" }, "Preview Cache"),
@@ -171,4 +204,12 @@ function daemonText(daemon) {
     return [pid, updatedAt].filter(Boolean).join(" | ");
   }
   return daemon.error || "未运行";
+}
+
+function daemonControlText(daemon) {
+  if (!daemon?.control) return "未声明";
+  const parts = [];
+  if (daemon.control.health) parts.push(`health=${daemon.control.health}`);
+  if (daemon.control.shutdown) parts.push(`shutdown=${daemon.control.shutdown}`);
+  return parts.join(" | ") || "未声明";
 }

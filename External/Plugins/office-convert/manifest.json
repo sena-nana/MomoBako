@@ -70,7 +70,8 @@
       "methods": [
         "officeConvert.ensurePreviewPdf",
         "officeConvert.getRuntimeStatus",
-        "officeConvert.clearPreviewCache"
+        "officeConvert.clearPreviewCache",
+        "officeConvert.shutdownDaemon"
       ]
     }
   },
