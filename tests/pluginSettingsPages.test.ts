@@ -253,6 +253,119 @@ describe("plugin settings pages", () => {
     expect(screen.getByText("转换模式与自动下载选项沿用下方插件通用配置字段保存。")).toBeInTheDocument();
   });
 
+  it("refreshes office self-check diagnostics after running runtime self-check", async () => {
+    const manifest = officeConvertSettingsManifest();
+    let selfCheckCompleted = false;
+    mockPluginCallResponse("momobako.service.office-convert", "officeConvert.getRuntimeStatus", () => ({
+      converterMode: "libreoffice",
+      autoDownloadLibreOffice: true,
+      bundledDownloadUrl: "https://example.test/libreoffice.msi",
+      microsoftOffice: {
+        available: false,
+        reason: "未探测到系统 Microsoft Office 安装。",
+      },
+      libreofficeSystem: {
+        available: false,
+        reason: "未探测到系统 LibreOffice 安装。",
+      },
+      libreofficeBundle: {
+        available: true,
+        path: "C:/MomoBako/.service-data/plugin-data/momobako-service-office-convert/runtime/program/soffice.exe",
+        version: "25.8.3",
+      },
+      daemon: {
+        running: true,
+        healthy: true,
+        helperType: "bundled",
+        pid: 23119,
+        port: 21345,
+        baseUrl: "http://127.0.0.1:21345",
+        sofficeReady: true,
+        sofficePid: 23120,
+        unoAvailable: true,
+        pythonValid: true,
+        pythonPath: "C:/MomoBako/.service-data/plugin-data/momobako-service-office-convert/runtime/program/python.exe",
+        control: {
+          health: "/health",
+          shutdown: "/shutdown",
+        },
+        lastConvert: {
+          phase: "completed",
+          conversionMode: "libreoffice",
+          sourcePath: "C:/Mock/AnimeAssets/Docs/demo.pptx",
+          updatedAt: "2026-07-01T08:00:30Z",
+        },
+        lastSelfCheck: selfCheckCompleted
+          ? {
+              ok: true,
+              converter: "libreoffice",
+              converterVersion: "25.8.3",
+              converterPath: "C:/MomoBako/.service-data/plugin-data/momobako-service-office-convert/runtime/program/soffice.exe",
+              conversionMode: "libreoffice",
+              samplePath: "C:/Mock/office/self-check.docx",
+              pdfPath: "C:/Mock/office/self-check.pdf",
+              pdfSizeBytes: 4096,
+              durationMs: 1500,
+              completedAt: "2026-07-01T08:01:00Z",
+            }
+          : null,
+        updatedAt: "2026-07-01T08:00:00Z",
+      },
+    }));
+    mockPluginCallResponse("momobako.service.office-convert", "officeConvert.runRuntimeSelfCheck", () => {
+      selfCheckCompleted = true;
+      return {
+        ok: true,
+        converter: "libreoffice",
+        converterVersion: "25.8.3",
+        converterPath: "C:/MomoBako/.service-data/plugin-data/momobako-service-office-convert/runtime/program/soffice.exe",
+        conversionMode: "libreoffice",
+        samplePath: "C:/Mock/office/self-check.docx",
+        pdfPath: "C:/Mock/office/self-check.pdf",
+        pdfSizeBytes: 4096,
+        durationMs: 1500,
+      };
+    });
+    seedMockRepositories([{
+      repoId: "repo-main-001",
+      name: "Mock Anime Repo",
+      path: "C:/Mock/AnimeAssets",
+      backend: {
+        pluginId: "momobako.local-filesystem",
+        kind: "filesystem",
+        name: "Local Filesystem",
+        capabilities: ["browse"],
+      },
+      status: "ready",
+      assetCount: 12,
+      updatedAt: "2026-07-01T08:00:00Z",
+    }]);
+    seedMockPlugins([manifest]);
+
+    await syncRegisteredFrontendPluginManifests([manifest]);
+    const page = getPluginSettingsPage(manifest.pluginId);
+    expect(page?.component).toBeDefined();
+
+    render(page!.component, {
+      props: {
+        manifest,
+      },
+    });
+
+    expect(await screen.findByText("暂无记录")).toBeInTheDocument();
+    expect(screen.getByText("completed | libreoffice | C:/Mock/AnimeAssets/Docs/demo.pptx | 2026-07-01T08:00:30Z")).toBeInTheDocument();
+    expect(screen.getByText("health=/health | shutdown=/shutdown")).toBeInTheDocument();
+    expect(screen.getByText("http://127.0.0.1:21345")).toBeInTheDocument();
+
+    await fireEvent.click(screen.getByRole("button", { name: "运行自检" }));
+
+    expect(await screen.findByText("运行时自检通过")).toBeInTheDocument();
+    expect(await screen.findByText("通过 | libreoffice | 25.8.3 | libreoffice | 4096 bytes | 1500 ms | 2026-07-01T08:01:00Z")).toBeInTheDocument();
+    expect(screen.getByText("libreoffice | 25.8.3 | C:/MomoBako/.service-data/plugin-data/momobako-service-office-convert/runtime/program/soffice.exe")).toBeInTheDocument();
+    expect(screen.getByText("C:/Mock/office/self-check.docx")).toBeInTheDocument();
+    expect(screen.getByText("C:/Mock/office/self-check.pdf")).toBeInTheDocument();
+  });
+
   it("allows shutting down a running office daemon and refreshes runtime status", async () => {
     const manifest = officeConvertSettingsManifest();
     let runtimeStatusReads = 0;
