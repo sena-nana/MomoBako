@@ -166,6 +166,7 @@ fn handle_call(input: *const c_char) -> Result<serde_json::Value, String> {
                 serde_json::from_value(request.payload).map_err(|error| error.to_string())?;
             clear_preview_cache(&runtime, payload)
         }
+        "officeConvert.runRuntimeSelfCheck" => run_runtime_self_check(&runtime),
         "officeConvert.shutdownDaemon" => shutdown_libreoffice_daemon(&runtime),
         method => Err(format!("unsupported method: {method}")),
     }
@@ -303,6 +304,60 @@ fn get_runtime_status(runtime: &RuntimeContext) -> Result<RuntimeStatusResponse,
         auto_download_libre_office: runtime.config.auto_download_libreoffice,
         bundled_download_url: DEFAULT_LIBREOFFICE_DOWNLOAD_URL.to_string(),
     })
+}
+
+fn run_runtime_self_check(runtime: &RuntimeContext) -> Result<serde_json::Value, String> {
+    let helper_dir = libreoffice_helper_dir(runtime);
+    fs::create_dir_all(&helper_dir).map_err(io_error)?;
+    let sample_dir = helper_dir.join("self-check");
+    if sample_dir.is_dir() {
+        let _ = fs::remove_dir_all(&sample_dir);
+    }
+    fs::create_dir_all(&sample_dir).map_err(io_error)?;
+    let source_path = sample_dir.join("self-check.docx");
+    let pdf_path = sample_dir.join("self-check.pdf");
+    write_minimal_docx(&source_path)?;
+    let converter = select_converter(runtime, OfficeFamily::Word)?;
+    let temp_dir = sample_dir.join("temp");
+    fs::create_dir_all(&temp_dir).map_err(io_error)?;
+    let started_at = OffsetDateTime::now_utc()
+        .format(&Rfc3339)
+        .map_err(time_error)?;
+    let result = match converter.kind {
+        ConverterKind::MicrosoftOffice => {
+            convert_with_microsoft_office(&converter, &source_path, &pdf_path).map(|_| None)
+        }
+        ConverterKind::LibreOfficeSystem | ConverterKind::LibreOfficeBundled => {
+            convert_with_libreoffice(runtime, &converter, &source_path, &pdf_path, &temp_dir)
+                .map(|_| latest_conversion_mode(runtime))
+        }
+    };
+    let completed_at = OffsetDateTime::now_utc()
+        .format(&Rfc3339)
+        .map_err(time_error)?;
+    let (ok, error, conversion_mode) = match result {
+        Ok(mode) => (pdf_path.is_file(), None, mode),
+        Err(error) => (false, Some(error), None),
+    };
+    write_runtime_self_check_status(
+        runtime,
+        serde_json::json!({
+            "startedAt": started_at,
+            "completedAt": completed_at,
+            "ok": ok,
+            "converter": converter.result_label(),
+            "conversionMode": conversion_mode,
+            "pdfPath": if ok { Some(pdf_path.to_string_lossy().to_string()) } else { None::<String> },
+            "error": error,
+        }),
+    )?;
+    Ok(serde_json::json!({
+        "ok": ok,
+        "converter": converter.result_label(),
+        "conversionMode": conversion_mode,
+        "pdfPath": if ok { Some(pdf_path.to_string_lossy().to_string()) } else { None::<String> },
+        "error": error,
+    }))
 }
 
 fn detect_microsoft_office() -> ConverterStatus {
@@ -1374,6 +1429,75 @@ fn write_libreoffice_conversion_status(
     .map_err(io_error)
 }
 
+fn latest_conversion_mode(runtime: &RuntimeContext) -> Option<String> {
+    read_helper_status(&libreoffice_helper_dir(runtime).join("status.json"))
+        .get("lastConvert")
+        .and_then(|value| value.get("conversionMode"))
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string)
+}
+
+fn write_runtime_self_check_status(
+    runtime: &RuntimeContext,
+    payload: serde_json::Value,
+) -> Result<(), String> {
+    let status_path = libreoffice_helper_dir(runtime).join("status.json");
+    let mut status = read_helper_status(&status_path);
+    if let Some(object) = status.as_object_mut() {
+        object.insert("lastSelfCheck".to_string(), payload);
+    }
+    fs::write(
+        status_path,
+        serde_json::to_string_pretty(&status).map_err(|error| error.to_string())?,
+    )
+    .map_err(io_error)
+}
+
+fn write_minimal_docx(path: &Path) -> Result<(), String> {
+    let file = fs::File::create(path).map_err(io_error)?;
+    let mut archive = zip::ZipWriter::new(file);
+    let options = zip::write::SimpleFileOptions::default();
+    let entries = [
+        ("[Content_Types].xml", CONTENT_TYPES_XML),
+        ("_rels/.rels", PACKAGE_RELS_XML),
+        ("word/document.xml", WORD_DOCUMENT_XML),
+        ("word/_rels/document.xml.rels", WORD_DOCUMENT_RELS_XML),
+    ];
+    for (name, content) in entries {
+        archive.start_file(name, options).map_err(|error| error.to_string())?;
+        std::io::Write::write_all(&mut archive, content.as_bytes()).map_err(io_error)?;
+    }
+    archive.finish().map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+const CONTENT_TYPES_XML: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+</Types>"#;
+
+const PACKAGE_RELS_XML: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+</Relationships>"#;
+
+const WORD_DOCUMENT_RELS_XML: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"></Relationships>"#;
+
+const WORD_DOCUMENT_XML: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p>
+      <w:r>
+        <w:t>MomoBako Office Convert Self Check</w:t>
+      </w:r>
+    </w:p>
+    <w:sectPr/>
+  </w:body>
+</w:document>"#;
+
 fn cleanup_stale_libreoffice_state(plugin_data_dir: &Path) -> Result<(), String> {
     let helper_dir = plugin_data_dir.join("helpers").join("libreoffice");
     let pid_path = helper_dir.join("pid.txt");
@@ -1965,5 +2089,16 @@ mod tests {
         });
 
         assert_eq!(last_convert.get("conversionMode"), Some(&serde_json::json!("uno")));
+    }
+
+    #[test]
+    fn minimal_docx_writer_creates_docx_package() {
+        let workspace = TestWorkspace::new("self-check-docx");
+        let path = workspace.path("self-check.docx");
+        write_minimal_docx(&path).expect("self-check docx should write");
+        let file = fs::File::open(&path).expect("docx should exist");
+        let mut archive = zip::ZipArchive::new(file).expect("docx should be a zip archive");
+        assert!(archive.by_name("[Content_Types].xml").is_ok());
+        assert!(archive.by_name("word/document.xml").is_ok());
     }
 }

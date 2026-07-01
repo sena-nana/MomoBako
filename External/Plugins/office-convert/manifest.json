@@ -71,6 +71,7 @@
         "officeConvert.ensurePreviewPdf",
         "officeConvert.getRuntimeStatus",
         "officeConvert.clearPreviewCache",
+        "officeConvert.runRuntimeSelfCheck",
         "officeConvert.shutdownDaemon"
       ]
     }

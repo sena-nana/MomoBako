@@ -24,6 +24,7 @@ function createSettingsPage(ctx) {
       const selectedRepoId = ref("");
       const clearing = ref(false);
       const stoppingDaemon = ref(false);
+      const selfChecking = ref(false);
       const loading = ref(false);
       const message = ref("");
       const error = ref("");
@@ -106,6 +107,27 @@ function createSettingsPage(ctx) {
         }
       }
 
+      async function runSelfCheck() {
+        if (selfChecking.value) return;
+        selfChecking.value = true;
+        error.value = "";
+        message.value = "";
+        try {
+          const response = await ctx.callPlugin({
+            pluginId: OFFICE_CONVERT_PLUGIN_ID,
+            method: "officeConvert.runRuntimeSelfCheck",
+            payload: {},
+          });
+          const ok = response.payload?.ok === true;
+          message.value = ok ? "运行时自检通过" : (response.payload?.error || "运行时自检失败");
+          await loadAll();
+        } catch (cause) {
+          error.value = cause instanceof Error ? cause.message : String(cause);
+        } finally {
+          selfChecking.value = false;
+        }
+      }
+
       function row(label, value) {
         return h("div", { class: "asset-meta__row file-metadata-card__source-row" }, [
           h("span", label),
@@ -152,9 +174,16 @@ function createSettingsPage(ctx) {
               row("Python 路径", status.value.daemon?.pythonPath || "未上报"),
               row("控制方式", daemonControlText(status.value.daemon)),
               row("最近转换", daemonConvertText(status.value.daemon)),
+              row("最近自检", daemonSelfCheckText(status.value.daemon)),
             ])
           : h("p", { class: "repository-add-popover__note" }, "读取当前转换器、自带运行时与守护进程状态。"),
         h("div", { class: "file-metadata-card__source-row", style: "gap: 8px; margin-top: 8px;" }, [
+          h("button", {
+            type: "button",
+            class: "repository-add-popover__action",
+            disabled: selfChecking.value,
+            onClick: runSelfCheck,
+          }, selfChecking.value ? "自检中" : "运行自检"),
           h("button", {
             type: "button",
             class: "repository-add-popover__action",
@@ -244,5 +273,16 @@ function daemonConvertText(daemon) {
   if (lastConvert.conversionMode) parts.push(lastConvert.conversionMode);
   if (lastConvert.sourcePath) parts.push(lastConvert.sourcePath);
   if (lastConvert.updatedAt) parts.push(lastConvert.updatedAt);
+  return parts.join(" | ");
+}
+
+function daemonSelfCheckText(daemon) {
+  const lastSelfCheck = daemon?.lastSelfCheck;
+  if (!lastSelfCheck) return "暂无记录";
+  const parts = [];
+  parts.push(lastSelfCheck.ok ? "通过" : "失败");
+  if (lastSelfCheck.converter) parts.push(lastSelfCheck.converter);
+  if (lastSelfCheck.conversionMode) parts.push(lastSelfCheck.conversionMode);
+  if (lastSelfCheck.completedAt) parts.push(lastSelfCheck.completedAt);
   return parts.join(" | ");
 }
