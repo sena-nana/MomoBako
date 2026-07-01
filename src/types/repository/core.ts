@@ -810,6 +810,16 @@ export type OfficeConvertDaemonLastConvert = {
   error?: string | null;
 };
 
+export type OfficeConvertDaemonLastSelfCheck = {
+  startedAt?: string | null;
+  completedAt?: string | null;
+  ok?: boolean | null;
+  converter?: string | null;
+  conversionMode?: string | null;
+  pdfPath?: string | null;
+  error?: string | null;
+};
+
 export type OfficeConvertDaemonStatus = {
   running: boolean;
   healthy?: boolean | null;
@@ -827,6 +837,7 @@ export type OfficeConvertDaemonStatus = {
   error?: string | null;
   control?: OfficeConvertDaemonControl | null;
   lastConvert?: OfficeConvertDaemonLastConvert | null;
+  lastSelfCheck?: OfficeConvertDaemonLastSelfCheck | null;
 };
 
 export type OfficeConvertRuntimeStatus = {
