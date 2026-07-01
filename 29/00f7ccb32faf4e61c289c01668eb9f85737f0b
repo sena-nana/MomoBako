@@ -1,0 +1,79 @@
+src-tauri/src/lib.rs
+  s_e584de4eac847c::t_067adf35542463 15-17,309-316,725
+src-tauri/src/services/repository/contracts.rs
+  s_e584de4eac847c::t_04bf12ede7fb9b 48,229,686-700
+src-tauri/src/services/repository/facade.rs
+  s_e584de4eac847c::t_fa52f4a5123afc 158-164
+src-tauri/src/services/repository/query.rs
+  s_e584de4eac847c::t_82afdfff403744 25-29,46,122-126,135-136,183-206,457-458,637-653
+src-tauri/src/services/repository/read_model.rs
+  s_e584de4eac847c::t_57d977377d02fc 391,403,1690,1717-1718,1721-1722,1726,1744,1767,2311,2336-2337,2340-2341,2345,2360,2382,2416,2441-2442,2445-2446,2450,2465,2501
+src-tauri/src/services/repository/registry_store.rs
+  s_e584de4eac847c::t_7ad487ed5958a9 352-354
+src-tauri/src/services/repository/schema.rs
+  s_e584de4eac847c::t_a71176a0c44e05 12,74
+src-tauri/src/viewmodels/repository/interaction.rs
+  s_e584de4eac847c::t_4f470b064fada1 4,236-244
+src-tauri/src/viewmodels/repository/playback.rs
+  s_e584de4eac847c::t_206533dd66ce33 28,45
+src-tauri/src/viewmodels/repository/query.rs
+  s_e584de4eac847c::t_6d835bebedd267 71
+src/composables/useRepositoryWorkspace.ts
+  s_e584de4eac847c::t_04e0eb1e505e5c 27
+src/composables/workspace/facade.ts
+  s_e584de4eac847c::t_da5bd084daaeba 3,50,59,62,71-72,86,204-213,250-252,314-315,435
+src/composables/workspace/fileOperations.ts
+  s_e584de4eac847c::t_56646868c5c3f9 10,20,55,68-75,85-93,256-258,277,284-291,312,455,457,460
+src/composables/workspace/files.ts
+  s_e584de4eac847c::t_1fa4216e7bc33a 313
+src/composables/workspace/index.ts
+  s_e584de4eac847c::t_00a29eac55b85f 9,24
+src/composables/workspace/lifecycle.ts
+  s_e584de4eac847c::t_7eabc8997bc815 17,167,251,566
+src/composables/workspace/navigation.ts
+  s_e584de4eac847c::t_e159eb27088726 6,25,104,169,174-177
+src/composables/workspace/selectors.ts
+  s_e584de4eac847c::t_9314ffc9babc85 5,19,21-22,40-118,120-122,131,135,139,155
+src/composables/workspace/state.ts
+  s_e584de4eac847c::t_925a82c0619f12 25-27,116,165-185
+src/composables/workspace/sync.ts
+  s_e584de4eac847c::t_869c6d96b6e404 85,117
+src/layouts/SecondaryPanel.vue
+  s_e584de4eac847c::t_dd9a55d5e78160 53-54,281,300,330
+src/layouts/WorkspaceSidebarShortcuts.vue
+  s_e584de4eac847c::t_aa2f0df04b9c2d 6,10,33
+src/layouts/useFolderSidebarUi.ts
+  s_e584de4eac847c::t_1d1c1adbcc2999 28,50,71
+src/layouts/useSidebarShortcutsUi.ts
+  s_e584de4eac847c::t_02700aea87acbd 6,15,18,34,43,45-46,54,56-57,67-68,70,72,74,78,80-81,97-98,101,124,131
+src/pages/workspace/files/FileBrowserPanel.vue
+  s_e584de4eac847c::t_3dda583ff14d26 64,151,156,159,162,172,185
+src/pages/workspace/files/useFileInteraction.ts
+  s_e584de4eac847c::t_ca23b491282017 35,45,77
+src/pages/workspace/files/useFilesSurfaceBindings.ts
+  s_e584de4eac847c::t_d0e39b5670d143 5,47,50,68-69,138,141,160-161
+src/pages/workspace/playlists/usePlayerUi.ts
+  s_e584de4eac847c::t_62830b161554c6 22,75
+src/pages/workspace/repository/useWorkspaceHomeViewModel.ts
+  s_e584de4eac847c::t_368e93939df9f6 45,62,71,73,132-133,210,215,221-222,224-226,238,241,250,262,330,452,611,613,644-645
+src/services/repositoryApi/files.ts
+  s_e584de4eac847c::t_2fe01677bd9330 4-5,36-60,74-81,85-92,103-117
+src/types/repository/core.ts
+  s_e584de4eac847c::t_8ddefd77cb3adb 42,145,599-609
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.5",
+  "base_commit_sha": "2900f7ccb32faf4e61c289c01668eb9f85737f0b",
+  "prompts": {},
+  "sessions": {
+    "s_e584de4eac847c": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f1e10-b3b1-78d1-8a8f-7bc529ca9cbe",
+        "model": "unknown"
+      },
+      "human_author": "AuraElicase <auraelicase@outlook.com>"
+    }
+  }
+}
