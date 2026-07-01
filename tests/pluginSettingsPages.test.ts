@@ -476,6 +476,7 @@ describe("plugin settings pages", () => {
 
     expect(await screen.findByText("aria2 运行状态")).toBeInTheDocument();
     expect(await screen.findByText("http://127.0.0.1:6800/jsonrpc")).toBeInTheDocument();
+    expect(screen.getByText("https://example.test/aria2.zip")).toBeInTheDocument();
     expect(getPluginCallCalls("momobako.service.downloader", "downloader.getRuntimeStatus")).toHaveLength(1);
   });
 });

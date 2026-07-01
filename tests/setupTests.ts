@@ -1475,6 +1475,8 @@ vi.mock("@tauri-apps/api/core", () => ({
           method,
           payload: {
             converterMode: "auto",
+            autoDownloadLibreOffice: true,
+            bundledDownloadUrl: "https://example.test/libreoffice.msi",
             microsoftOffice: {
               available: true,
               path: "C:/Program Files/Microsoft Office/root/Office16/WINWORD.EXE",
@@ -1541,6 +1543,7 @@ vi.mock("@tauri-apps/api/core", () => ({
             },
             queueSize: 0,
             downloadsDir: "C:/MomoBako/.service-data/plugin-data/momobako-service-downloader/downloads",
+            downloadUrl: "https://example.test/aria2.zip",
           },
         };
       }
