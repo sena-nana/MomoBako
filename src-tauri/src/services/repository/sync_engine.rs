@@ -53,7 +53,11 @@ fn collect_directory_records(
         .map_err(|error| error.to_string())?
         .to_string_lossy()
         .replace('\\', "/");
-    let path = if relative == "." { String::new() } else { relative };
+    let path = if relative == "." {
+        String::new()
+    } else {
+        relative
+    };
     let parent_path = parent_relative_path(&path);
     let name = if path.is_empty() {
         String::new()
@@ -223,18 +227,19 @@ pub(super) fn sync_repository_files(
                 )))
             },
         )?;
+    let source_metadata_keys =
+        source_metadata_mirror_keys(service_root, &repo.backend_record.plugin_id);
     let mut existing_by_path = existing
         .into_iter()
         .map(|(_asset_id, path, record)| (path, record))
         .collect::<BTreeMap<_, _>>();
-    let directory_records = build_directory_records_from_files(&repo_root, &files).map_err(
-        |error| {
+    let directory_records =
+        build_directory_records_from_files(&repo_root, &files).map_err(|error| {
             rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::new(
                 std::io::ErrorKind::Other,
                 error,
             )))
-        },
-    )?;
+        })?;
 
     let now = now_rfc3339();
     let mut created_assets = 0_i64;
@@ -329,11 +334,11 @@ pub(super) fn sync_repository_files(
                 plugin_defaults_by_path.get(&file.relative_path),
                 false,
             )?;
-            sync_netease_source_metadata(
+            sync_mirrored_source_metadata(
                 tx,
                 &asset_id,
-                file.provider_id.as_deref(),
                 file.source_payload.as_ref(),
+                &source_metadata_keys,
             )?;
             updated_assets += 1;
             insert_event(
@@ -428,11 +433,11 @@ pub(super) fn sync_repository_files(
                 &palette,
                 plugin_defaults_by_path.get(&file.relative_path),
             )?;
-            sync_netease_source_metadata(
+            sync_mirrored_source_metadata(
                 tx,
                 &asset_id,
-                file.provider_id.as_deref(),
                 file.source_payload.as_ref(),
+                &source_metadata_keys,
             )?;
             insert_event(
                 tx,
@@ -560,48 +565,41 @@ pub(super) fn apply_revision_state(
     Ok(())
 }
 
-pub(super) fn sync_netease_source_metadata(
+pub(super) fn source_metadata_mirror_keys(service_root: &Path, plugin_id: &str) -> Vec<String> {
+    backend_plugin_registry(service_root)
+        .manifest(plugin_id)
+        .and_then(|manifest| manifest.contributes.as_object())
+        .and_then(|contributes| contributes.get("source"))
+        .and_then(serde_json::Value::as_object)
+        .and_then(|source| source.get("metadataMirrorKeys"))
+        .and_then(serde_json::Value::as_array)
+        .map(|keys| {
+            keys.iter()
+                .filter_map(serde_json::Value::as_str)
+                .map(ToString::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+pub(super) fn sync_mirrored_source_metadata(
     connection: &Connection,
     asset_id: &str,
-    provider_id: Option<&str>,
     source_payload: Option<&serde_json::Value>,
+    metadata_keys: &[String],
 ) -> Result<(), rusqlite::Error> {
-    if provider_id != Some(NETEASE_CLOUD_MUSIC_PROVIDER_ID) {
+    if metadata_keys.is_empty() {
         return Ok(());
     }
     let Some(source_payload) = source_payload else {
         return Ok(());
     };
-    for (key, value) in netease_source_metadata_patch(source_payload) {
-        upsert_metadata_value(connection, asset_id, &key, &value)?;
+    for key in metadata_keys {
+        if let Some(value) = source_payload.get(key).cloned() {
+            upsert_metadata_value(connection, asset_id, key, &value)?;
+        }
     }
     Ok(())
-}
-
-fn netease_source_metadata_patch(
-    source_payload: &serde_json::Value,
-) -> BTreeMap<String, serde_json::Value> {
-    const KEYS: &[&str] = &[
-        "songId",
-        "songName",
-        "artists",
-        "albumName",
-        "coverUrl",
-        "durationMs",
-        "playlistId",
-        "playlistName",
-        "playlistCategory",
-        "provider",
-        "accountId",
-    ];
-    KEYS.iter()
-        .filter_map(|key| {
-            source_payload
-                .get(*key)
-                .cloned()
-                .map(|value| ((*key).to_string(), value))
-        })
-        .collect()
 }
 
 fn rebuild_netease_directory_cache(
@@ -619,19 +617,22 @@ fn rebuild_netease_directory_cache(
         if directory_path.is_empty() {
             continue;
         }
-        groups.entry(directory_path).or_default().push(FileSystemEntry {
-            path: file.relative_path.clone(),
-            name: file.filename.clone(),
-            kind: FileSystemEntryKind::File,
-            extension: Some(file.extension.clone()),
-            size_bytes: Some(file.size_bytes),
-            modified_at: Some(file.modified_at.clone()),
-            is_virtual: file.is_virtual,
-            provider_id: file.provider_id.clone(),
-            provider_item_id: file.provider_item_id.clone(),
-            source_payload: file.source_payload.clone(),
-            local_absolute_path: file.local_absolute_path.clone(),
-        });
+        groups
+            .entry(directory_path)
+            .or_default()
+            .push(FileSystemEntry {
+                path: file.relative_path.clone(),
+                name: file.filename.clone(),
+                kind: FileSystemEntryKind::File,
+                extension: Some(file.extension.clone()),
+                size_bytes: Some(file.size_bytes),
+                modified_at: Some(file.modified_at.clone()),
+                is_virtual: file.is_virtual,
+                provider_id: file.provider_id.clone(),
+                provider_item_id: file.provider_item_id.clone(),
+                source_payload: file.source_payload.clone(),
+                local_absolute_path: file.local_absolute_path.clone(),
+            });
     }
     let refreshed_at = now_rfc3339();
     for (directory_path, entries) in groups {

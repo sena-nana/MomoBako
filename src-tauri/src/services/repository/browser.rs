@@ -74,8 +74,9 @@ fn load_cached_directory_entries(
         })
         .collect::<Vec<_>>();
 
-    let mut stmt = connection.prepare(
-        r#"
+    let mut stmt = connection
+        .prepare(
+            r#"
         SELECT
           path,
           filename,
@@ -96,7 +97,8 @@ fn load_cached_directory_entries(
           )
         ORDER BY filename COLLATE NOCASE
         "#,
-    ).map_err(db_error)?;
+        )
+        .map_err(db_error)?;
     let file_entries = stmt
         .query_map(params![repo_id, current_path], |row| {
             Ok(FileSystemEntry {
@@ -130,11 +132,21 @@ fn paginate_listed_entries(
     let total_entries = entries.len();
     let start = offset.min(total_entries);
     let limit = limit.unwrap_or(total_entries.saturating_sub(start));
-    let paged_entries = entries.into_iter().skip(start).take(limit).collect::<Vec<_>>();
+    let paged_entries = entries
+        .into_iter()
+        .skip(start)
+        .take(limit)
+        .collect::<Vec<_>>();
     let loaded_count = start.saturating_add(paged_entries.len()).min(total_entries);
     let has_more = loaded_count < total_entries;
     let next_offset = has_more.then_some(loaded_count);
-    (paged_entries, total_entries, loaded_count, next_offset, has_more)
+    (
+        paged_entries,
+        total_entries,
+        loaded_count,
+        next_offset,
+        has_more,
+    )
 }
 
 fn netease_cache_fresh(record: &NeteaseDirectoryCacheRecord) -> bool {
@@ -150,6 +162,7 @@ fn mirror_netease_entries_to_assets(
     repo_id: &str,
     entries: &[FileSystemEntry],
     synced_at: &str,
+    source_metadata_keys: &[String],
 ) -> Result<(), rusqlite::Error> {
     for entry in entries {
         if !matches!(entry.kind, FileSystemEntryKind::File) {
@@ -159,10 +172,7 @@ fn mirror_netease_entries_to_assets(
             continue;
         }
         let asset_id = asset_id_for_path(repo_id, &entry.path);
-        let extension = entry
-            .extension
-            .clone()
-            .unwrap_or_else(|| "mp3".to_string());
+        let extension = entry.extension.clone().unwrap_or_else(|| "mp3".to_string());
         let modified_at = entry
             .modified_at
             .clone()
@@ -218,13 +228,12 @@ fn mirror_netease_entries_to_assets(
             None,
             false,
         )?;
-        sync_netease_source_metadata(
+        sync_mirrored_source_metadata(
             tx,
             &asset_id,
-            entry.provider_id.as_deref(),
             entry.source_payload.as_ref(),
-        )
-        ?;
+            source_metadata_keys,
+        )?;
     }
     Ok(())
 }
@@ -238,8 +247,9 @@ fn load_netease_directory_page(
     offset: usize,
     limit: usize,
 ) -> Result<DirectoryPageResult, String> {
-    let cache_record = load_netease_directory_cache(connection, &repo.summary.repo_id, directory_path)
-        .map_err(db_error)?;
+    let cache_record =
+        load_netease_directory_cache(connection, &repo.summary.repo_id, directory_path)
+            .map_err(db_error)?;
     let cache_entries = load_netease_directory_entries_page(
         connection,
         &repo.summary.repo_id,
@@ -248,9 +258,7 @@ fn load_netease_directory_page(
         limit,
     )
     .map_err(db_error)?;
-    let cache_fresh = cache_record
-        .as_ref()
-        .is_some_and(netease_cache_fresh);
+    let cache_fresh = cache_record.as_ref().is_some_and(netease_cache_fresh);
     let has_full_page = if let Some(record) = &cache_record {
         if offset >= record.total_entries {
             true
@@ -268,8 +276,12 @@ fn load_netease_directory_page(
     }
 
     if !cache_fresh {
-        clear_netease_directory_cache_for_directory(connection, &repo.summary.repo_id, directory_path)
-            .map_err(db_error)?;
+        clear_netease_directory_cache_for_directory(
+            connection,
+            &repo.summary.repo_id,
+            directory_path,
+        )
+        .map_err(db_error)?;
     }
 
     let page = list_backend_directory_entries_page(
@@ -280,6 +292,8 @@ fn load_netease_directory_page(
         offset,
         limit,
     )?;
+    let source_metadata_keys =
+        source_metadata_mirror_keys(&state.root, &repo.backend_record.plugin_id);
     let refreshed_at = now_rfc3339();
     let tx = connection.transaction().map_err(db_error)?;
     replace_netease_directory_cache_page(
@@ -292,8 +306,14 @@ fn load_netease_directory_page(
         &refreshed_at,
     )
     .map_err(db_error)?;
-    mirror_netease_entries_to_assets(&tx, &repo.summary.repo_id, &page.entries, &refreshed_at)
-        .map_err(db_error)?;
+    mirror_netease_entries_to_assets(
+        &tx,
+        &repo.summary.repo_id,
+        &page.entries,
+        &refreshed_at,
+        &source_metadata_keys,
+    )
+    .map_err(db_error)?;
     tx.commit().map_err(db_error)?;
     Ok(page)
 }
@@ -340,20 +360,24 @@ pub(super) fn load_file_browser(
     let tree = if special_location.is_some() {
         None
     } else if request.include_tree.unwrap_or(true) {
-        Some(if repo.backend_record.plugin_id == LOCAL_FILESYSTEM_PLUGIN_ID {
-            build_tree_from_directory_records(
-                load_directory_records(&connection, &request.repo_id).map_err(db_error)?,
-            )
-        } else {
-            list_backend_tree(&state.root, &repo, &repo_root)?
-        })
+        Some(
+            if repo.backend_record.plugin_id == LOCAL_FILESYSTEM_PLUGIN_ID {
+                build_tree_from_directory_records(
+                    load_directory_records(&connection, &request.repo_id).map_err(db_error)?,
+                )
+            } else {
+                list_backend_tree(&state.root, &repo, &repo_root)?
+            },
+        )
     } else {
         None
     };
     let offset = request.offset.unwrap_or(0);
     let limit = request.limit.filter(|value| *value > 0);
-    let (raw_entries, total_entries, loaded_count, next_offset, has_more) =
-        if special_location.as_deref() == Some("trash") {
+    let (raw_entries, total_entries, loaded_count, next_offset, has_more) = if special_location
+        .as_deref()
+        == Some("trash")
+    {
         let asset_map = normalize_asset_thumbnail_map(
             &connection,
             &repo,
@@ -366,14 +390,16 @@ pub(super) fn load_file_browser(
             &thumbnail_root,
             load_entry_thumbnail_map(&connection, &request.repo_id).map_err(db_error)?,
         )?;
-        let entries = list_trash_directory_entries(&repo_root, &current_path, &asset_map, &thumbnail_map)?;
+        let entries =
+            list_trash_directory_entries(&repo_root, &current_path, &asset_map, &thumbnail_map)?;
         let (entries, total_entries, loaded_count, next_offset, has_more) =
             paginate_file_browser_entries(entries, offset, limit);
         (entries, total_entries, loaded_count, next_offset, has_more)
     } else {
         let (listed_entries, total_entries, loaded_count, next_offset, has_more) =
             if repo.backend_record.plugin_id == LOCAL_FILESYSTEM_PLUGIN_ID {
-                let entries = load_cached_directory_entries(&connection, &request.repo_id, &current_path)?;
+                let entries =
+                    load_cached_directory_entries(&connection, &request.repo_id, &current_path)?;
                 paginate_listed_entries(entries, offset, limit)
             } else if repo.backend_record.plugin_id == NETEASE_CLOUD_MUSIC_PLUGIN_ID
                 && limit.is_some()
@@ -387,7 +413,9 @@ pub(super) fn load_file_browser(
                     offset,
                     limit.unwrap_or_default(),
                 )?;
-                let loaded_count = offset.saturating_add(page.entries.len()).min(page.total_entries);
+                let loaded_count = offset
+                    .saturating_add(page.entries.len())
+                    .min(page.total_entries);
                 let has_more = loaded_count < page.total_entries;
                 (
                     page.entries,
@@ -434,30 +462,26 @@ pub(super) fn load_file_browser(
             &connection,
             &repo,
             &thumbnail_root,
-            load_entry_thumbnail_map_for_paths(&connection, &request.repo_id, &entry_thumbnail_keys)
-                .map_err(db_error)?,
+            load_entry_thumbnail_map_for_paths(
+                &connection,
+                &request.repo_id,
+                &entry_thumbnail_keys,
+            )
+            .map_err(db_error)?,
         )?;
-        let folder_metadata = load_folder_metadata_map_for_paths(
-            &connection,
-            &request.repo_id,
-            &directory_paths,
-        )
-        .map_err(db_error)?;
+        let folder_metadata =
+            load_folder_metadata_map_for_paths(&connection, &request.repo_id, &directory_paths)
+                .map_err(db_error)?;
         (
-            map_file_browser_entries(
-                listed_entries,
-                &asset_map,
-                &thumbnail_map,
-                &folder_metadata,
-            ),
+            map_file_browser_entries(listed_entries, &asset_map, &thumbnail_map, &folder_metadata),
             total_entries,
             loaded_count,
             next_offset,
             has_more,
         )
     };
-    let entries =
-        attach_browser_entry_metadata(&connection, &request.repo_id, raw_entries).map_err(db_error)?;
+    let entries = attach_browser_entry_metadata(&connection, &request.repo_id, raw_entries)
+        .map_err(db_error)?;
 
     Ok(FileBrowserSnapshot {
         repo_id: request.repo_id,
@@ -507,7 +531,9 @@ pub(super) fn load_repository_tree(
         }
     };
     let tree = if repo.backend_record.plugin_id == LOCAL_FILESYSTEM_PLUGIN_ID {
-        build_tree_from_directory_records(load_directory_records(&connection, repo_id).map_err(db_error)?)
+        build_tree_from_directory_records(
+            load_directory_records(&connection, repo_id).map_err(db_error)?,
+        )
     } else {
         list_backend_tree(&state.root, &repo, &repo_root)?
     };

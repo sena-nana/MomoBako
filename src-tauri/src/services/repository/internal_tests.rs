@@ -1562,6 +1562,7 @@ mod tests {
                 }),
             ),
         );
+        install_netease_source_test_plugin_archive(service_root);
         write_test_plugin_archive_with_manifest(
             &runtime_root.join("media-preview.momoplug"),
             test_plugin_manifest_json(
@@ -1639,6 +1640,48 @@ mod tests {
                     "sdk": "backend",
                     "runtime": "manifest-only",
                     "source": "builtin"
+                }),
+            ),
+        );
+    }
+
+    fn install_netease_source_test_plugin_archive(service_root: &Path) {
+        let runtime_root = runtime_plugins_dir(service_root);
+        write_test_plugin_archive_with_manifest(
+            &runtime_root.join("source-netease-cloud-music.momoplug"),
+            test_plugin_manifest_json(
+                NETEASE_CLOUD_MUSIC_PLUGIN_ID,
+                "Netease Cloud Music Source",
+                serde_json::json!({
+                    "kind": "netease-cloud-music",
+                    "category": "source",
+                    "type": {
+                        "layer": "source",
+                        "kind": "netease-cloud-music"
+                    },
+                    "capabilities": ["browse", "read", "sync", "virtual-entries", "login"],
+                    "sdk": "backend",
+                    "runtime": "manifest-only",
+                    "source": "builtin",
+                    "contributes": {
+                        "source": {
+                            "operations": ["list", "read", "sync"],
+                            "dangerousOperations": [],
+                            "metadataMirrorKeys": [
+                                "songId",
+                                "songName",
+                                "artists",
+                                "albumName",
+                                "coverUrl",
+                                "durationMs",
+                                "playlistId",
+                                "playlistName",
+                                "playlistCategory",
+                                "provider",
+                                "accountId"
+                            ]
+                        }
+                    }
                 }),
             ),
         );
@@ -2227,6 +2270,7 @@ mod tests {
             .ensure_initialized()
             .expect("repository state should initialize");
         install_local_filesystem_test_plugin_archive(&state.root);
+        install_netease_source_test_plugin_archive(&state.root);
         let repo_path = repo_root.to_string_lossy().to_string();
         let backend = RepositoryBackendRecord {
             plugin_id: LOCAL_FILESYSTEM_PLUGIN_ID.to_string(),
@@ -2596,7 +2640,7 @@ mod tests {
     }
 
     #[test]
-    fn sync_netease_source_metadata_mirrors_system_fields_without_touching_user_fields() {
+    fn sync_mirrored_source_metadata_uses_plugin_manifest_rules_without_touching_user_fields() {
         let (state, root, repo_root, _thumbnail_root) =
             create_test_state("netease-system-metadata");
         let repo_id = create_netease_repository_without_initial_sync(
@@ -2667,10 +2711,11 @@ mod tests {
         .expect("default metadata should seed");
         upsert_metadata_value(&tx, &asset_id, "rating", &serde_json::json!(4))
             .expect("user rating should update");
-        sync_netease_source_metadata(
+        let metadata_keys =
+            source_metadata_mirror_keys(&state.root, &repo.backend_record.plugin_id);
+        sync_mirrored_source_metadata(
             &tx,
             &asset_id,
-            Some(NETEASE_CLOUD_MUSIC_PROVIDER_ID),
             Some(&serde_json::json!({
                 "provider": "netease-cloud-music",
                 "accountId": "123456",
@@ -2684,15 +2729,20 @@ mod tests {
                 "coverUrl": "https://example.test/cover-3301.jpg",
                 "durationMs": 180000
             })),
+            &metadata_keys,
         )
-        .expect("netease metadata should sync");
+        .expect("mirrored metadata should sync");
         tx.commit().expect("transaction should commit");
 
-        let metadata = metadata_for_asset_path(&state, &repo_id, "创建的歌单/分页歌单/歌手 A - 第一页.mp3");
+        let metadata =
+            metadata_for_asset_path(&state, &repo_id, "创建的歌单/分页歌单/歌手 A - 第一页.mp3");
         assert_eq!(metadata.get("rating"), Some(&serde_json::json!(4)));
         assert_eq!(metadata.get("songId"), Some(&serde_json::json!(3301)));
         assert_eq!(metadata.get("songName"), Some(&serde_json::json!("第一页")));
-        assert_eq!(metadata.get("artists"), Some(&serde_json::json!(["歌手 A"])));
+        assert_eq!(
+            metadata.get("artists"),
+            Some(&serde_json::json!(["歌手 A"]))
+        );
         assert_eq!(
             metadata.get("coverUrl"),
             Some(&serde_json::json!("https://example.test/cover-3301.jpg"))
@@ -2804,7 +2854,10 @@ mod tests {
         assert_eq!(snapshot.next_offset, Some(2));
         assert!(snapshot.has_more);
         assert_eq!(
-            snapshot.entries[0].source_payload.as_ref().and_then(|value| value.get("songId")),
+            snapshot.entries[0]
+                .source_payload
+                .as_ref()
+                .and_then(|value| value.get("songId")),
             Some(&serde_json::json!(3301))
         );
         assert!(snapshot.entries[0].asset_id.is_some());

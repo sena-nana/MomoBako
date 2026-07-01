@@ -84,7 +84,20 @@
     },
     "source": {
       "operations": ["list", "read", "sync"],
-      "dangerousOperations": []
+      "dangerousOperations": [],
+      "metadataMirrorKeys": [
+        "songId",
+        "songName",
+        "artists",
+        "albumName",
+        "coverUrl",
+        "durationMs",
+        "playlistId",
+        "playlistName",
+        "playlistCategory",
+        "provider",
+        "accountId"
+      ]
     }
   },
   "compat": {
