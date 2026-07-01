@@ -717,6 +717,22 @@ export type RepositoryCacheFilePreviewSourceResponse = {
   modifiedAt?: string | null;
 };
 
+export type DownloaderEnsureRuntimeRequest = Record<string, never>;
+
+export type DownloaderEnqueueRequest = {
+  url: string;
+  destinationPath: string;
+  metadata?: Record<string, unknown> | null;
+};
+
+export type DownloaderAwaitRequest = {
+  taskId: string;
+};
+
+export type DownloaderRemoveRequest = {
+  taskId: string;
+};
+
 export type DownloaderTaskStatus =
   | "queued"
   | "active"
@@ -801,6 +817,25 @@ export type OfficeConvertPreviewResult = {
   sizeBytes: number;
   modifiedAt?: string | null;
 };
+
+export type OfficeConvertEnsurePreviewPdfRequest = {
+  repoId: string;
+  entryPath: string;
+  extension: string;
+  sourcePath?: string | null;
+  sourceModifiedAt?: string | null;
+  sourceSizeBytes?: number | null;
+};
+
+export type OfficeConvertGetRuntimeStatusRequest = Record<string, never>;
+
+export type OfficeConvertClearPreviewCacheRequest = {
+  repoId: string;
+};
+
+export type OfficeConvertRunRuntimeSelfCheckRequest = Record<string, never>;
+
+export type OfficeConvertShutdownDaemonRequest = Record<string, never>;
 
 export type OfficeConvertDaemonControl = {
   health?: string | null;
