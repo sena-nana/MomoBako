@@ -1,0 +1,19 @@
+src-tauri/src/services/repository/internal_tests.rs
+  s_f0abc17e5269b6::t_289321bbac7d49 819-870
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.5",
+  "base_commit_sha": "c686c63aaaf854b9ed12b16fc1cd1785d2891250",
+  "prompts": {},
+  "sessions": {
+    "s_f0abc17e5269b6": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f0caa-72ab-7720-90c5-6cba6822b374",
+        "model": "unknown"
+      },
+      "human_author": "AuraElicase <auraelicase@outlook.com>"
+    }
+  }
+}
