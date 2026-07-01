@@ -136,14 +136,24 @@ function shouldSkipCopy(name) {
   return ["target", ".dist", ".packages", "node_modules"].includes(name);
 }
 
-function copyPluginProject(sourceDir, outputDir) {
+function isExcludedRelativePath(relativePath, excludePaths = []) {
+  const normalized = relativePath.replace(/\\/g, "/");
+  return excludePaths.some((candidate) => {
+    const normalizedCandidate = candidate.replace(/\\/g, "/");
+    return normalized === normalizedCandidate || normalized.startsWith(`${normalizedCandidate}/`);
+  });
+}
+
+function copyPluginProject(sourceDir, outputDir, rootDir = sourceDir, excludePaths = []) {
   mkdirSync(outputDir, { recursive: true });
   for (const entry of readdirSync(sourceDir, { withFileTypes: true })) {
     if (shouldSkipCopy(entry.name)) continue;
     const sourcePath = join(sourceDir, entry.name);
     const targetPath = join(outputDir, entry.name);
+    const relativePath = sourcePath.slice(rootDir.length + 1).replace(/\\/g, "/");
+    if (isExcludedRelativePath(relativePath, excludePaths)) continue;
     if (entry.isDirectory()) {
-      copyPluginProject(sourcePath, targetPath);
+      copyPluginProject(sourcePath, targetPath, rootDir, excludePaths);
       continue;
     }
     cpSync(sourcePath, targetPath);
@@ -176,7 +186,7 @@ for (const name of readdirSync(pluginsRoot, { withFileTypes: true })) {
   rmSync(outputDir, { recursive: true, force: true });
   mkdirSync(outputDir, { recursive: true });
   // 分发产物只保留插件自身运行时文件，开发 SDK 继续留在源码目录参与编译。
-  copyPluginProject(pluginDir, outputDir);
+  copyPluginProject(pluginDir, outputDir, pluginDir, project.build?.excludePaths ?? []);
 
   const buildType = project.build?.type;
   if (buildType === "frontend-module") {
