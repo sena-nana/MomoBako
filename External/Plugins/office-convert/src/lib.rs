@@ -44,6 +44,7 @@ const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 struct RuntimeContext {
     plugin_data_dir: PathBuf,
     service_root_dir: PathBuf,
+    plugin_runtime_dir: PathBuf,
     config: PluginConfig,
 }
 
@@ -176,6 +177,7 @@ fn runtime_context(runtime: PluginRuntimeContext) -> Result<RuntimeContext, Stri
         runtime.service_root_dir,
         plugin_data_dir.as_path(),
     )?;
+    let plugin_runtime_dir = PathBuf::from(runtime.plugin_runtime_dir);
     fs::create_dir_all(plugin_data_dir.join("helpers").join("libreoffice")).map_err(io_error)?;
     fs::create_dir_all(plugin_data_dir.join("downloads")).map_err(io_error)?;
     cleanup_stale_libreoffice_state(&plugin_data_dir)?;
@@ -195,6 +197,7 @@ fn runtime_context(runtime: PluginRuntimeContext) -> Result<RuntimeContext, Stri
     Ok(RuntimeContext {
         plugin_data_dir,
         service_root_dir,
+        plugin_runtime_dir,
         config,
     })
 }
@@ -663,6 +666,7 @@ fn download_runtime_via_downloader(
         plugin_id: "momobako.service.office-convert".to_string(),
         plugin_data_dir: runtime.plugin_data_dir.to_string_lossy().to_string(),
         service_root_dir: runtime.service_root_dir.to_string_lossy().to_string(),
+        plugin_runtime_dir: runtime.plugin_runtime_dir.to_string_lossy().to_string(),
         plugin_config: Default::default(),
     };
     let _ = call_host_plugin(
@@ -899,29 +903,45 @@ fn start_windows_libreoffice_helper(
     port: u16,
 ) -> Result<(), String> {
     let helper_dir = libreoffice_helper_dir(runtime);
-    let script_path = helper_dir.join("office-convert-helper.ps1");
-    fs::write(&script_path, libreoffice_helper_script()).map_err(io_error)?;
     let profile_dir = libreoffice_profile_dir(runtime);
     fs::create_dir_all(&profile_dir).map_err(io_error)?;
-    let child = with_no_window(
-        Command::new("powershell.exe")
-            .arg("-NoProfile")
-            .arg("-NonInteractive")
-            .arg("-ExecutionPolicy")
-            .arg("Bypass")
-            .arg("-File")
-            .arg(&script_path)
-            .arg("-SofficePath")
-            .arg(executable_path)
-            .arg("-Port")
-            .arg(port.to_string())
-            .arg("-ProfileUri")
-            .arg(libreoffice_profile_uri(&profile_dir))
-            .stdout(Stdio::null())
-            .stderr(Stdio::null()),
-    )
-    .spawn()
-    .map_err(|error| format!("failed to start LibreOffice helper: {error}"))?;
+    let child = if let Some(helper_binary) = bundled_helper_path(runtime) {
+        with_no_window(
+            Command::new(helper_binary)
+                .arg("--soffice-path")
+                .arg(executable_path)
+                .arg("--port")
+                .arg(port.to_string())
+                .arg("--profile-uri")
+                .arg(libreoffice_profile_uri(&profile_dir))
+                .stdout(Stdio::null())
+                .stderr(Stdio::null()),
+        )
+        .spawn()
+        .map_err(|error| format!("failed to start bundled LibreOffice helper: {error}"))?
+    } else {
+        let script_path = helper_dir.join("office-convert-helper.ps1");
+        fs::write(&script_path, libreoffice_helper_script()).map_err(io_error)?;
+        with_no_window(
+            Command::new("powershell.exe")
+                .arg("-NoProfile")
+                .arg("-NonInteractive")
+                .arg("-ExecutionPolicy")
+                .arg("Bypass")
+                .arg("-File")
+                .arg(&script_path)
+                .arg("-SofficePath")
+                .arg(executable_path)
+                .arg("-Port")
+                .arg(port.to_string())
+                .arg("-ProfileUri")
+                .arg(libreoffice_profile_uri(&profile_dir))
+                .stdout(Stdio::null())
+                .stderr(Stdio::null()),
+        )
+        .spawn()
+        .map_err(|error| format!("failed to start LibreOffice helper: {error}"))?
+    };
     let pid = child.id();
     fs::write(helper_dir.join("pid.txt"), pid.to_string()).map_err(io_error)?;
     for _ in 0..LIBREOFFICE_HELPER_STARTUP_RETRIES {
@@ -1091,6 +1111,23 @@ fn helper_type_label() -> &'static str {
     } else {
         "native-cli-fallback"
     }
+}
+
+fn bundled_helper_path(runtime: &RuntimeContext) -> Option<PathBuf> {
+    let runtime_dir = runtime.plugin_runtime_dir.as_path();
+    if runtime_dir.as_os_str().is_empty() {
+        return None;
+    }
+    let file_name = if cfg!(target_os = "windows") {
+        "office-convert-helper.exe"
+    } else {
+        "office-convert-helper"
+    };
+    let candidate = runtime_dir.join(file_name);
+    if candidate.is_file() {
+        return Some(candidate);
+    }
+    None
 }
 
 fn helper_http_client() -> Result<Client, String> {
@@ -1666,6 +1703,7 @@ mod tests {
         let runtime = RuntimeContext {
             plugin_data_dir: PathBuf::from("C:/Service/plugin-data/momobako-service-office-convert"),
             service_root_dir: PathBuf::from("C:/Service"),
+            plugin_runtime_dir: PathBuf::from("C:/Service/runtime/plugins/momobako-service-office-convert"),
             config: PluginConfig {
                 converter_mode: ConverterMode::Auto,
                 auto_download_libreoffice: true,

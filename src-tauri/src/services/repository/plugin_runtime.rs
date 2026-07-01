@@ -12,6 +12,7 @@ pub(super) type HostPluginFreeFn = unsafe extern "C" fn(*mut c_char);
 
 pub(super) struct NativePlugin {
     pub(super) _library: libloading::Library,
+    pub(super) runtime_dir: PathBuf,
     pub(super) call: PluginCallFn,
     pub(super) free: PluginFreeFn,
 }
@@ -197,10 +198,16 @@ impl BackendPluginRegistry {
         let plugin_data_dir =
             ensure_plugin_data_dir(&self.service_root, &resolved_manifest.plugin_id)?;
         let plugin_config = load_plugin_config_values(&plugin_data_dir)?;
+        let plugin_runtime_dir = registration
+            .native
+            .as_ref()
+            .map(|native| native.runtime_dir.to_string_lossy().to_string())
+            .unwrap_or_default();
         let runtime_context = PluginCallHostRuntime {
             plugin_id: resolved_manifest.plugin_id.clone(),
             plugin_data_dir: plugin_data_dir.to_string_lossy().to_string(),
             service_root_dir: self.service_root.to_string_lossy().to_string(),
+            plugin_runtime_dir,
             plugin_config,
         };
         let response = if let Some(native) = &registration.native {
