@@ -920,11 +920,9 @@ impl RepositoryState {
                     let backend_plugin_id = plugin_registry.normalize_plugin_id(&backend_plugin_id);
                     let path: String = row.get(2)?;
                     let stored_status: String = row.get(5)?;
-                    let status = repository_runtime_status(
-                        &path,
-                        &backend_plugin_id,
-                        stored_status.as_str(),
-                    );
+                    let backend =
+                        backend_summary_from_registry(&plugin_registry, &backend_plugin_id);
+                    let status = repository_runtime_status(&path, &backend, stored_status.as_str());
                     let backend_config_json: String = row.get(4)?;
                     let backend_config = parse_backend_config_json(&backend_config_json).map_err(to_from_sql_error)?;
                     Ok(RepositoryRecord {
@@ -932,7 +930,7 @@ impl RepositoryState {
                             repo_id: row.get(0)?,
                             name: row.get(1)?,
                             path: path.clone(),
-                            backend: backend_summary_from_registry(&plugin_registry, &backend_plugin_id),
+                            backend,
                             status,
                             asset_count: 0,
                             updated_at: row.get(6)?,
@@ -969,8 +967,8 @@ impl RepositoryState {
                 let backend_plugin_id = plugin_registry.normalize_plugin_id(&backend_plugin_id);
                 let path: String = row.get(2)?;
                 let stored_status: String = row.get(5)?;
-                let status =
-                    repository_runtime_status(&path, &backend_plugin_id, stored_status.as_str());
+                let backend = backend_summary_from_registry(&plugin_registry, &backend_plugin_id);
+                let status = repository_runtime_status(&path, &backend, stored_status.as_str());
                 let backend_config_json: String = row.get(4)?;
                 let backend_config =
                     parse_backend_config_json(&backend_config_json).map_err(to_from_sql_error)?;
@@ -979,10 +977,7 @@ impl RepositoryState {
                         repo_id: row.get(0)?,
                         name: row.get(1)?,
                         path: path.clone(),
-                        backend: backend_summary_from_registry(
-                            &plugin_registry,
-                            &backend_plugin_id,
-                        ),
+                        backend,
                         status,
                         asset_count: 0,
                         updated_at: row.get(6)?,

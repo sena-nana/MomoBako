@@ -3,12 +3,15 @@
 use super::*;
 
 pub(super) fn normalize_repository_root_for_backend(
+    service_root: &Path,
     path: &str,
     backend: &RepositoryBackendRecord,
     must_exist: bool,
 ) -> Result<PathBuf, String> {
     let repo_root = PathBuf::from(path);
-    if backend.plugin_id != LOCAL_FILESYSTEM_PLUGIN_ID {
+    let plugin_registry = backend_plugin_registry(service_root);
+    let backend_summary = backend_summary_from_registry(&plugin_registry, &backend.plugin_id);
+    if !backend_summary_supports_local_root_access(&backend_summary) {
         return Ok(repo_root);
     }
 

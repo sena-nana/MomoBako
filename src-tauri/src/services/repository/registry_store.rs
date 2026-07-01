@@ -26,22 +26,33 @@ pub(super) fn backend_summary_from_registry(
 
 pub(super) fn repository_runtime_status(
     path: &str,
-    backend_plugin_id: &str,
+    backend: &RepositoryBackendSummary,
     stored_status: &str,
 ) -> String {
-    if backend_plugin_id == LOCAL_FILESYSTEM_PLUGIN_ID
-        || netease_cache_root_path(path, backend_plugin_id).is_some()
+    if backend_summary_supports_local_root_access(backend)
+        || netease_cache_root_path(path, &backend.plugin_id).is_some()
     {
         if Path::new(path).is_dir() {
             "ready".to_string()
         } else {
             "missing".to_string()
         }
-    } else if backend_plugin_id == NETEASE_CLOUD_MUSIC_PLUGIN_ID {
+    } else if backend.plugin_id == NETEASE_CLOUD_MUSIC_PLUGIN_ID {
         "missing".to_string()
     } else {
         stored_status.to_string()
     }
+}
+
+fn backend_uses_repository_root_metadata(
+    service_root: &Path,
+    repo_root: &Path,
+    backend_plugin_id: &str,
+) -> bool {
+    let plugin_registry = backend_plugin_registry(service_root);
+    let backend = backend_summary_from_registry(&plugin_registry, backend_plugin_id);
+    backend_summary_supports_local_root_access(&backend)
+        || netease_cache_root_path(&repo_root.to_string_lossy(), backend_plugin_id).is_some()
 }
 
 pub(super) fn netease_cache_root_path(path: &str, backend_plugin_id: &str) -> Option<PathBuf> {
@@ -775,8 +786,7 @@ pub(super) fn ensure_repository_storage_paths(
     repo_root: &Path,
     backend_plugin_id: &str,
 ) -> Result<RepositoryStoragePaths, String> {
-    let metadata_dir = if backend_plugin_id == LOCAL_FILESYSTEM_PLUGIN_ID
-        || netease_cache_root_path(&repo_root.to_string_lossy(), backend_plugin_id).is_some()
+    let metadata_dir = if backend_uses_repository_root_metadata(service_root, repo_root, backend_plugin_id)
     {
         migrate_legacy_meta_dir_if_needed(repo_root, backend_plugin_id)?;
         let metadata_dir = repository_meta_dir(repo_root);

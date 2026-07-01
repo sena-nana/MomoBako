@@ -160,11 +160,9 @@ impl RepositoryState {
                 let path: String = row.get(2)?;
                 let backend_plugin_id: String = row.get(3)?;
                 let backend_plugin_id = plugin_registry.normalize_plugin_id(&backend_plugin_id);
-                let status = repository_runtime_status(
-                    &path,
-                    &backend_plugin_id,
-                    row.get::<_, String>(5)?.as_str(),
-                );
+                let backend = backend_summary_from_registry(&plugin_registry, &backend_plugin_id);
+                let status =
+                    repository_runtime_status(&path, &backend, row.get::<_, String>(5)?.as_str());
                 let asset_count = if status == "missing" {
                     0
                 } else {
@@ -175,7 +173,7 @@ impl RepositoryState {
                     repo_id,
                     name: row.get(1)?,
                     path: path.clone(),
-                    backend: backend_summary_from_registry(&plugin_registry, &backend_plugin_id),
+                    backend,
                     status,
                     asset_count,
                     updated_at: row.get(6)?,
