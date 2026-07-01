@@ -379,6 +379,7 @@
     - `officeConvert.getRuntimeStatus`
       - Response: `{ converterMode, microsoftOffice, libreofficeSystem, libreofficeBundle, daemon, autoDownloadLibreOffice, bundledDownloadUrl }`
       - `daemon` currently includes `running`, `healthy`, `helperType`, `port`, `baseUrl`, `pid`, `sofficeReady`, `sofficePid`, `path`, `updatedAt`, `error`, `control`, and optional `lastConvert`.
+      - `daemon.lastConvert` may include `conversionMode`, so the host settings page can distinguish `uno` and `cli-fallback` conversion paths.
       - Windows helper control currently uses a local HTTP control plane for `health` and `convert`, while shutdown remains exposed through the plugin call.
       - Bundled helper health now also reports whether the managed background Headless LibreOffice process is ready and exposes its process id when available.
       - Windows bundled helper now prefers using LibreOffice Python + UNO to connect to the managed pipe session for conversion, selects PDF export filters by Office family, and keeps `soffice --convert-to` as a fallback path.

@@ -774,6 +774,7 @@ fn convert_with_libreoffice(
         pdf_path,
         "running",
         None,
+        None,
     )?;
     let output_dir = temp_dir.join(format!(
         "pdf-{}",
@@ -800,22 +801,27 @@ fn convert_with_libreoffice(
             .filter(|value| !value.is_empty())
             .ok_or_else(|| format!("invalid source file name: {}", source_path.display()))?
     ));
-    if let Err(error) = convert_result {
-        write_libreoffice_conversion_status(
-            runtime,
-            source_path,
-            pdf_path,
-            "failed",
-            Some(error.clone()),
-        )?;
-        return Err(format!("LibreOffice 转换失败：{error}"));
-    }
+    let conversion_mode = match convert_result {
+        Ok(mode) => mode,
+        Err(error) => {
+            write_libreoffice_conversion_status(
+                runtime,
+                source_path,
+                pdf_path,
+                "failed",
+                None,
+                Some(error.clone()),
+            )?;
+            return Err(format!("LibreOffice 转换失败：{error}"));
+        }
+    };
     if !generated_path.is_file() {
         write_libreoffice_conversion_status(
             runtime,
             source_path,
             pdf_path,
             "failed",
+            conversion_mode.as_deref(),
             Some(format!("转换结果缺失：{}", generated_path.display())),
         )?;
         return Err(format!("LibreOffice 转换失败：未找到输出文件 {}", generated_path.display()));
@@ -826,6 +832,7 @@ fn convert_with_libreoffice(
         source_path,
         pdf_path,
         "completed",
+        conversion_mode.as_deref(),
         None,
     )?;
     Ok(())
@@ -1211,7 +1218,7 @@ fn helper_convert(
     source_path: &Path,
     output_dir: &Path,
     pdf_path: &Path,
-) -> Result<(), String> {
+) -> Result<Option<String>, String> {
     #[cfg(not(target_os = "windows"))]
     {
         let profile_dir = libreoffice_profile_dir(runtime);
@@ -1234,7 +1241,7 @@ fn helper_convert(
             "convert office document with LibreOffice",
         )?;
         if output.status.success() {
-            return Ok(());
+            return Ok(None);
         }
         return Err(command_output_message(&output));
     }
@@ -1251,7 +1258,12 @@ fn helper_convert(
             .send()
             .map_err(|error| format!("failed to request LibreOffice helper convert: {error}"))?;
         if response.status().is_success() {
-            return Ok(());
+            let payload = response.json::<serde_json::Value>().ok();
+            return Ok(payload
+                .as_ref()
+                .and_then(|value| value.get("conversionMode"))
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string));
         }
         Err(response.text().unwrap_or_else(|_| "helper convert request failed".to_string()))
     }
@@ -1287,6 +1299,7 @@ fn write_libreoffice_conversion_status(
     source_path: &Path,
     pdf_path: &Path,
     phase: &str,
+    conversion_mode: Option<&str>,
     error: Option<String>,
 ) -> Result<(), String> {
     let status_path = libreoffice_helper_dir(runtime).join("status.json");
@@ -1299,6 +1312,7 @@ fn write_libreoffice_conversion_status(
         "sourcePath": source_path.to_string_lossy().to_string(),
         "pdfPath": pdf_path.to_string_lossy().to_string(),
         "updatedAt": updated_at,
+        "conversionMode": conversion_mode,
         "error": error,
     });
     let phase_error = last_convert
@@ -1881,5 +1895,17 @@ mod tests {
         assert!(status.healthy);
         assert!(status.soffice_ready);
         assert_eq!(status.soffice_pid, Some(4567));
+    }
+
+    #[test]
+    fn libreoffice_conversion_status_keeps_conversion_mode() {
+        let last_convert = serde_json::json!({
+            "phase": "completed",
+            "conversionMode": "uno",
+            "sourcePath": "C:/Repo/demo.docx",
+            "pdfPath": "C:/Repo/demo.pdf",
+        });
+
+        assert_eq!(last_convert.get("conversionMode"), Some(&serde_json::json!("uno")));
     }
 }

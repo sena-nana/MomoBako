@@ -806,6 +806,7 @@ export type OfficeConvertDaemonLastConvert = {
   sourcePath?: string | null;
   pdfPath?: string | null;
   updatedAt?: string | null;
+  conversionMode?: string | null;
   error?: string | null;
 };
 
