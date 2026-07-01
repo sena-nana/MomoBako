@@ -181,6 +181,7 @@ pub fn enqueue_download(
     metadata: Option<serde_json::Value>,
 ) -> Result<DownloadTaskRecord, String> {
     let runtime = ensure_runtime(config)?;
+    let paths = paths_for_snapshot(&runtime);
     let parent = destination_path
         .parent()
         .ok_or_else(|| format!("download destination is missing parent directory: {}", destination_path.display()))?;
@@ -190,6 +191,12 @@ pub fn enqueue_download(
         .and_then(OsStr::to_str)
         .filter(|value| !value.trim().is_empty())
         .ok_or_else(|| format!("download destination filename is invalid: {}", destination_path.display()))?;
+    let task_id = managed_task_id(url, destination_path);
+    if let Some(existing) = load_task_if_present(&paths.tasks_dir, &task_id)? {
+        if should_reuse_existing_task(&existing, url, destination_path) {
+            return Ok(existing);
+        }
+    }
     let payload = rpc_request(
         &runtime.status,
         "aria2.addUri",
@@ -209,7 +216,7 @@ pub fn enqueue_download(
         .map(ToOwned::to_owned)
         .ok_or_else(|| "aria2.addUri did not return a gid".to_string())?;
     let record = DownloadTaskRecord {
-        task_id: gid.clone(),
+        task_id: task_id.clone(),
         gid,
         url: url.to_string(),
         destination_path: destination_path.to_string_lossy().to_string(),
@@ -221,7 +228,7 @@ pub fn enqueue_download(
         completed_length: None,
         error: None,
     };
-    save_task(&paths_for_snapshot(&runtime).tasks_dir, &record)?;
+    save_task(&paths.tasks_dir, &record)?;
     Ok(record)
 }
 
@@ -675,8 +682,39 @@ fn load_task(tasks_dir: &Path, task_id: &str) -> Result<DownloadTaskRecord, Stri
     serde_json::from_str::<DownloadTaskRecord>(&raw).map_err(|error| error.to_string())
 }
 
+fn load_task_if_present(tasks_dir: &Path, task_id: &str) -> Result<Option<DownloadTaskRecord>, String> {
+    let path = task_path(tasks_dir, task_id);
+    if !path.is_file() {
+        return Ok(None);
+    }
+    load_task(tasks_dir, task_id).map(Some)
+}
+
 fn task_path(tasks_dir: &Path, task_id: &str) -> PathBuf {
     tasks_dir.join(format!("{task_id}.json"))
+}
+
+fn managed_task_id(url: &str, destination_path: &Path) -> String {
+    let mut hasher = Sha1::new();
+    hasher.update(url.as_bytes());
+    hasher.update(b"\n");
+    hasher.update(destination_path.to_string_lossy().as_bytes());
+    format!("{:x}", hasher.finalize())
+}
+
+fn should_reuse_existing_task(
+    record: &DownloadTaskRecord,
+    url: &str,
+    destination_path: &Path,
+) -> bool {
+    if record.url != url || record.destination_path != destination_path.to_string_lossy() {
+        return false;
+    }
+    match record.status.as_str() {
+        "queued" | "active" => true,
+        "completed" => Path::new(record.destination_path.as_str()).is_file(),
+        _ => false,
+    }
 }
 
 fn cleanup_stale_state(paths: &Aria2Paths) -> Result<(), String> {
@@ -976,5 +1014,98 @@ mod tests {
         assert_eq!(record.total_length, Some(13));
         assert_eq!(record.completed_length, Some(13));
         assert_eq!(fs::read(&destination_path).expect("downloaded file should read"), b"mock-download");
+    }
+
+    #[test]
+    fn managed_task_id_stays_stable_for_same_url_and_destination() {
+        let destination_path = Path::new("C:/Temp/runtime.zip");
+        let left = managed_task_id("https://example.test/runtime.zip", destination_path);
+        let right = managed_task_id("https://example.test/runtime.zip", destination_path);
+
+        assert_eq!(left, right);
+    }
+
+    #[test]
+    fn enqueue_download_reuses_existing_queued_task_record() {
+        let destination_path = Path::new("C:/Temp/file-1.zip");
+        let record = DownloadTaskRecord {
+            task_id: managed_task_id("http://127.0.0.1/file-1.zip", destination_path),
+            gid: "gid-existing".to_string(),
+            url: "http://127.0.0.1/file-1.zip".to_string(),
+            destination_path: destination_path.to_string_lossy().to_string(),
+            metadata: Some(serde_json::json!({ "kind": "queued" })),
+            status: "queued".to_string(),
+            created_at: "2026-07-01T10:00:00Z".to_string(),
+            finished_at: None,
+            total_length: None,
+            completed_length: None,
+            error: None,
+        };
+
+        assert!(should_reuse_existing_task(
+            &record,
+            "http://127.0.0.1/file-1.zip",
+            destination_path,
+        ));
+    }
+
+    #[test]
+    fn enqueue_download_reuses_completed_task_only_when_file_exists() {
+        let workspace = TestWorkspace::new("reuse-completed-task");
+        let destination_path = workspace.path("downloads/runtime.zip");
+        fs::create_dir_all(destination_path.parent().expect("downloads dir should exist"))
+            .expect("downloads dir should be created");
+        fs::write(&destination_path, b"runtime").expect("completed file should be written");
+        let record = DownloadTaskRecord {
+            task_id: managed_task_id("https://example.test/runtime.zip", &destination_path),
+            gid: "gid-completed".to_string(),
+            url: "https://example.test/runtime.zip".to_string(),
+            destination_path: destination_path.to_string_lossy().to_string(),
+            metadata: Some(serde_json::json!({ "kind": "runtime" })),
+            status: "completed".to_string(),
+            created_at: "2026-07-01T10:00:00Z".to_string(),
+            finished_at: Some("2026-07-01T10:01:00Z".to_string()),
+            total_length: Some(7),
+            completed_length: Some(7),
+            error: None,
+        };
+
+        assert!(should_reuse_existing_task(
+            &record,
+            "https://example.test/runtime.zip",
+            &destination_path,
+        ));
+
+        fs::remove_file(&destination_path).expect("completed file should be removed");
+
+        assert!(!should_reuse_existing_task(
+            &record,
+            "https://example.test/runtime.zip",
+            &destination_path,
+        ));
+    }
+
+    #[test]
+    fn enqueue_download_recreates_failed_task_record() {
+        let destination_path = Path::new("C:/Temp/runtime.zip");
+        let record = DownloadTaskRecord {
+            task_id: managed_task_id("https://example.test/runtime.zip", destination_path),
+            gid: "gid-failed".to_string(),
+            url: "https://example.test/runtime.zip".to_string(),
+            destination_path: destination_path.to_string_lossy().to_string(),
+            metadata: Some(serde_json::json!({ "kind": "runtime" })),
+            status: "failed".to_string(),
+            created_at: "2026-07-01T10:00:00Z".to_string(),
+            finished_at: Some("2026-07-01T10:00:30Z".to_string()),
+            total_length: Some(100),
+            completed_length: Some(30),
+            error: Some("network failed".to_string()),
+        };
+
+        assert!(!should_reuse_existing_task(
+            &record,
+            "https://example.test/runtime.zip",
+            destination_path,
+        ));
     }
 }
