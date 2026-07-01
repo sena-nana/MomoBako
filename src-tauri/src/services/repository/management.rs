@@ -81,7 +81,7 @@ pub(super) fn import_repository(
         .to_string();
     let backend = imported_metadata
         .as_ref()
-        .and_then(|metadata| import_backend_record(&state.root, metadata))
+        .and_then(|metadata| import_backend_record(&state.root, metadata, &repo_root))
         .unwrap_or(requested_backend);
 
     let seed = RepositorySeed {

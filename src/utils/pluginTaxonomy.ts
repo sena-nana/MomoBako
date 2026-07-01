@@ -1,6 +1,7 @@
 import type { PluginCategory, PluginManifest } from "../types/repository";
 
 const legacySourceKinds = new Set(["filesystem", "webdav", "cloud"]);
+const localRootPathCapability = "localRootPath";
 
 export function pluginCategoryForKind(kind: string): PluginCategory {
   if (legacySourceKinds.has(kind)) return "source";
@@ -24,6 +25,10 @@ export function isRepositoryBackendRuntimeAvailable(plugin: Pick<PluginManifest,
     && plugin.runtime === "native-dylib"
     && plugin.status !== "unavailable"
     && plugin.status !== "error";
+}
+
+export function supportsLocalRepositoryRoot(plugin: Pick<PluginManifest, "capabilities">) {
+  return plugin.capabilities.includes(localRootPathCapability);
 }
 
 export function pluginCategoryLabel(category: PluginCategory | string | undefined) {

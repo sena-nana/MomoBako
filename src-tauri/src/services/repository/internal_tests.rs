@@ -2077,6 +2077,71 @@ mod tests {
     }
 
     #[test]
+    fn create_repository_without_backend_plugin_id_infers_custom_local_root_backend() {
+        let workspace = TestWorkspace::new("infer-custom-local-backend");
+        let service_root = workspace.path("service");
+        let repo_root = workspace.path("repo");
+        let runtime_root = runtime_plugins_dir(&service_root);
+        let plugin_id = "user.custom-local-filesystem";
+        write_test_plugin_archive_with_manifest(
+            &runtime_root.join("custom-local-filesystem.momoplug"),
+            test_plugin_manifest_json(
+                plugin_id,
+                "Custom Local Filesystem",
+                serde_json::json!({
+                    "kind": "filesystem",
+                    "category": "source",
+                    "type": {
+                        "layer": "source",
+                        "kind": "filesystem"
+                    },
+                    "capabilities": ["browse", "read", "write", "watch", "sync", "localRootPath", EMBEDDED_RUNTIME_FALLBACK_CAPABILITY],
+                    "sdk": "backend",
+                    "runtime": "native-dylib",
+                    "source": "system"
+                }),
+            ),
+        );
+        let state = RepositoryState::from_root(service_root);
+
+        let repo = state
+            .create_repository(RepositoryMutationRequest {
+                repo_id: Some("repo-infer-custom".to_string()),
+                name: "Infer Custom Repo".to_string(),
+                path: repo_root.to_string_lossy().to_string(),
+                backend_plugin_id: None,
+                backend_config: None,
+                skip_initial_sync: false,
+            })
+            .expect("custom local backend should be inferred")
+            .repository;
+
+        assert_eq!(repo.backend.plugin_id, plugin_id);
+    }
+
+    #[test]
+    fn create_repository_without_backend_plugin_id_errors_without_local_root_backend() {
+        let workspace = TestWorkspace::new("infer-local-backend-missing");
+        let service_root = workspace.path("service");
+        let repo_root = workspace.path("repo");
+        install_netease_source_test_plugin_archive(&service_root);
+        let state = RepositoryState::from_root(service_root);
+
+        let error = state
+            .create_repository(RepositoryMutationRequest {
+                repo_id: Some("repo-missing-local-backend".to_string()),
+                name: "Missing Local Backend".to_string(),
+                path: repo_root.to_string_lossy().to_string(),
+                backend_plugin_id: None,
+                backend_config: None,
+                skip_initial_sync: false,
+            })
+            .expect_err("missing local-root backend should fail clearly");
+
+        assert!(error.contains("supports local repository roots"));
+    }
+
+    #[test]
     fn update_repository_backend_config_persists_registry_and_repository_metadata() {
         let (state, root, repo_root, _thumbnail_root) =
             create_test_state("update-repo-backend-config");

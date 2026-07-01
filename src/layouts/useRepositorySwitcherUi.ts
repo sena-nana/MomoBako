@@ -8,6 +8,7 @@ import {
   updateRepositoryBackendConfig,
 } from "../services/repositoryApi";
 import type { RepositoryBackendOption, RepositorySummary } from "../types/repository";
+import { supportsLocalRepositoryRoot } from "../utils/pluginTaxonomy";
 
 export type RepositoryPopoverMode = "closed" | "switcher" | "addMenu" | "form" | "neteaseLogin";
 export type RepositoryPopoverAnchor = {
@@ -88,7 +89,7 @@ export function useRepositorySwitcherUi(options: RepositorySwitcherUiOptions) {
   const addRepositoryPopoverPosition = ref({ left: 0, top: 0, width: 0, anchorX: 0, anchorY: 0 });
   const addRepositoryPopoverRef = ref<HTMLElement | null>(null);
   const repositorySwitcherButtonRef = ref<HTMLElement | null>(null);
-  const backendPluginId = ref(localFilesystemPluginId);
+  const backendPluginId = ref("");
   const backendName = ref("");
   const backendUrl = ref("");
   const backendUsername = ref("");
@@ -121,7 +122,15 @@ export function useRepositorySwitcherUi(options: RepositorySwitcherUiOptions) {
     return !backendUrl.value.trim();
   });
 
-  function resetBackendForm(pluginId = options.repositoryBackendOptions.value.find((item) => item.enabled)?.pluginId ?? localFilesystemPluginId) {
+  function preferredBackendPluginId() {
+    return options.repositoryBackendOptions.value.find((item) => item.enabled)?.pluginId ?? "";
+  }
+
+  function preferredLocalBackendPluginId() {
+    return options.repositoryBackendOptions.value.find((item) => item.enabled && supportsLocalRepositoryRoot(item))?.pluginId ?? "";
+  }
+
+  function resetBackendForm(pluginId = preferredBackendPluginId()) {
     backendPluginId.value = pluginId;
     backendName.value = "";
     backendUrl.value = "";
@@ -228,7 +237,7 @@ export function useRepositorySwitcherUi(options: RepositorySwitcherUiOptions) {
   async function createLocalRepositoryFromPath(path: string, fallbackPosition = addRepositoryPopoverPosition.value) {
     const nextPath = path.trim();
     if (!nextPath) return false;
-    backendPluginId.value = localFilesystemPluginId;
+    backendPluginId.value = preferredLocalBackendPluginId() || backendPluginId.value;
     addRepositoryError.value = "";
     isSubmittingBackend.value = true;
     try {
@@ -410,7 +419,7 @@ export function useRepositorySwitcherUi(options: RepositorySwitcherUiOptions) {
     const backend = options.repositoryBackendOptions.value.find((item) => item.pluginId === pluginId);
     if (!backend?.enabled) return;
     resetBackendForm(pluginId);
-    if (pluginId === localFilesystemPluginId) {
+    if (supportsLocalRepositoryRoot(backend)) {
       await chooseLocalFolderAndCreate();
       return;
     }

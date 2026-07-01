@@ -20,7 +20,7 @@ CREATE TABLE IF NOT EXISTS repositories (
   repo_id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
   path TEXT NOT NULL UNIQUE,
-  backend_plugin_id TEXT NOT NULL DEFAULT 'momobako.local-filesystem',
+  backend_plugin_id TEXT NOT NULL,
   backend_config_json TEXT NOT NULL DEFAULT '{}',
   status TEXT NOT NULL,
   created_at TEXT NOT NULL,
