@@ -93,6 +93,29 @@ describe("MediaPreview", () => {
     });
   });
 
+  it("音频缩略图可直接渲染远程链接", async () => {
+    const plugin = getPreviewPluginForEntry({
+      ...audioEntry,
+      thumbnailPath: "https://img.example.test/theme-song-thumb.jpg",
+    });
+    expect(plugin).not.toBeNull();
+
+    render(plugin!.component, {
+      props: {
+        repoId: "repo-main-001",
+        entry: {
+          ...audioEntry,
+          thumbnailPath: "https://img.example.test/theme-song-thumb.jpg",
+        },
+      },
+    });
+
+    await waitFor(() => {
+      const cover = document.querySelector<HTMLImageElement>(".media-preview__audio-cover");
+      expect(cover?.getAttribute("src")).toBe("https://img.example.test/theme-song-thumb.jpg");
+    });
+  });
+
   it("准备音频播放源时显示下载进度条", async () => {
     const plugin = getPreviewPluginForEntry(audioEntry);
     expect(plugin).not.toBeNull();

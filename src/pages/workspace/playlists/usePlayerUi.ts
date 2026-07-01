@@ -1,4 +1,3 @@
-import { convertFileSrc } from "@tauri-apps/api/core";
 import { computed, ref, type ComputedRef } from "vue";
 import type {
   WorkspacePlayerBarHandlers,
@@ -8,6 +7,7 @@ import { getPlaylistPlayerByType } from "../../../plugins/playlistPlayers";
 import type { PlaylistDetail, PlaylistItem } from "../../../types/repository";
 import type { usePlaylistPlayer } from "../../../composables/usePlaylistPlayer";
 import type { PlaylistPlayerObjectFit } from "../../../plugins/sdk";
+import { resolveThumbnailSrc } from "../../../utils/thumbnailSrc";
 
 type PlaylistPlayerController = ReturnType<typeof usePlaylistPlayer>;
 
@@ -25,8 +25,7 @@ type WorkspacePlayerUiOptions = {
 };
 
 export function playlistItemThumbnailSrc(item: PlaylistItem) {
-  if (!item.thumbnailPath) return null;
-  return convertFileSrc(item.thumbnailPath);
+  return resolveThumbnailSrc(item.thumbnailPath);
 }
 
 export function playlistItemToFileEntry(item: PlaylistItem) {
@@ -57,7 +56,7 @@ export function usePlayerUi(options: WorkspacePlayerUiOptions) {
   const playerQueueItems = computed<PlaylistItem[]>(() => (
     (options.playlistPlayer.queueItems.value ?? []).map((item) => ({
       ...item,
-      thumbnailPath: item.thumbnailPath ? convertFileSrc(item.thumbnailPath) : null,
+      thumbnailPath: resolveThumbnailSrc(item.thumbnailPath),
     }))
   ));
   const currentPlayerItem = computed<PlaylistItem | null>(() => {
