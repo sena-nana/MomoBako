@@ -143,6 +143,7 @@ function createSettingsPage(ctx) {
               row("守护进程", daemonText(status.value.daemon)),
               row("健康检查", status.value.daemon?.healthy ? "通过" : "未通过"),
               row("控制方式", daemonControlText(status.value.daemon)),
+              row("最近转换", daemonConvertText(status.value.daemon)),
             ])
           : h("p", { class: "repository-add-popover__note" }, "读取当前转换器、自带运行时与守护进程状态。"),
         h("div", { class: "file-metadata-card__source-row", style: "gap: 8px; margin-top: 8px;" }, [
@@ -212,4 +213,14 @@ function daemonControlText(daemon) {
   if (daemon.control.health) parts.push(`health=${daemon.control.health}`);
   if (daemon.control.shutdown) parts.push(`shutdown=${daemon.control.shutdown}`);
   return parts.join(" | ") || "未声明";
+}
+
+function daemonConvertText(daemon) {
+  const lastConvert = daemon?.lastConvert;
+  if (!lastConvert) return "暂无记录";
+  const parts = [];
+  if (lastConvert.phase) parts.push(lastConvert.phase);
+  if (lastConvert.sourcePath) parts.push(lastConvert.sourcePath);
+  if (lastConvert.updatedAt) parts.push(lastConvert.updatedAt);
+  return parts.join(" | ");
 }
