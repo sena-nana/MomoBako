@@ -131,6 +131,10 @@ fn main() -> Result<(), String> {
                 let healthy = state.ensure_soffice_ready().is_ok();
                 let soffice_pid = state.soffice_pid();
                 let python_path = libreoffice_python_path(&state.args.soffice_path);
+                let uno_available = python_path
+                    .as_ref()
+                    .map(|path| uno_runtime_available(path))
+                    .unwrap_or(false);
                 let _ = request.respond(json_response(
                     if healthy {
                         StatusCode(200)
@@ -142,7 +146,7 @@ fn main() -> Result<(), String> {
                         "runtime": "office-convert-helper",
                         "sofficeReady": healthy,
                         "sofficePid": soffice_pid,
-                        "unoAvailable": python_path.is_some(),
+                        "unoAvailable": uno_available,
                         "pythonValid": python_path.as_ref().map(|value| value.is_file()).unwrap_or(false),
                         "pythonPath": python_path.map(|value| value.to_string_lossy().to_string()),
                     }),
@@ -430,6 +434,52 @@ finally:
 "#
 }
 
+#[cfg(target_os = "windows")]
+fn write_uno_ping_script() -> Result<PathBuf, String> {
+    let dir = std::env::temp_dir().join("momobako-office-convert-helper");
+    std::fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
+    let path = dir.join("uno_ping.py");
+    std::fs::write(&path, uno_ping_script()).map_err(|error| error.to_string())?;
+    Ok(path)
+}
+
+#[cfg(target_os = "windows")]
+fn uno_ping_script() -> &'static str {
+    r#"
+import sys
+
+import uno
+
+pipe_name = sys.argv[1]
+
+local_context = uno.getComponentContext()
+resolver = local_context.ServiceManager.createInstanceWithContext(
+    "com.sun.star.bridge.UnoUrlResolver",
+    local_context,
+)
+resolver.resolve(
+    f"uno:pipe,name={pipe_name};urp;StarOffice.ComponentContext"
+)
+"#
+}
+
+#[cfg(target_os = "windows")]
+fn uno_runtime_available(python_path: &PathBuf) -> bool {
+    let Ok(script_path) = write_uno_ping_script() else {
+        return false;
+    };
+    with_no_window(
+        Command::new(python_path)
+            .arg(script_path)
+            .arg(HELPER_PIPE_NAME)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null()),
+    )
+    .status()
+    .map(|status| status.success())
+    .unwrap_or(false)
+}
+
 fn office_family_from_path(path: &str) -> Option<OfficeFamily> {
     let extension = PathBuf::from(path)
         .extension()
@@ -520,6 +570,17 @@ mod tests {
     fn uno_bridge_script_mentions_managed_pipe_name() {
         #[cfg(target_os = "windows")]
         assert!(uno_bridge_script().contains("uno:pipe,name="));
+
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = "non-windows";
+        }
+    }
+
+    #[test]
+    fn uno_ping_script_mentions_managed_pipe_name() {
+        #[cfg(target_os = "windows")]
+        assert!(uno_ping_script().contains("uno:pipe,name="));
 
         #[cfg(not(target_os = "windows"))]
         {
