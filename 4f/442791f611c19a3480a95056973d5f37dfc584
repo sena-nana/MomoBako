@@ -1,0 +1,31 @@
+External/Plugins/media-preview/src/register.js
+  s_895c68a481220d::t_e9d92a1aba75dc 67,535,930-935
+src/components/WorkspacePlayerBar.vue
+  s_895c68a481220d::t_54ebe91fe6ce0c 18,78,183
+src/composables/useSystemMediaSession.ts
+  s_895c68a481220d::t_88fbd2244f9a75 3,12-13,15
+src/pages/workspace/playlists/usePlayerUi.ts
+  s_895c68a481220d::t_4622666543d4b8 10,28,59
+src/pages/workspace/preview/usePreviewUi.ts
+  s_895c68a481220d::t_d7f49e2cd17480 7,38-39
+src/utils/thumbnailSrc.ts
+  s_895c68a481220d::t_0f287e9bcfd289 1-11
+tests/mediaPreview.test.ts
+  s_895c68a481220d::t_07c966eacec839 96-118
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.5",
+  "base_commit_sha": "4f442791f611c19a3480a95056973d5f37dfc584",
+  "prompts": {},
+  "sessions": {
+    "s_895c68a481220d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f1dd2-a1c7-7af2-a290-265adf4c8c53",
+        "model": "unknown"
+      },
+      "human_author": "AuraElicase <auraelicase@outlook.com>"
+    }
+  }
+}
