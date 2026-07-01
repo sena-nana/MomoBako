@@ -1,0 +1,19 @@
+tests/pluginSettingsPages.test.ts
+  s_2d5a17782b6bfd::t_0e5e1f77415ca3 11,256-349
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.5",
+  "base_commit_sha": "7f1f07db23e6ceb5cfc19e372bcfa398e1221cee",
+  "prompts": {},
+  "sessions": {
+    "s_2d5a17782b6bfd": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f1cad-dea8-7323-b604-a3effbaf235c",
+        "model": "unknown"
+      },
+      "human_author": "AuraElicase <auraelicase@outlook.com>"
+    }
+  }
+}
