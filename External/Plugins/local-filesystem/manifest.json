@@ -10,7 +10,7 @@
   "kind": "filesystem",
   "category": "source",
   "description": "使用本地目录作为仓库文件管理后端。",
-  "capabilities": ["browse", "read", "write", "watch", "sync", "localRootPath"],
+  "capabilities": ["browse", "read", "write", "watch", "sync", "localRootPath", "embeddedRuntimeFallback"],
   "enabled": true,
   "sdk": "backend",
   "runtime": "native-dylib",
