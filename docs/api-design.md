@@ -426,7 +426,7 @@
       - Request: `{}`
       - Response: `{ runtime, aria2, queueSize, downloadsDir, downloadUrl }`
       - Returns the current aria2 runtime status without forcing a new download task.
-      - The downloader manifest now registers API Playground samples for both compatibility methods and the generic `ensureRuntime` / `enqueueDownload` / `awaitDownload` / `removeDownload` task methods, so both the music-download facade and the shared aria2 task layer can be exercised directly from plugin API tests.
+      - The downloader manifest now registers API Playground samples for both compatibility methods and the generic `getRuntimeStatus` / `ensureRuntime` / `enqueueDownload` / `awaitDownload` / `removeDownload` task methods, so both the music-download facade and the shared aria2 task layer can be exercised directly from plugin API tests.
   - Runtime plugin calls resolve `requires` and `optional` before dispatch. Missing or disabled required dependencies reject the call with the plugin disable reason; missing or disabled optional dependencies keep the call usable and return `runtime.degraded`, `runtime.degradationReason`, and `runtime.dependencyStatus` alongside the plugin payload.
   - The 网易云 source and downloader backends currently use `ncm-api-rs` directly for login, playlist, song URL, detail, and lyric requests; any `apiBaseUrl` setting is treated as an optional SDK domain override rather than a host-managed proxy endpoint.
 - `GET /plugins:hook-executions`
