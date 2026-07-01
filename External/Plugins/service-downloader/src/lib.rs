@@ -1446,6 +1446,28 @@ mod tests {
     }
 
     #[test]
+    fn generic_download_response_contains_failed_status_shape() {
+        let record = aria2_runtime::DownloadTaskRecord {
+            task_id: "gid-2".to_string(),
+            gid: "gid-2".to_string(),
+            url: "http://127.0.0.1:8080/test.zip".to_string(),
+            destination_path: "C:/Temp/test.zip".to_string(),
+            metadata: Some(serde_json::json!({ "kind": "runtime" })),
+            status: "failed".to_string(),
+            created_at: "2026-07-01T10:00:00Z".to_string(),
+            finished_at: Some("2026-07-01T10:00:30Z".to_string()),
+            total_length: Some(128),
+            completed_length: Some(32),
+            error: Some("network failed".to_string()),
+        };
+        let value = serde_json::to_value(&record).expect("task record should serialize");
+        assert_eq!(value["status"], serde_json::json!("failed"));
+        assert_eq!(value["totalLength"], serde_json::json!(128));
+        assert_eq!(value["completedLength"], serde_json::json!(32));
+        assert_eq!(value["error"], serde_json::json!("network failed"));
+    }
+
+    #[test]
     fn download_track_package_uses_cookie_from_source_payload_when_explicit_cookie_is_missing() {
         let workspace = TestWorkspace::new("track-package-source-payload-cookie");
         let export_root = workspace.path("exports");

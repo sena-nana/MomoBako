@@ -802,6 +802,19 @@ fn download_runtime_via_downloader(
             "taskId": task_id
         }),
     )?;
+    let status = record
+        .get("status")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    if status != "completed" {
+        let error = record
+            .get("error")
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or("LibreOffice runtime download failed");
+        return Err(error.to_string());
+    }
     let destination_path = record
         .get("destinationPath")
         .and_then(serde_json::Value::as_str)

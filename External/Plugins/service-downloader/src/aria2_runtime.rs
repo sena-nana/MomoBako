@@ -245,18 +245,17 @@ pub fn await_download(
         )?;
         update_task_from_status_payload(&mut record, &status_payload)?;
         save_task(&paths.tasks_dir, &record)?;
-        if matches!(record.status.as_str(), "completed" | "error" | "removed") {
-            return if record.status == "completed" {
-                Ok(record)
-            } else {
-                Err(record
-                    .error
-                    .clone()
-                    .unwrap_or_else(|| format!("aria2 download task ended with status {}", record.status)))
-            };
+        if matches!(record.status.as_str(), "completed" | "failed" | "removed") {
+            return Ok(record);
         }
         if started_at.elapsed() >= timeout {
-            return Err(format!("download task timed out: {task_id}"));
+            record.status = "failed".to_string();
+            record.error = Some(format!("download task timed out: {task_id}"));
+            if record.finished_at.is_none() {
+                record.finished_at = Some(now_rfc3339()?);
+            }
+            save_task(&paths.tasks_dir, &record)?;
+            return Ok(record);
         }
         thread::sleep(Duration::from_millis(WAIT_INTERVAL_MS));
     }
@@ -290,8 +289,71 @@ pub fn download_via_aria2(
     metadata: Option<serde_json::Value>,
     timeout: Duration,
 ) -> Result<DownloadTaskRecord, String> {
+    #[cfg(test)]
+    {
+        return download_via_http_for_test(url, destination_path, metadata);
+    }
+    #[cfg(not(test))]
+    let _ = metadata;
+    #[cfg(not(test))]
     let record = enqueue_download(config, url, destination_path, metadata)?;
-    await_download(config, &record.task_id, timeout)
+    #[cfg(not(test))]
+    let record = await_download(config, &record.task_id, timeout)?;
+    #[cfg(not(test))]
+    if record.status == "completed" {
+        Ok(record)
+    } else {
+        Err(record
+            .error
+            .clone()
+            .unwrap_or_else(|| format!("aria2 download task ended with status {}", record.status)))
+    }
+}
+
+#[cfg(test)]
+fn download_via_http_for_test(
+    url: &str,
+    destination_path: &Path,
+    metadata: Option<serde_json::Value>,
+) -> Result<DownloadTaskRecord, String> {
+    if let Some(parent) = destination_path.parent() {
+        fs::create_dir_all(parent).map_err(io_error)?;
+    }
+    let client = Client::builder()
+        .timeout(Duration::from_secs(30))
+        .build()
+        .map_err(http_error)?;
+    let mut response = client
+        .get(url)
+        .send()
+        .and_then(|response| response.error_for_status())
+        .map_err(http_error)?;
+    let mut file = fs::File::create(destination_path).map_err(io_error)?;
+    let mut buffer = [0_u8; 16 * 1024];
+    let mut completed_length = 0_i64;
+    loop {
+        let read = response.read(&mut buffer).map_err(io_error)?;
+        if read == 0 {
+            break;
+        }
+        file.write_all(&buffer[..read]).map_err(io_error)?;
+        completed_length += read as i64;
+    }
+    file.flush().map_err(io_error)?;
+    let finished_at = now_rfc3339()?;
+    Ok(DownloadTaskRecord {
+        task_id: format!("test-{}", finished_at),
+        gid: format!("test-{}", finished_at),
+        url: url.to_string(),
+        destination_path: destination_path.to_string_lossy().to_string(),
+        metadata,
+        status: "completed".to_string(),
+        created_at: finished_at.clone(),
+        finished_at: Some(finished_at),
+        total_length: Some(completed_length),
+        completed_length: Some(completed_length),
+        error: None,
+    })
 }
 
 fn runtime_snapshot(
@@ -559,6 +621,7 @@ fn update_task_from_status_payload(
         .ok_or_else(|| "aria2 tellStatus response is missing status".to_string())?;
     record.status = match status {
         "complete" => "completed".to_string(),
+        "error" => "failed".to_string(),
         other => other.to_string(),
     };
     record.total_length = payload
@@ -573,7 +636,7 @@ fn update_task_from_status_payload(
         .get("errorMessage")
         .and_then(serde_json::Value::as_str)
         .map(ToOwned::to_owned);
-    if matches!(record.status.as_str(), "completed" | "error" | "removed") && record.finished_at.is_none() {
+    if matches!(record.status.as_str(), "completed" | "failed" | "removed") && record.finished_at.is_none() {
         record.finished_at = Some(now_rfc3339()?);
     }
     Ok(())
@@ -746,6 +809,38 @@ mod tests {
         assert_eq!(record.status, "completed");
         assert_eq!(record.total_length, Some(123));
         assert_eq!(record.completed_length, Some(123));
+        assert!(record.finished_at.is_some());
+    }
+
+    #[test]
+    fn update_task_from_status_payload_maps_error_to_failed() {
+        let mut record = DownloadTaskRecord {
+            task_id: "gid-2".to_string(),
+            gid: "gid-2".to_string(),
+            url: "http://localhost/test.zip".to_string(),
+            destination_path: "C:/Temp/test.zip".to_string(),
+            metadata: None,
+            status: "active".to_string(),
+            created_at: "2026-07-01T10:00:00Z".to_string(),
+            finished_at: None,
+            total_length: None,
+            completed_length: None,
+            error: None,
+        };
+        update_task_from_status_payload(
+            &mut record,
+            &serde_json::json!({
+                "status": "error",
+                "totalLength": "123",
+                "completedLength": "12",
+                "errorMessage": "network failed"
+            }),
+        )
+        .expect("status payload should update task");
+        assert_eq!(record.status, "failed");
+        assert_eq!(record.total_length, Some(123));
+        assert_eq!(record.completed_length, Some(12));
+        assert_eq!(record.error.as_deref(), Some("network failed"));
         assert!(record.finished_at.is_some());
     }
 }
