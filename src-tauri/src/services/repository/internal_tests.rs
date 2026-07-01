@@ -1549,17 +1549,17 @@ mod tests {
                 "Local Filesystem",
                 serde_json::json!({
                     "legacyPluginIds": [LEGACY_LOCAL_FILESYSTEM_PLUGIN_ID],
-                    "kind": "filesystem",
-                    "category": "source",
-                    "type": {
-                        "layer": "source",
-                        "kind": "filesystem"
-                    },
-                    "capabilities": ["listFiles", "readFile", "writeFile", "moveFile", "deleteFile"],
-                    "sdk": "backend",
-                    "runtime": "native-dylib",
-                    "source": "system"
-                }),
+                "kind": "filesystem",
+                "category": "source",
+                "type": {
+                    "layer": "source",
+                    "kind": "filesystem"
+                },
+                "capabilities": ["browse", "read", "write", "watch", "sync", "localRootPath", EMBEDDED_RUNTIME_FALLBACK_CAPABILITY],
+                "sdk": "backend",
+                "runtime": "native-dylib",
+                "source": "system"
+            }),
             ),
         );
         install_netease_source_test_plugin_archive(service_root);
@@ -1848,7 +1848,7 @@ mod tests {
                     "layer": "source",
                     "kind": "filesystem"
                 },
-                "capabilities": ["listFiles"],
+                "capabilities": ["browse", "read", "write", "watch", "sync", "localRootPath", EMBEDDED_RUNTIME_FALLBACK_CAPABILITY],
                 "sdk": "backend",
                 "runtime": "native-dylib",
                 "source": "system"
@@ -2018,6 +2018,62 @@ mod tests {
             .expect("runtime local backend should move a file to trash");
         assert!(!repo_root.join("renamed.txt").exists());
         assert!(repository_trash_dir(&repo_root).exists());
+    }
+
+    #[test]
+    fn custom_system_filesystem_backend_with_embedded_fallback_runs_through_runtime_registry() {
+        let workspace = TestWorkspace::new("runtime-custom-local-backend");
+        let service_root = workspace.path("service");
+        let repo_root = workspace.path("repo");
+        let plugin_id = "user.custom-local-filesystem";
+        let runtime_root = runtime_plugins_dir(&service_root);
+        write_test_plugin_archive_with_manifest(
+            &runtime_root.join("custom-local-filesystem.momoplug"),
+            test_plugin_manifest_json(
+                plugin_id,
+                "Custom Local Filesystem",
+                serde_json::json!({
+                    "kind": "filesystem",
+                    "category": "source",
+                    "type": {
+                        "layer": "source",
+                        "kind": "filesystem"
+                    },
+                    "capabilities": ["browse", "read", "write", "watch", "sync", "localRootPath", EMBEDDED_RUNTIME_FALLBACK_CAPABILITY],
+                    "sdk": "backend",
+                    "runtime": "native-dylib",
+                    "source": "system"
+                }),
+            ),
+        );
+        let state = RepositoryState::from_root(service_root);
+
+        let repo_id = state
+            .create_repository(RepositoryMutationRequest {
+                repo_id: Some("repo-runtime-custom".to_string()),
+                name: "Runtime Custom Repo".to_string(),
+                path: repo_root.to_string_lossy().to_string(),
+                backend_plugin_id: Some(plugin_id.to_string()),
+                backend_config: None,
+                skip_initial_sync: false,
+            })
+            .expect("custom filesystem backend should create")
+            .repository
+            .repo_id;
+
+        let record = state
+            .load_repository_record(&repo_id)
+            .expect("repository record should load");
+        assert_eq!(record.backend_record.plugin_id, plugin_id);
+
+        state
+            .create_file(FileCreateRequest {
+                repo_id,
+                parent_path: None,
+                name: "note.txt".to_string(),
+            })
+            .expect("custom filesystem backend should create a file through embedded fallback");
+        assert!(repo_root.join("note.txt").is_file());
     }
 
     #[test]
@@ -2374,16 +2430,16 @@ mod tests {
                 LOCAL_FILESYSTEM_PLUGIN_ID,
                 "Local Filesystem",
                 serde_json::json!({
-                    "kind": "filesystem",
-                    "category": "source",
-                    "type": {
-                        "layer": "source",
-                        "kind": "filesystem"
-                    },
-                    "capabilities": ["listFiles", "readFile", "writeFile", "moveFile", "deleteFile"],
-                    "runtime": "manifest-only",
-                    "source": "system"
-                }),
+                "kind": "filesystem",
+                "category": "source",
+                "type": {
+                    "layer": "source",
+                    "kind": "filesystem"
+                },
+                "capabilities": ["browse", "read", "write", "watch", "sync", "localRootPath", EMBEDDED_RUNTIME_FALLBACK_CAPABILITY],
+                "runtime": "manifest-only",
+                "source": "system"
+            }),
             ),
         );
         let metadata_dir = repo_root.join(REPO_META_DIR);

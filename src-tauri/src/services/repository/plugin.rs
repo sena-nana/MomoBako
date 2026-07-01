@@ -560,7 +560,7 @@ pub(super) fn ensure_repository_backend_runtime_available(
     if !manifest.enabled || manifest.status == "disabled" {
         return Err(format!("plugin is disabled: {}", manifest.plugin_id));
     }
-    if embedded_local_filesystem_fallback_enabled(&manifest.plugin_id) {
+    if plugin_supports_embedded_runtime_fallback(manifest) {
         return Ok(());
     }
     if manifest.sdk != "backend" || manifest.runtime != "native-dylib" {
@@ -1212,8 +1212,13 @@ fn native_plugin_library_file_name(library_name: &str) -> String {
     }
 }
 
-pub(super) fn embedded_local_filesystem_fallback_enabled(plugin_id: &str) -> bool {
-    plugin_id == LOCAL_FILESYSTEM_PLUGIN_ID
+pub(super) fn plugin_supports_embedded_runtime_fallback(manifest: &PluginManifest) -> bool {
+    manifest.kind == "filesystem"
+        && manifest.source == "system"
+        && manifest
+            .capabilities
+            .iter()
+            .any(|value| value == EMBEDDED_RUNTIME_FALLBACK_CAPABILITY)
 }
 
 pub(super) fn default_plugins(service_root: &Path) -> Vec<PluginManifest> {

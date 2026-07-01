@@ -107,7 +107,7 @@ impl BackendPluginRegistry {
                 if manifest.runtime == "native-dylib"
                     && manifest.enabled
                     && registration.native.is_none()
-                    && !embedded_local_filesystem_fallback_enabled(&manifest.plugin_id)
+                    && !plugin_supports_embedded_runtime_fallback(&manifest)
                 {
                     manifest.status = "unavailable".to_string();
                     manifest.disable_reason = Some("原生运行时不可用。".to_string());
@@ -201,7 +201,7 @@ impl BackendPluginRegistry {
         };
         let response = if let Some(native) = &registration.native {
             native.call(method, payload, runtime_context)?
-        } else if embedded_local_filesystem_fallback_enabled(&registration.manifest.plugin_id) {
+        } else if plugin_supports_embedded_runtime_fallback(&resolved_manifest) {
             call_builtin_local_filesystem(method, payload, &runtime_context.plugin_config)?
         } else if let Some(error) = &registration.load_error {
             return Err(format!(
@@ -540,7 +540,7 @@ pub fn install_local_filesystem_test_plugin_archive(service_root: &Path) {
                 "kind": "filesystem",
                 "category": "source",
                 "description": "Test local filesystem backend.",
-                "capabilities": ["browse", "read", "write", "watch", "sync", "localRootPath"],
+                "capabilities": ["browse", "read", "write", "watch", "sync", "localRootPath", "embeddedRuntimeFallback"],
                 "enabled": true,
                 "sdk": "backend",
                 "entry": {},

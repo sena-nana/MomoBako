@@ -67,7 +67,7 @@ use self::local_index::*;
 use self::pathing::*;
 pub(crate) use self::playback::download_playlist_with_progress;
 use self::plugin::{
-    apply_plugin_settings, broken_plugin_manifest, embedded_local_filesystem_fallback_enabled,
+    apply_plugin_settings, broken_plugin_manifest, plugin_supports_embedded_runtime_fallback,
     ensure_plugin_data_dir, ensure_repository_backend_runtime_available, is_source_plugin,
     load_native_plugin, load_plugin_config_values, load_plugin_settings,
     parse_plugin_manifest_with_source, plugin_data_dir, plugin_legacy_ids,
