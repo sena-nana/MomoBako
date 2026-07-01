@@ -1534,6 +1534,15 @@ pub(super) struct PluginCallResponse {
     pub(super) error: Option<String>,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct HostPluginCallEnvelope {
+    pub(super) service_root_dir: String,
+    pub(super) plugin_id: String,
+    pub(super) method: String,
+    pub(super) payload: serde_json::Value,
+}
+
 #[derive(Debug, Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct ApiDefinition {
