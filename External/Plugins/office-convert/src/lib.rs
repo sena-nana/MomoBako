@@ -2,9 +2,6 @@
 //!
 //! 负责把 Office 文档转换为 PDF 并缓存到资源库缓存目录。
 
-#[path = "../../service-downloader/src/aria2_runtime.rs"]
-mod aria2_runtime;
-
 use std::{
     ffi::{c_char, CString},
     fs,
@@ -16,7 +13,8 @@ use std::{
 };
 
 use momobako_backend_plugin_sdk::{
-    free_c_string, read_request, response_error, response_ok, PluginRuntimeContext,
+    call_host_plugin, free_c_string, read_request, register_host_plugin_api, response_error,
+    response_ok, HostPluginCallFn, HostPluginFreeFn, PluginRuntimeContext,
 };
 use rusqlite::{Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
@@ -31,9 +29,9 @@ const REGISTRY_FILE_NAME: &str = "repositories.db";
 const REPO_META_DIR: &str = ".momo";
 const OFFICE_CACHE_NAMESPACE: &str = "office-preview";
 const DEFAULT_LIBREOFFICE_VERSION: &str = "25.8.3";
-const DOWNLOADER_PLUGIN_DATA_DIR_NAME: &str = "momobako-service-downloader";
 const DEFAULT_LIBREOFFICE_DOWNLOAD_URL: &str =
     "https://download.documentfoundation.org/libreoffice/stable/25.8.3/win/x86_64/LibreOffice_25.8.3_Win_x86-64.msi";
+const DOWNLOADER_PLUGIN_ID: &str = "momobako.service.downloader";
 
 #[cfg(target_os = "windows")]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
@@ -136,6 +134,14 @@ pub extern "C" fn momobako_plugin_call(input: *const c_char) -> *mut c_char {
 #[no_mangle]
 pub unsafe extern "C" fn momobako_plugin_free(value: *mut c_char) {
     unsafe { free_c_string(value) };
+}
+
+#[no_mangle]
+pub extern "C" fn momobako_plugin_register_host_api(
+    call: Option<HostPluginCallFn>,
+    free: Option<HostPluginFreeFn>,
+) {
+    register_host_plugin_api(call, free);
 }
 
 fn handle_call(input: *const c_char) -> Result<serde_json::Value, String> {
@@ -654,36 +660,59 @@ fn download_runtime_via_downloader(
     if let Some(parent) = target_path.parent() {
         fs::create_dir_all(parent).map_err(io_error)?;
     }
-    let downloader_plugin_data_dir = downloader_plugin_data_dir(runtime);
-    let record = aria2_runtime::download_via_aria2(
-        &aria2_runtime::Aria2Config {
-            plugin_data_dir: downloader_plugin_data_dir.as_path(),
-            download_url: DEFAULT_LIBREOFFICE_DOWNLOAD_URL,
-        },
-        url,
-        target_path,
-        Some(serde_json::json!({
-            "kind": "office-runtime",
-            "pluginId": "momobako.service.office-convert",
-            "runtime": "libreoffice",
-            "version": DEFAULT_LIBREOFFICE_VERSION,
-        })),
-        Duration::from_secs(60 * 30),
+    let plugin_runtime = PluginRuntimeContext {
+        plugin_id: "momobako.service.office-convert".to_string(),
+        plugin_data_dir: runtime.plugin_data_dir.to_string_lossy().to_string(),
+        service_root_dir: runtime.service_root_dir.to_string_lossy().to_string(),
+        plugin_config: Default::default(),
+    };
+    let _ = call_host_plugin(
+        &plugin_runtime,
+        DOWNLOADER_PLUGIN_ID,
+        "downloader.ensureRuntime",
+        serde_json::json!({}),
     )?;
-    if !Path::new(record.destination_path.as_str()).is_file() {
+    let queued = call_host_plugin(
+        &plugin_runtime,
+        DOWNLOADER_PLUGIN_ID,
+        "downloader.enqueueDownload",
+        serde_json::json!({
+            "url": url,
+            "destinationPath": target_path.to_string_lossy().to_string(),
+            "metadata": {
+                "kind": "office-runtime",
+                "pluginId": "momobako.service.office-convert",
+                "runtime": "libreoffice",
+                "version": DEFAULT_LIBREOFFICE_VERSION
+            }
+        }),
+    )?;
+    let task_id = queued
+        .get("taskId")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| "downloader.enqueueDownload 未返回 taskId".to_string())?;
+    let record = call_host_plugin(
+        &plugin_runtime,
+        DOWNLOADER_PLUGIN_ID,
+        "downloader.awaitDownload",
+        serde_json::json!({
+            "taskId": task_id
+        }),
+    )?;
+    let destination_path = record
+        .get("destinationPath")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+    if !Path::new(destination_path.as_str()).is_file() {
         return Err(format!(
             "LibreOffice runtime download completed but destination file is missing: {}",
-            record.destination_path
+            destination_path
         ));
     }
     Ok(())
-}
-
-fn downloader_plugin_data_dir(runtime: &RuntimeContext) -> PathBuf {
-    runtime
-        .service_root_dir
-        .join("plugin-data")
-        .join(DOWNLOADER_PLUGIN_DATA_DIR_NAME)
 }
 
 fn convert_with_microsoft_office(
@@ -1169,7 +1198,7 @@ mod tests {
     }
 
     #[test]
-    fn downloader_plugin_data_dir_reuses_service_downloader_runtime_root() {
+    fn runtime_context_keeps_service_root_for_host_plugin_bridge() {
         let runtime = RuntimeContext {
             plugin_data_dir: PathBuf::from("C:/Service/plugin-data/momobako-service-office-convert"),
             service_root_dir: PathBuf::from("C:/Service"),
@@ -1179,8 +1208,8 @@ mod tests {
             },
         };
         assert_eq!(
-            downloader_plugin_data_dir(&runtime),
-            PathBuf::from("C:/Service/plugin-data/momobako-service-downloader")
+            runtime.service_root_dir,
+            PathBuf::from("C:/Service")
         );
     }
 }

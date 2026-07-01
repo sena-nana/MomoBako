@@ -1223,6 +1223,9 @@ pub(super) fn load_native_plugin(
         let free = *library
             .get::<PluginFreeFn>(b"momobako_plugin_free")
             .map_err(|error| format!("missing momobako_plugin_free: {error}"))?;
+        if let Ok(register_host_api) = library.get::<PluginRegisterHostApiFn>(b"momobako_plugin_register_host_api") {
+            register_host_api(Some(host_plugin_call_bridge), Some(host_plugin_free_bridge));
+        }
         (call, free)
     };
     Ok(NativePlugin {

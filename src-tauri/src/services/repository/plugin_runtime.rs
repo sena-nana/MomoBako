@@ -5,6 +5,10 @@ use super::*;
 pub(super) type PluginManifestFn = unsafe extern "C" fn() -> *mut c_char;
 pub(super) type PluginCallFn = unsafe extern "C" fn(*const c_char) -> *mut c_char;
 pub(super) type PluginFreeFn = unsafe extern "C" fn(*mut c_char);
+pub(super) type PluginRegisterHostApiFn =
+    unsafe extern "C" fn(Option<HostPluginCallFn>, Option<HostPluginFreeFn>);
+pub(super) type HostPluginCallFn = unsafe extern "C" fn(*const c_char) -> *mut c_char;
+pub(super) type HostPluginFreeFn = unsafe extern "C" fn(*mut c_char);
 
 pub(super) struct NativePlugin {
     pub(super) _library: libloading::Library,
@@ -346,6 +350,59 @@ impl NativePlugin {
                 .unwrap_or_else(|| "plugin call failed without an error message".to_string()))
         }
     }
+}
+
+pub(super) unsafe extern "C" fn host_plugin_call_bridge(input: *const c_char) -> *mut c_char {
+    let response = match read_host_plugin_call(input).and_then(dispatch_host_plugin_call) {
+        Ok(payload) => PluginCallResponse {
+            ok: true,
+            payload: Some(payload),
+            error: None,
+        },
+        Err(error) => PluginCallResponse {
+            ok: false,
+            payload: None,
+            error: Some(error),
+        },
+    };
+    let json = serde_json::to_string(&response).unwrap_or_else(|error| {
+        format!(
+            "{{\"ok\":false,\"payload\":null,\"error\":\"failed to encode host plugin response: {error}\"}}"
+        )
+    });
+    CString::new(json)
+        .unwrap_or_else(|_| {
+            CString::new(
+                "{\"ok\":false,\"payload\":null,\"error\":\"host plugin response contained a null byte\"}",
+            )
+            .expect("static CString should be valid")
+        })
+        .into_raw()
+}
+
+pub(super) unsafe extern "C" fn host_plugin_free_bridge(value: *mut c_char) {
+    if value.is_null() {
+        return;
+    }
+    let _ = CString::from_raw(value);
+}
+
+fn read_host_plugin_call(input: *const c_char) -> Result<HostPluginCallEnvelope, String> {
+    if input.is_null() {
+        return Err("host plugin request pointer is null".to_string());
+    }
+    let raw = unsafe { CStr::from_ptr(input) }
+        .to_str()
+        .map_err(|error| error.to_string())?;
+    serde_json::from_str(raw).map_err(json_error)
+}
+
+fn dispatch_host_plugin_call(request: HostPluginCallEnvelope) -> Result<serde_json::Value, String> {
+    backend_plugin_registry(Path::new(request.service_root_dir.trim())).call(
+        &request.plugin_id,
+        &request.method,
+        request.payload,
+    )
 }
 
 pub(super) fn plugin_call_runtime(manifest: &PluginManifest) -> Option<PluginCallRuntime> {
