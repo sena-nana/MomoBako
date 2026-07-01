@@ -1,0 +1,19 @@
+External/Plugins/office-convert/helper/src/main.rs
+  s_2d5a17782b6bfd::t_d963f89c9eb3ff 134-137,149,437-482,580-590
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.5",
+  "base_commit_sha": "d5ea183b577479da578a65d917fbf291c463306a",
+  "prompts": {},
+  "sessions": {
+    "s_2d5a17782b6bfd": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f1cad-dea8-7323-b604-a3effbaf235c",
+        "model": "unknown"
+      },
+      "human_author": "AuraElicase <auraelicase@outlook.com>"
+    }
+  }
+}
