@@ -105,6 +105,9 @@ export function register(ctx) {
           await loadPdfDocument(token, preview.sourceUrl);
           if (token !== loadToken) return;
           state.value = "ready";
+          await nextTick();
+          if (token !== loadToken) return;
+          await renderCurrentPage();
           void persistPdfThumbnail(token);
         } catch (cause) {
           if (token !== loadToken) return;
@@ -123,8 +126,6 @@ export function register(ctx) {
         pdfDocument.value = document;
         pageCount.value = document.numPages;
         currentPage.value = 1;
-        await nextTick();
-        await renderCurrentPage();
       }
 
       async function renderCurrentPage() {

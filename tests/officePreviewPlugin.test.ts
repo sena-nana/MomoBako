@@ -195,6 +195,7 @@ describe("office preview plugin", () => {
   it("renders pdf preview pages and allows page navigation for direct pdf files", async () => {
     let component: unknown;
     const getPageCalls: number[] = [];
+    const renderCalls: number[] = [];
     pdfjsState.getDocument.mockImplementation(() => ({
       promise: Promise.resolve({
         numPages: 2,
@@ -205,9 +206,12 @@ describe("office preview plugin", () => {
               width: 480 * scale,
               height: 640 * scale,
             }),
-            render: () => ({
-              promise: Promise.resolve(),
-            }),
+            render: () => {
+              renderCalls.push(pageNumber);
+              return {
+                promise: Promise.resolve(),
+              };
+            },
           };
         },
         destroy: async () => undefined,
@@ -249,6 +253,9 @@ describe("office preview plugin", () => {
 
     expect(await screen.findByText("2 页 PDF")).toBeInTheDocument();
     expect(await screen.findByText("1 / 2")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(renderCalls).toContain(1);
+    });
     expect(screen.getByRole("button", { name: "上一页" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "下一页" })).toBeEnabled();
 
