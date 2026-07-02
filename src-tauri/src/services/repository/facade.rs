@@ -700,6 +700,20 @@ impl RepositoryState {
         browser::import_entries(self, request)
     }
 
+    pub fn import_archive_entries(
+        &self,
+        request: FileArchiveImportRequest,
+    ) -> Result<FileBrowserSnapshot, String> {
+        importing::import_archive_entries(self, request)
+    }
+
+    pub fn import_eagle_library(
+        &self,
+        request: EagleLibraryImportRequest,
+    ) -> Result<EagleLibraryImportResponse, String> {
+        importing::import_eagle_library(self, request)
+    }
+
     pub fn add_external_assets(
         &self,
         request_id: String,

@@ -7,12 +7,14 @@
 ```bash
 python External/EagleLibraryChanger/convert.py \
   --input External/Examples/TestBench.library \
+  --mode copy \
   --output External/Examples/TestBench.momo
 ```
 
 可选参数：
 
 - `--name`：指定仓库名称，默认使用输出目录名
+- `--mode`：素材导入模式，固定为 `copy` 或 `move`
 - `--dry-run`：只预览，不写文件
 - `--yes`：跳过确认直接执行
 - `--force`：允许复用已存在的空输出目录
@@ -20,7 +22,7 @@ python External/EagleLibraryChanger/convert.py \
 ## 行为
 
 - 读取 Eagle 顶层 `metadata.json`、`tags.json` 等文件生成转换计划
-- 把 `images/<assetId>.info/` 中的原文件移动到标准目录
+- 把 `images/<assetId>.info/` 中的原文件按 `--mode` 复制或移动到标准目录
 - 将 Eagle `isDeleted: true` 素材写入 MomoBako `.momo/trash` 和 `.momo/trash.json`，保留可恢复的原路径语义
 - 保留 Eagle 素材来源与原始属性：`url` 写入 `metadata.link`，导入/创建/修改时间写入 `addedToLibraryAt`、`fileCreatedAt`、`fileModifiedAt`，宽高与原始大小写入 `width`、`height`、`originalSizeBytes`
 - 把 Eagle 缩略图迁移到输出仓库的 `.momo/thumbnails/`
@@ -28,6 +30,11 @@ python External/EagleLibraryChanger/convert.py \
 - 将非空 `actions.json` 写入 MomoBako 仓库动作表；导入时不执行任何动作
 - 生成 `.momo/repository.json` 与 `.momo/metadata.db`
 - 输出仓库旁路报告 `<输出目录名>.import-report.json`，记录路径映射、重名处理、能力降级和警告
+
+模式说明：
+
+- `copy`：复制 Eagle 原文件与缩略图，保留源目录
+- `move`：移动 Eagle 原文件与缩略图，消费源目录
 
 ## 能力补全边界
 

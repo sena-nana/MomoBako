@@ -112,7 +112,11 @@ export function useWorkspaceViewState(options: WorkspaceViewStateOptions) {
     }
     return withActiveAssetMetadata(options.selectedEntry.value, options.activeAssetDetail.value);
   });
-  const isRepositoryWritable = computed(() => hasRepository.value && !isMissingRepository.value);
+  const isRepositoryWritable = computed(() => (
+    hasRepository.value
+    && !isMissingRepository.value
+    && Boolean(options.activeSnapshot.value?.repository.backend.capabilities.includes("write"))
+  ));
   const canRenameSelected = computed(() => options.selectedEntries.value.length === 1 && isRepositoryWritable.value && !isTrashPanel.value && !isSmartFolderPanel.value);
   const canOpenSelected = computed(() => options.selectedEntries.value.length === 1 && !isMissingRepository.value && !isTrashPanel.value);
   const canDeleteSelected = computed(() => options.selectedEntries.value.length > 0 && isRepositoryWritable.value && !isSmartFolderPanel.value);

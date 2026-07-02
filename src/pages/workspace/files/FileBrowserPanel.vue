@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { onBeforeUnmount, onMounted, ref } from "vue";
 import {
   Eye,
   File,
@@ -34,6 +34,7 @@ const props = defineProps<{
   breadcrumbs: BreadcrumbSegment[];
   canDragEntries: boolean;
   canDeleteSelected: boolean;
+  canImport?: boolean;
   canOpenSelected: boolean;
   canRenameSelected: boolean;
   canRestoreSelected: boolean;
@@ -92,6 +93,10 @@ const emit = defineEmits<{
   dragOver: [event: DragEvent];
   drop: [event: DragEvent];
   emptyTrash: [];
+  importEagleCopy: [];
+  importEagleMove: [];
+  importFolder: [];
+  importZip: [];
   entryDragEnd: [event: PointerEvent | null];
   entryDragMove: [event: PointerEvent];
   entryDragStart: [entry: FileBrowserEntry, event: PointerEvent];
@@ -115,6 +120,9 @@ const emit = defineEmits<{
 }>();
 
 const filesListRef = ref<HTMLElement | null>(null);
+const importMenuRef = ref<HTMLElement | null>(null);
+const importMenuOpen = ref(false);
+const showEagleImportActions = ref(false);
 const {
   dropTargetPathSet,
   multiSelectionSummary,
@@ -134,6 +142,58 @@ const {
   filesListRef,
   props,
   emit,
+});
+
+function closeImportMenu() {
+  importMenuOpen.value = false;
+  showEagleImportActions.value = false;
+}
+
+function toggleImportMenu() {
+  if (!props.canImport) return;
+  importMenuOpen.value = !importMenuOpen.value;
+  if (!importMenuOpen.value) {
+    showEagleImportActions.value = false;
+  }
+}
+
+function toggleEagleImportActions() {
+  showEagleImportActions.value = !showEagleImportActions.value;
+}
+
+function handleGlobalPointerDown(event: PointerEvent) {
+  const target = event.target;
+  if (!(target instanceof Node)) return;
+  if (importMenuRef.value?.contains(target)) return;
+  closeImportMenu();
+}
+
+function triggerImportFolder() {
+  closeImportMenu();
+  emit("importFolder");
+}
+
+function triggerImportZip() {
+  closeImportMenu();
+  emit("importZip");
+}
+
+function triggerImportEagleCopy() {
+  closeImportMenu();
+  emit("importEagleCopy");
+}
+
+function triggerImportEagleMove() {
+  closeImportMenu();
+  emit("importEagleMove");
+}
+
+onMounted(() => {
+  window.addEventListener("pointerdown", handleGlobalPointerDown);
+});
+
+onBeforeUnmount(() => {
+  window.removeEventListener("pointerdown", handleGlobalPointerDown);
 });
 </script>
 
@@ -191,6 +251,36 @@ const {
               <File :size="14" aria-hidden="true" />
               建文件
             </button>
+            <div ref="importMenuRef" class="files-toolbar__import">
+              <button
+                type="button"
+                class="ghost files-toolbar__btn"
+                :disabled="isMutatingFiles || !canImport"
+                @click="toggleImportMenu"
+              >
+                <FolderOpen :size="14" aria-hidden="true" />
+                导入
+              </button>
+              <div v-if="importMenuOpen" class="files-toolbar__menu">
+                <button type="button" class="files-toolbar__menu-item" :disabled="isMutatingFiles" @click="triggerImportFolder">
+                  从文件夹导入
+                </button>
+                <button type="button" class="files-toolbar__menu-item" :disabled="isMutatingFiles" @click="triggerImportZip">
+                  从 ZIP 导入
+                </button>
+                <button type="button" class="files-toolbar__menu-item" :disabled="isMutatingFiles" @click="toggleEagleImportActions">
+                  从 Eagle 导入
+                </button>
+                <div v-if="showEagleImportActions" class="files-toolbar__menu-subactions">
+                  <button type="button" class="files-toolbar__menu-item" :disabled="isMutatingFiles" @click="triggerImportEagleCopy">
+                    复制导入
+                  </button>
+                  <button type="button" class="files-toolbar__menu-item" :disabled="isMutatingFiles" @click="triggerImportEagleMove">
+                    剪切导入
+                  </button>
+                </div>
+              </div>
+            </div>
           </template>
 
           <template v-else-if="isTrashPanel && !isReadOnlyVirtual">
@@ -511,3 +601,50 @@ const {
     </div>
   </aside>
 </template>
+
+<style scoped>
+.files-toolbar__import {
+  position: relative;
+}
+
+.files-toolbar__menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  min-width: 184px;
+  display: grid;
+  gap: 6px;
+  padding: 8px;
+  border-radius: 12px;
+  border: 1px solid var(--panel-border, rgba(255, 255, 255, 0.08));
+  background: var(--panel-bg, #15171a);
+  box-shadow: 0 16px 32px rgba(0, 0, 0, 0.24);
+  z-index: 20;
+}
+
+.files-toolbar__menu-item {
+  width: 100%;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.files-toolbar__menu-item:hover:enabled {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.files-toolbar__menu-item:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.files-toolbar__menu-subactions {
+  display: grid;
+  gap: 6px;
+  padding-top: 2px;
+}
+</style>

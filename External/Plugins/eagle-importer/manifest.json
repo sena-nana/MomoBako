@@ -1,0 +1,45 @@
+{
+  "pluginId": "momobako.tool.eagle-importer",
+  "legacyPluginIds": [],
+  "name": "Eagle Importer",
+  "version": "0.1.0",
+  "type": {
+    "layer": "integration-capability-hook",
+    "kind": "eagle-importer"
+  },
+  "kind": "eagle-importer",
+  "category": "service",
+  "description": "把 EagleLibrary 合并导入当前工作区目录。",
+  "capabilities": ["tool-page", "eagle-import"],
+  "enabled": true,
+  "sdk": "frontend",
+  "runtime": "vue-module",
+  "entry": {
+    "frontend": {
+      "module": "dist/register.js",
+      "export": "register"
+    }
+  },
+  "contributes": {
+    "toolPages": [
+      {
+        "toolPageId": "momobako.tool.eagle-importer",
+        "label": "Eagle 导入",
+        "description": "从 EagleLibrary 复制或剪切导入",
+        "order": 30
+      }
+    ]
+  },
+  "permissions": [],
+  "requires": [],
+  "optional": [],
+  "hooks": [
+    { "slot": "toolPage", "action": "tool.eagleImporter.open", "label": "打开 Eagle 导入" }
+  ],
+  "compat": {
+    "sdkVersion": "1",
+    "legacyPluginIds": []
+  },
+  "source": "builtin",
+  "status": "ready"
+}

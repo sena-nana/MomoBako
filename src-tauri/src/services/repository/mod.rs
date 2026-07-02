@@ -32,6 +32,7 @@ mod file_transfer;
 mod filesystem_backend;
 #[cfg(test)]
 mod internal_tests;
+mod importing;
 mod local_index;
 mod management;
 mod pathing;

@@ -12,9 +12,11 @@ use services::repository as repository_service;
 use services::repository::{
     ApiDesignSnapshot, AssetDetail, BinaryFileWriteRequest, BinaryFileWriteResponse, CacheSnapshot,
     DownloaderPlaylistProgressEvent, DownloaderPlaylistRequest, EntryPlaybackProgressEvent,
-    EntryAccessRecordRequest, EntryAccessRecordResponse, EntryPlaybackRequest,
+    EagleLibraryImportRequest, EagleLibraryImportResponse, EntryAccessRecordRequest,
+    EntryAccessRecordResponse, EntryPlaybackRequest,
     EntryPlaybackSourceResponse, FileBrowserRequest, FileBrowserSnapshot, FileCopyRequest,
-    FileCreateRequest, FileDeleteRequest, FileImportRequest, FileMoveRequest,
+    FileArchiveImportRequest, FileCreateRequest, FileDeleteRequest, FileImportRequest,
+    FileMoveRequest,
     FilePreviewSourceResponse, FileReadRequest, FileRenameRequest, HardlinkCandidateResponse,
     HardlinkConfirmRequest, HardlinkConfirmResponse, MetadataUpdateRequest, MetadataUpdateResponse,
     NeteaseRepositoryCacheConfigureRequest, NeteaseRepositoryCacheConfigureResponse,
@@ -447,6 +449,22 @@ async fn import_entries(
 }
 
 #[tauri::command]
+async fn import_archive_entries(
+    request: FileArchiveImportRequest,
+    file_browser: tauri::State<'_, FileBrowserViewModel>,
+) -> Result<FileBrowserSnapshot, String> {
+    file_browser.import_archive_entries(request).await
+}
+
+#[tauri::command]
+async fn import_eagle_library(
+    request: EagleLibraryImportRequest,
+    file_browser: tauri::State<'_, FileBrowserViewModel>,
+) -> Result<EagleLibraryImportResponse, String> {
+    file_browser.import_eagle_library(request).await
+}
+
+#[tauri::command]
 async fn copy_entries(
     request: FileCopyRequest,
     file_browser: tauri::State<'_, FileBrowserViewModel>,
@@ -738,6 +756,8 @@ pub fn run() {
             create_directory,
             create_file,
             import_entries,
+            import_archive_entries,
+            import_eagle_library,
             copy_entries,
             move_entries,
             rename_entry,

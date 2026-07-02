@@ -1,6 +1,7 @@
 //! File-browser command orchestration for repository entries and trash operations.
 
 use crate::services::repository::{
+    EagleLibraryImportRequest, EagleLibraryImportResponse, FileArchiveImportRequest,
     FileBrowserRequest, FileBrowserSnapshot, FileCopyRequest, FileCreateRequest, FileDeleteRequest,
     FileImportRequest, FileMoveRequest, FileRenameRequest, RepositoryTreeSnapshot,
     TrashMutationRequest,
@@ -59,6 +60,24 @@ impl FileBrowserViewModel {
     ) -> Result<FileBrowserSnapshot, String> {
         self.runtime
             .run_write(move |state| state.import_entries(request))
+            .await
+    }
+
+    pub async fn import_archive_entries(
+        &self,
+        request: FileArchiveImportRequest,
+    ) -> Result<FileBrowserSnapshot, String> {
+        self.runtime
+            .run_write(move |state| state.import_archive_entries(request))
+            .await
+    }
+
+    pub async fn import_eagle_library(
+        &self,
+        request: EagleLibraryImportRequest,
+    ) -> Result<EagleLibraryImportResponse, String> {
+        self.runtime
+            .run_write(move |state| state.import_eagle_library(request))
             .await
     }
 

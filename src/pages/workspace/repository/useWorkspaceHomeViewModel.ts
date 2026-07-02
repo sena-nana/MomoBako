@@ -1,4 +1,4 @@
-import { computed, reactive } from "vue";
+import { computed, onBeforeUnmount, reactive } from "vue";
 import {
   useWorkspaceAssetMetadata,
   useWorkspaceActions,
@@ -37,8 +37,48 @@ import {
   hardlinkStateLabel,
   statusLabel,
 } from "../files/filePresentation";
-import type { FileBrowserEntry } from "../../../types/repository";
+import type { EagleLibraryImportResponse, FileBrowserEntry, FileBrowserSnapshot } from "../../../types/repository";
 import { loadThumbnailsForEntries } from "../../../composables/workspace/thumbnails";
+import { emitPluginEvent, onPluginEvent } from "../../../plugins/sdk";
+
+type WorkspaceImportRequest =
+  | {
+      requestId: string;
+      action: "folder";
+      repoId: string;
+      parentPath: string;
+      sourcePath: string;
+    }
+  | {
+      requestId: string;
+      action: "zip";
+      repoId: string;
+      parentPath: string;
+      archivePath: string;
+    }
+  | {
+      requestId: string;
+      action: "eagle";
+      repoId: string;
+      parentPath: string;
+      libraryPath: string;
+      mode: "copy" | "move";
+    };
+
+type WorkspaceImportResponse =
+  | {
+      requestId: string;
+      action: WorkspaceImportRequest["action"];
+      status: "success";
+      snapshot?: FileBrowserSnapshot;
+      result?: EagleLibraryImportResponse;
+    }
+  | {
+      requestId: string;
+      action: WorkspaceImportRequest["action"];
+      status: "error";
+      message: string;
+    };
 
 export function useWorkspaceHomeViewModel() {
   const {
@@ -77,6 +117,8 @@ export function useWorkspaceHomeViewModel() {
     copyWorkspaceEntries,
     moveWorkspaceEntries,
     deleteWorkspaceEntries,
+    importArchiveEntriesToWorkspace,
+    importEagleLibraryToWorkspace,
     importEntriesToWorkspace,
     renameWorkspaceEntry,
     deleteWorkspaceEntry,
@@ -468,6 +510,10 @@ export function useWorkspaceHomeViewModel() {
     deleteSelectedEntry,
     handleCreateFile,
     handleEmptyTrash,
+    handleImportEagleCopy,
+    handleImportEagleMove,
+    handleImportFolder,
+    handleImportZip,
     handleRestoreAllTrash,
     openCopyTargetDialog,
     openSelectedEntry,
@@ -493,6 +539,9 @@ export function useWorkspaceHomeViewModel() {
     deleteWorkspaceEntries,
     deleteWorkspaceEntry,
     emptyTrash,
+    importArchiveEntriesToWorkspace,
+    importEagleLibraryToWorkspace,
+    importEntriesToWorkspace,
     openDirectory,
     openWorkspaceEntry,
     renameWorkspaceEntry,
@@ -607,6 +656,7 @@ export function useWorkspaceHomeViewModel() {
     isLoadingFileBrowserMore,
     isModelEntry,
     isMutatingFiles,
+    isRepositoryWritable,
     isSavingMetadata,
     isReadOnlyVirtualView,
     isTrashPanel,
@@ -647,6 +697,10 @@ export function useWorkspaceHomeViewModel() {
     workspacePlayerBarProps,
     deleteSelectedEntry,
     exitPreview,
+    handleImportEagleCopy,
+    handleImportEagleMove,
+    handleImportFolder,
+    handleImportZip,
   });
   const { playlistPageHandlers, playlistPageProps } = usePlaylistPageBindings({
     activePlaylistDetail,
@@ -668,8 +722,94 @@ export function useWorkspaceHomeViewModel() {
     hasRepository,
   });
 
+  async function handleWorkspaceImportRequest(request: WorkspaceImportRequest): Promise<WorkspaceImportResponse> {
+    if (!activeRepoId.value || request.repoId !== activeRepoId.value) {
+      return {
+        requestId: request.requestId,
+        action: request.action,
+        status: "error",
+        message: "当前工具页目标仓库已变化，请刷新后重试。",
+      };
+    }
+    if (!hasRepository.value) {
+      return {
+        requestId: request.requestId,
+        action: request.action,
+        status: "error",
+        message: "当前没有可导入的资源库。",
+      };
+    }
+    if (!isRepositoryWritable.value || isTrashPanel.value || isVirtualView.value) {
+      return {
+        requestId: request.requestId,
+        action: request.action,
+        status: "error",
+        message: "当前视图不支持导入，请切换到可写目录后重试。",
+      };
+    }
+    if (request.action === "folder") {
+      const snapshot = await importEntriesToWorkspace([request.sourcePath], request.parentPath);
+      return snapshot
+        ? {
+            requestId: request.requestId,
+            action: request.action,
+            status: "success",
+            snapshot,
+          }
+        : {
+            requestId: request.requestId,
+            action: request.action,
+            status: "error",
+            message: error.value || "文件夹导入失败。",
+          };
+    }
+    if (request.action === "zip") {
+      const snapshot = await importArchiveEntriesToWorkspace(request.archivePath, request.parentPath);
+      return snapshot
+        ? {
+            requestId: request.requestId,
+            action: request.action,
+            status: "success",
+            snapshot,
+          }
+        : {
+            requestId: request.requestId,
+            action: request.action,
+            status: "error",
+            message: error.value || "ZIP 导入失败。",
+          };
+    }
+    const result = await importEagleLibraryToWorkspace(request.libraryPath, request.mode, request.parentPath);
+    return result
+      ? {
+          requestId: request.requestId,
+          action: request.action,
+          status: "success",
+          result,
+        }
+      : {
+          requestId: request.requestId,
+          action: request.action,
+          status: "error",
+          message: error.value || "Eagle 导入失败。",
+        };
+  }
+
+  const disposeWorkspaceImportListener = onPluginEvent<WorkspaceImportRequest>(
+    "workspace:import-request",
+    async (request) => {
+      const response = await handleWorkspaceImportRequest(request);
+      emitPluginEvent<WorkspaceImportResponse>("workspace:import-response", response);
+    },
+  );
+
+  onBeforeUnmount(() => {
+    disposeWorkspaceImportListener();
+  });
+
   return reactive({
     activeFilterCount,
+    activeRepoId,
     activeLibrarySearchShortcuts,
     activeNeteaseLoginExpired,
     activeRepository,
@@ -715,6 +855,7 @@ export function useWorkspaceHomeViewModel() {
     hasActiveFilters,
     hasRepository,
     hardlinkCandidateMessage,
+    currentDirectoryPath,
     isActionsPanel,
     isDeletingMissingRepository,
     isDraggingRepositoryFolder,
@@ -727,10 +868,13 @@ export function useWorkspaceHomeViewModel() {
     isMutatingFiles,
     isPlaylistPanel,
     isRepairingMissingRepository,
+    isRepositoryWritable,
     isRefreshingNeteaseLogin,
     isRunningRepositoryAction,
     isSearching,
     isSearchPanel,
+    isTrashPanel,
+    isVirtualView,
     limitInput,
     metadataFiltersInput,
     missingRepositoryError,

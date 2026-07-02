@@ -1019,6 +1019,39 @@ export type FileImportRequest = {
   sourcePaths: string[];
 };
 
+export type FileArchiveImportRequest = {
+  repoId: string;
+  parentPath?: string;
+  archivePath: string;
+};
+
+export type EagleImportMode = "copy" | "move";
+
+export type EagleLibraryImportRequest = {
+  repoId: string;
+  parentPath?: string;
+  libraryPath: string;
+  mode: EagleImportMode;
+};
+
+export type EagleLibraryImportSummary = {
+  importedFiles: number;
+  importedDirectories: number;
+  importedTrashEntries: number;
+  importedShortcuts: number;
+  importedSmartFolders: number;
+  importedRepositoryActions: number;
+  importedTagGroups: number;
+  importedAliasGroups: number;
+  importedHardlinkGroups: number;
+};
+
+export type EagleLibraryImportResponse = {
+  snapshot: FileBrowserSnapshot;
+  reportPath: string;
+  summary: EagleLibraryImportSummary;
+};
+
 export type ExternalAddAssetClient = {
   id?: string;
   name?: string;

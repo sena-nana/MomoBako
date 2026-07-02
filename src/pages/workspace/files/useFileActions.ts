@@ -1,5 +1,6 @@
 import { computed, ref, watch, type ComputedRef } from "vue";
 import type {
+  EagleLibraryImportResponse,
   FileBrowserEntry,
   FileBrowserSnapshot,
   FileDeleteMode,
@@ -22,6 +23,13 @@ type WorkspaceFileActionsOptions = {
   deleteWorkspaceEntries: (paths: string[], mode?: FileDeleteMode) => Promise<FileBrowserSnapshot | null>;
   deleteWorkspaceEntry: (path: string, mode?: FileDeleteMode) => Promise<FileBrowserSnapshot | null>;
   emptyTrash: () => Promise<FileBrowserSnapshot | null>;
+  importArchiveEntriesToWorkspace: (archivePath: string, parentPath?: string) => Promise<FileBrowserSnapshot | null>;
+  importEagleLibraryToWorkspace: (
+    libraryPath: string,
+    mode: "copy" | "move",
+    parentPath?: string,
+  ) => Promise<EagleLibraryImportResponse | null>;
+  importEntriesToWorkspace: (sourcePaths: string[], parentPath?: string) => Promise<FileBrowserSnapshot | null>;
   openDirectory: (path: string) => void;
   openWorkspaceEntry: (path: string) => Promise<void>;
   renameWorkspaceEntry: (path: string, newName: string) => Promise<FileBrowserSnapshot | null>;
@@ -185,6 +193,35 @@ export function useFileActions(options: WorkspaceFileActionsOptions) {
     await options.revealWorkspaceEntry(options.currentFileEntry.value.path);
   }
 
+  async function handleImportFolder() {
+    if (options.isTrashPanel.value) return;
+    const sourcePath = await openDirectoryDialog("选择导入文件夹");
+    if (!sourcePath) return;
+    await options.importEntriesToWorkspace([sourcePath]);
+  }
+
+  async function handleImportZip() {
+    if (options.isTrashPanel.value) return;
+    const archivePath = await openZipDialog("选择 ZIP 压缩包");
+    if (!archivePath) return;
+    await options.importArchiveEntriesToWorkspace(archivePath);
+  }
+
+  async function handleImportEagleCopy() {
+    await handleImportEagle("copy");
+  }
+
+  async function handleImportEagleMove() {
+    await handleImportEagle("move");
+  }
+
+  async function handleImportEagle(mode: "copy" | "move") {
+    if (options.isTrashPanel.value) return;
+    const libraryPath = await openDirectoryDialog("选择 EagleLibrary 目录");
+    if (!libraryPath) return;
+    await options.importEagleLibraryToWorkspace(libraryPath, mode);
+  }
+
   return {
     copyTargetDialogOpen,
     copyTargetPath,
@@ -198,6 +235,10 @@ export function useFileActions(options: WorkspaceFileActionsOptions) {
     deleteSelectedEntry,
     handleCreateFile,
     handleEmptyTrash,
+    handleImportEagleCopy,
+    handleImportEagleMove,
+    handleImportFolder,
+    handleImportZip,
     handleRestoreAllTrash,
     openCopyTargetDialog,
     openSelectedEntry,
@@ -210,4 +251,25 @@ export function useFileActions(options: WorkspaceFileActionsOptions) {
     submitCopyTarget,
     submitRenameSelected,
   };
+}
+
+async function openDirectoryDialog(title: string) {
+  const { open } = await import("@tauri-apps/plugin-dialog");
+  const selected = await open({
+    title,
+    directory: true,
+    multiple: false,
+  });
+  return typeof selected === "string" && selected.trim() ? selected : null;
+}
+
+async function openZipDialog(title: string) {
+  const { open } = await import("@tauri-apps/plugin-dialog");
+  const selected = await open({
+    title,
+    directory: false,
+    multiple: false,
+    filters: [{ name: "ZIP", extensions: ["zip"] }],
+  });
+  return typeof selected === "string" && selected.trim() ? selected : null;
 }
