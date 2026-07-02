@@ -476,4 +476,53 @@ describe("office preview plugin", () => {
     });
     expect(pdfjsState.getDocument).not.toHaveBeenCalled();
   });
+
+  it("rejects tauri asset urls for converted office previews", async () => {
+    let component: unknown;
+    const preparePreviewFileSource = vi.fn();
+    const callPlugin = vi.fn(async () => ({
+      payload: {
+        pdfPath: "C:/Users/AuraE/Desktop/test/车卡.xlsx",
+        cached: false,
+        converter: "microsoft-office",
+        cacheKey: "office-preview-cache",
+        mediaType: "application/pdf",
+        sizeBytes: 4096,
+        modifiedAt: "2026-07-01T08:00:00Z",
+      },
+    }));
+    const prepareRepositoryCacheFilePreviewSource = vi.fn(async () => ({
+      repoId: "repo-main-001",
+      path: "C:/Users/AuraE/Desktop/test/车卡.xlsx",
+      token: "asset-preview-token",
+      sourceUrl: "asset://localhost/C:/Users/AuraE/Desktop/test/%E8%BD%A6%E5%8D%A1.xlsx",
+      mediaType: "application/pdf",
+      sizeBytes: 4096,
+      modifiedAt: "2026-07-01T08:00:00Z",
+    }));
+
+    const { register } = await import("../External/Plugins/office-preview/src/register.js");
+    register({
+      preparePreviewFileSource,
+      callPlugin,
+      prepareRepositoryCacheFilePreviewSource,
+      registerPreview: (definition: { component?: unknown }) => {
+        component = definition.component;
+        return definition;
+      },
+      pdfRuntime: pdfjsState,
+      vue: await import("vue"),
+    });
+
+    render(component as never, {
+      props: {
+        repoId: "repo-main-001",
+        entry: fileEntry("xlsx"),
+      },
+    });
+
+    expect(await screen.findByText("无法预览该文档")).toBeInTheDocument();
+    expect(await screen.findByText("转换后的 PDF 预览源不可用")).toBeInTheDocument();
+    expect(pdfjsState.getDocument).not.toHaveBeenCalled();
+  });
 });
