@@ -58,6 +58,9 @@ export function register(ctx) {
       const canvas = ref(null);
       const pdfDocument = shallowRef(null);
       let loadToken = 0;
+      let renderToken = 0;
+      let activeRenderTask = null;
+      let thumbnailTaskToken = 0;
 
       const kind = computed(() => getOfficePreviewKind(props.entry?.extension));
       const kindLabel = computed(() => officeKindLabel(kind.value));
@@ -109,7 +112,7 @@ export function register(ctx) {
           await nextTick();
           if (token !== loadToken) return;
           await renderCurrentPage();
-          void persistPdfThumbnail(token);
+          scheduleThumbnailPersistence(token);
         } catch (cause) {
           if (token !== loadToken) return;
           state.value = "error";
@@ -130,26 +133,54 @@ export function register(ctx) {
       }
 
       async function renderCurrentPage() {
+        const currentRenderToken = ++renderToken;
         const document = pdfDocument.value;
         const canvasElement = canvas.value;
         const container = viewer.value;
         if (!document || !canvasElement || !container) return;
         const page = await document.getPage(currentPage.value);
+        if (currentRenderToken !== renderToken) return;
         const containerWidth = Math.max(container.clientWidth - 32, 320);
         const initialViewport = page.getViewport({ scale: 1 });
         const scale = containerWidth / initialViewport.width;
         const viewport = page.getViewport({ scale });
         const context = canvasElement.getContext("2d");
         if (!context) return;
+        if (activeRenderTask?.cancel) {
+          activeRenderTask.cancel();
+        }
         canvasElement.width = Math.ceil(viewport.width * window.devicePixelRatio);
         canvasElement.height = Math.ceil(viewport.height * window.devicePixelRatio);
         canvasElement.style.width = `${Math.ceil(viewport.width)}px`;
         canvasElement.style.height = `${Math.ceil(viewport.height)}px`;
         context.setTransform(window.devicePixelRatio, 0, 0, window.devicePixelRatio, 0, 0);
-        await page.render({
+        const renderTask = page.render({
           canvasContext: context,
           viewport,
-        }).promise;
+        });
+        activeRenderTask = renderTask;
+        try {
+          await renderTask.promise;
+        } catch (cause) {
+          if (cause?.name !== "RenderingCancelledException") {
+            throw cause;
+          }
+        } finally {
+          if (activeRenderTask === renderTask) {
+            activeRenderTask = null;
+          }
+        }
+      }
+
+      function scheduleThumbnailPersistence(token) {
+        const currentThumbnailTaskToken = ++thumbnailTaskToken;
+        const schedule = typeof globalThis.requestIdleCallback === "function"
+          ? (callback) => globalThis.requestIdleCallback(callback, { timeout: 600 })
+          : (callback) => globalThis.setTimeout(callback, 0);
+        schedule(async () => {
+          if (currentThumbnailTaskToken !== thumbnailTaskToken || token !== loadToken) return;
+          await persistPdfThumbnail(token);
+        });
       }
 
       async function persistPdfThumbnail(token) {
@@ -192,6 +223,12 @@ export function register(ctx) {
       }
 
       function destroyPdfDocument() {
+        renderToken += 1;
+        thumbnailTaskToken += 1;
+        if (activeRenderTask?.cancel) {
+          activeRenderTask.cancel();
+        }
+        activeRenderTask = null;
         const document = pdfDocument.value;
         pdfDocument.value = null;
         if (document?.destroy) {
