@@ -1,0 +1,24 @@
+tests/workspaceFileBrowserState.test.ts
+  s_9dc404649a1020::t_955e3aea23c8f1 2,4-22,36-91,145-153,180-276
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.5",
+  "base_commit_sha": "2a6158dec8d2930cdd4c881b45732ac9dd140741",
+  "prompts": {},
+  "humans": {
+    "h_8e6780fc7b4bb1": {
+      "author": "AuraElicase <auraelicase@outlook.com>"
+    }
+  },
+  "sessions": {
+    "s_9dc404649a1020": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f1202-866c-7a11-b051-6349f55579b1",
+        "model": "unknown"
+      },
+      "human_author": "AuraElicase <auraelicase@outlook.com>"
+    }
+  }
+}
