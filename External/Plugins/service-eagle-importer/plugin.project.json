@@ -1,0 +1,9 @@
+{
+  "pluginId": "momobako.service.eagle-importer",
+  "build": {
+    "type": "cargo-native",
+    "sourceDir": "src",
+    "manifestPath": "Cargo.toml",
+    "outputDir": ".dist/service-eagle-importer"
+  }
+}

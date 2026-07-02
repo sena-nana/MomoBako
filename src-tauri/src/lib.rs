@@ -11,33 +11,31 @@ mod window_state;
 use services::repository as repository_service;
 use services::repository::{
     ApiDesignSnapshot, AssetDetail, BinaryFileWriteRequest, BinaryFileWriteResponse, CacheSnapshot,
-    DownloaderPlaylistProgressEvent, DownloaderPlaylistRequest, EntryPlaybackProgressEvent,
-    EagleLibraryImportRequest, EagleLibraryImportResponse, EntryAccessRecordRequest,
-    EntryAccessRecordResponse, EntryPlaybackRequest,
-    EntryPlaybackSourceResponse, FileBrowserRequest, FileBrowserSnapshot, FileCopyRequest,
-    FileArchiveImportRequest, FileCreateRequest, FileDeleteRequest, FileImportRequest,
-    FileMoveRequest,
-    FilePreviewSourceResponse, FileReadRequest, FileRenameRequest, HardlinkCandidateResponse,
-    HardlinkConfirmRequest, HardlinkConfirmResponse, MetadataUpdateRequest, MetadataUpdateResponse,
-    NeteaseRepositoryCacheConfigureRequest, NeteaseRepositoryCacheConfigureResponse,
-    PlaylistDetail, PlaylistItemRemoveRequest, PlaylistItemsAddRequest,
-    PlaylistItemsByPathsAddRequest, PlaylistItemsOrderRequest, PlaylistMembershipIndex,
-    PlaylistMembershipRequest, PlaylistMembershipSnapshot, PlaylistMutationRequest,
-    PlaylistMutationResponse, PlaylistSummary, PluginArchiveReadRequest, PluginArchiveTextResponse,
-    PluginCallRequest, PluginCallResult, PluginConfigDeleteRequest, PluginConfigSetRequest,
-    PluginConfigSnapshot, PluginDataDirectoryResponse, PluginDataFilePreviewSourceRequest,
-    PluginDataFilePreviewSourceResponse, PluginEnabledRequest, PluginHookExecutionListRequest,
-    PluginHookExecutionListResponse, PluginInstallRequest, PluginManifest, PluginMutationResponse,
-    RepositoryAction, RepositoryActionEnabledRequest, RepositoryActionMutationResponse,
-    RepositoryActionRunRequest, RepositoryActionRunResponse, RepositoryExportRequest,
-    RepositoryExportResponse, RepositoryFolderRequest, RepositoryMutationRequest,
-    RepositoryMutationResponse, RepositoryRelocateRequest, RepositorySnapshot, RepositorySummary,
-    RepositoryTreeSnapshot, RepositoryCacheFilePreviewSourceRequest,
-    RepositoryCacheFilePreviewSourceResponse,
-    RevisionActionRequest, RevisionActionResponse, SearchRequest, SearchResponse,
-    SmartFolderMutationRequest, SmartFolderMutationResponse, SmartFolderResultSnapshot,
-    SmartFolderTreeNode, SmartFolderUpdateRequest, SyncRequest, SyncResult, ThumbnailRequest,
-    ThumbnailResponse, TrashMutationRequest,
+    DownloaderPlaylistProgressEvent, DownloaderPlaylistRequest, EagleLibraryImportResponse,
+    EntryAccessRecordRequest, EntryAccessRecordResponse, EntryPlaybackProgressEvent,
+    EntryPlaybackRequest, EntryPlaybackSourceResponse, FileArchiveImportRequest,
+    FileBrowserRequest, FileBrowserSnapshot, FileCopyRequest, FileCreateRequest, FileDeleteRequest,
+    FileImportRequest, FileMoveRequest, FilePreviewSourceResponse, FileReadRequest,
+    FileRenameRequest, HardlinkCandidateResponse, HardlinkConfirmRequest, HardlinkConfirmResponse,
+    MetadataUpdateRequest, MetadataUpdateResponse, NeteaseRepositoryCacheConfigureRequest,
+    NeteaseRepositoryCacheConfigureResponse, PlaylistDetail, PlaylistItemRemoveRequest,
+    PlaylistItemsAddRequest, PlaylistItemsByPathsAddRequest, PlaylistItemsOrderRequest,
+    PlaylistMembershipIndex, PlaylistMembershipRequest, PlaylistMembershipSnapshot,
+    PlaylistMutationRequest, PlaylistMutationResponse, PlaylistSummary, PluginArchiveReadRequest,
+    PluginArchiveTextResponse, PluginCallRequest, PluginCallResult, PluginConfigDeleteRequest,
+    PluginConfigSetRequest, PluginConfigSnapshot, PluginDataDirectoryResponse,
+    PluginDataFilePreviewSourceRequest, PluginDataFilePreviewSourceResponse, PluginEnabledRequest,
+    PluginHookExecutionListRequest, PluginHookExecutionListResponse, PluginInstallRequest,
+    PluginManifest, PluginMutationResponse, RepositoryAction, RepositoryActionEnabledRequest,
+    RepositoryActionMutationResponse, RepositoryActionRunRequest, RepositoryActionRunResponse,
+    RepositoryCacheFilePreviewSourceRequest, RepositoryCacheFilePreviewSourceResponse,
+    RepositoryExportRequest, RepositoryExportResponse, RepositoryFolderRequest,
+    RepositoryMutationRequest, RepositoryMutationResponse, RepositoryRelocateRequest,
+    RepositorySnapshot, RepositorySummary, RepositoryTreeSnapshot, RevisionActionRequest,
+    RevisionActionResponse, SearchRequest, SearchResponse, SmartFolderMutationRequest,
+    SmartFolderMutationResponse, SmartFolderResultSnapshot, SmartFolderTreeNode,
+    SmartFolderUpdateRequest, SyncRequest, SyncResult, ThumbnailRequest, ThumbnailResponse,
+    TrashMutationRequest,
 };
 use services::runtime::ExternalApiConnectionStatus;
 use viewmodels::{
@@ -45,6 +43,9 @@ use viewmodels::{
     RepositoryManagementViewModel, RepositoryPlaybackViewModel, RepositoryQueryViewModel,
     SystemViewModel,
 };
+
+pub use services::repository::eagle_import::import_eagle_library_with_service_root;
+pub use services::repository::{EagleLibraryImportRequest, EagleLibraryPluginImportResponse};
 
 #[tauri::command]
 async fn ping() -> Result<String, String> {
@@ -458,7 +459,7 @@ async fn import_archive_entries(
 
 #[tauri::command]
 async fn import_eagle_library(
-    request: EagleLibraryImportRequest,
+    request: services::repository::EagleLibraryImportRequest,
     file_browser: tauri::State<'_, FileBrowserViewModel>,
 ) -> Result<EagleLibraryImportResponse, String> {
     file_browser.import_eagle_library(request).await

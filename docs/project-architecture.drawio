@@ -18,7 +18,7 @@
         <mxCell id="p1-browser" value="浏览器扩展&#xa;External/BrowserExtension&#xa;右键发送图片 / 链接" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ddf4ff;strokeColor=#54aeef;fontColor=#0969da;arcSize=8;" vertex="1" parent="1">
           <mxGeometry x="60" y="330" width="190" height="94" as="geometry"/>
         </mxCell>
-        <mxCell id="p1-eagle" value="Eagle 转换工具&#xa;External/EagleLibraryChanger&#xa;生成可导入 Momo 仓库" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ddf4ff;strokeColor=#54aeef;fontColor=#0969da;arcSize=8;" vertex="1" parent="1">
+        <mxCell id="p1-eagle" value="Eagle 导入服务插件&#xa;momobako.service.eagle-importer&#xa;直接合并到当前仓库" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ddf4ff;strokeColor=#54aeef;fontColor=#0969da;arcSize=8;" vertex="1" parent="1">
           <mxGeometry x="60" y="470" width="190" height="96" as="geometry"/>
         </mxCell>
 
@@ -82,7 +82,7 @@
         <mxCell id="p1-e-browser" value="loopback HTTP /external/v1/assets:add" style="endArrow=block;html=1;rounded=0;strokeWidth=2;dashed=1;strokeColor=#0969da;" edge="1" parent="1" source="p1-browser" target="p1-runtime">
           <mxGeometry relative="1" as="geometry"/>
         </mxCell>
-        <mxCell id="p1-e-eagle" value="转换后导入" style="endArrow=block;html=1;rounded=0;strokeWidth=2;dashed=1;strokeColor=#0969da;" edge="1" parent="1" source="p1-eagle" target="p1-repo">
+        <mxCell id="p1-e-eagle" value="插件导入" style="endArrow=block;html=1;rounded=0;strokeWidth=2;dashed=1;strokeColor=#0969da;" edge="1" parent="1" source="p1-eagle" target="p1-repo">
           <mxGeometry relative="1" as="geometry"/>
         </mxCell>
         <mxCell id="p1-e-docs" value="约束实现与验证" style="endArrow=block;html=1;rounded=0;strokeWidth=2;dashed=1;strokeColor=#8c959f;" edge="1" parent="1" source="p1-docs-tests" target="p1-app">
@@ -417,7 +417,7 @@
         <mxCell id="p4-external-api" value="MomoBako 外部 API&#xa;127.0.0.1 + 启动生成 bearer token&#xa;health / repositories / assets:add&#xa;remoteUrl 下载 → 本地导入 → metadata 写入" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffebe9;strokeColor=#cf222e;fontColor=#82071e;arcSize=8;fontStyle=1;" vertex="1" parent="1">
           <mxGeometry x="470" y="760" width="340" height="140" as="geometry"/>
         </mxCell>
-        <mxCell id="p4-eagle" value="EagleLibraryChanger&#xa;读取 Eagle metadata/tags/actions/images&#xa;输出 .momo/repository.json + metadata.db&#xa;迁移 tagsGroups / quickAccess / smartFolders / actions / trash" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff8c5;strokeColor=#d4a72c;fontColor=#3d2d00;arcSize=8;fontStyle=1;" vertex="1" parent="1">
+        <mxCell id="p4-eagle" value="原生 Eagle 导入插件&#xa;读取 Eagle metadata/tags/actions/images&#xa;直接写入文件 / metadata.db / .momo&#xa;迁移 tagsGroups / quickAccess / smartFolders / actions / trash" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff8c5;strokeColor=#d4a72c;fontColor=#3d2d00;arcSize=8;fontStyle=1;" vertex="1" parent="1">
           <mxGeometry x="900" y="760" width="350" height="140" as="geometry"/>
         </mxCell>
         <mxCell id="p4-repo" value="目标资源库&#xa;本地文件系统后端当前是可写主路径&#xa;插件源后端可扩展为 WebDAV / cloud&#xa;所有写入仍走核心确认、审计与 revision 路径" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dafbe1;strokeColor=#2da44e;fontColor=#116329;arcSize=8;fontStyle=1;" vertex="1" parent="1">
@@ -451,7 +451,7 @@
         <mxCell id="p4-e9" value="导入资产" style="endArrow=block;html=1;rounded=0;strokeWidth=2;strokeColor=#2da44e;" edge="1" parent="1" source="p4-external-api" target="p4-repo">
           <mxGeometry relative="1" as="geometry"/>
         </mxCell>
-        <mxCell id="p4-e10" value="转换输出" style="endArrow=block;html=1;rounded=0;strokeWidth=2;strokeColor=#2da44e;" edge="1" parent="1" source="p4-eagle" target="p4-repo">
+        <mxCell id="p4-e10" value="直接导入" style="endArrow=block;html=1;rounded=0;strokeWidth=2;strokeColor=#2da44e;" edge="1" parent="1" source="p4-eagle" target="p4-repo">
           <mxGeometry relative="1" as="geometry"/>
         </mxCell>
       </root>

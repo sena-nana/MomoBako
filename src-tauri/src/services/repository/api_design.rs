@@ -532,7 +532,7 @@ pub(super) fn core_tauri_api_definitions() -> Vec<ApiDefinition> {
         tauri_api_definition(
             "File API",
             "import_eagle_library",
-            "将 EagleLibrary 转换后合并导入到当前仓库目录。",
+            "将 EagleLibrary 直接合并导入到当前仓库目录。",
             serde_json::json!({
                 "request": {
                     "repoId": "<repoId>",

@@ -25,14 +25,15 @@ mod asset_mutation;
 mod browser;
 mod contracts;
 mod discovery;
+pub mod eagle_import;
 mod export;
 mod external_assets;
 mod facade;
 mod file_transfer;
 mod filesystem_backend;
+mod importing;
 #[cfg(test)]
 mod internal_tests;
-mod importing;
 mod local_index;
 mod management;
 mod pathing;
@@ -59,21 +60,20 @@ use self::asset_mutation::*;
 pub use self::contracts::*;
 use self::discovery::*;
 use self::export::*;
+use self::file_transfer::*;
 pub(crate) use self::file_transfer::{
     backend_summary_supports_local_root_access, backend_summary_supports_local_write_access,
 };
-use self::file_transfer::*;
 use self::filesystem_backend::*;
 use self::local_index::*;
 use self::pathing::*;
 pub(crate) use self::playback::download_playlist_with_progress;
 use self::plugin::{
     apply_plugin_settings, broken_plugin_manifest, ensure_plugin_data_dir,
-    ensure_repository_backend_runtime_available, is_source_plugin,
-    load_native_plugin, load_plugin_config_values, load_plugin_settings,
-    parse_plugin_manifest_with_source, plugin_data_dir, plugin_legacy_ids,
-    read_plugin_manifest_from_archive, resolve_plugin_manifest_dependencies, runtime_plugins_dir,
-    shutdown_helper_state_dir,
+    ensure_repository_backend_runtime_available, is_source_plugin, load_native_plugin,
+    load_plugin_config_values, load_plugin_settings, parse_plugin_manifest_with_source,
+    plugin_data_dir, plugin_legacy_ids, read_plugin_manifest_from_archive,
+    resolve_plugin_manifest_dependencies, runtime_plugins_dir, shutdown_helper_state_dir,
 };
 #[cfg(test)]
 use self::plugin::{is_repository_backend_plugin, parse_plugin_manifest};

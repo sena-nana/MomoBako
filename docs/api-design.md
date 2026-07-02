@@ -119,6 +119,13 @@
 - `deleteEntry` moves files or recursive directory deletes to `.momo/trash` by default. Use `mode: "permanentDelete"` only for deleting entries already shown from the trash view.
 - `mutateTrash` supports `action: "restore" | "restoreAll" | "empty"` to restore a selected trash item, restore all tracked trash items, or clear `.momo/trash`.
 - Eagle imports map `isDeleted: true` assets into the same recoverable trash model: the file is written under `.momo/trash`, `.momo/trash.json` stores `originalPath`, `trashPath`, `deletedAt` and `kind`, and the asset row keeps its original repository path with `status: "deleted"`.
+- `POST /repositories/{repoId}/files:importArchive`
+  - Request includes `repoId`, optional `parentPath`, and `archivePath`.
+  - Current scope supports `.zip` only and preserves the archive's internal directory structure under the target directory.
+- `POST /repositories/{repoId}/files:importEagleLibrary`
+  - Request includes `repoId`, optional `parentPath`, `libraryPath`, and `mode: "copy" | "move"`.
+  - The backend uses the native `momobako.service.eagle-importer` plugin to merge EagleLibrary content directly into the active repository directory.
+  - Response includes the refreshed file-browser snapshot plus `summary` and structured `warnings`; report data is delivered through the API payload.
 - `POST /repositories/{repoId}/files:move`
   - Request body includes repository-relative `sourcePaths` and target `parentPath`
   - Moving into the original parent directory is rejected as a no-op.

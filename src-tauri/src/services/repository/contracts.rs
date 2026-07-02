@@ -959,7 +959,7 @@ pub struct EagleLibraryImportRequest {
     pub mode: String,
 }
 
-#[derive(Debug, Serialize, Clone, Default)]
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct EagleLibraryImportSummary {
     pub imported_files: usize,
@@ -973,12 +973,48 @@ pub struct EagleLibraryImportSummary {
     pub imported_hardlink_groups: usize,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct EagleLibraryImportWarning {
+    #[serde(rename = "type")]
+    pub warning_type: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub asset_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub field: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub folder_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target_relative_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub index: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub conditions: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub details: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct EagleLibraryPluginImportResponse {
+    pub summary: EagleLibraryImportSummary,
+    pub warnings: Vec<EagleLibraryImportWarning>,
+}
+
 #[derive(Debug, Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct EagleLibraryImportResponse {
     pub snapshot: FileBrowserSnapshot,
-    pub report_path: String,
     pub summary: EagleLibraryImportSummary,
+    pub warnings: Vec<EagleLibraryImportWarning>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
