@@ -1,4 +1,5 @@
 import * as pdfjsLib from "pdfjs-dist";
+export { WorkerMessageHandler } from "pdfjs-dist/build/pdf.worker.mjs";
 
 const pdfPreviewExtensions = ["pdf"];
 const wordPreviewExtensions = ["docx", "docm", "doc", "dotx", "dotm", "dot"];
@@ -14,10 +15,9 @@ const officePreviewExtensions = [
 const THUMBNAIL_SIZE = 512;
 const OFFICE_CONVERT_PLUGIN_ID = "momobako.service.office-convert";
 
-pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
-  "pdfjs-dist/build/pdf.worker.mjs",
-  import.meta.url,
-).toString();
+// 插件运行在 data: 动态模块里，直接按相对路径解析 worker 会触发 Invalid URL。
+// 复用当前 bundle 地址，让 pdf.js 能稳定回退到 fake worker 模式。
+pdfjsLib.GlobalWorkerOptions.workerSrc = import.meta.url;
 
 export function register(ctx) {
   const pdfRuntime = ctx.pdfRuntime ?? pdfjsLib;
