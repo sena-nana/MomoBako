@@ -1,0 +1,24 @@
+src/pages/workspace/WorkspaceFilesSurface.vue
+  s_55e5d6ca23123d::t_b1c73fa22293ee 153
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.5",
+  "base_commit_sha": "87e2433bdea4b0d63d8d10f5102f867b95abd4a6",
+  "prompts": {},
+  "humans": {
+    "h_8e6780fc7b4bb1": {
+      "author": "AuraElicase <auraelicase@outlook.com>"
+    }
+  },
+  "sessions": {
+    "s_55e5d6ca23123d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f232e-ba21-7a63-a5d7-15e80f0bc82f",
+        "model": "unknown"
+      },
+      "human_author": "AuraElicase <auraelicase@outlook.com>"
+    }
+  }
+}
