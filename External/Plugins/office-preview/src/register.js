@@ -361,11 +361,9 @@ async function resolvePreviewPdf(ctx, repoId, entry) {
       repoId,
       path: entry.path,
     });
-    if (!source.sourceUrl) {
-      throw new Error("PDF 预览源不可用");
-    }
+    const sourceUrl = requirePreviewHttpSourceUrl(source, "PDF 预览源不可用");
     return {
-      sourceUrl: source.sourceUrl,
+      sourceUrl,
       converter: "pdf",
       cacheKey: `${repoId}:${entry.path}`,
     };
@@ -388,14 +386,20 @@ async function resolvePreviewPdf(ctx, repoId, entry) {
     path: converted.payload?.pdfPath,
     mediaType: "application/pdf",
   });
-  if (!preview.sourceUrl) {
-    throw new Error("转换后的 PDF 预览源不可用");
-  }
+  const sourceUrl = requirePreviewHttpSourceUrl(preview, "转换后的 PDF 预览源不可用");
   return {
-    sourceUrl: preview.sourceUrl,
+    sourceUrl,
     converter: converted.payload?.converter || "office-convert",
     cacheKey: converted.payload?.cacheKey || `${repoId}:${entry.path}`,
   };
+}
+
+function requirePreviewHttpSourceUrl(preview, message) {
+  const sourceUrl = typeof preview?.sourceUrl === "string" ? preview.sourceUrl.trim() : "";
+  if (!sourceUrl || !/^https?:\/\/(?:127\.0\.0\.1|localhost|\[::1\])(?::\d+)?\/preview\//i.test(sourceUrl)) {
+    throw new Error(message);
+  }
+  return sourceUrl;
 }
 
 function getOfficePreviewKind(extension) {
