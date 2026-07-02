@@ -1046,10 +1046,25 @@ export type EagleLibraryImportSummary = {
   importedHardlinkGroups: number;
 };
 
+export type EagleLibraryImportWarning = {
+  type: string;
+  assetId?: string | null;
+  field?: string | null;
+  folderId?: string | null;
+  targetRelativePath?: string | null;
+  source?: string | null;
+  sourceId?: string | null;
+  name?: string | null;
+  reason?: string | null;
+  index?: number | null;
+  conditions?: unknown;
+  details?: Record<string, unknown> | unknown;
+};
+
 export type EagleLibraryImportResponse = {
   snapshot: FileBrowserSnapshot;
-  reportPath: string;
   summary: EagleLibraryImportSummary;
+  warnings: EagleLibraryImportWarning[];
 };
 
 export type ExternalAddAssetClient = {

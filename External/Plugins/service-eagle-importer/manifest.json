@@ -1,0 +1,49 @@
+{
+  "pluginId": "momobako.service.eagle-importer",
+  "name": "Eagle Importer Service",
+  "version": "0.1.0",
+  "type": {
+    "layer": "provider-service",
+    "kind": "eagle-importer"
+  },
+  "kind": "eagle-importer",
+  "category": "service",
+  "description": "Imports EagleLibrary data directly into the active MomoBako repository.",
+  "capabilities": ["eagle", "import", "write"],
+  "enabled": true,
+  "sdk": "backend",
+  "runtime": "native-dylib",
+  "entry": {
+    "backend": {
+      "library": "momobako_service_eagle_importer"
+    }
+  },
+  "permissions": ["filesystem:read", "filesystem:write"],
+  "requires": [],
+  "optional": [],
+  "hooks": [],
+  "contributes": {
+    "apiTests": [
+      {
+        "method": "eagleImporter.importLibrary",
+        "summary": "Import an EagleLibrary into the current repository directory.",
+        "payload": {
+          "repoId": "<repoId>",
+          "parentPath": "",
+          "libraryPath": "<absoluteLibraryPath>",
+          "mode": "copy"
+        }
+      }
+    ],
+    "service": {
+      "type": "eagle-importer",
+      "methods": ["eagleImporter.importLibrary"]
+    }
+  },
+  "compat": {
+    "sdkVersion": "1",
+    "legacyPluginIds": []
+  },
+  "source": "builtin",
+  "status": "ready"
+}

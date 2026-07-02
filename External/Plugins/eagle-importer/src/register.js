@@ -1,6 +1,6 @@
 /**
  * Eagle 导入工具页。
- * 支持复制导入和剪切导入，并展示宿主返回的报告摘要。
+ * 支持复制导入和剪切导入，并展示宿主返回的摘要与警告。
  */
 export function register(ctx) {
   const { computed, h, ref } = ctx.vue;
@@ -111,6 +111,7 @@ export function register(ctx) {
     },
     render() {
       const summary = this.lastResult?.summary;
+      const warnings = Array.isArray(this.lastResult?.warnings) ? this.lastResult.warnings : [];
       return h("section", { class: "tool-page-shell" }, [
         h("header", { class: "tool-page-shell__header" }, [
           h("div", [
@@ -161,7 +162,6 @@ export function register(ctx) {
         summary
           ? h("div", { class: "tool-page-shell__card" }, [
               h("p", { class: "asset-browser__eyebrow" }, "导入结果"),
-              h("div", { class: "tool-page-shell__row" }, [h("span", "报告路径"), h("code", this.lastResult.reportPath)]),
               h("div", { class: "tool-page-shell__summary" }, [
                 renderSummaryItem(h, "文件", summary.importedFiles),
                 renderSummaryItem(h, "目录", summary.importedDirectories),
@@ -173,6 +173,17 @@ export function register(ctx) {
                 renderSummaryItem(h, "Alias 组", summary.importedAliasGroups),
                 renderSummaryItem(h, "硬链接组", summary.importedHardlinkGroups),
               ]),
+              warnings.length
+                ? h("div", { class: "tool-page-shell__warnings" }, [
+                    h("p", { class: "asset-browser__eyebrow" }, `警告 ${warnings.length}`),
+                    ...warnings.slice(0, 20).map((item, index) => (
+                      h("div", { class: "tool-page-shell__row", key: `${item.type || item.warningType || "warning"}-${index}` }, [
+                        h("span", item.type || item.warningType || "warning"),
+                        h("code", warningText(item)),
+                      ])
+                    )),
+                  ])
+                : null,
             ])
           : null,
       ]);
@@ -194,6 +205,21 @@ function createRequestId(prefix) {
 
 function errorText(cause) {
   return cause instanceof Error ? cause.message : String(cause);
+}
+
+function warningText(item) {
+  if (!item || typeof item !== "object") return "";
+  if (typeof item.reason === "string" && item.reason.trim()) return item.reason;
+  if (typeof item.assetId === "string" && item.assetId.trim()) return item.assetId;
+  if (typeof item.sourceId === "string" && item.sourceId.trim()) return item.sourceId;
+  if (item.details != null) {
+    try {
+      return JSON.stringify(item.details);
+    } catch {
+      return String(item.details);
+    }
+  }
+  return "";
 }
 
 function renderSummaryItem(h, label, value) {
