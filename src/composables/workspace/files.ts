@@ -43,6 +43,10 @@ export type FileBrowserLoadOptions = {
   silent?: boolean;
 };
 
+type ApplyFileBrowserSnapshotOptions = {
+  preserveDerivedState?: boolean;
+};
+
 export { entryNameFromPath } from "./paths";
 
 export function getDefaultFileBrowserSelection(snapshot: FileBrowserSnapshot) {
@@ -203,10 +207,15 @@ function applySelectionForEntryMap(snapshot: FileBrowserSnapshot, entryMap: Read
     : nextPrimaryPath;
 }
 
-export function applyFileBrowserSnapshot(snapshot: FileBrowserSnapshot) {
+export function applyFileBrowserSnapshot(
+  snapshot: FileBrowserSnapshot,
+  options: ApplyFileBrowserSnapshotOptions = {},
+) {
   const requestId = ++derivedRequestId;
   fileBrowser.value = snapshot;
-  fileBrowserDerived.value = createEmptyFileBrowserDerivedState();
+  if (!options.preserveDerivedState) {
+    fileBrowserDerived.value = createEmptyFileBrowserDerivedState();
+  }
   if (snapshot.tree) {
     fileTree.value = snapshot.tree;
   }
@@ -234,10 +243,15 @@ export function appendFileBrowserSnapshot(snapshot: FileBrowserSnapshot) {
   const existingEntries = current.entries;
   const existingPathSet = new Set(existingEntries.map((entry) => `${entry.kind}:${entry.path}`));
   const appendedEntries = snapshot.entries.filter((entry) => !existingPathSet.has(`${entry.kind}:${entry.path}`));
+  const mergedEntries = [...existingEntries, ...appendedEntries];
+  const hasMore = mergedEntries.length < snapshot.totalEntries;
   const mergedSnapshot: FileBrowserSnapshot = {
     ...snapshot,
+    loadedCount: mergedEntries.length,
+    nextOffset: hasMore ? mergedEntries.length : null,
+    hasMore,
     tree: snapshot.tree ?? current.tree,
-    entries: [...existingEntries, ...appendedEntries],
+    entries: mergedEntries,
   };
   fileBrowser.value = mergedSnapshot;
   if (mergedSnapshot.tree) {
@@ -316,12 +330,21 @@ export async function loadFileBrowserForDirectory(directoryPath = "", options: F
   const keepsCurrentViewVisible = silent
     && currentSnapshot?.currentPath === directoryPath
     && (currentSnapshot.specialLocation ?? null) === normalizedSpecialLocation;
+  const currentLoadedCount = keepsCurrentViewVisible
+    ? Math.max(currentSnapshot?.entries.length ?? 0, currentSnapshot?.loadedCount ?? 0)
+    : 0;
   const offset = append
     ? currentSnapshot?.currentPath === directoryPath && (currentSnapshot.specialLocation ?? null) === normalizedSpecialLocation
-      ? currentSnapshot.nextOffset ?? currentSnapshot.entries.length
+      ? currentSnapshot.entries.length
       : 0
     : 0;
-  const limit = options.limit ?? (append ? FILE_BROWSER_APPEND_PAGE_SIZE : FILE_BROWSER_INITIAL_PAGE_SIZE);
+  const limit = options.limit ?? (
+    append
+      ? FILE_BROWSER_APPEND_PAGE_SIZE
+      : keepsCurrentViewVisible
+        ? Math.max(FILE_BROWSER_INITIAL_PAGE_SIZE, currentLoadedCount)
+        : FILE_BROWSER_INITIAL_PAGE_SIZE
+  );
 
   if (append) {
     if (!currentSnapshot?.hasMore) return currentSnapshot;
@@ -352,7 +375,7 @@ export async function loadFileBrowserForDirectory(directoryPath = "", options: F
       if (progressId != null) {
         updateOperationProgress(progressId, { detail: "整理目录条目", value: 92 });
       }
-      applyFileBrowserSnapshot(snapshot);
+      applyFileBrowserSnapshot(snapshot, { preserveDerivedState: keepsCurrentViewVisible });
       if (progressId != null) {
         finishOperationProgress(progressId);
       }
