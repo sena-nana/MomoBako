@@ -1,5 +1,5 @@
 import * as pdfjsLib from "pdfjs-dist";
-export { WorkerMessageHandler } from "pdfjs-dist/build/pdf.worker.mjs";
+import { WorkerMessageHandler } from "pdfjs-dist/build/pdf.worker.mjs";
 
 const pdfPreviewExtensions = ["pdf"];
 const wordPreviewExtensions = ["docx", "docm", "doc", "dotx", "dotm", "dot"];
@@ -15,9 +15,12 @@ const officePreviewExtensions = [
 const THUMBNAIL_SIZE = 512;
 const OFFICE_CONVERT_PLUGIN_ID = "momobako.service.office-convert";
 
-// 插件运行在 data: 动态模块里，直接按相对路径解析 worker 会触发 Invalid URL。
-// 复用当前 bundle 地址，让 pdf.js 能稳定回退到 fake worker 模式。
-pdfjsLib.GlobalWorkerOptions.workerSrc = import.meta.url;
+// 插件运行在 data: 动态模块里，pdf.js 的 Worker URL 解析不可用。
+// 直接注入主线程 WorkerMessageHandler，让预览稳定走 fake worker。
+globalThis.pdfjsWorker = {
+  ...(globalThis.pdfjsWorker ?? {}),
+  WorkerMessageHandler,
+};
 
 export function register(ctx) {
   const pdfRuntime = ctx.pdfRuntime ?? pdfjsLib;
@@ -250,7 +253,7 @@ export function register(ctx) {
 
       return h("div", { class: `office-preview office-preview--${this.kind}` }, [
         toolbar,
-        h("div", { class: "office-preview__viewer", ref: "viewer" }, [
+        h("div", { class: ["office-preview__viewer", `office-preview__viewer--${this.kind}`], ref: "viewer" }, [
           h("div", { class: "office-preview__pagination" }, [
             h("button", {
               type: "button",
