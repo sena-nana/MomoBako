@@ -1,0 +1,21 @@
+src/pages/workspace/useWorkspaceViewState.ts
+  s_7b5f531b8bdd1c::t_73c111cb0a3ecb 179-181
+tests/workspaceViewState.test.ts
+  s_7b5f531b8bdd1c::t_5721e1a7d48ea3 1-96
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.5",
+  "base_commit_sha": "72220ff0b9c586d07106f1aa9cf311abe54fcec4",
+  "prompts": {},
+  "sessions": {
+    "s_7b5f531b8bdd1c": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f224d-17af-7ea3-a271-9f18948b69b6",
+        "model": "unknown"
+      },
+      "human_author": "AuraElicase <auraelicase@outlook.com>"
+    }
+  }
+}
