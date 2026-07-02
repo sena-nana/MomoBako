@@ -1,0 +1,52 @@
+src-tauri/src/lib.rs
+  s_7b528da7574116::t_649dfb620e9af8 15-16,18-19,451-466,759-760
+src-tauri/src/services/repository/api_design.rs
+  s_7b528da7574116::t_4838aa05fc2fb2 520-544
+src-tauri/src/services/repository/contracts.rs
+  s_7b528da7574116::t_3c32bdef8853ae 945-983
+src-tauri/src/services/repository/facade.rs
+  s_7b528da7574116::t_18a753cd6e6ca0 703-716
+src-tauri/src/services/repository/importing.rs
+  s_7b528da7574116::t_44fbc65fac4f54 1-1803
+src-tauri/src/services/repository/mod.rs
+  s_7b528da7574116::t_bea81ecd43bada 35
+src-tauri/src/viewmodels/repository/browser.rs
+  s_7b528da7574116::t_4eb0838e7c74e8 4,66-83
+src/composables/workspace/facade.ts
+  s_7b528da7574116::t_fcf0e22afc3bb7 164-165,263-264
+src/composables/workspace/index.ts
+  s_7b528da7574116::t_7a38562d9b576a 95-96
+src/pages/workspace/WorkspaceFilesSurface.vue
+  s_7b528da7574116::t_ab2f7156f58250 27,93-96,160,212-215
+src/pages/workspace/files/FileBrowserPanel.vue
+  s_7b528da7574116::t_2533d575fb4047 2,37,96-99,123-125,146-197,254-283,604-650
+src/pages/workspace/files/useFileActions.ts
+  s_7b528da7574116::t_189ba333a0807b 3,26-32,196-224,238-241,255-275
+src/pages/workspace/files/useFilesSurfaceBindings.ts
+  s_7b528da7574116::t_a4b7d985ec3e5f 47,83-86,119,181-184
+src/services/repositoryApi/files.ts
+  s_7b528da7574116::t_51ee88fca922c6 11,17-18,139-146
+src/types/repository/core.ts
+  s_7b528da7574116::t_45f59f1c30e0bf 1022-1054
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.5",
+  "base_commit_sha": "564559aacbeb310cd6c2babbbf98ec1174d1a789",
+  "prompts": {},
+  "humans": {
+    "h_8e6780fc7b4bb1": {
+      "author": "AuraElicase <auraelicase@outlook.com>"
+    }
+  },
+  "sessions": {
+    "s_7b528da7574116": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f226b-0837-7bc3-94a8-95ef329ae44e",
+        "model": "unknown"
+      },
+      "human_author": "AuraElicase <auraelicase@outlook.com>"
+    }
+  }
+}
