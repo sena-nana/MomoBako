@@ -196,26 +196,33 @@ describe("office preview plugin", () => {
     let component: unknown;
     const getPageCalls: number[] = [];
     const renderCalls: number[] = [];
+    class MockPdfDocument {
+      #pagePromises: number[] = [];
+      numPages = 2;
+
+      async getPage(pageNumber: number) {
+        this.#pagePromises.push(pageNumber);
+        getPageCalls.push(pageNumber);
+        return {
+          getViewport: ({ scale }: { scale: number }) => ({
+            width: 480 * scale,
+            height: 640 * scale,
+          }),
+          render: () => {
+            renderCalls.push(pageNumber);
+            return {
+              promise: Promise.resolve(),
+            };
+          },
+        };
+      }
+
+      async destroy() {
+        return undefined;
+      }
+    }
     pdfjsState.getDocument.mockImplementation(() => ({
-      promise: Promise.resolve({
-        numPages: 2,
-        getPage: async (pageNumber: number) => {
-          getPageCalls.push(pageNumber);
-          return {
-            getViewport: ({ scale }: { scale: number }) => ({
-              width: 480 * scale,
-              height: 640 * scale,
-            }),
-            render: () => {
-              renderCalls.push(pageNumber);
-              return {
-                promise: Promise.resolve(),
-              };
-            },
-          };
-        },
-        destroy: async () => undefined,
-      }),
+      promise: Promise.resolve(new MockPdfDocument()),
     }));
     const preparePreviewFileSource = vi.fn(async () => ({
       repoId: "repo-main-001",

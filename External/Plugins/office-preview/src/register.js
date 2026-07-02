@@ -30,6 +30,7 @@ export function register(ctx) {
     nextTick,
     onBeforeUnmount,
     ref,
+    shallowRef,
     watch,
   } = ctx.vue;
 
@@ -55,7 +56,7 @@ export function register(ctx) {
       const loadingLabel = ref("准备预览");
       const viewer = ref(null);
       const canvas = ref(null);
-      const pdfDocument = ref(null);
+      const pdfDocument = shallowRef(null);
       let loadToken = 0;
 
       const kind = computed(() => getOfficePreviewKind(props.entry?.extension));
