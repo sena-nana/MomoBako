@@ -7,6 +7,7 @@ import {
   onBeforeUnmount,
   onMounted,
   ref,
+  shallowRef,
   watch,
 } from "vue";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
@@ -308,6 +309,7 @@ export type FrontendPluginContext = {
   vue: {
     h: typeof h;
     ref: typeof ref;
+    shallowRef: typeof shallowRef;
     computed: typeof computed;
     watch: typeof watch;
     onMounted: typeof onMounted;
@@ -603,6 +605,7 @@ function createFrontendPluginContext(manifest: PluginManifest): FrontendPluginCo
     vue: {
       h,
       ref,
+      shallowRef,
       computed,
       watch,
       onMounted,

@@ -552,6 +552,26 @@ function previewPluginModuleSource(pluginId: string) {
       "",
     ].join("\n");
   }
+  if (pluginId === "user.vue-shallow-ref-tool") {
+    return [
+      "export function register(ctx) {",
+      "  const { h, shallowRef } = ctx.vue;",
+      "  ctx.registerToolPage({",
+      "    toolPageId: 'user.vue-shallow-ref-tool',",
+      "    label: 'Vue Shallow Ref Tool',",
+      "    description: '验证前端插件上下文暴露 shallowRef。',",
+      "    component: {",
+      "      name: 'VueShallowRefTool',",
+      "      setup() {",
+      "        const message = shallowRef('context-ready');",
+      "        return () => h('section', { class: 'mock-vue-shallow-ref-tool' }, message.value);",
+      "      },",
+      "    },",
+      "  });",
+      "}",
+      "",
+    ].join("\n");
+  }
   if (pluginId === "momobako.service.office-convert") {
     const sourcePath = resolve("External/Plugins/office-convert/src/register.js");
     return readFileSync(sourcePath, "utf-8");

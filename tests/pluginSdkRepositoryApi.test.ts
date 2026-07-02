@@ -50,6 +50,44 @@ function repositoryCachePreviewToolManifest(): PluginManifest {
   };
 }
 
+function vueShallowRefToolManifest(): PluginManifest {
+  return {
+    pluginId: "user.vue-shallow-ref-tool",
+    name: "Vue Shallow Ref Tool",
+    version: "0.1.0",
+    kind: "tool",
+    category: "tool",
+    description: "验证前端插件上下文暴露 shallowRef。",
+    capabilities: ["tool", "vue"],
+    enabled: true,
+    sdk: "frontend",
+    entry: {
+      frontend: {
+        module: "dist/register.js",
+        export: "register",
+      },
+    },
+    source: "user",
+    runtime: "vue-module",
+    permissions: [],
+    requires: [],
+    optional: [],
+    hooks: [],
+    contributes: {},
+    compat: { sdkVersion: "1", legacyPluginIds: [] },
+    status: "ready",
+    dependencyStatus: {
+      required: [],
+      optional: [],
+      missingRequired: [],
+      missingOptional: [],
+      disabledRequired: [],
+      disabledOptional: [],
+    },
+    degraded: false,
+  };
+}
+
 describe("plugin sdk repository cache preview source bridge", () => {
   afterEach(() => {
     clearPreviewPluginRegistry();
@@ -104,5 +142,22 @@ describe("plugin sdk repository cache preview source bridge", () => {
         mediaType: "application/pdf",
       },
     });
+  });
+
+  it("injects shallowRef into frontend plugin vue context", async () => {
+    const manifest = vueShallowRefToolManifest();
+
+    await syncRegisteredFrontendPluginManifests([manifest]);
+    const page = getToolPage("user.vue-shallow-ref-tool");
+
+    expect(page?.component).toBeDefined();
+
+    render(page!.component, {
+      props: {
+        manifest,
+      },
+    });
+
+    expect(await screen.findByText("context-ready")).toBeInTheDocument();
   });
 });
