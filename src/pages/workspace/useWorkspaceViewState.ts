@@ -176,7 +176,9 @@ export function useWorkspaceViewState(options: WorkspaceViewStateOptions) {
   });
 
   watch(options.selectedFilePath, (path) => {
-    if (previewFilePath.value && previewFilePath.value !== path) {
+    if (!previewFilePath.value) return;
+    if (options.activePreviewPath.value === previewFilePath.value) return;
+    if (previewFilePath.value !== path) {
       previewFilePath.value = null;
     }
   });
