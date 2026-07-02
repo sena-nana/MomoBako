@@ -92,6 +92,8 @@ export {
   deleteWorkspaceEntries,
   deleteWorkspaceEntry,
   emptyTrash,
+  importArchiveEntriesToWorkspace,
+  importEagleLibraryToWorkspace,
   importEntriesToWorkspace,
   moveWorkspaceEntries,
   openWorkspaceEntry,

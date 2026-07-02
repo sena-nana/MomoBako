@@ -519,6 +519,31 @@ pub(super) fn core_tauri_api_definitions() -> Vec<ApiDefinition> {
         ),
         tauri_api_definition(
             "File API",
+            "import_archive_entries",
+            "解压 ZIP 并导入到当前仓库目录。",
+            serde_json::json!({
+                "request": {
+                    "repoId": "<repoId>",
+                    "parentPath": "",
+                    "archivePath": "<absoluteZipPath>"
+                }
+            }),
+        ),
+        tauri_api_definition(
+            "File API",
+            "import_eagle_library",
+            "将 EagleLibrary 转换后合并导入到当前仓库目录。",
+            serde_json::json!({
+                "request": {
+                    "repoId": "<repoId>",
+                    "parentPath": "",
+                    "libraryPath": "<absoluteEagleLibraryPath>",
+                    "mode": "copy"
+                }
+            }),
+        ),
+        tauri_api_definition(
+            "File API",
             "copy_entries",
             "复制仓库内文件条目。",
             serde_json::json!({

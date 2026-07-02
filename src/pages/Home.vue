@@ -123,7 +123,24 @@ const vm = useWorkspaceHomeViewModel();
       @run="vm.runActiveRepositoryAction"
     />
 
-    <ExtensionsPanel v-else-if="vm.isExtensionsPanel" />
+    <ExtensionsPanel
+      v-else-if="vm.isExtensionsPanel"
+      :manifest="{
+        pluginId: 'workspace.extensions',
+        name: 'Workspace Extensions',
+        version: '1.0.0',
+        kind: 'workspace-extensions',
+        description: 'Workspace extensions host.',
+        capabilities: [],
+        enabled: true,
+      }"
+      :active-repo-id="vm.activeRepoId"
+      :active-repository="vm.activeRepository"
+      :current-directory-path="vm.currentDirectoryPath"
+      :is-repository-writable="vm.isRepositoryWritable"
+      :is-trash-panel="vm.isTrashPanel"
+      :is-virtual-view="vm.isVirtualView"
+    />
 
     <EmptyRepositoryState
       v-else

@@ -942,6 +942,45 @@ pub struct FileImportRequest {
     pub source_paths: Vec<String>,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct FileArchiveImportRequest {
+    pub repo_id: String,
+    pub parent_path: Option<String>,
+    pub archive_path: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct EagleLibraryImportRequest {
+    pub repo_id: String,
+    pub parent_path: Option<String>,
+    pub library_path: String,
+    pub mode: String,
+}
+
+#[derive(Debug, Serialize, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct EagleLibraryImportSummary {
+    pub imported_files: usize,
+    pub imported_directories: usize,
+    pub imported_trash_entries: usize,
+    pub imported_shortcuts: usize,
+    pub imported_smart_folders: usize,
+    pub imported_repository_actions: usize,
+    pub imported_tag_groups: usize,
+    pub imported_alias_groups: usize,
+    pub imported_hardlink_groups: usize,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct EagleLibraryImportResponse {
+    pub snapshot: FileBrowserSnapshot,
+    pub report_path: String,
+    pub summary: EagleLibraryImportSummary,
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct ExternalAddAssetClient {

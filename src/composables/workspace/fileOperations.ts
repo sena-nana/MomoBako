@@ -3,6 +3,8 @@ import {
   createDirectory,
   createFile,
   deleteEntry,
+  importArchiveEntries,
+  importEagleLibrary,
   importEntries,
   moveEntries,
   mutateTrash,
@@ -15,6 +17,7 @@ import {
 import type {
   FileBrowserSnapshot,
   FileDeleteMode,
+  EagleImportMode,
 } from "../../types/repository";
 import {
   activeLibraryCategory,
@@ -95,6 +98,25 @@ async function finishFileTransfer(
   await refreshAfterFileMutation(repoId, { hardlinkCandidates: true, repositorySnapshot: true });
 }
 
+async function finishWorkspaceImport(
+  repoId: string,
+  snapshot: FileBrowserSnapshot,
+  previousPathSet: ReadonlySet<string>,
+  parentPath: string,
+) {
+  if (canApplyDirectorySnapshot(snapshot)) {
+    applyFileBrowserSnapshot(snapshot);
+    const nextSelection = snapshot.entries
+      .filter((entry) => parent_relative_path(entry.path) === parentPath)
+      .filter((entry) => !previousPathSet.has(entry.path))
+      .map((entry) => entry.path);
+    if (nextSelection.length) {
+      applyWorkspaceSelection(nextSelection, nextSelection[0], nextSelection[0]);
+    }
+  }
+  await refreshAfterFileMutation(repoId, { hardlinkCandidates: true, repositorySnapshot: true });
+}
+
 export async function createDirectoryInWorkspace(name: string, parentPath = currentDirectoryPath.value) {
   if (!activeRepoId.value) return null;
   isMutatingFiles.value = true;
@@ -165,6 +187,72 @@ export async function importEntriesToWorkspace(sourcePaths: string[], parentPath
     error.value = cause instanceof Error ? cause.message : String(cause);
     cancelOperationProgress(progressId);
     return null;
+  }
+}
+
+export async function importArchiveEntriesToWorkspace(
+  archivePath: string,
+  parentPath = currentDirectoryPath.value,
+) {
+  const repoId = activeRepoId.value;
+  if (!repoId || !archivePath.trim()) return null;
+  isMutatingFiles.value = true;
+  error.value = null;
+  const previousPathSet = new Set((fileBrowser.value?.entries ?? []).map((entry) => entry.path));
+  const progressId = startOperationProgress("导入 ZIP", "准备解压并导入 ZIP", { initial: 8 });
+  try {
+    updateOperationProgress(progressId, { detail: "预检压缩包条目", value: 24 });
+    const snapshot = await importArchiveEntries({
+      repoId,
+      parentPath,
+      archivePath,
+    });
+    updateOperationProgress(progressId, { detail: "刷新文件索引", value: 84 });
+    await finishWorkspaceImport(repoId, snapshot, previousPathSet, parentPath ?? "");
+    finishOperationProgress(progressId);
+    return snapshot;
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : String(cause);
+    cancelOperationProgress(progressId);
+    return null;
+  } finally {
+    isMutatingFiles.value = false;
+  }
+}
+
+export async function importEagleLibraryToWorkspace(
+  libraryPath: string,
+  mode: EagleImportMode,
+  parentPath = currentDirectoryPath.value,
+) {
+  const repoId = activeRepoId.value;
+  if (!repoId || !libraryPath.trim()) return null;
+  isMutatingFiles.value = true;
+  error.value = null;
+  const previousPathSet = new Set((fileBrowser.value?.entries ?? []).map((entry) => entry.path));
+  const progressId = startOperationProgress(
+    mode === "move" ? "剪切导入 Eagle" : "复制导入 Eagle",
+    "准备转换 EagleLibrary",
+    { initial: 8 },
+  );
+  try {
+    updateOperationProgress(progressId, { detail: "转换 EagleLibrary", value: 24 });
+    const response = await importEagleLibrary({
+      repoId,
+      parentPath,
+      libraryPath,
+      mode,
+    });
+    updateOperationProgress(progressId, { detail: "刷新文件索引", value: 84 });
+    await finishWorkspaceImport(repoId, response.snapshot, previousPathSet, parentPath ?? "");
+    finishOperationProgress(progressId);
+    return response;
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : String(cause);
+    cancelOperationProgress(progressId);
+    return null;
+  } finally {
+    isMutatingFiles.value = false;
   }
 }
 
@@ -495,4 +583,10 @@ export async function startWorkspaceEntriesDrag(paths: string[], icon?: string) 
     error.value = cause instanceof Error ? cause.message : String(cause);
     return false;
   }
+}
+
+function parent_relative_path(path: string) {
+  const normalized = path.replace(/\\/g, "/");
+  const index = normalized.lastIndexOf("/");
+  return index >= 0 ? normalized.slice(0, index) : "";
 }

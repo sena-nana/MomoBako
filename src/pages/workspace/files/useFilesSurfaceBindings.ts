@@ -44,6 +44,7 @@ export type WorkspaceFilesSurfaceBindingOptions = {
   isLoadingFileBrowserMore: ReadonlyRef<boolean>;
   isModelEntry: (entry: FileBrowserEntry) => boolean;
   isMutatingFiles: ReadonlyRef<boolean>;
+  isRepositoryWritable: ReadonlyRef<boolean>;
   isReadOnlyVirtualView: ReadonlyRef<boolean>;
   isSavingMetadata: ReadonlyRef<boolean>;
   isTrashPanel: ReadonlyRef<boolean>;
@@ -79,6 +80,10 @@ export type WorkspaceFilesSurfaceBindingOptions = {
   handleDrop: (event: DragEvent) => void | Promise<unknown>;
   handleFolderDrop: (path: string, event: DragEvent) => void | Promise<unknown>;
   handleEmptyTrash: () => void | Promise<unknown>;
+  handleImportEagleCopy: () => void | Promise<unknown>;
+  handleImportEagleMove: () => void | Promise<unknown>;
+  handleImportFolder: () => void | Promise<unknown>;
+  handleImportZip: () => void | Promise<unknown>;
   handleEntryDragEnd: (event: PointerEvent | null) => void;
   handleEntryDragMove: (event: PointerEvent) => void;
   handleEntryDragStart: (entry: FileBrowserEntry, event: PointerEvent) => void;
@@ -111,6 +116,7 @@ export function useFilesSurfaceBindings(options: WorkspaceFilesSurfaceBindingOpt
     breadcrumbs: options.breadcrumbSegments.value,
     canDeleteSelected: options.canDeleteSelected.value,
     canDragEntries: options.canDragEntries.value,
+    canImport: options.isRepositoryWritable.value && !options.isTrashPanel.value && !options.isVirtualView.value,
     canOpenSelected: options.canOpenSelected.value,
     canRenameSelected: options.canRenameSelected.value,
     canRestoreSelected: options.canRestoreSelected.value,
@@ -172,6 +178,10 @@ export function useFilesSurfaceBindings(options: WorkspaceFilesSurfaceBindingOpt
     drop: options.handleDrop,
     dropOnFolder: options.handleFolderDrop,
     emptyTrash: options.handleEmptyTrash,
+    importEagleCopy: options.handleImportEagleCopy,
+    importEagleMove: options.handleImportEagleMove,
+    importFolder: options.handleImportFolder,
+    importZip: options.handleImportZip,
     entryDragEnd: options.handleEntryDragEnd,
     entryDragMove: options.handleEntryDragMove,
     entryDragStart: options.handleEntryDragStart,

@@ -24,6 +24,7 @@ defineProps<{
   breadcrumbs: BreadcrumbSegment[];
   canDeleteSelected: boolean;
   canDragEntries: boolean;
+  canImport?: boolean;
   canOpenSelected: boolean;
   canRenameSelected: boolean;
   canRestoreSelected: boolean;
@@ -89,6 +90,10 @@ const emit = defineEmits<{
   drop: [event: DragEvent];
   dropOnFolder: [path: string, dragEvent: DragEvent];
   emptyTrash: [];
+  importEagleCopy: [];
+  importEagleMove: [];
+  importFolder: [];
+  importZip: [];
   entryDragEnd: [event: PointerEvent | null];
   entryDragMove: [event: PointerEvent];
   entryDragStart: [entry: FileBrowserEntry, event: PointerEvent];
@@ -152,6 +157,7 @@ const emit = defineEmits<{
       :breadcrumbs="breadcrumbs"
       :can-drag-entries="canDragEntries"
       :can-delete-selected="canDeleteSelected"
+      :can-import="canImport"
       :can-open-selected="canOpenSelected"
       :can-rename-selected="canRenameSelected"
       :can-restore-selected="canRestoreSelected"
@@ -203,6 +209,10 @@ const emit = defineEmits<{
       @drag-over="emit('dragOver', $event)"
       @drop="emit('drop', $event)"
       @empty-trash="emit('emptyTrash')"
+      @import-eagle-copy="emit('importEagleCopy')"
+      @import-eagle-move="emit('importEagleMove')"
+      @import-folder="emit('importFolder')"
+      @import-zip="emit('importZip')"
       @entry-drag-end="emit('entryDragEnd', $event)"
       @entry-drag-move="emit('entryDragMove', $event)"
       @entry-drag-start="(entry, event) => emit('entryDragStart', entry, event)"

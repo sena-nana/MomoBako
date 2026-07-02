@@ -1,0 +1,45 @@
+{
+  "pluginId": "momobako.tool.file-manager",
+  "legacyPluginIds": [],
+  "name": "File Manager",
+  "version": "0.1.0",
+  "type": {
+    "layer": "integration-capability-hook",
+    "kind": "file-manager"
+  },
+  "kind": "file-manager",
+  "category": "service",
+  "description": "在当前工作区目录执行文件夹导入和 ZIP 导入。",
+  "capabilities": ["tool-page", "file-import"],
+  "enabled": true,
+  "sdk": "frontend",
+  "runtime": "vue-module",
+  "entry": {
+    "frontend": {
+      "module": "dist/register.js",
+      "export": "register"
+    }
+  },
+  "contributes": {
+    "toolPages": [
+      {
+        "toolPageId": "momobako.tool.file-manager",
+        "label": "文件导入",
+        "description": "从文件夹或 ZIP 导入到当前目录",
+        "order": 20
+      }
+    ]
+  },
+  "permissions": [],
+  "requires": [],
+  "optional": [],
+  "hooks": [
+    { "slot": "toolPage", "action": "tool.fileManager.open", "label": "打开文件导入" }
+  ],
+  "compat": {
+    "sdkVersion": "1",
+    "legacyPluginIds": []
+  },
+  "source": "builtin",
+  "status": "ready"
+}

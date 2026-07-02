@@ -8,11 +8,14 @@ import type {
   EntryPlaybackSourceResponse,
   FileBrowserRequest,
   FileBrowserSnapshot,
+  FileArchiveImportRequest,
   FileCopyRequest,
   FileCreateRequest,
   FileDeleteRequest,
   FileImportRequest,
   FileMoveRequest,
+  EagleLibraryImportRequest,
+  EagleLibraryImportResponse,
   FilePreviewSourceResponse,
   FileReadRequest,
   FileRenameRequest,
@@ -131,6 +134,14 @@ export function createFile(request: FileCreateRequest) {
 
 export function importEntries(request: FileImportRequest) {
   return invokeCommand<FileBrowserSnapshot>("import_entries", { request });
+}
+
+export function importArchiveEntries(request: FileArchiveImportRequest) {
+  return invokeCommand<FileBrowserSnapshot>("import_archive_entries", { request });
+}
+
+export function importEagleLibrary(request: EagleLibraryImportRequest) {
+  return invokeCommand<EagleLibraryImportResponse>("import_eagle_library", { request });
 }
 
 export function copyEntries(request: FileCopyRequest) {

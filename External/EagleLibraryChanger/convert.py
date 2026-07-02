@@ -184,11 +184,11 @@ def main(argv: list[str] | None = None) -> int:
             print("\nDry run 完成，未写入任何文件。")
             return 0
 
-        if not args.yes and not confirm_execution():
+        if not args.yes and not confirm_execution(args.mode):
             print("已取消转换。")
             return 0
 
-        execute_plan(plan, args.force)
+        execute_plan(plan, args.force, args.mode)
         print(f"转换完成：{plan.output_root}")
         print(f"报告已写入：{report_output_path(plan.output_root)}")
         return 0
@@ -203,6 +203,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--input", type=Path, required=True, help="EagleLibrary 目录")
     parser.add_argument("--output", type=Path, required=True, help="输出的 MomoBako 目录")
+    parser.add_argument("--mode", choices=("copy", "move"), required=True, help="素材导入模式")
     parser.add_argument("--name", type=str, help="可选的资源库名称，默认使用输出目录名")
     parser.add_argument("--dry-run", action="store_true", help="仅预览，不写文件")
     parser.add_argument("--yes", action="store_true", help="跳过确认，直接执行")
@@ -2040,17 +2041,18 @@ def print_summary(plan: ConversionPlan) -> None:
             print(f"- {json.dumps(hit, ensure_ascii=False)}")
 
 
-def confirm_execution() -> bool:
-    answer = input("\n确认执行移动并写入新仓库？[y/N]: ").strip().lower()
+def confirm_execution(mode: str) -> bool:
+    action_label = "复制素材" if mode == "copy" else "移动素材"
+    answer = input(f"\n确认执行{action_label}并写入新仓库？[y/N]: ").strip().lower()
     return answer in {"y", "yes"}
 
 
-def execute_plan(plan: ConversionPlan, force: bool) -> None:
+def execute_plan(plan: ConversionPlan, force: bool, mode: str) -> None:
     create_output_root(plan.output_root, force)
     ensure_repo_layout(plan.output_root)
     write_todo_file(todo_file_path())
     write_repository_metadata(plan)
-    move_assets(plan)
+    move_assets(plan, mode)
     write_trash_manifest(plan)
     write_database(plan)
     plan.report = build_report(
@@ -2748,12 +2750,15 @@ def write_smart_folder_record(
     )
 
 
-def move_assets(plan: ConversionPlan) -> None:
+def move_assets(plan: ConversionPlan, mode: str) -> None:
     for asset in plan.assets:
         primary = asset.memberships[0]
         target_file = membership_asset_file_output_path(plan, asset, primary)
         target_file.parent.mkdir(parents=True, exist_ok=True)
-        shutil.move(str(asset.source_file), str(target_file))
+        if mode == "copy":
+            shutil.copy2(asset.source_file, target_file)
+        else:
+            shutil.move(str(asset.source_file), str(target_file))
         primary.link_state = "primary"
         for membership in asset.memberships[1:]:
             alias_target = membership_asset_file_output_path(plan, asset, membership)
@@ -2775,8 +2780,11 @@ def move_assets(plan: ConversionPlan) -> None:
         if asset.source_thumbnail is not None:
             thumbnail_target = build_thumbnail_target_path(plan, asset)
             thumbnail_target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.move(str(asset.source_thumbnail), str(thumbnail_target))
-        if asset.source_info_dir.exists():
+            if mode == "copy":
+                shutil.copy2(asset.source_thumbnail, thumbnail_target)
+            else:
+                shutil.move(str(asset.source_thumbnail), str(thumbnail_target))
+        if mode == "move" and asset.source_info_dir.exists():
             shutil.rmtree(asset.source_info_dir)
 
 

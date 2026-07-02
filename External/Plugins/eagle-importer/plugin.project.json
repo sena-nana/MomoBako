@@ -1,0 +1,9 @@
+{
+  "pluginId": "momobako.tool.eagle-importer",
+  "build": {
+    "type": "frontend-module",
+    "sourceDir": "src",
+    "entry": "dist/register.js",
+    "outputDir": ".dist/eagle-importer"
+  }
+}

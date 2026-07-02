@@ -11,7 +11,7 @@ import {
   watch,
 } from "vue";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
-import { save as saveDialog } from "@tauri-apps/plugin-dialog";
+import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import type {
   FileBrowserEntry,
   EntryPlaybackProgressEvent,
@@ -212,6 +212,12 @@ export type RegisteredLibraryExtension = LibraryExtensionDefinition & {
 
 export type ToolPageContext = {
   manifest: PluginManifest;
+  activeRepoId: string | null;
+  activeRepository: RepositorySummary | null;
+  currentDirectoryPath: string;
+  isRepositoryWritable: boolean;
+  isTrashPanel: boolean;
+  isVirtualView: boolean;
 };
 
 export type ToolPageComponentProps = ToolPageContext;
@@ -298,6 +304,7 @@ export type FrontendPluginContext = {
     mediaType?: string;
   }) => Promise<Awaited<ReturnType<typeof ensureThumbnail>>>;
   writeBinaryFile: typeof writeBinaryFile;
+  openDialog: typeof openDialog;
   saveFileDialog: typeof saveDialog;
   fileSrc: typeof convertFileSrc;
   startOperationProgress: typeof startOperationProgress;
@@ -594,6 +601,7 @@ function createFrontendPluginContext(manifest: PluginManifest): FrontendPluginCo
       });
     },
     writeBinaryFile,
+    openDialog,
     saveFileDialog: saveDialog,
     fileSrc: convertFileSrc,
     startOperationProgress,

@@ -1,8 +1,11 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import PluginManagerPanel from "../../components/PluginManagerPanel.vue";
+import type { ToolPageContext } from "../../plugins/sdk";
 import { frontendPluginRegistryVersion } from "../../plugins/sdk";
 import { listToolPages } from "../../plugins/toolPages";
+
+defineProps<ToolPageContext>();
 
 const toolPages = computed(() => {
   void frontendPluginRegistryVersion.value;
@@ -48,6 +51,12 @@ watch(toolPages, (pages) => {
           :is="activeToolPage.component"
           v-if="activeToolPage"
           :manifest="activeToolPage.manifest"
+          :active-repo-id="activeRepoId"
+          :active-repository="activeRepository"
+          :current-directory-path="currentDirectoryPath"
+          :is-repository-writable="isRepositoryWritable"
+          :is-trash-panel="isTrashPanel"
+          :is-virtual-view="isVirtualView"
         />
       </div>
     </div>
