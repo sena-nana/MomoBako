@@ -150,7 +150,7 @@ const emit = defineEmits<{
     </template>
 
     <FileBrowserPanel
-      v-else
+      v-show="!previewFileEntry"
       v-model:create-file-name="createFileName"
       v-model:file-display-mode="fileDisplayMode"
       v-model:rename-value="renameValue"
