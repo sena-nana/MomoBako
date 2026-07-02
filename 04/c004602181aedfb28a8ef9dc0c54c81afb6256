@@ -1,0 +1,50 @@
+External/Plugins/eagle-importer/src/register.js
+  s_7b528da7574116::t_9beb8208799efc 3,114,176-186,210-224
+External/Plugins/service-eagle-importer/Cargo.toml
+  s_7b528da7574116::t_79b49aa0080ab1 1-13
+External/Plugins/service-eagle-importer/build.rs
+  s_7b528da7574116::t_74c2cba2121e18 1-5
+External/Plugins/service-eagle-importer/manifest.json
+  s_7b528da7574116::t_5b75291ab9d36d 1-49
+External/Plugins/service-eagle-importer/plugin.project.json
+  s_7b528da7574116::t_7fe6fb191533d6 1-9
+External/Plugins/service-eagle-importer/src/lib.rs
+  s_7b528da7574116::t_2547ac022c673f 1-44
+docs/api-design.md
+  s_7b528da7574116::t_33a6e2552d060f 119-131
+src-tauri/src/services/repository/api_design.rs
+  s_7b528da7574116::t_de3da35c7924cf 535
+src-tauri/src/services/repository/contracts.rs
+  s_7b528da7574116::t_161552d25ca1db 962,976-1011,1017
+src-tauri/src/services/repository/eagle_import/mod.rs
+  s_7b528da7574116::t_24b976792155d9 1-995
+src-tauri/src/services/repository/eagle_import/planner.rs
+  s_7b528da7574116::t_2efe4b61cf40a6 1-984
+src-tauri/src/services/repository/eagle_import/smart_folder.rs
+  s_7b528da7574116::t_ec6806bf1f2b2b 1-696
+src-tauri/src/services/repository/importing.rs
+  s_7b528da7574116::t_2fd878faabe85e 49-54,72-79,81-96,128-129,251-252,270-275,290-291,302,306-307,313-314,321-322,324,326-327
+src/types/repository/core.ts
+  s_7b528da7574116::t_4df34dceb6d6bc 1049-1063,1067
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.5",
+  "base_commit_sha": "04c004602181aedfb28a8ef9dc0c54c81afb6256",
+  "prompts": {},
+  "humans": {
+    "h_8e6780fc7b4bb1": {
+      "author": "AuraElicase <auraelicase@outlook.com>"
+    }
+  },
+  "sessions": {
+    "s_7b528da7574116": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f226b-0837-7bc3-94a8-95ef329ae44e",
+        "model": "unknown"
+      },
+      "human_author": "AuraElicase <auraelicase@outlook.com>"
+    }
+  }
+}
