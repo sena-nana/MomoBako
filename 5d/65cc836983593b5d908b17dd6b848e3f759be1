@@ -1,0 +1,68 @@
+tests/workspaceRepositoryLifecycle.test.ts
+  s_d78ccad5ff38cc::t_c733a95c02a38b 1-46
+src-tauri/src/services/repository/management.rs
+  s_d78ccad5ff38cc::t_57fad874c023b9 459,462,464-472,475-476
+  s_d78ccad5ff38cc::t_6f61510fb384fc 473-474
+src-tauri/src/services/repository/mod.rs
+  s_d78ccad5ff38cc::t_72a01e15b9c86c 54
+  s_d78ccad5ff38cc::t_d62df51cb6408a 53,55,97,99
+  s_d78ccad5ff38cc::t_6005cea317fdfb 98
+src-tauri/src/services/repository/facade.rs
+  s_d78ccad5ff38cc::t_9638999fb64364 424,427,429
+src-tauri/src/services/repository/sync_metadata.rs
+  s_d78ccad5ff38cc::t_8564acd92cb34d 1-485
+src/composables/workspace/navigation.ts
+  s_d78ccad5ff38cc::t_4afe417496320b 4,23
+  s_d78ccad5ff38cc::t_273e790e6a348b 81-83
+  s_d78ccad5ff38cc::t_ce489f29a61aa7 67-69,88-96,115-117,141,148-150,157-159
+src-tauri/src/services/repository/internal_tests.rs
+  s_d78ccad5ff38cc::t_c2c057192bb6fb 2766-2767,2769-2775,2780-2796,2801-2846
+  s_d78ccad5ff38cc::t_7684dec5750789 2768,2776-2779,2797-2800,2945
+  s_d78ccad5ff38cc::t_f0e4fbc47f0d8b 2941-2944,2946-2986
+src-tauri/src/services/runtime/watcher.rs
+  s_d78ccad5ff38cc::t_7684dec5750789 130
+  s_d78ccad5ff38cc::t_331c28d646157f 202,222-239
+  s_d78ccad5ff38cc::t_494a3cf9b955a4 326-336
+src-tauri/src/services/repository/sync_engine.rs
+  s_d78ccad5ff38cc::t_7d671a4bf49961 1
+  s_d78ccad5ff38cc::t_b56b8c380da9b0 19,55,78,99,179-191,193-196,217,237-265,269,271,318,352,397,433,437
+  s_d78ccad5ff38cc::t_7853f456ec9ea3 266-268
+  s_d78ccad5ff38cc::t_8d98cfa00acf3c 270
+  s_d78ccad5ff38cc::t_7d8393733ff924 272-274,315-317
+  s_d78ccad5ff38cc::t_5c4a4aada4fcbd 319-321,349-351
+  s_d78ccad5ff38cc::t_0412027bfb8a13 353-355,394-396
+  s_d78ccad5ff38cc::t_4caf40d562f963 398-400,430-432
+  s_d78ccad5ff38cc::t_62b7a374f47f72 434-436
+  s_d78ccad5ff38cc::t_68eb1530f93127 438-440
+  s_d78ccad5ff38cc::t_35399039372056 275-314,322-348,356-393,401-429,441-463,514-527,606
+src/composables/workspace/lifecycle.ts
+  s_d78ccad5ff38cc::t_efae96341d467b 11
+  s_d78ccad5ff38cc::t_59bf26ab5fa2f8 388-391,395
+src-tauri/src/services/repository/sync_hardlink.rs
+  s_d78ccad5ff38cc::t_874243c4385e93 1-361
+src-tauri/src/services/repository/sync_incremental.rs
+  s_d78ccad5ff38cc::t_8b74fef39894de 1-298
+src/composables/workspace/state.ts
+  s_d78ccad5ff38cc::t_8a29425677f4de 72
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "5d65cc836983593b5d908b17dd6b848e3f759be1",
+  "prompts": {},
+  "humans": {
+    "h_8e6780fc7b4bb1": {
+      "author": "AuraElicase <auraelicase@outlook.com>"
+    }
+  },
+  "sessions": {
+    "s_d78ccad5ff38cc": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f27b7-6426-7031-8c48-f51fb5ee74ac",
+        "model": "gpt-5.5"
+      },
+      "human_author": "AuraElicase <auraelicase@outlook.com>"
+    }
+  }
+}
