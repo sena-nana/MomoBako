@@ -115,6 +115,55 @@ mod tests {
     }
 
     #[test]
+    fn load_snapshot_rebuilds_missing_repository_storage() {
+        let (state, root, repo_root, _thumbnail_root) = create_test_state("snapshot-rebuild-meta");
+        fs::write(repo_root.join("track.mp3"), b"demo").expect("test file should be written");
+        let repo_id = create_repository_for_path(&state, &repo_root);
+
+        fs::remove_dir_all(repo_root.join(REPO_META_DIR)).expect("metadata dir should be removed");
+
+        let snapshot = state
+            .load_snapshot(&repo_id)
+            .expect("snapshot should rebuild missing repository storage");
+
+        assert_eq!(snapshot.assets.len(), 1);
+        assert_eq!(snapshot.assets[0].path, "track.mp3");
+        assert!(repo_root
+            .join(REPO_META_DIR)
+            .join(REPO_METADATA_FILE_NAME)
+            .is_file());
+        assert!(repo_root
+            .join(REPO_META_DIR)
+            .join(REPO_DB_FILE_NAME)
+            .is_file());
+
+        fs::remove_dir_all(root).expect("test workspace should be removed");
+    }
+
+    #[test]
+    fn load_snapshot_recovers_from_corrupted_repository_database() {
+        let (state, root, repo_root, _thumbnail_root) =
+            create_test_state("snapshot-rebuild-corrupted-db");
+        fs::write(repo_root.join("track.mp3"), b"demo").expect("test file should be written");
+        let repo_id = create_repository_for_path(&state, &repo_root);
+
+        fs::write(
+            repo_root.join(REPO_META_DIR).join(REPO_DB_FILE_NAME),
+            b"broken",
+        )
+        .expect("database file should be corrupted");
+
+        let snapshot = state
+            .load_snapshot(&repo_id)
+            .expect("snapshot should recover from corrupted database");
+
+        assert_eq!(snapshot.assets.len(), 1);
+        assert_eq!(snapshot.assets[0].path, "track.mp3");
+
+        fs::remove_dir_all(root).expect("test workspace should be removed");
+    }
+
+    #[test]
     fn find_existing_repository_for_backend_matches_netease_account_id() {
         let workspace = TestWorkspace::new("netease-repository-dedupe");
         let service_root = workspace.path("service");
