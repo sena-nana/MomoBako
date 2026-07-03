@@ -88,7 +88,6 @@ function renderPanel(entry = asmrEntry(), overrides: Record<string, unknown> = {
       isTrashPanel: false,
       isVideoEntry: () => false,
       openSelectedLabel: "打开",
-      renameTargetPath: null,
       selectedEntries: [entry],
       selectedFilePaths: [entry.path],
       selectedFilePath: entry.path,
@@ -170,5 +169,11 @@ describe("FileBrowserPanel ASMR summary", () => {
     expect(detailCard).toBeInstanceOf(HTMLElement);
     const values = within(detailCard as HTMLElement).getAllByText(/^[12]$/).map((element) => element.textContent);
     expect(values).toEqual(["1", "1", "2"]);
+  });
+
+  it("详情面板不再显示内联重命名区域", () => {
+    renderPanel();
+
+    expect(document.querySelector(".files-detail__rename")).toBeNull();
   });
 });

@@ -1,13 +1,9 @@
 import type { FileBrowserEntry, HardlinkCandidate } from "../../../types/repository";
+import { displayNameWithoutExtension } from "../../../utils/fileName";
 
 export function entryDisplayTitle(entry: Pick<FileBrowserEntry, "kind" | "name" | "extension">) {
   if (entry.kind === "directory") return entry.name;
-  const extension = entry.extension?.trim();
-  if (!extension) return entry.name;
-  const suffix = `.${extension}`;
-  return entry.name.toLowerCase().endsWith(suffix.toLowerCase())
-    ? entry.name.slice(0, -suffix.length)
-    : entry.name;
+  return displayNameWithoutExtension(entry.name, entry.extension);
 }
 
 export function hardlinkStateLabel(entry: FileBrowserEntry) {

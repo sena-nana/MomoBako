@@ -47,7 +47,7 @@ describe("MediaPreview", () => {
       });
     });
 
-    const lyricsRegion = screen.getByRole("region", { name: "歌词面板" });
+    const lyricsRegion = await screen.findByRole("region", { name: "歌词面板" });
     await waitFor(() => {
       expect(lyricsRegion).toHaveTextContent("Mock lyric line 1");
       expect(lyricsRegion).toHaveTextContent("Mock lyric line 2");
@@ -62,6 +62,24 @@ describe("MediaPreview", () => {
       element.classList.contains("media-preview__audio-lyric")
     ));
     expect(lyricButtons).toHaveLength(2);
+  });
+
+  it("音频预览标题与媒体标识不显示扩展名", async () => {
+    const plugin = getPreviewPluginForEntry(audioEntry);
+    expect(plugin).not.toBeNull();
+
+    render(plugin!.component, {
+      props: {
+        repoId: "repo-main-001",
+        entry: audioEntry,
+      },
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "theme-song" })).toBeInTheDocument();
+    });
+    expect(screen.queryByText("MP3")).toBeNull();
+    expect(screen.getAllByText("音频").length).toBeGreaterThan(0);
   });
 
   it("音频预览使用来源封面作为缩略图兜底", async () => {

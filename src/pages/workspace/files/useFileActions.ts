@@ -31,12 +31,12 @@ type WorkspaceFileActionsOptions = {
   ) => Promise<EagleLibraryImportResponse | null>;
   importEntriesToWorkspace: (sourcePaths: string[], parentPath?: string) => Promise<FileBrowserSnapshot | null>;
   openDirectory: (path: string) => void;
-  openWorkspaceEntry: (path: string) => Promise<void>;
+  openWorkspaceEntry: (entry: FileBrowserEntry) => Promise<void>;
   renameWorkspaceEntry: (path: string, newName: string) => Promise<FileBrowserSnapshot | null>;
   restoreAllTrashEntries: () => Promise<FileBrowserSnapshot | null>;
   restoreTrashEntries: (paths: string[]) => Promise<FileBrowserSnapshot | null>;
   restoreTrashEntry: (path: string) => Promise<FileBrowserSnapshot | null>;
-  revealWorkspaceEntry: (path: string) => Promise<void>;
+  revealWorkspaceEntry: (entry: FileBrowserEntry) => Promise<void>;
 };
 
 export function useFileActions(options: WorkspaceFileActionsOptions) {
@@ -78,12 +78,16 @@ export function useFileActions(options: WorkspaceFileActionsOptions) {
     startRenameEntry(options.currentFileEntry.value);
   }
 
+  function cancelRenameSelected() {
+    renameTargetPath.value = null;
+    renameValue.value = "";
+  }
+
   async function submitRenameSelected() {
     if (!renameTargetPath.value || !renameValue.value.trim()) return;
     const snapshot = await options.renameWorkspaceEntry(renameTargetPath.value, renameValue.value.trim());
     if (snapshot) {
-      renameTargetPath.value = null;
-      renameValue.value = "";
+      cancelRenameSelected();
     }
   }
 
@@ -184,13 +188,13 @@ export function useFileActions(options: WorkspaceFileActionsOptions) {
       options.openDirectory(options.currentFileEntry.value.path);
       return;
     }
-    await options.openWorkspaceEntry(options.currentFileEntry.value.path);
+    await options.openWorkspaceEntry(options.currentFileEntry.value);
   }
 
   async function revealSelectedEntry() {
     if (options.isTrashPanel.value) return;
     if (!options.currentFileEntry.value) return;
-    await options.revealWorkspaceEntry(options.currentFileEntry.value.path);
+    await options.revealWorkspaceEntry(options.currentFileEntry.value);
   }
 
   async function handleImportFolder() {
@@ -229,6 +233,7 @@ export function useFileActions(options: WorkspaceFileActionsOptions) {
     currentHardlinkCandidate,
     renameTargetPath,
     renameValue,
+    cancelRenameSelected,
     cancelCopyTarget,
     confirmCurrentHardlinkCandidate,
     deleteContextSelection,

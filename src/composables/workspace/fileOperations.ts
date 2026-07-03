@@ -15,6 +15,7 @@ import {
   startExternalFileDrag,
 } from "../../services/repositoryApi";
 import type {
+  FileBrowserEntry,
   FileBrowserSnapshot,
   FileDeleteMode,
   EagleImportMode,
@@ -28,6 +29,7 @@ import {
   error,
   fileBrowser,
   isMutatingFiles,
+  selectedFilePaths,
   selectedFilePath,
 } from "./state";
 import { visibleEntries } from "./selectors";
@@ -40,7 +42,6 @@ import {
 import {
   applyFileBrowserSnapshot,
   entryNameFromPath,
-  getDefaultFileBrowserSelection,
   joinActiveRepositoryPath,
   loadFileBrowserForDirectory,
 } from "./files";
@@ -74,6 +75,37 @@ function isLibraryCategoryView() {
 
 function canApplyDirectorySnapshot(snapshot: FileBrowserSnapshot) {
   return !isLibraryCategoryView() || currentDirectoryPath.value === snapshot.currentPath;
+}
+
+type WorkspaceOpenTarget = string | Pick<FileBrowserEntry, "isVirtual" | "localAbsolutePath" | "path">;
+
+function hasExplicitWorkspaceSelection() {
+  return Boolean(selectedFilePath.value || selectedFilePaths.value.length);
+}
+
+function resolveWorkspaceEntryPath(target: WorkspaceOpenTarget) {
+  if (typeof target === "string") {
+    return {
+      absolutePath: joinActiveRepositoryPath(target),
+      relativePath: target,
+    };
+  }
+  if (target.localAbsolutePath?.trim()) {
+    return {
+      absolutePath: target.localAbsolutePath,
+      relativePath: target.path,
+    };
+  }
+  if (target.isVirtual || activeSnapshot.value?.repository.backend.kind !== "filesystem") {
+    return {
+      absolutePath: null,
+      relativePath: target.path,
+    };
+  }
+  return {
+    absolutePath: joinActiveRepositoryPath(target.path),
+    relativePath: target.path,
+  };
 }
 
 async function refreshAfterFileMutation(repoId: string, plan: WorkspaceRefreshPlan) {
@@ -142,6 +174,7 @@ export async function createFileInWorkspace(name: string, parentPath = currentDi
   if (!activeRepoId.value) return null;
   isMutatingFiles.value = true;
   error.value = null;
+  const hadExplicitSelection = hasExplicitWorkspaceSelection();
   try {
     const snapshot = await createFile({
       repoId: activeRepoId.value,
@@ -150,7 +183,7 @@ export async function createFileInWorkspace(name: string, parentPath = currentDi
     });
     applyFileBrowserSnapshot(snapshot);
     const createdPath = snapshot.entries.find((entry) => entry.name === name)?.path ?? null;
-    if (createdPath) {
+    if (createdPath && hadExplicitSelection) {
       applyWorkspaceSelection([createdPath], createdPath, createdPath);
     }
     await refreshAfterFileMutation(activeRepoId.value, { repositorySnapshot: true });
@@ -167,6 +200,7 @@ export async function importEntriesToWorkspace(sourcePaths: string[], parentPath
   const repoId = activeRepoId.value;
   if (!repoId || !sourcePaths.length) return null;
   error.value = null;
+  const hadExplicitSelection = hasExplicitWorkspaceSelection();
   const progressId = startOperationProgress(
     "导入文件",
     `准备导入 ${sourcePaths.length} 个条目`,
@@ -180,7 +214,7 @@ export async function importEntriesToWorkspace(sourcePaths: string[], parentPath
       sourcePaths,
     });
     updateOperationProgress(progressId, { detail: "刷新文件索引", value: 84 });
-    await finishFileTransfer(repoId, snapshot, sourcePaths);
+    await finishFileTransfer(repoId, snapshot, hadExplicitSelection ? sourcePaths : []);
     finishOperationProgress(progressId);
     return snapshot;
   } catch (cause) {
@@ -198,6 +232,7 @@ export async function importArchiveEntriesToWorkspace(
   if (!repoId || !archivePath.trim()) return null;
   isMutatingFiles.value = true;
   error.value = null;
+  const hadExplicitSelection = hasExplicitWorkspaceSelection();
   const previousPathSet = new Set((fileBrowser.value?.entries ?? []).map((entry) => entry.path));
   const progressId = startOperationProgress("导入 ZIP", "准备解压并导入 ZIP", { initial: 8 });
   try {
@@ -208,7 +243,12 @@ export async function importArchiveEntriesToWorkspace(
       archivePath,
     });
     updateOperationProgress(progressId, { detail: "刷新文件索引", value: 84 });
-    await finishWorkspaceImport(repoId, snapshot, previousPathSet, parentPath ?? "");
+    await finishWorkspaceImport(
+      repoId,
+      snapshot,
+      hadExplicitSelection ? previousPathSet : new Set([...previousPathSet, ...snapshot.entries.map((entry) => entry.path)]),
+      parentPath ?? "",
+    );
     finishOperationProgress(progressId);
     return snapshot;
   } catch (cause) {
@@ -229,6 +269,7 @@ export async function importEagleLibraryToWorkspace(
   if (!repoId || !libraryPath.trim()) return null;
   isMutatingFiles.value = true;
   error.value = null;
+  const hadExplicitSelection = hasExplicitWorkspaceSelection();
   const previousPathSet = new Set((fileBrowser.value?.entries ?? []).map((entry) => entry.path));
   const progressId = startOperationProgress(
     mode === "move" ? "剪切导入 Eagle" : "复制导入 Eagle",
@@ -244,7 +285,12 @@ export async function importEagleLibraryToWorkspace(
       mode,
     });
     updateOperationProgress(progressId, { detail: "刷新文件索引", value: 84 });
-    await finishWorkspaceImport(repoId, response.snapshot, previousPathSet, parentPath ?? "");
+    await finishWorkspaceImport(
+      repoId,
+      response.snapshot,
+      hadExplicitSelection ? previousPathSet : new Set([...previousPathSet, ...response.snapshot.entries.map((entry) => entry.path)]),
+      parentPath ?? "",
+    );
     finishOperationProgress(progressId);
     return response;
   } catch (cause) {
@@ -261,6 +307,7 @@ export async function copyWorkspaceEntries(sourcePaths: string[], parentPath = c
   if (!repoId || !sourcePaths.length) return null;
   isMutatingFiles.value = true;
   error.value = null;
+  const hadExplicitSelection = hasExplicitWorkspaceSelection();
   const progressId = startOperationProgress("复制文件", `准备复制 ${sourcePaths.length} 个条目`, { initial: 8 });
   try {
     updateOperationProgress(progressId, { detail: "创建硬链接或复制文件", value: 32 });
@@ -271,7 +318,7 @@ export async function copyWorkspaceEntries(sourcePaths: string[], parentPath = c
       mode: "hardlinkPreferred",
     });
     updateOperationProgress(progressId, { detail: "刷新文件索引", value: 84 });
-    await finishFileTransfer(repoId, snapshot, sourcePaths);
+    await finishFileTransfer(repoId, snapshot, hadExplicitSelection ? sourcePaths : []);
     finishOperationProgress(progressId);
     return snapshot;
   } catch (cause) {
@@ -368,15 +415,10 @@ export async function deleteWorkspaceEntry(path: string, mode?: FileDeleteMode) 
       path,
       mode: deleteMode,
     });
-    const shouldSelectDefault = selectedFilePath.value === path;
     if (canApplyDirectorySnapshot(snapshot)) {
       applyFileBrowserSnapshot(snapshot);
-      if (shouldSelectDefault) {
-        selectedFilePath.value = getDefaultFileBrowserSelection(snapshot);
-      }
-    } else if (shouldSelectDefault) {
-      const nextPrimaryPath = resolveBatchMutationPrimaryPath([path]);
-      applyWorkspaceSelection(nextPrimaryPath ? [nextPrimaryPath] : [], nextPrimaryPath, nextPrimaryPath);
+    } else if (selectedFilePath.value === path) {
+      applyWorkspaceSelection([], null, null);
     }
     await refreshAfterFileMutation(activeRepoId.value, { repositorySnapshot: true });
     return snapshot;
@@ -398,7 +440,6 @@ export async function deleteWorkspaceEntries(paths: string[], mode?: FileDeleteM
   const progressId = startOperationProgress("删除文件", `准备处理 ${nextPaths.length} 个条目`, { initial: 10 });
   try {
     const deleteMode = mode ?? (activePanel.value === "trash" ? "permanentDelete" : undefined);
-    const nextPrimaryPath = resolveBatchMutationPrimaryPath(nextPaths);
     for (const [index, path] of nextPaths.entries()) {
       updateOperationProgress(progressId, {
         detail: `正在处理 ${entryNameFromPath(path)}`,
@@ -410,7 +451,7 @@ export async function deleteWorkspaceEntries(paths: string[], mode?: FileDeleteM
         mode: deleteMode,
       });
     }
-    applyWorkspaceSelection(nextPrimaryPath ? [nextPrimaryPath] : [], nextPrimaryPath, nextPrimaryPath);
+    applyWorkspaceSelection([], null, null);
     await refreshAfterFileMutation(repoId, {
       directory: defaultDirectoryRefreshPlan(nextPaths),
       repositorySnapshot: true,
@@ -436,11 +477,7 @@ export async function restoreTrashEntry(path: string) {
       action: "restore",
       path,
     });
-    const shouldSelectDefault = selectedFilePath.value === path;
     applyFileBrowserSnapshot(snapshot);
-    if (shouldSelectDefault) {
-      selectedFilePath.value = getDefaultFileBrowserSelection(snapshot);
-    }
     await refreshAfterFileMutation(activeRepoId.value, {
       repositorySnapshot: true,
       repositorySummary: true,
@@ -501,7 +538,7 @@ export async function restoreAllTrashEntries() {
       action: "restoreAll",
     });
     applyFileBrowserSnapshot(snapshot);
-    selectedFilePath.value = getDefaultFileBrowserSelection(snapshot);
+    applyWorkspaceSelection([], null, null);
     await refreshAfterFileMutation(activeRepoId.value, {
       repositorySnapshot: true,
       repositorySummary: true,
@@ -525,7 +562,7 @@ export async function emptyTrash() {
       action: "empty",
     });
     applyFileBrowserSnapshot(snapshot);
-    selectedFilePath.value = getDefaultFileBrowserSelection(snapshot);
+    applyWorkspaceSelection([], null, null);
     await refreshAfterFileMutation(activeRepoId.value, {
       repositorySnapshot: true,
       repositorySummary: true,
@@ -539,21 +576,21 @@ export async function emptyTrash() {
   }
 }
 
-export async function openWorkspaceEntry(path: string) {
+export async function openWorkspaceEntry(target: WorkspaceOpenTarget) {
   const repoId = activeRepoId.value;
-  const absolutePath = joinActiveRepositoryPath(path);
+  const { absolutePath, relativePath } = resolveWorkspaceEntryPath(target);
   if (!repoId || !absolutePath) return;
   error.value = null;
   try {
-    await recordEntryAccess({ repoId, path });
+    await recordEntryAccess({ repoId, path: relativePath });
     await openRepositoryPath(absolutePath);
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : String(cause);
   }
 }
 
-export async function revealWorkspaceEntry(path: string) {
-  const absolutePath = joinActiveRepositoryPath(path);
+export async function revealWorkspaceEntry(target: WorkspaceOpenTarget) {
+  const { absolutePath } = resolveWorkspaceEntryPath(target);
   if (!absolutePath) return;
   error.value = null;
   try {

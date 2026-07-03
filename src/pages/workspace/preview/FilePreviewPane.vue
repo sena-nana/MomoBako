@@ -7,6 +7,7 @@ import FileMetadataEditor from "../files/FileMetadataEditor.vue";
 import ThumbnailPalette from "../../../components/ThumbnailPalette.vue";
 import type { FileBrowserEntry, RepositoryTagGroup } from "../../../types/repository";
 import type { RegisteredLibraryExtension } from "../../../plugins/sdk";
+import { metadataComment, metadataString } from "../../../utils/fileMetadata";
 import { entryDisplayTitle } from "../files/filePresentation";
 
 const props = defineProps<{
@@ -30,8 +31,8 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   back: [];
-  open: [path: string];
-  reveal: [path: string];
+  open: [entry: FileBrowserEntry];
+  reveal: [entry: FileBrowserEntry];
   preview: [entry: FileBrowserEntry];
   thumbnailError: [entry: FileBrowserEntry];
   thumbnailLoaded: [entry: FileBrowserEntry, event: Event];
@@ -93,13 +94,26 @@ onBeforeUnmount(() => {
       <p class="asset-browser__eyebrow">文件预览</p>
       <h1>{{ entryDisplayTitle(entry) }}</h1>
       <p v-if="entry.path !== entry.name" class="files-preview-page__subline">{{ entry.path }}</p>
+      <div
+        v-if="metadataComment(entry.metadata) || metadataString(entry.metadata, 'link')"
+        class="files-detail__lead"
+      >
+        <p v-if="metadataComment(entry.metadata)" class="files-detail__lead-row">
+          <span>注释</span>
+          <strong>{{ metadataComment(entry.metadata) }}</strong>
+        </p>
+        <p v-if="metadataString(entry.metadata, 'link')" class="files-detail__lead-row">
+          <span>链接</span>
+          <strong>{{ metadataString(entry.metadata, "link") }}</strong>
+        </p>
+      </div>
     </div>
     <div class="files-preview-page__actions">
-      <button type="button" class="ghost" @click="emit('open', entry.path)">
+      <button type="button" class="ghost" @click="emit('open', entry)">
         <Eye :size="14" aria-hidden="true" />
         打开
       </button>
-      <button type="button" class="ghost" @click="emit('reveal', entry.path)">
+      <button type="button" class="ghost" @click="emit('reveal', entry)">
         <FolderOpen :size="14" aria-hidden="true" />
         定位
       </button>

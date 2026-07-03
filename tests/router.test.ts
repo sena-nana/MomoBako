@@ -1063,7 +1063,7 @@ describe("文件管理冒烟", () => {
     expect(workspace.directoryEntries.value).toHaveLength(240);
     expect(workspace.fileEntries.value).toHaveLength(960);
     expect(workspace.fileBrowserEntryMap.value.get("asset-0001.png")?.assetId).toBe("asset-large-0001");
-    expect(workspace.selectedFilePaths.value).toEqual(["asset-0001.png"]);
+    expect(workspace.selectedFilePaths.value).toEqual([]);
   });
 
   it("自适应展示方式使用缩略图自然比例调整素材宽度", async () => {
@@ -2902,6 +2902,23 @@ describe("文件管理冒烟", () => {
     expect(getOpenerCalls("revealItemInDir").at(-1)).toMatchObject({
       path: "C:\\Mock\\AnimeAssets\\Campaigns",
     });
+
+    await workspace.openWorkspaceEntry({
+      path: "Cloud/song.mp3",
+      localAbsolutePath: "D:\\Detached\\Cloud\\song.mp3",
+      isVirtual: false,
+    });
+    expect(getOpenerCalls("openPath").at(-1)).toMatchObject({
+      path: "D:\\Detached\\Cloud\\song.mp3",
+    });
+
+    const openPathCount = getOpenerCalls("openPath").length;
+    await workspace.openWorkspaceEntry({
+      path: "Provider/remote-track.mp3",
+      localAbsolutePath: null,
+      isVirtual: true,
+    });
+    expect(getOpenerCalls("openPath")).toHaveLength(openPathCount);
 
     failNextOpenerCall("系统找不到指定的路径");
     await workspace.openWorkspaceEntry("missing.psd");

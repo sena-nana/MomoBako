@@ -244,6 +244,27 @@ onBeforeUnmount(() => {
 <template>
   <section v-if="entry.kind === 'file'" class="file-metadata-card">
     <label class="asset-meta__row file-metadata-card__inline-row">
+      <span>注释</span>
+      <div class="file-metadata-card__inline-input">
+        <MessageSquareText :size="14" aria-hidden="true" />
+        <input
+          v-model="draft.comment"
+          type="text"
+          placeholder="记录这个文件的用途、状态或上下文。"
+          :disabled="!canEdit || isSaving"
+        />
+      </div>
+    </label>
+
+    <label class="asset-meta__row file-metadata-card__inline-row">
+      <span>链接</span>
+      <div class="file-metadata-card__inline-input">
+        <Link2 :size="14" aria-hidden="true" />
+        <input v-model="draft.link" type="url" placeholder="https://example.com" :disabled="!canEdit || isSaving" />
+      </div>
+    </label>
+
+    <label class="asset-meta__row file-metadata-card__inline-row">
       <span>评分</span>
       <div class="file-metadata-card__stars" aria-label="文件评分">
         <button
@@ -410,27 +431,6 @@ onBeforeUnmount(() => {
         </div>
       </div>
     </section>
-
-    <label class="asset-meta__row file-metadata-card__inline-row">
-      <span>注释</span>
-      <div class="file-metadata-card__inline-input">
-        <MessageSquareText :size="14" aria-hidden="true" />
-        <input
-          v-model="draft.comment"
-          type="text"
-          placeholder="记录这个文件的用途、状态或上下文。"
-          :disabled="!canEdit || isSaving"
-        />
-      </div>
-    </label>
-
-    <label class="asset-meta__row file-metadata-card__inline-row">
-      <span>链接</span>
-      <div class="file-metadata-card__inline-input">
-        <Link2 :size="14" aria-hidden="true" />
-        <input v-model="draft.link" type="url" placeholder="https://example.com" :disabled="!canEdit || isSaving" />
-      </div>
-    </label>
 
     <div class="file-metadata-card__grid">
       <div class="asset-meta__row">

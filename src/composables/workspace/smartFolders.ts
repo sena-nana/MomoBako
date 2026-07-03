@@ -18,6 +18,7 @@ import {
   error,
   isLoadingSmartFolder,
   isMutatingSmartFolder,
+  selectedFilePaths,
   selectedFilePath,
   smartFolderResult,
   smartFolders,
@@ -102,7 +103,8 @@ export async function selectSmartFolder(smartFolderId: string) {
       return snapshot;
     }
     smartFolderResult.value = snapshot;
-    selectedFilePath.value = snapshot.results[0]?.path ?? null;
+    selectedFilePath.value = null;
+    selectedFilePaths.value = [];
     return snapshot;
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : String(cause);

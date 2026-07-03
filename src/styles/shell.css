@@ -1171,9 +1171,16 @@
 
 .workspace-player__progress-input {
   position: absolute;
-  inset: 0;
+  inset: 50% 0 auto;
+  transform: translateY(-50%);
   width: 100%;
-  opacity: 0;
+  height: 22px;
+  margin: 0;
+  padding: 0;
+  appearance: none;
+  -webkit-appearance: none;
+  background: transparent;
+  cursor: pointer;
 }
 
 .workspace-player__body {
@@ -1343,6 +1350,83 @@
 .workspace-player__volume input {
   width: min(120px, 18vw);
   min-width: 72px;
+}
+
+.workspace-player__progress-input::-webkit-slider-runnable-track {
+  height: 8px;
+  background: transparent;
+}
+
+.workspace-player__progress-input::-webkit-slider-thumb {
+  width: 16px;
+  height: 16px;
+  margin-top: -4px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  -webkit-appearance: none;
+}
+
+.workspace-player__progress-input::-moz-range-track {
+  height: 8px;
+  background: transparent;
+  border: 0;
+}
+
+.workspace-player__progress-input::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+}
+
+.workspace-player__volume input,
+.workspace-player__setting input {
+  height: 20px;
+  margin: 0;
+  padding: 0;
+  appearance: none;
+  -webkit-appearance: none;
+  background: transparent;
+  cursor: pointer;
+}
+
+.workspace-player__volume input::-webkit-slider-runnable-track,
+.workspace-player__setting input::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 24%, var(--border-soft));
+}
+
+.workspace-player__volume input::-webkit-slider-thumb,
+.workspace-player__setting input::-webkit-slider-thumb {
+  width: 12px;
+  height: 12px;
+  margin-top: -4px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--accent);
+  box-shadow: 0 0 0 2px var(--bg-elev);
+  -webkit-appearance: none;
+}
+
+.workspace-player__volume input::-moz-range-track,
+.workspace-player__setting input::-moz-range-track {
+  height: 4px;
+  border: 0;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 24%, var(--border-soft));
+}
+
+.workspace-player__volume input::-moz-range-thumb,
+.workspace-player__setting input::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--accent);
+  box-shadow: 0 0 0 2px var(--bg-elev);
 }
 
 .workspace-player__volume input:disabled,

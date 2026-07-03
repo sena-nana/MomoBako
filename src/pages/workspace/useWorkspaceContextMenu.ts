@@ -37,12 +37,12 @@ type WorkspaceContextMenuOptions = {
   refreshRepositoryWorkspace: () => Promise<void>;
   openCopyTargetDialog: (entry: FileBrowserEntry) => void | Promise<void>;
   openDirectory: (path: string) => void | Promise<void>;
-  openWorkspaceEntry: (path: string) => void | Promise<void>;
+  openWorkspaceEntry: (entry: FileBrowserEntry) => void | Promise<void>;
   pasteCustomThumbnail: (entry: FileBrowserEntry) => void | Promise<void>;
   previewEntry: (entry: FileBrowserEntry) => void;
   refreshEntryThumbnail: (entry: FileBrowserEntry) => void | Promise<void>;
   restoreContextSelection: (entry: FileBrowserEntry, contextSelectionPaths: string[]) => void | Promise<void>;
-  revealWorkspaceEntry: (path: string) => void | Promise<void>;
+  revealWorkspaceEntry: (entry: FileBrowserEntry) => void | Promise<void>;
   selectWorkspaceEntries: (
     paths: string[],
     options?: { primaryPath?: string | null; anchorPath?: string | null },
@@ -79,13 +79,13 @@ export function useWorkspaceContextMenu(options: WorkspaceContextMenuOptions) {
           label: "打开",
           icon: Eye,
           disabled: entry.kind !== "file",
-          onSelect: () => options.openWorkspaceEntry(entry.path),
+          onSelect: () => options.openWorkspaceEntry(entry),
         },
         {
           id: "reveal",
           label: "定位",
           icon: FolderOpen,
-          onSelect: () => options.revealWorkspaceEntry(entry.path),
+          onSelect: () => options.revealWorkspaceEntry(entry),
         },
       ];
     }
@@ -154,7 +154,7 @@ export function useWorkspaceContextMenu(options: WorkspaceContextMenuOptions) {
             options.openDirectory(entry.path);
             return;
           }
-          return options.openWorkspaceEntry(entry.path);
+          return options.openWorkspaceEntry(entry);
         },
       },
       {
@@ -162,7 +162,7 @@ export function useWorkspaceContextMenu(options: WorkspaceContextMenuOptions) {
         label: "定位",
         icon: FolderOpen,
         disabled: options.isTrashPanel.value,
-        onSelect: () => options.revealWorkspaceEntry(entry.path),
+        onSelect: () => options.revealWorkspaceEntry(entry),
       },
       {
         id: "copy-target",

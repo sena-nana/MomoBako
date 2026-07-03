@@ -178,6 +178,37 @@ describe("workspace file browser derived state", () => {
     ).toBe(targetThumbnailPath);
   });
 
+  it("空选中加载目录后保持空选中", async () => {
+    resetFileBrowserState();
+    const snapshot = createFileDirectorySnapshot({ count: 12 });
+
+    applyFileBrowserSnapshot(snapshot);
+    await waitForFileBrowserDerivedState();
+
+    expect(selectedFilePath.value).toBeNull();
+    expect(selectedFilePaths.value).toEqual([]);
+  });
+
+  it("当前选中项消失后保持空选中，不晋升相邻条目", async () => {
+    resetFileBrowserState();
+    const initialSnapshot = createFileDirectorySnapshot({ count: 3 });
+    applyFileBrowserSnapshot(initialSnapshot);
+    selectedFilePath.value = initialSnapshot.entries[0]?.path ?? null;
+    selectedFilePaths.value = selectedFilePath.value ? [selectedFilePath.value] : [];
+
+    const refreshedSnapshot = {
+      ...initialSnapshot,
+      entries: initialSnapshot.entries.slice(1),
+      loadedCount: 2,
+      totalEntries: 2,
+    };
+    applyFileBrowserSnapshot(refreshedSnapshot);
+    await waitForFileBrowserDerivedState();
+
+    expect(selectedFilePath.value).toBeNull();
+    expect(selectedFilePaths.value).toEqual([]);
+  });
+
   it("静默刷新当前目录时会保留已加载页并继续显示列表", async () => {
     resetFileBrowserState();
     activeRepoId.value = "repo-files-1";

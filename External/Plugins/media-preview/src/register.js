@@ -60,7 +60,7 @@ export function register(ctx) {
         isImageExtension(props.entry?.extension) ? "image" : isVideoExtension(props.entry?.extension) ? "video" : "audio"
       ));
       const extensionLabel = computed(() => (
-        props.entry?.extension?.toUpperCase() || (mediaKind.value === "image" ? "IMAGE" : mediaKind.value === "video" ? "VIDEO" : "AUDIO")
+        mediaKindLabel(mediaKind.value)
       ));
       const audioArtworkUrl = computed(() => (
         audioArtworkPath.value
@@ -328,7 +328,7 @@ export function register(ctx) {
               ]),
             ]),
             h("div", { class: "media-preview__audio-caption" }, [
-              h("h2", this.entry?.name ?? ""),
+              h("h2", displayNameWithoutExtension(this.entry?.name ?? "", this.entry?.extension)),
               h("p", this.entry?.path ?? ""),
               h("div", { class: "media-preview__audio-meta" }, [
                 h("span", this.extensionLabel),
@@ -542,7 +542,7 @@ export function register(ctx) {
       } else {
         const chip = document.createElement("span");
         chip.className = "media-preview__audio-chip";
-        chip.textContent = item.extension?.toUpperCase() || "AUDIO";
+        chip.textContent = mediaKindLabel("audio");
         wrapper.append(chip);
       }
       return wrapper;
@@ -558,13 +558,13 @@ export function register(ctx) {
       const caption = document.createElement("div");
       caption.className = "media-preview__audio-caption";
       const title = document.createElement("h2");
-      title.textContent = item.filename ?? "";
+      title.textContent = displayNameWithoutExtension(item.filename ?? "", item.extension);
       const path = document.createElement("p");
       path.textContent = item.path ?? "";
       const meta = document.createElement("div");
       meta.className = "media-preview__audio-meta";
       const extension = document.createElement("span");
-      extension.textContent = item.extension?.toUpperCase() || "AUDIO";
+      extension.textContent = mediaKindLabel("audio");
       meta.append(extension);
       caption.append(title, path, meta);
       stage.append(record, caption);
@@ -920,6 +920,22 @@ export function register(ctx) {
 function siblingLrcPath(path) {
   const extensionIndex = path.lastIndexOf(".");
   return extensionIndex >= 0 ? `${path.slice(0, extensionIndex)}.lrc` : `${path}.lrc`;
+}
+
+function mediaKindLabel(mediaKind) {
+  if (mediaKind === "image") return "图片";
+  if (mediaKind === "video") return "视频";
+  return "音频";
+}
+
+function displayNameWithoutExtension(name, extension) {
+  const normalizedName = typeof name === "string" ? name.trim() : "";
+  const normalizedExtension = typeof extension === "string" ? extension.trim() : "";
+  if (!normalizedName || !normalizedExtension) return normalizedName;
+  const suffix = `.${normalizedExtension}`;
+  return normalizedName.toLowerCase().endsWith(suffix.toLowerCase())
+    ? normalizedName.slice(0, -suffix.length)
+    : normalizedName;
 }
 
 function sourcePayloadString(entry, key) {
