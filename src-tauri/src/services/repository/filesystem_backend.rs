@@ -139,6 +139,19 @@ pub(super) fn list_backend_files(
     backend_adapter(service_root, repo).list_files(repo_root, &repo.backend_record.config)
 }
 
+pub(super) fn list_backend_directory_entries(
+    service_root: &Path,
+    repo: &RepositoryRecord,
+    repo_root: &Path,
+    directory_path: &str,
+) -> Result<Vec<FileSystemEntry>, String> {
+    backend_adapter(service_root, repo).list_directory_entries(
+        repo_root,
+        directory_path,
+        &repo.backend_record.config,
+    )
+}
+
 pub(super) fn list_backend_tree(
     service_root: &Path,
     repo: &RepositoryRecord,
