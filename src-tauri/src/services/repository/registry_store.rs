@@ -810,6 +810,35 @@ pub(super) fn seed_repository_data(
     Ok(())
 }
 
+pub(super) fn ensure_repository_identity_record(
+    connection: &Connection,
+    repo: &RepositoryRecord,
+) -> Result<(), String> {
+    let now = now_rfc3339();
+    connection
+        .execute(
+            r#"
+            INSERT INTO repositories (repo_id, name, root_path, schema_version, created_at, updated_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?5)
+            ON CONFLICT(repo_id)
+            DO UPDATE SET
+              name = excluded.name,
+              root_path = excluded.root_path,
+              schema_version = excluded.schema_version,
+              updated_at = excluded.updated_at
+            "#,
+            params![
+                repo.summary.repo_id,
+                repo.summary.name,
+                repo.summary.path,
+                REPO_SCHEMA_VERSION,
+                now
+            ],
+        )
+        .map_err(db_error)?;
+    Ok(())
+}
+
 pub(super) fn upsert_registry_entry(
     registry: &Connection,
     repo_root: &Path,
