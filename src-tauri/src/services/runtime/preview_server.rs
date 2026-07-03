@@ -19,7 +19,9 @@ pub(crate) struct ByteRange {
 }
 
 /// Starts the local preview server that serves registered preview-source tokens.
-pub(crate) fn start_preview_server(repository_state: Arc<RepositoryState>) -> Result<String, String> {
+pub(crate) fn start_preview_server(
+    repository_state: Arc<RepositoryState>,
+) -> Result<String, String> {
     let server = Server::http(format!("{PREVIEW_HOST}:0")).map_err(|error| error.to_string())?;
     let addr = server
         .server_addr()

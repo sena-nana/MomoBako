@@ -1,10 +1,10 @@
 //! External asset repository tests split out from the repository facade module.
 
-use crate::services::repository::{
-    ExternalAddAssetClient, ExternalAddAssetItem, ExternalAddAssetRequest,
-};
 use crate::services::repository::test_support::{
     create_local_repository_record_for_external_tests, create_test_state, serve_test_http_body,
+};
+use crate::services::repository::{
+    ExternalAddAssetClient, ExternalAddAssetItem, ExternalAddAssetRequest,
 };
 use std::{collections::BTreeMap, fs};
 
@@ -45,8 +45,7 @@ fn add_external_assets_imports_remote_url_and_metadata() {
         .expect("asset detail should load");
     assert!(detail.metadata.iter().any(|entry| {
         entry.key == "sourceUrl"
-            && entry.value
-                == serde_json::Value::String("https://example.test/source".to_string())
+            && entry.value == serde_json::Value::String("https://example.test/source".to_string())
     }));
 
     fs::remove_dir_all(root).expect("test temp root should be removed");

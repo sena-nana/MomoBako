@@ -1,14 +1,14 @@
+use crate::services::runtime::{
+    build_external_connection_status, start_structure_refresh_worker, RepositoryWatcher,
+};
 use crate::services::{
     repository::{
         install_local_filesystem_test_plugin_archive, FileReadRequest, RepositoryMutationRequest,
         RepositoryState,
     },
     runtime::preview_server::{
-        ByteRange, parse_byte_range, preview_token_from_url, start_preview_server,
+        parse_byte_range, preview_token_from_url, start_preview_server, ByteRange,
     },
-};
-use crate::services::runtime::{
-    RepositoryWatcher, build_external_connection_status, start_structure_refresh_worker,
 };
 use crate::viewmodels::RepositoryQueryViewModel;
 use std::{
@@ -21,7 +21,9 @@ use std::{
 };
 
 fn plugin_data_dir(service_root: &std::path::Path, plugin_id: &str) -> PathBuf {
-    service_root.join("plugin-data").join(plugin_id.replace('.', "-"))
+    service_root
+        .join("plugin-data")
+        .join(plugin_id.replace('.', "-"))
 }
 
 fn unique_temp_dir(label: &str) -> PathBuf {
@@ -143,8 +145,7 @@ fn preview_server_serves_registered_source_file_range() {
     let service_root = root.join("state");
     let repo_root = root.join("repo");
     fs::create_dir_all(&repo_root).expect("repo root should be created");
-    fs::write(repo_root.join("clip.mp4"), b"media-body")
-        .expect("preview source should be written");
+    fs::write(repo_root.join("clip.mp4"), b"media-body").expect("preview source should be written");
     install_local_filesystem_test_plugin_archive(&service_root);
 
     let state = RepositoryState::from_root(service_root);
@@ -197,8 +198,7 @@ fn repository_query_prepare_preview_file_source_returns_preview_url() {
     let service_root = root.join("state");
     let repo_root = root.join("repo");
     fs::create_dir_all(&repo_root).expect("repo root should be created");
-    fs::write(repo_root.join("model.glb"), b"glb-body")
-        .expect("preview source should be written");
+    fs::write(repo_root.join("model.glb"), b"glb-body").expect("preview source should be written");
     install_local_filesystem_test_plugin_archive(&service_root);
 
     let repository_state = Arc::new(RepositoryState::from_root(service_root.clone()));
@@ -272,8 +272,11 @@ fn repository_runtime_start_cleans_stale_office_helper_state() {
     fs::write(helper_dir.join("status.json"), "{}").expect("status state should be written");
     fs::write(helper_dir.join("port.txt"), "23119").expect("port state should be written");
     fs::write(helper_dir.join("session.txt"), "office").expect("session state should be written");
-    fs::write(helper_dir.join("office-convert-helper.ps1"), "Write-Host helper")
-        .expect("helper script should be written");
+    fs::write(
+        helper_dir.join("office-convert-helper.ps1"),
+        "Write-Host helper",
+    )
+    .expect("helper script should be written");
 
     let runtime = crate::services::runtime::RepositoryRuntime::start()
         .expect("repository runtime should start");

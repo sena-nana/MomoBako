@@ -444,10 +444,8 @@ pub(super) fn resolve_plugin_manifest_dependencies(manifests: &mut [PluginManife
         if !missing_required.is_empty() {
             manifest.enabled = false;
             manifest.status = "unavailable".to_string();
-            manifest.disable_reason = Some(format!(
-                "缺少必需依赖：{}。",
-                missing_required.join("、")
-            ));
+            manifest.disable_reason =
+                Some(format!("缺少必需依赖：{}。", missing_required.join("、")));
         } else if !unavailable_required.is_empty() {
             manifest.enabled = false;
             manifest.status = "disabled".to_string();
@@ -548,9 +546,10 @@ fn plugin_dependency_available(
     if !manifest.enabled || !matches!(manifest.status.as_str(), "ready" | "") {
         return false;
     }
-    manifest.requires.iter().all(|dependency_id| {
-        plugin_dependency_available(dependency_id, by_id, legacy_ids, visited)
-    })
+    manifest
+        .requires
+        .iter()
+        .all(|dependency_id| plugin_dependency_available(dependency_id, by_id, legacy_ids, visited))
 }
 
 fn dependency_ids_by_status(dependencies: &[PluginDependencyState], status: &str) -> Vec<String> {
@@ -811,7 +810,10 @@ fn load_plugin_hook_execution_records(
     Ok(records)
 }
 
-pub(super) fn ensure_plugin_data_dir(service_root: &Path, plugin_id: &str) -> Result<PathBuf, String> {
+pub(super) fn ensure_plugin_data_dir(
+    service_root: &Path,
+    plugin_id: &str,
+) -> Result<PathBuf, String> {
     let data_dir = plugin_data_dir(service_root, plugin_id);
     fs::create_dir_all(&data_dir).map_err(io_error)?;
     Ok(data_dir)
@@ -948,9 +950,7 @@ fn validate_plugin_config_value(
         "number" if value.as_f64().is_none() => {
             Err(format!("plugin config value must be number: {key}"))
         }
-        "string" if !value.is_string() => {
-            Err(format!("plugin config value must be string: {key}"))
-        }
+        "string" if !value.is_string() => Err(format!("plugin config value must be string: {key}")),
         "select" => validate_plugin_select_config_value(field, key, value),
         _ => Ok(()),
     }
@@ -1044,7 +1044,10 @@ fn ensure_runtime_plugin_archive(service_root: &Path, archive_path: &Path) -> Re
     }
 }
 
-fn install_plugin_archive(service_root: &Path, package_path: &Path) -> Result<PluginManifest, String> {
+fn install_plugin_archive(
+    service_root: &Path,
+    package_path: &Path,
+) -> Result<PluginManifest, String> {
     if package_path.as_os_str().is_empty() {
         return Err("plugin package path cannot be empty".to_string());
     }
@@ -1230,7 +1233,9 @@ pub(super) fn load_native_plugin(
         let free = *library
             .get::<PluginFreeFn>(b"momobako_plugin_free")
             .map_err(|error| format!("missing momobako_plugin_free: {error}"))?;
-        if let Ok(register_host_api) = library.get::<PluginRegisterHostApiFn>(b"momobako_plugin_register_host_api") {
+        if let Ok(register_host_api) =
+            library.get::<PluginRegisterHostApiFn>(b"momobako_plugin_register_host_api")
+        {
             register_host_api(Some(host_plugin_call_bridge), Some(host_plugin_free_bridge));
         }
         (call, free)
@@ -1325,7 +1330,8 @@ fn extract_runtime_sidecars(
     };
     for sidecar in sidecars {
         let direct = plugin_archive_entry_path(manifest_prefix, Path::new(sidecar));
-        let dist = plugin_archive_entry_path(manifest_prefix, Path::new(&format!("dist/{sidecar}")));
+        let dist =
+            plugin_archive_entry_path(manifest_prefix, Path::new(&format!("dist/{sidecar}")));
         for candidate_name in [sidecar.to_string(), format!("dist/{sidecar}"), direct, dist] {
             if let Ok(mut entry) = archive.by_name(&candidate_name) {
                 let output_path = cache_dir.join(sidecar);
@@ -1425,8 +1431,10 @@ mod tests {
                 .duration_since(UNIX_EPOCH)
                 .expect("system clock must be after unix epoch")
                 .as_nanos();
-            let root = std::env::temp_dir()
-                .join(format!("momobako-plugin-{name}-{}-{unique}", std::process::id()));
+            let root = std::env::temp_dir().join(format!(
+                "momobako-plugin-{name}-{}-{unique}",
+                std::process::id()
+            ));
             fs::create_dir_all(&root).expect("test workspace root should be created");
             Self { root }
         }
@@ -1460,7 +1468,10 @@ mod tests {
                     native_plugin_library_file_name(library_name),
                     "stub native library".to_string(),
                 ),
-                (sidecar_name.to_string(), "helper binary payload".to_string()),
+                (
+                    sidecar_name.to_string(),
+                    "helper binary payload".to_string(),
+                ),
             ],
         );
 
@@ -1500,7 +1511,10 @@ mod tests {
                     native_plugin_library_file_name(library_name),
                     "stub native library".to_string(),
                 ),
-                (sidecar_name.to_string(), "helper binary payload".to_string()),
+                (
+                    sidecar_name.to_string(),
+                    "helper binary payload".to_string(),
+                ),
             ],
         );
 

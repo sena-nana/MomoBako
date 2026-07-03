@@ -142,19 +142,24 @@ pub(super) fn import_backend_record(
     repo_root: &Path,
 ) -> Option<RepositoryBackendRecord> {
     let fallback_root_path = repo_root.to_string_lossy().to_string();
-    let plugin_id = metadata.backend_plugin_id.as_deref().and_then(|value| {
-        let trimmed = value.trim();
-        (!trimmed.is_empty()).then_some(trimmed)
-    }).map(str::to_string).or_else(|| {
-        infer_backend_plugin_id_for_path(
-            service_root,
-            metadata
-                .root_path
-                .as_deref()
-                .unwrap_or(fallback_root_path.as_str()),
-        )
-        .ok()
-    })?;
+    let plugin_id = metadata
+        .backend_plugin_id
+        .as_deref()
+        .and_then(|value| {
+            let trimmed = value.trim();
+            (!trimmed.is_empty()).then_some(trimmed)
+        })
+        .map(str::to_string)
+        .or_else(|| {
+            infer_backend_plugin_id_for_path(
+                service_root,
+                metadata
+                    .root_path
+                    .as_deref()
+                    .unwrap_or(fallback_root_path.as_str()),
+            )
+            .ok()
+        })?;
     let registry = backend_plugin_registry(service_root);
     let normalized_plugin_id = registry.normalize_plugin_id(&plugin_id);
     registry
@@ -298,19 +303,19 @@ fn infer_backend_plugin_id_for_path(service_root: &Path, path: &str) -> Result<S
         .filter(|manifest| {
             registry
                 .registration(&manifest.plugin_id)
-                .is_some_and(|registration| ensure_repository_backend_runtime_available(registration).is_ok())
+                .is_some_and(|registration| {
+                    ensure_repository_backend_runtime_available(registration).is_ok()
+                })
         })
         .collect::<Vec<_>>();
     candidates.sort_by(|left, right| left.plugin_id.cmp(&right.plugin_id));
 
     match candidates.as_slice() {
         [manifest] => Ok(manifest.plugin_id.clone()),
-        [] if requires_local_root => Err(
-            "no installed repository source plugin supports local repository roots".to_string(),
-        ),
-        [] => Err(
-            "backend plugin id is required for non-local repository paths".to_string(),
-        ),
+        [] if requires_local_root => {
+            Err("no installed repository source plugin supports local repository roots".to_string())
+        }
+        [] => Err("backend plugin id is required for non-local repository paths".to_string()),
         _ => Err(format!(
             "multiple repository source plugins match this path, backend plugin id is required: {}",
             candidates
@@ -849,22 +854,22 @@ pub(super) fn ensure_repository_storage_paths(
     repo_root: &Path,
     backend_plugin_id: &str,
 ) -> Result<RepositoryStoragePaths, String> {
-    let metadata_dir = if backend_uses_repository_root_metadata(service_root, repo_root, backend_plugin_id)
-    {
-        migrate_legacy_meta_dir_if_needed(repo_root, backend_plugin_id)?;
-        let metadata_dir = repository_meta_dir(repo_root);
-        if repo_root.exists() {
+    let metadata_dir =
+        if backend_uses_repository_root_metadata(service_root, repo_root, backend_plugin_id) {
+            migrate_legacy_meta_dir_if_needed(repo_root, backend_plugin_id)?;
+            let metadata_dir = repository_meta_dir(repo_root);
+            if repo_root.exists() {
+                ensure_repository_metadata_dirs(&metadata_dir)?;
+                hide_repository_meta_dir(&metadata_dir);
+            }
+            metadata_dir
+        } else {
+            let service_repo_dir = repository_state_storage_dir(service_root, repo_id);
+            fs::create_dir_all(&service_repo_dir).map_err(io_error)?;
+            let metadata_dir = service_repo_dir.join(REPO_META_DIR);
             ensure_repository_metadata_dirs(&metadata_dir)?;
-            hide_repository_meta_dir(&metadata_dir);
-        }
-        metadata_dir
-    } else {
-        let service_repo_dir = repository_state_storage_dir(service_root, repo_id);
-        fs::create_dir_all(&service_repo_dir).map_err(io_error)?;
-        let metadata_dir = service_repo_dir.join(REPO_META_DIR);
-        ensure_repository_metadata_dirs(&metadata_dir)?;
-        metadata_dir
-    };
+            metadata_dir
+        };
     Ok(RepositoryStoragePaths {
         database_path: metadata_dir.join(REPO_DB_FILE_NAME),
         metadata_dir,

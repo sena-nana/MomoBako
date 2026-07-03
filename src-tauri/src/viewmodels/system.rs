@@ -1,8 +1,6 @@
 //! Desktop-system command orchestration for lightweight shell-facing helpers.
 
-use crate::services::repository::{
-    BinaryFileWriteRequest, BinaryFileWriteResponse,
-};
+use crate::services::repository::{BinaryFileWriteRequest, BinaryFileWriteResponse};
 use crate::services::runtime::{ExternalApiConnectionStatus, RepositoryRuntime};
 use std::{fs, path::PathBuf};
 

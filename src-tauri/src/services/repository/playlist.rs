@@ -427,7 +427,10 @@ pub(super) fn set_playlist_membership(
         if !playlist_player_supports_extension(&player, &asset.extension) {
             continue;
         }
-        if valid_target_ids.iter().any(|item| item == &playlist.playlist_id) {
+        if valid_target_ids
+            .iter()
+            .any(|item| item == &playlist.playlist_id)
+        {
             let sort_order =
                 next_playlist_item_sort_order(&tx, &request.repo_id, &playlist.playlist_id)
                     .map_err(db_error)?;

@@ -1,6 +1,5 @@
 use crate::services::{
-    repository::RepositoryState,
-    runtime::external_api::start_external_api_server,
+    repository::RepositoryState, runtime::external_api::start_external_api_server,
 };
 use rusqlite::{params, Connection};
 use std::{
@@ -70,7 +69,8 @@ fn external_api_serves_health_and_requires_token() {
     assert!(health_raw.starts_with("HTTP/1.0 200 OK"));
     assert!(health_raw.contains("assets.add.remoteUrl"));
 
-    let mut unauthorized = TcpStream::connect(&addr).expect("external API should accept connections");
+    let mut unauthorized =
+        TcpStream::connect(&addr).expect("external API should accept connections");
     unauthorized
         .set_read_timeout(Some(Duration::from_secs(2)))
         .expect("read timeout should be set");
