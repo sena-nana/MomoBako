@@ -21,7 +21,7 @@
   },
   "permissions": ["filesystem:read", "filesystem:write"],
   "requires": [],
-  "optional": ["momobako.filesystem-watcher"],
+  "optional": [],
   "hooks": [],
   "contributes": {
     "settings": {

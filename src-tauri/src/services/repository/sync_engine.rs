@@ -2,12 +2,24 @@
 
 use super::*;
 
-pub(super) fn build_directory_records_from_files(
+pub(super) fn build_directory_records_from_tree(
     repo_root: &Path,
+    tree: &[FileTreeNode],
     files: &[DiscoveredFile],
 ) -> Result<Vec<DirectoryRecord>, String> {
     let mut directories = BTreeMap::<String, DirectoryRecord>::new();
-    collect_directory_records(repo_root, repo_root, &mut directories)?;
+    insert_directory_record(repo_root, "", &mut directories)?;
+    for node in tree {
+        collect_directory_records_from_tree(repo_root, node, &mut directories)?;
+    }
+    supplement_directory_records_from_files(&mut directories, files);
+    directory_records_from_map(directories)
+}
+
+fn supplement_directory_records_from_files(
+    directories: &mut BTreeMap<String, DirectoryRecord>,
+    files: &[DiscoveredFile],
+) {
     for file in files {
         let mut current = Path::new(&file.relative_path).parent();
         while let Some(parent) = current {
@@ -38,42 +50,40 @@ pub(super) fn build_directory_records_from_files(
             current = parent.parent();
         }
     }
+}
+
+fn directory_records_from_map(
+    directories: BTreeMap<String, DirectoryRecord>,
+) -> Result<Vec<DirectoryRecord>, String> {
     let mut values = directories.into_values().collect::<Vec<_>>();
     values.sort_by(|left, right| left.path.cmp(&right.path));
     Ok(values)
 }
 
-fn collect_directory_records(
+fn collect_directory_records_from_tree(
     repo_root: &Path,
-    current_dir: &Path,
+    node: &FileTreeNode,
     directories: &mut BTreeMap<String, DirectoryRecord>,
 ) -> Result<(), String> {
-    let relative = current_dir
-        .strip_prefix(repo_root)
-        .map_err(|error| error.to_string())?
-        .to_string_lossy()
-        .replace('\\', "/");
-    let path = if relative == "." {
-        String::new()
-    } else {
-        relative
-    };
+    let path = normalize_repository_relative_path(&node.path);
+    if !path.is_empty() {
+        insert_directory_record(repo_root, &path, directories)?;
+    }
+    for child in &node.children {
+        collect_directory_records_from_tree(repo_root, child, directories)?;
+    }
+    Ok(())
+}
+
+fn insert_directory_record(
+    repo_root: &Path,
+    raw_path: &str,
+    directories: &mut BTreeMap<String, DirectoryRecord>,
+) -> Result<(), String> {
+    let path = normalize_repository_relative_path(raw_path);
     let parent_path = parent_relative_path(&path);
-    let name = if path.is_empty() {
-        String::new()
-    } else {
-        Path::new(&path)
-            .file_name()
-            .map(|value| value.to_string_lossy().to_string())
-            .unwrap_or_default()
-    };
-    let updated_at = fs::metadata(current_dir)
-        .and_then(|metadata| metadata.modified())
-        .ok()
-        .map(system_time_to_rfc3339)
-        .transpose()
-        .map_err(time_error)?
-        .unwrap_or_else(now_rfc3339);
+    let name = directory_record_name(&path);
+    let updated_at = directory_updated_at(repo_root, &path)?;
     directories.insert(
         path.clone(),
         DirectoryRecord {
@@ -83,27 +93,44 @@ fn collect_directory_records(
             updated_at,
         },
     );
-    for entry in fs::read_dir(current_dir).map_err(io_error)? {
-        let entry = match entry {
-            Ok(entry) => entry,
-            Err(error) if is_skippable_filesystem_error(&error) => continue,
-            Err(error) => return Err(io_error(error)),
-        };
-        let metadata = match entry.metadata() {
-            Ok(metadata) => metadata,
-            Err(error) if is_skippable_filesystem_error(&error) => continue,
-            Err(error) => return Err(io_error(error)),
-        };
-        if !metadata.is_dir() {
-            continue;
-        }
-        let name = entry.file_name().to_string_lossy().to_string();
-        if is_internal_repository_dir(&name) {
-            continue;
-        }
-        collect_directory_records(repo_root, &entry.path(), directories)?;
-    }
     Ok(())
+}
+
+fn normalize_repository_relative_path(path: &str) -> String {
+    path.trim()
+        .replace('\\', "/")
+        .trim_matches('/')
+        .split('/')
+        .filter(|part| !part.is_empty() && *part != ".")
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+fn directory_record_name(path: &str) -> String {
+    if path.is_empty() {
+        String::new()
+    } else {
+        Path::new(path)
+            .file_name()
+            .map(|value| value.to_string_lossy().to_string())
+            .unwrap_or_default()
+    }
+}
+
+fn directory_updated_at(repo_root: &Path, path: &str) -> Result<String, String> {
+    let directory_path = if path.is_empty() {
+        repo_root.to_path_buf()
+    } else {
+        repo_root.join(Path::new(path))
+    };
+    let updated_at = fs::metadata(directory_path)
+        .and_then(|metadata| metadata.modified())
+        .ok()
+        .map(system_time_to_rfc3339)
+        .transpose()
+        .map_err(time_error)?
+        .unwrap_or_else(now_rfc3339);
+    Ok(updated_at)
 }
 
 pub(super) fn metadata_defaults_for_files(
@@ -247,8 +274,14 @@ pub(super) fn sync_repository_files(
         .into_iter()
         .map(|(_asset_id, path, record)| (path, record))
         .collect::<BTreeMap<_, _>>();
+    let tree = list_backend_tree(service_root, repo, &repo_root).map_err(|error| {
+        rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            error,
+        )))
+    })?;
     let directory_records =
-        build_directory_records_from_files(&repo_root, &files).map_err(|error| {
+        build_directory_records_from_tree(&repo_root, &tree, &files).map_err(|error| {
             rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::new(
                 std::io::ErrorKind::Other,
                 error,
