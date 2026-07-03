@@ -153,49 +153,25 @@ impl RepositoryState {
 
     /// Lists registered repositories together with runtime-derived status information.
     pub fn list_repositories(&self) -> Result<Vec<RepositorySummary>, String> {
-        self.ensure_initialized()?;
-
-        let registry = Connection::open(&self.registry_path).map_err(db_error)?;
-        let mut stmt = registry
-            .prepare(
-                r#"
-                SELECT repo_id, name, path, backend_plugin_id, backend_config_json, status, updated_at
-                FROM repositories
-                ORDER BY name COLLATE NOCASE
-                "#,
-            )
-            .map_err(db_error)?;
-
-        let plugin_registry = backend_plugin_registry(&self.root);
-        let rows = stmt
-            .query_map([], |row| {
-                let repo_id: String = row.get(0)?;
-                let path: String = row.get(2)?;
-                let backend_plugin_id: String = row.get(3)?;
-                let backend_plugin_id = plugin_registry.normalize_plugin_id(&backend_plugin_id);
-                let backend = backend_summary_from_registry(&plugin_registry, &backend_plugin_id);
-                let status =
-                    repository_runtime_status(&path, &backend, row.get::<_, String>(5)?.as_str());
-                let asset_count = if status == "missing" {
+        self.load_repository_records()?
+            .into_iter()
+            .map(|repo| {
+                let asset_count = if repo.summary.status == "missing" {
                     0
                 } else {
-                    load_asset_count(&self.root, &repo_id, &path, &backend_plugin_id).unwrap_or(0)
+                    let connection = self.open_repository_connection(
+                        &repo.summary.repo_id,
+                        &repo.summary.path,
+                        &repo.backend_record,
+                    )?;
+                    load_active_asset_count(&connection).map_err(db_error)?
                 };
-
                 Ok(RepositorySummary {
-                    repo_id,
-                    name: row.get(1)?,
-                    path: path.clone(),
-                    backend,
-                    status,
                     asset_count,
-                    updated_at: row.get(6)?,
-                    local_cache: repository_local_cache_status(&path, &backend_plugin_id),
+                    ..repo.summary
                 })
             })
-            .map_err(db_error)?;
-
-        rows.collect::<Result<Vec<_>, _>>().map_err(db_error)
+            .collect()
     }
 
     /// Returns repository thumbnail roots that should be exposed to the desktop asset scope.

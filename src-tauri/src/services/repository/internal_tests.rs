@@ -164,6 +164,36 @@ mod tests {
     }
 
     #[test]
+    fn list_repositories_recovers_asset_count_after_metadata_loss() {
+        let (state, root, repo_root, _thumbnail_root) =
+            create_test_state("list-rebuild-meta-asset-count");
+        fs::write(repo_root.join("track.mp3"), b"demo").expect("test file should be written");
+        let repo_id = create_repository_for_path(&state, &repo_root);
+
+        fs::remove_dir_all(repo_root.join(REPO_META_DIR)).expect("metadata dir should be removed");
+
+        let repositories = state
+            .list_repositories()
+            .expect("repository summaries should recover missing storage");
+        let rebuilt_summary = repositories
+            .iter()
+            .find(|repository| repository.repo_id == repo_id)
+            .expect("repository summary should exist");
+
+        assert_eq!(rebuilt_summary.asset_count, 1);
+        assert!(repo_root
+            .join(REPO_META_DIR)
+            .join(REPO_METADATA_FILE_NAME)
+            .is_file());
+        assert!(repo_root
+            .join(REPO_META_DIR)
+            .join(REPO_DB_FILE_NAME)
+            .is_file());
+
+        fs::remove_dir_all(root).expect("test workspace should be removed");
+    }
+
+    #[test]
     fn repository_tree_rebuilds_directory_cache_after_storage_loss_is_observed_by_listing() {
         let (state, root, repo_root, _thumbnail_root) =
             create_test_state("repository-tree-rebuild-after-listing");
@@ -184,7 +214,7 @@ mod tests {
             .iter()
             .find(|repository| repository.repo_id == repo_id)
             .expect("repository summary should exist");
-        assert_eq!(rebuilt_summary.asset_count, 0);
+        assert_eq!(rebuilt_summary.asset_count, 2);
         assert!(repo_root.join(REPO_META_DIR).join(REPO_DB_FILE_NAME).exists());
 
         let snapshot = state
