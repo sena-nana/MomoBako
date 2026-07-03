@@ -1,0 +1,56 @@
+src/components/WorkspacePlayerBar.vue
+  s_c3c5e86d99c066::t_97e77b8c85366b 18,47-57,91,94,196,199
+src/composables/workspace/smartFolders.ts
+  s_c3c5e86d99c066::t_4a8636b39bbfde 21,106-107
+src/pages/workspace/files/FileMetadataEditor.vue
+  s_c3c5e86d99c066::t_f45fffd60a1c35 246-266
+src/pages/workspace/files/filePresentation.ts
+  s_c3c5e86d99c066::t_fbc0d05622773f 2,6
+src/pages/workspace/files/useFileActions.ts
+  s_c3c5e86d99c066::t_63dfcd33b845b7 34,39,81-85,90,191,197,236
+src/pages/workspace/files/useFilesSurfaceBindings.ts
+  s_c3c5e86d99c066::t_50d2e1b4d7edc8 101,106,111,216
+src/pages/workspace/preview/FilePreviewPane.vue
+  s_c3c5e86d99c066::t_ae48909abc4dbd 10,34-35,97-109,112,116
+src/pages/workspace/repository/useWorkspaceHomeViewModel.ts
+  s_c3c5e86d99c066::t_11abf9c02a1b67 534,721
+src/pages/workspace/useWorkspaceContextMenu.ts
+  s_c3c5e86d99c066::t_40cef670bdfab1 40,45,82,88,157,165
+src/styles/pages/workspace.css
+  s_c3c5e86d99c066::t_67abdc0bc9ad24 1676-1677,1765,1801-1804,1806-1807,1811,1814,1861-1888
+src/styles/shell.css
+  s_c3c5e86d99c066::t_85033a4eac8254 1174-1175,1177-1183,1355-1431
+src/utils/fileName.ts
+  s_c3c5e86d99c066::t_308f219d45d2cd 1-13
+tests/workspaceFileBrowserState.test.ts
+  s_9dc404649a1020::t_f6ffaad3aa7599 181-211
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.5",
+  "base_commit_sha": "ac9ad9f815116fc384d04c179564adf1f19e7de8",
+  "prompts": {},
+  "humans": {
+    "h_8e6780fc7b4bb1": {
+      "author": "AuraElicase <auraelicase@outlook.com>"
+    }
+  },
+  "sessions": {
+    "s_9dc404649a1020": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f1202-866c-7a11-b051-6349f55579b1",
+        "model": "unknown"
+      },
+      "human_author": "AuraElicase <auraelicase@outlook.com>"
+    },
+    "s_c3c5e86d99c066": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f2684-c65c-7a92-9398-e88b91667222",
+        "model": "unknown"
+      },
+      "human_author": "AuraElicase <auraelicase@outlook.com>"
+    }
+  }
+}
