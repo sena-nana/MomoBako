@@ -1,0 +1,43 @@
+src-tauri/src/services/repository/state.rs
+  s_cab86a38a56410::t_91f1e7a9230b37 13,69-78,86
+src-tauri/src/services/repository/internal_tests.rs
+  s_cab86a38a56410::t_4085524175f696 3068-3107,3109-3127
+  s_cab86a38a56410::t_b3aa5db8b9e769 3108
+  s_cab86a38a56410::t_69e4ff64d5b803 3067
+src-tauri/src/services/runtime/watcher.rs
+  s_cab86a38a56410::t_26111a60ebb3ad 5,151-162
+  s_cab86a38a56410::t_4caa11d5f6494c 126,129,131,133-140,143-150,170,174-181,190,193,197,203,290-309
+src-tauri/src/services/repository/management.rs
+  s_cab86a38a56410::t_91f1e7a9230b37 18-19,54-59,259-264,451-463,471-484,495-502
+  s_cab86a38a56410::t_05ff2a9b6bd821 464
+src-tauri/src/services/repository/discovery.rs
+  s_cab86a38a56410::t_dad0df9d821f82 77-102
+src-tauri/src/services/repository/facade.rs
+  s_cab86a38a56410::t_91f1e7a9230b37 424-431
+  s_cab86a38a56410::t_1dbc573b1be502 1137-1144
+src-tauri/src/services/repository/sync_engine.rs
+  s_cab86a38a56410::t_dad0df9d821f82 157,166-178,514,516-545
+  s_cab86a38a56410::t_26111a60ebb3ad 515
+  s_cab86a38a56410::t_172157565ed8de 546-547
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "526b51680e7ac8338ff7acd2be1889b27c2c8986",
+  "prompts": {},
+  "humans": {
+    "h_8e6780fc7b4bb1": {
+      "author": "AuraElicase <auraelicase@outlook.com>"
+    }
+  },
+  "sessions": {
+    "s_cab86a38a56410": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f26f9-8ed7-7771-b2d4-baee6492ed46",
+        "model": "gpt-5.4"
+      },
+      "human_author": "AuraElicase <auraelicase@outlook.com>"
+    }
+  }
+}
