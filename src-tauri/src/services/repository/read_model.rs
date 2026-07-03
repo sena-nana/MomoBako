@@ -434,25 +434,7 @@ pub(super) fn build_repository_overview(
     })
 }
 
-pub(super) fn load_asset_count(
-    service_root: &Path,
-    repo_id: &str,
-    repo_path: &str,
-    backend_plugin_id: &str,
-) -> Result<i64, rusqlite::Error> {
-    let storage_paths = ensure_repository_storage_paths(
-        service_root,
-        repo_id,
-        Path::new(repo_path),
-        backend_plugin_id,
-    )
-    .map_err(|error| {
-        rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            error,
-        )))
-    })?;
-    let connection = Connection::open(storage_paths.database_path)?;
+pub(super) fn load_active_asset_count(connection: &Connection) -> Result<i64, rusqlite::Error> {
     connection.query_row(
         "SELECT COUNT(*) FROM assets WHERE status != 'deleted'",
         [],
