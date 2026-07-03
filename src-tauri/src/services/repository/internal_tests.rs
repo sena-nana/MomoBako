@@ -164,6 +164,69 @@ mod tests {
     }
 
     #[test]
+    fn repository_tree_rebuilds_directory_cache_after_storage_loss_is_observed_by_listing() {
+        let (state, root, repo_root, _thumbnail_root) =
+            create_test_state("repository-tree-rebuild-after-listing");
+        fs::create_dir_all(repo_root.join("Campaigns/Summer"))
+            .expect("summer directory should be created");
+        fs::write(repo_root.join("Campaigns/brief.txt"), "brief")
+            .expect("campaign file should be written");
+        fs::write(repo_root.join("Campaigns/Summer/cover.psd"), "cover")
+            .expect("summer cover should be written");
+        let repo_id = create_repository_for_path(&state, &repo_root);
+
+        fs::remove_dir_all(repo_root.join(REPO_META_DIR)).expect("metadata dir should be removed");
+
+        let repositories = state
+            .list_repositories()
+            .expect("repository summaries should load");
+        let rebuilt_summary = repositories
+            .iter()
+            .find(|repository| repository.repo_id == repo_id)
+            .expect("repository summary should exist");
+        assert_eq!(rebuilt_summary.asset_count, 0);
+        assert!(repo_root.join(REPO_META_DIR).join(REPO_DB_FILE_NAME).exists());
+
+        let snapshot = state
+            .load_repository_tree(&repo_id)
+            .expect("repository tree should rebuild after storage loss");
+        let campaigns = snapshot
+            .tree
+            .iter()
+            .find(|node| node.path == "Campaigns")
+            .expect("campaigns node should exist");
+        let summer = campaigns
+            .children
+            .iter()
+            .find(|node| node.path == "Campaigns/Summer")
+            .expect("summer node should exist");
+
+        assert_eq!(campaigns.file_count, 1);
+        assert_eq!(summer.file_count, 1);
+
+        let repo = state
+            .load_repository_record(&repo_id)
+            .expect("repository record should load");
+        let connection = state
+            .open_repository_connection(
+                &repo.summary.repo_id,
+                &repo.summary.path,
+                &repo.backend_record,
+            )
+            .expect("repository connection should open");
+        let directory_count: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM directories WHERE repo_id = ?1",
+                params![&repo_id],
+                |row| row.get(0),
+            )
+            .expect("directory count should query");
+
+        assert!(directory_count >= 2);
+        fs::remove_dir_all(root).expect("test workspace should be removed");
+    }
+
+    #[test]
     fn find_existing_repository_for_backend_matches_netease_account_id() {
         let workspace = TestWorkspace::new("netease-repository-dedupe");
         let service_root = workspace.path("service");
