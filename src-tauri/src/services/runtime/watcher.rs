@@ -1,9 +1,8 @@
 //! Filesystem watcher lifecycle and repository watch-set synchronization.
 
 use crate::services::repository::{
-    backend_summary_supports_local_root_access, RepositoryState,
-    RepositoryStructureRefreshRequest, RepositoryStructureUpdatedEvent, RepositorySummary,
-    SyncRequest,
+    backend_summary_supports_local_root_access, RepositoryState, RepositoryStructureRefreshRequest,
+    RepositoryStructureUpdatedEvent, RepositorySummary, SyncRequest,
 };
 use notify::{Config, Event, RecommendedWatcher, RecursiveMode, Watcher};
 use std::{
@@ -19,14 +18,19 @@ use std::{
 
 const STRUCTURE_REFRESH_DEBOUNCE_MS: u64 = 400;
 
-fn repository_supports_local_watch(summary: &RepositorySummary) -> bool {
-    backend_summary_supports_local_root_access(&summary.backend)
+/// 仅为状态正常且路径真实存在的本地仓库建立监听，避免缺失路径阻塞应用启动。
+fn repository_watch_path(summary: &RepositorySummary) -> Option<PathBuf> {
+    let path = PathBuf::from(&summary.path);
+    (summary.status == "ready"
+        && backend_summary_supports_local_root_access(&summary.backend)
         && summary
             .backend
             .capabilities
             .iter()
             .any(|value| value == "watch")
-        && Path::new(&summary.path).is_absolute()
+        && path.is_absolute()
+        && (path.is_dir() || path.is_file()))
+    .then_some(path)
 }
 
 #[derive(Debug)]
@@ -88,8 +92,7 @@ pub(crate) fn sync_watched_paths(
     let repositories = repository_state.list_repositories()?;
     let desired_paths = repositories
         .into_iter()
-        .filter(repository_supports_local_watch)
-        .map(|repository| PathBuf::from(repository.path))
+        .filter_map(|repository| repository_watch_path(&repository))
         .collect::<BTreeSet<_>>();
 
     let mut watcher = watcher_handle
@@ -186,4 +189,70 @@ fn run_structure_refresh_worker(
 
 fn normalize_path(path: &Path) -> String {
     path.to_string_lossy().replace('\\', "/")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::services::repository::RepositoryBackendSummary;
+    use std::{
+        fs,
+        time::{SystemTime, UNIX_EPOCH},
+    };
+
+    fn build_repository_summary(path: &Path, status: &str) -> RepositorySummary {
+        RepositorySummary {
+            repo_id: "repo-test".to_string(),
+            name: "Test Repo".to_string(),
+            path: path.to_string_lossy().to_string(),
+            backend: RepositoryBackendSummary {
+                plugin_id: "local-filesystem".to_string(),
+                kind: "filesystem".to_string(),
+                name: "Local Filesystem".to_string(),
+                capabilities: vec![
+                    "browse".to_string(),
+                    "read".to_string(),
+                    "write".to_string(),
+                    "watch".to_string(),
+                    "sync".to_string(),
+                    "localRootPath".to_string(),
+                ],
+            },
+            status: status.to_string(),
+            asset_count: 0,
+            updated_at: "2026-07-03T00:00:00Z".to_string(),
+            local_cache: None,
+        }
+    }
+
+    fn unique_test_path(label: &str) -> PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock must be after unix epoch")
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "momobako-watcher-{label}-{}-{unique}",
+            std::process::id()
+        ))
+    }
+
+    #[test]
+    fn repository_watch_path_returns_existing_ready_path() {
+        let repo_root = unique_test_path("existing");
+        fs::create_dir_all(&repo_root).expect("test repository root should be created");
+
+        let summary = build_repository_summary(&repo_root, "ready");
+        let watch_path = repository_watch_path(&summary);
+
+        assert_eq!(watch_path, Some(repo_root.clone()));
+        fs::remove_dir_all(&repo_root).expect("test repository root should be removed");
+    }
+
+    #[test]
+    fn repository_watch_path_skips_missing_path() {
+        let repo_root = unique_test_path("missing");
+        let summary = build_repository_summary(&repo_root, "ready");
+
+        assert_eq!(repository_watch_path(&summary), None);
+    }
 }
