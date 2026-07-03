@@ -1122,8 +1122,8 @@ impl RepositoryState {
                 None,
             )?;
         }
-        if database_missing || database_rebuilt {
-            // `.momo` 被删后会生成空库，这里补一次同步，确保首次打开就能看到内容。
+        if metadata_missing || database_missing || database_rebuilt {
+            // `.momo` 被删或被读链路部分重建后，这里补一次同步，确保首次打开就能看到内容。
             let repo = self.load_repository_record(repo_id)?;
             let tx = connection.transaction().map_err(db_error)?;
             sync_repository_files(&self.root, &tx, &repo, &std::collections::HashSet::new())
