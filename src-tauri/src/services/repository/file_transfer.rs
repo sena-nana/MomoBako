@@ -4,10 +4,7 @@ use super::*;
 
 pub(crate) const LOCAL_ROOT_PATH_CAPABILITY: &str = "localRootPath";
 
-pub(crate) fn backend_has_capability(
-    backend: &RepositoryBackendSummary,
-    capability: &str,
-) -> bool {
+pub(crate) fn backend_has_capability(backend: &RepositoryBackendSummary, capability: &str) -> bool {
     backend.capabilities.iter().any(|value| value == capability)
 }
 

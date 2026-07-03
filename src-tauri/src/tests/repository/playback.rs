@@ -1,12 +1,10 @@
 //! Playback-domain repository tests split out from the repository facade module.
 
-use crate::services::repository::{
-    set_test_downloader_playback_hook, EntryPlaybackRequest,
-};
 use crate::services::repository::test_support::{
     create_repository_without_initial_sync, create_test_state, insert_asset_metadata_number,
     insert_virtual_asset, playback_test_lock, update_repository_backend_config,
 };
+use crate::services::repository::{set_test_downloader_playback_hook, EntryPlaybackRequest};
 use std::fs;
 
 #[test]

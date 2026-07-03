@@ -45,7 +45,8 @@ impl RepositoryRuntime {
             start_structure_refresh_worker(repository_state.clone(), write_lock.clone())?;
         repository_state.set_structure_refresh_sender(structure_refresh_tx)?;
 
-        let watcher_handle = RepositoryWatcher::start(repository_state.clone(), write_lock.clone())?;
+        let watcher_handle =
+            RepositoryWatcher::start(repository_state.clone(), write_lock.clone())?;
         let preview_addr = start_preview_server(repository_state.clone())?;
         let external_token = generate_external_api_token()?;
         let external_addr = start_external_api_server(

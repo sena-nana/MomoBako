@@ -41,16 +41,15 @@ pub(super) fn create_smart_folder(
         .as_deref()
         .map(validate_smart_folder_id)
         .transpose()?
-        .unwrap_or_else(|| smart_folder_id_for(&request.repo_id, request.parent_id.as_deref(), &name));
+        .unwrap_or_else(|| {
+            smart_folder_id_for(&request.repo_id, request.parent_id.as_deref(), &name)
+        });
     let filter = normalize_smart_folder_filter(request.filter);
     let filter_json = serde_json::to_string(&filter).map_err(json_error)?;
     let now = now_rfc3339();
-    let sort_order = next_smart_folder_sort_order(
-        &connection,
-        &request.repo_id,
-        request.parent_id.as_deref(),
-    )
-    .map_err(db_error)?;
+    let sort_order =
+        next_smart_folder_sort_order(&connection, &request.repo_id, request.parent_id.as_deref())
+            .map_err(db_error)?;
     connection
         .execute(
             r#"
@@ -112,12 +111,8 @@ pub(super) fn update_smart_folder(
     let sort_order = if normalized_optional_id(request.parent_id.as_deref()) == existing.parent_id {
         existing.sort_order
     } else {
-        next_smart_folder_sort_order(
-            &connection,
-            &request.repo_id,
-            request.parent_id.as_deref(),
-        )
-        .map_err(db_error)?
+        next_smart_folder_sort_order(&connection, &request.repo_id, request.parent_id.as_deref())
+            .map_err(db_error)?
     };
     connection
         .execute(

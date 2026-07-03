@@ -25,9 +25,11 @@ pub(super) fn load_snapshot(
         )
         .map_err(db_error)?;
     let trash_count: i64 = connection
-        .query_row("SELECT COUNT(*) FROM assets WHERE status = 'deleted'", [], |row| {
-            row.get(0)
-        })
+        .query_row(
+            "SELECT COUNT(*) FROM assets WHERE status = 'deleted'",
+            [],
+            |row| row.get(0),
+        )
         .map_err(db_error)?;
 
     let thumbnail_root = state.repository_thumbnail_root(&repo)?;
@@ -195,9 +197,8 @@ pub(super) fn record_entry_access(
         &repo.backend_record,
     )?;
     let entry_path = normalize_entry_path(&request.path)?;
-    let recorded_at =
-        record_entry_access_in_connection(&connection, &request.repo_id, &entry_path)
-            .map_err(db_error)?;
+    let recorded_at = record_entry_access_in_connection(&connection, &request.repo_id, &entry_path)
+        .map_err(db_error)?;
 
     Ok(EntryAccessRecordResponse {
         repo_id: request.repo_id,

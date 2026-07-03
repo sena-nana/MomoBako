@@ -1,5 +1,6 @@
 //! Desktop app-shell bootstrap and lifecycle glue for the Tauri View layer.
 
+use crate::services::runtime::RepositoryRuntime;
 use crate::{
     viewmodels::{
         FileBrowserViewModel, PluginViewModel, RepositoryInteractionViewModel,
@@ -8,7 +9,6 @@ use crate::{
     },
     window_state,
 };
-use crate::services::runtime::RepositoryRuntime;
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},

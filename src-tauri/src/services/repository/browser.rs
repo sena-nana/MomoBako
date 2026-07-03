@@ -367,7 +367,8 @@ pub(super) fn load_file_browser(
     } else if request.include_tree.unwrap_or(true) {
         Some(if repository_supports_local_root_access(&repo) {
             let direct_file_counts =
-                load_direct_file_counts_by_parent(&connection, &request.repo_id).map_err(db_error)?;
+                load_direct_file_counts_by_parent(&connection, &request.repo_id)
+                    .map_err(db_error)?;
             build_tree_from_directory_records(
                 load_directory_records(&connection, &request.repo_id).map_err(db_error)?,
                 &direct_file_counts,

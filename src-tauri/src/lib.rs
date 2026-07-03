@@ -26,9 +26,9 @@ use services::repository::{
     PluginConfigSetRequest, PluginConfigSnapshot, PluginDataDirectoryResponse,
     PluginDataFilePreviewSourceRequest, PluginDataFilePreviewSourceResponse, PluginEnabledRequest,
     PluginHookExecutionListRequest, PluginHookExecutionListResponse, PluginInstallRequest,
-    PluginManifest, PluginMutationResponse, RepositoryAction, RepositoryActionEnabledRequest,
+    PluginManifest, PluginMutationResponse, RecentAccessHistoryClearRequest,
+    RecentAccessHistoryClearResponse, RepositoryAction, RepositoryActionEnabledRequest,
     RepositoryActionMutationResponse, RepositoryActionRunRequest, RepositoryActionRunResponse,
-    RecentAccessHistoryClearRequest, RecentAccessHistoryClearResponse,
     RepositoryCacheFilePreviewSourceRequest, RepositoryCacheFilePreviewSourceResponse,
     RepositoryExportRequest, RepositoryExportResponse, RepositoryFolderRequest,
     RepositoryMutationRequest, RepositoryMutationResponse, RepositoryRelocateRequest,
@@ -323,7 +323,9 @@ async fn clear_recent_access_history(
     request: RecentAccessHistoryClearRequest,
     repository_interaction: tauri::State<'_, RepositoryInteractionViewModel>,
 ) -> Result<RecentAccessHistoryClearResponse, String> {
-    repository_interaction.clear_recent_access_history(request).await
+    repository_interaction
+        .clear_recent_access_history(request)
+        .await
 }
 
 #[tauri::command]

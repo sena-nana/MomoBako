@@ -82,11 +82,13 @@ pub(super) fn has_directory_cache(
     connection: &Connection,
     repo_id: &str,
 ) -> Result<bool, rusqlite::Error> {
-    connection.query_row(
-        "SELECT EXISTS(SELECT 1 FROM directories WHERE repo_id = ?1 LIMIT 1)",
-        [repo_id],
-        |row| row.get::<_, i64>(0),
-    ).map(|value| value != 0)
+    connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM directories WHERE repo_id = ?1 LIMIT 1)",
+            [repo_id],
+            |row| row.get::<_, i64>(0),
+        )
+        .map(|value| value != 0)
 }
 
 pub(super) fn latest_directory_indexed_at(
@@ -210,9 +212,7 @@ pub(super) fn load_netease_directory_entries_page(
             repo_id,
             directory_path,
             offset.min(i64::MAX as usize) as i64,
-            offset
-                .saturating_add(limit)
-                .min(i64::MAX as usize) as i64
+            offset.saturating_add(limit).min(i64::MAX as usize) as i64
         ],
         |row| {
             let kind = match row.get::<_, String>(3)?.as_str() {
@@ -656,9 +656,11 @@ pub(super) fn load_entry_thumbnail_map_for_paths(
           AND (path, kind) IN ({tuple_placeholders})
         "#
     ))?;
-    let params = std::iter::once(repo_id).chain(entries.iter().flat_map(|(path, kind)| {
-        [path.as_str(), kind.as_str()]
-    }));
+    let params = std::iter::once(repo_id).chain(
+        entries
+            .iter()
+            .flat_map(|(path, kind)| [path.as_str(), kind.as_str()]),
+    );
     let rows = stmt.query_map(rusqlite::params_from_iter(params), |row| {
         Ok((
             row.get::<_, String>(0)?,
