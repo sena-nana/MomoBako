@@ -1,0 +1,24 @@
+src-tauri/src/services/runtime/watcher.rs
+  s_95a94e19b5f1e4::t_fce159ea392c0f 4-5,21-25,31-33,95,193-258
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.5",
+  "base_commit_sha": "3facd75ebc915ff548aacfc47b7c38eceaf8ac38",
+  "prompts": {},
+  "humans": {
+    "h_8e6780fc7b4bb1": {
+      "author": "AuraElicase <auraelicase@outlook.com>"
+    }
+  },
+  "sessions": {
+    "s_95a94e19b5f1e4": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f26b1-bf6c-7872-af45-8063f4b3b257",
+        "model": "unknown"
+      },
+      "human_author": "AuraElicase <auraelicase@outlook.com>"
+    }
+  }
+}
