@@ -154,9 +154,23 @@ pub(super) fn sync_repository_files(
     tx: &Transaction<'_>,
     repo: &RepositoryRecord,
     skip_hardlink_candidate_paths: &HashSet<String>,
+    hint_paths: &std::collections::BTreeSet<String>,
 ) -> Result<SyncResult, rusqlite::Error> {
     let repo_root = PathBuf::from(&repo.summary.path);
     let files = list_backend_files(service_root, repo, &repo_root).map_err(|error| {
+        rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            error,
+        )))
+    })?;
+    let files = supplement_discovered_files_with_hint_paths(
+        service_root,
+        repo,
+        &repo_root,
+        files,
+        hint_paths,
+    )
+    .map_err(|error| {
         rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::new(
             std::io::ErrorKind::Other,
             error,
@@ -495,6 +509,40 @@ pub(super) fn sync_repository_files(
         created_events,
         hardlink_candidates,
     })
+}
+
+/// 用 watcher 捕获到的变更路径补齐索引检索的短暂漏报，保证新增文件能立即入库。
+pub(super) fn supplement_discovered_files_with_hint_paths(
+    service_root: &Path,
+    repo: &RepositoryRecord,
+    repo_root: &Path,
+    mut files: Vec<DiscoveredFile>,
+    hint_paths: &std::collections::BTreeSet<String>,
+) -> Result<Vec<DiscoveredFile>, String> {
+    if hint_paths.is_empty() {
+        return Ok(files);
+    }
+
+    let mut existing_paths = files
+        .iter()
+        .map(|file| file.relative_path.clone())
+        .collect::<std::collections::BTreeSet<_>>();
+    for path in hint_paths {
+        if existing_paths.contains(path) {
+            continue;
+        }
+        let Ok(entry) = stat_backend_entry(service_root, repo, repo_root, path) else {
+            continue;
+        };
+        if !matches!(entry.kind, FileSystemEntryKind::File) {
+            continue;
+        }
+        let file = entry.into_discovered_file(repo_root)?;
+        existing_paths.insert(file.relative_path.clone());
+        files.push(file);
+    }
+    files.sort_by(|left, right| left.relative_path.cmp(&right.relative_path));
+    Ok(files)
 }
 
 pub(super) fn apply_revision_state(

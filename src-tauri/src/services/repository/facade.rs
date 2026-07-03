@@ -421,6 +421,14 @@ impl RepositoryState {
         management::sync_repository(self, request)
     }
 
+    pub(crate) fn sync_repository_with_hint_paths(
+        &self,
+        repo_id: &str,
+        hint_paths: &std::collections::BTreeSet<String>,
+    ) -> Result<SyncResult, String> {
+        management::sync_repository_with_hint_paths(self, repo_id, hint_paths)
+    }
+
     pub(super) fn sync_repository_with_candidate_skips(
         &self,
         repo_id: &str,
@@ -1126,8 +1134,14 @@ impl RepositoryState {
             // `.momo` 被删或被读链路部分重建后，这里补一次同步，确保首次打开就能看到内容。
             let repo = self.load_repository_record(repo_id)?;
             let tx = connection.transaction().map_err(db_error)?;
-            sync_repository_files(&self.root, &tx, &repo, &std::collections::HashSet::new())
-                .map_err(db_error)?;
+            sync_repository_files(
+                &self.root,
+                &tx,
+                &repo,
+                &std::collections::HashSet::new(),
+                &std::collections::BTreeSet::new(),
+            )
+            .map_err(db_error)?;
             tx.commit().map_err(db_error)?;
         }
         Ok(connection)

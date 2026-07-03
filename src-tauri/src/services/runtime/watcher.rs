@@ -2,7 +2,7 @@
 
 use crate::services::repository::{
     backend_summary_supports_local_root_access, RepositoryState, RepositoryStructureRefreshRequest,
-    RepositoryStructureUpdatedEvent, RepositorySummary, SyncRequest,
+    RepositoryStructureUpdatedEvent, RepositorySummary,
 };
 use notify::{Config, Event, RecommendedWatcher, RecursiveMode, Watcher};
 use std::{
@@ -123,16 +123,43 @@ fn handle_fs_event(repository_state: &Arc<RepositoryState>, event: Event) {
         return;
     };
 
+    let mut changed_paths_by_repo = BTreeMap::<String, BTreeSet<String>>::new();
     for path in event.paths {
         let normalized_path = normalize_path(&path);
-        if let Some(repository) = repositories
+        for repository in repositories
             .iter()
-            .find(|repo| normalized_path.starts_with(&normalize_path(Path::new(&repo.path))))
+            .filter(|repo| normalized_path.starts_with(&normalize_path(Path::new(&repo.path))))
         {
-            repository_state
-                .queue_repository_structure_refresh(repository.repo_id.clone(), "watcher");
+            let changed_paths = changed_paths_by_repo
+                .entry(repository.repo_id.clone())
+                .or_default();
+            if let Some(relative_path) =
+                repository_relative_event_path(Path::new(&repository.path), &path)
+            {
+                changed_paths.insert(relative_path);
+            }
         }
     }
+
+    for (repo_id, paths) in changed_paths_by_repo {
+        repository_state.queue_repository_structure_refresh_with_paths(repo_id, "watcher", paths);
+    }
+}
+
+fn repository_relative_event_path(repo_root: &Path, path: &Path) -> Option<String> {
+    let relative = path.strip_prefix(repo_root).ok()?;
+    let raw = relative.to_string_lossy().replace('\\', "/");
+    let mut parts = Vec::new();
+    for part in raw.split('/') {
+        if part.is_empty() || part == "." {
+            continue;
+        }
+        if part == ".." || matches!(part, ".momo" | ".meta") {
+            return None;
+        }
+        parts.push(part);
+    }
+    (!parts.is_empty()).then(|| parts.join("/"))
 }
 
 fn run_structure_refresh_worker(
@@ -140,11 +167,18 @@ fn run_structure_refresh_worker(
     write_lock: Arc<Mutex<()>>,
     rx: Receiver<RepositoryStructureRefreshRequest>,
 ) {
-    let mut pending = BTreeMap::<String, (String, Instant)>::new();
+    let mut pending = BTreeMap::<String, (String, Instant, BTreeSet<String>)>::new();
     loop {
         match rx.recv_timeout(Duration::from_millis(100)) {
             Ok(request) => {
-                pending.insert(request.repo_id, (request.reason, Instant::now()));
+                pending
+                    .entry(request.repo_id)
+                    .and_modify(|entry| {
+                        entry.0 = request.reason.clone();
+                        entry.1 = Instant::now();
+                        entry.2.extend(request.paths.clone());
+                    })
+                    .or_insert((request.reason, Instant::now(), request.paths));
             }
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
             Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
@@ -153,22 +187,20 @@ fn run_structure_refresh_worker(
         let now = Instant::now();
         let ready = pending
             .iter()
-            .filter_map(|(repo_id, (reason, queued_at))| {
+            .filter_map(|(repo_id, (reason, queued_at, paths))| {
                 (now.duration_since(*queued_at).as_millis()
                     >= u128::from(STRUCTURE_REFRESH_DEBOUNCE_MS))
-                .then_some((repo_id.clone(), reason.clone()))
+                .then_some((repo_id.clone(), reason.clone(), paths.clone()))
             })
             .collect::<Vec<_>>();
 
-        for (repo_id, reason) in ready {
+        for (repo_id, reason, paths) in ready {
             pending.remove(&repo_id);
             let Ok(_guard) = write_lock.lock() else {
                 return;
             };
             let _ = repository_state.set_repository_structure_refreshing(&repo_id, true);
-            let sync_result = repository_state.sync_repository(SyncRequest {
-                repo_id: repo_id.clone(),
-            });
+            let sync_result = repository_state.sync_repository_with_hint_paths(&repo_id, &paths);
             let indexed_at = repository_state
                 .repository_structure_indexed_at(&repo_id)
                 .ok()
@@ -254,5 +286,25 @@ mod tests {
         let summary = build_repository_summary(&repo_root, "ready");
 
         assert_eq!(repository_watch_path(&summary), None);
+    }
+
+    #[test]
+    fn repository_relative_event_path_returns_normalized_file_path() {
+        let repo_root = unique_test_path("relative-file");
+        let file_path = repo_root.join("Artist").join("track.mp3");
+
+        let relative = repository_relative_event_path(&repo_root, &file_path);
+
+        assert_eq!(relative.as_deref(), Some("Artist/track.mp3"));
+    }
+
+    #[test]
+    fn repository_relative_event_path_skips_internal_metadata() {
+        let repo_root = unique_test_path("relative-meta");
+        let metadata_path = repo_root.join(".momo").join("repo.db");
+
+        let relative = repository_relative_event_path(&repo_root, &metadata_path);
+
+        assert_eq!(relative, None);
     }
 }

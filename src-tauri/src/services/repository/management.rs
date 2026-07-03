@@ -15,7 +15,8 @@ pub(super) fn create_repository(
     let repo_id = request
         .repo_id
         .unwrap_or_else(|| slugify_repo_id(&request.name, &request.path));
-    let repo_root = normalize_repository_root_for_backend(&state.root, &request.path, &backend, false)?;
+    let repo_root =
+        normalize_repository_root_for_backend(&state.root, &request.path, &backend, false)?;
     let seed = RepositorySeed {
         repo_id: &repo_id,
         name: &request.name,
@@ -50,7 +51,12 @@ pub(super) fn import_repository(
     if let Some(repository) = state.find_existing_repository_for_backend(&requested_backend)? {
         return Ok(RepositoryMutationResponse { repository });
     }
-    let repo_root = normalize_repository_root_for_backend(&state.root, &request.path, &requested_backend, true)?;
+    let repo_root = normalize_repository_root_for_backend(
+        &state.root,
+        &request.path,
+        &requested_backend,
+        true,
+    )?;
     migrate_legacy_meta_dir_if_needed(&repo_root, &requested_backend.plugin_id)?;
     let metadata_path = repository_meta_dir(&repo_root).join(REPO_METADATA_FILE_NAME);
     let imported_metadata = if metadata_path.exists() {
@@ -250,8 +256,12 @@ pub(super) fn update_repository_backend_config(
     let repo = state.load_repository_record(&request.repo_id)?;
     let mut next_backend_config = request.backend_config.clone();
     preserve_netease_cache_config(&repo.backend_record, &mut next_backend_config);
-    let repo_root =
-        normalize_repository_root_for_backend(&state.root, &repo.summary.path, &repo.backend_record, true)?;
+    let repo_root = normalize_repository_root_for_backend(
+        &state.root,
+        &repo.summary.path,
+        &repo.backend_record,
+        true,
+    )?;
     let metadata_path = repository_meta_dir(&repo_root).join(REPO_METADATA_FILE_NAME);
     if metadata_path.exists() {
         let raw = fs::read_to_string(&metadata_path).map_err(io_error)?;
@@ -438,13 +448,40 @@ pub(super) fn sync_repository(
     state: &RepositoryState,
     request: SyncRequest,
 ) -> Result<SyncResult, String> {
-    sync_repository_with_candidate_skips(state, &request.repo_id, &HashSet::new())
+    sync_repository_with_candidate_skips_and_hint_paths(
+        state,
+        &request.repo_id,
+        &HashSet::new(),
+        &std::collections::BTreeSet::new(),
+    )
+}
+
+pub(super) fn sync_repository_with_hint_paths(
+    state: &RepositoryState,
+    repo_id: &str,
+    hint_paths: &std::collections::BTreeSet<String>,
+) -> Result<SyncResult, String> {
+    sync_repository_with_candidate_skips_and_hint_paths(state, repo_id, &HashSet::new(), hint_paths)
 }
 
 pub(super) fn sync_repository_with_candidate_skips(
     state: &RepositoryState,
     repo_id: &str,
     skip_hardlink_candidate_paths: &HashSet<String>,
+) -> Result<SyncResult, String> {
+    sync_repository_with_candidate_skips_and_hint_paths(
+        state,
+        repo_id,
+        skip_hardlink_candidate_paths,
+        &std::collections::BTreeSet::new(),
+    )
+}
+
+fn sync_repository_with_candidate_skips_and_hint_paths(
+    state: &RepositoryState,
+    repo_id: &str,
+    skip_hardlink_candidate_paths: &HashSet<String>,
+    hint_paths: &std::collections::BTreeSet<String>,
 ) -> Result<SyncResult, String> {
     state.ensure_initialized()?;
     let repo = state.load_repository_record(repo_id)?;
@@ -455,8 +492,14 @@ pub(super) fn sync_repository_with_candidate_skips(
     )?;
     let tx = connection.transaction().map_err(db_error)?;
 
-    let scan = sync_repository_files(&state.root, &tx, &repo, skip_hardlink_candidate_paths)
-        .map_err(db_error)?;
+    let scan = sync_repository_files(
+        &state.root,
+        &tx,
+        &repo,
+        skip_hardlink_candidate_paths,
+        hint_paths,
+    )
+    .map_err(db_error)?;
     tx.commit().map_err(db_error)?;
     Ok(scan)
 }

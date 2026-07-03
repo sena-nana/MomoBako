@@ -74,6 +74,32 @@ impl BackendDiscoveredFile {
     }
 }
 
+impl FileSystemEntry {
+    /// 将按路径补查得到的文件条目转换为同步引擎可复用的发现结果。
+    pub(super) fn into_discovered_file(self, repo_root: &Path) -> Result<DiscoveredFile, String> {
+        let relative_path = normalize_entry_path(&self.path)?;
+        let absolute_path = if self.is_virtual {
+            None
+        } else {
+            Some(resolve_repository_relative_path(repo_root, &relative_path)?)
+        };
+        Ok(DiscoveredFile {
+            absolute_path,
+            relative_path,
+            filename: self.name,
+            extension: self.extension.unwrap_or_default(),
+            size_bytes: self.size_bytes.unwrap_or(0),
+            created_at: None,
+            modified_at: self.modified_at.unwrap_or_else(now_rfc3339),
+            is_virtual: self.is_virtual,
+            provider_id: self.provider_id,
+            provider_item_id: self.provider_item_id,
+            source_payload: self.source_payload,
+            local_absolute_path: self.local_absolute_path,
+        })
+    }
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct MetadataDefaultsBatchEntry {

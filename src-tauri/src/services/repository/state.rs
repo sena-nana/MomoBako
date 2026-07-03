@@ -10,6 +10,7 @@ use tauri::{AppHandle, Emitter};
 pub(crate) struct RepositoryStructureRefreshRequest {
     pub repo_id: String,
     pub reason: String,
+    pub paths: BTreeSet<String>,
 }
 
 /// Shared repository runtime state used by ViewModels, runtime services, and repository feature modules.
@@ -65,6 +66,16 @@ impl RepositoryState {
     }
 
     pub fn queue_repository_structure_refresh(&self, repo_id: String, reason: &str) {
+        self.queue_repository_structure_refresh_with_paths(repo_id, reason, BTreeSet::new());
+    }
+
+    /// 记录 watcher 提供的变更路径，供同步阶段补偿索引型后端的短暂延迟。
+    pub fn queue_repository_structure_refresh_with_paths(
+        &self,
+        repo_id: String,
+        reason: &str,
+        paths: BTreeSet<String>,
+    ) {
         let Ok(sender) = self.structure_refresh_tx.lock() else {
             return;
         };
@@ -72,6 +83,7 @@ impl RepositoryState {
             let _ = sender.send(RepositoryStructureRefreshRequest {
                 repo_id,
                 reason: reason.to_string(),
+                paths,
             });
         }
     }
