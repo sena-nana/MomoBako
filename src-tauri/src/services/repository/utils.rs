@@ -30,6 +30,31 @@ pub(super) fn now_rfc3339() -> String {
         .unwrap_or_else(|_| "1970-01-01T00:00:00Z".to_string())
 }
 
+pub(super) fn configure_repository_connection(
+    connection: &Connection,
+) -> Result<(), rusqlite::Error> {
+    connection.pragma_update(None, "foreign_keys", "ON")?;
+    match connection.pragma_update(None, "journal_mode", "WAL") {
+        Ok(()) => Ok(()),
+        Err(error) => {
+            if should_fallback_repository_journal_mode(&error) {
+                connection.pragma_update(None, "journal_mode", "DELETE")?;
+                Ok(())
+            } else {
+                Err(error)
+            }
+        }
+    }
+}
+
+pub(super) fn should_fallback_repository_journal_mode(error: &rusqlite::Error) -> bool {
+    matches!(
+        error,
+        rusqlite::Error::SqliteFailure(sqlite_error, _)
+            if sqlite_error.code == rusqlite::ffi::ErrorCode::FileLockingProtocolFailed
+    ) || error.to_string().contains("locking protocol")
+}
+
 pub(super) fn db_error(error: rusqlite::Error) -> String {
     format!("database error: {error}")
 }

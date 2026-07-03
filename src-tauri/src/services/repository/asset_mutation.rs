@@ -180,9 +180,7 @@ pub(super) fn move_directory_contents_to_parent(
         &repo.backend_record.plugin_id,
     )?;
     let mut connection = Connection::open(storage_paths.database_path).map_err(db_error)?;
-    connection
-        .pragma_update(None, "journal_mode", "WAL")
-        .map_err(db_error)?;
+    configure_repository_connection(&connection).map_err(db_error)?;
     let tx = connection.transaction().map_err(db_error)?;
     for (_, child_source_path, child_target_path) in &children {
         rename_directory_move_asset_records(&tx, repo_id, child_source_path, child_target_path)
