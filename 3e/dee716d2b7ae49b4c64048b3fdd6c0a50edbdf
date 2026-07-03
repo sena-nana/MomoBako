@@ -1,0 +1,29 @@
+src-tauri/src/services/repository/internal_tests.rs
+  s_d4ee6152c91720::t_d28d52271a105d 167-195,217
+  s_d4ee6152c91720::t_8f62d7d022b194 166
+src-tauri/src/services/repository/state.rs
+  s_d4ee6152c91720::t_61d65514a2744c 156-159,162-167,171,174
+src-tauri/src/services/repository/read_model.rs
+  s_d4ee6152c91720::t_f3a158da94b879 437
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "3edee716d2b7ae49b4c64048b3fdd6c0a50edbdf",
+  "prompts": {},
+  "humans": {
+    "h_8e6780fc7b4bb1": {
+      "author": "AuraElicase <auraelicase@outlook.com>"
+    }
+  },
+  "sessions": {
+    "s_d4ee6152c91720": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f2775-ef99-7ef3-bf90-ad59e7b47b13",
+        "model": "gpt-5.5"
+      },
+      "human_author": "AuraElicase <auraelicase@outlook.com>"
+    }
+  }
+}
