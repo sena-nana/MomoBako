@@ -3065,6 +3065,67 @@ mod tests {
     }
 
     #[test]
+    fn supplement_discovered_files_with_hint_paths_adds_missing_watched_file() {
+        fn stat_hook(
+            _repo: &RepositoryRecord,
+            repo_root: &Path,
+            entry_path: &str,
+        ) -> Option<Result<FileSystemEntry, String>> {
+            if entry_path != "fresh.txt" {
+                return None;
+            }
+            let absolute_path = resolve_repository_relative_path(repo_root, entry_path)
+                .expect("fresh file path should resolve");
+            let metadata = fs::metadata(&absolute_path).expect("fresh file should exist");
+            Some(Ok(FileSystemEntry {
+                path: entry_path.to_string(),
+                name: "fresh.txt".to_string(),
+                kind: FileSystemEntryKind::File,
+                extension: Some("txt".to_string()),
+                size_bytes: Some(metadata.len() as i64),
+                modified_at: metadata
+                    .modified()
+                    .ok()
+                    .map(system_time_to_rfc3339)
+                    .transpose()
+                    .expect("modified time should serialize"),
+                is_virtual: false,
+                provider_id: None,
+                provider_item_id: None,
+                source_payload: None,
+                local_absolute_path: Some(absolute_path.to_string_lossy().to_string()),
+            }))
+        }
+
+        let (state, root, repo_root, _thumbnail_root) = create_test_state("sync-hint-path");
+        let repo_id = create_repository_without_initial_sync(&state, &repo_root);
+        fs::write(repo_root.join("fresh.txt"), "fresh").expect("fresh file should be written");
+        let repo = state
+            .load_repository_record(&repo_id)
+            .expect("repository record should load");
+        let hint_paths = ["fresh.txt".to_string()]
+            .into_iter()
+            .collect::<std::collections::BTreeSet<_>>();
+
+        set_test_backend_stat_entry_hook(Some(stat_hook));
+        let files = supplement_discovered_files_with_hint_paths(
+            &state.root,
+            &repo,
+            &repo_root,
+            Vec::new(),
+            &hint_paths,
+        )
+        .expect("hint paths should be supplemented from backend stat");
+        set_test_backend_stat_entry_hook(None);
+
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].relative_path, "fresh.txt");
+        assert_eq!(files[0].size_bytes, 5);
+
+        fs::remove_dir_all(root).expect("test temp root should be removed");
+    }
+
+    #[test]
     fn load_file_browser_returns_generic_file_metadata() {
         let (state, root, repo_root, _thumbnail_root) = create_test_state("browser-metadata");
         fs::write(repo_root.join("note.txt"), "plain text").expect("test file should be written");
