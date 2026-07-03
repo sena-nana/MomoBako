@@ -527,22 +527,67 @@ pub(super) fn supplement_discovered_files_with_hint_paths(
         .iter()
         .map(|file| file.relative_path.clone())
         .collect::<std::collections::BTreeSet<_>>();
+    let mut visited_directories = std::collections::BTreeSet::new();
     for path in hint_paths {
-        if existing_paths.contains(path) {
-            continue;
-        }
-        let Ok(entry) = stat_backend_entry(service_root, repo, repo_root, path) else {
-            continue;
-        };
-        if !matches!(entry.kind, FileSystemEntryKind::File) {
-            continue;
-        }
-        let file = entry.into_discovered_file(repo_root)?;
-        existing_paths.insert(file.relative_path.clone());
-        files.push(file);
+        supplement_hint_path_files(
+            service_root,
+            repo,
+            repo_root,
+            path,
+            &mut existing_paths,
+            &mut visited_directories,
+            &mut files,
+        )?;
     }
     files.sort_by(|left, right| left.relative_path.cmp(&right.relative_path));
     Ok(files)
+}
+
+/// 将 watcher 提供的路径提示补偿为可入库的文件结果，支持目录递归展开。
+fn supplement_hint_path_files(
+    service_root: &Path,
+    repo: &RepositoryRecord,
+    repo_root: &Path,
+    hint_path: &str,
+    existing_paths: &mut std::collections::BTreeSet<String>,
+    visited_directories: &mut std::collections::BTreeSet<String>,
+    files: &mut Vec<DiscoveredFile>,
+) -> Result<(), String> {
+    let Ok(entry) = stat_backend_entry(service_root, repo, repo_root, hint_path) else {
+        return Ok(());
+    };
+
+    match entry.kind {
+        FileSystemEntryKind::File => {
+            let file = entry.into_discovered_file(repo_root)?;
+            if existing_paths.insert(file.relative_path.clone()) {
+                files.push(file);
+            }
+        }
+        FileSystemEntryKind::Directory => {
+            if !visited_directories.insert(entry.path.clone()) {
+                return Ok(());
+            }
+            let Ok(children) =
+                list_backend_directory_entries(service_root, repo, repo_root, &entry.path)
+            else {
+                return Ok(());
+            };
+            for child in children {
+                supplement_hint_path_files(
+                    service_root,
+                    repo,
+                    repo_root,
+                    &child.path,
+                    existing_paths,
+                    visited_directories,
+                    files,
+                )?;
+            }
+        }
+    }
+
+    Ok(())
 }
 
 pub(super) fn apply_revision_state(

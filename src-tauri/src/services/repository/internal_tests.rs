@@ -3126,6 +3126,47 @@ mod tests {
     }
 
     #[test]
+    fn supplement_discovered_files_with_hint_paths_recurses_directory_hints() {
+        let (state, root, repo_root, _thumbnail_root) = create_test_state("sync-hint-directory");
+        let repo_id = create_repository_without_initial_sync(&state, &repo_root);
+        fs::create_dir_all(repo_root.join("incoming/nested"))
+            .expect("hint directory should be created");
+        fs::write(repo_root.join("incoming/fresh.txt"), "fresh")
+            .expect("direct child file should be written");
+        fs::write(repo_root.join("incoming/nested/deep.txt"), "deep")
+            .expect("nested child file should be written");
+        let repo = state
+            .load_repository_record(&repo_id)
+            .expect("repository record should load");
+        let hint_paths = ["incoming".to_string()]
+            .into_iter()
+            .collect::<std::collections::BTreeSet<_>>();
+
+        let files = supplement_discovered_files_with_hint_paths(
+            &state.root,
+            &repo,
+            &repo_root,
+            Vec::new(),
+            &hint_paths,
+        )
+        .expect("directory hint paths should be expanded recursively");
+
+        let discovered_paths = files
+            .into_iter()
+            .map(|file| file.relative_path)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            discovered_paths,
+            vec![
+                "incoming/fresh.txt".to_string(),
+                "incoming/nested/deep.txt".to_string()
+            ]
+        );
+
+        fs::remove_dir_all(root).expect("test temp root should be removed");
+    }
+
+    #[test]
     fn load_file_browser_returns_generic_file_metadata() {
         let (state, root, repo_root, _thumbnail_root) = create_test_state("browser-metadata");
         fs::write(repo_root.join("note.txt"), "plain text").expect("test file should be written");
