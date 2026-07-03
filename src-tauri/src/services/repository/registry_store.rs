@@ -323,6 +323,7 @@ fn infer_backend_plugin_id_for_path(service_root: &Path, path: &str) -> Result<S
 }
 
 pub(super) fn migrate_repository_schema(connection: &Connection) -> Result<(), rusqlite::Error> {
+    configure_repository_connection(connection)?;
     connection.execute_batch(REPOSITORY_SCHEMA_SQL)?;
     let mut stmt = connection.prepare("PRAGMA table_info(assets)")?;
     let columns = stmt

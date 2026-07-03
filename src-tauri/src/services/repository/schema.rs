@@ -46,7 +46,6 @@ pub(super) const PLUGIN_SDK_VERSION: &str = "1";
 pub(super) const MAX_PARALLEL_IMPORTS: usize = 4;
 
 pub(super) const REPOSITORY_SCHEMA_SQL: &str = r#"
-PRAGMA journal_mode = WAL;
 PRAGMA foreign_keys = ON;
 
 CREATE TABLE IF NOT EXISTS repositories (

@@ -1092,9 +1092,6 @@ impl RepositoryState {
             &backend_record.plugin_id,
         )?;
         let connection = Connection::open(storage_paths.database_path).map_err(db_error)?;
-        connection
-            .pragma_update(None, "journal_mode", "WAL")
-            .map_err(db_error)?;
         migrate_repository_schema(&connection).map_err(db_error)?;
         Ok(connection)
     }

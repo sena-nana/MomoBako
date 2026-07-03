@@ -5491,4 +5491,24 @@ mod tests {
                 .expect("probe output should parse")
         );
     }
+
+    #[test]
+    fn repository_journal_mode_falls_back_for_locking_protocol_errors() {
+        let error = rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_PROTOCOL),
+            Some("locking protocol".to_string()),
+        );
+
+        assert!(should_fallback_repository_journal_mode(&error));
+    }
+
+    #[test]
+    fn repository_journal_mode_keeps_original_error_for_other_sqlite_failures() {
+        let error = rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_BUSY),
+            Some("database is locked".to_string()),
+        );
+
+        assert!(!should_fallback_repository_journal_mode(&error));
+    }
 }
