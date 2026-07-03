@@ -125,10 +125,9 @@ fn handle_fs_event(repository_state: &Arc<RepositoryState>, event: Event) {
 
     let mut changed_paths_by_repo = BTreeMap::<String, BTreeSet<String>>::new();
     for path in event.paths {
-        let normalized_path = normalize_path(&path);
         for repository in repositories
             .iter()
-            .filter(|repo| normalized_path.starts_with(&normalize_path(Path::new(&repo.path))))
+            .filter(|repo| repository_event_path_is_inside(Path::new(&repo.path), &path))
         {
             let changed_paths = changed_paths_by_repo
                 .entry(repository.repo_id.clone())
@@ -200,7 +199,7 @@ fn run_structure_refresh_worker(
                 return;
             };
             let _ = repository_state.set_repository_structure_refreshing(&repo_id, true);
-            let sync_result = repository_state.sync_repository_with_hint_paths(&repo_id, &paths);
+            let sync_result = repository_state.sync_repository_changed_paths(&repo_id, &paths);
             let indexed_at = repository_state
                 .repository_structure_indexed_at(&repo_id)
                 .ok()
@@ -220,7 +219,24 @@ fn run_structure_refresh_worker(
 }
 
 fn normalize_path(path: &Path) -> String {
-    path.to_string_lossy().replace('\\', "/")
+    let value = path.to_string_lossy().replace('\\', "/");
+    #[cfg(windows)]
+    {
+        value.to_lowercase()
+    }
+    #[cfg(not(windows))]
+    {
+        value
+    }
+}
+
+fn repository_event_path_is_inside(repo_root: &Path, path: &Path) -> bool {
+    let root = normalize_path(repo_root).trim_end_matches('/').to_string();
+    let path = normalize_path(path);
+    path == root
+        || path
+            .strip_prefix(&root)
+            .is_some_and(|remaining| remaining.starts_with('/'))
 }
 
 #[cfg(test)]
@@ -306,5 +322,16 @@ mod tests {
         let relative = repository_relative_event_path(&repo_root, &metadata_path);
 
         assert_eq!(relative, None);
+    }
+
+    #[test]
+    fn repository_event_path_matches_only_repository_boundary() {
+        let repo_root = unique_test_path("boundary");
+        let sibling_root = PathBuf::from(format!("{}-other", repo_root.to_string_lossy()));
+        let inside_path = repo_root.join("folder").join("asset.png");
+        let sibling_path = sibling_root.join("asset.png");
+
+        assert!(repository_event_path_is_inside(&repo_root, &inside_path));
+        assert!(!repository_event_path_is_inside(&repo_root, &sibling_path));
     }
 }
