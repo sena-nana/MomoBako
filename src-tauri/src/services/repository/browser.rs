@@ -23,7 +23,10 @@ fn local_repository_cache_snapshot(
     })
 }
 
-fn build_tree_from_directory_records(records: Vec<DirectoryRecord>) -> Vec<FileTreeNode> {
+fn build_tree_from_directory_records(
+    records: Vec<DirectoryRecord>,
+    direct_file_counts: &BTreeMap<String, usize>,
+) -> Vec<FileTreeNode> {
     let mut grouped = BTreeMap::<String, Vec<DirectoryRecord>>::new();
     for record in records.into_iter().filter(|record| !record.path.is_empty()) {
         grouped
@@ -35,6 +38,7 @@ fn build_tree_from_directory_records(records: Vec<DirectoryRecord>) -> Vec<FileT
     fn build_nodes(
         parent_path: &str,
         grouped: &mut BTreeMap<String, Vec<DirectoryRecord>>,
+        direct_file_counts: &BTreeMap<String, usize>,
     ) -> Vec<FileTreeNode> {
         let mut children = grouped.remove(parent_path).unwrap_or_default();
         children.sort_by(|left, right| left.name.to_lowercase().cmp(&right.name.to_lowercase()));
@@ -43,12 +47,13 @@ fn build_tree_from_directory_records(records: Vec<DirectoryRecord>) -> Vec<FileT
             .map(|record| FileTreeNode {
                 path: record.path.clone(),
                 label: record.name.clone(),
-                children: build_nodes(&record.path, grouped),
+                file_count: direct_file_counts.get(&record.path).copied().unwrap_or(0),
+                children: build_nodes(&record.path, grouped, direct_file_counts),
             })
             .collect()
     }
 
-    build_nodes("", &mut grouped)
+    build_nodes("", &mut grouped, direct_file_counts)
 }
 
 fn load_cached_directory_entries(
@@ -361,8 +366,11 @@ pub(super) fn load_file_browser(
         None
     } else if request.include_tree.unwrap_or(true) {
         Some(if repository_supports_local_root_access(&repo) {
+            let direct_file_counts =
+                load_direct_file_counts_by_parent(&connection, &request.repo_id).map_err(db_error)?;
             build_tree_from_directory_records(
                 load_directory_records(&connection, &request.repo_id).map_err(db_error)?,
+                &direct_file_counts,
             )
         } else {
             list_backend_tree(&state.root, &repo, &repo_root)?
@@ -529,8 +537,11 @@ pub(super) fn load_repository_tree(
         }
     };
     let tree = if repository_supports_local_root_access(&repo) {
+        let direct_file_counts =
+            load_direct_file_counts_by_parent(&connection, repo_id).map_err(db_error)?;
         build_tree_from_directory_records(
             load_directory_records(&connection, repo_id).map_err(db_error)?,
+            &direct_file_counts,
         )
     } else {
         list_backend_tree(&state.root, &repo, &repo_root)?

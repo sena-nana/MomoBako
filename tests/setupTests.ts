@@ -33,6 +33,9 @@ import type { MockEntry, MockRepository } from "./fixtures/repositoryFixtures";
 
 const missingRepositoryPath = "C:/Mock/MissingAnimeAssets";
 const relocatedRepositoryPath = "C:/Mock/RelocatedAnimeAssets";
+const MAX_RECENT_ACCESS_ENTRIES = 50;
+const mockSnapshotBaseline = cloneSnapshot(mockSnapshot);
+const altSnapshotBaseline = cloneSnapshot(altSnapshot);
 
 
 let mockRepositories: MockRepository[] = [];
@@ -87,11 +90,49 @@ function cloneSnapshot<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
 }
 
+function resetObjectState<T extends Record<string, unknown>>(target: T, source: T) {
+  for (const key of Object.keys(target)) {
+    if (!(key in source)) {
+      delete target[key as keyof T];
+    }
+  }
+  Object.assign(target, cloneSnapshot(source));
+}
+
+function pruneRecentAccessAssets<T extends { assetId: string; filename: string; modifiedAt: string; lastAccessedAt: string | null }>(
+  assets: T[],
+) {
+  const ranked = assets
+    .filter((asset) => asset.lastAccessedAt)
+    .slice()
+    .sort((left, right) => (
+      (right.lastAccessedAt ?? "").localeCompare(left.lastAccessedAt ?? "")
+      || right.modifiedAt.localeCompare(left.modifiedAt)
+      || left.filename.localeCompare(right.filename, "zh-CN")
+    ));
+  if (ranked.length <= MAX_RECENT_ACCESS_ENTRIES) return;
+
+  const keepAssetIds = new Set(ranked.slice(0, MAX_RECENT_ACCESS_ENTRIES).map((asset) => asset.assetId));
+  for (const asset of assets) {
+    if (asset.lastAccessedAt && !keepAssetIds.has(asset.assetId)) {
+      asset.lastAccessedAt = null;
+    }
+  }
+}
+
 function updateSnapshotAssetAccess(repoId: string, path: string, recordedAt: string) {
   const snapshot = repoId === altSnapshot.repository.repoId ? altSnapshot : mockSnapshot;
   const asset = snapshot.assets.find((item) => item.path === path);
   if (!asset) return;
   asset.lastAccessedAt = recordedAt;
+  pruneRecentAccessAssets(snapshot.assets);
+}
+
+function clearSnapshotRecentAccess(repoId: string) {
+  const snapshot = repoId === altSnapshot.repository.repoId ? altSnapshot : mockSnapshot;
+  for (const asset of snapshot.assets) {
+    asset.lastAccessedAt = null;
+  }
 }
 
 function getTrashAssetCount(repoId: string) {
@@ -431,9 +472,16 @@ function restoreTrashTree(targetPath: string) {
 }
 
 function buildTree(entries = mockEntries) {
-  type TreeNode = { path: string; label: string; children: TreeNode[] };
+  type TreeNode = { path: string; label: string; fileCount: number; children: TreeNode[] };
   const roots: TreeNode[] = [];
   const nodeMap = new Map<string, TreeNode>();
+  const fileCountByParent = entries
+    .filter((entry) => entry.kind === "file")
+    .reduce((counts, entry) => {
+      const parentPath = getParentPath(entry.path);
+      counts.set(parentPath, (counts.get(parentPath) ?? 0) + 1);
+      return counts;
+    }, new Map<string, number>());
   const directoryEntries = entries
     .filter((entry) => entry.kind === "directory")
     .sort((left, right) => left.path.localeCompare(right.path));
@@ -442,6 +490,7 @@ function buildTree(entries = mockEntries) {
     const node: TreeNode = {
       path: entry.path,
       label: entry.name,
+      fileCount: fileCountByParent.get(entry.path) ?? 0,
       children: [],
     };
     nodeMap.set(entry.path, node);
@@ -1154,6 +1203,15 @@ vi.mock("@tauri-apps/api/core", () => ({
         repoId,
         path,
         recordedAt,
+      };
+    }
+    if (command === "clear_recent_access_history") {
+      const request = args?.request as { repoId?: string } | undefined;
+      const repoId = request?.repoId ?? "repo-main-001";
+      clearSnapshotRecentAccess(repoId);
+      return {
+        repoId,
+        cleared: true,
       };
     }
     if (command === "create_directory") {
@@ -2113,6 +2171,8 @@ afterEach(() => {
   mockRepositories = [];
   mockEntries = initialEntries();
   mockTrashEntries = initialTrashEntries();
+  resetObjectState(mockSnapshot, mockSnapshotBaseline);
+  resetObjectState(altSnapshot, altSnapshotBaseline);
   invokeCalls.length = 0;
   openerCalls.length = 0;
   pluginCallCalls.length = 0;

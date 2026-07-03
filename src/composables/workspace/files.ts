@@ -74,19 +74,36 @@ function appendTreeNode(nodes: FileTreeNode[], path: string, label: string) {
       node = {
         path: cursor,
         label: index === segments.length - 1 ? label : segment,
+        fileCount: 0,
         children: [],
       };
       currentNodes.push(node);
+    }
+    if (index === segments.length - 1) {
+      node.label = label;
     }
     currentNodes = node.children;
   }
 }
 
 function buildPresetFileTree(snapshot: RepositorySnapshot) {
+  const directFileCounts = snapshot.assets.reduce((counts, asset) => {
+    const slashIndex = asset.path.lastIndexOf("/");
+    const parentPath = slashIndex >= 0 ? asset.path.slice(0, slashIndex) : "";
+    counts.set(parentPath, (counts.get(parentPath) ?? 0) + 1);
+    return counts;
+  }, new Map<string, number>());
   const nodes: FileTreeNode[] = [];
   for (const folder of snapshot.folders) {
     appendTreeNode(nodes, folder.path, folderLabelFromPath(folder.path, folder.label));
   }
+  const applyCounts = (items: FileTreeNode[]) => {
+    for (const item of items) {
+      item.fileCount = directFileCounts.get(item.path) ?? 0;
+      applyCounts(item.children);
+    }
+  };
+  applyCounts(nodes);
   return nodes;
 }
 

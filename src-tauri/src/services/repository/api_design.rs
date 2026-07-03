@@ -148,6 +148,36 @@ pub(super) fn core_tauri_api_definitions() -> Vec<ApiDefinition> {
             serde_json::json!({ "repoId": "<repoId>" }),
         ),
         tauri_api_definition(
+            "File API",
+            "record_entry_access",
+            "记录条目访问时间，并将最近使用列表裁剪到当前仓库最新 50 条。",
+            serde_json::json!({
+                "request": {
+                    "repoId": "<repoId>",
+                    "path": "Campaigns/Summer/cover-final.psd"
+                },
+                "response": {
+                    "repoId": "<repoId>",
+                    "path": "Campaigns/Summer/cover-final.psd",
+                    "lastAccessedAt": "2026-07-03T12:00:00Z"
+                }
+            }),
+        ),
+        tauri_api_definition(
+            "File API",
+            "clear_recent_access_history",
+            "清空当前仓库全部最近使用记录。",
+            serde_json::json!({
+                "request": {
+                    "repoId": "<repoId>"
+                },
+                "response": {
+                    "repoId": "<repoId>",
+                    "clearedCount": 50
+                }
+            }),
+        ),
+        tauri_api_definition(
             "Playlist API",
             "list_playlists",
             "列出仓库播放列表。",

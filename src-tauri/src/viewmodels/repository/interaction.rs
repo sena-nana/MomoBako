@@ -6,6 +6,7 @@ use crate::services::repository::{
     PlaylistItemRemoveRequest, PlaylistItemsAddRequest, PlaylistItemsByPathsAddRequest,
     PlaylistItemsOrderRequest, PlaylistMembershipIndex, PlaylistMembershipRequest,
     PlaylistMembershipSnapshot, PlaylistMutationRequest, PlaylistMutationResponse, PlaylistSummary,
+    RecentAccessHistoryClearRequest, RecentAccessHistoryClearResponse,
     RepositoryAction, RepositoryActionEnabledRequest, RepositoryActionMutationResponse,
     RepositoryActionRunRequest, RepositoryActionRunResponse, RevisionActionRequest,
     RevisionActionResponse, SmartFolderMutationRequest, SmartFolderMutationResponse,
@@ -239,6 +240,15 @@ impl RepositoryInteractionViewModel {
     ) -> Result<EntryAccessRecordResponse, String> {
         self.runtime
             .run_write(move |state| state.record_entry_access(request))
+            .await
+    }
+
+    pub async fn clear_recent_access_history(
+        &self,
+        request: RecentAccessHistoryClearRequest,
+    ) -> Result<RecentAccessHistoryClearResponse, String> {
+        self.runtime
+            .run_write(move |state| state.clear_recent_access_history(request))
             .await
     }
 

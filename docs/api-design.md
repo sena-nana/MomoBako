@@ -114,6 +114,7 @@
 - 网易云分页回源与全量同步都会把 `songId`、`songName`、`artists`、`albumName`、`coverUrl`、`durationMs`、`playlistId`、`playlistName`、`playlistCategory`、`provider`、`accountId` 镜像到资产 metadata，并同步更新 `assets.source_payload_json`。用户字段如 `rating`、`comment`、`link`、`tagGroups` 保持原行为。
 - `get_repository_tree(repoId)` returns only `FileTreeNode[]`-style directory structure for background tree sync and does not include directory entries.
 - Local filesystem `get_repository_tree` responses also include `cacheState` and `indexedAt`, and the tree is sourced from the SQLite `directories` cache.
+- `RepositoryTreeSnapshot.tree[].fileCount` reports each directory's direct child file count and excludes nested descendants.
 - Runtime emits `repository://structure-updated` with `{ repoId, reason, indexedAt }` after watcher-driven or cold-cache refresh completes so the desktop can silently refresh the active directory and tree.
 - Trash browser entries include `metadata.deletedAt` and `metadata.originalPath` when they were moved by MomoBako.
 - `deleteEntry` moves files or recursive directory deletes to `.momo/trash` by default. Use `mode: "permanentDelete"` only for deleting entries already shown from the trash view.
@@ -143,6 +144,7 @@
 - `GET /repositories/{repoId}/snapshot`
   - `RepositorySnapshot` returns repository summary, folder summaries, indexed asset summaries, metadata field registry, overview, optional `playlists`, optional `quickAccess`, and optional `tagGroups`.
   - `assets[].lastAccessedAt` records the latest successful open, preview, or playback access time for each asset and powers the desktop "最近使用" category.
+  - The repository runtime persists at most the latest 50 non-null `lastAccessedAt` values per repository; older access timestamps are cleared during access recording.
   - `overview.trashCount` returns the current deleted-asset count for the dedicated trash view and sidebar badge.
   - `playlists` returns repository-scoped playlist summaries for sidebar and workspace entry points; full queue contents are loaded from the playlist API.
   - `quickAccess` entries expose `shortcutId`, `label`, `targetKind`, optional `targetPath`, and optional `targetId`, and can point to files, folders, or smart folders imported from Eagle.
@@ -213,6 +215,11 @@
   - Request body includes repository-relative `path`
   - Response returns `{ repoId, path, recordedAt }`
   - Used by direct open flows that hand control to the host OS so the desktop can keep the "最近使用" category in sync without refreshing the whole snapshot.
+- `POST /repositories/{repoId}/files:clearRecentAccessHistory`
+  - Tauri command: `clear_recent_access_history`
+  - Request body includes `repoId`
+  - Response returns `{ repoId, clearedCount }`
+  - Clears every non-null `lastAccessedAt` in the current repository so the desktop "最近使用" view becomes empty immediately.
 - `POST /repositories/{repoId}/entries:preparePlaybackWithProgress`
   - Request body matches `entries:preparePlayback` and includes a Tauri progress channel.
   - Emits `EntryPlaybackProgressEvent` phases for resolving the entry, downloading or reusing the temporary audio, preparing the preview source, and readiness.

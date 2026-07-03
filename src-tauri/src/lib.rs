@@ -28,6 +28,7 @@ use services::repository::{
     PluginHookExecutionListRequest, PluginHookExecutionListResponse, PluginInstallRequest,
     PluginManifest, PluginMutationResponse, RepositoryAction, RepositoryActionEnabledRequest,
     RepositoryActionMutationResponse, RepositoryActionRunRequest, RepositoryActionRunResponse,
+    RecentAccessHistoryClearRequest, RecentAccessHistoryClearResponse,
     RepositoryCacheFilePreviewSourceRequest, RepositoryCacheFilePreviewSourceResponse,
     RepositoryExportRequest, RepositoryExportResponse, RepositoryFolderRequest,
     RepositoryMutationRequest, RepositoryMutationResponse, RepositoryRelocateRequest,
@@ -315,6 +316,14 @@ async fn record_entry_access(
     repository_interaction: tauri::State<'_, RepositoryInteractionViewModel>,
 ) -> Result<EntryAccessRecordResponse, String> {
     repository_interaction.record_entry_access(request).await
+}
+
+#[tauri::command]
+async fn clear_recent_access_history(
+    request: RecentAccessHistoryClearRequest,
+    repository_interaction: tauri::State<'_, RepositoryInteractionViewModel>,
+) -> Result<RecentAccessHistoryClearResponse, String> {
+    repository_interaction.clear_recent_access_history(request).await
 }
 
 #[tauri::command]
@@ -742,6 +751,7 @@ pub fn run() {
             read_file,
             prepare_preview_file_source,
             record_entry_access,
+            clear_recent_access_history,
             prepare_entry_playback_source,
             prepare_entry_playback_source_with_progress,
             call_plugin,

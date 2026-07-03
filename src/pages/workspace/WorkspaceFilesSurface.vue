@@ -28,7 +28,10 @@ defineProps<{
   canOpenSelected: boolean;
   canRenameSelected: boolean;
   canRestoreSelected: boolean;
+  canClearRecentHistory?: boolean;
   currentFileEntry: FileBrowserEntry | null;
+  currentDirectoryDisplayName: string;
+  currentDirectoryPath: string;
   currentLibraryExtensions: RegisteredLibraryExtension[];
   directoryEntries: FileBrowserEntry[];
   displayModeClass: string;
@@ -49,6 +52,8 @@ defineProps<{
   isLoadingFileBrowserMore?: boolean;
   isModelEntry: (entry: FileBrowserEntry) => boolean;
   isMutatingFiles: boolean;
+  isClearingRecentHistory?: boolean;
+  isRecentView?: boolean;
   isReadOnlyVirtual: boolean;
   isSavingMetadata: boolean;
   isTrashPanel: boolean;
@@ -84,6 +89,7 @@ const renameValue = defineModel<string>("renameValue", { required: true });
 const emit = defineEmits<{
   back: [];
   createFile: [];
+  clearRecentHistory: [];
   deleteSelected: [];
   dragLeave: [event: DragEvent];
   dragOver: [event: DragEvent];
@@ -138,7 +144,6 @@ const emit = defineEmits<{
         :thumbnail-palette="thumbnailPalette"
         :save-metadata="saveMetadata"
         :save-cover-thumbnail="saveCoverThumbnail"
-        :status-label="statusLabel"
         @back="emit('back')"
         @open="emit('openEntry', $event)"
         @reveal="emit('revealEntry', $event)"
@@ -161,7 +166,10 @@ const emit = defineEmits<{
         :can-open-selected="canOpenSelected"
         :can-rename-selected="canRenameSelected"
         :can-restore-selected="canRestoreSelected"
+        :can-clear-recent-history="canClearRecentHistory"
         :current-file-entry="currentFileEntry"
+        :current-directory-display-name="currentDirectoryDisplayName"
+        :current-directory-path="currentDirectoryPath"
         :all-entries="allEntries"
         :directory-entries="directoryEntries"
         :display-mode-class="displayModeClass"
@@ -183,6 +191,8 @@ const emit = defineEmits<{
         :is-loading-file-browser-more="isLoadingFileBrowserMore"
         :is-model-entry="isModelEntry"
         :is-mutating-files="isMutatingFiles"
+        :is-clearing-recent-history="isClearingRecentHistory"
+        :is-recent-view="isRecentView"
         :is-read-only-virtual="isReadOnlyVirtual"
         :is-trash-panel="isTrashPanel"
         :is-virtual-view="isVirtualView"
@@ -203,6 +213,7 @@ const emit = defineEmits<{
         :thumbnail-src="thumbnailSrc"
         :virtual-subline="virtualSubline"
         :virtual-title="virtualTitle"
+        @clear-recent-history="emit('clearRecentHistory')"
         @create-file="emit('createFile')"
         @delete-selected="emit('deleteSelected')"
         @drag-leave="emit('dragLeave', $event)"

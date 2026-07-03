@@ -163,6 +163,32 @@ export const draggedWorkspacePaths = ref<string[]>([]);
 export const dragHoverFolderPath = ref<string | null>(null);
 export const error = ref<string | null>(null);
 
+function compareRecentAssetAccess(
+  left: NonNullable<typeof activeSnapshot.value>["assets"][number],
+  right: NonNullable<typeof activeSnapshot.value>["assets"][number],
+) {
+  return (right.lastAccessedAt ?? "").localeCompare(left.lastAccessedAt ?? "")
+    || right.modifiedAt.localeCompare(left.modifiedAt)
+    || left.filename.localeCompare(right.filename, "zh-CN");
+}
+
+function pruneRecentAccessAssets(
+  assets: NonNullable<typeof activeSnapshot.value>["assets"],
+) {
+  const ranked = assets
+    .filter((asset) => asset.lastAccessedAt)
+    .slice()
+    .sort(compareRecentAssetAccess);
+  if (ranked.length <= 50) return assets;
+
+  const keepAssetIds = new Set(ranked.slice(0, 50).map((asset) => asset.assetId));
+  return assets.map((asset) => (
+    asset.lastAccessedAt && !keepAssetIds.has(asset.assetId)
+      ? { ...asset, lastAccessedAt: null }
+      : asset
+  ));
+}
+
 export function patchActiveSnapshotAssetAccess(
   repoId: string,
   path: string,
@@ -173,12 +199,26 @@ export function patchActiveSnapshotAssetAccess(
 
   activeSnapshot.value = {
     ...activeSnapshot.value,
-    assets: activeSnapshot.value.assets.map((asset) => (
+    assets: pruneRecentAccessAssets(activeSnapshot.value.assets.map((asset) => (
       asset.path === path
         ? {
             ...asset,
             lastAccessedAt: recordedAt,
           }
+        : asset
+    ))),
+  };
+}
+
+export function clearActiveSnapshotRecentAccess(repoId: string) {
+  if (!activeSnapshot.value || activeSnapshot.value.repository.repoId !== repoId) return;
+  if (!activeSnapshot.value.assets.some((asset) => asset.lastAccessedAt)) return;
+
+  activeSnapshot.value = {
+    ...activeSnapshot.value,
+    assets: activeSnapshot.value.assets.map((asset) => (
+      asset.lastAccessedAt
+        ? { ...asset, lastAccessedAt: null }
         : asset
     )),
   };

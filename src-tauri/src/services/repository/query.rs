@@ -2,6 +2,8 @@
 
 use super::*;
 
+const MAX_RECENT_ACCESS_ENTRIES: i64 = 50;
+
 pub(super) fn load_snapshot(
     state: &RepositoryState,
     repo_id: &str,
@@ -201,6 +203,35 @@ pub(super) fn record_entry_access(
         repo_id: request.repo_id,
         path: entry_path,
         recorded_at,
+    })
+}
+
+pub(super) fn clear_recent_access_history(
+    state: &RepositoryState,
+    request: RecentAccessHistoryClearRequest,
+) -> Result<RecentAccessHistoryClearResponse, String> {
+    state.ensure_initialized()?;
+
+    let repo = state.load_repository_record(&request.repo_id)?;
+    let connection = state.open_repository_connection(
+        &repo.summary.repo_id,
+        &repo.summary.path,
+        &repo.backend_record,
+    )?;
+    let cleared_count = connection
+        .execute(
+            r#"
+            UPDATE assets
+            SET last_accessed_at = NULL
+            WHERE repo_id = ?1 AND last_accessed_at IS NOT NULL
+            "#,
+            [&request.repo_id],
+        )
+        .map_err(db_error)?;
+
+    Ok(RecentAccessHistoryClearResponse {
+        repo_id: request.repo_id,
+        cleared_count,
     })
 }
 
@@ -648,6 +679,22 @@ fn record_entry_access_in_connection(
         WHERE repo_id = ?1 AND path = ?2 AND status != 'deleted'
         "#,
         params![repo_id, entry_path, recorded_at],
+    )?;
+    connection.execute(
+        r#"
+        UPDATE assets
+        SET last_accessed_at = NULL
+        WHERE repo_id = ?1
+          AND asset_id NOT IN (
+            SELECT asset_id
+            FROM assets
+            WHERE repo_id = ?1 AND last_accessed_at IS NOT NULL
+            ORDER BY last_accessed_at DESC, path COLLATE NOCASE
+            LIMIT ?2
+          )
+          AND last_accessed_at IS NOT NULL
+        "#,
+        params![repo_id, MAX_RECENT_ACCESS_ENTRIES],
     )?;
     Ok(recorded_at)
 }

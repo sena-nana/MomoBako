@@ -390,6 +390,7 @@ pub struct PlaylistMembershipIndex {
 pub struct FileTreeNode {
     pub path: String,
     pub label: String,
+    pub file_count: usize,
     pub children: Vec<FileTreeNode>,
 }
 
@@ -696,6 +697,19 @@ pub struct EntryAccessRecordResponse {
     pub repo_id: String,
     pub path: String,
     pub recorded_at: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct RecentAccessHistoryClearRequest {
+    pub repo_id: String,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct RecentAccessHistoryClearResponse {
+    pub repo_id: String,
+    pub cleared_count: usize,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

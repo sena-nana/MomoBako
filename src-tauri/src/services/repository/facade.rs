@@ -162,6 +162,13 @@ impl RepositoryState {
         query::record_entry_access(self, request)
     }
 
+    pub fn clear_recent_access_history(
+        &self,
+        request: RecentAccessHistoryClearRequest,
+    ) -> Result<RecentAccessHistoryClearResponse, String> {
+        query::clear_recent_access_history(self, request)
+    }
+
     pub fn prepare_preview_file_source(
         &self,
         request: FileReadRequest,

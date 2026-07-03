@@ -77,13 +77,14 @@ describe("FileMetadataEditor", () => {
       originReferrer: "momoapp://library/reference-board",
     }));
 
-    const sourceRegion = screen.getByRole("region", { name: "来源信息" });
-    expect(sourceRegion).toHaveTextContent("Reference Board Item");
-    expect(sourceRegion).toHaveTextContent("https://example.test/assets/imported-image.png");
-    expect(sourceRegion).toHaveTextContent("momoapp://library/reference-board");
-
-    const sourceUrlRow = within(sourceRegion).getByText("原始链接").closest(".asset-meta__row");
+    const sourceTitleRow = screen.getByText("来源标题").closest(".asset-meta__row");
+    const sourceUrlRow = screen.getByText("来源链接").closest(".asset-meta__row");
+    expect(sourceTitleRow).not.toBeNull();
     expect(sourceUrlRow).not.toBeNull();
+    expect(sourceTitleRow).toHaveTextContent("Reference Board Item");
+    expect(sourceUrlRow).toHaveTextContent("https://example.test/assets/imported-image.png");
+    expect(screen.queryByText("momoapp://library/reference-board")).toBeNull();
+
     const sourceUrlButtons = within(sourceUrlRow as HTMLElement).getAllByRole("button");
     await fireEvent.click(sourceUrlButtons[0]);
     await fireEvent.click(sourceUrlButtons[1]);

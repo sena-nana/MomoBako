@@ -1008,7 +1008,7 @@ describe("文件管理冒烟", () => {
 
     await renderApp();
 
-    expect(screen.getAllByText("cover-final.psd").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("cover-final").length).toBeGreaterThan(0);
     expect(workspace.fileBrowser.value?.entries.find((entry) => entry.path === "cover-final.psd")?.thumbnailPath ?? null).toBeNull();
     await waitFor(() => {
       expect(getInvokeCalls("ensure_thumbnail").some((call) => (
@@ -1036,7 +1036,7 @@ describe("文件管理冒烟", () => {
     await fireEvent.update(displayModeSelect, "list");
     expect(localStorage.getItem("momobako.fileDisplayMode")).toBe("list");
     expect((await screen.findAllByText("227.9 MB")).length).toBeGreaterThan(0);
-    expect((await screen.findAllByText("已同步")).length).toBeGreaterThan(0);
+    expect(screen.queryByText("已同步")).toBeNull();
 
     cleanup();
     localStorage.setItem("momobako.fileDisplayMode", "masonry");
@@ -1223,11 +1223,24 @@ describe("文件管理冒烟", () => {
         ],
       });
     });
+    expect(screen.queryByRole("button", { name: "批量删除" })).toBeNull();
+  });
 
-    await fireEvent.click(screen.getByRole("button", { name: "批量删除" }));
-    await waitFor(() => {
-      expect(getInvokeCalls("delete_entry")).toHaveLength(2);
-    });
+  it("文件夹侧栏显示直属文件数并通过右键菜单提供操作", async () => {
+    seedMockRepository();
+    const workspace = useRepositoryWorkspace();
+    workspace.setActivePanel("files");
+    await renderApp();
+
+    const folderItem = folderTreeItem("Backgrounds");
+    expect(folderItem.textContent).toContain("1");
+    expect(document.querySelector(".workspace-folder-tree__actions")).toBeNull();
+
+    await fireEvent.contextMenu(folderItem, { clientX: 72, clientY: 88 });
+    expect(await screen.findByRole("menuitem", { name: "打开" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "新建子文件夹" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "重命名" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "删除" })).toBeInTheDocument();
   });
 
   it("切目录后丢弃旧目录返回的缩略图", async () => {
@@ -1341,8 +1354,7 @@ describe("文件管理冒烟", () => {
     workspace.setActivePanel("files");
     await renderApp();
 
-    const target = (await screen.findAllByText("cover-final.psd"))[0];
-    await fireEvent.contextMenu(target);
+    await fireEvent.contextMenu(fileListItem("cover-final.psd"));
     await fireEvent.click(await screen.findByRole("menuitem", { name: "自定义缩略图（选择文件）", hidden: true }));
 
     await waitFor(() => {
@@ -2405,9 +2417,9 @@ describe("文件管理冒烟", () => {
     await waitFor(() => {
       expect(document.querySelector(".files-preview-page__player-mount .media-playlist-runtime--image [data-path='cover-final.psd']")).toBeInTheDocument();
     });
-    expect(screen.getByRole("heading", { name: "cover-final.psd" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "cover-final" })).toBeInTheDocument();
 
-    await fireEvent.update(screen.getByLabelText("图片停留时长"), "7");
+    await fireEvent.update(screen.getAllByLabelText("图片停留时长")[0], "7");
     await fireEvent.click(screen.getByRole("radio", { name: "填充" }));
 
     expect(localStorage.getItem("momobako.playbackSettings")).toContain("\"imageDurationMs\":7000");
@@ -2454,6 +2466,7 @@ describe("文件管理冒烟", () => {
           specialLocation: "trash",
         },
       });
+      expect(fileListItems().map((item) => item.dataset.entryPath)).toEqual(["deleted-draft.png"]);
     });
     const workspace = useRepositoryWorkspace();
     expect(workspace.activePanel.value).toBe("trash");
@@ -2488,6 +2501,73 @@ describe("文件管理冒烟", () => {
         "Backgrounds/scene-forest-03.png",
       ]);
     });
+  });
+
+  it("最近使用记录超过 50 条后在当前会话内立即裁剪到 50 条", async () => {
+    seedMockRepository();
+    mockSnapshot.assets = Array.from({ length: 55 }, (_, index) => ({
+      assetId: `asset-recent-${index}`,
+      repoId: "repo-main-001",
+      path: `Recent/recent-${index}.png`,
+      filename: `recent-${index}.png`,
+      extension: "png",
+      sizeBytes: 1024 + index,
+      sizeLabel: "1 KB",
+      status: "synced",
+      modifiedAt: `2026-06-${String((index % 28) + 1).padStart(2, "0")}T08:00:00Z`,
+      lastAccessedAt: `2026-06-${String((index % 28) + 1).padStart(2, "0")}T09:00:${String(index).padStart(2, "0")}Z`,
+      version: 1,
+      tags: ["recent"],
+    }));
+    mockSnapshot.repository.assetCount = 55;
+    mockSnapshot.overview.fileCount = 55;
+    await renderApp();
+
+    await fireEvent.click(screen.getByRole("button", { name: /最近使用/ }));
+    await waitFor(() => {
+      expect(fileListItems()).toHaveLength(55);
+    });
+
+    const workspace = useRepositoryWorkspace();
+    await workspace.openWorkspaceEntry("Recent/recent-54.png");
+
+    await waitFor(() => {
+      expect(getInvokeCalls("record_entry_access").at(-1)?.args).toMatchObject({
+        request: {
+          repoId: "repo-main-001",
+          path: "Recent/recent-54.png",
+        },
+      });
+      expect(fileListItems()).toHaveLength(50);
+    });
+  });
+
+  it("最近使用视图支持清空当前仓库记录并保留当前视图", async () => {
+    seedMockRepository();
+    await renderApp();
+
+    await fireEvent.click(screen.getByRole("button", { name: /最近使用/ }));
+    await waitFor(() => {
+      expect(fileListItems().map((item) => item.dataset.entryPath)).toEqual([
+        "Campaigns/Summer/cover-final.psd",
+        "Backgrounds/scene-forest-03.png",
+      ]);
+    });
+
+    await fireEvent.click(screen.getByRole("button", { name: "清空记录" }));
+
+    await waitFor(() => {
+      expect(getInvokeCalls("clear_recent_access_history").at(-1)?.args).toMatchObject({
+        request: {
+          repoId: "repo-main-001",
+        },
+      });
+      expect(fileListItems()).toHaveLength(0);
+    });
+
+    const workspace = useRepositoryWorkspace();
+    expect(workspace.activePanel.value).toBe("files");
+    expect(workspace.activeLibraryCategory.value).toBe("recent");
   });
 
   it("保留目录按需加载，并在结构变化后刷新文件夹树", async () => {
@@ -2706,7 +2786,7 @@ describe("文件管理冒烟", () => {
     });
 
     expect(screen.queryByRole("heading", { name: "搜索结果" })).not.toBeInTheDocument();
-    expect(await screen.findByRole("heading", { name: "target-preview.png" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "target-preview" })).toBeInTheDocument();
     expect(screen.getByText("Reference/Paint/target-preview.png")).toBeInTheDocument();
     await waitFor(() => {
       expect(getInvokeCalls("prepare_entry_playback_source_with_progress").at(-1)?.args).toMatchObject({
@@ -2757,8 +2837,8 @@ describe("文件管理冒烟", () => {
     });
 
     expect((await screen.findAllByText("高评分封面")).length).toBeGreaterThan(0);
-    expect(await screen.findByText("智能文件夹不会改变实际目录。")).toBeInTheDocument();
-    expect((await screen.findAllByText("cover-final.psd")).length).toBeGreaterThan(0);
+    expect(await screen.findByText(/1 条结果/)).toBeInTheDocument();
+    expect((await screen.findAllByText("cover-final")).length).toBeGreaterThan(0);
     expect(screen.queryByRole("button", { name: "建文件" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "重命名" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "删除" })).not.toBeInTheDocument();
