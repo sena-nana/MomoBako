@@ -164,6 +164,31 @@ mod tests {
     }
 
     #[test]
+    fn sync_repository_recovers_missing_database_before_writing_assets() {
+        let (state, root, repo_root, _thumbnail_root) =
+            create_test_state("sync-rebuild-missing-db");
+        fs::write(repo_root.join("track.mp3"), b"demo").expect("test file should be written");
+        let repo_id = create_repository_for_path(&state, &repo_root);
+
+        fs::remove_file(repo_root.join(REPO_META_DIR).join(REPO_DB_FILE_NAME))
+            .expect("repository database should be removed");
+
+        let result = state
+            .sync_repository(SyncRequest {
+                repo_id: repo_id.clone(),
+            })
+            .expect("sync should rebuild repository identity before indexing assets");
+
+        assert_eq!(result.scanned_files, 1);
+        assert_eq!(
+            asset_status_for_path(&state, &repo_id, "track.mp3").as_deref(),
+            Some("synced")
+        );
+
+        fs::remove_dir_all(root).expect("test workspace should be removed");
+    }
+
+    #[test]
     fn list_repositories_recovers_asset_count_after_metadata_loss() {
         let (state, root, repo_root, _thumbnail_root) =
             create_test_state("list-rebuild-meta-asset-count");
