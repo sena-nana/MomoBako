@@ -1,0 +1,76 @@
+src-tauri/src/services/repository/read_model.rs
+  s_d4ee6152c91720::t_03fd621fa6df93 85-91,215,659-663
+src-tauri/src/app_shell.rs
+  s_1cabf8d0f77a1f::t_d09805ac7385e6 3
+src-tauri/src/lib.rs
+  s_1cabf8d0f77a1f::t_4ccb856abe7f51 29-30,326-328
+src-tauri/src/models/repository/api.rs
+  s_1cabf8d0f77a1f::t_a7a5d9e3923f91 11-37
+src-tauri/src/services/repository/browser.rs
+  s_1cabf8d0f77a1f::t_9c3f83635f20f8 370-371
+src-tauri/src/services/repository/file_transfer.rs
+  s_1cabf8d0f77a1f::t_dae6582172eb37 7
+src-tauri/src/services/repository/playlist.rs
+  s_1cabf8d0f77a1f::t_694eafc12368fd 430-433
+src-tauri/src/services/repository/plugin.rs
+  s_1cabf8d0f77a1f::t_91d6dd84a8be21 447-448,549-552,813-816,953,1047-1050,1236-1238,1333-1334,1434-1437,1471-1474,1514-1517
+src-tauri/src/services/repository/query.rs
+  s_1cabf8d0f77a1f::t_7f079c8ac2624c 28-32,200-201
+src-tauri/src/services/repository/registry_store.rs
+  s_16794827872a97::t_0f30457729a307 145-162,306-308,315-318,857-869,871-872
+src-tauri/src/services/repository/smart_folder.rs
+  s_1cabf8d0f77a1f::t_d17a388fc8b1e1 44-46,50-52,114-115
+src-tauri/src/services/runtime/mod.rs
+  s_1cabf8d0f77a1f::t_0c5968f3312d32 48-49
+src-tauri/src/services/runtime/preview_server.rs
+  s_1cabf8d0f77a1f::t_cb0e918c5fe052 22-24
+src-tauri/src/tests/repository/external_assets.rs
+  s_1cabf8d0f77a1f::t_5dbf8a7fe4d46c 6-8,48
+src-tauri/src/tests/repository/playback.rs
+  s_1cabf8d0f77a1f::t_9bb92a2969dda0 7
+src-tauri/src/tests/runtime/external_api.rs
+  s_1cabf8d0f77a1f::t_df44799ba935f5 2,72-73
+src-tauri/src/tests/runtime/preview_server.rs
+  s_1cabf8d0f77a1f::t_cbc4d6aa40d127 1-3,10,24-26,148,201,275-279
+src-tauri/src/viewmodels/repository/interaction.rs
+  s_1cabf8d0f77a1f::t_eb8c17e9c6f013 4-13
+src-tauri/src/viewmodels/system.rs
+  s_1cabf8d0f77a1f::t_74847804dfad46 3
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "4ce7ac37a0285b8d8e9b024328ad619d388a38cb",
+  "prompts": {},
+  "humans": {
+    "h_8e6780fc7b4bb1": {
+      "author": "AuraElicase <auraelicase@outlook.com>"
+    }
+  },
+  "sessions": {
+    "s_16794827872a97": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f26c9-d76d-7cb1-bdb3-c05b359d9d72",
+        "model": "unknown"
+      },
+      "human_author": "AuraElicase <auraelicase@outlook.com>"
+    },
+    "s_1cabf8d0f77a1f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f26bd-eb42-7002-9220-b7a168f4bd19",
+        "model": "unknown"
+      },
+      "human_author": "AuraElicase <auraelicase@outlook.com>"
+    },
+    "s_d4ee6152c91720": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f2775-ef99-7ef3-bf90-ad59e7b47b13",
+        "model": "gpt-5.5"
+      },
+      "human_author": "AuraElicase <auraelicase@outlook.com>"
+    }
+  }
+}
