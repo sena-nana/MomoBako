@@ -456,12 +456,24 @@ pub(super) fn sync_repository(
     )
 }
 
-pub(super) fn sync_repository_with_hint_paths(
+pub(super) fn sync_repository_changed_paths(
     state: &RepositoryState,
     repo_id: &str,
-    hint_paths: &std::collections::BTreeSet<String>,
+    changed_paths: &std::collections::BTreeSet<String>,
 ) -> Result<SyncResult, String> {
-    sync_repository_with_candidate_skips_and_hint_paths(state, repo_id, &HashSet::new(), hint_paths)
+    state.ensure_initialized()?;
+    let repo = state.load_repository_record(repo_id)?;
+    let mut connection = state.open_repository_connection(
+        &repo.summary.repo_id,
+        &repo.summary.path,
+        &repo.backend_record,
+    )?;
+    let tx = connection.transaction().map_err(db_error)?;
+
+    let sync = sync_repository_changed_paths_incremental(&state.root, &tx, &repo, changed_paths)
+        .map_err(db_error)?;
+    tx.commit().map_err(db_error)?;
+    Ok(sync)
 }
 
 pub(super) fn sync_repository_with_candidate_skips(

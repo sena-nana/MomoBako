@@ -8,6 +8,7 @@ import {
   listRepositoryActions,
   listSmartFolders,
   listRepositories,
+  syncRepository,
 } from "../../services/repositoryApi";
 import type {
   RepositoryStructureUpdatedEvent,
@@ -384,11 +385,14 @@ async function loadInitialRepository(
     return;
   }
 
-  setWorkspaceStartupProgress(2, "读取仓库摘要");
+  setWorkspaceStartupProgress(2, "扫描资源库文件");
+  lastSyncResult.value = await syncRepository({ repoId: nextRepoId });
+
+  setWorkspaceStartupProgress(3, "读取仓库摘要");
   await applyRepositorySnapshotState(nextRepoId, selectAsset);
   rememberLastActiveRepository(nextRepoId);
 
-  setWorkspaceStartupProgress(3, "读取首屏目录");
+  setWorkspaceStartupProgress(4, "读取首屏目录");
   const playlistItems = playlists.value;
   playlists.value = playlistItems;
   await primePlaylistDetailCache(nextRepoId, playlistItems);

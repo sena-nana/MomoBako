@@ -2763,6 +2763,87 @@ mod tests {
         fs::remove_dir_all(root).expect("test temp root should be removed");
     }
 
+    #[test]
+    fn changed_path_sync_creates_updates_and_deletes_file() {
+        let (state, root, repo_root, _thumbnail_root) = create_test_state("changed-path-file-sync");
+        let repo_id = create_repository_without_initial_sync(&state, &repo_root);
+
+        fs::write(repo_root.join("alpha.txt"), "one").expect("test file should be written");
+        let created = state
+            .sync_repository_changed_paths(&repo_id, &changed_paths(&["alpha.txt"]))
+            .expect("changed file should sync");
+        assert_eq!(created.created_assets, 1);
+        assert_eq!(
+            asset_status_for_path(&state, &repo_id, "alpha.txt").as_deref(),
+            Some("synced")
+        );
+
+        fs::write(repo_root.join("alpha.txt"), "updated file body")
+            .expect("test file should be updated");
+        let updated = state
+            .sync_repository_changed_paths(&repo_id, &changed_paths(&["alpha.txt"]))
+            .expect("updated file should sync");
+        assert_eq!(updated.updated_assets, 1);
+        assert_eq!(
+            asset_size_for_path(&state, &repo_id, "alpha.txt"),
+            Some("updated file body".len() as i64)
+        );
+
+        fs::remove_file(repo_root.join("alpha.txt")).expect("test file should be removed");
+        let deleted = state
+            .sync_repository_changed_paths(&repo_id, &changed_paths(&["alpha.txt"]))
+            .expect("deleted file should sync");
+        assert_eq!(deleted.deleted_assets, 1);
+        assert_eq!(
+            asset_status_for_path(&state, &repo_id, "alpha.txt").as_deref(),
+            Some("deleted")
+        );
+
+        fs::remove_dir_all(root).expect("test temp root should be removed");
+    }
+
+    #[test]
+    fn changed_path_sync_expands_and_deletes_directory_prefix() {
+        let (state, root, repo_root, _thumbnail_root) =
+            create_test_state("changed-path-directory-sync");
+        let repo_id = create_repository_without_initial_sync(&state, &repo_root);
+        fs::create_dir_all(repo_root.join("Scenes/Act1"))
+            .expect("nested directory should be created");
+        fs::write(repo_root.join("Scenes/Act1/shot-a.txt"), "shot a")
+            .expect("first nested file should be written");
+        fs::write(repo_root.join("Scenes/Act1/shot-b.txt"), "shot b")
+            .expect("second nested file should be written");
+
+        let created = state
+            .sync_repository_changed_paths(&repo_id, &changed_paths(&["Scenes"]))
+            .expect("changed directory should sync");
+        assert_eq!(created.created_assets, 2);
+        let tree = state
+            .load_repository_tree(&repo_id)
+            .expect("repository tree should load after changed sync");
+        assert!(tree.tree.iter().any(|node| node.path == "Scenes"));
+
+        fs::remove_dir_all(repo_root.join("Scenes")).expect("nested directory should be removed");
+        let deleted = state
+            .sync_repository_changed_paths(&repo_id, &changed_paths(&["Scenes"]))
+            .expect("deleted directory should sync");
+        assert_eq!(deleted.deleted_assets, 2);
+        assert_eq!(
+            asset_status_for_path(&state, &repo_id, "Scenes/Act1/shot-a.txt").as_deref(),
+            Some("deleted")
+        );
+        assert_eq!(
+            asset_status_for_path(&state, &repo_id, "Scenes/Act1/shot-b.txt").as_deref(),
+            Some("deleted")
+        );
+        let tree = state
+            .load_repository_tree(&repo_id)
+            .expect("repository tree should load after directory deletion");
+        assert!(tree.tree.iter().all(|node| node.path != "Scenes"));
+
+        fs::remove_dir_all(root).expect("test temp root should be removed");
+    }
+
     const LONG_RELATIVE_PATH: &str = "CubismSdkForNative-5-r.5/Samples/OpenGL/Demo/proj.harmonyos.cmake/Full/entry/src/main/resources/base/media/startIcon.png";
 
     fn unique_temp_dir(label: &str) -> PathBuf {
@@ -2855,6 +2936,52 @@ mod tests {
             )
             .expect("repository should be registered");
         repo_id
+    }
+
+    fn changed_paths(paths: &[&str]) -> std::collections::BTreeSet<String> {
+        paths.iter().map(|path| path.to_string()).collect()
+    }
+
+    fn asset_status_for_path(state: &RepositoryState, repo_id: &str, path: &str) -> Option<String> {
+        let repo = state
+            .load_repository_record(repo_id)
+            .expect("repository record should load");
+        let connection = state
+            .open_repository_connection(
+                &repo.summary.repo_id,
+                &repo.summary.path,
+                &repo.backend_record,
+            )
+            .expect("repository connection should open");
+        connection
+            .query_row(
+                "SELECT status FROM assets WHERE repo_id = ?1 AND path = ?2",
+                params![repo_id, path],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .expect("asset status should query")
+    }
+
+    fn asset_size_for_path(state: &RepositoryState, repo_id: &str, path: &str) -> Option<i64> {
+        let repo = state
+            .load_repository_record(repo_id)
+            .expect("repository record should load");
+        let connection = state
+            .open_repository_connection(
+                &repo.summary.repo_id,
+                &repo.summary.path,
+                &repo.backend_record,
+            )
+            .expect("repository connection should open");
+        connection
+            .query_row(
+                "SELECT size_bytes FROM assets WHERE repo_id = ?1 AND path = ?2",
+                params![repo_id, path],
+                |row| row.get::<_, i64>(0),
+            )
+            .optional()
+            .expect("asset size should query")
     }
 
     fn create_netease_repository_without_initial_sync(

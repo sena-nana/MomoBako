@@ -421,12 +421,12 @@ impl RepositoryState {
         management::sync_repository(self, request)
     }
 
-    pub(crate) fn sync_repository_with_hint_paths(
+    pub(crate) fn sync_repository_changed_paths(
         &self,
         repo_id: &str,
-        hint_paths: &std::collections::BTreeSet<String>,
+        changed_paths: &std::collections::BTreeSet<String>,
     ) -> Result<SyncResult, String> {
-        management::sync_repository_with_hint_paths(self, repo_id, hint_paths)
+        management::sync_repository_changed_paths(self, repo_id, changed_paths)
     }
 
     pub(super) fn sync_repository_with_candidate_skips(

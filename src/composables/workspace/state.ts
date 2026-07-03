@@ -69,7 +69,7 @@ export function createEmptyFileBrowserDerivedState(): FileBrowserDerivedState {
   };
 }
 
-export const STARTUP_TOTAL_STEPS = 3;
+export const STARTUP_TOTAL_STEPS = 4;
 
 export function createInitialWorkspaceStartup(): WorkspaceStartupState {
   return {
