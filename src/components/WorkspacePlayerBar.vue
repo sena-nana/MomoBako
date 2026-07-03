@@ -15,6 +15,7 @@ import type {
   WorkspacePlayerBarEmitMap,
   WorkspacePlayerBarProps,
 } from "./workspacePlayerBar.contract";
+import { displayNameWithoutExtension } from "../utils/fileName";
 import { resolveThumbnailSrc } from "../utils/thumbnailSrc";
 
 const props = defineProps<WorkspacePlayerBarProps>();
@@ -41,6 +42,17 @@ function progressPercent() {
 
 function imageDurationSeconds() {
   return Math.round(props.imageDurationMs / 1000);
+}
+
+function mediaTypeLabel() {
+  if (props.fileClass === "image") return "图片";
+  if (props.fileClass === "video") return "视频";
+  if (props.fileClass === "audio") return "音频";
+  return "媒体";
+}
+
+function itemTitle(filename?: string | null, extension?: string | null) {
+  return displayNameWithoutExtension(filename ?? "", extension);
 }
 
 function seekFromInput(event: Event) {
@@ -76,10 +88,10 @@ function setImageDurationFromInput(event: Event) {
       <button type="button" class="workspace-player__media" :disabled="!item" @click="emit('openPreview')">
         <span class="workspace-player__thumb" aria-hidden="true">
           <img v-if="resolveThumbnailSrc(item?.thumbnailPath)" :src="resolveThumbnailSrc(item?.thumbnailPath) ?? undefined" alt="" />
-          <span v-else>{{ item?.extension?.toUpperCase() ?? "—" }}</span>
+          <span v-else>{{ mediaTypeLabel() }}</span>
         </span>
         <span class="workspace-player__meta">
-          <strong>{{ item?.filename ? `正在播放 ${item.filename}` : "未选择播放内容" }}</strong>
+          <strong>{{ item?.filename ? `正在播放 ${itemTitle(item.filename, item.extension)}` : "未选择播放内容" }}</strong>
           <small v-if="errorMessage">{{ errorMessage }}</small>
           <small v-else>{{ playerLabel ? `${playerLabel} · ${item?.path ?? ""}` : (item?.path ?? "选择播放集后可开始播放") }}</small>
         </span>
@@ -181,10 +193,10 @@ function setImageDurationFromInput(event: Event) {
         >
           <span class="workspace-player__queue-thumb">
             <img v-if="resolveThumbnailSrc(queueItem.thumbnailPath)" :src="resolveThumbnailSrc(queueItem.thumbnailPath) ?? undefined" alt="" />
-            <span v-else>{{ queueItem.extension.toUpperCase() }}</span>
+            <span v-else>{{ mediaTypeLabel() }}</span>
           </span>
           <span class="workspace-player__queue-meta">
-            <strong>{{ queueItem.filename }}</strong>
+            <strong>{{ itemTitle(queueItem.filename, queueItem.extension) }}</strong>
             <small v-if="queueItem.status !== 'ready'">{{ queueItem.statusReason ?? queueItem.status }}</small>
             <small v-else>{{ queueItem.path }}</small>
           </span>

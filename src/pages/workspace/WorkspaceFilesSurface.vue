@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { PencilLine } from "@lucide/vue";
 import type { Component } from "vue";
 import WorkspacePlayerBar from "../../components/WorkspacePlayerBar.vue";
 import type { WorkspacePlayerBarHandlers, WorkspacePlayerBarProps } from "../../components/workspacePlayerBar.contract";
@@ -108,16 +109,17 @@ const emit = defineEmits<{
   loadMore: [];
   markThumbnailFailed: [entry: FileBrowserEntry];
   openDirectory: [path: string];
-  openEntry: [path: string];
+  openEntry: [entry: FileBrowserEntry];
   openSelected: [];
   previewFile: [entry: FileBrowserEntry];
   restoreAllTrash: [];
   restoreSelected: [];
-  revealEntry: [path: string];
+  revealEntry: [entry: FileBrowserEntry];
   revealSelected: [];
   selectEntries: [paths: string[], mode: BoxSelectionMode];
   selectEntry: [entry: FileBrowserEntry, mode: SelectionMode];
   startRename: [];
+  cancelRename: [];
   submitRename: [];
   thumbnailError: [entry: FileBrowserEntry];
   thumbnailLoaded: [entry: FileBrowserEntry, event: Event];
@@ -158,7 +160,6 @@ const emit = defineEmits<{
       <FileBrowserPanel
         v-model:create-file-name="createFileName"
         v-model:file-display-mode="fileDisplayMode"
-        v-model:rename-value="renameValue"
         :breadcrumbs="breadcrumbs"
         :can-drag-entries="canDragEntries"
         :can-delete-selected="canDeleteSelected"
@@ -199,7 +200,6 @@ const emit = defineEmits<{
         :is-video-entry="isVideoEntry"
         :has-more-entries="hasMoreEntries"
         :open-selected-label="openSelectedLabel"
-        :rename-target-path="renameTargetPath"
         :is-saving-metadata="isSavingMetadata"
         :available-tags="availableTags"
         :tag-groups="tagGroups"
@@ -250,11 +250,56 @@ const emit = defineEmits<{
         </template>
       </FileBrowserPanel>
     </div>
+    <Teleport to="body">
+      <Transition name="modal">
+        <div
+          v-if="renameTargetPath"
+          class="modal-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-label="重命名文件"
+          @click.self="emit('cancelRename')"
+        >
+          <div class="modal-card dialog-card workspace-rename-dialog">
+            <div class="dialog-card__header">
+              <PencilLine :size="14" aria-hidden="true" />
+              <span>重命名文件</span>
+            </div>
+            <div class="dialog-card__body workspace-rename-dialog__body">
+              <label class="dialog-field">
+                <span>新名称</span>
+                <input
+                  v-model="renameValue"
+                  type="text"
+                  autofocus
+                  :disabled="isMutatingFiles"
+                  placeholder="输入新的文件名"
+                  @keydown.esc.prevent="emit('cancelRename')"
+                  @keydown.enter.prevent="emit('submitRename')"
+                />
+              </label>
+            </div>
+            <div class="dialog-card__actions">
+              <button type="button" class="ghost" :disabled="isMutatingFiles" @click="emit('cancelRename')">
+                取消
+              </button>
+              <button type="button" class="primary" :disabled="isMutatingFiles" @click="emit('submitRename')">
+                {{ isMutatingFiles ? "处理中..." : "保存" }}
+              </button>
+            </div>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
   </section>
 </template>
 
 <style scoped>
 .workspace-files-surface__browser-shell {
   display: contents;
+}
+
+.workspace-rename-dialog {
+  width: min(460px, 92vw);
 }
 </style>

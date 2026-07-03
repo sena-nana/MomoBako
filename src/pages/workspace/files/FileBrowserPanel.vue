@@ -8,7 +8,6 @@ import {
   Folder,
   FolderOpen,
   LoaderCircle,
-  PencilLine,
   Plus,
   RotateCcw,
   Trash2,
@@ -19,6 +18,7 @@ import type { ContextMenuItem } from "../../../ui/core";
 import { vContextMenu } from "../../../ui/core";
 import type { RegisteredLibraryExtension } from "../../../plugins/sdk";
 import type { FileBrowserEntry, RepositoryTagGroup } from "../../../types/repository";
+import { metadataComment, metadataString } from "../../../utils/fileMetadata";
 import { useFileBrowserPanelViewModel } from "./useFileBrowserPanelViewModel";
 import { entryDisplayTitle } from "./filePresentation";
 
@@ -71,7 +71,6 @@ const props = defineProps<{
   isVideoEntry: (entry: FileBrowserEntry) => boolean;
   hasMoreEntries?: boolean;
   openSelectedLabel: string;
-  renameTargetPath: string | null;
   selectedEntries: FileBrowserEntry[];
   selectedFilePaths: string[];
   selectedFilePath: string | null;
@@ -89,7 +88,6 @@ const props = defineProps<{
 
 const createFileName = defineModel<string>("createFileName", { required: true });
 const fileDisplayMode = defineModel<FileDisplayMode>("fileDisplayMode", { required: true });
-const renameValue = defineModel<string>("renameValue", { required: true });
 
 const emit = defineEmits<{
   createFile: [];
@@ -492,16 +490,18 @@ onBeforeUnmount(() => {
         <p v-if="currentFileEntry.path !== currentFileEntry.name" class="files-detail__subline">
           {{ currentFileEntry.path }}
         </p>
-      </div>
-
-      <div v-if="!isReadOnlyVirtual && renameTargetPath === currentFileEntry.path" class="files-detail__section">
-        <p class="asset-browser__eyebrow">重命名</p>
-        <div class="files-detail__rename">
-          <input v-model="renameValue" type="text" />
-          <button type="button" :disabled="isMutatingFiles" @click="emit('submitRename')">
-            <PencilLine :size="14" aria-hidden="true" />
-            保存
-          </button>
+        <div
+          v-if="metadataComment(currentFileEntry.metadata) || metadataString(currentFileEntry.metadata, 'link')"
+          class="files-detail__lead"
+        >
+          <p v-if="metadataComment(currentFileEntry.metadata)" class="files-detail__lead-row">
+            <span>注释</span>
+            <strong>{{ metadataComment(currentFileEntry.metadata) }}</strong>
+          </p>
+          <p v-if="metadataString(currentFileEntry.metadata, 'link')" class="files-detail__lead-row">
+            <span>链接</span>
+            <strong>{{ metadataString(currentFileEntry.metadata, "link") }}</strong>
+          </p>
         </div>
       </div>
 

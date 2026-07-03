@@ -95,6 +95,25 @@ describe("FileMetadataEditor", () => {
     expect(writeText).toHaveBeenCalledWith("https://example.test/assets/imported-image.png");
   });
 
+  it("将注释和链接编辑区排在技术 metadata 之前", () => {
+    const { container } = renderEditor(createEntry({
+      comment: "整理来源和待办",
+      link: "https://example.test/task/imported-image",
+      addedToLibraryAt: "2026-06-05T00:18:00Z",
+    }));
+
+    const commentRow = screen.getByText("注释").closest(".asset-meta__row");
+    const linkRow = screen.getByText("链接").closest(".asset-meta__row");
+    const addedRow = screen.getByText("添加到资源库").closest(".asset-meta__row");
+
+    expect(commentRow).toBeInstanceOf(HTMLElement);
+    expect(linkRow).toBeInstanceOf(HTMLElement);
+    expect(addedRow).toBeInstanceOf(HTMLElement);
+    expect(container.querySelector(".file-metadata-card")).toContainElement(commentRow as HTMLElement);
+    expect((commentRow as HTMLElement).compareDocumentPosition(addedRow as HTMLElement)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect((linkRow as HTMLElement).compareDocumentPosition(addedRow as HTMLElement)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+  });
+
   it("显示 ASMR 作品 metadata 专用区", () => {
     renderEditor(createEntry({
       libraryKind: "asmr",

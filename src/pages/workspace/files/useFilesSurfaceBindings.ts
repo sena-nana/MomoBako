@@ -98,16 +98,17 @@ export type WorkspaceFilesSurfaceBindingOptions = {
   loadMoreEntries: () => void | Promise<unknown>;
   markThumbnailFailed: (entry: FileBrowserEntry) => void;
   openDirectory: (path: string) => void | Promise<unknown>;
-  openWorkspaceEntry: (path: string) => void | Promise<unknown>;
+  openWorkspaceEntry: (entry: FileBrowserEntry) => void | Promise<unknown>;
   openSelectedEntry: () => void | Promise<unknown>;
   previewFileEntryByDoubleClick: (entry: FileBrowserEntry) => void;
   handleRestoreAllTrash: () => void | Promise<unknown>;
   restoreSelectedEntry: () => void | Promise<unknown>;
-  revealWorkspaceEntry: (path: string) => void | Promise<unknown>;
+  revealWorkspaceEntry: (entry: FileBrowserEntry) => void | Promise<unknown>;
   revealSelectedEntry: () => void | Promise<unknown>;
   handleBoxSelection: (paths: string[], mode: BoxSelectionMode) => void;
   selectFileEntry: (entry: FileBrowserEntry, mode: SelectionMode) => void;
   startRenameSelected: () => void;
+  cancelRenameSelected: () => void;
   submitRenameSelected: () => void | Promise<unknown>;
   updateThumbnailAspectRatio: (entry: FileBrowserEntry, event: Event) => void;
   updateVisibleThumbnailEntries: (entries: FileBrowserEntry[]) => void;
@@ -212,6 +213,7 @@ export function useFilesSurfaceBindings(options: WorkspaceFilesSurfaceBindingOpt
     selectEntries: options.handleBoxSelection,
     selectEntry: options.selectFileEntry,
     startRename: options.startRenameSelected,
+    cancelRename: options.cancelRenameSelected,
     submitRename: options.submitRenameSelected,
     thumbnailError: options.markThumbnailFailed,
     thumbnailLoaded: options.updateThumbnailAspectRatio,
