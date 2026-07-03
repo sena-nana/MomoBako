@@ -1,0 +1,30 @@
+src-tauri/src/services/repository/facade.rs
+  s_d78ccad5ff38cc::t_67cad7f47f54cd 1120-1121
+src-tauri/src/services/repository/internal_tests.rs
+  s_d78ccad5ff38cc::t_35e2d7f0ee4d72 167,170-190
+  s_d78ccad5ff38cc::t_ecf0e90cef112d 168-169
+  s_d78ccad5ff38cc::t_5d34d6b405386d 166
+src-tauri/src/services/repository/registry_store.rs
+  s_d78ccad5ff38cc::t_f7d074eb43cd83 813-841
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "80491dec48537f7ca188220b5198098b368dab95",
+  "prompts": {},
+  "humans": {
+    "h_8e6780fc7b4bb1": {
+      "author": "AuraElicase <auraelicase@outlook.com>"
+    }
+  },
+  "sessions": {
+    "s_d78ccad5ff38cc": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f27b7-6426-7031-8c48-f51fb5ee74ac",
+        "model": "gpt-5.5"
+      },
+      "human_author": "AuraElicase <auraelicase@outlook.com>"
+    }
+  }
+}
