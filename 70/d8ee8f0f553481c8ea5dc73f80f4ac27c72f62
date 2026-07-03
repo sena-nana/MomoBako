@@ -1,0 +1,64 @@
+src-tauri/src/lib.rs
+  s_73ed5b02e3f785::t_4b49624fa01775 31,321-328,754
+src-tauri/src/models/repository/api.rs
+  s_73ed5b02e3f785::t_01db7957f705e0 27
+src-tauri/src/services/repository/api_design.rs
+  s_f0abc17e5269b6::t_7b6c980870b228 150-179
+src-tauri/src/services/repository/browser.rs
+  s_73ed5b02e3f785::t_ed3cb247dc0966 26-29,41,50-51,56,369-370,373,540-541,544
+src-tauri/src/services/repository/contracts.rs
+  s_73ed5b02e3f785::t_86142262b812c6 393,702-714
+src-tauri/src/services/repository/facade.rs
+  s_73ed5b02e3f785::t_4a55f6b0600deb 165-171
+src-tauri/src/services/repository/filesystem_backend.rs
+  s_73ed5b02e3f785::t_6007528aa62db0 518,537,559
+src-tauri/src/services/repository/internal_tests.rs
+  s_f0abc17e5269b6::t_256ec291e4d74a 2406-2566
+src-tauri/src/services/repository/query.rs
+  s_73ed5b02e3f785::t_8aaf43b65c1107 5-6,209-237,683-698
+src-tauri/src/services/repository/read_model.rs
+  s_73ed5b02e3f785::t_81cf0963d3beee 52-80
+src/services/repositoryApi/files.ts
+  s_73ed5b02e3f785::t_5980a4c851d850 25-26,125-128
+src/types/repository/core.ts
+  s_73ed5b02e3f785::t_46cdfa54b2748b 153,611-619
+tests/fileInteraction.test.ts
+  s_9dc404649a1020::t_eba9b2ee38bcdd 10,25,35,43,58,67
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.5",
+  "base_commit_sha": "70d8ee8f0f553481c8ea5dc73f80f4ac27c72f62",
+  "prompts": {},
+  "humans": {
+    "h_8e6780fc7b4bb1": {
+      "author": "AuraElicase <auraelicase@outlook.com>"
+    }
+  },
+  "sessions": {
+    "s_73ed5b02e3f785": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f25fc-fe02-7782-b8ad-42291b92ca29",
+        "model": "unknown"
+      },
+      "human_author": "AuraElicase <auraelicase@outlook.com>"
+    },
+    "s_9dc404649a1020": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f1202-866c-7a11-b051-6349f55579b1",
+        "model": "unknown"
+      },
+      "human_author": "AuraElicase <auraelicase@outlook.com>"
+    },
+    "s_f0abc17e5269b6": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f0caa-72ab-7720-90c5-6cba6822b374",
+        "model": "unknown"
+      },
+      "human_author": "AuraElicase <auraelicase@outlook.com>"
+    }
+  }
+}
