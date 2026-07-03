@@ -1091,7 +1091,50 @@ impl RepositoryState {
             repo_root,
             &backend_record.plugin_id,
         )?;
-        let connection = Connection::open(storage_paths.database_path).map_err(db_error)?;
+        let database_missing = !storage_paths.database_path.exists();
+        let metadata_missing = !storage_paths
+            .metadata_dir
+            .join(REPO_METADATA_FILE_NAME)
+            .exists();
+        let (mut connection, database_rebuilt) =
+            match self.try_open_repository_connection(&storage_paths.database_path) {
+                Ok(connection) => (connection, false),
+                Err(_) if storage_paths.database_path.exists() => {
+                    // 数据库文件损坏时直接重建，再从后端重新同步内容。
+                    fs::remove_file(&storage_paths.database_path).map_err(io_error)?;
+                    (
+                        self.try_open_repository_connection(&storage_paths.database_path)?,
+                        true,
+                    )
+                }
+                Err(error) => return Err(error),
+            };
+
+        if metadata_missing {
+            let repo = self.load_repository_record(repo_id)?;
+            write_repository_metadata(
+                &storage_paths.metadata_dir,
+                &repo.summary.repo_id,
+                &repo.summary.name,
+                repo_root,
+                &repo.backend_record.plugin_id,
+                &repo.backend_record.config,
+                None,
+            )?;
+        }
+        if database_missing || database_rebuilt {
+            // `.momo` 被删后会生成空库，这里补一次同步，确保首次打开就能看到内容。
+            let repo = self.load_repository_record(repo_id)?;
+            let tx = connection.transaction().map_err(db_error)?;
+            sync_repository_files(&self.root, &tx, &repo, &std::collections::HashSet::new())
+                .map_err(db_error)?;
+            tx.commit().map_err(db_error)?;
+        }
+        Ok(connection)
+    }
+
+    fn try_open_repository_connection(&self, database_path: &Path) -> Result<Connection, String> {
+        let connection = Connection::open(database_path).map_err(db_error)?;
         migrate_repository_schema(&connection).map_err(db_error)?;
         Ok(connection)
     }
