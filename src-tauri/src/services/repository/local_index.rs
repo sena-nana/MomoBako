@@ -56,6 +56,13 @@ pub(super) fn collect_repository_files_with_fallback(
     collect: fn(&Path) -> Result<Vec<DiscoveredFile>, String>,
 ) -> Result<Vec<DiscoveredFile>, String> {
     match collect(repo_root) {
+        Ok(files) if files.is_empty() && repository_contains_visible_entries(repo_root) => {
+            eprintln!(
+                "[repository] {label} file search returned empty for {} despite visible entries; falling back to recursive scan",
+                repo_root.to_string_lossy()
+            );
+            collect_repository_files(repo_root).map_err(io_error)
+        }
         Ok(files) => Ok(files),
         Err(error) => {
             eprintln!(
@@ -65,6 +72,20 @@ pub(super) fn collect_repository_files_with_fallback(
             collect_repository_files(repo_root).map_err(io_error)
         }
     }
+}
+
+fn repository_contains_visible_entries(repo_root: &Path) -> bool {
+    let Ok(entries) = fs::read_dir(repo_root) else {
+        return false;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().to_string();
+        if is_internal_repository_dir(&name) {
+            continue;
+        }
+        return true;
+    }
+    false
 }
 
 pub(super) fn collect_repository_files_everything(

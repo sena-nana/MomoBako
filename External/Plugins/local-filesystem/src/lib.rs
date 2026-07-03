@@ -296,6 +296,13 @@ fn collect_files_with_fallback(
     collect: fn(&Path) -> Result<Vec<DiscoveredFile>, String>,
 ) -> Result<Vec<DiscoveredFile>, String> {
     match collect(repo_root) {
+        Ok(files) if files.is_empty() && repository_contains_visible_entries(repo_root) => {
+            eprintln!(
+                "[local-filesystem] {label} file search returned empty for {} despite visible entries; falling back to recursive scan",
+                repo_root.to_string_lossy()
+            );
+            collect_files(repo_root)
+        }
         Ok(files) => Ok(files),
         Err(error) => {
             eprintln!(
@@ -305,6 +312,20 @@ fn collect_files_with_fallback(
             collect_files(repo_root)
         }
     }
+}
+
+fn repository_contains_visible_entries(repo_root: &Path) -> bool {
+    let Ok(entries) = fs::read_dir(repo_root) else {
+        return false;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().to_string();
+        if is_internal_repository_dir(&name) {
+            continue;
+        }
+        return true;
+    }
+    false
 }
 
 fn file_search_mode_from_config(value: Option<&Value>) -> FileSearchMode {
@@ -917,5 +938,23 @@ mod tests {
 
         assert_eq!(files.len(), 1);
         assert_eq!(files[0].relative_path, "demo.mp3");
+    }
+
+    #[test]
+    fn empty_index_search_falls_back_to_recursive_scan_when_visible_entries_exist() {
+        fn empty(_repo_root: &Path) -> Result<Vec<DiscoveredFile>, String> {
+            Ok(Vec::new())
+        }
+
+        let workspace = TestWorkspace::new("empty-index-fallback-search");
+        fs::create_dir_all(workspace.root.join("albums")).expect("albums dir should be created");
+        fs::write(workspace.root.join("albums").join("demo.mp3"), b"audio")
+            .expect("file should be written");
+
+        let files = collect_files_with_fallback(&workspace.root, "Test", empty)
+            .expect("empty index search should fall back to recursive scan");
+
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].relative_path, "albums/demo.mp3");
     }
 }
