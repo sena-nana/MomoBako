@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/vue";
+import { render, screen, within } from "@testing-library/vue";
 import { describe, expect, it, vi } from "vitest";
 import FileBrowserPanel from "../src/pages/workspace/files/FileBrowserPanel.vue";
 import type { RegisteredLibraryExtension } from "../src/plugins/sdk";
@@ -30,7 +30,22 @@ function asmrEntry(): FileBrowserEntry {
   };
 }
 
-function renderPanel(entry = asmrEntry()) {
+function mockDirectoryEntry(): FileBrowserEntry {
+  return {
+    path: "Voice",
+    name: "Voice",
+    kind: "directory",
+    extension: null,
+    sizeBytes: null,
+    sizeLabel: null,
+    modifiedAt: "2026-06-05T00:18:00Z",
+    assetId: null,
+    status: null,
+    metadata: {},
+  };
+}
+
+function renderPanel(entry = asmrEntry(), overrides: Record<string, unknown> = {}) {
   const libraryExtension: RegisteredLibraryExtension = {
     pluginId: "momobako.library.asmr",
     pluginName: "ASMR Library",
@@ -47,6 +62,8 @@ function renderPanel(entry = asmrEntry()) {
       canOpenSelected: true,
       canRenameSelected: true,
       canRestoreSelected: false,
+      currentDirectoryDisplayName: "Voice",
+      currentDirectoryPath: "Voice",
       currentFileEntry: entry,
       allEntries: [entry],
       directoryEntries: [],
@@ -86,6 +103,7 @@ function renderPanel(entry = asmrEntry()) {
       createFileName: "",
       fileDisplayMode: "list",
       renameValue: "",
+      ...overrides,
     },
   });
 }
@@ -103,5 +121,54 @@ describe("FileBrowserPanel ASMR summary", () => {
     expect(screen.getAllByText("收听中 · 42%").length).toBeGreaterThan(0);
     expect(screen.getAllByText("歌词").length).toBeGreaterThan(0);
     expect(screen.getAllByText("local").length).toBeGreaterThan(0);
+  });
+
+  it("最近使用视图在展示方式右侧显示清空记录按钮", () => {
+    renderPanel(asmrEntry(), {
+      canClearRecentHistory: true,
+      isRecentView: true,
+    });
+
+    expect(screen.getByRole("button", { name: "清空记录" })).toBeInTheDocument();
+  });
+
+  it("普通目录视图不显示清空记录按钮", () => {
+    renderPanel();
+
+    expect(screen.queryByRole("button", { name: "清空记录" })).toBeNull();
+  });
+
+  it("详情标题与文件列表标题显示去扩展名名称，并移除同步状态", () => {
+    renderPanel();
+
+    expect(screen.getAllByText("01").length).toBeGreaterThan(0);
+    expect(screen.queryByText("01.mp3")).toBeNull();
+    expect(screen.queryByText("synced")).toBeNull();
+  });
+
+  it("无选中文件时显示当前文件夹信息", () => {
+    const fileEntry = asmrEntry();
+    const directoryEntry = mockDirectoryEntry();
+    renderPanel(fileEntry, {
+      currentFileEntry: null,
+      selectedEntries: [],
+      selectedFilePaths: [],
+      selectedFilePath: null,
+      directoryEntries: [directoryEntry],
+      fileEntries: [fileEntry],
+      allEntries: [directoryEntry, fileEntry],
+      currentDirectoryDisplayName: "主资源库",
+      currentDirectoryPath: "",
+    });
+
+    expect(screen.getByRole("heading", { name: "主资源库" })).toBeInTheDocument();
+    expect(screen.getAllByText("根目录").length).toBeGreaterThan(0);
+    expect(screen.getByText("直属文件")).toBeInTheDocument();
+    expect(screen.getByText("直属子文件夹")).toBeInTheDocument();
+    expect(screen.getByText("当前视图总条目")).toBeInTheDocument();
+    const detailCard = screen.getByRole("heading", { name: "主资源库" }).closest(".files-detail__card");
+    expect(detailCard).toBeInstanceOf(HTMLElement);
+    const values = within(detailCard as HTMLElement).getAllByText(/^[12]$/).map((element) => element.textContent);
+    expect(values).toEqual(["1", "1", "2"]);
   });
 });

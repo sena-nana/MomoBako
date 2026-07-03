@@ -26,7 +26,10 @@ export type WorkspaceFilesSurfaceBindingOptions = {
   canOpenSelected: ReadonlyRef<boolean>;
   canRenameSelected: ReadonlyRef<boolean>;
   canRestoreSelected: ReadonlyRef<boolean>;
+  canClearRecentHistory: ReadonlyRef<boolean>;
   currentFileEntry: ReadonlyRef<FileBrowserEntry | null>;
+  currentDirectoryDisplayName: ReadonlyRef<string>;
+  currentDirectoryPath: ReadonlyRef<string>;
   currentLibraryExtensions: ReadonlyRef<RegisteredLibraryExtension[]>;
   dragHoverFolderPath: ReadonlyRef<string | null>;
   error: ReadonlyRef<string | null>;
@@ -44,6 +47,8 @@ export type WorkspaceFilesSurfaceBindingOptions = {
   isLoadingFileBrowserMore: ReadonlyRef<boolean>;
   isModelEntry: (entry: FileBrowserEntry) => boolean;
   isMutatingFiles: ReadonlyRef<boolean>;
+  isClearingRecentHistory: ReadonlyRef<boolean>;
+  isRecentView: ReadonlyRef<boolean>;
   isRepositoryWritable: ReadonlyRef<boolean>;
   isReadOnlyVirtualView: ReadonlyRef<boolean>;
   isSavingMetadata: ReadonlyRef<boolean>;
@@ -74,6 +79,7 @@ export type WorkspaceFilesSurfaceBindingOptions = {
   entryModifiedAtLabel: (entry: FileBrowserEntry) => string;
   exitPreview: () => void;
   handleCreateFile: () => void | Promise<unknown>;
+  handleClearRecentHistory: () => void | Promise<unknown>;
   deleteSelectedEntry: () => void | Promise<unknown>;
   handleDragLeave: (event: DragEvent) => void;
   handleDragOver: (event: DragEvent) => void;
@@ -120,7 +126,10 @@ export function useFilesSurfaceBindings(options: WorkspaceFilesSurfaceBindingOpt
     canOpenSelected: options.canOpenSelected.value,
     canRenameSelected: options.canRenameSelected.value,
     canRestoreSelected: options.canRestoreSelected.value,
+    canClearRecentHistory: options.canClearRecentHistory.value,
     currentFileEntry: options.currentFileEntry.value,
+    currentDirectoryDisplayName: options.currentDirectoryDisplayName.value,
+    currentDirectoryPath: options.currentDirectoryPath.value,
     currentLibraryExtensions: options.currentLibraryExtensions.value,
     directoryEntries: options.activeDirectoryEntries.value,
     displayModeClass: options.fileDisplayModeClass.value,
@@ -141,6 +150,8 @@ export function useFilesSurfaceBindings(options: WorkspaceFilesSurfaceBindingOpt
     isLoadingFileBrowserMore: options.isLoadingFileBrowserMore.value,
     isModelEntry: options.isModelEntry,
     isMutatingFiles: options.isMutatingFiles.value,
+    isClearingRecentHistory: options.isClearingRecentHistory.value,
+    isRecentView: options.isRecentView.value,
     isReadOnlyVirtual: options.isReadOnlyVirtualView.value,
     isSavingMetadata: options.isSavingMetadata.value,
     isTrashPanel: options.isTrashPanel.value,
@@ -172,6 +183,7 @@ export function useFilesSurfaceBindings(options: WorkspaceFilesSurfaceBindingOpt
   const filesSurfaceHandlers = {
     back: options.exitPreview,
     createFile: options.handleCreateFile,
+    clearRecentHistory: options.handleClearRecentHistory,
     deleteSelected: options.deleteSelectedEntry,
     dragLeave: options.handleDragLeave,
     dragOver: options.handleDragOver,

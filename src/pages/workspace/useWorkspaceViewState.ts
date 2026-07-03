@@ -98,7 +98,10 @@ export function useWorkspaceViewState(options: WorkspaceViewStateOptions) {
   const isActionsPanel = computed(() => options.activePanel.value === "actions");
   const isExtensionsPanel = computed(() => options.activePanel.value === "extensions");
   const isPlaylistPanel = computed(() => options.activePanel.value === "playlist");
-  const isVirtualView = computed(() => isSmartFolderPanel.value || options.isLibraryCategoryVirtualView.value);
+  const isLibraryCategoryView = computed(() => (
+    isFilesPanel.value && options.isLibraryCategoryVirtualView.value
+  ));
+  const isVirtualView = computed(() => isSmartFolderPanel.value || isLibraryCategoryView.value);
   const isFileBrowserPanel = computed(() => isFilesPanel.value || isTrashPanel.value || isSmartFolderPanel.value);
   const smartFolderEntryMap = computed<ReadonlyMap<string, FileBrowserEntry>>(() => (
     new Map((options.smartFolderResult.value?.results ?? []).map((entry) => [entry.path, entry]))

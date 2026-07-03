@@ -8,6 +8,8 @@ import {
   Trash2,
 } from "@lucide/vue";
 import type { FileTreeNode } from "../types/repository";
+import type { ContextMenuItem } from "../ui/core";
+import { vContextMenu } from "../ui/core";
 
 defineOptions({
   name: "FolderTreeNode",
@@ -44,6 +46,40 @@ const hasChildren = computed(() => props.node.children.length > 0);
 const depthStyle = computed(() => ({
   "--folder-node-depth": String(props.depth),
 }));
+const contextMenuItems = computed<ContextMenuItem[]>(() => [
+  {
+    id: "open",
+    label: "打开",
+    icon: FolderOpen,
+    onSelect: () => emit("open", props.node.path),
+  },
+  {
+    id: "create",
+    label: "新建子文件夹",
+    icon: FolderPlus,
+    disabled: props.isMutating,
+    onSelect: () => emit("create", props.node.path),
+  },
+  {
+    id: "rename",
+    label: "重命名",
+    icon: PencilLine,
+    disabled: props.isMutating,
+    onSelect: () => emit("rename", props.node.path, props.node.label),
+  },
+  {
+    id: "delete",
+    label: "删除",
+    icon: Trash2,
+    disabled: props.isMutating,
+    danger: true,
+    onSelect: () => emit("delete", props.node.path, props.node.label),
+  },
+]);
+
+function folderContextMenu() {
+  return contextMenuItems.value;
+}
 </script>
 
 <template>
@@ -74,7 +110,7 @@ const depthStyle = computed(() => ({
         />
       </button>
 
-      <div class="workspace-folder-tree__card">
+      <div v-context-menu="folderContextMenu" class="workspace-folder-tree__card">
         <button
           type="button"
           class="workspace-folder-tree__item"
@@ -85,40 +121,8 @@ const depthStyle = computed(() => ({
             <Folder v-else :size="14" aria-hidden="true" />
             {{ node.label }}
           </span>
+          <span class="workspace-folder-tree__count">{{ node.fileCount }}</span>
         </button>
-
-        <div class="workspace-folder-tree__actions">
-          <button
-            type="button"
-            class="workspace-folder-tree__action"
-            title="新建子文件夹"
-            aria-label="新建子文件夹"
-            :disabled="isMutating"
-            @click.stop="emit('create', node.path)"
-          >
-            <FolderPlus :size="13" aria-hidden="true" />
-          </button>
-          <button
-            type="button"
-            class="workspace-folder-tree__action"
-            title="重命名文件夹"
-            aria-label="重命名文件夹"
-            :disabled="isMutating"
-            @click.stop="emit('rename', node.path, node.label)"
-          >
-            <PencilLine :size="13" aria-hidden="true" />
-          </button>
-          <button
-            type="button"
-            class="workspace-folder-tree__action workspace-folder-tree__action--danger"
-            title="删除文件夹"
-            aria-label="删除文件夹"
-            :disabled="isMutating"
-            @click.stop="emit('delete', node.path, node.label)"
-          >
-            <Trash2 :size="13" aria-hidden="true" />
-          </button>
-        </div>
       </div>
     </div>
 

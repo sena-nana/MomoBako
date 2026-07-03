@@ -2403,6 +2403,167 @@ mod tests {
         fs::remove_dir_all(root).expect("test temp root should be removed");
     }
 
+    #[test]
+    fn record_entry_access_keeps_only_latest_50_entries() {
+        let (state, root, repo_root, _thumbnail_root) = create_test_state("recent-access-cap");
+        let repo_id = create_repository_without_initial_sync(&state, &repo_root);
+        for index in 0..55 {
+            fs::write(repo_root.join(format!("recent-{index:02}.txt")), format!("entry-{index}"))
+                .expect("test file should be written");
+        }
+        state
+            .sync_repository(SyncRequest {
+                repo_id: repo_id.clone(),
+            })
+            .expect("repository should sync");
+
+        for index in 0..55 {
+            state
+                .record_entry_access(EntryAccessRecordRequest {
+                    repo_id: repo_id.clone(),
+                    path: format!("recent-{index:02}.txt"),
+                })
+                .expect("entry access should record");
+        }
+
+        let repo = state
+            .load_repository_record(&repo_id)
+            .expect("repository record should load");
+        let connection = state
+            .open_repository_connection(
+                &repo.summary.repo_id,
+                &repo.summary.path,
+                &repo.backend_record,
+            )
+            .expect("repository connection should open");
+        let recent_count: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM assets WHERE repo_id = ?1 AND last_accessed_at IS NOT NULL",
+                params![&repo_id],
+                |row| row.get(0),
+            )
+            .expect("recent access count should query");
+        let trimmed_count: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM assets WHERE repo_id = ?1 AND last_accessed_at IS NULL",
+                params![&repo_id],
+                |row| row.get(0),
+            )
+            .expect("trimmed access count should query");
+        let latest_access: Option<String> = connection
+            .query_row(
+                "SELECT last_accessed_at FROM assets WHERE repo_id = ?1 AND path = ?2",
+                params![&repo_id, "recent-54.txt"],
+                |row| row.get(0),
+            )
+            .expect("latest access should query");
+
+        assert_eq!(recent_count, 50);
+        assert_eq!(trimmed_count, 5);
+        assert!(latest_access.is_some());
+        fs::remove_dir_all(root).expect("test temp root should be removed");
+    }
+
+    #[test]
+    fn clear_recent_access_history_resets_all_last_accessed_at() {
+        let (state, root, repo_root, _thumbnail_root) =
+            create_test_state("recent-access-clear");
+        let repo_id = create_repository_without_initial_sync(&state, &repo_root);
+        for path in ["alpha.txt", "beta.txt"] {
+            fs::write(repo_root.join(path), path).expect("test file should be written");
+        }
+        state
+            .sync_repository(SyncRequest {
+                repo_id: repo_id.clone(),
+            })
+            .expect("repository should sync");
+        for path in ["alpha.txt", "beta.txt"] {
+            state
+                .record_entry_access(EntryAccessRecordRequest {
+                    repo_id: repo_id.clone(),
+                    path: path.to_string(),
+                })
+                .expect("entry access should record");
+        }
+
+        let response = state
+            .clear_recent_access_history(RecentAccessHistoryClearRequest {
+                repo_id: repo_id.clone(),
+            })
+            .expect("recent access history should clear");
+
+        let repo = state
+            .load_repository_record(&repo_id)
+            .expect("repository record should load");
+        let connection = state
+            .open_repository_connection(
+                &repo.summary.repo_id,
+                &repo.summary.path,
+                &repo.backend_record,
+            )
+            .expect("repository connection should open");
+        let remaining_recent_count: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM assets WHERE repo_id = ?1 AND last_accessed_at IS NOT NULL",
+                params![&repo_id],
+                |row| row.get(0),
+            )
+            .expect("remaining recent access count should query");
+
+        assert_eq!(response.repo_id, repo_id);
+        assert_eq!(response.cleared_count, 2);
+        assert_eq!(remaining_recent_count, 0);
+        fs::remove_dir_all(root).expect("test temp root should be removed");
+    }
+
+    #[test]
+    fn repository_tree_reports_direct_file_counts_per_directory() {
+        let (state, root, repo_root, _thumbnail_root) =
+            create_test_state("repository-tree-file-count");
+        fs::create_dir_all(repo_root.join("Campaigns/Summer"))
+            .expect("summer directory should be created");
+        fs::create_dir_all(repo_root.join("Campaigns/Winter"))
+            .expect("winter directory should be created");
+        fs::write(repo_root.join("Campaigns/brief.txt"), "brief")
+            .expect("campaign file should be written");
+        fs::write(repo_root.join("Campaigns/Summer/cover.psd"), "cover")
+            .expect("summer cover should be written");
+        fs::write(repo_root.join("Campaigns/Summer/thumb.png"), "thumb")
+            .expect("summer thumbnail should be written");
+        fs::write(repo_root.join("Campaigns/Winter/scene.png"), "scene")
+            .expect("winter scene should be written");
+        let repo_id = create_repository_without_initial_sync(&state, &repo_root);
+        state
+            .sync_repository(SyncRequest {
+                repo_id: repo_id.clone(),
+            })
+            .expect("repository should sync");
+
+        let snapshot = state
+            .load_repository_tree(&repo_id)
+            .expect("repository tree should load");
+        let campaigns = snapshot
+            .tree
+            .iter()
+            .find(|node| node.path == "Campaigns")
+            .expect("campaigns node should exist");
+        let summer = campaigns
+            .children
+            .iter()
+            .find(|node| node.path == "Campaigns/Summer")
+            .expect("summer node should exist");
+        let winter = campaigns
+            .children
+            .iter()
+            .find(|node| node.path == "Campaigns/Winter")
+            .expect("winter node should exist");
+
+        assert_eq!(campaigns.file_count, 1);
+        assert_eq!(summer.file_count, 2);
+        assert_eq!(winter.file_count, 1);
+        fs::remove_dir_all(root).expect("test temp root should be removed");
+    }
+
     const LONG_RELATIVE_PATH: &str = "CubismSdkForNative-5-r.5/Samples/OpenGL/Demo/proj.harmonyos.cmake/Full/entry/src/main/resources/base/media/startIcon.png";
 
     fn unique_temp_dir(label: &str) -> PathBuf {

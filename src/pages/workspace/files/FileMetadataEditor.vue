@@ -75,12 +75,9 @@ const indexedTags = computed(() => props.entry.tags ?? []);
 const canEdit = computed(() => props.entry.kind === "file" && Boolean(props.entry.assetId));
 const sourceTitle = computed(() => metadataString(props.entry.metadata, "originTitle"));
 const sourceUrl = computed(() => metadataString(props.entry.metadata, "sourceUrl"));
-const originReferrer = computed(() => metadataString(props.entry.metadata, "originReferrer"));
 const sourceLinks = computed(() => [
-  { key: "sourceUrl", label: "原始链接", value: sourceUrl.value },
-  { key: "originReferrer", label: "来源页", value: originReferrer.value },
+  { key: "sourceUrl", label: "来源链接", value: sourceUrl.value },
 ].filter((item) => item.value));
-const hasSourceMetadata = computed(() => Boolean(sourceTitle.value || sourceLinks.value.length));
 const groupedTagOptions = computed(() => {
   const selected = new Set(draft.tags);
   return (props.tagGroups ?? [])
@@ -246,104 +243,6 @@ onBeforeUnmount(() => {
 
 <template>
   <section v-if="entry.kind === 'file'" class="file-metadata-card">
-    <div class="file-metadata-card__head">
-      <div>
-        <p class="asset-browser__eyebrow">文件 Metadata</p>
-        <strong>通用字段</strong>
-      </div>
-      <span class="file-metadata-card__status">
-        {{ saveState === "saving" ? "保存中…" : hasChanges ? "自动保存" : "已同步" }}
-      </span>
-    </div>
-
-    <div class="file-metadata-card__grid">
-      <div class="asset-meta__row">
-        <span>添加到资源库</span>
-        <span class="asset-meta__value">{{ addedToLibraryAt }}</span>
-      </div>
-      <div class="asset-meta__row">
-        <span>创建时间</span>
-        <span class="asset-meta__value">{{ fileCreatedAt }}</span>
-      </div>
-      <div class="asset-meta__row">
-        <span>文件修改时间</span>
-        <span class="asset-meta__value">{{ fileModifiedAt }}</span>
-      </div>
-      <div class="asset-meta__row">
-        <span>尺寸</span>
-        <span class="asset-meta__value">{{ dimensionsLabel }}</span>
-      </div>
-      <div class="asset-meta__row">
-        <span>原始大小</span>
-        <span class="asset-meta__value">{{ originalSizeLabel }}</span>
-      </div>
-      <div v-if="palette.length" class="asset-meta__row">
-        <span>调色板</span>
-        <span class="file-metadata-card__palette">
-          <i v-for="color in palette" :key="color" :style="{ backgroundColor: color }" :title="color" />
-        </span>
-      </div>
-      <div v-if="indexedTags.length" class="asset-meta__row">
-        <span>索引标签</span>
-        <span class="asset-meta__value">{{ indexedTags.join("，") }}</span>
-      </div>
-      <div v-if="aliasPaths.length" class="asset-meta__row file-metadata-card__alias-row">
-        <span>多归属位置</span>
-        <span class="asset-meta__value">{{ aliasPaths.join("，") }}</span>
-      </div>
-    </div>
-
-    <component
-      :is="extension.metadataPanel"
-      v-for="extension in libraryExtensions?.filter((item) => item.metadataPanel) ?? []"
-      :key="`${extension.pluginId}:metadata`"
-      :repo-id="repoId ?? ''"
-      :entry="entry"
-      :entries="playlistEntries ?? []"
-      :save-metadata="saveMetadata"
-      :save-cover-thumbnail="saveCoverThumbnail"
-    />
-
-    <section v-if="hasSourceMetadata" class="file-metadata-card__source" aria-label="来源信息">
-      <div class="file-metadata-card__source-head">
-        <div>
-          <p class="asset-browser__eyebrow">来源 Metadata</p>
-          <strong>来源信息</strong>
-        </div>
-      </div>
-      <div class="file-metadata-card__source-grid">
-        <div v-if="sourceTitle" class="asset-meta__row file-metadata-card__source-row">
-          <span>来源标题</span>
-          <span class="asset-meta__value">{{ sourceTitle }}</span>
-        </div>
-        <div v-for="item in sourceLinks" :key="item.key" class="asset-meta__row file-metadata-card__source-row">
-          <span>{{ item.label }}</span>
-          <span class="file-metadata-card__source-value">
-            <span class="asset-meta__value">{{ item.value }}</span>
-            <span class="file-metadata-card__source-actions">
-              <button
-                type="button"
-                class="file-metadata-card__source-action"
-                :disabled="!isOpenableSourceLink(item.value)"
-                title="打开链接"
-                @click="openSourceLink(item.value)"
-              >
-                <ExternalLink :size="14" aria-hidden="true" />
-              </button>
-              <button
-                type="button"
-                class="file-metadata-card__source-action"
-                title="复制链接"
-                @click="copySourceLink(item.value)"
-              >
-                <Copy :size="14" aria-hidden="true" />
-              </button>
-            </span>
-          </span>
-        </div>
-      </div>
-    </section>
-
     <label class="asset-meta__row file-metadata-card__inline-row">
       <span>评分</span>
       <div class="file-metadata-card__stars" aria-label="文件评分">
@@ -359,27 +258,6 @@ onBeforeUnmount(() => {
         >
           <Star :size="18" aria-hidden="true" />
         </button>
-      </div>
-    </label>
-
-    <label class="asset-meta__row file-metadata-card__inline-row">
-      <span>链接</span>
-      <div class="file-metadata-card__inline-input">
-        <Link2 :size="14" aria-hidden="true" />
-        <input v-model="draft.link" type="url" placeholder="https://example.com" :disabled="!canEdit || isSaving" />
-      </div>
-    </label>
-
-    <label class="asset-meta__row file-metadata-card__inline-row">
-      <span>注释</span>
-      <div class="file-metadata-card__inline-input">
-        <MessageSquareText :size="14" aria-hidden="true" />
-        <input
-          v-model="draft.comment"
-          type="text"
-          placeholder="记录这个文件的用途、状态或上下文。"
-          :disabled="!canEdit || isSaving"
-        />
       </div>
     </label>
 
@@ -532,5 +410,103 @@ onBeforeUnmount(() => {
         </div>
       </div>
     </section>
+
+    <label class="asset-meta__row file-metadata-card__inline-row">
+      <span>注释</span>
+      <div class="file-metadata-card__inline-input">
+        <MessageSquareText :size="14" aria-hidden="true" />
+        <input
+          v-model="draft.comment"
+          type="text"
+          placeholder="记录这个文件的用途、状态或上下文。"
+          :disabled="!canEdit || isSaving"
+        />
+      </div>
+    </label>
+
+    <label class="asset-meta__row file-metadata-card__inline-row">
+      <span>链接</span>
+      <div class="file-metadata-card__inline-input">
+        <Link2 :size="14" aria-hidden="true" />
+        <input v-model="draft.link" type="url" placeholder="https://example.com" :disabled="!canEdit || isSaving" />
+      </div>
+    </label>
+
+    <div class="file-metadata-card__grid">
+      <div class="asset-meta__row">
+        <span>添加到资源库</span>
+        <span class="asset-meta__value">{{ addedToLibraryAt }}</span>
+      </div>
+      <div class="asset-meta__row">
+        <span>创建时间</span>
+        <span class="asset-meta__value">{{ fileCreatedAt }}</span>
+      </div>
+      <div class="asset-meta__row">
+        <span>文件修改时间</span>
+        <span class="asset-meta__value">{{ fileModifiedAt }}</span>
+      </div>
+      <div class="asset-meta__row">
+        <span>尺寸</span>
+        <span class="asset-meta__value">{{ dimensionsLabel }}</span>
+      </div>
+      <div class="asset-meta__row">
+        <span>原始大小</span>
+        <span class="asset-meta__value">{{ originalSizeLabel }}</span>
+      </div>
+      <div v-if="palette.length" class="asset-meta__row">
+        <span>调色板</span>
+        <span class="file-metadata-card__palette">
+          <i v-for="color in palette" :key="color" :style="{ backgroundColor: color }" :title="color" />
+        </span>
+      </div>
+      <div v-if="indexedTags.length" class="asset-meta__row">
+        <span>索引标签</span>
+        <span class="asset-meta__value">{{ indexedTags.join("，") }}</span>
+      </div>
+      <div v-if="aliasPaths.length" class="asset-meta__row file-metadata-card__alias-row">
+        <span>多归属位置</span>
+        <span class="asset-meta__value">{{ aliasPaths.join("，") }}</span>
+      </div>
+      <div v-if="sourceTitle" class="asset-meta__row file-metadata-card__source-row">
+        <span>来源标题</span>
+        <span class="asset-meta__value">{{ sourceTitle }}</span>
+      </div>
+      <div v-for="item in sourceLinks" :key="item.key" class="asset-meta__row file-metadata-card__source-row">
+        <span>{{ item.label }}</span>
+        <span class="file-metadata-card__source-value">
+          <span class="asset-meta__value">{{ item.value }}</span>
+          <span class="file-metadata-card__source-actions">
+            <button
+              type="button"
+              class="file-metadata-card__source-action"
+              :disabled="!isOpenableSourceLink(item.value)"
+              title="打开链接"
+              @click="openSourceLink(item.value)"
+            >
+              <ExternalLink :size="14" aria-hidden="true" />
+            </button>
+            <button
+              type="button"
+              class="file-metadata-card__source-action"
+              title="复制链接"
+              @click="copySourceLink(item.value)"
+            >
+              <Copy :size="14" aria-hidden="true" />
+            </button>
+          </span>
+        </span>
+      </div>
+    </div>
+
+    <component
+      :is="extension.metadataPanel"
+      v-for="extension in libraryExtensions?.filter((item) => item.metadataPanel) ?? []"
+      :key="`${extension.pluginId}:metadata`"
+      :repo-id="repoId ?? ''"
+      :entry="entry"
+      :entries="playlistEntries ?? []"
+      :save-metadata="saveMetadata"
+      :save-cover-thumbnail="saveCoverThumbnail"
+    />
   </section>
 </template>

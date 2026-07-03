@@ -1,4 +1,4 @@
-import { computed, onBeforeUnmount, reactive } from "vue";
+import { computed, onBeforeUnmount, reactive, ref } from "vue";
 import {
   useWorkspaceAssetMetadata,
   useWorkspaceActions,
@@ -29,6 +29,8 @@ import { useWorkspaceFilesSurfaceViewModel } from "../files/useFilesSurfaceViewM
 import { usePlaylistPageBindings } from "../playlists/usePlaylistPageBindings";
 import { useEntryActionRepositoryDialog } from "../useEntryActionRepositoryDialog";
 import { useWorkspaceNeteaseAuthViewModel } from "./useWorkspaceNeteaseAuthViewModel";
+import { clearRecentAccessHistory } from "../../../services/repositoryApi";
+import { clearActiveSnapshotRecentAccess } from "../../../composables/workspace/state";
 import {
   entryDeletedAtLabel,
   entryModifiedAtLabel,
@@ -290,6 +292,20 @@ export function useWorkspaceHomeViewModel() {
   });
   const ratingFilterOptions = [1, 2, 3, 4, 5];
   const hasMoreEntries = computed(() => !isVirtualView.value && Boolean(fileBrowser.value?.hasMore));
+  const isRecentView = computed(() => (
+    activePanel.value === "files" && activeLibraryCategory.value === "recent"
+  ));
+  const canClearRecentHistory = computed(() => (
+    isRecentView.value && Boolean(activeSnapshot.value?.assets.some((asset) => asset.lastAccessedAt))
+  ));
+  const currentDirectoryDisplayName = computed(() => {
+    if (!currentDirectoryPath.value) {
+      return activeSnapshot.value?.repository.name ?? "根目录";
+    }
+    const segments = currentDirectoryPath.value.split("/");
+    return segments[segments.length - 1] ?? currentDirectoryPath.value;
+  });
+  const isClearingRecentHistory = ref(false);
 
   function updateVisibleThumbnailEntries(entries: FileBrowserEntry[]) {
     if (!fileBrowser.value || !entries.length) return;
@@ -306,6 +322,17 @@ export function useWorkspaceHomeViewModel() {
       append: true,
       specialLocation: isTrashPanel.value ? "trash" : undefined,
     });
+  }
+
+  async function handleClearRecentHistory() {
+    if (!activeRepoId.value || !canClearRecentHistory.value || isClearingRecentHistory.value) return;
+    isClearingRecentHistory.value = true;
+    try {
+      const response = await clearRecentAccessHistory({ repoId: activeRepoId.value });
+      clearActiveSnapshotRecentAccess(response.repoId);
+    } finally {
+      isClearingRecentHistory.value = false;
+    }
   }
   const {
     colorFilterInput,
@@ -622,7 +649,10 @@ export function useWorkspaceHomeViewModel() {
     canOpenSelected,
     canRenameSelected,
     canRestoreSelected,
+    canClearRecentHistory,
     currentFileEntry,
+    currentDirectoryDisplayName,
+    currentDirectoryPath,
     currentLibraryExtensions,
     dragHoverFolderPath,
     entryDeletedAtLabel,
@@ -636,6 +666,7 @@ export function useWorkspaceHomeViewModel() {
     hardlinkStateLabel,
     handleBoxSelection,
     handleCreateFile,
+    handleClearRecentHistory,
     handleDragLeave,
     handleDragOver,
     handleDrop,
@@ -656,6 +687,8 @@ export function useWorkspaceHomeViewModel() {
     isLoadingFileBrowserMore,
     isModelEntry,
     isMutatingFiles,
+    isClearingRecentHistory,
+    isRecentView,
     isRepositoryWritable,
     isSavingMetadata,
     isReadOnlyVirtualView,

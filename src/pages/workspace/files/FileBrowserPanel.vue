@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from "vue";
 import {
-  Eye,
   File,
   FileAudio,
   FileImage,
@@ -21,6 +20,7 @@ import { vContextMenu } from "../../../ui/core";
 import type { RegisteredLibraryExtension } from "../../../plugins/sdk";
 import type { FileBrowserEntry, RepositoryTagGroup } from "../../../types/repository";
 import { useFileBrowserPanelViewModel } from "./useFileBrowserPanelViewModel";
+import { entryDisplayTitle } from "./filePresentation";
 
 type FileDisplayMode = "adaptive" | "masonry" | "grid" | "list";
 type BreadcrumbSegment = {
@@ -38,7 +38,10 @@ const props = defineProps<{
   canOpenSelected: boolean;
   canRenameSelected: boolean;
   canRestoreSelected: boolean;
+  canClearRecentHistory?: boolean;
   currentFileEntry: FileBrowserEntry | null;
+  currentDirectoryDisplayName: string;
+  currentDirectoryPath: string;
   allEntries: FileBrowserEntry[];
   directoryEntries: FileBrowserEntry[];
   displayModeClass: string;
@@ -61,6 +64,8 @@ const props = defineProps<{
   isModelEntry: (entry: FileBrowserEntry) => boolean;
   isMutatingFiles: boolean;
   isReadOnlyVirtual?: boolean;
+  isRecentView?: boolean;
+  isClearingRecentHistory?: boolean;
   isTrashPanel: boolean;
   isVirtualView?: boolean;
   isVideoEntry: (entry: FileBrowserEntry) => boolean;
@@ -88,6 +93,7 @@ const renameValue = defineModel<string>("renameValue", { required: true });
 
 const emit = defineEmits<{
   createFile: [];
+  clearRecentHistory: [];
   deleteSelected: [];
   dragLeave: [event: DragEvent];
   dragOver: [event: DragEvent];
@@ -241,6 +247,16 @@ onBeforeUnmount(() => {
               </option>
             </select>
           </label>
+          <button
+            v-if="isRecentView"
+            type="button"
+            class="ghost files-toolbar__btn"
+            :disabled="!canClearRecentHistory || isClearingRecentHistory"
+            @click="emit('clearRecentHistory')"
+          >
+            <Trash2 :size="14" aria-hidden="true" />
+            {{ isClearingRecentHistory ? "清空中..." : "清空记录" }}
+          </button>
 
           <template v-if="!isTrashPanel && !isVirtualView">
             <label class="files-toolbar__field">
@@ -359,13 +375,12 @@ onBeforeUnmount(() => {
                 <Folder v-else :size="24" aria-hidden="true" />
               </div>
               <div class="files-list__body">
-                <strong>{{ entry.name }}</strong>
+                <strong>{{ entryDisplayTitle(entry) }}</strong>
                 <span v-if="fileDisplayMode === 'list'">{{ entry.path }}</span>
               </div>
               <div v-if="fileDisplayMode === 'list'" class="files-list__meta">
                 <span>文件夹</span>
                 <span>{{ entry.sizeLabel || "目录项" }}</span>
-                <span>{{ entry.status ? statusLabel(entry.status) : "未索引" }}</span>
                 <span>{{ entryModifiedAtLabel(entry) }}</span>
               </div>
             </button>
@@ -412,7 +427,7 @@ onBeforeUnmount(() => {
                 <FileImage v-else :size="24" aria-hidden="true" />
               </div>
               <div class="files-list__body">
-                <strong>{{ entry.name }}</strong>
+                <strong>{{ entryDisplayTitle(entry) }}</strong>
                 <span v-if="hardlinkStateLabel(entry) && fileDisplayMode !== 'list'">{{ hardlinkStateLabel(entry) }}</span>
                 <span v-if="librarySummary(entry)?.inline && fileDisplayMode !== 'list'" class="files-list__library-line">{{ librarySummary(entry)?.inline }}</span>
                 <span v-if="fileDisplayMode === 'list'">{{ entry.path }}</span>
@@ -421,7 +436,6 @@ onBeforeUnmount(() => {
                 <span v-if="librarySummary(entry)?.inline" class="files-list__library-list-label">{{ librarySummary(entry)?.inline }}</span>
                 <span>{{ entry.extension || '文件' }}</span>
                 <span>{{ entry.sizeLabel || "未知" }}</span>
-                <span>{{ entry.status ? statusLabel(entry.status) : "未索引" }}</span>
                 <span v-if="hardlinkStateLabel(entry)">{{ hardlinkStateLabel(entry) }}</span>
                 <span>{{ entryModifiedAtLabel(entry) }}</span>
               </div>
@@ -448,30 +462,8 @@ onBeforeUnmount(() => {
   <aside class="files-detail">
     <div v-if="selectedEntries.length > 1" class="files-detail__card">
       <div class="files-detail__section">
-        <p class="asset-browser__eyebrow">选中项</p>
-        <h2>已选择 {{ selectedEntries.length }} 个项目</h2>
+        <h2>{{ selectedEntries.length }} 个项目</h2>
         <p class="files-detail__subline">{{ multiSelectionSummary }}</p>
-      </div>
-
-      <div class="files-detail__section">
-        <div class="files-detail__actions">
-          <button v-if="isTrashPanel" type="button" class="ghost" :disabled="isMutatingFiles || !canRestoreSelected" @click="emit('restoreSelected')">
-            <RotateCcw :size="14" aria-hidden="true" />
-            批量还原
-          </button>
-          <button type="button" class="ghost" disabled>
-            <Eye :size="14" aria-hidden="true" />
-            预览仅支持单选
-          </button>
-          <button type="button" class="ghost" disabled>
-            <PencilLine :size="14" aria-hidden="true" />
-            重命名仅支持单选
-          </button>
-          <button type="button" class="ghost danger" :disabled="isMutatingFiles || !canDeleteSelected" @click="emit('deleteSelected')">
-            <File :size="14" aria-hidden="true" />
-            {{ isTrashPanel ? "批量彻底删除" : "批量删除" }}
-          </button>
-        </div>
       </div>
     </div>
 
@@ -496,41 +488,9 @@ onBeforeUnmount(() => {
       <ThumbnailPalette :colors="thumbnailPalette(currentFileEntry)" />
 
       <div class="files-detail__section">
-        <p class="asset-browser__eyebrow">选中项</p>
-        <h2>{{ `已选中 ${currentFileEntry.name}` }}</h2>
+        <h2>{{ entryDisplayTitle(currentFileEntry) }}</h2>
         <p v-if="currentFileEntry.path !== currentFileEntry.name" class="files-detail__subline">
           {{ currentFileEntry.path }}
-        </p>
-      </div>
-
-      <div class="files-detail__section">
-        <div class="files-detail__actions">
-          <button v-if="isTrashPanel" type="button" class="ghost" :disabled="isMutatingFiles || !canRestoreSelected" @click="emit('restoreSelected')">
-            <RotateCcw :size="14" aria-hidden="true" />
-            还原
-          </button>
-          <button type="button" class="ghost" :disabled="!canOpenSelected" @click="emit('openSelected')">
-            <Eye :size="14" aria-hidden="true" />
-            {{ openSelectedLabel }}
-          </button>
-          <button type="button" class="ghost" :disabled="isTrashPanel" @click="emit('revealSelected')">
-            <FolderOpen :size="14" aria-hidden="true" />
-            定位
-          </button>
-          <button v-if="!isReadOnlyVirtual" type="button" class="ghost" :disabled="!canRenameSelected" @click="emit('startRename')">
-            <PencilLine :size="14" aria-hidden="true" />
-            重命名
-          </button>
-          <button v-if="!isReadOnlyVirtual" type="button" class="ghost danger" :disabled="isMutatingFiles || !canDeleteSelected" @click="emit('deleteSelected')">
-            <File :size="14" aria-hidden="true" />
-            {{ isTrashPanel ? "彻底删除" : "删除" }}
-          </button>
-        </div>
-        <p v-if="isTrashPanel" class="files-detail__hint">
-          回收站中的删除会直接从文件系统移除。
-        </p>
-        <p v-else-if="isReadOnlyVirtual" class="files-detail__hint">
-          智能文件夹不会改变实际目录。
         </p>
       </div>
 
@@ -553,10 +513,6 @@ onBeforeUnmount(() => {
         <div class="asset-meta__row">
           <span>大小</span>
           <span class="asset-meta__value">{{ currentFileEntry.sizeLabel || "目录项" }}</span>
-        </div>
-        <div class="asset-meta__row">
-          <span>状态</span>
-          <span class="asset-meta__value">{{ currentFileEntry.status ? statusLabel(currentFileEntry.status) : "未索引" }}</span>
         </div>
         <div v-if="hardlinkStateLabel(currentFileEntry)" class="asset-meta__row">
           <span>硬链接</span>
@@ -594,10 +550,31 @@ onBeforeUnmount(() => {
       />
     </div>
 
+    <div v-else-if="!isReadOnlyVirtual && !isTrashPanel && !isVirtualView" class="files-detail__card">
+      <div class="files-detail__section">
+        <h2>{{ currentDirectoryDisplayName }}</h2>
+        <p class="files-detail__subline">{{ currentDirectoryPath || "根目录" }}</p>
+      </div>
+      <div class="files-detail__stats">
+        <div class="asset-meta__row">
+          <span>直属文件</span>
+          <span class="asset-meta__value">{{ fileEntries.length }}</span>
+        </div>
+        <div class="asset-meta__row">
+          <span>直属子文件夹</span>
+          <span class="asset-meta__value">{{ directoryEntries.length }}</span>
+        </div>
+        <div class="asset-meta__row">
+          <span>当前视图总条目</span>
+          <span class="asset-meta__value">{{ fileEntries.length + directoryEntries.length }}</span>
+        </div>
+      </div>
+    </div>
+
     <div v-else class="files-detail__empty">
       <p class="asset-browser__eyebrow">{{ isReadOnlyVirtual ? "智能文件夹" : isTrashPanel ? "回收站" : "文件管理" }}</p>
       <h2>选择一个文件或文件夹</h2>
-      <p>{{ isReadOnlyVirtual ? "在中间列表中选择目标，然后可执行查看、定位。" : isTrashPanel ? "在中间列表中选择目标，然后可执行还原或彻底删除。" : "在中间列表中选择目标，然后可执行查看、定位、重命名和删除。" }}</p>
+      <p>{{ isReadOnlyVirtual ? "在中间列表中选择目标查看详情。" : isTrashPanel ? "在中间列表中选择目标，然后可执行还原或彻底删除。" : "在中间列表中选择目标查看详情。" }}</p>
     </div>
   </aside>
 </template>

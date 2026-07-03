@@ -150,6 +150,7 @@ export type RepositorySnapshot = {
 export type FileTreeNode = {
   path: string;
   label: string;
+  fileCount: number;
   children: FileTreeNode[];
 };
 
@@ -605,6 +606,15 @@ export type EntryAccessRecordResponse = {
   repoId: string;
   path: string;
   recordedAt: string;
+};
+
+export type RecentAccessHistoryClearRequest = {
+  repoId: string;
+};
+
+export type RecentAccessHistoryClearResponse = {
+  repoId: string;
+  clearedCount: number;
 };
 
 export type PluginCallRequest = {

@@ -7,6 +7,7 @@ import FileMetadataEditor from "../files/FileMetadataEditor.vue";
 import ThumbnailPalette from "../../../components/ThumbnailPalette.vue";
 import type { FileBrowserEntry, RepositoryTagGroup } from "../../../types/repository";
 import type { RegisteredLibraryExtension } from "../../../plugins/sdk";
+import { entryDisplayTitle } from "../files/filePresentation";
 
 const props = defineProps<{
   entry: FileBrowserEntry;
@@ -16,7 +17,7 @@ const props = defineProps<{
   isVideoEntry: (entry: FileBrowserEntry) => boolean;
   isAudioEntry: (entry: FileBrowserEntry) => boolean;
   hardlinkStateLabel: (entry: FileBrowserEntry) => string;
-  statusLabel: (status: string) => string;
+  statusLabel?: (status: string) => string;
   isSavingMetadata: boolean;
   availableTags: string[];
   tagGroups?: RepositoryTagGroup[];
@@ -90,7 +91,7 @@ onBeforeUnmount(() => {
     </button>
     <div>
       <p class="asset-browser__eyebrow">文件预览</p>
-      <h1>{{ entry.name }}</h1>
+      <h1>{{ entryDisplayTitle(entry) }}</h1>
       <p v-if="entry.path !== entry.name" class="files-preview-page__subline">{{ entry.path }}</p>
     </div>
     <div class="files-preview-page__actions">
@@ -160,10 +161,6 @@ onBeforeUnmount(() => {
       <div class="asset-meta__row">
         <span>大小</span>
         <span class="asset-meta__value">{{ entry.sizeLabel || "未知" }}</span>
-      </div>
-      <div class="asset-meta__row">
-        <span>状态</span>
-        <span class="asset-meta__value">{{ entry.status ? statusLabel(entry.status) : "未索引" }}</span>
       </div>
       <div v-if="hardlinkStateLabel(entry)" class="asset-meta__row">
         <span>硬链接</span>

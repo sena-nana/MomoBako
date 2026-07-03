@@ -22,6 +22,8 @@ import type {
   HardlinkCandidateResponse,
   HardlinkConfirmRequest,
   HardlinkConfirmResponse,
+  RecentAccessHistoryClearRequest,
+  RecentAccessHistoryClearResponse,
   RepositoryTreeSnapshot,
   TrashMutationRequest,
 } from "../../types/repository";
@@ -118,6 +120,10 @@ export function recordEntryAccess(request: EntryAccessRecordRequest) {
     emitRepositoryEntryAccess(response);
     return response;
   });
+}
+
+export function clearRecentAccessHistory(request: RecentAccessHistoryClearRequest) {
+  return invokeCommand<RecentAccessHistoryClearResponse>("clear_recent_access_history", { request });
 }
 
 export function writeBinaryFile(request: BinaryFileWriteRequest) {

@@ -49,6 +49,35 @@ pub(super) fn load_directory_records_for_parent(
     rows.collect::<Result<Vec<_>, _>>()
 }
 
+pub(super) fn load_direct_file_counts_by_parent(
+    connection: &Connection,
+    repo_id: &str,
+) -> Result<BTreeMap<String, usize>, rusqlite::Error> {
+    let mut stmt = connection.prepare(
+        r#"
+        SELECT
+          CASE
+            WHEN path = filename THEN ''
+            ELSE substr(path, 1, length(path) - length(filename) - 1)
+          END AS parent_path,
+          COUNT(*) AS file_count
+        FROM assets
+        WHERE repo_id = ?1 AND status != 'deleted'
+        GROUP BY parent_path
+        "#,
+    )?;
+    let rows = stmt.query_map([repo_id], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+    })?;
+
+    let mut counts = BTreeMap::new();
+    for row in rows {
+        let (parent_path, file_count) = row?;
+        counts.insert(parent_path, usize::try_from(file_count).unwrap_or(0));
+    }
+    Ok(counts)
+}
+
 pub(super) fn has_directory_cache(
     connection: &Connection,
     repo_id: &str,

@@ -24,6 +24,7 @@ pub use crate::services::repository::{
     PluginDataFilePreviewSourceRequest, PluginDataFilePreviewSourceResponse,
     PluginEnabledRequest, PluginHookExecutionListRequest, PluginHookExecutionListResponse,
     PluginHookExecutionRecord, PluginManifest, PluginMutationResponse, PluginInstallRequest,
+    RecentAccessHistoryClearRequest, RecentAccessHistoryClearResponse,
     RepositoryAction, RepositoryActionEnabledRequest, RepositoryActionMutationResponse,
     RepositoryActionRun, RepositoryActionRunRequest, RepositoryActionRunResponse,
     RepositoryActionStep, RepositoryArchiveExportOptions, RepositoryBackendConfigUpdateRequest,

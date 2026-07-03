@@ -3,6 +3,7 @@ import type { FileBrowserEntry, RepositoryBackendOption } from "../../types/repo
 import { isRepositoryBackendRuntimeAvailable, isSourcePlugin } from "../../utils/pluginTaxonomy";
 import {
   activeLibraryCategory,
+  activePanel,
   activeRepoId,
   activeSnapshot,
   currentDirectoryPath,
@@ -82,6 +83,9 @@ export const activeLibraryCategoryLabel = computed(() => {
 });
 
 export const isLibraryCategoryVirtualView = computed(() => activeLibraryCategory.value !== "all");
+const isLibraryCategoryFilesView = computed(() => (
+  activePanel.value === "files" && isLibraryCategoryVirtualView.value
+));
 
 const activeLibraryAssets = computed(() => (
   (activeSnapshot.value?.assets ?? []).filter((asset) => asset.status !== "deleted")
@@ -117,7 +121,7 @@ export const libraryCategorySummary = computed(() => {
 });
 
 export const fileBrowserEntryMap = computed<ReadonlyMap<string, FileBrowserEntry>>(() => (
-  isLibraryCategoryVirtualView.value
+  isLibraryCategoryFilesView.value
     ? new Map(libraryCategoryEntries.value.map((entry) => [entry.path, entry]))
     : fileBrowserDerived.value.entryMap
 ));
@@ -128,15 +132,15 @@ export const selectedEntry = computed(() => {
 });
 
 export const directoryEntries = computed(() => (
-  isLibraryCategoryVirtualView.value ? [] : fileBrowserDerived.value.directories
+  isLibraryCategoryFilesView.value ? [] : fileBrowserDerived.value.directories
 ));
 
 export const fileEntries = computed(() => (
-  isLibraryCategoryVirtualView.value ? libraryCategoryEntries.value : fileBrowserDerived.value.files
+  isLibraryCategoryFilesView.value ? libraryCategoryEntries.value : fileBrowserDerived.value.files
 ));
 
 export const visibleEntries = computed(() => (
-  isLibraryCategoryVirtualView.value ? libraryCategoryEntries.value : fileBrowserDerived.value.visibleEntries
+  isLibraryCategoryFilesView.value ? libraryCategoryEntries.value : fileBrowserDerived.value.visibleEntries
 ));
 
 export const selectedFilePathSet = computed<ReadonlySet<string>>(() => (
@@ -152,7 +156,7 @@ export const selectedEntries = computed(() => (
 export const hasMultipleSelection = computed(() => selectedEntries.value.length > 1);
 
 export const hasSplitFileGroups = computed(() => (
-  !isLibraryCategoryVirtualView.value && directoryEntries.value.length > 0 && fileEntries.value.length > 0
+  !isLibraryCategoryFilesView.value && directoryEntries.value.length > 0 && fileEntries.value.length > 0
 ));
 
 export const libraryOverview = computed(() => activeSnapshot.value?.overview ?? null);
