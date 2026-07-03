@@ -1,8 +1,0 @@
-{
-  "pluginId": "momobako.filesystem-watcher",
-  "build": {
-    "type": "manifest-only",
-    "sourceDir": "src",
-    "outputDir": ".dist/filesystem-watcher"
-  }
-}

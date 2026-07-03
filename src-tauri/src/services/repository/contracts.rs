@@ -390,6 +390,7 @@ pub struct PlaylistMembershipIndex {
 pub struct FileTreeNode {
     pub path: String,
     pub label: String,
+    #[serde(default)]
     pub file_count: usize,
     pub children: Vec<FileTreeNode>,
 }

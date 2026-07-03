@@ -2695,6 +2695,44 @@ mod tests {
         fs::remove_dir_all(root).expect("test temp root should be removed");
     }
 
+    #[test]
+    fn repository_tree_syncs_empty_directory_changes_from_filesystem_plugin() {
+        let (state, root, repo_root, _thumbnail_root) =
+            create_test_state("repository-tree-empty-directory-sync");
+        fs::create_dir_all(repo_root.join("Empty/Child"))
+            .expect("empty child directory should be created");
+        let repo_id = create_repository_without_initial_sync(&state, &repo_root);
+
+        state
+            .sync_repository(SyncRequest {
+                repo_id: repo_id.clone(),
+            })
+            .expect("repository should sync");
+
+        let snapshot = state
+            .load_repository_tree(&repo_id)
+            .expect("repository tree should load");
+        let empty = snapshot
+            .tree
+            .iter()
+            .find(|node| node.path == "Empty")
+            .expect("empty directory should be indexed");
+        assert!(empty.children.iter().any(|node| node.path == "Empty/Child"));
+
+        fs::remove_dir_all(repo_root.join("Empty")).expect("empty directory should be removed");
+        state
+            .sync_repository(SyncRequest {
+                repo_id: repo_id.clone(),
+            })
+            .expect("repository should sync after directory removal");
+
+        let snapshot = state
+            .load_repository_tree(&repo_id)
+            .expect("repository tree should load after directory removal");
+        assert!(snapshot.tree.iter().all(|node| node.path != "Empty"));
+        fs::remove_dir_all(root).expect("test temp root should be removed");
+    }
+
     const LONG_RELATIVE_PATH: &str = "CubismSdkForNative-5-r.5/Samples/OpenGL/Demo/proj.harmonyos.cmake/Full/entry/src/main/resources/base/media/startIcon.png";
 
     fn unique_temp_dir(label: &str) -> PathBuf {

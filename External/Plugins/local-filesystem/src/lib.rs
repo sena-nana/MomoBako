@@ -58,6 +58,7 @@ struct FileSystemEntry {
 struct FileTreeNode {
     path: String,
     label: String,
+    file_count: usize,
     children: Vec<FileTreeNode>,
 }
 
@@ -602,11 +603,13 @@ fn build_directory_tree(repo_root: &Path) -> Result<Vec<FileTreeNode>, String> {
 fn build_directory_node(repo_root: &Path, relative_path: &str) -> Result<FileTreeNode, String> {
     let abs_path = resolve_relative_path(repo_root, relative_path)?;
     let mut children = Vec::new();
+    let mut file_count = 0;
 
     for entry in fs::read_dir(&abs_path).map_err(io_error)? {
         let entry = entry.map_err(io_error)?;
         let metadata = entry.metadata().map_err(io_error)?;
         if !metadata.is_dir() {
+            file_count += 1;
             continue;
         }
 
@@ -626,6 +629,7 @@ fn build_directory_node(repo_root: &Path, relative_path: &str) -> Result<FileTre
             .file_name()
             .map(|name| name.to_string_lossy().to_string())
             .unwrap_or_else(|| relative_path.to_string()),
+        file_count,
         children,
     })
 }
