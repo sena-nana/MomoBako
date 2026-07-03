@@ -1192,6 +1192,25 @@ mod tests {
     }
 
     #[test]
+    fn empty_index_local_file_search_falls_back_to_recursive_scan_when_entries_exist() {
+        fn empty(_repo_root: &Path) -> Result<Vec<DiscoveredFile>, String> {
+            Ok(Vec::new())
+        }
+
+        let workspace = TestWorkspace::new("empty-index-local-file-search");
+        let repo_root = workspace.path("repo");
+        fs::create_dir_all(repo_root.join("music")).expect("music dir should be created");
+        fs::write(repo_root.join("music").join("demo.mp3"), b"audio")
+            .expect("file should be written");
+
+        let files = collect_repository_files_with_fallback(&repo_root, "Test", empty)
+            .expect("empty index should fall back to recursive scan");
+
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].relative_path, "music/demo.mp3");
+    }
+
+    #[test]
     fn native_dylib_source_plugin_without_library_is_marked_unavailable() {
         let workspace = TestWorkspace::new("native-dylib-source-unavailable");
         let service_root = workspace.path("service");
