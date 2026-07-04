@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<mxfile host="app.diagrams.net" modified="2026-06-13T00:00:00.000Z" agent="Codex" version="26.0.0" type="device">
+<mxfile host="app.diagrams.net" modified="2026-07-04T00:00:00.000Z" agent="Codex" version="26.0.0" type="device">
   <diagram id="overview-runtime" name="01 项目总览">
     <mxGraphModel dx="1600" dy="1000" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="1100" math="0" shadow="0">
       <root>
@@ -38,7 +38,7 @@
           <mxGeometry x="370" y="290" width="260" height="160" as="geometry"/>
         </mxCell>
 
-        <mxCell id="p1-storage" value="应用服务数据&#xa;.service-data/&#xa;repositories.db&#xa;plugins/*.momoplug&#xa;external-api.json / runtime cache" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dafbe1;strokeColor=#2da44e;fontColor=#116329;arcSize=8;" vertex="1" parent="1">
+        <mxCell id="p1-storage" value="应用服务数据&#xa;.service-data/&#xa;repositories.db / plugins/*.momoplug&#xa;plugin-state.json / plugin-data/ / plugin-cache/&#xa;external-api.json / runtime cache" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dafbe1;strokeColor=#2da44e;fontColor=#116329;arcSize=8;" vertex="1" parent="1">
           <mxGeometry x="1110" y="170" width="230" height="140" as="geometry"/>
         </mxCell>
         <mxCell id="p1-repo" value="用户资源库目录&#xa;用户文件保持原位&#xa;.momo/repository.json&#xa;.momo/metadata.db&#xa;.momo/thumbnails / trash / indexes" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dafbe1;strokeColor=#2da44e;fontColor=#116329;arcSize=8;fontStyle=1;" vertex="1" parent="1">
@@ -192,16 +192,16 @@
           <mxGeometry x="510" y="250" width="220" height="70" as="geometry"/>
         </mxCell>
 
-        <mxCell id="p2-plugin-sdk" value="前端插件 SDK&#xa;src/plugins/sdk.ts&#xa;registerPreview / registerPlaylistPlayer / registerLibraryExtension&#xa;loadModule 从 .momoplug 读取 JS 并动态 import" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fbefff;strokeColor=#bf3989;fontColor=#6e1b50;arcSize=8;fontStyle=1;" vertex="1" parent="1">
+        <mxCell id="p2-plugin-sdk" value="前端插件 SDK&#xa;src/plugins/sdk.ts&#xa;registerPreview / registerPlaylistPlayer / registerLibraryExtension&#xa;registerToolPage / registerSettingsPage / registerEntryActionProvider&#xa;loadModule 从 .momoplug 读取 JS 并动态 import" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fbefff;strokeColor=#bf3989;fontColor=#6e1b50;arcSize=8;fontStyle=1;" vertex="1" parent="1">
           <mxGeometry x="60" y="960" width="500" height="120" as="geometry"/>
         </mxCell>
-        <mxCell id="p2-preview" value="预览插件&#xa;media / text / three model / office&#xa;生成缩略图、文件动作、预览组件" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fbefff;strokeColor=#bf3989;fontColor=#6e1b50;arcSize=8;" vertex="1" parent="1">
+        <mxCell id="p2-preview" value="预览插件&#xa;media / text / three model / office&#xa;生成缩略图、文件动作、预览组件&#xa;preparePreviewSource / saveGeneratedThumbnail" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fbefff;strokeColor=#bf3989;fontColor=#6e1b50;arcSize=8;" vertex="1" parent="1">
           <mxGeometry x="630" y="960" width="280" height="120" as="geometry"/>
         </mxCell>
-        <mxCell id="p2-library" value="Library 扩展&#xa;metadataPanel / previewPanel&#xa;fileSummary / searchShortcuts / playlist 行为" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fbefff;strokeColor=#bf3989;fontColor=#6e1b50;arcSize=8;" vertex="1" parent="1">
+        <mxCell id="p2-library" value="Library 与工具扩展&#xa;metadataPanel / previewPanel / fileSummary&#xa;searchShortcuts / toolPages / entryActions&#xa;settings schema 与自定义设置页" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fbefff;strokeColor=#bf3989;fontColor=#6e1b50;arcSize=8;" vertex="1" parent="1">
           <mxGeometry x="970" y="960" width="280" height="120" as="geometry"/>
         </mxCell>
-        <mxCell id="p2-player" value="播放列表播放器运行时&#xa;load / play / pause / seek / volume / configure&#xa;由插件贡献 playerTypeId" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fbefff;strokeColor=#bf3989;fontColor=#6e1b50;arcSize=8;" vertex="1" parent="1">
+        <mxCell id="p2-player" value="播放列表播放器运行时&#xa;load / play / pause / seek / volume / configure&#xa;由插件贡献 playerTypeId&#xa;manifest 变更后按 registryVersion 同步" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fbefff;strokeColor=#bf3989;fontColor=#6e1b50;arcSize=8;" vertex="1" parent="1">
           <mxGeometry x="1310" y="960" width="280" height="120" as="geometry"/>
         </mxCell>
 
@@ -300,7 +300,7 @@
         <mxCell id="p3-s7" value="硬链接与别名&#xa;content hash / candidates&#xa;hardlink_groups / members&#xa;copy fallback 记录状态&#xa;Eagle 多目录 alias" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d0d7de;fontColor=#24292f;arcSize=8;" vertex="1" parent="p3-state">
           <mxGeometry x="310" y="190" width="250" height="100" as="geometry"/>
         </mxCell>
-        <mxCell id="p3-s8" value="插件管理与调用&#xa;list_plugins / install / enable / delete&#xa;read_plugin_archive_text&#xa;native dylib C ABI call_plugin&#xa;dependencyStatus 解析" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d0d7de;fontColor=#24292f;arcSize=8;" vertex="1" parent="p3-state">
+        <mxCell id="p3-s8" value="插件管理与调用&#xa;list_plugins / install / enable / delete / hook executions&#xa;read_plugin_archive_text / get_plugin_config / get_plugin_data_directory&#xa;native dylib C ABI call_plugin / host API&#xa;dependencyStatus / playlist player / metadata defaults" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d0d7de;fontColor=#24292f;arcSize=8;" vertex="1" parent="p3-state">
           <mxGeometry x="590" y="190" width="250" height="100" as="geometry"/>
         </mxCell>
         <mxCell id="p3-s9" value="外部素材 API 落地&#xa;add_external_assets&#xa;remoteUrl 下载到 staging&#xa;导入本地仓库并写 metadata&#xa;统一错误码" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d0d7de;fontColor=#24292f;arcSize=8;" vertex="1" parent="p3-state">
@@ -310,7 +310,7 @@
           <mxGeometry x="1150" y="190" width="250" height="100" as="geometry"/>
         </mxCell>
 
-        <mxCell id="p3-service-data" value="服务根目录 .service-data/&#xa;repositories.db 全局注册表&#xa;plugins/*.momoplug 运行时插件包&#xa;plugin settings / native cache&#xa;external-api.json 连接发现" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dafbe1;strokeColor=#2da44e;fontColor=#116329;arcSize=8;fontStyle=1;" vertex="1" parent="1">
+        <mxCell id="p3-service-data" value="服务根目录 .service-data/&#xa;repositories.db 全局注册表&#xa;plugins/*.momoplug 运行时插件包&#xa;plugin-state.json / plugin-data/&lt;slug&gt;/config.json&#xa;plugin-cache/ / external-api.json" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dafbe1;strokeColor=#2da44e;fontColor=#116329;arcSize=8;fontStyle=1;" vertex="1" parent="1">
           <mxGeometry x="60" y="840" width="320" height="150" as="geometry"/>
         </mxCell>
         <mxCell id="p3-repo-layout" value="资源库目录布局&#xa;用户文件不搬家&#xa;.momo/repository.json&#xa;.momo/metadata.db SQLite WAL&#xa;.momo/cache / thumbnails / logs / indexes / trash" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dafbe1;strokeColor=#2da44e;fontColor=#116329;arcSize=8;fontStyle=1;" vertex="1" parent="1">
@@ -351,77 +351,110 @@
     </mxGraphModel>
   </diagram>
 
-  <diagram id="plugins-external" name="04 插件与外部生态">
-    <mxGraphModel dx="1800" dy="1100" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1800" pageHeight="1200" math="0" shadow="0">
+  <diagram id="plugins-external" name="04 插件代码架构">
+    <mxGraphModel dx="2000" dy="1200" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="2000" pageHeight="1400" math="0" shadow="0">
       <root>
         <mxCell id="0"/>
         <mxCell id="1" parent="0"/>
-        <mxCell id="p4-title" value="插件架构与外部集成生态" style="text;html=1;strokeColor=none;fillColor=none;fontSize=24;fontStyle=1;fontColor=#1f2328;align=left;verticalAlign=top;" vertex="1" parent="1">
-          <mxGeometry x="40" y="24" width="720" height="44" as="geometry"/>
+        <mxCell id="p4-title" value="插件代码架构：Manifest、宿主 SDK、原生 ABI 与数据目录" style="text;html=1;strokeColor=none;fillColor=none;fontSize=24;fontStyle=1;fontColor=#1f2328;align=left;verticalAlign=top;" vertex="1" parent="1">
+          <mxGeometry x="40" y="24" width="980" height="44" as="geometry"/>
+        </mxCell>
+        <mxCell id="p4-note" value="当前插件系统以 `.momoplug` 为统一交付物。宿主保持包级扫描、按需加载和核心写路径收口；插件负责贡献 UI、后端能力、仓库 IO、元数据候选、播放类型和工具页。" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f6f8fa;strokeColor=#d0d7de;fontColor=#57606a;arcSize=8;" vertex="1" parent="1">
+          <mxGeometry x="40" y="76" width="1860" height="60" as="geometry"/>
         </mxCell>
 
-        <mxCell id="p4-plugin-src" value="插件源码工程&#xa;External/Plugins/*&#xa;每个插件独立 manifest.json / plugin.project.json&#xa;frontend-module / cargo-native / manifest-only&#xa;根仓库脚本仅转发构建、打包、stage" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fbefff;strokeColor=#bf3989;fontColor=#6e1b50;arcSize=8;fontStyle=1;" vertex="1" parent="1">
-          <mxGeometry x="60" y="110" width="330" height="150" as="geometry"/>
+        <mxCell id="p4-plugin-src" value="插件源码工程&#xa;External/Plugins/*&#xa;manifest.json + register.js 或 src/lib.rs&#xa;source / library-kind / parser / preview / service&#xa;每个插件独立构建与依赖" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fbefff;strokeColor=#bf3989;fontColor=#6e1b50;arcSize=8;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="60" y="170" width="300" height="150" as="geometry"/>
         </mxCell>
-        <mxCell id="p4-build" value="插件工具链&#xa;External/Plugins/scripts/build.mjs&#xa;package.mjs / stage-dev.mjs&#xa;_sdk/backend-rust&#xa;template / example" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fbefff;strokeColor=#bf3989;fontColor=#6e1b50;arcSize=8;" vertex="1" parent="1">
-          <mxGeometry x="460" y="110" width="300" height="150" as="geometry"/>
+        <mxCell id="p4-build" value="插件工具链&#xa;External/Plugins/scripts/build.mjs&#xa;package.mjs / stage-dev.mjs / _sdk/backend-rust&#xa;dev 模式可直接 stage 到 runtime plugins" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fbefff;strokeColor=#bf3989;fontColor=#6e1b50;arcSize=8;" vertex="1" parent="1">
+          <mxGeometry x="420" y="170" width="300" height="150" as="geometry"/>
         </mxCell>
-        <mxCell id="p4-package" value=".momoplug 包&#xa;物理格式 zip，扩展名固定 .momoplug&#xa;单插件根目录 / manifest.json&#xa;dist/register.js 或 backend dylib&#xa;安装时复制，不持久解压" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fbefff;strokeColor=#bf3989;fontColor=#6e1b50;arcSize=8;fontStyle=1;" vertex="1" parent="1">
-          <mxGeometry x="830" y="110" width="320" height="150" as="geometry"/>
+        <mxCell id="p4-package" value=".momoplug 统一包&#xa;zip 容器，扩展名固定 .momoplug&#xa;manifest.json + dist/register.js 或 backend dylib&#xa;安装复制，运行时直接读 archive，避免常驻解压目录" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fbefff;strokeColor=#bf3989;fontColor=#6e1b50;arcSize=8;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="780" y="170" width="330" height="150" as="geometry"/>
         </mxCell>
-        <mxCell id="p4-runtime-dir" value="运行时插件目录&#xa;&lt;serviceRoot&gt;/plugins/*.momoplug&#xa;宿主启动与 GET /plugins 扫描&#xa;manifest 直读，删除/新增直接反映" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fbefff;strokeColor=#bf3989;fontColor=#6e1b50;arcSize=8;" vertex="1" parent="1">
-          <mxGeometry x="1220" y="110" width="320" height="150" as="geometry"/>
+        <mxCell id="p4-runtime-dir" value="运行时插件目录&#xa;&lt;serviceRoot&gt;/plugins/*.momoplug&#xa;宿主启动与 `list_plugins` 按包扫描&#xa;manifest 直读，新增/删除直接反映到管理页与前端注册表" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fbefff;strokeColor=#bf3989;fontColor=#6e1b50;arcSize=8;" vertex="1" parent="1">
+          <mxGeometry x="1170" y="170" width="350" height="150" as="geometry"/>
         </mxCell>
-
-        <mxCell id="p4-categories" value="Manifest 分类与职责" style="swimlane;whiteSpace=wrap;html=1;rounded=1;startSize=32;fillColor=#f6f8fa;strokeColor=#8c959f;fontColor=#24292f;arcSize=8;fontStyle=1;" vertex="1" parent="1">
-          <mxGeometry x="60" y="340" width="700" height="330" as="geometry"/>
-        </mxCell>
-        <mxCell id="p4-c1" value="source&#xa;仓库 IO 后端&#xa;local-filesystem / webdav / cloud-drive" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ddf4ff;strokeColor=#54aeef;fontColor=#0969da;arcSize=8;" vertex="1" parent="p4-categories">
-          <mxGeometry x="30" y="60" width="200" height="80" as="geometry"/>
-        </mxCell>
-        <mxCell id="p4-c2" value="library-kind&#xa;资源语义、字段、视图、搜索快捷方式&#xa;image/audio/video/asmr/manga/font/model3d..." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ddf4ff;strokeColor=#54aeef;fontColor=#0969da;arcSize=8;" vertex="1" parent="p4-categories">
-          <mxGeometry x="250" y="60" width="200" height="80" as="geometry"/>
-        </mxCell>
-        <mxCell id="p4-c3" value="parser&#xa;文件/容器解析候选&#xa;image/video/audio/ebook/archive/font/asmr-folder" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ddf4ff;strokeColor=#54aeef;fontColor=#0969da;arcSize=8;" vertex="1" parent="p4-categories">
-          <mxGeometry x="470" y="60" width="200" height="80" as="geometry"/>
-        </mxCell>
-        <mxCell id="p4-c4" value="preview&#xa;预览与缩略图&#xa;media / text / three-model / office" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ddf4ff;strokeColor=#54aeef;fontColor=#0969da;arcSize=8;" vertex="1" parent="p4-categories">
-          <mxGeometry x="140" y="185" width="200" height="80" as="geometry"/>
-        </mxCell>
-        <mxCell id="p4-c5" value="service&#xa;外部能力与后台服务&#xa;metadata providers / downloader / network-search / vector-index / watcher" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ddf4ff;strokeColor=#54aeef;fontColor=#0969da;arcSize=8;" vertex="1" parent="p4-categories">
-          <mxGeometry x="360" y="185" width="200" height="80" as="geometry"/>
+        <mxCell id="p4-manifest" value="Manifest 契约&#xa;pluginId / legacyPluginIds / version / kind / category&#xa;sdk / runtime / entry / permissions / requires / optional&#xa;hooks / contributes / compat / status / dependencyStatus&#xa;settings.fields / settingsPage / toolPages / playlistPlayers / apiTests" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d0d7de;fontColor=#24292f;arcSize=8;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="1580" y="170" width="320" height="150" as="geometry"/>
         </mxCell>
 
-        <mxCell id="p4-flow" value="运行时加载流程" style="swimlane;whiteSpace=wrap;html=1;rounded=1;startSize=32;fillColor=#f6f8fa;strokeColor=#8c959f;fontColor=#24292f;arcSize=8;fontStyle=1;" vertex="1" parent="1">
-          <mxGeometry x="840" y="340" width="700" height="330" as="geometry"/>
+        <mxCell id="p4-frontend-lane" value="前端 vue-module 宿主" style="swimlane;whiteSpace=wrap;html=1;rounded=1;startSize=32;fillColor=#f6f8fa;strokeColor=#8c959f;fontColor=#24292f;arcSize=8;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="380" width="920" height="560" as="geometry"/>
         </mxCell>
-        <mxCell id="p4-f1" value="GET /plugins&#xa;RepositoryState 读取 manifest&#xa;解析 legacy IDs / dependencyStatus / enabled" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d0d7de;fontColor=#24292f;arcSize=8;" vertex="1" parent="p4-flow">
-          <mxGeometry x="30" y="60" width="190" height="84" as="geometry"/>
+        <mxCell id="p4-fe1" value="插件清单同步&#xa;src/services/repositoryApi/plugins.ts:listPlugins&#xa;src/plugins/sdk.ts:syncRegisteredPreviewPluginManifests&#xa;根据 manifest 启用/禁用、更新 registryVersion" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dbeafe;strokeColor=#2f6feb;fontColor=#0a3069;arcSize=8;fontStyle=1;" vertex="1" parent="p4-frontend-lane">
+          <mxGeometry x="30" y="60" width="270" height="110" as="geometry"/>
         </mxCell>
-        <mxCell id="p4-f2" value="前端 vue-module&#xa;read_plugin_archive_text&#xa;data:text/javascript URL&#xa;dynamic import + register(ctx)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d0d7de;fontColor=#24292f;arcSize=8;" vertex="1" parent="p4-flow">
-          <mxGeometry x="255" y="60" width="190" height="84" as="geometry"/>
+        <mxCell id="p4-fe2" value="包内模块按需读取&#xa;read_plugin_archive_text(pluginId, path)&#xa;data:text/javascript URL&#xa;dynamic import(register export)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dbeafe;strokeColor=#2f6feb;fontColor=#0a3069;arcSize=8;" vertex="1" parent="p4-frontend-lane">
+          <mxGeometry x="330" y="60" width="250" height="110" as="geometry"/>
         </mxCell>
-        <mxCell id="p4-f3" value="注册表生效&#xa;previewPluginRegistry&#xa;playlistPlayerRegistry&#xa;libraryExtensionRegistry" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d0d7de;fontColor=#24292f;arcSize=8;" vertex="1" parent="p4-flow">
-          <mxGeometry x="480" y="60" width="190" height="84" as="geometry"/>
+        <mxCell id="p4-fe3" value="FrontendPluginContext&#xa;registerPreview / registerPlaylistPlayer / registerLibraryExtension&#xa;registerToolPage / registerSettingsPage / registerEntryActionProvider&#xa;getPluginConfig / getPluginDataDirectory / callPlugin / onPluginEvent" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dbeafe;strokeColor=#2f6feb;fontColor=#0a3069;arcSize=8;" vertex="1" parent="p4-frontend-lane">
+          <mxGeometry x="610" y="60" width="270" height="110" as="geometry"/>
         </mxCell>
-        <mxCell id="p4-f4" value="后端 native-dylib&#xa;从包内提取到受控临时缓存&#xa;libloading 加载" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d0d7de;fontColor=#24292f;arcSize=8;" vertex="1" parent="p4-flow">
-          <mxGeometry x="140" y="190" width="190" height="84" as="geometry"/>
+        <mxCell id="p4-fe4" value="前端注册表&#xa;previewPluginRegistry&#xa;playlistPlayerRegistry&#xa;libraryExtensionRegistry&#xa;toolPageRegistry / settingsPageRegistry / entryActionProviderRegistry" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d0d7de;fontColor=#24292f;arcSize=8;" vertex="1" parent="p4-frontend-lane">
+          <mxGeometry x="30" y="220" width="380" height="130" as="geometry"/>
         </mxCell>
-        <mxCell id="p4-f5" value="C ABI + JSON envelope&#xa;momobako_plugin_manifest&#xa;momobako_plugin_call&#xa;momobako_plugin_free" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d0d7de;fontColor=#24292f;arcSize=8;" vertex="1" parent="p4-flow">
-          <mxGeometry x="370" y="190" width="190" height="84" as="geometry"/>
+        <mxCell id="p4-fe5" value="UI 消费点&#xa;FilePreviewPane / PlayerBar / ExtensionsPanel&#xa;PluginManagerPanel / Settings&#xa;FileMetadataEditor / Search shortcuts / Context menus" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d0d7de;fontColor=#24292f;arcSize=8;" vertex="1" parent="p4-frontend-lane">
+          <mxGeometry x="450" y="220" width="400" height="130" as="geometry"/>
+        </mxCell>
+        <mxCell id="p4-fe6" value="前端能力实例&#xa;preview: media / text / three-model / office&#xa;library-kind: metadataPanel / previewPanel / fileSummary / searchShortcuts&#xa;toolPages: API Playground / 文件管理 / Eagle 导入" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fbefff;strokeColor=#bf3989;fontColor=#6e1b50;arcSize=8;" vertex="1" parent="p4-frontend-lane">
+          <mxGeometry x="30" y="395" width="380" height="120" as="geometry"/>
+        </mxCell>
+        <mxCell id="p4-fe7" value="宿主事件与异步能力&#xa;emitPluginEvent / onPluginEvent&#xa;preparePreviewSource / ensureThumbnail / downloadPlaylistWithProgress&#xa;defineLazyComponent 保持重模块按需加载" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff1e5;strokeColor=#fb8f44;fontColor=#9a3412;arcSize=8;" vertex="1" parent="p4-frontend-lane">
+          <mxGeometry x="450" y="395" width="400" height="120" as="geometry"/>
         </mxCell>
 
-        <mxCell id="p4-browser" value="浏览器采集扩展&#xa;Manifest V3 service-worker&#xa;contextMenus image/link&#xa;读取 baseUrl/token/repoId/parentPath&#xa;POST /external/v1/assets:add" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff8c5;strokeColor=#d4a72c;fontColor=#3d2d00;arcSize=8;fontStyle=1;" vertex="1" parent="1">
-          <mxGeometry x="60" y="760" width="330" height="140" as="geometry"/>
+        <mxCell id="p4-backend-lane" value="后端 native-dylib / source 宿主" style="swimlane;whiteSpace=wrap;html=1;rounded=1;startSize=32;fillColor=#f6f8fa;strokeColor=#8c959f;fontColor=#24292f;arcSize=8;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="1000" y="380" width="900" height="560" as="geometry"/>
         </mxCell>
-        <mxCell id="p4-external-api" value="MomoBako 外部 API&#xa;127.0.0.1 + 启动生成 bearer token&#xa;health / repositories / assets:add&#xa;remoteUrl 下载 → 本地导入 → metadata 写入" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffebe9;strokeColor=#cf222e;fontColor=#82071e;arcSize=8;fontStyle=1;" vertex="1" parent="1">
-          <mxGeometry x="470" y="760" width="340" height="140" as="geometry"/>
+        <mxCell id="p4-be1" value="BackendPluginRegistry::load / load_for_management&#xa;扫描 &lt;serviceRoot&gt;/plugins/*.momoplug&#xa;读取 manifest，规范 legacyPluginIds 和 category&#xa;应用 plugin-state.json enabled 状态" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffebe9;strokeColor=#cf222e;fontColor=#82071e;arcSize=8;fontStyle=1;" vertex="1" parent="p4-backend-lane">
+          <mxGeometry x="30" y="60" width="280" height="120" as="geometry"/>
         </mxCell>
-        <mxCell id="p4-eagle" value="原生 Eagle 导入插件&#xa;读取 Eagle metadata/tags/actions/images&#xa;直接写入文件 / metadata.db / .momo&#xa;迁移 tagsGroups / quickAccess / smartFolders / actions / trash" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff8c5;strokeColor=#d4a72c;fontColor=#3d2d00;arcSize=8;fontStyle=1;" vertex="1" parent="1">
-          <mxGeometry x="900" y="760" width="350" height="140" as="geometry"/>
+        <mxCell id="p4-be2" value="依赖与能力解析&#xa;required / optional / dependencyStatus&#xa;playlistPlayers / metadataDefaults / apiTests / hooks&#xa;source.metadataMirrorKeys 与 provider 动作声明" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffebe9;strokeColor=#cf222e;fontColor=#82071e;arcSize=8;" vertex="1" parent="p4-backend-lane">
+          <mxGeometry x="340" y="60" width="250" height="120" as="geometry"/>
         </mxCell>
-        <mxCell id="p4-repo" value="目标资源库&#xa;本地文件系统后端当前是可写主路径&#xa;插件源后端可扩展为 WebDAV / cloud&#xa;所有写入仍走核心确认、审计与 revision 路径" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dafbe1;strokeColor=#2da44e;fontColor=#116329;arcSize=8;fontStyle=1;" vertex="1" parent="1">
-          <mxGeometry x="1330" y="760" width="310" height="140" as="geometry"/>
+        <mxCell id="p4-be3" value="native-dylib 加载&#xa;从 archive 提取到 plugin-cache/ 受控临时目录&#xa;libloading 打开动态库&#xa;安装阶段保持复制包，运行阶段按需抽取" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffebe9;strokeColor=#cf222e;fontColor=#82071e;arcSize=8;" vertex="1" parent="p4-backend-lane">
+          <mxGeometry x="620" y="60" width="250" height="120" as="geometry"/>
+        </mxCell>
+        <mxCell id="p4-be4" value="C ABI 边界&#xa;momobako_plugin_manifest&#xa;momobako_plugin_call&#xa;momobako_plugin_free&#xa;momobako_plugin_register_host_api" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d0d7de;fontColor=#24292f;arcSize=8;" vertex="1" parent="p4-backend-lane">
+          <mxGeometry x="30" y="220" width="250" height="120" as="geometry"/>
+        </mxCell>
+        <mxCell id="p4-be5" value="JSON envelope 与运行上下文&#xa;request.method / payload&#xa;runtime.pluginDataDir / runtime.pluginConfig&#xa;repoId / path / playback / preview token 等运行数据" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d0d7de;fontColor=#24292f;arcSize=8;" vertex="1" parent="p4-backend-lane">
+          <mxGeometry x="320" y="220" width="250" height="120" as="geometry"/>
+        </mxCell>
+        <mxCell id="p4-be6" value="宿主后端入口&#xa;call_plugin / list_plugin_hook_executions&#xa;playlist_player / metadata_default_providers&#xa;prepare_track_playback / plugin config / plugin data path" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d0d7de;fontColor=#24292f;arcSize=8;" vertex="1" parent="p4-backend-lane">
+          <mxGeometry x="610" y="220" width="250" height="120" as="geometry"/>
+        </mxCell>
+        <mxCell id="p4-be7" value="source 类插件职责&#xa;list/read/write/move/delete/watch&#xa;scanner 仍由核心调度，结果统一回写 RepositoryState&#xa;listFiles 兼容 relativePath 与 absolutePath" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ddf4ff;strokeColor=#54aeef;fontColor=#0969da;arcSize=8;" vertex="1" parent="p4-backend-lane">
+          <mxGeometry x="30" y="390" width="280" height="120" as="geometry"/>
+        </mxCell>
+        <mxCell id="p4-be8" value="provider / parser / service 类插件职责&#xa;provider.lookupMetadataCandidate&#xa;metadataDefaults.action&#xa;下载、OCR/ASR、网络搜索、向量检索、watcher 等共享能力" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ddf4ff;strokeColor=#54aeef;fontColor=#0969da;arcSize=8;" vertex="1" parent="p4-backend-lane">
+          <mxGeometry x="340" y="390" width="280" height="120" as="geometry"/>
+        </mxCell>
+        <mxCell id="p4-be9" value="核心收口边界&#xa;revision / audit / dangerous writes / batch organize / candidate merge / download queue 由宿主拥有&#xa;插件提供声明、候选与局部 UI，核心持有确认和持久化责任" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff8c5;strokeColor=#d4a72c;fontColor=#3d2d00;arcSize=8;fontStyle=1;" vertex="1" parent="p4-backend-lane">
+          <mxGeometry x="650" y="390" width="210" height="120" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="p4-data-lane" value="运行数据、配置与宿主周边" style="swimlane;whiteSpace=wrap;html=1;rounded=1;startSize=32;fillColor=#f6f8fa;strokeColor=#8c959f;fontColor=#24292f;arcSize=8;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="990" width="1860" height="320" as="geometry"/>
+        </mxCell>
+        <mxCell id="p4-data1" value="插件自有数据目录&#xa;&lt;serviceRoot&gt;/plugin-data/&lt;pluginSlug&gt;/&#xa;config.json 由宿主管理&#xa;helper 状态、缓存、下载任务、运行日志也落这里" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dafbe1;strokeColor=#2da44e;fontColor=#116329;arcSize=8;fontStyle=1;" vertex="1" parent="p4-data-lane">
+          <mxGeometry x="30" y="70" width="300" height="120" as="geometry"/>
+        </mxCell>
+        <mxCell id="p4-data2" value="插件状态与抽取缓存&#xa;plugin-state.json 保存 enabled 覆盖值&#xa;plugin-cache/ 保存 dylib 临时抽取与运行期辅助文件&#xa;管理面删除插件后缓存可重建" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dafbe1;strokeColor=#2da44e;fontColor=#116329;arcSize=8;" vertex="1" parent="p4-data-lane">
+          <mxGeometry x="360" y="70" width="300" height="120" as="geometry"/>
+        </mxCell>
+        <mxCell id="p4-data3" value="仓库核心落点&#xa;repositories.db 全局注册表&#xa;repo/.momo/repository.json / metadata.db / thumbnails / indexes&#xa;用户文件保持原位，插件写入经过宿主路径检查与 revision" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dafbe1;strokeColor=#2da44e;fontColor=#116329;arcSize=8;" vertex="1" parent="p4-data-lane">
+          <mxGeometry x="690" y="70" width="330" height="120" as="geometry"/>
+        </mxCell>
+        <mxCell id="p4-data4" value="浏览器扩展与外部 API&#xa;BrowserExtension 读取 external-api.json 中的 baseUrl/token&#xa;POST /external/v1/assets:add&#xa;MomoBako 运行时负责下载、导入、metadata 写入与鉴权" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff8c5;strokeColor=#d4a72c;fontColor=#3d2d00;arcSize=8;fontStyle=1;" vertex="1" parent="p4-data-lane">
+          <mxGeometry x="1050" y="70" width="330" height="120" as="geometry"/>
+        </mxCell>
+        <mxCell id="p4-data5" value="典型插件实例&#xa;source: local-filesystem / source-netease-cloud-music&#xa;service: service-downloader / service-provider-*&#xa;library-kind: library-asmr / library-netease-cloud-music&#xa;tool page: api-playground / file-manager / eagle-importer" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fbefff;strokeColor=#bf3989;fontColor=#6e1b50;arcSize=8;" vertex="1" parent="p4-data-lane">
+          <mxGeometry x="1410" y="70" width="390" height="120" as="geometry"/>
+        </mxCell>
+        <mxCell id="p4-data6" value="宿主为何这样设计&#xa;统一包格式便于分发与版本锁定&#xa;宿主管理 config/data 目录便于迁移与排障&#xa;核心掌握危险写路径，插件保留扩展能力和独立发布节奏" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d0d7de;fontColor=#24292f;arcSize=8;" vertex="1" parent="p4-data-lane">
+          <mxGeometry x="520" y="220" width="820" height="70" as="geometry"/>
         </mxCell>
 
         <mxCell id="p4-e1" value="build/package/stage" style="endArrow=block;html=1;rounded=0;strokeWidth=2;strokeColor=#bf3989;" edge="1" parent="1" source="p4-plugin-src" target="p4-build">
@@ -433,25 +466,67 @@
         <mxCell id="p4-e3" value="安装复制" style="endArrow=block;html=1;rounded=0;strokeWidth=2;strokeColor=#bf3989;" edge="1" parent="1" source="p4-package" target="p4-runtime-dir">
           <mxGeometry relative="1" as="geometry"/>
         </mxCell>
-        <mxCell id="p4-e4" value="扫描" style="endArrow=block;html=1;rounded=0;strokeWidth=2;strokeColor=#bf3989;" edge="1" parent="1" source="p4-runtime-dir" target="p4-flow">
+        <mxCell id="p4-e4" value="扫描 frontend manifests" style="endArrow=block;html=1;rounded=0;strokeWidth=2;strokeColor=#bf3989;" edge="1" parent="1" source="p4-runtime-dir" target="p4-fe1">
           <mxGeometry relative="1" as="geometry"/>
         </mxCell>
-        <mxCell id="p4-e5" value="" style="endArrow=block;html=1;rounded=0;strokeWidth=2;strokeColor=#57606a;" edge="1" parent="p4-flow" source="p4-f1" target="p4-f2">
+        <mxCell id="p4-e5" value="frontend sdk=frontend runtime=vue-module" style="endArrow=block;html=1;rounded=0;strokeWidth=2;strokeColor=#2f6feb;" edge="1" parent="p4-frontend-lane" source="p4-fe1" target="p4-fe2">
           <mxGeometry relative="1" as="geometry"/>
         </mxCell>
-        <mxCell id="p4-e6" value="" style="endArrow=block;html=1;rounded=0;strokeWidth=2;strokeColor=#57606a;" edge="1" parent="p4-flow" source="p4-f2" target="p4-f3">
+        <mxCell id="p4-e6" value="register(ctx)" style="endArrow=block;html=1;rounded=0;strokeWidth=2;strokeColor=#2f6feb;" edge="1" parent="p4-frontend-lane" source="p4-fe2" target="p4-fe3">
           <mxGeometry relative="1" as="geometry"/>
         </mxCell>
-        <mxCell id="p4-e7" value="" style="endArrow=block;html=1;rounded=0;strokeWidth=2;strokeColor=#57606a;" edge="1" parent="p4-flow" source="p4-f4" target="p4-f5">
+        <mxCell id="p4-e7" value="注册贡献" style="endArrow=block;html=1;rounded=0;strokeWidth=2;strokeColor=#2f6feb;" edge="1" parent="p4-frontend-lane" source="p4-fe3" target="p4-fe4">
           <mxGeometry relative="1" as="geometry"/>
         </mxCell>
-        <mxCell id="p4-e8" value="HTTP + bearer" style="endArrow=block;html=1;rounded=0;strokeWidth=2;strokeColor=#d4a72c;" edge="1" parent="1" source="p4-browser" target="p4-external-api">
+        <mxCell id="p4-e8" value="UI 查表消费" style="endArrow=block;html=1;rounded=0;strokeWidth=2;strokeColor=#2f6feb;" edge="1" parent="p4-frontend-lane" source="p4-fe4" target="p4-fe5">
           <mxGeometry relative="1" as="geometry"/>
         </mxCell>
-        <mxCell id="p4-e9" value="导入资产" style="endArrow=block;html=1;rounded=0;strokeWidth=2;strokeColor=#2da44e;" edge="1" parent="1" source="p4-external-api" target="p4-repo">
+        <mxCell id="p4-e9" value="能力分发" style="endArrow=block;html=1;rounded=0;strokeWidth=2;strokeColor=#bf3989;" edge="1" parent="p4-frontend-lane" source="p4-fe4" target="p4-fe6">
           <mxGeometry relative="1" as="geometry"/>
         </mxCell>
-        <mxCell id="p4-e10" value="直接导入" style="endArrow=block;html=1;rounded=0;strokeWidth=2;strokeColor=#2da44e;" edge="1" parent="1" source="p4-eagle" target="p4-repo">
+        <mxCell id="p4-e10" value="预览/缩略图/事件" style="endArrow=block;html=1;rounded=0;strokeWidth=2;dashed=1;strokeColor=#fb8f44;" edge="1" parent="p4-frontend-lane" source="p4-fe3" target="p4-fe7">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="p4-e11" value="扫描 backend manifests" style="endArrow=block;html=1;rounded=0;strokeWidth=2;strokeColor=#bf3989;" edge="1" parent="1" source="p4-runtime-dir" target="p4-be1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="p4-e12" value="解析依赖与贡献" style="endArrow=block;html=1;rounded=0;strokeWidth=2;strokeColor=#cf222e;" edge="1" parent="p4-backend-lane" source="p4-be1" target="p4-be2">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="p4-e13" value="按需加载" style="endArrow=block;html=1;rounded=0;strokeWidth=2;strokeColor=#cf222e;" edge="1" parent="p4-backend-lane" source="p4-be2" target="p4-be3">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="p4-e14" value="导出符号" style="endArrow=block;html=1;rounded=0;strokeWidth=2;strokeColor=#cf222e;" edge="1" parent="p4-backend-lane" source="p4-be3" target="p4-be4">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="p4-e15" value="host API + runtime" style="endArrow=block;html=1;rounded=0;strokeWidth=2;strokeColor=#57606a;" edge="1" parent="p4-backend-lane" source="p4-be4" target="p4-be5">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="p4-e16" value="RepositoryState / ViewModel 调用" style="endArrow=block;html=1;rounded=0;strokeWidth=2;strokeColor=#57606a;" edge="1" parent="p4-backend-lane" source="p4-be5" target="p4-be6">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="p4-e17" value="repo backend IO" style="endArrow=block;html=1;rounded=0;strokeWidth=2;strokeColor=#54aeef;" edge="1" parent="p4-backend-lane" source="p4-be6" target="p4-be7">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="p4-e18" value="候选、默认值、服务能力" style="endArrow=block;html=1;rounded=0;strokeWidth=2;strokeColor=#54aeef;" edge="1" parent="p4-backend-lane" source="p4-be6" target="p4-be8">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="p4-e19" value="核心确认与审计" style="endArrow=block;html=1;rounded=0;strokeWidth=2;strokeColor=#d4a72c;" edge="1" parent="p4-backend-lane" source="p4-be6" target="p4-be9">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="p4-e20" value="读取/写入 config 与 helper 状态" style="endArrow=block;html=1;rounded=0;strokeWidth=2;strokeColor=#2da44e;" edge="1" parent="1" source="p4-fe3" target="p4-data1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="p4-e21" value="共享 pluginDataDir / pluginConfig" style="endArrow=block;html=1;rounded=0;strokeWidth=2;strokeColor=#2da44e;" edge="1" parent="1" source="p4-be5" target="p4-data1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="p4-e22" value="enabled 状态 / cache" style="endArrow=block;html=1;rounded=0;strokeWidth=2;strokeColor=#2da44e;" edge="1" parent="1" source="p4-be1" target="p4-data2">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="p4-e23" value="写入仓库经核心收口" style="endArrow=block;html=1;rounded=0;strokeWidth=2;strokeColor=#2da44e;" edge="1" parent="1" source="p4-be9" target="p4-data3">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="p4-e24" value="baseUrl / token 参与外部导入" style="endArrow=block;html=1;rounded=0;strokeWidth=2;strokeColor=#d4a72c;" edge="1" parent="1" source="p4-data4" target="p4-data3">
           <mxGeometry relative="1" as="geometry"/>
         </mxCell>
       </root>
@@ -532,6 +607,104 @@
         </mxCell>
         <mxCell id="p5-e6" value="verify 包含" style="endArrow=block;html=1;rounded=0;strokeWidth=2;strokeColor=#2da44e;" edge="1" parent="1" source="p5-v4" target="p5-v3">
           <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+  <diagram id="plugin-design-notes" name="06 插件设计与说明">
+    <mxGraphModel dx="1800" dy="1100" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1800" pageHeight="1200" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+        <mxCell id="p6-title" value="插件设计原则、运行顺序与说明" style="text;html=1;strokeColor=none;fillColor=none;fontSize=24;fontStyle=1;fontColor=#1f2328;align=left;verticalAlign=top;" vertex="1" parent="1">
+          <mxGeometry x="40" y="24" width="760" height="44" as="geometry"/>
+        </mxCell>
+        <mxCell id="p6-note" value="这一页把第 4 页的结构图拆成设计原则和运行说明，方便在评审、开发接入和插件排障时快速定位边界。" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f6f8fa;strokeColor=#d0d7de;fontColor=#57606a;arcSize=8;" vertex="1" parent="1">
+          <mxGeometry x="40" y="76" width="1700" height="56" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="p6-principles" value="设计原则" style="swimlane;whiteSpace=wrap;html=1;rounded=1;startSize=32;fillColor=#f6f8fa;strokeColor=#8c959f;fontColor=#24292f;arcSize=8;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="170" width="1700" height="250" as="geometry"/>
+        </mxCell>
+        <mxCell id="p6-p1" value="统一交付物&#xa;.momoplug 同时承载 manifest、前端模块、原生库&#xa;发布、安装、版本回滚都围绕单包进行" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fbefff;strokeColor=#bf3989;fontColor=#6e1b50;arcSize=8;fontStyle=1;" vertex="1" parent="p6-principles">
+          <mxGeometry x="30" y="70" width="300" height="110" as="geometry"/>
+        </mxCell>
+        <mxCell id="p6-p2" value="声明先行&#xa;manifest 描述 category、runtime、依赖、hooks、settings、toolPages、playlistPlayers&#xa;宿主据此决定加载路径和 UI 呈现" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dbeafe;strokeColor=#2f6feb;fontColor=#0a3069;arcSize=8;" vertex="1" parent="p6-principles">
+          <mxGeometry x="360" y="70" width="300" height="110" as="geometry"/>
+        </mxCell>
+        <mxCell id="p6-p3" value="配置与数据由宿主管理&#xa;config.json、pluginDataDir、enabled 状态、native cache 都在 .service-data 下统一落盘&#xa;迁移、备份和排障路径稳定" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dafbe1;strokeColor=#2da44e;fontColor=#116329;arcSize=8;" vertex="1" parent="p6-principles">
+          <mxGeometry x="690" y="70" width="300" height="110" as="geometry"/>
+        </mxCell>
+        <mxCell id="p6-p4" value="核心收口危险写路径&#xa;revision、审计、批量整理、删除/移动、下载落盘和 metadata 写入由宿主执行&#xa;插件负责候选、声明、算法和局部 UI" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff8c5;strokeColor=#d4a72c;fontColor=#3d2d00;arcSize=8;fontStyle=1;" vertex="1" parent="p6-principles">
+          <mxGeometry x="1020" y="70" width="320" height="110" as="geometry"/>
+        </mxCell>
+        <mxCell id="p6-p5" value="前后端对称扩展&#xa;前端通过 FrontendPluginContext 注册 UI 能力&#xa;后端通过 C ABI + JSON envelope 暴露服务能力&#xa;source 插件继续走 RepositoryState 调度" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffebe9;strokeColor=#cf222e;fontColor=#82071e;arcSize=8;" vertex="1" parent="p6-principles">
+          <mxGeometry x="1370" y="70" width="280" height="110" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="p6-flow" value="运行顺序" style="swimlane;whiteSpace=wrap;html=1;rounded=1;startSize=32;fillColor=#f6f8fa;strokeColor=#8c959f;fontColor=#24292f;arcSize=8;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="470" width="1700" height="270" as="geometry"/>
+        </mxCell>
+        <mxCell id="p6-f1" value="1. 扫描 runtime plugins/" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d0d7de;fontColor=#24292f;arcSize=8;fontStyle=1;" vertex="1" parent="p6-flow">
+          <mxGeometry x="30" y="90" width="200" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="p6-f2" value="2. 读取 manifest&#xa;归一化 legacy ID 与 category&#xa;计算 dependencyStatus" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d0d7de;fontColor=#24292f;arcSize=8;" vertex="1" parent="p6-flow">
+          <mxGeometry x="260" y="90" width="220" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="p6-f3" value="3. 前端插件走 read_plugin_archive_text + dynamic import" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dbeafe;strokeColor=#2f6feb;fontColor=#0a3069;arcSize=8;" vertex="1" parent="p6-flow">
+          <mxGeometry x="510" y="90" width="240" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="p6-f4" value="4. 后端插件按需抽取 dylib + libloading + host API" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffebe9;strokeColor=#cf222e;fontColor=#82071e;arcSize=8;" vertex="1" parent="p6-flow">
+          <mxGeometry x="780" y="90" width="250" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="p6-f5" value="5. 注册 UI 与服务贡献&#xa;preview / player / library / tool / settings / actions / providers" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fbefff;strokeColor=#bf3989;fontColor=#6e1b50;arcSize=8;" vertex="1" parent="p6-flow">
+          <mxGeometry x="1060" y="90" width="250" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="p6-f6" value="6. 宿主页面与命令消费贡献&#xa;UI 查注册表，ViewModel 走 RepositoryState / call_plugin" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff1e5;strokeColor=#fb8f44;fontColor=#9a3412;arcSize=8;" vertex="1" parent="p6-flow">
+          <mxGeometry x="1340" y="90" width="250" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="p6-f7" value="7. 配置、缓存、helper 状态持久化到 .service-data；仓库写入走 revision/audit 路径" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dafbe1;strokeColor=#2da44e;fontColor=#116329;arcSize=8;fontStyle=1;" vertex="1" parent="p6-flow">
+          <mxGeometry x="620" y="180" width="470" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="p6-e1" value="" style="endArrow=block;html=1;rounded=0;strokeWidth=2;strokeColor=#57606a;" edge="1" parent="p6-flow" source="p6-f1" target="p6-f2">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="p6-e2" value="" style="endArrow=block;html=1;rounded=0;strokeWidth=2;strokeColor=#2f6feb;" edge="1" parent="p6-flow" source="p6-f2" target="p6-f3">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="p6-e3" value="" style="endArrow=block;html=1;rounded=0;strokeWidth=2;strokeColor=#cf222e;" edge="1" parent="p6-flow" source="p6-f3" target="p6-f4">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="p6-e4" value="" style="endArrow=block;html=1;rounded=0;strokeWidth=2;strokeColor=#bf3989;" edge="1" parent="p6-flow" source="p6-f4" target="p6-f5">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="p6-e5" value="" style="endArrow=block;html=1;rounded=0;strokeWidth=2;strokeColor=#fb8f44;" edge="1" parent="p6-flow" source="p6-f5" target="p6-f6">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="p6-e6" value="" style="endArrow=block;html=1;rounded=0;strokeWidth=2;strokeColor=#2da44e;" edge="1" parent="p6-flow" source="p6-f6" target="p6-f7">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="p6-map" value="贡献点速查" style="swimlane;whiteSpace=wrap;html=1;rounded=1;startSize=32;fillColor=#f6f8fa;strokeColor=#8c959f;fontColor=#24292f;arcSize=8;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="790" width="1700" height="330" as="geometry"/>
+        </mxCell>
+        <mxCell id="p6-m1" value="preview&#xa;宿主入口: registerPreview&#xa;主要页面: FilePreviewPane&#xa;典型能力: 预览组件、缩略图、文件动作" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dbeafe;strokeColor=#2f6feb;fontColor=#0a3069;arcSize=8;" vertex="1" parent="p6-map">
+          <mxGeometry x="30" y="70" width="250" height="120" as="geometry"/>
+        </mxCell>
+        <mxCell id="p6-m2" value="library-kind&#xa;宿主入口: registerLibraryExtension&#xa;主要页面: MetadataEditor / Search / Playlist&#xa;典型能力: 字段语义、搜索捷径、summary" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dbeafe;strokeColor=#2f6feb;fontColor=#0a3069;arcSize=8;" vertex="1" parent="p6-map">
+          <mxGeometry x="310" y="70" width="250" height="120" as="geometry"/>
+        </mxCell>
+        <mxCell id="p6-m3" value="tool / settings / actions&#xa;宿主入口: registerToolPage / registerSettingsPage / registerEntryActionProvider&#xa;主要页面: ExtensionsPanel / PluginManagerPanel / ContextMenu" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dbeafe;strokeColor=#2f6feb;fontColor=#0a3069;arcSize=8;" vertex="1" parent="p6-map">
+          <mxGeometry x="590" y="70" width="300" height="120" as="geometry"/>
+        </mxCell>
+        <mxCell id="p6-m4" value="source&#xa;宿主入口: BackendPluginRegistry + filesystem backend delegation&#xa;主要模块: sync / browser / importing / playback&#xa;典型能力: listFiles、read、move、watch" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffebe9;strokeColor=#cf222e;fontColor=#82071e;arcSize=8;" vertex="1" parent="p6-map">
+          <mxGeometry x="920" y="70" width="270" height="120" as="geometry"/>
+        </mxCell>
+        <mxCell id="p6-m5" value="provider / parser / service&#xa;宿主入口: call_plugin / metadata defaults / hook executions&#xa;主要模块: api_design / playlist / metadata sync / downloader&#xa;典型能力: provider.lookupMetadataCandidate、下载、转换、候选默认值" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffebe9;strokeColor=#cf222e;fontColor=#82071e;arcSize=8;" vertex="1" parent="p6-map">
+          <mxGeometry x="1220" y="70" width="320" height="120" as="geometry"/>
+        </mxCell>
+        <mxCell id="p6-m6" value="排障优先顺序&#xa;1. 先看 manifest 与 dependencyStatus&#xa;2. 再看 plugin-state.json / config.json / plugin-data&#xa;3. 前端问题查 registryVersion 与 read_plugin_archive_text&#xa;4. 后端问题查 plugin-cache、C ABI 导出和 host API 调用" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff8c5;strokeColor=#d4a72c;fontColor=#3d2d00;arcSize=8;fontStyle=1;" vertex="1" parent="p6-map">
+          <mxGeometry x="470" y="220" width="760" height="70" as="geometry"/>
         </mxCell>
       </root>
     </mxGraphModel>
