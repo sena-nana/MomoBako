@@ -1,0 +1,24 @@
+docs/project-architecture.drawio
+  s_1d646d8b90e27b::t_fc4927a4d4e7a1 2,41,195,198,201,204,303,313,354-355,359-363,366-367,369-370,372-373,375-379,382-389,391-392,394-395,397-398,400-401,403-404,407-408,410-411,413-414,416-417,419-420,422-435,438-442,444-445,447-448,450-457,469-475,478,481,484,487,490,493-529,614-711
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "737ef8426405a2c04104c2cbd755393d92874178",
+  "prompts": {},
+  "humans": {
+    "h_8e6780fc7b4bb1": {
+      "author": "AuraElicase <auraelicase@outlook.com>"
+    }
+  },
+  "sessions": {
+    "s_1d646d8b90e27b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f2d02-5bb3-7032-af8b-0bf6fccb5e77",
+        "model": "unknown"
+      },
+      "human_author": "AuraElicase <auraelicase@outlook.com>"
+    }
+  }
+}
