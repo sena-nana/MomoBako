@@ -51,10 +51,13 @@ export {
 } from "./settings";
 export {
   attachRepository,
+  closeRepositoryDeleteDialog,
+  confirmRepositoryDelete,
   configureNeteaseRepositoryCacheInWorkspace,
   createNewRepository,
   exportCurrentRepository,
   importExistingRepository,
+  openRepositoryDeleteDialog,
   relocateMissingRepository,
   removeRepository,
 } from "./repositories";

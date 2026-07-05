@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { ConfirmDialog } from "../ui/core";
 import {
   CopyTargetDialog,
   ExtensionsPanel,
@@ -171,18 +170,6 @@ const vm = useWorkspaceHomeViewModel();
     @skip="vm.skipCurrentHardlinkCandidate"
   />
 
-  <ConfirmDialog
-    :open="vm.showMissingRepositoryDeleteDialog"
-    title="删除丢失资源库"
-    message="会移除这条资源库注册记录并清理本机缓存，不会删除原路径中的用户文件。"
-    confirm-text="删除"
-    cancel-text="取消"
-    busy-text="删除中..."
-    :busy="vm.isDeletingMissingRepository"
-    danger
-    @confirm="vm.confirmMissingRepositoryDelete"
-    @cancel="vm.closeMissingRepositoryDeleteDialog"
-  />
   <Teleport to="body">
     <Transition name="modal">
       <div

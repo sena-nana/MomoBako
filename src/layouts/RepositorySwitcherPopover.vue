@@ -23,8 +23,6 @@ const props = defineProps<{
   addRepositoryError: string;
   backendOptions: Array<{ value: string; label: string; enabled: boolean }>;
   backendSubmitDisabled: boolean;
-  isConfirmingRepositoryDelete: boolean;
-  isRemovingRepository: boolean;
   isSubmittingBackend: boolean;
   mode: RepositoryPopoverMode;
   neteaseLoginMessage: string;
@@ -123,7 +121,7 @@ watch(
               :class="{ 'is-active': activeRepoId === library.repoId, 'is-missing': library.status === 'missing' }"
               :title="`${library.name}\n${library.path}`"
               :aria-label="`切换资源库 ${library.name}`"
-              :disabled="isRemovingRepository || isSubmittingBackend"
+              :disabled="isSubmittingBackend"
               @click="emit('selectRepository', library.repoId)"
             >
               <span class="repository-switcher__check">
@@ -137,21 +135,19 @@ watch(
           </div>
 
           <div class="repository-switcher__actions">
-            <button type="button" class="ctx-menu__item" :disabled="isSubmittingBackend || isRemovingRepository" @click="emit('showAddMenu')">
+            <button type="button" class="ctx-menu__item" :disabled="isSubmittingBackend" @click="emit('showAddMenu')">
               <Plus :size="14" aria-hidden="true" />
               <span class="ctx-menu__label">添加资源库</span>
             </button>
             <button
               type="button"
               class="ctx-menu__item ctx-menu__item--danger"
-              :class="{ 'ctx-menu__item--pending': isConfirmingRepositoryDelete }"
-              :disabled="!activeRepoId || isSubmittingBackend || isRemovingRepository"
+              :disabled="!activeRepoId || isSubmittingBackend"
               @click="emit('deleteActive')"
             >
-              <LoaderCircle v-if="isRemovingRepository" class="spin" :size="14" aria-hidden="true" />
-              <Trash2 v-else :size="14" aria-hidden="true" />
+              <Trash2 :size="14" aria-hidden="true" />
               <span class="ctx-menu__label">
-                {{ isConfirmingRepositoryDelete ? "确认删除当前资源库" : "删除当前资源库" }}
+                删除当前资源库
               </span>
             </button>
           </div>

@@ -607,6 +607,21 @@ pub struct RepositoryRelocateRequest {
     pub path: String,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum RepositoryDeleteMode {
+    RecordOnly,
+    DeleteMetadata,
+    DeleteFolder,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RepositoryDeleteRequest {
+    pub repo_id: String,
+    pub mode: RepositoryDeleteMode,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RepositoryBackendConfigUpdateRequest {

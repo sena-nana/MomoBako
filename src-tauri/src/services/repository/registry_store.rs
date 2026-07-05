@@ -44,7 +44,7 @@ pub(super) fn repository_runtime_status(
     }
 }
 
-fn backend_uses_repository_root_metadata(
+pub(super) fn backend_uses_repository_root_metadata(
     service_root: &Path,
     repo_root: &Path,
     backend_plugin_id: &str,

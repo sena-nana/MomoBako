@@ -1,5 +1,6 @@
 import type {
   AssetDetail,
+  RepositoryDeleteRequest,
   NeteaseRepositoryCacheConfigureRequest,
   NeteaseRepositoryCacheConfigureResponse,
   RepositoryBackendConfigUpdateRequest,
@@ -40,8 +41,8 @@ export function attachRepositoryFolder(request: RepositoryFolderRequest) {
   return invokeCommand<RepositoryMutationResponse>("attach_repository_folder", { request });
 }
 
-export function deleteRepository(repoId: string) {
-  return invokeCommand<void>("delete_repository", { repoId });
+export function deleteRepository(request: RepositoryDeleteRequest) {
+  return invokeCommand<void>("delete_repository", { request });
 }
 
 export function relocateRepository(request: RepositoryRelocateRequest) {

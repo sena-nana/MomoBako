@@ -4,9 +4,9 @@ use tauri::AppHandle;
 
 use crate::services::repository::{
     NeteaseRepositoryCacheConfigureRequest, NeteaseRepositoryCacheConfigureResponse,
-    RepositoryBackendConfigUpdateRequest, RepositoryExportRequest, RepositoryExportResponse,
-    RepositoryFolderRequest, RepositoryMutationRequest, RepositoryMutationResponse,
-    RepositoryRelocateRequest, SyncRequest, SyncResult,
+    RepositoryBackendConfigUpdateRequest, RepositoryDeleteRequest, RepositoryExportRequest,
+    RepositoryExportResponse, RepositoryFolderRequest, RepositoryMutationRequest,
+    RepositoryMutationResponse, RepositoryRelocateRequest, SyncRequest, SyncResult,
 };
 use crate::services::runtime::RepositoryRuntime;
 
@@ -47,9 +47,9 @@ impl RepositoryManagementViewModel {
             .await
     }
 
-    pub async fn delete_repository(&self, repo_id: String) -> Result<(), String> {
+    pub async fn delete_repository(&self, request: RepositoryDeleteRequest) -> Result<(), String> {
         self.runtime
-            .run_repository_collection_write(move |state| state.delete_repository(&repo_id))
+            .run_repository_collection_write(move |state| state.delete_repository(request))
             .await
     }
 

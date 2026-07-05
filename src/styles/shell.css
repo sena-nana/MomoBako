@@ -1949,6 +1949,7 @@
 
 .folder-dialog__body,
 .folder-delete-dialog__body,
+.repository-delete-dialog__body,
 .smart-folder-dialog__body {
   display: flex;
   flex-direction: column;
@@ -1975,7 +1976,14 @@
   gap: 10px;
 }
 
-.folder-delete-dialog__option {
+.repository-delete-dialog__options {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.folder-delete-dialog__option,
+.repository-delete-dialog__option {
   width: 100%;
   padding: 14px;
   border-radius: var(--radius-xl);
@@ -1988,27 +1996,55 @@
   text-align: left;
 }
 
-.folder-delete-dialog__option:hover:not(:disabled) {
+.folder-delete-dialog__option:hover:not(:disabled),
+.repository-delete-dialog__option:hover:not(:disabled) {
   background: var(--bg-hover);
   filter: none;
 }
 
-.folder-delete-dialog__option strong {
+.folder-delete-dialog__option strong,
+.repository-delete-dialog__option strong {
   font-size: 14px;
 }
 
-.folder-delete-dialog__option span {
+.folder-delete-dialog__option span,
+.repository-delete-dialog__option span {
   color: var(--text-muted);
   font-size: 12px;
   line-height: 1.5;
 }
 
-.folder-delete-dialog__option--danger {
+.folder-delete-dialog__option--danger,
+.repository-delete-dialog__option--danger {
   border-color: rgba(244, 113, 116, 0.28);
 }
 
-.folder-delete-dialog__option--danger:hover:not(:disabled) {
+.folder-delete-dialog__option--danger:hover:not(:disabled),
+.repository-delete-dialog__option--danger:hover:not(:disabled) {
   background: var(--err-soft);
+}
+
+.repository-delete-dialog__summary,
+.repository-delete-dialog__error,
+.repository-delete-dialog__busy {
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.repository-delete-dialog__summary {
+  color: var(--text-muted);
+}
+
+.repository-delete-dialog__error {
+  color: var(--err);
+}
+
+.repository-delete-dialog__busy {
+  margin-right: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-muted);
 }
 
 .spin {

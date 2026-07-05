@@ -526,6 +526,13 @@ export type RepositoryRelocateRequest = {
   path: string;
 };
 
+export type RepositoryDeleteMode = "recordOnly" | "deleteMetadata" | "deleteFolder";
+
+export type RepositoryDeleteRequest = {
+  repoId: string;
+  mode: RepositoryDeleteMode;
+};
+
 export type RepositoryBackendConfigUpdateRequest = {
   repoId: string;
   backendConfig: Record<string, unknown>;

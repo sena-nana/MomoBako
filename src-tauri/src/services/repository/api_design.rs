@@ -670,8 +670,13 @@ pub(super) fn core_tauri_api_definitions() -> Vec<ApiDefinition> {
         tauri_api_definition(
             "Repository API",
             "delete_repository",
-            "删除仓库记录。",
-            serde_json::json!({ "repoId": "<repoId>" }),
+            "删除仓库记录或资源库数据。",
+            serde_json::json!({
+                "request": {
+                    "repoId": "<repoId>",
+                    "mode": "recordOnly"
+                }
+            }),
         ),
         tauri_api_definition(
             "Repository API",
