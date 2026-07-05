@@ -5946,6 +5946,46 @@ mod tests {
     }
 
     #[test]
+    fn registry_connection_enables_wal_and_busy_timeout() {
+        let workspace = TestWorkspace::new("registry-connection-config");
+        let registry_path = workspace.path("registry.db");
+        fs::create_dir_all(workspace.path("")).expect("workspace root should be created");
+
+        let connection =
+            open_registry_connection(&registry_path).expect("registry connection should open");
+        let journal_mode: String = connection
+            .pragma_query_value(None, "journal_mode", |row| row.get(0))
+            .expect("journal mode pragma should succeed");
+        let busy_timeout: i64 = connection
+            .pragma_query_value(None, "busy_timeout", |row| row.get(0))
+            .expect("busy timeout pragma should succeed");
+
+        assert_eq!(journal_mode.to_ascii_lowercase(), "wal");
+        assert_eq!(busy_timeout, 5_000);
+    }
+
+    #[test]
+    fn repository_connection_configuration_skips_reapplying_wal_during_active_writer() {
+        let workspace = TestWorkspace::new("repository-connection-lock");
+        let database_path = workspace.path("metadata.db");
+        fs::create_dir_all(workspace.path("")).expect("workspace root should be created");
+
+        let seed_connection = open_repository_database_connection(&database_path)
+            .expect("repository database should initialize");
+        drop(seed_connection);
+
+        let writer = Connection::open(&database_path).expect("writer connection should open");
+        configure_repository_connection(&writer).expect("writer connection should be configured");
+        writer
+            .execute("BEGIN IMMEDIATE", [])
+            .expect("writer transaction should start");
+
+        let contender = Connection::open(&database_path).expect("contender connection should open");
+        configure_repository_connection(&contender)
+            .expect("contender should reuse wal mode without lock error");
+    }
+
+    #[test]
     fn repository_journal_mode_falls_back_for_locking_protocol_errors() {
         let error = rusqlite::Error::SqliteFailure(
             rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_PROTOCOL),

@@ -990,7 +990,7 @@ impl RepositoryState {
     }
 
     pub(super) fn load_repository_record(&self, repo_id: &str) -> Result<RepositoryRecord, String> {
-        let registry = Connection::open(&self.registry_path).map_err(db_error)?;
+        let registry = open_registry_connection(&self.registry_path)?;
         let plugin_registry = backend_plugin_registry(&self.root);
         registry
             .query_row(
@@ -1035,7 +1035,7 @@ impl RepositoryState {
 
     pub(super) fn load_repository_records(&self) -> Result<Vec<RepositoryRecord>, String> {
         self.ensure_initialized()?;
-        let registry = Connection::open(&self.registry_path).map_err(db_error)?;
+        let registry = open_registry_connection(&self.registry_path)?;
         let mut stmt = registry
             .prepare(
                 r#"
@@ -1110,7 +1110,7 @@ impl RepositoryState {
     }
 
     pub(super) fn repository_backend_in_use(&self, plugin_id: &str) -> Result<bool, String> {
-        let registry = Connection::open(&self.registry_path).map_err(db_error)?;
+        let registry = open_registry_connection(&self.registry_path)?;
         let plugin_registry = backend_plugin_registry(&self.root);
         let mut stmt = registry
             .prepare("SELECT backend_plugin_id FROM repositories")
@@ -1190,9 +1190,7 @@ impl RepositoryState {
     }
 
     fn try_open_repository_connection(&self, database_path: &Path) -> Result<Connection, String> {
-        let connection = Connection::open(database_path).map_err(db_error)?;
-        migrate_repository_schema(&connection).map_err(db_error)?;
-        Ok(connection)
+        open_repository_database_connection(database_path)
     }
 
     pub(super) fn repository_thumbnail_root(

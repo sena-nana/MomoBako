@@ -2,6 +2,8 @@
 
 use super::*;
 
+const SQLITE_BUSY_TIMEOUT_MS: u64 = 5_000;
+
 pub(super) fn system_time_to_rfc3339(value: SystemTime) -> Result<String, time::error::Format> {
     let datetime: OffsetDateTime = value.into();
     datetime.format(&Rfc3339)
@@ -30,15 +32,52 @@ pub(super) fn now_rfc3339() -> String {
         .unwrap_or_else(|_| "1970-01-01T00:00:00Z".to_string())
 }
 
-pub(super) fn configure_repository_connection(
+fn configure_sqlite_connection_defaults(connection: &Connection) -> Result<(), rusqlite::Error> {
+    connection.busy_timeout(Duration::from_millis(SQLITE_BUSY_TIMEOUT_MS))?;
+    connection.pragma_update(None, "foreign_keys", "ON")?;
+    connection.pragma_update(None, "synchronous", "NORMAL")?;
+    Ok(())
+}
+
+fn ensure_sqlite_journal_mode(
+    connection: &Connection,
+    target_mode: &str,
+) -> Result<(), rusqlite::Error> {
+    let current_mode: String =
+        connection.pragma_query_value(None, "journal_mode", |row| row.get(0))?;
+    if current_mode.eq_ignore_ascii_case(target_mode) {
+        return Ok(());
+    }
+    connection.pragma_update(None, "journal_mode", target_mode)?;
+    Ok(())
+}
+
+pub(super) fn configure_registry_connection(
     connection: &Connection,
 ) -> Result<(), rusqlite::Error> {
-    connection.pragma_update(None, "foreign_keys", "ON")?;
-    match connection.pragma_update(None, "journal_mode", "WAL") {
+    configure_sqlite_connection_defaults(connection)?;
+    match ensure_sqlite_journal_mode(connection, "WAL") {
         Ok(()) => Ok(()),
         Err(error) => {
             if should_fallback_repository_journal_mode(&error) {
-                connection.pragma_update(None, "journal_mode", "DELETE")?;
+                ensure_sqlite_journal_mode(connection, "DELETE")?;
+                Ok(())
+            } else {
+                Err(error)
+            }
+        }
+    }
+}
+
+pub(super) fn configure_repository_connection(
+    connection: &Connection,
+) -> Result<(), rusqlite::Error> {
+    configure_sqlite_connection_defaults(connection)?;
+    match ensure_sqlite_journal_mode(connection, "WAL") {
+        Ok(()) => Ok(()),
+        Err(error) => {
+            if should_fallback_repository_journal_mode(&error) {
+                ensure_sqlite_journal_mode(connection, "DELETE")?;
                 Ok(())
             } else {
                 Err(error)
@@ -53,6 +92,20 @@ pub(super) fn should_fallback_repository_journal_mode(error: &rusqlite::Error) -
         rusqlite::Error::SqliteFailure(sqlite_error, _)
             if sqlite_error.code == rusqlite::ffi::ErrorCode::FileLockingProtocolFailed
     ) || error.to_string().contains("locking protocol")
+}
+
+pub(super) fn open_registry_connection(registry_path: &Path) -> Result<Connection, String> {
+    let connection = Connection::open(registry_path).map_err(db_error)?;
+    configure_registry_connection(&connection).map_err(db_error)?;
+    Ok(connection)
+}
+
+pub(super) fn open_repository_database_connection(
+    database_path: &Path,
+) -> Result<Connection, String> {
+    let connection = Connection::open(database_path).map_err(db_error)?;
+    migrate_repository_schema(&connection).map_err(db_error)?;
+    Ok(connection)
 }
 
 pub(super) fn db_error(error: rusqlite::Error) -> String {

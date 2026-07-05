@@ -142,7 +142,7 @@ impl RepositoryState {
         }
 
         fs::create_dir_all(&self.root).map_err(io_error)?;
-        let registry = Connection::open(&self.registry_path).map_err(db_error)?;
+        let registry = open_registry_connection(&self.registry_path)?;
         registry
             .execute_batch(REGISTRY_SCHEMA_SQL)
             .map_err(db_error)?;

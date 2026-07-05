@@ -695,8 +695,7 @@ pub(super) fn initialize_repository_directory(
     let metadata_json = serde_json::to_string_pretty(&metadata).map_err(json_error)?;
     fs::write(meta_dir.join(REPO_METADATA_FILE_NAME), metadata_json).map_err(io_error)?;
 
-    let connection = Connection::open(storage_paths.database_path).map_err(db_error)?;
-    migrate_repository_schema(&connection).map_err(db_error)?;
+    let connection = open_repository_database_connection(&storage_paths.database_path)?;
     seed_repository_data(&connection, seed, &now)?;
 
     Ok(())
@@ -1110,9 +1109,7 @@ pub(super) fn self_open_repository_connection_for_cache_migration(
         cache_root,
         &repo.backend_record.plugin_id,
     )?;
-    let connection = Connection::open(storage_paths.database_path).map_err(db_error)?;
-    migrate_repository_schema(&connection).map_err(db_error)?;
-    Ok(connection)
+    open_repository_database_connection(&storage_paths.database_path)
 }
 
 pub(super) fn infer_repository_name(repo_root: &Path) -> String {
