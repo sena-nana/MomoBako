@@ -22,6 +22,14 @@ pub(super) struct DiscoveredFile {
     pub(super) source_payload: Option<serde_json::Value>,
     #[serde(default)]
     pub(super) local_absolute_path: Option<String>,
+    #[serde(default)]
+    pub(super) status: Option<String>,
+    #[serde(default)]
+    pub(super) shared_asset_id: Option<String>,
+    #[serde(default)]
+    pub(super) tags: Option<Vec<String>>,
+    #[serde(default)]
+    pub(super) thumbnail_local_absolute_path: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -44,6 +52,14 @@ pub(super) struct BackendDiscoveredFile {
     pub(super) source_payload: Option<serde_json::Value>,
     #[serde(default)]
     pub(super) local_absolute_path: Option<String>,
+    #[serde(default)]
+    pub(super) status: Option<String>,
+    #[serde(default)]
+    pub(super) shared_asset_id: Option<String>,
+    #[serde(default)]
+    pub(super) tags: Option<Vec<String>>,
+    #[serde(default)]
+    pub(super) thumbnail_local_absolute_path: Option<String>,
 }
 
 impl BackendDiscoveredFile {
@@ -70,6 +86,10 @@ impl BackendDiscoveredFile {
             provider_item_id: self.provider_item_id,
             source_payload: self.source_payload,
             local_absolute_path: self.local_absolute_path,
+            status: self.status,
+            shared_asset_id: self.shared_asset_id,
+            tags: self.tags,
+            thumbnail_local_absolute_path: self.thumbnail_local_absolute_path,
         })
     }
 }
@@ -96,6 +116,10 @@ impl FileSystemEntry {
             provider_item_id: self.provider_item_id,
             source_payload: self.source_payload,
             local_absolute_path: self.local_absolute_path,
+            status: self.status,
+            shared_asset_id: self.shared_asset_id,
+            tags: self.tags,
+            thumbnail_local_absolute_path: self.thumbnail_local_absolute_path,
         })
     }
 }

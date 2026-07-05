@@ -86,6 +86,30 @@ pub(super) trait FileSystemBackendAdapter {
         recursive: bool,
         config: &serde_json::Value,
     ) -> Result<(), String>;
+
+    fn describe_repository_state(
+        &self,
+        repo_root: &Path,
+        config: &serde_json::Value,
+    ) -> Result<SourceRepositoryStateSnapshot, String>;
+
+    fn write_asset_metadata(
+        &self,
+        repo_root: &Path,
+        path: &str,
+        shared_asset_id: Option<&str>,
+        metadata: &BTreeMap<String, serde_json::Value>,
+        previous_metadata: &BTreeMap<String, serde_json::Value>,
+        operation: &str,
+        config: &serde_json::Value,
+    ) -> Result<(), String>;
+
+    fn write_repository_state(
+        &self,
+        repo_root: &Path,
+        state: &SourceRepositoryStateSnapshot,
+        config: &serde_json::Value,
+    ) -> Result<(), String>;
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -114,6 +138,14 @@ pub(super) struct FileSystemEntry {
     pub(super) source_payload: Option<serde_json::Value>,
     #[serde(default)]
     pub(super) local_absolute_path: Option<String>,
+    #[serde(default)]
+    pub(super) status: Option<String>,
+    #[serde(default)]
+    pub(super) shared_asset_id: Option<String>,
+    #[serde(default)]
+    pub(super) tags: Option<Vec<String>>,
+    #[serde(default)]
+    pub(super) thumbnail_local_absolute_path: Option<String>,
 }
 
 pub(super) struct RuntimeFileSystemBackendAdapter {
@@ -195,6 +227,11 @@ pub(super) fn paginate_file_browser_entries(
     let has_more = loaded_count < total_entries;
     let next_offset = has_more.then_some(loaded_count);
     (paged_entries, total_entries, loaded_count, next_offset, has_more)
+}
+
+fn is_unsupported_filesystem_backend_method(error: &str) -> bool {
+    error.contains("unsupported method")
+        || error.contains("unsupported filesystem plugin method")
 }
 
 pub(super) fn list_trash_directory_entries(
@@ -338,6 +375,60 @@ pub(super) fn delete_backend_entry(
         recursive,
         &repo.backend_record.config,
     )
+}
+
+pub(super) fn describe_backend_repository_state(
+    service_root: &Path,
+    repo: &RepositoryRecord,
+    repo_root: &Path,
+) -> Result<Option<SourceRepositoryStateSnapshot>, String> {
+    match backend_adapter(service_root, repo)
+        .describe_repository_state(repo_root, &repo.backend_record.config)
+    {
+        Ok(state) => Ok(Some(state)),
+        Err(error) if is_unsupported_filesystem_backend_method(&error) => Ok(None),
+        Err(error) => Err(error),
+    }
+}
+
+pub(super) fn write_backend_asset_metadata(
+    service_root: &Path,
+    repo: &RepositoryRecord,
+    repo_root: &Path,
+    path: &str,
+    shared_asset_id: Option<&str>,
+    metadata: &BTreeMap<String, serde_json::Value>,
+    previous_metadata: &BTreeMap<String, serde_json::Value>,
+    operation: &str,
+) -> Result<bool, String> {
+    match backend_adapter(service_root, repo).write_asset_metadata(
+        repo_root,
+        path,
+        shared_asset_id,
+        metadata,
+        previous_metadata,
+        operation,
+        &repo.backend_record.config,
+    ) {
+        Ok(()) => Ok(true),
+        Err(error) if is_unsupported_filesystem_backend_method(&error) => Ok(false),
+        Err(error) => Err(error),
+    }
+}
+
+pub(super) fn write_backend_repository_state(
+    service_root: &Path,
+    repo: &RepositoryRecord,
+    repo_root: &Path,
+    state: &SourceRepositoryStateSnapshot,
+) -> Result<bool, String> {
+    match backend_adapter(service_root, repo)
+        .write_repository_state(repo_root, state, &repo.backend_record.config)
+    {
+        Ok(()) => Ok(true),
+        Err(error) if is_unsupported_filesystem_backend_method(&error) => Ok(false),
+        Err(error) => Err(error),
+    }
 }
 
 pub(super) fn move_entry_to_trash(
@@ -829,6 +920,10 @@ pub(super) fn local_directory_entries(
             provider_item_id: None,
             source_payload: None,
             local_absolute_path: Some(path.to_string_lossy().to_string()),
+            status: None,
+            shared_asset_id: None,
+            tags: None,
+            thumbnail_local_absolute_path: None,
         });
     }
 
@@ -943,10 +1038,7 @@ impl FileSystemBackendAdapter for RuntimeFileSystemBackendAdapter {
         );
         match response {
             Ok(value) => serde_json::from_value(value).map_err(json_error),
-            Err(error)
-                if error.contains("unsupported method")
-                    || error.contains("unsupported filesystem plugin method") =>
-            {
+            Err(error) if is_unsupported_filesystem_backend_method(&error) => {
                 let entries = self.list_directory_entries(repo_root, directory_path, config)?;
                 let total_entries = entries.len();
                 Ok(DirectoryPageResult {
@@ -1070,6 +1162,70 @@ impl FileSystemBackendAdapter for RuntimeFileSystemBackendAdapter {
                 "repoRoot": repo_root,
                 "entryPath": entry_path,
                 "recursive": recursive,
+                "config": config,
+            }),
+        )?;
+        Ok(())
+    }
+
+    fn describe_repository_state(
+        &self,
+        repo_root: &Path,
+        config: &serde_json::Value,
+    ) -> Result<SourceRepositoryStateSnapshot, String> {
+        let response = backend_plugin_registry(&self.service_root).call(
+            &self.plugin_id,
+            "filesystem.describeRepositoryState",
+            serde_json::json!({
+                "repoRoot": repo_root,
+                "config": config,
+            }),
+        )?;
+        serde_json::from_value(response).map_err(json_error)
+    }
+
+    fn write_asset_metadata(
+        &self,
+        repo_root: &Path,
+        path: &str,
+        shared_asset_id: Option<&str>,
+        metadata: &BTreeMap<String, serde_json::Value>,
+        previous_metadata: &BTreeMap<String, serde_json::Value>,
+        operation: &str,
+        config: &serde_json::Value,
+    ) -> Result<(), String> {
+        backend_plugin_registry(&self.service_root).call(
+            &self.plugin_id,
+            "filesystem.writeAssetMetadata",
+            serde_json::json!({
+                "repoRoot": repo_root,
+                "path": path,
+                "sharedAssetId": shared_asset_id,
+                "metadata": metadata,
+                "previousMetadata": previous_metadata,
+                "operation": operation,
+                "config": config,
+            }),
+        )?;
+        Ok(())
+    }
+
+    fn write_repository_state(
+        &self,
+        repo_root: &Path,
+        state: &SourceRepositoryStateSnapshot,
+        config: &serde_json::Value,
+    ) -> Result<(), String> {
+        backend_plugin_registry(&self.service_root).call(
+            &self.plugin_id,
+            "filesystem.writeRepositoryState",
+            serde_json::json!({
+                "repoRoot": repo_root,
+                "directoryMetadataByPath": &state.directory_metadata_by_path,
+                "quickAccess": &state.quick_access,
+                "tagGroups": &state.tag_groups,
+                "smartFolders": &state.smart_folders,
+                "repositoryActions": &state.repository_actions,
                 "config": config,
             }),
         )?;

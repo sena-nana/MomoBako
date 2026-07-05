@@ -39,19 +39,20 @@ pub(super) fn set_repository_action_enabled(
 ) -> Result<RepositoryActionMutationResponse, String> {
     state.ensure_initialized()?;
     let repo = state.load_repository_record(&request.repo_id)?;
-    let connection = state.open_repository_connection(
+    let mut connection = state.open_repository_connection(
         &repo.summary.repo_id,
         &repo.summary.path,
         &repo.backend_record,
     )?;
-    let action = load_repository_action(&connection, &request.repo_id, &request.action_id)
+    let tx = connection.transaction().map_err(db_error)?;
+    let action = load_repository_action(&tx, &request.repo_id, &request.action_id)
         .map_err(db_error)?
         .ok_or_else(|| format!("repository action not found: {}", request.action_id))?;
     if request.enabled && action.status != "ready" {
         return Err("unsupported repository actions cannot be enabled".to_string());
     }
     let now = now_rfc3339();
-    connection
+    tx
         .execute(
             r#"
             UPDATE repository_actions
@@ -66,6 +67,14 @@ pub(super) fn set_repository_action_enabled(
             ],
         )
         .map_err(db_error)?;
+    let snapshot = load_source_repository_state_snapshot(&tx, &request.repo_id).map_err(db_error)?;
+    let _ = write_backend_repository_state(
+        &state.root,
+        &repo,
+        Path::new(&repo.summary.path),
+        &snapshot,
+    )?;
+    tx.commit().map_err(db_error)?;
     let action = load_repository_action(&connection, &repo.summary.repo_id, &request.action_id)
         .map_err(db_error)?
         .ok_or_else(|| format!("repository action not found: {}", request.action_id))?;

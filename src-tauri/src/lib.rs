@@ -8,6 +8,11 @@ mod tests;
 mod viewmodels;
 mod window_state;
 
+pub use services::repository::eagle_import::source_adapter::{
+    build_eagle_source_snapshot, EagleSourceDiscoveredFile, EagleSourceEntry, EagleSourceEntryKind,
+    EagleSourceSnapshot,
+};
+
 use services::repository as repository_service;
 use services::repository::{
     ApiDesignSnapshot, AssetDetail, BinaryFileWriteRequest, BinaryFileWriteResponse, CacheSnapshot,

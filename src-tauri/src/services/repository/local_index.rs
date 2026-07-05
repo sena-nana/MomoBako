@@ -198,6 +198,10 @@ pub(super) fn push_local_discovered_file(
         provider_item_id: None,
         source_payload: None,
         local_absolute_path: Some(path.to_string_lossy().to_string()),
+        status: None,
+        shared_asset_id: None,
+        tags: None,
+        thumbnail_local_absolute_path: None,
     });
     Ok(())
 }
@@ -429,6 +433,10 @@ pub(super) fn collect_repository_files_recursive(
             provider_item_id: None,
             source_payload: None,
             local_absolute_path: None,
+            status: None,
+            shared_asset_id: None,
+            tags: None,
+            thumbnail_local_absolute_path: None,
         });
     }
 

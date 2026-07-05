@@ -1,0 +1,34 @@
+{
+  "id": "MR3DC4GHBD9NT",
+  "name": "论文 - 副本",
+  "size": 45568,
+  "btime": 1774702063053,
+  "mtime": 1774702063286,
+  "ext": "doc",
+  "tags": [
+    "doc",
+    "reviewed"
+  ],
+  "folders": [
+    "folder-design",
+    "folder-docs"
+  ],
+  "isDeleted": false,
+  "url": "https://example.com/paper",
+  "annotation": "用于 alias 回归",
+  "modificationTime": 1782988532369,
+  "height": 7017,
+  "width": 4962,
+  "lastModified": 1782988535033,
+  "rating": 4,
+  "palettes": [
+    {
+      "color": [
+        251,
+        251,
+        251
+      ],
+      "ratio": 88
+    }
+  ]
+}

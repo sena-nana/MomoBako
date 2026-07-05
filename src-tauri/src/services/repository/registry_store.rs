@@ -385,6 +385,17 @@ pub(super) fn migrate_repository_schema(connection: &Connection) -> Result<(), r
           PRIMARY KEY(repo_id, path, kind)
         );
 
+        CREATE TABLE IF NOT EXISTS source_trash_entries (
+          repo_id TEXT NOT NULL,
+          trash_path TEXT NOT NULL,
+          original_path TEXT NOT NULL,
+          kind TEXT NOT NULL,
+          deleted_at TEXT NOT NULL,
+          shared_asset_id TEXT,
+          PRIMARY KEY(repo_id, trash_path),
+          FOREIGN KEY(repo_id) REFERENCES repositories(repo_id)
+        );
+
         CREATE TABLE IF NOT EXISTS netease_directory_cache (
           repo_id TEXT NOT NULL,
           directory_path TEXT NOT NULL,

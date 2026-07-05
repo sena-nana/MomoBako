@@ -1,0 +1,32 @@
+{
+  "id": "MR3DCBB0Z4R5O",
+  "name": "未标题-2",
+  "size": 3246124,
+  "btime": 1782230897324,
+  "mtime": 1782230946060,
+  "ext": "png",
+  "tags": [
+    "todo"
+  ],
+  "folders": [
+    "folder-archive"
+  ],
+  "isDeleted": true,
+  "url": "",
+  "annotation": "用于回收站回归",
+  "modificationTime": 1782988541244,
+  "height": 1920,
+  "width": 1920,
+  "lastModified": 1782988541375,
+  "rating": 2,
+  "palettes": [
+    {
+      "color": [
+        236,
+        232,
+        232
+      ],
+      "ratio": 41
+    }
+  ]
+}

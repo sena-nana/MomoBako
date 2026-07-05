@@ -591,6 +591,10 @@ impl RepositoryState {
             provider_item_id: None,
             source_payload: None,
             local_absolute_path: None,
+            status: None,
+            shared_asset_id: None,
+            tags: None,
+            thumbnail_local_absolute_path: None,
         };
         let existing_record =
             load_entry_thumbnail_record(&connection, &request.repo_id, &entry_path, kind)
@@ -858,6 +862,8 @@ impl RepositoryState {
         let revision = load_latest_revision(&tx, &request.asset_id)
             .map_err(db_error)?
             .ok_or_else(|| format!("no revision found for asset: {}", request.asset_id))?;
+        let previous_metadata =
+            load_metadata_map_from_transaction(&tx, &request.asset_id).map_err(db_error)?;
         apply_revision_state(
             &tx,
             &request.repo_id,
@@ -867,6 +873,23 @@ impl RepositoryState {
             "undo",
         )
         .map_err(db_error)?;
+        let current_metadata =
+            load_metadata_map_from_transaction(&tx, &request.asset_id).map_err(db_error)?;
+        if let Some((path, shared_asset_id)) =
+            load_source_asset_writeback_target(&tx, &request.repo_id, &request.asset_id)
+                .map_err(db_error)?
+        {
+            write_backend_asset_metadata(
+                &self.root,
+                &repo,
+                Path::new(&repo.summary.path),
+                &path,
+                shared_asset_id.as_deref(),
+                &current_metadata,
+                &previous_metadata,
+                "undo",
+            )?;
+        }
         tx.commit().map_err(db_error)?;
 
         let asset = self.load_asset_detail(&request.repo_id, &request.asset_id)?;
@@ -892,6 +915,8 @@ impl RepositoryState {
         let revision = load_latest_revision(&tx, &request.asset_id)
             .map_err(db_error)?
             .ok_or_else(|| format!("no revision found for asset: {}", request.asset_id))?;
+        let previous_metadata =
+            load_metadata_map_from_transaction(&tx, &request.asset_id).map_err(db_error)?;
         apply_revision_state(
             &tx,
             &request.repo_id,
@@ -901,6 +926,23 @@ impl RepositoryState {
             "redo",
         )
         .map_err(db_error)?;
+        let current_metadata =
+            load_metadata_map_from_transaction(&tx, &request.asset_id).map_err(db_error)?;
+        if let Some((path, shared_asset_id)) =
+            load_source_asset_writeback_target(&tx, &request.repo_id, &request.asset_id)
+                .map_err(db_error)?
+        {
+            write_backend_asset_metadata(
+                &self.root,
+                &repo,
+                Path::new(&repo.summary.path),
+                &path,
+                shared_asset_id.as_deref(),
+                &current_metadata,
+                &previous_metadata,
+                "redo",
+            )?;
+        }
         tx.commit().map_err(db_error)?;
 
         let asset = self.load_asset_detail(&request.repo_id, &request.asset_id)?;

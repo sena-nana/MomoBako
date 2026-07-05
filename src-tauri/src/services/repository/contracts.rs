@@ -66,7 +66,7 @@ pub struct FolderSummary {
     pub asset_count: i64,
 }
 
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct RepositoryShortcut {
     pub shortcut_id: String,
@@ -76,12 +76,23 @@ pub struct RepositoryShortcut {
     pub target_id: Option<String>,
 }
 
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct RepositoryTagGroup {
     pub tag_group_id: String,
     pub name: String,
     pub tags: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct SourceTrashEntry {
+    pub trash_path: String,
+    pub original_path: String,
+    pub kind: String,
+    pub deleted_at: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shared_asset_id: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -142,7 +153,7 @@ pub struct PlaylistDetail {
     pub items: Vec<PlaylistItem>,
 }
 
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct FolderMetadata {
     pub protected: bool,
@@ -448,6 +459,23 @@ pub struct FileBrowserEntry {
     pub provider_item_id: Option<String>,
     pub source_payload: Option<serde_json::Value>,
     pub local_absolute_path: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct SourceRepositoryStateSnapshot {
+    #[serde(default)]
+    pub directory_metadata_by_path: BTreeMap<String, FolderMetadata>,
+    #[serde(default)]
+    pub quick_access: Vec<RepositoryShortcut>,
+    #[serde(default)]
+    pub tag_groups: Vec<RepositoryTagGroup>,
+    #[serde(default)]
+    pub smart_folders: Vec<SmartFolder>,
+    #[serde(default)]
+    pub repository_actions: Vec<RepositoryAction>,
+    #[serde(default)]
+    pub trash_entries: Vec<SourceTrashEntry>,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -1251,6 +1279,15 @@ pub(super) struct ExistingAssetRecord {
     pub(super) provider_item_id: Option<String>,
     pub(super) source_payload: Option<serde_json::Value>,
     pub(super) local_absolute_path: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub(super) struct SourceTrashEntryRecord {
+    pub(super) trash_path: String,
+    pub(super) original_path: String,
+    pub(super) kind: String,
+    pub(super) deleted_at: String,
+    pub(super) shared_asset_id: Option<String>,
 }
 
 #[derive(Debug, Clone)]

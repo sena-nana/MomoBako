@@ -233,6 +233,10 @@ pub(super) fn load_netease_directory_entries_page(
                     provider_item_id: row.get(9)?,
                     source_payload: parse_json_column_nullable(row.get::<_, Option<String>>(10)?)?,
                     local_absolute_path: row.get(11)?,
+                    status: None,
+                    shared_asset_id: None,
+                    tags: None,
+                    thumbnail_local_absolute_path: None,
                 },
             ))
         },

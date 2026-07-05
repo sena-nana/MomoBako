@@ -1,0 +1,15 @@
+[
+  {
+    "id": "action-review",
+    "name": "Mark Reviewed",
+    "enabled": true,
+    "steps": [
+      {
+        "id": "step-review-tag",
+        "name": "Add Workflow Tag",
+        "type": "setTag",
+        "tag": "reviewed"
+      }
+    ]
+  }
+]

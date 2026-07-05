@@ -23,14 +23,15 @@ pub(super) fn create_smart_folder(
 ) -> Result<SmartFolderMutationResponse, String> {
     state.ensure_initialized()?;
     let repo = state.load_repository_record(&request.repo_id)?;
-    let connection = state.open_repository_connection(
+    let mut connection = state.open_repository_connection(
         &repo.summary.repo_id,
         &repo.summary.path,
         &repo.backend_record,
     )?;
+    let tx = connection.transaction().map_err(db_error)?;
     let name = validate_smart_folder_name(&request.name)?;
     validate_smart_folder_parent(
-        &connection,
+        &tx,
         &request.repo_id,
         request.parent_id.as_deref(),
         None,
@@ -48,9 +49,9 @@ pub(super) fn create_smart_folder(
     let filter_json = serde_json::to_string(&filter).map_err(json_error)?;
     let now = now_rfc3339();
     let sort_order =
-        next_smart_folder_sort_order(&connection, &request.repo_id, request.parent_id.as_deref())
+        next_smart_folder_sort_order(&tx, &request.repo_id, request.parent_id.as_deref())
             .map_err(db_error)?;
-    connection
+    tx
         .execute(
             r#"
             INSERT INTO smart_folders (
@@ -70,7 +71,14 @@ pub(super) fn create_smart_folder(
             ],
         )
         .map_err(db_error)?;
-
+    let snapshot = load_source_repository_state_snapshot(&tx, &request.repo_id).map_err(db_error)?;
+    let _ = write_backend_repository_state(
+        &state.root,
+        &repo,
+        Path::new(&repo.summary.path),
+        &snapshot,
+    )?;
+    tx.commit().map_err(db_error)?;
     let folders = load_smart_folders(&connection, &request.repo_id).map_err(db_error)?;
     let smart_folder = folders
         .iter()
@@ -88,18 +96,19 @@ pub(super) fn update_smart_folder(
 ) -> Result<SmartFolderMutationResponse, String> {
     state.ensure_initialized()?;
     let repo = state.load_repository_record(&request.repo_id)?;
-    let connection = state.open_repository_connection(
+    let mut connection = state.open_repository_connection(
         &repo.summary.repo_id,
         &repo.summary.path,
         &repo.backend_record,
     )?;
+    let tx = connection.transaction().map_err(db_error)?;
     let smart_folder_id = validate_smart_folder_id(&request.smart_folder_id)?;
     let name = validate_smart_folder_name(&request.name)?;
-    let existing = load_smart_folder(&connection, &request.repo_id, &smart_folder_id)
+    let existing = load_smart_folder(&tx, &request.repo_id, &smart_folder_id)
         .map_err(db_error)?
         .ok_or_else(|| format!("smart folder not found: {smart_folder_id}"))?;
     validate_smart_folder_parent(
-        &connection,
+        &tx,
         &request.repo_id,
         request.parent_id.as_deref(),
         Some(&smart_folder_id),
@@ -111,10 +120,10 @@ pub(super) fn update_smart_folder(
     let sort_order = if normalized_optional_id(request.parent_id.as_deref()) == existing.parent_id {
         existing.sort_order
     } else {
-        next_smart_folder_sort_order(&connection, &request.repo_id, request.parent_id.as_deref())
+        next_smart_folder_sort_order(&tx, &request.repo_id, request.parent_id.as_deref())
             .map_err(db_error)?
     };
-    connection
+    tx
         .execute(
             r#"
             UPDATE smart_folders
@@ -133,7 +142,14 @@ pub(super) fn update_smart_folder(
             ],
         )
         .map_err(db_error)?;
-
+    let snapshot = load_source_repository_state_snapshot(&tx, &request.repo_id).map_err(db_error)?;
+    let _ = write_backend_repository_state(
+        &state.root,
+        &repo,
+        Path::new(&repo.summary.path),
+        &snapshot,
+    )?;
+    tx.commit().map_err(db_error)?;
     let folders = load_smart_folders(&connection, &request.repo_id).map_err(db_error)?;
     let smart_folder = folders
         .iter()
@@ -152,16 +168,17 @@ pub(super) fn delete_smart_folder(
 ) -> Result<SmartFolderMutationResponse, String> {
     state.ensure_initialized()?;
     let repo = state.load_repository_record(repo_id)?;
-    let connection = state.open_repository_connection(
+    let mut connection = state.open_repository_connection(
         &repo.summary.repo_id,
         &repo.summary.path,
         &repo.backend_record,
     )?;
+    let tx = connection.transaction().map_err(db_error)?;
     let smart_folder_id = validate_smart_folder_id(smart_folder_id)?;
-    load_smart_folder(&connection, repo_id, &smart_folder_id)
+    load_smart_folder(&tx, repo_id, &smart_folder_id)
         .map_err(db_error)?
         .ok_or_else(|| format!("smart folder not found: {smart_folder_id}"))?;
-    connection
+    tx
         .execute(
             r#"
             WITH RECURSIVE deleting(id) AS (
@@ -180,6 +197,14 @@ pub(super) fn delete_smart_folder(
             params![repo_id, smart_folder_id],
         )
         .map_err(db_error)?;
+    let snapshot = load_source_repository_state_snapshot(&tx, repo_id).map_err(db_error)?;
+    let _ = write_backend_repository_state(
+        &state.root,
+        &repo,
+        Path::new(&repo.summary.path),
+        &snapshot,
+    )?;
+    tx.commit().map_err(db_error)?;
     let folders = load_smart_folders(&connection, repo_id).map_err(db_error)?;
     Ok(SmartFolderMutationResponse {
         smart_folders: build_smart_folder_tree(folders),

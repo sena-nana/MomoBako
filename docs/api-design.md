@@ -64,6 +64,7 @@
 - `POST /repositories`
   - Create a new repository or import an existing folder with `.momo`
   - Request fields include `name`, `path`, optional `repoId`, optional `backendPluginId`, optional `backendConfig`, and optional `skipInitialSync`.
+  - 创建 Eagle Library 挂载仓库时，前端显式传 `backendPluginId: "momobako.source.eagle-library"`，`path` 直接指向 Eagle `.library` 目录；该流程不走通用本地文件夹后端推断。
   - `skipInitialSync: true` creates the repository metadata and registry entry without running an inline first sync. This is intended for account-backed or slow virtual sources such as 网易云音乐 so the desktop login flow can finish first and trigger sync in the background.
   - Creating a 网易云 repository uses the selected local cache directory as `path`; `backendConfig` keeps account credentials and defaults, and stores a non-secret `sourceUri: "netease-cloud-music://account/{accountId}"` for provenance.
   - The frontend receives only repository summaries and must not depend on the full persisted `backendConfig`, because it may contain cookies or other account secrets.
@@ -105,6 +106,8 @@
   - Sync updates repository indexes only; thumbnail generation is handled by the thumbnail API after content is visible
   - Newly discovered image assets automatically receive `metadata.color` as the primary `#RRGGBB` color and `metadata.palette` as up to five dominant `#RRGGBB` colors. Palette extraction failures are ignored so imports and syncs can continue.
   - Local filesystem scans store real `sha256:<hex>` content hashes on assets. When a newly discovered file has the same content hash as an existing active asset and is not already in a hardlink group, sync records a pending hardlink candidate instead of auto-linking it.
+  - Source backends may attach `status`, `sharedAssetId`, `tags`, and `thumbnailLocalAbsolutePath` to discovered files. The host mirrors them into asset status, alias/shared-asset relations, searchable tags, and entry thumbnail caches.
+  - After a source scan, the host may call `filesystem.describeRepositoryState` to refresh source-managed `folder_metadata`, `repository_shortcuts`, `tag_groups`, `smart_folders`, `repository_actions`, and `source_trash_entries`.
 - File browser requests may include `specialLocation: "trash"` to browse `.momo/trash` without exposing internal repository directories in normal browsing.
 - Local filesystem `get_file_browser` responses are cache-first and include `cacheState: "warming" | "ready" | "refreshing"` plus `indexedAt`. Cold-cache reads return immediately and schedule background sync rather than blocking on filesystem tree scans.
 - File browser requests may include optional `offset` and `limit` for incremental directory loading. Desktop首屏默认先请求首批结构，后续滚动再追加更多条目。
@@ -120,6 +123,7 @@
 - `deleteEntry` moves files or recursive directory deletes to `.momo/trash` by default. Use `mode: "permanentDelete"` only for deleting entries already shown from the trash view.
 - `mutateTrash` supports `action: "restore" | "restoreAll" | "empty"` to restore a selected trash item, restore all tracked trash items, or clear `.momo/trash`.
 - Eagle imports map `isDeleted: true` assets into the same recoverable trash model: the file is written under `.momo/trash`, `.momo/trash.json` stores `originalPath`, `trashPath`, `deletedAt` and `kind`, and the asset row keeps its original repository path with `status: "deleted"`.
+- Eagle Library source mounts may keep deleted assets in the source itself. The host merges its local trash model with source-managed trash entries so Eagle `isDeleted` items appear in the existing trash UI without copying business data into `.momo/trash`.
 - `POST /repositories/{repoId}/files:importArchive`
   - Request includes `repoId`, optional `parentPath`, and `archivePath`.
   - Current scope supports `.zip` only and preserves the archive's internal directory structure under the target directory.
@@ -354,6 +358,13 @@
 - Eagle `actions.json` is imported into repository actions and steps. Recognized metadata/tag steps become MomoBako native steps; unknown or dangerous steps are preserved as `unsupported`, keep their raw payload, and disable the containing action by default.
 - Eagle folder passwords are explicitly out of scope. MomoBako does not read, store, hash, export, or enforce Eagle plaintext `password`; it only stores `protected=true` and optional `passwordTip` for display as migration hints.
 
+## Eagle Source Notes
+
+- `momobako.source.eagle-library` mounts an Eagle `.library` directory as a source repository. The Eagle directory remains the business source of truth; host-managed repository state lives under the repository service data directory.
+- Mounted Eagle assets keep source-native sidecars. File operations, asset metadata saves, undo/redo, and repository-level object edits call back into the source plugin so Eagle JSON stays in sync with the host read model.
+- Eagle multi-folder membership is exposed as multiple logical file paths that share the same `sharedAssetId`. The host rebuilds alias relations from that shared asset id during sync.
+- Mounted Eagle repository state comes from `metadata.json`, `tags.json`, `saved-filters.json`, `actions.json`, and `images/*.info/metadata.json`.
+
 ## Plugin API
 
 - `GET /plugins`
@@ -362,6 +373,7 @@
   - Manifest fields include `pluginId`, `legacyPluginIds`, `name`, `version`, `type`, `kind`, `category`, `description`, `capabilities`, `enabled`, `sdk`, `entry`, `source`, `runtime`, `permissions`, `requires`, `optional`, `hooks`, `contributes`, `compat`, `status`, `dependencyStatus`, `disableReason`, `degraded`, and `degradationReason`
   - `category` is one of `source`, `library-kind`, `parser`, `preview`, or `service`; legacy manifests without `category` are inferred from `kind`.
   - `source` plugins are attachable repository IO backends. Existing `filesystem`, `webdav`, and `cloud` kinds remain accepted as source plugins for compatibility.
+  - `momobako.source.eagle-library` is a source plugin with `type.layer="source"`, `kind="eagle-library"`, `sdk="backend"`, `runtime="native-dylib"`, `capabilities=["browse","read","write","sync"]`, and `contributes.source.operations=["list","read","write","move","delete","sync"]`. It does not declare `localRootPath`, so repository creation must select it explicitly.
   - `contributes.source.metadataMirrorKeys[]` lets a source plugin declare which `sourcePayload` keys the host should mirror into system metadata during sync and virtual-entry cache hydration. The host applies the list generically and keeps overwrite rules identical to other metadata writes.
   - `library-kind` plugins declare content fields, facets, view presets, organization rules and declarative core-host hooks for content types. Manifest-only library kinds can describe static taxonomy; richer library kinds can ship frontend modules that call `registerLibraryExtension` to contribute metadata panels, file summaries, preview sidebars, search shortcuts and playlist actions.
   - Frontend library extensions expose `libraryKind`, `matchEntry(entry)`, optional `metadataPanel`, optional `previewPanel`, optional `fileSummary(entry)`, optional `searchShortcuts`, and optional `playlist` behavior. The desktop workspace renders registered contributions generically and does not branch on content-specific plugin IDs.
@@ -383,6 +395,7 @@
   - Each plugin has a host-owned data directory under `<serviceRoot>/plugin-data/<pluginSlug>` for plugin settings files and plugin-owned cache. The host creates it on demand and exposes it to frontend plugins through the SDK. Plugin key-value config is stored in that directory as `config.json` and accessed through the same normalized plugin ID path used by data-directory APIs and backend call runtime context.
   - Disabled or manifest-only source backends are displayed but not offered as usable repository backends until enabled with an available runtime
   - Filesystem backend `listFiles` responses include `absolutePath`, `relativePath`, `filename`, `extension`, `sizeBytes`, and `modifiedAt`; the runtime tolerates legacy responses without `absolutePath` by resolving `relativePath` under `repoRoot`
+  - Source `listFiles` and `listDirectory` payloads may additionally include `status: "synced" | "deleted"`, `sharedAssetId`, `tags`, and `thumbnailLocalAbsolutePath`.
 - `POST /plugins:install`
   - Request body includes `packagePath`
   - Only `.momoplug` files are accepted
@@ -392,6 +405,16 @@
   - Used by frontend preview or codec plugins to invoke native plugin capabilities without adding file-format-specific commands to the core runtime
   - Native plugin call envelopes include `runtime.pluginId`, `runtime.pluginDataDir`, `runtime.serviceRootDir`, and `runtime.pluginConfig`; `pluginDataDir` points to the plugin's own persistent directory and is created before dispatch, `serviceRootDir` points to the host service storage root, and `pluginConfig` is the current host-managed key-value config from `config.json`.
   - Native backend plugins may register an optional host callback bridge and call other backend plugins through the host. The current first-party use case is `momobako.service.office-convert` calling `momobako.service.downloader` to download bundled LibreOffice runtimes through the shared aria2 task layer.
+  - Source backends may expose:
+    - `filesystem.describeRepositoryState`
+      - Request: `{ repoRoot, config }`
+      - Response: `{ directoryMetadataByPath, quickAccess, tagGroups, smartFolders, repositoryActions, trashEntries }`
+    - `filesystem.writeAssetMetadata`
+      - Request: `{ repoRoot, config, path, sharedAssetId?, metadata, previousMetadata?, operation? }`
+      - Used by metadata saves plus undo/redo to write source-native sidecars before the host commits its own database transaction.
+    - `filesystem.writeRepositoryState`
+      - Request: `{ repoRoot, config, quickAccess, tagGroups, smartFolders, repositoryActions, directoryMetadataByPath }`
+      - Used by repository-level edits to write source-native top-level objects before the host refreshes its synchronized read model.
   - `momobako.local-filesystem` uses plugin config `fileSearchMode` (`recursive`, `ntfs`, or `everything`) to choose the file-list enumeration strategy for all local filesystem repositories; unavailable indexed modes log a reason and fall back to recursive scanning without changing sync result contracts.
   - `momobako.service.archive-preview` exposes `archive.ensurePrepared`, `archive.listDirectory`, and `archive.prepareEntryPreview`. Payloads use `archivePath` for the local source archive and `directoryPath`/`entryPath` for normalized internal paths; responses are read-only and backed by session temporary extraction cache.
   - `momobako.service.office-convert` exposes:

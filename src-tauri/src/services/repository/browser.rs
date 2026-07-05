@@ -76,6 +76,10 @@ fn load_cached_directory_entries(
             provider_item_id: None,
             source_payload: None,
             local_absolute_path: None,
+            status: None,
+            shared_asset_id: None,
+            tags: None,
+            thumbnail_local_absolute_path: None,
         })
         .collect::<Vec<_>>();
 
@@ -118,6 +122,10 @@ fn load_cached_directory_entries(
                 provider_item_id: row.get(7)?,
                 source_payload: parse_json_column_nullable(row.get::<_, Option<String>>(8)?)?,
                 local_absolute_path: row.get(9)?,
+                status: None,
+                shared_asset_id: None,
+                tags: None,
+                thumbnail_local_absolute_path: None,
             })
         })
         .map_err(db_error)?
@@ -338,7 +346,17 @@ pub(super) fn load_file_browser(
     )?;
     let thumbnail_root = state.repository_thumbnail_root(&repo)?;
     let special_location = normalize_special_location(request.special_location.as_deref())?;
-    if special_location.is_some() && !repository_supports_local_root_access(&repo) {
+    let source_trash_supported = if special_location.as_deref() == Some("trash")
+        && !repository_supports_local_root_access(&repo)
+    {
+        repository_has_source_trash_entries(&connection, &request.repo_id).map_err(db_error)?
+    } else {
+        false
+    };
+    if special_location.is_some()
+        && !repository_supports_local_root_access(&repo)
+        && !source_trash_supported
+    {
         return Err(format!(
             "trash browser is only supported for repositories with local root access, got: {}",
             repo.summary.backend.plugin_id
@@ -397,8 +415,18 @@ pub(super) fn load_file_browser(
             &thumbnail_root,
             load_entry_thumbnail_map(&connection, &request.repo_id).map_err(db_error)?,
         )?;
-        let entries =
-            list_trash_directory_entries(&repo_root, &current_path, &asset_map, &thumbnail_map)?;
+        let entries = if repository_supports_local_root_access(&repo) {
+            list_trash_directory_entries(&repo_root, &current_path, &asset_map, &thumbnail_map)?
+        } else {
+            let source_entries =
+                load_source_trash_entries(&connection, &request.repo_id).map_err(db_error)?;
+            list_source_trash_directory_entries(
+                &current_path,
+                &source_entries,
+                &asset_map,
+                &thumbnail_map,
+            )
+        };
         let (entries, total_entries, loaded_count, next_offset, has_more) =
             paginate_file_browser_entries(entries, offset, limit);
         (entries, total_entries, loaded_count, next_offset, has_more)
@@ -578,6 +606,10 @@ pub(super) fn create_directory(
         let path = join_relative_path(&parent_path, &name);
         upsert_directory_record(&connection, &request.repo_id, &path, &parent_path, &name)
             .map_err(db_error)?;
+    } else {
+        let _ = state.sync_repository(SyncRequest {
+            repo_id: request.repo_id.clone(),
+        })?;
     }
     load_file_browser(
         state,
@@ -671,16 +703,42 @@ pub(super) fn move_entries(
 ) -> Result<FileBrowserSnapshot, String> {
     state.ensure_initialized()?;
     let repo = state.load_repository_record(&request.repo_id)?;
-    ensure_repository_supports_local_write_access(&repo, "moving files")?;
+    if !backend_has_capability(&repo.summary.backend, "write") {
+        return Err("moving files is not available for this repository backend".to_string());
+    }
 
     let repo_root = PathBuf::from(&repo.summary.path);
     let parent_path = normalize_directory_path(&request.parent_path)?;
+    if request.source_paths.is_empty() {
+        return Err("no source files were provided".to_string());
+    }
+    if !repository_supports_local_root_access(&repo) {
+        let mut include_tree = false;
+        for source_path in &request.source_paths {
+            let source_path = normalize_entry_path(source_path)?;
+            let entry = stat_backend_entry(&state.root, &repo, &repo_root, &source_path)?;
+            include_tree |= matches!(entry.kind, FileSystemEntryKind::Directory);
+            move_backend_entry(&state.root, &repo, &repo_root, &source_path, &parent_path)?;
+        }
+        let _ = state.sync_repository(SyncRequest {
+            repo_id: request.repo_id.clone(),
+        })?;
+        return load_file_browser(
+            state,
+            FileBrowserRequest {
+                repo_id: request.repo_id,
+                directory_path: Some(parent_path),
+                include_tree: Some(include_tree),
+                special_location: None,
+                offset: None,
+                limit: None,
+            },
+        );
+    }
+
     let target_dir = resolve_repository_relative_path(&repo_root, &parent_path)?;
     if !target_dir.exists() || !target_dir.is_dir() {
         return Err(format!("directory not found: {parent_path}"));
-    }
-    if request.source_paths.is_empty() {
-        return Err("no source files were provided".to_string());
     }
 
     let move_plan =
@@ -758,6 +816,22 @@ pub(super) fn rename_entry(
     let renamed = rename_backend_entry(&state.root, &repo, &repo_root, &source_path, &new_name)?;
 
     let is_directory = matches!(renamed.kind, FileSystemEntryKind::Directory);
+    if !repository_supports_local_root_access(&repo) {
+        let _ = state.sync_repository(SyncRequest {
+            repo_id: request.repo_id.clone(),
+        })?;
+        return load_file_browser(
+            state,
+            FileBrowserRequest {
+                repo_id: request.repo_id,
+                directory_path: Some(parent_path),
+                include_tree: Some(is_directory),
+                special_location: None,
+                offset: None,
+                limit: None,
+            },
+        );
+    }
     if !is_directory {
         let extension = renamed.extension.unwrap_or_default();
         let modified_at = renamed.modified_at.unwrap_or_else(now_rfc3339);
@@ -814,17 +888,55 @@ pub(super) fn delete_entry(
     let repo = state.load_repository_record(&request.repo_id)?;
     let repo_root = PathBuf::from(&repo.summary.path);
     let delete_mode = request.mode.as_deref().unwrap_or("delete");
+    let mut connection = state.open_repository_connection(
+        &repo.summary.repo_id,
+        &repo.summary.path,
+        &repo.backend_record,
+    )?;
+    let source_trash_supported = if repository_supports_local_root_access(&repo) {
+        false
+    } else {
+        repository_has_source_trash_entries(&connection, &request.repo_id).map_err(db_error)?
+    };
 
     if delete_mode == "permanentDelete" {
-        if !repository_supports_local_write_access(&repo) {
+        if repository_supports_local_root_access(&repo) {
+            let trash_path = normalize_trash_relative_path(&request.path, false)?;
+            let parent_path = parent_relative_path(&trash_path);
+            delete_trash_entry(&repo_root, &trash_path)?;
+            return load_file_browser(
+                state,
+                FileBrowserRequest {
+                    repo_id: request.repo_id,
+                    directory_path: Some(parent_path),
+                    include_tree: Some(false),
+                    special_location: Some("trash".to_string()),
+                    offset: None,
+                    limit: None,
+                },
+            );
+        }
+        if !source_trash_supported {
             return Err(format!(
                 "permanent trash delete is only supported for repositories with local write access, got: {}",
                 repo.summary.backend.plugin_id
             ));
         }
         let trash_path = normalize_trash_relative_path(&request.path, false)?;
+        let trash_record = load_source_trash_entry(&connection, &request.repo_id, &trash_path)
+            .map_err(db_error)?
+            .ok_or_else(|| format!("trash entry not found: {trash_path}"))?;
         let parent_path = parent_relative_path(&trash_path);
-        delete_trash_entry(&repo_root, &trash_path)?;
+        delete_backend_entry(
+            &state.root,
+            &repo,
+            &repo_root,
+            &trash_path,
+            trash_record.kind == "directory",
+        )?;
+        let _ = state.sync_repository(SyncRequest {
+            repo_id: request.repo_id.clone(),
+        })?;
         return load_file_browser(
             state,
             FileBrowserRequest {
@@ -843,6 +955,26 @@ pub(super) fn delete_entry(
     let entry = stat_backend_entry(&state.root, &repo, &repo_root, &entry_path)?;
 
     let is_directory = matches!(entry.kind, FileSystemEntryKind::Directory);
+    if !repository_supports_local_root_access(&repo) {
+        if delete_mode == "moveToParent" {
+            return Err("moveToParent 仅支持本地目录资源库".to_string());
+        }
+        delete_backend_entry(&state.root, &repo, &repo_root, &entry_path, is_directory)?;
+        let _ = state.sync_repository(SyncRequest {
+            repo_id: request.repo_id.clone(),
+        })?;
+        return load_file_browser(
+            state,
+            FileBrowserRequest {
+                repo_id: request.repo_id,
+                directory_path: Some(parent_path),
+                include_tree: Some(is_directory),
+                special_location: None,
+                offset: None,
+                limit: None,
+            },
+        );
+    }
     if is_directory {
         if delete_mode == "moveToParent" {
             move_directory_contents_to_parent(
@@ -853,18 +985,7 @@ pub(super) fn delete_entry(
                 &entry_path,
             )?;
         } else {
-            if !repository_supports_local_write_access(&repo) {
-                return Err(format!(
-                    "trash delete is only supported for repositories with local write access, got: {}",
-                    repo.summary.backend.plugin_id
-                ));
-            }
             move_entry_to_trash(&repo_root, &entry_path, is_directory)?;
-            let mut connection = state.open_repository_connection(
-                &repo.summary.repo_id,
-                &repo.summary.path,
-                &repo.backend_record,
-            )?;
             let tx = connection.transaction().map_err(db_error)?;
             mark_directory_assets_deleted(&tx, &request.repo_id, &entry_path).map_err(db_error)?;
             tx.commit().map_err(db_error)?;
@@ -873,18 +994,7 @@ pub(super) fn delete_entry(
             })?;
         }
     } else {
-        if !repository_supports_local_write_access(&repo) {
-            return Err(format!(
-                "trash delete is only supported for repositories with local write access, got: {}",
-                repo.summary.backend.plugin_id
-            ));
-        }
         move_entry_to_trash(&repo_root, &entry_path, is_directory)?;
-        let mut connection = state.open_repository_connection(
-            &repo.summary.repo_id,
-            &repo.summary.path,
-            &repo.backend_record,
-        )?;
         let tx = connection.transaction().map_err(db_error)?;
         mark_file_asset_deleted(&tx, &request.repo_id, &entry_path).map_err(db_error)?;
         tx.commit().map_err(db_error)?;
@@ -909,30 +1019,91 @@ pub(super) fn mutate_trash(
 ) -> Result<FileBrowserSnapshot, String> {
     state.ensure_initialized()?;
     let repo = state.load_repository_record(&request.repo_id)?;
-    if !repository_supports_local_write_access(&repo) {
-        return Err(format!(
-            "trash operations are only supported for repositories with local write access, got: {}",
-            repo.summary.backend.plugin_id
-        ));
-    }
     let repo_root = PathBuf::from(&repo.summary.path);
+    let connection = state.open_repository_connection(
+        &repo.summary.repo_id,
+        &repo.summary.path,
+        &repo.backend_record,
+    )?;
+    let source_trash_supported = if repository_supports_local_root_access(&repo) {
+        false
+    } else {
+        repository_has_source_trash_entries(&connection, &request.repo_id).map_err(db_error)?
+    };
 
-    match request.action.as_str() {
-        "restore" => {
-            let trash_path = request
-                .path
-                .as_deref()
-                .ok_or_else(|| "trash restore requires a path".to_string())
-                .and_then(|path| normalize_trash_relative_path(path, false))?;
-            restore_trash_entry(&repo_root, &trash_path)?;
+    if repository_supports_local_root_access(&repo) {
+        match request.action.as_str() {
+            "restore" => {
+                let trash_path = request
+                    .path
+                    .as_deref()
+                    .ok_or_else(|| "trash restore requires a path".to_string())
+                    .and_then(|path| normalize_trash_relative_path(path, false))?;
+                restore_trash_entry(&repo_root, &trash_path)?;
+            }
+            "restoreAll" => {
+                restore_all_trash_entries(&repo_root)?;
+            }
+            "empty" => {
+                empty_trash(&repo_root)?;
+            }
+            value => return Err(format!("unsupported trash action: {value}")),
         }
-        "restoreAll" => {
-            restore_all_trash_entries(&repo_root)?;
+    } else {
+        if !source_trash_supported {
+            return Err(format!(
+                "trash operations are not available for backend: {}",
+                repo.summary.backend.plugin_id
+            ));
         }
-        "empty" => {
-            empty_trash(&repo_root)?;
+        let source_entries = load_source_trash_entries(&connection, &request.repo_id).map_err(db_error)?;
+        match request.action.as_str() {
+            "restore" => {
+                let trash_path = request
+                    .path
+                    .as_deref()
+                    .ok_or_else(|| "trash restore requires a path".to_string())
+                    .and_then(|path| normalize_trash_relative_path(path, false))?;
+                let record = source_entries
+                    .iter()
+                    .find(|entry| entry.trash_path == trash_path)
+                    .ok_or_else(|| format!("trash entry not found: {trash_path}"))?;
+                move_backend_entry(
+                    &state.root,
+                    &repo,
+                    &repo_root,
+                    &trash_path,
+                    &parent_relative_path(&record.original_path),
+                )?;
+            }
+            "restoreAll" => {
+                let mut restore_entries = source_entries.clone();
+                restore_entries.sort_by(|left, right| left.original_path.cmp(&right.original_path));
+                for entry in restore_entries {
+                    move_backend_entry(
+                        &state.root,
+                        &repo,
+                        &repo_root,
+                        &entry.trash_path,
+                        &parent_relative_path(&entry.original_path),
+                    )?;
+                }
+            }
+            "empty" => {
+                let mut delete_entries = source_entries.clone();
+                delete_entries.sort_by(|left, right| right.trash_path.cmp(&left.trash_path));
+                for entry in delete_entries {
+                    delete_backend_entry(
+                        &state.root,
+                        &repo,
+                        &repo_root,
+                        &entry.trash_path,
+                        entry.kind == "directory",
+                    )?;
+                }
+            }
+            value => return Err(format!("unsupported trash action: {value}")),
         }
-        value => return Err(format!("unsupported trash action: {value}")),
     }
 
     let _ = state.sync_repository(SyncRequest {
