@@ -1229,6 +1229,45 @@ mod tests {
     }
 
     #[test]
+    fn recursive_local_file_search_keeps_hidden_non_internal_directories() {
+        let workspace = TestWorkspace::new("recursive-local-hidden-dir");
+        let repo_root = workspace.path("repo");
+        fs::create_dir_all(repo_root.join(".hidden")).expect("hidden dir should be created");
+        fs::create_dir_all(repo_root.join(".momo")).expect("meta dir should be created");
+        fs::write(repo_root.join(".hidden").join("cover.jpg"), b"image")
+            .expect("hidden file should be written");
+        fs::write(repo_root.join(".momo").join("skip.jpg"), b"skip")
+            .expect("internal file should be written");
+
+        let files = collect_repository_files_with_mode(
+            &repo_root,
+            &serde_json::json!({
+                LOCAL_FILESYSTEM_FILE_SEARCH_MODE_KEY: "recursive"
+            }),
+        )
+        .expect("recursive scan should succeed");
+
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].relative_path, ".hidden/cover.jpg");
+    }
+
+    #[test]
+    fn count_repository_directories_excludes_internal_directories() {
+        let workspace = TestWorkspace::new("count-repository-directories");
+        let repo_root = workspace.path("repo");
+        fs::create_dir_all(repo_root.join("music").join("albums"))
+            .expect("nested dir should be created");
+        fs::create_dir_all(repo_root.join(".hidden")).expect("hidden dir should be created");
+        fs::create_dir_all(repo_root.join(".momo")).expect("meta dir should be created");
+        fs::create_dir_all(repo_root.join(".meta")).expect("legacy meta dir should be created");
+
+        let total =
+            count_repository_directories(&repo_root).expect("directory counting should succeed");
+
+        assert_eq!(total, 3);
+    }
+
+    #[test]
     fn unavailable_index_local_file_search_falls_back_to_recursive_scan() {
         fn unavailable(_repo_root: &Path) -> Result<Vec<DiscoveredFile>, String> {
             Err("not available".to_string())
@@ -1849,17 +1888,17 @@ mod tests {
                 "Local Filesystem",
                 serde_json::json!({
                     "legacyPluginIds": [LEGACY_LOCAL_FILESYSTEM_PLUGIN_ID],
-                "kind": "filesystem",
-                "category": "source",
-                "type": {
-                    "layer": "source",
-                    "kind": "filesystem"
-                },
-                "capabilities": ["browse", "read", "write", "watch", "sync", "localRootPath"],
-                "sdk": "backend",
-                "runtime": "native-dylib",
-                "source": "system"
-            }),
+                    "kind": "filesystem",
+                    "category": "source",
+                    "type": {
+                        "layer": "source",
+                        "kind": "filesystem"
+                    },
+                    "capabilities": ["browse", "read", "write", "watch", "sync", "localRootPath"],
+                    "sdk": "backend",
+                    "runtime": "native-dylib",
+                    "source": "system"
+                }),
             ),
         );
         install_netease_source_test_plugin_archive(service_root);
@@ -3333,6 +3372,10 @@ mod tests {
                 provider_item_id: None,
                 source_payload: None,
                 local_absolute_path: Some(absolute_path.to_string_lossy().to_string()),
+                status: None,
+                shared_asset_id: None,
+                tags: None,
+                thumbnail_local_absolute_path: None,
             }))
         }
 
@@ -3603,6 +3646,10 @@ mod tests {
                     "durationMs": 180000
                 })),
                 local_absolute_path: None,
+                status: None,
+                shared_asset_id: None,
+                tags: None,
+                thumbnail_local_absolute_path: None,
             },
             FileSystemEntry {
                 path: "创建的歌单/分页歌单/歌手 B - 第二页前.mp3".to_string(),
@@ -3628,6 +3675,10 @@ mod tests {
                     "durationMs": 190000
                 })),
                 local_absolute_path: None,
+                status: None,
+                shared_asset_id: None,
+                tags: None,
+                thumbnail_local_absolute_path: None,
             },
         ];
         replace_netease_directory_cache_page(
@@ -5532,6 +5583,10 @@ mod tests {
                     "level": "exhigh"
                 })),
                 local_absolute_path: None,
+                status: None,
+                shared_asset_id: None,
+                tags: None,
+                thumbnail_local_absolute_path: None,
             }))
         }
 
