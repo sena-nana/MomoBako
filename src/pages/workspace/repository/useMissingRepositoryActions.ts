@@ -2,25 +2,28 @@ import { computed, ref, watch, type ComputedRef } from "vue";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import type { RepositorySummary } from "../../../types/repository";
 
-type MissingRepositoryAction = "relocating" | "deleting" | null;
+type MissingRepositoryAction = "relocating" | null;
 
 type MissingRepositoryActionsOptions = {
   activeRepoId: ComputedRef<string | null>;
   activeRepository: ComputedRef<RepositorySummary | null>;
   configureNeteaseRepositoryCache?: (repoId: string, path: string) => Promise<unknown>;
+  isDeletingRepository: ComputedRef<boolean>;
+  openRepositoryDeleteDialog: (repoId: string) => void;
   refreshRepositoryWorkspaceSilently: () => Promise<unknown>;
   relocateMissingRepository: (repoId: string, path: string) => Promise<unknown>;
-  removeRepository: (repoId: string) => Promise<unknown>;
 };
 
 export function useMissingRepositoryActions(options: MissingRepositoryActionsOptions) {
   const missingRepositoryError = ref("");
   const missingRepositoryAction = ref<MissingRepositoryAction>(null);
-  const showMissingRepositoryDeleteDialog = ref(false);
 
-  const isMissingRepositoryBusy = computed(() => missingRepositoryAction.value !== null);
+  const isMissingRepositoryBusy = computed(() => (
+    missingRepositoryAction.value !== null
+    || options.isDeletingRepository.value
+  ));
   const isRepairingMissingRepository = computed(() => missingRepositoryAction.value === "relocating");
-  const isDeletingMissingRepository = computed(() => missingRepositoryAction.value === "deleting");
+  const isDeletingMissingRepository = computed(() => options.isDeletingRepository.value);
   const isNeteaseCacheMissing = computed(() => (
     options.activeRepository.value?.backend.pluginId === "momobako.source.netease-cloud-music"
     && options.activeRepository.value.localCache?.status !== "ready"
@@ -28,7 +31,6 @@ export function useMissingRepositoryActions(options: MissingRepositoryActionsOpt
 
   watch(options.activeRepoId, () => {
     missingRepositoryError.value = "";
-    showMissingRepositoryDeleteDialog.value = false;
   });
 
   async function chooseMissingRepositoryPath() {
@@ -72,26 +74,7 @@ export function useMissingRepositoryActions(options: MissingRepositoryActionsOpt
   function openMissingRepositoryDeleteDialog() {
     if (!options.activeRepoId.value || isMissingRepositoryBusy.value) return;
     missingRepositoryError.value = "";
-    showMissingRepositoryDeleteDialog.value = true;
-  }
-
-  function closeMissingRepositoryDeleteDialog() {
-    if (isDeletingMissingRepository.value) return;
-    showMissingRepositoryDeleteDialog.value = false;
-  }
-
-  async function confirmMissingRepositoryDelete() {
-    if (!options.activeRepoId.value) return;
-    missingRepositoryAction.value = "deleting";
-    missingRepositoryError.value = "";
-    try {
-      await options.removeRepository(options.activeRepoId.value);
-      showMissingRepositoryDeleteDialog.value = false;
-    } catch (cause) {
-      missingRepositoryError.value = cause instanceof Error ? cause.message : String(cause);
-    } finally {
-      missingRepositoryAction.value = null;
-    }
+    options.openRepositoryDeleteDialog(options.activeRepoId.value);
   }
 
   return {
@@ -99,11 +82,8 @@ export function useMissingRepositoryActions(options: MissingRepositoryActionsOpt
     isMissingRepositoryBusy,
     isRepairingMissingRepository,
     isDeletingMissingRepository,
-    showMissingRepositoryDeleteDialog,
     chooseMissingRepositoryPath,
     refreshMissingRepository,
     openMissingRepositoryDeleteDialog,
-    closeMissingRepositoryDeleteDialog,
-    confirmMissingRepositoryDelete,
   };
 }

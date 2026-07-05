@@ -240,7 +240,10 @@ mod tests {
             .find(|repository| repository.repo_id == repo_id)
             .expect("repository summary should exist");
         assert_eq!(rebuilt_summary.asset_count, 2);
-        assert!(repo_root.join(REPO_META_DIR).join(REPO_DB_FILE_NAME).exists());
+        assert!(repo_root
+            .join(REPO_META_DIR)
+            .join(REPO_DB_FILE_NAME)
+            .exists());
 
         let snapshot = state
             .load_repository_tree(&repo_id)
@@ -952,7 +955,10 @@ mod tests {
             })
             .expect("repository should be created");
 
-        let cache_dir = repo_root.join(REPO_META_DIR).join("cache").join("office-preview");
+        let cache_dir = repo_root
+            .join(REPO_META_DIR)
+            .join("cache")
+            .join("office-preview");
         fs::create_dir_all(&cache_dir).expect("repository cache dir should be created");
         let preview_file = cache_dir.join("preview.pdf");
         fs::write(&preview_file, b"%PDF-1.4").expect("preview cache file should be written");
@@ -996,9 +1002,13 @@ mod tests {
         fs::write(helper_dir.join("pid.txt"), "invalid").expect("pid state should be written");
         fs::write(helper_dir.join("status.json"), "{}").expect("status state should be written");
         fs::write(helper_dir.join("port.txt"), "23119").expect("port state should be written");
-        fs::write(helper_dir.join("session.txt"), "office").expect("session state should be written");
-        fs::write(helper_dir.join("office-convert-helper.ps1"), "Write-Host helper")
-            .expect("helper script should be written");
+        fs::write(helper_dir.join("session.txt"), "office")
+            .expect("session state should be written");
+        fs::write(
+            helper_dir.join("office-convert-helper.ps1"),
+            "Write-Host helper",
+        )
+        .expect("helper script should be written");
 
         state
             .shutdown_runtime_helpers()
@@ -1320,13 +1330,11 @@ mod tests {
             .expect("local filesystem plugin should exist");
 
         assert_eq!(plugin.status, "unavailable");
-        assert!(
-            plugin
-                .disable_reason
-                .as_deref()
-                .unwrap_or_default()
-                .contains("原生运行时不可用")
-        );
+        assert!(plugin
+            .disable_reason
+            .as_deref()
+            .unwrap_or_default()
+            .contains("原生运行时不可用"));
     }
 
     #[test]
@@ -2605,9 +2613,11 @@ mod tests {
     }
 
     #[test]
-    fn delete_repository_removes_registry_and_managed_state_dir() {
-        let (state, root, repo_root, _thumbnail_root) = create_test_state("delete-repo-state");
+    fn delete_repository_record_only_removes_registry_and_keeps_disk_data() {
+        let (state, root, repo_root, _thumbnail_root) =
+            create_test_state("delete-repo-record-only");
         let repo_id = create_repository_for_path(&state, &repo_root);
+        let metadata_dir = repo_root.join(REPO_META_DIR);
         let managed_state_dir = repository_state_storage_dir(&state.root, &repo_id);
         fs::create_dir_all(managed_state_dir.join("cache"))
             .expect("managed state dir should be created");
@@ -2615,10 +2625,14 @@ mod tests {
             .expect("managed cache file should be written");
 
         state
-            .delete_repository(&repo_id)
+            .delete_repository(RepositoryDeleteRequest {
+                repo_id: repo_id.clone(),
+                mode: RepositoryDeleteMode::RecordOnly,
+            })
             .expect("repository should delete");
 
-        assert!(!managed_state_dir.exists());
+        assert!(managed_state_dir.exists());
+        assert!(metadata_dir.exists());
         assert!(repo_root.exists());
         assert!(state
             .list_repositories()
@@ -2629,12 +2643,182 @@ mod tests {
     }
 
     #[test]
+    fn delete_repository_delete_metadata_removes_local_metadata_dirs() {
+        let (state, root, repo_root, _thumbnail_root) =
+            create_test_state("delete-repo-local-metadata");
+        let repo_id = create_repository_for_path(&state, &repo_root);
+        let metadata_dir = repo_root.join(REPO_META_DIR);
+        let legacy_metadata_dir = repo_root.join(LEGACY_REPO_META_DIR);
+        fs::create_dir_all(legacy_metadata_dir.join("cache"))
+            .expect("legacy metadata dir should be created");
+        fs::write(legacy_metadata_dir.join("cache").join("legacy.json"), "{}")
+            .expect("legacy metadata file should be written");
+
+        state
+            .delete_repository(RepositoryDeleteRequest {
+                repo_id: repo_id.clone(),
+                mode: RepositoryDeleteMode::DeleteMetadata,
+            })
+            .expect("repository metadata should delete");
+
+        assert!(!metadata_dir.exists());
+        assert!(!legacy_metadata_dir.exists());
+        assert!(repo_root.exists());
+        assert!(state
+            .list_repositories()
+            .expect("repositories should list after delete")
+            .iter()
+            .all(|item| item.repo_id != repo_id));
+        fs::remove_dir_all(root).expect("test temp root should be removed");
+    }
+
+    #[test]
+    fn delete_repository_delete_metadata_removes_managed_state_dir_for_uri_repo() {
+        let workspace = TestWorkspace::new("delete-repo-managed-metadata");
+        let service_root = workspace.path("service");
+        install_local_filesystem_test_plugin_archive(&service_root);
+        let state = RepositoryState::from_root(service_root.clone());
+        state
+            .ensure_initialized()
+            .expect("state should initialize registry");
+        let registry =
+            Connection::open(service_root.join(REGISTRY_FILE_NAME)).expect("registry should open");
+        let backend = RepositoryBackendRecord {
+            plugin_id: NETEASE_CLOUD_MUSIC_PLUGIN_ID.to_string(),
+            config: serde_json::json!({
+                "accountId": "456",
+                "cookie": "MUSIC_U=test-cookie"
+            }),
+        };
+        let seed = RepositorySeed {
+            repo_id: "netease-delete-metadata",
+            name: "网易云删除元数据",
+            root_path: "",
+            status: "ready",
+            assets: &[],
+        };
+        upsert_registry_entry(
+            &registry,
+            Path::new("netease-cloud-music://account/456"),
+            &seed,
+            &backend,
+        )
+        .expect("registry entry should be stored");
+        let managed_state_dir =
+            repository_state_storage_dir(&service_root, "netease-delete-metadata");
+        let metadata_dir = managed_state_dir.join(REPO_META_DIR);
+        fs::create_dir_all(metadata_dir.join("indexes"))
+            .expect("managed metadata indexes should be created");
+        fs::write(metadata_dir.join("indexes").join("legacy.json"), "{}")
+            .expect("managed metadata file should be written");
+
+        state
+            .delete_repository(RepositoryDeleteRequest {
+                repo_id: "netease-delete-metadata".to_string(),
+                mode: RepositoryDeleteMode::DeleteMetadata,
+            })
+            .expect("managed repository metadata should delete");
+
+        assert!(!metadata_dir.exists());
+        assert!(!managed_state_dir.exists());
+        assert!(state
+            .list_repositories()
+            .expect("repositories should list after delete")
+            .iter()
+            .all(|item| item.repo_id != "netease-delete-metadata"));
+    }
+
+    #[test]
+    fn delete_repository_delete_folder_removes_repository_root_and_managed_state() {
+        let (state, root, repo_root, _thumbnail_root) = create_test_state("delete-repo-folder");
+        let repo_id = create_repository_for_path(&state, &repo_root);
+        let managed_state_dir = repository_state_storage_dir(&state.root, &repo_id);
+        fs::create_dir_all(managed_state_dir.join("cache"))
+            .expect("managed state dir should be created");
+        fs::write(managed_state_dir.join("cache/index.json"), "{}")
+            .expect("managed cache file should be written");
+
+        state
+            .delete_repository(RepositoryDeleteRequest {
+                repo_id: repo_id.clone(),
+                mode: RepositoryDeleteMode::DeleteFolder,
+            })
+            .expect("repository folder should delete");
+
+        assert!(!repo_root.exists());
+        assert!(!managed_state_dir.exists());
+        assert!(state
+            .list_repositories()
+            .expect("repositories should list after delete")
+            .iter()
+            .all(|item| item.repo_id != repo_id));
+        fs::remove_dir_all(root).expect("test temp root should be removed");
+    }
+
+    #[test]
+    fn delete_repository_delete_folder_rejects_missing_repository_path() {
+        let (state, root, repo_root, _thumbnail_root) =
+            create_test_state("delete-repo-folder-missing");
+        let repo_id = create_repository_for_path(&state, &repo_root);
+        fs::remove_dir_all(&repo_root).expect("repository root should be removed");
+
+        let error = state
+            .delete_repository(RepositoryDeleteRequest {
+                repo_id: repo_id.clone(),
+                mode: RepositoryDeleteMode::DeleteFolder,
+            })
+            .expect_err("missing repository folder should reject deletion");
+
+        assert!(error.contains("repository folder is not available for deletion"));
+        assert!(state
+            .list_repositories()
+            .expect("repositories should still list after failed delete")
+            .iter()
+            .any(|item| item.repo_id == repo_id));
+        fs::remove_dir_all(root).expect("test temp root should be removed");
+    }
+
+    #[test]
+    fn delete_repository_delete_folder_removes_netease_cache_root() {
+        let workspace = TestWorkspace::new("delete-repo-netease-folder");
+        let service_root = workspace.path("service");
+        let cache_root = workspace.path("netease-cache");
+        fs::create_dir_all(&cache_root).expect("netease cache root should be created");
+        let state = RepositoryState::from_root(service_root.clone());
+        let repo_id = create_netease_repository_without_initial_sync(
+            &state,
+            &cache_root,
+            serde_json::json!({
+                "accountId": "789",
+                "cookie": "MUSIC_U=test"
+            }),
+        );
+
+        state
+            .delete_repository(RepositoryDeleteRequest {
+                repo_id: repo_id.clone(),
+                mode: RepositoryDeleteMode::DeleteFolder,
+            })
+            .expect("netease cache root should delete");
+
+        assert!(!cache_root.exists());
+        assert!(state
+            .list_repositories()
+            .expect("repositories should list after delete")
+            .iter()
+            .all(|item| item.repo_id != repo_id));
+    }
+
+    #[test]
     fn record_entry_access_keeps_only_latest_50_entries() {
         let (state, root, repo_root, _thumbnail_root) = create_test_state("recent-access-cap");
         let repo_id = create_repository_without_initial_sync(&state, &repo_root);
         for index in 0..55 {
-            fs::write(repo_root.join(format!("recent-{index:02}.txt")), format!("entry-{index}"))
-                .expect("test file should be written");
+            fs::write(
+                repo_root.join(format!("recent-{index:02}.txt")),
+                format!("entry-{index}"),
+            )
+            .expect("test file should be written");
         }
         state
             .sync_repository(SyncRequest {
@@ -2691,8 +2875,7 @@ mod tests {
 
     #[test]
     fn clear_recent_access_history_resets_all_last_accessed_at() {
-        let (state, root, repo_root, _thumbnail_root) =
-            create_test_state("recent-access-clear");
+        let (state, root, repo_root, _thumbnail_root) = create_test_state("recent-access-clear");
         let repo_id = create_repository_without_initial_sync(&state, &repo_root);
         for path in ["alpha.txt", "beta.txt"] {
             fs::write(repo_root.join(path), path).expect("test file should be written");
@@ -3115,16 +3298,16 @@ mod tests {
                 LOCAL_FILESYSTEM_PLUGIN_ID,
                 "Local Filesystem",
                 serde_json::json!({
-                "kind": "filesystem",
-                "category": "source",
-                "type": {
-                    "layer": "source",
-                    "kind": "filesystem"
-                },
-                "capabilities": ["browse", "read", "write", "watch", "sync", "localRootPath"],
-                "runtime": "manifest-only",
-                "source": "system"
-            }),
+                    "kind": "filesystem",
+                    "category": "source",
+                    "type": {
+                        "layer": "source",
+                        "kind": "filesystem"
+                    },
+                    "capabilities": ["browse", "read", "write", "watch", "sync", "localRootPath"],
+                    "runtime": "manifest-only",
+                    "source": "system"
+                }),
             ),
         );
         let metadata_dir = repo_root.join(REPO_META_DIR);

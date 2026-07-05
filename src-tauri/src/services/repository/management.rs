@@ -162,15 +162,99 @@ pub(super) fn attach_repository_folder(
     }
 }
 
-pub(super) fn delete_repository(state: &RepositoryState, repo_id: &str) -> Result<(), String> {
+pub(super) fn delete_repository(
+    state: &RepositoryState,
+    request: RepositoryDeleteRequest,
+) -> Result<(), String> {
     state.ensure_initialized()?;
+    let repo = state.load_repository_record(&request.repo_id)?;
+    delete_repository_files(state, &repo, request.mode)?;
     let registry = open_registry_connection(&state.registry_path)?;
     registry
-        .execute("DELETE FROM repositories WHERE repo_id = ?1", [repo_id])
+        .execute(
+            "DELETE FROM repositories WHERE repo_id = ?1",
+            [&request.repo_id],
+        )
         .map_err(db_error)?;
-    let storage_dir = repository_state_storage_dir(&state.root, repo_id);
-    if storage_dir.exists() {
-        fs::remove_dir_all(storage_dir).map_err(io_error)?;
+    Ok(())
+}
+
+fn delete_repository_files(
+    state: &RepositoryState,
+    repo: &RepositoryRecord,
+    mode: RepositoryDeleteMode,
+) -> Result<(), String> {
+    match mode {
+        RepositoryDeleteMode::RecordOnly => Ok(()),
+        RepositoryDeleteMode::DeleteMetadata => delete_repository_metadata(state, repo),
+        RepositoryDeleteMode::DeleteFolder => delete_repository_folder(state, repo),
+    }
+}
+
+fn delete_repository_metadata(
+    state: &RepositoryState,
+    repo: &RepositoryRecord,
+) -> Result<(), String> {
+    let repo_root = PathBuf::from(&repo.summary.path);
+    if backend_uses_repository_root_metadata(
+        &state.root,
+        &repo_root,
+        &repo.backend_record.plugin_id,
+    ) {
+        if !repo_root.is_dir() {
+            return Err("repository metadata directory is unavailable because the repository folder is missing".to_string());
+        }
+        remove_directory_if_exists(&repository_meta_dir(&repo_root))?;
+        remove_directory_if_exists(&legacy_repository_meta_dir(&repo_root))?;
+        return Ok(());
+    }
+
+    let managed_repo_dir = repository_state_storage_dir(&state.root, &repo.summary.repo_id);
+    let managed_metadata_dir = managed_repo_dir.join(REPO_META_DIR);
+    remove_directory_if_exists(&managed_metadata_dir)?;
+    remove_empty_directory_chain(
+        &managed_repo_dir,
+        &repository_state_storage_root(&state.root),
+    )?;
+    Ok(())
+}
+
+fn delete_repository_folder(
+    state: &RepositoryState,
+    repo: &RepositoryRecord,
+) -> Result<(), String> {
+    let repo_root = PathBuf::from(&repo.summary.path);
+    if !repo_root.is_dir() {
+        return Err("repository folder is not available for deletion".to_string());
+    }
+    fs::remove_dir_all(&repo_root).map_err(io_error)?;
+
+    let storage_dir = repository_state_storage_dir(&state.root, &repo.summary.repo_id);
+    remove_directory_if_exists(&storage_dir)?;
+    Ok(())
+}
+
+fn remove_directory_if_exists(path: &Path) -> Result<(), String> {
+    if path.exists() {
+        fs::remove_dir_all(path).map_err(io_error)?;
+    }
+    Ok(())
+}
+
+fn remove_empty_directory_chain(path: &Path, stop_at: &Path) -> Result<(), String> {
+    let mut current = path.to_path_buf();
+    while current != stop_at && current.starts_with(stop_at) {
+        if current.exists() {
+            let is_empty = fs::read_dir(&current).map_err(io_error)?.next().is_none();
+            if !is_empty {
+                break;
+            }
+            fs::remove_dir(&current).map_err(io_error)?;
+        }
+        let Some(parent) = current.parent() else {
+            break;
+        };
+        current = parent.to_path_buf();
     }
     Ok(())
 }

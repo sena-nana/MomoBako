@@ -25,6 +25,7 @@ import WorkspaceSidebarFolders from "./WorkspaceSidebarFolders.vue";
 import WorkspaceSidebarSmartFolders from "./WorkspaceSidebarSmartFolders.vue";
 import WorkspaceSidebarStatus from "./WorkspaceSidebarStatus.vue";
 import WorkspaceSidebarFooter from "./WorkspaceSidebarFooter.vue";
+import RepositoryDeleteDialog from "./RepositoryDeleteDialog.vue";
 import RepositorySwitcherPopover from "./RepositorySwitcherPopover.vue";
 import WorkspaceSidebarFolderDialogs from "./WorkspaceSidebarFolderDialogs.vue";
 import WorkspaceSidebarPlaylistDialog from "./WorkspaceSidebarPlaylistDialog.vue";
@@ -42,11 +43,19 @@ const {
   repositoryBackendOptions,
   activeRepoId,
   activeSnapshot,
+  canDeletePendingRepositoryFolder,
+  canDeletePendingRepositoryMetadata,
+  closeRepositoryDeleteDialog,
+  confirmRepositoryDelete,
   refreshActiveRepositoryWorkspaceSilently,
+  isDeletingRepository,
+  openRepositoryDeleteDialog,
+  pendingDeleteRepository,
   selectRepository,
   createNewRepository,
   attachRepository,
-  removeRepository,
+  repositoryDeleteDialogError,
+  repositoryDeleteDialogVisible,
 } = useWorkspaceRepository();
 const {
   activePanel,
@@ -124,8 +133,6 @@ const {
   backendUsername,
   closeAddRepositoryPopover,
   deleteActiveRepositoryFromMenu,
-  isConfirmingRepositoryDelete,
-  isRemovingRepository,
   isSubmittingBackend,
   neteaseLoginMessage,
   neteaseQrSession,
@@ -144,7 +151,7 @@ const {
   activeRepoId,
   attachRepository,
   createNewRepository,
-  removeRepository,
+  openRepositoryDeleteDialog,
   repositories,
   repositoryBackendOptions,
   refreshRepositoryWorkspaceSilently: refreshActiveRepositoryWorkspaceSilently,
@@ -411,8 +418,6 @@ const showFolderSidebar = computed(() => (
     :add-repository-error="addRepositoryError"
     :backend-options="backendOptions"
     :backend-submit-disabled="backendSubmitDisabled"
-    :is-confirming-repository-delete="isConfirmingRepositoryDelete"
-    :is-removing-repository="isRemovingRepository"
     :is-submitting-backend="isSubmittingBackend"
     :netease-login-message="neteaseLoginMessage"
     :netease-qr-session="neteaseQrSession"
@@ -430,6 +435,17 @@ const showFolderSidebar = computed(() => (
     @set-popover-ref="(element) => { addRepositoryPopoverRef = element; }"
     @show-add-menu="showAddRepositoryMenuFromSwitcher"
     @submit="submitAddRepositoryForm"
+  />
+
+  <RepositoryDeleteDialog
+    :open="repositoryDeleteDialogVisible"
+    :repository="pendingDeleteRepository"
+    :error="repositoryDeleteDialogError"
+    :is-deleting="isDeletingRepository"
+    :can-delete-metadata="canDeletePendingRepositoryMetadata"
+    :can-delete-folder="canDeletePendingRepositoryFolder"
+    @close="closeRepositoryDeleteDialog"
+    @confirm="confirmRepositoryDelete"
   />
 
   <WorkspaceSidebarPlaylistDialog

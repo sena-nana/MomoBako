@@ -55,7 +55,7 @@ type RepositorySwitcherUiOptions = {
       skipInitialSync?: boolean;
     },
   ) => Promise<unknown>;
-  removeRepository: (repoId: string) => Promise<unknown>;
+  openRepositoryDeleteDialog: (repoId: string) => void;
   repositories: ComputedRef<RepositorySummary[]>;
   repositoryBackendOptions: ComputedRef<RepositoryBackendOption[]>;
   refreshRepositoryWorkspaceSilently: () => Promise<unknown>;
@@ -98,8 +98,6 @@ export function useRepositorySwitcherUi(options: RepositorySwitcherUiOptions) {
   const backendPassword = ref("");
   const backendRoot = ref("");
   const isSubmittingBackend = ref(false);
-  const isRemovingRepository = ref(false);
-  const isConfirmingRepositoryDelete = ref(false);
   const addRepositoryError = ref("");
   const neteaseQrSession = ref<NeteaseQrSession | null>(null);
   const neteaseLoginMessage = ref("");
@@ -174,7 +172,6 @@ export function useRepositorySwitcherUi(options: RepositorySwitcherUiOptions) {
     if (!isSubmittingBackend.value) {
       resetBackendForm();
     }
-    isConfirmingRepositoryDelete.value = false;
     addRepositoryPopoverMode.value = "addMenu";
   }
 
@@ -184,28 +181,25 @@ export function useRepositorySwitcherUi(options: RepositorySwitcherUiOptions) {
   }
 
   function openRepositorySwitcherFromEvent(event: MouseEvent) {
-    if (isSubmittingBackend.value || isRemovingRepository.value) return;
+    if (isSubmittingBackend.value) return;
     if (addRepositoryPopoverMode.value === "switcher") return;
     addRepositoryError.value = "";
-    isConfirmingRepositoryDelete.value = false;
     addRepositoryPopoverMode.value = "switcher";
     addRepositoryPopoverPosition.value = getPopoverPosition(getAnchorFromElement(event.currentTarget), "switcher");
   }
 
   function showAddRepositoryMenuFromSwitcher() {
-    if (isSubmittingBackend.value || isRemovingRepository.value) return;
+    if (isSubmittingBackend.value) return;
     showAddRepositoryMenu();
   }
 
   function closeAddRepositoryPopover() {
-    if (isSubmittingBackend.value || isRemovingRepository.value) return;
+    if (isSubmittingBackend.value) return;
     addRepositoryPopoverMode.value = "closed";
-    isConfirmingRepositoryDelete.value = false;
   }
 
   function selectRepositoryFromList(repoId: string) {
-    if (isSubmittingBackend.value || isRemovingRepository.value) return;
-    isConfirmingRepositoryDelete.value = false;
+    if (isSubmittingBackend.value) return;
     void options.selectRepository(repoId).then(() => {
       addRepositoryPopoverMode.value = "closed";
       if (options.route.path === "/settings") {
@@ -214,25 +208,13 @@ export function useRepositorySwitcherUi(options: RepositorySwitcherUiOptions) {
     });
   }
 
-  async function deleteActiveRepositoryFromMenu() {
-    if (!options.activeRepoId.value || isSubmittingBackend.value || isRemovingRepository.value) return;
-    if (!isConfirmingRepositoryDelete.value) {
-      isConfirmingRepositoryDelete.value = true;
-      return;
-    }
-    isRemovingRepository.value = true;
+  function deleteActiveRepositoryFromMenu() {
+    if (!options.activeRepoId.value || isSubmittingBackend.value) return;
     addRepositoryError.value = "";
-    try {
-      await options.removeRepository(options.activeRepoId.value);
-      addRepositoryPopoverMode.value = "closed";
-      isConfirmingRepositoryDelete.value = false;
-      if (options.route.path === "/settings") {
-        void options.router.push("/");
-      }
-    } catch (cause) {
-      addRepositoryError.value = cause instanceof Error ? cause.message : String(cause);
-    } finally {
-      isRemovingRepository.value = false;
+    addRepositoryPopoverMode.value = "closed";
+    options.openRepositoryDeleteDialog(options.activeRepoId.value);
+    if (options.route.path === "/settings") {
+      void options.router.push("/");
     }
   }
 
@@ -315,7 +297,7 @@ export function useRepositorySwitcherUi(options: RepositorySwitcherUiOptions) {
   }
 
   async function openNeteaseLoginFlow(detail?: NeteaseReloginRequestDetail | null) {
-    if (isSubmittingBackend.value || isRemovingRepository.value) return;
+    if (isSubmittingBackend.value) return;
     resetBackendForm(neteaseSourcePluginId);
     neteaseQrSession.value = null;
     neteaseLoginMessage.value = "";
@@ -516,7 +498,7 @@ export function useRepositorySwitcherUi(options: RepositorySwitcherUiOptions) {
   }
 
   function handleDocumentPointerDown(event: PointerEvent) {
-    if (addRepositoryPopoverMode.value === "closed" || isSubmittingBackend.value || isRemovingRepository.value) return;
+    if (addRepositoryPopoverMode.value === "closed" || isSubmittingBackend.value) return;
     const target = event.target as Node | null;
     if (target && addRepositoryPopoverRef.value?.contains(target)) return;
     if (target && repositorySwitcherButtonRef.value?.contains(target)) return;
@@ -553,8 +535,6 @@ export function useRepositorySwitcherUi(options: RepositorySwitcherUiOptions) {
     closeAddRepositoryPopover,
     createLocalRepositoryFromPath,
     deleteActiveRepositoryFromMenu,
-    isConfirmingRepositoryDelete,
-    isRemovingRepository,
     isSubmittingBackend,
     neteaseLoginMessage,
     neteaseQrSession,

@@ -1,3 +1,4 @@
+import { computed, ref } from "vue";
 import {
   attachRepositoryFolder,
   configureNeteaseRepositoryCache,
@@ -8,8 +9,10 @@ import {
   relocateRepository,
 } from "../../services/repositoryApi";
 import type {
+  RepositoryDeleteMode,
   RepositoryExportRequest,
   RepositoryExportResponse,
+  RepositorySummary,
 } from "../../types/repository";
 import {
   activeRepoId,
@@ -31,6 +34,47 @@ type RepositoryWorkspaceDependencies = {
 };
 
 let dependencies: RepositoryWorkspaceDependencies | null = null;
+const neteaseSourcePluginId = "momobako.source.netease-cloud-music";
+const repositoryDeleteDialogRepoId = ref<string | null>(null);
+const repositoryDeleteDialogOpen = ref(false);
+const repositoryDeleteError = ref("");
+const deletingRepositoryMode = ref<RepositoryDeleteMode | null>(null);
+
+function repositoryUsesLocalMetadata(repository: RepositorySummary) {
+  if (repository.backend.capabilities.includes("localRootPath")) return true;
+  return repository.backend.pluginId === neteaseSourcePluginId
+    && repository.localCache?.status !== "unconfigured";
+}
+
+function repositoryHasAccessibleLocalMetadata(repository: RepositorySummary) {
+  if (repository.backend.pluginId === neteaseSourcePluginId) {
+    return repository.localCache?.status === "ready";
+  }
+  return repository.status === "ready";
+}
+
+export const pendingDeleteRepository = computed(() => (
+  repositories.value.find((item) => item.repoId === repositoryDeleteDialogRepoId.value) ?? null
+));
+
+export const canDeletePendingRepositoryMetadata = computed(() => {
+  const repository = pendingDeleteRepository.value;
+  if (!repository) return false;
+  return repositoryUsesLocalMetadata(repository)
+    ? repositoryHasAccessibleLocalMetadata(repository)
+    : true;
+});
+
+export const canDeletePendingRepositoryFolder = computed(() => {
+  const repository = pendingDeleteRepository.value;
+  if (!repository) return false;
+  return repositoryUsesLocalMetadata(repository)
+    && repositoryHasAccessibleLocalMetadata(repository);
+});
+
+export const isDeletingRepository = computed(() => deletingRepositoryMode.value !== null);
+export const repositoryDeleteDialogVisible = computed(() => repositoryDeleteDialogOpen.value);
+export const repositoryDeleteDialogError = computed(() => repositoryDeleteError.value);
 
 export function configureRepositoryWorkspaceActions(nextDependencies: RepositoryWorkspaceDependencies) {
   dependencies = nextDependencies;
@@ -135,13 +179,44 @@ export async function attachRepository(path: string) {
   }
 }
 
-export async function removeRepository(repoId: string) {
-  await deleteRepository(repoId);
+export async function removeRepository(repoId: string, mode: RepositoryDeleteMode = "recordOnly") {
+  await deleteRepository({ repoId, mode });
   removeRepositorySummary(repoId);
   if (activeRepoId.value !== repoId) return;
   const nextRepoId = selectNextRepositoryAfterRemoval(repoId);
   if (nextRepoId) {
     await repositoryDependencies().selectRepository(nextRepoId);
+  }
+}
+
+export function openRepositoryDeleteDialog(repoId: string) {
+  if (isDeletingRepository.value) return;
+  if (!repositories.value.some((item) => item.repoId === repoId)) return;
+  repositoryDeleteDialogRepoId.value = repoId;
+  repositoryDeleteError.value = "";
+  repositoryDeleteDialogOpen.value = true;
+}
+
+export function closeRepositoryDeleteDialog() {
+  if (isDeletingRepository.value) return;
+  repositoryDeleteDialogOpen.value = false;
+  repositoryDeleteDialogRepoId.value = null;
+  repositoryDeleteError.value = "";
+}
+
+export async function confirmRepositoryDelete(mode: RepositoryDeleteMode) {
+  const repoId = repositoryDeleteDialogRepoId.value;
+  if (!repoId || isDeletingRepository.value) return;
+  deletingRepositoryMode.value = mode;
+  repositoryDeleteError.value = "";
+  try {
+    await removeRepository(repoId, mode);
+    repositoryDeleteDialogOpen.value = false;
+    repositoryDeleteDialogRepoId.value = null;
+  } catch (cause) {
+    repositoryDeleteError.value = cause instanceof Error ? cause.message : String(cause);
+  } finally {
+    deletingRepositoryMode.value = null;
   }
 }
 

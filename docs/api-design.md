@@ -68,6 +68,12 @@
   - `skipInitialSync: true` creates the repository metadata and registry entry without running an inline first sync. This is intended for account-backed or slow virtual sources such as 网易云音乐 so the desktop login flow can finish first and trigger sync in the background.
   - Creating a 网易云 repository uses the selected local cache directory as `path`; `backendConfig` keeps account credentials and defaults, and stores a non-secret `sourceUri: "netease-cloud-music://account/{accountId}"` for provenance.
   - The frontend receives only repository summaries and must not depend on the full persisted `backendConfig`, because it may contain cookies or other account secrets.
+- `POST /repositories/{repoId}:delete`
+  - Tauri command: `delete_repository`
+  - Request includes `repoId` and `mode`.
+  - `mode: "recordOnly"` only removes the registry entry and keeps the repository folder, `.momo`, and any app-managed state.
+  - `mode: "deleteMetadata"` removes the registry entry and deletes the repository metadata directory. Local-root repositories delete `.momo` and legacy `.meta`; managed repositories delete the service-side metadata directory for that repo.
+  - `mode: "deleteFolder"` removes the registry entry and recursively deletes the repository folder. Any extra app-managed state directory for the repo is also removed.
 - `POST /repositories/{repoId}:relocate`
   - Repair a missing local filesystem repository by pointing the existing `repoId` at a new local folder.
   - Request includes `repoId` and `path`.

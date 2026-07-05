@@ -24,8 +24,8 @@ impl RepositoryState {
         management::attach_repository_folder(self, request)
     }
 
-    pub fn delete_repository(&self, repo_id: &str) -> Result<(), String> {
-        management::delete_repository(self, repo_id)
+    pub fn delete_repository(&self, request: RepositoryDeleteRequest) -> Result<(), String> {
+        management::delete_repository(self, request)
     }
 
     pub fn relocate_repository(

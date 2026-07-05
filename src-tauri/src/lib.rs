@@ -35,13 +35,13 @@ use services::repository::{
     RecentAccessHistoryClearResponse, RepositoryAction, RepositoryActionEnabledRequest,
     RepositoryActionMutationResponse, RepositoryActionRunRequest, RepositoryActionRunResponse,
     RepositoryCacheFilePreviewSourceRequest, RepositoryCacheFilePreviewSourceResponse,
-    RepositoryExportRequest, RepositoryExportResponse, RepositoryFolderRequest,
-    RepositoryMutationRequest, RepositoryMutationResponse, RepositoryRelocateRequest,
-    RepositorySnapshot, RepositorySummary, RepositoryTreeSnapshot, RevisionActionRequest,
-    RevisionActionResponse, SearchRequest, SearchResponse, SmartFolderMutationRequest,
-    SmartFolderMutationResponse, SmartFolderResultSnapshot, SmartFolderTreeNode,
-    SmartFolderUpdateRequest, SyncRequest, SyncResult, ThumbnailRequest, ThumbnailResponse,
-    TrashMutationRequest,
+    RepositoryDeleteRequest, RepositoryExportRequest, RepositoryExportResponse,
+    RepositoryFolderRequest, RepositoryMutationRequest, RepositoryMutationResponse,
+    RepositoryRelocateRequest, RepositorySnapshot, RepositorySummary, RepositoryTreeSnapshot,
+    RevisionActionRequest, RevisionActionResponse, SearchRequest, SearchResponse,
+    SmartFolderMutationRequest, SmartFolderMutationResponse, SmartFolderResultSnapshot,
+    SmartFolderTreeNode, SmartFolderUpdateRequest, SyncRequest, SyncResult, ThumbnailRequest,
+    ThumbnailResponse, TrashMutationRequest,
 };
 use services::runtime::ExternalApiConnectionStatus;
 use viewmodels::{
@@ -558,11 +558,11 @@ async fn attach_repository_folder(
 
 #[tauri::command]
 async fn delete_repository(
-    repo_id: String,
+    request: RepositoryDeleteRequest,
     app: AppHandle,
     repository_management: tauri::State<'_, RepositoryManagementViewModel>,
 ) -> Result<(), String> {
-    repository_management.delete_repository(repo_id).await?;
+    repository_management.delete_repository(request).await?;
     repository_management.refresh_thumbnail_scope(&app).await
 }
 
