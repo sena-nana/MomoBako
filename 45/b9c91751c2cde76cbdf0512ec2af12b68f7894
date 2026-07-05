@@ -1,0 +1,72 @@
+External/Plugins/source-eagle-library/Cargo.toml
+  s_a4bebf4a392266::t_843e951bf67c9a 1-14
+External/Plugins/source-eagle-library/manifest.json
+  s_a4bebf4a392266::t_03e6dd2a58abfa 1-63
+External/Plugins/source-eagle-library/plugin.project.json
+  s_a4bebf4a392266::t_2aee776cfc493e 1-9
+External/Plugins/source-eagle-library/src/lib.rs
+  s_a4bebf4a392266::t_7a8bd652fb05a0 1-1002
+src-tauri/src/lib.rs
+  s_a4bebf4a392266::t_5bacd8b21cd1ac 11-15
+src-tauri/src/services/repository/action.rs
+  s_a4bebf4a392266::t_a46e4274dd8205 42,47-48,55,70-77
+src-tauri/src/services/repository/browser.rs
+  s_a4bebf4a392266::t_8fbf8d82aa2432 79-82,125-128,349-359,418-429,609-612,706-708,712-738,819-834,891-900,903-919,926-928,930-939,958-977,1023-1032,1034-1050,1052-1057,1059-1105
+src-tauri/src/services/repository/contracts.rs
+  s_a4bebf4a392266::t_4bb3a7a67867d7 69,79,87-97,156,464-480,1284-1292
+src-tauri/src/services/repository/discovery.rs
+  s_a4bebf4a392266::t_cf1e5fd014f2e6 25-32,55-62,89-92,119-122
+src-tauri/src/services/repository/eagle_import/mod.rs
+  s_a4bebf4a392266::t_4c8cae32b62e7f 15
+src-tauri/src/services/repository/eagle_import/smart_folder.rs
+  s_a4bebf4a392266::t_df37a99b72a7f8 141-167
+src-tauri/src/services/repository/eagle_import/source_adapter.rs
+  s_a4bebf4a392266::t_61bc70d1ffcc0a 1-408
+src-tauri/src/services/repository/facade.rs
+  s_a4bebf4a392266::t_9282bda454b7be 594-597,865-866,876-892,918-919,929-945
+src-tauri/src/services/repository/filesystem_backend.rs
+  s_a4bebf4a392266::t_d8bffa3c234752 89-112,141-148,232-236,380-433,923-926,1041,1170-1233
+src-tauri/src/services/repository/local_index.rs
+  s_a4bebf4a392266::t_a800259b84b722 201-204,436-439
+src-tauri/src/services/repository/mod.rs
+  s_a4bebf4a392266::t_5d21745c2f8c92 51,95
+src-tauri/src/services/repository/query.rs
+  s_a4bebf4a392266::t_cce0d4bdab38fb 397-398,407-423
+src-tauri/src/services/repository/read_model.rs
+  s_a4bebf4a392266::t_5ff0d457abcc21 236-239
+src-tauri/src/services/repository/registry_store.rs
+  s_a4bebf4a392266::t_6b5106c3a44046 388-398
+src-tauri/src/services/repository/schema.rs
+  s_a4bebf4a392266::t_d2fbaa6cb907fb 228-238
+src-tauri/src/services/repository/smart_folder.rs
+  s_a4bebf4a392266::t_c54030ec4166fc 26,31,34,52,54,74-81,99,104,107,111,123,126,145-152,171,176,178,181,200-207
+src-tauri/src/services/repository/source_state.rs
+  s_a4bebf4a392266::t_fa6e89bb79d519 1-503
+src-tauri/src/services/repository/sync_engine.rs
+  s_a4bebf4a392266::t_3a75a5b14792d7 267-423,437-444,454,467,471-473,500,503-511,538,554,556,560,593,596-604,745-750
+src-tauri/src/services/repository/sync_metadata.rs
+  s_a4bebf4a392266::t_d4359ab4463e26 19,22-57,60-63,66-75,150-153
+src/layouts/useRepositorySwitcherUi.ts
+  s_a4bebf4a392266::t_fdf4ee549110b2 68,73,419-445,451-454
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "45b9c91751c2cde76cbdf0512ec2af12b68f7894",
+  "prompts": {},
+  "humans": {
+    "h_8e6780fc7b4bb1": {
+      "author": "AuraElicase <auraelicase@outlook.com>"
+    }
+  },
+  "sessions": {
+    "s_a4bebf4a392266": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f3038-8ff4-7340-b5f3-1bccf1f3964c",
+        "model": "unknown"
+      },
+      "human_author": "AuraElicase <auraelicase@outlook.com>"
+    }
+  }
+}
