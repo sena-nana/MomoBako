@@ -6,6 +6,7 @@ use std::{
     path::{Component, Path, PathBuf},
 };
 
+use jwalk::WalkDir;
 use momobako_backend_plugin_sdk::{free_c_string, read_request, response_error, response_ok};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -274,8 +275,38 @@ fn ensure_attachable(repo_root: &Path) -> Result<(), String> {
 
 fn collect_files(repo_root: &Path) -> Result<Vec<DiscoveredFile>, String> {
     let mut files = Vec::new();
-    collect_files_recursive(repo_root, repo_root, &mut files)?;
-    Ok(files)
+    for entry in plugin_recursive_walk(repo_root) {
+        let entry = entry.map_err(|error| error.to_string())?;
+        if entry.file_type().is_dir() {
+            continue;
+        }
+        let path = entry.path();
+        let metadata = entry.metadata().map_err(|error| error.to_string())?;
+        let relative_path = relative_path(repo_root, &path)?;
+        files.push(DiscoveredFile {
+            absolute_path: path.clone(),
+            filename: path
+                .file_name()
+                .map(|value| value.to_string_lossy().to_string())
+                .unwrap_or_else(|| relative_path.clone()),
+            extension: path
+                .extension()
+                .map(|value| value.to_string_lossy().to_string())
+                .unwrap_or_default(),
+            size_bytes: metadata.len() as i64,
+            modified_at: metadata
+                .modified()
+                .map_err(io_error)
+                .and_then(system_time_to_rfc3339)?,
+            is_virtual: false,
+            provider_id: None,
+            provider_item_id: None,
+            source_payload: None,
+            local_absolute_path: Some(path.to_string_lossy().to_string()),
+            relative_path,
+        });
+    }
+    finalize_discovered_files(files)
 }
 
 fn collect_files_with_mode(
@@ -532,51 +563,19 @@ fn finalize_discovered_files(files: Vec<DiscoveredFile>) -> Result<Vec<Discovere
     Ok(unique)
 }
 
-fn collect_files_recursive(
-    repo_root: &Path,
-    current: &Path,
-    files: &mut Vec<DiscoveredFile>,
-) -> Result<(), String> {
-    for entry in fs::read_dir(current).map_err(io_error)? {
-        let entry = entry.map_err(io_error)?;
-        let path = entry.path();
-        let name = entry.file_name().to_string_lossy().to_string();
-        if path.is_dir() {
-            if is_internal_repository_dir(&name) {
-                continue;
-            }
-            collect_files_recursive(repo_root, &path, files)?;
-            continue;
-        }
-        if !path.is_file() {
-            continue;
-        }
-        let metadata = fs::metadata(&path).map_err(io_error)?;
-        let relative_path = relative_path(repo_root, &path)?;
-        files.push(DiscoveredFile {
-            absolute_path: path.clone(),
-            filename: path
-                .file_name()
-                .map(|value| value.to_string_lossy().to_string())
-                .unwrap_or_else(|| relative_path.clone()),
-            extension: path
-                .extension()
-                .map(|value| value.to_string_lossy().to_string())
-                .unwrap_or_default(),
-            size_bytes: metadata.len() as i64,
-            modified_at: metadata
-                .modified()
-                .map_err(io_error)
-                .and_then(system_time_to_rfc3339)?,
-            is_virtual: false,
-            provider_id: None,
-            provider_item_id: None,
-            source_payload: None,
-            local_absolute_path: Some(path.to_string_lossy().to_string()),
-            relative_path,
-        });
-    }
-    Ok(())
+fn plugin_recursive_walk(repo_root: &Path) -> WalkDir {
+    WalkDir::new(repo_root)
+        .min_depth(1)
+        .skip_hidden(false)
+        .follow_links(true)
+        .process_read_dir(|_, _, _, children| {
+            children.retain(|entry| {
+                entry
+                    .as_ref()
+                    .map(|entry| !is_internal_repository_dir(&entry.file_name.to_string_lossy()))
+                    .unwrap_or(true)
+            });
+        })
 }
 
 fn build_directory_tree(repo_root: &Path) -> Result<Vec<FileTreeNode>, String> {
@@ -901,6 +900,24 @@ mod tests {
         assert_eq!(files[0].extension, "flac");
         assert_eq!(files[0].size_bytes, 5);
         assert!(files[0].modified_at.contains('T'));
+    }
+
+    #[test]
+    fn recursive_search_keeps_hidden_non_internal_directories() {
+        let workspace = TestWorkspace::new("recursive-hidden-dir");
+        let repo_root = &workspace.root;
+        fs::create_dir_all(repo_root.join(".hidden")).expect("hidden dir should be created");
+        fs::create_dir_all(repo_root.join(".momo")).expect("meta dir should be created");
+        fs::write(repo_root.join(".hidden").join("cover.jpg"), b"image")
+            .expect("hidden file should be written");
+        fs::write(repo_root.join(".momo").join("skip.jpg"), b"skip")
+            .expect("internal file should be written");
+
+        let files = collect_files_with_mode(repo_root, FileSearchMode::Recursive)
+            .expect("recursive search should succeed");
+
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].relative_path, ".hidden/cover.jpg");
     }
 
     #[test]

@@ -1,6 +1,7 @@
 //! Local filesystem indexing and fallback search helpers.
 
 use super::*;
+use jwalk::{Error as JwalkError, WalkDir};
 
 pub(super) fn collect_repository_files(repo_root: &Path) -> std::io::Result<Vec<DiscoveredFile>> {
     let mut files = Vec::new();
@@ -8,8 +9,65 @@ pub(super) fn collect_repository_files(repo_root: &Path) -> std::io::Result<Vec<
         return Ok(files);
     }
 
-    collect_repository_files_recursive(repo_root, repo_root, &mut files, false)?;
-    Ok(files)
+    for entry in repository_recursive_walk(repo_root) {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(error) if is_skippable_recursive_walk_error(&error) => continue,
+            Err(error) => return Err(std::io::Error::from(error)),
+        };
+        let path = entry.path();
+        let file_name = entry.file_name().to_string_lossy();
+        let metadata = match entry.metadata() {
+            Ok(metadata) => metadata,
+            Err(error) if is_skippable_recursive_walk_error(&error) => continue,
+            Err(error) => return Err(std::io::Error::from(error)),
+        };
+        if metadata.is_dir() {
+            continue;
+        }
+
+        let relative = path
+            .strip_prefix(repo_root)
+            .ok()
+            .map(|item| item.to_string_lossy().replace('\\', "/"))
+            .unwrap_or_else(|| file_name.to_string());
+        let extension = path
+            .extension()
+            .map(|ext| ext.to_string_lossy().to_string())
+            .unwrap_or_default();
+
+        files.push(DiscoveredFile {
+            absolute_path: Some(path),
+            relative_path: relative,
+            filename: file_name.to_string(),
+            extension,
+            size_bytes: metadata.len() as i64,
+            created_at: metadata
+                .created()
+                .ok()
+                .map(system_time_to_rfc3339)
+                .transpose()
+                .map_err(|error| std::io::Error::other(error.to_string()))?,
+            modified_at: metadata
+                .modified()
+                .ok()
+                .map(system_time_to_rfc3339)
+                .transpose()
+                .map_err(|error| std::io::Error::other(error.to_string()))?
+                .unwrap_or_else(now_rfc3339),
+            is_virtual: false,
+            provider_id: None,
+            provider_item_id: None,
+            source_payload: None,
+            local_absolute_path: None,
+            status: None,
+            shared_asset_id: None,
+            tags: None,
+            thumbnail_local_absolute_path: None,
+        });
+    }
+
+    finalize_local_discovered_files(files).map_err(std::io::Error::other)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -310,41 +368,20 @@ pub(super) fn count_repository_directories(repo_root: &Path) -> Result<i64, Stri
         return Ok(0);
     }
 
-    count_repository_directories_recursive(repo_root, false)
-}
-
-pub(super) fn count_repository_directories_recursive(
-    current: &Path,
-    skip_current_on_access_error: bool,
-) -> Result<i64, String> {
     let mut total = 0;
-    let entries = match fs::read_dir(current) {
-        Ok(entries) => entries,
-        Err(error) if skip_current_on_access_error && is_skippable_filesystem_error(&error) => {
-            return Ok(0);
-        }
-        Err(error) => return Err(io_error(error)),
-    };
-    for entry in entries {
+    for entry in repository_recursive_walk(repo_root) {
         let entry = match entry {
             Ok(entry) => entry,
-            Err(error) if is_skippable_filesystem_error(&error) => continue,
-            Err(error) => return Err(io_error(error)),
+            Err(error) if is_skippable_recursive_walk_error(&error) => continue,
+            Err(error) => return Err(io_error(std::io::Error::from(error))),
         };
-        let file_name = entry.file_name();
-        let file_name = file_name.to_string_lossy();
-        if is_internal_repository_dir(file_name.as_ref()) {
-            continue;
-        }
-
         let metadata = match entry.metadata() {
             Ok(metadata) => metadata,
-            Err(error) if is_skippable_filesystem_error(&error) => continue,
-            Err(error) => return Err(io_error(error)),
+            Err(error) if is_skippable_recursive_walk_error(&error) => continue,
+            Err(error) => return Err(io_error(std::io::Error::from(error))),
         };
         if metadata.is_dir() {
             total += 1;
-            total += count_repository_directories_recursive(&entry.path(), true)?;
         }
     }
 
@@ -363,82 +400,21 @@ pub(super) fn read_repository_readme(repo_root: &Path) -> Result<Option<String>,
     Ok(None)
 }
 
-pub(super) fn collect_repository_files_recursive(
-    repo_root: &Path,
-    current: &Path,
-    files: &mut Vec<DiscoveredFile>,
-    skip_current_on_access_error: bool,
-) -> std::io::Result<()> {
-    let entries = match fs::read_dir(current) {
-        Ok(entries) => entries,
-        Err(error) if skip_current_on_access_error && is_skippable_filesystem_error(&error) => {
-            return Ok(());
-        }
-        Err(error) => return Err(error),
-    };
-    for entry in entries {
-        let entry = match entry {
-            Ok(entry) => entry,
-            Err(error) if is_skippable_filesystem_error(&error) => continue,
-            Err(error) => return Err(error),
-        };
-        let path = entry.path();
-        let file_name = entry.file_name();
-        let file_name = file_name.to_string_lossy();
-        if is_internal_repository_dir(file_name.as_ref()) {
-            continue;
-        }
+fn repository_recursive_walk(repo_root: &Path) -> WalkDir {
+    WalkDir::new(repo_root)
+        .min_depth(1)
+        .skip_hidden(false)
+        .follow_links(true)
+        .process_read_dir(|_, _, _, children| {
+            children.retain(|entry| {
+                entry
+                    .as_ref()
+                    .map(|entry| !is_internal_repository_dir(&entry.file_name.to_string_lossy()))
+                    .unwrap_or(true)
+            });
+        })
+}
 
-        let metadata = match entry.metadata() {
-            Ok(metadata) => metadata,
-            Err(error) if is_skippable_filesystem_error(&error) => continue,
-            Err(error) => return Err(error),
-        };
-        if metadata.is_dir() {
-            collect_repository_files_recursive(repo_root, &path, files, true)?;
-            continue;
-        }
-
-        let relative = path
-            .strip_prefix(repo_root)
-            .ok()
-            .map(|item| item.to_string_lossy().replace('\\', "/"))
-            .unwrap_or_else(|| file_name.to_string());
-        let extension = path
-            .extension()
-            .map(|ext| ext.to_string_lossy().to_string())
-            .unwrap_or_default();
-
-        files.push(DiscoveredFile {
-            absolute_path: Some(path),
-            relative_path: relative,
-            filename: file_name.to_string(),
-            extension,
-            size_bytes: metadata.len() as i64,
-            created_at: metadata
-                .created()
-                .ok()
-                .map(system_time_to_rfc3339)
-                .transpose()
-                .map_err(|error| std::io::Error::new(std::io::ErrorKind::Other, error))?,
-            modified_at: metadata
-                .modified()
-                .ok()
-                .map(system_time_to_rfc3339)
-                .transpose()
-                .map_err(|error| std::io::Error::new(std::io::ErrorKind::Other, error))?
-                .unwrap_or_else(now_rfc3339),
-            is_virtual: false,
-            provider_id: None,
-            provider_item_id: None,
-            source_payload: None,
-            local_absolute_path: None,
-            status: None,
-            shared_asset_id: None,
-            tags: None,
-            thumbnail_local_absolute_path: None,
-        });
-    }
-
-    Ok(())
+fn is_skippable_recursive_walk_error(error: &JwalkError) -> bool {
+    error.depth() > 0 && error.io_error().is_some_and(is_skippable_filesystem_error)
 }
