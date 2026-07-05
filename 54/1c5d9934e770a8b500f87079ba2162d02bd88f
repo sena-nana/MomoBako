@@ -1,0 +1,26 @@
+src-tauri/src/services/repository/internal_tests.rs
+  s_f0abc17e5269b6::t_43902ebc97be1d 1231-1269,1891-1901,3375-3378,3649-3652,3678-3681,5586-5589
+src-tauri/src/services/repository/local_index.rs
+  s_f0abc17e5269b6::t_b456b14dad4ede 4,12-70,372,375-376,380-381,403-416,418-419
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "541c5d9934e770a8b500f87079ba2162d02bd88f",
+  "prompts": {},
+  "humans": {
+    "h_8e6780fc7b4bb1": {
+      "author": "AuraElicase <auraelicase@outlook.com>"
+    }
+  },
+  "sessions": {
+    "s_f0abc17e5269b6": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f0caa-72ab-7720-90c5-6cba6822b374",
+        "model": "unknown"
+      },
+      "human_author": "AuraElicase <auraelicase@outlook.com>"
+    }
+  }
+}
