@@ -1,0 +1,14 @@
+[
+  {
+    "id": "saved-doc",
+    "name": "Doc Review",
+    "sortOrder": 1,
+    "filter": {
+      "query": "论文",
+      "tags": [
+        "doc"
+      ],
+      "limit": 20
+    }
+  }
+]

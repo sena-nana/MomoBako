@@ -1,0 +1,9 @@
+{
+  "pluginId": "momobako.source.eagle-library",
+  "build": {
+    "type": "cargo-native",
+    "sourceDir": "src",
+    "manifestPath": "Cargo.toml",
+    "outputDir": ".dist/source-eagle-library"
+  }
+}

@@ -65,10 +65,12 @@ type RepositorySwitcherUiOptions = {
 };
 
 const localFilesystemPluginId = "momobako.local-filesystem";
+const eagleSourcePluginId = "momobako.source.eagle-library";
 const neteaseSourcePluginId = "momobako.source.netease-cloud-music";
 
 function formatAddRepositoryBackendLabel(pluginId: string, fallback: string) {
   if (pluginId === localFilesystemPluginId) return "本地文件夹";
+  if (pluginId === eagleSourcePluginId) return "Eagle Library";
   if (pluginId === neteaseSourcePluginId) return "网易云音乐";
   if (pluginId === "momobako.cloud-drive") return "云盘";
   return fallback;
@@ -414,11 +416,42 @@ export function useRepositorySwitcherUi(options: RepositorySwitcherUiOptions) {
     }
   }
 
+  async function chooseEagleLibraryAndCreate() {
+    addRepositoryError.value = "";
+    const previousPosition = addRepositoryPopoverPosition.value;
+    addRepositoryPopoverMode.value = "closed";
+    const selected = await open({
+      directory: true,
+      multiple: false,
+      title: "选择 Eagle Library 目录",
+    });
+    const nextPath = typeof selected === "string" ? selected.trim() : "";
+    if (!nextPath) return;
+    const segments = nextPath.split(/[\\/]/).filter(Boolean);
+    const rawName = segments[segments.length - 1] || "Eagle Library";
+    const repoName = rawName.replace(/\.library$/i, "") || "Eagle Library";
+    isSubmittingBackend.value = true;
+    try {
+      await options.createNewRepository(repoName, nextPath, eagleSourcePluginId);
+      addRepositoryPopoverMode.value = "closed";
+    } catch (cause) {
+      addRepositoryError.value = cause instanceof Error ? cause.message : String(cause);
+      addRepositoryPopoverPosition.value = previousPosition;
+      addRepositoryPopoverMode.value = "addMenu";
+    } finally {
+      isSubmittingBackend.value = false;
+    }
+  }
+
   async function selectBackend(pluginId: string) {
     if (isSubmittingBackend.value) return;
     const backend = options.repositoryBackendOptions.value.find((item) => item.pluginId === pluginId);
     if (!backend?.enabled) return;
     resetBackendForm(pluginId);
+    if (pluginId === eagleSourcePluginId) {
+      await chooseEagleLibraryAndCreate();
+      return;
+    }
     if (supportsLocalRepositoryRoot(backend)) {
       await chooseLocalFolderAndCreate();
       return;

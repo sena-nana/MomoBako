@@ -1,0 +1,33 @@
+{
+  "id": "MR3DC8JQES9NJ",
+  "name": "未标题-1",
+  "size": 49495,
+  "btime": 1782144607530,
+  "mtime": 1782144610983,
+  "ext": "png",
+  "tags": [
+    "cover",
+    "concept"
+  ],
+  "folders": [
+    "folder-moodboard"
+  ],
+  "isDeleted": false,
+  "url": "",
+  "annotation": "用于受保护目录回归",
+  "modificationTime": 1782988537670,
+  "height": 1080,
+  "width": 1920,
+  "lastModified": 1782988537760,
+  "rating": 5,
+  "palettes": [
+    {
+      "color": [
+        100,
+        88,
+        157
+      ],
+      "ratio": 12
+    }
+  ]
+}

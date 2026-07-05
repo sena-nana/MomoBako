@@ -264,6 +264,163 @@ fn discovered_file_content_hash(
     file_sha256_hash(discovered_file_absolute_path(file)?).map_err(sync_sql_error)
 }
 
+fn merged_discovered_source_payload(
+    file: &DiscoveredFile,
+    existing_record: Option<&ExistingAssetRecord>,
+) -> Option<serde_json::Value> {
+    let fallback = file
+        .source_payload
+        .clone()
+        .or_else(|| existing_record.and_then(|record| record.source_payload.clone()));
+    let Some(shared_asset_id) = file.shared_asset_id.as_deref() else {
+        return fallback;
+    };
+    let mut map = fallback
+        .as_ref()
+        .and_then(serde_json::Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    map.insert(
+        "sharedAssetId".to_string(),
+        serde_json::Value::String(shared_asset_id.to_string()),
+    );
+    Some(serde_json::Value::Object(map))
+}
+
+fn replace_discovered_asset_tags(
+    connection: &Transaction<'_>,
+    asset_id: &str,
+    tags: Option<&[String]>,
+) -> Result<(), rusqlite::Error> {
+    let Some(tags) = tags else {
+        return Ok(());
+    };
+    replace_asset_tags(connection, asset_id, tags)
+}
+
+fn sync_discovered_entry_thumbnail(
+    connection: &Connection,
+    repo_id: &str,
+    asset_id: &str,
+    relative_path: &str,
+    thumbnail_local_absolute_path: Option<&str>,
+    managed_by_source: bool,
+) -> Result<(), rusqlite::Error> {
+    if let Some(thumbnail_path) = thumbnail_local_absolute_path {
+        upsert_entry_thumbnail_record(
+            connection,
+            repo_id,
+            relative_path,
+            "file",
+            thumbnail_path,
+            false,
+        )?;
+        update_asset_thumbnail_path(connection, repo_id, asset_id, Some(thumbnail_path))?;
+        return Ok(());
+    }
+    if managed_by_source {
+        remove_entry_thumbnail_record(connection, repo_id, relative_path, "file")?;
+        update_asset_thumbnail_path(connection, repo_id, asset_id, None)?;
+    }
+    Ok(())
+}
+
+fn clear_source_shared_asset_relations(
+    tx: &Transaction<'_>,
+    repo_id: &str,
+) -> Result<(), rusqlite::Error> {
+    tx.execute("DELETE FROM hardlink_candidates WHERE repo_id = ?1", [repo_id])?;
+    tx.execute("DELETE FROM hardlink_members WHERE repo_id = ?1", [repo_id])?;
+    tx.execute("DELETE FROM hardlink_groups WHERE repo_id = ?1", [repo_id])?;
+    tx.execute("DELETE FROM asset_alias_members WHERE repo_id = ?1", [repo_id])?;
+    tx.execute("DELETE FROM asset_alias_groups WHERE repo_id = ?1", [repo_id])?;
+    Ok(())
+}
+
+fn rebuild_source_shared_asset_relations(
+    tx: &Transaction<'_>,
+    repo_id: &str,
+    files: &[DiscoveredFile],
+    now: &str,
+) -> Result<(), rusqlite::Error> {
+    let mut groups = BTreeMap::<String, Vec<&DiscoveredFile>>::new();
+    for file in files {
+        let Some(shared_asset_id) = file.shared_asset_id.as_deref() else {
+            continue;
+        };
+        groups
+            .entry(shared_asset_id.to_string())
+            .or_default()
+            .push(file);
+    }
+    if groups.is_empty() {
+        return Ok(());
+    }
+
+    clear_source_shared_asset_relations(tx, repo_id)?;
+    for (shared_asset_id, members) in groups {
+        if members.len() <= 1 {
+            continue;
+        }
+        let alias_group_id = format!(
+            "source-alias-{}",
+            sha256_hex(&[repo_id.as_bytes(), shared_asset_id.as_bytes()])
+        );
+        tx.execute(
+            r#"
+            INSERT INTO asset_alias_groups (alias_group_id, repo_id, source, created_at, updated_at)
+            VALUES (?1, ?2, ?3, ?4, ?5)
+            "#,
+            params![alias_group_id, repo_id, "source-shared-asset", now, now],
+        )?;
+
+        for (index, file) in members.iter().enumerate() {
+            let asset_id = asset_id_for_path(repo_id, &file.relative_path);
+            let role = if index == 0 { "primary" } else { "alias" };
+            tx.execute(
+                r#"
+                INSERT INTO asset_alias_members (alias_group_id, repo_id, asset_id, path, role, created_at)
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                "#,
+                params![alias_group_id, repo_id, asset_id, file.relative_path, role, now],
+            )?;
+
+            let hash_and_size = tx
+                .query_row(
+                    r#"
+                    SELECT hash, size_bytes
+                    FROM assets
+                    WHERE repo_id = ?1 AND asset_id = ?2
+                    "#,
+                    params![repo_id, asset_id],
+                    |row| {
+                        Ok((
+                            row.get::<_, Option<String>>(0)?,
+                            row.get::<_, i64>(1)?,
+                        ))
+                    },
+                )
+                .optional()?;
+            let Some((Some(content_hash), size_bytes)) = hash_and_size else {
+                continue;
+            };
+            if content_hash.is_empty() {
+                continue;
+            }
+            upsert_hardlink_member(
+                tx,
+                repo_id,
+                &asset_id,
+                &file.relative_path,
+                &content_hash,
+                size_bytes,
+                if index == 0 { "primary" } else { "linked" },
+            )?;
+        }
+    }
+    Ok(())
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(super) fn upsert_discovered_asset(
     tx: &Transaction<'_>,
@@ -277,6 +434,14 @@ pub(super) fn upsert_discovered_asset(
     event_origin: &str,
 ) -> Result<AssetSyncApplyResult, rusqlite::Error> {
     let mut result = AssetSyncApplyResult::default();
+    let status = file.status.as_deref().unwrap_or("synced");
+    let source_payload = merged_discovered_source_payload(file, existing_record.as_ref());
+    let thumbnail_path = file
+        .thumbnail_local_absolute_path
+        .clone()
+        .or_else(|| existing_record.as_ref().and_then(|record| record.thumbnail_path.clone()));
+    let source_manages_thumbnail =
+        file.thumbnail_local_absolute_path.is_some() || file.shared_asset_id.is_some();
 
     if let Some(existing_record) = existing_record {
         let asset_id = existing_record.asset_id.clone();
@@ -286,7 +451,7 @@ pub(super) fn upsert_discovered_asset(
             r#"
             UPDATE assets
             SET filename = ?3, extension = ?4, size_bytes = ?5, modified_at = ?6, hash = ?7,
-                status = 'synced', updated_at = ?8, thumbnail_path = ?9, is_virtual = ?10,
+                status = ?15, updated_at = ?8, thumbnail_path = ?9, is_virtual = ?10,
                 provider_id = ?11, provider_item_id = ?12, source_payload_json = ?13, local_absolute_path = ?14
             WHERE repo_id = ?1 AND asset_id = ?2
             "#,
@@ -299,12 +464,13 @@ pub(super) fn upsert_discovered_asset(
                 file.modified_at,
                 if content_hash.is_empty() { None } else { Some(content_hash.as_str()) },
                 now,
-                existing_record.thumbnail_path,
+                thumbnail_path,
                 if file.is_virtual { 1 } else { 0 },
                 file.provider_id,
                 file.provider_item_id,
-                file.source_payload.as_ref().map(|value| value.to_string()),
-                file.local_absolute_path
+                source_payload.as_ref().map(|value| value.to_string()),
+                file.local_absolute_path,
+                status,
             ],
         )?;
         if !file.is_virtual && !content_hash.is_empty() {
@@ -331,8 +497,17 @@ pub(super) fn upsert_discovered_asset(
         sync_mirrored_source_metadata(
             tx,
             &asset_id,
-            file.source_payload.as_ref(),
+            source_payload.as_ref(),
             source_metadata_keys,
+        )?;
+        replace_discovered_asset_tags(tx, &asset_id, file.tags.as_deref())?;
+        sync_discovered_entry_thumbnail(
+            tx,
+            &repo.summary.repo_id,
+            &asset_id,
+            &file.relative_path,
+            thumbnail_path.as_deref(),
+            source_manages_thumbnail,
         )?;
         insert_event(
             tx,
@@ -360,7 +535,7 @@ pub(super) fn upsert_discovered_asset(
           created_at, modified_at, hash, status, version, updated_at, thumbnail_path,
           is_virtual, provider_id, provider_item_id, source_payload_json, local_absolute_path
         )
-        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 'synced', 1, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 1, ?11, ?12, ?13, ?14, ?15, ?16, ?17)
         "#,
         params![
             asset_id,
@@ -376,12 +551,13 @@ pub(super) fn upsert_discovered_asset(
             } else {
                 Some(content_hash.as_str())
             },
+            status,
             now,
-            Option::<String>::None,
+            thumbnail_path,
             if file.is_virtual { 1 } else { 0 },
             file.provider_id,
             file.provider_item_id,
-            file.source_payload.as_ref().map(|value| value.to_string()),
+            source_payload.as_ref().map(|value| value.to_string()),
             file.local_absolute_path
         ],
     )?;
@@ -414,8 +590,17 @@ pub(super) fn upsert_discovered_asset(
     sync_mirrored_source_metadata(
         tx,
         &asset_id,
-        file.source_payload.as_ref(),
+        source_payload.as_ref(),
         source_metadata_keys,
+    )?;
+    replace_discovered_asset_tags(tx, &asset_id, file.tags.as_deref())?;
+    sync_discovered_entry_thumbnail(
+        tx,
+        &repo.summary.repo_id,
+        &asset_id,
+        &file.relative_path,
+        thumbnail_path.as_deref(),
+        source_manages_thumbnail,
     )?;
     insert_event(
         tx,
@@ -557,6 +742,12 @@ pub(super) fn sync_repository_files(
     let hardlink_candidates =
         count_pending_hardlink_candidates(tx, &repo.summary.repo_id).unwrap_or(0);
     replace_directory_records(tx, &repo.summary.repo_id, &directory_records)?;
+    rebuild_source_shared_asset_relations(tx, &repo.summary.repo_id, &files, &now)?;
+    if let Some(repository_state) =
+        describe_backend_repository_state(service_root, repo, &repo_root).map_err(sync_sql_error)?
+    {
+        replace_source_repository_state(tx, &repo.summary.repo_id, &repository_state)?;
+    }
     rebuild_netease_directory_cache(tx, &repo.summary.repo_id, &files)?;
 
     Ok(SyncResult {

@@ -1,0 +1,82 @@
+{
+  "applicationVersion": "4.0.0",
+  "folders": [
+    {
+      "id": "folder-design",
+      "name": "Design",
+      "children": [
+        {
+          "id": "folder-moodboard",
+          "name": "Moodboard",
+          "password": "demo-password",
+          "passwordTips": "团队共享提示",
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "folder-archive",
+      "name": "Archive",
+      "children": [
+        {
+          "id": "folder-docs",
+          "name": "Docs",
+          "children": []
+        }
+      ]
+    }
+  ],
+  "smartFolders": [
+    {
+      "id": "smart-png",
+      "name": "PNG Assets",
+      "sortOrder": 0,
+      "filter": {
+        "formats": [
+          "png"
+        ],
+        "matchMode": "and"
+      }
+    }
+  ],
+  "quickAccess": [
+    {
+      "id": "qa-design",
+      "name": "Design",
+      "type": "folder",
+      "target": "folder-design"
+    },
+    {
+      "id": "qa-smart",
+      "name": "PNG Assets",
+      "type": "smartFolder",
+      "target": "smart-png"
+    },
+    {
+      "id": "qa-file",
+      "name": "论文",
+      "type": "file",
+      "target": "MR3DC4GHBD9NT"
+    }
+  ],
+  "tagsGroups": [
+    {
+      "id": "group-theme",
+      "name": "Theme",
+      "tags": [
+        "cover",
+        "doc",
+        "concept"
+      ]
+    },
+    {
+      "id": "group-workflow",
+      "name": "Workflow",
+      "tags": [
+        "todo",
+        "reviewed"
+      ]
+    }
+  ],
+  "modificationTime": 1782988508055
+}

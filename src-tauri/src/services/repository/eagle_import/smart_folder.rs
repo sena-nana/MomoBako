@@ -138,6 +138,33 @@ fn convert_eagle_smart_folder_filter(
         .get("filter")
         .and_then(Value::as_object)
         .unwrap_or(entry);
+    if filter_root.keys().any(|key| {
+        matches!(
+            key.as_str(),
+            "query"
+                | "pathPrefix"
+                | "excludeQuery"
+                | "excludePathPrefixes"
+                | "tags"
+                | "formats"
+                | "colors"
+                | "shapes"
+                | "metadataFilters"
+                | "excludeTags"
+                | "excludeFormats"
+                | "excludeMetadataFilters"
+                | "excludeNumberFilters"
+                | "excludeDateFilters"
+                | "numberFilters"
+                | "dateFilters"
+                | "minRating"
+                | "matchMode"
+                | "sort"
+                | "limit"
+        )
+    }) {
+        return Ok(Value::Object(filter_root.clone()));
+    }
     let conditions = extract_smart_folder_conditions(filter_root)?;
     let mut query_values = Vec::new();
     let mut tag_values = Vec::new();

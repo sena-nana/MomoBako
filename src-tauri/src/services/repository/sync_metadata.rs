@@ -16,56 +16,66 @@ pub(super) fn apply_revision_state(
         .unwrap_or_default()
         .into_iter()
         .collect::<BTreeMap<_, _>>();
-    let before = load_metadata_map_from_transaction(tx, asset_id)?;
+    let target_asset_ids = load_alias_member_asset_ids(tx, repo_id, asset_id)?;
     let now = now_rfc3339();
 
-    tx.execute("DELETE FROM metadata WHERE asset_id = ?1", [asset_id])?;
-    for (key, value) in &target_map {
+    for target_asset_id in target_asset_ids {
+        let member_before = load_metadata_map_from_transaction(tx, &target_asset_id)?;
+        tx.execute("DELETE FROM metadata WHERE asset_id = ?1", [&target_asset_id])?;
+        for (key, value) in &target_map {
+            tx.execute(
+                r#"
+                INSERT INTO metadata (asset_id, key, value_type, value_json, version, updated_at)
+                VALUES (?1, ?2, ?3, ?4, 1, ?5)
+                "#,
+                params![
+                    target_asset_id,
+                    key,
+                    infer_value_type(value),
+                    value.to_string(),
+                    now
+                ],
+            )?;
+        }
+        if target_map.contains_key("tagGroups") {
+            replace_asset_tags(
+                tx,
+                &target_asset_id,
+                &metadata_tags_from_tag_groups(target_map.get("tagGroups")),
+            )?;
+        }
+
+        let next_version: i64 = tx.query_row(
+            "SELECT version + 1 FROM assets WHERE repo_id = ?1 AND asset_id = ?2",
+            params![repo_id, target_asset_id],
+            |row| row.get(0),
+        )?;
+
+        tx.execute(
+            "UPDATE assets SET version = ?3, updated_at = ?4, modified_at = ?4 WHERE repo_id = ?1 AND asset_id = ?2",
+            params![repo_id, target_asset_id, next_version, now],
+        )?;
         tx.execute(
             r#"
-            INSERT INTO metadata (asset_id, key, value_type, value_json, version, updated_at)
-            VALUES (?1, ?2, ?3, ?4, 1, ?5)
+            INSERT INTO revisions (
+              revision_id, repo_id, asset_id, timestamp, operation, before_json, after_json, source
+            )
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
             "#,
             params![
-                asset_id,
-                key,
-                infer_value_type(value),
-                value.to_string(),
-                now
+                format!("rev-{}-{}", target_asset_id, next_version),
+                repo_id,
+                target_asset_id,
+                now,
+                operation,
+                serde_json::to_string(&member_before)
+                    .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?,
+                serde_json::to_string(&target_map)
+                    .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?,
+                source
             ],
         )?;
     }
-
-    let next_version: i64 = tx.query_row(
-        "SELECT version + 1 FROM assets WHERE repo_id = ?1 AND asset_id = ?2",
-        params![repo_id, asset_id],
-        |row| row.get(0),
-    )?;
-
-    tx.execute(
-        "UPDATE assets SET version = ?3, updated_at = ?4, modified_at = ?4 WHERE repo_id = ?1 AND asset_id = ?2",
-        params![repo_id, asset_id, next_version, now],
-    )?;
-    tx.execute(
-        r#"
-        INSERT INTO revisions (
-          revision_id, repo_id, asset_id, timestamp, operation, before_json, after_json, source
-        )
-        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
-        "#,
-        params![
-            format!("rev-{}-{}", asset_id, next_version),
-            repo_id,
-            asset_id,
-            now,
-            operation,
-            serde_json::to_string(&before)
-                .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?,
-            serde_json::to_string(&target_map)
-                .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?,
-            source
-        ],
-    )?;
 
     Ok(())
 }
@@ -137,6 +147,10 @@ pub(super) fn rebuild_netease_directory_cache(
                 provider_item_id: file.provider_item_id.clone(),
                 source_payload: file.source_payload.clone(),
                 local_absolute_path: file.local_absolute_path.clone(),
+                status: file.status.clone(),
+                shared_asset_id: file.shared_asset_id.clone(),
+                tags: file.tags.clone(),
+                thumbnail_local_absolute_path: file.thumbnail_local_absolute_path.clone(),
             });
     }
     let refreshed_at = now_rfc3339();

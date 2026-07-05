@@ -394,6 +394,8 @@ pub(super) fn update_asset_metadata(
     }
 
     let source = request.source.unwrap_or_else(|| "desktop".to_string());
+    let previous_metadata =
+        load_metadata_map_from_transaction(&tx, &request.asset_id).map_err(db_error)?;
     update_metadata_for_asset_in_transaction(
         &tx,
         &request.repo_id,
@@ -402,6 +404,23 @@ pub(super) fn update_asset_metadata(
         &source,
     )
     .map_err(db_error)?;
+    let current_metadata =
+        load_metadata_map_from_transaction(&tx, &request.asset_id).map_err(db_error)?;
+    if let Some((path, shared_asset_id)) =
+        load_source_asset_writeback_target(&tx, &request.repo_id, &request.asset_id)
+            .map_err(db_error)?
+    {
+        write_backend_asset_metadata(
+            &state.root,
+            &repo,
+            Path::new(&repo.summary.path),
+            &path,
+            shared_asset_id.as_deref(),
+            &current_metadata,
+            &previous_metadata,
+            &source,
+        )?;
+    }
     tx.commit().map_err(db_error)?;
     let asset = state.load_asset_detail(&request.repo_id, &request.asset_id)?;
 

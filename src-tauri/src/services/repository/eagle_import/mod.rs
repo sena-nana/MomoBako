@@ -12,6 +12,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 pub(super) mod planner;
 pub(super) mod repository_objects;
+pub mod source_adapter;
 pub(super) mod smart_folder;
 pub(super) mod smart_folder_fields;
 

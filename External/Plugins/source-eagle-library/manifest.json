@@ -1,0 +1,63 @@
+{
+  "pluginId": "momobako.source.eagle-library",
+  "name": "Eagle Library Source",
+  "version": "0.1.0",
+  "type": {
+    "layer": "source",
+    "kind": "eagle-library"
+  },
+  "kind": "eagle-library",
+  "category": "source",
+  "description": "直接把 Eagle .library 目录挂载为 MomoBako 资源库。",
+  "capabilities": ["browse", "read", "write", "sync"],
+  "enabled": true,
+  "sdk": "backend",
+  "runtime": "native-dylib",
+  "entry": {
+    "backend": {
+      "library": "momobako_source_eagle_library"
+    }
+  },
+  "permissions": ["filesystem:read", "filesystem:write"],
+  "requires": [],
+  "optional": [],
+  "hooks": [],
+  "contributes": {
+    "apiTests": [
+      {
+        "method": "filesystem.ensureAttachable",
+        "summary": "检查 Eagle Library 是否可挂载。",
+        "payload": {
+          "repoRoot": "<absoluteEagleLibraryPath>",
+          "config": {}
+        }
+      },
+      {
+        "method": "filesystem.listFiles",
+        "summary": "列出 Eagle Library 逻辑文件。",
+        "payload": {
+          "repoRoot": "<absoluteEagleLibraryPath>",
+          "config": {}
+        }
+      },
+      {
+        "method": "filesystem.describeRepositoryState",
+        "summary": "读取 Eagle Library 仓库级对象。",
+        "payload": {
+          "repoRoot": "<absoluteEagleLibraryPath>",
+          "config": {}
+        }
+      }
+    ],
+    "source": {
+      "operations": ["list", "read", "write", "move", "delete", "sync"],
+      "dangerousOperations": ["write", "move", "delete"]
+    }
+  },
+  "compat": {
+    "sdkVersion": "1",
+    "legacyPluginIds": []
+  },
+  "source": "builtin",
+  "status": "ready"
+}
