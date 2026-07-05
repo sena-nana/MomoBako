@@ -26,7 +26,7 @@ pub(super) fn create_repository(
     };
     initialize_repository_directory(&state.root, &repo_root, &seed, &backend)?;
 
-    let registry = Connection::open(&state.registry_path).map_err(db_error)?;
+    let registry = open_registry_connection(&state.registry_path)?;
     upsert_registry_entry(&registry, &repo_root, &seed, &backend)?;
     if !request.skip_initial_sync {
         sync_repository(
@@ -103,7 +103,7 @@ pub(super) fn import_repository(
         initialize_repository_directory(&state.root, &repo_root, &seed, &backend)?;
     }
 
-    let registry = Connection::open(&state.registry_path).map_err(db_error)?;
+    let registry = open_registry_connection(&state.registry_path)?;
     upsert_registry_entry(&registry, &repo_root, &seed, &backend)?;
     sync_repository(
         state,
@@ -164,7 +164,7 @@ pub(super) fn attach_repository_folder(
 
 pub(super) fn delete_repository(state: &RepositoryState, repo_id: &str) -> Result<(), String> {
     state.ensure_initialized()?;
-    let registry = Connection::open(&state.registry_path).map_err(db_error)?;
+    let registry = open_registry_connection(&state.registry_path)?;
     registry
         .execute("DELETE FROM repositories WHERE repo_id = ?1", [repo_id])
         .map_err(db_error)?;
@@ -216,7 +216,7 @@ pub(super) fn relocate_repository(
         Some(&repo_root),
     )?;
 
-    let registry = Connection::open(&state.registry_path).map_err(db_error)?;
+    let registry = open_registry_connection(&state.registry_path)?;
     registry
         .execute(
             r#"
@@ -289,7 +289,7 @@ pub(super) fn update_repository_backend_config(
         fs::write(&metadata_path, metadata_json).map_err(io_error)?;
     }
 
-    let registry = Connection::open(&state.registry_path).map_err(db_error)?;
+    let registry = open_registry_connection(&state.registry_path)?;
     registry
         .execute(
             r#"
@@ -368,7 +368,7 @@ pub(super) fn configure_netease_repository_cache(
         None,
     )?;
 
-    let registry = Connection::open(&state.registry_path).map_err(db_error)?;
+    let registry = open_registry_connection(&state.registry_path)?;
     registry
         .execute(
             r#"
