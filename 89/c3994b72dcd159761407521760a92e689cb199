@@ -1,0 +1,34 @@
+src/composables/workspace/lifecycle.ts
+  s_00d505d662a806::t_49e009ea481ef7 326,331,343,356,392,395,399,548,553
+src/composables/workspace/navigation.ts
+  s_00d505d662a806::t_4133c5b850cebc 68,102,110,155
+src/composables/workspace/state.ts
+  s_00d505d662a806::t_679f2b59293415 79
+src/layouts/AppShell.vue
+  s_00d505d662a806::t_463e9aed3a650b 73-90,94-104,220-240
+src/styles/shell.css
+  s_00d505d662a806::t_9dd5df9a3e0f1a 1120-1197
+src/types/repository/core.ts
+  s_00d505d662a806::t_24b61f000d8550 1330
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "89c3994b72dcd159761407521760a92e689cb199",
+  "prompts": {},
+  "humans": {
+    "h_8e6780fc7b4bb1": {
+      "author": "AuraElicase <auraelicase@outlook.com>"
+    }
+  },
+  "sessions": {
+    "s_00d505d662a806": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f35fc-2b29-73d3-be01-f304d4eb7dcc",
+        "model": "unknown"
+      },
+      "human_author": "AuraElicase <auraelicase@outlook.com>"
+    }
+  }
+}
