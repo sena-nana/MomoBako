@@ -2,14 +2,39 @@
 
 use super::*;
 
+fn log_repository_management(level: &str, action: &str, message: &str, context: serde_json::Value) {
+    crate::app_log!(level, "repository.management", action, message, context);
+}
+
 pub(super) fn create_repository(
     state: &RepositoryState,
     request: RepositoryMutationRequest,
 ) -> Result<RepositoryMutationResponse, String> {
     state.ensure_initialized()?;
+    log_repository_management(
+        "info",
+        "createStart",
+        "开始创建资源库。",
+        serde_json::json!({
+            "name": request.name.as_str(),
+            "path": request.path.as_str(),
+            "backendPluginId": request.backend_plugin_id.as_deref(),
+            "skipInitialSync": request.skip_initial_sync,
+        }),
+    );
 
     let backend = parse_backend_request(&state.root, &request)?;
     if let Some(repository) = state.find_existing_repository_for_backend(&backend)? {
+        log_repository_management(
+            "info",
+            "createAlreadyRegistered",
+            "资源库已存在，复用现有记录。",
+            serde_json::json!({
+                "repoId": repository.repo_id.as_str(),
+                "path": repository.path.as_str(),
+                "backendPluginId": repository.backend.plugin_id.as_str(),
+            }),
+        );
         return Ok(RepositoryMutationResponse { repository });
     }
     let repo_id = request
@@ -38,6 +63,17 @@ pub(super) fn create_repository(
     }
 
     let repository = state.load_repository_record(&repo_id)?.summary;
+    log_repository_management(
+        "info",
+        "createSuccess",
+        "资源库创建完成。",
+        serde_json::json!({
+            "repoId": repository.repo_id.as_str(),
+            "path": repository.path.as_str(),
+            "backendPluginId": repository.backend.plugin_id.as_str(),
+            "assetCount": repository.asset_count,
+        }),
+    );
     Ok(RepositoryMutationResponse { repository })
 }
 
@@ -46,9 +82,29 @@ pub(super) fn import_repository(
     request: RepositoryMutationRequest,
 ) -> Result<RepositoryMutationResponse, String> {
     state.ensure_initialized()?;
+    log_repository_management(
+        "info",
+        "importStart",
+        "开始导入资源库。",
+        serde_json::json!({
+            "name": request.name.as_str(),
+            "path": request.path.as_str(),
+            "backendPluginId": request.backend_plugin_id.as_deref(),
+        }),
+    );
 
     let requested_backend = parse_backend_request(&state.root, &request)?;
     if let Some(repository) = state.find_existing_repository_for_backend(&requested_backend)? {
+        log_repository_management(
+            "info",
+            "importAlreadyRegistered",
+            "资源库已存在，复用现有记录。",
+            serde_json::json!({
+                "repoId": repository.repo_id.as_str(),
+                "path": repository.path.as_str(),
+                "backendPluginId": repository.backend.plugin_id.as_str(),
+            }),
+        );
         return Ok(RepositoryMutationResponse { repository });
     }
     let repo_root = normalize_repository_root_for_backend(
@@ -113,6 +169,17 @@ pub(super) fn import_repository(
     )?;
 
     let repository = state.load_repository_record(&repo_id)?.summary;
+    log_repository_management(
+        "info",
+        "importSuccess",
+        "资源库导入完成。",
+        serde_json::json!({
+            "repoId": repository.repo_id.as_str(),
+            "path": repository.path.as_str(),
+            "backendPluginId": repository.backend.plugin_id.as_str(),
+            "assetCount": repository.asset_count,
+        }),
+    );
     Ok(RepositoryMutationResponse { repository })
 }
 
@@ -121,6 +188,12 @@ pub(super) fn attach_repository_folder(
     request: RepositoryFolderRequest,
 ) -> Result<RepositoryMutationResponse, String> {
     state.ensure_initialized()?;
+    log_repository_management(
+        "info",
+        "attachStart",
+        "开始挂载资源库目录。",
+        serde_json::json!({ "path": request.path.as_str() }),
+    );
 
     let path = request.path.trim();
     if path.is_empty() {
@@ -167,6 +240,15 @@ pub(super) fn delete_repository(
     request: RepositoryDeleteRequest,
 ) -> Result<(), String> {
     state.ensure_initialized()?;
+    log_repository_management(
+        "info",
+        "deleteStart",
+        "开始删除资源库。",
+        serde_json::json!({
+            "repoId": request.repo_id.as_str(),
+            "mode": format!("{:?}", request.mode),
+        }),
+    );
     let repo = state.load_repository_record(&request.repo_id)?;
     delete_repository_files(state, &repo, request.mode)?;
     let registry = open_registry_connection(&state.registry_path)?;
@@ -176,6 +258,15 @@ pub(super) fn delete_repository(
             [&request.repo_id],
         )
         .map_err(db_error)?;
+    log_repository_management(
+        "info",
+        "deleteSuccess",
+        "资源库删除完成。",
+        serde_json::json!({
+            "repoId": repo.summary.repo_id.as_str(),
+            "path": repo.summary.path.as_str(),
+        }),
+    );
     Ok(())
 }
 
@@ -264,6 +355,15 @@ pub(super) fn relocate_repository(
     request: RepositoryRelocateRequest,
 ) -> Result<RepositoryMutationResponse, String> {
     state.ensure_initialized()?;
+    log_repository_management(
+        "info",
+        "relocateStart",
+        "开始迁移资源库路径。",
+        serde_json::json!({
+            "repoId": request.repo_id.as_str(),
+            "path": request.path.as_str(),
+        }),
+    );
 
     let repo = state.load_repository_record(&request.repo_id)?;
     if !repository_supports_local_write_access(&repo) {
@@ -324,6 +424,15 @@ pub(super) fn relocate_repository(
     )?;
 
     let repository = state.load_repository_record(&request.repo_id)?.summary;
+    log_repository_management(
+        "info",
+        "relocateSuccess",
+        "资源库路径迁移完成。",
+        serde_json::json!({
+            "repoId": repository.repo_id.as_str(),
+            "path": repository.path.as_str(),
+        }),
+    );
     Ok(RepositoryMutationResponse { repository })
 }
 
@@ -332,6 +441,19 @@ pub(super) fn update_repository_backend_config(
     request: RepositoryBackendConfigUpdateRequest,
 ) -> Result<RepositoryMutationResponse, String> {
     state.ensure_initialized()?;
+    log_repository_management(
+        "info",
+        "backendConfigUpdateStart",
+        "开始更新资源库后端配置。",
+        serde_json::json!({
+            "repoId": request.repo_id.as_str(),
+            "configKeys": request
+                .backend_config
+                .as_object()
+                .map(|object| object.keys().cloned().collect::<Vec<_>>())
+                .unwrap_or_default(),
+        }),
+    );
 
     if !request.backend_config.is_object() {
         return Err("backend config must be a JSON object".to_string());
@@ -390,6 +512,15 @@ pub(super) fn update_repository_backend_config(
         .map_err(db_error)?;
 
     let repository = state.load_repository_record(&request.repo_id)?.summary;
+    log_repository_management(
+        "info",
+        "backendConfigUpdateSuccess",
+        "资源库后端配置更新完成。",
+        serde_json::json!({
+            "repoId": repository.repo_id.as_str(),
+            "backendPluginId": repository.backend.plugin_id.as_str(),
+        }),
+    );
     Ok(RepositoryMutationResponse { repository })
 }
 
@@ -398,6 +529,16 @@ pub(super) fn configure_netease_repository_cache(
     request: NeteaseRepositoryCacheConfigureRequest,
 ) -> Result<NeteaseRepositoryCacheConfigureResponse, String> {
     state.ensure_initialized()?;
+    log_repository_management(
+        "info",
+        "neteaseCacheConfigureStart",
+        "开始配置网易云音乐资源库缓存。",
+        serde_json::json!({
+            "repoId": request.repo_id.as_str(),
+            "path": request.path.as_str(),
+            "migrateLegacyCache": request.migrate_legacy_cache,
+        }),
+    );
 
     let repo = state.load_repository_record(&request.repo_id)?;
     if repo.backend_record.plugin_id != NETEASE_CLOUD_MUSIC_PLUGIN_ID {
@@ -475,6 +616,16 @@ pub(super) fn configure_netease_repository_cache(
     }
 
     let repository = state.load_repository_record(&request.repo_id)?.summary;
+    log_repository_management(
+        "info",
+        "neteaseCacheConfigureSuccess",
+        "网易云音乐资源库缓存配置完成。",
+        serde_json::json!({
+            "repoId": repository.repo_id.as_str(),
+            "path": repository.path.as_str(),
+            "movedStateFiles": migration.moved_state_files,
+        }),
+    );
     Ok(NeteaseRepositoryCacheConfigureResponse {
         repository,
         migration,
@@ -486,6 +637,15 @@ pub(super) fn export_repository(
     request: RepositoryExportRequest,
 ) -> Result<RepositoryExportResponse, String> {
     state.ensure_initialized()?;
+    log_repository_management(
+        "info",
+        "exportStart",
+        "开始导出资源库。",
+        serde_json::json!({
+            "repoId": request.repo_id.as_str(),
+            "target": request.target.as_str(),
+        }),
+    );
     let repository = state.load_repository_record(&request.repo_id)?.summary;
     let repo_root = PathBuf::from(&repository.path);
 
@@ -495,7 +655,7 @@ pub(super) fn export_repository(
                 .archive
                 .ok_or_else(|| "archive export options are required".to_string())?;
             export_repository_archive(&repo_root, &archive)?;
-            Ok(RepositoryExportResponse {
+            let response = RepositoryExportResponse {
                 repository,
                 target: "archive".to_string(),
                 output_path: Some(archive.output_path),
@@ -504,7 +664,18 @@ pub(super) fn export_repository(
                 remote: None,
                 branch: None,
                 message: "资源库压缩包已导出".to_string(),
-            })
+            };
+            log_repository_management(
+                "info",
+                "exportSuccess",
+                "资源库导出完成。",
+                serde_json::json!({
+                    "repoId": response.repository.repo_id.as_str(),
+                    "target": response.target.as_str(),
+                    "outputPath": response.output_path.as_deref(),
+                }),
+            );
+            Ok(response)
         }
         "git" => {
             let git = request.git.unwrap_or(RepositoryGitExportOptions {
@@ -513,7 +684,7 @@ pub(super) fn export_repository(
                 message: None,
             });
             let result = export_repository_to_git(&repo_root, &git)?;
-            Ok(RepositoryExportResponse {
+            let response = RepositoryExportResponse {
                 repository,
                 target: "git".to_string(),
                 output_path: None,
@@ -522,7 +693,19 @@ pub(super) fn export_repository(
                 remote: Some(result.remote),
                 branch: Some(result.branch),
                 message: result.message,
-            })
+            };
+            log_repository_management(
+                "info",
+                "exportSuccess",
+                "资源库导出完成。",
+                serde_json::json!({
+                    "repoId": response.repository.repo_id.as_str(),
+                    "target": response.target.as_str(),
+                    "remote": response.remote.as_deref(),
+                    "branch": response.branch.as_deref(),
+                }),
+            );
+            Ok(response)
         }
         value => Err(format!("unsupported repository export target: {value}")),
     }
@@ -532,12 +715,31 @@ pub(super) fn sync_repository(
     state: &RepositoryState,
     request: SyncRequest,
 ) -> Result<SyncResult, String> {
-    sync_repository_with_candidate_skips_and_hint_paths(
+    log_repository_management(
+        "info",
+        "syncStart",
+        "开始同步资源库。",
+        serde_json::json!({ "repoId": request.repo_id.as_str() }),
+    );
+    let result = sync_repository_with_candidate_skips_and_hint_paths(
         state,
         &request.repo_id,
         &HashSet::new(),
         &std::collections::BTreeSet::new(),
-    )
+    )?;
+    log_repository_management(
+        "info",
+        "syncSuccess",
+        "资源库同步完成。",
+        serde_json::json!({
+            "repoId": result.repo_id.as_str(),
+            "scannedFiles": result.scanned_files,
+            "createdAssets": result.created_assets,
+            "updatedAssets": result.updated_assets,
+            "deletedAssets": result.deleted_assets,
+        }),
+    );
+    Ok(result)
 }
 
 pub(super) fn sync_repository_changed_paths(

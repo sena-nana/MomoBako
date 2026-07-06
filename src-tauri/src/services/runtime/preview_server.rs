@@ -12,6 +12,10 @@ use tiny_http::{Header, Method, Request, Response, ResponseBox, Server, StatusCo
 
 const PREVIEW_PATH_PREFIX: &str = "/preview/";
 
+fn log_preview_server(action: &str, message: &str, context: serde_json::Value) {
+    crate::app_log!("warn", "runtime.preview", action, message, context);
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct ByteRange {
     pub(crate) start: u64,
@@ -44,6 +48,7 @@ pub(crate) fn start_preview_server(
 fn handle_preview_request(request: Request, repository_state: &Arc<RepositoryState>) {
     match preview_token_from_url(request.url()) {
         Some(token) if request.method() == &Method::Get || request.method() == &Method::Head => {
+            let token = token.to_string();
             let range_header = request
                 .headers()
                 .iter()
@@ -51,28 +56,67 @@ fn handle_preview_request(request: Request, repository_state: &Arc<RepositorySta
                 .map(|item| item.value.as_str().to_string());
             let response =
                 repository_state
-                    .open_preview_file_source(token)
+                    .open_preview_file_source(&token)
                     .and_then(|(file, media_type)| {
                         build_preview_file_response(file, &media_type, range_header.as_deref())
                     });
             match response {
                 Ok(response) => {
-                    let _ = request.respond(response);
+                    if let Err(error) = request.respond(response) {
+                        log_preview_server(
+                            "responseSendFailed",
+                            "预览服务响应发送失败。",
+                            serde_json::json!({
+                                "token": token,
+                                "status": 200,
+                                "error": error.to_string(),
+                            }),
+                        );
+                    }
                 }
                 Err(error) => {
-                    let _ = request
-                        .respond(Response::from_string(error).with_status_code(StatusCode(404)));
+                    log_preview_server(
+                        "sourceOpenFailed",
+                        "预览服务打开文件源失败。",
+                        serde_json::json!({ "token": token.as_str(), "error": error.clone() }),
+                    );
+                    if let Err(error) = request
+                        .respond(Response::from_string(error).with_status_code(StatusCode(404)))
+                    {
+                        log_preview_server(
+                            "responseSendFailed",
+                            "预览服务错误响应发送失败。",
+                            serde_json::json!({
+                                "token": token,
+                                "status": 404,
+                                "error": error.to_string(),
+                            }),
+                        );
+                    }
                 }
             }
         }
         Some(_) => {
-            let _ = request.respond(
+            if let Err(error) = request.respond(
                 Response::from_string("method not allowed").with_status_code(StatusCode(405)),
-            );
+            ) {
+                log_preview_server(
+                    "responseSendFailed",
+                    "预览服务方法错误响应发送失败。",
+                    serde_json::json!({ "status": 405, "error": error.to_string() }),
+                );
+            }
         }
         None => {
-            let _ = request
-                .respond(Response::from_string("not found").with_status_code(StatusCode(404)));
+            if let Err(error) = request
+                .respond(Response::from_string("not found").with_status_code(StatusCode(404)))
+            {
+                log_preview_server(
+                    "responseSendFailed",
+                    "预览服务未找到响应发送失败。",
+                    serde_json::json!({ "status": 404, "error": error.to_string() }),
+                );
+            }
         }
     }
 }

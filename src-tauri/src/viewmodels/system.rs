@@ -23,7 +23,7 @@ impl SystemViewModel {
         &self,
         request: BinaryFileWriteRequest,
     ) -> Result<BinaryFileWriteResponse, String> {
-        tauri::async_runtime::spawn_blocking(move || {
+        match tauri::async_runtime::spawn_blocking(move || {
             let output_path = PathBuf::from(&request.path);
             if let Some(parent) = output_path.parent() {
                 fs::create_dir_all(parent).map_err(|error| error.to_string())?;
@@ -36,7 +36,45 @@ impl SystemViewModel {
             })
         })
         .await
-        .map_err(|error| error.to_string())?
+        {
+            Ok(result) => {
+                match &result {
+                    Ok(response) => {
+                        crate::app_log!(
+                            "info",
+                            "system.file",
+                            "writeBinaryFile",
+                            "二进制文件写入完成。",
+                            serde_json::json!({
+                                "path": response.path.as_str(),
+                                "sizeBytes": response.size_bytes,
+                            })
+                        );
+                    }
+                    Err(error) => {
+                        crate::app_log!(
+                            "error",
+                            "system.file",
+                            "writeBinaryFileFailed",
+                            "二进制文件写入失败。",
+                            serde_json::json!({ "error": error })
+                        );
+                    }
+                }
+                result
+            }
+            Err(error) => {
+                let error = error.to_string();
+                crate::app_log!(
+                    "error",
+                    "system.file",
+                    "writeBinaryFileTaskFailed",
+                    "二进制文件写入任务执行失败。",
+                    serde_json::json!({ "error": error.as_str() })
+                );
+                Err(error)
+            }
+        }
     }
 
     /// Returns the latest external API connection payload without exposing runtime details to the command layer.

@@ -77,14 +77,50 @@ impl RepositoryState {
         paths: BTreeSet<String>,
     ) {
         let Ok(sender) = self.structure_refresh_tx.lock() else {
+            crate::app_log!(
+                "warn",
+                "repository.structure",
+                "refreshQueueLockFailed",
+                "获取资源库结构刷新队列失败。",
+                serde_json::json!({
+                    "repoId": repo_id,
+                    "reason": reason,
+                    "changedPathCount": paths.len(),
+                })
+            );
             return;
         };
         if let Some(sender) = sender.as_ref() {
-            let _ = sender.send(RepositoryStructureRefreshRequest {
+            let request = RepositoryStructureRefreshRequest {
                 repo_id,
                 reason: reason.to_string(),
                 paths,
-            });
+            };
+            if let Err(error) = sender.send(request) {
+                crate::app_log!(
+                    "warn",
+                    "repository.structure",
+                    "refreshQueueSendFailed",
+                    "投递资源库结构刷新请求失败。",
+                    serde_json::json!({
+                        "repoId": error.0.repo_id,
+                        "reason": error.0.reason,
+                        "changedPathCount": error.0.paths.len(),
+                    })
+                );
+            }
+        } else {
+            crate::app_log!(
+                "warn",
+                "repository.structure",
+                "refreshQueueUnavailable",
+                "资源库结构刷新队列未就绪。",
+                serde_json::json!({
+                    "repoId": repo_id,
+                    "reason": reason,
+                    "changedPathCount": paths.len(),
+                })
+            );
         }
     }
 
@@ -114,10 +150,37 @@ impl RepositoryState {
 
     pub fn emit_repository_structure_updated(&self, event: RepositoryStructureUpdatedEvent) {
         let Ok(app_handle) = self.app_handle.lock() else {
+            crate::app_log!(
+                "warn",
+                "repository.structure",
+                "structureEventLockFailed",
+                "获取结构更新事件通道失败。",
+                serde_json::json!({ "repoId": event.repo_id })
+            );
             return;
         };
         if let Some(app_handle) = app_handle.as_ref() {
-            let _ = app_handle.emit("repository://structure-updated", event);
+            if let Err(error) = app_handle.emit("repository://structure-updated", event.clone()) {
+                crate::app_log!(
+                    "warn",
+                    "repository.structure",
+                    "structureEventEmitFailed",
+                    "发送资源库结构更新事件失败。",
+                    serde_json::json!({
+                        "repoId": event.repo_id,
+                        "reason": event.reason,
+                        "error": error.to_string(),
+                    })
+                );
+            }
+        } else {
+            crate::app_log!(
+                "warn",
+                "repository.structure",
+                "structureEventHandleUnavailable",
+                "结构更新事件通道未就绪。",
+                serde_json::json!({ "repoId": event.repo_id, "reason": event.reason })
+            );
         }
     }
 
