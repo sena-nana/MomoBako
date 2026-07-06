@@ -1,0 +1,32 @@
+src-tauri/src/services/repository/facade.rs
+  s_f0abc17e5269b6::t_61ac24df637608 1152-1157,1169-1175
+src-tauri/src/services/repository/internal_tests.rs
+  s_f0abc17e5269b6::t_ab072d4835123e 221-254,6278
+src-tauri/src/services/repository/registry_store.rs
+  s_f0abc17e5269b6::t_af5ddf90d5942a 654-671,675-708,904-928
+src-tauri/src/services/repository/schema.rs
+  s_f0abc17e5269b6::t_e4d9ec928ec963 445
+src-tauri/src/services/repository/utils.rs
+  s_f0abc17e5269b6::t_67e844b08c6a9f 97-113,124
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "b0fbb897f9a945c61a00e08399d9e956590efcdf",
+  "prompts": {},
+  "humans": {
+    "h_8e6780fc7b4bb1": {
+      "author": "AuraElicase <auraelicase@outlook.com>"
+    }
+  },
+  "sessions": {
+    "s_f0abc17e5269b6": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f0caa-72ab-7720-90c5-6cba6822b374",
+        "model": "unknown"
+      },
+      "human_author": "AuraElicase <auraelicase@outlook.com>"
+    }
+  }
+}
