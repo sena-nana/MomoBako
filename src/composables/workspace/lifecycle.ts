@@ -10,6 +10,7 @@ import {
   listRepositories,
   syncRepository,
 } from "../../services/repositoryApi";
+import { emitSystemLogSilently } from "../../services/systemLog";
 import type {
   RepositoryStructureUpdatedEvent,
   RepositorySummary,
@@ -99,7 +100,9 @@ let repositoryBackgroundToken = 0;
 let cancelRepositoryBackgroundTask: (() => void) | null = null;
 let unlistenStructureUpdated: UnlistenFn | null = null;
 let structureUpdatedListenerPromise: Promise<void> | null = null;
+let startupTargetRepoId: string | null = null;
 const LAST_ACTIVE_REPOSITORY_STORAGE_KEY = "momobako.lastActiveRepositoryId";
+const STARTUP_LOG_CATEGORY = "workspace.startup";
 
 function readLastActiveRepositoryId() {
   try {
@@ -365,11 +368,30 @@ function setStartupLoadingFlags(value: boolean) {
   isLoadingSettingsData.value = value;
 }
 
+function emitStartupLog(
+  level: "debug" | "info" | "warn" | "error",
+  action: string,
+  message: string,
+  context?: Record<string, unknown>,
+  repoId?: string | null,
+) {
+  emitSystemLogSilently(level, {
+    category: STARTUP_LOG_CATEGORY,
+    action,
+    message,
+    repoId,
+    context,
+  });
+}
+
 async function loadInitialRepository(
   items: RepositorySummary[],
   selectAsset: (assetId: string) => Promise<unknown>,
 ) {
   if (!items.length) {
+    emitStartupLog("warn", "repositoryEmpty", "首屏启动未找到可加载的资源库。", {
+      repositoryCount: 0,
+    });
     resetWorkspaceSelection({ clearRememberedRepository: true });
     return;
   }
@@ -380,28 +402,69 @@ async function loadInitialRepository(
     : lastActiveRepoId && items.some((item) => item.repoId === lastActiveRepoId)
       ? lastActiveRepoId
       : items[0].repoId;
+  startupTargetRepoId = nextRepoId;
   const nextRepository = items.find((item) => item.repoId === nextRepoId);
+  emitStartupLog("info", "repositorySelected", "首屏启动已选定资源库。", {
+    repositoryCount: items.length,
+    rememberedRepoId: lastActiveRepoId,
+    repositoryStatus: nextRepository?.status ?? null,
+    repositoryName: nextRepository?.name ?? null,
+    repositoryPath: nextRepository?.path ?? null,
+  }, nextRepoId);
 
   if (nextRepository?.status === "missing") {
     activeRepoId.value = nextRepoId;
     resetActiveRepositoryContent();
     rememberLastActiveRepository(nextRepoId);
+    emitStartupLog("warn", "repositoryMissing", "首屏启动遇到缺失资源库。", {
+      repositoryName: nextRepository.name,
+      repositoryPath: nextRepository.path,
+    }, nextRepoId);
     return;
   }
 
   setWorkspaceStartupProgress(2, "扫描资源库文件", "同步文件变化，更新新增、移动和删除记录。");
+  emitStartupLog("info", "syncStart", "首屏启动开始同步文件变化。", {
+    step: 2,
+  }, nextRepoId);
   lastSyncResult.value = await syncRepository({ repoId: nextRepoId });
+  emitStartupLog("info", "syncSuccess", "首屏启动文件变化同步完成。", {
+    step: 2,
+    scannedFiles: lastSyncResult.value.scannedFiles,
+    createdAssets: lastSyncResult.value.createdAssets,
+    updatedAssets: lastSyncResult.value.updatedAssets,
+    deletedAssets: lastSyncResult.value.deletedAssets,
+    createdEvents: lastSyncResult.value.createdEvents,
+    hardlinkCandidates: lastSyncResult.value.hardlinkCandidates,
+  }, nextRepoId);
 
   setWorkspaceStartupProgress(3, "读取仓库摘要", "读取资源库摘要、素材索引和默认预览对象。");
+  emitStartupLog("info", "snapshotStart", "首屏启动开始读取资源库摘要。", {
+    step: 3,
+  }, nextRepoId);
   await applyRepositorySnapshotState(nextRepoId, selectAsset);
+  emitStartupLog("info", "snapshotSuccess", "首屏启动资源库摘要读取完成。", {
+    step: 3,
+    assetCount: activeSnapshot.value?.assets.length ?? 0,
+    playlistCount: playlists.value.length,
+    defaultAssetId: activeAssetId.value,
+  }, nextRepoId);
   rememberLastActiveRepository(nextRepoId);
 
   setWorkspaceStartupProgress(4, "读取首屏目录", "加载根目录、播放列表和首屏关联数据。");
+  emitStartupLog("info", "firstScreenStart", "首屏启动开始加载首屏目录与关联数据。", {
+    step: 4,
+  }, nextRepoId);
   const playlistItems = playlists.value;
   playlists.value = playlistItems;
   await primePlaylistDetailCache(nextRepoId, playlistItems);
   await syncPlaylistMemberships(nextRepoId, playlistItems);
   queueRepositoryBackgroundLoads(nextRepoId);
+  emitStartupLog("info", "firstScreenSuccess", "首屏启动首屏目录与关联数据加载完成。", {
+    step: 4,
+    playlistCount: playlistItems.length,
+    currentDirectoryPath: currentDirectoryPath.value,
+  }, nextRepoId);
 }
 
 async function loadRepositoryPrimaryDirectory(repoId: string, token: number) {
@@ -543,23 +606,59 @@ export function ensureRepositoryWorkspace(
     error.value = null;
     setStartupLoadingFlags(true);
     ensureStructureUpdatedListener();
+    emitStartupLog("info", "startupStart", "首屏启动流程开始。", {
+      totalSteps: STARTUP_TOTAL_STEPS,
+      activeRepoId: activeRepoId.value,
+      rememberedRepoId: readLastActiveRepositoryId(),
+    });
 
     try {
       setWorkspaceStartupProgress(1, "加载仓库列表", "读取已注册资源库，并匹配上次打开的工作区。");
+      emitStartupLog("info", "repositoryListStart", "首屏启动开始读取资源库列表。", {
+        step: 1,
+      });
       const items = await listRepositories();
       repositories.value = items;
+      emitStartupLog("info", "repositoryListSuccess", "首屏启动资源库列表读取完成。", {
+        step: 1,
+        repositoryCount: items.length,
+        readyRepositoryCount: items.filter((item) => item.status === "ready").length,
+        missingRepositoryCount: items.filter((item) => item.status === "missing").length,
+      });
 
       await loadInitialRepository(items, selectAsset);
       setWorkspaceStartupProgress(4, "读取首屏目录", "加载应用配置、插件设置和首屏辅助数据。");
+      emitStartupLog("info", "settingsStart", "首屏启动开始加载应用配置与插件设置。", {
+        step: 4,
+        repoId: activeRepoId.value,
+      }, activeRepoId.value);
       await loadSettingsData();
+      emitStartupLog("info", "settingsSuccess", "首屏启动应用配置与插件设置加载完成。", {
+        step: 4,
+        repoId: activeRepoId.value,
+      }, activeRepoId.value);
 
       finishWorkspaceStartup();
+      emitStartupLog("info", "startupSuccess", "首屏启动流程完成。", {
+        activeRepoId: activeRepoId.value,
+        assetCount: activeSnapshot.value?.assets.length ?? 0,
+        playlistCount: playlists.value.length,
+      }, activeRepoId.value);
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : String(cause);
+      const failedRepoId = activeRepoId.value ?? startupTargetRepoId;
       error.value = message;
       failWorkspaceStartup(message);
+      emitStartupLog("error", "startupFailed", "首屏启动流程失败。", {
+        step: workspaceStartup.value.currentStep,
+        stepLabel: workspaceStartup.value.stepLabel,
+        error: message,
+        activeRepoId: activeRepoId.value,
+        targetRepoId: startupTargetRepoId,
+      }, failedRepoId);
     } finally {
       setStartupLoadingFlags(false);
+      startupTargetRepoId = null;
       startupPromise = null;
     }
   })();
