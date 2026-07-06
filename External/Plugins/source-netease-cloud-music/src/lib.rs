@@ -7,7 +7,8 @@ use std::{
 
 use base64::{engine::general_purpose, Engine as _};
 use momobako_backend_plugin_sdk::{
-    free_c_string, read_request, response_error, response_ok, PluginRuntimeContext,
+    free_c_string, read_request, register_host_plugin_api, response_error, response_with_error_log,
+    HostPluginCallFn, HostPluginFreeFn, PluginCallEnvelope, PluginRuntimeContext,
 };
 use ncm_api_rs::{create_client, ApiResponse, Query};
 use qrcode::{render::svg, QrCode};
@@ -320,10 +321,21 @@ pub extern "C" fn momobako_plugin_manifest() -> *mut c_char {
 
 #[no_mangle]
 pub extern "C" fn momobako_plugin_call(input: *const c_char) -> *mut c_char {
-    match handle_call(input) {
-        Ok(value) => response_ok(value),
-        Err(error) => response_error(error),
-    }
+    let request = match read_request(input) {
+        Ok(request) => request,
+        Err(error) => return response_error(error),
+    };
+    let method = request.method.clone();
+    let runtime = request.runtime.clone();
+    response_with_error_log(&runtime, &method, handle_call(request))
+}
+
+#[no_mangle]
+pub extern "C" fn momobako_plugin_register_host_api(
+    call: Option<HostPluginCallFn>,
+    free: Option<HostPluginFreeFn>,
+) {
+    register_host_plugin_api(call, free);
 }
 
 #[no_mangle]
@@ -331,8 +343,7 @@ pub unsafe extern "C" fn momobako_plugin_free(value: *mut c_char) {
     unsafe { free_c_string(value) };
 }
 
-fn handle_call(input: *const c_char) -> Result<serde_json::Value, String> {
-    let request = read_request(input)?;
+fn handle_call(request: PluginCallEnvelope) -> Result<serde_json::Value, String> {
     let payload: PluginPayload =
         serde_json::from_value(request.payload).map_err(|error| error.to_string())?;
     let runtime = runtime_context(request.runtime, payload.config.clone())?;
@@ -976,7 +987,8 @@ fn hydrate_playlist_tracks(
     playlist_category: &str,
     unique_folder_name: &str,
 ) -> Result<Vec<DiscoveredSong>, String> {
-    let mut songs = load_playlist_songs_until(runtime, config, detail, playlist_track_total(detail))?;
+    let mut songs =
+        load_playlist_songs_until(runtime, config, detail, playlist_track_total(detail))?;
     let folder_path = join_path(
         if playlist_category == "created" {
             CREATED_CATEGORY_PATH
@@ -2305,7 +2317,6 @@ mod tests {
             first_entries[1]["path"],
             serde_json::json!("创建的歌单/分页歌单/歌手 B - 第二页前.mp3")
         );
-
     }
 
     #[test]

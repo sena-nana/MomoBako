@@ -1,6 +1,9 @@
 use std::{collections::BTreeMap, ffi::CString, os::raw::c_char, time::Duration};
 
-use momobako_backend_plugin_sdk::{free_c_string, read_request, response_error, response_ok};
+use momobako_backend_plugin_sdk::{
+    free_c_string, read_request, register_host_plugin_api, response_error, response_with_error_log,
+    HostPluginCallFn, HostPluginFreeFn, PluginCallEnvelope,
+};
 use serde::Deserialize;
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 
@@ -22,10 +25,21 @@ pub extern "C" fn momobako_plugin_manifest() -> *mut c_char {
 
 #[no_mangle]
 pub extern "C" fn momobako_plugin_call(input: *const c_char) -> *mut c_char {
-    match handle_call(input) {
-        Ok(value) => response_ok(value),
-        Err(error) => response_error(error),
-    }
+    let request = match read_request(input) {
+        Ok(request) => request,
+        Err(error) => return response_error(error),
+    };
+    let method = request.method.clone();
+    let runtime = request.runtime.clone();
+    response_with_error_log(&runtime, &method, handle_call(request))
+}
+
+#[no_mangle]
+pub extern "C" fn momobako_plugin_register_host_api(
+    call: Option<HostPluginCallFn>,
+    free: Option<HostPluginFreeFn>,
+) {
+    register_host_plugin_api(call, free);
 }
 
 #[no_mangle]
@@ -33,8 +47,7 @@ pub unsafe extern "C" fn momobako_plugin_free(value: *mut c_char) {
     unsafe { free_c_string(value) };
 }
 
-fn handle_call(input: *const c_char) -> Result<serde_json::Value, String> {
-    let request = read_request(input)?;
+fn handle_call(request: PluginCallEnvelope) -> Result<serde_json::Value, String> {
     match request.method.as_str() {
         "provider.lookupMetadataCandidate" => {
             let payload: LookupPayload =
@@ -96,14 +109,19 @@ fn fetch_body(url: &str) -> Result<String, String> {
         .build()
         .map_err(|error| format!("provider client error: {error}"))?
         .get(url)
-        .header(reqwest::header::ACCEPT, "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+        .header(
+            reqwest::header::ACCEPT,
+            "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        )
         .send()
         .map_err(|error| format!("provider request failed: {error}"))?;
     let status = response.status();
     if !status.is_success() {
         return Err(format!("provider returned HTTP {status}"));
     }
-    response.text().map_err(|error| format!("provider body error: {error}"))
+    response
+        .text()
+        .map_err(|error| format!("provider body error: {error}"))
 }
 
 fn parse_candidate(
@@ -116,13 +134,33 @@ fn parse_candidate(
         ("rjCode".to_string(), serde_json::json!(work_id)),
         ("sourceUrl".to_string(), serde_json::json!(source_url)),
     ]);
-    insert_string(&mut fields, "workTitle", html_meta_content(body, "og:title").or_else(|| html_title(body)));
-    insert_string(&mut fields, "circle", html_meta_content(body, "product:brand").or_else(|| json_like_string(body, "maker_name")));
-    insert_string(&mut fields, "releaseDate", json_like_string(body, "regist_date"));
+    insert_string(
+        &mut fields,
+        "workTitle",
+        html_meta_content(body, "og:title").or_else(|| html_title(body)),
+    );
+    insert_string(
+        &mut fields,
+        "circle",
+        html_meta_content(body, "product:brand").or_else(|| json_like_string(body, "maker_name")),
+    );
+    insert_string(
+        &mut fields,
+        "releaseDate",
+        json_like_string(body, "regist_date"),
+    );
     insert_number(&mut fields, "price", json_like_number(body, "price"));
     insert_number(&mut fields, "dlCount", json_like_number(body, "dl_count"));
-    insert_number(&mut fields, "reviewCount", json_like_number(body, "review_count"));
-    insert_number(&mut fields, "rateAverage", json_like_number(body, "rate_average_2dp"));
+    insert_number(
+        &mut fields,
+        "reviewCount",
+        json_like_number(body, "review_count"),
+    );
+    insert_number(
+        &mut fields,
+        "rateAverage",
+        json_like_number(body, "rate_average_2dp"),
+    );
     if let Some(cover) = html_meta_content(body, "og:image") {
         fields.insert("cover".to_string(), serde_json::json!(cover));
     }
@@ -136,8 +174,15 @@ fn parse_candidate(
     }))
 }
 
-fn insert_string(fields: &mut BTreeMap<String, serde_json::Value>, key: &str, value: Option<String>) {
-    let Some(value) = value.map(|item| item.trim().to_string()).filter(|item| !item.is_empty()) else {
+fn insert_string(
+    fields: &mut BTreeMap<String, serde_json::Value>,
+    key: &str,
+    value: Option<String>,
+) {
+    let Some(value) = value
+        .map(|item| item.trim().to_string())
+        .filter(|item| !item.is_empty())
+    else {
         return;
     };
     fields.insert(key.to_string(), serde_json::json!(value));
@@ -153,7 +198,10 @@ fn insert_number(fields: &mut BTreeMap<String, serde_json::Value>, key: &str, va
 fn html_meta_content(body: &str, property: &str) -> Option<String> {
     let property_marker = format!("property=\"{property}\"");
     let name_marker = format!("name=\"{property}\"");
-    for tag in body.split('<').filter(|chunk| chunk.trim_start().starts_with("meta")) {
+    for tag in body
+        .split('<')
+        .filter(|chunk| chunk.trim_start().starts_with("meta"))
+    {
         if !tag.contains(&property_marker) && !tag.contains(&name_marker) {
             continue;
         }

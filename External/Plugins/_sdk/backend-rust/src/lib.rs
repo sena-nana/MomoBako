@@ -86,10 +86,7 @@ pub struct HostLogWriteRequest {
     pub location: Option<HostLogLocation>,
 }
 
-pub fn register_host_plugin_api(
-    call: Option<HostPluginCallFn>,
-    free: Option<HostPluginFreeFn>,
-) {
+pub fn register_host_plugin_api(call: Option<HostPluginCallFn>, free: Option<HostPluginFreeFn>) {
     let api = match (call, free) {
         (Some(call), Some(free)) => Some(HostPluginApi { call, free }),
         _ => None,
@@ -185,6 +182,41 @@ pub fn write_host_log<T: Serialize>(
     )
 }
 
+/// 以最佳努力写入宿主日志；日志通道不可用时保持插件原调用结果。
+pub fn write_host_log_silently<T: Serialize>(
+    runtime: &PluginRuntimeContext,
+    level: &str,
+    action: &str,
+    message: &str,
+    context: T,
+) {
+    let _ = write_host_log(runtime, level, action, message, context);
+}
+
+/// 将插件调用结果转换为 C ABI 响应，并在失败时写入宿主日志。
+pub fn response_with_error_log(
+    runtime: &PluginRuntimeContext,
+    method: &str,
+    result: Result<serde_json::Value, String>,
+) -> *mut c_char {
+    match result {
+        Ok(value) => response_ok(value),
+        Err(error) => {
+            write_host_log_silently(
+                runtime,
+                "error",
+                "callFailed",
+                "后端插件调用失败。",
+                serde_json::json!({
+                    "method": method,
+                    "error": error.as_str(),
+                }),
+            );
+            response_error(error)
+        }
+    }
+}
+
 pub fn read_request(input: *const c_char) -> Result<PluginCallEnvelope, String> {
     if input.is_null() {
         return Err("plugin request pointer is null".to_string());
@@ -277,7 +309,10 @@ mod tests {
             }),
         )
         .expect("host bridge call should succeed");
-        assert_eq!(response.get("taskId").and_then(serde_json::Value::as_str), Some("task-1"));
+        assert_eq!(
+            response.get("taskId").and_then(serde_json::Value::as_str),
+            Some("task-1")
+        );
         let request = LAST_REQUEST
             .get_or_init(|| Mutex::new(None))
             .lock()
@@ -322,15 +357,24 @@ mod tests {
         assert_eq!(request.plugin_id, "momobako.system");
         assert_eq!(request.method, "system.log.write");
         assert_eq!(
-            request.payload.get("pluginId").and_then(serde_json::Value::as_str),
+            request
+                .payload
+                .get("pluginId")
+                .and_then(serde_json::Value::as_str),
             Some("momobako.service.office-convert")
         );
         assert_eq!(
-            request.payload.get("sourceKind").and_then(serde_json::Value::as_str),
+            request
+                .payload
+                .get("sourceKind")
+                .and_then(serde_json::Value::as_str),
             Some("backend-plugin")
         );
         assert_eq!(
-            request.payload.get("action").and_then(serde_json::Value::as_str),
+            request
+                .payload
+                .get("action")
+                .and_then(serde_json::Value::as_str),
             Some("runtimeHealthChanged")
         );
         register_host_plugin_api(None, None);

@@ -1,6 +1,9 @@
 use std::ffi::{c_char, CString};
 
-use momobako_backend_plugin_sdk::{free_c_string, read_request, response_error, response_ok};
+use momobako_backend_plugin_sdk::{
+    free_c_string, read_request, register_host_plugin_api, response_error, response_with_error_log,
+    HostPluginCallFn, HostPluginFreeFn,
+};
 
 #[no_mangle]
 pub extern "C" fn momobako_plugin_manifest() -> *mut c_char {
@@ -18,13 +21,24 @@ pub extern "C" fn momobako_plugin_call(input: *const c_char) -> *mut c_char {
         Err(error) => return response_error(error),
     };
 
-    match request.method.as_str() {
-        "ping" => response_ok(serde_json::json!({
+    let method = request.method.clone();
+    let runtime = request.runtime.clone();
+    let result = match request.method.as_str() {
+        "ping" => Ok(serde_json::json!({
             "message": "pong",
             "pluginId": "momobako.example.backend-ping"
         })),
-        other => response_error(format!("unsupported method: {other}")),
-    }
+        other => Err(format!("unsupported method: {other}")),
+    };
+    response_with_error_log(&runtime, &method, result)
+}
+
+#[no_mangle]
+pub extern "C" fn momobako_plugin_register_host_api(
+    call: Option<HostPluginCallFn>,
+    free: Option<HostPluginFreeFn>,
+) {
+    register_host_plugin_api(call, free);
 }
 
 #[no_mangle]
