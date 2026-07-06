@@ -57,6 +57,35 @@ pub struct HostPluginCallEnvelope {
     pub payload: serde_json::Value,
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HostLogLocation {
+    pub module_path: Option<String>,
+    pub file: Option<String>,
+    pub line: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HostLogWriteRequest {
+    pub level: String,
+    pub category: String,
+    pub action: String,
+    pub message: String,
+    #[serde(default)]
+    pub context: serde_json::Value,
+    #[serde(default)]
+    pub repo_id: Option<String>,
+    #[serde(default)]
+    pub plugin_id: Option<String>,
+    #[serde(default)]
+    pub source_kind: Option<String>,
+    #[serde(default)]
+    pub source_label: Option<String>,
+    #[serde(default)]
+    pub location: Option<HostLogLocation>,
+}
+
 pub fn register_host_plugin_api(
     call: Option<HostPluginCallFn>,
     free: Option<HostPluginFreeFn>,
@@ -122,6 +151,38 @@ pub fn call_host_plugin(
             .error
             .unwrap_or_else(|| "host plugin call failed without an error message".to_string()))
     }
+}
+
+/// 通过宿主内建日志总线写入一条标准化日志。
+pub fn write_host_log<T: Serialize>(
+    runtime: &PluginRuntimeContext,
+    level: &str,
+    action: &str,
+    message: &str,
+    context: T,
+) -> Result<serde_json::Value, String> {
+    let request = HostLogWriteRequest {
+        level: level.trim().to_string(),
+        category: "plugin.backend".to_string(),
+        action: action.trim().to_string(),
+        message: message.trim().to_string(),
+        context: serde_json::to_value(context).map_err(|error| error.to_string())?,
+        repo_id: None,
+        plugin_id: Some(runtime.plugin_id.clone()),
+        source_kind: Some("backend-plugin".to_string()),
+        source_label: Some(runtime.plugin_id.clone()),
+        location: Some(HostLogLocation {
+            module_path: Some(runtime.plugin_id.clone()),
+            file: None,
+            line: None,
+        }),
+    };
+    call_host_plugin(
+        runtime,
+        "momobako.system",
+        "system.log.write",
+        serde_json::to_value(request).map_err(|error| error.to_string())?,
+    )
 }
 
 pub fn read_request(input: *const c_char) -> Result<PluginCallEnvelope, String> {
@@ -226,6 +287,52 @@ mod tests {
         assert_eq!(request.service_root_dir, "C:/Service");
         assert_eq!(request.plugin_id, "momobako.service.downloader");
         assert_eq!(request.method, "downloader.enqueueDownload");
+        register_host_plugin_api(None, None);
+    }
+
+    #[test]
+    fn write_host_log_calls_internal_system_logger_route() {
+        register_host_plugin_api(Some(test_host_call), Some(test_host_free));
+        let runtime = PluginRuntimeContext {
+            plugin_id: "momobako.service.office-convert".to_string(),
+            plugin_data_dir: "C:/Service/plugin-data/momobako-service-office-convert".to_string(),
+            service_root_dir: "C:/Service".to_string(),
+            plugin_runtime_dir: "C:/Service/runtime/plugins/office-convert".to_string(),
+            plugin_config: BTreeMap::new(),
+        };
+
+        let _ = write_host_log(
+            &runtime,
+            "warn",
+            "runtimeHealthChanged",
+            "运行时状态发生变化。",
+            serde_json::json!({
+                "healthy": false,
+                "reason": "helper exited",
+            }),
+        )
+        .expect("host log write should succeed");
+
+        let request = LAST_REQUEST
+            .get_or_init(|| Mutex::new(None))
+            .lock()
+            .expect("request slot should lock")
+            .clone()
+            .expect("request should be recorded");
+        assert_eq!(request.plugin_id, "momobako.system");
+        assert_eq!(request.method, "system.log.write");
+        assert_eq!(
+            request.payload.get("pluginId").and_then(serde_json::Value::as_str),
+            Some("momobako.service.office-convert")
+        );
+        assert_eq!(
+            request.payload.get("sourceKind").and_then(serde_json::Value::as_str),
+            Some("backend-plugin")
+        );
+        assert_eq!(
+            request.payload.get("action").and_then(serde_json::Value::as_str),
+            Some("runtimeHealthChanged")
+        );
         register_host_plugin_api(None, None);
     }
 }

@@ -16,6 +16,7 @@ import type {
   PlaylistMutationRequest,
   PlaylistSummary,
 } from "../../types/repository";
+import { emitSystemLogSilently } from "../../services/systemLog";
 import {
   activePanel,
   activePlaylistDetail,
@@ -153,25 +154,53 @@ export async function selectPlaylist(playlistId: string) {
 
 export async function createPlaylistInWorkspace(request: Omit<PlaylistMutationRequest, "repoId">) {
   if (!activeRepoId.value) return null;
+  emitSystemLogSilently("info", {
+    category: "playlist",
+    action: "createStart",
+    message: "开始创建播放集。",
+    repoId: activeRepoId.value,
+    context: { name: request.name },
+  });
   const response = await createPlaylist({ ...request, repoId: activeRepoId.value });
   playlists.value = response.playlists;
   await syncPlaylistMemberships(activeRepoId.value, response.playlists);
   if (response.playlist?.playlistId) {
     await selectPlaylist(response.playlist.playlistId);
   }
+  emitSystemLogSilently("info", {
+    category: "playlist",
+    action: "createSuccess",
+    message: "播放集创建完成。",
+    repoId: activeRepoId.value,
+    context: { playlistId: response.playlist?.playlistId ?? null, name: response.playlist?.name ?? request.name },
+  });
   return response;
 }
 
 export async function deletePlaylistInWorkspace(playlistId: string) {
   if (!activeRepoId.value) return null;
+  emitSystemLogSilently("warn", {
+    category: "playlist",
+    action: "deleteStart",
+    message: "开始删除播放集。",
+    repoId: activeRepoId.value,
+    context: { playlistId },
+  });
   const response = await deletePlaylist(activeRepoId.value, playlistId);
   playlists.value = response.playlists;
   await syncPlaylistMemberships(activeRepoId.value, response.playlists);
   if (activePlaylistId.value === playlistId) {
     activePlaylistId.value = null;
     activePlaylistDetail.value = null;
-    if (activePanel.value === "playlist") activePanel.value = "files";
+  if (activePanel.value === "playlist") activePanel.value = "files";
   }
+  emitSystemLogSilently("warn", {
+    category: "playlist",
+    action: "deleteSuccess",
+    message: "播放集删除完成。",
+    repoId: activeRepoId.value,
+    context: { playlistId },
+  });
   return response;
 }
 

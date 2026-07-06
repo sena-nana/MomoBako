@@ -39,6 +39,7 @@ use services::repository::{
     RepositoryFolderRequest, RepositoryMutationRequest, RepositoryMutationResponse,
     RepositoryRelocateRequest, RepositorySnapshot, RepositorySummary, RepositoryTreeSnapshot,
     RevisionActionRequest, RevisionActionResponse, SearchRequest, SearchResponse,
+    SystemLogPage, SystemLogQuery, SystemLogRecord, SystemLogWriteRequest,
     SmartFolderMutationRequest, SmartFolderMutationResponse, SmartFolderResultSnapshot,
     SmartFolderTreeNode, SmartFolderUpdateRequest, SyncRequest, SyncResult, ThumbnailRequest,
     ThumbnailResponse, TrashMutationRequest,
@@ -723,6 +724,29 @@ async fn get_external_api_connection_status(
     system_vm.get_external_api_connection_status().await
 }
 
+#[tauri::command]
+async fn list_system_logs(
+    query: Option<SystemLogQuery>,
+    system_vm: tauri::State<'_, SystemViewModel>,
+) -> Result<SystemLogPage, String> {
+    system_vm.list_system_logs(query).await
+}
+
+#[tauri::command]
+async fn write_system_log(
+    request: SystemLogWriteRequest,
+    system_vm: tauri::State<'_, SystemViewModel>,
+) -> Result<SystemLogRecord, String> {
+    system_vm.write_system_log(request).await
+}
+
+#[tauri::command]
+async fn clear_system_logs(
+    system_vm: tauri::State<'_, SystemViewModel>,
+) -> Result<(), String> {
+    system_vm.clear_system_logs().await
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     app_shell::builder()
@@ -802,7 +826,10 @@ pub fn run() {
             install_plugin_from_archive,
             get_cache_snapshot,
             get_api_design_snapshot,
-            get_external_api_connection_status
+            get_external_api_connection_status,
+            list_system_logs,
+            write_system_log,
+            clear_system_logs
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

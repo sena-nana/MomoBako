@@ -24,6 +24,7 @@ import {
   seedMockRepositories,
   seedMockRepositoryActions,
   seedMockSmartFolders,
+  seedMockSystemLogs,
   seedMissingMockRepository,
   seedMixedMockRepositories,
   seedLargeMockDirectory,
@@ -35,7 +36,7 @@ import {
   selectMockFolder,
 } from "./setupTests";
 import { getPreviewPluginForEntry } from "../src/plugins/previewPlugins";
-import type { FileBrowserEntry, PlaylistDetail, PlaylistSummary, SmartFolder } from "../src/types/repository";
+import type { FileBrowserEntry, PlaylistDetail, PlaylistSummary, SmartFolder, SystemLogRecord } from "../src/types/repository";
 import type { MockEntry, MockRepository } from "./fixtures/repositoryFixtures";
 import { altRepository, createMockPlugins, defaultRepositoryActions, initialEntries, mockSnapshot, pluginManifest } from "./fixtures/repositoryFixtures";
 
@@ -85,12 +86,16 @@ async function waitForCurrentWorkspaceView() {
     const selector = workspace.activeSnapshot.value
       ? workspace.activePanel.value === "search"
           ? ".search-workbench"
+          : workspace.activePanel.value === "logs"
+            ? ".logs-workbench"
           : workspace.activePanel.value === "extensions"
             ? ".extensions-workbench"
             : ".files-browser, .files-preview-page__body"
-      : workspace.activeRepository.value?.status === "missing"
-        ? ".missing-repository-page"
-        : ".empty-state-page";
+      : workspace.activePanel.value === "logs"
+        ? ".logs-workbench"
+        : workspace.activeRepository.value?.status === "missing"
+          ? ".missing-repository-page"
+          : ".empty-state-page";
     expect(document.querySelector(selector)).toBeInTheDocument();
   });
 }
@@ -220,6 +225,31 @@ function smartFolderFixture(
     sortOrder: 0,
     createdAt: "2026-06-05T00:18:00Z",
     updatedAt: "2026-06-05T00:18:00Z",
+  };
+}
+
+function systemLogFixture(partial: Partial<SystemLogRecord> & Pick<SystemLogRecord, "id" | "timestamp" | "level" | "category" | "action" | "message">): SystemLogRecord {
+  return {
+    id: partial.id,
+    timestamp: partial.timestamp,
+    level: partial.level,
+    category: partial.category,
+    action: partial.action,
+    message: partial.message,
+    source: {
+      kind: "frontend-host",
+      label: "MomoBako UI",
+      pluginId: null,
+      repoId: "repo-main-001",
+      ...partial.source,
+    },
+    location: {
+      modulePath: "tests.router",
+      file: "tests/router.test.ts",
+      line: 1,
+      ...partial.location,
+    },
+    context: partial.context ?? {},
   };
 }
 
@@ -649,6 +679,125 @@ describe("文件管理冒烟", () => {
     expect(screen.getByRole("button", { name: "刷新文件夹树" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "新建智能文件夹" })).toBeDisabled();
     expect(getInvokeCalls("get_repository_snapshot")).toHaveLength(0);
+  });
+
+  it("日志入口位于任务右侧，支持筛选、实时追加与清空", async () => {
+    seedMockRepository();
+    seedMockSystemLogs([
+      systemLogFixture({
+        id: "log-1",
+        timestamp: "2026-07-05T10:00:00Z",
+        level: "info",
+        category: "repository",
+        action: "loadSuccess",
+        message: "资源库已完成首屏加载。",
+        source: {
+          kind: "frontend-host",
+          label: "MomoBako UI",
+          repoId: "repo-main-001",
+        },
+      }),
+      systemLogFixture({
+        id: "log-2",
+        timestamp: "2026-07-05T10:00:03Z",
+        level: "error",
+        category: "plugin.runtime",
+        action: "startupFailed",
+        message: "插件启动失败。",
+        source: {
+          kind: "backend-plugin",
+          label: "Sample Runtime",
+          pluginId: "momobako.service.sample",
+          repoId: "repo-main-001",
+        },
+        context: {
+          error: "helper crashed",
+        },
+      }),
+      systemLogFixture({
+        id: "log-3",
+        timestamp: "2026-07-05T10:00:06Z",
+        level: "debug",
+        category: "watcher",
+        action: "refresh",
+        message: "文件监听器已刷新。",
+        source: {
+          kind: "helper",
+          label: "Repository Watcher",
+          repoId: "repo-main-001",
+        },
+      }),
+    ]);
+    await renderApp();
+
+    const taskButton = screen.getByRole("button", { name: "任务" });
+    const logButton = screen.getByRole("button", { name: "日志" });
+    expect(taskButton.nextElementSibling).toBe(logButton);
+
+    await fireEvent.click(logButton);
+    expect(await screen.findByRole("heading", { name: "系统日志" })).toBeInTheDocument();
+    await waitFor(() => {
+      expect(getInvokeCalls("list_system_logs").at(-1)?.args).toMatchObject({
+        query: {
+          limit: 200,
+        },
+      });
+    });
+
+    expect(screen.getByText("资源库已完成首屏加载。")).toBeInTheDocument();
+    expect(screen.getByText("插件启动失败。")).toBeInTheDocument();
+
+    await fireEvent.click(screen.getByRole("button", { name: "错误" }));
+    expect(screen.getByText("插件启动失败。")).toBeInTheDocument();
+    expect(screen.queryByText("资源库已完成首屏加载。")).not.toBeInTheDocument();
+
+    await fireEvent.click(screen.getByRole("button", { name: "重置筛选" }));
+    await fireEvent.update(screen.getByRole("searchbox", { name: "搜索日志" }), "刷新");
+    expect(screen.getByText("文件监听器已刷新。")).toBeInTheDocument();
+    expect(screen.queryByText("插件启动失败。")).not.toBeInTheDocument();
+
+    await fireEvent.update(screen.getByRole("searchbox", { name: "搜索日志" }), "");
+    await emitMockTauriEvent("system://log-recorded", systemLogFixture({
+      id: "log-4",
+      timestamp: "2026-07-05T10:00:08Z",
+      level: "warn",
+      category: "external.api",
+      action: "healthDegraded",
+      message: "外部 API 健康检查降级。",
+      source: {
+        kind: "host",
+        label: "MomoBako",
+      },
+    }));
+    expect(await screen.findByText("外部 API 健康检查降级。")).toBeInTheDocument();
+
+    await fireEvent.click(screen.getByRole("button", { name: "清空日志" }));
+    await waitFor(() => {
+      expect(getInvokeCalls("clear_system_logs")).toHaveLength(1);
+      expect(screen.getByRole("heading", { name: "还没有系统日志" })).toBeInTheDocument();
+    });
+  });
+
+  it("无活动仓库时仍可打开日志面板", async () => {
+    seedMockSystemLogs([
+      systemLogFixture({
+        id: "log-empty-1",
+        timestamp: "2026-07-05T09:30:00Z",
+        level: "info",
+        category: "app.lifecycle",
+        action: "startup",
+        message: "MomoBako 已启动。",
+        source: {
+          kind: "host",
+          label: "MomoBako",
+        },
+      }),
+    ]);
+    await renderApp();
+
+    await fireEvent.click(screen.getByRole("button", { name: "日志" }));
+    expect(await screen.findByRole("heading", { name: "系统日志" })).toBeInTheDocument();
+    expect(screen.getByText("MomoBako 已启动。")).toBeInTheDocument();
   });
 
   it("切换资源库时重新进入首屏加载页", async () => {

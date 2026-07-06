@@ -80,6 +80,7 @@ import {
   syncProgress,
   updateOperationProgress,
 } from "./tasks";
+import { resetSystemLogsForTests } from "./logs";
 import { invalidateThumbnailQueue } from "./thumbnails";
 import { scheduleIdleTask } from "./scheduler";
 import {
@@ -590,6 +591,7 @@ export function resetRepositoryWorkspaceForTests() {
   workspaceStartup.value = createInitialWorkspaceStartup();
   syncProgress.value = createInitialSyncProgress();
   setSyncProgress("idle", "", 0);
+  resetSystemLogsForTests();
   unlistenStructureUpdated?.();
   unlistenStructureUpdated = null;
   structureUpdatedListenerPromise = null;

@@ -16,13 +16,14 @@ import type {
   RepositorySnapshot,
   RepositorySummary,
   SearchHit,
+  SystemLogRecord,
   SmartFolderResultSnapshot,
   SmartFolderTreeNode,
   SyncResult,
   WorkspaceStartupState,
 } from "../../types/repository";
 
-export type WorkspacePanelKey = "files" | "trash" | "search" | "smartFolder" | "playlist" | "actions" | "extensions";
+export type WorkspacePanelKey = "files" | "trash" | "search" | "smartFolder" | "playlist" | "actions" | "extensions" | "logs";
 
 export type WorkspaceLibraryCategoryKey = "all" | "uncategorized" | "untagged" | "recent";
 
@@ -139,6 +140,7 @@ export const hardlinkCandidates = shallowRef<HardlinkCandidate[]>([]);
 export const lastSyncResult = shallowRef<SyncResult | null>(null);
 export const plugins = shallowRef<PluginManifest[]>([]);
 export const pluginHookExecutions = shallowRef<PluginHookExecutionRecord[]>([]);
+export const systemLogs = shallowRef<SystemLogRecord[]>([]);
 export const cacheSnapshot = shallowRef<CacheSnapshot | null>(null);
 export const apiDesign = shallowRef<ApiDesignSnapshot | null>(null);
 export const externalApiConnection = shallowRef<ExternalApiConnectionStatus | null>(null);
@@ -157,6 +159,8 @@ export const isSyncing = ref(false);
 export const isMutatingFiles = ref(false);
 export const isLoadingSettingsData = ref(false);
 export const isManagingPlugins = ref(false);
+export const isLoadingLogs = ref(false);
+export const isClearingLogs = ref(false);
 export const isExternalDragActive = ref(false);
 export const isInternalDragActive = ref(false);
 export const draggedWorkspacePaths = ref<string[]>([]);

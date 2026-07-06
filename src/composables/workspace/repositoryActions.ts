@@ -2,6 +2,7 @@ import {
   listRepositoryActions,
   runRepositoryAction,
 } from "../../services/repositoryApi";
+import { emitSystemLogSilently } from "../../services/systemLog";
 import {
   activePanel,
   activeRepoId,
@@ -54,6 +55,13 @@ export async function runActiveRepositoryAction(actionId = activeRepositoryActio
   const targetPaths = selectedFilePaths.value.length
     ? selectedFilePaths.value
     : selectedFilePath.value ? [selectedFilePath.value] : [];
+  emitSystemLogSilently("info", {
+    category: "repository.action",
+    action: "runStart",
+    message: "开始执行资源库动作。",
+    repoId,
+    context: { actionId, targetPaths },
+  });
   isRunningRepositoryAction.value = true;
   error.value = null;
   try {
@@ -69,9 +77,23 @@ export async function runActiveRepositoryAction(actionId = activeRepositoryActio
       directory: fileBrowser.value && !fileBrowser.value.specialLocation ? "current" : undefined,
       repositorySnapshot: true,
     }, loadFileBrowserForDirectory);
+    emitSystemLogSilently("info", {
+      category: "repository.action",
+      action: "runSuccess",
+      message: "资源库动作执行完成。",
+      repoId,
+      context: { actionId, targetPaths },
+    });
     return response;
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : String(cause);
+    emitSystemLogSilently("error", {
+      category: "repository.action",
+      action: "runFailed",
+      message: "资源库动作执行失败。",
+      repoId,
+      context: { actionId, targetPaths, error: error.value },
+    });
     return null;
   } finally {
     isRunningRepositoryAction.value = false;

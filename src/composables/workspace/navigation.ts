@@ -3,6 +3,7 @@ import {
   getRepositorySnapshot,
   syncRepository,
 } from "../../services/repositoryApi";
+import { emitSystemLogSilently } from "../../services/systemLog";
 import {
   activeLibraryCategory,
   activeAssetDetail,
@@ -48,11 +49,18 @@ import {
   resetActiveRepositoryContent,
   setWorkspaceStartupProgress,
 } from "./lifecycle";
+import { loadSystemLogsInWorkspace } from "./logs";
 import { loadSettingsData } from "./settings";
 
 export async function selectRepository(repoId: string) {
   if (!repoId) return;
 
+  emitSystemLogSilently("info", {
+    category: "repository",
+    action: "selectStart",
+    message: "开始切换资源库。",
+    repoId,
+  });
   const isSwitchingRepository = activeRepoId.value !== repoId;
   const previousDirectoryPath = !isSwitchingRepository ? currentDirectoryPath.value : "";
   const previousRepoId = activeRepoId.value;
@@ -81,6 +89,12 @@ export async function selectRepository(repoId: string) {
       if (progressId) {
         finishOperationProgress(progressId);
       }
+      emitSystemLogSilently("warn", {
+        category: "repository",
+        action: "selectMissing",
+        message: "资源库处于缺失状态。",
+        repoId,
+      });
       return;
     }
 
@@ -148,9 +162,23 @@ export async function selectRepository(repoId: string) {
     if (progressId) {
       finishOperationProgress(progressId);
     }
+    emitSystemLogSilently("info", {
+      category: "repository",
+      action: "selectSuccess",
+      message: "资源库切换完成。",
+      repoId,
+      context: { switched: isSwitchingRepository },
+    });
   } catch (cause) {
     const message = cause instanceof Error ? cause.message : String(cause);
     error.value = message;
+    emitSystemLogSilently("error", {
+      category: "repository",
+      action: "selectFailed",
+      message: "资源库切换失败。",
+      repoId,
+      context: { error: message },
+    });
     if (isSwitchingRepository) {
       failWorkspaceStartup(message);
     }
@@ -188,6 +216,9 @@ export function setActivePanel(panel: WorkspacePanelKey) {
   }
   if (panel === "trash" && activeRepoId.value) {
     void loadFileBrowserForDirectory("", { specialLocation: "trash" });
+  }
+  if (panel === "logs") {
+    void loadSystemLogsInWorkspace();
   }
 }
 

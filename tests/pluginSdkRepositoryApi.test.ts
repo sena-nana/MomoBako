@@ -88,6 +88,44 @@ function vueShallowRefToolManifest(): PluginManifest {
   };
 }
 
+function frontendLoggerToolManifest(): PluginManifest {
+  return {
+    pluginId: "user.frontend-logger-tool",
+    name: "Frontend Logger Tool",
+    version: "0.1.0",
+    kind: "tool",
+    category: "tool",
+    description: "验证前端插件日志接口。",
+    capabilities: ["tool", "logger"],
+    enabled: true,
+    sdk: "frontend",
+    entry: {
+      frontend: {
+        module: "dist/register.js",
+        export: "register",
+      },
+    },
+    source: "user",
+    runtime: "vue-module",
+    permissions: [],
+    requires: [],
+    optional: [],
+    hooks: [],
+    contributes: {},
+    compat: { sdkVersion: "1", legacyPluginIds: [] },
+    status: "ready",
+    dependencyStatus: {
+      required: [],
+      optional: [],
+      missingRequired: [],
+      missingOptional: [],
+      disabledRequired: [],
+      disabledOptional: [],
+    },
+    degraded: false,
+  };
+}
+
 describe("plugin sdk repository cache preview source bridge", () => {
   afterEach(() => {
     clearPreviewPluginRegistry();
@@ -159,5 +197,36 @@ describe("plugin sdk repository cache preview source bridge", () => {
     });
 
     expect(await screen.findByText("context-ready")).toBeInTheDocument();
+  });
+
+  it("injects logger helpers into frontend plugin context with automatic metadata", async () => {
+    const manifest = frontendLoggerToolManifest();
+
+    await syncRegisteredFrontendPluginManifests([manifest]);
+    const page = getToolPage("user.frontend-logger-tool");
+
+    expect(page?.component).toBeDefined();
+
+    render(page!.component, {
+      props: {
+        manifest,
+      },
+    });
+
+    expect(await screen.findByText("logger-ready")).toBeInTheDocument();
+    expect(getInvokeCalls("write_system_log").at(-1)?.args).toMatchObject({
+      level: "info",
+      category: "plugin.test",
+      action: "toolMounted",
+      message: "插件日志已写入。",
+      repoId: "repo-main-001",
+      pluginId: "user.frontend-logger-tool",
+      sourceKind: "frontend-plugin",
+      sourceLabel: "Frontend Logger Tool",
+      location: {
+        modulePath: "dist/register.js",
+        file: "dist/register.js",
+      },
+    });
   });
 });

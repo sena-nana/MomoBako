@@ -15,6 +15,7 @@ import type {
   SmartFolder,
   SmartFolderFilter,
   SmartFolderTreeNode,
+  SystemLogRecord,
 } from "../src/types/repository";
 import {
   altEntries,
@@ -53,6 +54,7 @@ let mockPlugins: PluginManifest[] | null = null;
 let mockPlaylists: PlaylistSummary[] | null = null;
 let mockPlaylistDetails: Record<string, PlaylistDetail> = {};
 let mockPluginConfigValues: Record<string, Record<string, unknown>> = {};
+let mockSystemLogs: SystemLogRecord[] = [];
 const pluginCallCalls: Array<{ pluginId: string; method: string; payload: unknown }> = [];
 const pluginCallMockResponses = new Map<string, unknown>();
 const invokeCalls: Array<{ command: string; args?: Record<string, unknown> }> = [];
@@ -510,6 +512,92 @@ function buildTree(entries = mockEntries) {
   return roots;
 }
 
+function listMockSystemLogs(query?: {
+  limit?: number;
+  before?: string | null;
+  levels?: string[];
+  sourceKinds?: string[];
+  pluginId?: string | null;
+  repoId?: string | null;
+  query?: string | null;
+}) {
+  const limit = Math.max(1, Math.min(query?.limit ?? 200, 500));
+  const keyword = query?.query?.trim().toLowerCase() ?? "";
+  const records = mockSystemLogs
+    .filter((record) => !query?.before || record.timestamp < query.before)
+    .filter((record) => !query?.levels?.length || query.levels.includes(record.level))
+    .filter((record) => !query?.sourceKinds?.length || query.sourceKinds.includes(record.source.kind))
+    .filter((record) => !query?.pluginId || record.source.pluginId === query.pluginId)
+    .filter((record) => !query?.repoId || record.source.repoId === query.repoId)
+    .filter((record) => {
+      if (!keyword) return true;
+      return [
+        record.level,
+        record.category,
+        record.action,
+        record.message,
+        record.source.kind,
+        record.source.label ?? "",
+        record.source.pluginId ?? "",
+        record.source.repoId ?? "",
+        record.location.modulePath ?? "",
+        record.location.file ?? "",
+        JSON.stringify(record.context ?? {}),
+      ]
+        .join("\n")
+        .toLowerCase()
+        .includes(keyword);
+    })
+    .slice()
+    .sort((left, right) => (
+      right.timestamp.localeCompare(left.timestamp)
+      || right.id.localeCompare(left.id)
+    ));
+  return {
+    records: records.slice(0, limit),
+    nextCursor: records.length > limit ? records[limit]?.timestamp ?? null : null,
+  };
+}
+
+function createMockSystemLogRecord(request: {
+  level?: string;
+  category?: string;
+  action?: string;
+  message?: string;
+  context?: Record<string, unknown>;
+  repoId?: string | null;
+  pluginId?: string | null;
+  sourceKind?: string | null;
+  sourceLabel?: string | null;
+  location?: {
+    modulePath?: string | null;
+    file?: string | null;
+    line?: number | null;
+  } | null;
+}): SystemLogRecord {
+  const index = mockSystemLogs.length + 1;
+  return {
+    id: `mock-log-${index}`,
+    timestamp: new Date(Date.UTC(2026, 6, 5, 12, 0, index)).toISOString(),
+    level: request.level ?? "info",
+    category: request.category ?? "test",
+    action: request.action ?? "mockAction",
+    message: request.message ?? "mock log",
+    source: {
+      kind: request.sourceKind ?? "frontend-host",
+      label: request.sourceLabel ?? "MomoBako UI",
+      pluginId: request.pluginId ?? null,
+      repoId: request.repoId ?? null,
+    },
+    location: {
+      modulePath: request.location?.modulePath ?? "tests.setup",
+      file: request.location?.file ?? "tests/setupTests.ts",
+      line: request.location?.line ?? 1,
+    },
+    context: request.context ?? {},
+  };
+}
+
 function getEntriesForDirectory(entries: MockEntry[], directoryPath: string) {
   return entries
     .filter((entry) => getParentPath(entry.path) === directoryPath)
@@ -614,6 +702,32 @@ function previewPluginModuleSource(pluginId: string) {
       "      setup() {",
       "        const message = shallowRef('context-ready');",
       "        return () => h('section', { class: 'mock-vue-shallow-ref-tool' }, message.value);",
+      "      },",
+      "    },",
+      "  });",
+      "}",
+      "",
+    ].join("\n");
+  }
+  if (pluginId === "user.frontend-logger-tool") {
+    return [
+      "export function register(ctx) {",
+      "  ctx.registerToolPage({",
+      "    toolPageId: 'user.frontend-logger-tool',",
+      "    label: 'Frontend Logger Tool',",
+      "    description: '验证前端插件 logger 接口。',",
+      "    component: {",
+      "      name: 'FrontendLoggerTool',",
+      "      template: '<section class=\"mock-frontend-logger-tool\">{{ state }}</section>',",
+      "      data() { return { state: 'pending' }; },",
+      "      async mounted() {",
+      "        await ctx.logger.info('插件日志已写入。', {",
+      "          category: 'plugin.test',",
+      "          action: 'toolMounted',",
+      "          repoId: 'repo-main-001',",
+      "          context: { ready: true },",
+      "        });",
+      "        this.state = 'logger-ready';",
       "      },",
       "    },",
       "  });",
@@ -1553,6 +1667,45 @@ vi.mock("@tauri-apps/api/core", () => ({
       mockPlugins ??= createMockPlugins();
       return mockPlugins;
     }
+    if (command === "list_system_logs") {
+      return listMockSystemLogs(args?.query as {
+        limit?: number;
+        before?: string | null;
+        levels?: string[];
+        sourceKinds?: string[];
+        pluginId?: string | null;
+        repoId?: string | null;
+        query?: string | null;
+      } | undefined);
+    }
+    if (command === "write_system_log") {
+      const record = createMockSystemLogRecord(args as {
+        level?: string;
+        category?: string;
+        action?: string;
+        message?: string;
+        context?: Record<string, unknown>;
+        repoId?: string | null;
+        pluginId?: string | null;
+        sourceKind?: string | null;
+        sourceLabel?: string | null;
+        location?: {
+          modulePath?: string | null;
+          file?: string | null;
+          line?: number | null;
+        } | null;
+      });
+      mockSystemLogs = [...mockSystemLogs, record];
+      const listeners = Array.from(tauriEventListeners.get("system://log-recorded") ?? []);
+      await Promise.all(listeners.map(async (listener) => {
+        await listener({ event: "system://log-recorded", payload: record });
+      }));
+      return record;
+    }
+    if (command === "clear_system_logs") {
+      mockSystemLogs = [];
+      return undefined;
+    }
     if (command === "list_plugin_hook_executions") {
       return { records: [] };
     }
@@ -1876,6 +2029,43 @@ vi.mock("@tauri-apps/api/core", () => ({
             requestTemplate: {},
           },
           {
+            group: "System Log API",
+            transport: "tauri-command",
+            method: "INVOKE",
+            path: "list_system_logs",
+            command: "list_system_logs",
+            summary: "分页读取系统日志。",
+            requestTemplate: {
+              query: {
+                limit: 200,
+                levels: ["error"],
+              },
+            },
+          },
+          {
+            group: "System Log API",
+            transport: "tauri-command",
+            method: "INVOKE",
+            path: "write_system_log",
+            command: "write_system_log",
+            summary: "写入一条标准化系统日志。",
+            requestTemplate: {
+              level: "info",
+              category: "frontend-host",
+              action: "openLogsPanel",
+              message: "打开日志中心面板。",
+            },
+          },
+          {
+            group: "System Log API",
+            transport: "tauri-command",
+            method: "INVOKE",
+            path: "clear_system_logs",
+            command: "clear_system_logs",
+            summary: "清空当前系统日志缓存与归档。",
+            requestTemplate: {},
+          },
+          {
             group: "File API",
             transport: "tauri-command",
             method: "INVOKE",
@@ -2168,6 +2358,7 @@ afterEach(() => {
   mockPlaylists = null;
   mockPlaylistDetails = {};
   mockPluginConfigValues = {};
+  mockSystemLogs = [];
   mockRepositories = [];
   mockEntries = initialEntries();
   mockTrashEntries = initialTrashEntries();
@@ -2270,6 +2461,10 @@ export function seedMockSmartFolders(smartFolders: SmartFolder[]) {
 
 export function seedMockPluginConfig(pluginId: string, values: Record<string, unknown>) {
   mockPluginConfigValues[pluginId] = { ...values };
+}
+
+export function seedMockSystemLogs(records: SystemLogRecord[]) {
+  mockSystemLogs = cloneSnapshot(records);
 }
 
 export function mockPluginCallResponse(pluginId: string, method: string, payload: unknown) {

@@ -371,6 +371,28 @@
 - Eagle multi-folder membership is exposed as multiple logical file paths that share the same `sharedAssetId`. The host rebuilds alias relations from that shared asset id during sync.
 - Mounted Eagle repository state comes from `metadata.json`, `tags.json`, `saved-filters.json`, `actions.json`, and `images/*.info/metadata.json`.
 
+## System Log API
+
+- 宿主维护统一日志总线，内存保留最近 500 条记录，同时把标准化日志落盘到 `<serviceRoot>/logs/system.current.jsonl`。
+- 当前日志文件超过 `8 MiB` 时会轮转为 `system.1.jsonl` 到 `system.5.jsonl`；`clear_system_logs` 会同时清空内存缓存与全部归档文件。
+- 磁盘文件固定使用 JSONL，不写 ANSI 颜色码；彩色级别、高亮来源和上下文展开都由前端日志中心负责渲染。
+- `list_system_logs`
+  - Request shape: `{ query }`
+  - `query` 支持 `limit`, `before`, `levels`, `sourceKinds`, `pluginId`, `repoId`, `query`
+  - 默认首屏读取最近 200 条
+- `write_system_log`
+  - Request shape: `SystemLogWriteRequest`
+  - 宿主补齐 `id`, `timestamp`, `source` 与 `location` 缺省字段
+- `clear_system_logs`
+  - 清空 JSONL 文件、轮转归档和内存环形缓冲
+- `system://log-recorded`
+  - Payload: `SystemLogRecord`
+  - 新日志写入后立即广播，供日志中心面板实时追加
+- 标准日志字段：
+  - `level`: `debug | info | warn | error`
+  - `source.kind`: `host | frontend-host | frontend-plugin | backend-plugin | helper`
+  - `record`: `id, timestamp, level, category, action, message, source, location, context`
+
 ## Plugin API
 
 - `GET /plugins`
@@ -399,6 +421,7 @@
   - `permissions` are host-visible permission claims. The plugin manager displays them for review; runtime authorization enforcement is still tracked as plugin-orchestration follow-up work.
   - Backend plugin IDs are normalized to the `momobako.*` namespace; legacy `builtin.*` IDs remain accepted when reading existing repositories
   - Each plugin has a host-owned data directory under `<serviceRoot>/plugin-data/<pluginSlug>` for plugin settings files and plugin-owned cache. The host creates it on demand and exposes it to frontend plugins through the SDK. Plugin key-value config is stored in that directory as `config.json` and accessed through the same normalized plugin ID path used by data-directory APIs and backend call runtime context.
+  - Frontend plugins receive `ctx.logger.debug/info/warn/error(message, options)` from the SDK. The host auto-fills `pluginId`, `sourceKind: "frontend-plugin"`, plugin label, and the current frontend module path before forwarding to `write_system_log`.
   - Disabled or manifest-only source backends are displayed but not offered as usable repository backends until enabled with an available runtime
   - Filesystem backend `listFiles` responses include `absolutePath`, `relativePath`, `filename`, `extension`, `sizeBytes`, and `modifiedAt`; the runtime tolerates legacy responses without `absolutePath` by resolving `relativePath` under `repoRoot`
   - Source `listFiles` and `listDirectory` payloads may additionally include `status: "synced" | "deleted"`, `sharedAssetId`, `tags`, and `thumbnailLocalAbsolutePath`.
@@ -411,6 +434,7 @@
   - Used by frontend preview or codec plugins to invoke native plugin capabilities without adding file-format-specific commands to the core runtime
   - Native plugin call envelopes include `runtime.pluginId`, `runtime.pluginDataDir`, `runtime.serviceRootDir`, and `runtime.pluginConfig`; `pluginDataDir` points to the plugin's own persistent directory and is created before dispatch, `serviceRootDir` points to the host service storage root, and `pluginConfig` is the current host-managed key-value config from `config.json`.
   - Native backend plugins may register an optional host callback bridge and call other backend plugins through the host. The current first-party use case is `momobako.service.office-convert` calling `momobako.service.downloader` to download bundled LibreOffice runtimes through the shared aria2 task layer.
+  - 内建宿主桥还暴露 `pluginId = "momobako.system"` / `method = "system.log.write"`，供后端插件写入统一日志中心。Rust SDK helper `write_host_log(runtime, level, action, message, context)` 会自动带上 `pluginId` 和 `sourceKind: "backend-plugin"`。
   - Source backends may expose:
     - `filesystem.describeRepositoryState`
       - Request: `{ repoRoot, config }`

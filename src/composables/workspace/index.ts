@@ -26,10 +26,16 @@ export {
   setActivePreviewPath,
 } from "./navigation";
 export {
+  clearSystemLogsInWorkspace,
+  ensureSystemLogSubscription,
+  loadSystemLogsInWorkspace,
+} from "./logs";
+export {
   useRepositoryWorkspace,
   useWorkspaceAssetMetadata,
   useWorkspaceActions,
   useWorkspaceFiles,
+  useWorkspaceLogs,
   useWorkspaceNavigation,
   useWorkspacePlaylists,
   useWorkspaceProgress,

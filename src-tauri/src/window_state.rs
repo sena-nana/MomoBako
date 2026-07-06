@@ -157,7 +157,13 @@ pub fn persist_main_window_snapshot(
     snapshot: MainWindowSnapshot,
 ) {
     if let Err(error) = save_main_window_state(app, snapshot, cache.latest_normal_state()) {
-        eprintln!("[window-state] {error}");
+        crate::app_log!(
+            "warn",
+            "window.state",
+            "persistFailed",
+            "保存主窗口状态失败。",
+            serde_json::json!({ "error": error })
+        );
     }
 }
 

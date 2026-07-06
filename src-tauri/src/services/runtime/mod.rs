@@ -95,6 +95,14 @@ impl RepositoryRuntime {
         let _ = self
             .repository_state
             .shutdown_runtime_helpers()
-            .map_err(|error| eprintln!("runtime helper shutdown failed: {error}"));
+            .map_err(|error| {
+                crate::app_log!(
+                    "warn",
+                    "runtime.helper",
+                    "shutdownFailed",
+                    "运行时辅助进程停止失败。",
+                    serde_json::json!({ "error": error })
+                )
+            });
     }
 }

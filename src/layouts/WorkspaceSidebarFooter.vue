@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { RouterLink } from "vue-router";
-import { Puzzle, Settings } from "@lucide/vue";
+import { Logs, Puzzle, Settings } from "@lucide/vue";
 import TaskPopover from "../components/TaskPopover.vue";
 import type { WorkspacePanelKey } from "../composables/useRepositoryWorkspace";
 
@@ -11,6 +11,7 @@ defineProps<{
 
 const emit = defineEmits<{
   selectExtensions: [];
+  selectLogs: [];
 }>();
 </script>
 
@@ -36,5 +37,15 @@ const emit = defineEmits<{
       <Puzzle :size="14" aria-hidden="true" />
     </button>
     <TaskPopover />
+    <button
+      type="button"
+      class="workspace-footer__btn"
+      :class="{ 'is-active': activePanel === 'logs' && !isSettingsRoute }"
+      title="日志"
+      aria-label="日志"
+      @click="emit('selectLogs')"
+    >
+      <Logs :size="14" aria-hidden="true" />
+    </button>
   </footer>
 </template>

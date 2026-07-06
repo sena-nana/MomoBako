@@ -2,6 +2,8 @@
 
 use super::*;
 
+use crate::services::logging::write_log;
+
 pub(super) type PluginManifestFn = unsafe extern "C" fn() -> *mut c_char;
 pub(super) type PluginCallFn = unsafe extern "C" fn(*const c_char) -> *mut c_char;
 pub(super) type PluginFreeFn = unsafe extern "C" fn(*mut c_char);
@@ -405,11 +407,28 @@ fn read_host_plugin_call(input: *const c_char) -> Result<HostPluginCallEnvelope,
 }
 
 fn dispatch_host_plugin_call(request: HostPluginCallEnvelope) -> Result<serde_json::Value, String> {
+    if request.plugin_id.trim() == "momobako.system" {
+        return dispatch_internal_host_system_call(&request.method, request.payload);
+    }
     backend_plugin_registry(Path::new(request.service_root_dir.trim())).call(
         &request.plugin_id,
         &request.method,
         request.payload,
     )
+}
+
+fn dispatch_internal_host_system_call(
+    method: &str,
+    payload: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    match method.trim() {
+        "system.log.write" => {
+            let request = serde_json::from_value::<SystemLogWriteRequest>(payload).map_err(json_error)?;
+            let record = write_log(request)?;
+            serde_json::to_value(record).map_err(json_error)
+        }
+        _ => Err(format!("unsupported internal host method: {method}")),
+    }
 }
 
 pub(super) fn plugin_call_runtime(manifest: &PluginManifest) -> Option<PluginCallRuntime> {
@@ -496,10 +515,15 @@ pub(super) fn load_plugin_manifests_from_runtime(
     match read_plugin_manifests_from_dir(&runtime_root) {
         Ok(manifests) => manifests,
         Err(error) => {
-            eprintln!(
-                "failed to read runtime plugin manifests from {}: {}",
-                runtime_root.display(),
-                error
+            crate::app_log!(
+                "error",
+                "plugin.runtime",
+                "manifestScanFailed",
+                "读取运行时插件清单失败。",
+                serde_json::json!({
+                    "runtimeRoot": runtime_root.display().to_string(),
+                    "error": error,
+                })
             );
             Vec::new()
         }
@@ -664,4 +688,78 @@ pub(super) fn default_cache_entries() -> Vec<CacheEntry> {
             last_accessed_at: now_rfc3339(),
         },
     ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::services::logging::{set_global_logger, AppLogger};
+    use crate::services::repository::SystemLogPage;
+    use std::{
+        path::PathBuf,
+        sync::Arc,
+        time::{SystemTime, UNIX_EPOCH},
+    };
+
+    fn test_root(name: &str) -> PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time should move forward")
+            .as_nanos();
+        std::env::temp_dir().join(format!("momobako-plugin-runtime-{name}-{unique}"))
+    }
+
+    fn list_records(logger: &AppLogger) -> SystemLogPage {
+        logger
+            .list(Some(SystemLogQuery {
+                limit: Some(20),
+                ..SystemLogQuery::default()
+            }))
+            .expect("logs should list")
+    }
+
+    #[test]
+    fn internal_system_log_bridge_writes_standard_record() {
+        let root = test_root("system-log-write");
+        let logger = Arc::new(AppLogger::new(root.clone()).expect("logger should initialize"));
+        set_global_logger(Some(logger.clone())).expect("global logger should register");
+
+        let payload = dispatch_host_plugin_call(HostPluginCallEnvelope {
+            service_root_dir: root.display().to_string(),
+            plugin_id: "momobako.system".to_string(),
+            method: "system.log.write".to_string(),
+            payload: serde_json::json!({
+                "level": "warn",
+                "category": "plugin.runtime",
+                "action": "healthChanged",
+                "message": "后端插件运行状态变化。",
+                "pluginId": "momobako.service.test",
+                "repoId": "repo-main-001",
+                "sourceKind": "backend-plugin",
+                "sourceLabel": "Test Backend Plugin",
+                "context": {
+                    "healthy": false,
+                },
+                "location": {
+                    "modulePath": "plugin.runtime",
+                    "file": "runtime.rs",
+                    "line": 42,
+                }
+            }),
+        })
+        .expect("internal host call should succeed");
+
+        let record: SystemLogRecord =
+            serde_json::from_value(payload).expect("record payload should decode");
+        assert_eq!(record.action, "healthChanged");
+        assert_eq!(record.source.kind, "backend-plugin");
+        assert_eq!(record.source.plugin_id.as_deref(), Some("momobako.service.test"));
+
+        let page = list_records(logger.as_ref());
+        assert_eq!(page.records.len(), 1);
+        assert_eq!(page.records[0].message, "后端插件运行状态变化。");
+
+        set_global_logger(None).expect("global logger should clear");
+        let _ = std::fs::remove_dir_all(root);
+    }
 }

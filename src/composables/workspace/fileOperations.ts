@@ -54,6 +54,7 @@ import {
   refreshWorkspaceAfterMutation,
   type WorkspaceRefreshPlan,
 } from "./refresh";
+import { emitSystemLogSilently } from "../../services/systemLog";
 
 function defaultDirectoryRefreshPlan(paths: string[]): WorkspaceRefreshPlan["directory"] {
   if (activePanel.value === "trash") return "trash";
@@ -151,6 +152,13 @@ async function finishWorkspaceImport(
 
 export async function createDirectoryInWorkspace(name: string, parentPath = currentDirectoryPath.value) {
   if (!activeRepoId.value) return null;
+  emitSystemLogSilently("info", {
+    category: "file",
+    action: "createDirectoryStart",
+    message: "开始创建文件夹。",
+    repoId: activeRepoId.value,
+    context: { name, parentPath },
+  });
   isMutatingFiles.value = true;
   error.value = null;
   try {
@@ -161,9 +169,23 @@ export async function createDirectoryInWorkspace(name: string, parentPath = curr
     });
     applyFileBrowserSnapshot(snapshot);
     await refreshAfterFileMutation(activeRepoId.value, { repositorySnapshot: true });
+    emitSystemLogSilently("info", {
+      category: "file",
+      action: "createDirectorySuccess",
+      message: "文件夹创建完成。",
+      repoId: activeRepoId.value,
+      context: { name, parentPath },
+    });
     return snapshot;
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : String(cause);
+    emitSystemLogSilently("error", {
+      category: "file",
+      action: "createDirectoryFailed",
+      message: "文件夹创建失败。",
+      repoId: activeRepoId.value,
+      context: { name, parentPath, error: error.value },
+    });
     return null;
   } finally {
     isMutatingFiles.value = false;
@@ -172,6 +194,13 @@ export async function createDirectoryInWorkspace(name: string, parentPath = curr
 
 export async function createFileInWorkspace(name: string, parentPath = currentDirectoryPath.value) {
   if (!activeRepoId.value) return null;
+  emitSystemLogSilently("info", {
+    category: "file",
+    action: "createFileStart",
+    message: "开始创建文件。",
+    repoId: activeRepoId.value,
+    context: { name, parentPath },
+  });
   isMutatingFiles.value = true;
   error.value = null;
   const hadExplicitSelection = hasExplicitWorkspaceSelection();
@@ -187,9 +216,23 @@ export async function createFileInWorkspace(name: string, parentPath = currentDi
       applyWorkspaceSelection([createdPath], createdPath, createdPath);
     }
     await refreshAfterFileMutation(activeRepoId.value, { repositorySnapshot: true });
+    emitSystemLogSilently("info", {
+      category: "file",
+      action: "createFileSuccess",
+      message: "文件创建完成。",
+      repoId: activeRepoId.value,
+      context: { name, parentPath, path: createdPath },
+    });
     return snapshot;
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : String(cause);
+    emitSystemLogSilently("error", {
+      category: "file",
+      action: "createFileFailed",
+      message: "文件创建失败。",
+      repoId: activeRepoId.value,
+      context: { name, parentPath, error: error.value },
+    });
     return null;
   } finally {
     isMutatingFiles.value = false;
@@ -199,6 +242,13 @@ export async function createFileInWorkspace(name: string, parentPath = currentDi
 export async function importEntriesToWorkspace(sourcePaths: string[], parentPath = currentDirectoryPath.value) {
   const repoId = activeRepoId.value;
   if (!repoId || !sourcePaths.length) return null;
+  emitSystemLogSilently("info", {
+    category: "file",
+    action: "importStart",
+    message: "开始导入条目。",
+    repoId,
+    context: { parentPath, count: sourcePaths.length },
+  });
   error.value = null;
   const hadExplicitSelection = hasExplicitWorkspaceSelection();
   const progressId = startOperationProgress(
@@ -215,10 +265,24 @@ export async function importEntriesToWorkspace(sourcePaths: string[], parentPath
     });
     updateOperationProgress(progressId, { detail: "刷新文件索引", value: 84 });
     await finishFileTransfer(repoId, snapshot, hadExplicitSelection ? sourcePaths : []);
+    emitSystemLogSilently("info", {
+      category: "file",
+      action: "importSuccess",
+      message: "条目导入完成。",
+      repoId,
+      context: { parentPath, count: sourcePaths.length },
+    });
     finishOperationProgress(progressId);
     return snapshot;
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : String(cause);
+    emitSystemLogSilently("error", {
+      category: "file",
+      action: "importFailed",
+      message: "条目导入失败。",
+      repoId,
+      context: { parentPath, count: sourcePaths.length, error: error.value },
+    });
     cancelOperationProgress(progressId);
     return null;
   }
@@ -230,6 +294,13 @@ export async function importArchiveEntriesToWorkspace(
 ) {
   const repoId = activeRepoId.value;
   if (!repoId || !archivePath.trim()) return null;
+  emitSystemLogSilently("info", {
+    category: "file",
+    action: "importArchiveStart",
+    message: "开始导入压缩包。",
+    repoId,
+    context: { archivePath, parentPath },
+  });
   isMutatingFiles.value = true;
   error.value = null;
   const hadExplicitSelection = hasExplicitWorkspaceSelection();
@@ -249,10 +320,24 @@ export async function importArchiveEntriesToWorkspace(
       hadExplicitSelection ? previousPathSet : new Set([...previousPathSet, ...snapshot.entries.map((entry) => entry.path)]),
       parentPath ?? "",
     );
+    emitSystemLogSilently("info", {
+      category: "file",
+      action: "importArchiveSuccess",
+      message: "压缩包导入完成。",
+      repoId,
+      context: { archivePath, parentPath },
+    });
     finishOperationProgress(progressId);
     return snapshot;
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : String(cause);
+    emitSystemLogSilently("error", {
+      category: "file",
+      action: "importArchiveFailed",
+      message: "压缩包导入失败。",
+      repoId,
+      context: { archivePath, parentPath, error: error.value },
+    });
     cancelOperationProgress(progressId);
     return null;
   } finally {
@@ -267,6 +352,13 @@ export async function importEagleLibraryToWorkspace(
 ) {
   const repoId = activeRepoId.value;
   if (!repoId || !libraryPath.trim()) return null;
+  emitSystemLogSilently("info", {
+    category: "file",
+    action: "importEagleStart",
+    message: "开始导入 Eagle 资源库。",
+    repoId,
+    context: { libraryPath, mode, parentPath },
+  });
   isMutatingFiles.value = true;
   error.value = null;
   const hadExplicitSelection = hasExplicitWorkspaceSelection();
@@ -291,10 +383,24 @@ export async function importEagleLibraryToWorkspace(
       hadExplicitSelection ? previousPathSet : new Set([...previousPathSet, ...response.snapshot.entries.map((entry) => entry.path)]),
       parentPath ?? "",
     );
+    emitSystemLogSilently("info", {
+      category: "file",
+      action: "importEagleSuccess",
+      message: "Eagle 资源库导入完成。",
+      repoId,
+      context: { libraryPath, mode, parentPath },
+    });
     finishOperationProgress(progressId);
     return response;
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : String(cause);
+    emitSystemLogSilently("error", {
+      category: "file",
+      action: "importEagleFailed",
+      message: "Eagle 资源库导入失败。",
+      repoId,
+      context: { libraryPath, mode, parentPath, error: error.value },
+    });
     cancelOperationProgress(progressId);
     return null;
   } finally {
@@ -305,6 +411,13 @@ export async function importEagleLibraryToWorkspace(
 export async function copyWorkspaceEntries(sourcePaths: string[], parentPath = currentDirectoryPath.value) {
   const repoId = activeRepoId.value;
   if (!repoId || !sourcePaths.length) return null;
+  emitSystemLogSilently("info", {
+    category: "file",
+    action: "copyStart",
+    message: "开始复制条目。",
+    repoId,
+    context: { sourcePaths, parentPath },
+  });
   isMutatingFiles.value = true;
   error.value = null;
   const hadExplicitSelection = hasExplicitWorkspaceSelection();
@@ -319,10 +432,24 @@ export async function copyWorkspaceEntries(sourcePaths: string[], parentPath = c
     });
     updateOperationProgress(progressId, { detail: "刷新文件索引", value: 84 });
     await finishFileTransfer(repoId, snapshot, hadExplicitSelection ? sourcePaths : []);
+    emitSystemLogSilently("info", {
+      category: "file",
+      action: "copySuccess",
+      message: "条目复制完成。",
+      repoId,
+      context: { sourcePaths, parentPath },
+    });
     finishOperationProgress(progressId);
     return snapshot;
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : String(cause);
+    emitSystemLogSilently("error", {
+      category: "file",
+      action: "copyFailed",
+      message: "条目复制失败。",
+      repoId,
+      context: { sourcePaths, parentPath, error: error.value },
+    });
     cancelOperationProgress(progressId);
     return null;
   } finally {
@@ -334,6 +461,13 @@ export async function moveWorkspaceEntries(sourcePaths: string[], parentPath: st
   const repoId = activeRepoId.value;
   const nextPaths = normalizeSelectionPaths(sourcePaths);
   if (!repoId || !nextPaths.length) return null;
+  emitSystemLogSilently("info", {
+    category: "file",
+    action: "moveStart",
+    message: "开始移动条目。",
+    repoId,
+    context: { sourcePaths: nextPaths, parentPath },
+  });
 
   isMutatingFiles.value = true;
   error.value = null;
@@ -366,10 +500,24 @@ export async function moveWorkspaceEntries(sourcePaths: string[], parentPath: st
       });
     }
 
+    emitSystemLogSilently("info", {
+      category: "file",
+      action: "moveSuccess",
+      message: "条目移动完成。",
+      repoId,
+      context: { sourcePaths: nextPaths, parentPath },
+    });
     finishOperationProgress(progressId);
     return snapshot;
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : String(cause);
+    emitSystemLogSilently("error", {
+      category: "file",
+      action: "moveFailed",
+      message: "条目移动失败。",
+      repoId,
+      context: { sourcePaths: nextPaths, parentPath, error: error.value },
+    });
     cancelOperationProgress(progressId);
     return null;
   } finally {
@@ -379,6 +527,13 @@ export async function moveWorkspaceEntries(sourcePaths: string[], parentPath: st
 
 export async function renameWorkspaceEntry(path: string, newName: string) {
   if (!activeRepoId.value) return null;
+  emitSystemLogSilently("info", {
+    category: "file",
+    action: "renameStart",
+    message: "开始重命名条目。",
+    repoId: activeRepoId.value,
+    context: { path, newName },
+  });
   isMutatingFiles.value = true;
   error.value = null;
   try {
@@ -395,9 +550,23 @@ export async function renameWorkspaceEntry(path: string, newName: string) {
       applyWorkspaceSelection([renamedPath], renamedPath, renamedPath);
     }
     await refreshAfterFileMutation(activeRepoId.value, { repositorySnapshot: true });
+    emitSystemLogSilently("info", {
+      category: "file",
+      action: "renameSuccess",
+      message: "条目重命名完成。",
+      repoId: activeRepoId.value,
+      context: { path, newName, renamedPath },
+    });
     return snapshot;
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : String(cause);
+    emitSystemLogSilently("error", {
+      category: "file",
+      action: "renameFailed",
+      message: "条目重命名失败。",
+      repoId: activeRepoId.value,
+      context: { path, newName, error: error.value },
+    });
     return null;
   } finally {
     isMutatingFiles.value = false;
@@ -406,6 +575,13 @@ export async function renameWorkspaceEntry(path: string, newName: string) {
 
 export async function deleteWorkspaceEntry(path: string, mode?: FileDeleteMode) {
   if (!activeRepoId.value) return null;
+  emitSystemLogSilently("warn", {
+    category: "file",
+    action: "deleteStart",
+    message: "开始删除条目。",
+    repoId: activeRepoId.value,
+    context: { path, mode: mode ?? null },
+  });
   isMutatingFiles.value = true;
   error.value = null;
   try {
@@ -421,9 +597,23 @@ export async function deleteWorkspaceEntry(path: string, mode?: FileDeleteMode) 
       applyWorkspaceSelection([], null, null);
     }
     await refreshAfterFileMutation(activeRepoId.value, { repositorySnapshot: true });
+    emitSystemLogSilently("warn", {
+      category: "file",
+      action: "deleteSuccess",
+      message: "条目删除完成。",
+      repoId: activeRepoId.value,
+      context: { path, mode: deleteMode ?? null },
+    });
     return snapshot;
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : String(cause);
+    emitSystemLogSilently("error", {
+      category: "file",
+      action: "deleteFailed",
+      message: "条目删除失败。",
+      repoId: activeRepoId.value,
+      context: { path, mode: mode ?? null, error: error.value },
+    });
     return null;
   } finally {
     isMutatingFiles.value = false;
@@ -554,6 +744,12 @@ export async function restoreAllTrashEntries() {
 
 export async function emptyTrash() {
   if (!activeRepoId.value) return null;
+  emitSystemLogSilently("warn", {
+    category: "file",
+    action: "emptyTrashStart",
+    message: "开始清空回收站。",
+    repoId: activeRepoId.value,
+  });
   isMutatingFiles.value = true;
   error.value = null;
   try {
@@ -567,9 +763,22 @@ export async function emptyTrash() {
       repositorySnapshot: true,
       repositorySummary: true,
     });
+    emitSystemLogSilently("warn", {
+      category: "file",
+      action: "emptyTrashSuccess",
+      message: "回收站已清空。",
+      repoId: activeRepoId.value,
+    });
     return snapshot;
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : String(cause);
+    emitSystemLogSilently("error", {
+      category: "file",
+      action: "emptyTrashFailed",
+      message: "清空回收站失败。",
+      repoId: activeRepoId.value,
+      context: { error: error.value },
+    });
     return null;
   } finally {
     isMutatingFiles.value = false;
@@ -584,8 +793,22 @@ export async function openWorkspaceEntry(target: WorkspaceOpenTarget) {
   try {
     await recordEntryAccess({ repoId, path: relativePath });
     await openRepositoryPath(absolutePath);
+    emitSystemLogSilently("info", {
+      category: "file",
+      action: "openExternal",
+      message: "已用系统程序打开条目。",
+      repoId,
+      context: { path: relativePath, absolutePath },
+    });
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : String(cause);
+    emitSystemLogSilently("error", {
+      category: "file",
+      action: "openExternalFailed",
+      message: "打开条目失败。",
+      repoId,
+      context: { path: relativePath, absolutePath, error: error.value },
+    });
   }
 }
 
@@ -595,8 +818,22 @@ export async function revealWorkspaceEntry(target: WorkspaceOpenTarget) {
   error.value = null;
   try {
     await revealRepositoryPath(absolutePath);
+    emitSystemLogSilently("info", {
+      category: "file",
+      action: "revealExternal",
+      message: "已在系统文件管理器中定位条目。",
+      repoId: activeRepoId.value,
+      context: { absolutePath },
+    });
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : String(cause);
+    emitSystemLogSilently("error", {
+      category: "file",
+      action: "revealExternalFailed",
+      message: "定位条目失败。",
+      repoId: activeRepoId.value,
+      context: { absolutePath, error: error.value },
+    });
   }
 }
 

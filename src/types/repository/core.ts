@@ -624,6 +624,68 @@ export type RecentAccessHistoryClearResponse = {
   clearedCount: number;
 };
 
+export type SystemLogLevel = "debug" | "info" | "warn" | "error";
+
+export type SystemLogSourceKind =
+  | "host"
+  | "frontend-host"
+  | "frontend-plugin"
+  | "backend-plugin"
+  | "helper";
+
+export type SystemLogSource = {
+  kind: SystemLogSourceKind | string;
+  label?: string | null;
+  pluginId?: string | null;
+  repoId?: string | null;
+};
+
+export type SystemLogLocation = {
+  modulePath?: string | null;
+  file?: string | null;
+  line?: number | null;
+};
+
+export type SystemLogRecord = {
+  id: string;
+  timestamp: string;
+  level: SystemLogLevel | string;
+  category: string;
+  action: string;
+  message: string;
+  source: SystemLogSource;
+  location: SystemLogLocation;
+  context: Record<string, unknown>;
+};
+
+export type SystemLogQuery = {
+  limit?: number;
+  before?: string | null;
+  levels?: Array<SystemLogLevel | string>;
+  sourceKinds?: Array<SystemLogSourceKind | string>;
+  pluginId?: string | null;
+  repoId?: string | null;
+  query?: string | null;
+};
+
+export type SystemLogPage = {
+  records: SystemLogRecord[];
+  nextCursor?: string | null;
+};
+
+export type SystemLogWriteRequest = {
+  level: SystemLogLevel | string;
+  category: string;
+  action: string;
+  message: string;
+  context?: Record<string, unknown>;
+  repoId?: string | null;
+  pluginId?: string | null;
+  sourceKind?: SystemLogSourceKind | string | null;
+  sourceLabel?: string | null;
+  location?: SystemLogLocation | null;
+};
+
 export type PluginCallRequest = {
   pluginId: string;
   method: string;

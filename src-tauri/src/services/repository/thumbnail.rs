@@ -50,9 +50,15 @@ pub(super) fn generate_thumbnail_for_file(
         }
         Err(error) => {
             let _ = fs::remove_file(&thumbnail_path);
-            eprintln!(
-                "thumbnail generation skipped for {}: {}",
-                file.relative_path, error
+            crate::app_log!(
+                "warn",
+                "thumbnail",
+                "generateSkipped",
+                "缩略图生成已跳过。",
+                serde_json::json!({
+                    "path": file.relative_path,
+                    "error": error,
+                })
             );
             Ok(None)
         }
