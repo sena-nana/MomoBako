@@ -76,6 +76,7 @@ export function createInitialWorkspaceStartup(): WorkspaceStartupState {
   return {
     status: "idle",
     stepLabel: "准备加载仓库",
+    stepDetail: "准备资源库状态，恢复上次打开的工作区。",
     currentStep: 0,
     totalSteps: STARTUP_TOTAL_STEPS,
     percent: 0,

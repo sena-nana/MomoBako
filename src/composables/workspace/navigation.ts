@@ -65,7 +65,7 @@ export async function selectRepository(repoId: string) {
   const previousDirectoryPath = !isSwitchingRepository ? currentDirectoryPath.value : "";
   const previousRepoId = activeRepoId.value;
   if (isSwitchingRepository) {
-    setWorkspaceStartupProgress(1, "切换资源库");
+    setWorkspaceStartupProgress(1, "切换资源库", "准备目标资源库，清理上一个资源库的首屏状态。");
     resetActiveRepositoryContent(previousRepoId);
     activeRepoId.value = repoId;
     isLoadingFileBrowser.value = true;
@@ -99,7 +99,7 @@ export async function selectRepository(repoId: string) {
     }
 
     if (isSwitchingRepository) {
-      setWorkspaceStartupProgress(2, "扫描资源库文件");
+      setWorkspaceStartupProgress(2, "扫描资源库文件", "同步文件变化，更新新增、移动和删除记录。");
     }
     if (progressId) {
       updateOperationProgress(progressId, { detail: "扫描资源库文件", value: 28 });
@@ -107,7 +107,7 @@ export async function selectRepository(repoId: string) {
     lastSyncResult.value = await syncRepository({ repoId });
 
     if (isSwitchingRepository) {
-      setWorkspaceStartupProgress(3, "读取仓库摘要");
+      setWorkspaceStartupProgress(3, "读取仓库摘要", "读取资源库摘要、素材索引和默认预览对象。");
       await applyRepositorySnapshotAsPresetRoot(repoId, selectAsset);
     } else {
       const snapshot = await getRepositorySnapshot(repoId);
@@ -152,7 +152,7 @@ export async function selectRepository(repoId: string) {
       currentDirectoryPath.value = "";
     }
     if (isSwitchingRepository) {
-      setWorkspaceStartupProgress(4, "读取首屏目录");
+      setWorkspaceStartupProgress(4, "读取首屏目录", "加载根目录文件、侧栏结构和首屏内容。");
       await loadRepositoryRootDirectoryImmediately(repoId);
     }
     queueRepositoryBackgroundLoads(repoId);

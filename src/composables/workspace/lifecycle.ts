@@ -323,11 +323,12 @@ async function applyRepositorySnapshotState(
 /**
  * 统一驱动首屏加载页，启动和切换资源库都复用同一套状态展示。
  */
-export function setWorkspaceStartupProgress(currentStep: number, stepLabel: string) {
+export function setWorkspaceStartupProgress(currentStep: number, stepLabel: string, stepDetail = "") {
   const totalSteps = workspaceStartup.value.totalSteps || STARTUP_TOTAL_STEPS;
   workspaceStartup.value = {
     status: "loading",
     stepLabel,
+    stepDetail,
     currentStep,
     totalSteps,
     percent: Math.round((currentStep / totalSteps) * 100),
@@ -339,6 +340,7 @@ export function finishWorkspaceStartup() {
   workspaceStartup.value = {
     status: "ready",
     stepLabel: "加载完成",
+    stepDetail: "工作区首屏已经准备完成。",
     currentStep: STARTUP_TOTAL_STEPS,
     totalSteps: STARTUP_TOTAL_STEPS,
     percent: 100,
@@ -351,6 +353,7 @@ export function failWorkspaceStartup(message: string) {
     ...workspaceStartup.value,
     status: "error",
     stepLabel: "加载失败",
+    stepDetail: "资源库加载流程已停止，保留当前错误供重试。",
     error: message,
   };
 }
@@ -386,14 +389,14 @@ async function loadInitialRepository(
     return;
   }
 
-  setWorkspaceStartupProgress(2, "扫描资源库文件");
+  setWorkspaceStartupProgress(2, "扫描资源库文件", "同步文件变化，更新新增、移动和删除记录。");
   lastSyncResult.value = await syncRepository({ repoId: nextRepoId });
 
-  setWorkspaceStartupProgress(3, "读取仓库摘要");
+  setWorkspaceStartupProgress(3, "读取仓库摘要", "读取资源库摘要、素材索引和默认预览对象。");
   await applyRepositorySnapshotState(nextRepoId, selectAsset);
   rememberLastActiveRepository(nextRepoId);
 
-  setWorkspaceStartupProgress(4, "读取首屏目录");
+  setWorkspaceStartupProgress(4, "读取首屏目录", "加载根目录、播放列表和首屏关联数据。");
   const playlistItems = playlists.value;
   playlists.value = playlistItems;
   await primePlaylistDetailCache(nextRepoId, playlistItems);
@@ -542,11 +545,12 @@ export function ensureRepositoryWorkspace(
     ensureStructureUpdatedListener();
 
     try {
-      setWorkspaceStartupProgress(1, "加载仓库列表");
+      setWorkspaceStartupProgress(1, "加载仓库列表", "读取已注册资源库，并匹配上次打开的工作区。");
       const items = await listRepositories();
       repositories.value = items;
 
       await loadInitialRepository(items, selectAsset);
+      setWorkspaceStartupProgress(4, "读取首屏目录", "加载应用配置、插件设置和首屏辅助数据。");
       await loadSettingsData();
 
       finishWorkspaceStartup();

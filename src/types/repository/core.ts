@@ -1327,6 +1327,7 @@ export type WorkspaceStartupStatus = "idle" | "loading" | "ready" | "error";
 export type WorkspaceStartupState = {
   status: WorkspaceStartupStatus;
   stepLabel: string;
+  stepDetail: string;
   currentStep: number;
   totalSteps: number;
   percent: number;

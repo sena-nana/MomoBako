@@ -70,9 +70,38 @@ const { workspaceStartup } = useWorkspaceProgress();
 const player = usePlaylistPlayer();
 const systemMediaSession = useSystemMediaSession(player);
 const hasRenderedWorkspace = ref(false);
+const startupStepHints = [
+  {
+    label: "准备资源库",
+    detail: "读取仓库列表或切换目标资源库。",
+  },
+  {
+    label: "同步文件变化",
+    detail: "扫描新增、移动、删除和缓存状态。",
+  },
+  {
+    label: "读取资源索引",
+    detail: "整理摘要、素材索引和默认预览对象。",
+  },
+  {
+    label: "加载首屏内容",
+    detail: "准备目录、播放列表和首屏辅助数据。",
+  },
+];
 
 const isWorkspaceReady = computed(() => workspaceStartup.value.status === "ready");
 const isWorkspaceStartupError = computed(() => workspaceStartup.value.status === "error");
+const startupStepItems = computed(() => startupStepHints.map((step, index) => {
+  const stepNumber = index + 1;
+  const isCurrent = workspaceStartup.value.currentStep === stepNumber;
+  const isDone = workspaceStartup.value.currentStep > stepNumber || workspaceStartup.value.status === "ready";
+  const isError = isCurrent && workspaceStartup.value.status === "error";
+  return {
+    ...step,
+    stepNumber,
+    state: isError ? "error" : isDone ? "done" : isCurrent ? "current" : "pending",
+  };
+}));
 
 const sidebarWidth = useResizablePane({
   storageKey: WIDTH_STORAGE_KEY,
@@ -188,6 +217,27 @@ onBeforeUnmount(() => {
           >
             <span :style="{ width: `${workspaceStartup.percent}%` }"></span>
           </div>
+          <p
+            v-if="workspaceStartup.stepDetail"
+            id="workspace-startup-detail"
+            class="workspace-startup__detail"
+          >
+            {{ workspaceStartup.stepDetail }}
+          </p>
+          <ol class="workspace-startup__steps" aria-label="加载步骤">
+            <li
+              v-for="item in startupStepItems"
+              :key="item.stepNumber"
+              class="workspace-startup__step"
+              :class="`is-${item.state}`"
+            >
+              <span class="workspace-startup__step-index">{{ item.stepNumber }}</span>
+              <span class="workspace-startup__step-copy">
+                <strong>{{ item.label }}</strong>
+                <small>{{ item.detail }}</small>
+              </span>
+            </li>
+          </ol>
           <p v-if="workspaceStartup.error" class="workspace-startup__error">
             {{ workspaceStartup.error }}
           </p>
