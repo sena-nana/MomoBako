@@ -442,6 +442,6 @@ CREATE TABLE IF NOT EXISTS schema_version (
 );
 
 INSERT INTO schema_version(component, version)
-VALUES ('repository', 1)
+VALUES ('repository', 3)
 ON CONFLICT(component) DO UPDATE SET version = excluded.version;
 "#;

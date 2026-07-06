@@ -219,6 +219,40 @@ mod tests {
     }
 
     #[test]
+    fn list_repositories_reads_existing_database_during_active_writer() {
+        let (state, root, repo_root, _thumbnail_root) =
+            create_test_state("list-during-active-writer");
+        fs::write(repo_root.join("track.mp3"), b"demo").expect("test file should be written");
+        let repo_id = create_repository_for_path(&state, &repo_root);
+        let database_path = repo_root.join(REPO_META_DIR).join(REPO_DB_FILE_NAME);
+        let writer = Connection::open(&database_path).expect("writer connection should open");
+        configure_repository_connection(&writer).expect("writer connection should be configured");
+        writer
+            .execute("BEGIN IMMEDIATE", [])
+            .expect("writer transaction should start");
+        writer
+            .execute(
+                "UPDATE repositories SET updated_at = updated_at WHERE repo_id = ?1",
+                [&repo_id],
+            )
+            .expect("writer should hold an uncommitted update");
+
+        let repositories = state
+            .list_repositories()
+            .expect("repository summaries should load while writer is active");
+        let summary = repositories
+            .iter()
+            .find(|repository| repository.repo_id == repo_id)
+            .expect("repository summary should exist");
+
+        assert_eq!(summary.asset_count, 1);
+        writer
+            .execute("ROLLBACK", [])
+            .expect("writer transaction should roll back");
+        fs::remove_dir_all(root).expect("test workspace should be removed");
+    }
+
+    #[test]
     fn repository_tree_rebuilds_directory_cache_after_storage_loss_is_observed_by_listing() {
         let (state, root, repo_root, _thumbnail_root) =
             create_test_state("repository-tree-rebuild-after-listing");
@@ -6241,5 +6275,6 @@ mod tests {
         );
 
         assert!(!should_fallback_repository_journal_mode(&error));
+        assert!(is_database_locked_error(&error));
     }
 }

@@ -651,7 +651,59 @@ pub(super) fn migrate_repository_schema(connection: &Connection) -> Result<(), r
         FROM assets;
         "#,
     )?;
+    connection.execute(
+        r#"
+        INSERT INTO schema_version(component, version)
+        VALUES ('repository', ?1)
+        ON CONFLICT(component) DO UPDATE SET version = excluded.version
+        "#,
+        [REPO_SCHEMA_VERSION],
+    )?;
     Ok(())
+}
+
+pub(super) fn ensure_repository_schema_current(
+    connection: &Connection,
+) -> Result<(), rusqlite::Error> {
+    configure_repository_connection(connection)?;
+    if repository_schema_needs_migration(connection)? {
+        migrate_repository_schema(connection)?;
+    }
+    Ok(())
+}
+
+fn repository_schema_needs_migration(connection: &Connection) -> Result<bool, rusqlite::Error> {
+    if !sqlite_table_exists(connection, "schema_version")?
+        || !sqlite_table_exists(connection, "repositories")?
+        || !sqlite_table_exists(connection, "assets")?
+    {
+        return Ok(true);
+    }
+
+    let version = connection
+        .query_row(
+            "SELECT version FROM schema_version WHERE component = 'repository'",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .optional()?
+        .unwrap_or(0);
+    Ok(version < REPO_SCHEMA_VERSION)
+}
+
+fn sqlite_table_exists(connection: &Connection, table_name: &str) -> Result<bool, rusqlite::Error> {
+    connection
+        .query_row(
+            r#"
+            SELECT EXISTS(
+              SELECT 1 FROM sqlite_master
+              WHERE type = 'table' AND name = ?1
+            )
+            "#,
+            [table_name],
+            |row| row.get::<_, i64>(0),
+        )
+        .map(|exists| exists != 0)
 }
 
 pub(super) fn ensure_backend_path_is_attachable(
@@ -847,6 +899,31 @@ pub(super) fn ensure_repository_identity_record(
         )
         .map_err(db_error)?;
     Ok(())
+}
+
+pub(super) fn repository_identity_record_is_current(
+    connection: &Connection,
+    repo: &RepositoryRecord,
+) -> Result<bool, rusqlite::Error> {
+    connection
+        .query_row(
+            r#"
+            SELECT name, root_path, schema_version
+            FROM repositories
+            WHERE repo_id = ?1
+            "#,
+            [&repo.summary.repo_id],
+            |row| {
+                let name: String = row.get(0)?;
+                let root_path: String = row.get(1)?;
+                let schema_version: i64 = row.get(2)?;
+                Ok(name == repo.summary.name
+                    && root_path == repo.summary.path
+                    && schema_version == REPO_SCHEMA_VERSION)
+            },
+        )
+        .optional()
+        .map(|value| value.unwrap_or(false))
 }
 
 pub(super) fn upsert_registry_entry(
