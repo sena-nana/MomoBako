@@ -81,6 +81,7 @@ export function createInitialWorkspaceStartup(): WorkspaceStartupState {
     totalSteps: STARTUP_TOTAL_STEPS,
     percent: 0,
     error: null,
+    logs: [],
   };
 }
 

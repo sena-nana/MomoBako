@@ -194,6 +194,39 @@ pub(super) fn sync_sql_error(message: impl Into<String>) -> rusqlite::Error {
     )))
 }
 
+fn sync_file_sample_paths(files: &[DiscoveredFile]) -> Vec<String> {
+    files
+        .iter()
+        .take(12)
+        .map(|file| file.relative_path.clone())
+        .collect()
+}
+
+fn write_sync_log(
+    repo_id: &str,
+    level: &str,
+    action: &str,
+    message: &str,
+    context: serde_json::Value,
+) {
+    let _ = crate::services::logging::write_log(SystemLogWriteRequest {
+        level: level.to_string(),
+        category: "repository.sync".to_string(),
+        action: action.to_string(),
+        message: message.to_string(),
+        context: Some(context),
+        repo_id: Some(repo_id.to_string()),
+        plugin_id: None,
+        source_kind: Some("host".to_string()),
+        source_label: Some("MomoBako".to_string()),
+        location: Some(SystemLogLocationInput {
+            module_path: Some(module_path!().to_string()),
+            file: Some(file!().to_string()),
+            line: Some(line!()),
+        }),
+    });
+}
+
 pub(super) fn load_existing_asset_records(
     tx: &Transaction<'_>,
     repo_id: &str,
@@ -629,6 +662,17 @@ pub(super) fn sync_repository_files(
     hint_paths: &std::collections::BTreeSet<String>,
 ) -> Result<SyncResult, rusqlite::Error> {
     let repo_root = PathBuf::from(&repo.summary.path);
+    write_sync_log(
+        &repo.summary.repo_id,
+        "info",
+        "scanStart",
+        "开始扫描资源库文件。",
+        serde_json::json!({
+            "repoPath": repo.summary.path.as_str(),
+            "backendPluginId": repo.backend_record.plugin_id.as_str(),
+            "hintPathCount": hint_paths.len(),
+        }),
+    );
     let files = list_backend_files(service_root, repo, &repo_root).map_err(|error| {
         rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::new(
             std::io::ErrorKind::Other,
@@ -648,6 +692,16 @@ pub(super) fn sync_repository_files(
             error,
         )))
     })?;
+    write_sync_log(
+        &repo.summary.repo_id,
+        "info",
+        "scanFilesDiscovered",
+        "资源库文件扫描完成。",
+        serde_json::json!({
+            "scannedFiles": files.len(),
+            "samplePaths": sync_file_sample_paths(&files),
+        }),
+    );
 
     let existing = load_existing_asset_records(tx, &repo.summary.repo_id)?;
     let existing_asset_ids = existing
@@ -664,6 +718,16 @@ pub(super) fn sync_repository_files(
                 .map(|metadata| (path.clone(), metadata))
         })
         .collect::<BTreeMap<_, _>>();
+    write_sync_log(
+        &repo.summary.repo_id,
+        "info",
+        "metadataDefaultsStart",
+        "开始计算默认元数据。",
+        serde_json::json!({
+            "scannedFiles": files.len(),
+            "existingAssets": existing_metadata_by_path.len(),
+        }),
+    );
     let plugin_defaults_by_path =
         metadata_defaults_for_files(service_root, &files, &existing_metadata_by_path).map_err(
             |error| {
@@ -673,6 +737,15 @@ pub(super) fn sync_repository_files(
                 )))
             },
         )?;
+    write_sync_log(
+        &repo.summary.repo_id,
+        "info",
+        "metadataDefaultsSuccess",
+        "默认元数据计算完成。",
+        serde_json::json!({
+            "defaultPathCount": plugin_defaults_by_path.len(),
+        }),
+    );
     let source_metadata_keys =
         source_metadata_mirror_keys(service_root, &repo.backend_record.plugin_id);
     let mut existing_by_path = existing
@@ -698,6 +771,16 @@ pub(super) fn sync_repository_files(
     let mut updated_assets = 0_i64;
     let mut deleted_assets = 0_i64;
     let mut created_events = 0_i64;
+    write_sync_log(
+        &repo.summary.repo_id,
+        "info",
+        "writeIndexStart",
+        "开始写入资源索引。",
+        serde_json::json!({
+            "scannedFiles": files.len(),
+            "directoryCount": directory_records.len(),
+        }),
+    );
 
     for file in &files {
         let apply_result = upsert_discovered_asset(
@@ -753,6 +836,21 @@ pub(super) fn sync_repository_files(
         replace_source_repository_state(tx, &repo.summary.repo_id, &repository_state)?;
     }
     rebuild_netease_directory_cache(tx, &repo.summary.repo_id, &files)?;
+    write_sync_log(
+        &repo.summary.repo_id,
+        "info",
+        "syncComplete",
+        "资源库同步写入完成。",
+        serde_json::json!({
+            "scannedFiles": files.len(),
+            "createdAssets": created_assets,
+            "updatedAssets": updated_assets,
+            "deletedAssets": deleted_assets,
+            "createdEvents": created_events,
+            "hardlinkCandidates": hardlink_candidates,
+            "samplePaths": sync_file_sample_paths(&files),
+        }),
+    );
 
     Ok(SyncResult {
         repo_id: repo.summary.repo_id.clone(),

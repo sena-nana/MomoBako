@@ -1324,6 +1324,15 @@ export type ThumbnailResponse = {
 
 export type WorkspaceStartupStatus = "idle" | "loading" | "ready" | "error";
 
+export type WorkspaceStartupLogRecord = {
+  id: string;
+  timestamp: string;
+  level: SystemLogLevel | string;
+  action: string;
+  message: string;
+  detail?: string | null;
+};
+
 export type WorkspaceStartupState = {
   status: WorkspaceStartupStatus;
   stepLabel: string;
@@ -1332,6 +1341,7 @@ export type WorkspaceStartupState = {
   totalSteps: number;
   percent: number;
   error: string | null;
+  logs: WorkspaceStartupLogRecord[];
 };
 
 export type RepositorySyncProgress = {
