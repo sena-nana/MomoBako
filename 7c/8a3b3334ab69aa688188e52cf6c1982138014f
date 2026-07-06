@@ -1,0 +1,44 @@
+External/Plugins/service-eagle-importer/src/lib.rs
+  s_7b528da7574116::t_bebfc013cb43f9 4
+External/Plugins/source-eagle-library/src/lib.rs
+  s_a4bebf4a392266::t_2416badb94bbe1 20
+src-tauri/src/services/repository/plugin_runtime.rs
+  s_f0abc17e5269b6::t_137922a48d68eb 336,347-349,355-362,366,368-370,375-397,460-461,791-794
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "7c8a3b3334ab69aa688188e52cf6c1982138014f",
+  "prompts": {},
+  "humans": {
+    "h_8e6780fc7b4bb1": {
+      "author": "AuraElicase <auraelicase@outlook.com>"
+    }
+  },
+  "sessions": {
+    "s_7b528da7574116": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f226b-0837-7bc3-94a8-95ef329ae44e",
+        "model": "unknown"
+      },
+      "human_author": "AuraElicase <auraelicase@outlook.com>"
+    },
+    "s_a4bebf4a392266": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f3038-8ff4-7340-b5f3-1bccf1f3964c",
+        "model": "unknown"
+      },
+      "human_author": "AuraElicase <auraelicase@outlook.com>"
+    },
+    "s_f0abc17e5269b6": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f0caa-72ab-7720-90c5-6cba6822b374",
+        "model": "unknown"
+      },
+      "human_author": "AuraElicase <auraelicase@outlook.com>"
+    }
+  }
+}
