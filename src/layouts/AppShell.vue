@@ -91,6 +91,7 @@ const startupStepHints = [
 
 const isWorkspaceReady = computed(() => workspaceStartup.value.status === "ready");
 const isWorkspaceStartupError = computed(() => workspaceStartup.value.status === "error");
+const startupVisibleLogs = computed(() => workspaceStartup.value.logs.slice(-8).reverse());
 const startupStepItems = computed(() => startupStepHints.map((step, index) => {
   const stepNumber = index + 1;
   const isCurrent = workspaceStartup.value.currentStep === stepNumber;
@@ -241,6 +242,29 @@ onBeforeUnmount(() => {
           <p v-if="workspaceStartup.error" class="workspace-startup__error">
             {{ workspaceStartup.error }}
           </p>
+          <section
+            v-if="startupVisibleLogs.length"
+            class="workspace-startup__logs"
+            aria-label="首屏加载日志"
+          >
+            <header class="workspace-startup__logs-head">
+              <strong>加载日志</strong>
+              <span>{{ startupVisibleLogs.length }} 条最近记录</span>
+            </header>
+            <ol>
+              <li
+                v-for="record in startupVisibleLogs"
+                :key="record.id"
+                :class="`is-${record.level}`"
+              >
+                <time>{{ new Date(record.timestamp).toLocaleTimeString("zh-CN", { hour12: false }) }}</time>
+                <span>
+                  <strong>{{ record.message }}</strong>
+                  <small v-if="record.detail">{{ record.detail }}</small>
+                </span>
+              </li>
+            </ol>
+          </section>
           <button
             v-if="isWorkspaceStartupError"
             type="button"

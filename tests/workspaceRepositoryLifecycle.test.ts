@@ -49,6 +49,14 @@ describe("workspace repository lifecycle", () => {
       "settingsSuccess",
       "startupSuccess",
     ]));
+
+    const progress = useWorkspaceProgress();
+    expect(progress.workspaceStartup.value.logs.map((record) => record.action)).toEqual(expect.arrayContaining([
+      "startupStart",
+      "syncStart",
+      "syncSuccess",
+      "startupSuccess",
+    ]));
   });
 
   it("切换资源库时扫描失败会进入启动错误状态", async () => {
@@ -72,6 +80,10 @@ describe("workspace repository lifecycle", () => {
     const progress = useWorkspaceProgress();
     expect(progress.workspaceStartup.value.status).toBe("error");
     expect(progress.workspaceStartup.value.error).toBe("扫描失败");
+    expect(progress.workspaceStartup.value.logs.map((record) => record.action)).toEqual(expect.arrayContaining([
+      "syncStart",
+      "startupFailed",
+    ]));
 
     const startupLogs = getInvokeCalls("write_system_log")
       .filter((call) => call.args?.category === "workspace.startup");

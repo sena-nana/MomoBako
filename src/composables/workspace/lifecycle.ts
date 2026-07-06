@@ -8,12 +8,14 @@ import {
   listRepositoryActions,
   listSmartFolders,
   listRepositories,
+  onSystemLogRecord,
   syncRepository,
 } from "../../services/repositoryApi";
 import { emitSystemLogSilently } from "../../services/systemLog";
 import type {
   RepositoryStructureUpdatedEvent,
   RepositorySummary,
+  SystemLogRecord,
 } from "../../types/repository";
 import {
   activeLibraryCategory,
@@ -101,8 +103,12 @@ let cancelRepositoryBackgroundTask: (() => void) | null = null;
 let unlistenStructureUpdated: UnlistenFn | null = null;
 let structureUpdatedListenerPromise: Promise<void> | null = null;
 let startupTargetRepoId: string | null = null;
+let startupLogSequence = 0;
+let unlistenStartupSyncLogs: UnlistenFn | null = null;
+let startupSyncLogListenerPromise: Promise<void> | null = null;
 const LAST_ACTIVE_REPOSITORY_STORAGE_KEY = "momobako.lastActiveRepositoryId";
 const STARTUP_LOG_CATEGORY = "workspace.startup";
+const STARTUP_SYNC_LOG_CATEGORY = "repository.sync";
 
 function readLastActiveRepositoryId() {
   try {
@@ -329,6 +335,7 @@ async function applyRepositorySnapshotState(
 export function setWorkspaceStartupProgress(currentStep: number, stepLabel: string, stepDetail = "") {
   const totalSteps = workspaceStartup.value.totalSteps || STARTUP_TOTAL_STEPS;
   workspaceStartup.value = {
+    ...workspaceStartup.value,
     status: "loading",
     stepLabel,
     stepDetail,
@@ -341,6 +348,7 @@ export function setWorkspaceStartupProgress(currentStep: number, stepLabel: stri
 
 export function finishWorkspaceStartup() {
   workspaceStartup.value = {
+    ...workspaceStartup.value,
     status: "ready",
     stepLabel: "加载完成",
     stepDetail: "工作区首屏已经准备完成。",
@@ -375,6 +383,7 @@ function emitStartupLog(
   context?: Record<string, unknown>,
   repoId?: string | null,
 ) {
+  appendStartupLog(level, action, message, context);
   emitSystemLogSilently(level, {
     category: STARTUP_LOG_CATEGORY,
     action,
@@ -382,6 +391,55 @@ function emitStartupLog(
     repoId,
     context,
   });
+}
+
+function appendStartupLog(
+  level: string,
+  action: string,
+  message: string,
+  context?: Record<string, unknown> | null,
+) {
+  startupLogSequence += 1;
+  const detail = context
+    ? Object.entries(context)
+        .filter(([, value]) => value !== undefined && value !== null && value !== "")
+        .map(([key, value]) => `${key}: ${typeof value === "object" ? JSON.stringify(value) : String(value)}`)
+        .join(" · ")
+    : "";
+  workspaceStartup.value = {
+    ...workspaceStartup.value,
+    logs: [
+      ...workspaceStartup.value.logs,
+      {
+        id: `startup-log-${startupLogSequence}`,
+        timestamp: new Date().toISOString(),
+        level,
+        action,
+        message,
+        detail: detail || null,
+      },
+    ].slice(-40),
+  };
+}
+
+function appendStartupSyncLog(record: SystemLogRecord) {
+  if (workspaceStartup.value.status !== "loading") return;
+  if (record.category !== STARTUP_SYNC_LOG_CATEGORY) return;
+  if (startupTargetRepoId && record.source.repoId && record.source.repoId !== startupTargetRepoId) return;
+  appendStartupLog(record.level, record.action, record.message, record.context);
+}
+
+function ensureStartupSyncLogListener() {
+  if (unlistenStartupSyncLogs) return Promise.resolve();
+  if (startupSyncLogListenerPromise) return startupSyncLogListenerPromise;
+  startupSyncLogListenerPromise = onSystemLogRecord(appendStartupSyncLog)
+    .then((unlisten) => {
+      unlistenStartupSyncLogs = unlisten;
+    })
+    .finally(() => {
+      startupSyncLogListenerPromise = null;
+    });
+  return startupSyncLogListenerPromise;
 }
 
 async function loadInitialRepository(
@@ -603,9 +661,11 @@ export function ensureRepositoryWorkspace(
 
   startupPromise = (async () => {
     workspaceStartup.value = { ...createInitialWorkspaceStartup(), status: "loading" };
+    startupLogSequence = 0;
     error.value = null;
     setStartupLoadingFlags(true);
     ensureStructureUpdatedListener();
+    await ensureStartupSyncLogListener();
     emitStartupLog("info", "startupStart", "首屏启动流程开始。", {
       totalSteps: STARTUP_TOTAL_STEPS,
       activeRepoId: activeRepoId.value,
@@ -697,6 +757,9 @@ export function resetRepositoryWorkspaceForTests() {
   resetSystemLogsForTests();
   unlistenStructureUpdated?.();
   unlistenStructureUpdated = null;
+  void unlistenStartupSyncLogs?.();
+  unlistenStartupSyncLogs = null;
   structureUpdatedListenerPromise = null;
+  startupSyncLogListenerPromise = null;
   startupPromise = null;
 }
