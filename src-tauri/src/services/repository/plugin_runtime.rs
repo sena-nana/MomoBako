@@ -333,6 +333,7 @@ impl NativePlugin {
         payload: serde_json::Value,
         runtime: PluginCallHostRuntime,
     ) -> Result<serde_json::Value, String> {
+        let plugin_id = runtime.plugin_id.clone();
         let request = PluginCallEnvelope {
             method: method.to_string(),
             payload,
@@ -343,22 +344,55 @@ impl NativePlugin {
             .map_err(|_| "plugin request contains an invalid null byte".to_string())?;
         let response_ptr = unsafe { (self.call)(request_cstring.as_ptr()) };
         if response_ptr.is_null() {
-            return Err("plugin returned a null response".to_string());
+            let error = "plugin returned a null response".to_string();
+            log_backend_plugin_call_failure(&plugin_id, method, &error);
+            return Err(error);
         }
         let response_json = unsafe { CStr::from_ptr(response_ptr) }
             .to_string_lossy()
             .to_string();
         unsafe { (self.free)(response_ptr) };
-        let response: PluginCallResponse =
-            serde_json::from_str(&response_json).map_err(json_error)?;
+        let response: PluginCallResponse = match serde_json::from_str(&response_json) {
+            Ok(response) => response,
+            Err(error) => {
+                let error = json_error(error);
+                log_backend_plugin_call_failure(&plugin_id, method, &error);
+                return Err(error);
+            }
+        };
         if response.ok {
             Ok(response.payload.unwrap_or_else(|| serde_json::json!({})))
         } else {
-            Err(response
+            let error = response
                 .error
-                .unwrap_or_else(|| "plugin call failed without an error message".to_string()))
+                .unwrap_or_else(|| "plugin call failed without an error message".to_string());
+            log_backend_plugin_call_failure(&plugin_id, method, &error);
+            Err(error)
         }
     }
+}
+
+fn log_backend_plugin_call_failure(plugin_id: &str, method: &str, error: &str) {
+    let _ = write_log(SystemLogWriteRequest {
+        level: "error".to_string(),
+        category: "plugin.backend".to_string(),
+        action: "callFailed".to_string(),
+        message: "后端插件调用失败。".to_string(),
+        context: Some(serde_json::json!({
+            "pluginId": plugin_id,
+            "method": method,
+            "error": error,
+        })),
+        repo_id: None,
+        plugin_id: Some(plugin_id.to_string()),
+        source_kind: Some("backend-plugin".to_string()),
+        source_label: Some(plugin_id.to_string()),
+        location: Some(SystemLogLocationInput {
+            module_path: Some(module_path!().to_string()),
+            file: Some(file!().to_string()),
+            line: Some(line!()),
+        }),
+    });
 }
 
 pub(super) unsafe extern "C" fn host_plugin_call_bridge(input: *const c_char) -> *mut c_char {
@@ -423,7 +457,8 @@ fn dispatch_internal_host_system_call(
 ) -> Result<serde_json::Value, String> {
     match method.trim() {
         "system.log.write" => {
-            let request = serde_json::from_value::<SystemLogWriteRequest>(payload).map_err(json_error)?;
+            let request =
+                serde_json::from_value::<SystemLogWriteRequest>(payload).map_err(json_error)?;
             let record = write_log(request)?;
             serde_json::to_value(record).map_err(json_error)
         }
@@ -753,7 +788,10 @@ mod tests {
             serde_json::from_value(payload).expect("record payload should decode");
         assert_eq!(record.action, "healthChanged");
         assert_eq!(record.source.kind, "backend-plugin");
-        assert_eq!(record.source.plugin_id.as_deref(), Some("momobako.service.test"));
+        assert_eq!(
+            record.source.plugin_id.as_deref(),
+            Some("momobako.service.test")
+        );
 
         let page = list_records(logger.as_ref());
         assert_eq!(page.records.len(), 1);

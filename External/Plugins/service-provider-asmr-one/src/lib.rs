@@ -6,8 +6,7 @@ use std::{
 };
 
 use momobako_backend_plugin_sdk::{
-    free_c_string, read_request, register_host_plugin_api, response_error, response_with_error_log,
-    HostPluginCallFn, HostPluginFreeFn, PluginCallEnvelope,
+    free_c_string, read_request, response_error, response_with_error_log, PluginCallEnvelope,
 };
 use serde::Deserialize;
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
@@ -37,14 +36,6 @@ pub extern "C" fn momobako_plugin_call(input: *const c_char) -> *mut c_char {
     let method = request.method.clone();
     let runtime = request.runtime.clone();
     response_with_error_log(&runtime, &method, handle_call(request))
-}
-
-#[no_mangle]
-pub extern "C" fn momobako_plugin_register_host_api(
-    call: Option<HostPluginCallFn>,
-    free: Option<HostPluginFreeFn>,
-) {
-    register_host_plugin_api(call, free);
 }
 
 #[no_mangle]

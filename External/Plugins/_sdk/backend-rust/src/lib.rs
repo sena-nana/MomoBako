@@ -199,21 +199,10 @@ pub fn response_with_error_log(
     method: &str,
     result: Result<serde_json::Value, String>,
 ) -> *mut c_char {
+    let _ = (runtime, method);
     match result {
         Ok(value) => response_ok(value),
-        Err(error) => {
-            write_host_log_silently(
-                runtime,
-                "error",
-                "callFailed",
-                "后端插件调用失败。",
-                serde_json::json!({
-                    "method": method,
-                    "error": error.as_str(),
-                }),
-            );
-            response_error(error)
-        }
+        Err(error) => response_error(error),
     }
 }
 
