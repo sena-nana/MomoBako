@@ -1,0 +1,110 @@
+External/Plugins/_sdk/backend-rust/src/lib.rs
+  s_bf1b4ca0d28199::t_6ab0097210e6a1 60-88,156-187,292-337
+External/Plugins/dev.md
+  s_bf1b4ca0d28199::t_b1af700484c61b 147-162,191-212
+docs/api-design.md
+  s_bf1b4ca0d28199::t_08b5d254b4c4b8 374-395,416-425,437
+src-tauri/src/app_shell.rs
+  s_bf1b4ca0d28199::t_a48489bd67b8e2 3,6,35-55,154-169
+src-tauri/src/lib.rs
+  s_bf1b4ca0d28199::t_89adf59d91e142 42,727-749,829-832
+src-tauri/src/services/logging.rs
+  s_bf1b4ca0d28199::t_09c194fce63136 1-526
+src-tauri/src/services/mod.rs
+  s_bf1b4ca0d28199::t_ed650b39f63193 3
+src-tauri/src/services/repository/api_design.rs
+  s_bf1b4ca0d28199::t_b64465081c6ce1 83-118
+src-tauri/src/services/repository/contracts.rs
+  s_bf1b4ca0d28199::t_8dfade8e985fed 759-854
+src-tauri/src/services/repository/local_index.rs
+  s_bf1b4ca0d28199::t_4e2639ee1d0b71 118-126,132-141
+src-tauri/src/services/repository/plugin_runtime.rs
+  s_bf1b4ca0d28199::t_ab5441a18e598b 5-6,410-412,420-433,518-526,692-765
+src-tauri/src/services/repository/thumbnail.rs
+  s_bf1b4ca0d28199::t_9266f05e2f6f6c 53-61
+src-tauri/src/services/runtime/mod.rs
+  s_bf1b4ca0d28199::t_2f55fd48133b6b 98-106
+src-tauri/src/viewmodels/system.rs
+  s_bf1b4ca0d28199::t_e8837ad8594609 3,5-7,48-68
+src-tauri/src/window_state.rs
+  s_bf1b4ca0d28199::t_8a61c6c272dd5d 160-166
+src/composables/useRepositoryWorkspace.ts
+  s_bf1b4ca0d28199::t_ffef6fe9e7d75a 18
+src/composables/workspace/facade.ts
+  s_bf1b4ca0d28199::t_e1bcf77b90e719 57,59-60,189-192,435-442,455,463
+src/composables/workspace/fileOperations.ts
+  s_bf1b4ca0d28199::t_16e348dcfacf80 57,155-161,172-178,182-188,197-203,219-225,229-235,245-251,268-274,279-285,297-303,323-329,334-340,355-361,386-392,397-403,414-420,435-441,446-452,464-470,503-509,514-520,530-536,553-559,563-569,578-584,600-606,610-616,747-752,766-771,775-781,796-802,805-811,821-827,830-836
+src/composables/workspace/index.ts
+  s_bf1b4ca0d28199::t_47a04812a0b86c 28-32,38
+src/composables/workspace/lifecycle.ts
+  s_bf1b4ca0d28199::t_35e02b92f48428 83,594
+src/composables/workspace/logs.ts
+  s_bf1b4ca0d28199::t_330021fa30eded 1-82
+src/composables/workspace/navigation.ts
+  s_bf1b4ca0d28199::t_0d8db5fda5987e 6,52,58-63,92-97,165-171,175-181,220-222
+src/composables/workspace/playlists.ts
+  s_bf1b4ca0d28199::t_96990511c15031 19,157-163,170-176,182-188,195,197-203
+src/composables/workspace/repositories.ts
+  s_bf1b4ca0d28199::t_f0aa87f75f69a6 17,126-131,153-159,163-168,175-180,186-192,196-201,208-213,219-225,229-234,241-247,255-261,296-302,332-338,342-348,359-365,379-385,390-396
+src/composables/workspace/repositoryActions.ts
+  s_bf1b4ca0d28199::t_1e6282e47d81d9 5,58-64,80-86,90-96
+src/composables/workspace/settings.ts
+  s_bf1b4ca0d28199::t_44fb7426720288 16,86-92,97-102,107-112,149-155,159-167,170-176,184-190,194-202,205-211
+src/composables/workspace/state.ts
+  s_bf1b4ca0d28199::t_e8cb4a678cad6d 19,26,143,162-163
+src/layouts/SecondaryPanel.vue
+  s_bf1b4ca0d28199::t_8e94e225b620d4 406
+src/layouts/WorkspaceSidebarFooter.vue
+  s_bf1b4ca0d28199::t_892f69ad1b2f03 3,14,40-49
+src/pages/Home.vue
+  s_bf1b4ca0d28199::t_e555ebed57b515 10,145-152
+src/pages/workspace/WorkspaceLogsPanel.vue
+  s_bf1b4ca0d28199::t_766e6966373c76 1-361
+src/pages/workspace/lazyComponents.ts
+  s_bf1b4ca0d28199::t_ad64703904f04b 27,40,48-49,65
+src/pages/workspace/repository/useWorkspaceHomeViewModel.ts
+  s_bf1b4ca0d28199::t_a0c5cc38649e2f 6,202-205,212,215,260,906,917-918,934,953
+src/pages/workspace/useWorkspaceViewState.ts
+  s_bf1b4ca0d28199::t_b1eaf9f31e0209 100,231
+src/plugins/sdk.ts
+  s_bf1b4ca0d28199::t_2dd2caf64fc781 52,248-259,327-332,389-420,550,662,687
+src/services/repositoryApi.ts
+  s_bf1b4ca0d28199::t_353b075a7ebfb0 2
+src/services/repositoryApi/logs.ts
+  s_bf1b4ca0d28199::t_a237194fdf9e39 1-45
+src/services/systemLog.ts
+  s_bf1b4ca0d28199::t_dea2d343c33d37 1-87
+src/styles/pages/workspace.css
+  s_bf1b4ca0d28199::t_a4619b334f7c0a 975-983,1101-1293,4798-4816
+src/types/repository/core.ts
+  s_bf1b4ca0d28199::t_da74115195b39e 627-688
+src/types/repository/plugins.ts
+  s_bf1b4ca0d28199::t_8ce4f2d16e53a4 11-18
+tests/pluginSdkRepositoryApi.test.ts
+  s_bf1b4ca0d28199::t_de049ad0b82091 91-128,201-231
+tests/router.test.ts
+  s_bf1b4ca0d28199::t_dc1d72a1401899 27,39,89-90,94-98,231-255,684-802
+tests/setupTests.ts
+  s_bf1b4ca0d28199::t_cc2a725c85d1bf 18,57,515-600,712-737,1670-1708,2031-2067,2361,2466-2469
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "c0daa45da8869d137f54cef9aba6e000ce721d3c",
+  "prompts": {},
+  "humans": {
+    "h_8e6780fc7b4bb1": {
+      "author": "AuraElicase <auraelicase@outlook.com>"
+    }
+  },
+  "sessions": {
+    "s_bf1b4ca0d28199": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f355f-74ba-7fb1-bbb6-d2266ccaaf13",
+        "model": "unknown"
+      },
+      "human_author": "AuraElicase <auraelicase@outlook.com>"
+    }
+  }
+}
