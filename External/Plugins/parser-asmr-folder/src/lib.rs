@@ -1,6 +1,9 @@
 use std::{collections::BTreeMap, ffi::CString, os::raw::c_char};
 
-use momobako_backend_plugin_sdk::{free_c_string, read_request, response_error, response_ok};
+use momobako_backend_plugin_sdk::{
+    free_c_string, read_request, register_host_plugin_api, response_error, response_with_error_log,
+    HostPluginCallFn, HostPluginFreeFn, PluginCallEnvelope,
+};
 use serde::Deserialize;
 
 const MANIFEST: &str = include_str!("../manifest.json");
@@ -36,10 +39,21 @@ pub extern "C" fn momobako_plugin_manifest() -> *mut c_char {
 
 #[no_mangle]
 pub extern "C" fn momobako_plugin_call(input: *const c_char) -> *mut c_char {
-    match handle_call(input) {
-        Ok(value) => response_ok(value),
-        Err(error) => response_error(error),
-    }
+    let request = match read_request(input) {
+        Ok(request) => request,
+        Err(error) => return response_error(error),
+    };
+    let method = request.method.clone();
+    let runtime = request.runtime.clone();
+    response_with_error_log(&runtime, &method, handle_call(request))
+}
+
+#[no_mangle]
+pub extern "C" fn momobako_plugin_register_host_api(
+    call: Option<HostPluginCallFn>,
+    free: Option<HostPluginFreeFn>,
+) {
+    register_host_plugin_api(call, free);
 }
 
 #[no_mangle]
@@ -47,8 +61,7 @@ pub unsafe extern "C" fn momobako_plugin_free(value: *mut c_char) {
     unsafe { free_c_string(value) };
 }
 
-fn handle_call(input: *const c_char) -> Result<serde_json::Value, String> {
-    let request = read_request(input)?;
+fn handle_call(request: PluginCallEnvelope) -> Result<serde_json::Value, String> {
     match request.method.as_str() {
         "metadata.defaults.batch" => {
             let payload: DefaultsPayload =
@@ -90,10 +103,19 @@ fn default_metadata(
     let extension = extension.to_ascii_lowercase();
     let mut defaults = BTreeMap::from([
         ("libraryKind".to_string(), serde_json::json!("asmr")),
-        ("workId".to_string(), serde_json::json!(context.work_id.clone())),
-        ("rjCode".to_string(), serde_json::json!(context.work_id.clone())),
+        (
+            "workId".to_string(),
+            serde_json::json!(context.work_id.clone()),
+        ),
+        (
+            "rjCode".to_string(),
+            serde_json::json!(context.work_id.clone()),
+        ),
         ("workRoot".to_string(), serde_json::json!(context.work_root)),
-        ("workTitle".to_string(), serde_json::json!(context.work_title)),
+        (
+            "workTitle".to_string(),
+            serde_json::json!(context.work_title),
+        ),
         ("trackPath".to_string(), serde_json::json!(relative_path)),
         ("trackTitle".to_string(), serde_json::json!(filename)),
         (
@@ -108,7 +130,10 @@ fn default_metadata(
     if is_audio_extension(&extension) {
         defaults.extend([
             ("asmrEntryKind".to_string(), serde_json::json!("audio")),
-            ("listeningStatus".to_string(), serde_json::json!("unlistened")),
+            (
+                "listeningStatus".to_string(),
+                serde_json::json!("unlistened"),
+            ),
             ("listeningProgress".to_string(), serde_json::json!(0)),
             ("trackDurationMs".to_string(), serde_json::json!(0)),
         ]);
@@ -185,8 +210,14 @@ mod tests {
     #[test]
     fn creates_defaults_for_work_tracks() {
         let defaults = default_metadata("Voice/RJ123456 Work/01.mp3", "01.mp3", "mp3");
-        assert_eq!(defaults.get("libraryKind"), Some(&serde_json::json!("asmr")));
+        assert_eq!(
+            defaults.get("libraryKind"),
+            Some(&serde_json::json!("asmr"))
+        );
         assert_eq!(defaults.get("rjCode"), Some(&serde_json::json!("RJ123456")));
-        assert_eq!(defaults.get("asmrEntryKind"), Some(&serde_json::json!("audio")));
+        assert_eq!(
+            defaults.get("asmrEntryKind"),
+            Some(&serde_json::json!("audio"))
+        );
     }
 }

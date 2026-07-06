@@ -15,7 +15,9 @@ use std::{
 
 use aria2_runtime::Aria2Config;
 use momobako_backend_plugin_sdk::{
-    free_c_string, read_request, response_error, response_ok, PluginRuntimeContext,
+    free_c_string, read_request, register_host_plugin_api, response_error, response_with_error_log,
+    write_host_log_silently, HostPluginCallFn, HostPluginFreeFn, PluginCallEnvelope,
+    PluginRuntimeContext,
 };
 use ncm_api_rs::{create_client, ApiResponse, Query};
 use serde::Deserialize;
@@ -114,6 +116,7 @@ struct PluginConfig {
 
 #[derive(Debug)]
 struct RuntimeContext {
+    host_runtime: PluginRuntimeContext,
     plugin_data_dir: PathBuf,
     config: PluginConfig,
 }
@@ -220,10 +223,21 @@ pub extern "C" fn momobako_plugin_manifest() -> *mut raw_c_char {
 
 #[no_mangle]
 pub extern "C" fn momobako_plugin_call(input: *const c_char) -> *mut c_char {
-    match handle_call(input) {
-        Ok(value) => response_ok(value),
-        Err(error) => response_error(error),
-    }
+    let request = match read_request(input) {
+        Ok(request) => request,
+        Err(error) => return response_error(error),
+    };
+    let method = request.method.clone();
+    let runtime = request.runtime.clone();
+    response_with_error_log(&runtime, &method, handle_call(request))
+}
+
+#[no_mangle]
+pub extern "C" fn momobako_plugin_register_host_api(
+    call: Option<HostPluginCallFn>,
+    free: Option<HostPluginFreeFn>,
+) {
+    register_host_plugin_api(call, free);
 }
 
 #[no_mangle]
@@ -231,8 +245,7 @@ pub unsafe extern "C" fn momobako_plugin_free(value: *mut c_char) {
     unsafe { free_c_string(value) };
 }
 
-fn handle_call(input: *const c_char) -> Result<serde_json::Value, String> {
-    let request = read_request(input)?;
+fn handle_call(request: PluginCallEnvelope) -> Result<serde_json::Value, String> {
     let runtime = runtime_context(request.runtime)?;
 
     match request.method.as_str() {
@@ -287,7 +300,7 @@ fn handle_call(input: *const c_char) -> Result<serde_json::Value, String> {
 }
 
 fn runtime_context(runtime: PluginRuntimeContext) -> Result<RuntimeContext, String> {
-    let plugin_data_dir = PathBuf::from(runtime.plugin_data_dir);
+    let plugin_data_dir = PathBuf::from(runtime.plugin_data_dir.clone());
     fs::create_dir_all(plugin_data_dir.join("temp")).map_err(io_error)?;
     fs::create_dir_all(plugin_data_dir.join("exports")).map_err(io_error)?;
     let config = PluginConfig {
@@ -321,6 +334,7 @@ fn runtime_context(runtime: PluginRuntimeContext) -> Result<RuntimeContext, Stri
             .to_string(),
     };
     let runtime = RuntimeContext {
+        host_runtime: runtime,
         plugin_data_dir,
         config,
     };
@@ -1012,7 +1026,18 @@ fn clear_expired_temp_files(runtime: &RuntimeContext) -> Result<(), String> {
         {
             let path = entry.path();
             if path.is_file() {
-                let _ = fs::remove_file(path);
+                if let Err(error) = fs::remove_file(&path) {
+                    write_host_log_silently(
+                        &runtime.host_runtime,
+                        "warn",
+                        "tempCleanupFailed",
+                        "下载临时文件清理失败。",
+                        serde_json::json!({
+                            "path": path.to_string_lossy().to_string(),
+                            "error": error.to_string(),
+                        }),
+                    );
+                }
             }
         }
     }
@@ -1094,6 +1119,7 @@ fn time_error(error: impl ToString) -> String {
 
 fn aria2_config(runtime: &RuntimeContext) -> Aria2Config<'_> {
     Aria2Config {
+        host_runtime: Some(&runtime.host_runtime),
         plugin_data_dir: runtime.plugin_data_dir.as_path(),
         download_url: DEFAULT_ARIA2_DOWNLOAD_URL,
     }
@@ -1140,6 +1166,13 @@ mod tests {
 
     fn runtime_for_test(plugin_data_dir: PathBuf, api_base_url: String) -> RuntimeContext {
         RuntimeContext {
+            host_runtime: PluginRuntimeContext {
+                plugin_id: "momobako.service.downloader".to_string(),
+                plugin_data_dir: plugin_data_dir.to_string_lossy().to_string(),
+                service_root_dir: String::new(),
+                plugin_runtime_dir: String::new(),
+                plugin_config: Default::default(),
+            },
             plugin_data_dir,
             config: PluginConfig {
                 api_base_url,

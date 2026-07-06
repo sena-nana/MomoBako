@@ -16,7 +16,10 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use momobako_backend_plugin_sdk::{free_c_string, read_request, response_error, response_ok};
+use momobako_backend_plugin_sdk::{
+    free_c_string, read_request, register_host_plugin_api, response_error, response_with_error_log,
+    HostPluginCallFn, HostPluginFreeFn, PluginCallEnvelope,
+};
 use momobako_lib::{
     build_eagle_source_snapshot, EagleSourceEntry, EagleSourceEntryKind, EagleSourceSnapshot,
 };
@@ -40,10 +43,21 @@ pub extern "C" fn momobako_plugin_manifest() -> *mut raw_c_char {
 
 #[no_mangle]
 pub extern "C" fn momobako_plugin_call(input: *const c_char) -> *mut raw_c_char {
-    match handle_call(input) {
-        Ok(value) => response_ok(value),
-        Err(error) => response_error(error),
-    }
+    let request = match read_request(input) {
+        Ok(request) => request,
+        Err(error) => return response_error(error),
+    };
+    let method = request.method.clone();
+    let runtime = request.runtime.clone();
+    response_with_error_log(&runtime, &method, handle_call(request))
+}
+
+#[no_mangle]
+pub extern "C" fn momobako_plugin_register_host_api(
+    call: Option<HostPluginCallFn>,
+    free: Option<HostPluginFreeFn>,
+) {
+    register_host_plugin_api(call, free);
 }
 
 #[no_mangle]
@@ -51,8 +65,7 @@ pub unsafe extern "C" fn momobako_plugin_free(value: *mut raw_c_char) {
     unsafe { free_c_string(value) };
 }
 
-fn handle_call(input: *const c_char) -> Result<Value, String> {
-    let request = read_request(input)?;
+fn handle_call(request: PluginCallEnvelope) -> Result<Value, String> {
     let payload: PluginPayload =
         serde_json::from_value(request.payload).map_err(|error| error.to_string())?;
     match request.method.as_str() {
@@ -74,7 +87,8 @@ fn handle_call(input: *const c_char) -> Result<Value, String> {
         }
         "filesystem.listDirectory" => {
             let snapshot = load_snapshot(&payload.repo_root)?;
-            let directory_path = normalize_relative_path(payload.directory_path.as_deref().unwrap_or_default());
+            let directory_path =
+                normalize_relative_path(payload.directory_path.as_deref().unwrap_or_default());
             let entries = snapshot
                 .directories
                 .get(&directory_path)
@@ -84,7 +98,8 @@ fn handle_call(input: *const c_char) -> Result<Value, String> {
         }
         "filesystem.listDirectoryPage" => {
             let snapshot = load_snapshot(&payload.repo_root)?;
-            let directory_path = normalize_relative_path(payload.directory_path.as_deref().unwrap_or_default());
+            let directory_path =
+                normalize_relative_path(payload.directory_path.as_deref().unwrap_or_default());
             let entries = snapshot
                 .directories
                 .get(&directory_path)
@@ -92,7 +107,9 @@ fn handle_call(input: *const c_char) -> Result<Value, String> {
                 .ok_or_else(|| format!("directory not found: {directory_path}"))?;
             let total_entries = entries.len();
             let offset = payload.offset.unwrap_or(0).min(total_entries);
-            let limit = payload.limit.unwrap_or(total_entries.saturating_sub(offset));
+            let limit = payload
+                .limit
+                .unwrap_or(total_entries.saturating_sub(offset));
             serde_json::to_value(DirectoryPageResult {
                 entries: entries.into_iter().skip(offset).take(limit).collect(),
                 total_entries,
@@ -106,13 +123,15 @@ fn handle_call(input: *const c_char) -> Result<Value, String> {
             serde_json::to_value(entry).map_err(|error| error.to_string())
         }
         "filesystem.createDirectory" => {
-            let parent_path = normalize_relative_path(payload.parent_path.as_deref().unwrap_or_default());
+            let parent_path =
+                normalize_relative_path(payload.parent_path.as_deref().unwrap_or_default());
             let name = payload.name.as_deref().ok_or("missing name")?;
             create_directory(&payload.repo_root, &parent_path, name)?;
             Ok(serde_json::json!({}))
         }
         "filesystem.createFile" => {
-            let parent_path = normalize_relative_path(payload.parent_path.as_deref().unwrap_or_default());
+            let parent_path =
+                normalize_relative_path(payload.parent_path.as_deref().unwrap_or_default());
             let name = payload.name.as_deref().ok_or("missing name")?;
             create_file(&payload.repo_root, &parent_path, name)?;
             Ok(serde_json::json!({}))
@@ -195,7 +214,10 @@ fn load_snapshot(repo_root: &Path) -> Result<EagleSourceSnapshot, String> {
     build_eagle_source_snapshot(repo_root)
 }
 
-fn stat_entry(snapshot: &EagleSourceSnapshot, entry_path: &str) -> Result<EagleSourceEntry, String> {
+fn stat_entry(
+    snapshot: &EagleSourceSnapshot,
+    entry_path: &str,
+) -> Result<EagleSourceEntry, String> {
     let entry_path = normalize_relative_path(entry_path);
     for entries in snapshot.directories.values() {
         if let Some(entry) = entries.iter().find(|entry| entry.path == entry_path) {
@@ -273,8 +295,14 @@ fn create_file(repo_root: &Path, parent_path: &str, name: &str) -> Result<(), St
     asset.insert("isDeleted".to_string(), Value::Bool(false));
     asset.insert("url".to_string(), Value::String(String::new()));
     asset.insert("annotation".to_string(), Value::String(String::new()));
-    asset.insert("modificationTime".to_string(), serde_json::json!(now_unix_millis()));
-    asset.insert("lastModified".to_string(), serde_json::json!(now_unix_millis()));
+    asset.insert(
+        "modificationTime".to_string(),
+        serde_json::json!(now_unix_millis()),
+    );
+    asset.insert(
+        "lastModified".to_string(),
+        serde_json::json!(now_unix_millis()),
+    );
     save_json_pretty(&info_dir.join(METADATA_FILE_NAME), &Value::Object(asset))
 }
 
@@ -291,7 +319,8 @@ fn rename_entry(repo_root: &Path, source_path: &str, new_name: &str) -> Result<(
             save_metadata_map(repo_root, &metadata)
         }
         EagleSourceEntryKind::File => {
-            let shared_asset_id = resolve_shared_asset_id(&snapshot, source_path, entry.shared_asset_id.as_deref())?;
+            let shared_asset_id =
+                resolve_shared_asset_id(&snapshot, source_path, entry.shared_asset_id.as_deref())?;
             let info_dir = info_dir_for_asset(repo_root, &shared_asset_id);
             let old_file_path = file_absolute_path_from_entry(&entry)?;
             let new_file_path = info_dir.join(new_name);
@@ -323,7 +352,8 @@ fn move_entry(repo_root: &Path, source_path: &str, target_parent_path: &str) -> 
             save_metadata_map(repo_root, &metadata)
         }
         EagleSourceEntryKind::File => {
-            let shared_asset_id = resolve_shared_asset_id(&snapshot, source_path, entry.shared_asset_id.as_deref())?;
+            let shared_asset_id =
+                resolve_shared_asset_id(&snapshot, source_path, entry.shared_asset_id.as_deref())?;
             let mut root_metadata = load_metadata_map(repo_root)?;
             let mut asset = load_asset_metadata_map(repo_root, &shared_asset_id)?;
             rewrite_asset_membership(
@@ -382,7 +412,10 @@ fn delete_entry(repo_root: &Path, entry_path: &str, _recursive: bool) -> Result<
             } else {
                 asset.insert("isDeleted".to_string(), Value::Bool(true));
             }
-            touch_asset_metadata(&mut asset, Path::new(&file_absolute_path_from_entry(&entry)?))?;
+            touch_asset_metadata(
+                &mut asset,
+                Path::new(&file_absolute_path_from_entry(&entry)?),
+            )?;
             save_asset_metadata_map(repo_root, &shared_asset_id, &asset)
         }
     }
@@ -448,12 +481,7 @@ fn write_repository_state(repo_root: &Path, payload: &PluginPayload) -> Result<(
     );
     metadata.insert(
         "quickAccess".to_string(),
-        Value::Array(
-            quick_access
-                .into_iter()
-                .map(serialize_shortcut)
-                .collect(),
-        ),
+        Value::Array(quick_access.into_iter().map(serialize_shortcut).collect()),
     );
     metadata.insert(
         "tagsGroups".to_string(),
@@ -526,10 +554,16 @@ fn load_metadata_map(repo_root: &Path) -> Result<Map<String, Value>, String> {
 }
 
 fn save_metadata_map(repo_root: &Path, metadata: &Map<String, Value>) -> Result<(), String> {
-    save_json_pretty(&repo_root.join(METADATA_FILE_NAME), &Value::Object(metadata.clone()))
+    save_json_pretty(
+        &repo_root.join(METADATA_FILE_NAME),
+        &Value::Object(metadata.clone()),
+    )
 }
 
-fn load_asset_metadata_map(repo_root: &Path, shared_asset_id: &str) -> Result<Map<String, Value>, String> {
+fn load_asset_metadata_map(
+    repo_root: &Path,
+    shared_asset_id: &str,
+) -> Result<Map<String, Value>, String> {
     load_json_object(&info_dir_for_asset(repo_root, shared_asset_id).join(METADATA_FILE_NAME))
 }
 
@@ -570,7 +604,10 @@ fn resolve_shared_asset_id(
     path: &str,
     shared_asset_id: Option<&str>,
 ) -> Result<String, String> {
-    if let Some(shared_asset_id) = shared_asset_id.map(str::trim).filter(|value| !value.is_empty()) {
+    if let Some(shared_asset_id) = shared_asset_id
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
         return Ok(shared_asset_id.to_string());
     }
     snapshot
@@ -597,7 +634,11 @@ fn resolve_primary_file_path(
                 .ok()?
                 .filter_map(Result::ok)
                 .map(|entry| entry.path())
-                .find(|path| path.is_file() && path.file_name().and_then(|value| value.to_str()) != Some(METADATA_FILE_NAME))
+                .find(|path| {
+                    path.is_file()
+                        && path.file_name().and_then(|value| value.to_str())
+                            != Some(METADATA_FILE_NAME)
+                })
         })
         .ok_or_else(|| format!("asset file not found for shared asset: {shared_asset_id}"))
 }
@@ -651,7 +692,9 @@ fn rewrite_asset_membership(
     asset.insert("isDeleted".to_string(), Value::Bool(false));
     match (folder_ids.is_empty(), target_folder_id) {
         (true, Some(folder_id)) => folder_ids.push(folder_id),
-        (false, Some(folder_id)) if member_index < folder_ids.len() => folder_ids[member_index] = folder_id,
+        (false, Some(folder_id)) if member_index < folder_ids.len() => {
+            folder_ids[member_index] = folder_id
+        }
         (false, None) if member_index < folder_ids.len() => {
             folder_ids.remove(member_index);
         }
@@ -665,7 +708,11 @@ fn rewrite_asset_membership(
     Ok(())
 }
 
-fn rename_thumbnail_with_file(info_dir: &Path, old_file_path: &Path, new_file_path: &Path) -> Result<(), String> {
+fn rename_thumbnail_with_file(
+    info_dir: &Path,
+    old_file_path: &Path,
+    new_file_path: &Path,
+) -> Result<(), String> {
     let old_stem = old_file_path
         .file_stem()
         .and_then(|value| value.to_str())
@@ -714,9 +761,9 @@ fn apply_folder_metadata(
                     "passwordTips".to_string(),
                     Value::String(metadata.password_tip.clone().unwrap_or_default()),
                 );
-                folder_map.entry("password".to_string()).or_insert_with(|| {
-                    Value::String("momobako-managed".to_string())
-                });
+                folder_map
+                    .entry("password".to_string())
+                    .or_insert_with(|| Value::String("momobako-managed".to_string()));
             } else {
                 folder_map.remove("password");
                 folder_map.remove("passwordTip");
@@ -729,7 +776,11 @@ fn apply_folder_metadata(
     }
 }
 
-fn insert_folder(metadata: &mut Map<String, Value>, parent_path: &str, folder: Value) -> Result<(), String> {
+fn insert_folder(
+    metadata: &mut Map<String, Value>,
+    parent_path: &str,
+    folder: Value,
+) -> Result<(), String> {
     if normalize_relative_path(parent_path).is_empty() {
         ensure_array_mut(metadata, "folders").push(folder);
         return Ok(());
@@ -942,11 +993,16 @@ fn ensure_array_mut<'a>(map: &'a mut Map<String, Value>, key: &str) -> &'a mut V
 }
 
 fn info_dir_for_asset(repo_root: &Path, shared_asset_id: &str) -> PathBuf {
-    repo_root.join("images").join(format!("{shared_asset_id}.info"))
+    repo_root
+        .join("images")
+        .join(format!("{shared_asset_id}.info"))
 }
 
 fn touch_library_metadata(metadata: &mut Map<String, Value>) {
-    metadata.insert("modificationTime".to_string(), serde_json::json!(now_unix_millis()));
+    metadata.insert(
+        "modificationTime".to_string(),
+        serde_json::json!(now_unix_millis()),
+    );
 }
 
 fn touch_asset_metadata(metadata: &mut Map<String, Value>, file_path: &Path) -> Result<(), String> {
@@ -957,10 +1013,20 @@ fn touch_asset_metadata(metadata: &mut Map<String, Value>, file_path: &Path) -> 
     );
     metadata.insert(
         "mtime".to_string(),
-        serde_json::json!(stats.modified().ok().map(system_time_to_millis).unwrap_or_else(now_unix_millis)),
+        serde_json::json!(stats
+            .modified()
+            .ok()
+            .map(system_time_to_millis)
+            .unwrap_or_else(now_unix_millis)),
     );
-    metadata.insert("modificationTime".to_string(), serde_json::json!(now_unix_millis()));
-    metadata.insert("lastModified".to_string(), serde_json::json!(now_unix_millis()));
+    metadata.insert(
+        "modificationTime".to_string(),
+        serde_json::json!(now_unix_millis()),
+    );
+    metadata.insert(
+        "lastModified".to_string(),
+        serde_json::json!(now_unix_millis()),
+    );
     Ok(())
 }
 
@@ -970,7 +1036,11 @@ fn generate_eagle_id(prefix: &str) -> String {
         prefix
             .chars()
             .filter(|ch| ch.is_ascii_alphanumeric())
-            .flat_map(|ch| ch.to_ascii_uppercase().to_string().chars().collect::<Vec<_>>())
+            .flat_map(|ch| ch
+                .to_ascii_uppercase()
+                .to_string()
+                .chars()
+                .collect::<Vec<_>>())
             .collect::<String>(),
         now_unix_millis()
     )

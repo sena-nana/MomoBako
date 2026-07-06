@@ -16,6 +16,8 @@ use sha1::{Digest, Sha1};
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 use zip::ZipArchive;
 
+use momobako_backend_plugin_sdk::{write_host_log_silently, PluginRuntimeContext};
+
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
 
@@ -28,6 +30,7 @@ const DEFAULT_RPC_TIMEOUT_SECS: u64 = 10;
 
 #[derive(Debug, Clone)]
 pub struct Aria2Config<'a> {
+    pub host_runtime: Option<&'a PluginRuntimeContext>,
     pub plugin_data_dir: &'a Path,
     pub download_url: &'a str,
 }
@@ -116,7 +119,7 @@ pub fn ensure_runtime(config: &Aria2Config<'_>) -> Result<RuntimeSnapshot, Strin
         fs::write(&paths.session_path, "").map_err(io_error)?;
     }
 
-    cleanup_stale_state(&paths)?;
+    cleanup_stale_state(config, &paths)?;
     if let Some(status) = load_status(&paths.status_path)? {
         if status.running && status_record_healthy(&status)? {
             return runtime_snapshot(config, &paths, status);
@@ -182,15 +185,23 @@ pub fn enqueue_download(
 ) -> Result<DownloadTaskRecord, String> {
     let runtime = ensure_runtime(config)?;
     let paths = paths_for_snapshot(&runtime);
-    let parent = destination_path
-        .parent()
-        .ok_or_else(|| format!("download destination is missing parent directory: {}", destination_path.display()))?;
+    let parent = destination_path.parent().ok_or_else(|| {
+        format!(
+            "download destination is missing parent directory: {}",
+            destination_path.display()
+        )
+    })?;
     fs::create_dir_all(parent).map_err(io_error)?;
     let file_name = destination_path
         .file_name()
         .and_then(OsStr::to_str)
         .filter(|value| !value.trim().is_empty())
-        .ok_or_else(|| format!("download destination filename is invalid: {}", destination_path.display()))?;
+        .ok_or_else(|| {
+            format!(
+                "download destination filename is invalid: {}",
+                destination_path.display()
+            )
+        })?;
     let task_id = managed_task_id(url, destination_path);
     if let Some(existing) = load_task_if_present(&paths.tasks_dir, &task_id)? {
         if should_reuse_existing_task(&existing, url, destination_path) {
@@ -247,7 +258,13 @@ pub fn await_download(
             "aria2.tellStatus",
             vec![
                 serde_json::json!(record.gid.clone()),
-                serde_json::json!(["gid", "status", "totalLength", "completedLength", "errorMessage"]),
+                serde_json::json!([
+                    "gid",
+                    "status",
+                    "totalLength",
+                    "completedLength",
+                    "errorMessage"
+                ]),
             ],
         )?;
         update_task_from_status_payload(&mut record, &status_payload)?;
@@ -272,16 +289,40 @@ pub fn remove_download(config: &Aria2Config<'_>, task_id: &str) -> Result<(), St
     let runtime = ensure_runtime(config)?;
     let paths = paths_for_snapshot(&runtime);
     let record = load_task(&paths.tasks_dir, task_id)?;
-    let _ = rpc_request(
+    let gid = record.gid.clone();
+    if let Err(error) = rpc_request(
         &runtime.status,
         "aria2.remove",
-        vec![serde_json::json!(record.gid.clone())],
-    );
-    let _ = rpc_request(
+        vec![serde_json::json!(gid.clone())],
+    ) {
+        log_runtime_warning(
+            config,
+            "downloadRemoveRpcFailed",
+            "aria2 删除下载任务失败。",
+            serde_json::json!({
+                "taskId": task_id,
+                "gid": gid,
+                "method": "aria2.remove",
+                "error": error,
+            }),
+        );
+    }
+    if let Err(error) = rpc_request(
         &runtime.status,
         "aria2.removeDownloadResult",
         vec![serde_json::json!(record.gid)],
-    );
+    ) {
+        log_runtime_warning(
+            config,
+            "downloadRemoveRpcFailed",
+            "aria2 删除下载结果失败。",
+            serde_json::json!({
+                "taskId": task_id,
+                "method": "aria2.removeDownloadResult",
+                "error": error,
+            }),
+        );
+    }
     let task_path = task_path(&paths.tasks_dir, task_id);
     if task_path.is_file() {
         fs::remove_file(task_path).map_err(io_error)?;
@@ -456,7 +497,11 @@ fn detect_system_aria2() -> Option<PathBuf> {
 }
 
 fn detect_bundled_aria2(paths: &Aria2Paths) -> Option<PathBuf> {
-    let binary_name = if cfg!(target_os = "windows") { "aria2c.exe" } else { "aria2c" };
+    let binary_name = if cfg!(target_os = "windows") {
+        "aria2c.exe"
+    } else {
+        "aria2c"
+    };
     let candidate = paths.runtime_dir.join(binary_name);
     if candidate.is_file() {
         return Some(candidate);
@@ -498,7 +543,11 @@ fn extract_aria2_archive(archive_path: &Path, runtime_dir: &Path) -> Result<(), 
     fs::create_dir_all(runtime_dir).map_err(io_error)?;
     let file = fs::File::open(archive_path).map_err(io_error)?;
     let mut archive = ZipArchive::new(file).map_err(|error| error.to_string())?;
-    let expected_name = if cfg!(target_os = "windows") { "aria2c.exe" } else { "aria2c" };
+    let expected_name = if cfg!(target_os = "windows") {
+        "aria2c.exe"
+    } else {
+        "aria2c"
+    };
     for index in 0..archive.len() {
         let mut entry = archive.by_index(index).map_err(|error| error.to_string())?;
         let entry_name = entry.name().replace('\\', "/");
@@ -511,10 +560,7 @@ fn extract_aria2_archive(archive_path: &Path, runtime_dir: &Path) -> Result<(), 
         output.flush().map_err(io_error)?;
         return Ok(());
     }
-    Err(format!(
-        "aria2 archive does not contain {}",
-        expected_name
-    ))
+    Err(format!("aria2 archive does not contain {}", expected_name))
 }
 
 fn spawn_aria2_process(
@@ -602,9 +648,7 @@ fn rpc_request(
         .send()
         .and_then(|response| response.error_for_status())
         .map_err(http_error)?;
-    let body = response
-        .json::<serde_json::Value>()
-        .map_err(http_error)?;
+    let body = response.json::<serde_json::Value>().map_err(http_error)?;
     if let Some(error) = body.get("error") {
         let message = error
             .get("message")
@@ -642,7 +686,9 @@ fn update_task_from_status_payload(
         .get("errorMessage")
         .and_then(serde_json::Value::as_str)
         .map(ToOwned::to_owned);
-    if matches!(record.status.as_str(), "completed" | "failed" | "removed") && record.finished_at.is_none() {
+    if matches!(record.status.as_str(), "completed" | "failed" | "removed")
+        && record.finished_at.is_none()
+    {
         record.finished_at = Some(now_rfc3339()?);
     }
     Ok(())
@@ -681,7 +727,10 @@ fn load_task(tasks_dir: &Path, task_id: &str) -> Result<DownloadTaskRecord, Stri
     serde_json::from_str::<DownloadTaskRecord>(&raw).map_err(|error| error.to_string())
 }
 
-fn load_task_if_present(tasks_dir: &Path, task_id: &str) -> Result<Option<DownloadTaskRecord>, String> {
+fn load_task_if_present(
+    tasks_dir: &Path,
+    task_id: &str,
+) -> Result<Option<DownloadTaskRecord>, String> {
     let path = task_path(tasks_dir, task_id);
     if !path.is_file() {
         return Ok(None);
@@ -716,15 +765,54 @@ fn should_reuse_existing_task(
     }
 }
 
-fn cleanup_stale_state(paths: &Aria2Paths) -> Result<(), String> {
+fn cleanup_stale_state(config: &Aria2Config<'_>, paths: &Aria2Paths) -> Result<(), String> {
     if let Some(pid) = read_pid(&paths.pid_path)? {
         if process_is_running(pid) {
             return Ok(());
         }
     }
-    let _ = fs::remove_file(&paths.pid_path);
-    let _ = fs::remove_file(&paths.status_path);
+    remove_file_if_present(
+        config,
+        &paths.pid_path,
+        "runtimeStateCleanupFailed",
+        "aria2 过期 PID 文件清理失败。",
+    );
+    remove_file_if_present(
+        config,
+        &paths.status_path,
+        "runtimeStateCleanupFailed",
+        "aria2 过期状态文件清理失败。",
+    );
     Ok(())
+}
+
+fn remove_file_if_present(config: &Aria2Config<'_>, path: &Path, action: &str, message: &str) {
+    if !path.is_file() {
+        return;
+    }
+    if let Err(error) = fs::remove_file(path) {
+        log_runtime_warning(
+            config,
+            action,
+            message,
+            serde_json::json!({
+                "path": path.to_string_lossy().to_string(),
+                "error": error.to_string(),
+            }),
+        );
+    }
+}
+
+fn log_runtime_warning<T: Serialize>(
+    config: &Aria2Config<'_>,
+    action: &str,
+    message: &str,
+    context: T,
+) {
+    let Some(host_runtime) = config.host_runtime else {
+        return;
+    };
+    write_host_log_silently(host_runtime, "warn", action, message, context);
 }
 
 fn read_pid(path: &Path) -> Result<Option<u32>, String> {
@@ -856,8 +944,11 @@ mod tests {
     fn start_mock_aria2_rpc_server(
         handler: impl Fn(&serde_json::Value) -> serde_json::Value + Send + 'static,
     ) -> String {
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("mock rpc server should bind");
-        let address = listener.local_addr().expect("mock rpc server address should resolve");
+        let listener =
+            std::net::TcpListener::bind("127.0.0.1:0").expect("mock rpc server should bind");
+        let address = listener
+            .local_addr()
+            .expect("mock rpc server address should resolve");
         std::thread::spawn(move || {
             for _ in 0..4 {
                 let Ok((mut stream, _)) = listener.accept() else {
@@ -909,13 +1000,10 @@ mod tests {
         format!("http://{}/jsonrpc", address)
     }
 
-    fn write_mock_running_status(
-        paths: &Aria2Paths,
-        plugin_data_dir: &Path,
-        rpc_url: &str,
-    ) {
+    fn write_mock_running_status(paths: &Aria2Paths, plugin_data_dir: &Path, rpc_url: &str) {
         fs::create_dir_all(&paths.helper_dir).expect("helper dir should be created");
-        fs::write(&paths.pid_path, std::process::id().to_string()).expect("pid file should be written");
+        fs::write(&paths.pid_path, std::process::id().to_string())
+            .expect("pid file should be written");
         save_status(
             &paths.status_path,
             &Aria2StatusRecord {
@@ -1021,6 +1109,7 @@ mod tests {
         .expect("second task should be written");
 
         let snapshot = runtime_status(&Aria2Config {
+            host_runtime: None,
             plugin_data_dir: &plugin_data_dir,
             download_url: "https://example.test/aria2.zip",
         })
@@ -1028,9 +1117,15 @@ mod tests {
 
         assert_eq!(snapshot.queue_size, 2);
         assert_eq!(snapshot.downloads_dir, plugin_data_dir.join("downloads"));
-        assert_eq!(snapshot.helper_dir, plugin_data_dir.join("helpers").join("aria2"));
+        assert_eq!(
+            snapshot.helper_dir,
+            plugin_data_dir.join("helpers").join("aria2")
+        );
         assert!(!snapshot.status.running);
-        assert_eq!(snapshot.status.download_url, "https://example.test/aria2.zip");
+        assert_eq!(
+            snapshot.status.download_url,
+            "https://example.test/aria2.zip"
+        );
         assert_eq!(
             snapshot.status.bundled_archive_path.as_deref(),
             Some(
@@ -1067,7 +1162,9 @@ mod tests {
         let workspace = TestWorkspace::new("http-fallback");
         let destination_path = workspace.path("downloads/mock.bin");
         let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("test server should bind");
-        let addr = listener.local_addr().expect("test server address should resolve");
+        let addr = listener
+            .local_addr()
+            .expect("test server address should resolve");
         std::thread::spawn(move || {
             if let Ok((mut stream, _)) = listener.accept() {
                 let mut buffer = [0_u8; 1024];
@@ -1084,6 +1181,7 @@ mod tests {
 
         let record = download_via_aria2(
             &Aria2Config {
+                host_runtime: None,
                 plugin_data_dir: &workspace.path("plugin-data"),
                 download_url: "https://example.test/aria2.zip",
             },
@@ -1095,12 +1193,21 @@ mod tests {
         .expect("http fallback should download file");
 
         assert_eq!(record.status, "completed");
-        assert_eq!(record.destination_path, destination_path.to_string_lossy().to_string());
-        assert_eq!(record.metadata, Some(serde_json::json!({ "kind": "runtime-test" })));
+        assert_eq!(
+            record.destination_path,
+            destination_path.to_string_lossy().to_string()
+        );
+        assert_eq!(
+            record.metadata,
+            Some(serde_json::json!({ "kind": "runtime-test" }))
+        );
         assert!(record.finished_at.is_some());
         assert_eq!(record.total_length, Some(13));
         assert_eq!(record.completed_length, Some(13));
-        assert_eq!(fs::read(&destination_path).expect("downloaded file should read"), b"mock-download");
+        assert_eq!(
+            fs::read(&destination_path).expect("downloaded file should read"),
+            b"mock-download"
+        );
     }
 
     #[test]
@@ -1140,8 +1247,12 @@ mod tests {
     fn enqueue_download_reuses_completed_task_only_when_file_exists() {
         let workspace = TestWorkspace::new("reuse-completed-task");
         let destination_path = workspace.path("downloads/runtime.zip");
-        fs::create_dir_all(destination_path.parent().expect("downloads dir should exist"))
-            .expect("downloads dir should be created");
+        fs::create_dir_all(
+            destination_path
+                .parent()
+                .expect("downloads dir should exist"),
+        )
+        .expect("downloads dir should be created");
         fs::write(&destination_path, b"runtime").expect("completed file should be written");
         let record = DownloadTaskRecord {
             task_id: managed_task_id("https://example.test/runtime.zip", &destination_path),
@@ -1228,6 +1339,7 @@ mod tests {
         .expect("task file should be written");
 
         let config = Aria2Config {
+            host_runtime: None,
             plugin_data_dir: &plugin_data_dir,
             download_url: "https://example.test/aria2.zip",
         };
@@ -1283,6 +1395,7 @@ mod tests {
 
         let result = await_download(
             &Aria2Config {
+                host_runtime: None,
                 plugin_data_dir: &plugin_data_dir,
                 download_url: "https://example.test/aria2.zip",
             },
@@ -1292,12 +1405,19 @@ mod tests {
         .expect("await download should return timeout record");
 
         assert_eq!(result.status, "failed");
-        assert_eq!(result.error.as_deref(), Some("download task timed out: task-timeout"));
+        assert_eq!(
+            result.error.as_deref(),
+            Some("download task timed out: task-timeout")
+        );
         assert!(result.finished_at.is_some());
 
-        let persisted = load_task(&paths.tasks_dir, task_id).expect("timed out task should persist");
+        let persisted =
+            load_task(&paths.tasks_dir, task_id).expect("timed out task should persist");
         assert_eq!(persisted.status, "failed");
-        assert_eq!(persisted.error.as_deref(), Some("download task timed out: task-timeout"));
+        assert_eq!(
+            persisted.error.as_deref(),
+            Some("download task timed out: task-timeout")
+        );
         assert!(persisted.finished_at.is_some());
     }
 }

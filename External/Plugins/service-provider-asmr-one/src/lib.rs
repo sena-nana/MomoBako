@@ -1,6 +1,14 @@
-use std::{collections::{BTreeMap, HashSet}, ffi::CString, os::raw::c_char, time::Duration};
+use std::{
+    collections::{BTreeMap, HashSet},
+    ffi::CString,
+    os::raw::c_char,
+    time::Duration,
+};
 
-use momobako_backend_plugin_sdk::{free_c_string, read_request, response_error, response_ok};
+use momobako_backend_plugin_sdk::{
+    free_c_string, read_request, register_host_plugin_api, response_error, response_with_error_log,
+    HostPluginCallFn, HostPluginFreeFn, PluginCallEnvelope,
+};
 use serde::Deserialize;
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 
@@ -22,10 +30,21 @@ pub extern "C" fn momobako_plugin_manifest() -> *mut c_char {
 
 #[no_mangle]
 pub extern "C" fn momobako_plugin_call(input: *const c_char) -> *mut c_char {
-    match handle_call(input) {
-        Ok(value) => response_ok(value),
-        Err(error) => response_error(error),
-    }
+    let request = match read_request(input) {
+        Ok(request) => request,
+        Err(error) => return response_error(error),
+    };
+    let method = request.method.clone();
+    let runtime = request.runtime.clone();
+    response_with_error_log(&runtime, &method, handle_call(request))
+}
+
+#[no_mangle]
+pub extern "C" fn momobako_plugin_register_host_api(
+    call: Option<HostPluginCallFn>,
+    free: Option<HostPluginFreeFn>,
+) {
+    register_host_plugin_api(call, free);
 }
 
 #[no_mangle]
@@ -33,8 +52,7 @@ pub unsafe extern "C" fn momobako_plugin_free(value: *mut c_char) {
     unsafe { free_c_string(value) };
 }
 
-fn handle_call(input: *const c_char) -> Result<serde_json::Value, String> {
-    let request = read_request(input)?;
+fn handle_call(request: PluginCallEnvelope) -> Result<serde_json::Value, String> {
     match request.method.as_str() {
         "provider.lookupMetadataCandidate" => {
             let payload: LookupPayload =
@@ -106,7 +124,9 @@ fn fetch_body(url: &str) -> Result<String, String> {
     if !status.is_success() {
         return Err(format!("provider returned HTTP {status}"));
     }
-    response.text().map_err(|error| format!("provider body error: {error}"))
+    response
+        .text()
+        .map_err(|error| format!("provider body error: {error}"))
 }
 
 fn parse_candidate(
@@ -114,7 +134,8 @@ fn parse_candidate(
     source_url: &str,
     body: &str,
 ) -> Result<serde_json::Value, String> {
-    let value = serde_json::from_str::<serde_json::Value>(body).map_err(|error| error.to_string())?;
+    let value =
+        serde_json::from_str::<serde_json::Value>(body).map_err(|error| error.to_string())?;
     let payload = value
         .get("data")
         .filter(|item| item.is_object())
@@ -124,18 +145,64 @@ fn parse_candidate(
         ("rjCode".to_string(), serde_json::json!(work_id)),
         ("sourceUrl".to_string(), serde_json::json!(source_url)),
     ]);
-    insert_string(&mut fields, "workTitle", first_string(payload, &["title", "name", "workTitle"]));
-    insert_string(&mut fields, "circle", nested_string(payload, &[&["circle", "name"], &["maker", "name"], &["circleName"]]));
-    insert_string(&mut fields, "series", nested_string(payload, &[&["series", "name"], &["seriesName"]]));
-    insert_string(&mut fields, "releaseDate", first_string(payload, &["release", "releaseDate", "release_dtl"]));
-    insert_string(&mut fields, "ageRating", first_string(payload, &["ageCategory", "ageRating", "rate"]));
+    insert_string(
+        &mut fields,
+        "workTitle",
+        first_string(payload, &["title", "name", "workTitle"]),
+    );
+    insert_string(
+        &mut fields,
+        "circle",
+        nested_string(
+            payload,
+            &[&["circle", "name"], &["maker", "name"], &["circleName"]],
+        ),
+    );
+    insert_string(
+        &mut fields,
+        "series",
+        nested_string(payload, &[&["series", "name"], &["seriesName"]]),
+    );
+    insert_string(
+        &mut fields,
+        "releaseDate",
+        first_string(payload, &["release", "releaseDate", "release_dtl"]),
+    );
+    insert_string(
+        &mut fields,
+        "ageRating",
+        first_string(payload, &["ageCategory", "ageRating", "rate"]),
+    );
     insert_number(&mut fields, "price", first_number(payload, &["price"]));
-    insert_number(&mut fields, "dlCount", first_number(payload, &["dl_count", "dlCount", "sales"]));
-    insert_number(&mut fields, "reviewCount", first_number(payload, &["review_count", "reviewCount"]));
-    insert_number(&mut fields, "rateAverage", first_number(payload, &["rate_average_2dp", "rateAverage", "rating"]));
-    insert_array(&mut fields, "voiceActors", collect_named_array(payload, &["vas", "voiceActors", "creators"]));
-    insert_array(&mut fields, "scenarioTags", collect_named_array(payload, &["tags", "genres"]));
-    if let Some(cover) = first_string(payload, &["mainCoverUrl", "cover", "image_main", "imageMain"]) {
+    insert_number(
+        &mut fields,
+        "dlCount",
+        first_number(payload, &["dl_count", "dlCount", "sales"]),
+    );
+    insert_number(
+        &mut fields,
+        "reviewCount",
+        first_number(payload, &["review_count", "reviewCount"]),
+    );
+    insert_number(
+        &mut fields,
+        "rateAverage",
+        first_number(payload, &["rate_average_2dp", "rateAverage", "rating"]),
+    );
+    insert_array(
+        &mut fields,
+        "voiceActors",
+        collect_named_array(payload, &["vas", "voiceActors", "creators"]),
+    );
+    insert_array(
+        &mut fields,
+        "scenarioTags",
+        collect_named_array(payload, &["tags", "genres"]),
+    );
+    if let Some(cover) = first_string(
+        payload,
+        &["mainCoverUrl", "cover", "image_main", "imageMain"],
+    ) {
         fields.insert("cover".to_string(), serde_json::json!(cover));
     }
     if fields.len() <= 3 {
@@ -148,8 +215,15 @@ fn parse_candidate(
     }))
 }
 
-fn insert_string(fields: &mut BTreeMap<String, serde_json::Value>, key: &str, value: Option<String>) {
-    let Some(value) = value.map(|item| item.trim().to_string()).filter(|item| !item.is_empty()) else {
+fn insert_string(
+    fields: &mut BTreeMap<String, serde_json::Value>,
+    key: &str,
+    value: Option<String>,
+) {
+    let Some(value) = value
+        .map(|item| item.trim().to_string())
+        .filter(|item| !item.is_empty())
+    else {
         return;
     };
     fields.insert(key.to_string(), serde_json::json!(value));
@@ -169,11 +243,13 @@ fn insert_array(fields: &mut BTreeMap<String, serde_json::Value>, key: &str, val
 }
 
 fn first_string(value: &serde_json::Value, keys: &[&str]) -> Option<String> {
-    keys.iter().find_map(|key| value.get(*key).and_then(json_string))
+    keys.iter()
+        .find_map(|key| value.get(*key).and_then(json_string))
 }
 
 fn first_number(value: &serde_json::Value, keys: &[&str]) -> Option<f64> {
-    keys.iter().find_map(|key| value.get(*key).and_then(json_number))
+    keys.iter()
+        .find_map(|key| value.get(*key).and_then(json_number))
 }
 
 fn nested_string(value: &serde_json::Value, paths: &[&[&str]]) -> Option<String> {

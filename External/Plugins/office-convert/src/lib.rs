@@ -15,7 +15,8 @@ use std::{
 
 use momobako_backend_plugin_sdk::{
     call_host_plugin, free_c_string, read_request, register_host_plugin_api, response_error,
-    response_ok, HostPluginCallFn, HostPluginFreeFn, PluginRuntimeContext,
+    response_with_error_log, write_host_log_silently, HostPluginCallFn, HostPluginFreeFn,
+    PluginCallEnvelope, PluginRuntimeContext,
 };
 use reqwest::blocking::Client;
 use rusqlite::{Connection, OptionalExtension};
@@ -34,6 +35,7 @@ const DEFAULT_LIBREOFFICE_VERSION: &str = "25.8.3";
 const DEFAULT_LIBREOFFICE_DOWNLOAD_URL: &str =
     "https://download.documentfoundation.org/libreoffice/stable/25.8.3/win/x86_64/LibreOffice_25.8.3_Win_x86-64.msi";
 const DOWNLOADER_PLUGIN_ID: &str = "momobako.service.downloader";
+const OFFICE_CONVERT_PLUGIN_ID: &str = "momobako.service.office-convert";
 const LIBREOFFICE_HELPER_HEALTH_TIMEOUT_SECS: u64 = 3;
 const LIBREOFFICE_HELPER_STARTUP_RETRIES: usize = 20;
 
@@ -130,10 +132,13 @@ pub extern "C" fn momobako_plugin_manifest() -> *mut raw_c_char {
 
 #[no_mangle]
 pub extern "C" fn momobako_plugin_call(input: *const c_char) -> *mut c_char {
-    match handle_call(input) {
-        Ok(value) => response_ok(value),
-        Err(error) => response_error(error),
-    }
+    let request = match read_request(input) {
+        Ok(request) => request,
+        Err(error) => return response_error(error),
+    };
+    let method = request.method.clone();
+    let runtime = request.runtime.clone();
+    response_with_error_log(&runtime, &method, handle_call(request))
 }
 
 #[no_mangle]
@@ -149,8 +154,7 @@ pub extern "C" fn momobako_plugin_register_host_api(
     register_host_plugin_api(call, free);
 }
 
-fn handle_call(input: *const c_char) -> Result<serde_json::Value, String> {
-    let request = read_request(input)?;
+fn handle_call(request: PluginCallEnvelope) -> Result<serde_json::Value, String> {
     let runtime = runtime_context(request.runtime)?;
 
     match request.method.as_str() {
@@ -159,8 +163,9 @@ fn handle_call(input: *const c_char) -> Result<serde_json::Value, String> {
                 serde_json::from_value(request.payload).map_err(|error| error.to_string())?;
             ensure_preview_pdf(&runtime, payload)
         }
-        "officeConvert.getRuntimeStatus" => serde_json::to_value(get_runtime_status(&runtime)?)
-            .map_err(|error| error.to_string()),
+        "officeConvert.getRuntimeStatus" => {
+            serde_json::to_value(get_runtime_status(&runtime)?).map_err(|error| error.to_string())
+        }
         "officeConvert.clearPreviewCache" => {
             let payload: ClearPreviewCachePayload =
                 serde_json::from_value(request.payload).map_err(|error| error.to_string())?;
@@ -173,15 +178,13 @@ fn handle_call(input: *const c_char) -> Result<serde_json::Value, String> {
 }
 
 fn runtime_context(runtime: PluginRuntimeContext) -> Result<RuntimeContext, String> {
-    let plugin_data_dir = PathBuf::from(runtime.plugin_data_dir);
-    let service_root_dir = normalize_service_root_dir(
-        runtime.service_root_dir,
-        plugin_data_dir.as_path(),
-    )?;
-    let plugin_runtime_dir = PathBuf::from(runtime.plugin_runtime_dir);
+    let plugin_data_dir = PathBuf::from(runtime.plugin_data_dir.clone());
+    let service_root_dir =
+        normalize_service_root_dir(runtime.service_root_dir.clone(), plugin_data_dir.as_path())?;
+    let plugin_runtime_dir = PathBuf::from(runtime.plugin_runtime_dir.clone());
     fs::create_dir_all(plugin_data_dir.join("helpers").join("libreoffice")).map_err(io_error)?;
     fs::create_dir_all(plugin_data_dir.join("downloads")).map_err(io_error)?;
-    cleanup_stale_libreoffice_state(&plugin_data_dir)?;
+    cleanup_stale_libreoffice_state(&plugin_data_dir, &runtime)?;
     let config = PluginConfig {
         converter_mode: ConverterMode::from_config(
             runtime
@@ -201,6 +204,65 @@ fn runtime_context(runtime: PluginRuntimeContext) -> Result<RuntimeContext, Stri
         plugin_runtime_dir,
         config,
     })
+}
+
+fn host_runtime_for_log(runtime: &RuntimeContext) -> PluginRuntimeContext {
+    PluginRuntimeContext {
+        plugin_id: OFFICE_CONVERT_PLUGIN_ID.to_string(),
+        plugin_data_dir: runtime.plugin_data_dir.to_string_lossy().to_string(),
+        service_root_dir: runtime.service_root_dir.to_string_lossy().to_string(),
+        plugin_runtime_dir: runtime.plugin_runtime_dir.to_string_lossy().to_string(),
+        plugin_config: Default::default(),
+    }
+}
+
+fn write_runtime_warning<T: Serialize>(
+    runtime: &RuntimeContext,
+    action: &str,
+    message: &str,
+    context: T,
+) {
+    write_host_log_silently(
+        &host_runtime_for_log(runtime),
+        "warn",
+        action,
+        message,
+        context,
+    );
+}
+
+fn remove_file_with_warning(runtime: &RuntimeContext, path: &Path, action: &str, message: &str) {
+    if !path.is_file() {
+        return;
+    }
+    if let Err(error) = fs::remove_file(path) {
+        write_runtime_warning(
+            runtime,
+            action,
+            message,
+            serde_json::json!({
+                "path": path.to_string_lossy().to_string(),
+                "error": error.to_string(),
+            }),
+        );
+    }
+}
+
+fn remove_dir_all_with_warning(runtime: &RuntimeContext, path: &Path, action: &str, message: &str) {
+    if !path.is_dir() {
+        return;
+    }
+    if let Err(error) = fs::remove_dir_all(path) {
+        write_runtime_warning(
+            runtime,
+            action,
+            message,
+            serde_json::json!({
+                "path": path.to_string_lossy().to_string(),
+                "error": error.to_string(),
+            }),
+        );
+    }
 }
 
 impl ConverterMode {
@@ -341,7 +403,12 @@ fn run_runtime_self_check(runtime: &RuntimeContext) -> Result<serde_json::Value,
     fs::create_dir_all(&helper_dir).map_err(io_error)?;
     let sample_dir = helper_dir.join("self-check");
     if sample_dir.is_dir() {
-        let _ = fs::remove_dir_all(&sample_dir);
+        remove_dir_all_with_warning(
+            runtime,
+            &sample_dir,
+            "runtimeSelfCheckCleanupFailed",
+            "Office 转换自检目录清理失败。",
+        );
     }
     fs::create_dir_all(&sample_dir).map_err(io_error)?;
     let source_path = sample_dir.join("self-check.docx");
@@ -365,8 +432,9 @@ fn run_runtime_self_check(runtime: &RuntimeContext) -> Result<serde_json::Value,
     let completed_at = OffsetDateTime::now_utc()
         .format(&Rfc3339)
         .map_err(time_error)?;
-    let duration_ms = (OffsetDateTime::now_utc() - OffsetDateTime::parse(&started_at, &Rfc3339).map_err(time_error)?)
-        .whole_milliseconds();
+    let duration_ms = (OffsetDateTime::now_utc()
+        - OffsetDateTime::parse(&started_at, &Rfc3339).map_err(time_error)?)
+    .whole_milliseconds();
     let pdf_size_bytes = fs::metadata(&pdf_path).ok().map(|value| value.len() as i64);
     let (ok, error, conversion_mode) = match result {
         Ok(mode) => (pdf_path.is_file(), None, mode),
@@ -433,7 +501,7 @@ fn clear_preview_cache(
     let cache_dir = repository_cache_dir_for_repo(runtime, &payload.repo_id)?;
     let mut removed = 0;
     if cache_dir.is_dir() {
-        removed = remove_files_recursively(&cache_dir)?;
+        removed = remove_files_recursively(runtime, &cache_dir)?;
     }
     Ok(serde_json::json!({
         "repoId": payload.repo_id,
@@ -447,12 +515,8 @@ fn select_converter(
     family: OfficeFamily,
 ) -> Result<SelectedConverter, String> {
     match runtime.config.converter_mode {
-        ConverterMode::MicrosoftOffice => {
-            select_microsoft_office(family)
-        }
-        ConverterMode::LibreOffice => {
-            select_libreoffice(runtime, family)
-        }
+        ConverterMode::MicrosoftOffice => select_microsoft_office(family),
+        ConverterMode::LibreOffice => select_libreoffice(runtime, family),
         ConverterMode::Auto => {
             if let Ok(converter) = select_microsoft_office(family) {
                 return Ok(converter);
@@ -513,7 +577,10 @@ fn convert_office_to_pdf(
     }
 }
 
-fn repository_cache_dir_for_repo(runtime: &RuntimeContext, repo_id: &str) -> Result<PathBuf, String> {
+fn repository_cache_dir_for_repo(
+    runtime: &RuntimeContext,
+    repo_id: &str,
+) -> Result<PathBuf, String> {
     let repo_root = repository_root_for_id(runtime, repo_id)?;
     Ok(repository_cache_dir(&repo_root))
 }
@@ -539,7 +606,10 @@ fn repository_root_for_id(runtime: &RuntimeContext, repo_id: &str) -> Result<Pat
 }
 
 fn repository_cache_dir(repo_root: &Path) -> PathBuf {
-    repo_root.join(REPO_META_DIR).join("cache").join(OFFICE_CACHE_NAMESPACE)
+    repo_root
+        .join(REPO_META_DIR)
+        .join("cache")
+        .join(OFFICE_CACHE_NAMESPACE)
 }
 
 fn select_microsoft_office(family: OfficeFamily) -> Result<SelectedConverter, String> {
@@ -583,7 +653,8 @@ fn select_libreoffice(
             kind: ConverterKind::LibreOfficeBundled,
             family,
             executable_path: path.clone(),
-            version: command_version(&path).or_else(|| Some(DEFAULT_LIBREOFFICE_VERSION.to_string())),
+            version: command_version(&path)
+                .or_else(|| Some(DEFAULT_LIBREOFFICE_VERSION.to_string())),
         });
     }
     Err(status
@@ -648,7 +719,10 @@ fn detect_system_libreoffice() -> ConverterStatus {
             PathBuf::from(r"C:\Program Files (x86)\LibreOffice\program\soffice.exe"),
         ]
     } else {
-        vec![PathBuf::from("/usr/bin/libreoffice"), PathBuf::from("/usr/bin/soffice")]
+        vec![
+            PathBuf::from("/usr/bin/libreoffice"),
+            PathBuf::from("/usr/bin/soffice"),
+        ]
     };
     for candidate in candidates {
         if candidate.is_file() {
@@ -723,7 +797,11 @@ fn ensure_bundled_libreoffice(runtime: &RuntimeContext) -> Result<Option<PathBuf
     #[cfg(target_os = "windows")]
     {
         let installer_path = bundled_libreoffice_installer_path(runtime);
-        download_runtime_via_downloader(runtime, DEFAULT_LIBREOFFICE_DOWNLOAD_URL, &installer_path)?;
+        download_runtime_via_downloader(
+            runtime,
+            DEFAULT_LIBREOFFICE_DOWNLOAD_URL,
+            &installer_path,
+        )?;
         extract_libreoffice_installer(runtime, &installer_path)?;
         if executable.is_file() {
             return Ok(Some(executable));
@@ -899,20 +977,18 @@ fn convert_with_libreoffice(
     temp_dir: &Path,
 ) -> Result<(), String> {
     ensure_libreoffice_daemon(runtime, &converter.executable_path)?;
-    write_libreoffice_conversion_status(
-        runtime,
-        source_path,
-        pdf_path,
-        "running",
-        None,
-        None,
-    )?;
+    write_libreoffice_conversion_status(runtime, source_path, pdf_path, "running", None, None)?;
     let output_dir = temp_dir.join(format!(
         "pdf-{}",
         preview_cache_temp_key(source_path, pdf_path)
     ));
     if output_dir.is_dir() {
-        let _ = fs::remove_dir_all(&output_dir);
+        remove_dir_all_with_warning(
+            runtime,
+            &output_dir,
+            "conversionTempCleanupFailed",
+            "Office 转换临时目录清理失败。",
+        );
     }
     fs::create_dir_all(&output_dir).map_err(io_error)?;
     let helper_port = helper_port(runtime)?;
@@ -955,7 +1031,10 @@ fn convert_with_libreoffice(
             conversion_mode.as_deref(),
             Some(format!("转换结果缺失：{}", generated_path.display())),
         )?;
-        return Err(format!("LibreOffice 转换失败：未找到输出文件 {}", generated_path.display()));
+        return Err(format!(
+            "LibreOffice 转换失败：未找到输出文件 {}",
+            generated_path.display()
+        ));
     }
     fs::copy(&generated_path, pdf_path).map_err(io_error)?;
     write_libreoffice_conversion_status(
@@ -969,7 +1048,10 @@ fn convert_with_libreoffice(
     Ok(())
 }
 
-fn ensure_libreoffice_daemon(runtime: &RuntimeContext, executable_path: &Path) -> Result<(), String> {
+fn ensure_libreoffice_daemon(
+    runtime: &RuntimeContext,
+    executable_path: &Path,
+) -> Result<(), String> {
     let helper_dir = libreoffice_helper_dir(runtime);
     fs::create_dir_all(&helper_dir).map_err(io_error)?;
     let pid_path = helper_dir.join("pid.txt");
@@ -980,8 +1062,21 @@ fn ensure_libreoffice_daemon(runtime: &RuntimeContext, executable_path: &Path) -
                 write_libreoffice_status(runtime, Some(pid), executable_path, true, None)?;
                 return Ok(());
             }
-            let _ = stop_process(pid);
-            cleanup_stale_libreoffice_state(&runtime.plugin_data_dir)?;
+            if let Err(error) = stop_process(pid) {
+                write_runtime_warning(
+                    runtime,
+                    "daemonStopFailed",
+                    "LibreOffice 异常守护进程停止失败。",
+                    serde_json::json!({
+                        "pid": pid,
+                        "error": error,
+                    }),
+                );
+            }
+            cleanup_stale_libreoffice_state(
+                &runtime.plugin_data_dir,
+                &host_runtime_for_log(runtime),
+            )?;
         }
     }
     #[cfg(not(target_os = "windows"))]
@@ -1111,7 +1206,9 @@ fn read_helper_status(path: &Path) -> serde_json::Value {
         })
 }
 
-fn current_libreoffice_daemon_status(runtime: &RuntimeContext) -> Result<serde_json::Value, String> {
+fn current_libreoffice_daemon_status(
+    runtime: &RuntimeContext,
+) -> Result<serde_json::Value, String> {
     let status_path = libreoffice_helper_dir(runtime).join("status.json");
     let pid_path = libreoffice_helper_dir(runtime).join("pid.txt");
     let mut status = read_helper_status(&status_path);
@@ -1123,7 +1220,12 @@ fn current_libreoffice_daemon_status(runtime: &RuntimeContext) -> Result<serde_j
         object.insert("running".to_string(), serde_json::Value::Bool(running));
         object.insert(
             "healthy".to_string(),
-            serde_json::Value::Bool(helper_runtime.as_ref().map(|value| value.healthy).unwrap_or(false)),
+            serde_json::Value::Bool(
+                helper_runtime
+                    .as_ref()
+                    .map(|value| value.healthy)
+                    .unwrap_or(false),
+            ),
         );
         object.insert(
             "helperType".to_string(),
@@ -1131,7 +1233,8 @@ fn current_libreoffice_daemon_status(runtime: &RuntimeContext) -> Result<serde_j
         );
         object.insert(
             "port".to_string(),
-            port.map(serde_json::Value::from).unwrap_or(serde_json::Value::Null),
+            port.map(serde_json::Value::from)
+                .unwrap_or(serde_json::Value::Null),
         );
         object.insert(
             "baseUrl".to_string(),
@@ -1213,7 +1316,12 @@ fn shutdown_libreoffice_daemon(runtime: &RuntimeContext) -> Result<serde_json::V
     let status_path = helper_dir.join("status.json");
     let pid = read_pid(&pid_path)?;
     let Some(pid) = pid else {
-        let _ = fs::remove_file(status_path);
+        remove_file_with_warning(
+            runtime,
+            &status_path,
+            "daemonStateCleanupFailed",
+            "LibreOffice 守护进程状态文件清理失败。",
+        );
         return Ok(serde_json::json!({
             "stopped": false,
             "reason": "daemon-not-running"
@@ -1221,10 +1329,26 @@ fn shutdown_libreoffice_daemon(runtime: &RuntimeContext) -> Result<serde_json::V
     };
     let port = helper_port(runtime)?;
     if helper_health(port) {
-        let _ = helper_shutdown(port);
+        if let Err(error) = helper_shutdown(port) {
+            write_runtime_warning(
+                runtime,
+                "daemonShutdownRequestFailed",
+                "LibreOffice 守护进程关闭请求失败。",
+                serde_json::json!({
+                    "port": port,
+                    "pid": pid,
+                    "error": error,
+                }),
+            );
+        }
     }
     stop_process(pid)?;
-    let _ = fs::remove_file(pid_path);
+    remove_file_with_warning(
+        runtime,
+        &pid_path,
+        "daemonStateCleanupFailed",
+        "LibreOffice 守护进程 PID 文件清理失败。",
+    );
     let mut status = read_helper_status(&status_path);
     if let Some(object) = status.as_object_mut() {
         object.insert("running".to_string(), serde_json::Value::Bool(false));
@@ -1249,7 +1373,9 @@ fn shutdown_libreoffice_daemon(runtime: &RuntimeContext) -> Result<serde_json::V
         object.insert(
             "updatedAt".to_string(),
             serde_json::Value::String(
-                OffsetDateTime::now_utc().format(&Rfc3339).map_err(time_error)?,
+                OffsetDateTime::now_utc()
+                    .format(&Rfc3339)
+                    .map_err(time_error)?,
             ),
         );
         object.insert(
@@ -1460,7 +1586,9 @@ fn helper_convert(
                 .and_then(serde_json::Value::as_str)
                 .map(str::to_string));
         }
-        Err(response.text().unwrap_or_else(|_| "helper convert request failed".to_string()))
+        Err(response
+            .text()
+            .unwrap_or_else(|_| "helper convert request failed".to_string()))
     }
 }
 
@@ -1480,16 +1608,22 @@ fn write_libreoffice_status(
         object.insert("running".to_string(), serde_json::Value::Bool(running));
         object.insert(
             "pid".to_string(),
-            pid.map(serde_json::Value::from).unwrap_or(serde_json::Value::Null),
+            pid.map(serde_json::Value::from)
+                .unwrap_or(serde_json::Value::Null),
         );
         object.insert(
             "path".to_string(),
             serde_json::Value::String(executable_path.to_string_lossy().to_string()),
         );
-        object.insert("updatedAt".to_string(), serde_json::Value::String(updated_at));
+        object.insert(
+            "updatedAt".to_string(),
+            serde_json::Value::String(updated_at),
+        );
         object.insert(
             "error".to_string(),
-            error.map(serde_json::Value::String).unwrap_or(serde_json::Value::Null),
+            error
+                .map(serde_json::Value::String)
+                .unwrap_or(serde_json::Value::Null),
         );
     }
     fs::write(
@@ -1574,7 +1708,9 @@ fn write_minimal_docx(path: &Path) -> Result<(), String> {
         ("word/_rels/document.xml.rels", WORD_DOCUMENT_RELS_XML),
     ];
     for (name, content) in entries {
-        archive.start_file(name, options).map_err(|error| error.to_string())?;
+        archive
+            .start_file(name, options)
+            .map_err(|error| error.to_string())?;
         std::io::Write::write_all(&mut archive, content.as_bytes()).map_err(io_error)?;
     }
     archive.finish().map_err(|error| error.to_string())?;
@@ -1608,7 +1744,10 @@ const WORD_DOCUMENT_XML: &str = r#"<?xml version="1.0" encoding="UTF-8" standalo
   </w:body>
 </w:document>"#;
 
-fn cleanup_stale_libreoffice_state(plugin_data_dir: &Path) -> Result<(), String> {
+fn cleanup_stale_libreoffice_state(
+    plugin_data_dir: &Path,
+    host_runtime: &PluginRuntimeContext,
+) -> Result<(), String> {
     let helper_dir = plugin_data_dir.join("helpers").join("libreoffice");
     let pid_path = helper_dir.join("pid.txt");
     let status_path = helper_dir.join("status.json");
@@ -1617,9 +1756,42 @@ fn cleanup_stale_libreoffice_state(plugin_data_dir: &Path) -> Result<(), String>
             return Ok(());
         }
     }
-    let _ = fs::remove_file(pid_path);
-    let _ = fs::remove_file(status_path);
+    remove_stale_file_with_log(
+        host_runtime,
+        &pid_path,
+        "daemonStateCleanupFailed",
+        "LibreOffice 过期 PID 文件清理失败。",
+    );
+    remove_stale_file_with_log(
+        host_runtime,
+        &status_path,
+        "daemonStateCleanupFailed",
+        "LibreOffice 过期状态文件清理失败。",
+    );
     Ok(())
+}
+
+fn remove_stale_file_with_log(
+    host_runtime: &PluginRuntimeContext,
+    path: &Path,
+    action: &str,
+    message: &str,
+) {
+    if !path.is_file() {
+        return;
+    }
+    if let Err(error) = fs::remove_file(path) {
+        write_host_log_silently(
+            host_runtime,
+            "warn",
+            action,
+            message,
+            serde_json::json!({
+                "path": path.to_string_lossy().to_string(),
+                "error": error.to_string(),
+            }),
+        );
+    }
 }
 
 fn read_pid(path: &Path) -> Result<Option<u32>, String> {
@@ -1719,14 +1891,24 @@ fn preview_cache_temp_key(source_path: &Path, pdf_path: &Path) -> String {
     format!("{:x}", hasher.finalize())
 }
 
-fn remove_files_recursively(root: &Path) -> Result<i64, String> {
+fn remove_files_recursively(runtime: &RuntimeContext, root: &Path) -> Result<i64, String> {
     let mut removed = 0_i64;
     for entry in fs::read_dir(root).map_err(io_error)? {
         let entry = entry.map_err(io_error)?;
         let path = entry.path();
         if path.is_dir() {
-            removed += remove_files_recursively(&path)?;
-            let _ = fs::remove_dir(&path);
+            removed += remove_files_recursively(runtime, &path)?;
+            if let Err(error) = fs::remove_dir(&path) {
+                write_runtime_warning(
+                    runtime,
+                    "previewCacheCleanupFailed",
+                    "Office 预览缓存目录清理失败。",
+                    serde_json::json!({
+                        "path": path.to_string_lossy().to_string(),
+                        "error": error.to_string(),
+                    }),
+                );
+            }
             continue;
         }
         if path.is_file() {
@@ -1744,7 +1926,10 @@ fn bundled_libreoffice_installer_path(runtime: &RuntimeContext) -> PathBuf {
 }
 
 fn bundled_libreoffice_runtime_dir(runtime: &RuntimeContext) -> PathBuf {
-    runtime.plugin_data_dir.join("downloads").join("LibreOffice")
+    runtime
+        .plugin_data_dir
+        .join("downloads")
+        .join("LibreOffice")
 }
 
 fn bundled_libreoffice_executable_path(runtime: &RuntimeContext) -> PathBuf {
@@ -2052,7 +2237,9 @@ mod test_support {
         test_status_from(&TEST_MICROSOFT_OFFICE).flatten()
     }
 
-    pub fn test_detect_microsoft_office_for_family(family: OfficeFamily) -> Option<ConverterStatus> {
+    pub fn test_detect_microsoft_office_for_family(
+        family: OfficeFamily,
+    ) -> Option<ConverterStatus> {
         let cell = match family {
             OfficeFamily::Word => &TEST_MICROSOFT_OFFICE_WORD,
             OfficeFamily::Spreadsheet => &TEST_MICROSOFT_OFFICE_SPREADSHEET,
@@ -2114,11 +2301,17 @@ mod tests {
         test_support::reset_test_detector_overrides();
     }
 
-    fn set_test_microsoft_office_family_status(family: OfficeFamily, value: Option<ConverterStatus>) {
+    fn set_test_microsoft_office_family_status(
+        family: OfficeFamily,
+        value: Option<ConverterStatus>,
+    ) {
         test_support::set_test_microsoft_office_family_status(family, value);
     }
 
-    fn runtime_for_converter_test(workspace: &TestWorkspace, mode: ConverterMode) -> RuntimeContext {
+    fn runtime_for_converter_test(
+        workspace: &TestWorkspace,
+        mode: ConverterMode,
+    ) -> RuntimeContext {
         RuntimeContext {
             plugin_data_dir: workspace.path("plugin-data"),
             service_root_dir: workspace.path("service-root"),
@@ -2183,8 +2376,10 @@ mod tests {
                 .duration_since(UNIX_EPOCH)
                 .expect("system clock must be after unix epoch")
                 .as_nanos();
-            let root = std::env::temp_dir()
-                .join(format!("momobako-office-convert-{name}-{}-{unique}", std::process::id()));
+            let root = std::env::temp_dir().join(format!(
+                "momobako-office-convert-{name}-{}-{unique}",
+                std::process::id()
+            ));
             fs::create_dir_all(&root).expect("test workspace root should be created");
             Self { root }
         }
@@ -2217,12 +2412,30 @@ mod tests {
 
     #[test]
     fn office_family_from_extension_supports_legacy_and_openxml_formats() {
-        assert_eq!(office_family_from_extension("doc"), Some(OfficeFamily::Word));
-        assert_eq!(office_family_from_extension("docx"), Some(OfficeFamily::Word));
-        assert_eq!(office_family_from_extension("xls"), Some(OfficeFamily::Spreadsheet));
-        assert_eq!(office_family_from_extension("xlsx"), Some(OfficeFamily::Spreadsheet));
-        assert_eq!(office_family_from_extension("ppt"), Some(OfficeFamily::Presentation));
-        assert_eq!(office_family_from_extension("pptx"), Some(OfficeFamily::Presentation));
+        assert_eq!(
+            office_family_from_extension("doc"),
+            Some(OfficeFamily::Word)
+        );
+        assert_eq!(
+            office_family_from_extension("docx"),
+            Some(OfficeFamily::Word)
+        );
+        assert_eq!(
+            office_family_from_extension("xls"),
+            Some(OfficeFamily::Spreadsheet)
+        );
+        assert_eq!(
+            office_family_from_extension("xlsx"),
+            Some(OfficeFamily::Spreadsheet)
+        );
+        assert_eq!(
+            office_family_from_extension("ppt"),
+            Some(OfficeFamily::Presentation)
+        );
+        assert_eq!(
+            office_family_from_extension("pptx"),
+            Some(OfficeFamily::Presentation)
+        );
         assert_eq!(office_family_from_extension("txt"), None);
     }
 
@@ -2263,7 +2476,10 @@ mod tests {
 
     #[test]
     fn converter_mode_from_config_supports_all_declared_values() {
-        assert!(matches!(ConverterMode::from_config(Some("auto")), ConverterMode::Auto));
+        assert!(matches!(
+            ConverterMode::from_config(Some("auto")),
+            ConverterMode::Auto
+        ));
         assert!(matches!(
             ConverterMode::from_config(Some("microsoft-office")),
             ConverterMode::MicrosoftOffice
@@ -2290,12 +2506,10 @@ mod tests {
                 "Office16",
             )),
         );
-        test_support::set_test_system_libreoffice_status(
-            Some(available_status(
-                "C:/Program Files/LibreOffice/program/soffice.exe",
-                "25.8.3",
-            )),
-        );
+        test_support::set_test_system_libreoffice_status(Some(available_status(
+            "C:/Program Files/LibreOffice/program/soffice.exe",
+            "25.8.3",
+        )));
 
         let selected = select_converter(&runtime, OfficeFamily::Word)
             .expect("auto mode should choose microsoft office");
@@ -2314,14 +2528,14 @@ mod tests {
         let runtime = runtime_for_converter_test(&workspace, ConverterMode::Auto);
         set_test_microsoft_office_family_status(
             OfficeFamily::Word,
-            Some(unavailable_status("未探测到适用于当前文档类型的 Microsoft Office 安装。")),
-        );
-        test_support::set_test_system_libreoffice_status(
-            Some(available_status(
-                "C:/Program Files/LibreOffice/program/soffice.exe",
-                "25.8.3",
+            Some(unavailable_status(
+                "未探测到适用于当前文档类型的 Microsoft Office 安装。",
             )),
         );
+        test_support::set_test_system_libreoffice_status(Some(available_status(
+            "C:/Program Files/LibreOffice/program/soffice.exe",
+            "25.8.3",
+        )));
 
         let selected = select_converter(&runtime, OfficeFamily::Word)
             .expect("auto mode should choose system libreoffice");
@@ -2340,11 +2554,13 @@ mod tests {
         let runtime = runtime_for_converter_test(&workspace, ConverterMode::Auto);
         set_test_microsoft_office_family_status(
             OfficeFamily::Word,
-            Some(unavailable_status("未探测到适用于当前文档类型的 Microsoft Office 安装。")),
+            Some(unavailable_status(
+                "未探测到适用于当前文档类型的 Microsoft Office 安装。",
+            )),
         );
-        test_support::set_test_system_libreoffice_status(
-            Some(unavailable_status("未探测到系统 LibreOffice 安装。")),
-        );
+        test_support::set_test_system_libreoffice_status(Some(unavailable_status(
+            "未探测到系统 LibreOffice 安装。",
+        )));
         test_support::set_test_bundled_libreoffice_status(
             Some(available_status(
                 "C:/MomoBako/.service-data/plugin-data/momobako-service-office-convert/runtime/program/soffice.exe",
@@ -2388,7 +2604,9 @@ mod tests {
             .clear();
         let responses = HOST_PLUGIN_RESPONSES.get_or_init(|| Mutex::new(VecDeque::new()));
         {
-            let mut guard = responses.lock().expect("host bridge response queue should lock");
+            let mut guard = responses
+                .lock()
+                .expect("host bridge response queue should lock");
             guard.clear();
             guard.push_back(serde_json::json!({
                 "runtime": "aria2",
@@ -2422,12 +2640,30 @@ mod tests {
         assert_eq!(calls[0].plugin_id, DOWNLOADER_PLUGIN_ID);
         assert_eq!(calls[0].method, "downloader.ensureRuntime");
         assert_eq!(calls[1].method, "downloader.enqueueDownload");
-        assert_eq!(calls[1].payload["url"], serde_json::json!(DEFAULT_LIBREOFFICE_DOWNLOAD_URL));
-        assert_eq!(calls[1].payload["destinationPath"], serde_json::json!(target_path.to_string_lossy().to_string()));
-        assert_eq!(calls[1].payload["metadata"]["kind"], serde_json::json!("office-runtime"));
-        assert_eq!(calls[1].payload["metadata"]["pluginId"], serde_json::json!("momobako.service.office-convert"));
-        assert_eq!(calls[1].payload["metadata"]["runtime"], serde_json::json!("libreoffice"));
-        assert_eq!(calls[1].payload["metadata"]["version"], serde_json::json!(DEFAULT_LIBREOFFICE_VERSION));
+        assert_eq!(
+            calls[1].payload["url"],
+            serde_json::json!(DEFAULT_LIBREOFFICE_DOWNLOAD_URL)
+        );
+        assert_eq!(
+            calls[1].payload["destinationPath"],
+            serde_json::json!(target_path.to_string_lossy().to_string())
+        );
+        assert_eq!(
+            calls[1].payload["metadata"]["kind"],
+            serde_json::json!("office-runtime")
+        );
+        assert_eq!(
+            calls[1].payload["metadata"]["pluginId"],
+            serde_json::json!("momobako.service.office-convert")
+        );
+        assert_eq!(
+            calls[1].payload["metadata"]["runtime"],
+            serde_json::json!("libreoffice")
+        );
+        assert_eq!(
+            calls[1].payload["metadata"]["version"],
+            serde_json::json!(DEFAULT_LIBREOFFICE_VERSION)
+        );
         assert_eq!(calls[2].method, "downloader.awaitDownload");
         assert_eq!(calls[2].payload["taskId"], serde_json::json!("task-demo"));
     }
@@ -2572,7 +2808,10 @@ mod tests {
 
         assert_eq!(value["cached"], serde_json::json!(true));
         assert_eq!(value["converter"], serde_json::json!("microsoft-office"));
-        assert_eq!(value["pdfPath"], serde_json::json!(pdf_path.to_string_lossy().to_string()));
+        assert_eq!(
+            value["pdfPath"],
+            serde_json::json!(pdf_path.to_string_lossy().to_string())
+        );
         assert_eq!(value["cacheKey"], serde_json::json!(cache_key));
         assert_eq!(value["sizeBytes"], serde_json::json!(15));
     }
@@ -2634,10 +2873,12 @@ mod tests {
             "microsoft-office",
             "Office16",
         );
-        let original_pdf_path = repository_cache_dir(&repo_root).join(format!("{original_cache_key}.pdf"));
+        let original_pdf_path =
+            repository_cache_dir(&repo_root).join(format!("{original_cache_key}.pdf"));
         fs::create_dir_all(original_pdf_path.parent().expect("cache dir should exist"))
             .expect("cache dir should be created");
-        fs::write(&original_pdf_path, b"%PDF-1.4 cached").expect("original cached pdf should be written");
+        fs::write(&original_pdf_path, b"%PDF-1.4 cached")
+            .expect("original cached pdf should be written");
 
         let changed_modified_at = "2026-07-02T09:30:00Z".to_string();
         let changed_size_bytes = 6_i64;
@@ -2651,8 +2892,10 @@ mod tests {
             "microsoft-office",
             "Office16",
         );
-        let changed_pdf_path = repository_cache_dir(&repo_root).join(format!("{changed_cache_key}.pdf"));
-        fs::write(&changed_pdf_path, b"%PDF-1.4 new").expect("changed cached pdf should be written");
+        let changed_pdf_path =
+            repository_cache_dir(&repo_root).join(format!("{changed_cache_key}.pdf"));
+        fs::write(&changed_pdf_path, b"%PDF-1.4 new")
+            .expect("changed cached pdf should be written");
 
         let value = ensure_preview_pdf(
             &runtime,
@@ -2669,9 +2912,15 @@ mod tests {
 
         assert_ne!(original_cache_key, changed_cache_key);
         assert_eq!(value["cached"], serde_json::json!(true));
-        assert_eq!(value["pdfPath"], serde_json::json!(changed_pdf_path.to_string_lossy().to_string()));
+        assert_eq!(
+            value["pdfPath"],
+            serde_json::json!(changed_pdf_path.to_string_lossy().to_string())
+        );
         assert_eq!(value["cacheKey"], serde_json::json!(changed_cache_key));
-        assert_ne!(value["pdfPath"], serde_json::json!(original_pdf_path.to_string_lossy().to_string()));
+        assert_ne!(
+            value["pdfPath"],
+            serde_json::json!(original_pdf_path.to_string_lossy().to_string())
+        );
     }
 
     #[test]
@@ -2682,13 +2931,18 @@ mod tests {
 
         set_test_microsoft_office_family_status(
             OfficeFamily::Word,
-            Some(unavailable_status("未探测到适用于当前文档类型的 Microsoft Office 安装。")),
+            Some(unavailable_status(
+                "未探测到适用于当前文档类型的 Microsoft Office 安装。",
+            )),
         );
 
         let error = select_converter(&runtime, OfficeFamily::Word)
             .expect_err("explicit microsoft office mode should fail when office is missing");
 
-        assert_eq!(error, "未探测到适用于当前文档类型的 Microsoft Office 安装。");
+        assert_eq!(
+            error,
+            "未探测到适用于当前文档类型的 Microsoft Office 安装。"
+        );
     }
 
     #[test]
@@ -2697,12 +2951,12 @@ mod tests {
         let workspace = TestWorkspace::new("missing-libreoffice");
         let runtime = runtime_for_converter_test(&workspace, ConverterMode::LibreOffice);
 
-        test_support::set_test_system_libreoffice_status(
-            Some(unavailable_status("未探测到系统 LibreOffice 安装。")),
-        );
-        test_support::set_test_bundled_libreoffice_status(
-            Some(unavailable_status("未发现已下载的 LibreOffice 运行时。")),
-        );
+        test_support::set_test_system_libreoffice_status(Some(unavailable_status(
+            "未探测到系统 LibreOffice 安装。",
+        )));
+        test_support::set_test_bundled_libreoffice_status(Some(unavailable_status(
+            "未发现已下载的 LibreOffice 运行时。",
+        )));
         test_support::set_test_ensured_bundled_libreoffice_path(None);
 
         let error = select_converter(&runtime, OfficeFamily::Word)
@@ -2723,8 +2977,10 @@ mod tests {
         fs::create_dir_all(&service_root).expect("service root should be created");
         fs::create_dir_all(&plugin_data_dir).expect("plugin data dir should be created");
         fs::create_dir_all(&nested_dir).expect("cache dir should be created");
-        fs::write(cache_dir.join("preview-a.pdf"), b"%PDF-1.4").expect("cache file should be written");
-        fs::write(nested_dir.join("preview-b.pdf"), b"%PDF-1.4").expect("nested cache file should be written");
+        fs::write(cache_dir.join("preview-a.pdf"), b"%PDF-1.4")
+            .expect("cache file should be written");
+        fs::write(nested_dir.join("preview-b.pdf"), b"%PDF-1.4")
+            .expect("nested cache file should be written");
         fs::write(&sibling_file, b"%PDF-1.4").expect("outside file should be written");
 
         let connection = Connection::open(service_root.join(REGISTRY_FILE_NAME))
@@ -2770,18 +3026,19 @@ mod tests {
     #[test]
     fn runtime_context_keeps_service_root_for_host_plugin_bridge() {
         let runtime = RuntimeContext {
-            plugin_data_dir: PathBuf::from("C:/Service/plugin-data/momobako-service-office-convert"),
+            plugin_data_dir: PathBuf::from(
+                "C:/Service/plugin-data/momobako-service-office-convert",
+            ),
             service_root_dir: PathBuf::from("C:/Service"),
-            plugin_runtime_dir: PathBuf::from("C:/Service/runtime/plugins/momobako-service-office-convert"),
+            plugin_runtime_dir: PathBuf::from(
+                "C:/Service/runtime/plugins/momobako-service-office-convert",
+            ),
             config: PluginConfig {
                 converter_mode: ConverterMode::Auto,
                 auto_download_libreoffice: true,
             },
         };
-        assert_eq!(
-            runtime.service_root_dir,
-            PathBuf::from("C:/Service")
-        );
+        assert_eq!(runtime.service_root_dir, PathBuf::from("C:/Service"));
     }
 
     #[test]
@@ -2801,7 +3058,10 @@ mod tests {
 
         assert_eq!(status.converter_mode, "libreoffice");
         assert!(!status.auto_download_libre_office);
-        assert_eq!(status.bundled_download_url, DEFAULT_LIBREOFFICE_DOWNLOAD_URL);
+        assert_eq!(
+            status.bundled_download_url,
+            DEFAULT_LIBREOFFICE_DOWNLOAD_URL
+        );
         assert!(status.microsoft_office.reason.is_some() || status.microsoft_office.available);
         assert!(status.libreoffice_system.reason.is_some() || status.libreoffice_system.available);
         assert!(status.libreoffice_bundle.reason.is_some() || status.libreoffice_bundle.available);
@@ -2917,7 +3177,10 @@ mod tests {
         assert_eq!(status.soffice_pid, Some(4567));
         assert!(status.uno_available);
         assert!(status.python_valid);
-        assert_eq!(status.python_path.as_deref(), Some("C:/LibreOffice/program/python.exe"));
+        assert_eq!(
+            status.python_path.as_deref(),
+            Some("C:/LibreOffice/program/python.exe")
+        );
     }
 
     #[test]
@@ -2929,7 +3192,10 @@ mod tests {
             "pdfPath": "C:/Repo/demo.pdf",
         });
 
-        assert_eq!(last_convert.get("conversionMode"), Some(&serde_json::json!("uno")));
+        assert_eq!(
+            last_convert.get("conversionMode"),
+            Some(&serde_json::json!("uno"))
+        );
     }
 
     #[test]
@@ -2957,7 +3223,10 @@ mod tests {
             "durationMs": 1234
         });
 
-        assert_eq!(payload.get("converterPath"), Some(&serde_json::json!("C:/LibreOffice/program/soffice.exe")));
+        assert_eq!(
+            payload.get("converterPath"),
+            Some(&serde_json::json!("C:/LibreOffice/program/soffice.exe"))
+        );
         assert_eq!(payload.get("pdfSizeBytes"), Some(&serde_json::json!(2048)));
         assert_eq!(payload.get("durationMs"), Some(&serde_json::json!(1234)));
     }
@@ -3001,11 +3270,15 @@ mod tests {
         )
         .expect("merged status should decode");
         assert_eq!(
-            merged.get("lastConvert").and_then(|value| value.get("conversionMode")),
+            merged
+                .get("lastConvert")
+                .and_then(|value| value.get("conversionMode")),
             Some(&serde_json::json!("uno"))
         );
         assert_eq!(
-            merged.get("lastSelfCheck").and_then(|value| value.get("ok")),
+            merged
+                .get("lastSelfCheck")
+                .and_then(|value| value.get("ok")),
             Some(&serde_json::json!(true))
         );
         assert_eq!(merged.get("pid"), Some(&serde_json::json!(123)));
