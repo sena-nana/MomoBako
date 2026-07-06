@@ -1117,6 +1117,84 @@
   transition: width 0.18s ease;
 }
 
+.workspace-startup__detail {
+  margin: -2px 0 0;
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.workspace-startup__steps {
+  display: grid;
+  gap: 8px;
+  margin: 2px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.workspace-startup__step {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  color: var(--text-muted);
+}
+
+.workspace-startup__step-index {
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1;
+  background: var(--bg-subtle);
+}
+
+.workspace-startup__step-copy {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.workspace-startup__step-copy strong {
+  color: inherit;
+  font-size: 13px;
+  line-height: 1.35;
+  font-weight: 600;
+}
+
+.workspace-startup__step-copy small {
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.workspace-startup__step.is-current {
+  color: var(--text);
+}
+
+.workspace-startup__step.is-current .workspace-startup__step-index {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.workspace-startup__step.is-done .workspace-startup__step-index {
+  border-color: var(--ok);
+  color: var(--ok);
+  background: var(--ok-soft);
+}
+
+.workspace-startup__step.is-error .workspace-startup__step-index {
+  border-color: var(--err);
+  color: var(--err);
+  background: var(--err-soft);
+}
+
 .workspace-startup__error {
   padding: 10px 12px;
   border-radius: var(--radius-sm);
