@@ -1,0 +1,34 @@
+src-tauri/src/services/repository/sync_engine.rs
+  s_f0abc17e5269b6::t_6a39f0425f1705 197-229,665-675,695-704,721-730,740-748,774-783,839-853
+tests/workspaceRepositoryLifecycle.test.ts
+  s_d78ccad5ff38cc::t_70800dcbab9849 52-59,83-86
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "d92fac9f97bc69d9ded3ad001ff71f19431252e4",
+  "prompts": {},
+  "humans": {
+    "h_8e6780fc7b4bb1": {
+      "author": "AuraElicase <auraelicase@outlook.com>"
+    }
+  },
+  "sessions": {
+    "s_d78ccad5ff38cc": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f27b7-6426-7031-8c48-f51fb5ee74ac",
+        "model": "unknown"
+      },
+      "human_author": "AuraElicase <auraelicase@outlook.com>"
+    },
+    "s_f0abc17e5269b6": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f0caa-72ab-7720-90c5-6cba6822b374",
+        "model": "unknown"
+      },
+      "human_author": "AuraElicase <auraelicase@outlook.com>"
+    }
+  }
+}
