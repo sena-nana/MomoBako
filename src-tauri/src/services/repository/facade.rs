@@ -1149,6 +1149,12 @@ impl RepositoryState {
         let (mut connection, database_rebuilt) =
             match self.try_open_repository_connection(&storage_paths.database_path) {
                 Ok(connection) => (connection, false),
+                Err(error)
+                    if storage_paths.database_path.exists()
+                        && is_database_locked_error_message(&error) =>
+                {
+                    return Err(error);
+                }
                 Err(_) if storage_paths.database_path.exists() => {
                     // 数据库文件损坏时直接重建，再从后端重新同步内容。
                     fs::remove_file(&storage_paths.database_path).map_err(io_error)?;
@@ -1160,7 +1166,13 @@ impl RepositoryState {
                 Err(error) => return Err(error),
             };
         let repo = self.load_repository_record(repo_id)?;
-        ensure_repository_identity_record(&connection, &repo)?;
+        if metadata_missing
+            || database_missing
+            || database_rebuilt
+            || !repository_identity_record_is_current(&connection, &repo).map_err(db_error)?
+        {
+            ensure_repository_identity_record(&connection, &repo)?;
+        }
 
         if metadata_missing {
             write_repository_metadata(

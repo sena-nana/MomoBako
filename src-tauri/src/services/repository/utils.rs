@@ -94,6 +94,23 @@ pub(super) fn should_fallback_repository_journal_mode(error: &rusqlite::Error) -
     ) || error.to_string().contains("locking protocol")
 }
 
+#[cfg(test)]
+pub(super) fn is_database_locked_error(error: &rusqlite::Error) -> bool {
+    matches!(
+        error,
+        rusqlite::Error::SqliteFailure(sqlite_error, _)
+            if sqlite_error.code == rusqlite::ffi::ErrorCode::DatabaseBusy
+                || sqlite_error.code == rusqlite::ffi::ErrorCode::DatabaseLocked
+    ) || is_database_locked_error_message(&error.to_string())
+}
+
+pub(super) fn is_database_locked_error_message(error: &str) -> bool {
+    let normalized = error.to_ascii_lowercase();
+    normalized.contains("database is locked")
+        || normalized.contains("database table is locked")
+        || normalized.contains("database is busy")
+}
+
 pub(super) fn open_registry_connection(registry_path: &Path) -> Result<Connection, String> {
     let connection = Connection::open(registry_path).map_err(db_error)?;
     configure_registry_connection(&connection).map_err(db_error)?;
@@ -104,7 +121,7 @@ pub(super) fn open_repository_database_connection(
     database_path: &Path,
 ) -> Result<Connection, String> {
     let connection = Connection::open(database_path).map_err(db_error)?;
-    migrate_repository_schema(&connection).map_err(db_error)?;
+    ensure_repository_schema_current(&connection).map_err(db_error)?;
     Ok(connection)
 }
 
