@@ -2,6 +2,16 @@
 
 use super::*;
 
+fn log_external_assets(action: &str, message: &str, context: serde_json::Value) {
+    crate::app_log!(
+        "warn",
+        "repository.externalAssets",
+        action,
+        message,
+        context
+    );
+}
+
 pub(super) fn add_external_assets(
     state: &RepositoryState,
     request_id: String,
@@ -19,12 +29,34 @@ pub(super) fn add_external_assets(
             false,
             None,
         ));
+        log_external_assets(
+            "importRejected",
+            "外部资源导入请求被拒绝。",
+            serde_json::json!({
+                "requestId": request_id.as_str(),
+                "repoId": request.repo_id.as_str(),
+                "code": "invalidInput",
+                "message": "items cannot be empty",
+            }),
+        );
         return external_add_asset_response(request_id, imported, failed, total);
     }
 
     let context = match external_asset_import_context(state, &request_id, &request) {
         Ok(context) => context,
         Err(error) => {
+            log_external_assets(
+                "contextCreateFailed",
+                "外部资源导入上下文创建失败。",
+                serde_json::json!({
+                    "requestId": request_id.as_str(),
+                    "repoId": request.repo_id.as_str(),
+                    "code": error.code,
+                    "message": error.message.as_str(),
+                    "retryable": error.retryable,
+                    "total": total,
+                }),
+            );
             failed.extend((0..total).map(|item_index| {
                 external_failure(
                     item_index,
@@ -103,8 +135,46 @@ pub(super) fn add_external_assets(
         }
     }
 
-    let _ = fs::remove_dir_all(&context.staging_root);
-    external_add_asset_response(request_id, imported, failed, total)
+    if let Err(error) = fs::remove_dir_all(&context.staging_root) {
+        log_external_assets(
+            "stagingCleanupFailed",
+            "外部资源导入临时目录清理失败。",
+            serde_json::json!({
+                "requestId": request_id.as_str(),
+                "path": context.staging_root.to_string_lossy().to_string(),
+                "error": error.to_string(),
+            }),
+        );
+    }
+    let response = external_add_asset_response(request_id, imported, failed, total);
+    if response.status == "failed" || !response.failed.is_empty() {
+        log_external_assets(
+            "importCompletedWithFailures",
+            "外部资源导入存在失败项。",
+            serde_json::json!({
+                "requestId": response.request_id.as_str(),
+                "repoId": request.repo_id.as_str(),
+                "status": response.status.as_str(),
+                "total": response.summary.total,
+                "imported": response.imported.len(),
+                "failed": response.failed.len(),
+            }),
+        );
+    } else {
+        crate::app_log!(
+            "info",
+            "repository.externalAssets",
+            "importCompleted",
+            "外部资源导入完成。",
+            serde_json::json!({
+                "requestId": response.request_id.as_str(),
+                "repoId": request.repo_id.as_str(),
+                "total": response.summary.total,
+                "imported": response.imported.len(),
+            })
+        );
+    }
+    response
 }
 
 fn external_asset_import_context(

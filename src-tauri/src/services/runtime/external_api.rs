@@ -17,6 +17,11 @@ use tiny_http::{Method, Request, Response, Server, StatusCode};
 
 const EXTERNAL_PATH_PREFIX: &str = "/external/v1/";
 const EXTERNAL_CONNECTION_FILE_NAME: &str = "external-api.json";
+
+fn log_external_api(action: &str, message: &str, context: serde_json::Value) {
+    crate::app_log!("warn", "runtime.externalApi", action, message, context);
+}
+
 fn repository_supports_external_add_assets(summary: &RepositorySummary) -> bool {
     summary.status == "ready"
         && backend_summary_supports_local_write_access(&summary.backend)
@@ -266,6 +271,19 @@ fn handle_external_api_request(
             } else {
                 StatusCode(200)
             };
+            if response.status == "failed" || !response.failed.is_empty() {
+                log_external_api(
+                    "assetsAddFailed",
+                    "外部 API 添加资源存在失败项。",
+                    serde_json::json!({
+                        "requestId": response.request_id.as_str(),
+                        "status": response.status.as_str(),
+                        "total": response.summary.total,
+                        "imported": response.imported.len(),
+                        "failed": response.failed.len(),
+                    }),
+                );
+            }
             respond_json(request, status, &response);
         }
         _ => respond_external_error(
@@ -291,6 +309,18 @@ fn respond_external_error(
     message: &str,
     retryable: bool,
 ) {
+    if status.0 >= 500 {
+        log_external_api(
+            "requestFailed",
+            "外部 API 请求处理失败。",
+            serde_json::json!({
+                "status": status.0,
+                "code": code,
+                "message": message,
+                "retryable": retryable,
+            }),
+        );
+    }
     respond_json(
         request,
         status,
@@ -303,8 +333,21 @@ fn respond_external_error(
 }
 
 fn respond_json<T: Serialize>(request: Request, status: StatusCode, payload: &T) {
-    let body = serde_json::to_string(payload).unwrap_or_else(|_| "{}".to_string());
-    let _ = request.respond(
+    let body = match serde_json::to_string(payload) {
+        Ok(body) => body,
+        Err(error) => {
+            log_external_api(
+                "responseSerializeFailed",
+                "外部 API 响应序列化失败。",
+                serde_json::json!({
+                    "status": status.0,
+                    "error": error.to_string(),
+                }),
+            );
+            "{}".to_string()
+        }
+    };
+    if let Err(error) = request.respond(
         Response::from_string(body)
             .with_status_code(status)
             .with_header(header("Content-Type", "application/json"))
@@ -315,7 +358,16 @@ fn respond_json<T: Serialize>(request: Request, status: StatusCode, payload: &T)
                 "Authorization, Content-Type",
             ))
             .with_header(header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")),
-    );
+    ) {
+        log_external_api(
+            "responseSendFailed",
+            "外部 API 响应发送失败。",
+            serde_json::json!({
+                "status": status.0,
+                "error": error.to_string(),
+            }),
+        );
+    }
 }
 
 fn header(name: &str, value: &str) -> tiny_http::Header {

@@ -836,32 +836,122 @@ pub(super) fn shutdown_helper_state_dir(plugin_data_dir: &Path) -> Result<(), St
         }
         let pid_raw = fs::read_to_string(&pid_path).map_err(io_error)?;
         let Some(pid) = pid_raw.trim().parse::<u32>().ok() else {
-            let _ = fs::remove_file(&pid_path);
-            let _ = fs::remove_file(state_dir.join("status.json"));
-            let _ = fs::remove_file(state_dir.join("port.txt"));
-            let _ = fs::remove_file(state_dir.join("session.txt"));
-            let _ = fs::remove_file(state_dir.join("office-convert-helper.ps1"));
+            crate::app_log!(
+                "warn",
+                "runtime.helper",
+                "invalidPid",
+                "运行时辅助进程 PID 无效，开始清理状态文件。",
+                serde_json::json!({
+                    "stateDir": state_dir.to_string_lossy().to_string(),
+                    "pid": pid_raw.trim(),
+                })
+            );
+            remove_helper_file_if_exists(&pid_path);
+            remove_helper_file_if_exists(&state_dir.join("status.json"));
+            remove_helper_file_if_exists(&state_dir.join("port.txt"));
+            remove_helper_file_if_exists(&state_dir.join("session.txt"));
+            remove_helper_file_if_exists(&state_dir.join("office-convert-helper.ps1"));
             continue;
         };
         #[cfg(target_os = "windows")]
         {
-            let _ = Command::new("taskkill")
-                .args(["/PID", &pid.to_string(), "/T", "/F"])
-                .status();
+            log_helper_shutdown_status(
+                "taskkill",
+                pid,
+                &state_dir,
+                Command::new("taskkill")
+                    .args(["/PID", &pid.to_string(), "/T", "/F"])
+                    .status(),
+            );
         }
         #[cfg(not(target_os = "windows"))]
         {
-            let _ = Command::new("kill")
-                .args(["-TERM", &pid.to_string()])
-                .status();
+            log_helper_shutdown_status(
+                "kill",
+                pid,
+                &state_dir,
+                Command::new("kill")
+                    .args(["-TERM", &pid.to_string()])
+                    .status(),
+            );
         }
-        let _ = fs::remove_file(&pid_path);
-        let _ = fs::remove_file(state_dir.join("status.json"));
-        let _ = fs::remove_file(state_dir.join("port.txt"));
-        let _ = fs::remove_file(state_dir.join("session.txt"));
-        let _ = fs::remove_file(state_dir.join("office-convert-helper.ps1"));
+        remove_helper_file_if_exists(&pid_path);
+        remove_helper_file_if_exists(&state_dir.join("status.json"));
+        remove_helper_file_if_exists(&state_dir.join("port.txt"));
+        remove_helper_file_if_exists(&state_dir.join("session.txt"));
+        remove_helper_file_if_exists(&state_dir.join("office-convert-helper.ps1"));
     }
     Ok(())
+}
+
+fn log_helper_shutdown_status(
+    command: &str,
+    pid: u32,
+    state_dir: &Path,
+    result: std::io::Result<std::process::ExitStatus>,
+) {
+    match result {
+        Ok(status) if status.success() => {
+            crate::app_log!(
+                "info",
+                "runtime.helper",
+                "shutdownSuccess",
+                "运行时辅助进程已停止。",
+                serde_json::json!({
+                    "command": command,
+                    "pid": pid,
+                    "stateDir": state_dir.to_string_lossy().to_string(),
+                })
+            );
+        }
+        Ok(status) => {
+            crate::app_log!(
+                "warn",
+                "runtime.helper",
+                "shutdownStatusFailed",
+                "运行时辅助进程停止命令返回失败状态。",
+                serde_json::json!({
+                    "command": command,
+                    "pid": pid,
+                    "status": status.to_string(),
+                    "stateDir": state_dir.to_string_lossy().to_string(),
+                })
+            );
+        }
+        Err(error) => {
+            crate::app_log!(
+                "warn",
+                "runtime.helper",
+                "shutdownCommandFailed",
+                "运行时辅助进程停止命令执行失败。",
+                serde_json::json!({
+                    "command": command,
+                    "pid": pid,
+                    "error": error.to_string(),
+                    "stateDir": state_dir.to_string_lossy().to_string(),
+                })
+            );
+        }
+    }
+}
+
+fn remove_helper_file_if_exists(path: &Path) {
+    match fs::remove_file(path) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => {
+            crate::app_log!(
+                "warn",
+                "runtime.helper",
+                "stateFileCleanupFailed",
+                "运行时辅助进程状态文件清理失败。",
+                serde_json::json!({
+                    "path": path.to_string_lossy().to_string(),
+                    "error": error.to_string(),
+                })
+            );
+        }
+    }
 }
 
 fn plugin_config_path(plugin_data_dir: &Path) -> PathBuf {

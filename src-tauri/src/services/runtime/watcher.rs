@@ -18,6 +18,10 @@ use std::{
 
 const STRUCTURE_REFRESH_DEBOUNCE_MS: u64 = 400;
 
+fn log_watcher_error(action: &str, message: &str, context: serde_json::Value) {
+    crate::app_log!("warn", "runtime.watcher", action, message, context);
+}
+
 /// 仅为状态正常且路径真实存在的本地仓库建立监听，避免缺失路径阻塞应用启动。
 fn repository_watch_path(summary: &RepositorySummary) -> Option<PathBuf> {
     let path = PathBuf::from(&summary.path);
@@ -48,7 +52,13 @@ impl RepositoryWatcher {
         let (tx, rx) = channel::<notify::Result<Event>>();
         let watcher = RecommendedWatcher::new(
             move |result| {
-                let _ = tx.send(result);
+                if tx.send(result).is_err() {
+                    log_watcher_error(
+                        "eventDispatchFailed",
+                        "文件监听事件投递失败。",
+                        serde_json::json!({}),
+                    );
+                }
             },
             Config::default(),
         )
@@ -62,8 +72,15 @@ impl RepositoryWatcher {
 
         thread::spawn(move || {
             while let Ok(event) = rx.recv() {
-                if let Ok(event) = event {
-                    handle_fs_event(&repository_state_for_thread, event);
+                match event {
+                    Ok(event) => handle_fs_event(&repository_state_for_thread, event),
+                    Err(error) => {
+                        log_watcher_error(
+                            "eventReadFailed",
+                            "文件监听事件读取失败。",
+                            serde_json::json!({ "error": error.to_string() }),
+                        );
+                    }
                 }
             }
         });
@@ -119,7 +136,19 @@ pub(crate) fn sync_watched_paths(
 }
 
 fn handle_fs_event(repository_state: &Arc<RepositoryState>, event: Event) {
-    let Ok(repositories) = repository_state.list_repositories() else {
+    let repositories = match repository_state.list_repositories() {
+        Ok(repositories) => repositories,
+        Err(error) => {
+            log_watcher_error(
+                "listRepositoriesFailed",
+                "处理文件监听事件时读取资源库列表失败。",
+                serde_json::json!({ "error": error }),
+            );
+            return;
+        }
+    };
+
+    if event.paths.is_empty() {
         return;
     };
 
@@ -196,23 +225,79 @@ fn run_structure_refresh_worker(
         for (repo_id, reason, paths) in ready {
             pending.remove(&repo_id);
             let Ok(_guard) = write_lock.lock() else {
+                log_watcher_error(
+                    "writeLockFailed",
+                    "结构刷新工作线程获取写锁失败。",
+                    serde_json::json!({ "repoId": repo_id }),
+                );
                 return;
             };
-            let _ = repository_state.set_repository_structure_refreshing(&repo_id, true);
-            let sync_result = repository_state.sync_repository_changed_paths(&repo_id, &paths);
-            let indexed_at = repository_state
-                .repository_structure_indexed_at(&repo_id)
-                .ok()
-                .flatten();
-            let _ = repository_state.set_repository_structure_refreshing(&repo_id, false);
-            if sync_result.is_ok() {
-                repository_state.emit_repository_structure_updated(
-                    RepositoryStructureUpdatedEvent {
-                        repo_id,
-                        reason,
-                        indexed_at,
-                    },
+            if let Err(error) = repository_state.set_repository_structure_refreshing(&repo_id, true)
+            {
+                log_watcher_error(
+                    "refreshStateSetFailed",
+                    "标记资源库结构刷新状态失败。",
+                    serde_json::json!({ "repoId": repo_id, "refreshing": true, "error": error }),
                 );
+            }
+            let sync_result = repository_state.sync_repository_changed_paths(&repo_id, &paths);
+            let indexed_at = match repository_state.repository_structure_indexed_at(&repo_id) {
+                Ok(value) => value,
+                Err(error) => {
+                    log_watcher_error(
+                        "indexedAtReadFailed",
+                        "读取资源库结构索引时间失败。",
+                        serde_json::json!({ "repoId": repo_id, "error": error }),
+                    );
+                    None
+                }
+            };
+            if let Err(error) =
+                repository_state.set_repository_structure_refreshing(&repo_id, false)
+            {
+                log_watcher_error(
+                    "refreshStateSetFailed",
+                    "标记资源库结构刷新状态失败。",
+                    serde_json::json!({ "repoId": repo_id, "refreshing": false, "error": error }),
+                );
+            }
+            match sync_result {
+                Ok(result) => {
+                    crate::app_log!(
+                        "info",
+                        "runtime.watcher",
+                        "structureRefreshed",
+                        "资源库结构刷新完成。",
+                        serde_json::json!({
+                            "repoId": repo_id,
+                            "reason": reason,
+                            "changedPathCount": paths.len(),
+                            "scannedFiles": result.scanned_files,
+                            "createdAssets": result.created_assets,
+                            "updatedAssets": result.updated_assets,
+                            "deletedAssets": result.deleted_assets,
+                        })
+                    );
+                    repository_state.emit_repository_structure_updated(
+                        RepositoryStructureUpdatedEvent {
+                            repo_id,
+                            reason,
+                            indexed_at,
+                        },
+                    );
+                }
+                Err(error) => {
+                    log_watcher_error(
+                        "structureRefreshFailed",
+                        "资源库结构刷新失败。",
+                        serde_json::json!({
+                            "repoId": repo_id,
+                            "reason": reason,
+                            "changedPathCount": paths.len(),
+                            "error": error,
+                        }),
+                    );
+                }
             }
         }
     }
