@@ -1,8 +1,7 @@
 use std::ffi::{c_char, CString};
 
 use momobako_backend_plugin_sdk::{
-    free_c_string, read_request, register_host_plugin_api, response_error, response_with_error_log,
-    HostPluginCallFn, HostPluginFreeFn,
+    free_c_string, read_request, response_error, response_with_error_log,
 };
 
 #[no_mangle]
@@ -31,14 +30,6 @@ pub extern "C" fn momobako_plugin_call(input: *const c_char) -> *mut c_char {
         other => Err(format!("unsupported method: {other}")),
     };
     response_with_error_log(&runtime, &method, result)
-}
-
-#[no_mangle]
-pub extern "C" fn momobako_plugin_register_host_api(
-    call: Option<HostPluginCallFn>,
-    free: Option<HostPluginFreeFn>,
-) {
-    register_host_plugin_api(call, free);
 }
 
 #[no_mangle]
