@@ -158,6 +158,10 @@ pub(super) fn metadata_defaults_for_files(
             metadata: existing_metadata_by_path.get(&file.relative_path).cloned(),
         })
         .collect::<Vec<_>>();
+    let known_paths = files
+        .iter()
+        .map(|file| file.relative_path.clone())
+        .collect::<std::collections::BTreeSet<_>>();
     let payload = serde_json::json!({ "entries": entries });
     let mut defaults_by_path = BTreeMap::<String, BTreeMap<String, serde_json::Value>>::new();
 
@@ -166,7 +170,7 @@ pub(super) fn metadata_defaults_for_files(
         let parsed = serde_json::from_value::<MetadataDefaultsBatchResponse>(response)
             .map_err(json_error)?;
         for (path, defaults) in parsed.defaults_by_path {
-            if !files.iter().any(|file| file.relative_path == path) {
+            if !known_paths.contains(&path) {
                 continue;
             }
             defaults_by_path.entry(path).or_default().extend(defaults);
