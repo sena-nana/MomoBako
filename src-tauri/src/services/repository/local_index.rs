@@ -115,17 +115,30 @@ pub(super) fn collect_repository_files_with_fallback(
 ) -> Result<Vec<DiscoveredFile>, String> {
     match collect(repo_root) {
         Ok(files) if files.is_empty() && repository_contains_visible_entries(repo_root) => {
-            eprintln!(
-                "[repository] {label} file search returned empty for {} despite visible entries; falling back to recursive scan",
-                repo_root.to_string_lossy()
+            crate::app_log!(
+                "warn",
+                "repository.index",
+                "fallbackToRecursiveScan",
+                "索引文件搜索结果为空，已退回递归扫描。",
+                serde_json::json!({
+                    "label": label,
+                    "repoRoot": repo_root.to_string_lossy().to_string(),
+                })
             );
             collect_repository_files(repo_root).map_err(io_error)
         }
         Ok(files) => Ok(files),
         Err(error) => {
-            eprintln!(
-                "[repository] {label} file search unavailable for {}: {error}; falling back to recursive scan",
-                repo_root.to_string_lossy()
+            crate::app_log!(
+                "warn",
+                "repository.index",
+                "searchUnavailable",
+                "索引文件搜索不可用，已退回递归扫描。",
+                serde_json::json!({
+                    "label": label,
+                    "repoRoot": repo_root.to_string_lossy().to_string(),
+                    "error": error,
+                })
             );
             collect_repository_files(repo_root).map_err(io_error)
         }

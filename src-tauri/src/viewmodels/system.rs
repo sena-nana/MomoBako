@@ -1,6 +1,10 @@
 //! Desktop-system command orchestration for lightweight shell-facing helpers.
 
+use crate::services::logging::{clear_logs, list_logs, write_log};
 use crate::services::repository::{BinaryFileWriteRequest, BinaryFileWriteResponse};
+use crate::services::repository::{
+    SystemLogPage, SystemLogQuery, SystemLogRecord, SystemLogWriteRequest,
+};
 use crate::services::runtime::{ExternalApiConnectionStatus, RepositoryRuntime};
 use std::{fs, path::PathBuf};
 
@@ -40,5 +44,26 @@ impl SystemViewModel {
         &self,
     ) -> Result<ExternalApiConnectionStatus, String> {
         Ok(self.runtime.external_api_connection_status())
+    }
+
+    /// 返回系统日志分页结果，供日志中心面板读取。
+    pub async fn list_system_logs(
+        &self,
+        query: Option<SystemLogQuery>,
+    ) -> Result<SystemLogPage, String> {
+        list_logs(query)
+    }
+
+    /// 写入一条来自前端或命令层的系统日志。
+    pub async fn write_system_log(
+        &self,
+        request: SystemLogWriteRequest,
+    ) -> Result<SystemLogRecord, String> {
+        write_log(request)
+    }
+
+    /// 清空系统日志文件与内存缓存。
+    pub async fn clear_system_logs(&self) -> Result<(), String> {
+        clear_logs()
     }
 }

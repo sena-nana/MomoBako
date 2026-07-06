@@ -24,6 +24,7 @@ export const workspaceComponentLoaders = {
   HardlinkCandidateDialog: () => import("./HardlinkCandidateDialog.vue"),
   RepositoryActionsPanel: () => import("./repository/RepositoryActionsPanel.vue"),
   SearchPanel: () => import("./SearchPanel.vue"),
+  WorkspaceLogsPanel: () => import("./WorkspaceLogsPanel.vue"),
   WorkspaceFilterBar: () => import("./search/WorkspaceFilterBar.vue"),
   WorkspaceFilesSurface: () => import("./WorkspaceFilesSurface.vue"),
   WorkspacePlaylistPage: () => import("./playlists/WorkspacePlaylistPage.vue"),
@@ -36,6 +37,7 @@ export const FilePreviewPane = defineAsyncComponent(workspaceComponentLoaders.Fi
 export const HardlinkCandidateDialog = defineAsyncComponent(workspaceComponentLoaders.HardlinkCandidateDialog);
 export const RepositoryActionsPanel = defineAsyncComponent(workspaceComponentLoaders.RepositoryActionsPanel);
 export const SearchPanel = defineAsyncComponent(workspaceComponentLoaders.SearchPanel);
+export const WorkspaceLogsPanel = defineAsyncComponent(workspaceComponentLoaders.WorkspaceLogsPanel);
 export const WorkspaceFilterBar = defineAsyncComponent(workspaceComponentLoaders.WorkspaceFilterBar);
 export const WorkspaceFilesSurface = defineAsyncComponent(workspaceComponentLoaders.WorkspaceFilesSurface);
 export { WorkspacePlaylistPage };
@@ -43,6 +45,8 @@ export { WorkspacePlaylistPage };
 function currentPanelLoaders(activePanel: WorkspacePanelKey) {
   return activePanel === "search"
     ? [workspaceComponentLoaders.SearchPanel]
+    : activePanel === "logs"
+      ? [workspaceComponentLoaders.WorkspaceLogsPanel]
     : activePanel === "extensions"
       ? [workspaceComponentLoaders.ExtensionsPanel]
       : activePanel === "actions"
@@ -58,6 +62,7 @@ function secondaryWorkspaceLoaders(activePanel: WorkspacePanelKey) {
     workspaceComponentLoaders.FilePreviewPane,
     workspaceComponentLoaders.WorkspaceFilterBar,
     workspaceComponentLoaders.SearchPanel,
+    workspaceComponentLoaders.WorkspaceLogsPanel,
     workspaceComponentLoaders.ExtensionsPanel,
     workspaceComponentLoaders.CopyTargetDialog,
     workspaceComponentLoaders.HardlinkCandidateDialog,

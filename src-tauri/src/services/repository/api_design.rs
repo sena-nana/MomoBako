@@ -81,6 +81,42 @@ pub(super) fn core_tauri_api_definitions() -> Vec<ApiDefinition> {
             serde_json::json!({}),
         ),
         tauri_api_definition(
+            "System Log API",
+            "list_system_logs",
+            "按条件分页读取系统日志。",
+            serde_json::json!({
+                "query": {
+                    "limit": 200,
+                    "levels": ["error"],
+                    "sourceKinds": ["backend-plugin"],
+                    "pluginId": "momobako.service.downloader",
+                    "repoId": "<repoId>",
+                    "query": "runtime"
+                }
+            }),
+        ),
+        tauri_api_definition(
+            "System Log API",
+            "write_system_log",
+            "写入一条标准化系统日志记录。",
+            serde_json::json!({
+                "level": "info",
+                "category": "frontend-host",
+                "action": "openLogsPanel",
+                "message": "打开日志中心面板。",
+                "repoId": "<repoId>",
+                "context": {
+                    "panel": "logs"
+                }
+            }),
+        ),
+        tauri_api_definition(
+            "System Log API",
+            "clear_system_logs",
+            "清空日志缓存与落盘归档。",
+            serde_json::json!({}),
+        ),
+        tauri_api_definition(
             "Repository API",
             "get_repository_snapshot",
             "读取仓库总览、文件树和基础状态。",

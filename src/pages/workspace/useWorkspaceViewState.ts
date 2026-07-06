@@ -97,6 +97,7 @@ export function useWorkspaceViewState(options: WorkspaceViewStateOptions) {
   const isSmartFolderPanel = computed(() => options.activePanel.value === "smartFolder");
   const isActionsPanel = computed(() => options.activePanel.value === "actions");
   const isExtensionsPanel = computed(() => options.activePanel.value === "extensions");
+  const isLogsPanel = computed(() => options.activePanel.value === "logs");
   const isPlaylistPanel = computed(() => options.activePanel.value === "playlist");
   const isLibraryCategoryView = computed(() => (
     isFilesPanel.value && options.isLibraryCategoryVirtualView.value
@@ -227,6 +228,7 @@ export function useWorkspaceViewState(options: WorkspaceViewStateOptions) {
     isExtensionsPanel,
     isFileBrowserPanel,
     isFilesPanel,
+    isLogsPanel,
     isVirtualView,
     isMissingRepository,
     isPlaylistPanel,

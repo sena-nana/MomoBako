@@ -49,6 +49,7 @@ import {
   startOperationProgress,
   updateOperationProgress,
 } from "../composables/workspace/tasks";
+import { emitSystemLog } from "../services/systemLog";
 
 export type PreviewPluginFileAction = {
   id: string;
@@ -244,6 +245,18 @@ export type RegisteredPluginSettingsPage = PluginSettingsPageContribution & {
 
 export type PluginEventHandler<T = unknown> = (payload: T) => void | Promise<void>;
 
+export type PluginLoggerOptions = {
+  category?: string;
+  action: string;
+  context?: Record<string, unknown>;
+  repoId?: string | null;
+  location?: {
+    modulePath?: string | null;
+    file?: string | null;
+    line?: number | null;
+  } | null;
+};
+
 export type MediaPlaybackEvent = {
   repoId: string;
   entry: FileBrowserEntry;
@@ -311,6 +324,12 @@ export type FrontendPluginContext = {
   updateOperationProgress: typeof updateOperationProgress;
   finishOperationProgress: typeof finishOperationProgress;
   cancelOperationProgress: typeof cancelOperationProgress;
+  logger: {
+    debug: (message: string, options: PluginLoggerOptions) => Promise<void>;
+    info: (message: string, options: PluginLoggerOptions) => Promise<void>;
+    warn: (message: string, options: PluginLoggerOptions) => Promise<void>;
+    error: (message: string, options: PluginLoggerOptions) => Promise<void>;
+  };
   emitPluginEvent: <T = unknown>(eventName: string, payload: T) => void;
   onPluginEvent: <T = unknown>(eventName: string, handler: PluginEventHandler<T>) => () => void;
   vue: {
@@ -365,6 +384,38 @@ export function registerPreviewPlugin(plugin: FilePreviewPlugin) {
   previewPluginRegistry.set(plugin.pluginId, plugin);
   bumpFrontendPluginRegistry();
   return plugin;
+}
+
+function createPluginLogger(manifest: PluginManifest, modulePath: string) {
+  async function write(
+    level: "debug" | "info" | "warn" | "error",
+    message: string,
+    options: PluginLoggerOptions,
+  ) {
+    await emitSystemLog(level, {
+      category: options.category ?? "plugin.frontend",
+      action: options.action,
+      message,
+      context: options.context,
+      repoId: options.repoId,
+      pluginId: manifest.pluginId,
+      sourceKind: "frontend-plugin",
+      sourceLabel: manifest.name,
+      location: {
+        modulePath: options.location?.modulePath ?? modulePath,
+        file: options.location?.file ?? modulePath,
+        line: options.location?.line ?? null,
+      },
+      stackOffset: 4,
+    });
+  }
+
+  return {
+    debug: (message: string, options: PluginLoggerOptions) => write("debug", message, options),
+    info: (message: string, options: PluginLoggerOptions) => write("info", message, options),
+    warn: (message: string, options: PluginLoggerOptions) => write("warn", message, options),
+    error: (message: string, options: PluginLoggerOptions) => write("error", message, options),
+  };
 }
 
 export function registerPlaylistPlayer(player: RegisteredPlaylistPlayer) {
@@ -496,7 +547,7 @@ async function loadPluginModule<T = unknown>(pluginId: string, path: string): Pr
   return import(/* @vite-ignore */ url) as Promise<T>;
 }
 
-function createFrontendPluginContext(manifest: PluginManifest): FrontendPluginContext {
+function createFrontendPluginContext(manifest: PluginManifest, modulePath: string): FrontendPluginContext {
   return {
     manifest,
     registerPreview(definition) {
@@ -608,6 +659,7 @@ function createFrontendPluginContext(manifest: PluginManifest): FrontendPluginCo
     updateOperationProgress,
     finishOperationProgress,
     cancelOperationProgress,
+    logger: createPluginLogger(manifest, modulePath),
     emitPluginEvent,
     onPluginEvent,
     vue: {
@@ -632,7 +684,7 @@ async function registerFrontendPluginManifest(manifest: PluginManifest) {
   if (typeof register !== "function") {
     throw new Error(`plugin register export not found: ${manifest.pluginId}:${moduleExport}`);
   }
-  await Promise.resolve(register(createFrontendPluginContext(manifest)));
+  await Promise.resolve(register(createFrontendPluginContext(manifest, modulePath)));
 }
 
 export async function syncRegisteredPreviewPluginManifests(manifests: PluginManifest[]) {

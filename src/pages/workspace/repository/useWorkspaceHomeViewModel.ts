@@ -3,6 +3,7 @@ import {
   useWorkspaceAssetMetadata,
   useWorkspaceActions,
   useWorkspaceFiles,
+  useWorkspaceLogs,
   useWorkspaceNavigation,
   useWorkspacePlaylists,
   useWorkspaceProgress,
@@ -199,13 +200,19 @@ export function useWorkspaceHomeViewModel() {
     runActiveRepositoryAction,
   } = useWorkspaceActions();
   const {
+    systemLogs,
+    clearSystemLogsInWorkspace,
+  } = useWorkspaceLogs();
+  const {
     isLoadingFileBrowser,
     isSearching,
     isSavingMetadata,
     isLoadingSmartFolder,
     isLoadingRepositoryActions,
+    isLoadingLogs,
     isMutatingFiles,
     isRunningRepositoryAction,
+    isClearingLogs,
     error,
   } = useWorkspaceProgress();
   const {
@@ -250,6 +257,7 @@ export function useWorkspaceHomeViewModel() {
     isExtensionsPanel,
     isFileBrowserPanel,
     isFilesPanel,
+    isLogsPanel,
     isMissingRepository,
     isPlaylistPanel,
     isReadOnlyVirtualView,
@@ -895,6 +903,7 @@ export function useWorkspaceHomeViewModel() {
     isFileBrowserPanel,
     isFilterBarOpen,
     isLoadingRepositoryActions,
+    isLoadingLogs,
     isMissingRepository,
     isMissingRepositoryBusy,
     isMutatingFiles,
@@ -905,6 +914,8 @@ export function useWorkspaceHomeViewModel() {
     isRunningRepositoryAction,
     isSearching,
     isSearchPanel,
+    isClearingLogs,
+    isLogsPanel,
     isTrashPanel,
     isVirtualView,
     limitInput,
@@ -920,6 +931,7 @@ export function useWorkspaceHomeViewModel() {
     renameValue,
     repositories,
     repositoryActions,
+    clearSystemLogsInWorkspace,
     requestActiveNeteaseRelogin,
     runActiveRepositoryAction,
     ratingFilterOptions,
@@ -938,6 +950,7 @@ export function useWorkspaceHomeViewModel() {
     skipCurrentHardlinkCandidate,
     submitCopyTarget,
     submitMetadataFilterInput,
+    systemLogs,
     tagFilterOptions,
     toggleSearchFilter,
   });

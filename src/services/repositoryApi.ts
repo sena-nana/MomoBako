@@ -1,4 +1,5 @@
 export * from "./repositoryApi/files";
+export * from "./repositoryApi/logs";
 export * from "./repositoryApi/actions";
 export * from "./repositoryApi/externalApi";
 export * from "./repositoryApi/playlists";

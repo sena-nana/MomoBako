@@ -144,6 +144,22 @@ export function register(ctx) {
 - `deletePluginConfigValue(key)`
 - `invokeCommand(command, args?)`
 - `callPlugin(request)`
+- `logger.debug/info/warn/error(message, options)`
+
+`ctx.logger.*` 会自动补齐：
+
+- `pluginId`
+- `sourceKind: "frontend-plugin"`
+- 插件名称作为 `sourceLabel`
+- 当前前端模块路径作为 `location.modulePath` / `location.file`
+
+`options` 推荐字段：
+
+- `category`
+- `action`
+- `repoId`
+- `context`
+- 可选 `location`
 
 后端插件可以通过 manifest 的 `contributes.apiTests[]` 声明可调试 API；每项使用 `method`、可选 `summary`、`payload` 或 `requestTemplate`。API Playground 会把这些声明和内置 provider / metadataDefaults 贡献点一起合并到宿主 API 快照中。
 
@@ -171,6 +187,28 @@ export function register(ctx) {
 原生动态库不会持久解压安装。宿主只会在运行时把库文件提取到受控临时目录，再按内容哈希缓存加载。
 
 后端调用 envelope 会带上 `runtime.pluginDataDir` 和 `runtime.pluginConfig`。前者指向同一个插件自有数据目录，后者是宿主从 `config.json` 读取的当前 key-value 配置快照。
+
+后端插件还可以通过宿主内建桥写统一日志：
+
+- `pluginId = "momobako.system"`
+- `method = "system.log.write"`
+- payload 使用标准 `SystemLogWriteRequest`
+
+`External/Plugins/_sdk/backend-rust` 已提供：
+
+```rust
+write_host_log(runtime, "info", "taskStarted", "开始处理任务。", serde_json::json!({
+    "taskId": "demo-1"
+}))?;
+```
+
+这个 helper 会自动补齐：
+
+- `pluginId = runtime.plugin_id`
+- `sourceKind = "backend-plugin"`
+- `category = "plugin.backend"`
+
+统一日志最终会进入宿主日志中心，并落盘到 `<serviceRoot>/logs/*.jsonl`。
 
 ## 7. `.momoplug` 包结构
 

@@ -14,6 +14,7 @@ import type {
   RepositoryExportResponse,
   RepositorySummary,
 } from "../../types/repository";
+import { emitSystemLogSilently } from "../../services/systemLog";
 import {
   activeRepoId,
   activeSnapshot,
@@ -122,6 +123,12 @@ export async function createNewRepository(
     skipInitialSync?: boolean;
   },
 ) {
+  emitSystemLogSilently("info", {
+    category: "repository",
+    action: "createStart",
+    message: "开始创建资源库。",
+    context: { name, path, backendPluginId, skipInitialSync: options?.skipInitialSync ?? false },
+  });
   const progressId = startOperationProgress(
     "创建资源库",
     options?.skipInitialSync ? "初始化资源库" : "初始化资源库并扫描文件",
@@ -143,43 +150,101 @@ export async function createNewRepository(
     });
     upsertRepositorySummary(response.repository);
     await repositoryDependencies().selectRepository(response.repository.repoId);
+    emitSystemLogSilently("info", {
+      category: "repository",
+      action: "createSuccess",
+      message: "资源库创建完成。",
+      repoId: response.repository.repoId,
+      context: { name: response.repository.name, path: response.repository.path },
+    });
     finishOperationProgress(progressId);
     return response;
   } catch (cause) {
+    emitSystemLogSilently("error", {
+      category: "repository",
+      action: "createFailed",
+      message: "资源库创建失败。",
+      context: { name, path, error: cause instanceof Error ? cause.message : String(cause) },
+    });
     cancelOperationProgress(progressId);
     throw cause;
   }
 }
 
 export async function importExistingRepository(name: string, path: string) {
+  emitSystemLogSilently("info", {
+    category: "repository",
+    action: "importStart",
+    message: "开始导入资源库。",
+    context: { name, path },
+  });
   const progressId = startOperationProgress("导入资源库", "读取资源库元数据并扫描文件", { initial: 8 });
   try {
     const response = await importRepository({ name, path });
     upsertRepositorySummary(response.repository);
     await repositoryDependencies().selectRepository(response.repository.repoId);
+    emitSystemLogSilently("info", {
+      category: "repository",
+      action: "importSuccess",
+      message: "资源库导入完成。",
+      repoId: response.repository.repoId,
+      context: { name: response.repository.name, path: response.repository.path },
+    });
     finishOperationProgress(progressId);
     return response;
   } catch (cause) {
+    emitSystemLogSilently("error", {
+      category: "repository",
+      action: "importFailed",
+      message: "资源库导入失败。",
+      context: { name, path, error: cause instanceof Error ? cause.message : String(cause) },
+    });
     cancelOperationProgress(progressId);
     throw cause;
   }
 }
 
 export async function attachRepository(path: string) {
+  emitSystemLogSilently("info", {
+    category: "repository",
+    action: "attachStart",
+    message: "开始挂载资源库。",
+    context: { path },
+  });
   const progressId = startOperationProgress("挂载资源库", "检查文件夹并读取索引", { initial: 8 });
   try {
     const response = await attachRepositoryFolder({ path });
     upsertRepositorySummary(response.repository);
     await repositoryDependencies().selectRepository(response.repository.repoId);
+    emitSystemLogSilently("info", {
+      category: "repository",
+      action: "attachSuccess",
+      message: "资源库挂载完成。",
+      repoId: response.repository.repoId,
+      context: { path: response.repository.path },
+    });
     finishOperationProgress(progressId);
     return response;
   } catch (cause) {
+    emitSystemLogSilently("error", {
+      category: "repository",
+      action: "attachFailed",
+      message: "资源库挂载失败。",
+      context: { path, error: cause instanceof Error ? cause.message : String(cause) },
+    });
     cancelOperationProgress(progressId);
     throw cause;
   }
 }
 
 export async function removeRepository(repoId: string, mode: RepositoryDeleteMode = "recordOnly") {
+  emitSystemLogSilently("info", {
+    category: "repository",
+    action: "deleteStart",
+    message: "开始删除资源库。",
+    repoId,
+    context: { mode },
+  });
   await deleteRepository({ repoId, mode });
   removeRepositorySummary(repoId);
   if (activeRepoId.value !== repoId) return;
@@ -187,6 +252,13 @@ export async function removeRepository(repoId: string, mode: RepositoryDeleteMod
   if (nextRepoId) {
     await repositoryDependencies().selectRepository(nextRepoId);
   }
+  emitSystemLogSilently("warn", {
+    category: "repository",
+    action: "deleteSuccess",
+    message: "资源库已删除。",
+    repoId,
+    context: { mode },
+  });
 }
 
 export function openRepositoryDeleteDialog(repoId: string) {
@@ -221,6 +293,13 @@ export async function confirmRepositoryDelete(mode: RepositoryDeleteMode) {
 }
 
 export async function relocateMissingRepository(repoId: string, path: string) {
+  emitSystemLogSilently("info", {
+    category: "repository",
+    action: "relocateStart",
+    message: "开始重定向资源库。",
+    repoId,
+    context: { path },
+  });
   const progressId = startOperationProgress("重定向资源库", "校验资源库位置", { initial: 12 });
   try {
     const response = await relocateRepository({ repoId, path });
@@ -250,9 +329,23 @@ export async function configureNeteaseRepositoryCacheInWorkspace(repoId: string,
     if (activeRepoId.value !== response.repository.repoId || !activeSnapshot.value) {
       await repositoryDependencies().selectRepository(response.repository.repoId);
     }
+    emitSystemLogSilently("info", {
+      category: "repository",
+      action: "relocateSuccess",
+      message: "资源库位置已更新。",
+      repoId: response.repository.repoId,
+      context: { path: response.repository.path },
+    });
     finishOperationProgress(progressId);
     return response;
   } catch (cause) {
+    emitSystemLogSilently("error", {
+      category: "repository",
+      action: "relocateFailed",
+      message: "资源库位置更新失败。",
+      repoId,
+      context: { path, error: cause instanceof Error ? cause.message : String(cause) },
+    });
     cancelOperationProgress(progressId);
     throw cause;
   }
@@ -263,6 +356,13 @@ export async function exportCurrentRepository(
 ): Promise<RepositoryExportResponse | null> {
   if (!activeRepoId.value) return null;
 
+  emitSystemLogSilently("info", {
+    category: "repository",
+    action: "exportStart",
+    message: request.target === "git" ? "开始导出到 Git。" : "开始导出资源库。",
+    repoId: activeRepoId.value,
+    context: { target: request.target },
+  });
   error.value = null;
   const progressId = startOperationProgress(
     request.target === "git" ? "上传到 Git" : "导出资源库",
@@ -276,10 +376,24 @@ export async function exportCurrentRepository(
       repoId: activeRepoId.value,
     });
     updateOperationProgress(progressId, { detail: response.message, value: 92 });
+    emitSystemLogSilently("info", {
+      category: "repository",
+      action: "exportSuccess",
+      message: response.message,
+      repoId: activeRepoId.value,
+      context: { target: request.target, outputPath: response.outputPath ?? null },
+    });
     finishOperationProgress(progressId);
     return response;
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : String(cause);
+    emitSystemLogSilently("error", {
+      category: "repository",
+      action: "exportFailed",
+      message: "资源库导出失败。",
+      repoId: activeRepoId.value,
+      context: { target: request.target, error: error.value },
+    });
     cancelOperationProgress(progressId);
     return null;
   }

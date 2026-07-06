@@ -15,6 +15,7 @@ export {
   useWorkspaceActions,
   useWorkspaceAssetMetadata,
   useWorkspaceFiles,
+  useWorkspaceLogs,
   useWorkspaceNavigation,
   useWorkspacePlaylists,
   useWorkspaceProgress,

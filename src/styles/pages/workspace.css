@@ -972,6 +972,15 @@
   padding: 0;
 }
 
+.search-workbench__field select {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  padding: 0;
+}
+
 .search-workbench__field input:focus {
   border: 0;
 }
@@ -1087,6 +1096,199 @@
   justify-content: flex-end;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+.logs-workbench {
+  min-height: 100%;
+}
+
+.logs-workbench__panel {
+  min-height: 100%;
+}
+
+.logs-workbench__header {
+  align-items: flex-start;
+}
+
+.logs-workbench__toolbar,
+.logs-workbench__filters,
+.logs-workbench__filter-group,
+.logs-workbench__chips,
+.logs-workbench__badges,
+.logs-workbench__meta {
+  display: flex;
+}
+
+.logs-workbench__toolbar,
+.logs-workbench__filters {
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.logs-workbench__search {
+  min-width: min(320px, 100%);
+  flex: 1 1 320px;
+}
+
+.logs-workbench__select {
+  min-width: 180px;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.logs-workbench__select span {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.logs-workbench__filter-group {
+  width: 100%;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.logs-workbench__filter-group > span {
+  min-width: 42px;
+  padding-top: 5px;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.logs-workbench__chips {
+  flex: 1;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.logs-workbench__list {
+  min-height: 360px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.logs-workbench__item {
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-xl);
+  background: var(--bg);
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.logs-workbench__item-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.logs-workbench__item-head time {
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.logs-workbench__badges {
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.logs-workbench__level {
+  min-height: 28px;
+  padding: 0 12px;
+  border-radius: var(--radius-pill);
+  display: inline-flex;
+  align-items: center;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.logs-workbench__level.is-debug {
+  background: color-mix(in srgb, #5c7088 18%, var(--bg));
+  color: #5c7088;
+}
+
+.logs-workbench__level.is-info {
+  background: color-mix(in srgb, var(--accent) 18%, var(--bg));
+  color: var(--accent);
+}
+
+.logs-workbench__level.is-warn {
+  background: color-mix(in srgb, #dca33a 22%, var(--bg));
+  color: #b67a09;
+}
+
+.logs-workbench__level.is-error {
+  background: color-mix(in srgb, var(--err) 18%, var(--bg));
+  color: var(--err);
+}
+
+.logs-workbench__body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.logs-workbench__message {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.logs-workbench__message strong {
+  font-size: 14px;
+}
+
+.logs-workbench__message p {
+  margin: 0;
+  color: var(--text);
+  line-height: 1.6;
+}
+
+.logs-workbench__meta {
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.logs-workbench__meta span {
+  min-height: 24px;
+  padding: 3px 9px;
+  border-radius: var(--radius-pill);
+  background: var(--bg-subtle);
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.logs-workbench__context {
+  border-top: 1px solid var(--border-soft);
+  padding-top: 10px;
+}
+
+.logs-workbench__context summary {
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.logs-workbench__context pre {
+  margin: 10px 0 0;
+  padding: 12px;
+  border-radius: var(--radius-lg);
+  background: var(--bg-subtle);
+  color: var(--text);
+  font: 12px/1.6 var(--font-mono);
+  overflow: auto;
 }
 
 .repository-actions-panel {
@@ -4591,6 +4793,25 @@
   .workspace-filter-bar__actions,
   .search-workbench__stats {
     justify-content: flex-start;
+  }
+
+  .logs-workbench__item-head {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .logs-workbench__search,
+  .logs-workbench__select {
+    min-width: 100%;
+  }
+
+  .logs-workbench__filter-group {
+    flex-direction: column;
+  }
+
+  .logs-workbench__filter-group > span {
+    min-width: 0;
+    padding-top: 0;
   }
 
   .workspace-filter-bar__group {

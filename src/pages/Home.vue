@@ -7,6 +7,7 @@ import {
   SearchPanel,
   WorkspaceFilterBar,
   WorkspaceFilesSurface,
+  WorkspaceLogsPanel,
   WorkspacePlaylistPage,
 } from "./workspace/lazyComponents";
 import MissingRepositoryState from "./workspace/MissingRepositoryState.vue";
@@ -139,6 +140,14 @@ const vm = useWorkspaceHomeViewModel();
       :is-repository-writable="vm.isRepositoryWritable"
       :is-trash-panel="vm.isTrashPanel"
       :is-virtual-view="vm.isVirtualView"
+    />
+
+    <WorkspaceLogsPanel
+      v-else-if="vm.isLogsPanel"
+      :records="vm.systemLogs"
+      :is-loading="vm.isLoadingLogs"
+      :is-clearing="vm.isClearingLogs"
+      @clear="vm.clearSystemLogsInWorkspace"
     />
 
     <EmptyRepositoryState

@@ -403,6 +403,7 @@ const showFolderSidebar = computed(() => (
         :active-panel="activePanel"
         :is-settings-route="route.path === '/settings'"
         @select-extensions="selectPanel('extensions')"
+        @select-logs="selectPanel('logs')"
       />
     </div>
   </aside>

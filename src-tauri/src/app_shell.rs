@@ -1,7 +1,9 @@
 //! Desktop app-shell bootstrap and lifecycle glue for the Tauri View layer.
 
+use crate::services::logging::{init_app_logger, write_log};
 use crate::services::runtime::RepositoryRuntime;
 use crate::{
+    services::repository::{SystemLogLocationInput, SystemLogWriteRequest},
     viewmodels::{
         FileBrowserViewModel, PluginViewModel, RepositoryInteractionViewModel,
         RepositoryManagementViewModel, RepositoryPlaybackViewModel, RepositoryQueryViewModel,
@@ -30,6 +32,27 @@ pub fn builder() -> Builder<tauri::Wry> {
         .plugin(tauri_plugin_store::Builder::default().build())
         .manage(window_state::MainWindowStateCache::default())
         .setup(|app| {
+            let service_root = std::env::current_dir()
+                .map_err(|error| error.to_string())?
+                .join(".service-data");
+            let logger = init_app_logger(service_root)?;
+            logger.set_app_handle(app.handle().clone())?;
+            let _ = write_log(SystemLogWriteRequest {
+                level: "info".to_string(),
+                category: "app.lifecycle".to_string(),
+                action: "startup".to_string(),
+                message: "MomoBako 桌面端启动。".to_string(),
+                context: None,
+                repo_id: None,
+                plugin_id: None,
+                source_kind: Some("host".to_string()),
+                source_label: Some("MomoBako".to_string()),
+                location: Some(SystemLogLocationInput {
+                    module_path: Some(module_path!().to_string()),
+                    file: Some(file!().to_string()),
+                    line: Some(line!()),
+                }),
+            });
             let runtime = RepositoryRuntime::start()?;
             runtime.set_app_handle(app.handle().clone())?;
             let file_browser = FileBrowserViewModel::new(runtime.clone());
@@ -128,6 +151,22 @@ fn quit_app(app: &AppHandle) {
     if let Some(runtime) = app.try_state::<RepositoryRuntime>() {
         runtime.shutdown_helpers();
     }
+    let _ = write_log(SystemLogWriteRequest {
+        level: "info".to_string(),
+        category: "app.lifecycle".to_string(),
+        action: "shutdown".to_string(),
+        message: "MomoBako 桌面端退出。".to_string(),
+        context: None,
+        repo_id: None,
+        plugin_id: None,
+        source_kind: Some("host".to_string()),
+        source_label: Some("MomoBako".to_string()),
+        location: Some(SystemLogLocationInput {
+            module_path: Some(module_path!().to_string()),
+            file: Some(file!().to_string()),
+            line: Some(line!()),
+        }),
+    });
     app.exit(0);
 }
 

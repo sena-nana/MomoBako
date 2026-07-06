@@ -54,7 +54,10 @@ import {
   selectedFilePaths,
   smartFolderResult,
   smartFolders,
+  systemLogs,
   workspaceStartup,
+  isLoadingLogs,
+  isClearingLogs,
 } from "./state";
 import { onRepositoryEntryAccess } from "../../services/repositoryApi";
 import {
@@ -183,6 +186,10 @@ import {
   startWorkspaceEntriesDrag,
   startWorkspaceEntryDrag,
 } from "./fileOperations";
+import {
+  clearSystemLogsInWorkspace,
+  loadSystemLogsInWorkspace,
+} from "./logs";
 import {
   confirmWorkspaceHardlinkCandidate,
   refreshFileBrowserTree,
@@ -425,6 +432,14 @@ export function useWorkspaceSettings() {
   };
 }
 
+export function useWorkspaceLogs() {
+  return {
+    systemLogs: readonlyArrayRef(systemLogs),
+    loadSystemLogsInWorkspace,
+    clearSystemLogsInWorkspace,
+  };
+}
+
 export function useWorkspaceProgress() {
   return {
     operationProgress: readonlyRef(operationProgress),
@@ -437,6 +452,7 @@ export function useWorkspaceProgress() {
     isSearching: readonlyRef(isSearching),
     isLoadingSmartFolder: readonlyRef(isLoadingSmartFolder),
     isLoadingRepositoryActions: readonlyRef(isLoadingRepositoryActions),
+    isLoadingLogs: readonlyRef(isLoadingLogs),
     isSavingMetadata: readonlyRef(isSavingMetadata),
     isSyncing: readonlyRef(isSyncing),
     isMutatingFiles: readonlyRef(isMutatingFiles),
@@ -444,6 +460,7 @@ export function useWorkspaceProgress() {
     isRunningRepositoryAction: readonlyRef(isRunningRepositoryAction),
     isLoadingSettingsData: readonlyRef(isLoadingSettingsData),
     isManagingPlugins: readonlyRef(isManagingPlugins),
+    isClearingLogs: readonlyRef(isClearingLogs),
     isBusy: computed(() => (
       isLoadingRepositories.value ||
       isLoadingSnapshot.value ||
