@@ -1,0 +1,24 @@
+tests/workspaceRepositoryLifecycle.test.ts
+  s_d78ccad5ff38cc::t_370eadd0630ea3 34-51,64-93
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "a08fe86852f6877f9734bb4f35d099d2a01005e0",
+  "prompts": {},
+  "humans": {
+    "h_8e6780fc7b4bb1": {
+      "author": "AuraElicase <auraelicase@outlook.com>"
+    }
+  },
+  "sessions": {
+    "s_d78ccad5ff38cc": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f27b7-6426-7031-8c48-f51fb5ee74ac",
+        "model": "unknown"
+      },
+      "human_author": "AuraElicase <auraelicase@outlook.com>"
+    }
+  }
+}
