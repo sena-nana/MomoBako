@@ -31,6 +31,24 @@ describe("workspace repository lifecycle", () => {
     expect(commands.indexOf("sync_repository")).toBeLessThan(
       commands.indexOf("get_repository_snapshot"),
     );
+
+    const startupLogActions = getInvokeCalls("write_system_log")
+      .map((call) => call.args?.action);
+    expect(startupLogActions).toEqual(expect.arrayContaining([
+      "startupStart",
+      "repositoryListStart",
+      "repositoryListSuccess",
+      "repositorySelected",
+      "syncStart",
+      "syncSuccess",
+      "snapshotStart",
+      "snapshotSuccess",
+      "firstScreenStart",
+      "firstScreenSuccess",
+      "settingsStart",
+      "settingsSuccess",
+      "startupSuccess",
+    ]));
   });
 
   it("切换资源库时扫描失败会进入启动错误状态", async () => {
@@ -42,5 +60,35 @@ describe("workspace repository lifecycle", () => {
     const progress = useWorkspaceProgress();
     expect(progress.workspaceStartup.value.status).toBe("error");
     expect(progress.workspaceStartup.value.error).toBe("扫描失败");
+  });
+
+  it("启动同步失败会记录首屏失败日志", async () => {
+    seedMockRepository();
+    window.localStorage.setItem("momobako.lastActiveRepositoryId", "repo-main-001");
+    failNextInvoke("sync_repository", "扫描失败");
+
+    await ensureRepositoryWorkspace();
+
+    const progress = useWorkspaceProgress();
+    expect(progress.workspaceStartup.value.status).toBe("error");
+    expect(progress.workspaceStartup.value.error).toBe("扫描失败");
+
+    const startupLogs = getInvokeCalls("write_system_log")
+      .filter((call) => call.args?.category === "workspace.startup");
+    expect(startupLogs.map((call) => call.args?.action)).toEqual(expect.arrayContaining([
+      "startupStart",
+      "repositoryListSuccess",
+      "repositorySelected",
+      "syncStart",
+      "startupFailed",
+    ]));
+    expect(startupLogs.at(-1)?.args).toMatchObject({
+      level: "error",
+      action: "startupFailed",
+      repoId: "repo-main-001",
+      context: {
+        error: "扫描失败",
+      },
+    });
   });
 });
