@@ -204,14 +204,20 @@ pub(super) fn list_source_trash_directory_entries(
             }
             continue;
         }
-        entries.push(map_single_source_trash_entry(entry, asset_map, thumbnail_map));
+        entries.push(map_single_source_trash_entry(
+            entry,
+            asset_map,
+            thumbnail_map,
+        ));
     }
 
-    entries.sort_by(|left, right| match (left.kind.as_str(), right.kind.as_str()) {
-        ("directory", "file") => std::cmp::Ordering::Less,
-        ("file", "directory") => std::cmp::Ordering::Greater,
-        _ => left.name.to_lowercase().cmp(&right.name.to_lowercase()),
-    });
+    entries.sort_by(
+        |left, right| match (left.kind.as_str(), right.kind.as_str()) {
+            ("directory", "file") => std::cmp::Ordering::Less,
+            ("file", "directory") => std::cmp::Ordering::Greater,
+            _ => left.name.to_lowercase().cmp(&right.name.to_lowercase()),
+        },
+    );
     entries
 }
 
@@ -220,12 +226,13 @@ pub(super) fn repository_has_source_trash_entries(
     connection: &Connection,
     repo_id: &str,
 ) -> Result<bool, rusqlite::Error> {
-    connection.query_row(
-        "SELECT EXISTS(SELECT 1 FROM source_trash_entries WHERE repo_id = ?1)",
-        [repo_id],
-        |row| row.get::<_, i64>(0),
-    )
-    .map(|value| value != 0)
+    connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM source_trash_entries WHERE repo_id = ?1)",
+            [repo_id],
+            |row| row.get::<_, i64>(0),
+        )
+        .map(|value| value != 0)
 }
 
 fn map_single_source_trash_entry(
@@ -238,7 +245,9 @@ fn map_single_source_trash_entry(
     let asset_thumbnail_path = asset_record.and_then(|record| record.thumbnail_path.clone());
     let hardlink_group_id = asset_record.and_then(|record| record.hardlink_group_id.clone());
     let hardlink_state = asset_record.and_then(|record| record.hardlink_state.clone());
-    let is_virtual = asset_record.map(|record| record.is_virtual).unwrap_or(false);
+    let is_virtual = asset_record
+        .map(|record| record.is_virtual)
+        .unwrap_or(false);
     let provider_id = asset_record.and_then(|record| record.provider_id.clone());
     let provider_item_id = asset_record.and_then(|record| record.provider_item_id.clone());
     let source_payload = asset_record.and_then(|record| record.source_payload.clone());
@@ -322,7 +331,10 @@ fn replace_repository_shortcuts(
     repo_id: &str,
     entries: &[RepositoryShortcut],
 ) -> Result<(), rusqlite::Error> {
-    connection.execute("DELETE FROM repository_shortcuts WHERE repo_id = ?1", [repo_id])?;
+    connection.execute(
+        "DELETE FROM repository_shortcuts WHERE repo_id = ?1",
+        [repo_id],
+    )?;
     let now = now_rfc3339();
     for (index, entry) in entries.iter().enumerate() {
         connection.execute(
@@ -352,7 +364,10 @@ fn replace_repository_tag_groups(
     repo_id: &str,
     entries: &[RepositoryTagGroup],
 ) -> Result<(), rusqlite::Error> {
-    connection.execute("DELETE FROM tag_group_members WHERE repo_id = ?1", [repo_id])?;
+    connection.execute(
+        "DELETE FROM tag_group_members WHERE repo_id = ?1",
+        [repo_id],
+    )?;
     connection.execute("DELETE FROM tag_groups WHERE repo_id = ?1", [repo_id])?;
     let now = now_rfc3339();
     for (group_index, entry) in entries.iter().enumerate() {
@@ -361,7 +376,14 @@ fn replace_repository_tag_groups(
             INSERT INTO tag_groups (tag_group_id, repo_id, name, sort_order, created_at, updated_at)
             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
             "#,
-            params![entry.tag_group_id, repo_id, entry.name, group_index as i64, now, now],
+            params![
+                entry.tag_group_id,
+                repo_id,
+                entry.name,
+                group_index as i64,
+                now,
+                now
+            ],
         )?;
         for (member_index, tag) in entry.tags.iter().enumerate() {
             connection.execute(
@@ -417,10 +439,22 @@ fn replace_repository_actions(
     repo_id: &str,
     entries: &[RepositoryAction],
 ) -> Result<(), rusqlite::Error> {
-    connection.execute("DELETE FROM repository_action_run_steps WHERE repo_id = ?1", [repo_id])?;
-    connection.execute("DELETE FROM repository_action_runs WHERE repo_id = ?1", [repo_id])?;
-    connection.execute("DELETE FROM repository_action_steps WHERE repo_id = ?1", [repo_id])?;
-    connection.execute("DELETE FROM repository_actions WHERE repo_id = ?1", [repo_id])?;
+    connection.execute(
+        "DELETE FROM repository_action_run_steps WHERE repo_id = ?1",
+        [repo_id],
+    )?;
+    connection.execute(
+        "DELETE FROM repository_action_runs WHERE repo_id = ?1",
+        [repo_id],
+    )?;
+    connection.execute(
+        "DELETE FROM repository_action_steps WHERE repo_id = ?1",
+        [repo_id],
+    )?;
+    connection.execute(
+        "DELETE FROM repository_actions WHERE repo_id = ?1",
+        [repo_id],
+    )?;
     for entry in entries {
         connection.execute(
             r#"
@@ -462,10 +496,12 @@ fn replace_repository_actions(
                     step.step_kind,
                     step.label,
                     step.status,
-                    serde_json::to_string(&step.config)
-                        .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?,
-                    serde_json::to_string(&step.raw)
-                        .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?,
+                    serde_json::to_string(&step.config).map_err(|error| {
+                        rusqlite::Error::ToSqlConversionFailure(Box::new(error))
+                    })?,
+                    serde_json::to_string(&step.raw).map_err(|error| {
+                        rusqlite::Error::ToSqlConversionFailure(Box::new(error))
+                    })?,
                     step.unsupported_reason,
                     step.sort_order,
                 ],
@@ -480,7 +516,10 @@ fn replace_source_trash_entries(
     repo_id: &str,
     entries: &[SourceTrashEntry],
 ) -> Result<(), rusqlite::Error> {
-    connection.execute("DELETE FROM source_trash_entries WHERE repo_id = ?1", [repo_id])?;
+    connection.execute(
+        "DELETE FROM source_trash_entries WHERE repo_id = ?1",
+        [repo_id],
+    )?;
     for entry in entries {
         connection.execute(
             r#"

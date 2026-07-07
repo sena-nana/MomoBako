@@ -21,7 +21,10 @@ pub(super) fn apply_revision_state(
 
     for target_asset_id in target_asset_ids {
         let member_before = load_metadata_map_from_transaction(tx, &target_asset_id)?;
-        tx.execute("DELETE FROM metadata WHERE asset_id = ?1", [&target_asset_id])?;
+        tx.execute(
+            "DELETE FROM metadata WHERE asset_id = ?1",
+            [&target_asset_id],
+        )?;
         for (key, value) in &target_map {
             tx.execute(
                 r#"

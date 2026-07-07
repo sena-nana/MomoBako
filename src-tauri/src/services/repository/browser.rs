@@ -1056,7 +1056,8 @@ pub(super) fn mutate_trash(
                 repo.summary.backend.plugin_id
             ));
         }
-        let source_entries = load_source_trash_entries(&connection, &request.repo_id).map_err(db_error)?;
+        let source_entries =
+            load_source_trash_entries(&connection, &request.repo_id).map_err(db_error)?;
         match request.action.as_str() {
             "restore" => {
                 let trash_path = request
