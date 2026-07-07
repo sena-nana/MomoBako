@@ -30,13 +30,8 @@ pub(super) fn create_smart_folder(
     )?;
     let tx = connection.transaction().map_err(db_error)?;
     let name = validate_smart_folder_name(&request.name)?;
-    validate_smart_folder_parent(
-        &tx,
-        &request.repo_id,
-        request.parent_id.as_deref(),
-        None,
-    )
-    .map_err(db_error)?;
+    validate_smart_folder_parent(&tx, &request.repo_id, request.parent_id.as_deref(), None)
+        .map_err(db_error)?;
     let smart_folder_id = request
         .smart_folder_id
         .as_deref()
@@ -51,27 +46,27 @@ pub(super) fn create_smart_folder(
     let sort_order =
         next_smart_folder_sort_order(&tx, &request.repo_id, request.parent_id.as_deref())
             .map_err(db_error)?;
-    tx
-        .execute(
-            r#"
+    tx.execute(
+        r#"
             INSERT INTO smart_folders (
               smart_folder_id, repo_id, parent_id, name, filter_json,
               sort_order, created_at, updated_at
             )
             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7)
             "#,
-            params![
-                smart_folder_id,
-                request.repo_id,
-                normalized_optional_id(request.parent_id.as_deref()),
-                name,
-                filter_json,
-                sort_order,
-                now
-            ],
-        )
-        .map_err(db_error)?;
-    let snapshot = load_source_repository_state_snapshot(&tx, &request.repo_id).map_err(db_error)?;
+        params![
+            smart_folder_id,
+            request.repo_id,
+            normalized_optional_id(request.parent_id.as_deref()),
+            name,
+            filter_json,
+            sort_order,
+            now
+        ],
+    )
+    .map_err(db_error)?;
+    let snapshot =
+        load_source_repository_state_snapshot(&tx, &request.repo_id).map_err(db_error)?;
     let _ = write_backend_repository_state(
         &state.root,
         &repo,
@@ -123,26 +118,26 @@ pub(super) fn update_smart_folder(
         next_smart_folder_sort_order(&tx, &request.repo_id, request.parent_id.as_deref())
             .map_err(db_error)?
     };
-    tx
-        .execute(
-            r#"
+    tx.execute(
+        r#"
             UPDATE smart_folders
             SET parent_id = ?3, name = ?4, filter_json = ?5,
                 sort_order = ?6, updated_at = ?7
             WHERE repo_id = ?1 AND smart_folder_id = ?2
             "#,
-            params![
-                request.repo_id,
-                smart_folder_id,
-                normalized_optional_id(request.parent_id.as_deref()),
-                name,
-                filter_json,
-                sort_order,
-                now
-            ],
-        )
-        .map_err(db_error)?;
-    let snapshot = load_source_repository_state_snapshot(&tx, &request.repo_id).map_err(db_error)?;
+        params![
+            request.repo_id,
+            smart_folder_id,
+            normalized_optional_id(request.parent_id.as_deref()),
+            name,
+            filter_json,
+            sort_order,
+            now
+        ],
+    )
+    .map_err(db_error)?;
+    let snapshot =
+        load_source_repository_state_snapshot(&tx, &request.repo_id).map_err(db_error)?;
     let _ = write_backend_repository_state(
         &state.root,
         &repo,
@@ -178,9 +173,8 @@ pub(super) fn delete_smart_folder(
     load_smart_folder(&tx, repo_id, &smart_folder_id)
         .map_err(db_error)?
         .ok_or_else(|| format!("smart folder not found: {smart_folder_id}"))?;
-    tx
-        .execute(
-            r#"
+    tx.execute(
+        r#"
             WITH RECURSIVE deleting(id) AS (
               SELECT smart_folder_id
               FROM smart_folders
@@ -194,9 +188,9 @@ pub(super) fn delete_smart_folder(
             DELETE FROM smart_folders
             WHERE repo_id = ?1 AND smart_folder_id IN (SELECT id FROM deleting)
             "#,
-            params![repo_id, smart_folder_id],
-        )
-        .map_err(db_error)?;
+        params![repo_id, smart_folder_id],
+    )
+    .map_err(db_error)?;
     let snapshot = load_source_repository_state_snapshot(&tx, repo_id).map_err(db_error)?;
     let _ = write_backend_repository_state(
         &state.root,

@@ -110,7 +110,11 @@ fn build_discovered_files(plan: &ConversionPlan) -> Result<Vec<EagleSourceDiscov
                 is_virtual: false,
                 provider_id: None,
                 provider_item_id: None,
-                source_payload: Some(asset_source_payload(asset, membership, thumbnail_path.as_deref())),
+                source_payload: Some(asset_source_payload(
+                    asset,
+                    membership,
+                    thumbnail_path.as_deref(),
+                )),
                 local_absolute_path: Some(source_file_path.clone()),
                 status: Some(if asset.is_deleted {
                     "deleted".to_string()
@@ -133,10 +137,15 @@ fn build_source_tree(plan: &ConversionPlan) -> Vec<FileTreeNode> {
         .iter()
         .filter(|asset| !asset.is_deleted)
         .flat_map(|asset| asset.memberships.iter())
-        .fold(BTreeMap::<String, usize>::new(), |mut counts, membership| {
-            *counts.entry(membership.target_relative_dir.clone()).or_default() += 1;
-            counts
-        });
+        .fold(
+            BTreeMap::<String, usize>::new(),
+            |mut counts, membership| {
+                *counts
+                    .entry(membership.target_relative_dir.clone())
+                    .or_default() += 1;
+                counts
+            },
+        );
     plan.folder_nodes
         .iter()
         .map(|node| build_tree_node(node, &file_counts))
@@ -235,8 +244,12 @@ fn build_directory_entries(
     }
     for entries in directories.values_mut() {
         entries.sort_by(|left, right| match (&left.kind, &right.kind) {
-            (EagleSourceEntryKind::Directory, EagleSourceEntryKind::File) => std::cmp::Ordering::Less,
-            (EagleSourceEntryKind::File, EagleSourceEntryKind::Directory) => std::cmp::Ordering::Greater,
+            (EagleSourceEntryKind::Directory, EagleSourceEntryKind::File) => {
+                std::cmp::Ordering::Less
+            }
+            (EagleSourceEntryKind::File, EagleSourceEntryKind::Directory) => {
+                std::cmp::Ordering::Greater
+            }
             _ => left.path.to_lowercase().cmp(&right.path.to_lowercase()),
         });
     }
@@ -372,7 +385,8 @@ fn build_trash_entries(assets: &[AssetPlan], now: &str) -> Vec<SourceTrashEntry>
 }
 
 fn asset_created_at(asset: &AssetPlan) -> Option<String> {
-    asset.preserved_metadata
+    asset
+        .preserved_metadata
         .get("fileCreatedAt")
         .or_else(|| asset.preserved_metadata.get("addedToLibraryAt"))
         .and_then(serde_json::Value::as_str)
@@ -380,7 +394,8 @@ fn asset_created_at(asset: &AssetPlan) -> Option<String> {
 }
 
 fn asset_modified_at(asset: &AssetPlan, metadata: &fs::Metadata) -> Result<String, String> {
-    asset.preserved_metadata
+    asset
+        .preserved_metadata
         .get("fileModifiedAt")
         .and_then(serde_json::Value::as_str)
         .map(str::to_string)

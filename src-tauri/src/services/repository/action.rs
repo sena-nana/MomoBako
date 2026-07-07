@@ -52,22 +52,22 @@ pub(super) fn set_repository_action_enabled(
         return Err("unsupported repository actions cannot be enabled".to_string());
     }
     let now = now_rfc3339();
-    tx
-        .execute(
-            r#"
+    tx.execute(
+        r#"
             UPDATE repository_actions
             SET enabled = ?3, updated_at = ?4
             WHERE repo_id = ?1 AND action_id = ?2
             "#,
-            params![
-                request.repo_id,
-                request.action_id,
-                if request.enabled { 1 } else { 0 },
-                now
-            ],
-        )
-        .map_err(db_error)?;
-    let snapshot = load_source_repository_state_snapshot(&tx, &request.repo_id).map_err(db_error)?;
+        params![
+            request.repo_id,
+            request.action_id,
+            if request.enabled { 1 } else { 0 },
+            now
+        ],
+    )
+    .map_err(db_error)?;
+    let snapshot =
+        load_source_repository_state_snapshot(&tx, &request.repo_id).map_err(db_error)?;
     let _ = write_backend_repository_state(
         &state.root,
         &repo,

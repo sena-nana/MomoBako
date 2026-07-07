@@ -226,12 +226,17 @@ pub(super) fn paginate_file_browser_entries(
     let loaded_count = end;
     let has_more = loaded_count < total_entries;
     let next_offset = has_more.then_some(loaded_count);
-    (paged_entries, total_entries, loaded_count, next_offset, has_more)
+    (
+        paged_entries,
+        total_entries,
+        loaded_count,
+        next_offset,
+        has_more,
+    )
 }
 
 fn is_unsupported_filesystem_backend_method(error: &str) -> bool {
-    error.contains("unsupported method")
-        || error.contains("unsupported filesystem plugin method")
+    error.contains("unsupported method") || error.contains("unsupported filesystem plugin method")
 }
 
 pub(super) fn list_trash_directory_entries(
@@ -422,9 +427,11 @@ pub(super) fn write_backend_repository_state(
     repo_root: &Path,
     state: &SourceRepositoryStateSnapshot,
 ) -> Result<bool, String> {
-    match backend_adapter(service_root, repo)
-        .write_repository_state(repo_root, state, &repo.backend_record.config)
-    {
+    match backend_adapter(service_root, repo).write_repository_state(
+        repo_root,
+        state,
+        &repo.backend_record.config,
+    ) {
         Ok(()) => Ok(true),
         Err(error) if is_unsupported_filesystem_backend_method(&error) => Ok(false),
         Err(error) => Err(error),

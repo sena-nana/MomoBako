@@ -366,11 +366,20 @@ fn clear_source_shared_asset_relations(
     tx: &Transaction<'_>,
     repo_id: &str,
 ) -> Result<(), rusqlite::Error> {
-    tx.execute("DELETE FROM hardlink_candidates WHERE repo_id = ?1", [repo_id])?;
+    tx.execute(
+        "DELETE FROM hardlink_candidates WHERE repo_id = ?1",
+        [repo_id],
+    )?;
     tx.execute("DELETE FROM hardlink_members WHERE repo_id = ?1", [repo_id])?;
     tx.execute("DELETE FROM hardlink_groups WHERE repo_id = ?1", [repo_id])?;
-    tx.execute("DELETE FROM asset_alias_members WHERE repo_id = ?1", [repo_id])?;
-    tx.execute("DELETE FROM asset_alias_groups WHERE repo_id = ?1", [repo_id])?;
+    tx.execute(
+        "DELETE FROM asset_alias_members WHERE repo_id = ?1",
+        [repo_id],
+    )?;
+    tx.execute(
+        "DELETE FROM asset_alias_groups WHERE repo_id = ?1",
+        [repo_id],
+    )?;
     Ok(())
 }
 
@@ -430,12 +439,7 @@ fn rebuild_source_shared_asset_relations(
                     WHERE repo_id = ?1 AND asset_id = ?2
                     "#,
                     params![repo_id, asset_id],
-                    |row| {
-                        Ok((
-                            row.get::<_, Option<String>>(0)?,
-                            row.get::<_, i64>(1)?,
-                        ))
-                    },
+                    |row| Ok((row.get::<_, Option<String>>(0)?, row.get::<_, i64>(1)?)),
                 )
                 .optional()?;
             let Some((Some(content_hash), size_bytes)) = hash_and_size else {
@@ -473,10 +477,11 @@ pub(super) fn upsert_discovered_asset(
     let mut result = AssetSyncApplyResult::default();
     let status = file.status.as_deref().unwrap_or("synced");
     let source_payload = merged_discovered_source_payload(file, existing_record.as_ref());
-    let thumbnail_path = file
-        .thumbnail_local_absolute_path
-        .clone()
-        .or_else(|| existing_record.as_ref().and_then(|record| record.thumbnail_path.clone()));
+    let thumbnail_path = file.thumbnail_local_absolute_path.clone().or_else(|| {
+        existing_record
+            .as_ref()
+            .and_then(|record| record.thumbnail_path.clone())
+    });
     let source_manages_thumbnail =
         file.thumbnail_local_absolute_path.is_some() || file.shared_asset_id.is_some();
 
@@ -624,12 +629,7 @@ pub(super) fn upsert_discovered_asset(
         &palette,
         plugin_defaults,
     )?;
-    sync_mirrored_source_metadata(
-        tx,
-        &asset_id,
-        source_payload.as_ref(),
-        source_metadata_keys,
-    )?;
+    sync_mirrored_source_metadata(tx, &asset_id, source_payload.as_ref(), source_metadata_keys)?;
     replace_discovered_asset_tags(tx, &asset_id, file.tags.as_deref())?;
     sync_discovered_entry_thumbnail(
         tx,
