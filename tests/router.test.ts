@@ -613,7 +613,7 @@ describe("文件管理冒烟", () => {
     const delay = delayNextInvoke("list_repositories");
     await renderAppWithoutStartupPreload();
 
-    expect(screen.getByRole("heading", { name: "加载仓库列表" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "加载仓库列表" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "资源库" })).not.toBeInTheDocument();
 
     delay.resolve();
@@ -633,7 +633,9 @@ describe("文件管理冒烟", () => {
     const first = workspace.ensureRepositoryWorkspace();
     const second = workspace.ensureRepositoryWorkspace();
     expect(first).toBe(second);
-    expect(getInvokeCalls("list_repositories")).toHaveLength(1);
+    await waitFor(() => {
+      expect(getInvokeCalls("list_repositories")).toHaveLength(1);
+    });
 
     delay.resolve();
     await first;
@@ -1120,12 +1122,15 @@ describe("文件管理冒烟", () => {
     await fireEvent.click(await screen.findByRole("button", { name: "切换资源库 主资源库" }));
     await screen.findByText("资源库丢失");
     await fireEvent.click(screen.getByRole("button", { name: "删除资源库" }));
-    const dialog = await screen.findByRole("dialog", { name: "删除丢失资源库" });
-    await fireEvent.click(within(dialog).getByRole("button", { name: "删除" }));
+    const dialog = await screen.findByRole("dialog", { name: "删除资源库" });
+    await fireEvent.click(within(dialog).getByRole("button", { name: /^只删除记录/ }));
 
     await waitFor(() => {
       expect(getInvokeCalls("delete_repository").at(-1)?.args).toMatchObject({
-        repoId: "repo-main-001",
+        request: {
+          repoId: "repo-main-001",
+          mode: "recordOnly",
+        },
       });
     });
     expect((await screen.findAllByText("Reference")).length).toBeGreaterThan(0);
@@ -3123,13 +3128,17 @@ describe("文件管理冒烟", () => {
 
     await fireEvent.click(await screen.findByRole("button", { name: "资源库" }));
     await fireEvent.click(await screen.findByRole("button", { name: "删除当前资源库" }));
-    expect(screen.getByRole("button", { name: "确认删除当前资源库" })).toBeInTheDocument();
+    const dialog = screen.getByRole("dialog", { name: "删除资源库" });
+    expect(within(dialog).getByRole("button", { name: /^只删除记录/ })).toBeInTheDocument();
     expect(getInvokeCalls("delete_repository")).toHaveLength(0);
-    await fireEvent.click(screen.getByRole("button", { name: "确认删除当前资源库" }));
+    await fireEvent.click(within(dialog).getByRole("button", { name: /^只删除记录/ }));
 
     await waitFor(() => {
       expect(getInvokeCalls("delete_repository").at(-1)?.args).toMatchObject({
-        repoId: "repo-main-001",
+        request: {
+          repoId: "repo-main-001",
+          mode: "recordOnly",
+        },
       });
     });
   });

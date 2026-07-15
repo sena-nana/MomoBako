@@ -11,8 +11,12 @@ MomoBako 是一个基于 Tauri 2、Vue 3 与 TypeScript 的桌面资源库工作
 
 ## 本地开发
 
+项目使用 Node.js 26.5.0、Corepack 0.35.0 和 Yarn 4.17.1。首次准备 Node 26 环境时需显式安装 Corepack。
+
 ```bash
-yarn install
+npm install --global corepack@0.35.0
+corepack enable
+corepack yarn install --immutable
 yarn dev
 yarn tauri:dev
 yarn verify

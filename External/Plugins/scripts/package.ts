@@ -1,8 +1,13 @@
+// 校验插件 manifest 后，将构建目录打包为可安装的 .momoplug 归档。
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { join, relative, resolve } from "node:path";
-import { dirname } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import JSZip from "jszip";
+
+interface PluginManifest {
+  pluginId: string;
+  version: string;
+}
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const pluginsRoot = resolve(__dirname, "..");
@@ -10,7 +15,8 @@ const distRoot = join(pluginsRoot, ".dist");
 const packagesRoot = join(pluginsRoot, ".packages");
 const requestedPluginIds = new Set(process.argv.slice(2).filter(Boolean));
 
-function addDirectory(zip, sourceDir, baseDir) {
+/** 按相对路径递归写入插件目录，保留文件修改时间。 */
+function addDirectory(zip: JSZip, sourceDir: string, baseDir: string): void {
   for (const entry of readdirSync(sourceDir, { withFileTypes: true })) {
     const absolutePath = join(sourceDir, entry.name);
     const archivePath = relative(baseDir, absolutePath).replace(/\\/g, "/");
@@ -28,6 +34,25 @@ function addDirectory(zip, sourceDir, baseDir) {
   }
 }
 
+/** 读取并校验打包命名所需的 manifest 核心字段。 */
+function readManifest(path: string): PluginManifest {
+  const value: unknown = JSON.parse(readFileSync(path, "utf-8"));
+  if (
+    typeof value !== "object"
+    || value === null
+    || !("pluginId" in value)
+    || typeof value.pluginId !== "string"
+    || !("version" in value)
+    || typeof value.version !== "string"
+  ) {
+    throw new Error(`invalid plugin manifest: ${path}`);
+  }
+  return {
+    pluginId: value.pluginId,
+    version: value.version,
+  };
+}
+
 rmSync(packagesRoot, { recursive: true, force: true });
 mkdirSync(packagesRoot, { recursive: true });
 let packagedCount = 0;
@@ -38,7 +63,7 @@ for (const name of readdirSync(distRoot, { withFileTypes: true })) {
   const pluginDir = join(distRoot, name.name);
   const manifestPath = join(pluginDir, "manifest.json");
   if (!existsSync(manifestPath)) continue;
-  const manifest = JSON.parse(readFileSync(manifestPath, "utf-8"));
+  const manifest = readManifest(manifestPath);
   if (
     requestedPluginIds.size === 0
       ? ["example", "template"].includes(name.name)

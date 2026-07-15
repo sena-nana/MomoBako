@@ -558,7 +558,7 @@
         <mxCell id="p5-build" value="构建与脚本" style="swimlane;whiteSpace=wrap;html=1;rounded=1;startSize=32;fillColor=#f6f8fa;strokeColor=#8c959f;fontColor=#24292f;arcSize=8;fontStyle=1;" vertex="1" parent="1">
           <mxGeometry x="810" y="110" width="660" height="360" as="geometry"/>
         </mxCell>
-        <mxCell id="p5-b1" value="开发&#xa;yarn dev → Vite dev server:1420&#xa;yarn tauri:dev → scripts/tauri-dev.mjs&#xa;yarn tauri:dev:with-plugins → build/package/stage plugins" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff1e5;strokeColor=#fb8f44;fontColor=#9a3412;arcSize=8;" vertex="1" parent="p5-build">
+        <mxCell id="p5-b1" value="开发&#xa;yarn dev → Vite dev server:1420&#xa;yarn tauri:dev → scripts/tauri-dev.ts&#xa;yarn tauri:dev:with-plugins → build/package/stage plugins" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff1e5;strokeColor=#fb8f44;fontColor=#9a3412;arcSize=8;" vertex="1" parent="p5-build">
           <mxGeometry x="40" y="70" width="260" height="110" as="geometry"/>
         </mxCell>
         <mxCell id="p5-b2" value="前端构建&#xa;yarn build&#xa;vue-tsc --noEmit + vite build&#xa;manualChunks 拆出 three / vrm 预览依赖" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff1e5;strokeColor=#fb8f44;fontColor=#9a3412;arcSize=8;" vertex="1" parent="p5-build">

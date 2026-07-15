@@ -13,6 +13,14 @@
 
 ## 2. 目录规范
 
+插件工具链与主应用一致，固定使用 Node.js 26.5.0、Corepack 0.35.0 和 Yarn 4.17.1。首次在插件目录独立工作时执行：
+
+```bash
+npm install --global corepack@0.35.0
+corepack enable
+corepack yarn install --immutable
+```
+
 标准结构：
 
 ```text
@@ -21,7 +29,7 @@ External/Plugins/
   package.json
   scripts/
     build.mjs
-    package.mjs
+    package.ts
     stage-dev.mjs
   _sdk/
     backend-rust/
