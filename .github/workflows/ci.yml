@@ -26,10 +26,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: 22
+      - name: Set up Node.js and Yarn
+        uses: sena-nana/LiliaUI/.github/actions/setup-node-yarn@ae25c7b8ef6c6a9e38b6b64779d4ff085aa584bf
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
@@ -45,12 +43,6 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-
 
-      - name: Enable Corepack
-        run: corepack enable
-
-      - name: Install dependencies
-        run: corepack yarn install --immutable
-
       - name: Verify MomoBako
         run: corepack yarn verify
 
@@ -63,10 +55,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v6
+      - name: Set up Node.js and Yarn
+        uses: sena-nana/LiliaUI/.github/actions/setup-node-yarn@ae25c7b8ef6c6a9e38b6b64779d4ff085aa584bf
         with:
-          node-version: 22
+          working-directory: External/Plugins
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
@@ -82,16 +74,6 @@ jobs:
           key: ${{ runner.os }}-external-plugins-cargo-${{ hashFiles('src-tauri/Cargo.lock', 'External/Plugins/local-filesystem/Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-external-plugins-cargo-
-
-      - name: Enable Corepack
-        run: corepack enable
-
-      - name: Install host dependencies
-        run: corepack yarn install --immutable
-
-      - name: Install external plugin dependencies
-        working-directory: External/Plugins
-        run: corepack yarn install --immutable
 
       - name: Build external plugins
         working-directory: External/Plugins
@@ -110,16 +92,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: 22
-
-      - name: Enable Corepack
-        run: corepack enable
-
-      - name: Install dependencies
-        run: corepack yarn install --immutable
+      - name: Set up Node.js and Yarn
+        uses: sena-nana/LiliaUI/.github/actions/setup-node-yarn@ae25c7b8ef6c6a9e38b6b64779d4ff085aa584bf
 
       - name: Build docs
         run: corepack yarn docs:build

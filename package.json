@@ -12,18 +12,19 @@
     "docs:preview": "vitepress preview docs",
     "preview": "vite preview",
     "tauri": "tauri",
-    "tauri:dev": "node scripts/tauri-dev.mjs",
+    "tauri:dev": "node scripts/tauri-dev.ts",
     "plugins:build": "node scripts/build-external-plugins.mjs",
     "plugins:package": "node scripts/package-external-plugins.mjs",
     "plugins:stage:dev": "node scripts/stage-external-plugins.mjs",
-    "tauri:dev:with-plugins": "yarn plugins:build && yarn plugins:package && yarn plugins:stage:dev && node scripts/tauri-dev.mjs",
+    "tauri:dev:with-plugins": "yarn plugins:build && yarn plugins:package && yarn plugins:stage:dev && node scripts/tauri-dev.ts",
     "tauri:build": "tauri build",
     "icons:generate": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/generate-icon.ps1",
     "icons:tauri": "yarn tauri icon src-tauri/icons/icon-source.png",
-    "verify": "yarn test && yarn build && cargo check --manifest-path src-tauri/Cargo.toml"
+    "typecheck:node-scripts": "tsc --project tsconfig.node-scripts.json",
+    "verify": "yarn typecheck:node-scripts && yarn test && yarn build && cargo check --manifest-path src-tauri/Cargo.toml"
   },
   "dependencies": {
-    "@lilia/ui": "github:sena-nana/LiliaUI#workspace=@lilia/ui&commit=d8baeb0b97251ce973063c480f86b70f96b1ec07",
+    "@lilia/ui": "github:sena-nana/LiliaUI#workspace=@lilia/ui&commit=ae25c7b8ef6c6a9e38b6b64779d4ff085aa584bf",
     "@lucide/vue": "^1.17.0",
     "@pixiv/three-vrm": "^3.4.5",
     "@tauri-apps/api": "^2",
@@ -32,7 +33,7 @@
     "@tauri-apps/plugin-store": "^2",
     "pdfjs-dist": "^4.10.38",
     "three": "^0.184.0",
-    "vue": "^3.5.35",
+    "vue": "^3.5.39",
     "vue-demi": "^0.14.10",
     "vue-router": "^5.1.0"
   },
@@ -41,15 +42,19 @@
     "@testing-library/dom": "^10.4.1",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/vue": "^8.1.0",
+    "@types/node": "^26.1.1",
     "@types/three": "^0.184.1",
-    "@vitejs/plugin-vue": "^6.0.7",
-    "@vue/compiler-sfc": "^3.5.35",
+    "@vitejs/plugin-vue": "^6.0.8",
+    "@vue/compiler-sfc": "^3.5.39",
     "jsdom": "^29.1.1",
     "typescript": "~6.0.3",
-    "vite": "^8.0.16",
+    "vite": "^8.1.4",
     "vitepress": "^1.6.4",
-    "vitest": "^4.1.8",
-    "vue-tsc": "^3.3.4"
+    "vitest": "^4.1.10",
+    "vue-tsc": "^3.3.7"
   },
-  "packageManager": "yarn@4.14.1"
+  "packageManager": "yarn@4.17.1+sha512.ccbfabf7d7b6b32075088be9386fb9a2e00bb6887ef07fa56effabc890a56d53da1ccc4128d62db245fcbd3961b236d75335bdf7d5320ed6eafb7588b7ad4697",
+  "engines": {
+    "node": ">=26.0.0 <27"
+  }
 }

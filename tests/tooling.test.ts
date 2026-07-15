@@ -2,6 +2,8 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
+import { resolveYarnCommand } from "../scripts/yarn-command.ts";
+
 function read(path: string) {
   return readFileSync(resolve(path), "utf-8");
 }
@@ -16,7 +18,7 @@ describe("MomoBako 工具链", () => {
     const pkg = JSON.parse(read("package.json"));
     const deps = { ...pkg.dependencies, ...pkg.devDependencies };
 
-    expect(pkg.packageManager).toBe("yarn@4.14.1");
+    expect(pkg.packageManager).toMatch(/^yarn@4\.17\.1\+sha512\./);
     expect(pkg.scripts).toMatchObject({
       "docs:dev": "vitepress dev docs",
       "docs:build": "vitepress build docs",
@@ -24,15 +26,15 @@ describe("MomoBako 工具链", () => {
       "plugins:build": "node scripts/build-external-plugins.mjs",
       "plugins:package": "node scripts/package-external-plugins.mjs",
       "plugins:stage:dev": "node scripts/stage-external-plugins.mjs",
-      "tauri:dev:with-plugins": "yarn plugins:build && yarn plugins:package && yarn plugins:stage:dev && node scripts/tauri-dev.mjs",
-      verify: "yarn test && yarn build && cargo check --manifest-path src-tauri/Cargo.toml",
+      "tauri:dev:with-plugins": "yarn plugins:build && yarn plugins:package && yarn plugins:stage:dev && node scripts/tauri-dev.ts",
+      verify: "yarn typecheck:node-scripts && yarn test && yarn build && cargo check --manifest-path src-tauri/Cargo.toml",
     });
     expect(deps.vitepress).toBeDefined();
     expect(deps.jszip).toBeUndefined();
     expect(pkg.dependencies.three).toBeDefined();
     expect(pkg.dependencies["@pixiv/three-vrm"]).toBeDefined();
     expect(pkg.dependencies["@lilia/ui"]).toBe(
-      "github:sena-nana/LiliaUI#workspace=@lilia/ui&commit=d8baeb0b97251ce973063c480f86b70f96b1ec07",
+      "github:sena-nana/LiliaUI#workspace=@lilia/ui&commit=ae25c7b8ef6c6a9e38b6b64779d4ff085aa584bf",
     );
     expect(pkg.dependencies["@lucide/vue"]).toBeDefined();
     expect(pkg.dependencies["lucide-vue-next"]).toBeUndefined();
@@ -56,16 +58,41 @@ describe("MomoBako 工具链", () => {
     expect(devGuide).toContain("momobako_plugin_call");
     expect(pluginsPkg.scripts).toMatchObject({
       build: "node scripts/build.mjs",
-      package: "node scripts/package.mjs",
+      package: "yarn typecheck:node-scripts && node scripts/package.ts",
       "stage:dev": "node scripts/stage-dev.mjs",
     });
-    expect(read("External/Plugins/scripts/package.mjs")).toContain("no plugin build outputs found to package");
     expect(templateManifest).toContain("\"pluginId\"");
     expect(templateProject).toContain("\"build\"");
     expect(exampleManifest).toContain("\"pluginId\"");
     expect(exampleProject).toContain("\"build\"");
     expect(tsconfig).not.toContain("plugins/**/*.ts");
     expect(tsconfig).not.toContain("plugins/**/*.json");
+  });
+
+  it("Yarn 启动器优先复用当前项目入口并在独立执行时回退 Corepack", () => {
+    expect(resolveYarnCommand({
+      npmExecPath: "/tooling/yarn",
+      platform: "linux",
+    })).toEqual({
+      command: "/tooling/yarn",
+      args: [],
+    });
+    expect(resolveYarnCommand({
+      comSpec: "C:\\Windows\\System32\\cmd.exe",
+      npmExecPath: "C:\\tooling\\yarn.cmd",
+      platform: "win32",
+    })).toEqual({
+      command: "C:\\Windows\\System32\\cmd.exe",
+      args: ["/d", "/s", "/c", "C:\\tooling\\yarn.cmd"],
+    });
+    expect(resolveYarnCommand({
+      comSpec: "C:\\Windows\\System32\\cmd.exe",
+      npmExecPath: "",
+      platform: "win32",
+    })).toEqual({
+      command: "C:\\Windows\\System32\\cmd.exe",
+      args: ["/d", "/s", "/c", "corepack.cmd", "yarn"],
+    });
   });
 
   it("GitHub CI 使用 MomoBako 验证和文档构建配置", () => {
