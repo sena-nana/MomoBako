@@ -6,7 +6,7 @@ import {
   CORNER_RADIUS_MAX,
   CORNER_RADIUS_MIN,
   useCornerStyle as useLiliaCornerStyle,
-} from "@lilia/ui";
+} from "@lilia/ui/composables/useCornerStyle";
 import { configureMomoBakoUiCore } from "./configure";
 
 const RADIUS_STORAGE_KEY = "momobako.cornerRadius";
@@ -22,7 +22,7 @@ function hasStoredRadiusPreference() {
   }
 }
 
-export type { CornerStyle } from "@lilia/ui";
+export type { CornerStyle } from "@lilia/ui/composables/useCornerStyle";
 export { CORNER_RADIUS_MAX, CORNER_RADIUS_MIN };
 
 export function useCornerStyle() {
