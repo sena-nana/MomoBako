@@ -12,7 +12,7 @@ import {
   RotateCcw,
   Trash2,
 } from "@lucide/vue";
-import type { ContextMenuItem } from "../../ui/core";
+import type { ContextMenuItem } from "../../ui";
 import type { FileBrowserEntry, RepositorySummary } from "../../types/repository";
 import type { EntryActionDialogRequest, EntryActionDialogResultMap } from "../../plugins/sdk";
 import { getPluginEntryActions, getPreviewPluginFileActions } from "../../plugins/previewPlugins";

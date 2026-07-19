@@ -1,9 +1,16 @@
 <script setup lang="ts">
+import type { Component } from "vue";
 import { RouterView } from "vue-router";
-import { ContextMenuHost } from "./ui/core";
+import { ContextMenuHost, useTheme } from "./ui";
+import { appUIPreset } from "./ui/preset";
+
+const AppUIProvider = appUIPreset.provider as Component;
+const { theme } = useTheme();
 </script>
 
 <template>
-  <RouterView />
-  <ContextMenuHost />
+  <component :is="AppUIProvider" :theme="theme" agent-id="momobako-ui">
+    <RouterView />
+    <ContextMenuHost />
+  </component>
 </template>

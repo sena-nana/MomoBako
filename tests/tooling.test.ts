@@ -36,6 +36,13 @@ describe("MomoBako 工具链", () => {
     expect(pkg.dependencies["@lilia/ui"]).toMatch(
       /^github:sena-nana\/LiliaUI#workspace=@lilia\/ui&commit=[0-9a-f]{40}$/,
     );
+    const liliaCommit = pkg.dependencies["@lilia/ui"].match(/commit=([0-9a-f]{40})$/)?.[1];
+    expect(pkg.dependencies["@lilia/ui-contract"]).toBe(
+      `github:sena-nana/LiliaUI#workspace=@lilia/ui-contract&commit=${liliaCommit}`,
+    );
+    expect(pkg.dependencies["@lilia/ui-foundation"]).toBe(
+      `github:sena-nana/LiliaUI#workspace=@lilia/ui-foundation&commit=${liliaCommit}`,
+    );
     expect(pkg.dependencies["@lucide/vue"]).toBeDefined();
     expect(pkg.dependencies["lucide-vue-next"]).toBeUndefined();
     expect(pkg.devDependencies["@types/three"]).toBeDefined();
@@ -147,13 +154,16 @@ describe("MomoBako 工具链", () => {
   it("全局滚动条使用隐藏原生条和 overlay 显隐样式", () => {
     const styles = read("src/styles/index.css").replace(/\r\n/g, "\n");
     const main = read("src/main.ts");
+    const facade = read("src/ui/index.ts");
     const scrollbars = read("src/ui/core/index.ts");
 
-    expect(styles).toContain('@import "@lilia/ui/styles.css";');
+    expect(styles).toContain('@import "../ui/styles.css";');
+    expect(facade).toContain('export * from "@lilia/ui/layouts";');
+    expect(facade).toContain('export * from "./core";');
     expect(main).toContain(
       'installGlobalScrollbarVisibility',
     );
-    expect(main).toContain('from "./ui/core"');
+    expect(main).toContain('from "./ui"');
     expect(scrollbars).toContain("installGlobalScrollbarVisibility");
     expect(scrollbars).toContain("uninstallGlobalScrollbarVisibility");
   });

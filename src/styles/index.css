@@ -1,4 +1,4 @@
-@import "@lilia/ui/styles.css";
+@import "../ui/styles.css";
 @import "./components.css";
 @import "./shell.css";
 @import "./pages/workspace.css";

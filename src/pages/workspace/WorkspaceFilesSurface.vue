@@ -4,7 +4,7 @@ import type { Component } from "vue";
 import WorkspacePlayerBar from "../../components/WorkspacePlayerBar.vue";
 import type { WorkspacePlayerBarHandlers, WorkspacePlayerBarProps } from "../../components/workspacePlayerBar.contract";
 import { FileBrowserPanel, FilePreviewPane } from "./lazyComponents";
-import type { ContextMenuItem } from "../../ui/core";
+import type { ContextMenuItem } from "../../ui";
 import type { RegisteredLibraryExtension } from "../../plugins/sdk";
 import type { FileBrowserEntry, RepositoryTagGroup } from "../../types/repository";
 import type { FileDisplayMode } from "./useWorkspaceViewState";

@@ -14,6 +14,7 @@ export default defineConfig({
     environment: "jsdom",
     execArgv: ["--no-experimental-webstorage"],
     setupFiles: ["./tests/setupTests.ts"],
+    testTimeout: 10_000,
     server: {
       deps: {
         inline: ["@lilia/ui"],

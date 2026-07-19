@@ -10,7 +10,7 @@ import {
   openContextMenuAt,
   type ContextMenuItem,
   vContextMenu,
-} from "../src/ui/core";
+} from "../src/ui";
 import { SB_MENU_POP_TRANSITION_MS } from "../src/composables/menuMotion";
 
 function renderWithTemplate(template: string, setup: () => Record<string, unknown>) {

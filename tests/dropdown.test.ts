@@ -2,7 +2,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/vue";
 import { defineComponent, ref } from "vue";
 import { describe, expect, it } from "vitest";
-import { Dropdown } from "../src/ui/core";
+import { Dropdown } from "../src/ui";
 import { SB_MENU_POP_TRANSITION_MS } from "../src/composables/menuMotion";
 
 const options = [
