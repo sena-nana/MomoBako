@@ -19,23 +19,25 @@ const {
 } = useWorkspaceSearch();
 const { setActivePanel } = useWorkspaceNavigation();
 
-/** 将标题栏输入同步到工作区搜索面板。 */
-function onSearchInput(event: Event) {
-  const query = event.target instanceof HTMLInputElement ? event.target.value : "";
+/** 打开工作区搜索面板。 */
+function showSearchWorkspace() {
   setActivePanel("search");
   if (route.path !== "/") {
     void router.push("/");
   }
+}
+
+/** 将标题栏输入同步到工作区搜索面板。 */
+function onSearchInput(event: Event) {
+  const query = event.target instanceof HTMLInputElement ? event.target.value : "";
+  showSearchWorkspace();
   void runSearch({ query });
 }
 
 /** 切换筛选栏并确保用户回到工作区。 */
 function onToggleFilterBar() {
   toggleFilterBar();
-  setActivePanel("search");
-  if (route.path !== "/") {
-    void router.push("/");
-  }
+  showSearchWorkspace();
 }
 </script>
 

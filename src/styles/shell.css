@@ -1,5 +1,4 @@
 ﻿.shell {
-  --sidebar-easing: cubic-bezier(0.4, 0, 0.2, 1);
   --lilia-primary-inset: var(--shell-main-padding-y) var(--shell-main-padding-x);
   --shell-main-padding-x: 24px;
   --shell-main-padding-y: 20px;

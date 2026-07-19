@@ -3096,18 +3096,15 @@ describe("文件管理冒烟", () => {
     expect(shell).toHaveAttribute("data-agent-id", "workspace");
     expect(resourceRegion).toHaveAttribute("data-region-role", "resources");
     expect(primaryRegion).toHaveAttribute("data-region-role", "primary");
-    expect(shell).not.toHaveClass("is-sidebar-collapsed");
     expect(resizer).toHaveAttribute("aria-valuenow", "276");
 
     await fireEvent.click(toggleButton);
-    expect(shell).toHaveClass("is-sidebar-collapsed");
     expect(resourceRegion).toHaveAttribute("hidden");
     expect(resourceRegion).toHaveAttribute("data-region-visible", "false");
     expect(localStorage.getItem("momobako.sidebarCollapsed")).toBe("1");
     expect(screen.getByRole("button", { name: "展开侧边栏" })).toBeInTheDocument();
 
     await fireEvent.click(screen.getByRole("button", { name: "展开侧边栏" }));
-    expect(shell).not.toHaveClass("is-sidebar-collapsed");
     expect(localStorage.getItem("momobako.sidebarCollapsed")).toBe("0");
     resizer = screen.getByRole("separator", { name: "拖动调整侧边栏宽度（双击恢复默认）" });
 

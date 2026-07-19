@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch, type Component } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { RouterView } from "vue-router";
 import { PanelLeftClose, PanelLeftOpen, RefreshCw } from "@lucide/vue";
 import WorkspaceTitleBarSearch from "../components/WorkspaceTitleBarSearch.vue";
@@ -25,7 +25,6 @@ const MAX_WIDTH = 480;
 const DEFAULT_WIDTH = 276;
 const WIDTH_STORAGE_KEY = "momobako.sidebarWidth";
 const COLLAPSED_STORAGE_KEY = "momobako.sidebarCollapsed";
-const AppFrame = appUIPreset.shell as Component;
 
 function readStorage(key: string): string | null {
   try {
@@ -52,16 +51,8 @@ function readSidebarWidth() {
   return Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, stored));
 }
 
-function readPlaybackSession(repoId: string) {
-  try {
-    return localStorage.getItem(`momobako.playbackSession:${repoId}`);
-  } catch {
-    return null;
-  }
-}
-
 function readPlaybackPlaylistId(repoId: string) {
-  const raw = readPlaybackSession(repoId);
+  const raw = readStorage(`momobako.playbackSession:${repoId}`);
   if (!raw) return null;
   try {
     const session = JSON.parse(raw) as { playlistId?: unknown };
@@ -120,18 +111,13 @@ const startupStepItems = computed(() => startupStepHints.map((step, index) => {
   };
 }));
 
-function toggleSidebarCollapsed() {
-  sidebarCollapsed.value = !sidebarCollapsed.value;
-}
-
 watch(sidebarCollapsed, (value) => {
   writeStorage(COLLAPSED_STORAGE_KEY, value ? "1" : "0");
 });
 
-/** 保存 Workspace Region 完成调整后的受约束宽度。 */
+/** 保存 Workspace Region 完成调整后的宽度。 */
 function persistSidebarWidth(value: number) {
-  sidebarWidth.value = Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, value));
-  writeStorage(WIDTH_STORAGE_KEY, String(sidebarWidth.value));
+  writeStorage(WIDTH_STORAGE_KEY, String(value));
 }
 
 function retryWorkspaceStartup() {
@@ -182,7 +168,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <component :is="AppFrame" title="MomoBako">
+  <component :is="appUIPreset.shell" title="MomoBako">
     <template #header-leading>
       <button
         type="button"
@@ -190,7 +176,7 @@ onBeforeUnmount(() => {
         :aria-label="sidebarCollapsed ? '展开侧边栏' : '折叠侧边栏'"
         :title="sidebarCollapsed ? '展开侧边栏' : '折叠侧边栏'"
         :aria-pressed="sidebarCollapsed"
-        @click="toggleSidebarCollapsed"
+        @click="sidebarCollapsed = !sidebarCollapsed"
       >
         <PanelLeftOpen v-if="sidebarCollapsed" :size="15" aria-hidden="true" />
         <PanelLeftClose v-else :size="15" aria-hidden="true" />
@@ -203,10 +189,6 @@ onBeforeUnmount(() => {
     <LiliaWorkspace
       class="shell"
       aria-label="MomoBako 工作区"
-      :class="{
-        'is-sidebar-collapsed': sidebarCollapsed,
-        'is-starting-workspace': !isWorkspaceReady,
-      }"
     >
       <LiliaResourcePanel
         v-if="hasRenderedWorkspace"
