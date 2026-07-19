@@ -1,0 +1,11 @@
+{
+  "name": "momobako",
+  "productName": "MomoBako",
+  "version": "0.1.0",
+  "identifier": "com.momobako.desktop",
+  "storageKeyPrefix": "momobako",
+  "ui": {
+    "preset": "lilia",
+    "density": "compact"
+  }
+}

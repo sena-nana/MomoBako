@@ -8,7 +8,7 @@ import {
   useCornerStyle,
   useTheme,
   vContextMenu,
-} from "./ui/core";
+} from "./ui";
 import "./styles/index.css";
 
 configureMomoBakoUiCore();

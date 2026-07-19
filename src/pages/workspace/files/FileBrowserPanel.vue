@@ -14,8 +14,8 @@ import {
 } from "@lucide/vue";
 import FileMetadataEditor from "./FileMetadataEditor.vue";
 import ThumbnailPalette from "../../../components/ThumbnailPalette.vue";
-import type { ContextMenuItem } from "../../../ui/core";
-import { vContextMenu } from "../../../ui/core";
+import type { ContextMenuItem } from "../../../ui";
+import { vContextMenu } from "../../../ui";
 import type { RegisteredLibraryExtension } from "../../../plugins/sdk";
 import type { FileBrowserEntry, RepositoryTagGroup } from "../../../types/repository";
 import { metadataComment, metadataString } from "../../../utils/fileMetadata";

@@ -8,8 +8,8 @@ import {
   Trash2,
 } from "@lucide/vue";
 import type { FileTreeNode } from "../types/repository";
-import type { ContextMenuItem } from "../ui/core";
-import { vContextMenu } from "../ui/core";
+import type { ContextMenuItem } from "../ui";
+import { vContextMenu } from "../ui";
 
 defineOptions({
   name: "FolderTreeNode",

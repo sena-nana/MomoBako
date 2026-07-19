@@ -7,7 +7,7 @@ import { usePlaylistPlayer } from "../src/composables/usePlaylistPlayer";
 import { waitForFileBrowserDerivedState } from "../src/composables/workspace/files";
 import { syncRegisteredFrontendPluginManifests } from "../src/plugins/sdk";
 import { createMomoBakoRouter } from "../src/router";
-import { installContextMenu, vContextMenu } from "../src/ui/core";
+import { installContextMenu, vContextMenu } from "../src/ui";
 import {
   createDirectoryOnNextSync,
   delayNextInvoke,
@@ -3087,38 +3087,52 @@ describe("文件管理冒烟", () => {
 
     const shell = shellElement();
     const toggleButton = screen.getByRole("button", { name: "折叠侧边栏" });
-    const resizer = screen.getByRole("separator", { name: "拖动调整侧边栏宽度（双击恢复默认）" });
+    const resourceRegion = document.querySelector('[data-region-id="repository-sidebar"]');
+    const primaryRegion = document.querySelector('[data-region-id="workspace-primary"]');
+    let resizer = screen.getByRole("separator", { name: "拖动调整侧边栏宽度（双击恢复默认）" });
 
+    expect(document.querySelector('[data-agent-id="momobako-ui"]')).toHaveClass("lilia-ui");
+    expect(document.querySelector('[data-agent-id="app-shell"]')).toHaveClass("lilia-app-shell");
+    expect(shell).toHaveAttribute("data-agent-id", "workspace");
+    expect(resourceRegion).toHaveAttribute("data-region-role", "resources");
+    expect(primaryRegion).toHaveAttribute("data-region-role", "primary");
     expect(shell).not.toHaveClass("is-sidebar-collapsed");
-    expect(shell.style.getPropertyValue("--sidebar-width")).toBe("276px");
+    expect(resizer).toHaveAttribute("aria-valuenow", "276");
 
     await fireEvent.click(toggleButton);
     expect(shell).toHaveClass("is-sidebar-collapsed");
+    expect(resourceRegion).toHaveAttribute("hidden");
+    expect(resourceRegion).toHaveAttribute("data-region-visible", "false");
     expect(localStorage.getItem("momobako.sidebarCollapsed")).toBe("1");
     expect(screen.getByRole("button", { name: "展开侧边栏" })).toBeInTheDocument();
 
     await fireEvent.click(screen.getByRole("button", { name: "展开侧边栏" }));
     expect(shell).not.toHaveClass("is-sidebar-collapsed");
     expect(localStorage.getItem("momobako.sidebarCollapsed")).toBe("0");
+    resizer = screen.getByRole("separator", { name: "拖动调整侧边栏宽度（双击恢复默认）" });
 
     resizer.dispatchEvent(pointerEvent("pointerdown", 276));
     window.dispatchEvent(pointerEvent("pointermove", 420));
     window.dispatchEvent(pointerEvent("pointerup", 420));
     await waitFor(() => {
-      expect(shell.style.getPropertyValue("--sidebar-width")).toBe("420px");
+      expect(resizer).toHaveAttribute("aria-valuenow", "420");
     });
     expect(localStorage.getItem("momobako.sidebarWidth")).toBe("420");
 
-    resizer.dispatchEvent(pointerEvent("pointerdown", 420));
+    await fireEvent.keyDown(resizer, { key: "ArrowRight" });
+    expect(resizer).toHaveAttribute("aria-valuenow", "428");
+    expect(localStorage.getItem("momobako.sidebarWidth")).toBe("428");
+
+    resizer.dispatchEvent(pointerEvent("pointerdown", 428));
     window.dispatchEvent(pointerEvent("pointermove", 1000));
     window.dispatchEvent(pointerEvent("pointerup", 1000));
     await waitFor(() => {
-      expect(shell.style.getPropertyValue("--sidebar-width")).toBe("480px");
+      expect(resizer).toHaveAttribute("aria-valuenow", "480");
     });
     expect(localStorage.getItem("momobako.sidebarWidth")).toBe("480");
 
     await fireEvent.dblClick(resizer);
-    expect(shell.style.getPropertyValue("--sidebar-width")).toBe("276px");
+    expect(resizer).toHaveAttribute("aria-valuenow", "276");
     expect(localStorage.getItem("momobako.sidebarWidth")).toBe("276");
   });
 

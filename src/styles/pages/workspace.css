@@ -4751,27 +4751,6 @@
   .shell {
     --shell-main-padding-x: 16px;
     --shell-main-padding-y: 16px;
-    grid-template-columns: 1fr;
-    grid-template-areas:
-      "titlebar"
-      "secondary"
-      "main";
-    grid-template-rows: 36px auto 1fr;
-  }
-
-  .shell__resizer {
-    display: none;
-  }
-
-  .shell.is-sidebar-collapsed .secondary-panel {
-    opacity: 1;
-    visibility: visible;
-    transform: none;
-    pointer-events: auto;
-  }
-
-  .shell__main {
-    border-top-left-radius: 0;
   }
 
   .secondary-panel--workspace {

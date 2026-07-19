@@ -3,7 +3,7 @@ import { computed, inject, ref, watch } from "vue";
 import { open } from "@tauri-apps/plugin-dialog";
 import { FolderOpen, Power, RefreshCw, Settings, Trash2, Upload } from "@lucide/vue";
 import { routeLocationKey, type RouteLocationNormalizedLoaded } from "vue-router";
-import { ConfirmDialog } from "../ui/core";
+import { ConfirmDialog } from "../ui";
 import {
   useWorkspaceProgress,
   useWorkspaceSettings,

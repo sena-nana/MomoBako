@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch, type Component } from "vue";
 import { RouterView } from "vue-router";
-import { RefreshCw } from "@lucide/vue";
-import TitleBar from "../components/TitleBar.vue";
+import { PanelLeftClose, PanelLeftOpen, RefreshCw } from "@lucide/vue";
+import WorkspaceTitleBarSearch from "../components/WorkspaceTitleBarSearch.vue";
 import SecondaryPanel from "./SecondaryPanel.vue";
 import {
   useWorkspacePlaylists,
@@ -12,7 +12,12 @@ import {
 import { usePlaylistPlayer } from "../composables/usePlaylistPlayer";
 import { useSystemMediaSession } from "../composables/useSystemMediaSession";
 import { getCachedPlaylistDetail } from "../composables/workspace/playlists";
-import { useResizablePane } from "../ui/core";
+import {
+  LiliaPrimaryContent,
+  LiliaResourcePanel,
+  LiliaWorkspace,
+} from "../ui";
+import { appUIPreset } from "../ui/preset";
 import { getPlaylistDetail } from "../services/repositoryApi";
 
 const MIN_WIDTH = 220;
@@ -20,6 +25,7 @@ const MAX_WIDTH = 480;
 const DEFAULT_WIDTH = 276;
 const WIDTH_STORAGE_KEY = "momobako.sidebarWidth";
 const COLLAPSED_STORAGE_KEY = "momobako.sidebarCollapsed";
+const AppFrame = appUIPreset.shell as Component;
 
 function readStorage(key: string): string | null {
   try {
@@ -35,6 +41,15 @@ function writeStorage(key: string, value: string) {
   } catch {
     /* ignore */
   }
+}
+
+/** 读取并约束持久化的侧栏宽度。 */
+function readSidebarWidth() {
+  const raw = readStorage(WIDTH_STORAGE_KEY);
+  if (raw === null) return DEFAULT_WIDTH;
+  const stored = Number(raw);
+  if (!Number.isFinite(stored)) return DEFAULT_WIDTH;
+  return Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, stored));
 }
 
 function readPlaybackSession(repoId: string) {
@@ -59,6 +74,7 @@ function readPlaybackPlaylistId(repoId: string) {
 }
 
 const sidebarCollapsed = ref(readStorage(COLLAPSED_STORAGE_KEY) === "1");
+const sidebarWidth = ref(readSidebarWidth());
 const playerMountRef = ref<HTMLElement | null>(null);
 
 const {
@@ -104,18 +120,18 @@ const startupStepItems = computed(() => startupStepHints.map((step, index) => {
   };
 }));
 
-const sidebarWidth = useResizablePane({
-  storageKey: WIDTH_STORAGE_KEY,
-  minWidth: MIN_WIDTH,
-  maxWidth: MAX_WIDTH,
-  defaultWidth: DEFAULT_WIDTH,
-  edge: "right",
-  disabled: sidebarCollapsed,
-});
-
 function toggleSidebarCollapsed() {
   sidebarCollapsed.value = !sidebarCollapsed.value;
-  writeStorage(COLLAPSED_STORAGE_KEY, sidebarCollapsed.value ? "1" : "0");
+}
+
+watch(sidebarCollapsed, (value) => {
+  writeStorage(COLLAPSED_STORAGE_KEY, value ? "1" : "0");
+});
+
+/** 保存 Workspace Region 完成调整后的受约束宽度。 */
+function persistSidebarWidth(value: number) {
+  sidebarWidth.value = Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, value));
+  writeStorage(WIDTH_STORAGE_KEY, String(sidebarWidth.value));
 }
 
 function retryWorkspaceStartup() {
@@ -166,125 +182,145 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div
-    class="shell"
-    :class="{
-      'is-resizing': sidebarWidth.isResizing.value,
-      'is-sidebar-collapsed': sidebarCollapsed,
-      'is-starting-workspace': !isWorkspaceReady,
-    }"
-    :style="{ '--sidebar-width': sidebarCollapsed ? '0px' : `${sidebarWidth.width.value}px` }"
-  >
-    <TitleBar
-      :left-sidebar-collapsed="sidebarCollapsed"
-      @toggle-left-sidebar="toggleSidebarCollapsed"
-    />
-    <div
-      v-if="hasRenderedWorkspace"
-      class="shell__workspace-layer"
-      :style="{ display: isWorkspaceReady ? 'contents' : 'none' }"
+  <component :is="AppFrame" title="MomoBako">
+    <template #header-leading>
+      <button
+        type="button"
+        class="titlebar__btn titlebar__left-sidebar-btn"
+        :aria-label="sidebarCollapsed ? '展开侧边栏' : '折叠侧边栏'"
+        :title="sidebarCollapsed ? '展开侧边栏' : '折叠侧边栏'"
+        :aria-pressed="sidebarCollapsed"
+        @click="toggleSidebarCollapsed"
+      >
+        <PanelLeftOpen v-if="sidebarCollapsed" :size="15" aria-hidden="true" />
+        <PanelLeftClose v-else :size="15" aria-hidden="true" />
+      </button>
+    </template>
+    <template #header-center>
+      <WorkspaceTitleBarSearch />
+    </template>
+
+    <LiliaWorkspace
+      class="shell"
+      aria-label="MomoBako 工作区"
+      :class="{
+        'is-sidebar-collapsed': sidebarCollapsed,
+        'is-starting-workspace': !isWorkspaceReady,
+      }"
     >
-      <SecondaryPanel />
-    </div>
-    <div
-      v-if="hasRenderedWorkspace"
-      :style="{ display: isWorkspaceReady ? '' : 'none' }"
-      class="shell__resizer"
-      role="separator"
-      aria-orientation="vertical"
-      :aria-disabled="sidebarCollapsed ? 'true' : undefined"
-      :aria-valuenow="sidebarWidth.width.value"
-      :aria-valuemin="MIN_WIDTH"
-      :aria-valuemax="MAX_WIDTH"
-      title="拖动调整侧边栏宽度（双击恢复默认）"
-      @pointerdown="sidebarWidth.startResize"
-      @dblclick="sidebarWidth.resetWidth"
-    />
-    <main class="shell__main">
-      <section v-if="!isWorkspaceReady" class="workspace-startup" aria-live="polite">
-        <div class="workspace-startup__panel">
-          <p class="asset-browser__eyebrow">MomoBako</p>
-          <h1>{{ workspaceStartup.stepLabel }}</h1>
-          <p class="workspace-startup__meta">
-            第 {{ workspaceStartup.currentStep }} / {{ workspaceStartup.totalSteps }} 步
-          </p>
-          <div
-            class="workspace-startup__progress"
-            role="progressbar"
-            :aria-valuenow="workspaceStartup.percent"
-            aria-valuemin="0"
-            aria-valuemax="100"
-            :aria-label="workspaceStartup.stepLabel"
-          >
-            <span :style="{ width: `${workspaceStartup.percent}%` }"></span>
-          </div>
-          <p
-            v-if="workspaceStartup.stepDetail"
-            id="workspace-startup-detail"
-            class="workspace-startup__detail"
-          >
-            {{ workspaceStartup.stepDetail }}
-          </p>
-          <ol class="workspace-startup__steps" aria-label="加载步骤">
-            <li
-              v-for="item in startupStepItems"
-              :key="item.stepNumber"
-              class="workspace-startup__step"
-              :class="`is-${item.state}`"
+      <LiliaResourcePanel
+        v-if="hasRenderedWorkspace"
+        id="repository-sidebar"
+        role="resources"
+        class="shell__sidebar-region"
+        v-model:size="sidebarWidth"
+        :default-size="DEFAULT_WIDTH"
+        :min-size="MIN_WIDTH"
+        :max-size="MAX_WIDTH"
+        v-model:collapsed="sidebarCollapsed"
+        :hidden="!isWorkspaceReady"
+        collapsible
+        resizable
+        overflow="hidden"
+        narrow-behavior="overlay"
+        :collapse-below="720"
+        resize-label="拖动调整侧边栏宽度（双击恢复默认）"
+        @resize-end="persistSidebarWidth"
+      >
+        <SecondaryPanel />
+      </LiliaResourcePanel>
+
+      <LiliaPrimaryContent
+        id="workspace-primary"
+        role="primary"
+        class="shell__main"
+        overflow="auto"
+      >
+        <section v-if="!isWorkspaceReady" class="workspace-startup" aria-live="polite">
+          <div class="workspace-startup__panel">
+            <p class="asset-browser__eyebrow">MomoBako</p>
+            <h1>{{ workspaceStartup.stepLabel }}</h1>
+            <p class="workspace-startup__meta">
+              第 {{ workspaceStartup.currentStep }} / {{ workspaceStartup.totalSteps }} 步
+            </p>
+            <div
+              class="workspace-startup__progress"
+              role="progressbar"
+              :aria-valuenow="workspaceStartup.percent"
+              aria-valuemin="0"
+              aria-valuemax="100"
+              :aria-label="workspaceStartup.stepLabel"
             >
-              <span class="workspace-startup__step-index">{{ item.stepNumber }}</span>
-              <span class="workspace-startup__step-copy">
-                <strong>{{ item.label }}</strong>
-                <small>{{ item.detail }}</small>
-              </span>
-            </li>
-          </ol>
-          <p v-if="workspaceStartup.error" class="workspace-startup__error">
-            {{ workspaceStartup.error }}
-          </p>
-          <section
-            v-if="startupVisibleLogs.length"
-            class="workspace-startup__logs"
-            aria-label="首屏加载日志"
-          >
-            <header class="workspace-startup__logs-head">
-              <strong>加载日志</strong>
-              <span>{{ startupVisibleLogs.length }} 条最近记录</span>
-            </header>
-            <ol>
+              <span :style="{ width: `${workspaceStartup.percent}%` }"></span>
+            </div>
+            <p
+              v-if="workspaceStartup.stepDetail"
+              id="workspace-startup-detail"
+              class="workspace-startup__detail"
+            >
+              {{ workspaceStartup.stepDetail }}
+            </p>
+            <ol class="workspace-startup__steps" aria-label="加载步骤">
               <li
-                v-for="record in startupVisibleLogs"
-                :key="record.id"
-                :class="`is-${record.level}`"
+                v-for="item in startupStepItems"
+                :key="item.stepNumber"
+                class="workspace-startup__step"
+                :class="`is-${item.state}`"
               >
-                <time>{{ new Date(record.timestamp).toLocaleTimeString("zh-CN", { hour12: false }) }}</time>
-                <span>
-                  <strong>{{ record.message }}</strong>
-                  <small v-if="record.detail">{{ record.detail }}</small>
+                <span class="workspace-startup__step-index">{{ item.stepNumber }}</span>
+                <span class="workspace-startup__step-copy">
+                  <strong>{{ item.label }}</strong>
+                  <small>{{ item.detail }}</small>
                 </span>
               </li>
             </ol>
-          </section>
-          <button
-            v-if="isWorkspaceStartupError"
-            type="button"
-            class="ghost workspace-startup__retry"
-            @click="retryWorkspaceStartup"
-          >
-            <RefreshCw :size="14" aria-hidden="true" />
-            重试
-          </button>
+            <p v-if="workspaceStartup.error" class="workspace-startup__error">
+              {{ workspaceStartup.error }}
+            </p>
+            <section
+              v-if="startupVisibleLogs.length"
+              class="workspace-startup__logs"
+              aria-label="首屏加载日志"
+            >
+              <header class="workspace-startup__logs-head">
+                <strong>加载日志</strong>
+                <span>{{ startupVisibleLogs.length }} 条最近记录</span>
+              </header>
+              <ol>
+                <li
+                  v-for="record in startupVisibleLogs"
+                  :key="record.id"
+                  :class="`is-${record.level}`"
+                >
+                  <time>{{ new Date(record.timestamp).toLocaleTimeString("zh-CN", { hour12: false }) }}</time>
+                  <span>
+                    <strong>{{ record.message }}</strong>
+                    <small v-if="record.detail">{{ record.detail }}</small>
+                  </span>
+                </li>
+              </ol>
+            </section>
+            <button
+              v-if="isWorkspaceStartupError"
+              type="button"
+              class="ghost workspace-startup__retry"
+              @click="retryWorkspaceStartup"
+            >
+              <RefreshCw :size="14" aria-hidden="true" />
+              重试
+            </button>
+          </div>
+        </section>
+        <div
+          v-if="hasRenderedWorkspace"
+          class="shell__workspace-layer"
+          :style="{ display: isWorkspaceReady ? 'contents' : 'none' }"
+        >
+          <RouterView />
         </div>
-      </section>
-      <div
-        v-if="hasRenderedWorkspace"
-        class="shell__workspace-layer"
-        :style="{ display: isWorkspaceReady ? 'contents' : 'none' }"
-      >
-        <RouterView />
-      </div>
-    </main>
+      </LiliaPrimaryContent>
+    </LiliaWorkspace>
 
     <div ref="playerMountRef" class="workspace-player-host" aria-hidden="true"></div>
-  </div>
+  </component>
 </template>

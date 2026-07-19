@@ -19,8 +19,8 @@ import {
   CORNER_RADIUS_MAX,
   CORNER_RADIUS_MIN,
   useCornerStyle,
-} from "../ui/core";
-import { useTheme } from "../ui/core";
+} from "../ui";
+import { useTheme } from "../ui";
 import {
   useWorkspaceRepository,
   useWorkspaceSettings,
