@@ -18,7 +18,6 @@ import {
 import { vContextMenu } from "../../directives/contextMenu";
 import { installContextMenu } from "../../composables/useContextMenu";
 import type { ContextMenuItem, ContextMenuProvider } from "../../composables/useContextMenu";
-import { configureMomoBakoUiCore } from "./configure";
 import {
   CORNER_RADIUS_MAX,
   CORNER_RADIUS_MIN,
@@ -28,7 +27,6 @@ import { useTheme } from "./useTheme";
 
 export {
   closeContextMenu,
-  configureMomoBakoUiCore,
   CORNER_RADIUS_MAX,
   CORNER_RADIUS_MIN,
   ContextMenuHost,

@@ -3,7 +3,7 @@ import { nextTick } from "vue";
 
 async function loadCornerStyle() {
   vi.resetModules();
-  return import("../src/ui");
+  return import("../src/ui/core");
 }
 
 afterEach(() => {

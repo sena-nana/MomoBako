@@ -2,7 +2,6 @@ import { createApp } from "vue";
 import App from "./App.vue";
 import { router } from "./router";
 import {
-  configureMomoBakoUiCore,
   installContextMenu,
   installGlobalScrollbarVisibility,
   useCornerStyle,
@@ -11,7 +10,6 @@ import {
 } from "./ui";
 import "./styles/index.css";
 
-configureMomoBakoUiCore();
 useTheme();
 useCornerStyle();
 installContextMenu();
