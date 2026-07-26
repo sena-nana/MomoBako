@@ -1,0 +1,109 @@
+# Mutsuki ABI v2 执行清单；构建阶段会刷新 artifact 哈希。
+[manifest]
+plugin_id = "momobako.local-filesystem"
+version = "1.0.0"
+api_version = "mutsuki-plugin-v1"
+requires = []
+
+[manifest.artifact]
+artifact_type = "abi"
+path = "momobako_builtin_local_filesystem.dll"
+sha256 = "sha256:build"
+
+[manifest.provides]
+protocols = [
+  { protocol_id = "momobako.filesystem.ensureAttachable", version = "1.0.0", input_schema = {}, output_schema = {}, error_schema = {}, codec = "json", compatibility = "compatible" },
+  { protocol_id = "momobako.filesystem.prepareRepositoryRoot", version = "1.0.0", input_schema = {}, output_schema = {}, error_schema = {}, codec = "json", compatibility = "compatible" },
+  { protocol_id = "momobako.filesystem.listFiles", version = "1.0.0", input_schema = {}, output_schema = {}, error_schema = {}, codec = "json", compatibility = "compatible" },
+  { protocol_id = "momobako.filesystem.listTree", version = "1.0.0", input_schema = {}, output_schema = {}, error_schema = {}, codec = "json", compatibility = "compatible" },
+  { protocol_id = "momobako.filesystem.listDirectory", version = "1.0.0", input_schema = {}, output_schema = {}, error_schema = {}, codec = "json", compatibility = "compatible" },
+  { protocol_id = "momobako.filesystem.listDirectoryPage", version = "1.0.0", input_schema = {}, output_schema = {}, error_schema = {}, codec = "json", compatibility = "compatible" },
+  { protocol_id = "momobako.filesystem.createDirectory", version = "1.0.0", input_schema = {}, output_schema = {}, error_schema = {}, codec = "json", compatibility = "compatible" },
+  { protocol_id = "momobako.filesystem.createFile", version = "1.0.0", input_schema = {}, output_schema = {}, error_schema = {}, codec = "json", compatibility = "compatible" },
+  { protocol_id = "momobako.filesystem.statEntry", version = "1.0.0", input_schema = {}, output_schema = {}, error_schema = {}, codec = "json", compatibility = "compatible" },
+  { protocol_id = "momobako.filesystem.renameEntry", version = "1.0.0", input_schema = {}, output_schema = {}, error_schema = {}, codec = "json", compatibility = "compatible" },
+  { protocol_id = "momobako.filesystem.moveEntry", version = "1.0.0", input_schema = {}, output_schema = {}, error_schema = {}, codec = "json", compatibility = "compatible" },
+  { protocol_id = "momobako.filesystem.deleteEntry", version = "1.0.0", input_schema = {}, output_schema = {}, error_schema = {}, codec = "json", compatibility = "compatible" },
+]
+protocol_classes = {}
+handler_bindings = [
+  { binding_id = "binding:momobako.filesystem.ensureAttachable", plugin_id = "momobako.local-filesystem", protocol_id = "momobako.filesystem.ensureAttachable", target_protocol_id = "momobako.filesystem.ensureAttachable", target_runner_hint = "momobako.local-filesystem.runner", pool_id = "default", priority = 0, policy = "single", metadata = {} },
+  { binding_id = "binding:momobako.filesystem.prepareRepositoryRoot", plugin_id = "momobako.local-filesystem", protocol_id = "momobako.filesystem.prepareRepositoryRoot", target_protocol_id = "momobako.filesystem.prepareRepositoryRoot", target_runner_hint = "momobako.local-filesystem.runner", pool_id = "default", priority = 0, policy = "single", metadata = {} },
+  { binding_id = "binding:momobako.filesystem.listFiles", plugin_id = "momobako.local-filesystem", protocol_id = "momobako.filesystem.listFiles", target_protocol_id = "momobako.filesystem.listFiles", target_runner_hint = "momobako.local-filesystem.runner", pool_id = "default", priority = 0, policy = "single", metadata = {} },
+  { binding_id = "binding:momobako.filesystem.listTree", plugin_id = "momobako.local-filesystem", protocol_id = "momobako.filesystem.listTree", target_protocol_id = "momobako.filesystem.listTree", target_runner_hint = "momobako.local-filesystem.runner", pool_id = "default", priority = 0, policy = "single", metadata = {} },
+  { binding_id = "binding:momobako.filesystem.listDirectory", plugin_id = "momobako.local-filesystem", protocol_id = "momobako.filesystem.listDirectory", target_protocol_id = "momobako.filesystem.listDirectory", target_runner_hint = "momobako.local-filesystem.runner", pool_id = "default", priority = 0, policy = "single", metadata = {} },
+  { binding_id = "binding:momobako.filesystem.listDirectoryPage", plugin_id = "momobako.local-filesystem", protocol_id = "momobako.filesystem.listDirectoryPage", target_protocol_id = "momobako.filesystem.listDirectoryPage", target_runner_hint = "momobako.local-filesystem.runner", pool_id = "default", priority = 0, policy = "single", metadata = {} },
+  { binding_id = "binding:momobako.filesystem.createDirectory", plugin_id = "momobako.local-filesystem", protocol_id = "momobako.filesystem.createDirectory", target_protocol_id = "momobako.filesystem.createDirectory", target_runner_hint = "momobako.local-filesystem.runner", pool_id = "default", priority = 0, policy = "single", metadata = {} },
+  { binding_id = "binding:momobako.filesystem.createFile", plugin_id = "momobako.local-filesystem", protocol_id = "momobako.filesystem.createFile", target_protocol_id = "momobako.filesystem.createFile", target_runner_hint = "momobako.local-filesystem.runner", pool_id = "default", priority = 0, policy = "single", metadata = {} },
+  { binding_id = "binding:momobako.filesystem.statEntry", plugin_id = "momobako.local-filesystem", protocol_id = "momobako.filesystem.statEntry", target_protocol_id = "momobako.filesystem.statEntry", target_runner_hint = "momobako.local-filesystem.runner", pool_id = "default", priority = 0, policy = "single", metadata = {} },
+  { binding_id = "binding:momobako.filesystem.renameEntry", plugin_id = "momobako.local-filesystem", protocol_id = "momobako.filesystem.renameEntry", target_protocol_id = "momobako.filesystem.renameEntry", target_runner_hint = "momobako.local-filesystem.runner", pool_id = "default", priority = 0, policy = "single", metadata = {} },
+  { binding_id = "binding:momobako.filesystem.moveEntry", plugin_id = "momobako.local-filesystem", protocol_id = "momobako.filesystem.moveEntry", target_protocol_id = "momobako.filesystem.moveEntry", target_runner_hint = "momobako.local-filesystem.runner", pool_id = "default", priority = 0, policy = "single", metadata = {} },
+  { binding_id = "binding:momobako.filesystem.deleteEntry", plugin_id = "momobako.local-filesystem", protocol_id = "momobako.filesystem.deleteEntry", target_protocol_id = "momobako.filesystem.deleteEntry", target_runner_hint = "momobako.local-filesystem.runner", pool_id = "default", priority = 0, policy = "single", metadata = {} },
+]
+resource_schemas = []
+resource_providers = []
+resource_types = []
+effects = []
+streams = []
+subscriptions = []
+timers = []
+state_schemas = []
+host_extensions = [
+  { extension_id = "host.extension.momobako.local-filesystem.abi", kind = "plugin_backend", supported_deployments = ["abi"], reload_policy = "static", drain_required = false },
+]
+plugin_backends = [
+  { backend_id = "plugin.backend.momobako.local-filesystem.abi", deployment_kind = "abi", task_client_protocol = "mutsuki.task.v1", resource_client_protocol = "mutsuki.resource-plan.v1", codec_id = "mutsuki.codec.typed-msgpack.v1", bridge_id = "mutsuki.bridge.abi.binary.v2" },
+]
+codecs = [
+  { codec_id = "mutsuki.codec.typed-msgpack.v1", media_type = "application/msgpack", version = "2", connection_scoped = true },
+]
+bridges = [
+  { bridge_id = "mutsuki.bridge.abi.binary.v2", deployment_kind = "abi", codec_ids = ["mutsuki.codec.typed-msgpack.v1"], drain_policy = "drain_and_swap" },
+]
+scheduler_policies = []
+workflows = []
+
+[[manifest.provides.runners]]
+runner_id = "momobako.local-filesystem.runner"
+plugin_id = "momobako.local-filesystem"
+plugin_generation = 1
+accepted_protocol_ids = [
+  "momobako.filesystem.ensureAttachable",
+  "momobako.filesystem.prepareRepositoryRoot",
+  "momobako.filesystem.listFiles",
+  "momobako.filesystem.listTree",
+  "momobako.filesystem.listDirectory",
+  "momobako.filesystem.listDirectoryPage",
+  "momobako.filesystem.createDirectory",
+  "momobako.filesystem.createFile",
+  "momobako.filesystem.statEntry",
+  "momobako.filesystem.renameEntry",
+  "momobako.filesystem.moveEntry",
+  "momobako.filesystem.deleteEntry",
+]
+purity = "effectful"
+execution_class = "io"
+invocation_mode = "sync_exclusive"
+concurrency = { mode = "exclusive" }
+input_schema = {}
+output_schema = {}
+batch = { mode = "scalar_adapter", preferred_batch_size = 1, max_batch_entries = 1, max_entry_concurrency = 1, max_inflight_batches = 1, scalar_thread_safe = false, scalar_reentrant = false, partial_failure = true, preserve_order = true, side_effect = "unknown" }
+payload = { layouts = ["row"], preferred_layout = "row", zero_copy = false }
+resources = { batch_read = false, batch_write = false, requires_resource_plan = true, supports_shared_memory = false }
+ordering = { default = { type = "none" }, supports_sequence = true, supports_same_resource_order = true }
+control = { entry_cancel = false, batch_cancel = true, timeout_granularity = "batch" }
+metadata = {}
+contract_surfaces = ["runner:momobako.local-filesystem.runner"]
+
+[manifest.permissions]
+effects = ["filesystem:read", "filesystem:write"]
+resources = []
+
+[manifest.lifecycle]
+reload_policy = "drain_and_swap"
+unload_timeout_ms = 5000
+supports_cancel = true
+supports_dispose = true
+supports_snapshot = false
+
+[manifest.metadata]
