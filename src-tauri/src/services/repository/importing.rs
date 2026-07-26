@@ -69,7 +69,7 @@ pub(super) fn import_eagle_library(
         return Err(format!("directory not found: {parent_path}"));
     }
 
-    let response_value = backend_plugin_registry(&state.root).call(
+    let response_value = plugin_catalog(&state.root).call(
         "momobako.service.eagle-importer",
         "eagleImporter.importLibrary",
         serde_json::to_value(&request).map_err(json_error)?,

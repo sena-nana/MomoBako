@@ -860,7 +860,7 @@ pub(super) fn core_tauri_api_definitions() -> Vec<ApiDefinition> {
 }
 
 pub(super) fn plugin_api_definitions(service_root: &Path) -> Vec<ApiDefinition> {
-    let registry = backend_plugin_registry(service_root);
+    let registry = plugin_catalog(service_root);
     let mut definitions = Vec::new();
     let mut seen = HashSet::<(String, String)>::new();
 

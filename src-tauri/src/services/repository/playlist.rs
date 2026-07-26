@@ -43,7 +43,7 @@ pub(super) fn create_playlist(
         &repo.summary.path,
         &repo.backend_record,
     )?;
-    let registry = backend_plugin_registry(&state.root);
+    let registry = plugin_catalog(&state.root);
     let player = registry
         .playlist_player(&request.player_type_id)
         .ok_or_else(|| format!("playlist player not found: {}", request.player_type_id))?;
@@ -103,7 +103,7 @@ pub(super) fn update_playlist(
     let existing = load_playlist_summary(&connection, &request.repo_id, &request.playlist_id)
         .map_err(db_error)?
         .ok_or_else(|| format!("playlist not found: {}", request.playlist_id))?;
-    let registry = backend_plugin_registry(&state.root);
+    let registry = plugin_catalog(&state.root);
     let player = if let Some(player_type_id) = request.player_type_id.as_deref() {
         registry
             .playlist_player(player_type_id)
@@ -206,7 +206,7 @@ pub(super) fn get_playlist_detail(
     load_playlist_detail(
         &connection,
         &repo,
-        &backend_plugin_registry(&state.root),
+        &plugin_catalog(&state.root),
         repo_id,
         playlist_id,
     )
@@ -227,7 +227,7 @@ pub(super) fn add_playlist_items(
     let playlist = load_playlist_summary(&connection, &request.repo_id, &request.playlist_id)
         .map_err(db_error)?
         .ok_or_else(|| format!("playlist not found: {}", request.playlist_id))?;
-    let registry = backend_plugin_registry(&state.root);
+    let registry = plugin_catalog(&state.root);
     let player = registry.playlist_player(&playlist.player_type_id);
     let mut sort_order =
         next_playlist_item_sort_order(&connection, &request.repo_id, &request.playlist_id)
@@ -369,7 +369,7 @@ pub(super) fn reorder_playlist_items(
     load_playlist_detail(
         &connection,
         &repo,
-        &backend_plugin_registry(&state.root),
+        &plugin_catalog(&state.root),
         &request.repo_id,
         &request.playlist_id,
     )
@@ -394,7 +394,7 @@ pub(super) fn remove_playlist_item(
     load_playlist_detail(
         &connection,
         &repo,
-        &backend_plugin_registry(&state.root),
+        &plugin_catalog(&state.root),
         &request.repo_id,
         &request.playlist_id,
     )
@@ -416,7 +416,7 @@ pub(super) fn set_playlist_membership(
         .map_err(db_error)?
         .ok_or_else(|| format!("asset not found: {}", request.asset_id))?;
     let playlists = load_playlists(&connection, &request.repo_id).map_err(db_error)?;
-    let registry = backend_plugin_registry(&state.root);
+    let registry = plugin_catalog(&state.root);
     let valid_target_ids = normalize_id_list(&request.playlist_ids);
     let tx = connection.transaction().map_err(db_error)?;
     let mut kept = Vec::new();

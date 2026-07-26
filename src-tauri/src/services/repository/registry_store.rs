@@ -3,7 +3,7 @@
 use super::*;
 
 pub(super) fn backend_summary_from_registry(
-    registry: &BackendPluginRegistry,
+    registry: &PluginCatalog,
     plugin_id: &str,
 ) -> RepositoryBackendSummary {
     let normalized_plugin_id = registry.normalize_plugin_id(plugin_id);
@@ -49,7 +49,7 @@ pub(super) fn backend_uses_repository_root_metadata(
     repo_root: &Path,
     backend_plugin_id: &str,
 ) -> bool {
-    let plugin_registry = backend_plugin_registry(service_root);
+    let plugin_registry = plugin_catalog(service_root);
     let backend = backend_summary_from_registry(&plugin_registry, backend_plugin_id);
     backend_summary_supports_local_root_access(&backend)
         || netease_cache_root_path(&repo_root.to_string_lossy(), backend_plugin_id).is_some()
@@ -110,7 +110,7 @@ pub(super) fn parse_backend_request(
         .map(|value| value.to_string())
         .map(Ok)
         .unwrap_or_else(|| infer_backend_plugin_id_for_path(service_root, &request.path))?;
-    let registry = backend_plugin_registry(service_root);
+    let registry = plugin_catalog(service_root);
     let normalized_plugin_id = registry.normalize_plugin_id(&plugin_id);
     let registration = registry
         .registration(&normalized_plugin_id)
@@ -160,7 +160,7 @@ pub(super) fn import_backend_record(
             )
             .ok()
         })?;
-    let registry = backend_plugin_registry(service_root);
+    let registry = plugin_catalog(service_root);
     let normalized_plugin_id = registry.normalize_plugin_id(&plugin_id);
     registry
         .manifest(&normalized_plugin_id)
@@ -189,7 +189,7 @@ pub(super) fn rewrite_repository_metadata_if_needed(
         .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty())
-        .map(|plugin_id| backend_plugin_registry(service_root).normalize_plugin_id(plugin_id))
+        .map(|plugin_id| plugin_catalog(service_root).normalize_plugin_id(plugin_id))
         .map(Ok)
         .unwrap_or_else(|| infer_backend_plugin_id_for_path(service_root, &root_path))?;
 
@@ -288,7 +288,7 @@ pub(super) fn migrate_registry_schema(registry: &Connection) -> Result<(), rusql
 fn infer_backend_plugin_id_for_path(service_root: &Path, path: &str) -> Result<String, String> {
     let trimmed = path.trim();
     let requires_local_root = !trimmed.contains("://");
-    let registry = backend_plugin_registry(service_root);
+    let registry = plugin_catalog(service_root);
     let mut candidates = registry
         .list_manifests()
         .into_iter()

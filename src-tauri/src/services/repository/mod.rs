@@ -6,11 +6,10 @@ use sha1::{Digest as Sha1Digest, Sha1};
 use sha2::{Digest, Sha256};
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
-    ffi::{CStr, CString, OsString},
+    ffi::OsString,
     fs::{self, File, OpenOptions},
     hash::{Hash, Hasher},
     io::{Read, Write},
-    os::raw::c_char,
     path::{Component, Path, PathBuf},
     process::Command,
     sync::{Arc, Mutex, OnceLock},
@@ -74,10 +73,10 @@ use self::pathing::*;
 pub(crate) use self::playback::download_playlist_with_progress;
 use self::plugin::{
     apply_plugin_settings, broken_plugin_manifest, ensure_plugin_data_dir,
-    ensure_repository_backend_runtime_available, is_source_plugin, load_native_plugin,
-    load_plugin_config_values, load_plugin_settings, parse_plugin_manifest_with_source,
-    plugin_data_dir, plugin_legacy_ids, read_plugin_manifest_from_archive,
-    resolve_plugin_manifest_dependencies, runtime_plugins_dir, shutdown_helper_state_dir,
+    ensure_repository_backend_runtime_available, is_source_plugin, load_plugin_config_values,
+    load_plugin_settings, parse_plugin_manifest_with_source, plugin_data_dir, plugin_legacy_ids,
+    read_plugin_manifest_from_archive, resolve_plugin_manifest_dependencies, runtime_plugins_dir,
+    shutdown_helper_state_dir,
 };
 #[cfg(test)]
 use self::plugin::{is_repository_backend_plugin, parse_plugin_manifest};

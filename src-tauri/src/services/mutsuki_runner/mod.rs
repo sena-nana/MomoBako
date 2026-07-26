@@ -11,4 +11,4 @@ pub use protocols::{
     PROTOCOL_REPOSITORY_CREATE, PROTOCOL_REPOSITORY_EXPORT, PROTOCOL_REPOSITORY_IMPORT,
     PROTOCOL_REPOSITORY_RELOCATE, PROTOCOL_REPOSITORY_SYNC, PROTOCOL_THUMBNAIL_REQUEST,
 };
-pub use runner::{build_momo_long_task_runner, MomoLongTaskRunner};
+pub use runner::build_momo_long_task_runner;

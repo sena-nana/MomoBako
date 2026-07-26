@@ -1,23 +1,9 @@
-//! Backend plugin registry, native runtime bridge, and plugin discovery.
+//! Momo 插件目录、依赖状态与 Mutsuki 执行路由。
 
 use super::*;
 
 use crate::services::logging::write_log;
-
-pub(super) type PluginManifestFn = unsafe extern "C" fn() -> *mut c_char;
-pub(super) type PluginCallFn = unsafe extern "C" fn(*const c_char) -> *mut c_char;
-pub(super) type PluginFreeFn = unsafe extern "C" fn(*mut c_char);
-pub(super) type PluginRegisterHostApiFn =
-    unsafe extern "C" fn(Option<HostPluginCallFn>, Option<HostPluginFreeFn>);
-pub(super) type HostPluginCallFn = unsafe extern "C" fn(*const c_char) -> *mut c_char;
-pub(super) type HostPluginFreeFn = unsafe extern "C" fn(*mut c_char);
-
-pub(super) struct NativePlugin {
-    pub(super) _library: libloading::Library,
-    pub(super) runtime_dir: PathBuf,
-    pub(super) call: PluginCallFn,
-    pub(super) free: PluginFreeFn,
-}
+use crate::services::mutsuki_host;
 
 #[derive(Debug)]
 pub(super) struct DiscoveredPluginManifest {
@@ -26,17 +12,14 @@ pub(super) struct DiscoveredPluginManifest {
     pub(super) manifest_prefix: String,
 }
 
-pub(super) struct BackendPluginRegistration {
+pub(super) struct PluginCatalogEntry {
     pub(super) manifest: PluginManifest,
     pub(super) archive_path: PathBuf,
     pub(super) manifest_prefix: String,
-    pub(super) native: Option<NativePlugin>,
-    pub(super) load_error: Option<String>,
 }
 
-pub(super) struct BackendPluginRegistry {
-    pub(super) service_root: PathBuf,
-    pub(super) registrations: BTreeMap<String, BackendPluginRegistration>,
+pub(super) struct PluginCatalog {
+    pub(super) registrations: BTreeMap<String, PluginCatalogEntry>,
     pub(super) legacy_ids: BTreeMap<String, String>,
 }
 
@@ -52,16 +35,12 @@ pub(super) struct PluginSettingsEntry {
     pub(super) enabled: Option<bool>,
 }
 
-impl BackendPluginRegistry {
+impl PluginCatalog {
     pub(super) fn load(service_root: &Path) -> Self {
-        Self::load_with_options(service_root, true)
+        Self::load_catalog(service_root)
     }
 
-    pub(super) fn load_for_management(service_root: &Path) -> Self {
-        Self::load_with_options(service_root, false)
-    }
-
-    pub(super) fn load_with_options(service_root: &Path, load_native: bool) -> Self {
+    fn load_catalog(service_root: &Path) -> Self {
         let settings = load_plugin_settings(service_root).unwrap_or_default();
         let manifests = load_runtime_plugin_manifests(service_root);
         let mut registrations = BTreeMap::new();
@@ -72,34 +51,17 @@ impl BackendPluginRegistry {
             for legacy_id in plugin_legacy_ids(&manifest) {
                 legacy_ids.insert(legacy_id, manifest.plugin_id.clone());
             }
-            let (native, load_error) =
-                if load_native && manifest.enabled && manifest.runtime == "native-dylib" {
-                    match load_native_plugin(
-                        &manifest,
-                        &discovered.archive_path,
-                        &discovered.manifest_prefix,
-                        service_root,
-                    ) {
-                        Ok(native) => (Some(native), None),
-                        Err(error) => (None, Some(error)),
-                    }
-                } else {
-                    (None, None)
-                };
             registrations.insert(
                 manifest.plugin_id.clone(),
-                BackendPluginRegistration {
+                PluginCatalogEntry {
                     manifest,
                     archive_path: discovered.archive_path,
                     manifest_prefix: discovered.manifest_prefix,
-                    native,
-                    load_error,
                 },
             );
         }
 
         Self {
-            service_root: service_root.to_path_buf(),
             registrations,
             legacy_ids,
         }
@@ -111,12 +73,13 @@ impl BackendPluginRegistry {
             .values()
             .map(|registration| {
                 let mut manifest = registration.manifest.clone();
-                if manifest.runtime == "native-dylib"
-                    && manifest.enabled
-                    && registration.native.is_none()
-                {
-                    manifest.status = "unavailable".to_string();
-                    manifest.disable_reason = Some("原生运行时不可用。".to_string());
+                if manifest.runtime == "native-dylib" && manifest.enabled {
+                    if let Some(error) =
+                        mutsuki_host::plugin_unavailable_reason(&manifest.plugin_id)
+                    {
+                        manifest.status = "unavailable".to_string();
+                        manifest.disable_reason = Some(error);
+                    }
                 }
                 manifest
             })
@@ -144,7 +107,7 @@ impl BackendPluginRegistry {
             .map(|registration| &registration.manifest)
     }
 
-    pub(super) fn registration(&self, plugin_id: &str) -> Option<&BackendPluginRegistration> {
+    pub(super) fn registration(&self, plugin_id: &str) -> Option<&PluginCatalogEntry> {
         let normalized = self.normalize_plugin_id(plugin_id);
         self.registrations.get(normalized.as_str())
     }
@@ -197,34 +160,11 @@ impl BackendPluginRegistry {
             ));
         }
         let runtime = plugin_call_runtime(&resolved_manifest);
-        let plugin_data_dir =
-            ensure_plugin_data_dir(&self.service_root, &resolved_manifest.plugin_id)?;
-        let plugin_config = load_plugin_config_values(&plugin_data_dir)?;
-        let plugin_runtime_dir = registration
-            .native
-            .as_ref()
-            .map(|native| native.runtime_dir.to_string_lossy().to_string())
-            .unwrap_or_default();
-        let runtime_context = PluginCallHostRuntime {
-            plugin_id: resolved_manifest.plugin_id.clone(),
-            plugin_data_dir: plugin_data_dir.to_string_lossy().to_string(),
-            service_root_dir: self.service_root.to_string_lossy().to_string(),
-            plugin_runtime_dir,
-            plugin_config,
-        };
-        let response = if let Some(native) = &registration.native {
-            native.call(method, payload, runtime_context)?
-        } else if let Some(error) = &registration.load_error {
-            return Err(format!(
-                "plugin runtime is not available: {} ({error})",
-                registration.manifest.plugin_id
-            ));
-        } else {
-            return Err(format!(
-                "plugin runtime is not available: {}",
-                registration.manifest.plugin_id
-            ));
-        };
+        let response = mutsuki_host::call_plugin(&resolved_manifest.plugin_id, method, payload)
+            .map_err(|error| {
+                log_backend_plugin_call_failure(&resolved_manifest.plugin_id, method, &error);
+                error
+            })?;
         Ok(PluginRuntimeCallResult {
             plugin_id: resolved_manifest.plugin_id,
             payload: response,
@@ -326,52 +266,6 @@ impl BackendPluginRegistry {
     }
 }
 
-impl NativePlugin {
-    pub(super) fn call(
-        &self,
-        method: &str,
-        payload: serde_json::Value,
-        runtime: PluginCallHostRuntime,
-    ) -> Result<serde_json::Value, String> {
-        let plugin_id = runtime.plugin_id.clone();
-        let request = PluginCallEnvelope {
-            method: method.to_string(),
-            payload,
-            runtime,
-        };
-        let request_json = serde_json::to_string(&request).map_err(json_error)?;
-        let request_cstring = CString::new(request_json)
-            .map_err(|_| "plugin request contains an invalid null byte".to_string())?;
-        let response_ptr = unsafe { (self.call)(request_cstring.as_ptr()) };
-        if response_ptr.is_null() {
-            let error = "plugin returned a null response".to_string();
-            log_backend_plugin_call_failure(&plugin_id, method, &error);
-            return Err(error);
-        }
-        let response_json = unsafe { CStr::from_ptr(response_ptr) }
-            .to_string_lossy()
-            .to_string();
-        unsafe { (self.free)(response_ptr) };
-        let response: PluginCallResponse = match serde_json::from_str(&response_json) {
-            Ok(response) => response,
-            Err(error) => {
-                let error = json_error(error);
-                log_backend_plugin_call_failure(&plugin_id, method, &error);
-                return Err(error);
-            }
-        };
-        if response.ok {
-            Ok(response.payload.unwrap_or_else(|| serde_json::json!({})))
-        } else {
-            let error = response
-                .error
-                .unwrap_or_else(|| "plugin call failed without an error message".to_string());
-            log_backend_plugin_call_failure(&plugin_id, method, &error);
-            Err(error)
-        }
-    }
-}
-
 fn log_backend_plugin_call_failure(plugin_id: &str, method: &str, error: &str) {
     let _ = write_log(SystemLogWriteRequest {
         level: "error".to_string(),
@@ -395,77 +289,6 @@ fn log_backend_plugin_call_failure(plugin_id: &str, method: &str, error: &str) {
     });
 }
 
-pub(super) unsafe extern "C" fn host_plugin_call_bridge(input: *const c_char) -> *mut c_char {
-    let response = match read_host_plugin_call(input).and_then(dispatch_host_plugin_call) {
-        Ok(payload) => PluginCallResponse {
-            ok: true,
-            payload: Some(payload),
-            error: None,
-        },
-        Err(error) => PluginCallResponse {
-            ok: false,
-            payload: None,
-            error: Some(error),
-        },
-    };
-    let json = serde_json::to_string(&response).unwrap_or_else(|error| {
-        format!(
-            "{{\"ok\":false,\"payload\":null,\"error\":\"failed to encode host plugin response: {error}\"}}"
-        )
-    });
-    CString::new(json)
-        .unwrap_or_else(|_| {
-            CString::new(
-                "{\"ok\":false,\"payload\":null,\"error\":\"host plugin response contained a null byte\"}",
-            )
-            .expect("static CString should be valid")
-        })
-        .into_raw()
-}
-
-pub(super) unsafe extern "C" fn host_plugin_free_bridge(value: *mut c_char) {
-    if value.is_null() {
-        return;
-    }
-    let _ = CString::from_raw(value);
-}
-
-fn read_host_plugin_call(input: *const c_char) -> Result<HostPluginCallEnvelope, String> {
-    if input.is_null() {
-        return Err("host plugin request pointer is null".to_string());
-    }
-    let raw = unsafe { CStr::from_ptr(input) }
-        .to_str()
-        .map_err(|error| error.to_string())?;
-    serde_json::from_str(raw).map_err(json_error)
-}
-
-fn dispatch_host_plugin_call(request: HostPluginCallEnvelope) -> Result<serde_json::Value, String> {
-    if request.plugin_id.trim() == "momobako.system" {
-        return dispatch_internal_host_system_call(&request.method, request.payload);
-    }
-    backend_plugin_registry(Path::new(request.service_root_dir.trim())).call(
-        &request.plugin_id,
-        &request.method,
-        request.payload,
-    )
-}
-
-fn dispatch_internal_host_system_call(
-    method: &str,
-    payload: serde_json::Value,
-) -> Result<serde_json::Value, String> {
-    match method.trim() {
-        "system.log.write" => {
-            let request =
-                serde_json::from_value::<SystemLogWriteRequest>(payload).map_err(json_error)?;
-            let record = write_log(request)?;
-            serde_json::to_value(record).map_err(json_error)
-        }
-        _ => Err(format!("unsupported internal host method: {method}")),
-    }
-}
-
 pub(super) fn plugin_call_runtime(manifest: &PluginManifest) -> Option<PluginCallRuntime> {
     if !manifest.degraded {
         return None;
@@ -477,12 +300,12 @@ pub(super) fn plugin_call_runtime(manifest: &PluginManifest) -> Option<PluginCal
     })
 }
 
-pub(super) fn backend_plugin_registry(service_root: &Path) -> BackendPluginRegistry {
-    BackendPluginRegistry::load(service_root)
+pub(super) fn plugin_catalog(service_root: &Path) -> PluginCatalog {
+    PluginCatalog::load(service_root)
 }
 
-pub(super) fn plugin_management_registry(service_root: &Path) -> BackendPluginRegistry {
-    BackendPluginRegistry::load_for_management(service_root)
+pub(super) fn plugin_management_catalog(service_root: &Path) -> PluginCatalog {
+    PluginCatalog::load(service_root)
 }
 
 pub(super) fn call_downloader_prepare_track_playback(
@@ -494,7 +317,7 @@ pub(super) fn call_downloader_prepare_track_playback(
         return hook(payload);
     }
 
-    backend_plugin_registry(service_root).call(
+    plugin_catalog(service_root).call(
         "momobako.service.downloader",
         "downloader.prepareTrackPlayback",
         payload,
@@ -510,7 +333,7 @@ pub(crate) fn call_downloader_download_track_package(
         return hook(payload);
     }
 
-    backend_plugin_registry(service_root).call(
+    plugin_catalog(service_root).call(
         "momobako.service.downloader",
         "downloader.downloadTrackPackage",
         payload,
@@ -723,81 +546,4 @@ pub(super) fn default_cache_entries() -> Vec<CacheEntry> {
             last_accessed_at: now_rfc3339(),
         },
     ]
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::services::logging::{set_global_logger, AppLogger};
-    use crate::services::repository::SystemLogPage;
-    use std::{
-        path::PathBuf,
-        sync::Arc,
-        time::{SystemTime, UNIX_EPOCH},
-    };
-
-    fn test_root(name: &str) -> PathBuf {
-        let unique = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("time should move forward")
-            .as_nanos();
-        std::env::temp_dir().join(format!("momobako-plugin-runtime-{name}-{unique}"))
-    }
-
-    fn list_records(logger: &AppLogger) -> SystemLogPage {
-        logger
-            .list(Some(SystemLogQuery {
-                limit: Some(20),
-                ..SystemLogQuery::default()
-            }))
-            .expect("logs should list")
-    }
-
-    #[test]
-    fn internal_system_log_bridge_writes_standard_record() {
-        let root = test_root("system-log-write");
-        let logger = Arc::new(AppLogger::new(root.clone()).expect("logger should initialize"));
-        set_global_logger(Some(logger.clone())).expect("global logger should register");
-
-        let payload = dispatch_host_plugin_call(HostPluginCallEnvelope {
-            service_root_dir: root.display().to_string(),
-            plugin_id: "momobako.system".to_string(),
-            method: "system.log.write".to_string(),
-            payload: serde_json::json!({
-                "level": "warn",
-                "category": "plugin.runtime",
-                "action": "healthChanged",
-                "message": "后端插件运行状态变化。",
-                "pluginId": "momobako.service.test",
-                "repoId": "repo-main-001",
-                "sourceKind": "backend-plugin",
-                "sourceLabel": "Test Backend Plugin",
-                "context": {
-                    "healthy": false,
-                },
-                "location": {
-                    "modulePath": "plugin.runtime",
-                    "file": "runtime.rs",
-                    "line": 42,
-                }
-            }),
-        })
-        .expect("internal host call should succeed");
-
-        let record: SystemLogRecord =
-            serde_json::from_value(payload).expect("record payload should decode");
-        assert_eq!(record.action, "healthChanged");
-        assert_eq!(record.source.kind, "backend-plugin");
-        assert_eq!(
-            record.source.plugin_id.as_deref(),
-            Some("momobako.service.test")
-        );
-
-        let page = list_records(logger.as_ref());
-        assert_eq!(page.records.len(), 1);
-        assert_eq!(page.records[0].message, "后端插件运行状态变化。");
-
-        set_global_logger(None).expect("global logger should clear");
-        let _ = std::fs::remove_dir_all(root);
-    }
 }

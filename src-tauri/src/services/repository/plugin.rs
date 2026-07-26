@@ -1,6 +1,7 @@
 //! Plugin, cache, and API design operations.
 
 use super::*;
+use crate::services::mutsuki_host;
 use std::path::Path;
 
 pub(super) fn call_plugin(
@@ -17,11 +18,8 @@ pub(super) fn call_plugin(
         plugin_hook_execution_context(&state.root, &request.plugin_id, &request.method);
     let started_at = now_rfc3339();
     let target = plugin_hook_execution_target(&payload);
-    let response = backend_plugin_registry(&state.root).call_with_runtime(
-        &request.plugin_id,
-        &request.method,
-        payload,
-    );
+    let response =
+        plugin_catalog(&state.root).call_with_runtime(&request.plugin_id, &request.method, payload);
     if let Some((plugin_id, hook)) = hook_context {
         let (status, message, runtime) = match &response {
             Ok(result) => (
@@ -70,7 +68,7 @@ pub(super) fn read_plugin_archive_text(
     request: PluginArchiveReadRequest,
 ) -> Result<PluginArchiveTextResponse, String> {
     state.ensure_initialized()?;
-    let registry = plugin_management_registry(&state.root);
+    let registry = plugin_management_catalog(&state.root);
     let normalized_plugin_id = registry.normalize_plugin_id(&request.plugin_id);
     let registration = registry
         .registration(&normalized_plugin_id)
@@ -92,7 +90,7 @@ pub(super) fn get_plugin_data_directory(
     plugin_id: String,
 ) -> Result<PluginDataDirectoryResponse, String> {
     state.ensure_initialized()?;
-    let registry = plugin_management_registry(&state.root);
+    let registry = plugin_management_catalog(&state.root);
     let normalized_plugin_id = registry.normalize_plugin_id(&plugin_id);
     let registration = registry
         .registration(&normalized_plugin_id)
@@ -109,7 +107,7 @@ pub(super) fn prepare_plugin_data_file_preview_source(
     request: PluginDataFilePreviewSourceRequest,
 ) -> Result<PluginDataFilePreviewSourceResponse, String> {
     state.ensure_initialized()?;
-    let registry = plugin_management_registry(&state.root);
+    let registry = plugin_management_catalog(&state.root);
     let normalized_plugin_id = registry.normalize_plugin_id(&request.plugin_id);
     let registration = registry
         .registration(&normalized_plugin_id)
@@ -254,7 +252,7 @@ pub(super) fn list_plugin_hook_executions(
     request: PluginHookExecutionListRequest,
 ) -> Result<PluginHookExecutionListResponse, String> {
     state.ensure_initialized()?;
-    let registry = plugin_management_registry(&state.root);
+    let registry = plugin_management_catalog(&state.root);
     let plugin_id = request
         .plugin_id
         .as_deref()
@@ -273,7 +271,7 @@ pub(super) fn set_plugin_enabled(
     request: PluginEnabledRequest,
 ) -> Result<PluginMutationResponse, String> {
     state.ensure_initialized()?;
-    let registry = plugin_management_registry(&state.root);
+    let registry = plugin_management_catalog(&state.root);
     let normalized_plugin_id = registry.normalize_plugin_id(&request.plugin_id);
     let manifest = registry
         .manifest(&normalized_plugin_id)
@@ -307,7 +305,7 @@ pub(super) fn delete_plugin(
     plugin_id: String,
 ) -> Result<PluginMutationResponse, String> {
     state.ensure_initialized()?;
-    let registry = plugin_management_registry(&state.root);
+    let registry = plugin_management_catalog(&state.root);
     let normalized_plugin_id = registry.normalize_plugin_id(&plugin_id);
     let registration = registry
         .registration(&normalized_plugin_id)
@@ -604,7 +602,7 @@ pub(super) fn is_source_plugin(manifest: &PluginManifest) -> bool {
 }
 
 pub(super) fn ensure_repository_backend_runtime_available(
-    registration: &BackendPluginRegistration,
+    registration: &PluginCatalogEntry,
 ) -> Result<(), String> {
     let manifest = &registration.manifest;
     if !manifest.enabled || manifest.status == "disabled" {
@@ -616,19 +614,13 @@ pub(super) fn ensure_repository_backend_runtime_available(
             manifest.plugin_id
         ));
     }
-    if registration.native.is_some() {
-        return Ok(());
-    }
-    if let Some(error) = &registration.load_error {
+    if let Some(error) = mutsuki_host::plugin_unavailable_reason(&manifest.plugin_id) {
         return Err(format!(
             "plugin runtime is not available: {} ({error})",
             manifest.plugin_id
         ));
     }
-    Err(format!(
-        "plugin runtime is not available: {}",
-        manifest.plugin_id
-    ))
+    Ok(())
 }
 
 fn plugin_settings_path(service_root: &Path) -> PathBuf {
@@ -706,7 +698,7 @@ fn plugin_hook_execution_context(
     plugin_id: &str,
     method: &str,
 ) -> Option<(String, PluginHook)> {
-    let registry = plugin_management_registry(service_root);
+    let registry = plugin_management_catalog(service_root);
     let normalized_plugin_id = registry.normalize_plugin_id(plugin_id);
     let manifest = registry.resolved_manifest(&normalized_plugin_id)?;
     manifest
@@ -1074,10 +1066,6 @@ fn validate_plugin_select_config_value(
     }
 }
 
-fn plugin_runtime_cache_dir(service_root: &Path) -> PathBuf {
-    service_root.join("plugin-cache")
-}
-
 pub(super) fn load_plugin_settings(service_root: &Path) -> Result<PluginSettings, String> {
     let path = plugin_settings_path(service_root);
     if !path.is_file() {
@@ -1166,7 +1154,7 @@ fn install_plugin_archive(
         return Err("plugin manifest is missing pluginId".to_string());
     }
 
-    let existing_registry = plugin_management_registry(service_root);
+    let existing_registry = plugin_management_catalog(service_root);
     if existing_registry.manifest(&manifest.plugin_id).is_some() {
         return Err(format!("plugin already exists: {}", manifest.plugin_id));
     }
@@ -1279,174 +1267,8 @@ pub(super) fn safe_zip_relative_path(value: &str) -> Result<PathBuf, String> {
     }
 }
 
-pub(super) fn load_native_plugin(
-    manifest: &PluginManifest,
-    archive_path: &Path,
-    manifest_prefix: &str,
-    service_root: &Path,
-) -> Result<NativePlugin, String> {
-    let library_name = manifest
-        .entry
-        .get("backend")
-        .and_then(serde_json::Value::as_object)
-        .and_then(|entry| entry.get("library"))
-        .or_else(|| manifest.entry.get("library"))
-        .and_then(serde_json::Value::as_str)
-        .ok_or_else(|| {
-            format!(
-                "native plugin is missing entry.library: {}",
-                manifest.plugin_id
-            )
-        })?;
-    let (library_path, runtime_dir) =
-        native_plugin_library_path(service_root, archive_path, manifest_prefix, library_name)?;
-    let library = unsafe { libloading::Library::new(&library_path) }.map_err(|error| {
-        format!(
-            "failed to load plugin library {}: {error}",
-            library_path.display()
-        )
-    })?;
-    let (call, free) = unsafe {
-        let manifest_fn: libloading::Symbol<PluginManifestFn> = library
-            .get(b"momobako_plugin_manifest")
-            .map_err(|error| format!("missing momobako_plugin_manifest: {error}"))?;
-        let manifest_ptr = manifest_fn();
-        if !manifest_ptr.is_null() {
-            let free_fn: libloading::Symbol<PluginFreeFn> = library
-                .get(b"momobako_plugin_free")
-                .map_err(|error| format!("missing momobako_plugin_free: {error}"))?;
-            free_fn(manifest_ptr);
-        }
-        let call = *library
-            .get::<PluginCallFn>(b"momobako_plugin_call")
-            .map_err(|error| format!("missing momobako_plugin_call: {error}"))?;
-        let free = *library
-            .get::<PluginFreeFn>(b"momobako_plugin_free")
-            .map_err(|error| format!("missing momobako_plugin_free: {error}"))?;
-        if let Ok(register_host_api) =
-            library.get::<PluginRegisterHostApiFn>(b"momobako_plugin_register_host_api")
-        {
-            register_host_api(Some(host_plugin_call_bridge), Some(host_plugin_free_bridge));
-        }
-        (call, free)
-    };
-    Ok(NativePlugin {
-        _library: library,
-        runtime_dir,
-        call,
-        free,
-    })
-}
-
-fn native_plugin_library_path(
-    service_root: &Path,
-    archive_path: &Path,
-    manifest_prefix: &str,
-    library_name: &str,
-) -> Result<(PathBuf, PathBuf), String> {
-    let file_name = native_plugin_library_file_name(library_name);
-    let cache_root = plugin_runtime_cache_dir(service_root);
-    fs::create_dir_all(&cache_root).map_err(io_error)?;
-    let archive_hash = hash_file_sha256(archive_path)?;
-    let cache_dir = cache_root.join(format!(
-        "{}-{}",
-        slugify_ascii_component(library_name),
-        archive_hash
-    ));
-    let output_path = cache_dir.join(&file_name);
-    if output_path.is_file() {
-        extract_runtime_sidecars(
-            archive_path,
-            manifest_prefix,
-            &mut zip::ZipArchive::new(File::open(archive_path).map_err(io_error)?)
-                .map_err(|error| error.to_string())?,
-            &cache_dir,
-        )?;
-        return Ok((output_path, cache_dir));
-    }
-    fs::create_dir_all(&cache_dir).map_err(io_error)?;
-    let file = File::open(archive_path).map_err(io_error)?;
-    let mut archive = zip::ZipArchive::new(file).map_err(|error| error.to_string())?;
-    let prefixed_file_name = plugin_archive_entry_path(manifest_prefix, Path::new(&file_name));
-    let prefixed_library_dir = plugin_archive_entry_path(
-        manifest_prefix,
-        Path::new(&format!("{library_name}/{file_name}")),
-    );
-    let prefixed_dist_file =
-        plugin_archive_entry_path(manifest_prefix, Path::new(&format!("dist/{file_name}")));
-    let prefixed_dist_library = plugin_archive_entry_path(
-        manifest_prefix,
-        Path::new(&format!("dist/{library_name}/{file_name}")),
-    );
-    let candidate_names = [
-        file_name.clone(),
-        format!("{library_name}/{file_name}"),
-        format!("dist/{file_name}"),
-        format!("dist/{library_name}/{file_name}"),
-        prefixed_file_name,
-        prefixed_library_dir,
-        prefixed_dist_file,
-        prefixed_dist_library,
-    ];
-    for candidate_name in candidate_names {
-        let extracted = if let Ok(mut entry) = archive.by_name(&candidate_name) {
-            let mut output = File::create(&output_path).map_err(io_error)?;
-            std::io::copy(&mut entry, &mut output).map_err(io_error)?;
-            output.flush().map_err(io_error)?;
-            true
-        } else {
-            false
-        };
-        if extracted {
-            extract_runtime_sidecars(archive_path, manifest_prefix, &mut archive, &cache_dir)?;
-            return Ok((output_path, cache_dir));
-        }
-    }
-    Err(format!(
-        "native plugin library not found in archive: {library_name}"
-    ))
-}
-
-fn extract_runtime_sidecars(
-    _archive_path: &Path,
-    manifest_prefix: &str,
-    archive: &mut zip::ZipArchive<File>,
-    cache_dir: &Path,
-) -> Result<(), String> {
-    let sidecars = if cfg!(target_os = "windows") {
-        vec!["office-convert-helper.exe"]
-    } else {
-        vec!["office-convert-helper"]
-    };
-    for sidecar in sidecars {
-        let direct = plugin_archive_entry_path(manifest_prefix, Path::new(sidecar));
-        let dist =
-            plugin_archive_entry_path(manifest_prefix, Path::new(&format!("dist/{sidecar}")));
-        for candidate_name in [sidecar.to_string(), format!("dist/{sidecar}"), direct, dist] {
-            if let Ok(mut entry) = archive.by_name(&candidate_name) {
-                let output_path = cache_dir.join(sidecar);
-                let mut output = File::create(&output_path).map_err(io_error)?;
-                std::io::copy(&mut entry, &mut output).map_err(io_error)?;
-                output.flush().map_err(io_error)?;
-                break;
-            }
-        }
-    }
-    Ok(())
-}
-
-fn native_plugin_library_file_name(library_name: &str) -> String {
-    if cfg!(target_os = "windows") {
-        format!("{library_name}.dll")
-    } else if cfg!(target_os = "macos") {
-        format!("lib{library_name}.dylib")
-    } else {
-        format!("lib{library_name}.so")
-    }
-}
-
 pub(super) fn default_plugins(service_root: &Path) -> Vec<PluginManifest> {
-    backend_plugin_registry(service_root).list_manifests()
+    plugin_catalog(service_root).list_manifests()
 }
 
 pub(super) fn read_plugin_manifest_from_archive(
@@ -1484,211 +1306,9 @@ pub(super) fn plugin_archive_entry_path(prefix: &str, relative_path: &Path) -> S
     }
 }
 
-fn hash_file_sha256(path: &Path) -> Result<String, String> {
-    let mut file = File::open(path).map_err(io_error)?;
-    let mut hasher = Sha256::new();
-    let mut buffer = [0_u8; 8192];
-    loop {
-        let read = file.read(&mut buffer).map_err(io_error)?;
-        if read == 0 {
-            break;
-        }
-        hasher.update(&buffer[..read]);
-    }
-    let digest = hasher.finalize();
-    Ok(digest.iter().map(|byte| format!("{byte:02x}")).collect())
-}
-
 fn hash_text_sha256(value: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(value.as_bytes());
     let digest = hasher.finalize();
     digest.iter().map(|byte| format!("{byte:02x}")).collect()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::time::{SystemTime, UNIX_EPOCH};
-
-    struct TestWorkspace {
-        root: PathBuf,
-    }
-
-    impl TestWorkspace {
-        fn new(name: &str) -> Self {
-            let unique = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .expect("system clock must be after unix epoch")
-                .as_nanos();
-            let root = std::env::temp_dir().join(format!(
-                "momobako-plugin-{name}-{}-{unique}",
-                std::process::id()
-            ));
-            fs::create_dir_all(&root).expect("test workspace root should be created");
-            Self { root }
-        }
-
-        fn path(&self, child: &str) -> PathBuf {
-            self.root.join(child)
-        }
-    }
-
-    impl Drop for TestWorkspace {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.root);
-        }
-    }
-
-    #[test]
-    fn native_plugin_library_path_extracts_runtime_sidecars() {
-        let workspace = TestWorkspace::new("native-sidecar-extract");
-        let archive_path = workspace.path("office-convert.momoplug");
-        let library_name = "momobako_service_office_convert";
-        let sidecar_name = if cfg!(target_os = "windows") {
-            "office-convert-helper.exe"
-        } else {
-            "office-convert-helper"
-        };
-        write_native_plugin_archive(
-            &archive_path,
-            library_name,
-            vec![
-                (
-                    native_plugin_library_file_name(library_name),
-                    "stub native library".to_string(),
-                ),
-                (
-                    sidecar_name.to_string(),
-                    "helper binary payload".to_string(),
-                ),
-            ],
-        );
-
-        let (library_path, runtime_dir) = native_plugin_library_path(
-            &workspace.root,
-            &archive_path,
-            "momobako-service-office-convert-0.1.0/",
-            library_name,
-        )
-        .expect("native plugin runtime should extract");
-
-        assert!(library_path.is_file());
-        assert_eq!(library_path.parent(), Some(runtime_dir.as_path()));
-        let sidecar_path = runtime_dir.join(sidecar_name);
-        assert!(sidecar_path.is_file());
-        assert_eq!(
-            fs::read_to_string(sidecar_path).expect("sidecar should be readable"),
-            "helper binary payload"
-        );
-    }
-
-    #[test]
-    fn native_plugin_library_path_restores_missing_sidecar_from_cached_runtime() {
-        let workspace = TestWorkspace::new("native-sidecar-restore");
-        let archive_path = workspace.path("office-convert.momoplug");
-        let library_name = "momobako_service_office_convert";
-        let sidecar_name = if cfg!(target_os = "windows") {
-            "office-convert-helper.exe"
-        } else {
-            "office-convert-helper"
-        };
-        write_native_plugin_archive(
-            &archive_path,
-            library_name,
-            vec![
-                (
-                    native_plugin_library_file_name(library_name),
-                    "stub native library".to_string(),
-                ),
-                (
-                    sidecar_name.to_string(),
-                    "helper binary payload".to_string(),
-                ),
-            ],
-        );
-
-        let (_, runtime_dir) = native_plugin_library_path(
-            &workspace.root,
-            &archive_path,
-            "momobako-service-office-convert-0.1.0/",
-            library_name,
-        )
-        .expect("initial runtime extraction should succeed");
-        let sidecar_path = runtime_dir.join(sidecar_name);
-        fs::remove_file(&sidecar_path).expect("sidecar should be removed");
-
-        let (_, second_runtime_dir) = native_plugin_library_path(
-            &workspace.root,
-            &archive_path,
-            "momobako-service-office-convert-0.1.0/",
-            library_name,
-        )
-        .expect("cached runtime should restore missing sidecar");
-
-        assert_eq!(runtime_dir, second_runtime_dir);
-        assert!(sidecar_path.is_file());
-    }
-
-    fn write_native_plugin_archive(
-        path: &Path,
-        library_name: &str,
-        extra_files: Vec<(String, String)>,
-    ) {
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent).expect("archive parent should be created");
-        }
-        let root_dir = "momobako-service-office-convert-0.1.0";
-        let manifest = serde_json::json!({
-            "pluginId": "momobako.service.office-convert",
-            "legacyPluginIds": [],
-            "name": "Office Convert",
-            "version": "0.1.0",
-            "kind": "service",
-            "description": "Test native plugin archive.",
-            "capabilities": ["service"],
-            "enabled": true,
-            "sdk": "backend",
-            "runtime": "native-dylib",
-            "source": "builtin",
-            "permissions": [],
-            "compat": {
-                "sdkVersion": "1",
-                "legacyPluginIds": []
-            },
-            "status": "ready",
-            "entry": {
-                "backend": {
-                    "library": library_name
-                }
-            }
-        });
-        let file = File::create(path).expect("plugin archive should be created");
-        let mut archive = zip::ZipWriter::new(file);
-        archive
-            .start_file(
-                format!("{root_dir}/manifest.json"),
-                zip::write::SimpleFileOptions::default(),
-            )
-            .expect("manifest entry should start");
-        archive
-            .write_all(
-                serde_json::to_string_pretty(&manifest)
-                    .expect("manifest should encode")
-                    .as_bytes(),
-            )
-            .expect("manifest should write");
-        for (relative_path, content) in extra_files {
-            archive
-                .start_file(
-                    format!("{root_dir}/{relative_path}"),
-                    zip::write::SimpleFileOptions::default(),
-                )
-                .expect("archive entry should start");
-            archive
-                .write_all(content.as_bytes())
-                .expect("archive entry should write");
-        }
-        archive.finish().expect("archive should finish");
-    }
 }

@@ -84,7 +84,7 @@ pub(super) fn apply_revision_state(
 }
 
 pub(super) fn source_metadata_mirror_keys(service_root: &Path, plugin_id: &str) -> Vec<String> {
-    backend_plugin_registry(service_root)
+    plugin_catalog(service_root)
         .manifest(plugin_id)
         .and_then(|manifest| manifest.contributes.as_object())
         .and_then(|contributes| contributes.get("source"))

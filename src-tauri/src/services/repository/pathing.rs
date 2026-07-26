@@ -9,7 +9,7 @@ pub(super) fn normalize_repository_root_for_backend(
     must_exist: bool,
 ) -> Result<PathBuf, String> {
     let repo_root = PathBuf::from(path);
-    let plugin_registry = backend_plugin_registry(service_root);
+    let plugin_registry = plugin_catalog(service_root);
     let backend_summary = backend_summary_from_registry(&plugin_registry, &backend.plugin_id);
     if !backend_summary_supports_local_root_access(&backend_summary) {
         return Ok(repo_root);

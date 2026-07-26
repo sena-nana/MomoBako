@@ -1101,7 +1101,7 @@ pub(super) fn load_playlist_memberships(
 pub(super) fn load_playlist_detail(
     connection: &Connection,
     repo: &RepositoryRecord,
-    registry: &BackendPluginRegistry,
+    registry: &PluginCatalog,
     repo_id: &str,
     playlist_id: &str,
 ) -> Result<PlaylistDetail, rusqlite::Error> {

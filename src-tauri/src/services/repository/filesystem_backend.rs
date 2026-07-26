@@ -943,7 +943,7 @@ impl FileSystemBackendAdapter for RuntimeFileSystemBackendAdapter {
         repo_root: &Path,
         config: &serde_json::Value,
     ) -> Result<(), String> {
-        backend_plugin_registry(&self.service_root).call(
+        plugin_catalog(&self.service_root).call(
             &self.plugin_id,
             "filesystem.ensureAttachable",
             serde_json::json!({
@@ -959,7 +959,7 @@ impl FileSystemBackendAdapter for RuntimeFileSystemBackendAdapter {
         repo_root: &Path,
         config: &serde_json::Value,
     ) -> Result<(), String> {
-        backend_plugin_registry(&self.service_root).call(
+        plugin_catalog(&self.service_root).call(
             &self.plugin_id,
             "filesystem.prepareRepositoryRoot",
             serde_json::json!({
@@ -975,7 +975,7 @@ impl FileSystemBackendAdapter for RuntimeFileSystemBackendAdapter {
         repo_root: &Path,
         config: &serde_json::Value,
     ) -> Result<Vec<DiscoveredFile>, String> {
-        let response = backend_plugin_registry(&self.service_root).call(
+        let response = plugin_catalog(&self.service_root).call(
             &self.plugin_id,
             "filesystem.listFiles",
             serde_json::json!({
@@ -995,7 +995,7 @@ impl FileSystemBackendAdapter for RuntimeFileSystemBackendAdapter {
         repo_root: &Path,
         config: &serde_json::Value,
     ) -> Result<Vec<FileTreeNode>, String> {
-        let response = backend_plugin_registry(&self.service_root).call(
+        let response = plugin_catalog(&self.service_root).call(
             &self.plugin_id,
             "filesystem.listTree",
             serde_json::json!({
@@ -1012,7 +1012,7 @@ impl FileSystemBackendAdapter for RuntimeFileSystemBackendAdapter {
         directory_path: &str,
         config: &serde_json::Value,
     ) -> Result<Vec<FileSystemEntry>, String> {
-        let response = backend_plugin_registry(&self.service_root).call(
+        let response = plugin_catalog(&self.service_root).call(
             &self.plugin_id,
             "filesystem.listDirectory",
             serde_json::json!({
@@ -1032,7 +1032,7 @@ impl FileSystemBackendAdapter for RuntimeFileSystemBackendAdapter {
         limit: usize,
         config: &serde_json::Value,
     ) -> Result<DirectoryPageResult, String> {
-        let response = backend_plugin_registry(&self.service_root).call(
+        let response = plugin_catalog(&self.service_root).call(
             &self.plugin_id,
             "filesystem.listDirectoryPage",
             serde_json::json!({
@@ -1064,7 +1064,7 @@ impl FileSystemBackendAdapter for RuntimeFileSystemBackendAdapter {
         name: &str,
         config: &serde_json::Value,
     ) -> Result<(), String> {
-        backend_plugin_registry(&self.service_root).call(
+        plugin_catalog(&self.service_root).call(
             &self.plugin_id,
             "filesystem.createDirectory",
             serde_json::json!({
@@ -1084,7 +1084,7 @@ impl FileSystemBackendAdapter for RuntimeFileSystemBackendAdapter {
         name: &str,
         config: &serde_json::Value,
     ) -> Result<(), String> {
-        backend_plugin_registry(&self.service_root).call(
+        plugin_catalog(&self.service_root).call(
             &self.plugin_id,
             "filesystem.createFile",
             serde_json::json!({
@@ -1103,7 +1103,7 @@ impl FileSystemBackendAdapter for RuntimeFileSystemBackendAdapter {
         entry_path: &str,
         config: &serde_json::Value,
     ) -> Result<FileSystemEntry, String> {
-        let response = backend_plugin_registry(&self.service_root).call(
+        let response = plugin_catalog(&self.service_root).call(
             &self.plugin_id,
             "filesystem.statEntry",
             serde_json::json!({
@@ -1122,7 +1122,7 @@ impl FileSystemBackendAdapter for RuntimeFileSystemBackendAdapter {
         new_name: &str,
         config: &serde_json::Value,
     ) -> Result<FileSystemEntry, String> {
-        let response = backend_plugin_registry(&self.service_root).call(
+        let response = plugin_catalog(&self.service_root).call(
             &self.plugin_id,
             "filesystem.renameEntry",
             serde_json::json!({
@@ -1142,7 +1142,7 @@ impl FileSystemBackendAdapter for RuntimeFileSystemBackendAdapter {
         target_parent_path: &str,
         config: &serde_json::Value,
     ) -> Result<FileSystemEntry, String> {
-        let response = backend_plugin_registry(&self.service_root).call(
+        let response = plugin_catalog(&self.service_root).call(
             &self.plugin_id,
             "filesystem.moveEntry",
             serde_json::json!({
@@ -1162,7 +1162,7 @@ impl FileSystemBackendAdapter for RuntimeFileSystemBackendAdapter {
         recursive: bool,
         config: &serde_json::Value,
     ) -> Result<(), String> {
-        backend_plugin_registry(&self.service_root).call(
+        plugin_catalog(&self.service_root).call(
             &self.plugin_id,
             "filesystem.deleteEntry",
             serde_json::json!({
@@ -1180,7 +1180,7 @@ impl FileSystemBackendAdapter for RuntimeFileSystemBackendAdapter {
         repo_root: &Path,
         config: &serde_json::Value,
     ) -> Result<SourceRepositoryStateSnapshot, String> {
-        let response = backend_plugin_registry(&self.service_root).call(
+        let response = plugin_catalog(&self.service_root).call(
             &self.plugin_id,
             "filesystem.describeRepositoryState",
             serde_json::json!({
@@ -1201,7 +1201,7 @@ impl FileSystemBackendAdapter for RuntimeFileSystemBackendAdapter {
         operation: &str,
         config: &serde_json::Value,
     ) -> Result<(), String> {
-        backend_plugin_registry(&self.service_root).call(
+        plugin_catalog(&self.service_root).call(
             &self.plugin_id,
             "filesystem.writeAssetMetadata",
             serde_json::json!({
@@ -1223,7 +1223,7 @@ impl FileSystemBackendAdapter for RuntimeFileSystemBackendAdapter {
         state: &SourceRepositoryStateSnapshot,
         config: &serde_json::Value,
     ) -> Result<(), String> {
-        backend_plugin_registry(&self.service_root).call(
+        plugin_catalog(&self.service_root).call(
             &self.plugin_id,
             "filesystem.writeRepositoryState",
             serde_json::json!({
