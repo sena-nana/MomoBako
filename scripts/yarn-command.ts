@@ -1,5 +1,6 @@
 // 统一解析项目锁定的 Yarn 入口，避免依赖 Node 安装目录中的 Corepack 私有路径。
 import { spawn, spawnSync, type SpawnOptions, type SpawnSyncOptions } from "node:child_process";
+import { win32 as win32Path } from "node:path";
 
 export interface YarnCommandOptions {
   comSpec?: string;
@@ -18,17 +19,28 @@ export function resolveYarnCommand({
   npmExecPath = process.env.npm_execpath,
   platform = process.platform,
 }: YarnCommandOptions = {}): YarnCommand {
-  const yarnEntry = npmExecPath || (platform === "win32" ? "corepack.cmd" : "corepack");
-
-  if (platform === "win32" && /\.(?:cmd|bat)$/i.test(yarnEntry)) {
+  if (platform === "win32") {
+    const reusableEntry = npmExecPath ? (
+      /\.(?:cmd|bat)$/i.test(npmExecPath)
+        ? npmExecPath
+        : win32Path.extname(npmExecPath) === ""
+          ? `${npmExecPath}.cmd`
+          : undefined
+    ) : undefined;
     return {
       command: comSpec,
-      args: ["/d", "/s", "/c", yarnEntry, ...(npmExecPath ? [] : ["yarn"])],
+      args: [
+        "/d",
+        "/s",
+        "/c",
+        reusableEntry ?? "corepack.cmd",
+        ...(reusableEntry ? [] : ["yarn"]),
+      ],
     };
   }
 
   return {
-    command: yarnEntry,
+    command: npmExecPath || "corepack",
     args: npmExecPath ? [] : ["yarn"],
   };
 }
