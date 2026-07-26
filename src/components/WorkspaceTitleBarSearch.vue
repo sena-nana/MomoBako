@@ -1,11 +1,14 @@
 <!-- MomoBako 工作区标题栏的搜索与筛选内容。 -->
 <script setup lang="ts">
 import { SlidersHorizontal } from "@lucide/vue";
+import { onBeforeUnmount } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import {
   useWorkspaceNavigation,
   useWorkspaceSearch,
 } from "../composables/useRepositoryWorkspace";
+
+const SEARCH_DEBOUNCE_MS = 250;
 
 const route = useRoute();
 const router = useRouter();
@@ -18,6 +21,14 @@ const {
   toggleFilterBar,
 } = useWorkspaceSearch();
 const { setActivePanel } = useWorkspaceNavigation();
+let searchTimer: ReturnType<typeof window.setTimeout> | null = null;
+
+/** 清理尚未触发的标题栏搜索。 */
+function clearSearchTimer() {
+  if (searchTimer === null) return;
+  window.clearTimeout(searchTimer);
+  searchTimer = null;
+}
 
 /** 打开工作区搜索面板。 */
 function showSearchWorkspace() {
@@ -31,7 +42,11 @@ function showSearchWorkspace() {
 function onSearchInput(event: Event) {
   const query = event.target instanceof HTMLInputElement ? event.target.value : "";
   showSearchWorkspace();
-  void runSearch({ query });
+  clearSearchTimer();
+  searchTimer = window.setTimeout(() => {
+    searchTimer = null;
+    void runSearch({ query });
+  }, SEARCH_DEBOUNCE_MS);
 }
 
 /** 切换筛选栏并确保用户回到工作区。 */
@@ -39,6 +54,8 @@ function onToggleFilterBar() {
   toggleFilterBar();
   showSearchWorkspace();
 }
+
+onBeforeUnmount(clearSearchTimer);
 </script>
 
 <template>

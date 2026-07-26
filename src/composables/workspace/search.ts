@@ -19,11 +19,21 @@ import {
   parsePathPrefixesInput,
 } from "./filterInputs";
 
+let latestSearchRequestId = 0;
+
+/** 生成新的搜索请求序号，使此前仍在执行的请求失效。 */
+function nextSearchRequestId() {
+  latestSearchRequestId += 1;
+  return latestSearchRequestId;
+}
+
 export function resetSearchState() {
+  nextSearchRequestId();
   searchQuery.value = "";
   searchResults.value = [];
   filters.value = createInitialFilters();
   isFilterBarOpen.value = false;
+  isSearching.value = false;
 }
 
 export function buildSearchRequest(query = searchQuery.value): SearchRequest {
@@ -129,6 +139,7 @@ export function clearFilters() {
 }
 
 export async function runSearch(request: SearchRequest) {
+  const requestId = nextSearchRequestId();
   searchQuery.value = request.query;
   const filterRequest = buildSearchRequest(request.query);
   const repoId = hasActiveFilters.value ? activeRepoId.value ?? undefined : undefined;
@@ -155,6 +166,7 @@ export async function runSearch(request: SearchRequest) {
 
   if (!hasSearchCriteria(normalizedRequest)) {
     searchResults.value = [];
+    isSearching.value = false;
     return;
   }
 
@@ -163,17 +175,23 @@ export async function runSearch(request: SearchRequest) {
 
   try {
     const response = await searchAssets(normalizedRequest);
+    if (requestId !== latestSearchRequestId) return;
     searchResults.value = response.results;
   } catch (cause) {
+    if (requestId !== latestSearchRequestId) return;
     error.value = cause instanceof Error ? cause.message : String(cause);
   } finally {
-    isSearching.value = false;
+    if (requestId === latestSearchRequestId) {
+      isSearching.value = false;
+    }
   }
 }
 
 export function runFilteredSearch() {
   if (!activeRepoId.value && hasActiveFilters.value) {
+    nextSearchRequestId();
     searchResults.value = [];
+    isSearching.value = false;
     return Promise.resolve();
   }
   return runSearch(buildSearchRequest());
