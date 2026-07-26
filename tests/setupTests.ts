@@ -60,6 +60,35 @@ const pluginCallMockResponses = new Map<string, unknown>();
 const invokeCalls: Array<{ command: string; args?: Record<string, unknown> }> = [];
 const openerCalls: Array<{ command: "openPath" | "openUrl" | "revealItemInDir"; path: string }> = [];
 const tauriEventListeners = new Map<string, Set<(event: { event: string; payload: unknown }) => void>>();
+const mutsukiTaskOutcomes = new Map<string, {
+  outcome: {
+    status: "completed" | "failed" | "cancelled";
+    output?: unknown;
+    error?: unknown;
+    reason?: string;
+  };
+}>();
+
+function emitMutsukiTaskProgress(taskId: string, progress: unknown) {
+  const listeners = tauriEventListeners.get("mutsuki://event");
+  for (const listener of listeners ?? []) {
+    listener({
+      event: "mutsuki://event",
+      payload: {
+        payload: {
+          type: "task",
+          task_id: taskId,
+          event: {
+            name: "momobako.task.progress",
+            attributes: {
+              payload: JSON.stringify({ progress }),
+            },
+          },
+        },
+      },
+    });
+  }
+}
 
 globalThis.fetch = vi.fn(async (input: string | URL | Request) => {
   const url = typeof input === "string"
@@ -851,7 +880,7 @@ vi.mock("@tauri-apps/api/core", () => ({
     onmessage: ((message: T) => void) | null = null;
   },
   convertFileSrc: (path: string) => `asset://${path}`,
-  invoke: async (command: string, args?: Record<string, unknown>) => {
+  invoke: async function mockInvoke(command: string, args?: Record<string, unknown>) {
     invokeCalls.push({ command, args });
     if (mockInvokeDelay?.command === command && command !== "prepare_entry_playback_source_with_progress") {
       await mockInvokeDelay.promise;
@@ -861,6 +890,57 @@ vi.mock("@tauri-apps/api/core", () => ({
       const failure = mockInvokeFailure.error;
       mockInvokeFailure = null;
       throw failure;
+    }
+    if (command === "mutsuki_start_task") {
+      const request = args?.request as {
+        protocol_id?: string;
+        payload?: unknown;
+        task_id?: string;
+      } | undefined;
+      const taskId = request?.task_id ?? `mock-mutsuki-task-${mutsukiTaskOutcomes.size + 1}`;
+      const progress = {
+        onmessage: (value: unknown) => emitMutsukiTaskProgress(taskId, value),
+      };
+      try {
+        let output: unknown;
+        if (request?.protocol_id === "momobako.playback.prepare") {
+          output = await mockInvoke("prepare_entry_playback_source_with_progress", {
+            request: request.payload,
+            progress,
+          });
+        } else if (request?.protocol_id === "momobako.playlist.download") {
+          output = await mockInvoke("download_playlist_with_progress", {
+            request: request.payload,
+            progress,
+          });
+        } else {
+          throw new Error(`unsupported mock Mutsuki protocol: ${request?.protocol_id ?? "unknown"}`);
+        }
+        mutsukiTaskOutcomes.set(taskId, {
+          outcome: { status: "completed", output },
+        });
+      } catch (error) {
+        mutsukiTaskOutcomes.set(taskId, {
+          outcome: { status: "failed", error: String(error) },
+        });
+      }
+      return { task_id: taskId };
+    }
+    if (command === "mutsuki_task_result") {
+      const request = args?.request as { task_id?: string } | undefined;
+      return mutsukiTaskOutcomes.get(request?.task_id ?? "") ?? { outcome: null };
+    }
+    if (command === "mutsuki_cancel_task") {
+      const request = args?.request as { task_id?: string; reason?: string } | undefined;
+      if (request?.task_id) {
+        mutsukiTaskOutcomes.set(request.task_id, {
+          outcome: {
+            status: "cancelled",
+            reason: request.reason ?? "cancelled by test",
+          },
+        });
+      }
+      return true;
     }
     if (command === "list_repositories") return mockRepositories;
     if (command === "get_repository_snapshot") {
@@ -2369,6 +2449,7 @@ afterEach(() => {
   pluginCallCalls.length = 0;
   pluginCallMockResponses.clear();
   tauriEventListeners.clear();
+  mutsukiTaskOutcomes.clear();
 });
 
 export function getInvokeCalls(command?: string) {
