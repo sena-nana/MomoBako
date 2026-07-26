@@ -1,10 +1,8 @@
 //! File-browser command orchestration for repository entries and trash operations.
 
 use crate::services::repository::{
-    EagleLibraryImportRequest, EagleLibraryImportResponse, FileArchiveImportRequest,
-    FileBrowserRequest, FileBrowserSnapshot, FileCopyRequest, FileCreateRequest, FileDeleteRequest,
-    FileImportRequest, FileMoveRequest, FileRenameRequest, RepositoryTreeSnapshot,
-    TrashMutationRequest,
+    FileBrowserRequest, FileBrowserSnapshot, FileCreateRequest, FileRenameRequest,
+    RepositoryTreeSnapshot, TrashMutationRequest,
 };
 use crate::services::runtime::RepositoryRuntime;
 
@@ -54,66 +52,12 @@ impl FileBrowserViewModel {
             .await
     }
 
-    pub async fn import_entries(
-        &self,
-        request: FileImportRequest,
-    ) -> Result<FileBrowserSnapshot, String> {
-        self.runtime
-            .run_write(move |state| state.import_entries(request))
-            .await
-    }
-
-    pub async fn import_archive_entries(
-        &self,
-        request: FileArchiveImportRequest,
-    ) -> Result<FileBrowserSnapshot, String> {
-        self.runtime
-            .run_write(move |state| state.import_archive_entries(request))
-            .await
-    }
-
-    pub async fn import_eagle_library(
-        &self,
-        request: EagleLibraryImportRequest,
-    ) -> Result<EagleLibraryImportResponse, String> {
-        self.runtime
-            .run_write(move |state| state.import_eagle_library(request))
-            .await
-    }
-
-    pub async fn copy_entries(
-        &self,
-        request: FileCopyRequest,
-    ) -> Result<FileBrowserSnapshot, String> {
-        self.runtime
-            .run_write(move |state| state.copy_entries(request))
-            .await
-    }
-
-    pub async fn move_entries(
-        &self,
-        request: FileMoveRequest,
-    ) -> Result<FileBrowserSnapshot, String> {
-        self.runtime
-            .run_write(move |state| state.move_entries(request))
-            .await
-    }
-
     pub async fn rename_entry(
         &self,
         request: FileRenameRequest,
     ) -> Result<FileBrowserSnapshot, String> {
         self.runtime
             .run_write(move |state| state.rename_entry(request))
-            .await
-    }
-
-    pub async fn delete_entry(
-        &self,
-        request: FileDeleteRequest,
-    ) -> Result<FileBrowserSnapshot, String> {
-        self.runtime
-            .run_write(move |state| state.delete_entry(request))
             .await
     }
 

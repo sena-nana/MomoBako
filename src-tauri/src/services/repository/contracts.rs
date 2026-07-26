@@ -1763,43 +1763,6 @@ pub struct PluginMutationResponse {
     pub plugins: Vec<PluginManifest>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(super) struct PluginCallEnvelope {
-    pub(super) method: String,
-    pub(super) payload: serde_json::Value,
-    pub(super) runtime: PluginCallHostRuntime,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(super) struct PluginCallHostRuntime {
-    pub(super) plugin_id: String,
-    pub(super) plugin_data_dir: String,
-    #[serde(default)]
-    pub(super) service_root_dir: String,
-    #[serde(default)]
-    pub(super) plugin_runtime_dir: String,
-    pub(super) plugin_config: BTreeMap<String, serde_json::Value>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(super) struct PluginCallResponse {
-    pub(super) ok: bool,
-    pub(super) payload: Option<serde_json::Value>,
-    pub(super) error: Option<String>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(super) struct HostPluginCallEnvelope {
-    pub(super) service_root_dir: String,
-    pub(super) plugin_id: String,
-    pub(super) method: String,
-    pub(super) payload: serde_json::Value,
-}
-
 #[derive(Debug, Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct ApiDefinition {

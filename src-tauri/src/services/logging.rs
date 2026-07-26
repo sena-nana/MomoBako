@@ -156,7 +156,10 @@ impl AppLogger {
                     .location
                     .as_ref()
                     .and_then(|value| value.module_path.clone()),
-                file: request.location.as_ref().and_then(|value| value.file.clone()),
+                file: request
+                    .location
+                    .as_ref()
+                    .and_then(|value| value.file.clone()),
                 line: request.location.as_ref().and_then(|value| value.line),
             },
             context: request.context.unwrap_or_else(|| serde_json::json!({})),
@@ -254,8 +257,9 @@ impl AppLogger {
     }
 
     fn archived_log_path(&self, index: usize) -> PathBuf {
-        self.log_dir()
-            .join(format!("{ARCHIVED_LOG_FILE_PREFIX}{index}{ARCHIVED_LOG_FILE_SUFFIX}"))
+        self.log_dir().join(format!(
+            "{ARCHIVED_LOG_FILE_PREFIX}{index}{ARCHIVED_LOG_FILE_SUFFIX}"
+        ))
     }
 
     fn log_paths(&self) -> Vec<PathBuf> {
@@ -365,50 +369,46 @@ pub fn clear_logs() -> Result<(), String> {
 /// 使用调用点元信息输出宿主日志。
 #[macro_export]
 macro_rules! app_log {
-    ($level:expr, $category:expr, $action:expr, $message:expr) => {
-        {
-            let _ = $crate::services::logging::write_log(
-                $crate::services::repository::SystemLogWriteRequest {
-                    level: $level.to_string(),
-                    category: $category.to_string(),
-                    action: $action.to_string(),
-                    message: $message.to_string(),
-                    context: None,
-                    repo_id: None,
-                    plugin_id: None,
-                    source_kind: Some("host".to_string()),
-                    source_label: None,
-                    location: Some($crate::services::repository::SystemLogLocationInput {
-                        module_path: Some(module_path!().to_string()),
-                        file: Some(file!().to_string()),
-                        line: Some(line!()),
-                    }),
-                },
-            );
-        }
-    };
-    ($level:expr, $category:expr, $action:expr, $message:expr, $context:expr) => {
-        {
-            let _ = $crate::services::logging::write_log(
-                $crate::services::repository::SystemLogWriteRequest {
-                    level: $level.to_string(),
-                    category: $category.to_string(),
-                    action: $action.to_string(),
-                    message: $message.to_string(),
-                    context: Some($context),
-                    repo_id: None,
-                    plugin_id: None,
-                    source_kind: Some("host".to_string()),
-                    source_label: None,
-                    location: Some($crate::services::repository::SystemLogLocationInput {
-                        module_path: Some(module_path!().to_string()),
-                        file: Some(file!().to_string()),
-                        line: Some(line!()),
-                    }),
-                },
-            );
-        }
-    };
+    ($level:expr, $category:expr, $action:expr, $message:expr) => {{
+        let _ = $crate::services::logging::write_log(
+            $crate::services::repository::SystemLogWriteRequest {
+                level: $level.to_string(),
+                category: $category.to_string(),
+                action: $action.to_string(),
+                message: $message.to_string(),
+                context: None,
+                repo_id: None,
+                plugin_id: None,
+                source_kind: Some("host".to_string()),
+                source_label: None,
+                location: Some($crate::services::repository::SystemLogLocationInput {
+                    module_path: Some(module_path!().to_string()),
+                    file: Some(file!().to_string()),
+                    line: Some(line!()),
+                }),
+            },
+        );
+    }};
+    ($level:expr, $category:expr, $action:expr, $message:expr, $context:expr) => {{
+        let _ = $crate::services::logging::write_log(
+            $crate::services::repository::SystemLogWriteRequest {
+                level: $level.to_string(),
+                category: $category.to_string(),
+                action: $action.to_string(),
+                message: $message.to_string(),
+                context: Some($context),
+                repo_id: None,
+                plugin_id: None,
+                source_kind: Some("host".to_string()),
+                source_label: None,
+                location: Some($crate::services::repository::SystemLogLocationInput {
+                    module_path: Some(module_path!().to_string()),
+                    file: Some(file!().to_string()),
+                    line: Some(line!()),
+                }),
+            },
+        );
+    }};
 }
 
 #[cfg(test)]

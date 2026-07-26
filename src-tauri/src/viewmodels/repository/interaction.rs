@@ -7,10 +7,9 @@ use crate::services::repository::{
     PlaylistMembershipIndex, PlaylistMembershipRequest, PlaylistMembershipSnapshot,
     PlaylistMutationRequest, PlaylistMutationResponse, PlaylistSummary,
     RecentAccessHistoryClearRequest, RecentAccessHistoryClearResponse, RepositoryAction,
-    RepositoryActionEnabledRequest, RepositoryActionMutationResponse, RepositoryActionRunRequest,
-    RepositoryActionRunResponse, RevisionActionRequest, RevisionActionResponse,
-    SmartFolderMutationRequest, SmartFolderMutationResponse, SmartFolderResultSnapshot,
-    SmartFolderTreeNode, SmartFolderUpdateRequest, ThumbnailRequest, ThumbnailResponse,
+    RepositoryActionEnabledRequest, RepositoryActionMutationResponse, RevisionActionRequest,
+    RevisionActionResponse, SmartFolderMutationRequest, SmartFolderMutationResponse,
+    SmartFolderResultSnapshot, SmartFolderTreeNode, SmartFolderUpdateRequest,
 };
 use crate::services::runtime::RepositoryRuntime;
 
@@ -197,15 +196,6 @@ impl RepositoryInteractionViewModel {
             .await
     }
 
-    pub async fn run_repository_action(
-        &self,
-        request: RepositoryActionRunRequest,
-    ) -> Result<RepositoryActionRunResponse, String> {
-        self.runtime
-            .run_write(move |state| state.run_repository_action(request))
-            .await
-    }
-
     pub async fn list_hardlink_candidates(
         &self,
         repo_id: String,
@@ -221,15 +211,6 @@ impl RepositoryInteractionViewModel {
     ) -> Result<HardlinkConfirmResponse, String> {
         self.runtime
             .run_write(move |state| state.confirm_hardlink_candidate(request))
-            .await
-    }
-
-    pub async fn ensure_thumbnail(
-        &self,
-        request: ThumbnailRequest,
-    ) -> Result<ThumbnailResponse, String> {
-        self.runtime
-            .run_write(move |state| state.ensure_thumbnail(request))
             .await
     }
 

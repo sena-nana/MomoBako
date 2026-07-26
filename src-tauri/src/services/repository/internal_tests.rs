@@ -803,7 +803,7 @@ mod tests {
         let workspace = TestWorkspace::new("plugin-registry");
         let service_root = workspace.path("service");
         seed_standard_test_plugins(&service_root);
-        let registry = backend_plugin_registry(&service_root);
+        let registry = plugin_catalog(&service_root);
         let manifests = registry.list_manifests();
 
         assert!(manifests.iter().any(|manifest| {
@@ -1176,44 +1176,6 @@ mod tests {
                 value: serde_json::json!("fast"),
             })
             .expect("schema option should be accepted");
-    }
-
-    #[test]
-    fn plugin_call_envelope_serializes_runtime_config_snapshot() {
-        let envelope = PluginCallEnvelope {
-            method: "provider.lookupMetadataCandidate".to_string(),
-            payload: serde_json::json!({ "id": "sample-123456" }),
-            runtime: PluginCallHostRuntime {
-                plugin_id: "user.provider".to_string(),
-                plugin_data_dir: "C:/MomoBako/.service-data/plugin-data/user-provider".to_string(),
-                service_root_dir: "C:/MomoBako/.service-data".to_string(),
-                plugin_runtime_dir: "C:/MomoBako/.service-data/runtime-cache/user-provider"
-                    .to_string(),
-                plugin_config: BTreeMap::from([(
-                    "apiKey".to_string(),
-                    serde_json::json!("secret"),
-                )]),
-            },
-        };
-
-        let value = serde_json::to_value(envelope).expect("envelope should serialize");
-
-        assert_eq!(
-            value["runtime"]["pluginId"],
-            serde_json::json!("user.provider")
-        );
-        assert_eq!(
-            value["runtime"]["serviceRootDir"],
-            serde_json::json!("C:/MomoBako/.service-data")
-        );
-        assert_eq!(
-            value["runtime"]["pluginRuntimeDir"],
-            serde_json::json!("C:/MomoBako/.service-data/runtime-cache/user-provider")
-        );
-        assert_eq!(
-            value["runtime"]["pluginConfig"]["apiKey"],
-            serde_json::json!("secret")
-        );
     }
 
     #[test]

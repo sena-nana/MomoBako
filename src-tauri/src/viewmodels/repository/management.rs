@@ -4,9 +4,7 @@ use tauri::AppHandle;
 
 use crate::services::repository::{
     NeteaseRepositoryCacheConfigureRequest, NeteaseRepositoryCacheConfigureResponse,
-    RepositoryBackendConfigUpdateRequest, RepositoryDeleteRequest, RepositoryExportRequest,
-    RepositoryExportResponse, RepositoryFolderRequest, RepositoryMutationRequest,
-    RepositoryMutationResponse, RepositoryRelocateRequest, SyncRequest, SyncResult,
+    RepositoryBackendConfigUpdateRequest, RepositoryDeleteRequest, RepositoryMutationResponse,
 };
 use crate::services::runtime::RepositoryRuntime;
 
@@ -20,45 +18,9 @@ impl RepositoryManagementViewModel {
         Self { runtime }
     }
 
-    pub async fn create_repository(
-        &self,
-        request: RepositoryMutationRequest,
-    ) -> Result<RepositoryMutationResponse, String> {
-        self.runtime
-            .run_repository_collection_write(move |state| state.create_repository(request))
-            .await
-    }
-
-    pub async fn import_repository(
-        &self,
-        request: RepositoryMutationRequest,
-    ) -> Result<RepositoryMutationResponse, String> {
-        self.runtime
-            .run_repository_collection_write(move |state| state.import_repository(request))
-            .await
-    }
-
-    pub async fn attach_repository_folder(
-        &self,
-        request: RepositoryFolderRequest,
-    ) -> Result<RepositoryMutationResponse, String> {
-        self.runtime
-            .run_repository_collection_write(move |state| state.attach_repository_folder(request))
-            .await
-    }
-
     pub async fn delete_repository(&self, request: RepositoryDeleteRequest) -> Result<(), String> {
         self.runtime
             .run_repository_collection_write(move |state| state.delete_repository(request))
-            .await
-    }
-
-    pub async fn relocate_repository(
-        &self,
-        request: RepositoryRelocateRequest,
-    ) -> Result<RepositoryMutationResponse, String> {
-        self.runtime
-            .run_repository_collection_write(move |state| state.relocate_repository(request))
             .await
     }
 
@@ -81,21 +43,6 @@ impl RepositoryManagementViewModel {
             .run_repository_collection_write(move |state| {
                 state.configure_netease_repository_cache(request)
             })
-            .await
-    }
-
-    pub async fn export_repository(
-        &self,
-        request: RepositoryExportRequest,
-    ) -> Result<RepositoryExportResponse, String> {
-        self.runtime
-            .run_write(move |state| state.export_repository(request))
-            .await
-    }
-
-    pub async fn sync_repository(&self, request: SyncRequest) -> Result<SyncResult, String> {
-        self.runtime
-            .run_write(move |state| state.sync_repository(request))
             .await
     }
 

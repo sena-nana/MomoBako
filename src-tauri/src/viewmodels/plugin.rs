@@ -84,18 +84,24 @@ impl PluginViewModel {
         &self,
         request: PluginConfigSetRequest,
     ) -> Result<PluginConfigSnapshot, String> {
-        self.runtime
+        let snapshot = self
+            .runtime
             .run_write(move |state| state.set_plugin_config_value(request))
-            .await
+            .await?;
+        self.runtime.reload_mutsuki_plugins().await?;
+        Ok(snapshot)
     }
 
     pub async fn delete_plugin_config_value(
         &self,
         request: PluginConfigDeleteRequest,
     ) -> Result<PluginConfigSnapshot, String> {
-        self.runtime
+        let snapshot = self
+            .runtime
             .run_write(move |state| state.delete_plugin_config_value(request))
-            .await
+            .await?;
+        self.runtime.reload_mutsuki_plugins().await?;
+        Ok(snapshot)
     }
 
     pub async fn list_plugins(&self) -> Result<Vec<PluginManifest>, String> {
@@ -115,24 +121,33 @@ impl PluginViewModel {
         &self,
         request: PluginEnabledRequest,
     ) -> Result<PluginMutationResponse, String> {
-        self.runtime
+        let response = self
+            .runtime
             .run_write(move |state| state.set_plugin_enabled(request))
-            .await
+            .await?;
+        self.runtime.reload_mutsuki_plugins().await?;
+        Ok(response)
     }
 
     pub async fn delete_plugin(&self, plugin_id: String) -> Result<PluginMutationResponse, String> {
-        self.runtime
+        let response = self
+            .runtime
             .run_write(move |state| state.delete_plugin(plugin_id))
-            .await
+            .await?;
+        self.runtime.reload_mutsuki_plugins().await?;
+        Ok(response)
     }
 
     pub async fn install_plugin_from_archive(
         &self,
         request: PluginInstallRequest,
     ) -> Result<PluginMutationResponse, String> {
-        self.runtime
+        let response = self
+            .runtime
             .run_write(move |state| state.install_plugin_from_archive(request))
-            .await
+            .await?;
+        self.runtime.reload_mutsuki_plugins().await?;
+        Ok(response)
     }
 
     pub async fn get_cache_snapshot(&self) -> Result<CacheSnapshot, String> {

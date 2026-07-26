@@ -142,7 +142,7 @@ pub(super) fn metadata_defaults_for_files(
         return Ok(BTreeMap::new());
     }
 
-    let registry = backend_plugin_registry(service_root);
+    let registry = plugin_catalog(service_root);
     let providers = registry.metadata_default_providers();
     if providers.is_empty() {
         return Ok(BTreeMap::new());

@@ -13,42 +13,46 @@ pub use services::repository::eagle_import::source_adapter::{
     EagleSourceSnapshot,
 };
 
+use services::mutsuki_runner::{
+    PROTOCOL_ARCHIVE_IMPORT, PROTOCOL_EAGLE_IMPORT, PROTOCOL_ENTRY_COPY, PROTOCOL_ENTRY_DELETE,
+    PROTOCOL_ENTRY_IMPORT, PROTOCOL_ENTRY_MOVE, PROTOCOL_PLAYBACK_PREPARE,
+    PROTOCOL_PLAYLIST_DOWNLOAD, PROTOCOL_REPOSITORY_ACTION_RUN, PROTOCOL_REPOSITORY_ATTACH,
+    PROTOCOL_REPOSITORY_CREATE, PROTOCOL_REPOSITORY_EXPORT, PROTOCOL_REPOSITORY_IMPORT,
+    PROTOCOL_REPOSITORY_RELOCATE, PROTOCOL_REPOSITORY_SYNC, PROTOCOL_THUMBNAIL_REQUEST,
+};
 use services::repository as repository_service;
 use services::repository::{
     ApiDesignSnapshot, AssetDetail, BinaryFileWriteRequest, BinaryFileWriteResponse, CacheSnapshot,
-    DownloaderPlaylistProgressEvent, DownloaderPlaylistRequest, EagleLibraryImportResponse,
-    EntryAccessRecordRequest, EntryAccessRecordResponse, EntryPlaybackProgressEvent,
-    EntryPlaybackRequest, EntryPlaybackSourceResponse, FileArchiveImportRequest,
-    FileBrowserRequest, FileBrowserSnapshot, FileCopyRequest, FileCreateRequest, FileDeleteRequest,
-    FileImportRequest, FileMoveRequest, FilePreviewSourceResponse, FileReadRequest,
-    FileRenameRequest, HardlinkCandidateResponse, HardlinkConfirmRequest, HardlinkConfirmResponse,
-    MetadataUpdateRequest, MetadataUpdateResponse, NeteaseRepositoryCacheConfigureRequest,
-    NeteaseRepositoryCacheConfigureResponse, PlaylistDetail, PlaylistItemRemoveRequest,
-    PlaylistItemsAddRequest, PlaylistItemsByPathsAddRequest, PlaylistItemsOrderRequest,
-    PlaylistMembershipIndex, PlaylistMembershipRequest, PlaylistMembershipSnapshot,
-    PlaylistMutationRequest, PlaylistMutationResponse, PlaylistSummary, PluginArchiveReadRequest,
-    PluginArchiveTextResponse, PluginCallRequest, PluginCallResult, PluginConfigDeleteRequest,
-    PluginConfigSetRequest, PluginConfigSnapshot, PluginDataDirectoryResponse,
-    PluginDataFilePreviewSourceRequest, PluginDataFilePreviewSourceResponse, PluginEnabledRequest,
-    PluginHookExecutionListRequest, PluginHookExecutionListResponse, PluginInstallRequest,
-    PluginManifest, PluginMutationResponse, RecentAccessHistoryClearRequest,
-    RecentAccessHistoryClearResponse, RepositoryAction, RepositoryActionEnabledRequest,
-    RepositoryActionMutationResponse, RepositoryActionRunRequest, RepositoryActionRunResponse,
+    DownloaderPlaylistRequest, EntryAccessRecordRequest, EntryAccessRecordResponse,
+    EntryPlaybackRequest, FileArchiveImportRequest, FileBrowserRequest, FileBrowserSnapshot,
+    FileCopyRequest, FileCreateRequest, FileDeleteRequest, FileImportRequest, FileMoveRequest,
+    FilePreviewSourceResponse, FileReadRequest, FileRenameRequest, HardlinkCandidateResponse,
+    HardlinkConfirmRequest, HardlinkConfirmResponse, MetadataUpdateRequest, MetadataUpdateResponse,
+    NeteaseRepositoryCacheConfigureRequest, NeteaseRepositoryCacheConfigureResponse,
+    PlaylistDetail, PlaylistItemRemoveRequest, PlaylistItemsAddRequest,
+    PlaylistItemsByPathsAddRequest, PlaylistItemsOrderRequest, PlaylistMembershipIndex,
+    PlaylistMembershipRequest, PlaylistMembershipSnapshot, PlaylistMutationRequest,
+    PlaylistMutationResponse, PlaylistSummary, PluginArchiveReadRequest, PluginArchiveTextResponse,
+    PluginCallRequest, PluginCallResult, PluginConfigDeleteRequest, PluginConfigSetRequest,
+    PluginConfigSnapshot, PluginDataDirectoryResponse, PluginDataFilePreviewSourceRequest,
+    PluginDataFilePreviewSourceResponse, PluginEnabledRequest, PluginHookExecutionListRequest,
+    PluginHookExecutionListResponse, PluginInstallRequest, PluginManifest, PluginMutationResponse,
+    RecentAccessHistoryClearRequest, RecentAccessHistoryClearResponse, RepositoryAction,
+    RepositoryActionEnabledRequest, RepositoryActionMutationResponse, RepositoryActionRunRequest,
     RepositoryCacheFilePreviewSourceRequest, RepositoryCacheFilePreviewSourceResponse,
-    RepositoryDeleteRequest, RepositoryExportRequest, RepositoryExportResponse,
-    RepositoryFolderRequest, RepositoryMutationRequest, RepositoryMutationResponse,
-    RepositoryRelocateRequest, RepositorySnapshot, RepositorySummary, RepositoryTreeSnapshot,
-    RevisionActionRequest, RevisionActionResponse, SearchRequest, SearchResponse,
-    SystemLogPage, SystemLogQuery, SystemLogRecord, SystemLogWriteRequest,
-    SmartFolderMutationRequest, SmartFolderMutationResponse, SmartFolderResultSnapshot,
-    SmartFolderTreeNode, SmartFolderUpdateRequest, SyncRequest, SyncResult, ThumbnailRequest,
-    ThumbnailResponse, TrashMutationRequest,
+    RepositoryDeleteRequest, RepositoryExportRequest, RepositoryFolderRequest,
+    RepositoryMutationRequest, RepositoryMutationResponse, RepositoryRelocateRequest,
+    RepositorySnapshot, RepositorySummary, RepositoryTreeSnapshot, RevisionActionRequest,
+    RevisionActionResponse, SearchRequest, SearchResponse, SmartFolderMutationRequest,
+    SmartFolderMutationResponse, SmartFolderResultSnapshot, SmartFolderTreeNode,
+    SmartFolderUpdateRequest, SyncRequest, SystemLogPage, SystemLogQuery, SystemLogRecord,
+    SystemLogWriteRequest, ThumbnailRequest, TrashMutationRequest,
 };
 use services::runtime::ExternalApiConnectionStatus;
+use services::runtime::RepositoryRuntime;
 use viewmodels::{
-    FileBrowserViewModel, PluginViewModel, RepositoryInteractionViewModel,
-    RepositoryManagementViewModel, RepositoryPlaybackViewModel, RepositoryQueryViewModel,
-    SystemViewModel,
+    FileBrowserViewModel, MutsukiTaskViewModel, PluginViewModel, RepositoryInteractionViewModel,
+    RepositoryManagementViewModel, RepositoryQueryViewModel, SystemViewModel,
 };
 
 pub use services::repository::eagle_import::import_eagle_library_with_service_root;
@@ -295,9 +299,12 @@ async fn set_repository_action_enabled(
 #[tauri::command]
 async fn run_repository_action(
     request: RepositoryActionRunRequest,
-    repository_interaction: tauri::State<'_, RepositoryInteractionViewModel>,
-) -> Result<RepositoryActionRunResponse, String> {
-    repository_interaction.run_repository_action(request).await
+    mutsuki_tasks: tauri::State<'_, MutsukiTaskViewModel>,
+) -> Result<serde_json::Value, String> {
+    let (response, _) = mutsuki_tasks
+        .execute(PROTOCOL_REPOSITORY_ACTION_RUN, request)
+        .await?;
+    Ok(response)
 }
 
 #[tauri::command]
@@ -337,22 +344,27 @@ async fn clear_recent_access_history(
 #[tauri::command]
 async fn prepare_entry_playback_source(
     request: EntryPlaybackRequest,
-    repository_playback: tauri::State<'_, RepositoryPlaybackViewModel>,
-) -> Result<EntryPlaybackSourceResponse, String> {
-    repository_playback
-        .prepare_entry_playback_source(request)
-        .await
+    mutsuki_tasks: tauri::State<'_, MutsukiTaskViewModel>,
+) -> Result<serde_json::Value, String> {
+    let (response, _) = mutsuki_tasks
+        .execute(PROTOCOL_PLAYBACK_PREPARE, request)
+        .await?;
+    Ok(response)
 }
 
 #[tauri::command]
 async fn prepare_entry_playback_source_with_progress(
     request: EntryPlaybackRequest,
-    progress: Channel<EntryPlaybackProgressEvent>,
-    repository_playback: tauri::State<'_, RepositoryPlaybackViewModel>,
-) -> Result<EntryPlaybackSourceResponse, String> {
-    repository_playback
-        .prepare_entry_playback_source_with_progress(request, progress)
-        .await
+    progress: Channel<serde_json::Value>,
+    mutsuki_tasks: tauri::State<'_, MutsukiTaskViewModel>,
+) -> Result<serde_json::Value, String> {
+    let (response, events) = mutsuki_tasks
+        .execute(PROTOCOL_PLAYBACK_PREPARE, request)
+        .await?;
+    for event in events {
+        let _ = progress.send(event);
+    }
+    Ok(response)
 }
 
 #[tauri::command]
@@ -366,12 +378,16 @@ async fn call_plugin(
 #[tauri::command]
 async fn download_playlist_with_progress(
     request: DownloaderPlaylistRequest,
-    progress: Channel<DownloaderPlaylistProgressEvent>,
-    repository_playback: tauri::State<'_, RepositoryPlaybackViewModel>,
+    progress: Channel<serde_json::Value>,
+    mutsuki_tasks: tauri::State<'_, MutsukiTaskViewModel>,
 ) -> Result<serde_json::Value, String> {
-    repository_playback
-        .download_playlist_with_progress(request, progress)
-        .await
+    let (response, events) = mutsuki_tasks
+        .execute(PROTOCOL_PLAYLIST_DOWNLOAD, request)
+        .await?;
+    for event in events {
+        let _ = progress.send(event);
+    }
+    Ok(response)
 }
 
 #[tauri::command]
@@ -461,41 +477,56 @@ async fn create_file(
 #[tauri::command]
 async fn import_entries(
     request: FileImportRequest,
-    file_browser: tauri::State<'_, FileBrowserViewModel>,
-) -> Result<FileBrowserSnapshot, String> {
-    file_browser.import_entries(request).await
+    mutsuki_tasks: tauri::State<'_, MutsukiTaskViewModel>,
+) -> Result<serde_json::Value, String> {
+    mutsuki_tasks
+        .execute(PROTOCOL_ENTRY_IMPORT, request)
+        .await
+        .map(|(response, _)| response)
 }
 
 #[tauri::command]
 async fn import_archive_entries(
     request: FileArchiveImportRequest,
-    file_browser: tauri::State<'_, FileBrowserViewModel>,
-) -> Result<FileBrowserSnapshot, String> {
-    file_browser.import_archive_entries(request).await
+    mutsuki_tasks: tauri::State<'_, MutsukiTaskViewModel>,
+) -> Result<serde_json::Value, String> {
+    mutsuki_tasks
+        .execute(PROTOCOL_ARCHIVE_IMPORT, request)
+        .await
+        .map(|(response, _)| response)
 }
 
 #[tauri::command]
 async fn import_eagle_library(
     request: services::repository::EagleLibraryImportRequest,
-    file_browser: tauri::State<'_, FileBrowserViewModel>,
-) -> Result<EagleLibraryImportResponse, String> {
-    file_browser.import_eagle_library(request).await
+    mutsuki_tasks: tauri::State<'_, MutsukiTaskViewModel>,
+) -> Result<serde_json::Value, String> {
+    mutsuki_tasks
+        .execute(PROTOCOL_EAGLE_IMPORT, request)
+        .await
+        .map(|(response, _)| response)
 }
 
 #[tauri::command]
 async fn copy_entries(
     request: FileCopyRequest,
-    file_browser: tauri::State<'_, FileBrowserViewModel>,
-) -> Result<FileBrowserSnapshot, String> {
-    file_browser.copy_entries(request).await
+    mutsuki_tasks: tauri::State<'_, MutsukiTaskViewModel>,
+) -> Result<serde_json::Value, String> {
+    mutsuki_tasks
+        .execute(PROTOCOL_ENTRY_COPY, request)
+        .await
+        .map(|(response, _)| response)
 }
 
 #[tauri::command]
 async fn move_entries(
     request: FileMoveRequest,
-    file_browser: tauri::State<'_, FileBrowserViewModel>,
-) -> Result<FileBrowserSnapshot, String> {
-    file_browser.move_entries(request).await
+    mutsuki_tasks: tauri::State<'_, MutsukiTaskViewModel>,
+) -> Result<serde_json::Value, String> {
+    mutsuki_tasks
+        .execute(PROTOCOL_ENTRY_MOVE, request)
+        .await
+        .map(|(response, _)| response)
 }
 
 #[tauri::command]
@@ -509,9 +540,12 @@ async fn rename_entry(
 #[tauri::command]
 async fn delete_entry(
     request: FileDeleteRequest,
-    file_browser: tauri::State<'_, FileBrowserViewModel>,
-) -> Result<FileBrowserSnapshot, String> {
-    file_browser.delete_entry(request).await
+    mutsuki_tasks: tauri::State<'_, MutsukiTaskViewModel>,
+) -> Result<serde_json::Value, String> {
+    mutsuki_tasks
+        .execute(PROTOCOL_ENTRY_DELETE, request)
+        .await
+        .map(|(response, _)| response)
 }
 
 #[tauri::command]
@@ -527,8 +561,12 @@ async fn create_repository(
     request: RepositoryMutationRequest,
     app: AppHandle,
     repository_management: tauri::State<'_, RepositoryManagementViewModel>,
-) -> Result<RepositoryMutationResponse, String> {
-    let response = repository_management.create_repository(request).await?;
+    mutsuki_tasks: tauri::State<'_, MutsukiTaskViewModel>,
+) -> Result<serde_json::Value, String> {
+    let response = mutsuki_tasks
+        .execute(PROTOCOL_REPOSITORY_CREATE, request)
+        .await?
+        .0;
     repository_management.refresh_thumbnail_scope(&app).await?;
     Ok(response)
 }
@@ -538,8 +576,12 @@ async fn import_repository(
     request: RepositoryMutationRequest,
     app: AppHandle,
     repository_management: tauri::State<'_, RepositoryManagementViewModel>,
-) -> Result<RepositoryMutationResponse, String> {
-    let response = repository_management.import_repository(request).await?;
+    mutsuki_tasks: tauri::State<'_, MutsukiTaskViewModel>,
+) -> Result<serde_json::Value, String> {
+    let response = mutsuki_tasks
+        .execute(PROTOCOL_REPOSITORY_IMPORT, request)
+        .await?
+        .0;
     repository_management.refresh_thumbnail_scope(&app).await?;
     Ok(response)
 }
@@ -549,10 +591,12 @@ async fn attach_repository_folder(
     request: RepositoryFolderRequest,
     app: AppHandle,
     repository_management: tauri::State<'_, RepositoryManagementViewModel>,
-) -> Result<RepositoryMutationResponse, String> {
-    let response = repository_management
-        .attach_repository_folder(request)
-        .await?;
+    mutsuki_tasks: tauri::State<'_, MutsukiTaskViewModel>,
+) -> Result<serde_json::Value, String> {
+    let response = mutsuki_tasks
+        .execute(PROTOCOL_REPOSITORY_ATTACH, request)
+        .await?
+        .0;
     repository_management.refresh_thumbnail_scope(&app).await?;
     Ok(response)
 }
@@ -572,8 +616,12 @@ async fn relocate_repository(
     request: RepositoryRelocateRequest,
     app: AppHandle,
     repository_management: tauri::State<'_, RepositoryManagementViewModel>,
-) -> Result<RepositoryMutationResponse, String> {
-    let response = repository_management.relocate_repository(request).await?;
+    mutsuki_tasks: tauri::State<'_, MutsukiTaskViewModel>,
+) -> Result<serde_json::Value, String> {
+    let response = mutsuki_tasks
+        .execute(PROTOCOL_REPOSITORY_RELOCATE, request)
+        .await?
+        .0;
     repository_management.refresh_thumbnail_scope(&app).await?;
     Ok(response)
 }
@@ -607,17 +655,23 @@ async fn configure_netease_repository_cache(
 #[tauri::command]
 async fn export_repository(
     request: RepositoryExportRequest,
-    repository_management: tauri::State<'_, RepositoryManagementViewModel>,
-) -> Result<RepositoryExportResponse, String> {
-    repository_management.export_repository(request).await
+    mutsuki_tasks: tauri::State<'_, MutsukiTaskViewModel>,
+) -> Result<serde_json::Value, String> {
+    mutsuki_tasks
+        .execute(PROTOCOL_REPOSITORY_EXPORT, request)
+        .await
+        .map(|(response, _)| response)
 }
 
 #[tauri::command]
 async fn sync_repository(
     request: SyncRequest,
-    repository_management: tauri::State<'_, RepositoryManagementViewModel>,
-) -> Result<SyncResult, String> {
-    repository_management.sync_repository(request).await
+    mutsuki_tasks: tauri::State<'_, MutsukiTaskViewModel>,
+) -> Result<serde_json::Value, String> {
+    mutsuki_tasks
+        .execute(PROTOCOL_REPOSITORY_SYNC, request)
+        .await
+        .map(|(response, _)| response)
 }
 
 #[tauri::command]
@@ -643,9 +697,12 @@ async fn confirm_hardlink_candidate(
 #[tauri::command]
 async fn ensure_thumbnail(
     request: ThumbnailRequest,
-    repository_interaction: tauri::State<'_, RepositoryInteractionViewModel>,
-) -> Result<ThumbnailResponse, String> {
-    repository_interaction.ensure_thumbnail(request).await
+    mutsuki_tasks: tauri::State<'_, MutsukiTaskViewModel>,
+) -> Result<serde_json::Value, String> {
+    mutsuki_tasks
+        .execute(PROTOCOL_THUMBNAIL_REQUEST, request)
+        .await
+        .map(|(response, _)| response)
 }
 
 #[tauri::command]
@@ -741,15 +798,14 @@ async fn write_system_log(
 }
 
 #[tauri::command]
-async fn clear_system_logs(
-    system_vm: tauri::State<'_, SystemViewModel>,
-) -> Result<(), String> {
+async fn clear_system_logs(system_vm: tauri::State<'_, SystemViewModel>) -> Result<(), String> {
     system_vm.clear_system_logs().await
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    app_shell::builder()
+    let runtime = RepositoryRuntime::start().expect("failed to start repository runtime");
+    app_shell::builder(runtime)
         .invoke_handler(tauri::generate_handler![
             ping,
             list_repositories,

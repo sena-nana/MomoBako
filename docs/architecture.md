@@ -101,12 +101,10 @@
 - Core-hosted capabilities such as playlist, PiP, progress, candidate queue, batch organize, download queue, metadata merge, rename/move execution, audit log and unified search are exposed through declarative `hooks`. Plugins contribute data and actions; core owns state, confirmation and dangerous writes.
 - Rich library-kind support follows that split: a frontend library plugin registers workspace UI and behavior through `registerLibraryExtension`; parser or support plugins can provide non-destructive sync defaults through `metadata.defaults.batch`; source plugins can declare `contributes.source.metadataMirrorKeys` for system metadata mirroring; provider plugins expose manual candidate lookup through `provider.lookupMetadataCandidate`. The host owns only these generic extension points and metadata writes still flow through the normal revision path.
 - Frontend preview registration is driven by runtime plugin manifests and `.momoplug` bundle loading; preview modules are read from the archive at runtime and do not enter the host frontend bundle.
-- Backend plugins use a C ABI boundary with JSON request/response envelopes:
-  - `momobako_plugin_manifest`
-  - `momobako_plugin_call`
-  - `momobako_plugin_free`
-- The repository runtime discovers manifests at startup from `.momoplug` archives and routes filesystem backend operations through the plugin registry using canonical `momobako.*` plugin IDs.
-- Native backend libraries are extracted from `.momoplug` into a controlled temporary cache before loading; plugin installation itself does not persistently extract archives.
+- Executable backend packages carry both the Momo-facing `manifest.json` and a native Mutsuki `plugin.toml`; their plugin IDs and versions must match.
+- Backend plugins export Mutsuki ABI v2 runners. The desktop host validates both manifests, artifact hashes, provider surfaces and plugin-scoped handler bindings before connecting them to Core.
+- The repository runtime discovers `.momoplug` archives at startup and maps `callPlugin` methods to declared `momobako.*` protocols and target bindings.
+- Executable artifacts are staged into a content-hash-isolated runtime cache. Companion artifacts such as the Office helper are declared in `plugin.toml` instead of extracted by product-specific host code.
 - Plugin-owned persistent files live under `.service-data/plugin-data/<pluginSlug>` (`<serviceRoot>/plugin-data/<pluginSlug>` at runtime). The host creates the directory on demand for frontend plugin settings entry points and before native backend plugin calls, then passes it as `runtime.pluginDataDir` with the current `runtime.pluginConfig` key-value snapshot.
 - Plugin configuration uses the same directory and plugin ID normalization path. `contributes.settings` declares optional schema fields and a settings page contribution; the plugin manager opens one settings entry per plugin, renders a registered custom Vue page when available, falls back to the schema form, and stores host-managed key-value config in `config.json`.
 - The runtime infers `category` for legacy manifests that only declare `kind`, normalizes legacy IDs such as `builtin.local-filesystem`, and reflects runtime plugin directory changes directly in `GET /plugins`.

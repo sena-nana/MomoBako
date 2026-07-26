@@ -245,7 +245,7 @@ impl RepositoryState {
         &self,
         plugin_id: &str,
     ) -> Result<(PluginManifest, PathBuf, BTreeMap<String, serde_json::Value>), String> {
-        let registry = plugin_management_registry(&self.root);
+        let registry = plugin_management_catalog(&self.root);
         let normalized_plugin_id = registry.normalize_plugin_id(plugin_id);
         let registration = registry
             .registration(&normalized_plugin_id)
@@ -991,7 +991,7 @@ impl RepositoryState {
 
     pub(super) fn load_repository_record(&self, repo_id: &str) -> Result<RepositoryRecord, String> {
         let registry = open_registry_connection(&self.registry_path)?;
-        let plugin_registry = backend_plugin_registry(&self.root);
+        let plugin_registry = plugin_catalog(&self.root);
         registry
             .query_row(
                 r#"
@@ -1045,7 +1045,7 @@ impl RepositoryState {
                 "#,
             )
             .map_err(db_error)?;
-        let plugin_registry = backend_plugin_registry(&self.root);
+        let plugin_registry = plugin_catalog(&self.root);
         let rows = stmt
             .query_map([], |row| {
                 let backend_plugin_id: String = row.get(3)?;
@@ -1111,7 +1111,7 @@ impl RepositoryState {
 
     pub(super) fn repository_backend_in_use(&self, plugin_id: &str) -> Result<bool, String> {
         let registry = open_registry_connection(&self.registry_path)?;
-        let plugin_registry = backend_plugin_registry(&self.root);
+        let plugin_registry = plugin_catalog(&self.root);
         let mut stmt = registry
             .prepare("SELECT backend_plugin_id FROM repositories")
             .map_err(db_error)?;
