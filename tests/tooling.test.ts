@@ -37,15 +37,11 @@ describe("MomoBako 工具链", () => {
       /^github:sena-nana\/LiliaUI#workspace=@lilia\/ui&commit=[0-9a-f]{40}$/,
     );
     const liliaCommit = pkg.dependencies["@lilia/ui"].match(/commit=([0-9a-f]{40})$/)?.[1];
-    expect(pkg.dependencies["@lilia/theme"]).toBe(
-      `github:sena-nana/LiliaUI#workspace=@lilia/theme&commit=${liliaCommit}`,
-    );
-    expect(pkg.dependencies["@lilia/ui-contract"]).toBe(
-      `github:sena-nana/LiliaUI#workspace=@lilia/ui-contract&commit=${liliaCommit}`,
-    );
-    expect(pkg.dependencies["@lilia/ui-foundation"]).toBe(
-      `github:sena-nana/LiliaUI#workspace=@lilia/ui-foundation&commit=${liliaCommit}`,
-    );
+    for (const workspace of ["theme", "ui-contract", "ui-foundation"]) {
+      expect(pkg.dependencies[`@lilia/${workspace}`]).toBe(
+        `github:sena-nana/LiliaUI#workspace=@lilia/${workspace}&commit=${liliaCommit}`,
+      );
+    }
     expect(pkg.dependencies["@lucide/vue"]).toBeDefined();
     expect(pkg.dependencies["lucide-vue-next"]).toBeUndefined();
     expect(pkg.devDependencies["@types/three"]).toBeDefined();
