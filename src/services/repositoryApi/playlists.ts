@@ -13,7 +13,8 @@ import type {
   PlaylistSummary,
   PlaylistUpdateRequest,
 } from "../../types/repository";
-import { invokeCommand, invokeWithProgress } from "./core";
+import { invokeCommand } from "./core";
+import { runMutsukiTask } from "../mutsukiTasks";
 
 export function listPlaylists(repoId: string) {
   return invokeCommand<PlaylistSummary[]>("list_playlists", { repoId });
@@ -66,10 +67,12 @@ export function setPlaylistMembership(request: PlaylistMembershipRequest) {
 export function downloadPlaylistWithProgress(
   request: DownloaderPlaylistRequest,
   onEvent: (event: DownloaderPlaylistProgressEvent) => void,
+  signal?: AbortSignal,
 ) {
-  return invokeWithProgress<Record<string, unknown>, DownloaderPlaylistProgressEvent>(
-    "download_playlist_with_progress",
-    { request },
+  return runMutsukiTask<Record<string, unknown>, DownloaderPlaylistProgressEvent>(
+    "momobako.playlist.download",
+    request,
     onEvent,
+    signal,
   );
 }

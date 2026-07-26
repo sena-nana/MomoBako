@@ -63,6 +63,7 @@ const runtime = ref<PlaylistPlayerRuntimeApi | null>(null);
 const runtimeController = ref<PlaylistPlayerController | null>(null);
 const runtimeMountTarget = ref<HTMLElement | null>(null);
 const runtimePlayerTypeId = ref<string | null>(null);
+let runtimeGeneration = 0;
 const shuffledOrder = ref<string[]>([]);
 const playbackHistory = ref<string[]>([]);
 const playbackSettings = ref<PlaylistPlayerSettings>(readPlaybackSettings());
@@ -272,12 +273,13 @@ function ensureShuffleOrder() {
 }
 
 async function disposeRuntime() {
-  if (!runtime.value) return;
-  await runtime.value.dispose?.();
+  runtimeGeneration += 1;
+  const activeRuntime = runtime.value;
   runtime.value = null;
   runtimeController.value = null;
   runtimeMountTarget.value = null;
   runtimePlayerTypeId.value = null;
+  await activeRuntime?.dispose?.();
 }
 
 function setError(message: string | null) {
@@ -325,16 +327,25 @@ async function ensureRuntimeLoaded() {
     await disposeRuntime();
   }
   if (!runtime.value) {
+    const generation = ++runtimeGeneration;
     const controller = {
       mountTarget: target,
       repoId: activeRepoId.value,
       onEvent: handleRuntimeEvent,
     };
     runtimeController.value = controller;
-    runtime.value = await player.createRuntime(controller);
+    const createdRuntime = await player.createRuntime(controller);
+    if (generation !== runtimeGeneration) {
+      await createdRuntime.dispose?.();
+      return false;
+    }
+    runtime.value = createdRuntime;
     runtimeMountTarget.value = target;
     runtimePlayerTypeId.value = playerTypeId;
     await configureRuntime();
+    if (generation !== runtimeGeneration) {
+      return false;
+    }
   } else {
     moveMountedRuntimeNode(target);
   }
@@ -355,21 +366,27 @@ async function loadCurrentItem(autoPlay = false) {
     return;
   }
   const ready = await ensureRuntimeLoaded();
-  if (!ready || !runtime.value) {
+  const activeRuntime = runtime.value;
+  if (!ready || !activeRuntime) {
     setError("缺少对应播放插件");
     return;
   }
   setError(null);
   await configureRuntime();
-  await runtime.value.load(item);
+  if (runtime.value !== activeRuntime) return;
+  await activeRuntime.load(item);
+  if (runtime.value !== activeRuntime) return;
   if (player.supportsVolume) {
-    await runtime.value.setVolume?.(volume.value);
+    await activeRuntime.setVolume?.(volume.value);
+    if (runtime.value !== activeRuntime) return;
   }
   if (player.supportsSeek && currentTimeMs.value > 0) {
-    await runtime.value.seek?.(currentTimeMs.value);
+    await activeRuntime.seek?.(currentTimeMs.value);
+    if (runtime.value !== activeRuntime) return;
   }
   if (autoPlay || isPlaying.value) {
-    await runtime.value.play();
+    await activeRuntime.play();
+    if (runtime.value !== activeRuntime) return;
     isPlaying.value = true;
   }
   persistSession();
@@ -635,6 +652,8 @@ function attachVisibleMountTarget(element: HTMLElement | null) {
 }
 
 function resetPlayerState() {
+  runtimeGeneration += 1;
+  void runtime.value?.dispose?.();
   activeRepoId.value = null;
   activePlaylist.value = null;
   playbackQueue.value = [];

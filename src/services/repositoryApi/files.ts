@@ -29,12 +29,12 @@ import type {
 } from "../../types/repository";
 import {
   invokeCommand,
-  invokeWithProgress,
   openExternalUrl,
   openRepositoryPath,
   revealRepositoryPath,
   startExternalFileDrag,
 } from "./core";
+import { runMutsukiTask } from "../mutsukiTasks";
 
 export { openExternalUrl, openRepositoryPath, revealRepositoryPath, startExternalFileDrag };
 
@@ -100,11 +100,13 @@ export function prepareEntryPlaybackSource(request: EntryPlaybackRequest) {
 export function prepareEntryPlaybackSourceWithProgress(
   request: EntryPlaybackRequest,
   onEvent: (event: EntryPlaybackProgressEvent) => void,
+  signal?: AbortSignal,
 ) {
-  return invokeWithProgress<EntryPlaybackSourceResponse, EntryPlaybackProgressEvent>(
-    "prepare_entry_playback_source_with_progress",
-    { request },
+  return runMutsukiTask<EntryPlaybackSourceResponse, EntryPlaybackProgressEvent>(
+    "momobako.playback.prepare",
+    request,
     onEvent,
+    signal,
   ).then((response) => {
     emitRepositoryEntryAccess({
       repoId: request.repoId,
