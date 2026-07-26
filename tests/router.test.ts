@@ -3099,12 +3099,14 @@ describe("文件管理冒烟", () => {
     expect(resizer).toHaveAttribute("aria-valuenow", "276");
 
     await fireEvent.click(toggleButton);
-    expect(resourceRegion).toHaveAttribute("hidden");
-    expect(resourceRegion).toHaveAttribute("data-region-visible", "false");
+    expect(resourceRegion).toHaveAttribute("data-region-collapsed", "true");
+    expect(resourceRegion).not.toHaveAttribute("hidden");
+    expect(resourceRegion).toHaveAttribute("data-region-visible", "true");
     expect(localStorage.getItem("momobako.sidebarCollapsed")).toBe("1");
     expect(screen.getByRole("button", { name: "展开侧边栏" })).toBeInTheDocument();
 
     await fireEvent.click(screen.getByRole("button", { name: "展开侧边栏" }));
+    expect(resourceRegion).not.toHaveAttribute("data-region-collapsed");
     expect(localStorage.getItem("momobako.sidebarCollapsed")).toBe("0");
     resizer = screen.getByRole("separator", { name: "拖动调整侧边栏宽度（双击恢复默认）" });
 
