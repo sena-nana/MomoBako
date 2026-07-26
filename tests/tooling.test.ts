@@ -26,7 +26,9 @@ describe("MomoBako 工具链", () => {
       "plugins:build": "node scripts/build-external-plugins.mjs",
       "plugins:package": "node scripts/package-external-plugins.mjs",
       "plugins:stage:dev": "node scripts/stage-external-plugins.mjs",
-      "tauri:dev:with-plugins": "yarn plugins:build && yarn plugins:package && yarn plugins:stage:dev && node scripts/tauri-dev.ts",
+      dev: "vite",
+      "tauri:dev": "yarn plugins:build && yarn plugins:package && yarn plugins:stage:dev && node scripts/tauri-dev.ts",
+      "tauri:dev:with-plugins": "yarn tauri:dev",
       verify: "yarn typecheck:node-scripts && yarn test && yarn build && cargo check --manifest-path src-tauri/Cargo.toml",
     });
     expect(deps.vitepress).toBeDefined();
