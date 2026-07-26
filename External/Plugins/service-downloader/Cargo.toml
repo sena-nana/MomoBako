@@ -7,7 +7,7 @@ edition = "2021"
 crate-type = ["cdylib"]
 
 [dependencies]
-momobako_backend_plugin_sdk = { path = "../_sdk/backend-rust" }
+momobako_mutsuki_plugin_sdk = { path = "../_sdk/mutsuki-rust" }
 ncm-api-rs = { git = "https://github.com/SPlayer-Dev/ncm-api-rs.git" }
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
 serde = { version = "1", features = ["derive"] }

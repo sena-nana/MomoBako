@@ -26,14 +26,23 @@ interface MutsukiPluginArtifact {
   companion_artifacts?: MutsukiCompanionArtifact[];
 }
 
+interface MutsukiHandlerBinding {
+  binding_id: string;
+  plugin_id: string;
+  protocol_id: string;
+  target_runner_hint?: string;
+}
+
 interface MutsukiPluginManifest {
   plugin_id: string;
   version: string;
   artifact: MutsukiPluginArtifact;
+  provides?: {
+    handler_bindings?: MutsukiHandlerBinding[];
+  };
 }
 
-interface MutsukiPluginToml {
-  manifest: MutsukiPluginManifest;
+interface MutsukiPluginToml extends MutsukiPluginManifest {
   [key: string]: unknown;
 }
 
@@ -71,13 +80,10 @@ function parseMutsukiManifest(path: string): MutsukiPluginToml {
   if (
     typeof value !== "object"
     || value === null
-    || !("manifest" in value)
-    || typeof value.manifest !== "object"
-    || value.manifest === null
   ) {
     throw new Error(`invalid Mutsuki plugin manifest: ${path}`);
   }
-  const manifest = value.manifest as Record<string, unknown>;
+  const manifest = value as Record<string, unknown>;
   if (
     typeof manifest.plugin_id !== "string"
     || manifest.plugin_id.trim() === ""
@@ -172,6 +178,42 @@ function companionArtifacts(artifact: MutsukiPluginArtifact): MutsukiCompanionAr
   return companions;
 }
 
+/** 强制 binding ID 按插件隔离，使同一 protocol 可由多个仓库后端安全提供。 */
+function validateHandlerBindings(manifest: MutsukiPluginManifest): void {
+  const bindings = manifest.provides?.handler_bindings;
+  if (!Array.isArray(bindings) || bindings.length === 0) {
+    throw new Error(`executable plugin must declare handler bindings: ${manifest.plugin_id}`);
+  }
+  const bindingIds = new Set<string>();
+  for (const binding of bindings) {
+    if (
+      typeof binding !== "object"
+      || binding === null
+      || typeof binding.binding_id !== "string"
+      || typeof binding.plugin_id !== "string"
+      || typeof binding.protocol_id !== "string"
+    ) {
+      throw new Error(`invalid handler binding: ${manifest.plugin_id}`);
+    }
+    if (binding.plugin_id !== manifest.plugin_id) {
+      throw new Error(
+        `handler binding plugin mismatch: expected ${manifest.plugin_id}, got ${binding.plugin_id}`,
+      );
+    }
+    const expectedBindingId =
+      `binding:${manifest.plugin_id}:${binding.protocol_id}`;
+    if (binding.binding_id !== expectedBindingId) {
+      throw new Error(
+        `handler binding id must be plugin-scoped: expected ${expectedBindingId}, got ${binding.binding_id}`,
+      );
+    }
+    if (bindingIds.has(binding.binding_id)) {
+      throw new Error(`duplicate handler binding id: ${binding.binding_id}`);
+    }
+    bindingIds.add(binding.binding_id);
+  }
+}
+
 /** 确认需要本地编译的 companion 已由 Mutsuki 清单显式声明。 */
 export function assertDeclaredCompanionArtifacts(pluginDir: string, paths: string[]): void {
   if (paths.length === 0) {
@@ -183,7 +225,7 @@ export function assertDeclaredCompanionArtifacts(pluginDir: string, paths: strin
   }
   const pluginToml = parseMutsukiManifest(pluginTomlPath);
   const declared = new Set(
-    companionArtifacts(pluginToml.manifest.artifact).map((companion) => companion.path),
+    companionArtifacts(pluginToml.artifact).map((companion) => companion.path),
   );
   const requested = new Set<string>();
   for (const path of paths) {
@@ -211,7 +253,7 @@ export function validatePluginPackage(pluginDir: string): ValidatedPluginPackage
   }
 
   const pluginToml = parseMutsukiManifest(pluginTomlPath);
-  const mutsukiManifest = pluginToml.manifest;
+  const mutsukiManifest = pluginToml;
   if (mutsukiManifest.plugin_id !== manifest.pluginId) {
     throw new Error(
       `plugin id mismatch: manifest.json=${manifest.pluginId}, plugin.toml=${mutsukiManifest.plugin_id}`,
@@ -223,6 +265,7 @@ export function validatePluginPackage(pluginDir: string): ValidatedPluginPackage
     );
   }
 
+  validateHandlerBindings(mutsukiManifest);
   validateArtifact(pluginDir, mutsukiManifest.artifact, "plugin artifact");
   for (const [index, companion] of companionArtifacts(mutsukiManifest.artifact).entries()) {
     validateArtifact(pluginDir, companion, `companion artifact ${index}`);
@@ -237,7 +280,7 @@ export function refreshPluginArtifactHashes(pluginDir: string): void {
     return;
   }
   const pluginToml = parseMutsukiManifest(pluginTomlPath);
-  const artifact = pluginToml.manifest.artifact;
+  const artifact = pluginToml.artifact;
   const declared = [artifact, ...companionArtifacts(artifact)];
   for (const [index, item] of declared.entries()) {
     const label = index === 0 ? "plugin artifact" : `companion artifact ${index - 1}`;

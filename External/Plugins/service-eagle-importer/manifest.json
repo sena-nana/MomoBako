@@ -12,12 +12,8 @@
   "capabilities": ["eagle", "import", "write"],
   "enabled": true,
   "sdk": "backend",
-  "runtime": "native-dylib",
-  "entry": {
-    "backend": {
-      "library": "momobako_service_eagle_importer"
-    }
-  },
+  "runtime": "manifest-only",
+  "entry": {},
   "permissions": ["filesystem:read", "filesystem:write"],
   "requires": [],
   "optional": [],

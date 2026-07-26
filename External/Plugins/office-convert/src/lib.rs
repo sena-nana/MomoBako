@@ -3,20 +3,17 @@
 //! 负责把 Office 文档转换为 PDF 并缓存到资源库缓存目录。
 
 use std::{
-    ffi::{c_char, CString},
     fs,
     net::TcpListener,
-    os::raw::c_char as raw_c_char,
     path::{Path, PathBuf},
     process::{Command, Output, Stdio},
     thread,
     time::Duration,
 };
 
-use momobako_backend_plugin_sdk::{
-    call_host_plugin, free_c_string, read_request, register_host_plugin_api, response_error,
-    response_with_error_log, write_host_log_silently, HostPluginCallFn, HostPluginFreeFn,
-    PluginCallEnvelope, PluginRuntimeContext,
+use momobako_mutsuki_plugin_sdk::{
+    export_mutsuki_momobako_plugin, write_host_log_silently, PluginCallEnvelope,
+    PluginRuntimeContext,
 };
 use reqwest::blocking::Client;
 use rusqlite::{Connection, OptionalExtension};
@@ -27,14 +24,12 @@ use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
 
-const MANIFEST: &str = include_str!("../manifest.json");
 const REGISTRY_FILE_NAME: &str = "repositories.db";
 const REPO_META_DIR: &str = ".momo";
 const OFFICE_CACHE_NAMESPACE: &str = "office-preview";
 const DEFAULT_LIBREOFFICE_VERSION: &str = "25.8.3";
 const DEFAULT_LIBREOFFICE_DOWNLOAD_URL: &str =
     "https://download.documentfoundation.org/libreoffice/stable/25.8.3/win/x86_64/LibreOffice_25.8.3_Win_x86-64.msi";
-const DOWNLOADER_PLUGIN_ID: &str = "momobako.service.downloader";
 const OFFICE_CONVERT_PLUGIN_ID: &str = "momobako.service.office-convert";
 const LIBREOFFICE_HELPER_HEALTH_TIMEOUT_SECS: u64 = 3;
 const LIBREOFFICE_HELPER_STARTUP_RETRIES: usize = 20;
@@ -123,36 +118,20 @@ struct RuntimeStatusResponse {
     bundled_download_url: String,
 }
 
-#[no_mangle]
-pub extern "C" fn momobako_plugin_manifest() -> *mut raw_c_char {
-    CString::new(MANIFEST)
-        .expect("manifest should not contain null bytes")
-        .into_raw()
-}
-
-#[no_mangle]
-pub extern "C" fn momobako_plugin_call(input: *const c_char) -> *mut c_char {
-    let request = match read_request(input) {
-        Ok(request) => request,
-        Err(error) => return response_error(error),
-    };
-    let method = request.method.clone();
-    let runtime = request.runtime.clone();
-    response_with_error_log(&runtime, &method, handle_call(request))
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn momobako_plugin_free(value: *mut c_char) {
-    unsafe { free_c_string(value) };
-}
-
-#[no_mangle]
-pub extern "C" fn momobako_plugin_register_host_api(
-    call: Option<HostPluginCallFn>,
-    free: Option<HostPluginFreeFn>,
-) {
-    register_host_plugin_api(call, free);
-}
+export_mutsuki_momobako_plugin!(
+    "momobako.service.office-convert",
+    "0.1.0",
+    protocols = [
+        "officeConvert.ensurePreviewPdf",
+        "officeConvert.getRuntimeStatus",
+        "officeConvert.clearPreviewCache",
+        "officeConvert.runRuntimeSelfCheck",
+        "officeConvert.shutdownDaemon",
+    ],
+    requires = ["momobako.service.downloader"],
+    permissions = ["filesystem:read", "filesystem:write", "network", "process"],
+    handle_call
+);
 
 fn handle_call(request: PluginCallEnvelope) -> Result<serde_json::Value, String> {
     let runtime = runtime_context(request.runtime)?;
@@ -797,11 +776,7 @@ fn ensure_bundled_libreoffice(runtime: &RuntimeContext) -> Result<Option<PathBuf
     #[cfg(target_os = "windows")]
     {
         let installer_path = bundled_libreoffice_installer_path(runtime);
-        download_runtime_via_downloader(
-            runtime,
-            DEFAULT_LIBREOFFICE_DOWNLOAD_URL,
-            &installer_path,
-        )?;
+        download_runtime(runtime, DEFAULT_LIBREOFFICE_DOWNLOAD_URL, &installer_path)?;
         extract_libreoffice_installer(runtime, &installer_path)?;
         if executable.is_file() {
             return Ok(Some(executable));
@@ -847,83 +822,39 @@ fn extract_libreoffice_installer(
     Err("当前仅支持在 Windows 上解压自带 LibreOffice 运行时。".to_string())
 }
 
-fn download_runtime_via_downloader(
-    runtime: &RuntimeContext,
-    url: &str,
-    target_path: &Path,
-) -> Result<(), String> {
+fn download_runtime(runtime: &RuntimeContext, url: &str, target_path: &Path) -> Result<(), String> {
     if target_path.is_file() {
         return Ok(());
     }
     if let Some(parent) = target_path.parent() {
         fs::create_dir_all(parent).map_err(io_error)?;
     }
-    let plugin_runtime = PluginRuntimeContext {
-        plugin_id: "momobako.service.office-convert".to_string(),
-        plugin_data_dir: runtime.plugin_data_dir.to_string_lossy().to_string(),
-        service_root_dir: runtime.service_root_dir.to_string_lossy().to_string(),
-        plugin_runtime_dir: runtime.plugin_runtime_dir.to_string_lossy().to_string(),
-        plugin_config: Default::default(),
-    };
-    let _ = call_host_plugin(
-        &plugin_runtime,
-        DOWNLOADER_PLUGIN_ID,
-        "downloader.ensureRuntime",
-        serde_json::json!({}),
-    )?;
-    let queued = call_host_plugin(
-        &plugin_runtime,
-        DOWNLOADER_PLUGIN_ID,
-        "downloader.enqueueDownload",
-        serde_json::json!({
-            "url": url,
-            "destinationPath": target_path.to_string_lossy().to_string(),
-            "metadata": {
-                "kind": "office-runtime",
-                "pluginId": "momobako.service.office-convert",
-                "runtime": "libreoffice",
-                "version": DEFAULT_LIBREOFFICE_VERSION
-            }
-        }),
-    )?;
-    let task_id = queued
-        .get("taskId")
-        .and_then(serde_json::Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| "downloader.enqueueDownload 未返回 taskId".to_string())?;
-    let record = call_host_plugin(
-        &plugin_runtime,
-        DOWNLOADER_PLUGIN_ID,
-        "downloader.awaitDownload",
-        serde_json::json!({
-            "taskId": task_id
-        }),
-    )?;
-    let status = record
-        .get("status")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or_default();
-    if status != "completed" {
-        let error = record
-            .get("error")
-            .and_then(serde_json::Value::as_str)
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .unwrap_or("LibreOffice runtime download failed");
-        return Err(error.to_string());
-    }
-    let destination_path = record
-        .get("destinationPath")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or_default()
-        .to_string();
-    if !Path::new(destination_path.as_str()).is_file() {
-        return Err(format!(
-            "LibreOffice runtime download completed but destination file is missing: {}",
-            destination_path
-        ));
-    }
+    let client = Client::builder()
+        .timeout(Duration::from_secs(30 * 60))
+        .build()
+        .map_err(|error| error.to_string())?;
+    let mut response = client
+        .get(url)
+        .send()
+        .and_then(reqwest::blocking::Response::error_for_status)
+        .map_err(|error| error.to_string())?;
+    let mut target = fs::File::create(target_path).map_err(io_error)?;
+    response
+        .copy_to(&mut target)
+        .map_err(|error| error.to_string())?;
+    write_host_log_silently(
+        &PluginRuntimeContext {
+            plugin_id: OFFICE_CONVERT_PLUGIN_ID.to_string(),
+            plugin_data_dir: runtime.plugin_data_dir.to_string_lossy().to_string(),
+            service_root_dir: runtime.service_root_dir.to_string_lossy().to_string(),
+            plugin_runtime_dir: runtime.plugin_runtime_dir.to_string_lossy().to_string(),
+            plugin_config: Default::default(),
+        },
+        "info",
+        "runtimeDownloaded",
+        "LibreOffice 运行时下载完成。",
+        serde_json::json!({ "url": url, "targetPath": target_path }),
+    );
     Ok(())
 }
 
@@ -2265,20 +2196,9 @@ mod test_support {
 mod tests {
     use super::*;
     use crate::test_support;
-    use momobako_backend_plugin_sdk::{
-        free_c_string, register_host_plugin_api, response_ok, HostPluginCallEnvelope,
-    };
     use rusqlite::params;
-    use std::{
-        collections::VecDeque,
-        ffi::CStr,
-        os::raw::c_char,
-        sync::{Mutex, OnceLock},
-        time::{SystemTime, UNIX_EPOCH},
-    };
+    use std::time::{SystemTime, UNIX_EPOCH};
 
-    static HOST_PLUGIN_CALLS: OnceLock<Mutex<Vec<HostPluginCallEnvelope>>> = OnceLock::new();
-    static HOST_PLUGIN_RESPONSES: OnceLock<Mutex<VecDeque<serde_json::Value>>> = OnceLock::new();
     fn unavailable_status(reason: &str) -> ConverterStatus {
         ConverterStatus {
             available: false,
@@ -2321,49 +2241,6 @@ mod tests {
                 auto_download_libreoffice: true,
             },
         }
-    }
-
-    unsafe extern "C" fn test_host_plugin_call(input: *const c_char) -> *mut c_char {
-        let raw = unsafe { CStr::from_ptr(input) }
-            .to_str()
-            .expect("host bridge request should be utf-8")
-            .to_string();
-        let envelope: HostPluginCallEnvelope =
-            serde_json::from_str(&raw).expect("host bridge request should decode");
-        if envelope.method == "downloader.awaitDownload" {
-            if let Some(destination_path) = HOST_PLUGIN_CALLS
-                .get_or_init(|| Mutex::new(Vec::new()))
-                .lock()
-                .expect("host bridge call log should lock")
-                .iter()
-                .find(|call| call.method == "downloader.enqueueDownload")
-                .and_then(|call| call.payload.get("destinationPath"))
-                .and_then(serde_json::Value::as_str)
-                .map(str::to_string)
-            {
-                let path = PathBuf::from(destination_path);
-                if let Some(parent) = path.parent() {
-                    let _ = fs::create_dir_all(parent);
-                }
-                let _ = fs::write(path, b"msi");
-            }
-        }
-        HOST_PLUGIN_CALLS
-            .get_or_init(|| Mutex::new(Vec::new()))
-            .lock()
-            .expect("host bridge call log should lock")
-            .push(envelope);
-        let response = HOST_PLUGIN_RESPONSES
-            .get_or_init(|| Mutex::new(VecDeque::new()))
-            .lock()
-            .expect("host bridge response queue should lock")
-            .pop_front()
-            .unwrap_or_else(|| serde_json::json!({}));
-        response_ok(response)
-    }
-
-    unsafe extern "C" fn test_host_plugin_free(value: *mut c_char) {
-        unsafe { free_c_string(value) };
     }
 
     struct TestWorkspace {
@@ -2581,91 +2458,6 @@ mod tests {
                 "C:/MomoBako/.service-data/plugin-data/momobako-service-office-convert/runtime/program/soffice.exe"
             )
         );
-    }
-
-    #[test]
-    fn download_runtime_via_downloader_uses_expected_host_plugin_sequence() {
-        let workspace = TestWorkspace::new("runtime-download-bridge");
-        let runtime = RuntimeContext {
-            plugin_data_dir: workspace.path("plugin-data"),
-            service_root_dir: workspace.path("service-root"),
-            plugin_runtime_dir: workspace.path("runtime"),
-            config: PluginConfig {
-                converter_mode: ConverterMode::Auto,
-                auto_download_libreoffice: true,
-            },
-        };
-        let target_path = workspace.path("plugin-data/downloads/LibreOffice/runtime.msi");
-
-        HOST_PLUGIN_CALLS
-            .get_or_init(|| Mutex::new(Vec::new()))
-            .lock()
-            .expect("host bridge call log should lock")
-            .clear();
-        let responses = HOST_PLUGIN_RESPONSES.get_or_init(|| Mutex::new(VecDeque::new()));
-        {
-            let mut guard = responses
-                .lock()
-                .expect("host bridge response queue should lock");
-            guard.clear();
-            guard.push_back(serde_json::json!({
-                "runtime": "aria2",
-                "queueSize": 0
-            }));
-            guard.push_back(serde_json::json!({
-                "taskId": "task-demo"
-            }));
-            guard.push_back(serde_json::json!({
-                "status": "completed",
-                "destinationPath": target_path.to_string_lossy().to_string()
-            }));
-        }
-        register_host_plugin_api(Some(test_host_plugin_call), Some(test_host_plugin_free));
-
-        let result = download_runtime_via_downloader(
-            &runtime,
-            DEFAULT_LIBREOFFICE_DOWNLOAD_URL,
-            &target_path,
-        );
-
-        register_host_plugin_api(None, None);
-        result.expect("host plugin bridge should download bundled runtime");
-
-        let calls = HOST_PLUGIN_CALLS
-            .get_or_init(|| Mutex::new(Vec::new()))
-            .lock()
-            .expect("host bridge call log should lock")
-            .clone();
-        assert_eq!(calls.len(), 3);
-        assert_eq!(calls[0].plugin_id, DOWNLOADER_PLUGIN_ID);
-        assert_eq!(calls[0].method, "downloader.ensureRuntime");
-        assert_eq!(calls[1].method, "downloader.enqueueDownload");
-        assert_eq!(
-            calls[1].payload["url"],
-            serde_json::json!(DEFAULT_LIBREOFFICE_DOWNLOAD_URL)
-        );
-        assert_eq!(
-            calls[1].payload["destinationPath"],
-            serde_json::json!(target_path.to_string_lossy().to_string())
-        );
-        assert_eq!(
-            calls[1].payload["metadata"]["kind"],
-            serde_json::json!("office-runtime")
-        );
-        assert_eq!(
-            calls[1].payload["metadata"]["pluginId"],
-            serde_json::json!("momobako.service.office-convert")
-        );
-        assert_eq!(
-            calls[1].payload["metadata"]["runtime"],
-            serde_json::json!("libreoffice")
-        );
-        assert_eq!(
-            calls[1].payload["metadata"]["version"],
-            serde_json::json!(DEFAULT_LIBREOFFICE_VERSION)
-        );
-        assert_eq!(calls[2].method, "downloader.awaitDownload");
-        assert_eq!(calls[2].payload["taskId"], serde_json::json!("task-demo"));
     }
 
     #[test]

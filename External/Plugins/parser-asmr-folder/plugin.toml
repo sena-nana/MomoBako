@@ -1,22 +1,21 @@
 # Mutsuki ABI v2 执行清单；构建阶段会刷新 artifact 哈希。
-[manifest]
 plugin_id = "momobako.parser.asmr-folder"
 version = "0.1.0"
 api_version = "mutsuki-plugin-v1"
 requires = []
 
-[manifest.artifact]
+[artifact]
 artifact_type = "abi"
 path = "momobako_parser_asmr_folder.dll"
 sha256 = "sha256:build"
 
-[manifest.provides]
+[provides]
 protocols = [
   { protocol_id = "momobako.metadata.defaults.batch", version = "1.0.0", input_schema = {}, output_schema = {}, error_schema = {}, codec = "json", compatibility = "compatible" },
 ]
-protocol_classes = {}
+protocol_classes = { "momobako.metadata.defaults.batch" = "effect" }
 handler_bindings = [
-  { binding_id = "binding:momobako.metadata.defaults.batch", plugin_id = "momobako.parser.asmr-folder", protocol_id = "momobako.metadata.defaults.batch", target_protocol_id = "momobako.metadata.defaults.batch", target_runner_hint = "momobako.parser.asmr-folder.runner", pool_id = "default", priority = 0, policy = "single", metadata = {} },
+  { binding_id = "binding:momobako.parser.asmr-folder:momobako.metadata.defaults.batch", plugin_id = "momobako.parser.asmr-folder", protocol_id = "momobako.metadata.defaults.batch", target_protocol_id = "momobako.metadata.defaults.batch", target_runner_hint = "momobako.parser.asmr-folder.runner", pool_id = "default", priority = 0, policy = "single", metadata = {} },
 ]
 resource_schemas = []
 resource_providers = []
@@ -41,7 +40,7 @@ bridges = [
 scheduler_policies = []
 workflows = []
 
-[[manifest.provides.runners]]
+[[provides.runners]]
 runner_id = "momobako.parser.asmr-folder.runner"
 plugin_id = "momobako.parser.asmr-folder"
 plugin_generation = 1
@@ -60,15 +59,15 @@ control = { entry_cancel = false, batch_cancel = true, timeout_granularity = "ba
 metadata = {}
 contract_surfaces = ["runner:momobako.parser.asmr-folder.runner"]
 
-[manifest.permissions]
+[permissions]
 effects = ["readRepository", "readMetadata", "writeCandidates"]
 resources = []
 
-[manifest.lifecycle]
+[lifecycle]
 reload_policy = "drain_and_swap"
 unload_timeout_ms = 5000
 supports_cancel = true
 supports_dispose = true
 supports_snapshot = false
 
-[manifest.metadata]
+[metadata]

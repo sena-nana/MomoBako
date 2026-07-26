@@ -1,16 +1,15 @@
 # Mutsuki ABI v2 执行清单；构建阶段会刷新 artifact 哈希。
-[manifest]
 plugin_id = "momobako.source.netease-cloud-music"
 version = "0.1.0"
 api_version = "mutsuki-plugin-v1"
 requires = ["momobako.service.downloader"]
 
-[manifest.artifact]
+[artifact]
 artifact_type = "abi"
 path = "momobako_source_netease_cloud_music.dll"
 sha256 = "sha256:build"
 
-[manifest.provides]
+[provides]
 protocols = [
   { protocol_id = "momobako.auth.createQrSession", version = "1.0.0", input_schema = {}, output_schema = {}, error_schema = {}, codec = "json", compatibility = "compatible" },
   { protocol_id = "momobako.auth.pollQrSession", version = "1.0.0", input_schema = {}, output_schema = {}, error_schema = {}, codec = "json", compatibility = "compatible" },
@@ -24,19 +23,31 @@ protocols = [
   { protocol_id = "momobako.filesystem.listDirectoryPage", version = "1.0.0", input_schema = {}, output_schema = {}, error_schema = {}, codec = "json", compatibility = "compatible" },
   { protocol_id = "momobako.filesystem.statEntry", version = "1.0.0", input_schema = {}, output_schema = {}, error_schema = {}, codec = "json", compatibility = "compatible" },
 ]
-protocol_classes = {}
+protocol_classes = {
+  "momobako.auth.createQrSession" = "effect",
+  "momobako.auth.pollQrSession" = "effect",
+  "momobako.auth.getLoginStatus" = "effect",
+  "momobako.auth.clearLogin" = "effect",
+  "momobako.filesystem.ensureAttachable" = "effect",
+  "momobako.filesystem.prepareRepositoryRoot" = "effect",
+  "momobako.filesystem.listFiles" = "effect",
+  "momobako.filesystem.listTree" = "effect",
+  "momobako.filesystem.listDirectory" = "effect",
+  "momobako.filesystem.listDirectoryPage" = "effect",
+  "momobako.filesystem.statEntry" = "effect",
+}
 handler_bindings = [
-  { binding_id = "binding:momobako.auth.createQrSession", plugin_id = "momobako.source.netease-cloud-music", protocol_id = "momobako.auth.createQrSession", target_protocol_id = "momobako.auth.createQrSession", target_runner_hint = "momobako.source.netease-cloud-music.runner", pool_id = "default", priority = 0, policy = "single", metadata = {} },
-  { binding_id = "binding:momobako.auth.pollQrSession", plugin_id = "momobako.source.netease-cloud-music", protocol_id = "momobako.auth.pollQrSession", target_protocol_id = "momobako.auth.pollQrSession", target_runner_hint = "momobako.source.netease-cloud-music.runner", pool_id = "default", priority = 0, policy = "single", metadata = {} },
-  { binding_id = "binding:momobako.auth.getLoginStatus", plugin_id = "momobako.source.netease-cloud-music", protocol_id = "momobako.auth.getLoginStatus", target_protocol_id = "momobako.auth.getLoginStatus", target_runner_hint = "momobako.source.netease-cloud-music.runner", pool_id = "default", priority = 0, policy = "single", metadata = {} },
-  { binding_id = "binding:momobako.auth.clearLogin", plugin_id = "momobako.source.netease-cloud-music", protocol_id = "momobako.auth.clearLogin", target_protocol_id = "momobako.auth.clearLogin", target_runner_hint = "momobako.source.netease-cloud-music.runner", pool_id = "default", priority = 0, policy = "single", metadata = {} },
-  { binding_id = "binding:momobako.filesystem.ensureAttachable", plugin_id = "momobako.source.netease-cloud-music", protocol_id = "momobako.filesystem.ensureAttachable", target_protocol_id = "momobako.filesystem.ensureAttachable", target_runner_hint = "momobako.source.netease-cloud-music.runner", pool_id = "default", priority = 0, policy = "single", metadata = {} },
-  { binding_id = "binding:momobako.filesystem.prepareRepositoryRoot", plugin_id = "momobako.source.netease-cloud-music", protocol_id = "momobako.filesystem.prepareRepositoryRoot", target_protocol_id = "momobako.filesystem.prepareRepositoryRoot", target_runner_hint = "momobako.source.netease-cloud-music.runner", pool_id = "default", priority = 0, policy = "single", metadata = {} },
-  { binding_id = "binding:momobako.filesystem.listFiles", plugin_id = "momobako.source.netease-cloud-music", protocol_id = "momobako.filesystem.listFiles", target_protocol_id = "momobako.filesystem.listFiles", target_runner_hint = "momobako.source.netease-cloud-music.runner", pool_id = "default", priority = 0, policy = "single", metadata = {} },
-  { binding_id = "binding:momobako.filesystem.listTree", plugin_id = "momobako.source.netease-cloud-music", protocol_id = "momobako.filesystem.listTree", target_protocol_id = "momobako.filesystem.listTree", target_runner_hint = "momobako.source.netease-cloud-music.runner", pool_id = "default", priority = 0, policy = "single", metadata = {} },
-  { binding_id = "binding:momobako.filesystem.listDirectory", plugin_id = "momobako.source.netease-cloud-music", protocol_id = "momobako.filesystem.listDirectory", target_protocol_id = "momobako.filesystem.listDirectory", target_runner_hint = "momobako.source.netease-cloud-music.runner", pool_id = "default", priority = 0, policy = "single", metadata = {} },
-  { binding_id = "binding:momobako.filesystem.listDirectoryPage", plugin_id = "momobako.source.netease-cloud-music", protocol_id = "momobako.filesystem.listDirectoryPage", target_protocol_id = "momobako.filesystem.listDirectoryPage", target_runner_hint = "momobako.source.netease-cloud-music.runner", pool_id = "default", priority = 0, policy = "single", metadata = {} },
-  { binding_id = "binding:momobako.filesystem.statEntry", plugin_id = "momobako.source.netease-cloud-music", protocol_id = "momobako.filesystem.statEntry", target_protocol_id = "momobako.filesystem.statEntry", target_runner_hint = "momobako.source.netease-cloud-music.runner", pool_id = "default", priority = 0, policy = "single", metadata = {} },
+  { binding_id = "binding:momobako.source.netease-cloud-music:momobako.auth.createQrSession", plugin_id = "momobako.source.netease-cloud-music", protocol_id = "momobako.auth.createQrSession", target_protocol_id = "momobako.auth.createQrSession", target_runner_hint = "momobako.source.netease-cloud-music.runner", pool_id = "default", priority = 0, policy = "single", metadata = {} },
+  { binding_id = "binding:momobako.source.netease-cloud-music:momobako.auth.pollQrSession", plugin_id = "momobako.source.netease-cloud-music", protocol_id = "momobako.auth.pollQrSession", target_protocol_id = "momobako.auth.pollQrSession", target_runner_hint = "momobako.source.netease-cloud-music.runner", pool_id = "default", priority = 0, policy = "single", metadata = {} },
+  { binding_id = "binding:momobako.source.netease-cloud-music:momobako.auth.getLoginStatus", plugin_id = "momobako.source.netease-cloud-music", protocol_id = "momobako.auth.getLoginStatus", target_protocol_id = "momobako.auth.getLoginStatus", target_runner_hint = "momobako.source.netease-cloud-music.runner", pool_id = "default", priority = 0, policy = "single", metadata = {} },
+  { binding_id = "binding:momobako.source.netease-cloud-music:momobako.auth.clearLogin", plugin_id = "momobako.source.netease-cloud-music", protocol_id = "momobako.auth.clearLogin", target_protocol_id = "momobako.auth.clearLogin", target_runner_hint = "momobako.source.netease-cloud-music.runner", pool_id = "default", priority = 0, policy = "single", metadata = {} },
+  { binding_id = "binding:momobako.source.netease-cloud-music:momobako.filesystem.ensureAttachable", plugin_id = "momobako.source.netease-cloud-music", protocol_id = "momobako.filesystem.ensureAttachable", target_protocol_id = "momobako.filesystem.ensureAttachable", target_runner_hint = "momobako.source.netease-cloud-music.runner", pool_id = "default", priority = 0, policy = "single", metadata = {} },
+  { binding_id = "binding:momobako.source.netease-cloud-music:momobako.filesystem.prepareRepositoryRoot", plugin_id = "momobako.source.netease-cloud-music", protocol_id = "momobako.filesystem.prepareRepositoryRoot", target_protocol_id = "momobako.filesystem.prepareRepositoryRoot", target_runner_hint = "momobako.source.netease-cloud-music.runner", pool_id = "default", priority = 0, policy = "single", metadata = {} },
+  { binding_id = "binding:momobako.source.netease-cloud-music:momobako.filesystem.listFiles", plugin_id = "momobako.source.netease-cloud-music", protocol_id = "momobako.filesystem.listFiles", target_protocol_id = "momobako.filesystem.listFiles", target_runner_hint = "momobako.source.netease-cloud-music.runner", pool_id = "default", priority = 0, policy = "single", metadata = {} },
+  { binding_id = "binding:momobako.source.netease-cloud-music:momobako.filesystem.listTree", plugin_id = "momobako.source.netease-cloud-music", protocol_id = "momobako.filesystem.listTree", target_protocol_id = "momobako.filesystem.listTree", target_runner_hint = "momobako.source.netease-cloud-music.runner", pool_id = "default", priority = 0, policy = "single", metadata = {} },
+  { binding_id = "binding:momobako.source.netease-cloud-music:momobako.filesystem.listDirectory", plugin_id = "momobako.source.netease-cloud-music", protocol_id = "momobako.filesystem.listDirectory", target_protocol_id = "momobako.filesystem.listDirectory", target_runner_hint = "momobako.source.netease-cloud-music.runner", pool_id = "default", priority = 0, policy = "single", metadata = {} },
+  { binding_id = "binding:momobako.source.netease-cloud-music:momobako.filesystem.listDirectoryPage", plugin_id = "momobako.source.netease-cloud-music", protocol_id = "momobako.filesystem.listDirectoryPage", target_protocol_id = "momobako.filesystem.listDirectoryPage", target_runner_hint = "momobako.source.netease-cloud-music.runner", pool_id = "default", priority = 0, policy = "single", metadata = {} },
+  { binding_id = "binding:momobako.source.netease-cloud-music:momobako.filesystem.statEntry", plugin_id = "momobako.source.netease-cloud-music", protocol_id = "momobako.filesystem.statEntry", target_protocol_id = "momobako.filesystem.statEntry", target_runner_hint = "momobako.source.netease-cloud-music.runner", pool_id = "default", priority = 0, policy = "single", metadata = {} },
 ]
 resource_schemas = []
 resource_providers = []
@@ -61,7 +72,7 @@ bridges = [
 scheduler_policies = []
 workflows = []
 
-[[manifest.provides.runners]]
+[[provides.runners]]
 runner_id = "momobako.source.netease-cloud-music.runner"
 plugin_id = "momobako.source.netease-cloud-music"
 plugin_generation = 1
@@ -92,15 +103,15 @@ control = { entry_cancel = false, batch_cancel = true, timeout_granularity = "ba
 metadata = {}
 contract_surfaces = ["runner:momobako.source.netease-cloud-music.runner"]
 
-[manifest.permissions]
+[permissions]
 effects = ["network", "filesystem:read", "filesystem:write"]
 resources = []
 
-[manifest.lifecycle]
+[lifecycle]
 reload_policy = "drain_and_swap"
 unload_timeout_ms = 5000
 supports_cancel = true
 supports_dispose = true
 supports_snapshot = false
 
-[manifest.metadata]
+[metadata]

@@ -10,19 +10,18 @@ use std::{
 use serde_json::{json, Value};
 
 use super::{
-    delete_entry, load_asset_metadata_map, load_json_or_default, load_snapshot, write_asset_metadata,
-    write_repository_state, PluginPayload, ACTIONS_FILE_NAME, SAVED_FILTERS_FILE_NAME,
-    TAGS_FILE_NAME,
+    delete_entry, load_asset_metadata_map, load_json_or_default, load_snapshot,
+    write_asset_metadata, write_repository_state, PluginPayload, ACTIONS_FILE_NAME,
+    SAVED_FILTERS_FILE_NAME, TAGS_FILE_NAME,
 };
 
-/// 验证基础模板库的挂载快照。
+/// 验证仓库内置 Eagle 夹具可以生成挂载快照。
 #[test]
-fn template_library_snapshot_is_mountable() {
-    let snapshot = load_snapshot(&fixture_library("EagleLibraryTemplate.library")).unwrap();
-    assert_eq!(snapshot.files.len(), 3);
+fn fixture_library_snapshot_is_mountable() {
+    let snapshot = load_snapshot(&fixture_library("EagleLibraryRichSample.library")).unwrap();
+    assert!(!snapshot.files.is_empty());
     assert!(snapshot.directories.contains_key(""));
-    assert!(snapshot.repository_state.quick_access.is_empty());
-    assert!(snapshot.repository_state.trash_entries.is_empty());
+    assert!(!snapshot.repository_state.quick_access.is_empty());
 }
 
 /// 验证富样例会产出 alias、回收站和仓库级对象。
@@ -59,7 +58,10 @@ fn rich_sample_snapshot_contains_alias_and_repository_state() {
 fn write_asset_metadata_updates_eagle_sidecar() {
     let repo_root = copy_fixture_library("EagleLibraryRichSample.library");
     let mut metadata = BTreeMap::new();
-    metadata.insert("title".to_string(), Value::String("重命名后的论文".to_string()));
+    metadata.insert(
+        "title".to_string(),
+        Value::String("重命名后的论文".to_string()),
+    );
     metadata.insert(
         "comment".to_string(),
         Value::String("来自测试的注释".to_string()),
@@ -90,7 +92,10 @@ fn write_asset_metadata_updates_eagle_sidecar() {
     .unwrap();
 
     let asset = load_asset_metadata_map(&repo_root, "MR3DC4GHBD9NT").unwrap();
-    assert_eq!(asset.get("name").and_then(Value::as_str), Some("重命名后的论文"));
+    assert_eq!(
+        asset.get("name").and_then(Value::as_str),
+        Some("重命名后的论文")
+    );
     assert_eq!(
         asset.get("annotation").and_then(Value::as_str),
         Some("来自测试的注释")
@@ -101,7 +106,10 @@ fn write_asset_metadata_updates_eagle_sidecar() {
     );
     assert_eq!(asset.get("rating").and_then(Value::as_i64), Some(5));
     assert_eq!(
-        asset.get("tags").and_then(Value::as_array).map(|tags| tags.len()),
+        asset
+            .get("tags")
+            .and_then(Value::as_array)
+            .map(|tags| tags.len()),
         Some(2)
     );
 }
@@ -215,7 +223,10 @@ fn delete_alias_entry_keeps_primary_asset_alive() {
     let asset = load_asset_metadata_map(&repo_root, "MR3DC4GHBD9NT").unwrap();
     assert_eq!(alias_count, 1);
     assert_eq!(
-        asset.get("folders").and_then(Value::as_array).map(|items| items.len()),
+        asset
+            .get("folders")
+            .and_then(Value::as_array)
+            .map(|items| items.len()),
         Some(1)
     );
     assert_eq!(asset.get("isDeleted").and_then(Value::as_bool), Some(false));

@@ -9,6 +9,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3d62b7694a562cdf5a74227903507c56ab2cc8bdd1f781ed5cb4cf9c9f810bfc"
 
 [[package]]
+name = "autocfg"
+version = "1.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
+
+[[package]]
 name = "binread"
 version = "2.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -232,24 +238,81 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6b947ae49db0d222b1dbc6b113ce7248a3fc3a6ca21b696717bfc000ba4484d8"
 
 [[package]]
-name = "momobako_backend_plugin_sdk"
+name = "momobako_builtin_local_filesystem"
 version = "0.1.0"
+dependencies = [
+ "everything-ipc",
+ "jwalk",
+ "momobako_mutsuki_plugin_sdk",
+ "ntfs-reader",
+ "serde",
+ "serde_json",
+ "time",
+]
+
+[[package]]
+name = "momobako_mutsuki_plugin_sdk"
+version = "0.1.0"
+dependencies = [
+ "mutsuki-runtime-contracts",
+ "mutsuki-runtime-core",
+ "mutsuki-runtime-sdk",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "mutsuki-runtime-contracts"
+version = "0.1.0"
+source = "git+https://github.com/sena-nana/MutsukiCore.git?rev=eb8d185bf6272e209a2137ac4b0b9c580a6e5a48#eb8d185bf6272e209a2137ac4b0b9c580a6e5a48"
 dependencies = [
  "serde",
  "serde_json",
 ]
 
 [[package]]
-name = "momobako_builtin_local_filesystem"
+name = "mutsuki-runtime-core"
 version = "0.1.0"
+source = "git+https://github.com/sena-nana/MutsukiCore.git?rev=eb8d185bf6272e209a2137ac4b0b9c580a6e5a48#eb8d185bf6272e209a2137ac4b0b9c580a6e5a48"
 dependencies = [
- "everything-ipc",
- "jwalk",
- "momobako_backend_plugin_sdk",
- "ntfs-reader",
+ "mutsuki-runtime-contracts",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
+name = "mutsuki-runtime-sdk"
+version = "0.1.0"
+source = "git+https://github.com/sena-nana/MutsukiCore.git?rev=eb8d185bf6272e209a2137ac4b0b9c580a6e5a48#eb8d185bf6272e209a2137ac4b0b9c580a6e5a48"
+dependencies = [
+ "mutsuki-runtime-contracts",
+ "mutsuki-runtime-core",
+ "mutsuki-runtime-sdk-macros",
+ "mutsuki-runtime-wire",
  "serde",
  "serde_json",
- "time",
+]
+
+[[package]]
+name = "mutsuki-runtime-sdk-macros"
+version = "0.1.0"
+source = "git+https://github.com/sena-nana/MutsukiCore.git?rev=eb8d185bf6272e209a2137ac4b0b9c580a6e5a48#eb8d185bf6272e209a2137ac4b0b9c580a6e5a48"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
+]
+
+[[package]]
+name = "mutsuki-runtime-wire"
+version = "0.1.0"
+source = "git+https://github.com/sena-nana/MutsukiCore.git?rev=eb8d185bf6272e209a2137ac4b0b9c580a6e5a48#eb8d185bf6272e209a2137ac4b0b9c580a6e5a48"
+dependencies = [
+ "mutsuki-runtime-contracts",
+ "rmp-serde",
+ "serde",
+ "serde_json",
+ "thiserror",
 ]
 
 [[package]]
@@ -270,6 +333,15 @@ name = "num-conv"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "521739c6d2bac4aa25192232afe6841231376b2b26d4d9fae5ecf8ca5772e441"
+
+[[package]]
+name = "num-traits"
+version = "0.2.19"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "071dfc062690e90b734c0b2273ce72ad0ffa95f0c74596bc250dcfd960262841"
+dependencies = [
+ "autocfg",
+]
 
 [[package]]
 name = "once_cell"
@@ -335,6 +407,25 @@ checksum = "22e18b0f0062d30d4230b2e85ff77fdfe4326feb054b9783a3460d8435c8ab91"
 dependencies = [
  "crossbeam-deque",
  "crossbeam-utils",
+]
+
+[[package]]
+name = "rmp"
+version = "0.8.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4ba8be72d372b2c9b35542551678538b562e7cf86c3315773cae48dfbfe7790c"
+dependencies = [
+ "num-traits",
+]
+
+[[package]]
+name = "rmp-serde"
+version = "1.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "72f81bee8c8ef9b577d1681a70ebbc962c232461e397b22c208c43c04b67a155"
+dependencies = [
+ "rmp",
+ "serde",
 ]
 
 [[package]]

@@ -1,21 +1,16 @@
 use std::{
     collections::BTreeSet,
-    ffi::CString,
     fs::{self, File},
     io::Write,
-    os::raw::c_char,
     path::{Path, PathBuf},
 };
 
-use momobako_backend_plugin_sdk::{
-    free_c_string, read_request, response_error, response_with_error_log, PluginCallEnvelope,
-};
+use momobako_mutsuki_plugin_sdk::{export_mutsuki_momobako_plugin, PluginCallEnvelope};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 use unarc_rs::unified::{ArchiveFormat, UnifiedArchive};
 
-const MANIFEST: &str = include_str!("../manifest.json");
 const DEFAULT_MAX_NESTED_DEPTH: usize = 5;
 const SUPPORTED_EXTENSIONS: &[&str] = &["zip", "cbz", "7z", "rar", "cbr"];
 
@@ -90,28 +85,18 @@ struct PreparedEntryPreview {
     modified_at: Option<String>,
 }
 
-#[no_mangle]
-pub extern "C" fn momobako_plugin_manifest() -> *mut c_char {
-    CString::new(MANIFEST)
-        .expect("manifest should not contain null bytes")
-        .into_raw()
-}
-
-#[no_mangle]
-pub extern "C" fn momobako_plugin_call(input: *const c_char) -> *mut c_char {
-    let request = match read_request(input) {
-        Ok(request) => request,
-        Err(error) => return response_error(error),
-    };
-    let method = request.method.clone();
-    let runtime = request.runtime.clone();
-    response_with_error_log(&runtime, &method, handle_call(request))
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn momobako_plugin_free(value: *mut c_char) {
-    unsafe { free_c_string(value) };
-}
+export_mutsuki_momobako_plugin!(
+    "momobako.service.archive-preview",
+    "0.1.0",
+    protocols = [
+        "archive.ensurePrepared",
+        "archive.listDirectory",
+        "archive.prepareEntryPreview",
+    ],
+    requires = [],
+    permissions = ["filesystem:read"],
+    handle_call
+);
 
 fn handle_call(request: PluginCallEnvelope) -> Result<serde_json::Value, String> {
     let payload: ArchivePayload =

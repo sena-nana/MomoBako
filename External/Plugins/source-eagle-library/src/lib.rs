@@ -9,52 +9,49 @@ mod tests;
 
 use std::{
     collections::BTreeMap,
-    ffi::{c_char, CString},
     fs::{self, OpenOptions},
-    os::raw::c_char as raw_c_char,
     path::{Path, PathBuf},
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use momobako_backend_plugin_sdk::{
-    free_c_string, read_request, response_error, response_with_error_log, PluginCallEnvelope,
-};
 use momobako_lib::{
     build_eagle_source_snapshot, EagleSourceEntry, EagleSourceEntryKind, EagleSourceSnapshot,
 };
+use momobako_mutsuki_plugin_sdk::{export_mutsuki_momobako_plugin, PluginCallEnvelope};
 use serde_json::{Map, Value};
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 
 use self::models::*;
 
-const MANIFEST: &str = include_str!("../manifest.json");
 const METADATA_FILE_NAME: &str = "metadata.json";
 const TAGS_FILE_NAME: &str = "tags.json";
 const SAVED_FILTERS_FILE_NAME: &str = "saved-filters.json";
 const ACTIONS_FILE_NAME: &str = "actions.json";
 
-#[no_mangle]
-pub extern "C" fn momobako_plugin_manifest() -> *mut raw_c_char {
-    CString::new(MANIFEST)
-        .expect("manifest should not contain null bytes")
-        .into_raw()
-}
-
-#[no_mangle]
-pub extern "C" fn momobako_plugin_call(input: *const c_char) -> *mut raw_c_char {
-    let request = match read_request(input) {
-        Ok(request) => request,
-        Err(error) => return response_error(error),
-    };
-    let method = request.method.clone();
-    let runtime = request.runtime.clone();
-    response_with_error_log(&runtime, &method, handle_call(request))
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn momobako_plugin_free(value: *mut raw_c_char) {
-    unsafe { free_c_string(value) };
-}
+export_mutsuki_momobako_plugin!(
+    "momobako.source.eagle-library",
+    "0.1.0",
+    protocols = [
+        "filesystem.ensureAttachable",
+        "filesystem.prepareRepositoryRoot",
+        "filesystem.listFiles",
+        "filesystem.listTree",
+        "filesystem.listDirectory",
+        "filesystem.listDirectoryPage",
+        "filesystem.statEntry",
+        "filesystem.createDirectory",
+        "filesystem.createFile",
+        "filesystem.renameEntry",
+        "filesystem.moveEntry",
+        "filesystem.deleteEntry",
+        "filesystem.describeRepositoryState",
+        "filesystem.writeAssetMetadata",
+        "filesystem.writeRepositoryState",
+    ],
+    requires = [],
+    permissions = ["filesystem:read", "filesystem:write"],
+    handle_call
+);
 
 fn handle_call(request: PluginCallEnvelope) -> Result<Value, String> {
     let payload: PluginPayload =

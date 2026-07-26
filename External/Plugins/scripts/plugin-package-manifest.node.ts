@@ -58,9 +58,17 @@ function writePluginToml(
         role: "office-convert-helper",
       }],
     },
+    provides: {
+      handler_bindings: [{
+        binding_id: "binding:momobako.test:momobako.test.ping",
+        plugin_id: "momobako.test",
+        protocol_id: "momobako.test.ping",
+        target_runner_hint: "momobako.test.runner",
+      }],
+    },
     ...overrides,
   };
-  writeFileSync(join(directory, "plugin.toml"), stringify({ manifest }));
+  writeFileSync(join(directory, "plugin.toml"), stringify(manifest));
 }
 
 function writeValidExecutableFixture(): string {
@@ -103,7 +111,7 @@ test("validates matching dual manifests and companion artifacts", () => {
   const directory = writeValidExecutableFixture();
   const result = validatePluginPackage(directory);
   assert.equal(result.manifest.pluginId, "momobako.test");
-  assert.equal(result.pluginToml?.manifest.artifact.companion_artifacts?.[0]?.role, "office-convert-helper");
+  assert.equal(result.pluginToml?.artifact.companion_artifacts?.[0]?.role, "office-convert-helper");
 });
 
 test("rejects mismatched plugin ids and versions", () => {
@@ -114,6 +122,37 @@ test("rejects mismatched plugin ids and versions", () => {
   const versionDirectory = writeValidExecutableFixture();
   writePluginToml(versionDirectory, { version: "9.9.9" });
   assert.throws(() => validatePluginPackage(versionDirectory), /plugin version mismatch/);
+});
+
+test("requires plugin-scoped unique handler bindings", () => {
+  const legacyBindingDirectory = writeValidExecutableFixture();
+  writePluginToml(legacyBindingDirectory, {
+    provides: {
+      handler_bindings: [{
+        binding_id: "binding:momobako.test.ping",
+        plugin_id: "momobako.test",
+        protocol_id: "momobako.test.ping",
+      }],
+    },
+  });
+  assert.throws(
+    () => validatePluginPackage(legacyBindingDirectory),
+    /handler binding id must be plugin-scoped/,
+  );
+
+  const duplicateBindingDirectory = writeValidExecutableFixture();
+  const binding = {
+    binding_id: "binding:momobako.test:momobako.test.ping",
+    plugin_id: "momobako.test",
+    protocol_id: "momobako.test.ping",
+  };
+  writePluginToml(duplicateBindingDirectory, {
+    provides: { handler_bindings: [binding, binding] },
+  });
+  assert.throws(
+    () => validatePluginPackage(duplicateBindingDirectory),
+    /duplicate handler binding id/,
+  );
 });
 
 test("rejects invalid artifact paths", () => {
@@ -175,9 +214,9 @@ test("refreshes only declared artifact hashes before package validation", () => 
   refreshPluginArtifactHashes(directory);
 
   const result = validatePluginPackage(directory);
-  assert.equal(result.pluginToml?.manifest.artifact.sha256, sha256("rebuilt-plugin"));
+  assert.equal(result.pluginToml?.artifact.sha256, sha256("rebuilt-plugin"));
   assert.equal(
-    result.pluginToml?.manifest.artifact.companion_artifacts?.[0]?.sha256,
+    result.pluginToml?.artifact.companion_artifacts?.[0]?.sha256,
     sha256("rebuilt-helper"),
   );
 });
