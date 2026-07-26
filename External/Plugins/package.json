@@ -6,6 +6,7 @@
   "scripts": {
     "build": "node scripts/build.mjs",
     "package": "yarn typecheck:node-scripts && node scripts/package.ts",
+    "test:package": "node --test scripts/plugin-package-manifest.test.ts",
     "typecheck:node-scripts": "tsc --project tsconfig.node-scripts.json",
     "stage:dev": "node scripts/stage-dev.mjs"
   },
@@ -14,6 +15,7 @@
     "esbuild": "^0.27.0",
     "jszip": "^3.10.1",
     "pdfjs-dist": "^4.10.38",
+    "smol-toml": "1.6.1",
     "three": "^0.184.0"
   },
   "devDependencies": {

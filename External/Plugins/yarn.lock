@@ -196,6 +196,7 @@ __metadata:
     esbuild: "npm:^0.27.0"
     jszip: "npm:^3.10.1"
     pdfjs-dist: "npm:^4.10.38"
+    smol-toml: "npm:1.6.1"
     three: "npm:^0.184.0"
     typescript: "npm:~6.0.3"
   languageName: unknown
@@ -659,6 +660,13 @@ __metadata:
   version: 1.0.5
   resolution: "setimmediate@npm:1.0.5"
   checksum: 10c0/5bae81bfdbfbd0ce992893286d49c9693c82b1bcc00dcaaf3a09c8f428fdeacf4190c013598b81875dfac2b08a572422db7df779a99332d0fce186d15a3e4d49
+  languageName: node
+  linkType: hard
+
+"smol-toml@npm:1.6.1":
+  version: 1.6.1
+  resolution: "smol-toml@npm:1.6.1"
+  checksum: 10c0/511a78722f99c7616fdb46af708de3d7e81434b5a3d58061166da73f28bfc6cae4f0cd04683f60515b9c490cd10152fce72287c960b337419c0299cc1f0f2a22
   languageName: node
   linkType: hard
 

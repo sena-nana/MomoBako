@@ -3,6 +3,11 @@ import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
+import {
+  assertDeclaredCompanionArtifacts,
+  refreshPluginArtifactHashes,
+  resolvePluginPackagePath,
+} from "./plugin-package-manifest.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const pluginsRoot = resolve(__dirname, "..");
@@ -107,7 +112,10 @@ function binaryFileName(binaryName) {
   return binaryName;
 }
 
-function buildExtraNativeBinary(pluginDir, definition) {
+function buildCompanionNativeArtifact(pluginDir, definition) {
+  if (!definition.path) {
+    throw new Error(`companion native artifact is missing package path: ${pluginDir}`);
+  }
   const manifestPath = join(pluginDir, definition.manifestPath);
   const binaryRoot = dirname(manifestPath);
   const result = spawnSync(
@@ -121,7 +129,7 @@ function buildExtraNativeBinary(pluginDir, definition) {
   if (result.status !== 0) {
     process.exit(result.status ?? 1);
   }
-  const fileName = definition.outputName || binaryFileName(definition.binaryName);
+  const fileName = definition.path;
   const builtBinaryPath = join(binaryRoot, "target", "release", binaryFileName(definition.binaryName));
   if (!existsSync(builtBinaryPath)) {
     throw new Error(`missing built binary: ${builtBinaryPath}`);
@@ -201,16 +209,24 @@ for (const name of readdirSync(pluginsRoot, { withFileTypes: true })) {
   if (buildType === "cargo-native") {
     const cargoManifestPath = nativeManifestPath(pluginDir, project);
     if (existsSync(cargoManifestPath)) {
+      const companionDefinitions = project.build?.companionArtifacts ?? [];
+      assertDeclaredCompanionArtifacts(
+        outputDir,
+        companionDefinitions.map((definition) => definition.path),
+      );
       const { fileName, builtLibraryPath } = buildNativePlugin(pluginDir, manifest, project);
       cpSync(builtLibraryPath, join(outputDir, fileName));
-      for (const definition of project.build?.extraBinaries ?? []) {
-        const { fileName: extraFileName, builtBinaryPath } = buildExtraNativeBinary(pluginDir, definition);
-        cpSync(builtBinaryPath, join(outputDir, extraFileName));
+      for (const definition of companionDefinitions) {
+        const { fileName: extraFileName, builtBinaryPath } = buildCompanionNativeArtifact(pluginDir, definition);
+        const outputPath = resolvePluginPackagePath(outputDir, extraFileName, "companion build artifact");
+        mkdirSync(dirname(outputPath), { recursive: true });
+        cpSync(builtBinaryPath, outputPath);
       }
     } else {
       console.log(`[build-external-plugins] skipped compile for ${name.name}: missing native manifest ${cargoManifestPath}`);
     }
   }
 
+  refreshPluginArtifactHashes(outputDir);
   console.log(`[build-external-plugins] prepared ${name.name}`);
 }

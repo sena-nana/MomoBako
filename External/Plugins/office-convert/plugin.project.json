@@ -11,11 +11,11 @@
       "Cargo.lock",
       "src/lib.rs"
     ],
-    "extraBinaries": [
+    "companionArtifacts": [
       {
         "manifestPath": "helper/Cargo.toml",
         "binaryName": "office-convert-helper",
-        "outputName": "office-convert-helper.exe"
+        "path": "office-convert-helper.exe"
       }
     ]
   }
