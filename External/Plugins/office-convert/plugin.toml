@@ -1,0 +1,94 @@
+# Mutsuki ABI v2 执行清单；构建阶段会刷新主产物与 helper 哈希。
+[manifest]
+plugin_id = "momobako.service.office-convert"
+version = "0.1.0"
+api_version = "mutsuki-plugin-v1"
+requires = ["momobako.service.downloader"]
+
+[manifest.artifact]
+artifact_type = "abi"
+path = "momobako_service_office_convert.dll"
+sha256 = "sha256:build"
+
+[[manifest.artifact.companion_artifacts]]
+path = "office-convert-helper.exe"
+sha256 = "sha256:build"
+executable = true
+role = "office-convert-helper"
+
+[manifest.provides]
+protocols = [
+  { protocol_id = "momobako.officeConvert.ensurePreviewPdf", version = "1.0.0", input_schema = {}, output_schema = {}, error_schema = {}, codec = "json", compatibility = "compatible" },
+  { protocol_id = "momobako.officeConvert.getRuntimeStatus", version = "1.0.0", input_schema = {}, output_schema = {}, error_schema = {}, codec = "json", compatibility = "compatible" },
+  { protocol_id = "momobako.officeConvert.clearPreviewCache", version = "1.0.0", input_schema = {}, output_schema = {}, error_schema = {}, codec = "json", compatibility = "compatible" },
+  { protocol_id = "momobako.officeConvert.runRuntimeSelfCheck", version = "1.0.0", input_schema = {}, output_schema = {}, error_schema = {}, codec = "json", compatibility = "compatible" },
+  { protocol_id = "momobako.officeConvert.shutdownDaemon", version = "1.0.0", input_schema = {}, output_schema = {}, error_schema = {}, codec = "json", compatibility = "compatible" },
+]
+protocol_classes = {}
+handler_bindings = [
+  { binding_id = "binding:momobako.officeConvert.ensurePreviewPdf", plugin_id = "momobako.service.office-convert", protocol_id = "momobako.officeConvert.ensurePreviewPdf", target_protocol_id = "momobako.officeConvert.ensurePreviewPdf", target_runner_hint = "momobako.service.office-convert.runner", pool_id = "default", priority = 0, policy = "single", metadata = {} },
+  { binding_id = "binding:momobako.officeConvert.getRuntimeStatus", plugin_id = "momobako.service.office-convert", protocol_id = "momobako.officeConvert.getRuntimeStatus", target_protocol_id = "momobako.officeConvert.getRuntimeStatus", target_runner_hint = "momobako.service.office-convert.runner", pool_id = "default", priority = 0, policy = "single", metadata = {} },
+  { binding_id = "binding:momobako.officeConvert.clearPreviewCache", plugin_id = "momobako.service.office-convert", protocol_id = "momobako.officeConvert.clearPreviewCache", target_protocol_id = "momobako.officeConvert.clearPreviewCache", target_runner_hint = "momobako.service.office-convert.runner", pool_id = "default", priority = 0, policy = "single", metadata = {} },
+  { binding_id = "binding:momobako.officeConvert.runRuntimeSelfCheck", plugin_id = "momobako.service.office-convert", protocol_id = "momobako.officeConvert.runRuntimeSelfCheck", target_protocol_id = "momobako.officeConvert.runRuntimeSelfCheck", target_runner_hint = "momobako.service.office-convert.runner", pool_id = "default", priority = 0, policy = "single", metadata = {} },
+  { binding_id = "binding:momobako.officeConvert.shutdownDaemon", plugin_id = "momobako.service.office-convert", protocol_id = "momobako.officeConvert.shutdownDaemon", target_protocol_id = "momobako.officeConvert.shutdownDaemon", target_runner_hint = "momobako.service.office-convert.runner", pool_id = "default", priority = 0, policy = "single", metadata = {} },
+]
+resource_schemas = []
+resource_providers = []
+resource_types = []
+effects = []
+streams = []
+subscriptions = []
+timers = []
+state_schemas = []
+host_extensions = [
+  { extension_id = "host.extension.momobako.service.office-convert.abi", kind = "plugin_backend", supported_deployments = ["abi"], reload_policy = "static", drain_required = false },
+]
+plugin_backends = [
+  { backend_id = "plugin.backend.momobako.service.office-convert.abi", deployment_kind = "abi", task_client_protocol = "mutsuki.task.v1", resource_client_protocol = "mutsuki.resource-plan.v1", codec_id = "mutsuki.codec.typed-msgpack.v1", bridge_id = "mutsuki.bridge.abi.binary.v2" },
+]
+codecs = [
+  { codec_id = "mutsuki.codec.typed-msgpack.v1", media_type = "application/msgpack", version = "2", connection_scoped = true },
+]
+bridges = [
+  { bridge_id = "mutsuki.bridge.abi.binary.v2", deployment_kind = "abi", codec_ids = ["mutsuki.codec.typed-msgpack.v1"], drain_policy = "drain_and_swap" },
+]
+scheduler_policies = []
+workflows = []
+
+[[manifest.provides.runners]]
+runner_id = "momobako.service.office-convert.runner"
+plugin_id = "momobako.service.office-convert"
+plugin_generation = 1
+accepted_protocol_ids = [
+  "momobako.officeConvert.ensurePreviewPdf",
+  "momobako.officeConvert.getRuntimeStatus",
+  "momobako.officeConvert.clearPreviewCache",
+  "momobako.officeConvert.runRuntimeSelfCheck",
+  "momobako.officeConvert.shutdownDaemon",
+]
+purity = "effectful"
+execution_class = "io"
+invocation_mode = "sync_exclusive"
+concurrency = { mode = "exclusive" }
+input_schema = {}
+output_schema = {}
+batch = { mode = "scalar_adapter", preferred_batch_size = 1, max_batch_entries = 1, max_entry_concurrency = 1, max_inflight_batches = 1, scalar_thread_safe = false, scalar_reentrant = false, partial_failure = true, preserve_order = true, side_effect = "unknown" }
+payload = { layouts = ["row"], preferred_layout = "row", zero_copy = false }
+resources = { batch_read = false, batch_write = false, requires_resource_plan = true, supports_shared_memory = false }
+ordering = { default = { type = "none" }, supports_sequence = true, supports_same_resource_order = true }
+control = { entry_cancel = false, batch_cancel = true, timeout_granularity = "batch" }
+metadata = {}
+contract_surfaces = ["runner:momobako.service.office-convert.runner"]
+
+[manifest.permissions]
+effects = ["filesystem:read", "filesystem:write", "network", "process"]
+resources = []
+
+[manifest.lifecycle]
+reload_policy = "drain_and_swap"
+unload_timeout_ms = 5000
+supports_cancel = true
+supports_dispose = true
+supports_snapshot = false
+
+[manifest.metadata]

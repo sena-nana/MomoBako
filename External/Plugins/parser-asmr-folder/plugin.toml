@@ -1,0 +1,74 @@
+# Mutsuki ABI v2 执行清单；构建阶段会刷新 artifact 哈希。
+[manifest]
+plugin_id = "momobako.parser.asmr-folder"
+version = "0.1.0"
+api_version = "mutsuki-plugin-v1"
+requires = []
+
+[manifest.artifact]
+artifact_type = "abi"
+path = "momobako_parser_asmr_folder.dll"
+sha256 = "sha256:build"
+
+[manifest.provides]
+protocols = [
+  { protocol_id = "momobako.metadata.defaults.batch", version = "1.0.0", input_schema = {}, output_schema = {}, error_schema = {}, codec = "json", compatibility = "compatible" },
+]
+protocol_classes = {}
+handler_bindings = [
+  { binding_id = "binding:momobako.metadata.defaults.batch", plugin_id = "momobako.parser.asmr-folder", protocol_id = "momobako.metadata.defaults.batch", target_protocol_id = "momobako.metadata.defaults.batch", target_runner_hint = "momobako.parser.asmr-folder.runner", pool_id = "default", priority = 0, policy = "single", metadata = {} },
+]
+resource_schemas = []
+resource_providers = []
+resource_types = []
+effects = []
+streams = []
+subscriptions = []
+timers = []
+state_schemas = []
+host_extensions = [
+  { extension_id = "host.extension.momobako.parser.asmr-folder.abi", kind = "plugin_backend", supported_deployments = ["abi"], reload_policy = "static", drain_required = false },
+]
+plugin_backends = [
+  { backend_id = "plugin.backend.momobako.parser.asmr-folder.abi", deployment_kind = "abi", task_client_protocol = "mutsuki.task.v1", resource_client_protocol = "mutsuki.resource-plan.v1", codec_id = "mutsuki.codec.typed-msgpack.v1", bridge_id = "mutsuki.bridge.abi.binary.v2" },
+]
+codecs = [
+  { codec_id = "mutsuki.codec.typed-msgpack.v1", media_type = "application/msgpack", version = "2", connection_scoped = true },
+]
+bridges = [
+  { bridge_id = "mutsuki.bridge.abi.binary.v2", deployment_kind = "abi", codec_ids = ["mutsuki.codec.typed-msgpack.v1"], drain_policy = "drain_and_swap" },
+]
+scheduler_policies = []
+workflows = []
+
+[[manifest.provides.runners]]
+runner_id = "momobako.parser.asmr-folder.runner"
+plugin_id = "momobako.parser.asmr-folder"
+plugin_generation = 1
+accepted_protocol_ids = ["momobako.metadata.defaults.batch"]
+purity = "effectful"
+execution_class = "io"
+invocation_mode = "sync_exclusive"
+concurrency = { mode = "exclusive" }
+input_schema = {}
+output_schema = {}
+batch = { mode = "scalar_adapter", preferred_batch_size = 1, max_batch_entries = 1, max_entry_concurrency = 1, max_inflight_batches = 1, scalar_thread_safe = false, scalar_reentrant = false, partial_failure = true, preserve_order = true, side_effect = "unknown" }
+payload = { layouts = ["row"], preferred_layout = "row", zero_copy = false }
+resources = { batch_read = false, batch_write = false, requires_resource_plan = true, supports_shared_memory = false }
+ordering = { default = { type = "none" }, supports_sequence = true, supports_same_resource_order = true }
+control = { entry_cancel = false, batch_cancel = true, timeout_granularity = "batch" }
+metadata = {}
+contract_surfaces = ["runner:momobako.parser.asmr-folder.runner"]
+
+[manifest.permissions]
+effects = ["readRepository", "readMetadata", "writeCandidates"]
+resources = []
+
+[manifest.lifecycle]
+reload_policy = "drain_and_swap"
+unload_timeout_ms = 5000
+supports_cancel = true
+supports_dispose = true
+supports_snapshot = false
+
+[manifest.metadata]
