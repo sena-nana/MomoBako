@@ -1,17 +1,11 @@
 use std::{
     collections::{BTreeMap, HashSet},
-    ffi::CString,
-    os::raw::c_char,
     time::Duration,
 };
 
-use momobako_backend_plugin_sdk::{
-    free_c_string, read_request, response_error, response_with_error_log, PluginCallEnvelope,
-};
+use momobako_mutsuki_plugin_sdk::{export_mutsuki_momobako_plugin, PluginCallEnvelope};
 use serde::Deserialize;
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
-
-const MANIFEST: &str = include_str!("../manifest.json");
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -20,28 +14,14 @@ struct LookupPayload {
     source_url: Option<String>,
 }
 
-#[no_mangle]
-pub extern "C" fn momobako_plugin_manifest() -> *mut c_char {
-    CString::new(MANIFEST)
-        .expect("manifest should not contain null bytes")
-        .into_raw()
-}
-
-#[no_mangle]
-pub extern "C" fn momobako_plugin_call(input: *const c_char) -> *mut c_char {
-    let request = match read_request(input) {
-        Ok(request) => request,
-        Err(error) => return response_error(error),
-    };
-    let method = request.method.clone();
-    let runtime = request.runtime.clone();
-    response_with_error_log(&runtime, &method, handle_call(request))
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn momobako_plugin_free(value: *mut c_char) {
-    unsafe { free_c_string(value) };
-}
+export_mutsuki_momobako_plugin!(
+    "momobako.service.provider.asmr-one",
+    "0.1.0",
+    protocols = ["provider.lookupMetadataCandidate"],
+    requires = [],
+    permissions = ["network", "useProvider", "writeCandidates"],
+    handle_call
+);
 
 fn handle_call(request: PluginCallEnvelope) -> Result<serde_json::Value, String> {
     match request.method.as_str() {

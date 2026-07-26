@@ -63,7 +63,7 @@ describe("MomoBako 工具链", () => {
     expect(devGuide).toContain("<serviceRoot>/plugins");
     expect(devGuide).toContain(".momoplug");
     expect(devGuide).toContain("register(ctx)");
-    expect(devGuide).toContain("momobako_plugin_call");
+    expect(devGuide).toContain("Mutsuki ABI v2");
     expect(pluginsPkg.scripts).toMatchObject({
       build: "node scripts/build.mjs",
       package: "yarn typecheck:node-scripts && node scripts/package.ts",

@@ -1,21 +1,14 @@
-use std::{
-    ffi::{c_char, CString},
-    fs,
-    future::Future,
-    path::PathBuf,
-};
+use std::{fs, future::Future, path::PathBuf};
 
 use base64::{engine::general_purpose, Engine as _};
-use momobako_backend_plugin_sdk::{
-    free_c_string, read_request, response_error, response_with_error_log, PluginCallEnvelope,
-    PluginRuntimeContext,
+use momobako_mutsuki_plugin_sdk::{
+    export_mutsuki_momobako_plugin, PluginCallEnvelope, PluginRuntimeContext,
 };
 use ncm_api_rs::{create_client, ApiResponse, Query};
 use qrcode::{render::svg, QrCode};
 use serde::{Deserialize, Serialize};
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 
-const MANIFEST: &str = include_str!("../manifest.json");
 const DEFAULT_API_BASE_URL: &str = "";
 const CREATED_CATEGORY_PATH: &str = "创建的歌单";
 const SUBSCRIBED_CATEGORY_PATH: &str = "收藏的歌单";
@@ -312,28 +305,26 @@ struct DiscoveredSong {
     payload: serde_json::Value,
 }
 
-#[no_mangle]
-pub extern "C" fn momobako_plugin_manifest() -> *mut c_char {
-    CString::new(MANIFEST)
-        .expect("manifest should not contain null bytes")
-        .into_raw()
-}
-
-#[no_mangle]
-pub extern "C" fn momobako_plugin_call(input: *const c_char) -> *mut c_char {
-    let request = match read_request(input) {
-        Ok(request) => request,
-        Err(error) => return response_error(error),
-    };
-    let method = request.method.clone();
-    let runtime = request.runtime.clone();
-    response_with_error_log(&runtime, &method, handle_call(request))
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn momobako_plugin_free(value: *mut c_char) {
-    unsafe { free_c_string(value) };
-}
+export_mutsuki_momobako_plugin!(
+    "momobako.source.netease-cloud-music",
+    "0.1.0",
+    protocols = [
+        "auth.createQrSession",
+        "auth.pollQrSession",
+        "auth.getLoginStatus",
+        "auth.clearLogin",
+        "filesystem.ensureAttachable",
+        "filesystem.prepareRepositoryRoot",
+        "filesystem.listFiles",
+        "filesystem.listTree",
+        "filesystem.listDirectory",
+        "filesystem.listDirectoryPage",
+        "filesystem.statEntry",
+    ],
+    requires = ["momobako.service.downloader"],
+    permissions = ["network", "filesystem:read", "filesystem:write"],
+    handle_call
+);
 
 fn handle_call(request: PluginCallEnvelope) -> Result<serde_json::Value, String> {
     let payload: PluginPayload =

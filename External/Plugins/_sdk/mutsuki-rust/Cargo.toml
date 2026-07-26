@@ -1,0 +1,11 @@
+[package]
+name = "momobako_mutsuki_plugin_sdk"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+mutsuki-runtime-contracts = { git = "https://github.com/sena-nana/MutsukiCore.git", rev = "eb8d185bf6272e209a2137ac4b0b9c580a6e5a48" }
+mutsuki-runtime-core = { git = "https://github.com/sena-nana/MutsukiCore.git", rev = "eb8d185bf6272e209a2137ac4b0b9c580a6e5a48" }
+mutsuki-runtime-sdk = { git = "https://github.com/sena-nana/MutsukiCore.git", rev = "eb8d185bf6272e209a2137ac4b0b9c580a6e5a48" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

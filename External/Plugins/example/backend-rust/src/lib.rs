@@ -1,38 +1,22 @@
-use std::ffi::{c_char, CString};
+//! Mutsuki ABI v2 后端插件最小示例。
 
-use momobako_backend_plugin_sdk::{
-    free_c_string, read_request, response_error, response_with_error_log,
-};
+use momobako_mutsuki_plugin_sdk::{export_mutsuki_momobako_plugin, PluginCallEnvelope};
 
-#[no_mangle]
-pub extern "C" fn momobako_plugin_manifest() -> *mut c_char {
-    CString::new(
-        r#"{"pluginId":"momobako.example.backend-ping","name":"Example Backend Ping","version":"0.1.0"}"#,
-    )
-    .expect("static manifest should be valid")
-    .into_raw()
-}
-
-#[no_mangle]
-pub extern "C" fn momobako_plugin_call(input: *const c_char) -> *mut c_char {
-    let request = match read_request(input) {
-        Ok(request) => request,
-        Err(error) => return response_error(error),
-    };
-
-    let method = request.method.clone();
-    let runtime = request.runtime.clone();
-    let result = match request.method.as_str() {
+fn handle(request: PluginCallEnvelope) -> Result<serde_json::Value, String> {
+    match request.method.as_str() {
         "ping" => Ok(serde_json::json!({
             "message": "pong",
             "pluginId": "momobako.example.backend-ping"
         })),
         other => Err(format!("unsupported method: {other}")),
-    };
-    response_with_error_log(&runtime, &method, result)
+    }
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn momobako_plugin_free(value: *mut c_char) {
-    unsafe { free_c_string(value) };
-}
+export_mutsuki_momobako_plugin!(
+    "momobako.example.backend-ping",
+    "0.1.0",
+    protocols = ["ping"],
+    requires = [],
+    permissions = [],
+    handle
+);

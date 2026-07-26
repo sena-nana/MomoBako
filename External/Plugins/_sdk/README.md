@@ -67,9 +67,9 @@
 
 目录：
 
-- `backend-rust/`
-  - 后端原生插件 Rust SDK
-  - 提供 C ABI 请求/响应辅助
+- `mutsuki-rust/`
+  - 后端原生插件 Mutsuki ABI v2 Rust 适配 SDK
+  - 提供 Runner、protocol/binding 和 DomainEvent 日志适配
   - `PluginCallEnvelope.runtime.plugin_data_dir` 指向同一个插件数据目录；`runtime.plugin_config` 是宿主从 `config.json` 读取的当前 key-value 配置快照
 
-模板与示例工程会直接复用这个目录，而不依赖主工程内旧 `plugins/backend-sdk`。
+模板与示例工程会直接复用这个目录。

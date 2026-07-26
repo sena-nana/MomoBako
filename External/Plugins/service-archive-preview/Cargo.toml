@@ -8,7 +8,7 @@ build = "build.rs"
 crate-type = ["cdylib"]
 
 [dependencies]
-momobako_backend_plugin_sdk = { path = "../_sdk/backend-rust" }
+momobako_mutsuki_plugin_sdk = { path = "../_sdk/mutsuki-rust" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.11"

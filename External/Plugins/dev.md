@@ -186,37 +186,29 @@ export function register(ctx) {
 
 ## 6. 后端插件 ABI
 
-后端插件继续使用 C ABI：
+执行型后端插件只支持 Mutsuki ABI v2。`.momoplug` 必须同时包含 `manifest.json` 与 `plugin.toml`，两份清单的插件 ID 和版本必须一致；纯前端和 manifest-only 插件不需要 `plugin.toml`。
 
-- `momobako_plugin_manifest`
-- `momobako_plugin_call`
-- `momobako_plugin_free`
+原生动态库及 companion artifacts 不会持久解压安装。MutsukiTauriHost 只会在运行期将通过路径与 SHA-256 校验的执行文件提取到按包内容哈希隔离的缓存目录。
 
-原生动态库不会持久解压安装。宿主只会在运行时把库文件提取到受控临时目录，再按内容哈希缓存加载。
+后端调用 envelope 会带上插件数据目录、运行缓存目录和宿主从 `config.json` 读取的当前 key-value 配置快照。
 
-后端调用 envelope 会带上 `runtime.pluginDataDir` 和 `runtime.pluginConfig`。前者指向同一个插件自有数据目录，后者是宿主从 `config.json` 读取的当前 key-value 配置快照。
+后端插件日志通过 Mutsuki `DomainEvent` 进入观察协议，不再同步回调宿主。
 
-后端插件还可以通过宿主内建桥写统一日志：
-
-- `pluginId = "momobako.system"`
-- `method = "system.log.write"`
-- payload 使用标准 `SystemLogWriteRequest`
-
-`External/Plugins/_sdk/backend-rust` 已提供：
+`External/Plugins/_sdk/mutsuki-rust` 已提供：
 
 ```rust
-write_host_log(runtime, "info", "taskStarted", "开始处理任务。", serde_json::json!({
+write_host_log_silently(runtime, "info", "taskStarted", "开始处理任务。", serde_json::json!({
     "taskId": "demo-1"
-}))?;
+}));
 ```
 
 这个 helper 会自动补齐：
 
 - `pluginId = runtime.plugin_id`
-- `sourceKind = "backend-plugin"`
-- `category = "plugin.backend"`
+- `kind = "momobako.plugin.log"`
+- 日志上下文序列化到领域事件 payload
 
-统一日志最终会进入宿主日志中心，并落盘到 `<serviceRoot>/logs/*.jsonl`。
+宿主可通过 Mutsuki 观察协议把事件适配到日志中心。
 
 ## 7. `.momoplug` 包结构
 
@@ -330,11 +322,11 @@ role = "office-convert-helper"
   - 包含最小前端预览插件骨架
 - `template/backend-rust/`
   - 后端原生插件模板
-  - 演示如何使用 `External/Plugins/_sdk/backend-rust`
+  - 演示如何使用 `External/Plugins/_sdk/mutsuki-rust`
 - `example/`
   - 演示从源码到 `.momoplug` 再到宿主发现和运行时加载的完整链路
 - `example/backend-rust/`
-  - 演示后端 `.momoplug` 的最小 C ABI 插件工程
+  - 演示后端 `.momoplug` 的最小 Mutsuki ABI v2 插件工程
 
 ## 11. 兼容与版本
 

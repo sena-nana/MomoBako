@@ -1,26 +1,29 @@
 # Mutsuki ABI v2 执行清单；构建阶段会刷新 artifact 哈希。
-[manifest]
 plugin_id = "momobako.service.archive-preview"
 version = "0.1.0"
 api_version = "mutsuki-plugin-v1"
 requires = []
 
-[manifest.artifact]
+[artifact]
 artifact_type = "abi"
 path = "momobako_service_archive_preview.dll"
 sha256 = "sha256:build"
 
-[manifest.provides]
+[provides]
 protocols = [
   { protocol_id = "momobako.archive.ensurePrepared", version = "1.0.0", input_schema = {}, output_schema = {}, error_schema = {}, codec = "json", compatibility = "compatible" },
   { protocol_id = "momobako.archive.listDirectory", version = "1.0.0", input_schema = {}, output_schema = {}, error_schema = {}, codec = "json", compatibility = "compatible" },
   { protocol_id = "momobako.archive.prepareEntryPreview", version = "1.0.0", input_schema = {}, output_schema = {}, error_schema = {}, codec = "json", compatibility = "compatible" },
 ]
-protocol_classes = {}
+protocol_classes = {
+  "momobako.archive.ensurePrepared" = "effect",
+  "momobako.archive.listDirectory" = "effect",
+  "momobako.archive.prepareEntryPreview" = "effect",
+}
 handler_bindings = [
-  { binding_id = "binding:momobako.archive.ensurePrepared", plugin_id = "momobako.service.archive-preview", protocol_id = "momobako.archive.ensurePrepared", target_protocol_id = "momobako.archive.ensurePrepared", target_runner_hint = "momobako.service.archive-preview.runner", pool_id = "default", priority = 0, policy = "single", metadata = {} },
-  { binding_id = "binding:momobako.archive.listDirectory", plugin_id = "momobako.service.archive-preview", protocol_id = "momobako.archive.listDirectory", target_protocol_id = "momobako.archive.listDirectory", target_runner_hint = "momobako.service.archive-preview.runner", pool_id = "default", priority = 0, policy = "single", metadata = {} },
-  { binding_id = "binding:momobako.archive.prepareEntryPreview", plugin_id = "momobako.service.archive-preview", protocol_id = "momobako.archive.prepareEntryPreview", target_protocol_id = "momobako.archive.prepareEntryPreview", target_runner_hint = "momobako.service.archive-preview.runner", pool_id = "default", priority = 0, policy = "single", metadata = {} },
+  { binding_id = "binding:momobako.service.archive-preview:momobako.archive.ensurePrepared", plugin_id = "momobako.service.archive-preview", protocol_id = "momobako.archive.ensurePrepared", target_protocol_id = "momobako.archive.ensurePrepared", target_runner_hint = "momobako.service.archive-preview.runner", pool_id = "default", priority = 0, policy = "single", metadata = {} },
+  { binding_id = "binding:momobako.service.archive-preview:momobako.archive.listDirectory", plugin_id = "momobako.service.archive-preview", protocol_id = "momobako.archive.listDirectory", target_protocol_id = "momobako.archive.listDirectory", target_runner_hint = "momobako.service.archive-preview.runner", pool_id = "default", priority = 0, policy = "single", metadata = {} },
+  { binding_id = "binding:momobako.service.archive-preview:momobako.archive.prepareEntryPreview", plugin_id = "momobako.service.archive-preview", protocol_id = "momobako.archive.prepareEntryPreview", target_protocol_id = "momobako.archive.prepareEntryPreview", target_runner_hint = "momobako.service.archive-preview.runner", pool_id = "default", priority = 0, policy = "single", metadata = {} },
 ]
 resource_schemas = []
 resource_providers = []
@@ -45,7 +48,7 @@ bridges = [
 scheduler_policies = []
 workflows = []
 
-[[manifest.provides.runners]]
+[[provides.runners]]
 runner_id = "momobako.service.archive-preview.runner"
 plugin_id = "momobako.service.archive-preview"
 plugin_generation = 1
@@ -68,15 +71,15 @@ control = { entry_cancel = false, batch_cancel = true, timeout_granularity = "ba
 metadata = {}
 contract_surfaces = ["runner:momobako.service.archive-preview.runner"]
 
-[manifest.permissions]
+[permissions]
 effects = ["filesystem:read"]
 resources = []
 
-[manifest.lifecycle]
+[lifecycle]
 reload_policy = "drain_and_swap"
 unload_timeout_ms = 5000
 supports_cancel = true
 supports_dispose = true
 supports_snapshot = false
 
-[manifest.metadata]
+[metadata]

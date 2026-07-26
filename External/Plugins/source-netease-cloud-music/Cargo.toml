@@ -7,7 +7,7 @@ edition = "2021"
 crate-type = ["cdylib"]
 
 [dependencies]
-momobako_backend_plugin_sdk = { path = "../_sdk/backend-rust" }
+momobako_mutsuki_plugin_sdk = { path = "../_sdk/mutsuki-rust" }
 base64 = "0.22"
 ncm-api-rs = { git = "https://github.com/SPlayer-Dev/ncm-api-rs.git" }
 qrcode = "0.14"

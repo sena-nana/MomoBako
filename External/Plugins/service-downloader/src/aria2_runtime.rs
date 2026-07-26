@@ -16,7 +16,7 @@ use sha1::{Digest, Sha1};
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 use zip::ZipArchive;
 
-use momobako_backend_plugin_sdk::{write_host_log_silently, PluginRuntimeContext};
+use momobako_mutsuki_plugin_sdk::{write_host_log_silently, PluginRuntimeContext};
 
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
@@ -1151,7 +1151,15 @@ mod tests {
         )
         .expect("status file should be written");
 
-        cleanup_stale_state(&paths).expect("cleanup should remove stale process state");
+        cleanup_stale_state(
+            &Aria2Config {
+                host_runtime: None,
+                plugin_data_dir: &plugin_data_dir,
+                download_url: "https://example.test/aria2.zip",
+            },
+            &paths,
+        )
+        .expect("cleanup should remove stale process state");
 
         assert!(!paths.pid_path.exists());
         assert!(!paths.status_path.exists());

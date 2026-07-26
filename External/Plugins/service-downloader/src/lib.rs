@@ -5,18 +5,15 @@
 mod aria2_runtime;
 
 use std::{
-    ffi::{c_char, CString},
     fs,
     future::Future,
-    os::raw::c_char as raw_c_char,
     path::{Path, PathBuf},
     time::Duration,
 };
 
 use aria2_runtime::Aria2Config;
-use momobako_backend_plugin_sdk::{
-    free_c_string, read_request, register_host_plugin_api, response_error, response_with_error_log,
-    write_host_log_silently, HostPluginCallFn, HostPluginFreeFn, PluginCallEnvelope,
+use momobako_mutsuki_plugin_sdk::{
+    export_mutsuki_momobako_plugin, write_host_log_silently, PluginCallEnvelope,
     PluginRuntimeContext,
 };
 use ncm_api_rs::{create_client, ApiResponse, Query};
@@ -24,7 +21,6 @@ use serde::Deserialize;
 use sha1::{Digest, Sha1};
 use time::{format_description::well_known::Rfc3339, Duration as TimeDuration, OffsetDateTime};
 
-const MANIFEST: &str = include_str!("../manifest.json");
 const DEFAULT_API_BASE_URL: &str = "";
 const DEFAULT_LEVEL: &str = "standard";
 const DEFAULT_TEMP_TTL_MINUTES: i64 = 120;
@@ -214,36 +210,25 @@ struct PlaylistDetailItem {
     name: Option<String>,
 }
 
-#[no_mangle]
-pub extern "C" fn momobako_plugin_manifest() -> *mut raw_c_char {
-    CString::new(MANIFEST)
-        .expect("manifest should not contain null bytes")
-        .into_raw()
-}
-
-#[no_mangle]
-pub extern "C" fn momobako_plugin_call(input: *const c_char) -> *mut c_char {
-    let request = match read_request(input) {
-        Ok(request) => request,
-        Err(error) => return response_error(error),
-    };
-    let method = request.method.clone();
-    let runtime = request.runtime.clone();
-    response_with_error_log(&runtime, &method, handle_call(request))
-}
-
-#[no_mangle]
-pub extern "C" fn momobako_plugin_register_host_api(
-    call: Option<HostPluginCallFn>,
-    free: Option<HostPluginFreeFn>,
-) {
-    register_host_plugin_api(call, free);
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn momobako_plugin_free(value: *mut c_char) {
-    unsafe { free_c_string(value) };
-}
+export_mutsuki_momobako_plugin!(
+    "momobako.service.downloader",
+    "0.1.0",
+    protocols = [
+        "downloader.prepareTrackPlayback",
+        "downloader.downloadTrackPackage",
+        "downloader.downloadPlaylistPackage",
+        "downloader.resolveLyrics",
+        "downloader.clearTrackCache",
+        "downloader.ensureRuntime",
+        "downloader.enqueueDownload",
+        "downloader.awaitDownload",
+        "downloader.removeDownload",
+        "downloader.getRuntimeStatus",
+    ],
+    requires = [],
+    permissions = ["network", "filesystem:write", "filesystem:read"],
+    handle_call
+);
 
 fn handle_call(request: PluginCallEnvelope) -> Result<serde_json::Value, String> {
     let runtime = runtime_context(request.runtime)?;
