@@ -2797,7 +2797,7 @@ describe("文件管理冒烟", () => {
       });
     });
 
-    const hexColorButton = screen.getByRole("button", { name: "#336699" });
+    const hexColorButton = await screen.findByRole("button", { name: "#336699" });
     expect(hexColorButton.style.getPropertyValue("--filter-swatch")).toBe("#336699");
     await fireEvent.click(hexColorButton);
     await waitFor(() => {
