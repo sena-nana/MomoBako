@@ -61,17 +61,19 @@ pub fn build_abi_plugin(
     permissions: &'static [&'static str],
     handler: PluginHandler,
 ) -> RuntimeResult<LoadedPlugin> {
-    let mut runtime = serde_json::from_value::<PluginRuntimeContext>(config.clone())
-        .unwrap_or_else(|_| PluginRuntimeContext {
+    let runtime_dir = config
+        .pointer("/_mutsuki/runtime_dir")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+    let mut runtime = serde_json::from_value::<PluginRuntimeContext>(config).unwrap_or_else(|_| {
+        PluginRuntimeContext {
             plugin_id: plugin_id.to_string(),
             ..PluginRuntimeContext::default()
-        });
+        }
+    });
     if runtime.plugin_runtime_dir.is_empty() {
-        runtime.plugin_runtime_dir = config
-            .pointer("/_mutsuki/runtime_dir")
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .to_string();
+        runtime.plugin_runtime_dir = runtime_dir;
     }
     let runner_id = format!("{plugin_id}.runner");
     let descriptor = RunnerDescriptorBuilder::new(&runner_id, plugin_id)

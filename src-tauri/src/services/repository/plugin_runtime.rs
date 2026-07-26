@@ -37,10 +37,6 @@ pub(super) struct PluginSettingsEntry {
 
 impl PluginCatalog {
     pub(super) fn load(service_root: &Path) -> Self {
-        Self::load_catalog(service_root)
-    }
-
-    fn load_catalog(service_root: &Path) -> Self {
         let settings = load_plugin_settings(service_root).unwrap_or_default();
         let manifests = load_runtime_plugin_manifests(service_root);
         let mut registrations = BTreeMap::new();
@@ -97,7 +93,9 @@ impl PluginCatalog {
 
     pub(super) fn resolved_manifest(&self, plugin_id: &str) -> Option<PluginManifest> {
         let normalized = self.normalize_plugin_id(plugin_id);
-        self.resolved_manifests_by_id().remove(normalized.as_str())
+        self.list_manifests()
+            .into_iter()
+            .find(|manifest| manifest.plugin_id == normalized)
     }
 
     pub(super) fn manifest(&self, plugin_id: &str) -> Option<&PluginManifest> {
@@ -136,14 +134,9 @@ impl PluginCatalog {
         method: &str,
         payload: serde_json::Value,
     ) -> Result<PluginRuntimeCallResult, String> {
-        let normalized = self.normalize_plugin_id(plugin_id);
-        let registration = self
-            .registrations
-            .get(normalized.as_str())
-            .ok_or_else(|| format!("unsupported plugin: {plugin_id}"))?;
         let resolved_manifest = self
-            .resolved_manifest(&normalized)
-            .unwrap_or_else(|| registration.manifest.clone());
+            .resolved_manifest(plugin_id)
+            .ok_or_else(|| format!("unsupported plugin: {plugin_id}"))?;
         if !resolved_manifest.enabled
             || matches!(
                 resolved_manifest.status.as_str(),
@@ -161,9 +154,8 @@ impl PluginCatalog {
         }
         let runtime = plugin_call_runtime(&resolved_manifest);
         let response = mutsuki_host::call_plugin(&resolved_manifest.plugin_id, method, payload)
-            .map_err(|error| {
-                log_backend_plugin_call_failure(&resolved_manifest.plugin_id, method, &error);
-                error
+            .inspect_err(|error| {
+                log_backend_plugin_call_failure(&resolved_manifest.plugin_id, method, error);
             })?;
         Ok(PluginRuntimeCallResult {
             plugin_id: resolved_manifest.plugin_id,
@@ -301,10 +293,6 @@ pub(super) fn plugin_call_runtime(manifest: &PluginManifest) -> Option<PluginCal
 }
 
 pub(super) fn plugin_catalog(service_root: &Path) -> PluginCatalog {
-    PluginCatalog::load(service_root)
-}
-
-pub(super) fn plugin_management_catalog(service_root: &Path) -> PluginCatalog {
     PluginCatalog::load(service_root)
 }
 

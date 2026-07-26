@@ -245,7 +245,7 @@ impl RepositoryState {
         &self,
         plugin_id: &str,
     ) -> Result<(PluginManifest, PathBuf, BTreeMap<String, serde_json::Value>), String> {
-        let registry = plugin_management_catalog(&self.root);
+        let registry = plugin_catalog(&self.root);
         let normalized_plugin_id = registry.normalize_plugin_id(plugin_id);
         let registration = registry
             .registration(&normalized_plugin_id)
