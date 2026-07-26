@@ -85,11 +85,32 @@ describe("MomoBako 工具链", () => {
     });
     expect(resolveYarnCommand({
       comSpec: "C:\\Windows\\System32\\cmd.exe",
+      npmExecPath: "C:\\Users\\ADMINI~1\\AppData\\Local\\Temp\\xfs-a96bedc1\\yarn",
+      platform: "win32",
+    })).toEqual({
+      command: "C:\\Windows\\System32\\cmd.exe",
+      args: [
+        "/d",
+        "/s",
+        "/c",
+        "C:\\Users\\ADMINI~1\\AppData\\Local\\Temp\\xfs-a96bedc1\\yarn.cmd",
+      ],
+    });
+    expect(resolveYarnCommand({
+      comSpec: "C:\\Windows\\System32\\cmd.exe",
       npmExecPath: "C:\\tooling\\yarn.cmd",
       platform: "win32",
     })).toEqual({
       command: "C:\\Windows\\System32\\cmd.exe",
       args: ["/d", "/s", "/c", "C:\\tooling\\yarn.cmd"],
+    });
+    expect(resolveYarnCommand({
+      comSpec: "C:\\Windows\\System32\\cmd.exe",
+      npmExecPath: "C:\\tooling\\yarn.js",
+      platform: "win32",
+    })).toEqual({
+      command: "C:\\Windows\\System32\\cmd.exe",
+      args: ["/d", "/s", "/c", "corepack.cmd", "yarn"],
     });
     expect(resolveYarnCommand({
       comSpec: "C:\\Windows\\System32\\cmd.exe",
