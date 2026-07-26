@@ -1,13 +1,12 @@
-// 校验插件 manifest 后，将构建目录打包为可安装的 .momoplug 归档。
+// 校验插件双清单与所有 artifact 后，将构建目录打包为可安装的 .momoplug 归档。
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import JSZip from "jszip";
-
-interface PluginManifest {
-  pluginId: string;
-  version: string;
-}
+import {
+  readMomoPluginManifest,
+  validatePluginPackage,
+} from "./plugin-package-manifest.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const pluginsRoot = resolve(__dirname, "..");
@@ -34,25 +33,6 @@ function addDirectory(zip: JSZip, sourceDir: string, baseDir: string): void {
   }
 }
 
-/** 读取并校验打包命名所需的 manifest 核心字段。 */
-function readManifest(path: string): PluginManifest {
-  const value: unknown = JSON.parse(readFileSync(path, "utf-8"));
-  if (
-    typeof value !== "object"
-    || value === null
-    || !("pluginId" in value)
-    || typeof value.pluginId !== "string"
-    || !("version" in value)
-    || typeof value.version !== "string"
-  ) {
-    throw new Error(`invalid plugin manifest: ${path}`);
-  }
-  return {
-    pluginId: value.pluginId,
-    version: value.version,
-  };
-}
-
 rmSync(packagesRoot, { recursive: true, force: true });
 mkdirSync(packagesRoot, { recursive: true });
 let packagedCount = 0;
@@ -63,7 +43,7 @@ for (const name of readdirSync(distRoot, { withFileTypes: true })) {
   const pluginDir = join(distRoot, name.name);
   const manifestPath = join(pluginDir, "manifest.json");
   if (!existsSync(manifestPath)) continue;
-  const manifest = readManifest(manifestPath);
+  const manifest = readMomoPluginManifest(manifestPath);
   if (
     requestedPluginIds.size === 0
       ? ["example", "template"].includes(name.name)
@@ -71,6 +51,7 @@ for (const name of readdirSync(distRoot, { withFileTypes: true })) {
   ) {
     continue;
   }
+  validatePluginPackage(pluginDir);
   expectedCount += 1;
   const packageName = `${name.name}-${manifest.version}.momoplug`;
   const packagePath = join(packagesRoot, packageName);

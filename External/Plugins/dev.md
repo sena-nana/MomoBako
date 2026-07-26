@@ -226,7 +226,10 @@ write_host_log(runtime, "info", "taskStarted", "开始处理任务。", serde_js
 
 - 必须包含单插件根目录
 - 根目录下必须包含 `manifest.json`
+- 执行型后端必须同时包含 Mutsuki `plugin.toml`；纯前端与 `manifest-only` 插件不需要伪造该文件
+- 双清单的插件 ID 与版本必须一致
 - 前端入口、后端入口、资源路径都使用包内相对路径
+- `plugin.toml` 的主 artifact 与 companion artifacts 必须存在于包内，并携带匹配内容的规范小写 SHA-256
 
 典型结构：
 
@@ -237,6 +240,39 @@ example-text-preview-0.1.0.momoplug
     dist/register.js
     _sdk/README.md
 ```
+
+执行型后端的产物由 `plugin.toml` 声明：
+
+```toml
+[manifest.artifact]
+artifact_type = "abi"
+path = "momobako_service_office_convert.dll"
+sha256 = "sha256:<build 阶段生成的 64 位小写十六进制>"
+
+[[manifest.artifact.companion_artifacts]]
+path = "office-convert-helper.exe"
+sha256 = "sha256:<build 阶段生成的 64 位小写十六进制>"
+executable = true
+role = "office-convert-helper"
+```
+
+需要额外 Cargo 构建的 companion 在 `plugin.project.json` 中使用相同包内路径：
+
+```json
+{
+  "build": {
+    "companionArtifacts": [
+      {
+        "manifestPath": "helper/Cargo.toml",
+        "binaryName": "office-convert-helper",
+        "path": "office-convert-helper.exe"
+      }
+    ]
+  }
+}
+```
+
+构建器仅刷新清单已经声明的文件哈希；打包器会再次校验相对路径、文件存在性和 SHA-256，不会隐式补入未声明产物。
 
 安装动作本质上是：
 
@@ -285,6 +321,7 @@ example-text-preview-0.1.0.momoplug
 
 `example/` 与 `template/` 也包含 `plugin.project.json`，可通过 `cd External/Plugins && yarn build example` 或 `yarn build template` 做定向构建验证；默认批量打包不会把它们产出到 `.packages/`。
 如需验证完整链路，可继续执行 `yarn package example` 生成 `example-<version>.momoplug`，再用 `yarn stage:dev <serviceRoot>` 定向复制到某个运行时目录下的 `plugins/`。
+双清单与 artifact 规则可用 `yarn test:package` 做定向验证。
 
 ## 10. 模板与示例
 
