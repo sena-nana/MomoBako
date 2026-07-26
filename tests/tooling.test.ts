@@ -37,6 +37,9 @@ describe("MomoBako 工具链", () => {
       /^github:sena-nana\/LiliaUI#workspace=@lilia\/ui&commit=[0-9a-f]{40}$/,
     );
     const liliaCommit = pkg.dependencies["@lilia/ui"].match(/commit=([0-9a-f]{40})$/)?.[1];
+    expect(pkg.dependencies["@lilia/theme"]).toBe(
+      `github:sena-nana/LiliaUI#workspace=@lilia/theme&commit=${liliaCommit}`,
+    );
     expect(pkg.dependencies["@lilia/ui-contract"]).toBe(
       `github:sena-nana/LiliaUI#workspace=@lilia/ui-contract&commit=${liliaCommit}`,
     );
