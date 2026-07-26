@@ -3,10 +3,8 @@
 use mutsuki_runtime_contracts::TaskOutcome;
 use mutsuki_tauri_bridge::{FrontendContext, FrontendTaskRequest};
 use mutsuki_tauri_host::{MutsukiTauriHost, PluginSelection};
-use serde::Serialize;
 use serde_json::Value;
 use std::{
-    collections::{BTreeMap, BTreeSet},
     sync::{Arc, OnceLock, RwLock},
     time::Duration,
 };
@@ -39,11 +37,10 @@ fn active_host() -> Result<Arc<MutsukiTauriHost>, String> {
 /// 将旧的 `callPlugin` 方法名映射到声明式 `momobako.*` protocol。
 pub fn call_plugin(plugin_id: &str, method: &str, payload: Value) -> Result<Value, String> {
     let protocol_id = format!("momobako.{}", method.trim().trim_start_matches("momobako."));
-    let (binding_id, runner_id) = plugin_target(plugin_id, &protocol_id);
     execute_task(
         &protocol_id,
         payload,
-        Some((binding_id.as_str(), runner_id.as_str())),
+        Some(plugin_target(plugin_id, &protocol_id)),
     )
     .map(|(output, _)| output)
     .map_err(|error| format!("{error} [plugin={plugin_id}, method={method}]"))
@@ -56,14 +53,12 @@ fn plugin_target(plugin_id: &str, protocol_id: &str) -> (String, String) {
     )
 }
 
-fn execute_task(
+pub(crate) fn execute_task(
     protocol_id: &str,
     payload: Value,
-    target: Option<(&str, &str)>,
+    target: Option<(String, String)>,
 ) -> Result<(Value, Vec<Value>), String> {
-    let (target_binding_id, runner_hint) = target
-        .map(|(binding, runner)| (Some(binding.to_string()), Some(runner.to_string())))
-        .unwrap_or_default();
+    let (target_binding_id, runner_hint) = target.unzip();
     let result = active_host()?
         .call(FrontendTaskRequest {
             protocol_id: protocol_id.to_string(),
@@ -116,23 +111,9 @@ fn execute_task(
     }
 }
 
-/// 在 blocking pool 中执行内建长任务，并返回可供旧 Channel 回放的进度。
-pub async fn call_long_task<Request>(
-    protocol_id: &'static str,
-    request: Request,
-) -> Result<(Value, Vec<Value>), String>
-where
-    Request: Serialize + Send + 'static,
-{
-    let payload = serde_json::to_value(request).map_err(|error| error.to_string())?;
-    tauri::async_runtime::spawn_blocking(move || execute_task(protocol_id, payload, None))
-        .await
-        .map_err(|error| error.to_string())?
-}
-
 /// 若 Host 已启动，返回执行型插件不可用的精确原因。
 pub fn plugin_unavailable_reason(plugin_id: &str) -> Option<String> {
-    let host = host_slot().read().ok()?.clone()?;
+    let host = active_host().ok()?;
     let summary = host
         .plugins()
         .into_iter()
@@ -155,17 +136,6 @@ pub fn reload_plugins(selection: PluginSelection) -> Result<(), String> {
         .reload_plugins(selection, PLUGIN_RELOAD_DRAIN_TIMEOUT)
         .map(|_| ())
         .map_err(|error| error.to_string())
-}
-
-/// 构造 Momo 配置目录保持不变时需要传给 ABI guest 的初始化快照。
-pub fn plugin_selection(
-    enabled_plugin_ids: BTreeSet<String>,
-    configs: BTreeMap<String, Value>,
-) -> PluginSelection {
-    PluginSelection {
-        enabled_plugin_ids: Some(enabled_plugin_ids),
-        configs,
-    }
 }
 
 #[cfg(test)]

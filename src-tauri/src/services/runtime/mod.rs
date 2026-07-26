@@ -99,7 +99,10 @@ impl RepositoryRuntime {
                 }),
             );
         }
-        Ok(mutsuki_host::plugin_selection(enabled_plugin_ids, configs))
+        Ok(PluginSelection {
+            enabled_plugin_ids: Some(enabled_plugin_ids),
+            configs,
+        })
     }
 
     /// 将 Mutsuki 的运行缓存挂在现有 `.service-data` 下，同时保留原插件包目录。

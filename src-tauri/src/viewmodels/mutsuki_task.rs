@@ -17,6 +17,11 @@ impl MutsukiTaskViewModel {
     where
         Request: Serialize + Send + 'static,
     {
-        mutsuki_host::call_long_task(protocol_id, request).await
+        let payload = serde_json::to_value(request).map_err(|error| error.to_string())?;
+        tauri::async_runtime::spawn_blocking(move || {
+            mutsuki_host::execute_task(protocol_id, payload, None)
+        })
+        .await
+        .map_err(|error| error.to_string())?
     }
 }

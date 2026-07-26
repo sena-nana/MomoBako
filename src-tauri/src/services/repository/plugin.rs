@@ -68,7 +68,7 @@ pub(super) fn read_plugin_archive_text(
     request: PluginArchiveReadRequest,
 ) -> Result<PluginArchiveTextResponse, String> {
     state.ensure_initialized()?;
-    let registry = plugin_management_catalog(&state.root);
+    let registry = plugin_catalog(&state.root);
     let normalized_plugin_id = registry.normalize_plugin_id(&request.plugin_id);
     let registration = registry
         .registration(&normalized_plugin_id)
@@ -90,7 +90,7 @@ pub(super) fn get_plugin_data_directory(
     plugin_id: String,
 ) -> Result<PluginDataDirectoryResponse, String> {
     state.ensure_initialized()?;
-    let registry = plugin_management_catalog(&state.root);
+    let registry = plugin_catalog(&state.root);
     let normalized_plugin_id = registry.normalize_plugin_id(&plugin_id);
     let registration = registry
         .registration(&normalized_plugin_id)
@@ -107,7 +107,7 @@ pub(super) fn prepare_plugin_data_file_preview_source(
     request: PluginDataFilePreviewSourceRequest,
 ) -> Result<PluginDataFilePreviewSourceResponse, String> {
     state.ensure_initialized()?;
-    let registry = plugin_management_catalog(&state.root);
+    let registry = plugin_catalog(&state.root);
     let normalized_plugin_id = registry.normalize_plugin_id(&request.plugin_id);
     let registration = registry
         .registration(&normalized_plugin_id)
@@ -252,7 +252,7 @@ pub(super) fn list_plugin_hook_executions(
     request: PluginHookExecutionListRequest,
 ) -> Result<PluginHookExecutionListResponse, String> {
     state.ensure_initialized()?;
-    let registry = plugin_management_catalog(&state.root);
+    let registry = plugin_catalog(&state.root);
     let plugin_id = request
         .plugin_id
         .as_deref()
@@ -271,7 +271,7 @@ pub(super) fn set_plugin_enabled(
     request: PluginEnabledRequest,
 ) -> Result<PluginMutationResponse, String> {
     state.ensure_initialized()?;
-    let registry = plugin_management_catalog(&state.root);
+    let registry = plugin_catalog(&state.root);
     let normalized_plugin_id = registry.normalize_plugin_id(&request.plugin_id);
     let manifest = registry
         .manifest(&normalized_plugin_id)
@@ -305,7 +305,7 @@ pub(super) fn delete_plugin(
     plugin_id: String,
 ) -> Result<PluginMutationResponse, String> {
     state.ensure_initialized()?;
-    let registry = plugin_management_catalog(&state.root);
+    let registry = plugin_catalog(&state.root);
     let normalized_plugin_id = registry.normalize_plugin_id(&plugin_id);
     let registration = registry
         .registration(&normalized_plugin_id)
@@ -698,7 +698,7 @@ fn plugin_hook_execution_context(
     plugin_id: &str,
     method: &str,
 ) -> Option<(String, PluginHook)> {
-    let registry = plugin_management_catalog(service_root);
+    let registry = plugin_catalog(service_root);
     let normalized_plugin_id = registry.normalize_plugin_id(plugin_id);
     let manifest = registry.resolved_manifest(&normalized_plugin_id)?;
     manifest
@@ -1154,7 +1154,7 @@ fn install_plugin_archive(
         return Err("plugin manifest is missing pluginId".to_string());
     }
 
-    let existing_registry = plugin_management_catalog(service_root);
+    let existing_registry = plugin_catalog(service_root);
     if existing_registry.manifest(&manifest.plugin_id).is_some() {
         return Err(format!("plugin already exists: {}", manifest.plugin_id));
     }

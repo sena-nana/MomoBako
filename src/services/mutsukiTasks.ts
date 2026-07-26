@@ -2,7 +2,7 @@
  * Mutsuki task handle、事件与取消的前端适配。
  */
 import { invoke } from "@tauri-apps/api/core";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { listen } from "@tauri-apps/api/event";
 
 type RuntimeEvent = {
   name: string;
@@ -72,26 +72,24 @@ export async function runMutsukiTask<TResult, TProgress = never>(
     throw new DOMException("Mutsuki task aborted before start.", "AbortError");
   }
   const requestedTaskId = taskId();
-  let unlisten: UnlistenFn | undefined;
   const abort = () => {
     void invoke("mutsuki_cancel_task", {
       request: { task_id: requestedTaskId, reason: "frontend aborted" },
     });
   };
-  try {
-    unlisten = await listen<EventEnvelope>("mutsuki://event", ({ payload: envelope }) => {
-      visitEvents(envelope.payload, (event) => {
-        if (
-          event.type !== "task"
-          || event.task_id !== requestedTaskId
-          || !event.event
-        ) return;
-        const progress = progressPayload<TProgress>(event.event);
-        if (progress !== null) onProgress?.(progress);
-      });
+  const unlisten = await listen<EventEnvelope>("mutsuki://event", ({ payload: envelope }) => {
+    visitEvents(envelope.payload, (event) => {
+      if (
+        event.type !== "task"
+        || event.task_id !== requestedTaskId
+        || !event.event
+      ) return;
+      const progress = progressPayload<TProgress>(event.event);
+      if (progress !== null) onProgress?.(progress);
     });
-    signal?.addEventListener("abort", abort, { once: true });
-
+  });
+  signal?.addEventListener("abort", abort, { once: true });
+  try {
     const run = await invoke<TaskRun>("mutsuki_start_task", {
       request: {
         protocol_id: protocolId,
@@ -110,6 +108,6 @@ export async function runMutsukiTask<TResult, TProgress = never>(
     throw new Error(`Mutsuki task ended with ${outcome?.status ?? "no outcome"}: ${outcome?.reason ?? ""}`);
   } finally {
     signal?.removeEventListener("abort", abort);
-    unlisten?.();
+    unlisten();
   }
 }
