@@ -5,7 +5,7 @@
 - 插件源码唯一根目录是 `External/Plugins/`
 - 每个插件一个独立工程，独立编译，独立产物
 - `External/Plugins/` 自带插件开发所需工具链与打包脚本
-- 主应用默认构建、`tauri:dev`、`tauri build`、`verify` 都不隐式编译插件
+- `yarn tauri:dev` 每次都会完整构建、打包并暂存插件；主应用默认构建、`tauri build` 和 `verify` 不隐式编译插件
 - 插件运行时目录固定为 `<serviceRoot>/plugins`
 - 默认开发 staging 目录为 `src-tauri/.service-data/plugins`
 - `<serviceRoot>/plugins` 只保存 `.momoplug` 文件，不做持久解压安装
@@ -270,19 +270,17 @@ example-text-preview-0.1.0.momoplug
 - `yarn plugins:build`
 - `yarn plugins:package`
 - `yarn plugins:stage:dev`
-- `yarn tauri:dev:with-plugins`
+- `yarn tauri:dev`
+- `yarn tauri:dev:with-plugins`（兼容别名）
 
 推荐流程：
 
 1. 进入 `External/Plugins/` 并执行 `yarn install`
 2. 复制 `template/` 创建新插件工程
 3. 编写 `manifest.json` 与 `src/register.js`
-4. 在 `External/Plugins/` 内执行 `yarn build`
-5. 在 `External/Plugins/` 内执行 `yarn package`
-6. 在 `External/Plugins/` 内执行 `yarn stage:dev`
-7. 启动 `yarn tauri:dev:with-plugins`
+4. 回到主仓库根目录执行 `yarn tauri:dev`
 
-主仓库根的 `plugins:build`、`plugins:package`、`plugins:stage:dev` 只是对 `External/Plugins/package.json` 脚本的转发，方便宿主开发，不再承载插件工具链本体。
+`yarn tauri:dev` 会依次执行完整插件构建、打包、暂存和桌面端启动；`yarn tauri:dev:with-plugins` 保留为兼容别名。主仓库根的 `plugins:build`、`plugins:package`、`plugins:stage:dev` 只是对 `External/Plugins/package.json` 脚本的转发，方便单独排查构建阶段，不再承载插件工具链本体。
 不传 `<serviceRoot>` 时，`stage:dev` 会把 `.momoplug` 复制到 `src-tauri/.service-data/plugins`；传入 `<serviceRoot>` 时仍复制到 `<serviceRoot>/plugins`。
 
 `example/` 与 `template/` 也包含 `plugin.project.json`，可通过 `cd External/Plugins && yarn build example` 或 `yarn build template` 做定向构建验证；默认批量打包不会把它们产出到 `.packages/`。

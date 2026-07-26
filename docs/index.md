@@ -22,4 +22,6 @@ yarn tauri:dev
 yarn verify
 ```
 
-`yarn verify` 会串行运行前端测试、前端构建、Tauri Rust 编译检查和内置插件构建。
+`yarn dev` 仅启动 Vite 前端；`yarn tauri:dev` 会先完整构建、打包并暂存外置插件，再启动桌面端。
+
+`yarn verify` 会串行运行前端测试、前端构建和 Tauri Rust 编译检查。
