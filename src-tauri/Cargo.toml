@@ -33,12 +33,12 @@ getrandom = "0.3"
 zip = { version = "8.6", default-features = false, features = ["deflate"] }
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
 jwalk = "0.8.1"
-mutsuki-runtime-contracts = { git = "https://github.com/sena-nana/MutsukiCore.git", rev = "eb8d185bf6272e209a2137ac4b0b9c580a6e5a48" }
-mutsuki-runtime-core = { git = "https://github.com/sena-nana/MutsukiCore.git", rev = "eb8d185bf6272e209a2137ac4b0b9c580a6e5a48" }
-mutsuki-runtime-sdk = { git = "https://github.com/sena-nana/MutsukiCore.git", rev = "eb8d185bf6272e209a2137ac4b0b9c580a6e5a48" }
-mutsuki-tauri-bridge = { git = "https://github.com/sena-nana/MutsukiTauriHost.git", rev = "c2920e2c9dd6416e59b6224151187c001915e83c" }
-mutsuki-tauri-host = { git = "https://github.com/sena-nana/MutsukiTauriHost.git", rev = "c2920e2c9dd6416e59b6224151187c001915e83c" }
-tauri-plugin-mutsuki = { git = "https://github.com/sena-nana/MutsukiTauriHost.git", rev = "c2920e2c9dd6416e59b6224151187c001915e83c" }
+mutsuki-runtime-contracts = { git = "https://github.com/sena-nana/Mutsuki.git", rev = "387a42735ce13f105292ddc91e5f209979c529d9" }
+mutsuki-runtime-core = { git = "https://github.com/sena-nana/Mutsuki.git", rev = "387a42735ce13f105292ddc91e5f209979c529d9" }
+mutsuki-runtime-sdk = { git = "https://github.com/sena-nana/Mutsuki.git", rev = "387a42735ce13f105292ddc91e5f209979c529d9" }
+mutsuki-tauri-bridge = { git = "https://github.com/sena-nana/Mutsuki.git", rev = "387a42735ce13f105292ddc91e5f209979c529d9" }
+mutsuki-tauri-host = { git = "https://github.com/sena-nana/Mutsuki.git", rev = "387a42735ce13f105292ddc91e5f209979c529d9" }
+tauri-plugin-mutsuki = { git = "https://github.com/sena-nana/Mutsuki.git", rev = "387a42735ce13f105292ddc91e5f209979c529d9" }
 
 [target.'cfg(windows)'.dependencies]
 everything-ipc = "0.1.3"
