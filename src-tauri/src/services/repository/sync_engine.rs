@@ -660,7 +660,9 @@ pub(super) fn sync_repository_files(
     repo: &RepositoryRecord,
     skip_hardlink_candidate_paths: &HashSet<String>,
     hint_paths: &std::collections::BTreeSet<String>,
+    cancellation: &dyn CancellationCheck,
 ) -> Result<SyncResult, rusqlite::Error> {
+    cancellation.checkpoint().map_err(cancellation_sql_error)?;
     let repo_root = PathBuf::from(&repo.summary.path);
     write_sync_log(
         &repo.summary.repo_id,
@@ -679,6 +681,7 @@ pub(super) fn sync_repository_files(
             error,
         )))
     })?;
+    cancellation.checkpoint().map_err(cancellation_sql_error)?;
     let files = supplement_discovered_files_with_hint_paths(
         service_root,
         repo,
@@ -737,6 +740,7 @@ pub(super) fn sync_repository_files(
                 )))
             },
         )?;
+    cancellation.checkpoint().map_err(cancellation_sql_error)?;
     write_sync_log(
         &repo.summary.repo_id,
         "info",
@@ -758,6 +762,7 @@ pub(super) fn sync_repository_files(
             error,
         )))
     })?;
+    cancellation.checkpoint().map_err(cancellation_sql_error)?;
     let directory_records =
         build_directory_records_from_tree(&repo_root, &tree, &files).map_err(|error| {
             rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::new(
@@ -783,6 +788,7 @@ pub(super) fn sync_repository_files(
     );
 
     for file in &files {
+        cancellation.checkpoint().map_err(cancellation_sql_error)?;
         let apply_result = upsert_discovered_asset(
             tx,
             repo,
@@ -800,6 +806,7 @@ pub(super) fn sync_repository_files(
     }
 
     for (path, record) in existing_by_path {
+        cancellation.checkpoint().map_err(cancellation_sql_error)?;
         if record.status == "deleted" {
             continue;
         }
@@ -861,6 +868,13 @@ pub(super) fn sync_repository_files(
         created_events,
         hardlink_candidates,
     })
+}
+
+fn cancellation_sql_error(error: String) -> rusqlite::Error {
+    rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::new(
+        std::io::ErrorKind::Interrupted,
+        error,
+    )))
 }
 
 /// 用 watcher 捕获到的变更路径补齐索引检索的短暂漏报，保证新增文件能立即入库。

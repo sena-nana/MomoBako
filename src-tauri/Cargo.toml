@@ -35,6 +35,7 @@ reqwest = { version = "0.12", default-features = false, features = ["blocking", 
 jwalk = "0.8.1"
 mutsuki-runtime-contracts = { git = "https://github.com/sena-nana/Mutsuki.git", rev = "387a42735ce13f105292ddc91e5f209979c529d9" }
 mutsuki-runtime-core = { git = "https://github.com/sena-nana/Mutsuki.git", rev = "387a42735ce13f105292ddc91e5f209979c529d9" }
+mutsuki-runtime-host = { git = "https://github.com/sena-nana/Mutsuki.git", rev = "387a42735ce13f105292ddc91e5f209979c529d9" }
 mutsuki-runtime-sdk = { git = "https://github.com/sena-nana/Mutsuki.git", rev = "387a42735ce13f105292ddc91e5f209979c529d9" }
 mutsuki-tauri-bridge = { git = "https://github.com/sena-nana/Mutsuki.git", rev = "387a42735ce13f105292ddc91e5f209979c529d9" }
 mutsuki-tauri-host = { git = "https://github.com/sena-nana/Mutsuki.git", rev = "387a42735ce13f105292ddc91e5f209979c529d9" }

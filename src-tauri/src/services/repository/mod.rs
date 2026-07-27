@@ -22,6 +22,7 @@ mod action;
 mod api_design;
 mod asset_mutation;
 mod browser;
+mod cancellation;
 mod contracts;
 mod discovery;
 pub mod eagle_import;
@@ -60,6 +61,7 @@ mod utils;
 
 use self::api_design::*;
 use self::asset_mutation::*;
+pub(crate) use self::cancellation::{CancellationCheck, NeverCancelled};
 pub use self::contracts::*;
 use self::discovery::*;
 use self::export::*;
@@ -70,7 +72,9 @@ pub(crate) use self::file_transfer::{
 use self::filesystem_backend::*;
 use self::local_index::*;
 use self::pathing::*;
+#[cfg(test)]
 pub(crate) use self::playback::download_playlist_with_progress;
+pub(crate) use self::playback::download_playlist_with_progress_cancellable;
 use self::plugin::{
     apply_plugin_settings, broken_plugin_manifest, ensure_plugin_data_dir,
     ensure_repository_backend_runtime_available, is_source_plugin, load_plugin_config_values,

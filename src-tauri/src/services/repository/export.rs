@@ -315,10 +315,13 @@ pub(super) fn copy_directory_recursive_with_mode(
     target: &Path,
     target_relative_path: &str,
     hardlink_preferred: bool,
+    cancellation: &dyn CancellationCheck,
 ) -> Result<Vec<HardlinkCopyOutcome>, String> {
+    cancellation.checkpoint()?;
     fs::create_dir(target).map_err(io_error)?;
     let mut outcomes = Vec::new();
     for entry in fs::read_dir(source).map_err(io_error)? {
+        cancellation.checkpoint()?;
         let entry = entry.map_err(io_error)?;
         let name = entry.file_name().to_string_lossy().to_string();
         if is_internal_repository_dir(&name) {
@@ -338,6 +341,7 @@ pub(super) fn copy_directory_recursive_with_mode(
                 &child_target,
                 &child_relative_path,
                 hardlink_preferred,
+                cancellation,
             )?);
         } else if metadata.is_file() {
             outcomes.push(copy_file_with_mode(
@@ -346,6 +350,7 @@ pub(super) fn copy_directory_recursive_with_mode(
                 &child_target,
                 &child_relative_path,
                 hardlink_preferred,
+                cancellation,
             )?);
         }
     }
@@ -359,10 +364,13 @@ pub(super) fn copy_file_with_mode(
     target: &Path,
     target_relative_path: &str,
     hardlink_preferred: bool,
+    cancellation: &dyn CancellationCheck,
 ) -> Result<HardlinkCopyOutcome, String> {
+    cancellation.checkpoint()?;
     if let Some(parent) = target.parent() {
         fs::create_dir_all(parent).map_err(io_error)?;
     }
+    cancellation.checkpoint()?;
     if hardlink_preferred && fs::hard_link(source, target).is_ok() {
         return Ok(HardlinkCopyOutcome {
             source_path: source_relative_path.map(str::to_string),
@@ -370,12 +378,124 @@ pub(super) fn copy_file_with_mode(
             link_state: "linked".to_string(),
         });
     }
-    fs::copy(source, target).map_err(io_error)?;
+    copy_file_atomically(source, target, cancellation)?;
     Ok(HardlinkCopyOutcome {
         source_path: source_relative_path.map(str::to_string),
         target_path: target_relative_path.to_string(),
         link_state: "copiedFallback".to_string(),
     })
+}
+
+/// 分块复制到同目录临时文件，完整落盘后再原子发布。
+fn copy_file_atomically(
+    source: &Path,
+    target: &Path,
+    cancellation: &dyn CancellationCheck,
+) -> Result<(), String> {
+    let file_name = target
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("entry");
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let temporary = target.with_file_name(format!(
+        ".{file_name}.momobako-part-{}-{nonce}",
+        std::process::id()
+    ));
+    let result = (|| {
+        let mut input = File::open(source).map_err(io_error)?;
+        let mut output = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary)
+            .map_err(io_error)?;
+        let mut buffer = vec![0_u8; 1024 * 1024];
+        loop {
+            cancellation.checkpoint()?;
+            let read = input.read(&mut buffer).map_err(io_error)?;
+            if read == 0 {
+                break;
+            }
+            output.write_all(&buffer[..read]).map_err(io_error)?;
+        }
+        output.flush().map_err(io_error)?;
+        cancellation.checkpoint()?;
+        fs::set_permissions(
+            &temporary,
+            fs::metadata(source).map_err(io_error)?.permissions(),
+        )
+        .map_err(io_error)?;
+        fs::rename(&temporary, target).map_err(io_error)
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&temporary);
+    }
+    result
+}
+
+#[cfg(test)]
+mod cancellation_tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct CancelAfter {
+        checkpoints: AtomicUsize,
+        limit: usize,
+    }
+
+    impl CancellationCheck for CancelAfter {
+        fn is_cancelled(&self) -> bool {
+            self.checkpoints.fetch_add(1, Ordering::AcqRel) + 1 >= self.limit
+        }
+    }
+
+    #[test]
+    fn cancelled_file_copy_removes_temporary_file_and_can_be_retried() {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock should be valid")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "momobako-cancel-copy-{}-{nonce}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&root).expect("test directory should be created");
+        let source = root.join("source.bin");
+        let target = root.join("target.bin");
+        fs::write(&source, vec![7_u8; 2 * 1024 * 1024]).expect("test source should be written");
+
+        let error = copy_file_with_mode(
+            &source,
+            None,
+            &target,
+            "target.bin",
+            false,
+            &CancelAfter {
+                checkpoints: AtomicUsize::new(0),
+                limit: 4,
+            },
+        )
+        .expect_err("copy should be cancelled between chunks");
+        assert_eq!(error, "repository operation cancelled");
+        assert!(!target.exists());
+        assert!(fs::read_dir(&root)
+            .expect("test directory should remain readable")
+            .all(|entry| !entry
+                .expect("directory entry should be readable")
+                .file_name()
+                .to_string_lossy()
+                .contains(".momobako-part-")));
+
+        copy_file_with_mode(&source, None, &target, "target.bin", false, &NeverCancelled)
+            .expect("retry should publish the complete target");
+        assert_eq!(
+            fs::metadata(&target).expect("target should exist").len(),
+            2 * 1024 * 1024
+        );
+        let _ = fs::remove_dir_all(root);
+    }
 }
 
 pub(super) fn replace_file_with_hardlink(

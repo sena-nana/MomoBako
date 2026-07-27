@@ -103,6 +103,16 @@
 - Frontend preview registration is driven by runtime plugin manifests and `.momoplug` bundle loading; preview modules are read from the archive at runtime and do not enter the host frontend bundle.
 - Executable backend packages carry both the Momo-facing `manifest.json` and a native Mutsuki `plugin.toml`; their plugin IDs and versions must match.
 - Backend plugins export Mutsuki ABI v2 runners. The desktop host validates both manifests, artifact hashes, provider surfaces and plugin-scoped handler bindings before connecting them to Core.
+
+### Cooperative cancellation for long tasks
+
+- MomoBako's built-in long-task runner uses the Host-owned `NativeRunner` cancellation probe. Repository code only sees a read-only domain cancellation interface; no cancellation handle or registry is added to the wire schema.
+- "Cancellation requested" means the probe is set. The worker may still be waiting for a repository write lock, finishing the current atomic batch item, synchronizing the watcher/index, or returning from an external plugin call.
+- "Worker finalizing" is non-terminal. Core publishes the cancelled terminal state only after the worker has stopped and discards any result or progress events produced after cancellation was requested.
+- Batch operations use one item as the atomic boundary. Completed items remain on disk and in the index, while unstarted items have no side effects. File copies and archive extraction write to temporary siblings and publish with a rename only after the complete file is written.
+- Native filesystem loops check cancellation between items and I/O chunks. External plugin calls cannot be interrupted in-process; cancellation is observed as soon as the call returns, after any required repository consistency cleanup.
+- The frontend treats every cancelled outcome as `DOMException("AbortError")`. It checks the `AbortSignal` before registration and bridges cancellation that races with task registration back to the Host before waiting for the real terminal outcome.
+
 - The repository runtime discovers `.momoplug` archives at startup and maps `callPlugin` methods to declared `momobako.*` protocols and target bindings.
 - Executable artifacts are staged into a content-hash-isolated runtime cache. Companion artifacts such as the Office helper are declared in `plugin.toml` instead of extracted by product-specific host code.
 - Plugin-owned persistent files live under `.service-data/plugin-data/<pluginSlug>` (`<serviceRoot>/plugin-data/<pluginSlug>` at runtime). The host creates the directory on demand for frontend plugin settings entry points and before native backend plugin calls, then passes it as `runtime.pluginDataDir` with the current `runtime.pluginConfig` key-value snapshot.

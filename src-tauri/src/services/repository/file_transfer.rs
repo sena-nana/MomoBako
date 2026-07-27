@@ -280,7 +280,9 @@ pub(super) fn validate_repository_move_entries(
 pub(super) fn copy_external_entries_parallel(
     plan: Vec<FileImportPlanEntry>,
     hardlink_preferred: bool,
+    cancellation: &dyn CancellationCheck,
 ) -> Result<Vec<HardlinkCopyOutcome>, String> {
+    cancellation.checkpoint()?;
     if plan.is_empty() {
         return Ok(Vec::new());
     }
@@ -288,53 +290,60 @@ pub(super) fn copy_external_entries_parallel(
     let worker_count = plan.len().min(MAX_PARALLEL_IMPORTS);
     let queue = Arc::new(Mutex::new(plan.into_iter()));
     let outcomes = Arc::new(Mutex::new(Vec::new()));
-    let mut handles = Vec::with_capacity(worker_count);
+    thread::scope(|scope| -> Result<(), String> {
+        let mut handles = Vec::with_capacity(worker_count);
+        for _ in 0..worker_count {
+            let queue = queue.clone();
+            let outcomes = outcomes.clone();
+            handles.push(scope.spawn(move || loop {
+                cancellation.checkpoint()?;
+                let Some(entry) = ({
+                    let mut entries = queue
+                        .lock()
+                        .map_err(|_| "import queue lock poisoned".to_string())?;
+                    entries.next()
+                }) else {
+                    return Ok(());
+                };
 
-    for _ in 0..worker_count {
-        let queue = queue.clone();
-        let outcomes = outcomes.clone();
-        handles.push(thread::spawn(move || loop {
-            let Some(entry) = ({
-                let mut entries = queue
+                let mut entry_outcomes = if entry.is_directory {
+                    copy_directory_recursive_with_mode(
+                        &entry.source,
+                        entry.source_relative_path.as_deref(),
+                        &entry.target,
+                        &entry.target_relative_path,
+                        hardlink_preferred,
+                        cancellation,
+                    )?
+                } else {
+                    vec![copy_file_with_mode(
+                        &entry.source,
+                        entry.source_relative_path.as_deref(),
+                        &entry.target,
+                        &entry.target_relative_path,
+                        hardlink_preferred,
+                        cancellation,
+                    )?]
+                };
+                cancellation.checkpoint()?;
+                outcomes
                     .lock()
-                    .map_err(|_| "import queue lock poisoned".to_string())?;
-                entries.next()
-            }) else {
-                return Ok(());
-            };
-
-            let mut entry_outcomes = if entry.is_directory {
-                copy_directory_recursive_with_mode(
-                    &entry.source,
-                    entry.source_relative_path.as_deref(),
-                    &entry.target,
-                    &entry.target_relative_path,
-                    hardlink_preferred,
-                )?
-            } else {
-                vec![copy_file_with_mode(
-                    &entry.source,
-                    entry.source_relative_path.as_deref(),
-                    &entry.target,
-                    &entry.target_relative_path,
-                    hardlink_preferred,
-                )?]
-            };
-            outcomes
-                .lock()
-                .map_err(|_| "import outcome lock poisoned".to_string())?
-                .append(&mut entry_outcomes);
-        }));
-    }
-
-    for handle in handles {
-        match handle.join() {
-            Ok(Ok(())) => {}
-            Ok(Err(error)) => return Err(error),
-            Err(_) => return Err("file import worker panicked".to_string()),
+                    .map_err(|_| "import outcome lock poisoned".to_string())?
+                    .append(&mut entry_outcomes);
+            }));
         }
-    }
 
+        for handle in handles {
+            match handle.join() {
+                Ok(Ok(())) => {}
+                Ok(Err(error)) => return Err(error),
+                Err(_) => return Err("file import worker panicked".to_string()),
+            }
+        }
+        Ok(())
+    })?;
+
+    cancellation.checkpoint()?;
     let outcomes = Arc::try_unwrap(outcomes)
         .map_err(|_| "import outcome still shared".to_string())?
         .into_inner()

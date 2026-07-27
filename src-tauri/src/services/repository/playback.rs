@@ -3,9 +3,20 @@
 use super::*;
 
 /// Downloads a playlist through the downloader plugin while reporting aggregated progress.
+#[cfg(test)]
 pub(crate) fn download_playlist_with_progress(
     service_root: &Path,
     request: DownloaderPlaylistRequest,
+    emit: &mut dyn FnMut(DownloaderPlaylistProgressEvent) -> Result<(), String>,
+) -> Result<serde_json::Value, String> {
+    download_playlist_with_progress_cancellable(service_root, request, &NeverCancelled, emit)
+}
+
+/// Downloads a playlist and observes cooperative cancellation between tracks.
+pub(crate) fn download_playlist_with_progress_cancellable(
+    service_root: &Path,
+    request: DownloaderPlaylistRequest,
+    cancellation: &dyn CancellationCheck,
     emit: &mut dyn FnMut(DownloaderPlaylistProgressEvent) -> Result<(), String>,
 ) -> Result<serde_json::Value, String> {
     let playlist_name = request.playlist_name.clone();
@@ -18,6 +29,7 @@ pub(crate) fn download_playlist_with_progress(
     let managed_cache_root = request.managed_cache_root.clone();
     let destination = request.destination.clone();
 
+    cancellation.checkpoint()?;
     emit(DownloaderPlaylistProgressEvent {
         phase: "start".to_string(),
         playlist_id: request.playlist_id,
@@ -33,6 +45,7 @@ pub(crate) fn download_playlist_with_progress(
     let mut completed = Vec::new();
     let mut failed = Vec::new();
     for track in request.tracks {
+        cancellation.checkpoint()?;
         let current_song_name = track.song_name.clone();
         let source_payload = track
             .source_payload
@@ -46,7 +59,9 @@ pub(crate) fn download_playlist_with_progress(
             "managedCacheRoot": managed_cache_root.clone(),
             "sourcePayload": source_payload,
         });
-        match call_downloader_download_track_package(service_root, payload) {
+        let track_result = call_downloader_download_track_package(service_root, payload);
+        cancellation.checkpoint()?;
+        match track_result {
             Ok(value) => {
                 completed.push(value);
                 emit(DownloaderPlaylistProgressEvent {
@@ -96,6 +111,7 @@ pub(crate) fn download_playlist_with_progress(
             "failed": failed.len()
         }
     });
+    cancellation.checkpoint()?;
     emit(DownloaderPlaylistProgressEvent {
         phase: "complete".to_string(),
         playlist_id: request.playlist_id,
