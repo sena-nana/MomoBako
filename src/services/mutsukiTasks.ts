@@ -77,11 +77,9 @@ export async function runMutsukiTask<TResult, TProgress = never>(
   }
   const requestedTaskId = taskId();
   let registeredTaskId: string | null = null;
-  let abortRequested = false;
   let cancelPromise: Promise<void> | null = null;
   let unlisten: (() => void) | null = null;
   const requestCancellation = () => {
-    abortRequested = true;
     if (!registeredTaskId || cancelPromise) return;
     cancelPromise = invoke("mutsuki_cancel_task", {
       request: { task_id: registeredTaskId, reason: "frontend aborted" },
@@ -94,7 +92,7 @@ export async function runMutsukiTask<TResult, TProgress = never>(
   if (signal?.aborted) requestCancellation();
   try {
     unlisten = await listen<EventEnvelope>("mutsuki://event", ({ payload: envelope }) => {
-      if (abortRequested) return;
+      if (signal?.aborted) return;
       visitEvents(envelope.payload, (event) => {
         if (
           event.type !== "task"
@@ -105,7 +103,7 @@ export async function runMutsukiTask<TResult, TProgress = never>(
         if (progress !== null) onProgress?.(progress);
       });
     });
-    if (abortRequested || signal?.aborted) throw abortError();
+    if (signal?.aborted) throw abortError();
 
     let run: TaskRun;
     try {
@@ -117,19 +115,19 @@ export async function runMutsukiTask<TResult, TProgress = never>(
         },
       });
     } catch (error) {
-      if (abortRequested || signal?.aborted) throw abortError();
+      if (signal?.aborted) throw abortError();
       throw error;
     }
     registeredTaskId = run.task_id;
-    if (abortRequested || signal?.aborted) requestCancellation();
-    await cancelPromise;
+    if (signal?.aborted) requestCancellation();
+    if (cancelPromise) await cancelPromise;
 
     const result = await invoke<TaskResult>("mutsuki_task_result", {
       request: { task_id: run.task_id },
     });
-    if (abortRequested || signal?.aborted) {
+    if (signal?.aborted) {
       requestCancellation();
-      await cancelPromise;
+      if (cancelPromise) await cancelPromise;
       throw abortError();
     }
     const outcome = result.outcome;
