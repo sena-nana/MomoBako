@@ -33,13 +33,13 @@ getrandom = "0.3"
 zip = { version = "8.6", default-features = false, features = ["deflate"] }
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
 jwalk = "0.8.1"
-mutsuki-runtime-contracts = { git = "https://github.com/sena-nana/Mutsuki.git", rev = "387a42735ce13f105292ddc91e5f209979c529d9" }
-mutsuki-runtime-core = { git = "https://github.com/sena-nana/Mutsuki.git", rev = "387a42735ce13f105292ddc91e5f209979c529d9" }
-mutsuki-runtime-host = { git = "https://github.com/sena-nana/Mutsuki.git", rev = "387a42735ce13f105292ddc91e5f209979c529d9" }
-mutsuki-runtime-sdk = { git = "https://github.com/sena-nana/Mutsuki.git", rev = "387a42735ce13f105292ddc91e5f209979c529d9" }
-mutsuki-tauri-bridge = { git = "https://github.com/sena-nana/Mutsuki.git", rev = "387a42735ce13f105292ddc91e5f209979c529d9" }
-mutsuki-tauri-host = { git = "https://github.com/sena-nana/Mutsuki.git", rev = "387a42735ce13f105292ddc91e5f209979c529d9" }
-tauri-plugin-mutsuki = { git = "https://github.com/sena-nana/Mutsuki.git", rev = "387a42735ce13f105292ddc91e5f209979c529d9" }
+mutsuki-runtime-contracts = { git = "https://github.com/sena-nana/Mutsuki.git", rev = "0f8ab8a3f2124a94c6da4d6b75a017ab47db0795" }
+mutsuki-runtime-core = { git = "https://github.com/sena-nana/Mutsuki.git", rev = "0f8ab8a3f2124a94c6da4d6b75a017ab47db0795" }
+mutsuki-runtime-host = { git = "https://github.com/sena-nana/Mutsuki.git", rev = "0f8ab8a3f2124a94c6da4d6b75a017ab47db0795" }
+mutsuki-runtime-sdk = { git = "https://github.com/sena-nana/Mutsuki.git", rev = "0f8ab8a3f2124a94c6da4d6b75a017ab47db0795" }
+mutsuki-tauri-bridge = { git = "https://github.com/sena-nana/Mutsuki.git", rev = "0f8ab8a3f2124a94c6da4d6b75a017ab47db0795" }
+mutsuki-tauri-host = { git = "https://github.com/sena-nana/Mutsuki.git", rev = "0f8ab8a3f2124a94c6da4d6b75a017ab47db0795" }
+tauri-plugin-mutsuki = { git = "https://github.com/sena-nana/Mutsuki.git", rev = "0f8ab8a3f2124a94c6da4d6b75a017ab47db0795" }
 
 [target.'cfg(windows)'.dependencies]
 everything-ipc = "0.1.3"
