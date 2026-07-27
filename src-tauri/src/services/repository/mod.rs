@@ -21,6 +21,7 @@ use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 mod action;
 mod api_design;
 mod asset_mutation;
+mod atomic_io;
 mod browser;
 mod cancellation;
 mod contracts;
@@ -61,6 +62,7 @@ mod utils;
 
 use self::api_design::*;
 use self::asset_mutation::*;
+use self::atomic_io::*;
 pub(crate) use self::cancellation::{CancellationCheck, NeverCancelled};
 pub use self::contracts::*;
 use self::discovery::*;

@@ -392,47 +392,14 @@ fn copy_file_atomically(
     target: &Path,
     cancellation: &dyn CancellationCheck,
 ) -> Result<(), String> {
-    let file_name = target
-        .file_name()
-        .and_then(|value| value.to_str())
-        .unwrap_or("entry");
-    let nonce = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
-    let temporary = target.with_file_name(format!(
-        ".{file_name}.momobako-part-{}-{nonce}",
-        std::process::id()
-    ));
-    let result = (|| {
-        let mut input = File::open(source).map_err(io_error)?;
-        let mut output = OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&temporary)
-            .map_err(io_error)?;
-        let mut buffer = vec![0_u8; 1024 * 1024];
-        loop {
-            cancellation.checkpoint()?;
-            let read = input.read(&mut buffer).map_err(io_error)?;
-            if read == 0 {
-                break;
-            }
-            output.write_all(&buffer[..read]).map_err(io_error)?;
-        }
-        output.flush().map_err(io_error)?;
-        cancellation.checkpoint()?;
+    let mut input = File::open(source).map_err(io_error)?;
+    publish_reader_atomically(&mut input, target, cancellation, |temporary| {
         fs::set_permissions(
-            &temporary,
+            temporary,
             fs::metadata(source).map_err(io_error)?.permissions(),
         )
-        .map_err(io_error)?;
-        fs::rename(&temporary, target).map_err(io_error)
-    })();
-    if result.is_err() {
-        let _ = fs::remove_file(&temporary);
-    }
-    result
+        .map_err(io_error)
+    })
 }
 
 #[cfg(test)]
