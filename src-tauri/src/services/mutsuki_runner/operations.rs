@@ -1,15 +1,22 @@
 //! Mutsuki 长任务到现有 RepositoryService 的领域调用适配。
 
-use std::path::PathBuf;
+use std::{
+    path::PathBuf,
+    sync::{Mutex, MutexGuard, TryLockError},
+    thread,
+    time::Duration,
+};
 
 use mutsuki_runtime_contracts::{DomainEvent, RunnerResult, RuntimeError, ScalarValue, Task};
+use mutsuki_runtime_host::CancellationProbe;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::json;
 
 use super::protocols::*;
 use crate::services::repository::{
-    download_playlist_with_progress, DownloaderPlaylistRequest, EntryPlaybackProgressEvent,
-    EntryPlaybackRequest, EntryPlaybackSourceResponse, FileDeleteRequest,
+    download_playlist_with_progress_cancellable, CancellationCheck, DownloaderPlaylistRequest,
+    EntryPlaybackProgressEvent, EntryPlaybackRequest, EntryPlaybackSourceResponse,
+    FileDeleteRequest,
 };
 use crate::services::runtime::{sync_watched_paths, RepositoryRuntime};
 
@@ -31,11 +38,18 @@ enum EntryDeleteOperationRequest {
 /// 复用 RepositoryRuntime 的写锁与 watcher 同步语义。
 pub(super) struct RepositoryTaskExecutor<'a> {
     runtime: &'a RepositoryRuntime,
+    cancellation: &'a dyn CancellationCheck,
 }
 
 impl<'a> RepositoryTaskExecutor<'a> {
-    pub(super) fn new(runtime: &'a RepositoryRuntime) -> Self {
-        Self { runtime }
+    pub(super) fn new(
+        runtime: &'a RepositoryRuntime,
+        cancellation: &'a dyn CancellationCheck,
+    ) -> Self {
+        Self {
+            runtime,
+            cancellation,
+        }
     }
 
     /// 在资源库全局写锁内执行普通领域写操作。
@@ -43,11 +57,8 @@ impl<'a> RepositoryTaskExecutor<'a> {
         &self,
         operation: impl FnOnce(&crate::services::repository::RepositoryState) -> Result<T, String>,
     ) -> Result<T, String> {
-        let _guard = self
-            .runtime
-            .write_lock
-            .lock()
-            .map_err(|_| "repository write lock poisoned".to_string())?;
+        let _guard = acquire_cancellable_lock(&self.runtime.write_lock, self.cancellation)?;
+        self.cancellation.checkpoint()?;
         operation(&self.runtime.repository_state)
     }
 
@@ -56,13 +67,11 @@ impl<'a> RepositoryTaskExecutor<'a> {
         &self,
         operation: impl FnOnce(&crate::services::repository::RepositoryState) -> Result<T, String>,
     ) -> Result<T, String> {
-        let _guard = self
-            .runtime
-            .write_lock
-            .lock()
-            .map_err(|_| "repository write lock poisoned".to_string())?;
+        let _guard = acquire_cancellable_lock(&self.runtime.write_lock, self.cancellation)?;
+        self.cancellation.checkpoint()?;
         let response = operation(&self.runtime.repository_state)?;
         sync_watched_paths(&self.runtime.repository_state, &self.runtime.watcher_handle)?;
+        self.cancellation.checkpoint()?;
         Ok(response)
     }
 
@@ -103,32 +112,47 @@ impl<'a> RepositoryTaskExecutor<'a> {
             PROTOCOL_REPOSITORY_SYNC => finish_operation(
                 task,
                 events,
-                self.write(|state| state.sync_repository(decode_request(task)?)),
+                self.write(|state| {
+                    state.sync_repository_cancellable(decode_request(task)?, self.cancellation)
+                }),
             ),
             PROTOCOL_ENTRY_IMPORT => finish_operation(
                 task,
                 events,
-                self.write(|state| state.import_entries(decode_request(task)?)),
+                self.write(|state| {
+                    state.import_entries_cancellable(decode_request(task)?, self.cancellation)
+                }),
             ),
             PROTOCOL_ARCHIVE_IMPORT => finish_operation(
                 task,
                 events,
-                self.write(|state| state.import_archive_entries(decode_request(task)?)),
+                self.write(|state| {
+                    state.import_archive_entries_cancellable(
+                        decode_request(task)?,
+                        self.cancellation,
+                    )
+                }),
             ),
             PROTOCOL_EAGLE_IMPORT => finish_operation(
                 task,
                 events,
-                self.write(|state| state.import_eagle_library(decode_request(task)?)),
+                self.write(|state| {
+                    state.import_eagle_library_cancellable(decode_request(task)?, self.cancellation)
+                }),
             ),
             PROTOCOL_ENTRY_COPY => finish_operation(
                 task,
                 events,
-                self.write(|state| state.copy_entries(decode_request(task)?)),
+                self.write(|state| {
+                    state.copy_entries_cancellable(decode_request(task)?, self.cancellation)
+                }),
             ),
             PROTOCOL_ENTRY_MOVE => finish_operation(
                 task,
                 events,
-                self.write(|state| state.move_entries(decode_request(task)?)),
+                self.write(|state| {
+                    state.move_entries_cancellable(decode_request(task)?, self.cancellation)
+                }),
             ),
             PROTOCOL_ENTRY_DELETE => {
                 let request = decode_request::<EntryDeleteOperationRequest>(task)
@@ -152,12 +176,14 @@ impl<'a> RepositoryTaskExecutor<'a> {
                             let deleted_count = paths.len();
                             let mut snapshot = None;
                             for path in paths {
+                                self.cancellation.checkpoint()?;
                                 snapshot = Some(state.delete_entry(FileDeleteRequest {
                                     repo_id: repo_id.clone(),
                                     path,
                                     mode: mode.clone(),
                                 })?);
                             }
+                            self.cancellation.checkpoint()?;
                             Ok(json!({
                                 "repoId": repo_id,
                                 "deletedCount": deleted_count,
@@ -198,10 +224,17 @@ impl<'a> RepositoryTaskExecutor<'a> {
         let mut response = self
             .write(|state| {
                 let mut emit = |progress: EntryPlaybackProgressEvent| {
+                    self.cancellation.checkpoint()?;
                     push_progress_event(events, task, progress)
                 };
-                state.prepare_entry_playback_source_with_progress(request, &mut emit)
+                let response =
+                    state.prepare_entry_playback_source_with_progress(request, &mut emit)?;
+                self.cancellation.checkpoint()?;
+                Ok(response)
             })
+            .map_err(|error| operation_error(task, error))?;
+        self.cancellation
+            .checkpoint()
             .map_err(|error| operation_error(task, error))?;
         self.attach_preview_urls(&mut response)
             .map_err(|error| operation_error(task, error))?;
@@ -216,10 +249,17 @@ impl<'a> RepositoryTaskExecutor<'a> {
     ) -> Result<RunnerResult, RuntimeError> {
         let request = decode_request::<DownloaderPlaylistRequest>(task)
             .map_err(|error| operation_error(task, error))?;
-        let mut emit = |progress| push_progress_event(events, task, progress);
-        let response =
-            download_playlist_with_progress(&self.runtime.service_root(), request, &mut emit)
-                .map_err(|error| operation_error(task, error))?;
+        let mut emit = |progress| {
+            self.cancellation.checkpoint()?;
+            push_progress_event(events, task, progress)
+        };
+        let response = download_playlist_with_progress_cancellable(
+            &self.runtime.service_root(),
+            request,
+            self.cancellation,
+            &mut emit,
+        )
+        .map_err(|error| operation_error(task, error))?;
         encode_result(task, response, events)
     }
 
@@ -228,6 +268,7 @@ impl<'a> RepositoryTaskExecutor<'a> {
         &self,
         response: &mut EntryPlaybackSourceResponse,
     ) -> Result<(), String> {
+        self.cancellation.checkpoint()?;
         if response.source_url.is_none() {
             let path = response
                 .local_path
@@ -235,6 +276,7 @@ impl<'a> RepositoryTaskExecutor<'a> {
                 .or(response.temp_file_path.as_deref())
                 .map(PathBuf::from);
             if let Some(path) = path {
+                self.cancellation.checkpoint()?;
                 let token = self
                     .runtime
                     .repository_state
@@ -244,14 +286,41 @@ impl<'a> RepositoryTaskExecutor<'a> {
         }
         attach_text_preview(
             self.runtime,
+            self.cancellation,
             &mut response.lyric_source_url,
             response.lyric_path.as_deref(),
         )?;
         attach_text_preview(
             self.runtime,
+            self.cancellation,
             &mut response.word_lyric_source_url,
             response.word_lyric_path.as_deref(),
         )
+    }
+}
+
+impl CancellationCheck for CancellationProbe {
+    fn is_cancelled(&self) -> bool {
+        CancellationProbe::is_cancelled(self)
+    }
+}
+
+fn acquire_cancellable_lock<'a>(
+    lock: &'a Mutex<()>,
+    cancellation: &dyn CancellationCheck,
+) -> Result<MutexGuard<'a, ()>, String> {
+    loop {
+        cancellation.checkpoint()?;
+        match lock.try_lock() {
+            Ok(guard) => {
+                cancellation.checkpoint()?;
+                return Ok(guard);
+            }
+            Err(TryLockError::WouldBlock) => thread::sleep(Duration::from_millis(10)),
+            Err(TryLockError::Poisoned(_)) => {
+                return Err("repository write lock poisoned".to_string())
+            }
+        }
     }
 }
 
@@ -310,6 +379,7 @@ fn push_progress_event(
 
 fn attach_text_preview(
     runtime: &RepositoryRuntime,
+    cancellation: &dyn CancellationCheck,
     target_url: &mut Option<String>,
     source_path: Option<&str>,
 ) -> Result<(), String> {
@@ -319,6 +389,7 @@ fn attach_text_preview(
     let Some(source_path) = source_path else {
         return Ok(());
     };
+    cancellation.checkpoint()?;
     let token = runtime
         .repository_state
         .register_preview_source_path(PathBuf::from(source_path), "text/plain; charset=utf-8")?;
@@ -353,6 +424,18 @@ mod tests {
     use super::*;
     use crate::services::repository::RepositoryFolderRequest;
     use serde_json::Value;
+    use std::sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    };
+
+    struct TestCancellation(Arc<AtomicBool>);
+
+    impl CancellationCheck for TestCancellation {
+        fn is_cancelled(&self) -> bool {
+            self.0.load(Ordering::Acquire)
+        }
+    }
 
     #[test]
     fn invalid_payload_is_structured() {
@@ -372,5 +455,27 @@ mod tests {
                     .to_string()
             ))
         );
+    }
+
+    #[test]
+    fn cancellation_while_waiting_for_write_lock_prevents_acquisition() {
+        let lock = Arc::new(Mutex::new(()));
+        let held = lock.lock().expect("test lock should be available");
+        let requested = Arc::new(AtomicBool::new(false));
+        let worker_lock = lock.clone();
+        let worker_requested = requested.clone();
+        let worker = thread::spawn(move || {
+            acquire_cancellable_lock(&worker_lock, &TestCancellation(worker_requested)).map(|_| ())
+        });
+
+        thread::sleep(Duration::from_millis(25));
+        requested.store(true, Ordering::Release);
+        drop(held);
+
+        assert_eq!(
+            worker.join().expect("worker should exit").unwrap_err(),
+            "repository operation cancelled"
+        );
+        assert!(lock.try_lock().is_ok());
     }
 }

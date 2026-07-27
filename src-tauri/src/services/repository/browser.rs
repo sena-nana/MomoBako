@@ -651,10 +651,12 @@ pub(super) fn create_file(
     )
 }
 
-pub(super) fn import_entries(
+pub(super) fn import_entries_cancellable(
     state: &RepositoryState,
     request: FileImportRequest,
+    cancellation: &dyn CancellationCheck,
 ) -> Result<FileBrowserSnapshot, String> {
+    cancellation.checkpoint()?;
     state.ensure_initialized()?;
     let repo = state.load_repository_record(&request.repo_id)?;
     ensure_repository_supports_local_write_access(&repo, "importing files")?;
@@ -669,14 +671,27 @@ pub(super) fn import_entries(
     let import_plan =
         validate_external_import_entries(&request.source_paths, &repo_root, &target_dir)?;
     let include_tree = import_plan.iter().any(|entry| entry.is_directory);
-    let outcomes = copy_external_entries_parallel(import_plan, true)?;
-    state.finish_file_copy_operation(&request.repo_id, parent_path, include_tree, outcomes)
+    let outcomes = match copy_external_entries_parallel(import_plan, true, cancellation) {
+        Ok(outcomes) => outcomes,
+        Err(error) => {
+            let _ = state.sync_repository(SyncRequest {
+                repo_id: request.repo_id.clone(),
+            })?;
+            return Err(error);
+        }
+    };
+    let snapshot =
+        state.finish_file_copy_operation(&request.repo_id, parent_path, include_tree, outcomes)?;
+    cancellation.checkpoint()?;
+    Ok(snapshot)
 }
 
-pub(super) fn copy_entries(
+pub(super) fn copy_entries_cancellable(
     state: &RepositoryState,
     request: FileCopyRequest,
+    cancellation: &dyn CancellationCheck,
 ) -> Result<FileBrowserSnapshot, String> {
+    cancellation.checkpoint()?;
     state.ensure_initialized()?;
     let repo = state.load_repository_record(&request.repo_id)?;
     ensure_repository_supports_local_write_access(&repo, "copying files")?;
@@ -693,14 +708,28 @@ pub(super) fn copy_entries(
     let include_tree = copy_plan.iter().any(|entry| entry.is_directory);
     let hardlink_preferred =
         request.mode.as_deref().unwrap_or("hardlinkPreferred") == "hardlinkPreferred";
-    let outcomes = copy_external_entries_parallel(copy_plan, hardlink_preferred)?;
-    state.finish_file_copy_operation(&request.repo_id, parent_path, include_tree, outcomes)
+    let outcomes = match copy_external_entries_parallel(copy_plan, hardlink_preferred, cancellation)
+    {
+        Ok(outcomes) => outcomes,
+        Err(error) => {
+            let _ = state.sync_repository(SyncRequest {
+                repo_id: request.repo_id.clone(),
+            })?;
+            return Err(error);
+        }
+    };
+    let snapshot =
+        state.finish_file_copy_operation(&request.repo_id, parent_path, include_tree, outcomes)?;
+    cancellation.checkpoint()?;
+    Ok(snapshot)
 }
 
-pub(super) fn move_entries(
+pub(super) fn move_entries_cancellable(
     state: &RepositoryState,
     request: FileMoveRequest,
+    cancellation: &dyn CancellationCheck,
 ) -> Result<FileBrowserSnapshot, String> {
+    cancellation.checkpoint()?;
     state.ensure_initialized()?;
     let repo = state.load_repository_record(&request.repo_id)?;
     if !backend_has_capability(&repo.summary.backend, "write") {
@@ -715,14 +744,16 @@ pub(super) fn move_entries(
     if !repository_supports_local_root_access(&repo) {
         let mut include_tree = false;
         for source_path in &request.source_paths {
+            cancellation.checkpoint()?;
             let source_path = normalize_entry_path(source_path)?;
             let entry = stat_backend_entry(&state.root, &repo, &repo_root, &source_path)?;
             include_tree |= matches!(entry.kind, FileSystemEntryKind::Directory);
             move_backend_entry(&state.root, &repo, &repo_root, &source_path, &parent_path)?;
+            let _ = state.sync_repository(SyncRequest {
+                repo_id: request.repo_id.clone(),
+            })?;
+            cancellation.checkpoint()?;
         }
-        let _ = state.sync_repository(SyncRequest {
-            repo_id: request.repo_id.clone(),
-        })?;
         return load_file_browser(
             state,
             FileBrowserRequest {
@@ -749,9 +780,9 @@ pub(super) fn move_entries(
         &repo.summary.path,
         &repo.backend_record,
     )?;
-    let tx = connection.transaction().map_err(db_error)?;
-
     for entry in &move_plan {
+        cancellation.checkpoint()?;
+        let tx = connection.transaction().map_err(db_error)?;
         let moved = move_backend_entry(
             &state.root,
             &repo,
@@ -781,13 +812,15 @@ pub(super) fn move_entries(
             )
             .map_err(db_error)?;
         }
+        tx.commit().map_err(db_error)?;
+        cancellation.checkpoint()?;
     }
-    tx.commit().map_err(db_error)?;
     if include_tree {
         let _ = state.sync_repository(SyncRequest {
             repo_id: request.repo_id.clone(),
         })?;
     }
+    cancellation.checkpoint()?;
 
     load_file_browser(
         state,

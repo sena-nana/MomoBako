@@ -418,7 +418,15 @@ impl RepositoryState {
     }
 
     pub fn sync_repository(&self, request: SyncRequest) -> Result<SyncResult, String> {
-        management::sync_repository(self, request)
+        management::sync_repository_cancellable(self, request, &NeverCancelled)
+    }
+
+    pub(crate) fn sync_repository_cancellable(
+        &self,
+        request: SyncRequest,
+        cancellation: &dyn CancellationCheck,
+    ) -> Result<SyncResult, String> {
+        management::sync_repository_cancellable(self, request, cancellation)
     }
 
     pub(crate) fn sync_repository_changed_paths(
@@ -716,21 +724,45 @@ impl RepositoryState {
         &self,
         request: FileImportRequest,
     ) -> Result<FileBrowserSnapshot, String> {
-        browser::import_entries(self, request)
+        browser::import_entries_cancellable(self, request, &NeverCancelled)
+    }
+
+    pub(crate) fn import_entries_cancellable(
+        &self,
+        request: FileImportRequest,
+        cancellation: &dyn CancellationCheck,
+    ) -> Result<FileBrowserSnapshot, String> {
+        browser::import_entries_cancellable(self, request, cancellation)
     }
 
     pub fn import_archive_entries(
         &self,
         request: FileArchiveImportRequest,
     ) -> Result<FileBrowserSnapshot, String> {
-        importing::import_archive_entries(self, request)
+        importing::import_archive_entries_cancellable(self, request, &NeverCancelled)
+    }
+
+    pub(crate) fn import_archive_entries_cancellable(
+        &self,
+        request: FileArchiveImportRequest,
+        cancellation: &dyn CancellationCheck,
+    ) -> Result<FileBrowserSnapshot, String> {
+        importing::import_archive_entries_cancellable(self, request, cancellation)
     }
 
     pub fn import_eagle_library(
         &self,
         request: EagleLibraryImportRequest,
     ) -> Result<EagleLibraryImportResponse, String> {
-        importing::import_eagle_library(self, request)
+        importing::import_eagle_library_cancellable(self, request, &NeverCancelled)
+    }
+
+    pub(crate) fn import_eagle_library_cancellable(
+        &self,
+        request: EagleLibraryImportRequest,
+        cancellation: &dyn CancellationCheck,
+    ) -> Result<EagleLibraryImportResponse, String> {
+        importing::import_eagle_library_cancellable(self, request, cancellation)
     }
 
     pub fn add_external_assets(
@@ -742,11 +774,27 @@ impl RepositoryState {
     }
 
     pub fn copy_entries(&self, request: FileCopyRequest) -> Result<FileBrowserSnapshot, String> {
-        browser::copy_entries(self, request)
+        browser::copy_entries_cancellable(self, request, &NeverCancelled)
+    }
+
+    pub(crate) fn copy_entries_cancellable(
+        &self,
+        request: FileCopyRequest,
+        cancellation: &dyn CancellationCheck,
+    ) -> Result<FileBrowserSnapshot, String> {
+        browser::copy_entries_cancellable(self, request, cancellation)
     }
 
     pub fn move_entries(&self, request: FileMoveRequest) -> Result<FileBrowserSnapshot, String> {
-        browser::move_entries(self, request)
+        browser::move_entries_cancellable(self, request, &NeverCancelled)
+    }
+
+    pub(crate) fn move_entries_cancellable(
+        &self,
+        request: FileMoveRequest,
+        cancellation: &dyn CancellationCheck,
+    ) -> Result<FileBrowserSnapshot, String> {
+        browser::move_entries_cancellable(self, request, cancellation)
     }
 
     pub(super) fn finish_file_copy_operation(
@@ -1194,6 +1242,7 @@ impl RepositoryState {
                 &repo,
                 &std::collections::HashSet::new(),
                 &std::collections::BTreeSet::new(),
+                &NeverCancelled,
             )
             .map_err(db_error)?;
             tx.commit().map_err(db_error)?;

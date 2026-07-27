@@ -2783,6 +2783,7 @@ dependencies = [
  "jwalk",
  "mutsuki-runtime-contracts",
  "mutsuki-runtime-core",
+ "mutsuki-runtime-host",
  "mutsuki-runtime-sdk",
  "mutsuki-tauri-bridge",
  "mutsuki-tauri-host",

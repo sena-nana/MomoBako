@@ -59,6 +59,10 @@ function progressPayload<T>(event: RuntimeEvent): T | null {
   }
 }
 
+function abortError() {
+  return new DOMException("Mutsuki task aborted.", "AbortError");
+}
+
 /**
  * 启动任务后按 handle 过滤 DomainEvent；AbortSignal 会进入 Core cancellation。
  */
@@ -69,45 +73,74 @@ export async function runMutsukiTask<TResult, TProgress = never>(
   signal?: AbortSignal,
 ): Promise<TResult> {
   if (signal?.aborted) {
-    throw new DOMException("Mutsuki task aborted before start.", "AbortError");
+    throw abortError();
   }
   const requestedTaskId = taskId();
-  const abort = () => {
-    void invoke("mutsuki_cancel_task", {
-      request: { task_id: requestedTaskId, reason: "frontend aborted" },
-    });
+  let registeredTaskId: string | null = null;
+  let abortRequested = false;
+  let cancelPromise: Promise<void> | null = null;
+  let unlisten: (() => void) | null = null;
+  const requestCancellation = () => {
+    abortRequested = true;
+    if (!registeredTaskId || cancelPromise) return;
+    cancelPromise = invoke("mutsuki_cancel_task", {
+      request: { task_id: registeredTaskId, reason: "frontend aborted" },
+    }).then(
+      () => undefined,
+      () => undefined,
+    );
   };
-  const unlisten = await listen<EventEnvelope>("mutsuki://event", ({ payload: envelope }) => {
-    visitEvents(envelope.payload, (event) => {
-      if (
-        event.type !== "task"
-        || event.task_id !== requestedTaskId
-        || !event.event
-      ) return;
-      const progress = progressPayload<TProgress>(event.event);
-      if (progress !== null) onProgress?.(progress);
-    });
-  });
-  signal?.addEventListener("abort", abort, { once: true });
+  signal?.addEventListener("abort", requestCancellation, { once: true });
+  if (signal?.aborted) requestCancellation();
   try {
-    const run = await invoke<TaskRun>("mutsuki_start_task", {
-      request: {
-        protocol_id: protocolId,
-        payload,
-        task_id: requestedTaskId,
-      },
+    unlisten = await listen<EventEnvelope>("mutsuki://event", ({ payload: envelope }) => {
+      if (abortRequested) return;
+      visitEvents(envelope.payload, (event) => {
+        if (
+          event.type !== "task"
+          || event.task_id !== requestedTaskId
+          || !event.event
+        ) return;
+        const progress = progressPayload<TProgress>(event.event);
+        if (progress !== null) onProgress?.(progress);
+      });
     });
+    if (abortRequested || signal?.aborted) throw abortError();
+
+    let run: TaskRun;
+    try {
+      run = await invoke<TaskRun>("mutsuki_start_task", {
+        request: {
+          protocol_id: protocolId,
+          payload,
+          task_id: requestedTaskId,
+        },
+      });
+    } catch (error) {
+      if (abortRequested || signal?.aborted) throw abortError();
+      throw error;
+    }
+    registeredTaskId = run.task_id;
+    if (abortRequested || signal?.aborted) requestCancellation();
+    await cancelPromise;
+
     const result = await invoke<TaskResult>("mutsuki_task_result", {
       request: { task_id: run.task_id },
     });
+    if (abortRequested || signal?.aborted) {
+      requestCancellation();
+      await cancelPromise;
+      throw abortError();
+    }
     const outcome = result.outcome;
     if (outcome?.status === "completed") return outcome.output as TResult;
     if (outcome?.status === "failed") {
       throw new Error(`Mutsuki task failed: ${JSON.stringify(outcome.error)}`);
     }
+    if (outcome?.status === "cancelled") throw abortError();
     throw new Error(`Mutsuki task ended with ${outcome?.status ?? "no outcome"}: ${outcome?.reason ?? ""}`);
   } finally {
-    signal?.removeEventListener("abort", abort);
-    unlisten();
+    signal?.removeEventListener("abort", requestCancellation);
+    unlisten?.();
   }
 }

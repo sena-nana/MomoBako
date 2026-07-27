@@ -13,10 +13,12 @@ struct ArchivePlanEntry {
     is_directory: bool,
 }
 
-pub(super) fn import_archive_entries(
+pub(super) fn import_archive_entries_cancellable(
     state: &RepositoryState,
     request: FileArchiveImportRequest,
+    cancellation: &dyn CancellationCheck,
 ) -> Result<FileBrowserSnapshot, String> {
+    cancellation.checkpoint()?;
     state.ensure_initialized()?;
     let repo = state.load_repository_record(&request.repo_id)?;
     ensure_repository_supports_local_write_access(&repo, "importing archives")?;
@@ -45,19 +47,28 @@ pub(super) fn import_archive_entries(
     }
 
     let plan = plan_archive_import(&archive_path, &repo_root, &parent_path)?;
-    execute_archive_import(&archive_path, &repo_root, &plan)?;
-    finish_import_operation(
+    if let Err(error) = execute_archive_import(&archive_path, &repo_root, &plan, cancellation) {
+        let _ = state.sync_repository(SyncRequest {
+            repo_id: request.repo_id.clone(),
+        })?;
+        return Err(error);
+    }
+    let snapshot = finish_import_operation(
         state,
         &request.repo_id,
         parent_path,
         plan_has_directories(&plan),
-    )
+    )?;
+    cancellation.checkpoint()?;
+    Ok(snapshot)
 }
 
-pub(super) fn import_eagle_library(
+pub(super) fn import_eagle_library_cancellable(
     state: &RepositoryState,
     request: EagleLibraryImportRequest,
+    cancellation: &dyn CancellationCheck,
 ) -> Result<EagleLibraryImportResponse, String> {
+    cancellation.checkpoint()?;
     state.ensure_initialized()?;
     let repo = state.load_repository_record(&request.repo_id)?;
     ensure_repository_supports_local_write_access(&repo, "importing Eagle libraries")?;
@@ -78,9 +89,11 @@ pub(super) fn import_eagle_library(
         serde_json::from_value::<EagleLibraryPluginImportResponse>(response_value)
             .map_err(json_error)?;
 
+    // 插件调用本身不可中断；返回后先恢复索引一致性，再对外观察取消。
     state.sync_repository(SyncRequest {
         repo_id: request.repo_id.clone(),
     })?;
+    cancellation.checkpoint()?;
     let snapshot = state.load_file_browser(FileBrowserRequest {
         repo_id: request.repo_id.clone(),
         directory_path: Some(parent_path),
@@ -246,7 +259,9 @@ fn execute_archive_import(
     archive_path: &Path,
     repo_root: &Path,
     plan: &[ArchivePlanEntry],
+    cancellation: &dyn CancellationCheck,
 ) -> Result<(), String> {
+    cancellation.checkpoint()?;
     let file = File::open(archive_path).map_err(io_error)?;
     let mut archive =
         zip::ZipArchive::new(file).map_err(|error| format!("invalid zip archive: {error}"))?;
@@ -258,6 +273,7 @@ fn execute_archive_import(
         .collect::<Vec<_>>();
     directories.sort_by_key(|entry| entry.target_relative_path.len());
     for entry in directories {
+        cancellation.checkpoint()?;
         let target_abs = resolve_repository_relative_path(repo_root, &entry.target_relative_path)?;
         fs::create_dir_all(target_abs).map_err(io_error)?;
     }
@@ -267,6 +283,7 @@ fn execute_archive_import(
         .filter(|entry| !entry.is_directory)
         .collect::<Vec<_>>();
     for entry in files {
+        cancellation.checkpoint()?;
         let archive_name = entry.archive_name.as_deref().ok_or_else(|| {
             format!(
                 "archive entry missing source: {}",
@@ -280,10 +297,52 @@ fn execute_archive_import(
         if let Some(parent) = target_abs.parent() {
             fs::create_dir_all(parent).map_err(io_error)?;
         }
-        let mut output = File::create(&target_abs).map_err(io_error)?;
-        std::io::copy(&mut source, &mut output).map_err(io_error)?;
+        extract_file_atomically(&mut source, &target_abs, cancellation)?;
     }
     Ok(())
+}
+
+/// 解压到临时文件，取消或失败时不暴露残缺目标。
+fn extract_file_atomically(
+    source: &mut dyn Read,
+    target: &Path,
+    cancellation: &dyn CancellationCheck,
+) -> Result<(), String> {
+    let file_name = target
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("entry");
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let temporary = target.with_file_name(format!(
+        ".{file_name}.momobako-part-{}-{nonce}",
+        std::process::id()
+    ));
+    let result = (|| {
+        let mut output = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary)
+            .map_err(io_error)?;
+        let mut buffer = vec![0_u8; 1024 * 1024];
+        loop {
+            cancellation.checkpoint()?;
+            let read = source.read(&mut buffer).map_err(io_error)?;
+            if read == 0 {
+                break;
+            }
+            output.write_all(&buffer[..read]).map_err(io_error)?;
+        }
+        output.flush().map_err(io_error)?;
+        cancellation.checkpoint()?;
+        fs::rename(&temporary, target).map_err(io_error)
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&temporary);
+    }
+    result
 }
 
 fn prefix_relative_path(parent_path: &str, path: &str) -> String {

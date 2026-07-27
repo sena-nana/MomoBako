@@ -111,9 +111,7 @@ fn official_packages_load_and_route_through_abi_v2() {
             .iter()
             .find(|summary| summary.plugin_id == plugin_id)
             .unwrap_or_else(|| {
-                panic!(
-                    "missing plugin summary: {plugin_id}; packages={package_diagnostics:#?}"
-                )
+                panic!("missing plugin summary: {plugin_id}; packages={package_diagnostics:#?}")
             });
         assert_eq!(summary.status, "loaded", "{plugin_id}: {:?}", summary.error);
     }

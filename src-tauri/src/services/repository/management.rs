@@ -715,6 +715,15 @@ pub(super) fn sync_repository(
     state: &RepositoryState,
     request: SyncRequest,
 ) -> Result<SyncResult, String> {
+    sync_repository_cancellable(state, request, &NeverCancelled)
+}
+
+pub(super) fn sync_repository_cancellable(
+    state: &RepositoryState,
+    request: SyncRequest,
+    cancellation: &dyn CancellationCheck,
+) -> Result<SyncResult, String> {
+    cancellation.checkpoint()?;
     log_repository_management(
         "info",
         "syncStart",
@@ -726,6 +735,7 @@ pub(super) fn sync_repository(
         &request.repo_id,
         &HashSet::new(),
         &std::collections::BTreeSet::new(),
+        cancellation,
     )?;
     log_repository_management(
         "info",
@@ -772,6 +782,7 @@ pub(super) fn sync_repository_with_candidate_skips(
         repo_id,
         skip_hardlink_candidate_paths,
         &std::collections::BTreeSet::new(),
+        &NeverCancelled,
     )
 }
 
@@ -780,7 +791,9 @@ fn sync_repository_with_candidate_skips_and_hint_paths(
     repo_id: &str,
     skip_hardlink_candidate_paths: &HashSet<String>,
     hint_paths: &std::collections::BTreeSet<String>,
+    cancellation: &dyn CancellationCheck,
 ) -> Result<SyncResult, String> {
+    cancellation.checkpoint()?;
     state.ensure_initialized()?;
     let repo = state.load_repository_record(repo_id)?;
     let mut connection = state.open_repository_connection(
@@ -796,8 +809,10 @@ fn sync_repository_with_candidate_skips_and_hint_paths(
         &repo,
         skip_hardlink_candidate_paths,
         hint_paths,
+        cancellation,
     )
     .map_err(db_error)?;
+    cancellation.checkpoint()?;
     tx.commit().map_err(db_error)?;
     Ok(scan)
 }
