@@ -34,7 +34,7 @@ struct TaskRequest {
     protocol_id: String,
     payload: Value,
     cancellation: Arc<MomoCancellation>,
-    result: Option<oneshot::Sender<TaskResult>>,
+    result: oneshot::Sender<TaskResult>,
 }
 
 struct RuntimeState {
@@ -152,7 +152,7 @@ impl MomoTaskRuntime {
             protocol_id: protocol_id.clone(),
             payload,
             cancellation,
-            result: Some(result_tx),
+            result: result_tx,
         };
         let sender = if is_interactive(&protocol_id) {
             &self.state.interactive_tx
@@ -170,22 +170,21 @@ impl MomoTaskRuntime {
         result
     }
 
-    fn run_blocking(&self, request: TaskRequest) -> TaskResult {
-        let task = Task::new(
-            request.task_id.clone(),
-            request.protocol_id.clone(),
-            request.payload,
-        );
+    fn run_blocking(&self, request: TaskRequest) {
+        let TaskRequest {
+            task_id,
+            protocol_id,
+            payload,
+            cancellation,
+            result: result_sender,
+        } = request;
+        let task = Task::new(task_id, protocol_id.clone(), payload);
         let mut events = Vec::new();
-        let executor =
-            RepositoryTaskExecutor::new(&self.state.runtime, request.cancellation.as_ref());
-        let result = executor.execute(&task, &mut events).map_err(|error| {
-            format!(
-                "{} [{}] {:?}",
-                request.protocol_id, error.route, error.evidence
-            )
-        });
-        result.map(|result| {
+        let executor = RepositoryTaskExecutor::new(&self.state.runtime, cancellation.as_ref());
+        let result = executor
+            .execute(&task, &mut events)
+            .map_err(|error| format!("{} [{}] {:?}", protocol_id, error.route, error.evidence));
+        let result = result.map(|result| {
             let output = result.output.unwrap_or(Value::Null);
             let events = result
                 .events
@@ -194,7 +193,8 @@ impl MomoTaskRuntime {
                 .filter_map(|event| event.payload.get("progress").cloned())
                 .collect();
             (output, events)
-        })
+        });
+        let _ = result_sender.send(result);
     }
 
     fn remove_task(&self, task_id: &str) {
@@ -292,12 +292,7 @@ fn spawn_lane_workers(
                 let Some(request) = request else { break };
                 let result_runtime = runtime.clone();
                 tauri::async_runtime::spawn_blocking(move || {
-                    let mut request = request;
-                    let result_sender = request.result.take();
-                    let result = result_runtime.run_blocking(request);
-                    if let Some(result_sender) = result_sender {
-                        let _ = result_sender.send(result);
-                    }
+                    result_runtime.run_blocking(request);
                 })
                 .await
                 .unwrap_or_else(|error| {
