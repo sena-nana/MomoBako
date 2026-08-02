@@ -23,6 +23,14 @@ pub(super) struct PluginCatalog {
     pub(super) legacy_ids: BTreeMap<String, String>,
 }
 
+/// 已由 Momo 完成目录发现、依赖解析和包定位的原生插件输入。
+#[derive(Clone, Debug)]
+pub(crate) struct NativePluginSpec {
+    pub(crate) manifest: PluginManifest,
+    pub(crate) archive_path: PathBuf,
+    pub(crate) manifest_prefix: String,
+}
+
 #[derive(Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct PluginSettings {
@@ -256,6 +264,23 @@ impl PluginCatalog {
         providers.sort_by(|left, right| left.0.cmp(&right.0).then_with(|| left.1.cmp(&right.1)));
         providers
     }
+}
+
+/// 返回可交给独立 ABI Host 的产品级插件输入；包扫描、依赖和 staging 仍归 Momo 所有。
+pub(crate) fn native_plugin_specs(service_root: &Path) -> Vec<NativePluginSpec> {
+    let catalog = PluginCatalog::load(service_root);
+    catalog
+        .registrations
+        .values()
+        .filter(|registration| {
+            registration.manifest.enabled && registration.manifest.runtime == "native-dylib"
+        })
+        .map(|registration| NativePluginSpec {
+            manifest: registration.manifest.clone(),
+            archive_path: registration.archive_path.clone(),
+            manifest_prefix: registration.manifest_prefix.clone(),
+        })
+        .collect()
 }
 
 fn log_backend_plugin_call_failure(plugin_id: &str, method: &str, error: &str) {

@@ -1,14 +1,21 @@
-//! Mutsuki 长任务的 Tauri 命令编排边界。
+//! MomoBako 长任务的 Tauri 命令编排边界。
 
-use crate::services::mutsuki_host;
+use crate::services::mutsuki_runner::MomoTaskRuntime;
 use serde::Serialize;
 use serde_json::Value;
+use std::sync::Arc;
 
-#[derive(Clone, Default)]
-pub struct MutsukiTaskViewModel;
+#[derive(Clone)]
+pub struct MutsukiTaskViewModel {
+    runtime: Arc<MomoTaskRuntime>,
+}
 
 impl MutsukiTaskViewModel {
-    /// 将命令请求提交给 Mutsuki，并保留任务产生的进度事件。
+    pub fn new(runtime: Arc<MomoTaskRuntime>) -> Self {
+        Self { runtime }
+    }
+
+    /// 将命令请求提交给 Momo 自有双 lane runtime，并保留任务产生的进度事件。
     pub async fn execute<Request>(
         &self,
         protocol_id: &'static str,
@@ -17,11 +24,6 @@ impl MutsukiTaskViewModel {
     where
         Request: Serialize + Send + 'static,
     {
-        let payload = serde_json::to_value(request).map_err(|error| error.to_string())?;
-        tauri::async_runtime::spawn_blocking(move || {
-            mutsuki_host::execute_task(protocol_id, payload, None)
-        })
-        .await
-        .map_err(|error| error.to_string())?
+        self.runtime.execute(protocol_id, request).await
     }
 }

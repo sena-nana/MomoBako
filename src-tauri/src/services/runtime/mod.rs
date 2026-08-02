@@ -7,9 +7,7 @@ pub(crate) mod watcher;
 
 use crate::services::mutsuki_host;
 use crate::services::repository::RepositoryState;
-use mutsuki_tauri_host::{MutsukiTauriConfig, PathsConfig, PluginSelection};
 use std::{
-    collections::{BTreeMap, BTreeSet},
     path::PathBuf,
     sync::{Arc, Mutex},
 };
@@ -76,61 +74,9 @@ impl RepositoryRuntime {
         self.repository_state.root_path()
     }
 
-    /// 读取现有插件启用状态与配置，生成 ABI 初始化选择，不迁移 Momo 配置目录。
-    pub fn mutsuki_plugin_selection(&self) -> Result<PluginSelection, String> {
-        let service_root = self.service_root();
-        let mut enabled_plugin_ids = BTreeSet::new();
-        let mut configs = BTreeMap::new();
-        for manifest in self.repository_state.list_plugins()? {
-            if !manifest.enabled || manifest.runtime != "native-dylib" {
-                continue;
-            }
-            enabled_plugin_ids.insert(manifest.plugin_id.clone());
-            let snapshot = self
-                .repository_state
-                .get_plugin_config(manifest.plugin_id.clone())?;
-            configs.insert(
-                manifest.plugin_id.clone(),
-                serde_json::json!({
-                    "pluginId": manifest.plugin_id,
-                    "pluginDataDir": snapshot.data_directory,
-                    "serviceRootDir": service_root,
-                    "pluginConfig": snapshot.values,
-                }),
-            );
-        }
-        Ok(PluginSelection {
-            enabled_plugin_ids: Some(enabled_plugin_ids),
-            configs,
-        })
-    }
-
-    /// 将 Mutsuki 的运行缓存挂在现有 `.service-data` 下，同时保留原插件包目录。
-    pub fn mutsuki_config(&self) -> Result<MutsukiTauriConfig, String> {
-        let service_root = self.service_root();
-        let runtime_root = service_root.join("mutsuki");
-        let mut config = MutsukiTauriConfig::for_app("MomoBako");
-        config.paths = PathsConfig {
-            app_data_dir: runtime_root.clone(),
-            config_dir: runtime_root.join("config"),
-            data_dir: runtime_root.join("data"),
-            cache_dir: runtime_root.join("cache"),
-            logs_dir: runtime_root.join("logs"),
-            plugins_dir: service_root.join("plugins"),
-            resources_dir: runtime_root.join("resources"),
-            runners_dir: runtime_root.join("runners"),
-        };
-        config.plugin_selection = self.mutsuki_plugin_selection()?;
-        Ok(config)
-    }
-
     /// 配置、安装、删除或启停后原子切换桌面插件 generation。
     pub async fn reload_mutsuki_plugins(&self) -> Result<(), String> {
-        let runtime = self.clone();
-        let selection = self
-            .run_write(move |_| runtime.mutsuki_plugin_selection())
-            .await?;
-        tauri::async_runtime::spawn_blocking(move || mutsuki_host::reload_plugins(selection))
+        tauri::async_runtime::spawn_blocking(mutsuki_host::reload_plugins)
             .await
             .map_err(|error| error.to_string())?
     }

@@ -1099,12 +1099,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "doctest-file"
-version = "1.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c2db04e74f0a9a93103b50e90b96024c9b2bdca8bce6a632ec71b88736d3d359"
-
-[[package]]
 name = "dom_query"
 version = "0.27.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2338,21 +2332,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "interprocess"
-version = "2.4.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "069323743400cb7ab06a8fe5c1ed911d36b6919ec531661d034c89083629595b"
-dependencies = [
- "doctest-file",
- "futures-core",
- "libc",
- "recvmsg",
- "tokio",
- "widestring",
- "windows-sys 0.61.2",
-]
-
-[[package]]
 name = "ipnet"
 version = "2.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2740,16 +2719,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6877bb514081ee2a7ff5ef9de3281f14a4dd4bceac4c09388074a6b5df8a139a"
 
 [[package]]
-name = "mime_guess"
-version = "2.0.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f7c44f8e672c00fe5308fa235f821cb4198414e1c77935c1ab6948d3fd78550e"
-dependencies = [
- "mime",
- "unicase",
-]
-
-[[package]]
 name = "miniz_oxide"
 version = "0.8.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2781,12 +2750,9 @@ dependencies = [
  "hex",
  "image",
  "jwalk",
+ "mutsuki-plugin-api",
+ "mutsuki-plugin-host",
  "mutsuki-runtime-contracts",
- "mutsuki-runtime-core",
- "mutsuki-runtime-host",
- "mutsuki-runtime-sdk",
- "mutsuki-tauri-bridge",
- "mutsuki-tauri-host",
  "notify",
  "ntfs-reader",
  "reqwest 0.12.28",
@@ -2799,11 +2765,12 @@ dependencies = [
  "tauri-build",
  "tauri-plugin-dialog",
  "tauri-plugin-drag",
- "tauri-plugin-mutsuki",
  "tauri-plugin-opener",
  "tauri-plugin-store",
  "time",
  "tiny_http",
+ "tokio",
+ "toml 0.8.2",
  "zip 8.6.0",
 ]
 
@@ -2839,162 +2806,47 @@ dependencies = [
 ]
 
 [[package]]
-name = "mutsuki-link-core"
+name = "mutsuki-plugin-api"
 version = "0.1.0"
-source = "git+https://github.com/sena-nana/Mutsuki.git?rev=0f8ab8a3f2124a94c6da4d6b75a017ab47db0795#0f8ab8a3f2124a94c6da4d6b75a017ab47db0795"
+source = "git+https://github.com/sena-nana/Mutsuki.git?rev=a4bbca5#a4bbca5"
 dependencies = [
- "sha2 0.10.9",
+ "mutsuki-runtime-contracts",
+ "mutsuki-runtime-wire",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
-name = "mutsuki-link-io"
+name = "mutsuki-plugin-host"
 version = "0.1.0"
-source = "git+https://github.com/sena-nana/Mutsuki.git?rev=0f8ab8a3f2124a94c6da4d6b75a017ab47db0795#0f8ab8a3f2124a94c6da4d6b75a017ab47db0795"
+source = "git+https://github.com/sena-nana/Mutsuki.git?rev=a4bbca5#a4bbca5"
 dependencies = [
- "mutsuki-link-core",
- "tokio",
-]
-
-[[package]]
-name = "mutsuki-link-local"
-version = "0.1.0"
-source = "git+https://github.com/sena-nana/Mutsuki.git?rev=0f8ab8a3f2124a94c6da4d6b75a017ab47db0795#0f8ab8a3f2124a94c6da4d6b75a017ab47db0795"
-dependencies = [
- "interprocess",
- "mutsuki-link-core",
- "mutsuki-link-io",
- "sha2 0.10.9",
- "tokio",
+ "libloading 0.8.9",
+ "mutsuki-plugin-api",
+ "mutsuki-runtime-contracts",
+ "mutsuki-runtime-wire",
+ "serde_json",
 ]
 
 [[package]]
 name = "mutsuki-runtime-contracts"
 version = "0.1.0"
-source = "git+https://github.com/sena-nana/Mutsuki.git?rev=0f8ab8a3f2124a94c6da4d6b75a017ab47db0795#0f8ab8a3f2124a94c6da4d6b75a017ab47db0795"
+source = "git+https://github.com/sena-nana/Mutsuki.git?rev=a4bbca5#a4bbca5"
 dependencies = [
  "serde",
  "serde_json",
-]
-
-[[package]]
-name = "mutsuki-runtime-core"
-version = "0.1.0"
-source = "git+https://github.com/sena-nana/Mutsuki.git?rev=0f8ab8a3f2124a94c6da4d6b75a017ab47db0795#0f8ab8a3f2124a94c6da4d6b75a017ab47db0795"
-dependencies = [
- "mutsuki-runtime-contracts",
- "serde_json",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "mutsuki-runtime-host"
-version = "0.1.0"
-source = "git+https://github.com/sena-nana/Mutsuki.git?rev=0f8ab8a3f2124a94c6da4d6b75a017ab47db0795#0f8ab8a3f2124a94c6da4d6b75a017ab47db0795"
-dependencies = [
- "crossbeam-channel",
- "futures-channel",
- "futures-util",
- "libloading 0.8.9",
- "mutsuki-runtime-contracts",
- "mutsuki-runtime-core",
- "mutsuki-runtime-sdk",
- "mutsuki-runtime-wire",
- "serde",
- "serde_json",
- "tokio",
-]
-
-[[package]]
-name = "mutsuki-runtime-sdk"
-version = "0.1.0"
-source = "git+https://github.com/sena-nana/Mutsuki.git?rev=0f8ab8a3f2124a94c6da4d6b75a017ab47db0795#0f8ab8a3f2124a94c6da4d6b75a017ab47db0795"
-dependencies = [
- "mutsuki-runtime-contracts",
- "mutsuki-runtime-core",
- "mutsuki-runtime-sdk-macros",
- "mutsuki-runtime-wire",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "mutsuki-runtime-sdk-macros"
-version = "0.1.0"
-source = "git+https://github.com/sena-nana/Mutsuki.git?rev=0f8ab8a3f2124a94c6da4d6b75a017ab47db0795#0f8ab8a3f2124a94c6da4d6b75a017ab47db0795"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.117",
 ]
 
 [[package]]
 name = "mutsuki-runtime-wire"
 version = "0.1.0"
-source = "git+https://github.com/sena-nana/Mutsuki.git?rev=0f8ab8a3f2124a94c6da4d6b75a017ab47db0795#0f8ab8a3f2124a94c6da4d6b75a017ab47db0795"
+source = "git+https://github.com/sena-nana/Mutsuki.git?rev=a4bbca5#a4bbca5"
 dependencies = [
  "mutsuki-runtime-contracts",
  "rmp-serde",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
-]
-
-[[package]]
-name = "mutsuki-tauri-bridge"
-version = "0.1.0"
-source = "git+https://github.com/sena-nana/Mutsuki.git?rev=0f8ab8a3f2124a94c6da4d6b75a017ab47db0795#0f8ab8a3f2124a94c6da4d6b75a017ab47db0795"
-dependencies = [
- "mutsuki-runtime-contracts",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tokio",
- "uuid",
-]
-
-[[package]]
-name = "mutsuki-tauri-host"
-version = "0.1.0"
-source = "git+https://github.com/sena-nana/Mutsuki.git?rev=0f8ab8a3f2124a94c6da4d6b75a017ab47db0795#0f8ab8a3f2124a94c6da4d6b75a017ab47db0795"
-dependencies = [
- "dirs",
- "hex",
- "mutsuki-link-core",
- "mutsuki-link-local",
- "mutsuki-runtime-contracts",
- "mutsuki-runtime-core",
- "mutsuki-runtime-host",
- "mutsuki-runtime-sdk",
- "mutsuki-tauri-bridge",
- "mutsuki-tauri-resource",
- "parking_lot",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "thiserror 2.0.18",
- "tokio",
- "toml 0.9.12+spec-1.1.0",
- "uuid",
- "zip 8.6.0",
-]
-
-[[package]]
-name = "mutsuki-tauri-resource"
-version = "0.1.0"
-source = "git+https://github.com/sena-nana/Mutsuki.git?rev=0f8ab8a3f2124a94c6da4d6b75a017ab47db0795#0f8ab8a3f2124a94c6da4d6b75a017ab47db0795"
-dependencies = [
- "mime_guess",
- "mutsuki-runtime-contracts",
- "mutsuki-runtime-core",
- "mutsuki-runtime-sdk",
- "mutsuki-tauri-bridge",
- "parking_lot",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "thiserror 2.0.18",
- "tokio",
- "uuid",
 ]
 
 [[package]]
@@ -3986,12 +3838,6 @@ dependencies = [
  "crossbeam-deque",
  "crossbeam-utils",
 ]
-
-[[package]]
-name = "recvmsg"
-version = "1.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d3edd4d5d42c92f0a659926464d4cce56b562761267ecf0f469d85b7de384175"
 
 [[package]]
 name = "redox_syscall"
@@ -5082,20 +4928,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "tauri-plugin-mutsuki"
-version = "0.1.0"
-source = "git+https://github.com/sena-nana/Mutsuki.git?rev=0f8ab8a3f2124a94c6da4d6b75a017ab47db0795#0f8ab8a3f2124a94c6da4d6b75a017ab47db0795"
-dependencies = [
- "mutsuki-runtime-contracts",
- "mutsuki-tauri-bridge",
- "mutsuki-tauri-host",
- "serde",
- "serde_json",
- "tauri",
- "time",
-]
-
-[[package]]
 name = "tauri-plugin-opener"
 version = "2.5.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5388,7 +5220,6 @@ dependencies = [
  "libc",
  "mio",
  "pin-project-lite",
- "signal-hook-registry",
  "socket2",
  "tokio-macros",
  "windows-sys 0.61.2",
@@ -5721,12 +5552,6 @@ checksum = "96bd2f2237fe450fcd0a1d2f5f4e91711124f7857ba2e964247776ebeeb7b0c4"
 dependencies = [
  "unic-common",
 ]
-
-[[package]]
-name = "unicase"
-version = "2.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dbc4bc3a9f746d862c45cb89d705aa10f187bb96c76001afab07a0d35ce60142"
 
 [[package]]
 name = "unicode-ident"

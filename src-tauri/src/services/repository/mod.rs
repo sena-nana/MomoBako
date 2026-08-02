@@ -77,10 +77,12 @@ use self::pathing::*;
 #[cfg(test)]
 pub(crate) use self::playback::download_playlist_with_progress;
 pub(crate) use self::playback::download_playlist_with_progress_cancellable;
+pub(crate) use self::plugin::extract_zip_plugin;
+pub(crate) use self::plugin::plugin_data_dir;
 use self::plugin::{
     apply_plugin_settings, broken_plugin_manifest, ensure_plugin_data_dir,
     ensure_repository_backend_runtime_available, is_source_plugin, load_plugin_config_values,
-    load_plugin_settings, parse_plugin_manifest_with_source, plugin_data_dir, plugin_legacy_ids,
+    load_plugin_settings, parse_plugin_manifest_with_source, plugin_legacy_ids,
     read_plugin_manifest_from_archive, resolve_plugin_manifest_dependencies, runtime_plugins_dir,
     shutdown_helper_state_dir,
 };
@@ -92,6 +94,7 @@ pub(crate) use self::plugin_runtime::{
     install_local_filesystem_test_plugin_archive, set_test_downloader_playback_hook,
     set_test_downloader_track_package_hook,
 };
+pub(crate) use self::plugin_runtime::{native_plugin_specs, NativePluginSpec};
 use self::read_model::*;
 use self::records::*;
 use self::registry_store::*;

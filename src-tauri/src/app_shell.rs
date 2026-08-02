@@ -1,9 +1,7 @@
 //! Desktop app-shell bootstrap and lifecycle glue for the Tauri View layer.
 
 use crate::services::logging::{init_app_logger, write_log};
-use crate::services::{
-    mutsuki_host, mutsuki_runner::build_momo_long_task_runner, runtime::RepositoryRuntime,
-};
+use crate::services::{mutsuki_host, mutsuki_runner::MomoTaskRuntime, runtime::RepositoryRuntime};
 use crate::{
     services::repository::{SystemLogLocationInput, SystemLogWriteRequest},
     viewmodels::{
@@ -13,10 +11,7 @@ use crate::{
     },
     window_state,
 };
-use std::sync::{
-    atomic::{AtomicU64, Ordering},
-    Arc,
-};
+use std::sync::Arc;
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
@@ -31,25 +26,12 @@ const BG: Color = Color(0x18, 0x18, 0x18, 0xFF);
 
 /// Applies desktop-shell plugins and lifecycle hooks before command registration.
 pub fn builder(runtime: RepositoryRuntime) -> Builder<tauri::Wry> {
-    let host_runtime = runtime.clone();
     let app_runtime = runtime.clone();
-    let runner_generation = Arc::new(AtomicU64::new(1));
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_drag::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_store::Builder::default().build())
-        .plugin(tauri_plugin_mutsuki::init_with_app(move |_| {
-            let config = host_runtime.mutsuki_config()?;
-            let runner_runtime = host_runtime.clone();
-            let runner_generation = runner_generation.clone();
-            Ok(mutsuki_tauri_host::MutsukiTauriHostBuilder::new()
-                .config(config)
-                .runner_factory(move || {
-                    let generation = runner_generation.fetch_add(1, Ordering::Relaxed);
-                    build_momo_long_task_runner(runner_runtime.clone(), generation)
-                }))
-        }))
         .manage(window_state::MainWindowStateCache::default())
         .setup(move |app| {
             let service_root = std::env::current_dir()
@@ -75,18 +57,19 @@ pub fn builder(runtime: RepositoryRuntime) -> Builder<tauri::Wry> {
             });
             let runtime = app_runtime.clone();
             runtime.set_app_handle(app.handle().clone())?;
-            let host = app
-                .try_state::<Arc<mutsuki_tauri_host::MutsukiTauriHost>>()
-                .ok_or_else(|| "Mutsuki Host 未完成启动。".to_string())?
-                .inner()
-                .clone();
-            mutsuki_host::install_host(host)?;
+            let task_runtime = Arc::new(MomoTaskRuntime::new(runtime.clone()));
+            let plugin_runtime = Arc::new(mutsuki_host::MomoPluginRuntime::new(
+                runtime.clone(),
+                task_runtime.clone(),
+            ));
+            plugin_runtime.reload()?;
+            mutsuki_host::install_host(plugin_runtime.clone())?;
             let file_browser = FileBrowserViewModel::new(runtime.clone());
             let plugin_vm = PluginViewModel::new(runtime.clone());
             let repository_interaction = RepositoryInteractionViewModel::new(runtime.clone());
             let repository_query = RepositoryQueryViewModel::new(runtime.clone());
             let repository_management = RepositoryManagementViewModel::new(runtime.clone());
-            let mutsuki_tasks = MutsukiTaskViewModel;
+            let mutsuki_tasks = MutsukiTaskViewModel::new(task_runtime);
             let system_vm = SystemViewModel::new(runtime.clone());
 
             allow_thumbnail_asset_roots(
@@ -99,6 +82,7 @@ pub fn builder(runtime: RepositoryRuntime) -> Builder<tauri::Wry> {
             app.manage(repository_interaction);
             app.manage(repository_query);
             app.manage(repository_management);
+            app.manage(plugin_runtime);
             app.manage(mutsuki_tasks);
             app.manage(system_vm);
             setup_tray(app.handle())?;
