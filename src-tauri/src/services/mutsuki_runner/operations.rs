@@ -8,7 +8,6 @@ use std::{
 };
 
 use mutsuki_runtime_contracts::{DomainEvent, RunnerResult, RuntimeError, ScalarValue, Task};
-use mutsuki_runtime_host::CancellationProbe;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::json;
 
@@ -296,12 +295,6 @@ impl<'a> RepositoryTaskExecutor<'a> {
             &mut response.word_lyric_source_url,
             response.word_lyric_path.as_deref(),
         )
-    }
-}
-
-impl CancellationCheck for CancellationProbe {
-    fn is_cancelled(&self) -> bool {
-        CancellationProbe::is_cancelled(self)
     }
 }
 

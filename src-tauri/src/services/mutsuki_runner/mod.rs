@@ -2,7 +2,7 @@
 
 mod operations;
 mod protocols;
-mod runner;
+mod task_runtime;
 
 pub use protocols::{
     PROTOCOL_ARCHIVE_IMPORT, PROTOCOL_EAGLE_IMPORT, PROTOCOL_ENTRY_COPY, PROTOCOL_ENTRY_DELETE,
@@ -11,4 +11,4 @@ pub use protocols::{
     PROTOCOL_REPOSITORY_CREATE, PROTOCOL_REPOSITORY_EXPORT, PROTOCOL_REPOSITORY_IMPORT,
     PROTOCOL_REPOSITORY_RELOCATE, PROTOCOL_REPOSITORY_SYNC, PROTOCOL_THUMBNAIL_REQUEST,
 };
-pub use runner::build_momo_long_task_runner;
+pub use task_runtime::MomoTaskRuntime;
