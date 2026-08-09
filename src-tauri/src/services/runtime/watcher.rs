@@ -135,6 +135,17 @@ pub(crate) fn sync_watched_paths(
     Ok(())
 }
 
+/// 读取测试运行时的监听集合，用于核对取消后 watcher 未发生漂移。
+#[cfg(test)]
+pub(crate) fn watched_paths_for_test(
+    watcher_handle: &Arc<Mutex<RepositoryWatcher>>,
+) -> Result<BTreeSet<PathBuf>, String> {
+    watcher_handle
+        .lock()
+        .map(|watcher| watcher.watched_paths.clone())
+        .map_err(|_| "watcher state lock poisoned".to_string())
+}
+
 fn handle_fs_event(repository_state: &Arc<RepositoryState>, event: Event) {
     let repositories = match repository_state.list_repositories() {
         Ok(repositories) => repositories,
