@@ -2753,6 +2753,7 @@ dependencies = [
  "mutsuki-plugin-api",
  "mutsuki-plugin-host",
  "mutsuki-runtime-contracts",
+ "mutsuki-runtime-wire",
  "notify",
  "ntfs-reader",
  "reqwest 0.12.28",
