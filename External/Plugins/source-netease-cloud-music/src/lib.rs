@@ -37,8 +37,6 @@ struct PluginPayload {
     #[serde(default)]
     persist_session: Option<bool>,
     #[serde(default)]
-    timestamp: Option<i64>,
-    #[serde(default)]
     cookie: Option<String>,
 }
 
@@ -120,8 +118,6 @@ struct RuntimeContext {
 struct RepoConfig {
     cookie: String,
     account_id: i64,
-    nickname: Option<String>,
-    user_name: Option<String>,
     default_level: String,
 }
 
@@ -129,8 +125,6 @@ struct RepoConfig {
 struct RepoBackendConfigOverride {
     cookie: Option<String>,
     account_id: Option<i64>,
-    nickname: Option<String>,
-    user_name: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -430,16 +424,6 @@ fn repo_config(runtime: &RuntimeContext) -> Result<RepoConfig, String> {
         return Ok(RepoConfig {
             cookie,
             account_id,
-            nickname: runtime
-                .repo_backend_config
-                .nickname
-                .clone()
-                .or_else(|| stored.as_ref().and_then(|value| value.nickname.clone())),
-            user_name: runtime
-                .repo_backend_config
-                .user_name
-                .clone()
-                .or_else(|| stored.as_ref().and_then(|value| value.user_name.clone())),
             default_level: runtime.default_level.clone(),
         });
     }
@@ -448,8 +432,6 @@ fn repo_config(runtime: &RuntimeContext) -> Result<RepoConfig, String> {
     Ok(RepoConfig {
         cookie: value.cookie,
         account_id: value.account_id,
-        nickname: value.nickname,
-        user_name: value.user_name,
         default_level: runtime.default_level.clone(),
     })
 }
@@ -1270,18 +1252,6 @@ fn repo_backend_config_override(config: Option<&serde_json::Value>) -> RepoBacke
             .filter(|value| !value.is_empty())
             .map(ToOwned::to_owned),
         account_id: config.get("accountId").and_then(value_to_i64),
-        nickname: config
-            .get("nickname")
-            .and_then(serde_json::Value::as_str)
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(ToOwned::to_owned),
-        user_name: config
-            .get("userName")
-            .and_then(serde_json::Value::as_str)
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(ToOwned::to_owned),
     }
 }
 
@@ -1620,8 +1590,6 @@ mod tests {
             repo_backend_config: RepoBackendConfigOverride {
                 cookie: Some("MUSIC_U=repo-cookie".to_string()),
                 account_id: Some(123456),
-                nickname: Some("云村 Aura".to_string()),
-                user_name: Some("Aura".to_string()),
             },
         };
 
@@ -1629,8 +1597,6 @@ mod tests {
 
         assert_eq!(config.cookie, "MUSIC_U=repo-cookie");
         assert_eq!(config.account_id, 123456);
-        assert_eq!(config.nickname.as_deref(), Some("云村 Aura"));
-        assert_eq!(config.user_name.as_deref(), Some("Aura"));
         assert_eq!(config.default_level, "higher");
     }
 
@@ -1646,8 +1612,6 @@ mod tests {
             repo_backend_config: RepoBackendConfigOverride {
                 cookie: Some("MUSIC_U=repo-cookie".to_string()),
                 account_id: Some(123456),
-                nickname: None,
-                user_name: None,
             },
         };
 
@@ -1666,8 +1630,6 @@ mod tests {
             repo_backend_config: RepoBackendConfigOverride {
                 cookie: Some("MUSIC_U=repo-cookie".to_string()),
                 account_id: Some(123456),
-                nickname: Some("云村 Aura".to_string()),
-                user_name: Some("Aura".to_string()),
             },
         };
 
@@ -1683,7 +1645,6 @@ mod tests {
                 key: None,
                 qrimg: None,
                 persist_session: None,
-                timestamp: None,
                 cookie: None,
             },
         )
@@ -1693,6 +1654,19 @@ mod tests {
         assert_eq!(value["loginExpired"], serde_json::json!(false));
         assert_eq!(value["account"]["id"], serde_json::json!(123456));
         assert_eq!(value["profile"]["nickname"], serde_json::json!("云村 Aura"));
+    }
+
+    #[test]
+    fn plugin_payload_accepts_legacy_timestamp_field() {
+        let payload: PluginPayload = serde_json::from_value(serde_json::json!({
+            "key": "qr-key",
+            "timestamp": 1_723_456_789_000_i64,
+            "persistSession": false,
+        }))
+        .expect("legacy timestamp should remain an accepted extra field");
+
+        assert_eq!(payload.key.as_deref(), Some("qr-key"));
+        assert_eq!(payload.persist_session, Some(false));
     }
 
     #[test]
@@ -2090,8 +2064,6 @@ mod tests {
             repo_backend_config: RepoBackendConfigOverride {
                 cookie: Some("MUSIC_U=repo-cookie".to_string()),
                 account_id: Some(123456),
-                nickname: Some("云村 Aura".to_string()),
-                user_name: Some("Aura".to_string()),
             },
         };
 
@@ -2127,8 +2099,6 @@ mod tests {
             repo_backend_config: RepoBackendConfigOverride {
                 cookie: Some("MUSIC_U=repo-cookie".to_string()),
                 account_id: Some(123456),
-                nickname: Some("云村 Aura".to_string()),
-                user_name: Some("Aura".to_string()),
             },
         };
 
@@ -2276,8 +2246,6 @@ mod tests {
             repo_backend_config: RepoBackendConfigOverride {
                 cookie: Some("MUSIC_U=repo-cookie".to_string()),
                 account_id: Some(123456),
-                nickname: Some("云村 Aura".to_string()),
-                user_name: Some("Aura".to_string()),
             },
         };
 
@@ -2312,8 +2280,6 @@ mod tests {
             repo_backend_config: RepoBackendConfigOverride {
                 cookie: Some("MUSIC_U=repo-cookie".to_string()),
                 account_id: Some(123456),
-                nickname: Some("云村 Aura".to_string()),
-                user_name: Some("Aura".to_string()),
             },
         };
 

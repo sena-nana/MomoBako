@@ -150,15 +150,8 @@ struct SongUrlEnvelope {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct SongUrlItem {
-    id: Option<i64>,
     url: Option<String>,
     br: Option<i64>,
-    size: Option<i64>,
-    md5: Option<String>,
-    #[serde(default)]
-    free_trial_info: Option<serde_json::Value>,
-    #[serde(default)]
-    type_field: Option<String>,
     #[serde(rename = "type")]
     #[serde(default)]
     mime_hint: Option<String>,
@@ -166,7 +159,6 @@ struct SongUrlItem {
 
 #[derive(Debug, Deserialize)]
 struct LyricsEnvelope {
-    code: Option<i64>,
     #[serde(default)]
     lrc: Option<LyricField>,
     #[serde(default)]
@@ -188,7 +180,6 @@ struct SongDetailEnvelope {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct SongDetailItem {
-    id: i64,
     name: String,
     #[serde(default)]
     ar: Vec<SongArtistItem>,
