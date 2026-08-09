@@ -153,12 +153,38 @@ impl MomoPluginRuntime {
         result
     }
 
-    fn unavailable_reason(&self, plugin_id: &str) -> Option<String> {
-        let slot = self.slots.read().ok()?.get(plugin_id).cloned()?;
-        if slot.draining.load(Ordering::Acquire) {
-            return Some("插件正在重新加载。".to_string());
-        }
-        slot.error.clone()
+    fn unavailable_reason(&self, plugin_id: &str) -> Result<Option<String>, String> {
+        let slots = self
+            .slots
+            .read()
+            .map_err(|_| "Momo 插件 generation 状态锁已损坏。".to_string())?;
+        plugin_slot_unavailable_reason(plugin_id, slots.get(plugin_id).map(Arc::as_ref))
+    }
+}
+
+/// 将当前 generation 的插件槽位收窄为可用、不可用或状态错误三种结果。
+fn plugin_slot_unavailable_reason(
+    plugin_id: &str,
+    slot: Option<&PluginSlot>,
+) -> Result<Option<String>, String> {
+    let slot = slot.ok_or_else(|| format!("插件未加载到当前 Host generation：{plugin_id}"))?;
+    if slot.draining.load(Ordering::Acquire) {
+        return Ok(Some("插件正在重新加载。".to_string()));
+    }
+    if let Some(error) = slot.error.as_ref() {
+        return Ok(Some(error.clone()));
+    }
+    if slot.session.is_none() {
+        return Ok(Some("插件未加载。".to_string()));
+    }
+    Ok(None)
+}
+
+/// 保留健康插件的 None，同时将 Host 或插件状态错误转为不可用原因。
+fn resolve_plugin_unavailable_reason(reason: Result<Option<String>, String>) -> Option<String> {
+    match reason {
+        Ok(reason) => reason,
+        Err(error) => Some(error),
     }
 }
 
@@ -185,10 +211,9 @@ pub fn call_plugin(plugin_id: &str, method: &str, payload: Value) -> Result<Valu
 }
 
 pub fn plugin_unavailable_reason(plugin_id: &str) -> Option<String> {
-    active_host()
-        .ok()
-        .and_then(|host| host.unavailable_reason(plugin_id))
-        .or_else(|| Some("需要独立 ABI v2 插件 Host。".to_string()))
+    resolve_plugin_unavailable_reason(
+        active_host().and_then(|host| host.unavailable_reason(plugin_id)),
+    )
 }
 
 pub fn reload_plugins() -> Result<(), String> {
@@ -430,6 +455,8 @@ fn drain_slots(slots: BTreeMap<String, Arc<PluginSlot>>) {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
     #[test]
     fn plugin_target_is_explicitly_plugin_scoped() {
         let plugin_id = "momobako.source.eagle-library";
@@ -437,6 +464,56 @@ mod tests {
         assert_eq!(
             format!("binding:{plugin_id}:momobako.{method}"),
             "binding:momobako.source.eagle-library:momobako.filesystem.listFiles"
+        );
+    }
+
+    #[test]
+    fn healthy_plugin_reason_remains_none() {
+        assert_eq!(resolve_plugin_unavailable_reason(Ok(None)), None);
+    }
+
+    #[test]
+    fn plugin_and_host_errors_are_preserved() {
+        assert_eq!(
+            resolve_plugin_unavailable_reason(Ok(Some("插件加载失败。".to_string()))),
+            Some("插件加载失败。".to_string())
+        );
+        assert_eq!(
+            resolve_plugin_unavailable_reason(Err("Momo 独立插件 Host 尚未启动。".to_string())),
+            Some("Momo 独立插件 Host 尚未启动。".to_string())
+        );
+    }
+
+    #[test]
+    fn missing_plugin_generation_is_unavailable() {
+        let error = plugin_slot_unavailable_reason("momobako.local-filesystem", None)
+            .expect_err("missing generation slot should be unavailable");
+
+        assert!(error.contains("momobako.local-filesystem"));
+        assert!(error.contains("未加载到当前 Host generation"));
+    }
+
+    #[test]
+    fn unloaded_and_draining_slots_remain_unavailable() {
+        let unloaded = PluginSlot {
+            session: None,
+            generation: 1,
+            active_calls: AtomicUsize::new(0),
+            draining: AtomicBool::new(false),
+            error: None,
+        };
+        assert_eq!(
+            plugin_slot_unavailable_reason("momobako.local-filesystem", Some(&unloaded)),
+            Ok(Some("插件未加载。".to_string()))
+        );
+
+        let draining = PluginSlot {
+            draining: AtomicBool::new(true),
+            ..unloaded
+        };
+        assert_eq!(
+            plugin_slot_unavailable_reason("momobako.local-filesystem", Some(&draining)),
+            Ok(Some("插件正在重新加载。".to_string()))
         );
     }
 }
