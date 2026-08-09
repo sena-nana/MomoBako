@@ -32,7 +32,6 @@ hex = "0.4"
 getrandom = "0.3"
 zip = { version = "8.6", default-features = false, features = ["deflate"] }
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
-jwalk = "0.8.1"
 mutsuki-runtime-contracts = { git = "https://github.com/sena-nana/Mutsuki.git", rev = "e8b86a14e2433461525d2a052b499fde488102a9" }
 mutsuki-plugin-api = { git = "https://github.com/sena-nana/Mutsuki.git", rev = "e8b86a14e2433461525d2a052b499fde488102a9" }
 mutsuki-plugin-host = { git = "https://github.com/sena-nana/Mutsuki.git", rev = "e8b86a14e2433461525d2a052b499fde488102a9" }
@@ -41,7 +40,3 @@ toml = "0.8"
 
 [dev-dependencies]
 mutsuki-runtime-wire = { git = "https://github.com/sena-nana/Mutsuki.git", rev = "e8b86a14e2433461525d2a052b499fde488102a9" }
-
-[target.'cfg(windows)'.dependencies]
-everything-ipc = "0.1.3"
-ntfs-reader = "0.4.5"

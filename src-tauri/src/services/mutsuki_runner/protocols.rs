@@ -18,7 +18,8 @@ pub const PROTOCOL_PLAYBACK_PREPARE: &str = "momobako.playback.prepare";
 pub const PROTOCOL_PLAYLIST_DOWNLOAD: &str = "momobako.playlist.download";
 
 /// 返回宿主内建 runner 接受的全部协议。
-pub const fn all() -> [&'static str; 16] {
+#[cfg(test)]
+const fn all() -> [&'static str; 16] {
     [
         PROTOCOL_REPOSITORY_CREATE,
         PROTOCOL_REPOSITORY_IMPORT,

@@ -368,7 +368,7 @@ pub(crate) fn set_test_downloader_track_package_hook(
 }
 
 #[cfg(test)]
-pub(crate) fn set_test_backend_stat_entry_hook(
+pub(super) fn set_test_backend_stat_entry_hook(
     hook: Option<fn(&RepositoryRecord, &Path, &str) -> Option<Result<FileSystemEntry, String>>>,
 ) {
     test_support::set_test_backend_stat_entry_hook(hook);
@@ -514,7 +514,7 @@ pub fn install_local_filesystem_test_plugin_archive(service_root: &Path) {
                         },
                         "fields": [
                             {
-                                "key": LOCAL_FILESYSTEM_FILE_SEARCH_MODE_KEY,
+                                "key": "fileSearchMode",
                                 "label": "文件检索方式",
                                 "type": "select",
                                 "description": "NTFS 与 Everything 不可用时会自动回退到现有扫描。",
