@@ -284,7 +284,7 @@ export function useRepositorySwitcherUi(options: RepositorySwitcherUiOptions) {
       const response = await callPlugin<NeteaseQrSession>({
         pluginId: neteaseSourcePluginId,
         method: "auth.createQrSession",
-        payload: { qrimg: true, timestamp: Date.now() },
+        payload: { qrimg: true },
       });
       neteaseQrSession.value = response.payload ?? null;
       neteaseLoginMessage.value = "请使用网易云音乐扫码登录，完成后点击检查扫码结果。";
@@ -326,7 +326,7 @@ export function useRepositorySwitcherUi(options: RepositorySwitcherUiOptions) {
       const response = await callPlugin<NeteaseLoginResult>({
         pluginId: neteaseSourcePluginId,
         method: "auth.pollQrSession",
-        payload: { key, timestamp: Date.now(), persistSession: false },
+        payload: { key, persistSession: false },
       });
       const result = response.payload ?? {};
       if (!result.backendConfig) {

@@ -14,7 +14,24 @@ const pluginsRoot = resolve(__dirname, "..");
 const repoRoot = resolve(pluginsRoot, "..", "..");
 const distRoot = join(pluginsRoot, ".dist");
 const cargoCommand = process.platform === "win32" ? "cargo.exe" : "cargo";
+const rustcCommand = process.platform === "win32" ? "rustc.exe" : "rustc";
 const requestedPluginIds = new Set(process.argv.slice(2).filter(Boolean));
+
+function cargoBuildEnvironment() {
+  if (process.platform !== "win32") return process.env;
+
+  const environment = { ...process.env };
+  const lintList = spawnSync(rustcCommand, ["-W", "help"], { encoding: "utf8" });
+  if (lintList.status === 0 && lintList.stdout.includes("linker-messages")) {
+    // 中文 MSVC 会把正常的导入库提示归入 linker-messages；仅在支持该 lint 时关闭误报。
+    environment.RUSTFLAGS = [environment.RUSTFLAGS?.trim(), "-A linker-messages"]
+      .filter(Boolean)
+      .join(" ");
+  }
+  return environment;
+}
+
+const cargoEnvironment = cargoBuildEnvironment();
 
 function readJson(path) {
   return JSON.parse(readFileSync(path, "utf-8"));
@@ -85,6 +102,7 @@ function buildNativePlugin(pluginDir, manifest, project) {
     ["build", "--release", "--manifest-path", manifestPath],
     {
       cwd: repoRoot,
+      env: cargoEnvironment,
       stdio: "inherit",
     },
   );
@@ -123,6 +141,7 @@ function buildCompanionNativeArtifact(pluginDir, definition) {
     ["build", "--release", "--manifest-path", manifestPath],
     {
       cwd: repoRoot,
+      env: cargoEnvironment,
       stdio: "inherit",
     },
   );
