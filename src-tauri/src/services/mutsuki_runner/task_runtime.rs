@@ -12,6 +12,7 @@ use std::time::{Duration, Instant};
 use mutsuki_plugin_api::{plugin_error, PluginHostError, PluginResult, PluginTaskGateway};
 use mutsuki_runtime_contracts::{
     CancelPolicy, RuntimeError, ScalarValue, Task, TaskBatch, TaskHandle, TaskOutcome,
+    ERR_TASK_EXPIRED, ERR_TASK_NOT_FOUND,
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -54,14 +55,21 @@ struct PreparedGatewayTask {
 }
 
 struct StoredOutcome {
+    task_id: String,
     outcome: TaskOutcome,
     completed_at: Instant,
 }
 
-/// 终态按完成顺序保留固定容量，并在 TTL 后惰性回收。
+enum OutcomeLookup {
+    Retained(TaskOutcome),
+    Expired,
+    Missing,
+}
+
+/// 终态与过期标记分别按 FIFO 有界保留，并在 TTL 后惰性回收。
 struct OutcomeStore {
-    entries: BTreeMap<String, StoredOutcome>,
-    completion_order: VecDeque<String>,
+    terminal: VecDeque<StoredOutcome>,
+    expired: VecDeque<(String, Instant)>,
     capacity: usize,
     retention: Duration,
 }
@@ -69,8 +77,8 @@ struct OutcomeStore {
 impl OutcomeStore {
     fn new(capacity: usize, retention: Duration) -> Self {
         Self {
-            entries: BTreeMap::new(),
-            completion_order: VecDeque::new(),
+            terminal: VecDeque::new(),
+            expired: VecDeque::new(),
             capacity: capacity.max(1),
             retention,
         }
@@ -82,62 +90,60 @@ impl OutcomeStore {
 
     fn publish_at(&mut self, task_id: String, outcome: TaskOutcome, completed_at: Instant) {
         self.prune_expired(completed_at);
-        if self.entries.contains_key(&task_id) {
-            self.completion_order.retain(|queued| queued != &task_id);
-        }
-        self.entries.insert(
-            task_id.clone(),
-            StoredOutcome {
-                outcome,
-                completed_at,
-            },
-        );
-        self.completion_order.push_back(task_id);
-        while self.entries.len() > self.capacity {
-            self.evict_oldest();
+        self.terminal.push_back(StoredOutcome {
+            task_id,
+            outcome,
+            completed_at,
+        });
+        if self.terminal.len() > self.capacity {
+            self.evict_oldest(completed_at);
         }
     }
 
-    fn lookup(&mut self, task_id: &str) -> Option<TaskOutcome> {
+    fn lookup(&mut self, task_id: &str) -> OutcomeLookup {
         self.lookup_at(task_id, Instant::now())
     }
 
-    fn lookup_at(&mut self, task_id: &str, now: Instant) -> Option<TaskOutcome> {
+    fn lookup_at(&mut self, task_id: &str, now: Instant) -> OutcomeLookup {
         self.prune_expired(now);
-        self.entries
-            .get(task_id)
-            .map(|stored| stored.outcome.clone())
+        if let Some(stored) = self
+            .terminal
+            .iter()
+            .find(|stored| stored.task_id == task_id)
+        {
+            OutcomeLookup::Retained(stored.outcome.clone())
+        } else if self.expired.iter().any(|(expired, _)| expired == task_id) {
+            OutcomeLookup::Expired
+        } else {
+            OutcomeLookup::Missing
+        }
     }
 
     fn contains(&self, task_id: &str) -> bool {
-        self.entries.contains_key(task_id)
+        self.terminal.iter().any(|stored| stored.task_id == task_id)
+            || self.expired.iter().any(|(expired, _)| expired == task_id)
     }
 
     fn prune_expired(&mut self, now: Instant) {
-        loop {
-            let Some(task_id) = self.completion_order.front() else {
-                break;
-            };
-            let Some(stored) = self.entries.get(task_id) else {
-                self.completion_order.pop_front();
-                continue;
-            };
-            if now.saturating_duration_since(stored.completed_at) < self.retention {
-                break;
+        while self.terminal.front().is_some_and(|stored| {
+            now.saturating_duration_since(stored.completed_at) >= self.retention
+        }) {
+            self.evict_oldest(now);
+        }
+        while self.expired.front().is_some_and(|(_, expired_at)| {
+            now.saturating_duration_since(*expired_at) >= self.retention
+        }) {
+            self.expired.pop_front();
+        }
+    }
+
+    fn evict_oldest(&mut self, expired_at: Instant) {
+        if let Some(stored) = self.terminal.pop_front() {
+            self.expired.push_back((stored.task_id, expired_at));
+            if self.expired.len() > self.capacity {
+                self.expired.pop_front();
             }
-            self.evict_oldest();
         }
-    }
-
-    fn evict_oldest(&mut self) {
-        if let Some(task_id) = self.completion_order.pop_front() {
-            self.entries.remove(&task_id);
-        }
-    }
-
-    #[cfg(test)]
-    fn len(&self) -> usize {
-        self.entries.len()
     }
 }
 
@@ -182,6 +188,15 @@ impl CancellationCheck for MomoCancellation {
 impl MomoTaskRuntime {
     /// 创建固定 worker 的交互/后台双 lane。
     pub fn new(runtime: RepositoryRuntime) -> Self {
+        Self::with_outcome_policy(runtime, OUTCOME_CAPACITY, OUTCOME_RETENTION)
+    }
+
+    /// 创建使用指定终态留存策略的双 lane 运行时。
+    fn with_outcome_policy(
+        runtime: RepositoryRuntime,
+        outcome_capacity: usize,
+        outcome_retention: Duration,
+    ) -> Self {
         let (interactive_tx, interactive_rx) = mpsc::channel(INTERACTIVE_QUEUE_LIMIT);
         let (background_tx, background_rx) = mpsc::channel(BACKGROUND_QUEUE_LIMIT);
         let state = Arc::new(RuntimeState {
@@ -190,7 +205,7 @@ impl MomoTaskRuntime {
             background_tx,
             next_task_id: AtomicU64::new(1),
             cancellations: Mutex::new(BTreeMap::new()),
-            outcomes: Mutex::new(OutcomeStore::new(OUTCOME_CAPACITY, OUTCOME_RETENTION)),
+            outcomes: Mutex::new(OutcomeStore::new(outcome_capacity, outcome_retention)),
         });
         let task_runtime = Self { state };
         spawn_lane_workers(
@@ -411,8 +426,17 @@ impl MomoTaskRuntime {
                 "restart the plugin host",
             )
         })?;
-        if let Some(outcome) = outcomes.lookup(&handle.task_id) {
-            return Ok(Some(outcome));
+        match outcomes.lookup(&handle.task_id) {
+            OutcomeLookup::Retained(outcome) => return Ok(Some(outcome)),
+            OutcomeLookup::Expired => {
+                return Err(gateway_error(
+                    ERR_TASK_EXPIRED,
+                    "plugin.task.outcome",
+                    format!("task outcome was evicted: {}", handle.task_id),
+                    "submit a new task with a fresh unique task id",
+                ));
+            }
+            OutcomeLookup::Missing => {}
         }
         let active = self
             .state
@@ -431,13 +455,10 @@ impl MomoTaskRuntime {
             Ok(None)
         } else {
             Err(gateway_error(
-                "plugin.task.outcome_not_found",
+                ERR_TASK_NOT_FOUND,
                 "plugin.task.outcome",
-                format!(
-                    "task outcome expired or handle is unknown: {}",
-                    handle.task_id
-                ),
-                "submit a new task and retain its current handle",
+                format!("task handle is unknown: {}", handle.task_id),
+                "submit the task before querying its outcome",
             ))
         }
     }
@@ -653,272 +674,5 @@ fn is_interactive(protocol_id: &str) -> bool {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::services::mutsuki_runner::protocols::{
-        PROTOCOL_ENTRY_DELETE, PROTOCOL_REPOSITORY_SYNC,
-    };
-    use crate::services::repository::{
-        test_support::{create_repository_without_initial_sync, create_test_state},
-        SyncRequest,
-    };
-    use crate::services::runtime::{
-        external_api::build_external_connection_status, watcher::RepositoryWatcher,
-    };
-    use mutsuki_plugin_api::PluginHostContext;
-    use mutsuki_runtime_wire::{
-        decode_binary_response, encode_binary_request, CancelTaskRequest, SubmitTaskBatchRequest,
-        TaskOutcomeRequest, WireRequest, DEFAULT_WIRE_LIMITS,
-    };
-    use std::fs;
-    use std::path::PathBuf;
-    use std::thread;
-
-    const TEST_TIMEOUT: Duration = Duration::from_secs(5);
-
-    /// 为 ABI dispatch 测试提供真实 RepositoryRuntime 与 watcher。
-    struct RuntimeFixture {
-        runtime: RepositoryRuntime,
-        root: PathBuf,
-        repo_root: PathBuf,
-        repo_id: String,
-    }
-
-    impl RuntimeFixture {
-        fn new(label: &str) -> Self {
-            let (state, root, repo_root, _) = create_test_state(label);
-            let repo_id = create_repository_without_initial_sync(&state, &repo_root);
-            state
-                .sync_repository(SyncRequest {
-                    repo_id: repo_id.clone(),
-                })
-                .expect("initial repository index should be created");
-            let repository_state = Arc::new(state);
-            let write_lock = Arc::new(Mutex::new(()));
-            let watcher_handle =
-                RepositoryWatcher::start(repository_state.clone(), write_lock.clone())
-                    .expect("test repository watcher should start");
-            let runtime = RepositoryRuntime {
-                repository_state,
-                watcher_handle,
-                write_lock,
-                preview_addr: "127.0.0.1:0".to_string(),
-                external_connection: build_external_connection_status(
-                    &root.join("state"),
-                    "127.0.0.1:0",
-                    "test-token",
-                    "0",
-                ),
-            };
-            Self {
-                runtime,
-                root,
-                repo_root,
-                repo_id,
-            }
-        }
-    }
-
-    impl Drop for RuntimeFixture {
-        fn drop(&mut self) {
-            for _ in 0..20 {
-                if fs::remove_dir_all(&self.root).is_ok() || !self.root.exists() {
-                    break;
-                }
-                thread::sleep(Duration::from_millis(10));
-            }
-        }
-    }
-
-    fn dispatch<R: WireRequest>(
-        context: &PluginHostContext,
-        request_id: u64,
-        request: &R,
-    ) -> Result<R::Response, RuntimeError> {
-        let frame = encode_binary_request(request_id, request, DEFAULT_WIRE_LIMITS)
-            .expect("ABI request should encode");
-        let response = context.dispatch_binary_request(&frame);
-        decode_binary_response::<R>(&response, request_id, DEFAULT_WIRE_LIMITS)
-    }
-
-    fn wait_for_outcome(context: &PluginHostContext, handle: &TaskHandle) -> TaskOutcome {
-        let deadline = Instant::now() + TEST_TIMEOUT;
-        loop {
-            let outcome = dispatch(
-                context,
-                900,
-                &TaskOutcomeRequest {
-                    handle: handle.clone(),
-                },
-            )
-            .expect("task outcome dispatch should succeed");
-            if let Some(outcome) = outcome {
-                return outcome;
-            }
-            assert!(
-                Instant::now() < deadline,
-                "task did not publish a terminal outcome"
-            );
-            thread::sleep(Duration::from_millis(10));
-        }
-    }
-
-    fn completed_outcome(task_id: &str) -> TaskOutcome {
-        TaskOutcome::Completed {
-            task_id: task_id.to_string(),
-            output: Some(Value::Null),
-            output_ref: None,
-        }
-    }
-
-    #[test]
-    fn outcome_store_applies_ttl_and_fifo_capacity() {
-        let started_at = Instant::now();
-        let mut outcomes = OutcomeStore::new(4, Duration::from_secs(30));
-        for index in 0..100 {
-            let task_id = format!("capacity-{index}");
-            outcomes.publish_at(
-                task_id.clone(),
-                completed_outcome(&task_id),
-                started_at + Duration::from_millis(index),
-            );
-        }
-        assert_eq!(outcomes.len(), 4);
-        assert!(outcomes
-            .lookup_at("capacity-0", started_at + Duration::from_secs(1))
-            .is_none());
-        assert!(outcomes
-            .lookup_at("capacity-99", started_at + Duration::from_secs(31))
-            .is_none());
-        assert_eq!(outcomes.len(), 0);
-    }
-
-    #[test]
-    fn mixed_batch_capacity_failure_enqueues_nothing() {
-        let fixture = RuntimeFixture::new("issue-13-batch-atomic");
-        let runtime = MomoTaskRuntime::new(fixture.runtime.clone());
-        let mut tasks = vec![Task::new(
-            "interactive-task",
-            PROTOCOL_THUMBNAIL_REQUEST,
-            serde_json::json!({}),
-        )];
-        tasks.extend((0..=BACKGROUND_QUEUE_LIMIT).map(|index| {
-            Task::new(
-                format!("background-task-{index}"),
-                PROTOCOL_REPOSITORY_SYNC,
-                serde_json::json!({}),
-            )
-        }));
-        let error = runtime
-            .submit_batch(TaskBatch {
-                batch_id: "capacity-failure".to_string(),
-                tick_id: None,
-                tasks,
-                resource_plan: None,
-            })
-            .expect_err("oversized background lane reservation should fail");
-        assert_eq!(error.error.code, "plugin.task.queue_full");
-        assert!(!runtime.cancel("interactive-task"));
-        assert!(!runtime.cancel("background-task-0"));
-    }
-
-    #[test]
-    fn abi_dispatch_submit_then_outcome_returns_completed_terminal_state() {
-        let fixture = RuntimeFixture::new("issue-13-abi-outcome");
-        let runtime = Arc::new(MomoTaskRuntime::new(fixture.runtime.clone()));
-        let context = PluginHostContext::default().with_task_gateway(runtime);
-        let handles = dispatch(
-            &context,
-            1,
-            &SubmitTaskBatchRequest {
-                batch: TaskBatch::one(
-                    "abi-outcome-batch",
-                    Task::new(
-                        "abi-outcome-task",
-                        PROTOCOL_REPOSITORY_SYNC,
-                        serde_json::json!({ "repoId": fixture.repo_id }),
-                    ),
-                ),
-            },
-        )
-        .expect("ABI submit dispatch should succeed");
-        let [handle] = handles.as_slice() else {
-            panic!("ABI submit should return one handle")
-        };
-
-        let outcome = wait_for_outcome(&context, handle);
-        assert!(matches!(
-            outcome,
-            TaskOutcome::Completed { ref task_id, .. } if task_id == "abi-outcome-task"
-        ));
-    }
-
-    #[test]
-    fn abi_dispatch_submit_returns_handle_before_cancelled_task_finishes() {
-        let fixture = RuntimeFixture::new("issue-13-abi-cancel");
-        fs::write(fixture.repo_root.join("keep.txt"), b"keep")
-            .expect("delete fixture should be written");
-        fixture
-            .runtime
-            .repository_state
-            .sync_repository(SyncRequest {
-                repo_id: fixture.repo_id.clone(),
-            })
-            .expect("delete fixture should be indexed");
-        let runtime = Arc::new(MomoTaskRuntime::new(fixture.runtime.clone()));
-        let context = PluginHostContext::default().with_task_gateway(runtime);
-        let held = fixture
-            .runtime
-            .write_lock
-            .lock()
-            .expect("test should hold the repository write lock");
-
-        let handles = dispatch(
-            &context,
-            10,
-            &SubmitTaskBatchRequest {
-                batch: TaskBatch::one(
-                    "abi-cancel-batch",
-                    Task::new(
-                        "abi-cancel-task",
-                        PROTOCOL_ENTRY_DELETE,
-                        serde_json::json!({
-                            "repoId": fixture.repo_id,
-                            "paths": ["keep.txt"],
-                            "mode": "delete"
-                        }),
-                    ),
-                ),
-            },
-        )
-        .expect("ABI submit must return while the task is blocked");
-        let [handle] = handles.as_slice() else {
-            panic!("ABI submit should return one handle")
-        };
-        assert!(dispatch(
-            &context,
-            11,
-            &TaskOutcomeRequest {
-                handle: handle.clone(),
-            },
-        )
-        .expect("running outcome dispatch should succeed")
-        .is_none());
-        dispatch(
-            &context,
-            12,
-            &CancelTaskRequest {
-                handle: handle.clone(),
-            },
-        )
-        .expect("ABI cancel dispatch should succeed");
-        drop(held);
-
-        let outcome = wait_for_outcome(&context, handle);
-        assert!(matches!(
-            outcome,
-            TaskOutcome::Cancelled { ref task_id, .. } if task_id == "abi-cancel-task"
-        ));
-        assert!(fixture.repo_root.join("keep.txt").is_file());
-    }
-}
+#[path = "task_runtime_tests.rs"]
+mod tests;
