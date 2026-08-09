@@ -438,6 +438,70 @@ pub(super) fn build_repository_overview(
     })
 }
 
+/// 统计资源库目录，并通过规范路径去重避免符号链接形成递归环。
+pub(super) fn count_repository_directories(repo_root: &Path) -> Result<i64, String> {
+    if !repo_root.exists() {
+        return Ok(0);
+    }
+
+    let mut total = 0;
+    let mut pending = vec![repo_root.to_path_buf()];
+    let mut visited = HashSet::from([fs::canonicalize(repo_root).map_err(io_error)?]);
+    while let Some(directory) = pending.pop() {
+        let entries = match fs::read_dir(&directory) {
+            Ok(entries) => entries,
+            Err(error) if directory != repo_root && is_skippable_filesystem_error(&error) => {
+                continue;
+            }
+            Err(error) => return Err(io_error(error)),
+        };
+        for entry in entries {
+            let entry = match entry {
+                Ok(entry) => entry,
+                Err(error) if is_skippable_filesystem_error(&error) => continue,
+                Err(error) => return Err(io_error(error)),
+            };
+            let name = entry.file_name().to_string_lossy().to_string();
+            if is_internal_repository_dir(&name) {
+                continue;
+            }
+
+            let path = entry.path();
+            let metadata = match fs::metadata(&path) {
+                Ok(metadata) => metadata,
+                Err(error) if is_skippable_filesystem_error(&error) => continue,
+                Err(error) => return Err(io_error(error)),
+            };
+            if !metadata.is_dir() {
+                continue;
+            }
+
+            total += 1;
+            let canonical_path = match fs::canonicalize(&path) {
+                Ok(path) => path,
+                Err(error) if is_skippable_filesystem_error(&error) => continue,
+                Err(error) => return Err(io_error(error)),
+            };
+            if visited.insert(canonical_path) {
+                pending.push(path);
+            }
+        }
+    }
+
+    Ok(total)
+}
+
+pub(super) fn read_repository_readme(repo_root: &Path) -> Result<Option<String>, String> {
+    for candidate in ["README.md", "readme.md"] {
+        let path = repo_root.join(candidate);
+        if path.is_file() {
+            return fs::read_to_string(path).map(Some).map_err(io_error);
+        }
+    }
+
+    Ok(None)
+}
+
 pub(super) fn load_active_asset_count(connection: &Connection) -> Result<i64, rusqlite::Error> {
     connection.query_row(
         "SELECT COUNT(*) FROM assets WHERE status != 'deleted'",

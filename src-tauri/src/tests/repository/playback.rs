@@ -4,8 +4,19 @@ use crate::services::repository::test_support::{
     create_repository_without_initial_sync, create_test_state, insert_asset_metadata_number,
     insert_virtual_asset, playback_test_lock, update_repository_backend_config,
 };
-use crate::services::repository::{set_test_downloader_playback_hook, EntryPlaybackRequest};
+use crate::services::repository::{
+    set_test_downloader_playback_hook, EntryPlaybackRequest, EntryPlaybackSourceResponse,
+    RepositoryState,
+};
 use std::fs;
+
+fn prepare_entry_playback_source(
+    state: &RepositoryState,
+    request: EntryPlaybackRequest,
+) -> Result<EntryPlaybackSourceResponse, String> {
+    let mut ignore_progress = |_| Ok(());
+    state.prepare_entry_playback_source_with_progress(request, &mut ignore_progress)
+}
 
 #[test]
 fn prepare_entry_playback_source_delegates_virtual_tracks_to_downloader() {
@@ -58,12 +69,14 @@ fn prepare_entry_playback_source_delegates_virtual_tracks_to_downloader() {
 
     std::env::set_var("MOMOBKO_TEST_EXPECTED_REPO_ID", &expected_repo_id);
     set_test_downloader_playback_hook(Some(test_hook));
-    let response = state
-        .prepare_entry_playback_source(EntryPlaybackRequest {
+    let response = prepare_entry_playback_source(
+        &state,
+        EntryPlaybackRequest {
             repo_id: repo_id.clone(),
             path: "Created/demo-track.mp3".to_string(),
-        })
-        .expect("virtual playback source should resolve");
+        },
+    )
+    .expect("virtual playback source should resolve");
     set_test_downloader_playback_hook(None);
     std::env::remove_var("MOMOBKO_TEST_EXPECTED_REPO_ID");
 
@@ -199,12 +212,14 @@ fn prepare_entry_playback_source_prefers_repository_backend_cookie_over_stale_as
     }
 
     set_test_downloader_playback_hook(Some(test_hook));
-    let response = state
-        .prepare_entry_playback_source(EntryPlaybackRequest {
+    let response = prepare_entry_playback_source(
+        &state,
+        EntryPlaybackRequest {
             repo_id: repo_id.clone(),
             path: "Created/stale-track.mp3".to_string(),
-        })
-        .expect("virtual playback source should resolve");
+        },
+    )
+    .expect("virtual playback source should resolve");
     set_test_downloader_playback_hook(None);
 
     assert_eq!(response.repo_id, repo_id);

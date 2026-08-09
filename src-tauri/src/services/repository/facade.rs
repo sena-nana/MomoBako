@@ -176,13 +176,6 @@ impl RepositoryState {
         query::prepare_preview_file_source(self, request)
     }
 
-    pub fn prepare_entry_playback_source(
-        &self,
-        request: EntryPlaybackRequest,
-    ) -> Result<EntryPlaybackSourceResponse, String> {
-        query::prepare_entry_playback_source(self, request)
-    }
-
     pub fn prepare_entry_playback_source_with_progress(
         &self,
         request: EntryPlaybackRequest,
@@ -735,26 +728,12 @@ impl RepositoryState {
         browser::import_entries_cancellable(self, request, cancellation)
     }
 
-    pub fn import_archive_entries(
-        &self,
-        request: FileArchiveImportRequest,
-    ) -> Result<FileBrowserSnapshot, String> {
-        importing::import_archive_entries_cancellable(self, request, &NeverCancelled)
-    }
-
     pub(crate) fn import_archive_entries_cancellable(
         &self,
         request: FileArchiveImportRequest,
         cancellation: &dyn CancellationCheck,
     ) -> Result<FileBrowserSnapshot, String> {
         importing::import_archive_entries_cancellable(self, request, cancellation)
-    }
-
-    pub fn import_eagle_library(
-        &self,
-        request: EagleLibraryImportRequest,
-    ) -> Result<EagleLibraryImportResponse, String> {
-        importing::import_eagle_library_cancellable(self, request, &NeverCancelled)
     }
 
     pub(crate) fn import_eagle_library_cancellable(
@@ -773,20 +752,12 @@ impl RepositoryState {
         external_assets::add_external_assets(self, request_id, request)
     }
 
-    pub fn copy_entries(&self, request: FileCopyRequest) -> Result<FileBrowserSnapshot, String> {
-        browser::copy_entries_cancellable(self, request, &NeverCancelled)
-    }
-
     pub(crate) fn copy_entries_cancellable(
         &self,
         request: FileCopyRequest,
         cancellation: &dyn CancellationCheck,
     ) -> Result<FileBrowserSnapshot, String> {
         browser::copy_entries_cancellable(self, request, cancellation)
-    }
-
-    pub fn move_entries(&self, request: FileMoveRequest) -> Result<FileBrowserSnapshot, String> {
-        browser::move_entries_cancellable(self, request, &NeverCancelled)
     }
 
     pub(crate) fn move_entries_cancellable(

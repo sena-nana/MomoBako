@@ -236,13 +236,6 @@ pub(super) fn clear_recent_access_history(
     })
 }
 
-pub(super) fn prepare_entry_playback_source(
-    state: &RepositoryState,
-    request: EntryPlaybackRequest,
-) -> Result<EntryPlaybackSourceResponse, String> {
-    state.prepare_entry_playback_source_internal(request, None)
-}
-
 pub(super) fn prepare_entry_playback_source_with_progress(
     state: &RepositoryState,
     request: EntryPlaybackRequest,

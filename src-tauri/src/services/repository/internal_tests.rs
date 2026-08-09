@@ -1179,85 +1179,6 @@ mod tests {
     }
 
     #[test]
-    fn local_file_search_mode_defaults_to_recursive() {
-        assert_eq!(
-            local_file_search_mode_from_config(&serde_json::json!({})),
-            LocalFileSearchMode::Recursive
-        );
-        assert_eq!(
-            local_file_search_mode_from_config(&serde_json::json!({
-                LOCAL_FILESYSTEM_FILE_SEARCH_MODE_KEY: "unknown"
-            })),
-            LocalFileSearchMode::Recursive
-        );
-        assert_eq!(
-            local_file_search_mode_from_config(&serde_json::json!({
-                LOCAL_FILESYSTEM_FILE_SEARCH_MODE_KEY: "ntfs"
-            })),
-            LocalFileSearchMode::Ntfs
-        );
-        assert_eq!(
-            local_file_search_mode_from_config(&serde_json::json!({
-                LOCAL_FILESYSTEM_FILE_SEARCH_MODE_KEY: "everything"
-            })),
-            LocalFileSearchMode::Everything
-        );
-    }
-
-    #[test]
-    fn recursive_local_file_search_preserves_file_metadata_semantics() {
-        let workspace = TestWorkspace::new("recursive-local-file-search");
-        let repo_root = workspace.path("repo");
-        fs::create_dir_all(repo_root.join("music")).expect("music dir should be created");
-        fs::create_dir_all(repo_root.join(".momo")).expect("meta dir should be created");
-        fs::create_dir_all(repo_root.join(".meta")).expect("legacy meta dir should be created");
-        fs::write(repo_root.join("music").join("demo.flac"), b"audio")
-            .expect("file should be written");
-        fs::write(repo_root.join(".momo").join("hidden.flac"), b"skip")
-            .expect("hidden file should be written");
-        fs::write(repo_root.join(".meta").join("legacy.flac"), b"skip")
-            .expect("legacy file should be written");
-
-        let files = collect_repository_files_with_mode(
-            &repo_root,
-            &serde_json::json!({
-                LOCAL_FILESYSTEM_FILE_SEARCH_MODE_KEY: "recursive"
-            }),
-        )
-        .expect("recursive scan should succeed");
-
-        assert_eq!(files.len(), 1);
-        assert_eq!(files[0].relative_path, "music/demo.flac");
-        assert_eq!(files[0].filename, "demo.flac");
-        assert_eq!(files[0].extension, "flac");
-        assert_eq!(files[0].size_bytes, 5);
-        assert!(files[0].modified_at.contains('T'));
-    }
-
-    #[test]
-    fn recursive_local_file_search_keeps_hidden_non_internal_directories() {
-        let workspace = TestWorkspace::new("recursive-local-hidden-dir");
-        let repo_root = workspace.path("repo");
-        fs::create_dir_all(repo_root.join(".hidden")).expect("hidden dir should be created");
-        fs::create_dir_all(repo_root.join(".momo")).expect("meta dir should be created");
-        fs::write(repo_root.join(".hidden").join("cover.jpg"), b"image")
-            .expect("hidden file should be written");
-        fs::write(repo_root.join(".momo").join("skip.jpg"), b"skip")
-            .expect("internal file should be written");
-
-        let files = collect_repository_files_with_mode(
-            &repo_root,
-            &serde_json::json!({
-                LOCAL_FILESYSTEM_FILE_SEARCH_MODE_KEY: "recursive"
-            }),
-        )
-        .expect("recursive scan should succeed");
-
-        assert_eq!(files.len(), 1);
-        assert_eq!(files[0].relative_path, ".hidden/cover.jpg");
-    }
-
-    #[test]
     fn count_repository_directories_excludes_internal_directories() {
         let workspace = TestWorkspace::new("count-repository-directories");
         let repo_root = workspace.path("repo");
@@ -1271,43 +1192,6 @@ mod tests {
             count_repository_directories(&repo_root).expect("directory counting should succeed");
 
         assert_eq!(total, 3);
-    }
-
-    #[test]
-    fn unavailable_index_local_file_search_falls_back_to_recursive_scan() {
-        fn unavailable(_repo_root: &Path) -> Result<Vec<DiscoveredFile>, String> {
-            Err("not available".to_string())
-        }
-
-        let workspace = TestWorkspace::new("unavailable-index-local-file-search");
-        let repo_root = workspace.path("repo");
-        fs::create_dir_all(&repo_root).expect("repo root should be created");
-        fs::write(repo_root.join("demo.mp3"), b"audio").expect("file should be written");
-
-        let files = collect_repository_files_with_fallback(&repo_root, "Test", unavailable)
-            .expect("fallback scan should succeed");
-
-        assert_eq!(files.len(), 1);
-        assert_eq!(files[0].relative_path, "demo.mp3");
-    }
-
-    #[test]
-    fn empty_index_local_file_search_falls_back_to_recursive_scan_when_entries_exist() {
-        fn empty(_repo_root: &Path) -> Result<Vec<DiscoveredFile>, String> {
-            Ok(Vec::new())
-        }
-
-        let workspace = TestWorkspace::new("empty-index-local-file-search");
-        let repo_root = workspace.path("repo");
-        fs::create_dir_all(repo_root.join("music")).expect("music dir should be created");
-        fs::write(repo_root.join("music").join("demo.mp3"), b"audio")
-            .expect("file should be written");
-
-        let files = collect_repository_files_with_fallback(&repo_root, "Test", empty)
-            .expect("empty index should fall back to recursive scan");
-
-        assert_eq!(files.len(), 1);
-        assert_eq!(files[0].relative_path, "music/demo.mp3");
     }
 
     #[test]
@@ -3276,91 +3160,6 @@ mod tests {
         repo_id
     }
 
-    fn create_local_repository_record_for_external_tests(
-        state: &RepositoryState,
-        repo_root: &Path,
-    ) -> String {
-        let repo_id = format!(
-            "repo-{}",
-            slugify_repo_id("external", &repo_root.to_string_lossy())
-        );
-        state
-            .ensure_initialized()
-            .expect("repository state should initialize");
-        let runtime_plugin_root = runtime_plugins_dir(&state.root);
-        write_test_plugin_archive_with_manifest(
-            &runtime_plugin_root.join("local-filesystem.momoplug"),
-            test_plugin_manifest_json(
-                LOCAL_FILESYSTEM_PLUGIN_ID,
-                "Local Filesystem",
-                serde_json::json!({
-                    "kind": "filesystem",
-                    "category": "source",
-                    "type": {
-                        "layer": "source",
-                        "kind": "filesystem"
-                    },
-                    "capabilities": ["browse", "read", "write", "watch", "sync", "localRootPath"],
-                    "runtime": "manifest-only",
-                    "source": "system"
-                }),
-            ),
-        );
-        let metadata_dir = repo_root.join(REPO_META_DIR);
-        fs::create_dir_all(&metadata_dir).expect("metadata dir should be created");
-        let now = now_rfc3339();
-        let metadata = RepositoryMetadataFile {
-            repo_id: repo_id.clone(),
-            name: "External Test Repo".to_string(),
-            root_path: repo_root.to_string_lossy().to_string(),
-            backend_plugin_id: LOCAL_FILESYSTEM_PLUGIN_ID.to_string(),
-            backend_config: serde_json::json!({}),
-            created_at: now.clone(),
-            schema_version: REPO_SCHEMA_VERSION,
-        };
-        fs::write(
-            metadata_dir.join(REPO_METADATA_FILE_NAME),
-            serde_json::to_string_pretty(&metadata).expect("metadata should encode"),
-        )
-        .expect("metadata should be written");
-        let connection = Connection::open(metadata_dir.join(REPO_DB_FILE_NAME))
-            .expect("repository db should open");
-        migrate_repository_schema(&connection).expect("repository schema should initialize");
-        seed_repository_data(
-            &connection,
-            &RepositorySeed {
-                repo_id: &repo_id,
-                name: "External Test Repo",
-                root_path: "",
-                status: "ready",
-                assets: &[],
-            },
-            &now,
-        )
-        .expect("repository data should seed");
-
-        let registry = Connection::open(&state.registry_path).expect("registry should open");
-        registry
-            .execute(
-                r#"
-                INSERT OR REPLACE INTO repositories (
-                  repo_id, name, path, backend_plugin_id, backend_config_json, status, created_at, updated_at
-                )
-                VALUES (?1, ?2, ?3, ?4, ?5, 'ready', ?6, ?6)
-                "#,
-                params![
-                    &repo_id,
-                    "External Test Repo",
-                    repo_root.to_string_lossy().to_string(),
-                    LOCAL_FILESYSTEM_PLUGIN_ID,
-                    "{}",
-                    now
-                ],
-            )
-            .expect("repository should be registered");
-        repo_id
-    }
-
     fn write_test_image(path: &Path) {
         let image = image::RgbImage::from_pixel(2, 2, image::Rgb([120, 120, 120]));
         image.save(path).expect("test image should be saved");
@@ -4948,12 +4747,15 @@ mod tests {
         let repo_id = create_repository_for_path(&state, &repo_root);
 
         state
-            .copy_entries(FileCopyRequest {
-                repo_id: repo_id.clone(),
-                source_paths: vec!["source.txt".to_string()],
-                parent_path: Some("Copies".to_string()),
-                mode: None,
-            })
+            .copy_entries_cancellable(
+                FileCopyRequest {
+                    repo_id: repo_id.clone(),
+                    source_paths: vec!["source.txt".to_string()],
+                    parent_path: Some("Copies".to_string()),
+                    mode: None,
+                },
+                &NeverCancelled,
+            )
             .expect("copy should complete");
 
         let snapshot = state
@@ -5005,12 +4807,15 @@ mod tests {
         let repo_id = create_repository_for_path(&state, &repo_root);
 
         let error = state
-            .copy_entries(FileCopyRequest {
-                repo_id,
-                source_paths: vec!["source.txt".to_string()],
-                parent_path: Some("".to_string()),
-                mode: None,
-            })
+            .copy_entries_cancellable(
+                FileCopyRequest {
+                    repo_id,
+                    source_paths: vec!["source.txt".to_string()],
+                    parent_path: Some("".to_string()),
+                    mode: None,
+                },
+                &NeverCancelled,
+            )
             .expect_err("same-directory copy should fail");
         assert!(error.contains("不能复制到原目录"));
 
@@ -5030,11 +4835,14 @@ mod tests {
             .expect("repository should sync");
 
         let snapshot = state
-            .move_entries(FileMoveRequest {
-                repo_id: repo_id.clone(),
-                source_paths: vec!["note.txt".to_string()],
-                parent_path: "Archive".to_string(),
-            })
+            .move_entries_cancellable(
+                FileMoveRequest {
+                    repo_id: repo_id.clone(),
+                    source_paths: vec!["note.txt".to_string()],
+                    parent_path: "Archive".to_string(),
+                },
+                &NeverCancelled,
+            )
             .expect("move should complete");
 
         assert!(!repo_root.join("note.txt").exists());
@@ -5062,11 +4870,14 @@ mod tests {
         let repo_id = create_repository_for_path(&state, &repo_root);
 
         let error = state
-            .move_entries(FileMoveRequest {
-                repo_id,
-                source_paths: vec!["source.txt".to_string()],
-                parent_path: String::new(),
-            })
+            .move_entries_cancellable(
+                FileMoveRequest {
+                    repo_id,
+                    source_paths: vec!["source.txt".to_string()],
+                    parent_path: String::new(),
+                },
+                &NeverCancelled,
+            )
             .expect_err("same-directory move should fail");
         assert!(error.contains("不能移动到原目录"));
 
@@ -5087,11 +4898,14 @@ mod tests {
             .expect("repository should sync");
 
         let error = state
-            .move_entries(FileMoveRequest {
-                repo_id,
-                source_paths: vec!["Scenes".to_string()],
-                parent_path: "Scenes/Act1".to_string(),
-            })
+            .move_entries_cancellable(
+                FileMoveRequest {
+                    repo_id,
+                    source_paths: vec!["Scenes".to_string()],
+                    parent_path: "Scenes/Act1".to_string(),
+                },
+                &NeverCancelled,
+            )
             .expect_err("cyclic folder move should fail");
         assert!(error.contains("文件夹不能移动到自身或其子文件夹内"));
 
@@ -5106,12 +4920,15 @@ mod tests {
         let repo_id = create_repository_for_path(&state, &repo_root);
 
         state
-            .copy_entries(FileCopyRequest {
-                repo_id: repo_id.clone(),
-                source_paths: vec!["source.txt".to_string()],
-                parent_path: Some("Copies".to_string()),
-                mode: Some("copy".to_string()),
-            })
+            .copy_entries_cancellable(
+                FileCopyRequest {
+                    repo_id: repo_id.clone(),
+                    source_paths: vec!["source.txt".to_string()],
+                    parent_path: Some("Copies".to_string()),
+                    mode: Some("copy".to_string()),
+                },
+                &NeverCancelled,
+            )
             .expect("copy should complete");
 
         let snapshot = state
@@ -5797,11 +5614,15 @@ mod tests {
         std::env::set_var("MOMOBKO_TEST_EXPECTED_REPO_ID", &expected_repo_id);
         set_test_backend_stat_entry_hook(Some(stat_hook));
         set_test_downloader_playback_hook(Some(playback_hook));
+        let mut ignore_progress = |_| Ok(());
         let response = state
-            .prepare_entry_playback_source(EntryPlaybackRequest {
-                repo_id: repo_id.clone(),
-                path: "Created/lazy-track.mp3".to_string(),
-            })
+            .prepare_entry_playback_source_with_progress(
+                EntryPlaybackRequest {
+                    repo_id: repo_id.clone(),
+                    path: "Created/lazy-track.mp3".to_string(),
+                },
+                &mut ignore_progress,
+            )
             .expect("unindexed virtual playback source should resolve from backend stat");
         set_test_downloader_playback_hook(None);
         set_test_backend_stat_entry_hook(None);

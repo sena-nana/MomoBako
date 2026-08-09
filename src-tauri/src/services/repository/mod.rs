@@ -35,7 +35,6 @@ mod filesystem_backend;
 mod importing;
 #[cfg(test)]
 mod internal_tests;
-mod local_index;
 mod management;
 mod pathing;
 mod playback;
@@ -72,7 +71,6 @@ pub(crate) use self::file_transfer::{
     backend_summary_supports_local_root_access, backend_summary_supports_local_write_access,
 };
 use self::filesystem_backend::*;
-use self::local_index::*;
 use self::pathing::*;
 #[cfg(test)]
 pub(crate) use self::playback::download_playlist_with_progress;

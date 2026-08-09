@@ -9,7 +9,7 @@ use std::{
     path::Path,
     sync::{Mutex, MutexGuard, OnceLock},
     thread,
-    time::{SystemTime, UNIX_EPOCH},
+    time::SystemTime,
 };
 
 #[cfg(test)]
@@ -52,7 +52,7 @@ pub(crate) fn downloader_track_package_hook(
 }
 
 #[cfg(test)]
-pub(crate) fn backend_stat_entry_hook(
+pub(super) fn backend_stat_entry_hook(
     repo: &RepositoryRecord,
     repo_root: &Path,
     entry_path: &str,
@@ -85,40 +85,11 @@ pub(crate) fn set_test_downloader_track_package_hook(hook: Option<TestDownloader
 }
 
 #[cfg(test)]
-pub(crate) fn set_test_backend_stat_entry_hook(hook: Option<TestBackendStatEntryHook>) {
+pub(super) fn set_test_backend_stat_entry_hook(hook: Option<TestBackendStatEntryHook>) {
     *TEST_BACKEND_STAT_ENTRY_HOOK
         .get_or_init(|| Mutex::new(None))
         .lock()
         .expect("test backend stat entry hook lock should succeed") = hook;
-}
-
-#[cfg(test)]
-pub(crate) struct TestWorkspace {
-    root: PathBuf,
-}
-
-#[cfg(test)]
-impl TestWorkspace {
-    pub(crate) fn new(name: &str) -> Self {
-        let unique = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("system clock must be after unix epoch")
-            .as_nanos();
-        let root =
-            std::env::temp_dir().join(format!("momobako-{name}-{}-{unique}", std::process::id()));
-        Self { root }
-    }
-
-    pub(crate) fn path(&self, child: &str) -> PathBuf {
-        self.root.join(child)
-    }
-}
-
-#[cfg(test)]
-impl Drop for TestWorkspace {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.root);
-    }
 }
 
 #[cfg(test)]
