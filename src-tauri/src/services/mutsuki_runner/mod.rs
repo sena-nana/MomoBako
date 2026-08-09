@@ -1,5 +1,7 @@
 //! MomoBako 内建 Mutsuki 长任务 runner 组合入口。
 
+#[cfg(test)]
+mod cancellation_tests;
 mod operations;
 mod protocols;
 mod task_runtime;

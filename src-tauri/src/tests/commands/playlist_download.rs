@@ -1,4 +1,5 @@
 use crate::services::repository as repository_service;
+use crate::services::repository::test_support::playback_test_lock;
 use std::sync::{Mutex, OnceLock};
 
 static TRACK_PACKAGE_CALLS: OnceLock<Mutex<Vec<serde_json::Value>>> = OnceLock::new();
@@ -24,6 +25,7 @@ fn record_track_package_call(payload: serde_json::Value) -> Result<serde_json::V
 
 #[test]
 fn execute_playlist_download_with_progress_reports_events_and_partial_failures() {
+    let _lock = playback_test_lock();
     crate::services::repository::set_test_downloader_track_package_hook(Some(
         record_track_package_call,
     ));
