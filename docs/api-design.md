@@ -397,8 +397,8 @@
 
 - `GET /plugins`
   - List runtime-discovered plugin manifests and capabilities
-  - Runtime discovery scans `<serviceRoot>/plugins/*.momoplug`; missing or deleted archive files are reflected directly in the response and are not replaced by compiled defaults
-  - Manifest fields include `pluginId`, `legacyPluginIds`, `name`, `version`, `type`, `kind`, `category`, `description`, `capabilities`, `enabled`, `sdk`, `entry`, `source`, `runtime`, `permissions`, `requires`, `optional`, `hooks`, `contributes`, `compat`, `status`, `dependencyStatus`, `disableReason`, `degraded`, and `degradationReason`
+  - Runtime discovery scans bundled packages under `<serviceRoot>/plugins/builtin` and user packages under `<serviceRoot>/plugins/user`; root-level packages remain a legacy compatibility input.
+  - Manifest fields include host-owned `packageFormatVersion`, `packageHash`, `provenance`, `trustLevel`, `deployment`, `targetTriple`, and the existing `pluginId`, `legacyPluginIds`, `name`, `version`, `type`, `kind`, `category`, `description`, `capabilities`, `enabled`, `sdk`, `entry`, `source`, `runtime`, `permissions`, `requires`, `optional`, `hooks`, `contributes`, `compat`, `status`, `dependencyStatus`, `disableReason`, `degraded`, and `degradationReason`.
   - `category` is one of `source`, `library-kind`, `parser`, `preview`, or `service`; legacy manifests without `category` are inferred from `kind`.
   - `source` plugins are attachable repository IO backends. Existing `filesystem`, `webdav`, and `cloud` kinds remain accepted as source plugins for compatibility.
   - `momobako.source.eagle-library` is a source plugin with `type.layer="source"`, `kind="eagle-library"`, `sdk="backend"`, `runtime="native-dylib"`, `capabilities=["browse","read","write","sync"]`, and `contributes.source.operations=["list","read","write","move","delete","sync"]`. It does not declare `localRootPath`, so repository creation must select it explicitly.
@@ -427,11 +427,12 @@
   - Source `listFiles` and `listDirectory` payloads may additionally include `status: "synced" | "deleted"`, `sharedAssetId`, `tags`, and `thumbnailLocalAbsolutePath`.
 - `POST /plugins:install`
   - Request body includes `packagePath`
-  - Only `.momoplug` files are accepted
-  - Install copies the archive to `<serviceRoot>/plugins` and refreshes discovery without persistent extraction
+  - Only format-v2 `.momoplug` files are accepted. Installation verifies package identity, target triple, deployment and all declared artifact SHA-256 values before copying.
+  - Install copies the archive to `<serviceRoot>/plugins/user`; the host forces `source=user`, `provenance=user-installed` and `trustLevel=untrusted` even if `manifest.json` claims otherwise.
+  - User-installed in-process ABI packages are rejected; native user plugins must declare `process` deployment.
 - `POST /plugins:call`
   - Request body includes `pluginId`, `method`, and arbitrary JSON `payload`
-  - Used by frontend preview or codec plugins to invoke native plugin capabilities without adding file-format-specific commands to the core runtime
+  - Used by frontend preview or codec plugins to invoke ABI or isolated process plugin capabilities without adding file-format-specific commands to the core runtime
   - Native plugin call envelopes include `runtime.pluginId`, `runtime.pluginDataDir`, `runtime.serviceRootDir`, and `runtime.pluginConfig`; `pluginDataDir` points to the plugin's own persistent directory and is created before dispatch, `serviceRootDir` points to the host service storage root, and `pluginConfig` is the current host-managed key-value config from `config.json`.
   - Native backend plugins may register an optional host callback bridge and call other backend plugins through the host. The current first-party use case is `momobako.service.office-convert` calling `momobako.service.downloader` to download bundled LibreOffice runtimes through the shared aria2 task layer.
   - 内建宿主桥还暴露 `pluginId = "momobako.system"` / `method = "system.log.write"`，供后端插件写入统一日志中心。Rust SDK helper `write_host_log(runtime, level, action, message, context)` 会自动带上 `pluginId` 和 `sourceKind: "backend-plugin"`。

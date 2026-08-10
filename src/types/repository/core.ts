@@ -1436,6 +1436,12 @@ export type PluginApiTestContribution = {
 
 export type PluginManifest = {
   pluginId: string;
+  packageFormatVersion?: number;
+  packageHash?: string;
+  provenance?: "bundled" | "user-installed" | "legacy";
+  trustLevel?: "trusted" | "untrusted" | "legacy";
+  deployment?: "manifest" | "frontend" | "abi" | "process";
+  targetTriple?: string;
   legacyPluginIds?: string[];
   name: string;
   version: string;
@@ -1460,14 +1466,15 @@ export type PluginManifest = {
       export?: string;
     };
     backend?: {
-      library: string;
+      library?: string;
+      executable?: string;
       path?: string;
     };
     manifestOnly?: boolean;
     [key: string]: unknown;
   };
   source?: "builtin" | "user" | "system";
-  runtime?: "vue-module" | "native-dylib" | "manifest-only";
+  runtime?: "vue-module" | "native-dylib" | "process" | "manifest-only";
   permissions?: string[];
   requires?: string[];
   optional?: string[];

@@ -4,8 +4,8 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-mutsuki-runtime-contracts = { git = "https://github.com/sena-nana/Mutsuki.git", rev = "387a42735ce13f105292ddc91e5f209979c529d9" }
-mutsuki-runtime-core = { git = "https://github.com/sena-nana/Mutsuki.git", rev = "387a42735ce13f105292ddc91e5f209979c529d9" }
-mutsuki-runtime-sdk = { git = "https://github.com/sena-nana/Mutsuki.git", rev = "387a42735ce13f105292ddc91e5f209979c529d9" }
+mutsuki-runtime-contracts = { git = "https://github.com/sena-nana/Mutsuki.git", rev = "e8b86a14e2433461525d2a052b499fde488102a9" }
+mutsuki-runtime-core = { git = "https://github.com/sena-nana/Mutsuki.git", rev = "e8b86a14e2433461525d2a052b499fde488102a9" }
+mutsuki-runtime-sdk = { git = "https://github.com/sena-nana/Mutsuki.git", rev = "e8b86a14e2433461525d2a052b499fde488102a9" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

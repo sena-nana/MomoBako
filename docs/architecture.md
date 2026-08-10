@@ -84,13 +84,13 @@
 
 ## Plugin Architecture
 
-- Plugin source projects live under `External/Plugins/*` and are built independently from the main app.
-- Runtime plugins live under `<serviceRoot>/plugins/*.momoplug`.
-- The desktop runtime scans only `.momoplug` files in that directory, reads `manifest.json` from the archive directly, and does not fall back to compiled manifests or source-relative plugin folders.
+- Plugin source projects live under `External/Plugins/*`. All Rust plugins are members of the repository root Cargo workspace and share one `Cargo.lock`, dependency graph and `target/`; the build script submits selected native packages to Cargo in one invocation.
+- Bundled runtime plugins live under `<serviceRoot>/plugins/builtin/*.momoplug`; installed user plugins live under `<serviceRoot>/plugins/user/*.momoplug`. Root-level archives are read only as legacy packages.
+- New packages use `momobako.package.json` format v2. The envelope binds `pluginId`, `version`, `targetTriple`, deployment, product/runtime manifests and every executable/frontend artifact hash. The host computes the whole-package hash and owns `provenance`, `trustLevel` and `source` instead of trusting the product manifest.
 - Plugin manifest includes the existing display fields plus taxonomy, runtime and contribution fields:
   - `pluginId`, `legacyPluginIds`, `name`, `version`, `type`, `kind`, `category`, `description`, `capabilities`, `enabled`
   - `sdk`: `frontend` or `backend`
-  - `runtime`: `vue-module`, `native-dylib`, or `manifest-only`
+  - `runtime`: `vue-module`, `native-dylib`, `process`, or `manifest-only`
   - `entry`, `source`, `permissions`, `requires`, `optional`, `hooks`, `contributes`, `compat`, `status`
 - `category` defines the plugin responsibility layer:
   - `source` provides repository IO such as list/read/write/move/delete/watch. Local filesystem, WebDAV and cloud drive are source plugins.
@@ -100,9 +100,9 @@
   - `service` provides shared external or background capabilities such as network search, metadata providers, download queues, OCR/ASR, vector search or filesystem watching.
 - Core-hosted capabilities such as playlist, PiP, progress, candidate queue, batch organize, download queue, metadata merge, rename/move execution, audit log and unified search are exposed through declarative `hooks`. Plugins contribute data and actions; core owns state, confirmation and dangerous writes.
 - Rich library-kind support follows that split: a frontend library plugin registers workspace UI and behavior through `registerLibraryExtension`; parser or support plugins can provide non-destructive sync defaults through `metadata.defaults.batch`; source plugins can declare `contributes.source.metadataMirrorKeys` for system metadata mirroring; provider plugins expose manual candidate lookup through `provider.lookupMetadataCandidate`. The host owns only these generic extension points and metadata writes still flow through the normal revision path.
-- Frontend preview registration is driven by runtime plugin manifests and `.momoplug` bundle loading; preview modules are read from the archive at runtime and do not enter the host frontend bundle.
+- Frontend preview registration is driven by runtime plugin manifests and `.momoplug` bundle loading; preview modules use Blob URLs keyed by the whole-package hash and do not enter the host frontend bundle. Disable, delete and content updates run plugin disposers, remove owned event handlers and revoke Blob URLs before re-registration.
 - Executable backend packages carry both the Momo-facing `manifest.json` and a native Mutsuki `plugin.toml`; their plugin IDs and versions must match.
-- Backend plugins export Mutsuki ABI v2 runners. The desktop host validates both manifests, artifact hashes, provider surfaces and plugin-scoped handler bindings before connecting them to Core.
+- Trusted bundled backend plugins may export Mutsuki ABI v2 runners. User-installed native code must use `process` deployment; the first process pilot is `momobako.service.archive-preview`, using a JSONL request/response bridge with crash and hard-timeout process termination.
 
 ### Cooperative cancellation for long tasks
 
@@ -113,8 +113,8 @@
 - Native filesystem loops check cancellation between items and I/O chunks. External plugin calls cannot be interrupted in-process; cancellation is observed as soon as the call returns, after any required repository consistency cleanup.
 - The frontend treats every cancelled outcome as `DOMException("AbortError")`. It checks the `AbortSignal` before registration and bridges cancellation that races with task registration back to the Host before waiting for the real terminal outcome.
 
-- The repository runtime discovers `.momoplug` archives at startup and maps `callPlugin` methods to declared `momobako.*` protocols and target bindings.
-- Executable artifacts are staged into a content-hash-isolated runtime cache. Companion artifacts such as the Office helper are declared in `plugin.toml` instead of extracted by product-specific host code.
+- The repository runtime caches a catalog snapshot and invalidates it from plugin directory/config metadata, so normal plugin calls no longer reopen every ZIP. It maps `callPlugin` methods to declared `momobako.*` protocols and target bindings.
+- Executable artifacts are staged atomically into a whole-package-hash-isolated runtime cache. Candidate generations are fully loaded before swap; any load failure keeps the current generation, while a successful swap drains calls before disposing ABI sessions or terminating process runners. Companion artifacts such as the Office helper are declared in `plugin.toml` instead of extracted by product-specific host code.
 - Plugin-owned persistent files live under `.service-data/plugin-data/<pluginSlug>` (`<serviceRoot>/plugin-data/<pluginSlug>` at runtime). The host creates the directory on demand for frontend plugin settings entry points and before native backend plugin calls, then passes it as `runtime.pluginDataDir` with the current `runtime.pluginConfig` key-value snapshot.
 - Plugin configuration uses the same directory and plugin ID normalization path. `contributes.settings` declares optional schema fields and a settings page contribution; the plugin manager opens one settings entry per plugin, renders a registered custom Vue page when available, falls back to the schema form, and stores host-managed key-value config in `config.json`.
 - The runtime infers `category` for legacy manifests that only declare `kind`, normalizes legacy IDs such as `builtin.local-filesystem`, and reflects runtime plugin directory changes directly in `GET /plugins`.

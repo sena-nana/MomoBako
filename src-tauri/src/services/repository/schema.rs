@@ -41,7 +41,7 @@ pub(super) const LOCAL_FILESYSTEM_PLUGIN_ID: &str = "momobako.local-filesystem";
 pub(super) const LEGACY_LOCAL_FILESYSTEM_PLUGIN_ID: &str = "builtin.local-filesystem";
 pub(super) const NETEASE_CLOUD_MUSIC_PLUGIN_ID: &str = "momobako.source.netease-cloud-music";
 pub(super) const NETEASE_CLOUD_MUSIC_PROVIDER_ID: &str = "netease-cloud-music";
-pub(super) const PLUGIN_SDK_VERSION: &str = "1";
+pub(super) const PLUGIN_SDK_VERSION: &str = "2";
 pub(super) const MAX_PARALLEL_IMPORTS: usize = 4;
 
 pub(super) const REPOSITORY_SCHEMA_SQL: &str = r#"

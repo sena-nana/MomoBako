@@ -229,4 +229,18 @@ describe("plugin sdk repository cache preview source bridge", () => {
       },
     });
   });
+
+  it("rolls back contributions when frontend plugin registration fails", async () => {
+    const manifest = {
+      ...repositoryCachePreviewToolManifest(),
+      pluginId: "user.partial-register-failure",
+      name: "Partial Register Failure",
+    };
+
+    await expect(syncRegisteredFrontendPluginManifests([manifest])).rejects.toThrow(
+      "partial registration failed",
+    );
+
+    expect(getToolPage(manifest.pluginId)).toBeNull();
+  });
 });

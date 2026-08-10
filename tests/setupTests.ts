@@ -764,6 +764,20 @@ function previewPluginModuleSource(pluginId: string) {
       "",
     ].join("\n");
   }
+  if (pluginId === "user.partial-register-failure") {
+    return [
+      "export function register(ctx) {",
+      "  ctx.registerToolPage({",
+      "    toolPageId: 'user.partial-register-failure',",
+      "    label: 'Partial Register Failure',",
+      "    description: '验证失败注册回滚。',",
+      "    component: { template: '<section>partial</section>' },",
+      "  });",
+      "  throw new Error('partial registration failed');",
+      "}",
+      "",
+    ].join("\n");
+  }
   if (pluginId === "momobako.service.office-convert") {
     const sourcePath = resolve("External/Plugins/office-convert/src/register.js");
     return readFileSync(sourcePath, "utf-8");

@@ -5,8 +5,8 @@ api_version = "mutsuki-plugin-v1"
 requires = []
 
 [artifact]
-artifact_type = "abi"
-path = "momobako_service_archive_preview.dll"
+artifact_type = "process"
+path = "momobako_service_archive_preview_runner.exe"
 sha256 = "sha256:build"
 
 [provides]
@@ -34,16 +34,16 @@ subscriptions = []
 timers = []
 state_schemas = []
 host_extensions = [
-  { extension_id = "host.extension.momobako.service.archive-preview.abi", kind = "plugin_backend", supported_deployments = ["abi"], reload_policy = "static", drain_required = false },
+  { extension_id = "host.extension.momobako.service.archive-preview.process", kind = "plugin_backend", supported_deployments = ["process"], reload_policy = "static", drain_required = true },
 ]
 plugin_backends = [
-  { backend_id = "plugin.backend.momobako.service.archive-preview.abi", deployment_kind = "abi", task_client_protocol = "mutsuki.task.v1", resource_client_protocol = "mutsuki.resource-plan.v1", codec_id = "mutsuki.codec.typed-msgpack.v1", bridge_id = "mutsuki.bridge.abi.binary.v2" },
+  { backend_id = "plugin.backend.momobako.service.archive-preview.process", deployment_kind = "process", task_client_protocol = "mutsuki.task.v1", resource_client_protocol = "mutsuki.resource-plan.v1", codec_id = "mutsuki.codec.typed-msgpack.v1", bridge_id = "momobako.bridge.process.jsonl.v1" },
 ]
 codecs = [
   { codec_id = "mutsuki.codec.typed-msgpack.v1", media_type = "application/msgpack", version = "2", connection_scoped = true },
 ]
 bridges = [
-  { bridge_id = "mutsuki.bridge.abi.binary.v2", deployment_kind = "abi", codec_ids = ["mutsuki.codec.typed-msgpack.v1"], drain_policy = "drain_and_swap" },
+  { bridge_id = "momobako.bridge.process.jsonl.v1", deployment_kind = "process", codec_ids = ["mutsuki.codec.typed-msgpack.v1"], drain_policy = "drain_and_swap" },
 ]
 scheduler_policies = []
 workflows = []

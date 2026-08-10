@@ -4,6 +4,33 @@ use super::*;
 use crate::services::mutsuki_host;
 use std::path::Path;
 
+const PLUGIN_PACKAGE_FORMAT_VERSION: u32 = 2;
+const PLUGIN_PACKAGE_MANIFEST: &str = "momobako.package.json";
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PluginPackageEnvelope {
+    format_version: u32,
+    plugin_id: String,
+    version: String,
+    target_triple: String,
+    deployment: String,
+    product_manifest: String,
+    #[serde(default)]
+    runtime_manifest: Option<String>,
+    #[serde(default)]
+    artifacts: Vec<PluginPackageArtifact>,
+}
+
+#[derive(Debug, Deserialize)]
+struct PluginPackageArtifact {
+    role: String,
+    path: String,
+    sha256: String,
+    #[serde(default)]
+    executable: bool,
+}
+
 pub(super) fn call_plugin(
     state: &RepositoryState,
     request: PluginCallRequest,
@@ -634,6 +661,12 @@ pub(super) fn broken_plugin_manifest(archive_path: &Path, error: &str) -> Plugin
         .unwrap_or("broken-plugin");
     PluginManifest {
         plugin_id: format!("broken.{}", slugify_ascii_component(file_stem)),
+        package_format_version: None,
+        package_hash: None,
+        provenance: Some("legacy".to_string()),
+        trust_level: Some("legacy".to_string()),
+        deployment: Some("manifest".to_string()),
+        target_triple: None,
         legacy_plugin_ids: Vec::new(),
         name: format!("Broken Plugin ({file_stem})"),
         version: "0.0.0".to_string(),
@@ -1139,17 +1172,7 @@ fn install_plugin_archive(
         ));
     }
 
-    let file = File::open(package_path).map_err(io_error)?;
-    let mut archive = zip::ZipArchive::new(file).map_err(|error| error.to_string())?;
-    let (manifest_index, _) = find_zip_plugin_manifest(&mut archive)?;
-    let mut manifest_raw = String::new();
-    archive
-        .by_index(manifest_index)
-        .map_err(|error| error.to_string())?
-        .read_to_string(&mut manifest_raw)
-        .map_err(io_error)?;
-
-    let manifest = parse_plugin_manifest_with_source(&manifest_raw, Some("user"))?;
+    let (manifest, _) = read_validated_v2_plugin_archive(package_path, "user-installed")?;
     if manifest.plugin_id.trim().is_empty() {
         return Err("plugin manifest is missing pluginId".to_string());
     }
@@ -1159,7 +1182,7 @@ fn install_plugin_archive(
         return Err(format!("plugin already exists: {}", manifest.plugin_id));
     }
 
-    let runtime_root = runtime_plugins_dir(service_root);
+    let runtime_root = runtime_plugins_dir(service_root).join("user");
     fs::create_dir_all(&runtime_root).map_err(io_error)?;
     let install_name = format!(
         "{}-{}.momoplug",
@@ -1206,6 +1229,162 @@ fn find_zip_plugin_manifest<R: Read + std::io::Seek>(
         );
     }
     Err("plugin archive contains multiple manifest roots".to_string())
+}
+
+/// 校验 v2 包信封、目标平台与所有声明产物，并由宿主写入来源和信任元数据。
+pub(super) fn read_validated_v2_plugin_archive(
+    archive_path: &Path,
+    provenance: &str,
+) -> Result<(PluginManifest, String), String> {
+    let file = File::open(archive_path).map_err(io_error)?;
+    let mut archive = zip::ZipArchive::new(file).map_err(|error| error.to_string())?;
+    let (manifest_index, manifest_prefix) = find_zip_plugin_manifest(&mut archive)?;
+    let mut manifest_raw = String::new();
+    archive
+        .by_index(manifest_index)
+        .map_err(|error| error.to_string())?
+        .read_to_string(&mut manifest_raw)
+        .map_err(io_error)?;
+    let envelope_path = format!("{manifest_prefix}{PLUGIN_PACKAGE_MANIFEST}");
+    let mut envelope_raw = String::new();
+    archive
+        .by_name(&envelope_path)
+        .map_err(|_| format!("plugin package requires {PLUGIN_PACKAGE_MANIFEST}"))?
+        .read_to_string(&mut envelope_raw)
+        .map_err(io_error)?;
+    let envelope =
+        serde_json::from_str::<PluginPackageEnvelope>(&envelope_raw).map_err(json_error)?;
+    let mut manifest = parse_plugin_manifest_with_source(&manifest_raw, None)?;
+    validate_plugin_package_envelope(&mut archive, &manifest_prefix, &envelope, &manifest)?;
+    if provenance == "user-installed" && envelope.deployment == "abi" {
+        return Err(
+            "user-installed native plugins must use process deployment; in-process ABI is reserved for bundled plugins"
+                .to_string(),
+        );
+    }
+
+    let (source, trust_level) = match provenance {
+        "bundled" => ("builtin", "trusted"),
+        "user-installed" => ("user", "untrusted"),
+        _ => ("system", "legacy"),
+    };
+    manifest.source = source.to_string();
+    manifest.package_format_version = Some(envelope.format_version);
+    manifest.package_hash = Some(sha256_path(archive_path)?);
+    manifest.provenance = Some(provenance.to_string());
+    manifest.trust_level = Some(trust_level.to_string());
+    manifest.deployment = Some(envelope.deployment);
+    manifest.target_triple = Some(envelope.target_triple);
+    Ok((manifest, manifest_prefix))
+}
+
+fn validate_plugin_package_envelope<R: Read + std::io::Seek>(
+    archive: &mut zip::ZipArchive<R>,
+    prefix: &str,
+    envelope: &PluginPackageEnvelope,
+    manifest: &PluginManifest,
+) -> Result<(), String> {
+    if envelope.format_version != PLUGIN_PACKAGE_FORMAT_VERSION {
+        return Err(format!(
+            "unsupported plugin package format: {}",
+            envelope.format_version
+        ));
+    }
+    if envelope.plugin_id != manifest.plugin_id || envelope.version != manifest.version {
+        return Err("plugin package envelope identity mismatch".to_string());
+    }
+    if envelope.product_manifest != "manifest.json" {
+        return Err("plugin package productManifest must be manifest.json".to_string());
+    }
+    let expected_deployment = match manifest.runtime.as_str() {
+        "native-dylib" => "abi",
+        "process" => "process",
+        "vue-module" => "frontend",
+        _ => "manifest",
+    };
+    if envelope.deployment != expected_deployment {
+        return Err(format!(
+            "plugin package deployment mismatch: expected {expected_deployment}, got {}",
+            envelope.deployment
+        ));
+    }
+    if matches!(expected_deployment, "abi" | "process") {
+        if envelope.target_triple != env!("MOMO_TARGET_TRIPLE") {
+            return Err(format!(
+                "plugin target mismatch: expected {}, got {}",
+                env!("MOMO_TARGET_TRIPLE"),
+                envelope.target_triple
+            ));
+        }
+        if envelope.runtime_manifest.as_deref() != Some("plugin.toml") {
+            return Err("executable plugin package requires plugin.toml".to_string());
+        }
+    }
+    if expected_deployment != "manifest" && envelope.artifacts.is_empty() {
+        return Err("executable or frontend package requires declared artifacts".to_string());
+    }
+
+    let mut paths = HashSet::new();
+    for artifact in &envelope.artifacts {
+        if artifact.role.trim().is_empty() || !paths.insert(artifact.path.as_str()) {
+            return Err(format!(
+                "invalid or duplicate package artifact: {}",
+                artifact.path
+            ));
+        }
+        let relative_path = safe_zip_relative_path(&artifact.path)?;
+        let archive_path = format!(
+            "{prefix}{}",
+            relative_path.to_string_lossy().replace('\\', "/")
+        );
+        let mut entry = archive
+            .by_name(&archive_path)
+            .map_err(|_| format!("plugin artifact is missing: {}", artifact.path))?;
+        if entry.is_dir() {
+            return Err(format!("plugin artifact is not a file: {}", artifact.path));
+        }
+        let expected = artifact
+            .sha256
+            .strip_prefix("sha256:")
+            .filter(|value| {
+                value.len() == 64
+                    && value
+                        .bytes()
+                        .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+            })
+            .ok_or_else(|| format!("invalid plugin artifact hash: {}", artifact.sha256))?;
+        let mut hasher = Sha256::new();
+        let mut buffer = [0_u8; 64 * 1024];
+        loop {
+            let read = entry.read(&mut buffer).map_err(io_error)?;
+            if read == 0 {
+                break;
+            }
+            hasher.update(&buffer[..read]);
+        }
+        let actual = hex::encode(hasher.finalize());
+        if actual != expected {
+            return Err(format!("plugin artifact hash mismatch: {}", artifact.path));
+        }
+        if expected_deployment == "process" && artifact.role == "runner" && !artifact.executable {
+            return Err("process runner artifact must be marked executable".to_string());
+        }
+    }
+    Ok(())
+}
+
+pub(super) fn sha256_path(path: &Path) -> Result<String, String> {
+    let mut file = File::open(path).map_err(io_error)?;
+    let mut hasher = Sha256::new();
+    let mut buffer = [0_u8; 64 * 1024];
+    loop {
+        let read = file.read(&mut buffer).map_err(io_error)?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+    }
+    Ok(format!("sha256:{}", hex::encode(hasher.finalize())))
 }
 
 #[allow(dead_code)]

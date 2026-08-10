@@ -11,7 +11,7 @@ use crate::{
     },
     window_state,
 };
-use std::sync::Arc;
+use std::{collections::HashSet, fs, path::Path, sync::Arc};
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
@@ -34,10 +34,8 @@ pub fn builder(runtime: RepositoryRuntime) -> Builder<tauri::Wry> {
         .plugin(tauri_plugin_store::Builder::default().build())
         .manage(window_state::MainWindowStateCache::default())
         .setup(move |app| {
-            let service_root = std::env::current_dir()
-                .map_err(|error| error.to_string())?
-                .join(".service-data");
-            let logger = init_app_logger(service_root)?;
+            let service_root = app_runtime.service_root();
+            let logger = init_app_logger(service_root.clone())?;
             logger.set_app_handle(app.handle().clone())?;
             let _ = write_log(SystemLogWriteRequest {
                 level: "info".to_string(),
@@ -57,6 +55,7 @@ pub fn builder(runtime: RepositoryRuntime) -> Builder<tauri::Wry> {
             });
             let runtime = app_runtime.clone();
             runtime.set_app_handle(app.handle().clone())?;
+            stage_bundled_plugins(app.handle(), &service_root)?;
             let task_runtime = Arc::new(MomoTaskRuntime::new(runtime.clone()));
             let plugin_runtime = Arc::new(mutsuki_host::MomoPluginRuntime::new(
                 runtime.clone(),
@@ -112,6 +111,46 @@ pub fn builder(runtime: RepositoryRuntime) -> Builder<tauri::Wry> {
                 _ => {}
             }
         })
+}
+
+/// 将安装包资源中的官方插件同步到宿主拥有的 builtin 目录。
+fn stage_bundled_plugins(app: &AppHandle, service_root: &Path) -> Result<(), String> {
+    let source_root = app
+        .path()
+        .resource_dir()
+        .map_err(|error| error.to_string())?
+        .join("plugins");
+    if !source_root.is_dir() {
+        return Ok(());
+    }
+    let target_root = service_root.join("plugins").join("builtin");
+    fs::create_dir_all(&target_root).map_err(|error| error.to_string())?;
+    let mut bundled_names = HashSet::new();
+    for entry in fs::read_dir(&source_root).map_err(|error| error.to_string())? {
+        let entry = entry.map_err(|error| error.to_string())?;
+        let source_path = entry.path();
+        if source_path.extension().and_then(|value| value.to_str()) != Some("momoplug") {
+            continue;
+        }
+        let file_name = entry.file_name();
+        bundled_names.insert(file_name.clone());
+        let target_path = target_root.join(&file_name);
+        let temporary_path = target_root.join(format!("{}.new", file_name.to_string_lossy()));
+        fs::copy(&source_path, &temporary_path).map_err(|error| error.to_string())?;
+        if target_path.exists() {
+            fs::remove_file(&target_path).map_err(|error| error.to_string())?;
+        }
+        fs::rename(&temporary_path, &target_path).map_err(|error| error.to_string())?;
+    }
+    for entry in fs::read_dir(&target_root).map_err(|error| error.to_string())? {
+        let entry = entry.map_err(|error| error.to_string())?;
+        if entry.path().extension().and_then(|value| value.to_str()) == Some("momoplug")
+            && !bundled_names.contains(&entry.file_name())
+        {
+            fs::remove_file(entry.path()).map_err(|error| error.to_string())?;
+        }
+    }
+    Ok(())
 }
 
 /// Reuses the existing asset-scope behavior for repository thumbnail roots.

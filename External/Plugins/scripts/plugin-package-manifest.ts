@@ -10,7 +10,33 @@ interface MomoPluginManifest {
   runtime?: string;
   entry?: {
     backend?: unknown;
+    frontend?: {
+      module?: string;
+    };
   };
+}
+
+export const PLUGIN_PACKAGE_FORMAT_VERSION = 2;
+export const PLUGIN_PACKAGE_MANIFEST = "momobako.package.json";
+
+export type PluginDeployment = "manifest" | "frontend" | "abi" | "process";
+
+export interface PluginPackageArtifact {
+  role: string;
+  path: string;
+  sha256: string;
+  executable?: boolean;
+}
+
+export interface PluginPackageEnvelope {
+  formatVersion: 2;
+  pluginId: string;
+  version: string;
+  targetTriple: string;
+  deployment: PluginDeployment;
+  productManifest: "manifest.json";
+  runtimeManifest?: "plugin.toml";
+  artifacts: PluginPackageArtifact[];
 }
 
 interface MutsukiCompanionArtifact {
@@ -49,6 +75,7 @@ interface MutsukiPluginToml extends MutsukiPluginManifest {
 export interface ValidatedPluginPackage {
   manifest: MomoPluginManifest;
   pluginToml?: MutsukiPluginToml;
+  packageEnvelope: PluginPackageEnvelope;
 }
 
 /** 判断 Momo 清单是否声明了需要 Mutsuki 承载的执行型后端。 */
@@ -127,8 +154,83 @@ export function resolvePluginPackagePath(
 }
 
 /** 计算 Mutsuki 清单使用的规范小写 SHA-256。 */
-function sha256File(path: string): string {
+export function sha256File(path: string): string {
   return `sha256:${createHash("sha256").update(readFileSync(path)).digest("hex")}`;
+}
+
+/** 根据产品清单选择宿主部署模型，避免安装来源伪装成执行信任级别。 */
+function deploymentForManifest(manifest: MomoPluginManifest): PluginDeployment {
+  if (manifest.runtime === "native-dylib") return "abi";
+  if (manifest.runtime === "process") return "process";
+  if (manifest.runtime === "vue-module" || manifest.entry?.frontend?.module) return "frontend";
+  return "manifest";
+}
+
+/** 读取并收窄 v2 包信封。 */
+function readPluginPackageEnvelope(path: string): PluginPackageEnvelope {
+  const value: unknown = JSON.parse(readFileSync(path, "utf-8"));
+  if (typeof value !== "object" || value === null) {
+    throw new Error(`invalid plugin package envelope: ${path}`);
+  }
+  const envelope = value as Partial<PluginPackageEnvelope>;
+  if (
+    envelope.formatVersion !== PLUGIN_PACKAGE_FORMAT_VERSION
+    || typeof envelope.pluginId !== "string"
+    || typeof envelope.version !== "string"
+    || typeof envelope.targetTriple !== "string"
+    || !["manifest", "frontend", "abi", "process"].includes(envelope.deployment ?? "")
+    || envelope.productManifest !== "manifest.json"
+    || !Array.isArray(envelope.artifacts)
+  ) {
+    throw new Error(`unsupported or invalid plugin package envelope: ${path}`);
+  }
+  return envelope as PluginPackageEnvelope;
+}
+
+/** 从已构建目录生成宿主可验证的 v2 包信封。 */
+export function writePluginPackageEnvelope(pluginDir: string, targetTriple: string): void {
+  const manifest = readMomoPluginManifest(resolve(pluginDir, "manifest.json"));
+  const pluginTomlPath = resolve(pluginDir, "plugin.toml");
+  const pluginToml = existsSync(pluginTomlPath) ? parseMutsukiManifest(pluginTomlPath) : undefined;
+  const deployment = deploymentForManifest(manifest);
+  const artifacts: PluginPackageArtifact[] = [];
+
+  if (pluginToml) {
+    artifacts.push({
+      role: deployment === "process" ? "runner" : "plugin",
+      path: pluginToml.artifact.path,
+      sha256: pluginToml.artifact.sha256,
+      executable: deployment === "process" || undefined,
+    });
+    for (const companion of companionArtifacts(pluginToml.artifact)) {
+      artifacts.push({
+        role: companion.role ?? "companion",
+        path: companion.path,
+        sha256: companion.sha256,
+        executable: companion.executable,
+      });
+    }
+  } else if (manifest.entry?.frontend?.module) {
+    const path = manifest.entry.frontend.module.replace(/\\/g, "/");
+    const absolutePath = resolvePluginPackagePath(pluginDir, path, "frontend artifact");
+    artifacts.push({ role: "frontend", path, sha256: sha256File(absolutePath) });
+  }
+
+  const envelope: PluginPackageEnvelope = {
+    formatVersion: PLUGIN_PACKAGE_FORMAT_VERSION,
+    pluginId: manifest.pluginId,
+    version: manifest.version,
+    targetTriple: deployment === "abi" || deployment === "process" ? targetTriple : "any",
+    deployment,
+    productManifest: "manifest.json",
+    runtimeManifest: pluginToml ? "plugin.toml" : undefined,
+    artifacts,
+  };
+  writeFileSync(
+    resolve(pluginDir, PLUGIN_PACKAGE_MANIFEST),
+    `${JSON.stringify(envelope, null, 2)}\n`,
+    "utf-8",
+  );
 }
 
 /** 校验单个 artifact 的相对路径、文件存在性与内容哈希。 */
@@ -245,11 +347,29 @@ export function validatePluginPackage(pluginDir: string): ValidatedPluginPackage
   const momoManifestPath = resolve(pluginDir, "manifest.json");
   const pluginTomlPath = resolve(pluginDir, "plugin.toml");
   const manifest = readMomoPluginManifest(momoManifestPath);
+  const packageEnvelope = readPluginPackageEnvelope(resolve(pluginDir, PLUGIN_PACKAGE_MANIFEST));
+  if (packageEnvelope.pluginId !== manifest.pluginId || packageEnvelope.version !== manifest.version) {
+    throw new Error(`package envelope identity mismatch: ${manifest.pluginId}@${manifest.version}`);
+  }
+  if (packageEnvelope.deployment !== deploymentForManifest(manifest)) {
+    throw new Error(`package envelope deployment mismatch: ${manifest.pluginId}`);
+  }
+  const artifactPaths = new Set<string>();
+  for (const [index, artifact] of packageEnvelope.artifacts.entries()) {
+    if (typeof artifact.role !== "string" || artifact.role.trim() === "") {
+      throw new Error(`package artifact ${index} requires a role`);
+    }
+    if (artifactPaths.has(artifact.path)) {
+      throw new Error(`duplicate package artifact path: ${artifact.path}`);
+    }
+    artifactPaths.add(artifact.path);
+    validateArtifact(pluginDir, artifact, `package artifact ${index}`);
+  }
   if (!existsSync(pluginTomlPath)) {
     if (isExecutableBackend(manifest)) {
       throw new Error(`executable backend plugin requires plugin.toml: ${manifest.pluginId}`);
     }
-    return { manifest };
+    return { manifest, packageEnvelope };
   }
 
   const pluginToml = parseMutsukiManifest(pluginTomlPath);
@@ -270,7 +390,17 @@ export function validatePluginPackage(pluginDir: string): ValidatedPluginPackage
   for (const [index, companion] of companionArtifacts(mutsukiManifest.artifact).entries()) {
     validateArtifact(pluginDir, companion, `companion artifact ${index}`);
   }
-  return { manifest, pluginToml };
+  const runtimeArtifactPaths = new Set([
+    pluginToml.artifact.path,
+    ...companionArtifacts(pluginToml.artifact).map((artifact) => artifact.path),
+  ]);
+  if (
+    runtimeArtifactPaths.size !== artifactPaths.size
+    || [...runtimeArtifactPaths].some((path) => !artifactPaths.has(path))
+  ) {
+    throw new Error(`package envelope artifacts differ from plugin.toml: ${manifest.pluginId}`);
+  }
+  return { manifest, pluginToml, packageEnvelope };
 }
 
 /** 构建完成后只更新清单已声明文件的哈希，不推断或注入产物。 */

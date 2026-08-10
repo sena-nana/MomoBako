@@ -1551,7 +1551,7 @@ mod tests {
         let workspace = TestWorkspace::new("plugin-archive-install");
         let service_root = workspace.path("service");
         let archive_path = workspace.path("sample-plugin.momoplug");
-        write_test_plugin_archive(&archive_path, "user.sample-metadata");
+        write_test_v2_plugin_archive(&archive_path, "user.sample-metadata", "builtin");
         let state = RepositoryState::from_root(service_root.clone());
 
         let response = state
@@ -1565,8 +1565,12 @@ mod tests {
             .find(|plugin| plugin.plugin_id == "user.sample-metadata")
             .expect("installed plugin should be listed");
         assert_eq!(installed.source, "user");
+        assert_eq!(installed.provenance.as_deref(), Some("user-installed"));
+        assert_eq!(installed.trust_level.as_deref(), Some("untrusted"));
+        assert_eq!(installed.package_format_version, Some(2));
         assert!(installed.enabled);
         assert!(runtime_plugins_dir(&service_root)
+            .join("user")
             .join("user-sample-metadata-0.1.0.momoplug")
             .is_file());
 
@@ -1578,6 +1582,7 @@ mod tests {
             .iter()
             .any(|plugin| plugin.plugin_id == "user.sample-metadata"));
         assert!(!runtime_plugins_dir(&service_root)
+            .join("user")
             .join("user-sample-metadata-0.1.0.momoplug")
             .exists());
     }
@@ -1765,6 +1770,48 @@ mod tests {
                 ..TestPluginArchiveOptions::default()
             },
         );
+    }
+
+    fn write_test_v2_plugin_archive(path: &Path, plugin_id: &str, claimed_source: &str) {
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).expect("plugin archive parent should be created");
+        }
+        let root_dir = format!("{}-0.1.0", slugify_ascii_component(plugin_id));
+        let manifest = test_plugin_manifest_json(
+            plugin_id,
+            "Sample Metadata",
+            serde_json::json!({ "source": claimed_source }),
+        );
+        let envelope = serde_json::json!({
+            "formatVersion": 2,
+            "pluginId": plugin_id,
+            "version": "0.1.0",
+            "targetTriple": "any",
+            "deployment": "manifest",
+            "productManifest": "manifest.json",
+            "artifacts": []
+        });
+        let file = File::create(path).expect("plugin archive should be created");
+        let mut archive = zip::ZipWriter::new(file);
+        for (name, value) in [
+            ("manifest.json", manifest),
+            ("momobako.package.json", envelope),
+        ] {
+            archive
+                .start_file(
+                    format!("{root_dir}/{name}"),
+                    zip::write::SimpleFileOptions::default(),
+                )
+                .expect("plugin entry should start");
+            archive
+                .write_all(
+                    serde_json::to_string_pretty(&value)
+                        .expect("plugin json should encode")
+                        .as_bytes(),
+                )
+                .expect("plugin entry should write");
+        }
+        archive.finish().expect("plugin archive should finish");
     }
 
     fn seed_standard_test_plugins(service_root: &Path) {

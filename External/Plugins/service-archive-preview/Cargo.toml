@@ -5,7 +5,11 @@ edition = "2021"
 build = "build.rs"
 
 [lib]
-crate-type = ["cdylib"]
+crate-type = ["rlib"]
+
+[[bin]]
+name = "momobako_service_archive_preview_runner"
+path = "src/main.rs"
 
 [dependencies]
 momobako_mutsuki_plugin_sdk = { path = "../_sdk/mutsuki-rust" }

@@ -1659,6 +1659,18 @@ pub struct PluginCompat {
 pub struct PluginManifest {
     pub plugin_id: String,
     #[serde(default)]
+    pub package_format_version: Option<u32>,
+    #[serde(default)]
+    pub package_hash: Option<String>,
+    #[serde(default)]
+    pub provenance: Option<String>,
+    #[serde(default)]
+    pub trust_level: Option<String>,
+    #[serde(default)]
+    pub deployment: Option<String>,
+    #[serde(default)]
+    pub target_triple: Option<String>,
+    #[serde(default)]
     pub legacy_plugin_ids: Vec<String>,
     pub name: String,
     pub version: String,
