@@ -5,7 +5,7 @@ import { runYarn } from "./yarn-command.ts";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, "..");
 const pluginsRoot = resolve(root, "External", "Plugins");
-const result = runYarn(["build"], {
+const result = runYarn(["build", ...process.argv.slice(2)], {
   cwd: pluginsRoot,
   stdio: "inherit",
 });

@@ -98,7 +98,8 @@ export_mutsuki_momobako_plugin!(
     handle_call
 );
 
-fn handle_call(request: PluginCallEnvelope) -> Result<serde_json::Value, String> {
+/// 处理 ABI 与进程 runner 共用的归档预览协议。
+pub fn handle_call(request: PluginCallEnvelope) -> Result<serde_json::Value, String> {
     let payload: ArchivePayload =
         serde_json::from_value(request.payload).map_err(|error| error.to_string())?;
     let plugin_data_dir = PathBuf::from(request.runtime.plugin_data_dir);

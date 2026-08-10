@@ -10,6 +10,7 @@ import {
   assertDeclaredCompanionArtifacts,
   refreshPluginArtifactHashes,
   validatePluginPackage,
+  writePluginPackageEnvelope,
 } from "./plugin-package-manifest.ts";
 
 const temporaryDirectories: string[] = [];
@@ -78,6 +79,7 @@ function writeValidExecutableFixture(): string {
   writeFileSync(join(directory, "bin", "helper.exe"), "helper");
   writeMomoManifest(directory);
   writePluginToml(directory);
+  writePluginPackageEnvelope(directory, "x86_64-pc-windows-msvc");
   return directory;
 }
 
@@ -94,6 +96,11 @@ test("manifest-only and frontend packages do not require plugin.toml", () => {
   ]) {
     const directory = fixtureDir();
     writeMomoManifest(directory, manifest);
+    if (manifest.runtime === "vue-module") {
+      mkdirSync(join(directory, "dist"));
+      writeFileSync(join(directory, "dist", "index.js"), "export default {};");
+    }
+    writePluginPackageEnvelope(directory, "x86_64-pc-windows-msvc");
     assert.equal(validatePluginPackage(directory).pluginToml, undefined);
   }
 });
@@ -101,6 +108,7 @@ test("manifest-only and frontend packages do not require plugin.toml", () => {
 test("executable backend packages require plugin.toml", () => {
   const directory = fixtureDir();
   writeMomoManifest(directory);
+  writePluginPackageEnvelope(directory, "x86_64-pc-windows-msvc");
   assert.throws(
     () => validatePluginPackage(directory),
     /executable backend plugin requires plugin\.toml/,
@@ -212,6 +220,7 @@ test("refreshes only declared artifact hashes before package validation", () => 
   writeFileSync(join(directory, "bin", "helper.exe"), "rebuilt-helper");
 
   refreshPluginArtifactHashes(directory);
+  writePluginPackageEnvelope(directory, "x86_64-pc-windows-msvc");
 
   const result = validatePluginPackage(directory);
   assert.equal(result.pluginToml?.artifact.sha256, sha256("rebuilt-plugin"));

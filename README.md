@@ -27,4 +27,6 @@ yarn verify
 
 `yarn dev` 仅启动 Vite 前端；`yarn tauri:dev` 会先完整构建、打包并暂存外置插件，再启动桌面端，确保本地文件系统等运行时能力可用。
 
+原生插件共享仓库根 `Cargo.lock` 与 `target/`。日常增量调试可运行 `yarn plugins:build:dev <目录名或 pluginId>`；发布产物使用 `yarn plugins:build` 与 `yarn plugins:package`，生成带目标三元组的可复现 v2 `.momoplug`。
+
 `yarn verify` 会串行运行前端测试、前端构建和 Tauri Rust 编译检查。

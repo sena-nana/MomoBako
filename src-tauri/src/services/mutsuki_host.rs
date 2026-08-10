@@ -5,10 +5,12 @@
 
 use std::collections::BTreeMap;
 use std::fs::{self, File};
-use std::io::Read;
+use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Component, Path, PathBuf};
+use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
-use std::sync::{Arc, OnceLock, RwLock};
+use std::sync::mpsc::{self, Receiver};
+use std::sync::{Arc, Mutex, OnceLock, RwLock};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -18,6 +20,7 @@ use mutsuki_runtime_contracts::{
     BatchEntry, BatchPayload, DispatchLane, OrderingRequirement, PluginManifest, RowPayload,
     RunnerContext, RunnerStatus, Task, TaskLease, WorkBatch, WorkResourcePlan,
 };
+use serde::Deserialize;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
@@ -28,6 +31,7 @@ use crate::services::repository::{
 use crate::services::runtime::RepositoryRuntime;
 
 const PLUGIN_RELOAD_DRAIN_TIMEOUT: Duration = Duration::from_secs(30);
+const PROCESS_CALL_TIMEOUT: Duration = Duration::from_secs(30);
 
 static HOST: OnceLock<RwLock<Option<Arc<MomoPluginRuntime>>>> = OnceLock::new();
 
@@ -45,10 +49,34 @@ pub struct MomoPluginRuntime {
 }
 
 struct PluginSlot {
-    session: Option<Arc<PluginSession>>,
+    session: Option<PluginBackendSession>,
     generation: u64,
     active_calls: AtomicUsize,
     draining: AtomicBool,
+    error: Option<String>,
+}
+
+#[derive(Clone)]
+enum PluginBackendSession {
+    Abi(Arc<PluginSession>),
+    Process(Arc<ProcessPluginSession>),
+}
+
+struct ProcessPluginSession {
+    plugin_id: String,
+    runtime: Value,
+    stdin: Mutex<ChildStdin>,
+    responses: Mutex<Receiver<Result<String, String>>>,
+    child: Mutex<Child>,
+    call_lock: Mutex<()>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ProcessPluginResponse {
+    id: u64,
+    ok: bool,
+    output: Option<Value>,
     error: Option<String>,
 }
 
@@ -66,7 +94,7 @@ impl MomoPluginRuntime {
     /// 加载新的插件 generation，并对旧 session 执行 drain-and-swap。
     pub fn reload(&self) -> Result<(), String> {
         let generation = self.generation.fetch_add(1, Ordering::AcqRel) + 1;
-        let next = self.load_slots(generation);
+        let next = self.load_slots(generation)?;
         let previous = {
             let mut slots = self
                 .slots
@@ -82,43 +110,38 @@ impl MomoPluginRuntime {
         Ok(())
     }
 
-    fn load_slots(&self, generation: u64) -> BTreeMap<String, Arc<PluginSlot>> {
-        native_plugin_specs(&self.runtime.service_root())
-            .into_iter()
-            .map(|spec| {
-                let plugin_id = spec.manifest.plugin_id.clone();
-                let slot = match load_plugin_session(
-                    &self.runtime,
-                    &self.task_runtime,
-                    &spec,
-                ) {
-                    Ok(session) => PluginSlot {
-                        session: Some(Arc::new(session)),
-                        generation,
-                        active_calls: AtomicUsize::new(0),
-                        draining: AtomicBool::new(false),
-                        error: None,
-                    },
-                    Err(error) => {
-                        crate::app_log!(
-                            "error",
-                            "plugin.runtime",
-                            "loadFailed",
-                            "独立 ABI 插件加载失败。",
-                            serde_json::json!({ "pluginId": plugin_id, "generation": generation, "error": error })
-                        );
-                        PluginSlot {
-                            session: None,
-                            generation,
-                            active_calls: AtomicUsize::new(0),
-                            draining: AtomicBool::new(false),
-                            error: Some(error),
-                        }
-                    }
-                };
-                (plugin_id, Arc::new(slot))
-            })
-            .collect()
+    fn load_slots(&self, generation: u64) -> Result<BTreeMap<String, Arc<PluginSlot>>, String> {
+        let mut slots = BTreeMap::new();
+        for spec in native_plugin_specs(&self.runtime.service_root()) {
+            let plugin_id = spec.manifest.plugin_id.clone();
+            let session = match load_plugin_session(&self.runtime, &self.task_runtime, &spec) {
+                Ok(session) => session,
+                Err(error) => {
+                    crate::app_log!(
+                        "error",
+                        "plugin.runtime",
+                        "candidateLoadFailed",
+                        "候选插件 generation 加载失败，继续保留当前 generation。",
+                        serde_json::json!({ "pluginId": plugin_id, "generation": generation, "error": error })
+                    );
+                    drain_slots(slots);
+                    return Err(format!(
+                        "plugin generation {generation} rejected by {plugin_id}: {error}"
+                    ));
+                }
+            };
+            slots.insert(
+                plugin_id,
+                Arc::new(PluginSlot {
+                    session: Some(session),
+                    generation,
+                    active_calls: AtomicUsize::new(0),
+                    draining: AtomicBool::new(false),
+                    error: None,
+                }),
+            );
+        }
+        Ok(slots)
     }
 
     fn call(&self, plugin_id: &str, method: &str, payload: Value) -> Result<Value, String> {
@@ -141,7 +164,7 @@ impl MomoPluginRuntime {
         let result = if slot.draining.load(Ordering::Acquire) {
             Err(format!("plugin is reloading: {plugin_id}"))
         } else {
-            call_session(
+            call_backend_session(
                 &session,
                 slot.generation,
                 &self.next_invocation,
@@ -224,7 +247,7 @@ fn load_plugin_session(
     runtime: &RepositoryRuntime,
     task_runtime: &Arc<MomoTaskRuntime>,
     spec: &NativePluginSpec,
-) -> Result<PluginSession, String> {
+) -> Result<PluginBackendSession, String> {
     let (stage_root, expected_manifest) = stage_plugin(spec, &runtime.service_root())?;
     let data_dir = plugin_data_dir(&runtime.service_root(), &spec.manifest.plugin_id);
     fs::create_dir_all(&data_dir).map_err(|error| error.to_string())?;
@@ -241,6 +264,15 @@ fn load_plugin_session(
         "_mutsuki": { "runtime_dir": stage_root },
     });
     let library_path = artifact_path(&stage_root, &expected_manifest.artifact.path)?;
+    if spec.manifest.runtime == "process" {
+        return spawn_process_plugin_session(
+            spec.manifest.plugin_id.clone(),
+            library_path,
+            stage_root,
+            config,
+        )
+        .map(|session| PluginBackendSession::Process(Arc::new(session)));
+    }
     let host_context = PluginHostContext::default().with_task_gateway(task_runtime.clone());
     PluginSession::load(PluginLoadRequest {
         library_path,
@@ -249,7 +281,60 @@ fn load_plugin_session(
         host_context,
         host_config: Default::default(),
     })
+    .map(|session| PluginBackendSession::Abi(Arc::new(session)))
     .map_err(|error| error.to_string())
+}
+
+/// 启动逐行 JSON 进程 runner；崩溃或硬超时只终止当前插件进程。
+fn spawn_process_plugin_session(
+    plugin_id: String,
+    executable: PathBuf,
+    runtime_dir: PathBuf,
+    runtime: Value,
+) -> Result<ProcessPluginSession, String> {
+    let mut child = Command::new(&executable)
+        .current_dir(runtime_dir)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit())
+        .spawn()
+        .map_err(|error| format!("failed to start process plugin {plugin_id}: {error}"))?;
+    let Some(stdin) = child.stdin.take() else {
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(format!("process plugin stdin unavailable: {plugin_id}"));
+    };
+    let Some(stdout) = child.stdout.take() else {
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(format!("process plugin stdout unavailable: {plugin_id}"));
+    };
+    let (sender, receiver) = mpsc::channel();
+    if let Err(error) = thread::Builder::new()
+        .name(format!("momo-plugin-{plugin_id}"))
+        .spawn(move || {
+            for line in BufReader::new(stdout).lines() {
+                let response = line.map_err(|error| error.to_string());
+                if sender.send(response).is_err() {
+                    break;
+                }
+            }
+        })
+    {
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(format!(
+            "failed to start process reader {plugin_id}: {error}"
+        ));
+    }
+    Ok(ProcessPluginSession {
+        plugin_id,
+        runtime,
+        stdin: Mutex::new(stdin),
+        responses: Mutex::new(receiver),
+        child: Mutex::new(child),
+        call_lock: Mutex::new(()),
+    })
 }
 
 fn stage_plugin(
@@ -261,13 +346,54 @@ fn stage_plugin(
     } else {
         let cache_root = service_root
             .join("mutsuki-plugin-cache")
-            .join(cache_name(&spec.manifest.plugin_id, &spec.manifest.version));
-        fs::create_dir_all(&cache_root).map_err(|error| error.to_string())?;
-        let file = File::open(&spec.archive_path).map_err(|error| error.to_string())?;
-        let mut archive = zip::ZipArchive::new(file).map_err(|error| error.to_string())?;
-        extract_zip_plugin(&mut archive, &spec.manifest_prefix, &cache_root)?;
+            .join(cache_name(&spec.package_hash)?);
+        if !cache_root.is_dir() {
+            let cache_parent = cache_root
+                .parent()
+                .ok_or_else(|| "invalid plugin cache path".to_string())?;
+            fs::create_dir_all(cache_parent).map_err(|error| error.to_string())?;
+            let temporary_root = cache_parent.join(format!(
+                ".staging-{}-{}",
+                std::process::id(),
+                spec.package_hash.trim_start_matches("sha256:")
+            ));
+            if temporary_root.exists() {
+                fs::remove_dir_all(&temporary_root).map_err(|error| error.to_string())?;
+            }
+            fs::create_dir_all(&temporary_root).map_err(|error| error.to_string())?;
+            let file = File::open(&spec.archive_path).map_err(|error| error.to_string())?;
+            let mut archive = zip::ZipArchive::new(file).map_err(|error| error.to_string())?;
+            if let Err(error) =
+                extract_zip_plugin(&mut archive, &spec.manifest_prefix, &temporary_root)
+            {
+                let _ = fs::remove_dir_all(&temporary_root);
+                return Err(error);
+            }
+            if let Err(error) = read_staged_plugin_manifest(&temporary_root, spec) {
+                let _ = fs::remove_dir_all(&temporary_root);
+                return Err(error);
+            }
+            match fs::rename(&temporary_root, &cache_root) {
+                Ok(()) => {}
+                Err(_) if cache_root.is_dir() => {
+                    let _ = fs::remove_dir_all(&temporary_root);
+                }
+                Err(error) => {
+                    let _ = fs::remove_dir_all(&temporary_root);
+                    return Err(error.to_string());
+                }
+            }
+        }
         cache_root
     };
+    let expected_manifest = read_staged_plugin_manifest(&stage_root, spec)?;
+    Ok((stage_root, expected_manifest))
+}
+
+fn read_staged_plugin_manifest(
+    stage_root: &Path,
+    spec: &NativePluginSpec,
+) -> Result<PluginManifest, String> {
     let manifest_path = stage_root.join("plugin.toml");
     let manifest_raw = fs::read_to_string(&manifest_path).map_err(|error| {
         format!(
@@ -291,7 +417,7 @@ fn stage_plugin(
     }
     let library_path = artifact_path(&stage_root, &expected_manifest.artifact.path)?;
     verify_artifact_hash(&library_path, &expected_manifest.artifact.sha256)?;
-    Ok((stage_root, expected_manifest))
+    Ok(expected_manifest)
 }
 
 fn artifact_path(root: &Path, relative: &str) -> Result<PathBuf, String> {
@@ -334,12 +460,103 @@ fn verify_artifact_hash(path: &Path, expected: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn cache_name(plugin_id: &str, version: &str) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(plugin_id.as_bytes());
-    hasher.update(b"\n");
-    hasher.update(version.as_bytes());
-    format!("plugin-{}", hex::encode(hasher.finalize()))
+fn cache_name(package_hash: &str) -> Result<String, String> {
+    let digest = package_hash
+        .strip_prefix("sha256:")
+        .filter(|value| {
+            value.len() == 64
+                && value
+                    .bytes()
+                    .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+        })
+        .ok_or_else(|| format!("invalid plugin package hash: {package_hash}"))?;
+    Ok(format!("plugin-{digest}"))
+}
+
+fn call_backend_session(
+    session: &PluginBackendSession,
+    generation: u64,
+    next_invocation: &AtomicU64,
+    protocol_id: &str,
+    payload: Value,
+) -> Result<Value, String> {
+    match session {
+        PluginBackendSession::Abi(session) => {
+            call_session(session, generation, next_invocation, protocol_id, payload)
+        }
+        PluginBackendSession::Process(session) => {
+            call_process_session(session, next_invocation, protocol_id, payload)
+        }
+    }
+}
+
+fn call_process_session(
+    session: &ProcessPluginSession,
+    next_invocation: &AtomicU64,
+    protocol_id: &str,
+    payload: Value,
+) -> Result<Value, String> {
+    let _call = session
+        .call_lock
+        .lock()
+        .map_err(|_| format!("process plugin call lock poisoned: {}", session.plugin_id))?;
+    let request_id = next_invocation.fetch_add(1, Ordering::Relaxed);
+    let method = protocol_id.strip_prefix("momobako.").unwrap_or(protocol_id);
+    let request = serde_json::json!({
+        "id": request_id,
+        "method": method,
+        "payload": payload,
+        "runtime": session.runtime,
+    });
+    {
+        let mut stdin = session
+            .stdin
+            .lock()
+            .map_err(|_| format!("process plugin stdin lock poisoned: {}", session.plugin_id))?;
+        serde_json::to_writer(&mut *stdin, &request).map_err(|error| error.to_string())?;
+        stdin.write_all(b"\n").map_err(|error| error.to_string())?;
+        stdin.flush().map_err(|error| error.to_string())?;
+    }
+    let response_line = session
+        .responses
+        .lock()
+        .map_err(|_| {
+            format!(
+                "process plugin response lock poisoned: {}",
+                session.plugin_id
+            )
+        })?
+        .recv_timeout(PROCESS_CALL_TIMEOUT)
+        .map_err(|error| {
+            terminate_process_session(session);
+            format!(
+                "process plugin call timed out or exited: {} ({error})",
+                session.plugin_id
+            )
+        })??;
+    let response = serde_json::from_str::<ProcessPluginResponse>(&response_line)
+        .map_err(|error| format!("invalid process plugin response: {error}"))?;
+    if response.id != request_id {
+        terminate_process_session(session);
+        return Err(format!(
+            "process plugin response id mismatch: expected {request_id}, got {}",
+            response.id
+        ));
+    }
+    if response.ok {
+        Ok(response.output.unwrap_or(Value::Null))
+    } else {
+        Err(response
+            .error
+            .unwrap_or_else(|| "process plugin returned an unspecified error".to_string()))
+    }
+}
+
+fn terminate_process_session(session: &ProcessPluginSession) {
+    if let Ok(mut child) = session.child.lock() {
+        let _ = child.kill();
+        let _ = child.wait();
+    }
 }
 
 fn call_session(
@@ -448,7 +665,12 @@ fn drain_slots(slots: BTreeMap<String, Arc<PluginSlot>>) {
             );
         }
         if let Some(session) = slot.session.as_ref() {
-            let _ = session.dispose();
+            match session {
+                PluginBackendSession::Abi(session) => {
+                    let _ = session.dispose();
+                }
+                PluginBackendSession::Process(session) => terminate_process_session(session),
+            }
         }
     }
 }

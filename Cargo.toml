@@ -1,0 +1,20 @@
+[workspace]
+resolver = "2"
+members = [
+  "src-tauri",
+  "External/Plugins/_sdk/mutsuki-rust",
+  "External/Plugins/local-filesystem",
+  "External/Plugins/office-convert",
+  "External/Plugins/office-convert/helper",
+  "External/Plugins/parser-asmr-folder",
+  "External/Plugins/service-archive-preview",
+  "External/Plugins/service-downloader",
+  "External/Plugins/service-provider-asmr-one",
+  "External/Plugins/service-provider-dlsite",
+  "External/Plugins/source-eagle-library",
+  "External/Plugins/source-netease-cloud-music",
+]
+exclude = [
+  "External/Plugins/example/backend-rust",
+  "External/Plugins/template/backend-rust",
+]

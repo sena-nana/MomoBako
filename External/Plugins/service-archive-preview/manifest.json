@@ -12,10 +12,10 @@
   "capabilities": ["archive", "preview", "read", "readonly"],
   "enabled": true,
   "sdk": "backend",
-  "runtime": "native-dylib",
+  "runtime": "process",
   "entry": {
     "backend": {
-      "library": "momobako_service_archive_preview"
+      "executable": "momobako_service_archive_preview_runner.exe"
     }
   },
   "permissions": ["filesystem:read"],

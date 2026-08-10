@@ -8,8 +8,8 @@ const repoRoot = resolve(pluginsRoot, "..", "..");
 const packagesRoot = join(pluginsRoot, ".packages");
 const targetRoot = process.argv[2]?.trim();
 const runtimeRoot = targetRoot
-  ? resolve(targetRoot, "plugins")
-  : join(repoRoot, "src-tauri", ".service-data", "plugins");
+  ? resolve(targetRoot, "plugins", "builtin")
+  : join(repoRoot, "src-tauri", ".service-data", "plugins", "builtin");
 
 rmSync(runtimeRoot, { recursive: true, force: true });
 mkdirSync(runtimeRoot, { recursive: true });

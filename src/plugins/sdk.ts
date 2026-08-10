@@ -351,8 +351,9 @@ const toolPageRegistry = new Map<string, RegisteredToolPage>();
 const settingsPageRegistry = new Map<string, RegisteredPluginSettingsPage>();
 const entryActionProviderRegistry = new Map<string, RegisteredEntryActionProvider>();
 const pluginEventHandlers = new Map<string, Set<PluginEventHandler>>();
-const loadedPluginModules = new Map<string, Promise<void>>();
+const loadedPluginModules = new Map<string, { packageHash: string; promise: Promise<void> }>();
 const pluginModuleUrls = new Map<string, string>();
+const pluginRegistrationDisposers = new Map<string, Set<() => void | Promise<void>>>();
 export const frontendPluginRegistryVersion = ref(0);
 
 function bumpFrontendPluginRegistry() {
@@ -532,16 +533,22 @@ export function onPluginEvent<T = unknown>(eventName: string, handler: PluginEve
   };
 }
 
-function pluginBlobUrlCacheKey(pluginId: string, path: string) {
-  return `${pluginId}:${path}`;
+function frontendPackageHash(manifest: PluginManifest) {
+  return manifest.packageHash ?? `legacy:${manifest.version}`;
 }
 
-async function loadPluginModule<T = unknown>(pluginId: string, path: string): Promise<T> {
-  const cacheKey = pluginBlobUrlCacheKey(pluginId, path);
+function pluginBlobUrlCacheKey(manifest: PluginManifest, path: string) {
+  return `${manifest.pluginId}:${frontendPackageHash(manifest)}:${path}`;
+}
+
+async function loadPluginModule<T = unknown>(manifest: PluginManifest, path: string): Promise<T> {
+  const cacheKey = pluginBlobUrlCacheKey(manifest, path);
   let url = pluginModuleUrls.get(cacheKey);
   if (!url) {
-    const response = await readPluginArchiveText({ pluginId, path });
-    url = `data:text/javascript;charset=utf-8,${encodeURIComponent(response.text)}`;
+    const response = await readPluginArchiveText({ pluginId: manifest.pluginId, path });
+    url = typeof navigator !== "undefined" && navigator.userAgent.toLowerCase().includes("jsdom")
+      ? `data:text/javascript;charset=utf-8,${encodeURIComponent(response.text)}`
+      : URL.createObjectURL(new Blob([response.text], { type: "text/javascript;charset=utf-8" }));
     pluginModuleUrls.set(cacheKey, url);
   }
   return import(/* @vite-ignore */ url) as Promise<T>;
@@ -616,7 +623,7 @@ function createFrontendPluginContext(manifest: PluginManifest, modulePath: strin
       return defineAsyncComponent(loader);
     },
     loadModule<T = unknown>(path: string) {
-      return loadPluginModule<T>(manifest.pluginId, path);
+      return loadPluginModule<T>(manifest, path);
     },
     getApiDesignSnapshot,
     getExternalApiConnectionStatus,
@@ -661,7 +668,16 @@ function createFrontendPluginContext(manifest: PluginManifest, modulePath: strin
     cancelOperationProgress,
     logger: createPluginLogger(manifest, modulePath),
     emitPluginEvent,
-    onPluginEvent,
+    onPluginEvent<T = unknown>(eventName: string, handler: PluginEventHandler<T>) {
+      const dispose = onPluginEvent(eventName, handler);
+      const disposers = pluginRegistrationDisposers.get(manifest.pluginId) ?? new Set();
+      disposers.add(dispose);
+      pluginRegistrationDisposers.set(manifest.pluginId, disposers);
+      return () => {
+        dispose();
+        disposers.delete(dispose);
+      };
+    },
     vue: {
       h,
       ref,
@@ -679,120 +695,106 @@ async function registerFrontendPluginManifest(manifest: PluginManifest) {
   const modulePath = manifest.entry?.frontend?.module?.trim();
   if (!modulePath) return;
   const moduleExport = manifest.entry?.frontend?.export?.trim() || "register";
-  const module = await loadPluginModule<Record<string, unknown>>(manifest.pluginId, modulePath);
+  const module = await loadPluginModule<Record<string, unknown>>(manifest, modulePath);
   const register = module[moduleExport];
   if (typeof register !== "function") {
     throw new Error(`plugin register export not found: ${manifest.pluginId}:${moduleExport}`);
   }
-  await Promise.resolve(register(createFrontendPluginContext(manifest, modulePath)));
+  const registration = await Promise.resolve(register(createFrontendPluginContext(manifest, modulePath)));
+  const dispose = typeof registration === "function"
+    ? registration as () => void | Promise<void>
+    : typeof registration === "object" && registration !== null && "dispose" in registration
+      && typeof registration.dispose === "function"
+      ? () => Promise.resolve(registration.dispose.call(registration)).then(() => undefined)
+      : null;
+  if (dispose) {
+    const disposers = pluginRegistrationDisposers.get(manifest.pluginId) ?? new Set();
+    disposers.add(dispose);
+    pluginRegistrationDisposers.set(manifest.pluginId, disposers);
+  }
+}
+
+function updateFrontendPluginManifest(manifest: PluginManifest) {
+  const preview = previewPluginRegistry.get(manifest.pluginId);
+  if (preview) preview.manifest = manifest;
+  for (const player of playlistPlayerRegistry.values()) {
+    if (player.pluginId === manifest.pluginId) player.manifest = manifest;
+  }
+  for (const extension of libraryExtensionRegistry.values()) {
+    if (extension.pluginId === manifest.pluginId) extension.manifest = manifest;
+  }
+  for (const page of toolPageRegistry.values()) {
+    if (page.pluginId === manifest.pluginId) page.manifest = manifest;
+  }
+  const settingsPage = settingsPageRegistry.get(manifest.pluginId);
+  if (settingsPage) settingsPage.manifest = manifest;
+  for (const provider of entryActionProviderRegistry.values()) {
+    if (provider.pluginId === manifest.pluginId) provider.manifest = manifest;
+  }
+}
+
+async function unloadFrontendPlugin(pluginId: string) {
+  for (const dispose of pluginRegistrationDisposers.get(pluginId) ?? []) {
+    try {
+      await dispose();
+    } catch (error) {
+      console.error(`[frontend-plugin] dispose failed: ${pluginId}`, error);
+    }
+  }
+  pluginRegistrationDisposers.delete(pluginId);
+  previewPluginRegistry.delete(pluginId);
+  for (const [key, value] of playlistPlayerRegistry) {
+    if (value.pluginId === pluginId) playlistPlayerRegistry.delete(key);
+  }
+  for (const [key, value] of libraryExtensionRegistry) {
+    if (value.pluginId === pluginId) libraryExtensionRegistry.delete(key);
+  }
+  for (const [key, value] of toolPageRegistry) {
+    if (value.pluginId === pluginId) toolPageRegistry.delete(key);
+  }
+  settingsPageRegistry.delete(pluginId);
+  for (const [key, value] of entryActionProviderRegistry) {
+    if (value.pluginId === pluginId) entryActionProviderRegistry.delete(key);
+  }
+  loadedPluginModules.delete(pluginId);
+  for (const [key, url] of pluginModuleUrls) {
+    if (!key.startsWith(`${pluginId}:`)) continue;
+    if (url.startsWith("blob:")) URL.revokeObjectURL(url);
+    pluginModuleUrls.delete(key);
+  }
 }
 
 export async function syncRegisteredPreviewPluginManifests(manifests: PluginManifest[]) {
-  const manifestMap = new Map(manifests.map((manifest) => [manifest.pluginId, manifest]));
-  for (const [pluginId, plugin] of previewPluginRegistry) {
-    const manifest = manifestMap.get(pluginId);
-    if (!manifest) {
-      previewPluginRegistry.delete(pluginId);
-      loadedPluginModules.delete(pluginId);
-      continue;
+  const frontendManifests = new Map(
+    manifests
+      .filter((manifest) => (
+        manifest.sdk === "frontend"
+        && manifest.runtime === "vue-module"
+        && Boolean(manifest.entry?.frontend?.module)
+        && manifest.enabled !== false
+        && !["disabled", "unavailable", "error"].includes(manifest.status ?? "ready")
+      ))
+      .map((manifest) => [manifest.pluginId, manifest]),
+  );
+
+  for (const [pluginId, loaded] of [...loadedPluginModules]) {
+    const manifest = frontendManifests.get(pluginId);
+    if (!manifest || loaded.packageHash !== frontendPackageHash(manifest)) {
+      await unloadFrontendPlugin(pluginId);
     }
-    plugin.manifest = manifest;
-  }
-  for (const [playerTypeId, player] of playlistPlayerRegistry) {
-    const manifest = manifestMap.get(player.pluginId);
-    if (!manifest) {
-      playlistPlayerRegistry.delete(playerTypeId);
-      loadedPluginModules.delete(player.pluginId);
-      continue;
-    }
-    player.manifest = manifest;
-  }
-  for (const [libraryKind, extension] of libraryExtensionRegistry) {
-    const manifest = manifestMap.get(extension.pluginId);
-    if (!manifest) {
-      libraryExtensionRegistry.delete(libraryKind);
-      loadedPluginModules.delete(extension.pluginId);
-      continue;
-    }
-    extension.manifest = manifest;
-  }
-  for (const [toolPageId, page] of toolPageRegistry) {
-    const manifest = manifestMap.get(page.pluginId);
-    if (!manifest) {
-      toolPageRegistry.delete(toolPageId);
-      loadedPluginModules.delete(page.pluginId);
-      continue;
-    }
-    page.manifest = manifest;
-  }
-  for (const [pluginId, page] of settingsPageRegistry) {
-    const manifest = manifestMap.get(pluginId);
-    if (!manifest) {
-      settingsPageRegistry.delete(pluginId);
-      loadedPluginModules.delete(pluginId);
-      continue;
-    }
-    page.manifest = manifest;
-  }
-  for (const [providerId, provider] of entryActionProviderRegistry) {
-    const manifest = manifestMap.get(provider.pluginId);
-    if (!manifest) {
-      entryActionProviderRegistry.delete(providerId);
-      loadedPluginModules.delete(provider.pluginId);
-      continue;
-    }
-    provider.manifest = manifest;
   }
 
-  for (const manifest of manifests) {
-    if (manifest.sdk !== "frontend" || manifest.runtime !== "vue-module") continue;
-    if (!manifest.entry?.frontend?.module) continue;
-    if (
-      previewPluginRegistry.has(manifest.pluginId)
-      || [...playlistPlayerRegistry.values()].some((player) => player.pluginId === manifest.pluginId)
-      || [...libraryExtensionRegistry.values()].some((extension) => extension.pluginId === manifest.pluginId)
-      || [...toolPageRegistry.values()].some((page) => page.pluginId === manifest.pluginId)
-      || settingsPageRegistry.has(manifest.pluginId)
-      || [...entryActionProviderRegistry.values()].some((provider) => provider.pluginId === manifest.pluginId)
-    ) {
-      const plugin = previewPluginRegistry.get(manifest.pluginId);
-      if (plugin) plugin.manifest = manifest;
-      for (const player of playlistPlayerRegistry.values()) {
-        if (player.pluginId === manifest.pluginId) {
-          player.manifest = manifest;
-        }
-      }
-      for (const extension of libraryExtensionRegistry.values()) {
-        if (extension.pluginId === manifest.pluginId) {
-          extension.manifest = manifest;
-        }
-      }
-      for (const page of toolPageRegistry.values()) {
-        if (page.pluginId === manifest.pluginId) {
-          page.manifest = manifest;
-        }
-      }
-      const settingsPage = settingsPageRegistry.get(manifest.pluginId);
-      if (settingsPage) settingsPage.manifest = manifest;
-      for (const provider of entryActionProviderRegistry.values()) {
-        if (provider.pluginId === manifest.pluginId) {
-          provider.manifest = manifest;
-        }
-      }
-      continue;
-    }
+  for (const manifest of frontendManifests.values()) {
     if (!loadedPluginModules.has(manifest.pluginId)) {
-      loadedPluginModules.set(
-        manifest.pluginId,
-        registerFrontendPluginManifest(manifest).catch((error) => {
-          loadedPluginModules.delete(manifest.pluginId);
-          throw error;
-        }),
-      );
+      const packageHash = frontendPackageHash(manifest);
+      const promise = registerFrontendPluginManifest(manifest).catch(async (error) => {
+        await unloadFrontendPlugin(manifest.pluginId);
+        throw error;
+      });
+      loadedPluginModules.set(manifest.pluginId, { packageHash, promise });
     }
-    await loadedPluginModules.get(manifest.pluginId);
-    const plugin = previewPluginRegistry.get(manifest.pluginId);
-    if (plugin) plugin.manifest = manifest;
+    await loadedPluginModules.get(manifest.pluginId)?.promise;
+    updateFrontendPluginManifest(manifest);
   }
   bumpFrontendPluginRegistry();
 }
@@ -806,6 +808,10 @@ export function getRegisteredPreviewPluginForEntry(entry: FileBrowserEntry | nul
 }
 
 export function clearPreviewPluginRegistry() {
+  for (const pluginId of loadedPluginModules.keys()) void unloadFrontendPlugin(pluginId);
+  for (const url of pluginModuleUrls.values()) {
+    if (url.startsWith("blob:")) URL.revokeObjectURL(url);
+  }
   previewPluginRegistry.clear();
   playlistPlayerRegistry.clear();
   libraryExtensionRegistry.clear();
@@ -813,6 +819,7 @@ export function clearPreviewPluginRegistry() {
   settingsPageRegistry.clear();
   entryActionProviderRegistry.clear();
   pluginEventHandlers.clear();
+  pluginRegistrationDisposers.clear();
   loadedPluginModules.clear();
   pluginModuleUrls.clear();
   bumpFrontendPluginRegistry();

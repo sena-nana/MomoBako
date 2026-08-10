@@ -20,7 +20,9 @@ use serde_json::Value;
 
 pub type PluginHandler = fn(PluginCallEnvelope) -> Result<Value, String>;
 pub use mutsuki_runtime_core::RuntimeResult;
-pub use mutsuki_runtime_sdk::{export_mutsuki_plugin_abi_v2, AbiHostClientV2, LoadedPlugin};
+pub use mutsuki_runtime_sdk::{
+    export_mutsuki_plugin_abi_v2, AbiHostClient as AbiHostClientV2, LoadedPlugin,
+};
 
 static EVENT_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 

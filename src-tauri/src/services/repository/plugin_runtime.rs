@@ -1,23 +1,26 @@
 //! Momo 插件目录、依赖状态与 Mutsuki 执行路由。
 
+use super::plugin::{read_validated_v2_plugin_archive, sha256_path};
 use super::*;
 
 use crate::services::logging::write_log;
 use crate::services::mutsuki_host;
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(super) struct DiscoveredPluginManifest {
     pub(super) manifest: PluginManifest,
     pub(super) archive_path: PathBuf,
     pub(super) manifest_prefix: String,
 }
 
+#[derive(Clone)]
 pub(super) struct PluginCatalogEntry {
     pub(super) manifest: PluginManifest,
     pub(super) archive_path: PathBuf,
     pub(super) manifest_prefix: String,
 }
 
+#[derive(Clone)]
 pub(super) struct PluginCatalog {
     pub(super) registrations: BTreeMap<String, PluginCatalogEntry>,
     pub(super) legacy_ids: BTreeMap<String, String>,
@@ -29,6 +32,7 @@ pub(crate) struct NativePluginSpec {
     pub(crate) manifest: PluginManifest,
     pub(crate) archive_path: PathBuf,
     pub(crate) manifest_prefix: String,
+    pub(crate) package_hash: String,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -77,7 +81,9 @@ impl PluginCatalog {
             .values()
             .map(|registration| {
                 let mut manifest = registration.manifest.clone();
-                if manifest.runtime == "native-dylib" && manifest.enabled {
+                if matches!(manifest.runtime.as_str(), "native-dylib" | "process")
+                    && manifest.enabled
+                {
                     if let Some(error) =
                         mutsuki_host::plugin_unavailable_reason(&manifest.plugin_id)
                     {
@@ -268,14 +274,28 @@ impl PluginCatalog {
 
 /// 返回可交给独立 ABI Host 的产品级插件输入；包扫描、依赖和 staging 仍归 Momo 所有。
 pub(crate) fn native_plugin_specs(service_root: &Path) -> Vec<NativePluginSpec> {
-    let catalog = PluginCatalog::load(service_root);
+    let catalog = plugin_catalog(service_root);
     catalog
         .registrations
         .values()
         .filter(|registration| {
-            registration.manifest.enabled && registration.manifest.runtime == "native-dylib"
+            registration.manifest.enabled
+                && matches!(
+                    registration.manifest.runtime.as_str(),
+                    "native-dylib" | "process"
+                )
         })
         .map(|registration| NativePluginSpec {
+            package_hash: registration
+                .manifest
+                .package_hash
+                .clone()
+                .unwrap_or_else(|| {
+                    format!(
+                        "legacy-{}-{}",
+                        registration.manifest.plugin_id, registration.manifest.version
+                    )
+                }),
             manifest: registration.manifest.clone(),
             archive_path: registration.archive_path.clone(),
             manifest_prefix: registration.manifest_prefix.clone(),
@@ -318,7 +338,59 @@ pub(super) fn plugin_call_runtime(manifest: &PluginManifest) -> Option<PluginCal
 }
 
 pub(super) fn plugin_catalog(service_root: &Path) -> PluginCatalog {
-    PluginCatalog::load(service_root)
+    static CACHE: OnceLock<Mutex<HashMap<PathBuf, (u64, PluginCatalog)>>> = OnceLock::new();
+    let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    let key = service_root.to_path_buf();
+    let fingerprint = plugin_catalog_fingerprint(service_root);
+    if let Ok(catalogs) = cache.lock() {
+        if let Some((cached_fingerprint, catalog)) = catalogs.get(&key) {
+            if *cached_fingerprint == fingerprint {
+                return catalog.clone();
+            }
+        }
+    }
+
+    let catalog = PluginCatalog::load(service_root);
+    if let Ok(mut catalogs) = cache.lock() {
+        catalogs.insert(key, (fingerprint, catalog.clone()));
+    }
+    catalog
+}
+
+/// 只读取目录元数据来判断 catalog 是否失效，避免每个调用重复解压并解析全部 ZIP。
+fn plugin_catalog_fingerprint(service_root: &Path) -> u64 {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    hash_plugin_catalog_path(&runtime_plugins_dir(service_root), &mut hasher);
+    hash_plugin_catalog_path(&service_root.join("plugin-state.json"), &mut hasher);
+    hasher.finish()
+}
+
+fn hash_plugin_catalog_path(path: &Path, hasher: &mut impl Hasher) {
+    path.hash(hasher);
+    let Ok(metadata) = fs::metadata(path) else {
+        return;
+    };
+    metadata.len().hash(hasher);
+    metadata
+        .modified()
+        .ok()
+        .and_then(|value| value.duration_since(UNIX_EPOCH).ok())
+        .map(|value| value.as_nanos())
+        .hash(hasher);
+    if !metadata.is_dir() {
+        return;
+    }
+    let Ok(entries) = fs::read_dir(path) else {
+        return;
+    };
+    let mut paths = entries
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .collect::<Vec<_>>();
+    paths.sort();
+    for path in paths {
+        hash_plugin_catalog_path(&path, hasher);
+    }
 }
 
 pub(super) fn call_downloader_prepare_track_playback(
@@ -376,6 +448,14 @@ pub(super) fn set_test_backend_stat_entry_hook(
 
 pub(super) fn load_runtime_plugin_manifests(service_root: &Path) -> Vec<DiscoveredPluginManifest> {
     let mut manifests = load_plugin_manifests_from_runtime(runtime_plugins_dir(service_root));
+    manifests.extend(load_plugin_manifests_from_runtime_with_provenance(
+        runtime_plugins_dir(service_root).join("builtin"),
+        "bundled",
+    ));
+    manifests.extend(load_plugin_manifests_from_runtime_with_provenance(
+        runtime_plugins_dir(service_root).join("user"),
+        "user-installed",
+    ));
     manifests.sort_by(|left, right| left.manifest.plugin_id.cmp(&right.manifest.plugin_id));
     manifests
 }
@@ -383,7 +463,21 @@ pub(super) fn load_runtime_plugin_manifests(service_root: &Path) -> Vec<Discover
 pub(super) fn load_plugin_manifests_from_runtime(
     runtime_root: PathBuf,
 ) -> Vec<DiscoveredPluginManifest> {
-    match read_plugin_manifests_from_dir(&runtime_root) {
+    load_plugin_manifests_from_runtime_inner(runtime_root, None)
+}
+
+fn load_plugin_manifests_from_runtime_with_provenance(
+    runtime_root: PathBuf,
+    provenance: &'static str,
+) -> Vec<DiscoveredPluginManifest> {
+    load_plugin_manifests_from_runtime_inner(runtime_root, Some(provenance))
+}
+
+fn load_plugin_manifests_from_runtime_inner(
+    runtime_root: PathBuf,
+    provenance: Option<&str>,
+) -> Vec<DiscoveredPluginManifest> {
+    match read_plugin_manifests_from_dir_with_provenance(&runtime_root, provenance) {
         Ok(manifests) => manifests,
         Err(error) => {
             crate::app_log!(
@@ -401,8 +495,9 @@ pub(super) fn load_plugin_manifests_from_runtime(
     }
 }
 
-pub(super) fn read_plugin_manifests_from_dir(
+fn read_plugin_manifests_from_dir_with_provenance(
     root: &Path,
+    provenance: Option<&str>,
 ) -> Result<Vec<DiscoveredPluginManifest>, String> {
     let mut manifests = Vec::new();
     if !root.is_dir() {
@@ -426,7 +521,8 @@ pub(super) fn read_plugin_manifests_from_dir(
         if plugin_path.extension().and_then(|value| value.to_str()) != Some("momoplug") {
             continue;
         }
-        match read_discovered_plugin_manifest_from_archive(&plugin_path) {
+        match read_discovered_plugin_manifest_from_archive_with_provenance(&plugin_path, provenance)
+        {
             Ok(discovered) => manifests.push(discovered),
             Err(error) => manifests.push(DiscoveredPluginManifest {
                 manifest: broken_plugin_manifest(&plugin_path, &error),
@@ -454,12 +550,36 @@ pub(super) fn read_discovered_plugin_manifest_from_directory(
     }))
 }
 
-pub(super) fn read_discovered_plugin_manifest_from_archive(
+fn read_discovered_plugin_manifest_from_archive_with_provenance(
     archive_path: &Path,
+    provenance: Option<&str>,
 ) -> Result<DiscoveredPluginManifest, String> {
+    if let Some(provenance) = provenance {
+        let (mut manifest, manifest_prefix) =
+            read_validated_v2_plugin_archive(archive_path, provenance)?;
+        manifest.archive_path = Some(archive_path.to_string_lossy().to_string());
+        return Ok(DiscoveredPluginManifest {
+            manifest,
+            archive_path: archive_path.to_path_buf(),
+            manifest_prefix,
+        });
+    }
     let (raw, manifest_prefix) = read_plugin_manifest_from_archive(archive_path)?;
+    let mut manifest = parse_plugin_manifest_with_source(&raw, None)?;
+    manifest.package_hash = Some(sha256_path(archive_path)?);
+    manifest.provenance = Some("legacy".to_string());
+    manifest.trust_level = Some("legacy".to_string());
+    manifest.deployment = Some(
+        match manifest.runtime.as_str() {
+            "native-dylib" => "abi",
+            "process" => "process",
+            "vue-module" => "frontend",
+            _ => "manifest",
+        }
+        .to_string(),
+    );
     Ok(DiscoveredPluginManifest {
-        manifest: parse_plugin_manifest_with_source(&raw, None)?,
+        manifest,
         archive_path: archive_path.to_path_buf(),
         manifest_prefix,
     })
