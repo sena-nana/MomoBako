@@ -1,46 +1,37 @@
 {
-  "pluginId": "momobako.source.netease-cloud-music",
+  "pluginId": "momobako.netease.source",
   "name": "Netease Cloud Music Source",
-  "version": "0.1.0",
-  "type": {
-    "layer": "source",
-    "kind": "netease-cloud-music"
-  },
+  "version": "0.2.0",
+  "type": { "layer": "source", "kind": "netease-cloud-music" },
   "kind": "netease-cloud-music",
   "category": "source",
-  "description": "通过网易云音乐账号登录并把创建/收藏歌单映射为虚拟资源库。",
+  "description": "提供网易云认证、虚拟资源库、媒体解析、下载与缓存。",
   "capabilities": [
     "browse",
     "read",
     "sync",
     "virtual-entries",
-    "login"
+    "authentication",
+    "media-source",
+    "entry-actions"
   ],
   "enabled": true,
   "sdk": "backend",
   "runtime": "native-dylib",
-  "entry": {
-    "backend": {
-      "library": "momobako_source_netease_cloud_music"
-    }
-  },
+  "entry": { "backend": { "library": "momobako_source_netease_cloud_music" } },
   "permissions": [
     "network",
     "filesystem:read",
-    "filesystem:write"
+    "filesystem:write",
+    "credential:read",
+    "credential:write"
   ],
-  "requires": [
-    "momobako.service.downloader"
-  ],
+  "requires": [],
   "optional": [],
   "hooks": [],
   "contributes": {
     "apiTests": [
-      {
-        "method": "auth.createQrSession",
-        "summary": "创建二维码登录会话。",
-        "payload": {}
-      },
+      { "method": "auth.createQrSession", "summary": "创建二维码登录会话。", "payload": {} },
       {
         "method": "filesystem.listDirectory",
         "summary": "列出网易云虚拟目录。",
@@ -50,22 +41,20 @@
           "config": {
             "apiBaseUrl": "",
             "accountId": "0",
-            "cookie": ""
+            "credentialRef": "keyring:momobako.netease.source:0"
           }
         }
       }
     ],
     "settings": {
       "schemaVersion": 1,
-      "settingsPage": {
-        "label": "网易云音乐"
-      },
+      "settingsPage": { "label": "网易云音乐" },
       "fields": [
         {
           "key": "apiBaseUrl",
           "label": "API Base URL",
           "type": "string",
-          "description": "留空时使用 ncm-api-rs 内置的网易云官方域名；仅在需要自定义域名时填写。",
+          "description": "留空时使用 ncm-api-rs 内置的网易云官方域名。",
           "default": ""
         },
         {
@@ -79,7 +68,9 @@
             { "label": "极高", "value": "exhigh" },
             { "label": "无损", "value": "lossless" }
           ]
-        }
+        },
+        { "key": "tempTtlMinutes", "label": "播放缓存分钟数", "type": "number", "default": 120, "min": 5, "max": 1440 },
+        { "key": "filenameTemplate", "label": "下载文件名", "type": "string", "default": "{{artists}} - {{songName}}" }
       ]
     },
     "source": {
@@ -97,12 +88,38 @@
         "playlistCategory",
         "provider",
         "accountId"
+      ],
+      "authentication": {
+        "kind": "qr",
+        "createSessionMethod": "auth.createQrSession",
+        "pollSessionMethod": "auth.pollQrSession",
+        "statusMethod": "auth.getLoginStatus",
+        "clearMethod": "auth.clearLogin",
+        "repositoryProvisioning": {
+          "sourceUriScheme": "netease-cloud-music",
+          "repoIdPrefix": "netease-cloud-music",
+          "requiresLocalCache": true
+        }
+      },
+      "media": {
+        "preparePlaybackMethod": "media.prepareTrackPlayback",
+        "resolveLyricsMethod": "media.resolveLyrics",
+        "downloadEntryMethod": "media.downloadTrackPackage",
+        "downloadDirectoryMethod": "media.downloadPlaylistPackage",
+        "clearCacheMethod": "media.clearTrackCache"
+      },
+      "entryActions": [
+        { "actionId": "download-track", "label": "下载单曲", "scope": "file", "entryKind": "track", "operation": "download-entry", "method": "media.downloadTrackPackage", "targets": ["local-directory", "writable-repository"] },
+        { "actionId": "refresh-track-playback", "label": "重新获取播放资源", "scope": "file", "entryKind": "track", "operation": "refresh-playback", "method": "media.prepareTrackPlayback" },
+        { "actionId": "clear-track-cache", "label": "清理播放缓存", "scope": "file", "entryKind": "track", "operation": "clear-cache", "method": "media.clearTrackCache" },
+        { "actionId": "download-playlist", "label": "下载歌单", "scope": "directory", "entryKind": "playlist-folder", "operation": "download-directory", "method": "media.downloadPlaylistPackage", "targets": ["local-directory", "writable-repository"] },
+        { "actionId": "create-audio-playlist", "label": "创建播放列表", "scope": "directory", "entryKind": "playlist-folder", "operation": "playlist-from-directory", "playerTypeId": "momobako.playlist.audio-sequence" }
       ]
     }
   },
   "compat": {
     "sdkVersion": "1",
-    "legacyPluginIds": []
+    "legacyPluginIds": ["momobako.source.netease-cloud-music"]
   },
   "source": "builtin",
   "status": "ready"

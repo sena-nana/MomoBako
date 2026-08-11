@@ -393,8 +393,10 @@ fn hash_plugin_catalog_path(path: &Path, hasher: &mut impl Hasher) {
     }
 }
 
-pub(super) fn call_downloader_prepare_track_playback(
+/// 按 Source manifest 声明调用播放源准备方法，宿主不识别具体媒体协议。
+pub(super) fn call_source_prepare_entry_playback(
     service_root: &Path,
+    plugin_id: &str,
     payload: serde_json::Value,
 ) -> Result<serde_json::Value, String> {
     #[cfg(test)]
@@ -402,27 +404,26 @@ pub(super) fn call_downloader_prepare_track_playback(
         return hook(payload);
     }
 
-    plugin_catalog(service_root).call(
-        "momobako.service.downloader",
-        "downloader.prepareTrackPlayback",
-        payload,
-    )
-}
-
-pub(crate) fn call_downloader_download_track_package(
-    service_root: &Path,
-    payload: serde_json::Value,
-) -> Result<serde_json::Value, String> {
-    #[cfg(test)]
-    if let Some(hook) = test_support::downloader_track_package_hook()? {
-        return hook(payload);
-    }
-
-    plugin_catalog(service_root).call(
-        "momobako.service.downloader",
-        "downloader.downloadTrackPackage",
-        payload,
-    )
+    let catalog = plugin_catalog(service_root);
+    let manifest = catalog
+        .manifest(plugin_id)
+        .ok_or_else(|| format!("source plugin is unavailable: {plugin_id}"))?;
+    let method = manifest
+        .contributes
+        .get("source")
+        .and_then(|source| source.get("media"))
+        .and_then(|media| media.get("preparePlaybackMethod"))
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| {
+            format!(
+                "source plugin does not declare contributes.source.media.preparePlaybackMethod: {}",
+                manifest.plugin_id
+            )
+        })?
+        .to_string();
+    catalog.call(&manifest.plugin_id, &method, payload)
 }
 
 #[cfg(test)]

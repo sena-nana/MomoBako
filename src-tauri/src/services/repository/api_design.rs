@@ -439,6 +439,7 @@ pub(super) fn core_tauri_api_definitions() -> Vec<ApiDefinition> {
             "下载歌单并通过进度通道回报逐首处理状态。",
             serde_json::json!({
                 "request": {
+                    "sourceRepositoryId": "netease-cloud-music-123456",
                     "playlistId": 9001,
                     "playlistName": "夜跑歌单",
                     "tracks": [

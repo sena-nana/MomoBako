@@ -1,7 +1,16 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { getPreviewPluginForEntry, listPreviewPlugins } from "../src/plugins/previewPlugins";
-import { getPlaylistPlayerByType, listPlaylistPlayers } from "../src/plugins/playlistPlayers";
-import { clearPreviewPluginRegistry, syncRegisteredPreviewPluginManifests } from "../src/plugins/sdk";
+import {
+  getAudioPlayerResolution,
+  getPlaylistPlayerByType,
+  listPlaylistPlayers,
+  setDefaultAudioPlayerPluginId,
+} from "../src/plugins/playlistPlayers";
+import {
+  clearPreviewPluginRegistry,
+  registerPlaylistPlayer,
+  syncRegisteredPreviewPluginManifests,
+} from "../src/plugins/sdk";
 import { listPlugins } from "../src/services/repositoryApi";
 import type { FileBrowserEntry } from "../src/types/repository";
 
@@ -24,6 +33,7 @@ function fileEntry(extension: string): FileBrowserEntry {
 
 describe("previewPlugins", () => {
   afterEach(() => {
+    setDefaultAudioPlayerPluginId(null);
     clearPreviewPluginRegistry();
   });
 
@@ -46,15 +56,17 @@ describe("previewPlugins", () => {
     expect(modelPlugin?.supportedExtensions).toContain("blend");
   });
 
-  it("routes image, video, and audio files to the built-in media preview", async () => {
+  it("routes image/video and audio to their independent built-in plugins", async () => {
     await syncRegisteredPreviewPluginManifests(await listPlugins());
     expect(getPreviewPluginForEntry(fileEntry("png"))?.pluginId).toBe("momobako.preview.media");
     expect(getPreviewPluginForEntry(fileEntry("mp4"))?.pluginId).toBe("momobako.preview.media");
-    expect(getPreviewPluginForEntry(fileEntry("mp3"))?.pluginId).toBe("momobako.preview.media");
+    expect(getPreviewPluginForEntry(fileEntry("mp3"))?.pluginId).toBe("momobako.player.audio");
     const mediaPlugin = listPreviewPlugins().find((plugin) => plugin.pluginId === "momobako.preview.media");
     expect(mediaPlugin?.supportedExtensions).toContain("png");
     expect(mediaPlugin?.supportedExtensions).toContain("webm");
-    expect(mediaPlugin?.supportedExtensions).toContain("wav");
+    expect(mediaPlugin?.supportedExtensions).not.toContain("wav");
+    expect(listPreviewPlugins().find((plugin) => plugin.pluginId === "momobako.player.audio")?.supportedExtensions)
+      .toContain("wav");
   });
 
   it("registers built-in playlist player types from the media plugin manifest", async () => {
@@ -81,9 +93,54 @@ describe("previewPlugins", () => {
     await syncRegisteredPreviewPluginManifests(manifests);
 
     expect(getPlaylistPlayerByType("momobako.playlist.image-slideshow")).toBeNull();
-    expect(getPlaylistPlayerByType("momobako.playlist.audio-sequence")).toBeNull();
+    expect(getPlaylistPlayerByType("momobako.playlist.audio-sequence")?.pluginId).toBe("momobako.player.audio");
     expect(getPlaylistPlayerByType("momobako.playlist.video-sequence")).toBeNull();
-    expect(listPlaylistPlayers()).toHaveLength(0);
+    expect(listPlaylistPlayers()).toHaveLength(1);
+  });
+
+  it("uses the selected audio implementation and falls back to the official player", async () => {
+    await syncRegisteredPreviewPluginManifests(await listPlugins());
+    const alternative = {
+      ...getPlaylistPlayerByType("momobako.playlist.audio-sequence")!,
+      pluginId: "user.audio-player",
+      pluginName: "Alternative Audio Player",
+      manifest: {
+        ...getPlaylistPlayerByType("momobako.playlist.audio-sequence")!.manifest!,
+        pluginId: "user.audio-player",
+        name: "Alternative Audio Player",
+      },
+    };
+    registerPlaylistPlayer(alternative);
+    setDefaultAudioPlayerPluginId("user.audio-player");
+
+    expect(getPlaylistPlayerByType("momobako.playlist.audio-sequence")?.pluginId).toBe("user.audio-player");
+    expect(getAudioPlayerResolution().fallbackUsed).toBe(false);
+
+    alternative.manifest!.enabled = false;
+    expect(getPlaylistPlayerByType("momobako.playlist.audio-sequence")?.pluginId).toBe("momobako.player.audio");
+    expect(getAudioPlayerResolution()).toMatchObject({
+      preferredPluginId: "user.audio-player",
+      fallbackUsed: true,
+    });
+  });
+
+  it("does not let an unselected audio implementation take over when the official player is unavailable", async () => {
+    await syncRegisteredPreviewPluginManifests(await listPlugins());
+    const official = getPlaylistPlayerByType("momobako.playlist.audio-sequence")!;
+    registerPlaylistPlayer({
+      ...official,
+      pluginId: "user.audio-player",
+      pluginName: "Alternative Audio Player",
+      manifest: {
+        ...official.manifest!,
+        pluginId: "user.audio-player",
+        name: "Alternative Audio Player",
+      },
+    });
+    official.manifest!.enabled = false;
+
+    expect(getPlaylistPlayerByType("momobako.playlist.audio-sequence")).toBeNull();
+    expect(getPreviewPluginForEntry(fileEntry("mp3"))).toBeNull();
   });
 
   it("routes text and markdown files to the built-in text preview", async () => {
@@ -173,7 +230,7 @@ describe("previewPlugins", () => {
     await syncRegisteredPreviewPluginManifests(manifests);
 
     expect(getPreviewPluginForEntry(fileEntry("mp4"))).toBeNull();
-    expect(getPreviewPluginForEntry(fileEntry("mp3"))).toBeNull();
+    expect(getPreviewPluginForEntry(fileEntry("mp3"))?.pluginId).toBe("momobako.player.audio");
     expect(getPreviewPluginForEntry(fileEntry("vrm"))?.pluginId).toBe("momobako.preview.three-model");
   });
 });

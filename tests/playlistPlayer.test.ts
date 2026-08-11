@@ -17,7 +17,7 @@ function playlist(fileClass: "image" | "audio" | "video"): PlaylistSummary {
     repoId: "repo-main-001",
     name: `${playerLabel} Test`,
     playerTypeId,
-    playerPluginId: "momobako.preview.media",
+    playerPluginId: fileClass === "audio" ? "momobako.player.audio" : "momobako.preview.media",
     playerLabel,
     fileClass,
     itemCount: 2,
@@ -48,7 +48,7 @@ function playlistDetail(fileClass: "image" | "audio" | "video"): PlaylistDetail 
   };
 }
 
-async function registerMediaPlugin() {
+async function registerPlayerPlugins() {
   await syncRegisteredPreviewPluginManifests(await listPlugins());
 }
 
@@ -61,7 +61,7 @@ afterEach(() => {
 describe("usePlaylistPlayer", () => {
   it("uses configured image duration and pauses slideshow timers", async () => {
     vi.useFakeTimers();
-    await registerMediaPlugin();
+    await registerPlayerPlugins();
     const player = usePlaylistPlayer();
     const mount = document.createElement("div");
     document.body.append(mount);
@@ -88,7 +88,7 @@ describe("usePlaylistPlayer", () => {
   });
 
   it("moves the current runtime between hidden and visible mount targets", async () => {
-    await registerMediaPlugin();
+    await registerPlayerPlugins();
     const player = usePlaylistPlayer();
     const hiddenMount = document.createElement("div");
     const visibleMount = document.createElement("div");
@@ -113,7 +113,7 @@ describe("usePlaylistPlayer", () => {
   });
 
   it("supports video seek, volume, object fit and ended navigation", async () => {
-    await registerMediaPlugin();
+    await registerPlayerPlugins();
     const player = usePlaylistPlayer();
     const mount = document.createElement("div");
     document.body.append(mount);
@@ -139,7 +139,7 @@ describe("usePlaylistPlayer", () => {
   });
 
   it("keeps audio runtime controlled by the workspace player bar", async () => {
-    await registerMediaPlugin();
+    await registerPlayerPlugins();
     const player = usePlaylistPlayer();
     const mount = document.createElement("div");
     document.body.append(mount);

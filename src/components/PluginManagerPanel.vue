@@ -4,6 +4,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { FolderOpen, Power, RefreshCw, Settings, Trash2, Upload } from "@lucide/vue";
 import { routeLocationKey, type RouteLocationNormalizedLoaded } from "vue-router";
 import { ConfirmDialog } from "../ui";
+import SourceAuthenticationSettings from "./SourceAuthenticationSettings.vue";
 import {
   useWorkspaceProgress,
   useWorkspaceSettings,
@@ -226,6 +227,10 @@ function settingsPageFor(plugin: PluginManifest) {
   return getPluginSettingsPage(plugin.pluginId);
 }
 
+function sourceAuthenticationFor(plugin: PluginManifest) {
+  return plugin.contributes?.source?.authentication ?? null;
+}
+
 function pluginSettingsFields(plugin: PluginManifest) {
   return (plugin.contributes?.settings?.fields ?? [])
     .filter((field): field is PluginConfigField => (
@@ -239,12 +244,14 @@ function pluginSettingsFields(plugin: PluginManifest) {
 function pluginSettingsLabel(plugin: PluginManifest) {
   return settingsPageFor(plugin)?.label
     ?? plugin.contributes?.settings?.settingsPage?.label
+    ?? (sourceAuthenticationFor(plugin) ? "账号与来源" : undefined)
     ?? "插件设置";
 }
 
 function pluginSettingsDescription(plugin: PluginManifest) {
   return settingsPageFor(plugin)?.description
     ?? plugin.contributes?.settings?.settingsPage?.description
+    ?? (sourceAuthenticationFor(plugin) ? "管理来源账号、登录状态与关联仓库。" : undefined)
     ?? "";
 }
 
@@ -700,6 +707,10 @@ watch(
 
               <div v-if="settingsPageFor(plugin)" class="plugin-manager__custom-settings">
                 <component :is="settingsPageFor(plugin)?.component" :manifest="plugin" />
+              </div>
+
+              <div v-else-if="sourceAuthenticationFor(plugin)" class="plugin-manager__custom-settings">
+                <SourceAuthenticationSettings :manifest="plugin" />
               </div>
 
               <div v-if="pluginSettingsFields(plugin).length" class="plugin-manager__settings-fields">

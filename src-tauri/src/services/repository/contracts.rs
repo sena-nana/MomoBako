@@ -23,6 +23,8 @@ pub struct RepositorySummary {
     pub updated_at: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub local_cache: Option<RepositoryLocalCacheStatus>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub authentication: Option<RepositoryAuthenticationStatus>,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -56,6 +58,14 @@ pub struct AssetSummary {
     pub provider_item_id: Option<String>,
     pub source_payload: Option<serde_json::Value>,
     pub local_absolute_path: Option<String>,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct RepositoryAuthenticationStatus {
+    pub required: bool,
+    pub logged_in: bool,
+    pub login_expired: bool,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -143,6 +153,7 @@ pub struct PlaylistItem {
     pub provider_id: Option<String>,
     pub provider_item_id: Option<String>,
     pub source_payload: Option<serde_json::Value>,
+    pub metadata: Option<serde_json::Value>,
     pub local_absolute_path: Option<String>,
 }
 
@@ -858,6 +869,8 @@ pub struct PluginCallRequest {
     pub plugin_id: String,
     pub method: String,
     #[serde(default)]
+    pub repository_id: Option<String>,
+    #[serde(default)]
     pub payload: serde_json::Value,
 }
 
@@ -883,6 +896,8 @@ pub struct DownloaderPlaylistTrackRequest {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct DownloaderPlaylistRequest {
+    #[serde(default)]
+    pub source_repository_id: Option<String>,
     pub playlist_id: i64,
     pub playlist_name: Option<String>,
     pub tracks: Vec<DownloaderPlaylistTrackRequest>,

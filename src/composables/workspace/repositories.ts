@@ -35,7 +35,6 @@ type RepositoryWorkspaceDependencies = {
 };
 
 let dependencies: RepositoryWorkspaceDependencies | null = null;
-const neteaseSourcePluginId = "momobako.source.netease-cloud-music";
 const repositoryDeleteDialogRepoId = ref<string | null>(null);
 const repositoryDeleteDialogOpen = ref(false);
 const repositoryDeleteError = ref("");
@@ -43,12 +42,12 @@ const deletingRepositoryMode = ref<RepositoryDeleteMode | null>(null);
 
 function repositoryUsesLocalMetadata(repository: RepositorySummary) {
   if (repository.backend.capabilities.includes("localRootPath")) return true;
-  return repository.backend.pluginId === neteaseSourcePluginId
-    && repository.localCache?.status !== "unconfigured";
+  return repository.localCache?.required === true
+    && repository.localCache.status !== "unconfigured";
 }
 
 function repositoryHasAccessibleLocalMetadata(repository: RepositorySummary) {
-  if (repository.backend.pluginId === neteaseSourcePluginId) {
+  if (repository.localCache?.required) {
     return repository.localCache?.status === "ready";
   }
   return repository.status === "ready";

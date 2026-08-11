@@ -253,7 +253,7 @@ impl<'a> RepositoryTaskExecutor<'a> {
             push_progress_event(events, task, progress)
         };
         let response = download_playlist_with_progress_cancellable(
-            &self.runtime.service_root(),
+            &self.runtime.repository_state,
             request,
             self.cancellation,
             &mut emit,

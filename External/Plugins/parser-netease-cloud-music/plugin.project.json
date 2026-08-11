@@ -1,0 +1,8 @@
+{
+  "pluginId": "momobako.netease.parser",
+  "build": {
+    "type": "cargo-native",
+    "sourceDir": "src",
+    "outputDir": ".dist/parser-netease-cloud-music"
+  }
+}

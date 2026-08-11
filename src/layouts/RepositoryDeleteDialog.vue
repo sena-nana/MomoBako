@@ -22,7 +22,7 @@ const emit = defineEmits<{
 
 function metadataOptionDescription(repository: RepositorySummary | null, enabled: boolean) {
   if (enabled) {
-    return repository?.backend.pluginId === "momobako.source.netease-cloud-music"
+    return repository?.localCache?.required
       ? "删除该资源库的 Momo 元数据目录与索引缓存，保留缓存文件夹中的其他用户内容。"
       : "删除该资源库的 .momo 数据目录，保留原文件夹与用户文件。";
   }

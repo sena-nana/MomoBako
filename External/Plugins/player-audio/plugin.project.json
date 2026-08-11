@@ -1,9 +1,9 @@
 {
-  "pluginId": "momobako.library.netease-cloud-music",
+  "pluginId": "momobako.player.audio",
   "build": {
     "type": "frontend-module",
     "sourceDir": "src",
     "entry": "dist/register.js",
-    "outputDir": ".dist/library-netease-cloud-music"
+    "outputDir": ".dist/player-audio"
   }
 }

@@ -147,7 +147,7 @@ function audioPlaylist(repoId = "repo-main-001"): PlaylistSummary {
     repoId,
     name: "Mock Playlist",
     playerTypeId: "momobako.playlist.audio-sequence",
-    playerPluginId: "momobako.preview.media",
+    playerPluginId: "momobako.player.audio",
     playerLabel: "音频顺序播放",
     fileClass: "audio",
     itemCount: 1,
@@ -254,49 +254,49 @@ function systemLogFixture(partial: Partial<SystemLogRecord> & Pick<SystemLogReco
 }
 
 function neteasePlugins() {
-  return [
-    ...createMockPlugins(),
-    pluginManifest(
-      "momobako.source.netease-cloud-music",
-      [],
+  const source = pluginManifest(
+      "momobako.netease.source",
+      ["momobako.source.netease-cloud-music"],
       "Netease Cloud Music Source",
-      "0.1.0",
+      "0.2.0",
       "source",
       "netease-cloud-music",
       "网易云音乐资源库后端。",
-      ["browse", "read", "sync"],
+      ["browse", "read", "sync", "virtual-entries", "authentication", "media-source", "entry-actions"],
       true,
       "backend",
       "native-dylib",
-    ),
-    pluginManifest(
-      "momobako.service.downloader",
-      [],
-      "Downloader Service",
-      "0.1.0",
-      "provider-service",
-      "downloader",
-      "下载播放和导出资源。",
-      ["download", "playback"],
-      true,
-      "backend",
-      "native-dylib",
-    ),
-    pluginManifest(
-      "momobako.library.netease-cloud-music",
-      [],
-      "Netease Cloud Music Library",
-      "0.1.0",
-      "library-kind",
-      "netease-cloud-music",
-      "网易云音乐前端扩展。",
-      ["library", "entry-actions", "settings"],
-      true,
-      "frontend",
-      "vue-module",
-      "user",
-    ),
-  ];
+    );
+  source.contributes = {
+    settings: { settingsPage: { label: "网易云音乐" } },
+    source: {
+      authentication: {
+        kind: "qr",
+        createSessionMethod: "auth.createQrSession",
+        pollSessionMethod: "auth.pollQrSession",
+        statusMethod: "auth.getLoginStatus",
+        clearMethod: "auth.clearLogin",
+        repositoryProvisioning: {
+          sourceUriScheme: "netease-cloud-music",
+          repoIdPrefix: "netease-cloud-music",
+          requiresLocalCache: true,
+        },
+      },
+      media: {
+        preparePlaybackMethod: "media.prepareTrackPlayback",
+        downloadEntryMethod: "media.downloadTrackPackage",
+        downloadDirectoryMethod: "media.downloadPlaylistPackage",
+        clearCacheMethod: "media.clearTrackCache",
+      },
+      entryActions: [
+        { actionId: "download-track", label: "下载单曲", scope: "file", entryKind: "track", operation: "download-entry", method: "media.downloadTrackPackage", targets: ["local-directory", "writable-repository"] },
+        { actionId: "refresh-track-playback", label: "重新获取播放资源", scope: "file", entryKind: "track", operation: "refresh-playback", method: "media.prepareTrackPlayback" },
+        { actionId: "download-playlist", label: "下载歌单", scope: "directory", entryKind: "playlist-folder", operation: "download-directory", method: "media.downloadPlaylistPackage", targets: ["local-directory", "writable-repository"] },
+        { actionId: "create-audio-playlist", label: "创建播放列表", scope: "directory", entryKind: "playlist-folder", operation: "playlist-from-directory", playerTypeId: "momobako.playlist.audio-sequence" },
+      ],
+    },
+  };
+  return [...createMockPlugins(), source];
 }
 
 function neteaseRepository(): MockRepository {
@@ -305,10 +305,10 @@ function neteaseRepository(): MockRepository {
     name: "云村 Aura",
     path: "C:/Mock/NeteaseCache",
     backend: {
-      pluginId: "momobako.source.netease-cloud-music",
+      pluginId: "momobako.netease.source",
       kind: "netease-cloud-music",
       name: "Netease Cloud Music",
-      capabilities: ["browse", "read", "sync"],
+      capabilities: ["browse", "read", "sync", "virtual-entries", "authentication"],
     },
     status: "ready",
     assetCount: 2,
@@ -881,19 +881,11 @@ describe("文件管理冒烟", () => {
 
     await renderApp();
 
-    expect(await screen.findByText("这个网易云资源库需要指定本地缓存目录。缓存目录会保存索引、缩略图、播放缓存和下载暂存。")).toBeInTheDocument();
-    await fireEvent.click(screen.getByRole("button", { name: "指定缓存目录" }));
+    expect(await screen.findByText("这个来源资源库需要在插件设置中配置本地缓存或重新认证。仓库记录和已有缓存不会被删除。")).toBeInTheDocument();
+    await fireEvent.click(screen.getByRole("button", { name: "打开来源设置" }));
 
-    await waitFor(() => {
-      expect(getInvokeCalls("configure_netease_repository_cache").at(-1)?.args).toMatchObject({
-        request: {
-          repoId: "netease-cloud-music-123456",
-          path: "C:/Mock/NeteaseCacheMigrated",
-          migrateLegacyCache: true,
-        },
-      });
-    });
-    expect(await screen.findByRole("button", { name: "资源库" })).toBeInTheDocument();
+    expect(await screen.findByText("账号与仓库")).toBeInTheDocument();
+    expect(getInvokeCalls("configure_netease_repository_cache")).toHaveLength(0);
   });
 
   it("缺失资源库手动刷新走静默链路且不显示任务", async () => {
@@ -1561,164 +1553,19 @@ describe("文件管理冒烟", () => {
     expect(getInvokeCalls("create_repository")).toHaveLength(0);
   });
 
-  it("新增资源库选择网易云后会在创建流程中扫码登录并创建资源库", async () => {
+  it("认证型 Source 从新增资源库入口跳转到插件设置", async () => {
     seedMockRepository();
     seedMockPlugins(neteasePlugins());
-    mockPluginCallResponse("momobako.source.netease-cloud-music", "auth.createQrSession", {
-      unikey: "qr-key-1",
-      qrimg: "data:image/png;base64,mock-qr",
-    });
-    mockPluginCallResponse("momobako.source.netease-cloud-music", "auth.pollQrSession", {
-      code: 803,
-      backendConfig: {
-        apiBaseUrl: "https://mock.api",
-        accountId: "123456",
-        cookie: "MUSIC_U=mock-cookie",
-        defaultLevel: "standard",
-      },
-      account: { id: 123456, userName: "Aura" },
-      profile: { nickname: "云村 Aura" },
-    });
 
     await renderApp();
 
     await fireEvent.click(screen.getByRole("button", { name: "资源库" }));
     await fireEvent.click(await screen.findByRole("button", { name: "添加资源库" }));
-    await fireEvent.click(await screen.findByRole("button", { name: "网易云音乐" }));
+    await fireEvent.click(await screen.findByRole("button", { name: "Netease Cloud Music Source" }));
 
-    expect(await screen.findByText("登录网易云音乐")).toBeInTheDocument();
-    expect(await screen.findByAltText("网易云二维码登录")).toBeInTheDocument();
-    selectMockFolder("C:/Mock/NeteaseCache");
-    await fireEvent.click(screen.getByRole("button", { name: "本地缓存目录" }));
-    await fireEvent.click(screen.getByRole("button", { name: "检查扫码结果" }));
-
-    await waitFor(() => {
-      expect(getInvokeCalls("create_repository").at(-1)?.args).toMatchObject({
-        request: {
-          repoId: "netease-cloud-music-123456",
-          name: "云村 Aura",
-          path: "C:/Mock/NeteaseCache",
-          backendPluginId: "momobako.source.netease-cloud-music",
-          backendConfig: {
-            apiBaseUrl: "https://mock.api",
-            accountId: "123456",
-            cookie: "MUSIC_U=mock-cookie",
-            defaultLevel: "standard",
-            sourceUri: "netease-cloud-music://account/123456",
-            localCachePath: "C:/Mock/NeteaseCache",
-            lastSyncAt: expect.any(String),
-          },
-        },
-      });
-    });
-    await waitFor(() => {
-      expect(getInvokeCalls("get_repository_snapshot").some((call) => (
-        call.args?.repoId === "netease-cloud-music-123456"
-      ))).toBe(true);
-    });
-  });
-
-  it("网易云创建流程命中已有同账号资源库后会刷新而不是创建重复资源库", async () => {
-    seedMockRepository();
-    seedMockPlugins(neteasePlugins());
-    seedMockRepositories([neteaseRepository()]);
-    mockPluginCallResponse("momobako.source.netease-cloud-music", "auth.createQrSession", {
-      unikey: "qr-key-1",
-      qrimg: "data:image/png;base64,mock-qr",
-    });
-    mockPluginCallResponse("momobako.source.netease-cloud-music", "auth.pollQrSession", {
-      code: 803,
-      backendConfig: {
-        accountId: "123456",
-        cookie: "MUSIC_U=mock-cookie",
-      },
-      account: { id: 123456, userName: "Aura" },
-      profile: { nickname: "云村 Aura" },
-    });
-
-    await renderApp();
-
-    await fireEvent.click(screen.getByRole("button", { name: "资源库" }));
-    await fireEvent.click(await screen.findByRole("button", { name: "添加资源库" }));
-    await fireEvent.click(await screen.findByRole("button", { name: "网易云音乐" }));
-    selectMockFolder("C:/Mock/NeteaseCache");
-    await fireEvent.click(await screen.findByRole("button", { name: "本地缓存目录" }));
-    await fireEvent.click(await screen.findByRole("button", { name: "检查扫码结果" }));
-
-    await waitFor(() => {
-      expect(getInvokeCalls("update_repository_backend_config").at(-1)?.args).toMatchObject({
-        request: {
-          repoId: "netease-cloud-music-123456",
-        },
-      });
-    });
-    await waitFor(() => {
-      expect(getInvokeCalls("get_repository_snapshot").some((call) => (
-        call.args?.repoId === "netease-cloud-music-123456"
-      ))).toBe(true);
-    });
-    await waitFor(() => {
-      expect(getInvokeCalls("get_file_browser").some((call) => (
-        (call.args?.request as { repoId?: string } | undefined)?.repoId === "netease-cloud-music-123456"
-      ))).toBe(true);
-    });
+    expect(await screen.findByText("账号与仓库")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "连接新账号" })).toBeInTheDocument();
     expect(getInvokeCalls("create_repository")).toHaveLength(0);
-  });
-
-  it("网易云后台同步完成后保持无感刷新且不显示任务", async () => {
-    seedMockRepository();
-    seedMockPlugins(neteasePlugins());
-    seedMockRepositories([neteaseRepository()]);
-    mockPluginCallResponse("momobako.source.netease-cloud-music", "auth.createQrSession", {
-      unikey: "qr-key-1",
-      qrimg: "data:image/png;base64,mock-qr",
-    });
-    mockPluginCallResponse("momobako.source.netease-cloud-music", "auth.pollQrSession", {
-      code: 803,
-      backendConfig: {
-        accountId: "123456",
-        cookie: "MUSIC_U=mock-cookie",
-      },
-      account: { id: 123456, userName: "Aura" },
-      profile: { nickname: "云村 Aura" },
-    });
-
-    await renderApp();
-
-    const workspace = useRepositoryWorkspace();
-    await waitFor(() => {
-      expect(workspace.operationProgress.value).toBeNull();
-    });
-    const delayedSync = delayNextInvoke("sync_repository");
-    await fireEvent.click(screen.getByRole("button", { name: "资源库" }));
-    await fireEvent.click(await screen.findByRole("button", { name: "添加资源库" }));
-    await fireEvent.click(await screen.findByRole("button", { name: "网易云音乐" }));
-    selectMockFolder("C:/Mock/NeteaseCache");
-    await fireEvent.click(await screen.findByRole("button", { name: "本地缓存目录" }));
-    await fireEvent.click(await screen.findByRole("button", { name: "检查扫码结果" }));
-
-    await waitFor(() => {
-      expect(getInvokeCalls("sync_repository").some((call) => (
-        call.args?.request && (call.args.request as { repoId?: string }).repoId === "netease-cloud-music-123456"
-      ))).toBe(true);
-      expect(workspace.operationProgress.value).toBeNull();
-    });
-    expect(document.querySelector(".task-button__badge")).not.toBeInTheDocument();
-
-    const delayedRefresh = delayNextInvoke("list_repositories");
-    delayedSync.resolve();
-
-    await waitFor(() => {
-      expect(getInvokeCalls("list_repositories").length).toBeGreaterThan(1);
-      expect(workspace.operationProgress.value).toBeNull();
-    });
-    expect(document.querySelector(".task-button__badge")).not.toBeInTheDocument();
-
-    delayedRefresh.resolve();
-    await waitFor(() => {
-      expect(workspace.operationProgress.value).toBeNull();
-    });
-    expect(document.querySelector(".task-button__badge")).not.toBeInTheDocument();
   });
 
   it("空状态拖入本地文件夹时挂载已有目录而不是创建新仓库", async () => {
@@ -1813,7 +1660,7 @@ describe("文件管理冒烟", () => {
     await workspace.setPluginEnabledInWorkspace("momobako.preview.three-model", false);
 
     expect(getPreviewPluginForEntry(previewEntry("mp4"))).toBeNull();
-    expect(getPreviewPluginForEntry(previewEntry("mp3"))).toBeNull();
+    expect(getPreviewPluginForEntry(previewEntry("mp3"))?.pluginId).toBe("momobako.player.audio");
     expect(getPreviewPluginForEntry(previewEntry("vrm"))).toBeNull();
   });
 
@@ -1823,7 +1670,7 @@ describe("文件管理冒烟", () => {
       "playlist-mock": audioPlaylistDetail(),
     });
     seedMockPlugins(createMockPlugins().map((plugin) => (
-      plugin.pluginId === "momobako.preview.media"
+      plugin.pluginId === "momobako.player.audio"
         ? { ...plugin, enabled: false, status: "disabled" as const }
         : plugin
     )));
@@ -2076,7 +1923,7 @@ describe("文件管理冒烟", () => {
       account: { id: 123456, userName: "Aura" },
       profile: { nickname: "云村 Aura" },
     });
-    mockPluginCallResponse("momobako.service.downloader", "downloader.downloadTrackPackage", {
+    mockPluginCallResponse("momobako.netease.source", "media.downloadTrackPackage", {
       paths: [
         "C:/Mock/.service-data/plugin-data/momobako-service-downloader/exports/repository-staging/repo-target-001/周杰伦 - 稻香.mp3",
         "C:/Mock/.service-data/plugin-data/momobako-service-downloader/exports/repository-staging/repo-target-001/周杰伦 - 稻香.lrc",
@@ -2089,18 +1936,18 @@ describe("文件管理冒烟", () => {
     await fireEvent.dblClick(fileListItem("创建的歌单"));
     await fireEvent.dblClick(fileListItem("创建的歌单/夜跑歌单"));
     await fireEvent.contextMenu(fileListItem("创建的歌单/夜跑歌单/周杰伦 - 稻香.mp3"));
-    await fireEvent.click(await screen.findByRole("menuitem", { name: "下载到其他资源库", hidden: true }));
+    await fireEvent.click(await screen.findByRole("menuitem", { name: "下载单曲到其他资源库", hidden: true }));
 
     const dialog = await screen.findByRole("dialog", { name: "选择目标资源库" });
     expect(within(dialog).getByRole("button", { name: "本地音乐库C:/Mock/TargetMusicRepo" })).toBeInTheDocument();
     expect(within(dialog).getByRole("button", { name: "备份音乐库D:/Mock/BackupMusicRepo" })).toBeInTheDocument();
     expect(within(dialog).queryByText("云村 Aura")).not.toBeInTheDocument();
-    expect(within(dialog).queryByText("WebDAV 备份库")).not.toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "WebDAV 备份库https://mock.example/webdav" })).toBeInTheDocument();
     expect(within(dialog).queryByText("只读音乐库")).not.toBeInTheDocument();
     await fireEvent.click(within(dialog).getByRole("button", { name: "本地音乐库C:/Mock/TargetMusicRepo" }));
 
     await waitFor(() => {
-      const calls = getPluginCallCalls("momobako.service.downloader", "downloader.downloadTrackPackage");
+      const calls = getPluginCallCalls("momobako.netease.source", "media.downloadTrackPackage");
       expect(calls.at(-1)?.payload).toMatchObject({
         songId: 2001,
         level: "standard",
@@ -2136,7 +1983,7 @@ describe("文件管理冒烟", () => {
     });
   });
 
-  it("网易云虚拟歌曲支持下载到本地并携带登录 cookie", async () => {
+  it("网易云虚拟歌曲支持下载到本地且不携带登录 Cookie", async () => {
     const plugins = neteasePlugins();
     seedMockPlugins(plugins);
     seedMockRepositories([neteaseRepository()]);
@@ -2147,7 +1994,7 @@ describe("文件管理冒烟", () => {
       account: { id: 123456, userName: "Aura" },
       profile: { nickname: "云村 Aura" },
     });
-    mockPluginCallResponse("momobako.service.downloader", "downloader.downloadTrackPackage", {
+    mockPluginCallResponse("momobako.netease.source", "media.downloadTrackPackage", {
       paths: ["C:/Mock/LocalExports/周杰伦 - 稻香.mp3"],
     });
     selectMockFolder("C:/Mock/LocalExports");
@@ -2158,10 +2005,10 @@ describe("文件管理冒烟", () => {
     await fireEvent.dblClick(fileListItem("创建的歌单"));
     await fireEvent.dblClick(fileListItem("创建的歌单/夜跑歌单"));
     await fireEvent.contextMenu(fileListItem("创建的歌单/夜跑歌单/周杰伦 - 稻香.mp3"));
-    await fireEvent.click(await screen.findByRole("menuitem", { name: "下载到本地", hidden: true }));
+    await fireEvent.click(await screen.findByRole("menuitem", { name: "下载单曲到本地", hidden: true }));
 
     await waitFor(() => {
-      const calls = getPluginCallCalls("momobako.service.downloader", "downloader.downloadTrackPackage");
+      const calls = getPluginCallCalls("momobako.netease.source", "media.downloadTrackPackage");
       expect(calls.at(-1)?.payload).toMatchObject({
         songId: 2001,
         level: "standard",
@@ -2175,6 +2022,8 @@ describe("文件管理冒烟", () => {
           songId: 2001,
         },
       });
+      expect(calls.at(-1)?.payload).not.toHaveProperty("cookie");
+      expect(calls.at(-1)?.payload).not.toHaveProperty("accountCookie");
     });
   });
 
@@ -2187,6 +2036,10 @@ describe("文件管理冒烟", () => {
       loggedIn: true,
       loginExpired: false,
     });
+    mockPluginCallResponse("momobako.netease.source", "media.downloadPlaylistPackage", {
+      completed: [{ paths: ["C:/Mock/TargetMusicRepo/夜跑歌单/周杰伦 - 稻香.mp3"] }],
+      failed: [],
+    });
     await syncRegisteredFrontendPluginManifests(plugins);
     await renderApp();
 
@@ -2198,9 +2051,9 @@ describe("文件管理冒烟", () => {
     await fireEvent.click(within(dialog).getByRole("button", { name: "本地音乐库C:/Mock/TargetMusicRepo" }));
 
     await waitFor(() => {
-      const calls = getInvokeCalls("download_playlist_with_progress");
+      const calls = getPluginCallCalls("momobako.netease.source", "media.downloadPlaylistPackage");
       expect(calls).toHaveLength(1);
-      const request = calls[0]?.args?.request as {
+      const request = calls[0]?.payload as {
         tracks?: Array<{ songId?: number; songName?: string | null; sourcePayload?: Record<string, unknown> }>;
       } & Record<string, unknown>;
       expect(request).toMatchObject({
@@ -2210,7 +2063,6 @@ describe("文件管理冒烟", () => {
           kind: "repository",
           repoId: "repo-target-001",
           path: "C:/Mock/TargetMusicRepo",
-          parentPath: "夜跑歌单",
         },
       });
       expect(request.tracks).toHaveLength(2);
@@ -2267,7 +2119,7 @@ describe("文件管理冒烟", () => {
 
     await fireEvent.dblClick(fileListItem("创建的歌单"));
     await fireEvent.contextMenu(fileListItem("创建的歌单/夜跑歌单"));
-    await fireEvent.click(await screen.findByRole("menuitem", { name: "创建播放集", hidden: true }));
+    await fireEvent.click(await screen.findByRole("menuitem", { name: "创建播放列表", hidden: true }));
 
     await waitFor(() => {
       expect(getInvokeCalls("create_playlist").at(-1)?.args).toMatchObject({
@@ -2293,7 +2145,7 @@ describe("文件管理冒烟", () => {
     await useRepositoryWorkspace().loadFileBrowserForDirectory("创建的歌单");
     await waitForFileBrowserDerivedState();
     await fireEvent.contextMenu(fileListItem("创建的歌单/夜跑歌单"));
-    await fireEvent.click(await screen.findByRole("menuitem", { name: "创建播放集", hidden: true }));
+    await fireEvent.click(await screen.findByRole("menuitem", { name: "创建播放列表", hidden: true }));
 
     await waitFor(() => {
       expect(getInvokeCalls("add_playlist_items_by_paths").filter((call) => (
@@ -2314,6 +2166,10 @@ describe("文件管理冒烟", () => {
       loggedIn: true,
       loginExpired: false,
     });
+    mockPluginCallResponse("momobako.netease.source", "media.downloadPlaylistPackage", {
+      completed: [{ paths: ["C:/Mock/PlaylistExports/夜跑歌单/周杰伦 - 稻香.mp3"] }],
+      failed: [],
+    });
     selectMockFolder("C:/Mock/PlaylistExports");
 
     await syncRegisteredFrontendPluginManifests(plugins);
@@ -2324,9 +2180,9 @@ describe("文件管理冒烟", () => {
     await fireEvent.click(await screen.findByRole("menuitem", { name: "下载歌单到本地", hidden: true }));
 
     await waitFor(() => {
-      const calls = getInvokeCalls("download_playlist_with_progress");
+      const calls = getPluginCallCalls("momobako.netease.source", "media.downloadPlaylistPackage");
       expect(calls).toHaveLength(1);
-      const request = calls[0]?.args?.request as {
+      const request = calls[0]?.payload as {
         tracks?: Array<{ songId?: number; songName?: string | null }>;
       } & Record<string, unknown>;
       expect(request).toMatchObject({
@@ -2334,7 +2190,7 @@ describe("文件管理冒烟", () => {
         playlistName: "夜跑歌单",
         destination: {
           kind: "localFolder",
-          path: "C:/Mock/PlaylistExports/夜跑歌单",
+          path: "C:/Mock/PlaylistExports",
         },
       });
       expect(request.tracks).toHaveLength(2);
@@ -2360,8 +2216,8 @@ describe("文件管理冒烟", () => {
       loggedIn: true,
       loginExpired: false,
     });
-    mockPluginCallResponse("momobako.service.downloader", "downloader.clearTrackCache", {
-      cleared: ["C:/Mock/Temp/track.mp3"],
+    mockPluginCallResponse("momobako.netease.source", "media.prepareTrackPlayback", {
+      tempFilePath: "C:/Mock/Temp/track.mp3",
     });
 
     await syncRegisteredFrontendPluginManifests(plugins);
@@ -2373,15 +2229,11 @@ describe("文件管理冒烟", () => {
     await fireEvent.click(await screen.findByRole("menuitem", { name: "重新获取播放资源", hidden: true }));
 
     await waitFor(() => {
-      const calls = getPluginCallCalls("momobako.service.downloader", "downloader.clearTrackCache");
+      const calls = getPluginCallCalls("momobako.netease.source", "media.prepareTrackPlayback");
       expect(calls.at(-1)?.payload).toMatchObject({
         songId: 2001,
         level: "standard",
-        sourcePayload: {
-          accountId: "123456",
-          playlistId: 9001,
-          songId: 2001,
-        },
+        forceRefresh: true,
       });
     });
   });
@@ -2398,20 +2250,20 @@ describe("文件管理冒烟", () => {
 
     await syncRegisteredFrontendPluginManifests(plugins);
     await renderApp();
-    expect(await screen.findByText("登录已失效，请重新登录后再刷新或播放。")).toBeInTheDocument();
+    expect(screen.queryByText("登录已失效，请重新登录后再刷新或播放。")).not.toBeInTheDocument();
     await fireEvent.dblClick(fileListItem("创建的歌单"));
     await fireEvent.contextMenu(fileListItem("创建的歌单/夜跑歌单"));
     const playlistAction = await screen.findByRole("menuitem", { name: "下载歌单到其他资源库", hidden: true });
     expect(playlistAction).toBeDisabled();
-    expect(getPluginCallCalls("momobako.service.downloader", "downloader.downloadPlaylistPackage")).toHaveLength(0);
+    expect(getPluginCallCalls("momobako.netease.source", "media.downloadPlaylistPackage")).toHaveLength(0);
 
     await fireEvent.click(document.body);
     await fireEvent.dblClick(fileListItem("创建的歌单/夜跑歌单"));
     await fireEvent.contextMenu(fileListItem("创建的歌单/夜跑歌单/周杰伦 - 稻香.mp3"));
 
-    const action = await screen.findByRole("menuitem", { name: "下载到其他资源库", hidden: true });
+    const action = await screen.findByRole("menuitem", { name: "下载单曲到其他资源库", hidden: true });
     expect(action).toBeDisabled();
-    expect(getPluginCallCalls("momobako.service.downloader", "downloader.downloadTrackPackage")).toHaveLength(0);
+    expect(getPluginCallCalls("momobako.netease.source", "media.downloadTrackPackage")).toHaveLength(0);
   });
 
   it("网易云虚拟歌曲和歌单目录支持加入播放列表", async () => {

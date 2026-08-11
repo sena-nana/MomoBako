@@ -269,6 +269,23 @@ pub(super) fn ensure_default_metadata(
     plugin_defaults: Option<&BTreeMap<String, serde_json::Value>>,
     overwrite_existing: bool,
 ) -> Result<(), rusqlite::Error> {
+    if let Some(plugin_defaults) = plugin_defaults {
+        for (key, value) in plugin_defaults {
+            tx.execute(
+                r#"
+                INSERT OR IGNORE INTO metadata (asset_id, key, value_type, value_json, version, updated_at)
+                VALUES (?1, ?2, ?3, ?4, 1, ?5)
+                "#,
+                params![
+                    asset_id,
+                    key,
+                    infer_value_type(value),
+                    value.to_string(),
+                    added_to_library_at
+                ],
+            )?;
+        }
+    }
     let mut defaults = vec![
         (
             "title".to_string(),
@@ -305,7 +322,9 @@ pub(super) fn ensure_default_metadata(
         defaults.push(("palette".to_string(), serde_json::json!(palette)));
     }
     for (key, value) in defaults {
-        if overwrite_existing {
+        if overwrite_existing
+            && !plugin_defaults.is_some_and(|defaults| defaults.contains_key(&key))
+        {
             tx.execute(
                 r#"
                 INSERT OR REPLACE INTO metadata (asset_id, key, value_type, value_json, version, updated_at)
@@ -335,24 +354,6 @@ pub(super) fn ensure_default_metadata(
             )?;
         }
     }
-    if let Some(plugin_defaults) = plugin_defaults {
-        for (key, value) in plugin_defaults {
-            tx.execute(
-                r#"
-                INSERT OR IGNORE INTO metadata (asset_id, key, value_type, value_json, version, updated_at)
-                VALUES (?1, ?2, ?3, ?4, 1, ?5)
-                "#,
-                params![
-                    asset_id,
-                    key,
-                    infer_value_type(value),
-                    value.to_string(),
-                    added_to_library_at
-                ],
-            )?;
-        }
-    }
-
     Ok(())
 }
 

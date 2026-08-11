@@ -1,878 +1,110 @@
+/** 图片与视频预览插件入口。音频能力由 momobako.player.audio 独立提供。 */
 import {
-  audioPreviewExtensions,
   imagePreviewExtensions,
   isImageExtension,
-  isVideoExtension,
   videoPreviewExtensions,
 } from "./mediaExtensions.js";
 
 export function register(ctx) {
-  const {
-    computed,
-    h,
-    nextTick,
-    onBeforeUnmount,
-    onMounted,
-    ref,
-    watch,
-  } = ctx.vue;
+  const { computed, h, onBeforeUnmount, ref, watch } = ctx.vue;
 
   const MediaPreviewPlugin = {
     name: "MediaPreviewPlugin",
     props: {
-      entry: {
-        type: Object,
-        default: null,
-      },
-      repoId: {
-        type: String,
-        default: "",
-      },
-      saveMetadata: {
-        type: Function,
-        default: null,
-      },
+      entry: { type: Object, default: null },
+      repoId: { type: String, default: "" },
     },
     setup(props) {
       const state = ref("idle");
       const sourceUrl = ref("");
       const sourceMediaType = ref("");
       const errorMessage = ref("");
-      const audioArtworkPath = ref(props.entry?.thumbnailPath ?? null);
-      const lyricsStatus = ref("idle");
-      const lyricsLines = ref([]);
-      const currentPlaybackMs = ref(0);
-      const activeLyricIndex = ref(-1);
-      const lyricsInset = ref(104);
-      const lyricsViewport = ref(null);
-      const lyricsItems = ref([]);
-      const preparedPlayback = ref(null);
-      const playbackProgress = ref({
-        value: 0,
-        detail: "准备媒体",
-        indeterminate: true,
-        cached: null,
-      });
-      let objectUrl = null;
-      let resizeObserver = null;
-
-      const mediaKind = computed(() => (
-        isImageExtension(props.entry?.extension) ? "image" : isVideoExtension(props.entry?.extension) ? "video" : "audio"
-      ));
-      const extensionLabel = computed(() => (
-        mediaKindLabel(mediaKind.value)
-      ));
-      const audioArtworkUrl = computed(() => (
-        audioArtworkPath.value
-          ? resolveArtworkUrl(audioArtworkPath.value, ctx.fileSrc)
-          : sourcePayloadString(props.entry, "coverUrl")
-      ));
-      const lyricsPlaceholder = computed(() => (
-        lyricsStatus.value === "loading" ? "读取歌词..." : "暂无歌词"
-      ));
-
-      function revokeObjectUrl() {
-        if (!objectUrl) return;
-        URL.revokeObjectURL(objectUrl);
-        objectUrl = null;
-      }
+      const playbackProgress = ref(createInitialProgress());
+      const mediaKind = computed(() => (isImageExtension(props.entry?.extension) ? "image" : "video"));
 
       async function loadMediaSource() {
         state.value = "loading";
         sourceUrl.value = "";
         sourceMediaType.value = "";
         errorMessage.value = "";
-        preparedPlayback.value = null;
-        playbackProgress.value = {
-          value: 6,
-          detail: "准备媒体",
-          indeterminate: true,
-          cached: null,
-        };
-        revokeObjectUrl();
-
+        playbackProgress.value = createInitialProgress();
         try {
-          const request = {
-            repoId: props.repoId,
-            path: props.entry.path,
-          };
-          const response = ctx.prepareEntryPlaybackSourceWithProgress
-            ? await ctx.prepareEntryPlaybackSourceWithProgress(request, (event) => {
-                if (event.path !== props.entry.path) return;
-                playbackProgress.value = {
-                  value: event.value ?? playbackProgress.value.value,
-                  detail: event.detail || playbackProgress.value.detail,
-                  indeterminate: Boolean(event.indeterminate),
-                  cached: event.cached ?? playbackProgress.value.cached,
-                };
-              })
-            : await ctx.prepareEntryPlaybackSource(request);
-          const resolvedSourceUrl = response.sourceUrl
-            || (response.localPath ? ctx.fileSrc(response.localPath) : null);
-          if (!resolvedSourceUrl) {
-            throw new Error("媒体预览源不可用");
-          }
-          preparedPlayback.value = response;
-          playbackProgress.value = {
-            value: 100,
-            detail: "播放源已就绪",
-            indeterminate: false,
-            cached: response.cached ?? playbackProgress.value.cached,
-          };
-          sourceUrl.value = resolvedSourceUrl;
-          sourceMediaType.value = response.mediaType;
+          const response = await prepareSource(ctx, props.repoId, props.entry.path, (event) => {
+            playbackProgress.value = progressState(playbackProgress.value, event);
+          });
+          sourceUrl.value = response.sourceUrl;
+          sourceMediaType.value = response.mediaType ?? "";
+          playbackProgress.value = { value: 100, detail: "播放源已就绪", indeterminate: false, cached: response.cached ?? null };
           state.value = "ready";
         } catch (cause) {
           state.value = "error";
-          errorMessage.value = cause instanceof Error ? cause.message : String(cause);
+          errorMessage.value = errorText(cause, "媒体预览源不可用");
+          void ctx.logger.error("媒体预览源准备失败。", {
+            action: "preview.prepareSource",
+            repoId: props.repoId,
+            context: { path: props.entry?.path, message: errorMessage.value },
+          });
         }
-      }
-
-      async function loadAudioLyrics() {
-        if (mediaKind.value !== "audio") {
-          lyricsStatus.value = "idle";
-          lyricsLines.value = [];
-          return;
-        }
-        lyricsStatus.value = "loading";
-        try {
-          let text = "";
-          if (preparedPlayback.value?.lyricSourceUrl || preparedPlayback.value?.lyricPath) {
-            text = await readLocalTextFile(
-              preparedPlayback.value.lyricSourceUrl || ctx.fileSrc(preparedPlayback.value.lyricPath),
-            );
-          } else {
-            const bytes = await ctx.readFile({
-              repoId: props.repoId,
-              path: siblingLrcPath(props.entry.path),
-            });
-            text = decodeTextBytes(Uint8Array.from(bytes));
-          }
-          const parsed = parseLrcLyrics(text);
-          lyricsLines.value = parsed;
-          lyricsStatus.value = parsed.length ? "ready" : "empty";
-          await nextTick();
-          syncLyricsInset();
-        } catch {
-          lyricsLines.value = [];
-          lyricsStatus.value = "empty";
-        }
-      }
-
-      function syncLyricsInset() {
-        const viewport = lyricsViewport.value;
-        if (!viewport) return;
-        lyricsInset.value = Math.max(96, Math.floor(viewport.clientHeight / 2));
-      }
-
-      function centerActiveLyric() {
-        const viewport = lyricsViewport.value;
-        if (!viewport || activeLyricIndex.value < 0) return;
-        const item = lyricsItems.value[activeLyricIndex.value];
-        if (!item) return;
-        const top = item.offsetTop - (viewport.clientHeight / 2) + (item.clientHeight / 2);
-        viewport.scrollTop = Math.max(0, top);
       }
 
       watch(
         [() => props.repoId, () => props.entry?.path, () => props.entry?.extension],
-        async () => {
-          audioArtworkPath.value = props.entry?.thumbnailPath ?? null;
-          await loadMediaSource();
-          await loadAudioLyrics();
-        },
+        loadMediaSource,
         { immediate: true },
       );
-
-      watch(currentPlaybackMs, () => {
-        activeLyricIndex.value = findActiveLyricIndex(lyricsLines.value, currentPlaybackMs.value);
-        centerActiveLyric();
-      });
-
-      onMounted(() => {
-        if (typeof ResizeObserver !== "undefined" && lyricsViewport.value) {
-          resizeObserver = new ResizeObserver(() => {
-            syncLyricsInset();
-            centerActiveLyric();
-          });
-          resizeObserver.observe(lyricsViewport.value);
-        }
-      });
-
       onBeforeUnmount(() => {
-        resizeObserver?.disconnect();
-        revokeObjectUrl();
+        sourceUrl.value = "";
       });
-
-      function handleMediaError() {
-        state.value = "error";
-        errorMessage.value = "媒体无法播放";
-      }
-
-      function emitPlaybackState(event, playbackState) {
-        const target = event.target;
-        const duration = Number(target?.duration);
-        const currentTime = Number(target?.currentTime);
-        ctx.emitPluginEvent("media.playback", {
-          repoId: props.repoId,
-          entry: props.entry,
-          state: playbackState,
-          currentTimeMs: Number.isFinite(currentTime) && currentTime > 0 ? Math.round(currentTime * 1000) : 0,
-          durationMs: Number.isFinite(duration) && duration > 0 ? Math.round(duration * 1000) : 0,
-          saveMetadata: props.saveMetadata,
-        });
-      }
-
-      function setLyricItemRef(index, element) {
-        if (!element) return;
-        lyricsItems.value[index] = element;
-      }
 
       return {
-        activeLyricIndex,
-        audioArtworkUrl,
-        currentPlaybackMs,
-        entry: props.entry,
-        extensionLabel,
-        handleMediaError,
-        lyricsInset,
-        lyricsLines,
-        lyricsPlaceholder,
-        lyricsStatus,
-        lyricsViewport,
+        errorMessage,
+        handleMediaError() {
+          state.value = "error";
+          errorMessage.value = "媒体无法播放";
+          void ctx.logger.warn("媒体元素播放失败。", {
+            action: "preview.mediaError",
+            repoId: props.repoId,
+            context: { path: props.entry?.path },
+          });
+        },
         mediaKind,
         playbackProgress,
-        setLyricItemRef,
         sourceMediaType,
         sourceUrl,
         state,
-        errorMessage,
-        onAudioEnded(event) {
-          currentPlaybackMs.value = Math.round(((event.target?.currentTime ?? 0) * 1000));
-          emitPlaybackState(event, "ended");
-        },
-        onAudioLoadedMetadata(event) {
-          emitPlaybackState(event, "metadata");
-        },
-        onAudioPause(event) {
-          emitPlaybackState(event, "pause");
-        },
-        onAudioTimeUpdate(event) {
-          currentPlaybackMs.value = Math.round(((event.target?.currentTime ?? 0) * 1000));
-          emitPlaybackState(event, "timeupdate");
-        },
       };
     },
     render() {
-      if (this.state === "loading") {
-        const progressValue = Math.max(0, Math.min(100, Math.round(this.playbackProgress.value || 0)));
-        return h("div", { class: "media-preview__status" }, [
-          h("span", this.playbackProgress.cached ? "读取缓存" : "准备播放"),
-          h("span", this.playbackProgress.detail || (this.entry?.sizeLabel ? `准备 ${this.entry.sizeLabel}` : "建立预览流")),
-          h("div", {
-            class: [
-              "media-preview__download-progress",
-              { "media-preview__download-progress--indeterminate": this.playbackProgress.indeterminate },
-            ],
-            role: "progressbar",
-            "aria-label": "下载进度",
-            "aria-valuemin": 0,
-            "aria-valuemax": 100,
-            "aria-valuenow": this.playbackProgress.indeterminate ? undefined : progressValue,
-          }, [
-            h("span", { style: { width: `${progressValue}%` } }),
-          ]),
-          this.playbackProgress.indeterminate ? null : h("span", `${progressValue}%`),
-        ]);
-      }
+      if (this.state === "loading") return renderLoading(h, this.playbackProgress);
       if (this.state === "error") {
         return h("div", { class: "media-preview__overlay media-preview__overlay--error" }, [
           h("strong", "无法预览该媒体"),
           h("span", this.errorMessage),
         ]);
       }
-      if (this.sourceUrl && this.mediaKind === "image") {
+      if (this.mediaKind === "image") {
         return h("div", { class: "media-preview media-preview--image" }, [
-          h("img", {
-            class: "media-preview__image",
-            src: this.sourceUrl,
-            onError: this.handleMediaError,
-          }),
+          h("img", { class: "media-preview__image", src: this.sourceUrl, onError: this.handleMediaError }),
         ]);
       }
-      if (this.sourceUrl && this.mediaKind === "video") {
-        const videoSourceAttrs = { src: this.sourceUrl };
-        if (this.sourceMediaType && this.sourceMediaType !== "video/x-matroska") {
-          videoSourceAttrs.type = this.sourceMediaType;
-        }
-        return h("div", { class: "media-preview media-preview--video" }, [
-          h("video", {
-            class: "media-preview__video",
-            controls: true,
-            preload: "metadata",
-            playsinline: true,
-            onError: this.handleMediaError,
-          }, [
-            h("source", videoSourceAttrs),
-          ]),
-        ]);
-      }
-      return h("div", { class: "media-preview media-preview--audio" }, [
-        h("div", { class: "media-preview__audio-layout" }, [
-          h("section", { class: "media-preview__audio-stage", "aria-label": "音频封面" }, [
-            h("div", { class: "media-preview__audio-record" }, [
-              h("div", { class: "media-preview__audio-art", "aria-hidden": "true" }, [
-                this.audioArtworkUrl
-                  ? h("img", { class: "media-preview__audio-cover", src: this.audioArtworkUrl, alt: "" })
-                  : h("span", { class: "media-preview__audio-chip" }, this.extensionLabel),
-              ]),
-            ]),
-            h("div", { class: "media-preview__audio-caption" }, [
-              h("h2", displayNameWithoutExtension(this.entry?.name ?? "", this.entry?.extension)),
-              h("p", this.entry?.path ?? ""),
-              h("div", { class: "media-preview__audio-meta" }, [
-                h("span", this.extensionLabel),
-                this.entry?.sizeLabel ? h("span", this.entry.sizeLabel) : null,
-              ]),
-            ]),
-          ]),
-          h("section", { class: "media-preview__audio-info", "aria-label": "歌词" }, [
-            h("section", { class: "media-preview__audio-panel", "aria-label": "歌词面板" }, [
-              h("div", {
-                ref: "lyricsViewport",
-                class: ["media-preview__audio-lyrics", { "media-preview__audio-lyrics--empty": !this.lyricsLines.length }],
-              }, this.lyricsLines.length
-                ? [
-                    h("div", {
-                      class: "media-preview__audio-lyrics-track",
-                      style: { "--lyrics-inset": `${this.lyricsInset}px` },
-                    }, this.lyricsLines.map((line, index) => h("button", {
-                      key: line.id,
-                      type: "button",
-                      class: [
-                        "media-preview__audio-lyric",
-                        {
-                          "is-active": index === this.activeLyricIndex,
-                          "is-passed": this.activeLyricIndex > index,
-                          "is-timed": line.timeMs != null,
-                        },
-                      ],
-                      disabled: line.timeMs == null,
-                      ref: (element) => this.setLyricItemRef(index, element),
-                    }, line.text))),
-                  ]
-                : [h("span", this.lyricsPlaceholder)]),
-            ]),
-          ]),
-        ]),
-        h("div", { class: "media-preview__audio-control-bar" }, [
-          h("audio", {
-            class: "media-preview__audio-control",
-            controls: true,
-            preload: "metadata",
-            onError: this.handleMediaError,
-            onEnded: this.onAudioEnded,
-            onLoadedmetadata: this.onAudioLoadedMetadata,
-            onPause: this.onAudioPause,
-            onTimeupdate: this.onAudioTimeUpdate,
-          }, [
-            h("source", { src: this.sourceUrl, type: this.sourceMediaType }),
-          ]),
-        ]),
+      const source = { src: this.sourceUrl };
+      if (this.sourceMediaType && this.sourceMediaType !== "video/x-matroska") source.type = this.sourceMediaType;
+      return h("div", { class: "media-preview media-preview--video" }, [
+        h("video", {
+          class: "media-preview__video",
+          controls: true,
+          preload: "metadata",
+          playsinline: true,
+          onError: this.handleMediaError,
+        }, [h("source", source)]),
       ]);
     },
   };
 
   ctx.registerPreview({
-    supportedExtensions: [...imagePreviewExtensions, ...videoPreviewExtensions, ...audioPreviewExtensions],
+    supportedExtensions: [...imagePreviewExtensions, ...videoPreviewExtensions],
     component: MediaPreviewPlugin,
   });
-
-  function createPlaylistRuntime(controller, kind) {
-    const settings = {
-      imageDurationMs: 5000,
-      objectFit: "contain",
-    };
-    let currentItem = null;
-    let currentTimeMs = 0;
-    let durationMs = kind === "image" ? settings.imageDurationMs : 0;
-    let isPlaying = false;
-    let timer = null;
-    let mediaElement = null;
-    let imageElement = null;
-    let frameElement = null;
-    let lyricLines = [];
-    let lyricViewport = null;
-    let lyricItems = [];
-
-    function normalizeImageDurationMs(value) {
-      if (!Number.isFinite(value)) return 5000;
-      return Math.min(30000, Math.max(2000, Math.round(value)));
-    }
-
-    function normalizeObjectFit(value) {
-      return value === "cover" ? "cover" : "contain";
-    }
-
-    function imageDurationMs() {
-      return normalizeImageDurationMs(settings.imageDurationMs);
-    }
-
-    function objectFit() {
-      return normalizeObjectFit(settings.objectFit);
-    }
-
-    function emitState(extra = {}) {
-      controller.onEvent({
-        type: "state",
-        canPlay: Boolean(currentItem),
-        isPlaying,
-        ...extra,
-      });
-    }
-
-    function emitTime() {
-      controller.onEvent({
-        type: "time",
-        currentTimeMs,
-        durationMs,
-      });
-    }
-
-    function applyObjectFit() {
-      if (imageElement) imageElement.style.objectFit = objectFit();
-      if (mediaElement && kind === "video") mediaElement.style.objectFit = objectFit();
-    }
-
-    function buildFrame() {
-      const element = document.createElement("div");
-      element.className = `media-playlist-runtime media-playlist-runtime--${kind}`;
-      return element;
-    }
-
-    function clearMountTarget() {
-      controller.mountTarget.replaceChildren();
-      mediaElement = null;
-      imageElement = null;
-      frameElement = null;
-    }
-
-    function stopTimer() {
-      if (timer) {
-        clearInterval(timer);
-        timer = null;
-      }
-    }
-
-    function startTimer() {
-      stopTimer();
-      if (durationMs <= 0) return;
-      timer = setInterval(() => {
-        currentTimeMs += 1000;
-        if (currentTimeMs >= durationMs) {
-          currentTimeMs = durationMs;
-          isPlaying = false;
-          stopTimer();
-          emitTime();
-          emitState();
-          controller.onEvent({ type: "ended" });
-          return;
-        }
-        emitTime();
-      }, 1000);
-    }
-
-    function syncMediaTime() {
-      if (!mediaElement) return;
-      currentTimeMs = Math.round((mediaElement.currentTime ?? 0) * 1000);
-      durationMs = Number.isFinite(mediaElement.duration) ? Math.round(mediaElement.duration * 1000) : durationMs;
-      updateRuntimeLyrics();
-      emitTime();
-    }
-
-    function syncMediaState() {
-      if (!mediaElement) return;
-      isPlaying = !mediaElement.paused;
-      emitState();
-    }
-
-    function createMediaNode(tagName, sourceUrl, mediaType) {
-      const element = document.createElement(tagName);
-      element.className = tagName === "video"
-        ? "media-preview__video media-playlist-runtime__media"
-        : "media-preview__audio-control media-playlist-runtime__media";
-      element.controls = false;
-      element.preload = "metadata";
-      element.src = sourceUrl;
-      if (tagName === "video") {
-        element.playsInline = true;
-      }
-      element.dataset.mediaType = mediaType ?? "";
-      element.addEventListener("loadedmetadata", () => {
-        durationMs = Number.isFinite(element.duration) ? Math.round(element.duration * 1000) : 0;
-        emitTime();
-        emitState();
-      });
-      element.addEventListener("timeupdate", syncMediaTime);
-      element.addEventListener("play", syncMediaState);
-      element.addEventListener("pause", syncMediaState);
-      element.addEventListener("ended", () => {
-        isPlaying = false;
-        syncMediaTime();
-        emitState();
-        controller.onEvent({ type: "ended" });
-      });
-      element.addEventListener("error", () => {
-        controller.onEvent({ type: "error", message: "媒体无法播放" });
-      });
-      applyObjectFit();
-      return element;
-    }
-
-    function createAudioArtwork(item) {
-      const wrapper = document.createElement("div");
-      wrapper.className = "media-preview__audio-art media-playlist-runtime__audio-art";
-      const artworkUrl = item.thumbnailPath ? resolveArtworkUrl(item.thumbnailPath, ctx.fileSrc) : sourcePayloadString(item, "coverUrl");
-      if (artworkUrl) {
-        const cover = document.createElement("img");
-        cover.className = "media-preview__audio-cover";
-        cover.src = artworkUrl;
-        cover.alt = "";
-        wrapper.append(cover);
-      } else {
-        const chip = document.createElement("span");
-        chip.className = "media-preview__audio-chip";
-        chip.textContent = mediaKindLabel("audio");
-        wrapper.append(chip);
-      }
-      return wrapper;
-    }
-
-    function createAudioStage(item) {
-      const stage = document.createElement("section");
-      stage.className = "media-preview__audio-stage";
-      stage.setAttribute("aria-label", "音频封面");
-      const record = document.createElement("div");
-      record.className = "media-preview__audio-record";
-      record.append(createAudioArtwork(item));
-      const caption = document.createElement("div");
-      caption.className = "media-preview__audio-caption";
-      const title = document.createElement("h2");
-      title.textContent = displayNameWithoutExtension(item.filename ?? "", item.extension);
-      const path = document.createElement("p");
-      path.textContent = item.path ?? "";
-      const meta = document.createElement("div");
-      meta.className = "media-preview__audio-meta";
-      const extension = document.createElement("span");
-      extension.textContent = mediaKindLabel("audio");
-      meta.append(extension);
-      caption.append(title, path, meta);
-      stage.append(record, caption);
-      return stage;
-    }
-
-    function resetRuntimeLyrics() {
-      lyricLines = [];
-      lyricViewport = null;
-      lyricItems = [];
-    }
-
-    function createLyricsViewport() {
-      lyricViewport = document.createElement("div");
-      lyricViewport.className = "media-preview__audio-lyrics media-preview__audio-lyrics--empty media-playlist-runtime__lyrics";
-      lyricViewport.textContent = "读取歌词...";
-      return lyricViewport;
-    }
-
-    function runtimeLyricsInset() {
-      return Math.max(96, Math.floor((lyricViewport?.clientHeight ?? 0) / 2));
-    }
-
-    function renderRuntimeLyrics(lines) {
-      if (!lyricViewport) return;
-      lyricViewport.replaceChildren();
-      lyricItems = [];
-      if (!lines.length) {
-        lyricViewport.className = "media-preview__audio-lyrics media-preview__audio-lyrics--empty media-playlist-runtime__lyrics";
-        const placeholder = document.createElement("span");
-        placeholder.textContent = "暂无歌词";
-        lyricViewport.append(placeholder);
-        return;
-      }
-      lyricViewport.className = "media-preview__audio-lyrics media-playlist-runtime__lyrics";
-      const track = document.createElement("div");
-      track.className = "media-preview__audio-lyrics-track";
-      track.style.setProperty("--lyrics-inset", `${runtimeLyricsInset()}px`);
-      for (const [index, line] of lines.entries()) {
-        const button = document.createElement("button");
-        button.type = "button";
-        button.className = [
-          "media-preview__audio-lyric",
-          line.timeMs == null ? "" : "is-timed",
-        ].filter(Boolean).join(" ");
-        button.disabled = line.timeMs == null;
-        button.textContent = line.text;
-        button.addEventListener("click", () => {
-          if (line.timeMs == null || !mediaElement) return;
-          mediaElement.currentTime = line.timeMs / 1000;
-          syncMediaTime();
-        });
-        lyricItems[index] = button;
-        track.append(button);
-      }
-      lyricViewport.append(track);
-      updateRuntimeLyrics();
-    }
-
-    async function loadRuntimeLyrics(item, playback = null) {
-      if (kind !== "audio") return;
-      try {
-        if (playback?.lyricSourceUrl || playback?.lyricPath) {
-          const text = await readLocalTextFile(
-            playback.lyricSourceUrl || ctx.fileSrc(playback.lyricPath),
-          );
-          lyricLines = parseLrcLyrics(text);
-        } else {
-          const bytes = await ctx.readFile({
-            repoId: controller.repoId,
-            path: siblingLrcPath(item.path),
-          });
-          lyricLines = parseLrcLyrics(decodeTextBytes(Uint8Array.from(bytes)));
-        }
-      } catch {
-        lyricLines = [];
-      }
-      renderRuntimeLyrics(lyricLines);
-    }
-
-    function updateRuntimeLyrics() {
-      if (kind !== "audio" || !lyricLines.length || !lyricViewport) return;
-      const activeIndex = findActiveLyricIndex(lyricLines, currentTimeMs);
-      for (const [index, item] of lyricItems.entries()) {
-        if (!item) continue;
-        item.classList.toggle("is-active", index === activeIndex);
-        item.classList.toggle("is-passed", activeIndex > index);
-      }
-      const activeItem = activeIndex >= 0 ? lyricItems[activeIndex] : null;
-      if (!activeItem) return;
-      const top = activeItem.offsetTop - (lyricViewport.clientHeight / 2) + (activeItem.clientHeight / 2);
-      lyricViewport.scrollTop = Math.max(0, top);
-    }
-
-    function createAudioShell(item, mediaNode) {
-      const wrapper = document.createElement("div");
-      wrapper.className = "media-preview media-preview--audio media-playlist-runtime__audio-shell";
-      const layout = document.createElement("div");
-      layout.className = "media-preview__audio-layout media-playlist-runtime__audio-layout";
-      const info = document.createElement("section");
-      info.className = "media-preview__audio-info media-playlist-runtime__audio-info";
-      info.setAttribute("aria-label", "歌词");
-      const panel = document.createElement("section");
-      panel.className = "media-preview__audio-panel media-playlist-runtime__audio-panel";
-      panel.setAttribute("aria-label", "歌词面板");
-      panel.append(createLyricsViewport());
-      info.append(panel);
-      const controlBar = document.createElement("div");
-      controlBar.className = "media-preview__audio-control-bar";
-      controlBar.append(mediaNode);
-      layout.append(createAudioStage(item), info);
-      wrapper.append(layout, controlBar);
-      return wrapper;
-    }
-
-    function mountNode(node) {
-      frameElement = buildFrame();
-      frameElement.append(node);
-      controller.mountTarget.replaceChildren(frameElement);
-      applyObjectFit();
-    }
-
-    function clampProgress(value) {
-      return Math.max(0, Math.min(100, Math.round(Number(value) || 0)));
-    }
-
-    function createProgressNode(item) {
-      const wrapper = document.createElement("div");
-      wrapper.className = "media-playlist-runtime__loading";
-      const title = document.createElement("strong");
-      title.textContent = item.name || item.filename || "准备播放";
-      const detail = document.createElement("span");
-      detail.className = "media-playlist-runtime__loading-detail";
-      detail.textContent = "准备媒体";
-      const bar = document.createElement("div");
-      bar.className = "media-preview__download-progress media-preview__download-progress--indeterminate";
-      bar.setAttribute("role", "progressbar");
-      bar.setAttribute("aria-label", "下载进度");
-      bar.setAttribute("aria-valuemin", "0");
-      bar.setAttribute("aria-valuemax", "100");
-      const fill = document.createElement("span");
-      fill.style.width = "0%";
-      bar.append(fill);
-      wrapper.append(title, detail, bar);
-      return {
-        node: wrapper,
-        update(event) {
-          const value = clampProgress(event.value);
-          detail.textContent = event.detail || detail.textContent;
-          bar.classList.toggle("media-preview__download-progress--indeterminate", Boolean(event.indeterminate));
-          if (event.indeterminate) {
-            bar.removeAttribute("aria-valuenow");
-          } else {
-            bar.setAttribute("aria-valuenow", String(value));
-          }
-          fill.style.width = `${value}%`;
-        },
-      };
-    }
-
-    async function prepareSource(item, onProgress = null) {
-      const request = {
-        repoId: controller.repoId,
-        path: item.path,
-      };
-      const response = ctx.prepareEntryPlaybackSourceWithProgress
-        ? await ctx.prepareEntryPlaybackSourceWithProgress(request, (event) => {
-            if (event.path !== item.path) return;
-            onProgress?.(event);
-            controller.onEvent({
-              type: "state",
-              canPlay: false,
-              isPlaying: false,
-              loading: true,
-              progress: event,
-            });
-          })
-        : await ctx.prepareEntryPlaybackSource(request);
-      const sourceUrl = response.sourceUrl
-        || (response.localPath ? ctx.fileSrc(response.localPath) : null);
-      if (!sourceUrl) {
-        throw new Error("媒体播放源不可用");
-      }
-      return {
-        ...response,
-        sourceUrl,
-      };
-    }
-
-    return {
-      async load(item) {
-        currentItem = item;
-        currentTimeMs = 0;
-        durationMs = kind === "image" ? imageDurationMs() : 0;
-        isPlaying = false;
-        stopTimer();
-        clearMountTarget();
-        resetRuntimeLyrics();
-
-        try {
-          const progress = createProgressNode(item);
-          mountNode(progress.node);
-          const response = await prepareSource(item, (event) => progress.update(event));
-          if (kind === "image") {
-            imageElement = document.createElement("img");
-            imageElement.className = "media-preview__image media-playlist-runtime__media";
-            imageElement.src = response.sourceUrl;
-            imageElement.alt = item.filename;
-            imageElement.dataset.path = item.path;
-            imageElement.addEventListener("error", () => {
-              controller.onEvent({ type: "error", message: "图片无法播放" });
-            });
-            mountNode(imageElement);
-          } else {
-            mediaElement = createMediaNode(kind === "video" ? "video" : "audio", response.sourceUrl, response.mediaType);
-            mediaElement.dataset.path = item.path;
-            mountNode(kind === "audio" ? createAudioShell(item, mediaElement) : mediaElement);
-            if (kind === "audio") {
-              void loadRuntimeLyrics(item, response);
-            }
-          }
-        } catch (cause) {
-          currentItem = null;
-          controller.onEvent({
-            type: "error",
-            message: cause instanceof Error ? cause.message : "媒体播放源不可用",
-          });
-          return;
-        }
-        emitState();
-        emitTime();
-      },
-      async play() {
-        if (!currentItem) return;
-        if (kind === "image") {
-          isPlaying = true;
-          emitState();
-          startTimer();
-          return;
-        }
-        if (!mediaElement) {
-          emitState();
-          return;
-        }
-        try {
-          await mediaElement.play();
-        } catch (error) {
-          isPlaying = false;
-          emitState();
-          controller.onEvent({
-            type: "error",
-            message: error instanceof Error ? error.message : "媒体无法播放",
-          });
-        }
-      },
-      pause() {
-        isPlaying = false;
-        if (kind === "image") {
-          stopTimer();
-          emitState();
-          return;
-        }
-        mediaElement?.pause();
-      },
-      seek(timeMs) {
-        const requestedMs = Math.max(0, Math.round(timeMs));
-        currentTimeMs = durationMs > 0 ? Math.min(durationMs, requestedMs) : requestedMs;
-        if (kind === "image") {
-          emitTime();
-          return;
-        }
-        if (!mediaElement) return;
-        mediaElement.currentTime = currentTimeMs / 1000;
-        updateRuntimeLyrics();
-        emitTime();
-      },
-      configure(nextSettings = {}) {
-        if (nextSettings.imageDurationMs !== undefined) {
-          settings.imageDurationMs = normalizeImageDurationMs(Number(nextSettings.imageDurationMs));
-        }
-        if (nextSettings.objectFit !== undefined) {
-          settings.objectFit = normalizeObjectFit(nextSettings.objectFit);
-        }
-        applyObjectFit();
-        if (kind === "image") {
-          const previousDurationMs = durationMs;
-          durationMs = imageDurationMs();
-          currentTimeMs = Math.min(currentTimeMs, durationMs);
-          if (previousDurationMs !== durationMs) {
-            emitTime();
-          }
-          if (isPlaying) startTimer();
-        }
-      },
-      setVolume(value) {
-        if (!mediaElement) return;
-        mediaElement.volume = Math.max(0, Math.min(1, value));
-      },
-      dispose() {
-        stopTimer();
-        if (mediaElement) {
-          mediaElement.pause();
-          mediaElement.src = "";
-        }
-        clearMountTarget();
-      },
-    };
-  }
 
   ctx.registerPlaylistPlayer({
     playerTypeId: "momobako.playlist.image-slideshow",
@@ -884,21 +116,7 @@ export function register(ctx) {
     supportsPreviewNavigation: true,
     description: "按顺序展示图片并交由宿主处理队列模式。",
     createRuntime(controller) {
-      return createPlaylistRuntime(controller, "image");
-    },
-  });
-
-  ctx.registerPlaylistPlayer({
-    playerTypeId: "momobako.playlist.audio-sequence",
-    label: "音频顺序播放",
-    fileClass: "audio",
-    supportedExtensions: audioPreviewExtensions,
-    supportsSeek: true,
-    supportsVolume: true,
-    supportsPreviewNavigation: true,
-    description: "复用媒体能力播放音频队列。",
-    createRuntime(controller) {
-      return createPlaylistRuntime(controller, "audio");
+      return createVisualPlaylistRuntime(ctx, controller, "image");
     },
   });
 
@@ -912,109 +130,261 @@ export function register(ctx) {
     supportsPreviewNavigation: true,
     description: "复用媒体能力播放视频队列。",
     createRuntime(controller) {
-      return createPlaylistRuntime(controller, "video");
+      return createVisualPlaylistRuntime(ctx, controller, "video");
     },
   });
 }
 
-function siblingLrcPath(path) {
-  const extensionIndex = path.lastIndexOf(".");
-  return extensionIndex >= 0 ? `${path.slice(0, extensionIndex)}.lrc` : `${path}.lrc`;
-}
+/** 创建图片或视频播放列表运行时。 */
+function createVisualPlaylistRuntime(ctx, controller, kind) {
+  const settings = { imageDurationMs: 5000, objectFit: "contain" };
+  let currentItem = null;
+  let currentTimeMs = 0;
+  let durationMs = kind === "image" ? settings.imageDurationMs : 0;
+  let isPlaying = false;
+  let timer = null;
+  let mediaElement = null;
+  let imageElement = null;
 
-function mediaKindLabel(mediaKind) {
-  if (mediaKind === "image") return "图片";
-  if (mediaKind === "video") return "视频";
-  return "音频";
-}
-
-function displayNameWithoutExtension(name, extension) {
-  const normalizedName = typeof name === "string" ? name.trim() : "";
-  const normalizedExtension = typeof extension === "string" ? extension.trim() : "";
-  if (!normalizedName || !normalizedExtension) return normalizedName;
-  const suffix = `.${normalizedExtension}`;
-  return normalizedName.toLowerCase().endsWith(suffix.toLowerCase())
-    ? normalizedName.slice(0, -suffix.length)
-    : normalizedName;
-}
-
-function sourcePayloadString(entry, key) {
-  const value = entry?.sourcePayload?.[key];
-  return typeof value === "string" && value.trim() ? value.trim() : null;
-}
-
-function resolveArtworkUrl(path, fileSrc) {
-  if (!path) return "";
-  if (/^https?:\/\//i.test(path)) return path;
-  return fileSrc(path);
-}
-
-function decodeTextBytes(bytes) {
-  if (bytes.length >= 3 && bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) {
-    return new TextDecoder("utf-8").decode(bytes.slice(3));
+  function emitState(extra = {}) {
+    controller.onEvent({ type: "state", canPlay: Boolean(currentItem), isPlaying, ...extra });
   }
-  return new TextDecoder("utf-8").decode(bytes);
-}
-
-async function readLocalTextFile(sourceUrl) {
-  const response = await fetch(sourceUrl);
-  if (!response.ok) {
-    throw new Error(`failed to read local text file: ${response.status}`);
+  function emitTime() {
+    controller.onEvent({ type: "time", currentTimeMs, durationMs });
   }
-  return response.text();
-}
+  function stopTimer() {
+    if (!timer) return;
+    clearInterval(timer);
+    timer = null;
+  }
+  function startTimer() {
+    stopTimer();
+    timer = setInterval(() => {
+      currentTimeMs = Math.min(durationMs, currentTimeMs + 1000);
+      emitTime();
+      if (currentTimeMs < durationMs) return;
+      isPlaying = false;
+      stopTimer();
+      emitState();
+      controller.onEvent({ type: "ended" });
+    }, 1000);
+  }
+  function applyObjectFit() {
+    if (imageElement) imageElement.style.objectFit = settings.objectFit;
+    if (mediaElement) mediaElement.style.objectFit = settings.objectFit;
+  }
+  function clearTarget() {
+    controller.mountTarget.replaceChildren();
+    mediaElement = null;
+    imageElement = null;
+  }
+  function mount(node) {
+    const frame = document.createElement("div");
+    frame.className = `media-playlist-runtime media-playlist-runtime--${kind}`;
+    frame.append(node);
+    controller.mountTarget.replaceChildren(frame);
+    applyObjectFit();
+  }
+  function createVideo(sourceUrl, mediaType) {
+    const element = document.createElement("video");
+    element.className = "media-preview__video media-playlist-runtime__media";
+    element.controls = false;
+    element.preload = "metadata";
+    element.playsInline = true;
+    element.src = sourceUrl;
+    element.dataset.mediaType = mediaType ?? "";
+    element.addEventListener("loadedmetadata", () => {
+      durationMs = Number.isFinite(element.duration) ? Math.round(element.duration * 1000) : 0;
+      emitTime();
+      emitState();
+    });
+    element.addEventListener("timeupdate", () => {
+      currentTimeMs = Math.round((element.currentTime ?? 0) * 1000);
+      durationMs = Number.isFinite(element.duration) ? Math.round(element.duration * 1000) : durationMs;
+      emitTime();
+    });
+    element.addEventListener("play", () => { isPlaying = true; emitState(); });
+    element.addEventListener("pause", () => { isPlaying = false; emitState(); });
+    element.addEventListener("ended", () => {
+      isPlaying = false;
+      emitState();
+      controller.onEvent({ type: "ended" });
+    });
+    element.addEventListener("error", () => controller.onEvent({ type: "error", message: "视频无法播放" }));
+    return element;
+  }
 
-function parseLrcLyrics(text) {
-  const normalized = text.replace(/\r\n?/g, "\n");
-  const rawLines = normalized
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean);
-
-  const parsed = [];
-  for (const rawLine of rawLines) {
-    const timeTags = [...rawLine.matchAll(/\[(\d{1,2}):(\d{1,2})(?:[.:](\d{1,3}))?\]/g)];
-    const plainText = rawLine.replace(/\[(\d{1,2}):(\d{1,2})(?:[.:](\d{1,3}))?\]/g, "").trim();
-    if (timeTags.length > 0) {
-      const textValue = plainText || "…";
-      for (const [index, tag] of timeTags.entries()) {
-        parsed.push({
-          id: `${tag[0]}-${parsed.length}-${index}`,
-          text: textValue,
-          timeMs: timestampToMs(tag[1], tag[2], tag[3]),
+  return {
+    async load(item) {
+      currentItem = item;
+      currentTimeMs = 0;
+      durationMs = kind === "image" ? normalizeImageDuration(settings.imageDurationMs) : 0;
+      isPlaying = false;
+      stopTimer();
+      clearTarget();
+      try {
+        const progress = createProgressNode(item);
+        mount(progress.node);
+        const response = await prepareSource(ctx, controller.repoId, item.path, progress.update);
+        if (kind === "image") {
+          imageElement = document.createElement("img");
+          imageElement.className = "media-preview__image media-playlist-runtime__media";
+          imageElement.src = response.sourceUrl;
+          imageElement.alt = item.filename;
+          imageElement.dataset.path = item.path;
+          imageElement.addEventListener("error", () => controller.onEvent({ type: "error", message: "图片无法播放" }));
+          mount(imageElement);
+        } else {
+          mediaElement = createVideo(response.sourceUrl, response.mediaType);
+          mediaElement.dataset.path = item.path;
+          mount(mediaElement);
+        }
+      } catch (cause) {
+        currentItem = null;
+        const message = errorText(cause, "媒体播放源不可用");
+        void ctx.logger.error("播放列表媒体源准备失败。", {
+          action: "playlist.prepareSource",
+          repoId: controller.repoId,
+          context: { path: item.path, message },
         });
+        controller.onEvent({ type: "error", message });
+        return;
       }
-      continue;
-    }
-    if (plainText) {
-      parsed.push({
-        id: `plain-${parsed.length}`,
-        text: plainText,
-        timeMs: null,
-      });
-    }
-  }
-  return parsed.sort((left, right) => {
-    if (left.timeMs == null && right.timeMs == null) return 0;
-    if (left.timeMs == null) return 1;
-    if (right.timeMs == null) return -1;
-    return left.timeMs - right.timeMs;
-  });
+      emitState();
+      emitTime();
+    },
+    async play() {
+      if (!currentItem) return;
+      if (kind === "image") {
+        isPlaying = true;
+        emitState();
+        startTimer();
+        return;
+      }
+      try {
+        await mediaElement?.play();
+      } catch (cause) {
+        const message = errorText(cause, "视频无法播放");
+        isPlaying = false;
+        emitState();
+        controller.onEvent({ type: "error", message });
+      }
+    },
+    pause() {
+      isPlaying = false;
+      if (kind === "image") {
+        stopTimer();
+        emitState();
+      } else {
+        mediaElement?.pause();
+      }
+    },
+    seek(timeMs) {
+      currentTimeMs = durationMs > 0 ? Math.min(durationMs, Math.max(0, Math.round(timeMs))) : Math.max(0, Math.round(timeMs));
+      if (kind === "video" && mediaElement) mediaElement.currentTime = currentTimeMs / 1000;
+      emitTime();
+    },
+    configure(next = {}) {
+      settings.imageDurationMs = normalizeImageDuration(next.imageDurationMs ?? settings.imageDurationMs);
+      settings.objectFit = next.objectFit === "cover" ? "cover" : "contain";
+      applyObjectFit();
+      if (kind === "image") {
+        durationMs = settings.imageDurationMs;
+        currentTimeMs = Math.min(currentTimeMs, durationMs);
+        emitTime();
+        if (isPlaying) startTimer();
+      }
+    },
+    setVolume(value) {
+      if (mediaElement) mediaElement.volume = Math.max(0, Math.min(1, value));
+    },
+    dispose() {
+      stopTimer();
+      if (mediaElement) {
+        mediaElement.pause();
+        mediaElement.src = "";
+      }
+      clearTarget();
+    },
+  };
 }
 
-function timestampToMs(minutes, seconds, fraction) {
-  const minuteValue = Number.parseInt(minutes, 10);
-  const secondValue = Number.parseInt(seconds, 10);
-  const fractionValue = fraction ? Number.parseInt(fraction.padEnd(3, "0").slice(0, 3), 10) : 0;
-  return (minuteValue * 60 * 1000) + (secondValue * 1000) + fractionValue;
+function createInitialProgress() {
+  return { value: 6, detail: "准备媒体", indeterminate: true, cached: null };
 }
 
-function findActiveLyricIndex(lines, playbackMs) {
-  let index = -1;
-  for (let cursor = 0; cursor < lines.length; cursor += 1) {
-    const line = lines[cursor];
-    if (line.timeMs == null || line.timeMs > playbackMs) continue;
-    index = cursor;
-  }
-  return index;
+function progressState(previous, event) {
+  return {
+    value: event.value ?? previous.value,
+    detail: event.detail || previous.detail,
+    indeterminate: Boolean(event.indeterminate),
+    cached: event.cached ?? previous.cached,
+  };
+}
+
+/** 通过宿主统一播放源路由准备媒体，插件不感知具体来源协议。 */
+async function prepareSource(ctx, repoId, path, onProgress) {
+  const request = { repoId, path };
+  const response = ctx.prepareEntryPlaybackSourceWithProgress
+    ? await ctx.prepareEntryPlaybackSourceWithProgress(request, (event) => {
+        if (event.path !== path) return;
+        onProgress?.(event);
+      })
+    : await ctx.prepareEntryPlaybackSource(request);
+  const sourceUrl = response.sourceUrl || (response.localPath ? ctx.fileSrc(response.localPath) : null);
+  if (!sourceUrl) throw new Error("媒体播放源不可用");
+  return { ...response, sourceUrl };
+}
+
+function renderLoading(h, progress) {
+  const value = Math.max(0, Math.min(100, Math.round(progress.value || 0)));
+  return h("div", { class: "media-preview__status" }, [
+    h("span", progress.cached ? "读取缓存" : "准备播放"),
+    h("span", progress.detail || "建立预览流"),
+    h("div", {
+      class: ["media-preview__download-progress", { "media-preview__download-progress--indeterminate": progress.indeterminate }],
+      role: "progressbar",
+      "aria-label": "下载进度",
+      "aria-valuemin": 0,
+      "aria-valuemax": 100,
+      "aria-valuenow": progress.indeterminate ? undefined : value,
+    }, [h("span", { style: { width: `${value}%` } })]),
+    progress.indeterminate ? null : h("span", `${value}%`),
+  ]);
+}
+
+function createProgressNode(item) {
+  const node = document.createElement("div");
+  node.className = "media-playlist-runtime__loading";
+  const title = document.createElement("strong");
+  title.textContent = item.name || item.filename || "准备播放";
+  const detail = document.createElement("span");
+  detail.className = "media-playlist-runtime__loading-detail";
+  detail.textContent = "准备媒体";
+  const bar = document.createElement("div");
+  bar.className = "media-preview__download-progress media-preview__download-progress--indeterminate";
+  bar.setAttribute("role", "progressbar");
+  bar.setAttribute("aria-label", "下载进度");
+  const fill = document.createElement("span");
+  fill.style.width = "0%";
+  bar.append(fill);
+  node.append(title, detail, bar);
+  return {
+    node,
+    update(event) {
+      const value = Math.max(0, Math.min(100, Math.round(Number(event.value) || 0)));
+      detail.textContent = event.detail || detail.textContent;
+      bar.classList.toggle("media-preview__download-progress--indeterminate", Boolean(event.indeterminate));
+      fill.style.width = `${value}%`;
+    },
+  };
+}
+
+function normalizeImageDuration(value) {
+  if (!Number.isFinite(Number(value))) return 5000;
+  return Math.min(30000, Math.max(2000, Math.round(Number(value))));
+}
+
+function errorText(cause, fallback) {
+  return cause instanceof Error ? cause.message : fallback;
 }

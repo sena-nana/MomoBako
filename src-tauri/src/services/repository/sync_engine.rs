@@ -133,53 +133,6 @@ fn directory_updated_at(repo_root: &Path, path: &str) -> Result<String, String> 
     Ok(updated_at)
 }
 
-pub(super) fn metadata_defaults_for_files(
-    service_root: &Path,
-    files: &[DiscoveredFile],
-    existing_metadata_by_path: &BTreeMap<String, BTreeMap<String, serde_json::Value>>,
-) -> Result<BTreeMap<String, BTreeMap<String, serde_json::Value>>, String> {
-    if files.is_empty() {
-        return Ok(BTreeMap::new());
-    }
-
-    let registry = plugin_catalog(service_root);
-    let providers = registry.metadata_default_providers();
-    if providers.is_empty() {
-        return Ok(BTreeMap::new());
-    }
-
-    let entries = files
-        .iter()
-        .map(|file| MetadataDefaultsBatchEntry {
-            path: file.relative_path.clone(),
-            name: file.filename.clone(),
-            extension: file.extension.clone(),
-            kind: "file".to_string(),
-            metadata: existing_metadata_by_path.get(&file.relative_path).cloned(),
-        })
-        .collect::<Vec<_>>();
-    let known_paths = files
-        .iter()
-        .map(|file| file.relative_path.clone())
-        .collect::<std::collections::BTreeSet<_>>();
-    let payload = serde_json::json!({ "entries": entries });
-    let mut defaults_by_path = BTreeMap::<String, BTreeMap<String, serde_json::Value>>::new();
-
-    for (plugin_id, action) in providers {
-        let response = registry.call(&plugin_id, &action, payload.clone())?;
-        let parsed = serde_json::from_value::<MetadataDefaultsBatchResponse>(response)
-            .map_err(json_error)?;
-        for (path, defaults) in parsed.defaults_by_path {
-            if !known_paths.contains(&path) {
-                continue;
-            }
-            defaults_by_path.entry(path).or_default().extend(defaults);
-        }
-    }
-
-    Ok(defaults_by_path)
-}
-
 #[derive(Debug, Default)]
 pub(super) struct AssetSyncApplyResult {
     pub(super) created_assets: i64,
@@ -731,15 +684,20 @@ pub(super) fn sync_repository_files(
             "existingAssets": existing_metadata_by_path.len(),
         }),
     );
-    let plugin_defaults_by_path =
-        metadata_defaults_for_files(service_root, &files, &existing_metadata_by_path).map_err(
-            |error| {
-                rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    error,
-                )))
-            },
-        )?;
+    let source_metadata_keys =
+        source_metadata_mirror_keys(service_root, &repo.backend_record.plugin_id);
+    let plugin_defaults_by_path = metadata_defaults_for_files(
+        service_root,
+        &files,
+        &existing_metadata_by_path,
+        &source_metadata_keys,
+    )
+    .map_err(|error| {
+        rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            error,
+        )))
+    })?;
     cancellation.checkpoint().map_err(cancellation_sql_error)?;
     write_sync_log(
         &repo.summary.repo_id,
@@ -750,8 +708,6 @@ pub(super) fn sync_repository_files(
             "defaultPathCount": plugin_defaults_by_path.len(),
         }),
     );
-    let source_metadata_keys =
-        source_metadata_mirror_keys(service_root, &repo.backend_record.plugin_id);
     let mut existing_by_path = existing
         .into_iter()
         .map(|(_asset_id, path, record)| (path, record))

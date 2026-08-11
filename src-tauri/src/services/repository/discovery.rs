@@ -132,6 +132,13 @@ pub(super) struct MetadataDefaultsBatchEntry {
     pub(super) extension: String,
     pub(super) kind: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) provider_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) provider_item_id: Option<String>,
+    /// 来源元数据必须由宿主按 Source 清单白名单投影，禁止透传原始载荷。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) source_metadata: Option<BTreeMap<String, serde_json::Value>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) metadata: Option<BTreeMap<String, serde_json::Value>>,
 }
 

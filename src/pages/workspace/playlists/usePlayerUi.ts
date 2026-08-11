@@ -42,6 +42,7 @@ export function playlistItemToFileEntry(item: PlaylistItem) {
     providerId: item.providerId,
     providerItemId: item.providerItemId,
     sourcePayload: item.sourcePayload,
+    metadata: item.metadata ?? undefined,
     localAbsolutePath: item.localAbsolutePath,
   };
 }

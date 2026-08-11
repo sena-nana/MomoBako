@@ -69,11 +69,15 @@ pub(super) fn sync_repository_changed_paths(
                 .map(|metadata| (path.clone(), metadata))
         })
         .collect::<BTreeMap<_, _>>();
-    let plugin_defaults_by_path =
-        metadata_defaults_for_files(service_root, &files, &existing_metadata_by_path)
-            .map_err(sync_sql_error)?;
     let source_metadata_keys =
         source_metadata_mirror_keys(service_root, &repo.backend_record.plugin_id);
+    let plugin_defaults_by_path = metadata_defaults_for_files(
+        service_root,
+        &files,
+        &existing_metadata_by_path,
+        &source_metadata_keys,
+    )
+    .map_err(sync_sql_error)?;
     let mut existing_by_path = existing
         .into_iter()
         .map(|(_asset_id, path, record)| (path, record))

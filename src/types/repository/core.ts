@@ -18,6 +18,12 @@ export type RepositoryLocalCacheStatus = {
   status: "ready" | "missing" | "unconfigured";
 };
 
+export type RepositoryAuthenticationStatus = {
+  required: boolean;
+  loggedIn: boolean;
+  loginExpired: boolean;
+};
+
 export type RepositorySummary = {
   repoId: string;
   name: string;
@@ -27,6 +33,7 @@ export type RepositorySummary = {
   assetCount: number;
   updatedAt: string;
   localCache?: RepositoryLocalCacheStatus | null;
+  authentication?: RepositoryAuthenticationStatus | null;
 };
 
 export type AssetSummary = {
@@ -114,6 +121,7 @@ export type PlaylistItem = {
   providerId?: string | null;
   providerItemId?: string | null;
   sourcePayload?: Record<string, unknown> | null;
+  metadata?: Record<string, unknown> | null;
   localAbsolutePath?: string | null;
 };
 
@@ -538,23 +546,30 @@ export type RepositoryBackendConfigUpdateRequest = {
   backendConfig: Record<string, unknown>;
 };
 
-export type NeteaseRepositoryCacheConfigureRequest = {
+export type SourceRepositoryCacheConfigureRequest = {
   repoId: string;
   path: string;
   migrateLegacyCache?: boolean;
 };
 
-export type NeteaseRepositoryCacheMigrationSummary = {
+export type SourceRepositoryCacheMigrationSummary = {
   movedStateFiles: number;
   migratedPlaybackCacheFiles: number;
   skippedPlaybackCacheFiles: number;
   failedPlaybackCacheFiles: number;
 };
 
-export type NeteaseRepositoryCacheConfigureResponse = {
+export type SourceRepositoryCacheConfigureResponse = {
   repository: RepositorySummary;
-  migration: NeteaseRepositoryCacheMigrationSummary;
+  migration: SourceRepositoryCacheMigrationSummary;
 };
+
+/** @deprecated 使用通用 Source 缓存契约。 */
+export type NeteaseRepositoryCacheConfigureRequest = SourceRepositoryCacheConfigureRequest;
+/** @deprecated 使用通用 Source 缓存契约。 */
+export type NeteaseRepositoryCacheMigrationSummary = SourceRepositoryCacheMigrationSummary;
+/** @deprecated 使用通用 Source 缓存契约。 */
+export type NeteaseRepositoryCacheConfigureResponse = SourceRepositoryCacheConfigureResponse;
 
 export type RepositoryExportTarget = "archive" | "git";
 
@@ -689,6 +704,7 @@ export type SystemLogWriteRequest = {
 export type PluginCallRequest = {
   pluginId: string;
   method: string;
+  repositoryId?: string;
   payload?: Record<string, unknown>;
 };
 
@@ -711,6 +727,7 @@ export type DownloaderPlaylistTrackRequest = {
 };
 
 export type DownloaderPlaylistRequest = {
+  sourceRepositoryId?: string | null;
   playlistId: number;
   playlistName?: string;
   tracks: DownloaderPlaylistTrackRequest[];
@@ -1381,6 +1398,8 @@ export type CacheSnapshot = {
 
 export type PlaylistPlayerContribution = {
   playerTypeId: string;
+  /** 可由多个插件共同实现的稳定能力标识。 */
+  capabilityId?: string;
   label: string;
   fileClass: PlaylistFileClass;
   supportedExtensions: string[];
@@ -1425,6 +1444,54 @@ export type PluginSettingsContribution = {
   schemaVersion?: number;
   fields?: PluginConfigField[];
   settingsPage?: PluginSettingsPageContribution;
+};
+
+export type SourceAuthenticationContribution = {
+  kind: "qr" | string;
+  createSessionMethod: string;
+  pollSessionMethod: string;
+  statusMethod: string;
+  clearMethod: string;
+  repositoryProvisioning?: {
+    sourceUriScheme: string;
+    repoIdPrefix: string;
+    requiresLocalCache: boolean;
+  };
+};
+
+export type SourceMediaContribution = {
+  preparePlaybackMethod?: string;
+  resolveLyricsMethod?: string;
+  downloadEntryMethod?: string;
+  downloadDirectoryMethod?: string;
+  clearCacheMethod?: string;
+};
+
+export type SourceEntryActionOperation =
+  | "download-entry"
+  | "download-directory"
+  | "refresh-playback"
+  | "clear-cache"
+  | "playlist-from-directory";
+
+export type SourceEntryActionContribution = {
+  actionId: string;
+  label: string;
+  scope: "file" | "directory";
+  operation: SourceEntryActionOperation;
+  method?: string;
+  providerId?: string;
+  entryKind?: string;
+  targets?: Array<"local-directory" | "writable-repository">;
+  playerTypeId?: string;
+};
+
+export type SourceContribution = {
+  operations?: string[];
+  metadataMirrorKeys?: string[];
+  authentication?: SourceAuthenticationContribution;
+  media?: SourceMediaContribution;
+  entryActions?: SourceEntryActionContribution[];
 };
 
 export type PluginApiTestContribution = {
@@ -1483,6 +1550,7 @@ export type PluginManifest = {
     apiTests?: PluginApiTestContribution[];
     playlistPlayers?: PlaylistPlayerContribution[];
     settings?: PluginSettingsContribution;
+    source?: SourceContribution;
     toolPages?: ToolPageContribution[];
     [key: string]: unknown;
   };

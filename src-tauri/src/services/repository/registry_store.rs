@@ -86,16 +86,31 @@ pub(super) fn repository_local_cache_status(
     })
 }
 
-pub(super) fn ensure_netease_cache_ready(repo: &RepositoryRecord) -> Result<PathBuf, String> {
-    if repo.backend_record.plugin_id != NETEASE_CLOUD_MUSIC_PLUGIN_ID {
-        return Err("repository is not a netease cloud music repository".to_string());
-    }
-    let cache_root = netease_cache_root_path(&repo.summary.path, &repo.backend_record.plugin_id)
-        .ok_or_else(|| "网易云资源库缺少本地缓存目录，请先指定缓存目录".to_string())?;
-    if !cache_root.is_dir() {
-        return Err("网易云资源库缓存目录不可用，请重新指定缓存目录".to_string());
-    }
-    Ok(cache_root)
+/// 仅公开 Source 认证的可用状态，不将后端配置或凭据引用返回给前端。
+pub(super) fn repository_authentication_status(
+    registry: &PluginCatalog,
+    backend_plugin_id: &str,
+    backend_config: &serde_json::Value,
+) -> Option<RepositoryAuthenticationStatus> {
+    let manifest = registry.manifest(backend_plugin_id)?;
+    manifest
+        .contributes
+        .pointer("/source/authentication")
+        .filter(|value| value.is_object())?;
+
+    let credential_present = backend_config
+        .get("credentialRef")
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|value| !value.trim().is_empty());
+    let login_expired = backend_config
+        .get("loginExpired")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(!credential_present);
+    Some(RepositoryAuthenticationStatus {
+        required: true,
+        logged_in: credential_present && !login_expired,
+        login_expired,
+    })
 }
 
 pub(super) fn parse_backend_request(
@@ -281,6 +296,125 @@ pub(super) fn migrate_registry_schema(registry: &Connection) -> Result<(), rusql
             "ALTER TABLE repositories ADD COLUMN backend_config_json TEXT NOT NULL DEFAULT '{}'",
             [],
         )?;
+    }
+    registry.execute(
+        "UPDATE repositories SET backend_plugin_id = ?1 WHERE backend_plugin_id = ?2",
+        params![
+            NETEASE_CLOUD_MUSIC_PLUGIN_ID,
+            LEGACY_NETEASE_CLOUD_MUSIC_PLUGIN_ID
+        ],
+    )?;
+    Ok(())
+}
+
+/// 幂等迁移网易云仓库 ID、公开配置和仓库元数据；凭据写入失败时保留旧配置以便重试。
+pub(super) fn migrate_netease_repository_records(
+    service_root: &Path,
+    registry: &Connection,
+) -> Result<(), String> {
+    let mut stmt = registry
+        .prepare(
+            r#"
+            SELECT repo_id, name, path, backend_config_json, created_at
+            FROM repositories
+            WHERE backend_plugin_id = ?1
+            "#,
+        )
+        .map_err(db_error)?;
+    let rows = stmt
+        .query_map([NETEASE_CLOUD_MUSIC_PLUGIN_ID], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, String>(4)?,
+            ))
+        })
+        .map_err(db_error)?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(db_error)?;
+    drop(stmt);
+
+    for (repo_id, name, path, config_json, created_at) in rows {
+        let mut config = parse_backend_config_json(&config_json).map_err(json_error)?;
+        let has_legacy_cookie = ["cookie", "accountCookie"].iter().any(|key| {
+            config
+                .get(key)
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|value| !value.trim().is_empty())
+        });
+        if has_legacy_cookie {
+            match plugin_catalog(service_root).call(
+                NETEASE_CLOUD_MUSIC_PLUGIN_ID,
+                "auth.migrateRepositoryCredential",
+                serde_json::json!({ "config": config }),
+            ) {
+                Ok(response) => {
+                    let credential_ref = response
+                        .get("credentialRef")
+                        .and_then(serde_json::Value::as_str)
+                        .map(str::trim)
+                        .filter(|value| !value.is_empty())
+                        .ok_or_else(|| {
+                            "credential migration did not return credentialRef".to_string()
+                        })?;
+                    let object = config
+                        .as_object_mut()
+                        .ok_or_else(|| "repository backend config must be an object".to_string())?;
+                    object.remove("cookie");
+                    object.remove("accountCookie");
+                    object.insert(
+                        "credentialRef".to_string(),
+                        serde_json::json!(credential_ref),
+                    );
+                    registry
+                        .execute(
+                            r#"
+                            UPDATE repositories
+                            SET backend_config_json = ?2, updated_at = ?3
+                            WHERE repo_id = ?1
+                            "#,
+                            params![repo_id, config.to_string(), now_rfc3339()],
+                        )
+                        .map_err(db_error)?;
+                }
+                Err(error) => {
+                    crate::app_log!(
+                        "warn",
+                        "repository.migration",
+                        "sourceCredentialMigrationDeferred",
+                        "来源凭据迁移暂未完成，将在下次启动重试。",
+                        serde_json::json!({ "repoId": repo_id, "error": error })
+                    );
+                    continue;
+                }
+            }
+        }
+
+        let storage = ensure_repository_storage_paths(
+            service_root,
+            &repo_id,
+            Path::new(&path),
+            NETEASE_CLOUD_MUSIC_PLUGIN_ID,
+        )?;
+        if let Err(error) = write_repository_metadata(
+            &storage.metadata_dir,
+            &repo_id,
+            &name,
+            Path::new(&path),
+            NETEASE_CLOUD_MUSIC_PLUGIN_ID,
+            &config,
+            Some(created_at),
+        ) {
+            crate::app_log!(
+                "warn",
+                "repository.migration",
+                "sourceMetadataMigrationDeferred",
+                "来源仓库元数据迁移暂未完成，将在下次启动重试。",
+                serde_json::json!({ "repoId": repo_id, "error": error })
+            );
+        }
     }
     Ok(())
 }
@@ -650,6 +784,15 @@ pub(super) fn migrate_repository_schema(connection: &Connection) -> Result<(), r
         SELECT asset_id, 'addedToLibraryAt', 'string', json_quote(created_at), 1, updated_at
         FROM assets;
         "#,
+    )?;
+    connection.execute(
+        r#"
+        UPDATE playlists
+        SET player_plugin_id = ?1
+        WHERE player_type_id = 'momobako.playlist.audio-sequence'
+          AND player_plugin_id = ?2
+        "#,
+        params![AUDIO_PLAYER_PLUGIN_ID, LEGACY_AUDIO_PLAYER_PLUGIN_ID],
     )?;
     connection.execute(
         r#"

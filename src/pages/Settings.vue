@@ -12,9 +12,16 @@ import {
   ServerCog,
   SquareRoundCorner,
   Sun,
+  Volume2,
 } from "@lucide/vue";
 import PluginManagerPanel from "../components/PluginManagerPanel.vue";
-import { onPluginEvent } from "../plugins/sdk";
+import { frontendPluginRegistryVersion, onPluginEvent } from "../plugins/sdk";
+import {
+  getAudioPlayerResolution,
+  getDefaultAudioPlayerPluginId,
+  listAudioPlayerImplementations,
+  setDefaultAudioPlayerPluginId,
+} from "../plugins/playlistPlayers";
 import {
   CORNER_RADIUS_MAX,
   CORNER_RADIUS_MIN,
@@ -42,6 +49,23 @@ const {
 
 const externalApiMessage = ref("");
 const externalApiError = ref("");
+const audioPlayerPreference = ref(getDefaultAudioPlayerPluginId());
+
+const audioPlayerImplementations = computed(() => {
+  frontendPluginRegistryVersion.value;
+  return listAudioPlayerImplementations();
+});
+const audioPlayerResolution = computed(() => {
+  frontendPluginRegistryVersion.value;
+  audioPlayerPreference.value;
+  return getAudioPlayerResolution();
+});
+const missingAudioPlayerPreference = computed(() => {
+  const selected = audioPlayerPreference.value;
+  return selected && !audioPlayerImplementations.value.some((player) => player.pluginId === selected)
+    ? selected
+    : null;
+});
 
 const repositoryCount = computed(() => repositories.value.length);
 const repositoryBackends = computed(() => {
@@ -94,6 +118,12 @@ function setExternalApiNotice(message: string, error = "") {
 
 function onCornerRadiusInput(event: Event) {
   setCornerRadius(Number((event.target as HTMLInputElement).value));
+}
+
+function onAudioPlayerChange(event: Event) {
+  const pluginId = (event.target as HTMLSelectElement).value.trim() || null;
+  setDefaultAudioPlayerPluginId(pluginId);
+  audioPlayerPreference.value = pluginId;
 }
 
 async function copyExternalApiValue(label: string, value?: string) {
@@ -156,6 +186,42 @@ onBeforeUnmount(() => {
         <h1>设置</h1>
         <p>管理仓库服务、插件、缓存与 API 契约。</p>
       </div>
+    </div>
+
+    <div class="card">
+      <h2>音频播放</h2>
+      <div class="settings-row">
+        <div class="settings-row__label">
+          <div>默认音频播放器</div>
+          <div class="settings-row__hint">按插件 ID 固定选择；不可用时只回退到官方播放器。</div>
+        </div>
+        <label class="settings-player-select">
+          <Volume2 :size="14" aria-hidden="true" />
+          <select
+            :disabled="!audioPlayerImplementations.length"
+            :value="audioPlayerPreference ?? audioPlayerResolution.player?.pluginId ?? ''"
+            aria-label="默认音频播放器"
+            @change="onAudioPlayerChange"
+          >
+            <option v-if="missingAudioPlayerPreference" :value="missingAudioPlayerPreference">
+              {{ missingAudioPlayerPreference }}（不可用）
+            </option>
+            <option
+              v-for="player in audioPlayerImplementations"
+              :key="player.pluginId"
+              :value="player.pluginId"
+            >
+              {{ player.pluginName }} · {{ player.pluginId }}
+            </option>
+          </select>
+        </label>
+      </div>
+      <p v-if="audioPlayerResolution.fallbackUsed" class="settings-notice">
+        所选播放器当前不可用，已回退到 {{ audioPlayerResolution.player?.pluginName ?? "官方默认实现" }}。
+      </p>
+      <p v-else-if="!audioPlayerResolution.player" class="settings-notice settings-notice--error">
+        官方音频播放器未启用或缺失，音频播放暂不可用。
+      </p>
     </div>
 
     <div class="card">

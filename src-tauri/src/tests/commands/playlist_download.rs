@@ -1,6 +1,9 @@
 use crate::services::repository as repository_service;
-use crate::services::repository::test_support::playback_test_lock;
-use std::sync::{Mutex, OnceLock};
+use crate::services::repository::test_support::{create_test_state, playback_test_lock};
+use std::{
+    fs,
+    sync::{Mutex, OnceLock},
+};
 
 static TRACK_PACKAGE_CALLS: OnceLock<Mutex<Vec<serde_json::Value>>> = OnceLock::new();
 
@@ -26,6 +29,7 @@ fn record_track_package_call(payload: serde_json::Value) -> Result<serde_json::V
 #[test]
 fn execute_playlist_download_with_progress_reports_events_and_partial_failures() {
     let _lock = playback_test_lock();
+    let (state, root, _repo_root, _thumbnail_root) = create_test_state("source-playlist-download");
     crate::services::repository::set_test_downloader_track_package_hook(Some(
         record_track_package_call,
     ));
@@ -36,6 +40,7 @@ fn execute_playlist_download_with_progress_reports_events_and_partial_failures()
         .clear();
 
     let request = repository_service::DownloaderPlaylistRequest {
+        source_repository_id: None,
         playlist_id: 9001,
         playlist_name: Some("夜跑歌单".to_string()),
         tracks: vec![
@@ -69,15 +74,12 @@ fn execute_playlist_download_with_progress_reports_events_and_partial_failures()
     };
 
     let mut events = Vec::new();
-    let response = repository_service::download_playlist_with_progress(
-        std::path::Path::new("C:/Mock/.service-data"),
-        request,
-        &mut |event| {
+    let response =
+        repository_service::download_playlist_with_progress(&state, request, &mut |event| {
             events.push(event);
             Ok(())
-        },
-    )
-    .expect("playlist download should produce a partial-success response");
+        })
+        .expect("playlist download should produce a partial-success response");
 
     crate::services::repository::set_test_downloader_track_package_hook(None);
 
@@ -132,4 +134,6 @@ fn execute_playlist_download_with_progress_reports_events_and_partial_failures()
     assert_eq!(response["summary"]["failed"], serde_json::json!(1));
     assert_eq!(response["completed"].as_array().map(Vec::len), Some(1));
     assert_eq!(response["failed"].as_array().map(Vec::len), Some(1));
+
+    fs::remove_dir_all(root).expect("test temp root should be removed");
 }

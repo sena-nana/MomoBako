@@ -25,6 +25,7 @@ export function useEntryActionRepositoryDialog(options: EntryActionRepositoryDia
     const candidates = options.repositories.value.filter((repository) => {
       if (dialogRequest.requireReady !== false && repository.status !== "ready") return false;
       if (dialogRequest.requireWritable && !repository.backend.capabilities.includes("write")) return false;
+      if (dialogRequest.requiredCapabilities?.some((capability) => !repository.backend.capabilities.includes(capability))) return false;
       if (dialogRequest.backendPluginIds?.length && !dialogRequest.backendPluginIds.includes(repository.backend.pluginId)) return false;
       if (dialogRequest.backendKinds?.length && !dialogRequest.backendKinds.includes(repository.backend.kind)) return false;
       if (options.activeRepoId.value && repository.repoId === options.activeRepoId.value) return false;

@@ -1,0 +1,99 @@
+{
+  "pluginId": "momobako.netease.parser",
+  "legacyPluginIds": [],
+  "name": "Netease Cloud Music Parser",
+  "version": "0.1.0",
+  "type": {
+    "layer": "extractor-parser",
+    "kind": "netease-cloud-music"
+  },
+  "kind": "parser",
+  "category": "parser",
+  "description": "将网易云来源公开字段转换为通用音频元数据默认值。",
+  "capabilities": [
+    "parser",
+    "metadata-defaults",
+    "audio-metadata",
+    "netease-cloud-music"
+  ],
+  "enabled": true,
+  "sdk": "backend",
+  "entry": {
+    "backend": {
+      "library": "momobako_netease_parser"
+    }
+  },
+  "source": "builtin",
+  "runtime": "native-dylib",
+  "permissions": [
+    "readMetadata",
+    "writeCandidates"
+  ],
+  "requires": [
+    "momobako.netease.source"
+  ],
+  "optional": [
+    "momobako.library.audio"
+  ],
+  "hooks": [],
+  "contributes": {
+    "apiTests": [
+      {
+        "method": "metadata.defaults.batch",
+        "summary": "生成网易云歌曲通用音频元数据默认值。",
+        "payload": {
+          "entries": [
+            {
+              "path": "创建的歌单/示例歌单/歌手 - 歌曲.mp3",
+              "name": "歌手 - 歌曲.mp3",
+              "extension": "mp3",
+              "kind": "file",
+              "providerId": "netease-cloud-music",
+              "providerItemId": "1001",
+              "sourceMetadata": {
+                "songId": 1001,
+                "songName": "歌曲",
+                "artists": ["歌手"],
+                "albumName": "示例专辑",
+                "coverUrl": "https://example.invalid/cover.jpg",
+                "durationMs": 180000,
+                "playlistId": 2001,
+                "playlistName": "示例歌单",
+                "playlistCategory": "created"
+              }
+            }
+          ]
+        }
+      }
+    ],
+    "metadataDefaults": {
+      "action": "metadata.defaults.batch",
+      "candidateOnly": false,
+      "preserveExisting": true
+    },
+    "parser": {
+      "scope": "source-entry",
+      "providerIds": [
+        "netease-cloud-music"
+      ],
+      "outputs": [
+        "libraryKind",
+        "title",
+        "artist",
+        "album",
+        "durationMs",
+        "coverArt",
+        "songId",
+        "playlistId",
+        "playlistName",
+        "playlistCategory"
+      ],
+      "candidateOnly": false
+    }
+  },
+  "compat": {
+    "sdkVersion": "1",
+    "legacyPluginIds": []
+  },
+  "status": "ready"
+}

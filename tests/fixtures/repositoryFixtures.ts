@@ -488,7 +488,8 @@ export function pluginManifest(
     : layer;
   const previewExtensions =
     pluginId === "momobako.preview.three-model" ? ["fbx", "obj", "glb", "gltf", "vrm", "stl", "3mf", "blend"]
-    : pluginId === "momobako.preview.media" ? ["png", "jpg", "jpeg", "webp", "gif", "bmp", "avif", "svg", "mp4", "mov", "mkv", "webm", "avi", "m4v", "mp3", "wav", "ogg", "flac", "m4a", "aac", "opus"]
+    : pluginId === "momobako.preview.media" ? ["png", "jpg", "jpeg", "webp", "gif", "bmp", "avif", "svg", "mp4", "mov", "mkv", "webm", "avi", "m4v"]
+    : pluginId === "momobako.player.audio" ? ["mp3", "wav", "ogg", "flac", "m4a", "aac", "opus"]
     : pluginId === "momobako.preview.text" ? ["txt", "md", "markdown", "json", "yaml", "yml", "csv"]
     : pluginId === "momobako.preview.office"
       ? [
@@ -506,6 +507,11 @@ export function pluginManifest(
           { slot: "pip", action: "preview.media.openPip", label: "画中画" },
           { slot: "progress", action: "preview.media.reportProgress", label: "更新播放进度" },
         ]
+      : pluginId === "momobako.player.audio"
+        ? [
+            { slot: "playlist", action: "player.audio.enqueue", label: "加入播放列表" },
+            { slot: "progress", action: "player.audio.reportProgress", label: "更新播放进度" },
+          ]
       : pluginId === "momobako.preview.office"
         ? [{ slot: "progress", action: "preview.office.reportReadPosition", label: "更新阅读进度" }]
       : pluginId === "momobako.vector-index"
@@ -517,14 +523,15 @@ export function pluginManifest(
     pluginId === "momobako.preview.archive" ? ["momobako.service.archive-preview"]
     : [];
   const optional =
-    pluginId === "momobako.preview.media" ? ["momobako.parser.image", "momobako.parser.audio", "momobako.parser.video"]
+    pluginId === "momobako.preview.media" ? ["momobako.parser.image", "momobako.parser.video"]
+    : pluginId === "momobako.player.audio" ? ["momobako.parser.audio"]
     : pluginId === "momobako.preview.office" ? ["momobako.parser.ebook"]
     : pluginId === "momobako.metadata-provider" ? ["momobako.service.network-search"]
     : [];
   const permissions =
     pluginId === "momobako.local-filesystem" ? ["filesystem:read", "filesystem:write"]
     : pluginId === "momobako.webdav" || pluginId === "momobako.cloud-drive" ? ["network", "filesystem:read", "filesystem:write"]
-    : pluginId.startsWith("momobako.preview.") ? ["preview:read"]
+    : pluginId.startsWith("momobako.preview.") || pluginId === "momobako.player.audio" ? ["preview:read"]
     : pluginId === "momobako.preview.office" ? ["preview:read", "thumbnail:write"]
     : pluginId === "momobako.tool.api-playground" ? ["network:localhost", "external-api:read", "external-api:write"]
     : pluginId === "momobako.vector-index" ? ["filesystem:read"]
@@ -549,16 +556,6 @@ export function pluginManifest(
                 description: "按顺序展示图片并交由宿主处理队列模式。",
               },
               {
-                playerTypeId: "momobako.playlist.audio-sequence",
-                label: "音频顺序播放",
-                fileClass: "audio",
-                supportedExtensions: ["mp3", "wav", "ogg", "flac", "m4a", "aac", "opus"],
-                supportsSeek: true,
-                supportsVolume: true,
-                supportsPreviewNavigation: true,
-                description: "复用媒体能力播放音频队列。",
-              },
-              {
                 playerTypeId: "momobako.playlist.video-sequence",
                 label: "视频顺序播放",
                 fileClass: "video",
@@ -570,6 +567,22 @@ export function pluginManifest(
               },
             ],
           }
+        : pluginId === "momobako.player.audio"
+          ? {
+              playlistPlayers: [
+                {
+                  playerTypeId: "momobako.playlist.audio-sequence",
+                  capabilityId: "momobako.player.audio",
+                  label: "音频顺序播放",
+                  fileClass: "audio",
+                  supportedExtensions: ["mp3", "wav", "ogg", "flac", "m4a", "aac", "opus"],
+                  supportsSeek: true,
+                  supportsVolume: true,
+                  supportsPreviewNavigation: true,
+                  description: "通过宿主播放源路由播放通用音频队列。",
+                },
+              ],
+            }
         : {}),
     }
     : category === "source" ? {
@@ -675,7 +688,8 @@ export function createMockPlugins() {
     pluginManifest("momobako.webdav", ["builtin.webdav"], "WebDAV", "0.1.0", "source", "webdav", "通过 WebDAV 适配远程文件管理服务。", ["browse", "read", "write", "sync"], false, "backend", "manifest-only"),
     pluginManifest("momobako.cloud-drive", ["builtin.cloud-drive"], "Cloud Drive", "0.1.0", "source", "cloud", "预留云盘文件系统接入点，如对象存储或网盘。", ["browse", "read", "write", "sync"], false, "backend", "manifest-only"),
     pluginManifest("momobako.preview.three-model", ["builtin.three-model-preview"], "3D Model Preview", "1.0.0", "library-kind", "preview", "为 FBX、OBJ、GLB、glTF 与 VRM 模型提供可旋转缩放的 3D 文件预览。", ["preview", "3d-model", "fbx", "obj", "gltf", "vrm"], true, "frontend", "vue-module"),
-    pluginManifest("momobako.preview.media", ["builtin.media-preview"], "Media Preview", "1.0.0", "library-kind", "preview", "为常见图片、视频与音频文件提供内联预览和播放列表播放能力。", ["preview", "playlist", "media", "image", "video", "audio"], true, "frontend", "vue-module"),
+    pluginManifest("momobako.preview.media", ["builtin.media-preview"], "Media Preview", "1.0.0", "library-kind", "preview", "为常见图片与视频文件提供内联预览和播放列表播放能力。", ["preview", "playlist", "media", "image", "video"], true, "frontend", "vue-module"),
+    pluginManifest("momobako.player.audio", [], "Audio Player", "0.1.0", "library-kind", "preview", "提供可替换的通用音频预览、歌词与播放列表播放能力。", ["preview", "playlist", "audio", "lyrics", "momobako.player.audio"], true, "frontend", "vue-module"),
     pluginManifest("momobako.preview.text", ["builtin.text-preview"], "Text Preview", "1.0.0", "library-kind", "preview", "为常见文本与 Markdown 文件提供阅读预览，并生成文本缩略图。", ["preview", "text", "markdown", "thumbnail"], true, "frontend", "vue-module"),
     pluginManifest("momobako.preview.office", ["builtin.office-preview"], "Office & PDF Preview", "1.0.0", "library-kind", "preview", "为 Microsoft Office 文档与 PDF 文件提供预览，并生成文档缩略图。", ["preview", "thumbnail", "pdf", "office", "word", "excel", "powerpoint"], true, "frontend", "vue-module"),
     pluginManifest("momobako.tool.api-playground", [], "API Playground", "0.1.0", "integration-capability-hook", "api-playground", "在 MomoBako 内调试本机外部后端 API。", ["tool-page", "api-playground", "external-api"], true, "frontend", "vue-module"),

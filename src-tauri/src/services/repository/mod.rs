@@ -50,6 +50,7 @@ mod search_engine;
 mod smart_folder;
 mod source_state;
 mod state;
+mod sync_defaults;
 mod sync_engine;
 mod sync_hardlink;
 mod sync_incremental;
@@ -80,9 +81,9 @@ pub(crate) use self::plugin::plugin_data_dir;
 use self::plugin::{
     apply_plugin_settings, broken_plugin_manifest, ensure_plugin_data_dir,
     ensure_repository_backend_runtime_available, is_source_plugin, load_plugin_config_values,
-    load_plugin_settings, parse_plugin_manifest_with_source, plugin_legacy_ids,
-    read_plugin_manifest_from_archive, resolve_plugin_manifest_dependencies, runtime_plugins_dir,
-    shutdown_helper_state_dir,
+    load_plugin_settings, migrate_builtin_plugin_data_dirs, parse_plugin_manifest_with_source,
+    plugin_legacy_ids, read_plugin_manifest_from_archive, resolve_plugin_manifest_dependencies,
+    runtime_plugins_dir, shutdown_helper_state_dir,
 };
 #[cfg(test)]
 use self::plugin::{is_repository_backend_plugin, parse_plugin_manifest};
@@ -101,6 +102,7 @@ use self::search_engine::*;
 use self::source_state::*;
 pub use self::state::RepositoryState;
 pub(crate) use self::state::RepositoryStructureRefreshRequest;
+use self::sync_defaults::*;
 use self::sync_engine::*;
 use self::sync_hardlink::*;
 use self::sync_incremental::sync_repository_changed_paths as sync_repository_changed_paths_incremental;

@@ -50,6 +50,18 @@ import {
   updateOperationProgress,
 } from "../composables/workspace/tasks";
 import { emitSystemLog } from "../services/systemLog";
+import {
+  AUDIO_PLAYER_CAPABILITY_ID,
+  getStoredPlayerPreference,
+  playerCapabilityId,
+  resolvePlayer,
+  setStoredPlayerPreference,
+} from "./playlistPlayerPreference";
+export {
+  AUDIO_PLAYER_CAPABILITY_ID,
+  OFFICIAL_AUDIO_PLAYER_PLUGIN_ID,
+  type PlaylistPlayerResolution,
+} from "./playlistPlayerPreference";
 
 export type PreviewPluginFileAction = {
   id: string;
@@ -72,6 +84,7 @@ export type EntryActionDialogRequest =
       title?: string;
       requireReady?: boolean;
       requireWritable?: boolean;
+      requiredCapabilities?: string[];
       backendPluginIds?: string[];
       backendKinds?: string[];
     };
@@ -420,7 +433,7 @@ function createPluginLogger(manifest: PluginManifest, modulePath: string) {
 }
 
 export function registerPlaylistPlayer(player: RegisteredPlaylistPlayer) {
-  playlistPlayerRegistry.set(player.playerTypeId, player);
+  playlistPlayerRegistry.set(`${player.playerTypeId}:${player.pluginId}`, player);
   bumpFrontendPluginRegistry();
   return player;
 }
@@ -454,13 +467,45 @@ export function listRegisteredPreviewPlugins() {
 }
 
 export function listRegisteredPlaylistPlayers() {
-  return [...playlistPlayerRegistry.values()].filter((player) => player.manifest?.enabled ?? true);
+  const playerTypeIds = new Set(
+    listRegisteredPlaylistPlayerImplementations().map((player) => player.playerTypeId),
+  );
+  return [...playerTypeIds]
+    .map((playerTypeId) => resolveRegisteredPlaylistPlayerByType(playerTypeId).player)
+    .filter((player): player is RegisteredPlaylistPlayer => Boolean(player));
 }
 
 export function getRegisteredPlaylistPlayerByType(playerTypeId: string) {
-  const player = playlistPlayerRegistry.get(playerTypeId);
-  if (!player) return null;
-  return (player.manifest?.enabled ?? true) ? player : null;
+  return resolveRegisteredPlaylistPlayerByType(playerTypeId).player;
+}
+
+/** 列出所有启用的播放器实现，供设置页选择默认实现。 */
+export function listRegisteredPlaylistPlayerImplementations(capabilityId?: string) {
+  return [...playlistPlayerRegistry.values()]
+    .filter((player) => player.manifest?.enabled ?? true)
+    .filter((player) => !capabilityId || playerCapabilityId(player) === capabilityId)
+    .sort((left, right) => (
+      left.label.localeCompare(right.label)
+      || left.pluginName.localeCompare(right.pluginName)
+      || left.pluginId.localeCompare(right.pluginId)
+    ));
+}
+
+/** 保存全局能力默认实现；实现不可用时仍保留选择，以便安装或重新启用后自动恢复。 */
+export function setPreferredPlaylistPlayerPluginId(capabilityId: string, pluginId: string | null) {
+  setStoredPlayerPreference(capabilityId, pluginId);
+  bumpFrontendPluginRegistry();
+}
+
+export function getPreferredPlaylistPlayerPluginId(capabilityId: string) {
+  return getStoredPlayerPreference(capabilityId);
+}
+
+/** 按显式选择、官方默认、稳定插件 ID 的顺序解析播放器。 */
+export function resolveRegisteredPlaylistPlayerByType(playerTypeId: string) {
+  const candidates = listRegisteredPlaylistPlayerImplementations()
+    .filter((player) => player.playerTypeId === playerTypeId);
+  return resolvePlayer(playerTypeId, candidates);
 }
 
 export function listRegisteredLibraryExtensions() {
@@ -802,9 +847,18 @@ export async function syncRegisteredPreviewPluginManifests(manifests: PluginMani
 export function getRegisteredPreviewPluginForEntry(entry: FileBrowserEntry | null) {
   const extension = entry?.extension?.toLowerCase();
   if (!extension) return null;
-  return listRegisteredPreviewPlugins()
+  const candidates = listRegisteredPreviewPlugins()
     .filter((plugin) => plugin.manifest?.enabled ?? true)
-    .find((plugin) => plugin.supportedExtensions.includes(extension)) ?? null;
+    .filter((plugin) => plugin.supportedExtensions.includes(extension))
+    .sort((left, right) => left.pluginId.localeCompare(right.pluginId));
+  const audioImplementations = listRegisteredPlaylistPlayerImplementations(AUDIO_PLAYER_CAPABILITY_ID);
+  const audioResolution = resolveRegisteredPlaylistPlayerByType("momobako.playlist.audio-sequence");
+  if (audioImplementations.some((player) => player.supportedExtensions.includes(extension))) {
+    if (!audioResolution.player) return null;
+    const selectedPreview = candidates.find((plugin) => plugin.pluginId === audioResolution.player?.pluginId);
+    return selectedPreview ?? null;
+  }
+  return candidates[0] ?? null;
 }
 
 export function clearPreviewPluginRegistry() {

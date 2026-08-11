@@ -1,16 +1,10 @@
 import { computed, onBeforeUnmount, onMounted, ref, type ComputedRef } from "vue";
 import { open } from "@tauri-apps/plugin-dialog";
 import type { RouteLocationNormalizedLoadedGeneric, Router } from "vue-router";
-import {
-  callPlugin,
-  configureNeteaseRepositoryCache,
-  syncRepository,
-  updateRepositoryBackendConfig,
-} from "../services/repositoryApi";
 import type { RepositoryBackendOption, RepositorySummary } from "../types/repository";
 import { supportsLocalRepositoryRoot } from "../utils/pluginTaxonomy";
 
-export type RepositoryPopoverMode = "closed" | "switcher" | "addMenu" | "form" | "neteaseLogin";
+export type RepositoryPopoverMode = "closed" | "switcher" | "addMenu" | "form";
 export type RepositoryPopoverAnchor = {
   left: number;
   bottom: number;
@@ -19,29 +13,6 @@ export type RepositoryPopoverAnchor = {
 type AddRepositoryRequestDetail = {
   anchor?: RepositoryPopoverAnchor;
 };
-type NeteaseReloginRequestDetail = {
-  repoId?: string;
-  accountId?: string | number;
-  anchor?: RepositoryPopoverAnchor;
-};
-type NeteaseQrSession = {
-  unikey?: string;
-  qrurl?: string;
-  qrimg?: string | null;
-};
-type NeteaseLoginResult = {
-  code?: number;
-  message?: string | null;
-  backendConfig?: Record<string, unknown>;
-  account?: {
-    id?: string | number;
-    userName?: string | null;
-  } | null;
-  profile?: {
-    nickname?: string | null;
-  } | null;
-};
-
 type RepositorySwitcherUiOptions = {
   activeRepoId: ComputedRef<string | null>;
   attachRepository: (path: string) => Promise<unknown>;
@@ -58,7 +29,6 @@ type RepositorySwitcherUiOptions = {
   openRepositoryDeleteDialog: (repoId: string) => void;
   repositories: ComputedRef<RepositorySummary[]>;
   repositoryBackendOptions: ComputedRef<RepositoryBackendOption[]>;
-  refreshRepositoryWorkspaceSilently: () => Promise<unknown>;
   route: RouteLocationNormalizedLoadedGeneric;
   router: Router;
   selectRepository: (repoId: string) => Promise<unknown>;
@@ -66,12 +36,10 @@ type RepositorySwitcherUiOptions = {
 
 const localFilesystemPluginId = "momobako.local-filesystem";
 const eagleSourcePluginId = "momobako.source.eagle-library";
-const neteaseSourcePluginId = "momobako.source.netease-cloud-music";
 
 function formatAddRepositoryBackendLabel(pluginId: string, fallback: string) {
   if (pluginId === localFilesystemPluginId) return "本地文件夹";
   if (pluginId === eagleSourcePluginId) return "Eagle Library";
-  if (pluginId === neteaseSourcePluginId) return "网易云音乐";
   if (pluginId === "momobako.cloud-drive") return "云盘";
   return fallback;
 }
@@ -99,11 +67,6 @@ export function useRepositorySwitcherUi(options: RepositorySwitcherUiOptions) {
   const backendRoot = ref("");
   const isSubmittingBackend = ref(false);
   const addRepositoryError = ref("");
-  const neteaseQrSession = ref<NeteaseQrSession | null>(null);
-  const neteaseLoginMessage = ref("");
-  const neteaseLoginTargetRepoId = ref<string | null>(null);
-  const neteaseExpectedAccountId = ref<string | null>(null);
-  const neteaseCachePath = ref("");
 
   const backendOptions = computed(() => options.repositoryBackendOptions.value.map((item) => ({
     value: item.pluginId,
@@ -143,7 +106,6 @@ export function useRepositorySwitcherUi(options: RepositorySwitcherUiOptions) {
   function getPopoverWidth(mode = addRepositoryPopoverMode.value) {
     if (mode === "switcher") return 280;
     if (mode === "addMenu") return 160;
-    if (mode === "neteaseLogin") return 340;
     return 320;
   }
 
@@ -239,151 +201,6 @@ export function useRepositorySwitcherUi(options: RepositorySwitcherUiOptions) {
     }
   }
 
-  function accountIdFromValue(value: unknown) {
-    const text = String(value ?? "").trim();
-    return text ? text : null;
-  }
-
-  function accountIdFromRepoId(repoId?: string | null) {
-    const match = String(repoId ?? "").match(/^netease-cloud-music-(.+)$/);
-    return match?.[1] ?? null;
-  }
-
-  function backendConfigWithSyncTime(backendConfig: Record<string, unknown>, accountId: string) {
-    return {
-      ...backendConfig,
-      accountId,
-      lastSyncAt: new Date().toISOString(),
-    };
-  }
-
-  function neteaseRepositoryName(result: NeteaseLoginResult, accountId: string) {
-    return result.profile?.nickname
-      || result.account?.userName
-      || `网易云音乐 ${accountId}`;
-  }
-
-  function syncNeteaseRepositoryInBackground(repoId: string) {
-    void (async () => {
-      try {
-        await syncRepository({ repoId });
-        await options.refreshRepositoryWorkspaceSilently();
-      } catch (cause) {
-        const message = cause instanceof Error ? cause.message : String(cause);
-        console.error(`failed to sync netease repository ${repoId}`, cause);
-        addRepositoryError.value = message;
-      }
-    })();
-  }
-
-  async function createNeteaseQrSession() {
-    isSubmittingBackend.value = true;
-    addRepositoryError.value = "";
-    neteaseLoginMessage.value = "正在创建二维码...";
-    try {
-      const response = await callPlugin<NeteaseQrSession>({
-        pluginId: neteaseSourcePluginId,
-        method: "auth.createQrSession",
-        payload: { qrimg: true },
-      });
-      neteaseQrSession.value = response.payload ?? null;
-      neteaseLoginMessage.value = "请使用网易云音乐扫码登录，完成后点击检查扫码结果。";
-    } catch (cause) {
-      addRepositoryError.value = cause instanceof Error ? cause.message : String(cause);
-      neteaseLoginMessage.value = "";
-    } finally {
-      isSubmittingBackend.value = false;
-    }
-  }
-
-  async function openNeteaseLoginFlow(detail?: NeteaseReloginRequestDetail | null) {
-    if (isSubmittingBackend.value) return;
-    resetBackendForm(neteaseSourcePluginId);
-    neteaseQrSession.value = null;
-    neteaseLoginMessage.value = "";
-    neteaseLoginTargetRepoId.value = detail?.repoId?.trim() || null;
-    neteaseExpectedAccountId.value = accountIdFromValue(detail?.accountId)
-      ?? accountIdFromRepoId(detail?.repoId)
-      ?? null;
-    neteaseCachePath.value = "";
-    addRepositoryPopoverMode.value = "neteaseLogin";
-    addRepositoryPopoverPosition.value = getPopoverPosition(detail?.anchor, "neteaseLogin");
-    await createNeteaseQrSession();
-  }
-
-  async function pollNeteaseQrSession() {
-    const key = neteaseQrSession.value?.unikey;
-    if (!key || isSubmittingBackend.value) return;
-    const cachePath = neteaseCachePath.value.trim();
-    if (!cachePath) {
-      addRepositoryError.value = "请先选择网易云资源库的本地缓存目录。";
-      return;
-    }
-    isSubmittingBackend.value = true;
-    addRepositoryError.value = "";
-    neteaseLoginMessage.value = "正在检查扫码结果...";
-    try {
-      const response = await callPlugin<NeteaseLoginResult>({
-        pluginId: neteaseSourcePluginId,
-        method: "auth.pollQrSession",
-        payload: { key, persistSession: false },
-      });
-      const result = response.payload ?? {};
-      if (!result.backendConfig) {
-        neteaseLoginMessage.value = result.message || "还没有确认登录，请在手机端确认后再检查。";
-        return;
-      }
-      const accountId = accountIdFromValue(result.backendConfig.accountId ?? result.account?.id);
-      if (!accountId) {
-        throw new Error("扫码成功但未返回账号 ID");
-      }
-      if (neteaseExpectedAccountId.value && neteaseExpectedAccountId.value !== accountId) {
-        throw new Error("扫码账号与当前资源库不一致。请使用原账号重新登录，或通过“添加资源库”创建新的网易云账号库。");
-      }
-
-      const repoId = neteaseLoginTargetRepoId.value || `netease-cloud-music-${accountId}`;
-      const backendConfig = backendConfigWithSyncTime({
-        ...result.backendConfig,
-        sourceUri: `netease-cloud-music://account/${accountId}`,
-        localCachePath: cachePath,
-      }, accountId);
-      const existing = options.repositories.value.find((repo) => repo.repoId === repoId);
-      if (existing) {
-        await updateRepositoryBackendConfig({ repoId, backendConfig });
-        if (existing.localCache?.status !== "ready" || existing.path !== cachePath) {
-          await configureNeteaseRepositoryCache({
-            repoId,
-            path: cachePath,
-            migrateLegacyCache: true,
-          });
-        }
-        await options.selectRepository(repoId);
-        neteaseLoginMessage.value = `已更新登录状态，正在后台同步歌单：${existing.name}`;
-        addRepositoryPopoverMode.value = "closed";
-        syncNeteaseRepositoryInBackground(repoId);
-        return;
-      }
-
-      const name = neteaseRepositoryName(result, accountId);
-      await options.createNewRepository(
-        name,
-        cachePath,
-        neteaseSourcePluginId,
-        backendConfig,
-        repoId,
-        { skipInitialSync: true },
-      );
-      neteaseLoginMessage.value = `已创建资源库，正在后台同步歌单：${name}`;
-      addRepositoryPopoverMode.value = "closed";
-      syncNeteaseRepositoryInBackground(repoId);
-    } catch (cause) {
-      addRepositoryError.value = cause instanceof Error ? cause.message : String(cause);
-      neteaseLoginMessage.value = "";
-    } finally {
-      isSubmittingBackend.value = false;
-    }
-  }
-
   async function chooseLocalFolderAndCreate() {
     addRepositoryError.value = "";
     const previousPosition = addRepositoryPopoverPosition.value;
@@ -438,25 +255,13 @@ export function useRepositorySwitcherUi(options: RepositorySwitcherUiOptions) {
       await chooseLocalFolderAndCreate();
       return;
     }
-    if (pluginId === neteaseSourcePluginId) {
-      await openNeteaseLoginFlow();
+    if (backend.capabilities.includes("authentication")) {
+      addRepositoryPopoverMode.value = "closed";
+      await options.router.push({ path: "/settings", query: { plugin: pluginId } });
       return;
     }
     backendPluginId.value = pluginId;
     addRepositoryPopoverMode.value = "form";
-  }
-
-  async function chooseNeteaseCacheFolder() {
-    if (isSubmittingBackend.value) return;
-    addRepositoryError.value = "";
-    const selected = await open({
-      directory: true,
-      multiple: false,
-      title: "选择网易云缓存目录",
-    });
-    if (typeof selected === "string" && selected.trim()) {
-      neteaseCachePath.value = selected.trim();
-    }
   }
 
   async function submitAddRepositoryForm() {
@@ -486,11 +291,6 @@ export function useRepositorySwitcherUi(options: RepositorySwitcherUiOptions) {
     openAddRepositoryMenu(detail?.anchor);
   }
 
-  function handleNeteaseReloginRequest(event: Event) {
-    const detail = (event as CustomEvent<NeteaseReloginRequestDetail>).detail;
-    void openNeteaseLoginFlow(detail);
-  }
-
   function handleDocumentKeydown(event: KeyboardEvent) {
     if (event.key === "Escape" && addRepositoryPopoverMode.value !== "closed") {
       closeAddRepositoryPopover();
@@ -507,14 +307,12 @@ export function useRepositorySwitcherUi(options: RepositorySwitcherUiOptions) {
 
   onMounted(() => {
     window.addEventListener("momo:add-repository", handleAddRepositoryRequest);
-    window.addEventListener("momo:netease-relogin", handleNeteaseReloginRequest);
     document.addEventListener("keydown", handleDocumentKeydown);
     document.addEventListener("pointerdown", handleDocumentPointerDown, true);
   });
 
   onBeforeUnmount(() => {
     window.removeEventListener("momo:add-repository", handleAddRepositoryRequest);
-    window.removeEventListener("momo:netease-relogin", handleNeteaseReloginRequest);
     document.removeEventListener("keydown", handleDocumentKeydown);
     document.removeEventListener("pointerdown", handleDocumentPointerDown, true);
   });
@@ -536,13 +334,7 @@ export function useRepositorySwitcherUi(options: RepositorySwitcherUiOptions) {
     createLocalRepositoryFromPath,
     deleteActiveRepositoryFromMenu,
     isSubmittingBackend,
-    neteaseLoginMessage,
-    neteaseQrSession,
-    neteaseCachePath,
-    chooseNeteaseCacheFolder,
     openRepositorySwitcherFromEvent,
-    pollNeteaseQrSession,
-    createNeteaseQrSession,
     repositorySwitcherButtonRef,
     selectedBackend,
     selectBackend,

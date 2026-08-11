@@ -61,19 +61,6 @@ const vm = useWorkspaceHomeViewModel();
     class="workspace-page__body"
     :class="{ 'workspace-page__body--fixed': vm.hasRepository && vm.isFileBrowserPanel }"
   >
-    <div
-      v-if="vm.activeNeteaseLoginExpired"
-      class="asset-browser__state asset-browser__state--error workspace-page__notice"
-    >
-      <span>登录已失效，请重新登录后再刷新或播放。</span>
-      <button type="button" class="ghost" :disabled="vm.isRefreshingNeteaseLogin" @click="vm.refreshActiveNeteaseLoginStatus">
-        刷新状态
-      </button>
-      <button type="button" class="primary" :disabled="vm.isRefreshingNeteaseLogin" @click="vm.requestActiveNeteaseRelogin">
-        重新登录
-      </button>
-    </div>
-
     <MissingRepositoryState
       v-if="vm.isMissingRepository"
       :active-repository="vm.activeRepository"

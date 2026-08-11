@@ -8,6 +8,7 @@ import {
   type FilePreviewPlugin,
   type PreviewPluginFileAction,
 } from "./sdk";
+import { getManifestSourceEntryActions } from "./sourceEntryActions";
 
 export function getPreviewPluginForEntry(entry: FileBrowserEntry | null) {
   return getRegisteredPreviewPluginForEntry(entry);
@@ -27,7 +28,10 @@ export function getPreviewPluginFileActions(
 }
 
 export function getPluginEntryActions(context: EntryActionContext): EntryAction[] {
-  return getRegisteredEntryActions(context);
+  return [
+    ...getManifestSourceEntryActions(context),
+    ...getRegisteredEntryActions(context),
+  ];
 }
 
 export type { FilePreviewPlugin };

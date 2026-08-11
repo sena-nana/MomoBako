@@ -128,7 +128,7 @@ function createLargeNeteaseDirectorySnapshot(): FileBrowserSnapshot {
   return {
     repoId: "netease-cloud-music-123456",
     rootPath: "netease-cloud-music://account/123456",
-    backendPluginId: "momobako.source.netease-cloud-music",
+    backendPluginId: "momobako.netease.source",
     backendKind: "netease-cloud-music",
     cacheState: "ready",
     indexedAt: null,

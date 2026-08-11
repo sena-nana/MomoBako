@@ -9,8 +9,8 @@
   },
   "kind": "preview",
   "category": "preview",
-  "description": "为常见图片、视频与音频文件提供内联预览和播放列表播放能力。",
-  "capabilities": ["preview", "playlist", "media", "image", "video", "audio"],
+  "description": "为常见图片与视频文件提供内联预览和播放列表播放能力。",
+  "capabilities": ["preview", "playlist", "media", "image", "video"],
   "enabled": true,
   "sdk": "frontend",
   "runtime": "vue-module",
@@ -22,7 +22,7 @@
   },
   "contributes": {
     "preview": {
-      "extensions": ["png", "jpg", "jpeg", "webp", "gif", "bmp", "avif", "svg", "mp4", "mov", "mkv", "webm", "avi", "m4v", "mp3", "wav", "ogg", "flac", "m4a", "aac", "opus"],
+      "extensions": ["png", "jpg", "jpeg", "webp", "gif", "bmp", "avif", "svg", "mp4", "mov", "mkv", "webm", "avi", "m4v"],
       "thumbnail": false
     },
     "playlistPlayers": [
@@ -35,16 +35,6 @@
         "supportsVolume": false,
         "supportsPreviewNavigation": true,
         "description": "按顺序展示图片并交由宿主处理队列模式。"
-      },
-      {
-        "playerTypeId": "momobako.playlist.audio-sequence",
-        "label": "音频顺序播放",
-        "fileClass": "audio",
-        "supportedExtensions": ["mp3", "wav", "ogg", "flac", "m4a", "aac", "opus"],
-        "supportsSeek": true,
-        "supportsVolume": true,
-        "supportsPreviewNavigation": true,
-        "description": "复用媒体能力播放音频队列。"
       },
       {
         "playerTypeId": "momobako.playlist.video-sequence",
@@ -60,7 +50,7 @@
   },
   "permissions": ["preview:read"],
   "requires": [],
-  "optional": ["momobako.parser.image", "momobako.parser.audio", "momobako.parser.video"],
+  "optional": ["momobako.parser.image", "momobako.parser.video"],
   "hooks": [
     { "slot": "playlist", "action": "preview.media.enqueue", "label": "加入播放列表" },
     { "slot": "pip", "action": "preview.media.openPip", "label": "画中画" },

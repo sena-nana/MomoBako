@@ -205,11 +205,13 @@ impl RepositoryState {
         }
 
         fs::create_dir_all(&self.root).map_err(io_error)?;
+        migrate_builtin_plugin_data_dirs(&self.root)?;
         let registry = open_registry_connection(&self.registry_path)?;
         registry
             .execute_batch(REGISTRY_SCHEMA_SQL)
             .map_err(db_error)?;
         migrate_registry_schema(&registry).map_err(db_error)?;
+        migrate_netease_repository_records(&self.root, &registry)?;
         *initialized = true;
         Ok(())
     }

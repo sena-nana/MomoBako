@@ -1242,6 +1242,11 @@ pub(super) fn load_playlist_detail(
             let path_value = path.clone().unwrap_or_default();
             let thumbnail_asset_id = asset_id.clone();
             let thumbnail_entry_path = path.clone().unwrap_or_default();
+            let metadata = path
+                .as_ref()
+                .map(|_| load_metadata_map(connection, &asset_id))
+                .transpose()?
+                .map(|values| serde_json::Value::Object(values.into_iter().collect()));
             let (status, status_reason) = resolve_playlist_item_status(
                 &playlist,
                 active_player.as_ref(),
@@ -1282,6 +1287,7 @@ pub(super) fn load_playlist_detail(
                 provider_id,
                 provider_item_id,
                 source_payload: parse_json_column_nullable(source_payload_json)?,
+                metadata,
                 local_absolute_path,
             })
         })
