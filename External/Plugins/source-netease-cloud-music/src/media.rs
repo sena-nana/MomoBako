@@ -41,17 +41,15 @@ pub(crate) fn prepare_track_playback(
     }
     let expires_at = OffsetDateTime::now_utc() + TimeDuration::minutes(runtime.temp_ttl_minutes);
     if is_fresh(&audio_path, runtime.temp_ttl_minutes)? {
-        let metadata = fs::metadata(&audio_path).map_err(io_error)?;
-        return Ok(playback_response(
+        return playback_response(
             &audio_path,
             &lrc_path,
             &yrc_path,
             "audio/mpeg",
             expires_at,
-            metadata.len() as i64,
             None,
             true,
-        )?);
+        );
     }
 
     let song_url = client::fetch_song_url(runtime, &cookie, payload.song_id, level)?;
@@ -62,15 +60,12 @@ pub(crate) fn prepare_track_playback(
         .ok_or_else(|| "未获取到可播放音频地址".to_string())?;
     download_binary_to_path(runtime, url, &audio_path)?;
     write_lyrics(runtime, &cookie, payload.song_id, &lrc_path, &yrc_path)?;
-    let metadata = fs::metadata(&audio_path).map_err(io_error)?;
-    let _context = (payload.repo_id, payload.entry_path);
     playback_response(
         &audio_path,
         &lrc_path,
         &yrc_path,
         guess_media_type(song_url.mime_hint.as_deref()),
         expires_at,
-        metadata.len() as i64,
         song_url.br,
         false,
     )
@@ -262,10 +257,10 @@ fn playback_response(
     yrc_path: &Path,
     media_type: &str,
     expires_at: OffsetDateTime,
-    size_bytes: i64,
     bitrate: Option<i64>,
     cached: bool,
 ) -> Result<serde_json::Value, String> {
+    let size_bytes = fs::metadata(audio_path).map_err(io_error)?.len() as i64;
     Ok(serde_json::json!({
         "localPath": audio_path.to_string_lossy(),
         "tempFilePath": audio_path.to_string_lossy(),

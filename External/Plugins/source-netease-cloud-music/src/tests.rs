@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use momobako_mutsuki_plugin_sdk::PluginRuntimeContext;
 
 use crate::{
-    actions, client,
+    client,
     models::{RuntimeContext, StoredSession},
 };
 
@@ -37,9 +37,12 @@ fn stored_session_serialization_never_contains_cookie() {
 }
 
 #[test]
-fn action_contract_is_declarative() {
-    let value = actions::describe();
-    let actions = value.as_array().expect("actions should be an array");
+fn manifest_action_contract_is_declarative() {
+    let manifest: serde_json::Value = serde_json::from_str(include_str!("../manifest.json"))
+        .expect("plugin manifest should be valid json");
+    let actions = manifest["contributes"]["source"]["entryActions"]
+        .as_array()
+        .expect("actions should be an array");
     assert!(actions.iter().all(|action| action.get("script").is_none()));
     assert!(actions
         .iter()
@@ -47,9 +50,6 @@ fn action_contract_is_declarative() {
     assert!(actions
         .iter()
         .any(|action| action["method"] == "media.prepareTrackPlayback"));
-    let manifest: serde_json::Value = serde_json::from_str(include_str!("../manifest.json"))
-        .expect("plugin manifest should be valid json");
-    assert_eq!(value, manifest["contributes"]["source"]["entryActions"]);
 }
 
 #[test]

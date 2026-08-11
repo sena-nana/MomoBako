@@ -72,14 +72,16 @@ pub(crate) fn poll_qr_session(
         .filter(|value| !value.trim().is_empty())
         .ok_or_else(|| "扫码成功但未返回 Cookie".to_string())?;
     let login = client::fetch_login_status(runtime, &cookie)?;
-    let fallback = || client::fetch_user_account(runtime, &cookie).ok();
+    let fallback = (login.account.is_none() || login.profile.is_none())
+        .then(|| client::fetch_user_account(runtime, &cookie).ok())
+        .flatten();
     let account = login
         .account
-        .or_else(|| fallback().and_then(|value| value.account))
+        .or_else(|| fallback.as_ref().and_then(|value| value.account.clone()))
         .ok_or_else(|| "登录状态未返回账号信息".to_string())?;
     let profile = login
         .profile
-        .or_else(|| fallback().and_then(|value| value.profile));
+        .or_else(|| fallback.and_then(|value| value.profile));
     let credential_ref = store_cookie(account.id, &cookie)?;
     let session = StoredSession {
         credential_ref: credential_ref.clone(),
@@ -253,7 +255,7 @@ pub(crate) fn current_login_expired(runtime: &RuntimeContext) -> bool {
     resolve_repository_credential(runtime)
         .ok()
         .and_then(|(_, cookie)| client::fetch_login_status(runtime, &cookie).ok())
-        .map_or(true, |status| status.account.is_none())
+        .is_none_or(|status| status.account.is_none())
 }
 
 fn credential_ref(account_id: i64) -> String {
