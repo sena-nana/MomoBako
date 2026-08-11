@@ -2,7 +2,6 @@
 //!
 //! 认证、虚拟目录和媒体解析都由 Source 自己负责；Cookie 仅保存在系统凭据库中。
 
-mod actions;
 mod auth;
 mod catalog;
 mod client;
@@ -31,7 +30,6 @@ export_mutsuki_momobako_plugin!(
         "auth.getLoginStatus",
         "auth.clearLogin",
         "auth.migrateRepositoryCredential",
-        "source.describeActions",
         "media.prepareTrackPlayback",
         "media.downloadTrackPackage",
         "media.downloadPlaylistPackage",
@@ -70,7 +68,6 @@ fn handle_call(request: PluginCallEnvelope) -> Result<serde_json::Value, String>
         "auth.getLoginStatus" => auth::get_login_status(&runtime),
         "auth.clearLogin" => auth::clear_login(&runtime),
         "auth.migrateRepositoryCredential" => auth::migrate_repository_credential(&runtime),
-        "source.describeActions" => Ok(actions::describe()),
         "media.prepareTrackPlayback" => decode::<PrepareTrackPlaybackPayload>(request.payload)
             .and_then(|p| media::prepare_track_playback(&runtime, p)),
         "media.downloadTrackPackage" => decode::<DownloadTrackPackagePayload>(request.payload)

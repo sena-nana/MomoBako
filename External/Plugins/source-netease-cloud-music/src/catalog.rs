@@ -165,8 +165,7 @@ fn list_playlist_directory_page(
                 &detail,
                 folder.playlist_category,
                 &folder.playlist_name,
-                offset,
-                limit,
+                offset..offset.saturating_add(limit),
             )?;
             Ok(DirectoryPageResponse {
                 total_entries,
@@ -359,14 +358,13 @@ fn hydrate_playlist_track_page(
     detail: &PlaylistDetailItem,
     playlist_category: &str,
     unique_folder_name: &str,
-    offset: usize,
-    limit: usize,
+    range: std::ops::Range<usize>,
 ) -> Result<Vec<DiscoveredSong>, String> {
     let total = playlist_track_total(detail);
-    if offset >= total || limit == 0 {
+    if range.start >= total || range.is_empty() {
         return Ok(Vec::new());
     }
-    let end = offset.saturating_add(limit).min(total);
+    let end = range.end.min(total);
     let songs = load_playlist_songs_until(runtime, cookie, detail, end)?;
     let category = if playlist_category == "created" {
         CREATED_CATEGORY_PATH
@@ -383,7 +381,7 @@ fn hydrate_playlist_track_page(
         songs,
     )?
     .into_iter()
-    .skip(offset)
+    .skip(range.start)
     .collect())
 }
 

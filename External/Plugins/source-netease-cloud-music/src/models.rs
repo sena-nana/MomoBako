@@ -327,8 +327,6 @@ pub(crate) struct PrepareTrackPlaybackPayload {
     pub level: Option<String>,
     #[serde(default)]
     pub force_refresh: bool,
-    pub repo_id: Option<String>,
-    pub entry_path: Option<String>,
     pub managed_cache_root: Option<String>,
 }
 
