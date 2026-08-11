@@ -7,6 +7,7 @@ members = [
   "External/Plugins/office-convert",
   "External/Plugins/office-convert/helper",
   "External/Plugins/parser-asmr-folder",
+  "External/Plugins/parser-netease-cloud-music",
   "External/Plugins/service-archive-preview",
   "External/Plugins/service-downloader",
   "External/Plugins/service-provider-asmr-one",

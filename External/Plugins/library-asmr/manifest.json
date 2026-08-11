@@ -43,7 +43,7 @@
   "optional": [
     "momobako.parser.audio",
     "momobako.parser.asmr-folder",
-    "momobako.preview.media",
+    "momobako.player.audio",
     "momobako.service.network-search",
     "momobako.service.provider.dlsite",
     "momobako.service.provider.asmr-one"
@@ -213,7 +213,7 @@
         "candidateOnly": true
       },
       "preview": [
-        "momobako.preview.media"
+        "momobako.player.audio"
       ]
     }
   },

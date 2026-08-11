@@ -7,7 +7,6 @@ type MissingRepositoryAction = "relocating" | null;
 type MissingRepositoryActionsOptions = {
   activeRepoId: ComputedRef<string | null>;
   activeRepository: ComputedRef<RepositorySummary | null>;
-  configureNeteaseRepositoryCache?: (repoId: string, path: string) => Promise<unknown>;
   isDeletingRepository: ComputedRef<boolean>;
   openRepositoryDeleteDialog: (repoId: string) => void;
   refreshRepositoryWorkspaceSilently: () => Promise<unknown>;
@@ -24,10 +23,6 @@ export function useMissingRepositoryActions(options: MissingRepositoryActionsOpt
   ));
   const isRepairingMissingRepository = computed(() => missingRepositoryAction.value === "relocating");
   const isDeletingMissingRepository = computed(() => options.isDeletingRepository.value);
-  const isNeteaseCacheMissing = computed(() => (
-    options.activeRepository.value?.backend.pluginId === "momobako.source.netease-cloud-music"
-    && options.activeRepository.value.localCache?.status !== "ready"
-  ));
 
   watch(options.activeRepoId, () => {
     missingRepositoryError.value = "";
@@ -37,7 +32,7 @@ export function useMissingRepositoryActions(options: MissingRepositoryActionsOpt
     if (!options.activeRepoId.value || isMissingRepositoryBusy.value) return;
     missingRepositoryError.value = "";
     const selected = await openDialog({
-      title: isNeteaseCacheMissing.value ? "指定网易云缓存目录" : "重定向资源库位置",
+      title: "重定向资源库位置",
       directory: true,
       multiple: false,
     });
@@ -45,14 +40,7 @@ export function useMissingRepositoryActions(options: MissingRepositoryActionsOpt
 
     missingRepositoryAction.value = "relocating";
     try {
-      if (isNeteaseCacheMissing.value) {
-        if (!options.configureNeteaseRepositoryCache) {
-          throw new Error("缺少网易云缓存目录配置能力");
-        }
-        await options.configureNeteaseRepositoryCache(options.activeRepoId.value, selected);
-      } else {
-        await options.relocateMissingRepository(options.activeRepoId.value, selected);
-      }
+      await options.relocateMissingRepository(options.activeRepoId.value, selected);
       missingRepositoryError.value = "";
     } catch (cause) {
       missingRepositoryError.value = cause instanceof Error ? cause.message : String(cause);

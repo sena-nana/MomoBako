@@ -177,7 +177,7 @@ function defaultPlaylistSummary(repoId = "repo-main-001"): PlaylistSummary {
     repoId,
     name: "Mock Playlist",
     playerTypeId: "momobako.playlist.audio-sequence",
-    playerPluginId: "momobako.preview.media",
+    playerPluginId: "momobako.player.audio",
     playerLabel: "音频顺序播放",
     fileClass: "audio",
     itemCount: 1,
@@ -690,6 +690,9 @@ function previewPluginModuleSource(pluginId: string) {
   if (pluginId === "momobako.preview.media") {
     return mediaPreviewPluginSourceForTest();
   }
+  if (pluginId === "momobako.player.audio") {
+    return audioPlayerPluginSourceForTest();
+  }
   if (pluginId === "user.repository-cache-preview-source-tool") {
     return [
       "export function register(ctx) {",
@@ -786,10 +789,6 @@ function previewPluginModuleSource(pluginId: string) {
     const sourcePath = resolve("External/Plugins/service-downloader/src/register.js");
     return readFileSync(sourcePath, "utf-8");
   }
-  if (pluginId === "momobako.library.netease-cloud-music") {
-    const sourcePath = resolve("External/Plugins/library-netease-cloud-music/src/register.js");
-    return readFileSync(sourcePath, "utf-8");
-  }
   if (pluginId === "momobako.tool.api-playground") {
     return [
       "export function register(ctx) {",
@@ -880,13 +879,28 @@ function mediaPreviewPluginSourceForTest() {
     .replace(
       new RegExp('import\\s*\\{[\\s\\S]*?\\}\\s*from\\s*"\\./mediaExtensions\\.js";\\s*'),
       [
-        "const audioPreviewExtensions = ['mp3', 'wav', 'ogg', 'flac', 'm4a', 'aac', 'opus'];",
         "const imagePreviewExtensions = ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'avif', 'svg'];",
         "const videoPreviewExtensions = ['mp4', 'mov', 'mkv', 'webm', 'avi', 'm4v'];",
         "const isImageExtension = (extension) => imagePreviewExtensions.includes((extension ?? '').toLowerCase());",
-        "const isVideoExtension = (extension) => videoPreviewExtensions.includes((extension ?? '').toLowerCase());",
       ].join("\n"),
     );
+}
+
+function audioPlayerPluginSourceForTest() {
+  const sourcePaths = [
+    "audioExtensions.js",
+    "audioMetadata.js",
+    "lyrics.js",
+    "playbackSource.js",
+    "audioPreview.js",
+    "audioRuntime.js",
+    "register.js",
+  ];
+  return sourcePaths.map((fileName, index) => {
+    const source = readFileSync(resolve("External/Plugins/player-audio/src", fileName), "utf-8")
+      .replace(/import\s*\{[\s\S]*?\}\s*from\s*"\.\/[^\"]+";\s*/g, "");
+    return index === sourcePaths.length - 1 ? source : source.replace(/^export\s+/gm, "");
+  }).join("\n");
 }
 
 vi.mock("@tauri-apps/api/core", () => ({
@@ -1058,7 +1072,10 @@ vi.mock("@tauri-apps/api/core", () => ({
         repoId,
         name: request?.name ?? "新播放集",
         playerTypeId: request?.playerTypeId ?? "momobako.playlist.audio-sequence",
-        playerPluginId: "momobako.preview.media",
+        playerPluginId: request?.playerTypeId === "momobako.playlist.image-slideshow"
+          || request?.playerTypeId === "momobako.playlist.video-sequence"
+          ? "momobako.preview.media"
+          : "momobako.player.audio",
         playerLabel: "音频顺序播放",
         fileClass: "audio",
         itemCount: 0,
@@ -1557,14 +1574,14 @@ vi.mock("@tauri-apps/api/core", () => ({
         ? "webdav"
         : backendPluginId === "momobako.cloud-drive"
           ? "cloud"
-          : backendPluginId === "momobako.source.netease-cloud-music"
+          : backendPluginId === "momobako.netease.source"
             ? "netease-cloud-music"
           : "filesystem";
       const backendName = backendPluginId === "momobako.webdav"
         ? "WebDAV"
         : backendPluginId === "momobako.cloud-drive"
           ? "Cloud Drive"
-          : backendPluginId === "momobako.source.netease-cloud-music"
+          : backendPluginId === "momobako.netease.source"
             ? "Netease Cloud Music"
           : "Local Filesystem";
       const created = {
@@ -1580,7 +1597,7 @@ vi.mock("@tauri-apps/api/core", () => ({
         status: "ready",
         assetCount: 0,
         updatedAt: "2026-06-05T00:18:00Z",
-        localCache: backendPluginId === "momobako.source.netease-cloud-music"
+        localCache: backendPluginId === "momobako.netease.source"
           ? {
             required: true,
             path: request?.path ?? "C:/Mock/NewRepo",

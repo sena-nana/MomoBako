@@ -566,19 +566,6 @@ impl RepositoryState {
                     .and_then(|value| value.parse::<i64>().ok())
             })
             .ok_or_else(|| "virtual entry is missing songId".to_string())?;
-        let account_cookie = source_payload
-            .get("accountCookie")
-            .or_else(|| metadata.get("accountCookie"))
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or_default();
-        let backend_account_cookie = repo
-            .backend_record
-            .config
-            .get("cookie")
-            .and_then(serde_json::Value::as_str)
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .unwrap_or(account_cookie);
         emit_entry_playback_progress(
             &mut emit,
             "download",
@@ -590,21 +577,33 @@ impl RepositoryState {
             None,
             None,
         )?;
-        let managed_cache_root = if repo.backend_record.plugin_id == NETEASE_CLOUD_MUSIC_PLUGIN_ID {
-            Some(ensure_netease_cache_ready(repo)?)
-        } else {
-            None
+        let managed_cache_root = match repo.summary.local_cache.as_ref() {
+            Some(cache) if cache.status == "ready" => cache.path.clone(),
+            Some(cache) if cache.required => {
+                return Err("来源资源库缓存目录不可用，请在插件设置中重新指定".to_string())
+            }
+            _ => None,
         };
-        let payload = serde_json::json!({
-            "accountCookie": backend_account_cookie,
-            "songId": song_id,
-            "level": source_payload.get("level").cloned().unwrap_or_else(|| serde_json::json!("standard")),
-            "repoId": repo_id,
-            "entryPath": entry_path,
-            "managedCacheRoot": managed_cache_root.as_ref().map(|path| path.to_string_lossy().to_string()),
-            "sourcePayload": source_payload,
+        let mut payload = source_payload.as_object().cloned().unwrap_or_default();
+        payload.retain(|key, _| {
+            let normalized = key.to_ascii_lowercase();
+            !normalized.contains("cookie")
+                && !normalized.contains("password")
+                && !normalized.contains("secret")
+                && normalized != "token"
         });
-        let response = call_downloader_prepare_track_playback(&self.root, payload)?;
+        payload.insert("songId".to_string(), serde_json::json!(song_id));
+        payload.insert("repoId".to_string(), serde_json::json!(repo_id));
+        payload.insert("entryPath".to_string(), serde_json::json!(entry_path));
+        payload.insert("config".to_string(), repo.backend_record.config.clone());
+        if let Some(path) = managed_cache_root {
+            payload.insert("managedCacheRoot".to_string(), serde_json::json!(path));
+        }
+        let response = call_source_prepare_entry_playback(
+            &self.root,
+            &repo.backend_record.plugin_id,
+            serde_json::Value::Object(payload),
+        )?;
         let cached = response.get("cached").and_then(serde_json::Value::as_bool);
         emit_entry_playback_progress(
             &mut emit,

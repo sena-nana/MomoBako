@@ -170,12 +170,14 @@ fn netease_cache_fresh(record: &NeteaseDirectoryCacheRecord) -> bool {
     age.whole_seconds() <= NETEASE_DIRECTORY_CACHE_TTL_SECS
 }
 
-fn mirror_netease_entries_to_assets(
+/// 将分页返回的网易云歌曲水合为资产，并仅补齐 Parser 默认元数据。
+pub(super) fn mirror_netease_entries_to_assets(
     tx: &Transaction<'_>,
     repo_id: &str,
     entries: &[FileSystemEntry],
     synced_at: &str,
     source_metadata_keys: &[String],
+    plugin_defaults_by_path: &BTreeMap<String, BTreeMap<String, serde_json::Value>>,
 ) -> Result<(), rusqlite::Error> {
     for entry in entries {
         if !matches!(entry.kind, FileSystemEntryKind::File) {
@@ -238,7 +240,7 @@ fn mirror_netease_entries_to_assets(
             synced_at,
             Some(&modified_at),
             &[],
-            None,
+            plugin_defaults_by_path.get(&entry.path),
             false,
         )?;
         sync_mirrored_source_metadata(
@@ -307,6 +309,30 @@ fn load_netease_directory_page(
     )?;
     let source_metadata_keys =
         source_metadata_mirror_keys(&state.root, &repo.backend_record.plugin_id);
+    let page_asset_ids = page
+        .entries
+        .iter()
+        .filter(|entry| matches!(entry.kind, FileSystemEntryKind::File))
+        .map(|entry| asset_id_for_path(&repo.summary.repo_id, &entry.path))
+        .collect::<Vec<_>>();
+    let existing_metadata_by_asset_id =
+        load_metadata_maps_for_assets(connection, &page_asset_ids).map_err(db_error)?;
+    let existing_metadata_by_path = page
+        .entries
+        .iter()
+        .filter_map(|entry| {
+            existing_metadata_by_asset_id
+                .get(&asset_id_for_path(&repo.summary.repo_id, &entry.path))
+                .cloned()
+                .map(|metadata| (entry.path.clone(), metadata))
+        })
+        .collect::<BTreeMap<_, _>>();
+    let plugin_defaults_by_path = metadata_defaults_for_file_system_entries(
+        &state.root,
+        &page.entries,
+        &existing_metadata_by_path,
+        &source_metadata_keys,
+    )?;
     let refreshed_at = now_rfc3339();
     let tx = connection.transaction().map_err(db_error)?;
     replace_netease_directory_cache_page(
@@ -325,6 +351,7 @@ fn load_netease_directory_page(
         &page.entries,
         &refreshed_at,
         &source_metadata_keys,
+        &plugin_defaults_by_path,
     )
     .map_err(db_error)?;
     tx.commit().map_err(db_error)?;

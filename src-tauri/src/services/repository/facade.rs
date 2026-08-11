@@ -1029,6 +1029,11 @@ impl RepositoryState {
                     let status = repository_runtime_status(&path, &backend, stored_status.as_str());
                     let backend_config_json: String = row.get(4)?;
                     let backend_config = parse_backend_config_json(&backend_config_json).map_err(to_from_sql_error)?;
+                    let authentication = repository_authentication_status(
+                        &plugin_registry,
+                        &backend_plugin_id,
+                        &backend_config,
+                    );
                     Ok(RepositoryRecord {
                         summary: RepositorySummary {
                             repo_id: row.get(0)?,
@@ -1039,6 +1044,7 @@ impl RepositoryState {
                             asset_count: 0,
                             updated_at: row.get(6)?,
                             local_cache: repository_local_cache_status(&path, &backend_plugin_id),
+                            authentication,
                         },
                         backend_record: RepositoryBackendRecord {
                             plugin_id: backend_plugin_id,
@@ -1076,6 +1082,11 @@ impl RepositoryState {
                 let backend_config_json: String = row.get(4)?;
                 let backend_config =
                     parse_backend_config_json(&backend_config_json).map_err(to_from_sql_error)?;
+                let authentication = repository_authentication_status(
+                    &plugin_registry,
+                    &backend_plugin_id,
+                    &backend_config,
+                );
                 Ok(RepositoryRecord {
                     summary: RepositorySummary {
                         repo_id: row.get(0)?,
@@ -1086,6 +1097,7 @@ impl RepositoryState {
                         asset_count: 0,
                         updated_at: row.get(6)?,
                         local_cache: repository_local_cache_status(&path, &backend_plugin_id),
+                        authentication,
                     },
                     backend_record: RepositoryBackendRecord {
                         plugin_id: backend_plugin_id,

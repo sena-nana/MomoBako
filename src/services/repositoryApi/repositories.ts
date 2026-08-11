@@ -3,6 +3,8 @@ import type {
   RepositoryDeleteRequest,
   NeteaseRepositoryCacheConfigureRequest,
   NeteaseRepositoryCacheConfigureResponse,
+  SourceRepositoryCacheConfigureRequest,
+  SourceRepositoryCacheConfigureResponse,
   RepositoryBackendConfigUpdateRequest,
   RepositoryExportRequest,
   RepositoryExportResponse,
@@ -55,6 +57,14 @@ export function updateRepositoryBackendConfig(request: RepositoryBackendConfigUp
 
 export function configureNeteaseRepositoryCache(request: NeteaseRepositoryCacheConfigureRequest) {
   return invokeCommand<NeteaseRepositoryCacheConfigureResponse>(
+    "configure_netease_repository_cache",
+    { request },
+  );
+}
+
+/** 配置需要本地缓存的 Source 仓库；当前宿主命令同时负责迁移旧网易云缓存。 */
+export function configureSourceRepositoryCache(request: SourceRepositoryCacheConfigureRequest) {
+  return invokeCommand<SourceRepositoryCacheConfigureResponse>(
     "configure_netease_repository_cache",
     { request },
   );

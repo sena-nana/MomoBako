@@ -1,0 +1,54 @@
+{
+  "pluginId": "momobako.player.audio",
+  "name": "Audio Player",
+  "version": "0.1.0",
+  "type": {
+    "layer": "library-kind",
+    "kind": "preview"
+  },
+  "kind": "preview",
+  "category": "preview",
+  "description": "提供可替换的通用音频预览、歌词与播放列表播放能力。",
+  "capabilities": ["preview", "playlist", "audio", "lyrics", "momobako.player.audio"],
+  "enabled": true,
+  "sdk": "frontend",
+  "runtime": "vue-module",
+  "entry": {
+    "frontend": {
+      "module": "dist/register.js",
+      "export": "register"
+    }
+  },
+  "contributes": {
+    "preview": {
+      "extensions": ["mp3", "wav", "ogg", "flac", "m4a", "aac", "opus"],
+      "thumbnail": false
+    },
+    "playlistPlayers": [
+      {
+        "playerTypeId": "momobako.playlist.audio-sequence",
+        "capabilityId": "momobako.player.audio",
+        "label": "音频顺序播放",
+        "fileClass": "audio",
+        "supportedExtensions": ["mp3", "wav", "ogg", "flac", "m4a", "aac", "opus"],
+        "supportsSeek": true,
+        "supportsVolume": true,
+        "supportsPreviewNavigation": true,
+        "description": "通过宿主播放源路由播放通用音频队列。"
+      }
+    ]
+  },
+  "permissions": ["preview:read"],
+  "requires": [],
+  "optional": ["momobako.parser.audio"],
+  "hooks": [
+    { "slot": "playlist", "action": "player.audio.enqueue", "label": "加入播放列表" },
+    { "slot": "progress", "action": "player.audio.reportProgress", "label": "更新播放进度" }
+  ],
+  "compat": {
+    "sdkVersion": "1",
+    "legacyPluginIds": []
+  },
+  "source": "builtin",
+  "status": "ready"
+}

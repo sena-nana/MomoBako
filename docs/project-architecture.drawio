@@ -450,7 +450,7 @@
         <mxCell id="p4-data4" value="浏览器扩展与外部 API&#xa;BrowserExtension 读取 external-api.json 中的 baseUrl/token&#xa;POST /external/v1/assets:add&#xa;MomoBako 运行时负责下载、导入、metadata 写入与鉴权" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff8c5;strokeColor=#d4a72c;fontColor=#3d2d00;arcSize=8;fontStyle=1;" vertex="1" parent="p4-data-lane">
           <mxGeometry x="1050" y="70" width="330" height="120" as="geometry"/>
         </mxCell>
-        <mxCell id="p4-data5" value="典型插件实例&#xa;source: local-filesystem / source-netease-cloud-music&#xa;service: service-downloader / service-provider-*&#xa;library-kind: library-asmr / library-netease-cloud-music&#xa;tool page: api-playground / file-manager / eagle-importer" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fbefff;strokeColor=#bf3989;fontColor=#6e1b50;arcSize=8;" vertex="1" parent="p4-data-lane">
+        <mxCell id="p4-data5" value="典型插件实例&#xa;source: local-filesystem / source-netease-cloud-music&#xa;parser: parser-audio / parser-netease-cloud-music&#xa;player: player-audio / media-preview&#xa;service: service-downloader / service-provider-*" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fbefff;strokeColor=#bf3989;fontColor=#6e1b50;arcSize=8;" vertex="1" parent="p4-data-lane">
           <mxGeometry x="1410" y="70" width="390" height="120" as="geometry"/>
         </mxCell>
         <mxCell id="p4-data6" value="宿主为何这样设计&#xa;统一包格式便于分发与版本锁定&#xa;宿主管理 config/data 目录便于迁移与排障&#xa;核心掌握危险写路径，插件保留扩展能力和独立发布节奏" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d0d7de;fontColor=#24292f;arcSize=8;" vertex="1" parent="p4-data-lane">

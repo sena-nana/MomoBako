@@ -4,6 +4,7 @@ use super::*;
 
 #[cfg(test)]
 mod tests {
+    use super::super::browser::mirror_netease_entries_to_assets;
     use super::*;
     use std::net::TcpListener;
     use std::sync::MutexGuard;
@@ -43,6 +44,130 @@ mod tests {
             .get_or_init(|| Mutex::new(()))
             .lock()
             .expect("playback test lock should succeed")
+    }
+
+    #[test]
+    fn registry_migration_rewrites_legacy_netease_source_id_idempotently() {
+        let connection = Connection::open_in_memory().expect("registry should open");
+        connection
+            .execute_batch(REGISTRY_SCHEMA_SQL)
+            .expect("registry schema should initialize");
+        let now = now_rfc3339();
+        connection
+            .execute(
+                r#"
+                INSERT INTO repositories (
+                  repo_id, name, path, backend_plugin_id, backend_config_json,
+                  status, created_at, updated_at
+                ) VALUES (?1, ?2, ?3, ?4, '{}', 'ready', ?5, ?5)
+                "#,
+                params![
+                    "legacy-netease",
+                    "Legacy Netease",
+                    "netease-cloud-music://account/42",
+                    LEGACY_NETEASE_CLOUD_MUSIC_PLUGIN_ID,
+                    now,
+                ],
+            )
+            .expect("legacy registry record should insert");
+
+        migrate_registry_schema(&connection).expect("source id migration should succeed");
+        migrate_registry_schema(&connection).expect("source id migration should be idempotent");
+
+        let plugin_id: String = connection
+            .query_row(
+                "SELECT backend_plugin_id FROM repositories WHERE repo_id = 'legacy-netease'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("migrated source id should load");
+        assert_eq!(plugin_id, NETEASE_CLOUD_MUSIC_PLUGIN_ID);
+    }
+
+    #[test]
+    fn repository_migration_moves_audio_playlists_to_audio_player_idempotently() {
+        let connection = Connection::open_in_memory().expect("repository should open");
+        connection
+            .execute_batch(REPOSITORY_SCHEMA_SQL)
+            .expect("repository schema should initialize");
+        let now = now_rfc3339();
+        connection
+            .execute(
+                r#"
+                INSERT INTO repositories (
+                  repo_id, name, root_path, schema_version, created_at, updated_at
+                ) VALUES (?1, ?2, ?3, 3, ?4, ?4)
+                "#,
+                params!["repo-audio-migration", "Audio Repo", "C:/Mock/Audio", now],
+            )
+            .expect("repository row should insert");
+        connection
+            .execute(
+                r#"
+                INSERT INTO playlists (
+                  playlist_id, repo_id, name, player_type_id, player_plugin_id,
+                  player_label, file_class, sort_order, created_at, updated_at
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'audio', 0, ?7, ?7)
+                "#,
+                params![
+                    "legacy-audio-playlist",
+                    "repo-audio-migration",
+                    "Legacy Audio",
+                    "momobako.playlist.audio-sequence",
+                    LEGACY_AUDIO_PLAYER_PLUGIN_ID,
+                    "Audio",
+                    now,
+                ],
+            )
+            .expect("legacy playlist should insert");
+
+        ensure_repository_schema_current(&connection)
+            .expect("audio player migration should succeed");
+        ensure_repository_schema_current(&connection)
+            .expect("audio player migration should be idempotent");
+
+        let plugin_id: String = connection
+            .query_row(
+                "SELECT player_plugin_id FROM playlists WHERE playlist_id = 'legacy-audio-playlist'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("migrated playlist should load");
+        assert_eq!(plugin_id, AUDIO_PLAYER_PLUGIN_ID);
+    }
+
+    #[test]
+    fn source_data_directory_migration_merges_missing_files_idempotently() {
+        let workspace = TestWorkspace::new("source-data-directory-migration");
+        let service_root = workspace.path("service");
+        let legacy = plugin_data_dir(&service_root, LEGACY_NETEASE_CLOUD_MUSIC_PLUGIN_ID);
+        let current = plugin_data_dir(&service_root, NETEASE_CLOUD_MUSIC_PLUGIN_ID);
+        fs::create_dir_all(legacy.join("cache")).expect("legacy data dir should exist");
+        fs::create_dir_all(&current).expect("current data dir should exist");
+        fs::write(legacy.join("last-session.json"), b"legacy-session")
+            .expect("legacy session should write");
+        fs::write(legacy.join("cache/index.json"), b"legacy-index")
+            .expect("legacy nested data should write");
+        fs::write(current.join("last-session.json"), b"current-session")
+            .expect("current session should write");
+
+        migrate_builtin_plugin_data_dirs(&service_root)
+            .expect("source data migration should succeed");
+        migrate_builtin_plugin_data_dirs(&service_root)
+            .expect("source data migration should be idempotent");
+
+        assert_eq!(
+            fs::read(current.join("last-session.json")).expect("current session should read"),
+            b"current-session"
+        );
+        assert_eq!(
+            fs::read(current.join("cache/index.json")).expect("nested data should migrate"),
+            b"legacy-index"
+        );
+        assert!(
+            legacy.is_dir(),
+            "legacy Source data remains recoverable after merge"
+        );
     }
 
     #[test]
@@ -1458,6 +1583,7 @@ mod tests {
             .call_plugin(PluginCallRequest {
                 plugin_id: LOCAL_FILESYSTEM_PLUGIN_ID.to_string(),
                 method: "filesystem.listTree".to_string(),
+                repository_id: None,
                 payload: serde_json::json!({
                     "repoRoot": workspace.path("repo"),
                     "path": "note.txt"
@@ -2145,6 +2271,7 @@ mod tests {
         PluginCallRequest {
             plugin_id: plugin_id.to_string(),
             method: "filesystem.listFiles".to_string(),
+            repository_id: None,
             payload: serde_json::json!({
                 "repoRoot": repo_root,
                 "config": {}
@@ -3620,6 +3747,119 @@ mod tests {
             Some(&serde_json::json!("https://example.test/cover-3301.jpg"))
         );
 
+        fs::remove_dir_all(root).expect("test temp root should be removed");
+    }
+
+    #[test]
+    fn metadata_parser_source_projection_only_contains_manifest_keys() {
+        let projected = project_source_metadata(
+            Some(&serde_json::json!({
+                "songId": 3301,
+                "songName": "公开歌曲",
+                "accountCookie": "MUSIC_U=secret",
+                "privateSession": { "token": "secret" }
+            })),
+            &["songId".to_string(), "songName".to_string()],
+        )
+        .expect("whitelisted source metadata should be projected");
+
+        assert_eq!(projected.get("songId"), Some(&serde_json::json!(3301)));
+        assert_eq!(
+            projected.get("songName"),
+            Some(&serde_json::json!("公开歌曲"))
+        );
+        assert!(!projected.contains_key("accountCookie"));
+        assert!(!projected.contains_key("privateSession"));
+    }
+
+    #[test]
+    fn netease_page_asset_hydration_applies_parser_defaults_without_overwriting_user_metadata() {
+        let (state, root, repo_root, _thumbnail_root) =
+            create_test_state("netease-page-parser-defaults");
+        let repo_id = create_netease_repository_without_initial_sync(
+            &state,
+            &repo_root,
+            serde_json::json!({
+                "accountId": "123456",
+                "cookie": "MUSIC_U=test"
+            }),
+        );
+        let repo = state
+            .load_repository_record(&repo_id)
+            .expect("repository record should load");
+        let mut connection = state
+            .open_repository_connection(
+                &repo.summary.repo_id,
+                &repo.summary.path,
+                &repo.backend_record,
+            )
+            .expect("repository connection should open");
+        let path = "创建的歌单/分页歌单/歌手 A - 第一页.mp3";
+        let entry = FileSystemEntry {
+            path: path.to_string(),
+            name: "歌手 A - 第一页.mp3".to_string(),
+            kind: FileSystemEntryKind::File,
+            extension: Some("mp3".to_string()),
+            size_bytes: Some(0),
+            modified_at: Some(now_rfc3339()),
+            is_virtual: true,
+            provider_id: Some(NETEASE_CLOUD_MUSIC_PROVIDER_ID.to_string()),
+            provider_item_id: Some("3301".to_string()),
+            source_payload: Some(serde_json::json!({
+                "songId": 3301,
+                "songName": "第一页"
+            })),
+            local_absolute_path: None,
+            status: None,
+            shared_asset_id: None,
+            tags: None,
+            thumbnail_local_absolute_path: None,
+        };
+        let parser_defaults = BTreeMap::from([(
+            path.to_string(),
+            BTreeMap::from([
+                ("title".to_string(), serde_json::json!("第一页")),
+                ("artist".to_string(), serde_json::json!("歌手 A")),
+            ]),
+        )]);
+        let source_keys = vec!["songId".to_string(), "songName".to_string()];
+
+        let tx = connection.transaction().expect("transaction should start");
+        mirror_netease_entries_to_assets(
+            &tx,
+            &repo_id,
+            std::slice::from_ref(&entry),
+            &now_rfc3339(),
+            &source_keys,
+            &parser_defaults,
+        )
+        .expect("paged asset metadata should hydrate");
+        tx.commit().expect("transaction should commit");
+        let metadata = metadata_for_asset_path(&state, &repo_id, path);
+        assert_eq!(metadata.get("title"), Some(&serde_json::json!("第一页")));
+        assert_eq!(metadata.get("artist"), Some(&serde_json::json!("歌手 A")));
+
+        let tx = connection
+            .transaction()
+            .expect("second transaction should start");
+        let asset_id = asset_id_for_path(&repo_id, path);
+        upsert_metadata_value(&tx, &asset_id, "title", &serde_json::json!("用户标题"))
+            .expect("user title should update");
+        mirror_netease_entries_to_assets(
+            &tx,
+            &repo_id,
+            &[entry],
+            &now_rfc3339(),
+            &source_keys,
+            &parser_defaults,
+        )
+        .expect("paged asset metadata should hydrate again");
+        tx.commit().expect("second transaction should commit");
+        let metadata = metadata_for_asset_path(&state, &repo_id, path);
+        assert_eq!(metadata.get("title"), Some(&serde_json::json!("用户标题")));
+        assert_eq!(metadata.get("artist"), Some(&serde_json::json!("歌手 A")));
+
+        drop(connection);
         fs::remove_dir_all(root).expect("test temp root should be removed");
     }
 
@@ -5637,19 +5877,12 @@ mod tests {
             let expected_repo_id = std::env::var("MOMOBKO_TEST_EXPECTED_REPO_ID")
                 .expect("expected repo id should be provided");
             assert_eq!(payload["songId"], serde_json::json!(3001));
-            assert_eq!(
-                payload["accountCookie"],
-                serde_json::json!("MUSIC_U=lazy-cookie")
-            );
+            assert!(payload.get("accountCookie").is_none());
             assert_eq!(payload["level"], serde_json::json!("exhigh"));
             assert_eq!(payload["repoId"], serde_json::json!(expected_repo_id));
             assert_eq!(
                 payload["entryPath"],
                 serde_json::json!("Created/lazy-track.mp3")
-            );
-            assert_eq!(
-                payload["sourcePayload"]["provider"],
-                serde_json::json!("netease-cloud-music")
             );
             Ok(serde_json::json!({
                 "localPath": "C:/Mock/Temp/lazy-track.mp3",

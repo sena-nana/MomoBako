@@ -29,7 +29,6 @@ import { useWorkspaceComponentPreload } from "../useWorkspaceComponentPreload";
 import { useWorkspaceFilesSurfaceViewModel } from "../files/useFilesSurfaceViewModel";
 import { usePlaylistPageBindings } from "../playlists/usePlaylistPageBindings";
 import { useEntryActionRepositoryDialog } from "../useEntryActionRepositoryDialog";
-import { useWorkspaceNeteaseAuthViewModel } from "./useWorkspaceNeteaseAuthViewModel";
 import { clearRecentAccessHistory } from "../../../services/repositoryApi";
 import { clearActiveSnapshotRecentAccess } from "../../../composables/workspace/state";
 import {
@@ -98,7 +97,6 @@ export function useWorkspaceHomeViewModel() {
     attachRepository,
     isDeletingRepository,
     openRepositoryDeleteDialog,
-    configureNeteaseRepositoryCacheInWorkspace,
     relocateMissingRepository,
   } = useWorkspaceRepository();
   const {
@@ -443,7 +441,6 @@ export function useWorkspaceHomeViewModel() {
   } = useMissingRepositoryActions({
     activeRepoId,
     activeRepository,
-    configureNeteaseRepositoryCache: configureNeteaseRepositoryCacheInWorkspace,
     isDeletingRepository,
     openRepositoryDeleteDialog,
     refreshRepositoryWorkspaceSilently: refreshActiveRepositoryWorkspaceSilently,
@@ -601,17 +598,6 @@ export function useWorkspaceHomeViewModel() {
   } = useEntryActionRepositoryDialog({
     activeRepoId,
     repositories,
-  });
-
-  const {
-    activeNeteaseLoginExpired,
-    isRefreshingNeteaseLogin,
-    refreshActiveNeteaseLoginStatus,
-    requestActiveNeteaseRelogin,
-  } = useWorkspaceNeteaseAuthViewModel({
-    activeRepoId,
-    activeSnapshot,
-    fileBrowser,
   });
 
   const { fileEntryContextMenu } = useWorkspaceContextMenu({
@@ -853,7 +839,6 @@ export function useWorkspaceHomeViewModel() {
     activeFilterCount,
     activeRepoId,
     activeLibrarySearchShortcuts,
-    activeNeteaseLoginExpired,
     activeRepository,
     activeRepositoryActionId,
     activeSnapshot,
@@ -910,7 +895,6 @@ export function useWorkspaceHomeViewModel() {
     isPlaylistPanel,
     isRepairingMissingRepository,
     isRepositoryWritable,
-    isRefreshingNeteaseLogin,
     isRunningRepositoryAction,
     isSearching,
     isSearchPanel,
@@ -926,13 +910,11 @@ export function useWorkspaceHomeViewModel() {
     openSearchHit,
     playlistPageHandlers,
     playlistPageProps,
-    refreshActiveNeteaseLoginStatus,
     refreshMissingRepository,
     renameValue,
     repositories,
     repositoryActions,
     clearSystemLogsInWorkspace,
-    requestActiveNeteaseRelogin,
     runActiveRepositoryAction,
     ratingFilterOptions,
     searchQuery,

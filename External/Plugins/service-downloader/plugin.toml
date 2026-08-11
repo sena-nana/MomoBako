@@ -1,6 +1,6 @@
 # Mutsuki ABI v2 执行清单；构建阶段会刷新 artifact 哈希。
 plugin_id = "momobako.service.downloader"
-version = "0.1.0"
+version = "0.2.0"
 api_version = "mutsuki-plugin-v1"
 requires = []
 
@@ -11,35 +11,14 @@ sha256 = "sha256:build"
 
 [provides]
 protocols = [
-  { protocol_id = "momobako.downloader.prepareTrackPlayback", version = "1.0.0", input_schema = {}, output_schema = {}, error_schema = {}, codec = "json", compatibility = "compatible" },
-  { protocol_id = "momobako.downloader.downloadTrackPackage", version = "1.0.0", input_schema = {}, output_schema = {}, error_schema = {}, codec = "json", compatibility = "compatible" },
-  { protocol_id = "momobako.downloader.downloadPlaylistPackage", version = "1.0.0", input_schema = {}, output_schema = {}, error_schema = {}, codec = "json", compatibility = "compatible" },
-  { protocol_id = "momobako.downloader.resolveLyrics", version = "1.0.0", input_schema = {}, output_schema = {}, error_schema = {}, codec = "json", compatibility = "compatible" },
-  { protocol_id = "momobako.downloader.clearTrackCache", version = "1.0.0", input_schema = {}, output_schema = {}, error_schema = {}, codec = "json", compatibility = "compatible" },
   { protocol_id = "momobako.downloader.ensureRuntime", version = "1.0.0", input_schema = {}, output_schema = {}, error_schema = {}, codec = "json", compatibility = "compatible" },
   { protocol_id = "momobako.downloader.enqueueDownload", version = "1.0.0", input_schema = {}, output_schema = {}, error_schema = {}, codec = "json", compatibility = "compatible" },
   { protocol_id = "momobako.downloader.awaitDownload", version = "1.0.0", input_schema = {}, output_schema = {}, error_schema = {}, codec = "json", compatibility = "compatible" },
   { protocol_id = "momobako.downloader.removeDownload", version = "1.0.0", input_schema = {}, output_schema = {}, error_schema = {}, codec = "json", compatibility = "compatible" },
   { protocol_id = "momobako.downloader.getRuntimeStatus", version = "1.0.0", input_schema = {}, output_schema = {}, error_schema = {}, codec = "json", compatibility = "compatible" },
 ]
-protocol_classes = {
-  "momobako.downloader.prepareTrackPlayback" = "effect",
-  "momobako.downloader.downloadTrackPackage" = "effect",
-  "momobako.downloader.downloadPlaylistPackage" = "effect",
-  "momobako.downloader.resolveLyrics" = "effect",
-  "momobako.downloader.clearTrackCache" = "effect",
-  "momobako.downloader.ensureRuntime" = "effect",
-  "momobako.downloader.enqueueDownload" = "effect",
-  "momobako.downloader.awaitDownload" = "effect",
-  "momobako.downloader.removeDownload" = "effect",
-  "momobako.downloader.getRuntimeStatus" = "effect",
-}
+protocol_classes = {}
 handler_bindings = [
-  { binding_id = "binding:momobako.service.downloader:momobako.downloader.prepareTrackPlayback", plugin_id = "momobako.service.downloader", protocol_id = "momobako.downloader.prepareTrackPlayback", target_protocol_id = "momobako.downloader.prepareTrackPlayback", target_runner_hint = "momobako.service.downloader.runner", pool_id = "default", priority = 0, policy = "single", metadata = {} },
-  { binding_id = "binding:momobako.service.downloader:momobako.downloader.downloadTrackPackage", plugin_id = "momobako.service.downloader", protocol_id = "momobako.downloader.downloadTrackPackage", target_protocol_id = "momobako.downloader.downloadTrackPackage", target_runner_hint = "momobako.service.downloader.runner", pool_id = "default", priority = 0, policy = "single", metadata = {} },
-  { binding_id = "binding:momobako.service.downloader:momobako.downloader.downloadPlaylistPackage", plugin_id = "momobako.service.downloader", protocol_id = "momobako.downloader.downloadPlaylistPackage", target_protocol_id = "momobako.downloader.downloadPlaylistPackage", target_runner_hint = "momobako.service.downloader.runner", pool_id = "default", priority = 0, policy = "single", metadata = {} },
-  { binding_id = "binding:momobako.service.downloader:momobako.downloader.resolveLyrics", plugin_id = "momobako.service.downloader", protocol_id = "momobako.downloader.resolveLyrics", target_protocol_id = "momobako.downloader.resolveLyrics", target_runner_hint = "momobako.service.downloader.runner", pool_id = "default", priority = 0, policy = "single", metadata = {} },
-  { binding_id = "binding:momobako.service.downloader:momobako.downloader.clearTrackCache", plugin_id = "momobako.service.downloader", protocol_id = "momobako.downloader.clearTrackCache", target_protocol_id = "momobako.downloader.clearTrackCache", target_runner_hint = "momobako.service.downloader.runner", pool_id = "default", priority = 0, policy = "single", metadata = {} },
   { binding_id = "binding:momobako.service.downloader:momobako.downloader.ensureRuntime", plugin_id = "momobako.service.downloader", protocol_id = "momobako.downloader.ensureRuntime", target_protocol_id = "momobako.downloader.ensureRuntime", target_runner_hint = "momobako.service.downloader.runner", pool_id = "default", priority = 0, policy = "single", metadata = {} },
   { binding_id = "binding:momobako.service.downloader:momobako.downloader.enqueueDownload", plugin_id = "momobako.service.downloader", protocol_id = "momobako.downloader.enqueueDownload", target_protocol_id = "momobako.downloader.enqueueDownload", target_runner_hint = "momobako.service.downloader.runner", pool_id = "default", priority = 0, policy = "single", metadata = {} },
   { binding_id = "binding:momobako.service.downloader:momobako.downloader.awaitDownload", plugin_id = "momobako.service.downloader", protocol_id = "momobako.downloader.awaitDownload", target_protocol_id = "momobako.downloader.awaitDownload", target_runner_hint = "momobako.service.downloader.runner", pool_id = "default", priority = 0, policy = "single", metadata = {} },
@@ -74,11 +53,6 @@ runner_id = "momobako.service.downloader.runner"
 plugin_id = "momobako.service.downloader"
 plugin_generation = 1
 accepted_protocol_ids = [
-  "momobako.downloader.prepareTrackPlayback",
-  "momobako.downloader.downloadTrackPackage",
-  "momobako.downloader.downloadPlaylistPackage",
-  "momobako.downloader.resolveLyrics",
-  "momobako.downloader.clearTrackCache",
   "momobako.downloader.ensureRuntime",
   "momobako.downloader.enqueueDownload",
   "momobako.downloader.awaitDownload",

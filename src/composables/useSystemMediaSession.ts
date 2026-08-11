@@ -44,16 +44,16 @@ export function useSystemMediaSession(player: PlaylistPlayerController) {
 
   const metadata = computed(() => {
     const item = player.currentItem.value;
-    const payload = item?.sourcePayload ?? {};
-    const artists = Array.isArray(payload.artists)
-      ? payload.artists.join(", ")
-      : typeof payload.artist === "string"
-        ? payload.artist
+    const fields = item?.metadata ?? {};
+    const artists = Array.isArray(fields.artists)
+      ? fields.artists.filter((value) => typeof value === "string").join(", ")
+      : typeof fields.artist === "string"
+        ? fields.artist
         : "";
     return {
-      title: String(payload.songName ?? item?.filename ?? "MomoBako"),
+      title: String(fields.title ?? item?.filename ?? "MomoBako"),
       artist: artists,
-      album: String(payload.albumName ?? ""),
+      album: String(fields.album ?? ""),
       artwork: artworkForItem(item),
     };
   });

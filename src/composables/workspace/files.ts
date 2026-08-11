@@ -33,8 +33,6 @@ import { loadThumbnailsForEntries, loadThumbnailsForSnapshot } from "./thumbnail
 import { joinRepositoryPath } from "./paths";
 import { scheduleIdleTask, shouldYieldEvery, yieldEvery } from "./scheduler";
 
-const NETEASE_SOURCE_PLUGIN_ID = "momobako.source.netease-cloud-music";
-
 export type FileBrowserLoadOptions = {
   includeTree?: boolean;
   specialLocation?: "trash";
@@ -151,8 +149,8 @@ export function buildPresetRootFileBrowserSnapshot(snapshot: RepositorySnapshot)
 
 let derivedRequestId = 0;
 let latestDerivedPromise: Promise<void> = Promise.resolve();
-let cancelNeteaseThumbnailPrefetch: (() => void) | null = null;
-const queuedNeteaseThumbnailPrefetchKeys = new Set<string>();
+let cancelVirtualThumbnailPrefetch: (() => void) | null = null;
+const queuedVirtualThumbnailPrefetchKeys = new Set<string>();
 
 function resolveLiveFileBrowserSnapshot(snapshot: FileBrowserSnapshot) {
   const current = fileBrowser.value;
@@ -239,7 +237,7 @@ export function applyFileBrowserSnapshot(
   latestDerivedPromise = buildFileBrowserDerivedState(snapshot, requestId);
   void latestDerivedPromise;
   loadThumbnailsForSnapshot(snapshot);
-  queueNeteaseThumbnailPrefetch(snapshot);
+  queueVirtualThumbnailPrefetch(snapshot);
 }
 
 export function appendFileBrowserSnapshot(snapshot: FileBrowserSnapshot) {
@@ -277,28 +275,28 @@ export function appendFileBrowserSnapshot(snapshot: FileBrowserSnapshot) {
       appendedEntries,
     );
   }
-  queueNeteaseThumbnailPrefetch(mergedSnapshot);
+  queueVirtualThumbnailPrefetch(mergedSnapshot);
 }
 
-function queueNeteaseThumbnailPrefetch(snapshot: FileBrowserSnapshot) {
-  cancelNeteaseThumbnailPrefetch?.();
-  cancelNeteaseThumbnailPrefetch = null;
+function queueVirtualThumbnailPrefetch(snapshot: FileBrowserSnapshot) {
+  cancelVirtualThumbnailPrefetch?.();
+  cancelVirtualThumbnailPrefetch = null;
   if (
-    snapshot.backendPluginId !== NETEASE_SOURCE_PLUGIN_ID
+    !snapshot.entries.some((entry) => entry.isVirtual)
     || !snapshot.hasMore
     || snapshot.nextOffset == null
   ) {
     return;
   }
   const key = `${snapshot.repoId}:${snapshot.currentPath}:${snapshot.nextOffset}`;
-  if (queuedNeteaseThumbnailPrefetchKeys.has(key)) return;
-  cancelNeteaseThumbnailPrefetch = scheduleIdleTask(() => {
-    queuedNeteaseThumbnailPrefetchKeys.add(key);
-    void prefetchNeteaseThumbnailPage(snapshot, key);
+  if (queuedVirtualThumbnailPrefetchKeys.has(key)) return;
+  cancelVirtualThumbnailPrefetch = scheduleIdleTask(() => {
+    queuedVirtualThumbnailPrefetchKeys.add(key);
+    void prefetchVirtualThumbnailPage(snapshot, key);
   }, 420);
 }
 
-async function prefetchNeteaseThumbnailPage(snapshot: FileBrowserSnapshot, key: string) {
+async function prefetchVirtualThumbnailPage(snapshot: FileBrowserSnapshot, key: string) {
   try {
     const preload = await getFileBrowser({
       repoId: snapshot.repoId,
@@ -317,10 +315,10 @@ async function prefetchNeteaseThumbnailPage(snapshot: FileBrowserSnapshot, key: 
     }
     loadThumbnailsForEntries(preload.repoId, preload.currentPath, preload.entries);
   } finally {
-    if (cancelNeteaseThumbnailPrefetch) {
-      cancelNeteaseThumbnailPrefetch = null;
+    if (cancelVirtualThumbnailPrefetch) {
+      cancelVirtualThumbnailPrefetch = null;
     }
-    queuedNeteaseThumbnailPrefetchKeys.delete(key);
+    queuedVirtualThumbnailPrefetchKeys.delete(key);
   }
 }
 

@@ -1,5 +1,5 @@
 {
-  "pluginId": "momobako.source.netease-cloud-music",
+  "pluginId": "momobako.netease.source",
   "build": {
     "type": "cargo-native",
     "sourceDir": "src",

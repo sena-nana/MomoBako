@@ -57,7 +57,7 @@ describe("ASMR plugin contracts", () => {
       "momobako.service.network-search",
       "momobako.service.provider.dlsite",
       "momobako.service.provider.asmr-one",
-      "momobako.preview.media",
+      "momobako.player.audio",
     ]));
     expect(manifest.optional).not.toEqual([]);
     expect(manifest.hooks.map((hook) => hook.slot)).toEqual(expect.arrayContaining([

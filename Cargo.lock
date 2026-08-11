@@ -2827,6 +2827,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "keyring"
+version = "3.6.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "eebcc3aff044e5944a8fbaf69eb277d11986064cba30c468730e8b9909fb551c"
+dependencies = [
+ "byteorder",
+ "log",
+ "windows-sys 0.60.2",
+ "zeroize",
+]
+
+[[package]]
 name = "kqueue"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3167,6 +3179,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "momobako_netease_parser"
+version = "0.1.0"
+dependencies = [
+ "momobako_mutsuki_plugin_sdk",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "momobako_parser_asmr_folder"
 version = "0.1.0"
 dependencies = [
@@ -3212,16 +3233,14 @@ dependencies = [
 
 [[package]]
 name = "momobako_service_downloader"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "momobako_mutsuki_plugin_sdk",
- "ncm-api-rs",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
  "sha1 0.10.7",
  "time",
- "tokio",
  "zip 2.4.2",
 ]
 
@@ -3253,14 +3272,17 @@ dependencies = [
 
 [[package]]
 name = "momobako_source_netease_cloud_music"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "base64 0.22.1",
+ "keyring",
  "momobako_mutsuki_plugin_sdk",
  "ncm-api-rs",
  "qrcode",
+ "reqwest 0.12.28",
  "serde",
  "serde_json",
+ "sha1 0.10.7",
  "time",
  "tokio",
 ]

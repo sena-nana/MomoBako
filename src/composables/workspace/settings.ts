@@ -15,6 +15,7 @@ import {
 } from "../../services/repositoryApi";
 import { emitSystemLogSilently } from "../../services/systemLog";
 import { syncRegisteredFrontendPluginManifests } from "../../plugins/sdk";
+import { syncSourceEntryActionManifests } from "../../plugins/sourceEntryActions";
 import type { PluginConfigSnapshot, PluginConfigValue, PluginManifest } from "../../types/repository";
 import {
   apiDesign,
@@ -33,6 +34,7 @@ type SettingsDataLoadOptions = {
 
 async function syncPreviewPlugins(items: PluginManifest[]) {
   try {
+    syncSourceEntryActionManifests(items);
     await syncRegisteredFrontendPluginManifests(items);
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : String(cause);

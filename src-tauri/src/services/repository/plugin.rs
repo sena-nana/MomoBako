@@ -36,11 +36,32 @@ pub(super) fn call_plugin(
     request: PluginCallRequest,
 ) -> Result<PluginCallResult, String> {
     state.ensure_initialized()?;
-    let payload = if request.payload.is_null() {
+    let mut payload = if request.payload.is_null() {
         serde_json::json!({})
     } else {
         request.payload
     };
+    if let Some(repository_id) = request.repository_id.as_deref() {
+        let repository = state.load_repository_record(repository_id)?;
+        let catalog = plugin_catalog(&state.root);
+        let requested_plugin_id = catalog.normalize_plugin_id(&request.plugin_id);
+        let repository_plugin_id =
+            catalog.normalize_plugin_id(&repository.backend_record.plugin_id);
+        if requested_plugin_id != repository_plugin_id {
+            return Err(format!(
+                "repository backend mismatch: {repository_id} uses {repository_plugin_id}, not {requested_plugin_id}"
+            ));
+        }
+        let object = payload.as_object_mut().ok_or_else(|| {
+            "plugin payload must be an object when repositoryId is provided".to_string()
+        })?;
+        object.insert("repoId".to_string(), serde_json::json!(repository_id));
+        object.insert(
+            "repoRoot".to_string(),
+            serde_json::json!(repository.summary.path),
+        );
+        object.insert("config".to_string(), repository.backend_record.config);
+    }
     let hook_context =
         plugin_hook_execution_context(&state.root, &request.plugin_id, &request.method);
     let started_at = now_rfc3339();
@@ -713,6 +734,36 @@ pub(crate) fn plugin_data_dir(service_root: &Path, plugin_id: &str) -> PathBuf {
     plugin_data_root_dir(service_root).join(plugin_data_dir_name(plugin_id))
 }
 
+/// 将旧 Source 的运行目录迁至新 ID；旧 Library 数据目录不会被删除或改名。
+pub(super) fn migrate_builtin_plugin_data_dirs(service_root: &Path) -> Result<(), String> {
+    let legacy = plugin_data_dir(service_root, LEGACY_NETEASE_CLOUD_MUSIC_PLUGIN_ID);
+    if !legacy.is_dir() {
+        return Ok(());
+    }
+    let current = plugin_data_dir(service_root, NETEASE_CLOUD_MUSIC_PLUGIN_ID);
+    if !current.exists() {
+        fs::rename(&legacy, &current).map_err(io_error)?;
+        return Ok(());
+    }
+    copy_missing_plugin_data(&legacy, &current)
+}
+
+/// 合并旧目录中尚未迁移的运行文件；新 ID 下已有文件始终优先。
+fn copy_missing_plugin_data(source: &Path, destination: &Path) -> Result<(), String> {
+    fs::create_dir_all(destination).map_err(io_error)?;
+    for entry in fs::read_dir(source).map_err(io_error)? {
+        let entry = entry.map_err(io_error)?;
+        let file_type = entry.file_type().map_err(io_error)?;
+        let target = destination.join(entry.file_name());
+        if file_type.is_dir() {
+            copy_missing_plugin_data(&entry.path(), &target)?;
+        } else if file_type.is_file() && !target.exists() {
+            fs::copy(entry.path(), target).map_err(io_error)?;
+        }
+    }
+    Ok(())
+}
+
 fn plugin_data_dir_name(plugin_id: &str) -> String {
     let slug = slugify_ascii_component(plugin_id);
     if slug.is_empty() {
@@ -1105,7 +1156,18 @@ pub(super) fn load_plugin_settings(service_root: &Path) -> Result<PluginSettings
         return Ok(PluginSettings::default());
     }
     let raw = fs::read_to_string(path).map_err(io_error)?;
-    serde_json::from_str::<PluginSettings>(&raw).map_err(json_error)
+    let mut settings = serde_json::from_str::<PluginSettings>(&raw).map_err(json_error)?;
+    if let Some(legacy) = settings
+        .plugins
+        .remove(LEGACY_NETEASE_CLOUD_MUSIC_PLUGIN_ID)
+    {
+        settings
+            .plugins
+            .entry(NETEASE_CLOUD_MUSIC_PLUGIN_ID.to_string())
+            .or_insert(legacy);
+        save_plugin_settings(service_root, &settings)?;
+    }
+    Ok(settings)
 }
 
 pub(super) fn save_plugin_settings(

@@ -366,6 +366,7 @@ mod tests {
             asset_count: 0,
             updated_at: "2026-07-03T00:00:00Z".to_string(),
             local_cache: None,
+            authentication: None,
         }
     }
 

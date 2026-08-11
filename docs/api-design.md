@@ -61,13 +61,14 @@
   - Local filesystem repositories return `status: "ready"` when the registered path exists and `status: "missing"` when the local directory cannot be found.
   - Account-backed repositories that require a local managed cache, currently 网易云音乐, include `localCache: { required, path, status }`.
   - 网易云 `localCache.required` is always `true`; `status` is `"ready"` when the configured cache directory exists, `"missing"` when a configured directory is gone, and `"unconfigured"` for legacy URI-style repositories that have not selected a local cache directory.
+  - Repositories whose Source declares authentication include the public state `authentication: { required, loggedIn, loginExpired }`. This state is derived only from the persisted credential reference and last-known expiry flag; credentials are never returned. Logout sets `loggedIn=false` and `loginExpired=true` while preserving the repository and cache.
 - `POST /repositories`
   - Create a new repository or import an existing folder with `.momo`
   - Request fields include `name`, `path`, optional `repoId`, optional `backendPluginId`, optional `backendConfig`, and optional `skipInitialSync`.
   - 创建 Eagle Library 挂载仓库时，前端显式传 `backendPluginId: "momobako.source.eagle-library"`，`path` 直接指向 Eagle `.library` 目录；该流程不走通用本地文件夹后端推断。
   - `skipInitialSync: true` creates the repository metadata and registry entry without running an inline first sync. This is intended for account-backed or slow virtual sources such as 网易云音乐 so the desktop login flow can finish first and trigger sync in the background.
   - Creating a 网易云 repository uses the selected local cache directory as `path`; `backendConfig` keeps account credentials and defaults, and stores a non-secret `sourceUri: "netease-cloud-music://account/{accountId}"` for provenance.
-  - The frontend receives only repository summaries and must not depend on the full persisted `backendConfig`, because it may contain cookies or other account secrets.
+  - The frontend receives only repository summaries and must not depend on the full persisted `backendConfig`; authentication Sources persist only public account state plus `credentialRef`, never raw cookies or other account secrets.
 - `POST /repositories/{repoId}:delete`
   - Tauri command: `delete_repository`
   - Request includes `repoId` and `mode`.
@@ -215,8 +216,8 @@
 - `POST /repositories/{repoId}/entries:preparePlayback`
   - Request body includes repository-relative `path`.
   - Real local assets reuse the existing local preview preparation path and may return a direct `localPath`.
-  - Virtual assets delegate to a download-capable backend plugin such as `momobako.service.downloader`, which can return `localPath`, optional `tempFilePath`, optional `expiresAt`, and media metadata for temporary playback sources.
-  - 网易云 virtual playback is rejected until `localCache.status === "ready"`. When ready, the core passes `managedCacheRoot` to the downloader and all managed playback files are written under `{cacheRoot}/.momo/cache/netease-playback`.
+  - Virtual assets delegate to their repository Source through `contributes.source.media.preparePlaybackMethod`; the Source may return `localPath`, optional `tempFilePath`, optional `expiresAt`, lyrics, and media metadata without exposing provider credentials to the player.
+  - 网易云 virtual playback is rejected until `localCache.status === "ready"`. When ready, the core passes `managedCacheRoot` to `momobako.netease.source`, and all managed playback files are written under `{cacheRoot}/.momo/cache/netease-playback`.
   - Response `sourceUrl` is the preferred browser-consumable playback URL. Temporary audio files and lyric files are registered with the in-process preview runtime; lyric files may also return `lyricSourceUrl` or `wordLyricSourceUrl`.
   - A successful playback-source preparation updates `assets.last_accessed_at` without creating a revision entry.
   - Frontend playlist players and virtual-source preview flows should prefer this endpoint over `files:preparePreviewSource` when a file may not exist locally.
@@ -233,10 +234,11 @@
 - `POST /repositories/{repoId}/entries:preparePlaybackWithProgress`
   - Request body matches `entries:preparePlayback` and includes a Tauri progress channel.
   - Emits `EntryPlaybackProgressEvent` phases for resolving the entry, downloading or reusing the temporary audio, preparing the preview source, and readiness.
-  - The media preview plugin waits for the command to finish before mounting the audio/video element, so playback starts only after the temporary download is complete.
+  - The selected audio player or visual media preview waits for the command to finish before mounting media, so playback starts only after the temporary source is ready.
 - `POST /repositories/{repoId}/playlists:downloadWithProgress`
   - Tauri command: `download_playlist_with_progress`
   - Request body includes:
+    - `sourceRepositoryId`: the repository whose Source owns the entries and credentials
     - `playlistId`
     - optional `playlistName`
     - `tracks[]`: `{ songId, optional songName, optional sourcePayload }`
@@ -254,14 +256,14 @@
     - optional `currentSongId`
     - optional `currentSongName`
     - optional `error`
-  - The runtime delegates each track export to `momobako.service.downloader` and returns a partial-success summary when some tracks fail instead of aborting the whole playlist export.
+  - The runtime resolves `downloadEntryMethod` from that repository's Source manifest, injects repository configuration only into the native Source call, and returns a partial-success summary when some tracks fail instead of aborting the whole playlist export.
 
 ## Managed Cache Layout
 
 - Local filesystem repositories and configured 网易云 repositories use the same root layout: `.momo/repository.json`, repository indexes/databases, `cache`, `thumbnails`, `logs`, `indexes`, and `trash`.
 - For 网易云, MomoBako-managed local data must stay inside the selected cache root. Playback audio, lyrics, reusable playback cache, thumbnail cache, indexes, and download-to-repository staging files live below `{cacheRoot}/.momo/...`.
 - User-selected “download to local folder” targets remain explicit export destinations. Those exports are not treated as managed cache.
-- Downloader/source plugin global data directories remain available for non-网易云 or legacy compatibility, but new 网易云 create/re-login flows pass `persistSession: false` and use repository-scoped managed cache paths instead of writing account sessions globally.
+- Source and service plugin data directories remain available for non-secret runtime state. 网易云 create/re-login stores only a public session reference there; raw Cookie values stay in the OS credential store, while media cache remains repository-scoped.
 ## Desktop Runtime State
 
 - Workspace startup progress is a desktop UI state, not a repository service endpoint
@@ -402,11 +404,14 @@
   - `category` is one of `source`, `library-kind`, `parser`, `preview`, or `service`; legacy manifests without `category` are inferred from `kind`.
   - `source` plugins are attachable repository IO backends. Existing `filesystem`, `webdav`, and `cloud` kinds remain accepted as source plugins for compatibility.
   - `momobako.source.eagle-library` is a source plugin with `type.layer="source"`, `kind="eagle-library"`, `sdk="backend"`, `runtime="native-dylib"`, `capabilities=["browse","read","write","sync"]`, and `contributes.source.operations=["list","read","write","move","delete","sync"]`. It does not declare `localRootPath`, so repository creation must select it explicitly.
-  - `contributes.source.metadataMirrorKeys[]` lets a source plugin declare which `sourcePayload` keys the host should mirror into system metadata during sync and virtual-entry cache hydration. The host applies the list generically and keeps overwrite rules identical to other metadata writes.
+- `contributes.source.metadataMirrorKeys[]` lets a source plugin declare which `sourcePayload` keys the host should mirror into system metadata during sync and virtual-entry cache hydration. The host applies the list generically and keeps overwrite rules identical to other metadata writes.
+- `contributes.source.authentication` declares a host-rendered source authentication flow. QR providers name their create, poll, status, and clear methods plus repository provisioning rules; the plugin settings page creates or updates the repository after authentication without exposing backend credentials to frontend state.
+- `contributes.source.media` declares source-owned playback preparation, lyrics, download, and cache methods. Provider-specific network protocols and credentials stay inside the source plugin, while previews and players consume normalized playback-source responses.
+- `contributes.source.entryActions[]` declares fixed `download-entry`, `download-directory`, `refresh-playback`, `clear-cache`, or `playlist-from-directory` operations for matching provider entries. The host owns destination selection, progress, import, and sync; declarations cannot execute scripts or arbitrary host commands.
   - `library-kind` plugins declare content fields, facets, view presets, organization rules and declarative core-host hooks for content types. Manifest-only library kinds can describe static taxonomy; richer library kinds can ship frontend modules that call `registerLibraryExtension` to contribute metadata panels, file summaries, preview sidebars, search shortcuts and playlist actions.
   - Frontend library extensions expose `libraryKind`, `matchEntry(entry)`, optional `metadataPanel`, optional `previewPanel`, optional `fileSummary(entry)`, optional `searchShortcuts`, and optional `playlist` behavior. The desktop workspace renders registered contributions generically and does not branch on content-specific plugin IDs.
   - `parser` plugins declare extraction targets and normalized candidate outputs for concrete file/container types; parser output enters the candidate queue rather than directly writing metadata.
-  - Backend parser or library-support plugins may contribute `metadataDefaults` with action `metadata.defaults.batch`. During local sync, the host passes `{ entries: [{ path, name, extension, kind, metadata? }] }`; the plugin returns `{ defaultsByPath }`. The host inserts returned keys only when they are missing, so plugin defaults cannot overwrite user or provider metadata.
+  - Backend parser or library-support plugins may contribute `metadataDefaults` with action `metadata.defaults.batch`. During full, incremental, or paged source sync, the host passes `{ entries: [{ path, name, extension, kind, metadata?, providerId?, providerItemId?, sourceMetadata? }] }`; `sourceMetadata` contains only keys allowed by the active Source manifest's `contributes.source.metadataMirrorKeys`. The plugin returns `{ defaultsByPath }`. Parser defaults take precedence over generic filename defaults, but the host inserts every returned key only when it is missing, so neither path can overwrite user or provider metadata.
   - `preview` plugins render file previews and thumbnails independently of library-kind semantics.
   - `momobako.preview.archive` previews `.zip`, `.cbz`, `.7z`, `.rar`, and `.cbr` files as read-only containers inside the file preview pane. It calls `momobako.service.archive-preview` through `POST /plugins:call` to prepare a session cache, list internal directories, and expose internal files for preview without indexing them as repository assets.
   - `service` plugins expose shared capabilities such as metadata providers, network search, download queues, filesystem watching and vector search. External/network services are manual-trigger and candidate-only unless a future runtime implementation changes the contract.
@@ -414,7 +419,7 @@
   - `hooks` declare how plugins attach to core-hosted capabilities such as playlist, PiP, progress, candidate queue, batch organize, download queue, metadata merge, rename/move execution, audit log and unified search.
   - Frontend plugins may declare `contributes.toolPages[]` and call `registerToolPage` to add a workspace extension page. Each page includes `toolPageId`, `label`, optional `description`, optional `order`, and a Vue component. Tool pages are host-rendered utility surfaces for plugin-provided workflows such as API debugging; the host lists enabled pages generically and does not branch on specific plugin IDs.
   - Backend plugins may declare `contributes.apiTests[]` so API Playground can discover plugin-provided API tests automatically. Each item includes `method`, optional `summary`, and either `payload` or `requestTemplate`; the host calls it through `POST /plugins:call` with the current plugin ID. The host also derives plugin-call tests from provider `lookup.action` and `metadataDefaults.action` contributions.
-  - Frontend plugins may declare `contributes.playlistPlayers[]` to register playlist playback types. Each item includes `playerTypeId`, `label`, `fileClass`, `supportedExtensions`, `supportsSeek`, `supportsVolume`, `supportsPreviewNavigation`, and optional `description`.
+  - Frontend plugins may declare `contributes.playlistPlayers[]` to register playlist playback types. Each item includes `playerTypeId`, optional stable `capabilityId`, `label`, `fileClass`, `supportedExtensions`, `supportsSeek`, `supportsVolume`, `supportsPreviewNavigation`, and optional `description`. Multiple plugins may implement one capability; the frontend stores an explicit global preferred plugin ID, falls back to the official implementation when that selection is unavailable, and exposes the fallback state for settings UI feedback.
   - Plugins may declare `contributes.settings` with `fields[]` and optional `settingsPage`. Each field includes `key`, `label`, `type` (`string`, `number`, `boolean`, `select`, or `json`), optional `description`, `default`, `placeholder`, numeric bounds, and select `options`. Frontend plugins can also call `registerSettingsPage` to provide a custom Vue settings surface for the same plugin manager entry.
   - Playlist player runtimes implement `load`, `play`, `pause`, optional `seek`, optional `setVolume`, optional `dispose`, and optional `configure(settings)`. Current settings are `{ imageDurationMs?: number, objectFit?: "contain" | "cover" }` for slideshow timing and image/video fitting.
   - `dependencyStatus` resolves manifest `requires` and `optional` against current runtime-discovered plugins, including legacy plugin IDs. Missing or disabled required dependencies mark the plugin unavailable/disabled with `disableReason`; missing or disabled optional dependencies keep the plugin usable but set `degraded` with `degradationReason`.
@@ -431,7 +436,7 @@
   - Install copies the archive to `<serviceRoot>/plugins/user`; the host forces `source=user`, `provenance=user-installed` and `trustLevel=untrusted` even if `manifest.json` claims otherwise.
   - User-installed in-process ABI packages are rejected; native user plugins must declare `process` deployment.
 - `POST /plugins:call`
-  - Request body includes `pluginId`, `method`, and arbitrary JSON `payload`
+  - Request body includes `pluginId`, `method`, optional `repositoryId`, and arbitrary JSON `payload`. When `repositoryId` is present, the host verifies that the repository uses the requested source plugin and injects its backend config only into the native call envelope.
   - Used by frontend preview or codec plugins to invoke ABI or isolated process plugin capabilities without adding file-format-specific commands to the core runtime
   - Native plugin call envelopes include `runtime.pluginId`, `runtime.pluginDataDir`, `runtime.serviceRootDir`, and `runtime.pluginConfig`; `pluginDataDir` points to the plugin's own persistent directory and is created before dispatch, `serviceRootDir` points to the host service storage root, and `pluginConfig` is the current host-managed key-value config from `config.json`.
   - Native backend plugins may register an optional host callback bridge and call other backend plugins through the host. The current first-party use case is `momobako.service.office-convert` calling `momobako.service.downloader` to download bundled LibreOffice runtimes through the shared aria2 task layer.
@@ -476,13 +481,6 @@
       - Response: `{ stopped, pid?, reason? }`
       - Requests the current LibreOffice helper to stop and clears runtime state for the daemon process.
   - `momobako.service.downloader` exposes:
-    - Compatibility methods:
-      - `downloader.prepareTrackPlayback`
-      - `downloader.downloadTrackPackage`
-      - `downloader.downloadPlaylistPackage`
-      - `downloader.resolveLyrics`
-      - `downloader.clearTrackCache`
-      - Existing music download workflows keep these method names unchanged and are implemented on top of the shared aria2 runtime plus the existing 网易云 metadata flow.
     - `downloader.ensureRuntime`
       - Request: `{}`
       - Response: `{ runtime, downloadsDir, helperDir, downloadUrl, aria2, queueSize }`
@@ -503,9 +501,9 @@
       - Request: `{}`
       - Response: `{ runtime, aria2, queueSize, downloadsDir, downloadUrl }`
       - Returns the current aria2 runtime status without forcing a new download task.
-      - The downloader manifest now registers API Playground samples for both compatibility methods and the generic `getRuntimeStatus` / `ensureRuntime` / `enqueueDownload` / `awaitDownload` / `removeDownload` task methods, so both the music-download facade and the shared aria2 task layer can be exercised directly from plugin API tests.
+      - The downloader manifest registers API Playground samples for the generic `getRuntimeStatus` / `ensureRuntime` / `enqueueDownload` / `awaitDownload` / `removeDownload` task methods.
   - Runtime plugin calls resolve `requires` and `optional` before dispatch. Missing or disabled required dependencies reject the call with the plugin disable reason; missing or disabled optional dependencies keep the call usable and return `runtime.degraded`, `runtime.degradationReason`, and `runtime.dependencyStatus` alongside the plugin payload.
-  - The 网易云 source and downloader backends currently use `ncm-api-rs` directly for login, playlist, song URL, detail, and lyric requests; any `apiBaseUrl` setting is treated as an optional SDK domain override rather than a host-managed proxy endpoint.
+  - `momobako.netease.source` uses `ncm-api-rs` directly for login, playlists, song URLs, details, lyrics, downloads, and cache management; `momobako.service.downloader` remains provider-neutral.
 - `GET /plugins:hook-executions`
   - Tauri command: `list_plugin_hook_executions`
   - Returns host-side execution records for declared hook actions; the host only records calls whose method matches a manifest `hooks[].action`

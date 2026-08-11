@@ -20,7 +20,7 @@ const audioEntry = {
   metadata: {},
 };
 
-describe("MediaPreview", () => {
+describe("AudioPlayerPreview", () => {
   beforeEach(async () => {
     document.body.innerHTML = "";
     clearPreviewPluginRegistry();
@@ -82,12 +82,12 @@ describe("MediaPreview", () => {
     expect(screen.getAllByText("音频").length).toBeGreaterThan(0);
   });
 
-  it("音频预览使用来源封面作为缩略图兜底", async () => {
+  it("音频预览使用通用封面元数据作为缩略图兜底", async () => {
     const plugin = getPreviewPluginForEntry({
       ...audioEntry,
       thumbnailPath: null,
-      sourcePayload: {
-        coverUrl: "https://img.example.test/theme-song.jpg",
+      metadata: {
+        coverArt: "https://img.example.test/theme-song.jpg",
       },
     });
     expect(plugin).not.toBeNull();
@@ -98,8 +98,8 @@ describe("MediaPreview", () => {
         entry: {
           ...audioEntry,
           thumbnailPath: null,
-          sourcePayload: {
-            coverUrl: "https://img.example.test/theme-song.jpg",
+          metadata: {
+            coverArt: "https://img.example.test/theme-song.jpg",
           },
         },
       },

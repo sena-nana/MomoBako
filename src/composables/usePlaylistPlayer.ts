@@ -222,6 +222,7 @@ function transientItemFromEntry(entry: FileBrowserEntry, playerTypeId: string): 
     providerId: entry.providerId,
     providerItemId: entry.providerItemId,
     sourcePayload: entry.sourcePayload,
+    metadata: entry.metadata,
     localAbsolutePath: entry.localAbsolutePath,
     runtimePlayerTypeId: playerTypeId,
     playerLabel: player?.label ?? "",

@@ -31,8 +31,6 @@ import WorkspaceSidebarFolderDialogs from "./WorkspaceSidebarFolderDialogs.vue";
 import WorkspaceSidebarPlaylistDialog from "./WorkspaceSidebarPlaylistDialog.vue";
 import WorkspaceSidebarSmartFolderDialogs from "./WorkspaceSidebarSmartFolderDialogs.vue";
 
-const NETEASE_SOURCE_PLUGIN_ID = "momobako.source.netease-cloud-music";
-
 const route = useRoute();
 const router = useRouter();
 const playlistPlayer = usePlaylistPlayer();
@@ -47,7 +45,6 @@ const {
   canDeletePendingRepositoryMetadata,
   closeRepositoryDeleteDialog,
   confirmRepositoryDelete,
-  refreshActiveRepositoryWorkspaceSilently,
   isDeletingRepository,
   openRepositoryDeleteDialog,
   pendingDeleteRepository,
@@ -134,13 +131,7 @@ const {
   closeAddRepositoryPopover,
   deleteActiveRepositoryFromMenu,
   isSubmittingBackend,
-  neteaseLoginMessage,
-  neteaseQrSession,
-  neteaseCachePath,
-  chooseNeteaseCacheFolder,
   openRepositorySwitcherFromEvent,
-  pollNeteaseQrSession,
-  createNeteaseQrSession,
   repositorySwitcherButtonRef,
   selectedBackend,
   selectBackend,
@@ -154,7 +145,6 @@ const {
   openRepositoryDeleteDialog,
   repositories,
   repositoryBackendOptions,
-  refreshRepositoryWorkspaceSilently: refreshActiveRepositoryWorkspaceSilently,
   route,
   router,
   selectRepository,
@@ -309,7 +299,7 @@ const {
 });
 
 const showFolderSidebar = computed(() => (
-  activeSnapshot.value?.repository.backend.pluginId !== NETEASE_SOURCE_PLUGIN_ID
+  !activeSnapshot.value?.repository.backend.capabilities.includes("virtual-entries")
 ));
 
 </script>
@@ -420,17 +410,11 @@ const showFolderSidebar = computed(() => (
     :backend-options="backendOptions"
     :backend-submit-disabled="backendSubmitDisabled"
     :is-submitting-backend="isSubmittingBackend"
-    :netease-login-message="neteaseLoginMessage"
-    :netease-qr-session="neteaseQrSession"
-    :netease-cache-path="neteaseCachePath"
     :position="addRepositoryPopoverPosition"
     :repositories="repositories"
     :selected-backend="selectedBackend"
     @close="closeAddRepositoryPopover"
-    @choose-netease-cache-folder="chooseNeteaseCacheFolder"
-    @create-netease-qr-session="createNeteaseQrSession"
     @delete-active="deleteActiveRepositoryFromMenu"
-    @poll-netease-qr-session="pollNeteaseQrSession"
     @select-backend="selectBackend"
     @select-repository="selectRepositoryFromList"
     @set-popover-ref="(element) => { addRepositoryPopoverRef = element; }"

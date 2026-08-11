@@ -1,14 +1,16 @@
 <script setup lang="ts">
 import { AlertTriangle } from "@lucide/vue";
+import { useRouter } from "vue-router";
 import type { RepositorySummary } from "../../types/repository";
 
-defineProps<{
+const props = defineProps<{
   activeRepository: RepositorySummary | null;
   error: string | null;
   isBusy: boolean;
   isDeleting: boolean;
   isRepairing: boolean;
 }>();
+const router = useRouter();
 
 const emit = defineEmits<{
   choosePath: [];
@@ -16,9 +18,14 @@ const emit = defineEmits<{
   refresh: [];
 }>();
 
-function isNeteaseCacheIssue(repository: RepositorySummary | null) {
-  return repository?.backend.pluginId === "momobako.source.netease-cloud-music"
-    && repository.localCache?.status !== "ready";
+function isSourceCacheIssue(repository: RepositorySummary | null) {
+  return repository?.localCache?.required === true && repository.localCache.status !== "ready";
+}
+
+function openSourceSettings() {
+  const pluginId = props.activeRepository?.backend.pluginId;
+  if (!pluginId) return;
+  void router.push({ path: "/settings", query: { plugin: pluginId } });
 }
 </script>
 
@@ -32,8 +39,8 @@ function isNeteaseCacheIssue(repository: RepositorySummary | null) {
       <h1>{{ activeRepository?.name ?? "资源库不可用" }}</h1>
       <p class="missing-repository-page__summary">
         {{
-          isNeteaseCacheIssue(activeRepository)
-            ? "这个网易云资源库需要指定本地缓存目录。缓存目录会保存索引、缩略图、播放缓存和下载暂存。"
+          isSourceCacheIssue(activeRepository)
+            ? "这个来源资源库需要在插件设置中配置本地缓存或重新认证。仓库记录和已有缓存不会被删除。"
             : "MomoBako 找不到这个资源库的本地文件夹。可以重定向到原资源库位置，或移除这条注册记录和本机缓存。"
         }}
       </p>
@@ -44,8 +51,13 @@ function isNeteaseCacheIssue(repository: RepositorySummary | null) {
         {{ error }}
       </p>
       <div class="missing-repository-page__actions">
-        <button type="button" class="primary" :disabled="isBusy" @click="emit('choosePath')">
-          {{ isRepairing ? (isNeteaseCacheIssue(activeRepository) ? "配置中..." : "重定向中...") : (isNeteaseCacheIssue(activeRepository) ? "指定缓存目录" : "重定向") }}
+        <button
+          type="button"
+          class="primary"
+          :disabled="isBusy"
+          @click="isSourceCacheIssue(activeRepository) ? openSourceSettings() : emit('choosePath')"
+        >
+          {{ isSourceCacheIssue(activeRepository) ? "打开来源设置" : (isRepairing ? "重定向中..." : "重定向") }}
         </button>
         <button type="button" class="ghost" :disabled="isBusy" @click="emit('refresh')">
           刷新

@@ -19,7 +19,7 @@ fn prepare_entry_playback_source(
 }
 
 #[test]
-fn prepare_entry_playback_source_delegates_virtual_tracks_to_downloader() {
+fn prepare_entry_playback_source_delegates_virtual_tracks_to_source() {
     let _lock = playback_test_lock();
     let (state, root, repo_root, _thumbnail_root) =
         create_test_state("prepare-entry-playback-virtual");
@@ -45,10 +45,7 @@ fn prepare_entry_playback_source_delegates_virtual_tracks_to_downloader() {
         let expected_repo_id = std::env::var("MOMOBKO_TEST_EXPECTED_REPO_ID")
             .expect("expected repo id should be provided");
         assert_eq!(payload["songId"], serde_json::json!(1001));
-        assert_eq!(
-            payload["accountCookie"],
-            serde_json::json!("MUSIC_U=test-cookie")
-        );
+        assert!(payload.get("accountCookie").is_none());
         assert_eq!(payload["level"], serde_json::json!("lossless"));
         assert_eq!(payload["repoId"], serde_json::json!(expected_repo_id));
         assert_eq!(
@@ -171,16 +168,16 @@ fn prepare_entry_playback_source_with_progress_emits_download_and_ready_events()
 }
 
 #[test]
-fn prepare_entry_playback_source_prefers_repository_backend_cookie_over_stale_asset_payload() {
+fn prepare_entry_playback_source_strips_legacy_entry_credentials() {
     let _lock = playback_test_lock();
     let (state, root, repo_root, _thumbnail_root) =
-        create_test_state("prepare-entry-playback-backend-cookie");
+        create_test_state("prepare-entry-playback-private-source-payload");
     let repo_id = create_repository_without_initial_sync(&state, &repo_root);
     update_repository_backend_config(
         &state,
         &repo_id,
         serde_json::json!({
-            "cookie": "MUSIC_U=fresh-cookie"
+            "credentialRef": "keyring:momobako.netease.source:42"
         }),
     );
     insert_virtual_asset(
@@ -200,9 +197,10 @@ fn prepare_entry_playback_source_prefers_repository_backend_cookie_over_stale_as
 
     fn test_hook(payload: serde_json::Value) -> Result<serde_json::Value, String> {
         assert_eq!(payload["songId"], serde_json::json!(1002));
+        assert!(payload.get("accountCookie").is_none());
         assert_eq!(
-            payload["accountCookie"],
-            serde_json::json!("MUSIC_U=fresh-cookie")
+            payload["config"]["credentialRef"],
+            serde_json::json!("keyring:momobako.netease.source:42")
         );
         Ok(serde_json::json!({
             "localPath": "C:/Mock/Temp/stale-track.mp3",
