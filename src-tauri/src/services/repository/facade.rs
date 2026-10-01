@@ -975,6 +975,24 @@ impl RepositoryState {
         plugin::list_plugins(self)
     }
 
+    /// 返回当前启用插件贡献的播放类型，供原生宿主创建播放列表时选择。
+    pub fn list_playlist_players(&self) -> Result<Vec<PlaylistPlayerContribution>, String> {
+        Ok(plugin_catalog(&self.root)
+            .playlist_players()
+            .into_iter()
+            .map(|player| PlaylistPlayerContribution {
+                player_type_id: player.player_type_id,
+                label: player.label,
+                file_class: player.file_class,
+                supported_extensions: player.supported_extensions,
+                supports_seek: player.supports_seek,
+                supports_volume: player.supports_volume,
+                supports_preview_navigation: player.supports_preview_navigation,
+                description: player.description,
+            })
+            .collect())
+    }
+
     pub fn list_plugin_hook_executions(
         &self,
         request: PluginHookExecutionListRequest,
