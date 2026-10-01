@@ -1,10 +1,10 @@
 //! Repository state shell and shared entry points.
 
 use super::*;
+use crate::services::host_events::{HostEvent, HostEventSink};
 use crate::services::repository::plugin::plugin_data_root_dir;
 use std::collections::BTreeSet;
 use std::sync::mpsc::Sender;
-use tauri::{AppHandle, Emitter};
 
 #[derive(Clone)]
 pub(crate) struct RepositoryStructureRefreshRequest {
@@ -21,7 +21,7 @@ pub struct RepositoryState {
     pub(super) preview_sources: Mutex<BTreeMap<String, PreviewFileSource>>,
     pub(super) structure_refresh_tx: Mutex<Option<Sender<RepositoryStructureRefreshRequest>>>,
     pub(super) refreshing_repo_ids: Mutex<BTreeSet<String>>,
-    pub(super) app_handle: Mutex<Option<AppHandle>>,
+    pub(super) event_sink: Mutex<Option<Arc<dyn HostEventSink>>>,
 }
 
 impl RepositoryState {
@@ -35,7 +35,7 @@ impl RepositoryState {
             preview_sources: Mutex::new(BTreeMap::new()),
             structure_refresh_tx: Mutex::new(None),
             refreshing_repo_ids: Mutex::new(BTreeSet::new()),
-            app_handle: Mutex::new(None),
+            event_sink: Mutex::new(None),
         }
     }
 
@@ -56,12 +56,12 @@ impl RepositoryState {
         Ok(())
     }
 
-    pub fn set_app_handle(&self, app: AppHandle) -> Result<(), String> {
+    pub fn set_event_sink(&self, sink: Arc<dyn HostEventSink>) -> Result<(), String> {
         let mut slot = self
-            .app_handle
+            .event_sink
             .lock()
-            .map_err(|_| "app handle lock poisoned".to_string())?;
-        *slot = Some(app);
+            .map_err(|_| "event sink lock poisoned".to_string())?;
+        *slot = Some(sink);
         Ok(())
     }
 
@@ -149,18 +149,21 @@ impl RepositoryState {
     }
 
     pub fn emit_repository_structure_updated(&self, event: RepositoryStructureUpdatedEvent) {
-        let Ok(app_handle) = self.app_handle.lock() else {
-            crate::app_log!(
-                "warn",
-                "repository.structure",
-                "structureEventLockFailed",
-                "获取结构更新事件通道失败。",
-                serde_json::json!({ "repoId": event.repo_id })
-            );
-            return;
+        let sink = match self.event_sink.lock() {
+            Ok(slot) => slot.clone(),
+            Err(_) => {
+                crate::app_log!(
+                    "warn",
+                    "repository.structure",
+                    "structureEventLockFailed",
+                    "获取结构更新事件通道失败。",
+                    serde_json::json!({ "repoId": event.repo_id })
+                );
+                return;
+            }
         };
-        if let Some(app_handle) = app_handle.as_ref() {
-            if let Err(error) = app_handle.emit("repository://structure-updated", event.clone()) {
+        if let Some(sink) = sink {
+            if let Err(error) = sink.emit(HostEvent::RepositoryStructureUpdated(event.clone())) {
                 crate::app_log!(
                     "warn",
                     "repository.structure",
@@ -169,7 +172,7 @@ impl RepositoryState {
                     serde_json::json!({
                         "repoId": event.repo_id,
                         "reason": event.reason,
-                        "error": error.to_string(),
+                        "error": error,
                     })
                 );
             }

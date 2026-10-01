@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
   "src-tauri",
+  "src-nana",
   "External/Plugins/_sdk/mutsuki-rust",
   "External/Plugins/local-filesystem",
   "External/Plugins/office-convert",

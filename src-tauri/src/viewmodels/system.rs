@@ -23,7 +23,7 @@ impl SystemViewModel {
         &self,
         request: BinaryFileWriteRequest,
     ) -> Result<BinaryFileWriteResponse, String> {
-        match tauri::async_runtime::spawn_blocking(move || {
+        match tokio::task::spawn_blocking(move || {
             let output_path = PathBuf::from(&request.path);
             if let Some(parent) = output_path.parent() {
                 fs::create_dir_all(parent).map_err(|error| error.to_string())?;

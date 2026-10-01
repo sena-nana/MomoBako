@@ -4,20 +4,20 @@
 //! 写锁、取消检查和错误语义，但不再经过 CoreRuntime、CoreActor 或无界阻塞线程池。
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
-use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, Weak};
 use std::time::{Duration, Instant};
 
-use mutsuki_plugin_api::{plugin_error, PluginHostError, PluginResult, PluginTaskGateway};
+use mutsuki_plugin_api::{PluginHostError, PluginResult, PluginTaskGateway, plugin_error};
 use mutsuki_runtime_contracts::{
-    CancelPolicy, RuntimeError, ScalarValue, Task, TaskBatch, TaskHandle, TaskOutcome,
-    ERR_TASK_EXPIRED, ERR_TASK_NOT_FOUND,
+    CancelPolicy, ERR_TASK_EXPIRED, ERR_TASK_NOT_FOUND, RuntimeError, ScalarValue, Task, TaskBatch,
+    TaskHandle, TaskOutcome,
 };
 use serde::Serialize;
 use serde_json::Value;
 use tokio::sync::mpsc::error::TrySendError;
-use tokio::sync::{mpsc, oneshot, Mutex as AsyncMutex};
+use tokio::sync::{Mutex as AsyncMutex, mpsc, oneshot};
 
 use super::operations::RepositoryTaskExecutor;
 use super::protocols::{
@@ -642,13 +642,13 @@ fn spawn_lane_workers(
     for worker_id in 0..count {
         let state = state.clone();
         let receiver = receiver.clone();
-        tauri::async_runtime::spawn(async move {
+        tokio::spawn(async move {
             loop {
                 let request = receiver.lock().await.recv().await;
                 let Some(request) = request else { break };
                 let Some(state) = state.upgrade() else { break };
                 let result_runtime = MomoTaskRuntime { state };
-                tauri::async_runtime::spawn_blocking(move || {
+                tokio::task::spawn_blocking(move || {
                     result_runtime.run_blocking(request);
                 })
                 .await

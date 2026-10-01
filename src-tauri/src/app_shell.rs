@@ -1,5 +1,6 @@
 //! Desktop app-shell bootstrap and lifecycle glue for the Tauri View layer.
 
+use crate::services::host_events::{HostEvent, HostEventSink};
 use crate::services::logging::{init_app_logger, write_log};
 use crate::services::{mutsuki_host, mutsuki_runner::MomoTaskRuntime, runtime::RepositoryRuntime};
 use crate::{
@@ -13,10 +14,10 @@ use crate::{
 };
 use std::{collections::HashSet, fs, path::Path, sync::Arc};
 use tauri::{
+    AppHandle, Builder, Emitter, Manager, WindowEvent,
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     utils::config::Color,
-    AppHandle, Builder, Manager, WindowEvent,
 };
 
 const MAIN_WINDOW_LABEL: &str = "main";
@@ -36,7 +37,13 @@ pub fn builder(runtime: RepositoryRuntime) -> Builder<tauri::Wry> {
         .setup(move |app| {
             let service_root = app_runtime.service_root();
             let logger = init_app_logger(service_root.clone())?;
-            logger.set_app_handle(app.handle().clone())?;
+            let app_handle = app.handle().clone();
+            let event_sink: Arc<dyn HostEventSink> = Arc::new(move |event: HostEvent| {
+                app_handle
+                    .emit(event.name(), event.payload())
+                    .map_err(|error| error.to_string())
+            });
+            logger.set_event_sink(event_sink.clone())?;
             let _ = write_log(SystemLogWriteRequest {
                 level: "info".to_string(),
                 category: "app.lifecycle".to_string(),
@@ -54,7 +61,7 @@ pub fn builder(runtime: RepositoryRuntime) -> Builder<tauri::Wry> {
                 }),
             });
             let runtime = app_runtime.clone();
-            runtime.set_app_handle(app.handle().clone())?;
+            runtime.set_event_sink(event_sink)?;
             stage_bundled_plugins(app.handle(), &service_root)?;
             let task_runtime = Arc::new(MomoTaskRuntime::new(runtime.clone()));
             let plugin_runtime = Arc::new(mutsuki_host::MomoPluginRuntime::new(
@@ -103,10 +110,10 @@ pub fn builder(runtime: RepositoryRuntime) -> Builder<tauri::Wry> {
                     }
                 }
                 WindowEvent::CloseRequested { .. } => {
-                    quit_app(&app_handle);
+                    quit_app(app_handle);
                 }
                 WindowEvent::Destroyed => {
-                    persist_main_window_state(&app_handle);
+                    persist_main_window_state(app_handle);
                 }
                 _ => {}
             }

@@ -1,5 +1,6 @@
 //! 应用级日志中心，负责统一落盘、内存缓存与实时事件广播。
 
+use crate::services::host_events::{HostEvent, HostEventSink};
 use crate::services::repository::{
     SystemLogLocation, SystemLogPage, SystemLogQuery, SystemLogRecord, SystemLogSource,
     SystemLogWriteRequest,
@@ -10,15 +11,13 @@ use std::{
     io::{BufRead, BufReader, Write},
     path::PathBuf,
     sync::{
-        atomic::{AtomicU64, Ordering},
         Arc, Mutex, OnceLock,
+        atomic::{AtomicU64, Ordering},
     },
     time::{SystemTime, UNIX_EPOCH},
 };
-use tauri::{AppHandle, Emitter};
-use time::{format_description::well_known::Rfc3339, OffsetDateTime};
+use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 
-const LOG_EVENT_NAME: &str = "system://log-recorded";
 const LOG_DIR_NAME: &str = "logs";
 const CURRENT_LOG_FILE_NAME: &str = "system.current.jsonl";
 const ARCHIVED_LOG_FILE_PREFIX: &str = "system.";
@@ -32,7 +31,7 @@ static GLOBAL_LOGGER: OnceLock<Mutex<Option<Arc<AppLogger>>>> = OnceLock::new();
 #[derive(Default)]
 struct LoggerState {
     recent: VecDeque<SystemLogRecord>,
-    app_handle: Option<AppHandle>,
+    event_sink: Option<Arc<dyn HostEventSink>>,
 }
 
 /// 应用全局日志器。
@@ -54,13 +53,13 @@ impl AppLogger {
         Ok(logger)
     }
 
-    /// 绑定 Tauri 应用句柄，供日志事件推送使用。
-    pub fn set_app_handle(&self, app_handle: AppHandle) -> Result<(), String> {
+    /// 绑定宿主事件 sink；Tauri 适配器可在边界层自行转发。
+    pub fn set_event_sink(&self, sink: Arc<dyn HostEventSink>) -> Result<(), String> {
         let mut state = self
             .state
             .lock()
             .map_err(|_| "logger state lock poisoned".to_string())?;
-        state.app_handle = Some(app_handle);
+        state.event_sink = Some(sink);
         Ok(())
     }
 
@@ -68,7 +67,7 @@ impl AppLogger {
     pub fn write(&self, request: SystemLogWriteRequest) -> Result<SystemLogRecord, String> {
         let record = self.build_record(request)?;
         let raw = serde_json::to_string(&record).map_err(|error| error.to_string())?;
-        let app_handle = {
+        let event_sink = {
             let mut state = self
                 .state
                 .lock()
@@ -76,10 +75,12 @@ impl AppLogger {
             self.rotate_if_needed(raw.len() as u64 + 1)?;
             self.append_raw_line(&raw)?;
             push_recent_log(&mut state.recent, record.clone());
-            state.app_handle.clone()
+            state.event_sink.clone()
         };
-        if let Some(app_handle) = app_handle {
-            let _ = app_handle.emit(LOG_EVENT_NAME, &record);
+        if let Some(sink) = event_sink {
+            if let Err(error) = sink.emit(HostEvent::LogRecorded(record.clone())) {
+                eprintln!("[momobako] 日志事件广播失败: {error}");
+            }
         }
         Ok(record)
     }
