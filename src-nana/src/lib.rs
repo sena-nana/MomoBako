@@ -409,10 +409,22 @@ impl ApplicationState for MomoBakoApplication {
                 .get(key)
                 .cloned()
                 .unwrap_or_default();
+            let value = if self.shell.plugin_config_string_values.contains(key) {
+                serde_json::Value::String(value)
+            } else {
+                match serde_json::from_str(&value) {
+                    Ok(value) => value,
+                    Err(error) => {
+                        eprintln!("Nana 插件配置 JSON 解析失败 {key}：{error}");
+                        self.shell.detail = format!("配置 {key} 不是有效 JSON：{error}");
+                        return RuntimeProgramUpdate::redraw(*id);
+                    }
+                }
+            };
             let request = backend::services::repository::PluginConfigSetRequest {
                 plugin_id: plugin_id.clone(),
                 key: key.clone(),
-                value: serde_json::Value::String(value),
+                value,
             };
             if let Err(error) = context.run_task(Task::new(async move {
                 ShellMessage::PluginConfigLoaded(
