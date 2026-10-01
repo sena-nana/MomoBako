@@ -5,7 +5,9 @@
 
 use nana_ui::runtime::view::{button, text, widget};
 use nana_ui::runtime::{Activate, FrameworkError, LengthSpec, List, RuntimeDocument, Stack};
-use crate::backend::services::repository::{RepositorySnapshot, RepositorySummary};
+use crate::backend::services::repository::{
+    FileBrowserSnapshot, RepositorySnapshot, RepositorySummary,
+};
 
 /// Nana Runtime 传递给应用状态的壳层交互消息。
 #[derive(Clone, Debug)]
@@ -16,6 +18,7 @@ pub enum ShellMessage {
     EditAction,
     RepositoriesLoaded(Result<Vec<RepositorySummary>, String>),
     RepositorySnapshotLoaded(Result<RepositorySnapshot, String>),
+    FileBrowserLoaded(Result<FileBrowserSnapshot, String>),
 }
 
 /// 主内容页面的可观察状态。
@@ -104,6 +107,7 @@ pub struct ShellViewModel {
     pub selected_path: Option<String>,
     pub detail: String,
     pub dirty: bool,
+    pub file_entries: Vec<String>,
 }
 
 impl Default for ShellViewModel {
@@ -114,6 +118,7 @@ impl Default for ShellViewModel {
             selected_path: None,
             detail: "等待资源库服务响应".into(),
             dirty: false,
+            file_entries: Vec::new(),
         }
     }
 }
@@ -170,6 +175,14 @@ impl ShellViewModel {
         }
     }
 
+    fn file_entries_label(&self) -> String {
+        if self.file_entries.is_empty() {
+            "当前目录暂无已加载条目".into()
+        } else {
+            format!("条目：{}", self.file_entries.iter().take(8).cloned().collect::<Vec<_>>().join("、"))
+        }
+    }
+
     /// 在 ViewModel 边界集中处理导航和页面动作，避免控件闭包直接修改领域状态。
     pub fn reduce(&mut self, message: ShellMessage) {
         match message {
@@ -203,6 +216,18 @@ impl ShellViewModel {
             ShellMessage::RepositorySnapshotLoaded(Err(error)) => {
                 self.page = ShellPage::Error;
                 self.detail = format!("无法读取资源库文件列表：{error}");
+            }
+            ShellMessage::FileBrowserLoaded(Ok(browser)) => {
+                self.page = ShellPage::FileList;
+                self.file_entries = browser.entries.iter().map(|entry| entry.name.clone()).collect();
+                self.detail = format!(
+                    "{} 个条目 · 当前目录 {}",
+                    browser.total_entries, browser.current_path
+                );
+            }
+            ShellMessage::FileBrowserLoaded(Err(error)) => {
+                self.page = ShellPage::Error;
+                self.detail = format!("无法读取文件列表：{error}");
             }
             ShellMessage::Refresh => {
                 self.detail = "刷新服务尚未接通，当前数据未变更".into();
@@ -268,6 +293,7 @@ pub fn mount_shell(
                 text(view_model.page.status()).key("page-status"),
                 text(view_model.selection_label()).key("selection"),
                 text(view_model.detail.clone()).key("page-detail"),
+                text(view_model.file_entries_label()).key("file-entries"),
                 button(view_model.page.primary_action())
                     .key("primary-action")
                     .on_cx(|_, _: &Activate, cx| cx.dispatch_program(ShellMessage::PrimaryAction)),
