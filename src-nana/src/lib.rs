@@ -14,6 +14,7 @@ pub mod shell;
 use shell::{ShellPage, ShellViewModel, mount_shell};
 
 pub mod host_api;
+pub mod services;
 
 /// Nana 宿主直接使用共享领域服务 crate，迁移期 Tauri 仍保留同一服务源码的
 /// 适配入口；此 re-export 让后续 ViewModel 接线不需要再穿过 command 层。
@@ -22,14 +23,14 @@ pub mod plugin_api;
 
 /// Nana 宿主应用状态，持有共享领域 Runtime 和原生壳层 ViewModel。
 pub struct MomoBakoApplication {
-    runtime: Option<backend::RepositoryRuntime>,
+    pub services: Option<services::NativeServices>,
     shell: ShellViewModel,
 }
 
 impl Default for MomoBakoApplication {
     fn default() -> Self {
         Self {
-            runtime: None,
+            services: None,
             shell: ShellViewModel::default(),
         }
     }
@@ -40,21 +41,21 @@ impl ApplicationState for MomoBakoApplication {
     type Error = FrameworkError;
 
     fn initialize(_: &RuntimeProgramContext<Self::Message>) -> Result<Self, Self::Error> {
-        let runtime = match backend::RepositoryRuntime::start() {
-            Ok(runtime) => Some(runtime),
+        let services = match services::NativeServices::start() {
+            Ok(services) => Some(services),
             Err(error) => {
                 eprintln!("Nana 领域 Runtime 启动失败：{error}");
                 None
             }
         };
-        let shell = if runtime.is_some() {
+        let shell = if services.is_some() {
             ShellViewModel::default()
         } else {
             let mut shell = ShellViewModel::for_page(ShellPage::Error);
             shell.detail = "领域服务启动失败，请检查服务目录和端口配置".into();
             shell
         };
-        Ok(Self { runtime, shell })
+        Ok(Self { services, shell })
     }
 
     fn build(
@@ -72,14 +73,6 @@ impl ApplicationState for MomoBakoApplication {
         _: &RuntimeProgramContext<Self::Message>,
     ) -> RuntimeProgramUpdate {
         RuntimeProgramUpdate::default()
-    }
-}
-
-impl Drop for MomoBakoApplication {
-    fn drop(&mut self) {
-        if let Some(runtime) = &self.runtime {
-            runtime.shutdown_helpers();
-        }
     }
 }
 
