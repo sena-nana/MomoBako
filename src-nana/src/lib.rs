@@ -229,6 +229,30 @@ impl ApplicationState for MomoBakoApplication {
                 eprintln!("Nana 插件设置删除任务提交失败：{error}");
             }
         }
+        if let ShellMessage::SavePluginConfig { plugin_id, key } = &message
+            && let Some(services) = self.services.as_ref()
+        {
+            let plugin = services.plugin.clone();
+            let executor = services.executor.clone();
+            let value = self
+                .shell
+                .plugin_config_drafts
+                .get(key)
+                .cloned()
+                .unwrap_or_default();
+            let request = backend::services::repository::PluginConfigSetRequest {
+                plugin_id: plugin_id.clone(),
+                key: key.clone(),
+                value: serde_json::Value::String(value),
+            };
+            if let Err(error) = context.run_task(Task::new(async move {
+                ShellMessage::PluginConfigLoaded(
+                    executor.block_on(plugin.set_plugin_config_value(request)),
+                )
+            })) {
+                eprintln!("Nana 插件设置保存任务提交失败：{error}");
+            }
+        }
         if let ShellMessage::CancelTask(task_id) = &message
             && let Some(services) = self.services.as_ref()
         {
