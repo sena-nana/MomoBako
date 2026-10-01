@@ -151,8 +151,15 @@ impl ApplicationState for MomoBakoApplication {
             && let Some(services) = self.services.as_ref()
         {
             let (active, completed) = services.tasks.activity_snapshot();
-            self.shell
-                .reduce(ShellMessage::TaskSnapshotLoaded { active, completed });
+            self.shell.active_task_ids = services.tasks.active_task_ids();
+            self.shell.reduce(ShellMessage::TaskSnapshotLoaded { active, completed });
+        }
+        if let ShellMessage::CancelTask(task_id) = &message
+            && let Some(services) = self.services.as_ref()
+        {
+            if !services.tasks.cancel(task_id) {
+                eprintln!("Nana 任务取消请求未找到任务：{task_id}");
+            }
         }
         if let ShellMessage::RepositorySnapshotLoaded(Ok(snapshot)) = &message
             && let Some(services) = self.services.as_ref()

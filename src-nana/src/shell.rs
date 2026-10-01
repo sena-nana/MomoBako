@@ -27,6 +27,7 @@ pub enum ShellMessage {
     LogsLoaded(Result<SystemLogPage, String>),
     PlaylistsLoaded(Result<Vec<PlaylistSummary>, String>),
     TaskSnapshotLoaded { active: usize, completed: usize },
+    CancelTask(String),
 }
 
 /// 主内容页面的可观察状态。
@@ -129,6 +130,7 @@ pub struct ShellViewModel {
     pub playlist_entries: Vec<String>,
     pub active_tasks: usize,
     pub completed_tasks: usize,
+    pub active_task_ids: Vec<String>,
 }
 
 impl Default for ShellViewModel {
@@ -148,6 +150,7 @@ impl Default for ShellViewModel {
             playlist_entries: Vec::new(),
             active_tasks: 0,
             completed_tasks: 0,
+            active_task_ids: Vec::new(),
         }
     }
 }
@@ -360,6 +363,9 @@ impl ShellViewModel {
                 self.completed_tasks = completed;
                 self.detail = format!("{} 个运行中任务 · {} 个近期完成任务", active, completed);
             }
+            ShellMessage::CancelTask(task_id) => {
+                self.detail = format!("已请求取消任务 {task_id}");
+            }
             ShellMessage::Refresh => {
                 self.detail = "刷新服务尚未接通，当前数据未变更".into();
             }
@@ -428,6 +434,20 @@ pub fn mount_shell(
                 text(view_model.plugin_entries_label()).key("plugin-entries"),
                 text(view_model.log_entries_label()).key("log-entries"),
                 text(view_model.playlist_entries_label()).key("playlist-entries"),
+                widget(Stack::fill_column(6.0)).children(
+                    view_model
+                        .active_task_ids
+                        .iter()
+                        .map(|task_id| {
+                            let task_id = task_id.clone();
+                            button(format!("取消任务 {task_id}"))
+                                .key(format!("cancel-task-{task_id}"))
+                                .on_cx(move |_, _: &Activate, cx| {
+                                    cx.dispatch_program(ShellMessage::CancelTask(task_id.clone()));
+                                })
+                        })
+                        .collect::<Vec<_>>(),
+                ),
                 widget(Stack::fill_column(6.0)).children(
                     view_model
                         .file_entries

@@ -31,4 +31,14 @@ impl MutsukiTaskViewModel {
     pub fn activity_snapshot(&self) -> (usize, usize) {
         self.runtime.activity_snapshot()
     }
+
+    /// 返回当前可取消任务的稳定 ID 列表。
+    pub fn active_task_ids(&self) -> Vec<String> {
+        self.runtime.active_task_ids()
+    }
+
+    /// 请求取消一个正在排队或运行中的任务。
+    pub fn cancel(&self, task_id: &str) -> bool {
+        self.runtime.cancel(task_id)
+    }
 }
