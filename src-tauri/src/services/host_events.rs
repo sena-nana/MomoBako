@@ -1,7 +1,7 @@
 //! 宿主无关的应用事件边界，供原生 UI 与迁移期 Tauri 适配器共同订阅。
 
 use crate::services::repository::{RepositoryStructureUpdatedEvent, SystemLogRecord};
-use std::sync::{Arc, mpsc};
+use std::sync::{mpsc, Arc};
 
 /// 应用服务产生的事件；宿主负责将其送入自己的 UI 事件循环。
 #[derive(Clone)]
