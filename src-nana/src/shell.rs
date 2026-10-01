@@ -11,7 +11,6 @@ use crate::backend::services::repository::{
 };
 
 /// Nana Runtime 传递给应用状态的壳层交互消息。
-#[derive(Debug)]
 pub enum ShellMessage {
     Navigate(ShellPage),
     Refresh,
@@ -26,6 +25,7 @@ pub enum ShellMessage {
     PluginsLoaded(Result<Vec<PluginManifest>, String>),
     LogsLoaded(Result<SystemLogPage, String>),
     PlaylistsLoaded(Result<Vec<PlaylistSummary>, String>),
+    SystemStatusLoaded(Result<crate::backend::services::runtime::ExternalApiConnectionStatus, String>),
     TaskSnapshotLoaded { active: usize, completed: usize },
     CancelTask(String),
 }
@@ -131,6 +131,7 @@ pub struct ShellViewModel {
     pub active_tasks: usize,
     pub completed_tasks: usize,
     pub active_task_ids: Vec<String>,
+    pub system_status: Option<String>,
 }
 
 impl Default for ShellViewModel {
@@ -151,6 +152,7 @@ impl Default for ShellViewModel {
             active_tasks: 0,
             completed_tasks: 0,
             active_task_ids: Vec::new(),
+            system_status: None,
         }
     }
 }
@@ -363,6 +365,19 @@ impl ShellViewModel {
                 self.completed_tasks = completed;
                 self.detail = format!("{} 个运行中任务 · {} 个近期完成任务", active, completed);
             }
+            ShellMessage::SystemStatusLoaded(Ok(status)) => {
+                self.page = ShellPage::Settings;
+                self.system_status = Some(format!(
+                    "{} · {}",
+                    if status.ready { "服务已就绪" } else { "服务未就绪" },
+                    status.base_url
+                ));
+                self.detail = self.system_status.clone().unwrap_or_default();
+            }
+            ShellMessage::SystemStatusLoaded(Err(error)) => {
+                self.page = ShellPage::Error;
+                self.detail = format!("无法读取系统服务状态：{error}");
+            }
             ShellMessage::CancelTask(task_id) => {
                 self.detail = format!("已请求取消任务 {task_id}");
             }
@@ -415,17 +430,7 @@ pub fn mount_shell(
                     cx.dispatch_program(ShellMessage::Navigate(ShellPage::Settings));
                 }),
             ));
-            let content = widget(
-                Stack::fill_column(12.0)
-                    .padding_xy(24.0, 20.0)
-                    .min_width(LengthSpec::Px(0.0)),
-            )
-            .children((widget(
-                List::new()
-                    .label(view_model.page.title())
-                    .style(Stack::column(12.0).node_style()),
-            )
-            .children((
+            let status_summary = widget(Stack::fill_column(8.0)).children((
                 text(view_model.page.title()).key("page-title"),
                 text(view_model.page.status()).key("page-status"),
                 text(view_model.selection_label()).key("selection"),
@@ -434,40 +439,54 @@ pub fn mount_shell(
                 text(view_model.plugin_entries_label()).key("plugin-entries"),
                 text(view_model.log_entries_label()).key("log-entries"),
                 text(view_model.playlist_entries_label()).key("playlist-entries"),
-                widget(Stack::fill_column(6.0)).children(
-                    view_model
-                        .active_task_ids
-                        .iter()
-                        .map(|task_id| {
-                            let task_id = task_id.clone();
-                            button(format!("取消任务 {task_id}"))
-                                .key(format!("cancel-task-{task_id}"))
-                                .on_cx(move |_, _: &Activate, cx| {
-                                    cx.dispatch_program(ShellMessage::CancelTask(task_id.clone()));
-                                })
-                        })
-                        .collect::<Vec<_>>(),
-                ),
-                widget(Stack::fill_column(6.0)).children(
-                    view_model
-                        .file_entries
-                        .iter()
-                        .zip(view_model.file_entry_ids.iter())
-                        .take(8)
-                        .map(|(path, asset_id)| {
-                            let path = path.clone();
-                            let asset_id = asset_id.clone();
-                            button(path.clone())
-                                .key(format!("file-entry-{path}"))
-                                .on_cx(move |_, _: &Activate, cx| {
-                                    cx.dispatch_program(ShellMessage::SelectFile {
-                                        path: path.clone(),
-                                        asset_id: asset_id.clone(),
-                                    });
-                                })
-                        })
-                        .collect::<Vec<_>>(),
-                ),
+                text(view_model.system_status.clone().unwrap_or_else(|| "尚未读取系统服务状态".into()))
+                    .key("system-status"),
+            ));
+            let task_actions = widget(Stack::fill_column(6.0)).children(
+                view_model
+                    .active_task_ids
+                    .iter()
+                    .map(|task_id| {
+                        let task_id = task_id.clone();
+                        button(format!("取消任务 {task_id}"))
+                            .key(format!("cancel-task-{task_id}"))
+                            .on_cx(move |_, _: &Activate, cx| {
+                                cx.dispatch_program(ShellMessage::CancelTask(task_id.clone()));
+                            })
+                    })
+                    .collect::<Vec<_>>(),
+            );
+            let file_actions = widget(Stack::fill_column(6.0)).children(
+                view_model
+                    .file_entries
+                    .iter()
+                    .zip(view_model.file_entry_ids.iter())
+                    .take(8)
+                    .map(|(path, asset_id)| {
+                        let path = path.clone();
+                        let asset_id = asset_id.clone();
+                        button(path.clone())
+                            .key(format!("file-entry-{path}"))
+                            .on_cx(move |_, _: &Activate, cx| {
+                                cx.dispatch_program(ShellMessage::SelectFile {
+                                    path: path.clone(),
+                                    asset_id: asset_id.clone(),
+                                });
+                            })
+                    })
+                    .collect::<Vec<_>>(),
+            );
+            let content = widget(
+                Stack::fill_column(12.0)
+                    .padding_xy(24.0, 20.0)
+                    .min_width(LengthSpec::Px(0.0)),
+            )
+            .children((status_summary, task_actions, file_actions, widget(
+                List::new()
+                    .label(view_model.page.title())
+                    .style(Stack::column(12.0).node_style()),
+            )
+            .children((
                 button(view_model.page.primary_action())
                     .key("primary-action")
                     .on_cx(|_, _: &Activate, cx| cx.dispatch_program(ShellMessage::PrimaryAction)),
