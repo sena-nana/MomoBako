@@ -120,6 +120,21 @@ impl ApplicationState for MomoBakoApplication {
                 eprintln!("Nana 插件列表任务提交失败：{error}");
             }
         }
+        if matches!(&message, ShellMessage::Navigate(ShellPage::Logs))
+            && let Some(services) = self.services.as_ref()
+        {
+            let system = services.system.clone();
+            let executor = services.executor.clone();
+            let query = backend::services::repository::SystemLogQuery {
+                limit: Some(100),
+                ..Default::default()
+            };
+            if let Err(error) = context.run_task(Task::new(async move {
+                ShellMessage::LogsLoaded(executor.block_on(system.list_system_logs(Some(query))))
+            })) {
+                eprintln!("Nana 系统日志任务提交失败：{error}");
+            }
+        }
         if let ShellMessage::RepositorySnapshotLoaded(Ok(snapshot)) = &message
             && let Some(services) = self.services.as_ref()
         {
