@@ -49,5 +49,10 @@ Nana `ApplicationState::initialize` 现在启动共享 `RepositoryRuntime`，窗
 和 Mutsuki 任务 ViewModel 全部绑定到该 Runtime；后续页面接线只需消费
 `NativeServices`，不再调用 Tauri command。
 
+原生窗口首次构建后通过 Nana `RuntimeProgramContext::run_task` 异步调用
+`RepositoryQueryViewModel::list_repositories`，再请求首个资源库的
+`get_repository_snapshot`。结果以 `ShellMessage` 回到应用状态，空仓库、加载错误和
+文件/文件夹统计分别落入对应页面状态；未完成真实服务调用的按钮不会显示成功反馈。
+
 插件的 Vue 自定义设置页、工具页、预览和播放器贡献不进入原生生产树。官方插件应迁移
 到 Nana 原生贡献接口；第三方旧插件需要升级，宿主应提供明确的兼容提示。
