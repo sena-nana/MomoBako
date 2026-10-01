@@ -6,11 +6,12 @@
 use nana_ui::runtime::view::{button, text, widget};
 use nana_ui::runtime::{Activate, FrameworkError, LengthSpec, List, RuntimeDocument, Stack};
 use crate::backend::services::repository::{
-    AssetDetail, FileBrowserSnapshot, RepositorySnapshot, RepositorySummary,
+    AssetDetail, FileBrowserSnapshot, FilePreviewSourceResponse, RepositorySnapshot,
+    RepositorySummary,
 };
 
 /// Nana Runtime 传递给应用状态的壳层交互消息。
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub enum ShellMessage {
     Navigate(ShellPage),
     Refresh,
@@ -21,6 +22,7 @@ pub enum ShellMessage {
     FileBrowserLoaded(Result<FileBrowserSnapshot, String>),
     SelectFile { path: String, asset_id: Option<String> },
     AssetDetailLoaded(Result<AssetDetail, String>),
+    PreviewSourceLoaded(Result<FilePreviewSourceResponse, String>),
 }
 
 /// 主内容页面的可观察状态。
@@ -112,6 +114,7 @@ pub struct ShellViewModel {
     pub dirty: bool,
     pub file_entries: Vec<String>,
     pub file_entry_ids: Vec<Option<String>>,
+    pub preview_url: Option<String>,
 }
 
 impl Default for ShellViewModel {
@@ -125,6 +128,7 @@ impl Default for ShellViewModel {
             dirty: false,
             file_entries: Vec::new(),
             file_entry_ids: Vec::new(),
+            preview_url: None,
         }
     }
 }
@@ -256,6 +260,18 @@ impl ShellViewModel {
             ShellMessage::AssetDetailLoaded(Err(error)) => {
                 self.page = ShellPage::Error;
                 self.detail = format!("无法读取文件元数据：{error}");
+            }
+            ShellMessage::PreviewSourceLoaded(Ok(source)) => {
+                self.page = ShellPage::SelectedFile;
+                self.preview_url = source.source_url;
+                self.detail = format!(
+                    "{} · {} · {} 字节",
+                    source.media_type, source.path, source.size_bytes
+                );
+            }
+            ShellMessage::PreviewSourceLoaded(Err(error)) => {
+                self.page = ShellPage::Error;
+                self.detail = format!("无法打开预览源：{error}");
             }
             ShellMessage::Refresh => {
                 self.detail = "刷新服务尚未接通，当前数据未变更".into();
