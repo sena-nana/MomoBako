@@ -710,7 +710,6 @@ pub fn mount_shell(
                     .collect::<Vec<_>>(),
             );
             let plugin_config_keys = view_model.plugin_config_keys.clone();
-            let plugin_config_string_values = view_model.plugin_config_string_values.clone();
             let plugin_config_drafts = view_model.plugin_config_drafts.clone();
             let plugin_config_editors = widget(Stack::fill_column(8.0)).children(
                 view_model
@@ -721,7 +720,6 @@ pub fn mount_shell(
                         let drafts = plugin_config_drafts.clone();
                         plugin_config_keys
                             .iter()
-                            .filter(|key| plugin_config_string_values.contains(*key))
                             .map(move |key| {
                                 let plugin_id = plugin_id.clone();
                                 let key = key.clone();
