@@ -1,6 +1,6 @@
 //! Repository management command orchestration.
 
-use tauri::AppHandle;
+use std::path::PathBuf;
 
 use crate::services::repository::{
     NeteaseRepositoryCacheConfigureRequest, NeteaseRepositoryCacheConfigureResponse,
@@ -46,8 +46,12 @@ impl RepositoryManagementViewModel {
             .await
     }
 
-    pub async fn refresh_thumbnail_scope(&self, app: &AppHandle) -> Result<(), String> {
-        let paths = self.runtime.repository_thumbnail_roots().await?;
-        crate::app_shell::allow_thumbnail_asset_roots(app, paths)
+    /// Returns the repository roots needed by a host to serve thumbnail assets.
+    ///
+    /// The ViewModel deliberately returns data instead of touching a window or
+    /// asset protocol. Native Nana hosts can route the paths through their own
+    /// resource policy while the Tauri adapter keeps its existing allow-list.
+    pub async fn thumbnail_roots(&self) -> Result<Vec<PathBuf>, String> {
+        self.runtime.repository_thumbnail_roots().await
     }
 }
