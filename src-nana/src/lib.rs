@@ -240,6 +240,22 @@ impl ApplicationState for MomoBakoApplication {
                 eprintln!("Nana 文件浏览任务提交失败：{error}");
             }
         }
+        if let ShellMessage::OpenDirectory(path) = &message
+            && let Some(repo_id) = self.shell.repository_id.clone()
+            && let Some(services) = self.services.as_ref()
+        {
+            let browser = services.file_browser.clone();
+            let executor = services.executor.clone();
+            let request = backend::services::repository::FileBrowserRequest {
+                repo_id, directory_path: Some(path.clone()), include_tree: Some(false),
+                special_location: None, offset: Some(0), limit: Some(200),
+            };
+            if let Err(error) = context.run_task(Task::new(async move {
+                ShellMessage::FileBrowserLoaded(executor.block_on(browser.get_file_browser(request)))
+            })) {
+                eprintln!("Nana 目录加载任务提交失败：{error}");
+            }
+        }
         if let ShellMessage::SelectFile {
             asset_id: Some(asset_id),
             ..
