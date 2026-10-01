@@ -88,6 +88,23 @@ fn renders_repository_states_with_semantic_labels() {
     }
 }
 
+#[test]
+fn native_actions_are_reachable_through_runtime_hit_testing() {
+    if !offscreen::pixels_available() {
+        return;
+    }
+    let document = acceptance_document_for(ShellPage::FileList).expect("acceptance document");
+    let mut session = RuntimeAgentSession::new(document, 1200, 800).expect("agent session");
+    for label in ["资源库", "插件", "设置", "刷新状态", "刷新列表", "编辑内容"] {
+        let node = session
+            .accessibility_dump()
+            .into_iter()
+            .find(|node| node.label.as_deref() == Some(label))
+            .unwrap_or_else(|| panic!("missing native action: {label}"));
+        assert!(session.click_node(node.id).expect("runtime click"), "{label}");
+    }
+}
+
 fn page_title(page: &ShellPage) -> &'static str {
     match page {
         ShellPage::Loading => "正在加载资源库",
