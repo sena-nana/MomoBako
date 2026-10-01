@@ -103,7 +103,7 @@ impl ApplicationState for MomoBakoApplication {
                 },
                 WindowAction::ToggleMaximize => WindowCommand::SetMaximized {
                     id: *id,
-                    maximized: true,
+                    maximized: !context.geometry().maximized,
                 },
                 WindowAction::Close => WindowCommand::Close(*id),
             };
