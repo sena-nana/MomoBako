@@ -20,16 +20,41 @@ pub mod host_api;
 pub use momobako_backend as backend;
 pub mod plugin_api;
 
-/// Nana 宿主的最小应用状态；后续阶段将把 repository/plugin/task ViewModel 注入这里。
-#[derive(Default)]
-pub struct MomoBakoApplication;
+/// Nana 宿主应用状态，持有共享领域 Runtime 和原生壳层 ViewModel。
+pub struct MomoBakoApplication {
+    runtime: Option<backend::RepositoryRuntime>,
+    shell: ShellViewModel,
+}
+
+impl Default for MomoBakoApplication {
+    fn default() -> Self {
+        Self {
+            runtime: None,
+            shell: ShellViewModel::default(),
+        }
+    }
+}
 
 impl ApplicationState for MomoBakoApplication {
     type Message = ();
     type Error = FrameworkError;
 
     fn initialize(_: &RuntimeProgramContext<Self::Message>) -> Result<Self, Self::Error> {
-        Ok(Self)
+        let runtime = match backend::RepositoryRuntime::start() {
+            Ok(runtime) => Some(runtime),
+            Err(error) => {
+                eprintln!("Nana 领域 Runtime 启动失败：{error}");
+                None
+            }
+        };
+        let shell = if runtime.is_some() {
+            ShellViewModel::default()
+        } else {
+            let mut shell = ShellViewModel::for_page(ShellPage::Error);
+            shell.detail = "领域服务启动失败，请检查服务目录和端口配置".into();
+            shell
+        };
+        Ok(Self { runtime, shell })
     }
 
     fn build(
@@ -37,7 +62,7 @@ impl ApplicationState for MomoBakoApplication {
         window: &mut ApplicationWindow,
         _: &RuntimeProgramContext<Self::Message>,
     ) -> Result<(), Self::Error> {
-        mount_shell(&mut window.document, &ShellViewModel::default())
+        mount_shell(&mut window.document, &self.shell)
     }
 
     fn update(
@@ -47,6 +72,14 @@ impl ApplicationState for MomoBakoApplication {
         _: &RuntimeProgramContext<Self::Message>,
     ) -> RuntimeProgramUpdate {
         RuntimeProgramUpdate::default()
+    }
+}
+
+impl Drop for MomoBakoApplication {
+    fn drop(&mut self) {
+        if let Some(runtime) = &self.runtime {
+            runtime.shutdown_helpers();
+        }
     }
 }
 
