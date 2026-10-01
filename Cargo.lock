@@ -3893,6 +3893,7 @@ dependencies = [
  "nana-ui",
  "nana-ui-devtools",
  "nana-ui-platform",
+ "serde_json",
 ]
 
 [[package]]

@@ -71,13 +71,13 @@ fn renders_repository_states_with_semantic_labels() {
         let hit = session.hit_test(20.0, 20.0);
         let png = output.join(format!("state-{}.png", page_slug(&page)));
         session.screenshot_png(&png).expect("state PNG snapshot");
-        let evidence_text = format!(
-            "{{\"page\":{:?},\"accessibility\":{:?},\"scene_probe\":{:?},\"hit_test\":{:?}}}",
-            page_slug(&page),
-            session.accessibility_dump(),
-            probe,
-            hit
-        );
+        let evidence_text = serde_json::to_string_pretty(&serde_json::json!({
+            "page": page_slug(&page),
+            "accessibility": session.accessibility_dump(),
+            "scene_probe": probe,
+            "hit_test": hit
+        }))
+        .expect("serialize acceptance evidence");
         std::fs::write(evidence, evidence_text).expect("write acceptance evidence");
     }
 }

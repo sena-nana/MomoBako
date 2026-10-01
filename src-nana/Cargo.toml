@@ -10,6 +10,7 @@ nana-ui = { git = "https://github.com/sena-nana/NanaUI.git", rev = "ee94106746b1
 nana-ui-platform = { git = "https://github.com/sena-nana/NanaUI.git", rev = "ee94106746b13f356af17586ed5e35ed78f9eb40", features = ["clipboard"] }
 
 [dev-dependencies]
+serde_json = "1"
 nana-ui-devtools = { git = "https://github.com/sena-nana/NanaUI.git", rev = "ee94106746b13f356af17586ed5e35ed78f9eb40", features = ["runtime-agent"] }
 
 [[bin]]

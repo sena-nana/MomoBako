@@ -4,7 +4,7 @@
 //! `ShellViewModel` 注入文本状态，避免把领域服务直接耦合到 Nana 控件树。
 
 use nana_ui::runtime::view::{button, text, widget};
-use nana_ui::runtime::{FrameworkError, List, RuntimeDocument};
+use nana_ui::runtime::{FrameworkError, LengthSpec, List, RuntimeDocument, Stack};
 
 /// 主内容页面的可观察状态。
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -122,31 +122,63 @@ pub fn mount_shell(
     document
         .context_mut()
         .mount_view_root(document_id, move || {
-            let navigation = widget(List::new().label("资源库导航")).children((
+            // 标题栏、导航栏和主工作区分别承担窗口级操作、上下文导航和资源主线。
+            let navigation = widget(
+                Stack::fill_column(8.0)
+                    .width(LengthSpec::Px(220.0))
+                    .grow(0.0)
+                    .shrink(0.0)
+                    .padding_xy(16.0, 18.0),
+            )
+            .children((
                 text("资源库").key("nav-library"),
                 text("播放列表").key("nav-playlists"),
                 text("插件").key("nav-plugins"),
                 text("设置").key("nav-settings"),
             ));
-            let content = widget(List::new().label(view_model.page.title())).children((
+            let content = widget(
+                Stack::fill_column(12.0)
+                    .padding_xy(24.0, 20.0)
+                    .min_width(LengthSpec::Px(0.0)),
+            )
+            .children((widget(
+                List::new()
+                    .label(view_model.page.title())
+                    .style(Stack::column(12.0).node_style()),
+            )
+            .children((
                 text(view_model.page.status()).key("page-status"),
                 text(view_model.selection_label()).key("selection"),
                 text(view_model.detail.clone()).key("page-detail"),
                 button(view_model.page.primary_action()).key("primary-action"),
                 button(view_model.edit_label()).key("edit-action"),
-            ));
-            let process = widget(List::new().label("过程信息")).children((
+            )),));
+            let process = widget(
+                Stack::fill_column(8.0)
+                    .width(LengthSpec::Px(240.0))
+                    .grow(0.0)
+                    .shrink(0.0)
+                    .padding_xy(16.0, 20.0),
+            )
+            .children((
                 text("当前状态").key("process-heading"),
                 text(view_model.page.status()).key("process-status"),
             ));
-            widget(List::new().label("MomoBako 工作区")).children((
+            let title_bar = widget(
+                Stack::bar(12.0)
+                    .height(LengthSpec::Px(48.0))
+                    .padding_xy(20.0, 12.0),
+            )
+            .children((
                 text("MomoBako").key("title"),
-                text("NanaUI 原生渲染宿主").key("subtitle"),
-                navigation,
-                content,
-                process,
+                text("资源库工作区").key("subtitle"),
                 button("刷新状态").key("refresh"),
-            ))
+            ));
+            let body = widget(Stack::fill_row(0.0).min_height(LengthSpec::Px(0.0)))
+                .children((navigation, content, process))
+                .key("workspace-body");
+            widget(Stack::fill_column(0.0).min_width(LengthSpec::Px(0.0)))
+                .children((title_bar, body))
         })?;
     Ok(())
 }
