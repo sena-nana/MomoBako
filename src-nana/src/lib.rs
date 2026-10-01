@@ -167,6 +167,18 @@ impl ApplicationState for MomoBakoApplication {
                 eprintln!("Nana 系统状态任务提交失败：{error}");
             }
         }
+        if let ShellMessage::SelectPlugin(plugin_id) = &message
+            && let Some(services) = self.services.as_ref()
+        {
+            let plugin = services.plugin.clone();
+            let executor = services.executor.clone();
+            let plugin_id = plugin_id.clone();
+            if let Err(error) = context.run_task(Task::new(async move {
+                ShellMessage::PluginConfigLoaded(executor.block_on(plugin.get_plugin_config(plugin_id)))
+            })) {
+                eprintln!("Nana 插件设置任务提交失败：{error}");
+            }
+        }
         if let ShellMessage::CancelTask(task_id) = &message
             && let Some(services) = self.services.as_ref()
         {
