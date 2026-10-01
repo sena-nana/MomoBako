@@ -106,6 +106,7 @@ fn native_actions_are_reachable_through_runtime_hit_testing() {
         "关闭",
         "刷新列表",
         "编辑内容",
+        "清理日志",
     ] {
         let node = session
             .accessibility_dump()
