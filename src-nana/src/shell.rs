@@ -38,6 +38,7 @@ pub enum ShellMessage {
     PluginConfigDraftChanged { key: String, value: String },
     SavePluginConfig { plugin_id: String, key: String },
     LogsLoaded(Result<SystemLogPage, String>),
+    ClearLogs,
     PlaylistsLoaded(Result<Vec<PlaylistSummary>, String>),
     SelectPlaylist(String),
     DeletePlaylist(String),
@@ -478,6 +479,9 @@ impl ShellViewModel {
                 self.page = ShellPage::Error;
                 self.detail = format!("无法读取系统日志：{error}");
             }
+            ShellMessage::ClearLogs => {
+                self.detail = "正在清理系统日志…".into();
+            }
             ShellMessage::PlaylistsLoaded(Ok(playlists)) => {
                 self.page = ShellPage::Playlists;
                 self.playlist_entries = playlists
@@ -760,6 +764,11 @@ pub fn mount_shell(
                     })
                     .collect::<Vec<_>>(),
             );
+            let log_actions = widget(Stack::fill_row(8.0)).children((
+                button("清理日志")
+                    .key("clear-logs")
+                    .on_cx(|_, _: &Activate, cx| cx.dispatch_program(ShellMessage::ClearLogs)),
+            ));
             let preview_slot = if view_model.preview_pixels.is_some() {
                 "file-preview"
             } else {
@@ -774,7 +783,7 @@ pub fn mount_shell(
                     .padding_xy(24.0, 20.0)
                     .min_width(LengthSpec::Px(0.0)),
             )
-            .children((status_summary, task_actions, file_actions, plugin_actions, plugin_config_actions, plugin_config_editors, playlist_actions, playlist_item_actions, preview_node, widget(
+            .children((status_summary, task_actions, file_actions, plugin_actions, plugin_config_actions, plugin_config_editors, playlist_actions, playlist_item_actions, log_actions, preview_node, widget(
                 List::new()
                     .label(view_model.page.title())
                     .style(Stack::column(12.0).node_style()),

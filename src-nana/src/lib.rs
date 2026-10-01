@@ -331,6 +331,25 @@ impl ApplicationState for MomoBakoApplication {
                 eprintln!("Nana 播放列表项目移除任务提交失败：{error}");
             }
         }
+        if matches!(&message, ShellMessage::ClearLogs)
+            && let Some(services) = self.services.as_ref()
+        {
+            let system = services.system.clone();
+            let executor = services.executor.clone();
+            let query = backend::services::repository::SystemLogQuery {
+                limit: Some(100),
+                ..Default::default()
+            };
+            if let Err(error) = context.run_task(Task::new(async move {
+                let result = executor.block_on(async {
+                    system.clear_system_logs().await?;
+                    system.list_system_logs(Some(query)).await
+                });
+                ShellMessage::LogsLoaded(result)
+            })) {
+                eprintln!("Nana 系统日志清理任务提交失败：{error}");
+            }
+        }
         if let ShellMessage::DeletePluginConfig { plugin_id, key } = &message
             && let Some(services) = self.services.as_ref()
         {
