@@ -253,6 +253,23 @@ impl MomoTaskRuntime {
         }
     }
 
+    /// Returns a lightweight task-center snapshot without exposing task internals.
+    pub fn activity_snapshot(&self) -> (usize, usize) {
+        let active = self
+            .state
+            .cancellations
+            .lock()
+            .map(|tasks| tasks.len())
+            .unwrap_or_default();
+        let completed = self
+            .state
+            .outcomes
+            .lock()
+            .map(|outcomes| outcomes.terminal.len())
+            .unwrap_or_default();
+        (active, completed)
+    }
+
     async fn execute_value(
         &self,
         task_id: String,

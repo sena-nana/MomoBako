@@ -26,6 +26,7 @@ pub enum ShellMessage {
     PluginsLoaded(Result<Vec<PluginManifest>, String>),
     LogsLoaded(Result<SystemLogPage, String>),
     PlaylistsLoaded(Result<Vec<PlaylistSummary>, String>),
+    TaskSnapshotLoaded { active: usize, completed: usize },
 }
 
 /// 主内容页面的可观察状态。
@@ -126,6 +127,8 @@ pub struct ShellViewModel {
     pub plugin_entries: Vec<String>,
     pub log_entries: Vec<String>,
     pub playlist_entries: Vec<String>,
+    pub active_tasks: usize,
+    pub completed_tasks: usize,
 }
 
 impl Default for ShellViewModel {
@@ -143,6 +146,8 @@ impl Default for ShellViewModel {
             plugin_entries: Vec::new(),
             log_entries: Vec::new(),
             playlist_entries: Vec::new(),
+            active_tasks: 0,
+            completed_tasks: 0,
         }
     }
 }
@@ -348,6 +353,12 @@ impl ShellViewModel {
             ShellMessage::PlaylistsLoaded(Err(error)) => {
                 self.page = ShellPage::Error;
                 self.detail = format!("无法读取播放列表：{error}");
+            }
+            ShellMessage::TaskSnapshotLoaded { active, completed } => {
+                self.page = ShellPage::TaskRunning;
+                self.active_tasks = active;
+                self.completed_tasks = completed;
+                self.detail = format!("{} 个运行中任务 · {} 个近期完成任务", active, completed);
             }
             ShellMessage::Refresh => {
                 self.detail = "刷新服务尚未接通，当前数据未变更".into();
