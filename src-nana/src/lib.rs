@@ -135,6 +135,18 @@ impl ApplicationState for MomoBakoApplication {
                 eprintln!("Nana 系统日志任务提交失败：{error}");
             }
         }
+        if matches!(&message, ShellMessage::Navigate(ShellPage::Playlists))
+            && let Some(repository_id) = self.shell.repository_id.clone()
+            && let Some(services) = self.services.as_ref()
+        {
+            let interaction = services.repository_interaction.clone();
+            let executor = services.executor.clone();
+            if let Err(error) = context.run_task(Task::new(async move {
+                ShellMessage::PlaylistsLoaded(executor.block_on(interaction.list_playlists(repository_id)))
+            })) {
+                eprintln!("Nana 播放列表任务提交失败：{error}");
+            }
+        }
         if let ShellMessage::RepositorySnapshotLoaded(Ok(snapshot)) = &message
             && let Some(services) = self.services.as_ref()
         {
