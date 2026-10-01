@@ -33,6 +33,8 @@ pub enum ShellMessage {
     },
     PluginsLoaded(Result<Vec<PluginManifest>, String>),
     SelectPlugin(String),
+    TogglePlugin { plugin_id: String, enabled: bool },
+    DeletePlugin(String),
     PluginConfigLoaded(Result<PluginConfigSnapshot, String>),
     DeletePluginConfig { plugin_id: String, key: String },
     PluginConfigDraftChanged { key: String, value: String },
@@ -166,6 +168,7 @@ pub struct ShellViewModel {
     pub preview_pixels: Option<PreviewPixels>,
     pub plugin_entries: Vec<String>,
     pub plugin_entry_ids: Vec<String>,
+    pub plugin_enabled: Vec<bool>,
     pub log_entries: Vec<String>,
     pub playlist_entries: Vec<String>,
     pub playlist_entry_ids: Vec<String>,
@@ -199,6 +202,7 @@ impl Default for ShellViewModel {
             preview_pixels: None,
             plugin_entries: Vec::new(),
             plugin_entry_ids: Vec::new(),
+            plugin_enabled: Vec::new(),
             log_entries: Vec::new(),
             playlist_entries: Vec::new(),
             playlist_entry_ids: Vec::new(),
@@ -426,6 +430,7 @@ impl ShellViewModel {
                     .map(|plugin| format!("{} {} · {}", plugin.name, plugin.version, plugin.status))
                     .collect();
                 self.plugin_entry_ids = plugins.iter().map(|plugin| plugin.plugin_id.clone()).collect();
+                self.plugin_enabled = plugins.iter().map(|plugin| plugin.enabled).collect();
                 self.detail = format!("{} 个插件 · 原生贡献接口优先", plugins.len());
             }
             ShellMessage::PluginsLoaded(Err(error)) => {
@@ -435,6 +440,15 @@ impl ShellViewModel {
             ShellMessage::SelectPlugin(plugin_id) => {
                 self.page = ShellPage::PluginSettings;
                 self.detail = format!("正在读取插件 {plugin_id} 的原生设置…");
+            }
+            ShellMessage::TogglePlugin { plugin_id, enabled } => {
+                self.detail = format!(
+                    "正在{}插件 {plugin_id}…",
+                    if enabled { "启用" } else { "停用" }
+                );
+            }
+            ShellMessage::DeletePlugin(plugin_id) => {
+                self.detail = format!("正在删除插件 {plugin_id}…");
             }
             ShellMessage::PluginConfigLoaded(Ok(config)) => {
                 self.page = ShellPage::PluginSettings;
@@ -643,14 +657,34 @@ pub fn mount_shell(
                     .plugin_entries
                     .iter()
                     .zip(view_model.plugin_entry_ids.iter())
+                    .zip(view_model.plugin_enabled.iter())
                     .take(8)
-                    .map(|(label, plugin_id)| {
+                    .map(|((label, plugin_id), enabled)| {
                         let plugin_id = plugin_id.clone();
-                        button(label.clone())
-                            .key(format!("plugin-entry-{plugin_id}"))
-                            .on_cx(move |_, _: &Activate, cx| {
-                                cx.dispatch_program(ShellMessage::SelectPlugin(plugin_id.clone()));
-                            })
+                        let select_id = plugin_id.clone();
+                        let toggle_id = plugin_id.clone();
+                        let delete_id = plugin_id.clone();
+                        let next_enabled = !*enabled;
+                        widget(Stack::fill_row(8.0)).children((
+                            button(label.clone())
+                                .key(format!("plugin-entry-{select_id}"))
+                                .on_cx(move |_, _: &Activate, cx| {
+                                    cx.dispatch_program(ShellMessage::SelectPlugin(select_id.clone()));
+                                }),
+                            button(if *enabled { "停用" } else { "启用" })
+                                .key(format!("toggle-plugin-{toggle_id}"))
+                                .on_cx(move |_, _: &Activate, cx| {
+                                    cx.dispatch_program(ShellMessage::TogglePlugin {
+                                        plugin_id: toggle_id.clone(),
+                                        enabled: next_enabled,
+                                    });
+                                }),
+                            button("删除")
+                                .key(format!("delete-plugin-{delete_id}"))
+                                .on_cx(move |_, _: &Activate, cx| {
+                                    cx.dispatch_program(ShellMessage::DeletePlugin(delete_id.clone()));
+                                }),
+                        ))
                     })
                     .collect::<Vec<_>>(),
             );
