@@ -88,11 +88,25 @@ impl ApplicationState for MomoBakoApplication {
         &mut self,
         message: ShellMessage,
         windows: &mut std::collections::HashMap<nana_ui_platform::WindowId, ApplicationWindow>,
-        _: &RuntimeProgramContext<Self::Message>,
+        context: &RuntimeProgramContext<Self::Message>,
     ) -> RuntimeProgramUpdate {
         let Some((id, window)) = windows.iter_mut().next() else {
             return RuntimeProgramUpdate::default();
         };
+        if let ShellMessage::RepositoriesLoaded(Ok(repositories)) = &message
+            && let Some(repository) = repositories.first()
+            && let Some(services) = self.services.as_ref()
+        {
+            let query = services.repository_query.clone();
+            let repo_id = repository.repo_id.clone();
+            if let Err(error) = context.run_task(Task::new(async move {
+                ShellMessage::RepositorySnapshotLoaded(
+                    query.get_repository_snapshot(repo_id).await,
+                )
+            })) {
+                eprintln!("Nana 资源库快照任务提交失败：{error}");
+            }
+        }
         self.shell.reduce(message);
         if let Err(error) = mount_shell(&mut window.document, &self.shell) {
             eprintln!("Nana 壳层重建失败：{error}");
