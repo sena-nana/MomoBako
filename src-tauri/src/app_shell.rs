@@ -14,10 +14,10 @@ use crate::{
 };
 use std::{collections::HashSet, fs, path::Path, sync::Arc};
 use tauri::{
-    AppHandle, Builder, Emitter, Manager, WindowEvent,
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     utils::config::Color,
+    AppHandle, Builder, Emitter, Manager, WindowEvent,
 };
 
 const MAIN_WINDOW_LABEL: &str = "main";

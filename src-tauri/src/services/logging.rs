@@ -11,12 +11,12 @@ use std::{
     io::{BufRead, BufReader, Write},
     path::PathBuf,
     sync::{
-        Arc, Mutex, OnceLock,
         atomic::{AtomicU64, Ordering},
+        Arc, Mutex, OnceLock,
     },
     time::{SystemTime, UNIX_EPOCH},
 };
-use time::{OffsetDateTime, format_description::well_known::Rfc3339};
+use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 
 const LOG_DIR_NAME: &str = "logs";
 const CURRENT_LOG_FILE_NAME: &str = "system.current.jsonl";

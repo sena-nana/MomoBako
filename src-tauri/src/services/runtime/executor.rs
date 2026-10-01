@@ -1,6 +1,6 @@
 //! Blocking-task execution helpers for repository runtime operations.
 
-use super::{RepositoryRuntime, sync_watched_paths};
+use super::{sync_watched_paths, RepositoryRuntime};
 use crate::services::repository::RepositoryState;
 use std::path::PathBuf;
 

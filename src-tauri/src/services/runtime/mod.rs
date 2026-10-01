@@ -19,7 +19,7 @@ pub(crate) use external_api::{
     write_external_connection_file,
 };
 pub(crate) use preview_server::start_preview_server;
-pub(crate) use watcher::{RepositoryWatcher, start_structure_refresh_worker, sync_watched_paths};
+pub(crate) use watcher::{start_structure_refresh_worker, sync_watched_paths, RepositoryWatcher};
 
 const PREVIEW_HOST: &str = "127.0.0.1";
 

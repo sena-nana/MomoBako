@@ -4,20 +4,20 @@
 //! 写锁、取消检查和错误语义，但不再经过 CoreRuntime、CoreActor 或无界阻塞线程池。
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
-use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, Weak};
 use std::time::{Duration, Instant};
 
-use mutsuki_plugin_api::{PluginHostError, PluginResult, PluginTaskGateway, plugin_error};
+use mutsuki_plugin_api::{plugin_error, PluginHostError, PluginResult, PluginTaskGateway};
 use mutsuki_runtime_contracts::{
-    CancelPolicy, ERR_TASK_EXPIRED, ERR_TASK_NOT_FOUND, RuntimeError, ScalarValue, Task, TaskBatch,
-    TaskHandle, TaskOutcome,
+    CancelPolicy, RuntimeError, ScalarValue, Task, TaskBatch, TaskHandle, TaskOutcome,
+    ERR_TASK_EXPIRED, ERR_TASK_NOT_FOUND,
 };
 use serde::Serialize;
 use serde_json::Value;
 use tokio::sync::mpsc::error::TrySendError;
-use tokio::sync::{Mutex as AsyncMutex, mpsc, oneshot};
+use tokio::sync::{mpsc, oneshot, Mutex as AsyncMutex};
 
 use super::operations::RepositoryTaskExecutor;
 use super::protocols::{
