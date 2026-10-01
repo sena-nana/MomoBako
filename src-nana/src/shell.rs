@@ -6,7 +6,7 @@
 use nana_ui::runtime::view::{button, text, widget};
 use nana_ui::runtime::{Activate, FrameworkError, LengthSpec, List, RuntimeDocument, Stack};
 use crate::backend::services::repository::{
-    AssetDetail, FileBrowserSnapshot, FilePreviewSourceResponse, RepositorySnapshot,
+    AssetDetail, FileBrowserEntry, FileBrowserSnapshot, FilePreviewSourceResponse, RepositorySnapshot,
     PluginManifest, PlaylistSummary, RepositorySummary, SystemLogPage,
     PluginConfigSnapshot,
 };
@@ -21,6 +21,7 @@ pub enum ShellMessage {
     RepositorySnapshotLoaded(Result<RepositorySnapshot, String>),
     FileBrowserLoaded(Result<FileBrowserSnapshot, String>),
     SelectFile { path: String, asset_id: Option<String> },
+    OpenDirectory(String),
     AssetDetailLoaded(Result<AssetDetail, String>),
     PreviewSourceLoaded(Result<FilePreviewSourceResponse, String>),
     PluginsLoaded(Result<Vec<PluginManifest>, String>),
@@ -127,7 +128,7 @@ impl ShellPage {
 }
 
 /// 壳层所需的宿主无关页面状态。
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct ShellViewModel {
     pub page: ShellPage,
     pub repository_name: String,
@@ -136,7 +137,8 @@ pub struct ShellViewModel {
     pub detail: String,
     pub dirty: bool,
     pub file_entries: Vec<String>,
-    pub file_entry_ids: Vec<Option<String>>,
+    pub browser_entries: Vec<FileBrowserEntry>,
+    pub current_directory: String,
     pub preview_url: Option<String>,
     pub plugin_entries: Vec<String>,
     pub plugin_entry_ids: Vec<String>,
@@ -160,7 +162,8 @@ impl Default for ShellViewModel {
             detail: "等待资源库服务响应".into(),
             dirty: false,
             file_entries: Vec::new(),
-            file_entry_ids: Vec::new(),
+            browser_entries: Vec::new(),
+            current_directory: String::new(),
             preview_url: None,
             plugin_entries: Vec::new(),
             plugin_entry_ids: Vec::new(),
@@ -309,7 +312,8 @@ impl ShellViewModel {
             ShellMessage::FileBrowserLoaded(Ok(browser)) => {
                 self.page = ShellPage::FileList;
                 self.file_entries = browser.entries.iter().map(|entry| entry.name.clone()).collect();
-                self.file_entry_ids = browser.entries.iter().map(|entry| entry.asset_id.clone()).collect();
+                self.browser_entries = browser.entries;
+                self.current_directory = browser.current_path.clone();
                 self.detail = format!(
                     "{} 个条目 · 当前目录 {}",
                     browser.total_entries, browser.current_path
@@ -323,6 +327,12 @@ impl ShellViewModel {
                 self.page = ShellPage::SelectedFile;
                 self.selected_path = Some(path);
                 self.detail = "正在读取文件元数据…".into();
+            }
+            ShellMessage::OpenDirectory(path) => {
+                self.page = ShellPage::FileList;
+                self.detail = format!("正在读取目录 {path}…");
+                self.selected_path = None;
+                self.preview_url = None;
             }
             ShellMessage::AssetDetailLoaded(Ok(detail)) => {
                 self.page = ShellPage::SelectedFile;
@@ -505,20 +515,15 @@ pub fn mount_shell(
             );
             let file_actions = widget(Stack::fill_column(6.0)).children(
                 view_model
-                    .file_entries
+                    .browser_entries
                     .iter()
-                    .zip(view_model.file_entry_ids.iter())
                     .take(8)
-                    .map(|(path, asset_id)| {
-                        let path = path.clone();
-                        let asset_id = asset_id.clone();
-                        button(path.clone())
-                            .key(format!("file-entry-{path}"))
+                    .map(|entry| {
+                        let entry = entry.clone();
+                        button(entry.name.clone())
+                            .key(format!("file-entry-{}", entry.path))
                             .on_cx(move |_, _: &Activate, cx| {
-                                cx.dispatch_program(ShellMessage::SelectFile {
-                                    path: path.clone(),
-                                    asset_id: asset_id.clone(),
-                                });
+                                cx.dispatch_program(entry_message(&entry));
                             })
                     })
                     .collect::<Vec<_>>(),
@@ -623,6 +628,15 @@ pub fn mount_shell(
                 .children((title_bar, body))
         })?;
     Ok(())
+}
+
+/// 显示名仅用于标签，服务请求始终使用 DTO 中的完整仓库相对路径。
+fn entry_message(entry: &FileBrowserEntry) -> ShellMessage {
+    if entry.kind == "directory" {
+        ShellMessage::OpenDirectory(entry.path.clone())
+    } else {
+        ShellMessage::SelectFile { path: entry.path.clone(), asset_id: entry.asset_id.clone() }
+    }
 }
 
 #[cfg(test)]
