@@ -6,7 +6,7 @@
 use nana_ui::runtime::view::{button, text, widget};
 use nana_ui::runtime::{Activate, FrameworkError, LengthSpec, List, RuntimeDocument, Stack};
 use crate::backend::services::repository::{
-    FileBrowserSnapshot, RepositorySnapshot, RepositorySummary,
+    AssetDetail, FileBrowserSnapshot, RepositorySnapshot, RepositorySummary,
 };
 
 /// Nana Runtime 传递给应用状态的壳层交互消息。
@@ -19,6 +19,8 @@ pub enum ShellMessage {
     RepositoriesLoaded(Result<Vec<RepositorySummary>, String>),
     RepositorySnapshotLoaded(Result<RepositorySnapshot, String>),
     FileBrowserLoaded(Result<FileBrowserSnapshot, String>),
+    SelectFile { path: String, asset_id: Option<String> },
+    AssetDetailLoaded(Result<AssetDetail, String>),
 }
 
 /// 主内容页面的可观察状态。
@@ -104,10 +106,12 @@ impl ShellPage {
 pub struct ShellViewModel {
     pub page: ShellPage,
     pub repository_name: String,
+    pub repository_id: Option<String>,
     pub selected_path: Option<String>,
     pub detail: String,
     pub dirty: bool,
     pub file_entries: Vec<String>,
+    pub file_entry_ids: Vec<Option<String>>,
 }
 
 impl Default for ShellViewModel {
@@ -115,10 +119,12 @@ impl Default for ShellViewModel {
         Self {
             page: ShellPage::default(),
             repository_name: "默认资源库".into(),
+            repository_id: None,
             selected_path: None,
             detail: "等待资源库服务响应".into(),
             dirty: false,
             file_entries: Vec::new(),
+            file_entry_ids: Vec::new(),
         }
     }
 }
@@ -196,6 +202,7 @@ impl ShellViewModel {
                         .first()
                         .map(|repository| repository.name.clone())
                         .unwrap_or_else(|| "默认资源库".into());
+                    self.repository_id = repositories.first().map(|repository| repository.repo_id.clone());
                     self.detail = format!("{} 个资源库 · 已加载文件列表", repositories.len());
                 }
             }
@@ -206,6 +213,7 @@ impl ShellViewModel {
             ShellMessage::RepositorySnapshotLoaded(Ok(snapshot)) => {
                 self.page = ShellPage::FileList;
                 self.repository_name = snapshot.repository.name;
+                self.repository_id = Some(snapshot.repository.repo_id);
                 self.detail = format!(
                     "{} 个文件 · {} 个文件夹 · {}",
                     snapshot.overview.file_count,
@@ -220,6 +228,7 @@ impl ShellViewModel {
             ShellMessage::FileBrowserLoaded(Ok(browser)) => {
                 self.page = ShellPage::FileList;
                 self.file_entries = browser.entries.iter().map(|entry| entry.name.clone()).collect();
+                self.file_entry_ids = browser.entries.iter().map(|entry| entry.asset_id.clone()).collect();
                 self.detail = format!(
                     "{} 个条目 · 当前目录 {}",
                     browser.total_entries, browser.current_path
@@ -228,6 +237,25 @@ impl ShellViewModel {
             ShellMessage::FileBrowserLoaded(Err(error)) => {
                 self.page = ShellPage::Error;
                 self.detail = format!("无法读取文件列表：{error}");
+            }
+            ShellMessage::SelectFile { path, .. } => {
+                self.page = ShellPage::SelectedFile;
+                self.selected_path = Some(path);
+                self.detail = "正在读取文件元数据…".into();
+            }
+            ShellMessage::AssetDetailLoaded(Ok(detail)) => {
+                self.page = ShellPage::SelectedFile;
+                self.selected_path = Some(detail.summary.path);
+                self.detail = format!(
+                    "{} · {} 个元数据字段 · {} 个修订",
+                    detail.summary.size_label,
+                    detail.metadata.len(),
+                    detail.revisions.len()
+                );
+            }
+            ShellMessage::AssetDetailLoaded(Err(error)) => {
+                self.page = ShellPage::Error;
+                self.detail = format!("无法读取文件元数据：{error}");
             }
             ShellMessage::Refresh => {
                 self.detail = "刷新服务尚未接通，当前数据未变更".into();
@@ -294,6 +322,26 @@ pub fn mount_shell(
                 text(view_model.selection_label()).key("selection"),
                 text(view_model.detail.clone()).key("page-detail"),
                 text(view_model.file_entries_label()).key("file-entries"),
+                widget(Stack::fill_column(6.0)).children(
+                    view_model
+                        .file_entries
+                        .iter()
+                        .zip(view_model.file_entry_ids.iter())
+                        .take(8)
+                        .map(|(path, asset_id)| {
+                            let path = path.clone();
+                            let asset_id = asset_id.clone();
+                            button(path.clone())
+                                .key(format!("file-entry-{path}"))
+                                .on_cx(move |_, _: &Activate, cx| {
+                                    cx.dispatch_program(ShellMessage::SelectFile {
+                                        path: path.clone(),
+                                        asset_id: asset_id.clone(),
+                                    });
+                                })
+                        })
+                        .collect::<Vec<_>>(),
+                ),
                 button(view_model.page.primary_action())
                     .key("primary-action")
                     .on_cx(|_, _: &Activate, cx| cx.dispatch_program(ShellMessage::PrimaryAction)),
