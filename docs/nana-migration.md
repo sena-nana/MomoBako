@@ -41,5 +41,9 @@ cargo test -p momobako-nana --test offscreen_acceptance -- --nocapture
 -p momobako-backend -p momobako-nana` 是共享边界的编译验收。服务源码仍有既存的
 Clippy 基线告警，迁移期间单独清理，不通过全局 `allow` 隐藏。
 
+Nana `ApplicationState::initialize` 现在启动共享 `RepositoryRuntime`，窗口构建使用
+同一状态中的 `ShellViewModel`；启动失败会落入原生错误状态，应用销毁时释放 Runtime
+辅助进程。离屏验收仍直接构造同一 `RuntimeDocument`，不启动网络服务。
+
 插件的 Vue 自定义设置页、工具页、预览和播放器贡献不进入原生生产树。官方插件应迁移
 到 Nana 原生贡献接口；第三方旧插件需要升级，宿主应提供明确的兼容提示。
