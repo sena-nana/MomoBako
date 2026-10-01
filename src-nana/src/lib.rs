@@ -362,6 +362,33 @@ impl ApplicationState for MomoBakoApplication {
                 eprintln!("Nana 播放列表项目移除任务提交失败：{error}");
             }
         }
+        if matches!(&message, ShellMessage::SavePlaylistName)
+            && let (Some(repository_id), Some(playlist_id), Some(player_type_id), Some(services)) = (
+                self.shell.repository_id.clone(),
+                self.shell.selected_playlist_id.clone(),
+                self.shell.selected_playlist_player_type_id.clone(),
+                self.services.as_ref(),
+            )
+        {
+            let interaction = services.repository_interaction.clone();
+            let executor = services.executor.clone();
+            let name = self.shell.playlist_name_draft.trim().to_string();
+            let request = backend::services::repository::PlaylistUpdateRequest {
+                repo_id: repository_id,
+                playlist_id,
+                name: Some(name),
+                player_type_id: Some(player_type_id),
+            };
+            if let Err(error) = context.run_task(Task::new(async move {
+                ShellMessage::PlaylistsLoaded(
+                    executor
+                        .block_on(interaction.update_playlist(request))
+                        .map(|response| response.playlists),
+                )
+            })) {
+                eprintln!("Nana 播放列表名称保存任务提交失败：{error}");
+            }
+        }
         if matches!(&message, ShellMessage::ClearLogs)
             && let Some(services) = self.services.as_ref()
         {

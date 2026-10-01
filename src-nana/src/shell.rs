@@ -46,6 +46,8 @@ pub enum ShellMessage {
     DeletePlaylist(String),
     PlaylistDetailLoaded(Result<PlaylistDetail, String>),
     RemovePlaylistItem { playlist_id: String, item_id: String },
+    PlaylistNameDraftChanged(String),
+    SavePlaylistName,
     SystemStatusLoaded(Result<crate::backend::services::runtime::ExternalApiConnectionStatus, String>),
     TaskSnapshotLoaded { active: usize, completed: usize },
     CancelTask(String),
@@ -173,6 +175,8 @@ pub struct ShellViewModel {
     pub playlist_entries: Vec<String>,
     pub playlist_entry_ids: Vec<String>,
     pub selected_playlist_id: Option<String>,
+    pub selected_playlist_player_type_id: Option<String>,
+    pub playlist_name_draft: String,
     pub playlist_item_entries: Vec<String>,
     pub playlist_item_ids: Vec<String>,
     pub active_tasks: usize,
@@ -207,6 +211,8 @@ impl Default for ShellViewModel {
             playlist_entries: Vec::new(),
             playlist_entry_ids: Vec::new(),
             selected_playlist_id: None,
+            selected_playlist_player_type_id: None,
+            playlist_name_draft: String::new(),
             playlist_item_entries: Vec::new(),
             playlist_item_ids: Vec::new(),
             active_tasks: 0,
@@ -520,6 +526,8 @@ impl ShellViewModel {
             ShellMessage::PlaylistDetailLoaded(Ok(detail)) => {
                 self.page = ShellPage::Playlists;
                 self.selected_playlist_id = Some(detail.playlist.playlist_id.clone());
+                self.selected_playlist_player_type_id = Some(detail.playlist.player_type_id.clone());
+                self.playlist_name_draft = detail.playlist.name.clone();
                 self.playlist_item_entries = detail
                     .items
                     .iter()
@@ -538,6 +546,18 @@ impl ShellViewModel {
             }
             ShellMessage::RemovePlaylistItem { item_id, .. } => {
                 self.detail = format!("正在移除播放列表项目 {item_id}…");
+            }
+            ShellMessage::PlaylistNameDraftChanged(value) => {
+                self.playlist_name_draft = value;
+            }
+            ShellMessage::SavePlaylistName => {
+                self.detail = if self.selected_playlist_id.is_none() {
+                    "请先选择一个播放列表".into()
+                } else if self.playlist_name_draft.trim().is_empty() {
+                    "播放列表名称不能为空".into()
+                } else {
+                    "正在保存播放列表名称…".into()
+                };
             }
             ShellMessage::TaskSnapshotLoaded { active, completed } => {
                 self.page = ShellPage::TaskRunning;
@@ -801,6 +821,19 @@ pub fn mount_shell(
                     .key("clear-logs")
                     .on_cx(|_, _: &Activate, cx| cx.dispatch_program(ShellMessage::ClearLogs)),
             ));
+            let playlist_name = view_model.playlist_name_draft.clone();
+            let playlist_editor = widget(Stack::fill_row(8.0)).children((
+                widget(TextInput::new(playlist_name).label("播放列表名称")).on_cx(
+                    |_, event: &TextChanged, cx| {
+                        cx.dispatch_program(ShellMessage::PlaylistNameDraftChanged(
+                            event.value.to_string(),
+                        ));
+                    },
+                ),
+                button("保存名称")
+                    .key("save-playlist-name")
+                    .on_cx(|_, _: &Activate, cx| cx.dispatch_program(ShellMessage::SavePlaylistName)),
+            ));
             let preview_slot = if view_model.preview_pixels.is_some() {
                 "file-preview"
             } else {
@@ -815,7 +848,7 @@ pub fn mount_shell(
                     .padding_xy(24.0, 20.0)
                     .min_width(LengthSpec::Px(0.0)),
             )
-            .children((status_summary, task_actions, file_actions, plugin_actions, plugin_config_actions, plugin_config_editors, playlist_actions, playlist_item_actions, log_actions, preview_node, widget(
+            .children((status_summary, task_actions, file_actions, plugin_actions, plugin_config_actions, plugin_config_editors, playlist_actions, playlist_item_actions, playlist_editor, log_actions, preview_node, widget(
                 List::new()
                     .label(view_model.page.title())
                     .style(Stack::column(12.0).node_style()),
