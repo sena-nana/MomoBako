@@ -47,6 +47,12 @@ fn renders_repository_states_with_semantic_labels() {
         ShellPage::Error,
         ShellPage::FileList,
         ShellPage::SelectedFile,
+        ShellPage::PluginSettings,
+        ShellPage::TaskRunning,
+        ShellPage::Conflict,
+        ShellPage::UnsavedEdit,
+        ShellPage::Settings,
+        ShellPage::Logs,
     ] {
         let document = acceptance_document_for(page.clone()).expect("acceptance document");
         let mut session = RuntimeAgentSession::new(document, 1200, 800).expect("agent session");
@@ -89,6 +95,12 @@ fn page_title(page: &ShellPage) -> &'static str {
         ShellPage::Error => "资源库加载失败",
         ShellPage::FileList => "文件列表",
         ShellPage::SelectedFile => "文件预览",
+        ShellPage::PluginSettings => "插件设置",
+        ShellPage::TaskRunning => "任务进行中",
+        ShellPage::Conflict => "同步冲突",
+        ShellPage::UnsavedEdit => "编辑未保存",
+        ShellPage::Settings => "应用设置",
+        ShellPage::Logs => "系统日志",
     }
 }
 
@@ -99,5 +111,11 @@ fn page_slug(page: &ShellPage) -> &'static str {
         ShellPage::Error => "error",
         ShellPage::FileList => "file-list",
         ShellPage::SelectedFile => "selected-file",
+        ShellPage::PluginSettings => "plugin-settings",
+        ShellPage::TaskRunning => "task-running",
+        ShellPage::Conflict => "conflict",
+        ShellPage::UnsavedEdit => "unsaved-edit",
+        ShellPage::Settings => "settings",
+        ShellPage::Logs => "logs",
     }
 }
