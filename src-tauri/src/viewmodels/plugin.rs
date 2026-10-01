@@ -6,6 +6,7 @@ use crate::services::repository::{
     PluginConfigSnapshot, PluginDataDirectoryResponse, PluginDataFilePreviewSourceRequest,
     PluginDataFilePreviewSourceResponse, PluginEnabledRequest, PluginHookExecutionListRequest,
     PluginHookExecutionListResponse, PluginInstallRequest, PluginManifest, PluginMutationResponse,
+    PlaylistPlayerContribution,
     RepositoryCacheFilePreviewSourceRequest, RepositoryCacheFilePreviewSourceResponse,
 };
 use crate::services::runtime::RepositoryRuntime;
@@ -106,6 +107,12 @@ impl PluginViewModel {
 
     pub async fn list_plugins(&self) -> Result<Vec<PluginManifest>, String> {
         self.runtime.run_read(|state| state.list_plugins()).await
+    }
+
+    pub async fn list_playlist_players(&self) -> Result<Vec<PlaylistPlayerContribution>, String> {
+        self.runtime
+            .run_read(|state| state.list_playlist_players())
+            .await
     }
 
     pub async fn list_plugin_hook_executions(

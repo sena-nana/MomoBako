@@ -239,11 +239,20 @@ impl ApplicationState for MomoBakoApplication {
             && let Some(services) = self.services.as_ref()
         {
             let interaction = services.repository_interaction.clone();
+            let plugin = services.plugin.clone();
             let executor = services.executor.clone();
+            let players_executor = executor.clone();
             if let Err(error) = context.run_task(Task::new(async move {
                 ShellMessage::PlaylistsLoaded(executor.block_on(interaction.list_playlists(repository_id)))
             })) {
                 eprintln!("Nana 播放列表任务提交失败：{error}");
+            }
+            if let Err(error) = context.run_task(Task::new(async move {
+                ShellMessage::PlaylistPlayersLoaded(
+                    players_executor.block_on(plugin.list_playlist_players()),
+                )
+            })) {
+                eprintln!("Nana 播放器类型任务提交失败：{error}");
             }
         }
         if matches!(&message, ShellMessage::Navigate(ShellPage::TaskRunning))
@@ -387,6 +396,30 @@ impl ApplicationState for MomoBakoApplication {
                 )
             })) {
                 eprintln!("Nana 播放列表名称保存任务提交失败：{error}");
+            }
+        }
+        if matches!(&message, ShellMessage::CreatePlaylist)
+            && let Some(repository_id) = self.shell.repository_id.clone()
+            && let Some(player_type_id) = self.shell.selected_new_playlist_player_type_id.clone()
+            && !self.shell.new_playlist_name.trim().is_empty()
+            && let Some(services) = self.services.as_ref()
+        {
+            let interaction = services.repository_interaction.clone();
+            let executor = services.executor.clone();
+            let request = backend::services::repository::PlaylistMutationRequest {
+                repo_id: repository_id,
+                playlist_id: None,
+                name: self.shell.new_playlist_name.trim().to_string(),
+                player_type_id,
+            };
+            if let Err(error) = context.run_task(Task::new(async move {
+                ShellMessage::PlaylistsLoaded(
+                    executor
+                        .block_on(interaction.create_playlist(request))
+                        .map(|response| response.playlists),
+                )
+            })) {
+                eprintln!("Nana 播放列表创建任务提交失败：{error}");
             }
         }
         if matches!(&message, ShellMessage::ClearLogs)

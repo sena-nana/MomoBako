@@ -11,7 +11,7 @@ use nana_ui::runtime::{
 use crate::backend::services::repository::{
     AssetDetail, FileBrowserEntry, FileBrowserSnapshot, FilePreviewSourceResponse, RepositorySnapshot,
     PluginManifest, PlaylistSummary, RepositorySummary, SystemLogPage,
-    PluginConfigSnapshot, PlaylistDetail,
+    PluginConfigSnapshot, PlaylistDetail, PlaylistPlayerContribution,
 };
 
 /// Nana Runtime 传递给应用状态的壳层交互消息。
@@ -42,6 +42,10 @@ pub enum ShellMessage {
     LogsLoaded(Result<SystemLogPage, String>),
     ClearLogs,
     PlaylistsLoaded(Result<Vec<PlaylistSummary>, String>),
+    PlaylistPlayersLoaded(Result<Vec<PlaylistPlayerContribution>, String>),
+    NewPlaylistNameChanged(String),
+    SelectPlaylistPlayer(String),
+    CreatePlaylist,
     SelectPlaylist(String),
     DeletePlaylist(String),
     PlaylistDetailLoaded(Result<PlaylistDetail, String>),
@@ -177,6 +181,9 @@ pub struct ShellViewModel {
     pub selected_playlist_id: Option<String>,
     pub selected_playlist_player_type_id: Option<String>,
     pub playlist_name_draft: String,
+    pub new_playlist_name: String,
+    pub playlist_players: Vec<PlaylistPlayerContribution>,
+    pub selected_new_playlist_player_type_id: Option<String>,
     pub playlist_item_entries: Vec<String>,
     pub playlist_item_ids: Vec<String>,
     pub active_tasks: usize,
@@ -213,6 +220,9 @@ impl Default for ShellViewModel {
             selected_playlist_id: None,
             selected_playlist_player_type_id: None,
             playlist_name_draft: String::new(),
+            new_playlist_name: String::new(),
+            playlist_players: Vec::new(),
+            selected_new_playlist_player_type_id: None,
             playlist_item_entries: Vec::new(),
             playlist_item_ids: Vec::new(),
             active_tasks: 0,
@@ -514,6 +524,34 @@ impl ShellViewModel {
             ShellMessage::PlaylistsLoaded(Err(error)) => {
                 self.page = ShellPage::Error;
                 self.detail = format!("无法读取播放列表：{error}");
+            }
+            ShellMessage::PlaylistPlayersLoaded(Ok(players)) => {
+                self.playlist_players = players;
+                if self.selected_new_playlist_player_type_id.is_none() {
+                    self.selected_new_playlist_player_type_id = self
+                        .playlist_players
+                        .first()
+                        .map(|player| player.player_type_id.clone());
+                }
+                self.detail = format!("可用播放器 {} 个", self.playlist_players.len());
+            }
+            ShellMessage::PlaylistPlayersLoaded(Err(error)) => {
+                self.detail = format!("无法读取播放器类型：{error}");
+            }
+            ShellMessage::NewPlaylistNameChanged(value) => {
+                self.new_playlist_name = value;
+            }
+            ShellMessage::SelectPlaylistPlayer(player_type_id) => {
+                self.selected_new_playlist_player_type_id = Some(player_type_id);
+            }
+            ShellMessage::CreatePlaylist => {
+                self.detail = if self.new_playlist_name.trim().is_empty() {
+                    "播放列表名称不能为空".into()
+                } else if self.selected_new_playlist_player_type_id.is_none() {
+                    "请先选择播放器类型".into()
+                } else {
+                    "正在创建播放列表…".into()
+                };
             }
             ShellMessage::SelectPlaylist(playlist_id) => {
                 self.page = ShellPage::Playlists;
@@ -834,6 +872,38 @@ pub fn mount_shell(
                     .key("save-playlist-name")
                     .on_cx(|_, _: &Activate, cx| cx.dispatch_program(ShellMessage::SavePlaylistName)),
             ));
+            let new_playlist_name = view_model.new_playlist_name.clone();
+            let playlist_player_choices = widget(Stack::fill_row(6.0)).children(
+                view_model
+                    .playlist_players
+                    .iter()
+                    .take(8)
+                    .map(|player| {
+                        let player_type_id = player.player_type_id.clone();
+                        let label = format!("使用 {}", player.label);
+                        button(label)
+                            .key(format!("playlist-player-{}", player_type_id))
+                            .on_cx(move |_, _: &Activate, cx| {
+                                cx.dispatch_program(ShellMessage::SelectPlaylistPlayer(
+                                    player_type_id.clone(),
+                                ));
+                            })
+                    })
+                    .collect::<Vec<_>>(),
+            );
+            let playlist_creator = widget(Stack::fill_column(6.0)).children((
+                widget(TextInput::new(new_playlist_name).label("新建播放列表")).on_cx(
+                    |_, event: &TextChanged, cx| {
+                        cx.dispatch_program(ShellMessage::NewPlaylistNameChanged(
+                            event.value.to_string(),
+                        ));
+                    },
+                ),
+                playlist_player_choices,
+                button("创建播放列表")
+                    .key("create-playlist")
+                    .on_cx(|_, _: &Activate, cx| cx.dispatch_program(ShellMessage::CreatePlaylist)),
+            ));
             let preview_slot = if view_model.preview_pixels.is_some() {
                 "file-preview"
             } else {
@@ -843,12 +913,26 @@ pub fn mount_shell(
                 text("选择图片文件后，预览将在原生纹理节点中显示").key("preview-placeholder"),
                 widget(GpuTextureView::new(preview_slot).contain()).key("file-preview"),
             ));
+            let workspace_actions = widget(Stack::fill_column(8.0)).children((
+                status_summary,
+                task_actions,
+                file_actions,
+                plugin_actions,
+                plugin_config_actions,
+                plugin_config_editors,
+                playlist_actions,
+                playlist_item_actions,
+                playlist_editor,
+                playlist_creator,
+                log_actions,
+                preview_node,
+            ));
             let content = widget(
                 Stack::fill_column(12.0)
                     .padding_xy(24.0, 20.0)
                     .min_width(LengthSpec::Px(0.0)),
             )
-            .children((status_summary, task_actions, file_actions, plugin_actions, plugin_config_actions, plugin_config_editors, playlist_actions, playlist_item_actions, playlist_editor, log_actions, preview_node, widget(
+            .children((workspace_actions, widget(
                 List::new()
                     .label(view_model.page.title())
                     .style(Stack::column(12.0).node_style()),
@@ -953,5 +1037,15 @@ mod tests {
         assert_eq!(model.detail, "1 个运行中任务 · 2 个近期完成任务");
         model.reduce(ShellMessage::Navigate(ShellPage::Playlists));
         assert_eq!(model.repository_id.as_deref(), Some("repo-real"));
+    }
+
+    #[test]
+    fn playlist_creation_requires_name_and_player_type() {
+        let mut model = ShellViewModel::for_page(ShellPage::Playlists);
+        model.reduce(ShellMessage::CreatePlaylist);
+        assert_eq!(model.detail, "播放列表名称不能为空");
+        model.reduce(ShellMessage::NewPlaylistNameChanged("我的列表".into()));
+        model.reduce(ShellMessage::CreatePlaylist);
+        assert_eq!(model.detail, "请先选择播放器类型");
     }
 }
