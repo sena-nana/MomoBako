@@ -7,7 +7,7 @@ use nana_ui::runtime::view::{button, text, widget};
 use nana_ui::runtime::{Activate, FrameworkError, LengthSpec, List, RuntimeDocument, Stack};
 use crate::backend::services::repository::{
     AssetDetail, FileBrowserSnapshot, FilePreviewSourceResponse, RepositorySnapshot,
-    RepositorySummary,
+    PluginManifest, RepositorySummary,
 };
 
 /// Nana Runtime 传递给应用状态的壳层交互消息。
@@ -23,6 +23,7 @@ pub enum ShellMessage {
     SelectFile { path: String, asset_id: Option<String> },
     AssetDetailLoaded(Result<AssetDetail, String>),
     PreviewSourceLoaded(Result<FilePreviewSourceResponse, String>),
+    PluginsLoaded(Result<Vec<PluginManifest>, String>),
 }
 
 /// 主内容页面的可观察状态。
@@ -115,6 +116,7 @@ pub struct ShellViewModel {
     pub file_entries: Vec<String>,
     pub file_entry_ids: Vec<Option<String>>,
     pub preview_url: Option<String>,
+    pub plugin_entries: Vec<String>,
 }
 
 impl Default for ShellViewModel {
@@ -129,6 +131,7 @@ impl Default for ShellViewModel {
             file_entries: Vec::new(),
             file_entry_ids: Vec::new(),
             preview_url: None,
+            plugin_entries: Vec::new(),
         }
     }
 }
@@ -190,6 +193,14 @@ impl ShellViewModel {
             "当前目录暂无已加载条目".into()
         } else {
             format!("条目：{}", self.file_entries.iter().take(8).cloned().collect::<Vec<_>>().join("、"))
+        }
+    }
+
+    fn plugin_entries_label(&self) -> String {
+        if self.plugin_entries.is_empty() {
+            "当前没有已安装插件".into()
+        } else {
+            format!("插件：{}", self.plugin_entries.iter().take(6).cloned().collect::<Vec<_>>().join("、"))
         }
     }
 
@@ -273,6 +284,18 @@ impl ShellViewModel {
                 self.page = ShellPage::Error;
                 self.detail = format!("无法打开预览源：{error}");
             }
+            ShellMessage::PluginsLoaded(Ok(plugins)) => {
+                self.page = ShellPage::PluginSettings;
+                self.plugin_entries = plugins
+                    .iter()
+                    .map(|plugin| format!("{} {} · {}", plugin.name, plugin.version, plugin.status))
+                    .collect();
+                self.detail = format!("{} 个插件 · 原生贡献接口优先", plugins.len());
+            }
+            ShellMessage::PluginsLoaded(Err(error)) => {
+                self.page = ShellPage::Error;
+                self.detail = format!("无法读取插件列表：{error}");
+            }
             ShellMessage::Refresh => {
                 self.detail = "刷新服务尚未接通，当前数据未变更".into();
             }
@@ -338,6 +361,7 @@ pub fn mount_shell(
                 text(view_model.selection_label()).key("selection"),
                 text(view_model.detail.clone()).key("page-detail"),
                 text(view_model.file_entries_label()).key("file-entries"),
+                text(view_model.plugin_entries_label()).key("plugin-entries"),
                 widget(Stack::fill_column(6.0)).children(
                     view_model
                         .file_entries
