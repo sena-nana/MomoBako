@@ -3921,6 +3921,7 @@ dependencies = [
  "nana-ui-devtools",
  "nana-ui-platform",
  "serde_json",
+ "tokio",
 ]
 
 [[package]]
