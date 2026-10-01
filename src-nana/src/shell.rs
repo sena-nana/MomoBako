@@ -26,6 +26,7 @@ pub enum ShellMessage {
     PluginsLoaded(Result<Vec<PluginManifest>, String>),
     SelectPlugin(String),
     PluginConfigLoaded(Result<PluginConfigSnapshot, String>),
+    DeletePluginConfig { plugin_id: String, key: String },
     LogsLoaded(Result<SystemLogPage, String>),
     PlaylistsLoaded(Result<Vec<PlaylistSummary>, String>),
     SystemStatusLoaded(Result<crate::backend::services::runtime::ExternalApiConnectionStatus, String>),
@@ -145,6 +146,8 @@ pub struct ShellViewModel {
     pub completed_tasks: usize,
     pub active_task_ids: Vec<String>,
     pub system_status: Option<String>,
+    pub selected_plugin_id: Option<String>,
+    pub plugin_config_keys: Vec<String>,
 }
 
 impl Default for ShellViewModel {
@@ -167,6 +170,8 @@ impl Default for ShellViewModel {
             completed_tasks: 0,
             active_task_ids: Vec::new(),
             system_status: None,
+            selected_plugin_id: None,
+            plugin_config_keys: Vec::new(),
         }
     }
 }
@@ -355,11 +360,16 @@ impl ShellViewModel {
             }
             ShellMessage::PluginConfigLoaded(Ok(config)) => {
                 self.page = ShellPage::PluginSettings;
+                self.selected_plugin_id = Some(config.plugin_id.clone());
+                self.plugin_config_keys = config.values.keys().cloned().collect();
                 self.detail = format!("插件 {} · 已加载 {} 项配置", config.plugin_id, config.values.len());
             }
             ShellMessage::PluginConfigLoaded(Err(error)) => {
                 self.page = ShellPage::Error;
                 self.detail = format!("无法读取插件设置：{error}");
+            }
+            ShellMessage::DeletePluginConfig { plugin_id, key } => {
+                self.detail = format!("正在删除插件 {plugin_id} 的配置 {key}…");
             }
             ShellMessage::LogsLoaded(Ok(page)) => {
                 self.page = ShellPage::Logs;
@@ -520,12 +530,33 @@ pub fn mount_shell(
                     })
                     .collect::<Vec<_>>(),
             );
+            let plugin_config_actions = widget(Stack::fill_column(6.0)).children(
+                view_model
+                    .selected_plugin_id
+                    .as_ref()
+                    .into_iter()
+                    .flat_map(|plugin_id| {
+                        view_model.plugin_config_keys.iter().map(move |key| {
+                            let plugin_id = plugin_id.clone();
+                            let key = key.clone();
+                            button(format!("删除配置 {key}"))
+                                .key(format!("delete-plugin-config-{key}"))
+                                .on_cx(move |_, _: &Activate, cx| {
+                                    cx.dispatch_program(ShellMessage::DeletePluginConfig {
+                                        plugin_id: plugin_id.clone(),
+                                        key: key.clone(),
+                                    });
+                                })
+                        })
+                    })
+                    .collect::<Vec<_>>(),
+            );
             let content = widget(
                 Stack::fill_column(12.0)
                     .padding_xy(24.0, 20.0)
                     .min_width(LengthSpec::Px(0.0)),
             )
-            .children((status_summary, task_actions, file_actions, plugin_actions, widget(
+            .children((status_summary, task_actions, file_actions, plugin_actions, plugin_config_actions, widget(
                 List::new()
                     .label(view_model.page.title())
                     .style(Stack::column(12.0).node_style()),
