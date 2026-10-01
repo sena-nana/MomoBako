@@ -4,7 +4,7 @@
 //! `ShellViewModel` 注入文本状态，避免把领域服务直接耦合到 Nana 控件树。
 
 use nana_ui::runtime::view::{button, text, widget};
-use nana_ui::runtime::{Activate, FrameworkError, LengthSpec, List, RuntimeDocument, Stack};
+use nana_ui::runtime::{Activate, FrameworkError, LengthSpec, List, RuntimeDocument, Stack, TextChanged, TextInput};
 use crate::backend::services::repository::{
     AssetDetail, FileBrowserEntry, FileBrowserSnapshot, FilePreviewSourceResponse, RepositorySnapshot,
     PluginManifest, PlaylistSummary, RepositorySummary, SystemLogPage,
@@ -28,6 +28,8 @@ pub enum ShellMessage {
     SelectPlugin(String),
     PluginConfigLoaded(Result<PluginConfigSnapshot, String>),
     DeletePluginConfig { plugin_id: String, key: String },
+    PluginConfigDraftChanged { key: String, value: String },
+    SavePluginConfig { plugin_id: String, key: String },
     LogsLoaded(Result<SystemLogPage, String>),
     PlaylistsLoaded(Result<Vec<PlaylistSummary>, String>),
     SelectPlaylist(String),
@@ -153,6 +155,8 @@ pub struct ShellViewModel {
     pub system_status: Option<String>,
     pub selected_plugin_id: Option<String>,
     pub plugin_config_keys: Vec<String>,
+    pub plugin_config_drafts: std::collections::BTreeMap<String, String>,
+    pub plugin_config_string_values: std::collections::BTreeSet<String>,
 }
 
 impl Default for ShellViewModel {
@@ -179,6 +183,8 @@ impl Default for ShellViewModel {
             system_status: None,
             selected_plugin_id: None,
             plugin_config_keys: Vec::new(),
+            plugin_config_drafts: std::collections::BTreeMap::new(),
+            plugin_config_string_values: std::collections::BTreeSet::new(),
         }
     }
 }
@@ -385,6 +391,17 @@ impl ShellViewModel {
                 self.page = ShellPage::PluginSettings;
                 self.selected_plugin_id = Some(config.plugin_id.clone());
                 self.plugin_config_keys = config.values.keys().cloned().collect();
+                self.plugin_config_drafts = config
+                    .values
+                    .iter()
+                    .map(|(key, value)| (key.clone(), value.as_str().map_or_else(|| value.to_string(), str::to_owned)))
+                    .collect();
+                self.plugin_config_string_values = config
+                    .values
+                    .iter()
+                    .filter(|(_, value)| value.is_string())
+                    .map(|(key, _)| key.clone())
+                    .collect();
                 self.detail = format!("插件 {} · 已加载 {} 项配置", config.plugin_id, config.values.len());
             }
             ShellMessage::PluginConfigLoaded(Err(error)) => {
@@ -393,6 +410,12 @@ impl ShellViewModel {
             }
             ShellMessage::DeletePluginConfig { plugin_id, key } => {
                 self.detail = format!("正在删除插件 {plugin_id} 的配置 {key}…");
+            }
+            ShellMessage::PluginConfigDraftChanged { key, value } => {
+                self.plugin_config_drafts.insert(key, value);
+            }
+            ShellMessage::SavePluginConfig { key, .. } => {
+                self.detail = format!("正在保存插件配置 {key}…");
             }
             ShellMessage::LogsLoaded(Ok(page)) => {
                 self.page = ShellPage::Logs;
@@ -582,6 +605,47 @@ pub fn mount_shell(
                     })
                     .collect::<Vec<_>>(),
             );
+            let plugin_config_keys = view_model.plugin_config_keys.clone();
+            let plugin_config_string_values = view_model.plugin_config_string_values.clone();
+            let plugin_config_drafts = view_model.plugin_config_drafts.clone();
+            let plugin_config_editors = widget(Stack::fill_column(8.0)).children(
+                view_model
+                    .selected_plugin_id
+                    .as_ref()
+                    .into_iter()
+                    .flat_map(|plugin_id| {
+                        let drafts = plugin_config_drafts.clone();
+                        plugin_config_keys
+                            .iter()
+                            .filter(|key| plugin_config_string_values.contains(*key))
+                            .map(move |key| {
+                                let plugin_id = plugin_id.clone();
+                                let key = key.clone();
+                                let value = drafts.get(&key).cloned().unwrap_or_default();
+                                let draft_key = key.clone();
+                                let input = widget(TextInput::new(value).label(key.clone())).on_cx(
+                                    move |_, event: &TextChanged, cx| {
+                                        cx.dispatch_program(ShellMessage::PluginConfigDraftChanged {
+                                            key: draft_key.clone(),
+                                            value: event.value.to_string(),
+                                        });
+                                    },
+                                );
+                                let save_key = key.clone();
+                                widget(Stack::fill_row(8.0)).children((
+                                    input,
+                                    button("保存").key(format!("save-plugin-config-{save_key}"))
+                                        .on_cx(move |_, _: &Activate, cx| {
+                                            cx.dispatch_program(ShellMessage::SavePluginConfig {
+                                                plugin_id: plugin_id.clone(),
+                                                key: save_key.clone(),
+                                            });
+                                        }),
+                                ))
+                            })
+                    })
+                    .collect::<Vec<_>>(),
+            );
             let playlist_actions = widget(Stack::fill_column(6.0)).children(
                 view_model
                     .playlist_entries
@@ -603,7 +667,7 @@ pub fn mount_shell(
                     .padding_xy(24.0, 20.0)
                     .min_width(LengthSpec::Px(0.0)),
             )
-            .children((status_summary, task_actions, file_actions, plugin_actions, plugin_config_actions, playlist_actions, widget(
+            .children((status_summary, task_actions, file_actions, plugin_actions, plugin_config_actions, plugin_config_editors, playlist_actions, widget(
                 List::new()
                     .label(view_model.page.title())
                     .style(Stack::column(12.0).node_style()),
