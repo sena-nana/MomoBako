@@ -1,6 +1,6 @@
 //! Blocking-task execution helpers for repository runtime operations.
 
-use super::{sync_watched_paths, RepositoryRuntime};
+use super::{RepositoryRuntime, sync_watched_paths};
 use crate::services::repository::RepositoryState;
 use std::path::PathBuf;
 
@@ -22,7 +22,7 @@ impl RepositoryRuntime {
         F: FnOnce(&RepositoryState) -> Result<T, String> + Send + 'static,
     {
         let repository_state = self.repository_state.clone();
-        match tauri::async_runtime::spawn_blocking(move || operation(&repository_state)).await {
+        match tokio::task::spawn_blocking(move || operation(&repository_state)).await {
             Ok(result) => {
                 if let Err(error) = &result {
                     log_runtime_operation_error("readFailed", "资源库读取操作失败。", error);
@@ -45,7 +45,7 @@ impl RepositoryRuntime {
     {
         let repository_state = self.repository_state.clone();
         let write_lock = self.write_lock.clone();
-        let result = tauri::async_runtime::spawn_blocking(move || {
+        let result = tokio::task::spawn_blocking(move || {
             let _guard = write_lock
                 .lock()
                 .map_err(|_| "repository write lock poisoned".to_string())?;
@@ -76,7 +76,7 @@ impl RepositoryRuntime {
         let repository_state = self.repository_state.clone();
         let watcher_handle = self.watcher_handle.clone();
         let write_lock = self.write_lock.clone();
-        let result = tauri::async_runtime::spawn_blocking(move || {
+        let result = tokio::task::spawn_blocking(move || {
             let _guard = write_lock
                 .lock()
                 .map_err(|_| "repository write lock poisoned".to_string())?;
@@ -111,7 +111,7 @@ impl RepositoryRuntime {
     /// Returns all repository roots that are allowed to serve thumbnails to the UI shell.
     pub async fn repository_thumbnail_roots(&self) -> Result<Vec<PathBuf>, String> {
         let repository_state = self.repository_state.clone();
-        match tauri::async_runtime::spawn_blocking(move || {
+        match tokio::task::spawn_blocking(move || {
             repository_state.list_repository_thumbnail_roots()
         })
         .await

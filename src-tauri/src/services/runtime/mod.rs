@@ -5,6 +5,7 @@ pub(crate) mod external_api;
 pub(crate) mod preview_server;
 pub(crate) mod watcher;
 
+use crate::services::host_events::HostEventSink;
 use crate::services::mutsuki_host;
 use crate::services::repository::RepositoryState;
 use std::{
@@ -18,7 +19,7 @@ pub(crate) use external_api::{
     write_external_connection_file,
 };
 pub(crate) use preview_server::start_preview_server;
-pub(crate) use watcher::{start_structure_refresh_worker, sync_watched_paths, RepositoryWatcher};
+pub(crate) use watcher::{RepositoryWatcher, start_structure_refresh_worker, sync_watched_paths};
 
 const PREVIEW_HOST: &str = "127.0.0.1";
 
@@ -76,7 +77,7 @@ impl RepositoryRuntime {
 
     /// 配置、安装、删除或启停后原子切换桌面插件 generation。
     pub async fn reload_mutsuki_plugins(&self) -> Result<(), String> {
-        tauri::async_runtime::spawn_blocking(mutsuki_host::reload_plugins)
+        tokio::task::spawn_blocking(mutsuki_host::reload_plugins)
             .await
             .map_err(|error| error.to_string())?
     }
@@ -94,8 +95,8 @@ impl RepositoryRuntime {
         }
     }
 
-    pub fn set_app_handle(&self, app: tauri::AppHandle) -> Result<(), String> {
-        self.repository_state.set_app_handle(app)
+    pub fn set_event_sink(&self, sink: Arc<dyn HostEventSink>) -> Result<(), String> {
+        self.repository_state.set_event_sink(sink)
     }
 
     /// Performs best-effort cleanup for long-lived helper processes before app shutdown.
