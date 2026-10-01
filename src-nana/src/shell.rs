@@ -854,24 +854,33 @@ pub fn mount_shell(
                     })
                     .collect::<Vec<_>>(),
             );
-            let log_actions = widget(Stack::fill_row(8.0)).children((
-                button("清理日志")
-                    .key("clear-logs")
-                    .on_cx(|_, _: &Activate, cx| cx.dispatch_program(ShellMessage::ClearLogs)),
-            ));
+            let log_actions = if matches!(view_model.page, ShellPage::Loading) {
+                None
+            } else {
+                Some(widget(Stack::fill_row(8.0)).children((
+                    button("清理日志")
+                        .key("clear-logs")
+                        .on_cx(|_, _: &Activate, cx| cx.dispatch_program(ShellMessage::ClearLogs)),
+                )))
+            };
             let playlist_name = view_model.playlist_name_draft.clone();
-            let playlist_editor = widget(Stack::fill_row(8.0)).children((
-                widget(TextInput::new(playlist_name).label("播放列表名称")).on_cx(
-                    |_, event: &TextChanged, cx| {
-                        cx.dispatch_program(ShellMessage::PlaylistNameDraftChanged(
-                            event.value.to_string(),
-                        ));
-                    },
-                ),
-                button("保存名称")
-                    .key("save-playlist-name")
-                    .on_cx(|_, _: &Activate, cx| cx.dispatch_program(ShellMessage::SavePlaylistName)),
-            ));
+            let is_playlists = matches!(view_model.page, ShellPage::Playlists);
+            let playlist_editor = if is_playlists {
+                Some(widget(Stack::fill_row(8.0)).children((
+                    widget(TextInput::new(playlist_name).label("播放列表名称")).on_cx(
+                        |_, event: &TextChanged, cx| {
+                            cx.dispatch_program(ShellMessage::PlaylistNameDraftChanged(
+                                event.value.to_string(),
+                            ));
+                        },
+                    ),
+                    button("保存名称")
+                        .key("save-playlist-name")
+                        .on_cx(|_, _: &Activate, cx| cx.dispatch_program(ShellMessage::SavePlaylistName)),
+                )))
+            } else {
+                None
+            };
             let new_playlist_name = view_model.new_playlist_name.clone();
             let playlist_player_choices = widget(Stack::fill_row(6.0)).children(
                 view_model
@@ -891,28 +900,48 @@ pub fn mount_shell(
                     })
                     .collect::<Vec<_>>(),
             );
-            let playlist_creator = widget(Stack::fill_column(6.0)).children((
-                widget(TextInput::new(new_playlist_name).label("新建播放列表")).on_cx(
-                    |_, event: &TextChanged, cx| {
-                        cx.dispatch_program(ShellMessage::NewPlaylistNameChanged(
-                            event.value.to_string(),
-                        ));
-                    },
-                ),
-                playlist_player_choices,
-                button("创建播放列表")
-                    .key("create-playlist")
-                    .on_cx(|_, _: &Activate, cx| cx.dispatch_program(ShellMessage::CreatePlaylist)),
-            ));
+            let playlist_creator = if is_playlists {
+                Some(widget(Stack::fill_column(6.0)).children((
+                    widget(TextInput::new(new_playlist_name).label("新建播放列表")).on_cx(
+                        |_, event: &TextChanged, cx| {
+                            cx.dispatch_program(ShellMessage::NewPlaylistNameChanged(
+                                event.value.to_string(),
+                            ));
+                        },
+                    ),
+                    playlist_player_choices,
+                    button("创建播放列表")
+                        .key("create-playlist")
+                        .on_cx(|_, _: &Activate, cx| cx.dispatch_program(ShellMessage::CreatePlaylist)),
+                )))
+            } else {
+                None
+            };
             let preview_slot = if view_model.preview_pixels.is_some() {
                 "file-preview"
             } else {
                 ""
             };
-            let preview_node = widget(Stack::fill_column(8.0)).children((
-                text("选择图片文件后，预览将在原生纹理节点中显示").key("preview-placeholder"),
-                widget(GpuTextureView::new(preview_slot).contain()).key("file-preview"),
-            ));
+            let preview_node = if matches!(view_model.page, ShellPage::SelectedFile) {
+                Some(widget(Stack::fill_column(8.0)).children((
+                    text("选择图片文件后，预览将在原生纹理节点中显示").key("preview-placeholder"),
+                    widget(GpuTextureView::new(preview_slot).contain()).key("file-preview"),
+                )))
+            } else {
+                None
+            };
+            let page_actions = if matches!(view_model.page, ShellPage::Loading) {
+                None
+            } else {
+                Some(widget(Stack::fill_row(8.0)).children((
+                    button(view_model.page.primary_action())
+                        .key("primary-action")
+                        .on_cx(|_, _: &Activate, cx| cx.dispatch_program(ShellMessage::PrimaryAction)),
+                    button(view_model.edit_label())
+                        .key("edit-action")
+                        .on_cx(|_, _: &Activate, cx| cx.dispatch_program(ShellMessage::EditAction)),
+                )))
+            };
             let workspace_actions = widget(Stack::fill_column(8.0)).children((
                 status_summary,
                 task_actions,
@@ -937,14 +966,7 @@ pub fn mount_shell(
                     .label(view_model.page.title())
                     .style(Stack::column(12.0).node_style()),
             )
-            .children((
-                button(view_model.page.primary_action())
-                    .key("primary-action")
-                    .on_cx(|_, _: &Activate, cx| cx.dispatch_program(ShellMessage::PrimaryAction)),
-                button(view_model.edit_label())
-                    .key("edit-action")
-                    .on_cx(|_, _: &Activate, cx| cx.dispatch_program(ShellMessage::EditAction)),
-            )),));
+            .children((page_actions,)),));
             let process = widget(
                 Stack::fill_column(8.0)
                     .width(LengthSpec::Px(240.0))
