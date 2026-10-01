@@ -154,6 +154,19 @@ impl ApplicationState for MomoBakoApplication {
             self.shell.active_task_ids = services.tasks.active_task_ids();
             self.shell.reduce(ShellMessage::TaskSnapshotLoaded { active, completed });
         }
+        if matches!(&message, ShellMessage::Navigate(ShellPage::Settings))
+            && let Some(services) = self.services.as_ref()
+        {
+            let system = services.system.clone();
+            let executor = services.executor.clone();
+            if let Err(error) = context.run_task(Task::new(async move {
+                ShellMessage::SystemStatusLoaded(
+                    executor.block_on(system.get_external_api_connection_status()),
+                )
+            })) {
+                eprintln!("Nana 系统状态任务提交失败：{error}");
+            }
+        }
         if let ShellMessage::CancelTask(task_id) = &message
             && let Some(services) = self.services.as_ref()
         {
