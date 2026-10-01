@@ -100,7 +100,7 @@ impl ShellPage {
             Self::SelectedFile => "已选中一个文件",
             Self::Playlists => "正在读取仓库播放列表",
             Self::PluginSettings => "正在编辑官方插件的原生设置",
-            Self::TaskRunning => "扫描任务正在运行 · 42%",
+            Self::TaskRunning => "任务活动",
             Self::Conflict => "本地与远端 Revision 不一致",
             Self::UnsavedEdit => "编辑内容尚未写入仓库",
             Self::Settings => "应用偏好和服务配置",
@@ -264,7 +264,16 @@ impl ShellViewModel {
     /// 在 ViewModel 边界集中处理导航和页面动作，避免控件闭包直接修改领域状态。
     pub fn reduce(&mut self, message: ShellMessage) {
         match message {
-            ShellMessage::Navigate(page) => self.apply_page(page),
+            ShellMessage::Navigate(page) => {
+                self.page = page;
+                self.detail = match self.page {
+                    ShellPage::TaskRunning => format!(
+                        "{} 个运行中任务 · {} 个近期完成任务",
+                        self.active_tasks, self.completed_tasks
+                    ),
+                    _ => "正在读取页面数据…".into(),
+                };
+            }
             ShellMessage::RepositoriesLoaded(Ok(repositories)) => {
                 if repositories.is_empty() {
                     self.apply_page(ShellPage::EmptyRepository);
@@ -627,7 +636,7 @@ mod tests {
         assert_eq!(model.page, ShellPage::Loading);
 
         model.reduce(ShellMessage::Navigate(ShellPage::PluginSettings));
-        assert_eq!(model.detail, "官方插件 · Nana 原生贡献接口 · 已加载 3 项配置");
+        assert_eq!(model.detail, "正在读取页面数据…");
 
         model = ShellViewModel::for_page(ShellPage::UnsavedEdit);
         model.reduce(ShellMessage::EditAction);
@@ -636,5 +645,21 @@ mod tests {
         model.reduce(ShellMessage::PrimaryAction);
         assert!(model.dirty);
         assert_eq!(model.detail, "该操作的领域服务尚未接通，数据未写入");
+    }
+
+    #[test]
+    fn navigation_preserves_repository_and_task_context() {
+        let mut model = ShellViewModel::default();
+        model.repository_id = Some("repo-real".into());
+        model.file_entries = vec!["cover.png".into()];
+        model.active_task_ids = vec!["task-real".into()];
+        model.reduce(ShellMessage::TaskSnapshotLoaded { active: 1, completed: 2 });
+        model.reduce(ShellMessage::Navigate(ShellPage::TaskRunning));
+        assert_eq!(model.repository_id.as_deref(), Some("repo-real"));
+        assert_eq!(model.file_entries, ["cover.png"]);
+        assert_eq!(model.active_task_ids, ["task-real"]);
+        assert_eq!(model.detail, "1 个运行中任务 · 2 个近期完成任务");
+        model.reduce(ShellMessage::Navigate(ShellPage::Playlists));
+        assert_eq!(model.repository_id.as_deref(), Some("repo-real"));
     }
 }
