@@ -1,0 +1,31 @@
+[package]
+name = "momobako-backend"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rusqlite = { version = "0.39", features = ["bundled"] }
+time = { version = "0.3", features = ["formatting", "parsing", "macros"] }
+notify = "8.2"
+tiny_http = "0.12"
+image = "0.25"
+ffmpeg-sidecar = "2.5.2"
+sha2 = "0.11"
+sha1 = "0.10"
+hex = "0.4"
+getrandom = "0.3"
+zip = { version = "8.6", default-features = false, features = ["deflate"] }
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
+mutsuki-runtime-contracts = { git = "https://github.com/sena-nana/Mutsuki.git", rev = "e8b86a14e2433461525d2a052b499fde488102a9" }
+mutsuki-plugin-api = { git = "https://github.com/sena-nana/Mutsuki.git", rev = "e8b86a14e2433461525d2a052b499fde488102a9" }
+mutsuki-plugin-host = { git = "https://github.com/sena-nana/Mutsuki.git", rev = "e8b86a14e2433461525d2a052b499fde488102a9" }
+tokio = { version = "1", features = ["rt", "sync"] }
+toml = "0.8"
+
+[build-dependencies]
+
+[dev-dependencies]
+mutsuki-runtime-wire = { git = "https://github.com/sena-nana/Mutsuki.git", rev = "e8b86a14e2433461525d2a052b499fde488102a9" }

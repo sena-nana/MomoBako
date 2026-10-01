@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
   "src-tauri",
+  "src-backend",
   "src-nana",
   "External/Plugins/_sdk/mutsuki-rust",
   "External/Plugins/local-filesystem",

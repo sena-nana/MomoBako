@@ -14,6 +14,10 @@ pub mod shell;
 use shell::{ShellPage, ShellViewModel, mount_shell};
 
 pub mod host_api;
+
+/// Nana 宿主直接使用共享领域服务 crate，迁移期 Tauri 仍保留同一服务源码的
+/// 适配入口；此 re-export 让后续 ViewModel 接线不需要再穿过 command 层。
+pub use momobako_backend as backend;
 pub mod plugin_api;
 
 /// Nana 宿主的最小应用状态；后续阶段将把 repository/plugin/task ViewModel 注入这里。

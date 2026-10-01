@@ -36,5 +36,10 @@ cargo test -p momobako-nana --test offscreen_acceptance -- --nocapture
 取消探针。它们是宿主无关请求；Windows 原生适配器可以实现这些请求而不把窗口对象
 泄漏进领域服务或 ViewModel。
 
+`src-backend` 是当前迁移期的共享领域库，使用同一份 `models/services/viewmodels`
+源码，同时被 Nana 宿主和 Tauri 适配层编译。它不依赖 Tauri；`cargo check
+-p momobako-backend -p momobako-nana` 是共享边界的编译验收。服务源码仍有既存的
+Clippy 基线告警，迁移期间单独清理，不通过全局 `allow` 隐藏。
+
 插件的 Vue 自定义设置页、工具页、预览和播放器贡献不进入原生生产树。官方插件应迁移
 到 Nana 原生贡献接口；第三方旧插件需要升级，宿主应提供明确的兼容提示。

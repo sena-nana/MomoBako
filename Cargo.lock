@@ -3887,9 +3887,36 @@ dependencies = [
 ]
 
 [[package]]
+name = "momobako-backend"
+version = "0.1.0"
+dependencies = [
+ "ffmpeg-sidecar",
+ "getrandom 0.3.4",
+ "hex",
+ "image",
+ "mutsuki-plugin-api",
+ "mutsuki-plugin-host",
+ "mutsuki-runtime-contracts",
+ "mutsuki-runtime-wire",
+ "notify",
+ "reqwest 0.12.28",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "sha1 0.10.7",
+ "sha2 0.11.0",
+ "time",
+ "tiny_http",
+ "tokio",
+ "toml 0.8.2",
+ "zip 8.6.0",
+]
+
+[[package]]
 name = "momobako-nana"
 version = "0.1.0"
 dependencies = [
+ "momobako-backend",
  "nana-ui",
  "nana-ui-devtools",
  "nana-ui-platform",
