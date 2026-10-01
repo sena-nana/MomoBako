@@ -8,6 +8,7 @@ use nana_ui::runtime::{Activate, FrameworkError, LengthSpec, List, RuntimeDocume
 use crate::backend::services::repository::{
     AssetDetail, FileBrowserSnapshot, FilePreviewSourceResponse, RepositorySnapshot,
     PluginManifest, PlaylistSummary, RepositorySummary, SystemLogPage,
+    PluginConfigSnapshot,
 };
 
 /// Nana Runtime 传递给应用状态的壳层交互消息。
@@ -23,6 +24,8 @@ pub enum ShellMessage {
     AssetDetailLoaded(Result<AssetDetail, String>),
     PreviewSourceLoaded(Result<FilePreviewSourceResponse, String>),
     PluginsLoaded(Result<Vec<PluginManifest>, String>),
+    SelectPlugin(String),
+    PluginConfigLoaded(Result<PluginConfigSnapshot, String>),
     LogsLoaded(Result<SystemLogPage, String>),
     PlaylistsLoaded(Result<Vec<PlaylistSummary>, String>),
     SystemStatusLoaded(Result<crate::backend::services::runtime::ExternalApiConnectionStatus, String>),
@@ -126,6 +129,7 @@ pub struct ShellViewModel {
     pub file_entry_ids: Vec<Option<String>>,
     pub preview_url: Option<String>,
     pub plugin_entries: Vec<String>,
+    pub plugin_entry_ids: Vec<String>,
     pub log_entries: Vec<String>,
     pub playlist_entries: Vec<String>,
     pub active_tasks: usize,
@@ -147,6 +151,7 @@ impl Default for ShellViewModel {
             file_entry_ids: Vec::new(),
             preview_url: None,
             plugin_entries: Vec::new(),
+            plugin_entry_ids: Vec::new(),
             log_entries: Vec::new(),
             playlist_entries: Vec::new(),
             active_tasks: 0,
@@ -328,11 +333,24 @@ impl ShellViewModel {
                     .iter()
                     .map(|plugin| format!("{} {} · {}", plugin.name, plugin.version, plugin.status))
                     .collect();
+                self.plugin_entry_ids = plugins.iter().map(|plugin| plugin.plugin_id.clone()).collect();
                 self.detail = format!("{} 个插件 · 原生贡献接口优先", plugins.len());
             }
             ShellMessage::PluginsLoaded(Err(error)) => {
                 self.page = ShellPage::Error;
                 self.detail = format!("无法读取插件列表：{error}");
+            }
+            ShellMessage::SelectPlugin(plugin_id) => {
+                self.page = ShellPage::PluginSettings;
+                self.detail = format!("正在读取插件 {plugin_id} 的原生设置…");
+            }
+            ShellMessage::PluginConfigLoaded(Ok(config)) => {
+                self.page = ShellPage::PluginSettings;
+                self.detail = format!("插件 {} · 已加载 {} 项配置", config.plugin_id, config.values.len());
+            }
+            ShellMessage::PluginConfigLoaded(Err(error)) => {
+                self.page = ShellPage::Error;
+                self.detail = format!("无法读取插件设置：{error}");
             }
             ShellMessage::LogsLoaded(Ok(page)) => {
                 self.page = ShellPage::Logs;
@@ -476,12 +494,28 @@ pub fn mount_shell(
                     })
                     .collect::<Vec<_>>(),
             );
+            let plugin_actions = widget(Stack::fill_column(6.0)).children(
+                view_model
+                    .plugin_entries
+                    .iter()
+                    .zip(view_model.plugin_entry_ids.iter())
+                    .take(8)
+                    .map(|(label, plugin_id)| {
+                        let plugin_id = plugin_id.clone();
+                        button(label.clone())
+                            .key(format!("plugin-entry-{plugin_id}"))
+                            .on_cx(move |_, _: &Activate, cx| {
+                                cx.dispatch_program(ShellMessage::SelectPlugin(plugin_id.clone()));
+                            })
+                    })
+                    .collect::<Vec<_>>(),
+            );
             let content = widget(
                 Stack::fill_column(12.0)
                     .padding_xy(24.0, 20.0)
                     .min_width(LengthSpec::Px(0.0)),
             )
-            .children((status_summary, task_actions, file_actions, widget(
+            .children((status_summary, task_actions, file_actions, plugin_actions, widget(
                 List::new()
                     .label(view_model.page.title())
                     .style(Stack::column(12.0).node_style()),
