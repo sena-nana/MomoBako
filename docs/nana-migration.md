@@ -32,5 +32,9 @@ cargo test -p momobako-nana --test offscreen_acceptance -- --nocapture
 `repository://structure-updated` 事件，原 JSON 负载保持兼容。Nana 宿主消费同一事件
 边界并在自己的事件循环中更新 Runtime 状态。
 
+`src-nana/src/host_api.rs` 进一步定义窗口生命周期、通知、文件对话框、外部打开和
+取消探针。它们是宿主无关请求；Windows 原生适配器可以实现这些请求而不把窗口对象
+泄漏进领域服务或 ViewModel。
+
 插件的 Vue 自定义设置页、工具页、预览和播放器贡献不进入原生生产树。官方插件应迁移
 到 Nana 原生贡献接口；第三方旧插件需要升级，宿主应提供明确的兼容提示。

@@ -13,6 +13,7 @@ use nana_ui::{
 pub mod shell;
 use shell::{ShellPage, ShellViewModel, mount_shell};
 
+pub mod host_api;
 pub mod plugin_api;
 
 /// Nana 宿主的最小应用状态；后续阶段将把 repository/plugin/task ViewModel 注入这里。
