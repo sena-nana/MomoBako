@@ -33,6 +33,7 @@ pub enum ShellMessage {
     LogsLoaded(Result<SystemLogPage, String>),
     PlaylistsLoaded(Result<Vec<PlaylistSummary>, String>),
     SelectPlaylist(String),
+    DeletePlaylist(String),
     PlaylistDetailLoaded(Result<PlaylistDetail, String>),
     SystemStatusLoaded(Result<crate::backend::services::runtime::ExternalApiConnectionStatus, String>),
     TaskSnapshotLoaded { active: usize, completed: usize },
@@ -447,6 +448,9 @@ impl ShellViewModel {
                 self.page = ShellPage::Playlists;
                 self.detail = format!("正在读取播放列表 {playlist_id}…");
             }
+            ShellMessage::DeletePlaylist(playlist_id) => {
+                self.detail = format!("正在删除播放列表 {playlist_id}…");
+            }
             ShellMessage::PlaylistDetailLoaded(Ok(detail)) => {
                 self.page = ShellPage::Playlists;
                 self.detail = format!("{} · {} 个项目", detail.playlist.name, detail.items.len());
@@ -652,13 +656,22 @@ pub fn mount_shell(
                     .iter()
                     .zip(view_model.playlist_entry_ids.iter())
                     .take(8)
-                    .map(|(label, playlist_id)| {
+                            .map(|(label, playlist_id)| {
                         let playlist_id = playlist_id.clone();
-                        button(label.clone())
-                            .key(format!("playlist-entry-{playlist_id}"))
-                            .on_cx(move |_, _: &Activate, cx| {
-                                cx.dispatch_program(ShellMessage::SelectPlaylist(playlist_id.clone()));
-                            })
+                        let open_id = playlist_id.clone();
+                        let delete_id = playlist_id.clone();
+                        widget(Stack::fill_row(8.0)).children((
+                            button(label.clone())
+                                .key(format!("playlist-entry-{open_id}"))
+                                .on_cx(move |_, _: &Activate, cx| {
+                                    cx.dispatch_program(ShellMessage::SelectPlaylist(open_id.clone()));
+                                }),
+                            button("删除")
+                                .key(format!("delete-playlist-{delete_id}"))
+                                .on_cx(move |_, _: &Activate, cx| {
+                                    cx.dispatch_program(ShellMessage::DeletePlaylist(delete_id.clone()));
+                                }),
+                        ))
                     })
                     .collect::<Vec<_>>(),
             );
