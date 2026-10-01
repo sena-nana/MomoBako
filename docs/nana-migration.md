@@ -45,5 +45,9 @@ Nana `ApplicationState::initialize` 现在启动共享 `RepositoryRuntime`，窗
 同一状态中的 `ShellViewModel`；启动失败会落入原生错误状态，应用销毁时释放 Runtime
 辅助进程。离屏验收仍直接构造同一 `RuntimeDocument`，不启动网络服务。
 
+`src-nana/src/services.rs` 将 repository 查询、文件浏览、交互、管理、插件、系统日志
+和 Mutsuki 任务 ViewModel 全部绑定到该 Runtime；后续页面接线只需消费
+`NativeServices`，不再调用 Tauri command。
+
 插件的 Vue 自定义设置页、工具页、预览和播放器贡献不进入原生生产树。官方插件应迁移
 到 Nana 原生贡献接口；第三方旧插件需要升级，宿主应提供明确的兼容提示。
