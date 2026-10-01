@@ -8,7 +8,7 @@ use nana_ui::runtime::{Activate, FrameworkError, LengthSpec, List, RuntimeDocume
 use crate::backend::services::repository::{
     AssetDetail, FileBrowserEntry, FileBrowserSnapshot, FilePreviewSourceResponse, RepositorySnapshot,
     PluginManifest, PlaylistSummary, RepositorySummary, SystemLogPage,
-    PluginConfigSnapshot,
+    PluginConfigSnapshot, PlaylistDetail,
 };
 
 /// Nana Runtime 传递给应用状态的壳层交互消息。
@@ -30,6 +30,8 @@ pub enum ShellMessage {
     DeletePluginConfig { plugin_id: String, key: String },
     LogsLoaded(Result<SystemLogPage, String>),
     PlaylistsLoaded(Result<Vec<PlaylistSummary>, String>),
+    SelectPlaylist(String),
+    PlaylistDetailLoaded(Result<PlaylistDetail, String>),
     SystemStatusLoaded(Result<crate::backend::services::runtime::ExternalApiConnectionStatus, String>),
     TaskSnapshotLoaded { active: usize, completed: usize },
     CancelTask(String),
@@ -144,6 +146,7 @@ pub struct ShellViewModel {
     pub plugin_entry_ids: Vec<String>,
     pub log_entries: Vec<String>,
     pub playlist_entries: Vec<String>,
+    pub playlist_entry_ids: Vec<String>,
     pub active_tasks: usize,
     pub completed_tasks: usize,
     pub active_task_ids: Vec<String>,
@@ -169,6 +172,7 @@ impl Default for ShellViewModel {
             plugin_entry_ids: Vec::new(),
             log_entries: Vec::new(),
             playlist_entries: Vec::new(),
+            playlist_entry_ids: Vec::new(),
             active_tasks: 0,
             completed_tasks: 0,
             active_task_ids: Vec::new(),
@@ -409,11 +413,24 @@ impl ShellViewModel {
                     .iter()
                     .map(|playlist| format!("{} · {} 项", playlist.name, playlist.item_count))
                     .collect();
+                self.playlist_entry_ids = playlists.iter().map(|playlist| playlist.playlist_id.clone()).collect();
                 self.detail = format!("{} 个播放列表", playlists.len());
             }
             ShellMessage::PlaylistsLoaded(Err(error)) => {
                 self.page = ShellPage::Error;
                 self.detail = format!("无法读取播放列表：{error}");
+            }
+            ShellMessage::SelectPlaylist(playlist_id) => {
+                self.page = ShellPage::Playlists;
+                self.detail = format!("正在读取播放列表 {playlist_id}…");
+            }
+            ShellMessage::PlaylistDetailLoaded(Ok(detail)) => {
+                self.page = ShellPage::Playlists;
+                self.detail = format!("{} · {} 个项目", detail.playlist.name, detail.items.len());
+            }
+            ShellMessage::PlaylistDetailLoaded(Err(error)) => {
+                self.page = ShellPage::Error;
+                self.detail = format!("无法读取播放列表详情：{error}");
             }
             ShellMessage::TaskSnapshotLoaded { active, completed } => {
                 self.page = ShellPage::TaskRunning;
@@ -565,12 +582,28 @@ pub fn mount_shell(
                     })
                     .collect::<Vec<_>>(),
             );
+            let playlist_actions = widget(Stack::fill_column(6.0)).children(
+                view_model
+                    .playlist_entries
+                    .iter()
+                    .zip(view_model.playlist_entry_ids.iter())
+                    .take(8)
+                    .map(|(label, playlist_id)| {
+                        let playlist_id = playlist_id.clone();
+                        button(label.clone())
+                            .key(format!("playlist-entry-{playlist_id}"))
+                            .on_cx(move |_, _: &Activate, cx| {
+                                cx.dispatch_program(ShellMessage::SelectPlaylist(playlist_id.clone()));
+                            })
+                    })
+                    .collect::<Vec<_>>(),
+            );
             let content = widget(
                 Stack::fill_column(12.0)
                     .padding_xy(24.0, 20.0)
                     .min_width(LengthSpec::Px(0.0)),
             )
-            .children((status_summary, task_actions, file_actions, plugin_actions, plugin_config_actions, widget(
+            .children((status_summary, task_actions, file_actions, plugin_actions, plugin_config_actions, playlist_actions, widget(
                 List::new()
                     .label(view_model.page.title())
                     .style(Stack::column(12.0).node_style()),
