@@ -505,7 +505,7 @@ impl ShellViewModel {
             }
             ShellMessage::WindowAction(_) => {}
             ShellMessage::Refresh => {
-                self.detail = "刷新服务尚未接通，当前数据未变更".into();
+                self.detail = "正在刷新资源库…".into();
             }
             ShellMessage::PrimaryAction => {
                 self.detail = "该操作的领域服务尚未接通，数据未写入".into();
