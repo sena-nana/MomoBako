@@ -270,6 +270,15 @@ impl MomoTaskRuntime {
         (active, completed)
     }
 
+    /// Returns active task identifiers for host-native cancellation controls.
+    pub fn active_task_ids(&self) -> Vec<String> {
+        self.state
+            .cancellations
+            .lock()
+            .map(|tasks| tasks.keys().cloned().collect())
+            .unwrap_or_default()
+    }
+
     async fn execute_value(
         &self,
         task_id: String,
