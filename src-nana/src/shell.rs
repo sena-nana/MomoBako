@@ -35,6 +35,7 @@ pub enum ShellMessage {
     SelectPlaylist(String),
     DeletePlaylist(String),
     PlaylistDetailLoaded(Result<PlaylistDetail, String>),
+    RemovePlaylistItem { playlist_id: String, item_id: String },
     SystemStatusLoaded(Result<crate::backend::services::runtime::ExternalApiConnectionStatus, String>),
     TaskSnapshotLoaded { active: usize, completed: usize },
     CancelTask(String),
@@ -150,6 +151,9 @@ pub struct ShellViewModel {
     pub log_entries: Vec<String>,
     pub playlist_entries: Vec<String>,
     pub playlist_entry_ids: Vec<String>,
+    pub selected_playlist_id: Option<String>,
+    pub playlist_item_entries: Vec<String>,
+    pub playlist_item_ids: Vec<String>,
     pub active_tasks: usize,
     pub completed_tasks: usize,
     pub active_task_ids: Vec<String>,
@@ -178,6 +182,9 @@ impl Default for ShellViewModel {
             log_entries: Vec::new(),
             playlist_entries: Vec::new(),
             playlist_entry_ids: Vec::new(),
+            selected_playlist_id: None,
+            playlist_item_entries: Vec::new(),
+            playlist_item_ids: Vec::new(),
             active_tasks: 0,
             completed_tasks: 0,
             active_task_ids: Vec::new(),
@@ -446,6 +453,7 @@ impl ShellViewModel {
             }
             ShellMessage::SelectPlaylist(playlist_id) => {
                 self.page = ShellPage::Playlists;
+                self.selected_playlist_id = Some(playlist_id.clone());
                 self.detail = format!("正在读取播放列表 {playlist_id}…");
             }
             ShellMessage::DeletePlaylist(playlist_id) => {
@@ -453,11 +461,25 @@ impl ShellViewModel {
             }
             ShellMessage::PlaylistDetailLoaded(Ok(detail)) => {
                 self.page = ShellPage::Playlists;
+                self.selected_playlist_id = Some(detail.playlist.playlist_id.clone());
+                self.playlist_item_entries = detail
+                    .items
+                    .iter()
+                    .map(|item| format!("{} · {}", item.filename, item.status))
+                    .collect();
+                self.playlist_item_ids = detail
+                    .items
+                    .iter()
+                    .map(|item| item.playlist_item_id.clone())
+                    .collect();
                 self.detail = format!("{} · {} 个项目", detail.playlist.name, detail.items.len());
             }
             ShellMessage::PlaylistDetailLoaded(Err(error)) => {
                 self.page = ShellPage::Error;
                 self.detail = format!("无法读取播放列表详情：{error}");
+            }
+            ShellMessage::RemovePlaylistItem { item_id, .. } => {
+                self.detail = format!("正在移除播放列表项目 {item_id}…");
             }
             ShellMessage::TaskSnapshotLoaded { active, completed } => {
                 self.page = ShellPage::TaskRunning;
@@ -675,12 +697,35 @@ pub fn mount_shell(
                     })
                     .collect::<Vec<_>>(),
             );
+            let playlist_item_actions = widget(Stack::fill_column(6.0)).children(
+                view_model
+                    .playlist_item_entries
+                    .iter()
+                    .zip(view_model.playlist_item_ids.iter())
+                    .take(8)
+                    .map(|(label, item_id)| {
+                        let item_id = item_id.clone();
+                        let playlist_id = view_model.selected_playlist_id.clone().unwrap_or_default();
+                        widget(Stack::fill_row(8.0)).children((
+                            text(label.clone()).key(format!("playlist-item-{item_id}")),
+                            button("移除")
+                                .key(format!("remove-playlist-item-{item_id}"))
+                                .on_cx(move |_, _: &Activate, cx| {
+                                    cx.dispatch_program(ShellMessage::RemovePlaylistItem {
+                                        playlist_id: playlist_id.clone(),
+                                        item_id: item_id.clone(),
+                                    });
+                                }),
+                        ))
+                    })
+                    .collect::<Vec<_>>(),
+            );
             let content = widget(
                 Stack::fill_column(12.0)
                     .padding_xy(24.0, 20.0)
                     .min_width(LengthSpec::Px(0.0)),
             )
-            .children((status_summary, task_actions, file_actions, plugin_actions, plugin_config_actions, plugin_config_editors, playlist_actions, widget(
+            .children((status_summary, task_actions, file_actions, plugin_actions, plugin_config_actions, plugin_config_editors, playlist_actions, playlist_item_actions, widget(
                 List::new()
                     .label(view_model.page.title())
                     .style(Stack::column(12.0).node_style()),
