@@ -18,6 +18,11 @@ cargo test -p momobako-nana --test offscreen_acceptance -- --nocapture
 | 错误 | 1200×800 / 默认 | `state-error.png` + `state-error.json` |
 | 文件列表 | 1200×800 / 默认 | `state-file-list.png` + `state-file-list.json` |
 | 选中文件 / 预览入口 | 1200×800 / 默认 | `state-selected-file.png` + `state-selected-file.json` |
+| 插件设置 | 1200×800 / 默认 | `state-plugin-settings.png` + `state-plugin-settings.json` |
+| 任务进行中 | 1200×800 / 默认 | `state-task-running.png` + `state-task-running.json` |
+| 冲突 | 1200×800 / 默认 | `state-conflict.png` + `state-conflict.json` |
+| 编辑未保存 | 1200×800 / 默认 | `state-unsaved-edit.png` + `state-unsaved-edit.json` |
+| 应用设置 / 系统日志 | 1200×800 / 默认 | `state-settings.*` + `state-logs.*` |
 
 JSON 同时保存可访问性树、`scene_probe` 布局/绘制信息和 `(20,20)` 命中结果，
 与对应 PNG 来自同一个 `RuntimeAgentSession`。

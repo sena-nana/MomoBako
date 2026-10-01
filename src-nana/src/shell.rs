@@ -20,6 +20,18 @@ pub enum ShellPage {
     FileList,
     /// 展示当前选中的文件及预览入口。
     SelectedFile,
+    /// 插件原生设置贡献页。
+    PluginSettings,
+    /// 任务中心有正在运行的任务。
+    TaskRunning,
+    /// 当前资源存在同步冲突。
+    Conflict,
+    /// 编辑器存在尚未保存的内容。
+    UnsavedEdit,
+    /// 应用设置页。
+    Settings,
+    /// 系统日志页。
+    Logs,
 }
 
 impl ShellPage {
@@ -30,6 +42,12 @@ impl ShellPage {
             Self::Error => "资源库加载失败",
             Self::FileList => "文件列表",
             Self::SelectedFile => "文件预览",
+            Self::PluginSettings => "插件设置",
+            Self::TaskRunning => "任务进行中",
+            Self::Conflict => "同步冲突",
+            Self::UnsavedEdit => "编辑未保存",
+            Self::Settings => "应用设置",
+            Self::Logs => "系统日志",
         }
     }
 
@@ -40,6 +58,12 @@ impl ShellPage {
             Self::Error => "需要处理仓库错误",
             Self::FileList => "已加载仓库文件",
             Self::SelectedFile => "已选中一个文件",
+            Self::PluginSettings => "正在编辑官方插件的原生设置",
+            Self::TaskRunning => "扫描任务正在运行 · 42%",
+            Self::Conflict => "本地与远端 Revision 不一致",
+            Self::UnsavedEdit => "编辑内容尚未写入仓库",
+            Self::Settings => "应用偏好和服务配置",
+            Self::Logs => "最近的服务和插件事件",
         }
     }
 
@@ -50,6 +74,12 @@ impl ShellPage {
             Self::Error => "重试加载",
             Self::FileList => "刷新列表",
             Self::SelectedFile => "打开预览",
+            Self::PluginSettings => "保存插件设置",
+            Self::TaskRunning => "查看任务",
+            Self::Conflict => "查看冲突",
+            Self::UnsavedEdit => "保存更改",
+            Self::Settings => "应用设置",
+            Self::Logs => "刷新日志",
         }
     }
 }
@@ -91,6 +121,23 @@ impl ShellViewModel {
                 model.selected_path = Some("assets/cover.png".into());
                 model.detail = "PNG 图片 · 1920 × 1080 · 2.4 MB".into();
             }
+            ShellPage::PluginSettings => {
+                model.detail = "官方插件 · Nana 原生贡献接口 · 已加载 3 项配置".into();
+            }
+            ShellPage::TaskRunning => {
+                model.detail = "扫描默认资源库 · 1,284 / 3,040 个文件".into();
+            }
+            ShellPage::Conflict => {
+                model.selected_path = Some("assets/cover.png".into());
+                model.detail = "远端修改时间较新，需要选择保留本地或远端版本".into();
+            }
+            ShellPage::UnsavedEdit => {
+                model.selected_path = Some("notes/readme.md".into());
+                model.dirty = true;
+                model.detail = "Markdown · 3 行未保存 · 最后保存于 2 分钟前".into();
+            }
+            ShellPage::Settings => model.detail = "主题、缩略图缓存和默认播放器".into(),
+            ShellPage::Logs => model.detail = "最近 24 小时 · 18 条记录 · 0 个错误".into(),
             ShellPage::Loading => {}
         }
         model
