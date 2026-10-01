@@ -14,6 +14,8 @@ use crate::backend::viewmodels::{
 
 /// Nana Runtime 的领域服务依赖集合。
 pub struct NativeServices {
+    /// 领域服务依赖 Tokio；Nana 自身的 pollster 任务线程不提供 reactor。
+    pub executor: Arc<tokio::runtime::Runtime>,
     pub runtime: RepositoryRuntime,
     pub repository_query: RepositoryQueryViewModel,
     pub file_browser: FileBrowserViewModel,
@@ -27,9 +29,14 @@ pub struct NativeServices {
 impl NativeServices {
     /// 启动一次领域 Runtime，并将所有页面 ViewModel 绑定到同一实例。
     pub fn start() -> Result<Self, String> {
+        let executor = Arc::new(tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .map_err(|error| format!("领域异步执行器启动失败：{error}"))?);
         let runtime = RepositoryRuntime::start()?;
         let task_runtime = Arc::new(MomoTaskRuntime::new(runtime.clone()));
         Ok(Self {
+            executor,
             repository_query: RepositoryQueryViewModel::new(runtime.clone()),
             file_browser: FileBrowserViewModel::new(runtime.clone()),
             repository_interaction: RepositoryInteractionViewModel::new(runtime.clone()),

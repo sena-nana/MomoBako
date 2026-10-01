@@ -6,6 +6,7 @@ rust-version = "1.98"
 publish = false
 
 [dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "time", "net"] }
 momobako-backend = { path = "../src-backend" }
 nana-ui = { git = "https://github.com/sena-nana/NanaUI.git", rev = "ee94106746b13f356af17586ed5e35ed78f9eb40", features = ["hosted", "bundled-fonts", "components"] }
 nana-ui-platform = { git = "https://github.com/sena-nana/NanaUI.git", rev = "ee94106746b13f356af17586ed5e35ed78f9eb40", features = ["clipboard"] }
