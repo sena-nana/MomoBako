@@ -278,6 +278,37 @@ impl ApplicationState for MomoBakoApplication {
                 eprintln!("Nana 插件设置任务提交失败：{error}");
             }
         }
+        if let ShellMessage::TogglePlugin { plugin_id, enabled } = &message
+            && let Some(services) = self.services.as_ref()
+        {
+            let plugin = services.plugin.clone();
+            let executor = services.executor.clone();
+            let request = backend::services::repository::PluginEnabledRequest {
+                plugin_id: plugin_id.clone(),
+                enabled: *enabled,
+            };
+            if let Err(error) = context.run_task(Task::new(async move {
+                ShellMessage::PluginsLoaded(
+                    executor.block_on(plugin.set_plugin_enabled(request)).map(|response| response.plugins),
+                )
+            })) {
+                eprintln!("Nana 插件启停任务提交失败：{error}");
+            }
+        }
+        if let ShellMessage::DeletePlugin(plugin_id) = &message
+            && let Some(services) = self.services.as_ref()
+        {
+            let plugin = services.plugin.clone();
+            let executor = services.executor.clone();
+            let plugin_id = plugin_id.clone();
+            if let Err(error) = context.run_task(Task::new(async move {
+                ShellMessage::PluginsLoaded(
+                    executor.block_on(plugin.delete_plugin(plugin_id)).map(|response| response.plugins),
+                )
+            })) {
+                eprintln!("Nana 插件删除任务提交失败：{error}");
+            }
+        }
         if let ShellMessage::SelectPlaylist(playlist_id) = &message
             && let Some(repository_id) = self.shell.repository_id.clone()
             && let Some(services) = self.services.as_ref()
