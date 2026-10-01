@@ -7,7 +7,8 @@ use std::collections::BTreeSet;
 use std::sync::mpsc::Sender;
 
 #[derive(Clone)]
-pub(crate) struct RepositoryStructureRefreshRequest {
+/// Watcher 到宿主无关 Runtime 的结构刷新请求。
+pub struct RepositoryStructureRefreshRequest {
     pub repo_id: String,
     pub reason: String,
     pub paths: BTreeSet<String>,
