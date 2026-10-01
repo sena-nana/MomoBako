@@ -128,6 +128,24 @@ impl ApplicationState for MomoBakoApplication {
                 eprintln!("Nana 文件浏览任务提交失败：{error}");
             }
         }
+        if let ShellMessage::SelectFile {
+            asset_id: Some(asset_id),
+            ..
+        } = &message
+            && let Some(repository_id) = self.shell.repository_id.clone()
+            && let Some(services) = self.services.as_ref()
+        {
+            let query = services.repository_query.clone();
+            let executor = services.executor.clone();
+            let asset_id = asset_id.clone();
+            if let Err(error) = context.run_task(Task::new(async move {
+                ShellMessage::AssetDetailLoaded(
+                    executor.block_on(query.get_asset_detail(repository_id, asset_id)),
+                )
+            })) {
+                eprintln!("Nana 文件元数据任务提交失败：{error}");
+            }
+        }
         self.shell.reduce(message);
         if let Err(error) = mount_shell(&mut window.document, &self.shell) {
             eprintln!("Nana 壳层重建失败：{error}");
