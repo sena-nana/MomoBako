@@ -11,7 +11,7 @@ use nana_ui::{
 };
 
 pub mod shell;
-use shell::{ShellPage, ShellViewModel, mount_shell};
+use shell::{ShellMessage, ShellPage, ShellViewModel, mount_shell};
 
 pub mod host_api;
 pub mod services;
@@ -37,7 +37,7 @@ impl Default for MomoBakoApplication {
 }
 
 impl ApplicationState for MomoBakoApplication {
-    type Message = ();
+    type Message = ShellMessage;
     type Error = FrameworkError;
 
     fn initialize(_: &RuntimeProgramContext<Self::Message>) -> Result<Self, Self::Error> {
@@ -68,11 +68,21 @@ impl ApplicationState for MomoBakoApplication {
 
     fn update(
         &mut self,
-        _id: (),
-        _windows: &mut std::collections::HashMap<nana_ui_platform::WindowId, ApplicationWindow>,
+        message: ShellMessage,
+        windows: &mut std::collections::HashMap<nana_ui_platform::WindowId, ApplicationWindow>,
         _: &RuntimeProgramContext<Self::Message>,
     ) -> RuntimeProgramUpdate {
-        RuntimeProgramUpdate::default()
+        let Some((id, window)) = windows.iter_mut().next() else {
+            return RuntimeProgramUpdate::default();
+        };
+        self.shell.reduce(message);
+        if let Err(error) = mount_shell(&mut window.document, &self.shell) {
+            eprintln!("Nana 壳层重建失败：{error}");
+            self.shell.page = ShellPage::Error;
+            self.shell.detail = "页面更新失败，请查看系统日志".into();
+            return RuntimeProgramUpdate::redraw(*id);
+        }
+        RuntimeProgramUpdate::redraw(*id)
     }
 }
 
