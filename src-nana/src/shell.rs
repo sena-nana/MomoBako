@@ -7,7 +7,7 @@ use nana_ui::runtime::view::{button, text, widget};
 use nana_ui::runtime::{Activate, FrameworkError, LengthSpec, List, RuntimeDocument, Stack};
 use crate::backend::services::repository::{
     AssetDetail, FileBrowserSnapshot, FilePreviewSourceResponse, RepositorySnapshot,
-    PluginManifest, RepositorySummary, SystemLogPage,
+    PluginManifest, PlaylistSummary, RepositorySummary, SystemLogPage,
 };
 
 /// Nana Runtime 传递给应用状态的壳层交互消息。
@@ -25,6 +25,7 @@ pub enum ShellMessage {
     PreviewSourceLoaded(Result<FilePreviewSourceResponse, String>),
     PluginsLoaded(Result<Vec<PluginManifest>, String>),
     LogsLoaded(Result<SystemLogPage, String>),
+    PlaylistsLoaded(Result<Vec<PlaylistSummary>, String>),
 }
 
 /// 主内容页面的可观察状态。
@@ -41,6 +42,8 @@ pub enum ShellPage {
     FileList,
     /// 展示当前选中的文件及预览入口。
     SelectedFile,
+    /// 当前仓库的播放列表。
+    Playlists,
     /// 插件原生设置贡献页。
     PluginSettings,
     /// 任务中心有正在运行的任务。
@@ -63,6 +66,7 @@ impl ShellPage {
             Self::Error => "资源库加载失败",
             Self::FileList => "文件列表",
             Self::SelectedFile => "文件预览",
+            Self::Playlists => "播放列表",
             Self::PluginSettings => "插件设置",
             Self::TaskRunning => "任务进行中",
             Self::Conflict => "同步冲突",
@@ -79,6 +83,7 @@ impl ShellPage {
             Self::Error => "需要处理仓库错误",
             Self::FileList => "已加载仓库文件",
             Self::SelectedFile => "已选中一个文件",
+            Self::Playlists => "正在读取仓库播放列表",
             Self::PluginSettings => "正在编辑官方插件的原生设置",
             Self::TaskRunning => "扫描任务正在运行 · 42%",
             Self::Conflict => "本地与远端 Revision 不一致",
@@ -95,6 +100,7 @@ impl ShellPage {
             Self::Error => "重试加载",
             Self::FileList => "刷新列表",
             Self::SelectedFile => "打开预览",
+            Self::Playlists => "刷新列表",
             Self::PluginSettings => "保存插件设置",
             Self::TaskRunning => "查看任务",
             Self::Conflict => "查看冲突",
@@ -119,6 +125,7 @@ pub struct ShellViewModel {
     pub preview_url: Option<String>,
     pub plugin_entries: Vec<String>,
     pub log_entries: Vec<String>,
+    pub playlist_entries: Vec<String>,
 }
 
 impl Default for ShellViewModel {
@@ -135,6 +142,7 @@ impl Default for ShellViewModel {
             preview_url: None,
             plugin_entries: Vec::new(),
             log_entries: Vec::new(),
+            playlist_entries: Vec::new(),
         }
     }
 }
@@ -154,6 +162,7 @@ impl ShellViewModel {
                 model.selected_path = Some("assets/cover.png".into());
                 model.detail = "PNG 图片 · 1920 × 1080 · 2.4 MB".into();
             }
+            ShellPage::Playlists => model.detail = "正在加载播放列表".into(),
             ShellPage::PluginSettings => {
                 model.detail = "官方插件 · Nana 原生贡献接口 · 已加载 3 项配置".into();
             }
@@ -212,6 +221,14 @@ impl ShellViewModel {
             "当前没有系统日志".into()
         } else {
             format!("日志：{}", self.log_entries.iter().take(6).cloned().collect::<Vec<_>>().join("、"))
+        }
+    }
+
+    fn playlist_entries_label(&self) -> String {
+        if self.playlist_entries.is_empty() {
+            "当前没有播放列表".into()
+        } else {
+            format!("播放列表：{}", self.playlist_entries.iter().take(6).cloned().collect::<Vec<_>>().join("、"))
         }
     }
 
@@ -320,6 +337,18 @@ impl ShellViewModel {
                 self.page = ShellPage::Error;
                 self.detail = format!("无法读取系统日志：{error}");
             }
+            ShellMessage::PlaylistsLoaded(Ok(playlists)) => {
+                self.page = ShellPage::Playlists;
+                self.playlist_entries = playlists
+                    .iter()
+                    .map(|playlist| format!("{} · {} 项", playlist.name, playlist.item_count))
+                    .collect();
+                self.detail = format!("{} 个播放列表", playlists.len());
+            }
+            ShellMessage::PlaylistsLoaded(Err(error)) => {
+                self.page = ShellPage::Error;
+                self.detail = format!("无法读取播放列表：{error}");
+            }
             ShellMessage::Refresh => {
                 self.detail = "刷新服务尚未接通，当前数据未变更".into();
             }
@@ -360,7 +389,7 @@ pub fn mount_shell(
                     cx.dispatch_program(ShellMessage::Navigate(ShellPage::FileList));
                 }),
                 button("播放列表").key("nav-playlists").on_cx(|_, _: &Activate, cx| {
-                    cx.dispatch_program(ShellMessage::Navigate(ShellPage::SelectedFile));
+                    cx.dispatch_program(ShellMessage::Navigate(ShellPage::Playlists));
                 }),
                 button("插件").key("nav-plugins").on_cx(|_, _: &Activate, cx| {
                     cx.dispatch_program(ShellMessage::Navigate(ShellPage::PluginSettings));
@@ -387,6 +416,7 @@ pub fn mount_shell(
                 text(view_model.file_entries_label()).key("file-entries"),
                 text(view_model.plugin_entries_label()).key("plugin-entries"),
                 text(view_model.log_entries_label()).key("log-entries"),
+                text(view_model.playlist_entries_label()).key("playlist-entries"),
                 widget(Stack::fill_column(6.0)).children(
                     view_model
                         .file_entries
