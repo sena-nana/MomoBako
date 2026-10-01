@@ -31,6 +31,15 @@ pub enum ShellMessage {
     SystemStatusLoaded(Result<crate::backend::services::runtime::ExternalApiConnectionStatus, String>),
     TaskSnapshotLoaded { active: usize, completed: usize },
     CancelTask(String),
+    WindowAction(WindowAction),
+}
+
+/// 宿主无关的窗口生命周期动作。
+#[derive(Clone, Debug)]
+pub enum WindowAction {
+    Minimize,
+    ToggleMaximize,
+    Close,
 }
 
 /// 主内容页面的可观察状态。
@@ -399,6 +408,7 @@ impl ShellViewModel {
             ShellMessage::CancelTask(task_id) => {
                 self.detail = format!("已请求取消任务 {task_id}");
             }
+            ShellMessage::WindowAction(_) => {}
             ShellMessage::Refresh => {
                 self.detail = "刷新服务尚未接通，当前数据未变更".into();
             }
@@ -550,6 +560,21 @@ pub fn mount_shell(
                 button("刷新状态")
                     .key("refresh")
                     .on_cx(|_, _: &Activate, cx| cx.dispatch_program(ShellMessage::Refresh)),
+                button("最小化")
+                    .key("window-minimize")
+                    .on_cx(|_, _: &Activate, cx| {
+                        cx.dispatch_program(ShellMessage::WindowAction(WindowAction::Minimize));
+                    }),
+                button("最大化")
+                    .key("window-maximize")
+                    .on_cx(|_, _: &Activate, cx| {
+                        cx.dispatch_program(ShellMessage::WindowAction(WindowAction::ToggleMaximize));
+                    }),
+                button("关闭")
+                    .key("window-close")
+                    .on_cx(|_, _: &Activate, cx| {
+                        cx.dispatch_program(ShellMessage::WindowAction(WindowAction::Close));
+                    }),
             ));
             let body = widget(Stack::fill_row(0.0).min_height(LengthSpec::Px(0.0)))
                 .children((navigation, content, process))

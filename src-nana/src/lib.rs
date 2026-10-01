@@ -11,7 +11,7 @@ use nana_ui::{
 };
 
 pub mod shell;
-use shell::{ShellMessage, ShellPage, ShellViewModel, mount_shell};
+use shell::{ShellMessage, ShellPage, ShellViewModel, WindowAction, mount_shell};
 
 pub mod host_api;
 pub mod services;
@@ -94,6 +94,24 @@ impl ApplicationState for MomoBakoApplication {
         let Some((id, window)) = windows.iter_mut().next() else {
             return RuntimeProgramUpdate::default();
         };
+        if let ShellMessage::WindowAction(action) = &message {
+            use nana_ui_platform::host::WindowCommand;
+            let command = match action {
+                WindowAction::Minimize => WindowCommand::SetMinimized {
+                    id: *id,
+                    minimized: true,
+                },
+                WindowAction::ToggleMaximize => WindowCommand::SetMaximized {
+                    id: *id,
+                    maximized: true,
+                },
+                WindowAction::Close => WindowCommand::Close(*id),
+            };
+            return RuntimeProgramUpdate {
+                window_commands: vec![command],
+                ..RuntimeProgramUpdate::default()
+            };
+        }
         if let ShellMessage::RepositoriesLoaded(Ok(repositories)) = &message
             && let Some(repository) = repositories.first()
             && let Some(services) = self.services.as_ref()

@@ -96,7 +96,17 @@ fn native_actions_are_reachable_through_runtime_hit_testing() {
     }
     let document = acceptance_document_for(ShellPage::FileList).expect("acceptance document");
     let mut session = RuntimeAgentSession::new(document, 1200, 800).expect("agent session");
-    for label in ["资源库", "插件", "设置", "刷新状态", "刷新列表", "编辑内容"] {
+    for label in [
+        "资源库",
+        "插件",
+        "设置",
+        "刷新状态",
+        "最小化",
+        "最大化",
+        "关闭",
+        "刷新列表",
+        "编辑内容",
+    ] {
         let node = session
             .accessibility_dump()
             .into_iter()
