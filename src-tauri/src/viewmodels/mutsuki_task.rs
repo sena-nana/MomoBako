@@ -26,4 +26,9 @@ impl MutsukiTaskViewModel {
     {
         self.runtime.execute(protocol_id, request).await
     }
+
+    /// 返回任务中心所需的活动和近期终态计数。
+    pub fn activity_snapshot(&self) -> (usize, usize) {
+        self.runtime.activity_snapshot()
+    }
 }

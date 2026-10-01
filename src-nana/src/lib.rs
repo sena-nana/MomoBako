@@ -147,6 +147,13 @@ impl ApplicationState for MomoBakoApplication {
                 eprintln!("Nana 播放列表任务提交失败：{error}");
             }
         }
+        if matches!(&message, ShellMessage::Navigate(ShellPage::TaskRunning))
+            && let Some(services) = self.services.as_ref()
+        {
+            let (active, completed) = services.tasks.activity_snapshot();
+            self.shell
+                .reduce(ShellMessage::TaskSnapshotLoaded { active, completed });
+        }
         if let ShellMessage::RepositorySnapshotLoaded(Ok(snapshot)) = &message
             && let Some(services) = self.services.as_ref()
         {
