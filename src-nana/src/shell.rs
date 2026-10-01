@@ -4,7 +4,10 @@
 //! `ShellViewModel` 注入文本状态，避免把领域服务直接耦合到 Nana 控件树。
 
 use nana_ui::runtime::view::{button, text, widget};
-use nana_ui::runtime::{Activate, FrameworkError, LengthSpec, List, RuntimeDocument, Stack, TextChanged, TextInput};
+use nana_ui::runtime::{
+    Activate, FrameworkError, GpuTextureView, LengthSpec, List, RuntimeDocument, Stack,
+    TextChanged, TextInput,
+};
 use crate::backend::services::repository::{
     AssetDetail, FileBrowserEntry, FileBrowserSnapshot, FilePreviewSourceResponse, RepositorySnapshot,
     PluginManifest, PlaylistSummary, RepositorySummary, SystemLogPage,
@@ -24,6 +27,10 @@ pub enum ShellMessage {
     OpenDirectory(String),
     AssetDetailLoaded(Result<AssetDetail, String>),
     PreviewSourceLoaded(Result<FilePreviewSourceResponse, String>),
+    PreviewPixelsLoaded {
+        source: FilePreviewSourceResponse,
+        pixels: Result<PreviewPixels, String>,
+    },
     PluginsLoaded(Result<Vec<PluginManifest>, String>),
     SelectPlugin(String),
     PluginConfigLoaded(Result<PluginConfigSnapshot, String>),
@@ -40,6 +47,14 @@ pub enum ShellMessage {
     TaskSnapshotLoaded { active: usize, completed: usize },
     CancelTask(String),
     WindowAction(WindowAction),
+}
+
+/// 已解码的 RGBA 预览帧；解码在服务任务中完成，窗口线程只负责上传 GPU 纹理。
+#[derive(Clone, Debug)]
+pub struct PreviewPixels {
+    pub width: u32,
+    pub height: u32,
+    pub rgba: Vec<u8>,
 }
 
 /// 宿主无关的窗口生命周期动作。
@@ -146,6 +161,8 @@ pub struct ShellViewModel {
     pub browser_entries: Vec<FileBrowserEntry>,
     pub current_directory: String,
     pub preview_url: Option<String>,
+    pub preview_token: Option<String>,
+    pub preview_pixels: Option<PreviewPixels>,
     pub plugin_entries: Vec<String>,
     pub plugin_entry_ids: Vec<String>,
     pub log_entries: Vec<String>,
@@ -177,6 +194,8 @@ impl Default for ShellViewModel {
             browser_entries: Vec::new(),
             current_directory: String::new(),
             preview_url: None,
+            preview_token: None,
+            preview_pixels: None,
             plugin_entries: Vec::new(),
             plugin_entry_ids: Vec::new(),
             log_entries: Vec::new(),
@@ -344,6 +363,9 @@ impl ShellViewModel {
             ShellMessage::SelectFile { path, .. } => {
                 self.page = ShellPage::SelectedFile;
                 self.selected_path = Some(path);
+                self.preview_url = None;
+                self.preview_token = None;
+                self.preview_pixels = None;
                 self.detail = "正在读取文件元数据…".into();
             }
             ShellMessage::OpenDirectory(path) => {
@@ -351,6 +373,8 @@ impl ShellViewModel {
                 self.detail = format!("正在读取目录 {path}…");
                 self.selected_path = None;
                 self.preview_url = None;
+                self.preview_token = None;
+                self.preview_pixels = None;
             }
             ShellMessage::AssetDetailLoaded(Ok(detail)) => {
                 self.page = ShellPage::SelectedFile;
@@ -369,6 +393,7 @@ impl ShellViewModel {
             ShellMessage::PreviewSourceLoaded(Ok(source)) => {
                 self.page = ShellPage::SelectedFile;
                 self.preview_url = source.source_url;
+                self.preview_token = Some(source.token);
                 self.detail = format!(
                     "{} · {} · {} 字节",
                     source.media_type, source.path, source.size_bytes
@@ -377,6 +402,21 @@ impl ShellViewModel {
             ShellMessage::PreviewSourceLoaded(Err(error)) => {
                 self.page = ShellPage::Error;
                 self.detail = format!("无法打开预览源：{error}");
+            }
+            ShellMessage::PreviewPixelsLoaded { source, pixels } => {
+                self.page = ShellPage::SelectedFile;
+                self.preview_url = source.source_url;
+                self.preview_token = Some(source.token);
+                match pixels {
+                    Ok(pixels) => {
+                        self.preview_pixels = Some(pixels);
+                        self.detail = format!("原生图片预览已加载 · {}", source.media_type);
+                    }
+                    Err(error) => {
+                        self.preview_pixels = None;
+                        self.detail = format!("预览源已准备，但图片解码失败：{error}");
+                    }
+                }
             }
             ShellMessage::PluginsLoaded(Ok(plugins)) => {
                 self.page = ShellPage::PluginSettings;
@@ -720,12 +760,21 @@ pub fn mount_shell(
                     })
                     .collect::<Vec<_>>(),
             );
+            let preview_slot = if view_model.preview_pixels.is_some() {
+                "file-preview"
+            } else {
+                ""
+            };
+            let preview_node = widget(Stack::fill_column(8.0)).children((
+                text("选择图片文件后，预览将在原生纹理节点中显示").key("preview-placeholder"),
+                widget(GpuTextureView::new(preview_slot).contain()).key("file-preview"),
+            ));
             let content = widget(
                 Stack::fill_column(12.0)
                     .padding_xy(24.0, 20.0)
                     .min_width(LengthSpec::Px(0.0)),
             )
-            .children((status_summary, task_actions, file_actions, plugin_actions, plugin_config_actions, plugin_config_editors, playlist_actions, playlist_item_actions, widget(
+            .children((status_summary, task_actions, file_actions, plugin_actions, plugin_config_actions, plugin_config_editors, playlist_actions, playlist_item_actions, preview_node, widget(
                 List::new()
                     .label(view_model.page.title())
                     .style(Stack::column(12.0).node_style()),

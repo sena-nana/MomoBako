@@ -3916,6 +3916,7 @@ dependencies = [
 name = "momobako-nana"
 version = "0.1.0"
 dependencies = [
+ "image",
  "momobako-backend",
  "nana-ui",
  "nana-ui-devtools",

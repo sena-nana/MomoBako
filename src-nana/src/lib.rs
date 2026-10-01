@@ -7,11 +7,13 @@
 use nana_ui::runtime::{DocumentId, FrameworkError, Task};
 use nana_ui::{
     ApplicationIdentity, ApplicationState, ApplicationWindow, DiagnosticsConfig, NanaApplication,
-    RuntimeApplication, RuntimeProgramContext, RuntimeProgramUpdate, WindowDescriptor,
+    GpuTexture, GpuTextureDescriptor, GpuTextureFormat, GpuTextureUsages, HostTexture,
+    HostTextureAlphaMode, GpuTextureRegion, RuntimeApplication, RuntimeProgramContext,
+    RuntimeProgramUpdate, WindowDescriptor,
 };
 
 pub mod shell;
-use shell::{ShellMessage, ShellPage, ShellViewModel, WindowAction, mount_shell};
+use shell::{PreviewPixels, ShellMessage, ShellPage, ShellViewModel, WindowAction, mount_shell};
 
 pub mod host_api;
 pub mod services;
@@ -26,6 +28,14 @@ pub struct MomoBakoApplication {
     pub services: Option<services::NativeServices>,
     shell: ShellViewModel,
     repositories_load_scheduled: bool,
+    preview_gpu: Option<NativePreviewGpu>,
+}
+
+struct NativePreviewGpu {
+    token: String,
+    texture: GpuTexture,
+    width: u32,
+    height: u32,
 }
 
 impl Default for MomoBakoApplication {
@@ -34,6 +44,7 @@ impl Default for MomoBakoApplication {
             services: None,
             shell: ShellViewModel::default(),
             repositories_load_scheduled: false,
+            preview_gpu: None,
         }
     }
 }
@@ -61,6 +72,7 @@ impl ApplicationState for MomoBakoApplication {
             services,
             shell,
             repositories_load_scheduled: false,
+            preview_gpu: None,
         })
     }
 
@@ -83,6 +95,64 @@ impl ApplicationState for MomoBakoApplication {
             }
         }
         Ok(())
+    }
+
+    fn prepare(
+        &mut self,
+        window: &mut ApplicationWindow,
+        context: &RuntimeProgramContext<Self::Message>,
+    ) {
+        let Some(token) = self.shell.preview_token.clone() else {
+            self.preview_gpu = None;
+            window.textures.remove("file-preview");
+            return;
+        };
+        let Some(pixels) = self.shell.preview_pixels.as_ref() else {
+            self.preview_gpu = None;
+            window.textures.remove("file-preview");
+            return;
+        };
+        let needs_upload = self.preview_gpu.as_ref().is_none_or(|preview| {
+            preview.token != token
+                || preview.width != pixels.width
+                || preview.height != pixels.height
+        });
+        if needs_upload {
+            let Ok(texture) = context.gpu().create_texture(&GpuTextureDescriptor {
+                label: Some("momobako file preview"),
+                width: pixels.width,
+                height: pixels.height,
+                format: GpuTextureFormat::RGBA8_UNORM_SRGB,
+                usage: GpuTextureUsages::SAMPLED | GpuTextureUsages::COPY_DST,
+            }) else {
+                eprintln!("Nana 文件预览纹理创建失败：{}x{}", pixels.width, pixels.height);
+                return;
+            };
+            if let Err(error) = context.gpu().write_texture(
+                &texture,
+                GpuTextureRegion::full(pixels.width, pixels.height),
+                &pixels.rgba,
+                pixels.width.saturating_mul(4),
+            ) {
+                eprintln!("Nana 文件预览纹理上传失败：{error}");
+                return;
+            }
+            self.preview_gpu = Some(NativePreviewGpu {
+                token,
+                texture,
+                width: pixels.width,
+                height: pixels.height,
+            });
+        }
+        if let Some(preview) = self.preview_gpu.as_ref() {
+            window.textures.register(
+                "file-preview",
+                HostTexture::new(1, 1, &preview.texture),
+                preview.width,
+                preview.height,
+                HostTextureAlphaMode::Premultiplied,
+            );
+        }
     }
 
     fn update(
@@ -381,6 +451,37 @@ impl ApplicationState for MomoBakoApplication {
                 eprintln!("Nana 预览源任务提交失败：{error}");
             }
         }
+        if let ShellMessage::PreviewSourceLoaded(Ok(source)) = &message
+            && let Some(services) = self.services.as_ref()
+        {
+            let query = services.repository_query.clone();
+            let executor = services.executor.clone();
+            let source = backend::services::repository::FilePreviewSourceResponse {
+                repo_id: source.repo_id.clone(),
+                path: source.path.clone(),
+                token: source.token.clone(),
+                source_url: source.source_url.clone(),
+                local_path: source.local_path.clone(),
+                media_type: source.media_type.clone(),
+                size_bytes: source.size_bytes,
+                modified_at: source.modified_at.clone(),
+            };
+            let request = backend::services::repository::FileReadRequest {
+                repo_id: source.repo_id.clone(),
+                path: source.path.clone(),
+            };
+            if let Err(error) = context.run_task(Task::new(async move {
+                let pixels = executor.block_on(query.read_file(request)).and_then(|bytes| {
+                    if !source.media_type.starts_with("image/") {
+                        return Err(format!("原生纹理预览暂不支持 {}", source.media_type));
+                    }
+                    decode_preview_pixels(&bytes)
+                });
+                ShellMessage::PreviewPixelsLoaded { source, pixels }
+            })) {
+                eprintln!("Nana 原生图片预览任务提交失败：{error}");
+            }
+        }
         self.shell.reduce(message);
         if let Err(error) = mount_shell(&mut window.document, &self.shell) {
             eprintln!("Nana 壳层重建失败：{error}");
@@ -390,6 +491,20 @@ impl ApplicationState for MomoBakoApplication {
         }
         RuntimeProgramUpdate::redraw(*id)
     }
+}
+
+fn decode_preview_pixels(bytes: &[u8]) -> Result<PreviewPixels, String> {
+    let image = image::load_from_memory(bytes).map_err(|error| format!("图片解码失败：{error}"))?;
+    let rgba = image.to_rgba8();
+    let (width, height) = rgba.dimensions();
+    if width == 0 || height == 0 || width > 8192 || height > 8192 {
+        return Err(format!("图片尺寸不受支持：{width}x{height}"));
+    }
+    Ok(PreviewPixels {
+        width,
+        height,
+        rgba: rgba.into_raw(),
+    })
 }
 
 /// 启动原生 NanaUI 窗口。
