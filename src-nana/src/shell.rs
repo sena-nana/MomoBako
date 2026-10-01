@@ -172,31 +172,13 @@ impl ShellViewModel {
         match message {
             ShellMessage::Navigate(page) => self.apply_page(page),
             ShellMessage::Refresh => {
-                self.detail = "正在刷新资源库文件列表".into();
-                self.page = ShellPage::Loading;
+                self.detail = "刷新服务尚未接通，当前数据未变更".into();
             }
-            ShellMessage::PrimaryAction => match self.page {
-                ShellPage::Loading => self.apply_page(ShellPage::FileList),
-                ShellPage::EmptyRepository | ShellPage::Error => {
-                    self.apply_page(ShellPage::FileList)
-                }
-                ShellPage::FileList => self.detail = "文件列表已刷新 · 12 个文件".into(),
-                ShellPage::SelectedFile => self.detail = "预览已打开 · assets/cover.png".into(),
-                ShellPage::PluginSettings => self.detail = "插件设置已保存".into(),
-                ShellPage::TaskRunning => self.apply_page(ShellPage::TaskRunning),
-                ShellPage::Conflict => self.detail = "冲突对比已打开".into(),
-                ShellPage::UnsavedEdit => {
-                    self.dirty = false;
-                    self.detail = "更改已保存到仓库".into();
-                }
-                ShellPage::Settings => self.detail = "应用设置已应用".into(),
-                ShellPage::Logs => self.detail = "日志已刷新 · 18 条记录 · 0 个错误".into(),
-            },
+            ShellMessage::PrimaryAction => {
+                self.detail = "该操作的领域服务尚未接通，数据未写入".into();
+            }
             ShellMessage::EditAction => {
-                self.page = ShellPage::UnsavedEdit;
-                self.dirty = true;
-                self.selected_path = Some("notes/readme.md".into());
-                self.detail = "Markdown · 3 行未保存 · 最后保存于刚刚".into();
+                self.detail = "原生编辑器尚未接通，当前文件未修改".into();
             }
         }
     }
@@ -249,6 +231,7 @@ pub fn mount_shell(
                     .style(Stack::column(12.0).node_style()),
             )
             .children((
+                text(view_model.page.title()).key("page-title"),
                 text(view_model.page.status()).key("page-status"),
                 text(view_model.selection_label()).key("selection"),
                 text(view_model.detail.clone()).key("page-detail"),
@@ -299,16 +282,17 @@ mod tests {
     fn shell_messages_reduce_to_user_visible_states() {
         let mut model = ShellViewModel::for_page(ShellPage::Loading);
         model.reduce(ShellMessage::PrimaryAction);
-        assert_eq!(model.page, ShellPage::FileList);
+        assert_eq!(model.page, ShellPage::Loading);
 
         model.reduce(ShellMessage::Navigate(ShellPage::PluginSettings));
         assert_eq!(model.detail, "官方插件 · Nana 原生贡献接口 · 已加载 3 项配置");
 
+        model = ShellViewModel::for_page(ShellPage::UnsavedEdit);
         model.reduce(ShellMessage::EditAction);
         assert_eq!(model.page, ShellPage::UnsavedEdit);
         assert!(model.dirty);
         model.reduce(ShellMessage::PrimaryAction);
-        assert!(!model.dirty);
-        assert_eq!(model.detail, "更改已保存到仓库");
+        assert!(model.dirty);
+        assert_eq!(model.detail, "该操作的领域服务尚未接通，数据未写入");
     }
 }
