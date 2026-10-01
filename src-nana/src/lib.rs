@@ -4,7 +4,7 @@
 //! `src-tauri` 的宿主无关服务层收口后由应用状态注入。离屏测试复用同一棵
 //! `RuntimeDocument`，不创建第二套 UI 树或 GPU 设备。
 
-use nana_ui::runtime::{DocumentId, FrameworkError};
+use nana_ui::runtime::{DocumentId, FrameworkError, Task};
 use nana_ui::{
     ApplicationIdentity, ApplicationState, ApplicationWindow, DiagnosticsConfig, NanaApplication,
     RuntimeApplication, RuntimeProgramContext, RuntimeProgramUpdate, WindowDescriptor,
@@ -25,6 +25,7 @@ pub mod plugin_api;
 pub struct MomoBakoApplication {
     pub services: Option<services::NativeServices>,
     shell: ShellViewModel,
+    repositories_load_scheduled: bool,
 }
 
 impl Default for MomoBakoApplication {
@@ -32,6 +33,7 @@ impl Default for MomoBakoApplication {
         Self {
             services: None,
             shell: ShellViewModel::default(),
+            repositories_load_scheduled: false,
         }
     }
 }
@@ -55,15 +57,31 @@ impl ApplicationState for MomoBakoApplication {
             shell.detail = "领域服务启动失败，请检查服务目录和端口配置".into();
             shell
         };
-        Ok(Self { services, shell })
+        Ok(Self {
+            services,
+            shell,
+            repositories_load_scheduled: false,
+        })
     }
 
     fn build(
         &mut self,
         window: &mut ApplicationWindow,
-        _: &RuntimeProgramContext<Self::Message>,
+        context: &RuntimeProgramContext<Self::Message>,
     ) -> Result<(), Self::Error> {
-        mount_shell(&mut window.document, &self.shell)
+        mount_shell(&mut window.document, &self.shell)?;
+        if !self.repositories_load_scheduled {
+            if let Some(services) = self.services.as_ref() {
+                let query = services.repository_query.clone();
+                if let Err(error) = context.run_task(Task::new(async move {
+                    ShellMessage::RepositoriesLoaded(query.list_repositories().await)
+                })) {
+                    eprintln!("Nana 资源库加载任务提交失败：{error}");
+                }
+                self.repositories_load_scheduled = true;
+            }
+        }
+        Ok(())
     }
 
     fn update(

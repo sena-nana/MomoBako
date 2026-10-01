@@ -5,14 +5,16 @@
 
 use nana_ui::runtime::view::{button, text, widget};
 use nana_ui::runtime::{Activate, FrameworkError, LengthSpec, List, RuntimeDocument, Stack};
+use crate::backend::services::repository::RepositorySummary;
 
 /// Nana Runtime 传递给应用状态的壳层交互消息。
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug)]
 pub enum ShellMessage {
     Navigate(ShellPage),
     Refresh,
     PrimaryAction,
     EditAction,
+    RepositoriesLoaded(Result<Vec<RepositorySummary>, String>),
 }
 
 /// 主内容页面的可观察状态。
@@ -171,6 +173,22 @@ impl ShellViewModel {
     pub fn reduce(&mut self, message: ShellMessage) {
         match message {
             ShellMessage::Navigate(page) => self.apply_page(page),
+            ShellMessage::RepositoriesLoaded(Ok(repositories)) => {
+                if repositories.is_empty() {
+                    self.apply_page(ShellPage::EmptyRepository);
+                } else {
+                    self.apply_page(ShellPage::FileList);
+                    self.repository_name = repositories
+                        .first()
+                        .map(|repository| repository.name.clone())
+                        .unwrap_or_else(|| "默认资源库".into());
+                    self.detail = format!("{} 个资源库 · 已加载文件列表", repositories.len());
+                }
+            }
+            ShellMessage::RepositoriesLoaded(Err(error)) => {
+                self.page = ShellPage::Error;
+                self.detail = format!("无法读取资源库：{error}");
+            }
             ShellMessage::Refresh => {
                 self.detail = "刷新服务尚未接通，当前数据未变更".into();
             }
