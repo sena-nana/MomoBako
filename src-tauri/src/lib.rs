@@ -556,6 +556,17 @@ async fn mutate_trash(
     file_browser.mutate_trash(request).await
 }
 
+/// Keeps the migration-only Tauri asset policy at the command boundary.
+/// Repository ViewModels return host-neutral paths; only this adapter knows
+/// how to authorize them for the WebView asset protocol.
+async fn refresh_thumbnail_scope(
+    app: &AppHandle,
+    repository_management: &RepositoryManagementViewModel,
+) -> Result<(), String> {
+    let paths = repository_management.thumbnail_roots().await?;
+    crate::app_shell::allow_thumbnail_asset_roots(app, paths)
+}
+
 #[tauri::command]
 async fn create_repository(
     request: RepositoryMutationRequest,
@@ -567,7 +578,7 @@ async fn create_repository(
         .execute(PROTOCOL_REPOSITORY_CREATE, request)
         .await?
         .0;
-    repository_management.refresh_thumbnail_scope(&app).await?;
+    refresh_thumbnail_scope(&app, &repository_management).await?;
     Ok(response)
 }
 
@@ -582,7 +593,7 @@ async fn import_repository(
         .execute(PROTOCOL_REPOSITORY_IMPORT, request)
         .await?
         .0;
-    repository_management.refresh_thumbnail_scope(&app).await?;
+    refresh_thumbnail_scope(&app, &repository_management).await?;
     Ok(response)
 }
 
@@ -597,7 +608,7 @@ async fn attach_repository_folder(
         .execute(PROTOCOL_REPOSITORY_ATTACH, request)
         .await?
         .0;
-    repository_management.refresh_thumbnail_scope(&app).await?;
+    refresh_thumbnail_scope(&app, &repository_management).await?;
     Ok(response)
 }
 
@@ -608,7 +619,7 @@ async fn delete_repository(
     repository_management: tauri::State<'_, RepositoryManagementViewModel>,
 ) -> Result<(), String> {
     repository_management.delete_repository(request).await?;
-    repository_management.refresh_thumbnail_scope(&app).await
+    refresh_thumbnail_scope(&app, &repository_management).await
 }
 
 #[tauri::command]
@@ -622,7 +633,7 @@ async fn relocate_repository(
         .execute(PROTOCOL_REPOSITORY_RELOCATE, request)
         .await?
         .0;
-    repository_management.refresh_thumbnail_scope(&app).await?;
+    refresh_thumbnail_scope(&app, &repository_management).await?;
     Ok(response)
 }
 
@@ -635,7 +646,7 @@ async fn update_repository_backend_config(
     let response = repository_management
         .update_repository_backend_config(request)
         .await?;
-    repository_management.refresh_thumbnail_scope(&app).await?;
+    refresh_thumbnail_scope(&app, &repository_management).await?;
     Ok(response)
 }
 
@@ -648,7 +659,7 @@ async fn configure_netease_repository_cache(
     let response = repository_management
         .configure_netease_repository_cache(request)
         .await?;
-    repository_management.refresh_thumbnail_scope(&app).await?;
+    refresh_thumbnail_scope(&app, &repository_management).await?;
     Ok(response)
 }
 
