@@ -4,7 +4,16 @@
 //! `ShellViewModel` 注入文本状态，避免把领域服务直接耦合到 Nana 控件树。
 
 use nana_ui::runtime::view::{button, text, widget};
-use nana_ui::runtime::{FrameworkError, LengthSpec, List, RuntimeDocument, Stack};
+use nana_ui::runtime::{Activate, FrameworkError, LengthSpec, List, RuntimeDocument, Stack};
+
+/// Nana Runtime 传递给应用状态的壳层交互消息。
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ShellMessage {
+    Navigate(ShellPage),
+    Refresh,
+    PrimaryAction,
+    EditAction,
+}
 
 /// 主内容页面的可观察状态。
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -157,6 +166,44 @@ impl ShellViewModel {
             "编辑内容"
         }
     }
+
+    /// 在 ViewModel 边界集中处理导航和页面动作，避免控件闭包直接修改领域状态。
+    pub fn reduce(&mut self, message: ShellMessage) {
+        match message {
+            ShellMessage::Navigate(page) => self.apply_page(page),
+            ShellMessage::Refresh => {
+                self.detail = "正在刷新资源库文件列表".into();
+                self.page = ShellPage::Loading;
+            }
+            ShellMessage::PrimaryAction => match self.page {
+                ShellPage::Loading => self.apply_page(ShellPage::FileList),
+                ShellPage::EmptyRepository | ShellPage::Error => {
+                    self.apply_page(ShellPage::FileList)
+                }
+                ShellPage::FileList => self.detail = "文件列表已刷新 · 12 个文件".into(),
+                ShellPage::SelectedFile => self.detail = "预览已打开 · assets/cover.png".into(),
+                ShellPage::PluginSettings => self.detail = "插件设置已保存".into(),
+                ShellPage::TaskRunning => self.apply_page(ShellPage::TaskRunning),
+                ShellPage::Conflict => self.detail = "冲突对比已打开".into(),
+                ShellPage::UnsavedEdit => {
+                    self.dirty = false;
+                    self.detail = "更改已保存到仓库".into();
+                }
+                ShellPage::Settings => self.detail = "应用设置已应用".into(),
+                ShellPage::Logs => self.detail = "日志已刷新 · 18 条记录 · 0 个错误".into(),
+            },
+            ShellMessage::EditAction => {
+                self.page = ShellPage::UnsavedEdit;
+                self.dirty = true;
+                self.selected_path = Some("notes/readme.md".into());
+                self.detail = "Markdown · 3 行未保存 · 最后保存于刚刚".into();
+            }
+        }
+    }
+
+    fn apply_page(&mut self, page: ShellPage) {
+        *self = Self::for_page(page);
+    }
 }
 
 /// 在给定 Runtime 文档中挂载完整的 MomoBako 壳层。
@@ -178,10 +225,18 @@ pub fn mount_shell(
                     .padding_xy(16.0, 18.0),
             )
             .children((
-                text("资源库").key("nav-library"),
-                text("播放列表").key("nav-playlists"),
-                text("插件").key("nav-plugins"),
-                text("设置").key("nav-settings"),
+                button("资源库").key("nav-library").on_cx(|_, _: &Activate, cx| {
+                    cx.dispatch_program(ShellMessage::Navigate(ShellPage::FileList));
+                }),
+                button("播放列表").key("nav-playlists").on_cx(|_, _: &Activate, cx| {
+                    cx.dispatch_program(ShellMessage::Navigate(ShellPage::SelectedFile));
+                }),
+                button("插件").key("nav-plugins").on_cx(|_, _: &Activate, cx| {
+                    cx.dispatch_program(ShellMessage::Navigate(ShellPage::PluginSettings));
+                }),
+                button("设置").key("nav-settings").on_cx(|_, _: &Activate, cx| {
+                    cx.dispatch_program(ShellMessage::Navigate(ShellPage::Settings));
+                }),
             ));
             let content = widget(
                 Stack::fill_column(12.0)
@@ -197,8 +252,12 @@ pub fn mount_shell(
                 text(view_model.page.status()).key("page-status"),
                 text(view_model.selection_label()).key("selection"),
                 text(view_model.detail.clone()).key("page-detail"),
-                button(view_model.page.primary_action()).key("primary-action"),
-                button(view_model.edit_label()).key("edit-action"),
+                button(view_model.page.primary_action())
+                    .key("primary-action")
+                    .on_cx(|_, _: &Activate, cx| cx.dispatch_program(ShellMessage::PrimaryAction)),
+                button(view_model.edit_label())
+                    .key("edit-action")
+                    .on_cx(|_, _: &Activate, cx| cx.dispatch_program(ShellMessage::EditAction)),
             )),));
             let process = widget(
                 Stack::fill_column(8.0)
@@ -219,7 +278,9 @@ pub fn mount_shell(
             .children((
                 text("MomoBako").key("title"),
                 text("资源库工作区").key("subtitle"),
-                button("刷新状态").key("refresh"),
+                button("刷新状态")
+                    .key("refresh")
+                    .on_cx(|_, _: &Activate, cx| cx.dispatch_program(ShellMessage::Refresh)),
             ));
             let body = widget(Stack::fill_row(0.0).min_height(LengthSpec::Px(0.0)))
                 .children((navigation, content, process))
@@ -228,4 +289,26 @@ pub fn mount_shell(
                 .children((title_bar, body))
         })?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ShellMessage, ShellPage, ShellViewModel};
+
+    #[test]
+    fn shell_messages_reduce_to_user_visible_states() {
+        let mut model = ShellViewModel::for_page(ShellPage::Loading);
+        model.reduce(ShellMessage::PrimaryAction);
+        assert_eq!(model.page, ShellPage::FileList);
+
+        model.reduce(ShellMessage::Navigate(ShellPage::PluginSettings));
+        assert_eq!(model.detail, "官方插件 · Nana 原生贡献接口 · 已加载 3 项配置");
+
+        model.reduce(ShellMessage::EditAction);
+        assert_eq!(model.page, ShellPage::UnsavedEdit);
+        assert!(model.dirty);
+        model.reduce(ShellMessage::PrimaryAction);
+        assert!(!model.dirty);
+        assert_eq!(model.detail, "更改已保存到仓库");
+    }
 }
