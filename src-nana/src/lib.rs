@@ -212,6 +212,25 @@ impl ApplicationState for MomoBakoApplication {
                 eprintln!("Nana 播放列表详情任务提交失败：{error}");
             }
         }
+        if let ShellMessage::DeletePlaylist(playlist_id) = &message
+            && let Some(repository_id) = self.shell.repository_id.clone()
+            && let Some(services) = self.services.as_ref()
+        {
+            let interaction = services.repository_interaction.clone();
+            let executor = services.executor.clone();
+            let playlist_id = playlist_id.clone();
+            if let Err(error) = context.run_task(Task::new(async move {
+                let result = executor.block_on(async {
+                    interaction
+                        .delete_playlist(repository_id.clone(), playlist_id)
+                        .await?;
+                    interaction.list_playlists(repository_id).await
+                });
+                ShellMessage::PlaylistsLoaded(result)
+            })) {
+                eprintln!("Nana 播放列表删除任务提交失败：{error}");
+            }
+        }
         if let ShellMessage::DeletePluginConfig { plugin_id, key } = &message
             && let Some(services) = self.services.as_ref()
         {
