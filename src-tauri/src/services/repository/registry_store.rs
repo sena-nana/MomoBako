@@ -423,7 +423,7 @@ fn infer_backend_plugin_id_for_path(service_root: &Path, path: &str) -> Result<S
     let trimmed = path.trim();
     let requires_local_root = !trimmed.contains("://");
     let registry = plugin_catalog(service_root);
-    let mut candidates = registry
+    let matching_manifests = registry
         .list_manifests()
         .into_iter()
         .filter(is_source_plugin)
@@ -434,6 +434,20 @@ fn infer_backend_plugin_id_for_path(service_root: &Path, path: &str) -> Result<S
                 .any(|value| value == LOCAL_ROOT_PATH_CAPABILITY)
                 == requires_local_root
         })
+        .collect::<Vec<_>>();
+    let unavailable = matching_manifests
+        .iter()
+        .filter(|manifest| {
+            registry
+                .registration(&manifest.plugin_id)
+                .is_some_and(|registration| {
+                    ensure_repository_backend_runtime_available(registration).is_err()
+                })
+        })
+        .map(|manifest| manifest.plugin_id.clone())
+        .collect::<Vec<_>>();
+    let mut candidates = matching_manifests
+        .into_iter()
         .filter(|manifest| {
             registry
                 .registration(&manifest.plugin_id)
@@ -447,7 +461,14 @@ fn infer_backend_plugin_id_for_path(service_root: &Path, path: &str) -> Result<S
     match candidates.as_slice() {
         [manifest] => Ok(manifest.plugin_id.clone()),
         [] if requires_local_root => {
-            Err("no installed repository source plugin supports local repository roots".to_string())
+            if unavailable.is_empty() {
+                Err("no installed repository source plugin supports local repository roots".to_string())
+            } else {
+                Err(format!(
+                    "repository source plugin runtime is not available: {}",
+                    unavailable.join(", ")
+                ))
+            }
         }
         [] => Err("backend plugin id is required for non-local repository paths".to_string()),
         _ => Err(format!(

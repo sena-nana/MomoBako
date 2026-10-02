@@ -656,6 +656,14 @@ pub(super) fn ensure_repository_backend_runtime_available(
     if !manifest.enabled || manifest.status == "disabled" {
         return Err(format!("plugin is disabled: {}", manifest.plugin_id));
     }
+    #[cfg(test)]
+    if manifest.plugin_id == LOCAL_FILESYSTEM_PLUGIN_ID
+        && manifest.runtime == "manifest-only"
+        && local_filesystem_adapter_enabled()
+    {
+        // 后端单测使用协议等价的 cfg(test) 本地适配器；生产仍要求独立 ABI Host。
+        return Ok(());
+    }
     if manifest.sdk != "backend" || manifest.runtime != "native-dylib" {
         return Err(format!(
             "plugin runtime is not available: {}",
