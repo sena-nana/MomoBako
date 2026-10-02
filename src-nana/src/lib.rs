@@ -401,7 +401,7 @@ impl ApplicationState for MomoBakoApplication {
                 let target = if *direction < 0 { index.checked_sub(1) } else { (index + 1 < item_ids.len()).then_some(index + 1) };
                 if let Some(target) = target {
                     item_ids.swap(index, target);
-                    self.shell.reduce(ShellMessage::ReorderPlaylistItems { playlist_id, item_ids: item_ids.clone() });
+                    self.shell.reduce(ShellMessage::ReorderPlaylistItems { playlist_id: playlist_id.clone(), item_ids: item_ids.clone() });
                     let message = ShellMessage::ReorderPlaylistItems { playlist_id, item_ids };
                     // Continue through the normal service dispatch below.
                     return self.update(message, windows, context);

@@ -1084,21 +1084,25 @@ pub fn mount_shell(
                 )))
             };
             let workspace_actions = widget(Stack::fill_column(8.0)).children((
-                status_summary,
-                task_actions,
-                task_progress,
-                file_actions,
-                plugin_actions,
-                plugin_config_actions,
-                plugin_config_editors,
-                playlist_actions,
-                playlist_item_actions,
-                playlist_item_status,
-                playlist_editor,
-                playlist_creator,
-                playlist_add_current_directory,
-                log_actions,
-                preview_node,
+                widget(Stack::fill_column(8.0)).children((
+                    status_summary,
+                    task_actions,
+                    task_progress,
+                    file_actions,
+                    plugin_actions,
+                    plugin_config_actions,
+                    plugin_config_editors,
+                    playlist_actions,
+                )),
+                widget(Stack::fill_column(8.0)).children((
+                    playlist_item_actions,
+                    playlist_item_status,
+                    playlist_editor,
+                    playlist_creator,
+                    playlist_add_current_directory,
+                    log_actions,
+                    preview_node,
+                )),
             ));
             let content = widget(
                 Stack::fill_column(12.0)
