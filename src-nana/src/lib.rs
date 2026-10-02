@@ -728,8 +728,15 @@ pub fn acceptance_document() -> Result<nana_ui::runtime::RuntimeDocument, Framew
 pub fn acceptance_document_for(
     page: ShellPage,
 ) -> Result<nana_ui::runtime::RuntimeDocument, FrameworkError> {
+    acceptance_document_for_model(ShellViewModel::for_page(page))
+}
+
+/// 为离屏验收挂载指定 ViewModel；仍然复用生产壳层挂载函数和同一棵 Runtime 树。
+pub fn acceptance_document_for_model(
+    model: ShellViewModel,
+) -> Result<nana_ui::runtime::RuntimeDocument, FrameworkError> {
     let document_id = DocumentId::new(1).expect("document id 1 is valid");
     let mut document = nana_ui::runtime::RuntimeDocument::new(document_id);
-    mount_shell(&mut document, &ShellViewModel::for_page(page))?;
+    mount_shell(&mut document, &model)?;
     Ok(document)
 }
