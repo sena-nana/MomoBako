@@ -12,10 +12,17 @@ fi
 export MOMOBAKO_NANA_EVIDENCE_DIR="${MOMOBAKO_NANA_EVIDENCE_DIR:-$PWD/target/nana-offscreen-evidence}"
 mkdir -p "$MOMOBAKO_NANA_EVIDENCE_DIR"
 log="$MOMOBAKO_NANA_EVIDENCE_DIR/acceptance.log"
+tmp_log=$(mktemp "${TMPDIR:-/tmp}/momobako-nana-acceptance.XXXXXX.log")
+cleanup() {
+  rm -f "$tmp_log"
+}
+trap cleanup EXIT
 set +e
-cargo test -p momobako-nana --test offscreen_acceptance -- --nocapture 2>&1 | tee "$log"
+cargo test -p momobako-nana --test offscreen_acceptance -- --nocapture 2>&1 | tee "$tmp_log"
 status=${PIPESTATUS[0]}
 set -e
+mkdir -p "$MOMOBAKO_NANA_EVIDENCE_DIR"
+cp "$tmp_log" "$log"
 if [[ $status -ne 0 ]]; then
   printf 'cargo test exited with status %s\n' "$status" >> "$MOMOBAKO_NANA_EVIDENCE_DIR/failures.log"
   exit "$status"
