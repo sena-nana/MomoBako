@@ -374,6 +374,7 @@ mod tests {
         writer
             .execute("ROLLBACK", [])
             .expect("writer transaction should roll back");
+        drop(writer);
         fs::remove_dir_all(root).expect("test workspace should be removed");
     }
 
@@ -440,6 +441,7 @@ mod tests {
             .expect("directory count should query");
 
         assert!(directory_count >= 2);
+        drop(connection);
         fs::remove_dir_all(root).expect("test workspace should be removed");
     }
 
@@ -545,6 +547,7 @@ mod tests {
         let missing_cache = workspace.path("missing-cache");
         fs::create_dir_all(&ready_cache).expect("ready cache should be created");
         install_local_filesystem_test_plugin_archive(&service_root);
+        install_netease_source_test_plugin_archive(&service_root);
         let state = RepositoryState::from_root(service_root.clone());
         state
             .ensure_initialized()
@@ -1325,6 +1328,7 @@ mod tests {
         let service_root = workspace.path("service");
         let plugin_root = runtime_plugins_dir(&service_root);
         write_test_local_filesystem_plugin_archive(&plugin_root, serde_json::json!({}));
+        disable_local_filesystem_adapter();
         let state = RepositoryState::from_root(service_root);
 
         let plugin = state
@@ -2219,6 +2223,28 @@ mod tests {
                 .as_bytes(),
             )
             .expect("manifest should write");
+        let envelope = serde_json::json!({
+            "formatVersion": 2,
+            "pluginId": options.plugin_id,
+            "version": "0.1.0",
+            "targetTriple": "any",
+            "deployment": "manifest",
+            "productManifest": "manifest.json",
+            "artifacts": []
+        });
+        archive
+            .start_file(
+                format!("{root_dir}/momobako.package.json"),
+                zip::write::SimpleFileOptions::default(),
+            )
+            .expect("package envelope entry should start");
+        archive
+            .write_all(
+                serde_json::to_string_pretty(&envelope)
+                    .expect("package envelope should encode")
+                    .as_bytes(),
+            )
+            .expect("package envelope should write");
         for (relative_path, content) in options.extra_files {
             archive
                 .start_file(
@@ -2265,6 +2291,7 @@ mod tests {
             &plugin_root.join("local-filesystem.momoplug"),
             manifest,
         );
+        enable_local_filesystem_adapter();
     }
 
     fn test_list_files_plugin_call(plugin_id: &str, repo_root: PathBuf) -> PluginCallRequest {
@@ -2372,6 +2399,7 @@ mod tests {
         let service_root = workspace.path("service");
         let repo_root = workspace.path("repo");
         install_local_filesystem_test_plugin_archive(&service_root);
+        disable_local_filesystem_adapter();
         let state = RepositoryState::from_root(service_root);
 
         let error = state
@@ -2924,6 +2952,7 @@ mod tests {
         assert_eq!(recent_count, 50);
         assert_eq!(trimmed_count, 5);
         assert!(latest_access.is_some());
+        drop(connection);
         fs::remove_dir_all(root).expect("test temp root should be removed");
     }
 
@@ -2975,6 +3004,7 @@ mod tests {
         assert_eq!(response.repo_id, repo_id);
         assert_eq!(response.cleared_count, 2);
         assert_eq!(remaining_recent_count, 0);
+        drop(connection);
         fs::remove_dir_all(root).expect("test temp root should be removed");
     }
 
@@ -3298,6 +3328,7 @@ mod tests {
             .ensure_initialized()
             .expect("repository state should initialize");
         install_local_filesystem_test_plugin_archive(&state.root);
+        install_netease_source_test_plugin_archive(&state.root);
         let repo_path = repo_root.to_string_lossy().to_string();
         let backend = RepositoryBackendRecord {
             plugin_id: NETEASE_CLOUD_MUSIC_PLUGIN_ID.to_string(),
@@ -3747,6 +3778,7 @@ mod tests {
             Some(&serde_json::json!("https://example.test/cover-3301.jpg"))
         );
 
+        drop(connection);
         fs::remove_dir_all(root).expect("test temp root should be removed");
     }
 
@@ -3982,6 +4014,7 @@ mod tests {
         );
         assert!(snapshot.entries[0].asset_id.is_some());
 
+        drop(connection);
         fs::remove_dir_all(root).expect("test temp root should be removed");
     }
 

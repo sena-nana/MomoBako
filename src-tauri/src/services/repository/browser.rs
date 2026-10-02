@@ -284,8 +284,25 @@ fn load_netease_directory_page(
         false
     };
     if cache_fresh && has_full_page {
+        let cached_entries = cache_entries
+            .iter()
+            .map(|(_, entry)| entry.clone())
+            .collect::<Vec<_>>();
+        let source_metadata_keys =
+            source_metadata_mirror_keys(&state.root, &repo.backend_record.plugin_id);
+        let tx = connection.transaction().map_err(db_error)?;
+        mirror_netease_entries_to_assets(
+            &tx,
+            &repo.summary.repo_id,
+            &cached_entries,
+            &now_rfc3339(),
+            &source_metadata_keys,
+            &BTreeMap::new(),
+        )
+        .map_err(db_error)?;
+        tx.commit().map_err(db_error)?;
         return Ok(DirectoryPageResult {
-            entries: cache_entries.into_iter().map(|(_, entry)| entry).collect(),
+            entries: cached_entries,
             total_entries: cache_record.map(|record| record.total_entries).unwrap_or(0),
         });
     }

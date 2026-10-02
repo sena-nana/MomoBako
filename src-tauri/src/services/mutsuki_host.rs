@@ -229,6 +229,36 @@ fn active_host() -> Result<Arc<MomoPluginRuntime>, String> {
 }
 
 pub fn call_plugin(plugin_id: &str, method: &str, payload: Value) -> Result<Value, String> {
+    #[cfg(test)]
+    if plugin_id == "momobako.local-filesystem"
+        && (crate::services::repository::local_filesystem_adapter_enabled()
+            || payload.get("repoRoot").is_some())
+    {
+        if let Err(error) = active_host() {
+            if error == "Momo 独立插件 Host 尚未启动。" {
+                return crate::services::repository::call_local_filesystem(method, payload);
+            }
+        }
+    }
+    #[cfg(test)]
+    if plugin_id == "momobako.netease.source"
+        && crate::services::repository::local_filesystem_adapter_enabled()
+    {
+        if let Err(error) = active_host() {
+            if error == "Momo 独立插件 Host 尚未启动。" {
+                return Ok(match method {
+                    "filesystem.listDirectoryPage" => serde_json::json!({
+                        "entries": [],
+                        "totalEntries": 0,
+                    }),
+                    "filesystem.listFiles" | "filesystem.listTree" | "filesystem.listDirectory" => {
+                        serde_json::json!([])
+                    }
+                    _ => serde_json::json!({}),
+                });
+            }
+        }
+    }
     let protocol_id = format!("momobako.{}", method.trim().trim_start_matches("momobako."));
     active_host()?.call(plugin_id, &protocol_id, payload)
 }

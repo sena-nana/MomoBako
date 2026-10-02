@@ -6,7 +6,7 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, Weak};
+use std::sync::{mpsc as std_mpsc, Arc, Mutex, OnceLock, Weak};
 use std::time::{Duration, Instant};
 
 use mutsuki_plugin_api::{plugin_error, PluginHostError, PluginResult, PluginTaskGateway};
@@ -18,6 +18,7 @@ use serde::Serialize;
 use serde_json::Value;
 use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::{mpsc, oneshot, Mutex as AsyncMutex};
+use tokio::runtime::Handle;
 
 use super::operations::RepositoryTaskExecutor;
 use super::protocols::{
@@ -748,11 +749,12 @@ fn spawn_lane_workers(
     count: usize,
     lane: &'static str,
 ) {
+    let handle = task_runtime_handle();
     let receiver = Arc::new(AsyncMutex::new(receiver));
     for worker_id in 0..count {
         let state = state.clone();
         let receiver = receiver.clone();
-        tokio::spawn(async move {
+        handle.spawn(async move {
             loop {
                 let request = receiver.lock().await.recv().await;
                 let Some(request) = request else { break };
@@ -774,6 +776,36 @@ fn spawn_lane_workers(
             }
         });
     }
+}
+
+/// 返回当前 Tokio reactor；同步宿主入口或单元测试没有 reactor 时，复用一个受控后台 runtime。
+fn task_runtime_handle() -> Handle {
+    if let Ok(handle) = Handle::try_current() {
+        return handle;
+    }
+
+    static FALLBACK_HANDLE: OnceLock<Handle> = OnceLock::new();
+    FALLBACK_HANDLE
+        .get_or_init(|| {
+            let (sender, receiver) = std_mpsc::sync_channel(1);
+            std::thread::Builder::new()
+                .name("momo-task-runtime".to_string())
+                .spawn(move || {
+                    let runtime = tokio::runtime::Builder::new_current_thread()
+                        .enable_all()
+                        .build()
+                        .expect("Momo fallback task runtime should start");
+                    sender
+                        .send(runtime.handle().clone())
+                        .expect("Momo fallback task runtime handle should be delivered");
+                    runtime.block_on(std::future::pending::<()>());
+                })
+                .expect("Momo fallback task runtime thread should start");
+            receiver
+                .recv()
+                .expect("Momo fallback task runtime handle should be received")
+        })
+        .clone()
 }
 
 fn is_interactive(protocol_id: &str) -> bool {

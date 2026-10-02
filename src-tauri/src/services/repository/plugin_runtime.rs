@@ -83,7 +83,17 @@ impl PluginCatalog {
                 let mut manifest = registration.manifest.clone();
                 if matches!(manifest.runtime.as_str(), "native-dylib" | "process")
                     && manifest.enabled
+                    && !(manifest.plugin_id == LOCAL_FILESYSTEM_PLUGIN_ID
+                        && test_local_filesystem_adapter_enabled())
                 {
+                    #[cfg(test)]
+                    if manifest.plugin_id == LOCAL_FILESYSTEM_PLUGIN_ID
+                        && !test_local_filesystem_adapter_enabled()
+                    {
+                        manifest.status = "unavailable".to_string();
+                        manifest.disable_reason = Some("原生运行时不可用。".to_string());
+                        return manifest;
+                    }
                     if let Some(error) =
                         mutsuki_host::plugin_unavailable_reason(&manifest.plugin_id)
                     {
@@ -270,6 +280,15 @@ impl PluginCatalog {
         providers.sort_by(|left, right| left.0.cmp(&right.0).then_with(|| left.1.cmp(&right.1)));
         providers
     }
+}
+
+fn test_local_filesystem_adapter_enabled() -> bool {
+    #[cfg(test)]
+    {
+        return super::test_plugin::local_filesystem_adapter_enabled();
+    }
+    #[cfg(not(test))]
+    false
 }
 
 /// 返回可交给独立 ABI Host 的产品级插件输入；包扫描、依赖和 staging 仍归 Momo 所有。
@@ -660,6 +679,7 @@ pub fn install_local_filesystem_test_plugin_archive(service_root: &Path) {
         )
         .expect("manifest should write");
     archive.finish().expect("plugin archive should finish");
+    enable_local_filesystem_adapter();
 }
 
 pub(super) fn default_cache_entries() -> Vec<CacheEntry> {

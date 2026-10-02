@@ -59,6 +59,8 @@ pub(crate) mod test_support;
 mod thumbnail;
 mod trash;
 mod utils;
+#[cfg(test)]
+mod test_plugin;
 
 use self::api_design::*;
 use self::asset_mutation::*;
@@ -110,3 +112,8 @@ use self::sync_metadata::*;
 use self::thumbnail::*;
 use self::trash::*;
 use self::utils::*;
+#[cfg(test)]
+pub(crate) use self::test_plugin::{
+    call_local_filesystem, disable_local_filesystem_adapter, enable_local_filesystem_adapter,
+    local_filesystem_adapter_enabled,
+};
