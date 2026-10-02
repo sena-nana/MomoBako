@@ -1,95 +1,117 @@
-//! NanaUI 原生页面的真实 Runtime/WGPU 离屏验收。
-
+//! Nana Runtime/WGPU 离屏验收。
+//!
+//! 每个证据文件都来自生产 `RuntimeDocument` 和同一个 `RuntimeAgentSession`，
+//! 不创建第二棵 UI 树。
 use momobako_nana::{acceptance_document_for, shell::ShellPage};
-use nana_ui_devtools::agent::{AgentSession, RuntimeAgentSession};
+use nana_ui_devtools::agent::{protocol::ThemeName, AgentSession, RuntimeAgentSession};
 use nana_ui_devtools::offscreen;
+use serde_json::json;
+use sha2::{Digest, Sha256};
+use std::fs;
+use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::path::{Path, PathBuf};
 
-#[test]
-fn renders_light_and_dark_shell_at_product_viewports() {
-    if !offscreen::pixels_available() {
-        return;
-    }
-    let output = std::path::Path::new(env!("CARGO_TARGET_TMPDIR"));
-    for (name, width, height) in [("light-main", 1200, 800), ("dark-min", 960, 600)] {
-        let document = acceptance_document_for(ShellPage::Loading).expect("acceptance document");
-        let mut session = RuntimeAgentSession::new(document, width, height).expect("agent session");
-        if name.starts_with("dark") {
-            session
-                .set_theme(nana_ui_devtools::agent::protocol::ThemeName::Dark)
-                .expect("dark theme");
-        }
-        let path = output.join(format!("{name}.png"));
-        let stats = session.screenshot_png(&path).expect("PNG snapshot");
-        assert_eq!(stats.width, width);
-        assert_eq!(stats.height, height);
-        assert!(
-            stats.nonclear_ratio > 0.0,
-            "snapshot must contain painted UI"
-        );
-        assert!(
-            session
-                .accessibility_dump()
-                .iter()
-                .any(|node| node.label.as_deref() == Some("MomoBako"))
-        );
-    }
+const NANA_REVISION: &str = "ee94106746b13f356af17586ed5e35ed78f9eb40";
+const EVIDENCE_SCHEMA: &str = "momobako.nana.offscreen/v1";
+
+#[derive(Debug, Clone, Copy)]
+struct Viewport {
+    width: u32,
+    height: u32,
+    theme: ThemeName,
+    name: &'static str,
 }
+const VIEWPORTS: [Viewport; 4] = [
+    Viewport {
+        width: 1200,
+        height: 800,
+        theme: ThemeName::Light,
+        name: "light-1200x800",
+    },
+    Viewport {
+        width: 1200,
+        height: 800,
+        theme: ThemeName::Dark,
+        name: "dark-1200x800",
+    },
+    Viewport {
+        width: 960,
+        height: 600,
+        theme: ThemeName::Light,
+        name: "light-960x600",
+    },
+    Viewport {
+        width: 960,
+        height: 600,
+        theme: ThemeName::Dark,
+        name: "dark-960x600",
+    },
+];
+const PAGES: [ShellPage; 15] = [
+    ShellPage::Loading,
+    ShellPage::EmptyRepository,
+    ShellPage::Error,
+    ShellPage::FileList,
+    ShellPage::SelectedFile,
+    ShellPage::Playlists,
+    ShellPage::PluginSettings,
+    ShellPage::TaskRunning,
+    ShellPage::PlaybackRunning,
+    ShellPage::TaskCancelling,
+    ShellPage::Conflict,
+    ShellPage::UnsavedEdit,
+    ShellPage::Settings,
+    ShellPage::SettingsError,
+    ShellPage::Logs,
+];
 
 #[test]
-fn renders_repository_states_with_semantic_labels() {
+fn generates_versioned_offscreen_evidence() {
     if !offscreen::pixels_available() {
+        eprintln!("Nana offscreen GPU unavailable; evidence generation skipped");
         return;
     }
-    let output = std::path::Path::new(env!("CARGO_TARGET_TMPDIR"));
-    for page in [
-        ShellPage::Loading,
-        ShellPage::EmptyRepository,
-        ShellPage::Error,
-        ShellPage::FileList,
-        ShellPage::SelectedFile,
-        ShellPage::Playlists,
-        ShellPage::PluginSettings,
-        ShellPage::TaskRunning,
-        ShellPage::PlaybackRunning,
-        ShellPage::TaskCancelling,
-        ShellPage::Conflict,
-        ShellPage::UnsavedEdit,
-        ShellPage::Settings,
-        ShellPage::SettingsError,
-        ShellPage::Logs,
-    ] {
-        let document = acceptance_document_for(page.clone()).expect("acceptance document");
-        let mut session = RuntimeAgentSession::new(document, 1200, 800).expect("agent session");
-        let labels = session
-            .accessibility_dump()
-            .into_iter()
-            .filter_map(|node| node.label)
-            .collect::<Vec<_>>();
-        assert!(labels.iter().any(|label| label == "MomoBako"));
-        assert!(labels.iter().any(|label| label == page_title(&page)));
-
-        // 证据与 PNG 使用同一个 RuntimeAgentSession，避免语义树、布局和命中
-        // 结果来自静态 mock。scene_probe 同时包含目标布局盒和绘制节点信息。
-        let evidence_name = format!("state-{}.json", page_slug(&page));
-        let evidence = output.join(evidence_name);
-        let root = session
-            .accessibility_dump()
-            .into_iter()
-            .find(|node| node.label.as_deref() == Some("MomoBako"))
-            .expect("root accessibility node");
-        let probe = session.scene_probe(root.id);
-        let hit = session.hit_test(20.0, 20.0);
-        let png = output.join(format!("state-{}.png", page_slug(&page)));
-        session.screenshot_png(&png).expect("state PNG snapshot");
-        let evidence_text = serde_json::to_string_pretty(&serde_json::json!({
-            "page": page_slug(&page),
-            "accessibility": session.accessibility_dump(),
-            "scene_probe": probe,
-            "hit_test": hit
-        }))
-        .expect("serialize acceptance evidence");
-        std::fs::write(evidence, evidence_text).expect("write acceptance evidence");
+    let root = evidence_dir();
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).expect("create Nana evidence directory");
+    let mut scenes = Vec::new();
+    let mut failures = Vec::new();
+    for page in PAGES.iter().cloned() {
+        for viewport in VIEWPORTS {
+            match catch_unwind(AssertUnwindSafe(|| {
+                render_case(&root, page.clone(), viewport)
+            })) {
+                Ok(Ok(scene)) => scenes.push(scene),
+                Ok(Err(error)) => {
+                    failures.push(format!("{} {}: {error}", page_slug(&page), viewport.name))
+                }
+                Err(_) => failures.push(format!(
+                    "{} {}: Runtime/WGPU panic (see acceptance.log)",
+                    page_slug(&page),
+                    viewport.name
+                )),
+            }
+        }
     }
+    let manifest = root.join("scene-manifest.json");
+    let manifest_value = json!({
+        "schema": EVIDENCE_SCHEMA, "manifest_version": 1, "product_version": env!("CARGO_PKG_VERSION"),
+        "runtime": "Nana RuntimeAgentSession + SceneWgpuPainter", "nana_revision": NANA_REVISION,
+        "command": "cargo test -p momobako-nana --test offscreen_acceptance -- --nocapture",
+        "viewports": VIEWPORTS.iter().map(|v| json!({"name": v.name, "width": v.width, "height": v.height, "theme": theme_name(v.theme)})).collect::<Vec<_>>(),
+        "scenes": scenes, "failed_scenes": failures,
+    });
+    fs::write(
+        &manifest,
+        serde_json::to_vec_pretty(&manifest_value).expect("serialize scene manifest"),
+    )
+    .expect("write scene manifest");
+    if !failures.is_empty() {
+        let log = root.join("failures.log");
+        fs::write(&log, failures.join("\n") + "\n").expect("write failure log");
+        panic!("Nana offscreen acceptance failed; see {}", log.display());
+    }
+    let _ = fs::remove_file(root.join("failures.log"));
 }
 
 #[test]
@@ -116,10 +138,105 @@ fn native_actions_are_reachable_through_runtime_hit_testing() {
             .into_iter()
             .find(|node| node.label.as_deref() == Some(label))
             .unwrap_or_else(|| panic!("missing native action: {label}"));
-        assert!(session.click_node(node.id).expect("runtime click"), "{label}");
+        assert!(
+            session.click_node(node.id).expect("runtime click"),
+            "{label}"
+        );
     }
 }
 
+fn render_case(
+    root: &Path,
+    page: ShellPage,
+    viewport: Viewport,
+) -> Result<serde_json::Value, String> {
+    let stem = format!("{}-{}", page_slug(&page), viewport.name);
+    let document = acceptance_document_for(page.clone()).map_err(|e| e.to_string())?;
+    let mut session = RuntimeAgentSession::new(document, viewport.width, viewport.height)
+        .map_err(|e| e.to_string())?;
+    session
+        .set_theme(viewport.theme)
+        .map_err(|e| e.to_string())?;
+    let accessibility = session.accessibility_dump();
+    let title = page_title(&page);
+    if !accessibility
+        .iter()
+        .any(|node| node.label.as_deref() == Some("MomoBako"))
+    {
+        return Err("missing MomoBako accessibility root".into());
+    }
+    if !accessibility
+        .iter()
+        .any(|node| node.label.as_deref() == Some(title))
+    {
+        return Err(format!("missing page title {title}"));
+    }
+    let root_node = accessibility
+        .iter()
+        .find(|node| node.label.as_deref() == Some("MomoBako"))
+        .ok_or("missing root")?;
+    let layout = session
+        .scene_probe(root_node.id)
+        .ok_or("missing root scene probe")?;
+    let hits = session.hit_test(20.0, 20.0);
+    let png = root.join(format!("{stem}.png"));
+    let stats = session.screenshot_png(&png).map_err(|e| e.to_string())?;
+    if stats.width != viewport.width
+        || stats.height != viewport.height
+        || stats.nonclear_ratio <= 0.0
+    {
+        return Err(format!("invalid pixels: {stats:?}"));
+    }
+    let semantic_path = root.join(format!("{stem}.semantic.json"));
+    let layout_path = root.join(format!("{stem}.layout.json"));
+    let hit_path = root.join(format!("{stem}.hits.json"));
+    write_json(
+        &semantic_path,
+        &json!({"page": page_slug(&page), "theme": theme_name(viewport.theme), "viewport": [viewport.width, viewport.height], "accessibility": accessibility}),
+    )?;
+    write_json(
+        &layout_path,
+        &json!({"page": page_slug(&page), "root_node": root_node.id, "scene_probe": layout}),
+    )?;
+    write_json(
+        &hit_path,
+        &json!({"page": page_slug(&page), "point": [20.0, 20.0], "hits": hits}),
+    )?;
+    let paths = [png, semantic_path, layout_path, hit_path];
+    Ok(json!({
+        "id": stem,
+        "page": page_slug(&page),
+        "title": title,
+        "theme": theme_name(viewport.theme),
+        "viewport": {"width": viewport.width, "height": viewport.height},
+        "artifacts": paths.into_iter().map(|path| json!({"path": path.file_name().unwrap().to_string_lossy(), "sha256": sha256(&path).unwrap_or_else(|e| format!("error:{e}")), "bytes": fs::metadata(&path).map(|m| m.len()).unwrap_or(0)})).collect::<Vec<_>>(),
+    }))
+}
+fn write_json(path: &Path, value: &serde_json::Value) -> Result<(), String> {
+    fs::write(
+        path,
+        serde_json::to_vec_pretty(value).map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| e.to_string())
+}
+fn sha256(path: &Path) -> Result<String, String> {
+    let mut hasher = Sha256::new();
+    hasher.update(fs::read(path).map_err(|e| e.to_string())?);
+    Ok(format!("{:x}", hasher.finalize()))
+}
+fn evidence_dir() -> PathBuf {
+    std::env::var_os("MOMOBAKO_NANA_EVIDENCE_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target/nana-offscreen-evidence")
+        })
+}
+fn theme_name(theme: ThemeName) -> &'static str {
+    match theme {
+        ThemeName::Light => "light",
+        ThemeName::Dark => "dark",
+    }
+}
 fn page_title(page: &ShellPage) -> &'static str {
     match page {
         ShellPage::Loading => "正在加载资源库",
@@ -139,7 +256,6 @@ fn page_title(page: &ShellPage) -> &'static str {
         ShellPage::Logs => "系统日志",
     }
 }
-
 fn page_slug(page: &ShellPage) -> &'static str {
     match page {
         ShellPage::Loading => "loading",
