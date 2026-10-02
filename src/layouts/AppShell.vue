@@ -27,6 +27,9 @@ const DEFAULT_WIDTH = 276;
 const WIDTH_STORAGE_KEY = "momobako.sidebarWidth";
 const COLLAPSED_STORAGE_KEY = "momobako.sidebarCollapsed";
 
+// 测试与路由切换可能让旧壳层晚于新壳层卸载；只有最后一个壳层离开时才取消共享启动链路。
+let mountedAppShellCount = 0;
+
 function readStorage(key: string): string | null {
   try {
     return localStorage.getItem(key);
@@ -135,6 +138,12 @@ watch(isWorkspaceReady, (ready) => {
   }
 }, { immediate: true });
 
+watch(() => workspaceStartup.value.status, (status) => {
+  if (status === "idle" && mountedAppShellCount > 0) {
+    void ensureRepositoryWorkspace();
+  }
+});
+
 watch(activeRepoId, async (repoId, previousRepoId) => {
   if (previousRepoId && previousRepoId !== repoId) {
     await player.stop();
@@ -160,11 +169,15 @@ watch(
 );
 
 onMounted(() => {
+  mountedAppShellCount += 1;
   void ensureRepositoryWorkspace();
 });
 
 onBeforeUnmount(() => {
-  cancelRepositoryWorkspaceStartup();
+  mountedAppShellCount = Math.max(0, mountedAppShellCount - 1);
+  if (mountedAppShellCount === 0) {
+    cancelRepositoryWorkspaceStartup();
+  }
   systemMediaSession.dispose();
 });
 </script>

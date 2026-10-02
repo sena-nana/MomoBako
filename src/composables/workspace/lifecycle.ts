@@ -781,4 +781,7 @@ export function cancelRepositoryWorkspaceStartup() {
   startupGeneration += 1;
   startupPromise = null;
   startupTargetRepoId = null;
+  if (workspaceStartup.value.status === "loading") {
+    workspaceStartup.value = createInitialWorkspaceStartup();
+  }
 }
