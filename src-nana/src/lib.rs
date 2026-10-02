@@ -166,20 +166,16 @@ impl ApplicationState for MomoBakoApplication {
             return RuntimeProgramUpdate::default();
         };
         if let ShellMessage::WindowAction(action) = &message {
-            use nana_ui_platform::host::WindowCommand;
-            let command = match action {
-                WindowAction::Minimize => WindowCommand::SetMinimized {
-                    id: *id,
-                    minimized: true,
-                },
-                WindowAction::ToggleMaximize => WindowCommand::SetMaximized {
-                    id: *id,
-                    maximized: !context.geometry().maximized,
-                },
-                WindowAction::Close => WindowCommand::Close(*id),
+            let request = match action {
+                WindowAction::Minimize => host_api::WindowCommand::Minimize,
+                WindowAction::ToggleMaximize => host_api::WindowCommand::ToggleMaximize,
+                WindowAction::Close => host_api::WindowCommand::Close,
             };
             return RuntimeProgramUpdate {
-                window_commands: vec![command],
+                window_commands: request
+                    .to_platform_command(*id, context.geometry().maximized)
+                    .into_iter()
+                    .collect(),
                 ..RuntimeProgramUpdate::default()
             };
         }
@@ -269,6 +265,7 @@ impl ApplicationState for MomoBakoApplication {
             && let Some(services) = self.services.as_ref()
         {
             let system = services.system.clone();
+            let settings = services.settings.clone();
             let executor = services.executor.clone();
             if let Err(error) = context.run_task(Task::new(async move {
                 ShellMessage::SystemStatusLoaded(
@@ -276,6 +273,29 @@ impl ApplicationState for MomoBakoApplication {
                 )
             })) {
                 eprintln!("Nana 系统状态任务提交失败：{error}");
+            }
+            let settings_executor = services.executor.clone();
+            if let Err(error) = context.run_task(Task::new(async move {
+                ShellMessage::SettingsLoaded(settings_executor.block_on(async move {
+                    settings.load_or_recover()
+                }))
+            })) {
+                eprintln!("Nana 应用设置加载任务提交失败：{error}");
+            }
+        }
+        if matches!(&message, ShellMessage::SaveSettings)
+            && let Some(services) = self.services.as_ref()
+        {
+            let settings = self.shell.settings.clone();
+            let settings_service = services.settings.clone();
+            let executor = services.executor.clone();
+            if let Err(error) = context.run_task(Task::new(async move {
+                ShellMessage::SettingsSaved(executor.block_on(async move {
+                    settings.validate()?;
+                    settings_service.save(&settings).map(|()| settings)
+                }))
+            })) {
+                eprintln!("Nana 应用设置保存任务提交失败：{error}");
             }
         }
         if let ShellMessage::SelectPlugin(plugin_id) = &message
