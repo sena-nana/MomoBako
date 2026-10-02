@@ -9,6 +9,7 @@ import {
   useWorkspaceProgress,
   useWorkspaceRepository,
 } from "../composables/useRepositoryWorkspace";
+import { cancelRepositoryWorkspaceStartup } from "../composables/workspace";
 import { usePlaylistPlayer } from "../composables/usePlaylistPlayer";
 import { useSystemMediaSession } from "../composables/useSystemMediaSession";
 import { getCachedPlaylistDetail } from "../composables/workspace/playlists";
@@ -163,6 +164,7 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
+  cancelRepositoryWorkspaceStartup();
   systemMediaSession.dispose();
 });
 </script>

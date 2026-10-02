@@ -13,7 +13,10 @@ export type {
   WorkspaceOperationProgress,
 } from "./tasks";
 
-export { resetRepositoryWorkspaceForTests } from "./lifecycle";
+export {
+  cancelRepositoryWorkspaceStartup,
+  resetRepositoryWorkspaceForTests,
+} from "./lifecycle";
 export {
   ensureRepositoryWorkspace,
   loadRepositories,
