@@ -3922,6 +3922,7 @@ dependencies = [
  "nana-ui-devtools",
  "nana-ui-platform",
  "serde_json",
+ "sha2 0.10.9",
  "tokio",
 ]
 

@@ -22,7 +22,8 @@
     "icons:generate": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/generate-icon.ps1",
     "icons:tauri": "yarn tauri icon src-tauri/icons/icon-source.png",
     "typecheck:node-scripts": "tsc --project tsconfig.node-scripts.json",
-    "verify": "yarn typecheck:node-scripts && yarn test && yarn build && cargo check --manifest-path src-tauri/Cargo.toml"
+    "verify": "yarn typecheck:node-scripts && yarn test && yarn build && cargo check --manifest-path src-tauri/Cargo.toml",
+    "test:nana:offscreen": "bash scripts/run-nana-offscreen-acceptance.sh"
   },
   "dependencies": {
     "@lilia/theme": "github:sena-nana/LiliaUI#workspace=@lilia/theme&commit=de0117fbc32fd8df957a1e32452329f5697fcd30",
