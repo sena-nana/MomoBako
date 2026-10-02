@@ -258,6 +258,19 @@
     - optional `error`
   - The runtime resolves `downloadEntryMethod` from that repository's Source manifest, injects repository configuration only into the native Source call, and returns a partial-success summary when some tracks fail instead of aborting the whole playlist export.
 
+## Nana host state contracts
+
+- Desktop hosts expose one core-owned `PlaybackSessionState` for playlist playback. It carries the
+  repository and playlist identity, current item, lifecycle status, position, duration, volume,
+  capability flags, and an optional user-facing error. Plugin players implement media operations;
+  the host owns session transitions and disposal.
+- Long-running operations project `DomainEvent` progress into `TaskProgressSnapshot` values with a
+  stable task ID, protocol, phase, label, current/total values, percentage, and terminal status.
+  Cancellation remains `cancelling` until the worker exits; late events are ignored after the
+  terminal snapshot.
+- `ApplicationSettings` is persisted by the host and validated before activation. The stable fields
+  are `theme`, `thumbnailCacheLimitMb`, `defaultPlaylistPlayerTypeId`, and `closeBehavior`.
+  Settings writes are atomic and a corrupt file falls back to defaults with a diagnostic log.
 ## Managed Cache Layout
 
 - Local filesystem repositories and configured 网易云 repositories use the same root layout: `.momo/repository.json`, repository indexes/databases, `cache`, `thumbnails`, `logs`, `indexes`, and `trash`.

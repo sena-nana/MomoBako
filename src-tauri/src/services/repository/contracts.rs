@@ -2,6 +2,40 @@
 
 use super::*;
 
+/// Core-owned playlist playback state shared by Nana and Tauri hosts.
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct PlaybackSessionState {
+    pub session_id: String,
+    pub repo_id: String,
+    pub playlist_id: String,
+    pub playlist_item_id: Option<String>,
+    pub status: String,
+    pub current_time_ms: u64,
+    pub duration_ms: Option<u64>,
+    pub volume: f32,
+    pub can_seek: bool,
+    pub can_volume: bool,
+    pub error: Option<String>,
+    pub updated_at: String,
+}
+
+/// Stable projection of a long-running task progress event.
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskProgressSnapshot {
+    pub task_id: String,
+    pub protocol_id: String,
+    pub status: String,
+    pub phase: Option<String>,
+    pub label: Option<String>,
+    pub current: Option<u64>,
+    pub total: Option<u64>,
+    pub percent: Option<f32>,
+    pub error: Option<String>,
+    pub updated_at: String,
+}
+
 #[derive(Debug, Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct RepositoryBackendSummary {
