@@ -3,16 +3,12 @@
 //! 壳层只描述稳定的导航、状态和主内容层级；仓库、插件和任务服务通过
 //! `ShellViewModel` 注入文本状态，避免把领域服务直接耦合到 Nana 控件树。
 
-use nana_ui::runtime::view::{button, text, widget};
-use nana_ui::runtime::{
-    Activate, FrameworkError, GpuTextureView, LengthSpec, List, RuntimeDocument, Stack,
-    TextChanged, TextInput,
-};
 use crate::backend::services::repository::{
     AssetDetail, FileBrowserEntry, FileBrowserSnapshot, FilePreviewSourceResponse, RepositorySnapshot,
     PluginManifest, PlaylistSummary, RepositorySummary, SystemLogPage,
     PluginConfigSnapshot, PlaylistDetail, PlaylistPlayerContribution, TaskProgressSnapshot,
 };
+use crate::settings::ApplicationSettings;
 
 /// Nana Runtime 传递给应用状态的壳层交互消息。
 pub enum ShellMessage {
@@ -56,6 +52,13 @@ pub enum ShellMessage {
     PlaylistNameDraftChanged(String),
     SavePlaylistName,
     SystemStatusLoaded(Result<crate::backend::services::runtime::ExternalApiConnectionStatus, String>),
+    SettingsLoaded(Result<(ApplicationSettings, Option<String>), String>),
+    SettingsThemeChanged(String),
+    SettingsCacheLimitChanged(String),
+    SettingsPlayerChanged(String),
+    SettingsCloseBehaviorChanged(String),
+    SaveSettings,
+    SettingsSaved(Result<ApplicationSettings, String>),
     TaskSnapshotLoaded { active: usize, completed: usize },
     TaskProgressLoaded(Vec<TaskProgressSnapshot>),
     CancelTask(String),
@@ -211,6 +214,9 @@ pub struct ShellViewModel {
     pub active_task_ids: Vec<String>,
     pub task_progress: Vec<TaskProgressSnapshot>,
     pub system_status: Option<String>,
+    pub settings: ApplicationSettings,
+    pub settings_cache_limit_draft: String,
+    pub settings_error: Option<String>,
     pub selected_plugin_id: Option<String>,
     pub plugin_config_keys: Vec<String>,
     pub plugin_config_drafts: std::collections::BTreeMap<String, String>,
@@ -252,6 +258,9 @@ impl Default for ShellViewModel {
             active_task_ids: Vec::new(),
             task_progress: Vec::new(),
             system_status: None,
+            settings: ApplicationSettings::default(),
+            settings_cache_limit_draft: "1024".into(),
+            settings_error: None,
             selected_plugin_id: None,
             plugin_config_keys: Vec::new(),
             plugin_config_drafts: std::collections::BTreeMap::new(),
@@ -699,6 +708,60 @@ impl ShellViewModel {
                 self.page = ShellPage::Error;
                 self.detail = format!("无法读取系统服务状态：{error}");
             }
+            ShellMessage::SettingsLoaded(Ok((settings, diagnostic))) => {
+                self.page = ShellPage::Settings;
+                self.settings_cache_limit_draft = settings.thumbnail_cache_limit_mb.to_string();
+                self.settings = settings;
+                self.settings_error = diagnostic;
+                self.detail = self
+                    .settings_error
+                    .clone()
+                    .unwrap_or_else(|| "应用设置已加载".into());
+            }
+            ShellMessage::SettingsLoaded(Err(error)) => {
+                self.page = ShellPage::SettingsError;
+                self.settings_error = Some(error.clone());
+                self.detail = format!("无法读取应用设置：{error}");
+            }
+            ShellMessage::SettingsThemeChanged(theme) => {
+                self.settings.theme = theme;
+                self.settings_error = None;
+            }
+            ShellMessage::SettingsCacheLimitChanged(value) => {
+                self.settings_cache_limit_draft = value.clone();
+                self.settings_error = None;
+                match value.parse::<u32>() {
+                    Ok(limit) => self.settings.thumbnail_cache_limit_mb = limit,
+                    Err(_) => self.settings_error = Some("缩略图缓存上限必须是整数".into()),
+                }
+            }
+            ShellMessage::SettingsPlayerChanged(player) => {
+                self.settings.default_playlist_player_type_id = if player.trim().is_empty() {
+                    None
+                } else {
+                    Some(player)
+                };
+                self.settings_error = None;
+            }
+            ShellMessage::SettingsCloseBehaviorChanged(behavior) => {
+                self.settings.close_behavior = behavior;
+                self.settings_error = None;
+            }
+            ShellMessage::SaveSettings => {
+                self.detail = "正在保存应用设置…".into();
+            }
+            ShellMessage::SettingsSaved(Ok(settings)) => {
+                self.page = ShellPage::Settings;
+                self.settings_cache_limit_draft = settings.thumbnail_cache_limit_mb.to_string();
+                self.settings = settings;
+                self.settings_error = None;
+                self.detail = "应用设置已保存".into();
+            }
+            ShellMessage::SettingsSaved(Err(error)) => {
+                self.page = ShellPage::SettingsError;
+                self.settings_error = Some(error.clone());
+                self.detail = format!("设置校验失败：{error}");
+            }
             ShellMessage::CancelTask(task_id) => {
                 self.detail = format!("已请求取消任务 {task_id}");
             }
@@ -720,549 +783,8 @@ impl ShellViewModel {
     }
 }
 
-/// 在给定 Runtime 文档中挂载完整的 MomoBako 壳层。
-pub fn mount_shell(
-    document: &mut RuntimeDocument,
-    model: &ShellViewModel,
-) -> Result<(), FrameworkError> {
-    let document_id = document.document();
-    let view_model = model.clone();
-    document
-        .context_mut()
-        .mount_view_root(document_id, move || {
-            // 标题栏、导航栏和主工作区分别承担窗口级操作、上下文导航和资源主线。
-            let navigation = widget(
-                Stack::fill_column(8.0)
-                    .width(LengthSpec::Px(220.0))
-                    .grow(0.0)
-                    .shrink(0.0)
-                    .padding_xy(16.0, 18.0),
-            )
-            .children((
-                button("资源库").key("nav-library").on_cx(|_, _: &Activate, cx| {
-                    cx.dispatch_program(ShellMessage::Navigate(ShellPage::FileList));
-                }),
-                button("播放列表").key("nav-playlists").on_cx(|_, _: &Activate, cx| {
-                    cx.dispatch_program(ShellMessage::Navigate(ShellPage::Playlists));
-                }),
-                button("插件").key("nav-plugins").on_cx(|_, _: &Activate, cx| {
-                    cx.dispatch_program(ShellMessage::Navigate(ShellPage::PluginSettings));
-                }),
-                button("设置").key("nav-settings").on_cx(|_, _: &Activate, cx| {
-                    cx.dispatch_program(ShellMessage::Navigate(ShellPage::Settings));
-                }),
-            ));
-            let status_summary = widget(Stack::fill_column(8.0)).children((
-                text(view_model.page.title()).key("page-title"),
-                text(view_model.page.status()).key("page-status"),
-                text(view_model.selection_label()).key("selection"),
-                text(view_model.detail.clone()).key("page-detail"),
-                text(view_model.file_entries_label()).key("file-entries"),
-                text(view_model.plugin_entries_label()).key("plugin-entries"),
-                text(view_model.log_entries_label()).key("log-entries"),
-                text(view_model.playlist_entries_label()).key("playlist-entries"),
-                text(view_model.system_status.clone().unwrap_or_else(|| "尚未读取系统服务状态".into()))
-                    .key("system-status"),
-            ));
-            let task_actions = widget(Stack::fill_column(6.0)).children(
-                view_model
-                    .active_task_ids
-                    .iter()
-                    .map(|task_id| {
-                        let task_id = task_id.clone();
-                        button(format!("取消任务 {task_id}"))
-                            .key(format!("cancel-task-{task_id}"))
-                            .on_cx(move |_, _: &Activate, cx| {
-                                cx.dispatch_program(ShellMessage::CancelTask(task_id.clone()));
-                            })
-                    })
-                    .collect::<Vec<_>>(),
-            );
-            let task_progress = widget(Stack::fill_column(6.0)).children(
-                view_model
-                    .task_progress
-                    .iter()
-                    .take(8)
-                    .map(|snapshot| {
-                        let status = match snapshot.status.as_str() {
-                            "cancelling" => "取消中",
-                            "completed" => "已完成",
-                            "cancelled" => "已取消",
-                            "failed" => "失败",
-                            "queued" => "排队中",
-                            _ => "进行中",
-                        };
-                        text(format!(
-                            "{} · {}",
-                            snapshot
-                                .label
-                                .clone()
-                                .unwrap_or_else(|| snapshot.protocol_id.clone()),
-                            status
-                        ))
-                        .key(format!("task-progress-{}", snapshot.task_id))
-                    })
-                    .collect::<Vec<_>>(),
-            );
-            let file_actions = widget(Stack::fill_column(6.0)).children(
-                view_model
-                    .browser_entries
-                    .iter()
-                    .take(8)
-                    .map(|entry| {
-                        let entry = entry.clone();
-                        button(entry.name.clone())
-                            .key(format!("file-entry-{}", entry.path))
-                            .on_cx(move |_, _: &Activate, cx| {
-                                cx.dispatch_program(entry_message(&entry));
-                            })
-                    })
-                    .collect::<Vec<_>>(),
-            );
-            let plugin_actions = widget(Stack::fill_column(6.0)).children(
-                view_model
-                    .plugin_entries
-                    .iter()
-                    .zip(view_model.plugin_entry_ids.iter())
-                    .zip(view_model.plugin_enabled.iter())
-                    .take(8)
-                    .map(|((label, plugin_id), enabled)| {
-                        let plugin_id = plugin_id.clone();
-                        let select_id = plugin_id.clone();
-                        let toggle_id = plugin_id.clone();
-                        let delete_id = plugin_id.clone();
-                        let next_enabled = !*enabled;
-                        widget(Stack::fill_row(8.0)).children((
-                            button(label.clone())
-                                .key(format!("plugin-entry-{select_id}"))
-                                .on_cx(move |_, _: &Activate, cx| {
-                                    cx.dispatch_program(ShellMessage::SelectPlugin(select_id.clone()));
-                                }),
-                            button(if *enabled { "停用" } else { "启用" })
-                                .key(format!("toggle-plugin-{toggle_id}"))
-                                .on_cx(move |_, _: &Activate, cx| {
-                                    cx.dispatch_program(ShellMessage::TogglePlugin {
-                                        plugin_id: toggle_id.clone(),
-                                        enabled: next_enabled,
-                                    });
-                                }),
-                            button("删除")
-                                .key(format!("delete-plugin-{delete_id}"))
-                                .on_cx(move |_, _: &Activate, cx| {
-                                    cx.dispatch_program(ShellMessage::DeletePlugin(delete_id.clone()));
-                                }),
-                        ))
-                    })
-                    .collect::<Vec<_>>(),
-            );
-            let plugin_config_actions = widget(Stack::fill_column(6.0)).children(
-                view_model
-                    .selected_plugin_id
-                    .as_ref()
-                    .into_iter()
-                    .flat_map(|plugin_id| {
-                        view_model.plugin_config_keys.iter().map(move |key| {
-                            let plugin_id = plugin_id.clone();
-                            let key = key.clone();
-                            button(format!("删除配置 {key}"))
-                                .key(format!("delete-plugin-config-{key}"))
-                                .on_cx(move |_, _: &Activate, cx| {
-                                    cx.dispatch_program(ShellMessage::DeletePluginConfig {
-                                        plugin_id: plugin_id.clone(),
-                                        key: key.clone(),
-                                    });
-                                })
-                        })
-                    })
-                    .collect::<Vec<_>>(),
-            );
-            let plugin_config_keys = view_model.plugin_config_keys.clone();
-            let plugin_config_drafts = view_model.plugin_config_drafts.clone();
-            let plugin_config_editors = widget(Stack::fill_column(8.0)).children(
-                view_model
-                    .selected_plugin_id
-                    .as_ref()
-                    .into_iter()
-                    .flat_map(|plugin_id| {
-                        let drafts = plugin_config_drafts.clone();
-                        plugin_config_keys
-                            .iter()
-                            .map(move |key| {
-                                let plugin_id = plugin_id.clone();
-                                let key = key.clone();
-                                let value = drafts.get(&key).cloned().unwrap_or_default();
-                                let draft_key = key.clone();
-                                let input = widget(TextInput::new(value).label(key.clone())).on_cx(
-                                    move |_, event: &TextChanged, cx| {
-                                        cx.dispatch_program(ShellMessage::PluginConfigDraftChanged {
-                                            key: draft_key.clone(),
-                                            value: event.value.to_string(),
-                                        });
-                                    },
-                                );
-                                let save_key = key.clone();
-                                widget(Stack::fill_row(8.0)).children((
-                                    input,
-                                    button("保存").key(format!("save-plugin-config-{save_key}"))
-                                        .on_cx(move |_, _: &Activate, cx| {
-                                            cx.dispatch_program(ShellMessage::SavePluginConfig {
-                                                plugin_id: plugin_id.clone(),
-                                                key: save_key.clone(),
-                                            });
-                                        }),
-                                ))
-                            })
-                    })
-                    .collect::<Vec<_>>(),
-            );
-            let playlist_actions = widget(Stack::fill_column(6.0)).children(
-                view_model
-                    .playlist_entries
-                    .iter()
-                    .zip(view_model.playlist_entry_ids.iter())
-                    .take(8)
-                            .map(|(label, playlist_id)| {
-                        let playlist_id = playlist_id.clone();
-                        let open_id = playlist_id.clone();
-                        let delete_id = playlist_id.clone();
-                        widget(Stack::fill_row(8.0)).children((
-                            button(label.clone())
-                                .key(format!("playlist-entry-{open_id}"))
-                                .on_cx(move |_, _: &Activate, cx| {
-                                    cx.dispatch_program(ShellMessage::SelectPlaylist(open_id.clone()));
-                                }),
-                            button("删除")
-                                .key(format!("delete-playlist-{delete_id}"))
-                                .on_cx(move |_, _: &Activate, cx| {
-                                    cx.dispatch_program(ShellMessage::DeletePlaylist(delete_id.clone()));
-                                }),
-                        ))
-                    })
-                    .collect::<Vec<_>>(),
-            );
-            let playlist_item_actions = widget(Stack::fill_column(6.0)).children(
-                view_model
-                    .playlist_item_entries
-                    .iter()
-                    .zip(view_model.playlist_item_ids.iter())
-                    .take(8)
-                    .map(|(label, item_id)| {
-                        let item_id = item_id.clone();
-                        let playlist_id = view_model.selected_playlist_id.clone().unwrap_or_default();
-                        widget(Stack::fill_row(8.0)).children((
-                            text(label.clone()).key(format!("playlist-item-{item_id}")),
-                            button("上移")
-                                .key(format!("move-playlist-item-up-{item_id}"))
-                                .on_cx({
-                                    let item_id = item_id.clone();
-                                    move |_, _: &Activate, cx| cx.dispatch_program(ShellMessage::MovePlaylistItem { item_id: item_id.clone(), direction: -1 })
-                                }),
-                            button("下移")
-                                .key(format!("move-playlist-item-down-{item_id}"))
-                                .on_cx({
-                                    let item_id = item_id.clone();
-                                    move |_, _: &Activate, cx| cx.dispatch_program(ShellMessage::MovePlaylistItem { item_id: item_id.clone(), direction: 1 })
-                                }),
-                            button("移除")
-                                .key(format!("remove-playlist-item-{item_id}"))
-                                .on_cx(move |_, _: &Activate, cx| {
-                                    cx.dispatch_program(ShellMessage::RemovePlaylistItem {
-                                        playlist_id: playlist_id.clone(),
-                                        item_id: item_id.clone(),
-                                    });
-                                }),
-                        ))
-                    })
-                    .collect::<Vec<_>>(),
-            );
-            let playlist_item_status = if view_model.playlist_item_status.is_empty() {
-                None
-            } else {
-                Some(text(format!("不可播放项目：{}", view_model.playlist_item_status)).key("playlist-item-status"))
-            };
-            let log_actions = if matches!(view_model.page, ShellPage::Loading) {
-                None
-            } else {
-                Some(widget(Stack::fill_row(8.0)).children((
-                    button("清理日志")
-                        .key("clear-logs")
-                        .on_cx(|_, _: &Activate, cx| cx.dispatch_program(ShellMessage::ClearLogs)),
-                )))
-            };
-            let playlist_name = view_model.playlist_name_draft.clone();
-            let is_playlists = matches!(view_model.page, ShellPage::Playlists);
-            let playlist_editor = if is_playlists {
-                Some(widget(Stack::fill_row(8.0)).children((
-                    widget(TextInput::new(playlist_name).label("播放列表名称")).on_cx(
-                        |_, event: &TextChanged, cx| {
-                            cx.dispatch_program(ShellMessage::PlaylistNameDraftChanged(
-                                event.value.to_string(),
-                            ));
-                        },
-                    ),
-                    button("保存名称")
-                        .key("save-playlist-name")
-                        .on_cx(|_, _: &Activate, cx| cx.dispatch_program(ShellMessage::SavePlaylistName)),
-                )))
-            } else {
-                None
-            };
-            let new_playlist_name = view_model.new_playlist_name.clone();
-            let playlist_player_choices = widget(Stack::fill_row(6.0)).children(
-                view_model
-                    .playlist_players
-                    .iter()
-                    .take(8)
-                    .map(|player| {
-                        let player_type_id = player.player_type_id.clone();
-                        let label = format!("使用 {}", player.label);
-                        button(label)
-                            .key(format!("playlist-player-{}", player_type_id))
-                            .on_cx(move |_, _: &Activate, cx| {
-                                cx.dispatch_program(ShellMessage::SelectPlaylistPlayer(
-                                    player_type_id.clone(),
-                                ));
-                            })
-                    })
-                    .collect::<Vec<_>>(),
-            );
-            let playlist_creator = if is_playlists {
-                Some(widget(Stack::fill_column(6.0)).children((
-                    widget(TextInput::new(new_playlist_name).label("新建播放列表")).on_cx(
-                        |_, event: &TextChanged, cx| {
-                            cx.dispatch_program(ShellMessage::NewPlaylistNameChanged(
-                                event.value.to_string(),
-                            ));
-                        },
-                    ),
-                    playlist_player_choices,
-                    button("创建播放列表")
-                        .key("create-playlist")
-                        .on_cx(|_, _: &Activate, cx| cx.dispatch_program(ShellMessage::CreatePlaylist)),
-                )))
-            } else {
-                None
-            };
-            let playlist_add_current_directory = if is_playlists {
-                view_model.selected_playlist_id.clone().map(|playlist_id| {
-                    let path = view_model.current_directory.clone();
-                    button("添加当前目录").key("add-playlist-current-directory").on_cx(
-                        move |_, _: &Activate, cx| {
-                            cx.dispatch_program(ShellMessage::AddPlaylistItemsByPaths {
-                                playlist_id: playlist_id.clone(),
-                                paths: vec![path.clone()],
-                            });
-                        },
-                    )
-                })
-            } else {
-                None
-            };
-            let preview_slot = if view_model.preview_pixels.is_some() {
-                "file-preview"
-            } else {
-                ""
-            };
-            let preview_node = if matches!(view_model.page, ShellPage::SelectedFile) {
-                Some(widget(Stack::fill_column(8.0)).children((
-                    text("选择图片文件后，预览将在原生纹理节点中显示").key("preview-placeholder"),
-                    widget(GpuTextureView::new(preview_slot).contain()).key("file-preview"),
-                )))
-            } else {
-                None
-            };
-            let page_actions = if matches!(view_model.page, ShellPage::Loading) {
-                None
-            } else {
-                Some(widget(Stack::fill_row(8.0)).children((
-                    button(view_model.page.primary_action())
-                        .key("primary-action")
-                        .on_cx(|_, _: &Activate, cx| cx.dispatch_program(ShellMessage::PrimaryAction)),
-                    button(view_model.edit_label())
-                        .key("edit-action")
-                        .on_cx(|_, _: &Activate, cx| cx.dispatch_program(ShellMessage::EditAction)),
-                )))
-            };
-            let workspace_actions = widget(Stack::fill_column(8.0)).children((
-                widget(Stack::fill_column(8.0)).children((
-                    status_summary,
-                    task_actions,
-                    task_progress,
-                    file_actions,
-                    plugin_actions,
-                    plugin_config_actions,
-                    plugin_config_editors,
-                    playlist_actions,
-                )),
-                widget(Stack::fill_column(8.0)).children((
-                    playlist_item_actions,
-                    playlist_item_status,
-                    playlist_editor,
-                    playlist_creator,
-                    playlist_add_current_directory,
-                    log_actions,
-                    preview_node,
-                )),
-            ));
-            let content = widget(
-                Stack::fill_column(12.0)
-                    .padding_xy(24.0, 20.0)
-                    .min_width(LengthSpec::Px(0.0)),
-            )
-            .children((workspace_actions, widget(
-                List::new()
-                    .label(view_model.page.title())
-                    .style(Stack::column(12.0).node_style()),
-            )
-            .children((page_actions,)),));
-            let process = widget(
-                Stack::fill_column(8.0)
-                    .width(LengthSpec::Px(240.0))
-                    .grow(0.0)
-                    .shrink(0.0)
-                    .padding_xy(16.0, 20.0),
-            )
-            .children((
-                text("当前状态").key("process-heading"),
-                text(view_model.page.status()).key("process-status"),
-            ));
-            let title_bar = widget(
-                Stack::bar(12.0)
-                    .height(LengthSpec::Px(48.0))
-                    .padding_xy(20.0, 12.0),
-            )
-            .children((
-                text("MomoBako").key("title"),
-                text("资源库工作区").key("subtitle"),
-                button("刷新状态")
-                    .key("refresh")
-                    .on_cx(|_, _: &Activate, cx| cx.dispatch_program(ShellMessage::Refresh)),
-                button("最小化")
-                    .key("window-minimize")
-                    .on_cx(|_, _: &Activate, cx| {
-                        cx.dispatch_program(ShellMessage::WindowAction(WindowAction::Minimize));
-                    }),
-                button("最大化")
-                    .key("window-maximize")
-                    .on_cx(|_, _: &Activate, cx| {
-                        cx.dispatch_program(ShellMessage::WindowAction(WindowAction::ToggleMaximize));
-                    }),
-                button("关闭")
-                    .key("window-close")
-                    .on_cx(|_, _: &Activate, cx| {
-                        cx.dispatch_program(ShellMessage::WindowAction(WindowAction::Close));
-                    }),
-            ));
-            let body = widget(Stack::fill_row(0.0).min_height(LengthSpec::Px(0.0)))
-                .children((navigation, content, process))
-                .key("workspace-body");
-            widget(Stack::fill_column(0.0).min_width(LengthSpec::Px(0.0)))
-                .children((title_bar, body))
-        })?;
-    Ok(())
-}
-
-/// 显示名仅用于标签，服务请求始终使用 DTO 中的完整仓库相对路径。
-fn entry_message(entry: &FileBrowserEntry) -> ShellMessage {
-    if entry.kind == "directory" {
-        ShellMessage::OpenDirectory(entry.path.clone())
-    } else {
-        ShellMessage::SelectFile { path: entry.path.clone(), asset_id: entry.asset_id.clone() }
-    }
-}
+mod render;
+pub use render::mount_shell;
 
 #[cfg(test)]
-mod tests {
-    use super::{ShellMessage, ShellPage, ShellViewModel};
-    use crate::backend::services::repository::TaskProgressSnapshot;
-
-    #[test]
-    fn shell_messages_reduce_to_user_visible_states() {
-        let mut model = ShellViewModel::for_page(ShellPage::Loading);
-        model.reduce(ShellMessage::PrimaryAction);
-        assert_eq!(model.page, ShellPage::Loading);
-
-        model.reduce(ShellMessage::Navigate(ShellPage::PluginSettings));
-        assert_eq!(model.detail, "正在读取页面数据…");
-
-        model = ShellViewModel::for_page(ShellPage::UnsavedEdit);
-        model.reduce(ShellMessage::EditAction);
-        assert_eq!(model.page, ShellPage::UnsavedEdit);
-        assert!(model.dirty);
-        model.reduce(ShellMessage::PrimaryAction);
-        assert!(model.dirty);
-        assert_eq!(model.detail, "该操作的领域服务尚未接通，数据未写入");
-    }
-
-    #[test]
-    fn navigation_preserves_repository_and_task_context() {
-        let mut model = ShellViewModel::default();
-        model.repository_id = Some("repo-real".into());
-        model.file_entries = vec!["cover.png".into()];
-        model.active_task_ids = vec!["task-real".into()];
-        model.reduce(ShellMessage::TaskSnapshotLoaded { active: 1, completed: 2 });
-        model.reduce(ShellMessage::Navigate(ShellPage::TaskRunning));
-        assert_eq!(model.repository_id.as_deref(), Some("repo-real"));
-        assert_eq!(model.file_entries, ["cover.png"]);
-        assert_eq!(model.active_task_ids, ["task-real"]);
-        assert_eq!(model.detail, "1 个运行中任务 · 2 个近期完成任务");
-        model.reduce(ShellMessage::Navigate(ShellPage::Playlists));
-        assert_eq!(model.repository_id.as_deref(), Some("repo-real"));
-    }
-
-    #[test]
-    fn playlist_creation_requires_name_and_player_type() {
-        let mut model = ShellViewModel::for_page(ShellPage::Playlists);
-        model.reduce(ShellMessage::CreatePlaylist);
-        assert_eq!(model.detail, "播放列表名称不能为空");
-        model.reduce(ShellMessage::NewPlaylistNameChanged("我的列表".into()));
-        model.reduce(ShellMessage::CreatePlaylist);
-        assert_eq!(model.detail, "请先选择播放器类型");
-    }
-
-    #[test]
-    fn playlist_reorder_keeps_item_ids_and_labels_aligned() {
-        let mut model = ShellViewModel::for_page(ShellPage::Playlists);
-        model.selected_playlist_id = Some("playlist-1".into());
-        model.playlist_item_ids = vec!["a".into(), "b".into()];
-        model.playlist_item_entries = vec!["A".into(), "B".into()];
-        model.reduce(ShellMessage::MovePlaylistItem { item_id: "b".into(), direction: -1 });
-        assert_eq!(model.playlist_item_ids, ["b", "a"]);
-        assert_eq!(model.playlist_item_entries, ["B", "A"]);
-        assert!(model.detail.contains("正在保存播放列表顺序"));
-    }
-
-    #[test]
-    fn task_progress_updates_running_detail_and_retains_terminal_rows() {
-        let mut model = ShellViewModel::for_page(ShellPage::TaskRunning);
-        model.reduce(ShellMessage::TaskProgressLoaded(vec![
-            TaskProgressSnapshot {
-                task_id: "task-1".into(),
-                protocol_id: "momobako.sync".into(),
-                status: "running".into(),
-                phase: Some("scanning".into()),
-                label: Some("扫描文件".into()),
-                current: Some(4),
-                total: Some(10),
-                percent: Some(40.0),
-                error: None,
-                updated_at: "now".into(),
-            },
-            TaskProgressSnapshot {
-                task_id: "task-2".into(),
-                protocol_id: "momobako.sync".into(),
-                status: "cancelled".into(),
-                phase: None,
-                label: Some("旧任务".into()),
-                current: None,
-                total: None,
-                percent: None,
-                error: Some("用户取消".into()),
-                updated_at: "now".into(),
-            },
-        ]));
-        assert_eq!(model.task_progress.len(), 2);
-        assert!(model.detail.contains("扫描文件"));
-        assert!(model.detail.contains("40%"));
-    }
-}
+mod tests;

@@ -11,6 +11,7 @@ use crate::backend::viewmodels::{
     FileBrowserViewModel, MutsukiTaskViewModel, PluginViewModel, RepositoryInteractionViewModel,
     RepositoryManagementViewModel, RepositoryQueryViewModel, SystemViewModel,
 };
+use crate::settings::{self, ApplicationSettings, SettingsStore};
 
 /// Nana Runtime 的领域服务依赖集合。
 pub struct NativeServices {
@@ -24,6 +25,7 @@ pub struct NativeServices {
     pub plugin: PluginViewModel,
     pub system: SystemViewModel,
     pub tasks: MutsukiTaskViewModel,
+    pub settings: SettingsStore,
 }
 
 impl NativeServices {
@@ -44,8 +46,19 @@ impl NativeServices {
             plugin: PluginViewModel::new(runtime.clone()),
             system: SystemViewModel::new(runtime.clone()),
             tasks: MutsukiTaskViewModel::new(task_runtime),
+            settings: SettingsStore::new(settings::default_path()),
             runtime,
         })
+    }
+
+    pub fn load_settings(&self) -> Result<(ApplicationSettings, Option<String>), String> {
+        self.settings.load_or_recover()
+    }
+
+    pub fn save_settings(&self, settings: &ApplicationSettings) -> Result<ApplicationSettings, String> {
+        settings.validate()?;
+        self.settings.save(settings)?;
+        Ok(settings.clone())
     }
 }
 

@@ -13,6 +13,58 @@ pub struct ApplicationSettings {
     pub close_behavior: String,
 }
 
+/// 应用设置的宿主无关存储。写入通过临时文件和重命名提交，避免半写配置被下次启动读取。
+#[derive(Clone, Debug)]
+pub struct SettingsStore {
+    path: PathBuf,
+}
+
+impl SettingsStore {
+    pub fn new(path: PathBuf) -> Self {
+        Self { path }
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    pub fn load(&self) -> Result<ApplicationSettings, String> {
+        load(&self.path)
+    }
+
+    /// 损坏配置会被保留为 `.corrupt`，应用回退默认值并返回可展示的诊断信息。
+    pub fn load_or_recover(&self) -> Result<(ApplicationSettings, Option<String>), String> {
+        match self.load() {
+            Ok(settings) => Ok((settings, None)),
+            Err(error) if self.path.exists() => {
+                let backup = self.path.with_extension("corrupt");
+                fs::rename(&self.path, &backup)
+                    .map_err(|rename_error| format!("设置损坏且无法备份：{rename_error}"))?;
+                Ok((
+                    ApplicationSettings::default(),
+                    Some(format!("应用设置已恢复默认值：{error}")),
+                ))
+            }
+            Err(error) => Err(error),
+        }
+    }
+
+    pub fn save(&self, settings: &ApplicationSettings) -> Result<(), String> {
+        save(&self.path, settings)
+    }
+}
+
+/// 返回当前宿主的稳定配置路径，不依赖 Tauri 或窗口对象。
+pub fn default_path() -> PathBuf {
+    let root = std::env::var_os("LOCALAPPDATA")
+        .or_else(|| std::env::var_os("APPDATA"))
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+        });
+    root.join("MomoBako").join("settings.json")
+}
+
 impl Default for ApplicationSettings {
     fn default() -> Self {
         Self {
@@ -137,6 +189,21 @@ mod tests {
         };
         save(&path, &settings).expect("settings should save");
         assert_eq!(load(&path).expect("settings should load"), settings);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn corrupted_settings_are_backed_up_and_recovered() {
+        let root = std::env::temp_dir().join(format!("momobako-settings-corrupt-{}", std::process::id()));
+        let path = root.join("settings.json");
+        fs::create_dir_all(&root).expect("settings test directory should exist");
+        fs::write(&path, b"{broken").expect("corrupt settings should be written");
+        let (settings, diagnostic) = SettingsStore::new(path.clone())
+            .load_or_recover()
+            .expect("corrupt settings should recover");
+        assert_eq!(settings, ApplicationSettings::default());
+        assert!(diagnostic.is_some());
+        assert!(path.with_extension("corrupt").exists());
         let _ = fs::remove_dir_all(root);
     }
 }
