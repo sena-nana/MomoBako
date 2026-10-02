@@ -21,3 +21,6 @@ exclude = [
   "External/Plugins/example/backend-rust",
   "External/Plugins/template/backend-rust",
 ]
+
+[patch."https://github.com/sena-nana/NanaUI.git"]
+nana-ui = { path = "vendor/nana-ui" }
