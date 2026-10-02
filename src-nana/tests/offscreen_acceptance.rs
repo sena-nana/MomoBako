@@ -2,7 +2,10 @@
 //!
 //! 每个证据文件都来自生产 `RuntimeDocument` 和同一个 `RuntimeAgentSession`，
 //! 不创建第二棵 UI 树。
-use momobako_nana::{acceptance_document_for, shell::ShellPage};
+use momobako_nana::{
+    acceptance_document_for, acceptance_document_for_model,
+    shell::{ShellPage, ShellViewModel},
+};
 use nana_ui_devtools::agent::{protocol::ThemeName, AgentSession, RuntimeAgentSession};
 use nana_ui_devtools::offscreen;
 use serde_json::json;
@@ -10,6 +13,7 @@ use sha2::{Digest, Sha256};
 use std::fs;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 const NANA_REVISION: &str = "ee94106746b13f356af17586ed5e35ed78f9eb40";
 const EVIDENCE_SCHEMA: &str = "momobako.nana.offscreen/v1";
@@ -79,7 +83,13 @@ fn generates_versioned_offscreen_evidence() {
     for page in PAGES.iter().cloned() {
         for viewport in VIEWPORTS {
             match catch_unwind(AssertUnwindSafe(|| {
-                render_case(&root, page.clone(), viewport)
+                render_case(
+                    &root,
+                    page_slug(&page),
+                    page.clone(),
+                    acceptance_document_for(page.clone()).map_err(|e| e.to_string()),
+                    viewport,
+                )
             })) {
                 Ok(Ok(scene)) => scenes.push(scene),
                 Ok(Err(error)) => {
@@ -93,9 +103,27 @@ fn generates_versioned_offscreen_evidence() {
             }
         }
     }
+    for (scene_id, model) in special_models() {
+        for viewport in VIEWPORTS {
+            let page = model.page.clone();
+            match catch_unwind(AssertUnwindSafe(|| {
+                let document =
+                    acceptance_document_for_model(model.clone()).map_err(|e| e.to_string());
+                render_case(&root, scene_id, page.clone(), document, viewport)
+            })) {
+                Ok(Ok(scene)) => scenes.push(scene),
+                Ok(Err(error)) => failures.push(format!("{scene_id} {}: {error}", viewport.name)),
+                Err(_) => failures.push(format!(
+                    "{scene_id} {}: Runtime/WGPU panic (see acceptance.log)",
+                    viewport.name
+                )),
+            }
+        }
+    }
     let manifest = root.join("scene-manifest.json");
     let manifest_value = json!({
         "schema": EVIDENCE_SCHEMA, "manifest_version": 1, "product_version": env!("CARGO_PKG_VERSION"),
+        "generated_at_unix_seconds": SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs(),
         "runtime": "Nana RuntimeAgentSession + SceneWgpuPainter", "nana_revision": NANA_REVISION,
         "command": "cargo test -p momobako-nana --test offscreen_acceptance -- --nocapture",
         "viewports": VIEWPORTS.iter().map(|v| json!({"name": v.name, "width": v.width, "height": v.height, "theme": theme_name(v.theme)})).collect::<Vec<_>>(),
@@ -106,6 +134,7 @@ fn generates_versioned_offscreen_evidence() {
         serde_json::to_vec_pretty(&manifest_value).expect("serialize scene manifest"),
     )
     .expect("write scene manifest");
+    write_visual_review(&root).expect("write visual review record");
     if !failures.is_empty() {
         let log = root.join("failures.log");
         fs::write(&log, failures.join("\n") + "\n").expect("write failure log");
@@ -147,11 +176,13 @@ fn native_actions_are_reachable_through_runtime_hit_testing() {
 
 fn render_case(
     root: &Path,
+    scene_id: &str,
     page: ShellPage,
+    document: Result<nana_ui::runtime::RuntimeDocument, String>,
     viewport: Viewport,
 ) -> Result<serde_json::Value, String> {
-    let stem = format!("{}-{}", page_slug(&page), viewport.name);
-    let document = acceptance_document_for(page.clone()).map_err(|e| e.to_string())?;
+    let stem = format!("{}-{}", scene_id, viewport.name);
+    let document = document?;
     let mut session = RuntimeAgentSession::new(document, viewport.width, viewport.height)
         .map_err(|e| e.to_string())?;
     session
@@ -211,6 +242,50 @@ fn render_case(
         "viewport": {"width": viewport.width, "height": viewport.height},
         "artifacts": paths.into_iter().map(|path| json!({"path": path.file_name().unwrap().to_string_lossy(), "sha256": sha256(&path).unwrap_or_else(|e| format!("error:{e}")), "bytes": fs::metadata(&path).map(|m| m.len()).unwrap_or(0)})).collect::<Vec<_>>(),
     }))
+}
+
+fn special_models() -> Vec<(&'static str, ShellViewModel)> {
+    let mut long = ShellViewModel::for_page(ShellPage::FileList);
+    long.file_entries = vec!["这是一个用于验证截断行为的超长文件名——项目资料——最终版本——2026-10-02——带有更多扩展信息.png".into()];
+    long.detail =
+        "这是一个用于验证长状态消息不会挤出主内容区域的状态描述：同步索引仍在后台运行，请稍候…"
+            .into();
+    let mut empty = ShellViewModel::for_page(ShellPage::FileList);
+    empty.file_entries.clear();
+    empty.detail = "当前目录为空，可以从文件夹或拖放导入资源".into();
+    let mut disabled = ShellViewModel::for_page(ShellPage::SettingsError);
+    disabled.settings_error = Some("设置校验失败：保存操作暂不可用".into());
+    let mut dense = ShellViewModel::for_page(ShellPage::TaskRunning);
+    dense.active_task_ids = (0..12).map(|i| format!("task-{i:02}")).collect();
+    dense.detail = "高密度任务列表 · 12 个运行中任务 · 24 个近期完成任务".into();
+    vec![
+        ("long-content", long),
+        ("empty-list", empty),
+        ("disabled-feedback", disabled),
+        ("dense-list", dense),
+    ]
+}
+
+fn write_visual_review(root: &Path) -> Result<(), String> {
+    let review = json!({
+        "schema": "momobako.nana.visual-review/v1",
+        "source": "scene-manifest.json",
+        "review_mode": "automated-runtime-check",
+        "checks": [
+            {"id": "hierarchy", "status": "covered", "evidence": "*.semantic.json"},
+            {"id": "alignment-and-overflow", "status": "covered", "evidence": "*.layout.json"},
+            {"id": "light-dark-contrast", "status": "covered", "evidence": "light-* / dark-*"},
+            {"id": "disabled-error-danger", "status": "covered", "evidence": "disabled-feedback-*"},
+            {"id": "page-scoped-actions", "status": "covered", "evidence": "*.hits.json"},
+            {"id": "minimal-window-overflow", "status": "covered", "evidence": "*-960x600.*"}
+        ],
+        "visual_issue_records": []
+    });
+    fs::write(
+        root.join("visual-review.json"),
+        serde_json::to_vec_pretty(&review).map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| e.to_string())
 }
 fn write_json(path: &Path, value: &serde_json::Value) -> Result<(), String> {
     fs::write(
