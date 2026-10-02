@@ -222,7 +222,7 @@ fn shade(input: VsOut) -> TextShade {
         if linear {
             coverage = footprint_sample(mask_atlas, input.uv, uv_dx, uv_dy, input.cell).x;
         } else {
-            coverage = textureSampleLevel(mask_atlas, atlas_nearest, input.uv, 0.0).x;
+            coverage = textureSampleLevel(mask_atlas, atlas_linear, input.uv, 0.0).x;
         }
         // One coverage against the foreground's luma, as DirectWrite's
         // grayscale blend does.
@@ -242,7 +242,7 @@ fn shade(input: VsOut) -> TextShade {
     if linear {
         sampled = footprint_sample(color_atlas, input.uv, uv_dx, uv_dy, input.cell);
     } else {
-        sampled = textureSampleLevel(color_atlas, atlas_nearest, input.uv, 0.0);
+        sampled = textureSampleLevel(color_atlas, atlas_linear, input.uv, 0.0);
     }
     if input.content == CONTENT_SUBPIXEL {
         // Coverage per subpixel, stored encoded so the page's sRGB decode
