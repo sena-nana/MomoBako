@@ -13,7 +13,7 @@ vi.mock("@tauri-apps/api/event", () => ({
   listen: tauriMocks.listen,
 }));
 
-import { runMutsukiTask } from "../src/services/mutsukiTasks";
+import { runMutsukiTask, toTaskProgressSnapshot } from "../src/services/mutsukiTasks";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -101,5 +101,28 @@ describe("runMutsukiTask cancellation", () => {
     });
     expect(tauriMocks.invoke.mock.calls.filter(([command]) => command === "mutsuki_cancel_task"))
       .toHaveLength(1);
+  });
+});
+
+describe("toTaskProgressSnapshot", () => {
+  it("normalizes progress values and clamps percentage", () => {
+    const snapshot = toTaskProgressSnapshot("task-1", "protocol", {
+      phase: "writing",
+      message: "保存文件",
+      completed: 12,
+      total: 20,
+      percentage: 120,
+    });
+    expect(snapshot).toMatchObject({
+      taskId: "task-1",
+      protocolId: "protocol",
+      status: "running",
+      phase: "writing",
+      label: "保存文件",
+      current: 12,
+      total: 20,
+      percent: 100,
+    });
+    expect(snapshot.updatedAt).toEqual(expect.any(String));
   });
 });

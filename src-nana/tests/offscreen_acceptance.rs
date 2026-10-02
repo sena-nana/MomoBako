@@ -50,9 +50,12 @@ fn renders_repository_states_with_semantic_labels() {
         ShellPage::Playlists,
         ShellPage::PluginSettings,
         ShellPage::TaskRunning,
+        ShellPage::PlaybackRunning,
+        ShellPage::TaskCancelling,
         ShellPage::Conflict,
         ShellPage::UnsavedEdit,
         ShellPage::Settings,
+        ShellPage::SettingsError,
         ShellPage::Logs,
     ] {
         let document = acceptance_document_for(page.clone()).expect("acceptance document");
@@ -127,9 +130,12 @@ fn page_title(page: &ShellPage) -> &'static str {
         ShellPage::Playlists => "播放列表",
         ShellPage::PluginSettings => "插件设置",
         ShellPage::TaskRunning => "任务进行中",
+        ShellPage::PlaybackRunning => "播放进行中",
+        ShellPage::TaskCancelling => "任务取消中",
         ShellPage::Conflict => "同步冲突",
         ShellPage::UnsavedEdit => "编辑未保存",
         ShellPage::Settings => "应用设置",
+        ShellPage::SettingsError => "设置校验失败",
         ShellPage::Logs => "系统日志",
     }
 }
@@ -144,9 +150,12 @@ fn page_slug(page: &ShellPage) -> &'static str {
         ShellPage::Playlists => "playlists",
         ShellPage::PluginSettings => "plugin-settings",
         ShellPage::TaskRunning => "task-running",
+        ShellPage::PlaybackRunning => "playback-running",
+        ShellPage::TaskCancelling => "task-cancelling",
         ShellPage::Conflict => "conflict",
         ShellPage::UnsavedEdit => "unsaved-edit",
         ShellPage::Settings => "settings",
+        ShellPage::SettingsError => "settings-error",
         ShellPage::Logs => "logs",
     }
 }

@@ -3,6 +3,37 @@
  */
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import type { TaskProgressSnapshot } from "../types/repository";
+
+/** 将旧版进度事件归一化为宿主统一的任务快照。 */
+export function toTaskProgressSnapshot(
+  taskId: string,
+  protocolId: string,
+  progress: Record<string, unknown>,
+  status: TaskProgressSnapshot["status"] = "running",
+): TaskProgressSnapshot {
+  const numberValue = (key: string) => {
+    const value = progress[key];
+    return typeof value === "number" && Number.isFinite(value) ? value : null;
+  };
+  const stringValue = (key: string) => {
+    const value = progress[key];
+    return typeof value === "string" ? value : null;
+  };
+  const percent = numberValue("percent") ?? numberValue("percentage") ?? null;
+  return {
+    taskId,
+    protocolId,
+    status,
+    phase: stringValue("phase"),
+    label: stringValue("label") ?? stringValue("message"),
+    current: numberValue("current") ?? numberValue("completed"),
+    total: numberValue("total"),
+    percent: percent == null ? null : Math.max(0, Math.min(100, percent)),
+    error: stringValue("error"),
+    updatedAt: new Date().toISOString(),
+  };
+}
 
 type RuntimeEvent = {
   name: string;

@@ -34,6 +34,21 @@ pub enum FileDialogRequest {
     SaveFile { suggested_name: String },
 }
 
+/// Host-provided file drop payload. Paths are validated by the host before dispatch.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FileDropRequest {
+    pub paths: Vec<String>,
+}
+
+/// Native input and close-confirmation requests kept outside the Runtime widget tree.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum HostInputRequest {
+    FileDrop(FileDropRequest),
+    ConfirmClose { dirty: bool },
+    FocusMainWindow,
+    RegisterShortcut { accelerator: String },
+}
+
 /// 请求宿主打开外部资源。
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ExternalOpenRequest {
@@ -61,6 +76,7 @@ pub enum HostRequest {
     Notify(Notification),
     OpenFileDialog(FileDialogRequest),
     OpenExternal(ExternalOpenRequest),
+    Input(HostInputRequest),
 }
 
 #[cfg(test)]
@@ -86,6 +102,22 @@ mod tests {
             HostRequest::OpenFileDialog(FileDialogRequest::OpenFile {
                 extensions: vec!["png".into(), "jpg".into()],
             })
+        );
+    }
+
+    #[test]
+    fn host_input_keeps_drop_paths_and_close_state() {
+        assert_eq!(
+            HostRequest::Input(HostInputRequest::FileDrop(FileDropRequest {
+                paths: vec!["C:/assets/a.png".into()],
+            })),
+            HostRequest::Input(HostInputRequest::FileDrop(FileDropRequest {
+                paths: vec!["C:/assets/a.png".into()],
+            }))
+        );
+        assert_eq!(
+            HostInputRequest::ConfirmClose { dirty: true },
+            HostInputRequest::ConfirmClose { dirty: true }
         );
     }
 }

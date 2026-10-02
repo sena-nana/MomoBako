@@ -20,6 +20,11 @@ export type {
   PlaylistMutationRequest,
   PlaylistMutationResponse,
   PlaylistPlaybackMode,
+  PlaybackSessionState,
+  PlaybackSessionStatus,
+  TaskProgressSnapshot,
+  TaskProgressStatus,
+  ApplicationSettings,
   PlaylistSummary,
   PlaylistUpdateRequest,
 } from "./core";

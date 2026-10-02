@@ -22,6 +22,7 @@ pub mod services;
 /// 适配入口；此 re-export 让后续 ViewModel 接线不需要再穿过 command 层。
 pub use momobako_backend as backend;
 pub mod plugin_api;
+pub mod settings;
 
 /// Nana 宿主应用状态，持有共享领域 Runtime 和原生壳层 ViewModel。
 pub struct MomoBakoApplication {
@@ -369,6 +370,59 @@ impl ApplicationState for MomoBakoApplication {
                 )
             })) {
                 eprintln!("Nana 播放列表项目移除任务提交失败：{error}");
+            }
+        }
+        if let ShellMessage::ReorderPlaylistItems { playlist_id, item_ids } = &message
+            && let Some(repository_id) = self.shell.repository_id.clone()
+            && let Some(services) = self.services.as_ref()
+        {
+            let interaction = services.repository_interaction.clone();
+            let executor = services.executor.clone();
+            let request = backend::services::repository::PlaylistItemsOrderRequest {
+                repo_id: repository_id,
+                playlist_id: playlist_id.clone(),
+                item_ids: item_ids.clone(),
+            };
+            if let Err(error) = context.run_task(Task::new(async move {
+                ShellMessage::PlaylistDetailLoaded(
+                    executor.block_on(interaction.reorder_playlist_items(request)),
+                )
+            })) {
+                eprintln!("Nana 播放列表排序任务提交失败：{error}");
+            }
+        }
+        if let ShellMessage::MovePlaylistItem { item_id, direction } = &message
+            && let Some(playlist_id) = self.shell.selected_playlist_id.clone()
+        {
+            let mut item_ids = self.shell.playlist_item_ids.clone();
+            if let Some(index) = item_ids.iter().position(|id| id == item_id) {
+                let target = if *direction < 0 { index.checked_sub(1) } else { (index + 1 < item_ids.len()).then_some(index + 1) };
+                if let Some(target) = target {
+                    item_ids.swap(index, target);
+                    self.shell.reduce(ShellMessage::ReorderPlaylistItems { playlist_id, item_ids: item_ids.clone() });
+                    let message = ShellMessage::ReorderPlaylistItems { playlist_id, item_ids };
+                    // Continue through the normal service dispatch below.
+                    return self.update(message, windows, context);
+                }
+            }
+        }
+        if let ShellMessage::AddPlaylistItemsByPaths { playlist_id, paths } = &message
+            && let Some(repository_id) = self.shell.repository_id.clone()
+            && let Some(services) = self.services.as_ref()
+        {
+            let interaction = services.repository_interaction.clone();
+            let executor = services.executor.clone();
+            let request = backend::services::repository::PlaylistItemsByPathsAddRequest {
+                repo_id: repository_id,
+                playlist_id: playlist_id.clone(),
+                paths: paths.clone(),
+            };
+            if let Err(error) = context.run_task(Task::new(async move {
+                ShellMessage::PlaylistDetailLoaded(
+                    executor.block_on(interaction.add_playlist_items_by_paths(request)),
+                )
+            })) {
+                eprintln!("Nana 播放列表添加任务提交失败：{error}");
             }
         }
         if matches!(&message, ShellMessage::SavePlaylistName)

@@ -50,6 +50,9 @@ pub enum ShellMessage {
     DeletePlaylist(String),
     PlaylistDetailLoaded(Result<PlaylistDetail, String>),
     RemovePlaylistItem { playlist_id: String, item_id: String },
+    ReorderPlaylistItems { playlist_id: String, item_ids: Vec<String> },
+    MovePlaylistItem { item_id: String, direction: i8 },
+    AddPlaylistItemsByPaths { playlist_id: String, paths: Vec<String> },
     PlaylistNameDraftChanged(String),
     SavePlaylistName,
     SystemStatusLoaded(Result<crate::backend::services::runtime::ExternalApiConnectionStatus, String>),
@@ -94,12 +97,18 @@ pub enum ShellPage {
     PluginSettings,
     /// 任务中心有正在运行的任务。
     TaskRunning,
+    /// 播放会话正在使用统一宿主控制器。
+    PlaybackRunning,
+    /// 任务已请求取消但 worker 尚未退出。
+    TaskCancelling,
     /// 当前资源存在同步冲突。
     Conflict,
     /// 编辑器存在尚未保存的内容。
     UnsavedEdit,
     /// 应用设置页。
     Settings,
+    /// 设置校验失败，保留用户输入并阻止写入。
+    SettingsError,
     /// 系统日志页。
     Logs,
 }
@@ -115,9 +124,12 @@ impl ShellPage {
             Self::Playlists => "播放列表",
             Self::PluginSettings => "插件设置",
             Self::TaskRunning => "任务进行中",
+            Self::PlaybackRunning => "播放进行中",
+            Self::TaskCancelling => "任务取消中",
             Self::Conflict => "同步冲突",
             Self::UnsavedEdit => "编辑未保存",
             Self::Settings => "应用设置",
+            Self::SettingsError => "设置校验失败",
             Self::Logs => "系统日志",
         }
     }
@@ -132,9 +144,12 @@ impl ShellPage {
             Self::Playlists => "正在读取仓库播放列表",
             Self::PluginSettings => "正在编辑官方插件的原生设置",
             Self::TaskRunning => "任务活动",
+            Self::PlaybackRunning => "统一播放器正在输出当前项目",
+            Self::TaskCancelling => "正在等待任务 worker 退出",
             Self::Conflict => "本地与远端 Revision 不一致",
             Self::UnsavedEdit => "编辑内容尚未写入仓库",
             Self::Settings => "应用偏好和服务配置",
+            Self::SettingsError => "设置未写入，请修正输入后重试",
             Self::Logs => "最近的服务和插件事件",
         }
     }
@@ -149,9 +164,12 @@ impl ShellPage {
             Self::Playlists => "刷新列表",
             Self::PluginSettings => "保存插件设置",
             Self::TaskRunning => "查看任务",
+            Self::PlaybackRunning => "暂停播放",
+            Self::TaskCancelling => "查看任务",
             Self::Conflict => "查看冲突",
             Self::UnsavedEdit => "保存更改",
             Self::Settings => "应用设置",
+            Self::SettingsError => "返回设置",
             Self::Logs => "刷新日志",
         }
     }
@@ -186,6 +204,7 @@ pub struct ShellViewModel {
     pub selected_new_playlist_player_type_id: Option<String>,
     pub playlist_item_entries: Vec<String>,
     pub playlist_item_ids: Vec<String>,
+    pub playlist_item_status: String,
     pub active_tasks: usize,
     pub completed_tasks: usize,
     pub active_task_ids: Vec<String>,
@@ -225,6 +244,7 @@ impl Default for ShellViewModel {
             selected_new_playlist_player_type_id: None,
             playlist_item_entries: Vec::new(),
             playlist_item_ids: Vec::new(),
+            playlist_item_status: String::new(),
             active_tasks: 0,
             completed_tasks: 0,
             active_task_ids: Vec::new(),
@@ -259,6 +279,16 @@ impl ShellViewModel {
             ShellPage::TaskRunning => {
                 model.detail = "扫描默认资源库 · 1,284 / 3,040 个文件".into();
             }
+            ShellPage::PlaybackRunning => {
+                model.selected_playlist_id = Some("playlist-demo".into());
+                model.playlist_item_entries = vec!["track-01.mp3 · ready".into(), "track-02.mp3 · ready".into()];
+                model.playlist_item_ids = vec!["item-01".into(), "item-02".into()];
+                model.detail = "正在播放 · track-01.mp3 · 01:24 / 03:48 · 音量 80%".into();
+            }
+            ShellPage::TaskCancelling => {
+                model.active_task_ids = vec!["task-cancelling".into()];
+                model.detail = "正在取消扫描 · worker 尚未退出".into();
+            }
             ShellPage::Conflict => {
                 model.selected_path = Some("assets/cover.png".into());
                 model.detail = "远端修改时间较新，需要选择保留本地或远端版本".into();
@@ -269,6 +299,7 @@ impl ShellViewModel {
                 model.detail = "Markdown · 3 行未保存 · 最后保存于 2 分钟前".into();
             }
             ShellPage::Settings => model.detail = "主题、缩略图缓存和默认播放器".into(),
+            ShellPage::SettingsError => model.detail = "缩略图缓存上限必须在 64–16384 MB 之间".into(),
             ShellPage::Logs => model.detail = "最近 24 小时 · 18 条记录 · 0 个错误".into(),
             ShellPage::Loading => {}
         }
@@ -576,6 +607,13 @@ impl ShellViewModel {
                     .iter()
                     .map(|item| item.playlist_item_id.clone())
                     .collect();
+                self.playlist_item_status = detail
+                    .items
+                    .iter()
+                    .filter(|item| item.status != "ready")
+                    .map(|item| format!("{}: {}", item.filename, item.status_reason.clone().unwrap_or_else(|| item.status.clone())))
+                    .collect::<Vec<_>>()
+                    .join(" · ");
                 self.detail = format!("{} · {} 个项目", detail.playlist.name, detail.items.len());
             }
             ShellMessage::PlaylistDetailLoaded(Err(error)) => {
@@ -584,6 +622,28 @@ impl ShellViewModel {
             }
             ShellMessage::RemovePlaylistItem { item_id, .. } => {
                 self.detail = format!("正在移除播放列表项目 {item_id}…");
+            }
+            ShellMessage::ReorderPlaylistItems { .. } => {
+                self.detail = "正在保存播放列表顺序…".into();
+            }
+            ShellMessage::MovePlaylistItem { item_id, direction } => {
+                if let Some(index) = self.playlist_item_ids.iter().position(|id| id == &item_id) {
+                    let target = if direction < 0 { index.checked_sub(1) } else { (index + 1 < self.playlist_item_ids.len()).then_some(index + 1) };
+                    if let Some(target) = target {
+                        self.playlist_item_ids.swap(index, target);
+                        self.playlist_item_entries.swap(index, target);
+                        if let Some(playlist_id) = self.selected_playlist_id.clone() {
+                            self.detail = format!("正在保存播放列表顺序：{}", playlist_id);
+                        }
+                    }
+                }
+            }
+            ShellMessage::AddPlaylistItemsByPaths { paths, .. } => {
+                self.detail = if paths.is_empty() {
+                    "没有可添加的文件路径".into()
+                } else {
+                    format!("正在添加 {} 个播放列表项目…", paths.len())
+                };
             }
             ShellMessage::PlaylistNameDraftChanged(value) => {
                 self.playlist_name_draft = value;
@@ -842,6 +902,18 @@ pub fn mount_shell(
                         let playlist_id = view_model.selected_playlist_id.clone().unwrap_or_default();
                         widget(Stack::fill_row(8.0)).children((
                             text(label.clone()).key(format!("playlist-item-{item_id}")),
+                            button("上移")
+                                .key(format!("move-playlist-item-up-{item_id}"))
+                                .on_cx({
+                                    let item_id = item_id.clone();
+                                    move |_, _: &Activate, cx| cx.dispatch_program(ShellMessage::MovePlaylistItem { item_id: item_id.clone(), direction: -1 })
+                                }),
+                            button("下移")
+                                .key(format!("move-playlist-item-down-{item_id}"))
+                                .on_cx({
+                                    let item_id = item_id.clone();
+                                    move |_, _: &Activate, cx| cx.dispatch_program(ShellMessage::MovePlaylistItem { item_id: item_id.clone(), direction: 1 })
+                                }),
                             button("移除")
                                 .key(format!("remove-playlist-item-{item_id}"))
                                 .on_cx(move |_, _: &Activate, cx| {
@@ -854,6 +926,11 @@ pub fn mount_shell(
                     })
                     .collect::<Vec<_>>(),
             );
+            let playlist_item_status = if view_model.playlist_item_status.is_empty() {
+                None
+            } else {
+                Some(text(format!("不可播放项目：{}", view_model.playlist_item_status)).key("playlist-item-status"))
+            };
             let log_actions = if matches!(view_model.page, ShellPage::Loading) {
                 None
             } else {
@@ -917,6 +994,21 @@ pub fn mount_shell(
             } else {
                 None
             };
+            let playlist_add_current_directory = if is_playlists {
+                view_model.selected_playlist_id.clone().map(|playlist_id| {
+                    let path = view_model.current_directory.clone();
+                    button("添加当前目录").key("add-playlist-current-directory").on_cx(
+                        move |_, _: &Activate, cx| {
+                            cx.dispatch_program(ShellMessage::AddPlaylistItemsByPaths {
+                                playlist_id: playlist_id.clone(),
+                                paths: vec![path.clone()],
+                            });
+                        },
+                    )
+                })
+            } else {
+                None
+            };
             let preview_slot = if view_model.preview_pixels.is_some() {
                 "file-preview"
             } else {
@@ -951,8 +1043,10 @@ pub fn mount_shell(
                 plugin_config_editors,
                 playlist_actions,
                 playlist_item_actions,
+                playlist_item_status,
                 playlist_editor,
                 playlist_creator,
+                playlist_add_current_directory,
                 log_actions,
                 preview_node,
             ));
@@ -1069,5 +1163,17 @@ mod tests {
         model.reduce(ShellMessage::NewPlaylistNameChanged("我的列表".into()));
         model.reduce(ShellMessage::CreatePlaylist);
         assert_eq!(model.detail, "请先选择播放器类型");
+    }
+
+    #[test]
+    fn playlist_reorder_keeps_item_ids_and_labels_aligned() {
+        let mut model = ShellViewModel::for_page(ShellPage::Playlists);
+        model.selected_playlist_id = Some("playlist-1".into());
+        model.playlist_item_ids = vec!["a".into(), "b".into()];
+        model.playlist_item_entries = vec!["A".into(), "B".into()];
+        model.reduce(ShellMessage::MovePlaylistItem { item_id: "b".into(), direction: -1 });
+        assert_eq!(model.playlist_item_ids, ["b", "a"]);
+        assert_eq!(model.playlist_item_entries, ["B", "A"]);
+        assert!(model.detail.contains("正在保存播放列表顺序"));
     }
 }

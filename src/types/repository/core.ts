@@ -91,6 +91,58 @@ export type PlaylistItemStatus =
 
 export type PlaylistPlaybackMode = "listLoop" | "shuffle" | "singleLoop";
 
+/** Core-owned playback session state shared by desktop hosts. */
+export type PlaybackSessionStatus =
+  | "idle"
+  | "loading"
+  | "playing"
+  | "paused"
+  | "ended"
+  | "error";
+
+export type PlaybackSessionState = {
+  sessionId: string;
+  repoId: string;
+  playlistId: string;
+  playlistItemId?: string | null;
+  status: PlaybackSessionStatus;
+  currentTimeMs: number;
+  durationMs?: number | null;
+  volume: number;
+  canSeek: boolean;
+  canVolume: boolean;
+  error?: string | null;
+  updatedAt: string;
+};
+
+export type TaskProgressStatus =
+  | "queued"
+  | "running"
+  | "cancelling"
+  | "completed"
+  | "cancelled"
+  | "failed";
+
+export type TaskProgressSnapshot = {
+  taskId: string;
+  protocolId: string;
+  status: TaskProgressStatus;
+  phase?: string | null;
+  label?: string | null;
+  current?: number | null;
+  total?: number | null;
+  percent?: number | null;
+  error?: string | null;
+  updatedAt: string;
+};
+
+export type ApplicationSettings = {
+  theme: "light" | "dark" | "system";
+  thumbnailCacheLimitMb: number;
+  defaultPlaylistPlayerTypeId?: string | null;
+  closeBehavior: "confirm" | "minimizeToTray" | "quit";
+};
+
 export type PlaylistSummary = {
   playlistId: string;
   repoId: string;

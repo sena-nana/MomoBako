@@ -20,9 +20,12 @@ cargo test -p momobako-nana --test offscreen_acceptance -- --nocapture
 | 选中文件 / 预览入口 | 1200×800 / 默认 | `state-selected-file.png` + `state-selected-file.json` |
 | 插件设置 | 1200×800 / 默认 | `state-plugin-settings.png` + `state-plugin-settings.json` |
 | 任务进行中 | 1200×800 / 默认 | `state-task-running.png` + `state-task-running.json` |
+| 播放进行中 | 1200×800 / 默认 | `state-playback-running.png` + `state-playback-running.json` |
+| 任务取消中 | 1200×800 / 默认 | `state-task-cancelling.png` + `state-task-cancelling.json` |
 | 冲突 | 1200×800 / 默认 | `state-conflict.png` + `state-conflict.json` |
 | 编辑未保存 | 1200×800 / 默认 | `state-unsaved-edit.png` + `state-unsaved-edit.json` |
 | 应用设置 / 系统日志 | 1200×800 / 默认 | `state-settings.*` + `state-logs.*` |
+| 设置校验失败 | 1200×800 / 默认 | `state-settings-error.png` + `state-settings-error.json` |
 
 JSON 同时保存可访问性树、`scene_probe` 布局/绘制信息和 `(20,20)` 命中结果，
 与对应 PNG 来自同一个 `RuntimeAgentSession`。
