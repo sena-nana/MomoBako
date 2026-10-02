@@ -161,7 +161,7 @@ fn path_alpha(coverage: f32, fringe: bool) -> f32 {
 @fragment
 fn path_fs_main(
     input: PathVertexOutput,
-    @builtin(sample_mask) samples: u32,
+    @builtin(sample_index) sample: u32,
 ) -> @location(0) vec4<f32> {
     // Coverage is linear across a triangle; its screen gradient, taken while
     // every invocation of the quad still runs, reaches any sample from here.
@@ -186,20 +186,9 @@ fn path_fs_main(
     let fringe = input.fringe > 0.5;
     var coverage = path_alpha(input.coverage, fringe);
     if PATH_SAMPLES == 4u {
-        // A fringe's inner and outer rings are geometry edges inside its
-        // ramp, where the samples this triangle leaves to its neighbour get
-        // the interior's 1 or nothing. Those are the ramp's own values there,
-        // so the ramp averaged over the samples it covers makes the pixel
-        // resolve to the ramp averaged over all four, without shading each.
-        var sum = 0.0;
-        var covered = 0.0;
-        for (var i = 0u; i < 4u; i = i + 1u) {
-            if (samples & (1u << i)) != 0u {
-                sum += path_alpha(input.coverage + dot(ramp, PATH_SAMPLE_OFFSETS[i]), fringe);
-                covered += 1.0;
-            }
-        }
-        coverage = sum / max(covered, 1.0);
+        // Shade the actual sample; GLES exposes sample masks as int arrays,
+        // so a scalar mask input cannot be translated portably by Naga.
+        coverage = path_alpha(input.coverage + dot(ramp, PATH_SAMPLE_OFFSETS[sample]), fringe);
     }
     let alpha = coverage * clip_cover;
     if alpha <= 0.0 {
