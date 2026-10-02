@@ -509,4 +509,5 @@ fn entry_message(entry: &FileBrowserEntry) -> ShellMessage {
     } else {
         ShellMessage::SelectFile { path: entry.path.clone(), asset_id: entry.asset_id.clone() }
     }
-}\n
+}
+
