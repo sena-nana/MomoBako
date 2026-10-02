@@ -736,7 +736,7 @@ export function ensureRepositoryWorkspace(
 }
 
 export function resetRepositoryWorkspaceForTests() {
-  startupGeneration += 1;
+  cancelRepositoryWorkspaceStartup();
   clearPlaylistDetailCache();
   repositories.value = [];
   resetWorkspaceSelection();
@@ -772,4 +772,13 @@ export function resetRepositoryWorkspaceForTests() {
   structureUpdatedListenerPromise = null;
   startupSyncLogListenerPromise = null;
   startupPromise = null;
+}
+
+/**
+ * 在宿主壳层卸载时使未完成的启动链路失效，避免旧 Runtime 继续写入新页面状态。
+ */
+export function cancelRepositoryWorkspaceStartup() {
+  startupGeneration += 1;
+  startupPromise = null;
+  startupTargetRepoId = null;
 }
