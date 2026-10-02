@@ -262,6 +262,8 @@ impl ApplicationState for MomoBakoApplication {
             let (active, completed) = services.tasks.activity_snapshot();
             self.shell.active_task_ids = services.tasks.active_task_ids();
             self.shell.reduce(ShellMessage::TaskSnapshotLoaded { active, completed });
+            self.shell
+                .reduce(ShellMessage::TaskProgressLoaded(services.tasks.progress_snapshots()));
         }
         if matches!(&message, ShellMessage::Navigate(ShellPage::Settings))
             && let Some(services) = self.services.as_ref()
