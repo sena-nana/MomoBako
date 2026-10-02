@@ -37,6 +37,11 @@ impl MutsukiTaskViewModel {
         self.runtime.active_task_ids()
     }
 
+    /// 返回任务中心可展示的阶段、进度与终态快照。
+    pub fn progress_snapshots(&self) -> Vec<crate::services::repository::TaskProgressSnapshot> {
+        self.runtime.progress_snapshots()
+    }
+
     /// 请求取消一个正在排队或运行中的任务。
     pub fn cancel(&self, task_id: &str) -> bool {
         self.runtime.cancel(task_id)

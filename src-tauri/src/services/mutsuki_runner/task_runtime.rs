@@ -24,6 +24,7 @@ use super::protocols::{
     PROTOCOL_PLAYBACK_PREPARE, PROTOCOL_REPOSITORY_ACTION_RUN, PROTOCOL_THUMBNAIL_REQUEST,
 };
 use crate::services::repository::CancellationCheck;
+use crate::services::repository::TaskProgressSnapshot;
 use crate::services::runtime::RepositoryRuntime;
 
 const INTERACTIVE_QUEUE_LIMIT: usize = 32;
@@ -153,6 +154,7 @@ struct RuntimeState {
     background_tx: mpsc::Sender<TaskRequest>,
     next_task_id: AtomicU64,
     cancellations: Mutex<BTreeMap<String, Arc<MomoCancellation>>>,
+    progress: Mutex<BTreeMap<String, TaskProgressSnapshot>>,
     outcomes: Mutex<OutcomeStore>,
 }
 
@@ -205,6 +207,7 @@ impl MomoTaskRuntime {
             background_tx,
             next_task_id: AtomicU64::new(1),
             cancellations: Mutex::new(BTreeMap::new()),
+            progress: Mutex::new(BTreeMap::new()),
             outcomes: Mutex::new(OutcomeStore::new(outcome_capacity, outcome_retention)),
         });
         let task_runtime = Self { state };
@@ -247,6 +250,7 @@ impl MomoTaskRuntime {
             .and_then(|tasks| tasks.get(task_id).cloned());
         if let Some(cancellation) = cancellation {
             cancellation.cancel();
+            self.update_progress(task_id, |snapshot| snapshot.status = "cancelling".into());
             true
         } else {
             false
@@ -279,6 +283,15 @@ impl MomoTaskRuntime {
             .unwrap_or_default()
     }
 
+    /// Returns stable task progress snapshots for native task-center projections.
+    pub fn progress_snapshots(&self) -> Vec<TaskProgressSnapshot> {
+        self.state
+            .progress
+            .lock()
+            .map(|snapshots| snapshots.values().cloned().collect())
+            .unwrap_or_default()
+    }
+
     async fn execute_value(
         &self,
         task_id: String,
@@ -286,6 +299,22 @@ impl MomoTaskRuntime {
         payload: Value,
     ) -> TaskResult {
         let cancellation = Arc::new(MomoCancellation::new());
+        self.state
+            .progress
+            .lock()
+            .map_err(|_| "Momo task progress state poisoned".to_string())?
+            .insert(task_id.clone(), TaskProgressSnapshot {
+                task_id: task_id.clone(),
+                protocol_id: protocol_id.clone(),
+                status: "queued".into(),
+                phase: None,
+                label: None,
+                current: None,
+                total: None,
+                percent: None,
+                error: None,
+                updated_at: progress_timestamp(),
+            });
         self.state
             .cancellations
             .lock()
@@ -305,8 +334,14 @@ impl MomoTaskRuntime {
             &self.state.background_tx
         };
         if let Err(error) = sender.send(request).await {
+            let error_message = error.to_string();
+            self.update_progress(&task_id, |snapshot| {
+                snapshot.status = "failed".into();
+                snapshot.error = Some(format!("任务队列关闭：{error_message}"));
+                snapshot.updated_at = progress_timestamp();
+            });
             self.remove_task(&task_id);
-            return Err(format!("Momo task lane closed: {error}"));
+            return Err(format!("Momo task lane closed: {error_message}"));
         }
         match result_rx.await {
             Ok(result) => result,
@@ -325,6 +360,12 @@ impl MomoTaskRuntime {
             cancellation,
             completion,
         } = request;
+        if !cancellation.is_cancelled() {
+            self.update_progress(&task_id, |snapshot| {
+                snapshot.status = "running".into();
+                snapshot.updated_at = progress_timestamp();
+            });
+        }
         let task = Task::new(task_id.clone(), protocol_id.clone(), payload);
         let (result, cancelled) = catch_unwind(AssertUnwindSafe(|| {
             let mut events = Vec::new();
@@ -337,11 +378,23 @@ impl MomoTaskRuntime {
                         .into_iter()
                         .filter(|event| event.kind == "momobako.task.progress")
                         .filter_map(|event| event.payload.get("progress").cloned())
-                        .collect();
+                        .collect::<Vec<_>>();
+                    if let Some(progress) = events.last() {
+                        self.update_progress(&task_id, |snapshot| apply_progress(snapshot, progress));
+                    }
+                    self.update_progress(&task_id, |snapshot| {
+                        snapshot.status = "completed".into();
+                        snapshot.updated_at = progress_timestamp();
+                    });
                     (Ok((output, events)), false)
                 }
                 Err(error) => {
                     let cancelled = runtime_error_is_cancelled(&error);
+                    self.update_progress(&task_id, |snapshot| {
+                        snapshot.status = if cancelled { "cancelled" } else { "failed" }.into();
+                        snapshot.error = Some(error.to_string());
+                        snapshot.updated_at = progress_timestamp();
+                    });
                     (
                         Err(format!(
                             "{} [{}] {:?}",
@@ -384,6 +437,14 @@ impl MomoTaskRuntime {
             }
         }
         self.remove_task(&task_id);
+    }
+
+    fn update_progress(&self, task_id: &str, update: impl FnOnce(&mut TaskProgressSnapshot)) {
+        if let Ok(mut snapshots) = self.state.progress.lock() {
+            if let Some(snapshot) = snapshots.get_mut(task_id) {
+                update(snapshot);
+            }
+        }
     }
 
     fn remove_task(&self, task_id: &str) {
@@ -488,6 +549,29 @@ impl MomoTaskRuntime {
             ))
         }
     }
+}
+
+fn progress_timestamp() -> String {
+    time::OffsetDateTime::now_utc()
+        .format(&time::format_description::well_known::Rfc3339)
+        .unwrap_or_default()
+}
+
+fn apply_progress(snapshot: &mut TaskProgressSnapshot, value: &Value) {
+    if let Some(value) = value.get("phase").and_then(Value::as_str) {
+        snapshot.phase = Some(value.to_owned());
+    }
+    if let Some(value) = value.get("label").or_else(|| value.get("message")).and_then(Value::as_str) {
+        snapshot.label = Some(value.to_owned());
+    }
+    snapshot.current = value.get("current").or_else(|| value.get("completed")).and_then(Value::as_u64);
+    snapshot.total = value.get("total").and_then(Value::as_u64);
+    snapshot.percent = value
+        .get("percent")
+        .or_else(|| value.get("percentage"))
+        .and_then(Value::as_f64)
+        .map(|value| value.clamp(0.0, 100.0) as f32);
+    snapshot.updated_at = progress_timestamp();
 }
 
 impl PluginTaskGateway for MomoTaskRuntime {

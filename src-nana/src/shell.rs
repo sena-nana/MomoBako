@@ -11,7 +11,7 @@ use nana_ui::runtime::{
 use crate::backend::services::repository::{
     AssetDetail, FileBrowserEntry, FileBrowserSnapshot, FilePreviewSourceResponse, RepositorySnapshot,
     PluginManifest, PlaylistSummary, RepositorySummary, SystemLogPage,
-    PluginConfigSnapshot, PlaylistDetail, PlaylistPlayerContribution,
+    PluginConfigSnapshot, PlaylistDetail, PlaylistPlayerContribution, TaskProgressSnapshot,
 };
 
 /// Nana Runtime 传递给应用状态的壳层交互消息。
@@ -57,6 +57,7 @@ pub enum ShellMessage {
     SavePlaylistName,
     SystemStatusLoaded(Result<crate::backend::services::runtime::ExternalApiConnectionStatus, String>),
     TaskSnapshotLoaded { active: usize, completed: usize },
+    TaskProgressLoaded(Vec<TaskProgressSnapshot>),
     CancelTask(String),
     WindowAction(WindowAction),
 }
@@ -208,6 +209,7 @@ pub struct ShellViewModel {
     pub active_tasks: usize,
     pub completed_tasks: usize,
     pub active_task_ids: Vec<String>,
+    pub task_progress: Vec<TaskProgressSnapshot>,
     pub system_status: Option<String>,
     pub selected_plugin_id: Option<String>,
     pub plugin_config_keys: Vec<String>,
@@ -248,6 +250,7 @@ impl Default for ShellViewModel {
             active_tasks: 0,
             completed_tasks: 0,
             active_task_ids: Vec::new(),
+            task_progress: Vec::new(),
             system_status: None,
             selected_plugin_id: None,
             plugin_config_keys: Vec::new(),
@@ -663,6 +666,26 @@ impl ShellViewModel {
                 self.completed_tasks = completed;
                 self.detail = format!("{} 个运行中任务 · {} 个近期完成任务", active, completed);
             }
+            ShellMessage::TaskProgressLoaded(progress) => {
+                self.task_progress = progress;
+                if let Some(snapshot) = self
+                    .task_progress
+                    .iter()
+                    .find(|snapshot| snapshot.status == "running" || snapshot.status == "cancelling")
+                {
+                    self.detail = format!(
+                        "{} · {}",
+                        snapshot
+                            .label
+                            .clone()
+                            .unwrap_or_else(|| snapshot.protocol_id.clone()),
+                        snapshot
+                            .percent
+                            .map(|value| format!("{value:.0}%"))
+                            .unwrap_or_else(|| "处理中".into())
+                    );
+                }
+            }
             ShellMessage::SystemStatusLoaded(Ok(status)) => {
                 self.page = ShellPage::Settings;
                 self.system_status = Some(format!(
@@ -752,6 +775,32 @@ pub fn mount_shell(
                             .on_cx(move |_, _: &Activate, cx| {
                                 cx.dispatch_program(ShellMessage::CancelTask(task_id.clone()));
                             })
+                    })
+                    .collect::<Vec<_>>(),
+            );
+            let task_progress = widget(Stack::fill_column(6.0)).children(
+                view_model
+                    .task_progress
+                    .iter()
+                    .take(8)
+                    .map(|snapshot| {
+                        let status = match snapshot.status.as_str() {
+                            "cancelling" => "取消中",
+                            "completed" => "已完成",
+                            "cancelled" => "已取消",
+                            "failed" => "失败",
+                            "queued" => "排队中",
+                            _ => "进行中",
+                        };
+                        text(format!(
+                            "{} · {}",
+                            snapshot
+                                .label
+                                .clone()
+                                .unwrap_or_else(|| snapshot.protocol_id.clone()),
+                            status
+                        ))
+                        .key(format!("task-progress-{}", snapshot.task_id))
                     })
                     .collect::<Vec<_>>(),
             );
@@ -1037,6 +1086,7 @@ pub fn mount_shell(
             let workspace_actions = widget(Stack::fill_column(8.0)).children((
                 status_summary,
                 task_actions,
+                task_progress,
                 file_actions,
                 plugin_actions,
                 plugin_config_actions,
@@ -1120,6 +1170,7 @@ fn entry_message(entry: &FileBrowserEntry) -> ShellMessage {
 #[cfg(test)]
 mod tests {
     use super::{ShellMessage, ShellPage, ShellViewModel};
+    use crate::backend::services::repository::TaskProgressSnapshot;
 
     #[test]
     fn shell_messages_reduce_to_user_visible_states() {
@@ -1175,5 +1226,39 @@ mod tests {
         assert_eq!(model.playlist_item_ids, ["b", "a"]);
         assert_eq!(model.playlist_item_entries, ["B", "A"]);
         assert!(model.detail.contains("正在保存播放列表顺序"));
+    }
+
+    #[test]
+    fn task_progress_updates_running_detail_and_retains_terminal_rows() {
+        let mut model = ShellViewModel::for_page(ShellPage::TaskRunning);
+        model.reduce(ShellMessage::TaskProgressLoaded(vec![
+            TaskProgressSnapshot {
+                task_id: "task-1".into(),
+                protocol_id: "momobako.sync".into(),
+                status: "running".into(),
+                phase: Some("scanning".into()),
+                label: Some("扫描文件".into()),
+                current: Some(4),
+                total: Some(10),
+                percent: Some(40.0),
+                error: None,
+                updated_at: "now".into(),
+            },
+            TaskProgressSnapshot {
+                task_id: "task-2".into(),
+                protocol_id: "momobako.sync".into(),
+                status: "cancelled".into(),
+                phase: None,
+                label: Some("旧任务".into()),
+                current: None,
+                total: None,
+                percent: None,
+                error: Some("用户取消".into()),
+                updated_at: "now".into(),
+            },
+        ]));
+        assert_eq!(model.task_progress.len(), 2);
+        assert!(model.detail.contains("扫描文件"));
+        assert!(model.detail.contains("40%"));
     }
 }
