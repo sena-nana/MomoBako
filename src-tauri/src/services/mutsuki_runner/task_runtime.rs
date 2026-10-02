@@ -392,7 +392,7 @@ impl MomoTaskRuntime {
                     let cancelled = runtime_error_is_cancelled(&error);
                     self.update_progress(&task_id, |snapshot| {
                         snapshot.status = if cancelled { "cancelled" } else { "failed" }.into();
-                        snapshot.error = Some(error.to_string());
+                        snapshot.error = Some(format!("{:?}", error));
                         snapshot.updated_at = progress_timestamp();
                     });
                     (

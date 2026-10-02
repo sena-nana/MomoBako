@@ -98,6 +98,7 @@ import { refreshHardlinkCandidates, refreshRepositorySnapshot, refreshRepository
 import { refreshSmartFolders, selectSmartFolder } from "./smartFolders";
 
 let startupPromise: Promise<void> | null = null;
+let startupGeneration = 0;
 let repositoryBackgroundToken = 0;
 let cancelRepositoryBackgroundTask: (() => void) | null = null;
 let unlistenStructureUpdated: UnlistenFn | null = null;
@@ -659,13 +660,16 @@ export function ensureRepositoryWorkspace(
   if (workspaceStartup.value.status === "ready") return;
   if (startupPromise) return startupPromise;
 
+  const generation = ++startupGeneration;
   startupPromise = (async () => {
+    const isCurrent = () => generation === startupGeneration;
     workspaceStartup.value = { ...createInitialWorkspaceStartup(), status: "loading" };
     startupLogSequence = 0;
     error.value = null;
     setStartupLoadingFlags(true);
     ensureStructureUpdatedListener();
     await ensureStartupSyncLogListener();
+    if (!isCurrent()) return;
     emitStartupLog("info", "startupStart", "首屏启动流程开始。", {
       totalSteps: STARTUP_TOTAL_STEPS,
       activeRepoId: activeRepoId.value,
@@ -678,6 +682,7 @@ export function ensureRepositoryWorkspace(
         step: 1,
       });
       const items = await listRepositories();
+      if (!isCurrent()) return;
       repositories.value = items;
       emitStartupLog("info", "repositoryListSuccess", "首屏启动资源库列表读取完成。", {
         step: 1,
@@ -687,12 +692,14 @@ export function ensureRepositoryWorkspace(
       });
 
       await loadInitialRepository(items, selectAsset);
+      if (!isCurrent()) return;
       setWorkspaceStartupProgress(4, "读取首屏目录", "加载应用配置、插件设置和首屏辅助数据。");
       emitStartupLog("info", "settingsStart", "首屏启动开始加载应用配置与插件设置。", {
         step: 4,
         repoId: activeRepoId.value,
       }, activeRepoId.value);
       await loadSettingsData();
+      if (!isCurrent()) return;
       emitStartupLog("info", "settingsSuccess", "首屏启动应用配置与插件设置加载完成。", {
         step: 4,
         repoId: activeRepoId.value,
@@ -705,6 +712,7 @@ export function ensureRepositoryWorkspace(
         playlistCount: playlists.value.length,
       }, activeRepoId.value);
     } catch (cause) {
+      if (!isCurrent()) return;
       const message = cause instanceof Error ? cause.message : String(cause);
       const failedRepoId = activeRepoId.value ?? startupTargetRepoId;
       error.value = message;
@@ -717,6 +725,7 @@ export function ensureRepositoryWorkspace(
         targetRepoId: startupTargetRepoId,
       }, failedRepoId);
     } finally {
+      if (!isCurrent()) return;
       setStartupLoadingFlags(false);
       startupTargetRepoId = null;
       startupPromise = null;
@@ -727,6 +736,7 @@ export function ensureRepositoryWorkspace(
 }
 
 export function resetRepositoryWorkspaceForTests() {
+  startupGeneration += 1;
   clearPlaylistDetailCache();
   repositories.value = [];
   resetWorkspaceSelection();
