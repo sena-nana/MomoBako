@@ -21,5 +21,7 @@ yarn test:nana:offscreen
 `visual-review.json` 保存自动化视觉检查项和问题记录入口。离屏验收沿用生产
 Runtime/GPU 所有权链，不创建第二棵 UI 树。
 
+每个场景在写出 PNG 之前检查清屏色等于该主题 `SemanticPalette::background`。浅色和深色因此不会共用同一个写死背景。
+
 离屏证据不替代 Windows 真窗口、拖放、IME、托盘、UIA/AccessKit、真实 GPU 设备和发布包
 的设备验收。

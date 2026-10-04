@@ -15,8 +15,10 @@ use nana_ui::{
 pub mod shell;
 use shell::{PreviewPixels, ShellMessage, ShellPage, ShellViewModel, WindowAction, mount_shell};
 
+pub mod capability;
 pub mod host_api;
 pub mod services;
+pub mod theme_map;
 
 /// Nana 宿主直接使用共享领域服务 crate，迁移期 Tauri 仍保留同一服务源码的
 /// 适配入口；此 re-export 让后续 ViewModel 接线不需要再穿过 command 层。

@@ -4243,6 +4243,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "nana-icons-tabler"
+version = "0.1.0"
+source = "git+https://github.com/sena-nana/NanaUI.git?rev=ee94106746b13f356af17586ed5e35ed78f9eb40#ee94106746b13f356af17586ed5e35ed78f9eb40"
+dependencies = [
+ "nana-ui-core",
+]
+
+[[package]]
 name = "nana-js-engine"
 version = "0.1.0"
 source = "git+https://github.com/sena-nana/NanaUI.git?rev=ee94106746b13f356af17586ed5e35ed78f9eb40#ee94106746b13f356af17586ed5e35ed78f9eb40"
@@ -4292,6 +4300,7 @@ dependencies = [
  "nana-diagnostics",
  "nana-frame-exchange",
  "nana-gpu",
+ "nana-icons-tabler",
  "nana-svg-raster",
  "nana-text",
  "nana-ui-core",
