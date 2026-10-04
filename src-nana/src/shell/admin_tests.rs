@@ -257,7 +257,8 @@ fn toggle_and_install_keep_the_current_page() {
     send(&mut model, AdminMessage::InstallArchive(Some("  ".into())));
     send(&mut model, AdminMessage::ChooseArchive);
     assert!(matches!(model.admin.take_effects().pop(), Some(AdminEffect::RequestOpenDialog)));
-    assert!(!support::open_dialog_available());
+    assert!(support::open_dialog_available());
+    assert_eq!(model.admin.action_message, "正在选择插件包…");
     send(&mut model, AdminMessage::InstallArchive(Some("plugin.momoplug".into())));
     assert!(matches!(model.admin.take_effects().pop(), Some(AdminEffect::Install(path)) if path == "plugin.momoplug"));
 }
@@ -410,7 +411,7 @@ fn settings_audio_corner_external_api_and_backends() {
     assert!(choices.iter().any(|choice| choice.unavailable && choice.label.contains("不可用")));
     assert!(notice.contains("已回退到"));
     assert!(!support::clipboard_available());
-    assert!(!support::save_dialog_available());
+    assert!(support::save_dialog_available());
 
     send(&mut model, AdminMessage::SetCornerStyle("square".into()));
     assert_eq!(model.admin.corner_style, support::default_corner_style());
@@ -445,7 +446,8 @@ fn settings_audio_corner_external_api_and_backends() {
     assert!(matches!(model.admin.take_effects().pop(), Some(AdminEffect::CopyText(_))));
     send(&mut model, AdminMessage::ExportExternal);
     assert!(matches!(model.admin.take_effects().pop(), Some(AdminEffect::RequestSaveDialog { .. })));
-    assert_eq!(model.admin.external_error, "导出失败：宿主保存对话框尚未接通");
+    assert!(model.admin.external_error.is_empty());
+    assert_eq!(model.admin.external_message, "正在选择导出位置…");
     send(&mut model, AdminMessage::CompleteExport(None));
     assert!(model.admin.take_effects().is_empty());
     send(&mut model, AdminMessage::CompleteExport(Some("external-api.json".into())));

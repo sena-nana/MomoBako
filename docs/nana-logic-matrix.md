@@ -181,23 +181,23 @@
 
 这些行由 `src-nana/src/shell/admin_tests.rs` 覆盖状态机。设置包走 `PluginViewModel` 的 `list_plugins`、`list_plugin_hook_executions`、`get_cache_snapshot` 和 `get_api_design_snapshot`。安装、删除、启停、配置读写和数据目录走同一个 ViewModel。外部连接导出走 `SystemViewModel::write_binary_file`。仓库动作列表走 `RepositoryInteractionViewModel::list_repository_actions`，执行走 `MutsukiTaskViewModel::execute` 的 `momobako.repository.action.run`，完成后用 `FileBrowserViewModel::get_file_browser` 刷新当前目录。这些调用没有替身测试。圆角写到设置目录旁边的 `corners.json`，缺文件或坏 JSON 用平台默认，用户改过才写回。音频播放器偏好仍走阶段 5 的偏好文件，不写入 `ApplicationSettings.default_playlist_player_type_id`。15 个旧验收场景仍用原来的设置、插件、日志和任务按钮。下面每一行都未离屏。
 
-实况设置表面只在不是 `acceptance_scene`、页面是设置或设置错误时出现。动作、工具页、日志和任务还要求启动就绪且主区有仓库。生产工具页从空列表开始。剪贴板、保存对话框、打开对话框和目录揭示没有宿主桥。验收页的删除和启停仍立刻走原来的 `PluginsLoaded`，并切到插件设置页；实况确认、安装和启停用 `PluginsReplaced`，不切页。设置页读到插件配置时留在设置页。非法数字不提交。日志里的插件和仓库选项按字典序。
+实况设置表面只在不是 `acceptance_scene`、页面是设置或设置错误时出现。动作、工具页、日志和任务还要求启动就绪且主区有仓库。生产工具页从空列表开始。剪贴板和目录揭示没有宿主桥。保存对话框和打开对话框会发出 Nana 的 `OpenFileDialog`，系统对话框的结果仍要设备验证。验收页的删除和启停仍立刻走原来的 `PluginsLoaded`，并切到插件设置页；实况确认、安装和启停用 `PluginsReplaced`，不切页。设置页读到插件配置时留在设置页。非法数字不提交。日志里的插件和仓库选项按字典序。
 
-未完成，不能记成已测试：把 Vue 设置页、工具页、预览或播放器组件挂进 Nana；真实剪贴板、保存对话框、打开对话框和系统目录揭示；系统媒体会话；真实解码器；语法高亮；拖放和关闭确认；动作进度的中途重绘；`execute` 返回任务编号之前取消动作；这批实况表面的新离屏场景。
+未完成，不能记成已测试：把 Vue 设置页、工具页、预览或播放器组件挂进 Nana；真实剪贴板和系统目录揭示；保存对话框和打开对话框的操作系统结果；系统媒体会话；真实解码器；语法高亮；动作进度的中途重绘；`execute` 返回任务编号之前取消动作；这批实况表面的新离屏场景。
 
 | 来源 | 触发 | 服务 | 结果 | 可见性 | 状态 |
 | --- | --- | --- | --- | --- | --- |
 | `Settings.vue` 音频播放器 | 选择一个实现，或空白 | 阶段 5 的偏好写入，没有替身 | 只认 `momobako.player.audio`；空白清除偏好；缺失项显示但不可选；解析仍用音频序列类型 | “默认音频播放器” / “所选播放器当前不可用，已回退到 …” | 已测试（未离屏） |
 | `useCornerStyle` 圆角 | 样式或半径 | 写入 `corners.json` | 只接受 smooth 和 round；半径钳在 0–20；未知样式和坏数字忽略；缺文件不立刻写回 | “平滑” / “普通” | 已测试（未离屏） |
 | `Settings.vue` 后端计数 | 仓库列表成功 | 无 | 按后端插件累计，保留首次出现的顺序 | “本地 (2)” / “无” | 已测试（未离屏） |
-| `Settings.vue` 外部连接 | 复制或导出 | 有路径时 `write_binary_file`，没有替身 | 空值不复制；令牌取前 10 和后 6 位；取消导出不改提示；写出成功后记文件名 | “复制失败：宿主剪贴板尚未接通” / “导出失败：宿主保存对话框尚未接通” / “external-api.json 已导出。” | 已测试（未离屏） |
+| `Settings.vue` 外部连接 | 复制或导出 | 有路径时 `write_binary_file`，没有替身；导出先发 `OpenFileDialog` | 空值不复制；令牌取前 10 和后 6 位；取消导出不写文件；写出成功后记文件名 | “复制失败：宿主剪贴板尚未接通” / “正在选择导出位置…” / “external-api.json 已导出。” | 已测试（未离屏） |
 | `Settings.vue` 设置包 | 打开设置页 | 四个插件读取，没有替身 | 任一失败则四份都不替换，保留上一份 | “Nana 设置页数据读取失败” | 已测试（未离屏） |
 | `repository.select` | 插件事件带来仓库 id | 非空白时走现有仓库选择 | 空白忽略，当前仓库不变 | 当前仓库不变 | 已测试（未离屏） |
 | `PluginManagerPanel.vue` 分组和搜索 | 插件列表或关键词 | 无 | 分类顺序是来源、库类型、解析、预览、服务、未分类；未知分类进未分类；搜索不区分大小写 | “3 个插件 · 原生贡献接口优先” | 已测试（未离屏） |
 | `PluginManagerPanel.vue` 删除 | 用户插件确认，或非用户插件 | `delete_plugin`，没有替身 | 先进入待确认，取消不请求；非用户插件忽略；成功文案在列表替换后出现 | “确认删除” / “插件已删除。” | 已测试（未离屏） |
 | `PluginManagerPanel.vue` 字段 | 数字、选择、布尔、JSON | `set_plugin_config_value` 或 `delete_plugin_config_value`，没有替身 | 空数字或空选项是重置；非法 JSON 不请求；空 JSON 文本按 null 保存 | “原始 不是有效 JSON。” / “插件设置已保存。” | 已测试（未离屏） |
 | `PluginManagerPanel.vue` 设置页 | 再次打开同一插件，或路由到未知插件 | 已有快照时不重复 `get_plugin_config` | 第二次折叠；未知和空白 id 忽略；设置页加载配置不跳走 | “插件设置” | 已测试（未离屏） |
-| `PluginManagerPanel.vue` 启停和安装 | 实况启停，或选择安装包 | `set_plugin_enabled`、`install_plugin_from_archive`，没有替身 | 不切到插件设置页；空白路径不安装；打开对话框没有宿主桥 | “插件已禁用。” / “插件已安装。” | 已测试（未离屏） |
+| `PluginManagerPanel.vue` 启停和安装 | 实况启停，或选择安装包 | `set_plugin_enabled`、`install_plugin_from_archive`，没有替身；选择安装包先发 `OpenFileDialog` | 不切到插件设置页；空白路径不安装；取消对话框不安装 | “插件已禁用。” / “插件已安装。” / “正在选择插件包…” | 已测试（未离屏） |
 | `PluginManagerPanel.vue` Vue 页面 | 自定义设置页或来源账号 | 不挂 Vue 组件 | 原生字段仍可编辑 | “插件设置页仍是 Vue 页面，需要升级为 Nana 原生设置字段” / “账号与来源仍是 Vue 页面，需要升级为 Nana 原生设置” | 已测试（未离屏） |
 | `PluginManagerPanel.vue` 数据目录 | 打开插件目录 | `get_plugin_data_directory`，没有替身 | 查到路径后仍因没有目录揭示而失败 | “插件设置目录打开失败。” | 已测试（未离屏） |
 | `PluginManagerPanel.vue` 依赖 | 依赖状态为空或有状态 | 无 | 状态列表为空时用 requires 和 optional 的数量 | “必需 2 / 可选 0” / “缺失” / “已启用” | 已测试（未离屏） |
@@ -210,11 +210,27 @@
 
 ## Phase 7 宿主输入
 
-| 来源 | 状态 |
-| --- | --- |
-| `src/services/repositoryApi/core.ts` | 未读 |
-| `src/pages/workspace/useWorkspaceDragDrop.ts` | 未读 |
-| `src/pages/workspace/dragBehavior.ts` | 未读 |
-| `src/layouts/AppShell.vue` 的关闭确认 | 未读 |
+这些行由 `src-nana/src/shell/input_tests.rs` 覆盖状态机。内部移动走已有的 `momobako.entry.move`，外部导入走 `momobako.entry.import`，空库附加走 `momobako.repository.attach`。这些调用没有替身测试。打开路径、打开网址、目录揭示和拖出文件只记录 `HostRequest`，不调用系统，也不记访问。关闭设置里的 `confirm` 总是先询问；`quit` 在壳层或元数据没有未保存修改时关闭，有修改时询问；`minimizeToTray` 记录托盘请求并保持窗口。保存和打开对话框排队为 `WindowCommand::OpenFileDialog`。15 个旧验收场景不挂关闭确认条。下面每一行都未离屏。
+
+声明式视图没有 `set_drop_target`，实况树没有挂 `FileDropEvent`。拖放几何和放置决定由消息归约覆盖。卸载拖放只清标记，不清错误。
+
+未完成，不能记成已测试：真实剪贴板；用系统程序打开、目录揭示和文件拖出；托盘的左键恢复和菜单退出；系统文件对话框的操作系统结果；把拖放挂到实况控件上；这批实况表面的新离屏场景。拖放、托盘、IME 和真窗口仍留在 `nana-device-matrix.md`。
+
+| 来源 | 触发 | 服务 | 结果 | 可见性 | 状态 |
+| --- | --- | --- | --- | --- | --- |
+| `dragBehavior.ts` 路径 | 规范化或过滤移动路径 | 无 | 反斜杠转正斜杠并去掉首尾斜杠；父路径取最后一个斜杠之前；空白、放到自身、父目录已是目标的路径丢掉 | 无新文案 | 已测试（未离屏） |
+| `dragBehavior.ts` 外部拖出 | 指针在窗口外且距离达到 72 | 无 | 窗口内或距离不够保持内部拖放；指针离开和失焦只看距离，不要求仍在窗外 | 无新文案 | 已测试（未离屏） |
+| `useWorkspaceDragDrop.ts` 起点 | 按下一条条目 | 无 | 不可写、回收站、智能文件夹或后端不是 filesystem 时不开始；未选中的条目先变成单独选择 | 选择变成该路径 | 已测试（未离屏） |
+| `useWorkspaceDragDrop.ts` 放下 | 内部拖放结束，或放到文件夹 | `momobako.entry.move`，没有替身 | 没有目标、已经交给拖出、回收站，或过滤后没有路径时不移动 | 无新文案 | 已测试（未离屏） |
+| `useWorkspaceDragDrop.ts` 导入 | 外部文件放到文件区或文件夹 | `momobako.entry.import`，没有替身 | 文件区会丢掉落到自身绝对路径上的文件；文件夹放下不做这层过滤；不可写、回收站、没有快照或空白路径不导入 | 无新文案 | 已测试（未离屏） |
+| `useWorkspaceDragDrop.ts` 悬停 | dragover、dragleave 或文件夹悬停 | 无 | 不可写或不在文件面板时不改放置效果；内部是 move，外部是 copy；嵌套离开和内部拖放离开不清除外部状态；回收站忽略文件夹悬停 | 放置效果 | 已测试（未离屏） |
+| `useWorkspaceDragDrop.ts` 空库 | 拖入一个文件夹 | `momobako.repository.attach`，没有替身 | 已有活动 id 或已有仓库时忽略；只用第一条非空路径；失败写入空库错误，没有进行中的附加时忽略后续结果 | 空库错误文本 | 已测试（未离屏） |
+| `useWorkspaceDragDrop.ts` 宿主拖放 | enter、over、leave 或 drop | 附加或导入，没有替身 | 没有仓库且不是丢失仓库时按空库附加；有仓库时要可写并且在文件面板，离开会清悬停 | 拖放标记 | 已测试（未离屏） |
+| `useWorkspaceDragDrop.ts` 框选 | 追加或替换 | 无 | 追加时空列表不变并按原顺序并上新路径；替换空列表清空；主选和锚点用已有主选，否则用第一项 | 选择路径 | 已测试（未离屏） |
+| `core.ts` 打开和揭示 | 打开条目、网址或在目录中定位 | 不调用系统程序 | 没有仓库或路径为空则不动；否则记录 `OpenExternal` 并失败 | “打开失败：宿主外部打开尚未接通” / “定位失败：宿主目录揭示尚未接通” | 已测试（未离屏） |
+| `core.ts` 拖出 | 把选中路径拖出窗口 | 不调用 `start_drag` | 回收站、非 filesystem 或没有绝对路径时失败且不记请求；其余记录 `DragOut` 并失败 | “拖出失败：宿主文件拖出尚未接通” | 已测试（未离屏） |
+| 关闭行为 | 标题栏关闭或系统 `CloseRequested` | 无 | `confirm` 总是询问；`quit` 在没有脏数据时关闭；壳层未保存或元数据草稿未保存时询问；托盘不关闭；取消不关闭；重复询问不叠加请求 | “确认关闭 MomoBako？” / “有未保存的修改，确认关闭？” / “最小化到托盘尚未接通” | 已测试（未离屏） |
+| 文件对话框 | 导出外部连接或选择插件包 | `OpenFileDialog`；写出和安装没有替身 | 取消不写文件也不安装；失败记下错误；未知编号忽略 | “正在选择导出位置…” / “正在选择插件包…” / “导出失败：Busy” | 已测试（未离屏） |
+| 实况表面 | 验收场景 | 无 | `acceptance_scene` 不显示关闭确认条，旧按钮文案不变 | “关闭” | 已测试（未离屏） |
 
 Phase 8 在上表没有未读和未测试的产品分支之后，才把默认启动改到 `momobako-nana`。离屏通过不勾掉拖放、IME、托盘和真窗口行；那些行留在 `nana-device-matrix.md`。

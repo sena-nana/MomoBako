@@ -298,6 +298,39 @@ impl FilesState {
         self.selected = paths;
     }
 
+    /// 拖放移动复用文件阶段的移动请求。空白来源不进入进行中。
+    pub(crate) fn enqueue_move(&mut self, repo_id: String, sources: Vec<String>, parent: String) {
+        if sources.is_empty() {
+            return;
+        }
+        if repo_id.is_empty() {
+            eprintln!("Nana 拖放移动缺少仓库");
+            return;
+        }
+        self.begin("正在移动…");
+        self.effects.push(FilesEffect::Move { repo_id, sources, parent });
+    }
+
+    /// 拖放导入复用文件阶段的导入请求。空白来源不进入进行中。
+    pub(crate) fn enqueue_import(&mut self, repo_id: String, parent: Option<String>, sources: Vec<String>) {
+        if sources.is_empty() {
+            return;
+        }
+        if repo_id.is_empty() {
+            eprintln!("Nana 拖放导入缺少仓库");
+            return;
+        }
+        self.begin("正在导入…");
+        self.effects.push(FilesEffect::Import { repo_id, parent, sources });
+    }
+
+    /// 框选和拖放起点写入多选、主选和锚点。
+    pub(crate) fn set_drag_selection(&mut self, paths: Vec<String>, primary: Option<String>, anchor: Option<String>) {
+        self.selected = paths;
+        self.primary = primary;
+        self.anchor = anchor;
+    }
+
     pub fn entry_names(&self) -> Vec<String> {
         self.rows.iter().map(|row| row.name.clone()).collect()
     }

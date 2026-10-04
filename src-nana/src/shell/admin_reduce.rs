@@ -241,6 +241,9 @@ fn reduce_admin(model: &mut ShellViewModel, message: AdminMessage) {
         AdminMessage::ChooseArchive => {
             model.admin.reset_action();
             model.admin.effects.push(AdminEffect::RequestOpenDialog);
+            if support::open_dialog_available() {
+                model.admin.action_message = "正在选择插件包…".into();
+            }
         }
         AdminMessage::InstallArchive(path) => install_archive(model, path),
         AdminMessage::PluginsReplaced(result) => replace_plugins(model, result),
@@ -596,7 +599,9 @@ fn export_external(model: &mut ShellViewModel) {
         return;
     }
     model.admin.effects.push(AdminEffect::RequestSaveDialog { content });
-    if !support::save_dialog_available() {
+    if support::save_dialog_available() {
+        model.admin.external_message = "正在选择导出位置…".into();
+    } else {
         model.admin.external_error = "导出失败：宿主保存对话框尚未接通".into();
     }
 }

@@ -448,6 +448,7 @@ pub fn mount_shell(
             } else {
                 None
             };
+            let close_prompt = super::input::close_prompt(&view_model);
             let workspace_actions = widget(Stack::fill_column(8.0)).children((
                 widget(Stack::fill_column(8.0)).children((
                     status_summary,
@@ -462,6 +463,7 @@ pub fn mount_shell(
                 widget(Stack::fill_column(8.0)).children((
                     settings_editor,
                     admin_surface,
+                    close_prompt,
                     playlist_item_actions,
                     player_surface,
                     playlist_item_status,
