@@ -53,7 +53,8 @@ Nana `ApplicationState::initialize` 现在启动共享 `RepositoryRuntime`，窗
 `RepositoryQueryViewModel::list_repositories`。列表里选中的非缺失仓库先执行
 `PROTOCOL_REPOSITORY_SYNC`，同步成功后再请求 `get_repository_snapshot`，摘要仍属于当前仓库时才读取根目录。
 缺失仓库和空仓库在列表完成后结束启动，不进入同步。结果以 `ShellMessage` 回到应用状态；
-未完成真实服务调用的按钮不会显示成功反馈。
+未完成真实服务调用的按钮不会显示成功反馈。启动就绪后的实况侧栏用 `SidebarRow` 和 `TreeView`
+显示快捷方式、目录、智能文件夹和播放集；15 个旧验收场景仍用 `acceptance_scene` 保留原来的导航按钮。
 
 当前已接通的交互还包括资源库刷新、目录浏览、文件元数据与预览源读取、播放列表查询、
 播放列表创建、重命名、删除与项目移除、播放器类型选择、插件配置读取/编辑/保存/删除、任务取消、系统日志读取和窗口

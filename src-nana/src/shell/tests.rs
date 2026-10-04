@@ -113,3 +113,45 @@
         assert_eq!(model.settings.thumbnail_cache_limit_mb, 512);
         assert_eq!(model.detail, "应用设置已保存");
     }
+
+    fn playlist_detail(repo_id: &str, playlist_id: &str) -> crate::backend::services::repository::PlaylistDetail {
+        use crate::backend::services::repository::{PlaylistDetail, PlaylistSummary};
+        PlaylistDetail {
+            playlist: PlaylistSummary {
+                playlist_id: playlist_id.into(),
+                repo_id: repo_id.into(),
+                name: "早晨".into(),
+                player_type_id: "audio".into(),
+                player_plugin_id: "audio".into(),
+                player_label: "音频".into(),
+                file_class: "audio".into(),
+                item_count: 0,
+                sort_order: 0,
+                created_at: String::new(),
+                updated_at: String::new(),
+            },
+            items: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn stale_playlist_detail_keeps_the_bound_repository_screen() {
+        let mut model = ShellViewModel::default();
+        model.reduce(ShellMessage::PlaylistDetailLoaded(Ok(playlist_detail("repo-b", "pl"))));
+        assert_eq!(model.page, ShellPage::Playlists);
+        assert_eq!(model.selected_playlist_id.as_deref(), Some("pl"));
+
+        let mut model = ShellViewModel::default();
+        model.page = ShellPage::FileList;
+        model.detail = "保持".into();
+        model.sidebar.bind_repository(Some("repo-a"), false);
+        model.reduce(ShellMessage::PlaylistDetailLoaded(Ok(playlist_detail("repo-b", "pl"))));
+        assert_eq!(model.page, ShellPage::FileList);
+        assert_eq!(model.detail, "保持");
+        assert!(model.selected_playlist_id.is_none());
+
+        model.reduce(ShellMessage::PlaylistDetailLoaded(Ok(playlist_detail("repo-a", "pl"))));
+        assert_eq!(model.page, ShellPage::Playlists);
+        assert_eq!(model.selected_playlist_id.as_deref(), Some("pl"));
+        assert_eq!(model.detail, "早晨 · 0 个项目");
+    }

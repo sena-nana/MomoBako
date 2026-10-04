@@ -45,14 +45,35 @@
 
 ## Phase 2 侧栏
 
-| 来源 | 状态 |
-| --- | --- |
-| `src/layouts/useSidebarShortcutsUi.ts` | 未读 |
-| `src/layouts/useFolderSidebarUi.ts` | 未读 |
-| `src/layouts/useSmartFolderSidebarUi.ts` | 未读 |
-| `src/layouts/usePlaylistSidebarUi.ts` | 未读 |
-| `src/layouts/useRepositorySwitcherUi.ts` | 未读 |
-| `src/layouts/WorkspaceSidebar*.vue` | 未读 |
+这些行由 `src-nana/src/shell/sidebar_tests.rs` 和 `stale_playlist_detail_keeps_the_bound_repository_screen` 覆盖状态机。宿主在归约后把副作用交给领域服务：目录树用 `FileBrowserViewModel::get_repository_tree`，智能文件夹用 `list_smart_folders` 和 `query_smart_folder`，播放集用 `list_playlists`、`list_playlist_players` 和 `get_playlist_detail`，目录浏览用 `get_file_browser`，附加本地文件夹用 `PROTOCOL_REPOSITORY_ATTACH`。协议调用没有替身测试。实况侧栏在启动就绪后用 `SidebarRow` 和 `TreeView`；15 个旧验收场景仍走 `acceptance_scene`。下面每一行都未离屏。同一仓库且缺失标记不变时，再次绑定不重复请求目录树。
+
+快捷方式计数在摘要到达时立即计算，没有移植 Vue 的 200ms idle 调度。文件快捷访问会先把 `\` 收成 `/`，再打开父目录并选中该路径。
+
+未完成，不能记成已测试：文件夹拖放悬停、创建、重命名和删除对话框；智能文件夹筛选表单的创建、编辑和删除；播放集的创建、播放和移除完整流程（播放集页面上已有的创建不在本阶段）；系统文件夹对话框、Eagle 和云盘添加表单；弹层坐标夹取；侧栏同步进度旋转；全局 Escape。缺失仓库时播放集行整段隐藏，选择函数本身只检查仓库 id。
+
+| 来源 | 触发 | 服务 | 结果 | 可见性 | 状态 |
+| --- | --- | --- | --- | --- | --- |
+| `useSidebarShortcutsUi.ts` 计数 | 仓库摘要 | 无新请求 | 已删除素材不进入全部、未分类、未标签、最近使用；路径不含 `/` 为未分类；标签为空为未标签；有 `lastAccessedAt` 为最近使用；回收站用 `overview.trashCount` | “全部 · n”等五行 | 已测试（未离屏） |
+| `useSidebarShortcutsUi.ts` `selectShortcut` | 资源库缺失 | 无 | 快捷方式、快捷访问、打开文件夹和打开智能文件夹直接返回 | 这些行禁用 | 已测试（未离屏） |
+| `useSidebarShortcutsUi.ts` `selectShortcut` | 回收站，且未锁定 | `get_file_browser`，`special_location = trash` | 面板改为 trash；离开设置页 | “回收站” | 已测试（未离屏） |
+| `useSidebarShortcutsUi.ts` `selectShortcut` | 其余分类，且未锁定 | 若当前在回收站，则根目录浏览且不带 trash | 面板改为 files 并写入对应分类；离开设置页 | 分类名 | 已测试（未离屏） |
+| `useSidebarShortcutsUi.ts` `openQuickAccess` | `targetKind == smartFolder` 且有 id | `query_smart_folder` | 进入智能文件夹；没有 id 或找不到条目则返回 | 智能文件夹面板 | 已测试（未离屏） |
+| `useSidebarShortcutsUi.ts` `openQuickAccess` | `targetKind == file` 且有路径 | 浏览父目录 | 分类为全部；选中规范化后的文件路径；空路径返回 | 父目录 | 已测试（未离屏） |
+| `useSidebarShortcutsUi.ts` `openQuickAccess` | 其它非空 `targetPath` | 浏览该目录 | 分类为全部 | 该目录 | 已测试（未离屏） |
+| `useFolderSidebarUi.ts` 打开与展开 | 点击目录或当前目录变化 | `get_file_browser` | 面板 files、分类全部；按 `/` 逐段展开，空路径不展开；回收站浏览不展开目录 | 目录树选中当前路径 | 已测试（未离屏） |
+| `useFolderSidebarUi.ts` 树替换 | 新树到达 | 无 | 仓库不匹配则忽略；否则丢掉树里已经不存在的展开路径，空路径始终有效 | 保留仍存在的展开节点 | 已测试（未离屏） |
+| `useFolderSidebarUi.ts` 刷新 | 未锁定、有仓库、且不在加载中 | `get_repository_tree` | 重复刷新被忽略 | “正在刷新文件夹树”不可再次提交 | 已测试（未离屏） |
+| `WorkspaceSidebar*.vue` 文件夹空态 | 无仓库、缺失、回收站或空树 | 无 | 不画创建、重命名、删除或拖放按钮 | “先选择或添加一个资源库。” / “资源库文件夹丢失，请先在主视图修复。” / “回收站条目在主视图中管理。” / “当前仓库还没有子文件夹。” | 已测试（未离屏） |
+| `useSmartFolderSidebarUi.ts` 选择 | 有仓库、id 非空、且未锁定 | `query_smart_folder` | 面板 smartFolder，展开祖先但不展开自己；空 id 返回 | “正在查询智能文件夹” | 已测试（未离屏） |
+| `useSmartFolderSidebarUi.ts` 查询结果 | 仓库或当前 id 已变化 | 丢弃 | 返回 false，不改详情；匹配的错误只写入智能文件夹错误，不把整页改成 Error | 错误留在侧栏 | 已测试（未离屏） |
+| `useSmartFolderSidebarUi.ts` 树替换 | 列表到达 | `list_smart_folders` | 仓库不匹配则忽略；先剪掉无效展开，再展开当前项的祖先 | “还没有智能文件夹。”或树 | 已测试（未离屏） |
+| `usePlaylistSidebarUi.ts` 选择 | 有仓库 id 且 id 非空 | `get_playlist_detail` | 面板 playlist；播放集从列表消失时清空当前项，若面板仍是 playlist 则回到 files | 折叠时只显示名称；展开时显示名称、播放器标签和项数 | 已测试（未离屏） |
+| `usePlaylistSidebarUi.ts` 可播放 | 播放器类型已加载 | `list_playlist_players` | `player_type_id` 在已加载类型中才可播放；本阶段不画播放按钮 | 无播放按钮 | 已测试（未离屏） |
+| `PlaylistDetailLoaded` | 侧栏已绑定的仓库与详情仓库不同 | 丢弃 | 未绑定仓库时仍应用详情，避免旧页面测试失效 | 保持当前页 | 已测试（未离屏） |
+| `useRepositorySwitcherUi.ts` 打开与选择 | 点击仓库名 | `select_repository` 后重新绑定侧栏 | 已经是切换列表或正在提交时忽略；选择后关闭弹层并离开设置页 | “资源库 · 名称” | 已测试（未离屏） |
+| `useRepositorySwitcherUi.ts` 删除 | 有活动仓库且未提交 | 打开已有删除对话框 | 没有活动仓库或正在提交时忽略 | “删除当前资源库” | 已测试（未离屏） |
+| `useRepositorySwitcherUi.ts` 附加 | 路径去空白后非空 | `PROTOCOL_REPOSITORY_ATTACH` | 空白不提交；提交中不能关闭、改选或再打开添加菜单；成功后关闭并刷新列表；失败回到添加菜单并记下错误 | “附加资源库” / “正在附加…” | 已测试（未离屏） |
+| `useWorkspaceSidebarShellUi.ts` 缺失 | 活动仓库 `status == missing` | 不请求树、智能文件夹或播放集 | 快捷方式等导航锁定；仓库切换弹层本身不锁定 | 播放集显示“资源库修复后可继续使用播放集。” | 已测试（未离屏） |
 
 ## Phase 3 文件浏览与变更
 
