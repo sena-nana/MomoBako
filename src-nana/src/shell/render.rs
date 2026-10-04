@@ -427,12 +427,17 @@ pub fn mount_shell(
                         .on_cx(|_, _: &Activate, cx| cx.dispatch_program(ShellMessage::EditAction)),
                 )))
             };
+            let file_browser = if !view_model.acceptance_scene && view_model.files_surface_visible() {
+                super::files_view::files_surface(&view_model)
+            } else {
+                file_actions.into_any()
+            };
             let workspace_actions = widget(Stack::fill_column(8.0)).children((
                 widget(Stack::fill_column(8.0)).children((
                     status_summary,
                     task_actions,
                     task_progress,
-                    file_actions,
+                    file_browser,
                     plugin_actions,
                     plugin_config_actions,
                     plugin_config_editors,

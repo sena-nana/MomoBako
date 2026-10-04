@@ -6,7 +6,8 @@ use nana_ui::RuntimeProgramContext;
 use crate::backend::services::mutsuki_runner::PROTOCOL_REPOSITORY_ATTACH;
 use crate::backend::services::repository::{FileBrowserRequest, RepositoryFolderRequest};
 use crate::shell::{
-    ShellMessage, SidebarEffect, SidebarFolder, SidebarMessage, SidebarPlaylist, SidebarSmartFolder,
+    FileRow, ShellMessage, SidebarEffect, SidebarFolder, SidebarMessage, SidebarPlaylist, SidebarSmartFolder,
+    VirtualQuery,
 };
 use crate::MomoBakoApplication;
 
@@ -108,7 +109,10 @@ fn dispatch_smart_query(
     if let Err(error) = context.run_task(Task::new(async move {
         let result = executor
             .block_on(interaction.query_smart_folder(task_repo.clone(), task_id.clone()))
-            .map(|snapshot| snapshot.results.len());
+            .map(|snapshot| VirtualQuery {
+                count: snapshot.results.len(),
+                rows: snapshot.results.iter().map(FileRow::from_entry).collect(),
+            });
         sidebar_message(SidebarMessage::SidebarSmartFolderQueried { repo_id: task_repo, smart_folder_id: task_id, result })
     })) {
         eprintln!("Nana 智能文件夹查询任务提交失败：{error}");

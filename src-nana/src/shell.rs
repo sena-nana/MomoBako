@@ -10,9 +10,12 @@ use crate::backend::services::repository::{
 };
 use crate::settings::ApplicationSettings;
 
+mod files;
+mod files_view;
 mod sidebar;
 mod sidebar_view;
 mod workspace;
+pub use files::{display_mode_path, FileRow, FilesEffect, FilesMessage, HardlinkPrompt, VirtualQuery};
 pub use sidebar::{
     SidebarEffect, SidebarFolder, SidebarMessage, SidebarPlaylist, SidebarSmartFolder, ShortcutId,
 };
@@ -99,6 +102,8 @@ pub enum ShellMessage {
     SetLibraryCategory(LibraryCategory),
     /// 侧栏导航。具体分支在 `sidebar::reduce_message` 里归约。
     Sidebar(sidebar::SidebarMessage),
+    /// 文件浏览和变更。具体分支在 `files::reduce_message` 里归约。
+    Files(files::FilesMessage),
 }
 
 /// 已解码的 RGBA 预览帧；解码在服务任务中完成，窗口线程只负责上传 GPU 纹理。
@@ -261,6 +266,7 @@ pub struct ShellViewModel {
     pub acceptance_scene: bool,
     pub workspace: WorkspaceState,
     pub sidebar: sidebar::SidebarState,
+    pub files: files::FilesState,
 }
 
 impl Default for ShellViewModel {
@@ -308,6 +314,7 @@ impl Default for ShellViewModel {
             acceptance_scene: false,
             workspace: WorkspaceState::default(),
             sidebar: sidebar::SidebarState::default(),
+            files: files::FilesState::default(),
         }
     }
 }
@@ -414,6 +421,9 @@ impl ShellViewModel {
         let Some(message) = sidebar::reduce_message(self, message) else {
             return;
         };
+        let Some(message) = files::reduce_message(self, message) else {
+            return;
+        };
         match message {
             ShellMessage::Navigate(page) => {
                 self.page = page;
@@ -456,9 +466,13 @@ impl ShellViewModel {
                 self.detail = format!("无法读取资源库文件列表：{error}");
             }
             ShellMessage::FileBrowserLoaded(Ok(browser)) => {
+                let virtual_view = files::FileContext::from_model(self).is_virtual();
+                if !self.files.apply_browser(&browser, virtual_view) {
+                    return;
+                }
                 self.workspace.note_first_screen_finished(Ok(()));
                 self.page = ShellPage::FileList;
-                self.file_entries = browser.entries.iter().map(|entry| entry.name.clone()).collect();
+                self.file_entries = self.files.entry_names();
                 self.browser_entries = browser.entries;
                 self.current_directory = browser.current_path.clone();
                 self.sidebar.note_directory(
@@ -471,6 +485,10 @@ impl ShellViewModel {
                 );
             }
             ShellMessage::FileBrowserLoaded(Err(error)) => {
+                if self.files.note_load_failed(&error) {
+                    self.detail = format!("无法读取文件列表：{error}");
+                    return;
+                }
                 self.workspace.note_first_screen_finished(Err(error.clone()));
                 self.page = ShellPage::Error;
                 self.detail = format!("无法读取文件列表：{error}");
@@ -888,6 +906,7 @@ impl ShellViewModel {
                 self.detail = "原生编辑器尚未接通，当前文件未修改".into();
             }
             ShellMessage::Sidebar(_) => {}
+            ShellMessage::Files(_) => {}
         }
     }
 
