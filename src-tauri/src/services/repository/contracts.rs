@@ -944,7 +944,7 @@ pub struct DownloaderPlaylistRequest {
     pub level: Option<String>,
 }
 
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct DownloaderPlaylistProgressEvent {
     pub phase: String,

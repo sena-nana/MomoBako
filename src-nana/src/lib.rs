@@ -15,6 +15,7 @@ use nana_ui::{
 pub mod shell;
 mod files_dispatch;
 mod inspect_dispatch;
+mod player_dispatch;
 mod sidebar_dispatch;
 use shell::{
     DeleteMode, PreviewPixels, ShellMessage, ShellPage, ShellViewModel, StartupStatus, WindowAction,
@@ -85,6 +86,7 @@ impl ApplicationState for MomoBakoApplication {
         };
         shell.workspace.load_prefs_file(&sidebar_prefs_path());
         shell.files.load_display_mode_file(&display_mode_path());
+        shell.player.load_default_files();
         Ok(Self {
             services,
             shell,
@@ -658,6 +660,7 @@ impl ApplicationState for MomoBakoApplication {
             schedule_root_browser(services, context, repo_id);
         }
         dispatch_workspace_effects(self, context);
+        player_dispatch::dispatch_player_effects(self, context);
         sidebar_dispatch::dispatch_sidebar_effects(self, context);
         files_dispatch::dispatch_files_effects(self, context);
         inspect_dispatch::dispatch_inspect_effects(self, context);
@@ -731,6 +734,10 @@ fn dispatch_workspace_effects(
             }
             WorkspaceEffect::StopPlayback { previous_repo_id } => {
                 eprintln!("Nana 仓库切换，停止播放会话：{previous_repo_id}");
+                app.shell.reduce(ShellMessage::Player(crate::shell::player::PlayerMessage::Stop {
+                    repo_id: Some(previous_repo_id),
+                    clear_stored: true,
+                }));
             }
             WorkspaceEffect::RefreshRepositories { generation } => {
                 let prepared = app.services.as_ref().map(|services| {
