@@ -50,9 +50,10 @@ Nana `ApplicationState::initialize` 现在启动共享 `RepositoryRuntime`，窗
 `NativeServices`，不再调用 Tauri command。
 
 原生窗口首次构建后通过 Nana `RuntimeProgramContext::run_task` 异步调用
-`RepositoryQueryViewModel::list_repositories`，再请求首个资源库的
-`get_repository_snapshot`。结果以 `ShellMessage` 回到应用状态，空仓库、加载错误和
-文件/文件夹统计分别落入对应页面状态；未完成真实服务调用的按钮不会显示成功反馈。
+`RepositoryQueryViewModel::list_repositories`。列表里选中的非缺失仓库先执行
+`PROTOCOL_REPOSITORY_SYNC`，同步成功后再请求 `get_repository_snapshot`，摘要仍属于当前仓库时才读取根目录。
+缺失仓库和空仓库在列表完成后结束启动，不进入同步。结果以 `ShellMessage` 回到应用状态；
+未完成真实服务调用的按钮不会显示成功反馈。
 
 当前已接通的交互还包括资源库刷新、目录浏览、文件元数据与预览源读取、播放列表查询、
 播放列表创建、重命名、删除与项目移除、播放器类型选择、插件配置读取/编辑/保存/删除、任务取消、系统日志读取和窗口

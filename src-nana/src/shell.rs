@@ -10,6 +10,12 @@ use crate::backend::services::repository::{
 };
 use crate::settings::ApplicationSettings;
 
+mod workspace;
+pub use workspace::{
+    sidebar_prefs_path, DeleteMode, LibraryCategory, MainRegion, StartupStatus, WorkspaceEffect,
+    WorkspacePanel, WorkspaceRepository, WorkspaceState,
+};
+
 /// Nana Runtime 传递给应用状态的壳层交互消息。
 pub enum ShellMessage {
     Navigate(ShellPage),
@@ -63,6 +69,29 @@ pub enum ShellMessage {
     TaskProgressLoaded(Vec<TaskProgressSnapshot>),
     CancelTask(String),
     WindowAction(WindowAction),
+    /// 带代次的仓库列表结果。代次不匹配时保留当前启动步骤。
+    WorkspaceListLoaded {
+        generation: u64,
+        result: Result<Vec<RepositorySummary>, String>,
+    },
+    StartupSyncFinished { generation: u64, result: Result<(), String> },
+    ToggleSidebar,
+    SetSidebarWidth(f32),
+    CommitSidebarWidth,
+    StartupRetry,
+    MissingRefresh,
+    MissingChoosePath,
+    MissingPathChanged(String),
+    MissingSubmitPath,
+    MissingRelocateFinished(Result<(), String>),
+    MissingOpenDelete,
+    MissingCloseDelete,
+    MissingConfirmDelete(DeleteMode),
+    MissingDeleteFinished(Result<(), String>),
+    MissingOpenSourceSettings,
+    SelectWorkspaceRepository(String),
+    SetWorkspacePanel(WorkspacePanel),
+    SetLibraryCategory(LibraryCategory),
 }
 
 /// 已解码的 RGBA 预览帧；解码在服务任务中完成，窗口线程只负责上传 GPU 纹理。
@@ -221,6 +250,9 @@ pub struct ShellViewModel {
     pub plugin_config_keys: Vec<String>,
     pub plugin_config_drafts: std::collections::BTreeMap<String, String>,
     pub plugin_config_string_values: std::collections::BTreeSet<String>,
+    /// 离屏验收场景继续渲染原来的 15 个页面，直到对应逻辑有了新场景。
+    pub acceptance_scene: bool,
+    pub workspace: WorkspaceState,
 }
 
 impl Default for ShellViewModel {
@@ -265,6 +297,8 @@ impl Default for ShellViewModel {
             plugin_config_keys: Vec::new(),
             plugin_config_drafts: std::collections::BTreeMap::new(),
             plugin_config_string_values: std::collections::BTreeSet::new(),
+            acceptance_scene: false,
+            workspace: WorkspaceState::default(),
         }
     }
 }
@@ -274,6 +308,7 @@ impl ShellViewModel {
     pub fn for_page(page: ShellPage) -> Self {
         let mut model = Self {
             page,
+            acceptance_scene: true,
             ..Self::default()
         };
         match model.page {
@@ -378,24 +413,18 @@ impl ShellViewModel {
                     _ => "正在读取页面数据…".into(),
                 };
             }
-            ShellMessage::RepositoriesLoaded(Ok(repositories)) => {
-                if repositories.is_empty() {
-                    self.apply_page(ShellPage::EmptyRepository);
-                } else {
-                    self.apply_page(ShellPage::FileList);
-                    self.repository_name = repositories
-                        .first()
-                        .map(|repository| repository.name.clone())
-                        .unwrap_or_else(|| "默认资源库".into());
-                    self.repository_id = repositories.first().map(|repository| repository.repo_id.clone());
-                    self.detail = format!("{} 个资源库 · 已加载文件列表", repositories.len());
-                }
-            }
-            ShellMessage::RepositoriesLoaded(Err(error)) => {
-                self.page = ShellPage::Error;
-                self.detail = format!("无法读取资源库：{error}");
+            ShellMessage::RepositoriesLoaded(result) => self.apply_loaded_repositories(None, result),
+            ShellMessage::WorkspaceListLoaded { generation, result } => {
+                self.apply_loaded_repositories(Some(generation), result);
             }
             ShellMessage::RepositorySnapshotLoaded(Ok(snapshot)) => {
+                if self.workspace.startup.status == StartupStatus::Loading
+                    && self.workspace.active_repo_id.as_deref() != Some(snapshot.repository.repo_id.as_str())
+                {
+                    eprintln!("Nana 忽略过期的资源库摘要：{}", snapshot.repository.repo_id);
+                    return;
+                }
+                self.workspace.note_index_finished(&snapshot.repository.repo_id, Ok(()));
                 self.page = ShellPage::FileList;
                 self.repository_name = snapshot.repository.name;
                 self.repository_id = Some(snapshot.repository.repo_id);
@@ -407,10 +436,14 @@ impl ShellViewModel {
                 );
             }
             ShellMessage::RepositorySnapshotLoaded(Err(error)) => {
+                if let Some(repo_id) = self.workspace.active_repo_id.clone() {
+                    self.workspace.note_index_finished(&repo_id, Err(error.clone()));
+                }
                 self.page = ShellPage::Error;
                 self.detail = format!("无法读取资源库文件列表：{error}");
             }
             ShellMessage::FileBrowserLoaded(Ok(browser)) => {
+                self.workspace.note_first_screen_finished(Ok(()));
                 self.page = ShellPage::FileList;
                 self.file_entries = browser.entries.iter().map(|entry| entry.name.clone()).collect();
                 self.browser_entries = browser.entries;
@@ -421,6 +454,7 @@ impl ShellViewModel {
                 );
             }
             ShellMessage::FileBrowserLoaded(Err(error)) => {
+                self.workspace.note_first_screen_finished(Err(error.clone()));
                 self.page = ShellPage::Error;
                 self.detail = format!("无法读取文件列表：{error}");
             }
@@ -768,7 +802,63 @@ impl ShellViewModel {
             ShellMessage::WindowAction(_) => {}
             ShellMessage::Refresh => {
                 self.detail = "正在刷新资源库…".into();
+                self.workspace.request_repository_refresh();
             }
+            ShellMessage::StartupSyncFinished { generation, result } => {
+                self.workspace.note_sync_finished(generation, result);
+                self.detail = self.workspace.startup.step_label.clone();
+                if self.workspace.main_region() == MainRegion::LoadError {
+                    self.page = ShellPage::Error;
+                    if let Some(error) = &self.workspace.startup.error {
+                        self.detail = format!("无法同步资源库：{error}");
+                    }
+                }
+            }
+            ShellMessage::ToggleSidebar => self.workspace.toggle_sidebar(),
+            ShellMessage::SetSidebarWidth(width) => self.workspace.set_sidebar_width(width),
+            ShellMessage::CommitSidebarWidth => self.workspace.commit_sidebar_width(),
+            ShellMessage::StartupRetry => {
+                if self.workspace.retry_startup() {
+                    self.detail = self.workspace.startup.step_label.clone();
+                }
+            }
+            ShellMessage::MissingRefresh => self.workspace.refresh_missing(),
+            ShellMessage::MissingChoosePath => self.workspace.choose_missing_path(),
+            ShellMessage::MissingPathChanged(value) => self.workspace.set_path_draft(value),
+            ShellMessage::MissingSubmitPath => self.workspace.submit_missing_path(),
+            ShellMessage::MissingRelocateFinished(result) => self.workspace.note_relocate_finished(result),
+            ShellMessage::MissingOpenDelete => self.workspace.open_delete_dialog(),
+            ShellMessage::MissingCloseDelete => self.workspace.close_delete_dialog(),
+            ShellMessage::MissingConfirmDelete(mode) => {
+                self.workspace.confirm_delete(mode);
+            }
+            ShellMessage::MissingDeleteFinished(result) => {
+                self.workspace.note_delete_finished(result);
+                self.repository_id = self.workspace.active_repo_id.clone();
+                if let Some(repository) = self.workspace.active_repository() {
+                    self.repository_name = repository.name.clone();
+                } else if self.workspace.main_region() == MainRegion::EmptyRepository {
+                    self.page = ShellPage::EmptyRepository;
+                    self.repository_name = "默认资源库".into();
+                    self.detail = "还没有可用资源库".into();
+                }
+            }
+            ShellMessage::MissingOpenSourceSettings => {
+                self.workspace.open_source_settings();
+                if self.workspace.effects.iter().any(|effect| matches!(effect, WorkspaceEffect::OpenSourceSettings)) {
+                    self.page = ShellPage::Settings;
+                    self.detail = "正在打开来源设置…".into();
+                }
+            }
+            ShellMessage::SelectWorkspaceRepository(repo_id) => {
+                self.workspace.select_repository(&repo_id);
+                self.repository_id = self.workspace.active_repo_id.clone();
+                if let Some(repository) = self.workspace.active_repository() {
+                    self.repository_name = repository.name.clone();
+                }
+            }
+            ShellMessage::SetWorkspacePanel(panel) => self.workspace.panel = panel,
+            ShellMessage::SetLibraryCategory(category) => self.workspace.library_category = category,
             ShellMessage::PrimaryAction => {
                 self.detail = "该操作的领域服务尚未接通，数据未写入".into();
             }
@@ -778,8 +868,46 @@ impl ShellViewModel {
         }
     }
 
-    fn apply_page(&mut self, page: ShellPage) {
-        *self = Self::for_page(page);
+    /// 把仓库列表结果写进工作台，并同步壳层上仍被旧页面读取的仓库名称。
+    fn apply_loaded_repositories(&mut self, generation: Option<u64>, result: Result<Vec<RepositorySummary>, String>) {
+        let mapped = match result {
+            Ok(items) => Ok(items.iter().map(WorkspaceRepository::from_summary).collect()),
+            Err(error) => Err(error),
+        };
+        self.workspace.apply_repository_list(generation, mapped);
+        self.repository_id = self.workspace.active_repo_id.clone();
+        if let Some(repository) = self.workspace.active_repository() {
+            self.repository_name = repository.name.clone();
+        }
+        match self.workspace.main_region() {
+            MainRegion::LoadError => {
+                self.page = ShellPage::Error;
+                self.detail = format!(
+                    "无法读取资源库：{}",
+                    self.workspace.startup.error.clone().unwrap_or_else(|| "未知错误".into())
+                );
+            }
+            MainRegion::EmptyRepository => {
+                self.page = ShellPage::EmptyRepository;
+                self.repository_id = None;
+                self.repository_name = "默认资源库".into();
+                self.detail = "还没有可用资源库".into();
+                self.file_entries.clear();
+                self.browser_entries.clear();
+            }
+            MainRegion::MissingRepository => {
+                self.detail = "资源库丢失".into();
+                self.file_entries.clear();
+                self.browser_entries.clear();
+            }
+            MainRegion::HasRepository => {
+                self.page = ShellPage::FileList;
+                self.detail = format!("{} 个资源库 · 已加载文件列表", self.workspace.repositories.len());
+            }
+            MainRegion::Startup => {
+                self.detail = self.workspace.startup.step_label.clone();
+            }
+        }
     }
 }
 
