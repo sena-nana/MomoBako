@@ -28,7 +28,7 @@ pub(crate) use view::admin_surface;
 #[path = "admin_tests.rs"]
 mod tests;
 
-pub use support::{clipboard_available, open_dialog_available, save_dialog_available};
+pub use support::clipboard_available;
 
 /// 插件配置、安装、日志筛选、任务弹层和仓库动作消息。
 #[derive(Clone, Debug)]

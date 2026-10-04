@@ -194,17 +194,19 @@ impl ApplicationState for MomoBakoApplication {
         };
         if let ShellMessage::WindowAction(action) = &message {
             let request = match action {
-                WindowAction::Minimize => host_api::WindowCommand::Minimize,
-                WindowAction::ToggleMaximize => host_api::WindowCommand::ToggleMaximize,
-                WindowAction::Close => host_api::WindowCommand::Close,
+                WindowAction::Minimize => Some(host_api::WindowCommand::Minimize),
+                WindowAction::ToggleMaximize => Some(host_api::WindowCommand::ToggleMaximize),
+                WindowAction::Close => None,
             };
-            return RuntimeProgramUpdate {
-                window_commands: request
-                    .to_platform_command(*id, context.geometry().maximized)
-                    .into_iter()
-                    .collect(),
-                ..RuntimeProgramUpdate::default()
-            };
+            if let Some(request) = request {
+                return RuntimeProgramUpdate {
+                    window_commands: request
+                        .to_platform_command(*id, context.geometry().maximized)
+                        .into_iter()
+                        .collect(),
+                    ..RuntimeProgramUpdate::default()
+                };
+            }
         }
         if matches!(&message, ShellMessage::Navigate(ShellPage::PluginSettings))
             && let Some(services) = self.services.as_ref()
@@ -667,13 +669,63 @@ impl ApplicationState for MomoBakoApplication {
         sidebar_dispatch::dispatch_sidebar_effects(self, context);
         files_dispatch::dispatch_files_effects(self, context);
         inspect_dispatch::dispatch_inspect_effects(self, context);
+        let maximized = context.geometry().maximized;
+        let window_commands = self.shell.input.take_platform_commands(*id, maximized);
         if let Err(error) = mount_shell(&mut window.document, &self.shell) {
             eprintln!("Nana 壳层重建失败：{error}");
             self.shell.page = ShellPage::Error;
             self.shell.detail = "页面更新失败，请查看系统日志".into();
-            return RuntimeProgramUpdate::redraw(*id);
+            return RuntimeProgramUpdate { window_commands, ..RuntimeProgramUpdate::redraw(*id) };
         }
-        RuntimeProgramUpdate::redraw(*id)
+        RuntimeProgramUpdate { window_commands, ..RuntimeProgramUpdate::redraw(*id) }
+    }
+
+    fn window_event(
+        &mut self,
+        event: &nana_ui_platform::WindowEvent,
+        context: &RuntimeProgramContext<Self::Message>,
+    ) -> RuntimeProgramUpdate {
+        match event {
+            nana_ui_platform::WindowEvent::CloseRequested { id } => answer_close(self, *id, context),
+            nana_ui_platform::WindowEvent::FileDialogCompleted { id, result } => {
+                let failed = result.error.as_ref().map(|error| format!("{error:?}"));
+                let paths = result.paths.iter().map(|path| path.display().to_string()).collect();
+                context.dispatch(ShellMessage::Input(shell::input::InputMessage::FileDialogCompleted {
+                    request_id: result.id,
+                    paths,
+                    failed,
+                }));
+                RuntimeProgramUpdate::redraw(*id)
+            }
+            nana_ui_platform::WindowEvent::FileDialogRejected { id, request_id, error } => {
+                eprintln!("Nana 文件对话框被拒绝：{error:?}");
+                context.dispatch(ShellMessage::Input(shell::input::InputMessage::FileDialogCompleted {
+                    request_id: *request_id,
+                    paths: Vec::new(),
+                    failed: Some(format!("{error:?}")),
+                }));
+                RuntimeProgramUpdate::redraw(*id)
+            }
+            _ => RuntimeProgramUpdate::default(),
+        }
+    }
+}
+
+/// 系统关闭请求按关闭设置回答。确认和托盘只重绘，不立刻关闭。
+fn answer_close(app: &mut MomoBakoApplication, id: nana_ui_platform::WindowId, context: &RuntimeProgramContext<ShellMessage>) -> RuntimeProgramUpdate {
+    let decision = shell::input::decide_close(app.shell.settings.close_behavior.as_str(), app.shell.close_is_dirty());
+    match decision {
+        shell::input::CloseDecision::CloseNow => RuntimeProgramUpdate {
+            window_commands: host_api::WindowCommand::Close
+                .to_platform_command(id, context.geometry().maximized)
+                .into_iter()
+                .collect(),
+            ..RuntimeProgramUpdate::redraw(id)
+        },
+        shell::input::CloseDecision::Ask { .. } | shell::input::CloseDecision::HoldForTray => {
+            context.dispatch(ShellMessage::WindowAction(WindowAction::Close));
+            RuntimeProgramUpdate::redraw(id)
+        }
     }
 }
 

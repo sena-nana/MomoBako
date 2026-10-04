@@ -21,17 +21,17 @@ pub const CORNER_STYLE_KEY: &str = "momobako.corners";
 pub const CORNER_RADIUS_KEY: &str = "momobako.cornerRadius";
 const PLUGIN_GROUP_ORDER: [&str; 6] = ["source", "library-kind", "parser", "preview", "service", "unclassified"];
 
-/// 剪贴板、保存对话框、打开对话框和目录展示都还没有 Nana 宿主桥。
+/// 剪贴板和目录揭示没有宿主桥。保存和打开对话框走 Nana `OpenFileDialog`。
 pub fn clipboard_available() -> bool {
     false
 }
 
 pub fn save_dialog_available() -> bool {
-    false
+    true
 }
 
 pub fn open_dialog_available() -> bool {
-    false
+    true
 }
 
 pub fn reveal_directory_available() -> bool {

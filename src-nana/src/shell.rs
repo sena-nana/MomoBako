@@ -16,6 +16,7 @@ mod inspect;
 mod inspect_view;
 pub(crate) mod player;
 pub(crate) mod admin;
+pub(crate) mod input;
 mod player_view;
 mod sidebar;
 mod sidebar_view;
@@ -118,6 +119,8 @@ pub enum ShellMessage {
     Player(player::PlayerMessage),
     /// 设置、插件、日志、任务和仓库动作。具体分支在 `admin::reduce_message` 里归约。
     Admin(admin::AdminMessage),
+    /// 拖放、外部打开和关闭确认。具体分支在 `input::reduce_message` 里归约。
+    Input(input::InputMessage),
 }
 
 /// 已解码的 RGBA 预览帧；解码在服务任务中完成，窗口线程只负责上传 GPU 纹理。
@@ -284,6 +287,7 @@ pub struct ShellViewModel {
     pub inspect: inspect::InspectState,
     pub player: player::PlayerState,
     pub admin: admin::AdminState,
+    pub input: input::InputState,
 }
 
 impl Default for ShellViewModel {
@@ -335,6 +339,7 @@ impl Default for ShellViewModel {
             inspect: inspect::InspectState::default(),
             player: player::PlayerState::default(),
             admin: admin::AdminState::default(),
+            input: input::InputState::default(),
         }
     }
 }
@@ -438,6 +443,9 @@ impl ShellViewModel {
 
     /// 在 ViewModel 边界集中处理导航和页面动作，避免控件闭包直接修改领域状态。
     pub fn reduce(&mut self, message: ShellMessage) {
+        let Some(message) = input::reduce_message(self, message) else {
+            return;
+        };
         let Some(message) = player::reduce_message(self, message) else {
             return;
         };
@@ -805,6 +813,7 @@ impl ShellViewModel {
             ShellMessage::Files(_) => {}
             ShellMessage::Inspect(_) => {}
             ShellMessage::Player(_) => {}
+            ShellMessage::Input(_) => {}
         }
     }
 

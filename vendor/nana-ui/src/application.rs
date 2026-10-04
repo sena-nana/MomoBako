@@ -260,14 +260,26 @@ impl<State: ApplicationState> RuntimeProgram for RuntimeApplication<State> {
             self.state.window_closed(*id);
         }
         let application_update = self.state.window_event(&event, context);
-        let update = match event {
-            WindowEvent::CloseRequested { id } => RuntimeProgramUpdate {
-                window_commands: vec![nana_ui_platform::host::WindowCommand::Close(id)],
-                ..Default::default()
-            },
-            _ => RuntimeProgramUpdate::default(),
-        };
-        update.merge(application_update)
+        // The host never closes by itself. A program that redraws or answers
+        // with commands is confirming, deferring, or closing on its own.
+        // An empty answer still closes, so existing programs keep that default.
+        match &event {
+            WindowEvent::CloseRequested { id } => {
+                let answered = application_update.exit
+                    || application_update.redraw != crate::RuntimeRedraw::None
+                    || !application_update.window_commands.is_empty();
+                if answered {
+                    application_update
+                } else {
+                    RuntimeProgramUpdate {
+                        window_commands: vec![nana_ui_platform::host::WindowCommand::Close(*id)],
+                        ..RuntimeProgramUpdate::default()
+                    }
+                    .merge(application_update)
+                }
+            }
+            _ => RuntimeProgramUpdate::default().merge(application_update),
+        }
     }
     fn rebuild_gpu(&mut self, context: &RuntimeProgramContext<Self::Message>) {
         self.state.rebuild_gpu(&mut self.windows, context);

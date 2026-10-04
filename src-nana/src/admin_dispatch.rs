@@ -1,6 +1,6 @@
 //! 把设置、插件、日志和仓库动作的副作用交给已有领域服务。
 //!
-//! 剪贴板、保存对话框和打开对话框没有宿主桥，只记日志。
+//! 剪贴板没有宿主桥，只记日志。保存和打开对话框排队为平台文件对话框。
 //! 插件、缓存、动作和写文件没有替身；服务没启动时把错误写回状态机。
 
 use nana_ui::runtime::Task;
@@ -11,7 +11,7 @@ use crate::backend::services::repository::{
     BinaryFileWriteRequest, FileBrowserRequest, PluginConfigDeleteRequest, PluginConfigSetRequest, PluginEnabledRequest,
     PluginHookExecutionListRequest, PluginInstallRequest, RepositoryAction, RepositoryActionRunRequest,
 };
-use crate::shell::admin::{clipboard_available, open_dialog_available, save_dialog_available, AdminEffect, AdminMessage};
+use crate::shell::admin::{clipboard_available, AdminEffect, AdminMessage};
 use crate::shell::ShellMessage;
 use crate::MomoBakoApplication;
 
@@ -40,16 +40,8 @@ fn dispatch_one(app: &mut MomoBakoApplication, context: &RuntimeProgramContext<S
                 eprintln!("Nana 宿主剪贴板尚未接通");
             }
         }
-        AdminEffect::RequestOpenDialog => {
-            if !open_dialog_available() {
-                eprintln!("Nana 插件包选择对话框尚未接通");
-            }
-        }
-        AdminEffect::RequestSaveDialog { .. } => {
-            if !save_dialog_available() {
-                eprintln!("Nana 外部连接保存对话框尚未接通");
-            }
-        }
+        AdminEffect::RequestOpenDialog => app.shell.input.queue_plugin_dialog(),
+        AdminEffect::RequestSaveDialog { .. } => app.shell.input.queue_save_dialog(),
         AdminEffect::LoadSettingsBundle => load_bundle(app, context),
         AdminEffect::Install(path) => install(app, context, path),
         AdminEffect::DeletePlugin(plugin_id) => delete_plugin(app, context, plugin_id),

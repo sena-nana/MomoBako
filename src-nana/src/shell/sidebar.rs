@@ -531,6 +531,15 @@ impl SidebarState {
         true
     }
 
+    /// 空库拖放附加。空白路径不提交，也不打开添加菜单。
+    pub(crate) fn queue_attach(&mut self, path: String) {
+        let path = path.trim().to_string();
+        if path.is_empty() {
+            return;
+        }
+        self.effects.push(SidebarEffect::AttachRepository { path });
+    }
+
     pub fn note_attach_finished(&mut self, result: Result<(), String>) {
         self.submitting = false;
         match result {
