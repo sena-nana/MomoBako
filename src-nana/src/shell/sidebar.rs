@@ -110,7 +110,7 @@ pub enum SidebarMessage {
     RepositoryAttachFinished(Result<(), String>),
     SidebarTreeLoaded { repo_id: String, result: Result<Vec<SidebarFolder>, String> },
     SidebarSmartFoldersLoaded { repo_id: String, result: Result<Vec<SidebarSmartFolder>, String> },
-    SidebarSmartFolderQueried { repo_id: String, smart_folder_id: String, result: Result<usize, String> },
+    SidebarSmartFolderQueried { repo_id: String, smart_folder_id: String, result: Result<super::files::VirtualQuery, String> },
     SidebarPlaylistsLoaded { repo_id: String, result: Result<Vec<SidebarPlaylist>, String> },
     SidebarPlaylistPlayersLoaded { repo_id: String, result: Result<Vec<String>, String> },
 }
@@ -772,13 +772,21 @@ pub(super) fn reduce_message(model: &mut super::ShellViewModel, message: super::
         SidebarMessage::SidebarTreeLoaded { repo_id, result } => model.sidebar.apply_tree(&repo_id, result),
         SidebarMessage::SidebarSmartFoldersLoaded { repo_id, result } => model.sidebar.apply_smart_folders(&repo_id, result),
         SidebarMessage::SidebarSmartFolderQueried { repo_id, smart_folder_id, result } => {
-            if model.sidebar.note_smart_query(&repo_id, &smart_folder_id, result) {
-                if model.sidebar.smart_error.is_empty() {
-                    if let Some(count) = model.sidebar.smart_result_count {
+            let counted = match &result {
+                Ok(query) => Ok(query.count),
+                Err(error) => Err(error.clone()),
+            };
+            if model.sidebar.note_smart_query(&repo_id, &smart_folder_id, counted) {
+                match result {
+                    Ok(query) => {
+                        let count = query.count;
+                        model.files.set_virtual_rows(query.rows);
                         model.detail = format!("智能文件夹 · {count} 个结果");
                     }
-                } else {
-                    model.detail = format!("无法查询智能文件夹：{}", model.sidebar.smart_error);
+                    Err(error) => {
+                        model.files.set_virtual_rows(Vec::new());
+                        model.detail = format!("无法查询智能文件夹：{error}");
+                    }
                 }
             }
         }

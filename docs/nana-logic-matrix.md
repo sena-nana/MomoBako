@@ -77,14 +77,33 @@
 
 ## Phase 3 文件浏览与变更
 
-| 来源 | 状态 |
-| --- | --- |
-| `src/pages/workspace/WorkspaceFilesSurface.vue` | 未读 |
-| `src/pages/workspace/files/` | 未读 |
-| `src/composables/workspace/files.ts` | 未读 |
-| `src/composables/workspace/fileOperations.ts` | 未读 |
-| `src/pages/workspace/CopyTargetDialog.vue` | 未读 |
-| `src/pages/workspace/HardlinkCandidateDialog.vue` | 未读 |
+这些行由 `src-nana/src/shell/files_tests.rs` 覆盖状态机。宿主在归约后把副作用交给领域服务：浏览、新建、重命名和回收站用 `FileBrowserViewModel` 的 `get_file_browser`、`create_directory`、`create_file`、`rename_entry`、`mutate_trash`；硬链接用 `RepositoryInteractionViewModel` 的 `list_hardlink_candidates` 和 `confirm_hardlink_candidate`。复制、移动、导入、压缩包、Eagle 和删除走 Mutsuki 协议 `PROTOCOL_ENTRY_COPY`、`PROTOCOL_ENTRY_MOVE`、`PROTOCOL_ENTRY_IMPORT`、`PROTOCOL_ARCHIVE_IMPORT`、`PROTOCOL_EAGLE_IMPORT`、`PROTOCOL_ENTRY_DELETE`，协议调用没有替身测试。复制模式固定为 `hardlinkPreferred`。实况文件表面在启动就绪、主区有仓库、且面板是文件、回收站或智能文件夹时用 `each_virtual`；15 个旧验收场景仍走 `acceptance_scene` 的 `file_actions`。下面每一行都未离屏。
+
+文件表面自己发起的首页是 80 条、继续加载是 160 条。侧栏和启动的 `OpenDirectory` 仍是 200 条。自适应、瀑布流和网格共用同一套网格，没有单独的瀑布流排布。缩略图有路径时用 Nana `Thumbnail::new`，没有路径时用空缩略图。
+
+未完成，不能记成已测试：系统文件夹对话框；拖放；框选；修饰键手势（选择方式改成页内的“替换 / 切换 / 范围”）；元数据编辑器和预览属于 Phase 4；缩略图空闲预取；操作进度条（进行中只显示“正在复制…”这类短句）；在系统里显示或打开。
+
+| 来源 | 触发 | 服务 | 结果 | 可见性 | 状态 |
+| --- | --- | --- | --- | --- | --- |
+| `files.ts` 分页 | 首屏或继续加载 | `get_file_browser` | 追加按 `kind:path` 去重；`has_more` 为合并后条数小于 `total_entries`；虚拟视图不再分页 | “加载更多”在没有更多、加载中或虚拟视图时禁用 | 已测试（未离屏） |
+| `files.ts` 过期列表 | 快照的仓库、路径或回收站与 pending 不同 | 丢弃 | 保留原列表，清掉加载标记 | 仍是原来的条目 | 已测试（未离屏） |
+| `files.ts` 读取失败 | 文件表面自己处于加载中 | 无新请求 | 写下错误，不替换列表；启动阶段的失败仍交给壳层切到错误页 | 错误留在文件列 | 已测试（未离屏） |
+| `fileOperations.ts` 可写 | 新建、导入、复制、移动、重命名、删除 | 无 | 需要活动仓库、状态不是 missing、能力含 `write`；变更进行中全部拒绝 | 对应按钮禁用 | 已测试（未离屏） |
+| `fileOperations.ts` 虚拟视图 | 智能文件夹或分类视图 | 无 | 智能文件夹拒绝新建、导入、重命名、删除，行来自查询结果；分类视图隐藏文件夹，允许重命名和删除，拒绝新建、导入和用户发起的目录浏览 | “只读智能文件夹，不能在这里新建、重命名或删除。” / “分类视图” | 已测试（未离屏） |
+| `fileOperations.ts` `is_virtual` | 选中行带虚拟标记 | 无 | 复制、移动、重命名、删除和还原都拒绝 | 这些按钮禁用 | 已测试（未离屏） |
+| `files.ts` 选择 | 替换、切换、范围 | 无 | 没有锚点或锚点已不在列表时，范围退回替换；快照丢掉已经不存在的路径，主选不在则取剩余第一项 | “选择 · 替换 / 切换 / 范围” | 已测试（未离屏） |
+| `files.ts` 打开条目 | 替换模式下点击文件夹 | `get_file_browser` | 进入该目录并清空选择；切换或范围只选中文件夹，不进入 | 面包屑“根目录”和路径段 | 已测试（未离屏） |
+| `files.ts` 打开文件 | 选中带 `asset_id` 的文件 | `get_asset_detail` | 只记读取素材的副作用，不在本阶段画预览 | 选中该文件 | 已测试（未离屏） |
+| `fileOperations.ts` 空白提交 | 名称去空白后为空，或导入来源拆行和分号后为空 | 无 | 不进入变更中，不发请求 | 对话框保持打开 | 已测试（未离屏） |
+| `fileOperations.ts` 新建和重命名 | 名称非空 | `create_directory` / `create_file` / `rename_entry` | 成功只采用返回快照里的名字；分类视图路径不一致时保留原列表并关闭对话框；失败保留原列表和对话框 | “正在新建文件夹…” / “正在新建文件…” / “正在重命名…” | 已测试（未离屏） |
+| `CopyTargetDialog.vue` 复制和移动 | 已有选择，目标路径由页内输入 | `PROTOCOL_ENTRY_COPY` / `PROTOCOL_ENTRY_MOVE` | 复制父目录为空表示根；移动父目录用空字符串表示根；路径里的 `\` 收成 `/` | “正在复制…” / “正在移动…” | 已测试（未离屏） |
+| `fileOperations.ts` 协议结果 | 复制、移动、导入、压缩包、Eagle 或删除返回 | 成功后重新 `get_file_browser` | 成功不改当前行，保留选择并允许分类视图重读；智能文件夹不按目录重读；复制成功再列硬链接候选；失败保留原列表和对话框 | 对话框在成功后关闭 | 已测试（未离屏） |
+| `fileOperations.ts` 删除 | 有选择且可写 | `PROTOCOL_ENTRY_DELETE` | 回收站 mode 为 `permanentDelete`，普通删除 mode 为空；失败保留原列表和对话框 | “正在删除…” / “正在永久删除…” | 已测试（未离屏） |
+| `fileOperations.ts` 回收站 | 还原、还原全部、清空 | `mutate_trash` | 还原只在回收站；清空和还原全部不要求当前选择 | “正在还原…” / “正在清空回收站…” | 已测试（未离屏） |
+| `HardlinkCandidateDialog.vue` | 候选到达、跳过、确认 | 确认用 `confirm_hardlink_candidate`；跳过无请求 | 跳过只记本地 id 并显示下一条；确认失败保留该条；确认成功按 id 移除，没有剩余则关闭 | “确认后会将新文件加入硬链接关联。”；跳过 / 加入关联 | 已测试（未离屏） |
+| `files.ts` 展示方式 | 切换或读取 `file-display.json` | `PersistDisplayMode` | 值是 adaptive、masonry、grid、list，也接受中文标签；未知、损坏或文件缺失回到自适应；只在切换时写入 | “自适应 / 瀑布流 / 网格 / 列表” | 已测试（未离屏） |
+| `files.ts` 重命名草稿 | 选择变成多项，或主选变化 | 无 | 清掉重命名路径和草稿，并关闭重命名框 | 重命名框消失 | 已测试（未离屏） |
+| Eagle 导入 | 模式为 copy 或 move，库路径非空 | `PROTOCOL_EAGLE_IMPORT` | 其他模式不打开对话框；空白路径不提交 | “正在导入 Eagle…” | 已测试（未离屏） |
 
 ## Phase 4 预览、元数据和搜索
 
