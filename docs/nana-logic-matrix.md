@@ -81,7 +81,7 @@
 
 文件表面自己发起的首页是 80 条、继续加载是 160 条。侧栏和启动的 `OpenDirectory` 仍是 200 条。自适应、瀑布流和网格共用同一套网格，没有单独的瀑布流排布。缩略图有路径时用 Nana `Thumbnail::new`，没有路径时用空缩略图。
 
-未完成，不能记成已测试：系统文件夹对话框；拖放；框选；修饰键手势（选择方式改成页内的“替换 / 切换 / 范围”）；元数据编辑器和预览属于 Phase 4；缩略图空闲预取；操作进度条（进行中只显示“正在复制…”这类短句）；在系统里显示或打开。
+未完成，不能记成已测试：系统文件夹对话框；拖放；框选；修饰键手势（选择方式改成页内的“替换 / 切换 / 范围”）；元数据编辑器和预览已在 Phase 4 测试，仍未离屏；缩略图空闲预取；操作进度条（进行中只显示“正在复制…”这类短句）；在系统里显示或打开。
 
 | 来源 | 触发 | 服务 | 结果 | 可见性 | 状态 |
 | --- | --- | --- | --- | --- | --- |
@@ -107,13 +107,37 @@
 
 ## Phase 4 预览、元数据和搜索
 
-| 来源 | 状态 |
-| --- | --- |
-| `src/pages/workspace/preview/` | 未读 |
-| `src/pages/workspace/files/FileMetadataEditor.vue` | 未读 |
-| `src/pages/workspace/search/` | 未读 |
-| `src/pages/workspace/SearchPanel.vue` | 未读 |
-| `src/pages/workspace/search/WorkspaceFilterBar.vue` | 未读 |
+这些行由 `src-nana/src/shell/inspect_tests.rs` 覆盖状态机。浏览、详情和文本字节走 `RepositoryQueryViewModel` 的 `get_asset_detail`、`read_file`、`prepare_preview_file_source`；元数据保存走 `update_asset_metadata`；搜索走 `search_assets`；撤销和重做走 `RepositoryInteractionViewModel` 的 `undo_last_revision`、`redo_last_revision`。这些调用没有替身测试。图片沿用现有 GPU 纹理上传。Markdown 用 `NativeMarkdown`。纯文本用 `SelectableRichText`，不开启语法高亮。音视频用 `PlaybackSessionController`，没有解码器时停在失败态。PDF、Office、压缩包和三维模型在登记 `NativeContributionKind::Preview` 之前显示升级提示，不嵌入 Three.js。15 个旧验收场景仍用原来的预览占位。下面每一行都未离屏。
+
+实况预览和搜索只在不是 `acceptance_scene`、启动就绪、主区有仓库，且面板是搜索或已经选中文件时替换预览槽。保存是显式按钮，不移植 260 毫秒自动保存。版本冲突保留本地草稿和原来的 `expected_version`。生产环境的预览贡献和库类型快捷方式都从空列表开始。
+
+未完成，不能记成已测试：语法高亮；`ImageViewer` 全窗叠加；在系统里打开或显示；标签菜单位置和点击外部关闭；260 毫秒自动保存；Vue 库类型快捷方式注册表；缩略图空闲预取；拖放；嵌入 PDF.js、Office 或 Three.js；实况预览表面的新离屏场景。
+
+| 来源 | 触发 | 服务 | 结果 | 可见性 | 状态 |
+| --- | --- | --- | --- | --- | --- |
+| `filePreviewExtensions.ts` 图片 | 扩展名是 png、jpg、jpeg、webp、gif、bmp、avif、svg | `prepare_preview_file_source` 后 `read_file`，没有替身 | 媒体类型以 `image/` 开头才解码；失败是错误态，不显示空纹理；路径与当前目标不一致时丢弃 | “正在准备图片预览…”；纹理槽 `file-preview` | 已测试（未离屏） |
+| `filePreviewExtensions.ts` Markdown | md、markdown、mdown、mkd、mkdn、mdx | `read_file`，没有替身 | 先于纯文本列表；用 `NativeMarkdown` | “正在读取文本…” | 已测试（未离屏） |
+| `filePreviewExtensions.ts` 纯文本 | txt、text、log、csv、tsv、json、jsonl、yaml、yml、toml、xml、html、css、scss、sass、less、js、jsx、ts、tsx、vue、rs、py、rb、go、java、c、h、cpp、hpp、cs、php、sh、bash、zsh、ps1、bat、cmd、ini、cfg、conf、env、gitignore、gitattributes | `read_file`，没有替身 | 超过 768KiB 失败且不截断；非法 UTF-8 用 lossy；`SelectableRichText` 不开语法高亮 | “文本超过 786432 字节” | 已测试（未离屏） |
+| `filePreviewExtensions.ts` 音视频 | mp4、mov、mkv、webm、avi、m4v、mp3、wav、ogg、flac、m4a、aac、opus | `PlaybackSessionController`，插件 `load` 返回“没有原生解码器” | 播放、暂停、跳转和音量都停在 failed，不会变成 playing | “没有原生解码器” | 已测试（未离屏） |
+| `office-preview` / `preview-archive` / `three-model-preview` | pdf、Office、zip、cbz、7z、rar、cbr、fbx、obj、glb、gltf、vrm、stl、3mf、blend，且没有 Preview 贡献 | 无 | 显示升级提示；不嵌入 Three.js | “该预览仍是 Vue 插件，需要升级为 Nana 原生预览贡献” | 已测试（未离屏） |
+| `RegisterPreview` | 贡献种类是 Preview，扩展名匹配 | 无 | 只显示贡献标签和 `view_id`；其他种类忽略并记日志 | “原生预览 · {label} · {view_id}” | 已测试（未离屏） |
+| 未知扩展名 | 没有内置类型，也没有 Preview 贡献 | 无 | 失败，不显示空图片 | “无法预览此类型” | 已测试（未离屏） |
+| 过期预览 | 文本代次或图片路径与当前目标不同 | 丢弃 | 保留当前预览体 | 仍是当前目标 | 已测试（未离屏） |
+| `FileMetadataEditor.vue` 草稿 | 评分、注释、链接、标签、自定义字段 | 无，直到保存 | 评分 0–5，相同值回到 0；空白和重复标签忽略；保留键不能当自定义字段；注释没有时回退 note | “元数据 · 未保存” / “评分 N” | 已测试（未离屏） |
+| `FileMetadataEditor.vue` 保存 | 草稿已脏，且不是虚拟素材、不是保存中 | `update_asset_metadata`，`source` 为 desktop，没有替身 | 请求带 `expected_version` 和 `tagGroups`；虚拟、未脏或保存中不发请求；错误保留草稿 | “正在保存元数据…” / “保存元数据” | 已测试（未离屏） |
+| `FileMetadataEditor.vue` 冲突 | 结果是 conflict | 不覆盖草稿，`expected_version` 不变 | 采用服务器版本后才替换草稿和版本 | “版本冲突，未写入” / “采用服务器版本” | 已测试（未离屏） |
+| `FileMetadataEditor.vue` 撤销和重做 | 草稿不脏 | `undo_last_revision` / `redo_last_revision`，没有替身 | 有未保存编辑时拒绝并记日志 | “撤销” / “重做” | 已测试（未离屏） |
+| `search.ts` 空条件 | 查询和筛选都为空 | 不调用 `search_assets` | 清空结果 | “没有搜索结果” | 已测试（未离屏） |
+| `search.ts` 查询 | 有关键词或筛选条件 | `search_assets`，没有替身 | AND 不传 `matchMode`；错误保留上一份结果；过期代次忽略成功和失败 | “当前查询: …” / “当前资源库筛选: …” | 已测试（未离屏） |
+| `WorkspaceFilterBar.vue` 筛选 | 标签、格式、颜色、形状、评分、高级条件 | `search_assets`，没有替身 | 颜色和形状变成 color、shape 元数据筛选；只有 OR 传 `matchMode`；排序字段为空不传排序；limit ≤ 0 为空；minRating ≤ 0 为空 | “全部满足” / “任一满足” / “1 星+” | 已测试（未离屏） |
+| `selectors.ts` `hasActiveFilters` | 只有排除关键词、排除路径、排除数值或排除日期 | 不设置 `repoId` | 这些条件本身仍然会发起搜索 | 摘要保持“当前查询” | 已测试（未离屏） |
+| `search.ts` 缺少仓库 | 活动筛选需要仓库，但没有活动仓库 | 不请求 | 清空结果并记日志 | 结果被清空 | 已测试（未离屏） |
+| `useSearchUi.ts` 筛选栏 | 开关、清空、不可写 | 清空后按剩余查询重跑 | 开关不清筛选；清空回到初始筛选，不关栏也不清查询；资源库不可写时忽略筛选变更 | “筛选” / “关闭筛选” / “清空筛选” | 已测试（未离屏） |
+| `filterInputs.ts` 解析 | `key=value`、`key=min..max`、`key=from..to`、路径 | 无 | 空键或空值丢掉；数值要有一个有限边界；`\` 收成 `/` 并去掉首尾斜杠 | 高级筛选输入 | 已测试（未离屏） |
+| `SearchPanel.vue` 打开结果 | 点击一条结果 | `get_asset_detail`，没有替身 | 切到文件面板，选中路径，用结果自己的仓库 id；空素材 id 报错，不假装成功 | “搜索结果没有素材 id” | 已测试（未离屏） |
+| `SearchPanel.vue` 快捷方式 | `ApplyShortcut` | 无 | 生产列表为空，因为 Vue 库类型扩展还没有原生注册表；不可写时忽略 | 不显示库类型按钮 | 已测试（未离屏） |
+| 主按钮 | 已经有预览目标 | 按当前类型重新打开 | 验收页没有目标时仍写原来的未接通文案，且不重复拉取预览 | “打开预览” / “该操作的领域服务尚未接通，数据未写入” | 已测试（未离屏） |
+| 实况表面 | 启动就绪、主区有仓库，且面板是搜索或已选文件 | 无 | `acceptance_scene` 继续用旧的预览占位和“打开预览” | “文件预览” / “输入关键词、标签或评分条件后，这里会展示跨仓库结果。” | 已测试（未离屏） |
 
 ## Phase 5 播放列表
 

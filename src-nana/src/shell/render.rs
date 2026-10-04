@@ -407,11 +407,13 @@ pub fn mount_shell(
             } else {
                 ""
             };
-            let preview_node = if matches!(view_model.page, ShellPage::SelectedFile) {
+            let preview_node = if !view_model.acceptance_scene && view_model.inspect_surface_visible() {
+                Some(super::inspect_view::inspect_surface(&view_model))
+            } else if matches!(view_model.page, ShellPage::SelectedFile) {
                 Some(widget(Stack::column(8.0)).children((
                     text("选择图片文件后，预览将在原生纹理节点中显示").key("preview-placeholder"),
                     widget(GpuTextureView::new(preview_slot).contain()).key("file-preview"),
-                )))
+                )).into_any())
             } else {
                 None
             };

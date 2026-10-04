@@ -66,7 +66,11 @@ Nana `ApplicationState::initialize` 现在启动共享 `RepositoryRuntime`，窗
 预览；图片字节读取和解码在服务任务中完成，上传沿用窗口唯一的 GPU 上下文。非图片媒体
 仍显示明确的“不支持原生纹理预览”状态，不伪造成功。
 
-仍未宣称完成的能力包括视频/音频/PDF/Markdown/文本/3D 原生预览器、真实媒体输出插件和
+启动就绪且不是 `acceptance_scene` 时，实况预览和搜索替换原来的预览占位。Markdown 用
+`NativeMarkdown`，纯文本用 `SelectableRichText`。音视频没有原生解码器时停在失败态。
+PDF、Office、压缩包和三维模型在登记 Nana 原生预览贡献之前显示升级提示。这批状态有单测，还没有新的离屏场景。
+
+仍未宣称完成的能力包括语法高亮、真实媒体解码器、PDF.js/Office/Three.js 嵌入和
 Windows UIA/AccessKit 服务桥接；播放列表排序/添加、任务进度快照、设置加载/校验/原子存储、
 宿主输入请求抽象、宿主播放会话控制器和对应离屏场景已经接入。拖放、托盘、IME、真窗口和发布包仍需设备矩阵验收，
 离屏结果不会替代这些设备证据。
