@@ -2,16 +2,17 @@
 //!
 //! 每个证据文件都来自生产 `RuntimeDocument` 和同一个 `RuntimeAgentSession`，
 //! 不创建第二棵 UI 树。
+use momobako_nana::theme_map::clear_matches_background;
 use momobako_nana::{
     acceptance_document_for, acceptance_document_for_model,
     shell::{ShellPage, ShellViewModel},
 };
-use nana_ui_devtools::agent::{protocol::ThemeName, AgentSession, RuntimeAgentSession};
+use nana_ui_devtools::agent::{AgentSession, RuntimeAgentSession, protocol::ThemeName};
 use nana_ui_devtools::offscreen;
 use serde_json::json;
 use sha2::{Digest, Sha256};
 use std::fs;
-use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -188,6 +189,13 @@ fn render_case(
     session
         .set_theme(viewport.theme)
         .map_err(|e| e.to_string())?;
+    let theme = theme_name(viewport.theme);
+    let clear = AgentSession::describe(&session).clear;
+    if !clear_matches_background(theme, clear) {
+        return Err(format!(
+            "clear {clear:?} is not the {theme} background token"
+        ));
+    }
     let accessibility = session.accessibility_dump();
     let title = page_title(&page);
     if !accessibility
@@ -223,7 +231,7 @@ fn render_case(
     let hit_path = root.join(format!("{stem}.hits.json"));
     write_json(
         &semantic_path,
-        &json!({"page": page_slug(&page), "theme": theme_name(viewport.theme), "viewport": [viewport.width, viewport.height], "accessibility": accessibility}),
+        &json!({"page": page_slug(&page), "theme": theme, "clear": clear, "viewport": [viewport.width, viewport.height], "accessibility": accessibility}),
     )?;
     write_json(
         &layout_path,
@@ -275,6 +283,7 @@ fn write_visual_review(root: &Path) -> Result<(), String> {
             {"id": "hierarchy", "status": "covered", "evidence": "*.semantic.json"},
             {"id": "alignment-and-overflow", "status": "covered", "evidence": "*.layout.json"},
             {"id": "light-dark-contrast", "status": "covered", "evidence": "light-* / dark-*"},
+            {"id": "theme-clear-follows-palette", "status": "covered", "evidence": "*.semantic.json clear"},
             {"id": "disabled-error-danger", "status": "covered", "evidence": "disabled-feedback-*"},
             {"id": "page-scoped-actions", "status": "covered", "evidence": "*.hits.json"},
             {"id": "minimal-window-overflow", "status": "covered", "evidence": "*-960x600.*"}

@@ -70,3 +70,7 @@ Windows UIA/AccessKit 服务桥接；播放列表排序/添加、任务进度快
 
 插件的 Vue 自定义设置页、工具页、预览和播放器贡献不进入原生生产树。官方插件应迁移
 到 Nana 原生贡献接口；第三方旧插件需要升级，宿主应提供明确的兼容提示。
+
+继续迁移时先读 [组件对应](./nana-component-map.md) 和 [逻辑矩阵](./nana-logic-matrix.md)。组件目录以
+`src-nana/src/capability.rs` 为准，颜色和字号以 `src-nana/src/theme_map.rs` 为准。离屏清屏色必须等于当前主题的
+`background`，不能靠按钮上的写死颜色表示主题。
