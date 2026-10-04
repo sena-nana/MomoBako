@@ -141,12 +141,41 @@
 
 ## Phase 5 播放列表
 
-| 来源 | 状态 |
-| --- | --- |
-| `src/pages/workspace/playlists/` | 未读 |
-| `src/components/WorkspacePlayerBar.vue` | 未读 |
-| `src/composables/usePlaylistPlayer.ts` | 未读 |
-| `src/composables/useSystemMediaSession.ts` | 未读 |
+这些行由 `src-nana/src/shell/player_tests.rs` 覆盖状态机。成员走 `RepositoryInteractionViewModel` 的 `list_playlist_memberships` 和 `set_playlist_membership`；目录和不能切换的条目走已有的 `add_playlist_items_by_paths`；排序走已有的 `reorder_playlist_items`；恢复详情走 `get_playlist_detail`；下载走 `MutsukiTaskViewModel::execute` 的 `momobako.playlist.download`。这些调用没有替身测试。播放条和预览共用一份 `PlaybackSessionState`。没有原生候选时按回退或升级文案失败，有候选时仍停在“没有原生解码器”，不会变成 playing。实况播放列表用 `ReorderList`。15 个旧验收场景仍用原来的上移、下移和移除按钮。下面每一行都未离屏。
+
+实况播放表面只在不是 `acceptance_scene`、启动就绪、主区有仓库，且面板是文件或播放列表时出现。会话写到设置目录的 `playback-sessions.json`，只保存非临时条目。生产环境的原生播放候选从空列表开始。系统媒体会话没有宿主桥，相关调用是空操作。
+
+未完成，不能记成已测试：系统媒体会话和 SMTC 的播放、暂停、上一首、下一首、跳转和停止；真实解码器；把 Vue 播放运行时挂进 Nana；`execute` 返回任务编号之前取消下载；设置页里的播放器选择（阶段 6）；下载进度只在协议结果返回后整批应用，没有任务中途重绘；播放列表实况表面的新离屏场景。
+
+| 来源 | 触发 | 服务 | 结果 | 可见性 | 状态 |
+| --- | --- | --- | --- | --- | --- |
+| `usePlaylistMembershipUi.ts` 目录 | 条目是目录 | `add_playlist_items_by_paths`，没有替身 | 兼容列表是全部播放列表；有路径才提交 | “正在按路径加入播放列表…” | 已测试（未离屏） |
+| `usePlaylistMembershipUi.ts` 无扩展名 | 文件扩展名为空 | 不请求 | 没有兼容播放列表 | 不出现加入按钮 | 已测试（未离屏） |
+| `usePlaylistMembershipUi.ts` 扩展名 | 扩展名命中播放器类型 | 无，直到点击 | 候选和贡献的扩展名合并，忽略大小写 | “加入 {名称}” / “移出 {名称}” | 已测试（未离屏） |
+| `usePlaylistMembershipUi.ts` 切换 | 文件、有素材 id、不是虚拟项，且资源库可写 | `set_playlist_membership`，没有替身 | 已在列表中则移除，否则追加；本地成员要等 `MembershipSaved`；失败保留旧成员 | “正在更新播放列表成员…” | 已测试（未离屏） |
+| `usePlaylistMembershipUi.ts` 虚拟或无素材 | 虚拟项，或没有素材 id | `add_playlist_items_by_paths`，没有替身 | 不走成员切换；没有路径则不请求 | “正在按路径加入播放列表…” | 已测试（未离屏） |
+| `usePlaylistMembershipUi.ts` 拒绝 | 资源库不可写，或没有活动仓库 | 不请求 | 记日志，成员不变 | 成员列表不变 | 已测试（未离屏） |
+| `workspace.ts` 成员索引 | 播放列表加载、读取失败、仓库不一致或列表为空 | `list_playlist_memberships`，没有替身 | 失败清空；过期仓库忽略；空列表清空且不请求 | 成员与当前仓库一致 | 已测试（未离屏） |
+| `ReorderList` 排序 | 拖到某项之前，或放到末尾 | `reorder_playlist_items`，没有替身 | 用播放列表页的条目顺序，不先改本地；相同顺序或缺少 id 不请求；不可写时忽略 | “正在保存播放列表顺序…” | 已测试（未离屏） |
+| 验收场景排序 | `acceptance_scene` | 仍是原来的上移、下移和移除 | 不挂实况播放表面 | “上移” / “下移” / “移除” | 已测试（未离屏） |
+| `playlistPlayerPreference.ts` 回退 | 解析某个播放器类型 | 无 | 先用偏好，再官方，再第一个候选；音频能力不会落到未选择的第三方；偏好缺失时 `fallbackUsed` | “所选播放器当前不可用，已回退到 …” / “官方音频播放器未启用或缺失，音频播放暂不可用。” | 已测试（未离屏） |
+| `playlistPlayerPreference.ts` 空能力 | 能力标识为空白 | 不写偏好 | 记日志 | “播放器能力标识不能为空” | 已测试（未离屏） |
+| `usePlaylistPlayer.ts` 缺少插件 | 播放列表项就绪，但没有候选也没有贡献 | 不调用解码器 | 状态 failed，不是 playing | “缺少对应播放插件” | 已测试（未离屏） |
+| `usePlaylistPlayer.ts` Vue 贡献 | 只有贡献，没有原生候选 | 不调用解码器 | 状态 failed | “播放运行时仍是 Vue 插件，需要升级为 Nana 原生播放贡献” | 已测试（未离屏） |
+| `usePlaylistPlayer.ts` 解码失败 | 已解析到原生候选 | `PlaybackSessionController`，`load` 返回“没有原生解码器” | 播放、暂停、跳转和音量仍是 failed；音量和进度不被失败改写 | “没有原生解码器” | 已测试（未离屏） |
+| `usePlayerUi.ts` 图片停留和适配 | 当前项是图片，或切换适应 / 填充 | 写入 `playback-settings.json` | 停留钳在 2000–30000，坏数字回到 5000；只有 cover 是填充 | “适应” / “填充” | 已测试（未离屏） |
+| `usePlaylistPlayer.ts` 模式 | 循环、随机、单曲，以及自然结束 | 无 | 单曲自然结束留在当前项；手动到末尾停止；随机缺序列时重建后取后继，走到末尾时重建后取新序列第一项 | “列表循环” / “随机播放” / “单曲循环” | 已测试（未离屏） |
+| `usePlaylistPlayer.ts` 临时项 | 从文件插播，或自然结束 | 无 | 相同路径的旧临时项去掉；自然结束后清掉已经不是当前项的临时项；活动列表详情保留当前项和历史里的临时项 | “当前队列 N 项” | 已测试（未离屏） |
+| `usePlaylistPlayer.ts` 跨仓库插播 | 当前仓库不同 | `stop(false)`，不删存储 | 先确认有播放器，再停运行时；临时项不写入会话文件 | 会话仍是 failed | 已测试（未离屏） |
+| `usePlaylistPlayer.ts` 会话 | 非临时项开始播放，或停止 | 写入 `playback-sessions.json` | 坏 JSON 或缺文件回到默认；不完整会话忽略；停止把状态写成 ended，时间归零，保留当前 id，并删掉该仓库的存储 | “0:00 / 0:00” | 已测试（未离屏） |
+| `AppShell.vue` 恢复 | 播放列表里有存储的列表，且播放器仓库还不是该仓库 | `get_playlist_detail`，没有替身 | 类型须是候选或贡献，条目须就绪且列表一致；否则清掉该仓库会话。恢复后的装载仍会因没有解码器失败 | 音量和进度保留，状态是 failed | 已测试（未离屏） |
+| `AppShell.vue` 切仓库 | 播放另一个仓库的列表，或停止指定仓库 | 清掉被换下仓库的会话 | 即使当前播放仓库已经不同，也删除被指定仓库的存储；只停止仍属于该仓库的运行时 | 被停止的会话是 ended | 已测试（未离屏） |
+| `WorkspacePlayerBar.vue` 共用会话 | 预览读到音视频，或播放条改音量 | 与预览共用 `PlaybackSessionState` | 图片预览不覆盖播放条；音视频预览会接过会话；播放条失败时预览里的会话一起停在 failed 或 ended | “没有原生解码器” | 已测试（未离屏） |
+| `usePlaylistPlayer.ts` 打开预览 | 当前有条目 | 有素材 id 时 `get_asset_detail`，没有替身 | 切到文件面板和全部分类，并选中路径 | “打开预览” | 已测试（未离屏） |
+| `momobako.playlist.download` | 插件提交下载请求 | `MutsukiTaskViewModel::execute`，没有替身 | 提交阶段是 submitting；返回的进度按顺序应用；其他列表的事件忽略；空结果记为 complete；失败记为 error | “正在提交播放列表下载…” / “正在下载 N / N，失败 N” | 已测试（未离屏） |
+| `momobako.playlist.download` 取消 | 任务编号还没有返回 | 不调用 `cancel` | 只记日志 | “下载任务还没有可取消的句柄” | 已测试（未离屏） |
+| `useSystemMediaSession.ts` | 任何媒体键 | 无 | `system_media_session_available` 始终为假，不注册系统媒体控件 | 没有系统媒体会话 | 已测试（未离屏） |
+| 实况表面 | 启动就绪、主区有仓库，且面板是文件或播放列表 | 无 | `acceptance_scene` 不显示这块表面 | “播放集” / “正在播放” | 已测试（未离屏） |
 
 ## Phase 6 设置、插件、日志和任务
 

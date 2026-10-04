@@ -229,7 +229,8 @@ pub fn mount_shell(
                     })
                     .collect::<Vec<_>>(),
             );
-            let playlist_item_actions = widget(Stack::fill_column(6.0)).children(
+            let playlist_item_actions = if view_model.acceptance_scene {
+                Some(widget(Stack::fill_column(6.0)).children(
                 view_model
                     .playlist_item_entries
                     .iter()
@@ -263,7 +264,15 @@ pub fn mount_shell(
                         ))
                     })
                     .collect::<Vec<_>>(),
-            );
+            ))
+            } else {
+                None
+            };
+            let player_surface = if view_model.player_surface_visible() {
+                Some(super::player_view::player_surface(&view_model))
+            } else {
+                None
+            };
             let playlist_item_status = if view_model.playlist_item_status.is_empty() {
                 None
             } else {
@@ -448,6 +457,7 @@ pub fn mount_shell(
                 widget(Stack::fill_column(8.0)).children((
                     settings_editor,
                     playlist_item_actions,
+                    player_surface,
                     playlist_item_status,
                     playlist_editor,
                     playlist_creator,

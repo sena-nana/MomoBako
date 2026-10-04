@@ -844,6 +844,31 @@ impl InspectState {
         }
         self.pending_open = Some(row);
     }
+
+    pub(crate) fn media_session(&self) -> Option<&PlaybackSessionState> {
+        match &self.body {
+            PreviewBody::Media(session) => Some(session),
+            _ => None,
+        }
+    }
+
+    /// 只有预览体已经是音视频时，才把共用会话写回去。
+    pub(crate) fn replace_shared_media(&mut self, session: PlaybackSessionState) {
+        if !matches!(self.body, PreviewBody::Media(_)) {
+            return;
+        }
+        self.error = session.error.clone().unwrap_or_default();
+        self.body = PreviewBody::Media(session);
+    }
+
+    /// 从播放列表打开文件。有素材 id 时再读取详情。
+    pub(crate) fn open_playlist_item(&mut self, path: &str, repo_id: &str, asset_id: &str) {
+        self.begin_selection(path);
+        self.repo_id = Some(repo_id.to_string());
+        if !asset_id.is_empty() {
+            self.effects.push(InspectEffect::LoadAsset { repo_id: repo_id.to_string(), asset_id: asset_id.to_string() });
+        }
+    }
 }
 
 impl MetadataDraft {
@@ -925,6 +950,9 @@ pub(super) fn reduce_message(model: &mut ShellViewModel, message: super::ShellMe
     });
     let repo_id = model.workspace.active_repo_id.clone();
     model.inspect.reduce(writable, repo_id.as_deref(), message);
+    if let Some(session) = model.inspect.media_session().cloned() {
+        model.player.adopt_session(session);
+    }
     if let Some(row) = model.inspect.pending_open.take() {
         model.workspace.panel = WorkspacePanel::Files;
         model.selected_path = Some(row.path.clone());

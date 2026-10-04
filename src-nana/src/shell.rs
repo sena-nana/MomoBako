@@ -14,6 +14,8 @@ mod files;
 mod files_view;
 mod inspect;
 mod inspect_view;
+pub(crate) mod player;
+mod player_view;
 mod sidebar;
 mod sidebar_view;
 mod workspace;
@@ -111,6 +113,8 @@ pub enum ShellMessage {
     Files(files::FilesMessage),
     /// 预览、元数据和搜索。具体分支在 `inspect::reduce_message` 里归约。
     Inspect(inspect::InspectMessage),
+    /// 播放列表成员、下载、回退、会话和播放条。具体分支在 `player::reduce_message` 里归约。
+    Player(player::PlayerMessage),
 }
 
 /// 已解码的 RGBA 预览帧；解码在服务任务中完成，窗口线程只负责上传 GPU 纹理。
@@ -275,6 +279,7 @@ pub struct ShellViewModel {
     pub sidebar: sidebar::SidebarState,
     pub files: files::FilesState,
     pub inspect: inspect::InspectState,
+    pub player: player::PlayerState,
 }
 
 impl Default for ShellViewModel {
@@ -324,6 +329,7 @@ impl Default for ShellViewModel {
             sidebar: sidebar::SidebarState::default(),
             files: files::FilesState::default(),
             inspect: inspect::InspectState::default(),
+            player: player::PlayerState::default(),
         }
     }
 }
@@ -427,6 +433,9 @@ impl ShellViewModel {
 
     /// 在 ViewModel 边界集中处理导航和页面动作，避免控件闭包直接修改领域状态。
     pub fn reduce(&mut self, message: ShellMessage) {
+        let Some(message) = player::reduce_message(self, message) else {
+            return;
+        };
         let Some(message) = sidebar::reduce_message(self, message) else {
             return;
         };
@@ -533,6 +542,9 @@ impl ShellViewModel {
                     detail.revisions.len()
                 );
                 self.inspect.note_detail(&detail);
+                if let Some(session) = self.inspect.media_session().cloned() {
+                    self.player.adopt_session(session);
+                }
             }
             ShellMessage::AssetDetailLoaded(Err(error)) => {
                 self.page = ShellPage::Error;
@@ -931,6 +943,7 @@ impl ShellViewModel {
             ShellMessage::Sidebar(_) => {}
             ShellMessage::Files(_) => {}
             ShellMessage::Inspect(_) => {}
+            ShellMessage::Player(_) => {}
         }
     }
 
