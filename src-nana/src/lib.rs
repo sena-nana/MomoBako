@@ -16,6 +16,7 @@ pub mod shell;
 mod files_dispatch;
 mod inspect_dispatch;
 mod player_dispatch;
+mod admin_dispatch;
 mod sidebar_dispatch;
 use shell::{
     DeleteMode, PreviewPixels, ShellMessage, ShellPage, ShellViewModel, StartupStatus, WindowAction,
@@ -87,6 +88,7 @@ impl ApplicationState for MomoBakoApplication {
         shell.workspace.load_prefs_file(&sidebar_prefs_path());
         shell.files.load_display_mode_file(&display_mode_path());
         shell.player.load_default_files();
+        shell.admin.load_default_file();
         Ok(Self {
             services,
             shell,
@@ -661,6 +663,7 @@ impl ApplicationState for MomoBakoApplication {
         }
         dispatch_workspace_effects(self, context);
         player_dispatch::dispatch_player_effects(self, context);
+        admin_dispatch::dispatch_admin_effects(self, context);
         sidebar_dispatch::dispatch_sidebar_effects(self, context);
         files_dispatch::dispatch_files_effects(self, context);
         inspect_dispatch::dispatch_inspect_effects(self, context);

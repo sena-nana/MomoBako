@@ -443,6 +443,11 @@ pub fn mount_shell(
             } else {
                 file_actions.into_any()
             };
+            let admin_surface = if !view_model.acceptance_scene {
+                Some(super::admin::admin_surface(&view_model))
+            } else {
+                None
+            };
             let workspace_actions = widget(Stack::fill_column(8.0)).children((
                 widget(Stack::fill_column(8.0)).children((
                     status_summary,
@@ -456,6 +461,7 @@ pub fn mount_shell(
                 )),
                 widget(Stack::fill_column(8.0)).children((
                     settings_editor,
+                    admin_surface,
                     playlist_item_actions,
                     player_surface,
                     playlist_item_status,
