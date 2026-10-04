@@ -13,7 +13,10 @@ use nana_ui::{
 };
 
 pub mod shell;
-use shell::{PreviewPixels, ShellMessage, ShellPage, ShellViewModel, WindowAction, mount_shell};
+use shell::{
+    DeleteMode, PreviewPixels, ShellMessage, ShellPage, ShellViewModel, StartupStatus, WindowAction,
+    WorkspaceEffect, mount_shell, sidebar_prefs_path,
+};
 
 pub mod capability;
 pub mod host_api;
@@ -23,6 +26,11 @@ pub mod theme_map;
 /// Nana 宿主直接使用共享领域服务 crate，迁移期 Tauri 仍保留同一服务源码的
 /// 适配入口；此 re-export 让后续 ViewModel 接线不需要再穿过 command 层。
 pub use momobako_backend as backend;
+use backend::services::mutsuki_runner::{PROTOCOL_REPOSITORY_RELOCATE, PROTOCOL_REPOSITORY_SYNC};
+use backend::services::repository::{
+    FileBrowserRequest, RepositoryDeleteMode, RepositoryDeleteRequest, RepositoryRelocateRequest,
+    SyncRequest,
+};
 pub mod plugin_api;
 pub mod settings;
 
@@ -64,13 +72,14 @@ impl ApplicationState for MomoBakoApplication {
                 None
             }
         };
-        let shell = if services.is_some() {
+        let mut shell = if services.is_some() {
             ShellViewModel::default()
         } else {
             let mut shell = ShellViewModel::for_page(ShellPage::Error);
             shell.detail = "领域服务启动失败，请检查服务目录和端口配置".into();
             shell
         };
+        shell.workspace.load_prefs_file(&sidebar_prefs_path());
         Ok(Self {
             services,
             shell,
@@ -84,13 +93,20 @@ impl ApplicationState for MomoBakoApplication {
         window: &mut ApplicationWindow,
         context: &RuntimeProgramContext<Self::Message>,
     ) -> Result<(), Self::Error> {
+        if self.services.is_some() && !self.repositories_load_scheduled {
+            self.shell.workspace.prepare_initial_list();
+        }
         mount_shell(&mut window.document, &self.shell)?;
         if !self.repositories_load_scheduled {
             if let Some(services) = self.services.as_ref() {
                 let query = services.repository_query.clone();
                 let executor = services.executor.clone();
+                let generation = self.shell.workspace.list_generation;
                 if let Err(error) = context.run_task(Task::new(async move {
-                    ShellMessage::RepositoriesLoaded(executor.block_on(query.list_repositories()))
+                    ShellMessage::WorkspaceListLoaded {
+                        generation,
+                        result: executor.block_on(query.list_repositories()),
+                    }
                 })) {
                     eprintln!("Nana 资源库加载任务提交失败：{error}");
                 }
@@ -181,32 +197,6 @@ impl ApplicationState for MomoBakoApplication {
                 ..RuntimeProgramUpdate::default()
             };
         }
-        if let ShellMessage::RepositoriesLoaded(Ok(repositories)) = &message
-            && let Some(repository) = repositories.first()
-            && let Some(services) = self.services.as_ref()
-        {
-            let query = services.repository_query.clone();
-            let executor = services.executor.clone();
-            let repo_id = repository.repo_id.clone();
-            if let Err(error) = context.run_task(Task::new(async move {
-                ShellMessage::RepositorySnapshotLoaded(
-                    executor.block_on(query.get_repository_snapshot(repo_id)),
-                )
-            })) {
-                eprintln!("Nana 资源库快照任务提交失败：{error}");
-            }
-        }
-        if matches!(&message, ShellMessage::Refresh)
-            && let Some(services) = self.services.as_ref()
-        {
-            let query = services.repository_query.clone();
-            let executor = services.executor.clone();
-            if let Err(error) = context.run_task(Task::new(async move {
-                ShellMessage::RepositoriesLoaded(executor.block_on(query.list_repositories()))
-            })) {
-                eprintln!("Nana 资源库刷新任务提交失败：{error}");
-            }
-        }
         if matches!(&message, ShellMessage::Navigate(ShellPage::PluginSettings))
             && let Some(services) = self.services.as_ref()
         {
@@ -266,24 +256,7 @@ impl ApplicationState for MomoBakoApplication {
         if matches!(&message, ShellMessage::Navigate(ShellPage::Settings))
             && let Some(services) = self.services.as_ref()
         {
-            let system = services.system.clone();
-            let settings = services.settings.clone();
-            let executor = services.executor.clone();
-            if let Err(error) = context.run_task(Task::new(async move {
-                ShellMessage::SystemStatusLoaded(
-                    executor.block_on(system.get_external_api_connection_status()),
-                )
-            })) {
-                eprintln!("Nana 系统状态任务提交失败：{error}");
-            }
-            let settings_executor = services.executor.clone();
-            if let Err(error) = context.run_task(Task::new(async move {
-                ShellMessage::SettingsLoaded(settings_executor.block_on(async move {
-                    settings.load_or_recover()
-                }))
-            })) {
-                eprintln!("Nana 应用设置加载任务提交失败：{error}");
-            }
+            schedule_settings_load(services, context);
         }
         if matches!(&message, ShellMessage::SaveSettings)
             && let Some(services) = self.services.as_ref()
@@ -579,25 +552,11 @@ impl ApplicationState for MomoBakoApplication {
                 eprintln!("Nana 任务取消请求未找到任务：{task_id}");
             }
         }
-        if let ShellMessage::RepositorySnapshotLoaded(Ok(snapshot)) = &message
-            && let Some(services) = self.services.as_ref()
-        {
-            let browser = services.file_browser.clone();
-            let executor = services.executor.clone();
-            let request = backend::services::repository::FileBrowserRequest {
-                repo_id: snapshot.repository.repo_id.clone(),
-                directory_path: None,
-                include_tree: Some(false),
-                special_location: None,
-                offset: Some(0),
-                limit: Some(200),
-            };
-            if let Err(error) = context.run_task(Task::new(async move {
-                ShellMessage::FileBrowserLoaded(executor.block_on(browser.get_file_browser(request)))
-            })) {
-                eprintln!("Nana 文件浏览任务提交失败：{error}");
-            }
-        }
+        let snapshot_repo_id = if let ShellMessage::RepositorySnapshotLoaded(Ok(snapshot)) = &message {
+            Some(snapshot.repository.repo_id.clone())
+        } else {
+            None
+        };
         if let ShellMessage::OpenDirectory(path) = &message
             && let Some(repo_id) = self.shell.repository_id.clone()
             && let Some(services) = self.services.as_ref()
@@ -683,6 +642,16 @@ impl ApplicationState for MomoBakoApplication {
             }
         }
         self.shell.reduce(message);
+        if let Some(repo_id) = snapshot_repo_id
+            && self.shell.repository_id.as_deref() == Some(repo_id.as_str())
+            && self.shell.workspace.startup.status != StartupStatus::Error
+            && (self.shell.workspace.startup.status != StartupStatus::Loading
+                || self.shell.workspace.startup.current_step >= 4)
+            && let Some(services) = self.services.as_ref()
+        {
+            schedule_root_browser(services, context, repo_id);
+        }
+        dispatch_workspace_effects(self, context);
         if let Err(error) = mount_shell(&mut window.document, &self.shell) {
             eprintln!("Nana 壳层重建失败：{error}");
             self.shell.page = ShellPage::Error;
@@ -690,6 +659,210 @@ impl ApplicationState for MomoBakoApplication {
             return RuntimeProgramUpdate::redraw(*id);
         }
         RuntimeProgramUpdate::redraw(*id)
+    }
+}
+
+/// 读取系统连接状态和应用设置。设置页和来源缓存问题共用这一次调度。
+fn schedule_settings_load(
+    services: &services::NativeServices,
+    context: &RuntimeProgramContext<ShellMessage>,
+) {
+    let system = services.system.clone();
+    let settings = services.settings.clone();
+    let executor = services.executor.clone();
+    if let Err(error) = context.run_task(Task::new(async move {
+        ShellMessage::SystemStatusLoaded(
+            executor.block_on(system.get_external_api_connection_status()),
+        )
+    })) {
+        eprintln!("Nana 系统状态任务提交失败：{error}");
+    }
+    let settings_executor = services.executor.clone();
+    if let Err(error) = context.run_task(Task::new(async move {
+        ShellMessage::SettingsLoaded(
+            settings_executor.block_on(async move { settings.load_or_recover() }),
+        )
+    })) {
+        eprintln!("Nana 应用设置加载任务提交失败：{error}");
+    }
+}
+
+/// 摘要确认属于当前仓库后，读取根目录作为启动第 4 步。
+fn schedule_root_browser(
+    services: &services::NativeServices,
+    context: &RuntimeProgramContext<ShellMessage>,
+    repo_id: String,
+) {
+    let browser = services.file_browser.clone();
+    let executor = services.executor.clone();
+    let request = FileBrowserRequest {
+        repo_id,
+        directory_path: None,
+        include_tree: Some(false),
+        special_location: None,
+        offset: Some(0),
+        limit: Some(200),
+    };
+    if let Err(error) = context.run_task(Task::new(async move {
+        ShellMessage::FileBrowserLoaded(executor.block_on(browser.get_file_browser(request)))
+    })) {
+        eprintln!("Nana 文件浏览任务提交失败：{error}");
+    }
+}
+
+/// 执行工作台归约留下的副作用。服务未启动或任务提交失败时把错误写回状态机，避免步骤停在进行中。
+fn dispatch_workspace_effects(
+    app: &mut MomoBakoApplication,
+    context: &RuntimeProgramContext<ShellMessage>,
+) {
+    for effect in app.shell.workspace.take_effects() {
+        match effect {
+            WorkspaceEffect::PersistSidebar => {
+                app.shell.workspace.save_prefs_file(&sidebar_prefs_path());
+            }
+            WorkspaceEffect::StopPlayback { previous_repo_id } => {
+                eprintln!("Nana 仓库切换，停止播放会话：{previous_repo_id}");
+            }
+            WorkspaceEffect::RefreshRepositories { generation } => {
+                let prepared = app.services.as_ref().map(|services| {
+                    (services.repository_query.clone(), services.executor.clone())
+                });
+                let Some((query, executor)) = prepared else {
+                    eprintln!("Nana 资源库刷新需要领域服务，当前服务未启动");
+                    app.shell.reduce(ShellMessage::WorkspaceListLoaded {
+                        generation,
+                        result: Err("领域服务未启动".into()),
+                    });
+                    continue;
+                };
+                if let Err(error) = context.run_task(Task::new(async move {
+                    ShellMessage::WorkspaceListLoaded {
+                        generation,
+                        result: executor.block_on(query.list_repositories()),
+                    }
+                })) {
+                    eprintln!("Nana 资源库刷新任务提交失败：{error}");
+                    app.shell.reduce(ShellMessage::WorkspaceListLoaded {
+                        generation,
+                        result: Err(format!("资源库列表任务提交失败：{error}")),
+                    });
+                }
+            }
+            WorkspaceEffect::SyncRepository { repo_id, generation } => {
+                let prepared = app
+                    .services
+                    .as_ref()
+                    .map(|services| (services.tasks.clone(), services.executor.clone()));
+                let Some((tasks, executor)) = prepared else {
+                    eprintln!("Nana 资源库同步需要领域服务，当前服务未启动");
+                    app.shell.reduce(ShellMessage::StartupSyncFinished {
+                        generation,
+                        result: Err("领域服务未启动".into()),
+                    });
+                    continue;
+                };
+                if let Err(error) = context.run_task(Task::new(async move {
+                    let result = executor
+                        .block_on(tasks.execute(PROTOCOL_REPOSITORY_SYNC, SyncRequest { repo_id }))
+                        .map(|_| ());
+                    ShellMessage::StartupSyncFinished { generation, result }
+                })) {
+                    eprintln!("Nana 资源库同步任务提交失败：{error}");
+                    app.shell.reduce(ShellMessage::StartupSyncFinished {
+                        generation,
+                        result: Err(format!("资源库同步任务提交失败：{error}")),
+                    });
+                }
+            }
+            WorkspaceEffect::LoadSnapshot { repo_id } => {
+                let prepared = app.services.as_ref().map(|services| {
+                    (services.repository_query.clone(), services.executor.clone())
+                });
+                let Some((query, executor)) = prepared else {
+                    eprintln!("Nana 资源库摘要需要领域服务，当前服务未启动");
+                    app.shell.reduce(ShellMessage::RepositorySnapshotLoaded(Err(
+                        "领域服务未启动".into(),
+                    )));
+                    continue;
+                };
+                if let Err(error) = context.run_task(Task::new(async move {
+                    ShellMessage::RepositorySnapshotLoaded(
+                        executor.block_on(query.get_repository_snapshot(repo_id)),
+                    )
+                })) {
+                    eprintln!("Nana 资源库摘要任务提交失败：{error}");
+                    app.shell.reduce(ShellMessage::RepositorySnapshotLoaded(Err(format!(
+                        "资源库摘要任务提交失败：{error}"
+                    ))));
+                }
+            }
+            WorkspaceEffect::RelocateRepository { repo_id, path } => {
+                let prepared = app
+                    .services
+                    .as_ref()
+                    .map(|services| (services.tasks.clone(), services.executor.clone()));
+                let Some((tasks, executor)) = prepared else {
+                    eprintln!("Nana 资源库重定向需要领域服务，当前服务未启动");
+                    app.shell
+                        .reduce(ShellMessage::MissingRelocateFinished(Err("领域服务未启动".into())));
+                    continue;
+                };
+                if let Err(error) = context.run_task(Task::new(async move {
+                    let result = executor
+                        .block_on(tasks.execute(
+                            PROTOCOL_REPOSITORY_RELOCATE,
+                            RepositoryRelocateRequest { repo_id, path },
+                        ))
+                        .map(|_| ());
+                    ShellMessage::MissingRelocateFinished(result)
+                })) {
+                    eprintln!("Nana 资源库重定向任务提交失败：{error}");
+                    app.shell.reduce(ShellMessage::MissingRelocateFinished(Err(format!(
+                        "资源库重定向任务提交失败：{error}"
+                    ))));
+                }
+            }
+            WorkspaceEffect::DeleteRepository { repo_id, mode } => {
+                let prepared = app.services.as_ref().map(|services| {
+                    (
+                        services.repository_management.clone(),
+                        services.executor.clone(),
+                    )
+                });
+                let mode = match mode {
+                    DeleteMode::RecordOnly => RepositoryDeleteMode::RecordOnly,
+                    DeleteMode::DeleteMetadata => RepositoryDeleteMode::DeleteMetadata,
+                    DeleteMode::DeleteFolder => RepositoryDeleteMode::DeleteFolder,
+                };
+                let Some((management, executor)) = prepared else {
+                    eprintln!("Nana 资源库删除需要领域服务，当前服务未启动");
+                    app.shell
+                        .reduce(ShellMessage::MissingDeleteFinished(Err("领域服务未启动".into())));
+                    continue;
+                };
+                if let Err(error) = context.run_task(Task::new(async move {
+                    ShellMessage::MissingDeleteFinished(
+                        executor.block_on(
+                            management.delete_repository(RepositoryDeleteRequest { repo_id, mode }),
+                        ),
+                    )
+                })) {
+                    eprintln!("Nana 资源库删除任务提交失败：{error}");
+                    app.shell.reduce(ShellMessage::MissingDeleteFinished(Err(format!(
+                        "资源库删除任务提交失败：{error}"
+                    ))));
+                }
+            }
+            WorkspaceEffect::OpenSourceSettings => {
+                let Some(services) = app.services.as_ref() else {
+                    eprintln!("Nana 来源设置需要领域服务，当前服务未启动");
+                    app.shell
+                        .reduce(ShellMessage::SystemStatusLoaded(Err("领域服务未启动".into())));
+                    continue;
+                };
+                schedule_settings_load(services, context);
+            }
+        }
     }
 }
 
