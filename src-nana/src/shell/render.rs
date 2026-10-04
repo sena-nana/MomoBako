@@ -20,7 +20,7 @@ pub fn mount_shell(
         .context_mut()
         .mount_view_root(document_id, move || {
             // 标题栏、导航栏和主工作区分别承担窗口级操作、上下文导航和资源主线。
-            let navigation = widget(
+            let legacy_navigation = widget(
                 Stack::fill_column(8.0)
                     .width(LengthSpec::Px(220.0))
                     .grow(0.0)
@@ -498,7 +498,14 @@ pub fn mount_shell(
                     SIDEBAR_MIN_PX,
                     SIDEBAR_MAX_PX,
                 );
-                let sidebar = widget(SidebarFrame::new()).body(navigation);
+                let sidebar = if view_model.acceptance_scene {
+                    widget(SidebarFrame::new()).body(legacy_navigation)
+                } else {
+                    widget(SidebarFrame::new())
+                        .top(super::sidebar_view::sidebar_switcher(&view_model))
+                        .body(super::sidebar_view::sidebar_sections(&view_model))
+                        .footer(super::sidebar_view::sidebar_footer(&view_model))
+                };
                 widget(SplitPane::new(&split)).first(sidebar).second(stage).into_any()
             } else {
                 stage.into_any()
@@ -533,6 +540,8 @@ pub fn mount_shell(
             let mut shell = widget(AppShell::new()).title_bar(title_bar).body(body);
             if let Some(dialog) = delete_repository_dialog(&view_model) {
                 shell = shell.overlay(dialog);
+            } else if let Some(popover) = super::sidebar_view::repository_popover(&view_model) {
+                shell = shell.overlay(popover);
             }
             shell
         })?;

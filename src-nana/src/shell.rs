@@ -10,7 +10,12 @@ use crate::backend::services::repository::{
 };
 use crate::settings::ApplicationSettings;
 
+mod sidebar;
+mod sidebar_view;
 mod workspace;
+pub use sidebar::{
+    SidebarEffect, SidebarFolder, SidebarMessage, SidebarPlaylist, SidebarSmartFolder, ShortcutId,
+};
 pub use workspace::{
     sidebar_prefs_path, DeleteMode, LibraryCategory, MainRegion, StartupStatus, WorkspaceEffect,
     WorkspacePanel, WorkspaceRepository, WorkspaceState,
@@ -92,6 +97,8 @@ pub enum ShellMessage {
     SelectWorkspaceRepository(String),
     SetWorkspacePanel(WorkspacePanel),
     SetLibraryCategory(LibraryCategory),
+    /// 侧栏导航。具体分支在 `sidebar::reduce_message` 里归约。
+    Sidebar(sidebar::SidebarMessage),
 }
 
 /// 已解码的 RGBA 预览帧；解码在服务任务中完成，窗口线程只负责上传 GPU 纹理。
@@ -253,6 +260,7 @@ pub struct ShellViewModel {
     /// 离屏验收场景继续渲染原来的 15 个页面，直到对应逻辑有了新场景。
     pub acceptance_scene: bool,
     pub workspace: WorkspaceState,
+    pub sidebar: sidebar::SidebarState,
 }
 
 impl Default for ShellViewModel {
@@ -299,6 +307,7 @@ impl Default for ShellViewModel {
             plugin_config_string_values: std::collections::BTreeSet::new(),
             acceptance_scene: false,
             workspace: WorkspaceState::default(),
+            sidebar: sidebar::SidebarState::default(),
         }
     }
 }
@@ -402,6 +411,9 @@ impl ShellViewModel {
 
     /// 在 ViewModel 边界集中处理导航和页面动作，避免控件闭包直接修改领域状态。
     pub fn reduce(&mut self, message: ShellMessage) {
+        let Some(message) = sidebar::reduce_message(self, message) else {
+            return;
+        };
         match message {
             ShellMessage::Navigate(page) => {
                 self.page = page;
@@ -426,14 +438,15 @@ impl ShellViewModel {
                 }
                 self.workspace.note_index_finished(&snapshot.repository.repo_id, Ok(()));
                 self.page = ShellPage::FileList;
-                self.repository_name = snapshot.repository.name;
-                self.repository_id = Some(snapshot.repository.repo_id);
+                self.repository_name = snapshot.repository.name.clone();
+                self.repository_id = Some(snapshot.repository.repo_id.clone());
                 self.detail = format!(
                     "{} 个文件 · {} 个文件夹 · {}",
                     snapshot.overview.file_count,
                     snapshot.overview.folder_count,
                     snapshot.repository.status
                 );
+                self.apply_snapshot_sidebar(&snapshot);
             }
             ShellMessage::RepositorySnapshotLoaded(Err(error)) => {
                 if let Some(repo_id) = self.workspace.active_repo_id.clone() {
@@ -448,6 +461,10 @@ impl ShellViewModel {
                 self.file_entries = browser.entries.iter().map(|entry| entry.name.clone()).collect();
                 self.browser_entries = browser.entries;
                 self.current_directory = browser.current_path.clone();
+                self.sidebar.note_directory(
+                    &browser.current_path,
+                    browser.special_location.as_deref() == Some("trash"),
+                );
                 self.detail = format!(
                     "{} 个条目 · 当前目录 {}",
                     browser.total_entries, browser.current_path
@@ -639,6 +656,10 @@ impl ShellViewModel {
                 self.detail = format!("正在删除播放列表 {playlist_id}…");
             }
             ShellMessage::PlaylistDetailLoaded(Ok(detail)) => {
+                if self.sidebar.bound_repo_id().is_some_and(|repo_id| repo_id != detail.playlist.repo_id.as_str()) {
+                    eprintln!("Nana 忽略过期的播放集详情：{}", detail.playlist.playlist_id);
+                    return;
+                }
                 self.page = ShellPage::Playlists;
                 self.selected_playlist_id = Some(detail.playlist.playlist_id.clone());
                 self.selected_playlist_player_type_id = Some(detail.playlist.player_type_id.clone());
@@ -856,6 +877,7 @@ impl ShellViewModel {
                 if let Some(repository) = self.workspace.active_repository() {
                     self.repository_name = repository.name.clone();
                 }
+                self.bind_sidebar_repository();
             }
             ShellMessage::SetWorkspacePanel(panel) => self.workspace.panel = panel,
             ShellMessage::SetLibraryCategory(category) => self.workspace.library_category = category,
@@ -865,6 +887,7 @@ impl ShellViewModel {
             ShellMessage::EditAction => {
                 self.detail = "原生编辑器尚未接通，当前文件未修改".into();
             }
+            ShellMessage::Sidebar(_) => {}
         }
     }
 
@@ -908,6 +931,7 @@ impl ShellViewModel {
                 self.detail = self.workspace.startup.step_label.clone();
             }
         }
+        self.bind_sidebar_repository();
     }
 }
 

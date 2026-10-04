@@ -13,6 +13,7 @@ use nana_ui::{
 };
 
 pub mod shell;
+mod sidebar_dispatch;
 use shell::{
     DeleteMode, PreviewPixels, ShellMessage, ShellPage, ShellViewModel, StartupStatus, WindowAction,
     WorkspaceEffect, mount_shell, sidebar_prefs_path,
@@ -652,6 +653,7 @@ impl ApplicationState for MomoBakoApplication {
             schedule_root_browser(services, context, repo_id);
         }
         dispatch_workspace_effects(self, context);
+        sidebar_dispatch::dispatch_sidebar_effects(self, context);
         if let Err(error) = mount_shell(&mut window.document, &self.shell) {
             eprintln!("Nana 壳层重建失败：{error}");
             self.shell.page = ShellPage::Error;
