@@ -14,6 +14,7 @@ use nana_ui::{
 
 pub mod shell;
 mod files_dispatch;
+mod inspect_dispatch;
 mod sidebar_dispatch;
 use shell::{
     DeleteMode, PreviewPixels, ShellMessage, ShellPage, ShellViewModel, StartupStatus, WindowAction,
@@ -28,6 +29,7 @@ pub mod theme_map;
 /// Nana 宿主直接使用共享领域服务 crate，迁移期 Tauri 仍保留同一服务源码的
 /// 适配入口；此 re-export 让后续 ViewModel 接线不需要再穿过 command 层。
 pub use momobako_backend as backend;
+pub(crate) use shell::prepare_text as prepare_preview_text;
 use backend::services::mutsuki_runner::{PROTOCOL_REPOSITORY_RELOCATE, PROTOCOL_REPOSITORY_SYNC};
 use backend::services::repository::{
     FileBrowserRequest, RepositoryDeleteMode, RepositoryDeleteRequest, RepositoryRelocateRequest,
@@ -595,6 +597,7 @@ impl ApplicationState for MomoBakoApplication {
             }
         }
         if matches!(&message, ShellMessage::PrimaryAction)
+            && self.shell.acceptance_scene
             && self.shell.page == ShellPage::SelectedFile
             && let (Some(repository_id), Some(path), Some(services)) = (
                 self.shell.repository_id.clone(),
@@ -657,6 +660,7 @@ impl ApplicationState for MomoBakoApplication {
         dispatch_workspace_effects(self, context);
         sidebar_dispatch::dispatch_sidebar_effects(self, context);
         files_dispatch::dispatch_files_effects(self, context);
+        inspect_dispatch::dispatch_inspect_effects(self, context);
         if let Err(error) = mount_shell(&mut window.document, &self.shell) {
             eprintln!("Nana 壳层重建失败：{error}");
             self.shell.page = ShellPage::Error;
@@ -871,7 +875,7 @@ fn dispatch_workspace_effects(
     }
 }
 
-fn decode_preview_pixels(bytes: &[u8]) -> Result<PreviewPixels, String> {
+pub(crate) fn decode_preview_pixels(bytes: &[u8]) -> Result<PreviewPixels, String> {
     let image = image::load_from_memory(bytes).map_err(|error| format!("图片解码失败：{error}"))?;
     let rgba = image.to_rgba8();
     let (width, height) = rgba.dimensions();
