@@ -38,7 +38,7 @@ struct ExternalConnectionFile {
 }
 
 /// Public external API connection payload exposed to the desktop shell and local clients.
-#[derive(Clone, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExternalApiConnectionStatus {
     pub base_url: String,

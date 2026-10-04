@@ -287,6 +287,17 @@ impl FilesState {
         std::mem::take(&mut self.effects)
     }
 
+    /// 仓库动作的 `selectedCount` 只数多选路径，不含单独的主选。
+    pub(crate) fn selected_paths(&self) -> &[String] {
+        &self.selected
+    }
+
+    /// 测试直接放入多选路径。生产选择仍走文件消息。
+    #[cfg(test)]
+    pub(crate) fn set_selected_paths(&mut self, paths: Vec<String>) {
+        self.selected = paths;
+    }
+
     pub fn entry_names(&self) -> Vec<String> {
         self.rows.iter().map(|row| row.name.clone()).collect()
     }

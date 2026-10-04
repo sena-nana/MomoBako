@@ -15,6 +15,7 @@ mod files_view;
 mod inspect;
 mod inspect_view;
 pub(crate) mod player;
+pub(crate) mod admin;
 mod player_view;
 mod sidebar;
 mod sidebar_view;
@@ -115,6 +116,8 @@ pub enum ShellMessage {
     Inspect(inspect::InspectMessage),
     /// 播放列表成员、下载、回退、会话和播放条。具体分支在 `player::reduce_message` 里归约。
     Player(player::PlayerMessage),
+    /// 设置、插件、日志、任务和仓库动作。具体分支在 `admin::reduce_message` 里归约。
+    Admin(admin::AdminMessage),
 }
 
 /// 已解码的 RGBA 预览帧；解码在服务任务中完成，窗口线程只负责上传 GPU 纹理。
@@ -280,6 +283,7 @@ pub struct ShellViewModel {
     pub files: files::FilesState,
     pub inspect: inspect::InspectState,
     pub player: player::PlayerState,
+    pub admin: admin::AdminState,
 }
 
 impl Default for ShellViewModel {
@@ -330,6 +334,7 @@ impl Default for ShellViewModel {
             files: files::FilesState::default(),
             inspect: inspect::InspectState::default(),
             player: player::PlayerState::default(),
+            admin: admin::AdminState::default(),
         }
     }
 }
@@ -443,6 +448,9 @@ impl ShellViewModel {
             return;
         };
         let Some(message) = inspect::reduce_message(self, message) else {
+            return;
+        };
+        let Some(message) = admin::reduce_message(self, message) else {
             return;
         };
         match message {
@@ -584,79 +592,6 @@ impl ShellViewModel {
                     }
                 }
             }
-            ShellMessage::PluginsLoaded(Ok(plugins)) => {
-                self.page = ShellPage::PluginSettings;
-                self.plugin_entries = plugins
-                    .iter()
-                    .map(|plugin| format!("{} {} · {}", plugin.name, plugin.version, plugin.status))
-                    .collect();
-                self.plugin_entry_ids = plugins.iter().map(|plugin| plugin.plugin_id.clone()).collect();
-                self.plugin_enabled = plugins.iter().map(|plugin| plugin.enabled).collect();
-                self.detail = format!("{} 个插件 · 原生贡献接口优先", plugins.len());
-            }
-            ShellMessage::PluginsLoaded(Err(error)) => {
-                self.page = ShellPage::Error;
-                self.detail = format!("无法读取插件列表：{error}");
-            }
-            ShellMessage::SelectPlugin(plugin_id) => {
-                self.page = ShellPage::PluginSettings;
-                self.detail = format!("正在读取插件 {plugin_id} 的原生设置…");
-            }
-            ShellMessage::TogglePlugin { plugin_id, enabled } => {
-                self.detail = format!(
-                    "正在{}插件 {plugin_id}…",
-                    if enabled { "启用" } else { "停用" }
-                );
-            }
-            ShellMessage::DeletePlugin(plugin_id) => {
-                self.detail = format!("正在删除插件 {plugin_id}…");
-            }
-            ShellMessage::PluginConfigLoaded(Ok(config)) => {
-                self.page = ShellPage::PluginSettings;
-                self.selected_plugin_id = Some(config.plugin_id.clone());
-                self.plugin_config_keys = config.values.keys().cloned().collect();
-                self.plugin_config_drafts = config
-                    .values
-                    .iter()
-                    .map(|(key, value)| (key.clone(), value.as_str().map_or_else(|| value.to_string(), str::to_owned)))
-                    .collect();
-                self.plugin_config_string_values = config
-                    .values
-                    .iter()
-                    .filter(|(_, value)| value.is_string())
-                    .map(|(key, _)| key.clone())
-                    .collect();
-                self.detail = format!("插件 {} · 已加载 {} 项配置", config.plugin_id, config.values.len());
-            }
-            ShellMessage::PluginConfigLoaded(Err(error)) => {
-                self.page = ShellPage::Error;
-                self.detail = format!("无法读取插件设置：{error}");
-            }
-            ShellMessage::DeletePluginConfig { plugin_id, key } => {
-                self.detail = format!("正在删除插件 {plugin_id} 的配置 {key}…");
-            }
-            ShellMessage::PluginConfigDraftChanged { key, value } => {
-                self.plugin_config_drafts.insert(key, value);
-            }
-            ShellMessage::SavePluginConfig { key, .. } => {
-                self.detail = format!("正在保存插件配置 {key}…");
-            }
-            ShellMessage::LogsLoaded(Ok(page)) => {
-                self.page = ShellPage::Logs;
-                self.log_entries = page
-                    .records
-                    .iter()
-                    .map(|record| format!("{} · {} · {}", record.level, record.category, record.message))
-                    .collect();
-                self.detail = format!("最近日志 · {} 条记录", page.records.len());
-            }
-            ShellMessage::LogsLoaded(Err(error)) => {
-                self.page = ShellPage::Error;
-                self.detail = format!("无法读取系统日志：{error}");
-            }
-            ShellMessage::ClearLogs => {
-                self.detail = "正在清理系统日志…".into();
-            }
             ShellMessage::PlaylistsLoaded(Ok(playlists)) => {
                 self.page = ShellPage::Playlists;
                 self.playlist_entries = playlists
@@ -775,102 +710,28 @@ impl ShellViewModel {
                     "正在保存播放列表名称…".into()
                 };
             }
-            ShellMessage::TaskSnapshotLoaded { active, completed } => {
-                self.page = ShellPage::TaskRunning;
-                self.active_tasks = active;
-                self.completed_tasks = completed;
-                self.detail = format!("{} 个运行中任务 · {} 个近期完成任务", active, completed);
-            }
-            ShellMessage::TaskProgressLoaded(progress) => {
-                self.task_progress = progress;
-                if let Some(snapshot) = self
-                    .task_progress
-                    .iter()
-                    .find(|snapshot| snapshot.status == "running" || snapshot.status == "cancelling")
-                {
-                    self.detail = format!(
-                        "{} · {}",
-                        snapshot
-                            .label
-                            .clone()
-                            .unwrap_or_else(|| snapshot.protocol_id.clone()),
-                        snapshot
-                            .percent
-                            .map(|value| format!("{value:.0}%"))
-                            .unwrap_or_else(|| "处理中".into())
-                    );
-                }
-            }
-            ShellMessage::SystemStatusLoaded(Ok(status)) => {
-                self.page = ShellPage::Settings;
-                self.system_status = Some(format!(
-                    "{} · {}",
-                    if status.ready { "服务已就绪" } else { "服务未就绪" },
-                    status.base_url
-                ));
-                self.detail = self.system_status.clone().unwrap_or_default();
-            }
-            ShellMessage::SystemStatusLoaded(Err(error)) => {
-                self.page = ShellPage::Error;
-                self.detail = format!("无法读取系统服务状态：{error}");
-            }
-            ShellMessage::SettingsLoaded(Ok((settings, diagnostic))) => {
-                self.page = ShellPage::Settings;
-                self.settings_cache_limit_draft = settings.thumbnail_cache_limit_mb.to_string();
-                self.settings = settings;
-                self.settings_error = diagnostic;
-                self.detail = self
-                    .settings_error
-                    .clone()
-                    .unwrap_or_else(|| "应用设置已加载".into());
-            }
-            ShellMessage::SettingsLoaded(Err(error)) => {
-                self.page = ShellPage::SettingsError;
-                self.settings_error = Some(error.clone());
-                self.detail = format!("无法读取应用设置：{error}");
-            }
-            ShellMessage::SettingsThemeChanged(theme) => {
-                self.settings.theme = theme;
-                self.settings_error = None;
-            }
-            ShellMessage::SettingsCacheLimitChanged(value) => {
-                self.settings_cache_limit_draft = value.clone();
-                self.settings_error = None;
-                match value.parse::<u32>() {
-                    Ok(limit) => self.settings.thumbnail_cache_limit_mb = limit,
-                    Err(_) => self.settings_error = Some("缩略图缓存上限必须是整数".into()),
-                }
-            }
-            ShellMessage::SettingsPlayerChanged(player) => {
-                self.settings.default_playlist_player_type_id = if player.trim().is_empty() {
-                    None
-                } else {
-                    Some(player)
-                };
-                self.settings_error = None;
-            }
-            ShellMessage::SettingsCloseBehaviorChanged(behavior) => {
-                self.settings.close_behavior = behavior;
-                self.settings_error = None;
-            }
-            ShellMessage::SaveSettings => {
-                self.detail = "正在保存应用设置…".into();
-            }
-            ShellMessage::SettingsSaved(Ok(settings)) => {
-                self.page = ShellPage::Settings;
-                self.settings_cache_limit_draft = settings.thumbnail_cache_limit_mb.to_string();
-                self.settings = settings;
-                self.settings_error = None;
-                self.detail = "应用设置已保存".into();
-            }
-            ShellMessage::SettingsSaved(Err(error)) => {
-                self.page = ShellPage::SettingsError;
-                self.settings_error = Some(error.clone());
-                self.detail = format!("设置校验失败：{error}");
-            }
-            ShellMessage::CancelTask(task_id) => {
-                self.detail = format!("已请求取消任务 {task_id}");
-            }
+            ShellMessage::PluginsLoaded(_)
+            | ShellMessage::SelectPlugin(_)
+            | ShellMessage::TogglePlugin { .. }
+            | ShellMessage::DeletePlugin(_)
+            | ShellMessage::PluginConfigLoaded(_)
+            | ShellMessage::DeletePluginConfig { .. }
+            | ShellMessage::PluginConfigDraftChanged { .. }
+            | ShellMessage::SavePluginConfig { .. }
+            | ShellMessage::LogsLoaded(_)
+            | ShellMessage::ClearLogs
+            | ShellMessage::SystemStatusLoaded(_)
+            | ShellMessage::SettingsLoaded(_)
+            | ShellMessage::SettingsThemeChanged(_)
+            | ShellMessage::SettingsCacheLimitChanged(_)
+            | ShellMessage::SettingsPlayerChanged(_)
+            | ShellMessage::SettingsCloseBehaviorChanged(_)
+            | ShellMessage::SaveSettings
+            | ShellMessage::SettingsSaved(_)
+            | ShellMessage::TaskSnapshotLoaded { .. }
+            | ShellMessage::TaskProgressLoaded(_)
+            | ShellMessage::CancelTask(_)
+            | ShellMessage::Admin(_) => {}
             ShellMessage::WindowAction(_) => {}
             ShellMessage::Refresh => {
                 self.detail = "正在刷新资源库…".into();

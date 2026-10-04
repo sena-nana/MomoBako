@@ -20,12 +20,13 @@ use super::ShellViewModel;
 #[path = "player_support.rs"]
 mod support;
 pub use support::{preferences_path, sessions_path, settings_path};
+pub(crate) use support::{resolution_notice, resolve_player, AUDIO_CAPABILITY, AUDIO_SEQUENCE_TYPE};
 use support::{
     PlayerMatch, StoredSession, compatible_playlist_ids, cycle_mode, default_settings, find_player_for_extension,
     format_time, membership_can_toggle, mode_label, next_membership_ids, next_ready_id, preferences_json,
     previous_ready_id, queue_item_from_playlist, read_preferences_file, read_sessions_file, read_settings_file,
-    ready_ids, reorder_before, resolution_notice, resolve_player, sessions_json, settings_json, shuffle_order,
-    system_media_session_available, write_json, NextStep,
+    ready_ids, reorder_before, sessions_json, settings_json, shuffle_order, system_media_session_available, write_json,
+    NextStep,
 };
 
 /// 列表循环、随机、单曲循环。和 Vue 的切换顺序一致。

@@ -179,14 +179,34 @@
 
 ## Phase 6 设置、插件、日志和任务
 
-| 来源 | 状态 |
-| --- | --- |
-| `src/pages/Settings.vue` | 未读 |
-| `src/components/PluginManagerPanel.vue` | 未读 |
-| `src/pages/workspace/ExtensionsPanel.vue` | 未读 |
-| `src/pages/workspace/WorkspaceLogsPanel.vue` | 未读 |
-| `src/components/TaskPopover.vue` | 未读 |
-| `src/pages/workspace/repository/RepositoryActionsPanel.vue` | 未读 |
+这些行由 `src-nana/src/shell/admin_tests.rs` 覆盖状态机。设置包走 `PluginViewModel` 的 `list_plugins`、`list_plugin_hook_executions`、`get_cache_snapshot` 和 `get_api_design_snapshot`。安装、删除、启停、配置读写和数据目录走同一个 ViewModel。外部连接导出走 `SystemViewModel::write_binary_file`。仓库动作列表走 `RepositoryInteractionViewModel::list_repository_actions`，执行走 `MutsukiTaskViewModel::execute` 的 `momobako.repository.action.run`，完成后用 `FileBrowserViewModel::get_file_browser` 刷新当前目录。这些调用没有替身测试。圆角写到设置目录旁边的 `corners.json`，缺文件或坏 JSON 用平台默认，用户改过才写回。音频播放器偏好仍走阶段 5 的偏好文件，不写入 `ApplicationSettings.default_playlist_player_type_id`。15 个旧验收场景仍用原来的设置、插件、日志和任务按钮。下面每一行都未离屏。
+
+实况设置表面只在不是 `acceptance_scene`、页面是设置或设置错误时出现。动作、工具页、日志和任务还要求启动就绪且主区有仓库。生产工具页从空列表开始。剪贴板、保存对话框、打开对话框和目录揭示没有宿主桥。验收页的删除和启停仍立刻走原来的 `PluginsLoaded`，并切到插件设置页；实况确认、安装和启停用 `PluginsReplaced`，不切页。设置页读到插件配置时留在设置页。非法数字不提交。日志里的插件和仓库选项按字典序。
+
+未完成，不能记成已测试：把 Vue 设置页、工具页、预览或播放器组件挂进 Nana；真实剪贴板、保存对话框、打开对话框和系统目录揭示；系统媒体会话；真实解码器；语法高亮；拖放和关闭确认；动作进度的中途重绘；`execute` 返回任务编号之前取消动作；这批实况表面的新离屏场景。
+
+| 来源 | 触发 | 服务 | 结果 | 可见性 | 状态 |
+| --- | --- | --- | --- | --- | --- |
+| `Settings.vue` 音频播放器 | 选择一个实现，或空白 | 阶段 5 的偏好写入，没有替身 | 只认 `momobako.player.audio`；空白清除偏好；缺失项显示但不可选；解析仍用音频序列类型 | “默认音频播放器” / “所选播放器当前不可用，已回退到 …” | 已测试（未离屏） |
+| `useCornerStyle` 圆角 | 样式或半径 | 写入 `corners.json` | 只接受 smooth 和 round；半径钳在 0–20；未知样式和坏数字忽略；缺文件不立刻写回 | “平滑” / “普通” | 已测试（未离屏） |
+| `Settings.vue` 后端计数 | 仓库列表成功 | 无 | 按后端插件累计，保留首次出现的顺序 | “本地 (2)” / “无” | 已测试（未离屏） |
+| `Settings.vue` 外部连接 | 复制或导出 | 有路径时 `write_binary_file`，没有替身 | 空值不复制；令牌取前 10 和后 6 位；取消导出不改提示；写出成功后记文件名 | “复制失败：宿主剪贴板尚未接通” / “导出失败：宿主保存对话框尚未接通” / “external-api.json 已导出。” | 已测试（未离屏） |
+| `Settings.vue` 设置包 | 打开设置页 | 四个插件读取，没有替身 | 任一失败则四份都不替换，保留上一份 | “Nana 设置页数据读取失败” | 已测试（未离屏） |
+| `repository.select` | 插件事件带来仓库 id | 非空白时走现有仓库选择 | 空白忽略，当前仓库不变 | 当前仓库不变 | 已测试（未离屏） |
+| `PluginManagerPanel.vue` 分组和搜索 | 插件列表或关键词 | 无 | 分类顺序是来源、库类型、解析、预览、服务、未分类；未知分类进未分类；搜索不区分大小写 | “3 个插件 · 原生贡献接口优先” | 已测试（未离屏） |
+| `PluginManagerPanel.vue` 删除 | 用户插件确认，或非用户插件 | `delete_plugin`，没有替身 | 先进入待确认，取消不请求；非用户插件忽略；成功文案在列表替换后出现 | “确认删除” / “插件已删除。” | 已测试（未离屏） |
+| `PluginManagerPanel.vue` 字段 | 数字、选择、布尔、JSON | `set_plugin_config_value` 或 `delete_plugin_config_value`，没有替身 | 空数字或空选项是重置；非法 JSON 不请求；空 JSON 文本按 null 保存 | “原始 不是有效 JSON。” / “插件设置已保存。” | 已测试（未离屏） |
+| `PluginManagerPanel.vue` 设置页 | 再次打开同一插件，或路由到未知插件 | 已有快照时不重复 `get_plugin_config` | 第二次折叠；未知和空白 id 忽略；设置页加载配置不跳走 | “插件设置” | 已测试（未离屏） |
+| `PluginManagerPanel.vue` 启停和安装 | 实况启停，或选择安装包 | `set_plugin_enabled`、`install_plugin_from_archive`，没有替身 | 不切到插件设置页；空白路径不安装；打开对话框没有宿主桥 | “插件已禁用。” / “插件已安装。” | 已测试（未离屏） |
+| `PluginManagerPanel.vue` Vue 页面 | 自定义设置页或来源账号 | 不挂 Vue 组件 | 原生字段仍可编辑 | “插件设置页仍是 Vue 页面，需要升级为 Nana 原生设置字段” / “账号与来源仍是 Vue 页面，需要升级为 Nana 原生设置” | 已测试（未离屏） |
+| `PluginManagerPanel.vue` 数据目录 | 打开插件目录 | `get_plugin_data_directory`，没有替身 | 查到路径后仍因没有目录揭示而失败 | “插件设置目录打开失败。” | 已测试（未离屏） |
+| `PluginManagerPanel.vue` 依赖 | 依赖状态为空或有状态 | 无 | 状态列表为空时用 requires 和 optional 的数量 | “必需 2 / 可选 0” / “缺失” / “已启用” | 已测试（未离屏） |
+| `WorkspaceLogsPanel.vue` 筛选 | 级别、来源、搜索、暂停 | 不把条件写进 `SystemLogQuery` | 客户端排序是时间再 id；筛选变空时不滚动；暂停后签名变化也不滚动；记录本身不删 | “最近日志 · 2 条记录” / “日志滚动已暂停” | 已测试（未离屏） |
+| `TaskPopover.vue` | 任务和仓库操作 | 无 | 合成行 id 是 `workspace-operation`，来源是资源库，按更新时间降序；外部点击只在外侧关闭；Escape 和卸载关闭 | “任务” / “当前没有运行中的任务。” | 已测试（未离屏） |
+| `RepositoryActionsPanel.vue` 列表 | 切到动作面板，或过期仓库 | `list_repository_actions`，没有替身 | 过期仓库忽略；当前仓库读失败保留旧列表；没有选中时用第一项 | “正在加载动作” / “当前仓库没有导入动作。” | 已测试（未离屏） |
+| `RepositoryActionsPanel.vue` 执行 | 点击执行 | `momobako.repository.action.run`，没有替身 | 需要 ready、启用、多选路径且不在执行中；选中动作同时切到动作面板；成功后刷新文件列表 | “不支持” / “执行” | 已测试（未离屏） |
+| `ExtensionsPanel.vue` 工具页 | 工具页列表变化 | 无 | 空列表清空选中；当前 id 消失时选第一项；非原生页不挂 Vue 组件 | “没有原生工具页” / “工具页仍是 Vue 插件，需要升级为 Nana 原生工具页” | 已测试（未离屏） |
+| 实况表面 | 验收场景 | 无 | `acceptance_scene` 不显示这批表面，旧按钮文案不变 | “应用设置” / “刷新日志” / “查看任务” | 已测试（未离屏） |
 
 ## Phase 7 宿主输入
 
