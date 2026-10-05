@@ -176,7 +176,7 @@ fn search_panel(inspect: &InspectState) -> AnyView {
     widget(Stack::column(8.0)).children(rows).into_any()
 }
 
-fn filter_bar(filters: &SearchFilters, searching: bool) -> AnyView {
+pub(super) fn filter_bar(filters: &SearchFilters, searching: bool) -> AnyView {
     let mut rows = vec![
         text("当前资源库筛选").key("inspect-filter-title").into_any(),
         text(format!("匹配 {}", if filters.match_mode == MatchMode::Or { "任一" } else { "全部" })).key("inspect-match").into_any(),

@@ -138,7 +138,7 @@ pub struct PreviewPixels {
 }
 
 /// 宿主无关的窗口生命周期动作。
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub enum WindowAction {
     Minimize,
     ToggleMaximize,
@@ -875,7 +875,11 @@ impl ShellViewModel {
     }
 }
 
+mod interaction;
 mod render;
+mod title_bar;
+pub use interaction::commit_interaction;
+pub(crate) use interaction::window_action_commands;
 pub use render::mount_shell;
 
 #[cfg(test)]

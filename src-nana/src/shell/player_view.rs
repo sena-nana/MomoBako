@@ -23,7 +23,7 @@ pub(super) fn player_surface(model: &ShellViewModel) -> AnyView {
         rows.push(queue_list(model));
     }
     rows.push(membership(model));
-    widget(Stack::fill_column(8.0)).children(rows).key("player-surface").into_any()
+    widget(Stack::column(8.0)).children(rows).key("player-surface").into_any()
 }
 
 fn playlist_page(model: &ShellViewModel) -> AnyView {
@@ -91,10 +91,13 @@ fn transport(model: &ShellViewModel) -> AnyView {
     bar.placement = MediaTransportPlacement::Inline;
     bar.show_fullscreen = Some(false);
     let title = model.player.current_item().map(|item| format!("正在播放 {}", item.filename)).unwrap_or_else(|| "未选择播放内容".into());
+    let queue_label = if model.player.queue_open { "关闭队列" } else { "当前队列" };
     let mut rows = vec![
-        text(title).key("player-title").into_any(),
-        text(model.player.time_text()).key("player-time").into_any(),
-        text(model.player.mode_text()).key("player-mode").into_any(),
+        widget(Stack::bar(8.0)).children((
+            text(title).key("player-title"),
+            text(model.player.time_text()).key("player-time"),
+            text(model.player.mode_text()).key("player-mode"),
+        )).into_any(),
         widget(bar).key("player-transport").on_cx(move |_, event: &MediaTransportEvent, cx| {
             let message = match event {
                 MediaTransportEvent::PlayPause => Some(PlayerMessage::SetPlaying(!playing_now)),
@@ -106,21 +109,23 @@ fn transport(model: &ShellViewModel) -> AnyView {
                 cx.dispatch_program(player_message(message));
             }
         }).into_any(),
-        button(model.player.mode_text()).key("player-cycle-mode").on_cx(|_, _: &Activate, cx| {
-            cx.dispatch_program(player_message(PlayerMessage::CycleMode));
-        }).into_any(),
-        button("上一首").key("player-previous").on_cx(|_, _: &Activate, cx| {
-            cx.dispatch_program(player_message(PlayerMessage::PlayPrevious));
-        }).into_any(),
-        button("下一首").key("player-next").on_cx(|_, _: &Activate, cx| {
-            cx.dispatch_program(player_message(PlayerMessage::PlayNext { natural_end: false }));
-        }).into_any(),
-        button(if model.player.queue_open { "关闭队列" } else { "当前队列" }).key("player-queue").on_cx(|_, _: &Activate, cx| {
-            cx.dispatch_program(player_message(PlayerMessage::ToggleQueue));
-        }).into_any(),
-        button("打开预览").key("player-open-preview").on_cx(|_, _: &Activate, cx| {
-            cx.dispatch_program(player_message(PlayerMessage::OpenPreview));
-        }).into_any(),
+        widget(Stack::bar(8.0)).children((
+            button(model.player.mode_text()).key("player-cycle-mode").on_cx(|_, _: &Activate, cx| {
+                cx.dispatch_program(player_message(PlayerMessage::CycleMode));
+            }),
+            button("上一首").key("player-previous").on_cx(|_, _: &Activate, cx| {
+                cx.dispatch_program(player_message(PlayerMessage::PlayPrevious));
+            }),
+            button("下一首").key("player-next").on_cx(|_, _: &Activate, cx| {
+                cx.dispatch_program(player_message(PlayerMessage::PlayNext { natural_end: false }));
+            }),
+            button(queue_label).key("player-queue").on_cx(|_, _: &Activate, cx| {
+                cx.dispatch_program(player_message(PlayerMessage::ToggleQueue));
+            }),
+            button("打开预览").key("player-open-preview").on_cx(|_, _: &Activate, cx| {
+                cx.dispatch_program(player_message(PlayerMessage::OpenPreview));
+            }),
+        )).into_any(),
     ];
     if !model.player.activity.is_empty() {
         rows.push(text(model.player.activity.clone()).key("player-activity").into_any());

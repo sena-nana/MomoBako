@@ -1,13 +1,20 @@
 //! 原生壳层的 Runtime 视图挂载；复用唯一文档与 GPU 上下文。
 
+use std::cell::RefCell;
+
 use super::*;
 use crate::theme_map::{SIDEBAR_MAX_PX, SIDEBAR_MIN_PX};
 use nana_ui::runtime::view::{button, text, widget, IntoView};
 use nana_ui::runtime::{
-    Activate, AppShell, AppTitleBar, FrameworkError, GpuTextureView, LengthSpec, List, RuntimeDocument,
+    Activate, AppShell, FrameworkError, GpuTextureView, LengthSpec, List, MountedView, RuntimeDocument,
     SidebarFrame, SplitPane, Stack, TextChanged, TextInput,
 };
 use nana_ui::{SplitAxis, SplitPaneModel};
+
+thread_local! {
+    /// 上一次挂上的壳层。再次挂载前先卸掉，避免文档里叠多棵壳。
+    static SHELL_MOUNT: RefCell<Option<MountedView>> = const { RefCell::new(None) };
+}
 
 /// 在给定 Runtime 文档中挂载完整的 MomoBako 壳层。
 pub fn mount_shell(
@@ -16,7 +23,20 @@ pub fn mount_shell(
 ) -> Result<(), FrameworkError> {
     let document_id = document.document();
     let view_model = model.clone();
-    document
+    SHELL_MOUNT.with(|slot| {
+        if let Some(previous) = slot.borrow_mut().take() {
+            let live = previous
+                .roots()
+                .iter()
+                .any(|id| document.context().world().contains(*id));
+            if live {
+                if let Err(error) = previous.unmount(document.context_mut()) {
+                    eprintln!("Nana 卸载上一棵壳层失败：{error}");
+                }
+            }
+        }
+    });
+    let mounted = document
         .context_mut()
         .mount_view_root(document_id, move || {
             // 标题栏、导航栏和主工作区分别承担窗口级操作、上下文导航和资源主线。
@@ -495,12 +515,18 @@ pub fn mount_shell(
             .children((
                 text("当前状态").key("process-heading"),
                 text(view_model.page.status()).key("process-status"),
+                button("刷新状态").key("refresh").on_cx(|_, _: &Activate, cx| {
+                    cx.dispatch_program(ShellMessage::Refresh);
+                }),
             ));
+            let live_files = !view_model.acceptance_scene && view_model.files_surface_visible();
             let show_page = view_model.acceptance_scene
                 || matches!(view_model.page, ShellPage::Settings | ShellPage::SettingsError)
                 || matches!(view_model.workspace.main_region(), MainRegion::HasRepository);
             let region = view_model.workspace.main_region();
-            let primary = if show_page {
+            let primary = if live_files {
+                super::files_view::live_file_column(&view_model)
+            } else if show_page {
                 content.into_any()
             } else {
                 match region {
@@ -511,9 +537,17 @@ pub fn mount_shell(
                     }
                 }
             };
-            let stage = widget(Stack::fill_row(0.0).min_height(LengthSpec::Px(0.0)))
-                .children((primary, process))
-                .key("workspace-body");
+            let stage = if live_files {
+                widget(Stack::column(0.0).min_height(LengthSpec::Px(0.0)))
+                    .children((primary,))
+                    .key("workspace-body")
+                    .into_any()
+            } else {
+                widget(Stack::fill_row(0.0).min_height(LengthSpec::Px(0.0)))
+                    .children((primary, process))
+                    .key("workspace-body")
+                    .into_any()
+            };
             let show_sidebar = !view_model.workspace.sidebar_collapsed
                 && (view_model.acceptance_scene || view_model.workspace.startup.status == StartupStatus::Ready);
             let body = if show_sidebar {
@@ -535,33 +569,7 @@ pub fn mount_shell(
             } else {
                 stage.into_any()
             };
-            let sidebar_label = if view_model.workspace.sidebar_collapsed {
-                "展开侧边栏"
-            } else {
-                "折叠侧边栏"
-            };
-            let title_bar = widget(AppTitleBar::new("MomoBako").show_window_controls(false))
-                .leading(widget(Stack::row(8.0)).children((
-                    text("MomoBako").key("title"),
-                    button(sidebar_label).key("sidebar-toggle").on_cx(|_, _: &Activate, cx| {
-                        cx.dispatch_program(ShellMessage::ToggleSidebar);
-                    }),
-                )))
-                .center(text("资源库工作区").key("subtitle"))
-                .trailing(widget(Stack::row(8.0)).children((
-                    button("刷新状态")
-                        .key("refresh")
-                        .on_cx(|_, _: &Activate, cx| cx.dispatch_program(ShellMessage::Refresh)),
-                    button("最小化").key("window-minimize").on_cx(|_, _: &Activate, cx| {
-                        cx.dispatch_program(ShellMessage::WindowAction(WindowAction::Minimize));
-                    }),
-                    button("最大化").key("window-maximize").on_cx(|_, _: &Activate, cx| {
-                        cx.dispatch_program(ShellMessage::WindowAction(WindowAction::ToggleMaximize));
-                    }),
-                    button("关闭").key("window-close").on_cx(|_, _: &Activate, cx| {
-                        cx.dispatch_program(ShellMessage::WindowAction(WindowAction::Close));
-                    }),
-                )));
+            let title_bar = super::title_bar::title_bar(&view_model);
             let mut shell = widget(AppShell::new()).title_bar(title_bar).body(body);
             if let Some(dialog) = delete_repository_dialog(&view_model) {
                 shell = shell.overlay(dialog);
@@ -570,6 +578,8 @@ pub fn mount_shell(
             }
             shell
         })?;
+    super::title_bar::bind_window_controls(document)?;
+    SHELL_MOUNT.with(|slot| *slot.borrow_mut() = Some(mounted));
     Ok(())
 }
 
