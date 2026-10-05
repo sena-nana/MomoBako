@@ -7,7 +7,8 @@ use crate::theme_map::{SIDEBAR_MAX_PX, SIDEBAR_MIN_PX};
 use nana_ui::runtime::view::{button, text, widget, AnyView, IntoView};
 use nana_ui::runtime::{
     Activate, AlignSpec, AppShell, FrameworkError, GpuTextureView, JustifySpec, LengthSpec, List, MountedView,
-    Progress, RuntimeDocument, SidebarFrame, SplitPane, Stack, TextChanged, TextInput,
+    Progress, RuntimeDocument, SemanticColorRole, SidebarFrame, SplitPane, Stack, Text, TextChanged,
+    TextHorizontalAlignment, TextInput,
 };
 use nana_ui::{SplitAxis, SplitPaneModel};
 
@@ -521,9 +522,7 @@ pub fn mount_shell(
                         body.push(add.into_any());
                     }
                 }
-                if let Some(creator) = playlist_creator {
-                    body.push(super::workbench::section_card("新建播放列表", vec![creator.into_any()]));
-                }
+                let _ = playlist_creator;
                 super::workbench::page(body)
             } else if !view_model.acceptance_scene
                 && show_page
@@ -670,6 +669,8 @@ pub fn mount_shell(
             let mut shell = widget(AppShell::new()).title_bar(title_bar).body(body);
             if let Some(dialog) = delete_repository_dialog(&view_model) {
                 shell = shell.overlay(dialog);
+            } else if let Some(dialog) = playlist_creator_dialog(&view_model) {
+                shell = shell.overlay(dialog);
             } else if let Some(popover) = super::sidebar_view::repository_popover(&view_model) {
                 shell = shell.overlay(popover);
             }
@@ -680,39 +681,62 @@ pub fn mount_shell(
     Ok(())
 }
 
-/// 启动四步。版式对齐 Vue：居中面板、进度条、编号和标题分行。
+/// 24px 圆标。当前步用强调色，完成用成功色，失败用危险色。
+fn startup_step(item: super::workspace::StartupStepItem) -> AnyView {
+    let (fill, border, foreground) = match item.state {
+        super::workspace::StartupStepState::Current => (SemanticColorRole::AccentSoft, SemanticColorRole::Accent, SemanticColorRole::Accent),
+        super::workspace::StartupStepState::Done => (SemanticColorRole::Subtle, SemanticColorRole::Success, SemanticColorRole::Success),
+        super::workspace::StartupStepState::Error => (SemanticColorRole::Subtle, SemanticColorRole::Danger, SemanticColorRole::Danger),
+        super::workspace::StartupStepState::Pending => (SemanticColorRole::Subtle, SemanticColorRole::Border, SemanticColorRole::Muted),
+    };
+    let mut number = Text::new(item.number.to_string()).color(foreground).font_size(12.0).font_weight(600);
+    number.style.text_horizontal_alignment = TextHorizontalAlignment::Center;
+    widget(Stack::row(10.0).align(AlignSpec::Start)).children((
+        widget(
+            Stack::row(0.0)
+                .width(LengthSpec::Px(24.0))
+                .height(LengthSpec::Px(24.0))
+                .min_width(LengthSpec::Px(24.0))
+                .min_height(LengthSpec::Px(24.0))
+                .grow(0.0)
+                .shrink(0.0)
+                .surface(fill)
+                .outline(border, 1.0)
+                .radius_px(999.0)
+                .align(AlignSpec::Center)
+                .justify(JustifySpec::Center),
+        )
+        .children((widget(number).key(format!("startup-index-{}", item.number)),)),
+        widget(Stack::column(2.0)).children((
+            text(item.label).key(format!("startup-label-{}", item.number)),
+            text(item.detail).key(format!("startup-copy-{}", item.number)),
+        )),
+    )).into_any()
+}
+
+/// 启动四步。标题 20px，步骤号是 24px 圆标，进度只画 6px 条。
 fn startup_panel(model: &ShellViewModel) -> impl IntoView + use<'_> {
     let startup = &model.workspace.startup;
-    let steps = startup.step_items().into_iter().map(|item| {
-        widget(Stack::row(10.0)).children((
-            text(item.number.to_string()).key(format!("startup-index-{}", item.number)),
-            widget(Stack::column(2.0)).children((
-                text(item.label).key(format!("startup-label-{}", item.number)),
-                text(item.detail).key(format!("startup-copy-{}", item.number)),
-            )),
-        ))
-    });
+    let steps = startup.step_items().into_iter().map(startup_step);
     let error = startup.error.clone().map(|error| text(error).key("startup-error"));
     let retry = (startup.status == StartupStatus::Error).then(|| {
         button("重试").key("startup-retry").on_cx(|_, _: &Activate, cx| {
             cx.dispatch_program(ShellMessage::StartupRetry);
         })
     });
-    let mut progress = Progress::new(f64::from(startup.percent), 100.0)
-        .label(format!("进度 {}%", startup.percent));
+    let mut progress = Progress::new(f64::from(startup.percent), 100.0);
     {
         let layout = std::sync::Arc::make_mut(&mut progress.style.layout);
         layout.width = Some(LengthSpec::Fill);
         layout.height = Some(LengthSpec::Px(6.0));
     }
     let panel = widget(Stack::column(12.0).width(LengthSpec::Px(640.0))).children((
-        text("MomoBako").key("startup-eyebrow"),
-        text(startup.step_label.clone()).key("startup-title"),
-        text(format!("第 {} / {} 步", startup.current_step, startup.total_steps)).key("startup-meta"),
+        widget(Text::new("MomoBako").color(SemanticColorRole::Faint).font_size(11.0).font_weight(600)).key("startup-eyebrow"),
+        widget(Text::new(startup.step_label.clone()).font_size(20.0).font_weight(600)).key("startup-title"),
+        widget(Text::new(format!("第 {} / {} 步", startup.current_step, startup.total_steps)).color(SemanticColorRole::Muted).font_size(13.0)).key("startup-meta"),
         widget(progress).key("startup-progress"),
         text(startup.step_detail.clone()).key("startup-detail"),
-        text("加载步骤").key("startup-steps-label"),
-        widget(Stack::column(8.0)).children(steps.collect::<Vec<_>>()),
+        widget(Stack::column(8.0)).children(steps.collect::<Vec<_>>()).key("startup-steps"),
         error,
         retry,
     ));
@@ -836,6 +860,58 @@ fn section_heading(model: &ShellViewModel) -> (&'static str, String) {
         WorkspacePanel::Search => ("搜索", "搜索结果".into()),
         _ => ("工作台", model.page.title().into()),
     }
+}
+
+/// 新建播放集对话框。空播放集页不再把表单铺在虚线框下面。
+fn playlist_creator_dialog(model: &ShellViewModel) -> Option<impl IntoView + use<'_>> {
+    if !model.playlist_dialog_open {
+        return None;
+    }
+    let name = model.new_playlist_name.clone();
+    let selected = model.selected_new_playlist_player_type_id.clone();
+    let players = model.playlist_players.iter().take(8).map(|player| {
+        let player_type_id = player.player_type_id.clone();
+        let chosen = selected.as_deref() == Some(player.player_type_id.as_str());
+        let label = if chosen {
+            format!("已选 {}", player.label)
+        } else {
+            format!("使用 {}", player.label)
+        };
+        button(label).key(format!("playlist-player-{player_type_id}")).on_cx(move |_, _: &Activate, cx| {
+            cx.dispatch_program(ShellMessage::SelectPlaylistPlayer(player_type_id.clone()));
+        })
+    }).collect::<Vec<_>>();
+    let blocked = name.trim().is_empty() || selected.is_none();
+    let notice = matches!(model.detail.as_str(), "播放列表名称不能为空" | "请先选择播放器类型" | "正在创建播放列表…")
+        .then(|| text(model.detail.clone()).key("playlist-dialog-notice"));
+    Some(
+        widget(Stack::fill_column(0.0).padding_xy(24.0, 24.0).justify(JustifySpec::Center).align(AlignSpec::Center)).children((
+            widget(
+                Stack::column(12.0)
+                    .width(LengthSpec::Px(420.0))
+                    .surface(SemanticColorRole::Surface)
+                    .radius_px(16.0)
+                    .padding_xy(20.0, 18.0),
+            )
+            .children((
+                text("新建播放集").key("playlist-dialog-title"),
+                widget(TextInput::new(name).label("名称").placeholder("例如 通勤歌单 / 参考分镜")).on_cx(|_, event: &TextChanged, cx| {
+                    cx.dispatch_program(ShellMessage::NewPlaylistNameChanged(event.value.to_string()));
+                }),
+                text("播放类型").key("playlist-dialog-type"),
+                widget(Stack::column(6.0)).children(players),
+                notice,
+                widget(Stack::row(8.0)).children((
+                    button("取消").key("playlist-dialog-cancel").on_cx(|_, _: &Activate, cx| {
+                        cx.dispatch_program(ShellMessage::ClosePlaylistDialog);
+                    }),
+                    button("创建").key("create-playlist").disabled(blocked).on_cx(|_, _: &Activate, cx| {
+                        cx.dispatch_program(ShellMessage::CreatePlaylist);
+                    }),
+                )),
+            )),
+        )),
+    )
 }
 
 fn delete_repository_dialog(model: &ShellViewModel) -> Option<impl IntoView + use<'_>> {

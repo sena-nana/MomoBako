@@ -3,7 +3,8 @@
 //! 只在不是验收场景时挂上。验收页继续用原来的按钮和文案。
 
 use nana_ui::icons_tabler::{
-    BORDER_CORNER_ROUNDED, BORDER_RADIUS, COPY, DOWNLOAD, ERASER, JSON, PLAYER_PAUSE, PLAYER_PLAY, TRASH, UPLOAD,
+    BORDER_CORNER_ROUNDED, BORDER_RADIUS, COPY, DOWNLOAD, ERASER, JSON, PLAYER_PAUSE, PLAYER_PLAY, REFRESH, TRASH,
+    UPLOAD,
 };
 use nana_ui::runtime::view::{button, text, widget, AnyView, IntoView};
 use nana_ui::runtime::{Activate, Button, Chip, Icon, IconGlyph, LengthSpec, Stack, TextChanged, TextInput};
@@ -216,7 +217,10 @@ pub(crate) fn extensions_card(model: &ShellViewModel) -> AnyView {
             "admin-tools-subline",
             vec![
                 workbench::badge(format!("{count} 个插件"), "admin-plugin-count"),
-                icon_button(UPLOAD, "从 .momoplug 安装", "admin-plugin-install", false, || {
+                icon_button(REFRESH, "刷新", "admin-plugin-refresh", model.admin.loading_settings || model.admin.managing, || {
+                    ShellMessage::Admin(AdminMessage::RefreshPlugins)
+                }),
+                icon_button(UPLOAD, "从 .momoplug 安装", "admin-plugin-install", model.admin.managing, || {
                     ShellMessage::Admin(AdminMessage::ChooseArchive)
                 }),
             ],

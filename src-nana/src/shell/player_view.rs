@@ -3,11 +3,11 @@
 //! 排序用 `ReorderList`。播放、暂停、跳转和音量走共用的 `MediaTransportBar`。
 //! 验收场景不挂这块表面，旧的上移下移按钮保持原样。
 
-use nana_ui::icons_tabler::{EYE, LIST, PLAYER_PLAY, PLAYER_SKIP_BACK, PLAYER_SKIP_FORWARD, REPEAT};
+use nana_ui::icons_tabler::{EYE, LIST, PLAYER_PAUSE, PLAYER_PLAY, PLAYER_SKIP_BACK, PLAYER_SKIP_FORWARD, REPEAT, VOLUME};
 use nana_ui::runtime::view::{button, text, widget, AnyView, IntoView};
 use nana_ui::runtime::{
-    Activate, Button, MediaTransportBar, MediaTransportEvent, MediaTransportPlacement, ReorderItem, ReorderList,
-    ReorderListEvent, Stack, TextChanged, TextInput,
+    Activate, AlignSpec, Button, JustifySpec, LengthSpec, RadiusTier, RangeChanged, RangeField, ReorderItem, ReorderList,
+    ReorderListEvent, SemanticColorRole, Stack, Text, TextChanged, TextHorizontalAlignment, TextInput,
 };
 
 use super::player::PlayerMessage;
@@ -97,65 +97,131 @@ fn reorder_list(model: &ShellViewModel) -> AnyView {
         .into_any()
 }
 
+fn media_type_label(class: &str) -> &'static str {
+    match class {
+        "image" => "图片",
+        "video" => "视频",
+        "audio" => "音频",
+        _ => "媒体",
+    }
+}
+
+fn media_thumb(label: &'static str) -> AnyView {
+    let mut caption = Text::new(label).color(SemanticColorRole::Muted).font_size(11.0).font_weight(700);
+    caption.style.text_horizontal_alignment = TextHorizontalAlignment::Center;
+    widget(
+        Stack::row(0.0)
+            .width(LengthSpec::Px(58.0))
+            .height(LengthSpec::Px(58.0))
+            .min_width(LengthSpec::Px(58.0))
+            .min_height(LengthSpec::Px(58.0))
+            .grow(0.0)
+            .shrink(0.0)
+            .surface(SemanticColorRole::Background)
+            .radius(RadiusTier::Lg)
+            .align(AlignSpec::Center)
+            .justify(JustifySpec::Center),
+    )
+    .children((widget(caption),))
+    .into_any()
+}
+
+fn play_button(icon: nana_ui::Icon, disabled: bool, playing_now: bool) -> AnyView {
+    let mut button = super::title_bar::shell_icon(icon, "播放", disabled);
+    let layout = std::sync::Arc::make_mut(&mut button.style.layout);
+    layout.width = Some(LengthSpec::Px(36.0));
+    layout.height = Some(LengthSpec::Px(36.0));
+    layout.min_width = Some(LengthSpec::Px(36.0));
+    layout.min_height = Some(LengthSpec::Px(36.0));
+    widget(button).key("player-play").on_cx(move |_, _: &Activate, cx| {
+        cx.dispatch_program(player_message(PlayerMessage::SetPlaying(!playing_now)));
+    }).into_any()
+}
+
 fn transport(model: &ShellViewModel) -> AnyView {
     let session = &model.player.session;
     let playing_now = session.status == "playing";
-    let failed = session.status == "failed" || session.status == "ended" || session.status == "idle";
-    let duration = session.duration_ms.unwrap_or(0) as f64 / 1000.0;
-    let mut bar = MediaTransportBar::new();
-    bar.playing = session.status == "playing";
-    bar.disabled = failed || model.player.current_id.is_none();
-    bar.seekable = session.can_seek && session.status != "failed";
-    bar.position = session.current_time_ms as f64 / 1000.0;
-    bar.duration = duration;
-    bar.volume = f64::from(session.volume.clamp(0.0, 1.0) * 100.0);
-    bar.placement = MediaTransportPlacement::Inline;
-    bar.show_fullscreen = Some(false);
+    let has_item = model.player.current_id.is_some();
+    let duration_ms = session.duration_ms.unwrap_or(0).max(1) as f64;
+    let seekable = has_item && session.can_seek && session.status != "failed" && session.duration_ms.unwrap_or(0) > 0;
     let title = model.player.current_item().map(|item| format!("正在播放 {}", item.filename)).unwrap_or_else(|| "未选择播放内容".into());
+    let subtitle = model.player.current_item().map(|item| item.path.clone()).unwrap_or_else(|| "选择播放集后可开始播放".into());
+    let media = model.player.current_item().map(|item| media_type_label(&item.file_class)).unwrap_or("媒体");
     let queue_label = if model.player.queue_open { "关闭队列" } else { "当前队列" };
+    let play_icon = if playing_now { PLAYER_PAUSE } else { PLAYER_PLAY };
     let mut rows = vec![
-        widget(bar).key("player-transport").on_cx(move |_, event: &MediaTransportEvent, cx| {
-            let message = match event {
-                MediaTransportEvent::PlayPause => Some(PlayerMessage::SetPlaying(!playing_now)),
-                MediaTransportEvent::Seek(seconds) => Some(PlayerMessage::Seek((*seconds * 1000.0).max(0.0) as u64)),
-                MediaTransportEvent::Volume(volume) => Some(PlayerMessage::SetVolume((*volume / 100.0) as f32)),
-                _ => None,
-            };
-            if let Some(message) = message {
-                cx.dispatch_program(player_message(message));
-            }
-        }).into_any(),
-        widget(Stack::bar(12.0)).children((
-            text(title).key("player-title"),
-            widget(Stack::spacer()),
-            widget(super::title_bar::shell_icon(REPEAT, model.player.mode_text(), false))
-                .key("player-cycle-mode")
-                .on_cx(|_, _: &Activate, cx| {
-                    cx.dispatch_program(player_message(PlayerMessage::CycleMode));
-                }),
-            widget(super::title_bar::shell_icon(PLAYER_SKIP_BACK, "上一首", false))
-                .key("player-previous")
-                .on_cx(|_, _: &Activate, cx| {
-                    cx.dispatch_program(player_message(PlayerMessage::PlayPrevious));
-                }),
-            widget(super::title_bar::shell_icon(PLAYER_SKIP_FORWARD, "下一首", false))
-                .key("player-next")
-                .on_cx(|_, _: &Activate, cx| {
-                    cx.dispatch_program(player_message(PlayerMessage::PlayNext { natural_end: false }));
-                }),
-            widget(super::title_bar::shell_icon(LIST, queue_label, false))
-                .key("player-queue")
-                .on_cx(|_, _: &Activate, cx| {
-                    cx.dispatch_program(player_message(PlayerMessage::ToggleQueue));
-                }),
-            widget(super::title_bar::shell_icon(EYE, "打开预览", false))
-                .key("player-open-preview")
-                .on_cx(|_, _: &Activate, cx| {
-                    cx.dispatch_program(player_message(PlayerMessage::OpenPreview));
-                }),
-            widget(Stack::spacer()),
-            text(model.player.time_text()).key("player-time"),
-        )).into_any(),
+        widget(
+            Stack::column(10.0)
+                .surface(SemanticColorRole::Surface)
+                .outline(SemanticColorRole::BorderStrong, 1.0)
+                .radius(RadiusTier::Xl)
+                .padding_xy(16.0, 12.0)
+                .min_height(LengthSpec::Px(124.0)),
+        )
+        .children((
+            widget(
+                RangeField::new(session.current_time_ms as f64, 0.0, duration_ms, 100.0)
+                    .label("播放进度")
+                    .show_label(false)
+                    .show_value(false)
+                    .disabled(!seekable),
+            )
+            .key("player-seek")
+            .on_cx(|_, event: &RangeChanged, cx| {
+                cx.dispatch_program(player_message(PlayerMessage::Seek(event.value.max(0.0) as u64)));
+            }),
+            widget(Stack::bar(12.0).align(AlignSpec::Center)).children((
+                widget(Stack::row(12.0).width(LengthSpec::Shrink).min_width(LengthSpec::Px(0.0)).grow(1.0).shrink(1.0)).children((
+                    media_thumb(media),
+                    widget(Stack::column(3.0).width(LengthSpec::Shrink).min_width(LengthSpec::Px(0.0)).grow(1.0).shrink(1.0)).children((
+                        text(title).key("player-title"),
+                        widget(Text::new(subtitle).color(SemanticColorRole::Muted).font_size(12.0)).key("player-subtitle"),
+                    )),
+                )),
+                widget(Stack::row(6.0).grow(0.0).shrink(0.0)).children((
+                    widget(super::title_bar::shell_icon(REPEAT, model.player.mode_text(), !has_item))
+                        .key("player-cycle-mode")
+                        .on_cx(|_, _: &Activate, cx| cx.dispatch_program(player_message(PlayerMessage::CycleMode))),
+                    widget(super::title_bar::shell_icon(PLAYER_SKIP_BACK, "上一首", !has_item))
+                        .key("player-previous")
+                        .on_cx(|_, _: &Activate, cx| cx.dispatch_program(player_message(PlayerMessage::PlayPrevious))),
+                    play_button(play_icon, !has_item, playing_now),
+                    widget(super::title_bar::shell_icon(PLAYER_SKIP_FORWARD, "下一首", !has_item))
+                        .key("player-next")
+                        .on_cx(|_, _: &Activate, cx| {
+                            cx.dispatch_program(player_message(PlayerMessage::PlayNext { natural_end: false }));
+                        }),
+                    widget(super::title_bar::shell_icon(LIST, queue_label, !has_item))
+                        .key("player-queue")
+                        .on_cx(|_, _: &Activate, cx| cx.dispatch_program(player_message(PlayerMessage::ToggleQueue))),
+                    widget(super::title_bar::shell_icon(EYE, "打开预览", false))
+                        .key("player-open-preview")
+                        .on_cx(|_, _: &Activate, cx| cx.dispatch_program(player_message(PlayerMessage::OpenPreview))),
+                )),
+                widget(Stack::row(8.0).grow(0.0).shrink(1.0)).children((
+                    text(model.player.time_text()).key("player-time"),
+                    widget(super::title_bar::shell_icon(VOLUME, "音量", !has_item || !session.can_volume)),
+                    {
+                        let mut volume = RangeField::new(f64::from(session.volume.clamp(0.0, 1.0)), 0.0, 1.0, 0.01)
+                            .label("音量")
+                            .show_label(false)
+                            .show_value(false)
+                            .disabled(!has_item || !session.can_volume);
+                        let layout = std::sync::Arc::make_mut(&mut volume.style.layout);
+                        layout.width = Some(LengthSpec::Px(96.0));
+                        layout.flex_grow = Some(0.0);
+                        layout.flex_shrink = Some(1.0);
+                        widget(volume)
+                            .key("player-volume")
+                            .on_cx(|_, event: &RangeChanged, cx| {
+                                cx.dispatch_program(player_message(PlayerMessage::SetVolume(event.value.clamp(0.0, 1.0) as f32)));
+                            })
+                    },
+                )),
+            )),
+        ))
+        .key("player-card")
+        .into_any(),
     ];
     if !model.player.activity.is_empty() {
         rows.push(text(model.player.activity.clone()).key("player-activity").into_any());
