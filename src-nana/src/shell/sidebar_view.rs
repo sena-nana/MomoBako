@@ -72,7 +72,7 @@ pub fn sidebar_footer(model: &ShellViewModel) -> impl IntoView + use<'_> {
     let settings_active = matches!(model.page, ShellPage::Settings | ShellPage::SettingsError);
     let extensions_active = model.workspace.panel == WorkspacePanel::Extensions && !settings_active;
     let logs_active = model.workspace.panel == WorkspacePanel::Logs && !settings_active;
-    widget(Stack::row(8.0)).children((
+    widget(Stack::column(4.0)).children((
         sidebar_row("设置", settings_active, false, |cx| {
             cx.dispatch_program(ShellMessage::Navigate(ShellPage::Settings));
         }),

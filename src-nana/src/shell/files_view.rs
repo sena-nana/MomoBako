@@ -12,43 +12,63 @@ use super::files::{
 };
 use super::{ShellMessage, ShellViewModel};
 
-/// 在 `mount_view_root` 里调用，这样虚拟列表的 signal 落在当前视图作用域。
-pub(super) fn files_surface(model: &ShellViewModel) -> AnyView {
+/// 目录说明、展示方式和工具条。列表单独占剩余高度，播放条才能留在窗口里。
+fn files_tools(model: &ShellViewModel) -> AnyView {
     let ctx = FileContext::from_model(model);
     let files = &model.files;
     let mut rows = Vec::new();
     rows.push(text(location_eyebrow(&ctx)).key("file-location").into_any());
     rows.push(text(location_title(&ctx, &files.current_path)).key("file-path").into_any());
-    rows.push(text(format!("素材展示方式 · {}", files.display_mode.label())).key("file-display-mode").into_any());
     rows.push(display_modes().into_any());
-    rows.push(text(format!("选择 · {}", files.selection_mode.label())).key("file-selection-mode").into_any());
     rows.push(selection_modes().into_any());
     if !ctx.is_virtual() {
         rows.push(breadcrumbs(&files.current_path).into_any());
     }
     rows.push(toolbar(&ctx, files).into_any());
+    widget(Stack::column(6.0)).children(rows).into_any()
+}
+
+/// 在 `mount_view_root` 里调用，这样虚拟列表的 signal 落在当前视图作用域。
+pub(super) fn files_surface(model: &ShellViewModel) -> AnyView {
+    widget(Stack::column(8.0))
+        .children((files_tools(model), files_browser(model)))
+        .into_any()
+}
+
+fn files_browser(model: &ShellViewModel) -> AnyView {
+    widget(Stack::column(8.0))
+        .children((
+            files_status(model),
+            file_list(model.files.visible_rows(&FileContext::from_model(model)), model.files.display_mode),
+            load_more(model),
+            file_dialog(&model.files),
+        ))
+        .into_any()
+}
+
+fn files_status(model: &ShellViewModel) -> AnyView {
+    let ctx = FileContext::from_model(model);
+    let files = &model.files;
+    let mut rows = Vec::new();
     if !files.error.is_empty() {
         rows.push(text(files.error.clone()).key("file-error").into_any());
     }
     if !files.activity.is_empty() {
         rows.push(text(files.activity.clone()).key("file-activity").into_any());
     }
-    let visible = files.visible_rows(&ctx);
-    if visible.is_empty() && !files.loading {
+    if files.visible_rows(&ctx).is_empty() && !files.loading {
         rows.push(text(empty_copy(&ctx)).key("file-empty").into_any());
     }
-    rows.push(file_list(visible, files.display_mode).into_any());
-    rows.push(
-        button("加载更多")
-            .key("file-load-more")
-            .disabled(!files.can_load_more(&ctx))
-            .on_cx(|_, _: &Activate, cx| cx.dispatch_program(file_message(FilesMessage::LoadMore)))
-            .into_any(),
-    );
-    if let Some(dialog) = file_dialog(files) {
-        rows.push(dialog);
-    }
-    widget(Stack::column(8.0)).children(rows).into_any()
+    widget(Stack::column(6.0)).children(rows).into_any()
+}
+
+fn load_more(model: &ShellViewModel) -> AnyView {
+    let ctx = FileContext::from_model(model);
+    button("加载更多")
+        .key("file-load-more")
+        .disabled(!model.files.can_load_more(&ctx))
+        .on_cx(|_, _: &Activate, cx| cx.dispatch_program(file_message(FilesMessage::LoadMore)))
+        .into_any()
 }
 
 /// 实况文件页的纵带：任务读数、目录工具、文件名和播放条各占自己的盒子。
@@ -59,14 +79,18 @@ pub(super) fn live_file_column(model: &ShellViewModel) -> AnyView {
     let player = model.player_surface_visible().then(|| super::player_view::player_surface(model));
     let close_prompt = super::input::close_prompt(model);
     widget(
-        Stack::column(8.0)
-            .padding_xy(16.0, 12.0)
-            .min_width(nana_ui::runtime::LengthSpec::Px(0.0)),
+        Stack::fill_column(8.0)
+            .padding_xy(16.0, 8.0)
+            .min_width(nana_ui::runtime::LengthSpec::Px(0.0))
+            .min_height(nana_ui::runtime::LengthSpec::Px(0.0)),
     )
     .children((
         close_prompt,
         text(format!("任务 {}", model.active_tasks)).key("task-count"),
-        files_surface(model),
+        files_tools(model),
+        files_status(model),
+        file_list(model.files.visible_rows(&FileContext::from_model(model)), model.files.display_mode),
+        load_more(model),
         filter,
         player,
     ))
@@ -184,12 +208,12 @@ fn toolbar(ctx: &FileContext, files: &super::files::FilesState) -> impl IntoView
     let mut row = Vec::new();
     for (index, action) in actions.into_iter().enumerate() {
         row.push(action);
-        if row.len() == 3 {
+        if row.len() == 5 {
             let ready = std::mem::take(&mut row);
             rows.push(
                 widget(Stack::row(8.0))
                     .children(ready)
-                    .key(format!("file-toolbar-row-{}", index / 3))
+                    .key(format!("file-toolbar-row-{}", index / 5))
                     .into_any(),
             );
         }
@@ -218,7 +242,7 @@ fn file_list(rows: Vec<FileRow>, mode: DisplayMode) -> AnyView {
     let height = if list_mode { 28.0 } else { 96.0 };
     let list = each_virtual(items, |row| row.key(), height, move |row| file_row(row, list_mode))
         .overscan(56.0)
-        .height(120.0)
+        .grow()
         .key("file-virtual-list");
     if list_mode { list.into_any() } else { list.grid(160.0, 8.0).into_any() }
 }

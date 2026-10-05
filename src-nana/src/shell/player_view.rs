@@ -22,7 +22,9 @@ pub(super) fn player_surface(model: &ShellViewModel) -> AnyView {
     if model.player.queue_open {
         rows.push(queue_list(model));
     }
-    rows.push(membership(model));
+    if let Some(membership) = membership(model) {
+        rows.push(membership);
+    }
     widget(Stack::column(8.0)).children(rows).key("player-surface").into_any()
 }
 
@@ -186,13 +188,9 @@ fn queue_list(model: &ShellViewModel) -> AnyView {
     widget(Stack::column(4.0)).children(rows).into_any()
 }
 
-fn membership(model: &ShellViewModel) -> AnyView {
-    let Some(path) = model.selected_path.clone() else {
-        return text("").key("player-membership-empty").into_any();
-    };
-    let Some(entry) = model.browser_entries.iter().find(|entry| entry.path == path) else {
-        return text("").key("player-membership-empty").into_any();
-    };
+fn membership(model: &ShellViewModel) -> Option<AnyView> {
+    let path = model.selected_path.clone()?;
+    let entry = model.browser_entries.iter().find(|entry| entry.path == path)?.clone();
     let actions = model.player.membership_actions(
         &entry.kind,
         entry.extension.as_deref().unwrap_or(""),
@@ -200,7 +198,7 @@ fn membership(model: &ShellViewModel) -> AnyView {
         entry.is_virtual,
     );
     if actions.is_empty() {
-        return text("").key("player-membership-empty").into_any();
+        return None;
     }
     let mut rows = vec![text("加入播放列表").key("player-membership-title").into_any()];
     for action in actions {
@@ -226,7 +224,7 @@ fn membership(model: &ShellViewModel) -> AnyView {
                 .into_any(),
         );
     }
-    widget(Stack::column(4.0)).children(rows).into_any()
+    Some(widget(Stack::column(4.0)).children(rows).into_any())
 }
 
 fn player_message(message: PlayerMessage) -> ShellMessage {
