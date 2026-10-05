@@ -198,21 +198,13 @@ impl ApplicationState for MomoBakoApplication {
         let Some((id, window)) = windows.iter_mut().next() else {
             return RuntimeProgramUpdate::default();
         };
-        if let ShellMessage::WindowAction(action) = &message {
-            let request = match action {
-                WindowAction::Minimize => Some(host_api::WindowCommand::Minimize),
-                WindowAction::ToggleMaximize => Some(host_api::WindowCommand::ToggleMaximize),
-                WindowAction::Close => None,
+        if let Some(window_commands) =
+            shell::window_action_commands(&message, *id, context.geometry().maximized)
+        {
+            return RuntimeProgramUpdate {
+                window_commands,
+                ..RuntimeProgramUpdate::default()
             };
-            if let Some(request) = request {
-                return RuntimeProgramUpdate {
-                    window_commands: request
-                        .to_platform_command(*id, context.geometry().maximized)
-                        .into_iter()
-                        .collect(),
-                    ..RuntimeProgramUpdate::default()
-                };
-            }
         }
         if matches!(&message, ShellMessage::Navigate(ShellPage::PluginSettings))
             && let Some(services) = self.services.as_ref()

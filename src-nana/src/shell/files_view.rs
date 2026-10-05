@@ -48,7 +48,29 @@ pub(super) fn files_surface(model: &ShellViewModel) -> AnyView {
     if let Some(dialog) = file_dialog(files) {
         rows.push(dialog);
     }
-    widget(Stack::fill_column(8.0)).children(rows).into_any()
+    widget(Stack::column(8.0)).children(rows).into_any()
+}
+
+/// 实况文件页的纵带：任务读数、目录工具、文件名和播放条各占自己的盒子。
+pub(super) fn live_file_column(model: &ShellViewModel) -> AnyView {
+    let filter = model.inspect.filter_bar_open.then(|| {
+        super::inspect_view::filter_bar(&model.inspect.filters, model.inspect.searching)
+    });
+    let player = model.player_surface_visible().then(|| super::player_view::player_surface(model));
+    let close_prompt = super::input::close_prompt(model);
+    widget(
+        Stack::column(8.0)
+            .padding_xy(16.0, 12.0)
+            .min_width(nana_ui::runtime::LengthSpec::Px(0.0)),
+    )
+    .children((
+        close_prompt,
+        text(format!("任务 {}", model.active_tasks)).key("task-count"),
+        files_surface(model),
+        filter,
+        player,
+    ))
+    .into_any()
 }
 
 fn location_eyebrow(ctx: &FileContext) -> &'static str {
@@ -158,7 +180,29 @@ fn toolbar(ctx: &FileContext, files: &super::files::FilesState) -> impl IntoView
         actions.push(action("还原所有项目", "file-restore-all", files.can_empty_trash(ctx), FilesMessage::RestoreAll));
         actions.push(action("清空回收站", "file-empty-trash", files.can_empty_trash(ctx), FilesMessage::EmptyTrash));
     }
-    widget(Stack::row(8.0)).children(actions)
+    let mut rows = Vec::new();
+    let mut row = Vec::new();
+    for (index, action) in actions.into_iter().enumerate() {
+        row.push(action);
+        if row.len() == 3 {
+            let ready = std::mem::take(&mut row);
+            rows.push(
+                widget(Stack::row(8.0))
+                    .children(ready)
+                    .key(format!("file-toolbar-row-{}", index / 3))
+                    .into_any(),
+            );
+        }
+    }
+    if !row.is_empty() {
+        rows.push(
+            widget(Stack::row(8.0))
+                .children(row)
+                .key("file-toolbar-row-last")
+                .into_any(),
+        );
+    }
+    widget(Stack::column(6.0)).children(rows).key("file-toolbar")
 }
 
 fn action(label: &'static str, key: &'static str, enabled: bool, message: FilesMessage) -> AnyView {
@@ -174,7 +218,7 @@ fn file_list(rows: Vec<FileRow>, mode: DisplayMode) -> AnyView {
     let height = if list_mode { 28.0 } else { 96.0 };
     let list = each_virtual(items, |row| row.key(), height, move |row| file_row(row, list_mode))
         .overscan(56.0)
-        .height(360.0)
+        .height(120.0)
         .key("file-virtual-list");
     if list_mode { list.into_any() } else { list.grid(160.0, 8.0).into_any() }
 }
