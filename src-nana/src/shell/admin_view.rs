@@ -2,8 +2,9 @@
 //!
 //! 只在不是验收场景时挂上。验收页继续用原来的按钮和文案。
 
+use nana_ui::icons_tabler::{BORDER_CORNER_ROUNDED, BORDER_RADIUS, COPY, DOWNLOAD, JSON};
 use nana_ui::runtime::view::{button, text, widget, AnyView, IntoView};
-use nana_ui::runtime::{Activate, Stack, TextChanged, TextInput};
+use nana_ui::runtime::{Activate, Icon, IconGlyph, Stack, TextChanged, TextInput};
 
 use super::super::{ShellMessage, ShellViewModel, WorkspacePanel};
 use super::support::{self, action_can_run, action_status_label};
@@ -60,13 +61,14 @@ fn settings_rows(model: &ShellViewModel) -> Vec<AnyView> {
                 .into_any()
         }));
     }
-    rows.push(text(format!("圆角：{} · {}px", corner_label(&model.admin.corner_style), model.admin.corner_radius)).key("admin-corner").into_any());
-    rows.push(widget(Stack::row(8.0)).children((
-        button("平滑").key("admin-corner-smooth").on_cx(|_, _: &Activate, cx| {
-            cx.dispatch_program(ShellMessage::Admin(AdminMessage::SetCornerStyle("smooth".into())));
+    rows.push(widget(Stack::bar(8.0)).children((
+        text(format!("圆角：{} · {}px", corner_label(&model.admin.corner_style), model.admin.corner_radius)).key("admin-corner"),
+        widget(Stack::spacer()),
+        labeled_icon(BORDER_CORNER_ROUNDED, "平滑", "admin-corner-smooth", || {
+            ShellMessage::Admin(AdminMessage::SetCornerStyle("smooth".into()))
         }),
-        button("普通").key("admin-corner-round").on_cx(|_, _: &Activate, cx| {
-            cx.dispatch_program(ShellMessage::Admin(AdminMessage::SetCornerStyle("round".into())));
+        labeled_icon(BORDER_RADIUS, "普通", "admin-corner-round", || {
+            ShellMessage::Admin(AdminMessage::SetCornerStyle("round".into()))
         }),
     )).into_any());
     let radius = model.admin.corner_radius.to_string();
@@ -83,11 +85,11 @@ fn settings_rows(model: &ShellViewModel) -> Vec<AnyView> {
     let token_value = model.admin.external.as_ref().map(|status| status.token.clone()).unwrap_or_default();
     let json = external_json(model);
     rows.push(widget(Stack::row(8.0)).children((
-        copy_button("复制 Base URL", "Base URL", base_url, "admin-copy-url"),
-        copy_button("复制 Token", "Token", token_value, "admin-copy-token"),
-        copy_button("复制 JSON", "连接 JSON", json, "admin-copy-json"),
-        button("导出 JSON").key("admin-export-json").on_cx(|_, _: &Activate, cx| {
-            cx.dispatch_program(ShellMessage::Admin(AdminMessage::ExportExternal));
+        copy_button(COPY, "复制 Base URL", "Base URL", base_url, "admin-copy-url"),
+        copy_button(COPY, "复制 Token", "Token", token_value, "admin-copy-token"),
+        copy_button(JSON, "复制 JSON", "连接 JSON", json, "admin-copy-json"),
+        labeled_icon(DOWNLOAD, "导出 JSON", "admin-export-json", || {
+            ShellMessage::Admin(AdminMessage::ExportExternal)
         }),
     )).into_any());
     if !model.admin.external_error.is_empty() {
@@ -104,10 +106,30 @@ fn settings_rows(model: &ShellViewModel) -> Vec<AnyView> {
     rows
 }
 
-fn copy_button(label: &'static str, field: &'static str, value: String, key: &'static str) -> AnyView {
-    button(label).key(key).on_cx(move |_, _: &Activate, cx| {
-        cx.dispatch_program(ShellMessage::Admin(AdminMessage::CopyExternal { label: field.into(), value: value.clone() }));
-    }).into_any()
+fn copy_button(icon: Icon, label: &'static str, field: &'static str, value: String, key: &'static str) -> AnyView {
+    widget(Stack::row(6.0)).children((
+        widget(IconGlyph::new(icon).size(14.0)),
+        button(label).key(key).on_cx(move |_, _: &Activate, cx| {
+            cx.dispatch_program(ShellMessage::Admin(AdminMessage::CopyExternal {
+                label: field.into(),
+                value: value.clone(),
+            }));
+        }),
+    )).into_any()
+}
+
+fn labeled_icon(
+    icon: Icon,
+    label: &'static str,
+    key: &'static str,
+    message: impl Fn() -> ShellMessage + Send + 'static,
+) -> AnyView {
+    widget(Stack::row(6.0)).children((
+        widget(IconGlyph::new(icon).size(14.0)),
+        button(label).key(key).on_cx(move |_, _: &Activate, cx| {
+            cx.dispatch_program(message());
+        }),
+    )).into_any()
 }
 
 fn external_json(model: &ShellViewModel) -> String {
@@ -199,11 +221,15 @@ fn log_rows(model: &ShellViewModel) -> Vec<AnyView> {
             cx.dispatch_program(ShellMessage::Admin(AdminMessage::ToggleLogKind(value.into())));
         }).into_any()
     }).collect::<Vec<_>>();
-    rows.push(widget(Stack::row(8.0)).children(kinds).key("admin-log-kinds").into_any());
     let paused = model.admin.log_paused;
-    rows.push(button(if paused { "继续追踪" } else { "暂停追踪" }).key("admin-log-pause").on_cx(move |_, _: &Activate, cx| {
+    let mut kinds = kinds;
+    kinds.push(button(if paused { "继续追踪" } else { "暂停追踪" }).key("admin-log-pause").on_cx(move |_, _: &Activate, cx| {
         cx.dispatch_program(ShellMessage::Admin(AdminMessage::SetLogPaused(!paused)));
     }).into_any());
+    kinds.push(button("重置筛选").key("admin-log-reset").on_cx(|_, _: &Activate, cx| {
+        cx.dispatch_program(ShellMessage::Admin(AdminMessage::ResetLogFilters));
+    }).into_any());
+    rows.push(widget(Stack::row(8.0)).children(kinds).key("admin-log-kinds").into_any());
     for plugin_id in support::unique_sorted(model.admin.logs.iter().filter_map(|record| record.source.plugin_id.clone())) {
         rows.push(button(plugin_id.clone()).key(format!("admin-log-plugin-{plugin_id}")).on_cx(move |_, _: &Activate, cx| {
             cx.dispatch_program(ShellMessage::Admin(AdminMessage::SetLogPlugin(plugin_id.clone())));
@@ -214,9 +240,6 @@ fn log_rows(model: &ShellViewModel) -> Vec<AnyView> {
             cx.dispatch_program(ShellMessage::Admin(AdminMessage::SetLogRepo(repo_id.clone())));
         }).into_any());
     }
-    rows.push(button("重置筛选").key("admin-log-reset").on_cx(|_, _: &Activate, cx| {
-        cx.dispatch_program(ShellMessage::Admin(AdminMessage::ResetLogFilters));
-    }).into_any());
     let search = model.admin.log_search.clone();
     rows.push(widget(TextInput::new(search).label("搜索日志")).on_cx(|_, event: &TextChanged, cx| {
         cx.dispatch_program(ShellMessage::Admin(AdminMessage::SetLogSearch(event.value.to_string())));
