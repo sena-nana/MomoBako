@@ -33,17 +33,39 @@ pub(crate) fn admin_surface(model: &ShellViewModel) -> AnyView {
     if model.admin_settings_visible() {
         rows.push(workbench::section_card("插件", plugin_rows(model)));
     }
-    if task_visible(model) {
-        rows.extend(task_rows(model));
-    }
     widget(Stack::fill_column(8.0)).children(rows).key("admin-surface").into_any()
 }
 
-fn task_visible(model: &ShellViewModel) -> bool {
-    !model.acceptance_scene
-        && model.workspace.startup.status == super::super::StartupStatus::Ready
-        && model.workspace.main_region() == super::super::MainRegion::HasRepository
-        && (model.admin.popover_open || !model.task_rows().is_empty())
+/// 任务弹层挂在壳层浮层上，跟侧栏底部的任务按钮走。
+pub(crate) fn task_popover(model: &ShellViewModel) -> Option<AnyView> {
+    if model.acceptance_scene || !model.admin.popover_open {
+        return None;
+    }
+    let rows_data = model.task_rows();
+    let mut body = vec![text(format!("任务 {}", rows_data.len())).key("admin-task-count").into_any()];
+    if rows_data.is_empty() {
+        body.push(text("当前没有运行中的任务。").key("admin-task-empty").into_any());
+    }
+    for task in rows_data {
+        body.push(text(format!("{} · {} · {}", task.source, task.label, task.detail)).key(format!("admin-task-{}", task.id)).into_any());
+    }
+    body.push(button("关闭任务").key("admin-task-close").on_cx(|_, _: &Activate, cx| {
+        cx.dispatch_program(ShellMessage::Admin(AdminMessage::CloseTaskPopover));
+    }).into_any());
+    Some(
+        widget(Stack::fill_column(0.0).padding_xy(16.0, 48.0).justify(nana_ui::runtime::JustifySpec::End).align(nana_ui::runtime::AlignSpec::Start))
+            .children((
+                widget(
+                    Stack::column(8.0)
+                        .width(nana_ui::runtime::LengthSpec::Px(280.0))
+                        .surface(nana_ui::runtime::SemanticColorRole::Surface)
+                        .radius_px(12.0)
+                        .padding_xy(14.0, 12.0),
+                )
+                .children(body),
+            ))
+            .into_any(),
+    )
 }
 
 fn settings_rows(model: &ShellViewModel) -> Vec<AnyView> {
@@ -453,26 +475,4 @@ fn plugin_entries(model: &ShellViewModel) -> Vec<AnyView> {
     rows
 }
 
-fn task_rows(model: &ShellViewModel) -> Vec<AnyView> {
-    let rows_data = model.task_rows();
-    let mut rows = vec![widget(Stack::bar(8.0))
-        .children((
-            text(format!("任务 {}", rows_data.len())).key("admin-task-count"),
-            button("任务").key("admin-task-toggle").on_cx(|_, _: &Activate, cx| {
-                cx.dispatch_program(ShellMessage::Admin(AdminMessage::ToggleTaskPopover));
-            }),
-        ))
-        .into_any()];
-    if model.admin.popover_open {
-        rows.push(button("关闭任务").key("admin-task-close").on_cx(|_, _: &Activate, cx| {
-            cx.dispatch_program(ShellMessage::Admin(AdminMessage::CloseTaskPopover));
-        }).into_any());
-        if rows_data.is_empty() {
-            rows.push(text("当前没有运行中的任务。").key("admin-task-empty").into_any());
-        }
-        for task in rows_data {
-            rows.push(text(format!("{} · {} · {}", task.source, task.label, task.detail)).key(format!("admin-task-{}", task.id)).into_any());
-        }
-    }
-    rows
-}
+

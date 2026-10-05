@@ -22,7 +22,7 @@ mod reduce;
 mod view;
 
 pub(crate) use reduce::reduce_message;
-pub(crate) use view::admin_surface;
+pub(crate) use view::{admin_surface, task_popover};
 
 #[cfg(test)]
 #[path = "admin_tests.rs"]
