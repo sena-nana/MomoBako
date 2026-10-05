@@ -45,6 +45,7 @@ pub enum AdminMessage {
     SaveJson { plugin_id: String, key: String },
     ResetConfig { plugin_id: String, key: String },
     ChooseArchive,
+    RefreshPlugins,
     InstallArchive(Option<String>),
     PluginsReplaced(Result<Vec<PluginManifest>, String>),
     OpenDataDirectory(String),

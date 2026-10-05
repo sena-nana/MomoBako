@@ -238,6 +238,10 @@ fn reduce_admin(model: &mut ShellViewModel, message: AdminMessage) {
         }
         AdminMessage::SaveJson { plugin_id, key } => save_json(model, &plugin_id, &key),
         AdminMessage::ResetConfig { plugin_id, key } => reset_config(model, &plugin_id, &key),
+        AdminMessage::RefreshPlugins => {
+            model.admin.reset_action();
+            model.admin.begin_settings_load();
+        }
         AdminMessage::ChooseArchive => {
             model.admin.reset_action();
             model.admin.effects.push(AdminEffect::RequestOpenDialog);

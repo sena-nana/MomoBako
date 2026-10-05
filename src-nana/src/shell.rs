@@ -66,6 +66,8 @@ pub enum ShellMessage {
     PlaylistPlayersLoaded(Result<Vec<PlaylistPlayerContribution>, String>),
     NewPlaylistNameChanged(String),
     SelectPlaylistPlayer(String),
+    OpenPlaylistDialog,
+    ClosePlaylistDialog,
     CreatePlaylist,
     SelectPlaylist(String),
     DeletePlaylist(String),
@@ -270,6 +272,7 @@ pub struct ShellViewModel {
     pub new_playlist_name: String,
     pub playlist_players: Vec<PlaylistPlayerContribution>,
     pub selected_new_playlist_player_type_id: Option<String>,
+    pub playlist_dialog_open: bool,
     pub playlist_item_entries: Vec<String>,
     pub playlist_item_ids: Vec<String>,
     pub playlist_item_status: String,
@@ -323,6 +326,7 @@ impl Default for ShellViewModel {
             new_playlist_name: String::new(),
             playlist_players: Vec::new(),
             selected_new_playlist_player_type_id: None,
+            playlist_dialog_open: false,
             playlist_item_entries: Vec::new(),
             playlist_item_ids: Vec::new(),
             playlist_item_status: String::new(),
@@ -644,14 +648,21 @@ impl ShellViewModel {
             ShellMessage::SelectPlaylistPlayer(player_type_id) => {
                 self.selected_new_playlist_player_type_id = Some(player_type_id);
             }
+            ShellMessage::OpenPlaylistDialog => {
+                self.playlist_dialog_open = true;
+            }
+            ShellMessage::ClosePlaylistDialog => {
+                self.playlist_dialog_open = false;
+            }
             ShellMessage::CreatePlaylist => {
-                self.detail = if self.new_playlist_name.trim().is_empty() {
-                    "播放列表名称不能为空".into()
+                if self.new_playlist_name.trim().is_empty() {
+                    self.detail = "播放列表名称不能为空".into();
                 } else if self.selected_new_playlist_player_type_id.is_none() {
-                    "请先选择播放器类型".into()
+                    self.detail = "请先选择播放器类型".into();
                 } else {
-                    "正在创建播放列表…".into()
-                };
+                    self.detail = "正在创建播放列表…".into();
+                    self.playlist_dialog_open = false;
+                }
             }
             ShellMessage::SelectPlaylist(playlist_id) => {
                 self.page = ShellPage::Playlists;

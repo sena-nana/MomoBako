@@ -2,11 +2,11 @@
 
 use std::sync::Arc;
 
-use nana_ui::icons_tabler::{ARCHIVE, CLOCK, FOLDERS, LOGS, PUZZLE, REFRESH, SETTINGS, TAG, TRASH};
+use nana_ui::icons_tabler::{ARCHIVE, CLOCK, FOLDERS, LOGS, PLUS, PUZZLE, REFRESH, SETTINGS, TAG, TRASH};
 use nana_ui::runtime::view::{button, text, widget, AnyView, IntoView};
 use nana_ui::runtime::{
-    Activate, Icon, IconGlyph, SidebarRow, SidebarRowState, Stack, TextChanged, TextInput, TreeNode, TreeView,
-    TreeViewEvent, ViewContext,
+    Activate, Icon, IconGlyph, LengthSpec, SidebarRow, SidebarRowState, Stack, TextChanged, TextInput, TreeNode,
+    TreeView, TreeViewEvent, ViewContext,
 };
 
 use super::sidebar::{PopoverMode, ShortcutId};
@@ -61,9 +61,23 @@ pub fn sidebar_sections(model: &ShellViewModel) -> impl IntoView + use<'_> {
         rows.push(text(model.sidebar.smart_error.clone()).key("smart-folder-error").into_any());
     }
     let playlist_label = if model.sidebar.playlists_expanded { "收起播放集" } else { "展开播放集" };
-    rows.push(sidebar_row(playlist_label, false, false, |cx| {
-        cx.dispatch_program(sidebar_message(SidebarMessage::TogglePlaylists));
-    }).into_any());
+    let create_locked = locked || model.workspace.active_repo_id.is_none() || model.playlist_players.is_empty();
+    rows.push(
+        widget(Stack::bar(4.0))
+            .children((
+                widget(Stack::fill_row(0.0).grow(1.0).shrink(1.0).min_width(LengthSpec::Px(0.0))).children((
+                    sidebar_row(playlist_label, false, false, |cx| {
+                        cx.dispatch_program(sidebar_message(SidebarMessage::TogglePlaylists));
+                    }),
+                )),
+                widget(super::title_bar::shell_icon(PLUS, "新建播放集", create_locked))
+                    .key("playlist-create")
+                    .on_cx(|_, _: &Activate, cx| {
+                        cx.dispatch_program(ShellMessage::OpenPlaylistDialog);
+                    }),
+            ))
+            .into_any(),
+    );
     rows.push(playlist_body(model, locked).into_any());
     widget(Stack::fill_column(8.0).padding_xy(12.0, 8.0)).children(rows)
 }
