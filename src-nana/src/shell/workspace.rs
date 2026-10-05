@@ -186,6 +186,20 @@ impl StartupState {
         self.logs.iter().rev().take(STARTUP_VISIBLE_LOGS).collect()
     }
 
+    /// 启动仍在加载时追加一条同步日志。其它状态忽略。
+    pub(super) fn append_sync_log(&mut self, level: &str, message: impl Into<String>) {
+        if self.status != StartupStatus::Loading {
+            return;
+        }
+        let level = match level {
+            "debug" => "debug",
+            "warn" => "warn",
+            "error" => "error",
+            _ => "info",
+        };
+        self.push_log(level, message);
+    }
+
     fn push_log(&mut self, level: &'static str, message: impl Into<String>) {
         self.logs.push(StartupLog { level, message: message.into() });
         if self.logs.len() > STARTUP_LOG_LIMIT {

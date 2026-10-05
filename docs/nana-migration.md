@@ -34,7 +34,9 @@ cargo test -p momobako-nana --test offscreen_acceptance -- --nocapture
 
 `src-nana/src/host_api.rs` 进一步定义窗口生命周期、通知、文件对话框、外部打开和
 取消探针。它们是宿主无关请求；Windows 原生适配器可以实现这些请求而不把窗口对象
-泄漏进领域服务或 ViewModel。
+泄漏进领域服务或 ViewModel。Nana 启动后把 `HostEvent` 接回自己的事件循环：日志按
+id 合并，启动中的 `repository.sync` 追加到启动日志，就绪后的结构更新静默刷新当前
+面板。这条路径不重拉仓库列表、摘要和硬链接候选。
 
 `src-backend` 是当前迁移期的共享领域库，使用同一份 `models/services/viewmodels`
 源码，同时被 Nana 宿主和 Tauri 适配层编译。它不依赖 Tauri；`cargo check

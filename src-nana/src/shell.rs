@@ -17,6 +17,7 @@ mod inspect_view;
 pub(crate) mod player;
 pub(crate) mod admin;
 pub(crate) mod input;
+pub mod host_events;
 mod player_view;
 mod sidebar;
 mod sidebar_view;
@@ -121,6 +122,8 @@ pub enum ShellMessage {
     Admin(admin::AdminMessage),
     /// 拖放、外部打开和关闭确认。具体分支在 `input::reduce_message` 里归约。
     Input(input::InputMessage),
+    /// 日志广播和资源库结构更新。具体分支在 `host_events::reduce_message` 里归约。
+    Host(host_events::HostMessage),
 }
 
 /// 已解码的 RGBA 预览帧；解码在服务任务中完成，窗口线程只负责上传 GPU 纹理。
@@ -459,6 +462,9 @@ impl ShellViewModel {
             return;
         };
         let Some(message) = admin::reduce_message(self, message) else {
+            return;
+        };
+        let Some(message) = host_events::reduce_message(self, message) else {
             return;
         };
         match message {
@@ -814,6 +820,7 @@ impl ShellViewModel {
             ShellMessage::Inspect(_) => {}
             ShellMessage::Player(_) => {}
             ShellMessage::Input(_) => {}
+            ShellMessage::Host(_) => {}
         }
     }
 
