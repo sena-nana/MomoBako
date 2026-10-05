@@ -5,16 +5,27 @@ use std::sync::Arc;
 use nana_ui::icons_tabler::{ARCHIVE, CLOCK, CLIPBOARD_LIST, FOLDERS, LOGS, PLUS, PUZZLE, REFRESH, SETTINGS, TAG, TRASH};
 use nana_ui::runtime::view::{button, segmented_option, text, widget, AnyView, IntoView};
 use nana_ui::runtime::{
-    sidebar_section_tool_button, Activate, Dialog, Divider, FormField, Icon, IconGlyph, SegmentedControl,
-    SegmentedOptionChosen, SemanticColorRole, SidebarFooter, SidebarFooterButton, SidebarRow, SidebarRowState,
-    SidebarSection, Stack, Text, TextChanged, TextInput, ToggleChanged, TreeNode, TreeView, TreeViewEvent,
-    ValidationIntent, ValidationMessage, ViewContext,
+    sidebar_section_tool_button, Activate, Dialog, Divider, FormField, Icon, IconGlyph, LengthSpec, SegmentedControl,
+    SegmentedOptionChosen, SemanticColorRole, SidebarFooter, SidebarFooterButton, SidebarFrame, SidebarRow,
+    SidebarRowState, SidebarSection, Stack, Text, TextChanged, TextInput, ToggleChanged, TreeNode, TreeView,
+    TreeViewEvent, ValidationIntent, ValidationMessage, ViewContext,
 };
 
 use super::files::{FileDialog, FilesMessage};
 use super::sidebar::{PopoverMode, ShortcutId, SmartFolderField};
 use super::SidebarMessage;
 use super::{ShellMessage, ShellPage, ShellViewModel, WorkspacePanel};
+
+/// 实况侧栏。左右都是 8px，和 Vue `.workspace-sidebar` 的 `padding: 10px 8px` 一致。
+pub fn sidebar_frame() -> SidebarFrame {
+    let mut frame = SidebarFrame::new();
+    let layout = Arc::make_mut(&mut frame.style.layout);
+    layout.padding_top = Some(LengthSpec::Px(10.0));
+    layout.padding_right = Some(LengthSpec::Px(8.0));
+    layout.padding_bottom = Some(LengthSpec::Px(10.0));
+    layout.padding_left = Some(LengthSpec::Px(8.0));
+    frame
+}
 
 /// 仓库切换按钮，放在侧栏顶部。
 pub fn sidebar_switcher(model: &ShellViewModel) -> impl IntoView + use<'_> {
@@ -344,7 +355,19 @@ fn footer_button(
 }
 
 fn hint(copy: &str, key: impl Into<String>) -> AnyView {
-    widget(Text::new(copy).color(SemanticColorRole::Muted).font_size(12.0)).key(key.into()).into_any()
+    widget(Stack::column(0.0).padding_xy(8.0, 0.0))
+        .children((widget(Text::new(copy).color(SemanticColorRole::Muted).font_size(12.0)).key(key.into()),))
+        .into_any()
+}
+
+/// 树在深度 0 自带 4px。补成和分组标题一样的左右 8px。
+fn tree_inset(tree: AnyView) -> AnyView {
+    widget(Stack::column(0.0).with_layout(|layout| {
+        layout.padding_left = Some(LengthSpec::Px(4.0));
+        layout.padding_right = Some(LengthSpec::Px(8.0));
+    }))
+    .children((tree,))
+    .into_any()
 }
 
 fn shortcut_rows(model: &ShellViewModel, locked: bool) -> Vec<AnyView> {
@@ -387,10 +410,10 @@ fn folder_body(model: &ShellViewModel, locked: bool) -> impl IntoView + use<'_> 
         return hint("当前仓库还没有子文件夹。", "folder-none");
     }
     let nodes = folder_nodes(&model.sidebar.folders, &model.sidebar.expanded_folders, &model.sidebar.current_directory);
-    widget(TreeView::new(nodes)).on_cx(|_, event: &TreeViewEvent<Arc<str>>, cx| match event {
+    tree_inset(widget(TreeView::new(nodes)).on_cx(|_, event: &TreeViewEvent<Arc<str>>, cx| match event {
         TreeViewEvent::Toggle(id) => cx.dispatch_program(sidebar_message(SidebarMessage::ToggleFolder(id.to_string()))),
         TreeViewEvent::Select(id) => cx.dispatch_program(sidebar_message(SidebarMessage::OpenFolder(id.to_string()))),
-    }).into_any()
+    }).into_any())
 }
 
 fn smart_body(model: &ShellViewModel, locked: bool) -> impl IntoView + use<'_> {
@@ -405,10 +428,10 @@ fn smart_body(model: &ShellViewModel, locked: bool) -> impl IntoView + use<'_> {
     }
     let active = model.sidebar.active_smart_folder_id.clone();
     let nodes = smart_nodes(&model.sidebar.smart_folders, &model.sidebar.expanded_smart_folders, active.as_deref());
-    widget(TreeView::new(nodes)).on_cx(|_, event: &TreeViewEvent<Arc<str>>, cx| match event {
+    tree_inset(widget(TreeView::new(nodes)).on_cx(|_, event: &TreeViewEvent<Arc<str>>, cx| match event {
         TreeViewEvent::Toggle(id) => cx.dispatch_program(sidebar_message(SidebarMessage::ToggleSmartFolder(id.to_string()))),
         TreeViewEvent::Select(id) => cx.dispatch_program(sidebar_message(SidebarMessage::OpenSmartFolder(id.to_string()))),
-    }).into_any()
+    }).into_any())
 }
 
 fn playlist_body(model: &ShellViewModel, locked: bool) -> impl IntoView + use<'_> {

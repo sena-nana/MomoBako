@@ -650,7 +650,7 @@ pub fn mount_shell(
                 let sidebar = if view_model.acceptance_scene {
                     widget(SidebarFrame::new()).body(legacy_navigation).into_any()
                 } else {
-                    widget(SidebarFrame::new())
+                    widget(super::sidebar_view::sidebar_frame())
                         .top(super::sidebar_view::sidebar_switcher(&view_model))
                         .body(super::sidebar_view::sidebar_sections(&view_model))
                         .footer(super::sidebar_view::sidebar_footer(&view_model))
