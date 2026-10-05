@@ -16,20 +16,33 @@ use super::files::{
 };
 use super::{ShellMessage, ShellViewModel};
 
-/// 目录说明、展示方式和工具条。列表单独占剩余高度，播放条才能留在窗口里。
+/// 文件头和 Tauri 一样左右对齐：左边目录，右边工具。
 fn files_tools(model: &ShellViewModel) -> AnyView {
     let ctx = FileContext::from_model(model);
     let files = &model.files;
-    let mut rows = Vec::new();
-    rows.push(text(location_eyebrow(&ctx)).key("file-location").into_any());
-    rows.push(text(location_title(&ctx, &files.current_path)).key("file-path").into_any());
-    rows.push(display_modes().into_any());
-    rows.push(selection_modes().into_any());
-    if !ctx.is_virtual() {
-        rows.push(breadcrumbs(&files.current_path).into_any());
-    }
-    rows.push(toolbar(&ctx, files).into_any());
-    widget(Stack::column(6.0)).children(rows).into_any()
+    let path = if ctx.is_virtual() {
+        text(location_title(&ctx, &files.current_path)).key("file-path").into_any()
+    } else {
+        breadcrumbs(&files.current_path).into_any()
+    };
+    widget(Stack::column(8.0))
+        .children((
+            widget(Stack::bar(12.0)).children((
+                widget(Stack::column(2.0)).children((
+                    text(format!("任务 {}", model.active_tasks)).key("task-count"),
+                    text(location_eyebrow(&ctx)).key("file-location"),
+                )),
+                widget(Stack::spacer()),
+                display_modes(),
+                selection_modes(),
+            )),
+            widget(Stack::bar(12.0)).children((
+                path,
+                widget(Stack::spacer()),
+                toolbar(&ctx, files),
+            )),
+        ))
+        .into_any()
 }
 
 /// 在 `mount_view_root` 里调用，这样虚拟列表的 signal 落在当前视图作用域。
@@ -90,11 +103,12 @@ pub(super) fn live_file_column(model: &ShellViewModel) -> AnyView {
     )
     .children((
         close_prompt,
-        text(format!("任务 {}", model.active_tasks)).key("task-count"),
         files_tools(model),
         files_status(model),
         file_list(model.files.visible_rows(&FileContext::from_model(model)), model.files.display_mode),
         load_more(model),
+        file_dialog(&model.files),
+        widget(Stack::column(0.0).grow(1.0).min_height(nana_ui::runtime::LengthSpec::Px(0.0))),
         filter,
         player,
     ))
@@ -231,7 +245,7 @@ fn file_list(rows: Vec<FileRow>, mode: DisplayMode) -> AnyView {
     let height = if list_mode { 28.0 } else { 96.0 };
     let list = each_virtual(items, |row| row.key(), height, move |row| file_row(row, list_mode))
         .overscan(56.0)
-        .grow()
+        .height(height + 16.0)
         .key("file-virtual-list");
     if list_mode { list.into_any() } else { list.grid(160.0, 8.0).into_any() }
 }

@@ -96,10 +96,6 @@ fn transport(model: &ShellViewModel) -> AnyView {
     let title = model.player.current_item().map(|item| format!("正在播放 {}", item.filename)).unwrap_or_else(|| "未选择播放内容".into());
     let queue_label = if model.player.queue_open { "关闭队列" } else { "当前队列" };
     let mut rows = vec![
-        widget(Stack::bar(8.0)).children((
-            text(title).key("player-title"),
-            text(model.player.time_text()).key("player-time"),
-        )).into_any(),
         widget(bar).key("player-transport").on_cx(move |_, event: &MediaTransportEvent, cx| {
             let message = match event {
                 MediaTransportEvent::PlayPause => Some(PlayerMessage::SetPlaying(!playing_now)),
@@ -111,7 +107,9 @@ fn transport(model: &ShellViewModel) -> AnyView {
                 cx.dispatch_program(player_message(message));
             }
         }).into_any(),
-        widget(Stack::bar(4.0)).children((
+        widget(Stack::bar(12.0)).children((
+            text(title).key("player-title"),
+            widget(Stack::spacer()),
             widget(super::title_bar::shell_icon(REPEAT, model.player.mode_text(), false))
                 .key("player-cycle-mode")
                 .on_cx(|_, _: &Activate, cx| {
@@ -137,6 +135,8 @@ fn transport(model: &ShellViewModel) -> AnyView {
                 .on_cx(|_, _: &Activate, cx| {
                     cx.dispatch_program(player_message(PlayerMessage::OpenPreview));
                 }),
+            widget(Stack::spacer()),
+            text(model.player.time_text()).key("player-time"),
         )).into_any(),
     ];
     if !model.player.activity.is_empty() {
