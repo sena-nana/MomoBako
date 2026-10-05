@@ -324,6 +324,20 @@ impl AdminState {
         self.log_signature = signature;
     }
 
+    /// 按 id 合并一条实时日志，时间再 id 降序，最多保留 500 条。
+    pub(super) fn merge_log(&mut self, record: SystemLogRecord) {
+        if let Some(slot) = self.logs.iter_mut().find(|item| item.id == record.id) {
+            *slot = record;
+        } else {
+            self.logs.push(record);
+        }
+        self.logs.sort_by(|left, right| {
+            right.timestamp.cmp(&left.timestamp).then_with(|| right.id.cmp(&left.id))
+        });
+        self.logs.truncate(500);
+        self.note_log_scroll();
+    }
+
     pub fn filtered_logs(&self) -> Vec<SystemLogRecord> {
         support::filtered_logs(&self.logs, &self.log_levels, &self.log_kinds, &self.log_plugin_id, &self.log_repo_id, &self.log_search)
     }

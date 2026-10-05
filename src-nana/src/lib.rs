@@ -70,9 +70,15 @@ impl ApplicationState for MomoBakoApplication {
     type Message = ShellMessage;
     type Error = FrameworkError;
 
-    fn initialize(_: &RuntimeProgramContext<Self::Message>) -> Result<Self, Self::Error> {
+    fn initialize(context: &RuntimeProgramContext<Self::Message>) -> Result<Self, Self::Error> {
         let services = match services::NativeServices::start() {
-            Ok(services) => Some(services),
+            Ok(services) => {
+                let context = context.clone();
+                services.pump_host_events(move |event| {
+                    context.dispatch(ShellMessage::Host(shell::host_events::HostMessage::from_event(event)));
+                });
+                Some(services)
+            }
             Err(error) => {
                 eprintln!("Nana 领域 Runtime 启动失败：{error}");
                 None

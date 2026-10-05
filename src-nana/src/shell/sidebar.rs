@@ -302,6 +302,41 @@ impl SidebarState {
         true
     }
 
+    /// 结构更新后重读侧栏。不改当前面板；目录树正在加载时不重复请求。
+    pub fn refresh_after_structure(&mut self, repo_id: &str, panel: WorkspacePanel) {
+        if self.bound_missing || self.bound_repo_id.as_deref() != Some(repo_id) {
+            eprintln!("Nana 结构更新与侧栏仓库不一致：{repo_id}");
+            return;
+        }
+        if self.tree_loading {
+            eprintln!("Nana 目录树仍在读取，跳过重复的结构刷新：{repo_id}");
+        } else {
+            self.tree_loading = true;
+            self.tree_error.clear();
+            self.effects.push(SidebarEffect::LoadTree { repo_id: repo_id.to_string() });
+        }
+        self.effects.push(SidebarEffect::LoadSmartFolders { repo_id: repo_id.to_string() });
+        self.effects.push(SidebarEffect::LoadPlaylists { repo_id: repo_id.to_string() });
+        if panel == WorkspacePanel::Playlist {
+            if let Some(playlist_id) = self.active_playlist_id.clone() {
+                self.effects.push(SidebarEffect::LoadPlaylistDetail {
+                    repo_id: repo_id.to_string(),
+                    playlist_id,
+                });
+            }
+        }
+        if panel == WorkspacePanel::SmartFolder {
+            if let Some(smart_folder_id) = self.active_smart_folder_id.clone() {
+                self.smart_loading = true;
+                self.smart_error.clear();
+                self.effects.push(SidebarEffect::QuerySmartFolder {
+                    repo_id: repo_id.to_string(),
+                    smart_folder_id,
+                });
+            }
+        }
+    }
+
     /// 正在读取目录树时忽略重复刷新。
     pub fn refresh_tree(&mut self, repo_id: Option<&str>, locked: bool) -> bool {
         if locked || self.tree_loading {

@@ -202,6 +202,8 @@ struct BrowsePending {
     path: String,
     trash: bool,
     append: bool,
+    /// 结构更新触发的重读。不打开加载态，失败也不把整页改成错误。
+    silent: bool,
 }
 
 /// 归约后交给宿主的服务请求。
@@ -418,7 +420,13 @@ impl FilesState {
         }
         let repo_id = ctx.repo_id.clone().unwrap_or_default();
         let path = self.current_path.clone();
-        self.pending = Some(BrowsePending { repo_id: repo_id.clone(), path: path.clone(), trash: self.trash, append: true });
+        self.pending = Some(BrowsePending {
+            repo_id: repo_id.clone(),
+            path: path.clone(),
+            trash: self.trash,
+            append: true,
+            silent: false,
+        });
         self.loading_more = true;
         self.effects.push(FilesEffect::Browse {
             repo_id,
@@ -464,8 +472,49 @@ impl FilesState {
         true
     }
 
+    /// 静默重读当前目录。不改变加载文案和选择；虚拟视图直接返回。
+    pub(super) fn reload_silent(&mut self, ctx: &FileContext) -> bool {
+        if self.mutating {
+            eprintln!("Nana 文件变更进行中，跳过静默刷新");
+            return false;
+        }
+        if ctx.smart_folder || ctx.category_virtual {
+            eprintln!("Nana 虚拟视图不按目录静默刷新");
+            return false;
+        }
+        let Some(repo_id) = ctx.repo_id.clone() else {
+            eprintln!("Nana 静默刷新没有活动仓库");
+            return false;
+        };
+        let path = self.current_path.clone();
+        let trash = ctx.trash;
+        let limit = INITIAL_PAGE_SIZE.max(self.rows.len());
+        self.pending = Some(BrowsePending {
+            repo_id: repo_id.clone(),
+            path: path.clone(),
+            trash,
+            append: false,
+            silent: true,
+        });
+        self.effects.push(FilesEffect::Browse {
+            repo_id,
+            path,
+            trash,
+            offset: 0,
+            limit,
+            append: false,
+        });
+        true
+    }
+
     /// 只有文件表面自己发起的加载失败才吃掉错误。启动失败仍交给壳层切到错误页。
+    /// 静默刷新失败只记日志，保留当前列表和页面。
     pub(super) fn note_load_failed(&mut self, error: &str) -> bool {
+        if self.pending.as_ref().is_some_and(|pending| pending.silent) {
+            eprintln!("Nana 静默刷新目录失败：{error}");
+            self.pending = None;
+            return true;
+        }
         if !self.loading && !self.loading_more {
             return false;
         }
@@ -601,7 +650,13 @@ impl FilesState {
         };
         let path = normalize_path(path);
         let trash = if append { self.trash } else { ctx.trash };
-        self.pending = Some(BrowsePending { repo_id: repo_id.clone(), path: path.clone(), trash, append });
+        self.pending = Some(BrowsePending {
+            repo_id: repo_id.clone(),
+            path: path.clone(),
+            trash,
+            append,
+            silent: false,
+        });
         if append {
             self.loading_more = true;
         } else {

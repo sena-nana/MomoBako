@@ -114,7 +114,13 @@ fn load_more_is_ignored_without_more_or_while_loading() {
 fn stale_browse_keeps_entries() {
     let mut state = FilesState::default();
     state.rows = vec![row("keep", "keep", "file")];
-    state.pending = Some(super::BrowsePending { repo_id: "repo".into(), path: "photos".into(), trash: false, append: false });
+    state.pending = Some(super::BrowsePending {
+        repo_id: "repo".into(),
+        path: "photos".into(),
+        trash: false,
+        append: false,
+        silent: false,
+    });
     state.loading = true;
     assert!(!state.apply_browser(&snapshot("other", 1, vec![entry("new", "new", "file")]), false));
     assert_eq!(state.entry_names(), vec!["keep".to_string()]);
