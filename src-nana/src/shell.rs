@@ -11,6 +11,7 @@ use crate::backend::services::repository::{
 use crate::settings::ApplicationSettings;
 
 mod files;
+mod thumbs;
 mod files_view;
 mod inspect;
 mod inspect_view;
@@ -24,6 +25,7 @@ mod sidebar_view;
 mod workspace;
 pub(crate) mod workspace_refresh;
 pub use files::{display_mode_path, FileRow, FilesEffect, FilesMessage, HardlinkPrompt, VirtualQuery};
+pub(crate) use thumbs::{decode_thumbnail_file, thumbnail_slot, ThumbnailFrame};
 pub use inspect::{
     DateBound, InspectEffect, InspectMessage, NumberBound, SearchRequestDraft, SearchRow, prepare_text,
 };
@@ -44,6 +46,8 @@ pub enum ShellMessage {
     RepositoriesLoaded(Result<Vec<RepositorySummary>, String>),
     RepositorySnapshotLoaded(Result<RepositorySnapshot, String>),
     FileBrowserLoaded(Result<FileBrowserSnapshot, String>),
+    /// 缩略图解码结果。像素由宿主上传，归约只留下原始宽高。
+    ThumbnailPixels(Vec<ThumbnailFrame>),
     SelectFile { path: String, asset_id: Option<String> },
     OpenDirectory(String),
     AssetDetailLoaded(Result<AssetDetail, String>),
@@ -536,6 +540,9 @@ impl ShellViewModel {
                     "{} 个条目 · 当前目录 {}",
                     browser.total_entries, browser.current_path
                 );
+            }
+            ShellMessage::ThumbnailPixels(frames) => {
+                self.files.note_thumbnail_sizes(&frames);
             }
             ShellMessage::FileBrowserLoaded(Err(error)) => {
                 if self.files.note_load_failed(&error) {

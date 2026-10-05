@@ -1,15 +1,21 @@
 //! 文件列表视图。
 //!
 //! 实况目录用 `each_virtual` 只构建窗口内的行。列表高 28、预取 56；
-//! 自适应、瀑布流和网格共用同一套网格，缩略图走 Nana `Thumbnail`。
+//! 自适应和瀑布流按宽高比换行，网格和列表用固定盒子。缩略图走 Nana `Thumbnail`。
 //! 对话框用 Nana `Dialog`，固定定位盖住窗口，不占用壳层唯一浮层槽。
+
+use std::sync::Arc;
 
 use nana_ui::icons_tabler::{
     ARCHIVE, ARROW_FORWARD, COPY, FILE, FOLDER_OPEN, FOLDER_PLUS, LAYOUT_BOARD, LAYOUT_DASHBOARD, LAYOUT_GRID,
     LAYOUT_LIST, LIST_CHECK, PENCIL, REPLACE, ROTATE, SCISSORS, SWITCH, TRASH,
 };
 use nana_ui::runtime::view::{button, each_virtual, signal, text, widget, AnyView, IntoView};
-use nana_ui::runtime::{Activate, ConfirmDialog, Dialog, Icon, Stack, TextChanged, TextInput, Thumbnail};
+use nana_ui::runtime::{
+    Activate, AlignSpec, ConfirmDialog, Dialog, Icon, LengthSpec, RadiusTier, ScrollAxes, ScrollView, Stack, TextChanged,
+    TextInput, Thumbnail,
+};
+use nana_ui::ContentFit;
 
 use super::files::{
     hardlink_label, DisplayMode, FileContext, FileDialog, FileRow, FilesMessage, SelectionMode,
@@ -107,7 +113,6 @@ pub(super) fn live_file_column(model: &ShellViewModel) -> AnyView {
         file_list(model.files.visible_rows(&FileContext::from_model(model)), model.files.display_mode),
         load_more(model),
         file_dialog(&model.files),
-        widget(Stack::column(0.0).grow(1.0).min_height(nana_ui::runtime::LengthSpec::Px(0.0))),
         filter,
         player,
     ))
@@ -237,32 +242,75 @@ fn action(icon: Icon, label: &'static str, key: &'static str, enabled: bool, mes
         .into_any()
 }
 
-/// 列表行高 28。网格行更高，以便放下缩略图和标题。
+/// 列表行高 72，网格行高 190。自适应和瀑布流按条目宽度换行。
 fn file_list(rows: Vec<FileRow>, mode: DisplayMode) -> AnyView {
-    let items = signal(rows);
-    let list_mode = mode.is_list();
-    let height = if list_mode { 28.0 } else { 96.0 };
-    let list = each_virtual(items, |row| row.key(), height, move |row| file_row(row, list_mode))
-        .overscan(56.0)
-        .height(height + 16.0)
-        .key("file-virtual-list");
-    if list_mode { list.into_any() } else { list.grid(160.0, 8.0).into_any() }
+    match mode {
+        DisplayMode::List => each_virtual(signal(rows), |row| row.key(), 72.0, move |row| file_row(row, mode))
+            .overscan(56.0)
+            .grow()
+            .key("file-virtual-list")
+            .into_any(),
+        DisplayMode::Grid => each_virtual(signal(rows), |row| row.key(), 190.0, move |row| file_row(row, mode))
+            .overscan(56.0)
+            .grid(148.0, 14.0)
+            .grow()
+            .key("file-virtual-list")
+            .into_any(),
+        DisplayMode::Adaptive | DisplayMode::Masonry => {
+            let cards: Vec<_> = rows.into_iter().map(|row| file_row(row, mode)).collect();
+            widget(
+                ScrollView::new(ScrollAxes::Vertical).with_layout(|layout| {
+                    layout.flex_grow = Some(1.0);
+                    layout.flex_shrink = Some(1.0);
+                    layout.flex_basis = Some(LengthSpec::Px(0.0));
+                    layout.min_height = Some(LengthSpec::Px(0.0));
+                }),
+            )
+            .children((widget(Stack::row(14.0).wrap(true).align(AlignSpec::Start)).children(cards),))
+            .key("file-wrap-list")
+            .into_any()
+        }
+    }
 }
 
-fn file_row(row: FileRow, list_mode: bool) -> AnyView {
+fn file_row(row: FileRow, mode: DisplayMode) -> AnyView {
+    let metrics = super::thumbs::thumb_box(mode, row.pixel_width, row.pixel_height);
     let path = row.path.clone();
-    let label = row_label(&row, list_mode);
+    let label = row_label(&row, mode.is_list());
     let activate = button(label).key(format!("file-row-{}", row.key())).on_cx(move |_, _: &Activate, cx| {
         cx.dispatch_program(file_message(FilesMessage::ActivateRow(path.clone())));
     });
-    if list_mode {
-        return activate.into_any();
+    let thumb = thumbnail(&row, metrics.preview_width, metrics.preview_height, mode.is_list());
+    if mode.is_list() {
+        widget(Stack::row(12.0).align(AlignSpec::Center).min_height(LengthSpec::Px(72.0))).children((thumb, activate)).into_any()
+    } else {
+        let mut card = Stack::column(8.0).padding_xy(8.0, 8.0);
+        if metrics.item_width > 0.0 {
+            card = card.width(LengthSpec::Px(metrics.item_width));
+        }
+        widget(card).children((thumb, activate)).into_any()
     }
-    let thumb = match row.thumbnail_path.as_deref().map(str::trim).filter(|path| !path.is_empty()) {
-        Some(path) => widget(Thumbnail::new(path)),
-        None => widget(Thumbnail::empty()),
-    };
-    widget(Stack::column(4.0)).children((thumb, activate)).into_any()
+}
+
+/// 预览盒按计算出的宽高固定。图片用 cover，和 Vue 的 `object-fit: cover` 一样。
+fn thumbnail(row: &FileRow, width: f32, height: f32, list_mode: bool) -> AnyView {
+    let mut thumb = if row.texture_ready {
+        row.thumbnail_path.as_deref().map(str::trim).filter(|path| !path.is_empty()).map(|path| {
+            Thumbnail::new(super::thumbs::thumbnail_slot(path))
+                .fit(ContentFit::Cover)
+                .aspect(super::thumbs::content_aspect(row.pixel_width, row.pixel_height))
+        })
+    } else {
+        None
+    }
+    .unwrap_or_else(Thumbnail::empty);
+    let layout = Arc::make_mut(&mut thumb.style.layout);
+    layout.width = Some(LengthSpec::Px(width));
+    layout.height = Some(LengthSpec::Px(height));
+    layout.flex_grow = Some(0.0);
+    layout.flex_shrink = Some(0.0);
+    thumb.style.radius = Some(if list_mode { RadiusTier::Sm } else { RadiusTier::Md });
+    widget(thumb).into_any()
 }
 
 fn row_label(row: &FileRow, list_mode: bool) -> String {

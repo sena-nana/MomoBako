@@ -30,6 +30,11 @@ pub struct FileRow {
     pub thumbnail_path: Option<String>,
     pub hardlink_state: Option<String>,
     pub extension: Option<String>,
+    /// 元数据或解码后的原始宽高。0 表示还不知道，按正方形排。
+    pub pixel_width: u32,
+    pub pixel_height: u32,
+    /// 宿主已经能为这条路径注册纹理。
+    pub texture_ready: bool,
 }
 
 impl FileRow {
@@ -43,11 +48,22 @@ impl FileRow {
             thumbnail_path: entry.thumbnail_path.clone(),
             hardlink_state: entry.hardlink_state.clone(),
             extension: entry.extension.clone(),
+            pixel_width: metadata_u32(&entry.metadata, "width"),
+            pixel_height: metadata_u32(&entry.metadata, "height"),
+            texture_ready: false,
         }
     }
 
     pub fn key(&self) -> String {
         format!("{}:{}", self.kind, self.path)
+    }
+}
+
+fn metadata_u32(metadata: &std::collections::BTreeMap<String, serde_json::Value>, key: &str) -> u32 {
+    match metadata.get(key) {
+        Some(serde_json::Value::Number(number)) => number.as_u64().unwrap_or(0).min(u32::MAX as u64) as u32,
+        Some(serde_json::Value::String(text)) => text.trim().parse().unwrap_or(0),
+        _ => 0,
     }
 }
 
@@ -226,6 +242,8 @@ pub enum FilesEffect {
     ConfirmHardlink { repo_id: String, candidate_id: String },
     LoadAsset { repo_id: String, asset_id: String },
     PersistDisplayMode,
+    /// 读取目录里还没解码的缩略图文件。
+    DecodeThumbnails { paths: Vec<String> },
 }
 
 /// 文件表面消息。壳层只保留一个 `ShellMessage::Files`。
@@ -473,7 +491,39 @@ impl FilesState {
         self.finish_loading();
         let rows = self.rows.clone();
         self.prune_against(&rows);
+        self.queue_thumbnail_decode();
         true
+    }
+
+    /// 把还没有纹理的缩略图路径交给宿主解码。
+    fn queue_thumbnail_decode(&mut self) {
+        let paths: Vec<String> = self
+            .rows
+            .iter()
+            .filter(|row| !row.texture_ready)
+            .filter_map(|row| row.thumbnail_path.clone())
+            .filter(|path| !path.trim().is_empty())
+            .collect();
+        if paths.is_empty() {
+            return;
+        }
+        self.effects.push(FilesEffect::DecodeThumbnails { paths });
+    }
+
+    /// 用解码出的原始宽高替换布局。同一路径的行一起更新。
+    pub(super) fn note_thumbnail_sizes(&mut self, frames: &[super::thumbs::ThumbnailFrame]) {
+        for frame in frames {
+            if frame.natural_width == 0 || frame.natural_height == 0 {
+                continue;
+            }
+            for row in self.rows.iter_mut().chain(self.virtual_rows.iter_mut()) {
+                if row.thumbnail_path.as_deref() == Some(frame.path.as_str()) {
+                    row.pixel_width = frame.natural_width;
+                    row.pixel_height = frame.natural_height;
+                    row.texture_ready = true;
+                }
+            }
+        }
     }
 
     /// 静默重读当前目录。不改变加载文案和选择；虚拟视图直接返回。
