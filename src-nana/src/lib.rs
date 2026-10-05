@@ -39,6 +39,9 @@ use backend::services::repository::{
 };
 pub mod plugin_api;
 pub mod settings;
+mod thumbnail_host;
+
+use thumbnail_host::{PendingThumb, ThumbnailGpu};
 
 /// Nana 宿主应用状态，持有共享领域 Runtime 和原生壳层 ViewModel。
 pub struct MomoBakoApplication {
@@ -46,8 +49,8 @@ pub struct MomoBakoApplication {
     shell: ShellViewModel,
     repositories_load_scheduled: bool,
     preview_gpu: Option<NativePreviewGpu>,
-    thumbnail_gpu: Vec<ThumbnailGpu>,
-    pending_thumbs: Vec<PendingThumb>,
+    pub(crate) thumbnail_gpu: Vec<ThumbnailGpu>,
+    pub(crate) pending_thumbs: Vec<PendingThumb>,
 }
 
 struct NativePreviewGpu {
@@ -55,20 +58,6 @@ struct NativePreviewGpu {
     texture: GpuTexture,
     width: u32,
     height: u32,
-}
-
-struct ThumbnailGpu {
-    slot: String,
-    texture: GpuTexture,
-    width: u32,
-    height: u32,
-}
-
-struct PendingThumb {
-    slot: String,
-    width: u32,
-    height: u32,
-    rgba: Vec<u8>,
 }
 
 impl Default for MomoBakoApplication {
@@ -217,19 +206,7 @@ impl ApplicationState for MomoBakoApplication {
         context: &RuntimeProgramContext<Self::Message>,
     ) -> RuntimeProgramUpdate {
         if let ShellMessage::ThumbnailPixels(frames) = &mut message {
-            for frame in frames.iter_mut() {
-                let rgba = std::mem::take(&mut frame.rgba);
-                if rgba.len() != (frame.width as usize).saturating_mul(frame.height as usize).saturating_mul(4) {
-                    eprintln!("Nana 缩略图像素长度不对：{}", frame.path);
-                    continue;
-                }
-                self.pending_thumbs.push(PendingThumb {
-                    slot: shell::thumbnail_slot(&frame.path),
-                    width: frame.width,
-                    height: frame.height,
-                    rgba,
-                });
-            }
+            self.queue_thumbnail_frames(frames);
         }
         let Some((id, window)) = windows.iter_mut().next() else {
             return RuntimeProgramUpdate::default();
@@ -973,53 +950,6 @@ fn dispatch_workspace_effects(
             WorkspaceEffect::LoadSnapshotSilent { repo_id } => {
                 shell::workspace_refresh::dispatch_silent_snapshot(app, context, repo_id);
             }
-        }
-    }
-}
-
-impl MomoBakoApplication {
-    /// 把新解码的缩略图像素上传成宿主纹理，并在每帧重新登记。
-    fn publish_thumbnails(&mut self, window: &mut ApplicationWindow, context: &RuntimeProgramContext<ShellMessage>) {
-        for pending in std::mem::take(&mut self.pending_thumbs) {
-            let Ok(texture) = context.gpu().create_texture(&GpuTextureDescriptor {
-                label: Some("momobako thumbnail"),
-                width: pending.width,
-                height: pending.height,
-                format: GpuTextureFormat::RGBA8_UNORM_SRGB,
-                usage: GpuTextureUsages::SAMPLED | GpuTextureUsages::COPY_DST,
-            }) else {
-                eprintln!("Nana 缩略图纹理创建失败：{}x{}", pending.width, pending.height);
-                continue;
-            };
-            if let Err(error) = context.gpu().write_texture(
-                &texture,
-                GpuTextureRegion::full(pending.width, pending.height),
-                &pending.rgba,
-                pending.width.saturating_mul(4),
-            ) {
-                eprintln!("Nana 缩略图纹理上传失败：{error}");
-                continue;
-            }
-            self.thumbnail_gpu.retain(|item| item.slot != pending.slot);
-            self.thumbnail_gpu.push(ThumbnailGpu {
-                slot: pending.slot,
-                texture,
-                width: pending.width,
-                height: pending.height,
-            });
-        }
-        if self.thumbnail_gpu.len() > 240 {
-            let extra = self.thumbnail_gpu.len() - 240;
-            self.thumbnail_gpu.drain(0..extra);
-        }
-        for thumb in &self.thumbnail_gpu {
-            window.textures.register(
-                thumb.slot.clone(),
-                HostTexture::new(1, 1, &thumb.texture),
-                thumb.width,
-                thumb.height,
-                HostTextureAlphaMode::Premultiplied,
-            );
         }
     }
 }
