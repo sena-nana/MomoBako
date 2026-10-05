@@ -7,7 +7,7 @@ use super::support::{
     absolute_drag_paths, can_drag_entries, decide_close, filter_external_import_paths, internal_drag_distance,
     join_repository_path, normalize_filesystem_path, normalize_move_paths, normalize_workspace_path, resolve_drop_target,
     should_delegate_to_external_drag, workspace_parent_path, CloseDecision, DIALOG_EXPORT_ID, DIALOG_PLUGIN_ID,
-    DIALOG_RELOCATE_ID, EXTERNAL_DRAG_SWITCH_DISTANCE,
+    DIALOG_ATTACH_ID, DIALOG_RELOCATE_ID, EXTERNAL_DRAG_SWITCH_DISTANCE,
 };
 use super::{begin_relocate_dialog, close_prompt, HostDragPhase, InputMessage, InternalSession};
 use nana_ui::FileDialogKind;
@@ -632,5 +632,38 @@ fn relocate_folder_dialog_queues_pick_folder_and_submits_only_a_chosen_path() {
     assert!(matches!(
         chosen.workspace.take_effects().as_slice(),
         [WorkspaceEffect::RelocateRepository { repo_id, path }] if repo_id == "repo" && path == "D:/library"
+    ));
+}
+
+#[test]
+fn attach_folder_dialog_submits_a_chosen_path_and_ignores_cancel() {
+    let mut model = ShellViewModel::default();
+    model.reduce(ShellMessage::Sidebar(super::super::SidebarMessage::ShowRepositoryAddMenu));
+    let commands = model.input.take_platform_commands(nana_ui_platform::WindowId(1), false);
+    assert!(matches!(
+        commands.as_slice(),
+        [nana_ui_platform::host::WindowCommand::OpenFileDialog { request, .. }]
+            if request.id == DIALOG_ATTACH_ID
+                && request.kind == FileDialogKind::PickFolder
+                && request.title.as_deref() == Some("添加资源库")
+    ));
+
+    send(&mut model, InputMessage::FileDialogCompleted { request_id: DIALOG_ATTACH_ID, paths: Vec::new(), failed: None });
+    assert!(model.sidebar.take_effects().is_empty());
+
+    send(
+        &mut model,
+        InputMessage::FileDialogCompleted { request_id: DIALOG_ATTACH_ID, paths: vec!["D:/library".into()], failed: Some("Busy".into()) },
+    );
+    assert_eq!(model.sidebar.popover_error, "文件夹选择失败：Busy");
+    assert!(model.sidebar.take_effects().is_empty());
+
+    send(
+        &mut model,
+        InputMessage::FileDialogCompleted { request_id: DIALOG_ATTACH_ID, paths: vec!["D:/library".into()], failed: None },
+    );
+    assert!(matches!(
+        model.sidebar.take_effects().as_slice(),
+        [SidebarEffect::AttachRepository { path }] if path == "D:/library"
     ));
 }

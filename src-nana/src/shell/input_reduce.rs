@@ -8,7 +8,7 @@ use crate::shell::admin::AdminMessage;
 use super::support::{
     absolute_drag_paths, can_drag_entries, dropped_source_paths, filter_external_import_paths, internal_drag_distance,
     normalize_move_paths, resolve_drop_target, should_delegate_to_external_drag, DIALOG_EXPORT_ID, DIALOG_PLUGIN_ID,
-    DIALOG_RELOCATE_ID, EXTERNAL_DRAG_SWITCH_DISTANCE,
+    DIALOG_ATTACH_ID, DIALOG_RELOCATE_ID, EXTERNAL_DRAG_SWITCH_DISTANCE,
 };
 use super::{HostDragPhase, InputMessage, InputState, InternalSession};
 use crate::shell::{ShellMessage, ShellViewModel, WindowAction, WorkspacePanel};
@@ -513,6 +513,8 @@ fn complete_dialog(model: &mut ShellViewModel, request_id: u64, paths: &[String]
             model.admin.action_error = format!("插件包选择失败：{error}");
         } else if request_id == DIALOG_RELOCATE_ID {
             model.workspace.missing_error = format!("文件夹选择失败：{error}");
+        } else if request_id == DIALOG_ATTACH_ID {
+            model.sidebar.popover_error = format!("文件夹选择失败：{error}");
         }
         return;
     }
@@ -535,6 +537,17 @@ fn complete_dialog(model: &mut ShellViewModel, request_id: u64, paths: &[String]
         };
         model.workspace.set_path_draft(path);
         model.workspace.submit_missing_path();
+        return;
+    }
+    if request_id == DIALOG_ATTACH_ID {
+        let Some(path) = path else {
+            eprintln!("Nana 取消添加资源库文件夹选择");
+            return;
+        };
+        model.sidebar.set_attach_path(path);
+        if !model.sidebar.submit_attach() {
+            eprintln!("Nana 添加资源库文件夹没有提交");
+        }
         return;
     }
     eprintln!("Nana 忽略未知的文件对话框：{request_id}");

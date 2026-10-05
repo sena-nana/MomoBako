@@ -5,7 +5,7 @@ use std::sync::Arc;
 use nana_ui::icons_tabler::{ARCHIVE, CLOCK, CLIPBOARD_LIST, FOLDERS, LOGS, PLUS, PUZZLE, REFRESH, SETTINGS, TAG, TRASH};
 use nana_ui::runtime::view::{button, segmented_option, text, widget, AnyView, IntoView};
 use nana_ui::runtime::{
-    sidebar_section_tool_button, Activate, AlignSpec, Dialog, Divider, FormField, Icon, IconGlyph, LengthSpec,
+    sidebar_section_tool_button, Activate, AlignSpec, Button, Dialog, Divider, FormField, Icon, IconGlyph, LengthSpec,
     SegmentedControl, SegmentedOptionChosen, SemanticColorRole, SidebarFooter, SidebarFooterButton, SidebarFrame,
     SidebarRow, SidebarRowState, SidebarSection, Stack, Text, TextChanged, TextInput, TreeNode,
     TreeView, TreeViewEvent, ValidationIntent, ValidationMessage, ViewContext,
@@ -119,7 +119,7 @@ pub fn sidebar_footer(model: &ShellViewModel) -> impl IntoView + use<'_> {
     ))
 }
 
-/// 仓库切换和附加本地文件夹。系统文件夹对话框尚未接通，路径在弹层里提交。
+/// 仓库切换和附加本地文件夹。添加时先打开系统文件夹对话框，路径框留作手填。
 pub fn repository_popover(model: &ShellViewModel) -> Option<impl IntoView + use<'_>> {
     if model.sidebar.popover == PopoverMode::Closed {
         return None;
@@ -148,7 +148,7 @@ pub fn repository_popover(model: &ShellViewModel) -> Option<impl IntoView + use<
         let path = model.sidebar.attach_path.clone();
         widget(Stack::column(8.0)).children((
             text("添加资源库").key("add-repository-title"),
-            text("系统文件夹对话框尚未接通，可在这里填写本地文件夹。").key("add-repository-hint"),
+            text("选择系统文件夹，也可以在这里填写路径。").key("add-repository-hint"),
             widget(TextInput::new(path).label("资源库文件夹")).on_cx(|_, event: &TextChanged, cx| {
                 cx.dispatch_program(sidebar_message(SidebarMessage::RepositoryAttachPathChanged(event.value.to_string())));
             }),
@@ -330,7 +330,7 @@ fn playlist_group(count: usize, expanded: bool, tools: AnyView, body: AnyView) -
                 widget(mark).key("playlist-toggle").on_cx(move |_, _: &Activate, cx| {
                     cx.dispatch_program(sidebar_message(SidebarMessage::TogglePlaylists));
                 }),
-                widget(Text::new("播放集").color(SemanticColorRole::Faint).font_size(11.0).font_weight(700)),
+                playlist_title(),
                 widget(Text::new(count.to_string()).color(SemanticColorRole::Muted).font_size(11.0).font_weight(700)),
             )),
             widget(Stack::spacer()),
@@ -338,6 +338,22 @@ fn playlist_group(count: usize, expanded: bool, tools: AnyView, body: AnyView) -
         )),
         body,
     )).into_any()
+}
+
+/// 「播放集」本身也能折叠。零内边距的文字按钮，避免再占一条工具列。
+fn playlist_title() -> AnyView {
+    let mut layout = nana_ui_core::LayoutStyle::default();
+    layout.font_size = Some(11.0);
+    layout.font_weight = Some(700);
+    layout.width = Some(LengthSpec::Shrink);
+    layout.padding_left = Some(LengthSpec::Px(0.0));
+    layout.padding_right = Some(LengthSpec::Px(0.0));
+    widget(Button::new("播放集").kind(nana_ui::ButtonKind::Text).layout(Arc::new(layout)))
+        .key("playlist-title")
+        .on_cx(move |_, _: &Activate, cx| {
+            cx.dispatch_program(sidebar_message(SidebarMessage::TogglePlaylists));
+        })
+        .into_any()
 }
 
 fn section_tool(

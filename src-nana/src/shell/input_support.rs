@@ -12,6 +12,8 @@ pub const DIALOG_EXPORT_ID: u64 = 1;
 pub const DIALOG_PLUGIN_ID: u64 = 2;
 /// 缺失资源库重定向的文件夹对话框。
 pub const DIALOG_RELOCATE_ID: u64 = 3;
+/// 添加资源库的文件夹对话框。
+pub const DIALOG_ATTACH_ID: u64 = 4;
 
 /// 关闭按钮在三种设置下的决定。脏编辑只拦截真正退出。
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -202,4 +204,9 @@ pub fn open_plugin_request() -> FileDialogRequest {
 /// 选择一个文件夹来重定向缺失资源库。只构造请求，不打开系统对话框。
 pub fn pick_folder_request() -> FileDialogRequest {
     FileDialogRequest::new(DIALOG_RELOCATE_ID, FileDialogKind::PickFolder).title("重定向资源库位置")
+}
+
+/// 选择一个本地文件夹来添加资源库。只构造请求，不打开系统对话框。
+pub fn attach_folder_request() -> FileDialogRequest {
+    FileDialogRequest::new(DIALOG_ATTACH_ID, FileDialogKind::PickFolder).title("添加资源库")
 }
