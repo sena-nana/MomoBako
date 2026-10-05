@@ -512,6 +512,10 @@ pub fn mount_shell(
                     body.push(admin);
                 }
                 if is_playlists {
+                    if view_model.playlist_entries.is_empty() && view_model.playlist_item_entries.is_empty() {
+                        body.push(text("播放集还是空的").key("playlist-empty-title").into_any());
+                        body.push(text("在文件浏览区右键文件，使用“加入播放列表”把内容加入这里。").key("playlist-empty-detail").into_any());
+                    }
                     body.push(playlist_actions.into_any());
                     if let Some(editor) = playlist_editor {
                         body.push(editor.into_any());
