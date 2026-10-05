@@ -61,12 +61,14 @@ fn settings_rows(model: &ShellViewModel) -> Vec<AnyView> {
         }));
     }
     rows.push(text(format!("圆角：{} · {}px", corner_label(&model.admin.corner_style), model.admin.corner_radius)).key("admin-corner").into_any());
-    rows.push(button("平滑").key("admin-corner-smooth").on_cx(|_, _: &Activate, cx| {
-        cx.dispatch_program(ShellMessage::Admin(AdminMessage::SetCornerStyle("smooth".into())));
-    }).into_any());
-    rows.push(button("普通").key("admin-corner-round").on_cx(|_, _: &Activate, cx| {
-        cx.dispatch_program(ShellMessage::Admin(AdminMessage::SetCornerStyle("round".into())));
-    }).into_any());
+    rows.push(widget(Stack::row(8.0)).children((
+        button("平滑").key("admin-corner-smooth").on_cx(|_, _: &Activate, cx| {
+            cx.dispatch_program(ShellMessage::Admin(AdminMessage::SetCornerStyle("smooth".into())));
+        }),
+        button("普通").key("admin-corner-round").on_cx(|_, _: &Activate, cx| {
+            cx.dispatch_program(ShellMessage::Admin(AdminMessage::SetCornerStyle("round".into())));
+        }),
+    )).into_any());
     let radius = model.admin.corner_radius.to_string();
     rows.push(widget(TextInput::new(radius).label("圆角半径")).on_cx(|_, event: &TextChanged, cx| {
         cx.dispatch_program(ShellMessage::Admin(AdminMessage::SetCornerRadius(event.value.to_string())));
@@ -80,12 +82,14 @@ fn settings_rows(model: &ShellViewModel) -> Vec<AnyView> {
     let base_url = model.admin.external.as_ref().map(|status| status.base_url.clone()).unwrap_or_default();
     let token_value = model.admin.external.as_ref().map(|status| status.token.clone()).unwrap_or_default();
     let json = external_json(model);
-    rows.push(copy_button("复制 Base URL", "Base URL", base_url, "admin-copy-url"));
-    rows.push(copy_button("复制 Token", "Token", token_value, "admin-copy-token"));
-    rows.push(copy_button("复制 JSON", "连接 JSON", json, "admin-copy-json"));
-    rows.push(button("导出 JSON").key("admin-export-json").on_cx(|_, _: &Activate, cx| {
-        cx.dispatch_program(ShellMessage::Admin(AdminMessage::ExportExternal));
-    }).into_any());
+    rows.push(widget(Stack::row(8.0)).children((
+        copy_button("复制 Base URL", "Base URL", base_url, "admin-copy-url"),
+        copy_button("复制 Token", "Token", token_value, "admin-copy-token"),
+        copy_button("复制 JSON", "连接 JSON", json, "admin-copy-json"),
+        button("导出 JSON").key("admin-export-json").on_cx(|_, _: &Activate, cx| {
+            cx.dispatch_program(ShellMessage::Admin(AdminMessage::ExportExternal));
+        }),
+    )).into_any());
     if !model.admin.external_error.is_empty() {
         rows.push(text(model.admin.external_error.clone()).key("admin-external-error").into_any());
     } else if !model.admin.external_message.is_empty() {
@@ -184,16 +188,18 @@ fn log_rows(model: &ShellViewModel) -> Vec<AnyView> {
         text(format!("筛选 {}", support::active_filter_count(&model.admin.log_levels, &model.admin.log_kinds, &model.admin.log_plugin_id, &model.admin.log_repo_id, &model.admin.log_search))).key("admin-log-filters").into_any(),
         text(if model.admin.log_paused { "日志滚动已暂停" } else if model.admin.log_would_scroll { "日志将滚到最新" } else { "日志停在当前位置" }).key("admin-log-scroll").into_any(),
     ];
-    for value in ["debug", "info", "warn", "error"] {
-        rows.push(button(support::level_label(value)).key(format!("admin-log-level-{value}")).on_cx(move |_, _: &Activate, cx| {
+    let levels = ["debug", "info", "warn", "error"].into_iter().map(|value| {
+        button(support::level_label(value)).key(format!("admin-log-level-{value}")).on_cx(move |_, _: &Activate, cx| {
             cx.dispatch_program(ShellMessage::Admin(AdminMessage::ToggleLogLevel(value.into())));
-        }).into_any());
-    }
-    for value in ["host", "frontend-host", "frontend-plugin", "backend-plugin", "helper"] {
-        rows.push(button(support::source_kind_label(value)).key(format!("admin-log-kind-{value}")).on_cx(move |_, _: &Activate, cx| {
+        }).into_any()
+    }).collect::<Vec<_>>();
+    rows.push(widget(Stack::row(8.0)).children(levels).key("admin-log-levels").into_any());
+    let kinds = ["host", "frontend-host", "frontend-plugin", "backend-plugin", "helper"].into_iter().map(|value| {
+        button(support::source_kind_label(value)).key(format!("admin-log-kind-{value}")).on_cx(move |_, _: &Activate, cx| {
             cx.dispatch_program(ShellMessage::Admin(AdminMessage::ToggleLogKind(value.into())));
-        }).into_any());
-    }
+        }).into_any()
+    }).collect::<Vec<_>>();
+    rows.push(widget(Stack::row(8.0)).children(kinds).key("admin-log-kinds").into_any());
     let paused = model.admin.log_paused;
     rows.push(button(if paused { "继续追踪" } else { "暂停追踪" }).key("admin-log-pause").on_cx(move |_, _: &Activate, cx| {
         cx.dispatch_program(ShellMessage::Admin(AdminMessage::SetLogPaused(!paused)));
@@ -231,9 +237,13 @@ fn plugin_rows(model: &ShellViewModel) -> Vec<AnyView> {
     rows.push(widget(TextInput::new(keyword).label("筛选插件")).on_cx(|_, event: &TextChanged, cx| {
         cx.dispatch_program(ShellMessage::Admin(AdminMessage::SetKeyword(event.value.to_string())));
     }).into_any());
-    rows.push(button("安装插件包").key("admin-plugin-install").on_cx(|_, _: &Activate, cx| {
-        cx.dispatch_program(ShellMessage::Admin(AdminMessage::ChooseArchive));
-    }).into_any());
+    rows.push(
+        widget(Stack::row(8.0))
+            .children((button("安装插件包").key("admin-plugin-install").on_cx(|_, _: &Activate, cx| {
+                cx.dispatch_program(ShellMessage::Admin(AdminMessage::ChooseArchive));
+            }),))
+            .into_any(),
+    );
     for (category, ids) in groups {
         rows.push(text(format!("{} {}", support::category_label(&category), ids.len())).key(format!("admin-plugin-group-{category}")).into_any());
         for plugin_id in ids {
@@ -290,12 +300,14 @@ fn plugin_rows(model: &ShellViewModel) -> Vec<AnyView> {
 
 fn task_rows(model: &ShellViewModel) -> Vec<AnyView> {
     let rows_data = model.task_rows();
-    let mut rows = vec![
-        text(format!("任务 {}", rows_data.len())).key("admin-task-count").into_any(),
-        button("任务").key("admin-task-toggle").on_cx(|_, _: &Activate, cx| {
-            cx.dispatch_program(ShellMessage::Admin(AdminMessage::ToggleTaskPopover));
-        }).into_any(),
-    ];
+    let mut rows = vec![widget(Stack::bar(8.0))
+        .children((
+            text(format!("任务 {}", rows_data.len())).key("admin-task-count"),
+            button("任务").key("admin-task-toggle").on_cx(|_, _: &Activate, cx| {
+                cx.dispatch_program(ShellMessage::Admin(AdminMessage::ToggleTaskPopover));
+            }),
+        ))
+        .into_any()];
     if model.admin.popover_open {
         rows.push(button("关闭任务").key("admin-task-close").on_cx(|_, _: &Activate, cx| {
             cx.dispatch_program(ShellMessage::Admin(AdminMessage::CloseTaskPopover));
