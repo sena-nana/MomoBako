@@ -20,6 +20,7 @@ pub fn dispatch_sidebar_effects(app: &mut MomoBakoApplication, context: &Runtime
             SidebarEffect::QuerySmartFolder { repo_id, smart_folder_id } => {
                 dispatch_smart_query(app, context, repo_id, smart_folder_id);
             }
+            SidebarEffect::CreateSmartFolder { repo_id } => dispatch_create_smart(app, context, repo_id),
             SidebarEffect::LoadPlaylists { repo_id } => dispatch_playlists(app, context, repo_id),
             SidebarEffect::LoadPlaylistPlayers { repo_id } => dispatch_players(app, context, repo_id),
             SidebarEffect::LoadPlaylistDetail { repo_id, playlist_id } => {
@@ -81,6 +82,33 @@ fn dispatch_smart_folders(app: &mut MomoBakoApplication, context: &RuntimeProgra
     })) {
         eprintln!("Nana 智能文件夹任务提交失败：{error}");
         app.shell.reduce(sidebar_message(SidebarMessage::SidebarSmartFoldersLoaded {
+            repo_id,
+            result: Err(format!("智能文件夹任务提交失败：{error}")),
+        }));
+    }
+}
+
+fn dispatch_create_smart(app: &mut MomoBakoApplication, context: &RuntimeProgramContext<ShellMessage>, repo_id: String) {
+    let Some(services) = services(app) else {
+        eprintln!("Nana 新建智能文件夹需要领域服务，当前服务未启动");
+        app.shell.reduce(sidebar_message(SidebarMessage::SmartFolderSaved {
+            repo_id,
+            result: Err("领域服务未启动".into()),
+        }));
+        return;
+    };
+    let request = app.shell.sidebar.smart_create_request(&repo_id);
+    let interaction = services.repository_interaction.clone();
+    let executor = services.executor.clone();
+    let task_repo = repo_id.clone();
+    if let Err(error) = context.run_task(Task::new(async move {
+        let result = executor.block_on(interaction.create_smart_folder(request)).map(|response| {
+            response.smart_folders.iter().map(SidebarSmartFolder::from_tree_node).collect()
+        });
+        sidebar_message(SidebarMessage::SmartFolderSaved { repo_id: task_repo, result })
+    })) {
+        eprintln!("Nana 新建智能文件夹任务提交失败：{error}");
+        app.shell.reduce(sidebar_message(SidebarMessage::SmartFolderSaved {
             repo_id,
             result: Err(format!("智能文件夹任务提交失败：{error}")),
         }));

@@ -671,6 +671,8 @@ pub fn mount_shell(
                 shell = shell.overlay(dialog);
             } else if let Some(dialog) = playlist_creator_dialog(&view_model) {
                 shell = shell.overlay(dialog);
+            } else if let Some(dialog) = super::sidebar_view::smart_folder_dialog(&view_model) {
+                shell = shell.overlay(dialog);
             } else if let Some(popover) = super::sidebar_view::repository_popover(&view_model) {
                 shell = shell.overlay(popover);
             } else if let Some(popover) = super::admin::task_popover(&view_model) {

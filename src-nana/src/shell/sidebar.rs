@@ -89,6 +89,11 @@ pub enum PopoverMode {
     AddMenu,
 }
 
+#[path = "sidebar_smart.rs"]
+mod smart;
+
+pub use smart::{SmartFolderDraft, SmartFolderField};
+
 /// 侧栏交互。壳层只保留一个 `ShellMessage::Sidebar`，避免主归约重复列出这些分支。
 pub enum SidebarMessage {
     SelectShortcut(ShortcutId),
@@ -98,6 +103,11 @@ pub enum SidebarMessage {
     RefreshFolderTree,
     ToggleSmartFolder(String),
     OpenSmartFolder(String),
+    OpenSmartFolderDialog,
+    CloseSmartFolderDialog,
+    SetSmartFolderField { field: SmartFolderField, value: String },
+    SubmitSmartFolder,
+    SmartFolderSaved { repo_id: String, result: Result<Vec<SidebarSmartFolder>, String> },
     TogglePlaylists,
     OpenSidebarPlaylist(String),
     OpenRepositorySwitcher,
@@ -121,6 +131,7 @@ pub enum SidebarEffect {
     LoadTree { repo_id: String },
     LoadSmartFolders { repo_id: String },
     QuerySmartFolder { repo_id: String, smart_folder_id: String },
+    CreateSmartFolder { repo_id: String },
     LoadPlaylists { repo_id: String },
     LoadPlaylistPlayers { repo_id: String },
     LoadPlaylistDetail { repo_id: String, playlist_id: String },
@@ -143,6 +154,7 @@ pub struct SidebarState {
     pub active_smart_folder_id: Option<String>,
     pub smart_loading: bool,
     pub smart_error: String,
+    pub smart_draft: SmartFolderDraft,
     pub smart_result_count: Option<usize>,
     pub playlists: Vec<SidebarPlaylist>,
     pub playlists_expanded: bool,
@@ -174,6 +186,7 @@ impl Default for SidebarState {
             active_smart_folder_id: None,
             smart_loading: false,
             smart_error: String::new(),
+            smart_draft: SmartFolderDraft::default(),
             smart_result_count: None,
             playlists: Vec::new(),
             playlists_expanded: false,
@@ -605,6 +618,7 @@ impl SidebarState {
         self.active_smart_folder_id = None;
         self.smart_loading = false;
         self.smart_error.clear();
+        self.smart_draft = SmartFolderDraft::default();
         self.smart_result_count = None;
         self.playlists.clear();
         self.active_playlist_id = None;
@@ -776,6 +790,19 @@ pub(super) fn reduce_message(model: &mut super::ShellViewModel, message: super::
         }
         SidebarMessage::ToggleSmartFolder(id) => model.sidebar.toggle_smart_folder(&id),
         SidebarMessage::OpenSmartFolder(id) => model.apply_smart_folder(id),
+        SidebarMessage::OpenSmartFolderDialog => {
+            if model.navigation_locked() || model.workspace.active_repo_id.is_none() {
+                eprintln!("Nana 当前不能新建智能文件夹");
+            } else {
+                model.sidebar.open_smart_dialog();
+            }
+        }
+        SidebarMessage::CloseSmartFolderDialog => model.sidebar.close_smart_dialog(),
+        SidebarMessage::SetSmartFolderField { field, value } => model.sidebar.set_smart_field(field, value),
+        SidebarMessage::SubmitSmartFolder => {
+            model.sidebar.submit_smart_folder(model.workspace.active_repo_id.as_deref());
+        }
+        SidebarMessage::SmartFolderSaved { repo_id, result } => model.sidebar.note_smart_saved(&repo_id, result),
         SidebarMessage::TogglePlaylists => model.sidebar.toggle_playlists(),
         SidebarMessage::OpenSidebarPlaylist(id) => model.apply_playlist(id),
         SidebarMessage::OpenRepositorySwitcher => model.sidebar.open_switcher(),

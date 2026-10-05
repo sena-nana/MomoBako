@@ -222,3 +222,90 @@ fn binding_same_repository_does_not_request_the_tree_again() {
     assert!(sidebar.folders.is_empty());
     assert!(sidebar.quick_access.is_empty());
 }
+
+#[test]
+fn smart_folder_create_requires_a_name_and_replaces_the_tree() {
+    let mut model = super::super::ShellViewModel::default();
+    model.reduce(super::super::ShellMessage::Sidebar(SidebarMessage::OpenSmartFolderDialog));
+    assert!(!model.sidebar.smart_draft.open);
+    model.reduce(super::super::ShellMessage::Sidebar(SidebarMessage::SubmitSmartFolder));
+    assert_eq!(model.sidebar.smart_draft.error, "先选择一个资源库。");
+    assert!(model.sidebar.effects.is_empty());
+
+    model.workspace.active_repo_id = Some("repo".into());
+    model.sidebar.bind_repository(Some("repo"), false);
+    let _ = model.sidebar.take_effects();
+    model.reduce(super::super::ShellMessage::Sidebar(SidebarMessage::OpenSmartFolderDialog));
+    assert!(model.sidebar.smart_draft.open);
+    model.reduce(super::super::ShellMessage::Sidebar(SidebarMessage::SubmitSmartFolder));
+    assert_eq!(model.sidebar.smart_draft.error, "名称不能为空");
+    assert!(model.sidebar.effects.is_empty());
+
+    set_field(&mut model, SmartFolderField::Name, " 高评分 ");
+    set_field(&mut model, SmartFolderField::Parent, "parent");
+    set_field(&mut model, SmartFolderField::Formats, "psd，png");
+    set_field(&mut model, SmartFolderField::Match, "or");
+    model.reduce(super::super::ShellMessage::Sidebar(SidebarMessage::SubmitSmartFolder));
+    assert!(model.sidebar.smart_draft.busy);
+    assert!(model.sidebar.effects.iter().any(|effect| matches!(
+        effect,
+        SidebarEffect::CreateSmartFolder { repo_id } if repo_id == "repo"
+    )));
+    let request = model.sidebar.smart_create_request("repo");
+    assert_eq!(request.name, "高评分");
+    assert_eq!(request.parent_id.as_deref(), Some("parent"));
+    assert_eq!(request.smart_folder_id, None);
+    assert_eq!(request.filter.formats.unwrap(), ["psd".to_string(), "png".to_string()]);
+    assert_eq!(request.filter.match_mode.as_deref(), Some("or"));
+
+    set_field(&mut model, SmartFolderField::Name, "忽略");
+    assert_eq!(model.sidebar.smart_draft.name, " 高评分 ");
+
+    model.reduce(super::super::ShellMessage::Sidebar(SidebarMessage::SmartFolderSaved {
+        repo_id: "other".into(),
+        result: Ok(Vec::new()),
+    }));
+    assert_eq!(model.sidebar.smart_draft.error, "智能文件夹结果已过期");
+    assert!(model.sidebar.smart_draft.open);
+    assert!(model.sidebar.smart_folders.is_empty());
+
+    model.reduce(super::super::ShellMessage::Sidebar(SidebarMessage::SubmitSmartFolder));
+    model.reduce(super::super::ShellMessage::Sidebar(SidebarMessage::SmartFolderSaved {
+        repo_id: "repo".into(),
+        result: Err("写入失败".into()),
+    }));
+    assert!(model.sidebar.smart_draft.open);
+    assert!(!model.sidebar.smart_draft.busy);
+    assert_eq!(model.sidebar.smart_draft.error, "写入失败");
+
+    model.reduce(super::super::ShellMessage::Sidebar(SidebarMessage::SubmitSmartFolder));
+    model.reduce(super::super::ShellMessage::Sidebar(SidebarMessage::SmartFolderSaved {
+        repo_id: "repo".into(),
+        result: Ok(vec![SidebarSmartFolder {
+            id: "parent".into(),
+            parent_id: None,
+            name: "父级".into(),
+            children: vec![SidebarSmartFolder {
+                id: "child".into(),
+                parent_id: Some("parent".into()),
+                name: "高评分".into(),
+                children: Vec::new(),
+            }],
+        }]),
+    }));
+    assert!(!model.sidebar.smart_draft.open);
+    assert_eq!(model.sidebar.smart_folders[0].children[0].name, "高评分");
+    assert!(model.sidebar.expanded_smart_folders.iter().any(|id| id == "parent"));
+
+    model.reduce(super::super::ShellMessage::Sidebar(SidebarMessage::OpenSmartFolderDialog));
+    model.workspace.active_repo_id = Some("next".into());
+    model.sidebar.bind_repository(Some("next"), false);
+    assert!(!model.sidebar.smart_draft.open);
+}
+
+fn set_field(model: &mut super::super::ShellViewModel, field: SmartFolderField, value: &str) {
+    model.reduce(super::super::ShellMessage::Sidebar(SidebarMessage::SetSmartFolderField {
+        field,
+        value: value.into(),
+    }));
+}
