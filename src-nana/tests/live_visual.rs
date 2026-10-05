@@ -234,6 +234,77 @@ fn assert_title_bar(nodes: &[AccessibilityDumpNode]) {
             "标题栏仍是占位文案 {banned}"
         );
     }
+    let title = nodes
+        .iter()
+        .find(|node| node.label.as_deref() == Some("MomoBako") && node.bounds.width > 400.0)
+        .expect("标题栏");
+    let search = nodes
+        .iter()
+        .find(|node| node.role == "text-input" && node.label.as_deref() == Some("全局搜索"))
+        .expect("全局搜索");
+    let filter = nodes
+        .iter()
+        .find(|node| node.role == "button" && node.label.as_deref() == Some("显示筛选栏"))
+        .expect("显示筛选栏");
+    assert!(
+        filter.bounds.width > 24.0 && filter.bounds.height > 8.0,
+        "筛选开关布局盒为空：{:?}",
+        filter.bounds
+    );
+    assert!(
+        search.bounds.width > 24.0 && search.bounds.height > 8.0,
+        "搜索框布局盒为空：{:?}",
+        search.bounds
+    );
+    let center = center_slot(nodes, search, title);
+    assert!(
+        contains(&title.bounds, &filter.bounds),
+        "筛选开关不在标题栏内 {:?} / {:?}",
+        filter.bounds,
+        title.bounds
+    );
+    assert!(
+        contains(&center.bounds, &filter.bounds),
+        "筛选开关不在标题栏中间槽 {:?} / {:?}",
+        filter.bounds,
+        center.bounds
+    );
+    assert!(
+        !intersects(&filter.bounds, &search.bounds),
+        "筛选开关与搜索框相交 {:?} / {:?}",
+        filter.bounds,
+        search.bounds
+    );
+}
+
+/// 搜索框往上找到比整条标题栏窄的中间槽，那是会裁掉溢出内容的盒子。
+fn center_slot<'a>(
+    nodes: &'a [AccessibilityDumpNode],
+    search: &AccessibilityDumpNode,
+    title: &AccessibilityDumpNode,
+) -> &'a AccessibilityDumpNode {
+    let mut current = search.parent;
+    let mut slot = None;
+    while let Some(id) = current {
+        let Some(node) = nodes.iter().find(|node| node.id == id) else {
+            break;
+        };
+        if node.id == title.id {
+            break;
+        }
+        if node.bounds.width > 80.0 && node.bounds.width + 8.0 < title.bounds.width {
+            slot = Some(node);
+        }
+        current = node.parent;
+    }
+    slot.expect("标题栏中间槽")
+}
+
+fn contains(outer: &BoundsDump, inner: &BoundsDump) -> bool {
+    inner.x + 0.5 >= outer.x
+        && inner.y + 0.5 >= outer.y
+        && inner.x + inner.width <= outer.x + outer.width + 0.5
+        && inner.y + inner.height <= outer.y + outer.height + 0.5
 }
 
 fn assert_file_layout(session: &RuntimeAgentSession, nodes: &[AccessibilityDumpNode]) {
