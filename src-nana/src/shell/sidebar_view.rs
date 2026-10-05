@@ -5,10 +5,10 @@ use std::sync::Arc;
 use nana_ui::icons_tabler::{ARCHIVE, CLOCK, CLIPBOARD_LIST, FOLDERS, LOGS, PLUS, PUZZLE, REFRESH, SETTINGS, TAG, TRASH};
 use nana_ui::runtime::view::{button, segmented_option, text, widget, AnyView, IntoView};
 use nana_ui::runtime::{
-    sidebar_section_tool_button, Activate, Dialog, Divider, FormField, Icon, IconGlyph, LengthSpec, SegmentedControl,
-    SegmentedOptionChosen, SemanticColorRole, SidebarFooter, SidebarFooterButton, SidebarFrame, SidebarRow,
-    SidebarRowState, SidebarSection, Stack, Text, TextChanged, TextInput, ToggleChanged, TreeNode, TreeView,
-    TreeViewEvent, ValidationIntent, ValidationMessage, ViewContext,
+    sidebar_section_tool_button, Activate, AlignSpec, Dialog, Divider, FormField, Icon, IconGlyph, LengthSpec,
+    SegmentedControl, SegmentedOptionChosen, SemanticColorRole, SidebarFooter, SidebarFooterButton, SidebarFrame,
+    SidebarRow, SidebarRowState, SidebarSection, Stack, Text, TextChanged, TextInput, TreeNode,
+    TreeView, TreeViewEvent, ValidationIntent, ValidationMessage, ViewContext,
 };
 
 use super::files::{FileDialog, FilesMessage};
@@ -317,17 +317,48 @@ fn group(title: &'static str, count: Option<usize>, tools: Option<AnyView>, body
     section.children(body).into_any()
 }
 
-/// 播放集可以收起。标题点击交给组件，结果再同步到侧栏状态。
+/// 播放集标题。Vue 把数量放在「播放集」右边 6px，加号留在分组工具列。
+/// `SidebarSection` 的计数槽画在工具列里，右边线和加号对不齐，所以这里自己排。
 fn playlist_group(count: usize, expanded: bool, tools: AnyView, body: AnyView) -> AnyView {
-    widget(SidebarSection::new("播放集").count(count).collapsible(true).expanded(expanded))
-        .tools(tools)
-        .on_cx(move |_, event: &ToggleChanged, cx| {
-            if event.checked != expanded {
-                cx.dispatch_program(sidebar_message(SidebarMessage::TogglePlaylists));
-            }
-        })
-        .children((body,))
+    widget(Stack::column(2.0))
+        .children((playlist_header(count, expanded, tools), body))
         .into_any()
+}
+
+fn playlist_header(count: usize, expanded: bool, tools: AnyView) -> AnyView {
+    let chevron = if expanded { Icon::ChevronDown } else { Icon::ChevronRight };
+    let toggle_label = if expanded { "收起播放集" } else { "展开播放集" };
+    widget(Stack::bar(0.0).with_layout(|layout| {
+        layout.align_items = AlignSpec::Center;
+        layout.padding_left = Some(LengthSpec::Px(8.0));
+        layout.padding_right = Some(LengthSpec::Px(8.0));
+        layout.height = Some(LengthSpec::Px(28.0));
+    }))
+    .children((
+        widget(Stack::row(6.0).align(AlignSpec::Center)).children((
+            playlist_disclosure(chevron, toggle_label),
+            widget(Text::new("播放集").color(SemanticColorRole::Faint).font_size(11.0).font_weight(700)),
+            widget(Text::new(count.to_string()).color(SemanticColorRole::Muted).font_size(11.0).font_weight(700)),
+        )),
+        widget(Stack::spacer()),
+        tools,
+    ))
+    .into_any()
+}
+
+/// 12px 折叠标记，不占工具列的 4px 右边距，标题才能和其它分组对齐。
+fn playlist_disclosure(icon: Icon, label: &'static str) -> AnyView {
+    let mut button = sidebar_section_tool_button(icon, label);
+    let layout = Arc::make_mut(&mut button.style.layout);
+    let edge = LengthSpec::Px(12.0);
+    layout.width = Some(edge);
+    layout.height = Some(edge);
+    layout.min_width = Some(edge);
+    layout.min_height = Some(edge);
+    layout.margin_right = Some(LengthSpec::Px(0.0));
+    widget(button).key("playlist-toggle").on_cx(move |_, _: &Activate, cx| {
+        cx.dispatch_program(sidebar_message(SidebarMessage::TogglePlaylists));
+    }).into_any()
 }
 
 fn section_tool(
