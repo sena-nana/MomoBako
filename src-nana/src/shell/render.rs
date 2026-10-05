@@ -7,10 +7,10 @@ use crate::theme_map::{SIDEBAR_MAX_PX, SIDEBAR_MIN_PX};
 use nana_ui::runtime::view::{button, text, widget, AnyView, IntoView};
 use nana_ui::runtime::{
     Activate, AlignSpec, AppShell, FrameworkError, GpuTextureView, JustifySpec, LengthSpec, List, MountedView,
-    Progress, RuntimeDocument, SemanticColorRole, SidebarFrame, SplitPane, Stack, Text, TextChanged,
-    TextHorizontalAlignment, TextInput,
+    Progress, RuntimeDocument, SemanticColorRole, SidebarFrame, Stack, Text, TextChanged,
+    TextHorizontalAlignment, TextInput, Workspace,
 };
-use nana_ui::{SplitAxis, SplitPaneModel};
+use nana_ui::{RegionId, RegionRole, RegionState, WorkspaceLayout, WorkspaceModel};
 
 thread_local! {
     /// 上一次挂上的壳层。再次挂载前先卸掉，避免文档里叠多棵壳。
@@ -647,21 +647,16 @@ pub fn mount_shell(
             let show_sidebar = !view_model.workspace.sidebar_collapsed
                 && (view_model.acceptance_scene || view_model.workspace.startup.status == StartupStatus::Ready);
             let body = if show_sidebar {
-                let split = SplitPaneModel::new(
-                    SplitAxis::Horizontal,
-                    view_model.workspace.sidebar_width,
-                    SIDEBAR_MIN_PX,
-                    SIDEBAR_MAX_PX,
-                );
                 let sidebar = if view_model.acceptance_scene {
-                    widget(SidebarFrame::new()).body(legacy_navigation)
+                    widget(SidebarFrame::new()).body(legacy_navigation).into_any()
                 } else {
                     widget(SidebarFrame::new())
                         .top(super::sidebar_view::sidebar_switcher(&view_model))
                         .body(super::sidebar_view::sidebar_sections(&view_model))
                         .footer(super::sidebar_view::sidebar_footer(&view_model))
+                        .into_any()
                 };
-                widget(SplitPane::new(&split)).first(sidebar).second(stage).into_any()
+                workbench(sidebar, stage, view_model.workspace.sidebar_width)
             } else {
                 stage.into_any()
             };
@@ -683,6 +678,26 @@ pub fn mount_shell(
     super::title_bar::bind_window_controls(document)?;
     SHELL_MOUNT.with(|slot| *slot.borrow_mut() = Some(mounted));
     Ok(())
+}
+
+/// 资源区加主区。分割是工作台的发丝间隙，主区圆角，不画常驻浅色分割条。
+fn workbench(sidebar: AnyView, stage: AnyView, width: f32) -> AnyView {
+    let layout = WorkspaceLayout::new([
+        RegionState::new(RegionId::Resources, RegionRole::Resources)
+            .size(width)
+            .min_size(SIDEBAR_MIN_PX)
+            .max_size(SIDEBAR_MAX_PX)
+            .collapsible(true)
+            .resizable(true),
+        RegionState::new(RegionId::Primary, RegionRole::Primary)
+            .min_size(320.0)
+            .fill_priority(1),
+    ])
+    .expect("工作台只注册资源区和主区");
+    widget(Workspace::from_model(&WorkspaceModel::with_layout(layout), []))
+        .region(RegionId::Resources, sidebar)
+        .region(RegionId::Primary, stage)
+        .into_any()
 }
 
 /// 24px 圆标。当前步用强调色，完成用成功色，失败用危险色。

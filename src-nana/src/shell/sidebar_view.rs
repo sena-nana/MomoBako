@@ -1,12 +1,13 @@
-//! 侧栏视图。快捷方式和播放集用 `SidebarRow`，目录与智能文件夹用 `TreeView`。
+//! 侧栏视图。分组、行和页脚用 Nana 侧栏组件，目录与智能文件夹用 `TreeView`。
 
 use std::sync::Arc;
 
 use nana_ui::icons_tabler::{ARCHIVE, CLOCK, CLIPBOARD_LIST, FOLDERS, LOGS, PLUS, PUZZLE, REFRESH, SETTINGS, TAG, TRASH};
 use nana_ui::runtime::view::{button, text, widget, AnyView, IntoView};
 use nana_ui::runtime::{
-    Activate, AlignSpec, Icon, IconButton, IconGlyph, JustifySpec, LengthSpec, SemanticColorRole, SidebarRow,
-    SidebarRowState, Stack, Text, TextChanged, TextInput, TreeNode, TreeView, TreeViewEvent, ViewContext,
+    sidebar_section_tool_button, Activate, AlignSpec, Divider, Icon, IconGlyph, JustifySpec, LengthSpec,
+    SemanticColorRole, SidebarFooter, SidebarFooterButton, SidebarRow, SidebarRowState, SidebarSection, Stack, Text,
+    TextChanged, TextInput, ToggleChanged, TreeNode, TreeView, TreeViewEvent, ViewContext,
 };
 
 use super::files::{FileDialog, FilesMessage};
@@ -21,70 +22,71 @@ pub fn sidebar_switcher(model: &ShellViewModel) -> impl IntoView + use<'_> {
         .active_repository()
         .map(|repository| repository.name.clone())
         .unwrap_or_else(|| "无资源库".into());
-    widget(SidebarRow::new(format!("资源库 · {name}"))).on_cx(|_, _: &Activate, cx| {
-        cx.dispatch_program(sidebar_message(SidebarMessage::OpenRepositorySwitcher));
-    })
+    widget(Stack::column(8.0)).children((
+        widget(SidebarRow::new(format!("资源库 · {name}"))).on_cx(|_, _: &Activate, cx| {
+            cx.dispatch_program(sidebar_message(SidebarMessage::OpenRepositorySwitcher));
+        }),
+        widget(Divider::horizontal()),
+    ))
 }
 
-/// 快捷方式、目录树、智能文件夹和播放集。
+/// 快捷方式、目录树、智能文件夹和播放集。边距交给 `SidebarFrame`，行距交给 `SidebarSection`。
 pub fn sidebar_sections(model: &ShellViewModel) -> impl IntoView + use<'_> {
     let locked = model.navigation_locked();
-    let mut rows = Vec::new();
-    rows.push(section_label("快捷方式"));
-    for shortcut in shortcut_rows(model, locked) {
-        rows.push(shortcut);
-    }
+    let mut sections = vec![group("快捷方式", None, None, shortcut_rows(model, locked))];
     if !model.sidebar.quick_access.is_empty() {
-        rows.push(section_label("快捷访问"));
+        let mut rows = Vec::new();
         for shortcut in model.sidebar.quick_access.clone() {
             let id = shortcut.id.clone();
             rows.push(sidebar_row(&shortcut.label, false, locked, move |cx| {
                 cx.dispatch_program(sidebar_message(SidebarMessage::OpenQuickAccess(id.clone())));
             }));
         }
+        sections.push(group("快捷访问", None, None, rows));
     }
     let folder_locked = locked || model.workspace.active_repo_id.is_none() || model.workspace.panel == WorkspacePanel::Trash;
     let refresh_locked = locked || model.workspace.active_repo_id.is_none() || model.sidebar.tree_loading;
     let refresh_label = if model.sidebar.tree_loading { "正在刷新文件夹树" } else { "刷新文件夹树" };
-    rows.push(section_bar(
-        section_label("文件夹"),
-        vec![
-            tree_action(PLUS, "在当前目录新建文件夹", "folder-create", folder_locked, || {
+    let mut folders = vec![folder_body(model, locked).into_any()];
+    if !model.sidebar.tree_error.is_empty() {
+        folders.push(hint(&model.sidebar.tree_error, "folder-tree-error"));
+    }
+    sections.push(group(
+        "文件夹",
+        None,
+        Some(widget(Stack::row(0.0)).children((
+            section_tool(PLUS, "在当前目录新建文件夹", "folder-create", folder_locked, || {
                 ShellMessage::Files(FilesMessage::OpenDialog(FileDialog::CreateDirectory))
             }),
-            tree_action(REFRESH, refresh_label, "refresh-folder-tree", refresh_locked, || {
+            section_tool(REFRESH, refresh_label, "refresh-folder-tree", refresh_locked, || {
                 ShellMessage::Sidebar(SidebarMessage::RefreshFolderTree)
             }),
-        ],
+        )).into_any()),
+        folders,
     ));
-    rows.push(folder_body(model, locked).into_any());
-    if !model.sidebar.tree_error.is_empty() {
-        rows.push(hint(&model.sidebar.tree_error, "folder-tree-error"));
-    }
     let smart_locked = locked || model.workspace.active_repo_id.is_none();
-    rows.push(section_bar(
-        section_label("智能文件夹"),
-        vec![tree_action(PLUS, "新建智能文件夹", "smart-create", smart_locked, || {
-            ShellMessage::Sidebar(SidebarMessage::OpenSmartFolderDialog)
-        })],
-    ));
-    rows.push(smart_body(model, locked).into_any());
+    let mut smart = vec![smart_body(model, locked).into_any()];
     if !model.sidebar.smart_error.is_empty() {
-        rows.push(hint(&model.sidebar.smart_error, "smart-folder-error"));
+        smart.push(hint(&model.sidebar.smart_error, "smart-folder-error"));
     }
+    sections.push(group(
+        "智能文件夹",
+        None,
+        Some(section_tool(PLUS, "新建智能文件夹", "smart-create", smart_locked, || {
+            ShellMessage::Sidebar(SidebarMessage::OpenSmartFolderDialog)
+        })),
+        smart,
+    ));
     let create_locked = locked || model.workspace.active_repo_id.is_none() || model.playlist_players.is_empty();
     let playlist_count = model.sidebar.playlists.len();
-    rows.push(section_bar(
-        widget(Stack::row(6.0).grow(0.0).shrink(1.0)).children((
-            button("播放集")
-                .key("playlist-toggle")
-                .on_cx(|_, _: &Activate, cx| cx.dispatch_program(sidebar_message(SidebarMessage::TogglePlaylists))),
-            hint(&playlist_count.to_string(), "playlist-count"),
-        )).into_any(),
-        vec![tree_action(PLUS, "新建播放集", "playlist-create", create_locked, || ShellMessage::OpenPlaylistDialog)],
+    let playlists_open = model.sidebar.playlists_expanded;
+    sections.push(playlist_group(
+        playlist_count,
+        playlists_open,
+        section_tool(PLUS, "新建播放集", "playlist-create", create_locked, || ShellMessage::OpenPlaylistDialog),
+        playlist_body(model, locked).into_any(),
     ));
-    rows.push(playlist_body(model, locked).into_any());
-    widget(Stack::fill_column(10.0).padding_xy(12.0, 8.0)).children(rows)
+    widget(Stack::fill_column(10.0)).children(sections)
 }
 
 /// 设置、拓展、任务和日志。有运行中的任务时，任务按钮读出数量。
@@ -97,13 +99,13 @@ pub fn sidebar_footer(model: &ShellViewModel) -> impl IntoView + use<'_> {
     } else {
         "任务".into()
     };
-    widget(Stack::row(2.0)).children((
-        footer_icon(SETTINGS, "设置".into(), settings, || ShellMessage::Navigate(ShellPage::Settings)),
-        footer_icon(PUZZLE, "拓展".into(), extensions, || ShellMessage::SetWorkspacePanel(WorkspacePanel::Extensions)),
-        footer_icon(CLIPBOARD_LIST, task_label, model.admin.popover_open, || {
+    widget(SidebarFooter::new()).children((
+        footer_button(SETTINGS, "设置".into(), settings, || ShellMessage::Navigate(ShellPage::Settings)),
+        footer_button(PUZZLE, "拓展".into(), extensions, || ShellMessage::SetWorkspacePanel(WorkspacePanel::Extensions)),
+        footer_button(CLIPBOARD_LIST, task_label, model.admin.popover_open, || {
             ShellMessage::Admin(super::admin::AdminMessage::ToggleTaskPopover)
         }),
-        footer_icon(LOGS, "日志".into(), logs, || ShellMessage::SetWorkspacePanel(WorkspacePanel::Logs)),
+        footer_button(LOGS, "日志".into(), logs, || ShellMessage::SetWorkspacePanel(WorkspacePanel::Logs)),
     ))
 }
 
@@ -286,56 +288,61 @@ fn flatten_smart_folders(folders: &[super::sidebar::SidebarSmartFolder]) -> Vec<
     out
 }
 
-fn section_label(title: &'static str) -> AnyView {
-    widget(Text::new(title).color(SemanticColorRole::Faint).font_size(11.0).font_weight(700)).into_any()
+/// 一个侧栏分组。行与行的间距由 `SidebarSection` 自己的正文槽决定。
+fn group(title: &'static str, count: Option<usize>, tools: Option<AnyView>, body: Vec<AnyView>) -> AnyView {
+    let mut spec = SidebarSection::new(title);
+    // 标题工具要一直能看见。组件默认只在悬停时放进标题槽。
+    spec.header_hovered = tools.is_some();
+    if let Some(count) = count {
+        spec = spec.count(count);
+    }
+    let section = widget(spec);
+    let section = match tools {
+        Some(tools) => section.tools(tools),
+        None => section,
+    };
+    section.children(body).into_any()
 }
 
-fn section_bar(title: AnyView, actions: Vec<AnyView>) -> AnyView {
-    widget(Stack::bar(4.0).align(AlignSpec::Center).min_height(LengthSpec::Px(24.0)))
-        .children((
-            title,
-            widget(Stack::spacer()),
-            widget(Stack::row(2.0).grow(0.0).shrink(0.0)).children(actions),
-        ))
+/// 播放集可以收起。标题点击交给组件，结果再同步到侧栏状态。
+fn playlist_group(count: usize, expanded: bool, tools: AnyView, body: AnyView) -> AnyView {
+    widget(SidebarSection::new("播放集").count(count).collapsible(true).expanded(expanded))
+        .tools(tools)
+        .on_cx(move |_, event: &ToggleChanged, cx| {
+            if event.checked != expanded {
+                cx.dispatch_program(sidebar_message(SidebarMessage::TogglePlaylists));
+            }
+        })
+        .children((body,))
         .into_any()
 }
 
-fn hint(copy: &str, key: impl Into<String>) -> AnyView {
-    widget(Text::new(copy).color(SemanticColorRole::Muted).font_size(12.0)).key(key.into()).into_any()
-}
-
-/// 分组标题右侧的 22px 图标。文字只作无障碍名称。
-fn tree_action(
+fn section_tool(
     icon: Icon,
     label: &'static str,
     key: &'static str,
     disabled: bool,
     message: impl Fn() -> ShellMessage + Send + 'static,
 ) -> AnyView {
-    let mut button = IconButton::new(icon, label).disabled(disabled);
-    let layout = Arc::make_mut(&mut button.style.layout);
-    layout.width = Some(LengthSpec::Px(22.0));
-    layout.height = Some(LengthSpec::Px(22.0));
-    layout.min_width = Some(LengthSpec::Px(22.0));
-    layout.min_height = Some(LengthSpec::Px(22.0));
-    layout.flex_grow = Some(0.0);
-    layout.flex_shrink = Some(0.0);
-    widget(button).key(key).on_cx(move |_, _: &Activate, cx| cx.dispatch_program(message())).into_any()
+    widget(sidebar_section_tool_button(icon, label).disabled(disabled))
+        .key(key)
+        .on_cx(move |_, _: &Activate, cx| cx.dispatch_program(message()))
+        .into_any()
 }
 
-fn footer_icon(
+fn footer_button(
     icon: Icon,
     label: String,
     selected: bool,
     message: impl Fn() -> ShellMessage + Send + 'static,
 ) -> AnyView {
-    let mut button = super::title_bar::shell_icon(icon, label, false).selected(selected);
-    let layout = Arc::make_mut(&mut button.style.layout);
-    layout.width = Some(LengthSpec::Px(26.0));
-    layout.height = Some(LengthSpec::Px(26.0));
-    layout.min_width = Some(LengthSpec::Px(26.0));
-    layout.min_height = Some(LengthSpec::Px(26.0));
-    widget(button).on_cx(move |_, _: &Activate, cx| cx.dispatch_program(message())).into_any()
+    widget(SidebarFooterButton::new(label, icon).selected(selected))
+        .on_cx(move |_, _: &Activate, cx| cx.dispatch_program(message()))
+        .into_any()
+}
+
+fn hint(copy: &str, key: impl Into<String>) -> AnyView {
+    widget(Text::new(copy).color(SemanticColorRole::Muted).font_size(12.0)).key(key.into()).into_any()
 }
 
 fn shortcut_rows(model: &ShellViewModel, locked: bool) -> Vec<AnyView> {
@@ -348,13 +355,9 @@ fn shortcut_rows(model: &ShellViewModel, locked: bool) -> Vec<AnyView> {
         (ShortcutId::Trash, counts.trash, model.workspace.panel == WorkspacePanel::Trash),
     ];
     items.into_iter().map(|(id, count, active)| {
-        let row = sidebar_row_with(Some(shortcut_icon(id)), id.label(), None, active, locked, move |cx| {
+        sidebar_row_with(Some(shortcut_icon(id)), id.label(), Some(count.to_string()), active, locked, move |cx| {
             cx.dispatch_program(sidebar_message(SidebarMessage::SelectShortcut(id)));
-        });
-        widget(Stack::bar(4.0).align(AlignSpec::Center)).children((
-            widget(Stack::fill_row(0.0).grow(1.0).shrink(1.0).min_width(LengthSpec::Px(0.0))).children((row,)),
-            widget(Text::new(count.to_string()).color(SemanticColorRole::Muted).font_size(12.0).font_weight(600)),
-        )).into_any()
+        })
     }).collect()
 }
 
