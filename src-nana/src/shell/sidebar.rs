@@ -807,7 +807,9 @@ pub(super) fn reduce_message(model: &mut super::ShellViewModel, message: super::
         SidebarMessage::OpenSidebarPlaylist(id) => model.apply_playlist(id),
         SidebarMessage::OpenRepositorySwitcher => model.sidebar.open_switcher(),
         SidebarMessage::ShowRepositoryAddMenu => {
-            model.sidebar.show_add_menu();
+            if model.sidebar.show_add_menu() {
+                model.input.queue_attach_dialog();
+            }
         }
         SidebarMessage::CloseRepositoryPopover => {
             model.sidebar.close_popover();

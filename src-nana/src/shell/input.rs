@@ -42,6 +42,7 @@ pub enum PendingHostCommand {
     OpenSaveDialog,
     OpenPluginDialog,
     OpenFolderDialog,
+    OpenAttachDialog,
 }
 
 /// 工作区拖放、外部打开和关闭确认消息。
@@ -200,6 +201,11 @@ impl InputState {
         self.host_commands.push(PendingHostCommand::OpenFolderDialog);
     }
 
+    /// 排队添加资源库用的文件夹对话框。
+    pub(crate) fn queue_attach_dialog(&mut self) {
+        self.host_commands.push(PendingHostCommand::OpenAttachDialog);
+    }
+
     /// 把排队命令换成当前窗口的平台命令。
     pub(crate) fn take_platform_commands(&mut self, id: WindowId, maximized: bool) -> Vec<WindowCommand> {
         let pending = std::mem::take(&mut self.host_commands);
@@ -220,6 +226,10 @@ impl InputState {
                 PendingHostCommand::OpenFolderDialog => Some(WindowCommand::OpenFileDialog {
                     id,
                     request: support::pick_folder_request(),
+                }),
+                PendingHostCommand::OpenAttachDialog => Some(WindowCommand::OpenFileDialog {
+                    id,
+                    request: support::attach_folder_request(),
                 }),
             })
             .collect()
