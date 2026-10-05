@@ -512,7 +512,10 @@ pub fn mount_shell(
                     body.push(admin);
                 }
                 if is_playlists {
-                    if view_model.playlist_entries.is_empty() && view_model.playlist_item_entries.is_empty() {
+                    if view_model.selected_playlist_id.is_none() {
+                        body.push(text("选择一个播放集").key("playlist-empty-title").into_any());
+                        body.push(text("在左侧播放集区选择要查看或播放的列表。").key("playlist-empty-detail").into_any());
+                    } else if view_model.playlist_item_entries.is_empty() {
                         body.push(text("播放集还是空的").key("playlist-empty-title").into_any());
                         body.push(text("在文件浏览区右键文件，使用“加入播放列表”把内容加入这里。").key("playlist-empty-detail").into_any());
                     }
@@ -796,8 +799,8 @@ fn section_heading(model: &ShellViewModel) -> (&'static str, String) {
     }
     match model.workspace.panel {
         WorkspacePanel::Playlist => ("播放集", "播放集".into()),
-        WorkspacePanel::Extensions => ("插件", "拓展".into()),
-        WorkspacePanel::Logs => ("诊断", "日志".into()),
+        WorkspacePanel::Extensions => ("拓展能力", "文件系统与插件".into()),
+        WorkspacePanel::Logs => ("LOGS", "系统日志".into()),
         WorkspacePanel::Actions => ("仓库", "动作".into()),
         WorkspacePanel::Search => ("搜索", "搜索结果".into()),
         _ => ("工作台", model.page.title().into()),

@@ -145,7 +145,7 @@ fn shortcut_rows(model: &ShellViewModel, locked: bool) -> Vec<AnyView> {
         (ShortcutId::Trash, counts.trash, model.workspace.panel == WorkspacePanel::Trash),
     ];
     items.into_iter().map(|(id, count, active)| {
-        sidebar_row_with(Some(shortcut_icon(id)), format!("{} · {count}", id.label()), active, locked, move |cx| {
+        sidebar_row_with(Some(shortcut_icon(id)), format!("{} · {count}", id.label()), Some(count.to_string()), active, locked, move |cx| {
             cx.dispatch_program(sidebar_message(SidebarMessage::SelectShortcut(id)));
         })
     }).collect()
@@ -228,12 +228,13 @@ fn sidebar_row(
     disabled: bool,
     on_activate: impl Fn(&mut ViewContext<SidebarRow>) + Send + 'static,
 ) -> AnyView {
-    sidebar_row_with(None, label, active, disabled, on_activate)
+    sidebar_row_with(None, label, None, active, disabled, on_activate)
 }
 
 fn sidebar_row_with(
     icon: Option<Icon>,
     label: impl AsRef<str>,
+    trailing: Option<String>,
     active: bool,
     disabled: bool,
     on_activate: impl Fn(&mut ViewContext<SidebarRow>) + Send + 'static,
@@ -249,6 +250,9 @@ fn sidebar_row_with(
     let mut row = widget(SidebarRow::new(label).state(state));
     if let Some(icon) = icon {
         row = row.leading(widget(IconGlyph::new(icon).size(14.0)));
+    }
+    if let Some(trailing) = trailing {
+        row = row.trailing(text(trailing));
     }
     row.on_cx(move |_, _: &Activate, cx| on_activate(cx)).into_any()
 }
