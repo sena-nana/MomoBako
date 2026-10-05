@@ -3,6 +3,7 @@
 use std::sync::Arc;
 
 use nana_ui::icons_tabler::{ARCHIVE, CLOCK, CLIPBOARD_LIST, FOLDERS, LOGS, PLUS, PUZZLE, REFRESH, SETTINGS, TAG, TRASH};
+use nana_ui::{ButtonKind, ControlSize};
 use nana_ui::runtime::view::{button, segmented_option, text, widget, AnyView, IntoView};
 use nana_ui::runtime::{
     sidebar_section_tool_button, Activate, AlignSpec, Button, Dialog, Divider, FormField, Icon, IconGlyph, LengthSpec,
@@ -340,20 +341,21 @@ fn playlist_group(count: usize, expanded: bool, tools: AnyView, body: AnyView) -
     )).into_any()
 }
 
-/// 「播放集」本身也能折叠。零内边距的文字按钮，避免再占一条工具列。
+/// 「播放集」本身也能折叠。沿用文字按钮的控件盒，只把字号收到分组标题。
 fn playlist_title() -> AnyView {
-    let mut layout = nana_ui_core::LayoutStyle::default();
+    let mut button = Button::new("播放集").kind(ButtonKind::Text).size(ControlSize::Small);
+    button.style.control_padding_x = None;
+    let layout = Arc::make_mut(&mut button.style.layout);
     layout.font_size = Some(11.0);
     layout.font_weight = Some(700);
     layout.width = Some(LengthSpec::Shrink);
+    layout.flex_grow = Some(0.0);
+    layout.flex_shrink = Some(0.0);
     layout.padding_left = Some(LengthSpec::Px(0.0));
     layout.padding_right = Some(LengthSpec::Px(0.0));
-    widget(Button::new("播放集").kind(nana_ui::ButtonKind::Text).layout(Arc::new(layout)))
-        .key("playlist-title")
-        .on_cx(move |_, _: &Activate, cx| {
-            cx.dispatch_program(sidebar_message(SidebarMessage::TogglePlaylists));
-        })
-        .into_any()
+    widget(button).key("playlist-title").on_cx(move |_, _: &Activate, cx| {
+        cx.dispatch_program(sidebar_message(SidebarMessage::TogglePlaylists));
+    }).into_any()
 }
 
 fn section_tool(
