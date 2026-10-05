@@ -3919,6 +3919,7 @@ dependencies = [
  "image",
  "momobako-backend",
  "nana-ui",
+ "nana-ui-core",
  "nana-ui-devtools",
  "nana-ui-platform",
  "serde_json",

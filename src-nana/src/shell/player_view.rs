@@ -3,11 +3,11 @@
 //! 排序用 `ReorderList`。播放、暂停、跳转和音量走共用的 `MediaTransportBar`。
 //! 验收场景不挂这块表面，旧的上移下移按钮保持原样。
 
-use nana_ui::icons_tabler::{EYE, LIST, PLAYER_SKIP_BACK, PLAYER_SKIP_FORWARD, REPEAT};
+use nana_ui::icons_tabler::{EYE, LIST, PLAYER_PLAY, PLAYER_SKIP_BACK, PLAYER_SKIP_FORWARD, REPEAT};
 use nana_ui::runtime::view::{button, text, widget, AnyView, IntoView};
 use nana_ui::runtime::{
-    Activate, MediaTransportBar, MediaTransportEvent, MediaTransportPlacement, ReorderItem, ReorderList, ReorderListEvent,
-    Stack, TextChanged, TextInput,
+    Activate, Button, MediaTransportBar, MediaTransportEvent, MediaTransportPlacement, ReorderItem, ReorderList,
+    ReorderListEvent, Stack, TextChanged, TextInput,
 };
 
 use super::player::PlayerMessage;
@@ -18,8 +18,9 @@ pub(super) fn player_surface(model: &ShellViewModel) -> AnyView {
     let mut rows = Vec::new();
     if model.workspace.panel == super::workspace::WorkspacePanel::Playlist {
         rows.push(playlist_page(model));
+    } else {
+        rows.push(transport(model));
     }
-    rows.push(transport(model));
     if model.player.queue_open {
         rows.push(queue_list(model));
     }
@@ -30,36 +31,53 @@ pub(super) fn player_surface(model: &ShellViewModel) -> AnyView {
 }
 
 fn playlist_page(model: &ShellViewModel) -> AnyView {
-    let mut rows = vec![text("播放集").key("playlist-page-eyebrow").into_any()];
     let Some(detail) = model.player.listed.as_ref() else {
-        rows.push(text("选择一个播放集").key("playlist-page-empty").into_any());
-        rows.push(text("在左侧播放集区选择要查看或播放的列表。").key("playlist-page-empty-hint").into_any());
-        return widget(Stack::column(6.0)).children(rows).into_any();
+        return super::workbench::dashed_empty(
+            "选择一个播放集",
+            "在左侧播放集区选择要查看或播放的列表。",
+            "playlist-page-empty",
+            "playlist-page-empty-hint",
+            true,
+            false,
+        );
     };
-    rows.push(text(detail.playlist.name.clone()).key("playlist-page-title").into_any());
+    let missing_player = model.player.notice.is_empty()
+        && model.player.candidates.iter().all(|candidate| candidate.player_type_id != detail.playlist.player_type_id)
+        && model.player.contributions.iter().all(|player| player.player_type_id != detail.playlist.player_type_id);
     let mut subline = format!("{} · {} 项", detail.playlist.player_label, detail.items.len());
-    if model.player.notice.is_empty() && model.player.candidates.iter().all(|candidate| candidate.player_type_id != detail.playlist.player_type_id)
-        && model.player.contributions.iter().all(|player| player.player_type_id != detail.playlist.player_type_id)
-    {
+    if missing_player {
         subline.push_str(" · 缺少对应播放插件");
     }
-    rows.push(text(subline).key("playlist-page-status").into_any());
+    let can_play = !detail.items.is_empty() && !missing_player;
+    let mut body = vec![super::workbench::header(
+        "播放集",
+        "playlist-page-eyebrow",
+        &detail.playlist.name,
+        "playlist-page-title",
+        &subline,
+        "playlist-page-status",
+        vec![widget(Button::new("播放").disabled(!can_play).icon(PLAYER_PLAY))
+            .key("playlist-play")
+            .on_cx(|_, _: &Activate, cx| cx.dispatch_program(player_message(PlayerMessage::PlayListed { item_id: None })))
+            .into_any()],
+    )];
     if detail.items.is_empty() {
-        rows.push(text("播放集还是空的").key("playlist-page-no-items").into_any());
-        rows.push(text("在文件浏览区右键文件，使用“加入播放列表”把内容加入这里。").key("playlist-page-no-items-hint").into_any());
+        body.push(super::workbench::dashed_empty(
+            "播放集还是空的",
+            "在文件浏览区右键文件，使用“加入播放列表”把内容加入这里。",
+            "playlist-page-no-items",
+            "playlist-page-no-items-hint",
+            true,
+            true,
+        ));
     } else {
-        rows.push(reorder_list(model));
-        rows.push(
-            button("播放")
-                .key("playlist-play")
-                .on_cx(|_, _: &Activate, cx| cx.dispatch_program(player_message(PlayerMessage::PlayListed { item_id: None })))
-                .into_any(),
-        );
+        body.push(reorder_list(model));
     }
     if !model.player.notice.is_empty() {
-        rows.push(text(model.player.notice.clone()).key("playlist-player-notice").into_any());
+        body.push(text(model.player.notice.clone()).key("playlist-player-notice").into_any());
     }
-    widget(Stack::column(6.0)).children(rows).into_any()
+    body.push(transport(model));
+    super::workbench::panel(body)
 }
 
 fn reorder_list(model: &ShellViewModel) -> AnyView {

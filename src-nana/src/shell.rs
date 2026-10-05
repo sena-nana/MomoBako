@@ -877,6 +877,7 @@ impl ShellViewModel {
 
 mod interaction;
 mod render;
+mod workbench;
 mod title_bar;
 pub use interaction::commit_interaction;
 pub(crate) use interaction::window_action_commands;

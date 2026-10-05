@@ -386,8 +386,8 @@ pub fn mount_shell(
                     .unwrap_or_default();
                 let theme = view_model.settings.theme.clone();
                 let close_behavior = view_model.settings.close_behavior.clone();
-                Some(widget(Stack::column(16.0)).children((
-                    widget(Stack::bar(8.0)).children((
+                Some(widget(Stack::column(12.0)).children((
+                    super::workbench::section_card("外观", vec![widget(Stack::bar(8.0)).children((
                         text(format!("主题：{theme}")).key("settings-theme-label"),
                         widget(Stack::spacer()),
                         button("浅色").key("settings-theme-light").on_cx(|_, _: &Activate, cx| {
@@ -399,18 +399,20 @@ pub fn mount_shell(
                         button("跟随系统").key("settings-theme-system").on_cx(|_, _: &Activate, cx| {
                             cx.dispatch_program(ShellMessage::SettingsThemeChanged("system".into()));
                         }),
-                    )),
-                    widget(TextInput::new(cache_limit).label("缩略图缓存上限（MB）")).on_cx(
-                        |_, event: &TextChanged, cx| {
-                            cx.dispatch_program(ShellMessage::SettingsCacheLimitChanged(event.value.to_string()));
-                        },
-                    ),
-                    widget(TextInput::new(player_id).label("默认播放器类型")).on_cx(
-                        |_, event: &TextChanged, cx| {
-                            cx.dispatch_program(ShellMessage::SettingsPlayerChanged(event.value.to_string()));
-                        },
-                    ),
-                    widget(Stack::bar(8.0)).children((
+                    )).into_any()]),
+                    super::workbench::section_card("播放与缓存", vec![
+                        widget(TextInput::new(cache_limit).label("缩略图缓存上限（MB）")).on_cx(
+                            |_, event: &TextChanged, cx| {
+                                cx.dispatch_program(ShellMessage::SettingsCacheLimitChanged(event.value.to_string()));
+                            },
+                        ).into_any(),
+                        widget(TextInput::new(player_id).label("默认播放器类型")).on_cx(
+                            |_, event: &TextChanged, cx| {
+                                cx.dispatch_program(ShellMessage::SettingsPlayerChanged(event.value.to_string()));
+                            },
+                        ).into_any(),
+                    ]),
+                    super::workbench::section_card("关闭行为", vec![widget(Stack::bar(8.0)).children((
                         text(format!("关闭行为：{close_behavior}")).key("settings-close-label"),
                         widget(Stack::spacer()),
                         button("确认后关闭").key("settings-close-confirm").on_cx(|_, _: &Activate, cx| {
@@ -422,7 +424,7 @@ pub fn mount_shell(
                         button("直接退出").key("settings-close-quit").on_cx(|_, _: &Activate, cx| {
                             cx.dispatch_program(ShellMessage::SettingsCloseBehaviorChanged("quit".into()));
                         }),
-                    )),
+                    )).into_any()]),
                     view_model
                         .settings_error
                         .clone()
@@ -502,6 +504,42 @@ pub fn mount_shell(
                     playlist_add_current_directory, log_actions, preview_node, page_actions,
                 ));
                 super::files_view::live_file_column(&view_model)
+            } else if !view_model.acceptance_scene
+                && show_page
+                && !matches!(view_model.page, ShellPage::Settings | ShellPage::SettingsError)
+                && is_playlists
+            {
+                let mut body = Vec::new();
+                if let Some(player) = player_surface {
+                    body.push(player);
+                }
+                if view_model.selected_playlist_id.is_some() {
+                    if let Some(editor) = playlist_editor {
+                        body.push(editor.into_any());
+                    }
+                    if let Some(add) = playlist_add_current_directory {
+                        body.push(add.into_any());
+                    }
+                }
+                if let Some(creator) = playlist_creator {
+                    body.push(super::workbench::section_card("新建播放列表", vec![creator.into_any()]));
+                }
+                super::workbench::page(body)
+            } else if !view_model.acceptance_scene
+                && show_page
+                && !matches!(view_model.page, ShellPage::Settings | ShellPage::SettingsError)
+                && matches!(
+                    view_model.workspace.panel,
+                    WorkspacePanel::Logs | WorkspacePanel::Extensions | WorkspacePanel::Actions
+                )
+            {
+                super::workbench::page(vec![admin_surface.unwrap_or_else(|| widget(Stack::column(0.0)).into_any())])
+            } else if !view_model.acceptance_scene
+                && show_page
+                && !matches!(view_model.page, ShellPage::Settings | ShellPage::SettingsError)
+                && view_model.workspace.panel == WorkspacePanel::Search
+            {
+                super::workbench::page(vec![preview_node.unwrap_or_else(|| widget(Stack::column(0.0)).into_any())])
             } else if !view_model.acceptance_scene && show_page {
                 let (eyebrow, title) = section_heading(&view_model);
                 let mut body = Vec::new();
@@ -512,13 +550,6 @@ pub fn mount_shell(
                     body.push(admin);
                 }
                 if is_playlists {
-                    if view_model.selected_playlist_id.is_none() {
-                        body.push(text("选择一个播放集").key("playlist-empty-title").into_any());
-                        body.push(text("在左侧播放集区选择要查看或播放的列表。").key("playlist-empty-detail").into_any());
-                    } else if view_model.playlist_item_entries.is_empty() {
-                        body.push(text("播放集还是空的").key("playlist-empty-title").into_any());
-                        body.push(text("在文件浏览区右键文件，使用“加入播放列表”把内容加入这里。").key("playlist-empty-detail").into_any());
-                    }
                     body.push(playlist_actions.into_any());
                     if let Some(editor) = playlist_editor {
                         body.push(editor.into_any());
@@ -775,7 +806,7 @@ fn empty_repository_panel(model: &ShellViewModel) -> impl IntoView + use<'_> {
     .children((card,))
 }
 
-/// 设置、拓展、日志、播放集和搜索共用的页头：标题在左，操作在内容区。
+/// 设置和其余实况页的页头：标题在左，卡片在内容区。
 fn framed_page(eyebrow: impl Into<String>, title: impl Into<String>, body: Vec<AnyView>) -> AnyView {
     let eyebrow = eyebrow.into();
     let title = title.into();
