@@ -1,13 +1,16 @@
 //! 宿主输入的分支回归。几何、拖放、外部打开和关闭确认都不依赖真窗口。
 
-use super::super::{FilesEffect, ShellMessage, ShellPage, ShellViewModel, SidebarEffect, WorkspacePanel};
+use super::super::{
+    FilesEffect, ShellMessage, ShellPage, ShellViewModel, SidebarEffect, WorkspaceEffect, WorkspacePanel, WorkspaceRepository,
+};
 use super::support::{
     absolute_drag_paths, can_drag_entries, decide_close, filter_external_import_paths, internal_drag_distance,
     join_repository_path, normalize_filesystem_path, normalize_move_paths, normalize_workspace_path, resolve_drop_target,
     should_delegate_to_external_drag, workspace_parent_path, CloseDecision, DIALOG_EXPORT_ID, DIALOG_PLUGIN_ID,
-    EXTERNAL_DRAG_SWITCH_DISTANCE,
+    DIALOG_RELOCATE_ID, EXTERNAL_DRAG_SWITCH_DISTANCE,
 };
-use super::{close_prompt, HostDragPhase, InputMessage, InternalSession};
+use super::{begin_relocate_dialog, close_prompt, HostDragPhase, InputMessage, InternalSession};
+use nana_ui::FileDialogKind;
 use crate::host_api::{HostInputRequest, HostRequest};
 use crate::shell::InspectMessage;
 
@@ -544,4 +547,90 @@ fn close_confirmation_and_file_dialogs_do_not_pretend_the_host_finished() {
     assert!(matches!(model.admin.take_effects().pop(), Some(crate::shell::admin::AdminEffect::Install(path)) if path == "plugin.momoplug"));
     send(&mut model, InputMessage::FileDialogCompleted { request_id: DIALOG_PLUGIN_ID, paths: Vec::new(), failed: Some("Unavailable".into()) });
     assert_eq!(model.admin.action_error, "插件包选择失败：Unavailable");
+}
+
+fn missing_repository(id: &str) -> WorkspaceRepository {
+    WorkspaceRepository {
+        repo_id: id.into(),
+        name: id.into(),
+        path: format!("C:/{id}"),
+        status: "missing".into(),
+        backend_plugin_id: "filesystem".into(),
+        capabilities: vec!["localRootPath".into()],
+        cache_required: false,
+        cache_status: String::new(),
+    }
+}
+
+/// 启动已完成、有活动仓库，且该仓库状态为 missing。
+fn finished_missing(id: &str) -> ShellViewModel {
+    let mut model = ShellViewModel::default();
+    model.workspace.startup.finish();
+    model.workspace.active_repo_id = Some(id.into());
+    model.workspace.repositories.push(missing_repository(id));
+    model
+}
+
+#[test]
+fn relocate_folder_dialog_queues_pick_folder_and_submits_only_a_chosen_path() {
+    let mut model = finished_missing("repo");
+    model.workspace.missing_error = "旧错误".into();
+    begin_relocate_dialog(&mut model);
+    assert!(!model.workspace.path_prompt);
+    assert!(!model.workspace.relocating);
+    assert!(model.workspace.missing_error.is_empty());
+    let commands = model.input.take_platform_commands(nana_ui_platform::WindowId(1), false);
+    assert_eq!(commands.len(), 1);
+    assert!(matches!(
+        &commands[0],
+        nana_ui_platform::host::WindowCommand::OpenFileDialog { request, .. }
+            if request.id == DIALOG_RELOCATE_ID
+                && request.kind == FileDialogKind::PickFolder
+                && request.title.as_deref() == Some("重定向资源库位置")
+    ));
+
+    let mut idle = ShellViewModel::default();
+    idle.workspace.startup.finish();
+    idle.workspace.repositories.push(missing_repository("repo"));
+    begin_relocate_dialog(&mut idle);
+    assert!(idle.input.take_platform_commands(nana_ui_platform::WindowId(1), false).is_empty());
+
+    let mut busy = finished_missing("repo");
+    busy.workspace.relocating = true;
+    begin_relocate_dialog(&mut busy);
+    assert!(busy.workspace.relocating);
+    assert!(busy.input.take_platform_commands(nana_ui_platform::WindowId(1), false).is_empty());
+
+    let mut cancelled = finished_missing("repo");
+    cancelled.workspace.path_draft = "C:/old".into();
+    send(&mut cancelled, InputMessage::FileDialogCompleted { request_id: DIALOG_RELOCATE_ID, paths: Vec::new(), failed: None });
+    assert!(!cancelled.workspace.relocating);
+    assert!(!cancelled.workspace.take_effects().iter().any(|effect| matches!(effect, WorkspaceEffect::RelocateRepository { .. })));
+    send(
+        &mut cancelled,
+        InputMessage::FileDialogCompleted { request_id: DIALOG_RELOCATE_ID, paths: vec![" ".into()], failed: None },
+    );
+    assert!(!cancelled.workspace.relocating);
+    assert!(cancelled.workspace.take_effects().is_empty());
+
+    let mut failed = finished_missing("repo");
+    failed.workspace.path_draft = "C:/old".into();
+    send(
+        &mut failed,
+        InputMessage::FileDialogCompleted { request_id: DIALOG_RELOCATE_ID, paths: vec!["D:/library".into()], failed: Some("Busy".into()) },
+    );
+    assert_eq!(failed.workspace.missing_error, "文件夹选择失败：Busy");
+    assert!(!failed.workspace.relocating);
+    assert!(failed.workspace.take_effects().is_empty());
+
+    let mut chosen = finished_missing("repo");
+    send(
+        &mut chosen,
+        InputMessage::FileDialogCompleted { request_id: DIALOG_RELOCATE_ID, paths: vec!["D:/library".into()], failed: None },
+    );
+    assert!(chosen.workspace.relocating);
+    assert!(matches!(
+        chosen.workspace.take_effects().as_slice(),
+        [WorkspaceEffect::RelocateRepository { repo_id, path }] if repo_id == "repo" && path == "D:/library"
+    ));
 }

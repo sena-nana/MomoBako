@@ -10,6 +10,8 @@ pub const EXTERNAL_DRAG_SWITCH_DISTANCE: f32 = 72.0;
 pub const DIALOG_EXPORT_ID: u64 = 1;
 /// 插件包选择对话框。
 pub const DIALOG_PLUGIN_ID: u64 = 2;
+/// 缺失资源库重定向的文件夹对话框。
+pub const DIALOG_RELOCATE_ID: u64 = 3;
 
 /// 关闭按钮在三种设置下的决定。脏编辑只拦截真正退出。
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -195,4 +197,9 @@ pub fn save_export_request() -> FileDialogRequest {
 /// 选择一个插件包的系统对话框请求。
 pub fn open_plugin_request() -> FileDialogRequest {
     FileDialogRequest::new(DIALOG_PLUGIN_ID, FileDialogKind::OpenFile).title("选择插件包")
+}
+
+/// 选择一个文件夹来重定向缺失资源库。只构造请求，不打开系统对话框。
+pub fn pick_folder_request() -> FileDialogRequest {
+    FileDialogRequest::new(DIALOG_RELOCATE_ID, FileDialogKind::PickFolder).title("重定向资源库位置")
 }

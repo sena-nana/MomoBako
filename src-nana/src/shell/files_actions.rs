@@ -371,6 +371,29 @@ impl FilesState {
         }
     }
 
+    /// 结构更新静默重读硬链接候选。空仓库只记日志。
+    /// 不打开对话框，不改加载态和页面错误。
+    pub(super) fn refresh_hardlinks_silent(&mut self, repo_id: &str) {
+        if repo_id.is_empty() {
+            eprintln!("Nana 静默刷新硬链接候选缺少仓库");
+            return;
+        }
+        self.effects.push(FilesEffect::RefreshHardlinks { repo_id: repo_id.to_string() });
+    }
+
+    /// 静默替换硬链接候选。成功只换列表；失败只记日志。
+    /// 不改对话框、已跳过候选和页面错误。
+    pub(super) fn note_hardlinks_silent(&mut self, result: Result<Vec<HardlinkPrompt>, String>) {
+        match result {
+            Ok(prompts) => {
+                self.hardlinks = prompts;
+            }
+            Err(error) => {
+                eprintln!("Nana 静默刷新硬链接候选失败：{error}");
+            }
+        }
+    }
+
     pub(super) fn note_hardlink_confirmed(&mut self, result: Result<String, String>) {
         self.mutating = false;
         self.activity.clear();
