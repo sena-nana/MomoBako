@@ -180,6 +180,7 @@ fn action_rows(model: &ShellViewModel) -> Vec<AnyView> {
 
 fn tool_rows(model: &ShellViewModel) -> Vec<AnyView> {
     let mut rows = Vec::new();
+    rows.push(text("这里集中展示当前插件和后端能力。").key("admin-tools-subline").into_any());
     if model.admin.tool_pages.is_empty() {
         rows.push(text("没有原生工具页").key("admin-tools-empty").into_any());
         return rows;
@@ -241,9 +242,14 @@ fn log_rows(model: &ShellViewModel) -> Vec<AnyView> {
         }).into_any());
     }
     let search = model.admin.log_search.clone();
-    rows.push(widget(TextInput::new(search).label("搜索日志")).on_cx(|_, event: &TextChanged, cx| {
+    rows.push(widget(TextInput::new(search).label("搜索日志").placeholder("搜索消息、动作、位置或上下文")).on_cx(|_, event: &TextChanged, cx| {
         cx.dispatch_program(ShellMessage::Admin(AdminMessage::SetLogSearch(event.value.to_string())));
     }).into_any());
+    rows.push(text("统一查看宿主、插件与辅助进程的实时日志流。").key("admin-log-subline").into_any());
+    if filtered.is_empty() {
+        rows.push(text("还没有系统日志").key("admin-log-empty-title").into_any());
+        rows.push(text("宿主、插件和辅助进程产生的关键操作会在这里持续汇总。").key("admin-log-empty-detail").into_any());
+    }
     rows
 }
 
@@ -257,12 +263,12 @@ fn plugin_rows(model: &ShellViewModel) -> Vec<AnyView> {
         rows.push(text(model.admin.action_message.clone()).key("admin-plugin-message").into_any());
     }
     let keyword = model.admin.keyword.clone();
-    rows.push(widget(TextInput::new(keyword).label("筛选插件")).on_cx(|_, event: &TextChanged, cx| {
+    rows.push(widget(TextInput::new(keyword).label("筛选插件").placeholder("筛选导入器、脚本或元数据拓展")).on_cx(|_, event: &TextChanged, cx| {
         cx.dispatch_program(ShellMessage::Admin(AdminMessage::SetKeyword(event.value.to_string())));
     }).into_any());
     rows.push(
         widget(Stack::row(8.0))
-            .children((button("安装插件包").key("admin-plugin-install").on_cx(|_, _: &Activate, cx| {
+            .children((button("从 .momoplug 安装").key("admin-plugin-install").on_cx(|_, _: &Activate, cx| {
                 cx.dispatch_program(ShellMessage::Admin(AdminMessage::ChooseArchive));
             }),))
             .into_any(),
