@@ -4,7 +4,7 @@ use std::cell::RefCell;
 
 use super::*;
 use crate::theme_map::{SIDEBAR_MAX_PX, SIDEBAR_MIN_PX};
-use nana_ui::runtime::view::{button, text, widget, IntoView};
+use nana_ui::runtime::view::{button, text, widget, AnyView, IntoView};
 use nana_ui::runtime::{
     Activate, AlignSpec, AppShell, FrameworkError, GpuTextureView, JustifySpec, LengthSpec, List, MountedView,
     Progress, RuntimeDocument, SidebarFrame, SplitPane, Stack, TextChanged, TextInput,
@@ -308,7 +308,8 @@ pub fn mount_shell(
                 )))
             };
             let playlist_name = view_model.playlist_name_draft.clone();
-            let is_playlists = matches!(view_model.page, ShellPage::Playlists);
+            let is_playlists = matches!(view_model.page, ShellPage::Playlists)
+                || view_model.workspace.panel == WorkspacePanel::Playlist;
             let playlist_editor = if is_playlists {
                 Some(widget(Stack::fill_row(8.0)).children((
                     widget(TextInput::new(playlist_name).label("播放列表名称")).on_cx(
@@ -385,9 +386,10 @@ pub fn mount_shell(
                     .unwrap_or_default();
                 let theme = view_model.settings.theme.clone();
                 let close_behavior = view_model.settings.close_behavior.clone();
-                Some(widget(Stack::column(12.0).height(LengthSpec::Px(280.0)).grow(0.0).shrink(0.0)).children((
-                    widget(Stack::row(6.0).height(LengthSpec::Px(40.0)).grow(0.0).shrink(0.0)).children((
-                        text(format!("主题：{theme}")),
+                Some(widget(Stack::column(16.0)).children((
+                    widget(Stack::bar(8.0)).children((
+                        text(format!("主题：{theme}")).key("settings-theme-label"),
+                        widget(Stack::spacer()),
                         button("浅色").key("settings-theme-light").on_cx(|_, _: &Activate, cx| {
                             cx.dispatch_program(ShellMessage::SettingsThemeChanged("light".into()));
                         }),
@@ -408,8 +410,9 @@ pub fn mount_shell(
                             cx.dispatch_program(ShellMessage::SettingsPlayerChanged(event.value.to_string()));
                         },
                     ),
-                    widget(Stack::row(6.0).height(LengthSpec::Px(40.0)).grow(0.0).shrink(0.0)).children((
-                        text(format!("关闭行为：{close_behavior}")),
+                    widget(Stack::bar(8.0)).children((
+                        text(format!("关闭行为：{close_behavior}")).key("settings-close-label"),
+                        widget(Stack::spacer()),
                         button("确认后关闭").key("settings-close-confirm").on_cx(|_, _: &Activate, cx| {
                             cx.dispatch_program(ShellMessage::SettingsCloseBehaviorChanged("confirm".into()));
                         }),
@@ -469,42 +472,6 @@ pub fn mount_shell(
                 None
             };
             let close_prompt = super::input::close_prompt(&view_model);
-            let workspace_actions = widget(Stack::fill_column(8.0)).children((
-                widget(Stack::fill_column(8.0)).children((
-                    status_summary,
-                    task_actions,
-                    task_progress,
-                    file_browser,
-                    plugin_actions,
-                    plugin_config_actions,
-                    plugin_config_editors,
-                    playlist_actions,
-                )),
-                widget(Stack::fill_column(8.0)).children((
-                    settings_editor,
-                    admin_surface,
-                    close_prompt,
-                    playlist_item_actions,
-                    player_surface,
-                    playlist_item_status,
-                    playlist_editor,
-                    playlist_creator,
-                    playlist_add_current_directory,
-                    log_actions,
-                    preview_node,
-                )),
-            ));
-            let content = widget(
-                Stack::fill_column(12.0)
-                    .padding_xy(24.0, 20.0)
-                    .min_width(LengthSpec::Px(0.0)),
-            )
-            .children((workspace_actions, widget(
-                List::new()
-                    .label(view_model.page.title())
-                    .style(Stack::column(12.0).node_style()),
-            )
-            .children((page_actions,)),));
             let process = widget(
                 Stack::fill_column(8.0)
                     .width(LengthSpec::Px(240.0))
@@ -519,16 +486,108 @@ pub fn mount_shell(
                     cx.dispatch_program(ShellMessage::Refresh);
                 }),
             ));
-            let live_files = !view_model.acceptance_scene && view_model.files_surface_visible();
+            let live_files = !view_model.acceptance_scene
+                && view_model.files_surface_visible()
+                && !matches!(view_model.page, ShellPage::Settings | ShellPage::SettingsError);
             let show_page = view_model.acceptance_scene
                 || matches!(view_model.page, ShellPage::Settings | ShellPage::SettingsError)
                 || matches!(view_model.workspace.main_region(), MainRegion::HasRepository);
             let region = view_model.workspace.main_region();
             let primary = if live_files {
+                drop((
+                    status_summary, task_actions, task_progress, file_browser, plugin_actions,
+                    plugin_config_actions, plugin_config_editors, playlist_actions, settings_editor,
+                    admin_surface, close_prompt, playlist_item_actions, player_surface,
+                    playlist_item_status, playlist_editor, playlist_creator,
+                    playlist_add_current_directory, log_actions, preview_node, page_actions,
+                ));
                 super::files_view::live_file_column(&view_model)
+            } else if !view_model.acceptance_scene && show_page {
+                let (eyebrow, title) = section_heading(&view_model);
+                let mut body = Vec::new();
+                if let Some(editor) = settings_editor {
+                    body.push(editor.into_any());
+                }
+                if let Some(admin) = admin_surface {
+                    body.push(admin);
+                }
+                if is_playlists {
+                    body.push(playlist_actions.into_any());
+                    if let Some(editor) = playlist_editor {
+                        body.push(editor.into_any());
+                    }
+                    if let Some(creator) = playlist_creator {
+                        body.push(creator.into_any());
+                    }
+                    if let Some(add) = playlist_add_current_directory {
+                        body.push(add.into_any());
+                    }
+                    if let Some(items) = playlist_item_actions {
+                        body.push(items.into_any());
+                    }
+                    if let Some(status) = playlist_item_status {
+                        body.push(status.into_any());
+                    }
+                    if let Some(player) = player_surface {
+                        body.push(player);
+                    }
+                }
+                if view_model.workspace.panel == WorkspacePanel::Search {
+                    if let Some(preview) = preview_node {
+                        body.push(preview);
+                    }
+                }
+                if let Some(logs) = log_actions {
+                    if matches!(view_model.workspace.panel, WorkspacePanel::Logs) {
+                        body.push(logs.into_any());
+                    }
+                }
+                framed_page(eyebrow, title, body)
             } else if show_page {
-                content.into_any()
+                let workspace_actions = widget(Stack::fill_column(8.0)).children((
+                    widget(Stack::fill_column(8.0)).children((
+                        status_summary,
+                        task_actions,
+                        task_progress,
+                        file_browser,
+                        plugin_actions,
+                        plugin_config_actions,
+                        plugin_config_editors,
+                        playlist_actions,
+                    )),
+                    widget(Stack::fill_column(8.0)).children((
+                        settings_editor,
+                        admin_surface,
+                        close_prompt,
+                        playlist_item_actions,
+                        player_surface,
+                        playlist_item_status,
+                        playlist_editor,
+                        playlist_creator,
+                        playlist_add_current_directory,
+                        log_actions,
+                        preview_node,
+                    )),
+                ));
+                widget(
+                    Stack::fill_column(12.0)
+                        .padding_xy(24.0, 20.0)
+                        .min_width(LengthSpec::Px(0.0)),
+                )
+                .children((
+                    workspace_actions,
+                    widget(List::new().label(view_model.page.title()).style(Stack::column(12.0).node_style()))
+                        .children((page_actions,)),
+                ))
+                .into_any()
             } else {
+                drop((
+                    status_summary, task_actions, task_progress, file_browser, plugin_actions,
+                    plugin_config_actions, plugin_config_editors, playlist_actions, settings_editor,
+                    admin_surface, close_prompt, playlist_item_actions, player_surface,
+                    playlist_item_status, playlist_editor, playlist_creator,
+                    playlist_add_current_directory, log_actions, preview_node, page_actions,
+                ));
                 match region {
                     MainRegion::MissingRepository => missing_repository_panel(&view_model).into_any(),
                     MainRegion::EmptyRepository => empty_repository_panel(&view_model).into_any(),
@@ -537,7 +596,7 @@ pub fn mount_shell(
                     }
                 }
             };
-            let stage = if show_page && !live_files {
+            let stage = if view_model.acceptance_scene && show_page {
                 widget(Stack::fill_row(0.0).min_height(LengthSpec::Px(0.0)))
                     .children((primary, process))
                     .key("workspace-body")
@@ -653,7 +712,13 @@ fn missing_repository_panel(model: &ShellViewModel) -> impl IntoView + use<'_> {
             }),
         ))
     });
-    widget(Stack::fill_column(12.0).padding_xy(24.0, 20.0)).children((
+    let card = widget(Stack::column(12.0).width(LengthSpec::Px(560.0))).children((
+        widget(super::title_bar::shell_icon(
+            nana_ui::icons_tabler::ALERT_TRIANGLE,
+            "资源库丢失",
+            false,
+        ))
+        .key("missing-icon"),
         text("资源库丢失").key("missing-eyebrow"),
         text(name).key("missing-name"),
         text(summary).key("missing-summary"),
@@ -675,18 +740,64 @@ fn missing_repository_panel(model: &ShellViewModel) -> impl IntoView + use<'_> {
                 cx.dispatch_program(ShellMessage::MissingOpenDelete);
             }),
         )),
-    ))
+    ));
+    widget(
+        Stack::fill_column(0.0)
+            .padding_xy(24.0, 24.0)
+            .justify(JustifySpec::Center)
+            .align(AlignSpec::Center),
+    )
+    .children((card,))
 }
 
 fn empty_repository_panel(model: &ShellViewModel) -> impl IntoView + use<'_> {
     let error = model.workspace.startup.error.clone().or_else(|| {
         (!model.workspace.missing_error.is_empty()).then(|| model.workspace.missing_error.clone())
     });
-    widget(Stack::fill_column(12.0).padding_xy(24.0, 20.0)).children((
+    let card = widget(Stack::column(10.0).width(LengthSpec::Px(520.0)).align(AlignSpec::Center)).children((
         text("还没有可用资源库").key("empty-title"),
         text("拖入一个本地文件夹创建资源库。").key("empty-detail"),
         error.map(|error| text(error).key("empty-error")),
-    ))
+    ));
+    widget(
+        Stack::fill_column(0.0)
+            .padding_xy(24.0, 24.0)
+            .justify(JustifySpec::Center)
+            .align(AlignSpec::Center),
+    )
+    .children((card,))
+}
+
+/// 设置、拓展、日志、播放集和搜索共用的页头：标题在左，操作在内容区。
+fn framed_page(eyebrow: impl Into<String>, title: impl Into<String>, body: Vec<AnyView>) -> AnyView {
+    let eyebrow = eyebrow.into();
+    let title = title.into();
+    widget(Stack::fill_column(16.0).padding_xy(20.0, 18.0).min_height(LengthSpec::Px(0.0)))
+        .children((
+            widget(Stack::bar(16.0)).children((
+                widget(Stack::column(4.0)).children((
+                    text(eyebrow).key("section-eyebrow"),
+                    text(title).key("section-title"),
+                )),
+                widget(Stack::spacer()),
+            )),
+            widget(Stack::column(12.0)).children(body),
+        ))
+        .into_any()
+}
+
+fn section_heading(model: &ShellViewModel) -> (&'static str, String) {
+    if matches!(model.page, ShellPage::Settings | ShellPage::SettingsError) {
+        return ("应用", "设置".into());
+    }
+    match model.workspace.panel {
+        WorkspacePanel::Playlist => ("播放集", "播放集".into()),
+        WorkspacePanel::Extensions => ("插件", "拓展".into()),
+        WorkspacePanel::Logs => ("诊断", "日志".into()),
+        WorkspacePanel::Actions => ("仓库", "动作".into()),
+        WorkspacePanel::Search => ("搜索", "搜索结果".into()),
+        _ => ("工作台", model.page.title().into()),
+    }
 }
 
 fn delete_repository_dialog(model: &ShellViewModel) -> Option<impl IntoView + use<'_>> {
