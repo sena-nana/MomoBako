@@ -6,9 +6,9 @@ use super::*;
 use crate::theme_map::{SIDEBAR_MAX_PX, SIDEBAR_MIN_PX};
 use nana_ui::runtime::view::{button, text, widget, AnyView, IntoView};
 use nana_ui::runtime::{
-    Activate, AlignSpec, AppShell, FrameworkError, GpuTextureView, JustifySpec, LengthSpec, List, MountedView,
+    Activate, AlignSpec, AppShell, Dialog, FrameworkError, GpuTextureView, JustifySpec, LengthSpec, List, MountedView,
     Progress, RuntimeDocument, SemanticColorRole, SidebarFrame, Stack, Text, TextChanged,
-    TextHorizontalAlignment, TextInput, Workspace,
+    TextHorizontalAlignment, TextInput, ValidationIntent, ValidationMessage, Workspace,
 };
 use nana_ui::{RegionId, RegionRole, RegionState, WorkspaceLayout, WorkspaceModel};
 
@@ -902,34 +902,25 @@ fn playlist_creator_dialog(model: &ShellViewModel) -> Option<impl IntoView + use
     }).collect::<Vec<_>>();
     let blocked = name.trim().is_empty() || selected.is_none();
     let notice = matches!(model.detail.as_str(), "播放列表名称不能为空" | "请先选择播放器类型" | "正在创建播放列表…")
-        .then(|| text(model.detail.clone()).key("playlist-dialog-notice"));
+        .then(|| widget(ValidationMessage::new(model.detail.clone(), ValidationIntent::Danger)).key("playlist-dialog-notice"));
     Some(
-        widget(Stack::fill_column(0.0).padding_xy(24.0, 24.0).justify(JustifySpec::Center).align(AlignSpec::Center)).children((
-            widget(
-                Stack::column(12.0)
-                    .width(LengthSpec::Px(420.0))
-                    .surface(SemanticColorRole::Surface)
-                    .radius_px(16.0)
-                    .padding_xy(20.0, 18.0),
-            )
-            .children((
-                text("新建播放集").key("playlist-dialog-title"),
+        widget(Dialog::new("新建播放集"))
+            .body(widget(Stack::column(8.0)).children((
                 widget(TextInput::new(name).label("名称").placeholder("例如 通勤歌单 / 参考分镜")).on_cx(|_, event: &TextChanged, cx| {
                     cx.dispatch_program(ShellMessage::NewPlaylistNameChanged(event.value.to_string()));
                 }),
                 text("播放类型").key("playlist-dialog-type"),
                 widget(Stack::column(6.0)).children(players),
                 notice,
-                widget(Stack::row(8.0)).children((
-                    button("取消").key("playlist-dialog-cancel").on_cx(|_, _: &Activate, cx| {
-                        cx.dispatch_program(ShellMessage::ClosePlaylistDialog);
-                    }),
-                    button("创建").key("create-playlist").disabled(blocked).on_cx(|_, _: &Activate, cx| {
-                        cx.dispatch_program(ShellMessage::CreatePlaylist);
-                    }),
-                )),
-            )),
-        )),
+            )))
+            .footer(widget(Stack::row(8.0)).children((
+                button("取消").key("playlist-dialog-cancel").on_cx(|_, _: &Activate, cx| {
+                    cx.dispatch_program(ShellMessage::ClosePlaylistDialog);
+                }),
+                button("创建").key("create-playlist").disabled(blocked).on_cx(|_, _: &Activate, cx| {
+                    cx.dispatch_program(ShellMessage::CreatePlaylist);
+                }),
+            ))),
     )
 }
 
@@ -951,17 +942,19 @@ fn delete_repository_dialog(model: &ShellViewModel) -> Option<impl IntoView + us
             text(model.workspace.delete_mode_detail(mode)),
         ))
     });
-    let error = (!dialog.error.is_empty()).then(|| text(dialog.error.clone()));
-    Some(widget(Stack::fill_column(12.0).padding_xy(24.0, 20.0)).children((
-        text("删除资源库").key("delete-dialog-title"),
-        text(summary).key("delete-dialog-summary"),
-        widget(Stack::column(8.0)).children(options.collect::<Vec<_>>()),
-        error,
-        deleting.then(|| text("处理中...").key("delete-dialog-busy")),
-        button("取消").key("delete-dialog-cancel").disabled(deleting).on_cx(|_, _: &Activate, cx| {
-            cx.dispatch_program(ShellMessage::MissingCloseDelete);
-        }),
-    )))
+    let error = (!dialog.error.is_empty()).then(|| widget(ValidationMessage::new(dialog.error.clone(), ValidationIntent::Danger)));
+    Some(
+        widget(Dialog::new("删除资源库"))
+            .body(widget(Stack::column(8.0)).children((
+                text(summary).key("delete-dialog-summary"),
+                widget(Stack::column(8.0)).children(options.collect::<Vec<_>>()),
+                error,
+                deleting.then(|| text("处理中...").key("delete-dialog-busy")),
+            )))
+            .footer(button("取消").key("delete-dialog-cancel").disabled(deleting).on_cx(|_, _: &Activate, cx| {
+                cx.dispatch_program(ShellMessage::MissingCloseDelete);
+            })),
+    )
 }
 
 /// 显示名仅用于标签，服务请求始终使用 DTO 中的完整仓库相对路径。

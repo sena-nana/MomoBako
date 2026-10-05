@@ -2,14 +2,14 @@
 //!
 //! 实况目录用 `each_virtual` 只构建窗口内的行。列表高 28、预取 56；
 //! 自适应、瀑布流和网格共用同一套网格，缩略图走 Nana `Thumbnail`。
-//! 对话框放在文件列里，避免和壳层唯一的浮层槽抢位置。
+//! 对话框用 Nana `Dialog`，固定定位盖住窗口，不占用壳层唯一浮层槽。
 
 use nana_ui::icons_tabler::{
     ARCHIVE, ARROW_FORWARD, COPY, FILE, FOLDER_OPEN, FOLDER_PLUS, LAYOUT_BOARD, LAYOUT_DASHBOARD, LAYOUT_GRID,
     LAYOUT_LIST, LIST_CHECK, PENCIL, REPLACE, ROTATE, SCISSORS, SWITCH, TRASH,
 };
 use nana_ui::runtime::view::{button, each_virtual, signal, text, widget, AnyView, IntoView};
-use nana_ui::runtime::{Activate, Icon, Stack, TextChanged, TextInput, Thumbnail};
+use nana_ui::runtime::{Activate, ConfirmDialog, Dialog, Icon, Stack, TextChanged, TextInput, Thumbnail};
 
 use super::files::{
     hardlink_label, DisplayMode, FileContext, FileDialog, FileRow, FilesMessage, SelectionMode,
@@ -304,36 +304,31 @@ fn name_dialog(title: &'static str, draft: &str, placeholder: &'static str, muta
 
 fn target_dialog(title: &'static str, draft: &str, placeholder: &'static str, submit: &'static str, mutating: bool) -> AnyView {
     let submit_label = if mutating { "处理中..." } else { submit };
-    widget(Stack::column(8.0)).children((
-        text(title).key("file-dialog-title"),
-        widget(TextInput::new(draft.to_string()).label(placeholder)).on_cx(|_, event: &TextChanged, cx| {
+    widget(Dialog::new(title))
+        .body(widget(TextInput::new(draft.to_string()).label(placeholder)).on_cx(|_, event: &TextChanged, cx| {
             cx.dispatch_program(file_message(FilesMessage::DraftChanged(event.value.to_string())));
-        }),
-        widget(Stack::row(8.0)).children((
+        }))
+        .footer(widget(Stack::row(8.0)).children((
             button("取消").key("file-dialog-cancel").disabled(mutating).on_cx(|_, _: &Activate, cx| {
                 cx.dispatch_program(file_message(FilesMessage::CloseDialog));
             }),
             button(submit_label).key("file-dialog-submit").disabled(mutating).on_cx(|_, _: &Activate, cx| {
                 cx.dispatch_program(file_message(FilesMessage::SubmitDialog));
             }),
-        )),
-    )).into_any()
+        )))
+        .into_any()
 }
 
 fn hardlink_dialog(message: String, mutating: bool) -> AnyView {
     let confirm = if mutating { "处理中..." } else { "加入关联" };
-    widget(Stack::column(8.0)).children((
-        text("加入硬链接关联").key("file-hardlink-title"),
-        text(message).key("file-hardlink-message"),
-        widget(Stack::row(8.0)).children((
-            button("跳过").key("file-hardlink-skip").disabled(mutating).on_cx(|_, _: &Activate, cx| {
-                cx.dispatch_program(file_message(FilesMessage::SkipHardlink));
-            }),
-            button(confirm).key("file-hardlink-confirm").disabled(mutating).on_cx(|_, _: &Activate, cx| {
-                cx.dispatch_program(file_message(FilesMessage::ConfirmHardlink));
-            }),
-        )),
-    )).into_any()
+    widget(ConfirmDialog::new("加入硬链接关联", message))
+        .cancel(button("跳过").key("file-hardlink-skip").disabled(mutating).on_cx(|_, _: &Activate, cx| {
+            cx.dispatch_program(file_message(FilesMessage::SkipHardlink));
+        }))
+        .confirm(button(confirm).key("file-hardlink-confirm").disabled(mutating).on_cx(|_, _: &Activate, cx| {
+            cx.dispatch_program(file_message(FilesMessage::ConfirmHardlink));
+        }))
+        .into_any()
 }
 
 fn file_message(message: FilesMessage) -> ShellMessage {

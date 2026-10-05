@@ -193,7 +193,7 @@ fn assert_smart_folder_dialog() {
     click_label(&mut session, "新建智能文件夹");
     let _ = pump(&mut session, &mut model);
     let nodes = session.accessibility_dump();
-    for label in ["新建智能文件夹", "已选 顶层智能文件夹", "已选 全部匹配", "任一匹配", "取消", "创建"] {
+    for label in ["新建智能文件夹", "已选 顶层智能文件夹", "全部匹配", "任一匹配", "取消", "创建"] {
         assert!(has_label(&nodes, label), "新建智能文件夹缺少 {label}");
     }
     assert_eq!(input_placeholder(&session, "名称"), "例如 高评分 PSD");
