@@ -52,7 +52,23 @@ pub fn dispatch_files_effects(app: &mut MomoBakoApplication, context: &RuntimePr
             }
             FilesEffect::LoadAsset { repo_id, asset_id } => dispatch_asset(app, context, repo_id, asset_id),
             FilesEffect::PersistDisplayMode => app.shell.files.save_display_mode_file(&display_mode_path()),
+            FilesEffect::DecodeThumbnails { paths } => dispatch_thumbnails(context, paths),
         }
+    }
+}
+
+fn dispatch_thumbnails(context: &RuntimeProgramContext<ShellMessage>, paths: Vec<String>) {
+    if let Err(error) = context.run_task(Task::new(async move {
+        let mut frames = Vec::new();
+        for path in paths {
+            match crate::shell::decode_thumbnail_file(&path) {
+                Ok(frame) => frames.push(frame),
+                Err(error) => eprintln!("Nana 缩略图解码失败：{path}：{error}"),
+            }
+        }
+        ShellMessage::ThumbnailPixels(frames)
+    })) {
+        eprintln!("Nana 缩略图解码任务提交失败：{error}");
     }
 }
 

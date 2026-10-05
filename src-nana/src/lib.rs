@@ -46,6 +46,8 @@ pub struct MomoBakoApplication {
     shell: ShellViewModel,
     repositories_load_scheduled: bool,
     preview_gpu: Option<NativePreviewGpu>,
+    thumbnail_gpu: Vec<ThumbnailGpu>,
+    pending_thumbs: Vec<PendingThumb>,
 }
 
 struct NativePreviewGpu {
@@ -55,6 +57,20 @@ struct NativePreviewGpu {
     height: u32,
 }
 
+struct ThumbnailGpu {
+    slot: String,
+    texture: GpuTexture,
+    width: u32,
+    height: u32,
+}
+
+struct PendingThumb {
+    slot: String,
+    width: u32,
+    height: u32,
+    rgba: Vec<u8>,
+}
+
 impl Default for MomoBakoApplication {
     fn default() -> Self {
         Self {
@@ -62,6 +78,8 @@ impl Default for MomoBakoApplication {
             shell: ShellViewModel::default(),
             repositories_load_scheduled: false,
             preview_gpu: None,
+            thumbnail_gpu: Vec::new(),
+            pending_thumbs: Vec::new(),
         }
     }
 }
@@ -100,6 +118,8 @@ impl ApplicationState for MomoBakoApplication {
             shell,
             repositories_load_scheduled: false,
             preview_gpu: None,
+            thumbnail_gpu: Vec::new(),
+            pending_thumbs: Vec::new(),
         })
     }
 
@@ -187,14 +207,30 @@ impl ApplicationState for MomoBakoApplication {
                 HostTextureAlphaMode::Premultiplied,
             );
         }
+        self.publish_thumbnails(window, context);
     }
 
     fn update(
         &mut self,
-        message: ShellMessage,
+        mut message: ShellMessage,
         windows: &mut std::collections::HashMap<nana_ui_platform::WindowId, ApplicationWindow>,
         context: &RuntimeProgramContext<Self::Message>,
     ) -> RuntimeProgramUpdate {
+        if let ShellMessage::ThumbnailPixels(frames) = &mut message {
+            for frame in frames.iter_mut() {
+                let rgba = std::mem::take(&mut frame.rgba);
+                if rgba.len() != (frame.width as usize).saturating_mul(frame.height as usize).saturating_mul(4) {
+                    eprintln!("Nana 缩略图像素长度不对：{}", frame.path);
+                    continue;
+                }
+                self.pending_thumbs.push(PendingThumb {
+                    slot: shell::thumbnail_slot(&frame.path),
+                    width: frame.width,
+                    height: frame.height,
+                    rgba,
+                });
+            }
+        }
         let Some((id, window)) = windows.iter_mut().next() else {
             return RuntimeProgramUpdate::default();
         };
@@ -937,6 +973,53 @@ fn dispatch_workspace_effects(
             WorkspaceEffect::LoadSnapshotSilent { repo_id } => {
                 shell::workspace_refresh::dispatch_silent_snapshot(app, context, repo_id);
             }
+        }
+    }
+}
+
+impl MomoBakoApplication {
+    /// 把新解码的缩略图像素上传成宿主纹理，并在每帧重新登记。
+    fn publish_thumbnails(&mut self, window: &mut ApplicationWindow, context: &RuntimeProgramContext<ShellMessage>) {
+        for pending in std::mem::take(&mut self.pending_thumbs) {
+            let Ok(texture) = context.gpu().create_texture(&GpuTextureDescriptor {
+                label: Some("momobako thumbnail"),
+                width: pending.width,
+                height: pending.height,
+                format: GpuTextureFormat::RGBA8_UNORM_SRGB,
+                usage: GpuTextureUsages::SAMPLED | GpuTextureUsages::COPY_DST,
+            }) else {
+                eprintln!("Nana 缩略图纹理创建失败：{}x{}", pending.width, pending.height);
+                continue;
+            };
+            if let Err(error) = context.gpu().write_texture(
+                &texture,
+                GpuTextureRegion::full(pending.width, pending.height),
+                &pending.rgba,
+                pending.width.saturating_mul(4),
+            ) {
+                eprintln!("Nana 缩略图纹理上传失败：{error}");
+                continue;
+            }
+            self.thumbnail_gpu.retain(|item| item.slot != pending.slot);
+            self.thumbnail_gpu.push(ThumbnailGpu {
+                slot: pending.slot,
+                texture,
+                width: pending.width,
+                height: pending.height,
+            });
+        }
+        if self.thumbnail_gpu.len() > 240 {
+            let extra = self.thumbnail_gpu.len() - 240;
+            self.thumbnail_gpu.drain(0..extra);
+        }
+        for thumb in &self.thumbnail_gpu {
+            window.textures.register(
+                thumb.slot.clone(),
+                HostTexture::new(1, 1, &thumb.texture),
+                thumb.width,
+                thumb.height,
+                HostTextureAlphaMode::Premultiplied,
+            );
         }
     }
 }
