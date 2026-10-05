@@ -76,6 +76,7 @@ fn live_workspace_title_bar_layout_and_clicks_hold() {
     assert_startup();
     assert_missing();
     assert_clicks();
+    assert_smart_folder_dialog();
 }
 
 fn assert_startup() {
@@ -184,6 +185,27 @@ fn assert_clicks() {
         nodes.iter().all(|node| !(node.role == "text-input" && node.label.as_deref() == Some("标签"))),
         "关闭筛选后筛选输入还在"
     );
+}
+
+fn assert_smart_folder_dialog() {
+    let mut model = live_files();
+    let mut session = open_session(model.clone(), 1200, 800, ThemeName::Light);
+    click_label(&mut session, "新建智能文件夹");
+    let _ = pump(&mut session, &mut model);
+    let nodes = session.accessibility_dump();
+    for label in ["新建智能文件夹", "已选 顶层智能文件夹", "已选 全部匹配", "任一匹配", "取消", "创建"] {
+        assert!(has_label(&nodes, label), "新建智能文件夹缺少 {label}");
+    }
+    assert_eq!(input_placeholder(&session, "名称"), "例如 高评分 PSD");
+    let dialog_shot = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target/nana-live-visual/smart-folder-dialog.png");
+    session.screenshot_png(&dialog_shot).expect("智能文件夹对话框截图");
+
+    click_input(&mut session, "名称");
+    session.type_text("高评分 PSD").expect("输入名称");
+    let _ = pump(&mut session, &mut model);
+    click_label(&mut session, "创建");
+    let _ = pump(&mut session, &mut model);
+    assert!(has_label(&session.accessibility_dump(), "正在创建…"), "创建没有进入提交");
 }
 
 fn open_session(
@@ -492,6 +514,15 @@ fn pump(session: &mut RuntimeAgentSession, model: &mut ShellViewModel) -> Vec<Wi
     commands
 }
 
+fn click_input(session: &mut RuntimeAgentSession, label: &str) {
+    let node = session
+        .accessibility_dump()
+        .into_iter()
+        .find(|node| node.role == "text-input" && node.label.as_deref() == Some(label))
+        .unwrap_or_else(|| panic!("点不到输入 {label}"));
+    assert!(session.click_node(node.id).expect("click"), "点击没有命中输入 {label}");
+}
+
 fn click_label(session: &mut RuntimeAgentSession, label: &str) {
     let node = session
         .accessibility_dump()
@@ -502,15 +533,19 @@ fn click_label(session: &mut RuntimeAgentSession, label: &str) {
 }
 
 fn search_placeholder(session: &RuntimeAgentSession) -> String {
+    input_placeholder(session, "全局搜索")
+}
+
+fn input_placeholder(session: &RuntimeAgentSession, label: &str) -> String {
     let node = session
         .accessibility_dump()
         .into_iter()
-        .find(|node| node.label.as_deref() == Some("全局搜索"))
-        .expect("全局搜索");
-    let id = StableNodeId::new(node.id).expect("search id");
+        .find(|node| node.role == "text-input" && node.label.as_deref() == Some(label))
+        .unwrap_or_else(|| panic!("缺少输入 {label}"));
+    let id = StableNodeId::new(node.id).expect("input id");
     session
         .document()
         .context()
         .read(Entity::<TextInput>::from_stable_id(id), |input| input.placeholder.to_string())
-        .expect("搜索框")
+        .unwrap_or_else(|_| panic!("读不到输入 {label}"))
 }

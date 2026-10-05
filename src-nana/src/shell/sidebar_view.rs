@@ -5,12 +5,12 @@ use std::sync::Arc;
 use nana_ui::icons_tabler::{ARCHIVE, CLOCK, CLIPBOARD_LIST, FOLDERS, LOGS, PLUS, PUZZLE, REFRESH, SETTINGS, TAG, TRASH};
 use nana_ui::runtime::view::{button, text, widget, AnyView, IntoView};
 use nana_ui::runtime::{
-    Activate, AlignSpec, Icon, IconButton, IconGlyph, LengthSpec, SemanticColorRole, SidebarRow, SidebarRowState,
-    Stack, Text, TextChanged, TextInput, TreeNode, TreeView, TreeViewEvent, ViewContext,
+    Activate, AlignSpec, Icon, IconButton, IconGlyph, JustifySpec, LengthSpec, SemanticColorRole, SidebarRow,
+    SidebarRowState, Stack, Text, TextChanged, TextInput, TreeNode, TreeView, TreeViewEvent, ViewContext,
 };
 
 use super::files::{FileDialog, FilesMessage};
-use super::sidebar::{PopoverMode, ShortcutId};
+use super::sidebar::{PopoverMode, ShortcutId, SmartFolderField};
 use super::SidebarMessage;
 use super::{ShellMessage, ShellPage, ShellViewModel, WorkspacePanel};
 
@@ -61,7 +61,13 @@ pub fn sidebar_sections(model: &ShellViewModel) -> impl IntoView + use<'_> {
     if !model.sidebar.tree_error.is_empty() {
         rows.push(hint(&model.sidebar.tree_error, "folder-tree-error"));
     }
-    rows.push(section_label("智能文件夹"));
+    let smart_locked = locked || model.workspace.active_repo_id.is_none();
+    rows.push(section_bar(
+        section_label("智能文件夹"),
+        vec![tree_action(PLUS, "新建智能文件夹", "smart-create", smart_locked, || {
+            ShellMessage::Sidebar(SidebarMessage::OpenSmartFolderDialog)
+        })],
+    ));
     rows.push(smart_body(model, locked).into_any());
     if !model.sidebar.smart_error.is_empty() {
         rows.push(hint(&model.sidebar.smart_error, "smart-folder-error"));
@@ -151,6 +157,133 @@ pub fn repository_popover(model: &ShellViewModel) -> Option<impl IntoView + use<
             cx.dispatch_program(sidebar_message(SidebarMessage::CloseRepositoryPopover));
         }),
     )))
+}
+
+/// 新建智能文件夹。名称必填；筛选留空时创建的是不带条件的文件夹。
+pub fn smart_folder_dialog(model: &ShellViewModel) -> Option<AnyView> {
+    let draft = &model.sidebar.smart_draft;
+    if !draft.open {
+        return None;
+    }
+    let busy = draft.busy;
+    let name = draft.name.clone();
+    let blocked = busy || name.trim().is_empty();
+    let parent_id = draft.parent_id.clone();
+    let query = draft.query.clone();
+    let path_prefix = draft.path_prefix.clone();
+    let formats = draft.formats.clone();
+    let tags = draft.tags.clone();
+    let match_mode = draft.match_mode.clone();
+    let error = (!draft.error.is_empty()).then(|| text(draft.error.clone()).key("smart-dialog-error").into_any());
+    let mut parents = vec![choice(
+        "顶层智能文件夹".into(),
+        "smart-parent-root",
+        parent_id.is_empty(),
+        busy,
+        SmartFolderField::Parent,
+        String::new(),
+    )];
+    for (id, label) in flatten_smart_folders(&model.sidebar.smart_folders) {
+        let selected = parent_id == id;
+        parents.push(choice(label, format!("smart-parent-{id}"), selected, busy, SmartFolderField::Parent, id));
+    }
+    let mut body = vec![
+        text("新建智能文件夹").key("smart-dialog-title").into_any(),
+        labeled_field("名称", "例如 高评分 PSD", name, "smart-name", busy, SmartFolderField::Name),
+        text("父级").key("smart-parent-label").into_any(),
+        widget(Stack::column(6.0)).children(parents).into_any(),
+        labeled_field("关键词", "文件名、标签或元数据", query, "smart-query", busy, SmartFolderField::Query),
+        labeled_field("路径前缀", "Campaigns/Summer", path_prefix, "smart-path", busy, SmartFolderField::Path),
+        labeled_field("格式", "psd，png", formats, "smart-formats", busy, SmartFolderField::Formats),
+        labeled_field("标签", "封面，主视觉", tags, "smart-tags", busy, SmartFolderField::Tags),
+        text("匹配方式").key("smart-match-label").into_any(),
+        widget(Stack::row(8.0)).children((
+            choice("全部匹配".into(), "smart-match-and", match_mode != "or", busy, SmartFolderField::Match, "and".into()),
+            choice("任一匹配".into(), "smart-match-or", match_mode == "or", busy, SmartFolderField::Match, "or".into()),
+        )).into_any(),
+    ];
+    if let Some(error) = error {
+        body.push(error);
+    }
+    body.push(widget(Stack::row(8.0)).children((
+        button("取消").key("smart-dialog-cancel").disabled(busy).on_cx(|_, _: &Activate, cx| {
+            cx.dispatch_program(sidebar_message(SidebarMessage::CloseSmartFolderDialog));
+        }),
+        button(if busy { "正在创建…" } else { "创建" }).key("smart-create-submit").disabled(blocked).on_cx(|_, _: &Activate, cx| {
+            cx.dispatch_program(sidebar_message(SidebarMessage::SubmitSmartFolder));
+        }),
+    )).into_any());
+    Some(
+        widget(Stack::fill_column(0.0).padding_xy(24.0, 24.0).justify(JustifySpec::Center).align(AlignSpec::Center)).children((
+            widget(
+                Stack::column(12.0)
+                    .width(LengthSpec::Px(460.0))
+                    .surface(SemanticColorRole::Surface)
+                    .radius_px(16.0)
+                    .padding_xy(20.0, 18.0),
+            )
+            .children(body),
+        )).into_any(),
+    )
+}
+
+fn labeled_field(
+    label: &'static str,
+    placeholder: &'static str,
+    value: String,
+    key: &'static str,
+    disabled: bool,
+    field: SmartFolderField,
+) -> AnyView {
+    widget(Stack::column(4.0)).children((
+        widget(Text::new(label).color(SemanticColorRole::Muted).font_size(12.0)).key(format!("{key}-caption")),
+        draft_input(label, placeholder, value, key, disabled, field),
+    )).into_any()
+}
+
+fn draft_input(
+    label: &'static str,
+    placeholder: &'static str,
+    value: String,
+    key: &'static str,
+    disabled: bool,
+    field: SmartFolderField,
+) -> AnyView {
+    widget(TextInput::new(value).label(label).placeholder(placeholder).disabled(disabled)).key(key).on_cx(
+        move |_, event: &TextChanged, cx| {
+            cx.dispatch_program(sidebar_message(SidebarMessage::SetSmartFolderField {
+                field,
+                value: event.value.to_string(),
+            }));
+        },
+    ).into_any()
+}
+
+fn choice(
+    label: String,
+    key: impl Into<String>,
+    selected: bool,
+    disabled: bool,
+    field: SmartFolderField,
+    value: String,
+) -> AnyView {
+    let caption = if selected { format!("已选 {label}") } else { label };
+    button(caption).key(key.into()).disabled(disabled).on_cx(move |_, _: &Activate, cx| {
+        cx.dispatch_program(sidebar_message(SidebarMessage::SetSmartFolderField { field, value: value.clone() }));
+    }).into_any()
+}
+
+fn flatten_smart_folders(folders: &[super::sidebar::SidebarSmartFolder]) -> Vec<(String, String)> {
+    fn walk(folders: &[super::sidebar::SidebarSmartFolder], prefix: &str, out: &mut Vec<(String, String)>) {
+        for folder in folders {
+            let label = if prefix.is_empty() { folder.name.clone() } else { format!("{prefix} / {}", folder.name) };
+            out.push((folder.id.clone(), label.clone()));
+            walk(&folder.children, &label, out);
+        }
+    }
+    let mut out = Vec::new();
+    walk(folders, "", &mut out);
+    out
 }
 
 fn section_label(title: &'static str) -> AnyView {
