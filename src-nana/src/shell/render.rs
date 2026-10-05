@@ -6,8 +6,8 @@ use super::*;
 use crate::theme_map::{SIDEBAR_MAX_PX, SIDEBAR_MIN_PX};
 use nana_ui::runtime::view::{button, text, widget, IntoView};
 use nana_ui::runtime::{
-    Activate, AppShell, FrameworkError, GpuTextureView, LengthSpec, List, MountedView, RuntimeDocument,
-    SidebarFrame, SplitPane, Stack, TextChanged, TextInput,
+    Activate, AlignSpec, AppShell, FrameworkError, GpuTextureView, JustifySpec, LengthSpec, List, MountedView,
+    Progress, RuntimeDocument, SidebarFrame, SplitPane, Stack, TextChanged, TextInput,
 };
 use nana_ui::{SplitAxis, SplitPaneModel};
 
@@ -537,14 +537,14 @@ pub fn mount_shell(
                     }
                 }
             };
-            let stage = if live_files {
-                widget(Stack::column(0.0).min_height(LengthSpec::Px(0.0)))
-                    .children((primary,))
+            let stage = if show_page && !live_files {
+                widget(Stack::fill_row(0.0).min_height(LengthSpec::Px(0.0)))
+                    .children((primary, process))
                     .key("workspace-body")
                     .into_any()
             } else {
-                widget(Stack::fill_row(0.0).min_height(LengthSpec::Px(0.0)))
-                    .children((primary, process))
+                widget(Stack::fill_column(0.0).min_height(LengthSpec::Px(0.0)))
+                    .children((primary,))
                     .key("workspace-body")
                     .into_any()
             };
@@ -583,18 +583,17 @@ pub fn mount_shell(
     Ok(())
 }
 
-/// 启动四步。失败时保留已完成步骤，并提供重试。
+/// 启动四步。版式对齐 Vue：居中面板、进度条、编号和标题分行。
 fn startup_panel(model: &ShellViewModel) -> impl IntoView + use<'_> {
     let startup = &model.workspace.startup;
     let steps = startup.step_items().into_iter().map(|item| {
-        let state = match item.state {
-            super::workspace::StartupStepState::Pending => "等待",
-            super::workspace::StartupStepState::Current => "进行中",
-            super::workspace::StartupStepState::Done => "已完成",
-            super::workspace::StartupStepState::Error => "失败",
-        };
-        text(format!("{} {} · {} · {}", item.number, item.label, item.detail, state))
-            .key(format!("startup-step-{}", item.number))
+        widget(Stack::row(10.0)).children((
+            text(item.number.to_string()).key(format!("startup-index-{}", item.number)),
+            widget(Stack::column(2.0)).children((
+                text(item.label).key(format!("startup-label-{}", item.number)),
+                text(item.detail).key(format!("startup-copy-{}", item.number)),
+            )),
+        ))
     });
     let error = startup.error.clone().map(|error| text(error).key("startup-error"));
     let retry = (startup.status == StartupStatus::Error).then(|| {
@@ -602,17 +601,31 @@ fn startup_panel(model: &ShellViewModel) -> impl IntoView + use<'_> {
             cx.dispatch_program(ShellMessage::StartupRetry);
         })
     });
-    widget(Stack::fill_column(12.0).padding_xy(24.0, 20.0)).children((
+    let mut progress = Progress::new(f64::from(startup.percent), 100.0)
+        .label(format!("进度 {}%", startup.percent));
+    {
+        let layout = std::sync::Arc::make_mut(&mut progress.style.layout);
+        layout.width = Some(LengthSpec::Fill);
+        layout.height = Some(LengthSpec::Px(6.0));
+    }
+    let panel = widget(Stack::column(12.0).width(LengthSpec::Px(640.0))).children((
         text("MomoBako").key("startup-eyebrow"),
         text(startup.step_label.clone()).key("startup-title"),
         text(format!("第 {} / {} 步", startup.current_step, startup.total_steps)).key("startup-meta"),
-        text(format!("进度 {}%", startup.percent)).key("startup-percent"),
+        widget(progress).key("startup-progress"),
         text(startup.step_detail.clone()).key("startup-detail"),
         text("加载步骤").key("startup-steps-label"),
-        widget(Stack::column(6.0)).children(steps.collect::<Vec<_>>()),
+        widget(Stack::column(8.0)).children(steps.collect::<Vec<_>>()),
         error,
         retry,
-    ))
+    ));
+    widget(
+        Stack::fill_column(0.0)
+            .padding_xy(24.0, 24.0)
+            .justify(JustifySpec::Center)
+            .align(AlignSpec::Center),
+    )
+    .children((panel,))
 }
 
 /// 缺失仓库的刷新、重定向和删除。忙或删除中时按钮不可再次提交。

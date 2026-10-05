@@ -5,7 +5,7 @@
 
 use std::sync::Arc;
 
-use nana_ui::runtime::view::{button, icon_button, widget, IntoView};
+use nana_ui::runtime::view::{icon_button, widget, IntoView};
 use nana_ui::runtime::{
     Activate, AppTitleBar, Entity, IconButton, LengthSpec, RuntimeDocument, TextChanged, TextInput,
 };
@@ -30,7 +30,7 @@ pub(super) fn title_bar(model: &ShellViewModel) -> impl IntoView + use<'_> {
         AppTitleBar::new("MomoBako")
             .show_window_controls(true)
             .native_controls(false)
-            .center_width(560.0),
+            .center_width(460.0),
     )
     .leading(
         icon_button(Icon::Sidebar, sidebar_label)
@@ -39,7 +39,7 @@ pub(super) fn title_bar(model: &ShellViewModel) -> impl IntoView + use<'_> {
                 cx.dispatch_program(ShellMessage::ToggleSidebar);
             }),
     )
-    .center(widget(nana_ui::runtime::Stack::row(8.0)).children((
+    .center(widget(nana_ui::runtime::Stack::row(4.0)).children((
         widget(search_field(query))
             .key("global-search")
             .on_cx(|_, event: &TextChanged, cx| {
@@ -47,10 +47,26 @@ pub(super) fn title_bar(model: &ShellViewModel) -> impl IntoView + use<'_> {
                     event.value.to_string(),
                 )));
             }),
-        button(filter_label).key("filter-toggle").on_cx(|_, _: &Activate, cx| {
-            cx.dispatch_program(ShellMessage::Inspect(InspectMessage::ToggleFilterBar));
-        }),
+        widget(filter_button(filter_label))
+            .key("filter-toggle")
+            .on_cx(|_, _: &Activate, cx| {
+                cx.dispatch_program(ShellMessage::Inspect(InspectMessage::ToggleFilterBar));
+            }),
     )))
+}
+
+/// 28 像素的筛选图标。无障碍名称仍是「显示筛选栏」或「隐藏筛选栏」。
+fn filter_button(label: &str) -> IconButton {
+    let mut button = IconButton::new(nana_ui::icons_tabler::ADJUSTMENTS_HORIZONTAL, label)
+        .size(ControlSize::Small);
+    let layout = Arc::make_mut(&mut button.style.layout);
+    layout.width = Some(LengthSpec::Px(28.0));
+    layout.height = Some(LengthSpec::Px(28.0));
+    layout.min_width = Some(LengthSpec::Px(28.0));
+    layout.min_height = Some(LengthSpec::Px(28.0));
+    layout.flex_grow = Some(0.0);
+    layout.flex_shrink = Some(0.0);
+    button
 }
 
 /// 搜索框不用百分百宽度，给筛选开关留出中间槽里的可见位置。
@@ -60,9 +76,9 @@ fn search_field(query: String) -> TextInput {
         .placeholder("搜索文件名、标签、元数据")
         .size(ControlSize::Small);
     let layout = Arc::make_mut(&mut field.style.layout);
-    layout.width = Some(LengthSpec::Px(280.0));
-    layout.min_width = Some(LengthSpec::Px(280.0));
-    layout.max_width = Some(LengthSpec::Px(280.0));
+    layout.width = Some(LengthSpec::Px(360.0));
+    layout.min_width = Some(LengthSpec::Px(360.0));
+    layout.max_width = Some(LengthSpec::Px(360.0));
     layout.flex_grow = Some(0.0);
     layout.flex_shrink = Some(0.0);
     field
