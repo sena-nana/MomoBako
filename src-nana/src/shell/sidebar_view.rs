@@ -45,7 +45,7 @@ pub fn sidebar_switcher(model: &ShellViewModel) -> impl IntoView + use<'_> {
 /// 快捷方式、目录树、智能文件夹和播放集。边距交给 `SidebarFrame`，行距交给 `SidebarSection`。
 pub fn sidebar_sections(model: &ShellViewModel) -> impl IntoView + use<'_> {
     let locked = model.navigation_locked();
-    let mut sections = vec![group("快捷方式", None, None, shortcut_rows(model, locked))];
+    let mut sections = vec![group("快捷方式", None, shortcut_rows(model, locked))];
     if !model.sidebar.quick_access.is_empty() {
         let mut rows = Vec::new();
         for shortcut in model.sidebar.quick_access.clone() {
@@ -54,7 +54,7 @@ pub fn sidebar_sections(model: &ShellViewModel) -> impl IntoView + use<'_> {
                 cx.dispatch_program(sidebar_message(SidebarMessage::OpenQuickAccess(id.clone())));
             }));
         }
-        sections.push(group("快捷访问", None, None, rows));
+        sections.push(group("快捷访问", None, rows));
     }
     let folder_locked = locked || model.workspace.active_repo_id.is_none() || model.workspace.panel == WorkspacePanel::Trash;
     let refresh_locked = locked || model.workspace.active_repo_id.is_none() || model.sidebar.tree_loading;
@@ -65,7 +65,6 @@ pub fn sidebar_sections(model: &ShellViewModel) -> impl IntoView + use<'_> {
     }
     sections.push(group(
         "文件夹",
-        None,
         Some(widget(Stack::row(0.0)).children((
             section_tool(PLUS, "在当前目录新建文件夹", "folder-create", folder_locked, || {
                 ShellMessage::Files(FilesMessage::OpenDialog(FileDialog::CreateDirectory))
@@ -83,7 +82,6 @@ pub fn sidebar_sections(model: &ShellViewModel) -> impl IntoView + use<'_> {
     }
     sections.push(group(
         "智能文件夹",
-        None,
         Some(section_tool(PLUS, "新建智能文件夹", "smart-create", smart_locked, || {
             ShellMessage::Sidebar(SidebarMessage::OpenSmartFolderDialog)
         })),
@@ -301,64 +299,45 @@ fn flatten_smart_folders(folders: &[super::sidebar::SidebarSmartFolder]) -> Vec<
     out
 }
 
-/// 一个侧栏分组。行与行的间距由 `SidebarSection` 自己的正文槽决定。
-fn group(title: &'static str, count: Option<usize>, tools: Option<AnyView>, body: Vec<AnyView>) -> AnyView {
+/// 一个侧栏分组。行距由 `SidebarSection` 的正文槽决定。
+/// 标题工具要一直能看见；组件默认只在悬停时放进标题槽。
+fn group(title: &'static str, tools: Option<AnyView>, body: Vec<AnyView>) -> AnyView {
     let mut spec = SidebarSection::new(title);
-    // 标题工具要一直能看见。组件默认只在悬停时放进标题槽。
     spec.header_hovered = tools.is_some();
-    if let Some(count) = count {
-        spec = spec.count(count);
-    }
-    let section = widget(spec);
     let section = match tools {
-        Some(tools) => section.tools(tools),
-        None => section,
+        Some(tools) => widget(spec).tools(tools),
+        None => widget(spec),
     };
     section.children(body).into_any()
 }
 
-/// 播放集标题。Vue 把数量放在「播放集」右边 6px，加号留在分组工具列。
-/// `SidebarSection` 的计数槽画在工具列里，右边线和加号对不齐，所以这里自己排。
+/// 播放集标题。数量跟在标题后，加号留在工具列。
+/// 组件计数槽和加号占同一列，所以这里分开排。折叠标记收成 12px，避免带上工具列的右边距。
 fn playlist_group(count: usize, expanded: bool, tools: AnyView, body: AnyView) -> AnyView {
-    widget(Stack::column(2.0))
-        .children((playlist_header(count, expanded, tools), body))
-        .into_any()
-}
-
-fn playlist_header(count: usize, expanded: bool, tools: AnyView) -> AnyView {
-    let chevron = if expanded { Icon::ChevronDown } else { Icon::ChevronRight };
-    let toggle_label = if expanded { "收起播放集" } else { "展开播放集" };
-    widget(Stack::bar(0.0).with_layout(|layout| {
-        layout.align_items = AlignSpec::Center;
-        layout.padding_left = Some(LengthSpec::Px(8.0));
-        layout.padding_right = Some(LengthSpec::Px(8.0));
-        layout.height = Some(LengthSpec::Px(28.0));
-    }))
-    .children((
-        widget(Stack::row(6.0).align(AlignSpec::Center)).children((
-            playlist_disclosure(chevron, toggle_label),
-            widget(Text::new("播放集").color(SemanticColorRole::Faint).font_size(11.0).font_weight(700)),
-            widget(Text::new(count.to_string()).color(SemanticColorRole::Muted).font_size(11.0).font_weight(700)),
-        )),
-        widget(Stack::spacer()),
-        tools,
-    ))
-    .into_any()
-}
-
-/// 12px 折叠标记，不占工具列的 4px 右边距，标题才能和其它分组对齐。
-fn playlist_disclosure(icon: Icon, label: &'static str) -> AnyView {
-    let mut button = sidebar_section_tool_button(icon, label);
-    let layout = Arc::make_mut(&mut button.style.layout);
+    let icon = if expanded { Icon::ChevronDown } else { Icon::ChevronRight };
+    let label = if expanded { "收起播放集" } else { "展开播放集" };
+    let mut mark = sidebar_section_tool_button(icon, label);
+    let layout = Arc::make_mut(&mut mark.style.layout);
     let edge = LengthSpec::Px(12.0);
     layout.width = Some(edge);
     layout.height = Some(edge);
     layout.min_width = Some(edge);
     layout.min_height = Some(edge);
     layout.margin_right = Some(LengthSpec::Px(0.0));
-    widget(button).key("playlist-toggle").on_cx(move |_, _: &Activate, cx| {
-        cx.dispatch_program(sidebar_message(SidebarMessage::TogglePlaylists));
-    }).into_any()
+    widget(Stack::column(2.0)).children((
+        widget(Stack::bar(0.0).align(AlignSpec::Center).padding_xy(8.0, 0.0).height(LengthSpec::Px(28.0))).children((
+            widget(Stack::row(6.0).align(AlignSpec::Center)).children((
+                widget(mark).key("playlist-toggle").on_cx(move |_, _: &Activate, cx| {
+                    cx.dispatch_program(sidebar_message(SidebarMessage::TogglePlaylists));
+                }),
+                widget(Text::new("播放集").color(SemanticColorRole::Faint).font_size(11.0).font_weight(700)),
+                widget(Text::new(count.to_string()).color(SemanticColorRole::Muted).font_size(11.0).font_weight(700)),
+            )),
+            widget(Stack::spacer()),
+            tools,
+        )),
+        body,
+    )).into_any()
 }
 
 fn section_tool(
