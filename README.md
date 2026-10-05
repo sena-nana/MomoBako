@@ -1,6 +1,6 @@
 # MomoBako
 
-MomoBako 是一个基于 Tauri 2、Vue 3 与 TypeScript 的桌面资源库工作台。
+MomoBako 是一个桌面资源库工作台。默认桌面端是原生壳层 `momobako-nana`。Vue 3 与 Tauri 2 界面保留一个版本周期，用来对照回归。
 
 当前工程包含：
 
@@ -20,12 +20,13 @@ MomoBako 是一个基于 Tauri 2、Vue 3 与 TypeScript 的桌面资源库工作
 npm install --global corepack@0.35.0
 corepack enable
 corepack yarn install --immutable
+cargo run -p momobako-nana
 yarn dev
 yarn tauri:dev
 yarn verify
 ```
 
-`yarn dev` 仅启动 Vite 前端；`yarn tauri:dev` 会先完整构建、打包并暂存外置插件，再启动桌面端，确保本地文件系统等运行时能力可用。
+`cargo run -p momobako-nana` 从仓库根目录启动默认桌面端，服务数据写在当前目录的 `.service-data`。`yarn dev` 仅启动 Vite 前端。`yarn tauri:dev` 仍会先完整构建、打包并暂存外置插件，再启动 Tauri 对照窗口。
 
 原生插件共享仓库根 `Cargo.lock` 与 `target/`。日常增量调试可运行 `yarn plugins:build:dev <目录名或 pluginId>`；发布产物使用 `yarn plugins:build` 与 `yarn plugins:package`，生成带目标三元组的可复现 v2 `.momoplug`。
 

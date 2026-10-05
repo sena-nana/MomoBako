@@ -233,4 +233,4 @@
 | 文件对话框 | 导出外部连接或选择插件包 | `OpenFileDialog`；写出和安装没有替身 | 取消不写文件也不安装；失败记下错误；未知编号忽略 | “正在选择导出位置…” / “正在选择插件包…” / “导出失败：Busy” | 已测试（未离屏） |
 | 实况表面 | 验收场景 | 无 | `acceptance_scene` 不显示关闭确认条，旧按钮文案不变 | “关闭” | 已测试（未离屏） |
 
-Phase 8 在上表没有未读和未测试的产品分支之后，才把默认启动改到 `momobako-nana`。离屏通过不勾掉拖放、IME、托盘和真窗口行；那些行留在 `nana-device-matrix.md`。
+默认启动说明已经改到 `cargo run -p momobako-nana`。Vue 与 Tauri 源码保留一个版本周期，对照命令仍是 `yarn tauri:dev`。离屏通过不勾掉拖放、IME、托盘和真窗口行；那些行留在 `nana-device-matrix.md`。

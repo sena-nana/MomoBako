@@ -12,7 +12,7 @@ Surface。离屏验收使用同一份 Runtime 文档和 `RuntimeAgentSession`，
 `HeadlessInput → RuntimeDocument.flush → OffscreenSnapshots` 生成 PNG、语义树和输入
 结果；离屏路径不属于产品窗口，也不替代 Windows 原生窗口、拖放、IME、托盘和发布包验收。
 
-运行最小原生宿主：
+默认桌面端从仓库根目录启动。Vue 与 Tauri 对照窗口仍用 `yarn tauri:dev`，这次不删除前端。
 
 ```text
 cargo run -p momobako-nana
