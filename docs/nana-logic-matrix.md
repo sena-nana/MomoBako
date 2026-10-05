@@ -19,7 +19,7 @@
 
 这些行由 `src-nana/src/shell/workspace_tests.rs` 覆盖状态机和副作用枚举，状态是已测试。宿主在归约后把副作用交给领域服务：列表用 `list_repositories`，非缺失仓库接着 `PROTOCOL_REPOSITORY_SYNC`、`get_repository_snapshot` 和根目录 `get_file_browser`；重定向用 `PROTOCOL_REPOSITORY_RELOCATE`，删除用 `RepositoryManagementViewModel::delete_repository`，来源设置复用系统状态和应用设置加载。协议调用没有替身测试。下面每一行都未离屏，15 个旧验收场景仍走 `acceptance_scene`。
 
-未完成，不能记成已测试：分隔条拖动结束没有写回宽度；系统文件夹对话框未接，重定向使用页内路径框。
+未完成，不能记成已测试：分隔条拖动结束没有写回宽度。声明式分隔条在运行时内部消化松手，不向壳层发送宽度。
 
 | 来源 | 触发 | 服务 | 结果 | 可见性 | 状态 |
 | --- | --- | --- | --- | --- | --- |
@@ -37,8 +37,8 @@
 | `AppShell.vue` `watch(activeRepoId)` | 上一个 id 存在且变为另一个 id | `StopPlayback` | 相同 id 不停止播放，也不清缺失错误 | 切换后的仓库主区 | 已测试（未离屏） |
 | `AppShell.vue` 侧栏 | 折叠，或宽度在松手时提交 | `PersistSidebar` → `sidebar.json` | 宽度夹在 220–480，默认 276；只有存储值 `"1"` 才折叠；拖动中只夹取 | 折叠隐藏第一栏；键名沿用 `momobako.sidebarCollapsed` / `momobako.sidebarWidth` | 已测试（未离屏） |
 | `useMissingRepositoryActions.ts` 刷新 | 缺失仓库且不忙 | `RefreshRepositories` | 忙（重定向或删除中）时忽略 | “刷新”不可再次提交 | 已测试（未离屏） |
-| `useMissingRepositoryActions.ts` 选择路径 | 有仓库且不忙 | 无 | 打开页内路径框并清错误；空白提交不重定向 | “重定向”或忙时“重定向中...” | 已测试（未离屏） |
-| `useMissingRepositoryActions.ts` 提交路径 | 路径去空白后非空 | `RelocateRepository` | 成功后刷新列表；失败写入缺失错误并解除忙状态 | “确认重定向” | 已测试（未离屏） |
+| `useMissingRepositoryActions.ts` 选择路径 | 有仓库且不忙 | `OpenFileDialog`，`PickFolder`，编号 3 | 排队文件夹对话框并清错误；没有仓库或忙时不排队；取消、空白或对话框失败不重定向 | “重定向”；失败时“文件夹选择失败：…” | 已测试（未离屏） |
+| `useMissingRepositoryActions.ts` 提交路径 | 对话框返回去空白后非空的路径 | `RelocateRepository`，没有替身 | 成功后刷新列表；失败写入缺失错误并解除忙状态 | 忙时“重定向中...” | 已测试（未离屏） |
 | `MissingRepositoryState.vue` 来源缓存 | `localCache.required` 且缓存不是 ready | `OpenSourceSettings` | 不打开路径框 | 主按钮为“打开来源设置” | 已测试（未离屏） |
 | `RepositoryDeleteDialog.vue` | 打开、取消、确认 | `DeleteRepository` | 缺失的本地仓库只能“只删除记录”；删除中不能关闭或再次确认；没有删除标记的成功结果不关对话框；成功后移除记录并选剩余第一项或空仓库 | “删除资源库” / “删除中...”；三个删除方式 | 已测试（未离屏） |
 | `state.ts` 面板与分类 | 启动进度推进 | 无 | 面板保留；空列表把分类重置为全部 | 面板枚举不随步骤丢失 | 已测试（未离屏） |
@@ -235,9 +235,9 @@
 
 ## 宿主事件
 
-这些行由 `src-nana/src/shell/host_events.rs` 覆盖。日志和结构更新从 `host_event_channel` 进入壳层。实时日志按 id 合并，时间再 id 降序，最多 500 条；暂停时不标记滚动。启动仍在加载且分类是 `repository.sync` 时，才把消息追加到启动日志；记录里的仓库和当前仓库都非空且不同则忽略。结构更新只在启动完成、仓库匹配且不是缺失仓库时刷新：目录树、智能文件夹、播放集、仓库动作，以及文件或回收站的静默目录重读。播放集和智能文件夹面板改为重读当前项。分类视图不按目录重读。静默重读失败只记日志，不把整页改成错误。
+这些行由 `src-nana/src/shell/host_events.rs` 和 `workspace_refresh.rs` 覆盖。日志和结构更新从 `host_event_channel` 进入壳层。实时日志按 id 合并，时间再 id 降序，最多 500 条；暂停时不标记滚动。启动仍在加载且分类是 `repository.sync` 时，才把消息追加到启动日志；记录里的仓库和当前仓库都非空且不同则忽略。结构更新只在启动完成、仓库匹配且不是缺失仓库时刷新：目录树、智能文件夹、播放集、仓库动作、文件或回收站的静默目录重读，以及静默的仓库列表、摘要和硬链接候选。播放集和智能文件夹面板改为重读当前项。分类视图不按目录重读。静默重读失败只记日志，不把整页改成错误，也不弹出硬链接对话框。
 
-未完成，不能记成已测试：静默刷新不重拉仓库列表和摘要；不刷新硬链接候选；启动未完成时忽略结构更新；缺失仓库不因结构事件重置内容；这批路径没有新的离屏场景。
+未完成，不能记成已测试：这批路径没有新的离屏场景。启动未完成或仓库已经缺失时仍忽略整次结构更新，不重置内容。
 
 | 来源 | 触发 | 服务 | 结果 | 可见性 | 状态 |
 | --- | --- | --- | --- | --- | --- |
@@ -245,5 +245,8 @@
 | `lifecycle.ts` `appendStartupSyncLog` | 启动加载中的 `repository.sync` | 无新请求 | 其它分类不进入启动日志；仓库不一致则忽略；启动结束后不再追加 | 启动日志 | 已测试（未离屏） |
 | `lifecycle.ts` `handleRepositoryStructureUpdated` | `repository://structure-updated` | 目录树、智能文件夹、播放集、仓库动作、当前目录浏览，没有替身 | 别的仓库、启动未完成或缺失仓库不刷新；目录树正在读取时不重复请求树；文件和回收站静默重读并保留选择 | 当前列表 | 已测试（未离屏） |
 | 静默目录失败 | 重读返回错误 | 无 | 保留原列表和当前页 | 页面不变 | 已测试（未离屏） |
+| `refresh.ts` `refreshRepositorySummaries` | 就绪后的结构更新 | `list_repositories`，没有替身 | 替换列表；失败或启动中不写；不改活动 id、页面和启动步骤；当前仓库缺失或不在列表中时保留内容和主区 | 仓库名称；页面不变 | 已测试（未离屏） |
+| `refresh.ts` `refreshRepositorySnapshot` | 就绪且仓库匹配 | `get_repository_snapshot`，没有替身 | 更新名称、详情和快捷计数；不重新绑定目录树；失败、仓库不一致或缺失时不改页面 | 详情文本 | 已测试（未离屏） |
+| `refresh.ts` `refreshHardlinkCandidates` | 就绪后的结构更新 | `list_hardlink_candidates`，没有替身 | 替换候选；不打开对话框，不清已跳过项；失败不写页面错误 | 页面不变 | 已测试（未离屏） |
 
 默认启动说明已经改到 `cargo run -p momobako-nana`。Vue 与 Tauri 源码保留一个版本周期，对照命令仍是 `yarn tauri:dev`。离屏通过不勾掉拖放、IME、托盘和真窗口行；那些行留在 `nana-device-matrix.md`。

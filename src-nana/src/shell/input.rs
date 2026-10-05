@@ -2,7 +2,7 @@
 //!
 //! 移动、导入和附加复用文件与侧栏已有的服务请求。
 //! 系统拖出、外部打开、目录揭示和托盘没有 Nana 命令，只记录宿主请求。
-//! 保存和打开对话框排队为 `OpenFileDialog`，完成事件再写回设置状态。
+//! 保存、打开和重定向文件夹对话框都排队为 `OpenFileDialog`，完成事件再写回状态。
 
 use nana_ui_platform::host::WindowCommand;
 use nana_ui_platform::WindowId;
@@ -18,7 +18,7 @@ mod reduce;
 #[path = "input_view.rs"]
 mod view;
 
-pub(crate) use reduce::reduce_message;
+pub(crate) use reduce::{begin_relocate_dialog, reduce_message};
 pub(crate) use support::{decide_close, CloseDecision};
 pub(crate) use view::close_prompt;
 
@@ -41,6 +41,7 @@ pub enum PendingHostCommand {
     Close,
     OpenSaveDialog,
     OpenPluginDialog,
+    OpenFolderDialog,
 }
 
 /// 工作区拖放、外部打开和关闭确认消息。
@@ -194,6 +195,11 @@ impl InputState {
         self.host_commands.push(PendingHostCommand::OpenPluginDialog);
     }
 
+    /// 排队重定向用的文件夹对话框。平台稍后把它换成 `OpenFileDialog`。
+    pub(crate) fn queue_folder_dialog(&mut self) {
+        self.host_commands.push(PendingHostCommand::OpenFolderDialog);
+    }
+
     /// 把排队命令换成当前窗口的平台命令。
     pub(crate) fn take_platform_commands(&mut self, id: WindowId, maximized: bool) -> Vec<WindowCommand> {
         let pending = std::mem::take(&mut self.host_commands);
@@ -210,6 +216,10 @@ impl InputState {
                 PendingHostCommand::OpenPluginDialog => Some(WindowCommand::OpenFileDialog {
                     id,
                     request: support::open_plugin_request(),
+                }),
+                PendingHostCommand::OpenFolderDialog => Some(WindowCommand::OpenFileDialog {
+                    id,
+                    request: support::pick_folder_request(),
                 }),
             })
             .collect()

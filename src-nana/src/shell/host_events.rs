@@ -2,13 +2,13 @@
 //!
 //! 日志和资源库结构更新走 `host_event_channel`，不经过 Tauri。
 //! 启动中的 `repository.sync` 追加到启动日志。就绪后的结构更新静默刷新当前面板。
-//! 仓库列表、摘要和硬链接候选不在这条路径上重拉。
+//! 列表、摘要和硬链接候选现在会静默重拉。失败不改页面，也不弹出硬链接对话框。
 
 use crate::backend::services::host_events::HostEvent;
 use crate::backend::services::repository::SystemLogRecord;
 
 use super::files::FileContext;
-use super::{ShellMessage, ShellViewModel, StartupStatus, WorkspacePanel};
+use super::{ShellMessage, ShellViewModel, StartupStatus, WorkspaceEffect, WorkspacePanel};
 
 const SYNC_LOG_CATEGORY: &str = "repository.sync";
 
@@ -85,6 +85,11 @@ fn refresh_structure(model: &mut ShellViewModel, repo_id: &str, reason: &str) {
     if matches!(panel, WorkspacePanel::Files | WorkspacePanel::Trash) {
         let context = FileContext::from_model(model);
         model.files.reload_silent(&context);
+    }
+    model.files.refresh_hardlinks_silent(repo_id);
+    model.workspace.effects.push(WorkspaceEffect::RefreshRepositoriesSilent);
+    if model.workspace.active_repo_id.is_some() {
+        model.workspace.effects.push(WorkspaceEffect::LoadSnapshotSilent { repo_id: repo_id.to_string() });
     }
 }
 
@@ -193,16 +198,19 @@ mod tests {
         loading.workspace.startup.begin();
         send(&mut loading, HostMessage::StructureUpdated { repo_id: "repo".into(), reason: "watcher".into() });
         assert!(loading.sidebar.take_effects().is_empty());
+        assert!(loading.workspace.effects.is_empty());
 
         let mut other = ready(WorkspacePanel::Files);
         send(&mut other, HostMessage::StructureUpdated { repo_id: "other".into(), reason: "watcher".into() });
         assert!(other.sidebar.take_effects().is_empty());
         assert!(other.files.take_effects().is_empty());
+        assert!(other.workspace.effects.is_empty());
 
         let mut missing = ready(WorkspacePanel::Files);
         missing.workspace.repositories[0].status = "missing".into();
         send(&mut missing, HostMessage::StructureUpdated { repo_id: "repo".into(), reason: "watcher".into() });
         assert!(missing.files.take_effects().is_empty());
+        assert!(missing.workspace.effects.is_empty());
 
         let mut files = ready(WorkspacePanel::Files);
         files.files.current_path = "photos".into();
@@ -217,13 +225,25 @@ mod tests {
         let browse = files.files.take_effects();
         assert!(matches!(
             browse.as_slice(),
-            [crate::shell::FilesEffect::Browse { path, trash: false, append: false, .. }] if path == "photos"
+            [
+                crate::shell::FilesEffect::Browse { path, trash: false, append: false, .. },
+                crate::shell::FilesEffect::RefreshHardlinks { repo_id },
+            ] if path == "photos" && repo_id == "repo"
         ));
         assert!(!files.files.loading);
         assert_eq!(files.files.selected, vec!["photos/a".to_string()]);
         assert_eq!(files.files.primary.as_deref(), Some("photos/a"));
         assert!(files.files.note_load_failed("读取失败"));
         assert_eq!(files.page, crate::shell::ShellPage::FileList);
+        assert_eq!(files.workspace.startup.status, StartupStatus::Ready);
+        assert_eq!(files.workspace.list_generation, 0);
+        assert_eq!(
+            files.workspace.take_effects(),
+            vec![
+                WorkspaceEffect::RefreshRepositoriesSilent,
+                WorkspaceEffect::LoadSnapshotSilent { repo_id: "repo".into() },
+            ]
+        );
         assert!(matches!(
             files.admin.take_effects().as_slice(),
             [crate::shell::admin::AdminEffect::LoadActions { .. }]
@@ -234,13 +254,19 @@ mod tests {
         send(&mut trash, HostMessage::StructureUpdated { repo_id: "repo".into(), reason: "watcher".into() });
         assert!(matches!(
             trash.files.take_effects().as_slice(),
-            [crate::shell::FilesEffect::Browse { path, trash: true, .. }] if path == "bin"
+            [
+                crate::shell::FilesEffect::Browse { path, trash: true, .. },
+                crate::shell::FilesEffect::RefreshHardlinks { repo_id },
+            ] if path == "bin" && repo_id == "repo"
         ));
 
         let mut category = ready(WorkspacePanel::Files);
         category.workspace.library_category = LibraryCategory::Untagged;
         send(&mut category, HostMessage::StructureUpdated { repo_id: "repo".into(), reason: "watcher".into() });
-        assert!(category.files.take_effects().is_empty());
+        assert!(matches!(
+            category.files.take_effects().as_slice(),
+            [crate::shell::FilesEffect::RefreshHardlinks { repo_id }] if repo_id == "repo"
+        ));
 
         let mut playlist = ready(WorkspacePanel::Playlist);
         playlist.sidebar.active_playlist_id = Some("list".into());
@@ -248,7 +274,10 @@ mod tests {
         assert!(playlist.sidebar.take_effects().iter().any(|effect| {
             matches!(effect, crate::shell::SidebarEffect::LoadPlaylistDetail { playlist_id, .. } if playlist_id == "list")
         }));
-        assert!(playlist.files.take_effects().is_empty());
+        assert!(matches!(
+            playlist.files.take_effects().as_slice(),
+            [crate::shell::FilesEffect::RefreshHardlinks { repo_id }] if repo_id == "repo"
+        ));
 
         let mut busy = ready(WorkspacePanel::Files);
         busy.sidebar.tree_loading = true;

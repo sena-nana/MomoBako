@@ -22,6 +22,7 @@ mod player_view;
 mod sidebar;
 mod sidebar_view;
 mod workspace;
+pub(crate) mod workspace_refresh;
 pub use files::{display_mode_path, FileRow, FilesEffect, FilesMessage, HardlinkPrompt, VirtualQuery};
 pub use inspect::{
     DateBound, InspectEffect, InspectMessage, NumberBound, SearchRequestDraft, SearchRow, prepare_text,
@@ -124,6 +125,8 @@ pub enum ShellMessage {
     Input(input::InputMessage),
     /// 日志广播和资源库结构更新。具体分支在 `host_events::reduce_message` 里归约。
     Host(host_events::HostMessage),
+    /// 结构更新后的静默仓库列表和摘要。具体分支在 `workspace_refresh::reduce_message` 里归约。
+    SilentWorkspace(workspace_refresh::SilentMessage),
 }
 
 /// 已解码的 RGBA 预览帧；解码在服务任务中完成，窗口线程只负责上传 GPU 纹理。
@@ -467,6 +470,9 @@ impl ShellViewModel {
         let Some(message) = host_events::reduce_message(self, message) else {
             return;
         };
+        let Some(message) = workspace_refresh::reduce_message(self, message) else {
+            return;
+        };
         match message {
             ShellMessage::Navigate(page) => {
                 self.page = page;
@@ -770,7 +776,7 @@ impl ShellViewModel {
                 }
             }
             ShellMessage::MissingRefresh => self.workspace.refresh_missing(),
-            ShellMessage::MissingChoosePath => self.workspace.choose_missing_path(),
+            ShellMessage::MissingChoosePath => input::begin_relocate_dialog(self),
             ShellMessage::MissingPathChanged(value) => self.workspace.set_path_draft(value),
             ShellMessage::MissingSubmitPath => self.workspace.submit_missing_path(),
             ShellMessage::MissingRelocateFinished(result) => self.workspace.note_relocate_finished(result),
@@ -821,6 +827,7 @@ impl ShellViewModel {
             ShellMessage::Player(_) => {}
             ShellMessage::Input(_) => {}
             ShellMessage::Host(_) => {}
+            ShellMessage::SilentWorkspace(_) => {}
         }
     }
 

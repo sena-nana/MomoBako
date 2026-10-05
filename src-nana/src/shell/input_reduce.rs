@@ -8,10 +8,20 @@ use crate::shell::admin::AdminMessage;
 use super::support::{
     absolute_drag_paths, can_drag_entries, dropped_source_paths, filter_external_import_paths, internal_drag_distance,
     normalize_move_paths, resolve_drop_target, should_delegate_to_external_drag, DIALOG_EXPORT_ID, DIALOG_PLUGIN_ID,
-    EXTERNAL_DRAG_SWITCH_DISTANCE,
+    DIALOG_RELOCATE_ID, EXTERNAL_DRAG_SWITCH_DISTANCE,
 };
 use super::{HostDragPhase, InputMessage, InputState, InternalSession};
 use crate::shell::{ShellMessage, ShellViewModel, WindowAction, WorkspacePanel};
+
+/// 为缺失资源库排队文件夹选择。没有活动仓库或正在处理时只记日志，不改页内路径框。
+pub(crate) fn begin_relocate_dialog(model: &mut ShellViewModel) {
+    if model.workspace.active_repo_id.is_none() || model.workspace.missing_busy() {
+        eprintln!("Nana 当前不能打开重定向文件夹对话框");
+        return;
+    }
+    model.workspace.missing_error.clear();
+    model.input.queue_folder_dialog();
+}
 
 pub(crate) fn reduce_message(model: &mut ShellViewModel, message: ShellMessage) -> Option<ShellMessage> {
     match message {
@@ -501,6 +511,8 @@ fn complete_dialog(model: &mut ShellViewModel, request_id: u64, paths: &[String]
         } else if request_id == DIALOG_PLUGIN_ID {
             model.admin.action_message.clear();
             model.admin.action_error = format!("插件包选择失败：{error}");
+        } else if request_id == DIALOG_RELOCATE_ID {
+            model.workspace.missing_error = format!("文件夹选择失败：{error}");
         }
         return;
     }
@@ -513,6 +525,16 @@ fn complete_dialog(model: &mut ShellViewModel, request_id: u64, paths: &[String]
     if request_id == DIALOG_PLUGIN_ID {
         model.admin.action_message.clear();
         model.reduce(ShellMessage::Admin(AdminMessage::InstallArchive(path)));
+        return;
+    }
+    if request_id == DIALOG_RELOCATE_ID {
+        // 空白视为取消。非空交给 submit_missing_path，由它推 RelocateRepository。
+        let Some(path) = path else {
+            eprintln!("Nana 取消重定向文件夹选择");
+            return;
+        };
+        model.workspace.set_path_draft(path);
+        model.workspace.submit_missing_path();
         return;
     }
     eprintln!("Nana 忽略未知的文件对话框：{request_id}");

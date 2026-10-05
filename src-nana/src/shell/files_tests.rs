@@ -291,6 +291,64 @@ fn hardlink_skip_hides_candidate_and_confirm_failure_keeps_it() {
 }
 
 #[test]
+fn silent_hardlink_refresh_keeps_dialog_skipped_and_error() {
+    let mut state = FilesState::default();
+    let ctx = writable();
+    let kept = HardlinkPrompt {
+        id: "kept".into(),
+        new_path: "old-new".into(),
+        existing_path: "old-existing".into(),
+        size_label: "1 KB".into(),
+    };
+    let fresh = HardlinkPrompt {
+        id: "fresh".into(),
+        new_path: "new".into(),
+        existing_path: "existing".into(),
+        size_label: "2 KB".into(),
+    };
+    state.hardlinks = vec![kept.clone()];
+    state.skipped_hardlinks = vec!["kept".into()];
+    state.error = "旧错误".into();
+    state.loading = true;
+
+    state.reduce(&ctx, FilesMessage::HardlinksRefreshed(Ok(vec![fresh.clone()])));
+    assert_eq!(state.hardlinks, vec![fresh.clone()]);
+    assert_eq!(state.dialog, FileDialog::Closed);
+    assert_eq!(state.skipped_hardlinks, vec!["kept".to_string()]);
+    assert_eq!(state.error, "旧错误");
+    assert!(state.loading);
+
+    state.dialog = FileDialog::Rename;
+    state.reduce(&ctx, FilesMessage::HardlinksRefreshed(Err("刷新失败".into())));
+    assert_eq!(state.hardlinks, vec![fresh]);
+    assert_eq!(state.dialog, FileDialog::Rename);
+    assert_eq!(state.skipped_hardlinks, vec!["kept".to_string()]);
+    assert_eq!(state.error, "旧错误");
+    assert!(state.loading);
+
+    state.reduce(&ctx, FilesMessage::HardlinksLoaded(Ok(vec![kept.clone()])));
+    assert_eq!(state.dialog, FileDialog::Hardlink);
+    assert_eq!(state.hardlinks, vec![kept]);
+    assert!(state.skipped_hardlinks.is_empty());
+
+    state.dialog = FileDialog::Copy;
+    state.loading = false;
+    state.refresh_hardlinks_silent("");
+    assert!(state.effects.is_empty());
+    assert_eq!(state.dialog, FileDialog::Copy);
+    assert!(!state.loading);
+    assert_eq!(state.error, "旧错误");
+    state.refresh_hardlinks_silent("repo");
+    assert!(matches!(
+        state.effects.as_slice(),
+        [FilesEffect::RefreshHardlinks { repo_id }] if repo_id == "repo"
+    ));
+    assert_eq!(state.dialog, FileDialog::Copy);
+    assert!(!state.loading);
+    assert_eq!(state.error, "旧错误");
+}
+
+#[test]
 fn unknown_display_mode_falls_back_to_adaptive() {
     assert_eq!(DisplayMode::parse("nope"), DisplayMode::Adaptive);
     assert_eq!(DisplayMode::parse("list"), DisplayMode::List);

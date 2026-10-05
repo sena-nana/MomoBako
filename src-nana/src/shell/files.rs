@@ -221,6 +221,8 @@ pub enum FilesEffect {
     Delete { repo_id: String, paths: Vec<String>, mode: Option<String> },
     MutateTrash { repo_id: String, action: String, paths: Vec<String> },
     LoadHardlinks { repo_id: String },
+    /// 结构更新静默重读候选。不打开对话框，失败不写入页面错误。
+    RefreshHardlinks { repo_id: String },
     ConfirmHardlink { repo_id: String, candidate_id: String },
     LoadAsset { repo_id: String, asset_id: String },
     PersistDisplayMode,
@@ -248,6 +250,8 @@ pub enum FilesMessage {
     MutationSnapshot { result: Result<FileBrowserSnapshot, String>, created_name: Option<String> },
     ProtocolFinished { result: Result<(), String>, reload: bool, hardlinks: bool },
     HardlinksLoaded(Result<Vec<HardlinkPrompt>, String>),
+    /// 静默刷新结果。只替换候选，不改对话框和页面错误。
+    HardlinksRefreshed(Result<Vec<HardlinkPrompt>, String>),
     HardlinkConfirmed(Result<String, String>),
     NoteError(String),
 }
@@ -585,6 +589,7 @@ impl FilesState {
                 self.note_protocol_finished(ctx, result, reload, hardlinks);
             }
             FilesMessage::HardlinksLoaded(result) => self.note_hardlinks(result),
+            FilesMessage::HardlinksRefreshed(result) => self.note_hardlinks_silent(result),
             FilesMessage::HardlinkConfirmed(result) => self.note_hardlink_confirmed(result),
             FilesMessage::NoteError(error) => {
                 eprintln!("Nana 文件操作失败：{error}");

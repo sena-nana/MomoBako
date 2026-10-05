@@ -297,8 +297,12 @@ pub enum WorkspaceDialog {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum WorkspaceEffect {
     RefreshRepositories { generation: u64 },
+    /// 结构更新后重拉列表。不带代次，不能改启动步骤或页面。
+    RefreshRepositoriesSilent,
     SyncRepository { repo_id: String, generation: u64 },
     LoadSnapshot { repo_id: String },
+    /// 结构更新后重拉当前仓库摘要。失败不能把页面改成错误。
+    LoadSnapshotSilent { repo_id: String },
     RelocateRepository { repo_id: String, path: String },
     DeleteRepository { repo_id: String, mode: DeleteMode },
     OpenSourceSettings,

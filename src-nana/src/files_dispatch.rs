@@ -45,7 +45,8 @@ pub fn dispatch_files_effects(app: &mut MomoBakoApplication, context: &RuntimePr
             }
             FilesEffect::Delete { repo_id, paths, mode } => dispatch_delete(app, context, repo_id, paths, mode),
             FilesEffect::MutateTrash { repo_id, action, paths } => dispatch_trash(app, context, repo_id, action, paths),
-            FilesEffect::LoadHardlinks { repo_id } => dispatch_hardlinks(app, context, repo_id),
+            FilesEffect::LoadHardlinks { repo_id } => dispatch_hardlinks(app, context, repo_id, false),
+            FilesEffect::RefreshHardlinks { repo_id } => dispatch_hardlinks(app, context, repo_id, true),
             FilesEffect::ConfirmHardlink { repo_id, candidate_id } => {
                 dispatch_confirm_hardlink(app, context, repo_id, candidate_id);
             }
@@ -334,10 +335,16 @@ fn dispatch_trash(
     }
 }
 
-fn dispatch_hardlinks(app: &mut MomoBakoApplication, context: &RuntimeProgramContext<ShellMessage>, repo_id: String) {
+/// 拉取硬链接候选。`silent` 为真时结果是 `HardlinksRefreshed`，失败不经 `note_hardlinks` 写入页面错误。
+fn dispatch_hardlinks(
+    app: &mut MomoBakoApplication,
+    context: &RuntimeProgramContext<ShellMessage>,
+    repo_id: String,
+    silent: bool,
+) {
     let Some(services) = app.services.as_ref() else {
         eprintln!("Nana 硬链接候选需要领域服务，当前服务未启动");
-        app.shell.reduce(files_message(FilesMessage::HardlinksLoaded(Err("领域服务未启动".into()))));
+        app.shell.reduce(hardlinks_message(silent, Err("领域服务未启动".into())));
         return;
     };
     let interaction = services.repository_interaction.clone();
@@ -351,11 +358,19 @@ fn dispatch_hardlinks(app: &mut MomoBakoApplication, context: &RuntimeProgramCon
                 size_label: candidate.size_label,
             }).collect()
         });
-        files_message(FilesMessage::HardlinksLoaded(result))
+        hardlinks_message(silent, result)
     })) {
         eprintln!("Nana 硬链接候选任务提交失败：{error}");
-        app.shell.reduce(files_message(FilesMessage::HardlinksLoaded(Err(format!("硬链接候选任务提交失败：{error}")))));
+        app.shell.reduce(hardlinks_message(silent, Err(format!("硬链接候选任务提交失败：{error}"))));
     }
+}
+
+fn hardlinks_message(silent: bool, result: Result<Vec<HardlinkPrompt>, String>) -> ShellMessage {
+    files_message(if silent {
+        FilesMessage::HardlinksRefreshed(result)
+    } else {
+        FilesMessage::HardlinksLoaded(result)
+    })
 }
 
 fn dispatch_confirm_hardlink(

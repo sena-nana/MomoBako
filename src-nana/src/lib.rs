@@ -939,6 +939,12 @@ fn dispatch_workspace_effects(
                 };
                 schedule_settings_load(services, context);
             }
+            WorkspaceEffect::RefreshRepositoriesSilent => {
+                shell::workspace_refresh::dispatch_silent_list(app, context);
+            }
+            WorkspaceEffect::LoadSnapshotSilent { repo_id } => {
+                shell::workspace_refresh::dispatch_silent_snapshot(app, context, repo_id);
+            }
         }
     }
 }
