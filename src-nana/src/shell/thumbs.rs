@@ -88,6 +88,21 @@ pub struct ThumbnailFrame {
     pub rgba: Vec<u8>,
 }
 
+/// 把预览图解码成 RGBA。过大的图拒绝上传。
+pub fn decode_preview_pixels(bytes: &[u8]) -> Result<super::PreviewPixels, String> {
+    let image = image::load_from_memory(bytes).map_err(|error| format!("图片解码失败：{error}"))?;
+    let rgba = image.to_rgba8();
+    let (width, height) = rgba.dimensions();
+    if width == 0 || height == 0 || width > 8192 || height > 8192 {
+        return Err(format!("图片尺寸不受支持：{width}x{height}"));
+    }
+    Ok(super::PreviewPixels {
+        width,
+        height,
+        rgba: rgba.into_raw(),
+    })
+}
+
 /// 读取缩略图文件。原始尺寸用于宽高比，上传前缩到 480 边以内。
 pub fn decode_thumbnail_file(path: &str) -> Result<ThumbnailFrame, String> {
     let bytes = std::fs::read(path).map_err(|error| format!("读取缩略图失败：{error}"))?;

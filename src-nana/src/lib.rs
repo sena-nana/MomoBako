@@ -19,7 +19,7 @@ mod player_dispatch;
 mod admin_dispatch;
 mod sidebar_dispatch;
 use shell::{
-    DeleteMode, PreviewPixels, ShellMessage, ShellPage, ShellViewModel, StartupStatus, WindowAction,
+    DeleteMode, ShellMessage, ShellPage, ShellViewModel, StartupStatus, WindowAction,
     WorkspaceEffect, display_mode_path, mount_shell, sidebar_prefs_path,
 };
 
@@ -954,19 +954,7 @@ fn dispatch_workspace_effects(
     }
 }
 
-pub(crate) fn decode_preview_pixels(bytes: &[u8]) -> Result<PreviewPixels, String> {
-    let image = image::load_from_memory(bytes).map_err(|error| format!("图片解码失败：{error}"))?;
-    let rgba = image.to_rgba8();
-    let (width, height) = rgba.dimensions();
-    if width == 0 || height == 0 || width > 8192 || height > 8192 {
-        return Err(format!("图片尺寸不受支持：{width}x{height}"));
-    }
-    Ok(PreviewPixels {
-        width,
-        height,
-        rgba: rgba.into_raw(),
-    })
-}
+pub(crate) use shell::decode_preview_pixels;
 
 /// 启动原生 NanaUI 窗口。
 pub fn run() -> Result<(), nana_ui::HostedRunError> {
