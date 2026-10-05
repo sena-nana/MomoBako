@@ -29,7 +29,6 @@ fn files_tools(model: &ShellViewModel) -> AnyView {
         .children((
             widget(Stack::bar(12.0)).children((
                 widget(Stack::column(2.0)).children((
-                    text(format!("任务 {}", model.active_tasks)).key("task-count"),
                     text(location_eyebrow(&ctx)).key("file-location"),
                 )),
                 widget(Stack::spacer()),
