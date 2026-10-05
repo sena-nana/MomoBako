@@ -55,10 +55,9 @@ pub(super) fn title_bar(model: &ShellViewModel) -> impl IntoView + use<'_> {
     )))
 }
 
-/// 28 像素的筛选图标。无障碍名称仍是「显示筛选栏」或「隐藏筛选栏」。
-fn filter_button(label: &str) -> IconButton {
-    let mut button = IconButton::new(nana_ui::icons_tabler::ADJUSTMENTS_HORIZONTAL, label)
-        .size(ControlSize::Small);
+/// 28 像素图标按钮。文字只作无障碍名称，不画在按钮上。
+pub(super) fn shell_icon(icon: Icon, label: impl Into<std::sync::Arc<str>>, disabled: bool) -> IconButton {
+    let mut button = IconButton::new(icon, label).size(ControlSize::Small).disabled(disabled);
     let layout = Arc::make_mut(&mut button.style.layout);
     layout.width = Some(LengthSpec::Px(28.0));
     layout.height = Some(LengthSpec::Px(28.0));
@@ -67,6 +66,10 @@ fn filter_button(label: &str) -> IconButton {
     layout.flex_grow = Some(0.0);
     layout.flex_shrink = Some(0.0);
     button
+}
+
+fn filter_button(label: &str) -> IconButton {
+    shell_icon(nana_ui::icons_tabler::ADJUSTMENTS_HORIZONTAL, label, false)
 }
 
 /// 搜索框不用百分百宽度，给筛选开关留出中间槽里的可见位置。

@@ -2,9 +2,10 @@
 
 use std::sync::Arc;
 
+use nana_ui::icons_tabler::{ARCHIVE, CLOCK, FOLDERS, LOGS, PUZZLE, REFRESH, SETTINGS, TAG, TRASH};
 use nana_ui::runtime::view::{button, text, widget, AnyView, IntoView};
 use nana_ui::runtime::{
-    Activate, SidebarRow, SidebarRowState, Stack, TextChanged, TextInput, TreeNode, TreeView,
+    Activate, Icon, IconGlyph, SidebarRow, SidebarRowState, Stack, TextChanged, TextInput, TreeNode, TreeView,
     TreeViewEvent, ViewContext,
 };
 
@@ -43,10 +44,10 @@ pub fn sidebar_sections(model: &ShellViewModel) -> impl IntoView + use<'_> {
     }
     rows.push(text("文件夹").into_any());
     let refresh_locked = locked || model.workspace.active_repo_id.is_none() || model.sidebar.tree_loading;
+    let refresh_label = if model.sidebar.tree_loading { "正在刷新文件夹树" } else { "刷新文件夹树" };
     rows.push(
-        button(if model.sidebar.tree_loading { "正在刷新文件夹树" } else { "刷新文件夹树" })
+        widget(super::title_bar::shell_icon(REFRESH, refresh_label, refresh_locked))
             .key("refresh-folder-tree")
-            .disabled(refresh_locked)
             .on_cx(|_, _: &Activate, cx| cx.dispatch_program(sidebar_message(SidebarMessage::RefreshFolderTree)))
             .into_any(),
     );
@@ -68,18 +69,15 @@ pub fn sidebar_sections(model: &ShellViewModel) -> impl IntoView + use<'_> {
 }
 
 /// 设置、拓展和日志仍留在侧栏底部。
-pub fn sidebar_footer(model: &ShellViewModel) -> impl IntoView + use<'_> {
-    let settings_active = matches!(model.page, ShellPage::Settings | ShellPage::SettingsError);
-    let extensions_active = model.workspace.panel == WorkspacePanel::Extensions && !settings_active;
-    let logs_active = model.workspace.panel == WorkspacePanel::Logs && !settings_active;
-    widget(Stack::column(4.0)).children((
-        sidebar_row("设置", settings_active, false, |cx| {
+pub fn sidebar_footer(_model: &ShellViewModel) -> impl IntoView + use<'_> {
+    widget(Stack::row(4.0)).children((
+        widget(super::title_bar::shell_icon(SETTINGS, "设置", false)).on_cx(|_, _: &Activate, cx| {
             cx.dispatch_program(ShellMessage::Navigate(ShellPage::Settings));
         }),
-        sidebar_row("拓展", extensions_active, false, |cx| {
+        widget(super::title_bar::shell_icon(PUZZLE, "拓展", false)).on_cx(|_, _: &Activate, cx| {
             cx.dispatch_program(ShellMessage::SetWorkspacePanel(WorkspacePanel::Extensions));
         }),
-        sidebar_row("日志", logs_active, false, |cx| {
+        widget(super::title_bar::shell_icon(LOGS, "日志", false)).on_cx(|_, _: &Activate, cx| {
             cx.dispatch_program(ShellMessage::SetWorkspacePanel(WorkspacePanel::Logs));
         }),
     ))
@@ -147,10 +145,20 @@ fn shortcut_rows(model: &ShellViewModel, locked: bool) -> Vec<AnyView> {
         (ShortcutId::Trash, counts.trash, model.workspace.panel == WorkspacePanel::Trash),
     ];
     items.into_iter().map(|(id, count, active)| {
-        sidebar_row(format!("{} · {count}", id.label()), active, locked, move |cx| {
+        sidebar_row_with(Some(shortcut_icon(id)), format!("{} · {count}", id.label()), active, locked, move |cx| {
             cx.dispatch_program(sidebar_message(SidebarMessage::SelectShortcut(id)));
         })
     }).collect()
+}
+
+fn shortcut_icon(id: ShortcutId) -> Icon {
+    match id {
+        ShortcutId::All => ARCHIVE,
+        ShortcutId::Uncategorized => FOLDERS,
+        ShortcutId::Untagged => TAG,
+        ShortcutId::Recent => CLOCK,
+        ShortcutId::Trash => TRASH,
+    }
 }
 
 fn folder_body(model: &ShellViewModel, locked: bool) -> impl IntoView + use<'_> {
@@ -220,6 +228,16 @@ fn sidebar_row(
     disabled: bool,
     on_activate: impl Fn(&mut ViewContext<SidebarRow>) + Send + 'static,
 ) -> AnyView {
+    sidebar_row_with(None, label, active, disabled, on_activate)
+}
+
+fn sidebar_row_with(
+    icon: Option<Icon>,
+    label: impl AsRef<str>,
+    active: bool,
+    disabled: bool,
+    on_activate: impl Fn(&mut ViewContext<SidebarRow>) + Send + 'static,
+) -> AnyView {
     let state = if disabled {
         SidebarRowState::Disabled
     } else if active {
@@ -228,7 +246,11 @@ fn sidebar_row(
         SidebarRowState::Idle
     };
     let label: Arc<str> = Arc::from(label.as_ref());
-    widget(SidebarRow::new(label).state(state)).on_cx(move |_, _: &Activate, cx| on_activate(cx)).into_any()
+    let mut row = widget(SidebarRow::new(label).state(state));
+    if let Some(icon) = icon {
+        row = row.leading(widget(IconGlyph::new(icon).size(14.0)));
+    }
+    row.on_cx(move |_, _: &Activate, cx| on_activate(cx)).into_any()
 }
 
 fn sidebar_message(message: SidebarMessage) -> ShellMessage {

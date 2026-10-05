@@ -3,6 +3,7 @@
 //! 排序用 `ReorderList`。播放、暂停、跳转和音量走共用的 `MediaTransportBar`。
 //! 验收场景不挂这块表面，旧的上移下移按钮保持原样。
 
+use nana_ui::icons_tabler::{EYE, LIST, PLAYER_SKIP_BACK, PLAYER_SKIP_FORWARD, REPEAT};
 use nana_ui::runtime::view::{button, text, widget, AnyView, IntoView};
 use nana_ui::runtime::{
     Activate, MediaTransportBar, MediaTransportEvent, MediaTransportPlacement, ReorderItem, ReorderList, ReorderListEvent,
@@ -98,7 +99,6 @@ fn transport(model: &ShellViewModel) -> AnyView {
         widget(Stack::bar(8.0)).children((
             text(title).key("player-title"),
             text(model.player.time_text()).key("player-time"),
-            text(model.player.mode_text()).key("player-mode"),
         )).into_any(),
         widget(bar).key("player-transport").on_cx(move |_, event: &MediaTransportEvent, cx| {
             let message = match event {
@@ -111,22 +111,32 @@ fn transport(model: &ShellViewModel) -> AnyView {
                 cx.dispatch_program(player_message(message));
             }
         }).into_any(),
-        widget(Stack::bar(8.0)).children((
-            button(model.player.mode_text()).key("player-cycle-mode").on_cx(|_, _: &Activate, cx| {
-                cx.dispatch_program(player_message(PlayerMessage::CycleMode));
-            }),
-            button("上一首").key("player-previous").on_cx(|_, _: &Activate, cx| {
-                cx.dispatch_program(player_message(PlayerMessage::PlayPrevious));
-            }),
-            button("下一首").key("player-next").on_cx(|_, _: &Activate, cx| {
-                cx.dispatch_program(player_message(PlayerMessage::PlayNext { natural_end: false }));
-            }),
-            button(queue_label).key("player-queue").on_cx(|_, _: &Activate, cx| {
-                cx.dispatch_program(player_message(PlayerMessage::ToggleQueue));
-            }),
-            button("打开预览").key("player-open-preview").on_cx(|_, _: &Activate, cx| {
-                cx.dispatch_program(player_message(PlayerMessage::OpenPreview));
-            }),
+        widget(Stack::bar(4.0)).children((
+            widget(super::title_bar::shell_icon(REPEAT, model.player.mode_text(), false))
+                .key("player-cycle-mode")
+                .on_cx(|_, _: &Activate, cx| {
+                    cx.dispatch_program(player_message(PlayerMessage::CycleMode));
+                }),
+            widget(super::title_bar::shell_icon(PLAYER_SKIP_BACK, "上一首", false))
+                .key("player-previous")
+                .on_cx(|_, _: &Activate, cx| {
+                    cx.dispatch_program(player_message(PlayerMessage::PlayPrevious));
+                }),
+            widget(super::title_bar::shell_icon(PLAYER_SKIP_FORWARD, "下一首", false))
+                .key("player-next")
+                .on_cx(|_, _: &Activate, cx| {
+                    cx.dispatch_program(player_message(PlayerMessage::PlayNext { natural_end: false }));
+                }),
+            widget(super::title_bar::shell_icon(LIST, queue_label, false))
+                .key("player-queue")
+                .on_cx(|_, _: &Activate, cx| {
+                    cx.dispatch_program(player_message(PlayerMessage::ToggleQueue));
+                }),
+            widget(super::title_bar::shell_icon(EYE, "打开预览", false))
+                .key("player-open-preview")
+                .on_cx(|_, _: &Activate, cx| {
+                    cx.dispatch_program(player_message(PlayerMessage::OpenPreview));
+                }),
         )).into_any(),
     ];
     if !model.player.activity.is_empty() {
