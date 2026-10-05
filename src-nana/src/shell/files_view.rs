@@ -4,8 +4,12 @@
 //! 自适应、瀑布流和网格共用同一套网格，缩略图走 Nana `Thumbnail`。
 //! 对话框放在文件列里，避免和壳层唯一的浮层槽抢位置。
 
+use nana_ui::icons_tabler::{
+    ARCHIVE, ARROW_FORWARD, COPY, FILE, FOLDER_OPEN, FOLDER_PLUS, LAYOUT_BOARD, LAYOUT_DASHBOARD, LAYOUT_GRID,
+    LAYOUT_LIST, LIST_CHECK, PENCIL, REPLACE, ROTATE, SCISSORS, SWITCH, TRASH,
+};
 use nana_ui::runtime::view::{button, each_virtual, signal, text, widget, AnyView, IntoView};
-use nana_ui::runtime::{Activate, Stack, TextChanged, TextInput, Thumbnail};
+use nana_ui::runtime::{Activate, Icon, Stack, TextChanged, TextInput, Thumbnail};
 
 use super::files::{
     hardlink_label, DisplayMode, FileContext, FileDialog, FileRow, FilesMessage, SelectionMode,
@@ -130,32 +134,36 @@ fn empty_copy(ctx: &FileContext) -> &'static str {
 }
 
 fn display_modes() -> impl IntoView {
-    widget(Stack::row(8.0)).children((
-        mode_button(DisplayMode::Adaptive),
-        mode_button(DisplayMode::Masonry),
-        mode_button(DisplayMode::Grid),
-        mode_button(DisplayMode::List),
+    widget(Stack::row(4.0)).children((
+        mode_button(DisplayMode::Adaptive, LAYOUT_DASHBOARD),
+        mode_button(DisplayMode::Masonry, LAYOUT_BOARD),
+        mode_button(DisplayMode::Grid, LAYOUT_GRID),
+        mode_button(DisplayMode::List, LAYOUT_LIST),
     ))
 }
 
-fn mode_button(mode: DisplayMode) -> impl IntoView {
-    button(mode.label()).key(format!("file-display-{}", mode.storage_value())).on_cx(move |_, _: &Activate, cx| {
-        cx.dispatch_program(file_message(FilesMessage::SetDisplayMode(mode)));
-    })
+fn mode_button(mode: DisplayMode, icon: Icon) -> impl IntoView {
+    widget(super::title_bar::shell_icon(icon, mode.label(), false))
+        .key(format!("file-display-{}", mode.storage_value()))
+        .on_cx(move |_, _: &Activate, cx| {
+            cx.dispatch_program(file_message(FilesMessage::SetDisplayMode(mode)));
+        })
 }
 
 fn selection_modes() -> impl IntoView {
-    widget(Stack::row(8.0)).children((
-        selection_button(SelectionMode::Replace),
-        selection_button(SelectionMode::Toggle),
-        selection_button(SelectionMode::Range),
+    widget(Stack::row(4.0)).children((
+        selection_button(SelectionMode::Replace, REPLACE),
+        selection_button(SelectionMode::Toggle, SWITCH),
+        selection_button(SelectionMode::Range, LIST_CHECK),
     ))
 }
 
-fn selection_button(mode: SelectionMode) -> impl IntoView {
-    button(mode.label()).key(format!("file-selection-{}", mode.label())).on_cx(move |_, _: &Activate, cx| {
-        cx.dispatch_program(file_message(FilesMessage::SetSelectionMode(mode)));
-    })
+fn selection_button(mode: SelectionMode, icon: Icon) -> impl IntoView {
+    widget(super::title_bar::shell_icon(icon, mode.label(), false))
+        .key(format!("file-selection-{}", mode.label()))
+        .on_cx(move |_, _: &Activate, cx| {
+            cx.dispatch_program(file_message(FilesMessage::SetSelectionMode(mode)));
+        })
 }
 
 fn breadcrumbs(path: &str) -> impl IntoView {
@@ -187,52 +195,33 @@ fn breadcrumbs(path: &str) -> impl IntoView {
 fn toolbar(ctx: &FileContext, files: &super::files::FilesState) -> impl IntoView {
     let mut actions = Vec::new();
     if !ctx.trash && !ctx.is_virtual() {
-        actions.push(action("新建文件夹", "file-create-directory", files.can_create(ctx), FilesMessage::OpenDialog(FileDialog::CreateDirectory)));
-        actions.push(action("建文件", "file-create-file", files.can_create(ctx), FilesMessage::OpenDialog(FileDialog::CreateFile)));
-        actions.push(action("导入", "file-import", files.can_import(ctx), FilesMessage::OpenDialog(FileDialog::Import)));
-        actions.push(action("从 ZIP 导入", "file-import-archive", files.can_import(ctx), FilesMessage::OpenDialog(FileDialog::ImportArchive)));
-        actions.push(action("复制导入", "file-import-eagle-copy", files.can_import(ctx), FilesMessage::OpenEagle("copy".into())));
-        actions.push(action("剪切导入", "file-import-eagle-move", files.can_import(ctx), FilesMessage::OpenEagle("move".into())));
+        actions.push(action(FOLDER_PLUS, "新建文件夹", "file-create-directory", files.can_create(ctx), FilesMessage::OpenDialog(FileDialog::CreateDirectory)));
+        actions.push(action(FILE, "建文件", "file-create-file", files.can_create(ctx), FilesMessage::OpenDialog(FileDialog::CreateFile)));
+        actions.push(action(FOLDER_OPEN, "导入", "file-import", files.can_import(ctx), FilesMessage::OpenDialog(FileDialog::Import)));
+        actions.push(action(ARCHIVE, "从 ZIP 导入", "file-import-archive", files.can_import(ctx), FilesMessage::OpenDialog(FileDialog::ImportArchive)));
+        actions.push(action(COPY, "复制导入", "file-import-eagle-copy", files.can_import(ctx), FilesMessage::OpenEagle("copy".into())));
+        actions.push(action(SCISSORS, "剪切导入", "file-import-eagle-move", files.can_import(ctx), FilesMessage::OpenEagle("move".into())));
     }
-    actions.push(action("复制", "file-copy", files.can_transfer(ctx), FilesMessage::OpenDialog(FileDialog::Copy)));
-    actions.push(action("移动", "file-move", files.can_transfer(ctx), FilesMessage::OpenDialog(FileDialog::Move)));
-    actions.push(action("重命名", "file-rename", files.can_rename(ctx), FilesMessage::OpenDialog(FileDialog::Rename)));
+    actions.push(action(COPY, "复制", "file-copy", files.can_transfer(ctx), FilesMessage::OpenDialog(FileDialog::Copy)));
+    actions.push(action(ARROW_FORWARD, "移动", "file-move", files.can_transfer(ctx), FilesMessage::OpenDialog(FileDialog::Move)));
+    actions.push(action(PENCIL, "重命名", "file-rename", files.can_rename(ctx), FilesMessage::OpenDialog(FileDialog::Rename)));
     let delete_label = if ctx.trash { "永久删除" } else { "删除" };
-    actions.push(action(delete_label, "file-delete", files.can_delete(ctx), FilesMessage::DeleteSelected));
+    actions.push(action(TRASH, delete_label, "file-delete", files.can_delete(ctx), FilesMessage::DeleteSelected));
     if ctx.trash {
-        actions.push(action("还原", "file-restore", files.can_restore(ctx), FilesMessage::RestoreSelected));
-        actions.push(action("还原所有项目", "file-restore-all", files.can_empty_trash(ctx), FilesMessage::RestoreAll));
-        actions.push(action("清空回收站", "file-empty-trash", files.can_empty_trash(ctx), FilesMessage::EmptyTrash));
+        actions.push(action(ROTATE, "还原", "file-restore", files.can_restore(ctx), FilesMessage::RestoreSelected));
+        actions.push(action(ROTATE, "还原所有项目", "file-restore-all", files.can_empty_trash(ctx), FilesMessage::RestoreAll));
+        actions.push(action(TRASH, "清空回收站", "file-empty-trash", files.can_empty_trash(ctx), FilesMessage::EmptyTrash));
     }
-    let mut rows = Vec::new();
-    let mut row = Vec::new();
-    for (index, action) in actions.into_iter().enumerate() {
-        row.push(action);
-        if row.len() == 5 {
-            let ready = std::mem::take(&mut row);
-            rows.push(
-                widget(Stack::row(8.0))
-                    .children(ready)
-                    .key(format!("file-toolbar-row-{}", index / 5))
-                    .into_any(),
-            );
-        }
-    }
-    if !row.is_empty() {
-        rows.push(
-            widget(Stack::row(8.0))
-                .children(row)
-                .key("file-toolbar-row-last")
-                .into_any(),
-        );
-    }
-    widget(Stack::column(6.0)).children(rows).key("file-toolbar")
+    widget(Stack::row(4.0)).children(actions).key("file-toolbar")
 }
 
-fn action(label: &'static str, key: &'static str, enabled: bool, message: FilesMessage) -> AnyView {
-    button(label).key(key).disabled(!enabled).on_cx(move |_, _: &Activate, cx| {
-        cx.dispatch_program(file_message(message.clone()));
-    }).into_any()
+fn action(icon: Icon, label: &'static str, key: &'static str, enabled: bool, message: FilesMessage) -> AnyView {
+    widget(super::title_bar::shell_icon(icon, label, !enabled))
+        .key(key)
+        .on_cx(move |_, _: &Activate, cx| {
+            cx.dispatch_program(file_message(message.clone()));
+        })
+        .into_any()
 }
 
 /// 列表行高 28。网格行更高，以便放下缩略图和标题。
