@@ -19,7 +19,7 @@ pub(super) fn inspect_surface(model: &ShellViewModel) -> AnyView {
     let inspect = &model.inspect;
     let mut rows = Vec::new();
     if model.workspace.panel == super::workspace::WorkspacePanel::Search || inspect.filter_bar_open {
-        rows.push(search_panel(inspect));
+        rows.push(search_panel(model));
     }
     if inspect.has_target() {
         rows.push(preview_panel(model));
@@ -142,36 +142,87 @@ fn metadata_panel(inspect: &InspectState) -> AnyView {
     widget(Stack::column(8.0)).children(rows).into_any()
 }
 
-fn search_panel(inspect: &InspectState) -> AnyView {
-    let mut rows = vec![
-        text(search_summary(inspect)).key("inspect-search-summary").into_any(),
-        field("搜索", "inspect-query", &inspect.query, false, |value| InspectMessage::SetQuery(value)),
-        widget(Stack::row(8.0)).children((
-            button("搜索").key("inspect-run-search").disabled(inspect.searching).on_cx(|_, _: &Activate, cx| {
-                cx.dispatch_program(inspect_message(InspectMessage::RunSearch));
-            }),
-            button(if inspect.filter_bar_open { "关闭筛选" } else { "筛选" }).key("inspect-filter-toggle").on_cx(|_, _: &Activate, cx| {
-                cx.dispatch_program(inspect_message(InspectMessage::ToggleFilterBar));
-            }),
-        )).into_any(),
+fn search_panel(model: &ShellViewModel) -> AnyView {
+    let inspect = &model.inspect;
+    if model.workspace.panel != super::workspace::WorkspacePanel::Search {
+        return search_controls(inspect, false);
+    }
+    let mut body = vec![
+        super::workbench::header(
+            "搜索",
+            "inspect-search-eyebrow",
+            "搜索结果",
+            "inspect-search-title",
+            &search_summary(inspect),
+            "inspect-search-summary",
+            vec![
+                super::workbench::badge(format!("{} 个仓库", model.workspace.repositories.len()), "inspect-search-repos"),
+                super::workbench::badge(format!("{} 条结果", inspect.results.len()), "inspect-search-hits"),
+            ],
+        ),
     ];
+    body.push(search_controls(inspect, true));
     if inspect.filter_bar_open {
-        rows.push(filter_bar(&inspect.filters, inspect.searching));
+        body.push(filter_bar(&inspect.filters, inspect.searching));
     }
     if !inspect.search_error.is_empty() {
-        rows.push(text(inspect.search_error.clone()).key("inspect-search-error").into_any());
+        body.push(text(inspect.search_error.clone()).key("inspect-search-error").into_any());
     }
-    if inspect.results.is_empty() && !inspect.searching {
-        rows.push(text("没有搜索结果").key("inspect-search-empty").into_any());
+    if inspect.searching {
+        body.push(text("正在执行全局搜索").key("inspect-search-loading").into_any());
+    } else if inspect.results.is_empty() {
+        let (title, detail) = if model.workspace.repositories.is_empty() {
+            ("还没有可搜索的资源库", "先在资源库页面添加一个仓库，再执行跨仓库搜索。")
+        } else {
+            ("等待搜索条件", "输入关键词、标签或评分条件后，这里会展示结果。")
+        };
+        body.push(super::workbench::dashed_empty(title, detail, "inspect-search-empty", "inspect-search-empty-detail", false, true));
     }
     for row in &inspect.results {
         let asset_id = row.asset_id.clone();
-        rows.push(
+        body.push(
             button(format!("{} · {}", row.filename, row.repo_name))
                 .key(format!("inspect-hit-{}", row.asset_id))
                 .on_cx(move |_, _: &Activate, cx| cx.dispatch_program(inspect_message(InspectMessage::OpenHit(asset_id.clone()))))
                 .into_any(),
         );
+    }
+    super::workbench::panel(body)
+}
+
+fn search_controls(inspect: &InspectState, embedded: bool) -> AnyView {
+    let mut rows = Vec::new();
+    if !embedded {
+        rows.push(text(search_summary(inspect)).key("inspect-search-summary").into_any());
+    }
+    rows.push(field("搜索", "inspect-query", &inspect.query, false, |value| InspectMessage::SetQuery(value)));
+    rows.push(widget(Stack::row(8.0)).children((
+        button("搜索").key("inspect-run-search").disabled(inspect.searching).on_cx(|_, _: &Activate, cx| {
+            cx.dispatch_program(inspect_message(InspectMessage::RunSearch));
+        }),
+        button(if inspect.filter_bar_open { "关闭筛选" } else { "筛选" }).key("inspect-filter-toggle").on_cx(|_, _: &Activate, cx| {
+            cx.dispatch_program(inspect_message(InspectMessage::ToggleFilterBar));
+        }),
+    )).into_any());
+    if !embedded && inspect.filter_bar_open {
+        rows.push(filter_bar(&inspect.filters, inspect.searching));
+    }
+    if !embedded && !inspect.search_error.is_empty() {
+        rows.push(text(inspect.search_error.clone()).key("inspect-search-error").into_any());
+    }
+    if !embedded && inspect.results.is_empty() && !inspect.searching {
+        rows.push(text("没有搜索结果").key("inspect-search-empty").into_any());
+    }
+    if !embedded {
+        for row in &inspect.results {
+            let asset_id = row.asset_id.clone();
+            rows.push(
+                button(format!("{} · {}", row.filename, row.repo_name))
+                    .key(format!("inspect-hit-{}", row.asset_id))
+                    .on_cx(move |_, _: &Activate, cx| cx.dispatch_program(inspect_message(InspectMessage::OpenHit(asset_id.clone()))))
+                    .into_any(),
+            );
+        }
     }
     widget(Stack::column(8.0)).children(rows).into_any()
 }
