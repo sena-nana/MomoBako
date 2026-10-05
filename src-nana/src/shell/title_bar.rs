@@ -3,8 +3,12 @@
 //! 窗口按钮用 `AppTitleBar` 自带的自定义控件槽。点击后再送进现有的
 //! 最小化、最大化切换和关闭确认，不让关闭按钮直接关掉窗口。
 
+use std::sync::Arc;
+
 use nana_ui::runtime::view::{button, icon_button, widget, IntoView};
-use nana_ui::runtime::{Activate, AppTitleBar, Entity, IconButton, RuntimeDocument, TextChanged, TextInput};
+use nana_ui::runtime::{
+    Activate, AppTitleBar, Entity, IconButton, LengthSpec, RuntimeDocument, TextChanged, TextInput,
+};
 use nana_ui::{ControlSize, Icon};
 
 use super::{InspectMessage, ShellMessage, ShellViewModel};
@@ -26,7 +30,7 @@ pub(super) fn title_bar(model: &ShellViewModel) -> impl IntoView + use<'_> {
         AppTitleBar::new("MomoBako")
             .show_window_controls(true)
             .native_controls(false)
-            .center_width(480.0),
+            .center_width(560.0),
     )
     .leading(
         icon_button(Icon::Sidebar, sidebar_label)
@@ -36,22 +40,32 @@ pub(super) fn title_bar(model: &ShellViewModel) -> impl IntoView + use<'_> {
             }),
     )
     .center(widget(nana_ui::runtime::Stack::row(8.0)).children((
-        widget(
-            TextInput::new(query)
-                .label("全局搜索")
-                .placeholder("搜索文件名、标签、元数据")
-                .size(ControlSize::Small),
-        )
-        .key("global-search")
-        .on_cx(|_, event: &TextChanged, cx| {
-            cx.dispatch_program(ShellMessage::Inspect(InspectMessage::SetQuery(
-                event.value.to_string(),
-            )));
-        }),
+        widget(search_field(query))
+            .key("global-search")
+            .on_cx(|_, event: &TextChanged, cx| {
+                cx.dispatch_program(ShellMessage::Inspect(InspectMessage::SetQuery(
+                    event.value.to_string(),
+                )));
+            }),
         button(filter_label).key("filter-toggle").on_cx(|_, _: &Activate, cx| {
             cx.dispatch_program(ShellMessage::Inspect(InspectMessage::ToggleFilterBar));
         }),
     )))
+}
+
+/// 搜索框不用百分百宽度，给筛选开关留出中间槽里的可见位置。
+fn search_field(query: String) -> TextInput {
+    let mut field = TextInput::new(query)
+        .label("全局搜索")
+        .placeholder("搜索文件名、标签、元数据")
+        .size(ControlSize::Small);
+    let layout = Arc::make_mut(&mut field.style.layout);
+    layout.width = Some(LengthSpec::Px(280.0));
+    layout.min_width = Some(LengthSpec::Px(280.0));
+    layout.max_width = Some(LengthSpec::Px(280.0));
+    layout.flex_grow = Some(0.0);
+    layout.flex_shrink = Some(0.0);
+    field
 }
 
 /// 把组件生成的 Minimize / Maximize / Close 接上现有窗口动作。
