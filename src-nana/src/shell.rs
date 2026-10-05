@@ -25,7 +25,7 @@ mod sidebar_view;
 mod workspace;
 pub(crate) mod workspace_refresh;
 pub use files::{display_mode_path, FileRow, FilesEffect, FilesMessage, HardlinkPrompt, VirtualQuery};
-pub(crate) use thumbs::{decode_thumbnail_file, thumbnail_slot, ThumbnailFrame};
+pub(crate) use thumbs::{decode_preview_pixels, decode_thumbnail_file, thumbnail_slot, ThumbnailFrame};
 pub use inspect::{
     DateBound, InspectEffect, InspectMessage, NumberBound, SearchRequestDraft, SearchRow, prepare_text,
 };
