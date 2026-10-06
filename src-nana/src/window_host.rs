@@ -7,14 +7,19 @@ use crate::shell::{ShellMessage, ShellViewModel, WindowAction};
 use crate::{host_api, MomoBakoApplication};
 
 /// 动效还在走时按 30 帧继续画，并把工作区拖动后的宽度写回壳层。
+///
+/// 指针手势先读当前文档。手势进行中不拆树，否则按下目标会随节点一起消失。
 pub(crate) fn prepare_motion(shell: &mut ShellViewModel, window: &mut ApplicationWindow) {
+    let tracking = crate::shell::observe_live_pointer(shell, &window.document);
     if shell.motion.active() {
         shell.motion.advance(shell.motion.now_ms().saturating_add(16));
-        if let Err(error) = crate::shell::mount_shell(&mut window.document, shell) {
-            eprintln!("Nana 动效帧重建失败：{error}");
+        if !tracking {
+            if let Err(error) = crate::shell::mount_shell(&mut window.document, shell) {
+                eprintln!("Nana 动效帧重建失败：{error}");
+            }
         }
     }
-    window.demand = if shell.motion.active() {
+    window.demand = if shell.motion.active() || tracking {
         nana_ui::FrameDemand::Continuous(std::num::NonZeroU32::new(30).expect("30"))
     } else {
         nana_ui::FrameDemand::OnDemand

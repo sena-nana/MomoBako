@@ -205,7 +205,7 @@ fn assert_smart_folder_dialog() {
     let _ = pump(&mut session, &mut model);
     click_label(&mut session, "创建");
     let _ = pump(&mut session, &mut model);
-    assert!(has_label(&session.accessibility_dump(), "正在创建…"), "创建没有进入提交");
+    assert!(has_label(&session.accessibility_dump(), "正在保存…"), "创建没有进入提交");
 }
 
 fn open_session(

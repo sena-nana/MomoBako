@@ -12,6 +12,8 @@ use crate::settings::ApplicationSettings;
 
 mod files;
 mod motion;
+mod pointer_gesture;
+pub use pointer_gesture::observe_live_pointer;
 pub use motion::note_sidebar_resize;
 mod thumbs;
 mod files_view;

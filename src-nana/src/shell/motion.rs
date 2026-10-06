@@ -545,16 +545,20 @@ mod tests {
         model.reduce(ShellMessage::Files(super::super::files::FilesMessage::OpenDialog(
             super::super::files::FileDialog::CreateDirectory,
         )));
-        assert!(model.motion.modal_frame().overlay_opacity < 0.05);
-        assert!((model.motion.modal_frame().card_scale - MODAL_CARD_SCALE).abs() < 0.001);
+        let opened = model.motion.modal_frame();
+        assert_eq!(opened.overlay_opacity, 0.0);
+        assert_eq!(opened.card_shift, MODAL_CARD_SHIFT);
+        assert_eq!(opened.card_scale, MODAL_CARD_SCALE);
         model.motion.advance(MODAL_OVERLAY_MS);
         let mid = model.motion.modal_frame().overlay_opacity;
+        assert_eq!(mid, 1.0);
         model.reduce(ShellMessage::Refresh);
-        assert!((model.motion.modal_frame().overlay_opacity - mid).abs() < 0.001);
+        assert_eq!(model.motion.modal_frame().overlay_opacity, mid);
         model.motion.advance(MODAL_CARD_MS);
         let frame = model.motion.modal_frame();
-        assert!(frame.card_shift.abs() < 0.05);
-        assert!((frame.card_scale - 1.0).abs() < 0.01);
+        assert_eq!(frame.overlay_opacity, 1.0);
+        assert_eq!(frame.card_shift, 0.0);
+        assert_eq!(frame.card_scale, 1.0);
         assert!(frame.visible);
     }
 
@@ -609,31 +613,46 @@ mod tests {
     fn panel_progress_spinner_and_sidebar_use_the_vue_durations() {
         let mut motion = MotionState::default();
         motion.set_panel_open(true);
+        assert_eq!(motion.panel_frame().opacity, 0.0);
+        assert_eq!(motion.panel_frame().shift, PANEL_SHIFT);
         motion.advance(PANEL_OPACITY_MS);
-        assert!((motion.panel_frame().opacity - 1.0).abs() < 0.02);
+        assert_eq!(motion.panel_frame().opacity, 1.0);
         motion.advance(PANEL_RISE_MS);
-        assert!(motion.panel_frame().shift.abs() < 0.05);
+        assert_eq!(motion.panel_frame().shift, 0.0);
         motion.set_startup_percent(50.0);
+        assert_eq!(motion.startup_percent(), 0.0);
         motion.advance(motion.now_ms() + PROGRESS_WIDTH_MS);
-        assert!((motion.startup_percent() - 50.0).abs() < 0.6);
+        assert_eq!(motion.startup_percent(), 50.0);
+        motion.set_operation_percent(Some(32.0));
+        assert_eq!(motion.operation_percent(), Some(0.0));
+        motion.advance(motion.now_ms() + PROGRESS_WIDTH_MS);
+        assert_eq!(motion.operation_percent(), Some(32.0));
         motion.set_spinner(true);
         let started = motion.now_ms();
+        assert_eq!(motion.spinner_degrees(), 0.0);
         motion.advance(started + SPINNER_MS / 2);
-        assert!((motion.spinner_degrees() - 180.0).abs() < 0.1);
+        assert_eq!(motion.spinner_degrees(), 180.0);
         motion.set_tools_hover(true);
+        assert_eq!(motion.tools_opacity(), 0.0);
         motion.advance(motion.now_ms() + SIDEBAR_TOOL_FADE_MS);
-        assert!((motion.tools_opacity() - 1.0).abs() < 0.02);
+        assert_eq!(motion.tools_opacity(), 1.0);
         motion.set_footer_hover(true);
+        assert_eq!(motion.footer_opacity(), FOOTER_REST);
         motion.advance(motion.now_ms() + FOOTER_FADE_MS);
-        assert!((motion.footer_opacity() - 1.0).abs() < 0.02);
+        assert_eq!(motion.footer_opacity(), 1.0);
         motion.set_sidebar_collapsed(true, 276.0);
+        assert_eq!(motion.sidebar_presented_width(), 276.0);
         motion.advance(motion.now_ms() + SIDEBAR_COLLAPSE_MS);
-        assert!(motion.sidebar_presented_width() < 0.5);
+        assert_eq!(motion.sidebar_presented_width(), 0.0);
         motion.set_pulse(true);
         motion.set_sweep(true);
-        motion.advance(motion.now_ms() + PULSE_MS / 2);
-        assert!(motion.pulse_opacity() > 0.9);
-        assert!(motion.sweep_percent() > 0.0);
+        assert_eq!(motion.pulse_opacity(), PULSE_LOW);
+        assert_eq!(motion.sweep_percent(), -120.0);
+        let looped = motion.now_ms();
+        motion.advance(looped + SWEEP_MS);
+        assert_eq!(motion.sweep_percent(), -120.0);
+        motion.advance(looped + PULSE_MS);
+        assert_eq!(motion.pulse_opacity(), PULSE_LOW);
     }
 
     #[test]

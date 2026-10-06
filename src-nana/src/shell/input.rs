@@ -124,6 +124,19 @@ struct InternalSession {
     backend_kind: String,
 }
 
+/// 实况树上还没松手的指针。`row` 为空时是框选。
+#[derive(Clone, Debug)]
+pub struct LiveGesture {
+    pub row: Option<String>,
+    pub origin_x: f32,
+    pub origin_y: f32,
+    pub x: f32,
+    pub y: f32,
+    pub armed: bool,
+    /// 按下时 Ctrl 或 Meta 是否按着。文档不保留修饰键时为 false。
+    pub append: bool,
+}
+
 /// 拖放会话、关闭确认和已排队的宿主命令。
 #[derive(Clone, Debug, Default)]
 pub struct InputState {
@@ -143,6 +156,7 @@ pub struct InputState {
     pub external_drag_result: Option<bool>,
     pub sidebar_dragging: bool,
     pub sidebar_resize_dirty: bool,
+    pub live_gesture: Option<LiveGesture>,
     session: Option<InternalSession>,
     host_commands: Vec<PendingHostCommand>,
 }
