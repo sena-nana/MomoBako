@@ -31,10 +31,12 @@ fn unique_temp_dir(label: &str) -> PathBuf {
         .duration_since(UNIX_EPOCH)
         .expect("system time should be after unix epoch")
         .as_nanos();
-    std::env::temp_dir().join(format!(
+    let root = std::env::temp_dir().join(format!(
         "momobako-runtime-{label}-{}-{unique}",
         std::process::id()
-    ))
+    ));
+    fs::create_dir_all(&root).expect("temp root should be created");
+    root
 }
 
 #[test]
@@ -244,7 +246,10 @@ fn repository_query_prepare_preview_file_source_returns_preview_url() {
         .repository
         .repo_id;
     let response =
-        tauri::async_runtime::block_on(view_model.prepare_preview_file_source(FileReadRequest {
+        tokio::runtime::Builder::new_current_thread()
+            .build()
+            .expect("tokio")
+            .block_on(view_model.prepare_preview_file_source(FileReadRequest {
             repo_id,
             path: "model.glb".to_string(),
         }))

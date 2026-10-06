@@ -1,12 +1,9 @@
 use tauri::{ipc::Channel, AppHandle};
 
 mod app_shell;
-mod models;
-mod services;
-#[cfg(test)]
-mod tests;
-mod viewmodels;
 mod window_state;
+
+pub use momobako_backend::{app_log, models, services, viewmodels};
 
 pub use services::repository::eagle_import::source_adapter::{
     build_eagle_source_snapshot, EagleSourceDiscoveredFile, EagleSourceEntry, EagleSourceEntryKind,
