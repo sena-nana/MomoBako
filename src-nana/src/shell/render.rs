@@ -689,7 +689,19 @@ pub fn mount_shell(
     Ok(())
 }
 
+/// 窄窗逻辑宽。默认侧栏不随窗口缩小，主区下限要和它对得上。
+const NARROW_WINDOW_PX: f32 = 390.0;
+/// 工作台两条轨道之间的发丝间隙。
+const WORKBENCH_GAP_PX: f32 = 1.0;
+
+/// 主区最小宽。390 里还要放下默认侧栏和间隙，不能再用 320。
+/// 宽窗里主区按 fill 铺开，这个下限不会把 1200 的版式压窄。
+fn primary_min_px() -> f32 {
+    (NARROW_WINDOW_PX - crate::theme_map::SIDEBAR_DEFAULT_PX - WORKBENCH_GAP_PX).max(96.0)
+}
+
 /// 资源区加主区。分割是工作台的发丝间隙，主区圆角，不画常驻浅色分割条。
+/// 侧栏宽度仍用调用方给出的展开值，不改用户保存的折叠状态。
 fn workbench(sidebar: AnyView, stage: AnyView, width: f32) -> AnyView {
     let layout = WorkspaceLayout::new([
         RegionState::new(RegionId::Resources, RegionRole::Resources)
@@ -699,7 +711,7 @@ fn workbench(sidebar: AnyView, stage: AnyView, width: f32) -> AnyView {
             .collapsible(true)
             .resizable(true),
         RegionState::new(RegionId::Primary, RegionRole::Primary)
-            .min_size(320.0)
+            .min_size(primary_min_px())
             .fill_priority(1),
     ])
     .expect("工作台只注册资源区和主区");

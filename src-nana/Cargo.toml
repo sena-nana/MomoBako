@@ -11,6 +11,8 @@ serde_json = "1"
 sha2 = "0.10"
 image = "0.25"
 flate2 = "1.1.9"
+# 只开 mp3、flac、ogg/vorbis。关掉默认的 wav/mkv，WAV 仍走自有解析。
+symphonia = { version = "0.6.1", default-features = false, features = ["mp3", "flac", "ogg", "vorbis"] }
 zip = { version = "8.6", default-features = false, features = ["deflate"] }
 unarc-rs = "0.6.1"
 momobako-backend = { path = "../src-backend" }

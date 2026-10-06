@@ -14,14 +14,17 @@ pub(crate) fn page(body: Vec<AnyView>) -> AnyView {
 }
 
 /// 抬升的圆角内容面板，占满主区剩余高度。
+/// 矮不过内容：窄窗里说明折行后不能被压到下一张卡片上。
 pub(crate) fn panel(body: Vec<AnyView>) -> AnyView {
     widget(
         Stack::fill_column(16.0)
+            .height(LengthSpec::Shrink)
             .surface(SemanticColorRole::Surface)
             .radius(RadiusTier::Xl)
             .padding_xy(22.0, 22.0)
-            .min_height(LengthSpec::Px(0.0))
-            .grow(1.0),
+            .min_height(LengthSpec::MinContent)
+            .grow(1.0)
+            .shrink(0.0),
     )
     .children(body)
     .key("workbench-panel")
@@ -43,6 +46,7 @@ pub(crate) fn section_card(title: &str, body: Vec<AnyView>) -> AnyView {
 }
 
 /// 标题在左，徽章和操作在右。空副标题不占一行。
+/// 副标题单独占满列宽再折行，避免按单行宽画到下一张卡片上。
 pub(crate) fn header(
     eyebrow: &str,
     eyebrow_key: &'static str,
@@ -52,22 +56,36 @@ pub(crate) fn header(
     subline_key: &'static str,
     trailing: Vec<AnyView>,
 ) -> AnyView {
-    let mut left = vec![
+    let left = vec![
         widget(Text::new(eyebrow).color(SemanticColorRole::Faint).font_size(11.0).font_weight(600))
             .key(eyebrow_key)
             .into_any(),
         widget(Text::new(title).font_size(22.0).font_weight(600)).key(title_key).into_any(),
     ];
-    if !subline.is_empty() {
-        left.push(widget(muted(subline, 13.0, 400)).key(subline_key).into_any());
-    }
     // 左列如果用 Fill，会按父级 100% 算宽，把右侧徽章挤出卡片。
-    widget(Stack::bar(12.0).align(AlignSpec::Start))
+    let title_row = widget(Stack::bar(12.0).align(AlignSpec::Start))
         .children((
             widget(Stack::column(4.0).width(LengthSpec::Shrink).min_width(LengthSpec::Px(0.0)).grow(1.0).shrink(1.0)).children(left),
             widget(Stack::row(8.0).align(AlignSpec::Center).grow(0.0).shrink(0.0)).children(trailing),
         ))
+        .into_any();
+    if subline.is_empty() {
+        return title_row;
+    }
+    widget(Stack::column(4.0).width(LengthSpec::Fill).min_width(LengthSpec::Px(0.0)))
+        .children((title_row, widget(wrapping_subline(subline)).key(subline_key)))
         .into_any()
+}
+
+/// 说明按列宽折行。`Text` 没有 wrap，用 `line-break: anywhere`。
+fn wrapping_subline(label: &str) -> Text {
+    let mut node = muted(label, 13.0, 400);
+    let layout = std::sync::Arc::make_mut(&mut node.style.layout);
+    layout.width = Some(LengthSpec::Fill);
+    layout.min_width = Some(LengthSpec::Px(0.0));
+    layout.line_break = Some(nana_ui_core::LineBreakSpec::Anywhere);
+    layout.overflow_wrap = Some(nana_ui_core::OverflowWrapSpec::Anywhere);
+    node
 }
 
 /// 右上角计数胶囊。

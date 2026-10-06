@@ -46,7 +46,7 @@ pub struct PlaybackSettings {
     pub object_fit_cover: bool,
 }
 
-/// 已登记的播放器实现。只内置 WAV，其它格式仍要登记。
+/// 已登记的播放器实现。内置 WAV，以及解成 PCM 后共用游标的 mp3/flac/ogg。
 #[derive(Clone, Debug, PartialEq)]
 pub struct PlayerCandidate {
     pub plugin_id: String,
@@ -188,7 +188,7 @@ impl Default for PlayerState {
             shuffle_seed: 1,
             playlists: Vec::new(),
             contributions: Vec::new(),
-            candidates: vec![wav_player::builtin_candidate()],
+            candidates: wav_player::builtin_candidates(),
             preferences: BTreeMap::new(),
             memberships: BTreeMap::new(),
             listed: None,
@@ -257,10 +257,10 @@ impl PlayerState {
         self.queue.iter().find(|item| Some(&item.id) == self.current_id.as_ref())
     }
 
-    /// 当前条目解析到内置 WAV 候选时才走内存播放器。
+    /// 当前条目解析到内置内存播放器时才走游标。WAV 与 mp3/flac/ogg 共用。
     fn uses_wav(&self) -> bool {
         self.current_item().is_some_and(|item| {
-            self.resolve_type(&item.player_type_id).player.as_ref().is_some_and(wav_player::is_wav_candidate)
+            self.resolve_type(&item.player_type_id).player.as_ref().is_some_and(wav_player::is_memory_candidate)
         })
     }
 
@@ -440,12 +440,12 @@ impl PlayerState {
             return;
         }
         self.activity.clear();
-        let wav = resolution.player.as_ref().is_some_and(wav_player::is_wav_candidate);
-        if !wav {
+        let memory = resolution.player.as_ref().is_some_and(wav_player::is_memory_candidate);
+        if !memory {
             self.wav.clear();
         }
         let session = self.session.clone();
-        let (session, error) = wav_player::drive(wav, &self.wav, session, wav_player::Action::Load(item.path.clone()));
+        let (session, error) = wav_player::drive(memory, &self.wav, session, wav_player::Action::Load(item.path.clone()));
         self.session = session;
         self.can_play = self.session.status != "failed";
         if item.file_class == "image" {

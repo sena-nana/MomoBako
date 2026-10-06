@@ -1,11 +1,12 @@
-//! 内置 WAV 播放贡献。
+//! 内置 WAV 播放贡献，以及解成 PCM 后共用同一游标的 mp3、flac、ogg。
 //!
-//! 只解析标准 PCM（RIFF/WAVE、`fmt `、`data`，8-bit 或 16-bit，单声道或双声道）。
-//! 播放头和音量留在内存里。正式 Windows 构建在播放成功后用 winmm 异步出声。
-//! 测试构建不打开设备，单元测试不会出声。
+//! WAV 只解析标准 PCM（RIFF/WAVE、`fmt `、`data`，8-bit 或 16-bit，单声道或双声道）。
+//! 压缩格式先解成 16-bit 小端 PCM，再放进这份游标。播放头和音量留在内存里。
+//! 正式 Windows 构建在播放成功后用 winmm 异步出声。测试构建不打开设备，单元测试不会出声。
 
 use std::cell::RefCell;
 use std::fs;
+use std::path::Path;
 use std::rc::Rc;
 
 use crate::backend::services::repository::PlaybackSessionState;
@@ -16,7 +17,10 @@ use super::PlayerCandidate;
 pub(super) const PLUGIN_ID: &str = "momobako.player.wav";
 pub(super) const PLAYER_TYPE_ID: &str = "momobako.playlist.wav";
 
-/// 生产列表里唯一内置的候选。其它格式仍要另行登记。
+pub(super) const COMPRESSED_PLUGIN_ID: &str = "momobako.player.compressed-audio";
+pub(super) const COMPRESSED_PLAYER_TYPE_ID: &str = "momobako.playlist.compressed-audio";
+
+/// 生产列表里的 WAV 候选。
 pub(super) fn builtin_candidate() -> PlayerCandidate {
     PlayerCandidate {
         plugin_id: PLUGIN_ID.into(),
@@ -30,8 +34,27 @@ pub(super) fn builtin_candidate() -> PlayerCandidate {
     }
 }
 
-pub(super) fn is_wav_candidate(candidate: &PlayerCandidate) -> bool {
-    candidate.plugin_id == PLUGIN_ID
+/// mp3、flac、ogg 共用一个候选。装载时解进和 WAV 相同的内存游标。
+pub(super) fn compressed_candidate() -> PlayerCandidate {
+    PlayerCandidate {
+        plugin_id: COMPRESSED_PLUGIN_ID.into(),
+        player_type_id: COMPRESSED_PLAYER_TYPE_ID.into(),
+        capability_id: None,
+        label: "MP3 / FLAC / Ogg".into(),
+        file_class: "audio".into(),
+        extensions: vec!["mp3".into(), "flac".into(), "ogg".into()],
+        supports_seek: true,
+        supports_volume: true,
+    }
+}
+
+pub(super) fn builtin_candidates() -> Vec<PlayerCandidate> {
+    vec![builtin_candidate(), compressed_candidate()]
+}
+
+/// WAV 和已解码的压缩音频都走这份内存游标。其它候选仍是缺失解码器。
+pub(super) fn is_memory_candidate(candidate: &PlayerCandidate) -> bool {
+    candidate.plugin_id == PLUGIN_ID || candidate.plugin_id == COMPRESSED_PLUGIN_ID
 }
 
 /// 一次装载后的内存游标。克隆只复制句柄，播放头仍是同一份。
@@ -113,7 +136,8 @@ impl std::fmt::Debug for WavPlayer {
 impl PlaybackMediaPlugin for WavPlayer {
     fn load(&mut self, source: &str) -> Result<PlaybackMediaCapabilities, String> {
         self.clear();
-        match parse_wav_file(source) {
+        let compressed = is_compressed_path(source);
+        match load_source(source) {
             Ok(parsed) => {
                 let duration_ms = parsed.duration_ms;
                 *self.inner.borrow_mut() = Cursor::from_parsed(parsed);
@@ -124,7 +148,11 @@ impl PlaybackMediaPlugin for WavPlayer {
                 })
             }
             Err(error) => {
-                eprintln!("Nana WAV 装载失败：{error}");
+                if compressed {
+                    eprintln!("Nana 压缩音频装载失败：{error}");
+                } else {
+                    eprintln!("Nana WAV 装载失败：{error}");
+                }
                 Err(error)
             }
         }
@@ -233,14 +261,14 @@ pub(super) enum Action {
     Volume(f32),
 }
 
-/// 选中 WAV 时用内存播放器，其它候选仍是缺失解码器。
+/// 选中内置内存播放器时用游标，其它候选仍是缺失解码器。
 pub(super) fn drive(
-    use_wav: bool,
+    use_memory: bool,
     wav: &WavPlayer,
     session: PlaybackSessionState,
     action: Action,
 ) -> (PlaybackSessionState, Option<String>) {
-    if use_wav {
+    if use_memory {
         control(wav.clone(), session, action)
     } else {
         control(MissingDecoder, session, action)
@@ -292,6 +320,43 @@ impl PlaybackMediaPlugin for MissingDecoder {
 /// 预览只需要时长。坏文件返回错误，由调用方决定文案。
 pub(crate) fn wav_duration_ms(bytes: &[u8]) -> Result<u64, String> {
     parse_wav(bytes).map(|parsed| parsed.duration_ms)
+}
+
+/// WAV 走原解析。mp3、flac、ogg 读入后解成 16-bit PCM，再装进同一游标。
+fn load_source(path: &str) -> Result<ParsedWav, String> {
+    if is_compressed_path(path) {
+        let bytes = fs::read(path).map_err(|error| format!("无法读取音频：{error}"))?;
+        return parsed_from_decoded(crate::shell::audio_decode::decode_compressed(&bytes)?);
+    }
+    parse_wav_file(path)
+}
+
+fn is_compressed_path(path: &str) -> bool {
+    matches!(
+        Path::new(path).extension().and_then(|ext| ext.to_str()).map(|ext| ext.to_ascii_lowercase()).as_deref(),
+        Some("mp3" | "flac" | "ogg")
+    )
+}
+
+fn parsed_from_decoded(decoded: crate::shell::audio_decode::DecodedPcm) -> Result<ParsedWav, String> {
+    if decoded.channels != 1 && decoded.channels != 2 {
+        return Err("只支持单声道或双声道".into());
+    }
+    if decoded.sample_rate == 0 {
+        return Err("采样率无效".into());
+    }
+    let frame_bytes = usize::from(decoded.channels) * 2;
+    if frame_bytes == 0 || decoded.pcm.is_empty() || decoded.pcm.len() % frame_bytes != 0 {
+        return Err("压缩音频没有整帧样本".into());
+    }
+    Ok(ParsedWav {
+        sample_rate: decoded.sample_rate,
+        channels: decoded.channels,
+        bits_per_sample: 16,
+        frame_count: decoded.pcm.len() as u64 / frame_bytes as u64,
+        duration_ms: decoded.duration_ms,
+        pcm: decoded.pcm,
+    })
 }
 
 /// 读取并解析一个标准 PCM WAV。坏文件返回错误，由调用方记录日志。

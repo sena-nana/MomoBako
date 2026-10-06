@@ -19,6 +19,10 @@ use super::{AdminMessage, ToolPageEntry};
 pub(crate) fn admin_surface(model: &ShellViewModel) -> AnyView {
     let mut rows = Vec::new();
     if model.admin_settings_visible() {
+        // 登录按钮必须在应用设置之前，否则 1200×800 第一屏看不见。
+        if let Some(card) = super::tool_native::source_login_card(&model.admin.plugins) {
+            rows.push(card);
+        }
         rows.extend(settings_rows(model));
     }
     if model.admin_workspace_visible(WorkspacePanel::Actions) && !model.admin_settings_visible() {
@@ -283,7 +287,7 @@ pub(crate) fn extensions_card(model: &ShellViewModel) -> AnyView {
             true,
         ));
     } else {
-        body.extend(plugin_entries(model));
+        body.extend(plugin_entries(model, true));
     }
     workbench::panel(body)
 }
@@ -417,11 +421,13 @@ fn plugin_rows(model: &ShellViewModel) -> Vec<AnyView> {
             }),))
             .into_any(),
     );
-    rows.extend(plugin_entries(model));
+    rows.extend(plugin_entries(model, false));
     rows
 }
 
-fn plugin_entries(model: &ShellViewModel) -> Vec<AnyView> {
+/// 插件行。设置页的登录按钮在顶部卡片里，这里不再放第二套。
+fn plugin_entries(model: &ShellViewModel, include_source_auth: bool) -> Vec<AnyView> {
+    let login_ids = if include_source_auth { Vec::new() } else { super::tool_native::source_login_plugin_ids(&model.admin.plugins) };
     let mut rows = Vec::new();
     for (category, ids) in model.admin.grouped_plugins() {
         rows.push(text(format!("{} {}", support::category_label(&category), ids.len())).key(format!("admin-plugin-group-{category}")).into_any());
@@ -446,7 +452,11 @@ fn plugin_entries(model: &ShellViewModel) -> Vec<AnyView> {
                 );
             }
             let summary = support::source_account_summary(plugin);
+            let on_login_card = login_ids.iter().any(|id| id == &plugin_id);
             for (index, line) in support::settings_upgrade_lines(plugin, model.admin.vue_settings.contains(&plugin_id)).into_iter().enumerate() {
+                if on_login_card && summary.as_ref() == Some(&line) {
+                    continue;
+                }
                 let key = if summary.as_ref() == Some(&line) {
                     format!("admin-source-summary-{plugin_id}")
                 } else {
@@ -454,8 +464,10 @@ fn plugin_entries(model: &ShellViewModel) -> Vec<AnyView> {
                 };
                 rows.push(text(line).key(key).into_any());
             }
-            if let Some(row) = super::tool_native::source_auth_row(plugin) {
-                rows.push(row);
+            if include_source_auth {
+                if let Some(row) = super::tool_native::source_auth_row(plugin) {
+                    rows.push(row);
+                }
             }
             let toggle_id = plugin_id.clone();
             let enabled = plugin.enabled;

@@ -3,6 +3,7 @@
 //! 文件导入和 Eagle 导入只派发文件状态机已有的对话框消息。
 //! API Playground 只列出已加载的设计快照，不发请求，也不调用插件。
 //! 来源登录按钮按认证声明派发插件调用，不解析二维码。
+//! 设置页把有登录方法的插件收成一张顶部卡片，没有方法时不占位。
 
 use nana_ui::runtime::view::{text, widget, AnyView, IntoView};
 use nana_ui::runtime::{Activate, Button, Stack};
@@ -209,6 +210,37 @@ pub fn source_auth_actions(plugin: &PluginManifest) -> Vec<SourceAuthAction> {
         .filter(|(_, _, key, _)| super::support::named_auth_method(plugin, key).is_some())
         .map(|(id, label, _, slot)| SourceAuthAction { id, label, slot: *slot })
         .collect()
+}
+
+/// 有登录方法的插件。没有方法名的不进设置页顶部卡片。
+pub fn source_login_plugin_ids(plugins: &[PluginManifest]) -> Vec<String> {
+    plugins
+        .iter()
+        .filter(|plugin| !source_auth_actions(plugin).is_empty())
+        .map(|plugin| plugin.plugin_id.clone())
+        .collect()
+}
+
+/// 设置页顶部的来源登录卡片。摘要和按钮仍是原来的那一组；一个都没有时不占位。
+pub fn source_login_card(plugins: &[PluginManifest]) -> Option<AnyView> {
+    if source_login_plugin_ids(plugins).is_empty() {
+        return None;
+    }
+    let mut rows = Vec::new();
+    for plugin in plugins {
+        let Some(buttons) = source_auth_row(plugin) else {
+            continue;
+        };
+        if let Some(summary) = super::support::source_account_summary(plugin) {
+            rows.push(text(summary).key(format!("admin-source-summary-{}", plugin.plugin_id)).into_any());
+        }
+        rows.push(buttons);
+    }
+    if rows.is_empty() {
+        eprintln!("Nana 来源登录卡片没有可显示的内容");
+        return None;
+    }
+    Some(super::super::workbench::section_card("来源登录", rows))
 }
 
 /// 登录按钮行。一个方法都没有时不占位。

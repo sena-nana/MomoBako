@@ -12,7 +12,7 @@ use momobako_nana::shell::{
     commit_interaction, mount_shell, InspectEffect, InspectMessage, ShellMessage, ShellViewModel,
     ToolPageEntry, WorkspacePanel, WorkspaceRepository,
 };
-use nana_ui_devtools::agent::{AgentSession, RuntimeAgentSession, protocol::ThemeName};
+use nana_ui_devtools::agent::{AgentSession, BoundsDump, RuntimeAgentSession, protocol::ThemeName};
 use nana_ui_devtools::offscreen;
 use nana_ui_platform::host::WindowCommand;
 use nana_ui_platform::WindowId;
@@ -40,6 +40,9 @@ fn assert_wav_preview() {
         assert!(play.bounds.width > 8.0 && play.bounds.height > 8.0, "{name} 播放按钮没有尺寸");
         let stats = shot(&mut session, name);
         assert!(stats.nonclear_ratio > 0.01, "{name} 画面几乎是空的");
+        if name == "wav-preview-narrow" {
+            assert_search_copy_stays_off_preview(&before);
+        }
         if name != "wav-preview-light" {
             continue;
         }
@@ -246,4 +249,23 @@ fn click(session: &mut RuntimeAgentSession, label: &str) {
 
 fn has(nodes: &[nana_ui_devtools::agent::AccessibilityDumpNode], label: &str) -> bool {
     nodes.iter().any(|node| node.label.as_deref().is_some_and(|text| text.contains(label)))
+}
+
+/// 窄屏里搜索说明必须留在自己的卡片，不能盖住下面的文件预览。
+fn assert_search_copy_stays_off_preview(nodes: &[nana_ui_devtools::agent::AccessibilityDumpNode]) {
+    let preview = nodes.iter().find(|node| node.label.as_deref() == Some("文件预览")).expect("窄屏缺少文件预览");
+    let copy = nodes
+        .iter()
+        .find(|node| node.label.as_deref().is_some_and(|text| text.contains("输入关键词")))
+        .expect("窄屏缺少搜索说明");
+    assert!(
+        !bounds_intersect(&copy.bounds, &preview.bounds),
+        "搜索说明盖住了文件预览：说明 {:?}，预览 {:?}",
+        copy.bounds,
+        preview.bounds
+    );
+}
+
+fn bounds_intersect(a: &BoundsDump, b: &BoundsDump) -> bool {
+    a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y
 }

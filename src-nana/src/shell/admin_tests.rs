@@ -604,6 +604,7 @@ fn source_login_reduce_calls_create_session_and_skips_oauth_without_methods() {
         tool_native::source_auth_actions(&manifest).into_iter().map(|action| action.label).collect::<Vec<_>>(),
         vec!["创建登录会话", "查询登录状态", "退出登录"]
     );
+    let login_plugin = manifest.clone();
     model.admin.plugins = vec![manifest];
     send(&mut model, AdminMessage::CallSourceAuth { plugin_id: "source.one".into(), slot: SourceAuthCall::CreateSession });
     match model.admin.take_effects().pop() {
@@ -635,6 +636,10 @@ fn source_login_reduce_calls_create_session_and_skips_oauth_without_methods() {
     oauth.contributes["source"] = serde_json::json!({"authentication": {"kind": "oauth"}});
     assert!(support::settings_upgrade_lines(&oauth, false).iter().any(|line| line.contains("账号与来源仍是 Vue 页面，需要升级为 Nana 原生设置")));
     assert!(tool_native::source_auth_actions(&oauth).is_empty());
+    assert_eq!(
+        (tool_native::source_login_plugin_ids(&[login_plugin, oauth.clone()]), tool_native::source_login_plugin_ids(&[])),
+        (vec!["source.one".to_string()], Vec::<String>::new()),
+    );
     model.admin.plugins = vec![oauth];
     send(&mut model, AdminMessage::CallSourceAuth { plugin_id: "oauth.one".into(), slot: SourceAuthCall::CreateSession });
     assert!(model.admin.take_effects().is_empty());
