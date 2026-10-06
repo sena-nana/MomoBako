@@ -240,7 +240,7 @@ impl MotionState {
     }
 
     pub fn set_tools_hover(&mut self, hover: bool) {
-        if hover == self.tools_hover && self.tools.is_some() {
+        if hover == self.tools_hover && (self.tools.is_some() || !hover) {
             return;
         }
         let from = self.tools.as_ref().map(|track| track.value(self.now_ms)).unwrap_or(0.0);
@@ -254,7 +254,7 @@ impl MotionState {
     }
 
     pub fn set_footer_hover(&mut self, hover: bool) {
-        if hover == self.footer_hover && self.footer.is_some() {
+        if hover == self.footer_hover && (self.footer.is_some() || !hover) {
             return;
         }
         let from = self.footer.as_ref().map(|track| track.value(self.now_ms)).unwrap_or(FOOTER_REST);
