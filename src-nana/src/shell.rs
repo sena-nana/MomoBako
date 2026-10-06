@@ -19,6 +19,7 @@ mod thumbs;
 mod files_view;
 mod inspect;
 mod inspect_view;
+pub(crate) mod audio_decode;
 pub(crate) mod player;
 pub(crate) mod admin;
 pub use admin::{AdminMessage, ToolPageEntry};

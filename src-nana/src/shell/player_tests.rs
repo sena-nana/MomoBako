@@ -883,7 +883,7 @@ fn wav_session_loads_paused_then_plays_seeks_and_pauses() {
     let expected_ms = (samples.len() as u64) * 1000 / 8_000;
 
     let mut model = shell(true);
-    assert_eq!(model.player.candidates.len(), 1);
+    assert_eq!(model.player.candidates.len(), 2);
     let builtin = &model.player.candidates[0];
     assert_eq!(builtin.plugin_id, "momobako.player.wav");
     assert_eq!(builtin.player_type_id, "momobako.playlist.wav");
@@ -927,6 +927,57 @@ fn wav_player_rejects_a_non_wav_header() {
     send(&mut model, PlayerMessage::PlayItem { item_id: "bad".into() });
     assert_eq!(model.player.session.status, "failed");
     assert!(model.player.session.error.as_deref().unwrap_or_default().contains("不是 WAV 头"));
+    assert_ne!(model.player.session.status, "playing");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn compressed_audio_playlist_loads_duration_and_plays_without_a_device() {
+    let dir = temp_dir("compressed-audio");
+    let mut model = shell(true);
+    model.player.repo_id = Some("repo".into());
+    let kind = model
+        .player
+        .candidates
+        .iter()
+        .find(|candidate| candidate.extensions.iter().any(|extension| extension == "mp3"))
+        .expect("压缩音频候选")
+        .player_type_id
+        .clone();
+    let cases = [
+        ("tone.mp3", "mp3", crate::shell::audio_decode::fixture_mp3()),
+        ("tone.flac", "flac", crate::shell::audio_decode::fixture_flac()),
+        ("tone.ogg", "ogg", crate::shell::audio_decode::fixture_ogg()),
+    ];
+    for (name, extension, bytes) in cases {
+        let path = dir.join(name);
+        std::fs::write(&path, bytes).unwrap();
+        let decoded = crate::shell::audio_decode::decode_compressed(bytes).expect(extension);
+        assert!(decoded.duration_ms > 0, "{extension}");
+        let mut item = wav_queue_item(extension, &path);
+        item.filename = name.into();
+        item.extension = extension.into();
+        item.player_type_id = kind.clone();
+        model.player.queue = vec![item];
+        model.player.current_id = None;
+        send(&mut model, PlayerMessage::PlayItem { item_id: extension.into() });
+        assert_eq!(model.player.session.status, "paused", "{extension}");
+        assert_eq!(model.player.session.duration_ms, Some(decoded.duration_ms), "{extension}");
+        assert!(model.player.session.can_seek && model.player.session.can_volume, "{extension}");
+        assert!(model.player.session.error.is_none(), "{extension}");
+        send(&mut model, PlayerMessage::SetPlaying(true));
+        assert_eq!(model.player.session.status, "playing", "{extension}");
+    }
+    let bad = dir.join("bad.mp3");
+    std::fs::write(&bad, b"not-audio").unwrap();
+    let mut item = wav_queue_item("bad", &bad);
+    item.filename = "bad.mp3".into();
+    item.extension = "mp3".into();
+    item.player_type_id = kind;
+    model.player.queue = vec![item];
+    send(&mut model, PlayerMessage::PlayItem { item_id: "bad".into() });
+    assert_eq!(model.player.session.status, "failed");
+    assert!(model.player.session.error.is_some());
     assert_ne!(model.player.session.status, "playing");
     let _ = std::fs::remove_dir_all(dir);
 }

@@ -1,4 +1,4 @@
-//! 预览扩展名分派、文本字节上限、WAV 预览会话，以及搜索条件解析。
+//! 预览扩展名分派、文本字节上限、可解码音频的预览会话，以及搜索条件解析。
 //!
 //! Markdown 先于普通文本。内置贡献负责 ZIP、Open XML 和部分模型；其余文档和模型仍要求升级。
 
@@ -69,7 +69,7 @@ pub fn prepare_text(bytes: &[u8]) -> Result<String, String> {
     Ok(String::from_utf8_lossy(bytes).into_owned())
 }
 
-/// 音视频预览先排队读文件。WAV 成功后才允许播放控制。
+/// 音视频预览先排队读文件。可解码音频成功后才允许播放控制。
 pub(super) fn begin_media(state: &mut super::InspectState, repo_id: &str, path: &str) {
     state.loading = true;
     state.activity = "正在读取音频…".into();
@@ -82,7 +82,7 @@ pub(super) fn begin_media(state: &mut super::InspectState, repo_id: &str, path: 
     });
 }
 
-/// 代次或路径过期时保留当前预览。WAV 写入 paused 会话，其它格式失败。
+/// 代次或路径过期时保留当前预览。可解码音频写入 paused 会话，其余失败。
 pub(super) fn note_media(
     state: &mut super::InspectState,
     path: String,
@@ -110,10 +110,13 @@ pub(super) fn note_media(
     }
 }
 
-/// 只有 WAV 能进入可控制会话。其它字节仍是没有解码器。
+/// WAV 优先。失败后再试 mp3、flac、ogg/Vorbis。其余字节仍是没有解码器。
 pub(crate) fn preview_media_session(repo_id: &str, bytes: &[u8]) -> Result<PlaybackSessionState, String> {
-    match crate::shell::player::wav_duration_ms(bytes) {
-        Ok(duration) => Ok(paused_wav_session(repo_id, duration)),
+    if let Ok(duration) = crate::shell::player::wav_duration_ms(bytes) {
+        return Ok(paused_audio_session(repo_id, duration));
+    }
+    match crate::shell::audio_decode::decode_compressed(bytes) {
+        Ok(decoded) => Ok(paused_audio_session(repo_id, decoded.duration_ms)),
         Err(error) => {
             eprintln!("Nana 音视频预览不能解码：{error}");
             Err("没有原生解码器".into())
@@ -121,7 +124,7 @@ pub(crate) fn preview_media_session(repo_id: &str, bytes: &[u8]) -> Result<Playb
     }
 }
 
-/// 已装载的 WAV 允许播放、暂停、跳转和音量。失败会话仍拒绝控制。
+/// 已装载的音频允许播放、暂停、跳转和音量。失败会话仍拒绝控制。
 pub(super) fn transport_plugin(session: &PlaybackSessionState) -> TransportPlugin {
     if session.error.is_none() && session.duration_ms.is_some() {
         TransportPlugin::Ready
@@ -162,7 +165,7 @@ impl PlaybackMediaPlugin for TransportPlugin {
     fn dispose(&mut self) {}
 }
 
-fn paused_wav_session(repo_id: &str, duration_ms: u64) -> PlaybackSessionState {
+fn paused_audio_session(repo_id: &str, duration_ms: u64) -> PlaybackSessionState {
     PlaybackSessionState {
         status: "paused".into(),
         duration_ms: Some(duration_ms),
