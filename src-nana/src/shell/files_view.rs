@@ -283,16 +283,29 @@ fn file_row(row: FileRow, mode: DisplayMode) -> AnyView {
     let activate = button(label).key(format!("file-row-{}", row.key())).on_cx(move |_, _: &Activate, cx| {
         cx.dispatch_program(file_message(FilesMessage::ActivateRow(path.clone())));
     });
+    let marker = path_marker(&row.path);
     let thumb = thumbnail(&row, metrics.preview_width, metrics.preview_height, mode.is_list());
     if mode.is_list() {
-        widget(Stack::row(12.0).align(AlignSpec::Center).min_height(LengthSpec::Px(72.0))).children((thumb, activate)).into_any()
+        widget(Stack::row(12.0).align(AlignSpec::Center).min_height(LengthSpec::Px(72.0)))
+            .children((thumb, activate, marker))
+            .into_any()
     } else {
         let mut card = Stack::column(8.0).padding_xy(8.0, 8.0);
         if metrics.item_width > 0.0 {
             card = card.width(LengthSpec::Px(metrics.item_width));
         }
-        widget(card).children((thumb, activate)).into_any()
+        widget(card).children((thumb, activate, marker)).into_any()
     }
+}
+
+/// 行上的隐藏路径。命中按钮后沿父节点找到它，实况指针才能对上条目。
+fn path_marker(path: &str) -> AnyView {
+    let mut marker = nana_ui::runtime::Text::new(format!("momobako-path:{path}"));
+    let layout = std::sync::Arc::make_mut(&mut marker.style.layout);
+    layout.hidden = true;
+    layout.height = Some(LengthSpec::Px(0.0));
+    layout.width = Some(LengthSpec::Px(0.0));
+    widget(marker).into_any()
 }
 
 /// 预览盒按计算出的宽高固定。图片用 cover，和 Vue 的 `object-fit: cover` 一样。

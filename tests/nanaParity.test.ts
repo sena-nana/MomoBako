@@ -49,6 +49,16 @@ describe("nana parity sidebar", () => {
   });
 });
 
+describe("nana parity pointer", () => {
+  it("live_pointer_drag_and_box_select_follow_the_vue_thresholds", () => {
+    const panel = read("src/pages/workspace/files/useFileBrowserPanelViewModel.ts");
+    expect(panel).toContain("const dragStartThreshold = 7");
+    expect(panel).toContain("Math.abs(selection.currentX - selection.startX) > 3");
+    expect(panel).toContain('selection.additive ? "append" : "replace"');
+    expect(panel).toContain('options.emit("selectEntries", [], "replace")');
+  });
+});
+
 describe("nana parity files", () => {
   it("copy_and_move_submit_the_stored_sources", () => {
     expect(fileOps).toContain('updateOperationProgress(progressId, { detail: "创建硬链接或复制文件", value: 32 })');
