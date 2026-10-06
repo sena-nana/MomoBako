@@ -410,7 +410,7 @@ fn settings_audio_corner_external_api_and_backends() {
     let (choices, _, notice) = audio_choices(&model.player.candidates, &model.player.preferences);
     assert!(choices.iter().any(|choice| choice.unavailable && choice.label.contains("不可用")));
     assert!(notice.contains("已回退到"));
-    assert!(!support::clipboard_available());
+    assert!(support::clipboard_available());
     assert!(support::save_dialog_available());
 
     send(&mut model, AdminMessage::SetCornerStyle("square".into()));
@@ -442,7 +442,8 @@ fn settings_audio_corner_external_api_and_backends() {
     send(&mut model, AdminMessage::CopyExternal { label: "Base URL".into(), value: String::new() });
     assert_eq!(model.admin.external_error, "Base URL 尚未加载。");
     send(&mut model, AdminMessage::CopyExternal { label: "Token".into(), value: "1234567890abcdef".into() });
-    assert_eq!(model.admin.external_error, "复制失败：宿主剪贴板尚未接通");
+    assert_eq!(model.admin.external_message, "Token 已复制。");
+    assert!(model.admin.external_error.is_empty());
     assert!(matches!(model.admin.take_effects().pop(), Some(AdminEffect::CopyText(_))));
     send(&mut model, AdminMessage::ExportExternal);
     assert!(matches!(model.admin.take_effects().pop(), Some(AdminEffect::RequestSaveDialog { .. })));
@@ -499,6 +500,7 @@ fn dependency_label_uses_status_counts_and_directory_failure_is_visible() {
     send(&mut model, AdminMessage::OpenDataDirectory("user.one".into()));
     assert!(matches!(model.admin.take_effects().pop(), Some(AdminEffect::OpenDataDirectory { name, .. }) if name == "user.one"));
     send(&mut model, AdminMessage::DataDirectoryFinished { name: "user.one".into(), result: Ok("C:/plugin".into()) });
-    assert_eq!(model.admin.action_error, "插件设置目录打开失败。");
-    assert!(!support::reveal_directory_available());
+    assert_eq!(model.admin.action_message, "已打开“user.one”设置目录。");
+    assert!(model.admin.action_error.is_empty());
+    assert!(support::reveal_directory_available());
 }

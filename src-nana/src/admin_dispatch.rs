@@ -1,6 +1,6 @@
 //! 把设置、插件、日志和仓库动作的副作用交给已有领域服务。
 //!
-//! 剪贴板没有宿主桥，只记日志。保存和打开对话框排队为平台文件对话框。
+//! 剪贴板写入系统剪贴板。保存和打开对话框排队为平台文件对话框。
 //! 插件、缓存、动作和写文件没有替身；服务没启动时把错误写回状态机。
 
 use nana_ui::runtime::Task;
@@ -11,7 +11,7 @@ use crate::backend::services::repository::{
     BinaryFileWriteRequest, FileBrowserRequest, PluginConfigDeleteRequest, PluginConfigSetRequest, PluginEnabledRequest,
     PluginHookExecutionListRequest, PluginInstallRequest, RepositoryAction, RepositoryActionRunRequest,
 };
-use crate::shell::admin::{clipboard_available, AdminEffect, AdminMessage};
+use crate::shell::admin::{AdminEffect, AdminMessage};
 use crate::shell::ShellMessage;
 use crate::MomoBakoApplication;
 
@@ -35,9 +35,11 @@ fn admin(message: AdminMessage) -> ShellMessage {
 fn dispatch_one(app: &mut MomoBakoApplication, context: &RuntimeProgramContext<ShellMessage>, effect: AdminEffect) {
     match effect {
         AdminEffect::PersistCorners => app.shell.admin.save_corners_file(),
-        AdminEffect::CopyText(_) => {
-            if !clipboard_available() {
-                eprintln!("Nana 宿主剪贴板尚未接通");
+        AdminEffect::CopyText(text) => {
+            if !crate::host_bridge::copy_text(&text) {
+                eprintln!("Nana 宿主剪贴板写入失败");
+                app.shell.admin.external_message.clear();
+                app.shell.admin.external_error = "复制失败：宿主剪贴板尚未接通".into();
             }
         }
         AdminEffect::RequestOpenDialog => app.shell.input.queue_plugin_dialog(),

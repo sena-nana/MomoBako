@@ -28,8 +28,6 @@ pub(crate) use view::{admin_surface, task_popover};
 #[path = "admin_tests.rs"]
 mod tests;
 
-pub use support::clipboard_available;
-
 /// 插件配置、安装、日志筛选、任务弹层和仓库动作消息。
 #[derive(Clone, Debug)]
 pub enum AdminMessage {

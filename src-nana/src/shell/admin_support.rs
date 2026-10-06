@@ -21,9 +21,9 @@ pub const CORNER_STYLE_KEY: &str = "momobako.corners";
 pub const CORNER_RADIUS_KEY: &str = "momobako.cornerRadius";
 const PLUGIN_GROUP_ORDER: [&str; 6] = ["source", "library-kind", "parser", "preview", "service", "unclassified"];
 
-/// 剪贴板和目录揭示没有宿主桥。保存和打开对话框走 Nana `OpenFileDialog`。
+/// 桌面剪贴板走 Nana `OsClipboard`。保存和打开对话框走 Nana `OpenFileDialog`。
 pub fn clipboard_available() -> bool {
-    false
+    true
 }
 
 pub fn save_dialog_available() -> bool {
@@ -35,7 +35,7 @@ pub fn open_dialog_available() -> bool {
 }
 
 pub fn reveal_directory_available() -> bool {
-    false
+    true
 }
 
 /// Windows 和 Linux 默认平滑，macOS 默认普通。未写入半径时用 MomoBako 的 8。

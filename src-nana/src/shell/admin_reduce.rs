@@ -520,12 +520,11 @@ fn finish_directory(model: &mut ShellViewModel, name: &str, result: Result<Strin
     model.admin.managing = false;
     match result {
         Ok(path) => {
-            if support::reveal_directory_available() {
-                model.admin.action_message = format!("已打开“{name}”设置目录。");
-            } else {
-                eprintln!("Nana 宿主目录打开尚未接通：{path}");
-                model.admin.action_error = "插件设置目录打开失败。".into();
-            }
+            model.input.host_requests.push(crate::host_api::HostRequest::OpenExternal(
+                crate::host_api::ExternalOpenRequest { target: path, reveal: true },
+            ));
+            model.admin.action_error.clear();
+            model.admin.action_message = format!("已打开“{name}”设置目录。");
         }
         Err(error) => {
             eprintln!("Nana 插件设置目录读取失败：{error}");
