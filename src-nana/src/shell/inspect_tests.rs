@@ -192,6 +192,14 @@ fn image_errors_stay_failed_and_stale_pixels_are_ignored() {
 fn media_without_a_decoder_never_reports_playing() {
     let mut state = InspectState::default();
     state.note_detail(&asset("audio/a.mp3", "mp3", 1, false, Vec::new()));
+    let InspectEffect::LoadMedia { path, generation, .. } = state.take_effects().pop().unwrap() else {
+        panic!("没有音视频请求");
+    };
+    state.reduce(true, Some("repo"), InspectMessage::MediaLoaded {
+        path,
+        generation,
+        result: Err("没有原生解码器".into()),
+    });
     let PreviewBody::Media(session) = &state.body else { panic!("不是音视频") };
     assert_eq!(session.status, "failed");
     assert!(session.error.as_deref().unwrap_or_default().contains("没有原生解码器"));
@@ -201,6 +209,48 @@ fn media_without_a_decoder_never_reports_playing() {
         assert_eq!(session.status, "failed");
         assert_ne!(session.status, "playing");
     }
+    assert!(super::support::preview_media_session("repo", b"ID3").is_err());
+}
+
+#[test]
+fn wav_preview_plays_and_seeks_without_opening_a_device() {
+    let mut state = InspectState::default();
+    state.note_detail(&asset("audio/a.wav", "wav", 1, false, Vec::new()));
+    let InspectEffect::LoadMedia { path, generation, .. } = state.take_effects().pop().unwrap() else {
+        panic!("没有音视频请求");
+    };
+    let session = super::support::preview_media_session("repo", &tone_wav()).expect("wav");
+    assert_eq!(session.status, "paused");
+    assert_eq!(session.duration_ms, Some(2));
+    state.reduce(true, Some("repo"), InspectMessage::MediaLoaded { path, generation, result: Ok(session) });
+    state.reduce(true, Some("repo"), InspectMessage::PlayPause);
+    state.reduce(true, Some("repo"), InspectMessage::Seek(1));
+    let PreviewBody::Media(session) = &state.body else { panic!("丢了会话") };
+    assert_eq!(session.status, "playing");
+    assert_eq!(session.current_time_ms, 1);
+    assert!(session.error.is_none());
+}
+
+fn tone_wav() -> Vec<u8> {
+    let data = [0u8, 255, 0, 255, 0, 255, 0, 255, 0, 255, 0, 255, 0, 255, 0, 255];
+    let mut body = Vec::new();
+    body.extend_from_slice(b"fmt ");
+    body.extend_from_slice(&16u32.to_le_bytes());
+    body.extend_from_slice(&1u16.to_le_bytes());
+    body.extend_from_slice(&1u16.to_le_bytes());
+    body.extend_from_slice(&8_000u32.to_le_bytes());
+    body.extend_from_slice(&8_000u32.to_le_bytes());
+    body.extend_from_slice(&1u16.to_le_bytes());
+    body.extend_from_slice(&8u16.to_le_bytes());
+    body.extend_from_slice(b"data");
+    body.extend_from_slice(&(data.len() as u32).to_le_bytes());
+    body.extend_from_slice(&data);
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(b"RIFF");
+    bytes.extend_from_slice(&((body.len() + 4) as u32).to_le_bytes());
+    bytes.extend_from_slice(b"WAVE");
+    bytes.extend_from_slice(&body);
+    bytes
 }
 
 #[test]

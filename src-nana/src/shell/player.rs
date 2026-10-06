@@ -19,6 +19,7 @@ use super::ShellViewModel;
 mod support;
 #[path = "wav_player.rs"]
 mod wav_player;
+pub(crate) use wav_player::wav_duration_ms;
 pub use support::{preferences_path, sessions_path, settings_path};
 pub(crate) use support::{resolution_notice, resolve_player, AUDIO_CAPABILITY, AUDIO_SEQUENCE_TYPE};
 use support::{

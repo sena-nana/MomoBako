@@ -17,7 +17,7 @@ use super::support::{
     AUDIO_CAPABILITY, AUDIO_SEQUENCE_TYPE, OFFICIAL_AUDIO_PLUGIN,
 };
 use super::super::workspace::{LibraryCategory, WorkspacePanel, WorkspaceRepository};
-use super::super::{InspectEffect, ShellMessage, ShellPage, ShellViewModel};
+use super::super::{InspectEffect, InspectMessage, ShellMessage, ShellPage, ShellViewModel};
 use super::{PlaybackMode, PlayerCandidate, PlayerEffect, PlayerMessage, QueueItem};
 
 fn shell(writable: bool) -> ShellViewModel {
@@ -735,6 +735,14 @@ fn preview_and_player_share_one_media_session() {
     assert!(model.inspect.media_session().is_none());
 
     model.reduce(ShellMessage::AssetDetailLoaded(Ok(asset("audio/a.mp3", "mp3"))));
+    let InspectEffect::LoadMedia { path, generation, .. } = model.inspect.take_effects().pop().unwrap() else {
+        panic!("没有音视频请求");
+    };
+    model.reduce(ShellMessage::Inspect(InspectMessage::MediaLoaded {
+        path,
+        generation,
+        result: Err("没有原生解码器".into()),
+    }));
     assert_eq!(model.player.session.status, "failed");
     assert!(model.player.session.error.as_deref().unwrap_or_default().contains("没有原生解码器"));
     assert_eq!(model.inspect.media_session().map(|session| session.status.as_str()), Some("failed"));

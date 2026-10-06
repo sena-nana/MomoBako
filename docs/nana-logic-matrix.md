@@ -107,7 +107,7 @@
 
 ## Phase 4 预览、元数据和搜索
 
-这些行由 `src-nana/src/shell/inspect_tests.rs` 覆盖状态机。浏览、详情和文本字节走 `RepositoryQueryViewModel` 的 `get_asset_detail`、`read_file`、`prepare_preview_file_source`；元数据保存走 `update_asset_metadata`；搜索走 `search_assets`；撤销和重做走 `RepositoryInteractionViewModel` 的 `undo_last_revision`、`redo_last_revision`。这些调用没有替身测试。图片沿用现有 GPU 纹理上传。Markdown 用 `NativeMarkdown`。纯文本用 `SelectableRichText`，不开启语法高亮。文件预览里的音视频仍没有解码器，停在失败态。播放列表里的 WAV 能装载并进入 playing；正式 Windows 构建会用 winmm 异步出声，测试构建不开设备。ZIP、CBZ、7z、RAR、CBR 列出文件。未压缩 PDF 和 FlateDecode 文字流、Open XML，以及 OLE 文档里的 UTF-16 片段会抽出文本。OBJ、glTF、GLB、STL、3MF 给结构摘要。VRM 按 glb 读，FBX 和 BLEND 只报告文件头。不嵌入 Three.js。15 个旧验收场景仍用原来的预览占位。下面每一行都未离屏。
+这些行由 `src-nana/src/shell/inspect_tests.rs` 覆盖状态机。浏览、详情和文本字节走 `RepositoryQueryViewModel` 的 `get_asset_detail`、`read_file`、`prepare_preview_file_source`；元数据保存走 `update_asset_metadata`；搜索走 `search_assets`；撤销和重做走 `RepositoryInteractionViewModel` 的 `undo_last_revision`、`redo_last_revision`。这些调用没有替身测试。图片沿用现有 GPU 纹理上传。Markdown 用 `NativeMarkdown`。纯文本用 `SelectableRichText`，不开启语法高亮。文件预览里的 WAV 能读出时长并切换播放状态，但预览本身不出声。其它预览音视频仍失败。播放列表里的 WAV 能装载并进入 playing；正式 Windows 构建会用 winmm 异步出声，测试构建不开设备。ZIP、CBZ、7z、RAR、CBR 列出文件。未压缩 PDF 和 FlateDecode 文字流、Open XML，以及 OLE 文档里的 UTF-16 片段会抽出文本。OBJ、glTF、GLB、STL、3MF 给结构摘要。VRM 按 glb 读，FBX 和 BLEND 只报告文件头。不嵌入 Three.js。15 个旧验收场景仍用原来的预览占位。下面每一行都未离屏。
 
 实况预览和搜索只在不是 `acceptance_scene`、启动就绪、主区有仓库，且面板是搜索或已经选中文件时替换预览槽。保存是显式按钮，不移植 260 毫秒自动保存。版本冲突保留本地草稿和原来的 `expected_version`。生产环境从内置的压缩包、PDF、文档和模型贡献开始，库类型快捷方式仍从空列表开始。后登记的同扩展名预览贡献优先。
 
@@ -118,7 +118,7 @@
 | `filePreviewExtensions.ts` 图片 | 扩展名是 png、jpg、jpeg、webp、gif、bmp、avif、svg | `prepare_preview_file_source` 后 `read_file`，没有替身 | 媒体类型以 `image/` 开头才解码；失败是错误态，不显示空纹理；路径与当前目标不一致时丢弃 | “正在准备图片预览…”；纹理槽 `file-preview` | 已测试（未离屏） |
 | `filePreviewExtensions.ts` Markdown | md、markdown、mdown、mkd、mkdn、mdx | `read_file`，没有替身 | 先于纯文本列表；用 `NativeMarkdown` | “正在读取文本…” | 已测试（未离屏） |
 | `filePreviewExtensions.ts` 纯文本 | txt、text、log、csv、tsv、json、jsonl、yaml、yml、toml、xml、html、css、scss、sass、less、js、jsx、ts、tsx、vue、rs、py、rb、go、java、c、h、cpp、hpp、cs、php、sh、bash、zsh、ps1、bat、cmd、ini、cfg、conf、env、gitignore、gitattributes | `read_file`，没有替身 | 超过 768KiB 失败且不截断；非法 UTF-8 用 lossy；`SelectableRichText` 不开语法高亮 | “文本超过 786432 字节” | 已测试（未离屏） |
-| `filePreviewExtensions.ts` 音视频 | mp4、mov、mkv、webm、avi、m4v、mp3、wav、ogg、flac、m4a、aac、opus | `PlaybackSessionController`，插件 `load` 返回“没有原生解码器” | 播放、暂停、跳转和音量都停在 failed，不会变成 playing | “没有原生解码器” | 已测试（未离屏） |
+| `filePreviewExtensions.ts` 音视频 | mp4、mov、mkv、webm、avi、m4v、mp3、wav、ogg、flac、m4a、aac、opus | `read_file` 后只解析 WAV。其它格式失败 | WAV 进入 paused，播放和跳转能改会话，预览不打开声卡。mp3 等仍是 failed，不会变成 playing | “正在读取音频…” / “没有原生解码器” | 已测试（未离屏） |
 | `office-preview` / `preview-archive` / `three-model-preview` | pot、ppsx 等尚未列入内置扩展名，且没有可绘制的 Preview 贡献 | 无 | 显示升级提示；不嵌入 PDF.js 或 Three.js。PDF 的 ASCII85、LZW、DCTDecode 仍跳过 | “该预览仍是 Vue 插件，需要升级为 Nana 原生预览贡献” | 已测试（未离屏） |
 | 内置压缩包、PDF、文档和模型 | zip、cbz、7z、rar、cbr、pdf、docx、docm、dotx、xlsx、xlsm、pptx、pptm、doc、xls、ppt、dot、xlt、pps、obj、gltf、glb、stl、3mf、vrm、fbx、blend | `read_file` 后按 view 解析，没有替身 | 压缩包列文件，最多 200 条；PDF 解开 FlateDecode 后抽文字；Open XML 抽段落；OLE 刮 UTF-16 片段；VRM 按 glb；FBX/BLEND 只报文件头。坏文件是错误态 | “正在读取压缩包…” / “桃箱” / “二进制 FBX” | 已测试（未离屏） |
 | `RegisterPreview` | 贡献种类是 Preview，扩展名匹配 | 已知 view 走上面的读取；未知 view 不读文件 | 后登记的同扩展名优先；其他种类忽略并记日志 | 未知 view：“原生预览 · {label} · {view_id}” | 已测试（未离屏） |

@@ -28,6 +28,9 @@ pub fn dispatch_inspect_effects(app: &mut MomoBakoApplication, context: &Runtime
             InspectEffect::LoadNative { repo_id, path, view_id, generation } => {
                 dispatch_native(app, context, repo_id, path, view_id, generation);
             }
+            InspectEffect::LoadMedia { repo_id, path, generation } => {
+                dispatch_media(app, context, repo_id, path, generation);
+            }
             InspectEffect::SaveMetadata { repo_id, asset_id, expected_version, metadata } => {
                 dispatch_save(app, context, repo_id, asset_id, expected_version, metadata);
             }
@@ -78,6 +81,33 @@ fn dispatch_image(app: &mut MomoBakoApplication, context: &RuntimeProgramContext
             source: empty_source(&fail_repo, &fail_path),
             pixels: Err(format!("图片预览任务提交失败：{error}")),
         });
+    }
+}
+
+fn dispatch_media(
+    app: &mut MomoBakoApplication,
+    context: &RuntimeProgramContext<ShellMessage>,
+    repo_id: String,
+    path: String,
+    generation: u64,
+) {
+    let Some(services) = app.services.as_ref() else {
+        eprintln!("Nana 音视频预览需要领域服务，当前服务未启动");
+        app.shell.reduce(media_message(path, generation, Err("领域服务未启动".into())));
+        return;
+    };
+    let query = services.repository_query.clone();
+    let executor = services.executor.clone();
+    let task_path = path.clone();
+    let task_repo = repo_id.clone();
+    if let Err(error) = context.run_task(Task::new(async move {
+        let result = executor
+            .block_on(query.read_file(FileReadRequest { repo_id, path: task_path.clone() }))
+            .and_then(|bytes| crate::shell::preview_media_session(&task_repo, &bytes));
+        media_message(task_path, generation, result)
+    })) {
+        eprintln!("Nana 音视频预览任务提交失败：{error}");
+        app.shell.reduce(media_message(path, generation, Err(format!("音视频预览任务提交失败：{error}"))));
     }
 }
 
@@ -298,6 +328,14 @@ fn some_numbers(values: Vec<NumberBound>) -> Option<Vec<SearchNumberFilter>> {
 
 fn some_dates(values: Vec<DateBound>) -> Option<Vec<SearchDateFilter>> {
     (!values.is_empty()).then(|| values.into_iter().map(|bound| SearchDateFilter { key: bound.key, from: bound.from, to: bound.to }).collect())
+}
+
+fn media_message(
+    path: String,
+    generation: u64,
+    result: Result<crate::backend::services::repository::PlaybackSessionState, String>,
+) -> ShellMessage {
+    ShellMessage::Inspect(InspectMessage::MediaLoaded { path, generation, result })
 }
 
 fn native_message(path: String, generation: u64, result: Result<String, String>) -> ShellMessage {

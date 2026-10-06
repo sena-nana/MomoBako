@@ -289,6 +289,11 @@ impl PlaybackMediaPlugin for MissingDecoder {
     fn dispose(&mut self) {}
 }
 
+/// 预览只需要时长。坏文件返回错误，由调用方决定文案。
+pub(crate) fn wav_duration_ms(bytes: &[u8]) -> Result<u64, String> {
+    parse_wav(bytes).map(|parsed| parsed.duration_ms)
+}
+
 /// 读取并解析一个标准 PCM WAV。坏文件返回错误，由调用方记录日志。
 fn parse_wav_file(path: &str) -> Result<ParsedWav, String> {
     let bytes = fs::read(path).map_err(|error| format!("无法读取 WAV：{error}"))?;
