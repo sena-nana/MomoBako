@@ -57,6 +57,6 @@
 
 ## 没有现成组件的部分
 
-- 视频画面、压缩 PDF 页面、二进制 Office 和 Three.js 画面。`GpuView` 只能嵌自定义绘制。ZIP、7z、RAR、未压缩 PDF、Open XML 和 OBJ/glTF/GLB/STL/3MF 已由内置预览读出文本或列表。播放列表能装载 PCM WAV，但不打开声卡。其余旧 Vue 插件显示升级提示。
+- 视频画面和 PDF 页面。`GpuView` 只能嵌自定义绘制。ZIP、7z、RAR、FlateDecode PDF、Open XML、OLE 文本和 OBJ/glTF/GLB/STL/3MF/VRM 已由内置预览读出文本或列表。FBX 和 BLEND 只报文件头。播放列表的 PCM WAV 在正式 Windows 构建里用 winmm 出声。其余旧 Vue 插件显示升级提示。
 - 拖放、系统文件对话框、托盘、全局快捷键和窗口位置恢复。离屏只断言发出的 `host_api` 请求，真效果记在 `nana-device-matrix.md`。
 - 代码高亮。需要时再开 `syntax-highlighting`，并补离屏场景。

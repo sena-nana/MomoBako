@@ -30,6 +30,14 @@ pub(crate) use view::{admin_surface, task_popover};
 #[path = "admin_tests.rs"]
 mod tests;
 
+/// 来源认证上的一次调用。方法名从认证声明里读，按钮不写死方法。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SourceAuthCall {
+    CreateSession,
+    Status,
+    Clear,
+}
+
 /// 插件配置、安装、日志筛选、任务弹层和仓库动作消息。
 #[derive(Clone, Debug)]
 pub enum AdminMessage {
@@ -87,6 +95,10 @@ pub enum AdminMessage {
     ActionRunFinished { result: Result<RepositoryAction, String> },
     SetToolPages(Vec<ToolPageEntry>),
     SelectToolPage(String),
+    /// 按认证声明调用登录方法。没有插件或方法名时不派发。
+    CallSourceAuth { plugin_id: String, slot: SourceAuthCall },
+    /// 插件调用结束。成功文案只附加字符串 message 和 status。
+    SourceAuthFinished { method: String, result: Result<serde_json::Value, String> },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -125,6 +137,8 @@ pub enum AdminEffect {
     RequestOpenDialog,
     RequestSaveDialog { content: String },
     WriteFile { path: String, bytes: Vec<u8> },
+    /// 调用插件方法。载荷是空对象，不带登录二维码参数。
+    CallPlugin { plugin_id: String, method: String, payload: serde_json::Value },
 }
 
 #[derive(Clone, Debug)]

@@ -135,7 +135,7 @@ fn text_over_the_vue_limit_is_an_error_and_invalid_utf8_is_lossy() {
 fn preview_kind_starts_the_matching_body() {
     let mut state = InspectState::default();
     state.reduce(true, Some("repo"), InspectMessage::RegisterPreview(preview_binding(NativeContributionKind::PlaylistPlayer, "pdf")));
-    state.note_detail(&asset("docs/a.doc", "doc", 1, false, Vec::new()));
+    state.note_detail(&asset("docs/a.pot", "pot", 1, false, Vec::new()));
     assert!(matches!(state.body, PreviewBody::Upgrade(ref message) if message.contains("升级")));
     assert!(state.effects.is_empty());
     state.note_detail(&asset("docs/a.pdf", "pdf", 1, false, Vec::new()));

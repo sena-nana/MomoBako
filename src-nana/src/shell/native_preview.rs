@@ -1,7 +1,10 @@
-//! 内置原生预览。压缩包列文件，PDF 与 Open XML 抽文本，模型只做结构摘要。
+//! 内置原生预览。压缩包列文件，PDF 与 Office 抽文本，模型只做结构摘要。
 //!
-//! PDF 不画页面，只读未压缩内容流里的文字。3MF 只数对象和网格。
-//! 不读二进制 Office，也不嵌入 Three.js。读不到的格式仍走升级提示。
+//! PDF 不画页面，只读未压缩内容流里的文字。Open XML 仍走 zip。
+//! 二进制 Office 只刮取连续的 UTF-16LE 文本，不还原版式。
+//! 3MF 只数对象和网格。VRM 与 glb 一样认 `glTF` 魔数。
+//! FBX 与 BLEND 只看文件头，不解析网格或 DNA。不嵌入 Three.js。
+//! 读不到的格式仍走升级提示。
 
 use std::io::{Cursor, Read};
 
@@ -21,6 +24,8 @@ const OFFICE_VIEW: &str = "momobako.preview.office";
 const MODEL_VIEW: &str = "momobako.preview.model";
 const LIST_LIMIT: usize = 200;
 const TEXT_LIMIT: usize = 24_000;
+const OLE_MAGIC: [u8; 8] = [0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1];
+const OLE_MIN_CHARS: usize = 2;
 
 /// 壳层启动时就有的预览贡献。后登记的同扩展名贡献优先。
 pub fn builtin_bindings() -> Vec<PreviewBinding> {
@@ -31,10 +36,18 @@ pub fn builtin_bindings() -> Vec<PreviewBinding> {
             "momobako.preview.office",
             "文档",
             OFFICE_VIEW,
-            &["docx", "docm", "dotx", "xlsx", "xlsm", "pptx", "pptm"],
+            &[
+                "docx", "docm", "dotx", "xlsx", "xlsm", "pptx", "pptm", "doc", "xls", "ppt", "dot", "xlt", "pps",
+            ],
             20,
         ),
-        binding("momobako.preview.model", "模型", MODEL_VIEW, &["obj", "gltf", "glb", "stl", "3mf"], 30),
+        binding(
+            "momobako.preview.model",
+            "模型",
+            MODEL_VIEW,
+            &["obj", "gltf", "glb", "stl", "3mf", "vrm", "fbx", "blend"],
+            30,
+        ),
     ]
 }
 
@@ -191,7 +204,11 @@ fn archive_summary(lines: Vec<String>) -> String {
     format!("压缩包 · {count} 个文件\n{}", lines.join("\n"))
 }
 
+/// Open XML 仍按 zip 抽文本。OLE 头先刮 UTF-16LE，避免被当成打不开的压缩包。
 fn read_office(bytes: &[u8]) -> Result<String, String> {
+    if bytes.starts_with(&OLE_MAGIC) {
+        return scrape_ole_text(bytes);
+    }
     let mut archive = ZipArchive::new(Cursor::new(bytes)).map_err(|error| format!("无法读取文档：{error}"))?;
     if let Some(xml) = zip_text(&mut archive, "word/document.xml")? {
         return plain_or_empty(&xml_plain(&xml), "文档没有可提取的文本。");
@@ -216,6 +233,77 @@ fn read_office(bytes: &[u8]) -> Result<String, String> {
         }
     }
     plain_or_empty(&text, "演示文稿没有可提取的文本。")
+}
+
+/// 二进制 Office 是 OLE 复合文档。按双字节读 UTF-16LE，控制字符切开片段。
+///
+/// 私用区、非字符和零宽字符也不算可读。短于两个字符的片段丢掉。
+/// 剩下的片段按出现顺序拼成纯文本，不还原段落或表格。
+fn scrape_ole_text(bytes: &[u8]) -> Result<String, String> {
+    let mut pieces = Vec::new();
+    let mut run = String::new();
+    let mut index = 0;
+    while index + 1 < bytes.len() {
+        match next_utf16_char(bytes, &mut index) {
+            Some(ch) if readable_utf16(ch) => run.push(ch),
+            _ => finish_ole_run(&mut run, &mut pieces),
+        }
+    }
+    finish_ole_run(&mut run, &mut pieces);
+    if pieces.is_empty() {
+        eprintln!("Nana OLE 文档没有可读的 UTF-16 文本");
+        return Err("文档没有可读文本".into());
+    }
+    Ok(limit_text(&pieces.join("\n")))
+}
+
+fn next_utf16_char(bytes: &[u8], index: &mut usize) -> Option<char> {
+    if *index + 1 >= bytes.len() {
+        return None;
+    }
+    let unit = u16::from_le_bytes([bytes[*index], bytes[*index + 1]]);
+    *index += 2;
+    if (0xD800..0xDC00).contains(&unit) {
+        if *index + 1 >= bytes.len() {
+            return None;
+        }
+        let low = u16::from_le_bytes([bytes[*index], bytes[*index + 1]]);
+        if !(0xDC00..0xE000).contains(&low) {
+            return None;
+        }
+        *index += 2;
+        let point = 0x10000 + (((unit as u32) - 0xD800) << 10) + ((low as u32) - 0xDC00);
+        return char::from_u32(point);
+    }
+    if (0xDC00..0xE000).contains(&unit) {
+        return None;
+    }
+    char::from_u32(unit as u32)
+}
+
+fn readable_utf16(ch: char) -> bool {
+    if ch.is_control() || is_private_use(ch) || is_noncharacter(ch) {
+        return false;
+    }
+    let code = ch as u32;
+    !matches!(code, 0x00AD | 0x200B..=0x200F | 0x202A..=0x202E | 0x2060..=0x206F | 0xFEFF | 0xFFF9..=0xFFFB)
+}
+
+fn is_private_use(ch: char) -> bool {
+    matches!(ch as u32, 0xE000..=0xF8FF | 0xF0000..=0xFFFFD | 0x100000..=0x10FFFD)
+}
+
+fn is_noncharacter(ch: char) -> bool {
+    let code = ch as u32;
+    (0xFDD0..=0xFDEF).contains(&code) || (code & 0xFFFE) == 0xFFFE
+}
+
+fn finish_ole_run(run: &mut String, pieces: &mut Vec<String>) {
+    let trimmed = run.trim();
+    if trimmed.chars().count() >= OLE_MIN_CHARS {
+        pieces.push(trimmed.to_string());
+    }
+    run.clear();
 }
 
 fn plain_or_empty(text: &str, empty: &str) -> Result<String, String> {
@@ -270,12 +358,19 @@ fn limit_text(text: &str) -> String {
     clipped
 }
 
+/// VRM 就是 glb，靠 `glTF` 魔数走同一条摘要。FBX 与 BLEND 在网格解析之前返回。
 fn read_model(bytes: &[u8]) -> Result<String, String> {
     if bytes.len() >= 4 && &bytes[..4] == b"glTF" {
         return summarize_glb(bytes);
     }
     if looks_like_zip(bytes) {
         return summarize_3mf(bytes);
+    }
+    if let Some(summary) = summarize_fbx(bytes) {
+        return summary;
+    }
+    if let Some(summary) = summarize_blend(bytes) {
+        return summary;
     }
     let head = bytes.iter().position(|byte| !byte.is_ascii_whitespace()).map(|index| &bytes[index..]).unwrap_or(bytes);
     if head.first() == Some(&b'{') {
@@ -404,6 +499,38 @@ fn count_xml_tag(xml: &str, name: &str) -> usize {
         }
     }
     count
+}
+
+/// ASCII FBX 以 `;` 或 `FBX` 开头，只数 `Model:`。二进制只认 Kaydara 魔数和字节数。
+fn summarize_fbx(bytes: &[u8]) -> Option<Result<String, String>> {
+    if bytes.starts_with(b"Kaydara FBX Binary") {
+        return Some(Ok(format!("二进制 FBX\n{} 字节", bytes.len())));
+    }
+    let head = bytes.iter().position(|byte| !byte.is_ascii_whitespace()).map(|index| &bytes[index..]).unwrap_or(bytes);
+    if head.starts_with(b";") || head.starts_with(b"FBX") {
+        let models = bytes.windows(6).filter(|window| *window == b"Model:").count();
+        return Some(Ok(format!("FBX\n模型 {models}")));
+    }
+    None
+}
+
+/// 版本是 12 字节文件头末尾的三个字符。不解析 DNA。
+fn summarize_blend(bytes: &[u8]) -> Option<Result<String, String>> {
+    if !bytes.starts_with(b"BLENDER") {
+        return None;
+    }
+    if bytes.len() < 12 {
+        eprintln!("Nana BLEND 文件头不足 12 字节");
+        return Some(Err("BLEND 文件头不完整".into()));
+    }
+    let version = &bytes[9..12];
+    match std::str::from_utf8(version) {
+        Ok(version) if version.chars().all(|ch| ch.is_ascii_graphic()) => Some(Ok(format!("Blender 版本 {version}\n{} 字节", bytes.len()))),
+        _ => {
+            eprintln!("Nana BLEND 文件头没有可读版本");
+            Some(Err("BLEND 文件头没有版本".into()))
+        }
+    }
 }
 
 fn summarize_obj(bytes: &[u8]) -> Result<String, String> {
@@ -537,6 +664,47 @@ mod tests {
         stl[80..84].copy_from_slice(&1_u32.to_le_bytes());
         assert_eq!(read(MODEL_VIEW, &stl).expect("stl"), "STL 二进制\n三角形 1");
         assert!(read(MODEL_VIEW, b"plain").is_err());
+    }
+
+    #[test]
+    fn ole_utf16_vrm_binding_fbx_and_blend_headers() {
+        let mut ole = vec![0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1];
+        for unit in "桃箱".encode_utf16() {
+            ole.extend_from_slice(&unit.to_le_bytes());
+        }
+        assert_eq!(read(OFFICE_VIEW, &ole).expect("ole"), "桃箱");
+        assert!(read(OFFICE_VIEW, &[0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1]).is_err());
+
+        let bindings = builtin_bindings();
+        let extensions = |view: &str| {
+            bindings.iter().find(|item| item.contribution.view_id == view).expect(view).extensions.clone()
+        };
+        for extension in ["doc", "xls", "ppt", "dot", "xlt", "pps"] {
+            assert!(extensions(OFFICE_VIEW).iter().any(|item| item == extension), "{extension}");
+        }
+        for extension in ["vrm", "fbx", "blend"] {
+            assert!(extensions(MODEL_VIEW).iter().any(|item| item == extension), "{extension}");
+        }
+
+        assert!(read(MODEL_VIEW, b"glTF").is_err());
+
+        let fbx = b"; FBX 7.4\nModel: \"Cube\"";
+        let summary = read(MODEL_VIEW, fbx).expect("fbx");
+        assert!(summary.contains("模型 1"), "{summary}");
+        assert!(!summary.contains("网格") && !summary.contains("顶点"), "{summary}");
+
+        let binary = b"Kaydara FBX Binary";
+        let summary = read(MODEL_VIEW, binary).expect("binary fbx");
+        assert!(summary.contains("二进制 FBX"), "{summary}");
+        assert!(summary.contains(&format!("{} 字节", binary.len())), "{summary}");
+        assert!(!summary.contains("网格"), "{summary}");
+
+        let blend = b"BLENDER-v293";
+        let summary = read(MODEL_VIEW, blend).expect("blend");
+        assert!(summary.contains("293"), "{summary}");
+        assert!(summary.contains(&format!("{} 字节", blend.len())), "{summary}");
+        assert!(!summary.contains("网格"), "{summary}");
+        assert!(read(MODEL_VIEW, b"BLENDER").is_err());
     }
 
     #[test]

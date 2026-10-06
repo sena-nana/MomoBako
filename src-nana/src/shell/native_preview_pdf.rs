@@ -1,6 +1,10 @@
-//! 未压缩文字 PDF 的文本提取。
+//! PDF 文本提取。
 //!
-//! 只认内容流里的 `(text) Tj` 和 `TJ`。带 Filter 的流直接跳过，不画页面。
+//! 只认内容流里的 `(text) Tj` 和 `TJ`。`/FlateDecode` 先按 zlib 解开再提取。
+//! 其它 Filter 跳过，不画页面。
+
+use std::borrow::Cow;
+use std::io::Read;
 
 /// 抽出可见文字。坏文件或没有文字时返回错误。
 pub(super) fn read(bytes: &[u8]) -> Result<String, String> {
@@ -43,13 +47,17 @@ fn extract(bytes: &[u8]) -> String {
                 continue;
             }
         };
-        if has_filter(dict) {
-            if !noted_filter {
-                eprintln!("Nana PDF 跳过带 Filter 的流");
-                noted_filter = true;
+        if data_end > data_start {
+            match open_stream(dict, &bytes[data_start..data_end]) {
+                Ok(plain) => append_piece(&mut out, &show_text(&plain)),
+                Err(StreamSkip::Other) => {
+                    if !noted_filter {
+                        eprintln!("Nana PDF 跳过带 Filter 的流");
+                        noted_filter = true;
+                    }
+                }
+                Err(StreamSkip::Broken) => {}
             }
-        } else if data_end > data_start {
-            append_piece(&mut out, &show_text(&bytes[data_start..data_end]));
         }
         let next = end_kw.map(|pos| pos + b"endstream".len()).unwrap_or(data_end);
         cursor = if next > at { next } else { at + 6 };
@@ -133,8 +141,51 @@ fn direct_length(dict: &[u8]) -> Option<usize> {
     None
 }
 
-fn has_filter(dict: &[u8]) -> bool {
-    find_keyword(dict, b"/Filter", 0).is_some()
+enum StreamSkip {
+    Other,
+    Broken,
+}
+
+/// 无 Filter 原样返回。只有 `/FlateDecode` 时按 zlib 解开。其它 Filter 交给调用方记日志。
+fn open_stream<'a>(dict: &[u8], data: &'a [u8]) -> Result<Cow<'a, [u8]>, StreamSkip> {
+    let flate = find_keyword(dict, b"/FlateDecode", 0).is_some();
+    let other = has_other_filter(dict);
+    if flate && !other {
+        return match inflate_flate(data) {
+            Ok(bytes) => Ok(Cow::Owned(bytes)),
+            Err(error) => {
+                eprintln!("Nana PDF FlateDecode 解压失败：{error}");
+                Err(StreamSkip::Broken)
+            }
+        };
+    }
+    if other || find_keyword(dict, b"/Filter", 0).is_some() {
+        return Err(StreamSkip::Other);
+    }
+    Ok(Cow::Borrowed(data))
+}
+
+fn has_other_filter(dict: &[u8]) -> bool {
+    const NAMES: &[&[u8]] = &[
+        b"/ASCIIHexDecode",
+        b"/ASCII85Decode",
+        b"/LZWDecode",
+        b"/RunLengthDecode",
+        b"/CCITTFaxDecode",
+        b"/JBIG2Decode",
+        b"/DCTDecode",
+        b"/JPXDecode",
+        b"/Crypt",
+    ];
+    NAMES.iter().any(|name| find_keyword(dict, name, 0).is_some())
+}
+
+/// PDF 的 FlateDecode 是 zlib 包装，不是裸 deflate。失败只丢掉这一条流。
+fn inflate_flate(data: &[u8]) -> Result<Vec<u8>, String> {
+    let mut decoder = flate2::read::ZlibDecoder::new(data);
+    let mut out = Vec::new();
+    decoder.read_to_end(&mut out).map_err(|error| error.to_string())?;
+    Ok(out)
 }
 
 fn find_keyword(bytes: &[u8], keyword: &[u8], from: usize) -> Option<usize> {
@@ -482,4 +533,72 @@ fn pdf_text(bytes: &[u8]) -> String {
         return String::from_utf16_lossy(&units);
     }
     String::from_utf8(bytes.to_vec()).unwrap_or_else(|_| bytes.iter().map(|byte| char::from(*byte)).collect())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::Write;
+
+    use super::*;
+
+    fn zlib_bytes(plain: &[u8]) -> Vec<u8> {
+        let mut encoder = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+        encoder.write_all(plain).expect("压缩");
+        encoder.finish().expect("结束")
+    }
+
+    fn push_stream(out: &mut Vec<u8>, dict: &str, data: &[u8]) {
+        out.extend_from_slice(b"<< ");
+        out.extend_from_slice(dict.as_bytes());
+        out.extend_from_slice(b" >>\nstream\n");
+        out.extend_from_slice(data);
+        out.extend_from_slice(b"\nendstream\n");
+    }
+
+    #[test]
+    fn uncompressed_tj_still_extracts() {
+        let pdf = b"%PDF-1.4\n1 0 obj\n<< /Length 14 >>\nstream\n(MomoBako) Tj\nendstream\nendobj\n%%EOF\n";
+        assert!(read(pdf).expect("pdf").contains("MomoBako"));
+        let tj = b"%PDF-1.4\n<< /Length 22 >>\nstream\n[(Mo) 20 (moBako)] TJ\nendstream\n%%EOF\n";
+        assert!(read(tj).expect("tj").contains("MomoBako"));
+    }
+
+    #[test]
+    fn flate_stream_extracts_inflated_text() {
+        let plain = b"(Inflated) Tj\n";
+        let compressed = zlib_bytes(plain);
+        let mut pdf = b"%PDF-1.4\n".to_vec();
+        push_stream(
+            &mut pdf,
+            &format!("/Length {} /Filter /FlateDecode /Type /XObject", compressed.len()),
+            &compressed,
+        );
+        assert!(!pdf.windows(plain.len()).any(|window| window == plain), "内容流不该带着明文");
+        let text = read(&pdf).expect("flate");
+        assert!(text.contains("Inflated"), "{text}");
+    }
+
+    #[test]
+    fn flate_array_and_corrupt_stream_keep_other_text() {
+        let plain = b"(Inflated) Tj\n";
+        let compressed = zlib_bytes(plain);
+        let mut pdf = b"%PDF-1.4\n".to_vec();
+        push_stream(&mut pdf, "/Filter /FlateDecode /Length 4", b"xxxx");
+        push_stream(&mut pdf, &format!("/Filter [/FlateDecode] /Length {}", compressed.len()), &compressed);
+        let text = read(&pdf).expect("mixed");
+        assert!(text.contains("Inflated"), "{text}");
+    }
+
+    #[test]
+    fn other_filters_and_bad_deflate_do_not_panic() {
+        for name in ["/ASCII85Decode", "/LZWDecode", "/DCTDecode"] {
+            let mut pdf = b"%PDF-1.4\n".to_vec();
+            push_stream(&mut pdf, &format!("/Filter {name} /Length 8"), b"(No) Tj\n");
+            assert!(read(&pdf).is_err(), "{name}");
+        }
+        let pdf = b"%PDF-1.4\n<< /Filter /FlateDecode >>\nstream\nxxxx\nendstream\n";
+        assert!(read(pdf).is_err());
+        let truncated = b"%PDF-1.4\n<< /Filter /FlateDecode /Length 2 >>\nstream\n\x78\x9c\nendstream\n";
+        assert!(read(truncated).is_err());
+    }
 }

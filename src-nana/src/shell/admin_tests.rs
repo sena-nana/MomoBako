@@ -15,7 +15,7 @@ use super::super::workspace::{WorkspacePanel, WorkspaceRepository};
 use super::super::{ShellMessage, ShellPage, ShellViewModel};
 use super::support::{self, action_can_run, audio_choices};
 use super::tool_native::{self, ImportAction};
-use super::{AdminEffect, AdminMessage, OperationProgress, ToolPageEntry};
+use super::{AdminEffect, AdminMessage, OperationProgress, SourceAuthCall, ToolPageEntry};
 
 fn send(model: &mut ShellViewModel, message: AdminMessage) {
     model.reduce(ShellMessage::Admin(message));
@@ -583,6 +583,60 @@ fn source_account_summary_names_methods_without_the_upgrade_copy() {
 
     manifest.contributes["source"] = serde_json::json!({"authentication": {}});
     assert!(support::settings_upgrade_lines(&manifest, false).iter().any(|line| line.contains("账号与来源仍是 Vue 页面，需要升级为 Nana 原生设置")));
+}
+
+#[test]
+fn source_login_reduce_calls_create_session_and_skips_oauth_without_methods() {
+    let mut model = ShellViewModel::default();
+    let mut manifest = plugin("source.one", "system", "source", "filesystem");
+    manifest.contributes["source"] = serde_json::json!({
+        "authentication": {
+            "kind": "qr",
+            "createSessionMethod": "auth.createQrSession",
+            "statusMethod": "auth.getLoginStatus",
+            "clearMethod": "auth.clearLogin"
+        }
+    });
+    let summary = support::settings_upgrade_lines(&manifest, false).join("\n");
+    assert!(summary.contains("来源账号 qr：创建会话 auth.createQrSession，查询状态 auth.getLoginStatus。"));
+    assert!(!summary.contains("需要升级为 Nana 原生设置"));
+    assert_eq!(
+        tool_native::source_auth_actions(&manifest).into_iter().map(|action| action.label).collect::<Vec<_>>(),
+        vec!["创建登录会话", "查询登录状态", "退出登录"]
+    );
+    model.admin.plugins = vec![manifest];
+    send(&mut model, AdminMessage::CallSourceAuth { plugin_id: "source.one".into(), slot: SourceAuthCall::CreateSession });
+    match model.admin.take_effects().pop() {
+        Some(AdminEffect::CallPlugin { plugin_id, method, payload }) => {
+            assert_eq!(plugin_id, "source.one");
+            assert_eq!(method, "auth.createQrSession");
+            assert_eq!(payload, serde_json::json!({}));
+        }
+        other => panic!("unexpected {other:?}"),
+    }
+    send(&mut model, AdminMessage::CallSourceAuth { plugin_id: "  ".into(), slot: SourceAuthCall::CreateSession });
+    assert!(model.admin.take_effects().is_empty());
+
+    send(&mut model, AdminMessage::SourceAuthFinished {
+        method: "auth.createQrSession".into(),
+        result: Ok(serde_json::json!({"message": "请扫码", "status": "waiting", "qrImage": "data:image/png;base64,abc"})),
+    });
+    assert_eq!(model.admin.action_message, "已调用 auth.createQrSession。请扫码 waiting");
+    assert!(!model.admin.action_message.contains("qrImage"));
+    assert!(!model.admin.action_message.contains("base64"));
+    send(&mut model, AdminMessage::SourceAuthFinished {
+        method: "auth.getLoginStatus".into(),
+        result: Ok(serde_json::json!({"qrimg": "x", "message": 1})),
+    });
+    assert_eq!(model.admin.action_message, "已调用 auth.getLoginStatus。");
+
+    let mut oauth = plugin("oauth.one", "system", "source", "filesystem");
+    oauth.contributes["source"] = serde_json::json!({"authentication": {"kind": "oauth"}});
+    assert!(support::settings_upgrade_lines(&oauth, false).iter().any(|line| line.contains("账号与来源仍是 Vue 页面，需要升级为 Nana 原生设置")));
+    assert!(tool_native::source_auth_actions(&oauth).is_empty());
+    model.admin.plugins = vec![oauth];
+    send(&mut model, AdminMessage::CallSourceAuth { plugin_id: "oauth.one".into(), slot: SourceAuthCall::CreateSession });
+    assert!(model.admin.take_effects().is_empty());
 }
 
 #[test]

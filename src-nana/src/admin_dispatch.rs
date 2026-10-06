@@ -8,8 +8,8 @@ use nana_ui::RuntimeProgramContext;
 
 use crate::backend::services::mutsuki_runner::PROTOCOL_REPOSITORY_ACTION_RUN;
 use crate::backend::services::repository::{
-    BinaryFileWriteRequest, FileBrowserRequest, PluginConfigDeleteRequest, PluginConfigSetRequest, PluginEnabledRequest,
-    PluginHookExecutionListRequest, PluginInstallRequest, RepositoryAction, RepositoryActionRunRequest,
+    BinaryFileWriteRequest, FileBrowserRequest, PluginCallRequest, PluginConfigDeleteRequest, PluginConfigSetRequest,
+    PluginEnabledRequest, PluginHookExecutionListRequest, PluginInstallRequest, RepositoryAction, RepositoryActionRunRequest,
 };
 use crate::shell::admin::{AdminEffect, AdminMessage};
 use crate::shell::ShellMessage;
@@ -56,6 +56,38 @@ fn dispatch_one(app: &mut MomoBakoApplication, context: &RuntimeProgramContext<S
         AdminEffect::RunAction { repo_id, action_id, paths } => run_action(app, context, repo_id, action_id, paths),
         AdminEffect::ReloadBrowser { repo_id } => reload_browser(app, context, repo_id),
         AdminEffect::WriteFile { path, bytes } => write_file(app, context, path, bytes),
+        AdminEffect::CallPlugin { plugin_id, method, payload } => call_source_auth(app, context, plugin_id, method, payload),
+    }
+}
+
+fn call_source_auth(
+    app: &mut MomoBakoApplication,
+    context: &RuntimeProgramContext<ShellMessage>,
+    plugin_id: String,
+    method: String,
+    payload: serde_json::Value,
+) {
+    let Some(services) = app.services.as_ref() else {
+        eprintln!("Nana 来源登录调用需要领域服务，当前服务未启动");
+        app.shell.admin.action_message.clear();
+        app.shell.admin.action_error = "领域服务未启动".into();
+        return;
+    };
+    let plugin = services.plugin.clone();
+    let executor = services.executor.clone();
+    let called = method.clone();
+    if let Err(error) = context.run_task(Task::new(async move {
+        let result = executor.block_on(plugin.call_plugin(PluginCallRequest {
+            plugin_id,
+            method,
+            repository_id: None,
+            payload,
+        }));
+        admin(AdminMessage::SourceAuthFinished { method: called, result: result.map(|item| item.payload) })
+    })) {
+        eprintln!("Nana 来源登录调用任务提交失败：{error}");
+        app.shell.admin.action_message.clear();
+        app.shell.admin.action_error = format!("来源登录调用任务提交失败：{error}");
     }
 }
 
