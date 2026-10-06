@@ -27,7 +27,9 @@ pub(crate) fn prepare_motion(shell: &mut ShellViewModel, window: &mut Applicatio
     if shell.motion.active() {
         shell.motion.advance(shell.motion.now_ms().saturating_add(16));
     }
-    if (shell.motion.active() || placed) && !tracking {
+    let refresh = shell.motion.active() || placed || shell.surface_dirty;
+    if refresh && !tracking {
+        shell.surface_dirty = false;
         if let Err(error) = crate::shell::mount_shell(&mut window.document, shell) {
             eprintln!("Nana 动效帧重建失败：{error}");
         }

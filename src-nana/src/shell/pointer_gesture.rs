@@ -86,13 +86,7 @@ pub fn observe_live_pointer(model: &mut ShellViewModel, document: &RuntimeDocume
                 hover_folder: hover_folder.clone(),
                 over_browser,
             }));
-            if let Some(folder) = hover_folder {
-                model.reduce(ShellMessage::Sidebar(super::SidebarMessage::Gap(super::GapMessage::FolderHover {
-                    path: folder,
-                    now_ms: model.sidebar.hover_now(),
-                    dragging: true,
-                })));
-            }
+            note_folder_hover(model, hover_folder);
         }
     } else if !gesture.armed && (dx(gesture.origin_x, x) > BOX_DRAG_PX || dx(gesture.origin_y, y) > BOX_DRAG_PX) {
         gesture.armed = true;
@@ -110,6 +104,9 @@ fn release_gesture(model: &mut ShellViewModel, world: &UiWorld, document_id: nan
     let Some(gesture) = model.input.live_gesture.take() else {
         return;
     };
+    if let Some(previous) = model.sidebar.hover_folder.clone() {
+        model.reduce(ShellMessage::Sidebar(super::SidebarMessage::Gap(super::GapMessage::FolderLeave(previous))));
+    }
     let rows = collect_rows(world, document_id);
     let list = list_bounds(world, &rows);
     let (x, y) = position.unwrap_or((gesture.x, gesture.y));
@@ -127,6 +124,22 @@ fn release_gesture(model: &mut ShellViewModel, world: &UiWorld, document_id: nan
     }
     if !gesture.armed && !gesture.append {
         model.reduce(ShellMessage::Input(InputMessage::BoxSelect { paths: Vec::new(), append: false }));
+    }
+}
+
+/// 离开当前行或换到另一行时清掉 450ms 计时，再为新行重新开始。
+fn note_folder_hover(model: &mut ShellViewModel, hit: Option<String>) {
+    if let Some(previous) = model.sidebar.hover_folder.clone() {
+        if hit.as_deref() != Some(previous.as_str()) {
+            model.reduce(ShellMessage::Sidebar(super::SidebarMessage::Gap(super::GapMessage::FolderLeave(previous))));
+        }
+    }
+    if let Some(folder) = hit {
+        model.reduce(ShellMessage::Sidebar(super::SidebarMessage::Gap(super::GapMessage::FolderHover {
+            path: folder,
+            now_ms: model.sidebar.hover_now(),
+            dragging: true,
+        })));
     }
 }
 
@@ -516,12 +529,7 @@ mod tests {
 
     #[test]
     fn live_folder_hover_opens_after_the_idle_clock_reaches_450ms() {
-        let mut model = files_model();
-        model.sidebar.folders.push(crate::shell::SidebarFolder {
-            path: "photos".into(),
-            label: "照片".into(),
-            children: Vec::new(),
-        });
+        let mut model = hover_model();
         let mut window = mounted(&model);
         let mut input = bind(&mut window);
         let cover = row_center(&window, "cover.png");
@@ -530,18 +538,59 @@ mod tests {
         prepare_motion(&mut model, &mut window);
         pointer(&mut window, &mut input, PointerPhase::Move, photos.0, photos.1);
         prepare_motion(&mut model, &mut window);
-        assert_ne!(model.sidebar.current_directory, "photos", "刚悬停还不到 450ms");
+        assert_ne!(model.current_directory, "photos", "刚悬停还不到 450ms");
         for _ in 0..40 {
             prepare_motion(&mut model, &mut window);
         }
-        assert_eq!(model.sidebar.current_directory, "photos");
-        assert!(model.sidebar.expanded_folders.iter().any(|path| path == "photos"));
+        assert_eq!(model.current_directory, "photos");
+        assert!(!tree_shows_directory(&window, "photos"), "按着的时候不拆树");
+        pointer(&mut window, &mut input, PointerPhase::Up, photos.0, photos.1);
+        prepare_motion(&mut model, &mut window);
+        window.document.flush(LayoutViewport::new(1200.0, 800.0), &mut NanaTextShaper::default()).expect("布局");
         assert!(
-            model.sidebar.hover_now() >= 450 && model.sidebar.hover_now() != model.motion.now_ms(),
-            "悬停时钟 {} 应独立于动效时钟 {}",
-            model.sidebar.hover_now(),
-            model.motion.now_ms()
+            model.sidebar.take_effects().iter().any(|effect| matches!(effect, crate::shell::SidebarEffect::Browse { path, .. } if path == "photos")),
+            "悬停打开要发出目录浏览"
         );
+        assert_eq!(model.current_directory, "photos");
+        assert!(tree_shows_directory(&window, "photos"), "松手后的树应选中 photos");
+
+        let mut model = hover_model();
+        let mut window = mounted(&model);
+        let mut input = bind(&mut window);
+        let cover = row_center(&window, "cover.png");
+        let photos = row_center(&window, "photos");
+        pointer(&mut window, &mut input, PointerPhase::Down, cover.0, cover.1);
+        prepare_motion(&mut model, &mut window);
+        pointer(&mut window, &mut input, PointerPhase::Move, photos.0, photos.1);
+        prepare_motion(&mut model, &mut window);
+        pointer(&mut window, &mut input, PointerPhase::Move, cover.0, cover.1);
+        for _ in 0..32 {
+            prepare_motion(&mut model, &mut window);
+        }
+        pointer(&mut window, &mut input, PointerPhase::Move, photos.0, photos.1);
+        prepare_motion(&mut model, &mut window);
+        assert!(
+            model.sidebar.take_effects().iter().all(|effect| !matches!(effect, crate::shell::SidebarEffect::Browse { path, .. } if path == "photos")),
+            "离开后再进入不应立刻打开"
+        );
+        assert_ne!(model.current_directory, "photos");
+    }
+
+    fn hover_model() -> ShellViewModel {
+        let mut model = files_model();
+        model.sidebar.folders.push(crate::shell::SidebarFolder {
+            path: "photos".into(),
+            label: "照片".into(),
+            children: Vec::new(),
+        });
+        model
+    }
+
+    /// 目录树把当前选中的路径放在列表的无障碍名称上。
+    fn tree_shows_directory(window: &ApplicationWindow, path: &str) -> bool {
+        accessibility(window).into_iter().any(|node| {
+            node.role == nana_ui::runtime::AccessibilityRole::List && node.label.as_deref() == Some(path)
+        })
     }
 
     fn press_escape(window: &mut ApplicationWindow, input: &mut HeadlessInput) {

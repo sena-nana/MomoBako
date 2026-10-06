@@ -163,10 +163,12 @@ impl MotionState {
             .any(|track| track.as_ref().is_some_and(|track| !track.finished(self.now_ms)))
     }
 
-    pub fn set_modal_open(&mut self, open: bool) {
+    /// 开关有变化时返回 true，调用方据此把界面标成待重建。
+    pub fn set_modal_open(&mut self, open: bool) -> bool {
         if open == self.modal_wants_open && self.modal.is_some() {
-            return;
+            return false;
         }
+        let changed = open != self.modal_wants_open;
         self.modal_wants_open = open;
         self.modal = Some(if self.reduced {
             settled_modal(open)
@@ -175,12 +177,15 @@ impl MotionState {
         } else {
             track(self.now_ms, 1.0, 0.0, MODAL_CARD_MS, EasingKind::Emphasis, false)
         });
+        changed
     }
 
-    pub fn set_panel_open(&mut self, open: bool) {
+    /// 开关有变化时返回 true，调用方据此把界面标成待重建。
+    pub fn set_panel_open(&mut self, open: bool) -> bool {
         if open == self.panel_wants_open && self.panel.is_some() {
-            return;
+            return false;
         }
+        let changed = open != self.panel_wants_open;
         self.panel_wants_open = open;
         self.panel = Some(if self.reduced {
             settled_scalar(open)
@@ -189,6 +194,7 @@ impl MotionState {
         } else {
             track(self.now_ms, 1.0, 0.0, PANEL_RISE_MS, EasingKind::Ease, false)
         });
+        changed
     }
 
     pub fn set_startup_percent(&mut self, percent: f32) {
