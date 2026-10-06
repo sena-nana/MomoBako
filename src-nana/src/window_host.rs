@@ -24,6 +24,7 @@ pub(crate) fn prepare_motion(shell: &mut ShellViewModel, window: &mut Applicatio
         shell.sidebar.tick_hover(16);
     }
     let tracking = crate::shell::observe_live_pointer(shell, &window.document);
+    shell.stage_browses();
     let placed = place_live_popover(shell, &window.document);
     if shell.motion.active() {
         shell.motion.advance(shell.motion.now_ms().saturating_add(16));

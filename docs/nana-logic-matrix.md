@@ -49,7 +49,7 @@
 
 快捷方式计数在摘要到达时立即计算，没有移植 Vue 的 200ms idle 调度。文件快捷访问会先把 `\` 收成 `/`，再打开父目录并选中该路径。
 
-文件夹悬停 450ms、新建/重命名/删除、智能文件夹编辑和删除、播放集播放和移除、弹层夹取、云盘/Eagle 表单、Escape 和缺失仓库隐藏播放集由 `shell::sidebar::gap::tests` 覆盖。实况路径另由 `live_folder_hover_opens_after_the_idle_clock_reaches_450ms`、`live_popover_clamps_to_the_measured_viewport` 和 `live_folder_button_escape_and_prefetch_use_the_shell_path` 覆盖：悬停满 450ms 走 `apply_open_folder`，发出 `Browse` 并把壳层目录改成该路径，按着指针时不拆树，松手后选中该文件夹；离开行清掉计时，回来要重新等 450ms。弹层按锚点和视口夹取，边距 4，样例 `(-20, 900)` 在 `400×300` 里落到 `(4, 196)`。焦点在「文件夹名称」时 Escape 关掉最上层。系统文件夹对话框的操作系统结果仍要设备验证。侧栏刷新旋转走动效时钟。
+文件夹悬停 450ms、新建/重命名/删除、智能文件夹编辑和删除、播放集播放和移除、弹层夹取、云盘/Eagle 表单、Escape 和缺失仓库隐藏播放集由 `shell::sidebar::gap::tests` 覆盖。实况路径另由 `live_folder_hover_opens_after_the_idle_clock_reaches_450ms`、`live_popover_clamps_to_the_measured_viewport` 和 `live_folder_button_escape_and_prefetch_use_the_shell_path` 覆盖：悬停满 450ms 走 `apply_open_folder`，`prepare` 帧把 `Browse` 提交成目录请求，文件列表路径改成该目录并显示「正在读取目录…」，按着指针时不拆树，松手后选中该文件夹；离开行清掉计时，回来要重新等 450ms。弹层按锚点和视口夹取，边距 4，样例 `(-20, 900)` 在 `400×300` 里落到 `(4, 196)`。焦点在「文件夹名称」时 Escape 关掉最上层。系统文件夹对话框的操作系统结果仍要设备验证。侧栏刷新旋转走动效时钟。
 
 | 来源 | 触发 | 服务 | 结果 | 可见性 | 状态 |
 | --- | --- | --- | --- | --- | --- |

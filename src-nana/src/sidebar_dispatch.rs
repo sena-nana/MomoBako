@@ -13,6 +13,9 @@ use crate::MomoBakoApplication;
 
 /// 执行侧栏归约留下的请求。提交失败时把错误写回侧栏，避免刷新一直停在进行中。
 pub fn dispatch_sidebar_effects(app: &mut MomoBakoApplication, context: &RuntimeProgramContext<ShellMessage>) {
+    for request in dispatch_prepared_browses(&mut app.shell) {
+        dispatch_browse_request(app, context, request);
+    }
     for effect in app.shell.sidebar.take_effects() {
         match effect {
             SidebarEffect::LoadTree { repo_id } => dispatch_tree(app, context, repo_id),
@@ -34,7 +37,10 @@ pub fn dispatch_sidebar_effects(app: &mut MomoBakoApplication, context: &Runtime
             SidebarEffect::LoadPlaylistDetail { repo_id, playlist_id } => {
                 dispatch_playlist_detail(app, context, repo_id, playlist_id);
             }
-            SidebarEffect::Browse { repo_id, path, trash } => dispatch_browse(app, context, repo_id, path, trash),
+            SidebarEffect::Browse { repo_id, path, trash } => {
+                app.shell.note_sidebar_browse(&path);
+                dispatch_browse_request(app, context, browse_request(repo_id, path, trash));
+            }
             SidebarEffect::AttachRepository { path } => dispatch_attach(app, context, path),
         }
     }
@@ -348,12 +354,39 @@ fn dispatch_playlist_detail(
     }
 }
 
-fn dispatch_browse(
+/// 交出 `prepare` 暂存的目录浏览，并写成和领域服务相同的请求。
+pub(crate) fn dispatch_prepared_browses(shell: &mut crate::shell::ShellViewModel) -> Vec<FileBrowserRequest> {
+    let staged = std::mem::take(&mut shell.staged_browses);
+    staged
+        .into_iter()
+        .filter_map(|effect| match effect {
+            SidebarEffect::Browse { repo_id, path, trash } => {
+                shell.note_sidebar_browse(&path);
+                Some(browse_request(repo_id, path, trash))
+            }
+            other => {
+                shell.staged_browses.push(other);
+                None
+            }
+        })
+        .collect()
+}
+
+fn browse_request(repo_id: String, path: String, trash: bool) -> FileBrowserRequest {
+    FileBrowserRequest {
+        repo_id,
+        directory_path: if trash || path.is_empty() { None } else { Some(path) },
+        include_tree: Some(false),
+        special_location: if trash { Some("trash".into()) } else { None },
+        offset: Some(0),
+        limit: Some(200),
+    }
+}
+
+pub(crate) fn dispatch_browse_request(
     app: &mut MomoBakoApplication,
     context: &RuntimeProgramContext<ShellMessage>,
-    repo_id: String,
-    path: String,
-    trash: bool,
+    request: FileBrowserRequest,
 ) {
     let Some(services) = services(app) else {
         eprintln!("Nana 侧栏目录浏览需要领域服务，当前服务未启动");
@@ -362,14 +395,6 @@ fn dispatch_browse(
     };
     let browser = services.file_browser.clone();
     let executor = services.executor.clone();
-    let request = FileBrowserRequest {
-        repo_id,
-        directory_path: if trash || path.is_empty() { None } else { Some(path) },
-        include_tree: Some(false),
-        special_location: if trash { Some("trash".into()) } else { None },
-        offset: Some(0),
-        limit: Some(200),
-    };
     if let Err(error) = context.run_task(Task::new(async move {
         ShellMessage::FileBrowserLoaded(executor.block_on(browser.get_file_browser(request)))
     })) {

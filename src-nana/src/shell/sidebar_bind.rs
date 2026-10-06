@@ -45,6 +45,23 @@ impl ShellViewModel {
         }
     }
 
+    /// 侧栏浏览已经交给这一帧派发。文件列表先切到该目录，快照回来后再换行。
+    pub(crate) fn note_sidebar_browse(&mut self, path: &str) {
+        self.files.current_path = path.to_string();
+        self.files.loading = true;
+        self.files.activity = "正在读取目录…".into();
+    }
+
+    /// 把本帧新产生的目录浏览移出普通队列，并让文件列表进入该目录。
+    pub(crate) fn stage_browses(&mut self) {
+        for effect in self.sidebar.take_browses() {
+            if let super::SidebarEffect::Browse { path, .. } = &effect {
+                self.note_sidebar_browse(path);
+            }
+            self.staged_browses.push(effect);
+        }
+    }
+
     pub(crate) fn apply_open_folder(&mut self, path: String) {
         let locked = self.navigation_locked();
         if self.sidebar.open_folder(&mut self.workspace, &path, locked) {
