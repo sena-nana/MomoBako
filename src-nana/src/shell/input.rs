@@ -141,6 +141,8 @@ pub struct InputState {
     pub pending_close: bool,
     pub host_requests: Vec<HostRequest>,
     pub external_drag_result: Option<bool>,
+    pub sidebar_dragging: bool,
+    pub sidebar_resize_dirty: bool,
     session: Option<InternalSession>,
     host_commands: Vec<PendingHostCommand>,
 }

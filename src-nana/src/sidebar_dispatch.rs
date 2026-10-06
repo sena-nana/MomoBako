@@ -21,6 +21,14 @@ pub fn dispatch_sidebar_effects(app: &mut MomoBakoApplication, context: &Runtime
                 dispatch_smart_query(app, context, repo_id, smart_folder_id);
             }
             SidebarEffect::CreateSmartFolder { repo_id } => dispatch_create_smart(app, context, repo_id),
+            SidebarEffect::UpdateSmartFolder { repo_id } => dispatch_update_smart(app, context, repo_id),
+            SidebarEffect::DeleteSmartFolder { repo_id, smart_folder_id } => {
+                dispatch_delete_smart(app, context, repo_id, smart_folder_id);
+            }
+            SidebarEffect::DeletePlaylist { repo_id, playlist_id } => dispatch_delete_playlist(app, context, repo_id, playlist_id),
+            SidebarEffect::CreateBackendRepository { name, path, plugin_id } => {
+                dispatch_create_backend(app, context, name, path, plugin_id);
+            }
             SidebarEffect::LoadPlaylists { repo_id } => dispatch_playlists(app, context, repo_id),
             SidebarEffect::LoadPlaylistPlayers { repo_id } => dispatch_players(app, context, repo_id),
             SidebarEffect::LoadPlaylistDetail { repo_id, playlist_id } => {
@@ -112,6 +120,121 @@ fn dispatch_create_smart(app: &mut MomoBakoApplication, context: &RuntimeProgram
             repo_id,
             result: Err(format!("智能文件夹任务提交失败：{error}")),
         }));
+    }
+}
+
+fn dispatch_update_smart(app: &mut MomoBakoApplication, context: &RuntimeProgramContext<ShellMessage>, repo_id: String) {
+    let Some(services) = services(app) else {
+        eprintln!("Nana 编辑智能文件夹需要领域服务，当前服务未启动");
+        app.shell.reduce(sidebar_message(SidebarMessage::SmartFolderSaved {
+            repo_id,
+            result: Err("领域服务未启动".into()),
+        }));
+        return;
+    };
+    let request = app.shell.sidebar.smart_update_request(&repo_id);
+    let interaction = services.repository_interaction.clone();
+    let executor = services.executor.clone();
+    let task_repo = repo_id.clone();
+    if let Err(error) = context.run_task(Task::new(async move {
+        let result = executor.block_on(interaction.update_smart_folder(request)).map(|response| {
+            response.smart_folders.iter().map(SidebarSmartFolder::from_tree_node).collect()
+        });
+        sidebar_message(SidebarMessage::SmartFolderSaved { repo_id: task_repo, result })
+    })) {
+        eprintln!("Nana 编辑智能文件夹任务提交失败：{error}");
+        app.shell.reduce(sidebar_message(SidebarMessage::SmartFolderSaved {
+            repo_id,
+            result: Err(format!("智能文件夹任务提交失败：{error}")),
+        }));
+    }
+}
+
+fn dispatch_delete_smart(
+    app: &mut MomoBakoApplication,
+    context: &RuntimeProgramContext<ShellMessage>,
+    repo_id: String,
+    smart_folder_id: String,
+) {
+    let Some(services) = services(app) else {
+        eprintln!("Nana 删除智能文件夹需要领域服务，当前服务未启动");
+        app.shell.reduce(sidebar_message(SidebarMessage::SmartFolderSaved {
+            repo_id,
+            result: Err("领域服务未启动".into()),
+        }));
+        return;
+    };
+    let interaction = services.repository_interaction.clone();
+    let executor = services.executor.clone();
+    let task_repo = repo_id.clone();
+    if let Err(error) = context.run_task(Task::new(async move {
+        let result = executor.block_on(interaction.delete_smart_folder(task_repo.clone(), smart_folder_id)).map(|response| {
+            response.smart_folders.iter().map(SidebarSmartFolder::from_tree_node).collect()
+        });
+        sidebar_message(SidebarMessage::SmartFolderSaved { repo_id: task_repo, result })
+    })) {
+        eprintln!("Nana 删除智能文件夹任务提交失败：{error}");
+        app.shell.reduce(sidebar_message(SidebarMessage::SmartFolderSaved {
+            repo_id,
+            result: Err(format!("智能文件夹任务提交失败：{error}")),
+        }));
+    }
+}
+
+fn dispatch_delete_playlist(
+    app: &mut MomoBakoApplication,
+    context: &RuntimeProgramContext<ShellMessage>,
+    repo_id: String,
+    playlist_id: String,
+) {
+    let Some(services) = services(app) else {
+        eprintln!("Nana 移除播放集需要领域服务，当前服务未启动");
+        app.shell.reduce(ShellMessage::PlaylistsLoaded(Err("领域服务未启动".into())));
+        return;
+    };
+    let interaction = services.repository_interaction.clone();
+    let executor = services.executor.clone();
+    if let Err(error) = context.run_task(Task::new(async move {
+        let result = executor.block_on(async {
+            interaction.delete_playlist(repo_id.clone(), playlist_id).await?;
+            interaction.list_playlists(repo_id).await
+        });
+        ShellMessage::PlaylistsLoaded(result)
+    })) {
+        eprintln!("Nana 移除播放集任务提交失败：{error}");
+    }
+}
+
+fn dispatch_create_backend(
+    app: &mut MomoBakoApplication,
+    context: &RuntimeProgramContext<ShellMessage>,
+    name: String,
+    path: String,
+    plugin_id: String,
+) {
+    let Some(services) = services(app) else {
+        eprintln!("Nana 创建资源库需要领域服务，当前服务未启动");
+        app.shell.reduce(sidebar_message(SidebarMessage::RepositoryAttachFinished(Err("领域服务未启动".into()))));
+        return;
+    };
+    let tasks = services.tasks.clone();
+    let executor = services.executor.clone();
+    let request = crate::backend::services::repository::RepositoryMutationRequest {
+        repo_id: None,
+        name,
+        path,
+        backend_plugin_id: Some(plugin_id),
+        backend_config: None,
+        skip_initial_sync: false,
+    };
+    if let Err(error) = context.run_task(Task::new(async move {
+        let result = executor
+            .block_on(tasks.execute(crate::backend::services::mutsuki_runner::PROTOCOL_REPOSITORY_CREATE, request))
+            .map(|_| ());
+        sidebar_message(SidebarMessage::RepositoryAttachFinished(result))
+    })) {
+        eprintln!("Nana 创建资源库任务提交失败：{error}");
+        app.shell.reduce(sidebar_message(SidebarMessage::RepositoryAttachFinished(Err(format!("创建资源库任务提交失败：{error}")))));
     }
 }
 

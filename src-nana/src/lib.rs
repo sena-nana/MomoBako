@@ -18,8 +18,9 @@ mod inspect_dispatch;
 mod player_dispatch;
 mod admin_dispatch;
 mod sidebar_dispatch;
+mod window_host;
 use shell::{
-    DeleteMode, ShellMessage, ShellPage, ShellViewModel, StartupStatus, WindowAction,
+    DeleteMode, ShellMessage, ShellPage, ShellViewModel, StartupStatus,
     WorkspaceEffect, display_mode_path, mount_shell, sidebar_prefs_path,
 };
 
@@ -145,6 +146,7 @@ impl ApplicationState for MomoBakoApplication {
         window: &mut ApplicationWindow,
         context: &RuntimeProgramContext<Self::Message>,
     ) {
+        window_host::prepare_motion(&mut self.shell, window);
         let Some(token) = self.shell.preview_token.clone() else {
             self.preview_gpu = None;
             window.textures.remove("file-preview");
@@ -697,7 +699,11 @@ impl ApplicationState for MomoBakoApplication {
         context: &RuntimeProgramContext<Self::Message>,
     ) -> RuntimeProgramUpdate {
         match event {
-            nana_ui_platform::WindowEvent::CloseRequested { id } => answer_close(self, *id, context),
+            nana_ui_platform::WindowEvent::CloseRequested { id } => window_host::answer_close(self, *id, context),
+            nana_ui_platform::WindowEvent::ReducedMotionChanged { reduced, .. } => {
+                self.shell.motion.set_reduced(*reduced);
+                RuntimeProgramUpdate::redraw(context.window_id())
+            }
             nana_ui_platform::WindowEvent::FileDialogCompleted { id, result } => {
                 let failed = result.error.as_ref().map(|error| format!("{error:?}"));
                 let paths = result.paths.iter().map(|path| path.display().to_string()).collect();
@@ -718,24 +724,6 @@ impl ApplicationState for MomoBakoApplication {
                 RuntimeProgramUpdate::redraw(*id)
             }
             _ => RuntimeProgramUpdate::default(),
-        }
-    }
-}
-
-/// 系统关闭请求按关闭设置回答。确认和托盘只重绘，不立刻关闭。
-fn answer_close(app: &mut MomoBakoApplication, id: nana_ui_platform::WindowId, context: &RuntimeProgramContext<ShellMessage>) -> RuntimeProgramUpdate {
-    let decision = shell::input::decide_close(app.shell.settings.close_behavior.as_str(), app.shell.close_is_dirty());
-    match decision {
-        shell::input::CloseDecision::CloseNow => RuntimeProgramUpdate {
-            window_commands: host_api::WindowCommand::Close
-                .to_platform_command(id, context.geometry().maximized)
-                .into_iter()
-                .collect(),
-            ..RuntimeProgramUpdate::redraw(id)
-        },
-        shell::input::CloseDecision::Ask { .. } | shell::input::CloseDecision::HoldForTray => {
-            context.dispatch(ShellMessage::WindowAction(WindowAction::Close));
-            RuntimeProgramUpdate::redraw(id)
         }
     }
 }

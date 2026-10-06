@@ -267,6 +267,9 @@ pub struct InspectState {
     pub(super) search_error: String,
     effects: Vec<InspectEffect>,
     pending_open: Option<SearchRow>,
+    pub(super) tag_menu: bool,
+    pub(super) tag_menu_x: f32,
+    pub(super) tag_menu_y: f32,
 }
 
 impl Default for InspectState {
@@ -301,9 +304,15 @@ impl Default for InspectState {
             search_error: String::new(),
             effects: Vec::new(),
             pending_open: None,
+            tag_menu: false,
+            tag_menu_x: 0.0,
+            tag_menu_y: 0.0,
         }
     }
 }
+
+#[path = "inspect_tags.rs"]
+mod tags;
 
 impl InspectState {
     pub fn take_effects(&mut self) -> Vec<InspectEffect> {

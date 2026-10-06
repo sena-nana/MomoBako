@@ -29,6 +29,8 @@ pub struct SmartFolderDraft {
     pub formats: String,
     pub tags: String,
     pub match_mode: String,
+    pub mode_edit: bool,
+    pub target_id: String,
 }
 
 impl Default for SmartFolderDraft {
@@ -44,6 +46,8 @@ impl Default for SmartFolderDraft {
             formats: String::new(),
             tags: String::new(),
             match_mode: "and".into(),
+            mode_edit: false,
+            target_id: String::new(),
         }
     }
 }
@@ -97,10 +101,24 @@ impl SidebarState {
         }
         self.smart_draft.error.clear();
         self.smart_draft.busy = true;
-        self.effects.push(SidebarEffect::CreateSmartFolder { repo_id: repo_id.to_string() });
+        if self.smart_draft.mode_edit {
+            self.effects.push(SidebarEffect::UpdateSmartFolder { repo_id: repo_id.to_string() });
+        } else {
+            self.effects.push(SidebarEffect::CreateSmartFolder { repo_id: repo_id.to_string() });
+        }
     }
 
     /// 把当前草稿收成创建请求。文件夹标识由服务分配。
+    pub fn smart_update_request(&self, repo_id: &str) -> crate::backend::services::repository::SmartFolderUpdateRequest {
+        crate::backend::services::repository::SmartFolderUpdateRequest {
+            repo_id: repo_id.to_string(),
+            smart_folder_id: self.smart_draft.target_id.clone(),
+            parent_id: parent_id(&self.smart_draft),
+            name: self.smart_draft.name.trim().to_string(),
+            filter: filter_from_draft(&self.smart_draft),
+        }
+    }
+
     pub fn smart_create_request(&self, repo_id: &str) -> crate::backend::services::repository::SmartFolderMutationRequest {
         crate::backend::services::repository::SmartFolderMutationRequest {
             repo_id: repo_id.to_string(),
@@ -127,6 +145,8 @@ impl SidebarState {
                     self.expanded_smart_folders.push(parent);
                 }
                 self.smart_draft = SmartFolderDraft::default();
+                self.smart_delete_id.clear();
+                self.smart_delete_label.clear();
             }
             Err(error) => {
                 eprintln!("Nana 新建智能文件夹失败：{error}");

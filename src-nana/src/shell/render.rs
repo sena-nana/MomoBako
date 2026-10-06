@@ -644,7 +644,8 @@ pub fn mount_shell(
                     .key("workspace-body")
                     .into_any()
             };
-            let show_sidebar = !view_model.workspace.sidebar_collapsed
+            let presented_sidebar = view_model.motion.sidebar_presented_width();
+            let show_sidebar = presented_sidebar > 0.5
                 && (view_model.acceptance_scene || view_model.workspace.startup.status == StartupStatus::Ready);
             let body = if show_sidebar {
                 let sidebar = if view_model.acceptance_scene {
@@ -656,7 +657,7 @@ pub fn mount_shell(
                         .footer(super::sidebar_view::sidebar_footer(&view_model))
                         .into_any()
                 };
-                workbench(sidebar, stage, view_model.workspace.sidebar_width)
+                workbench(sidebar, stage, presented_sidebar)
             } else {
                 stage.into_any()
             };
@@ -665,6 +666,8 @@ pub fn mount_shell(
             if let Some(dialog) = delete_repository_dialog(&view_model) {
                 shell = shell.overlay(dialog);
             } else if let Some(dialog) = playlist_creator_dialog(&view_model) {
+                shell = shell.overlay(dialog);
+            } else if let Some(dialog) = super::sidebar_view::folder_dialog(&view_model) {
                 shell = shell.overlay(dialog);
             } else if let Some(dialog) = super::sidebar_view::smart_folder_dialog(&view_model) {
                 shell = shell.overlay(dialog);
@@ -743,7 +746,7 @@ fn startup_panel(model: &ShellViewModel) -> impl IntoView + use<'_> {
             cx.dispatch_program(ShellMessage::StartupRetry);
         })
     });
-    let mut progress = Progress::new(f64::from(startup.percent), 100.0);
+    let mut progress = Progress::new(f64::from(model.motion.startup_percent()), 100.0);
     {
         let layout = std::sync::Arc::make_mut(&mut progress.style.layout);
         layout.width = Some(LengthSpec::Fill);

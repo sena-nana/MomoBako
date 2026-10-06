@@ -27,11 +27,38 @@ pub(crate) fn reduce_message(model: &mut ShellViewModel, message: ShellMessage) 
             let stale = model.sidebar.bound_repo_id().is_some_and(|repo_id| repo_id != detail.playlist.repo_id);
             if !stale {
                 model.player.note_detail(&detail);
+                if model.sidebar.take_pending_play(&detail.playlist.playlist_id) {
+                    model.player.play_listed(None, &mut model.inspect);
+                }
                 model.player.publish(&mut model.inspect);
             }
             Some(ShellMessage::PlaylistDetailLoaded(Ok(detail)))
         }
         other => Some(other),
+    }
+}
+
+impl super::PlayerState {
+    pub(super) fn note_download_task(&mut self, task_id: String) {
+        if task_id.is_empty() {
+            eprintln!("Nana 下载任务编号是空的");
+            return;
+        }
+        self.download_task_id = Some(task_id);
+    }
+
+    pub(super) fn cancel_download(&mut self) {
+        let Some(task_id) = self.download_task_id.clone() else {
+            eprintln!("Nana 下载任务还没有可取消的句柄");
+            self.activity = "下载任务还没有可取消的句柄".into();
+            return;
+        };
+        self.activity = "正在取消下载…".into();
+        self.effects.push(super::PlayerEffect::CancelDownload { task_id });
+    }
+
+    pub(super) fn apply_download_progress(&mut self, event: super::DownloaderPlaylistProgressEvent) {
+        self.apply_download(event);
     }
 }
 
@@ -73,9 +100,11 @@ fn reduce_player(model: &mut ShellViewModel, message: PlayerMessage) {
         PlayerMessage::MembershipSaved(result) => model.player.note_membership_saved(result),
         PlayerMessage::StartDownload(request) => model.player.start_download(request),
         PlayerMessage::DownloadCompleted(result) => model.player.finish_download(result),
-        PlayerMessage::CancelDownload => {
-            eprintln!("Nana 下载任务还没有可取消的句柄");
-            model.player.activity = "下载任务还没有可取消的句柄".into();
+        PlayerMessage::CancelDownload => model.player.cancel_download(),
+        PlayerMessage::NoteDownloadTask(task_id) => model.player.note_download_task(task_id),
+        PlayerMessage::DownloadProgress(event) => {
+            model.player.apply_download_progress(event);
+            model.player.activity = model.player.download_text();
         }
         PlayerMessage::Reorder { source, before } => {
             model.player.reorder(&source, before.as_deref(), playlist_id.as_deref(), &item_ids, writable, repo_id.as_deref());

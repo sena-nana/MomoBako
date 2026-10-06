@@ -341,6 +341,10 @@ impl FilesState {
                 if reload {
                     let path = self.current_path.clone();
                     self.queue_browse(ctx, &path, false, true, true);
+                    self.operation = Some(FileOperation { value: 84.0, indeterminate: false, detail: "刷新文件索引".into() });
+                    self.activity = "刷新文件索引".into();
+                } else {
+                    self.operation = None;
                 }
                 if hardlinks {
                     if let Some(repo_id) = ctx.repo_id.clone() {
@@ -351,8 +355,28 @@ impl FilesState {
             Err(error) => {
                 eprintln!("Nana 文件变更失败：{error}");
                 self.error = error;
+                self.operation = None;
             }
         }
+    }
+
+    fn operation_for_activity(activity: &str) -> Option<FileOperation> {
+        let value = match activity {
+            "正在复制…" => 32.0,
+            "正在移动…" => 32.0,
+            "正在导入…" | "正在导入压缩包…" | "正在导入 Eagle…" => 24.0,
+            "正在删除…" | "正在永久删除…" | "正在还原…" | "正在清空回收站…" => 32.0,
+            _ => return None,
+        };
+        let detail = match activity {
+            "正在复制…" => "创建硬链接或复制文件",
+            "正在移动…" => "移动文件",
+            "正在导入…" => "导入文件到当前资源库",
+            "正在导入压缩包…" => "预检压缩包条目",
+            "正在导入 Eagle…" => "转换 EagleLibrary",
+            _ => "正在处理",
+        };
+        Some(FileOperation { value, indeterminate: false, detail: detail.into() })
     }
 
     pub(super) fn note_hardlinks(&mut self, result: Result<Vec<HardlinkPrompt>, String>) {
@@ -418,6 +442,7 @@ impl FilesState {
         self.mutating = true;
         self.error.clear();
         self.activity = activity.to_string();
+        self.operation = Self::operation_for_activity(activity);
     }
 
     fn finish_dialog_success(&mut self) {
