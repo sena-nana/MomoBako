@@ -17,32 +17,28 @@ use super::PlayerCandidate;
 pub(super) const PLUGIN_ID: &str = "momobako.player.wav";
 pub(super) const PLAYER_TYPE_ID: &str = "momobako.playlist.wav";
 
+const COMPRESSED_EXTENSIONS: &[&str] = &["mp3", "flac", "ogg"];
 pub(super) const COMPRESSED_PLUGIN_ID: &str = "momobako.player.compressed-audio";
 pub(super) const COMPRESSED_PLAYER_TYPE_ID: &str = "momobako.playlist.compressed-audio";
 
 /// 生产列表里的 WAV 候选。
 pub(super) fn builtin_candidate() -> PlayerCandidate {
-    PlayerCandidate {
-        plugin_id: PLUGIN_ID.into(),
-        player_type_id: PLAYER_TYPE_ID.into(),
-        capability_id: None,
-        label: "WAV".into(),
-        file_class: "audio".into(),
-        extensions: vec!["wav".into()],
-        supports_seek: true,
-        supports_volume: true,
-    }
+    audio_candidate(PLUGIN_ID, PLAYER_TYPE_ID, "WAV", &["wav"])
 }
 
 /// mp3、flac、ogg 共用一个候选。装载时解进和 WAV 相同的内存游标。
 pub(super) fn compressed_candidate() -> PlayerCandidate {
+    audio_candidate(COMPRESSED_PLUGIN_ID, COMPRESSED_PLAYER_TYPE_ID, "MP3 / FLAC / Ogg", COMPRESSED_EXTENSIONS)
+}
+
+fn audio_candidate(plugin_id: &str, player_type_id: &str, label: &str, extensions: &[&str]) -> PlayerCandidate {
     PlayerCandidate {
-        plugin_id: COMPRESSED_PLUGIN_ID.into(),
-        player_type_id: COMPRESSED_PLAYER_TYPE_ID.into(),
+        plugin_id: plugin_id.into(),
+        player_type_id: player_type_id.into(),
         capability_id: None,
-        label: "MP3 / FLAC / Ogg".into(),
+        label: label.into(),
         file_class: "audio".into(),
-        extensions: vec!["mp3".into(), "flac".into(), "ogg".into()],
+        extensions: extensions.iter().map(|ext| (*ext).to_string()).collect(),
         supports_seek: true,
         supports_volume: true,
     }
@@ -332,21 +328,15 @@ fn load_source(path: &str) -> Result<ParsedWav, String> {
 }
 
 fn is_compressed_path(path: &str) -> bool {
-    matches!(
-        Path::new(path).extension().and_then(|ext| ext.to_str()).map(|ext| ext.to_ascii_lowercase()).as_deref(),
-        Some("mp3" | "flac" | "ogg")
-    )
+    Path::new(path)
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| COMPRESSED_EXTENSIONS.iter().any(|item| item.eq_ignore_ascii_case(ext)))
 }
 
 fn parsed_from_decoded(decoded: crate::shell::audio_decode::DecodedPcm) -> Result<ParsedWav, String> {
-    if decoded.channels != 1 && decoded.channels != 2 {
-        return Err("只支持单声道或双声道".into());
-    }
-    if decoded.sample_rate == 0 {
-        return Err("采样率无效".into());
-    }
     let frame_bytes = usize::from(decoded.channels) * 2;
-    if frame_bytes == 0 || decoded.pcm.is_empty() || decoded.pcm.len() % frame_bytes != 0 {
+    if frame_bytes == 0 || decoded.pcm.len() % frame_bytes != 0 {
         return Err("压缩音频没有整帧样本".into());
     }
     Ok(ParsedWav {
