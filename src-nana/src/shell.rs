@@ -21,6 +21,7 @@ mod inspect;
 mod inspect_view;
 pub(crate) mod player;
 pub(crate) mod admin;
+pub use admin::{AdminMessage, ToolPageEntry};
 pub(crate) mod input;
 pub mod host_events;
 mod player_view;

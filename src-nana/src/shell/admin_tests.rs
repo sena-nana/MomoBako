@@ -614,6 +614,7 @@ fn source_login_reduce_calls_create_session_and_skips_oauth_without_methods() {
         }
         other => panic!("unexpected {other:?}"),
     }
+    assert_eq!(model.admin.action_message, "正在调用 auth.createQrSession…");
     send(&mut model, AdminMessage::CallSourceAuth { plugin_id: "  ".into(), slot: SourceAuthCall::CreateSession });
     assert!(model.admin.take_effects().is_empty());
 

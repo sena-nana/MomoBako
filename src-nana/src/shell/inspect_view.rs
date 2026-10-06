@@ -171,7 +171,7 @@ fn search_panel(model: &ShellViewModel) -> AnyView {
     }
     if inspect.searching {
         body.push(text("正在执行全局搜索").key("inspect-search-loading").into_any());
-    } else if inspect.results.is_empty() {
+    } else if inspect.results.is_empty() && !inspect.has_target() {
         let (title, detail) = if model.workspace.repositories.is_empty() {
             ("还没有可搜索的资源库", "先在资源库页面添加一个仓库，再执行跨仓库搜索。")
         } else {
