@@ -1,6 +1,11 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
+import {
+  clampAnchoredMenuPosition,
+  createAnchoredMenuPosition,
+  SB_MENU_EDGE_PADDING,
+} from "../src/composables/menuMotion";
 
 /**
  * Vue 侧的对照原文。Nana 壳层测试断言同一批时长和文案。
@@ -46,6 +51,49 @@ describe("nana parity sidebar", () => {
 
   it("smart_edit_popover_clamp_and_playlist_play_match_vue", () => {
     expect(smartUi).toContain('smartFolderDialogMode.value === "create" ? "新建智能文件夹" : "编辑智能文件夹"');
+  });
+
+  it("live_popover_clamps_to_the_measured_viewport", () => {
+    const previousWidth = window.innerWidth;
+    const previousHeight = window.innerHeight;
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 400 });
+    Object.defineProperty(window, "innerHeight", { configurable: true, value: 300 });
+    const placed = clampAnchoredMenuPosition(createAnchoredMenuPosition(-20, 900), 200, 100);
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: previousWidth });
+    Object.defineProperty(window, "innerHeight", { configurable: true, value: previousHeight });
+    expect(SB_MENU_EDGE_PADDING).toBe(4);
+    expect(placed.x).toBe(4);
+    expect(placed.y).toBe(196);
+    const gap = read("src-nana/src/shell/sidebar_gap.rs");
+    expect(gap).toContain("assert_eq!(model.sidebar.popover_x, 4.0);");
+    expect(gap).toContain("assert_eq!(model.sidebar.popover_y, 196.0);");
+    const live = read("src-nana/src/shell/pointer_gesture.rs");
+    expect(live).toContain("assert_ne!((model.sidebar.popover_x, model.sidebar.popover_y), (8.0, 48.0));");
+    expect(live).toContain("model.sidebar.popover_x >= 4.0 && model.sidebar.popover_y >= 4.0");
+  });
+
+  it("live_folder_hover_opens_after_the_idle_clock_reaches_450ms", () => {
+    expect(folderUi).toContain("ensureFolderExpanded(path);");
+    expect(folderUi).toContain("openFolder(path);");
+    expect(folderUi).toContain("}, 450);");
+    const motion = read("src-nana/src/shell/motion.rs");
+    expect(motion).toContain("pub const FOLDER_HOVER_MS: u64 = 450;");
+    const live = read("src-nana/src/shell/pointer_gesture.rs");
+    expect(live).toContain('assert_eq!(model.sidebar.current_directory, "photos");');
+    expect(live).toContain("model.sidebar.hover_now() >= 450");
+    expect(live).toContain("model.sidebar.hover_now() != model.motion.now_ms()");
+  });
+
+  it("live_folder_button_escape_and_prefetch_use_the_shell_path", () => {
+    const switcher = read("src/layouts/useRepositorySwitcherUi.ts");
+    expect(switcher).toContain('if (event.key === "Escape" && addRepositoryPopoverMode.value !== "closed")');
+    expect(switcher).toContain("closeAddRepositoryPopover();");
+    const live = read("src-nana/src/shell/pointer_gesture.rs");
+    expect(live).toContain('labeled_id(&window, "文件夹名称")');
+    expect(live).toContain("焦点在对话框输入框时 Escape 应该关掉它");
+    const host = read("src-nana/src/window_host.rs");
+    expect(host).toContain("fn note_dismissed_dialog");
+    expect(host).toContain("GapMessage::Escape");
   });
 });
 
