@@ -546,11 +546,18 @@ mod tests {
         assert!(!tree_shows_directory(&window, "photos"), "按着的时候不拆树");
         pointer(&mut window, &mut input, PointerPhase::Up, photos.0, photos.1);
         prepare_motion(&mut model, &mut window);
+        let requests = crate::sidebar_dispatch::dispatch_prepared_browses(&mut model);
         window.document.flush(LayoutViewport::new(1200.0, 800.0), &mut NanaTextShaper::default()).expect("布局");
         assert!(
-            model.sidebar.take_effects().iter().any(|effect| matches!(effect, crate::shell::SidebarEffect::Browse { path, .. } if path == "photos")),
-            "悬停打开要发出目录浏览"
+            requests.iter().any(|request| request.directory_path.as_deref() == Some("photos")),
+            "目录浏览已提交：{requests:?}"
         );
+        assert!(
+            model.sidebar.take_effects().iter().all(|effect| !matches!(effect, crate::shell::SidebarEffect::Browse { path, .. } if path == "photos")),
+            "浏览请求不能继续留在侧栏队列"
+        );
+        assert_eq!(model.files.current_path, "photos");
+        assert_eq!(model.files.activity, "正在读取目录…");
         assert_eq!(model.current_directory, "photos");
         assert!(tree_shows_directory(&window, "photos"), "松手后的树应选中 photos");
 
@@ -569,10 +576,9 @@ mod tests {
         }
         pointer(&mut window, &mut input, PointerPhase::Move, photos.0, photos.1);
         prepare_motion(&mut model, &mut window);
-        assert!(
-            model.sidebar.take_effects().iter().all(|effect| !matches!(effect, crate::shell::SidebarEffect::Browse { path, .. } if path == "photos")),
-            "离开后再进入不应立刻打开"
-        );
+        let requests = crate::sidebar_dispatch::dispatch_prepared_browses(&mut model);
+        assert!(requests.is_empty(), "离开后再进入不应立刻打开：{requests:?}");
+        assert_ne!(model.files.current_path, "photos");
         assert_ne!(model.current_directory, "photos");
     }
 

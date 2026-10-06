@@ -268,6 +268,21 @@ impl SidebarState {
         std::mem::take(&mut self.effects)
     }
 
+    /// 只取走目录浏览。其余请求留在队列里，等下一次 `update`。
+    pub fn take_browses(&mut self) -> Vec<SidebarEffect> {
+        let mut kept = Vec::new();
+        let mut browses = Vec::new();
+        for effect in std::mem::take(&mut self.effects) {
+            if matches!(effect, SidebarEffect::Browse { .. }) {
+                browses.push(effect);
+            } else {
+                kept.push(effect);
+            }
+        }
+        self.effects = kept;
+        browses
+    }
+
     /// 活动仓库变化时清空旧树，并在仓库可用时请求目录、智能文件夹和播放集。
     pub fn bind_repository(&mut self, repo_id: Option<&str>, missing: bool) {
         if self.bound_repo_id.as_deref() == repo_id && self.bound_missing == missing {

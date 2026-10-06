@@ -147,6 +147,9 @@ impl ApplicationState for MomoBakoApplication {
         context: &RuntimeProgramContext<Self::Message>,
     ) {
         window_host::prepare_motion(&mut self.shell, window);
+        for request in sidebar_dispatch::dispatch_prepared_browses(&mut self.shell) {
+            sidebar_dispatch::dispatch_browse_request(self, context, request);
+        }
         let Some(token) = self.shell.preview_token.clone() else {
             self.preview_gpu = None;
             window.textures.remove("file-preview");

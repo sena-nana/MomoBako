@@ -309,6 +309,8 @@ pub struct ShellViewModel {
     pub motion: motion::MotionState,
     /// 对话框、弹层或打开文件夹之后，手势松开时要重建树。
     pub surface_dirty: bool,
+    /// `prepare` 里产生的目录浏览。这一帧就要提交，不能等下一次 `update`。
+    pub(crate) staged_browses: Vec<sidebar::SidebarEffect>,
 }
 
 impl Default for ShellViewModel {
@@ -364,6 +366,7 @@ impl Default for ShellViewModel {
             input: input::InputState::default(),
             motion: motion::MotionState::default(),
             surface_dirty: false,
+            staged_browses: Vec::new(),
         }
     }
 }

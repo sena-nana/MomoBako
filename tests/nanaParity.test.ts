@@ -83,7 +83,8 @@ describe("nana parity sidebar", () => {
     const live = read("src-nana/src/shell/pointer_gesture.rs");
     expect(live).toContain('assert_eq!(model.current_directory, "photos");');
     expect(live).toContain('tree_shows_directory(&window, "photos")');
-    expect(live).toContain("悬停打开要发出目录浏览");
+    expect(live).toContain("目录浏览已提交");
+    expect(live).toContain('model.files.current_path, "photos"');
     expect(live).toContain("离开后再进入不应立刻打开");
   });
 
