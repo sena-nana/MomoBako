@@ -18,6 +18,8 @@ use super::{ShellMessage, ShellPage, ShellViewModel, WorkspacePanel};
 mod support;
 #[path = "admin_reduce.rs"]
 mod reduce;
+#[path = "tool_native.rs"]
+mod tool_native;
 #[path = "admin_view.rs"]
 mod view;
 

@@ -1,0 +1,357 @@
+//! 内置 WAV 播放贡献。
+//!
+//! 只解析标准 PCM（RIFF/WAVE、`fmt `、`data`，8-bit 或 16-bit，单声道或双声道）。
+//! 播放头和音量留在内存里。不调用 winmm、rodio 或任何输出设备，单元测试不会出声。
+
+use std::cell::RefCell;
+use std::fs;
+use std::rc::Rc;
+
+use crate::backend::services::repository::PlaybackSessionState;
+use crate::host_api::{PlaybackMediaCapabilities, PlaybackMediaPlugin, PlaybackSessionController};
+
+use super::PlayerCandidate;
+
+pub(super) const PLUGIN_ID: &str = "momobako.player.wav";
+pub(super) const PLAYER_TYPE_ID: &str = "momobako.playlist.wav";
+
+/// 生产列表里唯一内置的候选。其它格式仍要另行登记。
+pub(super) fn builtin_candidate() -> PlayerCandidate {
+    PlayerCandidate {
+        plugin_id: PLUGIN_ID.into(),
+        player_type_id: PLAYER_TYPE_ID.into(),
+        capability_id: None,
+        label: "WAV".into(),
+        file_class: "audio".into(),
+        extensions: vec!["wav".into()],
+        supports_seek: true,
+        supports_volume: true,
+    }
+}
+
+pub(super) fn is_wav_candidate(candidate: &PlayerCandidate) -> bool {
+    candidate.plugin_id == PLUGIN_ID
+}
+
+/// 一次装载后的内存游标。克隆只复制句柄，播放头仍是同一份。
+#[derive(Clone)]
+pub(super) struct WavPlayer {
+    inner: Rc<RefCell<Cursor>>,
+}
+
+struct Cursor {
+    loaded: bool,
+    sample_rate: u32,
+    channels: u16,
+    bits_per_sample: u16,
+    frame_count: u64,
+    /// PCM 负载。只留在进程里，不送给声卡。
+    pcm: Vec<u8>,
+    /// 播放头，单位是帧。
+    frame: u64,
+    volume: f32,
+    playing: bool,
+}
+
+struct ParsedWav {
+    sample_rate: u32,
+    channels: u16,
+    bits_per_sample: u16,
+    frame_count: u64,
+    duration_ms: u64,
+    pcm: Vec<u8>,
+}
+
+struct FmtChunk {
+    audio_format: u16,
+    channels: u16,
+    sample_rate: u32,
+    block_align: u16,
+    bits_per_sample: u16,
+}
+
+impl Default for WavPlayer {
+    fn default() -> Self {
+        Self {
+            inner: Rc::new(RefCell::new(Cursor::empty())),
+        }
+    }
+}
+
+impl WavPlayer {
+    /// 丢掉已装载的 PCM 和播放头。停止或换到其它解码器时调用。
+    pub(super) fn clear(&mut self) {
+        PlaybackMediaPlugin::dispose(self);
+    }
+}
+
+impl std::fmt::Debug for WavPlayer {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.inner.try_borrow() {
+            Ok(cursor) => formatter
+                .debug_struct("WavPlayer")
+                .field("loaded", &cursor.loaded)
+                .field("sample_rate", &cursor.sample_rate)
+                .field("channels", &cursor.channels)
+                .field("bits_per_sample", &cursor.bits_per_sample)
+                .field("frame_count", &cursor.frame_count)
+                .field("pcm_bytes", &cursor.pcm.len())
+                .field("frame", &cursor.frame)
+                .field("volume", &cursor.volume)
+                .field("playing", &cursor.playing)
+                .finish(),
+            Err(_) => formatter.write_str("WavPlayer { <忙> }"),
+        }
+    }
+}
+
+impl PlaybackMediaPlugin for WavPlayer {
+    fn load(&mut self, source: &str) -> Result<PlaybackMediaCapabilities, String> {
+        self.clear();
+        match parse_wav_file(source) {
+            Ok(parsed) => {
+                let duration_ms = parsed.duration_ms;
+                *self.inner.borrow_mut() = Cursor::from_parsed(parsed);
+                Ok(PlaybackMediaCapabilities {
+                    duration_ms: Some(duration_ms),
+                    can_seek: true,
+                    can_volume: true,
+                })
+            }
+            Err(error) => {
+                eprintln!("Nana WAV 装载失败：{error}");
+                Err(error)
+            }
+        }
+    }
+
+    fn play(&mut self) -> Result<(), String> {
+        self.ensure_loaded("播放")?;
+        self.inner.borrow_mut().playing = true;
+        Ok(())
+    }
+
+    fn pause(&mut self) -> Result<(), String> {
+        self.ensure_loaded("暂停")?;
+        self.inner.borrow_mut().playing = false;
+        Ok(())
+    }
+
+    fn seek(&mut self, position_ms: u64) -> Result<(), String> {
+        self.ensure_loaded("跳转")?;
+        let mut cursor = self.inner.borrow_mut();
+        let rate = u64::from(cursor.sample_rate);
+        let frame = if rate == 0 {
+            0
+        } else {
+            position_ms.saturating_mul(rate) / 1000
+        };
+        cursor.frame = frame.min(cursor.frame_count);
+        Ok(())
+    }
+
+    fn set_volume(&mut self, volume: f32) -> Result<(), String> {
+        self.ensure_loaded("音量")?;
+        self.inner.borrow_mut().volume = volume;
+        Ok(())
+    }
+
+    fn dispose(&mut self) {
+        *self.inner.borrow_mut() = Cursor::empty();
+    }
+}
+
+impl WavPlayer {
+    fn ensure_loaded(&self, action: &str) -> Result<(), String> {
+        if self.inner.borrow().loaded {
+            return Ok(());
+        }
+        let error = "WAV 尚未装载".to_string();
+        eprintln!("Nana WAV {action}失败：{error}");
+        Err(error)
+    }
+}
+
+impl Cursor {
+    fn empty() -> Self {
+        Self {
+            loaded: false,
+            sample_rate: 0,
+            channels: 0,
+            bits_per_sample: 0,
+            frame_count: 0,
+            pcm: Vec::new(),
+            frame: 0,
+            volume: 1.0,
+            playing: false,
+        }
+    }
+
+    fn from_parsed(parsed: ParsedWav) -> Self {
+        Self {
+            loaded: true,
+            sample_rate: parsed.sample_rate,
+            channels: parsed.channels,
+            bits_per_sample: parsed.bits_per_sample,
+            frame_count: parsed.frame_count,
+            pcm: parsed.pcm,
+            frame: 0,
+            volume: 1.0,
+            playing: false,
+        }
+    }
+}
+
+pub(super) enum Action {
+    Load(String),
+    Play,
+    Pause,
+    Seek(u64),
+    Volume(f32),
+}
+
+/// 选中 WAV 时用内存播放器，其它候选仍是缺失解码器。
+pub(super) fn drive(
+    use_wav: bool,
+    wav: &WavPlayer,
+    session: PlaybackSessionState,
+    action: Action,
+) -> (PlaybackSessionState, Option<String>) {
+    if use_wav {
+        control(wav.clone(), session, action)
+    } else {
+        control(MissingDecoder, session, action)
+    }
+}
+
+fn control<P: PlaybackMediaPlugin>(
+    plugin: P,
+    session: PlaybackSessionState,
+    action: Action,
+) -> (PlaybackSessionState, Option<String>) {
+    let mut controller = PlaybackSessionController::new(plugin, session);
+    let error = match action {
+        Action::Load(path) => controller.load(&path).err(),
+        Action::Play => controller.play().err(),
+        Action::Pause => controller.pause().err(),
+        Action::Seek(position) => controller.seek(position).err(),
+        Action::Volume(volume) => controller.set_volume(volume).err(),
+    };
+    (controller.state().clone(), error)
+}
+
+struct MissingDecoder;
+
+impl PlaybackMediaPlugin for MissingDecoder {
+    fn load(&mut self, _source: &str) -> Result<PlaybackMediaCapabilities, String> {
+        Err("没有原生解码器".into())
+    }
+
+    fn play(&mut self) -> Result<(), String> {
+        Err("没有原生解码器".into())
+    }
+
+    fn pause(&mut self) -> Result<(), String> {
+        Err("没有原生解码器".into())
+    }
+
+    fn seek(&mut self, _position_ms: u64) -> Result<(), String> {
+        Err("没有原生解码器".into())
+    }
+
+    fn set_volume(&mut self, _volume: f32) -> Result<(), String> {
+        Err("没有原生解码器".into())
+    }
+
+    fn dispose(&mut self) {}
+}
+
+/// 读取并解析一个标准 PCM WAV。坏文件返回错误，由调用方记录日志。
+fn parse_wav_file(path: &str) -> Result<ParsedWav, String> {
+    let bytes = fs::read(path).map_err(|error| format!("无法读取 WAV：{error}"))?;
+    parse_wav(&bytes)
+}
+
+/// 时长按帧计算。一帧是同一时刻全部声道的样本，单声道时帧数就是样本数。
+/// 秒 = 帧数 / 采样率，`duration_ms` = 帧数 × 1000 / 采样率。
+fn parse_wav(bytes: &[u8]) -> Result<ParsedWav, String> {
+    if bytes.len() < 12 || &bytes[0..4] != b"RIFF" || &bytes[8..12] != b"WAVE" {
+        return Err("不是 WAV 头".into());
+    }
+    let mut offset = 12usize;
+    let mut fmt = None;
+    let mut data = None;
+    while offset + 8 <= bytes.len() {
+        let id = [
+            bytes[offset],
+            bytes[offset + 1],
+            bytes[offset + 2],
+            bytes[offset + 3],
+        ];
+        let size = u32::from_le_bytes([
+            bytes[offset + 4],
+            bytes[offset + 5],
+            bytes[offset + 6],
+            bytes[offset + 7],
+        ]) as usize;
+        let start = offset + 8;
+        let end = start.checked_add(size).ok_or("WAV 块超出文件")?;
+        if end > bytes.len() {
+            return Err("WAV 块超出文件".into());
+        }
+        match id {
+            id if id == *b"fmt " => fmt = Some(parse_fmt(&bytes[start..end])?),
+            id if id == *b"data" && data.is_none() => data = Some(bytes[start..end].to_vec()),
+            _ => {}
+        }
+        offset = end;
+        if size % 2 == 1 {
+            offset = offset.saturating_add(1);
+        }
+    }
+    let fmt = fmt.ok_or("WAV 缺少 fmt 块")?;
+    let pcm = data.ok_or("WAV 缺少 data 块")?;
+    if fmt.audio_format != 1 {
+        return Err("只支持 PCM WAV".into());
+    }
+    if fmt.channels != 1 && fmt.channels != 2 {
+        return Err("只支持单声道或双声道 WAV".into());
+    }
+    if fmt.bits_per_sample != 8 && fmt.bits_per_sample != 16 {
+        return Err("只支持 8-bit 或 16-bit WAV".into());
+    }
+    if fmt.sample_rate == 0 {
+        return Err("WAV 采样率无效".into());
+    }
+    let frame_bytes = fmt.channels * (fmt.bits_per_sample / 8);
+    if frame_bytes == 0 || fmt.block_align != frame_bytes {
+        return Err("WAV 帧长无效".into());
+    }
+    let frame_bytes = u64::from(frame_bytes);
+    if pcm.len() as u64 % frame_bytes != 0 {
+        return Err("WAV 数据长度不是整帧".into());
+    }
+    let frame_count = pcm.len() as u64 / frame_bytes;
+    let duration_ms = frame_count.saturating_mul(1000) / u64::from(fmt.sample_rate);
+    Ok(ParsedWav {
+        sample_rate: fmt.sample_rate,
+        channels: fmt.channels,
+        bits_per_sample: fmt.bits_per_sample,
+        frame_count,
+        duration_ms,
+        pcm,
+    })
+}
+
+fn parse_fmt(chunk: &[u8]) -> Result<FmtChunk, String> {
+    if chunk.len() < 16 {
+        return Err("WAV fmt 块不完整".into());
+    }
+    Ok(FmtChunk {
+        audio_format: u16::from_le_bytes([chunk[0], chunk[1]]),
+        channels: u16::from_le_bytes([chunk[2], chunk[3]]),
+        sample_rate: u32::from_le_bytes([chunk[4], chunk[5], chunk[6], chunk[7]]),
+        block_align: u16::from_le_bytes([chunk[12], chunk[13]]),
+        bits_per_sample: u16::from_le_bytes([chunk[14], chunk[15]]),
+    })
+}

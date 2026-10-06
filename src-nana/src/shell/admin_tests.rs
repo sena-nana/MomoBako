@@ -9,10 +9,12 @@ use crate::backend::services::repository::{
 };
 use crate::backend::services::runtime::ExternalApiConnectionStatus;
 
+use super::super::files::{FileDialog, FilesMessage};
 use super::super::player::{PlayerCandidate, AUDIO_CAPABILITY, AUDIO_SEQUENCE_TYPE};
-use super::super::workspace::WorkspacePanel;
+use super::super::workspace::{WorkspacePanel, WorkspaceRepository};
 use super::super::{ShellMessage, ShellPage, ShellViewModel};
 use super::support::{self, action_can_run, audio_choices};
+use super::tool_native::{self, ImportAction};
 use super::{AdminEffect, AdminMessage, OperationProgress, ToolPageEntry};
 
 fn send(model: &mut ShellViewModel, message: AdminMessage) {
@@ -200,6 +202,7 @@ fn plugin_fields_reject_bad_json_and_reset_empty_numbers() {
     let lines = support::settings_upgrade_lines(&model.admin.plugins[0], true);
     assert_eq!(lines.len(), 2);
     assert!(lines[0].contains("Vue"));
+    assert!(lines.iter().any(|line| line.contains("账号与来源仍是 Vue 页面，需要升级为 Nana 原生设置")));
     let mut schema = plugin("schema.one", "system", "service", "service");
     schema.contributes["settings"]["settingsPage"] = serde_json::json!({"label": "本地文件系统"});
     assert!(support::settings_upgrade_lines(&schema, false).is_empty());
@@ -463,6 +466,123 @@ fn settings_audio_corner_external_api_and_backends() {
     assert_eq!(model.repository_id.as_deref(), Some("one"));
     send(&mut model, AdminMessage::SelectRepository("  ".into()));
     assert_eq!(model.repository_id.as_deref(), Some("one"));
+}
+
+fn tool_page(id: &str, native: bool) -> ToolPageEntry {
+    ToolPageEntry { id: id.into(), label: id.into(), plugin_name: "tool".into(), description: String::new(), native }
+}
+
+fn attach_repository(model: &mut ShellViewModel, capabilities: Vec<String>) {
+    model.workspace.active_repo_id = Some("repo".into());
+    model.workspace.repositories = vec![WorkspaceRepository {
+        repo_id: "repo".into(),
+        name: "资料库".into(),
+        path: "C:/repo".into(),
+        status: "ready".into(),
+        backend_plugin_id: "filesystem".into(),
+        capabilities,
+        cache_required: false,
+        cache_status: String::new(),
+    }];
+}
+
+fn import_action<'a>(actions: &'a [ImportAction], id: &str) -> &'a ImportAction {
+    actions.iter().find(|item| item.id == id).unwrap_or_else(|| panic!("missing {id}"))
+}
+
+#[test]
+fn builtin_tool_pages_follow_the_file_machine_and_api_snapshot() {
+    for id in [support::TOOL_FILE_MANAGER, support::TOOL_EAGLE_IMPORTER, support::TOOL_API_PLAYGROUND] {
+        assert!(support::tool_page_upgrade(&tool_page(id, false)).is_none());
+    }
+    assert_eq!(
+        support::tool_page_upgrade(&tool_page("momobako.tool.other", false)),
+        Some("工具页仍是 Vue 插件，需要升级为 Nana 原生工具页")
+    );
+
+    let mut model = ShellViewModel::default();
+    let blocked = tool_native::import_actions(&model, support::TOOL_FILE_MANAGER);
+    let folder = import_action(&blocked, "folder");
+    assert!(!folder.enabled);
+    assert_eq!(tool_native::import_block_reason(&model), Some("当前没有可用仓库。"));
+    assert!(tool_native::import_message(folder.enabled, folder.message.clone()).is_none());
+    model.reduce(ShellMessage::Files(folder.message.clone()));
+    assert!(model.files.take_effects().is_empty());
+    assert!(matches!(model.files.dialog, FileDialog::Closed));
+
+    attach_repository(&mut model, vec!["write".into()]);
+    let open = tool_native::import_actions(&model, support::TOOL_FILE_MANAGER);
+    let folder = import_action(&open, "folder");
+    assert!(folder.enabled);
+    assert!(tool_native::import_block_reason(&model).is_none());
+    match &folder.message {
+        FilesMessage::OpenDialog(FileDialog::Import) => {}
+        other => panic!("unexpected {other:?}"),
+    }
+    model.reduce(tool_native::import_message(folder.enabled, folder.message.clone()).expect("folder"));
+    assert!(matches!(model.files.dialog, FileDialog::Import));
+    assert!(model.files.take_effects().is_empty());
+
+    let eagle = tool_native::import_actions(&model, support::TOOL_EAGLE_IMPORTER);
+    let copy = import_action(&eagle, "copy");
+    match &copy.message {
+        FilesMessage::OpenEagle(mode) => assert_eq!(mode, "copy"),
+        other => panic!("unexpected {other:?}"),
+    }
+    model.reduce(tool_native::import_message(copy.enabled, copy.message.clone()).expect("copy"));
+    assert_eq!(model.files.eagle_mode, "copy");
+    assert!(matches!(model.files.dialog, FileDialog::ImportEagle));
+
+    assert_eq!(tool_native::api_lines(None), vec!["还没有 API 设计快照".to_string()]);
+    assert_eq!(
+        tool_native::api_lines(Some(&ApiDesignSnapshot { transport: "local".into(), endpoints: Vec::new() })),
+        vec!["还没有 API 设计快照".to_string()]
+    );
+    let lines = tool_native::api_lines(Some(&ApiDesignSnapshot {
+        transport: "local".into(),
+        endpoints: vec![ApiDefinition {
+            group: "system".into(),
+            transport: "local".into(),
+            method: "GET".into(),
+            path: "/health".into(),
+            summary: "健康".into(),
+            command: None,
+            plugin_id: None,
+            plugin_method: None,
+            requires_auth: None,
+            request_template: None,
+        }],
+    }));
+    assert_eq!(lines, vec!["GET /health · 健康".to_string()]);
+
+    model.workspace.repositories[0].capabilities.clear();
+    assert_eq!(tool_native::import_block_reason(&model), Some("当前仓库处于只读状态。"));
+    model.workspace.repositories[0].capabilities = vec!["write".into()];
+    model.workspace.panel = WorkspacePanel::Trash;
+    assert_eq!(tool_native::import_block_reason(&model), Some("回收站视图不支持导入。"));
+    model.workspace.panel = WorkspacePanel::SmartFolder;
+    assert_eq!(tool_native::import_block_reason(&model), Some("虚拟视图不支持导入。"));
+}
+
+#[test]
+fn source_account_summary_names_methods_without_the_upgrade_copy() {
+    let mut manifest = plugin("source.one", "system", "source", "filesystem");
+    manifest.contributes["source"] = serde_json::json!({
+        "authentication": {
+            "kind": "qr",
+            "createSessionMethod": "auth.createQrSession",
+            "statusMethod": "auth.getLoginStatus"
+        }
+    });
+    let lines = support::settings_upgrade_lines(&manifest, false);
+    let joined = lines.join("\n");
+    assert!(!joined.contains("需要升级为 Nana 原生设置"));
+    assert!(joined.contains("qr"));
+    assert!(joined.contains("auth.createQrSession"));
+    assert!(joined.contains("auth.getLoginStatus"));
+
+    manifest.contributes["source"] = serde_json::json!({"authentication": {}});
+    assert!(support::settings_upgrade_lines(&manifest, false).iter().any(|line| line.contains("账号与来源仍是 Vue 页面，需要升级为 Nana 原生设置")));
 }
 
 #[test]
