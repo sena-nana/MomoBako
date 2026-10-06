@@ -63,11 +63,12 @@ pub struct SidebarFolder {
     pub children: Vec<SidebarFolder>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct SidebarSmartFolder {
     pub id: String,
     pub parent_id: Option<String>,
     pub name: String,
+    pub filter: crate::backend::services::repository::SmartFolderFilter,
     pub children: Vec<SidebarSmartFolder>,
 }
 
@@ -87,12 +88,19 @@ pub enum PopoverMode {
     Closed,
     Switcher,
     AddMenu,
+    /// Eagle 或云盘这类需要表单的后端。
+    BackendForm,
 }
 
 #[path = "sidebar_smart.rs"]
 mod smart;
+#[path = "sidebar_gap.rs"]
+mod gap;
+#[path = "sidebar_bind.rs"]
+mod bind;
 
 pub use smart::{SmartFolderDraft, SmartFolderField};
+pub use gap::{clamp_anchored, FolderMutation, GapMessage};
 
 /// 侧栏交互。壳层只保留一个 `ShellMessage::Sidebar`，避免主归约重复列出这些分支。
 pub enum SidebarMessage {
@@ -123,6 +131,8 @@ pub enum SidebarMessage {
     SidebarSmartFolderQueried { repo_id: String, smart_folder_id: String, result: Result<super::files::VirtualQuery, String> },
     SidebarPlaylistsLoaded { repo_id: String, result: Result<Vec<SidebarPlaylist>, String> },
     SidebarPlaylistPlayersLoaded { repo_id: String, result: Result<Vec<String>, String> },
+    /// 文件夹对话框、智能文件夹编辑、播放、弹层夹取和 Escape。
+    Gap(gap::GapMessage),
 }
 
 /// 侧栏归约后交给宿主的服务请求。
@@ -137,6 +147,10 @@ pub enum SidebarEffect {
     LoadPlaylistDetail { repo_id: String, playlist_id: String },
     Browse { repo_id: String, path: String, trash: bool },
     AttachRepository { path: String },
+    UpdateSmartFolder { repo_id: String },
+    DeleteSmartFolder { repo_id: String, smart_folder_id: String },
+    DeletePlaylist { repo_id: String, playlist_id: String },
+    CreateBackendRepository { name: String, path: String, plugin_id: String },
 }
 
 #[derive(Clone, Debug)]
@@ -165,6 +179,25 @@ pub struct SidebarState {
     pub attach_path: String,
     pub popover_error: String,
     pub selected_path: Option<String>,
+    pub folder_dialog: gap::FolderDialog,
+    pub folder_delete_path: String,
+    pub folder_delete_label: String,
+    pub hover_folder: Option<String>,
+    pub hover_since_ms: Option<u64>,
+    pub smart_delete_id: String,
+    pub smart_delete_label: String,
+    pub pending_play: Option<String>,
+    pub popover_x: f32,
+    pub popover_y: f32,
+    pub backend_name: String,
+    pub backend_url: String,
+    pub backend_user: String,
+    pub backend_password: String,
+    pub backend_root: String,
+    pub backend_plugin_id: String,
+    pending_folder_create: Option<(String, String, String)>,
+    pending_folder_rename: Option<(String, String, String)>,
+    pending_folder_delete: Option<(String, String)>,
     bound_repo_id: Option<String>,
     bound_missing: bool,
     effects: Vec<SidebarEffect>,
@@ -197,6 +230,25 @@ impl Default for SidebarState {
             attach_path: String::new(),
             popover_error: String::new(),
             selected_path: None,
+            folder_dialog: gap::FolderDialog::default(),
+            folder_delete_path: String::new(),
+            folder_delete_label: String::new(),
+            hover_folder: None,
+            hover_since_ms: None,
+            smart_delete_id: String::new(),
+            smart_delete_label: String::new(),
+            pending_play: None,
+            popover_x: 0.0,
+            popover_y: 0.0,
+            backend_name: String::new(),
+            backend_url: String::new(),
+            backend_user: String::new(),
+            backend_password: String::new(),
+            backend_root: String::new(),
+            backend_plugin_id: String::new(),
+            pending_folder_create: None,
+            pending_folder_rename: None,
+            pending_folder_delete: None,
             bound_repo_id: None,
             bound_missing: false,
             effects: Vec::new(),
@@ -668,6 +720,7 @@ impl SidebarSmartFolder {
             id: node.folder.smart_folder_id.clone(),
             parent_id: node.folder.parent_id.clone(),
             name: node.folder.name.clone(),
+            filter: node.folder.filter.clone(),
             children: node.children.iter().map(Self::from_tree_node).collect(),
         }
     }
@@ -873,93 +926,9 @@ pub(super) fn reduce_message(model: &mut super::ShellViewModel, message: super::
         SidebarMessage::SidebarPlaylistPlayersLoaded { repo_id, result } => {
             model.sidebar.apply_playlist_players(&repo_id, result);
         }
+        SidebarMessage::Gap(message) => gap::reduce(model, message),
     }
     None
-}
-
-impl super::ShellViewModel {
-    pub(super) fn navigation_locked(&self) -> bool {
-        self.workspace.main_region() == super::workspace::MainRegion::MissingRepository
-            || self.workspace.active_repository().is_some_and(|repository| repository.status == "missing")
-    }
-
-    /// 按当前活动仓库重新绑定侧栏。缺失和空仓库只清空，不发请求。
-    pub(super) fn bind_sidebar_repository(&mut self) {
-        let missing = self.navigation_locked();
-        let repo_id = self.workspace.active_repo_id.clone();
-        self.sidebar.bind_repository(repo_id.as_deref(), missing);
-    }
-
-    pub(super) fn leave_settings_page(&mut self) {
-        if matches!(self.page, super::ShellPage::Settings | super::ShellPage::SettingsError) {
-            self.page = super::ShellPage::FileList;
-        }
-    }
-
-    pub(super) fn apply_shortcut(&mut self, id: ShortcutId) {
-        let locked = self.navigation_locked();
-        if self.sidebar.select_shortcut(&mut self.workspace, id, locked) {
-            self.leave_settings_page();
-            self.detail = if self.workspace.panel == WorkspacePanel::Trash {
-                "正在读取回收站…".into()
-            } else {
-                format!("当前分类 {}", id.label())
-            };
-        }
-    }
-
-    pub(super) fn apply_quick_access(&mut self, shortcut_id: String) {
-        let locked = self.navigation_locked();
-        if self.sidebar.open_quick_access(&mut self.workspace, &shortcut_id, locked) {
-            self.leave_settings_page();
-            self.selected_path = self.sidebar.selected_path.clone();
-            self.current_directory = self.sidebar.current_directory.clone();
-            self.detail = self.sidebar.selected_path.clone().unwrap_or_else(|| self.current_directory.clone());
-        }
-    }
-
-    pub(super) fn apply_open_folder(&mut self, path: String) {
-        let locked = self.navigation_locked();
-        if self.sidebar.open_folder(&mut self.workspace, &path, locked) {
-            self.leave_settings_page();
-            self.current_directory = self.sidebar.current_directory.clone();
-            self.detail = format!("正在读取目录 {path}…");
-        }
-    }
-
-    pub(super) fn apply_smart_folder(&mut self, smart_folder_id: String) {
-        let locked = self.navigation_locked();
-        if self.sidebar.select_smart_folder(&mut self.workspace, &smart_folder_id, locked) {
-            self.leave_settings_page();
-            self.detail = format!("正在查询智能文件夹 {smart_folder_id}…");
-        }
-    }
-
-    pub(super) fn apply_playlist(&mut self, playlist_id: String) {
-        if self.sidebar.select_playlist(&mut self.workspace, &playlist_id) {
-            self.leave_settings_page();
-            self.selected_playlist_id = Some(playlist_id.clone());
-            self.detail = format!("正在读取播放集 {playlist_id}…");
-        }
-    }
-
-    pub(super) fn apply_snapshot_sidebar(&mut self, snapshot: &crate::backend::services::repository::RepositorySnapshot) {
-        self.bind_sidebar_repository();
-        let assets = snapshot.assets.iter().map(|asset| ShortcutAsset {
-            path: asset.path.clone(),
-            untagged: asset.tags.is_empty(),
-            accessed: asset.last_accessed_at.is_some(),
-            deleted: asset.status == "deleted",
-        }).collect::<Vec<_>>();
-        let quick_access = snapshot.quick_access.iter().map(|shortcut| SidebarShortcut {
-            id: shortcut.shortcut_id.clone(),
-            label: shortcut.label.clone(),
-            target_kind: shortcut.target_kind.clone(),
-            target_path: shortcut.target_path.clone(),
-            target_id: shortcut.target_id.clone(),
-        }).collect();
-        self.sidebar.apply_snapshot(&assets, snapshot.overview.trash_count, quick_access);
-    }
 }
 
 #[cfg(test)]

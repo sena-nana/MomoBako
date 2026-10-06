@@ -25,6 +25,11 @@ pub fn dispatch_player_effects(app: &mut MomoBakoApplication, context: &RuntimeP
             PlayerEffect::AddByPaths(request) => dispatch_add_paths(app, context, request),
             PlayerEffect::Reorder(request) => dispatch_reorder(app, context, request),
             PlayerEffect::Download(request) => dispatch_download(app, context, request),
+            PlayerEffect::CancelDownload { task_id } => {
+                if app.services.as_ref().is_none_or(|services| !services.tasks.cancel(&task_id)) {
+                    eprintln!("Nana 取消下载没有找到任务：{task_id}");
+                }
+            }
             PlayerEffect::RestoreDetail { repo_id, playlist_id } => dispatch_restore(app, context, repo_id, playlist_id),
         }
     }

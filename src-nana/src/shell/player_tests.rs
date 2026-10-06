@@ -716,6 +716,13 @@ fn download_applies_returned_events_and_ignores_other_playlists() {
     assert_eq!(model.player.activity, "下载失败");
     send(&mut model, PlayerMessage::CancelDownload);
     assert!(model.player.activity.contains("还没有可取消的句柄"));
+    send(&mut model, PlayerMessage::StartDownload(download_request(7)));
+    send(&mut model, PlayerMessage::DownloadProgress(serde_json::from_value(progress(7, "track", 4, 1)).expect("进度")));
+    assert!(model.player.activity.contains("正在下载 1 / 4，失败"));
+    send(&mut model, PlayerMessage::NoteDownloadTask("task-9".into()));
+    send(&mut model, PlayerMessage::CancelDownload);
+    assert_eq!(model.player.activity, "正在取消下载…");
+    assert!(matches!(model.player.take_effects().pop(), Some(PlayerEffect::CancelDownload { task_id }) if task_id == "task-9"));
 }
 
 #[test]

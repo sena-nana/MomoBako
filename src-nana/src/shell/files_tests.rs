@@ -472,6 +472,15 @@ fn protocol_reload_allows_category_and_refuses_smart_folder() {
 }
 
 #[test]
+fn thumbnail_prefetch_waits_for_the_vue_idle_gap() {
+    let mut state = FilesState::default();
+    state.schedule_thumbnail_prefetch(true, 0);
+    assert!(!state.poll_thumbnail_prefetch(419, &["a.png".into()]));
+    assert!(state.poll_thumbnail_prefetch(420, &["a.png".into()]));
+    assert!(matches!(state.take_effects().as_slice(), [FilesEffect::DecodeThumbnails { paths }] if paths == &["a.png".to_string()]));
+}
+
+#[test]
 fn copy_and_move_submit_the_stored_sources() {
     let mut state = FilesState::default();
     let ctx = writable();
@@ -481,6 +490,8 @@ fn copy_and_move_submit_the_stored_sources() {
     assert!(reduce_open(&mut state, &ctx, FileDialog::Copy));
     state.reduce(&ctx, FilesMessage::DraftChanged("album\\nested".into()));
     assert!(submit_for(&mut state, &ctx));
+    assert_eq!(state.operation.as_ref().map(|item| item.value), Some(32.0));
+    assert_eq!(state.operation.as_ref().map(|item| item.detail.as_str()), Some("创建硬链接或复制文件"));
     assert!(matches!(
         state.take_effects().as_slice(),
         [FilesEffect::Copy { sources, parent: Some(parent), .. }]

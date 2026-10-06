@@ -91,12 +91,14 @@ pub fn sidebar_sections(model: &ShellViewModel) -> impl IntoView + use<'_> {
     let create_locked = locked || model.workspace.active_repo_id.is_none() || model.playlist_players.is_empty();
     let playlist_count = model.sidebar.playlists.len();
     let playlists_open = model.sidebar.playlists_expanded;
+    if model.sidebar.playlists_visible(locked) {
     sections.push(playlist_group(
         playlist_count,
         playlists_open,
         section_tool(PLUS, "新建播放集", "playlist-create", create_locked, || ShellMessage::OpenPlaylistDialog),
         playlist_body(model, locked).into_any(),
     ));
+    }
     widget(Stack::fill_column(10.0)).children(sections)
 }
 
@@ -172,6 +174,31 @@ pub fn repository_popover(model: &ShellViewModel) -> Option<impl IntoView + use<
     )))
 }
 
+/// 侧栏里的文件夹新建或重命名。提交后走文件服务。
+pub fn folder_dialog(model: &ShellViewModel) -> Option<AnyView> {
+    let dialog = &model.sidebar.folder_dialog;
+    if !dialog.open {
+        return None;
+    }
+    let value = dialog.value.clone();
+    let title = dialog.title();
+    Some(
+        widget(Dialog::new(title))
+            .body(widget(TextInput::new(value).label(if dialog.rename { "新名称" } else { "文件夹名称" })).on_cx(|_, event: &TextChanged, cx| {
+                cx.dispatch_program(sidebar_message(SidebarMessage::Gap(super::sidebar::GapMessage::SetFolderValue(event.value.to_string()))));
+            }))
+            .footer(widget(Stack::row(8.0)).children((
+                button("取消").key("folder-dialog-cancel").on_cx(|_, _: &Activate, cx| {
+                    cx.dispatch_program(sidebar_message(SidebarMessage::Gap(super::sidebar::GapMessage::CloseFolderDialog)));
+                }),
+                button(if dialog.rename { "保存" } else { "创建" }).key("folder-dialog-submit").on_cx(|_, _: &Activate, cx| {
+                    cx.dispatch_program(sidebar_message(SidebarMessage::Gap(super::sidebar::GapMessage::SubmitFolderDialog)));
+                }),
+            )))
+            .into_any(),
+    )
+}
+
 /// 新建智能文件夹。名称必填；筛选留空时创建的是不带条件的文件夹。
 pub fn smart_folder_dialog(model: &ShellViewModel) -> Option<AnyView> {
     let draft = &model.sidebar.smart_draft;
@@ -230,13 +257,13 @@ pub fn smart_folder_dialog(model: &ShellViewModel) -> Option<AnyView> {
         body.push(error);
     }
     Some(
-        widget(Dialog::new("新建智能文件夹"))
+        widget(Dialog::new(model.sidebar.smart_dialog_title()))
             .body(widget(Stack::column(8.0)).children(body))
             .footer(widget(Stack::row(8.0)).children((
                 button("取消").key("smart-dialog-cancel").disabled(busy).on_cx(|_, _: &Activate, cx| {
                     cx.dispatch_program(sidebar_message(SidebarMessage::CloseSmartFolderDialog));
                 }),
-                button(if busy { "正在创建…" } else { "创建" }).key("smart-create-submit").disabled(blocked).on_cx(|_, _: &Activate, cx| {
+                button(if busy { "正在保存…" } else if model.sidebar.smart_draft.mode_edit { "保存" } else { "创建" }).key("smart-create-submit").disabled(blocked).on_cx(|_, _: &Activate, cx| {
                     cx.dispatch_program(sidebar_message(SidebarMessage::SubmitSmartFolder));
                 }),
             )))

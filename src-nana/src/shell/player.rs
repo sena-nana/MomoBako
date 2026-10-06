@@ -115,6 +115,8 @@ pub enum PlayerMessage {
     StartDownload(DownloaderPlaylistRequest),
     DownloadCompleted(Result<(serde_json::Value, Vec<serde_json::Value>), String>),
     CancelDownload,
+    NoteDownloadTask(String),
+    DownloadProgress(DownloaderPlaylistProgressEvent),
     Reorder { source: String, before: Option<String> },
     OpenPreview,
     RestoreDetail(Result<PlaylistDetail, String>),
@@ -130,6 +132,7 @@ pub enum PlayerEffect {
     AddByPaths(PlaylistItemsByPathsAddRequest),
     Reorder(PlaylistItemsOrderRequest),
     Download(DownloaderPlaylistRequest),
+    CancelDownload { task_id: String },
     RestoreDetail { repo_id: String, playlist_id: String },
 }
 
@@ -157,6 +160,7 @@ pub struct PlayerState {
     pub listed: Option<PlaylistDetail>,
     pub download: DownloadProgress,
     download_playlist_id: Option<i64>,
+    download_task_id: Option<String>,
     transient_seq: u64,
     restore_playlist_id: Option<String>,
     stored: BTreeMap<String, StoredSession>,
@@ -188,6 +192,7 @@ impl Default for PlayerState {
             listed: None,
             download: DownloadProgress { phase: "idle".into(), ..DownloadProgress::default() },
             download_playlist_id: None,
+            download_task_id: None,
             transient_seq: 0,
             restore_playlist_id: None,
             stored: BTreeMap::new(),
@@ -261,6 +266,10 @@ impl PlayerState {
                 Some(MembershipAction { playlist_id, label, checked, toggle })
             })
             .collect()
+    }
+
+    pub fn download_indeterminate(&self) -> bool {
+        self.download.phase == "submitting" && self.download.total == 0
     }
 
     pub fn download_text(&self) -> String {

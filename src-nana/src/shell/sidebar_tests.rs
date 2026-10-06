@@ -130,10 +130,12 @@ fn smart_folder_query_ignores_stale_results_and_expands_ancestors() {
         id: "root".into(),
         parent_id: None,
         name: "根".into(),
+        filter: Default::default(),
         children: vec![SidebarSmartFolder {
             id: "child".into(),
             parent_id: Some("root".into()),
             name: "子".into(),
+            filter: Default::default(),
             children: Vec::new(),
         }],
     }]));
@@ -285,10 +287,12 @@ fn smart_folder_create_requires_a_name_and_replaces_the_tree() {
             id: "parent".into(),
             parent_id: None,
             name: "父级".into(),
+            filter: Default::default(),
             children: vec![SidebarSmartFolder {
                 id: "child".into(),
                 parent_id: Some("parent".into()),
                 name: "高评分".into(),
+                filter: Default::default(),
                 children: Vec::new(),
             }],
         }]),

@@ -663,6 +663,10 @@ impl WorkspaceState {
         }
     }
 
+    pub fn delete_dialog_open(&self) -> bool {
+        self.dialogs.iter().any(|dialog| matches!(dialog, WorkspaceDialog::Delete(_)))
+    }
+
     pub fn open_delete_dialog(&mut self) {
         let Some(repo_id) = self.active_repo_id.clone() else {
             return;

@@ -11,6 +11,8 @@ use crate::backend::services::repository::{
 use crate::settings::ApplicationSettings;
 
 mod files;
+mod motion;
+pub use motion::note_sidebar_resize;
 mod thumbs;
 mod files_view;
 mod inspect;
@@ -30,7 +32,7 @@ pub use inspect::{
     DateBound, InspectEffect, InspectMessage, NumberBound, SearchRequestDraft, SearchRow, prepare_text,
 };
 pub use sidebar::{
-    SidebarEffect, SidebarFolder, SidebarMessage, SidebarPlaylist, SidebarSmartFolder, ShortcutId,
+    FolderMutation, SidebarEffect, SidebarFolder, SidebarMessage, SidebarPlaylist, SidebarSmartFolder, ShortcutId,
 };
 pub use workspace::{
     sidebar_prefs_path, DeleteMode, LibraryCategory, MainRegion, StartupStatus, WorkspaceEffect,
@@ -301,6 +303,7 @@ pub struct ShellViewModel {
     pub player: player::PlayerState,
     pub admin: admin::AdminState,
     pub input: input::InputState,
+    pub motion: motion::MotionState,
 }
 
 impl Default for ShellViewModel {
@@ -354,6 +357,7 @@ impl Default for ShellViewModel {
             player: player::PlayerState::default(),
             admin: admin::AdminState::default(),
             input: input::InputState::default(),
+            motion: motion::MotionState::default(),
         }
     }
 }
@@ -457,6 +461,54 @@ impl ShellViewModel {
 
     /// 在 ViewModel 边界集中处理导航和页面动作，避免控件闭包直接修改领域状态。
     pub fn reduce(&mut self, message: ShellMessage) {
+        self.reduce_inner(message);
+        self.flush_folder_mutations();
+        self.follow_motion();
+    }
+
+    fn flush_folder_mutations(&mut self) {
+        let Some(mutation) = self.sidebar.take_folder_mutation() else {
+            return;
+        };
+        let effect = match mutation {
+            sidebar::FolderMutation::Create { repo_id, parent, name } => files::FilesEffect::CreateDirectory {
+                repo_id,
+                parent: (!parent.is_empty()).then_some(parent),
+                name,
+            },
+            sidebar::FolderMutation::Rename { repo_id, path, name } => {
+                files::FilesEffect::Rename { repo_id, path, new_name: name }
+            }
+            sidebar::FolderMutation::Delete { repo_id, path } => files::FilesEffect::Delete {
+                repo_id,
+                paths: vec![path],
+                mode: None,
+            },
+        };
+        self.files.enqueue(effect);
+    }
+
+    fn follow_motion(&mut self) {
+        let modal_open = self.files.dialog_open()
+            || self.workspace.delete_dialog_open()
+            || self.playlist_dialog_open
+            || self.sidebar.smart_draft.open
+            || self.input.pending_close;
+        let panel_open = self.sidebar.popover != sidebar::PopoverMode::Closed || self.admin.popover_open;
+        let startup = f32::from(self.workspace.startup.percent);
+        let operation = self.files.operation_percent();
+        let spinner = self.sidebar.tree_loading || self.sidebar.submitting || self.sidebar.smart_draft.busy || self.files.mutating;
+        self.motion.set_modal_open(modal_open);
+        self.motion.set_panel_open(panel_open);
+        self.motion.set_startup_percent(startup);
+        self.motion.set_operation_percent(operation);
+        self.motion.set_spinner(spinner);
+        self.motion.set_pulse(self.files.operation_indeterminate());
+        self.motion.set_sweep(self.player.download_indeterminate());
+        self.motion.set_sidebar_collapsed(self.workspace.sidebar_collapsed, self.workspace.sidebar_width);
+    }
+
+    fn reduce_inner(&mut self, message: ShellMessage) {
         let Some(message) = input::reduce_message(self, message) else {
             return;
         };

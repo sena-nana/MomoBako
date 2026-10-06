@@ -78,6 +78,9 @@ fn files_status(model: &ShellViewModel) -> AnyView {
     if !files.activity.is_empty() {
         rows.push(text(files.activity.clone()).key("file-activity").into_any());
     }
+    if let Some(label) = files.operation_label() {
+        rows.push(text(label).key("file-operation").into_any());
+    }
     if files.visible_rows(&ctx).is_empty() && !files.loading {
         rows.push(text(empty_copy(&ctx)).key("file-empty").into_any());
     }

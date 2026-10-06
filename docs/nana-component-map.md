@@ -39,7 +39,7 @@
 | Vue 插件组件 | `NativePluginContribution`，否则 `UpgradeRequired` |
 | 窗口、对话框、外部打开 | `host_api` 请求 |
 
-当前 `shell/render.rs` 仍只用 `Stack`、`button`、`text`、`TextInput` 和 `GpuTextureView`。上表是迁移目标，不是已经接上的控件树。
+非验收场景的实况壳层已经挂上 `SidebarFrame`、`TreeView`、`Dialog`、`Thumbnail`、虚拟列表、`MediaTransportBar`、`NativeMarkdown`、`SelectableRichText`、`ReorderList`、`Progress` 和 `Workspace`。15 个旧验收场景仍保留原来的按钮列表。
 
 ## 主题
 

@@ -274,6 +274,14 @@ pub enum FilesMessage {
     NoteError(String),
 }
 
+/// 文件操作进度。宽度过渡由壳层动效时钟绘制。
+#[derive(Clone, Debug, PartialEq)]
+pub(super) struct FileOperation {
+    pub value: f32,
+    pub indeterminate: bool,
+    pub detail: String,
+}
+
 /// 目录条目、选择、对话框和进行中的变更。
 #[derive(Clone, Debug, Default)]
 pub struct FilesState {
@@ -294,6 +302,8 @@ pub struct FilesState {
     pub(super) anchor: Option<String>,
     pub(super) selection_mode: SelectionMode,
     pub(super) dialog: FileDialog,
+    pub(super) operation: Option<FileOperation>,
+    prefetch_due_ms: Option<u64>,
     pub(super) name_draft: String,
     pub(super) target_draft: String,
     pub(super) import_draft: String,
@@ -307,6 +317,43 @@ pub struct FilesState {
 }
 
 impl FilesState {
+    pub(super) fn dialog_open(&self) -> bool {
+        !matches!(self.dialog, FileDialog::Closed)
+    }
+
+    pub(super) fn operation_percent(&self) -> Option<f32> {
+        self.operation.as_ref().map(|operation| operation.value)
+    }
+
+    pub fn operation_label(&self) -> Option<String> {
+        self.operation.as_ref().map(|item| format!("{} · {}%", item.detail, item.value as i32))
+    }
+
+    pub(super) fn operation_indeterminate(&self) -> bool {
+        self.operation.as_ref().is_some_and(|operation| operation.indeterminate)
+    }
+
+    /// 虚拟列表还有下一页时，空闲 `PREFETCH_IDLE_MS` 后再解码缩略图。
+    pub fn schedule_thumbnail_prefetch(&mut self, has_more: bool, now_ms: u64) {
+        self.prefetch_due_ms = has_more.then_some(now_ms.saturating_add(super::motion::PREFETCH_IDLE_MS));
+    }
+
+    pub fn poll_thumbnail_prefetch(&mut self, now_ms: u64, paths: &[String]) -> bool {
+        if self.prefetch_due_ms.is_some_and(|due| now_ms >= due) {
+            self.prefetch_due_ms = None;
+            if !paths.is_empty() {
+                self.effects.push(FilesEffect::DecodeThumbnails { paths: paths.to_vec() });
+            }
+            return true;
+        }
+        false
+    }
+
+    pub fn enqueue(&mut self, effect: FilesEffect) {
+        self.mutating = true;
+        self.effects.push(effect);
+    }
+
     pub fn take_effects(&mut self) -> Vec<FilesEffect> {
         std::mem::take(&mut self.effects)
     }
@@ -742,6 +789,7 @@ impl FilesState {
         self.loading_more = false;
         self.pending = None;
         self.activity.clear();
+        self.operation = None;
     }
 
     fn activate(&mut self, ctx: &FileContext, path: &str) -> bool {
