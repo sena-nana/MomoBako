@@ -117,10 +117,7 @@ pub(crate) fn preview_media_session(repo_id: &str, bytes: &[u8]) -> Result<Playb
     }
     match crate::shell::audio_decode::decode_compressed(bytes) {
         Ok(decoded) => Ok(paused_audio_session(repo_id, decoded.duration_ms)),
-        Err(error) => {
-            eprintln!("Nana 音视频预览不能解码：{error}");
-            Err("没有原生解码器".into())
-        }
+        Err(_) => Err("没有原生解码器".into()),
     }
 }
 

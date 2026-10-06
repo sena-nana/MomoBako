@@ -221,11 +221,8 @@ pub fn source_login_plugin_ids(plugins: &[PluginManifest]) -> Vec<String> {
         .collect()
 }
 
-/// 设置页顶部的来源登录卡片。摘要和按钮仍是原来的那一组；一个都没有时不占位。
+/// 设置页顶部的来源登录卡片。一个都没有时不占位。
 pub fn source_login_card(plugins: &[PluginManifest]) -> Option<AnyView> {
-    if source_login_plugin_ids(plugins).is_empty() {
-        return None;
-    }
     let mut rows = Vec::new();
     for plugin in plugins {
         let Some(buttons) = source_auth_row(plugin) else {
@@ -237,7 +234,6 @@ pub fn source_login_card(plugins: &[PluginManifest]) -> Option<AnyView> {
         rows.push(buttons);
     }
     if rows.is_empty() {
-        eprintln!("Nana 来源登录卡片没有可显示的内容");
         return None;
     }
     Some(super::super::workbench::section_card("来源登录", rows))
