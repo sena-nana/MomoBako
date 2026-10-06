@@ -76,7 +76,9 @@ pub(super) fn reduce(model: &mut super::super::ShellViewModel, message: GapMessa
     let repo_id = model.workspace.active_repo_id.clone();
     match message {
         GapMessage::FolderHover { path, now_ms, dragging } => {
-            model.sidebar.hover_folder(path, now_ms, dragging, locked);
+            if let Some(path) = model.sidebar.hover_folder(path, now_ms, dragging, locked) {
+                model.apply_open_folder(path);
+            }
         }
         GapMessage::FolderLeave(path) => model.sidebar.leave_folder(&path),
         GapMessage::OpenFolderCreate(parent) => model.sidebar.open_folder_create(parent, locked),
@@ -162,23 +164,22 @@ impl SidebarState {
         !self.smart_delete_id.is_empty()
     }
 
-    fn hover_folder(&mut self, path: String, now_ms: u64, dragging: bool, locked: bool) {
+    /// 同一路径停满 450ms 时返回该路径，由 `apply_open_folder` 打开。离开后再进来重新计时。
+    fn hover_folder(&mut self, path: String, now_ms: u64, dragging: bool, locked: bool) -> Option<String> {
         if locked || !dragging || path.is_empty() {
-            return;
+            return None;
         }
         if self.hover_folder.as_deref() != Some(path.as_str()) {
-            self.hover_folder = Some(path.clone());
+            self.hover_folder = Some(path);
             self.hover_since_ms = Some(now_ms);
-            return;
+            return None;
         }
         let since = self.hover_since_ms.unwrap_or(now_ms);
         if now_ms.saturating_sub(since) >= super::super::motion::FOLDER_HOVER_MS {
-            if !self.expanded_folders.iter().any(|item| item == &path) {
-                self.expanded_folders.push(path.clone());
-            }
-            self.current_directory = path;
             self.hover_since_ms = None;
+            return Some(path);
         }
+        None
     }
 
     fn leave_folder(&mut self, path: &str) {
@@ -446,12 +447,17 @@ mod tests {
     #[test]
     fn hover_opens_after_450ms_and_playlists_hide_when_the_repository_is_missing() {
         let mut model = shell();
+        let _ = model.sidebar.take_effects();
         gap(&mut model, GapMessage::FolderHover { path: "photos".into(), now_ms: 0, dragging: true });
         gap(&mut model, GapMessage::FolderHover { path: "photos".into(), now_ms: 449, dragging: true });
         assert_eq!(model.sidebar.current_directory, "");
+        assert_eq!(model.current_directory, "");
+        assert!(!model.sidebar.take_effects().iter().any(|effect| matches!(effect, crate::shell::SidebarEffect::Browse { path, .. } if path == "photos")));
         gap(&mut model, GapMessage::FolderHover { path: "photos".into(), now_ms: 450, dragging: true });
         assert_eq!(model.sidebar.current_directory, "photos");
+        assert_eq!(model.current_directory, "photos");
         assert!(model.sidebar.expanded_folders.iter().any(|path| path == "photos"));
+        assert!(model.sidebar.take_effects().iter().any(|effect| matches!(effect, crate::shell::SidebarEffect::Browse { path, .. } if path == "photos")));
         assert!(model.sidebar.playlists_visible(false));
         model.sidebar.bind_repository(Some("repo"), true);
         assert!(!model.sidebar.playlists_visible(true));

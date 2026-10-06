@@ -75,13 +75,16 @@ describe("nana parity sidebar", () => {
   it("live_folder_hover_opens_after_the_idle_clock_reaches_450ms", () => {
     expect(folderUi).toContain("ensureFolderExpanded(path);");
     expect(folderUi).toContain("openFolder(path);");
+    expect(folderUi).toContain("loadFileBrowserForDirectory(path, { silent: true });");
+    expect(folderUi).toContain("clearFolderHoverTimer();");
     expect(folderUi).toContain("}, 450);");
     const motion = read("src-nana/src/shell/motion.rs");
     expect(motion).toContain("pub const FOLDER_HOVER_MS: u64 = 450;");
     const live = read("src-nana/src/shell/pointer_gesture.rs");
-    expect(live).toContain('assert_eq!(model.sidebar.current_directory, "photos");');
-    expect(live).toContain("model.sidebar.hover_now() >= 450");
-    expect(live).toContain("model.sidebar.hover_now() != model.motion.now_ms()");
+    expect(live).toContain('assert_eq!(model.current_directory, "photos");');
+    expect(live).toContain('tree_shows_directory(&window, "photos")');
+    expect(live).toContain("悬停打开要发出目录浏览");
+    expect(live).toContain("离开后再进入不应立刻打开");
   });
 
   it("live_folder_button_escape_and_prefetch_use_the_shell_path", () => {

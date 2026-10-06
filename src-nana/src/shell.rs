@@ -307,6 +307,8 @@ pub struct ShellViewModel {
     pub admin: admin::AdminState,
     pub input: input::InputState,
     pub motion: motion::MotionState,
+    /// 对话框、弹层或打开文件夹之后，手势松开时要重建树。
+    pub surface_dirty: bool,
 }
 
 impl Default for ShellViewModel {
@@ -361,6 +363,7 @@ impl Default for ShellViewModel {
             admin: admin::AdminState::default(),
             input: input::InputState::default(),
             motion: motion::MotionState::default(),
+            surface_dirty: false,
         }
     }
 }
@@ -501,8 +504,9 @@ impl ShellViewModel {
         let startup = f32::from(self.workspace.startup.percent);
         let operation = self.files.operation_percent();
         let spinner = self.sidebar.tree_loading || self.sidebar.submitting || self.sidebar.smart_draft.busy || self.files.mutating;
-        self.motion.set_modal_open(modal_open);
-        self.motion.set_panel_open(panel_open);
+        if self.motion.set_modal_open(modal_open) || self.motion.set_panel_open(panel_open) {
+            self.surface_dirty = true;
+        }
         self.motion.set_startup_percent(startup);
         self.motion.set_operation_percent(operation);
         self.motion.set_spinner(spinner);
