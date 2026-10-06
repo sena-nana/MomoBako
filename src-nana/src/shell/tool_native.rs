@@ -1,7 +1,8 @@
-//! 三个内置工具页的原生表面。
+//! 三个内置工具页的原生表面，以及来源登录按钮。
 //!
 //! 文件导入和 Eagle 导入只派发文件状态机已有的对话框消息。
 //! API Playground 只列出已加载的设计快照，不发请求，也不调用插件。
+//! 来源登录按钮按认证声明派发插件调用，不解析二维码。
 
 use nana_ui::runtime::view::{text, widget, AnyView, IntoView};
 use nana_ui::runtime::{Activate, Button, Stack};
@@ -9,8 +10,8 @@ use nana_ui::runtime::{Activate, Button, Stack};
 use super::super::files::{FileContext, FileDialog, FilesMessage};
 use super::super::{ShellMessage, ShellViewModel};
 use super::support::{TOOL_API_PLAYGROUND, TOOL_EAGLE_IMPORTER, TOOL_FILE_MANAGER};
-use super::ToolPageEntry;
-use crate::backend::services::repository::ApiDesignSnapshot;
+use super::{AdminMessage, SourceAuthCall, ToolPageEntry};
+use crate::backend::services::repository::{ApiDesignSnapshot, PluginManifest};
 
 /// 工具页上的一个导入按钮。禁用时不派发消息。
 pub struct ImportAction {
@@ -186,6 +187,51 @@ fn action_row(model: &ShellViewModel, page_id: &str) -> AnyView {
         })
         .collect::<Vec<_>>();
     widget(Stack::row(8.0).wrap(true)).children(buttons).into_any()
+}
+
+/// 来源登录的一个按钮。没有对应方法名时不出现。
+pub struct SourceAuthAction {
+    pub id: &'static str,
+    pub label: &'static str,
+    pub slot: SourceAuthCall,
+}
+
+const SOURCE_AUTH_BUTTONS: &[(&str, &str, &str, SourceAuthCall)] = &[
+    ("create", "创建登录会话", "createSessionMethod", SourceAuthCall::CreateSession),
+    ("status", "查询登录状态", "statusMethod", SourceAuthCall::Status),
+    ("clear", "退出登录", "clearMethod", SourceAuthCall::Clear),
+];
+
+/// 当前插件认证对象里实际声明了的登录按钮。
+pub fn source_auth_actions(plugin: &PluginManifest) -> Vec<SourceAuthAction> {
+    SOURCE_AUTH_BUTTONS
+        .iter()
+        .filter(|(_, _, key, _)| super::support::named_auth_method(plugin, key).is_some())
+        .map(|(id, label, _, slot)| SourceAuthAction { id, label, slot: *slot })
+        .collect()
+}
+
+/// 登录按钮行。一个方法都没有时不占位。
+pub fn source_auth_row(plugin: &PluginManifest) -> Option<AnyView> {
+    let actions = source_auth_actions(plugin);
+    if actions.is_empty() {
+        return None;
+    }
+    let plugin_id = plugin.plugin_id.clone();
+    let buttons = actions
+        .into_iter()
+        .map(|action| {
+            let id = plugin_id.clone();
+            let slot = action.slot;
+            widget(Button::new(action.label))
+                .key(format!("admin-source-auth-{}-{plugin_id}", action.id))
+                .on_cx(move |_, _: &Activate, cx| {
+                    cx.dispatch_program(ShellMessage::Admin(AdminMessage::CallSourceAuth { plugin_id: id.clone(), slot }));
+                })
+                .into_any()
+        })
+        .collect::<Vec<_>>();
+    Some(widget(Stack::row(8.0).wrap(true)).children(buttons).key(format!("admin-source-auth-{plugin_id}")).into_any())
 }
 
 fn api_page(model: &ShellViewModel, page: &ToolPageEntry) -> Vec<AnyView> {

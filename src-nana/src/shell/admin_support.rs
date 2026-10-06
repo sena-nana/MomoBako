@@ -329,7 +329,7 @@ pub fn settings_upgrade_lines(plugin: &PluginManifest, marked_vue: bool) -> Vec<
     lines
 }
 
-/// 认证声明同时有 kind，以及创建会话或状态方法时，拼一行摘要。不发请求。
+/// 认证声明同时有 kind，以及创建会话或状态方法时，拼一行摘要。
 pub fn source_account_summary(plugin: &PluginManifest) -> Option<String> {
     let auth = plugin.contributes.get("source").and_then(|item| item.get("authentication"))?;
     if auth.is_null() {
@@ -349,6 +349,28 @@ pub fn source_account_summary(plugin: &PluginManifest) -> Option<String> {
         parts.push(format!("查询状态 {method}"));
     }
     Some(format!("来源账号 {kind}：{}。", parts.join("，")))
+}
+
+/// 读取认证对象上的方法名。空白不算有方法名。
+pub fn named_auth_method(plugin: &PluginManifest, key: &str) -> Option<String> {
+    let auth = plugin.contributes.get("source").and_then(|item| item.get("authentication"))?;
+    if auth.is_null() {
+        return None;
+    }
+    json_name(auth, key).map(str::to_string)
+}
+
+/// 登录调用成功后的提示。只附加字符串 message 和 status，不展开二维码。
+pub fn source_auth_called_message(method: &str, payload: &serde_json::Value) -> String {
+    let extras = ["message", "status"]
+        .into_iter()
+        .filter_map(|key| payload.get(key).and_then(|item| item.as_str()).map(str::trim).filter(|text| !text.is_empty()))
+        .collect::<Vec<_>>();
+    if extras.is_empty() {
+        format!("已调用 {method}。")
+    } else {
+        format!("已调用 {method}。{}", extras.join(" "))
+    }
 }
 
 fn json_name<'a>(value: &'a serde_json::Value, key: &str) -> Option<&'a str> {

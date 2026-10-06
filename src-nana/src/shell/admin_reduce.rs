@@ -7,7 +7,7 @@ use crate::backend::services::repository::{PluginConfigSnapshot, PluginManifest,
 
 use super::super::{ShellMessage, ShellPage, ShellViewModel, WorkspacePanel};
 use super::support::{self, FieldChange};
-use super::{AdminEffect, AdminMessage};
+use super::{AdminEffect, AdminMessage, SourceAuthCall};
 
 /// 处理实况管理消息，并吃掉原来写在壳层里的插件、日志、设置和任务分支。
 pub(crate) fn reduce_message(model: &mut ShellViewModel, message: ShellMessage) -> Option<ShellMessage> {
@@ -362,6 +362,8 @@ fn reduce_admin(model: &mut ShellViewModel, message: AdminMessage) {
                 model.admin.active_tool_page_id = Some(page_id);
             }
         }
+        AdminMessage::CallSourceAuth { plugin_id, slot } => queue_source_auth(model, &plugin_id, slot),
+        AdminMessage::SourceAuthFinished { method, result } => finish_source_auth(model, &method, result),
     }
 }
 
@@ -414,6 +416,47 @@ fn confirm_delete(model: &mut ShellViewModel) {
     model.admin.remember_outcome("插件已删除。", "插件删除失败。");
     model.detail = format!("正在删除插件 {plugin_id}…");
     model.admin.effects.push(AdminEffect::DeletePlugin(plugin_id));
+}
+
+fn queue_source_auth(model: &mut ShellViewModel, plugin_id: &str, slot: SourceAuthCall) {
+    let plugin_id = plugin_id.trim();
+    if plugin_id.is_empty() {
+        eprintln!("Nana 来源登录调用缺少插件");
+        return;
+    }
+    let Some(plugin) = model.admin.plugins.iter().find(|plugin| plugin.plugin_id == plugin_id) else {
+        eprintln!("Nana 来源登录调用缺少插件：{plugin_id}");
+        return;
+    };
+    let key = match slot {
+        SourceAuthCall::CreateSession => "createSessionMethod",
+        SourceAuthCall::Status => "statusMethod",
+        SourceAuthCall::Clear => "clearMethod",
+    };
+    let Some(method) = support::named_auth_method(plugin, key) else {
+        eprintln!("Nana 来源登录调用缺少方法名");
+        return;
+    };
+    model.admin.reset_action();
+    model.admin.effects.push(AdminEffect::CallPlugin {
+        plugin_id: plugin_id.to_string(),
+        method,
+        payload: serde_json::json!({}),
+    });
+}
+
+fn finish_source_auth(model: &mut ShellViewModel, method: &str, result: Result<serde_json::Value, String>) {
+    match result {
+        Ok(payload) => {
+            model.admin.action_error.clear();
+            model.admin.action_message = support::source_auth_called_message(method, &payload);
+        }
+        Err(error) => {
+            eprintln!("Nana 来源登录调用失败：{error}");
+            model.admin.action_message.clear();
+            model.admin.action_error = if error.is_empty() { "来源登录调用失败。".into() } else { error };
+        }
+    }
 }
 
 fn open_settings(model: &mut ShellViewModel, plugin_id: &str) {

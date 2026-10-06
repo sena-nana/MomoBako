@@ -454,6 +454,9 @@ fn plugin_entries(model: &ShellViewModel) -> Vec<AnyView> {
                 };
                 rows.push(text(line).key(key).into_any());
             }
+            if let Some(row) = super::tool_native::source_auth_row(plugin) {
+                rows.push(row);
+            }
             let toggle_id = plugin_id.clone();
             let enabled = plugin.enabled;
             rows.push(button(if enabled { "停用插件" } else { "启用插件" }).key(format!("admin-plugin-toggle-{plugin_id}")).on_cx(move |_, _: &Activate, cx| {

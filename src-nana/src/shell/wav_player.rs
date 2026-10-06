@@ -1,7 +1,8 @@
 //! 内置 WAV 播放贡献。
 //!
 //! 只解析标准 PCM（RIFF/WAVE、`fmt `、`data`，8-bit 或 16-bit，单声道或双声道）。
-//! 播放头和音量留在内存里。不调用 winmm、rodio 或任何输出设备，单元测试不会出声。
+//! 播放头和音量留在内存里。正式 Windows 构建在播放成功后用 winmm 异步出声。
+//! 测试构建不打开设备，单元测试不会出声。
 
 use std::cell::RefCell;
 use std::fs;
@@ -45,8 +46,12 @@ struct Cursor {
     channels: u16,
     bits_per_sample: u16,
     frame_count: u64,
-    /// PCM 负载。只留在进程里，不送给声卡。
+    /// 已解析的 PCM 负载。声卡只收由它拼出的完整 WAV，不收裸 PCM。
     pcm: Vec<u8>,
+    /// PlaySound `SND_MEMORY` 正在读的完整 WAV。停声返回后才能丢掉。
+    /// 测试构建不打开设备，因此不保留这块缓冲。
+    #[cfg(all(windows, not(test)))]
+    playback_wav: Vec<u8>,
     /// 播放头，单位是帧。
     frame: u64,
     volume: f32,
@@ -79,7 +84,7 @@ impl Default for WavPlayer {
 }
 
 impl WavPlayer {
-    /// 丢掉已装载的 PCM 和播放头。停止或换到其它解码器时调用。
+    /// 丢掉已装载的 PCM 和播放头，并停掉正在播放的声音。
     pub(super) fn clear(&mut self) {
         PlaybackMediaPlugin::dispose(self);
     }
@@ -127,13 +132,18 @@ impl PlaybackMediaPlugin for WavPlayer {
 
     fn play(&mut self) -> Result<(), String> {
         self.ensure_loaded("播放")?;
-        self.inner.borrow_mut().playing = true;
+        let mut cursor = self.inner.borrow_mut();
+        cursor.playing = true;
+        // 设备失败只记日志。会话表示用户要播放，不能因此返回 Err 变成 failed。
+        device::start(&mut cursor);
         Ok(())
     }
 
     fn pause(&mut self) -> Result<(), String> {
         self.ensure_loaded("暂停")?;
-        self.inner.borrow_mut().playing = false;
+        let mut cursor = self.inner.borrow_mut();
+        cursor.playing = false;
+        device::stop(&mut cursor);
         Ok(())
     }
 
@@ -147,17 +157,26 @@ impl PlaybackMediaPlugin for WavPlayer {
             position_ms.saturating_mul(rate) / 1000
         };
         cursor.frame = frame.min(cursor.frame_count);
+        // 跳转先停掉当前声音。只有仍在播放时才从新位置再开，暂停时不自动重开。
+        if cursor.playing {
+            device::start(&mut cursor);
+        } else {
+            device::stop(&mut cursor);
+        }
         Ok(())
     }
 
     fn set_volume(&mut self, volume: f32) -> Result<(), String> {
         self.ensure_loaded("音量")?;
+        // 记在游标里，下次 play 或播放中跳转时再缩放。拖动音量不重开，避免把声音拉回播放头。
         self.inner.borrow_mut().volume = volume;
         Ok(())
     }
 
     fn dispose(&mut self) {
-        *self.inner.borrow_mut() = Cursor::empty();
+        let mut cursor = self.inner.borrow_mut();
+        device::stop(&mut cursor);
+        *cursor = Cursor::empty();
     }
 }
 
@@ -181,6 +200,8 @@ impl Cursor {
             bits_per_sample: 0,
             frame_count: 0,
             pcm: Vec::new(),
+            #[cfg(all(windows, not(test)))]
+            playback_wav: Vec::new(),
             frame: 0,
             volume: 1.0,
             playing: false,
@@ -195,6 +216,8 @@ impl Cursor {
             bits_per_sample: parsed.bits_per_sample,
             frame_count: parsed.frame_count,
             pcm: parsed.pcm,
+            #[cfg(all(windows, not(test)))]
+            playback_wav: Vec::new(),
             frame: 0,
             volume: 1.0,
             playing: false,
@@ -354,4 +377,172 @@ fn parse_fmt(chunk: &[u8]) -> Result<FmtChunk, String> {
         block_align: u16::from_le_bytes([chunk[12], chunk[13]]),
         bits_per_sample: u16::from_le_bytes([chunk[14], chunk[15]]),
     })
+}
+
+/// 正式 Windows 构建用 winmm `PlaySoundW` 异步播放。测试构建不编译本模块，因此不打开设备。
+#[cfg(all(windows, not(test)))]
+mod device {
+    use super::Cursor;
+
+    /// 调用后立刻返回，不阻塞到播完。
+    const SND_ASYNC: u32 = 0x0001;
+    /// 找不到声音时不要播系统默认提示音。
+    const SND_NODEFAULT: u32 = 0x0002;
+    /// 参数是内存里的完整 WAV，不是文件路径。
+    const SND_MEMORY: u32 = 0x0004;
+
+    #[link(name = "winmm")]
+    unsafe extern "system" {
+        fn PlaySoundW(psz_sound: *const u16, module: *mut std::ffi::c_void, flags: u32) -> i32;
+    }
+
+    /// 从当前帧把剩余 PCM 打成带头 WAV 再异步播放。失败只记日志。
+    pub(super) fn start(cursor: &mut Cursor) {
+        let prepared = match headed_from(cursor) {
+            Ok(bytes) => bytes,
+            Err(error) => {
+                eprintln!("Nana WAV 播放失败：{error}");
+                stop(cursor);
+                return;
+            }
+        };
+        let Some(wav) = prepared else {
+            stop(cursor);
+            return;
+        };
+        // 先停掉上一声，返回后才能换掉它还在读的缓冲。
+        stop(cursor);
+        cursor.playback_wav = wav;
+        let ok = unsafe {
+            // SND_MEMORY 把指针当字节地址用。缓冲留在游标里，直到 stop 返回。
+            PlaySoundW(
+                cursor.playback_wav.as_ptr().cast(),
+                std::ptr::null_mut(),
+                SND_ASYNC | SND_NODEFAULT | SND_MEMORY,
+            )
+        };
+        if ok == 0 {
+            cursor.playback_wav.clear();
+            eprintln!("Nana WAV 播放失败：PlaySoundW 未能播放，会话仍保持播放意图");
+        }
+    }
+
+    /// 停声。`PlaySoundW` 的空指针会停掉当前波形；返回后才能释放 WAV 缓冲。
+    pub(super) fn stop(cursor: &mut Cursor) {
+        if cursor.playback_wav.is_empty() {
+            return;
+        }
+        let ok = unsafe { PlaySoundW(std::ptr::null(), std::ptr::null_mut(), 0) };
+        cursor.playback_wav.clear();
+        if ok == 0 {
+            eprintln!("Nana WAV 停止失败：PlaySoundW 返回失败");
+        }
+    }
+
+    /// 没有剩余样本时返回 `Ok(None)`，这不是设备错误。
+    fn headed_from(cursor: &Cursor) -> Result<Option<Vec<u8>>, String> {
+        let frame_bytes = usize::from(cursor.channels) * usize::from(cursor.bits_per_sample / 8);
+        if frame_bytes == 0 || cursor.sample_rate == 0 {
+            return Err("WAV 帧长无效".into());
+        }
+        let frame = usize::try_from(cursor.frame).map_err(|_| "WAV 播放头超出地址空间")?;
+        let start = frame
+            .checked_mul(frame_bytes)
+            .ok_or("WAV 播放头超出地址空间")?;
+        if start >= cursor.pcm.len() {
+            return Ok(None);
+        }
+        let pcm = scale_pcm(&cursor.pcm[start..], cursor.bits_per_sample, cursor.volume)?;
+        Ok(Some(headed_wav(
+            cursor.sample_rate,
+            cursor.channels,
+            cursor.bits_per_sample,
+            &pcm,
+        )?))
+    }
+
+    fn scale_pcm(src: &[u8], bits: u16, volume: f32) -> Result<Vec<u8>, String> {
+        let volume = volume.clamp(0.0, 1.0);
+        if volume >= 1.0 {
+            return Ok(src.to_vec());
+        }
+        if bits == 8 {
+            return Ok(src
+                .iter()
+                .map(|sample| {
+                    let centered = f32::from(*sample) - 128.0;
+                    (centered * volume + 128.0).round().clamp(0.0, 255.0) as u8
+                })
+                .collect());
+        }
+        if bits != 16 {
+            return Err("只支持 8-bit 或 16-bit WAV".into());
+        }
+        let mut out = Vec::with_capacity(src.len());
+        for chunk in src.chunks_exact(2) {
+            let sample = i16::from_le_bytes([chunk[0], chunk[1]]);
+            let mixed = (f32::from(sample) * volume)
+                .round()
+                .clamp(i16::MIN as f32, i16::MAX as f32) as i16;
+            out.extend_from_slice(&mixed.to_le_bytes());
+        }
+        Ok(out)
+    }
+
+    fn headed_wav(
+        sample_rate: u32,
+        channels: u16,
+        bits: u16,
+        pcm: &[u8],
+    ) -> Result<Vec<u8>, String> {
+        let block_align = channels.saturating_mul(bits / 8);
+        if block_align == 0 {
+            return Err("WAV 帧长无效".into());
+        }
+        let data_len =
+            u32::try_from(pcm.len()).map_err(|_| "WAV 超过 PlaySound 可承载长度".to_string())?;
+        let byte_rate = sample_rate
+            .checked_mul(u32::from(block_align))
+            .ok_or("WAV 字节率溢出")?;
+        let pad = data_len % 2;
+        let riff_size = 36u32
+            .checked_add(data_len)
+            .and_then(|size| size.checked_add(pad))
+            .ok_or("WAV 超过 PlaySound 可承载长度")?;
+        let mut bytes = Vec::with_capacity(44 + pcm.len() + pad as usize);
+        bytes.extend_from_slice(b"RIFF");
+        bytes.extend_from_slice(&riff_size.to_le_bytes());
+        bytes.extend_from_slice(b"WAVE");
+        bytes.extend_from_slice(b"fmt ");
+        bytes.extend_from_slice(&16u32.to_le_bytes());
+        bytes.extend_from_slice(&1u16.to_le_bytes());
+        bytes.extend_from_slice(&channels.to_le_bytes());
+        bytes.extend_from_slice(&sample_rate.to_le_bytes());
+        bytes.extend_from_slice(&byte_rate.to_le_bytes());
+        bytes.extend_from_slice(&block_align.to_le_bytes());
+        bytes.extend_from_slice(&bits.to_le_bytes());
+        bytes.extend_from_slice(b"data");
+        bytes.extend_from_slice(&data_len.to_le_bytes());
+        bytes.extend_from_slice(pcm);
+        if pad == 1 {
+            bytes.push(0);
+        }
+        Ok(bytes)
+    }
+}
+
+#[cfg(all(windows, not(test)))]
+impl Drop for Cursor {
+    fn drop(&mut self) {
+        // 测试构建没有这个 Drop，不会去停一个没打开的设备。
+        device::stop(self);
+    }
+}
+
+/// 测试构建和非 Windows 保持静音状态机，不打开设备。
+#[cfg(not(all(windows, not(test))))]
+mod device {
+    pub(super) fn start(_cursor: &mut super::Cursor) {}
+
+    pub(super) fn stop(_cursor: &mut super::Cursor) {}
 }
