@@ -14,7 +14,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use momobako_lib::{
+use momobako_backend::{
     build_eagle_source_snapshot, EagleSourceEntry, EagleSourceEntryKind, EagleSourceSnapshot,
 };
 use momobako_mutsuki_plugin_sdk::{export_mutsuki_momobako_plugin, PluginCallEnvelope};
