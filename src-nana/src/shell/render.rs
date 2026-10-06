@@ -627,7 +627,7 @@ pub fn mount_shell(
                 ));
                 match region {
                     MainRegion::MissingRepository => missing_repository_panel(&view_model).into_any(),
-                    MainRegion::EmptyRepository => empty_repository_panel(&view_model).into_any(),
+                    MainRegion::EmptyRepository => super::input::empty_repository_panel(&view_model),
                     MainRegion::Startup | MainRegion::LoadError | MainRegion::HasRepository => {
                         startup_panel(&view_model).into_any()
                     }
@@ -684,6 +684,7 @@ pub fn mount_shell(
         })?;
     super::title_bar::bind_window_controls(document)?;
     crate::window_host::bind_escape(document);
+    crate::window_host::bind_file_drop(document);
     SHELL_MOUNT.with(|slot| *slot.borrow_mut() = Some(mounted));
     Ok(())
 }
@@ -839,23 +840,7 @@ fn missing_repository_panel(model: &ShellViewModel) -> impl IntoView + use<'_> {
     .children((card,))
 }
 
-fn empty_repository_panel(model: &ShellViewModel) -> impl IntoView + use<'_> {
-    let error = model.workspace.startup.error.clone().or_else(|| {
-        (!model.workspace.missing_error.is_empty()).then(|| model.workspace.missing_error.clone())
-    });
-    let card = widget(Stack::column(10.0).width(LengthSpec::Px(520.0)).align(AlignSpec::Center)).children((
-        text("还没有可用资源库").key("empty-title"),
-        text("拖入一个本地文件夹创建资源库。").key("empty-detail"),
-        error.map(|error| text(error).key("empty-error")),
-    ));
-    widget(
-        Stack::fill_column(0.0)
-            .padding_xy(24.0, 24.0)
-            .justify(JustifySpec::Center)
-            .align(AlignSpec::Center),
-    )
-    .children((card,))
-}
+
 
 /// 设置和其余实况页的页头：标题在左，卡片在内容区。
 fn framed_page(eyebrow: impl Into<String>, title: impl Into<String>, body: Vec<AnyView>) -> AnyView {

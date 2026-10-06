@@ -101,6 +101,18 @@ describe("nana parity sidebar", () => {
 });
 
 describe("nana parity pointer", () => {
+  it("live_file_drop_imports_and_empty_drop_attaches", () => {
+    const drag = read("src/pages/workspace/useWorkspaceDragDrop.ts");
+    expect(drag).toContain("currentWindow.onDragDropEvent");
+    expect(drag).toContain("void handleExternalPathsDrop(payload.paths)");
+    expect(drag).toContain("void createRepositoryFromFolder(payload.paths[0])");
+    const live = read("src-nana/src/shell/pointer_gesture.rs");
+    expect(live).toContain("外部放下应该导入");
+    expect(live).toContain("空库放下应该附加文件夹");
+    expect(live).toContain('sources == &["D:\\\\other\\\\c.png".to_string()]');
+    expect(live).toContain('path == "C:\\\\library"');
+  });
+
   it("live_pointer_drag_and_box_select_follow_the_vue_thresholds", () => {
     const panel = read("src/pages/workspace/files/useFileBrowserPanelViewModel.ts");
     expect(panel).toContain("const dragStartThreshold = 7");

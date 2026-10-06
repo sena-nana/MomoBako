@@ -3,6 +3,7 @@
 use std::cell::Cell;
 
 use nana_ui::runtime::{component_descriptors, Entity, Workspace};
+use nana_ui_core::{DropAccepts, DropEffect};
 use nana_ui::{ApplicationWindow, RegionId, RuntimeProgramContext, RuntimeProgramUpdate};
 
 use crate::shell::{ShellMessage, ShellViewModel, WindowAction};
@@ -80,6 +81,31 @@ fn dialog_layer_open(shell: &ShellViewModel) -> bool {
         || shell.sidebar.smart_delete_open()
         || shell.playlist_dialog_open
         || shell.workspace.delete_dialog_open()
+}
+
+/// 文件区或空库标记的父节点接受系统文件拖放。事件由视图收成 `HostDrag`。
+pub(crate) fn bind_file_drop(document: &mut nana_ui::runtime::RuntimeDocument) {
+    let document_id = document.document();
+    let hosts: Vec<_> = {
+        let world = document.context().world();
+        world
+            .document_order(document_id)
+            .into_iter()
+            .filter_map(|id| {
+                let text = world.text(id)?;
+                text.starts_with("momobako-drop:").then(|| drop_host(world, id))
+            })
+            .collect()
+    };
+    for id in hosts {
+        if let Err(error) = document.context_mut().set_drop_target_node(id, DropAccepts::files().effect(DropEffect::Copy)) {
+            eprintln!("Nana 文件拖放目标没有挂上：{error}");
+        }
+    }
+}
+
+fn drop_host(world: &nana_ui::runtime::UiWorld, marker: nana_ui::runtime::StableNodeId) -> nana_ui::runtime::StableNodeId {
+    world.parent_id(marker).unwrap_or(marker)
 }
 
 /// 焦点在按钮或输入框上时，Escape 关掉最上面一层。对话框遮罩会先吞掉按键，由 `note_dismissed_dialog` 补上。

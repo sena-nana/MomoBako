@@ -21,6 +21,7 @@ mod view;
 pub(crate) use reduce::{begin_relocate_dialog, reduce_message};
 pub(crate) use support::{decide_close, CloseDecision};
 pub(crate) use view::close_prompt;
+pub(crate) use view::{drop_marker, empty_repository_panel, file_drop_flags, file_drop_message};
 
 #[cfg(test)]
 #[path = "input_tests.rs"]
