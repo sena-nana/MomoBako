@@ -33,6 +33,7 @@ pub(crate) use thumbs::{decode_preview_pixels, decode_thumbnail_file, thumbnail_
 pub use inspect::{
     DateBound, InspectEffect, InspectMessage, NumberBound, SearchRequestDraft, SearchRow, prepare_text,
 };
+pub(crate) use inspect::native_preview::read as read_native_preview;
 pub use sidebar::{
     FolderMutation, GapMessage, SidebarEffect, SidebarFolder, SidebarMessage, SidebarPlaylist, SidebarSmartFolder,
     ShortcutId,

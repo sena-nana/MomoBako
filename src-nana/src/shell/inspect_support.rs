@@ -1,6 +1,6 @@
 //! 预览扩展名分派、文本字节上限、无解码器的播放会话，以及搜索条件解析。
 //!
-//! Markdown 先于普通文本。PDF、Office、压缩包和三维模型没有原生预览贡献时不在这里解码。
+//! Markdown 先于普通文本。内置贡献负责 ZIP、Open XML 和部分模型；其余文档和模型仍要求升级。
 
 use serde_json::Value;
 
@@ -176,7 +176,7 @@ pub(super) fn toggle_filter(filters: &mut SearchFilters, key: FilterList, value:
 }
 
 fn find_contribution<'a>(extension: &str, contributions: &'a [PreviewBinding]) -> Option<&'a PreviewBinding> {
-    contributions.iter().find(|binding| {
+    contributions.iter().rev().find(|binding| {
         binding.contribution.kind == NativeContributionKind::Preview
             && binding.extensions.iter().any(|item| item.eq_ignore_ascii_case(extension))
     })

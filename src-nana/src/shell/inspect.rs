@@ -1,9 +1,9 @@
 //! 预览、元数据和搜索。
 //!
-//! 按扩展名分派图片、Markdown、纯文本、音视频，以及 PDF、Office、压缩包和三维模型。
+//! 按扩展名分派图片、Markdown、纯文本、音视频，以及内置的压缩包、文档和模型预览。
 //! 音视频走 `PlaybackSessionController`。没有原生解码器时停在失败态，不播放静默成功。
-//! PDF、Office、压缩包和三维模型只有登记了 `NativeContributionKind::Preview` 才显示贡献名；
-//! 未迁移的 Vue 插件显示升级提示。Three.js 页面不嵌进 Runtime。
+//! ZIP、Open XML、OBJ、glTF 和 STL 由内置贡献读取。PDF、旧版 Office 和其余三维格式
+//! 在登记可绘制的 Preview 贡献之前显示升级提示。Three.js 页面不嵌进 Runtime。
 
 use std::collections::BTreeMap;
 
@@ -16,6 +16,9 @@ use crate::plugin_api::{NativeContributionKind, NativePluginContribution};
 use super::files::repository_is_writable;
 use super::workspace::WorkspacePanel;
 use super::ShellViewModel;
+
+#[path = "native_preview.rs"]
+pub(super) mod native_preview;
 
 const RESERVED_METADATA: &[&str] = &[
     "rating", "comment", "note", "link", "tagGroups", "addedToLibraryAt", "fileCreatedAt", "fileModifiedAt", "width",
@@ -41,7 +44,7 @@ pub enum PreviewBody {
     Image,
     Document { markdown: bool, text: String },
     Media(PlaybackSessionState),
-    Native { view_id: String, label: String },
+    Native { view_id: String, label: String, content: String },
     Failed(String),
     Upgrade(String),
 }
@@ -144,6 +147,7 @@ pub struct PreviewBinding {
 pub enum InspectEffect {
     LoadImage { repo_id: String, path: String },
     LoadText { repo_id: String, path: String, markdown: bool, generation: u64 },
+    LoadNative { repo_id: String, path: String, view_id: String, generation: u64 },
     SaveMetadata { repo_id: String, asset_id: String, expected_version: i64, metadata: BTreeMap<String, Value> },
     Undo { repo_id: String, asset_id: String },
     Redo { repo_id: String, asset_id: String },
@@ -206,6 +210,7 @@ pub enum InspectMessage {
     RevisionLoaded(Result<(String, AssetDetail), String>),
     MetadataSaved(Result<(String, AssetDetail), String>),
     BodyLoaded { path: String, markdown: bool, generation: u64, result: Result<String, String> },
+    NativeLoaded { path: String, generation: u64, result: Result<String, String> },
     PlayPause,
     Seek(u64),
     SetVolume(f32),
@@ -283,7 +288,7 @@ impl Default for InspectState {
             conflict: String::new(),
             target_path: None,
             generation: 0,
-            contributions: Vec::new(),
+            contributions: native_preview::builtin_bindings(),
             asset_id: None,
             repo_id: None,
             expected_version: 0,
@@ -469,10 +474,7 @@ impl InspectState {
                 self.error = message.clone();
                 self.activity = message;
             }
-            PreviewKind::Native { view_id, label } => {
-                self.body = PreviewBody::Native { view_id, label };
-                self.error.clear();
-            }
+            PreviewKind::Native { view_id, label } => native_preview::begin(self, repo_id, path, view_id, label),
             PreviewKind::Upgrade => {
                 let message = "该预览仍是 Vue 插件，需要升级为 Nana 原生预览贡献".to_string();
                 eprintln!("Nana 预览插件需要升级：{path}");
@@ -535,6 +537,7 @@ impl InspectState {
             InspectMessage::BodyLoaded { path, markdown, generation, result } => {
                 self.note_body(path, markdown, generation, result);
             }
+            InspectMessage::NativeLoaded { path, generation, result } => native_preview::note_loaded(self, path, generation, result),
             InspectMessage::PlayPause => self.transport_play_pause(),
             InspectMessage::Seek(position_ms) => self.transport_seek(position_ms),
             InspectMessage::SetVolume(volume) => self.transport_volume(volume),

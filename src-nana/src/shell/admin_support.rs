@@ -303,14 +303,19 @@ pub fn settings_fields(plugin: &PluginManifest) -> Vec<ConfigField> {
 }
 
 pub fn has_vue_settings_page(plugin: &PluginManifest) -> bool {
-    plugin.contributes.get("settings").and_then(|item| item.get("settingsPage")).is_some_and(|item| !item.is_null())
+    let Some(settings) = plugin.contributes.get("settings") else {
+        return false;
+    };
+    let has_page = settings.get("settingsPage").is_some_and(|item| !item.is_null());
+    let has_fields = settings.get("fields").and_then(|item| item.as_array()).is_some_and(|items| !items.is_empty());
+    has_page && !has_fields
 }
 
 pub fn has_source_authentication(plugin: &PluginManifest) -> bool {
     plugin.contributes.get("source").and_then(|item| item.get("authentication")).is_some_and(|item| !item.is_null())
 }
 
-/// Vue 自定义设置页和来源账号页不挂进原生树，只保留升级说明和原生字段。
+/// 已有字段的设置页就是原生页。没有字段的设置页和来源账号页仍提示升级。
 pub fn settings_upgrade_lines(plugin: &PluginManifest, marked_vue: bool) -> Vec<String> {
     let mut lines = Vec::new();
     if marked_vue || has_vue_settings_page(plugin) {

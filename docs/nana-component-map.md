@@ -57,6 +57,6 @@
 
 ## 没有现成组件的部分
 
-- 视频、音频解码、PDF、Office、压缩包和 Three.js 预览。`GpuView` 只能嵌自定义绘制。官方插件要声明 `NativeContributionKind::Preview` 后才渲染内容；旧 Vue 插件显示升级提示。
+- 视频、音频解码、PDF 页面、二进制 Office 和 Three.js 画面。`GpuView` 只能嵌自定义绘制。ZIP、Open XML 和 OBJ/glTF/GLB/STL 已由内置 `NativeContributionKind::Preview` 读出文本或列表；其余旧 Vue 插件显示升级提示。
 - 拖放、系统文件对话框、托盘、全局快捷键和窗口位置恢复。离屏只断言发出的 `host_api` 请求，真效果记在 `nana-device-matrix.md`。
 - 代码高亮。需要时再开 `syntax-highlighting`，并补离屏场景。
