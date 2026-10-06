@@ -68,7 +68,7 @@ Nana `ApplicationState::initialize` 现在启动共享 `RepositoryRuntime`，窗
 
 启动就绪且不是 `acceptance_scene` 时，实况预览和搜索替换原来的预览占位。Markdown 用
 `NativeMarkdown`，纯文本用 `SelectableRichText`。音视频没有原生解码器时停在失败态。
-ZIP/CBZ、Open XML 和 OBJ/glTF/GLB/STL 已由内置原生预览读取目录、文本或结构摘要。PDF、二进制 Office、7z/rar 和其余三维模型在登记可绘制的 Nana 预览贡献之前仍显示升级提示。这批状态有单测，还没有新的离屏场景。
+ZIP/CBZ/7z/RAR/CBR、未压缩 PDF、Open XML，以及 OBJ/glTF/GLB/STL/3MF 已由内置原生预览读取目录、文本或结构摘要。二进制 Office、FlateDecode 的 PDF 和其余三维模型在登记可绘制的 Nana 预览贡献之前仍显示升级提示。文件导入、Eagle 导入和 API Playground 已是原生工具页。播放列表内置 WAV 会话，不打开声卡。这批状态有单测，还没有新的离屏场景。
 
 仍未宣称完成的能力包括语法高亮、真实媒体解码器、系统媒体会话、PDF.js/Office/Three.js 嵌入和
 Windows UIA/AccessKit 服务桥接；播放列表排序/添加、成员资格、下载进度、播放器回退、会话持久化、

@@ -1,16 +1,22 @@
-//! 内置原生预览。压缩包列文件，Open XML 抽文本，模型只做结构摘要。
+//! 内置原生预览。压缩包列文件，PDF 与 Open XML 抽文本，模型只做结构摘要。
 //!
-//! 不嵌入 PDF.js、Three.js 或旧版 Office。读不到的格式仍走升级提示。
+//! PDF 不画页面，只读未压缩内容流里的文字。3MF 只数对象和网格。
+//! 不读二进制 Office，也不嵌入 Three.js。读不到的格式仍走升级提示。
 
 use std::io::{Cursor, Read};
 
+use unarc_rs::unified::{ArchiveFormat, UnifiedArchive};
 use zip::ZipArchive;
 
 use crate::plugin_api::{NativeContributionKind, NativePluginContribution};
 
 use super::{InspectEffect, InspectState, PreviewBinding, PreviewBody};
 
+#[path = "native_preview_pdf.rs"]
+mod pdf;
+
 const ARCHIVE_VIEW: &str = "momobako.preview.archive";
+const PDF_VIEW: &str = "momobako.preview.pdf";
 const OFFICE_VIEW: &str = "momobako.preview.office";
 const MODEL_VIEW: &str = "momobako.preview.model";
 const LIST_LIMIT: usize = 200;
@@ -19,7 +25,8 @@ const TEXT_LIMIT: usize = 24_000;
 /// 壳层启动时就有的预览贡献。后登记的同扩展名贡献优先。
 pub fn builtin_bindings() -> Vec<PreviewBinding> {
     vec![
-        binding("momobako.preview.archive", "压缩包", ARCHIVE_VIEW, &["zip", "cbz"], 10),
+        binding("momobako.preview.archive", "压缩包", ARCHIVE_VIEW, &["zip", "cbz", "7z", "rar", "cbr"], 10),
+        binding("momobako.preview.pdf", "PDF", PDF_VIEW, &["pdf"], 15),
         binding(
             "momobako.preview.office",
             "文档",
@@ -27,7 +34,7 @@ pub fn builtin_bindings() -> Vec<PreviewBinding> {
             &["docx", "docm", "dotx", "xlsx", "xlsm", "pptx", "pptm"],
             20,
         ),
-        binding("momobako.preview.model", "模型", MODEL_VIEW, &["obj", "gltf", "glb", "stl"], 30),
+        binding("momobako.preview.model", "模型", MODEL_VIEW, &["obj", "gltf", "glb", "stl", "3mf"], 30),
     ]
 }
 
@@ -58,7 +65,8 @@ pub fn begin(state: &mut InspectState, repo_id: &str, path: &str, view_id: Strin
 /// 按 view 把字节变成可显示的文本。
 pub fn read(view_id: &str, bytes: &[u8]) -> Result<String, String> {
     match view_id {
-        ARCHIVE_VIEW => list_zip(bytes),
+        ARCHIVE_VIEW => list_archive(bytes),
+        PDF_VIEW => pdf::read(bytes),
         OFFICE_VIEW => read_office(bytes),
         MODEL_VIEW => read_model(bytes),
         other => {
@@ -92,7 +100,7 @@ pub fn note_loaded(state: &mut InspectState, path: String, generation: u64, resu
 }
 
 fn renders(view_id: &str) -> bool {
-    matches!(view_id, ARCHIVE_VIEW | OFFICE_VIEW | MODEL_VIEW)
+    matches!(view_id, ARCHIVE_VIEW | PDF_VIEW | OFFICE_VIEW | MODEL_VIEW)
 }
 
 fn binding(plugin_id: &str, label: &str, view_id: &str, extensions: &[&str], order: i32) -> PreviewBinding {
@@ -102,8 +110,18 @@ fn binding(plugin_id: &str, label: &str, view_id: &str, extensions: &[&str], ord
     }
 }
 
-fn list_zip(bytes: &[u8]) -> Result<String, String> {
-    let mut archive = ZipArchive::new(Cursor::new(bytes)).map_err(|error| format!("无法读取压缩包：{error}"))?;
+/// 先按 zip 列文件。zip 打不开时再试 7z，然后是 rar。
+fn list_archive(bytes: &[u8]) -> Result<String, String> {
+    match ZipArchive::new(Cursor::new(bytes)) {
+        Ok(archive) => list_zip(archive),
+        Err(error) => {
+            eprintln!("Nana 压缩包按 zip 打开失败：{error}");
+            list_unarc(bytes)
+        }
+    }
+}
+
+fn list_zip(mut archive: ZipArchive<Cursor<&[u8]>>) -> Result<String, String> {
     let mut lines = Vec::new();
     for index in 0..archive.len() {
         let file = archive.by_index(index).map_err(|error| format!("无法读取压缩包条目：{error}"))?;
@@ -118,10 +136,59 @@ fn list_zip(bytes: &[u8]) -> Result<String, String> {
             break;
         }
     }
-    if lines.is_empty() {
-        return Ok("压缩包里没有文件。".into());
+    Ok(archive_summary(lines))
+}
+
+fn list_unarc(bytes: &[u8]) -> Result<String, String> {
+    match list_unarc_format(bytes, ArchiveFormat::SevenZ) {
+        Ok(text) => Ok(text),
+        Err(error) => {
+            eprintln!("Nana 压缩包按 7z 打开失败：{error}");
+            match list_unarc_format(bytes, ArchiveFormat::Rar) {
+                Ok(text) => Ok(text),
+                Err(rar) => {
+                    eprintln!("Nana 压缩包按 rar 打开失败：{rar}");
+                    Err(rar)
+                }
+            }
+        }
     }
-    Ok(format!("压缩包 · {} 个文件\n{}", lines.iter().filter(|line| line.as_str() != "…").count(), lines.join("\n")))
+}
+
+fn list_unarc_format(bytes: &[u8], format: ArchiveFormat) -> Result<String, String> {
+    let mut archive = UnifiedArchive::open_with_format(Cursor::new(bytes), format).map_err(|error| format!("无法读取压缩包：{error}"))?;
+    let mut entries = Vec::new();
+    for item in archive.entries_iter() {
+        let entry = item.map_err(|error| format!("无法读取压缩包条目：{error}"))?;
+        let name = entry.name().replace('\\', "/");
+        if name.is_empty() || name.ends_with('/') || entry.is_directory() {
+            continue;
+        }
+        entries.push((name, entry.original_size()));
+    }
+    // unarc 的 7z 目录标记没有露到 is_directory，名字又常常不带斜杠。
+    let names: Vec<String> = entries.iter().map(|(name, _)| name.clone()).collect();
+    let mut lines = Vec::new();
+    for (name, size) in entries {
+        if names.iter().any(|other| other.starts_with(&format!("{name}/"))) {
+            continue;
+        }
+        lines.push(format!("{name} · {size} 字节"));
+        if lines.len() == LIST_LIMIT {
+            eprintln!("Nana 压缩包列表在 {LIST_LIMIT} 条处截断");
+            lines.push("…".into());
+            break;
+        }
+    }
+    Ok(archive_summary(lines))
+}
+
+fn archive_summary(lines: Vec<String>) -> String {
+    if lines.is_empty() {
+        return "压缩包里没有文件。".into();
+    }
+    let count = lines.iter().filter(|line| line.as_str() != "…").count();
+    format!("压缩包 · {count} 个文件\n{}", lines.join("\n"))
 }
 
 fn read_office(bytes: &[u8]) -> Result<String, String> {
@@ -207,6 +274,9 @@ fn read_model(bytes: &[u8]) -> Result<String, String> {
     if bytes.len() >= 4 && &bytes[..4] == b"glTF" {
         return summarize_glb(bytes);
     }
+    if looks_like_zip(bytes) {
+        return summarize_3mf(bytes);
+    }
     let head = bytes.iter().position(|byte| !byte.is_ascii_whitespace()).map(|index| &bytes[index..]).unwrap_or(bytes);
     if head.first() == Some(&b'{') {
         return summarize_gltf(bytes);
@@ -273,6 +343,69 @@ fn summarize_stl(bytes: &[u8]) -> Option<String> {
     None
 }
 
+fn looks_like_zip(bytes: &[u8]) -> bool {
+    bytes.len() >= 4 && matches!(&bytes[..4], b"PK\x03\x04" | b"PK\x05\x06" | b"PK\x07\x08")
+}
+
+/// 3MF 是 zip。模型 XML 通常在 `3D/3dmodel.model`，这里只数对象和网格。
+fn summarize_3mf(bytes: &[u8]) -> Result<String, String> {
+    let mut archive = ZipArchive::new(Cursor::new(bytes)).map_err(|error| {
+        eprintln!("Nana 3MF 无法作为 zip 打开：{error}");
+        format!("无法读取 3MF：{error}")
+    })?;
+    let mut names = Vec::new();
+    for index in 0..archive.len() {
+        let file = archive.by_index(index).map_err(|error| {
+            eprintln!("Nana 3MF 条目读取失败：{error}");
+            format!("无法读取 3MF 条目：{error}")
+        })?;
+        names.push(file.name().replace('\\', "/"));
+    }
+    let model_name = names
+        .iter()
+        .find(|name| name.eq_ignore_ascii_case("3D/3dmodel.model"))
+        .or_else(|| {
+            names.iter().find(|name| {
+                let lower = name.to_ascii_lowercase();
+                lower == "3dmodel.model" || lower.ends_with("/3dmodel.model")
+            })
+        })
+        .cloned();
+    let Some(model_name) = model_name else {
+        eprintln!("Nana 3MF 缺少 3D/3dmodel.model");
+        return Err("3MF 里没有模型".into());
+    };
+    let Some(xml) = zip_text(&mut archive, &model_name)? else {
+        eprintln!("Nana 3MF 读不到 {model_name}");
+        return Err("3MF 里没有模型".into());
+    };
+    let objects = count_xml_tag(&xml, "object");
+    let meshes = count_xml_tag(&xml, "mesh");
+    if objects == 0 && meshes == 0 {
+        eprintln!("Nana 3MF 没有对象或网格");
+        return Err("3MF 里没有对象或网格".into());
+    }
+    Ok(format!("对象 {objects}\n网格 {meshes}"))
+}
+
+fn count_xml_tag(xml: &str, name: &str) -> usize {
+    let mut count = 0;
+    let mut rest = xml;
+    while let Some(start) = rest.find('<') {
+        rest = &rest[start + 1..];
+        match rest.chars().next() {
+            Some('/' | '!' | '?') => continue,
+            _ => {}
+        }
+        let token = rest.split(|c: char| c.is_whitespace() || matches!(c, '>' | '/')).next().unwrap_or("");
+        let local = token.rsplit(':').next().unwrap_or(token);
+        if local == name {
+            count += 1;
+        }
+    }
+    count
+}
+
 fn summarize_obj(bytes: &[u8]) -> Result<String, String> {
     let text = String::from_utf8_lossy(bytes);
     let mut vertices = 0;
@@ -333,6 +466,59 @@ mod tests {
         let docx = sample_zip(&[("word/document.xml", xml)]);
         assert_eq!(read(OFFICE_VIEW, &docx).expect("docx"), "你好 & 桃");
         assert!(read(ARCHIVE_VIEW, b"not-a-zip").is_err());
+    }
+
+    #[test]
+    fn pdf_extracts_uncompressed_text_and_three_mf_counts_meshes() {
+        let pdf = b"%PDF-1.4\n1 0 obj\n<< /Length 14 >>\nstream\n(MomoBako) Tj\nendstream\nendobj\n%%EOF\n";
+        assert!(read(PDF_VIEW, pdf).expect("pdf").contains("MomoBako"));
+        let tj = b"%PDF-1.4\n<< /Length 22 >>\nstream\n[(Mo) 20 (moBako)] TJ\nendstream\n%%EOF\n";
+        assert!(read(PDF_VIEW, tj).expect("tj").contains("MomoBako"));
+        assert!(read(PDF_VIEW, b"not-a-pdf").is_err());
+        assert!(read(PDF_VIEW, b"%PDF-1.4\n<< /Filter /FlateDecode >>\nstream\nxxxx\nendstream\n").is_err());
+
+        let xml = br#"<?xml version="1.0"?>
+<model xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02">
+  <resources><object id="1" type="model"><mesh></mesh></object></resources>
+  <build><item objectid="1"/></build>
+</model>"#;
+        let three_mf = sample_zip(&[("3D/3dmodel.model", xml)]);
+        let summary = read(MODEL_VIEW, &three_mf).expect("3mf");
+        assert!(summary.contains("对象 1"), "{summary}");
+        assert!(summary.contains("网格 1"), "{summary}");
+        assert!(read(MODEL_VIEW, &sample_zip(&[("a.txt", b"hi")])).is_err());
+    }
+
+    #[test]
+    fn sevenz_lists_files_and_skips_directories() {
+        // sevenz-rust2 写出的未加密 7z：目录 dir，文件 dir/a.txt=hi、b.txt=yo。
+        const SEVEN_Z: &[u8] = &[
+            0x37, 0x7a, 0xbc, 0xaf, 0x27, 0x1c, 0x00, 0x04, 0x2c, 0x4a, 0xb6, 0xf6, 0x0c, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x64, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x99, 0x8e, 0x1f, 0x0e, 0x01, 0x00, 0x01, 0x68, 0x69, 0x00, 0x01, 0x00, 0x01, 0x79, 0x6f, 0x00, 0x01, 0x04, 0x06,
+            0x00, 0x02, 0x09, 0x06, 0x06, 0x0a, 0x01, 0x15, 0x5f, 0xd9, 0x30, 0xd4, 0x31, 0x67, 0x7b, 0x00, 0x07, 0x0b, 0x02, 0x00, 0x01, 0x21, 0x21, 0x01,
+            0x16, 0x01, 0x21, 0x21, 0x01, 0x16, 0x0c, 0x02, 0x02, 0x00, 0x08, 0x0a, 0x01, 0xac, 0x2a, 0x93, 0xd8, 0x89, 0xac, 0x29, 0x62, 0x00, 0x00, 0x05,
+            0x03, 0x0e, 0x01, 0x80, 0x11, 0x29, 0x00, 0x64, 0x00, 0x69, 0x00, 0x72, 0x00, 0x00, 0x00, 0x64, 0x00, 0x69, 0x00, 0x72, 0x00, 0x2f, 0x00, 0x61,
+            0x00, 0x2e, 0x00, 0x74, 0x00, 0x78, 0x00, 0x74, 0x00, 0x00, 0x00, 0x62, 0x00, 0x2e, 0x00, 0x74, 0x00, 0x78, 0x00, 0x74, 0x00, 0x00, 0x00, 0x00,
+            0x00,
+        ];
+        let listed = read(ARCHIVE_VIEW, SEVEN_Z).expect("7z");
+        assert!(listed.contains("压缩包 · 2 个文件"), "{listed}");
+        assert!(listed.contains("dir/a.txt · 2 字节"), "{listed}");
+        assert!(listed.contains("b.txt · 2 字节"), "{listed}");
+        assert!(!listed.lines().any(|line| line.starts_with("dir ·")), "{listed}");
+    }
+
+    #[test]
+    fn bindings_include_pdf_three_mf_and_non_zip_archives() {
+        let bindings = builtin_bindings();
+        let extensions = |view: &str| {
+            bindings.iter().find(|item| item.contribution.view_id == view).expect(view).extensions.clone()
+        };
+        assert_eq!(extensions(PDF_VIEW), vec!["pdf".to_string()]);
+        assert!(extensions(MODEL_VIEW).iter().any(|item| item == "3mf"));
+        for extension in ["zip", "cbz", "7z", "rar", "cbr"] {
+            assert!(extensions(ARCHIVE_VIEW).iter().any(|item| item == extension), "{extension}");
+        }
     }
 
     #[test]

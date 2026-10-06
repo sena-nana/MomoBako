@@ -315,16 +315,44 @@ pub fn has_source_authentication(plugin: &PluginManifest) -> bool {
     plugin.contributes.get("source").and_then(|item| item.get("authentication")).is_some_and(|item| !item.is_null())
 }
 
-/// 已有字段的设置页就是原生页。没有字段的设置页和来源账号页仍提示升级。
+/// 已有字段的设置页不提示升级。来源账号能读出 kind 和方法名时只给摘要，否则仍提示升级。
 pub fn settings_upgrade_lines(plugin: &PluginManifest, marked_vue: bool) -> Vec<String> {
     let mut lines = Vec::new();
     if marked_vue || has_vue_settings_page(plugin) {
         lines.push("插件设置页仍是 Vue 页面，需要升级为 Nana 原生设置字段".into());
     }
-    if has_source_authentication(plugin) {
+    if let Some(summary) = source_account_summary(plugin) {
+        lines.push(summary);
+    } else if has_source_authentication(plugin) {
         lines.push("账号与来源仍是 Vue 页面，需要升级为 Nana 原生设置".into());
     }
     lines
+}
+
+/// 认证声明同时有 kind，以及创建会话或状态方法时，拼一行摘要。不发请求。
+pub fn source_account_summary(plugin: &PluginManifest) -> Option<String> {
+    let auth = plugin.contributes.get("source").and_then(|item| item.get("authentication"))?;
+    if auth.is_null() {
+        return None;
+    }
+    let kind = json_name(auth, "kind")?;
+    let create = json_name(auth, "createSessionMethod");
+    let status = json_name(auth, "statusMethod");
+    if create.is_none() && status.is_none() {
+        return None;
+    }
+    let mut parts = Vec::new();
+    if let Some(method) = create {
+        parts.push(format!("创建会话 {method}"));
+    }
+    if let Some(method) = status {
+        parts.push(format!("查询状态 {method}"));
+    }
+    Some(format!("来源账号 {kind}：{}。", parts.join("，")))
+}
+
+fn json_name<'a>(value: &'a serde_json::Value, key: &str) -> Option<&'a str> {
+    value.get(key).and_then(|item| item.as_str()).map(str::trim).filter(|item| !item.is_empty())
 }
 
 pub fn normalize_field_input(field: &ConfigField, text: &str, checked: Option<bool>) -> FieldChange {
@@ -620,8 +648,20 @@ pub fn apply_tool_page_selection(pages: &[super::ToolPageEntry], active: Option<
     Some(pages[0].id.clone())
 }
 
+pub const TOOL_FILE_MANAGER: &str = "momobako.tool.file-manager";
+pub const TOOL_EAGLE_IMPORTER: &str = "momobako.tool.eagle-importer";
+pub const TOOL_API_PLAYGROUND: &str = "momobako.tool.api-playground";
+
+pub fn is_builtin_tool_page(id: &str) -> bool {
+    matches!(id, TOOL_FILE_MANAGER | TOOL_EAGLE_IMPORTER | TOOL_API_PLAYGROUND)
+}
+
+/// 三个内置工具页已经是原生页。其它非原生页仍提示升级。
 pub fn tool_page_upgrade(page: &super::ToolPageEntry) -> Option<&'static str> {
-    (!page.native).then_some("工具页仍是 Vue 插件，需要升级为 Nana 原生工具页")
+    if page.native || is_builtin_tool_page(&page.id) {
+        return None;
+    }
+    Some("工具页仍是 Vue 插件，需要升级为 Nana 原生工具页")
 }
 
 pub fn audio_picker_enabled(choices: &[AudioChoice]) -> bool {

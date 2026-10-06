@@ -266,6 +266,8 @@ pub(crate) fn extensions_card(model: &ShellViewModel) -> AnyView {
         if let Some(page) = active_tool(model) {
             if let Some(upgrade) = support::tool_page_upgrade(page) {
                 body.push(text(upgrade).key("admin-tool-upgrade").into_any());
+            } else if support::is_builtin_tool_page(&page.id) {
+                body.push(super::tool_native::tool_surface(model, page));
             }
         }
     }
@@ -443,8 +445,14 @@ fn plugin_entries(model: &ShellViewModel) -> Vec<AnyView> {
                         .into_any(),
                 );
             }
+            let summary = support::source_account_summary(plugin);
             for (index, line) in support::settings_upgrade_lines(plugin, model.admin.vue_settings.contains(&plugin_id)).into_iter().enumerate() {
-                rows.push(text(line).key(format!("admin-plugin-upgrade-{plugin_id}-{index}")).into_any());
+                let key = if summary.as_ref() == Some(&line) {
+                    format!("admin-source-summary-{plugin_id}")
+                } else {
+                    format!("admin-plugin-upgrade-{plugin_id}-{index}")
+                };
+                rows.push(text(line).key(key).into_any());
             }
             let toggle_id = plugin_id.clone();
             let enabled = plugin.enabled;

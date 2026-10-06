@@ -11,14 +11,14 @@ use crate::backend::services::repository::{
     PlaylistItemsByPathsAddRequest, PlaylistItemsOrderRequest, PlaylistMembershipRequest, PlaylistMembershipSnapshot,
     PlaylistPlayerContribution, PlaylistSummary,
 };
-use crate::host_api::{PlaybackMediaCapabilities, PlaybackMediaPlugin, PlaybackSessionController};
-
 use super::inspect::InspectState;
 use super::workspace::{LibraryCategory, MainRegion, StartupStatus, WorkspacePanel};
 use super::ShellViewModel;
 
 #[path = "player_support.rs"]
 mod support;
+#[path = "wav_player.rs"]
+mod wav_player;
 pub use support::{preferences_path, sessions_path, settings_path};
 pub(crate) use support::{resolution_notice, resolve_player, AUDIO_CAPABILITY, AUDIO_SEQUENCE_TYPE};
 use support::{
@@ -45,7 +45,7 @@ pub struct PlaybackSettings {
     pub object_fit_cover: bool,
 }
 
-/// 已登记的播放器实现。生产列表从空开始，登记前不能假装能播放。
+/// 已登记的播放器实现。只内置 WAV，其它格式仍要登记。
 #[derive(Clone, Debug, PartialEq)]
 pub struct PlayerCandidate {
     pub plugin_id: String,
@@ -165,6 +165,7 @@ pub struct PlayerState {
     restore_playlist_id: Option<String>,
     stored: BTreeMap<String, StoredSession>,
     effects: Vec<PlayerEffect>,
+    wav: wav_player::WavPlayer,
 }
 
 impl Default for PlayerState {
@@ -186,7 +187,7 @@ impl Default for PlayerState {
             shuffle_seed: 1,
             playlists: Vec::new(),
             contributions: Vec::new(),
-            candidates: Vec::new(),
+            candidates: vec![wav_player::builtin_candidate()],
             preferences: BTreeMap::new(),
             memberships: BTreeMap::new(),
             listed: None,
@@ -197,6 +198,7 @@ impl Default for PlayerState {
             restore_playlist_id: None,
             stored: BTreeMap::new(),
             effects: Vec::new(),
+            wav: wav_player::WavPlayer::default(),
         }
     }
 }
@@ -252,6 +254,13 @@ impl PlayerState {
 
     pub fn current_item(&self) -> Option<&QueueItem> {
         self.queue.iter().find(|item| Some(&item.id) == self.current_id.as_ref())
+    }
+
+    /// 当前条目解析到内置 WAV 候选时才走内存播放器。
+    fn uses_wav(&self) -> bool {
+        self.current_item().is_some_and(|item| {
+            self.resolve_type(&item.player_type_id).player.as_ref().is_some_and(wav_player::is_wav_candidate)
+        })
     }
 
     pub fn membership_actions(&self, kind: &str, extension: &str, asset_id: &str, is_virtual: bool) -> Vec<MembershipAction> {
@@ -430,17 +439,20 @@ impl PlayerState {
             return;
         }
         self.activity.clear();
-        let mut controller = PlaybackSessionController::new(MissingDecoder, self.session.clone());
-        if let Err(error) = controller.load(&item.path) {
-            eprintln!("Nana 播放装载失败：{error}");
+        let wav = resolution.player.as_ref().is_some_and(wav_player::is_wav_candidate);
+        if !wav {
+            self.wav.clear();
         }
-        self.session = controller.state().clone();
+        let session = self.session.clone();
+        let (session, error) = wav_player::drive(wav, &self.wav, session, wav_player::Action::Load(item.path.clone()));
+        self.session = session;
         self.can_play = self.session.status != "failed";
         if item.file_class == "image" {
             self.apply_image_duration();
         }
-        if self.session.status == "failed" {
-            self.activity = self.session.error.clone().unwrap_or_else(|| "没有原生解码器".into());
+        if let Some(error) = error {
+            eprintln!("Nana 播放装载失败：{error}");
+            self.activity = error;
         }
     }
 
@@ -554,37 +566,41 @@ impl PlayerState {
 
     fn set_playing(&mut self, playing: bool, inspect: &mut InspectState) {
         self.wants_playing = playing;
-        let mut controller = PlaybackSessionController::new(MissingDecoder, self.session.clone());
-        let result = if playing { controller.play() } else { controller.pause() };
-        if let Err(error) = result {
+        let use_wav = self.uses_wav();
+        let session = self.session.clone();
+        let action = if playing { wav_player::Action::Play } else { wav_player::Action::Pause };
+        let (session, error) = wav_player::drive(use_wav, &self.wav, session, action);
+        self.session = session;
+        if let Some(error) = error {
             eprintln!("Nana 播放控制失败：{error}");
+            self.activity = error;
         }
-        self.session = controller.state().clone();
         self.can_play = self.session.status != "failed" && self.current_item().is_some();
-        if self.session.status == "failed" {
-            self.activity = self.session.error.clone().unwrap_or_default();
-        }
         self.persist_if_needed();
         self.publish(inspect);
     }
 
     fn seek(&mut self, position_ms: u64, inspect: &mut InspectState) {
-        let mut controller = PlaybackSessionController::new(MissingDecoder, self.session.clone());
-        if let Err(error) = controller.seek(position_ms) {
+        let use_wav = self.uses_wav();
+        let session = self.session.clone();
+        let (session, error) = wav_player::drive(use_wav, &self.wav, session, wav_player::Action::Seek(position_ms));
+        self.session = session;
+        if let Some(error) = error {
             eprintln!("Nana 播放进度失败：{error}");
         }
-        self.session = controller.state().clone();
         self.persist_if_needed();
         self.publish(inspect);
     }
 
     fn set_volume(&mut self, volume: f32, inspect: &mut InspectState) {
         let volume = volume.clamp(0.0, 1.0);
-        let mut controller = PlaybackSessionController::new(MissingDecoder, self.session.clone());
-        if let Err(error) = controller.set_volume(volume) {
+        let use_wav = self.uses_wav();
+        let session = self.session.clone();
+        let (session, error) = wav_player::drive(use_wav, &self.wav, session, wav_player::Action::Volume(volume));
+        self.session = session;
+        if let Some(error) = error {
             eprintln!("Nana 播放音量失败：{error}");
         }
-        self.session = controller.state().clone();
         self.persist_if_needed();
         self.publish(inspect);
     }
@@ -635,6 +651,7 @@ impl PlayerState {
 
     /// 停掉运行时。`clear_stored_session` 为真时清掉当前仓库的持久会话，临时插播传假。
     fn stop_runtime(&mut self, clear_stored_session: bool, _inspect: &mut InspectState) {
+        self.wav.clear();
         let previous_repo = self.repo_id.clone();
         self.wants_playing = false;
         self.can_play = false;
@@ -936,27 +953,6 @@ impl PlayerState {
         *selected = Some(item.path.clone());
         inspect.open_playlist_item(&item.path, &repo_id, &item.asset_id);
     }
-}
-
-struct MissingDecoder;
-
-impl PlaybackMediaPlugin for MissingDecoder {
-    fn load(&mut self, _source: &str) -> Result<PlaybackMediaCapabilities, String> {
-        Err("没有原生解码器".into())
-    }
-    fn play(&mut self) -> Result<(), String> {
-        Err("没有原生解码器".into())
-    }
-    fn pause(&mut self) -> Result<(), String> {
-        Err("没有原生解码器".into())
-    }
-    fn seek(&mut self, _position_ms: u64) -> Result<(), String> {
-        Err("没有原生解码器".into())
-    }
-    fn set_volume(&mut self, _volume: f32) -> Result<(), String> {
-        Err("没有原生解码器".into())
-    }
-    fn dispose(&mut self) {}
 }
 
 fn fresh_session(repo_id: &str) -> PlaybackSessionState {
