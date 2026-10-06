@@ -3862,6 +3862,7 @@ dependencies = [
  "getrandom 0.3.4",
  "hex",
  "image",
+ "momobako-backend",
  "mutsuki-plugin-api",
  "mutsuki-plugin-host",
  "mutsuki-runtime-contracts",

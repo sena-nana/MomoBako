@@ -682,6 +682,7 @@ mod tests {
             })
             .expect("cache should configure");
 
+        let cache_root = canonicalize_local_path(&cache_root).unwrap_or(cache_root);
         assert_eq!(response.repository.path, cache_root.to_string_lossy());
         assert_eq!(response.repository.status, "ready");
         assert_eq!(

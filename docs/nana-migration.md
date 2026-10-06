@@ -38,9 +38,7 @@ cargo test -p momobako-nana --test offscreen_acceptance -- --nocapture
 id 合并，启动中的 `repository.sync` 追加到启动日志，就绪后的结构更新静默刷新当前
 面板、仓库列表、摘要和硬链接候选。失败不改页面，也不弹出硬链接对话框。缺失仓库的重定向排队 `PickFolder`，编号 3，取消或空白路径不提交。这条路径没有新的离屏场景。
 
-`src-backend` 是当前迁移期的共享领域库，使用同一份 `models/services/viewmodels`
-源码，同时被 Nana 宿主和 Tauri 适配层编译。它不依赖 Tauri；`cargo check
--p momobako-backend -p momobako-nana` 是共享边界的编译验收。服务源码仍有既存的
+`src-backend` 持有 `models`、`services` 和 `viewmodels`。Nana 宿主与 Tauri 窗口壳都依赖这个 crate，领域代码不依赖 Tauri。`cargo check -p momobako-backend -p momobako-nana` 是共享边界的编译验收。服务源码仍有既存的
 Clippy 基线告警，迁移期间单独清理，不通过全局 `allow` 隐藏。
 
 Nana `ApplicationState::initialize` 现在启动共享 `RepositoryRuntime`，窗口构建使用
