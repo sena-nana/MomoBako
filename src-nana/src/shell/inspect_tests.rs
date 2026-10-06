@@ -155,7 +155,10 @@ fn preview_kind_starts_the_matching_body() {
     assert!(matches!(state.take_effects().pop(), Some(InspectEffect::LoadText { markdown: false, .. })));
 
     state.note_detail(&asset("models/a.glb", "glb", 1, false, Vec::new()));
-    assert!(matches!(state.body, PreviewBody::Upgrade(_)));
+    assert!(matches!(
+        state.take_effects().pop(),
+        Some(InspectEffect::LoadNative { view_id, path, .. }) if view_id == "momobako.preview.model" && path == "models/a.glb"
+    ));
     state.note_detail(&asset("misc/a.bin", "bin", 1, false, Vec::new()));
     assert!(matches!(state.body, PreviewBody::Failed(ref message) if message == "无法预览此类型"));
 }

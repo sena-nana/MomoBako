@@ -200,6 +200,11 @@ fn plugin_fields_reject_bad_json_and_reset_empty_numbers() {
     let lines = support::settings_upgrade_lines(&model.admin.plugins[0], true);
     assert_eq!(lines.len(), 2);
     assert!(lines[0].contains("Vue"));
+    let mut schema = plugin("schema.one", "system", "service", "service");
+    schema.contributes["settings"]["settingsPage"] = serde_json::json!({"label": "本地文件系统"});
+    assert!(support::settings_upgrade_lines(&schema, false).is_empty());
+    schema.contributes["settings"].as_object_mut().expect("settings").remove("fields");
+    assert!(support::settings_upgrade_lines(&schema, false).iter().any(|line| line.contains("设置字段")));
 
     send(&mut model, AdminMessage::JsonDraft { plugin_id: "user.one".into(), key: "raw".into(), value: "{".into() });
     send(&mut model, AdminMessage::SaveJson { plugin_id: "user.one".into(), key: "raw".into() });

@@ -107,11 +107,11 @@
 
 ## Phase 4 预览、元数据和搜索
 
-这些行由 `src-nana/src/shell/inspect_tests.rs` 覆盖状态机。浏览、详情和文本字节走 `RepositoryQueryViewModel` 的 `get_asset_detail`、`read_file`、`prepare_preview_file_source`；元数据保存走 `update_asset_metadata`；搜索走 `search_assets`；撤销和重做走 `RepositoryInteractionViewModel` 的 `undo_last_revision`、`redo_last_revision`。这些调用没有替身测试。图片沿用现有 GPU 纹理上传。Markdown 用 `NativeMarkdown`。纯文本用 `SelectableRichText`，不开启语法高亮。音视频用 `PlaybackSessionController`，没有解码器时停在失败态。PDF、Office、压缩包和三维模型在登记 `NativeContributionKind::Preview` 之前显示升级提示，不嵌入 Three.js。15 个旧验收场景仍用原来的预览占位。下面每一行都未离屏。
+这些行由 `src-nana/src/shell/inspect_tests.rs` 覆盖状态机。浏览、详情和文本字节走 `RepositoryQueryViewModel` 的 `get_asset_detail`、`read_file`、`prepare_preview_file_source`；元数据保存走 `update_asset_metadata`；搜索走 `search_assets`；撤销和重做走 `RepositoryInteractionViewModel` 的 `undo_last_revision`、`redo_last_revision`。这些调用没有替身测试。图片沿用现有 GPU 纹理上传。Markdown 用 `NativeMarkdown`。纯文本用 `SelectableRichText`，不开启语法高亮。音视频用 `PlaybackSessionController`，没有解码器时停在失败态。ZIP/CBZ 列出文件，Open XML 抽出文本，OBJ、glTF、GLB 和 STL 给出结构摘要。PDF、旧版 Office、7z/rar 和其余三维格式在登记可绘制的 `NativeContributionKind::Preview` 之前显示升级提示，不嵌入 Three.js。15 个旧验收场景仍用原来的预览占位。下面每一行都未离屏。
 
-实况预览和搜索只在不是 `acceptance_scene`、启动就绪、主区有仓库，且面板是搜索或已经选中文件时替换预览槽。保存是显式按钮，不移植 260 毫秒自动保存。版本冲突保留本地草稿和原来的 `expected_version`。生产环境的预览贡献和库类型快捷方式都从空列表开始。
+实况预览和搜索只在不是 `acceptance_scene`、启动就绪、主区有仓库，且面板是搜索或已经选中文件时替换预览槽。保存是显式按钮，不移植 260 毫秒自动保存。版本冲突保留本地草稿和原来的 `expected_version`。生产环境从内置的压缩包、文档和模型贡献开始，库类型快捷方式仍从空列表开始。后登记的同扩展名预览贡献优先。
 
-标签菜单按视口夹取，点外面关闭，由 `inspect_tags::tests` 覆盖。语法高亮、`ImageViewer` 全窗、260 毫秒自动保存、Vue 库类型注册表，以及 PDF.js / Office / Three.js 仍保持升级或失败文案，不嵌入旧运行时。
+标签菜单按视口夹取，点外面关闭，由 `inspect_tags::tests` 覆盖。语法高亮、`ImageViewer` 全窗、260 毫秒自动保存和 Vue 库类型注册表仍未迁。PDF、二进制 Office 和 Three.js 画面仍保持升级文案，不嵌入旧运行时。
 
 | 来源 | 触发 | 服务 | 结果 | 可见性 | 状态 |
 | --- | --- | --- | --- | --- | --- |
@@ -119,8 +119,9 @@
 | `filePreviewExtensions.ts` Markdown | md、markdown、mdown、mkd、mkdn、mdx | `read_file`，没有替身 | 先于纯文本列表；用 `NativeMarkdown` | “正在读取文本…” | 已测试（未离屏） |
 | `filePreviewExtensions.ts` 纯文本 | txt、text、log、csv、tsv、json、jsonl、yaml、yml、toml、xml、html、css、scss、sass、less、js、jsx、ts、tsx、vue、rs、py、rb、go、java、c、h、cpp、hpp、cs、php、sh、bash、zsh、ps1、bat、cmd、ini、cfg、conf、env、gitignore、gitattributes | `read_file`，没有替身 | 超过 768KiB 失败且不截断；非法 UTF-8 用 lossy；`SelectableRichText` 不开语法高亮 | “文本超过 786432 字节” | 已测试（未离屏） |
 | `filePreviewExtensions.ts` 音视频 | mp4、mov、mkv、webm、avi、m4v、mp3、wav、ogg、flac、m4a、aac、opus | `PlaybackSessionController`，插件 `load` 返回“没有原生解码器” | 播放、暂停、跳转和音量都停在 failed，不会变成 playing | “没有原生解码器” | 已测试（未离屏） |
-| `office-preview` / `preview-archive` / `three-model-preview` | pdf、Office、zip、cbz、7z、rar、cbr、fbx、obj、glb、gltf、vrm、stl、3mf、blend，且没有 Preview 贡献 | 无 | 显示升级提示；不嵌入 Three.js | “该预览仍是 Vue 插件，需要升级为 Nana 原生预览贡献” | 已测试（未离屏） |
-| `RegisterPreview` | 贡献种类是 Preview，扩展名匹配 | 无 | 只显示贡献标签和 `view_id`；其他种类忽略并记日志 | “原生预览 · {label} · {view_id}” | 已测试（未离屏） |
+| `office-preview` / `preview-archive` / `three-model-preview` | pdf、doc/xls/ppt、7z、rar、cbr、fbx、vrm、3mf、blend，且没有可绘制的 Preview 贡献 | 无 | 显示升级提示；不嵌入 PDF.js 或 Three.js | “该预览仍是 Vue 插件，需要升级为 Nana 原生预览贡献” | 已测试（未离屏） |
+| 内置压缩包、文档和模型 | zip、cbz、docx、docm、dotx、xlsx、xlsm、pptx、pptm、obj、gltf、glb、stl | `read_file` 后按 view 解析，没有替身 | 压缩包列文件名和大小，最多 200 条；Open XML 抽段落文本；模型只给计数。坏文件是错误态；过期代次丢弃 | “正在读取压缩包…” / “压缩包 · N 个文件” / “顶点 N” | 已测试（未离屏） |
+| `RegisterPreview` | 贡献种类是 Preview，扩展名匹配 | 已知 view 走上面的读取；未知 view 不读文件 | 后登记的同扩展名优先；其他种类忽略并记日志 | 未知 view：“原生预览 · {label} · {view_id}” | 已测试（未离屏） |
 | 未知扩展名 | 没有内置类型，也没有 Preview 贡献 | 无 | 失败，不显示空图片 | “无法预览此类型” | 已测试（未离屏） |
 | 过期预览 | 文本代次或图片路径与当前目标不同 | 丢弃 | 保留当前预览体 | 仍是当前目标 | 已测试（未离屏） |
 | `FileMetadataEditor.vue` 草稿 | 评分、注释、链接、标签、自定义字段 | 无，直到保存 | 评分 0–5，相同值回到 0；空白和重复标签忽略；保留键不能当自定义字段；注释没有时回退 note | “元数据 · 未保存” / “评分 N” | 已测试（未离屏） |
@@ -198,7 +199,7 @@
 | `PluginManagerPanel.vue` 字段 | 数字、选择、布尔、JSON | `set_plugin_config_value` 或 `delete_plugin_config_value`，没有替身 | 空数字或空选项是重置；非法 JSON 不请求；空 JSON 文本按 null 保存 | “原始 不是有效 JSON。” / “插件设置已保存。” | 已测试（未离屏） |
 | `PluginManagerPanel.vue` 设置页 | 再次打开同一插件，或路由到未知插件 | 已有快照时不重复 `get_plugin_config` | 第二次折叠；未知和空白 id 忽略；设置页加载配置不跳走 | “插件设置” | 已测试（未离屏） |
 | `PluginManagerPanel.vue` 启停和安装 | 实况启停，或选择安装包 | `set_plugin_enabled`、`install_plugin_from_archive`，没有替身；选择安装包先发 `OpenFileDialog` | 不切到插件设置页；空白路径不安装；取消对话框不安装 | “插件已禁用。” / “插件已安装。” / “正在选择插件包…” | 已测试（未离屏） |
-| `PluginManagerPanel.vue` Vue 页面 | 自定义设置页或来源账号 | 不挂 Vue 组件 | 原生字段仍可编辑 | “插件设置页仍是 Vue 页面，需要升级为 Nana 原生设置字段” / “账号与来源仍是 Vue 页面，需要升级为 Nana 原生设置” | 已测试（未离屏） |
+| `PluginManagerPanel.vue` Vue 页面 | 自定义设置页或来源账号 | 已有 `fields` 的设置页直接用原生字段，不挂 Vue 组件 | 没有字段的设置页和来源账号仍提示升级 | “插件设置页仍是 Vue 页面，需要升级为 Nana 原生设置字段” / “账号与来源仍是 Vue 页面，需要升级为 Nana 原生设置” | 已测试（未离屏） |
 | `PluginManagerPanel.vue` 数据目录 | 打开插件目录 | `get_plugin_data_directory`，没有替身；查到路径后由宿主定位 | 读取失败仍显示错误；成功排队 `OpenExternal` 并显示已打开 | “已打开“user.one”设置目录。” / “插件设置目录打开失败。” | 已测试（未离屏） |
 | `PluginManagerPanel.vue` 依赖 | 依赖状态为空或有状态 | 无 | 状态列表为空时用 requires 和 optional 的数量 | “必需 2 / 可选 0” / “缺失” / “已启用” | 已测试（未离屏） |
 | `WorkspaceLogsPanel.vue` 筛选 | 级别、来源、搜索、暂停 | 不把条件写进 `SystemLogQuery` | 客户端排序是时间再 id；筛选变空时不滚动；暂停后签名变化也不滚动；记录本身不删 | “最近日志 · 2 条记录” / “日志滚动已暂停” | 已测试（未离屏） |

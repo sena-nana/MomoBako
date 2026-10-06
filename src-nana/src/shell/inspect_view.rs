@@ -56,8 +56,9 @@ fn preview_body(model: &ShellViewModel) -> AnyView {
             widget(SelectableRichText::new([RichSpan::plain(source.clone())])).key("inspect-text").into_any()
         }
         PreviewBody::Media(session) => media_bar(session),
-        PreviewBody::Native { view_id, label } => {
-            text(format!("原生预览 · {label} · {view_id}")).key("inspect-native").into_any()
+        PreviewBody::Native { content, label, .. } => {
+            let body = if content.is_empty() { label.clone() } else { content.clone() };
+            widget(SelectableRichText::new([RichSpan::plain(body)])).key("inspect-native").into_any()
         }
         PreviewBody::Failed(message) => text(message.clone()).key("inspect-failed").into_any(),
         PreviewBody::Upgrade(message) => text(message.clone()).key("inspect-upgrade").into_any(),
