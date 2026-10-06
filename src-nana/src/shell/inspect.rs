@@ -1,7 +1,7 @@
 //! 预览、元数据和搜索。
 //!
 //! 按扩展名分派图片、Markdown、纯文本、音视频，以及内置的压缩包、文档和模型预览。
-//! 音视频走 `PlaybackSessionController`。没有原生解码器时停在失败态，不播放静默成功。
+//! 音视频先读取文件。WAV 停在 paused 并带时长；其它格式失败，不把失败当成播放。
 //! ZIP、Open XML、OBJ、glTF 和 STL 由内置贡献读取。PDF、旧版 Office 和其余三维格式
 //! 在登记可绘制的 Preview 贡献之前显示升级提示。Three.js 页面不嵌进 Runtime。
 
@@ -148,6 +148,7 @@ pub enum InspectEffect {
     LoadImage { repo_id: String, path: String },
     LoadText { repo_id: String, path: String, markdown: bool, generation: u64 },
     LoadNative { repo_id: String, path: String, view_id: String, generation: u64 },
+    LoadMedia { repo_id: String, path: String, generation: u64 },
     SaveMetadata { repo_id: String, asset_id: String, expected_version: i64, metadata: BTreeMap<String, Value> },
     Undo { repo_id: String, asset_id: String },
     Redo { repo_id: String, asset_id: String },
@@ -211,6 +212,7 @@ pub enum InspectMessage {
     MetadataSaved(Result<(String, AssetDetail), String>),
     BodyLoaded { path: String, markdown: bool, generation: u64, result: Result<String, String> },
     NativeLoaded { path: String, generation: u64, result: Result<String, String> },
+    MediaLoaded { path: String, generation: u64, result: Result<PlaybackSessionState, String> },
     PlayPause,
     Seek(u64),
     SetVolume(f32),
@@ -467,13 +469,7 @@ impl InspectState {
                     generation: self.generation,
                 });
             }
-            PreviewKind::Media => {
-                let session = support::fail_media(repo_id, path);
-                let message = session.error.clone().unwrap_or_else(|| "没有原生解码器".into());
-                self.body = PreviewBody::Media(session);
-                self.error = message.clone();
-                self.activity = message;
-            }
+            PreviewKind::Media => support::begin_media(self, repo_id, path),
             PreviewKind::Native { view_id, label } => native_preview::begin(self, repo_id, path, view_id, label),
             PreviewKind::Upgrade => {
                 let message = "该预览仍是 Vue 插件，需要升级为 Nana 原生预览贡献".to_string();
@@ -538,6 +534,7 @@ impl InspectState {
                 self.note_body(path, markdown, generation, result);
             }
             InspectMessage::NativeLoaded { path, generation, result } => native_preview::note_loaded(self, path, generation, result),
+            InspectMessage::MediaLoaded { path, generation, result } => support::note_media(self, path, generation, result),
             InspectMessage::PlayPause => self.transport_play_pause(),
             InspectMessage::Seek(position_ms) => self.transport_seek(position_ms),
             InspectMessage::SetVolume(volume) => self.transport_volume(volume),
@@ -734,7 +731,7 @@ impl InspectState {
             return;
         };
         let playing = session.status == "playing";
-        let mut controller = PlaybackSessionController::new(support::MissingDecoder, session.clone());
+        let mut controller = PlaybackSessionController::new(support::transport_plugin(session), session.clone());
         let result = if playing { controller.pause() } else { controller.play() };
         if let Err(error) = result {
             eprintln!("Nana 播放控制失败：{error}");
@@ -746,7 +743,7 @@ impl InspectState {
         let PreviewBody::Media(session) = &self.body else {
             return;
         };
-        let mut controller = PlaybackSessionController::new(support::MissingDecoder, session.clone());
+        let mut controller = PlaybackSessionController::new(support::transport_plugin(session), session.clone());
         if let Err(error) = controller.seek(position_ms) {
             eprintln!("Nana 播放进度失败：{error}");
         }
@@ -757,7 +754,7 @@ impl InspectState {
         let PreviewBody::Media(session) = &self.body else {
             return;
         };
-        let mut controller = PlaybackSessionController::new(support::MissingDecoder, session.clone());
+        let mut controller = PlaybackSessionController::new(support::transport_plugin(session), session.clone());
         if let Err(error) = controller.set_volume(volume) {
             eprintln!("Nana 播放音量失败：{error}");
         }
@@ -984,7 +981,7 @@ impl super::ShellViewModel {
 }
 
 #[path = "inspect_support.rs"]
-mod support;
+pub(super) mod support;
 pub use support::prepare_text;
 
 #[cfg(test)]

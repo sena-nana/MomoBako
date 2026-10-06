@@ -67,7 +67,7 @@ Nana `ApplicationState::initialize` 现在启动共享 `RepositoryRuntime`，窗
 仍显示明确的“不支持原生纹理预览”状态，不伪造成功。
 
 启动就绪且不是 `acceptance_scene` 时，实况预览和搜索替换原来的预览占位。Markdown 用
-`NativeMarkdown`，纯文本用 `SelectableRichText`。音视频没有原生解码器时停在失败态。
+`NativeMarkdown`，纯文本用 `SelectableRichText`。WAV 预览能进入暂停并改播放状态，其它音视频没有解码器时停在失败态。
 ZIP/CBZ/7z/RAR/CBR、FlateDecode PDF、Open XML 和 OLE 文档文本，以及 OBJ/glTF/GLB/STL/3MF/VRM 摘要、FBX/BLEND 文件头，已由内置原生预览读取。文件导入、Eagle 导入和 API Playground 已是原生工具页。来源账号按钮会调用插件登录方法。播放列表内置 WAV，正式 Windows 构建用 winmm 出声，测试构建不开设备。PDF 页面、视频解码和网格渲染仍未迁。这批状态有单测，还没有新的离屏场景。
 
 仍未宣称完成的能力包括语法高亮、真实媒体解码器、系统媒体会话、PDF.js/Office/Three.js 嵌入和

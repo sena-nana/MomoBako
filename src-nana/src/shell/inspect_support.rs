@@ -1,11 +1,11 @@
-//! 预览扩展名分派、文本字节上限、无解码器的播放会话，以及搜索条件解析。
+//! 预览扩展名分派、文本字节上限、WAV 预览会话，以及搜索条件解析。
 //!
 //! Markdown 先于普通文本。内置贡献负责 ZIP、Open XML 和部分模型；其余文档和模型仍要求升级。
 
 use serde_json::Value;
 
 use crate::backend::services::repository::{MetadataEntry, PlaybackSessionState};
-use crate::host_api::{PlaybackMediaCapabilities, PlaybackMediaPlugin, PlaybackSessionController};
+use crate::host_api::{PlaybackMediaCapabilities, PlaybackMediaPlugin};
 use crate::plugin_api::NativeContributionKind;
 
 use super::{
@@ -69,40 +69,116 @@ pub fn prepare_text(bytes: &[u8]) -> Result<String, String> {
     Ok(String::from_utf8_lossy(bytes).into_owned())
 }
 
-/// 生产环境没有原生解码器。`load` 失败后会话停在 failed，后续控制也不能变成播放中。
-pub(super) struct MissingDecoder;
+/// 音视频预览先排队读文件。WAV 成功后才允许播放控制。
+pub(super) fn begin_media(state: &mut super::InspectState, repo_id: &str, path: &str) {
+    state.loading = true;
+    state.activity = "正在读取音频…".into();
+    state.body = super::PreviewBody::Empty;
+    state.error.clear();
+    state.effects.push(super::InspectEffect::LoadMedia {
+        repo_id: repo_id.to_string(),
+        path: path.to_string(),
+        generation: state.generation,
+    });
+}
 
-impl PlaybackMediaPlugin for MissingDecoder {
+/// 代次或路径过期时保留当前预览。WAV 写入 paused 会话，其它格式失败。
+pub(super) fn note_media(
+    state: &mut super::InspectState,
+    path: String,
+    generation: u64,
+    result: Result<PlaybackSessionState, String>,
+) {
+    if generation != state.generation || state.target_path.as_deref() != Some(path.as_str()) {
+        eprintln!("Nana 忽略过期的音视频预览：{path}");
+        return;
+    }
+    state.loading = false;
+    state.activity.clear();
+    match result {
+        Ok(session) => {
+            state.error.clear();
+            state.body = super::PreviewBody::Media(session);
+        }
+        Err(error) => {
+            eprintln!("Nana 音视频预览失败：{error}");
+            let repo_id = state.repo_id.clone().unwrap_or_default();
+            state.body = super::PreviewBody::Media(failed_session(&repo_id, error.clone()));
+            state.error = error;
+            state.activity = state.error.clone();
+        }
+    }
+}
+
+/// 只有 WAV 能进入可控制会话。其它字节仍是没有解码器。
+pub(crate) fn preview_media_session(repo_id: &str, bytes: &[u8]) -> Result<PlaybackSessionState, String> {
+    match crate::shell::player::wav_duration_ms(bytes) {
+        Ok(duration) => Ok(paused_wav_session(repo_id, duration)),
+        Err(error) => {
+            eprintln!("Nana 音视频预览不能解码：{error}");
+            Err("没有原生解码器".into())
+        }
+    }
+}
+
+/// 已装载的 WAV 允许播放、暂停、跳转和音量。失败会话仍拒绝控制。
+pub(super) fn transport_plugin(session: &PlaybackSessionState) -> TransportPlugin {
+    if session.error.is_none() && session.duration_ms.is_some() {
+        TransportPlugin::Ready
+    } else {
+        TransportPlugin::Missing
+    }
+}
+
+pub(super) enum TransportPlugin {
+    Ready,
+    Missing,
+}
+
+impl PlaybackMediaPlugin for TransportPlugin {
     fn load(&mut self, _source: &str) -> Result<PlaybackMediaCapabilities, String> {
-        Err("没有原生解码器".into())
+        Err("预览控制不重复装载".into())
     }
 
     fn play(&mut self) -> Result<(), String> {
-        Err("没有原生解码器".into())
+        match self {
+            Self::Ready => Ok(()),
+            Self::Missing => Err("没有原生解码器".into()),
+        }
     }
 
     fn pause(&mut self) -> Result<(), String> {
-        Err("没有原生解码器".into())
+        self.play()
     }
 
     fn seek(&mut self, _position_ms: u64) -> Result<(), String> {
-        Err("没有原生解码器".into())
+        self.play()
     }
 
     fn set_volume(&mut self, _volume: f32) -> Result<(), String> {
-        Err("没有原生解码器".into())
+        self.play()
     }
 
     fn dispose(&mut self) {}
 }
 
-/// 用缺失解码器装载路径。失败写入会话错误，不返回可播放状态。
-pub(super) fn fail_media(repo_id: &str, path: &str) -> PlaybackSessionState {
-    let mut controller = PlaybackSessionController::new(MissingDecoder, fresh_session(repo_id));
-    if let Err(error) = controller.load(path) {
-        eprintln!("Nana 音视频预览失败：{error}");
+fn paused_wav_session(repo_id: &str, duration_ms: u64) -> PlaybackSessionState {
+    PlaybackSessionState {
+        status: "paused".into(),
+        duration_ms: Some(duration_ms),
+        can_seek: true,
+        can_volume: true,
+        error: None,
+        ..fresh_session(repo_id)
     }
-    controller.state().clone()
+}
+
+fn failed_session(repo_id: &str, error: String) -> PlaybackSessionState {
+    PlaybackSessionState {
+        status: "failed".into(),
+        error: Some(error),
+        ..fresh_session(repo_id)
+    }
 }
 
 fn fresh_session(repo_id: &str) -> PlaybackSessionState {

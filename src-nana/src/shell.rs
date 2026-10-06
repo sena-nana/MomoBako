@@ -34,6 +34,7 @@ pub use inspect::{
     DateBound, InspectEffect, InspectMessage, NumberBound, SearchRequestDraft, SearchRow, prepare_text,
 };
 pub(crate) use inspect::native_preview::read as read_native_preview;
+pub(crate) use inspect::support::preview_media_session;
 pub use sidebar::{
     FolderMutation, GapMessage, SidebarEffect, SidebarFolder, SidebarMessage, SidebarPlaylist, SidebarSmartFolder,
     ShortcutId,
