@@ -438,6 +438,7 @@ fn queue_source_auth(model: &mut ShellViewModel, plugin_id: &str, slot: SourceAu
         return;
     };
     model.admin.reset_action();
+    model.admin.action_message = format!("正在调用 {method}…");
     model.admin.effects.push(AdminEffect::CallPlugin {
         plugin_id: plugin_id.to_string(),
         method,

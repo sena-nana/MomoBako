@@ -207,7 +207,7 @@
 | `TaskPopover.vue` | 任务和仓库操作 | 无 | 合成行 id 是 `workspace-operation`，来源是资源库，按更新时间降序；外部点击只在外侧关闭；Escape 和卸载关闭 | “任务” / “当前没有运行中的任务。” | 已测试（未离屏） |
 | `RepositoryActionsPanel.vue` 列表 | 切到动作面板，或过期仓库 | `list_repository_actions`，没有替身 | 过期仓库忽略；当前仓库读失败保留旧列表；没有选中时用第一项 | “正在加载动作” / “当前仓库没有导入动作。” | 已测试（未离屏） |
 | `RepositoryActionsPanel.vue` 执行 | 点击执行 | `momobako.repository.action.run`，没有替身 | 需要 ready、启用、多选路径且不在执行中；选中动作同时切到动作面板；成功后刷新文件列表 | “不支持” / “执行” | 已测试（未离屏） |
-| `ExtensionsPanel.vue` 工具页 | 工具页列表变化 | 文件导入和 Eagle 导入派发已有的 `OpenDialog` / `OpenEagle`；API Playground 只列已有快照 | 三个内置 id 不再显示升级。没有仓库、只读、回收站或虚拟视图时按钮禁用。其它非原生页仍提示升级 | “当前没有可用仓库。” / “还没有 API 设计快照” / “工具页仍是 Vue 插件，需要升级为 Nana 原生工具页” | 已测试（未离屏） |
+| `ExtensionsPanel.vue` 工具页 | 工具页列表变化 | 文件导入和 Eagle 导入派发已有的 `OpenDialog` / `OpenEagle`，并回到文件页把对话框画出来；API Playground 只列已有快照 | 三个内置 id 不再显示升级。没有仓库、只读、回收站或虚拟视图时按钮禁用。其它非原生页仍提示升级 | “当前没有可用仓库。” / “多个路径用分号分隔” / “还没有 API 设计快照” | 已测试；导入对话框由实况点击覆盖 |
 | 实况表面 | 验收场景 | 无 | `acceptance_scene` 不显示这批表面，旧按钮文案不变 | “应用设置” / “刷新日志” / “查看任务” | 已测试（未离屏） |
 
 ## Phase 7 宿主输入

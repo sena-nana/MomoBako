@@ -931,7 +931,15 @@ pub(super) fn reduce_message(model: &mut super::ShellViewModel, message: super::
         return Some(message);
     };
     let context = FileContext::from_model(model);
+    let show_on_files = matches!(
+        message,
+        FilesMessage::OpenDialog(FileDialog::Import | FileDialog::ImportArchive | FileDialog::ImportEagle)
+            | FilesMessage::OpenEagle(_)
+    );
     model.files.reduce(&context, message);
+    if show_on_files && model.files.dialog != FileDialog::Closed {
+        model.workspace.panel = super::workspace::WorkspacePanel::Files;
+    }
     None
 }
 
