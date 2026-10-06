@@ -4037,7 +4037,7 @@ dependencies = [
 name = "momobako_source_eagle_library"
 version = "0.1.0"
 dependencies = [
- "momobako",
+ "momobako-backend",
  "momobako_mutsuki_plugin_sdk",
  "serde",
  "serde_json",

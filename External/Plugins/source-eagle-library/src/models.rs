@@ -2,7 +2,7 @@
 
 use std::{collections::BTreeMap, path::PathBuf};
 
-use momobako_lib::EagleSourceEntry;
+use momobako_backend::EagleSourceEntry;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 

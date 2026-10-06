@@ -11,4 +11,8 @@ pub mod viewmodels;
 mod tests;
 
 pub use services::host_events::{host_event_channel, HostEvent, HostEventSink};
+pub use services::repository::eagle_import::source_adapter::{
+    build_eagle_source_snapshot, EagleSourceDiscoveredFile, EagleSourceEntry, EagleSourceEntryKind,
+    EagleSourceSnapshot,
+};
 pub use services::runtime::RepositoryRuntime;
