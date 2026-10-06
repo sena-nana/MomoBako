@@ -12,7 +12,7 @@ use nana_ui::icons_tabler::{
 };
 use nana_ui::runtime::view::{button, each_virtual, signal, text, widget, AnyView, IntoView};
 use nana_ui::runtime::{
-    Activate, AlignSpec, ConfirmDialog, Dialog, Icon, LengthSpec, RadiusTier, ScrollAxes, ScrollView, Stack, TextChanged,
+    Activate, AlignSpec, ConfirmDialog, Dialog, Icon, LengthSpec, Progress, RadiusTier, ScrollAxes, ScrollView, Stack, TextChanged,
     TextInput, Thumbnail,
 };
 use nana_ui::ContentFit;
@@ -78,8 +78,18 @@ fn files_status(model: &ShellViewModel) -> AnyView {
     if !files.activity.is_empty() {
         rows.push(text(files.activity.clone()).key("file-activity").into_any());
     }
-    if let Some(label) = files.operation_label() {
-        rows.push(text(label).key("file-operation").into_any());
+    if let Some(percent) = model.motion.operation_percent() {
+        let mut progress = Progress::new(f64::from(percent), 100.0).label(files.operation_label().unwrap_or_default());
+        let layout = std::sync::Arc::make_mut(&mut progress.style.layout);
+        layout.opacity = Some(model.motion.pulse_opacity());
+        layout.height = Some(LengthSpec::Px(6.0));
+        rows.push(widget(progress).key("file-operation-progress").into_any());
+    }
+    if model.motion.spinner_on() {
+        let mut mark = nana_ui::runtime::Text::new("忙");
+        let layout = std::sync::Arc::make_mut(&mut mark.style.layout);
+        layout.transform = Some(super::motion::spin_transform(model.motion.spinner_degrees()));
+        rows.push(widget(mark).key("motion-spinner").into_any());
     }
     if files.visible_rows(&ctx).is_empty() && !files.loading {
         rows.push(text(empty_copy(&ctx)).key("file-empty").into_any());
@@ -283,7 +293,7 @@ fn file_row(row: FileRow, mode: DisplayMode) -> AnyView {
     let activate = button(label).key(format!("file-row-{}", row.key())).on_cx(move |_, _: &Activate, cx| {
         cx.dispatch_program(file_message(FilesMessage::ActivateRow(path.clone())));
     });
-    let marker = path_marker(&row.path);
+    let marker = path_marker(&row.kind, &row.path);
     let thumb = thumbnail(&row, metrics.preview_width, metrics.preview_height, mode.is_list());
     if mode.is_list() {
         widget(Stack::row(12.0).align(AlignSpec::Center).min_height(LengthSpec::Px(72.0)))
@@ -299,8 +309,8 @@ fn file_row(row: FileRow, mode: DisplayMode) -> AnyView {
 }
 
 /// 行上的隐藏路径。命中按钮后沿父节点找到它，实况指针才能对上条目。
-fn path_marker(path: &str) -> AnyView {
-    let mut marker = nana_ui::runtime::Text::new(format!("momobako-path:{path}"));
+fn path_marker(kind: &str, path: &str) -> AnyView {
+    let mut marker = nana_ui::runtime::Text::new(format!("momobako-entry:{kind}:{path}"));
     let layout = std::sync::Arc::make_mut(&mut marker.style.layout);
     layout.hidden = true;
     layout.height = Some(LengthSpec::Px(0.0));
