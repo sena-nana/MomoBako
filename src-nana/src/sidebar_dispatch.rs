@@ -13,9 +13,6 @@ use crate::MomoBakoApplication;
 
 /// 执行侧栏归约留下的请求。提交失败时把错误写回侧栏，避免刷新一直停在进行中。
 pub fn dispatch_sidebar_effects(app: &mut MomoBakoApplication, context: &RuntimeProgramContext<ShellMessage>) {
-    for request in dispatch_prepared_browses(&mut app.shell) {
-        dispatch_browse_request(app, context, request);
-    }
     for effect in app.shell.sidebar.take_effects() {
         match effect {
             SidebarEffect::LoadTree { repo_id } => dispatch_tree(app, context, repo_id),
@@ -360,14 +357,8 @@ pub(crate) fn dispatch_prepared_browses(shell: &mut crate::shell::ShellViewModel
     staged
         .into_iter()
         .filter_map(|effect| match effect {
-            SidebarEffect::Browse { repo_id, path, trash } => {
-                shell.note_sidebar_browse(&path);
-                Some(browse_request(repo_id, path, trash))
-            }
-            other => {
-                shell.staged_browses.push(other);
-                None
-            }
+            SidebarEffect::Browse { repo_id, path, trash } => Some(browse_request(repo_id, path, trash)),
+            _ => None,
         })
         .collect()
 }
