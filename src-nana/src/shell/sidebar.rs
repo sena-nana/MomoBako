@@ -573,6 +573,10 @@ impl SidebarState {
         }
         self.popover_error.clear();
         self.popover = PopoverMode::Switcher;
+        if self.popover_x == 0.0 && self.popover_y == 0.0 {
+            self.popover_x = 8.0;
+            self.popover_y = 48.0;
+        }
     }
 
     /// 提交附加时保持当前弹层，避免附加过程中再打开菜单。

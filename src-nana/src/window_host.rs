@@ -1,4 +1,6 @@
-//! 窗口准备阶段的动效时钟和分隔条回写。
+//! 窗口准备阶段的动效时钟、预取和分隔条回写。
+
+use std::cell::Cell;
 
 use nana_ui::runtime::{component_descriptors, Entity, Workspace};
 use nana_ui::{ApplicationWindow, RegionId, RuntimeProgramContext, RuntimeProgramUpdate};
@@ -6,10 +8,16 @@ use nana_ui::{ApplicationWindow, RegionId, RuntimeProgramContext, RuntimeProgram
 use crate::shell::{ShellMessage, ShellViewModel, WindowAction};
 use crate::{host_api, MomoBakoApplication};
 
+thread_local! {
+    static ESCAPE_KEY: Cell<bool> = const { Cell::new(false) };
+}
+
 /// 动效还在走时按 30 帧继续画，并把工作区拖动后的宽度写回壳层。
 ///
 /// 指针手势先读当前文档。手势进行中不拆树，否则按下目标会随节点一起消失。
 pub(crate) fn prepare_motion(shell: &mut ShellViewModel, window: &mut ApplicationWindow) {
+    take_escape(shell);
+    drive_prefetch(shell);
     let tracking = crate::shell::observe_live_pointer(shell, &window.document);
     if shell.motion.active() {
         shell.motion.advance(shell.motion.now_ms().saturating_add(16));
@@ -19,12 +27,50 @@ pub(crate) fn prepare_motion(shell: &mut ShellViewModel, window: &mut Applicatio
             }
         }
     }
-    window.demand = if shell.motion.active() || tracking {
+    window.demand = if shell.motion.active() || tracking || shell.files.prefetch_pending() {
         nana_ui::FrameDemand::Continuous(std::num::NonZeroU32::new(30).expect("30"))
     } else {
         nana_ui::FrameDemand::OnDemand
     };
     sync_sidebar_resize(shell, &window.document);
+}
+
+fn drive_prefetch(shell: &mut ShellViewModel) {
+    if !shell.files.prefetch_pending() {
+        return;
+    }
+    let now = shell.files.tick_prefetch(16);
+    let paths = shell.files.undecoded_thumbnail_paths();
+    shell.files.poll_thumbnail_prefetch(now, &paths);
+}
+
+fn take_escape(shell: &mut ShellViewModel) {
+    let pressed = ESCAPE_KEY.with(|flag| flag.replace(false));
+    if pressed {
+        shell.reduce(ShellMessage::Sidebar(crate::shell::SidebarMessage::Gap(crate::shell::GapMessage::Escape)));
+    }
+}
+
+/// 把 Esc 接到「快捷键」按钮。焦点在这个按钮上时，归约关掉最上面一层。
+pub(crate) fn bind_escape(document: &mut nana_ui::runtime::RuntimeDocument) {
+    let document_id = document.document();
+    let Some(id) = document.context().world().project_accessibility(document_id).into_iter().find_map(|node| {
+        (node.label.as_deref() == Some("快捷键")).then_some(node.id)
+    }) else {
+        eprintln!("Nana 没有快捷键捕获按钮");
+        return;
+    };
+    let entity = Entity::<nana_ui::runtime::Button>::from_stable_id(id);
+    if let Err(error) = document.context_mut().on_key(entity, |key| {
+        if key.pressed && !key.repeat && key.key.as_ref() == "Escape" {
+            ESCAPE_KEY.with(|flag| flag.set(true));
+            true
+        } else {
+            false
+        }
+    }) {
+        eprintln!("Nana Escape 没有接到焦点按钮：{error}");
+    }
 }
 
 /// 分隔条的松手被 Nana 工作区吃掉。指针捕获结束时才写入宽度。

@@ -12,7 +12,6 @@ use nana_ui::runtime::{
     TreeView, TreeViewEvent, ValidationIntent, ValidationMessage, ViewContext,
 };
 
-use super::files::{FileDialog, FilesMessage};
 use super::sidebar::{PopoverMode, ShortcutId, SmartFolderField};
 use super::SidebarMessage;
 use super::{ShellMessage, ShellPage, ShellViewModel, WorkspacePanel};
@@ -46,7 +45,7 @@ pub fn sidebar_switcher(model: &ShellViewModel) -> impl IntoView + use<'_> {
 /// 快捷方式、目录树、智能文件夹和播放集。边距交给 `SidebarFrame`，行距交给 `SidebarSection`。
 pub fn sidebar_sections(model: &ShellViewModel) -> impl IntoView + use<'_> {
     let locked = model.navigation_locked();
-    let mut sections = vec![group("快捷方式", None, shortcut_rows(model, locked))];
+    let mut sections = vec![group(model, "快捷方式", None, shortcut_rows(model, locked))];
     if !model.sidebar.quick_access.is_empty() {
         let mut rows = Vec::new();
         for shortcut in model.sidebar.quick_access.clone() {
@@ -55,7 +54,7 @@ pub fn sidebar_sections(model: &ShellViewModel) -> impl IntoView + use<'_> {
                 cx.dispatch_program(sidebar_message(SidebarMessage::OpenQuickAccess(id.clone())));
             }));
         }
-        sections.push(group("快捷访问", None, rows));
+        sections.push(group(model, "快捷访问", None, rows));
     }
     let folder_locked = locked || model.workspace.active_repo_id.is_none() || model.workspace.panel == WorkspacePanel::Trash;
     let refresh_locked = locked || model.workspace.active_repo_id.is_none() || model.sidebar.tree_loading;
@@ -64,11 +63,14 @@ pub fn sidebar_sections(model: &ShellViewModel) -> impl IntoView + use<'_> {
     if !model.sidebar.tree_error.is_empty() {
         folders.push(hint(&model.sidebar.tree_error, "folder-tree-error"));
     }
+    folders.extend(folder_actions(model, folder_locked));
+    let parent = model.sidebar.current_directory.clone();
     sections.push(group(
+        model,
         "文件夹",
         Some(widget(Stack::row(0.0)).children((
-            section_tool(PLUS, "在当前目录新建文件夹", "folder-create", folder_locked, || {
-                ShellMessage::Files(FilesMessage::OpenDialog(FileDialog::CreateDirectory))
+            section_tool(PLUS, "在当前目录新建文件夹", "folder-create", folder_locked, move || {
+                ShellMessage::Sidebar(SidebarMessage::Gap(super::sidebar::GapMessage::OpenFolderCreate(parent.clone())))
             }),
             section_tool(REFRESH, refresh_label, "refresh-folder-tree", refresh_locked, || {
                 ShellMessage::Sidebar(SidebarMessage::RefreshFolderTree)
@@ -81,7 +83,9 @@ pub fn sidebar_sections(model: &ShellViewModel) -> impl IntoView + use<'_> {
     if !model.sidebar.smart_error.is_empty() {
         smart.push(hint(&model.sidebar.smart_error, "smart-folder-error"));
     }
+    smart.extend(smart_actions(model, smart_locked));
     sections.push(group(
+        model,
         "智能文件夹",
         Some(section_tool(PLUS, "新建智能文件夹", "smart-create", smart_locked, || {
             ShellMessage::Sidebar(SidebarMessage::OpenSmartFolderDialog)
@@ -112,13 +116,17 @@ pub fn sidebar_footer(model: &ShellViewModel) -> impl IntoView + use<'_> {
     } else {
         "任务".into()
     };
+    let footer_opacity = model.motion.footer_opacity();
     widget(SidebarFooter::new()).children((
-        footer_button(SETTINGS, "设置".into(), settings, || ShellMessage::Navigate(ShellPage::Settings)),
-        footer_button(PUZZLE, "拓展".into(), extensions, || ShellMessage::SetWorkspacePanel(WorkspacePanel::Extensions)),
-        footer_button(CLIPBOARD_LIST, task_label, model.admin.popover_open, || {
+        fade(footer_button(SETTINGS, "设置".into(), settings, || ShellMessage::Navigate(ShellPage::Settings)), footer_opacity),
+        fade(footer_button(PUZZLE, "拓展".into(), extensions, || ShellMessage::SetWorkspacePanel(WorkspacePanel::Extensions)), footer_opacity),
+        fade(footer_button(CLIPBOARD_LIST, task_label, model.admin.popover_open, || {
             ShellMessage::Admin(super::admin::AdminMessage::ToggleTaskPopover)
-        }),
-        footer_button(LOGS, "日志".into(), logs, || ShellMessage::SetWorkspacePanel(WorkspacePanel::Logs)),
+        }), footer_opacity),
+        fade(footer_button(LOGS, "日志".into(), logs, || ShellMessage::SetWorkspacePanel(WorkspacePanel::Logs)), footer_opacity),
+        widget(Button::new("快捷键").kind(ButtonKind::Text).size(ControlSize::Small))
+            .key("shell-keys")
+            .on_cx(|_, _: &Activate, _| {}),
     ))
 }
 
@@ -164,14 +172,21 @@ pub fn repository_popover(model: &ShellViewModel) -> Option<impl IntoView + use<
             }),
         )).into_any()
     };
-    Some(widget(Stack::fill_column(12.0).padding_xy(16.0, 16.0)).children((
+    let panel = widget(Stack::fill_column(12.0).padding_xy(16.0, 16.0)).children((
         text("资源库").key("repository-popover-title"),
         body,
+        backend_form(model),
         error,
         button("关闭").key("repository-popover-close").disabled(submitting).on_cx(|_, _: &Activate, cx| {
             cx.dispatch_program(sidebar_message(SidebarMessage::CloseRepositoryPopover));
         }),
-    )))
+        button("添加云盘").key("open-backend").disabled(submitting).on_cx(|_, _: &Activate, cx| {
+            cx.dispatch_program(sidebar_message(SidebarMessage::Gap(super::sidebar::GapMessage::OpenBackend {
+                plugin_id: "cloud".into(),
+            })));
+        }),
+    ));
+    Some(panel)
 }
 
 /// 侧栏里的文件夹新建或重命名。提交后走文件服务。
@@ -329,14 +344,23 @@ fn flatten_smart_folders(folders: &[super::sidebar::SidebarSmartFolder]) -> Vec<
 
 /// 一个侧栏分组。行距由 `SidebarSection` 的正文槽决定。
 /// 标题工具要一直能看见；组件默认只在悬停时放进标题槽。
-fn group(title: &'static str, tools: Option<AnyView>, body: Vec<AnyView>) -> AnyView {
+fn group(model: &ShellViewModel, title: &'static str, tools: Option<AnyView>, body: Vec<AnyView>) -> AnyView {
     let mut spec = SidebarSection::new(title);
-    spec.header_hovered = tools.is_some();
+    spec.header_hovered = model.motion.tools_revealed();
+    let opacity = model.motion.tools_opacity();
     let section = match tools {
-        Some(tools) => widget(spec).tools(tools),
+        Some(tools) => widget(spec).tools(fade(tools, opacity)),
         None => widget(spec),
     };
     section.children(body).into_any()
+}
+
+fn fade(view: AnyView, opacity: f32) -> AnyView {
+    widget(Stack::column(0.0).with_layout(|layout| {
+        layout.opacity = Some(opacity);
+    }))
+    .children((view,))
+    .into_any()
 }
 
 /// 播放集标题。数量跟在标题后，加号留在工具列。
@@ -451,6 +475,142 @@ fn shortcut_icon(id: ShortcutId) -> Icon {
     }
 }
 
+fn folder_actions(model: &ShellViewModel, locked: bool) -> Vec<AnyView> {
+    if locked {
+        return Vec::new();
+    }
+    let parent = model.sidebar.current_directory.clone();
+    let mut actions = vec![button("在当前目录新建文件夹").key("folder-create-row").on_cx(move |_, _: &Activate, cx| {
+        cx.dispatch_program(sidebar_message(SidebarMessage::Gap(super::sidebar::GapMessage::OpenFolderCreate(parent.clone()))));
+    }).into_any()];
+    if model.sidebar.current_directory.is_empty() {
+        return actions;
+    }
+    let path = model.sidebar.current_directory.clone();
+    let label = folder_label(&model.sidebar.folders, &path);
+    let rename_path = path.clone();
+    let rename_label = label.clone();
+    actions.push(button("重命名文件夹").key("folder-rename").on_cx(move |_, _: &Activate, cx| {
+        cx.dispatch_program(sidebar_message(SidebarMessage::Gap(super::sidebar::GapMessage::OpenFolderRename {
+            path: rename_path.clone(),
+            label: rename_label.clone(),
+        })));
+    }).into_any());
+    actions.push(button("删除文件夹").key("folder-delete").on_cx(move |_, _: &Activate, cx| {
+        cx.dispatch_program(sidebar_message(SidebarMessage::Gap(super::sidebar::GapMessage::OpenFolderDelete {
+            path: path.clone(),
+            label: label.clone(),
+        })));
+    }).into_any());
+    actions
+}
+
+fn smart_actions(model: &ShellViewModel, locked: bool) -> Vec<AnyView> {
+    if locked {
+        return Vec::new();
+    }
+    let mut actions = vec![button("新建智能文件夹").key("smart-create-row").on_cx(|_, _: &Activate, cx| {
+        cx.dispatch_program(sidebar_message(SidebarMessage::OpenSmartFolderDialog));
+    }).into_any()];
+    let Some(id) = model.sidebar.active_smart_folder_id.clone() else {
+        return actions;
+    };
+    let label = smart_label(&model.sidebar.smart_folders, &id);
+    let edit_id = id.clone();
+    actions.push(button("编辑智能文件夹").key("smart-edit").on_cx(move |_, _: &Activate, cx| {
+        cx.dispatch_program(sidebar_message(SidebarMessage::Gap(super::sidebar::GapMessage::OpenSmartEdit(edit_id.clone()))));
+    }).into_any());
+    actions.push(button("删除智能文件夹").key("smart-delete").on_cx(move |_, _: &Activate, cx| {
+        cx.dispatch_program(sidebar_message(SidebarMessage::Gap(super::sidebar::GapMessage::OpenSmartDelete {
+            id: id.clone(),
+            label: label.clone(),
+        })));
+    }).into_any());
+    actions
+}
+
+fn folder_label(folders: &[super::sidebar::SidebarFolder], path: &str) -> String {
+    fn walk(folders: &[super::sidebar::SidebarFolder], path: &str) -> Option<String> {
+        for folder in folders {
+            if folder.path == path {
+                return Some(folder.label.clone());
+            }
+            if let Some(label) = walk(&folder.children, path) {
+                return Some(label);
+            }
+        }
+        None
+    }
+    walk(folders, path).unwrap_or_else(|| path.to_string())
+}
+
+fn smart_label(folders: &[super::sidebar::SidebarSmartFolder], id: &str) -> String {
+    fn walk(folders: &[super::sidebar::SidebarSmartFolder], id: &str) -> Option<String> {
+        for folder in folders {
+            if folder.id == id {
+                return Some(folder.name.clone());
+            }
+            if let Some(name) = walk(&folder.children, id) {
+                return Some(name);
+            }
+        }
+        None
+    }
+    walk(folders, id).unwrap_or_else(|| id.to_string())
+}
+
+/// 确认删除侧栏文件夹。Escape 和取消都只关这一层。
+pub fn folder_delete_dialog(model: &ShellViewModel) -> Option<AnyView> {
+    if !model.sidebar.folder_delete_open() {
+        return None;
+    }
+    let label = model.sidebar.folder_delete_label.clone();
+    Some(widget(Dialog::new("删除文件夹")).body(text(format!("删除 {label}？")).key("folder-delete-copy")).footer(widget(Stack::row(8.0)).children((
+        button("取消").key("folder-delete-cancel").on_cx(|_, _: &Activate, cx| {
+            cx.dispatch_program(sidebar_message(SidebarMessage::Gap(super::sidebar::GapMessage::CloseFolderDelete)));
+        }),
+        button("删除").key("folder-delete-confirm").on_cx(|_, _: &Activate, cx| {
+            cx.dispatch_program(sidebar_message(SidebarMessage::Gap(super::sidebar::GapMessage::ConfirmFolderDelete)));
+        }),
+    ))).into_any())
+}
+
+/// 确认删除智能文件夹。
+pub fn smart_delete_dialog(model: &ShellViewModel) -> Option<AnyView> {
+    if !model.sidebar.smart_delete_open() {
+        return None;
+    }
+    let label = model.sidebar.smart_delete_label.clone();
+    Some(widget(Dialog::new(model.sidebar.smart_delete_title())).body(text(format!("删除 {label}？")).key("smart-delete-copy")).footer(widget(Stack::row(8.0)).children((
+        button("取消").key("smart-delete-cancel").on_cx(|_, _: &Activate, cx| {
+            cx.dispatch_program(sidebar_message(SidebarMessage::Gap(super::sidebar::GapMessage::CloseSmartDelete)));
+        }),
+        button("删除").key("smart-delete-confirm").on_cx(|_, _: &Activate, cx| {
+            cx.dispatch_program(sidebar_message(SidebarMessage::Gap(super::sidebar::GapMessage::ConfirmSmartDelete)));
+        }),
+    ))).into_any())
+}
+
+fn backend_form(model: &ShellViewModel) -> Option<AnyView> {
+    if model.sidebar.popover != PopoverMode::BackendForm {
+        return None;
+    }
+    let name = model.sidebar.backend_name.clone();
+    let url = model.sidebar.backend_url.clone();
+    Some(widget(Stack::column(8.0)).children((
+        text("云盘或 Eagle").key("backend-title"),
+        widget(TextInput::new(name).label("名称")).key("backend-name").on_cx(|_, event: &TextChanged, cx| {
+            cx.dispatch_program(sidebar_message(SidebarMessage::Gap(super::sidebar::GapMessage::SetBackendName(event.value.to_string()))));
+        }),
+        widget(TextInput::new(url).label("地址")).key("backend-url").on_cx(|_, event: &TextChanged, cx| {
+            cx.dispatch_program(sidebar_message(SidebarMessage::Gap(super::sidebar::GapMessage::SetBackendUrl(event.value.to_string()))));
+        }),
+        button("创建后端").key("backend-submit").on_cx(|_, _: &Activate, cx| {
+            cx.dispatch_program(sidebar_message(SidebarMessage::Gap(super::sidebar::GapMessage::SubmitBackend)));
+        }),
+    )).into_any())
+}
+
 fn folder_body(model: &ShellViewModel, locked: bool) -> impl IntoView + use<'_> {
     if model.workspace.active_repo_id.is_none() {
         return hint("先选择或添加一个资源库。", "folder-empty");
@@ -504,11 +664,19 @@ fn playlist_body(model: &ShellViewModel, locked: bool) -> impl IntoView + use<'_
         let id = playlist.id.clone();
         let active = model.workspace.panel == WorkspacePanel::Playlist && model.sidebar.active_playlist_id.as_deref() == Some(playlist.id.as_str());
         let subtitle = format!("{} · {} 项", playlist.player_label, playlist.item_count);
+        let play_id = id.clone();
+        let remove_id = id.clone();
         rows.push(widget(Stack::column(0.0)).children((
             sidebar_row(&playlist.name, active, false, move |cx| {
                 cx.dispatch_program(sidebar_message(SidebarMessage::OpenSidebarPlaylist(id.clone())));
             }),
             hint(&subtitle, format!("playlist-meta-{}", playlist.id)),
+            button(format!("播放 {}", playlist.name)).key(format!("playlist-play-{}", playlist.id)).on_cx(move |_, _: &Activate, cx| {
+                cx.dispatch_program(sidebar_message(SidebarMessage::Gap(super::sidebar::GapMessage::PlayPlaylist(play_id.clone()))));
+            }),
+            button(format!("移除 {}", playlist.name)).key(format!("playlist-remove-{}", playlist.id)).on_cx(move |_, _: &Activate, cx| {
+                cx.dispatch_program(sidebar_message(SidebarMessage::Gap(super::sidebar::GapMessage::RemovePlaylist(remove_id.clone()))));
+            }),
         )).into_any());
     }
     widget(Stack::column(6.0)).children(rows).into_any()

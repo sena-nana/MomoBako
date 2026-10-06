@@ -230,6 +230,12 @@ fn transport(model: &ShellViewModel) -> AnyView {
     if !download.is_empty() {
         rows.push(text(download).key("player-download").into_any());
     }
+    if model.motion.sweep_on() {
+        let mut sweep = nana_ui::runtime::Text::new("扫光");
+        let layout = std::sync::Arc::make_mut(&mut sweep.style.layout);
+        layout.transform = Some(super::motion::shift_x(model.motion.sweep_percent()));
+        rows.push(widget(sweep).key("download-sweep").into_any());
+    }
     if model.player.current_item().is_some_and(|item| item.file_class == "image" || item.file_class == "video") {
         rows.push(fit_controls(model));
     }

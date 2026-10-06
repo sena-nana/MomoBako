@@ -304,6 +304,7 @@ pub struct FilesState {
     pub(super) dialog: FileDialog,
     pub(super) operation: Option<FileOperation>,
     prefetch_due_ms: Option<u64>,
+    prefetch_clock: u64,
     pub(super) name_draft: String,
     pub(super) target_draft: String,
     pub(super) import_draft: String,
@@ -538,23 +539,35 @@ impl FilesState {
         self.finish_loading();
         let rows = self.rows.clone();
         self.prune_against(&rows);
-        self.queue_thumbnail_decode();
+        self.arm_thumbnail_prefetch();
         true
     }
 
-    /// 把还没有纹理的缩略图路径交给宿主解码。
-    fn queue_thumbnail_decode(&mut self) {
-        let paths: Vec<String> = self
-            .rows
+    /// 还有缩略图或下一页时，等空闲间隔再解码，不在快照到达的同一拍发出请求。
+    fn arm_thumbnail_prefetch(&mut self) {
+        let needs = self.has_more || !self.undecoded_thumbnail_paths().is_empty();
+        self.schedule_thumbnail_prefetch(needs, self.prefetch_clock);
+    }
+
+    pub fn undecoded_thumbnail_paths(&self) -> Vec<String> {
+        self.rows
             .iter()
             .filter(|row| !row.texture_ready)
             .filter_map(|row| row.thumbnail_path.clone())
             .filter(|path| !path.trim().is_empty())
-            .collect();
-        if paths.is_empty() {
-            return;
+            .collect()
+    }
+
+    pub fn prefetch_pending(&self) -> bool {
+        self.prefetch_due_ms.is_some()
+    }
+
+    /// 实况帧把空闲时钟向前拨。没有待预取时停在原地。
+    pub fn tick_prefetch(&mut self, step_ms: u64) -> u64 {
+        if self.prefetch_due_ms.is_some() {
+            self.prefetch_clock = self.prefetch_clock.saturating_add(step_ms);
         }
-        self.effects.push(FilesEffect::DecodeThumbnails { paths });
+        self.prefetch_clock
     }
 
     /// 用解码出的原始宽高替换布局。同一路径的行一起更新。

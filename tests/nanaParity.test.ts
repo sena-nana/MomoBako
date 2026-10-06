@@ -72,6 +72,18 @@ describe("nana parity files", () => {
 
 describe("nana parity host", () => {
   it("frozen host strings stay on the nana failure path", () => {
-    expect(fileOps).toContain("创建硬链接或复制文件");
+    const inputTests = read("src-nana/src/shell/input_tests.rs");
+    const adminTests = read("src-nana/src/shell/admin_tests.rs");
+    const frozen = [
+      "打开失败：宿主外部打开尚未接通",
+      "定位失败：宿主目录揭示尚未接通",
+      "拖出失败：宿主文件拖出尚未接通",
+      "最小化到托盘尚未接通",
+      "复制失败：宿主剪贴板尚未接通",
+    ];
+    for (const line of frozen) {
+      expect(inputTests.includes(line) || adminTests.includes(line), line).toBe(true);
+    }
+    expect(fileOps).toContain('detail: "创建硬链接或复制文件"');
   });
 });

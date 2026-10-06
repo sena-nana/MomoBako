@@ -663,22 +663,27 @@ pub fn mount_shell(
             };
             let title_bar = super::title_bar::title_bar(&view_model);
             let mut shell = widget(AppShell::new()).title_bar(title_bar).body(body);
-            if let Some(dialog) = delete_repository_dialog(&view_model) {
-                shell = shell.overlay(dialog);
+            if let Some(dialog) = super::sidebar_view::folder_delete_dialog(&view_model) {
+                shell = shell.overlay(super::motion::paint_modal(dialog, &view_model.motion));
+            } else if let Some(dialog) = super::sidebar_view::smart_delete_dialog(&view_model) {
+                shell = shell.overlay(super::motion::paint_modal(dialog, &view_model.motion));
+            } else if let Some(dialog) = delete_repository_dialog(&view_model) {
+                shell = shell.overlay(super::motion::paint_modal(dialog, &view_model.motion));
             } else if let Some(dialog) = playlist_creator_dialog(&view_model) {
-                shell = shell.overlay(dialog);
+                shell = shell.overlay(super::motion::paint_modal(dialog, &view_model.motion));
             } else if let Some(dialog) = super::sidebar_view::folder_dialog(&view_model) {
-                shell = shell.overlay(dialog);
+                shell = shell.overlay(super::motion::paint_modal(dialog, &view_model.motion));
             } else if let Some(dialog) = super::sidebar_view::smart_folder_dialog(&view_model) {
-                shell = shell.overlay(dialog);
+                shell = shell.overlay(super::motion::paint_modal(dialog, &view_model.motion));
             } else if let Some(popover) = super::sidebar_view::repository_popover(&view_model) {
-                shell = shell.overlay(popover);
+                shell = shell.overlay(super::motion::paint_panel(popover, &view_model));
             } else if let Some(popover) = super::admin::task_popover(&view_model) {
-                shell = shell.overlay(popover);
+                shell = shell.overlay(super::motion::paint_panel(popover, &view_model));
             }
             shell
         })?;
     super::title_bar::bind_window_controls(document)?;
+    crate::window_host::bind_escape(document);
     SHELL_MOUNT.with(|slot| *slot.borrow_mut() = Some(mounted));
     Ok(())
 }

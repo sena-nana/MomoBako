@@ -3,6 +3,8 @@
 //! 时钟留在 `ShellViewModel` 上。下一次归约会拆掉控件树，但进行中的轨道还在，
 //! 下一帧按已经走过的时间取样，不会从 0 重新开始。减少动效时全部立刻停在终点。
 
+use nana_ui::runtime::view::{widget, AnyView, IntoView};
+
 /// 对话框遮罩。`shell.css` `.modal-enter-active` 的 `opacity 0.16s ease`。
 pub const MODAL_OVERLAY_MS: u64 = 160;
 /// 对话框卡片。`transform 0.18s cubic-bezier(0.2, 0.8, 0.2, 1)`。
@@ -321,6 +323,19 @@ impl MotionState {
         self.operation.as_ref().map(|track| track.value(self.now_ms))
     }
 
+    pub fn spinner_on(&self) -> bool {
+        self.spinner_on && !self.reduced
+    }
+
+    /// 悬停已经开始，或淡出还没走完。分组工具在这期间留在树上。
+    pub fn tools_revealed(&self) -> bool {
+        self.tools_hover || self.tools.as_ref().is_some_and(|track| track.value(self.now_ms) > 0.01)
+    }
+
+    pub fn sweep_on(&self) -> bool {
+        self.sweep_on && !self.reduced
+    }
+
     pub fn spinner_degrees(&self) -> f32 {
         if !self.spinner_on || self.reduced {
             return 0.0;
@@ -460,6 +475,44 @@ impl Track {
     fn finished(&self, now_ms: u64) -> bool {
         self.looping || now_ms.saturating_sub(self.started_ms) >= self.duration_ms
     }
+}
+
+/// 对话框遮罩透明度和卡片的上移、缩放。
+pub fn paint_modal(view: impl IntoView, motion: &MotionState) -> AnyView {
+    let frame = motion.modal_frame();
+    paint_layer(view, frame.overlay_opacity, shift_scale(frame.card_shift, frame.card_scale))
+}
+
+/// 弹层透明度和 4px 上移，原点用侧栏记下的坐标。
+pub fn paint_panel(view: impl IntoView, model: &super::ShellViewModel) -> AnyView {
+    let frame = model.motion.panel_frame();
+    let shift = shift_x(model.sidebar.popover_x).then(shift_scale(frame.shift + model.sidebar.popover_y, 1.0));
+    paint_layer(view, frame.opacity, shift)
+}
+
+fn paint_layer(view: impl IntoView, opacity: f32, transform: nana_ui_core::PaintTransform) -> AnyView {
+    widget(nana_ui::runtime::Stack::column(0.0).with_layout(|layout| {
+        layout.opacity = Some(opacity);
+        layout.transform = Some(transform);
+    }))
+    .children((view.into_any(),))
+    .into_any()
+}
+
+/// 把平移动效写成绘制矩阵。`shift_y` 向下为正，缩放绕控件中心。
+pub fn shift_scale(shift_y: f32, scale: f32) -> nana_ui_core::PaintTransform {
+    nana_ui_core::PaintTransform { a: scale, b: 0.0, c: 0.0, d: scale, e: 0.0, f: shift_y }
+}
+
+/// 旋转绘制矩阵，角度为度。
+pub fn spin_transform(degrees: f32) -> nana_ui_core::PaintTransform {
+    let (sin, cos) = degrees.to_radians().sin_cos();
+    nana_ui_core::PaintTransform { a: cos, b: sin, c: -sin, d: cos, e: 0.0, f: 0.0 }
+}
+
+/// 水平平移，扫光用轨道宽度的百分比。
+pub fn shift_x(x: f32) -> nana_ui_core::PaintTransform {
+    nana_ui_core::PaintTransform { a: 1.0, b: 0.0, c: 0.0, d: 1.0, e: x, f: 0.0 }
 }
 
 fn lerp(from: f32, to: f32, progress: f32) -> f32 {
