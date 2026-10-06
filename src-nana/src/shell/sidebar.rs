@@ -184,6 +184,8 @@ pub struct SidebarState {
     pub folder_delete_label: String,
     pub hover_folder: Option<String>,
     pub hover_since_ms: Option<u64>,
+    /// 拖放悬停用的空闲时钟。动效时钟在没有轨道时不前进。
+    hover_clock: u64,
     pub smart_delete_id: String,
     pub smart_delete_label: String,
     pub pending_play: Option<String>,
@@ -235,6 +237,7 @@ impl Default for SidebarState {
             folder_delete_label: String::new(),
             hover_folder: None,
             hover_since_ms: None,
+            hover_clock: 0,
             smart_delete_id: String::new(),
             smart_delete_label: String::new(),
             pending_play: None,
@@ -567,16 +570,25 @@ impl SidebarState {
         })
     }
 
+    pub fn popover_is_open(&self) -> bool {
+        self.popover != PopoverMode::Closed
+    }
+
     pub fn open_switcher(&mut self) {
         if self.submitting || self.popover == PopoverMode::Switcher {
             return;
         }
         self.popover_error.clear();
         self.popover = PopoverMode::Switcher;
-        if self.popover_x == 0.0 && self.popover_y == 0.0 {
-            self.popover_x = 8.0;
-            self.popover_y = 48.0;
-        }
+    }
+
+    /// 拖放还按着，或悬停还没结算时，把悬停时钟向前拨一帧。
+    pub fn tick_hover(&mut self, step_ms: u64) {
+        self.hover_clock = self.hover_clock.saturating_add(step_ms);
+    }
+
+    pub fn hover_now(&self) -> u64 {
+        self.hover_clock
     }
 
     /// 提交附加时保持当前弹层，避免附加过程中再打开菜单。

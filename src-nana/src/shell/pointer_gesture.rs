@@ -89,7 +89,7 @@ pub fn observe_live_pointer(model: &mut ShellViewModel, document: &RuntimeDocume
             if let Some(folder) = hover_folder {
                 model.reduce(ShellMessage::Sidebar(super::SidebarMessage::Gap(super::GapMessage::FolderHover {
                     path: folder,
-                    now_ms: model.motion.now_ms(),
+                    now_ms: model.sidebar.hover_now(),
                     dragging: true,
                 })));
             }
@@ -165,7 +165,7 @@ fn directory_at(rows: &[RowMark], x: f32, y: f32, exclude: &str) -> Option<Strin
 fn note_chrome_hover(model: &mut ShellViewModel, world: &UiWorld, document_id: nana_ui::runtime::DocumentId) {
     let hover = world.pointer_hover(document_id, POINTER_ID);
     let over_tools = hover.is_some_and(|id| label_in(world, id, &["快捷方式", "快捷访问", "文件夹", "智能文件夹", "播放集"]));
-    let over_footer = hover.is_some_and(|id| label_in(world, id, &["设置", "拓展", "日志", "快捷键"]) || footer_task(world, id));
+    let over_footer = hover.is_some_and(|id| label_in(world, id, &["设置", "拓展", "日志"]) || footer_task(world, id));
     model.motion.set_tools_hover(over_tools);
     model.motion.set_footer_hover(over_footer);
 }
@@ -359,19 +359,15 @@ mod tests {
 
         let mut window = mounted(&model);
         let mut input = bind(&mut window);
-        let catcher = labeled_id(&window, "快捷键");
-        let document_id = window.document.document();
-        window.document.context_mut().focus_node(document_id, catcher).expect("焦点");
-        let escape = nana_ui::KeyInput {
-            physical: nana_ui_platform::PhysicalKey("Escape".into()),
-            logical: nana_ui_platform::LogicalKey("Escape".into()),
-            state: nana_ui::KeyState::Pressed,
-            repeat: false,
-            modifiers: nana_ui::InputModifiers::default(),
-        };
-        input.press(window.document.context_mut(), escape, None, None).expect("Escape");
         prepare_motion(&mut model, &mut window);
-        assert!(!model.sidebar.folder_dialog.open, "Escape 应该关掉文件夹对话框");
+        window.document.flush(LayoutViewport::new(1200.0, 800.0), &mut NanaTextShaper::default()).expect("布局");
+        assert!(model.sidebar.folder_dialog.open, "对话框还在时不能把它当成已经关掉");
+        let field = labeled_id(&window, "文件夹名称");
+        let document_id = window.document.document();
+        window.document.context_mut().focus_node(document_id, field).expect("焦点");
+        press_escape(&mut window, &mut input);
+        prepare_motion(&mut model, &mut window);
+        assert!(!model.sidebar.folder_dialog.open, "焦点在对话框输入框时 Escape 应该关掉它");
 
         let mut model = files_model();
         model.reduce(ShellMessage::FileBrowserLoaded(Ok(thumbnail_snapshot())));
@@ -461,12 +457,13 @@ mod tests {
     }
 
     fn mounted(model: &ShellViewModel) -> ApplicationWindow {
+        mounted_at(model, 1200.0, 800.0)
+    }
+
+    fn mounted_at(model: &ShellViewModel, width: f32, height: f32) -> ApplicationWindow {
         let mut window = ApplicationWindow::new();
         window.document = acceptance_document_for_model(model.clone()).expect("生产文档");
-        window
-            .document
-            .flush(LayoutViewport::new(1200.0, 800.0), &mut NanaTextShaper::default())
-            .expect("布局");
+        window.document.flush(LayoutViewport::new(width, height), &mut NanaTextShaper::default()).expect("布局");
         window
     }
 
@@ -498,6 +495,64 @@ mod tests {
             .into_iter()
             .find(|(x, y)| contains(list, *x, *y) && rows.iter().all(|row| !contains(row.bounds, *x, *y)))
             .unwrap_or_else(|| panic!("列表里没有空白点：{list:?} {:?}", rows.iter().map(|row| row.bounds).collect::<Vec<_>>()))
+    }
+
+    #[test]
+    fn live_popover_clamps_to_the_measured_viewport() {
+        let mut model = files_model();
+        let mut window = mounted_at(&model, 420.0, 280.0);
+        let mut input = bind(&mut window);
+        let anchor = labeled_center(&window, "资源库 · 动画素材");
+        pointer(&mut window, &mut input, PointerPhase::Down, anchor.0, anchor.1);
+        pointer(&mut window, &mut input, PointerPhase::Up, anchor.0, anchor.1);
+        reduce_queued(&mut model, &mut window);
+        crate::shell::mount_shell(&mut window.document, &model).expect("挂上弹层");
+        window.document.flush(LayoutViewport::new(420.0, 280.0), &mut NanaTextShaper::default()).expect("布局");
+        prepare_motion(&mut model, &mut window);
+        assert_ne!((model.sidebar.popover_x, model.sidebar.popover_y), (8.0, 48.0));
+        assert_ne!((model.sidebar.popover_x, model.sidebar.popover_y), (0.0, 0.0));
+        assert!(model.sidebar.popover_x >= 4.0 && model.sidebar.popover_y >= 4.0, "弹层应留在视口内边距里");
+    }
+
+    #[test]
+    fn live_folder_hover_opens_after_the_idle_clock_reaches_450ms() {
+        let mut model = files_model();
+        model.sidebar.folders.push(crate::shell::SidebarFolder {
+            path: "photos".into(),
+            label: "照片".into(),
+            children: Vec::new(),
+        });
+        let mut window = mounted(&model);
+        let mut input = bind(&mut window);
+        let cover = row_center(&window, "cover.png");
+        let photos = row_center(&window, "photos");
+        pointer(&mut window, &mut input, PointerPhase::Down, cover.0, cover.1);
+        prepare_motion(&mut model, &mut window);
+        pointer(&mut window, &mut input, PointerPhase::Move, photos.0, photos.1);
+        prepare_motion(&mut model, &mut window);
+        assert_ne!(model.sidebar.current_directory, "photos", "刚悬停还不到 450ms");
+        for _ in 0..40 {
+            prepare_motion(&mut model, &mut window);
+        }
+        assert_eq!(model.sidebar.current_directory, "photos");
+        assert!(model.sidebar.expanded_folders.iter().any(|path| path == "photos"));
+        assert!(
+            model.sidebar.hover_now() >= 450 && model.sidebar.hover_now() != model.motion.now_ms(),
+            "悬停时钟 {} 应独立于动效时钟 {}",
+            model.sidebar.hover_now(),
+            model.motion.now_ms()
+        );
+    }
+
+    fn press_escape(window: &mut ApplicationWindow, input: &mut HeadlessInput) {
+        let escape = nana_ui::KeyInput {
+            physical: nana_ui_platform::PhysicalKey("Escape".into()),
+            logical: nana_ui_platform::LogicalKey("Escape".into()),
+            state: nana_ui::KeyState::Pressed,
+            repeat: false,
+            modifiers: nana_ui::InputModifiers::default(),
+        };
+        input.press(window.document.context_mut(), escape, None, None).expect("Escape");
     }
 
     fn labeled_center(window: &ApplicationWindow, label: &str) -> (f32, f32) {

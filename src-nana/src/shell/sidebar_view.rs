@@ -124,9 +124,6 @@ pub fn sidebar_footer(model: &ShellViewModel) -> impl IntoView + use<'_> {
             ShellMessage::Admin(super::admin::AdminMessage::ToggleTaskPopover)
         }), footer_opacity),
         fade(footer_button(LOGS, "日志".into(), logs, || ShellMessage::SetWorkspacePanel(WorkspacePanel::Logs)), footer_opacity),
-        widget(Button::new("快捷键").kind(ButtonKind::Text).size(ControlSize::Small))
-            .key("shell-keys")
-            .on_cx(|_, _: &Activate, _| {}),
     ))
 }
 
