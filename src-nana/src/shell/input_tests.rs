@@ -452,11 +452,11 @@ fn box_selection_open_reveal_and_external_drag_follow_the_vue_guards() {
     assert_eq!(model.input.error, before);
     assert!(model.input.host_requests.is_empty());
     send(&mut model, InputMessage::OpenEntry { has_repo: true, absolute_path: "C:\\a.png".into() });
-    assert_eq!(model.input.error, "打开失败：宿主外部打开尚未接通");
+    assert!(model.input.error.is_empty());
     send(&mut model, InputMessage::RevealEntry { absolute_path: "C:\\a.png".into() });
-    assert_eq!(model.input.error, "定位失败：宿主目录揭示尚未接通");
+    assert!(matches!(model.input.host_requests.last(), Some(crate::host_api::HostRequest::OpenExternal(request)) if request.reveal && request.target == "C:\\a.png"));
     send(&mut model, InputMessage::OpenExternalUrl { url: "https://momobako.local".into() });
-    assert_eq!(model.input.error, "打开失败：宿主外部打开尚未接通");
+    assert!(model.input.error.is_empty());
     assert_eq!(model.input.host_requests.len(), 3);
 
     send(&mut model, InputMessage::StartExternalDrag { paths: vec!["a.png".into()], trash: true, backend_kind: "filesystem".into(), repo_root: "C:\\repo".into() });
@@ -465,7 +465,7 @@ fn box_selection_open_reveal_and_external_drag_follow_the_vue_guards() {
     send(&mut model, InputMessage::StartExternalDrag { paths: vec!["a.png".into()], trash: false, backend_kind: "webdav".into(), repo_root: "C:\\repo".into() });
     send(&mut model, InputMessage::StartExternalDrag { paths: vec![" ".into()], trash: false, backend_kind: "filesystem".into(), repo_root: "C:\\repo".into() });
     assert_eq!(model.input.host_requests.len(), 3);
-    assert!(model.input.error.starts_with("打开失败"));
+    assert!(model.input.error.is_empty());
     send(&mut model, InputMessage::StartExternalDrag { paths: vec!["a.png".into()], trash: false, backend_kind: "filesystem".into(), repo_root: "C:\\repo".into() });
     assert_eq!(model.input.error, "拖出失败：宿主文件拖出尚未接通");
     assert_eq!(model.input.external_drag_result, Some(false));

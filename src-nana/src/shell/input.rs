@@ -267,8 +267,11 @@ impl InputState {
         self.drop_effect.clear();
     }
 
-    fn remember_external(&mut self, target: &str) {
-        self.host_requests.push(HostRequest::OpenExternal(ExternalOpenRequest { target: target.to_string() }));
+    fn remember_external(&mut self, target: &str, reveal: bool) {
+        self.host_requests.push(HostRequest::OpenExternal(ExternalOpenRequest {
+            target: target.to_string(),
+            reveal,
+        }));
     }
 }
 

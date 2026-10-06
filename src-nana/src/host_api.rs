@@ -171,6 +171,8 @@ pub enum HostInputRequest {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ExternalOpenRequest {
     pub target: String,
+    /// 为真时在文件管理器中定位，否则用系统默认程序打开。
+    pub reveal: bool,
 }
 
 /// 可取消的长任务探针，服务层和 Nana 宿主共享同一个原子状态。

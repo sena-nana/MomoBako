@@ -460,9 +460,7 @@ fn open_entry(model: &mut ShellViewModel, has_repo: bool, absolute_path: &str) {
         return;
     }
     model.input.error.clear();
-    model.input.remember_external(absolute_path);
-    eprintln!("Nana 宿主外部打开尚未接通：{absolute_path}");
-    model.input.error = "打开失败：宿主外部打开尚未接通".into();
+    model.input.remember_external(absolute_path, false);
 }
 
 fn reveal_entry(model: &mut ShellViewModel, absolute_path: &str) {
@@ -470,9 +468,7 @@ fn reveal_entry(model: &mut ShellViewModel, absolute_path: &str) {
         return;
     }
     model.input.error.clear();
-    model.input.remember_external(absolute_path);
-    eprintln!("Nana 宿主目录揭示尚未接通：{absolute_path}");
-    model.input.error = "定位失败：宿主目录揭示尚未接通".into();
+    model.input.remember_external(absolute_path, true);
 }
 
 fn open_url(model: &mut ShellViewModel, url: &str) {
@@ -480,9 +476,7 @@ fn open_url(model: &mut ShellViewModel, url: &str) {
         return;
     }
     model.input.error.clear();
-    model.input.remember_external(url);
-    eprintln!("Nana 宿主外部打开尚未接通：{url}");
-    model.input.error = "打开失败：宿主外部打开尚未接通".into();
+    model.input.remember_external(url, false);
 }
 
 fn start_external_drag(input: &mut InputState, paths: &[String], trash: bool, backend_kind: &str, repo_root: &str) {

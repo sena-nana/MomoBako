@@ -1,7 +1,7 @@
 //! MomoBako 的 NanaUI 原生宿主骨架。
 //!
 //! 该 crate 只负责窗口、Runtime 文档和 Nana 控件树；资源库领域服务在
-//! `src-tauri` 的宿主无关服务层收口后由应用状态注入。离屏测试复用同一棵
+//! `src-backend` 收口后由应用状态注入。离屏测试复用同一棵
 //! `RuntimeDocument`，不创建第二套 UI 树或 GPU 设备。
 
 use nana_ui::runtime::{DocumentId, FrameworkError, Task};
@@ -19,6 +19,7 @@ mod player_dispatch;
 mod admin_dispatch;
 mod sidebar_dispatch;
 mod window_host;
+mod host_bridge;
 use shell::{
     DeleteMode, ShellMessage, ShellPage, ShellViewModel, StartupStatus,
     WorkspaceEffect, display_mode_path, mount_shell, sidebar_prefs_path,
@@ -685,6 +686,7 @@ impl ApplicationState for MomoBakoApplication {
         sidebar_dispatch::dispatch_sidebar_effects(self, context);
         files_dispatch::dispatch_files_effects(self, context);
         inspect_dispatch::dispatch_inspect_effects(self, context);
+        crate::host_bridge::perform_system(&mut self.shell);
         let maximized = context.geometry().maximized;
         let window_commands = self.shell.input.take_platform_commands(*id, maximized);
         if let Err(error) = mount_shell(&mut window.document, &self.shell) {
