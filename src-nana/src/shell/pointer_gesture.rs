@@ -576,6 +576,66 @@ mod tests {
         assert_ne!(model.current_directory, "photos");
     }
 
+    #[test]
+    fn live_file_drop_imports_and_empty_drop_attaches() {
+        use std::path::PathBuf;
+        use nana_ui::{FileDragInput, FileDragKind, InputModifiers, InputPayload};
+
+        let mut model = files_model();
+        let mut window = mounted(&model);
+        let mut input = bind(&mut window);
+        let point = drop_point(&window, "files");
+        drag_file(&mut window, &mut input, FileDragKind::Hover, "D:\\other\\c.png", point);
+        reduce_queued(&mut model, &mut window);
+        assert!(model.input.dragging_files, "悬停外部文件应标成正在拖入");
+        drag_file(&mut window, &mut input, FileDragKind::Drop, "D:\\other\\c.png", point);
+        reduce_queued(&mut model, &mut window);
+        let effects = model.files.take_effects();
+        assert!(
+            effects.iter().any(|effect| matches!(effect, crate::shell::FilesEffect::Import { sources, .. } if sources == &["D:\\other\\c.png".to_string()])),
+            "外部放下应该导入：{effects:?}"
+        );
+
+        let mut model = empty_library();
+        let mut window = mounted(&model);
+        let mut input = bind(&mut window);
+        let point = drop_point(&window, "empty");
+        drag_file(&mut window, &mut input, FileDragKind::Drop, "C:\\library", point);
+        reduce_queued(&mut model, &mut window);
+        let effects = model.sidebar.take_effects();
+        assert!(
+            effects.iter().any(|effect| matches!(effect, crate::shell::SidebarEffect::AttachRepository { path } if path == "C:\\library")),
+            "空库放下应该附加文件夹：{effects:?}"
+        );
+
+        fn drag_file(window: &mut ApplicationWindow, input: &mut HeadlessInput, kind: FileDragKind, path: &str, point: (f32, f32)) {
+            input.route(window.document.context_mut(), InputPayload::FileDrag(FileDragInput {
+                kind,
+                paths: vec![PathBuf::from(path)],
+                position: Some(point),
+                modifiers: InputModifiers::default(),
+            })).expect("文件拖放");
+        }
+    }
+
+    fn empty_library() -> ShellViewModel {
+        let mut model = ShellViewModel::default();
+        model.workspace.startup.finish();
+        model.workspace.apply_repository_list(None, Ok(Vec::new()));
+        model
+    }
+
+    fn drop_point(window: &ApplicationWindow, kind: &str) -> (f32, f32) {
+        let mark = format!("momobako-drop:{kind}");
+        let document = window.document.document();
+        let world = window.document.context().world();
+        let marker = world.document_order(document).into_iter().find(|id| world.text(*id) == Some(mark.as_str())).unwrap_or_else(|| panic!("没有拖放标记 {kind}"));
+        let host = world.parent_id(marker).unwrap_or(marker);
+        let bounds = world.layout_box(host).unwrap_or_else(|| panic!("拖放目标没有布局"));
+        assert!(bounds.width >= 40.0 && bounds.height >= 40.0, "拖放目标太小：{bounds:?}");
+        (bounds.x + bounds.width / 2.0, bounds.y + bounds.height / 2.0)
+    }
+
     fn hover_model() -> ShellViewModel {
         let mut model = files_model();
         model.sidebar.folders.push(crate::shell::SidebarFolder {

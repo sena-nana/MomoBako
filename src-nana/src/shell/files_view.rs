@@ -12,8 +12,8 @@ use nana_ui::icons_tabler::{
 };
 use nana_ui::runtime::view::{button, each_virtual, signal, text, widget, AnyView, IntoView};
 use nana_ui::runtime::{
-    Activate, AlignSpec, ConfirmDialog, Dialog, Icon, LengthSpec, Progress, RadiusTier, ScrollAxes, ScrollView, Stack, TextChanged,
-    TextInput, Thumbnail,
+    Activate, AlignSpec, ConfirmDialog, Dialog, FileDropEvent, Icon, LengthSpec, Progress, RadiusTier, ScrollAxes, ScrollView, Stack,
+    TextChanged, TextInput, Thumbnail,
 };
 use nana_ui::ContentFit;
 
@@ -119,7 +119,14 @@ pub(super) fn live_file_column(model: &ShellViewModel) -> AnyView {
             .min_width(nana_ui::runtime::LengthSpec::Px(0.0))
             .min_height(nana_ui::runtime::LengthSpec::Px(0.0)),
     )
+    .on_cx({
+        let flags = super::input::file_drop_flags(model);
+        move |_, event: &FileDropEvent, cx| {
+            cx.dispatch_program(super::input::file_drop_message(&flags, event));
+        }
+    })
     .children((
+        super::input::drop_marker("files"),
         close_prompt,
         files_tools(model),
         files_status(model),

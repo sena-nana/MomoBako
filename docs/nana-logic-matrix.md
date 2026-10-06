@@ -212,7 +212,7 @@
 
 这些行由 `src-nana/src/shell/input_tests.rs` 覆盖状态机。内部移动走已有的 `momobako.entry.move`，外部导入走 `momobako.entry.import`，空库附加走 `momobako.repository.attach`。这些调用没有替身测试。打开路径、打开网址、目录揭示和拖出文件只记录 `HostRequest`，不调用系统，也不记访问。关闭设置里的 `confirm` 总是先询问；`quit` 在壳层或元数据没有未保存修改时关闭，有修改时询问；`minimizeToTray` 记录托盘请求并保持窗口。保存和打开对话框排队为 `WindowCommand::OpenFileDialog`。15 个旧验收场景不挂关闭确认条。下面每一行都未离屏。
 
-声明式视图没有 `set_drop_target`，实况树没有挂 `FileDropEvent`。拖放几何和放置决定由消息归约覆盖。卸载拖放只清标记，不清错误。
+实况文件列和空库面板登记 `set_drop_target`，`FileDropEvent` 收成 `HostDrag`，由 `live_file_drop_imports_and_empty_drop_attaches` 覆盖：有仓库时悬停再放下导入外部路径，空库放下附加第一条文件夹。拖放几何和放置决定仍由消息归约覆盖。卸载拖放只清标记，不清错误。
 
 打开、定位、拖出和托盘保持「打开失败：宿主外部打开尚未接通」「定位失败：宿主目录揭示尚未接通」「拖出失败：宿主文件拖出尚未接通」「最小化到托盘尚未接通」。拖放决定仍由输入归约覆盖。IME、托盘点击和真窗口留在 `nana-device-matrix.md`。
 
