@@ -91,7 +91,7 @@ fn crumb(label: String, key: &str, target: Option<String>) -> AnyView {
     let button = style::styled_button(label, None, look).disabled(target.is_none());
     let mut node = widget(button).key(key.to_string());
     if let Some(target) = target {
-        node = node.on_cx(move |_, _: &Activate, cx| cx.dispatch_program(file_message(FilesMessage::OpenPath(target.clone()))));
+        node = node.on_cx(move |_, _: &Activate, cx| cx.dispatch_program_all(file_message(FilesMessage::OpenPath(target.clone()))));
     }
     node.into_any()
 }
@@ -144,7 +144,7 @@ fn toolbar(model: &ShellViewModel) -> AnyView {
         items.push(
             widget(style::styled_button("清空记录", Some(TRASH), ButtonLook::TOOLBAR).disabled(!enabled))
                 .key("file-clear-recent")
-                .on_cx(|_, _: &Activate, cx| cx.dispatch_program(ShellMessage::Sidebar(SidebarMessage::ClearRecent)))
+                .on_cx(|_, _: &Activate, cx| cx.dispatch_program_all(ShellMessage::Sidebar(SidebarMessage::ClearRecent)))
                 .into_any(),
         );
     }
@@ -158,7 +158,7 @@ fn toolbar(model: &ShellViewModel) -> AnyView {
         items.push(
             widget(style::styled_button("清空回收站", Some(TRASH), look).disabled(!files.can_empty_trash(&ctx)))
                 .key("file-empty-trash")
-                .on_cx(|_, _: &Activate, cx| cx.dispatch_program(file_message(FilesMessage::EmptyTrash)))
+                .on_cx(|_, _: &Activate, cx| cx.dispatch_program_all(file_message(FilesMessage::EmptyTrash)))
                 .into_any(),
         );
     }
@@ -183,7 +183,7 @@ fn toolbar(model: &ShellViewModel) -> AnyView {
 fn tool_button(label: &'static str, icon: nana_ui_core::Icon, key: &'static str, enabled: bool, message: FilesMessage) -> AnyView {
     widget(style::styled_button(label, Some(icon), ButtonLook::TOOLBAR).disabled(!enabled))
         .key(key)
-        .on_cx(move |_, _: &Activate, cx| cx.dispatch_program(file_message(message.clone())))
+        .on_cx(move |_, _: &Activate, cx| cx.dispatch_program_all(file_message(message.clone())))
         .into_any()
 }
 
@@ -230,7 +230,7 @@ fn display_mode_field(current: DisplayMode) -> AnyView {
         .children((
             widget(style::text("展示方式", 12.0, 400, SemanticColorRole::Muted, 18.6).nowrap(true)).key("file-display-label"),
             widget(clip).key("file-display-clip").children((widget(select).key("file-display-mode").on_cx(|_, event: &SelectChanged, cx| {
-                cx.dispatch_program(file_message(FilesMessage::SetDisplayMode(DisplayMode::parse(&event.value))));
+                cx.dispatch_program_all(file_message(FilesMessage::SetDisplayMode(DisplayMode::parse(&event.value))));
             }),)),
         ))
         .key("file-display-field")
@@ -268,7 +268,7 @@ fn create_name_field(draft: &str, mutating: bool) -> AnyView {
         .children((
             widget(nana_ui::runtime::IconGlyph::new(PLUS).size(14.0).role(SemanticColorRole::Muted)).key("file-create-icon"),
             widget(input).key("file-create-name").on_cx(|_, event: &TextChanged, cx| {
-                cx.dispatch_program(file_message(FilesMessage::SetCreateName(event.value.to_string())));
+                cx.dispatch_program_all(file_message(FilesMessage::SetCreateName(event.value.to_string())));
             }),
         ))
         .key("file-create-field")
@@ -295,7 +295,7 @@ fn import_anchor(files: &super::super::files::FilesState, ctx: &FileContext) -> 
     let enabled = files.can_import(ctx);
     let button = widget(style::styled_button("导入", Some(FOLDER_OPEN), ButtonLook::TOOLBAR).disabled(!enabled))
         .key("file-import")
-        .on_cx(|_, _: &Activate, cx| cx.dispatch_program(file_message(FilesMessage::ToggleImportMenu)))
+        .on_cx(|_, _: &Activate, cx| cx.dispatch_program_all(file_message(FilesMessage::ToggleImportMenu)))
         .into_any();
     let open = files.import_open && enabled;
     let menu = open.then(|| import_menu(files));
@@ -318,7 +318,7 @@ fn outside_closer() -> AnyView {
     widget(nana_ui::runtime::ListItem::new("收起导入菜单").style(style))
         .content(widget(Stack::column(0.0)))
         .key("file-import-closer")
-        .on_cx(|_, _: &Activate, cx| cx.dispatch_program(file_message(FilesMessage::ToggleImportMenu)))
+        .on_cx(|_, _: &Activate, cx| cx.dispatch_program_all(file_message(FilesMessage::ToggleImportMenu)))
         .into_any()
 }
 
@@ -390,7 +390,7 @@ fn menu_item(label: &'static str, key: &'static str, enabled: bool, message: Fil
         .content(widget(style::text(label, 14.0, 500, SemanticColorRole::Text, LINE).nowrap(true)))
         .key(key);
     if enabled {
-        node = node.on_cx(move |_, _: &Activate, cx| cx.dispatch_program(file_message(message.clone())));
+        node = node.on_cx(move |_, _: &Activate, cx| cx.dispatch_program_all(file_message(message.clone())));
     }
     node.into_any()
 }

@@ -150,8 +150,8 @@ fn backdrop() -> AnyView {
     widget(ListItem::new("关闭菜单").style(style))
         .content(widget(Stack::column(0.0)))
         .key("file-context-backdrop")
-        .on_cx(|_, _: &Activate, cx| cx.dispatch_program(close()))
-        .on_cx(|_, _: &SecondaryPress, cx| cx.dispatch_program(close()))
+        .on_cx(|_, _: &Activate, cx| cx.dispatch_program_all(close()))
+        .on_cx(|_, _: &SecondaryPress, cx| cx.dispatch_program_all(close()))
         .into_any()
 }
 
@@ -242,10 +242,10 @@ fn item(_model: &ShellViewModel, entry: &MenuEntry, pending: bool) -> AnyView {
         let close_after = entry.children.is_empty() && (entry.confirm_label.is_none() || pending);
         node = node.on_cx(move |_, _: &Activate, cx| {
             if close_after {
-                cx.dispatch_program(close());
+                cx.dispatch_program_all(close());
             }
             if let Some(make) = &action {
-                cx.dispatch_program(make());
+                cx.dispatch_program_all(make());
             }
         });
     }

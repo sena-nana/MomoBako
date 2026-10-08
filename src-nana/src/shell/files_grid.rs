@@ -15,6 +15,7 @@ use nana_ui::runtime::{
 };
 
 use super::super::files::{DisplayMode, FileContext, FileRow, FilesMessage};
+use super::super::workspace::{LibraryCategory, WorkspacePanel};
 use super::super::ShellViewModel;
 use super::cards::{self, CardState};
 use super::file_message;
@@ -142,7 +143,7 @@ fn list(model: &ShellViewModel) -> AnyView {
     .children(sections)
     .key("file-list-content")
     .on_cx(|_, event: &SizeChanged, cx| {
-        cx.dispatch_program(file_message(FilesMessage::ListResized(event.width - LIST_PADDING_X * 2.0)));
+        cx.dispatch_program_all(file_message(FilesMessage::ListResized(event.width - LIST_PADDING_X * 2.0)));
     })
     .into_any();
     widget(ScrollView::new(ScrollAxes::Vertical).with_layout(|layout| {
@@ -154,8 +155,26 @@ fn list(model: &ShellViewModel) -> AnyView {
         layout.width = Some(LengthSpec::Fill);
     }))
     .children((content,))
-    .key("file-wrap-list")
+    .key(list_scroll_key(model))
     .into_any()
+}
+
+/// 列表滚动区的键，按显示的内容取：仓库、面板或分类、所在目录或智能文件夹。
+///
+/// 壳层重挂时按键路径保留滚动位置。进另一个目录、回收站或智能文件夹时键变了，列表从顶部开始；
+/// 同一目录里因为选中、缩略图到达而重挂时键不变，位置保持。Vue 换目录时不主动回顶，只靠浏览器
+/// 按新内容高度钳住偏移；文件管理器换目录从顶部开始更合理，这里按后者做。
+fn list_scroll_key(model: &ShellViewModel) -> String {
+    let repo = model.workspace.active_repo_id.as_deref().unwrap_or("none");
+    let view = match model.workspace.panel {
+        WorkspacePanel::Trash => format!("trash-{}", model.files.current_path),
+        WorkspacePanel::SmartFolder => format!("smart-{}", model.sidebar.active_smart_folder_id.as_deref().unwrap_or("")),
+        _ => match model.workspace.library_category {
+            LibraryCategory::All => format!("files-{}", model.files.current_path),
+            category => format!("category-{category:?}"),
+        },
+    };
+    format!("files-scroll-{}-{}", style::key_part(repo), style::key_part(&view))
 }
 
 /// 一段：保持自身高度，段间距 14。
@@ -326,7 +345,7 @@ fn load_more(model: &ShellViewModel) -> Option<AnyView> {
     Some(
         widget(button)
             .key("file-load-more")
-            .on_cx(|_, _: &Activate, cx| cx.dispatch_program(file_message(FilesMessage::LoadMore)))
+            .on_cx(|_, _: &Activate, cx| cx.dispatch_program_all(file_message(FilesMessage::LoadMore)))
             .into_any(),
     )
 }

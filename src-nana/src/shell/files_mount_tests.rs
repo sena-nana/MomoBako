@@ -1,13 +1,15 @@
 //! 挂上完整壳层的文件页测试，和离屏场景是同一棵树。
 //!
-//! 一是输入框的键路径在打字时不变（壳层重挂后按键路径找回焦点），用户文本拼进键也不会让挂载失败；
-//! 二是浮层的指针行为：点在导入菜单、右键菜单外面就收起，点对话框遮罩等于取消，点卡片里面不取消。
+//! 一是输入框的键路径在打字时不变（壳层重挂后按键路径找回焦点），用户文本拼进键也不会让挂载失败，
+//! 滚动区按显示的内容取键（换目录、换选中项回顶，同一内容重挂保持位置）；
+//! 二是浮层的指针行为：点在导入菜单、右键菜单外面就收起，回收站的「彻底删除」要点两次，
+//! 点对话框遮罩等于取消，点卡片里面不取消。
 
 use nana_ui::runtime::LayoutViewport;
 use nana_ui::{ApplicationWindow, HeadlessInput, NanaTextShaper, PointerPhase};
 
 use crate::shell::inspect::InspectMessage;
-use crate::shell::{ShellMessage, ShellViewModel};
+use crate::shell::{ShellMessage, ShellViewModel, WorkspacePanel};
 
 use super::{FileDialog, FilesMessage};
 
@@ -84,11 +86,12 @@ fn slashes_in_tags_and_repeated_palette_colors_still_mount() {
     assert!(has_input(&paths, "inspect-tag-draft"), "标签菜单应在：{paths:?}");
 }
 
-/// 按 1200×800 挂载并排版。
+/// 按 1200×800 挂载并排版。首帧布局回报的消息（列表宽度等）在实况里早一帧就送走了，这里先取掉。
 fn laid_out(model: &ShellViewModel) -> ApplicationWindow {
     let mut window = ApplicationWindow::new();
     window.document = crate::acceptance_document_for_model(model.clone()).expect("挂载壳层");
     window.document.flush(LayoutViewport::new(1200.0, 800.0), &mut NanaTextShaper::default()).expect("排版");
+    let _ = window.document.context_mut().take_program_messages();
     window
 }
 
@@ -203,4 +206,69 @@ fn dialog_scrim_cancels_but_the_card_does_not() {
         model.reduce(message);
     }
     assert_eq!(model.files.dialog, FileDialog::Closed);
+}
+
+#[test]
+fn permanent_delete_in_the_trash_menu_needs_a_second_click() {
+    let mut model = scene("live-menu");
+    model.workspace.panel = WorkspacePanel::Trash;
+    let mut window = laid_out(&model);
+    let (x, y) = labeled_center(&window, "彻底删除");
+    let first = click(&mut window, x, y);
+    assert!(
+        matches!(first.as_slice(), [ShellMessage::Files(FilesMessage::ArmMenuConfirm(id))] if id == "delete"),
+        "第一次只进入待确认：{} 条消息",
+        first.len()
+    );
+    for message in first {
+        model.reduce(message);
+    }
+    assert!(model.files.entry_menu.is_some(), "待确认时菜单不关");
+
+    let mut window = laid_out(&model);
+    assert!(has_label(&window, "彻底删除"));
+    let (x, y) = labeled_center(&window, "彻底删除");
+    let second = click(&mut window, x, y);
+    assert!(
+        matches!(
+            second.as_slice(),
+            [ShellMessage::Files(FilesMessage::CloseEntryMenu), ShellMessage::Files(FilesMessage::DeleteSelected)]
+        ),
+        "第二次关菜单并删除：{} 条消息",
+        second.len()
+    );
+}
+
+/// 挂一次壳层，返回文件页列表和详情两个滚动区键路径的末段。
+fn scroll_keys(model: &ShellViewModel) -> (String, String) {
+    let document = crate::acceptance_document_for_model(model.clone()).expect("挂载壳层");
+    let document_id = document.document();
+    let context = document.context();
+    let keys = context
+        .world()
+        .nodes_of_component(document_id, nana_ui::runtime::component_descriptors::SCROLL_VIEW.type_id)
+        .filter_map(|node| context.assembly_path(node))
+        .filter_map(|path| path.rsplit('/').next().map(str::to_string))
+        .collect::<Vec<_>>();
+    let pick = |prefix: &str| keys.iter().find(|key| key.starts_with(prefix)).cloned().unwrap_or_else(|| panic!("没有 {prefix}：{keys:?}"));
+    (pick("files-scroll-"), pick("file-detail-scroll-"))
+}
+
+#[test]
+fn scroll_areas_are_keyed_by_what_they_show() {
+    let mut model = scene("live-files-selected");
+    let (list, detail) = scroll_keys(&model);
+    model.reduce(ShellMessage::Inspect(InspectMessage::SetComment("草稿".into())));
+    assert_eq!(scroll_keys(&model), (list.clone(), detail.clone()), "同一目录、同一选中项重挂保持位置");
+
+    model.reduce(ShellMessage::Files(FilesMessage::ActivateRow("cover.png".into())));
+    let (same_list, other_detail) = scroll_keys(&model);
+    assert_eq!(same_list, list, "换选中项时列表不动");
+    assert_ne!(other_detail, detail, "换选中项时详情回顶");
+
+    model.files.current_path = "assets".into();
+    assert_ne!(scroll_keys(&model).0, list, "进子目录时列表回顶");
+    model.files.current_path = String::new();
+    model.workspace.panel = WorkspacePanel::Trash;
+    assert_ne!(scroll_keys(&model).0, list, "进回收站时列表回顶");
 }
