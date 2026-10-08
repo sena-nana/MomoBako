@@ -180,6 +180,21 @@ fn apply_color_filter_channels(
     return vec4(clamp(rgb, vec3(0.0), vec3(1.0)), color.a * opacity);
 }
 
+// Corner curve exponent: 2 is a circular arc, 4 is CSS `corner-shape:
+// superellipse(2)` (a squircle). `corner_shape::specialize` rewrites this line
+// when a painter builds its shader modules; keep the text in step with it.
+const CORNER_EXPONENT: f32 = 2.0;
+
+// Length of a positive corner offset under the corner curve's norm: Euclidean
+// for arcs, the `CORNER_EXPONENT`-norm for superellipses.
+fn corner_norm(q: vec2<f32>) -> f32 {
+    if CORNER_EXPONENT > 2.0 {
+        let n = pow(q, vec2(CORNER_EXPONENT));
+        return pow(n.x + n.y, 1.0 / CORNER_EXPONENT);
+    }
+    return length(q);
+}
+
 // Signed distance in device px from `p` to a rounded box of half extents
 // `half` and per-corner `radii` (in `rounded_box_sdf`'s order), all in the
 // local px `p` is measured in; `dx`/`dy` are that position's screen
@@ -205,6 +220,14 @@ fn rounded_box_distance(p: vec2<f32>, half: vec2<f32>, radii: vec4<f32>, dx: vec
         }
     }
     if radius > 0.0 && all(q > vec2(0.0)) {
+        if CORNER_EXPONENT > 2.0 {
+            // f = |q|_n - r. Its local gradient is (q / |q|_n)^(n-1) per axis,
+            // signed like `v`; over its screen gradient that is device px.
+            let ratio = q / radius;
+            let norm = corner_norm(ratio);
+            let g = pow(ratio / max(norm, 1.0e-6), vec2(CORNER_EXPONENT - 1.0)) * s;
+            return (norm - 1.0) * radius / max(length(vec2(dot(g, dx), dot(g, dy))), 1.0e-6);
+        }
         let n = normalize(v);
         return (length(q) - radius) / max(length(vec2(dot(n, dx), dot(n, dy))), 1.0e-6);
     }
