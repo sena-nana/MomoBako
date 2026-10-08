@@ -279,6 +279,17 @@ fn special_models() -> Vec<(&'static str, ShellViewModel)> {
     scenes
 }
 
+/// 页面名和补充场景名一起决定证据文件名，重名会互相覆盖，清单里也会出现重复 id。
+#[test]
+fn scene_ids_are_unique() {
+    let mut seen = std::collections::BTreeSet::new();
+    let pages = PAGES.iter().map(page_slug);
+    let specials = special_models().into_iter().map(|(name, _)| name);
+    for name in pages.chain(specials) {
+        assert!(seen.insert(name), "离屏场景名重复：{name}");
+    }
+}
+
 fn write_visual_review(root: &Path) -> Result<(), String> {
     let review = json!({
         "schema": "momobako.nana.visual-review/v1",
