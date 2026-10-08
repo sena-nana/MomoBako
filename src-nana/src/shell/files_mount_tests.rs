@@ -1,0 +1,274 @@
+//! 挂上完整壳层的文件页测试，和离屏场景是同一棵树。
+//!
+//! 一是输入框的键路径在打字时不变（壳层重挂后按键路径找回焦点），用户文本拼进键也不会让挂载失败，
+//! 滚动区按显示的内容取键（换目录、换选中项回顶，同一内容重挂保持位置）；
+//! 二是浮层的指针行为：点在导入菜单、右键菜单外面就收起，回收站的「彻底删除」要点两次，
+//! 点对话框遮罩等于取消，点卡片里面不取消。
+
+use nana_ui::runtime::LayoutViewport;
+use nana_ui::{ApplicationWindow, HeadlessInput, NanaTextShaper, PointerPhase};
+
+use crate::shell::inspect::InspectMessage;
+use crate::shell::{ShellMessage, ShellViewModel, WorkspacePanel};
+
+use super::{FileDialog, FilesMessage};
+
+/// 挂一次完整壳层，找出所有文本输入并返回它们的键路径（排好序）。
+fn input_paths(model: &ShellViewModel) -> Vec<String> {
+    let document = crate::acceptance_document_for_model(model.clone()).expect("挂载壳层");
+    let document_id = document.document();
+    let context = document.context();
+    let mut paths = context
+        .world()
+        .nodes_of_component(document_id, nana_ui::runtime::component_descriptors::TEXT_INPUT.type_id)
+        .map(|node| context.assembly_path(node).unwrap_or_else(|| panic!("输入框 {node:?} 没有键路径")))
+        .collect::<Vec<_>>();
+    paths.sort();
+    paths
+}
+
+fn scene(name: &str) -> ShellViewModel {
+    crate::shell::acceptance_gap_models()
+        .into_iter()
+        .find(|(scene, _)| *scene == name)
+        .unwrap_or_else(|| panic!("没有场景 {name}"))
+        .1
+}
+
+fn has_input(paths: &[String], key: &str) -> bool {
+    paths.iter().any(|path| path.rsplit('/').next() == Some(key))
+}
+
+#[test]
+fn metadata_inputs_keep_their_key_paths_while_typing() {
+    let mut model = scene("files-selected-metadata");
+    model.reduce(ShellMessage::Files(FilesMessage::ToggleTagMenu));
+    let before = input_paths(&model);
+    for key in ["file-create-name", "inspect-comment", "inspect-link", "inspect-tag-draft"] {
+        assert!(has_input(&before, key), "缺少输入框 {key}：{before:?}");
+    }
+    model.reduce(ShellMessage::Files(FilesMessage::SetCreateName("n".into())));
+    model.reduce(ShellMessage::Inspect(InspectMessage::SetComment("新的注释".into())));
+    model.reduce(ShellMessage::Inspect(InspectMessage::SetLink("https://example.com/a".into())));
+    model.reduce(ShellMessage::Files(FilesMessage::SetTagDraft("新".into())));
+    assert_eq!(input_paths(&model), before, "打字不能改变输入框的键路径，否则重挂后找不回焦点");
+}
+
+#[test]
+fn dialog_inputs_keep_their_key_paths_while_typing() {
+    let mut model = scene("copy-dialog");
+    let before = input_paths(&model);
+    assert!(has_input(&before, "file-dialog-input"), "{before:?}");
+    model.reduce(ShellMessage::Files(FilesMessage::DraftChanged("assets".into())));
+    assert_eq!(input_paths(&model), before);
+
+    let mut model = scene("export-dialog");
+    model.reduce(ShellMessage::Files(FilesMessage::SetExportField { field: "encrypt".into(), value: "1".into() }));
+    let before = input_paths(&model);
+    assert!(has_input(&before, "export-password"), "{before:?}");
+    model.reduce(ShellMessage::Files(FilesMessage::SetExportField { field: "password".into(), value: "p".into() }));
+    assert_eq!(input_paths(&model), before);
+}
+
+#[test]
+fn slashes_in_tags_and_repeated_palette_colors_still_mount() {
+    let mut model = scene("files-selected-metadata");
+    model.reduce(ShellMessage::Inspect(InspectMessage::AddTag("角色/主角".into())));
+    model.reduce(ShellMessage::Inspect(InspectMessage::AddTag("a\\b".into())));
+    let repeated = vec!["#ffffff".to_string(), "#ffffff".to_string()];
+    model.inspect.palette = repeated.clone();
+    if let Some(row) = model.files.rows.iter_mut().find(|row| row.path == "cover.png") {
+        row.palette = repeated;
+        row.tags = vec!["角色/主角".into()];
+    }
+    model.reduce(ShellMessage::Files(FilesMessage::ToggleTagMenu));
+    let paths = input_paths(&model);
+    assert!(has_input(&paths, "inspect-tag-draft"), "标签菜单应在：{paths:?}");
+}
+
+/// 按 1200×800 挂载并排版。首帧布局回报的消息（列表宽度等）在实况里早一帧就送走了，这里先取掉。
+fn laid_out(model: &ShellViewModel) -> ApplicationWindow {
+    let mut window = ApplicationWindow::new();
+    window.document = crate::acceptance_document_for_model(model.clone()).expect("挂载壳层");
+    window.document.flush(LayoutViewport::new(1200.0, 800.0), &mut NanaTextShaper::default()).expect("排版");
+    let _ = window.document.context_mut().take_program_messages();
+    window
+}
+
+/// 在 (x, y) 按下再抬起，返回这次点击发出的壳层消息。
+fn click(window: &mut ApplicationWindow, x: f32, y: f32) -> Vec<ShellMessage> {
+    let document_id = window.document.document();
+    let mut input = HeadlessInput::bind(window.document.context_mut(), document_id);
+    for phase in [PointerPhase::Down, PointerPhase::Up] {
+        input.pointer(window.document.context_mut(), phase, x, y).expect("指针");
+    }
+    window
+        .document
+        .context_mut()
+        .take_program_messages()
+        .into_iter()
+        .map(|message| *message.downcast::<ShellMessage>().expect("壳层消息"))
+        .collect()
+}
+
+/// 无障碍名为 `label` 的节点中心。
+fn labeled_center(window: &ApplicationWindow, label: &str) -> (f32, f32) {
+    let document = window.document.document();
+    let node = window
+        .document
+        .context()
+        .world()
+        .project_accessibility(document)
+        .into_iter()
+        .find(|node| node.label.as_deref() == Some(label))
+        .unwrap_or_else(|| panic!("没有 {label}"));
+    (node.bounds.x + node.bounds.width / 2.0, node.bounds.y + node.bounds.height / 2.0)
+}
+
+fn has_label(window: &ApplicationWindow, label: &str) -> bool {
+    let document = window.document.document();
+    window.document.context().world().project_accessibility(document).iter().any(|node| node.label.as_deref() == Some(label))
+}
+
+#[test]
+fn clicking_outside_the_import_menu_closes_it_anywhere_in_the_window() {
+    // 列表空白处、右侧详情、左侧侧栏。
+    for (x, y) in [(640.0, 640.0), (1050.0, 420.0), (120.0, 420.0)] {
+        let mut model = scene("live-files");
+        assert!(model.files.import_open, "场景里导入菜单是开着的");
+        let mut window = laid_out(&model);
+        let messages = click(&mut window, x, y);
+        assert!(
+            matches!(messages.as_slice(), [ShellMessage::Files(FilesMessage::ToggleImportMenu)]),
+            "点 ({x}, {y}) 应只收起导入菜单：{} 条消息",
+            messages.len()
+        );
+        for message in messages {
+            model.reduce(message);
+        }
+        assert!(!model.files.import_open);
+    }
+}
+
+#[test]
+fn import_menu_items_still_take_their_own_clicks() {
+    let mut window = laid_out(&scene("live-files"));
+    let (x, y) = labeled_center(&window, "从文件夹导入");
+    let messages = click(&mut window, x, y);
+    assert!(
+        matches!(messages.as_slice(), [ShellMessage::Files(FilesMessage::OpenDialog(FileDialog::Import))]),
+        "菜单项在收起层上面：{} 条消息",
+        messages.len()
+    );
+}
+
+#[test]
+fn context_menu_closes_outside_and_opens_submenus_on_click() {
+    let mut model = scene("live-menu");
+    let mut window = laid_out(&model);
+    let (x, y) = labeled_center(&window, "缩略图");
+    for message in click(&mut window, x, y) {
+        model.reduce(message);
+    }
+    assert_eq!(model.files.menu_branch.as_deref(), Some("thumbnail"));
+    let mut window = laid_out(&model);
+    assert!(has_label(&window, "刷新缩略图"), "子菜单展开");
+
+    let messages = click(&mut window, 1150.0, 120.0);
+    assert!(
+        matches!(messages.as_slice(), [ShellMessage::Files(FilesMessage::CloseEntryMenu)]),
+        "点在菜单外关闭：{} 条消息",
+        messages.len()
+    );
+    for message in messages {
+        model.reduce(message);
+    }
+    assert!(model.files.entry_menu.is_none() && model.files.menu_branch.is_none());
+}
+
+#[test]
+fn dialog_scrim_cancels_but_the_card_does_not() {
+    let mut model = scene("copy-dialog");
+    let mut window = laid_out(&model);
+    let (x, y) = labeled_center(&window, "目标目录");
+    let inside = click(&mut window, x, y);
+    assert!(
+        inside.iter().all(|message| !matches!(message, ShellMessage::Files(FilesMessage::CloseDialog))),
+        "点卡片里的输入框不取消"
+    );
+    let messages = click(&mut window, 20.0, 780.0);
+    assert!(
+        matches!(messages.as_slice(), [ShellMessage::Files(FilesMessage::CloseDialog)]),
+        "点遮罩取消：{} 条消息",
+        messages.len()
+    );
+    for message in messages {
+        model.reduce(message);
+    }
+    assert_eq!(model.files.dialog, FileDialog::Closed);
+}
+
+#[test]
+fn permanent_delete_in_the_trash_menu_needs_a_second_click() {
+    let mut model = scene("live-menu");
+    model.workspace.panel = WorkspacePanel::Trash;
+    let mut window = laid_out(&model);
+    let (x, y) = labeled_center(&window, "彻底删除");
+    let first = click(&mut window, x, y);
+    assert!(
+        matches!(first.as_slice(), [ShellMessage::Files(FilesMessage::ArmMenuConfirm(id))] if id == "delete"),
+        "第一次只进入待确认：{} 条消息",
+        first.len()
+    );
+    for message in first {
+        model.reduce(message);
+    }
+    assert!(model.files.entry_menu.is_some(), "待确认时菜单不关");
+
+    let mut window = laid_out(&model);
+    assert!(has_label(&window, "彻底删除"));
+    let (x, y) = labeled_center(&window, "彻底删除");
+    let second = click(&mut window, x, y);
+    assert!(
+        matches!(
+            second.as_slice(),
+            [ShellMessage::Files(FilesMessage::CloseEntryMenu), ShellMessage::Files(FilesMessage::DeleteSelected)]
+        ),
+        "第二次关菜单并删除：{} 条消息",
+        second.len()
+    );
+}
+
+/// 挂一次壳层，返回文件页列表和详情两个滚动区键路径的末段。
+fn scroll_keys(model: &ShellViewModel) -> (String, String) {
+    let document = crate::acceptance_document_for_model(model.clone()).expect("挂载壳层");
+    let document_id = document.document();
+    let context = document.context();
+    let keys = context
+        .world()
+        .nodes_of_component(document_id, nana_ui::runtime::component_descriptors::SCROLL_VIEW.type_id)
+        .filter_map(|node| context.assembly_path(node))
+        .filter_map(|path| path.rsplit('/').next().map(str::to_string))
+        .collect::<Vec<_>>();
+    let pick = |prefix: &str| keys.iter().find(|key| key.starts_with(prefix)).cloned().unwrap_or_else(|| panic!("没有 {prefix}：{keys:?}"));
+    (pick("files-scroll-"), pick("file-detail-scroll-"))
+}
+
+#[test]
+fn scroll_areas_are_keyed_by_what_they_show() {
+    let mut model = scene("live-files-selected");
+    let (list, detail) = scroll_keys(&model);
+    model.reduce(ShellMessage::Inspect(InspectMessage::SetComment("草稿".into())));
+    assert_eq!(scroll_keys(&model), (list.clone(), detail.clone()), "同一目录、同一选中项重挂保持位置");
+
+    model.reduce(ShellMessage::Files(FilesMessage::ActivateRow("cover.png".into())));
+    let (same_list, other_detail) = scroll_keys(&model);
+    assert_eq!(same_list, list, "换选中项时列表不动");
+    assert_ne!(other_detail, detail, "换选中项时详情回顶");
+
+    model.files.current_path = "assets".into();
+    assert_ne!(scroll_keys(&model).0, list, "进子目录时列表回顶");
+    model.files.current_path = String::new();
+    model.workspace.panel = WorkspacePanel::Trash;
+    assert_ne!(scroll_keys(&model).0, list, "进回收站时列表回顶");
+}

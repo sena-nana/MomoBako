@@ -47,11 +47,12 @@ pub(super) fn hosted_bar(model: &ShellViewModel) -> AnyView {
     with_download(model, bar::player_bar(model))
 }
 
-/// 文件面板正在显示文件预览页。
+/// 文件面板正在显示文件预览页（和文件列的 `previewing` 同一判定：单击只选中时不算）。
 fn preview_hosts_bar(model: &ShellViewModel) -> bool {
     model.workspace.panel == super::workspace::WorkspacePanel::Files
         && model.page == super::ShellPage::SelectedFile
         && model.inspect.has_target()
+        && model.files.preview_open(model.inspect.target_path.as_deref())
 }
 
 /// 下载进度只在下载进行时写在播放条下面一行。
