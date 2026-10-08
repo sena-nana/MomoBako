@@ -36,6 +36,7 @@ const NETEASE_REPO_ID: &str = "netease-cloud-music-10086";
 /// 本面板的离屏对照场景。和 `ShellPage` 同名的场景在 `seed_*` 里，由 `acceptance::seed` 调用。
 pub(super) fn models() -> Vec<(&'static str, ShellViewModel)> {
     vec![
+        ("logs-paused", logs_paused_scene()),
         ("extensions", extensions_scene()),
         ("downloader-settings", plugin_settings_scene(DOWNLOADER)),
         ("office-convert", plugin_settings_scene(OFFICE_CONVERT)),
@@ -113,6 +114,16 @@ pub(super) fn seed_task(model: &mut ShellViewModel, cancelling: bool) {
         updated_at: "0".into(),
     }]));
     model.reduce(ShellMessage::Admin(AdminMessage::ToggleTaskPopover));
+    // 离屏会话不走帧时钟，把弹层的出现动效拨到结束，截图里是停稳的样子。
+    model.motion.advance(60_000);
+}
+
+/// `logs-paused`：日志面板点了「暂停追踪」，主区不跟随末尾，停在顶部。
+/// Vue 的跟随实际不滚动，这个场景用来和 Vue 对照版式。
+fn logs_paused_scene() -> ShellViewModel {
+    let mut model = ShellViewModel::for_page(ShellPage::Logs);
+    model.reduce(ShellMessage::Admin(AdminMessage::SetLogPaused(true)));
+    model
 }
 
 /// `extensions`：拓展页，全部内置插件。工具页来自前端插件的 `toolPages`。

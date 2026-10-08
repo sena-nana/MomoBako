@@ -45,7 +45,8 @@ pub(crate) fn logs_panel(model: &ShellViewModel) -> AnyView {
     } else if filtered.is_empty() {
         body.push(style::dashed_empty("当前筛选没有命中", "保留最近日志缓存，调整级别、来源或关键字后可以继续查看。", "admin-log-empty"));
     } else {
-        let items = filtered.iter().map(|record| log_item(model, record)).collect::<Vec<_>>();
+        let keys = style::unique_keys(filtered.iter().map(|record| record.id.as_str()));
+        let items = filtered.iter().zip(&keys).map(|(record, key)| log_item(model, record, key)).collect::<Vec<_>>();
         body.push(widget(column(10.0).with_layout(|layout| layout.min_height = Some(LengthSpec::Px(360.0)))).children(items).key("admin-log-list").into_any());
     }
     style::workbench_panel(body, "admin-log-panel")
@@ -67,7 +68,7 @@ fn toolbar(model: &ShellViewModel) -> AnyView {
         widget(style::bare_input(TextInput::new(admin.log_search.clone()).label("搜索日志").placeholder("搜索消息、动作、位置或上下文")))
             .key("admin-log-search")
             .on_cx(|_, event: &TextChanged, cx| {
-                cx.dispatch_program(ShellMessage::Admin(AdminMessage::SetLogSearch(event.value.to_string())));
+                cx.dispatch_program_all(ShellMessage::Admin(AdminMessage::SetLogSearch(event.value.to_string())));
             }),
     ))
     .key("admin-log-search-field")
@@ -79,17 +80,17 @@ fn toolbar(model: &ShellViewModel) -> AnyView {
     let active = support::active_filter_count(&admin.log_levels, &admin.log_kinds, &admin.log_plugin_id, &admin.log_repo_id, &admin.log_search);
     let pause = widget(action(if paused { "恢复追踪" } else { "暂停追踪" }, Some(if paused { icons::PLAY } else { icons::PAUSE }), Tone::Plain, false))
         .key("admin-log-pause")
-        .on_cx(move |_, _: &Activate, cx| cx.dispatch_program(ShellMessage::Admin(AdminMessage::SetLogPaused(!paused))))
+        .on_cx(move |_, _: &Activate, cx| cx.dispatch_program_all(ShellMessage::Admin(AdminMessage::SetLogPaused(!paused))))
         .into_any();
     let reset = widget(action("重置筛选", Some(icons::ERASER), Tone::Plain, active == 0))
         .key("admin-log-reset")
-        .on_cx(|_, _: &Activate, cx| cx.dispatch_program(ShellMessage::Admin(AdminMessage::ResetLogFilters)))
+        .on_cx(|_, _: &Activate, cx| cx.dispatch_program_all(ShellMessage::Admin(AdminMessage::ResetLogFilters)))
         .into_any();
     let clear = widget(action("清空日志", Some(icons::TRASH2), Tone::Plain, admin.logs.is_empty()))
         .key("clear-logs")
-        .on_cx(|_, _: &Activate, cx| cx.dispatch_program(ShellMessage::ClearLogs))
+        .on_cx(|_, _: &Activate, cx| cx.dispatch_program_all(ShellMessage::ClearLogs))
         .into_any();
-    widget(Stack::fill_row(10.0).wrap(true).grow(0.0).align(AlignSpec::Center))
+    widget(Stack::fill_row(10.0).wrap(true).grow(0.0).align(AlignSpec::Start))
         .children(vec![search, plugin_select, repo_select, pause, reset, clear])
         .key("admin-log-toolbar")
         .into_any()
@@ -112,8 +113,9 @@ fn select_field(
         style.interaction.base.background_mix = Some(SemanticColorMix::alpha(Role::Background, 0.0));
         style.interaction.base.border_mix = Some(SemanticColorMix::alpha(Role::Border, 0.0));
         let layout = Arc::make_mut(&mut style.layout);
-        layout.width = Some(LengthSpec::Fill);
-        layout.min_width = Some(LengthSpec::Px(0.0));
+        // Vue 的下拉框是 `width: 100%`，在最小 180 宽的框里扣掉标题和间距后约 122 宽。
+        layout.width = Some(LengthSpec::Shrink);
+        layout.min_width = Some(LengthSpec::Px(122.0));
         layout.height = Some(LengthSpec::Px(32.0));
         layout.font_size = Some(14.0);
         layout.padding_left = Some(LengthSpec::Px(0.0));
@@ -130,7 +132,7 @@ fn select_field(
         .children((
             widget(label(title, 12.0, 700, Role::Muted)),
             widget(select).key(key).on_cx(move |_, event: &SelectChanged, cx| {
-                cx.dispatch_program(ShellMessage::Admin(message(event.value.to_string())));
+                cx.dispatch_program_all(ShellMessage::Admin(message(event.value.to_string())));
             }),
         ))
         .key(format!("{key}-field"))
@@ -213,13 +215,12 @@ fn filter_chip(text: &str, active: bool, message: AdminMessage, key: String) -> 
     button = button.style(node);
     widget(button)
         .key(key)
-        .on_cx(move |_, _: &Activate, cx| cx.dispatch_program(ShellMessage::Admin(message.clone())))
+        .on_cx(move |_, _: &Activate, cx| cx.dispatch_program_all(ShellMessage::Admin(message.clone())))
         .into_any()
 }
 
 /// 一条日志。
-fn log_item(model: &ShellViewModel, record: &SystemLogRecord) -> AnyView {
-    let id = record.id.as_str();
+fn log_item(model: &ShellViewModel, record: &SystemLogRecord, id: &str) -> AnyView {
     let mut badges = vec![level_badge(&record.level, id), style::hint_chip(support::source_kind_label(&record.source.kind), format!("admin-log-kind-chip-{id}"))];
     if let Some(source_label) = record.source.label.as_deref().filter(|text| !text.is_empty()) {
         badges.push(style::hint_chip(source_label, format!("admin-log-source-{id}")));
@@ -254,7 +255,7 @@ fn log_item(model: &ShellViewModel, record: &SystemLogRecord) -> AnyView {
     if record.context.as_object().is_some_and(|object| !object.is_empty()) {
         children.push(context_block(model, record));
     }
-    let card = pad(column(12.0), 15.0, 17.0, 15.0, 17.0).surface(Role::Background).outline(Role::BorderSoft, 1.0).radius(RadiusTier::Xl);
+    let card = pad(column(12.0), 14.0, 16.0, 14.0, 16.0).surface(Role::Background).outline(Role::BorderSoft, 1.0).radius(RadiusTier::Xl);
     widget(card).children(children).key(format!("admin-log-row-{id}")).into_any()
 }
 
@@ -289,8 +290,8 @@ fn context_block(model: &ShellViewModel, record: &SystemLogRecord) -> AnyView {
     let open = model.admin.log_context_open.contains(&id);
     let toggle_id = id.clone();
     let mut rows = vec![widget(Button::new("上下文").style(summary_style()))
-        .key(format!("admin-log-context-{id}"))
-        .on_cx(move |_, _: &Activate, cx| cx.dispatch_program(ShellMessage::Admin(AdminMessage::ToggleLogContext(toggle_id.clone()))))
+        .key(format!("admin-log-context-{}", style::key_part(&id)))
+        .on_cx(move |_, _: &Activate, cx| cx.dispatch_program_all(ShellMessage::Admin(AdminMessage::ToggleLogContext(toggle_id.clone()))))
         .into_any()];
     if open {
         let text = serde_json::to_string_pretty(&record.context).unwrap_or_else(|_| record.context.to_string());

@@ -146,6 +146,32 @@ pub(crate) fn action(text: impl Into<String>, icon: Option<Icon>, tone: Tone, di
     button
 }
 
+/// 拼进 `.key()` 的外部文本（插件、字段、日志、仓库、任务标识）。`/` 是键路径分隔符，
+/// 留着会让壳层挂载失败；按 `%` 转义成 `%2F`，不同的原文仍得到不同的键。
+pub(crate) fn key_part(text: &str) -> String {
+    text.replace('%', "%25").replace('/', "%2F").replace('~', "%7E")
+}
+
+/// 一列外部标识对应的键：先转义，重复出现的再加「~第几次」。第一次出现的键保持原样，
+/// 列表增删时其它项的键不变，焦点和滚动跟得住；同层重复的键会让挂载失败。
+pub(crate) fn unique_keys<'a>(ids: impl IntoIterator<Item = &'a str>) -> Vec<String> {
+    let mut seen = std::collections::HashMap::<String, usize>::new();
+    ids.into_iter()
+        .map(|id| {
+            let base = key_part(id);
+            let count = seen.entry(base.clone()).or_insert(0);
+            *count += 1;
+            if *count == 1 { base } else { format!("{base}~{count}") }
+        })
+        .collect()
+}
+
+/// CSS `minmax(min, max)` 的定宽上限轨道。CSS 先把剩余空间分给这类轨道直到上限，再分给 `fr`；
+/// Nana 网格按权重分配后冻结越界轨道，所以给它极大的权重：空间够时先到上限，余下的给其它轨道。
+pub(crate) fn capped(min_px: f32, max_px: f32) -> nana_ui_core::GridTrack {
+    nana_ui_core::GridTrack::MinMax { min_px, fr: 1000.0, max_px: Some(max_px) }
+}
+
 /// 水平排列：子项垂直居中，宽度随内容。
 pub(crate) fn row(gap: f32) -> Stack {
     Stack::row(gap).align(AlignSpec::Center)
@@ -362,7 +388,7 @@ pub(crate) fn dashed_empty(title: &str, message: &str, key: &'static str) -> Any
 
 /// `.search-workbench__field`：主背景、1px 边线、lg 圆角，最小高 38，左右 12，间距 8，弱色。
 pub(crate) fn field_frame() -> Stack {
-    pad(Stack::fill_row(8.0), 0.0, 13.0, 0.0, 13.0)
+    pad(Stack::fill_row(8.0), 0.0, 12.0, 0.0, 12.0)
         .surface(Role::Background)
         .outline(Role::Border, 1.0)
         .radius(RadiusTier::Lg)

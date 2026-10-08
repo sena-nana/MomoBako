@@ -186,7 +186,7 @@ fn home_route(model: &ShellViewModel, region: MainRegion) -> AnyView {
             MainRegion::EmptyRepository => super::input::empty_repository_panel(model),
             _ => home_panel(model),
         };
-        widget(scroll_view())
+        widget(scroll_view().follow_end(model.admin_logs_follow_end()))
             .children((panel,))
             .key("workspace-page-body")
             .into_any()

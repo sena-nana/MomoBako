@@ -32,7 +32,7 @@ fn tools(model: &ShellViewModel) -> AnyView {
     let grid = Stack::from_layout(nana_ui_core::LayoutStyle::default()).with_layout(|layout| {
         layout.display = Some(nana_ui_core::DisplaySpec::Grid);
         layout.grid_columns = Some(vec![
-            GridTrack::MinMax { min_px: 180.0, fr: 1.0, max_px: Some(240.0) },
+            style::capped(180.0, 240.0),
             GridTrack::MinMax { min_px: 0.0, fr: 1.0, max_px: None },
         ]);
         layout.gap = Some(LengthSpec::Px(12.0));
@@ -47,8 +47,9 @@ fn tools(model: &ShellViewModel) -> AnyView {
 fn nav(model: &ShellViewModel) -> AnyView {
     let active = active_page(model).map(|page| page.id.clone());
     let mut rows = vec![widget(style::eyebrow_text("插件工具")).key("admin-tool-nav-eyebrow").into_any()];
-    for page in &model.admin.tool_pages {
-        rows.push(tool_tab(page, active.as_deref() == Some(page.id.as_str())));
+    let keys = style::unique_keys(model.admin.tool_pages.iter().map(|page| page.id.as_str()));
+    for (page, key) in model.admin.tool_pages.iter().zip(&keys) {
+        rows.push(tool_tab(page, key, active.as_deref() == Some(page.id.as_str())));
     }
     widget(pad(column(8.0), 14.0, 14.0, 14.0, 14.0).surface(Role::Surface).radius(RadiusTier::Md))
         .children(rows)
@@ -58,7 +59,7 @@ fn nav(model: &ShellViewModel) -> AnyView {
 
 /// 导航里的一个工具：最小高 58、内边距 10、sm 圆角；13/700 名称和 12 号弱色说明。
 /// 选中时 `bg-hover` 底、强调色名称。
-fn tool_tab(page: &ToolPageEntry, active: bool) -> AnyView {
+fn tool_tab(page: &ToolPageEntry, tid: &str, active: bool) -> AnyView {
     let id = page.id.clone();
     let description = if page.description.trim().is_empty() { page.plugin_name.clone() } else { page.description.clone() };
     let mut node = NodeStyle {
@@ -85,12 +86,12 @@ fn tool_tab(page: &ToolPageEntry, active: bool) -> AnyView {
     let stack = Stack::column(4.0).style(node).hittable();
     widget(stack)
         .children((
-            widget(wrapping(label(page.label.clone(), 13.0, 700, if active { Role::Accent } else { Role::Text }))).key(format!("admin-tool-{}", page.id)),
-            widget(wrapping(style::label_lh(description, 12.0, 400, Role::Muted, 1.35))).key(format!("admin-tool-desc-{}", page.id)),
+            widget(wrapping(label(page.label.clone(), 13.0, 700, if active { Role::Accent } else { Role::Text }))).key(format!("admin-tool-{tid}")),
+            widget(wrapping(style::label_lh(description, 12.0, 400, Role::Muted, 1.35))).key(format!("admin-tool-desc-{tid}")),
         ))
-        .key(format!("admin-tool-tab-{}", page.id))
+        .key(format!("admin-tool-tab-{tid}"))
         .on_cx(move |_, _: &Activate, cx| {
-            cx.dispatch_program(ShellMessage::Admin(AdminMessage::SelectToolPage(id.clone())));
+            cx.dispatch_program_all(ShellMessage::Admin(AdminMessage::SelectToolPage(id.clone())));
         })
         .into_any()
 }
@@ -125,9 +126,9 @@ fn page_frame(model: &ShellViewModel) -> AnyView {
 /// 第三方工具页：Vue 里是插件自己的组件。Nana 不能运行它，画页头并说明原因。
 fn foreign_page(page: &ToolPageEntry) -> AnyView {
     let mut header = vec![
-        widget(style::eyebrow_text(&page.plugin_name)).key(format!("admin-foreign-tool-eyebrow-{}", page.id)).into_any(),
+        widget(style::eyebrow_text(&page.plugin_name)).key(format!("admin-foreign-tool-eyebrow-{}", style::key_part(&page.id))).into_any(),
         widget(pad(column(0.0), 4.0, 0.0, 0.0, 0.0))
-            .children((widget(style::label_lh(page.label.clone(), 22.0, 700, Role::Text, 1.25)).key(format!("admin-foreign-tool-title-{}", page.id)),))
+            .children((widget(style::label_lh(page.label.clone(), 22.0, 700, Role::Text, 1.25)).key(format!("admin-foreign-tool-title-{}", style::key_part(&page.id))),))
             .into_any(),
     ];
     if !page.description.trim().is_empty() {
@@ -140,6 +141,6 @@ fn foreign_page(page: &ToolPageEntry) -> AnyView {
     let notice = style::state_notice("这个工具页由插件的前端组件绘制，Nana 原生界面不能运行它。".into(), false, "admin-foreign-tool-notice");
     widget(pad(column(14.0), 18.0, 18.0, 18.0, 18.0))
         .children((widget(column(0.0)).children(header), notice))
-        .key(format!("admin-foreign-tool-{}", page.id))
+        .key(format!("admin-foreign-tool-{}", style::key_part(&page.id)))
         .into_any()
 }

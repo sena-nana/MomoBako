@@ -570,6 +570,8 @@ fn apply_bundle(
             model.admin.api_design = Some(api);
             model.admin.external = Some(external);
             model.admin.load_error.clear();
+            // API Playground 挂载时选中第一个端点并带出方法、目标和请求体，契约换新后同样重选。
+            let _ = super::api::selected(model);
         }
         (plugins, hooks, cache, api, external) => {
             let error = [plugins.err(), hooks.err(), cache.err(), api.err(), external.err()].into_iter().flatten().next().unwrap_or_default();

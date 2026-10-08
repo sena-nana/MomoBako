@@ -493,6 +493,21 @@ fn logs_filter_sort_pause_and_context() {
 }
 
 #[test]
+fn logs_follow_the_end_while_tracking_and_hold_when_paused() {
+    let mut model = ShellViewModel::for_page(super::super::ShellPage::Logs);
+    assert!(model.admin_logs_follow_end());
+    send(&mut model, AdminMessage::SetLogPaused(true));
+    assert!(!model.admin_logs_follow_end());
+    model.admin.merge_log(log_record("late", "2026-10-08T08:00:00Z", "info", "host", "", "", "新记录"));
+    assert!(!model.admin_logs_follow_end());
+    send(&mut model, AdminMessage::SetLogPaused(false));
+    model.admin.merge_log(log_record("later", "2026-10-08T08:01:00Z", "info", "host", "", "", "又一条"));
+    assert!(model.admin_logs_follow_end());
+    model.workspace.panel = WorkspacePanel::Files;
+    assert!(!model.admin_logs_follow_end());
+}
+
+#[test]
 fn task_popover_merges_repository_operation_and_closes() {
     let mut model = ShellViewModel::default();
     model.reduce(ShellMessage::TaskProgressLoaded(vec![TaskProgressSnapshot {
@@ -745,6 +760,37 @@ fn file_plugin_call_keeps_repository_and_writes_activity() {
     assert_eq!(model.files.activity, "已调用 media.clearTrackCache。");
     send(&mut model, AdminMessage::FilePluginFinished { method: "media.clearTrackCache".into(), result: Err(String::new()) });
     assert_eq!(model.files.error, "media.clearTrackCache 调用失败。");
+}
+
+#[test]
+fn slashes_and_repeated_ids_in_external_data_still_mount() {
+    assert_eq!(super::style::key_part("a/b%c"), "a%2Fb%25c");
+    let mut model = ShellViewModel::for_page(super::super::ShellPage::PluginSettings);
+    let mut odd = plugin("user/tool", "user", "service", "service");
+    odd.contributes = json!({
+        "settings": { "fields": [
+            { "key": "path/root", "label": "根目录" },
+            { "key": "path/root", "label": "重复的根目录" }
+        ] },
+        "toolPages": [{ "toolPageId": "user/page", "label": "工具" }]
+    });
+    odd.sdk = "frontend".into();
+    odd.runtime = "vue-module".into();
+    odd.entry = json!({ "frontend": { "module": "dist/register.js" } });
+    load_bundle(&mut model, vec![odd.clone(), odd]);
+    send(&mut model, AdminMessage::ToggleSettings("user/tool".into()));
+    model.reduce(ShellMessage::LogsLoaded(Ok(SystemLogPage {
+        records: vec![log_record("log/1", "2026-01-01T00:00:00Z", "info", "host", "", "", "斜杠日志")],
+        next_cursor: None,
+    })));
+    send(&mut model, AdminMessage::ToggleLogContext("log/1".into()));
+    if let Err(error) = crate::acceptance_document_for_model(model.clone()) {
+        panic!("拓展页的插件、字段和工具页标识带斜杠时挂载失败：{error:?}");
+    }
+    model.workspace.panel = WorkspacePanel::Logs;
+    if let Err(error) = crate::acceptance_document_for_model(model) {
+        panic!("日志标识带斜杠时挂载失败：{error:?}");
+    }
 }
 
 #[test]

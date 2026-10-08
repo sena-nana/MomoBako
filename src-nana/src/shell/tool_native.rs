@@ -71,7 +71,7 @@ fn plugin_name(model: &ShellViewModel, tool_id: &str) -> Option<String> {
 
 /// 目标卡片：主背景、`border-soft` 边线、md 圆角，内边距 12/14，行间 8。
 fn target_card(rows: Vec<AnyView>) -> AnyView {
-    widget(pad(column(8.0), 13.0, 15.0, 13.0, 15.0).surface(Role::Background).outline(Role::BorderSoft, 1.0).radius(RadiusTier::Md))
+    widget(pad(column(8.0), 12.0, 14.0, 12.0, 14.0).surface(Role::Background).outline(Role::BorderSoft, 1.0).radius(RadiusTier::Md))
         .children(rows)
         .into_any()
 }
@@ -158,7 +158,7 @@ fn action_row(model: &ShellViewModel, page_id: &str) -> AnyView {
                 .key(format!("admin-tool-action-{page_id}-{}", item.id))
                 .on_cx(move |_, _: &Activate, cx| {
                     if let Some(outgoing) = import_message(enabled, message.clone()) {
-                        cx.dispatch_program(outgoing);
+                        cx.dispatch_program_all(outgoing);
                     }
                 })
                 .into_any()
