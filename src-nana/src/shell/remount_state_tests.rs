@@ -116,13 +116,18 @@ fn offset(document: &RuntimeDocument, id: StableNodeId) -> ScrollOffset {
     document.context().world().scroll_offset(id).unwrap_or_default()
 }
 
-/// 当前挂着的文件行。列表是虚拟的，只挂视口附近的行。
-fn file_rows(document: &RuntimeDocument) -> Vec<String> {
-    let mut rows = document
-        .context()
-        .world()
+/// 滚动容器视口里看得见的文件行：无障碍盒（已经减去滚动偏移）和容器的布局盒相交。
+fn visible_rows(document: &RuntimeDocument, scroll: StableNodeId) -> Vec<String> {
+    let world = document.context().world();
+    let viewport = world.layout_box(scroll).expect("滚动容器有布局盒");
+    let mut rows = world
         .project_accessibility(document.document())
         .into_iter()
+        .filter(|node| {
+            node.bounds.y < viewport.y + viewport.height
+                && node.bounds.y + node.bounds.height > viewport.y
+                && node.bounds.height > 0.0
+        })
         .filter_map(|node| node.label.map(|label| label.to_string()))
         .filter(|label| label.starts_with("file-"))
         .collect::<Vec<_>>();
@@ -144,15 +149,16 @@ fn file_list_keeps_its_scroll_and_rows_across_a_remount() {
     layout(&mut document, 800.0);
     layout(&mut document, 800.0);
     let scrolled = offset(&document, scroll);
-    let rows = file_rows(&document);
+    let rows = visible_rows(&document, scroll);
     assert_eq!(scrolled.y, 3600.0, "测试列表要能滚到 3600");
-    assert!(!rows.iter().any(|row| row.starts_with("file-000.txt")), "滚动后不该还挂着第一行：{rows:?}");
+    assert!(!rows.is_empty(), "滚动后视口里要有行");
+    assert!(!rows.iter().any(|row| row.starts_with("file-000")), "滚动后视口里不该还是第一行：{rows:?}");
 
     mount_shell(&mut document, &model).expect("重挂");
     layout(&mut document, 800.0);
     let scroll = scroll_around(&document, rows.first().expect("滚动后有行"));
     assert_eq!(offset(&document, scroll), scrolled, "重挂后滚动位置变了");
-    assert_eq!(file_rows(&document), rows, "重挂后视口里的行变了");
+    assert_eq!(visible_rows(&document, scroll), rows, "重挂后视口里的行变了");
 }
 
 #[test]
