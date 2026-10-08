@@ -652,15 +652,21 @@ impl FilesState {
         true
     }
 
-    /// 右键打开菜单。路径还没选中时先替换成这一条。
+    /// 右键打开菜单。路径还没选中时先像单击一样替换成这一条，右侧详情跟着换。
     pub(super) fn open_entry_menu(&mut self, ctx: &FileContext, path: &str, x: f32, y: f32) {
         if self.visible_rows(ctx).iter().all(|row| row.path != path) {
             eprintln!("Nana 找不到要打开菜单的文件：{path}");
             return;
         }
         if !self.selected.iter().any(|item| item == path) {
-            self.select_visible(ctx, path, SelectionMode::Replace);
+            let mode = std::mem::replace(&mut self.selection_mode, SelectionMode::Replace);
+            if self.select_row(ctx, path) {
+                self.note_selected_only(path);
+            }
+            self.selection_mode = mode;
         }
+        self.menu_branch = None;
+        self.menu_pending = None;
         self.entry_menu = Some(EntryMenu { path: path.to_string(), x, y });
     }
 
@@ -695,6 +701,33 @@ impl FilesState {
             return;
         }
         self.effects.push(FilesEffect::DecodeThumbnails { paths: vec![path.to_string()] });
+    }
+
+    /// Escape 关掉文件页最上面的一层：右键菜单、导入菜单、文件对话框、导出对话框。
+    /// 变更进行中的对话框不关。没有可关的返回 false，交给壳层继续处理。
+    pub(crate) fn dismiss_overlay(&mut self) -> bool {
+        if self.entry_menu.is_some() {
+            self.entry_menu = None;
+            self.menu_branch = None;
+            self.menu_pending = None;
+            return true;
+        }
+        if self.import_open {
+            self.import_open = false;
+            self.eagle_open = false;
+            return true;
+        }
+        if self.export.open && !self.export.busy {
+            self.close_export();
+            return true;
+        }
+        if self.dialog == FileDialog::Hardlink && !self.mutating {
+            return self.skip_hardlink();
+        }
+        if self.dialog != FileDialog::Closed && !self.mutating {
+            return self.close_dialog();
+        }
+        false
     }
 
     /// 展开或收起导入菜单。收起时 Eagle 的复制和剪切一起收起。
@@ -766,8 +799,19 @@ fn merge_rows(existing: &[FileRow], incoming: &[FileRow]) -> Vec<FileRow> {
 }
 
 pub(super) fn reduce_message(model: &mut super::ShellViewModel, message: super::ShellMessage) -> Option<super::ShellMessage> {
+    if let super::ShellMessage::AssetDetailLoaded(Ok(detail)) = &message {
+        model.files.note_detail_arrived(&detail.summary.path);
+    }
     let super::ShellMessage::Files(message) = message else {
         return Some(message);
+    };
+    // 压缩包导出还没有保存位置时，先弹系统保存对话框，不把空路径交给导出协议。
+    let export = &model.files.export;
+    let archive_without_path = export.target != "git" && export.output_path.trim().is_empty() && !export.busy;
+    let message = if matches!(message, FilesMessage::SubmitExport) && archive_without_path {
+        FilesMessage::ChooseExportOutput
+    } else {
+        message
     };
     if matches!(message, FilesMessage::ChooseExportOutput) {
         let extension = model.files.export.format.trim().to_string();
@@ -778,6 +822,26 @@ pub(super) fn reduce_message(model: &mut super::ShellViewModel, message: super::
         model.input.queue_repository_export_dialog(file_name, extension);
         return None;
     }
+    match &message {
+        FilesMessage::ToggleTagMenu => {
+            model.files.tag_draft.clear();
+            let next = if model.inspect.tag_menu_open() {
+                super::inspect::InspectMessage::CloseTagMenu
+            } else {
+                super::inspect::InspectMessage::OpenTagMenu { x: 0.0, y: 0.0 }
+            };
+            return Some(super::ShellMessage::Inspect(next));
+        }
+        FilesMessage::SubmitTagDraft(value) => {
+            let tag = value.trim().to_string();
+            if tag.is_empty() {
+                return None;
+            }
+            model.files.tag_draft.clear();
+            return Some(super::ShellMessage::Inspect(super::inspect::InspectMessage::AddTag(tag)));
+        }
+        _ => {}
+    }
     let context = FileContext::from_model(model);
     let show_on_files = matches!(
         message,
@@ -785,7 +849,7 @@ pub(super) fn reduce_message(model: &mut super::ShellViewModel, message: super::
             | FilesMessage::OpenEagle(_)
     );
     let preview_path = match &message {
-        FilesMessage::ActivateRow(path) | FilesMessage::OpenRow(path) => Some(path.clone()),
+        FilesMessage::ActivateRow(path) | FilesMessage::OpenRow(path) | FilesMessage::OpenEntryMenu { path, .. } => Some(path.clone()),
         _ => None,
     };
     model.files.reduce(&context, message);
