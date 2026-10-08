@@ -7,15 +7,15 @@ use std::sync::Arc;
 
 use nana_ui::runtime::view::{widget, AnyView, IntoView};
 use nana_ui::runtime::{
-    Activate, AlignSpec, BoxPaint, IconButton, InteractionStyle, LengthSpec, NodeStyle, PaintContext, PaintText, Painter,
+    Activate, AlignSpec, BoxPaint, IconButton, InteractionStyle, LayoutBox, LengthSpec, NodeStyle, PaintContext, PaintText, Painter,
     RangeChanged, RangeField, Select, SelectChanged, SelectOption, SemanticPaint, Stack, TextHorizontalAlignment,
     TextVerticalAlignment,
 };
-use nana_ui_core::{GridTrack, Icon, LayoutBox, RadiusTier, SemanticColorRole as Role, ThemeMode};
+use nana_ui_core::{GridTrack, Icon, RadiusTier, SemanticColorRole as Role, ThemeMode};
 
 use super::super::{ShellMessage, ShellViewModel};
 use super::icons;
-use super::style::{self, action, align_end, column, label, pad, row, wrapping, Soft, SoftFill, Tone};
+use super::style::{self, action, align_end, column, label, pad, row, Soft, SoftFill, Tone};
 use super::support;
 use super::AdminMessage;
 
@@ -427,7 +427,7 @@ fn cache_card(model: &ShellViewModel) -> AnyView {
 }
 
 /// `.settings-metric`：主背景、lg 圆角、内边距 12，数据库图标 16，数字 14/700 加 12 号弱色名称。
-fn metric(value: u64, name: &str, key: &'static str) -> AnyView {
+fn metric(value: usize, name: &str, key: &'static str) -> AnyView {
     widget(pad(row(10.0), 12.0, 12.0, 12.0, 12.0).surface(Role::Background).radius(RadiusTier::Lg).with_layout(|layout| {
         layout.width = Some(LengthSpec::Fill);
         layout.min_width = Some(LengthSpec::Px(0.0));

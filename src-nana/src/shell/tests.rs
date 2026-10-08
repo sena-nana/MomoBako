@@ -100,7 +100,7 @@
         model.reduce(ShellMessage::SaveSettings);
         assert_eq!(model.settings_cache_limit_draft, "32");
         model.reduce(ShellMessage::SettingsSaved(Err("缩略图缓存上限必须在 64–16384 MB 之间".into())));
-        assert_eq!(model.page, ShellPage::SettingsError);
+        assert_eq!(model.page, ShellPage::Settings);
         assert!(model.settings_error.is_some());
         model.reduce(ShellMessage::SettingsCacheLimitChanged("512".into()));
         model.reduce(ShellMessage::SettingsSaved(Ok(crate::settings::ApplicationSettings {

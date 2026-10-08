@@ -3,8 +3,7 @@
 //! 只填已经存在的仓库、预览、播放和任务状态，不发新的领域请求。
 
 use crate::backend::services::repository::{
-    PlaybackSessionState, PlaylistDetail, PlaylistItem, PlaylistPlayerContribution, PlaylistSummary, PluginDependencyStatus,
-    PluginManifest, TaskProgressSnapshot,
+    PlaybackSessionState, PlaylistDetail, PlaylistItem, PlaylistPlayerContribution, PlaylistSummary,
 };
 
 use super::inspect::InspectMessage;
@@ -41,27 +40,15 @@ pub(super) fn seed(model: &mut ShellViewModel) {
             present_repository(model);
             model.workspace.panel = WorkspacePanel::Playlist;
         }
-        ShellPage::PluginSettings => {
-            model.detail = "官方插件 · Nana 原生贡献接口 · 已加载 3 项配置".into();
-            present_repository(model);
-            model.workspace.panel = WorkspacePanel::Extensions;
-        }
-        ShellPage::TaskRunning => {
-            model.detail = "扫描默认资源库 · 1,284 / 3,040 个文件".into();
-            present_repository(model);
-            open_task(model, "task-scan", "running", "扫描默认资源库");
-        }
+        ShellPage::PluginSettings => admin_scenes::seed_plugin_settings(model),
+        ShellPage::TaskRunning => admin_scenes::seed_task(model, false),
         ShellPage::PlaybackRunning => {
             model.detail = "正在播放 · track-01.mp3".into();
             present_repository(model);
             model.workspace.panel = WorkspacePanel::Playlist;
             seed_playback(model);
         }
-        ShellPage::TaskCancelling => {
-            model.detail = "正在取消扫描 · worker 尚未退出".into();
-            present_repository(model);
-            open_task(model, "task-cancelling", "cancelling", "正在取消扫描");
-        }
+        ShellPage::TaskCancelling => admin_scenes::seed_task(model, true),
         ShellPage::Conflict => {
             model.selected_path = Some("assets/cover.png".into());
             model.detail = "远端修改时间较新，需要选择保留本地或远端版本".into();
@@ -77,20 +64,9 @@ pub(super) fn seed(model: &mut ShellViewModel) {
             model.inspect.begin_selection("notes/readme.md");
             model.inspect.reduce(true, Some(REPO_ID), InspectMessage::SetComment("3 行未保存".into()));
         }
-        ShellPage::Settings => {
-            model.detail = "主题、缩略图缓存和默认播放器".into();
-            present_repository(model);
-        }
-        ShellPage::SettingsError => {
-            model.detail = "缩略图缓存上限必须在 64–16384 MB 之间".into();
-            model.settings_error = Some(model.detail.clone());
-            present_repository(model);
-        }
-        ShellPage::Logs => {
-            model.detail = "最近 24 小时 · 18 条记录 · 0 个错误".into();
-            present_repository(model);
-            model.workspace.panel = WorkspacePanel::Logs;
-        }
+        ShellPage::Settings => admin_scenes::seed_settings(model),
+        ShellPage::SettingsError => admin_scenes::seed_settings_error(model),
+        ShellPage::Logs => admin_scenes::seed_logs(model),
     }
 }
 
@@ -107,25 +83,6 @@ fn present_repository(model: &mut ShellViewModel) {
         cache_required: false,
         cache_status: String::new(),
     });
-}
-
-/// 任务弹层使用已经存在的进度行，取消按钮键是 `admin-task-cancel-{id}`。
-fn open_task(model: &mut ShellViewModel, task_id: &str, status: &str, label: &str) {
-    model.active_tasks = 1;
-    model.active_task_ids = vec![task_id.into()];
-    model.admin.popover_open = true;
-    model.task_progress = vec![TaskProgressSnapshot {
-        task_id: task_id.into(),
-        protocol_id: "momobako.sync".into(),
-        status: status.into(),
-        phase: Some(status.into()),
-        label: Some(label.into()),
-        current: Some(1),
-        total: Some(2),
-        percent: Some(42.0),
-        error: None,
-        updated_at: "0".into(),
-    }];
 }
 
 /// 播放页走播放集表面：重排、移除和底部播放条，不再放上移下移按钮。
@@ -229,11 +186,6 @@ pub fn gap_models() -> Vec<(&'static str, ShellViewModel)> {
 
 fn base_gap_models() -> Vec<(&'static str, ShellViewModel)> {
     vec![
-        ("downloader-settings", downloader_scene()),
-        ("source-auth-gap", source_auth_scene()),
-        ("source-auth-methods", source_auth_methods_scene()),
-        ("office-convert", office_scene()),
-        ("foreign-tool", foreign_tool_scene()),
         ("search-results", search_scene()),
         ("copy-dialog", copy_dialog_scene()),
         ("hardlink-dialog", hardlink_dialog_scene()),
@@ -246,81 +198,6 @@ fn base_gap_models() -> Vec<(&'static str, ShellViewModel)> {
         ("live-menu", live_menu_scene()),
         ("live-asmr", live_asmr_scene()),
     ]
-}
-
-fn downloader_scene() -> ShellViewModel {
-    let mut model = ShellViewModel::for_page(ShellPage::Settings);
-    let mut plugin = gap_plugin("momobako.service.downloader", "service", "download", "Download Service");
-    plugin.contributes = serde_json::json!({
-        "settings": { "settingsPage": { "label": "下载服务" }, "fields": [] }
-    });
-    model.admin.plugins = vec![plugin];
-    model.admin.active_settings_plugin_id = Some("momobako.service.downloader".into());
-    model
-}
-
-fn source_auth_scene() -> ShellViewModel {
-    let mut model = ShellViewModel::for_page(ShellPage::Settings);
-    let mut plugin = gap_plugin("momobako.source.example", "source", "source", "示例来源");
-    plugin.contributes = serde_json::json!({
-        "source": { "authentication": { "kind": "oauth" } }
-    });
-    model.workspace.repositories.push(super::workspace::WorkspaceRepository {
-        repo_id: "source-repo".into(),
-        name: "来源仓库".into(),
-        path: "C:/acceptance/source".into(),
-        status: "ready".into(),
-        backend_plugin_id: "momobako.source.example".into(),
-        capabilities: vec!["authentication".into()],
-        cache_required: false,
-        cache_status: String::new(),
-    });
-    model.admin.plugins = vec![plugin];
-    model.admin.active_settings_plugin_id = Some("momobako.source.example".into());
-    model
-}
-
-fn source_auth_methods_scene() -> ShellViewModel {
-    let mut model = ShellViewModel::for_page(ShellPage::Settings);
-    let mut plugin = gap_plugin("momobako.source.example", "source", "source", "示例来源");
-    plugin.contributes = serde_json::json!({
-        "source": {
-            "authentication": {
-                "kind": "qr",
-                "createSessionMethod": "auth.createQrSession",
-                "statusMethod": "auth.getLoginStatus",
-                "pollSessionMethod": "auth.pollQrSession",
-                "clearMethod": "auth.clearLogin",
-                "repositoryProvisioning": { "requiresLocalCache": true, "repoIdPrefix": "source" }
-            }
-        }
-    });
-    model.workspace.repositories.push(WorkspaceRepository {
-        repo_id: "source-repo".into(),
-        name: "来源仓库".into(),
-        path: "C:/acceptance/source".into(),
-        status: "ready".into(),
-        backend_plugin_id: "momobako.source.example".into(),
-        capabilities: vec!["authentication".into()],
-        cache_required: true,
-        cache_status: String::new(),
-    });
-    model.admin.plugins = vec![plugin];
-    model.admin.active_settings_plugin_id = Some("momobako.source.example".into());
-    model.admin.source_auth.qr_text = Some("https://example.invalid/login".into());
-    model.admin.source_auth.lines = vec!["已登录".into(), "账号 alice".into()];
-    model
-}
-
-fn office_scene() -> ShellViewModel {
-    let mut model = ShellViewModel::for_page(ShellPage::Settings);
-    let mut plugin = gap_plugin("momobako.service.office-convert", "service", "office", "Office Convert");
-    plugin.contributes = serde_json::json!({
-        "settings": { "settingsPage": { "label": "Office 转换" }, "fields": [] }
-    });
-    model.admin.plugins = vec![plugin];
-    model.admin.active_settings_plugin_id = Some("momobako.service.office-convert".into());
-    model
 }
 
 fn search_scene() -> ShellViewModel {
@@ -361,19 +238,6 @@ fn hardlink_dialog_scene() -> ShellViewModel {
 fn export_dialog_scene() -> ShellViewModel {
     let mut model = ShellViewModel::for_page(ShellPage::FileList);
     model.files.present_export();
-    model
-}
-
-fn foreign_tool_scene() -> ShellViewModel {
-    let mut model = ShellViewModel::for_page(ShellPage::PluginSettings);
-    model.admin.tool_pages = vec![super::admin::ToolPageEntry {
-        id: "user.custom.tool".into(),
-        label: "自定义工具".into(),
-        plugin_name: "示例插件".into(),
-        description: "把当前目录交给外部流程。".into(),
-        native: false,
-    }];
-    model.admin.active_tool_page_id = Some("user.custom.tool".into());
     model
 }
 
@@ -606,43 +470,6 @@ fn attach_page_thumbnail(row: &mut super::files::FileRow) {
 
 /// 验收用的最小 PDF。文本是解析器从流里读出的 `MomoBako`。
 const PAGE_PDF: &[u8] = b"%PDF-1.4\n1 0 obj\n<< /Length 14 >>\nstream\n(MomoBako) Tj\nendstream\nendobj\n%%EOF\n";
-
-fn gap_plugin(id: &str, category: &str, kind: &str, name: &str) -> PluginManifest {
-    PluginManifest {
-        plugin_id: id.into(),
-        package_format_version: None,
-        package_hash: None,
-        provenance: None,
-        trust_level: None,
-        deployment: None,
-        target_triple: None,
-        legacy_plugin_ids: Vec::new(),
-        name: name.into(),
-        version: "0.2.0".into(),
-        r#type: None,
-        kind: kind.into(),
-        category: category.into(),
-        description: String::new(),
-        capabilities: Vec::new(),
-        enabled: true,
-        sdk: "backend".into(),
-        entry: serde_json::Value::Null,
-        contributes: serde_json::Value::Null,
-        source: "builtin".into(),
-        runtime: "native-dylib".into(),
-        permissions: Vec::new(),
-        requires: Vec::new(),
-        optional: Vec::new(),
-        hooks: Vec::new(),
-        compat: Default::default(),
-        status: "ready".into(),
-        dependency_status: PluginDependencyStatus::default(),
-        disable_reason: None,
-        degraded: false,
-        degradation_reason: None,
-        archive_path: None,
-    }
-}
 
 fn queue_item(id: &str, name: &str) -> QueueItem {
     QueueItem {

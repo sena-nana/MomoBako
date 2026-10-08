@@ -66,6 +66,8 @@ pub fn mount_shell(
                 shell = shell.overlay(super::motion::paint_modal(dialog, &view_model.motion));
             } else if let Some(dialog) = delete_repository_dialog(&view_model) {
                 shell = shell.overlay(super::motion::paint_modal(dialog, &view_model.motion));
+            } else if let Some(dialog) = super::admin::plugin_delete_dialog(&view_model) {
+                shell = shell.overlay(super::motion::paint_modal(dialog, &view_model.motion));
             } else if let Some(dialog) = super::input::playlist_name_dialog(&view_model) {
                 shell = shell.overlay(super::motion::paint_modal(dialog, &view_model.motion));
             } else if let Some(dialog) = playlist_creator_dialog(&view_model) {
@@ -158,21 +160,7 @@ fn startup_route(model: &ShellViewModel) -> AnyView {
 
 /// 设置路由：内边距放在纵向滚动里，整页和内边距一起滚动。
 fn settings_route(view_model: &ShellViewModel) -> AnyView {
-    let plugin_page = super::admin::opened_plugin_pages(view_model);
-    let content = if !plugin_page.is_empty() {
-        // 插件设置打开时主区只留这一张卡，不再叠外观、缓存和关闭行为。
-        widget(Stack::column(16.0)).children(plugin_page).into_any()
-    } else {
-        let (eyebrow, title) = section_heading(view_model);
-        let mut body = Vec::new();
-        body.push(super::admin::admin_surface(view_model));
-        // 缓存上限和关闭行为不在 Vue 设置页前几张卡里，排在音频、外观、仓库和外部素材之后。
-        if let Some(editor) = settings_editor(view_model) {
-            body.push(editor);
-        }
-        framed_page(eyebrow, title, body)
-    };
-    scroll_route(content)
+    scroll_route(super::admin::settings_page(view_model))
 }
 
 /// 首页路由，对应 `Home.vue` 的 `.workspace-page`：占满主区、自身不滚动。
@@ -425,102 +413,6 @@ fn playlist_page(model: &ShellViewModel) -> AnyView {
         body.push(text(format!("不可播放项目：{}", model.playlist_item_status)).key("playlist-item-status").into_any());
     }
     super::workbench::page(body)
-}
-
-/// 缓存上限和关闭行为。主题在外观卡里。保存仍走原来的设置消息。
-fn settings_editor(view_model: &ShellViewModel) -> Option<AnyView> {
-    if !matches!(view_model.page, ShellPage::Settings | ShellPage::SettingsError) {
-        return None;
-    }
-    let cache_limit = view_model.settings_cache_limit_draft.clone();
-    let player_id = view_model.settings.default_playlist_player_type_id.clone().unwrap_or_default();
-    let close_behavior = view_model.settings.close_behavior.clone();
-    Some(
-        widget(Stack::column(12.0))
-            .children((
-                super::workbench::section_card(
-                    "播放与缓存",
-                    vec![
-                        widget(TextInput::new(cache_limit).label("缩略图缓存上限（MB）"))
-                            .on_cx(|_, event: &TextChanged, cx| {
-                                cx.dispatch_program(ShellMessage::SettingsCacheLimitChanged(event.value.to_string()));
-                            })
-                            .into_any(),
-                        widget(TextInput::new(player_id).label("默认播放器类型"))
-                            .on_cx(|_, event: &TextChanged, cx| {
-                                cx.dispatch_program(ShellMessage::SettingsPlayerChanged(event.value.to_string()));
-                            })
-                            .into_any(),
-                    ],
-                ),
-                super::workbench::section_card(
-                    "关闭行为",
-                    vec![widget(Stack::bar(8.0))
-                        .children((
-                            text(format!("关闭行为：{}", close_label(&close_behavior))).key("settings-close-label"),
-                            widget(Stack::spacer()),
-                            button("确认后关闭").key("settings-close-confirm").on_cx(|_, _: &Activate, cx| {
-                                cx.dispatch_program(ShellMessage::SettingsCloseBehaviorChanged("confirm".into()));
-                            }),
-                            button("最小化到托盘").key("settings-close-tray").on_cx(|_, _: &Activate, cx| {
-                                cx.dispatch_program(ShellMessage::SettingsCloseBehaviorChanged("minimizeToTray".into()));
-                            }),
-                            button("直接退出").key("settings-close-quit").on_cx(|_, _: &Activate, cx| {
-                                cx.dispatch_program(ShellMessage::SettingsCloseBehaviorChanged("quit".into()));
-                            }),
-                        ))
-                        .into_any()],
-                ),
-                view_model.settings_error.clone().map(|error| text(format!("设置提示：{error}")).key("settings-error")),
-                button("保存应用设置").key("save-application-settings").on_cx(|_, _: &Activate, cx| {
-                    cx.dispatch_program(ShellMessage::SaveSettings);
-                }),
-            ))
-            .into_any(),
-    )
-}
-
-/// 设置页标题和正文。滚动和外边距由设置路由给，这里是普通的纵向排列。
-fn framed_page(eyebrow: impl Into<String>, title: impl Into<String>, body: Vec<AnyView>) -> AnyView {
-    let eyebrow = eyebrow.into();
-    let title = title.into();
-    let content = widget(Stack::column(12.0)).children(body).into_any();
-    widget(Stack::column(16.0))
-        .children((
-            widget(Stack::bar(16.0)).children((
-                widget(Stack::column(4.0)).children((
-                    text(eyebrow).key("section-eyebrow"),
-                    text(title).key("section-title"),
-                )),
-                widget(Stack::spacer()),
-            )),
-            content,
-        ))
-        .into_any()
-}
-
-/// 关闭行为存的是 confirm、minimizeToTray、quit。画面用按钮上的中文。
-fn close_label(value: &str) -> &str {
-    match value {
-        "confirm" => "确认后关闭",
-        "minimizeToTray" => "最小化到托盘",
-        "quit" => "直接退出",
-        other => other,
-    }
-}
-
-fn section_heading(model: &ShellViewModel) -> (&'static str, String) {
-    if matches!(model.page, ShellPage::Settings | ShellPage::SettingsError) {
-        return ("应用", "设置".into());
-    }
-    match model.workspace.panel {
-        WorkspacePanel::Playlist => ("播放集", "播放集".into()),
-        WorkspacePanel::Extensions => ("拓展能力", "文件系统与插件".into()),
-        WorkspacePanel::Logs => ("LOGS", "系统日志".into()),
-        WorkspacePanel::Actions => ("仓库", "动作".into()),
-        WorkspacePanel::Search => ("搜索", "搜索结果".into()),
-        _ => ("工作台", model.page.title().into()),
-    }
 }
 
 /// 新建播放集对话框。空播放集页不再把表单铺在虚线框下面。
