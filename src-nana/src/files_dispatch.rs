@@ -63,6 +63,12 @@ pub fn dispatch_files_effects(app: &mut MomoBakoApplication, context: &RuntimePr
             FilesEffect::ExportGit { repo_id, remote, branch, message } => {
                 dispatch_export(app, context, git_export(repo_id, remote, branch, message));
             }
+            FilesEffect::CopyText(text) => {
+                if !crate::host_bridge::copy_text(&text) {
+                    eprintln!("Nana 复制到系统剪贴板失败");
+                    app.shell.files.note_error("复制失败：系统剪贴板写入失败".into());
+                }
+            }
         }
     }
 }

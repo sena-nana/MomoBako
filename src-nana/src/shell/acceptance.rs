@@ -125,6 +125,8 @@ fn open_task(model: &mut ShellViewModel, task_id: &str, status: &str, label: &st
     }];
 }
 
+use files_scenes::{file_row, seed_browser, PAGE_PDF};
+
 #[path = "acceptance_shell.rs"]
 mod shell_scenes;
 #[path = "acceptance_files.rs"]
@@ -155,12 +157,6 @@ fn base_gap_models() -> Vec<(&'static str, ShellViewModel)> {
         ("source-auth-methods", source_auth_methods_scene()),
         ("office-convert", office_scene()),
         ("foreign-tool", foreign_tool_scene()),
-        ("copy-dialog", copy_dialog_scene()),
-        ("hardlink-dialog", hardlink_dialog_scene()),
-        ("export-dialog", export_dialog_scene()),
-        ("live-files", live_files_scene()),
-        ("live-files-selected", live_files_selected_scene()),
-        ("live-menu", live_menu_scene()),
     ]
 }
 
@@ -239,29 +235,6 @@ fn office_scene() -> ShellViewModel {
     model
 }
 
-fn copy_dialog_scene() -> ShellViewModel {
-    let mut model = ShellViewModel::for_page(ShellPage::FileList);
-    model.files.present_copy("notes");
-    model
-}
-
-fn hardlink_dialog_scene() -> ShellViewModel {
-    let mut model = ShellViewModel::for_page(ShellPage::FileList);
-    model.files.present_hardlink(super::files::HardlinkPrompt {
-        id: "link-1".into(),
-        new_path: "inbox/cover.png".into(),
-        existing_path: "assets/cover.png".into(),
-        size_label: "未返回".into(),
-    });
-    model
-}
-
-fn export_dialog_scene() -> ShellViewModel {
-    let mut model = ShellViewModel::for_page(ShellPage::FileList);
-    model.files.present_export();
-    model
-}
-
 fn foreign_tool_scene() -> ShellViewModel {
     let mut model = ShellViewModel::for_page(ShellPage::PluginSettings);
     model.admin.tool_pages = vec![super::admin::ToolPageEntry {
@@ -274,126 +247,6 @@ fn foreign_tool_scene() -> ShellViewModel {
     model.admin.active_tool_page_id = Some("user.custom.tool".into());
     model
 }
-
-/// 文件列和文件夹树。缩略图走实况 `Thumbnail`，不另画一套占位。
-fn live_files_scene() -> ShellViewModel {
-    let mut model = ShellViewModel::for_page(ShellPage::FileList);
-    seed_browser(&mut model);
-    model.files.display_mode = super::files::DisplayMode::Grid;
-    model.files.import_open = true;
-    model.files.eagle_open = true;
-    model
-}
-
-/// 选中 `notes/page.pdf`。右侧详情要能看到页图、类型、大小、修改时间和元数据。
-fn live_files_selected_scene() -> ShellViewModel {
-    let mut model = live_files_scene();
-    model.files.import_open = false;
-    model.files.eagle_open = false;
-    let path = "notes/page.pdf";
-    let size = format!("{} B", PAGE_PDF.len());
-    if let Some(row) = model.files.rows.iter_mut().find(|row| row.path == path) {
-        row.size_label = size.clone();
-    }
-    model.files.set_drag_selection(vec![path.into()], Some(path.into()), Some(path.into()));
-    model.inspect.begin_selection(path);
-    model.inspect.loading = false;
-    model.inspect.activity.clear();
-    model.inspect.facts.extension = "pdf".into();
-    model.inspect.facts.size_label = size;
-    model
-}
-
-/// 右键菜单挂在实况文件列上。
-fn live_menu_scene() -> ShellViewModel {
-    let mut model = live_files_scene();
-    model.files.entry_menu = Some(super::files::EntryMenu { path: "cover.png".into(), x: 280.0, y: 180.0 });
-    model
-}
-
-fn seed_browser(model: &mut ShellViewModel) {
-    let mut page = file_row("notes/page.pdf", "file");
-    attach_page_thumbnail(&mut page);
-    model.files.rows = vec![file_row("assets", "directory"), file_row("cover.png", "file"), page];
-    model.files.total_entries = model.files.rows.len();
-    model.sidebar.folders = vec![super::sidebar::SidebarFolder {
-        path: "assets".into(),
-        label: "assets".into(),
-        children: vec![super::sidebar::SidebarFolder {
-            path: "assets/covers".into(),
-            label: "covers".into(),
-            children: Vec::new(),
-        }],
-    }];
-    model.sidebar.expanded_folders = vec!["assets".into()];
-}
-
-fn file_row(path: &str, kind: &str) -> super::files::FileRow {
-    let name = path.rsplit('/').next().unwrap_or(path).to_string();
-    let extension = name.rsplit_once('.').map(|(_, ext)| ext.to_string());
-    super::files::FileRow {
-        path: path.into(),
-        name,
-        kind: kind.into(),
-        asset_id: Some(path.replace('/', "-")),
-        is_virtual: false,
-        thumbnail_path: None,
-        hardlink_state: None,
-        extension,
-        pixel_width: 0,
-        pixel_height: 0,
-        texture_ready: false,
-        thumbnail_rgba: None,
-        page_rgba: None,
-        palette: Vec::new(),
-        size_label: String::new(),
-        modified_at: String::new(),
-        tags: Vec::new(),
-        thumbnail_custom: false,
-        provider_id: None,
-        source_payload: None,
-        metadata: Default::default(),
-    }
-}
-
-/// 用已经画出的 PDF 页缩小成缩略图。`cover.png` 没有像素，保持类型图标。
-fn attach_page_thumbnail(row: &mut super::files::FileRow) {
-    let loaded = match super::inspect::native_preview::load("momobako.preview.pdf", PAGE_PDF) {
-        Ok(loaded) => loaded,
-        Err(error) => {
-            eprintln!("Nana 验收页图没有缩略图：{error}");
-            return;
-        }
-    };
-    let Some(frame) = loaded.frames.iter().find(|frame| {
-        frame.error.is_none() && !frame.rgba.is_empty() && frame.width > 0 && frame.height > 0
-    }) else {
-        eprintln!("Nana 验收 PDF 没有可缩小的页图");
-        return;
-    };
-    let box_px = super::thumbs::grid_page_box(frame.width, frame.height);
-    // 网格和详情都是整页缩小。只裁页眉会变成一条 MOMOBAKO 横条。
-    let Some(fitted) = super::thumbs::fit_page_sheet(
-        frame.width,
-        frame.height,
-        &frame.rgba,
-        box_px.preview_width.round().max(1.0) as u32,
-        box_px.preview_height.round().max(1.0) as u32,
-    ) else {
-        eprintln!("Nana 验收页图缩小失败");
-        return;
-    };
-    row.pixel_width = frame.width;
-    row.pixel_height = frame.height;
-    row.thumbnail_rgba = Some(fitted);
-    match super::thumbs::fit_page_sheet(frame.width, frame.height, &frame.rgba, 268, 160) {
-        Some(sheet) => row.page_rgba = Some(sheet),
-        None => eprintln!("Nana 验收整页没有装进详情盒"),
-    }
-}
-
-/// 验收用的最小 PDF。文本是解析器从流里读出的 `MomoBako`。
-const PAGE_PDF: &[u8] = b"%PDF-1.4\n1 0 obj\n<< /Length 14 >>\nstream\n(MomoBako) Tj\nendstream\nendobj\n%%EOF\n";
 
 fn gap_plugin(id: &str, category: &str, kind: &str, name: &str) -> PluginManifest {
     PluginManifest {

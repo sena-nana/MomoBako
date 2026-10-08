@@ -9,13 +9,9 @@ use nana_ui::runtime::view::{text, widget, AnyView, IntoView};
 use nana_ui::runtime::{AlignSpec, EmptyState, LabeledValue, LengthSpec, List, ListItem, RadiusTier, SemanticColorRole, SettingsCard, Stack, Text};
 
 use super::ShellViewModel;
-use serde_json::Value;
 
 use super::files::hardlink_label;
 use super::inspect::FileFacts;
-
-#[path = "local_time.rs"]
-mod local_time;
 
 const ARCHIVE_VIEW: &str = "momobako.preview.archive";
 const MODEL_VIEW: &str = "momobako.preview.model";
@@ -194,11 +190,7 @@ pub(super) fn archive_list(content: &str) -> AnyView {
 pub(super) fn fact_column(facts: &FileFacts) -> AnyView {
     let extension = if facts.extension.trim().is_empty() { "文件".to_string() } else { facts.extension.clone() };
     let size = if facts.size_label.trim().is_empty() { "未知".to_string() } else { facts.size_label.clone() };
-    let modified = if facts.modified_at.trim().is_empty() {
-        "未记录".to_string()
-    } else {
-        local_time::zh_cn_local(&facts.modified_at)
-    };
+    let modified = super::files::local_time::format_or(&facts.modified_at, "未记录");
     let mut rows = vec![
         stacked_value("类型", extension, "inspect-stat-type", false),
         stacked_value("大小", size, "inspect-stat-size", true),
@@ -212,90 +204,6 @@ pub(super) fn fact_column(facts: &FileFacts) -> AnyView {
         .children(rows)
         .key("inspect-file-facts")
         .into_any()
-}
-
-/// 标签组后面的只读行。没有元数据时写「未记录」，尺寸可以回落到已经解码的宽高。
-pub(super) fn recorded_rows(model: &super::ShellViewModel) -> Vec<AnyView> {
-    let facts = &model.inspect.facts;
-    let ctx = super::files::FileContext::from_model(model);
-    let row = model.inspect.target_path.as_ref().and_then(|path| {
-        model.files.visible_rows(&ctx).into_iter().find(|row| &row.path == path)
-    });
-    let metadata = row.as_ref().map(|row| &row.metadata);
-    let (pixel_width, pixel_height) = model
-        .inspect
-        .raster_frame()
-        .map(|(width, height, _)| (width, height))
-        .filter(|(width, height)| *width > 0 && *height > 0)
-        .or_else(|| {
-            row.as_ref()
-                .filter(|row| row.pixel_width > 0 && row.pixel_height > 0)
-                .map(|row| (row.pixel_width, row.pixel_height))
-        })
-        .unwrap_or((0, 0));
-    let copy = recorded_copy(RecordedInput {
-        added: prefer(&facts.added_to_library_at, json_text(metadata, "addedToLibraryAt")),
-        created: prefer(&facts.file_created_at, json_text(metadata, "fileCreatedAt")),
-        file_modified: prefer(&facts.file_modified_meta, json_text(metadata, "fileModifiedAt")),
-        summary_modified: prefer(&facts.modified_at, row.as_ref().map(|row| row.modified_at.clone()).unwrap_or_default()),
-        meta_width: nonzero_pair(facts.meta_width, facts.meta_height)
-            .or_else(|| nonzero_pair(json_u32(metadata, "width"), json_u32(metadata, "height")))
-            .map(|(width, _)| width)
-            .unwrap_or(0),
-        meta_height: nonzero_pair(facts.meta_width, facts.meta_height)
-            .or_else(|| nonzero_pair(json_u32(metadata, "width"), json_u32(metadata, "height")))
-            .map(|(_, height)| height)
-            .unwrap_or(0),
-        pixel_width,
-        pixel_height,
-        original_size_bytes: facts.original_size_bytes.or_else(|| json_f64(metadata, "originalSizeBytes")),
-    });
-    [
-        ("添加到资源库", copy.added, "inspect-recorded-added"),
-        ("创建时间", copy.created, "inspect-recorded-created"),
-        ("文件修改时间", copy.modified, "inspect-recorded-modified"),
-        ("尺寸", copy.dimensions, "inspect-recorded-size"),
-        ("原始大小", copy.original_size, "inspect-recorded-bytes"),
-    ]
-    .into_iter()
-    .enumerate()
-    .map(|(index, (label, value, key))| stacked_value(label, value, key, index > 0))
-    .collect()
-}
-
-/// 详情卡只读行的文案。空值写成「未记录」。
-pub(super) struct RecordedInput {
-    pub added: String,
-    pub created: String,
-    pub file_modified: String,
-    pub summary_modified: String,
-    pub meta_width: u32,
-    pub meta_height: u32,
-    pub pixel_width: u32,
-    pub pixel_height: u32,
-    pub original_size_bytes: Option<f64>,
-}
-
-pub(super) struct RecordedCopy {
-    pub added: String,
-    pub created: String,
-    pub modified: String,
-    pub dimensions: String,
-    pub original_size: String,
-}
-
-pub(super) fn recorded_copy(input: RecordedInput) -> RecordedCopy {
-    RecordedCopy {
-        added: blank_as_unrecorded(input.added),
-        created: blank_as_unrecorded(input.created),
-        modified: blank_as_unrecorded(if input.file_modified.trim().is_empty() {
-            input.summary_modified
-        } else {
-            input.file_modified
-        }),
-        dimensions: dimension_label(input.meta_width, input.meta_height, input.pixel_width, input.pixel_height),
-        original_size: format_original_size(input.original_size_bytes),
-    }
 }
 
 /// Vue `asset-meta__row`：标签在上（11px 粗体弱色、字距 0.4），数值在下（14px 正文色，长值随处折行），
@@ -325,28 +233,6 @@ fn stacked_value(label: &str, value: String, key: &str, divided: bool) -> AnyVie
         .into_any()
 }
 
-fn prefer(primary: &str, fallback: String) -> String {
-    let primary = primary.trim();
-    if primary.is_empty() { fallback } else { primary.to_string() }
-}
-
-fn blank_as_unrecorded(value: String) -> String {
-    if value.trim().is_empty() { "未记录".into() } else { value }
-}
-
-fn nonzero_pair(width: u32, height: u32) -> Option<(u32, u32)> {
-    (width > 0 && height > 0).then_some((width, height))
-}
-
-/// 元数据宽高优先。没有时用已经画出的像素，避免把 480×640 丢掉。两边都没有才写「未记录」。
-pub(super) fn dimension_label(meta_width: u32, meta_height: u32, pixel_width: u32, pixel_height: u32) -> String {
-    if let Some((width, height)) = nonzero_pair(meta_width, meta_height).or_else(|| nonzero_pair(pixel_width, pixel_height)) {
-        format!("{width} × {height}")
-    } else {
-        "未记录".into()
-    }
-}
-
 /// 与 Vue `formatBytes` 相同。无效数字记日志并写「未记录」。
 pub(super) fn format_original_size(value: Option<f64>) -> String {
     let Some(value) = value else {
@@ -372,42 +258,6 @@ pub(super) fn format_original_size(value: Option<f64>) -> String {
 
 fn plain_number(value: f64) -> String {
     if value.fract() == 0.0 { format!("{value:.0}") } else { value.to_string() }
-}
-
-fn json_text(metadata: Option<&BTreeMap<String, Value>>, key: &str) -> String {
-    match metadata.and_then(|metadata| metadata.get(key)) {
-        Some(Value::String(text)) => text.trim().to_string(),
-        Some(Value::Number(number)) => number.to_string(),
-        Some(_) => {
-            eprintln!("Nana 元数据字段不是文本：{key}");
-            String::new()
-        }
-        None => String::new(),
-    }
-}
-
-fn json_u32(metadata: Option<&BTreeMap<String, Value>>, key: &str) -> u32 {
-    let Some(value) = metadata.and_then(|metadata| metadata.get(key)) else {
-        return 0;
-    };
-    let number = match value {
-        Value::Number(number) => number.as_f64(),
-        Value::String(text) => text.trim().parse::<f64>().ok(),
-        _ => None,
-    };
-    match number {
-        Some(number) if number.is_finite() && number > 0.0 && number <= u32::MAX as f64 => number.round() as u32,
-        _ => 0,
-    }
-}
-
-fn json_f64(metadata: Option<&BTreeMap<String, Value>>, key: &str) -> Option<f64> {
-    let value = metadata.and_then(|metadata| metadata.get(key))?;
-    match value {
-        Value::Number(number) => number.as_f64().filter(|number| number.is_finite() && *number >= 0.0),
-        Value::String(text) => text.trim().parse::<f64>().ok().filter(|number| number.is_finite() && *number >= 0.0),
-        _ => None,
-    }
 }
 
 /// 作品字段、歌词状态或收听进度都画出 Vue 同名区块。
@@ -631,53 +481,9 @@ mod tests {
     }
 
     #[test]
-    fn recorded_rows_keep_decoded_size_and_leave_missing_times_blank() {
-        let empty = recorded_copy(RecordedInput {
-            added: String::new(),
-            created: String::new(),
-            file_modified: String::new(),
-            summary_modified: String::new(),
-            meta_width: 0,
-            meta_height: 0,
-            pixel_width: 0,
-            pixel_height: 640,
-            original_size_bytes: None,
-        });
-        assert_eq!(empty.added, "未记录");
-        assert_eq!(empty.created, "未记录");
-        assert_eq!(empty.modified, "未记录");
-        assert_eq!(empty.dimensions, "未记录");
-        assert_eq!(empty.original_size, "未记录");
-        let decoded = recorded_copy(RecordedInput {
-            added: String::new(),
-            created: "2026-10-08".into(),
-            file_modified: String::new(),
-            summary_modified: "昨天".into(),
-            meta_width: 0,
-            meta_height: 0,
-            pixel_width: 480,
-            pixel_height: 640,
-            original_size_bytes: Some(1536.0),
-        });
-        assert_eq!(decoded.created, "2026-10-08");
-        assert_eq!(decoded.modified, "昨天");
-        assert_eq!(decoded.dimensions, "480 × 640");
-        assert_eq!(decoded.original_size, "1.5 KB");
-        assert_eq!(
-            recorded_copy(RecordedInput {
-                added: String::new(),
-                created: String::new(),
-                file_modified: String::new(),
-                summary_modified: String::new(),
-                meta_width: 32,
-                meta_height: 32,
-                pixel_width: 480,
-                pixel_height: 640,
-                original_size_bytes: Some(500.0),
-            })
-            .dimensions,
-            "32 × 32"
-        );
+    fn original_size_formats_like_vue_and_rejects_bad_numbers() {
+        assert_eq!(format_original_size(None), "未记录");
+        assert_eq!(format_original_size(Some(1536.0)), "1.5 KB");
         assert_eq!(format_original_size(Some(500.0)), "500 B");
         assert_eq!(format_original_size(Some(f64::NAN)), "未记录");
     }
