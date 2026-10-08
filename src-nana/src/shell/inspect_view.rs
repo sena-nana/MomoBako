@@ -27,10 +27,11 @@ use super::{ShellMessage, ShellViewModel};
 /// 搜索面板或已选文件时替换验收用的预览占位。
 pub(super) fn inspect_surface(model: &ShellViewModel) -> AnyView {
     let inspect = &model.inspect;
-    let mut rows = Vec::new();
-    if model.workspace.panel == super::workspace::WorkspacePanel::Search || inspect.filter_bar_open {
-        rows.push(super::inspect_search_view::search_panel(model));
+    // 搜索面板独占主体，和 Vue 的 `SearchPanel` 一样不和预览叠在一起。筛选栏由壳层放置。
+    if model.workspace.panel == super::workspace::WorkspacePanel::Search {
+        return super::inspect_search_view::search_panel(model);
     }
+    let mut rows = Vec::new();
     if inspect.has_target() {
         rows.push(
             widget(
