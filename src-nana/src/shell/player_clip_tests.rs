@@ -88,7 +88,7 @@ fn current_m4a_enters_the_session_without_a_sound_device() {
 }
 
 #[test]
-fn still_png_uses_real_pixels_and_a_missing_file_states_the_contract() {
+fn still_png_uses_real_pixels_and_a_missing_file_fails_without_a_frame() {
     assert!(!super::wav_player::sound_device_compiled_in());
     let dir = std::env::temp_dir().join(format!("nana-still-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
@@ -117,9 +117,7 @@ fn still_png_uses_real_pixels_and_a_missing_file_states_the_contract() {
     let error = model.player.session.error.clone().unwrap_or_default();
     assert!(error.contains("图片无法播放"), "{error}");
     assert!(!error.contains("需要升级"), "{error}");
-    let missing = model.player.still.as_ref().and_then(|item| item.missing.clone()).unwrap_or_default();
-    assert!(missing.contains("RGBA"), "{missing}");
-    assert!(model.player.still.as_ref().is_some_and(|item| item.frame.is_none()));
+    assert!(model.player.still.as_ref().is_some_and(|item| item.path == "pics/missing.png" && item.frame.is_none()));
 
     model.player.contributions[0].supported_extensions = vec!["wma".into()];
     let mut audio = still_item("side", "notes/side.wma");
