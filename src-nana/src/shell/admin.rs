@@ -47,7 +47,8 @@ pub(crate) mod source_provision;
 pub(crate) use plugins_view::delete_dialog as plugin_delete_dialog;
 pub(crate) use reduce::reduce_message;
 pub(crate) use settings_view::settings_page;
-pub(crate) use source_provision::{SourceAuthState, SourceStep};
+pub(crate) use source_provision::SourceAuthState;
+pub use source_provision::SourceStep;
 pub(crate) use view::{admin_surface, task_popover};
 
 #[cfg(test)]
@@ -472,6 +473,12 @@ impl AdminState {
 }
 
 impl ShellViewModel {
+    /// 日志面板在追踪模式下让主区滚动跟随末尾：新记录进来滚到底，暂停后停在原位。
+    /// Vue 的跟随滚的是不定高的日志列表本身，列表不会出现滚动，实际没有效果；这里按设计意图滚主区。
+    pub(super) fn admin_logs_follow_end(&self) -> bool {
+        self.admin_workspace_visible(WorkspacePanel::Logs) && self.admin.log_would_scroll && !self.admin.log_paused
+    }
+
     /// 工作台面板要求启动完成且主区有仓库。
     pub(super) fn admin_workspace_visible(&self, panel: WorkspacePanel) -> bool {
         self.workspace.startup.status == super::StartupStatus::Ready

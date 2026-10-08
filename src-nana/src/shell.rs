@@ -34,7 +34,7 @@ mod inspect_search_view;
 pub(crate) mod audio_decode;
 pub(crate) mod player;
 pub(crate) mod admin;
-pub use admin::{AdminMessage, ToolPageEntry};
+pub use admin::{AdminMessage, SourceStep, ToolPageEntry};
 pub use acceptance::gap_models as acceptance_gap_models;
 pub(crate) mod input;
 pub mod host_events;

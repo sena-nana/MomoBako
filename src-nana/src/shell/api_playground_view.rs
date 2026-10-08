@@ -52,10 +52,10 @@ fn header(model: &ShellViewModel, loading: bool) -> AnyView {
         widget(pad(column(0.0), 8.0, 0.0, 0.0, 0.0)).children((widget(wrapping(mono(request_summary(model), 12.0, 400, Role::Muted))).key("admin-api-summary"),)),
     ));
     let actions = widget(row(12.0).wrap(true).align(AlignSpec::Start)).children((
-        widget(action("刷新契约", None, Tone::Plain, loading)).key("admin-api-refresh").on_cx(|_, _: &Activate, cx| cx.dispatch_program(api(ApiMessage::Refresh))),
+        widget(action("刷新契约", None, Tone::Plain, loading)).key("admin-api-refresh").on_cx(|_, _: &Activate, cx| cx.dispatch_program_all(api(ApiMessage::Refresh))),
         widget(action(if sending { "发送中" } else { "发送" }, None, Tone::Primary, !can_send(model)))
             .key("admin-api-send")
-            .on_cx(|_, _: &Activate, cx| cx.dispatch_program(api(ApiMessage::Send))),
+            .on_cx(|_, _: &Activate, cx| cx.dispatch_program_all(api(ApiMessage::Send))),
     ));
     widget(style::spread(12.0, AlignSpec::Start)).children((left, actions)).into_any()
 }
@@ -88,7 +88,7 @@ fn columns(model: &ShellViewModel) -> AnyView {
     let grid = Stack::from_layout(nana_ui_core::LayoutStyle::default()).with_layout(|layout| {
         layout.display = Some(nana_ui_core::DisplaySpec::Grid);
         layout.grid_columns = Some(vec![
-            GridTrack::MinMax { min_px: 260.0, fr: 1.0, max_px: Some(420.0) },
+            style::capped(260.0, 420.0),
             GridTrack::MinMax { min_px: 0.0, fr: 1.0, max_px: None },
         ]);
         layout.gap = Some(LengthSpec::Px(12.0));
@@ -102,7 +102,7 @@ fn columns(model: &ShellViewModel) -> AnyView {
 
 /// 两栏共用的框：主背景、`border-soft` 边线、md 圆角、1px 边加 14 内边距。
 fn frame(gap: f32) -> Stack {
-    pad(column(gap), 15.0, 15.0, 15.0, 15.0)
+    pad(column(gap), 14.0, 14.0, 14.0, 14.0)
         .surface(Role::Background)
         .outline(Role::BorderSoft, 1.0)
         .radius(RadiusTier::Md)
@@ -156,8 +156,8 @@ fn request_column(model: &ShellViewModel) -> AnyView {
         GridTrack::Px(126.0),
         GridTrack::MinMax { min_px: 0.0, fr: 1.0, max_px: None },
         (
-            field("Transport", widget(transport).key("admin-api-transport").on_cx(|_, event: &SelectChanged, cx| cx.dispatch_program(api(ApiMessage::SetTransport(event.value.to_string())))).into_any()),
-            field("Search", widget(search).key("admin-api-keyword").on_cx(|_, event: &TextChanged, cx| cx.dispatch_program(api(ApiMessage::SetKeyword(event.value.to_string())))).into_any()),
+            field("Transport", widget(transport).key("admin-api-transport").on_cx(|_, event: &SelectChanged, cx| cx.dispatch_program_all(api(ApiMessage::SetTransport(event.value.to_string())))).into_any()),
+            field("Search", widget(search).key("admin-api-keyword").on_cx(|_, event: &TextChanged, cx| cx.dispatch_program_all(api(ApiMessage::SetKeyword(event.value.to_string())))).into_any()),
         ),
         "admin-api-filters",
     );
@@ -174,8 +174,8 @@ fn request_column(model: &ShellViewModel) -> AnyView {
         GridTrack::MinMax { min_px: 0.0, fr: 1.0, max_px: None },
         GridTrack::Px(112.0),
         (
-            field("Endpoint", widget(endpoint_select).key("admin-api-endpoint").on_cx(|_, event: &SelectChanged, cx| cx.dispatch_program(api(ApiMessage::SelectEndpoint(event.value.to_string())))).into_any()),
-            field("Method", widget(method_select).key("admin-api-method").on_cx(|_, event: &SelectChanged, cx| cx.dispatch_program(api(ApiMessage::SetMethod(event.value.to_string())))).into_any()),
+            field("Endpoint", widget(endpoint_select).key("admin-api-endpoint").on_cx(|_, event: &SelectChanged, cx| cx.dispatch_program_all(api(ApiMessage::SelectEndpoint(event.value.to_string())))).into_any()),
+            field("Method", widget(method_select).key("admin-api-method").on_cx(|_, event: &SelectChanged, cx| cx.dispatch_program_all(api(ApiMessage::SetMethod(event.value.to_string())))).into_any()),
         ),
         "admin-api-endpoint-row",
     );
@@ -191,7 +191,7 @@ fn request_column(model: &ShellViewModel) -> AnyView {
     let target = style::native_input(
         TextInput::new(target_value).label("Target").placeholder(if is_http { "/external/v1/health" } else { "" }).read_only(!is_http),
     );
-    body.push(field("Target", widget(target).key("admin-api-target").on_cx(|_, event: &TextChanged, cx| cx.dispatch_program(api(ApiMessage::SetTarget(event.value.to_string())))).into_any()));
+    body.push(field("Target", widget(target).key("admin-api-target").on_cx(|_, event: &TextChanged, cx| cx.dispatch_program_all(api(ApiMessage::SetTarget(event.value.to_string())))).into_any()));
     if is_http {
         let mut checkbox = Checkbox::new("", state.include_auth);
         {
@@ -202,7 +202,7 @@ fn request_column(model: &ShellViewModel) -> AnyView {
         body.push(
             widget(row(8.0))
                 .children((
-                    widget(checkbox).key("admin-api-auth").on_cx(|_, event: &ToggleChanged, cx| cx.dispatch_program(api(ApiMessage::SetAuth(event.checked)))),
+                    widget(checkbox).key("admin-api-auth").on_cx(|_, event: &ToggleChanged, cx| cx.dispatch_program_all(api(ApiMessage::SetAuth(event.checked)))),
                     widget(label("Authorization: Bearer token", 12.0, 700, Role::Muted)),
                 ))
                 .key("admin-api-auth-row")
@@ -215,7 +215,7 @@ fn request_column(model: &ShellViewModel) -> AnyView {
         widget(column(6.0).grow(1.0).with_layout(|layout| layout.min_height = Some(LengthSpec::Px(0.0))))
             .children((
                 widget(label("Request JSON", 12.0, 700, Role::Muted)),
-                widget(area).key("admin-api-request").on_cx(|_, event: &TextChanged, cx| cx.dispatch_program(api(ApiMessage::SetRequestText(event.value.to_string())))),
+                widget(area).key("admin-api-request").on_cx(|_, event: &TextChanged, cx| cx.dispatch_program_all(api(ApiMessage::SetRequestText(event.value.to_string())))),
             ))
             .key("admin-api-request-field")
             .into_any(),
@@ -224,10 +224,10 @@ fn request_column(model: &ShellViewModel) -> AnyView {
     body.push(
         widget(row(12.0).wrap(true).width(LengthSpec::Fill).justify(JustifySpec::End))
             .children((
-                widget(action("复制请求", None, Tone::Plain, endpoint.is_none())).key("admin-api-copy").on_cx(|_, _: &Activate, cx| cx.dispatch_program(api(ApiMessage::Copy))),
+                widget(action("复制请求", None, Tone::Plain, endpoint.is_none())).key("admin-api-copy").on_cx(|_, _: &Activate, cx| cx.dispatch_program_all(api(ApiMessage::Copy))),
                 widget(action(if sending { "发送中" } else { "发送请求" }, None, Tone::Primary, !can_send(model)))
                     .key("admin-api-send-request")
-                    .on_cx(|_, _: &Activate, cx| cx.dispatch_program(api(ApiMessage::Send))),
+                    .on_cx(|_, _: &Activate, cx| cx.dispatch_program_all(api(ApiMessage::Send))),
             ))
             .key("admin-api-actions")
             .into_any(),

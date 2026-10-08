@@ -58,11 +58,11 @@ pub(crate) fn card(key: &'static str, children: Vec<AnyView>) -> AnyView {
         .into_any()
 }
 
-/// `.card h2`：13/600 弱色，下边距 8。
+/// `.card h2`：13/600 弱色、大写、字距 0.5，下边距 8。
 pub(crate) fn card_title(text: &str, key: &'static str) -> AnyView {
-    widget(pad(column(0.0), 0.0, 0.0, 8.0, 0.0))
-        .children((widget(label(text.to_uppercase(), 13.0, 600, Role::Muted)).key(key),))
-        .into_any()
+    let mut title = label(text.to_uppercase(), 13.0, 600, Role::Muted);
+    Arc::make_mut(&mut title.style.layout).letter_spacing = Some(0.5);
+    widget(pad(column(0.0), 0.0, 0.0, 8.0, 0.0)).children((widget(title).key(key),)).into_any()
 }
 
 /// `.settings-row` 的位置：首行上内边距 4，末行下内边距 4 且没有分割线。
@@ -102,6 +102,8 @@ fn audio_card(model: &ShellViewModel) -> AnyView {
     {
         let layout = Arc::make_mut(&mut select.style.layout);
         layout.width = Some(LengthSpec::Shrink);
+        // 没有可选项时 Vue 的空下拉框仍有内边距和箭头，约 42 宽。
+        layout.min_width = Some(LengthSpec::Px(42.0));
         layout.height = Some(LengthSpec::Px(32.0));
         layout.font_size = Some(14.0);
         layout.line_height = Some(nana_ui_core::LineHeightSpec::Relative(style::LINE));
@@ -110,13 +112,15 @@ fn audio_card(model: &ShellViewModel) -> AnyView {
         .children((
             widget(style::glyph(icons::VOLUME2, 14.0, Role::Text)).key("admin-audio-icon"),
             widget(select).key("admin-audio-player").on_cx(|_, event: &SelectChanged, cx| {
-                cx.dispatch_program(ShellMessage::Admin(AdminMessage::SetAudioPlayer(Some(event.value.to_string()))));
+                cx.dispatch_program_all(ShellMessage::Admin(AdminMessage::SetAudioPlayer(Some(event.value.to_string()))));
             }),
         ))
         .into_any();
+    // 下面有提示时这一行不是卡片最后一个子元素，Vue 的 `:last-child` 规则不生效：保留分割线和 12 的下内边距。
+    let place = if audio.notice.is_some() { RowPlace::Middle } else { RowPlace::Last };
     let mut body = vec![
         card_title("音频播放", "admin-audio-title"),
-        settings_row("默认音频播放器", "按插件 ID 固定选择；不可用时只回退到官方播放器。", picker, RowPlace::Last, "admin-audio-row"),
+        settings_row("默认音频播放器", "按插件 ID 固定选择；不可用时只回退到官方播放器。", picker, place, "admin-audio-row"),
     ];
     if let Some((text, error)) = audio.notice {
         body.push(notice(text, error, "admin-audio-notice"));
@@ -201,7 +205,7 @@ fn corner_segment(value: &'static str, icon: Icon, text: &'static str, active: b
     widget(button)
         .key(format!("admin-corner-{value}"))
         .on_cx(move |_, _: &Activate, cx| {
-            cx.dispatch_program(ShellMessage::Admin(AdminMessage::SetCornerStyle(value.into())));
+            cx.dispatch_program_all(ShellMessage::Admin(AdminMessage::SetCornerStyle(value.into())));
         })
         .into_any()
 }
@@ -225,7 +229,7 @@ fn theme_segment(mode: ThemeMode, icon: Icon, text: &'static str) -> AnyView {
     widget(button)
         .key(format!("settings-theme-{value}"))
         .on_cx(move |_, _: &Activate, cx| {
-            cx.dispatch_program(ShellMessage::SettingsThemeChanged(value.into()));
+            cx.dispatch_program_all(ShellMessage::SettingsThemeChanged(value.into()));
         })
         .into_any()
 }
@@ -289,7 +293,7 @@ fn radius_control(model: &ShellViewModel) -> AnyView {
     widget(row(10.0))
         .children((
             widget(range).key("admin-corner-radius").on_cx(|_, event: &RangeChanged, cx| {
-                cx.dispatch_program(ShellMessage::Admin(AdminMessage::SetCornerRadius(event.value.to_string())));
+                cx.dispatch_program_all(ShellMessage::Admin(AdminMessage::SetCornerRadius(event.value.to_string())));
             }),
             output,
         ))
@@ -352,7 +356,7 @@ fn external_card(model: &ShellViewModel) -> AnyView {
             copy_action("复制 JSON", "连接 JSON", json.clone(), icons::FILE_JSON, json.is_empty(), "admin-copy-json"),
             widget(action("导出 JSON", Some(icons::DOWNLOAD), Tone::Primary, json.is_empty()))
                 .key("admin-export-json")
-                .on_cx(|_, _: &Activate, cx| cx.dispatch_program(ShellMessage::Admin(AdminMessage::ExportExternal)))
+                .on_cx(|_, _: &Activate, cx| cx.dispatch_program_all(ShellMessage::Admin(AdminMessage::ExportExternal)))
                 .into_any(),
         ))
         .into_any();
@@ -392,7 +396,7 @@ fn copy_action(text: &'static str, field: &'static str, value: String, icon: Ico
     widget(action(text, Some(icon), Tone::Plain, disabled))
         .key(key)
         .on_cx(move |_, _: &Activate, cx| {
-            cx.dispatch_program(ShellMessage::Admin(AdminMessage::CopyExternal { label: field.into(), value: value.clone() }));
+            cx.dispatch_program_all(ShellMessage::Admin(AdminMessage::CopyExternal { label: field.into(), value: value.clone() }));
         })
         .into_any()
 }

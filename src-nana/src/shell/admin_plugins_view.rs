@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use nana_ui::runtime::view::{widget, AnyView, IntoView};
 use nana_ui::runtime::{Activate, AlignSpec, ConfirmDialog, LengthSpec, Stack, TextChanged, TextInput};
-use nana_ui_core::{GridTrack, RadiusTier, SemanticColorRole as Role};
+use nana_ui_core::{RadiusTier, SemanticColorRole as Role};
 
 use super::super::{ShellMessage, ShellViewModel};
 use super::icons;
@@ -60,11 +60,11 @@ pub(crate) fn manager_panel(model: &ShellViewModel, copy: &PanelCopy) -> AnyView
             style::stat(format!("{} 个插件", filtered.len()), "admin-plugin-count"),
             widget(action("刷新", Some(icons::REFRESH_CW), Tone::Plain, managing))
                 .key("admin-plugin-refresh")
-                .on_cx(|_, _: &Activate, cx| cx.dispatch_program(ShellMessage::Admin(AdminMessage::RefreshPlugins)))
+                .on_cx(|_, _: &Activate, cx| cx.dispatch_program_all(ShellMessage::Admin(AdminMessage::RefreshPlugins)))
                 .into_any(),
             widget(action("从 .momoplug 安装", Some(icons::UPLOAD), Tone::Primary, managing))
                 .key("admin-plugin-install")
-                .on_cx(|_, _: &Activate, cx| cx.dispatch_program(ShellMessage::Admin(AdminMessage::ChooseArchive)))
+                .on_cx(|_, _: &Activate, cx| cx.dispatch_program_all(ShellMessage::Admin(AdminMessage::ChooseArchive)))
                 .into_any(),
         ],
         "admin-plugin",
@@ -92,7 +92,7 @@ fn search_field(keyword: &str, placeholder: &str) -> AnyView {
     let input = style::bare_input(TextInput::new(keyword.to_string()).label("筛选插件").placeholder(placeholder.to_string()));
     widget(style::field_frame())
         .children((widget(input).key("admin-plugin-keyword").on_cx(|_, event: &TextChanged, cx| {
-            cx.dispatch_program(ShellMessage::Admin(AdminMessage::SetKeyword(event.value.to_string())));
+            cx.dispatch_program_all(ShellMessage::Admin(AdminMessage::SetKeyword(event.value.to_string())));
         }),))
         .key("admin-plugin-search")
         .into_any()
@@ -102,23 +102,24 @@ fn search_field(keyword: &str, placeholder: &str) -> AnyView {
 fn groups(model: &ShellViewModel) -> AnyView {
     let mut sections = Vec::new();
     for (category, ids) in model.admin.grouped_plugins() {
+        let keys = style::unique_keys(ids.iter().map(String::as_str));
         let mut cards = Vec::new();
-        for plugin_id in &ids {
+        for (plugin_id, key) in ids.iter().zip(&keys) {
             if let Some(plugin) = model.admin.plugins.iter().find(|plugin| &plugin.plugin_id == plugin_id) {
-                cards.push(plugin_card(model, plugin));
+                cards.push(plugin_card(model, plugin, key));
             }
         }
         let head = widget(style::fixed(style::spread(12.0, AlignSpec::Center), None, None).with_layout(|layout| {
             layout.min_height = Some(LengthSpec::Px(28.0));
         }))
         .children((
-            widget(style::label_lh(support::category_label(&category), 15.0, 700, Role::Text, 1.25)).key(format!("admin-plugin-group-{category}")),
-            widget(label(format!("{} 个插件", ids.len()), 12.0, 400, Role::Muted)).key(format!("admin-plugin-group-count-{category}")),
+            widget(style::label_lh(support::category_label(&category), 15.0, 700, Role::Text, 1.25)).key(format!("admin-plugin-group-{}", style::key_part(&category))),
+            widget(label(format!("{} 个插件", ids.len()), 12.0, 400, Role::Muted)).key(format!("admin-plugin-group-count-{}", style::key_part(&category))),
         ));
         sections.push(
             widget(column(8.0))
                 .children((head, widget(column(10.0)).children(cards)))
-                .key(format!("admin-plugin-section-{category}"))
+                .key(format!("admin-plugin-section-{}", style::key_part(&category)))
                 .into_any(),
         );
     }
@@ -126,25 +127,25 @@ fn groups(model: &ShellViewModel) -> AnyView {
 }
 
 /// `.extensions-workbench__card`：主背景、xl 圆角、1px 透明边加 16 内边距，竖排间距 10。
-fn plugin_card(model: &ShellViewModel, plugin: &PluginManifest) -> AnyView {
+fn plugin_card(model: &ShellViewModel, plugin: &PluginManifest, pid: &str) -> AnyView {
     let plugin_id = plugin.plugin_id.as_str();
     let managing = model.admin.managing;
     let status = support::plugin_status_label(plugin);
     let head = widget(style::spread(10.0, AlignSpec::Center))
         .children((
-            widget(label(plugin.name.clone(), 14.0, 700, Role::Text)).key(format!("admin-plugin-{plugin_id}")),
-            style::pill(status, status_tone(plugin), format!("admin-plugin-status-{plugin_id}")),
+            widget(label(plugin.name.clone(), 14.0, 700, Role::Text)).key(format!("admin-plugin-{pid}")),
+            style::pill(status, status_tone(plugin), format!("admin-plugin-status-{pid}")),
         ))
         .into_any();
     let mut body = vec![
         head,
-        widget(wrapping(label(plugin.description.clone(), 14.0, 400, Role::Muted))).key(format!("admin-plugin-desc-{plugin_id}")).into_any(),
+        widget(wrapping(label(plugin.description.clone(), 14.0, 400, Role::Muted))).key(format!("admin-plugin-desc-{pid}")).into_any(),
         widget(row(10.0).wrap(true))
             .children((
                 widget(label(plugin.plugin_id.clone(), 12.0, 400, Role::Muted)),
                 widget(label(format!("v{}", plugin.version), 12.0, 400, Role::Muted)),
             ))
-            .key(format!("admin-plugin-meta-{plugin_id}"))
+            .key(format!("admin-plugin-meta-{pid}"))
             .into_any(),
     ];
     if plugin.disable_reason.is_some() || plugin.degradation_reason.is_some() {
@@ -155,7 +156,7 @@ fn plugin_card(model: &ShellViewModel, plugin: &PluginManifest) -> AnyView {
         if let Some(reason) = plugin.degradation_reason.as_deref() {
             notices.push(plugin_notice(reason, false));
         }
-        body.push(widget(column(6.0)).children(notices).key(format!("admin-plugin-notices-{plugin_id}")).into_any());
+        body.push(widget(column(6.0)).children(notices).key(format!("admin-plugin-notices-{pid}")).into_any());
     }
     body.push(chips(plugin));
     body.extend(sections(model, plugin));
@@ -164,7 +165,7 @@ fn plugin_card(model: &ShellViewModel, plugin: &PluginManifest) -> AnyView {
         body.push(settings_section(model, plugin));
     }
     let card = pad(column(10.0), 17.0, 17.0, 17.0, 17.0).surface(Role::Background).radius(RadiusTier::Xl);
-    widget(card).children(body).key(format!("admin-plugin-card-{plugin_id}")).into_any()
+    widget(card).children(body).key(format!("admin-plugin-card-{pid}")).into_any()
 }
 
 fn status_tone(plugin: &PluginManifest) -> PillTone {
@@ -192,7 +193,7 @@ fn plugin_notice(text: &str, danger: bool) -> AnyView {
 
 /// `.settings-list__chips`：分类、类型、来源、运行时、依赖和能力，上边距 8、间距 8。
 fn chips(plugin: &PluginManifest) -> AnyView {
-    let plugin_id = plugin.plugin_id.as_str();
+    let pid = style::key_part(&plugin.plugin_id);
     let mut values = vec![
         support::category_label(&support::plugin_category(plugin)).to_string(),
         plugin.kind.clone(),
@@ -204,14 +205,15 @@ fn chips(plugin: &PluginManifest) -> AnyView {
     let items = values
         .into_iter()
         .enumerate()
-        .map(|(index, value)| style::hint_chip(value, format!("admin-plugin-chip-{plugin_id}-{index}")))
+        .map(|(index, value)| style::hint_chip(value, format!("admin-plugin-chip-{pid}-{index}")))
         .collect::<Vec<_>>();
-    widget(pad(row(8.0).wrap(true), 8.0, 0.0, 0.0, 0.0).width(LengthSpec::Fill)).children(items).key(format!("admin-plugin-chips-{plugin_id}")).into_any()
+    widget(pad(row(8.0).wrap(true), 8.0, 0.0, 0.0, 0.0).width(LengthSpec::Fill)).children(items).key(format!("admin-plugin-chips-{pid}")).into_any()
 }
 
 /// 依赖、权限、Hook 和执行记录四段，标签列 56 宽。
 fn sections(model: &ShellViewModel, plugin: &PluginManifest) -> Vec<AnyView> {
     let plugin_id = plugin.plugin_id.as_str();
+    let pid = style::key_part(plugin_id);
     let mut out = Vec::new();
     let deps = &plugin.dependency_status;
     if !deps.required.is_empty() || !deps.optional.is_empty() {
@@ -224,11 +226,11 @@ fn sections(model: &ShellViewModel, plugin: &PluginManifest) -> Vec<AnyView> {
             let name = state.name.clone().unwrap_or_else(|| state.plugin_id.clone());
             items.push(dependency_chip(format!("可选 {name} · {}", support::dependency_status_label(&state.status)), dependency_tone(&state.status)));
         }
-        out.push(section("依赖", items, format!("admin-plugin-deps-{plugin_id}")));
+        out.push(section("依赖", items, format!("admin-plugin-deps-{pid}")));
     }
     if !plugin.permissions.is_empty() {
         let items = plugin.permissions.iter().map(|permission| dependency_chip(permission.clone(), ChipTone::Plain)).collect();
-        out.push(section("权限", items, format!("admin-plugin-permissions-{plugin_id}")));
+        out.push(section("权限", items, format!("admin-plugin-permissions-{pid}")));
     }
     if !plugin.hooks.is_empty() {
         let items = plugin
@@ -236,13 +238,14 @@ fn sections(model: &ShellViewModel, plugin: &PluginManifest) -> Vec<AnyView> {
             .iter()
             .map(|hook| dependency_chip(format!("{} · {}", hook.label.clone().unwrap_or_else(|| hook.action.clone()), hook.slot), ChipTone::Plain))
             .collect();
-        out.push(section("Hook", items, format!("admin-plugin-hooks-{plugin_id}")));
+        out.push(section("Hook", items, format!("admin-plugin-hooks-{pid}")));
     }
     let records = model.admin.hook_executions.iter().filter(|record| record.plugin_id == plugin_id).take(3).collect::<Vec<_>>();
     if !records.is_empty() {
-        let items = records.into_iter().map(execution_item).collect::<Vec<_>>();
+        let keys = style::unique_keys(records.iter().map(|record| record.execution_id.as_str()));
+        let items = records.into_iter().zip(&keys).map(|(record, key)| execution_item(record, key)).collect::<Vec<_>>();
         let list = widget(column(8.0)).children(items).into_any();
-        out.push(section_with_body("执行记录", list, format!("admin-plugin-executions-{plugin_id}")));
+        out.push(section_with_body("执行记录", list, format!("admin-plugin-executions-{pid}")));
     }
     out
 }
@@ -276,27 +279,22 @@ fn dependency_chip(text: String, tone: ChipTone) -> AnyView {
 }
 
 fn section(title: &str, items: Vec<AnyView>, key: String) -> AnyView {
-    let list = widget(row(6.0).wrap(true).width(LengthSpec::Fill).min_width(LengthSpec::Px(0.0)).shrink(1.0)).children(items).into_any();
+    let list = widget(row(6.0).wrap(true).width(LengthSpec::Fill).min_width(LengthSpec::Px(0.0))).children(items).into_any();
     section_with_body(title, list, key)
 }
 
-/// `.plugin-manager__section`：两列网格 56 / 1fr，间距 8，顶对齐。
+/// `.plugin-manager__section`：56 宽标签列加占满余下宽度的内容列，间距 8，顶对齐。
+/// 用横排而不是网格：Nana 网格的自动行高按内容最窄时量，折行芯片会把行撑高。
 fn section_with_body(title: &str, body: AnyView, key: String) -> AnyView {
-    let grid = Stack::from_layout(nana_ui_core::LayoutStyle::default()).with_layout(|layout| {
-        layout.display = Some(nana_ui_core::DisplaySpec::Grid);
-        layout.grid_columns = Some(vec![GridTrack::Px(56.0), GridTrack::MinMax { min_px: 0.0, fr: 1.0, max_px: None }]);
-        layout.gap = Some(LengthSpec::Px(8.0));
-        layout.width = Some(LengthSpec::Fill);
-        layout.align_items = AlignSpec::Start;
-    });
-    widget(grid)
-        .children((widget(style::label_px(title, 12.0, 400, Role::Muted, 24.0)), body))
+    let content = widget(Stack::column(0.0).width(LengthSpec::Shrink).min_width(LengthSpec::Px(0.0)).grow(1.0).shrink(1.0)).children((body,));
+    widget(Stack::row(8.0).align(AlignSpec::Start).width(LengthSpec::Fill))
+        .children((widget(style::fixed(column(0.0), Some(56.0), None)).children((widget(style::label_px(title, 12.0, 400, Role::Muted, 24.0)),)), content))
         .key(key)
         .into_any()
 }
 
 /// 一条执行记录：状态小块，加标题、槽位、消息和时间。
-fn execution_item(record: &PluginHookExecutionRecord) -> AnyView {
+fn execution_item(record: &PluginHookExecutionRecord, key: &str) -> AnyView {
     let tone = match record.status.as_str() {
         "failed" => ChipTone::Danger,
         "blocked" => ChipTone::Muted,
@@ -319,27 +317,28 @@ fn execution_item(record: &PluginHookExecutionRecord) -> AnyView {
             dependency_chip(support::hook_status_label(&record.status), tone),
             widget(Stack::column(3.0).width(LengthSpec::Shrink).min_width(LengthSpec::Px(0.0)).grow(1.0).shrink(1.0)).children(lines),
         ))
-        .key(format!("admin-plugin-execution-{}", record.execution_id))
+        .key(format!("admin-plugin-execution-{key}"))
         .into_any()
 }
 
 /// 卡片底部的操作：设置、启用或禁用，用户插件多一个删除。靠右排。
 fn card_actions(plugin: &PluginManifest, managing: bool) -> AnyView {
     let plugin_id = plugin.plugin_id.clone();
+    let pid = style::key_part(&plugin_id);
     let enabled = plugin.enabled;
     let settings_id = plugin_id.clone();
     let toggle_id = plugin_id.clone();
     let mut buttons = vec![
         widget(action("设置", Some(icons::SETTINGS), Tone::Plain, managing))
-            .key(format!("admin-plugin-settings-{plugin_id}"))
+            .key(format!("admin-plugin-settings-{pid}"))
             .on_cx(move |_, _: &Activate, cx| {
-                cx.dispatch_program(ShellMessage::Admin(AdminMessage::ToggleSettings(settings_id.clone())));
+                cx.dispatch_program_all(ShellMessage::Admin(AdminMessage::ToggleSettings(settings_id.clone())));
             })
             .into_any(),
         widget(action(if enabled { "禁用" } else { "启用" }, Some(icons::POWER), Tone::Plain, managing))
-            .key(format!("admin-plugin-toggle-{plugin_id}"))
+            .key(format!("admin-plugin-toggle-{pid}"))
             .on_cx(move |_, _: &Activate, cx| {
-                cx.dispatch_program(ShellMessage::Admin(AdminMessage::SetEnabled { plugin_id: toggle_id.clone(), enabled: !enabled }));
+                cx.dispatch_program_all(ShellMessage::Admin(AdminMessage::SetEnabled { plugin_id: toggle_id.clone(), enabled: !enabled }));
             })
             .into_any(),
     ];
@@ -347,16 +346,16 @@ fn card_actions(plugin: &PluginManifest, managing: bool) -> AnyView {
         let delete_id = plugin_id.clone();
         buttons.push(
             widget(action("删除", Some(icons::TRASH2), Tone::Danger, managing))
-                .key(format!("admin-plugin-delete-{plugin_id}"))
+                .key(format!("admin-plugin-delete-{pid}"))
                 .on_cx(move |_, _: &Activate, cx| {
-                    cx.dispatch_program(ShellMessage::Admin(AdminMessage::RequestDelete(delete_id.clone())));
+                    cx.dispatch_program_all(ShellMessage::Admin(AdminMessage::RequestDelete(delete_id.clone())));
                 })
                 .into_any(),
         );
     }
     widget(row(8.0).wrap(true).width(LengthSpec::Fill).justify(nana_ui::runtime::JustifySpec::End))
         .children(buttons)
-        .key(format!("admin-plugin-actions-{plugin_id}"))
+        .key(format!("admin-plugin-actions-{pid}"))
         .into_any()
 }
 
@@ -364,12 +363,13 @@ fn card_actions(plugin: &PluginManifest, managing: bool) -> AnyView {
 /// 头部是设置标题、说明和「打开目录」；下面是来源认证页和字段表单。
 fn settings_section(model: &ShellViewModel, plugin: &PluginManifest) -> AnyView {
     let plugin_id = plugin.plugin_id.clone();
-    let mut head_text = vec![widget(label(support::plugin_settings_label(plugin), 13.0, 700, Role::Text)).key(format!("admin-plugin-settings-title-{plugin_id}")).into_any()];
+    let pid = style::key_part(&plugin_id);
+    let mut head_text = vec![widget(label(support::plugin_settings_label(plugin), 13.0, 700, Role::Text)).key(format!("admin-plugin-settings-title-{pid}")).into_any()];
     let description = support::plugin_settings_description(plugin);
     if !description.is_empty() {
         head_text.push(
             widget(pad(column(0.0), 4.0, 0.0, 0.0, 0.0))
-                .children((widget(wrapping(style::label_lh(description, 12.0, 400, Role::Muted, 1.5))).key(format!("admin-plugin-settings-desc-{plugin_id}")),))
+                .children((widget(wrapping(style::label_lh(description, 12.0, 400, Role::Muted, 1.5))).key(format!("admin-plugin-settings-desc-{pid}")),))
                 .into_any(),
         );
     }
@@ -378,13 +378,13 @@ fn settings_section(model: &ShellViewModel, plugin: &PluginManifest) -> AnyView 
         .children((
             widget(Stack::column(0.0).width(LengthSpec::Shrink).min_width(LengthSpec::Px(0.0)).grow(1.0).shrink(1.0)).children(head_text),
             widget(action("打开目录", Some(icons::FOLDER_OPEN), Tone::Plain, model.admin.managing))
-                .key(format!("admin-plugin-directory-{plugin_id}"))
+                .key(format!("admin-plugin-directory-{pid}"))
                 .on_cx(move |_, _: &Activate, cx| {
-                    cx.dispatch_program(ShellMessage::Admin(AdminMessage::OpenDataDirectory(directory_id.clone())));
+                    cx.dispatch_program_all(ShellMessage::Admin(AdminMessage::OpenDataDirectory(directory_id.clone())));
                 })
                 .into_any(),
         ))
-        .key(format!("admin-plugin-settings-head-{plugin_id}"))
+        .key(format!("admin-plugin-settings-head-{pid}"))
         .into_any();
     let mut body = vec![head];
     if support::has_source_authentication(plugin) {
@@ -395,7 +395,7 @@ fn settings_section(model: &ShellViewModel, plugin: &PluginManifest) -> AnyView 
     }
     widget(style::top_rule(pad(column(12.0), 12.0, 0.0, 0.0, 0.0)))
         .children(body)
-        .key(format!("admin-plugin-settings-section-{plugin_id}"))
+        .key(format!("admin-plugin-settings-section-{pid}"))
         .into_any()
 }
 
@@ -417,13 +417,13 @@ pub(crate) fn delete_dialog(model: &ShellViewModel) -> Option<AnyView> {
     Some(
         widget(dialog)
             .cancel(widget(action("取消", None, Tone::Plain, model.admin.managing)).key("admin-plugin-cancel-delete").on_cx(|_, _: &Activate, cx| {
-                cx.dispatch_program(ShellMessage::Admin(AdminMessage::CancelDelete));
+                cx.dispatch_program_all(ShellMessage::Admin(AdminMessage::CancelDelete));
             }))
             .confirm(
                 widget(action(if model.admin.managing { "删除中..." } else { "删除" }, None, Tone::Danger, model.admin.managing))
                     .key("admin-plugin-confirm-delete")
                     .on_cx(|_, _: &Activate, cx| {
-                        cx.dispatch_program(ShellMessage::Admin(AdminMessage::ConfirmDelete));
+                        cx.dispatch_program_all(ShellMessage::Admin(AdminMessage::ConfirmDelete));
                     }),
             )
             .key("admin-plugin-delete-dialog")

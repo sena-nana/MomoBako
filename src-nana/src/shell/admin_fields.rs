@@ -26,19 +26,21 @@ pub(super) fn fields_form(model: &ShellViewModel, plugin: &PluginManifest) -> Op
     if fields.is_empty() {
         return None;
     }
-    let rows = fields.iter().map(|field| field_row(model, plugin, field)).collect::<Vec<_>>();
-    Some(widget(style::column(10.0)).children(rows).key(format!("admin-fields-{}", plugin.plugin_id)).into_any())
+    let keys = style::unique_keys(fields.iter().map(|field| field.key.as_str()));
+    let rows = fields.iter().zip(&keys).map(|(field, key)| field_row(model, plugin, field, key)).collect::<Vec<_>>();
+    Some(widget(style::column(10.0)).children(rows).key(format!("admin-fields-{}", style::key_part(&plugin.plugin_id))).into_any())
 }
 
 /// 一行字段。布尔字段的控件列不拉伸，其余字段中间列占满。
-fn field_row(model: &ShellViewModel, plugin: &PluginManifest, field: &ConfigField) -> AnyView {
+fn field_row(model: &ShellViewModel, plugin: &PluginManifest, field: &ConfigField, key: &str) -> AnyView {
     let plugin_id = plugin.plugin_id.as_str();
+    let fkey = format!("{}-{key}", style::key_part(plugin_id));
     let boolean = field.field_type == "boolean";
     let columns = if boolean {
-        vec![GridTrack::MinMax { min_px: 140.0, fr: 1.0, max_px: Some(220.0) }, GridTrack::Auto, GridTrack::Auto]
+        vec![style::capped(140.0, 220.0), GridTrack::Auto, GridTrack::Auto]
     } else {
         vec![
-            GridTrack::MinMax { min_px: 140.0, fr: 1.0, max_px: Some(220.0) },
+            style::capped(140.0, 220.0),
             GridTrack::MinMax { min_px: 180.0, fr: 1.0, max_px: None },
             GridTrack::Auto,
         ]
@@ -50,7 +52,7 @@ fn field_row(model: &ShellViewModel, plugin: &PluginManifest, field: &ConfigFiel
         layout.width = Some(LengthSpec::Fill);
         layout.align_items = AlignSpec::Center;
     });
-    let mut name = vec![widget(label(field.label.clone(), 13.0, 600, Role::Text)).key(format!("admin-field-label-{plugin_id}-{}", field.key)).into_any()];
+    let mut name = vec![widget(label(field.label.clone(), 13.0, 600, Role::Text)).key(format!("admin-field-label-{fkey}")).into_any()];
     if let Some(description) = field.description.as_deref().filter(|text| !text.is_empty()) {
         name.push(
             widget(style::pad(style::column(0.0), 3.0, 0.0, 0.0, 0.0))
@@ -61,18 +63,18 @@ fn field_row(model: &ShellViewModel, plugin: &PluginManifest, field: &ConfigFiel
     let reset_id = plugin_id.to_string();
     let reset_key = field.key.clone();
     let reset = widget(action("重置", None, Tone::Plain, model.admin.managing))
-        .key(format!("admin-field-reset-{plugin_id}-{}", field.key))
+        .key(format!("admin-field-reset-{fkey}"))
         .on_cx(move |_, _: &Activate, cx| {
-            cx.dispatch_program(ShellMessage::Admin(AdminMessage::ResetConfig { plugin_id: reset_id.clone(), key: reset_key.clone() }));
+            cx.dispatch_program_all(ShellMessage::Admin(AdminMessage::ResetConfig { plugin_id: reset_id.clone(), key: reset_key.clone() }));
         })
         .into_any();
     widget(grid)
         .children((
             widget(Stack::column(0.0).min_width(LengthSpec::Px(0.0))).children(name),
-            control(model, plugin_id, field),
+            control(model, plugin_id, field, &fkey),
             reset,
         ))
-        .key(format!("admin-field-{plugin_id}-{}", field.key))
+        .key(format!("admin-field-{fkey}"))
         .into_any()
 }
 
@@ -86,7 +88,7 @@ fn current_value<'a>(model: &'a ShellViewModel, plugin_id: &str, field: &'a Conf
         .or(field.default_value.as_ref())
 }
 
-fn control(model: &ShellViewModel, plugin_id: &str, field: &ConfigField) -> AnyView {
+fn control(model: &ShellViewModel, plugin_id: &str, field: &ConfigField, fkey: &str) -> AnyView {
     let disabled = model.admin.managing;
     let current = current_value(model, plugin_id, field);
     let id = plugin_id.to_string();
@@ -101,9 +103,9 @@ fn control(model: &ShellViewModel, plugin_id: &str, field: &ConfigField) -> AnyV
                 layout.height = Some(LengthSpec::Px(18.0));
             }
             widget(checkbox)
-                .key(format!("admin-field-bool-{plugin_id}-{key}"))
+                .key(format!("admin-field-bool-{fkey}"))
                 .on_cx(move |_, event: &ToggleChanged, cx| {
-                    cx.dispatch_program(ShellMessage::Admin(AdminMessage::ConfigInput {
+                    cx.dispatch_program_all(ShellMessage::Admin(AdminMessage::ConfigInput {
                         plugin_id: id.clone(),
                         key: key.clone(),
                         text: String::new(),
@@ -125,9 +127,9 @@ fn control(model: &ShellViewModel, plugin_id: &str, field: &ConfigField) -> AnyV
                 layout.font_size = Some(14.0);
             }
             widget(select)
-                .key(format!("admin-field-select-{plugin_id}-{key}"))
+                .key(format!("admin-field-select-{fkey}"))
                 .on_cx(move |_, event: &SelectChanged, cx| {
-                    cx.dispatch_program(ShellMessage::Admin(AdminMessage::ConfigInput {
+                    cx.dispatch_program_all(ShellMessage::Admin(AdminMessage::ConfigInput {
                         plugin_id: id.clone(),
                         key: key.clone(),
                         text: event.value.to_string(),
@@ -160,16 +162,16 @@ fn control(model: &ShellViewModel, plugin_id: &str, field: &ConfigField) -> AnyV
             let submit_id = id.clone();
             let submit_key = key.clone();
             widget(area)
-                .key(format!("admin-field-json-{plugin_id}-{key}"))
+                .key(format!("admin-field-json-{fkey}"))
                 .on_cx(move |_, event: &TextChanged, cx| {
-                    cx.dispatch_program(ShellMessage::Admin(AdminMessage::JsonDraft {
+                    cx.dispatch_program_all(ShellMessage::Admin(AdminMessage::JsonDraft {
                         plugin_id: id.clone(),
                         key: key.clone(),
                         value: event.value.to_string(),
                     }));
                 })
                 .on_cx(move |_, _: &TextSubmitted, cx| {
-                    cx.dispatch_program(ShellMessage::Admin(AdminMessage::SaveJson { plugin_id: submit_id.clone(), key: submit_key.clone() }));
+                    cx.dispatch_program_all(ShellMessage::Admin(AdminMessage::SaveJson { plugin_id: submit_id.clone(), key: submit_key.clone() }));
                 })
                 .into_any()
         }
@@ -187,16 +189,16 @@ fn control(model: &ShellViewModel, plugin_id: &str, field: &ConfigField) -> AnyV
             let submit_id = id.clone();
             let submit_key = key.clone();
             widget(input)
-                .key(format!("admin-field-text-{plugin_id}-{key}"))
+                .key(format!("admin-field-text-{fkey}"))
                 .on_cx(move |_, event: &TextChanged, cx| {
-                    cx.dispatch_program(ShellMessage::Admin(AdminMessage::FieldDraft {
+                    cx.dispatch_program_all(ShellMessage::Admin(AdminMessage::FieldDraft {
                         plugin_id: id.clone(),
                         key: key.clone(),
                         value: event.value.to_string(),
                     }));
                 })
                 .on_cx(move |_, event: &TextSubmitted, cx| {
-                    cx.dispatch_program(ShellMessage::Admin(AdminMessage::ConfigInput {
+                    cx.dispatch_program_all(ShellMessage::Admin(AdminMessage::ConfigInput {
                         plugin_id: submit_id.clone(),
                         key: submit_key.clone(),
                         text: event.value.clone(),

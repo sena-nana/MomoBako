@@ -4,7 +4,7 @@
 //! 340 宽，贴在侧栏底部任务按钮上方；每个任务一块，来源加进度条（标签、细节、百分比）。
 
 use nana_ui::runtime::view::{widget, AnyView, IntoView};
-use nana_ui::runtime::{Activate, AlignSpec, IconButton, JustifySpec, LengthSpec, Stack};
+use nana_ui::runtime::{Activate, AlignSpec, IconButton, JustifySpec, LengthSpec, ScrollAxes, ScrollView, Stack};
 use nana_ui_core::{RadiusTier, SemanticColorRole as Role};
 
 use super::super::{ShellMessage, ShellViewModel, WorkspacePanel};
@@ -44,7 +44,7 @@ pub(crate) fn task_popover(model: &ShellViewModel) -> Option<AnyView> {
         .children((
             widget(label("任务", 13.0, 700, Role::Text)).key("admin-task-title"),
             widget(close_button()).key("admin-task-close").on_cx(|_, _: &Activate, cx| {
-                cx.dispatch_program(ShellMessage::Admin(AdminMessage::CloseTaskPopover));
+                cx.dispatch_program_all(ShellMessage::Admin(AdminMessage::CloseTaskPopover));
             }),
         ))
         .into_any();
@@ -56,10 +56,18 @@ pub(crate) fn task_popover(model: &ShellViewModel) -> Option<AnyView> {
                 .into_any(),
         );
     } else {
-        let items = rows.iter().map(task_item).collect::<Vec<_>>();
-        body.push(widget(column(10.0)).children(items).key("admin-task-list").into_any());
+        let keys = style::unique_keys(rows.iter().map(|task| task.id.as_str()));
+        let items = rows.iter().zip(&keys).map(|(task, key)| task_item(task, key)).collect::<Vec<_>>();
+        // `.task-popover__list`：弹层最高 360，任务多时列表自己滚动。
+        let scroll = ScrollView::new(ScrollAxes::Vertical).with_layout(|layout| {
+            layout.flex_grow = Some(1.0);
+            layout.flex_shrink = Some(1.0);
+            layout.min_height = Some(LengthSpec::Px(0.0));
+        });
+        let list = widget(column(10.0)).children(items).key("admin-task-list");
+        body.push(widget(scroll).children((list,)).key("admin-task-list-scroll").into_any());
     }
-    let popover = pad(column(10.0), 11.0, 11.0, 11.0, 11.0)
+    let popover = pad(column(10.0), 10.0, 10.0, 10.0, 10.0)
         .surface(Role::Surface)
         .outline(Role::BorderStrong, 1.0)
         .radius(RadiusTier::Md)
@@ -83,6 +91,8 @@ pub(crate) fn task_popover(model: &ShellViewModel) -> Option<AnyView> {
 /// 关闭按钮：22 见方、sm 圆角、弱色叉号 13。
 fn close_button() -> IconButton {
     let mut button = IconButton::new(icons::X, "关闭任务");
+    // 默认的方形尺寸取主题的图标按钮档（28），这里按 Vue 写死的 22。
+    button.style.square = None;
     let layout = std::sync::Arc::make_mut(&mut button.style.layout);
     layout.width = Some(LengthSpec::Px(22.0));
     layout.height = Some(LengthSpec::Px(22.0));
@@ -93,20 +103,18 @@ fn close_button() -> IconButton {
 }
 
 /// 一个任务：`bg` 底、`border-soft` 边线、sm 圆角、内边距 9；来源加进度条。
-fn task_item(task: &PopoverRow) -> AnyView {
-    let id = task.id.as_str();
-    widget(pad(column(6.0), 10.0, 10.0, 10.0, 10.0).surface(Role::Background).outline(Role::BorderSoft, 1.0).radius(RadiusTier::Sm))
+fn task_item(task: &PopoverRow, id: &str) -> AnyView {
+    widget(pad(column(6.0), 9.0, 9.0, 9.0, 9.0).surface(Role::Background).outline(Role::BorderSoft, 1.0).radius(RadiusTier::Sm))
         .children((
             widget(label(task.source.clone(), 12.0, 600, Role::Faint)).key(format!("admin-task-source-{id}")),
-            progress_bar(task),
+            progress_bar(task, id),
         ))
         .key(format!("admin-task-{id}"))
         .into_any()
 }
 
 /// `ProgressBar.vue`：6 高的药丸轨道，填充至少 18 宽；下面是标签、细节和百分比，间距 7。
-fn progress_bar(task: &PopoverRow) -> AnyView {
-    let id = task.id.as_str();
+fn progress_bar(task: &PopoverRow, id: &str) -> AnyView {
     let percent = task.value.clamp(0.0, 100.0).round();
     let fill = (percent / 100.0) as f32;
     let track = widget(
@@ -170,10 +178,12 @@ fn actions_panel(model: &ShellViewModel) -> AnyView {
 fn action_body(model: &ShellViewModel) -> AnyView {
     let admin = &model.admin;
     let active = admin.actions.iter().find(|action| Some(action.action_id.as_str()) == admin.active_action_id.as_deref()).or(admin.actions.first());
+    let keys = style::unique_keys(admin.actions.iter().map(|action| action.action_id.as_str()));
     let items = admin
         .actions
         .iter()
-        .map(|item| {
+        .zip(&keys)
+        .map(|(item, key)| {
             let id = item.action_id.clone();
             let selected = active.is_some_and(|current| current.action_id == item.action_id);
             let mut node = nana_ui::runtime::NodeStyle {
@@ -213,8 +223,8 @@ fn action_body(model: &ShellViewModel) -> AnyView {
             }
             widget(style::bottom_rule(Stack::row(10.0).style(node)).hittable())
                 .children(children)
-                .key(format!("admin-action-{}", item.action_id))
-                .on_cx(move |_, _: &Activate, cx| cx.dispatch_program(ShellMessage::Admin(AdminMessage::SelectAction(id.clone()))))
+                .key(format!("admin-action-{key}"))
+                .on_cx(move |_, _: &Activate, cx| cx.dispatch_program_all(ShellMessage::Admin(AdminMessage::SelectAction(id.clone()))))
                 .into_any()
         })
         .collect::<Vec<_>>();
@@ -223,7 +233,7 @@ fn action_body(model: &ShellViewModel) -> AnyView {
     let grid = Stack::from_layout(nana_ui_core::LayoutStyle::default()).with_layout(|layout| {
         layout.display = Some(nana_ui_core::DisplaySpec::Grid);
         layout.grid_columns = Some(vec![
-            nana_ui_core::GridTrack::MinMax { min_px: 220.0, fr: 1.0, max_px: Some(300.0) },
+            style::capped(220.0, 300.0),
             nana_ui_core::GridTrack::MinMax { min_px: 0.0, fr: 1.0, max_px: None },
         ]);
         layout.gap = Some(LengthSpec::Px(12.0));
@@ -247,7 +257,7 @@ fn action_detail(model: &ShellViewModel, current: &crate::backend::services::rep
                 widget(label(format!("{} · 最近运行 {last}", action_status_label(&current.status, current.enabled)), 12.0, 400, Role::Muted)).key("admin-action-detail"),
             )),
             widget(action("执行", Some(run_icon), Tone::Primary, !can_run)).key("admin-action-run").on_cx(move |_, _: &Activate, cx| {
-                cx.dispatch_program(ShellMessage::Admin(AdminMessage::RunAction(Some(action_id.clone()))));
+                cx.dispatch_program_all(ShellMessage::Admin(AdminMessage::RunAction(Some(action_id.clone()))));
             }),
         ))
         .into_any()];
@@ -266,13 +276,13 @@ fn action_detail(model: &ShellViewModel, current: &crate::backend::services::rep
             if let Some(reason) = step.unsupported_reason.clone() {
                 children.push(widget(style::align_end(label(reason, 12.0, 400, Role::Danger))).into_any());
             }
-            widget(pad(style::spread(10.0, AlignSpec::Start), 11.0, 11.0, 11.0, 11.0).surface(Role::Subtle).outline(Role::BorderSoft, 1.0).radius(RadiusTier::Sm))
+            widget(pad(style::spread(10.0, AlignSpec::Start), 10.0, 10.0, 10.0, 10.0).surface(Role::Subtle).outline(Role::BorderSoft, 1.0).radius(RadiusTier::Sm))
                 .children(children)
                 .into_any()
         })
         .collect::<Vec<_>>();
     body.push(widget(pad(column(8.0), 12.0, 0.0, 0.0, 0.0)).children(steps).into_any());
-    widget(pad(column(0.0), 15.0, 15.0, 15.0, 15.0).surface(Role::Surface).outline(Role::BorderSoft, 1.0).radius(RadiusTier::Md))
+    widget(pad(column(0.0), 14.0, 14.0, 14.0, 14.0).surface(Role::Surface).outline(Role::BorderSoft, 1.0).radius(RadiusTier::Md))
         .children(body)
         .key("admin-action-detail-card")
         .into_any()
