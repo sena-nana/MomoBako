@@ -356,6 +356,32 @@ fn opening_a_hit_in_another_repository_switches_first_and_resets_search() {
 }
 
 #[test]
+fn a_superseded_folder_read_drops_the_pending_hit() {
+    let mut model = shell();
+    model.workspace.panel = WorkspacePanel::Search;
+    model.inspect.results = vec![row("repo", "asset-1", "pics/cover.png")];
+    send(&mut model, InspectMessage::OpenHit { repo_id: "repo".into(), asset_id: "asset-1".into() });
+    // 文件列的点击在搜索归约之前就被消费，这里直接模拟另一处目录已经读完。
+    model.files.loading = false;
+    send(&mut model, InspectMessage::SetQuery("x".into()));
+    model.inspect.take_effects();
+    model.reduce(ShellMessage::FileBrowserLoaded(Ok(browser("repo", "pics", &["pics/cover.png"]))));
+    assert!(
+        !model.inspect.effects.iter().any(|effect| matches!(effect, InspectEffect::LoadAsset { .. })),
+        "被顶掉的命中不会在以后读到同一目录时突然打开"
+    );
+
+    let mut navigated = shell();
+    navigated.workspace.panel = WorkspacePanel::Search;
+    navigated.inspect.results = vec![row("repo", "asset-1", "pics/cover.png")];
+    send(&mut navigated, InspectMessage::OpenHit { repo_id: "repo".into(), asset_id: "asset-1".into() });
+    navigated.reduce(ShellMessage::OpenDirectory("docs".into()));
+    navigated.inspect.take_effects();
+    navigated.reduce(ShellMessage::FileBrowserLoaded(Ok(browser("repo", "pics", &["pics/cover.png"]))));
+    assert!(!navigated.inspect.effects.iter().any(|effect| matches!(effect, InspectEffect::LoadAsset { .. })));
+}
+
+#[test]
 fn a_failed_folder_read_still_opens_the_asset() {
     let mut model = shell();
     model.workspace.panel = WorkspacePanel::Search;

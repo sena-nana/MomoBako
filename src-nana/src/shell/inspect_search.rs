@@ -13,7 +13,7 @@ use crate::backend::services::repository::{FileBrowserSnapshot, RepositorySnapsh
 
 use super::super::workspace::{LibraryCategory, WorkspacePanel};
 use super::super::workspace_refresh::SilentMessage;
-use super::super::{FilesMessage, ShellMessage, ShellPage, ShellViewModel};
+use super::super::{ShellMessage, ShellPage, ShellViewModel};
 use super::{InspectEffect, InspectMessage, InspectState};
 
 #[path = "search_request.rs"]
@@ -516,6 +516,12 @@ impl InspectState {
 /// 主归约之前看一眼和搜索有关的壳层消息：仓库摘要提供候选，切换仓库清空搜索，
 /// 命中所在目录到达后再选中它并读取详情。
 pub(super) fn observe(model: &mut ShellViewModel, message: &ShellMessage) {
+    // 等待的目录请求已经落地却不是命中所在目录：被文件列或侧栏的浏览顶掉了，放弃等待。
+    // 文件列和侧栏的点击在本归约之前就被消费，只能从「不再加载」看出来。
+    if model.inspect.search_ui.reveal_hit.is_some() && !model.files.loading {
+        model.inspect.search_ui.reveal_hit = None;
+        eprintln!("Nana 搜索结果所在目录的读取被别的浏览顶掉，放弃等待中的命中");
+    }
     match message {
         ShellMessage::RepositorySnapshotLoaded(Ok(snapshot)) => note_snapshot(&mut model.inspect, snapshot),
         ShellMessage::SilentWorkspace(SilentMessage::Snapshot(Ok(snapshot))) => note_snapshot(&mut model.inspect, snapshot),
@@ -531,8 +537,7 @@ pub(super) fn observe(model: &mut ShellViewModel, message: &ShellMessage) {
         ShellMessage::OpenDirectory(_)
         | ShellMessage::SelectFile { .. }
         | ShellMessage::SetWorkspacePanel(_)
-        | ShellMessage::SetLibraryCategory(_)
-        | ShellMessage::Files(FilesMessage::OpenPath(_) | FilesMessage::OpenRow(_) | FilesMessage::ActivateRow(_)) => {
+        | ShellMessage::SetLibraryCategory(_) => {
             if model.inspect.search_ui.reveal_hit.take().is_some() {
                 eprintln!("Nana 打开搜索结果前已经切到别处，放弃等待中的命中");
             }
