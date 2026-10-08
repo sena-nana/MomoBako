@@ -122,6 +122,17 @@ impl ApplicationState for MomoBakoApplication {
             shell.workspace.startup.fail(message);
             shell
         };
+        if let Some(services) = services.as_ref() {
+            // 主题等应用设置启动时就要生效，不能等打开设置页才读。
+            match services.load_settings() {
+                Ok((settings, diagnostic)) => {
+                    shell.settings_cache_limit_draft = settings.thumbnail_cache_limit_mb.to_string();
+                    shell.settings = settings;
+                    shell.settings_error = diagnostic;
+                }
+                Err(error) => eprintln!("Nana 启动时读取应用设置失败，先用默认值：{error}"),
+            }
+        }
         shell.workspace.load_prefs_file(&sidebar_prefs_path());
         shell.files.load_display_mode_file(&display_mode_path());
         shell.player.load_default_files();
