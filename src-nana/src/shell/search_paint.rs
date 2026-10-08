@@ -6,7 +6,7 @@
 
 use std::hash::{Hash, Hasher};
 
-use nana_ui::runtime::{LayoutBox, LineCap, LineJoin, PaintColor, PaintContext, PaintPath, Painter, StrokeStyle};
+use nana_ui::runtime::{BoxPaint, LayoutBox, LineCap, LineJoin, PaintColor, PaintContext, PaintPath, Painter, StrokeStyle};
 use nana_ui_core::{BackgroundImage, CssGradient, GradientStop, LinearGradient, SemanticColorMix, SemanticColorRole};
 
 use super::presenter::SwatchColor;
@@ -39,18 +39,17 @@ impl Painter for SwatchChipPainter {
             height: SWATCH_SIZE + SWATCH_RING * 2.0,
         };
         let dot = LayoutBox { x: self.inset, y: top, width: SWATCH_SIZE, height: SWATCH_SIZE };
-        let mut outer = PaintPath::new();
-        outer.ellipse(ring);
-        cx.fill_path(&outer, PaintColor::Mix(SemanticColorMix::alpha(SemanticColorRole::BorderStrong, 0.7)));
-        let mut inner = PaintPath::new();
-        inner.ellipse(dot);
         let fill = match self.color {
             SwatchColor::Rgb([red, green, blue]) => {
                 PaintColor::Rgba([f32::from(red) / 255.0, f32::from(green) / 255.0, f32::from(blue) / 255.0, 1.0])
             }
             SwatchColor::Accent => PaintColor::Role(SemanticColorRole::Accent),
         };
-        cx.fill_path(&inner, fill);
+        // 全圆角矩形走和控件相同的圆角着色，平滑圆角设置下和 Vue 一样是超椭圆。
+        // 外圈按 70% 混进芯片底色，和 Vue 在 sRGB 里合成的 `color-mix` 一致。
+        let ring_color = PaintColor::Mix(SemanticColorMix::new(SemanticColorRole::BorderStrong, SemanticColorRole::Background, 0.7));
+        cx.rounded_rect(ring, 999.0, BoxPaint::fill(ring_color));
+        cx.rounded_rect(dot, 999.0, BoxPaint::fill(fill));
     }
 
     fn paint_key(&self) -> u64 {

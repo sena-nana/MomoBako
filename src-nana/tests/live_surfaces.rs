@@ -12,7 +12,7 @@ use momobako_nana::shell::{
     commit_interaction, mount_shell, InspectEffect, InspectMessage, ShellMessage, ShellViewModel,
     ToolPageEntry, WorkspacePanel, WorkspaceRepository,
 };
-use nana_ui_devtools::agent::{AgentSession, BoundsDump, RuntimeAgentSession, protocol::ThemeName};
+use nana_ui_devtools::agent::{AgentSession, RuntimeAgentSession, protocol::ThemeName};
 use nana_ui_devtools::offscreen;
 use nana_ui_platform::host::WindowCommand;
 use nana_ui_platform::WindowId;
@@ -41,7 +41,7 @@ fn assert_wav_preview() {
         let stats = shot(&mut session, name);
         assert!(stats.nonclear_ratio > 0.01, "{name} 画面几乎是空的");
         if name == "wav-preview-narrow" {
-            assert_search_copy_stays_off_preview(&before);
+            assert_preview_owns_the_page(&before);
         }
         if name != "wav-preview-light" {
             continue;
@@ -90,7 +90,7 @@ fn assert_source_login() {
 
 fn wav_preview() -> ShellViewModel {
     let mut model = ready_library();
-    model.workspace.panel = WorkspacePanel::Search;
+    model.workspace.panel = WorkspacePanel::Files;
     let detail = asset("audio/tone.wav", "wav");
     model.reduce(ShellMessage::AssetDetailLoaded(Ok(detail)));
     let InspectEffect::LoadMedia { path, generation, .. } = model.inspect.take_effects().pop().expect("音视频请求") else {
@@ -253,21 +253,14 @@ fn has(nodes: &[nana_ui_devtools::agent::AccessibilityDumpNode], label: &str) ->
     nodes.iter().any(|node| node.label.as_deref().is_some_and(|text| text.contains(label)))
 }
 
-/// 窄屏里搜索说明必须留在自己的卡片，不能盖住下面的文件预览。
-fn assert_search_copy_stays_off_preview(nodes: &[nana_ui_devtools::agent::AccessibilityDumpNode]) {
-    let preview = nodes.iter().find(|node| node.label.as_deref() == Some("文件预览")).expect("窄屏缺少文件预览");
-    let copy = nodes
-        .iter()
-        .find(|node| node.label.as_deref().is_some_and(|text| text.contains("输入关键词")))
-        .expect("窄屏缺少搜索说明");
+/// 文件预览和搜索面板互斥，和 Vue `Home.vue` 的 `v-else-if` 一样：窄屏预览页上不叠搜索说明。
+fn assert_preview_owns_the_page(nodes: &[nana_ui_devtools::agent::AccessibilityDumpNode]) {
     assert!(
-        !bounds_intersect(&copy.bounds, &preview.bounds),
-        "搜索说明盖住了文件预览：说明 {:?}，预览 {:?}",
-        copy.bounds,
-        preview.bounds
+        nodes.iter().any(|node| node.label.as_deref() == Some("文件预览")),
+        "窄屏缺少文件预览"
     );
-}
-
-fn bounds_intersect(a: &BoundsDump, b: &BoundsDump) -> bool {
-    a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y
+    assert!(
+        nodes.iter().all(|node| !node.label.as_deref().is_some_and(|text| text.contains("输入关键词"))),
+        "窄屏预览页上叠了搜索说明"
+    );
 }
