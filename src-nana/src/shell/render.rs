@@ -7,8 +7,8 @@ use crate::theme_map::{SIDEBAR_MAX_PX, SIDEBAR_MIN_PX};
 use nana_ui::runtime::view::{button, text, widget, AnyView, IntoView};
 use nana_ui::runtime::{
     Activate, AlignSpec, AppShell, Button, Dialog, FrameworkError, JustifySpec, LengthSpec, MountedView, Progress,
-    RuntimeDocument, ScrollAxes, ScrollView, SemanticColorRole, Stack, Text, TextChanged, TextHorizontalAlignment,
-    TextInput, ValidationIntent, ValidationMessage, Workspace,
+    RadiusTier, RuntimeDocument, ScrollAxes, ScrollView, SemanticColorRole, Stack, Text, TextChanged,
+    TextHorizontalAlignment, TextInput, ValidationIntent, ValidationMessage, Workspace,
 };
 use nana_ui::{ButtonKind, RegionId, RegionRole, RegionState, WorkspaceLayout, WorkspaceModel};
 
@@ -41,60 +41,7 @@ pub fn mount_shell(
         .context_mut()
         .mount_view_root(document_id, move || {
             // 标题栏、侧栏和主工作区共用同一套产品表面。验收页不再另挂按钮列表。
-            let settings_page = matches!(view_model.page, ShellPage::Settings | ShellPage::SettingsError);
-            let is_playlists = matches!(view_model.page, ShellPage::Playlists)
-                || view_model.workspace.panel == WorkspacePanel::Playlist;
-            let live_files = view_model.files_surface_visible() && !settings_page;
-            let show_page = settings_page
-                || matches!(view_model.workspace.main_region(), MainRegion::HasRepository);
-            let region = view_model.workspace.main_region();
-            let primary = if live_files {
-                super::files_view::live_file_column(&view_model)
-            } else if show_page && !settings_page && is_playlists {
-                playlist_page(&view_model)
-            } else if show_page
-                && !settings_page
-                && matches!(
-                    view_model.workspace.panel,
-                    WorkspacePanel::Logs | WorkspacePanel::Extensions | WorkspacePanel::Actions
-                )
-            {
-                super::workbench::page(vec![super::admin::admin_surface(&view_model)])
-            } else if show_page && !settings_page && view_model.workspace.panel == WorkspacePanel::Search {
-                let inspect = if view_model.inspect_surface_visible() {
-                    super::inspect_view::inspect_surface(&view_model)
-                } else {
-                    widget(Stack::column(0.0)).into_any()
-                };
-                super::workbench::page(vec![inspect])
-            } else if show_page {
-                let plugin_page = if settings_page { super::admin::opened_plugin_pages(&view_model) } else { Vec::new() };
-                if settings_page && !plugin_page.is_empty() {
-                    // 插件设置打开时主区只留这一张卡，不再叠外观、缓存和关闭行为。
-                    super::workbench::page(plugin_page)
-                } else {
-                    let (eyebrow, title) = section_heading(&view_model);
-                    let mut body = Vec::new();
-                    body.push(super::admin::admin_surface(&view_model));
-                    // 缓存上限和关闭行为不在 Vue 设置页前几张卡里，排在音频、外观、仓库和外部素材之后。
-                    if let Some(editor) = settings_editor(&view_model) {
-                        body.push(editor);
-                    }
-                    framed_page(eyebrow, title, body, settings_page)
-                }
-            } else {
-                match region {
-                    MainRegion::MissingRepository => missing_repository_panel(&view_model).into_any(),
-                    MainRegion::EmptyRepository => super::input::empty_repository_panel(&view_model),
-                    MainRegion::Startup | MainRegion::LoadError | MainRegion::HasRepository => {
-                        startup_panel(&view_model).into_any()
-                    }
-                }
-            };
-            let stage = widget(Stack::fill_column(0.0).min_height(LengthSpec::Px(0.0)))
-                .children((primary,))
-                .key("workspace-body")
-                .into_any();
+            let stage = primary_stage(primary_route(&view_model));
             let presented_sidebar = view_model.motion.sidebar_presented_width();
             let show_sidebar = presented_sidebar > 0.5
                 && view_model.workspace.startup.status == StartupStatus::Ready;
@@ -106,7 +53,10 @@ pub fn mount_shell(
                     .into_any();
                 workbench(sidebar, stage, presented_sidebar)
             } else {
-                stage.into_any()
+                // 启动和侧栏收起时主区独占一行，圆角外露出壳层的 --bg-elev。
+                widget(Stack::fill_column(0.0).surface(SemanticColorRole::Surface))
+                    .children((stage,))
+                    .into_any()
             };
             let title_bar = super::title_bar::title_bar(&view_model);
             let mut shell = widget(AppShell::new()).title_bar(title_bar).body(body);
@@ -142,23 +92,183 @@ pub fn mount_shell(
 
 /// 窄窗逻辑宽。默认侧栏不随窗口缩小，主区下限要和它对得上。
 const NARROW_WINDOW_PX: f32 = 390.0;
-/// 工作台两条轨道之间的发丝间隙。
-const WORKBENCH_GAP_PX: f32 = 1.0;
+/// Nana 工作区在两条轨道之间留的发丝间隙，画的是壳层底色，和侧栏同色。
+pub(super) const WORKBENCH_GAP_PX: f32 = nana_ui_core::HAIRLINE;
+/// Vue `.shell` 的 `--lilia-primary-inset`：主区内容左右 24、上下 20。
+const PRIMARY_INSET_X: f32 = 24.0;
+const PRIMARY_INSET_Y: f32 = 20.0;
 
 /// 主区最小宽。390 里还要放下默认侧栏和间隙，不能再用 320。
 /// 宽窗里主区按 fill 铺开，这个下限不会把 1200 的版式压窄。
 fn primary_min_px() -> f32 {
-    (NARROW_WINDOW_PX - crate::theme_map::SIDEBAR_DEFAULT_PX - WORKBENCH_GAP_PX).max(96.0)
+    (NARROW_WINDOW_PX - crate::theme_map::SIDEBAR_DEFAULT_PX).max(96.0)
 }
 
-/// 资源区加主区。分割是工作台的发丝间隙，主区圆角，不画常驻浅色分割条。
+/// Vue 标题栏高度。启动页的 `min-height: 100%` 要扣掉它和主区内边距。
+const TITLE_BAR_PX: f32 = 36.0;
+
+/// 主区外框：白底、`Lg` 档圆角（Vue 主区的 `--radius-lg`）。
+///
+/// 有侧栏时外面还有工作区的主区，同色同圆角；内边距由各路由自己放，
+/// 设置页和启动页的内边距要跟着内容一起滚动。
+fn primary_stage(primary: AnyView) -> AnyView {
+    widget(
+        Stack::fill_column(0.0)
+            .min_height(LengthSpec::Px(0.0))
+            .surface(SemanticColorRole::Background)
+            .radius(RadiusTier::Lg),
+    )
+    .children((primary,))
+    .key("workspace-body")
+    .into_any()
+}
+
+/// 主区路由，对应 `AppShell.vue` 的 `LiliaPrimaryContent`。
+///
+/// 启动未就绪（含启动失败）只显示启动页；就绪后设置走设置路由，其余都是首页。
+fn primary_route(model: &ShellViewModel) -> AnyView {
+    let settings_page = matches!(model.page, ShellPage::Settings | ShellPage::SettingsError);
+    match model.workspace.main_region() {
+        MainRegion::Startup | MainRegion::LoadError => startup_route(model),
+        _ if settings_page => settings_route(model),
+        region => home_route(model, region),
+    }
+}
+
+/// 启动页。Vue 主区内容层 `overflow: auto`，窗口矮时整页连同内边距一起滚动；
+/// `.workspace-startup` 的 `min-height: 100%` 让内容在高窗口里上下居中。
+fn startup_route(model: &ShellViewModel) -> AnyView {
+    let fill_height = LengthSpec::CalcViewportOffset {
+        axis: nana_ui_core::ViewportAxis::Height,
+        value: 100.0,
+        offset_px: -(TITLE_BAR_PX + PRIMARY_INSET_Y * 2.0),
+    };
+    let section = widget(
+        Stack::column(0.0)
+            .min_height(fill_height)
+            .padding(24.0)
+            .justify(JustifySpec::Center)
+            .align(AlignSpec::Center),
+    )
+    .children((startup_panel(model),))
+    .key("workspace-startup")
+    .into_any();
+    scroll_route(section)
+}
+
+/// 设置路由：内边距放在纵向滚动里，整页和内边距一起滚动。
+fn settings_route(view_model: &ShellViewModel) -> AnyView {
+    let plugin_page = super::admin::opened_plugin_pages(view_model);
+    let content = if !plugin_page.is_empty() {
+        // 插件设置打开时主区只留这一张卡，不再叠外观、缓存和关闭行为。
+        widget(Stack::column(16.0)).children(plugin_page).into_any()
+    } else {
+        let (eyebrow, title) = section_heading(view_model);
+        let mut body = Vec::new();
+        body.push(super::admin::admin_surface(view_model));
+        // 缓存上限和关闭行为不在 Vue 设置页前几张卡里，排在音频、外观、仓库和外部素材之后。
+        if let Some(editor) = settings_editor(view_model) {
+            body.push(editor);
+        }
+        framed_page(eyebrow, title, body)
+    };
+    scroll_route(content)
+}
+
+/// 首页路由，对应 `Home.vue` 的 `.workspace-page`：占满主区、自身不滚动。
+///
+/// 有仓库且筛选栏打开时，筛选栏放在所有首页面板上方。文件面板（含智能文件夹、回收站和
+/// 文件预览）主体固定高度，由面板内部自己滚（`.workspace-page__body--fixed`）；
+/// 其他面板的主体是纵向滚动（`.workspace-page__body` 的 `overflow: auto`）。
+fn home_route(model: &ShellViewModel, region: MainRegion) -> AnyView {
+    let filter = (region == MainRegion::HasRepository && model.inspect.filter_bar_open)
+        .then(|| super::inspect_search_view::filter_bar(model));
+    let body = if model.files_surface_visible() {
+        widget(Stack::fill_column(0.0).min_height(LengthSpec::Px(0.0)))
+            .children((super::files_view::live_file_column(model),))
+            .key("workspace-page-body")
+            .into_any()
+    } else {
+        let panel = match region {
+            MainRegion::MissingRepository => missing_repository_panel(model).into_any(),
+            // 没有资源库时标题栏搜索也会切到搜索面板，由搜索面板画「还没有可搜索的资源库」。
+            MainRegion::EmptyRepository if model.workspace.panel == WorkspacePanel::Search => {
+                super::inspect_search_view::search_panel(model)
+            }
+            MainRegion::EmptyRepository => super::input::empty_repository_panel(model),
+            _ => home_panel(model),
+        };
+        widget(scroll_view())
+            .children((panel,))
+            .key("workspace-page-body")
+            .into_any()
+    };
+    widget(
+        Stack::fill_column(0.0)
+            .min_height(LengthSpec::Px(0.0))
+            .padding_xy(PRIMARY_INSET_X, PRIMARY_INSET_Y),
+    )
+    .children((filter, body))
+    .key("workspace-page")
+    .into_any()
+}
+
+/// 首页里文件面板以外的面板：播放集、日志、拓展、动作和搜索结果。
+fn home_panel(model: &ShellViewModel) -> AnyView {
+    let is_playlists = matches!(model.page, ShellPage::Playlists) || model.workspace.panel == WorkspacePanel::Playlist;
+    if is_playlists {
+        return playlist_page(model);
+    }
+    match model.workspace.panel {
+        WorkspacePanel::Logs | WorkspacePanel::Extensions | WorkspacePanel::Actions => {
+            super::workbench::page(vec![super::admin::admin_surface(model)])
+        }
+        WorkspacePanel::Search => {
+            let inspect = if model.inspect_surface_visible() {
+                super::inspect_view::inspect_surface(model)
+            } else {
+                widget(Stack::column(0.0)).into_any()
+            };
+            super::workbench::page(vec![inspect])
+        }
+        _ => {
+            eprintln!("Nana 首页没有可显示的面板：{:?}", model.workspace.panel);
+            widget(Stack::column(0.0)).into_any()
+        }
+    }
+}
+
+/// 主区内容层的 `overflow: auto`：内边距在滚动内容里，随内容一起滚动。
+fn scroll_route(content: AnyView) -> AnyView {
+    let padded = widget(Stack::column(0.0).padding_xy(PRIMARY_INSET_X, PRIMARY_INSET_Y))
+        .children((content,))
+        .into_any();
+    widget(scroll_view()).children((padded,)).key("workspace-primary-scroll").into_any()
+}
+
+/// 占满剩余高度的纵向滚动。
+fn scroll_view() -> ScrollView {
+    ScrollView::new(ScrollAxes::Vertical).with_layout(|layout| {
+        layout.flex_grow = Some(1.0);
+        layout.flex_shrink = Some(1.0);
+        layout.min_height = Some(LengthSpec::Px(0.0));
+        layout.height = Some(LengthSpec::Fill);
+        layout.flex_basis = Some(LengthSpec::Px(0.0));
+    })
+}
+
+/// 资源区加主区。主区圆角，不画常驻浅色分割条。
 /// 侧栏宽度仍用调用方给出的展开值，不改用户保存的折叠状态。
+///
+/// Vue 的主区紧贴侧栏（侧栏 276 时主区从 x=276 起）。Nana 两条轨道之间多一条发丝间隙，
+/// 所以资源区少给一条间隙，侧栏右内边距也少一条（见 `sidebar_frame`），
+/// 侧栏看上去仍是 `width` 宽，内容盒和 Vue 一样。
 fn workbench(sidebar: AnyView, stage: AnyView, width: f32) -> AnyView {
     let layout = WorkspaceLayout::new([
         RegionState::new(RegionId::Resources, RegionRole::Resources)
-            .size(width)
-            .min_size(SIDEBAR_MIN_PX)
-            .max_size(SIDEBAR_MAX_PX)
+            .size((width - WORKBENCH_GAP_PX).max(0.0))
+            .min_size(SIDEBAR_MIN_PX - WORKBENCH_GAP_PX)
+            .max_size(SIDEBAR_MAX_PX - WORKBENCH_GAP_PX)
             .collapsible(true)
             .resizable(true),
         RegionState::new(RegionId::Primary, RegionRole::Primary)
@@ -370,25 +480,12 @@ fn settings_editor(view_model: &ShellViewModel) -> Option<AnyView> {
     )
 }
 
-/// 设置页正文放进纵向滚动。末尾留白挂在设置表面最后，滚到底才离开窗口边。
-fn framed_page(eyebrow: impl Into<String>, title: impl Into<String>, body: Vec<AnyView>, scroll: bool) -> AnyView {
+/// 设置页标题和正文。滚动和外边距由设置路由给，这里是普通的纵向排列。
+fn framed_page(eyebrow: impl Into<String>, title: impl Into<String>, body: Vec<AnyView>) -> AnyView {
     let eyebrow = eyebrow.into();
     let title = title.into();
     let content = widget(Stack::column(12.0)).children(body).into_any();
-    let content = if scroll {
-        widget(ScrollView::new(ScrollAxes::Vertical).with_layout(|layout| {
-            layout.flex_grow = Some(1.0);
-            layout.flex_shrink = Some(1.0);
-            layout.min_height = Some(LengthSpec::Px(0.0));
-            layout.height = Some(LengthSpec::Fill);
-            layout.flex_basis = Some(LengthSpec::Px(0.0));
-        }))
-        .children((content,))
-        .into_any()
-    } else {
-        content
-    };
-    widget(Stack::fill_column(16.0).padding_xy(20.0, 18.0).min_height(LengthSpec::Px(0.0)))
+    widget(Stack::column(16.0))
         .children((
             widget(Stack::bar(16.0)).children((
                 widget(Stack::column(4.0)).children((
