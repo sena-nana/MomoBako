@@ -13,7 +13,7 @@ use nana_ui::runtime::{
     Activate, AlignSpec, IconGlyph, LengthSpec, ListItem, NodeStyle, PositionSpec, RadiusTier, SecondaryPress,
     SemanticColorRole, SemanticPaint, Stack,
 };
-use nana_ui_core::{Icon, LengthAtom, SemanticColorMix, ViewportAxis};
+use nana_ui_core::{Icon, LengthAtom, SemanticColorMix};
 
 use super::super::admin::AdminMessage;
 use super::super::entry_actions::{self, FilePluginAction, FilePluginDispatch};
@@ -31,6 +31,8 @@ const ITEM_HEIGHT: f32 = 28.0;
 const ITEM_GAP: f32 = 1.0;
 /// 菜单离窗口边至少 4px（`SB_MENU_EDGE_PADDING`）。
 const EDGE: f32 = 4.0;
+/// Vue 右键菜单的层级（`SB_LAYER_Z_INDEX.contextMenu`）。浮层根比它低 1，点菜单外的透明底和它同层。
+const MENU_Z: i32 = 2000;
 
 /// 点菜单项时生成的壳层消息。`ShellMessage` 不能克隆，每次点击现做一条。
 type Action = Arc<dyn Fn() -> ShellMessage + Send + Sync>;
@@ -111,16 +113,16 @@ pub(super) fn entry_menu(model: &ShellViewModel) -> Option<AnyView> {
         .radius(RadiusTier::Md)
         .with_layout(move |layout| {
             layout.position = PositionSpec::Fixed;
-            layout.offset_left = Some(clamped(menu.x, ViewportAxis::Width, width));
-            layout.offset_top = Some(clamped(menu.y, ViewportAxis::Height, height));
-            layout.z_index = Some(2000);
+            layout.offset_left = Some(clamped(menu.x, width));
+            layout.offset_top = Some(clamped(menu.y, height));
+            layout.z_index = Some(MENU_Z + 1);
         });
     let surface = style::with_shadows(surface, vec![style::shadow(10.0, 28.0, -10.0, 0.55)]);
     Some(
         widget(Stack::overlay_layer().with_layout(|layout| {
             layout.position = PositionSpec::Fixed;
             layout.pointer_events = None;
-            layout.z_index = Some(1999);
+            layout.z_index = Some(MENU_Z - 1);
         }))
         .children((backdrop(), widget(surface).children(rows).key("file-context-menu")))
         .key("file-context-layer")
@@ -129,8 +131,9 @@ pub(super) fn entry_menu(model: &ShellViewModel) -> Option<AnyView> {
 }
 
 /// 菜单左上角：落点和「窗口边减去菜单尺寸再留 4」取小，放不下时贴着右边或下边。
-fn clamped(anchor: f32, axis: ViewportAxis, extent: f32) -> LengthSpec {
-    LengthSpec::Min2(LengthAtom::Px(anchor.max(EDGE)), LengthAtom::CalcViewport { axis, value: 100.0, offset_px: -(extent + EDGE) })
+/// 固定定位的包含块是窗口，百分比就是窗口宽高。
+fn clamped(anchor: f32, extent: f32) -> LengthSpec {
+    LengthSpec::Min2(LengthAtom::Px(anchor.max(EDGE)), LengthAtom::CalcPercent { percent: 100.0, offset_px: -(extent + EDGE) })
 }
 
 /// 铺满窗口的透明底，点在菜单外就关闭，和 Vue 的全局 pointerdown 一样。
@@ -140,9 +143,12 @@ fn backdrop() -> AnyView {
     layout.position = PositionSpec::Fixed;
     layout.offset_top = Some(LengthSpec::Px(0.0));
     layout.offset_left = Some(LengthSpec::Px(0.0));
-    layout.width = Some(LengthSpec::Viewport { axis: ViewportAxis::Width, value: 100.0 });
-    layout.height = Some(LengthSpec::Viewport { axis: ViewportAxis::Height, value: 100.0 });
+    layout.width = Some(LengthSpec::Percent(100.0));
+    layout.height = Some(LengthSpec::Percent(100.0));
+    // 固定定位的节点按自己的层级参与整窗排序；不给层级就排在壳层浮层根之下，点不到。
+    layout.z_index = Some(MENU_Z);
     widget(ListItem::new("关闭菜单").style(style))
+        .content(widget(Stack::column(0.0)))
         .key("file-context-backdrop")
         .on_cx(|_, _: &Activate, cx| cx.dispatch_program(close()))
         .on_cx(|_, _: &SecondaryPress, cx| cx.dispatch_program(close()))
@@ -362,7 +368,7 @@ fn playlist_entries(model: &ShellViewModel, row: &FileRow) -> Vec<MenuEntry> {
                     path: path.clone(),
                 })
             });
-            let mut entry = MenuEntry::new(&format!("playlist-{}", action.playlist_id), name, None).message(toggle);
+            let mut entry = MenuEntry::new(&format!("playlist-{}", style::key_part(&action.playlist_id)), name, None).message(toggle);
             entry.checked = action.checked;
             entry
         })

@@ -26,6 +26,7 @@ pub(super) fn detail_aside(model: &ShellViewModel, width: Option<f32>) -> AnyVie
         layout.width = Some(LengthSpec::Fill);
     }))
     .children((widget(content).children((body,)).key("file-detail-content"),))
+    .key("file-detail-scroll")
     .into_any();
     let mut frame = Stack::fill_column(0.0)
         .min_height(LengthSpec::Px(0.0))

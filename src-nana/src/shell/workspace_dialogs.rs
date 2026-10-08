@@ -25,6 +25,8 @@ use super::{ShellMessage, ShellViewModel};
 const DIALOG_WIDTH: f32 = 520.0;
 const RENAME_WIDTH: f32 = 460.0;
 const EXPORT_WIDTH: f32 = 560.0;
+/// Vue `--z-dialog`：遮罩在这一层，卡片在它上面。
+const DIALOG_Z: i32 = 1800;
 
 /// 对话框外壳的参数。
 struct Frame {
@@ -137,6 +139,7 @@ pub(super) fn export_dialog(model: &ShellViewModel) -> Option<AnyView> {
     let mut body = vec![repo, segmented(archive, busy)];
     if archive {
         body.push(two_columns(
+            "export-archive-grid",
             select_field("格式", "export-format", &export.format, &[("zip", "zip"), ("7z", "7z"), ("tar", "tar")], busy),
             select_field(
                 "压缩",
@@ -153,6 +156,7 @@ pub(super) fn export_dialog(model: &ShellViewModel) -> Option<AnyView> {
         }
     } else {
         body.push(two_columns(
+            "export-git-grid",
             field("远端", "export-remote", &export.remote, "origin", busy, |value| export_field("remote", value), None),
             field("分支", "export-branch", &export.branch, "默认当前分支", busy, |value| export_field("branch", value), None),
         ));
@@ -187,11 +191,11 @@ pub(super) fn export_dialog(model: &ShellViewModel) -> Option<AnyView> {
 fn modal(frame: Frame, body: Vec<AnyView>, gap: f32, actions: Vec<AnyView>) -> AnyView {
     let width = frame.width;
     let mut header_parts = vec![
-        widget(IconGlyph::new(frame.icon).size(14.0).role(SemanticColorRole::Text)).into_any(),
+        widget(IconGlyph::new(frame.icon).size(14.0).role(SemanticColorRole::Text)).key("dialog-icon").into_any(),
         widget(style::text(frame.title.clone(), 14.0, 600, SemanticColorRole::Text, 21.7).nowrap(true)).key("dialog-title").into_any(),
     ];
     if frame.close_button {
-        header_parts.push(widget(Stack::spacer()).into_any());
+        header_parts.push(widget(Stack::spacer()).key("dialog-spacer").into_any());
         let look = ButtonLook {
             height: 24.0,
             padding_x: 5.0,
@@ -217,34 +221,30 @@ fn modal(frame: Frame, body: Vec<AnyView>, gap: f32, actions: Vec<AnyView>) -> A
         .children(actions)
         .key("dialog-actions")
         .into_any();
+    // 卡片固定定位：距顶 12%、水平居中，宽 `min(宽, 92%)`，高不超过 72vh。
+    // 固定定位的包含块就是窗口，百分比按窗口宽高算，和 Vue 的 12vh / 92vw 一致。
+    // 最大高度要写成视口单位：自动高度的定位盒量内容时可用高度是 0，百分比会把卡片压成 0 高。
     let card = Stack::column(0.0)
-        .width(LengthSpec::Min2(LengthAtom::Px(width), LengthAtom::Viewport { axis: ViewportAxis::Width, value: 92.0 }))
+        .width(LengthSpec::Min2(LengthAtom::Px(width), LengthAtom::Percent(92.0)))
         .surface(SemanticColorRole::Surface)
         .radius(RadiusTier::Xl)
         .hittable()
-        .with_layout(|layout| {
+        .with_layout(move |layout| {
+            layout.position = PositionSpec::Fixed;
+            layout.offset_top = Some(LengthSpec::Percent(12.0));
+            layout.offset_left = Some(LengthSpec::Max2(
+                LengthAtom::CalcPercent { percent: 50.0, offset_px: -width / 2.0 },
+                LengthAtom::Percent(4.0),
+            ));
             layout.max_height = Some(LengthSpec::Viewport { axis: ViewportAxis::Height, value: 72.0 });
             layout.overflow_x = nana_ui_core::OverflowSpec::Hidden;
             layout.overflow_y = nana_ui_core::OverflowSpec::Hidden;
             layout.border_width = Some(1.0);
+            layout.z_index = Some(DIALOG_Z + 1);
         });
     let card = style::with_shadows(card, vec![style::shadow(14.0, 40.0, 0.0, 0.45)]);
-    let column = Stack::column(0.0).align(AlignSpec::Center).with_layout(|layout| {
-        layout.position = PositionSpec::Fixed;
-        layout.offset_top = Some(LengthSpec::Px(0.0));
-        layout.offset_left = Some(LengthSpec::Px(0.0));
-        layout.width = Some(LengthSpec::Viewport { axis: ViewportAxis::Width, value: 100.0 });
-        layout.height = Some(LengthSpec::Viewport { axis: ViewportAxis::Height, value: 100.0 });
-        layout.padding_top = Some(LengthSpec::Viewport { axis: ViewportAxis::Height, value: 12.0 });
-        layout.z_index = Some(1001);
-        layout.pointer_events = Some(nana_ui_core::PointerEventsSpec::None);
-    });
-    let card = card.with_layout(|layout| layout.pointer_events = Some(nana_ui_core::PointerEventsSpec::Auto));
     widget(Stack::column(0.0).with_layout(|layout| layout.position = PositionSpec::Fixed))
-        .children((
-            scrim(frame.cancel.clone(), frame.busy),
-            widget(column).children((widget(card).children((header, body, footer)).key("dialog-card"),)).key("dialog-column"),
-        ))
+        .children((scrim(frame.cancel.clone(), frame.busy), widget(card).children((header, body, footer)).key("dialog-card")))
         .key(format!("dialog-{}", frame.title))
         .into_any()
 }
@@ -252,20 +252,42 @@ fn modal(frame: Frame, body: Vec<AnyView>, gap: f32, actions: Vec<AnyView>) -> A
 /// 45% 黑色遮罩和 2px 背景模糊。点它取消，处理中时不响应。
 fn scrim(cancel: FilesMessage, busy: bool) -> AnyView {
     let mut style = NodeStyle::default();
+    style.painter = Some(nana_ui::runtime::NodePainter::new(Veil));
     let layout = Arc::make_mut(&mut style.layout);
     layout.position = PositionSpec::Fixed;
     layout.offset_top = Some(LengthSpec::Px(0.0));
     layout.offset_left = Some(LengthSpec::Px(0.0));
-    layout.width = Some(LengthSpec::Viewport { axis: ViewportAxis::Width, value: 100.0 });
-    layout.height = Some(LengthSpec::Viewport { axis: ViewportAxis::Height, value: 100.0 });
-    layout.z_index = Some(1000);
-    layout.background = Some([0.0, 0.0, 0.0, 0.45]);
+    layout.width = Some(LengthSpec::Percent(100.0));
+    layout.height = Some(LengthSpec::Percent(100.0));
+    layout.z_index = Some(DIALOG_Z);
     layout.paint.backdrop_filter = Some(nana_ui_core::BackdropFilter { blur_radius: 2.0, saturate: 1.0 });
-    let mut node = widget(ListItem::new("关闭对话框").style(style)).key("dialog-scrim");
+    let mut node = widget(ListItem::new("关闭对话框").style(style)).content(widget(Stack::column(0.0))).key("dialog-scrim");
     if !busy {
         node = node.on_cx(move |_, _: &Activate, cx| cx.dispatch_program(file_message(cancel.clone())));
     }
     node.into_any()
+}
+
+/// 遮罩的 `rgba(0, 0, 0, 0.45)`。不随主题变化。
+///
+/// 浏览器在 sRGB 里混合，Nana 渲染在线性空间混合：同样 45% 的黑在浅色底上只压暗到约 76%。
+/// 纯黑遮罩在线性空间里是把底色乘上 `1 - α`，折回 sRGB 约等于乘上 `(1 - α)^(1/2.2)`，
+/// 所以用 `1 - 0.55^2.2` 的不透明度，压暗程度和 Vue 的 55% 一致。
+#[derive(Clone, Copy, Debug)]
+struct Veil;
+
+/// `1 - 0.55^2.2`：线性空间混合下等效于 sRGB 里的 45% 黑。
+const VEIL_ALPHA: f32 = 0.732;
+
+impl nana_ui::runtime::Painter for Veil {
+    fn paint(&self, cx: &mut nana_ui::runtime::PaintContext<'_>) {
+        let bounds = cx.bounds();
+        cx.rounded_rect(bounds, 0.0, nana_ui::runtime::BoxPaint::fill([0.0, 0.0, 0.0, VEIL_ALPHA]));
+    }
+
+    fn paint_key(&self) -> u64 {
+        45
+    }
 }
 
 /// `dialog-field`：12px/600 弱化色标签，下面是 32 高的输入（白底、`--border` 描边、`Sm` 圆角）。
@@ -321,14 +343,19 @@ fn select_field(label: &str, key: &'static str, current: &str, options: &[(&str,
                 cx.dispatch_program(file_message(export_field(&field_name, event.value.to_string())));
             }),
         ))
+        .key(format!("{key}-field"))
         .into_any()
 }
 
 /// 两列等宽、间距 10（`repository-export-dialog__grid`）。
-fn two_columns(left: AnyView, right: AnyView) -> AnyView {
+fn two_columns(key: &'static str, left: AnyView, right: AnyView) -> AnyView {
     let column = || Stack::column(0.0).grow(1.0).shrink(1.0).min_width(LengthSpec::Px(0.0)).with_layout(|layout| layout.flex_basis = Some(LengthSpec::Px(0.0)));
     widget(Stack::bar(10.0).align(AlignSpec::Start))
-        .children((widget(column()).children((left,)), widget(column()).children((right,))))
+        .children((
+            widget(column()).children((left,)).key(format!("{key}-left")),
+            widget(column()).children((right,)).key(format!("{key}-right")),
+        ))
+        .key(key)
         .into_any()
 }
 
@@ -400,6 +427,7 @@ fn error_note(message: String) -> AnyView {
     let frame = frame.style(tinted);
     widget(frame)
         .children((widget(style::wrapping(style::text(message, 12.0, 400, SemanticColorRole::Danger, 18.6))).key("export-error"),))
+        .key("export-error-box")
         .into_any()
 }
 

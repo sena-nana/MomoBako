@@ -49,7 +49,7 @@ pub(super) fn metadata_panel(model: &ShellViewModel) -> AnyView {
     let extra = custom
         .iter()
         .filter(|(key, _)| !(claimed && super::inspect_library::claimed_metadata_keys().contains(&key.as_str())))
-        .map(|(key, value)| fact(key, value.clone(), &format!("inspect-custom-{key}"), false))
+        .map(|(key, value)| fact(key, value.clone(), &format!("inspect-custom-{}", style::key_part(key)), false))
         .collect::<Vec<_>>();
     if !extra.is_empty() {
         rows.push(widget(Stack::column(12.0).width(LengthSpec::Fill)).children(extra).key("inspect-custom").into_any());
@@ -239,7 +239,7 @@ fn tag_panel(model: &ShellViewModel, tags: &[String], locked: bool) -> AnyView {
                 .into_any(),
         );
     } else {
-        let mut chips = tags.iter().map(|tag| tag_chip(tag, locked)).collect::<Vec<_>>();
+        let mut chips = tags.iter().enumerate().map(|(index, tag)| tag_chip(index, tag, locked)).collect::<Vec<_>>();
         chips.push(round_button(PLUS, "inspect-tag-menu", locked, Arc::new(toggle_tag_menu)));
         parts.push(
             widget(Stack::row(8.0).wrap(true).align(AlignSpec::Center).with_layout(|layout| layout.row_gap = Some(LengthSpec::Px(8.0))))
@@ -259,9 +259,10 @@ fn toggle_tag_menu() -> ShellMessage {
     ShellMessage::Files(FilesMessage::ToggleTagMenu)
 }
 
-/// 标签片：30 高的药丸，浅底，标签文字和一枚「×」。
-fn tag_chip(tag: &str, locked: bool) -> AnyView {
+/// 标签片：30 高的药丸，浅底，标签文字和一枚「×」。键带序号，重复标签也不撞键。
+fn tag_chip(index: usize, tag: &str, locked: bool) -> AnyView {
     let remove = tag.to_string();
+    let key = format!("inspect-tag-{index}-{}", style::key_part(tag));
     widget(
         Stack::row(6.0)
             .align(AlignSpec::Center)
@@ -271,10 +272,10 @@ fn tag_chip(tag: &str, locked: bool) -> AnyView {
             .radius_px(999.0),
     )
     .children((
-        widget(style::body(tag.to_string()).nowrap(true)).key(format!("inspect-tag-{tag}-label")),
-        round_button_text("×", &format!("inspect-tag-{tag}-remove"), locked, Arc::new(move || inspect_message(InspectMessage::RemoveTag(remove.clone())))),
+        widget(style::body(tag.to_string()).nowrap(true)).key(format!("{key}-label")),
+        round_button_text("×", &format!("{key}-remove"), locked, Arc::new(move || inspect_message(InspectMessage::RemoveTag(remove.clone())))),
     ))
-    .key(format!("inspect-tag-{tag}"))
+    .key(key)
     .into_any()
 }
 
@@ -332,6 +333,7 @@ fn tag_menu(model: &ShellViewModel, tags: &[String], locked: bool) -> AnyView {
     let add_tag = trimmed.clone();
     let mut parts = vec![
         widget(Stack::column(6.0).width(LengthSpec::Fill))
+            .key("inspect-tag-draft-group")
             .children((
                 widget(style::row_label("新建标签")).key("inspect-tag-draft-label"),
                 widget(input)
@@ -344,19 +346,22 @@ fn tag_menu(model: &ShellViewModel, tags: &[String], locked: bool) -> AnyView {
                     }),
             ))
             .into_any(),
-        widget(style::styled_button(add_label, None, ButtonLook { height: 34.0, ..ButtonLook::TOOLBAR }).disabled(!can_create || locked))
+        // `ghost file-metadata-card__tag-create` 没有自己的尺寸，照基础按钮 32 高。
+        widget(style::styled_button(add_label, None, ButtonLook { height: 32.0, ..ButtonLook::TOOLBAR }).disabled(!can_create || locked))
             .key("inspect-tag-create")
             .on_cx(move |_, _: &Activate, cx| cx.dispatch_program(ShellMessage::Files(FilesMessage::SubmitTagDraft(add_tag.clone()))))
             .into_any(),
     ];
     let options = existing_tags(model, tags, &trimmed);
     if !options.is_empty() {
-        let chips = options.iter().map(|tag| option_chip(tag, locked)).collect::<Vec<_>>();
+        let chips = options.iter().enumerate().map(|(index, tag)| option_chip(index, tag, locked)).collect::<Vec<_>>();
         parts.push(
             widget(Stack::column(8.0).width(LengthSpec::Fill))
                 .children((
                     widget(style::row_label("已有标签")).key("inspect-tag-existing-label"),
-                    widget(Stack::row(8.0).wrap(true).with_layout(|layout| layout.row_gap = Some(LengthSpec::Px(8.0)))).children(chips),
+                    widget(Stack::row(8.0).wrap(true).with_layout(|layout| layout.row_gap = Some(LengthSpec::Px(8.0))))
+                        .children(chips)
+                        .key("inspect-tag-existing-chips"),
                 ))
                 .key("inspect-tag-existing")
                 .into_any(),
@@ -384,7 +389,8 @@ fn existing_tags(model: &ShellViewModel, draft: &[String], keyword: &str) -> Vec
 }
 
 /// `workspace-filter-chip`：26 高的描边药丸，12px 弱化色，点一下加进草稿。
-fn option_chip(tag: &str, locked: bool) -> AnyView {
+/// Vue 的全局 `button { height: 32px }` 会把它顶到 32，这里按组件声明的 26 画。
+fn option_chip(index: usize, tag: &str, locked: bool) -> AnyView {
     let look = ButtonLook {
         height: 26.0,
         padding_x: 9.0,
@@ -400,7 +406,7 @@ fn option_chip(tag: &str, locked: bool) -> AnyView {
     let button = button.style(outlined);
     let add = tag.to_string();
     widget(button)
-        .key(format!("inspect-tag-choice-{tag}"))
+        .key(format!("inspect-tag-choice-{index}-{}", style::key_part(tag)))
         .on_cx(move |_, _: &Activate, cx| cx.dispatch_program(inspect_message(InspectMessage::AddTag(add.clone()))))
         .into_any()
 }
@@ -493,7 +499,7 @@ fn source_link_row(url: &str) -> AnyView {
     let copy_url = url.to_string();
     let mut value = style::value(url.to_string());
     value.style.text_horizontal_alignment = nana_ui::runtime::TextHorizontalAlignment::End;
-    let actions = widget(Stack::row(4.0).grow(0.0).shrink(0.0)).children((
+    let actions = widget(Stack::row(4.0).grow(0.0).shrink(0.0)).key("inspect-source-actions").children((
         source_action(EXTERNAL_LINK, "inspect-source-open", openable, Arc::new(move || ShellMessage::Input(InputMessage::OpenExternalUrl { url: open_url.clone() }))),
         source_action(COPY, "inspect-source-copy", true, Arc::new(move || ShellMessage::Files(FilesMessage::CopyText(copy_url.clone())))),
     ));
@@ -501,7 +507,8 @@ fn source_link_row(url: &str) -> AnyView {
         .children((
             widget(style::row_label("来源链接")).key("inspect-source-label"),
             widget(Stack::row(8.0).align(AlignSpec::Start).justify(JustifySpec::End).width(LengthSpec::Fill).min_width(LengthSpec::Px(0.0)))
-                .children((widget(value).key("inspect-source-value"), actions)),
+                .children((widget(value).key("inspect-source-value"), actions))
+                .key("inspect-source-body"),
         ))
         .key("inspect-source")
         .into_any()
