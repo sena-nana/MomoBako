@@ -419,6 +419,8 @@ pub struct FilesState {
     /// 单击选中、还没打开预览的文件。和 Vue 的 `selectedFilePath` 对 `previewFileEntry`：
     /// 单击只在右侧详情里看，双击或「预览」才进入预览页。
     pub(super) select_only: Option<String>,
+    /// 单击发起、还没回来的素材读取。回来时保持「只选中」；别处发起的读取回来就进入预览。
+    pub(super) click_load: Option<String>,
     /// 右键菜单里展开子菜单的那一项（「缩略图」「加入播放列表」）。
     pub(super) menu_branch: Option<String>,
     /// 右键菜单里等第二次点击确认的那一项（回收站的「彻底删除」）。
@@ -772,6 +774,7 @@ impl FilesState {
             }
             FilesMessage::OpenRow(path) => {
                 self.select_only = None;
+                self.click_load = None;
                 self.open_row(ctx, &path);
             }
             FilesMessage::OpenEntryMenu { path, x, y } => self.open_entry_menu(ctx, &path, x, y),
@@ -799,6 +802,7 @@ impl FilesState {
             FilesMessage::RefreshThumbnail(path) => self.refresh_thumbnail(&path),
             FilesMessage::OpenPath(path) => {
                 self.select_only = None;
+                self.click_load = None;
                 self.request_browse(ctx, &path);
             }
             FilesMessage::LoadMore => {

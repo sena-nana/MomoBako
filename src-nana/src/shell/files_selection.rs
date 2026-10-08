@@ -12,6 +12,17 @@ impl FilesState {
     pub(in crate::shell) fn note_selected_only(&mut self, path: &str) {
         let file = self.rows.iter().chain(self.virtual_rows.iter()).any(|row| row.path == path && row.kind != "directory");
         self.select_only = file.then(|| path.to_string());
+        self.click_load = self.select_only.clone();
+    }
+
+    /// 素材详情到达。单击发起的那次读取只在右侧详情里看；双击、搜索结果、外部打开这些
+    /// 别处发起的读取回来就进入预览，和 Vue 里它们显式设置 `previewFileEntry` 一致。
+    pub(in crate::shell) fn note_detail_arrived(&mut self, path: &str) {
+        if self.click_load.as_deref() == Some(path) {
+            self.click_load = None;
+            return;
+        }
+        self.select_only = None;
     }
 
     /// 记下列表区宽度。半像素以内的抖动不算变化，避免布局回报来回重建。
