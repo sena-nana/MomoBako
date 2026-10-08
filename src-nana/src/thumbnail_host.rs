@@ -138,3 +138,50 @@ pub(crate) fn publish_still(
             );
         }
     }
+
+/// 文件预览的 RGBA 页图。没有预览令牌或像素就卸掉纹理。
+pub(crate) fn publish_preview(
+    app: &mut MomoBakoApplication,
+    window: &mut ApplicationWindow,
+    context: &RuntimeProgramContext<crate::shell::ShellMessage>,
+) {
+    let (Some(token), Some(pixels)) = (app.shell.preview_token.clone(), app.shell.preview_pixels.as_ref()) else {
+        app.preview_gpu = None;
+        window.textures.remove("file-preview");
+        return;
+    };
+    let needs_upload = app.preview_gpu.as_ref().is_none_or(|preview| {
+        preview.token != token || preview.width != pixels.width || preview.height != pixels.height
+    });
+    if needs_upload {
+        let Ok(texture) = context.gpu().create_texture(&GpuTextureDescriptor {
+            label: Some("momobako file preview"),
+            width: pixels.width,
+            height: pixels.height,
+            format: GpuTextureFormat::RGBA8_UNORM_SRGB,
+            usage: GpuTextureUsages::SAMPLED | GpuTextureUsages::COPY_DST,
+        }) else {
+            eprintln!("Nana 文件预览纹理创建失败：{}x{}", pixels.width, pixels.height);
+            return;
+        };
+        if let Err(error) = context.gpu().write_texture(
+            &texture,
+            GpuTextureRegion::full(pixels.width, pixels.height),
+            &pixels.rgba,
+            pixels.width.saturating_mul(4),
+        ) {
+            eprintln!("Nana 文件预览纹理上传失败：{error}");
+            return;
+        }
+        app.preview_gpu = Some(NativePreviewGpu { token, texture, width: pixels.width, height: pixels.height });
+    }
+    if let Some(preview) = app.preview_gpu.as_ref() {
+        window.textures.register(
+            "file-preview",
+            HostTexture::new(1, 1, &preview.texture),
+            preview.width,
+            preview.height,
+            HostTextureAlphaMode::Premultiplied,
+        );
+    }
+}
