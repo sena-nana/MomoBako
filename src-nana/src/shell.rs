@@ -431,7 +431,7 @@ impl ShellViewModel {
             || self.workspace.delete_dialog_open()
             || self.playlist_dialog_open
             || self.input.source_playlist.is_some()
-            || self.sidebar.smart_draft.open
+            || self.sidebar.modal_open()
             || self.input.pending_close;
         let panel_open = self.sidebar.popover != sidebar::PopoverMode::Closed || self.admin.popover_open;
         let startup = f32::from(self.workspace.startup.percent);
