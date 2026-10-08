@@ -24,8 +24,9 @@ pub fn mount_shell(
 ) -> Result<(), FrameworkError> {
     let document_id = document.document();
     let view_model = model.clone();
-    // 卸掉旧树前记下焦点，新树挂上后按键路径找回，避免文本框每打一个字就失焦。
-    let kept_focus = SHELL_MOUNT.with(|slot| {
+    // 卸掉旧树前记下焦点、选区和滚动位置，新树挂上后按键路径找回，
+    // 避免文本框每打一个字就失焦、滚动容器每次更新都回到顶部。
+    let kept = SHELL_MOUNT.with(|slot| {
         let previous = slot.borrow_mut().take()?;
         let live = previous
             .roots()
@@ -34,11 +35,11 @@ pub fn mount_shell(
         if !live {
             return None;
         }
-        let kept = super::remount_focus::capture(document, previous.roots());
+        let kept = super::remount_state::capture(document, previous.roots());
         if let Err(error) = previous.unmount(document.context_mut()) {
             eprintln!("Nana 卸载上一棵壳层失败：{error}");
         }
-        kept
+        Some(kept)
     });
     let mounted = document
         .context_mut()
@@ -92,8 +93,8 @@ pub fn mount_shell(
     crate::window_host::bind_escape(document);
     crate::window_host::bind_file_drop(document);
     super::sidebar_view::bind_field_labels(document);
-    if let Some(focus) = kept_focus {
-        focus.restore(document, mounted.roots());
+    if let Some(kept) = kept {
+        kept.restore(document, mounted.roots());
     }
     SHELL_MOUNT.with(|slot| *slot.borrow_mut() = Some(mounted));
     Ok(())
@@ -147,12 +148,17 @@ fn primary_route(model: &ShellViewModel) -> AnyView {
 /// 启动页。Vue 主区内容层 `overflow: auto`，窗口矮时整页连同内边距一起滚动；
 /// `.workspace-startup` 的 `min-height: 100%` 让内容在高窗口里上下居中。
 fn startup_route(model: &ShellViewModel) -> AnyView {
-    scroll_route(super::startup_view::startup_section(model))
+    scroll_route(super::startup_view::startup_section(model), "workspace-startup-scroll".into())
 }
 
 /// 设置路由：内边距放在纵向滚动里，整页和内边距一起滚动。
 fn settings_route(view_model: &ShellViewModel) -> AnyView {
     let plugin_page = super::admin::opened_plugin_pages(view_model);
+    // 滚动容器按显示的内容取键：换到另一张插件设置时从顶部开始，同一页重挂时保留滚动位置。
+    let scroll_key = match view_model.admin.active_settings_plugin_id.as_deref() {
+        Some(plugin_id) if !plugin_page.is_empty() => format!("settings-scroll-{plugin_id}"),
+        _ => "settings-scroll".into(),
+    };
     let content = if !plugin_page.is_empty() {
         // 插件设置打开时主区只留这一张卡，不再叠外观、缓存和关闭行为。
         widget(Stack::column(16.0)).children(plugin_page).into_any()
@@ -166,7 +172,7 @@ fn settings_route(view_model: &ShellViewModel) -> AnyView {
         }
         framed_page(eyebrow, title, body)
     };
-    scroll_route(content)
+    scroll_route(content, scroll_key)
 }
 
 /// 首页路由，对应 `Home.vue` 的 `.workspace-page`：占满主区、自身不滚动。
@@ -192,9 +198,10 @@ fn home_route(model: &ShellViewModel, region: MainRegion) -> AnyView {
             MainRegion::EmptyRepository => super::input::empty_repository_panel(model),
             _ => home_panel(model),
         };
+        // 滚动主体按区域和面板取键：换面板时从顶部开始，同一面板重挂时保留滚动位置。
         widget(scroll_view())
             .children((panel,))
-            .key("workspace-page-body")
+            .key(format!("workspace-page-scroll-{region:?}-{:?}", model.workspace.panel))
             .into_any()
     };
     widget(
@@ -233,11 +240,12 @@ fn home_panel(model: &ShellViewModel) -> AnyView {
 }
 
 /// 主区内容层的 `overflow: auto`：内边距在滚动内容里，随内容一起滚动。
-fn scroll_route(content: AnyView) -> AnyView {
+/// `key` 标出显示的内容，重挂时同键的滚动容器保留滚动位置。
+fn scroll_route(content: AnyView, key: String) -> AnyView {
     let padded = widget(Stack::column(0.0).padding_xy(PRIMARY_INSET_X, PRIMARY_INSET_Y))
         .children((content,))
         .into_any();
-    widget(scroll_view()).children((padded,)).key("workspace-primary-scroll").into_any()
+    widget(scroll_view()).children((padded,)).key(key).into_any()
 }
 
 /// 占满剩余高度的纵向滚动。
