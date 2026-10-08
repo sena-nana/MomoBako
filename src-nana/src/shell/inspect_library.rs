@@ -96,6 +96,11 @@ pub(super) fn is_office_pdf(view_id: &str) -> bool {
     view_id == PDF_VIEW || view_id == OFFICE_VIEW
 }
 
+/// PDF 读取中写「载入 PDF」，Office 写「转换文档」。
+pub(super) fn is_pdf(view_id: &str) -> bool {
+    view_id == PDF_VIEW
+}
+
 /// Vue 预览就绪后的第三项。翻页控件才写「当前 / 总数」。
 pub(super) fn ready_page_label(total: usize) -> String {
     format!("{total} 页 PDF")

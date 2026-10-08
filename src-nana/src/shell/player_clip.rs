@@ -14,15 +14,11 @@ const SESSION_EXTENSIONS: &[&str] = &[
 ];
 const STILL_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "webp", "gif", "bmp", "avif", "svg"];
 
-/// 图片幻灯片。有帧才画；读不到文件就留下缺的合约，不编造画面。
+/// 图片幻灯片的当前项。有帧才画；读不到文件时 `frame` 为空，不编造画面。
 #[derive(Clone, Debug)]
 pub(crate) struct StillShow {
-    pub extension: String,
     pub path: String,
-    pub width: u32,
-    pub height: u32,
     pub frame: Option<super::super::PreviewPixels>,
-    pub missing: Option<String>,
 }
 
 /// 读出并解码好的当前项。
@@ -214,27 +210,13 @@ fn install_clip(player: &mut PlayerState, parts: crate::shell::MediaParts) {
 fn install_still(player: &mut PlayerState, item: &QueueItem, pixels: super::super::PreviewPixels) {
     player.session.status = if player.wants_playing { "playing" } else { "paused" }.into();
     player.can_play = true;
-    player.still = Some(StillShow {
-        extension: item.extension.clone(),
-        path: item.path.clone(),
-        width: pixels.width,
-        height: pixels.height,
-        frame: Some(pixels),
-        missing: None,
-    });
+    player.still = Some(StillShow { path: item.path.clone(), frame: Some(pixels) });
 }
 
-/// 读不到或解不开：播放条和 Vue 一样只写「图片无法播放」，细节留在日志和缺帧说明里。
+/// 读不到或解不开：播放条和 Vue 一样只写「图片无法播放」，细节留在日志里。
 fn fail_still(player: &mut PlayerState, item: &QueueItem, error: &str) {
     eprintln!("Nana 图片幻灯片没有可绘制的画面：{}：{error}", item.path);
-    player.still = Some(StillShow {
-        extension: item.extension.clone(),
-        path: item.path.clone(),
-        width: 0,
-        height: 0,
-        frame: None,
-        missing: Some(format!("图片幻灯片需要路径上的 RGBA 帧。当前读不到 {}：{error}。不显示假图。", item.path)),
-    });
+    player.still = Some(StillShow { path: item.path.clone(), frame: None });
     player.fail_session("图片无法播放".into());
 }
 

@@ -39,7 +39,8 @@ pub enum PreviewKind {
 pub enum PreviewBody {
     Empty,
     Image,
-    Document { markdown: bool, text: String },
+    /// `truncated_at` 有值时只显示了文件开头这么多字节。
+    Document { markdown: bool, text: String, truncated_at: Option<u64> },
     Media(PlaybackSessionState),
     Native { view_id: String, label: String, content: String },
     Failed(String),
@@ -206,7 +207,7 @@ pub enum InspectMessage {
     Redo,
     RevisionLoaded(Result<(String, AssetDetail), String>),
     MetadataSaved(Result<(String, AssetDetail), String>),
-    BodyLoaded { path: String, markdown: bool, generation: u64, result: Result<String, String> },
+    BodyLoaded { path: String, markdown: bool, generation: u64, result: Result<support::PreviewText, String> },
     NativeLoaded { path: String, generation: u64, result: Result<bridge::NativeLoad, String> },
     MediaLoaded {
         path: String,
@@ -766,7 +767,7 @@ impl InspectState {
         self.error = error;
     }
 
-    fn note_body(&mut self, path: String, markdown: bool, generation: u64, result: Result<String, String>) {
+    fn note_body(&mut self, path: String, markdown: bool, generation: u64, result: Result<support::PreviewText, String>) {
         if generation != self.generation || self.target_path.as_deref() != Some(path.as_str()) {
             eprintln!("Nana 忽略过期的文本预览：{path}");
             return;
@@ -774,8 +775,8 @@ impl InspectState {
         self.loading = false;
         self.activity.clear();
         match result {
-            Ok(text) => {
-                self.body = PreviewBody::Document { markdown, text };
+            Ok(read) => {
+                self.body = PreviewBody::Document { markdown, text: read.text, truncated_at: read.truncated_at };
                 self.error.clear();
             }
             Err(error) => {

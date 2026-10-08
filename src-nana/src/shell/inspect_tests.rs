@@ -135,12 +135,25 @@ fn extension_dispatch_prefers_markdown_and_native_preview() {
 }
 
 #[test]
-fn text_over_the_vue_limit_is_an_error_and_invalid_utf8_is_lossy() {
+fn text_over_the_vue_limit_shows_the_head_and_invalid_utf8_is_lossy() {
     let limit = 768 * 1024;
-    assert_eq!(super::prepare_text(&vec![b'a'; limit]).unwrap().len(), limit);
-    let error = super::prepare_text(&vec![b'a'; limit + 1]).unwrap_err();
-    assert!(error.contains("文本超过"));
-    assert_eq!(super::prepare_text(&[0xff]), Ok("\u{FFFD}".into()));
+    let whole = super::prepare_text(&vec![b'a'; limit]);
+    assert_eq!((whole.text.len(), whole.truncated_at), (limit, None));
+    let head = super::prepare_text(&vec![b'a'; limit + 1]);
+    assert_eq!((head.text.len(), head.truncated_at), (limit, Some(limit as u64)));
+    assert_eq!(super::prepare_text(&[0xff]).text, "\u{FFFD}");
+}
+
+#[test]
+fn text_decodes_boms_and_drops_a_character_cut_by_the_limit() {
+    assert_eq!(super::prepare_text(&[0xef, 0xbb, 0xbf, b'h', b'i']).text, "hi");
+    assert_eq!(super::prepare_text(&[0xff, 0xfe, b'h', 0, b'i', 0]).text, "hi");
+    assert_eq!(super::prepare_text(&[0xfe, 0xff, 0, b'h', 0, b'i']).text, "hi");
+    let mut bytes = vec![b'a'; 768 * 1024 - 1];
+    bytes.extend_from_slice("好".as_bytes());
+    let head = super::prepare_text(&bytes);
+    assert!(head.text.chars().all(|c| c == 'a'));
+    assert_eq!(head.text.len(), 768 * 1024 - 1);
 }
 
 #[test]
@@ -284,7 +297,7 @@ fn stale_text_is_ignored_and_the_current_generation_renders() {
         path: path.clone(),
         markdown,
         generation,
-        result: Ok("旧文本".into()),
+        result: Ok(super::prepare_text("旧文本".as_bytes())),
     });
     assert!(matches!(state.body, PreviewBody::Empty));
     let generation = state.generation;
@@ -292,9 +305,9 @@ fn stale_text_is_ignored_and_the_current_generation_renders() {
         path: "notes/b.txt".into(),
         markdown: false,
         generation,
-        result: Err("文本超过 786432 字节".into()),
+        result: Err("无法读取文件".into()),
     });
-    assert!(matches!(state.body, PreviewBody::Failed(ref message) if message.contains("文本超过")));
+    assert!(matches!(state.body, PreviewBody::Failed(ref message) if message.contains("无法读取")));
 }
 
 #[test]

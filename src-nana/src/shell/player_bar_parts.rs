@@ -166,6 +166,7 @@ fn fit_switch(cover: bool) -> AnyView {
     .into_any()
 }
 
+/// 一档适配按钮。Vue 组件声明的是 26px 高（全局按钮规则把它顶成 32px），这里按组件设计值画。
 fn fit_option(label: &str, active: bool) -> Button {
     let mut button = Button::new(label);
     button.style.background = active.then_some(SemanticColorRole::AccentSoft);
@@ -175,7 +176,7 @@ fn fit_option(label: &str, active: bool) -> Button {
     button.style.control_height = None;
     button.style.control_padding_x = None;
     let layout = std::sync::Arc::make_mut(&mut button.style.layout);
-    layout.height = Some(LengthSpec::Px(32.0));
+    layout.height = Some(LengthSpec::Px(26.0));
     layout.min_height = Some(LengthSpec::Px(26.0));
     layout.padding_left = Some(LengthSpec::Px(8.0));
     layout.padding_right = Some(LengthSpec::Px(8.0));

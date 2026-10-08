@@ -68,12 +68,65 @@ pub fn classify(extension: &str, contributions: &[PreviewBinding]) -> PreviewKin
     PreviewKind::Unsupported
 }
 
-/// 文本超过 Vue 的 768KiB 上限时失败，不把截断内容当成完整预览。
-pub fn prepare_text(bytes: &[u8]) -> Result<String, String> {
-    if bytes.len() > TEXT_BYTE_LIMIT {
-        return Err(format!("文本超过 {} 字节", TEXT_BYTE_LIMIT));
+/// 文本预览读出的内容。只显示了开头一段时，`truncated_at` 记实际解码的字节数。
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PreviewText {
+    pub text: String,
+    pub truncated_at: Option<u64>,
+}
+
+/// 和 text-preview 一致：只取前 768 KiB，按 BOM 认 UTF-8 / UTF-16，其余按 UTF-8 宽松解码。
+///
+/// 截断处若切在多字节字符中间，丢掉这半个字符，不在末尾留替换符。
+pub fn prepare_text(bytes: &[u8]) -> PreviewText {
+    let truncated = bytes.len() > TEXT_BYTE_LIMIT;
+    let shown = &bytes[..bytes.len().min(TEXT_BYTE_LIMIT)];
+    PreviewText { text: decode_text(shown, truncated), truncated_at: truncated.then_some(shown.len() as u64) }
+}
+
+/// 按 BOM 选编码：EF BB BF 是 UTF-8，FF FE / FE FF 是 UTF-16 小端 / 大端，没有 BOM 按 UTF-8。
+fn decode_text(bytes: &[u8], truncated: bool) -> String {
+    if let Some(rest) = bytes.strip_prefix(&[0xef, 0xbb, 0xbf]) {
+        return utf8_text(rest, truncated);
     }
-    Ok(String::from_utf8_lossy(bytes).into_owned())
+    if let Some(rest) = bytes.strip_prefix(&[0xff, 0xfe]) {
+        return utf16_text(rest, u16::from_le_bytes);
+    }
+    if let Some(rest) = bytes.strip_prefix(&[0xfe, 0xff]) {
+        return utf16_text(rest, u16::from_be_bytes);
+    }
+    utf8_text(bytes, truncated)
+}
+
+fn utf8_text(bytes: &[u8], truncated: bool) -> String {
+    let bytes = if truncated { trim_partial_utf8(bytes) } else { bytes };
+    String::from_utf8_lossy(bytes).into_owned()
+}
+
+/// UTF-16 两字节一个码元；截断留下的单个尾字节丢掉，坏的代理对换成替换符。
+fn utf16_text(bytes: &[u8], unit: fn([u8; 2]) -> u16) -> String {
+    let units = bytes.chunks_exact(2).map(|pair| unit([pair[0], pair[1]]));
+    char::decode_utf16(units).map(|item| item.unwrap_or(char::REPLACEMENT_CHARACTER)).collect()
+}
+
+/// 算法：从末尾往前最多看 3 个字节，找到最后一个字符的首字节，按首字节算出该字符应有的长度；
+/// 剩下的字节不够这个长度，说明截断切在了字符中间，把这半个字符去掉。
+fn trim_partial_utf8(bytes: &[u8]) -> &[u8] {
+    let tail = bytes.len().saturating_sub(3);
+    for start in (tail..bytes.len()).rev() {
+        let lead = bytes[start];
+        if lead & 0b1100_0000 == 0b1000_0000 {
+            continue;
+        }
+        let width = match lead {
+            0xc0..=0xdf => 2,
+            0xe0..=0xef => 3,
+            0xf0..=0xf7 => 4,
+            _ => 1,
+        };
+        return if bytes.len() - start < width { &bytes[..start] } else { bytes };
+    }
+    bytes
 }
 
 /// 音视频预览先排队读文件。可解码音频成功后才允许播放控制。
