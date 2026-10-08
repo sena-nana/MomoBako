@@ -489,11 +489,10 @@ pub fn paint_modal(view: impl IntoView, motion: &MotionState) -> AnyView {
     paint_layer(view, frame.overlay_opacity, shift_scale(frame.card_shift, frame.card_scale))
 }
 
-/// 弹层透明度和 4px 上移，原点用侧栏记下的坐标。
-pub fn paint_panel(view: impl IntoView, model: &super::ShellViewModel) -> AnyView {
-    let frame = model.motion.panel_frame();
-    let shift = shift_x(model.sidebar.popover_x).then(shift_scale(frame.shift + model.sidebar.popover_y, 1.0));
-    paint_layer(view, frame.opacity, shift)
+/// 弹层透明度和 4px 上移。
+pub fn paint_panel(view: impl IntoView, motion: &MotionState) -> AnyView {
+    let frame = motion.panel_frame();
+    paint_layer(view, frame.opacity, shift_scale(frame.shift, 1.0))
 }
 
 fn paint_layer(view: impl IntoView, opacity: f32, transform: nana_ui_core::PaintTransform) -> AnyView {

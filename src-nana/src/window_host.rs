@@ -63,11 +63,10 @@ pub(crate) fn prepare_motion(shell: &mut ShellViewModel, window: &mut Applicatio
     }
     let tracking = crate::shell::observe_live_pointer(shell, &window.document);
     shell.stage_browses();
-    let placed = place_live_popover(shell, &window.document);
     if shell.motion.active() {
         shell.motion.advance(shell.motion.now_ms().saturating_add(16));
     }
-    let refresh = shell.motion.active() || placed || shell.surface_dirty;
+    let refresh = shell.motion.active() || shell.surface_dirty;
     if refresh && !tracking {
         shell.surface_dirty = false;
         if let Err(error) = crate::shell::mount_shell(&mut window.document, shell) {
@@ -181,70 +180,6 @@ fn note_escape_key(key: &nana_ui::runtime::KeyInput) -> bool {
         return true;
     }
     false
-}
-
-/// 打开的仓库弹层按锚点和自身尺寸夹进视口。坐标来自当前树上的布局盒。
-fn place_live_popover(shell: &mut ShellViewModel, document: &nana_ui::runtime::RuntimeDocument) -> bool {
-    if !shell.sidebar.popover_is_open() {
-        return false;
-    }
-    let document_id = document.document();
-    let world = document.context().world();
-    let nodes = world.project_accessibility(document_id);
-    let Some(anchor) = nodes.iter().find(|node| node.label.as_deref().is_some_and(|label| label.starts_with("资源库 ·"))) else {
-        return false;
-    };
-    let Some(title) = nodes.iter().find(|node| node.label.as_deref() == Some("资源库")) else {
-        return false;
-    };
-    let panel = popover_box(world, title.id);
-    if panel.width < 40.0 || panel.height < 40.0 {
-        eprintln!("Nana 仓库弹层还没有尺寸");
-        return false;
-    }
-    let (viewport_w, viewport_h) = viewport_size(world, document_id);
-    let before = (shell.sidebar.popover_x, shell.sidebar.popover_y);
-    shell.reduce(ShellMessage::Sidebar(crate::shell::SidebarMessage::Gap(crate::shell::GapMessage::PlacePopover {
-        x: anchor.bounds.x,
-        y: anchor.bounds.y,
-        width: panel.width,
-        height: panel.height,
-        viewport_w,
-        viewport_h,
-    })));
-    (shell.sidebar.popover_x, shell.sidebar.popover_y) != before
-}
-
-fn popover_box(world: &nana_ui::runtime::UiWorld, id: nana_ui::runtime::StableNodeId) -> nana_ui::runtime::LayoutBox {
-    let mut current = id;
-    let mut best = world.layout_box(id).unwrap_or_default();
-    while let Some(parent) = world.parent_id(current) {
-        let Some(bounds) = world.layout_box(parent) else {
-            break;
-        };
-        if bounds.width > 1100.0 || bounds.height > 700.0 || bounds.width + 8.0 < best.width {
-            break;
-        }
-        if bounds.width >= best.width && bounds.height >= best.height {
-            best = bounds;
-            current = parent;
-            continue;
-        }
-        break;
-    }
-    best
-}
-
-fn viewport_size(world: &nana_ui::runtime::UiWorld, document_id: nana_ui::runtime::DocumentId) -> (f32, f32) {
-    let mut width = 0.0_f32;
-    let mut height = 0.0_f32;
-    for id in world.document_order(document_id) {
-        if let Some(bounds) = world.layout_box(id) {
-            width = width.max(bounds.x + bounds.width);
-            height = height.max(bounds.y + bounds.height);
-        }
-    }
-    (width, height)
 }
 
 /// 分隔条的松手被 Nana 工作区吃掉。指针捕获结束时才写入宽度。

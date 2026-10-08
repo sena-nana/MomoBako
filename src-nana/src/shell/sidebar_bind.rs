@@ -82,6 +82,33 @@ impl ShellViewModel {
         }
     }
 
+    /// 添加菜单选了一个来源后端。本地文件夹和 Eagle 打开系统文件夹对话框，
+    /// 登录型来源跳到插件设置，其余来源切到表单（由侧栏状态完成）。
+    pub(crate) fn apply_repository_backend(&mut self, plugin_id: &str) {
+        let options = super::backend_options(&self.admin.plugins);
+        let Some(option) = options.iter().find(|option| option.plugin_id == plugin_id) else {
+            eprintln!("Nana 添加资源库找不到来源插件：{plugin_id}");
+            return;
+        };
+        match self.sidebar.choose_backend(option) {
+            Some(super::BackendRoute::PickLocalFolder | super::BackendRoute::PickEagleLibrary) => {
+                self.input.queue_attach_dialog();
+            }
+            Some(super::BackendRoute::OpenSettings(plugin_id)) => {
+                self.page = ShellPage::Settings;
+                self.reduce(super::super::ShellMessage::Admin(super::super::AdminMessage::RoutePlugin(plugin_id)));
+            }
+            Some(super::BackendRoute::Form) => {}
+            None => eprintln!("Nana 来源后端当前不可用：{plugin_id}"),
+        }
+    }
+
+    /// 每次归约后结算侧栏里等文件服务结果的对话框。
+    pub(crate) fn settle_sidebar_dialogs(&mut self) {
+        let error = self.files.error.clone();
+        self.sidebar.settle_folder_dialogs(self.files.mutating, &error);
+    }
+
     pub(crate) fn apply_playlist(&mut self, playlist_id: String) {
         if self.sidebar.select_playlist(&mut self.workspace, &playlist_id) {
             self.leave_settings_page();
