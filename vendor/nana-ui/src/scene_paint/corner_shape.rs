@@ -14,8 +14,11 @@ static EXPONENT: AtomicU32 = AtomicU32::new(0x4000_0000);
 
 /// 设置之后新建的着色器模块用的圆角指数。非有限值回到 2，范围夹在 2–8。
 pub fn set_corner_exponent(exponent: f32) {
-    let exponent = if exponent.is_finite() { exponent.clamp(2.0, 8.0) } else { 2.0 };
-    EXPONENT.store(exponent.to_bits(), Ordering::Relaxed);
+    EXPONENT.store(clamp_exponent(exponent).to_bits(), Ordering::Relaxed);
+}
+
+fn clamp_exponent(exponent: f32) -> f32 {
+    if exponent.is_finite() { exponent.clamp(2.0, 8.0) } else { 2.0 }
 }
 
 /// 当前的圆角指数。
@@ -49,13 +52,12 @@ mod tests {
         assert_eq!(specialize(source, 4.0), "const CORNER_EXPONENT: f32 = 4.0000;\nfn f() {}");
     }
 
+    /// 不碰全局值：并行的绘制测试都按默认圆弧建绘制器。
     #[test]
     fn exponent_is_clamped_and_defaults_to_round() {
-        set_corner_exponent(f32::NAN);
-        assert_eq!(corner_exponent(), 2.0);
-        set_corner_exponent(12.0);
-        assert_eq!(corner_exponent(), 8.0);
-        set_corner_exponent(2.0);
-        assert_eq!(corner_exponent(), 2.0);
+        assert_eq!(clamp_exponent(f32::NAN), 2.0);
+        assert_eq!(clamp_exponent(12.0), 8.0);
+        assert_eq!(clamp_exponent(1.0), 2.0);
+        assert_eq!(clamp_exponent(4.0), 4.0);
     }
 }
