@@ -116,7 +116,9 @@ impl ApplicationState for MomoBakoApplication {
         let mut shell = if services.is_some() {
             ShellViewModel::default()
         } else {
-            let mut shell = ShellViewModel::for_page(ShellPage::Error);
+            // 不走验收种子：验收的启动失败页带着夹具仓库和日志，不能出现在真实窗口里。
+            let mut shell = ShellViewModel::default();
+            shell.page = ShellPage::Error;
             let message = "领域服务启动失败，请检查服务目录和端口配置";
             shell.detail = message.into();
             shell.workspace.startup.fail(message);
