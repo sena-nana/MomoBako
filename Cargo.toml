@@ -24,3 +24,5 @@ exclude = [
 
 [patch."https://github.com/sena-nana/NanaUI.git"]
 nana-ui = { path = "vendor/nana-ui" }
+# RichSpan 语义色在 runtime。副本基线仍是修订 ee941067，nana-ui-core / nana-ui-scene 继续用该修订。
+nana-ui-runtime = { path = "vendor/nana-ui-runtime" }
