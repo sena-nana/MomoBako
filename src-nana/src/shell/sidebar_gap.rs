@@ -232,6 +232,10 @@ pub fn dismiss_top(model: &mut super::super::ShellViewModel) -> bool {
         model.inspect.close_tag_menu();
         return true;
     }
+    // 文件页的浮层：右键菜单 → 导入菜单 → 导出对话框 → 硬链接确认 → 文件对话框，文件操作进行中不关。
+    if model.files.dismiss_overlay() {
+        return true;
+    }
     false
 }
 
