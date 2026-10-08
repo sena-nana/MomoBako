@@ -5,7 +5,7 @@
 //! `HardlinkCandidateDialog.vue`。分页、选择、只读虚拟视图和变更守卫在这里归约。
 //! 框选、修饰键、系统对话框、拖放、缩略图空闲预取和操作进度条不在这里完成。
 
-use std::collections::HashSet;
+
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -300,6 +300,8 @@ pub enum FilesEffect {
     ExportArchive { repo_id: String, format: String, output_path: String, compression: String, encrypt: bool, password: String },
     /// Git 导出。远端、分支和说明来自对话框，空值在调度时省略。
     ExportGit { repo_id: String, remote: String, branch: String, message: String },
+    /// 写入系统剪贴板，例如元数据里的来源链接。
+    CopyText(String),
 }
 
 /// 文件表面消息。壳层只保留一个 `ShellMessage::Files`。
@@ -314,6 +316,20 @@ pub enum FilesMessage {
     CloseEntryMenu,
     /// 展开或收起右键菜单里的子菜单。
     ToggleMenuBranch(String),
+    /// 需要二次确认的菜单项第一次被点：只变成待确认，菜单不关。
+    ArmMenuConfirm(String),
+    /// 列表区内容宽度变了。瀑布流按新宽度重新分列。
+    ListResized(f32),
+    /// 展开或收起元数据里的标签组。`expanded` 是点之前画出来的状态。
+    ToggleTags { path: String, expanded: bool },
+    /// 打开或关上标签菜单。
+    ToggleTagMenu,
+    /// 标签菜单里新建标签的输入。
+    SetTagDraft(String),
+    /// 复制一段文字到系统剪贴板。
+    CopyText(String),
+    /// 把输入的新标签加进草稿。
+    SubmitTagDraft(String),
     RefreshThumbnail(String),
     OpenPath(String),
     LoadMore,
@@ -405,6 +421,14 @@ pub struct FilesState {
     pub(super) select_only: Option<String>,
     /// 右键菜单里展开子菜单的那一项（「缩略图」「加入播放列表」）。
     pub(super) menu_branch: Option<String>,
+    /// 右键菜单里等第二次点击确认的那一项（回收站的「彻底删除」）。
+    pub(super) menu_pending: Option<String>,
+    /// 列表区内容的实际宽度，瀑布流按它定列数。还没有布局回报时为 `None`。
+    pub(super) list_width: Option<f32>,
+    /// 元数据编辑里「新建标签」的输入草稿。
+    pub(super) tag_draft: String,
+    /// 用户手动展开或收起标签组的那个文件。别的文件按「有标签就展开」。
+    pub(super) tags_open: Option<(String, bool)>,
 }
 
 impl FilesState {
@@ -506,17 +530,6 @@ impl FilesState {
             return self.rows.iter().filter(|row| row.kind != "directory").cloned().collect();
         }
         self.rows.clone()
-    }
-
-    /// 单击选中的是文件时记下它：素材详情回来后仍留在列表，不切到预览页。
-    pub(super) fn note_selected_only(&mut self, path: &str) {
-        let file = self.rows.iter().chain(self.virtual_rows.iter()).any(|row| row.path == path && row.kind != "directory");
-        self.select_only = file.then(|| path.to_string());
-    }
-
-    /// 预览页是否该替换文件列表。单击选中的文件只在右侧详情里看，和 Vue 的 `previewFileEntry` 一致。
-    pub(super) fn preview_open(&self, target: Option<&str>) -> bool {
-        target.is_some() && self.select_only.as_deref() != target
     }
 
     pub(super) fn current_hardlink(&self) -> Option<&HardlinkPrompt> {
@@ -765,9 +778,23 @@ impl FilesState {
             FilesMessage::CloseEntryMenu => {
                 self.entry_menu = None;
                 self.menu_branch = None;
+                self.menu_pending = None;
             }
+            FilesMessage::ArmMenuConfirm(item) => self.menu_pending = Some(item),
             FilesMessage::ToggleMenuBranch(branch) => {
                 self.menu_branch = if self.menu_branch.as_deref() == Some(branch.as_str()) { None } else { Some(branch) };
+            }
+            FilesMessage::ListResized(width) => self.note_list_width(width),
+            FilesMessage::ToggleTags { path, expanded } => self.tags_open = Some((path, !expanded)),
+            FilesMessage::SetTagDraft(value) => self.tag_draft = value,
+            // 这两条要改检视草稿，在 `reduce_message` 里转成检视消息。
+            FilesMessage::ToggleTagMenu | FilesMessage::SubmitTagDraft(_) => {}
+            FilesMessage::CopyText(text) => {
+                if text.is_empty() {
+                    eprintln!("Nana 没有可复制的文字");
+                } else {
+                    self.effects.push(FilesEffect::CopyText(text));
+                }
             }
             FilesMessage::RefreshThumbnail(path) => self.refresh_thumbnail(&path),
             FilesMessage::OpenPath(path) => {
@@ -870,12 +897,6 @@ impl FilesState {
             && !self.mutating
     }
 
-    fn selection_has_virtual(&self) -> bool {
-        self.selected.iter().any(|path| {
-            self.rows.iter().chain(self.virtual_rows.iter()).any(|row| row.path == *path && row.is_virtual)
-        })
-    }
-
     fn queue_browse(&mut self, ctx: &FileContext, path: &str, append: bool, keep_selection: bool, allow_category: bool) -> bool {
         if self.mutating {
             eprintln!("Nana 文件变更进行中，不能切换目录");
@@ -931,93 +952,6 @@ impl FilesState {
         self.operation = None;
     }
 
-    fn select_visible(&mut self, ctx: &FileContext, path: &str, mode: SelectionMode) {
-        let rows = self.visible_rows(ctx);
-        if !rows.iter().any(|row| row.path == path) {
-            return;
-        }
-        let previous_primary = self.primary.clone();
-        match mode {
-            SelectionMode::Replace => self.replace_selection(path),
-            SelectionMode::Toggle => self.toggle_selection(path),
-            SelectionMode::Range => self.range_selection(&rows, path),
-        }
-        self.clear_rename_if_needed(previous_primary);
-    }
-
-    fn replace_selection(&mut self, path: &str) {
-        self.selected = vec![path.to_string()];
-        self.primary = Some(path.to_string());
-        self.anchor = Some(path.to_string());
-    }
-
-    fn toggle_selection(&mut self, path: &str) {
-        if let Some(index) = self.selected.iter().position(|item| item == path) {
-            self.selected.remove(index);
-        } else {
-            self.selected.push(path.to_string());
-        }
-        if self.selected.iter().any(|item| item == path) {
-            self.primary = Some(path.to_string());
-            self.anchor = Some(path.to_string());
-        } else {
-            self.primary = self.selected.first().cloned();
-            if self.anchor.as_deref() == Some(path) {
-                self.anchor = self.primary.clone();
-            }
-        }
-        if self.selected.is_empty() {
-            self.primary = None;
-            self.anchor = None;
-        }
-    }
-
-    /// 没有锚点时范围选择退回替换，避免从列表头意外拉出一段。
-    fn range_selection(&mut self, rows: &[FileRow], path: &str) {
-        let Some(anchor) = self.anchor.clone() else {
-            self.replace_selection(path);
-            return;
-        };
-        let Some(anchor_index) = rows.iter().position(|row| row.path == anchor) else {
-            self.replace_selection(path);
-            return;
-        };
-        let Some(index) = rows.iter().position(|row| row.path == path) else {
-            return;
-        };
-        let (start, end) = if anchor_index <= index { (anchor_index, index) } else { (index, anchor_index) };
-        self.selected = rows[start..=end].iter().map(|row| row.path.clone()).collect();
-        self.primary = Some(path.to_string());
-    }
-
-    fn prune_against(&mut self, rows: &[FileRow]) {
-        let paths: HashSet<String> = rows.iter().map(|row| row.path.clone()).collect();
-        let previous_primary = self.primary.clone();
-        self.selected.retain(|path| paths.contains(path));
-        if self.primary.as_ref().is_some_and(|path| !paths.contains(path)) {
-            self.primary = self.selected.first().cloned();
-        }
-        if self.selected.is_empty() {
-            self.primary = None;
-            self.anchor = None;
-        } else if self.anchor.as_ref().is_some_and(|path| !paths.contains(path)) {
-            self.anchor = self.primary.clone();
-        }
-        self.clear_rename_if_needed(previous_primary);
-    }
-
-    fn clear_rename_if_needed(&mut self, previous_primary: Option<String>) {
-        let multiple = self.selected.len() != 1;
-        let primary_changed = self.primary != previous_primary;
-        if multiple || (self.rename_path.is_some() && primary_changed) {
-            self.rename_path = None;
-            self.name_draft.clear();
-            if self.dialog == FileDialog::Rename {
-                self.dialog = FileDialog::Closed;
-            }
-        }
-    }
-
 }
 
 
@@ -1033,6 +967,12 @@ impl super::ShellViewModel {
 }
 
 include!("files_actions.rs");
+
+#[path = "files_selection.rs"]
+mod selection;
+
+#[path = "local_time.rs"]
+pub(crate) mod local_time;
 
 #[cfg(test)]
 #[path = "files_tests.rs"]

@@ -666,6 +666,7 @@ impl FilesState {
             self.selection_mode = mode;
         }
         self.menu_branch = None;
+        self.menu_pending = None;
         self.entry_menu = Some(EntryMenu { path: path.to_string(), x, y });
     }
 
@@ -700,6 +701,33 @@ impl FilesState {
             return;
         }
         self.effects.push(FilesEffect::DecodeThumbnails { paths: vec![path.to_string()] });
+    }
+
+    /// Escape 关掉文件页最上面的一层：右键菜单、导入菜单、文件对话框、导出对话框。
+    /// 变更进行中的对话框不关。没有可关的返回 false，交给壳层继续处理。
+    pub(crate) fn dismiss_overlay(&mut self) -> bool {
+        if self.entry_menu.is_some() {
+            self.entry_menu = None;
+            self.menu_branch = None;
+            self.menu_pending = None;
+            return true;
+        }
+        if self.import_open {
+            self.import_open = false;
+            self.eagle_open = false;
+            return true;
+        }
+        if self.export.open && !self.export.busy {
+            self.close_export();
+            return true;
+        }
+        if self.dialog == FileDialog::Hardlink && !self.mutating {
+            return self.skip_hardlink();
+        }
+        if self.dialog != FileDialog::Closed && !self.mutating {
+            return self.close_dialog();
+        }
+        false
     }
 
     /// 展开或收起导入菜单。收起时 Eagle 的复制和剪切一起收起。
@@ -774,6 +802,14 @@ pub(super) fn reduce_message(model: &mut super::ShellViewModel, message: super::
     let super::ShellMessage::Files(message) = message else {
         return Some(message);
     };
+    // 压缩包导出还没有保存位置时，先弹系统保存对话框，不把空路径交给导出协议。
+    let export = &model.files.export;
+    let archive_without_path = export.target != "git" && export.output_path.trim().is_empty() && !export.busy;
+    let message = if matches!(message, FilesMessage::SubmitExport) && archive_without_path {
+        FilesMessage::ChooseExportOutput
+    } else {
+        message
+    };
     if matches!(message, FilesMessage::ChooseExportOutput) {
         let extension = model.files.export.format.trim().to_string();
         let file_name = model.workspace.active_repository().and_then(|repository| {
@@ -782,6 +818,26 @@ pub(super) fn reduce_message(model: &mut super::ShellViewModel, message: super::
         });
         model.input.queue_repository_export_dialog(file_name, extension);
         return None;
+    }
+    match &message {
+        FilesMessage::ToggleTagMenu => {
+            model.files.tag_draft.clear();
+            let next = if model.inspect.tag_menu_open() {
+                super::inspect::InspectMessage::CloseTagMenu
+            } else {
+                super::inspect::InspectMessage::OpenTagMenu { x: 0.0, y: 0.0 }
+            };
+            return Some(super::ShellMessage::Inspect(next));
+        }
+        FilesMessage::SubmitTagDraft(value) => {
+            let tag = value.trim().to_string();
+            if tag.is_empty() {
+                return None;
+            }
+            model.files.tag_draft.clear();
+            return Some(super::ShellMessage::Inspect(super::inspect::InspectMessage::AddTag(tag)));
+        }
+        _ => {}
     }
     let context = FileContext::from_model(model);
     let show_on_files = matches!(
