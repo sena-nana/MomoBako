@@ -7,9 +7,7 @@
 use nana_ui::runtime::{DocumentId, FrameworkError, Task};
 use nana_ui::{
     ApplicationIdentity, ApplicationState, ApplicationWindow, DiagnosticsConfig, NanaApplication,
-    GpuTexture, GpuTextureDescriptor, GpuTextureFormat, GpuTextureUsages, HostTexture,
-    HostTextureAlphaMode, GpuTextureRegion, RuntimeApplication, RuntimeProgramContext,
-    RuntimeProgramUpdate,
+    GpuTexture, RuntimeApplication, RuntimeProgramContext, RuntimeProgramUpdate,
 };
 
 pub mod shell;
@@ -45,6 +43,7 @@ use backend::services::repository::{
 pub mod plugin_api;
 pub mod settings;
 mod thumbnail_host;
+pub mod appearance;
 
 use thumbnail_host::{PendingThumb, ThumbnailGpu};
 
@@ -58,6 +57,10 @@ pub struct MomoBakoApplication {
     pub(crate) thumbnail_gpu: Vec<ThumbnailGpu>,
     pub(crate) pending_thumbs: Vec<PendingThumb>,
     host: window_host::HostSession,
+    /// 宿主报告的系统深浅色，「跟随系统」时用。
+    system_appearance: Option<nana_ui_platform::SystemAppearance>,
+    /// 已装进文档的外观。设置变了才重新安装。
+    applied_appearance: Option<appearance::Appearance>,
 }
 
 pub(crate) struct NativePreviewGpu {
@@ -86,6 +89,8 @@ impl Default for MomoBakoApplication {
             thumbnail_gpu: Vec::new(),
             pending_thumbs: Vec::new(),
             host: window_host::HostSession::default(),
+            system_appearance: None,
+            applied_appearance: None,
         }
     }
 }
@@ -117,6 +122,17 @@ impl ApplicationState for MomoBakoApplication {
             shell.workspace.startup.fail(message);
             shell
         };
+        if let Some(services) = services.as_ref() {
+            // 主题等应用设置启动时就要生效，不能等打开设置页才读。
+            match services.load_settings() {
+                Ok((settings, diagnostic)) => {
+                    shell.settings_cache_limit_draft = settings.thumbnail_cache_limit_mb.to_string();
+                    shell.settings = settings;
+                    shell.settings_error = diagnostic;
+                }
+                Err(error) => eprintln!("Nana 启动时读取应用设置失败，先用默认值：{error}"),
+            }
+        }
         shell.workspace.load_prefs_file(&sidebar_prefs_path());
         shell.files.load_display_mode_file(&display_mode_path());
         shell.player.load_default_files();
@@ -130,6 +146,8 @@ impl ApplicationState for MomoBakoApplication {
             thumbnail_gpu: Vec::new(),
             pending_thumbs: Vec::new(),
             host: window_host::HostSession::default(),
+            system_appearance: context.system_appearance(),
+            applied_appearance: None,
         })
     }
 
@@ -142,6 +160,8 @@ impl ApplicationState for MomoBakoApplication {
             self.shell.workspace.prepare_initial_list();
         }
         mount_shell(&mut window.document, &self.shell)?;
+        self.applied_appearance = None;
+        appearance::sync(self, &mut window.document);
         if !self.repositories_load_scheduled {
             if let Some(services) = self.services.as_ref() {
                 let query = services.repository_query.clone();
@@ -162,6 +182,10 @@ impl ApplicationState for MomoBakoApplication {
         Ok(())
     }
 
+    fn theme_mode(&self) -> nana_ui::ThemeMode {
+        appearance::Appearance::from_shell(&self.shell, self.system_appearance).mode
+    }
+
     fn prepare(
         &mut self,
         window: &mut ApplicationWindow,
@@ -175,58 +199,9 @@ impl ApplicationState for MomoBakoApplication {
             sidebar_dispatch::dispatch_browse_request(self, context, request);
         }
         thumbnail_host::publish_still(self, window, context);
-        let Some(token) = self.shell.preview_token.clone() else {
-            self.preview_gpu = None;
-            window.textures.remove("file-preview");
-            return;
-        };
-        let Some(pixels) = self.shell.preview_pixels.as_ref() else {
-            self.preview_gpu = None;
-            window.textures.remove("file-preview");
-            return;
-        };
-        let needs_upload = self.preview_gpu.as_ref().is_none_or(|preview| {
-            preview.token != token
-                || preview.width != pixels.width
-                || preview.height != pixels.height
-        });
-        if needs_upload {
-            let Ok(texture) = context.gpu().create_texture(&GpuTextureDescriptor {
-                label: Some("momobako file preview"),
-                width: pixels.width,
-                height: pixels.height,
-                format: GpuTextureFormat::RGBA8_UNORM_SRGB,
-                usage: GpuTextureUsages::SAMPLED | GpuTextureUsages::COPY_DST,
-            }) else {
-                eprintln!("Nana 文件预览纹理创建失败：{}x{}", pixels.width, pixels.height);
-                return;
-            };
-            if let Err(error) = context.gpu().write_texture(
-                &texture,
-                GpuTextureRegion::full(pixels.width, pixels.height),
-                &pixels.rgba,
-                pixels.width.saturating_mul(4),
-            ) {
-                eprintln!("Nana 文件预览纹理上传失败：{error}");
-                return;
-            }
-            self.preview_gpu = Some(NativePreviewGpu {
-                token,
-                texture,
-                width: pixels.width,
-                height: pixels.height,
-            });
-        }
-        if let Some(preview) = self.preview_gpu.as_ref() {
-            window.textures.register(
-                "file-preview",
-                HostTexture::new(1, 1, &preview.texture),
-                preview.width,
-                preview.height,
-                HostTextureAlphaMode::Premultiplied,
-            );
-        }
+        thumbnail_host::publish_preview(self, window, context);
         self.publish_thumbnails(window, context);
+        appearance::sync(self, &mut window.document);
     }
 
     fn update(

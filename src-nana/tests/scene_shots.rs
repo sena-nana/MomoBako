@@ -14,6 +14,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use momobako_nana::acceptance_document_at_width;
+use momobako_nana::appearance::{self, Appearance};
 use momobako_nana::shell::{acceptance_gap_models, ShellPage, ShellViewModel};
 use nana_ui_devtools::agent::{AgentSession, RuntimeAgentSession, protocol::ThemeName};
 use nana_ui_devtools::offscreen;
@@ -71,9 +72,11 @@ fn catalog() -> Vec<(&'static str, ShellViewModel)> {
 }
 
 fn shoot(model: ShellViewModel, width: u32, height: u32, theme: ThemeName, dir: &std::path::Path, stem: &str) {
+    let appearance = Appearance::for_mode(&model, mode_of(theme));
     let document = acceptance_document_at_width(model, width as f32).expect("文档");
     let mut session = RuntimeAgentSession::new(document, width, height).expect("会话");
     session.set_theme(theme).expect("主题");
+    assert!(appearance::install(session.document_mut(), appearance), "外观安装失败");
     session.flush().expect("布局");
     session.screenshot_png(dir.join(format!("{stem}.png"))).expect("截图");
     let nodes = session
@@ -110,6 +113,13 @@ fn list(key: &str, default: &str) -> Vec<String> {
 fn parse_size(size: &str) -> (u32, u32) {
     let (width, height) = size.split_once('x').unwrap_or_else(|| panic!("尺寸写成 宽x高：{size}"));
     (width.parse().expect("宽"), height.parse().expect("高"))
+}
+
+fn mode_of(theme: ThemeName) -> nana_ui::ThemeMode {
+    match theme {
+        ThemeName::Light => nana_ui::ThemeMode::Light,
+        ThemeName::Dark => nana_ui::ThemeMode::Dark,
+    }
 }
 
 fn theme_of(name: &str) -> ThemeName {
