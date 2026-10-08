@@ -1,4 +1,4 @@
-//! 预览扩展名分派、文本字节上限、可解码音频的预览会话，以及搜索条件解析。
+//! 预览扩展名分派、文本字节上限和可解码音频的预览会话。搜索条件解析在 `search_request.rs`。
 //!
 //! Markdown 先于普通文本。压缩包、PDF、文档和模型走内置绘制，不因 Vue 贡献改回升级提示。
 //! 能解出的 WAV、mp3、flac、ogg 同时带上 PCM，供预览和播放条共用同一出声游标。
@@ -17,10 +17,7 @@ use crate::backend::services::repository::{MetadataEntry, PlaybackSessionState};
 use crate::host_api::{PlaybackMediaCapabilities, PlaybackMediaPlugin};
 use crate::plugin_api::NativeContributionKind;
 
-use super::{
-    DateBound, FilterList, MatchMode, NumberBound, PreviewBinding, PreviewKind, SearchFilters, SearchRequestDraft,
-    SortDirection,
-};
+use super::{PreviewBinding, PreviewKind};
 
 const TEXT_BYTE_LIMIT: usize = 768 * 1024;
 
@@ -281,59 +278,6 @@ fn fresh_session(repo_id: &str) -> PlaybackSessionState {
     }
 }
 
-pub(super) fn build_search_request(query: &str, filters: &SearchFilters, active_repo: Option<&str>) -> SearchRequestDraft {
-    let mut metadata_filters = Vec::new();
-    metadata_filters.extend(filters.colors.iter().cloned().map(|value| ("color".into(), value)));
-    metadata_filters.extend(filters.shapes.iter().cloned().map(|value| ("shape".into(), value)));
-    metadata_filters.extend(parse_metadata(&filters.metadata_filters));
-    let sort_field = filters.sort_field.trim();
-    SearchRequestDraft {
-        query: query.to_string(),
-        repo_id: filters.has_active_filters().then(|| active_repo.map(str::to_string)).flatten(),
-        exclude_query: nonempty(&filters.exclude_query),
-        tags: normalize_values(&filters.tags),
-        formats: normalize_values(&filters.formats),
-        metadata_filters,
-        exclude_tags: normalize_values(&filters.exclude_tags),
-        exclude_formats: normalize_values(&filters.exclude_formats),
-        exclude_metadata_filters: parse_metadata(&filters.exclude_metadata_filters),
-        exclude_path_prefixes: parse_paths(&filters.exclude_path_prefixes),
-        exclude_number_filters: parse_numbers(&filters.exclude_number_filters),
-        exclude_date_filters: parse_dates(&filters.exclude_date_filters),
-        number_filters: parse_numbers(&filters.number_filters),
-        date_filters: parse_dates(&filters.date_filters),
-        match_mode: (filters.match_mode == MatchMode::Or).then(|| "or".to_string()),
-        sort_field: (!sort_field.is_empty()).then(|| sort_field.to_string()),
-        sort_direction: (!sort_field.is_empty()).then(|| match filters.sort_direction {
-            SortDirection::Asc => "asc".to_string(),
-            SortDirection::Desc => "desc".to_string(),
-        }),
-        limit: filters.limit,
-        min_rating: filters.min_rating,
-    }
-}
-
-pub(super) fn toggle_filter(filters: &mut SearchFilters, key: FilterList, value: &str) {
-    let value = value.trim();
-    if value.is_empty() {
-        return;
-    }
-    let list = match key {
-        FilterList::Tags => &mut filters.tags,
-        FilterList::Formats => &mut filters.formats,
-        FilterList::Colors => &mut filters.colors,
-        FilterList::Shapes => &mut filters.shapes,
-        FilterList::ExcludeTags => &mut filters.exclude_tags,
-        FilterList::ExcludeFormats => &mut filters.exclude_formats,
-    };
-    if let Some(index) = list.iter().position(|item| item == value) {
-        list.remove(index);
-    } else {
-        list.push(value.to_string());
-        *list = normalize_values(list);
-    }
-}
-
 fn find_contribution<'a>(extension: &str, contributions: &'a [PreviewBinding]) -> Option<&'a PreviewBinding> {
     contributions.iter().rev().find(|binding| {
         binding.contribution.kind == NativeContributionKind::Preview
@@ -387,145 +331,6 @@ pub(super) fn value_text(value: &Value) -> String {
     }
 }
 
-fn normalize_values(values: &[String]) -> Vec<String> {
-    let mut unique = Vec::new();
-    for value in values {
-        let value = value.trim();
-        if value.is_empty() || unique.iter().any(|item| item == value) {
-            continue;
-        }
-        unique.push(value.to_string());
-    }
-    unique
-}
-
-pub(super) fn split_list(value: &str) -> Vec<String> {
-    let mut unique = Vec::new();
-    for item in value.split([',', '，', '\n']) {
-        let item = item.trim();
-        if item.is_empty() || unique.iter().any(|existing| existing == item) {
-            continue;
-        }
-        unique.push(item.to_string());
-    }
-    unique
-}
-
-fn nonempty(value: &str) -> Option<String> {
-    let value = value.trim();
-    (!value.is_empty()).then(|| value.to_string())
-}
-
-pub(super) fn parse_limit(value: &str) -> Option<usize> {
-    let value = value.trim();
-    if value.is_empty() {
-        return None;
-    }
-    value.parse::<usize>().ok().filter(|limit| *limit > 0)
-}
-
-fn parse_metadata(value: &str) -> Vec<(String, String)> {
-    value
-        .split(['\n', ',', '，'])
-        .filter_map(|item| {
-            let item = item.trim();
-            let index = item.find('=')?;
-            let key = item[..index].trim();
-            let filter_value = item[index + 1..].trim();
-            if key.is_empty() || filter_value.is_empty() {
-                None
-            } else {
-                Some((key.to_string(), filter_value.to_string()))
-            }
-        })
-        .collect()
-}
-
-fn parse_numbers(value: &str) -> Vec<NumberBound> {
-    value
-        .split(['\n', ',', '，'])
-        .filter_map(|item| {
-            let item = item.trim();
-            let (key, range) = item.split_once('=')?;
-            let (min_text, max_text) = range.split_once("..").unwrap_or((range, ""));
-            let min = bound_number(min_text);
-            let max = bound_number(max_text);
-            if key.trim().is_empty() || (min.is_none() && max.is_none()) {
-                None
-            } else {
-                Some(NumberBound { key: key.trim().to_string(), min, max })
-            }
-        })
-        .collect()
-}
-
-fn bound_number(value: &str) -> Option<String> {
-    let value = value.trim();
-    if value.is_empty() {
-        return None;
-    }
-    value.parse::<f64>().ok().filter(|number| number.is_finite()).map(|number| number.to_string())
-}
-
-fn parse_dates(value: &str) -> Vec<DateBound> {
-    value
-        .split(['\n', ',', '，'])
-        .filter_map(|item| {
-            let item = item.trim();
-            let (key, range) = item.split_once('=')?;
-            let (from, to) = range.split_once("..").unwrap_or((range, ""));
-            let from = nonempty(from);
-            let to = nonempty(to);
-            if key.trim().is_empty() || (from.is_none() && to.is_none()) {
-                None
-            } else {
-                Some(DateBound { key: key.trim().to_string(), from, to })
-            }
-        })
-        .collect()
-}
-
-impl SearchFilters {
-    /// 与 Vue `hasActiveFilters` 相同：排除关键词、排除路径和数值日期排除不单独把搜索收进当前仓库。
-    pub fn has_active_filters(&self) -> bool {
-        !self.tags.is_empty()
-            || !self.formats.is_empty()
-            || !self.colors.is_empty()
-            || !self.shapes.is_empty()
-            || !self.exclude_tags.is_empty()
-            || !self.exclude_formats.is_empty()
-            || !self.metadata_filters.trim().is_empty()
-            || !self.exclude_metadata_filters.trim().is_empty()
-            || !self.number_filters.trim().is_empty()
-            || !self.date_filters.trim().is_empty()
-            || self.match_mode == MatchMode::Or
-            || !self.sort_field.trim().is_empty()
-            || self.limit.is_some()
-            || self.min_rating.is_some()
-    }
-}
-
-impl SearchRequestDraft {
-    pub fn has_criteria(&self) -> bool {
-        !self.query.trim().is_empty()
-            || !self.tags.is_empty()
-            || !self.formats.is_empty()
-            || !self.metadata_filters.is_empty()
-            || !self.exclude_tags.is_empty()
-            || !self.exclude_formats.is_empty()
-            || self.exclude_query.as_ref().is_some_and(|value| !value.trim().is_empty())
-            || !self.exclude_path_prefixes.is_empty()
-            || !self.exclude_metadata_filters.is_empty()
-            || !self.exclude_number_filters.is_empty()
-            || !self.exclude_date_filters.is_empty()
-            || !self.number_filters.is_empty()
-            || !self.date_filters.is_empty()
-            || self.sort_field.is_some()
-            || self.limit.is_some()
-            || self.min_rating.is_some()
-    }
-}
-
 /// 把 Vue 详情卡里的只读行从元数据抄进事实。缺字段留空，不补当前时间。
 pub(super) fn fill_recorded_facts(facts: &mut super::FileFacts, metadata: &[MetadataEntry]) {
     facts.added_to_library_at = metadata_string(metadata, "addedToLibraryAt").unwrap_or_default();
@@ -568,12 +373,4 @@ fn metadata_f64(metadata: &[MetadataEntry], key: &str) -> Option<f64> {
             None
         }
     }
-}
-
-fn parse_paths(value: &str) -> Vec<String> {
-    split_list(value)
-        .into_iter()
-        .map(|item| item.replace('\\', "/").trim_matches('/').to_string())
-        .filter(|item| !item.is_empty())
-        .collect()
 }
