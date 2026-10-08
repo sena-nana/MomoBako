@@ -18,11 +18,13 @@ use super::SidebarMessage;
 use super::{ShellMessage, ShellPage, ShellViewModel, WorkspacePanel};
 
 /// 实况侧栏。左右都是 8px，和 Vue `.workspace-sidebar` 的 `padding: 10px 8px` 一致。
+/// 资源区比侧栏宽度少一条发丝间隙（见 `render::workbench`），右内边距同样扣掉这一条，
+/// 内容盒仍是 Vue 的 8..宽度-8。
 pub fn sidebar_frame() -> SidebarFrame {
     let mut frame = SidebarFrame::new();
     let layout = Arc::make_mut(&mut frame.style.layout);
     layout.padding_top = Some(LengthSpec::Px(10.0));
-    layout.padding_right = Some(LengthSpec::Px(8.0));
+    layout.padding_right = Some(LengthSpec::Px(8.0 - super::render::WORKBENCH_GAP_PX));
     layout.padding_bottom = Some(LengthSpec::Px(10.0));
     layout.padding_left = Some(LengthSpec::Px(8.0));
     frame
