@@ -5,7 +5,7 @@
 //! 外边距由壳层主区统一给，这里只负责两列本身；面板固定高度，列表和详情各自滚动。
 
 use nana_ui::runtime::view::{widget, AnyView, IntoView};
-use nana_ui::runtime::{AlignSpec, FileDropEvent, LengthSpec, OverflowSpec, PositionSpec, SemanticColorRole, Stack};
+use nana_ui::runtime::{AlignSpec, FileDropEvent, LengthSpec, PositionSpec, SemanticColorRole, Stack};
 
 use super::{ShellMessage, ShellPage, ShellViewModel};
 
@@ -99,7 +99,10 @@ fn workbench(model: &ShellViewModel) -> AnyView {
         .into_any()
 }
 
-/// `.files-browser`：抬升底色的大卡片，裁掉超出圆角的内容。外部文件拖进来时描强调色边。
+/// `.files-browser`：抬升底色的大卡片。外部文件拖进来时描强调色边。
+///
+/// Vue 给卡片 `overflow: hidden` 裁圆角，导入菜单也一起被裁，窗口矮时下面几项点不到。
+/// 这里卡片不裁：列表的滚动区自己裁内容，留在卡片里的内容都在圆角以内，导入菜单可以伸出卡片。
 fn browser_card(model: &ShellViewModel) -> AnyView {
     let dragging = model.input.dragging_files;
     let mut card = Stack::fill_column(0.0)
@@ -108,11 +111,7 @@ fn browser_card(model: &ShellViewModel) -> AnyView {
         .padding(1.0)
         .surface(SemanticColorRole::Surface)
         .radius_px(card_radius(model))
-        .with_layout(|layout| {
-            layout.position = PositionSpec::Relative;
-            layout.overflow_x = OverflowSpec::Hidden;
-            layout.overflow_y = OverflowSpec::Hidden;
-        });
+        .with_layout(|layout| layout.position = PositionSpec::Relative);
     if dragging {
         card = card.outline(SemanticColorRole::Accent, 1.0);
     }
