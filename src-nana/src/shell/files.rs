@@ -90,6 +90,23 @@ impl FileRow {
     pub fn key(&self) -> String {
         format!("{}:{}", self.kind, self.path)
     }
+
+    /// 与 Vue `entryDisplayTitle` 相同：文件去掉末尾的扩展名（不分大小写），目录保留原名。
+    pub fn display_title(&self) -> String {
+        let name = self.name.trim();
+        if self.kind == "directory" {
+            return name.to_string();
+        }
+        let Some(extension) = self.extension.as_deref().map(str::trim).filter(|ext| !ext.is_empty()) else {
+            return name.to_string();
+        };
+        let suffix = format!(".{}", extension.to_lowercase());
+        if name.to_lowercase().ends_with(&suffix) && name.len() >= suffix.len() {
+            name[..name.len() - suffix.len()].to_string()
+        } else {
+            name.to_string()
+        }
+    }
 }
 
 fn metadata_u32(metadata: &std::collections::BTreeMap<String, serde_json::Value>, key: &str) -> u32 {
@@ -295,6 +312,8 @@ pub enum FilesMessage {
     OpenRow(String),
     OpenEntryMenu { path: String, x: f32, y: f32 },
     CloseEntryMenu,
+    /// 展开或收起右键菜单里的子菜单。
+    ToggleMenuBranch(String),
     RefreshThumbnail(String),
     OpenPath(String),
     LoadMore,
@@ -381,6 +400,11 @@ pub struct FilesState {
     pending: Option<BrowsePending>,
     effects: Vec<FilesEffect>,
     pub(super) entry_menu: Option<EntryMenu>,
+    /// 单击选中、还没打开预览的文件。和 Vue 的 `selectedFilePath` 对 `previewFileEntry`：
+    /// 单击只在右侧详情里看，双击或「预览」才进入预览页。
+    pub(super) select_only: Option<String>,
+    /// 右键菜单里展开子菜单的那一项（「缩略图」「加入播放列表」）。
+    pub(super) menu_branch: Option<String>,
 }
 
 impl FilesState {
@@ -482,6 +506,17 @@ impl FilesState {
             return self.rows.iter().filter(|row| row.kind != "directory").cloned().collect();
         }
         self.rows.clone()
+    }
+
+    /// 单击选中的是文件时记下它：素材详情回来后仍留在列表，不切到预览页。
+    pub(super) fn note_selected_only(&mut self, path: &str) {
+        let file = self.rows.iter().chain(self.virtual_rows.iter()).any(|row| row.path == path && row.kind != "directory");
+        self.select_only = file.then(|| path.to_string());
+    }
+
+    /// 预览页是否该替换文件列表。单击选中的文件只在右侧详情里看，和 Vue 的 `previewFileEntry` 一致。
+    pub(super) fn preview_open(&self, target: Option<&str>) -> bool {
+        target.is_some() && self.select_only.as_deref() != target
     }
 
     pub(super) fn current_hardlink(&self) -> Option<&HardlinkPrompt> {
@@ -718,15 +753,25 @@ impl FilesState {
             }
             FilesMessage::SetSelectionMode(mode) => self.selection_mode = mode,
             FilesMessage::ActivateRow(path) => {
-                self.select_row(ctx, &path);
+                if self.select_row(ctx, &path) {
+                    self.note_selected_only(&path);
+                }
             }
             FilesMessage::OpenRow(path) => {
+                self.select_only = None;
                 self.open_row(ctx, &path);
             }
             FilesMessage::OpenEntryMenu { path, x, y } => self.open_entry_menu(ctx, &path, x, y),
-            FilesMessage::CloseEntryMenu => self.entry_menu = None,
+            FilesMessage::CloseEntryMenu => {
+                self.entry_menu = None;
+                self.menu_branch = None;
+            }
+            FilesMessage::ToggleMenuBranch(branch) => {
+                self.menu_branch = if self.menu_branch.as_deref() == Some(branch.as_str()) { None } else { Some(branch) };
+            }
             FilesMessage::RefreshThumbnail(path) => self.refresh_thumbnail(&path),
             FilesMessage::OpenPath(path) => {
+                self.select_only = None;
                 self.request_browse(ctx, &path);
             }
             FilesMessage::LoadMore => {

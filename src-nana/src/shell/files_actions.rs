@@ -652,15 +652,20 @@ impl FilesState {
         true
     }
 
-    /// 右键打开菜单。路径还没选中时先替换成这一条。
+    /// 右键打开菜单。路径还没选中时先像单击一样替换成这一条，右侧详情跟着换。
     pub(super) fn open_entry_menu(&mut self, ctx: &FileContext, path: &str, x: f32, y: f32) {
         if self.visible_rows(ctx).iter().all(|row| row.path != path) {
             eprintln!("Nana 找不到要打开菜单的文件：{path}");
             return;
         }
         if !self.selected.iter().any(|item| item == path) {
-            self.select_visible(ctx, path, SelectionMode::Replace);
+            let mode = std::mem::replace(&mut self.selection_mode, SelectionMode::Replace);
+            if self.select_row(ctx, path) {
+                self.note_selected_only(path);
+            }
+            self.selection_mode = mode;
         }
+        self.menu_branch = None;
         self.entry_menu = Some(EntryMenu { path: path.to_string(), x, y });
     }
 
@@ -785,7 +790,7 @@ pub(super) fn reduce_message(model: &mut super::ShellViewModel, message: super::
             | FilesMessage::OpenEagle(_)
     );
     let preview_path = match &message {
-        FilesMessage::ActivateRow(path) | FilesMessage::OpenRow(path) => Some(path.clone()),
+        FilesMessage::ActivateRow(path) | FilesMessage::OpenRow(path) | FilesMessage::OpenEntryMenu { path, .. } => Some(path.clone()),
         _ => None,
     };
     model.files.reduce(&context, message);
