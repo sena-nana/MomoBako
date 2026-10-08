@@ -194,16 +194,15 @@ pub(super) fn is_still_extension(extension: &str) -> bool {
     STILL_EXTENSIONS.iter().any(|item| item.eq_ignore_ascii_case(extension))
 }
 
-/// 不在音视频会话、也不是图片幻灯片时的缺数据说明。
+/// 不在音视频会话、也不是图片幻灯片时写进播放条的说明。和 Vue 插件报错一样只写一句事实。
 pub(super) fn outside_session_contract(extension: &str) -> String {
     let extension = extension.trim();
     let shown = if extension.is_empty() { "（空）" } else { extension };
-    format!(
-        "扩展名 {shown} 不在音视频会话（mp3、wav、ogg、flac、m4a、aac、opus、mp4、mov、mkv、webm、avi、m4v）里，也不是图片幻灯片。缺该扩展名的画面帧或 PCM，不编造时长。"
-    )
+    format!("暂不支持播放 {shown} 文件")
 }
 
 /// 只读当前图片。解得出就留下真实宽高；读失败不进入播放。
+/// 停留时长先按设置写进会话，和 Vue 运行时先配置时长、再读播放源的顺序一致。
 fn load_still(player: &mut PlayerState, item: &QueueItem) {
     player.drop_clip_frames();
     player.wav.clear();
@@ -213,6 +212,7 @@ fn load_still(player: &mut PlayerState, item: &QueueItem) {
     player.session.can_seek = false;
     player.session.can_volume = false;
     player.session.current_time_ms = 0;
+    player.apply_image_duration();
     let path = item.path.trim();
     let decoded = if path.is_empty() {
         Err("没有路径".to_string())
@@ -229,7 +229,6 @@ fn load_still(player: &mut PlayerState, item: &QueueItem) {
         Ok(pixels) => {
             let width = pixels.width;
             let height = pixels.height;
-            player.apply_image_duration();
             player.session.status = if player.wants_playing { "playing" } else { "paused" }.into();
             player.can_play = true;
             player.still = Some(StillShow {
@@ -252,9 +251,8 @@ fn load_still(player: &mut PlayerState, item: &QueueItem) {
                 frame: None,
                 missing: Some(missing),
             });
-            player.session.duration_ms = None;
-            player.session.current_time_ms = 0;
-            player.fail_session(format!("图片无法播放：{error}"));
+            // 播放条和 Vue 一样只写「图片无法播放」，读失败的细节留在日志和缺帧说明里。
+            player.fail_session("图片无法播放".into());
         }
     }
 }
