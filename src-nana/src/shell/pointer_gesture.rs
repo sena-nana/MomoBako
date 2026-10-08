@@ -209,8 +209,7 @@ fn footer_task(world: &UiWorld, id: StableNodeId) -> bool {
 
 /// 文件表面已经挂上时，行里应该有路径标记。
 fn file_rows_should_be_mounted(model: &ShellViewModel) -> bool {
-    !model.acceptance_scene
-        && model.workspace.startup.status == super::StartupStatus::Ready
+    model.workspace.startup.status == super::StartupStatus::Ready
         && model.workspace.main_region() == super::MainRegion::HasRepository
         && matches!(model.workspace.panel, WorkspacePanel::Files | WorkspacePanel::Trash | WorkspacePanel::SmartFolder)
         && !matches!(model.page, super::ShellPage::Settings | super::ShellPage::SettingsError)

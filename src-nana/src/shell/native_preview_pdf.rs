@@ -1,34 +1,47 @@
-//! PDF 文本提取。
+//! PDF 文本提取和页面绘制。
 //!
-//! 只认内容流里的 `(text) Tj` 和 `TJ`。`/FlateDecode` 先按 zlib 解开再提取。
-//! 其它 Filter 跳过，不画页面。
+//! 内容流里的文字画进页面，DCTDecode 的 JPEG 也画进去。
+//! ASCII85、LZW、Flate 按顺序解开。解不开的流记成该页失败，不假装成空白成功。
 
-use std::borrow::Cow;
-use std::io::Read;
+#[path = "native_preview_pdf_paint.rs"]
+mod paint;
 
-/// 抽出可见文字。坏文件或没有文字时返回错误。
-pub(super) fn read(bytes: &[u8]) -> Result<String, String> {
+use super::super::bridge::{page_caption, NativeLoad, PageFrame};
+
+/// 抽出第一页文字。整份文件都画不出来时返回错误。
+#[cfg(test)]
+fn read(bytes: &[u8]) -> Result<String, String> {
+    load(bytes).map(|item| item.text)
+}
+
+/// 按内容流分页。每一页要么有画面，要么带明确失败原因。
+pub(super) fn load(bytes: &[u8]) -> Result<NativeLoad, String> {
     if !has_pdf_header(bytes) {
         eprintln!("Nana PDF 文件头不匹配");
         return Err("不是 PDF 文件".into());
     }
-    let text = extract(bytes);
-    let trimmed = text.trim();
-    if trimmed.is_empty() {
-        eprintln!("Nana PDF 没有可提取的文字");
+    let mut pages = collect_pages(bytes);
+    if pages.len() > 32 {
+        eprintln!("Nana PDF 只保留前 32 页");
+        pages.truncate(32);
+    }
+    if pages.is_empty() {
+        eprintln!("Nana PDF 没有内容流");
         return Err("PDF 没有可提取的文字".into());
     }
-    Ok(super::limit_text(trimmed))
+    let all_failed = pages.iter().all(|page| page.error.is_some() && page.text.trim().is_empty());
+    if all_failed {
+        let message = pages[0].error.clone().unwrap_or_else(|| "PDF 没有可提取的文字".into());
+        eprintln!("Nana PDF 页面失败：{message}");
+        return Err(message);
+    }
+    let text = super::limit_text(&page_caption(0, pages.len(), &pages[0]));
+    Ok(NativeLoad { text, frames: pages, mesh: None, paged: true })
 }
 
-fn has_pdf_header(bytes: &[u8]) -> bool {
-    bytes.windows(5).take(1024).any(|window| window == b"%PDF-")
-}
-
-fn extract(bytes: &[u8]) -> String {
-    let mut out = String::new();
+fn collect_pages(bytes: &[u8]) -> Vec<PageFrame> {
+    let mut pages = Vec::new();
     let mut cursor = 0;
-    let mut noted_filter = false;
     while let Some(at) = find_keyword(bytes, b"stream", cursor) {
         let Some(data_start) = stream_data_start(bytes, at + 6) else {
             cursor = at + 6;
@@ -48,32 +61,36 @@ fn extract(bytes: &[u8]) -> String {
             }
         };
         if data_end > data_start {
-            match open_stream(dict, &bytes[data_start..data_end]) {
-                Ok(plain) => append_piece(&mut out, &show_text(&plain)),
-                Err(StreamSkip::Other) => {
-                    if !noted_filter {
-                        eprintln!("Nana PDF 跳过带 Filter 的流");
-                        noted_filter = true;
-                    }
-                }
-                Err(StreamSkip::Broken) => {}
-            }
+            pages.push(page_from_stream(dict, &bytes[data_start..data_end]));
         }
         let next = end_kw.map(|pos| pos + b"endstream".len()).unwrap_or(data_end);
         cursor = if next > at { next } else { at + 6 };
     }
-    out
+    pages
 }
 
-fn append_piece(out: &mut String, piece: &str) {
-    let piece = piece.trim();
-    if piece.is_empty() {
-        return;
+fn page_from_stream(dict: &[u8], data: &[u8]) -> PageFrame {
+    match paint::decode(dict, data) {
+        Ok(paint::Decoded::Text(plain)) => {
+            let text = show_text(&plain);
+            if text.trim().is_empty() {
+                let message = "这一页没有可绘制的内容".to_string();
+                eprintln!("Nana PDF {message}");
+                paint::failed(message)
+            } else {
+                paint::paint_text(&text)
+            }
+        }
+        Ok(paint::Decoded::Jpeg(jpeg)) => match paint::paint_jpeg(&jpeg) {
+            Ok(frame) => frame,
+            Err(error) => paint::failed(error),
+        },
+        Err(error) => paint::failed(error),
     }
-    if !out.is_empty() && !out.ends_with('\n') {
-        out.push('\n');
-    }
-    out.push_str(piece);
+}
+
+fn has_pdf_header(bytes: &[u8]) -> bool {
+    bytes.windows(5).take(1024).any(|window| window == b"%PDF-")
 }
 
 fn stream_data_start(bytes: &[u8], after_keyword: usize) -> Option<usize> {
@@ -139,53 +156,6 @@ fn direct_length(dict: &[u8]) -> Option<usize> {
         return std::str::from_utf8(&dict[start..index]).ok()?.parse().ok();
     }
     None
-}
-
-enum StreamSkip {
-    Other,
-    Broken,
-}
-
-/// 无 Filter 原样返回。只有 `/FlateDecode` 时按 zlib 解开。其它 Filter 交给调用方记日志。
-fn open_stream<'a>(dict: &[u8], data: &'a [u8]) -> Result<Cow<'a, [u8]>, StreamSkip> {
-    let flate = find_keyword(dict, b"/FlateDecode", 0).is_some();
-    let other = has_other_filter(dict);
-    if flate && !other {
-        return match inflate_flate(data) {
-            Ok(bytes) => Ok(Cow::Owned(bytes)),
-            Err(error) => {
-                eprintln!("Nana PDF FlateDecode 解压失败：{error}");
-                Err(StreamSkip::Broken)
-            }
-        };
-    }
-    if other || find_keyword(dict, b"/Filter", 0).is_some() {
-        return Err(StreamSkip::Other);
-    }
-    Ok(Cow::Borrowed(data))
-}
-
-fn has_other_filter(dict: &[u8]) -> bool {
-    const NAMES: &[&[u8]] = &[
-        b"/ASCIIHexDecode",
-        b"/ASCII85Decode",
-        b"/LZWDecode",
-        b"/RunLengthDecode",
-        b"/CCITTFaxDecode",
-        b"/JBIG2Decode",
-        b"/DCTDecode",
-        b"/JPXDecode",
-        b"/Crypt",
-    ];
-    NAMES.iter().any(|name| find_keyword(dict, name, 0).is_some())
-}
-
-/// PDF 的 FlateDecode 是 zlib 包装，不是裸 deflate。失败只丢掉这一条流。
-fn inflate_flate(data: &[u8]) -> Result<Vec<u8>, String> {
-    let mut decoder = flate2::read::ZlibDecoder::new(data);
-    let mut out = Vec::new();
-    decoder.read_to_end(&mut out).map_err(|error| error.to_string())?;
-    Ok(out)
 }
 
 fn find_keyword(bytes: &[u8], keyword: &[u8], from: usize) -> Option<usize> {
@@ -555,6 +525,16 @@ mod tests {
         out.extend_from_slice(b"\nendstream\n");
     }
 
+    /// 页眉 B 必须有左边竖干。和 8 共用点阵时，浅色预览会读成 MOMO8AKO。
+    #[test]
+    fn b_glyph_has_a_stem_that_eight_does_not() {
+        let bee = paint::paint_text("B");
+        let eight = paint::paint_text("8");
+        let index = ((24 * 480 + 16) * 4) as usize;
+        assert_eq!(&bee.rgba[index..index + 3], &[20, 20, 20], "B 左上角应是竖干");
+        assert_eq!(&eight.rgba[index..index + 3], &[255, 255, 255], "8 左上角应留白");
+    }
+
     #[test]
     fn uncompressed_tj_still_extracts() {
         let pdf = b"%PDF-1.4\n1 0 obj\n<< /Length 14 >>\nstream\n(MomoBako) Tj\nendstream\nendobj\n%%EOF\n";
@@ -585,8 +565,11 @@ mod tests {
         let mut pdf = b"%PDF-1.4\n".to_vec();
         push_stream(&mut pdf, "/Filter /FlateDecode /Length 4", b"xxxx");
         push_stream(&mut pdf, &format!("/Filter [/FlateDecode] /Length {}", compressed.len()), &compressed);
-        let text = read(&pdf).expect("mixed");
-        assert!(text.contains("Inflated"), "{text}");
+        let loaded = load(&pdf).expect("mixed");
+        assert_eq!(loaded.frames.len(), 2, "{}", loaded.text);
+        let failed = loaded.frames[0].error.as_deref().unwrap_or("");
+        assert!(failed.contains("FlateDecode"), "{failed}");
+        assert!(loaded.frames[1].text.contains("Inflated"), "{}", loaded.frames[1].text);
     }
 
     #[test]

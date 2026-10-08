@@ -34,10 +34,6 @@ pub fn open_dialog_available() -> bool {
     true
 }
 
-pub fn reveal_directory_available() -> bool {
-    true
-}
-
 /// Windows 和 Linux 默认平滑，macOS 默认普通。未写入半径时用 MomoBako 的 8。
 pub fn default_corner_style() -> &'static str {
     if cfg!(target_os = "macos") { "round" } else { "smooth" }
@@ -273,6 +269,14 @@ pub fn grouped_plugin_ids(plugins: &[PluginManifest], keyword: &str, records: &[
 }
 
 pub fn settings_fields(plugin: &PluginManifest) -> Vec<ConfigField> {
+    let declared = declared_settings_fields(plugin);
+    if !declared.is_empty() {
+        return declared;
+    }
+    provider_settings_fields(plugin)
+}
+
+fn declared_settings_fields(plugin: &PluginManifest) -> Vec<ConfigField> {
     let Some(fields) = plugin.contributes.get("settings").and_then(|item| item.get("fields")).and_then(|item| item.as_array()) else {
         return Vec::new();
     };
@@ -302,31 +306,184 @@ pub fn settings_fields(plugin: &PluginManifest) -> Vec<ConfigField> {
         .collect()
 }
 
+/// `provider.settings` 里能看成字段的对象。字符串选项是选择，数字或上下限是数字，布尔是开关。
+fn provider_settings_fields(plugin: &PluginManifest) -> Vec<ConfigField> {
+    let Some(settings) = plugin.contributes.get("provider").and_then(|item| item.get("settings")).and_then(|item| item.as_object()) else {
+        return Vec::new();
+    };
+    settings
+        .iter()
+        .filter_map(|(key, spec)| {
+            let key = key.trim();
+            if key.is_empty() {
+                return None;
+            }
+            let default_value = spec.get("default").cloned();
+            let options = spec.get("options").and_then(|item| item.as_array()).cloned().unwrap_or_default();
+            let field_type = if !options.is_empty() && options.iter().all(|option| option.is_string()) {
+                "select"
+            } else if spec.get("minimum").is_some() || spec.get("maximum").is_some() || default_value.as_ref().is_some_and(|value| value.is_number()) {
+                "number"
+            } else if default_value.as_ref().is_some_and(|value| value.is_boolean()) {
+                "boolean"
+            } else {
+                "string"
+            };
+            Some(ConfigField {
+                key: key.to_string(),
+                label: provider_field_label(key),
+                field_type: field_type.to_string(),
+                options,
+                default_value,
+            })
+        })
+        .collect()
+}
+
+fn provider_field_label(key: &str) -> String {
+    match key {
+        "language" => "语言".into(),
+        "proxy" => "代理".into(),
+        "maxParallelism" => "最大并行".into(),
+        "requestTimeoutMs" => "请求超时毫秒".into(),
+        other => other.to_string(),
+    }
+}
+
 pub fn has_vue_settings_page(plugin: &PluginManifest) -> bool {
     let Some(settings) = plugin.contributes.get("settings") else {
         return false;
     };
     let has_page = settings.get("settingsPage").is_some_and(|item| !item.is_null());
-    let has_fields = settings.get("fields").and_then(|item| item.as_array()).is_some_and(|items| !items.is_empty());
-    has_page && !has_fields
+    has_page && settings_fields(plugin).is_empty()
+}
+
+/// 设置页标题。空白不算。
+pub fn settings_page_label(plugin: &PluginManifest) -> Option<&str> {
+    plugin
+        .contributes
+        .get("settings")
+        .and_then(|item| item.get("settingsPage"))
+        .and_then(|item| item.get("label"))
+        .and_then(|item| item.as_str())
+        .map(str::trim)
+        .filter(|label| !label.is_empty())
+}
+
+fn is_office_convert(plugin: &PluginManifest) -> bool {
+    plugin.plugin_id == "momobako.service.office-convert"
+        || plugin.legacy_plugin_ids.iter().any(|id| id == "momobako.service.office-convert")
+        || settings_page_label(plugin) == Some("Office 转换")
+}
+
+/// 下载服务设置页。官方插件 id，或空字段且标题为「下载服务」。
+pub fn is_downloader_settings(plugin: &PluginManifest) -> bool {
+    plugin.plugin_id == "momobako.service.downloader"
+        || plugin.legacy_plugin_ids.iter().any(|id| id == "builtin.service-downloader" || id == "momobako.service.downloader")
+        || (settings_page_label(plugin) == Some("下载服务") && settings_fields(plugin).is_empty())
+}
+
+/// `downloader.getRuntimeStatus` 的可画字段。任务数缺键时保持空，不写成 0。
+#[derive(Clone, Debug, PartialEq)]
+pub struct DownloaderStatus {
+    pub runtime: String,
+    pub aria2_state: String,
+    pub version: String,
+    pub rpc_url: String,
+    pub queue_size: Option<u64>,
+    pub downloads_dir: String,
+    pub download_url: String,
+}
+
+/// 从真实返回值取出状态。字符串空值沿用 Vue 的占位文案，任务数没有就不填。
+pub fn parse_downloader_status(payload: &serde_json::Value) -> DownloaderStatus {
+    let aria2 = payload.get("aria2");
+    DownloaderStatus {
+        runtime: json_text_or(payload, "runtime", "aria2"),
+        aria2_state: aria2_running_text(aria2),
+        version: nested_text_or(aria2, "version", "未知"),
+        rpc_url: nested_text_or(aria2, "rpcUrl", "未启动"),
+        queue_size: payload.get("queueSize").and_then(json_count),
+        downloads_dir: json_text_or(payload, "downloadsDir", "未初始化"),
+        download_url: json_text_or(payload, "downloadUrl", "未配置"),
+    }
+}
+
+fn json_text_or(payload: &serde_json::Value, key: &str, fallback: &str) -> String {
+    payload
+        .get(key)
+        .and_then(|item| item.as_str())
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+        .unwrap_or(fallback)
+        .to_string()
+}
+
+fn nested_text_or(value: Option<&serde_json::Value>, key: &str, fallback: &str) -> String {
+    value.map(|item| json_text_or(item, key, fallback)).unwrap_or_else(|| fallback.to_string())
+}
+
+fn json_count(value: &serde_json::Value) -> Option<u64> {
+    value.as_u64().or_else(|| value.as_i64().filter(|number| *number >= 0).map(|number| number as u64))
+}
+
+/// Vue `aria2RunningText`：没有 aria2 对象是「未知」，运行中才带 PID 和来源。
+fn aria2_running_text(status: Option<&serde_json::Value>) -> String {
+    let Some(status) = status else {
+        return "未知".into();
+    };
+    if status.get("running").and_then(|item| item.as_bool()) == Some(true) {
+        let mut parts = vec!["运行中".to_string()];
+        if let Some(pid) = status.get("pid").and_then(json_count) {
+            parts.push(format!("PID {pid}"));
+        }
+        if let Some(source) = status.get("source").and_then(|item| item.as_str()).map(str::trim).filter(|text| !text.is_empty()) {
+            parts.push(source.to_string());
+        }
+        return parts.join(" | ");
+    }
+    status
+        .get("error")
+        .and_then(|item| item.as_str())
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+        .unwrap_or("未运行")
+        .to_string()
 }
 
 pub fn has_source_authentication(plugin: &PluginManifest) -> bool {
     plugin.contributes.get("source").and_then(|item| item.get("authentication")).is_some_and(|item| !item.is_null())
 }
 
-/// 已有字段的设置页不提示升级。来源账号能读出 kind 和方法名时只给摘要，否则仍提示升级。
+/// 已有字段的设置页不提示升级。下载服务和没有方法名的来源认证改画页面，不再用这句带过。
 pub fn settings_upgrade_lines(plugin: &PluginManifest, marked_vue: bool) -> Vec<String> {
     let mut lines = Vec::new();
-    if marked_vue || has_vue_settings_page(plugin) {
+    if (marked_vue || has_vue_settings_page(plugin)) && !is_downloader_settings(plugin) && !is_office_convert(plugin) {
         lines.push("插件设置页仍是 Vue 页面，需要升级为 Nana 原生设置字段".into());
     }
     if let Some(summary) = source_account_summary(plugin) {
         lines.push(summary);
-    } else if has_source_authentication(plugin) {
-        lines.push("账号与来源仍是 Vue 页面，需要升级为 Nana 原生设置".into());
     }
     lines
+}
+
+/// 认证对象在，但创建、查询、退出都没有方法名。这种页面画「账号与仓库」，按钮禁用。
+pub fn source_auth_gap_contract(plugin: &PluginManifest) -> Option<String> {
+    if !has_source_authentication(plugin) {
+        return None;
+    }
+    let callable = ["createSessionMethod", "statusMethod", "clearMethod"];
+    if callable.iter().any(|key| named_auth_method(plugin, key).is_some()) {
+        return None;
+    }
+    let missing = ["createSessionMethod", "statusMethod", "pollSessionMethod", "clearMethod"]
+        .into_iter()
+        .filter(|key| named_auth_method(plugin, key).is_none())
+        .collect::<Vec<_>>()
+        .join("、");
+    Some(format!(
+        "认证声明没有可调用的方法名。缺 {missing}。按钮保持禁用，不调用插件。仓库登录状态缺 RepositorySummary.authentication（loggedIn、loginExpired），因此显示「未检查」。路径只用仓库 path，没有 localCache.path 就不另写缓存目录。"
+    ))
 }
 
 /// 认证声明同时有 kind，以及创建会话或状态方法时，拼一行摘要。
@@ -358,6 +515,63 @@ pub fn named_auth_method(plugin: &PluginManifest, key: &str) -> Option<String> {
         return None;
     }
     json_name(auth, key).map(str::to_string)
+}
+
+/// 登录结果里可以画出来的状态和二维码文本。不包含凭据引用，也不把图片 data URL 再编成码。
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct SourceAuthView {
+    pub lines: Vec<String>,
+    pub qr_text: Option<String>,
+    /// 产生这份登录结果的插件。没有调用过就是空。
+    pub plugin_id: String,
+    /// 插件返回的原始 JSON。建仓只从这里取账号配置。
+    pub payload: Option<serde_json::Value>,
+}
+
+/// 从登录返回值取出状态行和可编码的地址。
+pub fn source_auth_view(payload: &serde_json::Value) -> SourceAuthView {
+    let mut lines = Vec::new();
+    if let Some(logged_in) = payload.get("loggedIn").and_then(|value| value.as_bool()) {
+        lines.push(if logged_in { "已登录".into() } else { "未登录".into() });
+    }
+    if payload.get("loginExpired").and_then(|value| value.as_bool()) == Some(true) {
+        lines.push("登录已过期".into());
+    }
+    if let Some(account) = account_label(payload.get("account")) {
+        lines.push(format!("账号 {account}"));
+    }
+    if let Some(profile) = account_label(payload.get("profile")) {
+        lines.push(format!("资料 {profile}"));
+    }
+    SourceAuthView { lines, qr_text: qr_target(payload), plugin_id: String::new(), payload: None }
+}
+
+fn qr_target(payload: &serde_json::Value) -> Option<String> {
+    for key in ["qrurl", "qrUrl", "url", "codeUrl"] {
+        let Some(text) = payload.get(key).and_then(|value| value.as_str()).map(str::trim).filter(|text| !text.is_empty()) else {
+            continue;
+        };
+        if text.starts_with("data:") {
+            eprintln!("Nana 登录结果里的 {key} 是图片数据，不拿来再编二维码");
+            continue;
+        }
+        return Some(text.to_string());
+    }
+    None
+}
+
+fn account_label(value: Option<&serde_json::Value>) -> Option<String> {
+    let value = value?;
+    if let Some(text) = value.as_str().map(str::trim).filter(|text| !text.is_empty()) {
+        return Some(text.to_string());
+    }
+    let object = value.as_object()?;
+    for key in ["nickname", "name", "userName", "account"] {
+        if let Some(text) = object.get(key).and_then(|item| item.as_str()).map(str::trim).filter(|text| !text.is_empty()) {
+            return Some(text.to_string());
+        }
+    }
+    None
 }
 
 /// 登录调用成功后的提示。只附加字符串 message 和 status，不展开二维码。
@@ -678,12 +892,21 @@ pub fn is_builtin_tool_page(id: &str) -> bool {
     matches!(id, TOOL_FILE_MANAGER | TOOL_EAGLE_IMPORTER | TOOL_API_PLAYGROUND)
 }
 
-/// 三个内置工具页已经是原生页。其它非原生页仍提示升级。
-pub fn tool_page_upgrade(page: &super::ToolPageEntry) -> Option<&'static str> {
+/// 非内置、也没有原生标记的工具页。只声明了 label 和 description，没有控件快照。
+pub fn foreign_tool_contract(page: &super::ToolPageEntry) -> Option<String> {
     if page.native || is_builtin_tool_page(&page.id) {
         return None;
     }
-    Some("工具页仍是 Vue 插件，需要升级为 Nana 原生工具页")
+    let description = page.description.trim();
+    let described = if description.is_empty() {
+        "没有 description".to_string()
+    } else {
+        format!("description 为「{description}」")
+    };
+    Some(format!(
+        "工具页 {} 只有 label「{}」和 {described}。缺原生控件快照（字段、列表或预览数据），不嵌 Vue 组件。",
+        page.id, page.label
+    ))
 }
 
 pub fn audio_picker_enabled(choices: &[AudioChoice]) -> bool {

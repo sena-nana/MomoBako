@@ -1,8 +1,8 @@
 //! 侧栏消息落到壳层页面上的那一层。
 
-use super::super::workspace::MainRegion;
+use super::super::workspace::{LibraryCategory, MainRegion, WorkspaceEffect};
 use super::super::{ShellPage, ShellViewModel};
-use super::{ShortcutAsset, ShortcutId, SidebarShortcut, WorkspacePanel};
+use super::{ShortcutAsset, ShortcutId, SidebarEffect, SidebarShortcut, WorkspacePanel};
 
 impl ShellViewModel {
     pub(crate) fn navigation_locked(&self) -> bool {
@@ -106,5 +106,44 @@ impl ShellViewModel {
             target_id: shortcut.target_id.clone(),
         }).collect();
         self.sidebar.apply_snapshot(&assets, snapshot.overview.trash_count, quick_access);
+    }
+
+    /// 只在最近使用视图、有记录且未锁定时清空访问历史。
+    pub(crate) fn clear_recent_access(&mut self) {
+        if self.navigation_locked() {
+            eprintln!("Nana 当前不能清空最近使用");
+            return;
+        }
+        if self.workspace.panel != WorkspacePanel::Files || self.workspace.library_category != LibraryCategory::Recent {
+            eprintln!("Nana 只有最近使用视图可以清空记录");
+            return;
+        }
+        if self.sidebar.counts.recent == 0 {
+            return;
+        }
+        let Some(repo_id) = self.workspace.active_repo_id.clone() else {
+            eprintln!("Nana 清空最近使用没有活动仓库");
+            return;
+        };
+        self.sidebar.effects.push(SidebarEffect::ClearRecent { repo_id });
+    }
+
+    /// 清空成功后计数归零，并静默重读仓库摘要。目录列表不在这里清空。
+    pub(crate) fn note_recent_cleared(&mut self, repo_id: &str, result: Result<usize, String>) {
+        if self.workspace.active_repo_id.as_deref() != Some(repo_id) {
+            eprintln!("Nana 忽略过期的最近使用清空：{repo_id}");
+            return;
+        }
+        match result {
+            Ok(count) => {
+                self.sidebar.counts.recent = 0;
+                self.files.activity = format!("已清空最近使用 {count} 条。");
+                self.workspace.effects.push(WorkspaceEffect::LoadSnapshotSilent { repo_id: repo_id.to_string() });
+            }
+            Err(error) => {
+                eprintln!("Nana 清空最近使用失败：{error}");
+                self.files.error = error;
+            }
+        }
     }
 }

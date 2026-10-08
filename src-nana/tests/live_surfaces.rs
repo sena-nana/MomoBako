@@ -113,6 +113,8 @@ fn wav_preview() -> ShellViewModel {
             error: None,
             updated_at: String::new(),
         }),
+        pcm: None,
+        frames: None,
     }));
     model
 }
@@ -212,7 +214,7 @@ fn asset(path: &str, extension: &str) -> AssetDetail {
 }
 
 fn open(model: &ShellViewModel, width: u32, height: u32, theme: ThemeName) -> RuntimeAgentSession {
-    let document = momobako_nana::acceptance_document_for_model(model.clone()).expect("文档");
+    let document = momobako_nana::acceptance_document_at_width(model.clone(), width as f32).expect("文档");
     let mut session = RuntimeAgentSession::new(document, width, height).expect("会话");
     session.set_theme(theme).expect("主题");
     session.flush().expect("布局");

@@ -9,7 +9,7 @@ use nana_ui::{
     ApplicationIdentity, ApplicationState, ApplicationWindow, DiagnosticsConfig, NanaApplication,
     GpuTexture, GpuTextureDescriptor, GpuTextureFormat, GpuTextureUsages, HostTexture,
     HostTextureAlphaMode, GpuTextureRegion, RuntimeApplication, RuntimeProgramContext,
-    RuntimeProgramUpdate, WindowDescriptor,
+    RuntimeProgramUpdate,
 };
 
 pub mod shell;
@@ -20,6 +20,9 @@ mod admin_dispatch;
 mod sidebar_dispatch;
 mod window_host;
 mod host_bridge;
+mod window_state;
+mod drag_out;
+mod tray;
 use shell::{
     DeleteMode, ShellMessage, ShellPage, ShellViewModel, StartupStatus,
     WorkspaceEffect, display_mode_path, mount_shell, sidebar_prefs_path,
@@ -51,15 +54,25 @@ pub struct MomoBakoApplication {
     shell: ShellViewModel,
     repositories_load_scheduled: bool,
     preview_gpu: Option<NativePreviewGpu>,
+    pub(crate) still_gpu: Option<NativePreviewGpu>,
     pub(crate) thumbnail_gpu: Vec<ThumbnailGpu>,
     pub(crate) pending_thumbs: Vec<PendingThumb>,
+    host: window_host::HostSession,
 }
 
-struct NativePreviewGpu {
-    token: String,
-    texture: GpuTexture,
-    width: u32,
-    height: u32,
+pub(crate) struct NativePreviewGpu {
+    pub(crate) token: String,
+    pub(crate) texture: GpuTexture,
+    pub(crate) width: u32,
+    pub(crate) height: u32,
+}
+
+impl MomoBakoApplication {
+    /// 当前图片幻灯片的路径和像素。没有帧时不返回。
+    pub(crate) fn slideshow_frame(&self) -> Option<(String, crate::shell::PreviewPixels)> {
+        let still = self.shell.player.still.as_ref()?;
+        Some((still.path.clone(), still.frame.clone()?))
+    }
 }
 
 impl Default for MomoBakoApplication {
@@ -69,8 +82,10 @@ impl Default for MomoBakoApplication {
             shell: ShellViewModel::default(),
             repositories_load_scheduled: false,
             preview_gpu: None,
+            still_gpu: None,
             thumbnail_gpu: Vec::new(),
             pending_thumbs: Vec::new(),
+            host: window_host::HostSession::default(),
         }
     }
 }
@@ -97,7 +112,9 @@ impl ApplicationState for MomoBakoApplication {
             ShellViewModel::default()
         } else {
             let mut shell = ShellViewModel::for_page(ShellPage::Error);
-            shell.detail = "领域服务启动失败，请检查服务目录和端口配置".into();
+            let message = "领域服务启动失败，请检查服务目录和端口配置";
+            shell.detail = message.into();
+            shell.workspace.startup.fail(message);
             shell
         };
         shell.workspace.load_prefs_file(&sidebar_prefs_path());
@@ -109,8 +126,10 @@ impl ApplicationState for MomoBakoApplication {
             shell,
             repositories_load_scheduled: false,
             preview_gpu: None,
+            still_gpu: None,
             thumbnail_gpu: Vec::new(),
             pending_thumbs: Vec::new(),
+            host: window_host::HostSession::default(),
         })
     }
 
@@ -139,6 +158,7 @@ impl ApplicationState for MomoBakoApplication {
                 self.repositories_load_scheduled = true;
             }
         }
+        window_host::install_tray(self, context);
         Ok(())
     }
 
@@ -147,10 +167,14 @@ impl ApplicationState for MomoBakoApplication {
         window: &mut ApplicationWindow,
         context: &RuntimeProgramContext<Self::Message>,
     ) {
+        if crate::shell::poll_timers(&mut self.shell) {
+            inspect_dispatch::dispatch_inspect_effects(self, context);
+        }
         window_host::prepare_motion(&mut self.shell, window);
         for request in sidebar_dispatch::dispatch_prepared_browses(&mut self.shell) {
             sidebar_dispatch::dispatch_browse_request(self, context, request);
         }
+        thumbnail_host::publish_still(self, window, context);
         let Some(token) = self.shell.preview_token.clone() else {
             self.preview_gpu = None;
             window.textures.remove("file-preview");
@@ -686,7 +710,7 @@ impl ApplicationState for MomoBakoApplication {
         sidebar_dispatch::dispatch_sidebar_effects(self, context);
         files_dispatch::dispatch_files_effects(self, context);
         inspect_dispatch::dispatch_inspect_effects(self, context);
-        crate::host_bridge::perform_system(&mut self.shell);
+        window_host::after_update(self, context);
         let maximized = context.geometry().maximized;
         let window_commands = self.shell.input.take_platform_commands(*id, maximized);
         if let Err(error) = mount_shell(&mut window.document, &self.shell) {
@@ -703,33 +727,7 @@ impl ApplicationState for MomoBakoApplication {
         event: &nana_ui_platform::WindowEvent,
         context: &RuntimeProgramContext<Self::Message>,
     ) -> RuntimeProgramUpdate {
-        match event {
-            nana_ui_platform::WindowEvent::CloseRequested { id } => window_host::answer_close(self, *id, context),
-            nana_ui_platform::WindowEvent::ReducedMotionChanged { reduced, .. } => {
-                self.shell.motion.set_reduced(*reduced);
-                RuntimeProgramUpdate::redraw(context.window_id())
-            }
-            nana_ui_platform::WindowEvent::FileDialogCompleted { id, result } => {
-                let failed = result.error.as_ref().map(|error| format!("{error:?}"));
-                let paths = result.paths.iter().map(|path| path.display().to_string()).collect();
-                context.dispatch(ShellMessage::Input(shell::input::InputMessage::FileDialogCompleted {
-                    request_id: result.id,
-                    paths,
-                    failed,
-                }));
-                RuntimeProgramUpdate::redraw(*id)
-            }
-            nana_ui_platform::WindowEvent::FileDialogRejected { id, request_id, error } => {
-                eprintln!("Nana 文件对话框被拒绝：{error:?}");
-                context.dispatch(ShellMessage::Input(shell::input::InputMessage::FileDialogCompleted {
-                    request_id: *request_id,
-                    paths: Vec::new(),
-                    failed: Some(format!("{error:?}")),
-                }));
-                RuntimeProgramUpdate::redraw(*id)
-            }
-            _ => RuntimeProgramUpdate::default(),
-        }
+        window_host::on_window_event(self, event, context)
     }
 }
 
@@ -959,7 +957,7 @@ pub fn run() -> Result<(), nana_ui::HostedRunError> {
     NanaApplication::builder(identity)
         .diagnostics(DiagnosticsConfig::default())
         .run::<RuntimeApplication<MomoBakoApplication>>(
-            WindowDescriptor::new("MomoBako").initial_size(1200.0, 800.0),
+            window_state::main_window_descriptor(),
         )
 }
 
@@ -973,6 +971,15 @@ pub fn acceptance_document_for(
     page: ShellPage,
 ) -> Result<nana_ui::runtime::RuntimeDocument, FrameworkError> {
     acceptance_document_for_model(ShellViewModel::for_page(page))
+}
+
+/// 按离屏视口宽度挂载验收文档。窄于 Vue 断点的视口走窄屏排布。
+pub fn acceptance_document_at_width(
+    mut model: ShellViewModel,
+    width: f32,
+) -> Result<nana_ui::runtime::RuntimeDocument, FrameworkError> {
+    model.set_viewport_width(width);
+    acceptance_document_for_model(model)
 }
 
 /// 为离屏验收挂载指定 ViewModel；仍然复用生产壳层挂载函数和同一棵 Runtime 树。

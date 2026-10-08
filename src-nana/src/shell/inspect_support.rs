@@ -1,6 +1,15 @@
 //! 预览扩展名分派、文本字节上限、可解码音频的预览会话，以及搜索条件解析。
 //!
-//! Markdown 先于普通文本。内置贡献负责 ZIP、Open XML 和部分模型；其余文档和模型仍要求升级。
+//! Markdown 先于普通文本。压缩包、PDF、文档和模型走内置绘制，不因 Vue 贡献改回升级提示。
+//! 能解出的 WAV、mp3、flac、ogg 同时带上 PCM，供预览和播放条共用同一出声游标。
+
+#[path = "video_preview.rs"]
+mod video_preview;
+pub(crate) use video_preview::VideoFrame;
+#[cfg(test)]
+pub(super) fn sample_uncompressed() -> Vec<u8> {
+    video_preview::sample_uncompressed()
+}
 
 use serde_json::Value;
 
@@ -24,14 +33,7 @@ const TEXT_EXTENSIONS: &[&str] = &[
 ];
 const VIDEO_EXTENSIONS: &[&str] = &["mp4", "mov", "mkv", "webm", "avi", "m4v"];
 const AUDIO_EXTENSIONS: &[&str] = &["mp3", "wav", "ogg", "flac", "m4a", "aac", "opus"];
-const OFFICE_EXTENSIONS: &[&str] = &[
-    "pdf", "docx", "docm", "doc", "dotx", "dotm", "dot", "xlsx", "xlsm", "xlsb", "xls", "xltx", "xltm", "xlt", "pptx",
-    "pptm", "ppt", "ppsx", "ppsm", "pps", "potx", "potm", "pot",
-];
-const ARCHIVE_EXTENSIONS: &[&str] = &["zip", "cbz", "7z", "rar", "cbr"];
-const MODEL_EXTENSIONS: &[&str] = &["fbx", "obj", "glb", "gltf", "vrm", "stl", "3mf", "blend"];
-
-/// 扩展名分派。Markdown 先于普通文本。插件类型没有原生贡献时要求升级。
+/// 扩展名分派。Markdown 先于普通文本。能画的文档、压缩包和模型不再要求升级。
 pub fn classify(extension: &str, contributions: &[PreviewBinding]) -> PreviewKind {
     let extension = normalize_extension(extension);
     if IMAGE_EXTENSIONS.contains(&extension.as_str()) {
@@ -47,16 +49,21 @@ pub fn classify(extension: &str, contributions: &[PreviewBinding]) -> PreviewKin
         return PreviewKind::Media;
     }
     if let Some(binding) = find_contribution(&extension, contributions) {
+        if super::native_preview::renders_view(&binding.contribution.view_id) {
+            return PreviewKind::Native {
+                view_id: binding.contribution.view_id.clone(),
+                label: binding.contribution.label.clone(),
+            };
+        }
+    }
+    if let Some((view_id, label)) = super::native_preview::fallback_view(&extension) {
+        return PreviewKind::Native { view_id: view_id.to_string(), label: label.to_string() };
+    }
+    if let Some(binding) = find_contribution(&extension, contributions) {
         return PreviewKind::Native {
             view_id: binding.contribution.view_id.clone(),
             label: binding.contribution.label.clone(),
         };
-    }
-    if OFFICE_EXTENSIONS.contains(&extension.as_str())
-        || ARCHIVE_EXTENSIONS.contains(&extension.as_str())
-        || MODEL_EXTENSIONS.contains(&extension.as_str())
-    {
-        return PreviewKind::Upgrade;
     }
     PreviewKind::Unsupported
 }
@@ -72,7 +79,7 @@ pub fn prepare_text(bytes: &[u8]) -> Result<String, String> {
 /// 音视频预览先排队读文件。可解码音频成功后才允许播放控制。
 pub(super) fn begin_media(state: &mut super::InspectState, repo_id: &str, path: &str) {
     state.loading = true;
-    state.activity = "正在读取音频…".into();
+    state.activity = "正在读取媒体…".into();
     state.body = super::PreviewBody::Empty;
     state.error.clear();
     state.effects.push(super::InspectEffect::LoadMedia {
@@ -88,6 +95,7 @@ pub(super) fn note_media(
     path: String,
     generation: u64,
     result: Result<PlaybackSessionState, String>,
+    frames: Option<Vec<VideoFrame>>,
 ) {
     if generation != state.generation || state.target_path.as_deref() != Some(path.as_str()) {
         eprintln!("Nana 忽略过期的音视频预览：{path}");
@@ -98,10 +106,12 @@ pub(super) fn note_media(
     match result {
         Ok(session) => {
             state.error.clear();
+            super::bridge::install_video(state, frames);
             state.body = super::PreviewBody::Media(session);
         }
         Err(error) => {
             eprintln!("Nana 音视频预览失败：{error}");
+            super::bridge::install_video(state, None);
             let repo_id = state.repo_id.clone().unwrap_or_default();
             state.body = super::PreviewBody::Media(failed_session(&repo_id, error.clone()));
             state.error = error;
@@ -110,14 +120,34 @@ pub(super) fn note_media(
     }
 }
 
-/// WAV 优先。失败后再试 mp3、flac、ogg/Vorbis。其余字节仍是没有解码器。
+/// 一次预览解出的会话、音轨和可选画面。
+#[derive(Clone, Debug)]
+pub struct MediaParts {
+    pub session: PlaybackSessionState,
+    pub pcm: Option<crate::shell::player::PreviewPcm>,
+    pub frames: Option<Vec<video_preview::VideoFrame>>,
+}
+
+/// WAV 优先。失败后再试 mp3、flac、ogg/Vorbis，然后解视频容器。没有画面的 m4a、aac、opus 走媒体基础音轨。认不出的字节仍是没有解码器。
+#[cfg(test)]
 pub(crate) fn preview_media_session(repo_id: &str, bytes: &[u8]) -> Result<PlaybackSessionState, String> {
-    if let Ok(duration) = crate::shell::player::wav_duration_ms(bytes) {
-        return Ok(paused_audio_session(repo_id, duration));
-    }
-    match crate::shell::audio_decode::decode_compressed(bytes) {
-        Ok(decoded) => Ok(paused_audio_session(repo_id, decoded.duration_ms)),
-        Err(_) => Err("没有原生解码器".into()),
+    preview_media_parts(repo_id, bytes).map(|parts| parts.session)
+}
+
+/// 会话、PCM 和画面一次解出。播放时由壳层装进 winmm 游标；测试构建不打开设备。
+pub(crate) fn preview_media_parts(repo_id: &str, bytes: &[u8]) -> Result<MediaParts, String> {
+    match crate::shell::player::pcm_from_bytes(bytes) {
+        Ok(pcm) => {
+            let duration = pcm.duration_ms;
+            Ok(MediaParts { session: paused_audio_session(repo_id, duration), pcm: Some(pcm), frames: None })
+        }
+        Err(_) => match video_preview::open_clip(repo_id, bytes) {
+            Ok((session, pcm, frames)) => Ok(MediaParts { session, pcm, frames: Some(frames) }),
+            Err(error) => {
+                eprintln!("Nana 视频预览失败：{error}");
+                Err(error)
+            }
+        },
     }
 }
 
@@ -400,6 +430,91 @@ fn parse_dates(value: &str) -> Vec<DateBound> {
             }
         })
         .collect()
+}
+
+impl SearchFilters {
+    /// 与 Vue `hasActiveFilters` 相同：排除关键词、排除路径和数值日期排除不单独把搜索收进当前仓库。
+    pub fn has_active_filters(&self) -> bool {
+        !self.tags.is_empty()
+            || !self.formats.is_empty()
+            || !self.colors.is_empty()
+            || !self.shapes.is_empty()
+            || !self.exclude_tags.is_empty()
+            || !self.exclude_formats.is_empty()
+            || !self.metadata_filters.trim().is_empty()
+            || !self.exclude_metadata_filters.trim().is_empty()
+            || !self.number_filters.trim().is_empty()
+            || !self.date_filters.trim().is_empty()
+            || self.match_mode == MatchMode::Or
+            || !self.sort_field.trim().is_empty()
+            || self.limit.is_some()
+            || self.min_rating.is_some()
+    }
+}
+
+impl SearchRequestDraft {
+    pub fn has_criteria(&self) -> bool {
+        !self.query.trim().is_empty()
+            || !self.tags.is_empty()
+            || !self.formats.is_empty()
+            || !self.metadata_filters.is_empty()
+            || !self.exclude_tags.is_empty()
+            || !self.exclude_formats.is_empty()
+            || self.exclude_query.as_ref().is_some_and(|value| !value.trim().is_empty())
+            || !self.exclude_path_prefixes.is_empty()
+            || !self.exclude_metadata_filters.is_empty()
+            || !self.exclude_number_filters.is_empty()
+            || !self.exclude_date_filters.is_empty()
+            || !self.number_filters.is_empty()
+            || !self.date_filters.is_empty()
+            || self.sort_field.is_some()
+            || self.limit.is_some()
+            || self.min_rating.is_some()
+    }
+}
+
+/// 把 Vue 详情卡里的只读行从元数据抄进事实。缺字段留空，不补当前时间。
+pub(super) fn fill_recorded_facts(facts: &mut super::FileFacts, metadata: &[MetadataEntry]) {
+    facts.added_to_library_at = metadata_string(metadata, "addedToLibraryAt").unwrap_or_default();
+    facts.file_created_at = metadata_string(metadata, "fileCreatedAt").unwrap_or_default();
+    facts.file_modified_meta = metadata_string(metadata, "fileModifiedAt").unwrap_or_default();
+    facts.meta_width = metadata_u32(metadata, "width");
+    facts.meta_height = metadata_u32(metadata, "height");
+    facts.original_size_bytes = metadata_f64(metadata, "originalSizeBytes");
+}
+
+fn metadata_u32(metadata: &[MetadataEntry], key: &str) -> u32 {
+    let Some(value) = metadata.iter().find(|entry| entry.key == key).map(|entry| &entry.value) else {
+        return 0;
+    };
+    let number = match value {
+        Value::Number(number) => number.as_f64(),
+        Value::String(text) => text.trim().parse::<f64>().ok(),
+        _ => None,
+    };
+    match number {
+        Some(number) if number.is_finite() && number > 0.0 && number <= u32::MAX as f64 => number.round() as u32,
+        _ => {
+            eprintln!("Nana 元数据尺寸不是正数：{key}");
+            0
+        }
+    }
+}
+
+fn metadata_f64(metadata: &[MetadataEntry], key: &str) -> Option<f64> {
+    let value = metadata.iter().find(|entry| entry.key == key).map(|entry| &entry.value)?;
+    let number = match value {
+        Value::Number(number) => number.as_f64(),
+        Value::String(text) => text.trim().parse::<f64>().ok(),
+        _ => None,
+    };
+    match number {
+        Some(number) if number.is_finite() && number >= 0.0 => Some(number),
+        _ => {
+            eprintln!("Nana 原始大小不是非负数字：{key}");
+            None
+        }
+    }
 }
 
 fn parse_paths(value: &str) -> Vec<String> {

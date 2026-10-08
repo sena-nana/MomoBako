@@ -307,6 +307,23 @@ fn smart_folder_create_requires_a_name_and_replaces_the_tree() {
     assert!(!model.sidebar.smart_draft.open);
 }
 
+#[test]
+fn clear_recent_only_queues_from_the_recent_view() {
+    let mut model = super::super::ShellViewModel::default();
+    model.sidebar.counts.recent = 3;
+    model.workspace.active_repo_id = Some("repo".into());
+    model.workspace.panel = super::super::WorkspacePanel::Files;
+    model.workspace.library_category = super::super::workspace::LibraryCategory::All;
+    model.clear_recent_access();
+    assert!(model.sidebar.take_effects().is_empty());
+    model.workspace.library_category = super::super::workspace::LibraryCategory::Recent;
+    model.clear_recent_access();
+    assert!(matches!(
+        model.sidebar.take_effects().as_slice(),
+        [SidebarEffect::ClearRecent { repo_id }] if repo_id == "repo"
+    ));
+}
+
 fn set_field(model: &mut super::super::ShellViewModel, field: SmartFolderField, value: &str) {
     model.reduce(super::super::ShellMessage::Sidebar(SidebarMessage::SetSmartFolderField {
         field,

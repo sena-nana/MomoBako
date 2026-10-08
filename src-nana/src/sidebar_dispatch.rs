@@ -4,7 +4,7 @@ use nana_ui::runtime::Task;
 use nana_ui::RuntimeProgramContext;
 
 use crate::backend::services::mutsuki_runner::PROTOCOL_REPOSITORY_ATTACH;
-use crate::backend::services::repository::{FileBrowserRequest, RepositoryFolderRequest};
+use crate::backend::services::repository::{FileBrowserRequest, RecentAccessHistoryClearRequest, RepositoryFolderRequest};
 use crate::shell::{
     FileRow, ShellMessage, SidebarEffect, SidebarFolder, SidebarMessage, SidebarPlaylist, SidebarSmartFolder,
     VirtualQuery,
@@ -39,12 +39,40 @@ pub fn dispatch_sidebar_effects(app: &mut MomoBakoApplication, context: &Runtime
                 dispatch_browse_request(app, context, browse_request(repo_id, path, trash));
             }
             SidebarEffect::AttachRepository { path } => dispatch_attach(app, context, path),
+            SidebarEffect::ClearRecent { repo_id } => dispatch_clear_recent(app, context, repo_id),
         }
     }
 }
 
 fn services(app: &MomoBakoApplication) -> Option<&crate::services::NativeServices> {
     app.services.as_ref()
+}
+
+/// 清空最近使用。服务没起来时把错误写回侧栏，不假装已经清空。
+fn dispatch_clear_recent(app: &mut MomoBakoApplication, context: &RuntimeProgramContext<ShellMessage>, repo_id: String) {
+    let Some(services) = services(app) else {
+        eprintln!("Nana 清空最近使用需要领域服务，当前服务未启动");
+        app.shell.reduce(sidebar_message(SidebarMessage::RecentCleared {
+            repo_id,
+            result: Err("领域服务未启动".into()),
+        }));
+        return;
+    };
+    let interaction = services.repository_interaction.clone();
+    let executor = services.executor.clone();
+    let task_repo = repo_id.clone();
+    if let Err(error) = context.run_task(Task::new(async move {
+        let result = executor
+            .block_on(interaction.clear_recent_access_history(RecentAccessHistoryClearRequest { repo_id: task_repo.clone() }))
+            .map(|response| response.cleared_count);
+        sidebar_message(SidebarMessage::RecentCleared { repo_id: task_repo, result })
+    })) {
+        eprintln!("Nana 清空最近使用任务提交失败：{error}");
+        app.shell.reduce(sidebar_message(SidebarMessage::RecentCleared {
+            repo_id,
+            result: Err(format!("清空最近使用任务提交失败：{error}")),
+        }));
+    }
 }
 
 fn dispatch_tree(app: &mut MomoBakoApplication, context: &RuntimeProgramContext<ShellMessage>, repo_id: String) {

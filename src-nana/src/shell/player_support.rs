@@ -7,7 +7,7 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use crate::backend::services::repository::{PlaylistItem, PlaylistPlayerContribution, PlaylistSummary};
+use crate::backend::services::repository::{PlaylistDetail, PlaylistItem, PlaylistPlayerContribution, PlaylistSummary};
 use crate::settings;
 
 use super::{PlaybackMode, PlaybackSettings, PlayerCandidate, QueueItem};
@@ -41,9 +41,9 @@ pub struct StoredSession {
     pub is_playing: bool,
 }
 
-/// 系统媒体会话是浏览器 API。Nana 没有对应的系统媒体键桥，因此这里始终不可用。
+/// 正式 Windows 构建才注册系统媒体控件。测试构建不注册，避免碰到真系统会话。
 pub fn system_media_session_available() -> bool {
-    false
+    super::super::system_media::session_compiled_in()
 }
 
 pub fn default_settings() -> PlaybackSettings {
@@ -295,6 +295,16 @@ pub fn reorder_before(ids: &[String], source: &str, before: Option<&str>) -> Opt
     (next != ids).then_some(next)
 }
 
+/// 点到的播放条目。队列里有就用队列，否则从已打开的播放集拼一条，不开始播放。
+pub fn listed_preview_item(queue: &[QueueItem], listed: Option<&PlaylistDetail>, id: &str) -> Option<QueueItem> {
+    if let Some(item) = queue.iter().find(|item| item.id == id) {
+        return Some(item.clone());
+    }
+    let detail = listed?;
+    let item = detail.items.iter().find(|item| item.playlist_item_id == id)?;
+    Some(queue_item_from_playlist(item, &detail.playlist))
+}
+
 pub fn queue_item_from_playlist(item: &PlaylistItem, playlist: &PlaylistSummary) -> QueueItem {
     QueueItem {
         id: item.playlist_item_id.clone(),
@@ -309,6 +319,7 @@ pub fn queue_item_from_playlist(item: &PlaylistItem, playlist: &PlaylistSummary)
         player_type_id: playlist.player_type_id.clone(),
         player_label: playlist.player_label.clone(),
         file_class: playlist.file_class.clone(),
+        thumbnail_path: item.thumbnail_path.clone(),
     }
 }
 

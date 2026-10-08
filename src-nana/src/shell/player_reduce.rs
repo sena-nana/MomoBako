@@ -39,6 +39,74 @@ pub(crate) fn reduce_message(model: &mut ShellViewModel, message: ShellMessage) 
 }
 
 impl super::PlayerState {
+    /// 播放列表里的内存候选，或预览刚刚装进同一游标。
+    pub(super) fn audible(&self) -> bool {
+        self.preview_armed || self.uses_wav()
+    }
+
+    pub(crate) fn preview_audio_armed(&self) -> bool {
+        self.preview_armed
+    }
+
+    #[cfg(test)]
+    pub(crate) fn preview_cursor_playing(&self) -> bool {
+        self.preview_armed && self.wav.is_playing()
+    }
+
+    pub(crate) fn preview_path(&self) -> &str {
+        &self.preview_path
+    }
+
+    /// 把预览 PCM 装进播放列表用的同一游标。装载本身不出声。
+    pub(crate) fn arm_preview_audio(&mut self, path: &str, audio: super::PreviewPcm) {
+        self.wav.install_preview(audio);
+        self.preview_armed = true;
+        self.preview_path = path.to_string();
+    }
+
+    /// 换文件或预览失败时停声，避免上一份预览继续响。
+    pub(crate) fn disarm_preview_audio(&mut self) {
+        if !self.preview_armed && self.preview_path.is_empty() {
+            return;
+        }
+        self.wav.clear();
+        self.preview_armed = false;
+        self.preview_path.clear();
+    }
+
+    pub(crate) fn mirror_preview_playing(&mut self, playing: bool, inspect: &mut super::InspectState) {
+        let action = if playing { super::wav_player::Action::Play } else { super::wav_player::Action::Pause };
+        self.mirror_preview(action, inspect);
+    }
+
+    pub(crate) fn mirror_preview_seek(&mut self, position_ms: u64, inspect: &mut super::InspectState) {
+        self.mirror_preview(super::wav_player::Action::Seek(position_ms), inspect);
+    }
+
+    pub(crate) fn mirror_preview_volume(&mut self, volume: f32, inspect: &mut super::InspectState) {
+        self.mirror_preview(super::wav_player::Action::Volume(volume), inspect);
+    }
+
+    /// 预览条已经改过会话。这里只驱动同一游标，让正式 Windows 构建出声。
+    fn mirror_preview(&mut self, action: super::wav_player::Action, inspect: &mut super::InspectState) {
+        if !self.preview_armed {
+            return;
+        }
+        match &action {
+            super::wav_player::Action::Play => self.wants_playing = true,
+            super::wav_player::Action::Pause => self.wants_playing = false,
+            _ => {}
+        }
+        let session = self.session.clone();
+        let (session, error) = super::wav_player::drive(true, &self.wav, session, action);
+        self.session = session;
+        if let Some(error) = error {
+            eprintln!("Nana 预览出声失败：{error}");
+            self.activity = error;
+        }
+        self.publish(inspect);
+    }
+
     pub(super) fn note_download_task(&mut self, task_id: String) {
         if task_id.is_empty() {
             eprintln!("Nana 下载任务编号是空的");
@@ -109,8 +177,9 @@ fn reduce_player(model: &mut ShellViewModel, message: PlayerMessage) {
         PlayerMessage::Reorder { source, before } => {
             model.player.reorder(&source, before.as_deref(), playlist_id.as_deref(), &item_ids, writable, repo_id.as_deref());
         }
-        PlayerMessage::OpenPreview => {
+        PlayerMessage::OpenPreview { item_id } => {
             model.player.open_preview(
+                item_id.as_deref(),
                 &mut model.workspace.panel,
                 &mut model.workspace.library_category,
                 &mut model.selected_path,

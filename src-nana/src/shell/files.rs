@@ -35,6 +35,29 @@ pub struct FileRow {
     pub pixel_height: u32,
     /// 宿主已经能为这条路径注册纹理。
     pub texture_ready: bool,
+    /// 已有像素缩小后的缩略图。没有像素时为 `None`，视图改画类型图标。
+    pub thumbnail_rgba: Option<(u32, u32, Vec<u8>)>,
+    /// 详情预览用的整页像素，四周留着页边。网格缩略图是同一张页图的缩小。
+    pub page_rgba: Option<(u32, u32, Vec<u8>)>,
+    /// 元数据色板，最多五枚 `#RRGGBB`。
+    pub palette: Vec<String>,
+    /// 列表里的大小文案。空字符串表示目录没有单独的大小。
+    pub size_label: String,
+    /// 修改时间原文。空字符串在详情里写成「未记录」。
+    pub modified_at: String,
+    pub tags: Vec<String>,
+    pub thumbnail_custom: bool,
+    pub provider_id: Option<String>,
+    pub source_payload: Option<serde_json::Value>,
+    pub metadata: std::collections::BTreeMap<String, serde_json::Value>,
+}
+
+/// 右键菜单锚点。坐标来自次级按键。
+#[derive(Clone, Debug)]
+pub(super) struct EntryMenu {
+    pub path: String,
+    pub x: f32,
+    pub y: f32,
 }
 
 impl FileRow {
@@ -51,6 +74,16 @@ impl FileRow {
             pixel_width: metadata_u32(&entry.metadata, "width"),
             pixel_height: metadata_u32(&entry.metadata, "height"),
             texture_ready: false,
+            thumbnail_rgba: None,
+            page_rgba: None,
+            palette: super::palette::from_metadata_map(&entry.metadata),
+            size_label: entry.size_label.clone().unwrap_or_default(),
+            modified_at: entry.modified_at.clone().unwrap_or_default(),
+            tags: entry.tags.clone(),
+            thumbnail_custom: entry.thumbnail_custom,
+            provider_id: entry.provider_id.clone(),
+            source_payload: entry.source_payload.clone(),
+            metadata: entry.metadata.clone(),
         }
     }
 
@@ -244,6 +277,12 @@ pub enum FilesEffect {
     PersistDisplayMode,
     /// 读取目录里还没解码的缩略图文件。
     DecodeThumbnails { paths: Vec<String> },
+    /// 保存、清除或刷新一条自定义缩略图。字节只在剪贴板 data URL 时带上。
+    MutateThumbnail { repo_id: String, path: String, kind: String, action: String, source_path: Option<String>, image_bytes: Option<Vec<u8>> },
+    /// 压缩包导出。调用前必须已有真实输出路径。
+    ExportArchive { repo_id: String, format: String, output_path: String, compression: String, encrypt: bool, password: String },
+    /// Git 导出。远端、分支和说明来自对话框，空值在调度时省略。
+    ExportGit { repo_id: String, remote: String, branch: String, message: String },
 }
 
 /// 文件表面消息。壳层只保留一个 `ShellMessage::Files`。
@@ -252,13 +291,29 @@ pub enum FilesMessage {
     SetDisplayMode(DisplayMode),
     SetSelectionMode(SelectionMode),
     ActivateRow(String),
+    /// 双击：目录进入，文件打开预览。
+    OpenRow(String),
+    OpenEntryMenu { path: String, x: f32, y: f32 },
+    CloseEntryMenu,
+    RefreshThumbnail(String),
     OpenPath(String),
     LoadMore,
     OpenDialog(FileDialog),
     OpenEagle(String),
+    ToggleImportMenu,
+    ToggleEagleImport,
+    SetCreateName(String),
+    SubmitCreateFile,
     DraftChanged(String),
     CloseDialog,
     SubmitDialog,
+    SetExportField { field: String, value: String },
+    CloseExport,
+    SubmitExport,
+    /// 排队保存对话框，让用户选出压缩包输出路径。
+    ChooseExportOutput,
+    /// 导出协议返回。成功文案来自宿主，失败是真实错误。
+    ExportFinished(Result<String, String>),
     DeleteSelected,
     RestoreSelected,
     RestoreAll,
@@ -272,6 +327,8 @@ pub enum FilesMessage {
     HardlinksRefreshed(Result<Vec<HardlinkPrompt>, String>),
     HardlinkConfirmed(Result<String, String>),
     NoteError(String),
+    /// 缩略图已经写入。路径是缓存文件，用来重新解码纹理。
+    ThumbnailSaved { path: String, thumbnail_path: Option<String>, custom: bool },
 }
 
 /// 文件操作进度。宽度过渡由壳层动效时钟绘制。
@@ -302,24 +359,33 @@ pub struct FilesState {
     pub(super) anchor: Option<String>,
     pub(super) selection_mode: SelectionMode,
     pub(super) dialog: FileDialog,
+    /// 导出对话框。默认关闭，首页不提供入口。
+    pub(super) export: ExportDraft,
     pub(super) operation: Option<FileOperation>,
     prefetch_due_ms: Option<u64>,
     prefetch_clock: u64,
     pub(super) name_draft: String,
+    /// 工具栏里的新建文件名。不占用对话框草稿。
+    pub(super) create_name: String,
     pub(super) target_draft: String,
     pub(super) import_draft: String,
     pub(super) eagle_mode: String,
+    /// 导入菜单是否展开。从文件夹、ZIP 和 Eagle 只在展开后出现。
+    pub(super) import_open: bool,
+    /// Eagle 的复制和剪切。收在「从 Eagle 导入」下面。
+    pub(super) eagle_open: bool,
     pub(super) rename_path: Option<String>,
     copy_sources: Vec<String>,
     hardlinks: Vec<HardlinkPrompt>,
     skipped_hardlinks: Vec<String>,
     pending: Option<BrowsePending>,
     effects: Vec<FilesEffect>,
+    pub(super) entry_menu: Option<EntryMenu>,
 }
 
 impl FilesState {
     pub(super) fn dialog_open(&self) -> bool {
-        !matches!(self.dialog, FileDialog::Closed)
+        self.export.open || !matches!(self.dialog, FileDialog::Closed)
     }
 
     pub(super) fn operation_percent(&self) -> Option<f32> {
@@ -652,8 +718,14 @@ impl FilesState {
             }
             FilesMessage::SetSelectionMode(mode) => self.selection_mode = mode,
             FilesMessage::ActivateRow(path) => {
-                self.activate(ctx, &path);
+                self.select_row(ctx, &path);
             }
+            FilesMessage::OpenRow(path) => {
+                self.open_row(ctx, &path);
+            }
+            FilesMessage::OpenEntryMenu { path, x, y } => self.open_entry_menu(ctx, &path, x, y),
+            FilesMessage::CloseEntryMenu => self.entry_menu = None,
+            FilesMessage::RefreshThumbnail(path) => self.refresh_thumbnail(&path),
             FilesMessage::OpenPath(path) => {
                 self.request_browse(ctx, &path);
             }
@@ -666,6 +738,12 @@ impl FilesState {
             FilesMessage::OpenEagle(mode) => {
                 self.open_eagle(ctx, &mode);
             }
+            FilesMessage::ToggleImportMenu => self.toggle_import_menu(),
+            FilesMessage::ToggleEagleImport => self.toggle_eagle_menu(),
+            FilesMessage::SetCreateName(value) => self.create_name = value,
+            FilesMessage::SubmitCreateFile => {
+                self.submit_inline_file(ctx);
+            }
             FilesMessage::DraftChanged(value) => self.set_draft(value),
             FilesMessage::CloseDialog => {
                 self.close_dialog();
@@ -673,6 +751,11 @@ impl FilesState {
             FilesMessage::SubmitDialog => {
                 self.submit_dialog(ctx);
             }
+            FilesMessage::SetExportField { field, value } => self.set_export_field(&field, value),
+            FilesMessage::CloseExport => self.close_export(),
+            FilesMessage::SubmitExport => self.submit_export(ctx),
+            FilesMessage::ChooseExportOutput => {}
+            FilesMessage::ExportFinished(result) => self.note_export(result),
             FilesMessage::DeleteSelected => {
                 self.delete_selected(ctx);
             }
@@ -701,10 +784,8 @@ impl FilesState {
             FilesMessage::HardlinksLoaded(result) => self.note_hardlinks(result),
             FilesMessage::HardlinksRefreshed(result) => self.note_hardlinks_silent(result),
             FilesMessage::HardlinkConfirmed(result) => self.note_hardlink_confirmed(result),
-            FilesMessage::NoteError(error) => {
-                eprintln!("Nana 文件操作失败：{error}");
-                self.error = error;
-            }
+            FilesMessage::NoteError(error) => self.note_error(error),
+            FilesMessage::ThumbnailSaved { path, thumbnail_path, custom } => self.note_custom_thumbnail(&path, thumbnail_path, custom),
         }
     }
 
@@ -805,26 +886,6 @@ impl FilesState {
         self.operation = None;
     }
 
-    fn activate(&mut self, ctx: &FileContext, path: &str) -> bool {
-        if self.mutating {
-            eprintln!("Nana 文件变更进行中，不能打开条目");
-            return false;
-        }
-        let Some(row) = self.visible_rows(ctx).into_iter().find(|row| row.path == path) else {
-            return false;
-        };
-        if row.kind == "directory" && self.selection_mode == SelectionMode::Replace && !ctx.is_virtual() {
-            return self.request_browse(ctx, &row.path);
-        }
-        self.select_visible(ctx, &row.path, self.selection_mode);
-        if row.kind != "directory" {
-            if let (Some(repo_id), Some(asset_id)) = (ctx.repo_id.clone(), row.asset_id) {
-                self.effects.push(FilesEffect::LoadAsset { repo_id, asset_id });
-            }
-        }
-        true
-    }
-
     fn select_visible(&mut self, ctx: &FileContext, path: &str, mode: SelectionMode) {
         let rows = self.visible_rows(ctx);
         if !rows.iter().any(|row| row.path == path) {
@@ -923,80 +984,6 @@ impl super::ShellViewModel {
                 self.workspace.panel,
                 WorkspacePanel::Files | WorkspacePanel::Trash | WorkspacePanel::SmartFolder
             )
-    }
-}
-
-pub(super) fn reduce_message(model: &mut super::ShellViewModel, message: super::ShellMessage) -> Option<super::ShellMessage> {
-    let super::ShellMessage::Files(message) = message else {
-        return Some(message);
-    };
-    let context = FileContext::from_model(model);
-    let show_on_files = matches!(
-        message,
-        FilesMessage::OpenDialog(FileDialog::Import | FileDialog::ImportArchive | FileDialog::ImportEagle)
-            | FilesMessage::OpenEagle(_)
-    );
-    model.files.reduce(&context, message);
-    if show_on_files && model.files.dialog != FileDialog::Closed {
-        model.workspace.panel = super::workspace::WorkspacePanel::Files;
-    }
-    None
-}
-
-pub fn display_mode_path() -> PathBuf {
-    settings::default_path().with_file_name("file-display.json")
-}
-
-/// 与 Vue `normalizeRepositoryRelativePath` 相同：去空白、反斜杠转正斜杠、去掉首尾斜杠。
-pub(super) fn normalize_path(path: &str) -> String {
-    path.trim().replace('\\', "/").trim_matches('/').to_string()
-}
-
-fn parent_path(path: &str) -> Option<String> {
-    let path = normalize_path(path);
-    if path.is_empty() { None } else { Some(path) }
-}
-
-/// 已有键保留原顺序，新键追加到末尾。
-fn merge_rows(existing: &[FileRow], incoming: &[FileRow]) -> Vec<FileRow> {
-    let mut seen: HashSet<String> = existing.iter().map(FileRow::key).collect();
-    let mut merged = existing.to_vec();
-    for row in incoming {
-        if seen.insert(row.key()) {
-            merged.push(row.clone());
-        }
-    }
-    merged
-}
-
-fn split_sources(raw: &str) -> Vec<String> {
-    raw.split(['\n', '\r', ';'])
-        .map(str::trim)
-        .filter(|item| !item.is_empty())
-        .map(ToString::to_string)
-        .collect()
-}
-
-fn display_mode_from_file(raw: &str) -> DisplayMode {
-    let Ok(value) = serde_json::from_str::<serde_json::Value>(raw) else {
-        eprintln!("Nana 展示方式文件不是 JSON");
-        return DisplayMode::Adaptive;
-    };
-    let Some(mode) = value.get("mode").and_then(|item| item.as_str()) else {
-        eprintln!("Nana 展示方式文件缺少 mode");
-        return DisplayMode::Adaptive;
-    };
-    DisplayMode::parse(mode)
-}
-
-pub(super) fn hardlink_label(state: Option<&str>) -> &'static str {
-    match state.unwrap_or("") {
-        "primary" => "主归属",
-        "linked" => "硬链接关联",
-        "copied" | "copiedFallback" => "普通复制",
-        "broken" => "关联异常",
-        "missing" => "关联缺失",
-        _ => "",
     }
 }
 

@@ -10,7 +10,15 @@ use crate::backend::services::repository::{
 };
 use crate::settings::ApplicationSettings;
 
+mod acceptance;
+mod workspace_dialogs;
 mod files;
+mod system_media;
+pub(crate) use system_media::{poll as poll_media_keys, sync as sync_media_session};
+mod inspect_shortcuts;
+mod entry_actions;
+mod palette;
+mod admin_fields;
 mod motion;
 mod pointer_gesture;
 pub use pointer_gesture::observe_live_pointer;
@@ -18,11 +26,14 @@ pub use motion::note_sidebar_resize;
 mod thumbs;
 mod files_view;
 mod inspect;
+mod inspect_library;
+mod inspect_asmr;
 mod inspect_view;
 pub(crate) mod audio_decode;
 pub(crate) mod player;
 pub(crate) mod admin;
 pub use admin::{AdminMessage, ToolPageEntry};
+pub use acceptance::gap_models as acceptance_gap_models;
 pub(crate) mod input;
 pub mod host_events;
 mod player_view;
@@ -32,11 +43,16 @@ mod workspace;
 pub(crate) mod workspace_refresh;
 pub use files::{display_mode_path, FileRow, FilesEffect, FilesMessage, HardlinkPrompt, VirtualQuery};
 pub(crate) use thumbs::{decode_preview_pixels, decode_thumbnail_file, thumbnail_slot, ThumbnailFrame};
+pub(crate) use inspect::poll_timers;
 pub use inspect::{
     DateBound, InspectEffect, InspectMessage, NumberBound, SearchRequestDraft, SearchRow, prepare_text,
 };
-pub(crate) use inspect::native_preview::read as read_native_preview;
+pub(crate) use inspect::native_preview::load as load_native_preview;
+pub(crate) use inspect::support::{preview_media_parts, MediaParts};
+#[cfg(test)]
 pub(crate) use inspect::support::preview_media_session;
+pub use player::PreviewPcm;
+pub(crate) use inspect::NativeLoad;
 pub use sidebar::{
     FolderMutation, GapMessage, SidebarEffect, SidebarFolder, SidebarMessage, SidebarPlaylist, SidebarSmartFolder,
     ShortcutId,
@@ -132,6 +148,8 @@ pub enum ShellMessage {
     Files(files::FilesMessage),
     /// 预览、元数据和搜索。具体分支在 `inspect::reduce_message` 里归约。
     Inspect(inspect::InspectMessage),
+    /// ASMR 作品队列、播放列表和补全候选。具体分支在 `inspect_asmr` 里归约。
+    Asmr(inspect_asmr::AsmrMessage),
     /// 播放列表成员、下载、回退、会话和播放条。具体分支在 `player::reduce_message` 里归约。
     Player(player::PlayerMessage),
     /// 设置、插件、日志、任务和仓库动作。具体分支在 `admin::reduce_message` 里归约。
@@ -216,46 +234,6 @@ impl ShellPage {
             Self::Logs => "系统日志",
         }
     }
-
-    fn status(&self) -> &'static str {
-        match self {
-            Self::Loading => "正在读取仓库结构…",
-            Self::EmptyRepository => "还没有可显示的文件",
-            Self::Error => "需要处理仓库错误",
-            Self::FileList => "已加载仓库文件",
-            Self::SelectedFile => "已选中一个文件",
-            Self::Playlists => "正在读取仓库播放列表",
-            Self::PluginSettings => "正在编辑官方插件的原生设置",
-            Self::TaskRunning => "任务活动",
-            Self::PlaybackRunning => "统一播放器正在输出当前项目",
-            Self::TaskCancelling => "正在等待任务 worker 退出",
-            Self::Conflict => "本地与远端 Revision 不一致",
-            Self::UnsavedEdit => "编辑内容尚未写入仓库",
-            Self::Settings => "应用偏好和服务配置",
-            Self::SettingsError => "设置未写入，请修正输入后重试",
-            Self::Logs => "最近的服务和插件事件",
-        }
-    }
-
-    fn primary_action(&self) -> &'static str {
-        match self {
-            Self::Loading => "取消加载",
-            Self::EmptyRepository => "打开文件夹",
-            Self::Error => "重试加载",
-            Self::FileList => "刷新列表",
-            Self::SelectedFile => "打开预览",
-            Self::Playlists => "刷新列表",
-            Self::PluginSettings => "保存插件设置",
-            Self::TaskRunning => "查看任务",
-            Self::PlaybackRunning => "暂停播放",
-            Self::TaskCancelling => "查看任务",
-            Self::Conflict => "查看冲突",
-            Self::UnsavedEdit => "保存更改",
-            Self::Settings => "应用设置",
-            Self::SettingsError => "返回设置",
-            Self::Logs => "刷新日志",
-        }
-    }
 }
 
 /// 壳层所需的宿主无关页面状态。
@@ -301,16 +279,19 @@ pub struct ShellViewModel {
     pub plugin_config_keys: Vec<String>,
     pub plugin_config_drafts: std::collections::BTreeMap<String, String>,
     pub plugin_config_string_values: std::collections::BTreeSet<String>,
-    /// 离屏验收场景继续渲染原来的 15 个页面，直到对应逻辑有了新场景。
+    /// 标记 `for_page` 造出的验收模型。界面和产品窗口共用同一套表面。
     pub acceptance_scene: bool,
     pub workspace: WorkspaceState,
     pub sidebar: sidebar::SidebarState,
     pub files: files::FilesState,
     pub inspect: inspect::InspectState,
+    pub asmr: inspect_asmr::AsmrUi,
     pub player: player::PlayerState,
     pub admin: admin::AdminState,
     pub input: input::InputState,
     pub motion: motion::MotionState,
+    /// 窗口逻辑宽。Vue 唯一按窗口宽度切换的断点在播放条，见 [`NARROW_VIEWPORT_PX`]。
+    pub viewport_width: f32,
     /// 对话框、弹层或打开文件夹之后，手势松开时要重建树。
     pub surface_dirty: bool,
     /// `prepare` 里产生的目录浏览。这一帧就要提交，不能等下一次 `update`。
@@ -365,111 +346,52 @@ impl Default for ShellViewModel {
             sidebar: sidebar::SidebarState::default(),
             files: files::FilesState::default(),
             inspect: inspect::InspectState::default(),
+            asmr: inspect_asmr::AsmrUi::default(),
             player: player::PlayerState::default(),
             admin: admin::AdminState::default(),
             input: input::InputState::default(),
             motion: motion::MotionState::default(),
+            viewport_width: DEFAULT_VIEWPORT_PX,
             surface_dirty: false,
             staged_browses: Vec::new(),
         }
     }
 }
 
+/// 主窗口默认逻辑宽，和窗口描述符的初始尺寸一致。
+pub const DEFAULT_VIEWPORT_PX: f32 = 1200.0;
+/// Vue `@media (max-width: 1120px)`：窗口不超过这个宽度时，播放条改成三行。
+pub const NARROW_VIEWPORT_PX: f32 = 1120.0;
+
 impl ShellViewModel {
-    /// 创建用于验收某一状态的页面模型。
+    /// 创建某一页面的验收模型，并挂上和产品窗口相同的表面。
     pub fn for_page(page: ShellPage) -> Self {
         let mut model = Self {
             page,
             acceptance_scene: true,
             ..Self::default()
         };
-        match model.page {
-            ShellPage::Error => model.detail = "无法读取仓库目录，请检查路径和权限".into(),
-            ShellPage::EmptyRepository => model.detail = "可从文件夹或拖放导入资源".into(),
-            ShellPage::FileList => model.detail = "12 个文件 · 按名称排序".into(),
-            ShellPage::SelectedFile => {
-                model.selected_path = Some("assets/cover.png".into());
-                model.detail = "PNG 图片 · 1920 × 1080 · 2.4 MB".into();
-            }
-            ShellPage::Playlists => model.detail = "正在加载播放列表".into(),
-            ShellPage::PluginSettings => {
-                model.detail = "官方插件 · Nana 原生贡献接口 · 已加载 3 项配置".into();
-            }
-            ShellPage::TaskRunning => {
-                model.detail = "扫描默认资源库 · 1,284 / 3,040 个文件".into();
-            }
-            ShellPage::PlaybackRunning => {
-                model.selected_playlist_id = Some("playlist-demo".into());
-                model.playlist_item_entries = vec!["track-01.mp3 · ready".into(), "track-02.mp3 · ready".into()];
-                model.playlist_item_ids = vec!["item-01".into(), "item-02".into()];
-                model.detail = "正在播放 · track-01.mp3 · 01:24 / 03:48 · 音量 80%".into();
-            }
-            ShellPage::TaskCancelling => {
-                model.active_task_ids = vec!["task-cancelling".into()];
-                model.detail = "正在取消扫描 · worker 尚未退出".into();
-            }
-            ShellPage::Conflict => {
-                model.selected_path = Some("assets/cover.png".into());
-                model.detail = "远端修改时间较新，需要选择保留本地或远端版本".into();
-            }
-            ShellPage::UnsavedEdit => {
-                model.selected_path = Some("notes/readme.md".into());
-                model.dirty = true;
-                model.detail = "Markdown · 3 行未保存 · 最后保存于 2 分钟前".into();
-            }
-            ShellPage::Settings => model.detail = "主题、缩略图缓存和默认播放器".into(),
-            ShellPage::SettingsError => model.detail = "缩略图缓存上限必须在 64–16384 MB 之间".into(),
-            ShellPage::Logs => model.detail = "最近 24 小时 · 18 条记录 · 0 个错误".into(),
-            ShellPage::Loading => {}
-        }
+        acceptance::seed(&mut model);
         model
     }
 
-    fn selection_label(&self) -> String {
-        self.selected_path
-            .as_deref()
-            .map(|path| format!("当前文件：{path}"))
-            .unwrap_or_else(|| "未选择文件".into())
+    /// 宿主报告窗口逻辑宽。跨过 Vue 的 1120px 断点时标记重建，返回是否跨过。
+    pub fn set_viewport_width(&mut self, width: f32) -> bool {
+        if !width.is_finite() || width <= 0.0 {
+            eprintln!("Nana 窗口宽度无效，保持 {}：{width}", self.viewport_width);
+            return false;
+        }
+        let crossed = self.narrow_viewport() != (width <= NARROW_VIEWPORT_PX);
+        self.viewport_width = width;
+        if crossed {
+            self.surface_dirty = true;
+        }
+        crossed
     }
 
-    fn edit_label(&self) -> &'static str {
-        if self.dirty {
-            "编辑内容 · 未保存"
-        } else {
-            "编辑内容"
-        }
-    }
-
-    fn file_entries_label(&self) -> String {
-        if self.file_entries.is_empty() {
-            "当前目录暂无已加载条目".into()
-        } else {
-            format!("条目：{}", self.file_entries.iter().take(8).cloned().collect::<Vec<_>>().join("、"))
-        }
-    }
-
-    fn plugin_entries_label(&self) -> String {
-        if self.plugin_entries.is_empty() {
-            "当前没有已安装插件".into()
-        } else {
-            format!("插件：{}", self.plugin_entries.iter().take(6).cloned().collect::<Vec<_>>().join("、"))
-        }
-    }
-
-    fn log_entries_label(&self) -> String {
-        if self.log_entries.is_empty() {
-            "当前没有系统日志".into()
-        } else {
-            format!("日志：{}", self.log_entries.iter().take(6).cloned().collect::<Vec<_>>().join("、"))
-        }
-    }
-
-    fn playlist_entries_label(&self) -> String {
-        if self.playlist_entries.is_empty() {
-            "当前没有播放列表".into()
-        } else {
-            format!("播放列表：{}", self.playlist_entries.iter().take(6).cloned().collect::<Vec<_>>().join("、"))
-        }
+    /// 窗口是否落在 Vue 的窄屏断点内。
+    pub fn narrow_viewport(&self) -> bool {
+        self.viewport_width <= NARROW_VIEWPORT_PX
     }
 
     /// 在 ViewModel 边界集中处理导航和页面动作，避免控件闭包直接修改领域状态。
@@ -505,6 +427,7 @@ impl ShellViewModel {
         let modal_open = self.files.dialog_open()
             || self.workspace.delete_dialog_open()
             || self.playlist_dialog_open
+            || self.input.source_playlist.is_some()
             || self.sidebar.smart_draft.open
             || self.input.pending_close;
         let panel_open = self.sidebar.popover != sidebar::PopoverMode::Closed || self.admin.popover_open;
@@ -536,6 +459,9 @@ impl ShellViewModel {
             return;
         };
         let Some(message) = inspect::reduce_message(self, message) else {
+            return;
+        };
+        let Some(message) = inspect_asmr::reduce_message(self, message) else {
             return;
         };
         let Some(message) = admin::reduce_message(self, message) else {
@@ -621,6 +547,7 @@ impl ShellViewModel {
             }
             ShellMessage::SelectFile { path, .. } => {
                 self.page = ShellPage::SelectedFile;
+                self.player.disarm_preview_audio();
                 self.inspect.begin_selection(&path);
                 self.selected_path = Some(path);
                 self.preview_url = None;
@@ -630,6 +557,7 @@ impl ShellViewModel {
             }
             ShellMessage::OpenDirectory(path) => {
                 self.page = ShellPage::FileList;
+                self.player.disarm_preview_audio();
                 self.detail = format!("正在读取目录 {path}…");
                 self.selected_path = None;
                 self.preview_url = None;
@@ -899,11 +827,15 @@ impl ShellViewModel {
             ShellMessage::SetLibraryCategory(category) => self.workspace.library_category = category,
             ShellMessage::PrimaryAction => {
                 if !self.inspect.request_open() {
-                    self.detail = "该操作的领域服务尚未接通，数据未写入".into();
+                    self.detail = "当前没有可打开的预览".into();
                 }
             }
             ShellMessage::EditAction => {
-                self.detail = "原生编辑器尚未接通，当前文件未修改".into();
+                self.detail = if self.dirty || self.inspect.dirty() {
+                    "未保存的修改留在当前草稿".into()
+                } else {
+                    "当前没有未保存的修改".into()
+                };
             }
             ShellMessage::Sidebar(_) => {}
             ShellMessage::Files(_) => {}
@@ -912,6 +844,7 @@ impl ShellViewModel {
             ShellMessage::Input(_) => {}
             ShellMessage::Host(_) => {}
             ShellMessage::SilentWorkspace(_) => {}
+            ShellMessage::Asmr(_) => {}
         }
     }
 

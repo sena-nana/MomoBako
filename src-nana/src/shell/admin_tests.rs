@@ -15,7 +15,7 @@ use super::super::workspace::{WorkspacePanel, WorkspaceRepository};
 use super::super::{ShellMessage, ShellPage, ShellViewModel};
 use super::support::{self, action_can_run, audio_choices};
 use super::tool_native::{self, ImportAction};
-use super::{AdminEffect, AdminMessage, OperationProgress, SourceAuthCall, ToolPageEntry};
+use super::{AdminEffect, AdminMessage, OperationProgress, PluginCallOrigin, SourceAuthCall, ToolPageEntry};
 
 fn send(model: &mut ShellViewModel, message: AdminMessage) {
     model.reduce(ShellMessage::Admin(message));
@@ -200,9 +200,11 @@ fn plugin_fields_reject_bad_json_and_reset_empty_numbers() {
     model.admin.plugins = vec![manifest];
     send(&mut model, AdminMessage::MarkVueSettings("user.one".into()));
     let lines = support::settings_upgrade_lines(&model.admin.plugins[0], true);
-    assert_eq!(lines.len(), 2);
+    assert_eq!(lines.len(), 1);
     assert!(lines[0].contains("Vue"));
-    assert!(lines.iter().any(|line| line.contains("账号与来源仍是 Vue 页面，需要升级为 Nana 原生设置")));
+    let contract = support::source_auth_gap_contract(&model.admin.plugins[0]).expect("缺方法名");
+    assert!(contract.contains("createSessionMethod"));
+    assert!(!contract.contains("需要升级"));
     let mut schema = plugin("schema.one", "system", "service", "service");
     schema.contributes["settings"]["settingsPage"] = serde_json::json!({"label": "本地文件系统"});
     assert!(support::settings_upgrade_lines(&schema, false).is_empty());
@@ -394,10 +396,13 @@ fn tool_pages_fall_back_and_do_not_mount_vue_components() {
         ToolPageEntry { id: "new".into(), label: "新工具".into(), plugin_name: "native".into(), description: String::new(), native: true },
     ]));
     assert_eq!(model.admin.active_tool_page_id.as_deref(), Some("old"));
-    assert_eq!(support::tool_page_upgrade(&model.admin.tool_pages[0]), Some("工具页仍是 Vue 插件，需要升级为 Nana 原生工具页"));
+    let contract = support::foreign_tool_contract(&model.admin.tool_pages[0]).expect("非内置工具页");
+    assert!(contract.contains("old"));
+    assert!(contract.contains("缺原生控件快照"));
+    assert!(!contract.contains("需要升级"));
     send(&mut model, AdminMessage::SelectToolPage("new".into()));
     assert_eq!(model.admin.active_tool_page_id.as_deref(), Some("new"));
-    assert!(support::tool_page_upgrade(&model.admin.tool_pages[1]).is_none());
+    assert!(support::foreign_tool_contract(&model.admin.tool_pages[1]).is_none());
     send(&mut model, AdminMessage::SetToolPages(vec![ToolPageEntry {
         id: "new".into(), label: "新工具".into(), plugin_name: "native".into(), description: String::new(), native: true,
     }]));
@@ -493,11 +498,11 @@ fn import_action<'a>(actions: &'a [ImportAction], id: &str) -> &'a ImportAction 
 #[test]
 fn builtin_tool_pages_follow_the_file_machine_and_api_snapshot() {
     for id in [support::TOOL_FILE_MANAGER, support::TOOL_EAGLE_IMPORTER, support::TOOL_API_PLAYGROUND] {
-        assert!(support::tool_page_upgrade(&tool_page(id, false)).is_none());
+        assert!(support::foreign_tool_contract(&tool_page(id, false)).is_none());
     }
     assert_eq!(
-        support::tool_page_upgrade(&tool_page("momobako.tool.other", false)),
-        Some("工具页仍是 Vue 插件，需要升级为 Nana 原生工具页")
+        support::foreign_tool_contract(&tool_page("momobako.tool.other", false)).as_deref(),
+        Some("工具页 momobako.tool.other 只有 label「momobako.tool.other」和 没有 description。缺原生控件快照（字段、列表或预览数据），不嵌 Vue 组件。")
     );
 
     let mut model = ShellViewModel::default();
@@ -582,7 +587,10 @@ fn source_account_summary_names_methods_without_the_upgrade_copy() {
     assert!(joined.contains("auth.getLoginStatus"));
 
     manifest.contributes["source"] = serde_json::json!({"authentication": {}});
-    assert!(support::settings_upgrade_lines(&manifest, false).iter().any(|line| line.contains("账号与来源仍是 Vue 页面，需要升级为 Nana 原生设置")));
+    assert!(support::settings_upgrade_lines(&manifest, false).is_empty());
+    let gap = support::source_auth_gap_contract(&manifest).expect("缺方法名");
+    assert!(gap.contains("createSessionMethod") && gap.contains("pollSessionMethod"));
+    assert!(!gap.contains("需要升级"));
 }
 
 #[test]
@@ -608,10 +616,12 @@ fn source_login_reduce_calls_create_session_and_skips_oauth_without_methods() {
     model.admin.plugins = vec![manifest];
     send(&mut model, AdminMessage::CallSourceAuth { plugin_id: "source.one".into(), slot: SourceAuthCall::CreateSession });
     match model.admin.take_effects().pop() {
-        Some(AdminEffect::CallPlugin { plugin_id, method, payload }) => {
+        Some(AdminEffect::CallPlugin { plugin_id, method, payload, repository_id, origin }) => {
             assert_eq!(plugin_id, "source.one");
             assert_eq!(method, "auth.createQrSession");
             assert_eq!(payload, serde_json::json!({}));
+            assert!(repository_id.is_none());
+            assert_eq!(origin, PluginCallOrigin::SourceAuth);
         }
         other => panic!("unexpected {other:?}"),
     }
@@ -626,15 +636,31 @@ fn source_login_reduce_calls_create_session_and_skips_oauth_without_methods() {
     assert_eq!(model.admin.action_message, "已调用 auth.createQrSession。请扫码 waiting");
     assert!(!model.admin.action_message.contains("qrImage"));
     assert!(!model.admin.action_message.contains("base64"));
+    assert!(model.admin.source_auth.qr_text.is_none());
     send(&mut model, AdminMessage::SourceAuthFinished {
         method: "auth.getLoginStatus".into(),
         result: Ok(serde_json::json!({"qrimg": "x", "message": 1})),
     });
     assert_eq!(model.admin.action_message, "已调用 auth.getLoginStatus。");
+    send(&mut model, AdminMessage::SourceAuthFinished {
+        method: "auth.getLoginStatus".into(),
+        result: Ok(serde_json::json!({
+            "loggedIn": true,
+            "credentialRef": "secret-ref",
+            "account": "alice",
+            "qrurl": "https://example.invalid/login"
+        })),
+    });
+    assert_eq!(model.admin.action_message, "已调用 auth.getLoginStatus。");
+    assert_eq!(model.admin.source_auth.qr_text.as_deref(), Some("https://example.invalid/login"));
+    assert!(model.admin.source_auth.lines.iter().any(|line| line == "已登录"));
+    assert!(model.admin.source_auth.lines.iter().any(|line| line.contains("alice")));
+    assert!(!model.admin.source_auth.lines.iter().any(|line| line.contains("secret")));
 
     let mut oauth = plugin("oauth.one", "system", "source", "filesystem");
     oauth.contributes["source"] = serde_json::json!({"authentication": {"kind": "oauth"}});
-    assert!(support::settings_upgrade_lines(&oauth, false).iter().any(|line| line.contains("账号与来源仍是 Vue 页面，需要升级为 Nana 原生设置")));
+    assert!(support::settings_upgrade_lines(&oauth, false).iter().all(|line| !line.contains("需要升级")));
+    assert!(support::source_auth_gap_contract(&oauth).is_some_and(|line| line.contains("statusMethod")));
     assert!(tool_native::source_auth_actions(&oauth).is_empty());
     assert_eq!(
         (tool_native::source_login_plugin_ids(&[login_plugin, oauth.clone()]), tool_native::source_login_plugin_ids(&[])),
@@ -646,10 +672,13 @@ fn source_login_reduce_calls_create_session_and_skips_oauth_without_methods() {
 }
 
 #[test]
-fn acceptance_scenes_do_not_show_live_admin_surfaces() {
-    assert!(!ShellViewModel::for_page(ShellPage::Settings).admin_settings_visible());
-    assert!(!ShellViewModel::for_page(ShellPage::Logs).admin_workspace_visible(WorkspacePanel::Logs));
-    assert!(!ShellViewModel::for_page(ShellPage::PluginSettings).admin_settings_visible());
+fn acceptance_pages_use_the_admin_surface() {
+    let settings = ShellViewModel::for_page(ShellPage::Settings);
+    assert!(settings.admin_settings_visible());
+    assert!(ShellViewModel::for_page(ShellPage::Logs).admin_workspace_visible(WorkspacePanel::Logs));
+    let plugins = ShellViewModel::for_page(ShellPage::PluginSettings);
+    assert!(plugins.admin_workspace_visible(WorkspacePanel::Extensions));
+    assert!(!plugins.admin_settings_visible());
 }
 
 #[test]
@@ -687,5 +716,137 @@ fn dependency_label_uses_status_counts_and_directory_failure_is_visible() {
     send(&mut model, AdminMessage::DataDirectoryFinished { name: "user.one".into(), result: Ok("C:/plugin".into()) });
     assert_eq!(model.admin.action_message, "已打开“user.one”设置目录。");
     assert!(model.admin.action_error.is_empty());
-    assert!(support::reveal_directory_available());
+}
+
+#[test]
+fn provider_settings_become_fields_and_downloader_page_stays_upgrade() {
+    let mut manifest = plugin("asmr", "builtin", "service", "asmr-one");
+    manifest.contributes = serde_json::json!({
+        "settings": { "settingsPage": { "label": "ASMR" }, "fields": [] },
+        "provider": { "settings": {
+            "language": { "default": "zh-cn", "options": ["zh-cn", "ja-jp"] },
+            "proxy": { "default": "" },
+            "maxParallelism": { "default": 4, "minimum": 1, "maximum": 16 },
+            "requestTimeoutMs": { "default": 10000, "minimum": 1000 }
+        }}
+    });
+    assert!(!support::has_vue_settings_page(&manifest));
+    let fields = support::settings_fields(&manifest);
+    let language = fields.iter().find(|field| field.key == "language").expect("language");
+    assert_eq!(language.field_type, "select");
+    assert_eq!(language.label, "语言");
+    assert_eq!(fields.iter().find(|field| field.key == "proxy").expect("proxy").field_type, "string");
+    assert_eq!(fields.iter().find(|field| field.key == "maxParallelism").expect("parallel").label, "最大并行");
+    assert_eq!(fields.iter().find(|field| field.key == "requestTimeoutMs").expect("timeout").field_type, "number");
+
+    manifest.contributes = serde_json::json!({
+        "settings": { "settingsPage": { "label": "下载服务" }, "fields": [] }
+    });
+    assert!(support::has_vue_settings_page(&manifest));
+    assert!(support::is_downloader_settings(&manifest));
+    assert!(support::settings_upgrade_lines(&manifest, false).is_empty());
+    let mut model = ShellViewModel::default();
+    model.admin.plugins = vec![manifest];
+    send(&mut model, AdminMessage::RefreshDownloader);
+    match model.admin.take_effects().pop() {
+        Some(AdminEffect::CallPlugin { plugin_id, method, origin, .. }) => {
+            assert_eq!(plugin_id, "momobako.service.downloader");
+            assert_eq!(method, "downloader.getRuntimeStatus");
+            assert_eq!(origin, PluginCallOrigin::Downloader);
+        }
+        other => panic!("unexpected {other:?}"),
+    }
+    assert!(model.admin.downloader_status.is_none());
+    send(&mut model, AdminMessage::DownloaderStatusFinished {
+        result: Ok(serde_json::json!({"runtime": "aria2", "aria2": {"running": true, "version": "1.37.0"}})),
+    });
+    let status = model.admin.downloader_status.expect("状态");
+    assert_eq!(status.version, "1.37.0");
+    assert_eq!(status.queue_size, None);
+    assert_eq!(status.aria2_state, "运行中");
+}
+
+#[test]
+fn asmr_shortcuts_publish_onto_the_filter_bar() {
+    let mut model = ShellViewModel::default();
+    let mut manifest = plugin("momobako.library.asmr", "builtin", "library-kind", "asmr");
+    manifest.contributes = serde_json::json!({
+        "libraryExtension": { "libraryKind": "asmr", "searchShortcuts": ["works", "missing"] }
+    });
+    model.reduce(ShellMessage::PluginsLoaded(Ok(vec![manifest])));
+    assert_eq!(model.inspect.shortcuts.len(), 1);
+    assert_eq!(model.inspect.shortcuts[0].label, "ASMR 作品");
+    assert_eq!(model.inspect.shortcuts[0].metadata, "libraryKind=asmr");
+}
+
+#[test]
+fn file_plugin_call_keeps_repository_and_writes_activity() {
+    let mut model = ShellViewModel::default();
+    send(&mut model, AdminMessage::CallFilePlugin {
+        plugin_id: "momobako.netease.source".into(),
+        method: "media.clearTrackCache".into(),
+        payload: serde_json::json!({"songId": 9}),
+        repository_id: Some("repo".into()),
+    });
+    match model.admin.take_effects().pop() {
+        Some(AdminEffect::CallPlugin { method, repository_id, origin, .. }) => {
+            assert_eq!(method, "media.clearTrackCache");
+            assert_eq!(repository_id.as_deref(), Some("repo"));
+            assert_eq!(origin, PluginCallOrigin::FileMenu);
+        }
+        other => panic!("unexpected {other:?}"),
+    }
+    send(&mut model, AdminMessage::FilePluginFinished {
+        method: "media.clearTrackCache".into(),
+        result: Ok(serde_json::json!({})),
+    });
+    assert_eq!(model.files.activity, "已调用 media.clearTrackCache。");
+}
+
+#[test]
+fn source_repository_create_uses_login_config_and_drops_cookies() {
+    let mut model = ShellViewModel::default();
+    let mut manifest = plugin("momobako.netease.source", "builtin", "source", "netease-cloud-music");
+    manifest.contributes["source"] = serde_json::json!({
+        "authentication": {
+            "repositoryProvisioning": { "repoIdPrefix": "netease-cloud-music" }
+        }
+    });
+    model.admin.plugins = vec![manifest];
+    model.admin.source_auth.plugin_id = "momobako.netease.source".into();
+    model.admin.source_auth.payload = Some(serde_json::json!({
+        "credentialRef": "keyring:momobako.netease.source:123456",
+        "backendConfig": {
+            "accountId": "123456",
+            "credentialRef": "keyring:momobako.netease.source:123456",
+            "cookie": "should-not-save",
+            "accountCookie": "also-hidden"
+        },
+        "account": { "id": 123456, "userName": "Aura" }
+    }));
+    model.admin.source_repo_name = "云村 Aura".into();
+    model.admin.source_repo_path = "C:/Mock/NeteaseCache".into();
+    send(&mut model, AdminMessage::SubmitSourceRepository);
+    match model.admin.take_effects().pop() {
+        Some(AdminEffect::CreateSourceRepository { repo_id, name, path, backend_plugin_id, backend_config }) => {
+            assert_eq!(repo_id, "netease-cloud-music-123456");
+            assert_eq!(name, "云村 Aura");
+            assert_eq!(path, "C:/Mock/NeteaseCache");
+            assert_eq!(backend_plugin_id, "momobako.netease.source");
+            assert_eq!(backend_config["accountId"], "123456");
+            assert_eq!(backend_config["credentialRef"], "keyring:momobako.netease.source:123456");
+            assert!(backend_config.get("cookie").is_none());
+            assert!(backend_config.get("accountCookie").is_none());
+        }
+        other => panic!("unexpected {other:?}"),
+    }
+    send(&mut model, AdminMessage::SourceRepositoryFinished { result: Ok("已创建 云村 Aura（netease-cloud-music-123456）C:/Mock/NeteaseCache".into()) });
+    assert!(model.workspace.take_effects().iter().any(|effect| matches!(effect, super::super::workspace::WorkspaceEffect::RefreshRepositories { .. })));
+    assert!(model.admin.action_error.is_empty());
+
+    model.admin.source_creating = false;
+    model.admin.source_auth.payload = Some(serde_json::json!({"loggedIn": true}));
+    send(&mut model, AdminMessage::SubmitSourceRepository);
+    assert!(model.admin.take_effects().is_empty());
+    assert_eq!(model.admin.action_error, "登录结果没有账号配置，没有创建仓库。");
 }

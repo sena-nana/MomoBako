@@ -136,6 +136,10 @@ pub fn dismiss_top(model: &mut super::super::ShellViewModel) -> bool {
         model.playlist_dialog_open = false;
         return true;
     }
+    if model.input.source_playlist.is_some() {
+        model.reduce(super::super::ShellMessage::Input(super::super::input::InputMessage::CloseSourcePlaylist));
+        return true;
+    }
     if model.sidebar.popover != super::PopoverMode::Closed {
         model.sidebar.close_popover();
         return true;

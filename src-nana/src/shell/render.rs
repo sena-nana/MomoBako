@@ -6,11 +6,11 @@ use super::*;
 use crate::theme_map::{SIDEBAR_MAX_PX, SIDEBAR_MIN_PX};
 use nana_ui::runtime::view::{button, text, widget, AnyView, IntoView};
 use nana_ui::runtime::{
-    Activate, AlignSpec, AppShell, Dialog, FrameworkError, GpuTextureView, JustifySpec, LengthSpec, List, MountedView,
-    Progress, RuntimeDocument, SemanticColorRole, SidebarFrame, Stack, Text, TextChanged,
-    TextHorizontalAlignment, TextInput, ValidationIntent, ValidationMessage, Workspace,
+    Activate, AlignSpec, AppShell, Button, Dialog, FrameworkError, JustifySpec, LengthSpec, MountedView, Progress,
+    RuntimeDocument, ScrollAxes, ScrollView, SemanticColorRole, Stack, Text, TextChanged, TextHorizontalAlignment,
+    TextInput, ValidationIntent, ValidationMessage, Workspace,
 };
-use nana_ui::{RegionId, RegionRole, RegionState, WorkspaceLayout, WorkspaceModel};
+use nana_ui::{ButtonKind, RegionId, RegionRole, RegionState, WorkspaceLayout, WorkspaceModel};
 
 thread_local! {
     /// 上一次挂上的壳层。再次挂载前先卸掉，避免文档里叠多棵壳。
@@ -40,591 +40,49 @@ pub fn mount_shell(
     let mounted = document
         .context_mut()
         .mount_view_root(document_id, move || {
-            // 标题栏、导航栏和主工作区分别承担窗口级操作、上下文导航和资源主线。
-            let legacy_navigation = widget(
-                Stack::fill_column(8.0)
-                    .width(LengthSpec::Px(220.0))
-                    .grow(0.0)
-                    .shrink(0.0)
-                    .padding_xy(16.0, 18.0),
-            )
-            .children((
-                button("资源库").key("nav-library").on_cx(|_, _: &Activate, cx| {
-                    cx.dispatch_program(ShellMessage::Navigate(ShellPage::FileList));
-                }),
-                button("播放列表").key("nav-playlists").on_cx(|_, _: &Activate, cx| {
-                    cx.dispatch_program(ShellMessage::Navigate(ShellPage::Playlists));
-                }),
-                button("插件").key("nav-plugins").on_cx(|_, _: &Activate, cx| {
-                    cx.dispatch_program(ShellMessage::Navigate(ShellPage::PluginSettings));
-                }),
-                button("设置").key("nav-settings").on_cx(|_, _: &Activate, cx| {
-                    cx.dispatch_program(ShellMessage::Navigate(ShellPage::Settings));
-                }),
-            ));
-            let status_summary = widget(Stack::column(8.0)).children((
-                text(view_model.page.title()).key("page-title"),
-                text(view_model.page.status()).key("page-status"),
-                text(view_model.selection_label()).key("selection"),
-                text(view_model.detail.clone()).key("page-detail"),
-                text(view_model.file_entries_label()).key("file-entries"),
-                text(view_model.plugin_entries_label()).key("plugin-entries"),
-                text(view_model.log_entries_label()).key("log-entries"),
-                text(view_model.playlist_entries_label()).key("playlist-entries"),
-                text(view_model.system_status.clone().unwrap_or_else(|| "尚未读取系统服务状态".into()))
-                    .key("system-status"),
-            ));
-            let task_actions = widget(Stack::fill_column(6.0)).children(
-                view_model
-                    .active_task_ids
-                    .iter()
-                    .map(|task_id| {
-                        let task_id = task_id.clone();
-                        button(format!("取消任务 {task_id}"))
-                            .key(format!("cancel-task-{task_id}"))
-                            .on_cx(move |_, _: &Activate, cx| {
-                                cx.dispatch_program(ShellMessage::CancelTask(task_id.clone()));
-                            })
-                    })
-                    .collect::<Vec<_>>(),
-            );
-            let task_progress = widget(Stack::fill_column(6.0)).children(
-                view_model
-                    .task_progress
-                    .iter()
-                    .take(8)
-                    .map(|snapshot| {
-                        let status = match snapshot.status.as_str() {
-                            "cancelling" => "取消中",
-                            "completed" => "已完成",
-                            "cancelled" => "已取消",
-                            "failed" => "失败",
-                            "queued" => "排队中",
-                            _ => "进行中",
-                        };
-                        text(format!(
-                            "{} · {}",
-                            snapshot
-                                .label
-                                .clone()
-                                .unwrap_or_else(|| snapshot.protocol_id.clone()),
-                            status
-                        ))
-                        .key(format!("task-progress-{}", snapshot.task_id))
-                    })
-                    .collect::<Vec<_>>(),
-            );
-            let file_actions = widget(Stack::fill_column(6.0)).children(
-                view_model
-                    .browser_entries
-                    .iter()
-                    .take(8)
-                    .map(|entry| {
-                        let entry = entry.clone();
-                        button(entry.name.clone())
-                            .key(format!("file-entry-{}", entry.path))
-                            .on_cx(move |_, _: &Activate, cx| {
-                                cx.dispatch_program(entry_message(&entry));
-                            })
-                    })
-                    .collect::<Vec<_>>(),
-            );
-            let plugin_actions = widget(Stack::fill_column(6.0)).children(
-                view_model
-                    .plugin_entries
-                    .iter()
-                    .zip(view_model.plugin_entry_ids.iter())
-                    .zip(view_model.plugin_enabled.iter())
-                    .take(8)
-                    .map(|((label, plugin_id), enabled)| {
-                        let plugin_id = plugin_id.clone();
-                        let select_id = plugin_id.clone();
-                        let toggle_id = plugin_id.clone();
-                        let delete_id = plugin_id.clone();
-                        let next_enabled = !*enabled;
-                        widget(Stack::fill_row(8.0)).children((
-                            button(label.clone())
-                                .key(format!("plugin-entry-{select_id}"))
-                                .on_cx(move |_, _: &Activate, cx| {
-                                    cx.dispatch_program(ShellMessage::SelectPlugin(select_id.clone()));
-                                }),
-                            button(if *enabled { "停用" } else { "启用" })
-                                .key(format!("toggle-plugin-{toggle_id}"))
-                                .on_cx(move |_, _: &Activate, cx| {
-                                    cx.dispatch_program(ShellMessage::TogglePlugin {
-                                        plugin_id: toggle_id.clone(),
-                                        enabled: next_enabled,
-                                    });
-                                }),
-                            button("删除")
-                                .key(format!("delete-plugin-{delete_id}"))
-                                .on_cx(move |_, _: &Activate, cx| {
-                                    cx.dispatch_program(ShellMessage::DeletePlugin(delete_id.clone()));
-                                }),
-                        ))
-                    })
-                    .collect::<Vec<_>>(),
-            );
-            let plugin_config_actions = widget(Stack::fill_column(6.0)).children(
-                view_model
-                    .selected_plugin_id
-                    .as_ref()
-                    .into_iter()
-                    .flat_map(|plugin_id| {
-                        view_model.plugin_config_keys.iter().map(move |key| {
-                            let plugin_id = plugin_id.clone();
-                            let key = key.clone();
-                            button(format!("删除配置 {key}"))
-                                .key(format!("delete-plugin-config-{key}"))
-                                .on_cx(move |_, _: &Activate, cx| {
-                                    cx.dispatch_program(ShellMessage::DeletePluginConfig {
-                                        plugin_id: plugin_id.clone(),
-                                        key: key.clone(),
-                                    });
-                                })
-                        })
-                    })
-                    .collect::<Vec<_>>(),
-            );
-            let plugin_config_keys = view_model.plugin_config_keys.clone();
-            let plugin_config_drafts = view_model.plugin_config_drafts.clone();
-            let plugin_config_editors = widget(Stack::fill_column(8.0)).children(
-                view_model
-                    .selected_plugin_id
-                    .as_ref()
-                    .into_iter()
-                    .flat_map(|plugin_id| {
-                        let drafts = plugin_config_drafts.clone();
-                        plugin_config_keys
-                            .iter()
-                            .map(move |key| {
-                                let plugin_id = plugin_id.clone();
-                                let key = key.clone();
-                                let value = drafts.get(&key).cloned().unwrap_or_default();
-                                let draft_key = key.clone();
-                                let input = widget(TextInput::new(value).label(key.clone())).on_cx(
-                                    move |_, event: &TextChanged, cx| {
-                                        cx.dispatch_program(ShellMessage::PluginConfigDraftChanged {
-                                            key: draft_key.clone(),
-                                            value: event.value.to_string(),
-                                        });
-                                    },
-                                );
-                                let save_key = key.clone();
-                                widget(Stack::fill_row(8.0)).children((
-                                    input,
-                                    button("保存").key(format!("save-plugin-config-{save_key}"))
-                                        .on_cx(move |_, _: &Activate, cx| {
-                                            cx.dispatch_program(ShellMessage::SavePluginConfig {
-                                                plugin_id: plugin_id.clone(),
-                                                key: save_key.clone(),
-                                            });
-                                        }),
-                                ))
-                            })
-                    })
-                    .collect::<Vec<_>>(),
-            );
-            let playlist_actions = widget(Stack::fill_column(6.0)).children(
-                view_model
-                    .playlist_entries
-                    .iter()
-                    .zip(view_model.playlist_entry_ids.iter())
-                    .take(8)
-                            .map(|(label, playlist_id)| {
-                        let playlist_id = playlist_id.clone();
-                        let open_id = playlist_id.clone();
-                        let delete_id = playlist_id.clone();
-                        widget(Stack::fill_row(8.0)).children((
-                            button(label.clone())
-                                .key(format!("playlist-entry-{open_id}"))
-                                .on_cx(move |_, _: &Activate, cx| {
-                                    cx.dispatch_program(ShellMessage::SelectPlaylist(open_id.clone()));
-                                }),
-                            button("删除")
-                                .key(format!("delete-playlist-{delete_id}"))
-                                .on_cx(move |_, _: &Activate, cx| {
-                                    cx.dispatch_program(ShellMessage::DeletePlaylist(delete_id.clone()));
-                                }),
-                        ))
-                    })
-                    .collect::<Vec<_>>(),
-            );
-            let playlist_item_actions = if view_model.acceptance_scene {
-                Some(widget(Stack::fill_column(6.0)).children(
-                view_model
-                    .playlist_item_entries
-                    .iter()
-                    .zip(view_model.playlist_item_ids.iter())
-                    .take(8)
-                    .map(|(label, item_id)| {
-                        let item_id = item_id.clone();
-                        let playlist_id = view_model.selected_playlist_id.clone().unwrap_or_default();
-                        widget(Stack::fill_row(8.0)).children((
-                            text(label.clone()).key(format!("playlist-item-{item_id}")),
-                            button("上移")
-                                .key(format!("move-playlist-item-up-{item_id}"))
-                                .on_cx({
-                                    let item_id = item_id.clone();
-                                    move |_, _: &Activate, cx| cx.dispatch_program(ShellMessage::MovePlaylistItem { item_id: item_id.clone(), direction: -1 })
-                                }),
-                            button("下移")
-                                .key(format!("move-playlist-item-down-{item_id}"))
-                                .on_cx({
-                                    let item_id = item_id.clone();
-                                    move |_, _: &Activate, cx| cx.dispatch_program(ShellMessage::MovePlaylistItem { item_id: item_id.clone(), direction: 1 })
-                                }),
-                            button("移除")
-                                .key(format!("remove-playlist-item-{item_id}"))
-                                .on_cx(move |_, _: &Activate, cx| {
-                                    cx.dispatch_program(ShellMessage::RemovePlaylistItem {
-                                        playlist_id: playlist_id.clone(),
-                                        item_id: item_id.clone(),
-                                    });
-                                }),
-                        ))
-                    })
-                    .collect::<Vec<_>>(),
-            ))
-            } else {
-                None
-            };
-            let player_surface = if view_model.player_surface_visible() {
-                Some(super::player_view::player_surface(&view_model))
-            } else {
-                None
-            };
-            let playlist_item_status = if view_model.playlist_item_status.is_empty() {
-                None
-            } else {
-                Some(text(format!("不可播放项目：{}", view_model.playlist_item_status)).key("playlist-item-status"))
-            };
-            let log_actions = if matches!(view_model.page, ShellPage::Loading) {
-                None
-            } else {
-                Some(widget(Stack::fill_row(8.0)).children((
-                    button("清理日志")
-                        .key("clear-logs")
-                        .on_cx(|_, _: &Activate, cx| cx.dispatch_program(ShellMessage::ClearLogs)),
-                )))
-            };
-            let playlist_name = view_model.playlist_name_draft.clone();
+            // 标题栏、侧栏和主工作区共用同一套产品表面。验收页不再另挂按钮列表。
+            let settings_page = matches!(view_model.page, ShellPage::Settings | ShellPage::SettingsError);
             let is_playlists = matches!(view_model.page, ShellPage::Playlists)
                 || view_model.workspace.panel == WorkspacePanel::Playlist;
-            let playlist_editor = if is_playlists {
-                Some(widget(Stack::fill_row(8.0)).children((
-                    widget(TextInput::new(playlist_name).label("播放列表名称")).on_cx(
-                        |_, event: &TextChanged, cx| {
-                            cx.dispatch_program(ShellMessage::PlaylistNameDraftChanged(
-                                event.value.to_string(),
-                            ));
-                        },
-                    ),
-                    button("保存名称")
-                        .key("save-playlist-name")
-                        .on_cx(|_, _: &Activate, cx| cx.dispatch_program(ShellMessage::SavePlaylistName)),
-                )))
-            } else {
-                None
-            };
-            let new_playlist_name = view_model.new_playlist_name.clone();
-            let playlist_player_choices = widget(Stack::fill_row(6.0)).children(
-                view_model
-                    .playlist_players
-                    .iter()
-                    .take(8)
-                    .map(|player| {
-                        let player_type_id = player.player_type_id.clone();
-                        let label = format!("使用 {}", player.label);
-                        button(label)
-                            .key(format!("playlist-player-{}", player_type_id))
-                            .on_cx(move |_, _: &Activate, cx| {
-                                cx.dispatch_program(ShellMessage::SelectPlaylistPlayer(
-                                    player_type_id.clone(),
-                                ));
-                            })
-                    })
-                    .collect::<Vec<_>>(),
-            );
-            let playlist_creator = if is_playlists {
-                Some(widget(Stack::fill_column(6.0)).children((
-                    widget(TextInput::new(new_playlist_name).label("新建播放列表")).on_cx(
-                        |_, event: &TextChanged, cx| {
-                            cx.dispatch_program(ShellMessage::NewPlaylistNameChanged(
-                                event.value.to_string(),
-                            ));
-                        },
-                    ),
-                    playlist_player_choices,
-                    button("创建播放列表")
-                        .key("create-playlist")
-                        .on_cx(|_, _: &Activate, cx| cx.dispatch_program(ShellMessage::CreatePlaylist)),
-                )))
-            } else {
-                None
-            };
-            let playlist_add_current_directory = if is_playlists {
-                view_model.selected_playlist_id.clone().map(|playlist_id| {
-                    let path = view_model.current_directory.clone();
-                    button("添加当前目录").key("add-playlist-current-directory").on_cx(
-                        move |_, _: &Activate, cx| {
-                            cx.dispatch_program(ShellMessage::AddPlaylistItemsByPaths {
-                                playlist_id: playlist_id.clone(),
-                                paths: vec![path.clone()],
-                            });
-                        },
-                    )
-                })
-            } else {
-                None
-            };
-            let settings_editor = if matches!(view_model.page, ShellPage::Settings | ShellPage::SettingsError) {
-                let cache_limit = view_model.settings_cache_limit_draft.clone();
-                let player_id = view_model
-                    .settings
-                    .default_playlist_player_type_id
-                    .clone()
-                    .unwrap_or_default();
-                let theme = view_model.settings.theme.clone();
-                let close_behavior = view_model.settings.close_behavior.clone();
-                Some(widget(Stack::column(12.0)).children((
-                    super::workbench::section_card("外观", vec![widget(Stack::bar(8.0)).children((
-                        text(format!("主题：{theme}")).key("settings-theme-label"),
-                        widget(Stack::spacer()),
-                        button("浅色").key("settings-theme-light").on_cx(|_, _: &Activate, cx| {
-                            cx.dispatch_program(ShellMessage::SettingsThemeChanged("light".into()));
-                        }),
-                        button("深色").key("settings-theme-dark").on_cx(|_, _: &Activate, cx| {
-                            cx.dispatch_program(ShellMessage::SettingsThemeChanged("dark".into()));
-                        }),
-                        button("跟随系统").key("settings-theme-system").on_cx(|_, _: &Activate, cx| {
-                            cx.dispatch_program(ShellMessage::SettingsThemeChanged("system".into()));
-                        }),
-                    )).into_any()]),
-                    super::workbench::section_card("播放与缓存", vec![
-                        widget(TextInput::new(cache_limit).label("缩略图缓存上限（MB）")).on_cx(
-                            |_, event: &TextChanged, cx| {
-                                cx.dispatch_program(ShellMessage::SettingsCacheLimitChanged(event.value.to_string()));
-                            },
-                        ).into_any(),
-                        widget(TextInput::new(player_id).label("默认播放器类型")).on_cx(
-                            |_, event: &TextChanged, cx| {
-                                cx.dispatch_program(ShellMessage::SettingsPlayerChanged(event.value.to_string()));
-                            },
-                        ).into_any(),
-                    ]),
-                    super::workbench::section_card("关闭行为", vec![widget(Stack::bar(8.0)).children((
-                        text(format!("关闭行为：{close_behavior}")).key("settings-close-label"),
-                        widget(Stack::spacer()),
-                        button("确认后关闭").key("settings-close-confirm").on_cx(|_, _: &Activate, cx| {
-                            cx.dispatch_program(ShellMessage::SettingsCloseBehaviorChanged("confirm".into()));
-                        }),
-                        button("最小化到托盘").key("settings-close-tray").on_cx(|_, _: &Activate, cx| {
-                            cx.dispatch_program(ShellMessage::SettingsCloseBehaviorChanged("minimizeToTray".into()));
-                        }),
-                        button("直接退出").key("settings-close-quit").on_cx(|_, _: &Activate, cx| {
-                            cx.dispatch_program(ShellMessage::SettingsCloseBehaviorChanged("quit".into()));
-                        }),
-                    )).into_any()]),
-                    view_model
-                        .settings_error
-                        .clone()
-                        .map(|error| text(format!("设置提示：{error}")).key("settings-error")),
-                    button("保存应用设置").key("save-application-settings").on_cx(
-                        |_, _: &Activate, cx| cx.dispatch_program(ShellMessage::SaveSettings),
-                    ),
-                )))
-            } else {
-                None
-            };
-            let preview_slot = if view_model.preview_pixels.is_some() {
-                "file-preview"
-            } else {
-                ""
-            };
-            let preview_node = if !view_model.acceptance_scene && view_model.inspect_surface_visible() {
-                Some(super::inspect_view::inspect_surface(&view_model))
-            } else if matches!(view_model.page, ShellPage::SelectedFile) {
-                Some(widget(Stack::column(8.0)).children((
-                    text("选择图片文件后，预览将在原生纹理节点中显示").key("preview-placeholder"),
-                    widget(GpuTextureView::new(preview_slot).contain()).key("file-preview"),
-                )).into_any())
-            } else {
-                None
-            };
-            let page_actions = if matches!(view_model.page, ShellPage::Loading) {
-                None
-            } else {
-                Some(widget(Stack::fill_row(8.0)).children((
-                    button(view_model.page.primary_action())
-                        .key("primary-action")
-                        .on_cx(|_, _: &Activate, cx| cx.dispatch_program(ShellMessage::PrimaryAction)),
-                    button(view_model.edit_label())
-                        .key("edit-action")
-                        .on_cx(|_, _: &Activate, cx| cx.dispatch_program(ShellMessage::EditAction)),
-                )))
-            };
-            let file_browser = if !view_model.acceptance_scene && view_model.files_surface_visible() {
-                super::files_view::files_surface(&view_model)
-            } else {
-                file_actions.into_any()
-            };
-            let admin_surface = if !view_model.acceptance_scene {
-                Some(super::admin::admin_surface(&view_model))
-            } else {
-                None
-            };
-            let close_prompt = super::input::close_prompt(&view_model);
-            let process = widget(
-                Stack::fill_column(8.0)
-                    .width(LengthSpec::Px(240.0))
-                    .grow(0.0)
-                    .shrink(0.0)
-                    .padding_xy(16.0, 20.0),
-            )
-            .children((
-                text("当前状态").key("process-heading"),
-                text(view_model.page.status()).key("process-status"),
-                button("刷新状态").key("refresh").on_cx(|_, _: &Activate, cx| {
-                    cx.dispatch_program(ShellMessage::Refresh);
-                }),
-            ));
-            let live_files = !view_model.acceptance_scene
-                && view_model.files_surface_visible()
-                && !matches!(view_model.page, ShellPage::Settings | ShellPage::SettingsError);
-            let show_page = view_model.acceptance_scene
-                || matches!(view_model.page, ShellPage::Settings | ShellPage::SettingsError)
+            let live_files = view_model.files_surface_visible() && !settings_page;
+            let show_page = settings_page
                 || matches!(view_model.workspace.main_region(), MainRegion::HasRepository);
             let region = view_model.workspace.main_region();
             let primary = if live_files {
-                drop((
-                    status_summary, task_actions, task_progress, file_browser, plugin_actions,
-                    plugin_config_actions, plugin_config_editors, playlist_actions, settings_editor,
-                    admin_surface, close_prompt, playlist_item_actions, player_surface,
-                    playlist_item_status, playlist_editor, playlist_creator,
-                    playlist_add_current_directory, log_actions, preview_node, page_actions,
-                ));
                 super::files_view::live_file_column(&view_model)
-            } else if !view_model.acceptance_scene
-                && show_page
-                && !matches!(view_model.page, ShellPage::Settings | ShellPage::SettingsError)
-                && is_playlists
-            {
-                let mut body = Vec::new();
-                if let Some(player) = player_surface {
-                    body.push(player);
-                }
-                if view_model.selected_playlist_id.is_some() {
-                    if let Some(editor) = playlist_editor {
-                        body.push(editor.into_any());
-                    }
-                    if let Some(add) = playlist_add_current_directory {
-                        body.push(add.into_any());
-                    }
-                }
-                let _ = playlist_creator;
-                super::workbench::page(body)
-            } else if !view_model.acceptance_scene
-                && show_page
-                && !matches!(view_model.page, ShellPage::Settings | ShellPage::SettingsError)
+            } else if show_page && !settings_page && is_playlists {
+                playlist_page(&view_model)
+            } else if show_page
+                && !settings_page
                 && matches!(
                     view_model.workspace.panel,
                     WorkspacePanel::Logs | WorkspacePanel::Extensions | WorkspacePanel::Actions
                 )
             {
-                super::workbench::page(vec![admin_surface.unwrap_or_else(|| widget(Stack::column(0.0)).into_any())])
-            } else if !view_model.acceptance_scene
-                && show_page
-                && !matches!(view_model.page, ShellPage::Settings | ShellPage::SettingsError)
-                && view_model.workspace.panel == WorkspacePanel::Search
-            {
-                super::workbench::page(vec![preview_node.unwrap_or_else(|| widget(Stack::column(0.0)).into_any())])
-            } else if !view_model.acceptance_scene && show_page {
-                let (eyebrow, title) = section_heading(&view_model);
-                let mut body = Vec::new();
-                if let Some(editor) = settings_editor {
-                    body.push(editor.into_any());
-                }
-                if let Some(admin) = admin_surface {
-                    body.push(admin);
-                }
-                if is_playlists {
-                    body.push(playlist_actions.into_any());
-                    if let Some(editor) = playlist_editor {
-                        body.push(editor.into_any());
-                    }
-                    if let Some(creator) = playlist_creator {
-                        body.push(creator.into_any());
-                    }
-                    if let Some(add) = playlist_add_current_directory {
-                        body.push(add.into_any());
-                    }
-                    if let Some(items) = playlist_item_actions {
-                        body.push(items.into_any());
-                    }
-                    if let Some(status) = playlist_item_status {
-                        body.push(status.into_any());
-                    }
-                    if let Some(player) = player_surface {
-                        body.push(player);
-                    }
-                }
-                if view_model.workspace.panel == WorkspacePanel::Search {
-                    if let Some(preview) = preview_node {
-                        body.push(preview);
-                    }
-                }
-                if let Some(logs) = log_actions {
-                    if matches!(view_model.workspace.panel, WorkspacePanel::Logs) {
-                        body.push(logs.into_any());
-                    }
-                }
-                framed_page(eyebrow, title, body)
+                super::workbench::page(vec![super::admin::admin_surface(&view_model)])
+            } else if show_page && !settings_page && view_model.workspace.panel == WorkspacePanel::Search {
+                let inspect = if view_model.inspect_surface_visible() {
+                    super::inspect_view::inspect_surface(&view_model)
+                } else {
+                    widget(Stack::column(0.0)).into_any()
+                };
+                super::workbench::page(vec![inspect])
             } else if show_page {
-                let workspace_actions = widget(Stack::fill_column(8.0)).children((
-                    widget(Stack::fill_column(8.0)).children((
-                        status_summary,
-                        task_actions,
-                        task_progress,
-                        file_browser,
-                        plugin_actions,
-                        plugin_config_actions,
-                        plugin_config_editors,
-                        playlist_actions,
-                    )),
-                    widget(Stack::fill_column(8.0)).children((
-                        settings_editor,
-                        admin_surface,
-                        close_prompt,
-                        playlist_item_actions,
-                        player_surface,
-                        playlist_item_status,
-                        playlist_editor,
-                        playlist_creator,
-                        playlist_add_current_directory,
-                        log_actions,
-                        preview_node,
-                    )),
-                ));
-                widget(
-                    Stack::fill_column(12.0)
-                        .padding_xy(24.0, 20.0)
-                        .min_width(LengthSpec::Px(0.0)),
-                )
-                .children((
-                    workspace_actions,
-                    widget(List::new().label(view_model.page.title()).style(Stack::column(12.0).node_style()))
-                        .children((page_actions,)),
-                ))
-                .into_any()
+                let plugin_page = if settings_page { super::admin::opened_plugin_pages(&view_model) } else { Vec::new() };
+                if settings_page && !plugin_page.is_empty() {
+                    // 插件设置打开时主区只留这一张卡，不再叠外观、缓存和关闭行为。
+                    super::workbench::page(plugin_page)
+                } else {
+                    let (eyebrow, title) = section_heading(&view_model);
+                    let mut body = Vec::new();
+                    body.push(super::admin::admin_surface(&view_model));
+                    // 缓存上限和关闭行为不在 Vue 设置页前几张卡里，排在音频、外观、仓库和外部素材之后。
+                    if let Some(editor) = settings_editor(&view_model) {
+                        body.push(editor);
+                    }
+                    framed_page(eyebrow, title, body, settings_page)
+                }
             } else {
-                drop((
-                    status_summary, task_actions, task_progress, file_browser, plugin_actions,
-                    plugin_config_actions, plugin_config_editors, playlist_actions, settings_editor,
-                    admin_surface, close_prompt, playlist_item_actions, player_surface,
-                    playlist_item_status, playlist_editor, playlist_creator,
-                    playlist_add_current_directory, log_actions, preview_node, page_actions,
-                ));
                 match region {
                     MainRegion::MissingRepository => missing_repository_panel(&view_model).into_any(),
                     MainRegion::EmptyRepository => super::input::empty_repository_panel(&view_model),
@@ -633,30 +91,19 @@ pub fn mount_shell(
                     }
                 }
             };
-            let stage = if view_model.acceptance_scene && show_page {
-                widget(Stack::fill_row(0.0).min_height(LengthSpec::Px(0.0)))
-                    .children((primary, process))
-                    .key("workspace-body")
-                    .into_any()
-            } else {
-                widget(Stack::fill_column(0.0).min_height(LengthSpec::Px(0.0)))
-                    .children((primary,))
-                    .key("workspace-body")
-                    .into_any()
-            };
+            let stage = widget(Stack::fill_column(0.0).min_height(LengthSpec::Px(0.0)))
+                .children((primary,))
+                .key("workspace-body")
+                .into_any();
             let presented_sidebar = view_model.motion.sidebar_presented_width();
             let show_sidebar = presented_sidebar > 0.5
-                && (view_model.acceptance_scene || view_model.workspace.startup.status == StartupStatus::Ready);
+                && view_model.workspace.startup.status == StartupStatus::Ready;
             let body = if show_sidebar {
-                let sidebar = if view_model.acceptance_scene {
-                    widget(SidebarFrame::new()).body(legacy_navigation).into_any()
-                } else {
-                    widget(super::sidebar_view::sidebar_frame())
-                        .top(super::sidebar_view::sidebar_switcher(&view_model))
-                        .body(super::sidebar_view::sidebar_sections(&view_model))
-                        .footer(super::sidebar_view::sidebar_footer(&view_model))
-                        .into_any()
-                };
+                let sidebar = widget(super::sidebar_view::sidebar_frame())
+                    .top(super::sidebar_view::sidebar_switcher(&view_model))
+                    .body(super::sidebar_view::sidebar_sections(&view_model))
+                    .footer(super::sidebar_view::sidebar_footer(&view_model))
+                    .into_any();
                 workbench(sidebar, stage, presented_sidebar)
             } else {
                 stage.into_any()
@@ -669,6 +116,8 @@ pub fn mount_shell(
                 shell = shell.overlay(super::motion::paint_modal(dialog, &view_model.motion));
             } else if let Some(dialog) = delete_repository_dialog(&view_model) {
                 shell = shell.overlay(super::motion::paint_modal(dialog, &view_model.motion));
+            } else if let Some(dialog) = super::input::playlist_name_dialog(&view_model) {
+                shell = shell.overlay(super::motion::paint_modal(dialog, &view_model.motion));
             } else if let Some(dialog) = playlist_creator_dialog(&view_model) {
                 shell = shell.overlay(super::motion::paint_modal(dialog, &view_model.motion));
             } else if let Some(dialog) = super::sidebar_view::folder_dialog(&view_model) {
@@ -679,6 +128,8 @@ pub fn mount_shell(
                 shell = shell.overlay(super::motion::paint_panel(popover, &view_model));
             } else if let Some(popover) = super::admin::task_popover(&view_model) {
                 shell = shell.overlay(super::motion::paint_panel(popover, &view_model));
+            } else if let Some(menu) = super::files_view::entry_menu(&view_model) {
+                shell = shell.overlay(menu);
             }
             shell
         })?;
@@ -854,10 +305,89 @@ fn missing_repository_panel(model: &ShellViewModel) -> impl IntoView + use<'_> {
 
 
 
-/// 设置和其余实况页的页头：标题在左，卡片在内容区。
-fn framed_page(eyebrow: impl Into<String>, title: impl Into<String>, body: Vec<AnyView>) -> AnyView {
+/// 播放集页：播放表面，以及不能播放的条目。名称和当前目录不在这一页另开输入。
+fn playlist_page(model: &ShellViewModel) -> AnyView {
+    let mut body = Vec::new();
+    if model.player_surface_visible() {
+        body.push(super::player_view::player_surface(model));
+    }
+    if !model.playlist_item_status.is_empty() {
+        body.push(text(format!("不可播放项目：{}", model.playlist_item_status)).key("playlist-item-status").into_any());
+    }
+    super::workbench::page(body)
+}
+
+/// 缓存上限和关闭行为。主题在外观卡里。保存仍走原来的设置消息。
+fn settings_editor(view_model: &ShellViewModel) -> Option<AnyView> {
+    if !matches!(view_model.page, ShellPage::Settings | ShellPage::SettingsError) {
+        return None;
+    }
+    let cache_limit = view_model.settings_cache_limit_draft.clone();
+    let player_id = view_model.settings.default_playlist_player_type_id.clone().unwrap_or_default();
+    let close_behavior = view_model.settings.close_behavior.clone();
+    Some(
+        widget(Stack::column(12.0))
+            .children((
+                super::workbench::section_card(
+                    "播放与缓存",
+                    vec![
+                        widget(TextInput::new(cache_limit).label("缩略图缓存上限（MB）"))
+                            .on_cx(|_, event: &TextChanged, cx| {
+                                cx.dispatch_program(ShellMessage::SettingsCacheLimitChanged(event.value.to_string()));
+                            })
+                            .into_any(),
+                        widget(TextInput::new(player_id).label("默认播放器类型"))
+                            .on_cx(|_, event: &TextChanged, cx| {
+                                cx.dispatch_program(ShellMessage::SettingsPlayerChanged(event.value.to_string()));
+                            })
+                            .into_any(),
+                    ],
+                ),
+                super::workbench::section_card(
+                    "关闭行为",
+                    vec![widget(Stack::bar(8.0))
+                        .children((
+                            text(format!("关闭行为：{}", close_label(&close_behavior))).key("settings-close-label"),
+                            widget(Stack::spacer()),
+                            button("确认后关闭").key("settings-close-confirm").on_cx(|_, _: &Activate, cx| {
+                                cx.dispatch_program(ShellMessage::SettingsCloseBehaviorChanged("confirm".into()));
+                            }),
+                            button("最小化到托盘").key("settings-close-tray").on_cx(|_, _: &Activate, cx| {
+                                cx.dispatch_program(ShellMessage::SettingsCloseBehaviorChanged("minimizeToTray".into()));
+                            }),
+                            button("直接退出").key("settings-close-quit").on_cx(|_, _: &Activate, cx| {
+                                cx.dispatch_program(ShellMessage::SettingsCloseBehaviorChanged("quit".into()));
+                            }),
+                        ))
+                        .into_any()],
+                ),
+                view_model.settings_error.clone().map(|error| text(format!("设置提示：{error}")).key("settings-error")),
+                button("保存应用设置").key("save-application-settings").on_cx(|_, _: &Activate, cx| {
+                    cx.dispatch_program(ShellMessage::SaveSettings);
+                }),
+            ))
+            .into_any(),
+    )
+}
+
+/// 设置页正文放进纵向滚动。末尾留白挂在设置表面最后，滚到底才离开窗口边。
+fn framed_page(eyebrow: impl Into<String>, title: impl Into<String>, body: Vec<AnyView>, scroll: bool) -> AnyView {
     let eyebrow = eyebrow.into();
     let title = title.into();
+    let content = widget(Stack::column(12.0)).children(body).into_any();
+    let content = if scroll {
+        widget(ScrollView::new(ScrollAxes::Vertical).with_layout(|layout| {
+            layout.flex_grow = Some(1.0);
+            layout.flex_shrink = Some(1.0);
+            layout.min_height = Some(LengthSpec::Px(0.0));
+            layout.height = Some(LengthSpec::Fill);
+            layout.flex_basis = Some(LengthSpec::Px(0.0));
+        }))
+        .children((content,))
+        .into_any()
+    } else {
+        content
+    };
     widget(Stack::fill_column(16.0).padding_xy(20.0, 18.0).min_height(LengthSpec::Px(0.0)))
         .children((
             widget(Stack::bar(16.0)).children((
@@ -867,9 +397,19 @@ fn framed_page(eyebrow: impl Into<String>, title: impl Into<String>, body: Vec<A
                 )),
                 widget(Stack::spacer()),
             )),
-            widget(Stack::column(12.0)).children(body),
+            content,
         ))
         .into_any()
+}
+
+/// 关闭行为存的是 confirm、minimizeToTray、quit。画面用按钮上的中文。
+fn close_label(value: &str) -> &str {
+    match value {
+        "confirm" => "确认后关闭",
+        "minimizeToTray" => "最小化到托盘",
+        "quit" => "直接退出",
+        other => other,
+    }
 }
 
 fn section_heading(model: &ShellViewModel) -> (&'static str, String) {
@@ -919,10 +459,10 @@ fn playlist_creator_dialog(model: &ShellViewModel) -> Option<impl IntoView + use
                 notice,
             )))
             .footer(widget(Stack::row(8.0)).children((
-                button("取消").key("playlist-dialog-cancel").on_cx(|_, _: &Activate, cx| {
+                widget(super::workbench::ghost_button("取消")).key("playlist-dialog-cancel").on_cx(|_, _: &Activate, cx| {
                     cx.dispatch_program(ShellMessage::ClosePlaylistDialog);
                 }),
-                button("创建").key("create-playlist").disabled(blocked).on_cx(|_, _: &Activate, cx| {
+                widget(super::workbench::primary_button("创建")).key("create-playlist").disabled(blocked).on_cx(|_, _: &Activate, cx| {
                     cx.dispatch_program(ShellMessage::CreatePlaylist);
                 }),
             ))),
@@ -940,11 +480,15 @@ fn delete_repository_dialog(model: &ShellViewModel) -> Option<impl IntoView + us
     let modes = [DeleteMode::RecordOnly, DeleteMode::DeleteMetadata, DeleteMode::DeleteFolder];
     let options = modes.into_iter().map(|mode| {
         let enabled = model.workspace.delete_mode_enabled(mode);
+        let kind = match mode {
+            DeleteMode::RecordOnly => ButtonKind::Ghost,
+            DeleteMode::DeleteMetadata | DeleteMode::DeleteFolder => ButtonKind::Danger,
+        };
         widget(Stack::column(4.0)).children((
-            button(mode.label()).disabled(deleting || !enabled).on_cx(move |_, _: &Activate, cx| {
+            widget(Button::new(mode.label()).kind(kind).disabled(deleting || !enabled)).on_cx(move |_, _: &Activate, cx| {
                 cx.dispatch_program(ShellMessage::MissingConfirmDelete(mode));
             }),
-            text(model.workspace.delete_mode_detail(mode)),
+            widget(super::workbench::meta(model.workspace.delete_mode_detail(mode))),
         ))
     });
     let error = (!dialog.error.is_empty()).then(|| widget(ValidationMessage::new(dialog.error.clone(), ValidationIntent::Danger)));
@@ -956,18 +500,10 @@ fn delete_repository_dialog(model: &ShellViewModel) -> Option<impl IntoView + us
                 error,
                 deleting.then(|| text("处理中...").key("delete-dialog-busy")),
             )))
-            .footer(button("取消").key("delete-dialog-cancel").disabled(deleting).on_cx(|_, _: &Activate, cx| {
+            .footer(widget(super::workbench::ghost_button("取消")).key("delete-dialog-cancel").disabled(deleting).on_cx(|_, _: &Activate, cx| {
                 cx.dispatch_program(ShellMessage::MissingCloseDelete);
             })),
     )
 }
 
-/// 显示名仅用于标签，服务请求始终使用 DTO 中的完整仓库相对路径。
-fn entry_message(entry: &FileBrowserEntry) -> ShellMessage {
-    if entry.kind == "directory" {
-        ShellMessage::OpenDirectory(entry.path.clone())
-    } else {
-        ShellMessage::SelectFile { path: entry.path.clone(), asset_id: entry.asset_id.clone() }
-    }
-}
 

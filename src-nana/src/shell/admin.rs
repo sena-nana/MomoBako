@@ -1,7 +1,6 @@
 //! 设置、插件、日志、任务和仓库动作的状态。
 //!
-//! 旧的插件、日志和设置消息仍由这里归约，页面文案保持原来的句子。
-//! 实况表面只在不是验收场景时出现，避免改掉 15 个离屏命中目标。
+//! 插件、日志和设置消息在这里归约。验收页和产品窗口共用同一套表面。
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -15,14 +14,23 @@ use super::player::PlayerMessage;
 use super::{ShellMessage, ShellPage, ShellViewModel, WorkspacePanel};
 
 #[path = "admin_support.rs"]
-mod support;
+pub(super) mod support;
 #[path = "admin_reduce.rs"]
 mod reduce;
 #[path = "tool_native.rs"]
 mod tool_native;
 #[path = "admin_view.rs"]
 mod view;
+#[path = "admin_gap.rs"]
+mod gap;
+#[path = "office_settings.rs"]
+mod office;
+#[path = "source_auth_page.rs"]
+mod source_page;
+#[path = "source_provision.rs"]
+mod source_provision;
 
+pub(crate) use gap::opened_plugin_pages;
 pub(crate) use reduce::reduce_message;
 pub(crate) use view::{admin_surface, task_popover};
 
@@ -36,6 +44,17 @@ pub enum SourceAuthCall {
     CreateSession,
     Status,
     Clear,
+    /// 轮询扫码结果。方法名仍从 `pollSessionMethod` 读取。
+    Poll,
+}
+
+/// Office 转换设置页上的一次调用。没有快照时不编造运行状态。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OfficeAction {
+    Status,
+    SelfCheck,
+    ClearCache,
+    StopDaemon,
 }
 
 /// 插件配置、安装、日志筛选、任务弹层和仓库动作消息。
@@ -99,6 +118,50 @@ pub enum AdminMessage {
     CallSourceAuth { plugin_id: String, slot: SourceAuthCall },
     /// 插件调用结束。成功文案只附加字符串 message 和 status。
     SourceAuthFinished { method: String, result: Result<serde_json::Value, String> },
+    /// 文件右键里能直接调用的插件动作。
+    CallFilePlugin {
+        plugin_id: String,
+        method: String,
+        payload: serde_json::Value,
+        repository_id: Option<String>,
+    },
+    /// 文件插件动作结束。成功写到文件活动，失败写到文件错误。
+    FilePluginFinished { method: String, result: Result<serde_json::Value, String> },
+    /// 刷新下载服务状态。没有快照时页面只说明缺的字段。
+    RefreshDownloader,
+    /// 下载服务状态返回。失败不编造任务数。
+    DownloaderStatusFinished { result: Result<serde_json::Value, String> },
+    /// 清掉本页的扫码会话，不调用插件的退出方法。
+    DismissSourceAuth,
+    /// 来源认证页上的缓存目录草稿。
+    SetSourceCachePath(String),
+    /// 排队选择来源缓存目录。取消时不改草稿。
+    ChooseSourceCache,
+    /// 建仓名称草稿。
+    SetSourceRepoName(String),
+    /// 建仓路径草稿。
+    SetSourceRepoPath(String),
+    /// 登录结果里有插件、账号配置、名称和路径才创建仓库。
+    SubmitSourceRepository,
+    /// 来源建仓协议返回。成功文案来自宿主，失败是真实错误。
+    SourceRepositoryFinished { result: Result<String, String> },
+    /// Office 转换设置页的刷新、自检、清缓存或停守护进程。
+    RunOffice(OfficeAction),
+    /// Office 插件调用结束。状态快照只在刷新成功时替换。
+    OfficeFinished { method: String, result: Result<serde_json::Value, String> },
+    /// 选择要清理预览缓存的资源库。
+    SelectOfficeRepository(String),
+}
+
+/// 插件调用从哪来。登录结果和文件菜单结果不能混在一起。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PluginCallOrigin {
+    SourceAuth,
+    FileMenu,
+    /// 下载服务设置页读取 `downloader.getRuntimeStatus`。
+    Downloader,
+    /// Office 转换设置页。
+    Office,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -137,8 +200,22 @@ pub enum AdminEffect {
     RequestOpenDialog,
     RequestSaveDialog { content: String },
     WriteFile { path: String, bytes: Vec<u8> },
-    /// 调用插件方法。载荷是空对象，不带登录二维码参数。
-    CallPlugin { plugin_id: String, method: String, payload: serde_json::Value },
+    /// 用来源登录结果创建仓库。配置必须来自登录返回，不能现编。
+    CreateSourceRepository {
+        repo_id: String,
+        name: String,
+        path: String,
+        backend_plugin_id: String,
+        backend_config: serde_json::Value,
+    },
+    /// 调用插件方法。来源登录不带仓库；文件动作带上当前仓库。
+    CallPlugin {
+        plugin_id: String,
+        method: String,
+        payload: serde_json::Value,
+        repository_id: Option<String>,
+        origin: PluginCallOrigin,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -151,6 +228,25 @@ pub struct AdminState {
     pub json_drafts: BTreeMap<String, BTreeMap<String, String>>,
     pub action_message: String,
     pub action_error: String,
+    pub source_auth: support::SourceAuthView,
+    /// 只有 `downloader.getRuntimeStatus` 成功后才有值。
+    pub downloader_status: Option<support::DownloaderStatus>,
+    pub downloader_error: String,
+    pub downloader_loading: bool,
+    /// 来源认证页的缓存目录。空字符串表示还没选。
+    pub source_cache_path: String,
+    pub source_repo_name: String,
+    pub source_repo_path: String,
+    /// 最近一次来源登录调用的插件。结果返回前先记在这里。
+    pub source_auth_plugin_id: String,
+    /// 来源建仓协议还没返回。避免重复提交。
+    pub source_creating: bool,
+    /// 只有 `officeConvert.getRuntimeStatus` 成功后才有值。
+    pub office_status: Option<serde_json::Value>,
+    pub office_error: String,
+    pub office_message: String,
+    pub office_pending: Option<OfficeAction>,
+    pub office_repo_id: String,
     pub hook_executions: Vec<PluginHookExecutionRecord>,
     pub vue_settings: BTreeSet<String>,
     pub managing: bool,
@@ -198,6 +294,20 @@ impl Default for AdminState {
             json_drafts: BTreeMap::new(),
             action_message: String::new(),
             action_error: String::new(),
+            source_auth: support::SourceAuthView::default(),
+            downloader_status: None,
+            downloader_error: String::new(),
+            downloader_loading: false,
+            source_cache_path: String::new(),
+            source_repo_name: String::new(),
+            source_repo_path: String::new(),
+            source_auth_plugin_id: String::new(),
+            source_creating: false,
+            office_status: None,
+            office_error: String::new(),
+            office_message: String::new(),
+            office_pending: None,
+            office_repo_id: String::new(),
             hook_executions: Vec::new(),
             vue_settings: BTreeSet::new(),
             managing: false,
@@ -365,12 +475,11 @@ impl AdminState {
 impl ShellViewModel {
     /// 设置页不要求当前仓库。工作台面板仍要求启动完成且主区有仓库。
     pub(super) fn admin_settings_visible(&self) -> bool {
-        !self.acceptance_scene && matches!(self.page, ShellPage::Settings | ShellPage::SettingsError)
+        matches!(self.page, ShellPage::Settings | ShellPage::SettingsError)
     }
 
     pub(super) fn admin_workspace_visible(&self, panel: WorkspacePanel) -> bool {
-        !self.acceptance_scene
-            && self.workspace.startup.status == super::StartupStatus::Ready
+        self.workspace.startup.status == super::StartupStatus::Ready
             && self.workspace.main_region() == super::MainRegion::HasRepository
             && self.workspace.panel == panel
     }

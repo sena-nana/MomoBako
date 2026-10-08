@@ -1,7 +1,7 @@
 //! 宿主输入：工作区拖放、外部打开和关闭确认。
 //!
 //! 移动、导入和附加复用文件与侧栏已有的服务请求。
-//! 系统拖出、外部打开、目录揭示和托盘没有 Nana 命令，只记录宿主请求。
+//! 系统拖出、外部打开、目录揭示和托盘没有 Nana 窗口命令，只记录宿主请求。
 //! 保存、打开和重定向文件夹对话框都排队为 `OpenFileDialog`，完成事件再写回状态。
 
 use nana_ui_platform::host::WindowCommand;
@@ -17,10 +17,21 @@ mod support;
 mod reduce;
 #[path = "input_view.rs"]
 mod view;
+#[path = "source_prompt.rs"]
+mod source_prompt;
+#[path = "thumbnail_prompt.rs"]
+mod thumbnail_prompt;
+
+pub(crate) use source_prompt::playlist_name_dialog;
 
 pub(crate) use reduce::{begin_relocate_dialog, reduce_message};
 pub(crate) use support::{decide_close, CloseDecision};
 pub(crate) use view::close_prompt;
+
+/// 用仓库根和条目相对路径拼绝对路径，供打开和定位使用。
+pub(super) fn repository_absolute(root: &str, relative: &str) -> String {
+    support::join_repository_path(root, relative, None)
+}
 pub(crate) use view::{drop_marker, empty_repository_panel, file_drop_flags, file_drop_message};
 
 #[cfg(test)]
@@ -44,6 +55,10 @@ pub enum PendingHostCommand {
     OpenPluginDialog,
     OpenFolderDialog,
     OpenAttachDialog,
+    OpenDownloadDialog,
+    OpenThumbnailDialog,
+    OpenSourceCacheDialog,
+    OpenRepositoryExportDialog { file_name: Option<String>, extension: String },
 }
 
 /// 工作区拖放、外部打开和关闭确认消息。
@@ -110,6 +125,24 @@ pub enum InputMessage {
     StartExternalDrag { paths: Vec<String>, trash: bool, backend_kind: String, repo_root: String },
     ConfirmCloseAnswer(bool),
     FileDialogCompleted { request_id: u64, paths: Vec<String>, failed: Option<String> },
+    BeginDownloadFolder {
+        plugin_id: String,
+        method: String,
+        payload: serde_json::Value,
+        repository_id: Option<String>,
+    },
+    OpenSourcePlaylist {
+        plugin_id: String,
+        method: String,
+        payload: serde_json::Value,
+        repository_id: Option<String>,
+    },
+    SourcePlaylistDraft(String),
+    SubmitSourcePlaylist,
+    CloseSourcePlaylist,
+    BeginThumbnailFile { repo_id: String, path: String, kind: String },
+    PasteThumbnail { repo_id: String, path: String, kind: String },
+    ClearThumbnail { repo_id: String, path: String, kind: String },
     ClearDrag,
 }
 
@@ -158,6 +191,12 @@ pub struct InputState {
     pub sidebar_dragging: bool,
     pub sidebar_resize_dirty: bool,
     pub live_gesture: Option<LiveGesture>,
+    /// 下载菜单已经点过，正在等目录对话框。
+    pub pending_download: Option<source_prompt::PendingDownload>,
+    /// 来源播放列表正在问名称。
+    pub source_playlist: Option<source_prompt::SourcePlaylistPrompt>,
+    /// 自定义缩略图正在等选文件对话框。
+    pub pending_thumbnail: Option<thumbnail_prompt::PendingThumbnail>,
     session: Option<InternalSession>,
     host_commands: Vec<PendingHostCommand>,
 }
@@ -185,8 +224,7 @@ impl InputState {
             }
             CloseDecision::HoldForTray => {
                 self.pending_close = false;
-                self.notice = "最小化到托盘尚未接通".into();
-                eprintln!("Nana 最小化到托盘尚未接通");
+                self.notice.clear();
                 self.host_requests.push(HostRequest::Input(HostInputRequest::MinimizeToTray));
             }
         }
@@ -223,6 +261,26 @@ impl InputState {
         self.host_commands.push(PendingHostCommand::OpenAttachDialog);
     }
 
+    /// 排队下载目标目录对话框。取消时不调用插件。
+    pub(crate) fn queue_download_dialog(&mut self) {
+        self.host_commands.push(PendingHostCommand::OpenDownloadDialog);
+    }
+
+    /// 排队自定义缩略图的选文件对话框。
+    pub(crate) fn queue_thumbnail_dialog(&mut self) {
+        self.host_commands.push(PendingHostCommand::OpenThumbnailDialog);
+    }
+
+    /// 排队来源缓存目录对话框。取消时不改认证页草稿。
+    pub(crate) fn queue_source_cache_dialog(&mut self) {
+        self.host_commands.push(PendingHostCommand::OpenSourceCacheDialog);
+    }
+
+    /// 排队资源库压缩包的保存对话框。取消时不调用导出协议。
+    pub(crate) fn queue_repository_export_dialog(&mut self, file_name: Option<String>, extension: String) {
+        self.host_commands.push(PendingHostCommand::OpenRepositoryExportDialog { file_name, extension });
+    }
+
     /// 把排队命令换成当前窗口的平台命令。
     pub(crate) fn take_platform_commands(&mut self, id: WindowId, maximized: bool) -> Vec<WindowCommand> {
         let pending = std::mem::take(&mut self.host_commands);
@@ -247,6 +305,22 @@ impl InputState {
                 PendingHostCommand::OpenAttachDialog => Some(WindowCommand::OpenFileDialog {
                     id,
                     request: support::attach_folder_request(),
+                }),
+                PendingHostCommand::OpenDownloadDialog => Some(WindowCommand::OpenFileDialog {
+                    id,
+                    request: support::download_folder_request(),
+                }),
+                PendingHostCommand::OpenThumbnailDialog => Some(WindowCommand::OpenFileDialog {
+                    id,
+                    request: support::thumbnail_file_request(),
+                }),
+                PendingHostCommand::OpenSourceCacheDialog => Some(WindowCommand::OpenFileDialog {
+                    id,
+                    request: support::source_cache_folder_request(),
+                }),
+                PendingHostCommand::OpenRepositoryExportDialog { file_name, extension } => Some(WindowCommand::OpenFileDialog {
+                    id,
+                    request: support::repository_export_save_request(file_name, &extension),
                 }),
             })
             .collect()

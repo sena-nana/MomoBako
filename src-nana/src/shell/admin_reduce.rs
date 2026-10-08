@@ -7,7 +7,7 @@ use crate::backend::services::repository::{PluginConfigSnapshot, PluginManifest,
 
 use super::super::{ShellMessage, ShellPage, ShellViewModel, WorkspacePanel};
 use super::support::{self, FieldChange};
-use super::{AdminEffect, AdminMessage, SourceAuthCall};
+use super::{AdminEffect, AdminMessage, PluginCallOrigin, SourceAuthCall};
 
 /// 处理实况管理消息，并吃掉原来写在壳层里的插件、日志、设置和任务分支。
 pub(crate) fn reduce_message(model: &mut ShellViewModel, message: ShellMessage) -> Option<ShellMessage> {
@@ -364,6 +364,34 @@ fn reduce_admin(model: &mut ShellViewModel, message: AdminMessage) {
         }
         AdminMessage::CallSourceAuth { plugin_id, slot } => queue_source_auth(model, &plugin_id, slot),
         AdminMessage::SourceAuthFinished { method, result } => finish_source_auth(model, &method, result),
+        AdminMessage::CallFilePlugin { plugin_id, method, payload, repository_id } => {
+            queue_file_plugin(model, plugin_id, method, payload, repository_id);
+        }
+        AdminMessage::FilePluginFinished { method, result } => finish_file_plugin(model, &method, result),
+        AdminMessage::RefreshDownloader => super::gap::queue_downloader(model),
+        AdminMessage::DownloaderStatusFinished { result } => super::gap::finish_downloader(model, result),
+        AdminMessage::DismissSourceAuth => {
+            model.admin.source_auth = super::support::SourceAuthView::default();
+            model.admin.source_auth_plugin_id.clear();
+            if model.admin.action_message.starts_with("已调用") || model.admin.action_message.starts_with("正在调用") {
+                model.admin.action_message.clear();
+            }
+        }
+        AdminMessage::SetSourceCachePath(path) => model.admin.source_cache_path = path,
+        AdminMessage::ChooseSourceCache => model.input.queue_source_cache_dialog(),
+        AdminMessage::SetSourceRepoName(name) => model.admin.source_repo_name = name,
+        AdminMessage::SetSourceRepoPath(path) => model.admin.source_repo_path = path,
+        AdminMessage::SubmitSourceRepository => super::source_provision::submit(model),
+        AdminMessage::SourceRepositoryFinished { result } => super::source_provision::finish(model, result),
+        AdminMessage::RunOffice(action) => super::office::queue_office(model, action),
+        AdminMessage::OfficeFinished { method, result } => super::office::finish_office(model, &method, result),
+        AdminMessage::SelectOfficeRepository(repo_id) => {
+            if model.workspace.repositories.iter().any(|repository| repository.repo_id == repo_id) {
+                model.admin.office_repo_id = repo_id;
+            } else {
+                eprintln!("Nana Office 清理缓存找不到资源库：{repo_id}");
+            }
+        }
     }
 }
 
@@ -375,6 +403,7 @@ fn publish_plugins(model: &mut ShellViewModel, plugins: &[PluginManifest], switc
     model.plugin_entries = plugins.iter().map(|plugin| format!("{} {} · {}", plugin.name, plugin.version, plugin.status)).collect();
     model.plugin_entry_ids = plugins.iter().map(|plugin| plugin.plugin_id.clone()).collect();
     model.plugin_enabled = plugins.iter().map(|plugin| plugin.enabled).collect();
+    model.inspect.shortcuts = super::super::inspect_shortcuts::shortcuts_from_plugins(plugins);
 }
 
 fn apply_config(model: &mut ShellViewModel, config: &PluginConfigSnapshot) {
@@ -432,17 +461,22 @@ fn queue_source_auth(model: &mut ShellViewModel, plugin_id: &str, slot: SourceAu
         SourceAuthCall::CreateSession => "createSessionMethod",
         SourceAuthCall::Status => "statusMethod",
         SourceAuthCall::Clear => "clearMethod",
+        SourceAuthCall::Poll => "pollSessionMethod",
     };
     let Some(method) = support::named_auth_method(plugin, key) else {
         eprintln!("Nana 来源登录调用缺少方法名");
         return;
     };
     model.admin.reset_action();
+    model.admin.source_auth = support::SourceAuthView::default();
+    model.admin.source_auth_plugin_id = plugin_id.to_string();
     model.admin.action_message = format!("正在调用 {method}…");
     model.admin.effects.push(AdminEffect::CallPlugin {
         plugin_id: plugin_id.to_string(),
         method,
         payload: serde_json::json!({}),
+        repository_id: None,
+        origin: PluginCallOrigin::SourceAuth,
     });
 }
 
@@ -451,11 +485,43 @@ fn finish_source_auth(model: &mut ShellViewModel, method: &str, result: Result<s
         Ok(payload) => {
             model.admin.action_error.clear();
             model.admin.action_message = support::source_auth_called_message(method, &payload);
+            let mut view = support::source_auth_view(&payload);
+            view.plugin_id = model.admin.source_auth_plugin_id.clone();
+            view.payload = Some(payload);
+            model.admin.source_auth = view;
         }
         Err(error) => {
             eprintln!("Nana 来源登录调用失败：{error}");
             model.admin.action_message.clear();
+            model.admin.source_auth = support::SourceAuthView::default();
             model.admin.action_error = if error.is_empty() { "来源登录调用失败。".into() } else { error };
+        }
+    }
+}
+
+fn queue_file_plugin(model: &mut ShellViewModel, plugin_id: String, method: String, payload: serde_json::Value, repository_id: Option<String>) {
+    if plugin_id.trim().is_empty() || method.trim().is_empty() {
+        eprintln!("Nana 文件插件动作缺少方法");
+        return;
+    }
+    model.admin.effects.push(AdminEffect::CallPlugin {
+        plugin_id,
+        method,
+        payload,
+        repository_id,
+        origin: PluginCallOrigin::FileMenu,
+    });
+}
+
+fn finish_file_plugin(model: &mut ShellViewModel, method: &str, result: Result<serde_json::Value, String>) {
+    match result {
+        Ok(_) => {
+            model.files.error.clear();
+            model.files.activity = format!("已调用 {method}。");
+        }
+        Err(error) => {
+            eprintln!("Nana 文件插件动作失败：{method}：{error}");
+            model.files.error = if error.is_empty() { format!("{method} 调用失败。") } else { error };
         }
     }
 }
@@ -629,12 +695,13 @@ fn copy_external(model: &mut ShellViewModel, label: &str, value: &str) {
         model.admin.external_error = format!("{label} 尚未加载。");
         return;
     }
-    model.admin.effects.push(AdminEffect::CopyText(value.to_string()));
-    if support::clipboard_available() {
-        model.admin.external_message = format!("{label} 已复制。");
-    } else {
-        model.admin.external_error = format!("复制失败：宿主剪贴板尚未接通");
+    if !support::clipboard_available() {
+        eprintln!("Nana 系统剪贴板不可用");
+        model.admin.external_error = "复制失败：系统剪贴板不可用".into();
+        return;
     }
+    model.admin.effects.push(AdminEffect::CopyText(value.to_string()));
+    model.admin.external_message = format!("{label} 已复制。");
 }
 
 fn export_external(model: &mut ShellViewModel) {
@@ -645,12 +712,13 @@ fn export_external(model: &mut ShellViewModel) {
         model.admin.external_error = "连接 JSON 尚未加载。".into();
         return;
     }
-    model.admin.effects.push(AdminEffect::RequestSaveDialog { content });
-    if support::save_dialog_available() {
-        model.admin.external_message = "正在选择导出位置…".into();
-    } else {
-        model.admin.external_error = "导出失败：宿主保存对话框尚未接通".into();
+    if !support::save_dialog_available() {
+        eprintln!("Nana 系统保存对话框不可用");
+        model.admin.external_error = "导出失败：系统保存对话框不可用".into();
+        return;
     }
+    model.admin.effects.push(AdminEffect::RequestSaveDialog { content });
+    model.admin.external_message = "正在选择导出位置…".into();
 }
 
 fn complete_export(model: &mut ShellViewModel, path: Option<String>) {

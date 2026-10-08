@@ -39,7 +39,7 @@
 | Vue 插件组件 | `NativePluginContribution`，否则 `UpgradeRequired` |
 | 窗口、对话框、外部打开 | `host_api` 请求 |
 
-非验收场景的实况壳层已经挂上 `SidebarFrame`、`TreeView`、`Dialog`、`Thumbnail`、虚拟列表、`MediaTransportBar`、`NativeMarkdown`、`SelectableRichText`、`ReorderList`、`Progress` 和 `Workspace`。15 个旧验收场景仍保留原来的按钮列表。
+产品窗口和 15 个验收场景共用 `SidebarFrame`、`TreeView`、`Dialog`、`Thumbnail`、虚拟列表、`MediaTransportBar`、`NativeMarkdown`、`SelectableRichText`、`ReorderList`、`Progress` 和 `Workspace`。原来的验收按钮列表已经退役。
 
 ## 主题
 

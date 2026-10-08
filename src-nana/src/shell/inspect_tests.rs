@@ -108,18 +108,30 @@ fn extension_dispatch_prefers_markdown_and_native_preview() {
     assert_eq!(super::support::classify("txt", &[]), PreviewKind::Text);
     assert_eq!(super::support::classify("vue", &[]), PreviewKind::Text);
     assert_eq!(super::support::classify("mp3", &[]), PreviewKind::Media);
-    assert_eq!(super::support::classify("pdf", &[]), PreviewKind::Upgrade);
-    assert_eq!(super::support::classify("glb", &[]), PreviewKind::Upgrade);
-    assert_eq!(super::support::classify("zip", &[]), PreviewKind::Upgrade);
+    assert_eq!(
+        super::support::classify("pdf", &[]),
+        PreviewKind::Native { view_id: "momobako.preview.pdf".into(), label: "PDF".into() }
+    );
+    assert_eq!(
+        super::support::classify("glb", &[]),
+        PreviewKind::Native { view_id: "momobako.preview.model".into(), label: "模型".into() }
+    );
+    assert_eq!(
+        super::support::classify("zip", &[]),
+        PreviewKind::Native { view_id: "momobako.preview.archive".into(), label: "压缩包".into() }
+    );
     assert_eq!(super::support::classify("bin", &[]), PreviewKind::Unsupported);
 
     let native = preview_binding(NativeContributionKind::Preview, "pdf");
     assert_eq!(
         super::support::classify("pdf", &[native]),
-        PreviewKind::Native { view_id: "view-pdf".into(), label: "官方预览".into() }
+        PreviewKind::Native { view_id: "momobako.preview.pdf".into(), label: "PDF".into() }
     );
     let playlist = preview_binding(NativeContributionKind::PlaylistPlayer, "pdf");
-    assert_eq!(super::support::classify("pdf", &[playlist]), PreviewKind::Upgrade);
+    assert_eq!(
+        super::support::classify("pdf", &[playlist]),
+        PreviewKind::Native { view_id: "momobako.preview.pdf".into(), label: "PDF".into() }
+    );
 }
 
 #[test]
@@ -136,8 +148,10 @@ fn preview_kind_starts_the_matching_body() {
     let mut state = InspectState::default();
     state.reduce(true, Some("repo"), InspectMessage::RegisterPreview(preview_binding(NativeContributionKind::PlaylistPlayer, "pdf")));
     state.note_detail(&asset("docs/a.pot", "pot", 1, false, Vec::new()));
-    assert!(matches!(state.body, PreviewBody::Upgrade(ref message) if message.contains("升级")));
-    assert!(state.effects.is_empty());
+    assert!(matches!(
+        state.take_effects().pop(),
+        Some(InspectEffect::LoadNative { view_id, path, .. }) if view_id == "momobako.preview.office" && path == "docs/a.pot"
+    ));
     state.note_detail(&asset("docs/a.pdf", "pdf", 1, false, Vec::new()));
     assert!(matches!(
         state.take_effects().pop(),
@@ -146,7 +160,10 @@ fn preview_kind_starts_the_matching_body() {
 
     state.reduce(true, Some("repo"), InspectMessage::RegisterPreview(preview_binding(NativeContributionKind::Preview, "pdf")));
     state.note_detail(&asset("docs/a.pdf", "pdf", 1, false, Vec::new()));
-    assert!(matches!(state.body, PreviewBody::Native { ref view_id, .. } if view_id == "view-pdf"));
+    assert!(matches!(
+        state.take_effects().pop(),
+        Some(InspectEffect::LoadNative { view_id, .. }) if view_id == "momobako.preview.pdf"
+    ));
 
     state.note_detail(&asset("pics/a.png", "png", 1, false, Vec::new()));
     assert!(matches!(state.take_effects().pop(), Some(InspectEffect::LoadImage { path, .. }) if path == "pics/a.png"));
@@ -199,6 +216,8 @@ fn media_without_a_decoder_never_reports_playing() {
         path,
         generation,
         result: Err("没有原生解码器".into()),
+        pcm: None,
+        frames: None,
     });
     let PreviewBody::Media(session) = &state.body else { panic!("不是音视频") };
     assert_eq!(session.status, "failed");
@@ -222,7 +241,7 @@ fn wav_preview_plays_and_seeks_without_opening_a_device() {
     let session = super::support::preview_media_session("repo", &tone_wav()).expect("wav");
     assert_eq!(session.status, "paused");
     assert_eq!(session.duration_ms, Some(2));
-    state.reduce(true, Some("repo"), InspectMessage::MediaLoaded { path, generation, result: Ok(session) });
+    state.reduce(true, Some("repo"), InspectMessage::MediaLoaded { path, generation, result: Ok(session), pcm: None, frames: None });
     state.reduce(true, Some("repo"), InspectMessage::PlayPause);
     state.reduce(true, Some("repo"), InspectMessage::Seek(1));
     let PreviewBody::Media(session) = &state.body else { panic!("丢了会话") };
@@ -522,8 +541,9 @@ fn primary_action_reopens_a_live_target_and_acceptance_keeps_the_old_detail() {
     assert!(matches!(live.inspect.effects.last(), Some(InspectEffect::LoadImage { .. })));
 
     let mut acceptance = ShellViewModel::for_page(ShellPage::SelectedFile);
+    assert!(acceptance.inspect_surface_visible());
     acceptance.reduce(ShellMessage::PrimaryAction);
-    assert_eq!(acceptance.detail, "该操作的领域服务尚未接通，数据未写入");
+    assert_eq!(acceptance.detail, "当前没有可打开的预览");
     assert!(acceptance.inspect.effects.is_empty());
 
     live.reduce(ShellMessage::OpenDirectory("folder".into()));
@@ -609,5 +629,77 @@ fn inspect_surface_appears_only_after_startup_with_a_repository() {
     assert!(!model.inspect_surface_visible());
     model.reduce(ShellMessage::SelectFile { path: "pics/a.png".into(), asset_id: None });
     assert!(model.inspect_surface_visible());
-    assert!(ShellViewModel::for_page(ShellPage::SelectedFile).acceptance_scene);
+    let selected = ShellViewModel::for_page(ShellPage::SelectedFile);
+    assert!(selected.files_surface_visible());
+    assert!(selected.inspect_surface_visible());
+}
+
+#[test]
+fn search_query_waits_250ms_before_running() {
+    let mut state = InspectState::default();
+    state.reduce(true, Some("repo"), InspectMessage::SetQuery("peach".into()));
+    assert!(state.effects.is_empty());
+    assert!(!state.poll_own(249, true, Some("repo")));
+    assert!(state.effects.is_empty());
+    assert!(state.poll_own(1, true, Some("repo")));
+    let InspectEffect::Search { request, .. } = state.take_effects().pop().unwrap() else {
+        panic!("没有搜索");
+    };
+    assert_eq!(request.query, "peach");
+}
+
+#[test]
+fn metadata_autosave_waits_260ms_and_flushes_before_the_next_file() {
+    let mut state = InspectState::default();
+    state.note_detail(&asset("pics/a.png", "png", 1, false, Vec::new()));
+    state.take_effects();
+    state.reduce(true, Some("repo"), InspectMessage::SetComment("note".into()));
+    assert!(state.effects.is_empty());
+    assert!(!state.poll_own(259, true, Some("repo")));
+    assert!(state.poll_own(1, true, Some("repo")));
+    assert!(matches!(state.take_effects().as_slice(), [InspectEffect::SaveMetadata { .. }]));
+
+    let mut next = InspectState::default();
+    next.note_detail(&asset("pics/b.png", "png", 1, false, Vec::new()));
+    next.take_effects();
+    next.reduce(true, Some("repo"), InspectMessage::SetComment("later".into()));
+    next.begin_selection("pics/c.png");
+    assert!(matches!(next.take_effects().as_slice(), [InspectEffect::SaveMetadata { .. }]));
+}
+
+#[test]
+fn avi_preview_plays_pauses_and_seeks_on_the_shared_session() {
+    assert!(!crate::shell::player::sound_device_compiled_in());
+    let parts = super::support::preview_media_parts("repo", &super::support::sample_uncompressed()).expect("avi");
+    assert!(parts.frames.as_ref().is_some_and(|frames| frames.len() == 2));
+    assert!(parts.pcm.is_some());
+    let mut model = ShellViewModel::default();
+    model.workspace.active_repo_id = Some("repo".into());
+    model.reduce(ShellMessage::AssetDetailLoaded(Ok(asset("clips/a.avi", "avi", 1, false, Vec::new()))));
+    let InspectEffect::LoadMedia { path, generation, .. } = model.inspect.take_effects().pop().unwrap() else {
+        panic!("没有音视频请求");
+    };
+    model.reduce(ShellMessage::Inspect(InspectMessage::MediaLoaded {
+        path,
+        generation,
+        result: Ok(parts.session),
+        pcm: parts.pcm,
+        frames: parts.frames,
+    }));
+    assert_eq!(model.player.session.status, "paused");
+    assert!(model.preview_token.as_deref().unwrap_or_default().starts_with("video:"));
+    assert_eq!(model.preview_pixels.as_ref().expect("画面").rgba[0], 255);
+    model.reduce(ShellMessage::Inspect(InspectMessage::PlayPause));
+    assert_eq!(model.player.session.status, "playing");
+    assert_eq!(model.inspect.media_session().expect("会话").status, "playing");
+    assert!(super::poll_timers(&mut model));
+    assert_eq!(model.player.session.current_time_ms, 16);
+    assert_eq!(model.inspect.media_session().expect("会话").current_time_ms, 16);
+    model.reduce(ShellMessage::Inspect(InspectMessage::Seek(500)));
+    assert_eq!(model.player.session.current_time_ms, 500);
+    assert_eq!(model.inspect.media_session().expect("会话").current_time_ms, 500);
+    assert_eq!(model.preview_pixels.as_ref().expect("第二帧").rgba[2], 255);
+    model.reduce(ShellMessage::Inspect(InspectMessage::PlayPause));
+    assert_eq!(model.player.session.status, "paused");
+    assert_eq!(model.inspect.media_session().expect("会话").status, "paused");
 }

@@ -17,9 +17,15 @@ use super::ShellViewModel;
 
 #[path = "player_support.rs"]
 mod support;
+#[path = "player_clip.rs"]
+mod clip;
+pub(crate) use clip::StillShow;
 #[path = "wav_player.rs"]
 mod wav_player;
-pub(crate) use wav_player::wav_duration_ms;
+pub(crate) use wav_player::pcm_from_bytes;
+#[cfg(test)]
+pub(crate) use wav_player::sound_device_compiled_in;
+pub use wav_player::PreviewPcm;
 pub use support::{preferences_path, sessions_path, settings_path};
 pub(crate) use support::{resolution_notice, resolve_player, AUDIO_CAPABILITY, AUDIO_SEQUENCE_TYPE};
 use support::{
@@ -73,6 +79,7 @@ pub struct QueueItem {
     pub player_type_id: String,
     pub player_label: String,
     pub file_class: String,
+    pub thumbnail_path: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -119,7 +126,7 @@ pub enum PlayerMessage {
     NoteDownloadTask(String),
     DownloadProgress(DownloaderPlaylistProgressEvent),
     Reorder { source: String, before: Option<String> },
-    OpenPreview,
+    OpenPreview { item_id: Option<String> },
     RestoreDetail(Result<PlaylistDetail, String>),
 }
 
@@ -167,6 +174,16 @@ pub struct PlayerState {
     stored: BTreeMap<String, StoredSession>,
     effects: Vec<PlayerEffect>,
     wav: wav_player::WavPlayer,
+    preview_armed: bool,
+    preview_path: String,
+    /// 当前项解出的画面。没有当前项或不是视频时为空，不保留整队画面。
+    clip_frames: Option<Vec<super::inspect::support::VideoFrame>>,
+    /// 为真时，下一次发布才改预览画面。预览自己的帧不会被空的播放列表清掉。
+    clip_owned: bool,
+    /// 图片幻灯片。没有帧时 `missing` 写明缺的像素，不编造画面。
+    pub(crate) still: Option<StillShow>,
+    /// 扩展名不在音视频会话里、也不是图片时的缺数据说明。
+    pub(crate) outside_note: Option<String>,
 }
 
 impl Default for PlayerState {
@@ -200,6 +217,12 @@ impl Default for PlayerState {
             stored: BTreeMap::new(),
             effects: Vec::new(),
             wav: wav_player::WavPlayer::default(),
+            preview_armed: false,
+            preview_path: String::new(),
+            clip_frames: None,
+            clip_owned: false,
+            still: None,
+            outside_note: None,
         }
     }
 }
@@ -399,6 +422,7 @@ impl PlayerState {
     }
 
     /// 选中队列项并尝试装载。装载失败时会话保持 failed，不会变成 playing。
+    /// 找不到条目时不解码。
     fn play_item(&mut self, item_id: &str, auto_play: bool) {
         let Some(item) = self.queue.iter().find(|item| item.id == item_id).cloned() else {
             eprintln!("Nana 播放队列没有这个条目：{item_id}");
@@ -410,51 +434,8 @@ impl PlayerState {
             self.history.push(item.id.clone());
         }
         self.wants_playing = auto_play;
-        self.load_item(&item);
+        clip::load_item(self, &item);
         self.persist_if_needed();
-    }
-
-    fn load_item(&mut self, item: &QueueItem) {
-        self.session.repo_id = self.repo_id.clone().unwrap_or_default();
-        self.session.playlist_id = item.playlist_id.clone();
-        self.session.playlist_item_id = Some(item.id.clone());
-        self.session.session_id = format!("playback-{}", self.session.repo_id);
-        if item.status != "ready" {
-            self.fail_session(item.status_reason.clone().unwrap_or_else(|| "当前条目不可播放".into()));
-            return;
-        }
-        let resolution = self.resolve_type(&item.player_type_id);
-        self.notice = resolution_notice(&resolution);
-        if resolution.player.is_none() {
-            let contributed = self.contributions.iter().any(|contribution| contribution.player_type_id == item.player_type_id);
-            // 有 Vue 贡献但没有原生候选时直接失败，不能再去问解码器，否则文案会变成「没有原生解码器」。
-            let message = if contributed {
-                "播放运行时仍是 Vue 插件，需要升级为 Nana 原生播放贡献".to_string()
-            } else if self.notice.is_empty() {
-                "缺少对应播放插件".into()
-            } else {
-                self.notice.clone()
-            };
-            eprintln!("Nana 播放插件不可用：{message}");
-            self.fail_session(message);
-            return;
-        }
-        self.activity.clear();
-        let memory = resolution.player.as_ref().is_some_and(wav_player::is_memory_candidate);
-        if !memory {
-            self.wav.clear();
-        }
-        let session = self.session.clone();
-        let (session, error) = wav_player::drive(memory, &self.wav, session, wav_player::Action::Load(item.path.clone()));
-        self.session = session;
-        self.can_play = self.session.status != "failed";
-        if item.file_class == "image" {
-            self.apply_image_duration();
-        }
-        if let Some(error) = error {
-            eprintln!("Nana 播放装载失败：{error}");
-            self.activity = error;
-        }
     }
 
     fn play_entry(&mut self, repo_id: &str, kind: &str, extension: &str, asset_id: &str, path: &str, filename: &str, inspect: &mut InspectState) {
@@ -469,10 +450,10 @@ impl PlayerState {
             extension.to_ascii_lowercase()
         };
         let matched = find_player_for_extension(&extension, &self.candidates, &self.contributions);
-        let Some((player_type_id, label, file_class, upgrade)) = (match matched {
-            Some(PlayerMatch::Native(candidate)) => Some((candidate.player_type_id.clone(), candidate.label.clone(), candidate.file_class.clone(), false)),
+        let Some((player_type_id, label, file_class)) = (match matched {
+            Some(PlayerMatch::Native(candidate)) => Some((candidate.player_type_id.clone(), candidate.label.clone(), candidate.file_class.clone())),
             Some(PlayerMatch::Contribution(contribution)) => {
-                Some((contribution.player_type_id.clone(), contribution.label.clone(), contribution.file_class.clone(), true))
+                Some((contribution.player_type_id.clone(), contribution.label.clone(), contribution.file_class.clone()))
             }
             None => None,
         }) else {
@@ -505,10 +486,6 @@ impl PlayerState {
             self.queue.push(item.clone());
         }
         self.play_item(&item.id, true);
-        if upgrade {
-            self.fail_session("播放运行时仍是 Vue 插件，需要升级为 Nana 原生播放贡献".into());
-            eprintln!("Nana 播放运行时需要升级：{path}");
-        }
         self.publish(inspect);
     }
 
@@ -566,8 +543,19 @@ impl PlayerState {
     }
 
     fn set_playing(&mut self, playing: bool, inspect: &mut InspectState) {
+        if self.still.is_some() {
+            let drawable = self.still.as_ref().is_some_and(|item| item.frame.is_some());
+            self.wants_playing = playing && drawable;
+            if drawable {
+                self.session.status = if playing { "playing" } else { "paused" }.into();
+                self.session.error = None;
+                self.can_play = true;
+            }
+            self.publish(inspect);
+            return;
+        }
         self.wants_playing = playing;
-        let use_wav = self.uses_wav();
+        let use_wav = self.audible();
         let session = self.session.clone();
         let action = if playing { wav_player::Action::Play } else { wav_player::Action::Pause };
         let (session, error) = wav_player::drive(use_wav, &self.wav, session, action);
@@ -582,7 +570,11 @@ impl PlayerState {
     }
 
     fn seek(&mut self, position_ms: u64, inspect: &mut InspectState) {
-        let use_wav = self.uses_wav();
+        if self.still.is_some() {
+            eprintln!("Nana 图片幻灯片不支持跳转");
+            return;
+        }
+        let use_wav = self.audible();
         let session = self.session.clone();
         let (session, error) = wav_player::drive(use_wav, &self.wav, session, wav_player::Action::Seek(position_ms));
         self.session = session;
@@ -594,8 +586,12 @@ impl PlayerState {
     }
 
     fn set_volume(&mut self, volume: f32, inspect: &mut InspectState) {
+        if self.still.is_some() {
+            eprintln!("Nana 图片幻灯片没有音量");
+            return;
+        }
         let volume = volume.clamp(0.0, 1.0);
-        let use_wav = self.uses_wav();
+        let use_wav = self.audible();
         let session = self.session.clone();
         let (session, error) = wav_player::drive(use_wav, &self.wav, session, wav_player::Action::Volume(volume));
         self.session = session;
@@ -653,6 +649,7 @@ impl PlayerState {
     /// 停掉运行时。`clear_stored_session` 为真时清掉当前仓库的持久会话，临时插播传假。
     fn stop_runtime(&mut self, clear_stored_session: bool, _inspect: &mut InspectState) {
         self.wav.clear();
+        self.drop_clip_frames();
         let previous_repo = self.repo_id.clone();
         self.wants_playing = false;
         self.can_play = false;
@@ -904,6 +901,7 @@ impl PlayerState {
             player_type_id: player_type_id.to_string(),
             player_label: label.to_string(),
             file_class: file_class.to_string(),
+            thumbnail_path: None,
         }
     }
 
@@ -940,12 +938,16 @@ impl PlayerState {
     }
 
     fn publish(&mut self, inspect: &mut InspectState) {
-        inspect.replace_shared_media(self.session.clone());
+        clip::publish_clip(self, inspect);
     }
 
-    fn open_preview(&mut self, model_panel: &mut WorkspacePanel, category: &mut LibraryCategory, selected: &mut Option<String>, inspect: &mut InspectState) {
-        let Some(item) = self.current_item().cloned() else {
-            eprintln!("Nana 没有正在播放的条目可以打开");
+    fn open_preview(&mut self, item_id: Option<&str>, model_panel: &mut WorkspacePanel, category: &mut LibraryCategory, selected: &mut Option<String>, inspect: &mut InspectState) {
+        let item = match item_id {
+            Some(id) => support::listed_preview_item(&self.queue, self.listed.as_ref(), id),
+            None => self.current_item().cloned(),
+        };
+        let Some(item) = item else {
+            eprintln!("Nana 没有可打开预览的播放条目");
             return;
         };
         let repo_id = self.repo_id.clone().unwrap_or_default();
@@ -979,8 +981,7 @@ pub(crate) use reduce::reduce_message;
 
 impl ShellViewModel {
     pub(super) fn player_surface_visible(&self) -> bool {
-        !self.acceptance_scene
-            && self.workspace.startup.status == StartupStatus::Ready
+        self.workspace.startup.status == StartupStatus::Ready
             && self.workspace.main_region() == MainRegion::HasRepository
             && matches!(self.workspace.panel, WorkspacePanel::Files | WorkspacePanel::Playlist)
     }
@@ -989,3 +990,6 @@ impl ShellViewModel {
 #[cfg(test)]
 #[path = "player_tests.rs"]
 mod tests;
+#[cfg(test)]
+#[path = "player_clip_tests.rs"]
+mod clip_tests;

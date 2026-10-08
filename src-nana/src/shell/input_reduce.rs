@@ -8,7 +8,8 @@ use crate::shell::admin::AdminMessage;
 use super::support::{
     absolute_drag_paths, can_drag_entries, dropped_source_paths, filter_external_import_paths, internal_drag_distance,
     normalize_move_paths, resolve_drop_target, should_delegate_to_external_drag, DIALOG_EXPORT_ID, DIALOG_PLUGIN_ID,
-    DIALOG_ATTACH_ID, DIALOG_RELOCATE_ID, EXTERNAL_DRAG_SWITCH_DISTANCE,
+    DIALOG_ATTACH_ID, DIALOG_DOWNLOAD_ID, DIALOG_RELOCATE_ID, DIALOG_REPOSITORY_EXPORT_ID, DIALOG_SOURCE_CACHE_ID,
+    DIALOG_THUMBNAIL_ID, EXTERNAL_DRAG_SWITCH_DISTANCE,
 };
 use super::{HostDragPhase, InputMessage, InputState, InternalSession};
 use crate::shell::{ShellMessage, ShellViewModel, WindowAction, WorkspacePanel};
@@ -139,6 +140,35 @@ fn reduce_input(model: &mut ShellViewModel, message: InputMessage) {
         }
         InputMessage::ConfirmCloseAnswer(accept) => model.input.answer_close(accept),
         InputMessage::FileDialogCompleted { request_id, paths, failed } => complete_dialog(model, request_id, &paths, failed),
+        InputMessage::BeginDownloadFolder { plugin_id, method, payload, repository_id } => {
+            model.input.pending_download = Some(super::source_prompt::PendingDownload { plugin_id, method, payload, repository_id });
+            model.input.queue_download_dialog();
+        }
+        InputMessage::OpenSourcePlaylist { plugin_id, method, payload, repository_id } => {
+            model.input.source_playlist = Some(super::source_prompt::SourcePlaylistPrompt {
+                plugin_id,
+                method,
+                payload,
+                repository_id,
+                draft: String::new(),
+            });
+        }
+        InputMessage::SourcePlaylistDraft(value) => {
+            if let Some(prompt) = model.input.source_playlist.as_mut() {
+                prompt.draft = value;
+            } else {
+                eprintln!("Nana 没有打开的来源播放列表名称");
+            }
+        }
+        InputMessage::SubmitSourcePlaylist => super::source_prompt::submit_source_playlist(model),
+        InputMessage::CloseSourcePlaylist => {
+            if model.input.source_playlist.take().is_none() {
+                eprintln!("Nana 没有打开的来源播放列表名称");
+            }
+        }
+        InputMessage::BeginThumbnailFile { repo_id, path, kind } => super::thumbnail_prompt::begin(model, repo_id, path, kind),
+        InputMessage::PasteThumbnail { repo_id, path, kind } => super::thumbnail_prompt::paste(model, repo_id, path, kind),
+        InputMessage::ClearThumbnail { repo_id, path, kind } => super::thumbnail_prompt::clear(model, repo_id, path, kind),
         InputMessage::ClearDrag => model.input.clear_flags(),
     }
 }
@@ -479,6 +509,7 @@ fn open_url(model: &mut ShellViewModel, url: &str) {
     model.input.remember_external(url, false);
 }
 
+/// 回收站、非 filesystem 或没有绝对路径时直接失败，不记请求。其余只排队 `DragOut`。
 fn start_external_drag(input: &mut InputState, paths: &[String], trash: bool, backend_kind: &str, repo_root: &str) {
     if trash || backend_kind != "filesystem" {
         input.external_drag_result = Some(false);
@@ -490,10 +521,8 @@ fn start_external_drag(input: &mut InputState, paths: &[String], trash: bool, ba
         return;
     }
     input.error.clear();
+    input.external_drag_result = None;
     input.host_requests.push(HostRequest::Input(HostInputRequest::DragOut { paths: absolute }));
-    eprintln!("Nana 宿主文件拖出尚未接通");
-    input.error = "拖出失败：宿主文件拖出尚未接通".into();
-    input.external_drag_result = Some(false);
 }
 
 fn complete_dialog(model: &mut ShellViewModel, request_id: u64, paths: &[String], failed: Option<String>) {
@@ -509,6 +538,17 @@ fn complete_dialog(model: &mut ShellViewModel, request_id: u64, paths: &[String]
             model.workspace.missing_error = format!("文件夹选择失败：{error}");
         } else if request_id == DIALOG_ATTACH_ID {
             model.sidebar.popover_error = format!("文件夹选择失败：{error}");
+        } else if request_id == DIALOG_DOWNLOAD_ID {
+            eprintln!("Nana 下载目录选择失败：{error}");
+            model.input.pending_download = None;
+        } else if request_id == DIALOG_THUMBNAIL_ID {
+            super::thumbnail_prompt::complete(model, &[], Some(error));
+        } else if request_id == DIALOG_SOURCE_CACHE_ID {
+            eprintln!("Nana 来源缓存目录选择失败：{error}");
+        } else if request_id == DIALOG_REPOSITORY_EXPORT_ID {
+            eprintln!("Nana 资源库导出路径选择失败：{error}");
+            model.files.export.notice.clear();
+            model.files.export.error = format!("导出路径选择失败：{error}");
         }
         return;
     }
@@ -542,6 +582,36 @@ fn complete_dialog(model: &mut ShellViewModel, request_id: u64, paths: &[String]
         if !model.sidebar.submit_attach() {
             eprintln!("Nana 添加资源库文件夹没有提交");
         }
+        return;
+    }
+    if request_id == DIALOG_DOWNLOAD_ID {
+        let Some(path) = path else {
+            eprintln!("Nana 取消下载目录选择");
+            model.input.pending_download = None;
+            return;
+        };
+        super::source_prompt::submit_download(model, path);
+        return;
+    }
+    if request_id == DIALOG_THUMBNAIL_ID {
+        super::thumbnail_prompt::complete(model, paths, None);
+        return;
+    }
+    if request_id == DIALOG_SOURCE_CACHE_ID {
+        let Some(path) = path else {
+            eprintln!("Nana 取消来源缓存目录选择");
+            return;
+        };
+        model.reduce(ShellMessage::Admin(AdminMessage::SetSourceCachePath(path)));
+        return;
+    }
+    if request_id == DIALOG_REPOSITORY_EXPORT_ID {
+        let Some(path) = path else {
+            eprintln!("Nana 取消资源库导出路径选择");
+            return;
+        };
+        model.files.set_export_field("output", path);
+        model.files.export.error.clear();
         return;
     }
     eprintln!("Nana 忽略未知的文件对话框：{request_id}");

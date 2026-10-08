@@ -1,16 +1,10 @@
-//! 预览、元数据和搜索。
-//!
-//! 按扩展名分派图片、Markdown、纯文本、音视频，以及内置的压缩包、文档和模型预览。
-//! 音视频先读取文件。WAV 停在 paused 并带时长；其它格式失败，不把失败当成播放。
-//! ZIP、Open XML、OBJ、glTF 和 STL 由内置贡献读取。PDF、旧版 Office 和其余三维格式
-//! 在登记可绘制的 Preview 贡献之前显示升级提示。Three.js 页面不嵌进 Runtime。
+//! 预览、元数据和搜索。按扩展名分派图片、文本、音视频和内置文档，Three.js 不嵌进 Runtime。
 
 use std::collections::BTreeMap;
 
 use serde_json::Value;
 
 use crate::backend::services::repository::{AssetDetail, PlaybackSessionState};
-use crate::host_api::PlaybackSessionController;
 use crate::plugin_api::{NativeContributionKind, NativePluginContribution};
 
 use super::files::repository_is_writable;
@@ -19,6 +13,10 @@ use super::ShellViewModel;
 
 #[path = "native_preview.rs"]
 pub(super) mod native_preview;
+#[path = "preview_bridge.rs"]
+mod bridge;
+pub use bridge::NativeLoad;
+pub(super) use bridge::rgba_png_data_url;
 
 const RESERVED_METADATA: &[&str] = &[
     "rating", "comment", "note", "link", "tagGroups", "addedToLibraryAt", "fileCreatedAt", "fileModifiedAt", "width",
@@ -33,7 +31,6 @@ pub enum PreviewKind {
     Text,
     Media,
     Native { view_id: String, label: String },
-    Upgrade,
     Unsupported,
 }
 
@@ -46,7 +43,6 @@ pub enum PreviewBody {
     Media(PlaybackSessionState),
     Native { view_id: String, label: String, content: String },
     Failed(String),
-    Upgrade(String),
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -211,8 +207,16 @@ pub enum InspectMessage {
     RevisionLoaded(Result<(String, AssetDetail), String>),
     MetadataSaved(Result<(String, AssetDetail), String>),
     BodyLoaded { path: String, markdown: bool, generation: u64, result: Result<String, String> },
-    NativeLoaded { path: String, generation: u64, result: Result<String, String> },
-    MediaLoaded { path: String, generation: u64, result: Result<PlaybackSessionState, String> },
+    NativeLoaded { path: String, generation: u64, result: Result<bridge::NativeLoad, String> },
+    MediaLoaded {
+        path: String,
+        generation: u64,
+        result: Result<PlaybackSessionState, String>,
+        pcm: Option<super::player::PreviewPcm>,
+        frames: Option<Vec<support::VideoFrame>>,
+    },
+    TurnPage(i32),
+    Orbit { yaw: f32, zoom: f32 },
     PlayPause,
     Seek(u64),
     SetVolume(f32),
@@ -231,6 +235,9 @@ pub enum InspectMessage {
     RunSearch,
     SearchFinished { generation: u64, result: Result<Vec<SearchRow>, String> },
     OpenHit(String),
+    OpenTagMenu { x: f32, y: f32 },
+    CloseTagMenu,
+    ToggleTagGroup,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -241,6 +248,23 @@ pub enum FilterList {
     Shapes,
     ExcludeTags,
     ExcludeFormats,
+}
+
+/// 预览右侧的文件事实。空字符串在视图里写成「未知」或「未记录」。
+/// 入库时间、创建时间和原始大小只用于展示，不写进可编辑草稿。
+#[derive(Clone, Debug, Default)]
+pub(super) struct FileFacts {
+    pub extension: String,
+    pub size_label: String,
+    pub modified_at: String,
+    pub hardlink_state: Option<String>,
+    pub thumbnail_path: Option<String>,
+    pub added_to_library_at: String,
+    pub file_created_at: String,
+    pub file_modified_meta: String,
+    pub meta_width: u32,
+    pub meta_height: u32,
+    pub original_size_bytes: Option<f64>,
 }
 
 #[derive(Clone, Debug)]
@@ -277,6 +301,13 @@ pub struct InspectState {
     pub(super) tag_menu: bool,
     pub(super) tag_menu_x: f32,
     pub(super) tag_menu_y: f32,
+    /// 标签组默认展开，折叠后才藏起「添加标签」。
+    pub(super) tags_expanded: bool,
+    pub(super) palette: Vec<String>,
+    pub(super) facts: FileFacts,
+    pub(super) shortcuts: Vec<super::inspect_shortcuts::SearchShortcut>,
+    timers: tags::LiveTimers,
+    deck: bridge::Deck,
 }
 
 impl Default for InspectState {
@@ -314,12 +345,19 @@ impl Default for InspectState {
             tag_menu: false,
             tag_menu_x: 0.0,
             tag_menu_y: 0.0,
+            tags_expanded: true,
+            palette: Vec::new(),
+            facts: FileFacts::default(),
+            shortcuts: Vec::new(),
+            timers: tags::LiveTimers::default(),
+            deck: bridge::Deck::default(),
         }
     }
 }
 
 #[path = "inspect_tags.rs"]
 mod tags;
+pub(crate) use tags::poll_timers;
 
 impl InspectState {
     pub fn take_effects(&mut self) -> Vec<InspectEffect> {
@@ -336,10 +374,6 @@ impl InspectState {
 
     pub(super) fn can_edit(&self) -> bool {
         self.asset_id.is_some() && !self.virtual_asset && !self.saving
-    }
-
-    pub(super) fn saving(&self) -> bool {
-        self.saving
     }
 
     pub(super) fn draft_rating(&self) -> i64 {
@@ -364,6 +398,8 @@ impl InspectState {
 
     /// 选择新文件时清掉上一份预览，等元数据到达后再分派。
     pub(super) fn begin_selection(&mut self, path: &str) {
+        self.flush_pending_metadata();
+        self.palette.clear();
         self.generation += 1;
         self.target_path = Some(path.to_string());
         self.kind = None;
@@ -371,10 +407,13 @@ impl InspectState {
         self.loading = true;
         self.activity = "正在读取文件元数据…".into();
         self.error.clear();
+        bridge::clear_deck(self);
         self.conflict.clear();
         self.conflict_detail = None;
         self.asset_id = None;
         self.virtual_asset = false;
+        self.facts = FileFacts::default();
+        self.tags_expanded = true;
     }
 
     pub(super) fn clear(&mut self) {
@@ -386,12 +425,18 @@ impl InspectState {
         self.activity.clear();
         self.error.clear();
         self.asset_id = None;
+        self.palette.clear();
+        self.facts = FileFacts::default();
+        self.tags_expanded = true;
+        self.timers.clear_metadata();
+        bridge::clear_deck(self);
     }
 
     /// 按扩展名打开预览，并用水合后的元数据草稿替换上一份。
     pub(super) fn note_detail(&mut self, detail: &AssetDetail) {
         let extension = support::extension_of(&detail.summary.extension, &detail.summary.filename);
         let kind = support::classify(&extension, &self.contributions);
+        let same_file = self.target_path.as_deref() == Some(detail.summary.path.as_str());
         self.generation += 1;
         self.target_path = Some(detail.summary.path.clone());
         self.repo_id = Some(detail.summary.repo_id.clone());
@@ -406,6 +451,20 @@ impl InspectState {
         let draft = MetadataDraft::from_detail(detail);
         self.baseline = draft.clone();
         self.draft = draft;
+        self.palette = super::palette::from_metadata_entries(&detail.metadata);
+        if !same_file {
+            self.tags_expanded = true;
+        }
+        self.facts = FileFacts {
+            extension: extension.clone(),
+            size_label: detail.summary.size_label.clone(),
+            modified_at: detail.summary.modified_at.clone(),
+            hardlink_state: detail.summary.hardlink_state.clone(),
+            thumbnail_path: detail.summary.thumbnail_path.clone(),
+            ..FileFacts::default()
+        };
+        support::fill_recorded_facts(&mut self.facts, &detail.metadata);
+        self.timers.clear_metadata();
         self.start_preview(&detail.summary.repo_id, &detail.summary.path, kind);
     }
 
@@ -437,7 +496,7 @@ impl InspectState {
         true
     }
 
-    /// 主按钮只在已经有预览目标时重新打开。验收页没有目标，仍走原来的未接通文案。
+    /// 主按钮只在已经有预览目标时重新打开。没有目标时不拉取预览。
     pub(super) fn request_open(&mut self) -> bool {
         let (Some(path), Some(repo_id), Some(kind)) = (self.target_path.clone(), self.repo_id.clone(), self.kind.clone()) else {
             return false;
@@ -471,12 +530,6 @@ impl InspectState {
             }
             PreviewKind::Media => support::begin_media(self, repo_id, path),
             PreviewKind::Native { view_id, label } => native_preview::begin(self, repo_id, path, view_id, label),
-            PreviewKind::Upgrade => {
-                let message = "该预览仍是 Vue 插件，需要升级为 Nana 原生预览贡献".to_string();
-                eprintln!("Nana 预览插件需要升级：{path}");
-                self.body = PreviewBody::Upgrade(message.clone());
-                self.error = message;
-            }
             PreviewKind::Unsupported => {
                 let message = "无法预览此类型".to_string();
                 eprintln!("Nana 无法预览此类型：{path}");
@@ -487,6 +540,7 @@ impl InspectState {
     }
 
     pub(super) fn reduce(&mut self, writable: bool, active_repo: Option<&str>, message: InspectMessage) {
+        let hint = tags::clock_hint(&message);
         match message {
             InspectMessage::RegisterPreview(binding) => {
                 if binding.contribution.kind != NativeContributionKind::Preview {
@@ -507,6 +561,7 @@ impl InspectState {
                     return;
                 }
                 self.draft.tags.push(tag);
+                self.close_tag_menu();
             }
             InspectMessage::RemoveTag(tag) => self.draft.tags.retain(|item| item != &tag),
             InspectMessage::SetCustom { key, value } => {
@@ -534,7 +589,9 @@ impl InspectState {
                 self.note_body(path, markdown, generation, result);
             }
             InspectMessage::NativeLoaded { path, generation, result } => native_preview::note_loaded(self, path, generation, result),
-            InspectMessage::MediaLoaded { path, generation, result } => support::note_media(self, path, generation, result),
+            InspectMessage::MediaLoaded { path, generation, result, frames, .. } => support::note_media(self, path, generation, result, frames),
+            InspectMessage::TurnPage(delta) => bridge::turn(self, delta),
+            InspectMessage::Orbit { yaw, zoom } => bridge::orbit(self, yaw, zoom),
             InspectMessage::PlayPause => self.transport_play_pause(),
             InspectMessage::Seek(position_ms) => self.transport_seek(position_ms),
             InspectMessage::SetVolume(volume) => self.transport_volume(volume),
@@ -606,7 +663,11 @@ impl InspectState {
             InspectMessage::RunSearch => self.run_search(active_repo),
             InspectMessage::SearchFinished { generation, result } => self.note_search(generation, result),
             InspectMessage::OpenHit(asset_id) => self.open_hit(&asset_id),
+            InspectMessage::OpenTagMenu { x, y } => self.open_tag_menu(x, y, 220.0, 280.0, 1280.0, 800.0),
+            InspectMessage::CloseTagMenu => self.close_tag_menu(),
+            InspectMessage::ToggleTagGroup => self.tags_expanded = !self.tags_expanded,
         }
+        self.apply_clock(hint);
     }
 
     fn save_metadata(&mut self) {
@@ -725,47 +786,6 @@ impl InspectState {
         }
     }
 
-    fn transport_play_pause(&mut self) {
-        let PreviewBody::Media(session) = &self.body else {
-            eprintln!("Nana 当前预览不是音视频");
-            return;
-        };
-        let playing = session.status == "playing";
-        let mut controller = PlaybackSessionController::new(support::transport_plugin(session), session.clone());
-        let result = if playing { controller.pause() } else { controller.play() };
-        if let Err(error) = result {
-            eprintln!("Nana 播放控制失败：{error}");
-        }
-        self.store_session(controller.state().clone());
-    }
-
-    fn transport_seek(&mut self, position_ms: u64) {
-        let PreviewBody::Media(session) = &self.body else {
-            return;
-        };
-        let mut controller = PlaybackSessionController::new(support::transport_plugin(session), session.clone());
-        if let Err(error) = controller.seek(position_ms) {
-            eprintln!("Nana 播放进度失败：{error}");
-        }
-        self.store_session(controller.state().clone());
-    }
-
-    fn transport_volume(&mut self, volume: f32) {
-        let PreviewBody::Media(session) = &self.body else {
-            return;
-        };
-        let mut controller = PlaybackSessionController::new(support::transport_plugin(session), session.clone());
-        if let Err(error) = controller.set_volume(volume) {
-            eprintln!("Nana 播放音量失败：{error}");
-        }
-        self.store_session(controller.state().clone());
-    }
-
-    fn store_session(&mut self, session: PlaybackSessionState) {
-        self.error = session.error.clone().unwrap_or_default();
-        self.body = PreviewBody::Media(session);
-    }
-
     fn set_advanced(&mut self, field: AdvancedField, value: String) {
         let draft = &mut self.advanced;
         match field {
@@ -861,6 +881,11 @@ impl InspectState {
         }
     }
 
+    /// 播放列表当前项的画面。空则清掉上一份，避免旧帧留在新文件上。
+    pub(crate) fn install_clip_frames(&mut self, frames: Option<Vec<support::VideoFrame>>) {
+        bridge::install_video(self, frames);
+    }
+
     /// 只有预览体已经是音视频时，才把共用会话写回去。
     pub(crate) fn replace_shared_media(&mut self, session: PlaybackSessionState) {
         if !matches!(self.body, PreviewBody::Media(_)) {
@@ -909,47 +934,6 @@ impl MetadataDraft {
     }
 }
 
-impl SearchFilters {
-    /// 与 Vue `hasActiveFilters` 相同：排除关键词、排除路径和数值日期排除不单独把搜索收进当前仓库。
-    pub fn has_active_filters(&self) -> bool {
-        !self.tags.is_empty()
-            || !self.formats.is_empty()
-            || !self.colors.is_empty()
-            || !self.shapes.is_empty()
-            || !self.exclude_tags.is_empty()
-            || !self.exclude_formats.is_empty()
-            || !self.metadata_filters.trim().is_empty()
-            || !self.exclude_metadata_filters.trim().is_empty()
-            || !self.number_filters.trim().is_empty()
-            || !self.date_filters.trim().is_empty()
-            || self.match_mode == MatchMode::Or
-            || !self.sort_field.trim().is_empty()
-            || self.limit.is_some()
-            || self.min_rating.is_some()
-    }
-}
-
-impl SearchRequestDraft {
-    pub fn has_criteria(&self) -> bool {
-        !self.query.trim().is_empty()
-            || !self.tags.is_empty()
-            || !self.formats.is_empty()
-            || !self.metadata_filters.is_empty()
-            || !self.exclude_tags.is_empty()
-            || !self.exclude_formats.is_empty()
-            || self.exclude_query.as_ref().is_some_and(|value| !value.trim().is_empty())
-            || !self.exclude_path_prefixes.is_empty()
-            || !self.exclude_metadata_filters.is_empty()
-            || !self.exclude_number_filters.is_empty()
-            || !self.exclude_date_filters.is_empty()
-            || !self.number_filters.is_empty()
-            || !self.date_filters.is_empty()
-            || self.sort_field.is_some()
-            || self.limit.is_some()
-            || self.min_rating.is_some()
-    }
-}
-
 pub(super) fn reduce_message(model: &mut ShellViewModel, message: super::ShellMessage) -> Option<super::ShellMessage> {
     let super::ShellMessage::Inspect(message) = message else {
         return Some(message);
@@ -958,10 +942,12 @@ pub(super) fn reduce_message(model: &mut ShellViewModel, message: super::ShellMe
         repository_is_writable(&repository.status, &repository.capabilities)
     });
     let repo_id = model.workspace.active_repo_id.clone();
+    let follow = bridge::follow(&message);
     model.inspect.reduce(writable, repo_id.as_deref(), message);
     if let Some(session) = model.inspect.media_session().cloned() {
         model.player.adopt_session(session);
     }
+    bridge::apply(model, follow);
     if let Some(row) = model.inspect.pending_open.take() {
         model.workspace.panel = WorkspacePanel::Files;
         model.selected_path = Some(row.path.clone());

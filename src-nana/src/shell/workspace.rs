@@ -781,6 +781,23 @@ impl WorkspaceState {
         std::mem::take(&mut self.effects)
     }
 
+    /// 验收页直接进入已有仓库的产品表面，不排队同步或快照。
+    pub(crate) fn present_repository(&mut self, repository: WorkspaceRepository) {
+        self.active_repo_id = Some(repository.repo_id.clone());
+        self.last_active_repo_id = self.active_repo_id.clone();
+        self.repositories = vec![repository];
+        self.presence = RepositoryPresence::Ready;
+        self.startup.finish();
+    }
+
+    /// 验收页的空库使用和产品窗口相同的空状态，不发列表请求。
+    pub(crate) fn present_empty(&mut self) {
+        self.repositories.clear();
+        self.active_repo_id = None;
+        self.presence = RepositoryPresence::Empty;
+        self.startup.finish();
+    }
+
     /// 选择顺序：当前 id、上次记住的 id、列表第一项。空列表清空记住的仓库。
     fn apply_repository_items(&mut self, items: Vec<WorkspaceRepository>, startup_open: bool) {
         self.repositories = items;

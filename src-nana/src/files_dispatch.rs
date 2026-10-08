@@ -8,11 +8,12 @@ use nana_ui::RuntimeProgramContext;
 
 use crate::backend::services::mutsuki_runner::{
     PROTOCOL_ARCHIVE_IMPORT, PROTOCOL_EAGLE_IMPORT, PROTOCOL_ENTRY_COPY, PROTOCOL_ENTRY_DELETE,
-    PROTOCOL_ENTRY_IMPORT, PROTOCOL_ENTRY_MOVE,
+    PROTOCOL_ENTRY_IMPORT, PROTOCOL_ENTRY_MOVE, PROTOCOL_REPOSITORY_EXPORT,
 };
 use crate::backend::services::repository::{
     EagleLibraryImportRequest, FileArchiveImportRequest, FileBrowserRequest, FileCopyRequest, FileCreateRequest,
     FileDeleteRequest, FileImportRequest, FileMoveRequest, FileRenameRequest, HardlinkConfirmRequest,
+    RepositoryArchiveExportOptions, RepositoryExportRequest, RepositoryGitExportOptions, ThumbnailRequest,
     TrashMutationRequest,
 };
 use crate::shell::{
@@ -53,7 +54,78 @@ pub fn dispatch_files_effects(app: &mut MomoBakoApplication, context: &RuntimePr
             FilesEffect::LoadAsset { repo_id, asset_id } => dispatch_asset(app, context, repo_id, asset_id),
             FilesEffect::PersistDisplayMode => app.shell.files.save_display_mode_file(&display_mode_path()),
             FilesEffect::DecodeThumbnails { paths } => dispatch_thumbnails(context, paths),
+            FilesEffect::MutateThumbnail { repo_id, path, kind, action, source_path, image_bytes } => {
+                dispatch_thumbnail(app, context, repo_id, path, kind, action, source_path, image_bytes);
+            }
+            FilesEffect::ExportArchive { repo_id, format, output_path, compression, encrypt, password } => {
+                dispatch_export(app, context, archive_export(repo_id, format, output_path, compression, encrypt, password));
+            }
+            FilesEffect::ExportGit { repo_id, remote, branch, message } => {
+                dispatch_export(app, context, git_export(repo_id, remote, branch, message));
+            }
         }
+    }
+}
+
+/// 写入或清除自定义缩略图。清除后文件没有路径时再刷新，恢复默认图。
+fn dispatch_thumbnail(
+    app: &mut MomoBakoApplication,
+    context: &RuntimeProgramContext<ShellMessage>,
+    repo_id: String,
+    path: String,
+    kind: String,
+    action: String,
+    source_path: Option<String>,
+    image_bytes: Option<Vec<u8>>,
+) {
+    let Some(services) = app.services.as_ref() else {
+        eprintln!("Nana 自定义缩略图需要领域服务，当前服务未启动");
+        app.shell.files.note_error("领域服务未启动".into());
+        return;
+    };
+    let browser = services.file_browser.clone();
+    let executor = services.executor.clone();
+    if let Err(error) = context.run_task(Task::new(async move {
+        let request = thumbnail_request(&repo_id, &path, &action, source_path.clone(), image_bytes.clone());
+        let saved = match executor.block_on(browser.ensure_thumbnail(request)) {
+            Ok(response) => response,
+            Err(error) => {
+                eprintln!("Nana 自定义缩略图写入失败：{error}");
+                return files_message(FilesMessage::NoteError(error));
+            }
+        };
+        let saved = if action == "clear" && saved.thumbnail_path.is_none() && kind == "file" {
+            let refresh = thumbnail_request(&repo_id, &path, "refresh", None, None);
+            match executor.block_on(browser.ensure_thumbnail(refresh)) {
+                Ok(response) => response,
+                Err(error) => {
+                    eprintln!("Nana 恢复默认缩略图失败：{error}");
+                    return files_message(FilesMessage::NoteError(error));
+                }
+            }
+        } else {
+            saved
+        };
+        files_message(FilesMessage::ThumbnailSaved {
+            path,
+            thumbnail_path: saved.thumbnail_path,
+            custom: saved.thumbnail_custom,
+        })
+    })) {
+        eprintln!("Nana 自定义缩略图任务提交失败：{error}");
+        app.shell.files.note_error(format!("自定义缩略图任务提交失败：{error}"));
+    }
+}
+
+fn thumbnail_request(repo_id: &str, path: &str, action: &str, source_path: Option<String>, image_bytes: Option<Vec<u8>>) -> ThumbnailRequest {
+    ThumbnailRequest {
+        repo_id: repo_id.to_string(),
+        path: path.to_string(),
+        action: Some(action.to_string()),
+        source_path,
+        source_url: None,
+        image_bytes,
+        media_type: None,
     }
 }
 
@@ -451,4 +523,79 @@ fn fail_protocol(app: &mut MomoBakoApplication, error: String) {
 
 fn files_message(message: FilesMessage) -> ShellMessage {
     ShellMessage::Files(message)
+}
+
+/// 用对话框里的格式、路径和压缩选项组压缩包导出请求。
+fn archive_export(
+    repo_id: String,
+    format: String,
+    output_path: String,
+    compression: String,
+    encrypt: bool,
+    password: String,
+) -> RepositoryExportRequest {
+    let password = password.trim().to_string();
+    RepositoryExportRequest {
+        repo_id,
+        target: "archive".into(),
+        archive: Some(RepositoryArchiveExportOptions {
+            format,
+            output_path,
+            compression,
+            encrypt,
+            password: (!password.is_empty()).then_some(password),
+        }),
+        git: None,
+    }
+}
+
+/// 用对话框里的远端、分支和提交说明组 Git 导出请求。空白字段省略。
+fn git_export(repo_id: String, remote: String, branch: String, message: String) -> RepositoryExportRequest {
+    RepositoryExportRequest {
+        repo_id,
+        target: "git".into(),
+        archive: None,
+        git: Some(RepositoryGitExportOptions {
+            remote: filled(remote),
+            branch: filled(branch),
+            message: filled(message),
+        }),
+    }
+}
+
+fn filled(value: String) -> Option<String> {
+    let value = value.trim().to_string();
+    (!value.is_empty()).then_some(value)
+}
+
+/// 调用 `momobako.repository.export`。成功把宿主 message 写回对话框，失败写真实错误。
+fn dispatch_export(app: &mut MomoBakoApplication, context: &RuntimeProgramContext<ShellMessage>, request: RepositoryExportRequest) {
+    let Some(services) = app.services.as_ref() else {
+        eprintln!("Nana 资源库导出需要领域服务，当前服务未启动");
+        app.shell.reduce(files_message(FilesMessage::ExportFinished(Err("领域服务未启动".into()))));
+        return;
+    };
+    let tasks = services.tasks.clone();
+    let executor = services.executor.clone();
+    if let Err(error) = context.run_task(Task::new(async move {
+        let result = executor.block_on(tasks.execute(PROTOCOL_REPOSITORY_EXPORT, request)).map(|(output, _)| export_notice(&output));
+        files_message(FilesMessage::ExportFinished(result))
+    })) {
+        eprintln!("Nana 资源库导出任务提交失败：{error}");
+        app.shell.reduce(files_message(FilesMessage::ExportFinished(Err(format!("资源库导出任务提交失败：{error}")))));
+    }
+}
+
+/// 只采用宿主返回的 message。没有说明时记日志，不编造成功。
+fn export_notice(value: &serde_json::Value) -> String {
+    value
+        .get("message")
+        .and_then(|item| item.as_str())
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| {
+            eprintln!("Nana 导出返回没有说明：{value}");
+            "导出已返回，但没有结果说明。".into()
+        })
 }

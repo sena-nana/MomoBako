@@ -54,8 +54,8 @@ Nana `ApplicationState::initialize` 现在启动共享 `RepositoryRuntime`，窗
 `PROTOCOL_REPOSITORY_SYNC`，同步成功后再请求 `get_repository_snapshot`，摘要仍属于当前仓库时才读取根目录。
 缺失仓库和空仓库在列表完成后结束启动，不进入同步。结果以 `ShellMessage` 回到应用状态；
 未完成真实服务调用的按钮不会显示成功反馈。启动就绪后的实况侧栏用 `SidebarRow` 和 `TreeView`
-显示快捷方式、目录、智能文件夹和播放集；15 个旧验收场景仍用 `acceptance_scene` 保留原来的导航按钮。
-启动就绪后的实况文件表面用 `each_virtual` 显示目录、回收站和智能文件夹；同一批验收场景继续使用原来的 `file_actions` 列表。
+显示快捷方式、目录、智能文件夹和播放集。15 个验收场景已改用同一套侧栏，不再保留原来的导航按钮。
+启动就绪后的文件表面用 `each_virtual` 显示目录、回收站和智能文件夹。同一批验收场景在文件页也走这套表面。
 
 当前已接通的交互还包括资源库刷新、目录浏览、文件元数据与预览源读取、播放列表查询、
 播放列表创建、重命名、删除与项目移除、播放器类型选择、插件配置读取/编辑/保存/删除、任务取消、系统日志读取和窗口
@@ -63,17 +63,16 @@ Nana `ApplicationState::initialize` 现在启动共享 `RepositoryRuntime`，窗
 服务结果，避免只修改界面文本造成假成功。
 
 图片文件已经通过 `GpuTextureView → HostTextureRegistry → GpuContext` 接入原生纹理
-预览；图片字节读取和解码在服务任务中完成，上传沿用窗口唯一的 GPU 上下文。非图片媒体
-仍显示明确的“不支持原生纹理预览”状态，不伪造成功。
+预览；图片字节读取和解码在服务任务中完成，上传沿用窗口唯一的 GPU 上下文。PDF 页面和能抽出三角形的网格先软件光栅，再送到同一预览纹理槽。解出的视频画面也进这个预览纹理槽。解不开的具体文件仍失败，不把截断画面当成成功。
 
-启动就绪且不是 `acceptance_scene` 时，实况预览和搜索替换原来的预览占位。Markdown 用
-`NativeMarkdown`，纯文本用 `SelectableRichText`。WAV 预览能进入暂停并改播放状态，其它音视频没有解码器时停在失败态。
-ZIP/CBZ/7z/RAR/CBR、FlateDecode PDF、Open XML 和 OLE 文档文本，以及 OBJ/glTF/GLB/STL/3MF/VRM 摘要、FBX/BLEND 文件头，已由内置原生预览读取。文件导入、Eagle 导入和 API Playground 已是原生工具页。来源账号按钮会调用插件登录方法。播放列表内置 WAV，正式 Windows 构建用 winmm 出声，测试构建不开设备。PDF 页面、视频解码和网格渲染仍未迁。这批状态有单测，还没有新的离屏场景。
+启动就绪后，搜索面板和已选文件使用预览与元数据表面；验收页里选中文件时也挂同一块表面。文件页在选中文件或打开筛选栏时把这块表面挂到列表上。标题栏输入先进入搜索，250 毫秒后再查。元数据草稿变脏后 260 毫秒自动保存。Markdown 用
+`NativeMarkdown`，纯文本仍用 `SelectableRichText`。代码类扩展名按 `RichSpan.color` 标语义角色：关键字 `Keyword`（可保留 strong），字符串 `Success`，注释 `Muted`。颜色来自语义角色，不是外部高亮库。txt、log、csv 和未知扩展名保持一段无色文本。超过 768KiB 失败，不截断。产品构建仍钉 Nana Git 修订 `ee94106746b13f356af17586ed5e35ed78f9eb40`。根 `Cargo.toml` 的 `[patch]` 把 `nana-ui` 指到 `vendor/nana-ui`，并把 `nana-ui-runtime` 指到 `vendor/nana-ui-runtime`。runtime 副本的基线就是该修订，只增加 `RichSpan.color` 和 overlay 投影；`nana-ui-core` 与 `nana-ui-scene` 继续用同一 Git 修订，不另做副本。不把整页换成 TextArea，也不打开 syntax-highlighting 当开关。WAV、mp3、flac、ogg 预览与底部播放条共用游标，正式 Windows 构建用 winmm 出声，测试构建不开设备。未压缩和 MJPEG 的 AVI 用纯 Rust 解出画面和 PCM；其余认得出的容器在 Windows 上用媒体基础源读取器。没有画面的 m4a、aac、opus 只解音轨成 PCM，进入同一 `PlaybackSessionState`。解不开返回「解码失败」。认不出的字节仍是「没有原生解码器」。
+ZIP/CBZ/7z/RAR/CBR、按内容流分页绘制的 PDF、Open XML 和 OLE 文档文本，以及 OBJ/glTF/GLB/STL/3MF/VRM 的网格光栅或结构摘要、FBX/BLEND 文件头，已由内置原生预览读取。Office 扩展名含 pot、ppsx、xlsb、xltx、dotm 等；抽不出文本是错误态。解不开的 PDF 流是该页失败。抽不出三角形的模型保留摘要。文件导入、Eagle 导入和 API Playground 已是原生工具页。来源账号按钮会调用插件登录方法。成功文案仍是「已调用 {method}。」；qrurl 一类地址会画成二维码，登录状态另显示，credentialRef 不显示。有字段的插件设置，以及能从 `provider.settings` 映射成字段的官方设置，可以编辑、重置并打开数据目录。映射不出字段的 Vue 设置页仍只显示升级文案。ASMR 库类型快捷方式会出现在筛选栏。素材元数据里已有的 `lyricStatus`、`listeningProgress` 等非保留字段按「键 = 值」显示；没有歌词正文，所以不另嵌歌词面板。文件右键里能直接调用的来源动作会调用插件。下载先用编号 5 的文件夹对话框，选中目录后把 `localFolder` 放进载荷再调用，取消不调用。创建来源播放列表先问名称，空白不提交，确认后带上名称和当前仓库再调用。自定义缩略图用编号 6 的选文件对话框、文本剪贴板或 `clear`，写入现有 `ensure_thumbnail`。日志画出过滤后的记录，任务行可以取消。播放集条目可以移除。播放列表内置 PCM WAV；当前正在播的视频、m4a、aac、opus 只解这一条并进入同一会话。正式 Windows 构建用 winmm 出声，测试构建不开设备。正式 Windows 构建还会注册系统媒体控件，把播放、暂停、上一首、下一首、跳转和停止写回播放条；测试构建不注册真会话。自适应和瀑布流已按视口虚拟化，行高可测、列宽均分，还不是 CSS column 瀑布流。`ImageViewer` 仍未替换行内 `GpuTextureView`：它是全窗模态，接上会更重。代码颜色走 `RichSpan` 的语义角色，经 `SelectableRichText` 的 overlay 进入已有文本 span，不嵌入外部高亮库。不嵌入 Chromium。这批状态有单测，还没有新的离屏场景。
 
-仍未宣称完成的能力包括语法高亮、真实媒体解码器、系统媒体会话、PDF.js/Office/Three.js 嵌入和
+仍未宣称完成的能力包括 PDF.js/Office/Three.js 嵌入和
 Windows UIA/AccessKit 服务桥接；播放列表排序/添加、成员资格、下载进度、播放器回退、会话持久化、
 仓库切换停止、任务进度快照、设置加载/校验/原子存储、宿主输入请求抽象、宿主播放会话控制器和对应离屏场景已经接入。
-播放列表这批新分支有单测，还没有新的离屏场景。设置页的音频播放器、圆角、插件管理、日志筛选、任务弹层和仓库动作也有单测，还没有新的离屏场景；剪贴板写入系统剪贴板，打开和目录揭示由宿主启动系统程序。保存对话框和打开对话框会发出 `OpenFileDialog`。拖放决定和关闭确认有单测，还没有新的离屏场景。拖出、托盘、IME、真窗口和发布包仍需设备矩阵验收，
+播放列表这批新分支有单测，还没有新的离屏场景。设置页的音频播放器、圆角、插件管理、日志筛选、任务弹层和仓库动作也有单测，还没有新的离屏场景；剪贴板写入系统剪贴板，打开和目录揭示由宿主启动系统程序。保存对话框和打开对话框会发出 `OpenFileDialog`。拖放决定和关闭确认有单测，还没有新的离屏场景。Windows 上拖出文件走系统拖放，最小化到托盘会隐藏窗口并留下托盘，主窗口位置、尺寸和最大化会在下次启动恢复。这些效果的单测不打开真窗口。IME、真窗口和发布包仍需设备矩阵验收，
 离屏结果不会替代这些设备证据。
 
 插件的 Vue 自定义设置页、工具页、预览和播放器贡献不进入原生生产树。官方插件应迁移
