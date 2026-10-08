@@ -97,6 +97,82 @@ fn results_panel_shows_scope_summary_counts_and_hit_context() {
     assert!(!has(&nodes, "等待搜索条件"));
 }
 
+/// 在离屏会话里点筛选栏：芯片、颜色输入回车、评分和清除都走生产消息链路。
+#[test]
+fn clicking_chips_and_submitting_inputs_drive_the_search() {
+    use nana_ui_devtools::agent::RuntimeAgentSession;
+
+    let mut model = acceptance_gap_models()
+        .into_iter()
+        .find(|(name, _)| *name == "filter-bar")
+        .map(|(_, model)| model)
+        .expect("filter-bar 场景");
+    let document = crate::acceptance_document_for_model(model.clone()).expect("生产文档");
+    let mut session = RuntimeAgentSession::new(document, 1200, 800).expect("离屏会话");
+    session.flush().expect("布局");
+
+    let pump = |session: &mut RuntimeAgentSession, model: &mut super::super::ShellViewModel, step: &str| {
+        let queued = session.document_mut().context_mut().take_program_messages();
+        assert!(!queued.is_empty(), "{step} 没有进入程序消息");
+        for message in queued {
+            let message = message.downcast::<super::super::ShellMessage>().expect("壳层消息");
+            super::super::commit_interaction(model, *message, nana_ui_platform::WindowId(1), false);
+        }
+        super::super::mount_shell(session.document_mut(), model).expect("重新挂载");
+        session.flush().expect("重新布局");
+    };
+    let node_id = |session: &RuntimeAgentSession, label: &str, role: &str| {
+        session
+            .accessibility_dump()
+            .into_iter()
+            .find(|node| node.label.as_deref() == Some(label) && node.role == role)
+            .map(|node| node.id)
+            .unwrap_or_else(|| panic!("没有 {role} {label}"))
+    };
+
+    let png = node_id(&session, "png", "button");
+    assert!(session.click_node(png).expect("点 png"));
+    pump(&mut session, &mut model, "点 png");
+    assert_eq!(model.inspect.filters.formats, ["png"]);
+    assert!(has(&session_nodes(&session), "1 个条件"));
+
+    let color = node_id(&session, "输入文件颜色", "text-input");
+    assert!(session.click_node(color).expect("点颜色输入"));
+    session.type_text("青色").expect("输入颜色");
+    pump(&mut session, &mut model, "输入颜色");
+    assert_eq!(model.inspect.search_ui.draft.color, "青色");
+    // 临时做法：mount_shell 现在每次更新整棵重挂，焦点会丢，回车前先重新点一次输入框。
+    // 修复在 render.rs 的 mount_shell（按键路径恢复焦点），合并后改成断言焦点自动恢复。
+    let color = node_id(&session, "输入文件颜色", "text-input");
+    assert!(session.click_node(color).expect("重新点颜色输入"));
+    session.key_press("Enter", "Enter", Default::default()).expect("回车提交");
+    pump(&mut session, &mut model, "回车提交");
+    assert_eq!(model.inspect.filters.colors, ["青色"], "回车按「添加」提交颜色");
+    assert!(model.inspect.search_ui.draft.color.is_empty(), "提交后清空输入");
+    assert!(session.accessibility_dump().iter().any(|node| node.label.as_deref() == Some("青色") && node.role == "button"));
+
+    let rating = node_id(&session, "4 星+", "button");
+    assert!(session.click_node(rating).expect("点 4 星+"));
+    pump(&mut session, &mut model, "点 4 星+");
+    assert_eq!(model.inspect.filters.min_rating, Some(4.0));
+
+    let clear = node_id(&session, "清除", "button");
+    assert!(session.click_node(clear).expect("点清除"));
+    pump(&mut session, &mut model, "点清除");
+    assert_eq!(model.inspect.active_filter_count(), 0);
+    assert!(model.inspect.filter_bar_open, "清除不收起筛选栏");
+
+    let close = node_id(&session, "关闭筛选栏", "button");
+    assert!(session.click_node(close).expect("点关闭"));
+    pump(&mut session, &mut model, "点关闭");
+    assert!(!model.inspect.filter_bar_open);
+    assert!(!has(&session_nodes(&session), "当前资源库筛选"));
+}
+
+fn session_nodes(session: &nana_ui_devtools::agent::RuntimeAgentSession) -> Vec<AccessibilityNode> {
+    session.document().context().world().project_accessibility(session.document().document())
+}
+
 #[test]
 fn empty_search_keeps_the_filter_bar_closed() {
     let nodes = nodes("search-empty");

@@ -30,6 +30,9 @@ pub(crate) struct FilterOptions {
 
 /// Vue `rebuildFilterOptions`：格式和标签来自当前仓库摘要的素材和搜索结果，
 /// 颜色和形状来自搜索结果和当前目录条目的元数据。
+///
+/// 已选的值也并进候选：Vue 只从数据里取候选，手动「添加」一个数据里没有的颜色或形状后
+/// 条件生效却没有芯片，只能整体清除。DESIGN.md 要求筛选可撤销，这里让每个已选条件都能单独点掉。
 pub(crate) fn filter_options(model: &ShellViewModel) -> FilterOptions {
     let inspect = &model.inspect;
     let mut tags = Vec::new();
@@ -53,6 +56,11 @@ pub(crate) fn filter_options(model: &ShellViewModel) -> FilterOptions {
         colors.push(metadata_text(&row.metadata, "color"));
         shapes.push(metadata_text(&row.metadata, "shape"));
     }
+    let filters = &inspect.filters;
+    tags.extend(filters.tags.iter().cloned());
+    formats.extend(filters.formats.iter().cloned());
+    colors.extend(filters.colors.iter().cloned());
+    shapes.extend(filters.shapes.iter().cloned());
     FilterOptions {
         formats: unique_sorted(formats),
         tags: unique_sorted(tags),
