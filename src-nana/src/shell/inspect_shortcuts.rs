@@ -1,7 +1,12 @@
 //! 库类型搜索快捷方式。
 //!
 //! 清单里的对象直接登记。ASMR 官方插件的字符串 id 映射成筛选和排序。
-//! 没有筛选内容的字符串不进筛选栏。
+//! 没有筛选内容的字符串不进筛选栏。快捷方式只在当前文件或搜索结果里有该库类型的条目时
+//! 才显示，对应 Vue `activeLibrarySearchShortcuts` 用插件 `matchEntry` 过滤。
+
+use std::collections::BTreeMap;
+
+use serde_json::Value;
 
 use crate::backend::services::repository::PluginManifest;
 
@@ -15,6 +20,10 @@ pub struct SearchShortcut {
     pub metadata: String,
     pub sort_field: String,
     pub sort_direction: SortDirection,
+    /// 贡献它的 `libraryExtension.libraryKind`，用来判断条目是否属于这个库类型。
+    pub library_kind: String,
+    /// 贡献它的插件，和 id 一起区分同名快捷方式。
+    pub plugin_id: String,
 }
 
 /// 从已启用插件的 `libraryExtension.searchShortcuts` 收集快捷方式。
@@ -33,12 +42,38 @@ pub fn shortcuts_from_plugins(plugins: &[PluginManifest]) -> Vec<SearchShortcut>
         };
         for item in list {
             match parse_shortcut(kind, item) {
-                Some(shortcut) => shortcuts.push(shortcut),
+                Some(mut shortcut) => {
+                    shortcut.plugin_id = plugin.plugin_id.clone();
+                    shortcuts.push(shortcut);
+                }
                 None => eprintln!("Nana 库类型快捷方式缺少筛选：{} / {kind}", plugin.plugin_id),
             }
         }
     }
     shortcuts
+}
+
+/// 条目元数据是否属于这个库类型。`libraryKind` 一致即属于；ASMR 插件的 `matchEntry`
+/// 还认作品号和 RJ 号。
+pub fn matches_entry(kind: &str, metadata: &BTreeMap<String, Value>) -> bool {
+    if kind.is_empty() {
+        return false;
+    }
+    if metadata.get("libraryKind").and_then(Value::as_str) == Some(kind) {
+        return true;
+    }
+    kind == "asmr" && (js_truthy(metadata.get("workId")) || js_truthy(metadata.get("rjCode")))
+}
+
+/// JavaScript 的 `Boolean(value)`。
+fn js_truthy(value: Option<&Value>) -> bool {
+    match value {
+        None | Some(Value::Null) => false,
+        Some(Value::Bool(flag)) => *flag,
+        Some(Value::Number(number)) => number.as_f64().is_some_and(|value| value != 0.0 && !value.is_nan()),
+        Some(Value::String(text)) => !text.is_empty(),
+        Some(Value::Array(_)) | Some(Value::Object(_)) => true,
+    }
 }
 
 fn parse_shortcut(kind: &str, item: &serde_json::Value) -> Option<SearchShortcut> {
@@ -55,7 +90,15 @@ fn parse_shortcut(kind: &str, item: &serde_json::Value) -> Option<SearchShortcut
     } else {
         SortDirection::Asc
     };
-    Some(SearchShortcut { id, label, metadata, sort_field, sort_direction })
+    Some(SearchShortcut {
+        id,
+        label,
+        metadata,
+        sort_field,
+        sort_direction,
+        library_kind: kind.to_string(),
+        plugin_id: String::new(),
+    })
 }
 
 /// ASMR 官方清单只写了 id。筛选文案和 `register.js` 里的四条快捷方式一致。
@@ -76,6 +119,8 @@ fn official_asmr(kind: &str, id: &str) -> Option<SearchShortcut> {
         metadata: metadata.to_string(),
         sort_field: sort_field.to_string(),
         sort_direction: if desc { SortDirection::Desc } else { SortDirection::Asc },
+        library_kind: kind.to_string(),
+        plugin_id: String::new(),
     })
 }
 
@@ -133,6 +178,8 @@ mod tests {
         assert_eq!(shortcuts[0].label, "ASMR 作品");
         assert_eq!(shortcuts[0].metadata, "libraryKind=asmr");
         assert_eq!(shortcuts[0].sort_field, "metadata.workId");
+        assert_eq!(shortcuts[0].library_kind, "asmr");
+        assert_eq!(shortcuts[0].plugin_id, "momobako.library.asmr");
         assert_eq!(shortcuts[2].sort_direction, SortDirection::Desc);
         assert_eq!(shortcuts[3].sort_field, "random");
     }
@@ -148,5 +195,18 @@ mod tests {
         assert_eq!(shortcuts.len(), 1);
         assert_eq!(shortcuts[0].metadata, "libraryKind=asmr\ncircle=test");
         assert_eq!(shortcuts[0].sort_direction, SortDirection::Desc);
+    }
+
+    #[test]
+    fn entries_match_by_library_kind_and_asmr_work_ids() {
+        let meta = |pairs: &[(&str, Value)]| pairs.iter().map(|(key, value)| (key.to_string(), value.clone())).collect();
+        assert!(matches_entry("asmr", &meta(&[("libraryKind", Value::from("asmr"))])));
+        assert!(matches_entry("asmr", &meta(&[("workId", Value::from("RJ01"))])));
+        assert!(matches_entry("asmr", &meta(&[("rjCode", Value::from(1))])));
+        assert!(!matches_entry("asmr", &meta(&[("workId", Value::from(""))])));
+        assert!(!matches_entry("asmr", &meta(&[("libraryKind", Value::from("audio"))])));
+        assert!(matches_entry("audio", &meta(&[("libraryKind", Value::from("audio"))])));
+        assert!(!matches_entry("audio", &meta(&[("workId", Value::from("RJ01"))])));
+        assert!(!matches_entry("", &meta(&[("libraryKind", Value::from(""))])));
     }
 }
