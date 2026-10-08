@@ -628,11 +628,11 @@ impl<Program: RuntimeProgram> WindowManager<Program> {
         // A device switch clears the map; a painter that still names another
         // device would only refuse every frame.
         let current = self.graphics.gpu().generation();
-        if self
-            .painters
-            .get(&format)
-            .is_some_and(|painter| painter.gpu().generation() != current)
-        {
+        // 圆角指数编进了着色器模块，设置变了只能整份重建。
+        let exponent = crate::scene_paint::corner_exponent();
+        if self.painters.get(&format).is_some_and(|painter| {
+            painter.gpu().generation() != current || painter.corner_exponent() != exponent
+        }) {
             self.painters.remove(&format);
         }
         if !self.painters.contains_key(&format) {
