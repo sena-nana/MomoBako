@@ -7,9 +7,9 @@ use nana_ui::runtime::view::{widget, AnyView, IntoView};
 use nana_ui::runtime::{AlignSpec, Button, ConfirmDialog, JustifySpec, LengthSpec, RadiusTier, SemanticColorRole, Stack, Text, TextHorizontalAlignment};
 use nana_ui::ButtonKind;
 
-/// 页边距。面板自己再做圆角和内边距。
+/// 页面纵向排布。页边距由主区外框统一给（上下 20、左右 24），这里不再加。
 pub(crate) fn page(body: Vec<AnyView>) -> AnyView {
-    widget(Stack::fill_column(16.0).padding_xy(20.0, 18.0).min_height(LengthSpec::Px(0.0)))
+    widget(Stack::fill_column(16.0).min_height(LengthSpec::Px(0.0)))
         .children(body)
         .into_any()
 }
