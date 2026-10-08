@@ -79,6 +79,8 @@ pub enum InspectEffect {
     Redo { repo_id: String, asset_id: String },
     LoadAsset { repo_id: String, asset_id: String },
     Search { generation: u64, request: SearchRequestDraft },
+    /// 预览的音视频接管了播放条，宿主派发后开始播放（Vue 预览页挂载即播放）。
+    Autoplay { path: String, generation: u64 },
 }
 
 #[derive(Clone, Debug)]
@@ -108,9 +110,8 @@ pub enum InspectMessage {
     },
     TurnPage(i32),
     Orbit { yaw: f32, zoom: f32 },
-    PlayPause,
-    Seek(u64),
-    SetVolume(f32),
+    /// 宿主派发的自动播放。代次或文件对不上就不动。
+    Autoplay { path: String, generation: u64 },
     SetQuery(String),
     ToggleFilterBar,
     CloseFilterBar,
@@ -471,9 +472,8 @@ impl InspectState {
             InspectMessage::MediaLoaded { path, generation, result, frames, .. } => support::note_media(self, path, generation, result, frames),
             InspectMessage::TurnPage(delta) => bridge::turn(self, delta),
             InspectMessage::Orbit { yaw, zoom } => bridge::orbit(self, yaw, zoom),
-            InspectMessage::PlayPause => self.transport_play_pause(),
-            InspectMessage::Seek(position_ms) => self.transport_seek(position_ms),
-            InspectMessage::SetVolume(volume) => self.transport_volume(volume),
+            // 播放归播放器管，由 `bridge::apply` 交过去；预览状态本身不变。
+            InspectMessage::Autoplay { .. } => {}
             message @ (InspectMessage::SetQuery(_)
             | InspectMessage::ToggleFilterBar
             | InspectMessage::CloseFilterBar
@@ -673,6 +673,11 @@ impl MetadataDraft {
     }
 }
 
+/// 播放器改了进度或状态后，预览页的视频换到对应画面。
+pub(crate) fn sync_preview_frame(model: &mut ShellViewModel) {
+    bridge::show_video_frame(model);
+}
+
 pub(super) fn reduce_message(model: &mut ShellViewModel, message: super::ShellMessage) -> Option<super::ShellMessage> {
     search::observe(model, &message);
     let super::ShellMessage::Inspect(message) = message else {
@@ -684,9 +689,6 @@ pub(super) fn reduce_message(model: &mut ShellViewModel, message: super::ShellMe
     let repo_id = model.workspace.active_repo_id.clone();
     let follow = bridge::follow(&message);
     model.inspect.reduce(writable, repo_id.as_deref(), message);
-    if let Some(session) = model.inspect.media_session().cloned() {
-        model.player.adopt_session(session);
-    }
     bridge::apply(model, follow);
     search::settle(model);
     None

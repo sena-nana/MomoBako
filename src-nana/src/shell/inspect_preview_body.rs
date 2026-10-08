@@ -66,6 +66,8 @@ fn text_plugin(model: &ShellViewModel, markdown: bool, source: &str, truncated_a
         layout.min_width = Some(LengthSpec::Px(0.0));
         layout.line_break = Some(nana_ui_core::LineBreakSpec::Anywhere);
         layout.overflow_wrap = Some(nana_ui_core::OverflowWrapSpec::Anywhere);
+        // `white-space: pre-wrap`：保留原文的换行和空格，长行在框内折行。
+        layout.white_space = nana_ui_core::WhiteSpaceSpec::PreWrap;
     }
     // 全局 `pre`：bg-subtle 底、border-soft 细边、8px 圆角、12/14 内边距，至少铺满内容区。
     let sheet = widget(
@@ -98,8 +100,9 @@ fn text_plugin(model: &ShellViewModel, markdown: bool, source: &str, truncated_a
         layout.padding_right = Some(LengthSpec::Px(22.0));
     }))
     .children((widget(Stack::fill_column(0.0).min_height(LengthSpec::Percent(100.0))).children((sheet,)),))
-    .key("inspect-text-scroll");
-    widget(Stack::fill_column(0.0).min_height(LengthSpec::Px(0.0)))
+    .key(super::frame::content_key(model, "preview-text"));
+    // 插件根自带 bg 底，盖住预览框顶部的插件光晕，和 `.text-preview { background: var(--bg) }` 一致。
+    widget(Stack::fill_column(0.0).min_height(LengthSpec::Px(0.0)).surface(SemanticColorRole::Background))
         .children((toolbar(chips, "inspect-text-toolbar"), content.into_any()))
         .key("inspect-text-plugin")
         .into_any()
@@ -212,7 +215,9 @@ fn native_view(model: &ShellViewModel, view_id: &str, label: &str, content: &str
     }
     let nav = model.inspect.page_nav();
     if let Some(page) = super::page::page_bitmap(model) {
-        rows.push(super::page::page_scroller(page, nav));
+        let index = nav.map(|(index, _)| index).unwrap_or(0);
+        let key = format!("{}-{index}", super::frame::content_key(model, "preview-page"));
+        rows.push(super::page::page_scroller(page, nav, key));
     } else if let Some(error) = model.inspect.raster_error() {
         rows.push(overlay("无法预览该文档", error, "inspect-native-error"));
     } else {
@@ -275,7 +280,7 @@ fn orbit_controls() -> AnyView {
             widget(nana_ui::runtime::Button::new(label).kind(nana_ui::ButtonKind::Ghost))
                 .key(key)
                 .on_cx(move |_, _: &Activate, cx| {
-                    cx.dispatch_program(ShellMessage::Inspect(InspectMessage::Orbit { yaw, zoom }));
+                    cx.dispatch_program_all(ShellMessage::Inspect(InspectMessage::Orbit { yaw, zoom }));
                 })
                 .into_any()
         })

@@ -22,7 +22,7 @@ pub(super) use parts::hit_area;
 
 /// 播放条要显示的全部状态。从壳层模型推导一次，视图只读这里。
 pub(crate) struct BarProps {
-    /// 当前条目；预览页把音频装进同一游标时，用预览文件充当当前条目。
+    /// 当前条目。预览音视频时是插在当前项后面的临时条目。
     pub item: Option<QueueItem>,
     /// 当前播放器登记的文件类别：image、video、audio，没有播放器时为空。
     pub file_class: String,
@@ -39,6 +39,8 @@ pub(crate) struct BarProps {
     pub error: Option<String>,
     pub queue_open: bool,
     pub queue: Vec<QueueItem>,
+    /// 队列浮层滚动区的键：仓库和播放集，换播放集时列表回到顶部。
+    pub queue_key: String,
     pub current_id: Option<String>,
     /// 已经上传纹理的缩略图槽位路径。
     pub thumbnail: Option<String>,
@@ -47,7 +49,7 @@ pub(crate) struct BarProps {
 impl BarProps {
     pub(crate) fn from_model(model: &ShellViewModel) -> Self {
         let player = &model.player;
-        let item = if player.preview_audio_armed() { preview_item(model) } else { player.current_item().cloned() };
+        let item = player.current_item().cloned();
         let definition = item.as_ref().and_then(|item| definition(model, &item.player_type_id));
         let session = &player.session;
         let error = session.error.clone().filter(|error| !error.trim().is_empty());
@@ -55,7 +57,7 @@ impl BarProps {
             file_class: definition.as_ref().map(|value| value.file_class.clone()).unwrap_or_default(),
             supports_seek: definition.as_ref().is_some_and(|value| value.supports_seek),
             supports_volume: definition.as_ref().is_some_and(|value| value.supports_volume),
-            can_play: if player.preview_audio_armed() { session.status != "failed" } else { player.can_play },
+            can_play: player.can_play,
             // 图标跟实际状态走：失败的会话不显示暂停。
             playing: session.status == "playing",
             mode: player.mode,
@@ -67,6 +69,11 @@ impl BarProps {
             error: error.filter(|_| item.is_some()),
             queue_open: player.queue_open && item.is_some(),
             queue: player.queue.clone(),
+            queue_key: format!(
+                "player-queue-list-{}-{}",
+                super::key_part(player.repo_id.as_deref().unwrap_or_default()),
+                super::key_part(player.listed.as_ref().map(|detail| detail.playlist.playlist_id.as_str()).unwrap_or("transient"))
+            ),
             current_id: player.current_id.clone(),
             thumbnail: thumbnail_slot(model, item.as_ref()),
             item,
@@ -140,48 +147,6 @@ fn definition(model: &ShellViewModel, player_type_id: &str) -> Option<Definition
         file_class: candidate.file_class.clone(),
         supports_seek: candidate.supports_seek,
         supports_volume: candidate.supports_volume,
-    })
-}
-
-/// 预览页装进同一游标的音频，按 Vue 临时插播条目的样子呈现。播放器名取插件登记的
-/// 音视频播放器，没有插件时用内置候选。
-fn preview_item(model: &ShellViewModel) -> Option<QueueItem> {
-    let path = model.player.preview_path().trim().to_string();
-    if path.is_empty() {
-        return model.player.current_item().cloned();
-    }
-    let filename = path.rsplit(['/', '\\']).next().unwrap_or(&path).to_string();
-    let extension = filename.rsplit_once('.').map(|(_, ext)| ext.to_ascii_lowercase()).unwrap_or_default();
-    let audio_like = |class: &str| matches!(class, "audio" | "video");
-    let (player_type_id, player_label) = model
-        .player
-        .contributions
-        .iter()
-        .find(|item| audio_like(&item.file_class) && item.supported_extensions.iter().any(|ext| ext.eq_ignore_ascii_case(&extension)))
-        .map(|item| (item.player_type_id.clone(), item.label.clone()))
-        .or_else(|| {
-            model
-                .player
-                .candidates
-                .iter()
-                .find(|item| audio_like(&item.file_class) && item.extensions.iter().any(|ext| ext.eq_ignore_ascii_case(&extension)))
-                .map(|item| (item.player_type_id.clone(), item.label.clone()))
-        })
-        .unwrap_or_default();
-    Some(QueueItem {
-        id: format!("preview:{path}"),
-        playlist_id: String::new(),
-        asset_id: String::new(),
-        path,
-        filename,
-        extension,
-        status: "ready".into(),
-        status_reason: None,
-        transient: true,
-        player_type_id,
-        player_label,
-        file_class: String::new(),
-        thumbnail_path: None,
     })
 }
 
@@ -287,7 +252,7 @@ fn progress(props: &BarProps) -> AnyView {
             .painter(ProgressTrack { ratio: props.progress_ratio() }),
     )
     .children((widget(range).key("player-seek").on_cx(|_, event: &RangeChanged, cx| {
-        cx.dispatch_program(player_message(PlayerMessage::Seek(event.value.max(0.0) as u64)));
+        cx.dispatch_program_all(player_message(PlayerMessage::Seek(event.value.max(0.0) as u64)));
     }),))
     .key("player-progress")
     .into_any()
@@ -343,7 +308,7 @@ fn media(props: &BarProps) -> AnyView {
     let dim = (!props.has_item()).then_some((SemanticColorRole::Surface, DISABLED_OPACITY));
     let hit = widget(parts::hit_area(&title, !props.has_item(), 0.0, 6.0))
         .key("player-media")
-        .on_cx(|_, _: &Activate, cx| cx.dispatch_program(player_message(PlayerMessage::OpenPreview { item_id: None })));
+        .on_cx(|_, _: &Activate, cx| cx.dispatch_program_all(player_message(PlayerMessage::OpenPreview { item_id: None })));
     let meta = widget(
         Stack::column(3.0)
             .width(LengthSpec::Shrink)
@@ -392,21 +357,21 @@ fn transport(props: &BarProps) -> AnyView {
         .children((
             widget(glyph_button(mode_icon, mode_label, 15.0, 32.0, !has_item))
                 .key("player-cycle-mode")
-                .on_cx(|_, _: &Activate, cx| cx.dispatch_program(player_message(PlayerMessage::CycleMode))),
+                .on_cx(|_, _: &Activate, cx| cx.dispatch_program_all(player_message(PlayerMessage::CycleMode))),
             widget(glyph_button(icons::SKIP_BACK, "上一首", 16.0, 32.0, skip_disabled))
                 .key("player-previous")
-                .on_cx(|_, _: &Activate, cx| cx.dispatch_program(player_message(PlayerMessage::PlayPrevious))),
+                .on_cx(|_, _: &Activate, cx| cx.dispatch_program_all(player_message(PlayerMessage::PlayPrevious))),
             widget(glyph_button(play_icon, play_label, 17.0, 36.0, skip_disabled))
                 .key("player-play")
-                .on_cx(move |_, _: &Activate, cx| cx.dispatch_program(player_message(PlayerMessage::SetPlaying(!playing)))),
+                .on_cx(move |_, _: &Activate, cx| cx.dispatch_program_all(player_message(PlayerMessage::SetPlaying(!playing)))),
             widget(glyph_button(icons::SKIP_FORWARD, "下一首", 16.0, 32.0, skip_disabled))
                 .key("player-next")
                 .on_cx(|_, _: &Activate, cx| {
-                    cx.dispatch_program(player_message(PlayerMessage::PlayNext { natural_end: false }));
+                    cx.dispatch_program_all(player_message(PlayerMessage::PlayNext { natural_end: false }));
                 }),
             widget(glyph_button(icons::LIST_MUSIC, "当前队列", 16.0, 32.0, !has_item))
                 .key("player-queue")
-                .on_cx(|_, _: &Activate, cx| cx.dispatch_program(player_message(PlayerMessage::ToggleQueue))),
+                .on_cx(|_, _: &Activate, cx| cx.dispatch_program_all(player_message(PlayerMessage::ToggleQueue))),
         ))
         .key("player-transport")
         .into_any()
@@ -451,7 +416,7 @@ fn volume(props: &BarProps) -> AnyView {
         .children((
             widget(parts::icon(icons::VOLUME_2, 15.0, SemanticColorRole::Muted)),
             widget(slider).key("player-volume").on_cx(|_, event: &RangeChanged, cx| {
-                cx.dispatch_program(player_message(PlayerMessage::SetVolume(event.value.clamp(0.0, 1.0) as f32)));
+                cx.dispatch_program_all(player_message(PlayerMessage::SetVolume(event.value.clamp(0.0, 1.0) as f32)));
             }),
         ))
         .key("player-volume-row")

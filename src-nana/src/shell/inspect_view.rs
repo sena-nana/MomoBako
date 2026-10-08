@@ -20,7 +20,7 @@ mod page;
 #[path = "preview_paint.rs"]
 mod preview_paint;
 
-/// 搜索面板或已选文件时的检视面：搜索在上，文件预览页在下。
+/// 检视面：搜索面板时只有搜索，已选文件时是文件预览页。
 pub(super) fn inspect_surface(model: &ShellViewModel) -> AnyView {
     let inspect = &model.inspect;
     // 搜索面板独占主体，和 Vue 的 `SearchPanel` 一样不和预览叠在一起。筛选栏由壳层放置。

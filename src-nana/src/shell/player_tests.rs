@@ -522,12 +522,13 @@ fn listed_playback_distinguishes_missing_plugin_upgrade_and_decoder_failure() {
     send(&mut decoded, PlayerMessage::PlayListed { item_id: None });
     assert_eq!(decoded.player.session.status, "failed");
     assert!(decoded.player.session.error.as_deref().unwrap_or_default().contains("没有原生解码器"));
-    let volume = decoded.player.session.volume;
     let time = decoded.player.session.current_time_ms;
+    // 和 Vue 一样，音量先记下来留给下一项；跳转在没装好的条目上不动，也不改掉原来的错误。
     send(&mut decoded, PlayerMessage::SetVolume(0.2));
     send(&mut decoded, PlayerMessage::Seek(1_500));
-    assert_eq!(decoded.player.session.volume, volume);
+    assert_eq!(decoded.player.session.volume, 0.2);
     assert_eq!(decoded.player.session.current_time_ms, time);
+    assert!(decoded.player.session.error.as_deref().unwrap_or_default().contains("没有原生解码器"));
     assert_ne!(decoded.player.session.status, "playing");
 
     let mut image = shell(true);
@@ -751,16 +752,18 @@ fn preview_and_player_share_one_media_session() {
         pcm: None,
         frames: None,
     }));
-    assert_eq!(model.player.session.status, "failed");
-    assert!(model.player.session.error.as_deref().unwrap_or_default().contains("没有原生解码器"));
+    // 读不出来的预览不接管播放条，播放器那份会话不受影响；预览页只显示自己的失败。
     assert_eq!(model.inspect.media_session().map(|session| session.status.as_str()), Some("failed"));
+    assert!(model.player.current_item().is_none());
+    assert_ne!(model.player.session.status, "failed");
     send(&mut model, PlayerMessage::SetVolume(0.2));
-    assert_eq!(model.player.session.volume, 1.0);
+    assert_eq!(model.player.session.volume, 0.2);
     assert_eq!(model.inspect.media_session().map(|session| session.volume), Some(1.0));
     assert_ne!(model.player.session.status, "playing");
+    // 播放器没在这个仓库里放东西，停止不改它；预览页的失败也留着。
     send(&mut model, PlayerMessage::Stop { repo_id: Some("repo".into()), clear_stored: true });
-    assert_eq!(model.player.session.status, "ended");
-    assert_eq!(model.inspect.media_session().map(|session| session.status.as_str()), Some("ended"));
+    assert_eq!(model.player.session.status, "idle");
+    assert_eq!(model.inspect.media_session().map(|session| session.status.as_str()), Some("failed"));
 
     model.player.candidates = vec![candidate("native.audio", "audio", "audio", &["mp3"])];
     load_playlist(&mut model, "repo", vec![item("a", "ready")]);

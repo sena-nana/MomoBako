@@ -3,16 +3,30 @@
 //! 场景名和 `tmp/vue-mock/scenes/player.ts` 同名，数据和 Vue 夹具保持一致：
 //! 演示播放列表、两首 `music/track-0N.mp3`、三个官方播放器贡献，侧栏播放集默认收起。
 //! 15 页里的「播放集」「播放中」也由这里填数据，状态都走产品归约，不手写会话字段。
+//! 预览场景的文件字节（`preview_fixtures/cover.png`、`audio_fixtures/tone.mp3`、文本）和 Vue 夹具逐字节相同。
 
-use crate::backend::services::repository::{PlaylistDetail, PlaylistItem, PlaylistPlayerContribution, PlaylistSummary};
+use crate::backend::services::repository::{
+    AssetDetail, AssetSummary, FilePreviewSourceResponse, PlaylistDetail, PlaylistItem, PlaylistPlayerContribution,
+    PlaylistSummary,
+};
 
+use super::super::inspect::InspectMessage;
 use super::super::player::{PlayerEffect, PlayerMessage};
+use super::super::InspectEffect;
 use super::super::sidebar::SidebarPlaylist;
 use super::super::{ShellMessage, ShellPage, ShellViewModel, WorkspacePanel};
 use super::REPO_ID;
 
 const PLAYLIST_ID: &str = "playlist-demo";
 const NOW: &str = "2026-10-08T08:00:00Z";
+/// 文本预览的内容。Vue 场景的 `SETTINGS_JSON` 是同一段。
+const TEXT_FIXTURE: &str = "{\n  \"name\": \"MomoBako\",\n  \"theme\": \"light\",\n  \"corners\": \"smooth\"\n}\n";
+/// 图片预览的字节。Vue 场景的 `COVER_PNG` 解出来是同一份。
+const COVER_PNG: &[u8] = include_bytes!("preview_fixtures/cover.png");
+/// 音频预览的字节。Vue 场景的 `TONE_MP3` 解出来是同一份。
+const TONE_MP3: &[u8] = include_bytes!("audio_fixtures/tone.mp3");
+/// Vue 夹具里 `cover.png` 登记的大小。
+const COVER_SIZE: i64 = 2_400_000;
 
 /// 本面板的离屏对照场景。和 15 页同名的「playlists」「playback-running」不在这里登记。
 pub(super) fn models() -> Vec<(&'static str, ShellViewModel)> {
@@ -23,6 +37,9 @@ pub(super) fn models() -> Vec<(&'static str, ShellViewModel)> {
         ("outside-playback", outside_playback_scene()),
         ("live-preview", live_preview_scene()),
         ("live-asmr", live_asmr_scene()),
+        ("preview-text", preview_text_scene()),
+        ("preview-image", preview_image_scene()),
+        ("preview-audio", preview_audio_scene()),
     ]
 }
 
@@ -277,5 +294,125 @@ fn live_asmr_scene() -> ShellViewModel {
     model.inspect.loading = false;
     model.inspect.activity.clear();
     model.inspect.facts.extension = "mp3".into();
+    model
+}
+
+/// 预览场景的起点：Vue `base()` 的根目录（缺的文件补一行），像双击一样选中它并读回素材详情。
+/// 之后的读取请求由各场景用夹具字节回答，和宿主派发后送回的消息一样走产品归约。
+fn preview_scene(path: &str, size_bytes: i64) -> ShellViewModel {
+    let mut model = ShellViewModel::for_page(ShellPage::FileList);
+    super::seed_browser(&mut model);
+    if !model.files.rows.iter().any(|row| row.path == path) {
+        model.files.rows.push(super::file_row(path, "file"));
+        model.files.total_entries = model.files.rows.len();
+    }
+    let asset_id = path.replace('/', "-");
+    model.reduce(ShellMessage::SelectFile { path: path.into(), asset_id: Some(asset_id) });
+    model.reduce(ShellMessage::AssetDetailLoaded(Ok(preview_detail(path, size_bytes))));
+    model
+}
+
+/// 素材详情和 Vue 夹具 `file()` / `asset()` 同一组字段：大小写成「N B」，修改时间是 NOW。
+fn preview_detail(path: &str, size_bytes: i64) -> AssetDetail {
+    let filename = path.rsplit('/').next().unwrap_or(path).to_string();
+    let extension = filename.rsplit_once('.').map(|(_, ext)| ext.to_ascii_lowercase()).unwrap_or_default();
+    AssetDetail {
+        summary: AssetSummary {
+            asset_id: path.replace('/', "-"),
+            repo_id: REPO_ID.into(),
+            path: path.into(),
+            filename,
+            extension,
+            size_bytes,
+            size_label: format!("{size_bytes} B"),
+            status: "ready".into(),
+            modified_at: NOW.into(),
+            last_accessed_at: None,
+            version: 1,
+            tags: Vec::new(),
+            thumbnail_path: None,
+            hardlink_group_id: None,
+            hardlink_state: None,
+            is_virtual: false,
+            provider_id: None,
+            provider_item_id: None,
+            source_payload: None,
+            local_absolute_path: None,
+        },
+        metadata: Vec::new(),
+        revisions: Vec::new(),
+    }
+}
+
+/// 取走预览排下的读取请求，找出要回答的那一个。
+fn take_effect<T>(model: &mut ShellViewModel, pick: impl Fn(InspectEffect) -> Option<T>) -> Option<T> {
+    let found = model.inspect.take_effects().into_iter().find_map(pick);
+    if found.is_none() {
+        eprintln!("Nana 验收预览没有排下要回答的读取请求");
+    }
+    found
+}
+
+/// 文本预览：根目录的 settings.json。
+fn preview_text_scene() -> ShellViewModel {
+    let mut model = preview_scene("settings.json", TEXT_FIXTURE.len() as i64);
+    let request = take_effect(&mut model, |effect| match effect {
+        InspectEffect::LoadText { path, markdown, generation, .. } => Some((path, markdown, generation)),
+        _ => None,
+    });
+    if let Some((path, markdown, generation)) = request {
+        let result = Ok(crate::shell::prepare_text(TEXT_FIXTURE.as_bytes()));
+        model.reduce(ShellMessage::Inspect(InspectMessage::BodyLoaded { path, markdown, generation, result }));
+    }
+    model
+}
+
+/// 图片预览：根目录的 cover.png。离屏会话不走宿主上传纹理，像素按内容图画。
+fn preview_image_scene() -> ShellViewModel {
+    let mut model = preview_scene("cover.png", COVER_SIZE);
+    let request = take_effect(&mut model, |effect| match effect {
+        InspectEffect::LoadImage { repo_id, path } => Some((repo_id, path)),
+        _ => None,
+    });
+    if let Some((repo_id, path)) = request {
+        let source = FilePreviewSourceResponse {
+            repo_id,
+            path,
+            token: "preview-image".into(),
+            source_url: None,
+            local_path: None,
+            media_type: "image/png".into(),
+            size_bytes: COVER_SIZE,
+            modified_at: Some(NOW.into()),
+        };
+        model.reduce(ShellMessage::PreviewPixelsLoaded { source, pixels: crate::shell::decode_preview_pixels(COVER_PNG) });
+    }
+    // 挂 file-preview 纹理槽会引用离屏没有注册的宿主纹理。
+    model.preview_token = None;
+    model
+}
+
+/// 音频预览：根目录的 track-01.mp3。读好后插成临时条目接管播放条；自动播放要宿主派发，
+/// 截图停在 0:00 暂停，和 Vue 场景截图前把播放暂停到开头一致。
+fn preview_audio_scene() -> ShellViewModel {
+    let mut model = preview_scene("track-01.mp3", TONE_MP3.len() as i64);
+    load_official_players(&mut model);
+    let request = take_effect(&mut model, |effect| match effect {
+        InspectEffect::LoadMedia { path, generation, .. } => Some((path, generation)),
+        _ => None,
+    });
+    let Some((path, generation)) = request else {
+        return model;
+    };
+    match crate::shell::preview_media_parts(REPO_ID, TONE_MP3) {
+        Ok(parts) => model.reduce(ShellMessage::Inspect(InspectMessage::MediaLoaded {
+            path,
+            generation,
+            result: Ok(parts.session),
+            pcm: parts.pcm,
+            frames: parts.frames,
+        })),
+        Err(error) => eprintln!("Nana 验收音频夹具解不开：{error}"),
+    }
     model
 }

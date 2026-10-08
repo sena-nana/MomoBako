@@ -130,7 +130,7 @@ pub(super) fn settings_row(props: &BarProps, narrow: bool) -> AnyView {
                         .key("player-duration-label"),
                     widget(duration).key("player-duration").on_cx(|_, event: &RangeChanged, cx| {
                         let seconds = event.value.round().clamp(2.0, 30.0) as u32;
-                        cx.dispatch_program(player_message(PlayerMessage::SetImageDuration(seconds * 1000)));
+                        cx.dispatch_program_all(player_message(PlayerMessage::SetImageDuration(seconds * 1000)));
                     }),
                 ))
                 .into_any(),
@@ -156,10 +156,10 @@ fn fit_switch(cover: bool) -> AnyView {
     )
     .children((
         widget(fit_option("适应", !cover)).key("player-fit-contain").on_cx(|_, _: &Activate, cx| {
-            cx.dispatch_program(player_message(PlayerMessage::SetObjectFit { cover: false }));
+            cx.dispatch_program_all(player_message(PlayerMessage::SetObjectFit { cover: false }));
         }),
         widget(fit_option("填充", cover)).key("player-fit-cover").on_cx(|_, _: &Activate, cx| {
-            cx.dispatch_program(player_message(PlayerMessage::SetObjectFit { cover: true }));
+            cx.dispatch_program_all(player_message(PlayerMessage::SetObjectFit { cover: true }));
         }),
     ))
     .key("player-fit")
@@ -212,7 +212,7 @@ pub(super) fn queue_popover(props: &BarProps) -> AnyView {
         layout.flex_shrink = Some(1.0);
     }))
     .children((widget(Stack::column(6.0)).children(rows),))
-    .key("player-queue-list")
+    .key(props.queue_key.clone())
     .into_any();
     widget(
         Stack::column(8.0)
@@ -252,8 +252,8 @@ fn queue_row(item: &QueueItem, media: &'static str, active: bool) -> AnyView {
     let title = display_title(&item.filename, &item.extension);
     let detail = if ready { item.path.clone() } else { item.status_reason.clone().unwrap_or_else(|| item.status.clone()) };
     let id = item.id.clone();
-    let hit = widget(hit_area(&title, !ready, 8.0, 10.0)).key(format!("player-queue-{}", item.id)).on_cx(move |_, _: &Activate, cx| {
-        cx.dispatch_program(player_message(PlayerMessage::PlayItem { item_id: id.clone() }));
+    let hit = widget(hit_area(&title, !ready, 8.0, 10.0)).key(format!("player-queue-{}", super::super::key_part(&item.id))).on_cx(move |_, _: &Activate, cx| {
+        cx.dispatch_program_all(player_message(PlayerMessage::PlayItem { item_id: id.clone() }));
     });
     let title_role = if active { SemanticColorRole::Accent } else { SemanticColorRole::Text };
     // 不可播放的条目整行按 Vue 的 0.52 淡化，在浮层底色上混出来。

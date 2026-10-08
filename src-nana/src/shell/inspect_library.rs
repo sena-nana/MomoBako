@@ -14,6 +14,9 @@ use serde_json::Value;
 use super::files::hardlink_label;
 use super::inspect::FileFacts;
 
+#[path = "local_time.rs"]
+mod local_time;
+
 const ARCHIVE_VIEW: &str = "momobako.preview.archive";
 const MODEL_VIEW: &str = "momobako.preview.model";
 const PDF_VIEW: &str = "momobako.preview.pdf";
@@ -191,7 +194,11 @@ pub(super) fn archive_list(content: &str) -> AnyView {
 pub(super) fn fact_column(facts: &FileFacts) -> AnyView {
     let extension = if facts.extension.trim().is_empty() { "文件".to_string() } else { facts.extension.clone() };
     let size = if facts.size_label.trim().is_empty() { "未知".to_string() } else { facts.size_label.clone() };
-    let modified = if facts.modified_at.trim().is_empty() { "未记录".to_string() } else { facts.modified_at.clone() };
+    let modified = if facts.modified_at.trim().is_empty() {
+        "未记录".to_string()
+    } else {
+        local_time::zh_cn_local(&facts.modified_at)
+    };
     let mut rows = vec![
         stacked_value("类型", extension, "inspect-stat-type", false),
         stacked_value("大小", size, "inspect-stat-size", true),
@@ -201,7 +208,7 @@ pub(super) fn fact_column(facts: &FileFacts) -> AnyView {
         rows.push(stacked_value("硬链接", hardlink.to_string(), "inspect-stat-hardlink", true));
     }
     rows.push(stacked_value("修改时间", modified, "inspect-stat-modified", true));
-    widget(Stack::column(4.0).width(LengthSpec::Fill).min_width(LengthSpec::Px(0.0)))
+    widget(Stack::column(12.0).width(LengthSpec::Fill).min_width(LengthSpec::Px(0.0)))
         .children(rows)
         .key("inspect-file-facts")
         .into_any()
@@ -291,19 +298,30 @@ pub(super) fn recorded_copy(input: RecordedInput) -> RecordedCopy {
     }
 }
 
-/// 标签在上、数值在下。`divided` 时在行顶加 Vue `asset-meta__row` 的发丝线。
+/// Vue `asset-meta__row`：标签在上（11px 粗体弱色、字距 0.4），数值在下（14px 正文色，长值随处折行），
+/// 两者间距 6。`divided` 时行顶一条 border-soft 发丝线，线下留 12px。
 fn stacked_value(label: &str, value: String, key: &str, divided: bool) -> AnyView {
     let key = key.to_string();
-    let mut column = Stack::column(2.0).width(LengthSpec::Fill).min_width(LengthSpec::Px(0.0));
+    let mut column = Stack::column(6.0).width(LengthSpec::Fill).min_width(LengthSpec::Px(0.0));
     if divided {
-        column = super::workbench::with_top_divider(column);
+        let mut style = column.node_style();
+        style.border = Some(SemanticColorRole::BorderSoft);
+        let layout = std::sync::Arc::make_mut(&mut style.layout);
+        layout.border_top_width = Some(1.0);
+        layout.padding_top = Some(LengthSpec::Px(12.0));
+        column = column.style(style);
+    }
+    let mut name = Text::new(label).color(SemanticColorRole::Faint).font_size(11.0).font_weight(700).line_height(17.05);
+    std::sync::Arc::make_mut(&mut name.style.layout).letter_spacing = Some(0.4);
+    let mut shown = Text::new(value).color(SemanticColorRole::Text).font_size(14.0).line_height(21.7);
+    {
+        let layout = std::sync::Arc::make_mut(&mut shown.style.layout);
+        layout.min_width = Some(LengthSpec::Px(0.0));
+        layout.overflow_wrap = Some(nana_ui_core::OverflowWrapSpec::Anywhere);
     }
     widget(column)
         .key(key.clone())
-        .children((
-            widget(super::workbench::eyebrow(label)).key(format!("{key}-label")),
-            text(value).key(format!("{key}-value")),
-        ))
+        .children((widget(name).key(format!("{key}-label")), widget(shown).key(format!("{key}-value"))))
         .into_any()
 }
 

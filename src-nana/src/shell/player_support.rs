@@ -323,7 +323,8 @@ pub fn queue_item_from_playlist(item: &PlaylistItem, playlist: &PlaylistSummary)
     }
 }
 
-/// 只在音频或视频实现里按扩展名找播放器。
+/// 只在音频或视频实现里按扩展名找播放器。和 Vue `findPlayerForEntry` 一样先找插件登记的
+/// 播放器（条目上显示它的名字），都没有时才用内置的原生候选，保证没装插件也能播放。
 pub fn find_player_for_extension<'a>(
     extension: &str,
     candidates: &'a [PlayerCandidate],
@@ -333,16 +334,16 @@ pub fn find_player_for_extension<'a>(
     if extension.is_empty() {
         return None;
     }
-    if let Some(candidate) = candidates.iter().find(|candidate| {
-        matches!(candidate.file_class.as_str(), "audio" | "video")
-            && candidate.extensions.iter().any(|item| item.eq_ignore_ascii_case(&extension))
-    }) {
-        return Some(PlayerMatch::Native(candidate));
-    }
-    contributions.iter().find(|contribution| {
+    if let Some(contribution) = contributions.iter().find(|contribution| {
         matches!(contribution.file_class.as_str(), "audio" | "video")
             && contribution.supported_extensions.iter().any(|item| item.eq_ignore_ascii_case(&extension))
-    }).map(PlayerMatch::Contribution)
+    }) {
+        return Some(PlayerMatch::Contribution(contribution));
+    }
+    candidates.iter().find(|candidate| {
+        matches!(candidate.file_class.as_str(), "audio" | "video")
+            && candidate.extensions.iter().any(|item| item.eq_ignore_ascii_case(&extension))
+    }).map(PlayerMatch::Native)
 }
 
 pub enum PlayerMatch<'a> {

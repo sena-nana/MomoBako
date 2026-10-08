@@ -14,7 +14,6 @@ pub(super) fn sample_uncompressed() -> Vec<u8> {
 use serde_json::Value;
 
 use crate::backend::services::repository::{MetadataEntry, PlaybackSessionState};
-use crate::host_api::{PlaybackMediaCapabilities, PlaybackMediaPlugin};
 use crate::plugin_api::NativeContributionKind;
 
 use super::{PreviewBinding, PreviewKind};
@@ -199,47 +198,6 @@ pub(crate) fn preview_media_parts(repo_id: &str, bytes: &[u8]) -> Result<MediaPa
             }
         },
     }
-}
-
-/// 已装载的音频允许播放、暂停、跳转和音量。失败会话仍拒绝控制。
-pub(super) fn transport_plugin(session: &PlaybackSessionState) -> TransportPlugin {
-    if session.error.is_none() && session.duration_ms.is_some() {
-        TransportPlugin::Ready
-    } else {
-        TransportPlugin::Missing
-    }
-}
-
-pub(super) enum TransportPlugin {
-    Ready,
-    Missing,
-}
-
-impl PlaybackMediaPlugin for TransportPlugin {
-    fn load(&mut self, _source: &str) -> Result<PlaybackMediaCapabilities, String> {
-        Err("预览控制不重复装载".into())
-    }
-
-    fn play(&mut self) -> Result<(), String> {
-        match self {
-            Self::Ready => Ok(()),
-            Self::Missing => Err("没有原生解码器".into()),
-        }
-    }
-
-    fn pause(&mut self) -> Result<(), String> {
-        self.play()
-    }
-
-    fn seek(&mut self, _position_ms: u64) -> Result<(), String> {
-        self.play()
-    }
-
-    fn set_volume(&mut self, _volume: f32) -> Result<(), String> {
-        self.play()
-    }
-
-    fn dispose(&mut self) {}
 }
 
 fn paused_audio_session(repo_id: &str, duration_ms: u64) -> PlaybackSessionState {

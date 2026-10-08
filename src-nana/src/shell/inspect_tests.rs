@@ -11,6 +11,7 @@ use crate::backend::services::repository::{
 use crate::plugin_api::{NativeContributionKind, NativePluginContribution};
 
 use super::super::workspace::{WorkspacePanel, WorkspaceRepository};
+use super::super::player::PlayerMessage;
 use super::super::{PreviewPixels, ShellMessage, ShellPage, ShellViewModel};
 use super::{InspectEffect, InspectMessage, InspectState, PreviewBinding, PreviewBody, PreviewKind};
 
@@ -201,49 +202,74 @@ fn image_errors_stay_failed_and_stale_pixels_are_ignored() {
     assert!(matches!(model.inspect.body, PreviewBody::Failed(ref message) if message.contains("坏图")));
 }
 
+/// 读不出来的预览不接管播放条：播放条上的播放、跳转和音量都不会把它变成 playing。
 #[test]
 fn media_without_a_decoder_never_reports_playing() {
-    let mut state = InspectState::default();
-    state.note_detail(&asset("audio/a.mp3", "mp3", 1, false, Vec::new()));
-    let InspectEffect::LoadMedia { path, generation, .. } = state.take_effects().pop().unwrap() else {
+    let mut model = ShellViewModel::default();
+    model.workspace.active_repo_id = Some("repo".into());
+    model.reduce(ShellMessage::AssetDetailLoaded(Ok(asset("audio/a.mp3", "mp3", 1, false, Vec::new()))));
+    let InspectEffect::LoadMedia { path, generation, .. } = model.inspect.take_effects().pop().unwrap() else {
         panic!("没有音视频请求");
     };
-    state.reduce(true, Some("repo"), InspectMessage::MediaLoaded {
+    model.reduce(ShellMessage::Inspect(InspectMessage::MediaLoaded {
         path,
         generation,
         result: Err("没有原生解码器".into()),
         pcm: None,
         frames: None,
-    });
-    let PreviewBody::Media(session) = &state.body else { panic!("不是音视频") };
+    }));
+    let PreviewBody::Media(session) = &model.inspect.body else { panic!("不是音视频") };
     assert_eq!(session.status, "failed");
     assert!(session.error.as_deref().unwrap_or_default().contains("没有原生解码器"));
-    for message in [InspectMessage::PlayPause, InspectMessage::Seek(1_500), InspectMessage::SetVolume(0.4)] {
-        state.reduce(true, Some("repo"), message);
-        let PreviewBody::Media(session) = &state.body else { panic!("控制后丢了会话") };
+    assert!(model.player.current_item().is_none());
+    assert!(model.inspect.take_effects().is_empty(), "失败的预览不该自动播放");
+    for message in [PlayerMessage::SetPlaying(true), PlayerMessage::Seek(1_500), PlayerMessage::SetVolume(0.4)] {
+        model.reduce(ShellMessage::Player(message));
+        let PreviewBody::Media(session) = &model.inspect.body else { panic!("控制后丢了会话") };
         assert_eq!(session.status, "failed");
-        assert_ne!(session.status, "playing");
     }
     assert!(super::support::preview_media_session("repo", b"ID3").is_err());
 }
 
+/// 和 Vue `playEntry` 一样：预览的音频插成临时条目接管播放条，宿主派发自动播放后开始走时钟。
 #[test]
-fn wav_preview_plays_and_seeks_without_opening_a_device() {
-    let mut state = InspectState::default();
-    state.note_detail(&asset("audio/a.wav", "wav", 1, false, Vec::new()));
-    let InspectEffect::LoadMedia { path, generation, .. } = state.take_effects().pop().unwrap() else {
+fn wav_preview_takes_over_the_bar_and_autoplays_once_dispatched() {
+    let mut model = ShellViewModel::default();
+    model.workspace.active_repo_id = Some("repo".into());
+    model.reduce(ShellMessage::AssetDetailLoaded(Ok(asset("audio/a.wav", "wav", 1, false, Vec::new()))));
+    let InspectEffect::LoadMedia { path, generation, .. } = model.inspect.take_effects().pop().unwrap() else {
         panic!("没有音视频请求");
     };
     let session = super::support::preview_media_session("repo", &tone_wav()).expect("wav");
     assert_eq!(session.status, "paused");
     assert_eq!(session.duration_ms, Some(2));
-    state.reduce(true, Some("repo"), InspectMessage::MediaLoaded { path, generation, result: Ok(session), pcm: None, frames: None });
-    state.reduce(true, Some("repo"), InspectMessage::PlayPause);
-    state.reduce(true, Some("repo"), InspectMessage::Seek(1));
-    let PreviewBody::Media(session) = &state.body else { panic!("丢了会话") };
-    assert_eq!(session.status, "playing");
+    model.reduce(ShellMessage::Inspect(InspectMessage::MediaLoaded { path, generation, result: Ok(session), pcm: None, frames: None }));
+    let item = model.player.current_item().cloned().expect("临时条目");
+    assert!(item.transient);
+    assert_eq!(item.path, "audio/a.wav");
+    assert_eq!(item.player_label, "WAV");
+    assert!(model.player.preview_owns_bar());
+    assert_eq!(model.player.session.status, "paused", "归约本身不出声");
+    let bar = super::super::player_view::bar::props_for_test(&model);
+    assert_eq!(bar.title(), "正在播放 a");
+    assert_eq!(bar.subtitle(), "WAV · audio/a.wav");
+    assert!(bar.can_play && !bar.playing);
+    let effects = model.inspect.take_effects();
+    let [InspectEffect::Autoplay { path, generation }] = effects.as_slice() else {
+        panic!("接管后应排一次自动播放");
+    };
+    model.reduce(ShellMessage::Inspect(InspectMessage::Autoplay { path: path.clone(), generation: *generation }));
+    assert_eq!(model.player.session.status, "playing");
+    assert_eq!(model.inspect.media_session().map(|session| session.status.as_str()), Some("playing"));
+    assert!(super::super::player_view::bar::props_for_test(&model).playing);
+    model.reduce(ShellMessage::Player(PlayerMessage::SetPlaying(false)));
+    model.reduce(ShellMessage::Player(PlayerMessage::Seek(1)));
+    let PreviewBody::Media(session) = &model.inspect.body else { panic!("丢了会话") };
+    assert_eq!(session.status, "paused");
     assert_eq!(session.current_time_ms, 1);
     assert!(session.error.is_none());
+    model.reduce(ShellMessage::Inspect(InspectMessage::Autoplay { path: "audio/a.wav".into(), generation: model.inspect.generation + 1 }));
+    assert_eq!(model.player.session.status, "paused", "过期的自动播放不动");
 }
 
 fn tone_wav() -> Vec<u8> {
@@ -531,6 +557,7 @@ fn avi_preview_plays_pauses_and_seeks_on_the_shared_session() {
     assert!(parts.pcm.is_some());
     let mut model = ShellViewModel::default();
     model.workspace.active_repo_id = Some("repo".into());
+    model.player.contributions = vec![video_player()];
     model.reduce(ShellMessage::AssetDetailLoaded(Ok(asset("clips/a.avi", "avi", 1, false, Vec::new()))));
     let InspectEffect::LoadMedia { path, generation, .. } = model.inspect.take_effects().pop().unwrap() else {
         panic!("没有音视频请求");
@@ -545,17 +572,30 @@ fn avi_preview_plays_pauses_and_seeks_on_the_shared_session() {
     assert_eq!(model.player.session.status, "paused");
     assert!(model.preview_token.as_deref().unwrap_or_default().starts_with("video:"));
     assert_eq!(model.preview_pixels.as_ref().expect("画面").rgba[0], 255);
-    model.reduce(ShellMessage::Inspect(InspectMessage::PlayPause));
+    model.reduce(ShellMessage::Player(PlayerMessage::SetPlaying(true)));
     assert_eq!(model.player.session.status, "playing");
     assert_eq!(model.inspect.media_session().expect("会话").status, "playing");
     assert!(super::poll_timers(&mut model));
     assert_eq!(model.player.session.current_time_ms, 16);
     assert_eq!(model.inspect.media_session().expect("会话").current_time_ms, 16);
-    model.reduce(ShellMessage::Inspect(InspectMessage::Seek(500)));
+    model.reduce(ShellMessage::Player(PlayerMessage::Seek(500)));
     assert_eq!(model.player.session.current_time_ms, 500);
     assert_eq!(model.inspect.media_session().expect("会话").current_time_ms, 500);
     assert_eq!(model.preview_pixels.as_ref().expect("第二帧").rgba[2], 255);
-    model.reduce(ShellMessage::Inspect(InspectMessage::PlayPause));
+    model.reduce(ShellMessage::Player(PlayerMessage::SetPlaying(false)));
     assert_eq!(model.player.session.status, "paused");
     assert_eq!(model.inspect.media_session().expect("会话").status, "paused");
+}
+
+fn video_player() -> crate::backend::services::repository::PlaylistPlayerContribution {
+    crate::backend::services::repository::PlaylistPlayerContribution {
+        player_type_id: "momobako.playlist.video-sequence".into(),
+        label: "视频顺序播放".into(),
+        file_class: "video".into(),
+        supported_extensions: vec!["avi".into(), "mp4".into()],
+        supports_seek: true,
+        supports_volume: true,
+        supports_preview_navigation: true,
+        description: None,
+    }
 }
