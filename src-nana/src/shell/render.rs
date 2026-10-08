@@ -6,11 +6,11 @@ use super::*;
 use crate::theme_map::{SIDEBAR_MAX_PX, SIDEBAR_MIN_PX};
 use nana_ui::runtime::view::{button, text, widget, AnyView, IntoView};
 use nana_ui::runtime::{
-    Activate, AlignSpec, AppShell, Button, Dialog, FrameworkError, JustifySpec, LengthSpec, MountedView, Progress,
-    RadiusTier, RuntimeDocument, ScrollAxes, ScrollView, SemanticColorRole, Stack, Text, TextChanged,
-    TextHorizontalAlignment, TextInput, ValidationIntent, ValidationMessage, Workspace,
+    Activate, AppShell, FrameworkError, LengthSpec, MountedView, RadiusTier, RuntimeDocument, ScrollAxes, ScrollView,
+    SemanticColorRole, Stack, TextChanged, TextInput, Workspace,
 };
-use nana_ui::{ButtonKind, RegionId, RegionRole, RegionState, WorkspaceLayout, WorkspaceModel};
+use nana_ui::{RegionId, RegionRole, RegionState, WorkspaceLayout, WorkspaceModel};
+
 
 thread_local! {
     /// 上一次挂上的壳层。再次挂载前先卸掉，避免文档里叠多棵壳。
@@ -64,20 +64,22 @@ pub fn mount_shell(
                 shell = shell.overlay(super::motion::paint_modal(dialog, &view_model.motion));
             } else if let Some(dialog) = super::sidebar_view::smart_delete_dialog(&view_model) {
                 shell = shell.overlay(super::motion::paint_modal(dialog, &view_model.motion));
-            } else if let Some(dialog) = delete_repository_dialog(&view_model) {
+            } else if let Some(dialog) = super::sidebar_view::repository_delete_dialog(&view_model) {
                 shell = shell.overlay(super::motion::paint_modal(dialog, &view_model.motion));
             } else if let Some(dialog) = super::input::playlist_name_dialog(&view_model) {
                 shell = shell.overlay(super::motion::paint_modal(dialog, &view_model.motion));
-            } else if let Some(dialog) = playlist_creator_dialog(&view_model) {
+            } else if let Some(dialog) = super::sidebar_view::playlist_create_dialog(&view_model) {
                 shell = shell.overlay(super::motion::paint_modal(dialog, &view_model.motion));
             } else if let Some(dialog) = super::sidebar_view::folder_dialog(&view_model) {
                 shell = shell.overlay(super::motion::paint_modal(dialog, &view_model.motion));
             } else if let Some(dialog) = super::sidebar_view::smart_folder_dialog(&view_model) {
                 shell = shell.overlay(super::motion::paint_modal(dialog, &view_model.motion));
             } else if let Some(popover) = super::sidebar_view::repository_popover(&view_model) {
-                shell = shell.overlay(super::motion::paint_panel(popover, &view_model));
+                shell = shell.overlay(popover);
+            } else if let Some(menu) = super::sidebar_view::folder_menu(&view_model) {
+                shell = shell.overlay(menu);
             } else if let Some(popover) = super::admin::task_popover(&view_model) {
-                shell = shell.overlay(super::motion::paint_panel(popover, &view_model));
+                shell = shell.overlay(super::motion::paint_panel(popover, &view_model.motion));
             } else if let Some(menu) = super::files_view::entry_menu(&view_model) {
                 shell = shell.overlay(menu);
             }
@@ -86,6 +88,7 @@ pub fn mount_shell(
     super::title_bar::bind_window_controls(document)?;
     crate::window_host::bind_escape(document);
     crate::window_host::bind_file_drop(document);
+    super::sidebar_view::bind_field_labels(document);
     SHELL_MOUNT.with(|slot| *slot.borrow_mut() = Some(mounted));
     Ok(())
 }
@@ -96,7 +99,7 @@ const NARROW_WINDOW_PX: f32 = 390.0;
 pub(super) const WORKBENCH_GAP_PX: f32 = nana_ui_core::HAIRLINE;
 /// Vue `.shell` 的 `--lilia-primary-inset`：主区内容左右 24、上下 20。
 const PRIMARY_INSET_X: f32 = 24.0;
-const PRIMARY_INSET_Y: f32 = 20.0;
+pub(super) const PRIMARY_INSET_Y: f32 = 20.0;
 
 /// 主区最小宽。390 里还要放下默认侧栏和间隙，不能再用 320。
 /// 宽窗里主区按 fill 铺开，这个下限不会把 1200 的版式压窄。
@@ -105,7 +108,7 @@ fn primary_min_px() -> f32 {
 }
 
 /// Vue 标题栏高度。启动页的 `min-height: 100%` 要扣掉它和主区内边距。
-const TITLE_BAR_PX: f32 = 36.0;
+pub(super) const TITLE_BAR_PX: f32 = 36.0;
 
 /// 主区外框：白底、`Lg` 档圆角（Vue 主区的 `--radius-lg`）。
 ///
@@ -138,22 +141,7 @@ fn primary_route(model: &ShellViewModel) -> AnyView {
 /// 启动页。Vue 主区内容层 `overflow: auto`，窗口矮时整页连同内边距一起滚动；
 /// `.workspace-startup` 的 `min-height: 100%` 让内容在高窗口里上下居中。
 fn startup_route(model: &ShellViewModel) -> AnyView {
-    let fill_height = LengthSpec::CalcViewportOffset {
-        axis: nana_ui_core::ViewportAxis::Height,
-        value: 100.0,
-        offset_px: -(TITLE_BAR_PX + PRIMARY_INSET_Y * 2.0),
-    };
-    let section = widget(
-        Stack::column(0.0)
-            .min_height(fill_height)
-            .padding(24.0)
-            .justify(JustifySpec::Center)
-            .align(AlignSpec::Center),
-    )
-    .children((startup_panel(model),))
-    .key("workspace-startup")
-    .into_any();
-    scroll_route(section)
+    scroll_route(super::startup_view::startup_section(model))
 }
 
 /// 设置路由：内边距放在纵向滚动里，整页和内边距一起滚动。
@@ -190,7 +178,7 @@ fn home_route(model: &ShellViewModel, region: MainRegion) -> AnyView {
             .into_any()
     } else {
         let panel = match region {
-            MainRegion::MissingRepository => missing_repository_panel(model).into_any(),
+            MainRegion::MissingRepository => super::startup_view::missing_repository_section(model),
             // 没有资源库时标题栏搜索也会切到搜索面板，由搜索面板画「还没有可搜索的资源库」。
             MainRegion::EmptyRepository if model.workspace.panel == WorkspacePanel::Search => {
                 super::inspect_search_view::search_panel(model)
@@ -281,139 +269,6 @@ fn workbench(sidebar: AnyView, stage: AnyView, width: f32) -> AnyView {
         .region(RegionId::Primary, stage)
         .into_any()
 }
-
-/// 24px 圆标。当前步用强调色，完成用成功色，失败用危险色。
-fn startup_step(item: super::workspace::StartupStepItem) -> AnyView {
-    let (fill, border, foreground) = match item.state {
-        super::workspace::StartupStepState::Current => (SemanticColorRole::AccentSoft, SemanticColorRole::Accent, SemanticColorRole::Accent),
-        super::workspace::StartupStepState::Done => (SemanticColorRole::Subtle, SemanticColorRole::Success, SemanticColorRole::Success),
-        super::workspace::StartupStepState::Error => (SemanticColorRole::Subtle, SemanticColorRole::Danger, SemanticColorRole::Danger),
-        super::workspace::StartupStepState::Pending => (SemanticColorRole::Subtle, SemanticColorRole::Border, SemanticColorRole::Muted),
-    };
-    let mut number = Text::new(item.number.to_string()).color(foreground).font_size(12.0).font_weight(600);
-    number.style.text_horizontal_alignment = TextHorizontalAlignment::Center;
-    widget(Stack::row(10.0).align(AlignSpec::Start)).children((
-        widget(
-            Stack::row(0.0)
-                .width(LengthSpec::Px(24.0))
-                .height(LengthSpec::Px(24.0))
-                .min_width(LengthSpec::Px(24.0))
-                .min_height(LengthSpec::Px(24.0))
-                .grow(0.0)
-                .shrink(0.0)
-                .surface(fill)
-                .outline(border, 1.0)
-                .radius_px(999.0)
-                .align(AlignSpec::Center)
-                .justify(JustifySpec::Center),
-        )
-        .children((widget(number).key(format!("startup-index-{}", item.number)),)),
-        widget(Stack::column(2.0)).children((
-            text(item.label).key(format!("startup-label-{}", item.number)),
-            text(item.detail).key(format!("startup-copy-{}", item.number)),
-        )),
-    )).into_any()
-}
-
-/// 启动四步。标题 20px，步骤号是 24px 圆标，进度只画 6px 条。
-fn startup_panel(model: &ShellViewModel) -> impl IntoView + use<'_> {
-    let startup = &model.workspace.startup;
-    let steps = startup.step_items().into_iter().map(startup_step);
-    let error = startup.error.clone().map(|error| text(error).key("startup-error"));
-    let retry = (startup.status == StartupStatus::Error).then(|| {
-        button("重试").key("startup-retry").on_cx(|_, _: &Activate, cx| {
-            cx.dispatch_program(ShellMessage::StartupRetry);
-        })
-    });
-    let mut progress = Progress::new(f64::from(model.motion.startup_percent()), 100.0);
-    {
-        let layout = std::sync::Arc::make_mut(&mut progress.style.layout);
-        layout.width = Some(LengthSpec::Fill);
-        layout.height = Some(LengthSpec::Px(6.0));
-    }
-    let panel = widget(Stack::column(12.0).width(LengthSpec::Px(640.0))).children((
-        widget(Text::new("MomoBako").color(SemanticColorRole::Faint).font_size(11.0).font_weight(600)).key("startup-eyebrow"),
-        widget(Text::new(startup.step_label.clone()).font_size(20.0).font_weight(600)).key("startup-title"),
-        widget(Text::new(format!("第 {} / {} 步", startup.current_step, startup.total_steps)).color(SemanticColorRole::Muted).font_size(13.0)).key("startup-meta"),
-        widget(progress).key("startup-progress"),
-        text(startup.step_detail.clone()).key("startup-detail"),
-        widget(Stack::column(8.0)).children(steps.collect::<Vec<_>>()).key("startup-steps"),
-        error,
-        retry,
-    ));
-    widget(
-        Stack::fill_column(0.0)
-            .padding_xy(24.0, 24.0)
-            .justify(JustifySpec::Center)
-            .align(AlignSpec::Center),
-    )
-    .children((panel,))
-}
-
-/// 缺失仓库的刷新、重定向和删除。忙或删除中时按钮不可再次提交。
-fn missing_repository_panel(model: &ShellViewModel) -> impl IntoView + use<'_> {
-    let repository = model.workspace.active_repository();
-    let name = repository.map(|item| item.name.clone()).unwrap_or_else(|| "资源库不可用".into());
-    let path = repository.map(|item| item.path.clone()).unwrap_or_default();
-    let cache_issue = repository.is_some_and(|item| item.is_source_cache_issue());
-    let summary = if cache_issue {
-        "这个来源资源库需要在插件设置中配置本地缓存或重新认证。仓库记录和已有缓存不会被删除。"
-    } else {
-        "MomoBako 找不到这个资源库的本地文件夹。可以重定向到原资源库位置，或移除这条注册记录和本机缓存。"
-    };
-    let busy = model.workspace.missing_busy();
-    let path_prompt = model.workspace.path_prompt && !cache_issue;
-    let path_draft = model.workspace.path_draft.clone();
-    let error = (!model.workspace.missing_error.is_empty()).then(|| text(model.workspace.missing_error.clone()).key("missing-error"));
-    let path_editor = path_prompt.then(|| {
-        widget(Stack::column(8.0)).children((
-            widget(TextInput::new(path_draft).label("资源库新位置")).on_cx(|_, event: &TextChanged, cx| {
-                cx.dispatch_program(ShellMessage::MissingPathChanged(event.value.to_string()));
-            }),
-            button("确认重定向").key("missing-submit-path").disabled(busy).on_cx(|_, _: &Activate, cx| {
-                cx.dispatch_program(ShellMessage::MissingSubmitPath);
-            }),
-        ))
-    });
-    let card = widget(Stack::column(12.0).width(LengthSpec::Px(560.0))).children((
-        widget(super::title_bar::shell_icon(
-            nana_ui::icons_tabler::ALERT_TRIANGLE,
-            "资源库丢失",
-            false,
-        ))
-        .key("missing-icon"),
-        text("资源库丢失").key("missing-eyebrow"),
-        text(name).key("missing-name"),
-        text(summary).key("missing-summary"),
-        text(path).key("missing-path"),
-        error,
-        path_editor,
-        widget(Stack::row(8.0)).children((
-            button(model.workspace.missing_primary_label()).key("missing-primary").disabled(busy).on_cx(move |_, _: &Activate, cx| {
-                cx.dispatch_program(if cache_issue {
-                    ShellMessage::MissingOpenSourceSettings
-                } else {
-                    ShellMessage::MissingChoosePath
-                });
-            }),
-            button("刷新").key("missing-refresh").disabled(busy).on_cx(|_, _: &Activate, cx| {
-                cx.dispatch_program(ShellMessage::MissingRefresh);
-            }),
-            button(model.workspace.missing_delete_label()).key("missing-delete").disabled(busy).on_cx(|_, _: &Activate, cx| {
-                cx.dispatch_program(ShellMessage::MissingOpenDelete);
-            }),
-        )),
-    ));
-    widget(
-        Stack::fill_column(0.0)
-            .padding_xy(24.0, 24.0)
-            .justify(JustifySpec::Center)
-            .align(AlignSpec::Center),
-    )
-    .children((card,))
-}
-
-
 
 /// 播放集页：播放表面，以及不能播放的条目。名称和当前目录不在这一页另开输入。
 fn playlist_page(model: &ShellViewModel) -> AnyView {
@@ -522,85 +377,3 @@ fn section_heading(model: &ShellViewModel) -> (&'static str, String) {
         _ => ("工作台", model.page.title().into()),
     }
 }
-
-/// 新建播放集对话框。空播放集页不再把表单铺在虚线框下面。
-fn playlist_creator_dialog(model: &ShellViewModel) -> Option<impl IntoView + use<'_>> {
-    if !model.playlist_dialog_open {
-        return None;
-    }
-    let name = model.new_playlist_name.clone();
-    let selected = model.selected_new_playlist_player_type_id.clone();
-    let players = model.playlist_players.iter().take(8).map(|player| {
-        let player_type_id = player.player_type_id.clone();
-        let chosen = selected.as_deref() == Some(player.player_type_id.as_str());
-        let label = if chosen {
-            format!("已选 {}", player.label)
-        } else {
-            format!("使用 {}", player.label)
-        };
-        button(label).key(format!("playlist-player-{player_type_id}")).on_cx(move |_, _: &Activate, cx| {
-            cx.dispatch_program(ShellMessage::SelectPlaylistPlayer(player_type_id.clone()));
-        })
-    }).collect::<Vec<_>>();
-    let blocked = name.trim().is_empty() || selected.is_none();
-    let notice = matches!(model.detail.as_str(), "播放列表名称不能为空" | "请先选择播放器类型" | "正在创建播放列表…")
-        .then(|| widget(ValidationMessage::new(model.detail.clone(), ValidationIntent::Danger)).key("playlist-dialog-notice"));
-    Some(
-        widget(Dialog::new("新建播放集"))
-            .body(widget(Stack::column(8.0)).children((
-                widget(TextInput::new(name).label("名称").placeholder("例如 通勤歌单 / 参考分镜")).on_cx(|_, event: &TextChanged, cx| {
-                    cx.dispatch_program(ShellMessage::NewPlaylistNameChanged(event.value.to_string()));
-                }),
-                text("播放类型").key("playlist-dialog-type"),
-                widget(Stack::column(6.0)).children(players),
-                notice,
-            )))
-            .footer(widget(Stack::row(8.0)).children((
-                widget(super::workbench::ghost_button("取消")).key("playlist-dialog-cancel").on_cx(|_, _: &Activate, cx| {
-                    cx.dispatch_program(ShellMessage::ClosePlaylistDialog);
-                }),
-                widget(super::workbench::primary_button("创建")).key("create-playlist").disabled(blocked).on_cx(|_, _: &Activate, cx| {
-                    cx.dispatch_program(ShellMessage::CreatePlaylist);
-                }),
-            ))),
-    )
-}
-
-fn delete_repository_dialog(model: &ShellViewModel) -> Option<impl IntoView + use<'_>> {
-    let dialog = model.workspace.dialogs.last()?;
-    let super::workspace::WorkspaceDialog::Delete(dialog) = dialog;
-    let repository = model.workspace.repositories.iter().find(|item| item.repo_id == dialog.repo_id);
-    let summary = repository
-        .map(|item| format!("资源库“{}”位于 {}。下面每个操作都会移除当前注册记录。", item.name, item.path))
-        .unwrap_or_else(|| "下面每个操作都会移除当前注册记录。".into());
-    let deleting = model.workspace.deleting_mode.is_some();
-    let modes = [DeleteMode::RecordOnly, DeleteMode::DeleteMetadata, DeleteMode::DeleteFolder];
-    let options = modes.into_iter().map(|mode| {
-        let enabled = model.workspace.delete_mode_enabled(mode);
-        let kind = match mode {
-            DeleteMode::RecordOnly => ButtonKind::Ghost,
-            DeleteMode::DeleteMetadata | DeleteMode::DeleteFolder => ButtonKind::Danger,
-        };
-        widget(Stack::column(4.0)).children((
-            widget(Button::new(mode.label()).kind(kind).disabled(deleting || !enabled)).on_cx(move |_, _: &Activate, cx| {
-                cx.dispatch_program(ShellMessage::MissingConfirmDelete(mode));
-            }),
-            widget(super::workbench::meta(model.workspace.delete_mode_detail(mode))),
-        ))
-    });
-    let error = (!dialog.error.is_empty()).then(|| widget(ValidationMessage::new(dialog.error.clone(), ValidationIntent::Danger)));
-    Some(
-        widget(Dialog::new("删除资源库"))
-            .body(widget(Stack::column(8.0)).children((
-                text(summary).key("delete-dialog-summary"),
-                widget(Stack::column(8.0)).children(options.collect::<Vec<_>>()),
-                error,
-                deleting.then(|| text("处理中...").key("delete-dialog-busy")),
-            )))
-            .footer(widget(super::workbench::ghost_button("取消")).key("delete-dialog-cancel").disabled(deleting).on_cx(|_, _: &Activate, cx| {
-                cx.dispatch_program(ShellMessage::MissingCloseDelete);
-            })),
-    )
-}
-
-

@@ -374,7 +374,7 @@ mod tests {
         prepare_motion(&mut model, &mut window);
         window.document.flush(LayoutViewport::new(1200.0, 800.0), &mut NanaTextShaper::default()).expect("布局");
         assert!(model.sidebar.folder_dialog.open, "对话框还在时不能把它当成已经关掉");
-        let field = labeled_id(&window, "文件夹名称");
+        let field = labeled_input_id(&window, "文件夹名称");
         let document_id = window.document.document();
         window.document.context_mut().focus_node(document_id, field).expect("焦点");
         press_escape(&mut window, &mut input);
@@ -510,20 +510,23 @@ mod tests {
     }
 
     #[test]
-    fn live_popover_clamps_to_the_measured_viewport() {
+    fn live_popover_opens_under_the_anchor_inside_the_viewport() {
         let mut model = files_model();
         let mut window = mounted_at(&model, 420.0, 280.0);
         let mut input = bind(&mut window);
-        let anchor = labeled_center(&window, "资源库 · 动画素材");
-        pointer(&mut window, &mut input, PointerPhase::Down, anchor.0, anchor.1);
-        pointer(&mut window, &mut input, PointerPhase::Up, anchor.0, anchor.1);
+        let anchor = labeled_bounds(&window, "资源库 · 动画素材");
+        let center = (anchor.x + anchor.width / 2.0, anchor.y + anchor.height / 2.0);
+        pointer(&mut window, &mut input, PointerPhase::Down, center.0, center.1);
+        pointer(&mut window, &mut input, PointerPhase::Up, center.0, center.1);
         reduce_queued(&mut model, &mut window);
         crate::shell::mount_shell(&mut window.document, &model).expect("挂上弹层");
         window.document.flush(LayoutViewport::new(420.0, 280.0), &mut NanaTextShaper::default()).expect("布局");
         prepare_motion(&mut model, &mut window);
-        assert_ne!((model.sidebar.popover_x, model.sidebar.popover_y), (8.0, 48.0));
-        assert_ne!((model.sidebar.popover_x, model.sidebar.popover_y), (0.0, 0.0));
-        assert!(model.sidebar.popover_x >= 4.0 && model.sidebar.popover_y >= 4.0, "弹层应留在视口内边距里");
+        window.document.flush(LayoutViewport::new(420.0, 280.0), &mut NanaTextShaper::default()).expect("布局");
+        // Vue `getPopoverPosition`：左边对齐仓库头按钮，顶边在按钮下方 6px，左右留 8px 视口边距。
+        let row = labeled_bounds(&window, "切换资源库 动画素材");
+        assert!(row.x >= 8.0 && row.x + row.width <= 420.0 - 8.0, "弹层应留在视口里：{row:?}");
+        assert!(row.y >= anchor.y + anchor.height + 6.0, "弹层应在仓库头下方：{row:?} {anchor:?}");
     }
 
     #[test]
@@ -542,7 +545,7 @@ mod tests {
             prepare_motion(&mut model, &mut window);
         }
         assert_eq!(model.current_directory, "photos");
-        assert!(!tree_shows_directory(&window, "photos"), "按着的时候不拆树");
+        assert!(!tree_selects_folder(&window, "照片"), "按着的时候不拆树");
         pointer(&mut window, &mut input, PointerPhase::Up, photos.0, photos.1);
         prepare_motion(&mut model, &mut window);
         let requests = crate::sidebar_dispatch::dispatch_prepared_browses(&mut model);
@@ -558,7 +561,7 @@ mod tests {
         assert_eq!(model.files.current_path, "photos");
         assert_eq!(model.files.activity, "正在读取目录…");
         assert_eq!(model.current_directory, "photos");
-        assert!(tree_shows_directory(&window, "photos"), "松手后的树应选中 photos");
+        assert!(tree_selects_folder(&window, "照片"), "松手后的树应选中 photos");
 
         let mut model = hover_model();
         let mut window = mounted(&model);
@@ -651,11 +654,11 @@ mod tests {
         model
     }
 
-    /// 目录树把当前选中的路径放在列表的无障碍名称上。
-    fn tree_shows_directory(window: &ApplicationWindow, path: &str) -> bool {
-        accessibility(window).into_iter().any(|node| {
-            node.role == nana_ui::runtime::AccessibilityRole::List && node.label.as_deref() == Some(path)
-        })
+    /// 目录树里名为 `label` 的文件夹行处于选中态。
+    fn tree_selects_folder(window: &ApplicationWindow, label: &str) -> bool {
+        accessibility(window)
+            .into_iter()
+            .any(|node| node.label.as_deref() == Some(label) && node.selected == Some(true))
     }
 
     fn press_escape(window: &mut ApplicationWindow, input: &mut HeadlessInput) {
@@ -674,8 +677,17 @@ mod tests {
         (node.bounds.x + node.bounds.width / 2.0, node.bounds.y + node.bounds.height / 2.0)
     }
 
-    fn labeled_id(window: &ApplicationWindow, label: &str) -> nana_ui::runtime::StableNodeId {
-        accessibility(window).into_iter().find(|node| node.label.as_deref() == Some(label)).unwrap_or_else(|| panic!("没有 {label}")).id
+    /// 对话框字段上方有同名的可见标签，按输入框角色找。
+    fn labeled_input_id(window: &ApplicationWindow, label: &str) -> nana_ui::runtime::StableNodeId {
+        accessibility(window)
+            .into_iter()
+            .find(|node| node.role == nana_ui::runtime::AccessibilityRole::TextInput && node.label.as_deref() == Some(label))
+            .unwrap_or_else(|| panic!("没有输入框 {label}"))
+            .id
+    }
+
+    fn labeled_bounds(window: &ApplicationWindow, label: &str) -> LayoutBox {
+        accessibility(window).into_iter().find(|node| node.label.as_deref() == Some(label)).unwrap_or_else(|| panic!("没有 {label}")).bounds
     }
 
     fn accessibility(window: &ApplicationWindow) -> Vec<nana_ui::runtime::AccessibilityNode> {

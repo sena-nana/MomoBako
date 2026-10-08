@@ -57,7 +57,7 @@ pub use player::PreviewPcm;
 pub(crate) use inspect::NativeLoad;
 pub use sidebar::{
     FolderMutation, GapMessage, SidebarEffect, SidebarFolder, SidebarMessage, SidebarPlaylist, SidebarSmartFolder,
-    ShortcutId,
+    SidebarTree, ShortcutId,
 };
 pub use workspace::{
     sidebar_prefs_path, DeleteMode, LibraryCategory, MainRegion, StartupStatus, WorkspaceEffect,
@@ -400,6 +400,7 @@ impl ShellViewModel {
     pub fn reduce(&mut self, message: ShellMessage) {
         self.reduce_inner(message);
         self.flush_folder_mutations();
+        self.settle_sidebar_dialogs();
         self.follow_motion();
     }
 
@@ -416,10 +417,10 @@ impl ShellViewModel {
             sidebar::FolderMutation::Rename { repo_id, path, name } => {
                 files::FilesEffect::Rename { repo_id, path, new_name: name }
             }
-            sidebar::FolderMutation::Delete { repo_id, path } => files::FilesEffect::Delete {
+            sidebar::FolderMutation::Delete { repo_id, path, mode } => files::FilesEffect::Delete {
                 repo_id,
                 paths: vec![path],
-                mode: None,
+                mode: Some(mode.as_str().into()),
             },
         };
         self.files.enqueue(effect);
@@ -896,6 +897,8 @@ impl ShellViewModel {
 
 mod interaction;
 mod render;
+mod shell_tint;
+mod startup_view;
 mod workbench;
 mod title_bar;
 pub use interaction::commit_interaction;
