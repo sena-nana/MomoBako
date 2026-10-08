@@ -77,7 +77,7 @@ fn entry_card(model: &ShellViewModel, ctx: &FileContext, row: &FileRow) -> AnyVi
     }
     rows.push(stat("修改时间", modified_text(row, facts), "file-detail-modified", true));
     if row.kind != "directory" && !ctx.trash && model.inspect.target_path.as_deref() == Some(row.path.as_str()) {
-        rows.push(super::super::inspect_view::metadata_panel(model));
+        rows.push(super::super::inspect_metadata_view::metadata_panel(model));
     }
     widget(Stack::column(4.0)).children(rows).key("file-detail-entry").into_any()
 }

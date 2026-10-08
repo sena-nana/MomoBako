@@ -29,6 +29,8 @@ mod inspect;
 mod inspect_library;
 mod inspect_asmr;
 mod inspect_view;
+mod inspect_metadata_view;
+mod inspect_search_view;
 pub(crate) mod audio_decode;
 pub(crate) mod player;
 pub(crate) mod admin;
