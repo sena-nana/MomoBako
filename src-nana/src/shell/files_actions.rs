@@ -799,6 +799,9 @@ fn merge_rows(existing: &[FileRow], incoming: &[FileRow]) -> Vec<FileRow> {
 }
 
 pub(super) fn reduce_message(model: &mut super::ShellViewModel, message: super::ShellMessage) -> Option<super::ShellMessage> {
+    if let super::ShellMessage::AssetDetailLoaded(Ok(detail)) = &message {
+        model.files.note_detail_arrived(&detail.summary.path);
+    }
     let super::ShellMessage::Files(message) = message else {
         return Some(message);
     };

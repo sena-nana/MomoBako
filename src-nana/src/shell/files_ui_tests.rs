@@ -1,13 +1,14 @@
 //! 文件页画面状态的测试：去扩展名标题、单击只选中、右键菜单的选中和二次确认、
-//! Escape 关闭顺序、标签组展开、列表宽度回报，以及标签草稿和导出保存位置的转发。
+//! Escape 关闭顺序、标签组展开、列表宽度回报，以及标签草稿和导出保存位置的转发；
+//! 还有别处（搜索结果、外部打开）读回详情时照样进入预览。
 
 use std::collections::BTreeMap;
 
 use nana_ui_platform::host::WindowCommand;
 use nana_ui_platform::WindowId;
 
-use crate::backend::services::repository::FileBrowserEntry;
-use crate::shell::{ShellMessage, ShellViewModel, WorkspaceRepository};
+use crate::backend::services::repository::{AssetDetail, AssetSummary, FileBrowserEntry};
+use crate::shell::{ShellMessage, ShellPage, ShellViewModel, WorkspaceRepository};
 
 use super::{FileContext, FileDialog, FileRow, FilesEffect, FilesMessage, FilesState};
 
@@ -188,4 +189,61 @@ fn archive_export_without_a_path_asks_for_one_first() {
         "没有保存位置时先弹系统保存对话框：{commands:?}"
     );
     assert!(model.files.export.error.is_empty());
+}
+
+#[test]
+fn only_the_detail_a_single_click_asked_for_stays_out_of_the_preview() {
+    let mut state = listed();
+    state.reduce(&writable(), FilesMessage::ActivateRow("cover.png".into()));
+    state.note_detail_arrived("cover.png");
+    assert!(!state.preview_open(Some("cover.png")), "单击读回来的详情只在右侧看");
+    state.note_detail_arrived("cover.png");
+    assert!(state.preview_open(Some("cover.png")), "别处再读同一个文件就进入预览");
+
+    state.reduce(&writable(), FilesMessage::ActivateRow("notes/page.pdf".into()));
+    state.reduce(&writable(), FilesMessage::OpenRow("notes/page.pdf".into()));
+    state.note_detail_arrived("notes/page.pdf");
+    assert!(state.preview_open(Some("notes/page.pdf")), "双击盖过还没回来的单击读取");
+}
+
+/// 只有摘要的素材详情，模拟搜索结果读回来的应答。
+fn bare_detail(path: &str) -> AssetDetail {
+    AssetDetail {
+        summary: AssetSummary {
+            asset_id: path.replace('/', "-"),
+            repo_id: "acceptance-repo".into(),
+            path: path.into(),
+            filename: path.rsplit('/').next().unwrap_or(path).into(),
+            extension: path.rsplit('.').next().unwrap_or_default().into(),
+            size_bytes: 0,
+            size_label: String::new(),
+            status: "ready".into(),
+            modified_at: String::new(),
+            last_accessed_at: None,
+            version: 1,
+            tags: Vec::new(),
+            thumbnail_path: None,
+            hardlink_group_id: None,
+            hardlink_state: None,
+            is_virtual: false,
+            provider_id: None,
+            provider_item_id: None,
+            source_payload: None,
+            local_absolute_path: None,
+        },
+        metadata: Vec::new(),
+        revisions: Vec::new(),
+    }
+}
+
+#[test]
+fn a_search_hit_on_the_clicked_file_still_opens_the_preview() {
+    let (_, mut model) = crate::shell::acceptance_gap_models()
+        .into_iter()
+        .find(|(name, _)| *name == "live-files-selected")
+        .expect("单击选中 notes/page.pdf 的场景");
+    assert_eq!(model.page, ShellPage::SelectedFile);
+    assert!(!model.files.preview_open(model.inspect.target_path.as_deref()), "单击只在右侧详情里看");
+    model.reduce(ShellMessage::AssetDetailLoaded(Ok(bare_detail("notes/page.pdf"))));
+    assert!(model.files.preview_open(model.inspect.target_path.as_deref()), "搜索结果读回同一个文件后进入预览");
 }
