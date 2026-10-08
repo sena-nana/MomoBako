@@ -622,14 +622,6 @@ impl WorkspaceState {
         self.startup.finish();
     }
 
-    /// 验收页的空库使用和产品窗口相同的空状态，不发列表请求。
-    pub(crate) fn present_empty(&mut self) {
-        self.repositories.clear();
-        self.active_repo_id = None;
-        self.presence = RepositoryPresence::Empty;
-        self.startup.finish();
-    }
-
     /// 选择顺序：当前 id、上次记住的 id、列表第一项。空列表清空记住的仓库。
     fn apply_repository_items(&mut self, items: Vec<WorkspaceRepository>, startup_open: bool) {
         self.repositories = items;
