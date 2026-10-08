@@ -148,3 +148,18 @@ fn smart_edit_delete_and_playlist_play_match_vue() {
     gap(&mut model, GapMessage::PlayPlaylist("pl-1".into()));
     assert_eq!(model.sidebar.pending_play.as_deref(), Some("pl-1"));
 }
+
+#[test]
+fn escape_closes_the_file_menu_and_leaves_the_sidebar_alone() {
+    let mut model = shell();
+    model.sidebar.expanded_folders = vec!["photos".into()];
+    model.files.entry_menu = Some(crate::shell::files::EntryMenu { path: "cover.png".into(), x: 280.0, y: 180.0 });
+    let sidebar = format!("{:?}", model.sidebar);
+    gap(&mut model, GapMessage::Escape);
+    assert!(model.files.entry_menu.is_none(), "Escape 关掉文件右键菜单");
+    assert_eq!(format!("{:?}", model.sidebar), sidebar, "关菜单不动侧栏状态");
+    // 没有可关的浮层时再按一次：什么也不做，也不报错。
+    gap(&mut model, GapMessage::Escape);
+    assert!(model.files.entry_menu.is_none());
+    assert_eq!(format!("{:?}", model.sidebar), sidebar);
+}
