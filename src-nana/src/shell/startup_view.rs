@@ -131,7 +131,7 @@ fn startup_panel(model: &ShellViewModel) -> AnyView {
             widget(Stack::row(0.0))
                 .children((widget(retry)
                     .key("startup-retry")
-                    .on_cx(|_, _: &Activate, cx| cx.dispatch_program(ShellMessage::StartupRetry)),))
+                    .on_cx(|_, _: &Activate, cx| cx.dispatch_program_all(ShellMessage::StartupRetry)),))
                 .into_any(),
         );
     }
@@ -304,11 +304,11 @@ fn missing_repository_panel(model: &ShellViewModel) -> AnyView {
         let draft = model.workspace.path_draft.clone();
         let editor = widget(Stack::column(8.0).width(LengthSpec::Fill)).children((
             widget(TextInput::new(draft).label("资源库新位置")).on_cx(|_, event: &TextChanged, cx| {
-                cx.dispatch_program(ShellMessage::MissingPathChanged(event.value.to_string()));
+                cx.dispatch_program_all(ShellMessage::MissingPathChanged(event.value.to_string()));
             }),
             widget(Stack::row(0.0)).children((widget(primary_button("确认重定向").disabled(busy))
                 .key("missing-submit-path")
-                .on_cx(|_, _: &Activate, cx| cx.dispatch_program(ShellMessage::MissingSubmitPath)),)),
+                .on_cx(|_, _: &Activate, cx| cx.dispatch_program_all(ShellMessage::MissingSubmitPath)),)),
         ));
         rows.push(with_margin(editor.into_any(), 12.0, 0.0));
     }
@@ -316,14 +316,14 @@ fn missing_repository_panel(model: &ShellViewModel) -> AnyView {
         widget(primary_button(model.workspace.missing_primary_label()).disabled(busy))
             .key("missing-primary")
             .on_cx(move |_, _: &Activate, cx| {
-                cx.dispatch_program(if cache_issue { ShellMessage::MissingOpenSourceSettings } else { ShellMessage::MissingChoosePath });
+                cx.dispatch_program_all(if cache_issue { ShellMessage::MissingOpenSourceSettings } else { ShellMessage::MissingChoosePath });
             }),
         widget(Button::new("刷新").kind(ButtonKind::Ghost).disabled(busy))
             .key("missing-refresh")
-            .on_cx(|_, _: &Activate, cx| cx.dispatch_program(ShellMessage::MissingRefresh)),
+            .on_cx(|_, _: &Activate, cx| cx.dispatch_program_all(ShellMessage::MissingRefresh)),
         widget(Button::new(model.workspace.missing_delete_label()).kind(ButtonKind::Danger).disabled(busy))
             .key("missing-delete")
-            .on_cx(|_, _: &Activate, cx| cx.dispatch_program(ShellMessage::MissingOpenDelete)),
+            .on_cx(|_, _: &Activate, cx| cx.dispatch_program_all(ShellMessage::MissingOpenDelete)),
     ));
     rows.push(with_margin(actions.into_any(), 18.0, 0.0));
     widget(Stack::column(0.0).width(LengthSpec::Fill).align(AlignSpec::Start).with_layout(|layout| {

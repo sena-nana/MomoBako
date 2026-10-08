@@ -120,7 +120,7 @@ pub fn folder_dialog(model: &ShellViewModel) -> Option<AnyView> {
     let input = widget(TextInput::new(dialog.value.clone()).label("文件夹名称").placeholder(dialog.placeholder()).disabled(busy))
         .key("folder-dialog-name")
         .on_cx(|_, event: &TextChanged, cx| {
-            cx.dispatch_program(sidebar_message(SidebarMessage::Gap(GapMessage::SetFolderValue(event.value.to_string()))));
+            cx.dispatch_program_all(sidebar_message(SidebarMessage::Gap(GapMessage::SetFolderValue(event.value.to_string()))));
         })
         .into_any();
     let body = widget(Stack::column(12.0)).children((
@@ -133,10 +133,10 @@ pub fn folder_dialog(model: &ShellViewModel) -> Option<AnyView> {
             .body(body)
             .footer(actions(None, vec![
                 widget(ghost_button("取消").disabled(busy)).key("folder-dialog-cancel").on_cx(|_, _: &Activate, cx| {
-                    cx.dispatch_program(sidebar_message(SidebarMessage::Gap(GapMessage::CloseFolderDialog)));
+                    cx.dispatch_program_all(sidebar_message(SidebarMessage::Gap(GapMessage::CloseFolderDialog)));
                 }).into_any(),
                 widget(primary_button(dialog.action_label()).disabled(blocked)).key("folder-dialog-submit").on_cx(|_, _: &Activate, cx| {
-                    cx.dispatch_program(sidebar_message(SidebarMessage::Gap(GapMessage::SubmitFolderDialog)));
+                    cx.dispatch_program_all(sidebar_message(SidebarMessage::Gap(GapMessage::SubmitFolderDialog)));
                 }).into_any(),
             ]))
             .into_any(),
@@ -177,7 +177,7 @@ pub fn folder_delete_dialog(model: &ShellViewModel) -> Option<AnyView> {
         widget(Dialog::new(super::super::sidebar::FOLDER_DELETE_TITLE))
             .body(body)
             .footer(actions(None, vec![widget(ghost_button("取消").disabled(busy)).key("folder-delete-cancel").on_cx(|_, _: &Activate, cx| {
-                cx.dispatch_program(sidebar_message(SidebarMessage::Gap(GapMessage::CloseFolderDelete)));
+                cx.dispatch_program_all(sidebar_message(SidebarMessage::Gap(GapMessage::CloseFolderDelete)));
             }).into_any()]))
             .into_any(),
     )
@@ -230,7 +230,7 @@ fn option_card(
         .key(key.into())
         .on_cx(move |_, _: &Activate, cx| {
             if !disabled {
-                cx.dispatch_program(message());
+                cx.dispatch_program_all(message());
             }
         })
         .into_any()
@@ -248,7 +248,7 @@ pub fn smart_folder_dialog(model: &ShellViewModel) -> Option<AnyView> {
         let control = widget(TextInput::new(draft.value(field).to_string()).label(label).placeholder(placeholder).disabled(busy))
             .key(format!("smart-field-{label}"))
             .on_cx(move |_, event: &TextChanged, cx| {
-                cx.dispatch_program(sidebar_message(SidebarMessage::SetSmartFolderField { field, value: event.value.to_string() }));
+                cx.dispatch_program_all(sidebar_message(SidebarMessage::SetSmartFolderField { field, value: event.value.to_string() }));
             })
             .into_any();
         self::field(label, control)
@@ -257,7 +257,7 @@ pub fn smart_folder_dialog(model: &ShellViewModel) -> Option<AnyView> {
         let control = widget(TextArea::new(draft.value(field).to_string()).label(label).placeholder(placeholder).disabled(busy).height(rows * 20.0 + 14.0))
             .key(format!("smart-field-{label}"))
             .on_cx(move |_, event: &TextChanged, cx| {
-                cx.dispatch_program(sidebar_message(SidebarMessage::SetSmartFolderField { field, value: event.value.to_string() }));
+                cx.dispatch_program_all(sidebar_message(SidebarMessage::SetSmartFolderField { field, value: event.value.to_string() }));
             })
             .into_any();
         self::field(label, control)
@@ -272,7 +272,7 @@ pub fn smart_folder_dialog(model: &ShellViewModel) -> Option<AnyView> {
         let control = widget(control)
             .key(format!("smart-field-{label}"))
             .on_cx(move |_, event: &SelectChanged, cx| {
-                cx.dispatch_program(sidebar_message(SidebarMessage::SetSmartFolderField { field, value: event.value.to_string() }));
+                cx.dispatch_program_all(sidebar_message(SidebarMessage::SetSmartFolderField { field, value: event.value.to_string() }));
             })
             .into_any();
         self::field(label, control)
@@ -343,10 +343,10 @@ pub fn smart_folder_dialog(model: &ShellViewModel) -> Option<AnyView> {
             .body(scroll)
             .footer(actions(None, vec![
                 widget(ghost_button("取消").disabled(busy)).key("smart-dialog-cancel").on_cx(|_, _: &Activate, cx| {
-                    cx.dispatch_program(sidebar_message(SidebarMessage::CloseSmartFolderDialog));
+                    cx.dispatch_program_all(sidebar_message(SidebarMessage::CloseSmartFolderDialog));
                 }).into_any(),
                 widget(primary_button(draft.action_label()).loading(busy).disabled(blocked)).key("smart-create-submit").on_cx(|_, _: &Activate, cx| {
-                    cx.dispatch_program(sidebar_message(SidebarMessage::SubmitSmartFolder));
+                    cx.dispatch_program_all(sidebar_message(SidebarMessage::SubmitSmartFolder));
                 }).into_any(),
             ]))
             .into_any(),
@@ -375,10 +375,10 @@ pub fn smart_delete_dialog(model: &ShellViewModel) -> Option<AnyView> {
             .body(paragraph(format!("将删除“{label}”及其子智能文件夹。实际文件和真实目录不会被删除。"), false, "smart-delete-copy"))
             .footer(actions(None, vec![
                 widget(ghost_button("取消").disabled(busy)).key("smart-delete-cancel").on_cx(|_, _: &Activate, cx| {
-                    cx.dispatch_program(sidebar_message(SidebarMessage::Gap(GapMessage::CloseSmartDelete)));
+                    cx.dispatch_program_all(sidebar_message(SidebarMessage::Gap(GapMessage::CloseSmartDelete)));
                 }).into_any(),
                 widget(danger_button("删除").disabled(busy)).key("smart-delete-confirm").on_cx(|_, _: &Activate, cx| {
-                    cx.dispatch_program(sidebar_message(SidebarMessage::Gap(GapMessage::ConfirmSmartDelete)));
+                    cx.dispatch_program_all(sidebar_message(SidebarMessage::Gap(GapMessage::ConfirmSmartDelete)));
                 }).into_any(),
             ]))
             .into_any(),
@@ -402,21 +402,21 @@ pub fn playlist_create_dialog(model: &ShellViewModel) -> Option<AnyView> {
     Arc::make_mut(&mut select.style.layout).width = Some(LengthSpec::Fill);
     let name_input = widget(TextInput::new(name).label("名称").placeholder("例如 通勤歌单 / 参考分镜"))
         .key("playlist-dialog-name")
-        .on_cx(|_, event: &TextChanged, cx| cx.dispatch_program(ShellMessage::NewPlaylistNameChanged(event.value.to_string())))
+        .on_cx(|_, event: &TextChanged, cx| cx.dispatch_program_all(ShellMessage::NewPlaylistNameChanged(event.value.to_string())))
         .into_any();
     let type_select = widget(select)
         .key("playlist-dialog-type")
-        .on_cx(|_, event: &SelectChanged, cx| cx.dispatch_program(ShellMessage::SelectPlaylistPlayer(event.value.to_string())))
+        .on_cx(|_, event: &SelectChanged, cx| cx.dispatch_program_all(ShellMessage::SelectPlaylistPlayer(event.value.to_string())))
         .into_any();
     Some(
         widget(Dialog::new("新建播放集"))
             .body(widget(Stack::column(12.0)).children((field("名称", name_input), field("播放类型", type_select))))
             .footer(actions(None, vec![
                 widget(ghost_button("取消")).key("playlist-dialog-cancel").on_cx(|_, _: &Activate, cx| {
-                    cx.dispatch_program(ShellMessage::ClosePlaylistDialog);
+                    cx.dispatch_program_all(ShellMessage::ClosePlaylistDialog);
                 }).into_any(),
                 widget(primary_button("创建").disabled(blocked)).key("create-playlist").on_cx(|_, _: &Activate, cx| {
-                    cx.dispatch_program(ShellMessage::CreatePlaylist);
+                    cx.dispatch_program_all(ShellMessage::CreatePlaylist);
                 }).into_any(),
             ]))
             .into_any(),
@@ -467,7 +467,7 @@ pub fn repository_delete_dialog(model: &ShellViewModel) -> Option<AnyView> {
         widget(Dialog::new("删除资源库"))
             .body(widget(Stack::column(12.0)).children(body))
             .footer(actions(busy, vec![widget(ghost_button("取消").disabled(deleting)).key("delete-dialog-cancel").on_cx(|_, _: &Activate, cx| {
-                cx.dispatch_program(ShellMessage::MissingCloseDelete);
+                cx.dispatch_program_all(ShellMessage::MissingCloseDelete);
             }).into_any()]))
             .into_any(),
     )

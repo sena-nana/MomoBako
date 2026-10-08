@@ -34,10 +34,10 @@ pub(super) fn folder_group(model: &ShellViewModel, locked: bool) -> AnyView {
     let parent = model.sidebar.current_directory.clone();
     let tools = vec![
         tree_action(PLUS, "在当前目录新建文件夹", "folder-create", !has_repo || locked || model.files.mutating || trash, move |cx| {
-            cx.dispatch_program(sidebar_message(SidebarMessage::Gap(GapMessage::OpenFolderCreate(parent.clone()))));
+            cx.dispatch_program_all(sidebar_message(SidebarMessage::Gap(GapMessage::OpenFolderCreate(parent.clone()))));
         }),
         tree_action(refresh_icon(loading), "刷新文件夹树", "refresh-folder-tree", !has_repo || locked || loading, |cx| {
-            cx.dispatch_program(sidebar_message(SidebarMessage::RefreshFolderTree));
+            cx.dispatch_program_all(sidebar_message(SidebarMessage::RefreshFolderTree));
         }),
     ];
     let mut body = Vec::new();
@@ -88,9 +88,9 @@ fn folder_rows(model: &ShellViewModel, folder: &SidebarFolder, depth: u16, rows:
     let card = widget(ListItem::new(folder.label.clone()).selected(active).style(card_style()))
         .content(content)
         .key(format!("folder-row-{}", folder.path))
-        .on_cx(move |_, _: &Activate, cx| cx.dispatch_program(sidebar_message(SidebarMessage::OpenFolder(open_path.clone()))))
+        .on_cx(move |_, _: &Activate, cx| cx.dispatch_program_all(sidebar_message(SidebarMessage::OpenFolder(open_path.clone()))))
         .on_cx(move |_, event: &SecondaryPress, cx| {
-            cx.dispatch_program(sidebar_message(SidebarMessage::Gap(GapMessage::OpenFolderMenu {
+            cx.dispatch_program_all(sidebar_message(SidebarMessage::Gap(GapMessage::OpenFolderMenu {
                 path: menu_path.clone(),
                 label: menu_label.clone(),
                 x: event.x,
@@ -142,7 +142,7 @@ fn caret(expanded: bool, label: &'static str, message: impl Fn() -> ShellMessage
     style.interaction.hovered.background = None;
     style.interaction.pressed.background = None;
     button.style = style;
-    widget(button.colors_from_style()).on_cx(move |_, _: &Activate, cx| cx.dispatch_program(message())).into_any()
+    widget(button.colors_from_style()).on_cx(move |_, _: &Activate, cx| cx.dispatch_program_all(message())).into_any()
 }
 
 /// 智能文件夹分组：标题带「新建」，正文是树或空状态。对应 `WorkspaceSidebarSmartFolders.vue`。
@@ -150,7 +150,7 @@ pub(super) fn smart_group(model: &ShellViewModel, locked: bool) -> AnyView {
     let has_repo = model.workspace.active_repo_id.is_some();
     let busy = model.sidebar.smart_draft.busy;
     let tools = vec![tree_action(PLUS, "新建智能文件夹", "smart-create", !has_repo || locked || busy, |cx| {
-        cx.dispatch_program(sidebar_message(SidebarMessage::OpenSmartFolderDialog));
+        cx.dispatch_program_all(sidebar_message(SidebarMessage::OpenSmartFolderDialog));
     })];
     let body = if !has_repo {
         empty_hint("先选择或添加一个资源库。", "smart-empty")
@@ -188,13 +188,13 @@ fn smart_rows(model: &ShellViewModel, folder: &SidebarSmartFolder, depth: u16, b
     let delete_label = folder.name.clone();
     let actions = widget(Stack::row(2.0).align(AlignSpec::Center).shrink(0.0)).children((
         tree_action(FOLDER_PLUS, "新建子智能文件夹", "smart-row-create", busy, move |cx| {
-            cx.dispatch_program(sidebar_message(SidebarMessage::OpenSmartFolderChild(child_id.clone())));
+            cx.dispatch_program_all(sidebar_message(SidebarMessage::OpenSmartFolderChild(child_id.clone())));
         }),
         tree_action(PENCIL, "编辑智能文件夹", "smart-row-edit", busy, move |cx| {
-            cx.dispatch_program(sidebar_message(SidebarMessage::Gap(GapMessage::OpenSmartEdit(edit_id.clone()))));
+            cx.dispatch_program_all(sidebar_message(SidebarMessage::Gap(GapMessage::OpenSmartEdit(edit_id.clone()))));
         }),
         super::danger_tree_action(TRASH, "删除智能文件夹", move |cx| {
-            cx.dispatch_program(sidebar_message(SidebarMessage::Gap(GapMessage::OpenSmartDelete {
+            cx.dispatch_program_all(sidebar_message(SidebarMessage::Gap(GapMessage::OpenSmartDelete {
                 id: delete_id.clone(),
                 label: delete_label.clone(),
             })));
@@ -212,7 +212,7 @@ fn smart_rows(model: &ShellViewModel, folder: &SidebarSmartFolder, depth: u16, b
     let card = widget(ListItem::new(folder.name.clone()).selected(active).style(style))
         .content(content)
         .key(format!("smart-row-{}", folder.id))
-        .on_cx(move |_, _: &Activate, cx| cx.dispatch_program(sidebar_message(SidebarMessage::OpenSmartFolder(open_id.clone()))));
+        .on_cx(move |_, _: &Activate, cx| cx.dispatch_program_all(sidebar_message(SidebarMessage::OpenSmartFolder(open_id.clone()))));
     rows.push(tree_row(depth, toggle, card.into_any()));
     if has_children && expanded {
         for child in &folder.children {
@@ -242,9 +242,9 @@ pub fn folder_menu(model: &ShellViewModel) -> Option<AnyView> {
             .key("folder-context-menu")
             .on_cx(move |_, event: &ContextMenuEvent, cx| match event {
                 ContextMenuEvent::Search(_) => {}
-                ContextMenuEvent::Dismiss => cx.dispatch_program(sidebar_message(SidebarMessage::Gap(GapMessage::CloseFolderMenu))),
+                ContextMenuEvent::Dismiss => cx.dispatch_program_all(sidebar_message(SidebarMessage::Gap(GapMessage::CloseFolderMenu))),
                 ContextMenuEvent::Select(value) => {
-                    cx.dispatch_program(sidebar_message(SidebarMessage::Gap(GapMessage::CloseFolderMenu)));
+                    cx.dispatch_program_all(sidebar_message(SidebarMessage::Gap(GapMessage::CloseFolderMenu)));
                     let message = match value.as_ref() {
                         "open" => SidebarMessage::OpenFolder(path.clone()),
                         "create" => SidebarMessage::Gap(GapMessage::OpenFolderCreate(path.clone())),
@@ -255,7 +255,7 @@ pub fn folder_menu(model: &ShellViewModel) -> Option<AnyView> {
                             return;
                         }
                     };
-                    cx.dispatch_program(sidebar_message(message));
+                    cx.dispatch_program_all(sidebar_message(message));
                 }
             })
             .into_any(),

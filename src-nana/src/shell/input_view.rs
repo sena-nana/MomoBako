@@ -108,7 +108,7 @@ pub(crate) fn empty_repository_panel(model: &ShellViewModel) -> AnyView {
         .on_cx({
             let flags = file_drop_flags(model);
             move |_, event: &FileDropEvent, cx| {
-                cx.dispatch_program(file_drop_message(&flags, event));
+                cx.dispatch_program_all(file_drop_message(&flags, event));
             }
         })
         .children((drop_marker("empty"), widget(panel).children(rows).key("empty-panel").into_any()))
@@ -149,10 +149,10 @@ pub(crate) fn close_prompt(model: &ShellViewModel) -> Option<AnyView> {
     Some(
         widget(ConfirmDialog::new(notice.clone(), notice))
             .cancel(widget(super::super::workbench::ghost_button("取消")).key("close-confirm-cancel").on_cx(|_, _: &Activate, cx| {
-                cx.dispatch_program(ShellMessage::Input(InputMessage::ConfirmCloseAnswer(false)));
+                cx.dispatch_program_all(ShellMessage::Input(InputMessage::ConfirmCloseAnswer(false)));
             }))
             .confirm(widget(super::super::workbench::primary_button("确认关闭")).key("close-confirm-accept").on_cx(|_, _: &Activate, cx| {
-                cx.dispatch_program(ShellMessage::Input(InputMessage::ConfirmCloseAnswer(true)));
+                cx.dispatch_program_all(ShellMessage::Input(InputMessage::ConfirmCloseAnswer(true)));
             }))
             .into_any(),
     )
