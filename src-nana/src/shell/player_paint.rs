@@ -37,9 +37,10 @@ impl Painter for ProgressTrack {
 }
 
 /// 细滑杆：4px 胶囊轨道是 accent 24% 混 border-soft；12px accent 圆钮带 2px bg-elev 外圈。
-/// 圆钮中心从 6px 走到「宽 - 6px」，和 webkit 原生 range 的行程一致。
+/// 圆钮中心从 6px 走到「宽 - 6px」，和 webkit 原生 range 的行程一致。`dim` 为真时按禁用淡化。
 pub(super) struct SliderTrack {
     pub ratio: f32,
+    pub dim: bool,
 }
 
 /// 轨道高度。
@@ -53,19 +54,39 @@ impl Painter for SliderTrack {
     fn paint(&self, cx: &mut PaintContext<'_>) {
         let [width, height] = cx.size();
         let track = LayoutBox { x: 0.0, y: (height - TRACK) / 2.0, width, height: TRACK };
-        let mix = SemanticColorMix::new(SemanticColorRole::Accent, SemanticColorRole::BorderSoft, 0.24);
-        cx.rounded_rect(track, TRACK / 2.0, BoxPaint::fill(mix));
-        // 圆钮中心按比例落在两端各留半个圆钮的行程上。
+        let track_color = cx.color(SemanticColorMix::new(SemanticColorRole::Accent, SemanticColorRole::BorderSoft, 0.24));
+        let track_color = dim_on_surface(cx, track_color, self.dim);
+        cx.rounded_rect(track, TRACK / 2.0, BoxPaint::fill(track_color));
+        // 圆钮中心按比例落在两端各留半个圆钮的行程上。圆钮是正圆，不跟随平滑圆角。
         let center_x = THUMB / 2.0 + self.ratio.clamp(0.0, 1.0) * (width - THUMB).max(0.0);
         let center_y = height / 2.0;
-        let ring = THUMB / 2.0 + RING;
-        cx.rounded_rect(circle(center_x, center_y, ring), ring, BoxPaint::fill(SemanticColorRole::Surface));
-        cx.rounded_rect(circle(center_x, center_y, THUMB / 2.0), THUMB / 2.0, BoxPaint::fill(SemanticColorRole::Accent));
+        let ring_color = dim_on_surface(cx, cx.color(SemanticColorRole::Surface), self.dim);
+        let thumb_color = dim_on_surface(cx, cx.color(SemanticColorRole::Accent), self.dim);
+        fill_circle(cx, center_x, center_y, THUMB / 2.0 + RING, ring_color);
+        fill_circle(cx, center_x, center_y, THUMB / 2.0, thumb_color);
     }
 
     fn paint_key(&self) -> u64 {
-        u64::from(self.ratio.to_bits())
+        u64::from(self.ratio.to_bits()) | (u64::from(self.dim) << 32)
     }
+}
+
+/// Vue 禁用控件整体 0.45 不透明，盖在 bg-elev 卡片上。这里在 sRGB 里和卡片底色直接混，
+/// 和浏览器的合成结果一致；NanaUI 的线性合成会比 Vue 亮。
+pub(super) const DIM_RATIO: f32 = 0.45;
+
+fn dim_on_surface(cx: &PaintContext<'_>, color: [f32; 4], dim: bool) -> [f32; 4] {
+    if !dim {
+        return color;
+    }
+    let base = cx.color(SemanticColorRole::Surface);
+    std::array::from_fn(|index| if index == 3 { color[3] } else { color[index] * DIM_RATIO + base[index] * (1.0 - DIM_RATIO) })
+}
+
+fn fill_circle(cx: &mut PaintContext<'_>, center_x: f32, center_y: f32, radius: f32, color: [f32; 4]) {
+    let mut path = PaintPath::new();
+    path.ellipse(circle(center_x, center_y, radius));
+    cx.fill_path(&path, color);
 }
 
 /// 只有图标的按钮：悬停铺 bg-hover、按下铺 bg-active，图标按给定像素居中。
@@ -74,6 +95,8 @@ pub(super) struct GlyphButton {
     pub icon: Icon,
     pub size: f32,
     pub color: SemanticColorRole,
+    /// 禁用时按 Vue 的 0.45 不透明度和卡片底色混。
+    pub dim: bool,
 }
 
 impl Painter for GlyphButton {
@@ -82,7 +105,8 @@ impl Painter for GlyphButton {
         let [width, height] = cx.size();
         let size = self.size.min(width).min(height);
         let rect = LayoutBox { x: (width - size) / 2.0, y: (height - size) / 2.0, width: size, height: size };
-        cx.icon(rect, self.icon, self.color);
+        let color = dim_on_surface(cx, cx.color(self.color), self.dim);
+        cx.icon(rect, self.icon, color);
     }
 
     fn paint_key(&self) -> u64 {
@@ -90,6 +114,7 @@ impl Painter for GlyphButton {
         self.icon.hash(&mut hasher);
         self.size.to_bits().hash(&mut hasher);
         (self.color as u32).hash(&mut hasher);
+        self.dim.hash(&mut hasher);
         hasher.finish()
     }
 }

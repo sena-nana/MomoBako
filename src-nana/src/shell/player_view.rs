@@ -82,7 +82,7 @@ fn header(name: &str, subline: &str, has_player: bool) -> AnyView {
         widget(spaced(Text::new(subline).color(SemanticColorRole::Muted).font_size(13.0).line_height(20.15), 8.0))
             .key("playlist-page-status"),
     ));
-    let play = widget(toolbar_button("播放", icons::PLAY, ButtonKind::Ghost, !has_player))
+    let play = widget(toolbar_button("播放", icons::PLAY, ButtonKind::Ghost, !has_player, SemanticColorRole::Surface))
         .key("playlist-play")
         .on_cx(|_, _: &Activate, cx| cx.dispatch_program(player_message(PlayerMessage::PlayListed { item_id: None })));
     widget(Stack::bar(16.0).align(AlignSpec::Start))
@@ -142,12 +142,12 @@ fn playlist_row(item: &PlaylistItem, playlist_id: &str, has_player: bool) -> Any
     let remove_playlist = playlist_id.to_string();
     let remove_id = id.clone();
     let actions = widget(Stack::row(8.0).align(AlignSpec::Center).grow(0.0).shrink(0.0)).children((
-        widget(toolbar_button("播放", icons::PLAY, ButtonKind::Ghost, !ready || !has_player))
+        widget(toolbar_button("播放", icons::PLAY, ButtonKind::Ghost, !ready || !has_player, SemanticColorRole::Background))
             .key(format!("playlist-item-play-{id}"))
             .on_cx(move |_, _: &Activate, cx| {
                 cx.dispatch_program(player_message(PlayerMessage::PlayListed { item_id: Some(play_id.clone()) }));
             }),
-        widget(toolbar_button("移除", icons::TRASH_2, ButtonKind::Danger, false))
+        widget(toolbar_button("移除", icons::TRASH_2, ButtonKind::Danger, false, SemanticColorRole::Background))
             .key(format!("playlist-remove-{id}"))
             .on_cx(move |_, _: &Activate, cx| {
                 cx.dispatch_program(ShellMessage::RemovePlaylistItem { playlist_id: remove_playlist.clone(), item_id: remove_id.clone() });
@@ -252,11 +252,15 @@ fn meta_line(label: &str, role: SemanticColorRole) -> Text {
     text
 }
 
-/// 工具栏按钮：34px 高、14px 图标在字前、6px 间距。禁用时整颗 0.45 不透明，颜色不变。
-/// 普通操作透明底，危险操作是红字，悬停铺淡红。
-fn toolbar_button(label: &str, icon: Icon, kind: ButtonKind, disabled: bool) -> Button {
+/// 工具栏按钮：34px 高、14px 图标在字前、6px 间距。普通操作透明底，危险操作是红字，悬停铺淡红。
+/// 禁用时按 Vue 的整颗 0.45 不透明度处理：字色在 sRGB 里和按钮所在的底色 `base` 混。
+fn toolbar_button(label: &str, icon: Icon, kind: ButtonKind, disabled: bool, base: SemanticColorRole) -> Button {
     let mut button = Button::new(label).kind(kind).icon(icon).icon_size(14.0).icon_gap(6.0).disabled(disabled);
     button.style.interaction.disabled = SemanticPaint::default();
+    if disabled {
+        let role = if kind == ButtonKind::Danger { SemanticColorRole::Danger } else { SemanticColorRole::Text };
+        button.style.interaction.base.foreground_mix = Some(nana_ui_core::SemanticColorMix::new(role, base, bar::DISABLED_OPACITY));
+    }
     let layout = std::sync::Arc::make_mut(&mut button.style.layout);
     layout.height = Some(LengthSpec::Px(34.0));
     layout.min_height = Some(LengthSpec::Px(34.0));
@@ -267,7 +271,6 @@ fn toolbar_button(label: &str, icon: Icon, kind: ButtonKind, disabled: bool) -> 
     layout.width = Some(LengthSpec::Shrink);
     layout.flex_grow = Some(0.0);
     layout.flex_shrink = Some(0.0);
-    layout.opacity = disabled.then_some(bar::DISABLED_OPACITY);
     button
 }
 

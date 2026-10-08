@@ -37,8 +37,10 @@ fn shell(writable: bool) -> ShellViewModel {
     model
 }
 
+/// 发一条播放消息。当前项的读取请求像 `player_dispatch` 一样当场读文件送回。
 fn send(model: &mut ShellViewModel, message: PlayerMessage) {
     model.reduce(ShellMessage::Player(message));
+    super::fulfill_loads(model);
 }
 
 fn summary(repo_id: &str, playlist_id: &str, player_type_id: &str, file_class: &str) -> PlaylistSummary {
@@ -509,7 +511,8 @@ fn listed_playback_distinguishes_missing_plugin_upgrade_and_decoder_failure() {
     upgrade.player.contributions = vec![contribution("audio", "audio", &["mp3"])];
     load_playlist(&mut upgrade, "repo", vec![item("a", "ready")]);
     send(&mut upgrade, PlayerMessage::PlayListed { item_id: None });
-    assert!(upgrade.player.session.error.as_deref().unwrap_or_default().contains("解码失败"));
+    // 条目路径是仓库内相对路径，经仓库服务读取；这里读不到就写明读取失败。
+    assert!(upgrade.player.session.error.as_deref().unwrap_or_default().contains("无法读取当前项"));
     assert!(!upgrade.player.session.error.as_deref().unwrap_or_default().contains("需要升级"));
     assert_ne!(upgrade.player.session.status, "playing");
 
@@ -608,7 +611,7 @@ fn entry_playback_keeps_the_other_repository_session() {
         path: "nested/song.mp3".into(),
         filename: "song.mp3".into(),
     });
-    assert!(model.player.session.error.as_deref().unwrap_or_default().contains("解码失败"));
+    assert!(model.player.session.error.as_deref().unwrap_or_default().contains("无法读取当前项"));
     assert!(!model.player.session.error.as_deref().unwrap_or_default().contains("需要升级"));
 }
 

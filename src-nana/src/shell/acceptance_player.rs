@@ -6,7 +6,7 @@
 
 use crate::backend::services::repository::{PlaylistDetail, PlaylistItem, PlaylistPlayerContribution, PlaylistSummary};
 
-use super::super::player::PlayerMessage;
+use super::super::player::{PlayerEffect, PlayerMessage};
 use super::super::sidebar::SidebarPlaylist;
 use super::super::{ShellMessage, ShellPage, ShellViewModel, WorkspacePanel};
 use super::REPO_ID;
@@ -93,14 +93,30 @@ fn outside_playback_scene() -> ShellViewModel {
     model
 }
 
-/// 只有一个条目的播放集，点开后播放第一条。
+/// 只有一个条目的播放集，点开后播放第一条。验收仓库里没有这个文件，读取请求按仓库服务的
+/// 读失败送回，和 Vue 场景里准备播放源失败一致。
 fn single_item_playback(summary: PlaylistSummary, path: &str) -> ShellViewModel {
     let mut model = ShellViewModel::for_page(ShellPage::Playlists);
     load_official_players(&mut model);
     open_playlist(&mut model, &summary, Some(vec![item(0, path)]));
     play_first(&mut model);
+    fail_pending_loads(&mut model);
     model.page = ShellPage::PlaybackRunning;
     model
+}
+
+/// 把排着的当前项读取请求按「仓库里没有这个文件」送回。其它副作用放回原处。
+fn fail_pending_loads(model: &mut ShellViewModel) {
+    let mut kept = Vec::new();
+    for effect in model.player.take_effects() {
+        let PlayerEffect::LoadItem { item_id, path, still, generation, .. } = effect else {
+            kept.push(effect);
+            continue;
+        };
+        let result = Err(format!("无法读取当前项：验收仓库里没有 {path}"));
+        model.reduce(ShellMessage::Player(PlayerMessage::ItemLoaded { item_id, generation, still, result }));
+    }
+    model.player.requeue_effects(kept);
 }
 
 /// 侧栏登记播放集并点开它；`items` 为空时详情还没回来。

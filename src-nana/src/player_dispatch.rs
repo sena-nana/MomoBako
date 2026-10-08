@@ -1,14 +1,16 @@
 //! 把播放列表副作用交给已有的仓库交互和下载协议。
 //!
-//! 成员、排序、按路径添加和下载都没有替身。服务没启动或任务提交失败时写回错误，
-//! 避免界面停在“正在提交”。
+//! 成员、排序、按路径添加和下载都没有替身。当前项的字节经仓库服务读取后在任务里解码，
+//! 条目里的相对路径不直接拿去读盘。服务没启动或任务提交失败时写回错误，
+//! 避免界面停在“正在提交”或“读取中”。
 
 use nana_ui::runtime::Task;
 use nana_ui::RuntimeProgramContext;
 
 use crate::backend::services::mutsuki_runner::PROTOCOL_PLAYLIST_DOWNLOAD;
+use crate::backend::services::repository::FileReadRequest;
 use crate::shell::player::{
-    PlayerEffect, PlayerMessage, preferences_path, sessions_path, settings_path,
+    decode_loaded, PlayerEffect, PlayerMessage, preferences_path, sessions_path, settings_path,
 };
 use crate::shell::ShellMessage;
 use crate::MomoBakoApplication;
@@ -31,6 +33,9 @@ pub fn dispatch_player_effects(app: &mut MomoBakoApplication, context: &RuntimeP
                 }
             }
             PlayerEffect::RestoreDetail { repo_id, playlist_id } => dispatch_restore(app, context, repo_id, playlist_id),
+            PlayerEffect::LoadItem { repo_id, item_id, path, extension, still, generation } => {
+                dispatch_load_item(app, context, LoadRequest { repo_id, item_id, path, extension, still, generation });
+            }
         }
     }
 }
@@ -159,6 +164,47 @@ fn dispatch_restore(
     })) {
         eprintln!("Nana 恢复播放会话任务提交失败：{error}");
         app.shell.reduce(player(PlayerMessage::RestoreDetail(Err(format!("播放列表详情任务提交失败：{error}")))));
+    }
+}
+
+/// 一次当前项读取请求。
+struct LoadRequest {
+    repo_id: String,
+    item_id: String,
+    path: String,
+    extension: String,
+    still: bool,
+    generation: u64,
+}
+
+/// 经仓库服务读出当前项，在任务里解码成会话、PCM 和画面，或图片帧。
+fn dispatch_load_item(app: &mut MomoBakoApplication, context: &RuntimeProgramContext<ShellMessage>, request: LoadRequest) {
+    let LoadRequest { repo_id, item_id, path, extension, still, generation } = request;
+    let Some(services) = app.services.as_ref() else {
+        eprintln!("Nana 播放当前项需要领域服务，当前服务未启动：{path}");
+        app.shell.reduce(player(PlayerMessage::ItemLoaded { item_id, generation, still, result: Err("领域服务未启动".into()) }));
+        return;
+    };
+    let query = services.repository_query.clone();
+    let executor = services.executor.clone();
+    let task_item = item_id.clone();
+    if let Err(error) = context.run_task(Task::new(async move {
+        let result = executor
+            .block_on(query.read_file(FileReadRequest { repo_id: repo_id.clone(), path: path.clone() }))
+            .map_err(|error| {
+                eprintln!("Nana 播放当前项读取失败：{path}：{error}");
+                format!("无法读取当前项：{error}")
+            })
+            .and_then(|bytes| decode_loaded(&repo_id, still, &extension, &bytes));
+        player(PlayerMessage::ItemLoaded { item_id: task_item, generation, still, result })
+    })) {
+        eprintln!("Nana 播放当前项读取任务提交失败：{error}");
+        app.shell.reduce(player(PlayerMessage::ItemLoaded {
+            item_id,
+            generation,
+            still,
+            result: Err(format!("播放当前项读取任务提交失败：{error}")),
+        }));
     }
 }
 
