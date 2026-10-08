@@ -256,19 +256,9 @@ fn dispatch_search(
     let executor = services.executor.clone();
     let service_request = to_service_request(request);
     if let Err(error) = context.run_task(Task::new(async move {
-        let result = executor.block_on(query.search_assets(service_request)).map(|response| {
-            response
-                .results
-                .into_iter()
-                .map(|hit| SearchRow {
-                    repo_id: hit.repo_id,
-                    asset_id: hit.asset_id,
-                    path: hit.path,
-                    filename: hit.filename,
-                    repo_name: hit.repo_name,
-                })
-                .collect()
-        });
+        let result = executor
+            .block_on(query.search_assets(service_request))
+            .map(|response| response.results.into_iter().map(SearchRow::from_hit).collect());
         search_message(generation, result)
     })) {
         eprintln!("Nana 搜索任务提交失败：{error}");
