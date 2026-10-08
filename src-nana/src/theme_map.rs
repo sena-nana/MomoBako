@@ -3,7 +3,7 @@
 //! 壳层只消费这里的角色，不在按钮或文本上写死 RGB。Nana 调色板的具体数值
 //! 由 `SemanticPalette` 持有；本模块只锁住角色、字号和侧栏尺寸的对应关系。
 
-use nana_ui::theme::{SemanticPalette, ThemeMode, type_scale};
+use nana_ui::theme::{SemanticPalette, ThemeMetrics, ThemeMode, UI_METRICS, type_scale};
 
 /// 一条 CSS 变量到 Nana 调色板字段的对应。
 pub struct ColorRole {
@@ -137,6 +137,41 @@ pub const TYPE_ROLES: &[TypeRole] = &[
     },
 ];
 
+/// Vue `--app-corner-radius` 的默认值（`src/ui/core/useCornerStyle.ts`）。
+pub const DEFAULT_CORNER_RADIUS_PX: f32 = 8.0;
+/// 圆角半径设置的上下限，和 Lilia `CORNER_RADIUS_MIN` / `CORNER_RADIUS_MAX` 一致。
+pub const CORNER_RADIUS_RANGE: std::ops::RangeInclusive<f32> = 0.0..=20.0;
+
+/// 圆角半径基数换成主题半径刻度。
+///
+/// Vue 的刻度都从 `--app-corner-radius` 乘出来：Lilia 给 xs=0.5r、sm=0.75r、md=r、lg=1.25r，
+/// MomoBako 另加 xl=1.5r、2xl=2r。Nana `RadiusTier` 只到 Xl，2xl 用 [`radius_2xl`] 按像素给。
+/// 其余控件尺寸沿用 Nana 默认度量。
+pub fn corner_metrics(radius: f32) -> ThemeMetrics {
+    let radius = clamp_corner_radius(radius);
+    ThemeMetrics {
+        radius_xs: radius * 0.5,
+        radius_sm: radius * 0.75,
+        radius_md: radius,
+        radius_lg: radius * 1.25,
+        radius_xl: radius * 1.5,
+        ..UI_METRICS
+    }
+}
+
+/// Vue `--radius-2xl`：两倍基数，用在播放条、详情卡这类大卡片上。
+pub fn radius_2xl(radius: f32) -> f32 {
+    clamp_corner_radius(radius) * 2.0
+}
+
+/// 非有限或越界的半径收回到 0–20，非有限时用默认 8。
+pub fn clamp_corner_radius(radius: f32) -> f32 {
+    if !radius.is_finite() {
+        return DEFAULT_CORNER_RADIUS_PX;
+    }
+    radius.clamp(*CORNER_RADIUS_RANGE.start(), *CORNER_RADIUS_RANGE.end())
+}
+
 /// 指定主题的主工作区背景，供离屏清屏色比对。
 pub fn background_rgba(mode: ThemeMode) -> [f32; 4] {
     let color = SemanticPalette::for_mode(mode).background;
@@ -200,6 +235,20 @@ mod tests {
                 .any(|role| role.nana == "hint" && role.nana_px == 11.0)
         );
         assert!(SIDEBAR_MIN_PX < SIDEBAR_DEFAULT_PX && SIDEBAR_DEFAULT_PX < SIDEBAR_MAX_PX);
+    }
+
+    #[test]
+    fn corner_scale_follows_the_vue_radius_tokens() {
+        let metrics = corner_metrics(8.0);
+        assert_eq!(
+            [metrics.radius_xs, metrics.radius_sm, metrics.radius_md, metrics.radius_lg, metrics.radius_xl],
+            [4.0, 6.0, 8.0, 10.0, 12.0]
+        );
+        assert_eq!(radius_2xl(8.0), 16.0);
+        assert_eq!(corner_metrics(40.0).radius_md, 20.0);
+        assert_eq!(corner_metrics(-3.0).radius_md, 0.0);
+        assert_eq!(corner_metrics(f32::NAN).radius_md, DEFAULT_CORNER_RADIUS_PX);
+        assert_eq!(corner_metrics(8.0).control_height, UI_METRICS.control_height);
     }
 
     #[test]
