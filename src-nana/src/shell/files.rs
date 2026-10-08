@@ -978,3 +978,9 @@ pub(crate) mod local_time;
 #[path = "files_tests.rs"]
 mod tests;
 
+#[cfg(test)]
+#[path = "files_ui_tests.rs"]
+mod ui_tests;
+#[cfg(test)]
+#[path = "files_mount_tests.rs"]
+mod mount_tests;

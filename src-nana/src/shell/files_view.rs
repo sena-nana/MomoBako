@@ -52,6 +52,7 @@ pub(super) fn live_file_column(model: &ShellViewModel) -> AnyView {
             super::workspace_dialogs::file_dialog(model),
             super::workspace_dialogs::export_dialog(model),
         ))
+        .key("file-column")
         .into_any()
 }
 
@@ -64,6 +65,7 @@ fn preview_page(model: &ShellViewModel) -> AnyView {
             .with_layout(|layout| layout.flex_basis = Some(LengthSpec::Px(0.0))),
     )
     .children((super::inspect_view::inspect_surface(model),))
+    .key("file-preview-inspect")
     .into_any();
     let player = model.player_surface_visible().then(|| player_slot(model));
     widget(Stack::fill_column(DETAIL_GAP).min_width(LengthSpec::Px(0.0)).min_height(LengthSpec::Px(0.0)))
@@ -149,6 +151,7 @@ fn drop_hint() -> AnyView {
 fn player_slot(model: &ShellViewModel) -> AnyView {
     widget(Stack::column(0.0).grow(0.0).shrink(0.0).width(LengthSpec::Fill).min_width(LengthSpec::Px(0.0)))
         .children((super::player_view::player_surface(model),))
+        .key("file-player-slot")
         .into_any()
 }
 

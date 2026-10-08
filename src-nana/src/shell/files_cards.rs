@@ -143,7 +143,12 @@ fn tile_content(row: &FileRow, mode: DisplayMode, geometry: CardBox) -> AnyView 
     let body = widget(Stack::column(4.0).width(LengthSpec::Fill).min_width(LengthSpec::Px(0.0)).justify(JustifySpec::Center))
         .children(lines)
         .into_any();
-    widget(Stack::column(8.0).align(AlignSpec::Center).width(LengthSpec::Fill).min_width(LengthSpec::Px(0.0)))
+    // 网格卡片定高 190，内容比它矮。Vue 的按钮把内容竖直居中，这里同样居中。
+    let mut column = Stack::column(8.0).align(AlignSpec::Center).width(LengthSpec::Fill).min_width(LengthSpec::Px(0.0));
+    if geometry.height > 0.0 {
+        column = column.height(LengthSpec::Fill).justify(JustifySpec::Center);
+    }
+    widget(column)
         .children((preview(row, geometry.preview_width, geometry.preview_height, 24.0, RadiusTier::Md), body))
         .into_any()
 }
@@ -311,8 +316,7 @@ pub(super) fn entry_icon(row: &FileRow) -> Icon {
 
 /// 组装键不能带路径分隔符。`notes/page.pdf` 里的 `/` 会让整行挂载失败。
 pub(super) fn view_key(prefix: &str, row: &FileRow) -> String {
-    let body = row.key().replace(['/', '\\'], "\u{2215}");
-    format!("{prefix}-{body}")
+    format!("{prefix}-{}", style::key_part(&row.key()))
 }
 
 /// 行上的隐藏路径。命中卡片后沿父节点找到它，实况指针才能对上条目。

@@ -89,6 +89,7 @@ pub(crate) fn playlist_name_dialog(model: &ShellViewModel) -> Option<AnyView> {
     let blank = prompt.draft.trim().is_empty();
     Some(
         widget(Dialog::new("创建来源播放列表"))
+            .key("source-playlist-dialog")
             .body(
                 widget(TextInput::new(prompt.draft.clone()).label("播放列表名称"))
                     .key("source-playlist-name")

@@ -32,7 +32,8 @@ pub(super) fn from_metadata_entries(entries: &[MetadataEntry]) -> Vec<String> {
 pub(super) fn swatches(colors: &[String], prefix: &str) -> Option<AnyView> {
     let chips: Vec<AnyView> = colors
         .iter()
-        .filter_map(|color| swatch(color, 34.0, 12.0, None, &format!("{prefix}-{}", color.trim_start_matches('#'))))
+        .enumerate()
+        .filter_map(|(index, color)| swatch(color, 34.0, 12.0, None, &format!("{prefix}-{index}")))
         .collect();
     if chips.is_empty() {
         return None;
@@ -49,7 +50,8 @@ pub(super) fn swatches(colors: &[String], prefix: &str) -> Option<AnyView> {
 pub(super) fn metadata_chips(colors: &[String], prefix: &str) -> Option<AnyView> {
     let chips: Vec<AnyView> = colors
         .iter()
-        .filter_map(|color| swatch(color, 14.0, 14.0, Some(RadiusTier::Xs), &format!("{prefix}-{}", color.trim_start_matches('#'))))
+        .enumerate()
+        .filter_map(|(index, color)| swatch(color, 14.0, 14.0, Some(RadiusTier::Xs), &format!("{prefix}-{index}")))
         .collect();
     if chips.is_empty() {
         return None;

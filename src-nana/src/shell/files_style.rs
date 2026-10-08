@@ -292,9 +292,22 @@ pub(crate) fn hex_rgba(hex: &str) -> Option<[f32; 4]> {
     Some([channel(0)?, channel(2)?, channel(4)?, 1.0])
 }
 
+/// 拼进组装键的用户文本。NanaUI 用 `/` 连接键路径，键里带 `/` 会让整棵树挂载失败；
+/// 反斜杠一并换成 `∕`，和条目键的写法一致。
+pub(crate) fn key_part(text: &str) -> String {
+    text.replace(['/', '\\'], "\u{2215}")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn key_part_never_contains_the_path_separator() {
+        assert_eq!(key_part("notes/page.pdf"), "notes\u{2215}page.pdf");
+        assert_eq!(key_part("a\\b"), "a\u{2215}b");
+        assert_eq!(key_part("封面"), "封面");
+    }
 
     #[test]
     fn hex_colors_parse_only_full_rgb() {

@@ -229,7 +229,7 @@ fn display_mode_field(current: DisplayMode) -> AnyView {
     widget(frame)
         .children((
             widget(style::text("展示方式", 12.0, 400, SemanticColorRole::Muted, 18.6).nowrap(true)).key("file-display-label"),
-            widget(clip).children((widget(select).key("file-display-mode").on_cx(|_, event: &SelectChanged, cx| {
+            widget(clip).key("file-display-clip").children((widget(select).key("file-display-mode").on_cx(|_, event: &SelectChanged, cx| {
                 cx.dispatch_program(file_message(FilesMessage::SetDisplayMode(DisplayMode::parse(&event.value))));
             }),)),
         ))
@@ -297,10 +297,28 @@ fn import_anchor(files: &super::super::files::FilesState, ctx: &FileContext) -> 
         .key("file-import")
         .on_cx(|_, _: &Activate, cx| cx.dispatch_program(file_message(FilesMessage::ToggleImportMenu)))
         .into_any();
-    let menu = (files.import_open && enabled).then(|| import_menu(files));
+    let open = files.import_open && enabled;
+    let menu = open.then(|| import_menu(files));
     widget(Stack::row(0.0).grow(0.0).shrink(0.0).with_layout(|layout| layout.position = PositionSpec::Relative))
-        .children((button, menu))
+        .children((button, open.then(outside_closer), menu))
         .key("file-import-anchor")
+        .into_any()
+}
+
+/// 菜单打开时铺满窗口的透明层：点在菜单外就收起，和 Vue 的全局 pointerdown 一样。
+fn outside_closer() -> AnyView {
+    let mut style = nana_ui::runtime::NodeStyle::default();
+    let layout = Arc::make_mut(&mut style.layout);
+    layout.position = PositionSpec::Fixed;
+    layout.offset_top = Some(LengthSpec::Px(0.0));
+    layout.offset_left = Some(LengthSpec::Px(0.0));
+    layout.width = Some(LengthSpec::Percent(100.0));
+    layout.height = Some(LengthSpec::Percent(100.0));
+    layout.z_index = Some(19);
+    widget(nana_ui::runtime::ListItem::new("收起导入菜单").style(style))
+        .content(widget(Stack::column(0.0)))
+        .key("file-import-closer")
+        .on_cx(|_, _: &Activate, cx| cx.dispatch_program(file_message(FilesMessage::ToggleImportMenu)))
         .into_any()
 }
 
@@ -343,8 +361,13 @@ fn import_menu(files: &super::super::files::FilesState) -> AnyView {
         .into_any()
 }
 
-/// `files-toolbar__menu-item`：撑满菜单宽，高 32，左右 12，文字靠左，圆角 10，悬停 `--bg-hover`。
+/// `files-toolbar__menu-item`：撑满菜单宽，内边距上下 10、左右 12，文字靠左，圆角 10，悬停 `--bg-hover`。
+///
+/// Vue 里 Lilia 的全局 `button { height: 32px }` 把它压成 32 高，文字溢出内容盒；
+/// 这里按组件自己声明的内边距画：10 + 21.7 行高 + 10。
 fn menu_item(label: &'static str, key: &'static str, enabled: bool, message: FilesMessage) -> AnyView {
+    const PADDING_Y: f32 = 10.0;
+    const LINE: f32 = 21.7;
     let mut style = nana_ui::runtime::NodeStyle::default();
     style.radius = Some(RadiusTier::Lg);
     style.foreground = Some(SemanticColorRole::Text);
@@ -356,12 +379,15 @@ fn menu_item(label: &'static str, key: &'static str, enabled: bool, message: Fil
     layout.align_items = AlignSpec::Center;
     layout.width = Some(LengthSpec::Fill);
     layout.min_width = Some(LengthSpec::Px(0.0));
-    layout.height = Some(LengthSpec::Px(32.0));
+    layout.height = Some(LengthSpec::Px(PADDING_Y * 2.0 + LINE));
+    layout.min_height = Some(LengthSpec::Px(PADDING_Y * 2.0 + LINE));
+    layout.padding_top = Some(LengthSpec::Px(PADDING_Y));
+    layout.padding_bottom = Some(LengthSpec::Px(PADDING_Y));
     layout.padding_left = Some(LengthSpec::Px(12.0));
     layout.padding_right = Some(LengthSpec::Px(12.0));
     layout.opacity = (!enabled).then_some(0.55);
     let mut node = widget(nana_ui::runtime::ListItem::new(label).disabled(!enabled).style(style))
-        .content(widget(style::text(label, 14.0, 500, SemanticColorRole::Text, 21.7).nowrap(true)))
+        .content(widget(style::text(label, 14.0, 500, SemanticColorRole::Text, LINE).nowrap(true)))
         .key(key);
     if enabled {
         node = node.on_cx(move |_, _: &Activate, cx| cx.dispatch_program(file_message(message.clone())));
