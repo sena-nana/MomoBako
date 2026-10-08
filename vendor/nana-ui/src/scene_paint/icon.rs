@@ -274,7 +274,7 @@ impl IconPipeline {
     ) -> Self {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("nana-ui.scene.icon.shader"),
-            source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(ICON_SHADER)),
+            source: wgpu::ShaderSource::Wgsl(super::corner_shape::specialize(ICON_SHADER, super::corner_shape::corner_exponent())),
         });
         let uniform_layout = if let Some(policy) = policy {
             let table = ResourceTable::new(vec![
@@ -415,7 +415,7 @@ impl IconPipeline {
                     generation: policy.generation(),
                     target_format: nana_gpu::__framework::format_from_wgpu(format),
                     sample_count: 1,
-                    shader: 0x6963_6f6e_7069_7065,
+                    shader: 0x6963_6f6e_7069_7065 ^ super::corner_shape::cache_salt(),
                     layout: icon_layout_key(),
                     material: 0,
                     primitive: 0,

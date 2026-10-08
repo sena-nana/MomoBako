@@ -20,7 +20,7 @@ fn cached_fullscreen_pipeline(
             generation: policy.generation(),
             target_format: nana_gpu::__framework::format_from_wgpu(format),
             sample_count: 1,
-            shader: 0x6261_636b_6472_6f70,
+            shader: 0x6261_636b_6472_6f70 ^ super::corner_shape::cache_salt(),
             layout: 8,
             material,
             primitive: 0,
@@ -259,13 +259,13 @@ impl BackdropPipeline {
         });
         let composite_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("nana-ui.scene.backdrop.composite.shader"),
-            source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(concat!(
+            source: wgpu::ShaderSource::Wgsl(super::corner_shape::specialize(concat!(
                 include_str!("shader/color.wgsl"),
                 "\n",
                 include_str!("shader/quad_paint_data.wgsl"),
                 "\n",
                 include_str!("shader/backdrop_composite.wgsl"),
-            ))),
+            ), super::corner_shape::corner_exponent())),
         });
         let copy_pipeline = cached_fullscreen_pipeline(policy, format, 1, || {
             Self::fullscreen_pipeline(
