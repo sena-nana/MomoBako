@@ -41,7 +41,7 @@ pub(crate) fn reduce_message(model: &mut ShellViewModel, message: ShellMessage) 
 impl super::PlayerState {
     /// 播放列表里的内存候选，或预览刚刚装进同一游标。
     pub(super) fn audible(&self) -> bool {
-        self.preview_armed || self.uses_wav()
+        self.preview_armed || (self.cursor_item.is_some() && self.cursor_item == self.current_id)
     }
 
     pub(crate) fn preview_audio_armed(&self) -> bool {
@@ -185,6 +185,10 @@ fn reduce_player(model: &mut ShellViewModel, message: PlayerMessage) {
                 &mut model.selected_path,
                 &mut model.inspect,
             );
+        }
+        PlayerMessage::ItemLoaded { item_id, generation, still, result } => {
+            super::clip::finish_load(&mut model.player, &item_id, generation, still, result);
+            model.player.publish(&mut model.inspect);
         }
         PlayerMessage::RestoreDetail(Ok(detail)) => {
             model.player.note_detail(&detail);

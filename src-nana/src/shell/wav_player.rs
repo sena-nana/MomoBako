@@ -48,11 +48,6 @@ pub(super) fn builtin_candidates() -> Vec<PlayerCandidate> {
     vec![builtin_candidate(), compressed_candidate()]
 }
 
-/// WAV 和已解码的压缩音频都走这份内存游标。其它候选仍是缺失解码器。
-pub(super) fn is_memory_candidate(candidate: &PlayerCandidate) -> bool {
-    candidate.plugin_id == PLUGIN_ID || candidate.plugin_id == COMPRESSED_PLUGIN_ID
-}
-
 /// 一次装载后的内存游标。克隆只复制句柄，播放头仍是同一份。
 #[derive(Clone)]
 pub(super) struct WavPlayer {
@@ -293,7 +288,6 @@ impl Cursor {
 }
 
 pub(super) enum Action {
-    Load(String),
     Play,
     Pause,
     Seek(u64),
@@ -321,7 +315,6 @@ fn control<P: PlaybackMediaPlugin>(
 ) -> (PlaybackSessionState, Option<String>) {
     let mut controller = PlaybackSessionController::new(plugin, session);
     let error = match action {
-        Action::Load(path) => controller.load(&path).err(),
         Action::Play => controller.play().err(),
         Action::Pause => controller.pause().err(),
         Action::Seek(position) => controller.seek(position).err(),
@@ -371,6 +364,24 @@ pub(crate) fn pcm_from_bytes(bytes: &[u8]) -> Result<PreviewPcm, String> {
         duration_ms: parsed.duration_ms,
         pcm: parsed.pcm,
     })
+}
+
+/// 按扩展名说明解不开的原因：wav 报 WAV 头的问题，mp3、flac、ogg 报压缩音频解码的问题。
+/// 其它扩展名不归这里管，返回 `None`。
+pub(crate) fn pcm_error_for_extension(extension: &str, bytes: &[u8]) -> Option<String> {
+    let extension = extension.trim().to_ascii_lowercase();
+    if extension == "wav" {
+        return parse_wav(bytes).err();
+    }
+    if COMPRESSED_EXTENSIONS.contains(&extension.as_str()) {
+        return crate::shell::audio_decode::decode_compressed(bytes).err();
+    }
+    None
+}
+
+/// WAV 和已解码的压缩音频都走这份内存游标。其它候选仍是缺失解码器。
+pub(super) fn is_memory_candidate(candidate: &PlayerCandidate) -> bool {
+    candidate.plugin_id == PLUGIN_ID || candidate.plugin_id == COMPRESSED_PLUGIN_ID
 }
 
 /// 测试构建恒为 false：winmm 模块没有编进来。测试用它确认不会打开声卡。

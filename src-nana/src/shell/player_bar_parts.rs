@@ -13,7 +13,7 @@ use nana_ui::Icon;
 use super::super::super::player::{PlayerMessage, QueueItem};
 use super::super::super::ShellMessage;
 use super::super::paint::{HoverSurface, SliderTrack};
-use super::{display_title, BarProps, DISABLED_OPACITY};
+use super::{display_title, BarProps};
 
 /// 卡片内边距：上 12、左右 16。浮层的绝对定位从内容盒算起。
 const CARD_PADDING_TOP: f32 = 12.0;
@@ -33,29 +33,48 @@ pub(super) fn line(label: impl Into<String>, size: f32, weight: u16, role: Seman
     text
 }
 
+/// 整块不透明度盖在已知底色上时的字色：在 sRGB 里和底色直接混，和浏览器的合成一致。
+/// `dim` 是（底色，不透明度）。
+pub(crate) fn dim_text(mut text: Text, dim: Option<(SemanticColorRole, f32)>) -> Text {
+    if let Some((base, ratio)) = dim {
+        let role = text.style.foreground.unwrap_or(SemanticColorRole::Text);
+        text.style.interaction.base.foreground_mix = Some(nana_ui_core::SemanticColorMix::new(role, base, ratio));
+    }
+    text
+}
+
+/// 同 [`dim_text`]，给方块底色用。
+pub(crate) fn dim_surface(stack: Stack, role: SemanticColorRole, dim: Option<(SemanticColorRole, f32)>) -> Stack {
+    match dim {
+        Some((base, ratio)) => {
+            let style = stack.node_style().surface_mix(nana_ui_core::SemanticColorMix::new(role, base, ratio));
+            stack.style(style)
+        }
+        None => stack.surface(role),
+    }
+}
+
 /// 固定像素的图标字形。
 pub(super) fn icon(icon: Icon, size: f32, role: SemanticColorRole) -> IconGlyph {
     IconGlyph::new(icon).size(size).role(role)
 }
 
 /// 没有缩略图时的类型方块：bg 底、10px 圆角、11px 粗体弱色字居中。
-pub(super) fn type_cover(label: &str, size: f32, key: &'static str) -> AnyView {
+pub(super) fn type_cover(label: &str, size: f32, key: &'static str, dim: Option<(SemanticColorRole, f32)>) -> AnyView {
     let mut text = Text::new(label).color(SemanticColorRole::Muted).font_size(11.0).font_weight(700).line_height(17.05);
     text.style.text_horizontal_alignment = TextHorizontalAlignment::Center;
-    widget(
-        Stack::column(0.0)
-            .align(AlignSpec::Center)
-            .justify(JustifySpec::Center)
-            .width(LengthSpec::Px(size))
-            .height(LengthSpec::Px(size))
-            .min_width(LengthSpec::Px(size))
-            .min_height(LengthSpec::Px(size))
-            .grow(0.0)
-            .shrink(0.0)
-            .surface(SemanticColorRole::Background)
-            .radius(RadiusTier::Lg),
-    )
-    .children((widget(text),))
+    let frame = Stack::column(0.0)
+        .align(AlignSpec::Center)
+        .justify(JustifySpec::Center)
+        .width(LengthSpec::Px(size))
+        .height(LengthSpec::Px(size))
+        .min_width(LengthSpec::Px(size))
+        .min_height(LengthSpec::Px(size))
+        .grow(0.0)
+        .shrink(0.0)
+        .radius(RadiusTier::Lg);
+    widget(dim_surface(frame, SemanticColorRole::Background, dim))
+    .children((widget(dim_text(text, dim)),))
     .key(key)
     .into_any()
 }
@@ -83,7 +102,7 @@ pub(crate) fn hit_area(label: &str, disabled: bool, inset: f32, radius: f32) -> 
 pub(super) fn slider(value: f64, minimum: f64, maximum: f64, step: f64, label: &str, disabled: bool, width: f32, min_width: f32) -> RangeField {
     let mut range = RangeField::new(value, minimum, maximum, step).label(label).show_label(false).show_value(false).disabled(disabled);
     let ratio = range.ratio();
-    range.style.painter = Some(SliderTrack { ratio }.into());
+    range.style.painter = Some(SliderTrack { ratio, dim: disabled }.into());
     range.style.background = None;
     range.style.border = None;
     let layout = std::sync::Arc::make_mut(&mut range.style.layout);
@@ -95,7 +114,6 @@ pub(super) fn slider(value: f64, minimum: f64, maximum: f64, step: f64, label: &
     layout.flex_shrink = Some(1.0);
     layout.padding_left = Some(LengthSpec::Px(0.0));
     layout.padding_right = Some(LengthSpec::Px(0.0));
-    layout.opacity = disabled.then_some(DISABLED_OPACITY);
     range
 }
 
@@ -237,27 +255,22 @@ fn queue_row(item: &QueueItem, media: &'static str, active: bool) -> AnyView {
         cx.dispatch_program(player_message(PlayerMessage::PlayItem { item_id: id.clone() }));
     });
     let title_role = if active { SemanticColorRole::Accent } else { SemanticColorRole::Text };
+    // 不可播放的条目整行按 Vue 的 0.52 淡化，在浮层底色上混出来。
+    let dim = (!ready).then_some((SemanticColorRole::Surface, 0.52));
     let meta = widget(Stack::column(2.0).width(LengthSpec::Shrink).min_width(LengthSpec::Px(0.0)).grow(1.0).shrink(1.0)).children((
-        widget(line(title, 14.0, 700, title_role, 21.7)),
-        widget(line(detail, 11.667, 500, SemanticColorRole::Muted, 18.08)),
+        widget(dim_text(line(title, 14.0, 700, title_role, 21.7), dim)),
+        widget(dim_text(line(detail, 11.667, 500, SemanticColorRole::Muted, 18.08), dim)),
     ));
     let surface = if active { SemanticColorRole::AccentSoft } else { SemanticColorRole::Background };
-    widget(
-        Stack::row(10.0)
-            .align(AlignSpec::Start)
-            .padding(8.0)
-            .min_height(LengthSpec::Px(56.0))
-            .width(LengthSpec::Fill)
-            .surface(surface)
-            .radius(RadiusTier::Lg)
-            .with_layout(|layout| layout.opacity = (!ready).then_some(0.52)),
-    )
-    .children((hit, type_cover_small(media), meta))
-    .into_any()
-}
-
-fn type_cover_small(label: &'static str) -> AnyView {
-    type_cover(label, 40.0, "player-queue-cover")
+    let row = Stack::row(10.0)
+        .align(AlignSpec::Start)
+        .padding(8.0)
+        .min_height(LengthSpec::Px(56.0))
+        .width(LengthSpec::Fill)
+        .radius(RadiusTier::Lg);
+    widget(dim_surface(row, surface, dim))
+        .children((hit, type_cover(media, 40.0, "player-queue-cover", dim), meta))
+        .into_any()
 }
 
 fn player_message(message: PlayerMessage) -> ShellMessage {

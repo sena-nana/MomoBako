@@ -5,8 +5,10 @@ use crate::backend::services::repository::PlaylistPlayerContribution;
 use super::super::{ShellMessage, ShellViewModel};
 use super::{PlayerMessage, QueueItem};
 
+/// 发一条播放消息。当前项的读取请求像 `player_dispatch` 一样当场读文件送回。
 fn send(model: &mut ShellViewModel, message: PlayerMessage) {
     model.reduce(ShellMessage::Player(message));
+    super::fulfill_loads(model);
 }
 
 fn item(id: &str, path: &str, extension: &str) -> QueueItem {
@@ -153,4 +155,54 @@ fn still_item(id: &str, path: &str) -> QueueItem {
     entry.player_label = "图片幻灯片".into();
     entry.file_class = "image".into();
     entry
+}
+
+/// 条目路径是仓库内相对路径：播放只留下经仓库服务读取的请求，不直接读盘。
+/// 读取结果按代次装进会话，过期的结果不装；装好后按播放意图开始播放。
+#[test]
+fn relative_item_paths_load_through_the_repository() {
+    let mut model = ShellViewModel::default();
+    model.player.candidates.clear();
+    model.player.contributions = vec![PlaylistPlayerContribution {
+        player_type_id: "momobako.playlist.audio-sequence".into(),
+        label: "音频顺序播放".into(),
+        file_class: "audio".into(),
+        supported_extensions: vec!["mp3".into()],
+        supports_seek: true,
+        supports_volume: true,
+        supports_preview_navigation: true,
+        description: None,
+    }];
+    model.player.repo_id = Some("repo".into());
+    let mut track = item("a", "music/a.mp3", "mp3");
+    track.player_type_id = "momobako.playlist.audio-sequence".into();
+    track.file_class = "audio".into();
+    model.player.queue = vec![track];
+    model.reduce(ShellMessage::Player(PlayerMessage::PlayItem { item_id: "a".into() }));
+    assert_eq!(model.player.session.status, "loading");
+    let effects = model.player.take_effects();
+    let Some(super::PlayerEffect::LoadItem { repo_id, path, still, generation, .. }) =
+        effects.iter().find(|effect| matches!(effect, super::PlayerEffect::LoadItem { .. })).cloned()
+    else {
+        panic!("播放没有留下读取请求");
+    };
+    assert_eq!((repo_id.as_str(), path.as_str(), still), ("repo", "music/a.mp3", false));
+
+    model.reduce(ShellMessage::Player(PlayerMessage::ItemLoaded {
+        item_id: "a".into(),
+        generation: generation + 1,
+        still: false,
+        result: Err("过期".into()),
+    }));
+    assert_eq!(model.player.session.status, "loading", "过期的读取结果不装");
+
+    let loaded = super::decode_loaded("repo", false, "mp3", crate::shell::audio_decode::fixture_mp3()).expect("解码");
+    model.reduce(ShellMessage::Player(PlayerMessage::ItemLoaded { item_id: "a".into(), generation, still: false, result: Ok(loaded) }));
+    assert_eq!(model.player.session.status, "playing");
+    assert!(model.player.session.duration_ms.is_some_and(|duration| duration > 0));
+    assert!(model.player.can_play);
+
+    send(&mut model, PlayerMessage::SetPlaying(false));
+    assert_eq!(model.player.session.status, "paused", "暂停落在同一游标上，不报缺解码器");
+    assert!(model.player.session.error.is_none());
 }

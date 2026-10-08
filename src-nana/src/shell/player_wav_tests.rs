@@ -40,8 +40,9 @@ fn wav_queue_item(id: &str, path: &std::path::Path) -> QueueItem {
     item
 }
 
+/// 和 Vue 一样，点播放条目后装载完成就开始播放；暂停、跳转、音量都落在同一游标上。
 #[test]
-fn wav_session_loads_paused_then_plays_seeks_and_pauses() {
+fn wav_session_loads_and_plays_then_pauses_seeks_and_sets_volume() {
     let dir = temp_dir("wav");
     let path = dir.join("tone.wav");
     let samples = [128u8; 16];
@@ -60,19 +61,23 @@ fn wav_session_loads_paused_then_plays_seeks_and_pauses() {
 
     model.player.repo_id = Some("repo".into());
     model.player.queue = vec![wav_queue_item("tone", &path)];
-    send(&mut model, PlayerMessage::PlayItem { item_id: "tone".into() });
-    assert_eq!(model.player.session.status, "paused");
+    model.reduce(ShellMessage::Player(PlayerMessage::PlayItem { item_id: "tone".into() }));
+    assert_eq!(model.player.session.status, "loading", "条目字节经仓库服务读取前先停在读取中");
+    assert!(!model.player.can_play);
+    super::super::fulfill_loads(&mut model);
+    assert_eq!(model.player.session.status, "playing");
     assert_eq!(model.player.session.duration_ms, Some(expected_ms));
     assert!(model.player.session.can_seek);
     assert!(model.player.session.can_volume);
     assert!(model.player.session.error.is_none());
-    assert_ne!(model.player.session.status, "playing");
 
-    send(&mut model, PlayerMessage::SetPlaying(true));
-    assert_eq!(model.player.session.status, "playing");
+    send(&mut model, PlayerMessage::SetPlaying(false));
+    assert_eq!(model.player.session.status, "paused");
     let middle = expected_ms / 2;
     send(&mut model, PlayerMessage::Seek(middle));
     assert_eq!(model.player.session.current_time_ms, middle);
+    assert_eq!(model.player.session.status, "paused");
+    send(&mut model, PlayerMessage::SetPlaying(true));
     assert_eq!(model.player.session.status, "playing");
     send(&mut model, PlayerMessage::SetPlaying(false));
     assert_eq!(model.player.session.status, "paused");
@@ -127,12 +132,12 @@ fn compressed_audio_playlist_loads_duration_and_plays_without_a_device() {
         model.player.queue = vec![item];
         model.player.current_id = None;
         send(&mut model, PlayerMessage::PlayItem { item_id: extension.into() });
-        assert_eq!(model.player.session.status, "paused", "{extension}");
+        assert_eq!(model.player.session.status, "playing", "{extension}");
         assert_eq!(model.player.session.duration_ms, Some(decoded.duration_ms), "{extension}");
         assert!(model.player.session.can_seek && model.player.session.can_volume, "{extension}");
         assert!(model.player.session.error.is_none(), "{extension}");
-        send(&mut model, PlayerMessage::SetPlaying(true));
-        assert_eq!(model.player.session.status, "playing", "{extension}");
+        send(&mut model, PlayerMessage::SetPlaying(false));
+        assert_eq!(model.player.session.status, "paused", "{extension}");
     }
     let bad = dir.join("bad.mp3");
     std::fs::write(&bad, b"not-audio").unwrap();

@@ -339,6 +339,8 @@ fn body(props: &BarProps, narrow: bool) -> AnyView {
 /// 封面和两行字是同一个可点区域：点它打开当前条目的预览。没有条目时整块变淡、不可点。
 fn media(props: &BarProps) -> AnyView {
     let title = props.title();
+    // 没有条目时整块按 Vue 的 0.45 淡化，在卡片底色上混出来。
+    let dim = (!props.has_item()).then_some((SemanticColorRole::Surface, DISABLED_OPACITY));
     let hit = widget(parts::hit_area(&title, !props.has_item(), 0.0, 6.0))
         .key("player-media")
         .on_cx(|_, _: &Activate, cx| cx.dispatch_program(player_message(PlayerMessage::OpenPreview { item_id: None })));
@@ -350,24 +352,18 @@ fn media(props: &BarProps) -> AnyView {
             .shrink(1.0),
     )
     .children((
-        widget(parts::line(title, 14.0, 700, SemanticColorRole::Text, 21.7)).key("player-title"),
-        widget(parts::line(props.subtitle(), 11.667, 500, SemanticColorRole::Muted, 18.08)).key("player-subtitle"),
+        widget(parts::dim_text(parts::line(title, 14.0, 700, SemanticColorRole::Text, 21.7), dim)).key("player-title"),
+        widget(parts::dim_text(parts::line(props.subtitle(), 11.667, 500, SemanticColorRole::Muted, 18.08), dim))
+            .key("player-subtitle"),
     ));
-    let opacity = if props.has_item() { None } else { Some(DISABLED_OPACITY) };
-    widget(
-        Stack::row(12.0)
-            .width(LengthSpec::Fill)
-            .min_width(LengthSpec::Px(0.0))
-            .min_height(LengthSpec::Px(58.0))
-            .with_layout(|layout| layout.opacity = opacity),
-    )
-    .children((hit, cover(props), meta))
+    widget(Stack::row(12.0).width(LengthSpec::Fill).min_width(LengthSpec::Px(0.0)).min_height(LengthSpec::Px(58.0)))
+        .children((hit, cover(props, dim), meta))
     .key("player-media-row")
     .into_any()
 }
 
 /// 58px 封面。有纹理画缩略图，没有就写类型字。
-fn cover(props: &BarProps) -> AnyView {
+fn cover(props: &BarProps, dim: Option<(SemanticColorRole, f32)>) -> AnyView {
     if let Some(path) = props.thumbnail.as_deref() {
         let mut thumb = Thumbnail::new(super::super::thumbs::thumbnail_slot(path)).fit(ContentFit::Cover);
         thumb.style.radius = Some(nana_ui_core::RadiusTier::Lg);
@@ -378,7 +374,7 @@ fn cover(props: &BarProps) -> AnyView {
         layout.flex_shrink = Some(0.0);
         return widget(thumb).key("player-cover").into_any();
     }
-    parts::type_cover(props.media_label(), 58.0, "player-cover")
+    parts::type_cover(props.media_label(), 58.0, "player-cover", dim)
 }
 
 /// 循环模式、上一首、播放 / 暂停、下一首、当前队列。
@@ -423,7 +419,7 @@ pub(crate) fn glyph_button(icon: Icon, label: &str, icon_size: f32, box_size: f3
     button.style.background = None;
     button.style.square = None;
     button.style.control_padding_x = None;
-    button.style.painter = Some(GlyphButton { icon, size: icon_size, color: SemanticColorRole::Text }.into());
+    button.style.painter = Some(GlyphButton { icon, size: icon_size, color: SemanticColorRole::Text, dim: disabled }.into());
     let layout = std::sync::Arc::make_mut(&mut button.style.layout);
     layout.width = Some(LengthSpec::Px(box_size));
     layout.height = Some(LengthSpec::Px(box_size));
@@ -431,7 +427,6 @@ pub(crate) fn glyph_button(icon: Icon, label: &str, icon_size: f32, box_size: f3
     layout.min_height = Some(LengthSpec::Px(box_size));
     layout.flex_grow = Some(0.0);
     layout.flex_shrink = Some(0.0);
-    layout.opacity = disabled.then_some(DISABLED_OPACITY);
     button
 }
 
