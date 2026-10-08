@@ -70,6 +70,12 @@ pub(crate) fn wrapping(mut node: Text) -> Text {
     node
 }
 
+/// 上外边距，对应 Vue 里 `h2` / `p` 的 `margin-top`。
+pub(crate) fn margin_top(mut node: Text, px: f32) -> Text {
+    std::sync::Arc::make_mut(&mut node.style.layout).margin_top = Some(LengthSpec::Px(px));
+    node
+}
+
 /// 文字居中。卡片标题和对话框按钮用。
 pub(crate) fn centered(mut node: Text) -> Text {
     node.style.text_horizontal_alignment = TextHorizontalAlignment::Center;
@@ -121,10 +127,77 @@ pub(crate) fn fixed(stack: Stack, width: f32, height: f32) -> Stack {
         .shrink(0.0)
 }
 
-/// 缩略图盒的底色：无底、主题占位灰或文件夹棕色渐变。
+/// 有自己 BEM 类的按钮外观（`files-toolbar__btn`、`files-breadcrumbs__item` 一类），照 Vue 实际样式画。
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct ButtonLook {
+    pub height: f32,
+    pub padding_x: f32,
+    pub font_size: f32,
+    pub weight: u16,
+    pub foreground: SemanticColorRole,
+    pub background: Option<SemanticColorRole>,
+    pub hover: Option<SemanticColorRole>,
+    pub radius: RadiusTier,
+    pub icon_size: f32,
+    pub gap: f32,
+}
+
+impl ButtonLook {
+    /// `.ghost.files-toolbar__btn`：高 34，左右 10，14px/500，常态透明，悬停 `--bg-hover`。
+    pub(crate) const TOOLBAR: Self = Self {
+        height: 34.0,
+        padding_x: 10.0,
+        font_size: 14.0,
+        weight: 500,
+        foreground: SemanticColorRole::Text,
+        background: None,
+        hover: Some(SemanticColorRole::Hover),
+        radius: RadiusTier::Sm,
+        icon_size: 14.0,
+        gap: 6.0,
+    };
+}
+
+/// 按 [`ButtonLook`] 画的按钮。禁用时只把字压成最弱色，不加底和边。
+pub(crate) fn styled_button(label: impl Into<String>, icon: Option<Icon>, look: ButtonLook) -> nana_ui::runtime::Button {
+    let mut button = nana_ui::runtime::Button::new(label);
+    if let Some(icon) = icon {
+        button = button.icon(icon).icon_size(look.icon_size);
+    }
+    button = button.icon_gap(look.gap);
+    let mut style = button.style.clone();
+    style.foreground = Some(look.foreground);
+    style.background = look.background;
+    style.border = None;
+    style.radius = Some(look.radius);
+    style.control_height = None;
+    style.control_padding_x = None;
+    style.control_padding_y = None;
+    style.interaction.hovered = nana_ui::runtime::SemanticPaint { background: look.hover.or(look.background), ..Default::default() };
+    style.interaction.pressed = nana_ui::runtime::SemanticPaint { background: look.hover.or(look.background), ..Default::default() };
+    style.interaction.disabled = nana_ui::runtime::SemanticPaint {
+        foreground: Some(SemanticColorRole::Faint),
+        background: look.background,
+        ..Default::default()
+    };
+    let layout = std::sync::Arc::make_mut(&mut style.layout);
+    layout.height = Some(LengthSpec::Px(look.height));
+    layout.min_height = Some(LengthSpec::Px(look.height));
+    layout.padding_left = Some(LengthSpec::Px(look.padding_x));
+    layout.padding_right = Some(LengthSpec::Px(look.padding_x));
+    layout.padding_top = Some(LengthSpec::Px(0.0));
+    layout.padding_bottom = Some(LengthSpec::Px(0.0));
+    layout.font_size = Some(look.font_size);
+    layout.font_weight = Some(look.weight);
+    layout.line_height = Some(nana_ui_core::LineHeightSpec::Absolute(look.font_size * LINE_BODY));
+    layout.flex_grow = Some(0.0);
+    layout.flex_shrink = Some(0.0);
+    button.style(style)
+}
+
+/// 缩略图盒的底色：主题占位灰或文件夹棕色渐变。
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) enum Tone {
-    None,
     Placeholder,
     Folder,
 }
@@ -173,7 +246,6 @@ impl Painter for PreviewPainter {
         let bounds = cx.bounds();
         let radius = self.radius;
         match self.tone {
-            Tone::None => {}
             Tone::Placeholder => {
                 let fill = placeholder_rgba(cx.theme_mode());
                 cx.rounded_rect(bounds, radius, nana_ui::runtime::BoxPaint::fill(fill));
@@ -206,34 +278,6 @@ impl Painter for PreviewPainter {
         format!("{:?}", self.radius).hash(&mut hasher);
         self.image.as_deref().map(str::len).hash(&mut hasher);
         self.image.as_deref().map(|url| &url[url.len().saturating_sub(64)..]).hash(&mut hasher);
-        hasher.finish()
-    }
-}
-
-/// 按主题取固定色：浅色和深色各一组 sRGB。
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct ThemedFill {
-    pub light: [f32; 4],
-    pub dark: [f32; 4],
-    pub radius: RadiusTier,
-}
-
-impl Painter for ThemedFill {
-    fn paint(&self, cx: &mut PaintContext<'_>) {
-        let fill = match cx.theme_mode() {
-            ThemeMode::Light => self.light,
-            ThemeMode::Dark => self.dark,
-        };
-        let bounds = cx.bounds();
-        cx.rounded_rect(bounds, self.radius, nana_ui::runtime::BoxPaint::fill(fill));
-    }
-
-    fn paint_key(&self) -> u64 {
-        let mut hasher = DefaultHasher::new();
-        for channel in self.light.iter().chain(self.dark.iter()) {
-            channel.to_bits().hash(&mut hasher);
-        }
-        format!("{:?}", self.radius).hash(&mut hasher);
         hasher.finish()
     }
 }
