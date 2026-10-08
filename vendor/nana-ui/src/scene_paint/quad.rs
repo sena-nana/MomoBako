@@ -188,7 +188,7 @@ impl QuadPipeline {
     ) -> Self {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("nana-ui.scene.quad.solid.shader"),
-            source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(concat!(
+            source: wgpu::ShaderSource::Wgsl(super::corner_shape::specialize(concat!(
                 include_str!("shader/motion.wgsl"),
                 "\n",
                 include_str!("shader/color.wgsl"),
@@ -202,7 +202,7 @@ impl QuadPipeline {
                 include_str!("shader/quad_paint.wgsl"),
                 "\n",
                 include_str!("shader/quad_solid.wgsl"),
-            ))),
+            ), super::corner_shape::corner_exponent())),
         });
         // Trilinear. A default (`ImageSampling::Resample`) texture has one
         // level at its painted size, so this is plain bilinear for it; only an
@@ -1659,7 +1659,7 @@ fn cached_solid_pipeline(
                 generation: policy.generation(),
                 target_format: nana_gpu::__framework::format_from_wgpu(format),
                 sample_count,
-                shader: 0x7175_6164_736f_6c69,
+                shader: 0x7175_6164_736f_6c69 ^ super::corner_shape::cache_salt(),
                 layout: quad_layout_key(),
                 material,
                 primitive: 0,

@@ -546,7 +546,7 @@ impl MeshPipeline {
     ) -> Self {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("nana-ui.scene.triangle.solid.shader"),
-            source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(concat!(
+            source: wgpu::ShaderSource::Wgsl(super::corner_shape::specialize(concat!(
                 include_str!("shader/triangle.wgsl"),
                 "\n",
                 include_str!("shader/triangle_solid.wgsl"),
@@ -554,7 +554,7 @@ impl MeshPipeline {
                 include_str!("shader/path.wgsl"),
                 "\n",
                 include_str!("shader/color.wgsl"),
-            ))),
+            ), super::corner_shape::corner_exponent())),
         });
         let bind_layout = if let Some(policy) = policy {
             let table = ResourceTable::new(vec![
@@ -1161,7 +1161,7 @@ fn cached_mesh_pipeline(
                 generation: policy.generation(),
                 target_format: nana_gpu::__framework::format_from_wgpu(format),
                 sample_count,
-                shader: 0x6d65_7368_736f_6c69,
+                shader: 0x6d65_7368_736f_6c69 ^ super::corner_shape::cache_salt(),
                 layout: mesh_layout_key(),
                 material,
                 primitive: 0,
@@ -1203,7 +1203,7 @@ fn cached_path_pipeline(
                 generation: policy.generation(),
                 target_format: nana_gpu::__framework::format_from_wgpu(format),
                 sample_count,
-                shader: 0x6d65_7368_7061_7468,
+                shader: 0x6d65_7368_7061_7468 ^ super::corner_shape::cache_salt(),
                 layout: mesh_layout_key(),
                 material,
                 primitive: 0,

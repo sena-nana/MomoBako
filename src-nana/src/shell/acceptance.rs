@@ -186,7 +186,6 @@ pub fn gap_models() -> Vec<(&'static str, ShellViewModel)> {
 
 fn base_gap_models() -> Vec<(&'static str, ShellViewModel)> {
     vec![
-        ("search-results", search_scene()),
         ("copy-dialog", copy_dialog_scene()),
         ("hardlink-dialog", hardlink_dialog_scene()),
         ("export-dialog", export_dialog_scene()),
@@ -198,24 +197,6 @@ fn base_gap_models() -> Vec<(&'static str, ShellViewModel)> {
         ("live-menu", live_menu_scene()),
         ("live-asmr", live_asmr_scene()),
     ]
-}
-
-fn search_scene() -> ShellViewModel {
-    let mut model = ShellViewModel::for_page(ShellPage::FileList);
-    model.workspace.panel = WorkspacePanel::Search;
-    model.inspect.filter_bar_open = true;
-    model.inspect.query = "封面".into();
-    model.inspect.filters.formats = vec!["png".into()];
-    model.inspect.filters.tags = vec!["参考".into()];
-    model.inspect.filters.colors = vec!["红色".into()];
-    model.inspect.results = vec![super::inspect::SearchRow {
-        repo_id: REPO_ID.into(),
-        asset_id: "asset-cover".into(),
-        path: "assets/cover.png".into(),
-        filename: "cover.png".into(),
-        repo_name: model.repository_name.clone(),
-    }];
-    model
 }
 
 fn copy_dialog_scene() -> ShellViewModel {
