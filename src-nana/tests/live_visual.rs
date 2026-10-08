@@ -20,7 +20,7 @@ use nana_ui_devtools::agent::{
 };
 use nana_ui_devtools::offscreen;
 use nana_ui_platform::host::WindowCommand;
-use nana_ui_platform::WindowId;
+use nana_ui_platform::{InputModifiers, WindowId};
 
 const NAMES: [&str; 3] = ["photos", "audio", "cover.png"];
 const DISPLAY_MODES: [&str; 4] = ["自适应", "瀑布流", "网格", "列表"];
@@ -67,6 +67,54 @@ fn live_workspace_title_bar_layout_and_clicks_hold() {
     assert_missing();
     assert_clicks();
     assert_smart_folder_dialog();
+}
+
+/// 每次更新都整棵重挂。两次按键之间重挂，第二个字仍要进同一个输入框。
+#[test]
+fn typing_survives_a_remount_between_keys() {
+    let mut model = live_files();
+    let mut session = open_session(model.clone(), 1200, 800, ThemeName::Light);
+    click_input(&mut session, "全局搜索");
+    session.type_text("a").expect("输入 a");
+    let _ = pump(&mut session, &mut model);
+    session.type_text("b").expect("输入 b");
+    let _ = pump(&mut session, &mut model);
+    assert_eq!(input_value(&session, "全局搜索"), "ab", "重挂后第二个字没有进搜索框");
+
+    // 对话框里的输入框在浮层里，键路径要经过壳层的浮层槽位。
+    click_label(&mut session, "新建智能文件夹");
+    let _ = pump(&mut session, &mut model);
+    click_input(&mut session, "名称");
+    session.type_text("高").expect("输入 高");
+    let _ = pump(&mut session, &mut model);
+    session.type_text("评").expect("输入 评");
+    let _ = pump(&mut session, &mut model);
+    assert_eq!(input_value(&session, "名称"), "高评", "重挂后对话框输入框失焦");
+}
+
+/// 光标在文字中间时重挂，光标要留在原处，后面的字接着插在中间。
+#[test]
+fn remount_restores_the_caret_inside_the_text() {
+    let mut model = live_files();
+    let mut session = open_session(model.clone(), 1200, 800, ThemeName::Light);
+    click_input(&mut session, "全局搜索");
+    session.type_text("ab").expect("输入 ab");
+    let _ = pump(&mut session, &mut model);
+    session.key_press("ArrowLeft", "ArrowLeft", InputModifiers::default()).expect("光标左移");
+    session.type_text("x").expect("输入 x");
+    let _ = pump(&mut session, &mut model);
+    session.type_text("y").expect("输入 y");
+    let _ = pump(&mut session, &mut model);
+    assert_eq!(input_value(&session, "全局搜索"), "axyb", "重挂后光标跳到了末尾");
+}
+
+fn input_value(session: &RuntimeAgentSession, label: &str) -> String {
+    session
+        .accessibility_dump()
+        .into_iter()
+        .find(|node| node.role == "text-input" && node.label.as_deref() == Some(label))
+        .and_then(|node| node.value)
+        .unwrap_or_else(|| panic!("读不到输入 {label} 的值"))
 }
 
 fn assert_startup() {

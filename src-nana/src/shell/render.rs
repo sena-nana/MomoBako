@@ -24,18 +24,21 @@ pub fn mount_shell(
 ) -> Result<(), FrameworkError> {
     let document_id = document.document();
     let view_model = model.clone();
-    SHELL_MOUNT.with(|slot| {
-        if let Some(previous) = slot.borrow_mut().take() {
-            let live = previous
-                .roots()
-                .iter()
-                .any(|id| document.context().world().contains(*id));
-            if live {
-                if let Err(error) = previous.unmount(document.context_mut()) {
-                    eprintln!("Nana 卸载上一棵壳层失败：{error}");
-                }
-            }
+    // 卸掉旧树前记下焦点，新树挂上后按键路径找回，避免文本框每打一个字就失焦。
+    let kept_focus = SHELL_MOUNT.with(|slot| {
+        let previous = slot.borrow_mut().take()?;
+        let live = previous
+            .roots()
+            .iter()
+            .any(|id| document.context().world().contains(*id));
+        if !live {
+            return None;
         }
+        let kept = super::remount_focus::capture(document, previous.roots());
+        if let Err(error) = previous.unmount(document.context_mut()) {
+            eprintln!("Nana 卸载上一棵壳层失败：{error}");
+        }
+        kept
     });
     let mounted = document
         .context_mut()
@@ -89,6 +92,9 @@ pub fn mount_shell(
     crate::window_host::bind_escape(document);
     crate::window_host::bind_file_drop(document);
     super::sidebar_view::bind_field_labels(document);
+    if let Some(focus) = kept_focus {
+        focus.restore(document, mounted.roots());
+    }
     SHELL_MOUNT.with(|slot| *slot.borrow_mut() = Some(mounted));
     Ok(())
 }
