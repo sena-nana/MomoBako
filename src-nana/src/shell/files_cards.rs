@@ -76,9 +76,9 @@ pub(super) fn card(row: &FileRow, mode: DisplayMode, geometry: CardBox, state: C
     let item = widget(ListItem::new(row.name.clone()).selected(state.selected).style(card_style(mode, geometry, state)))
         .content(content)
         .key(view_key("file-row", row))
-        .on_cx(move |_, _: &Activate, cx| cx.dispatch_program(file_message(super::grid::row_activation(&path))))
+        .on_cx(move |_, _: &Activate, cx| cx.dispatch_program_all(file_message(super::grid::row_activation(&path))))
         .on_cx(move |_, event: &SecondaryPress, cx| {
-            cx.dispatch_program(file_message(FilesMessage::OpenEntryMenu { path: menu_path.clone(), x: event.x, y: event.y }));
+            cx.dispatch_program_all(file_message(FilesMessage::OpenEntryMenu { path: menu_path.clone(), x: event.x, y: event.y }));
         })
         .into_any();
     let mut frame = Stack::column(0.0).grow(0.0).shrink(0.0).min_width(LengthSpec::Px(0.0));

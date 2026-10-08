@@ -94,15 +94,15 @@ pub(crate) fn playlist_name_dialog(model: &ShellViewModel) -> Option<AnyView> {
                 widget(TextInput::new(prompt.draft.clone()).label("播放列表名称"))
                     .key("source-playlist-name")
                     .on_cx(|_, event: &TextChanged, cx| {
-                        cx.dispatch_program(ShellMessage::Input(InputMessage::SourcePlaylistDraft(event.value.to_string())));
+                        cx.dispatch_program_all(ShellMessage::Input(InputMessage::SourcePlaylistDraft(event.value.to_string())));
                     }),
             )
             .footer(widget(Stack::row(8.0)).children((
                 widget(super::super::workbench::ghost_button("取消")).key("source-playlist-cancel").on_cx(|_, _: &Activate, cx| {
-                    cx.dispatch_program(ShellMessage::Input(InputMessage::CloseSourcePlaylist));
+                    cx.dispatch_program_all(ShellMessage::Input(InputMessage::CloseSourcePlaylist));
                 }),
                 widget(super::super::workbench::primary_button("确认")).key("source-playlist-submit").disabled(blank).on_cx(|_, _: &Activate, cx| {
-                    cx.dispatch_program(ShellMessage::Input(InputMessage::SubmitSourcePlaylist));
+                    cx.dispatch_program_all(ShellMessage::Input(InputMessage::SubmitSourcePlaylist));
                 }),
             )))
             .into_any(),

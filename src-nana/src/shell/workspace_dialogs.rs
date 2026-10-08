@@ -174,7 +174,7 @@ pub(super) fn export_dialog(model: &ShellViewModel) -> Option<AnyView> {
     }
     let actions = vec![
         action_button("取消", "export-cancel", ButtonKind::Ghost, busy, FilesMessage::CloseExport),
-        widget(dialog_button(submit)).key("export-submit").on_cx(|_, _: &Activate, cx| cx.dispatch_program(file_message(FilesMessage::SubmitExport))).into_any(),
+        widget(dialog_button(submit)).key("export-submit").on_cx(|_, _: &Activate, cx| cx.dispatch_program_all(file_message(FilesMessage::SubmitExport))).into_any(),
     ];
     let frame = Frame {
         title: "导出资源库".into(),
@@ -207,7 +207,7 @@ fn modal(frame: Frame, body: Vec<AnyView>, gap: f32, actions: Vec<AnyView>) -> A
         let mut close = style::styled_button("", Some(X), look).disabled(frame.busy);
         Arc::make_mut(&mut close.style.layout).width = Some(LengthSpec::Px(24.0));
         let cancel = frame.cancel.clone();
-        header_parts.push(widget(close).key("dialog-close").on_cx(move |_, _: &Activate, cx| cx.dispatch_program(file_message(cancel.clone()))).into_any());
+        header_parts.push(widget(close).key("dialog-close").on_cx(move |_, _: &Activate, cx| cx.dispatch_program_all(file_message(cancel.clone()))).into_any());
     }
     let header = widget(style::bottom_rule(Stack::bar(8.0).align(AlignSpec::Center).padding_xy(14.0, 12.0)))
         .children(header_parts)
@@ -263,7 +263,7 @@ fn scrim(cancel: FilesMessage, busy: bool) -> AnyView {
     layout.paint.backdrop_filter = Some(nana_ui_core::BackdropFilter { blur_radius: 2.0, saturate: 1.0 });
     let mut node = widget(ListItem::new("关闭对话框").style(style)).content(widget(Stack::column(0.0))).key("dialog-scrim");
     if !busy {
-        node = node.on_cx(move |_, _: &Activate, cx| cx.dispatch_program(file_message(cancel.clone())));
+        node = node.on_cx(move |_, _: &Activate, cx| cx.dispatch_program_all(file_message(cancel.clone())));
     }
     node.into_any()
 }
@@ -312,10 +312,10 @@ fn field(
     layout.padding_right = Some(LengthSpec::Px(8.0));
     layout.font_size = Some(14.0);
     let mut node = widget(input).key(key.to_string()).on_cx(move |_, event: &TextChanged, cx| {
-        cx.dispatch_program(file_message(on_change(event.value.to_string())));
+        cx.dispatch_program_all(file_message(on_change(event.value.to_string())));
     });
     if let Some(submit) = on_submit {
-        node = node.on_cx(move |_, _: &TextSubmitted, cx| cx.dispatch_program(file_message(submit.clone())));
+        node = node.on_cx(move |_, _: &TextSubmitted, cx| cx.dispatch_program_all(file_message(submit.clone())));
     }
     widget(Stack::column(6.0).width(LengthSpec::Fill).min_width(LengthSpec::Px(0.0)))
         .children((widget(style::text(label.to_string(), 12.0, 600, SemanticColorRole::Muted, 18.6)).key(format!("{key}-label")), node))
@@ -340,7 +340,7 @@ fn select_field(label: &str, key: &'static str, current: &str, options: &[(&str,
         .children((
             widget(style::text(label.to_string(), 12.0, 600, SemanticColorRole::Muted, 18.6)).key(format!("{key}-label")),
             widget(select).key(key).on_cx(move |_, event: &SelectChanged, cx| {
-                cx.dispatch_program(file_message(export_field(&field_name, event.value.to_string())));
+                cx.dispatch_program_all(file_message(export_field(&field_name, event.value.to_string())));
             }),
         ))
         .key(format!("{key}-field"))
@@ -374,7 +374,7 @@ fn segmented(archive: bool, busy: bool) -> AnyView {
         };
         widget(style::styled_button(label, Some(icon), look).disabled(busy))
             .key(format!("export-target-{value}"))
-            .on_cx(move |_, _: &Activate, cx| cx.dispatch_program(file_message(export_field("target", value.to_string()))))
+            .on_cx(move |_, _: &Activate, cx| cx.dispatch_program_all(file_message(export_field("target", value.to_string()))))
             .into_any()
     };
     widget(
@@ -401,8 +401,8 @@ fn output_field(path: &str, busy: bool) -> AnyView {
             widget(style::text("输出路径", 12.0, 600, SemanticColorRole::Muted, 18.6)).key("export-output-label"),
             widget(input)
                 .key("export-output")
-                .on_cx(|_, event: &TextChanged, cx| cx.dispatch_program(file_message(export_field("output", event.value.to_string()))))
-                .on_cx(|_, _: &BrowseRequested, cx| cx.dispatch_program(file_message(FilesMessage::ChooseExportOutput))),
+                .on_cx(|_, event: &TextChanged, cx| cx.dispatch_program_all(file_message(export_field("output", event.value.to_string()))))
+                .on_cx(|_, _: &BrowseRequested, cx| cx.dispatch_program_all(file_message(FilesMessage::ChooseExportOutput))),
         ))
         .key("export-output-row")
         .into_any()
@@ -415,7 +415,7 @@ fn encrypt_toggle(encrypt: bool, busy: bool) -> AnyView {
     widget(checkbox)
         .key("export-encrypt")
         .on_cx(move |_, event: &nana_ui::runtime::ToggleChanged, cx| {
-            cx.dispatch_program(file_message(export_field("encrypt", if event.checked { "1".into() } else { "0".into() })));
+            cx.dispatch_program_all(file_message(export_field("encrypt", if event.checked { "1".into() } else { "0".into() })));
         })
         .into_any()
 }
@@ -434,7 +434,7 @@ fn error_note(message: String) -> AnyView {
 /// 底部按钮：主操作低饱和蓝、600 字重；普通操作透明。高 32、左右 10、14px。
 fn action_button(label: &str, key: &str, kind: ButtonKind, disabled: bool, message: FilesMessage) -> AnyView {
     let button = Button::new(label.to_string()).kind(kind).disabled(disabled);
-    widget(dialog_button(button)).key(key.to_string()).on_cx(move |_, _: &Activate, cx| cx.dispatch_program(file_message(message.clone()))).into_any()
+    widget(dialog_button(button)).key(key.to_string()).on_cx(move |_, _: &Activate, cx| cx.dispatch_program_all(file_message(message.clone()))).into_any()
 }
 
 /// 对话框按钮的尺寸。颜色沿用主题按钮配方，只改尺寸和主操作字重。

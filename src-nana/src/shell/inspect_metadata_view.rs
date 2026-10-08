@@ -59,7 +59,7 @@ pub(super) fn metadata_panel(model: &ShellViewModel) -> AnyView {
         rows.push(
             widget(style::styled_button("采用服务器版本", None, ButtonLook::TOOLBAR))
                 .key("inspect-adopt")
-                .on_cx(|_, _: &Activate, cx| cx.dispatch_program(inspect_message(InspectMessage::AdoptConflict)))
+                .on_cx(|_, _: &Activate, cx| cx.dispatch_program_all(inspect_message(InspectMessage::AdoptConflict)))
                 .into_any(),
         );
     }
@@ -124,7 +124,7 @@ fn inline_field(
             widget(frame).key(format!("{key}-field")).children((
                 widget(IconGlyph::new(icon).size(14.0).role(SemanticColorRole::Muted)).key(format!("{key}-icon")),
                 widget(input).key(key).on_cx(move |_, event: &TextChanged, cx| {
-                    cx.dispatch_program(inspect_message(map(event.value.to_string())));
+                    cx.dispatch_program_all(inspect_message(map(event.value.to_string())));
                 }),
             )),
         ))
@@ -154,7 +154,7 @@ fn rating_row(rating: i64, locked: bool) -> AnyView {
             widget(ListItem::new(format!("{value} 星")).disabled(locked).style(style))
                 .content(widget(glyph))
                 .key(format!("inspect-rate-{value}"))
-                .on_cx(move |_, _: &Activate, cx| cx.dispatch_program(inspect_message(InspectMessage::SetRating(value))))
+                .on_cx(move |_, _: &Activate, cx| cx.dispatch_program_all(inspect_message(InspectMessage::SetRating(value))))
                 .into_any()
         })
         .collect::<Vec<_>>();
@@ -216,7 +216,7 @@ fn tags_row(model: &ShellViewModel, locked: bool) -> AnyView {
         )))
         .key("inspect-tag-group")
         .on_cx(move |_, _: &Activate, cx| {
-            cx.dispatch_program(ShellMessage::Files(FilesMessage::ToggleTags { path: toggle_path.clone(), expanded }));
+            cx.dispatch_program_all(ShellMessage::Files(FilesMessage::ToggleTags { path: toggle_path.clone(), expanded }));
         })
         .into_any();
     let mut parts = vec![collapse];
@@ -235,7 +235,7 @@ fn tag_panel(model: &ShellViewModel, tags: &[String], locked: bool) -> AnyView {
         parts.push(
             widget(style::styled_button("添加标签", Some(PLUS), look).disabled(locked))
                 .key("inspect-tag-menu")
-                .on_cx(|_, _: &Activate, cx| cx.dispatch_program(toggle_tag_menu()))
+                .on_cx(|_, _: &Activate, cx| cx.dispatch_program_all(toggle_tag_menu()))
                 .into_any(),
         );
     } else {
@@ -294,7 +294,7 @@ fn round_button(icon: Icon, key: &str, locked: bool, make: Action) -> AnyView {
     layout.width = Some(LengthSpec::Px(30.0));
     let rounded = button.style.clone().radius_px(999.0);
     let button = button.style(rounded);
-    widget(button).key(key.to_string()).on_cx(move |_, _: &Activate, cx| cx.dispatch_program(make())).into_any()
+    widget(button).key(key.to_string()).on_cx(move |_, _: &Activate, cx| cx.dispatch_program_all(make())).into_any()
 }
 
 /// 文字版圆按钮，标签片里的「×」。
@@ -312,7 +312,7 @@ fn round_button_text(text: &str, key: &str, locked: bool, make: Action) -> AnyVi
     layout.width = Some(LengthSpec::Px(30.0));
     let rounded = button.style.clone().radius_px(999.0);
     let button = button.style(rounded);
-    widget(button).key(key.to_string()).on_cx(move |_, _: &Activate, cx| cx.dispatch_program(make())).into_any()
+    widget(button).key(key.to_string()).on_cx(move |_, _: &Activate, cx| cx.dispatch_program_all(make())).into_any()
 }
 
 /// 标签菜单：新建标签输入和「添加“…”」，下面是已有标签。没有标签时铺在「添加标签」下面，
@@ -339,17 +339,17 @@ fn tag_menu(model: &ShellViewModel, tags: &[String], locked: bool) -> AnyView {
                 widget(input)
                     .key("inspect-tag-draft")
                     .on_cx(|_, event: &TextChanged, cx| {
-                        cx.dispatch_program(ShellMessage::Files(FilesMessage::SetTagDraft(event.value.to_string())));
+                        cx.dispatch_program_all(ShellMessage::Files(FilesMessage::SetTagDraft(event.value.to_string())));
                     })
                     .on_cx(|_, event: &TextSubmitted, cx| {
-                        cx.dispatch_program(ShellMessage::Files(FilesMessage::SubmitTagDraft(event.value.clone())));
+                        cx.dispatch_program_all(ShellMessage::Files(FilesMessage::SubmitTagDraft(event.value.clone())));
                     }),
             ))
             .into_any(),
         // `ghost file-metadata-card__tag-create` 没有自己的尺寸，照基础按钮 32 高。
         widget(style::styled_button(add_label, None, ButtonLook { height: 32.0, ..ButtonLook::TOOLBAR }).disabled(!can_create || locked))
             .key("inspect-tag-create")
-            .on_cx(move |_, _: &Activate, cx| cx.dispatch_program(ShellMessage::Files(FilesMessage::SubmitTagDraft(add_tag.clone()))))
+            .on_cx(move |_, _: &Activate, cx| cx.dispatch_program_all(ShellMessage::Files(FilesMessage::SubmitTagDraft(add_tag.clone()))))
             .into_any(),
     ];
     let options = existing_tags(model, tags, &trimmed);
@@ -407,7 +407,7 @@ fn option_chip(index: usize, tag: &str, locked: bool) -> AnyView {
     let add = tag.to_string();
     widget(button)
         .key(format!("inspect-tag-choice-{index}-{}", style::key_part(tag)))
-        .on_cx(move |_, _: &Activate, cx| cx.dispatch_program(inspect_message(InspectMessage::AddTag(add.clone()))))
+        .on_cx(move |_, _: &Activate, cx| cx.dispatch_program_all(inspect_message(InspectMessage::AddTag(add.clone()))))
         .into_any()
 }
 
@@ -528,7 +528,7 @@ fn source_action(icon: Icon, key: &str, enabled: bool, make: Action) -> AnyView 
     let outlined = button.style.clone().outline(SemanticColorRole::BorderSoft, 1.0);
     let mut button = button.style(outlined);
     Arc::make_mut(&mut button.style.layout).width = Some(LengthSpec::Px(26.0));
-    widget(button).key(key.to_string()).on_cx(move |_, _: &Activate, cx| cx.dispatch_program(make())).into_any()
+    widget(button).key(key.to_string()).on_cx(move |_, _: &Activate, cx| cx.dispatch_program_all(make())).into_any()
 }
 
 /// 和 Vue `isOpenableSourceLink` 一致：要有协议，且不是脚本或内联数据。

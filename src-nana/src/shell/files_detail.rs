@@ -13,7 +13,7 @@ use super::style;
 
 /// 详情卡片。`width` 为空时是窄窗里排在文件卡片下面的整行版式。
 pub(super) fn detail_aside(model: &ShellViewModel, width: Option<f32>) -> AnyView {
-    let (body, centered) = detail_body(model);
+    let (body, centered, shown) = detail_body(model);
     let mut content = Stack::column(14.0).width(LengthSpec::Fill).min_width(LengthSpec::Px(0.0)).padding(19.0);
     if centered {
         content = content.height(LengthSpec::Fill).justify(JustifySpec::Center);
@@ -26,7 +26,8 @@ pub(super) fn detail_aside(model: &ShellViewModel, width: Option<f32>) -> AnyVie
         layout.width = Some(LengthSpec::Fill);
     }))
     .children((widget(content).children((body,)).key("file-detail-content"),))
-    .key("file-detail-scroll")
+    // 按显示的条目取键：换选中项回到顶部，同一项重挂时壳层保留滚动位置。
+    .key(format!("file-detail-scroll-{}", style::key_part(&shown)))
     .into_any();
     let mut frame = Stack::fill_column(0.0)
         .min_height(LengthSpec::Px(0.0))
@@ -43,21 +44,21 @@ pub(super) fn detail_aside(model: &ShellViewModel, width: Option<f32>) -> AnyVie
     widget(frame).children((scroller,)).key("file-detail").into_any()
 }
 
-/// 卡片内容和是否需要上下居中（只有空状态居中）。
-fn detail_body(model: &ShellViewModel) -> (AnyView, bool) {
+/// 卡片内容、是否需要上下居中（只有空状态居中），以及显示的是什么（滚动区的键用）。
+fn detail_body(model: &ShellViewModel) -> (AnyView, bool, String) {
     let ctx = FileContext::from_model(model);
     let rows = model.files.visible_rows(&ctx);
     let chosen = chosen_rows(&rows, &model.files.selected, model.files.primary.as_deref());
     if chosen.len() > 1 {
-        return (multi_card(&chosen), false);
+        return (multi_card(&chosen), false, format!("multi-{}", chosen.len()));
     }
     if let Some(row) = current_row(&rows, model, &chosen) {
-        return (entry_card(model, &ctx, &row), false);
+        return (entry_card(model, &ctx, &row), false, format!("entry-{}", row.key()));
     }
     if !ctx.trash && !ctx.is_virtual() {
-        return (directory_card(model, &rows), false);
+        return (directory_card(model, &rows), false, format!("directory-{}", model.files.current_path));
     }
-    (empty_card(&ctx), true)
+    (empty_card(&ctx), true, "empty".into())
 }
 
 /// 主选优先；没有主选时取唯一的那条选择。

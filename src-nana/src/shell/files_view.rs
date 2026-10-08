@@ -42,7 +42,7 @@ pub(super) fn live_file_column(model: &ShellViewModel) -> AnyView {
         .on_cx({
             let flags = super::input::file_drop_flags(model);
             move |_, event: &FileDropEvent, cx| {
-                cx.dispatch_program(super::input::file_drop_message(&flags, event));
+                cx.dispatch_program_all(super::input::file_drop_message(&flags, event));
             }
         })
         .children((
