@@ -94,6 +94,7 @@ fn search_field(keyword: &str, placeholder: &str) -> AnyView {
         .children((widget(input).key("admin-plugin-keyword").on_cx(|_, event: &TextChanged, cx| {
             cx.dispatch_program(ShellMessage::Admin(AdminMessage::SetKeyword(event.value.to_string())));
         }),))
+        .key("admin-plugin-search")
         .into_any()
 }
 
@@ -154,11 +155,11 @@ fn plugin_card(model: &ShellViewModel, plugin: &PluginManifest) -> AnyView {
         if let Some(reason) = plugin.degradation_reason.as_deref() {
             notices.push(plugin_notice(reason, false));
         }
-        body.push(widget(column(6.0)).children(notices).into_any());
+        body.push(widget(column(6.0)).children(notices).key(format!("admin-plugin-notices-{plugin_id}")).into_any());
     }
     body.push(chips(plugin));
     body.extend(sections(model, plugin));
-    body.push(card_actions(plugin, model.admin.active_settings_plugin_id.as_deref() == Some(plugin_id), managing));
+    body.push(card_actions(plugin, managing));
     if model.admin.active_settings_plugin_id.as_deref() == Some(plugin_id) {
         body.push(settings_section(model, plugin));
     }
@@ -205,7 +206,7 @@ fn chips(plugin: &PluginManifest) -> AnyView {
         .enumerate()
         .map(|(index, value)| style::hint_chip(value, format!("admin-plugin-chip-{plugin_id}-{index}")))
         .collect::<Vec<_>>();
-    widget(pad(row(8.0).wrap(true), 8.0, 0.0, 0.0, 0.0).width(LengthSpec::Fill)).children(items).into_any()
+    widget(pad(row(8.0).wrap(true), 8.0, 0.0, 0.0, 0.0).width(LengthSpec::Fill)).children(items).key(format!("admin-plugin-chips-{plugin_id}")).into_any()
 }
 
 /// 依赖、权限、Hook 和执行记录四段，标签列 56 宽。
@@ -283,7 +284,7 @@ fn section(title: &str, items: Vec<AnyView>, key: String) -> AnyView {
 fn section_with_body(title: &str, body: AnyView, key: String) -> AnyView {
     let grid = Stack::from_layout(nana_ui_core::LayoutStyle::default()).with_layout(|layout| {
         layout.display = Some(nana_ui_core::DisplaySpec::Grid);
-        layout.grid_columns = Some(vec![GridTrack::Px(56.0), GridTrack::MinMax(Box::new(GridTrack::Px(0.0)), Box::new(GridTrack::Fr(1.0)))]);
+        layout.grid_columns = Some(vec![GridTrack::Px(56.0), GridTrack::MinMax { min_px: 0.0, fr: 1.0, max_px: None }]);
         layout.gap = Some(LengthSpec::Px(8.0));
         layout.width = Some(LengthSpec::Fill);
         layout.align_items = AlignSpec::Start;
@@ -323,7 +324,7 @@ fn execution_item(record: &PluginHookExecutionRecord) -> AnyView {
 }
 
 /// 卡片底部的操作：设置、启用或禁用，用户插件多一个删除。靠右排。
-fn card_actions(plugin: &PluginManifest, open: bool, managing: bool) -> AnyView {
+fn card_actions(plugin: &PluginManifest, managing: bool) -> AnyView {
     let plugin_id = plugin.plugin_id.clone();
     let enabled = plugin.enabled;
     let settings_id = plugin_id.clone();
@@ -353,7 +354,6 @@ fn card_actions(plugin: &PluginManifest, open: bool, managing: bool) -> AnyView 
                 .into_any(),
         );
     }
-    let _ = open;
     widget(row(8.0).wrap(true).width(LengthSpec::Fill).justify(nana_ui::runtime::JustifySpec::End))
         .children(buttons)
         .key(format!("admin-plugin-actions-{plugin_id}"))
@@ -384,6 +384,7 @@ fn settings_section(model: &ShellViewModel, plugin: &PluginManifest) -> AnyView 
                 })
                 .into_any(),
         ))
+        .key(format!("admin-plugin-settings-head-{plugin_id}"))
         .into_any();
     let mut body = vec![head];
     if support::has_source_authentication(plugin) {

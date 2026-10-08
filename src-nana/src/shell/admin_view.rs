@@ -1,752 +1,279 @@
-//! 设置、插件、日志、任务和仓库动作的实况表面。
+//! 首页的日志、拓展和动作面板入口，以及任务弹层。
 //!
-//! 验收页和产品窗口都挂这套表面。任务、日志和插件用稳定 key。
+//! 面板根节点是普通竖排，滚动和页边距由壳层主区提供。任务弹层照 `TaskPopover.vue`：
+//! 340 宽，贴在侧栏底部任务按钮上方；每个任务一块，来源加进度条（标签、细节、百分比）。
 
-use nana_ui::icons_tabler::{
-    BORDER_CORNER_ROUNDED, BORDER_RADIUS, COPY, DOWNLOAD, ERASER, JSON, PLAYER_PAUSE, PLAYER_PLAY, REFRESH, TRASH,
-    UPLOAD,
-};
-use nana_ui::runtime::view::{button, text, widget, AnyView, IntoView};
-use nana_ui::runtime::{
-    Activate, AlignSpec, Button, Chip, EmptyState, Icon, IconGlyph, LabeledValue, LengthSpec, List, ListItem, QrCode,
-    RangeChanged, RangeField, SettingsCard, Stack, StatusBadge, TextChanged, TextInput,
-};
-use nana_ui::{ButtonKind, StatusTone};
-
-use super::super::workbench;
+use nana_ui::runtime::view::{widget, AnyView, IntoView};
+use nana_ui::runtime::{Activate, AlignSpec, IconButton, JustifySpec, LengthSpec, Stack};
+use nana_ui_core::{RadiusTier, SemanticColorRole as Role};
 
 use super::super::{ShellMessage, ShellViewModel, WorkspacePanel};
-use super::support::{self, action_can_run, action_status_label};
+use super::icons;
+use super::style::{self, action, column, label, pad, row, wrapping, Tone};
+use super::support::{action_can_run, action_status_label, PopoverRow};
 use super::AdminMessage;
 
-/// 把阶段 6 的实况控件接到同一棵 Runtime 树上。
+/// 当前首页面板：日志、拓展或仓库动作。设置页走 [`super::settings_page`]。
 pub(crate) fn admin_surface(model: &ShellViewModel) -> AnyView {
-    let mut rows = Vec::new();
-    if model.admin_settings_visible() {
-        // 登录按钮必须在应用设置之前，否则 1200×800 第一屏看不见。
-        if let Some(card) = super::tool_native::source_login_card(&model.admin.plugins) {
-            rows.push(card);
-        }
-        if let Some(card) = source_auth_result(&model.admin.source_auth) {
-            rows.push(card);
-        }
-        rows.extend(settings_rows(model));
+    if model.admin_workspace_visible(WorkspacePanel::Logs) {
+        return super::logs_view::logs_panel(model);
     }
-    if model.admin_workspace_visible(WorkspacePanel::Actions) && !model.admin_settings_visible() {
-        rows.extend(action_rows(model));
+    if model.admin_workspace_visible(WorkspacePanel::Extensions) {
+        return super::tools::extensions_page(model);
     }
-    if model.admin_workspace_visible(WorkspacePanel::Extensions) && !model.admin_settings_visible() {
-        rows.push(extensions_card(model));
+    if model.admin_workspace_visible(WorkspacePanel::Actions) {
+        return actions_panel(model);
     }
-    if model.admin_workspace_visible(WorkspacePanel::Logs) && !model.admin_settings_visible() {
-        rows.push(logs_card(model));
-    }
-    if model.admin_settings_visible() {
-        rows.push(workbench::section_card("插件", plugin_rows(model)));
-        // 滚动范围跟到最后一张卡。20px 留白在插件卡之后，滚到底时不贴窗口边。
-        rows.push(settings_scroll_pad());
-    }
-    widget(Stack::fill_column(8.0)).children(rows).key("admin-surface").into_any()
+    widget(column(0.0)).key("admin-surface").into_any()
 }
 
-/// 任务弹层挂在壳层浮层上，跟侧栏底部的任务按钮走。
+/// Vue 定位弹层用的高度估计：`min(360, max(180, 96 + 任务数 × 70))`。
+fn estimated_height(count: usize) -> f32 {
+    (96.0 + count as f32 * 70.0).clamp(180.0, 360.0)
+}
+
+/// 任务弹层。左边对齐任务按钮（x=64），顶边在按钮上方「估计高度 + 8」处。
 pub(crate) fn task_popover(model: &ShellViewModel) -> Option<AnyView> {
     if !model.admin.popover_open {
         return None;
     }
-    let rows_data = model.task_rows();
-    let mut body = vec![widget(super::super::workbench::section_title(format!("任务 {}", rows_data.len()))).key("admin-task-count").into_any()];
-    if rows_data.is_empty() {
+    let rows = model.task_rows();
+    // 侧栏底部按钮离窗口底边 36（按钮高 26、下边距 10）。
+    let anchor = estimated_height(rows.len()) + 8.0 + 36.0;
+    let header = widget(style::spread(8.0, AlignSpec::Center).with_layout(|layout| layout.min_height = Some(LengthSpec::Px(24.0))))
+        .children((
+            widget(label("任务", 13.0, 700, Role::Text)).key("admin-task-title"),
+            widget(close_button()).key("admin-task-close").on_cx(|_, _: &Activate, cx| {
+                cx.dispatch_program(ShellMessage::Admin(AdminMessage::CloseTaskPopover));
+            }),
+        ))
+        .into_any();
+    let mut body = vec![header];
+    if rows.is_empty() {
         body.push(
-            widget(EmptyState::new("当前没有运行中的任务。").message("导入、扫描和插件处理开始后会列在这里。").compact(true))
-                .key("admin-task-empty")
+            widget(pad(column(0.0), 10.0, 2.0, 4.0, 2.0))
+                .children((widget(label("当前没有运行中的任务。", 12.0, 400, Role::Faint)).key("admin-task-empty"),))
                 .into_any(),
         );
+    } else {
+        let items = rows.iter().map(task_item).collect::<Vec<_>>();
+        body.push(widget(column(10.0)).children(items).key("admin-task-list").into_any());
     }
-    let mut tasks = Vec::new();
-    for task in rows_data {
-        let mut block = vec![
-            widget(super::super::workbench::section_title(task.label.clone()))
-                .key(format!("admin-task-title-{}", task.id))
-                .into_any(),
-            widget(ListItem::new(format!("{} · {}", task.source, task.detail)))
-                .key(format!("admin-task-{}", task.id))
-                .into_any(),
-        ];
-        if task.id != "workspace-operation" {
-            let task_id = task.id.clone();
-            block.push(widget(super::super::workbench::ghost_button("取消")).key(format!("admin-task-cancel-{}", task.id)).on_cx(move |_, _: &Activate, cx| {
-                cx.dispatch_program(ShellMessage::CancelTask(task_id.clone()));
-            }).into_any());
-        }
-        tasks.push(widget(Stack::column(4.0)).children(block).into_any());
-    }
-    if !tasks.is_empty() {
-        body.push(widget(List::new()).children(tasks).key("admin-task-list").into_any());
-    }
-    body.push(widget(super::super::workbench::ghost_button("关闭任务")).key("admin-task-close").on_cx(|_, _: &Activate, cx| {
-        cx.dispatch_program(ShellMessage::Admin(AdminMessage::CloseTaskPopover));
-    }).into_any());
+    let popover = pad(column(10.0), 11.0, 11.0, 11.0, 11.0)
+        .surface(Role::Surface)
+        .outline(Role::BorderStrong, 1.0)
+        .radius(RadiusTier::Md)
+        .with_layout(|layout| {
+            layout.width = Some(LengthSpec::Px(340.0));
+            layout.max_height = Some(LengthSpec::Px(360.0));
+            layout.overflow_y = nana_ui_core::OverflowSpec::Hidden;
+        });
+    let anchored = Stack::column(0.0).align(AlignSpec::Start).with_layout(move |layout| {
+        layout.height = Some(LengthSpec::Px(anchor));
+        layout.padding_left = Some(LengthSpec::Px(64.0));
+        layout.overflow_y = nana_ui_core::OverflowSpec::Visible;
+    });
     Some(
-        widget(Stack::fill_column(0.0).padding_xy(16.0, 48.0).justify(nana_ui::runtime::JustifySpec::End).align(nana_ui::runtime::AlignSpec::Start))
-            .children((
-                widget(
-                    Stack::column(8.0)
-                        .width(nana_ui::runtime::LengthSpec::Px(280.0))
-                        .surface(nana_ui::runtime::SemanticColorRole::Surface)
-                        .radius_px(12.0)
-                        .padding_xy(14.0, 12.0),
-                )
-                .children(body),
-            ))
+        widget(Stack::fill_column(0.0).justify(JustifySpec::End).align(AlignSpec::Start))
+            .children((widget(anchored).children((widget(popover).children(body).key("admin-task-popover"),)),))
             .into_any(),
     )
 }
 
-/// 登录调用返回的状态和二维码。没有可画的内容时不占位。
-fn source_auth_result(view: &super::support::SourceAuthView) -> Option<AnyView> {
-    if view.lines.is_empty() && view.qr_text.is_none() {
-        return None;
-    }
-    let mut rows = Vec::new();
-    for (index, line) in view.lines.iter().enumerate() {
-        let (label, value) = auth_labeled(line);
-        rows.push(widget(LabeledValue::new(label, value)).key(format!("admin-source-auth-line-{index}")).into_any());
-    }
-    if let Some(data) = view.qr_text.as_deref() {
-        match QrCode::encode(data, 160.0) {
-            Ok(code) => rows.push(widget(code.label("登录二维码")).key("admin-source-qr").into_any()),
-            Err(error) => {
-                eprintln!("Nana 登录二维码编码失败：{error}");
-                rows.push(text("登录二维码无法编码。").key("admin-source-qr-error").into_any());
-            }
-        }
-    }
-    Some(widget(SettingsCard::new("登录结果")).children(rows).key("admin-source-auth-card").into_any())
+/// 关闭按钮：22 见方、sm 圆角、弱色叉号 13。
+fn close_button() -> IconButton {
+    let mut button = IconButton::new(icons::X, "关闭任务");
+    let layout = std::sync::Arc::make_mut(&mut button.style.layout);
+    layout.width = Some(LengthSpec::Px(22.0));
+    layout.height = Some(LengthSpec::Px(22.0));
+    layout.min_width = Some(LengthSpec::Px(22.0));
+    layout.min_height = Some(LengthSpec::Px(22.0));
+    button.style.foreground = Some(Role::Faint);
+    button
 }
 
-/// 把登录摘要拆成标签和值。账号和状态不再只剩「已调用 method」。
-fn auth_labeled(line: &str) -> (&'static str, String) {
-    if line == "已登录" || line == "未登录" {
-        return ("登录", line.to_string());
-    }
-    if line == "登录已过期" {
-        return ("登录", "已过期".into());
-    }
-    if let Some(rest) = line.strip_prefix("账号 ") {
-        return ("账号", rest.to_string());
-    }
-    if let Some(rest) = line.strip_prefix("资料 ") {
-        return ("资料", rest.to_string());
-    }
-    ("状态", line.to_string())
+/// 一个任务：`bg` 底、`border-soft` 边线、sm 圆角、内边距 9；来源加进度条。
+fn task_item(task: &PopoverRow) -> AnyView {
+    let id = task.id.as_str();
+    widget(pad(column(6.0), 10.0, 10.0, 10.0, 10.0).surface(Role::Background).outline(Role::BorderSoft, 1.0).radius(RadiusTier::Sm))
+        .children((
+            widget(label(task.source.clone(), 12.0, 600, Role::Faint)).key(format!("admin-task-source-{id}")),
+            progress_bar(task),
+        ))
+        .key(format!("admin-task-{id}"))
+        .into_any()
 }
 
-/// 任务计数只来自已经在内存里的任务。没有任务时给空状态，不编一个仪表数字。
-fn task_card(model: &ShellViewModel) -> AnyView {
-    let rows_data = model.task_rows();
-    let mut rows = Vec::new();
-    if rows_data.is_empty() {
-        rows.push(
-            widget(EmptyState::new("当前没有运行中的任务。").message("导入、扫描和插件处理开始后会列在这里。").compact(true))
-                .key("admin-settings-task-empty")
-                .into_any(),
-        );
-    } else {
-        rows.push(widget(LabeledValue::new("运行中", rows_data.len().to_string())).key("admin-settings-task-count").into_any());
-        for task in rows_data.iter().take(8) {
-            rows.push(
-                widget(LabeledValue::new(task.label.clone(), task.detail.clone()))
-                    .key(format!("admin-settings-task-{}", task.id))
-                    .into_any(),
-            );
-        }
-    }
-    widget(SettingsCard::new("任务")).children(rows).key("admin-settings-tasks").into_any()
-}
-
-fn settings_rows(model: &ShellViewModel) -> Vec<AnyView> {
-    let (choices, selected, notice) = support::audio_choices(&model.player.candidates, &model.player.preferences);
-    let enabled = support::audio_picker_enabled(&choices);
-    let mut audio = vec![
-        widget(super::super::workbench::eyebrow("默认音频播放器")).key("admin-audio-label").into_any(),
-        widget(LabeledValue::new("当前播放器", if selected.is_empty() { "未选择".into() } else { selected })).key("admin-audio-selected").into_any(),
-    ];
-    if !notice.is_empty() {
-        audio.push(text(notice).key("admin-audio-notice").into_any());
-    }
-    if enabled {
-        audio.extend(choices.into_iter().filter(|choice| !choice.unavailable).map(|choice| {
-            let plugin_id = choice.plugin_id.clone();
-            button(choice.label)
-                .key(format!("admin-audio-{}", choice.plugin_id))
-                .on_cx(move |_, _: &Activate, cx| {
-                    cx.dispatch_program(ShellMessage::Admin(AdminMessage::SetAudioPlayer(Some(plugin_id.clone()))));
-                })
-                .into_any()
-        }));
-    }
-    let external_status = model.admin.external.as_ref();
-    let ready = external_status.map(|status| status.ready);
-    let token = external_status.map(|status| support::mask_token(Some(status.token.as_str()))).unwrap_or_else(|| "未加载".into());
-    let base_url = external_status.map(|status| status.base_url.clone()).unwrap_or_default();
-    let token_value = external_status.map(|status| status.token.clone()).unwrap_or_default();
-    let json = external_json(model);
-    let mut external = vec![
-        widget(LabeledValue::new("外部素材", support::external_status_label(ready))).key("admin-external-status").into_any(),
-        widget(LabeledValue::new("连接文件", external_text(external_status.map(|status| status.connection_file_path.as_str()))))
-            .key("admin-external-file")
-            .into_any(),
-        widget(LabeledValue::new("Base URL", external_text(external_status.map(|status| status.base_url.as_str()))))
-            .key("admin-external-url")
-            .into_any(),
-        widget(LabeledValue::new("Token", token)).key("admin-external-token").into_any(),
-        widget(LabeledValue::new("启动时间", external_text(external_status.map(|status| status.started_at.as_str()))))
-            .key("admin-external-started")
-            .into_any(),
-        widget(Stack::row(8.0).wrap(true)).children((
-            copy_button(COPY, "复制 Base URL", "Base URL", base_url, "admin-copy-url"),
-            copy_button(COPY, "复制 Token", "Token", token_value, "admin-copy-token"),
-            copy_button(JSON, "复制 JSON", "连接 JSON", json, "admin-copy-json"),
-            labeled_icon(DOWNLOAD, "导出 JSON", "admin-export-json", || {
-                ShellMessage::Admin(AdminMessage::ExportExternal)
+/// `ProgressBar.vue`：6 高的药丸轨道，填充至少 18 宽；下面是标签、细节和百分比，间距 7。
+fn progress_bar(task: &PopoverRow) -> AnyView {
+    let id = task.id.as_str();
+    let percent = task.value.clamp(0.0, 100.0).round();
+    let fill = (percent / 100.0) as f32;
+    let track = widget(
+        style::rounded(Stack::row(0.0), None)
+            .surface(Role::Subtle)
+            .outline(Role::BorderSoft, 1.0)
+            .with_layout(|layout| {
+                layout.width = Some(LengthSpec::Fill);
+                layout.height = Some(LengthSpec::Px(6.0));
+                layout.overflow_x = nana_ui_core::OverflowSpec::Hidden;
+                layout.overflow_y = nana_ui_core::OverflowSpec::Hidden;
             }),
-        )).into_any(),
-    ];
-    if !model.admin.external_error.is_empty() {
-        external.push(text(model.admin.external_error.clone()).key("admin-external-error").into_any());
-    } else if !model.admin.external_message.is_empty() {
-        external.push(text(model.admin.external_message.clone()).key("admin-external-message").into_any());
-    }
-    let (metadata, thumbnail, query, cached) = match model.admin.cache.as_ref() {
-        Some(cache) => (
-            cache.config.metadata_capacity.to_string(),
-            cache.config.thumbnail_capacity.to_string(),
-            cache.config.query_capacity.to_string(),
-            cache.entries.len().to_string(),
-        ),
-        None => ("未加载".into(), "未加载".into(), "未加载".into(), "未加载".into()),
-    };
-    let transport = model.admin.api_design.as_ref().map(|api| api.transport.clone()).unwrap_or_else(|| "本地服务契约未加载".into());
-    vec![
-        workbench::section_card("音频播放", audio),
-        // Vue 把主题、圆角和半径放在音频播放后面的同一张「外观」卡里。
-        appearance_card(model),
-        // 并发模型和同步方式是产品说明，不是运行时计数。
-        workbench::section_card("仓库服务", vec![
-            widget(LabeledValue::new("已注册仓库", model.workspace.repositories.len().to_string())).key("admin-repo-count").into_any(),
-            widget(LabeledValue::new("并发模型", "SQLite WAL + 乐观锁")).key("admin-repo-concurrency").into_any(),
-            widget(LabeledValue::new("同步方式", "全量扫描 + 事件表")).key("admin-repo-sync").into_any(),
-            widget(LabeledValue::new("已接入后端", support::backend_summary(&model.admin.backends))).key("admin-backends").into_any(),
-        ]),
-        workbench::section_card("外部素材接入", external),
-        widget(SettingsCard::new("缓存")).children((
-            widget(LabeledValue::new("元数据", metadata)).key("admin-cache"),
-            widget(LabeledValue::new("缩略图", thumbnail)).key("admin-cache-thumbnail"),
-            widget(LabeledValue::new("查询", query)).key("admin-cache-query"),
-            widget(LabeledValue::new("条目", cached)).key("admin-cache-entries"),
-        )).into_any(),
-        task_card(model),
-        workbench::section_card("API 设计", vec![widget(LabeledValue::new("传输", transport)).key("admin-api-transport").into_any()]),
-    ]
-}
-
-/// 主题和圆角同一张卡。半径用滑杆，范围和 Vue 的圆角半径一致。
-fn appearance_card(model: &ShellViewModel) -> AnyView {
-    let theme = model.settings.theme.clone();
-    workbench::section_card(
-        "外观",
-        vec![
-            widget(Stack::bar(8.0))
-                .children((
-                    text(format!("主题：{}", theme_label(&theme))).key("settings-theme-label"),
-                    widget(Stack::spacer()),
-                    button("浅色").key("settings-theme-light").on_cx(|_, _: &Activate, cx| {
-                        cx.dispatch_program(ShellMessage::SettingsThemeChanged("light".into()));
-                    }),
-                    button("暗色").key("settings-theme-dark").on_cx(|_, _: &Activate, cx| {
-                        cx.dispatch_program(ShellMessage::SettingsThemeChanged("dark".into()));
-                    }),
-                    button("跟随系统").key("settings-theme-system").on_cx(|_, _: &Activate, cx| {
-                        cx.dispatch_program(ShellMessage::SettingsThemeChanged("system".into()));
-                    }),
-                ))
-                .into_any(),
-            widget(Stack::bar(8.0))
-                .children((
-                    text(format!("圆角：{} · {}px", corner_label(&model.admin.corner_style), model.admin.corner_radius)).key("admin-corner"),
-                    widget(Stack::spacer()),
-                    labeled_icon(BORDER_CORNER_ROUNDED, "平滑", "admin-corner-smooth", || {
-                        ShellMessage::Admin(AdminMessage::SetCornerStyle("smooth".into()))
-                    }),
-                    labeled_icon(BORDER_RADIUS, "普通", "admin-corner-round", || {
-                        ShellMessage::Admin(AdminMessage::SetCornerStyle("round".into()))
-                    }),
-                ))
-                .into_any(),
-            widget(
-                RangeField::new(
-                    model.admin.corner_radius,
-                    support::CORNER_RADIUS_MIN,
-                    support::CORNER_RADIUS_MAX,
-                    1.0,
-                )
-                .label("圆角半径"),
-            )
-            .key("admin-corner-radius")
-            .on_cx(|_, event: &RangeChanged, cx| {
-                cx.dispatch_program(ShellMessage::Admin(AdminMessage::SetCornerRadius(event.value.to_string())));
-            })
-            .into_any(),
-        ],
     )
-}
-
-fn theme_label(theme: &str) -> &str {
-    match theme {
-        "light" => "浅色",
-        "dark" => "暗色",
-        "system" => "跟随系统",
-        other => other,
-    }
-}
-
-fn copy_button(icon: Icon, label: &'static str, field: &'static str, value: String, key: &'static str) -> AnyView {
-    widget(Stack::row(6.0)).children((
-        widget(IconGlyph::new(icon).size(14.0)),
-        button(label).key(key).on_cx(move |_, _: &Activate, cx| {
-            cx.dispatch_program(ShellMessage::Admin(AdminMessage::CopyExternal {
-                label: field.into(),
-                value: value.clone(),
-            }));
-        }),
-    )).into_any()
-}
-
-fn labeled_icon(
-    icon: Icon,
-    label: &'static str,
-    key: &'static str,
-    message: impl Fn() -> ShellMessage + Send + 'static,
-) -> AnyView {
-    widget(Stack::row(6.0)).children((
-        widget(IconGlyph::new(icon).size(14.0)),
-        button(label).key(key).on_cx(move |_, _: &Activate, cx| {
-            cx.dispatch_program(message());
-        }),
-    )).into_any()
-}
-
-/// 设置滚动内容末尾的空行。高度固定 20px，和 Vue 主区纵向留白一致。
-fn settings_scroll_pad() -> AnyView {
-    widget(Stack::column(0.0).with_layout(|layout| {
-        layout.height = Some(LengthSpec::Px(20.0));
-        layout.min_height = Some(LengthSpec::Px(20.0));
-        layout.flex_grow = Some(0.0);
-        layout.flex_shrink = Some(0.0);
-    }))
-    .key("admin-settings-end-pad")
-    .into_any()
-}
-
-/// 外部连接字段。没有快照或空白时写「未加载」，不编造启动时间。
-fn external_text(value: Option<&str>) -> String {
-    match value.map(str::trim).filter(|text| !text.is_empty()) {
-        Some(text) => text.to_string(),
-        None => "未加载".into(),
-    }
-}
-
-fn external_json(model: &ShellViewModel) -> String {
-    let Some(connection) = &model.admin.external else {
-        return String::new();
-    };
-    support::connection_json(&connection.base_url, &connection.token, &connection.version, &connection.started_at)
-}
-
-fn corner_label(style: &str) -> &'static str {
-    if style == "round" { "普通" } else { "平滑" }
-}
-
-fn action_rows(model: &ShellViewModel) -> Vec<AnyView> {
-    let mut body = Vec::new();
-    if model.admin.actions_loading {
-        body.push(widget(super::super::workbench::meta("正在加载动作")).key("admin-actions-loading").into_any());
-    } else if model.admin.actions.is_empty() {
-        body.push(
-            widget(EmptyState::new("当前仓库没有导入动作。").message("安装带动作的插件后，可以对选中文件执行。").compact(true))
-                .key("admin-actions-empty")
-                .into_any(),
-        );
-    } else {
-        let selected = model.files.selected_paths().len();
-        let active = model.admin.active_action_id.as_deref();
-        let current = model.admin.actions.iter().find(|action| Some(action.action_id.as_str()) == active).or(model.admin.actions.first());
-        let mut actions = Vec::new();
-        for action in &model.admin.actions {
-            let action_id = action.action_id.clone();
-            let picked = Some(action.action_id.as_str()) == active;
-            actions.push(
-                widget(ListItem::new(action.name.clone()).detail(format!("{} · {}", action.source, action_status_label(&action.status, action.enabled))).selected(picked))
-                    .key(format!("admin-action-{}", action.action_id))
-                    .on_cx(move |_, _: &Activate, cx| {
-                        cx.dispatch_program(ShellMessage::Admin(AdminMessage::SelectAction(action_id.clone())));
-                    })
-                    .into_any(),
-            );
-        }
-        body.push(widget(List::new()).children(actions).key("admin-action-list").into_any());
-        if let Some(action) = current {
-            let can_run = action_can_run(&action.status, action.enabled, selected, model.admin.actions_running);
-            let action_id = action.action_id.clone();
-            let last = action.last_run.as_ref().map(|run| run.status.as_str()).unwrap_or("无");
-            body.push(
-                widget(LabeledValue::new(action_status_label(&action.status, action.enabled), format!("最近运行 {last}")))
-                    .key("admin-action-detail")
-                    .into_any(),
-            );
-            body.push(icon_button(PLAYER_PLAY, "执行", "admin-action-run", !can_run, move || {
-                ShellMessage::Admin(AdminMessage::RunAction(Some(action_id.clone())))
-            }));
-        }
-    }
-    if !model.admin.actions_error.is_empty() {
-        body.push(text(model.admin.actions_error.clone()).key("admin-actions-error").into_any());
-    }
-    let mut rows = vec![workbench::header(
-        "动作",
-        "admin-actions-eyebrow",
-        "仓库动作",
-        "admin-actions-title",
-        "",
-        "admin-actions-subline",
-        vec![workbench::badge(format!("{} 项", model.admin.actions.len()), "admin-actions-count")],
-    )];
-    rows.extend(body);
-    vec![workbench::panel(rows)]
-}
-
-/// 拓展页卡片：标题在左，插件数和安装在右，空列表放进虚线框。
-pub(crate) fn extensions_card(model: &ShellViewModel) -> AnyView {
-    let groups = model.admin.grouped_plugins();
-    let count: usize = groups.iter().map(|(_, ids)| ids.len()).sum();
-    let mut body = vec![
-        workbench::header(
-            "拓展能力",
-            "section-eyebrow",
-            "文件系统与插件",
-            "section-title",
-            "这里集中展示当前插件和后端能力。",
-            "admin-tools-subline",
-            vec![
-                workbench::badge(format!("{count} 个插件"), "admin-plugin-count"),
-                icon_button(REFRESH, "刷新", "admin-plugin-refresh", model.admin.loading_settings || model.admin.managing, || {
-                    ShellMessage::Admin(AdminMessage::RefreshPlugins)
-                }),
-                icon_button(UPLOAD, "从 .momoplug 安装", "admin-plugin-install", model.admin.managing, || {
-                    ShellMessage::Admin(AdminMessage::ChooseArchive)
-                }),
-            ],
-        ),
-        widget(TextInput::new(model.admin.keyword.clone()).label("筛选插件").placeholder("筛选导入器、脚本或元数据拓展")).on_cx(|_, event: &TextChanged, cx| {
-            cx.dispatch_program(ShellMessage::Admin(AdminMessage::SetKeyword(event.value.to_string())));
-        }).into_any(),
-    ];
-    if !model.admin.action_error.is_empty() {
-        body.push(text(model.admin.action_error.clone()).key("admin-plugin-error").into_any());
-    } else if !model.admin.action_message.is_empty() {
-        body.push(text(model.admin.action_message.clone()).key("admin-plugin-message").into_any());
-    }
-    if !model.admin.tool_pages.is_empty() {
-        body.insert(0, super::gap::tool_workbench(model));
-    }
-    if model.admin.loading_settings && count == 0 {
-        body.push(text("正在加载插件信息").key("admin-plugin-loading").into_any());
-    } else if count == 0 {
-        if model.admin.tool_pages.is_empty() {
-            body.push(workbench::dashed_empty(
-                "没有匹配的插件",
-                "试试其他关键词，或从 .momoplug 安装新的插件。",
-                "admin-plugin-empty-title",
-                "admin-plugin-empty-detail",
-                false,
-                true,
-            ));
-        } else {
-            body.push(
-                widget(EmptyState::new("没有匹配的插件").message("试试其他关键词，或从 .momoplug 安装新的插件。").compact(true))
-                    .key("admin-plugin-empty")
-                    .into_any(),
-            );
-        }
-    } else {
-        body.extend(plugin_entries(model, true));
-    }
-    workbench::panel(body)
-}
-
-/// 日志页卡片：标题在左，计数在右，空状态放在虚线框里。
-pub(crate) fn logs_card(model: &ShellViewModel) -> AnyView {
-    let filtered = model.admin.filtered_logs();
-    let paused = model.admin.log_paused;
-    let search = model.admin.log_search.clone();
-    let levels = ["debug", "info", "warn", "error"].into_iter().map(|value| {
-        let selected = model.admin.log_levels.iter().any(|level| level == value);
-        filter_chip(support::level_label(value), format!("admin-log-level-{value}"), selected, move || {
-            ShellMessage::Admin(AdminMessage::ToggleLogLevel(value.into()))
-        })
-    }).collect::<Vec<_>>();
-    let kinds = ["host", "frontend-host", "frontend-plugin", "backend-plugin", "helper"].into_iter().map(|value| {
-        let selected = model.admin.log_kinds.iter().any(|kind| kind == value);
-        filter_chip(support::source_kind_label(value).to_string(), format!("admin-log-kind-{value}"), selected, move || {
-            ShellMessage::Admin(AdminMessage::ToggleLogKind(value.into()))
-        })
-    }).collect::<Vec<_>>();
-    let mut plugins = vec![filter_chip("全部插件".into(), "admin-log-plugin-all".into(), model.admin.log_plugin_id.is_empty(), || {
-        ShellMessage::Admin(AdminMessage::SetLogPlugin(String::new()))
-    })];
-    for plugin_id in support::unique_sorted(model.admin.logs.iter().filter_map(|record| record.source.plugin_id.clone())) {
-        let selected = model.admin.log_plugin_id == plugin_id;
-        let value = plugin_id.clone();
-        plugins.push(filter_chip(plugin_id.clone(), format!("admin-log-plugin-{plugin_id}"), selected, move || {
-            ShellMessage::Admin(AdminMessage::SetLogPlugin(value.clone()))
-        }));
-    }
-    let mut repos = vec![filter_chip("全部仓库".into(), "admin-log-repo-all".into(), model.admin.log_repo_id.is_empty(), || {
-        ShellMessage::Admin(AdminMessage::SetLogRepo(String::new()))
-    })];
-    for repo_id in support::unique_sorted(model.admin.logs.iter().filter_map(|record| record.source.repo_id.clone())) {
-        let selected = model.admin.log_repo_id == repo_id;
-        let value = repo_id.clone();
-        repos.push(filter_chip(repo_id.clone(), format!("admin-log-repo-{repo_id}"), selected, move || {
-            ShellMessage::Admin(AdminMessage::SetLogRepo(value.clone()))
-        }));
-    }
-    let mut body = vec![
-        workbench::header(
-            "LOGS",
-            "section-eyebrow",
-            "系统日志",
-            "section-title",
-            "统一查看宿主、插件与辅助进程的实时日志流。",
-            "admin-log-subline",
-            vec![
-                workbench::badge(format!("{} 条缓存", model.admin.logs.len()), "admin-log-cached"),
-                workbench::badge(format!("{} 条命中", filtered.len()), "admin-log-hits"),
-            ],
-        ),
-        widget(Stack::bar(8.0).wrap(true)).children((
-            widget(Stack::fill_row(0.0).grow(1.0).min_width(LengthSpec::Px(220.0))).children((
-                widget(TextInput::new(search).label("搜索日志").placeholder("搜索消息、动作、位置或上下文")).on_cx(|_, event: &TextChanged, cx| {
-                    cx.dispatch_program(ShellMessage::Admin(AdminMessage::SetLogSearch(event.value.to_string())));
-                }),
-            )),
-            text("插件").key("admin-log-plugin-label"),
-            widget(Stack::row(8.0).wrap(true)).children(plugins),
-            text("仓库").key("admin-log-repo-label"),
-            widget(Stack::row(8.0).wrap(true)).children(repos),
-            icon_button(if paused { PLAYER_PLAY } else { PLAYER_PAUSE }, if paused { "继续追踪" } else { "暂停追踪" }, "admin-log-pause", false, move || {
-                ShellMessage::Admin(AdminMessage::SetLogPaused(!paused))
-            }),
-        )).into_any(),
-        widget(Stack::row(8.0)).children((
-            icon_button(ERASER, "重置筛选", "admin-log-reset", support::active_filter_count(&model.admin.log_levels, &model.admin.log_kinds, &model.admin.log_plugin_id, &model.admin.log_repo_id, &model.admin.log_search) == 0, || ShellMessage::Admin(AdminMessage::ResetLogFilters)),
-            widget(Button::new("清空日志").icon(TRASH).kind(ButtonKind::Danger).disabled(model.admin.logs.is_empty())).key("clear-logs").on_cx(|_, _: &Activate, cx| {
-                cx.dispatch_program(ShellMessage::ClearLogs);
-            }),
-        )).into_any(),
-        widget(Stack::row(8.0).wrap(true)).children((text("级别").key("admin-log-level-label"), widget(Stack::row(8.0).wrap(true)).children(levels))).into_any(),
-        widget(Stack::row(8.0).wrap(true)).children((text("来源").key("admin-log-kind-label"), widget(Stack::row(8.0).wrap(true)).children(kinds).key("admin-log-kinds"))).into_any(),
-    ];
-    if filtered.is_empty() {
-        let (title, detail) = if model.admin.logs.is_empty() {
-            ("还没有系统日志", "宿主、插件和辅助进程产生的关键操作会在这里持续汇总。")
-        } else {
-            ("当前筛选没有命中", "保留最近日志缓存，调整级别、来源或关键字后可以继续查看。")
-        };
-        body.push(workbench::dashed_empty(title, detail, "admin-log-empty-title", "admin-log-empty-detail", false, true));
-    } else {
-        let records = filtered.iter().map(|record| {
-            widget(Stack::row(8.0).align(AlignSpec::Center))
-                .key(format!("admin-log-row-{}", record.id))
-                .children((
-                    widget(StatusBadge::new(support::level_label(&record.level), log_tone(&record.level)).compact(true)),
-                    widget(ListItem::new(record.message.clone()).detail(format!("{} · {}", record.timestamp, record.action))),
-                ))
-                .into_any()
-        }).collect::<Vec<_>>();
-        body.push(widget(List::new()).children(records).key("admin-log-list").into_any());
-    }
-    workbench::panel(body)
-}
-
-fn filter_chip(
-    label: String,
-    key: String,
-    selected: bool,
-    message: impl Fn() -> ShellMessage + Send + 'static,
-) -> AnyView {
-    widget(Chip::new(label).selected(selected)).key(key).on_cx(move |_, _: &Activate, cx| {
-        cx.dispatch_program(message());
-    }).into_any()
-}
-
-fn icon_button(
-    icon: Icon,
-    label: &'static str,
-    key: &'static str,
-    disabled: bool,
-    message: impl Fn() -> ShellMessage + Send + 'static,
-) -> AnyView {
-    widget(Button::new(label).icon(icon).disabled(disabled)).key(key).on_cx(move |_, _: &Activate, cx| {
-        cx.dispatch_program(message());
-    }).into_any()
-}
-
-fn plugin_rows(model: &ShellViewModel) -> Vec<AnyView> {
-    let groups = model.admin.grouped_plugins();
-    let count: usize = groups.iter().map(|(_, ids)| ids.len()).sum();
-    let mut rows = vec![text(format!("{count} 个插件")).key("admin-plugin-count").into_any()];
-    if !model.admin.action_error.is_empty() {
-        rows.push(text(model.admin.action_error.clone()).key("admin-plugin-error").into_any());
-    } else if !model.admin.action_message.is_empty() {
-        rows.push(text(model.admin.action_message.clone()).key("admin-plugin-message").into_any());
-    }
-    let keyword = model.admin.keyword.clone();
-    rows.push(widget(TextInput::new(keyword).label("筛选插件").placeholder("筛选导入器、脚本或元数据拓展")).on_cx(|_, event: &TextChanged, cx| {
-        cx.dispatch_program(ShellMessage::Admin(AdminMessage::SetKeyword(event.value.to_string())));
-    }).into_any());
-    rows.push(
-        widget(Stack::row(8.0))
-            .children((button("从 .momoplug 安装").key("admin-plugin-install").on_cx(|_, _: &Activate, cx| {
-                cx.dispatch_program(ShellMessage::Admin(AdminMessage::ChooseArchive));
-            }),))
+    .children((widget(style::rounded(Stack::row(0.0), None).surface(Role::Accent).with_layout(move |layout| {
+        layout.width = Some(LengthSpec::Percent(fill * 100.0));
+        layout.min_width = Some(LengthSpec::Px(18.0));
+        layout.height = Some(LengthSpec::Fill);
+    })),))
+    .into_any();
+    let mut meta = vec![widget(style::label_lh(task.label.clone(), 12.0, 600, Role::Text, 1.3)).key(format!("admin-task-label-{id}")).into_any()];
+    meta.push(
+        widget(Stack::row(0.0).width(LengthSpec::Shrink).grow(1.0).shrink(1.0).min_width(LengthSpec::Px(0.0)))
+            .children((widget(style::label_lh(task.detail.clone(), 12.0, 400, Role::Faint, 1.3)).key(format!("admin-task-detail-{id}")),))
             .into_any(),
     );
-    rows.extend(plugin_entries(model, false));
-    rows
+    if !task.indeterminate {
+        meta.push(widget(style::label_lh(format!("{percent}%"), 12.0, 400, Role::Muted, 1.3)).key(format!("admin-task-percent-{id}")).into_any());
+    }
+    widget(column(7.0))
+        .children((track, widget(row(8.0).width(LengthSpec::Fill)).children(meta).into_any()))
+        .into_any()
 }
 
-/// 插件行。设置页的登录按钮在顶部卡片里，这里不再放第二套。
-fn plugin_entries(model: &ShellViewModel, include_source_auth: bool) -> Vec<AnyView> {
-    let login_ids = if include_source_auth { Vec::new() } else { super::tool_native::source_login_plugin_ids(&model.admin.plugins) };
-    let mut rows = Vec::new();
-    for (category, ids) in model.admin.grouped_plugins() {
-        rows.push(
-            widget(super::super::workbench::eyebrow(format!("{} {}", support::category_label(&category), ids.len())))
-                .key(format!("admin-plugin-group-{category}"))
-                .into_any(),
-        );
-        for plugin_id in ids {
-            let Some(plugin) = model.admin.plugins.iter().find(|plugin| plugin.plugin_id == plugin_id) else {
-                continue;
+/// 仓库动作面板，照 `RepositoryActionsPanel.vue`。
+fn actions_panel(model: &ShellViewModel) -> AnyView {
+    let admin = &model.admin;
+    let header = widget(style::spread(12.0, AlignSpec::Center))
+        .children((
+            widget(column(0.0)).children((
+                widget(style::eyebrow_text("动作")).key("admin-actions-eyebrow"),
+                widget(style::label_lh("仓库动作", 18.0, 700, Role::Text, 1.25)).key("admin-actions-title"),
+            )),
+            style::hint_chip(format!("{} 项", admin.actions.len()), "admin-actions-count"),
+        ))
+        .into_any();
+    let mut body = vec![header];
+    if admin.actions_loading {
+        body.push(style::state_notice("正在加载动作".into(), false, "admin-actions-loading"));
+    } else if admin.actions.is_empty() {
+        body.push(style::state_notice("当前仓库没有导入动作。".into(), false, "admin-actions-empty"));
+    } else {
+        body.push(action_body(model));
+    }
+    if !admin.actions_error.is_empty() {
+        body.push(style::state_notice(admin.actions_error.clone(), true, "admin-actions-error"));
+    }
+    widget(pad(column(12.0), 18.0, 18.0, 18.0, 18.0)).children(body).key("admin-actions").into_any()
+}
+
+/// 左边动作列表（220–300 宽），右边选中动作的详情和步骤。
+fn action_body(model: &ShellViewModel) -> AnyView {
+    let admin = &model.admin;
+    let active = admin.actions.iter().find(|action| Some(action.action_id.as_str()) == admin.active_action_id.as_deref()).or(admin.actions.first());
+    let items = admin
+        .actions
+        .iter()
+        .map(|item| {
+            let id = item.action_id.clone();
+            let selected = active.is_some_and(|current| current.action_id == item.action_id);
+            let mut node = nana_ui::runtime::NodeStyle {
+                background: selected.then_some(Role::Hover),
+                interaction: nana_ui::runtime::InteractionStyle {
+                    hovered: nana_ui::runtime::SemanticPaint { background: Some(Role::Hover), ..Default::default() },
+                    ..Default::default()
+                },
+                ..Default::default()
             };
-            let status = support::plugin_status_label(plugin);
-            rows.push(
-                widget(Stack::bar(8.0).align(AlignSpec::Center).wrap(true))
-                    .children((
-                        widget(super::super::workbench::section_title(plugin.name.clone())).key(format!("admin-plugin-{plugin_id}")),
-                        widget(StatusBadge::new(status, plugin_tone(status)).compact(true)),
-                        widget(super::super::workbench::meta(format!(
-                            "{} · {}",
-                            support::plugin_source_label(&plugin.source),
-                            support::dependency_label(plugin)
-                        ))),
-                    ))
-                    .into_any(),
-            );
-            for (index, state) in plugin.dependency_status.required.iter().chain(plugin.dependency_status.optional.iter()).enumerate() {
-                let name = state.name.clone().unwrap_or_else(|| state.plugin_id.clone());
-                rows.push(
-                    widget(super::super::workbench::meta(format!("{name} · {}", support::dependency_status_label(&state.status))))
-                        .key(format!("admin-plugin-dep-{plugin_id}-{index}"))
-                        .into_any(),
-                );
+            {
+                let layout = std::sync::Arc::make_mut(&mut node.layout);
+                layout.width = Some(LengthSpec::Fill);
+                layout.min_height = Some(LengthSpec::Px(54.0));
+                layout.padding_top = Some(LengthSpec::Px(10.0));
+                layout.padding_bottom = Some(LengthSpec::Px(10.0));
+                layout.padding_left = Some(LengthSpec::Px(12.0));
+                layout.padding_right = Some(LengthSpec::Px(12.0));
+                layout.direction = Some(nana_ui_core::FlexDirection::Row);
+                layout.align_items = AlignSpec::Center;
+                layout.justify_content = JustifySpec::SpaceBetween;
+                layout.gap = Some(LengthSpec::Px(10.0));
             }
-            let summary = support::source_account_summary(plugin);
-            let on_login_card = login_ids.iter().any(|id| id == &plugin_id);
-            for (index, line) in support::settings_upgrade_lines(plugin, model.admin.vue_settings.contains(&plugin_id)).into_iter().enumerate() {
-                if on_login_card && summary.as_ref() == Some(&line) {
-                    continue;
-                }
-                let key = if summary.as_ref() == Some(&line) {
-                    format!("admin-source-summary-{plugin_id}")
-                } else {
-                    format!("admin-plugin-upgrade-{plugin_id}-{index}")
-                };
-                rows.push(text(line).key(key).into_any());
+            let mut children = vec![widget(Stack::column(3.0).width(LengthSpec::Shrink).grow(1.0).shrink(1.0).min_width(LengthSpec::Px(0.0)))
+                .children((
+                    widget(label(item.name.clone(), 13.0, 600, Role::Text)),
+                    widget(wrapping(label(
+                        format!("{} · {} 步 · {}", item.source, item.steps.len(), action_status_label(&item.status, item.enabled)),
+                        12.0,
+                        400,
+                        Role::Muted,
+                    ))),
+                ))
+                .into_any()];
+            if item.status != "ready" {
+                children.push(widget(style::glyph(icons::SHIELD_ALERT, 14.0, Role::Text)).into_any());
             }
-            if include_source_auth {
-                if let Some(row) = super::tool_native::source_auth_row(plugin) {
-                    rows.push(row);
-                }
-            }
-            let toggle_id = plugin_id.clone();
-            let enabled = plugin.enabled;
-            let mut actions = vec![
-                widget(super::super::workbench::ghost_button(if enabled { "停用插件" } else { "启用插件" }))
-                    .key(format!("admin-plugin-toggle-{plugin_id}"))
-                    .on_cx(move |_, _: &Activate, cx| {
-                        cx.dispatch_program(ShellMessage::Admin(AdminMessage::SetEnabled { plugin_id: toggle_id.clone(), enabled: !enabled }));
-                    })
-                    .into_any(),
-            ];
-            let settings_id = plugin_id.clone();
-            actions.push(
-                widget(super::super::workbench::ghost_button("插件设置"))
-                    .key(format!("admin-plugin-settings-{plugin_id}"))
-                    .on_cx(move |_, _: &Activate, cx| {
-                        cx.dispatch_program(ShellMessage::Admin(AdminMessage::ToggleSettings(settings_id.clone())));
-                    })
-                    .into_any(),
-            );
-            if support::can_delete_plugin(plugin) {
-                let delete_id = plugin_id.clone();
-                actions.push(
-                    widget(super::super::workbench::danger_button("删除插件"))
-                        .key(format!("admin-plugin-delete-{plugin_id}"))
-                        .on_cx(move |_, _: &Activate, cx| {
-                            cx.dispatch_program(ShellMessage::Admin(AdminMessage::RequestDelete(delete_id.clone())));
-                        })
-                        .into_any(),
-                );
-            }
-            rows.push(widget(Stack::row(8.0).wrap(true)).children(actions).into_any());
-            rows.extend(super::super::admin_fields::field_rows(model, &plugin_id));
-        }
-    }
-    if let Some(plugin_id) = model.admin.pending_delete.clone() {
-        rows.push(
-            widget(super::super::workbench::danger_dialog("删除插件", format!("删除 {plugin_id} 后需要重新安装才能恢复。")))
-                .body(text(format!("确认删除 {plugin_id}")).key("admin-plugin-pending-delete"))
-                .cancel(widget(super::super::workbench::ghost_button("取消删除")).key("admin-plugin-cancel-delete").on_cx(|_, _: &Activate, cx| {
-                    cx.dispatch_program(ShellMessage::Admin(AdminMessage::CancelDelete));
-                }))
-                .confirm(widget(super::super::workbench::danger_button("确认删除")).key("admin-plugin-confirm-delete").on_cx(|_, _: &Activate, cx| {
-                    cx.dispatch_program(ShellMessage::Admin(AdminMessage::ConfirmDelete));
-                }))
-                .into_any(),
-        );
-    }
-    rows
+            widget(style::bottom_rule(Stack::row(10.0).style(node)).hittable())
+                .children(children)
+                .key(format!("admin-action-{}", item.action_id))
+                .on_cx(move |_, _: &Activate, cx| cx.dispatch_program(ShellMessage::Admin(AdminMessage::SelectAction(id.clone()))))
+                .into_any()
+        })
+        .collect::<Vec<_>>();
+    let list = widget(column(0.0).surface(Role::Surface).outline(Role::BorderSoft, 1.0).radius(RadiusTier::Md)).children(items).key("admin-action-list").into_any();
+    let detail = active.map(|current| action_detail(model, current)).unwrap_or_else(|| widget(column(0.0)).into_any());
+    let grid = Stack::from_layout(nana_ui_core::LayoutStyle::default()).with_layout(|layout| {
+        layout.display = Some(nana_ui_core::DisplaySpec::Grid);
+        layout.grid_columns = Some(vec![
+            nana_ui_core::GridTrack::MinMax { min_px: 220.0, fr: 1.0, max_px: Some(300.0) },
+            nana_ui_core::GridTrack::MinMax { min_px: 0.0, fr: 1.0, max_px: None },
+        ]);
+        layout.gap = Some(LengthSpec::Px(12.0));
+        layout.width = Some(LengthSpec::Fill);
+        layout.align_items = AlignSpec::Start;
+    });
+    widget(grid).children((list, detail)).into_any()
 }
 
-fn plugin_tone(status: &str) -> StatusTone {
-    match status {
-        "错误" | "不可用" => StatusTone::Danger,
-        "降级运行" => StatusTone::Warning,
-        "未启用" => StatusTone::Neutral,
-        _ => StatusTone::Success,
+fn action_detail(model: &ShellViewModel, current: &crate::backend::services::repository::RepositoryAction) -> AnyView {
+    let admin = &model.admin;
+    let selected = model.files.selected_paths().len();
+    let can_run = action_can_run(&current.status, current.enabled, selected, admin.actions_running);
+    let action_id = current.action_id.clone();
+    let last = current.last_run.as_ref().map(|run| run.status.clone()).unwrap_or_else(|| "无".into());
+    let run_icon = if admin.actions_running { icons::LOADER_CIRCLE } else { icons::PLAY };
+    let mut body = vec![widget(style::spread(12.0, AlignSpec::Center))
+        .children((
+            widget(column(4.0)).children((
+                widget(style::label_lh(current.name.clone(), 18.0, 700, Role::Text, 1.25)),
+                widget(label(format!("{} · 最近运行 {last}", action_status_label(&current.status, current.enabled)), 12.0, 400, Role::Muted)).key("admin-action-detail"),
+            )),
+            widget(action("执行", Some(run_icon), Tone::Primary, !can_run)).key("admin-action-run").on_cx(move |_, _: &Activate, cx| {
+                cx.dispatch_program(ShellMessage::Admin(AdminMessage::RunAction(Some(action_id.clone()))));
+            }),
+        ))
+        .into_any()];
+    if let Some(reason) = current.unsupported_reason.clone() {
+        body.push(style::state_notice(reason, true, "admin-action-unsupported"));
     }
+    let steps = current
+        .steps
+        .iter()
+        .map(|step| {
+            let mut children = vec![widget(column(3.0).shrink(1.0)).children((
+                widget(label(step.label.clone(), 13.0, 600, Role::Text)),
+                widget(label(format!("{} · {}", step.step_kind, step.status), 12.0, 400, Role::Muted)),
+            ))
+            .into_any()];
+            if let Some(reason) = step.unsupported_reason.clone() {
+                children.push(widget(style::align_end(label(reason, 12.0, 400, Role::Danger))).into_any());
+            }
+            widget(pad(style::spread(10.0, AlignSpec::Start), 11.0, 11.0, 11.0, 11.0).surface(Role::Subtle).outline(Role::BorderSoft, 1.0).radius(RadiusTier::Sm))
+                .children(children)
+                .into_any()
+        })
+        .collect::<Vec<_>>();
+    body.push(widget(pad(column(8.0), 12.0, 0.0, 0.0, 0.0)).children(steps).into_any());
+    widget(pad(column(0.0), 15.0, 15.0, 15.0, 15.0).surface(Role::Surface).outline(Role::BorderSoft, 1.0).radius(RadiusTier::Md))
+        .children(body)
+        .key("admin-action-detail-card")
+        .into_any()
 }
-
-fn log_tone(level: &str) -> StatusTone {
-    match level {
-        "error" => StatusTone::Danger,
-        "warn" => StatusTone::Warning,
-        "info" => StatusTone::Info,
-        _ => StatusTone::Neutral,
-    }
-}
-
-

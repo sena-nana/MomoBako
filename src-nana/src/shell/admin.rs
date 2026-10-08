@@ -1,8 +1,10 @@
 //! 设置、插件、日志、任务和仓库动作的状态。
 //!
-//! 插件、日志和设置消息在这里归约。验收页和产品窗口共用同一套表面。
+//! 结构对应 Vue 的 `Settings.vue`、`PluginManagerPanel.vue`、`SourceAuthenticationSettings.vue`、
+//! `WorkspaceLogsPanel.vue`、`TaskPopover.vue`、`ExtensionsPanel.vue` 和 `RepositoryActionsPanel.vue`。
+//! 消息在 `admin_reduce` 里归约，副作用由 `admin_dispatch` 交给领域服务。
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 use crate::backend::services::repository::{
     ApiDesignSnapshot, CacheSnapshot, PluginConfigSnapshot, PluginHookExecutionRecord, PluginManifest, RepositoryAction,
@@ -11,53 +13,48 @@ use crate::backend::services::repository::{
 use crate::backend::services::runtime::ExternalApiConnectionStatus;
 
 use super::player::PlayerMessage;
-use super::{ShellMessage, ShellPage, ShellViewModel, WorkspacePanel};
+use super::{ShellMessage, ShellViewModel, WorkspacePanel};
 
 #[path = "admin_support.rs"]
-pub(super) mod support;
+pub(crate) mod support;
+#[path = "admin_time.rs"]
+mod time;
+#[path = "admin_style.rs"]
+pub(crate) mod style;
+#[path = "admin_icons.rs"]
+pub(crate) mod icons;
 #[path = "admin_reduce.rs"]
 mod reduce;
-#[path = "tool_native.rs"]
-mod tool_native;
 #[path = "admin_view.rs"]
 mod view;
+#[path = "admin_settings_view.rs"]
+mod settings_view;
+#[path = "admin_plugins_view.rs"]
+mod plugins_view;
+#[path = "admin_logs_view.rs"]
+mod logs_view;
 #[path = "admin_gap.rs"]
-mod gap;
-#[path = "office_settings.rs"]
-mod office;
+mod tools;
+#[path = "tool_native.rs"]
+mod tool_native;
+#[path = "api_playground.rs"]
+pub(crate) mod api;
 #[path = "source_auth_page.rs"]
 mod source_page;
 #[path = "source_provision.rs"]
-mod source_provision;
+pub(crate) mod source_provision;
 
-pub(crate) use gap::opened_plugin_pages;
+pub(crate) use plugins_view::delete_dialog as plugin_delete_dialog;
 pub(crate) use reduce::reduce_message;
+pub(crate) use settings_view::settings_page;
+pub(crate) use source_provision::{SourceAuthState, SourceStep};
 pub(crate) use view::{admin_surface, task_popover};
 
 #[cfg(test)]
 #[path = "admin_tests.rs"]
 mod tests;
 
-/// 来源认证上的一次调用。方法名从认证声明里读，按钮不写死方法。
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum SourceAuthCall {
-    CreateSession,
-    Status,
-    Clear,
-    /// 轮询扫码结果。方法名仍从 `pollSessionMethod` 读取。
-    Poll,
-}
-
-/// Office 转换设置页上的一次调用。没有快照时不编造运行状态。
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum OfficeAction {
-    Status,
-    SelfCheck,
-    ClearCache,
-    StopDaemon,
-}
-
-/// 插件配置、安装、日志筛选、任务弹层和仓库动作消息。
+/// 插件配置、安装、日志筛选、任务弹层、来源登录和仓库动作消息。
 #[derive(Clone, Debug)]
 pub enum AdminMessage {
     SetKeyword(String),
@@ -67,7 +64,10 @@ pub enum AdminMessage {
     ConfirmDelete,
     ToggleSettings(String),
     RoutePlugin(String),
+    /// 选项、勾选或回车提交的字段值。
     ConfigInput { plugin_id: String, key: String, text: String, checked: Option<bool> },
+    /// 单行字段的草稿，回车才提交。
+    FieldDraft { plugin_id: String, key: String, value: String },
     JsonDraft { plugin_id: String, key: String, value: String },
     SaveJson { plugin_id: String, key: String },
     ResetConfig { plugin_id: String, key: String },
@@ -80,11 +80,13 @@ pub enum AdminMessage {
     HooksLoaded(Result<Vec<PluginHookExecutionRecord>, String>),
     CacheLoaded(Result<CacheSnapshot, String>),
     ApiDesignLoaded(Result<ApiDesignSnapshot, String>),
+    /// 设置页一次读完的五份数据。任何一份失败，整批都不写入，和 Vue 的 `Promise.all` 一致。
     SettingsBundleLoaded {
         plugins: Result<Vec<PluginManifest>, String>,
         hooks: Result<Vec<PluginHookExecutionRecord>, String>,
         cache: Result<CacheSnapshot, String>,
         api: Result<ApiDesignSnapshot, String>,
+        external: Result<ExternalApiConnectionStatus, String>,
     },
     SetCornerStyle(String),
     SetCornerRadius(String),
@@ -94,7 +96,6 @@ pub enum AdminMessage {
     WriteFinished(Result<(), String>),
     SelectRepository(String),
     SetAudioPlayer(Option<String>),
-    MarkVueSettings(String),
     ToggleLogLevel(String),
     ToggleLogKind(String),
     SetLogPlugin(String),
@@ -102,6 +103,8 @@ pub enum AdminMessage {
     SetLogSearch(String),
     ResetLogFilters,
     SetLogPaused(bool),
+    /// 展开或收起一条日志的上下文。
+    ToggleLogContext(String),
     ToggleTaskPopover,
     CloseTaskPopover,
     TaskEscape,
@@ -114,10 +117,8 @@ pub enum AdminMessage {
     ActionRunFinished { result: Result<RepositoryAction, String> },
     SetToolPages(Vec<ToolPageEntry>),
     SelectToolPage(String),
-    /// 按认证声明调用登录方法。没有插件或方法名时不派发。
-    CallSourceAuth { plugin_id: String, slot: SourceAuthCall },
-    /// 插件调用结束。成功文案只附加字符串 message 和 status。
-    SourceAuthFinished { method: String, result: Result<serde_json::Value, String> },
+    /// API Playground 上的输入和请求。
+    Api(api::ApiMessage),
     /// 文件右键里能直接调用的插件动作。
     CallFilePlugin {
         plugin_id: String,
@@ -127,41 +128,34 @@ pub enum AdminMessage {
     },
     /// 文件插件动作结束。成功写到文件活动，失败写到文件错误。
     FilePluginFinished { method: String, result: Result<serde_json::Value, String> },
-    /// 刷新下载服务状态。没有快照时页面只说明缺的字段。
-    RefreshDownloader,
-    /// 下载服务状态返回。失败不编造任务数。
-    DownloaderStatusFinished { result: Result<serde_json::Value, String> },
-    /// 清掉本页的扫码会话，不调用插件的退出方法。
-    DismissSourceAuth,
-    /// 来源认证页上的缓存目录草稿。
-    SetSourceCachePath(String),
-    /// 排队选择来源缓存目录。取消时不改草稿。
+    /// 来源登录：连接新账号或重新登录。`repo_id` 为空是连接新账号。
+    BeginSourceAuth { plugin_id: String, repo_id: Option<String> },
+    /// 来源登录：查询仓库登录状态。
+    CheckSourceAuth { plugin_id: String, repo_id: String },
+    /// 来源登录：退出仓库账号，仓库和缓存保留。
+    ClearSourceAuth { plugin_id: String, repo_id: String },
+    /// 来源登录：取消扫码会话。
+    CancelSourceAuth,
+    /// 来源登录：检查扫码结果，成功后创建或更新仓库。
+    PollSourceAuth { plugin_id: String },
+    /// 来源登录：排队选择缓存目录。取消时不改。
     ChooseSourceCache,
-    /// 建仓名称草稿。
-    SetSourceRepoName(String),
-    /// 建仓路径草稿。
-    SetSourceRepoPath(String),
-    /// 登录结果里有插件、账号配置、名称和路径才创建仓库。
-    SubmitSourceRepository,
-    /// 来源建仓协议返回。成功文案来自宿主，失败是真实错误。
-    SourceRepositoryFinished { result: Result<String, String> },
-    /// Office 转换设置页的刷新、自检、清缓存或停守护进程。
-    RunOffice(OfficeAction),
-    /// Office 插件调用结束。状态快照只在刷新成功时替换。
-    OfficeFinished { method: String, result: Result<serde_json::Value, String> },
-    /// 选择要清理预览缓存的资源库。
-    SelectOfficeRepository(String),
+    /// 来源缓存目录对话框的结果。
+    SetSourceCachePath(String),
+    /// 来源登录流程里一步结束。
+    SourceStepFinished { step: SourceStep, result: Result<serde_json::Value, String> },
+    /// 设置写盘结果之外，主题改动后立即保存设置。
+    SaveSettingsNow,
 }
 
 /// 插件调用从哪来。登录结果和文件菜单结果不能混在一起。
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum PluginCallOrigin {
-    SourceAuth,
+    /// 来源登录流程里的一步。
+    SourceAuth(SourceStep),
     FileMenu,
-    /// 下载服务设置页读取 `downloader.getRuntimeStatus`。
-    Downloader,
-    /// Office 转换设置页。
-    Office,
+    /// API Playground 的插件调用。
+    Playground,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -173,6 +167,7 @@ pub struct OperationProgress {
     pub updated_at_ms: i64,
 }
 
+/// 拓展页左侧的一个工具页。Nana 只能画内置的三个；其它插件的工具页没有原生控件。
 #[derive(Clone, Debug, PartialEq)]
 pub struct ToolPageEntry {
     pub id: String,
@@ -196,19 +191,13 @@ pub enum AdminEffect {
     RunAction { repo_id: String, action_id: String, paths: Vec<String> },
     ReloadBrowser { repo_id: String },
     PersistCorners,
+    /// 主题改动后立即写设置文件。
+    SaveSettings,
     CopyText(String),
     RequestOpenDialog,
     RequestSaveDialog { content: String },
     WriteFile { path: String, bytes: Vec<u8> },
-    /// 用来源登录结果创建仓库。配置必须来自登录返回，不能现编。
-    CreateSourceRepository {
-        repo_id: String,
-        name: String,
-        path: String,
-        backend_plugin_id: String,
-        backend_config: serde_json::Value,
-    },
-    /// 调用插件方法。来源登录不带仓库；文件动作带上当前仓库。
+    /// 调用插件方法。来源登录可带仓库；文件动作带上当前仓库。
     CallPlugin {
         plugin_id: String,
         method: String,
@@ -216,6 +205,22 @@ pub enum AdminEffect {
         repository_id: Option<String>,
         origin: PluginCallOrigin,
     },
+    /// 来源登录成功后更新已有仓库的后端配置。
+    UpdateBackendConfig { repo_id: String, backend_config: serde_json::Value, step: SourceStep },
+    /// 需要本地缓存的来源仓库写入缓存目录，并迁移旧缓存。
+    ConfigureSourceCache { repo_id: String, path: String, step: SourceStep },
+    /// 跳过首次同步创建来源仓库。
+    CreateSourceRepository {
+        repo_id: String,
+        name: String,
+        path: String,
+        backend_plugin_id: String,
+        backend_config: serde_json::Value,
+    },
+    /// 后台同步来源仓库，完成后刷新仓库列表。
+    SyncRepository { repo_id: String },
+    /// API Playground 发出的外部 HTTP 请求。
+    HttpRequest(api::HttpRequest),
 }
 
 #[derive(Clone, Debug)]
@@ -226,33 +231,21 @@ pub struct AdminState {
     pub active_settings_plugin_id: Option<String>,
     pub config_snapshots: BTreeMap<String, PluginConfigSnapshot>,
     pub json_drafts: BTreeMap<String, BTreeMap<String, String>>,
+    /// 单行字段的未提交草稿。快照更新后清掉。
+    pub field_drafts: BTreeMap<String, BTreeMap<String, String>>,
     pub action_message: String,
     pub action_error: String,
-    pub source_auth: support::SourceAuthView,
-    /// 只有 `downloader.getRuntimeStatus` 成功后才有值。
-    pub downloader_status: Option<support::DownloaderStatus>,
-    pub downloader_error: String,
-    pub downloader_loading: bool,
-    /// 来源认证页的缓存目录。空字符串表示还没选。
-    pub source_cache_path: String,
-    pub source_repo_name: String,
-    pub source_repo_path: String,
-    /// 最近一次来源登录调用的插件。结果返回前先记在这里。
-    pub source_auth_plugin_id: String,
-    /// 来源建仓协议还没返回。避免重复提交。
-    pub source_creating: bool,
-    /// 只有 `officeConvert.getRuntimeStatus` 成功后才有值。
-    pub office_status: Option<serde_json::Value>,
-    pub office_error: String,
-    pub office_message: String,
-    pub office_pending: Option<OfficeAction>,
-    pub office_repo_id: String,
+    /// 设置页数据读取失败的原因，对应 Vue `useWorkspaceProgress().error`。
+    pub load_error: String,
     pub hook_executions: Vec<PluginHookExecutionRecord>,
-    pub vue_settings: BTreeSet<String>,
     pub managing: bool,
     pub loading_settings: bool,
     pending_notice: Option<String>,
     pending_failure: Option<String>,
+    /// 来源认证页的会话、缓存目录和提示。换插件或收起设置时重置。
+    pub source_auth: SourceAuthState,
+    /// 最近一次仓库列表的完整摘要。来源认证页要读登录状态和本地缓存路径。
+    pub repository_summaries: Vec<RepositorySummary>,
     pub logs: Vec<SystemLogRecord>,
     pub log_levels: Vec<String>,
     pub log_kinds: Vec<String>,
@@ -262,6 +255,8 @@ pub struct AdminState {
     pub log_paused: bool,
     pub log_would_scroll: bool,
     log_signature: String,
+    /// 展开了上下文的日志。
+    pub log_context_open: std::collections::BTreeSet<String>,
     pub popover_open: bool,
     pub operation: Option<OperationProgress>,
     pub actions: Vec<RepositoryAction>,
@@ -272,6 +267,7 @@ pub struct AdminState {
     actions_repo_id: Option<String>,
     pub tool_pages: Vec<ToolPageEntry>,
     pub active_tool_page_id: Option<String>,
+    pub api: api::ApiState,
     pub corner_style: String,
     pub corner_radius: f64,
     pub external: Option<ExternalApiConnectionStatus>,
@@ -292,28 +288,17 @@ impl Default for AdminState {
             active_settings_plugin_id: None,
             config_snapshots: BTreeMap::new(),
             json_drafts: BTreeMap::new(),
+            field_drafts: BTreeMap::new(),
             action_message: String::new(),
             action_error: String::new(),
-            source_auth: support::SourceAuthView::default(),
-            downloader_status: None,
-            downloader_error: String::new(),
-            downloader_loading: false,
-            source_cache_path: String::new(),
-            source_repo_name: String::new(),
-            source_repo_path: String::new(),
-            source_auth_plugin_id: String::new(),
-            source_creating: false,
-            office_status: None,
-            office_error: String::new(),
-            office_message: String::new(),
-            office_pending: None,
-            office_repo_id: String::new(),
+            load_error: String::new(),
             hook_executions: Vec::new(),
-            vue_settings: BTreeSet::new(),
             managing: false,
             loading_settings: false,
             pending_notice: None,
             pending_failure: None,
+            source_auth: SourceAuthState::default(),
+            repository_summaries: Vec::new(),
             logs: Vec::new(),
             log_levels: Vec::new(),
             log_kinds: Vec::new(),
@@ -323,6 +308,7 @@ impl Default for AdminState {
             log_paused: false,
             log_would_scroll: false,
             log_signature: String::new(),
+            log_context_open: std::collections::BTreeSet::new(),
             popover_open: false,
             operation: None,
             actions: Vec::new(),
@@ -333,6 +319,7 @@ impl Default for AdminState {
             actions_repo_id: None,
             tool_pages: Vec::new(),
             active_tool_page_id: None,
+            api: api::ApiState::default(),
             corner_style: support::default_corner_style().into(),
             corner_radius: support::DEFAULT_CORNER_RADIUS,
             external: None,
@@ -349,6 +336,11 @@ impl Default for AdminState {
 impl AdminState {
     pub fn take_effects(&mut self) -> Vec<AdminEffect> {
         std::mem::take(&mut self.effects)
+    }
+
+    /// 排一个副作用。只给本模块和来源认证流程用。
+    pub(crate) fn push_effect(&mut self, effect: AdminEffect) {
+        self.effects.push(effect);
     }
 
     /// 缺文件时用平台默认圆角，不立刻写回。
@@ -385,6 +377,7 @@ impl AdminState {
         self.pending_failure = None;
     }
 
+    /// 写失败文案。Vue 先用全局错误，空了才用这一步的兜底文案。
     fn apply_failure(&mut self, error: &str) {
         self.pending_notice = None;
         let fallback = self.pending_failure.take().unwrap_or_default();
@@ -393,6 +386,7 @@ impl AdminState {
 
     pub fn note_backends(&mut self, repositories: &[RepositorySummary]) {
         self.backends = support::backend_counts(repositories);
+        self.repository_summaries = repositories.to_vec();
     }
 
     pub fn queue_actions(&mut self, repo_id: Option<String>) {
@@ -414,8 +408,12 @@ impl AdminState {
         self.effects.push(AdminEffect::LoadSettingsBundle);
     }
 
+    /// 换上新的插件列表，并按清单里的工具页声明重排拓展页工具。
     fn store_plugins(&mut self, plugins: Vec<PluginManifest>) {
         self.plugins = plugins;
+        let pages = support::tool_pages_from_plugins(&self.plugins);
+        self.active_tool_page_id = support::apply_tool_page_selection(&pages, self.active_tool_page_id.as_deref());
+        self.tool_pages = pages;
     }
 
     fn sync_json_drafts(&mut self, plugin_id: &str) {
@@ -434,6 +432,7 @@ impl AdminState {
             drafts.insert(field.key, value.map(|item| support::json_draft_text(&item)).unwrap_or_default());
         }
         self.json_drafts.insert(plugin_id.to_string(), drafts);
+        self.field_drafts.remove(plugin_id);
     }
 
     fn note_log_scroll(&mut self) {
@@ -473,11 +472,7 @@ impl AdminState {
 }
 
 impl ShellViewModel {
-    /// 设置页不要求当前仓库。工作台面板仍要求启动完成且主区有仓库。
-    pub(super) fn admin_settings_visible(&self) -> bool {
-        matches!(self.page, ShellPage::Settings | ShellPage::SettingsError)
-    }
-
+    /// 工作台面板要求启动完成且主区有仓库。
     pub(super) fn admin_workspace_visible(&self, panel: WorkspacePanel) -> bool {
         self.workspace.startup.status == super::StartupStatus::Ready
             && self.workspace.main_region() == super::MainRegion::HasRepository

@@ -1,21 +1,26 @@
-//! 设置、插件、日志、任务和仓库动作的状态机测试。
+//! 设置、插件、日志、任务、仓库动作和工具页的状态机测试。
 //!
-//! 这些分支来自 Vue 页面。不启动仓库服务，服务调用只检查留下的副作用。
+//! 期望值来自对应的 Vue 组件。不启动仓库服务，服务调用只检查留下的副作用。
+
+use std::collections::BTreeMap;
+
+use serde_json::json;
 
 use crate::backend::services::repository::{
-    ApiDefinition, ApiDesignSnapshot, CacheConfig, CacheSnapshot, PluginConfigSnapshot, PluginDependencyStatus,
-    PluginManifest, RepositoryAction, RepositoryActionStep, RepositoryBackendSummary, RepositorySummary,
-    SystemLogLocation, SystemLogRecord, SystemLogSource, TaskProgressSnapshot,
+    ApiDesignSnapshot, CacheConfig, CacheSnapshot, PluginConfigSnapshot, PluginDependencyStatus, PluginManifest, RepositoryAction,
+    RepositoryActionStep, RepositoryBackendSummary, RepositorySummary, SystemLogLocation, SystemLogPage, SystemLogRecord,
+    SystemLogSource, TaskProgressSnapshot,
 };
 use crate::backend::services::runtime::ExternalApiConnectionStatus;
 
 use super::super::files::{FileDialog, FilesMessage};
 use super::super::player::{PlayerCandidate, AUDIO_CAPABILITY, AUDIO_SEQUENCE_TYPE};
 use super::super::workspace::{WorkspacePanel, WorkspaceRepository};
-use super::super::{ShellMessage, ShellPage, ShellViewModel};
-use super::support::{self, action_can_run, audio_choices};
+use super::super::{ShellMessage, ShellViewModel};
+use super::api::{ApiMessage, HttpResponse};
+use super::support::{self, action_can_run};
 use super::tool_native::{self, ImportAction};
-use super::{AdminEffect, AdminMessage, OperationProgress, PluginCallOrigin, SourceAuthCall, ToolPageEntry};
+use super::{AdminEffect, AdminMessage, OperationProgress, PluginCallOrigin, ToolPageEntry};
 
 fn send(model: &mut ShellViewModel, message: AdminMessage) {
     model.reduce(ShellMessage::Admin(message));
@@ -41,13 +46,14 @@ fn plugin(id: &str, source: &str, category: &str, kind: &str) -> PluginManifest 
         enabled: true,
         sdk: "backend".into(),
         entry: serde_json::Value::Null,
-        contributes: serde_json::json!({
+        contributes: json!({
             "settings": {
                 "fields": [
                     {"key": "limit", "label": "上限", "type": "number"},
-                    {"key": "mode", "label": "模式", "type": "select", "options": [{"value": "a"}]},
+                    {"key": "mode", "label": "模式", "type": "select", "options": [{"label": "甲", "value": "a"}]},
                     {"key": "raw", "label": "原始", "type": "json"},
-                    {"key": "on", "label": "开关", "type": "boolean"}
+                    {"key": "on", "label": "开关", "type": "boolean"},
+                    {"key": "", "label": "缺键"}
                 ]
             }
         }),
@@ -67,6 +73,16 @@ fn plugin(id: &str, source: &str, category: &str, kind: &str) -> PluginManifest 
     }
 }
 
+/// 能加载前端模块并声明工具页的插件。
+fn tool_plugin(id: &str, pages: serde_json::Value) -> PluginManifest {
+    let mut manifest = plugin(id, "builtin", "service", "tool");
+    manifest.sdk = "frontend".into();
+    manifest.runtime = "vue-module".into();
+    manifest.entry = json!({ "frontend": { "module": "dist/register.js" } });
+    manifest.contributes = json!({ "toolPages": pages });
+    manifest
+}
+
 fn log_record(id: &str, timestamp: &str, level: &str, kind: &str, plugin_id: &str, repo_id: &str, message: &str) -> SystemLogRecord {
     SystemLogRecord {
         id: id.into(),
@@ -82,7 +98,7 @@ fn log_record(id: &str, timestamp: &str, level: &str, kind: &str, plugin_id: &st
             repo_id: (!repo_id.is_empty()).then(|| repo_id.to_string()),
         },
         location: SystemLogLocation { module_path: Some("app".into()), file: Some("main.rs".into()), line: Some(12) },
-        context: serde_json::json!({"token": "other"}),
+        context: json!({"token": "other"}),
     }
 }
 
@@ -118,7 +134,7 @@ fn action(id: &str, status: &str, enabled: bool) -> RepositoryAction {
 
 fn connection() -> ExternalApiConnectionStatus {
     ExternalApiConnectionStatus {
-        base_url: "http://127.0.0.1:9".into(),
+        base_url: "http://127.0.0.1:9/external/v1".into(),
         token: "1234567890abcdef".into(),
         version: "1".into(),
         started_at: "2026-01-01T00:00:00Z".into(),
@@ -127,17 +143,12 @@ fn connection() -> ExternalApiConnectionStatus {
     }
 }
 
-fn repository(id: &str, plugin_id: &str, name: &str, kind: &str) -> RepositorySummary {
+fn repository(id: &str, plugin_id: &str, name: &str) -> RepositorySummary {
     RepositorySummary {
         repo_id: id.into(),
         name: id.into(),
         path: format!("C:/{id}"),
-        backend: RepositoryBackendSummary {
-            plugin_id: plugin_id.into(),
-            kind: kind.into(),
-            name: name.into(),
-            capabilities: Vec::new(),
-        },
+        backend: RepositoryBackendSummary { plugin_id: plugin_id.into(), kind: "local".into(), name: name.into(), capabilities: Vec::new() },
         status: "ready".into(),
         asset_count: 0,
         updated_at: String::new(),
@@ -159,6 +170,54 @@ fn candidate(plugin_id: &str, label: &str) -> PlayerCandidate {
     }
 }
 
+fn cache() -> CacheSnapshot {
+    CacheSnapshot { config: CacheConfig { metadata_capacity: 1, thumbnail_capacity: 2, query_capacity: 3 }, entries: Vec::new() }
+}
+
+fn api_design() -> ApiDesignSnapshot {
+    ApiDesignSnapshot { transport: "tauri-ipc".into(), endpoints: Vec::new() }
+}
+
+/// 一次成功的设置页数据。
+fn load_bundle(model: &mut ShellViewModel, plugins: Vec<PluginManifest>) {
+    send(model, AdminMessage::SettingsBundleLoaded {
+        plugins: Ok(plugins),
+        hooks: Ok(Vec::new()),
+        cache: Ok(cache()),
+        api: Ok(api_design()),
+        external: Ok(connection()),
+    });
+}
+
+#[test]
+fn settings_bundle_is_all_or_nothing_and_success_clears_the_error() {
+    let mut model = ShellViewModel::default();
+    model.reduce(ShellMessage::Navigate(super::super::ShellPage::Settings));
+    assert!(model.admin.loading_settings);
+    assert!(model.admin.take_effects().iter().any(|effect| matches!(effect, AdminEffect::LoadSettingsBundle)));
+    send(&mut model, AdminMessage::SettingsBundleLoaded {
+        plugins: Ok(vec![plugin("next", "system", "service", "service")]),
+        hooks: Ok(Vec::new()),
+        cache: Ok(cache()),
+        api: Err("API 设计读取失败".into()),
+        external: Ok(connection()),
+    });
+    assert!(!model.admin.loading_settings);
+    assert!(model.admin.plugins.is_empty());
+    assert!(model.admin.cache.is_none());
+    assert!(model.admin.external.is_none());
+    assert_eq!(model.admin.load_error, "API 设计读取失败");
+
+    let tools = tool_plugin("momobako.tool.file-manager", json!([{ "toolPageId": "momobako.tool.file-manager", "label": "文件导入" }]));
+    load_bundle(&mut model, vec![plugin("next", "system", "service", "service"), tools]);
+    assert_eq!(model.admin.plugins.len(), 2);
+    assert_eq!(model.admin.cache.as_ref().map(|item| item.config.query_capacity), Some(3));
+    assert_eq!(model.admin.external.as_ref().map(|item| item.ready), Some(true));
+    assert!(model.admin.load_error.is_empty());
+    assert_eq!(model.admin.tool_pages.iter().map(|page| page.id.as_str()).collect::<Vec<_>>(), ["momobako.tool.file-manager"]);
+    assert_eq!(model.admin.active_tool_page_id.as_deref(), Some("momobako.tool.file-manager"));
+}
+
 #[test]
 fn plugins_group_search_and_confirm_delete() {
     let mut model = ShellViewModel::default();
@@ -166,10 +225,8 @@ fn plugins_group_search_and_confirm_delete() {
     user.name = "导入".into();
     let mut custom = plugin("custom.one", "system", "made-up", "service");
     custom.capabilities = vec!["only-custom".into()];
-    let parser = plugin("parser.one", "", "parser", "parser");
-    model.reduce(ShellMessage::PluginsLoaded(Ok(vec![user, custom, parser])));
-    assert_eq!(model.page, ShellPage::PluginSettings);
-    assert_eq!(model.detail, "3 个插件 · 原生贡献接口优先");
+    let parser = plugin("parser.one", "", "", "parser");
+    load_bundle(&mut model, vec![user, custom, parser]);
     assert_eq!(
         model.admin.grouped_plugins().into_iter().map(|(category, _)| category).collect::<Vec<_>>(),
         ["source", "parser", "unclassified"]
@@ -185,32 +242,52 @@ fn plugins_group_search_and_confirm_delete() {
     assert!(model.admin.pending_delete.is_none());
     send(&mut model, AdminMessage::RequestDelete("user.one".into()));
     send(&mut model, AdminMessage::ConfirmDelete);
+    assert!(model.admin.managing);
     assert!(matches!(model.admin.take_effects().pop(), Some(AdminEffect::DeletePlugin(id)) if id == "user.one"));
-    model.reduce(ShellMessage::Admin(AdminMessage::PluginsReplaced(Ok(vec![plugin("parser.one", "", "parser", "parser")]))));
+    send(&mut model, AdminMessage::PluginsReplaced(Err("删除被拒绝".into())));
+    assert_eq!(model.admin.pending_delete.as_deref(), Some("user.one"));
+    assert_eq!(model.admin.action_error, "删除被拒绝");
+    send(&mut model, AdminMessage::ConfirmDelete);
+    send(&mut model, AdminMessage::PluginsReplaced(Ok(vec![plugin("parser.one", "", "parser", "parser")])));
     assert_eq!(model.admin.action_message, "插件已删除。");
-    assert_eq!(model.page, ShellPage::PluginSettings);
+    assert!(model.admin.action_error.is_empty());
+    assert!(model.admin.pending_delete.is_none());
+    assert!(!model.admin.managing);
+}
+
+#[test]
+fn plugin_labels_follow_the_vue_taxonomy() {
+    let mut manifest = plugin("user.one", "user", "", "webdav");
+    assert_eq!(support::plugin_category(&manifest), "source");
+    assert_eq!(support::category_label("library-kind"), "库类型");
+    assert_eq!(support::category_label("made-up"), "未分类");
+    assert_eq!(support::plugin_runtime_label("process"), "未知运行时");
+    assert_eq!(support::plugin_source_label("user"), "用户插件");
+    manifest.requires = vec!["a".into(), "b".into()];
+    assert_eq!(support::dependency_label(&manifest), "必需 2 / 可选 0");
+    assert_eq!(support::dependency_status_label("missing"), "缺失");
+    assert_eq!(support::hook_status_label("blocked"), "已拦截");
+    assert_eq!(support::plugin_status_label(&manifest), "已启用");
+    manifest.degraded = true;
+    assert_eq!(support::plugin_status_label(&manifest), "降级运行");
+    manifest.enabled = false;
+    assert_eq!(support::plugin_status_label(&manifest), "未启用");
+    manifest.status = "error".into();
+    assert_eq!(support::plugin_status_label(&manifest), "错误");
+    assert_eq!(support::settings_fields(&manifest).len(), 4);
+    assert_eq!(support::plugin_settings_label(&manifest), "插件设置");
+    manifest.contributes["settings"]["settingsPage"] = json!({ "label": "下载服务", "description": "队列和目录" });
+    assert_eq!(support::plugin_settings_label(&manifest), "下载服务");
+    assert_eq!(support::plugin_settings_description(&manifest), "队列和目录");
+    manifest.contributes = json!({ "source": { "authentication": { "kind": "qr" } } });
+    assert_eq!(support::plugin_settings_label(&manifest), "账号与来源");
+    assert_eq!(support::plugin_settings_description(&manifest), "管理来源账号、登录状态与关联仓库。");
 }
 
 #[test]
 fn plugin_fields_reject_bad_json_and_reset_empty_numbers() {
     let mut model = ShellViewModel::default();
-    let mut manifest = plugin("user.one", "user", "service", "service");
-    manifest.contributes["settings"]["settingsPage"] = serde_json::json!({"label": "旧页面"});
-    manifest.contributes["source"] = serde_json::json!({"authentication": {"kind": "oauth"}});
-    model.admin.plugins = vec![manifest];
-    send(&mut model, AdminMessage::MarkVueSettings("user.one".into()));
-    let lines = support::settings_upgrade_lines(&model.admin.plugins[0], true);
-    assert_eq!(lines.len(), 1);
-    assert!(lines[0].contains("Vue"));
-    let contract = support::source_auth_gap_contract(&model.admin.plugins[0]).expect("缺方法名");
-    assert!(contract.contains("createSessionMethod"));
-    assert!(!contract.contains("需要升级"));
-    let mut schema = plugin("schema.one", "system", "service", "service");
-    schema.contributes["settings"]["settingsPage"] = serde_json::json!({"label": "本地文件系统"});
-    assert!(support::settings_upgrade_lines(&schema, false).is_empty());
-    schema.contributes["settings"].as_object_mut().expect("settings").remove("fields");
-    assert!(support::settings_upgrade_lines(&schema, false).iter().any(|line| line.contains("设置字段")));
-
+    load_bundle(&mut model, vec![plugin("user.one", "user", "service", "service")]);
     send(&mut model, AdminMessage::JsonDraft { plugin_id: "user.one".into(), key: "raw".into(), value: "{".into() });
     send(&mut model, AdminMessage::SaveJson { plugin_id: "user.one".into(), key: "raw".into() });
     assert_eq!(model.admin.action_error, "原始 不是有效 JSON。");
@@ -218,74 +295,173 @@ fn plugin_fields_reject_bad_json_and_reset_empty_numbers() {
 
     send(&mut model, AdminMessage::ConfigInput { plugin_id: "user.one".into(), key: "limit".into(), text: "  ".into(), checked: None });
     assert!(matches!(model.admin.take_effects().pop(), Some(AdminEffect::DeleteConfig { key, .. }) if key == "limit"));
+    send(&mut model, AdminMessage::ConfigInput { plugin_id: "user.one".into(), key: "limit".into(), text: "12".into(), checked: None });
+    assert!(matches!(model.admin.take_effects().pop(), Some(AdminEffect::SetConfig { value, .. }) if value == json!(12.0)));
     send(&mut model, AdminMessage::ConfigInput { plugin_id: "user.one".into(), key: "on".into(), text: String::new(), checked: Some(true) });
-    match model.admin.take_effects().pop() {
-        Some(AdminEffect::SetConfig { value, .. }) => assert_eq!(value, serde_json::Value::Bool(true)),
-        other => panic!("unexpected {other:?}"),
-    }
+    assert!(matches!(model.admin.take_effects().pop(), Some(AdminEffect::SetConfig { value, .. }) if value == json!(true)));
     send(&mut model, AdminMessage::ConfigInput { plugin_id: "user.one".into(), key: "mode".into(), text: "\"a\"".into(), checked: None });
-    match model.admin.take_effects().pop() {
-        Some(AdminEffect::SetConfig { value, .. }) => assert_eq!(value, serde_json::json!("a")),
-        other => panic!("unexpected {other:?}"),
-    }
+    assert!(matches!(model.admin.take_effects().pop(), Some(AdminEffect::SetConfig { value, .. }) if value == json!("a")));
+    model.reduce(ShellMessage::PluginConfigLoaded(Ok(PluginConfigSnapshot {
+        plugin_id: "user.one".into(),
+        data_directory: "data".into(),
+        schema: serde_json::Value::Null,
+        values: [("mode".into(), json!("a"))].into_iter().collect(),
+    })));
+    assert_eq!(model.admin.action_message, "插件设置已保存。");
+    send(&mut model, AdminMessage::ResetConfig { plugin_id: "user.one".into(), key: "mode".into() });
+    assert!(matches!(model.admin.take_effects().pop(), Some(AdminEffect::DeleteConfig { key, .. }) if key == "mode"));
+    model.reduce(ShellMessage::PluginConfigLoaded(Err(String::new())));
+    assert_eq!(model.admin.action_error, "插件设置重置失败。");
 }
 
 #[test]
-fn plugin_settings_route_collapses_and_skips_loaded_pages() {
+fn plugin_settings_toggle_route_and_directory() {
     let mut model = ShellViewModel::default();
-    model.page = ShellPage::Settings;
-    model.admin.plugins = vec![plugin("user.one", "user", "service", "service")];
+    load_bundle(&mut model, vec![plugin("user.one", "user", "service", "service")]);
     send(&mut model, AdminMessage::RoutePlugin("  ".into()));
     send(&mut model, AdminMessage::RoutePlugin("missing".into()));
     assert!(model.admin.take_effects().is_empty());
     send(&mut model, AdminMessage::RoutePlugin("user.one".into()));
+    assert_eq!(model.admin.active_settings_plugin_id.as_deref(), Some("user.one"));
     assert!(matches!(model.admin.take_effects().pop(), Some(AdminEffect::LoadConfig(id)) if id == "user.one"));
     model.reduce(ShellMessage::PluginConfigLoaded(Ok(PluginConfigSnapshot {
         plugin_id: "user.one".into(),
         data_directory: "data".into(),
         schema: serde_json::Value::Null,
-        values: [("raw".into(), serde_json::json!({"ok": true}))].into_iter().collect(),
+        values: [("raw".into(), json!({"ok": true}))].into_iter().collect(),
     })));
-    assert_eq!(model.page, ShellPage::Settings);
     assert!(model.admin.json_drafts["user.one"]["raw"].contains("ok"));
+    assert!(!model.admin.managing);
     send(&mut model, AdminMessage::RoutePlugin("user.one".into()));
     assert!(model.admin.take_effects().is_empty());
+
+    send(&mut model, AdminMessage::OpenDataDirectory("user.one".into()));
+    assert!(matches!(model.admin.take_effects().pop(), Some(AdminEffect::OpenDataDirectory { name, .. }) if name == "user.one"));
+    send(&mut model, AdminMessage::DataDirectoryFinished { name: "user.one".into(), result: Ok("C:/plugin".into()) });
+    assert_eq!(model.admin.action_message, "已打开“user.one”设置目录。");
+    send(&mut model, AdminMessage::DataDirectoryFinished { name: "user.one".into(), result: Err(String::new()) });
+    assert_eq!(model.admin.action_error, "插件设置目录打开失败。");
+
     send(&mut model, AdminMessage::ToggleSettings("user.one".into()));
     assert!(model.admin.active_settings_plugin_id.is_none());
 }
 
 #[test]
-fn toggle_and_install_keep_the_current_page() {
+fn enable_and_install_report_vue_messages() {
     let mut model = ShellViewModel::default();
-    model.page = ShellPage::Settings;
-    model.admin.plugins = vec![plugin("user.one", "user", "service", "service")];
+    load_bundle(&mut model, vec![plugin("user.one", "user", "service", "service")]);
     send(&mut model, AdminMessage::SetEnabled { plugin_id: "user.one".into(), enabled: false });
     assert!(matches!(model.admin.take_effects().pop(), Some(AdminEffect::SetEnabled { enabled: false, .. })));
     send(&mut model, AdminMessage::PluginsReplaced(Ok(vec![plugin("user.one", "user", "service", "service")])));
     assert_eq!(model.admin.action_message, "插件已禁用。");
-    assert_eq!(model.page, ShellPage::Settings);
-    send(&mut model, AdminMessage::InstallArchive(Some("  ".into())));
     send(&mut model, AdminMessage::ChooseArchive);
+    assert!(model.admin.action_message.is_empty());
     assert!(matches!(model.admin.take_effects().pop(), Some(AdminEffect::RequestOpenDialog)));
-    assert!(support::open_dialog_available());
-    assert_eq!(model.admin.action_message, "正在选择插件包…");
+    send(&mut model, AdminMessage::InstallArchive(Some("  ".into())));
+    assert!(model.admin.take_effects().is_empty());
     send(&mut model, AdminMessage::InstallArchive(Some("plugin.momoplug".into())));
     assert!(matches!(model.admin.take_effects().pop(), Some(AdminEffect::Install(path)) if path == "plugin.momoplug"));
+    send(&mut model, AdminMessage::PluginsReplaced(Err(String::new())));
+    assert_eq!(model.admin.action_error, "插件安装失败。");
 }
 
 #[test]
-fn logs_filter_sort_and_pause_without_dropping_records() {
+fn theme_corners_and_external_connection() {
     let mut model = ShellViewModel::default();
-    model.reduce(ShellMessage::LogsLoaded(Ok(crate::backend::services::repository::SystemLogPage {
+    model.reduce(ShellMessage::SettingsThemeChanged("sepia".into()));
+    assert!(model.admin.take_effects().is_empty());
+    model.reduce(ShellMessage::SettingsThemeChanged("dark".into()));
+    assert_eq!(model.settings.theme, "dark");
+    assert!(matches!(model.admin.take_effects().as_slice(), [AdminEffect::SaveSettings]));
+
+    send(&mut model, AdminMessage::SetCornerStyle("square".into()));
+    assert!(model.admin.take_effects().is_empty());
+    send(&mut model, AdminMessage::SetCornerStyle("round".into()));
+    assert_eq!(model.admin.corner_style, "round");
+    send(&mut model, AdminMessage::SetCornerRadius("100".into()));
+    assert_eq!(model.admin.corner_radius, 20.0);
+    send(&mut model, AdminMessage::SetCornerRadius("nope".into()));
+    assert_eq!(model.admin.corner_radius, 20.0);
+    assert!(model.admin.take_effects().iter().all(|effect| matches!(effect, AdminEffect::PersistCorners)));
+
+    let directory = std::env::temp_dir().join(format!("momobako-corners-{}", std::process::id()));
+    std::fs::create_dir_all(&directory).expect("临时目录");
+    let path = directory.join("corners.json");
+    support::write_corners(&path, "round", 8.0);
+    model.admin.load_corners_file(&path);
+    assert_eq!((model.admin.corner_style.as_str(), model.admin.corner_radius), ("round", 8.0));
+    let _ = std::fs::remove_dir_all(&directory);
+
+    assert_eq!(support::external_status_label(None), "未加载");
+    assert_eq!(support::mask_token(Some("1234567890abcdef")), "1234567890...abcdef");
+    send(&mut model, AdminMessage::ExportExternal);
+    assert_eq!(model.admin.external_error, "连接 JSON 尚未加载。");
+    send(&mut model, AdminMessage::CopyExternal { label: "Base URL".into(), value: String::new() });
+    assert_eq!(model.admin.external_error, "Base URL 尚未加载。");
+    model.admin.external = Some(connection());
+    send(&mut model, AdminMessage::CopyExternal { label: "Token".into(), value: "1234567890abcdef".into() });
+    assert_eq!(model.admin.external_message, "Token 已复制。");
+    assert!(model.admin.external_error.is_empty());
+    assert!(matches!(model.admin.take_effects().pop(), Some(AdminEffect::CopyText(text)) if text == "1234567890abcdef"));
+    send(&mut model, AdminMessage::ExportExternal);
+    match model.admin.take_effects().pop() {
+        Some(AdminEffect::RequestSaveDialog { content }) => {
+            let parsed: serde_json::Value = serde_json::from_str(&content).expect("连接 JSON");
+            assert_eq!(parsed["token"], "1234567890abcdef");
+            assert!(parsed.get("connectionFilePath").is_none());
+        }
+        other => panic!("unexpected {other:?}"),
+    }
+    send(&mut model, AdminMessage::CompleteExport(None));
+    assert!(model.admin.take_effects().is_empty());
+    send(&mut model, AdminMessage::CompleteExport(Some("external-api.json".into())));
+    assert!(matches!(model.admin.take_effects().pop(), Some(AdminEffect::WriteFile { path, .. }) if path == "external-api.json"));
+    send(&mut model, AdminMessage::WriteFinished(Ok(())));
+    assert_eq!(model.admin.external_message, "external-api.json 已导出。");
+    send(&mut model, AdminMessage::WriteFinished(Err("磁盘已满".into())));
+    assert_eq!(model.admin.external_error, "导出失败：磁盘已满");
+}
+
+#[test]
+fn repository_backends_and_audio_player_choices() {
+    let mut model = ShellViewModel::default();
+    model.reduce(ShellMessage::RepositoriesLoaded(Ok(vec![
+        repository("one", "filesystem", "本地"),
+        repository("two", "filesystem", "本地"),
+        repository("three", "webdav", "WebDAV"),
+    ])));
+    assert_eq!(support::backend_summary(&model.admin.backends), "本地 (2) / WebDAV (1)");
+    assert_eq!(support::backend_summary(&[]), "无");
+
+    let names = |plugin_id: &str| (plugin_id == "momobako.player.audio").then(|| "官方音频播放器".to_string());
+    let mut preferences = BTreeMap::new();
+    let view = support::audio_view(&[candidate("momobako.player.audio", "音频顺序播放")], &preferences, &names);
+    assert_eq!(view.choices.iter().map(|choice| choice.label.as_str()).collect::<Vec<_>>(), ["官方音频播放器 · momobako.player.audio"]);
+    assert_eq!(view.selected, "momobako.player.audio");
+    assert!(view.notice.is_none());
+    preferences.insert(AUDIO_CAPABILITY.to_string(), "missing.player".to_string());
+    let view = support::audio_view(&[candidate("momobako.player.audio", "音频顺序播放")], &preferences, &names);
+    assert_eq!(view.choices[0].label, "missing.player（不可用）");
+    assert_eq!(view.notice, Some(("所选播放器当前不可用，已回退到 官方音频播放器。".into(), false)));
+    let view = support::audio_view(&[], &BTreeMap::new(), &names);
+    assert!(view.choices.is_empty());
+    assert_eq!(view.notice, Some(("官方音频播放器未启用或缺失，音频播放暂不可用。".into(), true)));
+
+    model.player.candidates = vec![candidate("momobako.player.audio", "音频顺序播放")];
+    send(&mut model, AdminMessage::SetAudioPlayer(Some(" momobako.player.audio ".into())));
+    assert_eq!(model.player.preferences.get(AUDIO_CAPABILITY).map(String::as_str), Some("momobako.player.audio"));
+}
+
+#[test]
+fn logs_filter_sort_pause_and_context() {
+    let mut model = ShellViewModel::default();
+    model.reduce(ShellMessage::LogsLoaded(Ok(SystemLogPage {
         records: vec![
             log_record("b", "2020-02-01T00:00:00Z", "error", "helper", "plug", "repo", "失败"),
             log_record("a", "2020-01-01T00:00:00Z", "info", "host", "", "", "开始 needle"),
         ],
         next_cursor: None,
     })));
-    assert_eq!(model.page, ShellPage::Logs);
-    assert_eq!(model.log_entries[0], "error · plugin · 失败");
-    assert_eq!(model.detail, "最近日志 · 2 条记录");
     assert!(model.admin.log_would_scroll);
     assert_eq!(model.admin.filtered_logs().iter().map(|record| record.id.as_str()).collect::<Vec<_>>(), ["a", "b"]);
     send(&mut model, AdminMessage::ToggleLogLevel("error".into()));
@@ -300,8 +476,20 @@ fn logs_filter_sort_and_pause_without_dropping_records() {
     send(&mut model, AdminMessage::SetLogSearch("不存在".into()));
     assert!(!model.admin.log_would_scroll);
     assert_eq!(model.admin.logs.len(), 2);
-    let plugins = support::unique_sorted(model.admin.logs.iter().filter_map(|record| record.source.plugin_id.clone()));
-    assert_eq!(plugins, ["plug"]);
+    assert_eq!(support::unique_sorted(model.admin.logs.iter().filter_map(|record| record.source.plugin_id.clone())), ["plug"]);
+    send(&mut model, AdminMessage::ToggleLogContext("a".into()));
+    assert!(model.admin.log_context_open.contains("a"));
+    send(&mut model, AdminMessage::ToggleLogContext("a".into()));
+    assert!(model.admin.log_context_open.is_empty());
+    assert_eq!(support::level_label("warn"), "警告");
+    assert_eq!(support::source_kind_label("frontend-plugin"), "前端插件");
+    assert_eq!(support::location_label(&model.admin.logs[0]), "app:main.rs:12");
+
+    for index in 0..502 {
+        model.admin.merge_log(log_record(&format!("n{index:03}"), &format!("2021-01-01T00:{:02}:{:02}Z", index / 60, index % 60), "info", "host", "", "", "x"));
+    }
+    assert_eq!(model.admin.logs.len(), 500);
+    assert_eq!(model.admin.logs[0].id, "n501");
 }
 
 #[test]
@@ -327,9 +515,8 @@ fn task_popover_merges_repository_operation_and_closes() {
         updated_at_ms: 50,
     })));
     let rows = model.task_rows();
-    assert_eq!(rows[0].id, "workspace-operation");
-    assert_eq!(rows[0].source, "资源库");
-    assert_eq!(rows[1].id, "task-1");
+    assert_eq!((rows[0].id.as_str(), rows[0].source.as_str()), ("workspace-operation", "资源库"));
+    assert_eq!((rows[1].id.as_str(), rows[1].source.as_str(), rows[1].detail.as_str()), ("task-1", "任务", "scanning"));
     send(&mut model, AdminMessage::ToggleTaskPopover);
     assert!(model.admin.popover_open);
     send(&mut model, AdminMessage::TaskOutside { inside: true });
@@ -375,7 +562,6 @@ fn repository_actions_follow_selection_and_refuse_when_not_runnable() {
     assert_eq!(model.admin.actions_error, "读取失败");
     model.files.set_selected_paths(vec!["a.txt".into()]);
     send(&mut model, AdminMessage::SelectAction("copy".into()));
-    assert_eq!(model.workspace.panel, WorkspacePanel::Actions);
     send(&mut model, AdminMessage::RunAction(None));
     assert!(matches!(
         model.admin.take_effects().pop(),
@@ -387,94 +573,33 @@ fn repository_actions_follow_selection_and_refuse_when_not_runnable() {
 }
 
 #[test]
-fn tool_pages_fall_back_and_do_not_mount_vue_components() {
+fn tool_pages_follow_frontend_manifests_and_keep_the_selection() {
+    let mut backend = tool_plugin("backend.tool", json!([{ "toolPageId": "backend.page", "label": "后端" }]));
+    backend.sdk = "backend".into();
+    let mut disabled = tool_plugin("disabled.tool", json!([{ "toolPageId": "disabled.page", "label": "停用" }]));
+    disabled.enabled = false;
+    let pages = support::tool_pages_from_plugins(&[
+        tool_plugin("a.tool", json!([{ "toolPageId": "zeta", "label": "Zeta", "order": 5 }, { "toolPageId": "  ", "label": "空" }])),
+        tool_plugin("b.tool", json!([{ "toolPageId": "momobako.tool.api-playground", "label": "API Playground", "description": "调试" }])),
+        tool_plugin("c.tool", json!([{ "toolPageId": "alpha", "label": "Alpha", "order": 5 }])),
+        backend,
+        disabled,
+    ]);
+    assert_eq!(pages.iter().map(|page| page.id.as_str()).collect::<Vec<_>>(), ["alpha", "zeta", "momobako.tool.api-playground"]);
+    assert_eq!((pages[2].native, pages[2].plugin_name.as_str(), pages[2].description.as_str()), (true, "b.tool", "调试"));
+    assert!(!pages[0].native);
+
     let mut model = ShellViewModel::default();
     send(&mut model, AdminMessage::SetToolPages(Vec::new()));
     assert!(model.admin.active_tool_page_id.is_none());
-    send(&mut model, AdminMessage::SetToolPages(vec![
-        ToolPageEntry { id: "old".into(), label: "旧工具".into(), plugin_name: "vue".into(), description: String::new(), native: false },
-        ToolPageEntry { id: "new".into(), label: "新工具".into(), plugin_name: "native".into(), description: String::new(), native: true },
-    ]));
+    let entry = |id: &str| ToolPageEntry { id: id.into(), label: id.into(), plugin_name: "tool".into(), description: String::new(), native: false };
+    send(&mut model, AdminMessage::SetToolPages(vec![entry("old"), entry("new")]));
     assert_eq!(model.admin.active_tool_page_id.as_deref(), Some("old"));
-    let contract = support::foreign_tool_contract(&model.admin.tool_pages[0]).expect("非内置工具页");
-    assert!(contract.contains("old"));
-    assert!(contract.contains("缺原生控件快照"));
-    assert!(!contract.contains("需要升级"));
+    send(&mut model, AdminMessage::SelectToolPage("missing".into()));
     send(&mut model, AdminMessage::SelectToolPage("new".into()));
     assert_eq!(model.admin.active_tool_page_id.as_deref(), Some("new"));
-    assert!(support::foreign_tool_contract(&model.admin.tool_pages[1]).is_none());
-    send(&mut model, AdminMessage::SetToolPages(vec![ToolPageEntry {
-        id: "new".into(), label: "新工具".into(), plugin_name: "native".into(), description: String::new(), native: true,
-    }]));
+    send(&mut model, AdminMessage::SetToolPages(vec![entry("new")]));
     assert_eq!(model.admin.active_tool_page_id.as_deref(), Some("new"));
-}
-
-#[test]
-fn settings_audio_corner_external_api_and_backends() {
-    let mut model = ShellViewModel::default();
-    model.player.candidates = vec![candidate("momobako.player.audio", "官方音频")];
-    send(&mut model, AdminMessage::SetAudioPlayer(Some(" momobako.player.audio ".into())));
-    assert_eq!(model.player.preferences.get(AUDIO_CAPABILITY).map(String::as_str), Some("momobako.player.audio"));
-    let (choices, selected, notice) = audio_choices(&model.player.candidates, &model.player.preferences);
-    assert_eq!(selected, "momobako.player.audio");
-    assert!(notice.is_empty());
-    assert!(support::audio_picker_enabled(&choices));
-    model.player.preferences.insert(AUDIO_CAPABILITY.into(), "missing.player".into());
-    let (choices, _, notice) = audio_choices(&model.player.candidates, &model.player.preferences);
-    assert!(choices.iter().any(|choice| choice.unavailable && choice.label.contains("不可用")));
-    assert!(notice.contains("已回退到"));
-    assert!(support::clipboard_available());
-    assert!(support::save_dialog_available());
-
-    send(&mut model, AdminMessage::SetCornerStyle("square".into()));
-    assert_eq!(model.admin.corner_style, support::default_corner_style());
-    send(&mut model, AdminMessage::SetCornerRadius("100".into()));
-    assert_eq!(model.admin.corner_radius, 20.0);
-    send(&mut model, AdminMessage::SetCornerRadius("nope".into()));
-    assert_eq!(model.admin.corner_radius, 20.0);
-    assert!(matches!(model.admin.take_effects().last(), Some(AdminEffect::PersistCorners)));
-
-    let directory = std::env::temp_dir().join(format!("momobako-corners-{}", std::process::id()));
-    let _ = std::fs::create_dir_all(&directory);
-    let path = directory.join("corners.json");
-    support::write_corners(&path, "round", 8.0);
-    model.admin.load_corners_file(&path);
-    assert_eq!(model.admin.corner_style, "round");
-    assert_eq!(model.admin.corner_radius, 8.0);
-    let _ = std::fs::remove_dir_all(&directory);
-
-    model.reduce(ShellMessage::RepositoriesLoaded(Ok(vec![
-        repository("one", "filesystem", "本地", "local"),
-        repository("two", "filesystem", "本地", "local"),
-    ])));
-    assert_eq!(support::backend_summary(&model.admin.backends), "本地 (2)");
-    model.reduce(ShellMessage::SystemStatusLoaded(Ok(connection())));
-    assert_eq!(model.detail, "服务已就绪 · http://127.0.0.1:9");
-    assert_eq!(support::mask_token(Some("1234567890abcdef")), "1234567890...abcdef");
-    assert_eq!(support::external_status_label(None), "未加载");
-    send(&mut model, AdminMessage::CopyExternal { label: "Base URL".into(), value: String::new() });
-    assert_eq!(model.admin.external_error, "Base URL 尚未加载。");
-    send(&mut model, AdminMessage::CopyExternal { label: "Token".into(), value: "1234567890abcdef".into() });
-    assert_eq!(model.admin.external_message, "Token 已复制。");
-    assert!(model.admin.external_error.is_empty());
-    assert!(matches!(model.admin.take_effects().pop(), Some(AdminEffect::CopyText(_))));
-    send(&mut model, AdminMessage::ExportExternal);
-    assert!(matches!(model.admin.take_effects().pop(), Some(AdminEffect::RequestSaveDialog { .. })));
-    assert!(model.admin.external_error.is_empty());
-    assert_eq!(model.admin.external_message, "正在选择导出位置…");
-    send(&mut model, AdminMessage::CompleteExport(None));
-    assert!(model.admin.take_effects().is_empty());
-    send(&mut model, AdminMessage::CompleteExport(Some("external-api.json".into())));
-    assert!(matches!(model.admin.take_effects().pop(), Some(AdminEffect::WriteFile { path, .. }) if path == "external-api.json"));
-    send(&mut model, AdminMessage::WriteFinished(Ok(())));
-    assert_eq!(model.admin.external_message, "external-api.json 已导出。");
-    assert_eq!(model.repository_id.as_deref(), Some("one"));
-    send(&mut model, AdminMessage::SelectRepository("  ".into()));
-    assert_eq!(model.repository_id.as_deref(), Some("one"));
-}
-
-fn tool_page(id: &str, native: bool) -> ToolPageEntry {
-    ToolPageEntry { id: id.into(), label: id.into(), plugin_name: "tool".into(), description: String::new(), native }
 }
 
 fn attach_repository(model: &mut ShellViewModel, capabilities: Vec<String>) {
@@ -496,69 +621,28 @@ fn import_action<'a>(actions: &'a [ImportAction], id: &str) -> &'a ImportAction 
 }
 
 #[test]
-fn builtin_tool_pages_follow_the_file_machine_and_api_snapshot() {
-    for id in [support::TOOL_FILE_MANAGER, support::TOOL_EAGLE_IMPORTER, support::TOOL_API_PLAYGROUND] {
-        assert!(support::foreign_tool_contract(&tool_page(id, false)).is_none());
-    }
-    assert_eq!(
-        support::foreign_tool_contract(&tool_page("momobako.tool.other", false)).as_deref(),
-        Some("工具页 momobako.tool.other 只有 label「momobako.tool.other」和 没有 description。缺原生控件快照（字段、列表或预览数据），不嵌 Vue 组件。")
-    );
-
+fn builtin_import_pages_follow_the_file_machine() {
     let mut model = ShellViewModel::default();
     let blocked = tool_native::import_actions(&model, support::TOOL_FILE_MANAGER);
     let folder = import_action(&blocked, "folder");
     assert!(!folder.enabled);
     assert_eq!(tool_native::import_block_reason(&model), Some("当前没有可用仓库。"));
     assert!(tool_native::import_message(folder.enabled, folder.message.clone()).is_none());
-    model.reduce(ShellMessage::Files(folder.message.clone()));
-    assert!(model.files.take_effects().is_empty());
-    assert!(matches!(model.files.dialog, FileDialog::Closed));
 
     attach_repository(&mut model, vec!["write".into()]);
     let open = tool_native::import_actions(&model, support::TOOL_FILE_MANAGER);
     let folder = import_action(&open, "folder");
     assert!(folder.enabled);
     assert!(tool_native::import_block_reason(&model).is_none());
-    match &folder.message {
-        FilesMessage::OpenDialog(FileDialog::Import) => {}
-        other => panic!("unexpected {other:?}"),
-    }
+    assert!(matches!(&folder.message, FilesMessage::OpenDialog(FileDialog::Import)));
     model.reduce(tool_native::import_message(folder.enabled, folder.message.clone()).expect("folder"));
     assert!(matches!(model.files.dialog, FileDialog::Import));
-    assert!(model.files.take_effects().is_empty());
 
     let eagle = tool_native::import_actions(&model, support::TOOL_EAGLE_IMPORTER);
     let copy = import_action(&eagle, "copy");
-    match &copy.message {
-        FilesMessage::OpenEagle(mode) => assert_eq!(mode, "copy"),
-        other => panic!("unexpected {other:?}"),
-    }
+    assert!(matches!(&copy.message, FilesMessage::OpenEagle(mode) if mode == "copy"));
     model.reduce(tool_native::import_message(copy.enabled, copy.message.clone()).expect("copy"));
     assert_eq!(model.files.eagle_mode, "copy");
-    assert!(matches!(model.files.dialog, FileDialog::ImportEagle));
-
-    assert_eq!(tool_native::api_lines(None), vec!["还没有 API 设计快照".to_string()]);
-    assert_eq!(
-        tool_native::api_lines(Some(&ApiDesignSnapshot { transport: "local".into(), endpoints: Vec::new() })),
-        vec!["还没有 API 设计快照".to_string()]
-    );
-    let lines = tool_native::api_lines(Some(&ApiDesignSnapshot {
-        transport: "local".into(),
-        endpoints: vec![ApiDefinition {
-            group: "system".into(),
-            transport: "local".into(),
-            method: "GET".into(),
-            path: "/health".into(),
-            summary: "健康".into(),
-            command: None,
-            plugin_id: None,
-            plugin_method: None,
-            requires_auth: None,
-            request_template: None,
-        }],
-    }));
-    assert_eq!(lines, vec!["GET /health · 健康".to_string()]);
 
     model.workspace.repositories[0].capabilities.clear();
     assert_eq!(tool_native::import_block_reason(&model), Some("当前仓库处于只读状态。"));
@@ -570,213 +654,74 @@ fn builtin_tool_pages_follow_the_file_machine_and_api_snapshot() {
 }
 
 #[test]
-fn source_account_summary_names_methods_without_the_upgrade_copy() {
-    let mut manifest = plugin("source.one", "system", "source", "filesystem");
-    manifest.contributes["source"] = serde_json::json!({
-        "authentication": {
-            "kind": "qr",
-            "createSessionMethod": "auth.createQrSession",
-            "statusMethod": "auth.getLoginStatus"
-        }
-    });
-    let lines = support::settings_upgrade_lines(&manifest, false);
-    let joined = lines.join("\n");
-    assert!(!joined.contains("需要升级为 Nana 原生设置"));
-    assert!(joined.contains("qr"));
-    assert!(joined.contains("auth.createQrSession"));
-    assert!(joined.contains("auth.getLoginStatus"));
-
-    manifest.contributes["source"] = serde_json::json!({"authentication": {}});
-    assert!(support::settings_upgrade_lines(&manifest, false).is_empty());
-    let gap = support::source_auth_gap_contract(&manifest).expect("缺方法名");
-    assert!(gap.contains("createSessionMethod") && gap.contains("pollSessionMethod"));
-    assert!(!gap.contains("需要升级"));
-}
-
-#[test]
-fn source_login_reduce_calls_create_session_and_skips_oauth_without_methods() {
+fn api_playground_falls_back_and_sends_http_and_plugin_calls() {
     let mut model = ShellViewModel::default();
-    let mut manifest = plugin("source.one", "system", "source", "filesystem");
-    manifest.contributes["source"] = serde_json::json!({
-        "authentication": {
-            "kind": "qr",
-            "createSessionMethod": "auth.createQrSession",
-            "statusMethod": "auth.getLoginStatus",
-            "clearMethod": "auth.clearLogin"
-        }
-    });
-    let summary = support::settings_upgrade_lines(&manifest, false).join("\n");
-    assert!(summary.contains("来源账号 qr：创建会话 auth.createQrSession，查询状态 auth.getLoginStatus。"));
-    assert!(!summary.contains("需要升级为 Nana 原生设置"));
-    assert_eq!(
-        tool_native::source_auth_actions(&manifest).into_iter().map(|action| action.label).collect::<Vec<_>>(),
-        vec!["创建登录会话", "查询登录状态", "退出登录"]
-    );
-    let login_plugin = manifest.clone();
-    model.admin.plugins = vec![manifest];
-    send(&mut model, AdminMessage::CallSourceAuth { plugin_id: "source.one".into(), slot: SourceAuthCall::CreateSession });
+    model.admin.external = Some(connection());
+    send(&mut model, AdminMessage::Api(ApiMessage::SetKeyword("repositories".into())));
+    let selected = super::api::selected_ref(&model).expect("兜底端点");
+    assert_eq!(selected.path, "/external/v1/repositories");
+    assert!(model.admin.api.include_auth);
+    assert_eq!(super::api::request_url(&model), "http://127.0.0.1:9/external/v1/repositories");
+    send(&mut model, AdminMessage::Api(ApiMessage::Send));
     match model.admin.take_effects().pop() {
-        Some(AdminEffect::CallPlugin { plugin_id, method, payload, repository_id, origin }) => {
-            assert_eq!(plugin_id, "source.one");
-            assert_eq!(method, "auth.createQrSession");
-            assert_eq!(payload, serde_json::json!({}));
-            assert!(repository_id.is_none());
-            assert_eq!(origin, PluginCallOrigin::SourceAuth);
+        Some(AdminEffect::HttpRequest(request)) => {
+            assert_eq!((request.method.as_str(), request.body.as_deref()), ("GET", None));
+            assert!(request.headers.contains(&("Authorization".into(), "Bearer 1234567890abcdef".into())));
         }
         other => panic!("unexpected {other:?}"),
     }
-    assert_eq!(model.admin.action_message, "正在调用 auth.createQrSession…");
-    send(&mut model, AdminMessage::CallSourceAuth { plugin_id: "  ".into(), slot: SourceAuthCall::CreateSession });
+    assert!(model.admin.api.sending);
+    send(&mut model, AdminMessage::Api(ApiMessage::HttpFinished(Ok(HttpResponse {
+        status: 200,
+        status_text: "OK".into(),
+        headers: vec![("Content-Type".into(), "application/json".into())],
+        body: "{\"items\":[]}".into(),
+    }))));
+    assert_eq!(model.admin.api.response_status, "200 OK");
+    assert!(model.admin.api.response_headers.contains("content-type"));
+    assert!(model.admin.api.response_body.contains("\"items\": []"));
+    assert!(!model.admin.api.sending);
+
+    send(&mut model, AdminMessage::Api(ApiMessage::Copy));
+    assert!(matches!(model.admin.take_effects().pop(), Some(AdminEffect::CopyText(text)) if text.starts_with("curl -X GET 'http://127.0.0.1:9/external/v1/repositories'")));
+    assert_eq!(model.admin.api.notice, "请求已复制。");
+
+    send(&mut model, AdminMessage::Api(ApiMessage::SetKeyword(String::new())));
+    send(&mut model, AdminMessage::Api(ApiMessage::SelectEndpoint("external-http:POST:/external/v1/assets:add".into())));
+    send(&mut model, AdminMessage::Api(ApiMessage::SetRequestText("{".into())));
+    send(&mut model, AdminMessage::Api(ApiMessage::Send));
     assert!(model.admin.take_effects().is_empty());
+    assert_eq!(model.admin.api.response_status, "ERROR");
+    assert!(model.admin.api.error.starts_with("请求 JSON 无效"));
 
-    send(&mut model, AdminMessage::SourceAuthFinished {
-        method: "auth.createQrSession".into(),
-        result: Ok(serde_json::json!({"message": "请扫码", "status": "waiting", "qrImage": "data:image/png;base64,abc"})),
+    model.admin.api_design = Some(ApiDesignSnapshot {
+        transport: "tauri-ipc".into(),
+        endpoints: vec![crate::backend::services::repository::ApiDefinition {
+            group: "插件".into(),
+            transport: String::new(),
+            method: String::new(),
+            path: String::new(),
+            summary: "状态".into(),
+            command: None,
+            plugin_id: Some("momobako.service.downloader".into()),
+            plugin_method: Some("downloader.getRuntimeStatus".into()),
+            requires_auth: None,
+            request_template: None,
+        }],
     });
-    assert_eq!(model.admin.action_message, "已调用 auth.createQrSession。请扫码 waiting");
-    assert!(!model.admin.action_message.contains("qrImage"));
-    assert!(!model.admin.action_message.contains("base64"));
-    assert!(model.admin.source_auth.qr_text.is_none());
-    send(&mut model, AdminMessage::SourceAuthFinished {
-        method: "auth.getLoginStatus".into(),
-        result: Ok(serde_json::json!({"qrimg": "x", "message": 1})),
-    });
-    assert_eq!(model.admin.action_message, "已调用 auth.getLoginStatus。");
-    send(&mut model, AdminMessage::SourceAuthFinished {
-        method: "auth.getLoginStatus".into(),
-        result: Ok(serde_json::json!({
-            "loggedIn": true,
-            "credentialRef": "secret-ref",
-            "account": "alice",
-            "qrurl": "https://example.invalid/login"
-        })),
-    });
-    assert_eq!(model.admin.action_message, "已调用 auth.getLoginStatus。");
-    assert_eq!(model.admin.source_auth.qr_text.as_deref(), Some("https://example.invalid/login"));
-    assert!(model.admin.source_auth.lines.iter().any(|line| line == "已登录"));
-    assert!(model.admin.source_auth.lines.iter().any(|line| line.contains("alice")));
-    assert!(!model.admin.source_auth.lines.iter().any(|line| line.contains("secret")));
-
-    let mut oauth = plugin("oauth.one", "system", "source", "filesystem");
-    oauth.contributes["source"] = serde_json::json!({"authentication": {"kind": "oauth"}});
-    assert!(support::settings_upgrade_lines(&oauth, false).iter().all(|line| !line.contains("需要升级")));
-    assert!(support::source_auth_gap_contract(&oauth).is_some_and(|line| line.contains("statusMethod")));
-    assert!(tool_native::source_auth_actions(&oauth).is_empty());
-    assert_eq!(
-        (tool_native::source_login_plugin_ids(&[login_plugin, oauth.clone()]), tool_native::source_login_plugin_ids(&[])),
-        (vec!["source.one".to_string()], Vec::<String>::new()),
-    );
-    model.admin.plugins = vec![oauth];
-    send(&mut model, AdminMessage::CallSourceAuth { plugin_id: "oauth.one".into(), slot: SourceAuthCall::CreateSession });
-    assert!(model.admin.take_effects().is_empty());
-}
-
-#[test]
-fn acceptance_pages_use_the_admin_surface() {
-    let settings = ShellViewModel::for_page(ShellPage::Settings);
-    assert!(settings.admin_settings_visible());
-    assert!(ShellViewModel::for_page(ShellPage::Logs).admin_workspace_visible(WorkspacePanel::Logs));
-    let plugins = ShellViewModel::for_page(ShellPage::PluginSettings);
-    assert!(plugins.admin_workspace_visible(WorkspacePanel::Extensions));
-    assert!(!plugins.admin_settings_visible());
-}
-
-#[test]
-fn settings_bundle_keeps_previous_data_when_one_request_fails() {
-    let mut model = ShellViewModel::default();
-    model.admin.plugins = vec![plugin("keep", "system", "service", "service")];
-    send(&mut model, AdminMessage::SettingsBundleLoaded {
-        plugins: Ok(vec![plugin("next", "system", "service", "service")]),
-        hooks: Err("钩子失败".into()),
-        cache: Ok(CacheSnapshot { config: CacheConfig { metadata_capacity: 1, thumbnail_capacity: 2, query_capacity: 3 }, entries: Vec::new() }),
-        api: Ok(ApiDesignSnapshot { transport: "local".into(), endpoints: vec![ApiDefinition {
-            group: "system".into(), transport: "local".into(), method: "GET".into(), path: "/health".into(), summary: "健康".into(),
-            command: None, plugin_id: None, plugin_method: None, requires_auth: None, request_template: None,
-        }] }),
-    });
-    assert_eq!(model.admin.plugins[0].plugin_id, "keep");
-    assert!(model.admin.cache.is_none());
-    assert_eq!(model.admin.action_error, "钩子失败");
-}
-
-#[test]
-fn dependency_label_uses_status_counts_and_directory_failure_is_visible() {
-    let mut manifest = plugin("user.one", "user", "service", "service");
-    manifest.requires = vec!["a".into(), "b".into()];
-    manifest.dependency_status.required = vec![];
-    assert_eq!(support::dependency_label(&manifest), "必需 2 / 可选 0");
-    assert_eq!(support::dependency_status_label("missing"), "缺失");
-    assert_eq!(support::plugin_status_label(&manifest), "已启用");
-    manifest.enabled = false;
-    assert_eq!(support::plugin_status_label(&manifest), "未启用");
-    let mut model = ShellViewModel::default();
-    model.admin.plugins = vec![manifest];
-    send(&mut model, AdminMessage::OpenDataDirectory("user.one".into()));
-    assert!(matches!(model.admin.take_effects().pop(), Some(AdminEffect::OpenDataDirectory { name, .. }) if name == "user.one"));
-    send(&mut model, AdminMessage::DataDirectoryFinished { name: "user.one".into(), result: Ok("C:/plugin".into()) });
-    assert_eq!(model.admin.action_message, "已打开“user.one”设置目录。");
-    assert!(model.admin.action_error.is_empty());
-}
-
-#[test]
-fn provider_settings_become_fields_and_downloader_page_stays_upgrade() {
-    let mut manifest = plugin("asmr", "builtin", "service", "asmr-one");
-    manifest.contributes = serde_json::json!({
-        "settings": { "settingsPage": { "label": "ASMR" }, "fields": [] },
-        "provider": { "settings": {
-            "language": { "default": "zh-cn", "options": ["zh-cn", "ja-jp"] },
-            "proxy": { "default": "" },
-            "maxParallelism": { "default": 4, "minimum": 1, "maximum": 16 },
-            "requestTimeoutMs": { "default": 10000, "minimum": 1000 }
-        }}
-    });
-    assert!(!support::has_vue_settings_page(&manifest));
-    let fields = support::settings_fields(&manifest);
-    let language = fields.iter().find(|field| field.key == "language").expect("language");
-    assert_eq!(language.field_type, "select");
-    assert_eq!(language.label, "语言");
-    assert_eq!(fields.iter().find(|field| field.key == "proxy").expect("proxy").field_type, "string");
-    assert_eq!(fields.iter().find(|field| field.key == "maxParallelism").expect("parallel").label, "最大并行");
-    assert_eq!(fields.iter().find(|field| field.key == "requestTimeoutMs").expect("timeout").field_type, "number");
-
-    manifest.contributes = serde_json::json!({
-        "settings": { "settingsPage": { "label": "下载服务" }, "fields": [] }
-    });
-    assert!(support::has_vue_settings_page(&manifest));
-    assert!(support::is_downloader_settings(&manifest));
-    assert!(support::settings_upgrade_lines(&manifest, false).is_empty());
-    let mut model = ShellViewModel::default();
-    model.admin.plugins = vec![manifest];
-    send(&mut model, AdminMessage::RefreshDownloader);
-    match model.admin.take_effects().pop() {
-        Some(AdminEffect::CallPlugin { plugin_id, method, origin, .. }) => {
-            assert_eq!(plugin_id, "momobako.service.downloader");
-            assert_eq!(method, "downloader.getRuntimeStatus");
-            assert_eq!(origin, PluginCallOrigin::Downloader);
-        }
-        other => panic!("unexpected {other:?}"),
-    }
-    assert!(model.admin.downloader_status.is_none());
-    send(&mut model, AdminMessage::DownloaderStatusFinished {
-        result: Ok(serde_json::json!({"runtime": "aria2", "aria2": {"running": true, "version": "1.37.0"}})),
-    });
-    let status = model.admin.downloader_status.expect("状态");
-    assert_eq!(status.version, "1.37.0");
-    assert_eq!(status.queue_size, None);
-    assert_eq!(status.aria2_state, "运行中");
-}
-
-#[test]
-fn asmr_shortcuts_publish_onto_the_filter_bar() {
-    let mut model = ShellViewModel::default();
-    let mut manifest = plugin("momobako.library.asmr", "builtin", "library-kind", "asmr");
-    manifest.contributes = serde_json::json!({
-        "libraryExtension": { "libraryKind": "asmr", "searchShortcuts": ["works", "missing"] }
-    });
-    model.reduce(ShellMessage::PluginsLoaded(Ok(vec![manifest])));
-    assert_eq!(model.inspect.shortcuts.len(), 1);
-    assert_eq!(model.inspect.shortcuts[0].label, "ASMR 作品");
-    assert_eq!(model.inspect.shortcuts[0].metadata, "libraryKind=asmr");
+    send(&mut model, AdminMessage::Api(ApiMessage::SelectEndpoint("plugin-call:momobako.service.downloader:downloader.getRuntimeStatus".into())));
+    assert_eq!(model.admin.api.request_text, "{}");
+    send(&mut model, AdminMessage::Api(ApiMessage::Send));
+    assert!(matches!(
+        model.admin.take_effects().pop(),
+        Some(AdminEffect::CallPlugin { method, origin: PluginCallOrigin::Playground, .. }) if method == "downloader.getRuntimeStatus"
+    ));
+    send(&mut model, AdminMessage::Api(ApiMessage::PluginFinished(Ok(json!({ "payload": { "running": true } })))));
+    assert_eq!(model.admin.api.response_status, "OK");
+    assert!(model.admin.api.response_headers.contains("downloader.getRuntimeStatus"));
+    send(&mut model, AdminMessage::Api(ApiMessage::Send));
+    send(&mut model, AdminMessage::Api(ApiMessage::PluginFinished(Err("插件未启用".into()))));
+    assert_eq!((model.admin.api.response_status.as_str(), model.admin.api.error.as_str()), ("ERROR", "插件未启用"));
 }
 
 #[test]
@@ -785,7 +730,7 @@ fn file_plugin_call_keeps_repository_and_writes_activity() {
     send(&mut model, AdminMessage::CallFilePlugin {
         plugin_id: "momobako.netease.source".into(),
         method: "media.clearTrackCache".into(),
-        payload: serde_json::json!({"songId": 9}),
+        payload: json!({"songId": 9}),
         repository_id: Some("repo".into()),
     });
     match model.admin.take_effects().pop() {
@@ -796,57 +741,21 @@ fn file_plugin_call_keeps_repository_and_writes_activity() {
         }
         other => panic!("unexpected {other:?}"),
     }
-    send(&mut model, AdminMessage::FilePluginFinished {
-        method: "media.clearTrackCache".into(),
-        result: Ok(serde_json::json!({})),
-    });
+    send(&mut model, AdminMessage::FilePluginFinished { method: "media.clearTrackCache".into(), result: Ok(json!({})) });
     assert_eq!(model.files.activity, "已调用 media.clearTrackCache。");
+    send(&mut model, AdminMessage::FilePluginFinished { method: "media.clearTrackCache".into(), result: Err(String::new()) });
+    assert_eq!(model.files.error, "media.clearTrackCache 调用失败。");
 }
 
 #[test]
-fn source_repository_create_uses_login_config_and_drops_cookies() {
+fn asmr_shortcuts_publish_onto_the_filter_bar() {
     let mut model = ShellViewModel::default();
-    let mut manifest = plugin("momobako.netease.source", "builtin", "source", "netease-cloud-music");
-    manifest.contributes["source"] = serde_json::json!({
-        "authentication": {
-            "repositoryProvisioning": { "repoIdPrefix": "netease-cloud-music" }
-        }
+    let mut manifest = plugin("momobako.library.asmr", "builtin", "library-kind", "asmr");
+    manifest.contributes = json!({
+        "libraryExtension": { "libraryKind": "asmr", "searchShortcuts": ["works", "missing"] }
     });
-    model.admin.plugins = vec![manifest];
-    model.admin.source_auth.plugin_id = "momobako.netease.source".into();
-    model.admin.source_auth.payload = Some(serde_json::json!({
-        "credentialRef": "keyring:momobako.netease.source:123456",
-        "backendConfig": {
-            "accountId": "123456",
-            "credentialRef": "keyring:momobako.netease.source:123456",
-            "cookie": "should-not-save",
-            "accountCookie": "also-hidden"
-        },
-        "account": { "id": 123456, "userName": "Aura" }
-    }));
-    model.admin.source_repo_name = "云村 Aura".into();
-    model.admin.source_repo_path = "C:/Mock/NeteaseCache".into();
-    send(&mut model, AdminMessage::SubmitSourceRepository);
-    match model.admin.take_effects().pop() {
-        Some(AdminEffect::CreateSourceRepository { repo_id, name, path, backend_plugin_id, backend_config }) => {
-            assert_eq!(repo_id, "netease-cloud-music-123456");
-            assert_eq!(name, "云村 Aura");
-            assert_eq!(path, "C:/Mock/NeteaseCache");
-            assert_eq!(backend_plugin_id, "momobako.netease.source");
-            assert_eq!(backend_config["accountId"], "123456");
-            assert_eq!(backend_config["credentialRef"], "keyring:momobako.netease.source:123456");
-            assert!(backend_config.get("cookie").is_none());
-            assert!(backend_config.get("accountCookie").is_none());
-        }
-        other => panic!("unexpected {other:?}"),
-    }
-    send(&mut model, AdminMessage::SourceRepositoryFinished { result: Ok("已创建 云村 Aura（netease-cloud-music-123456）C:/Mock/NeteaseCache".into()) });
-    assert!(model.workspace.take_effects().iter().any(|effect| matches!(effect, super::super::workspace::WorkspaceEffect::RefreshRepositories { .. })));
-    assert!(model.admin.action_error.is_empty());
-
-    model.admin.source_creating = false;
-    model.admin.source_auth.payload = Some(serde_json::json!({"loggedIn": true}));
-    send(&mut model, AdminMessage::SubmitSourceRepository);
-    assert!(model.admin.take_effects().is_empty());
-    assert_eq!(model.admin.action_error, "登录结果没有账号配置，没有创建仓库。");
+    load_bundle(&mut model, vec![manifest]);
+    assert_eq!(model.inspect.shortcuts.len(), 1);
+    assert_eq!(model.inspect.shortcuts[0].label, "ASMR 作品");
+    assert_eq!(model.inspect.shortcuts[0].metadata, "libraryKind=asmr");
 }

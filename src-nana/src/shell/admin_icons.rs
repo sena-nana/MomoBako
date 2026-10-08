@@ -74,9 +74,6 @@ static LOADER_CIRCLE_DATA: IconData = IconData { name: "lucide-loader-circle", s
 /// lucide `log-out`（`LogOut`）。
 pub(crate) const LOG_OUT: Icon = lucide(&LOG_OUT_DATA);
 static LOG_OUT_DATA: IconData = IconData { name: "lucide-log-out", shapes: EMPTY, svg: r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/></svg>"# };
-/// lucide `clipboard-list`（`ClipboardList`）。
-pub(crate) const CLIPBOARD_LIST: Icon = lucide(&CLIPBOARD_LIST_DATA);
-static CLIPBOARD_LIST_DATA: IconData = IconData { name: "lucide-clipboard-list", shapes: EMPTY, svg: r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="8" height="4" x="8" y="2" rx="1" ry="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="M12 11h4"/><path d="M12 16h4"/><path d="M8 11h.01"/><path d="M8 16h.01"/></svg>"# };
 /// lucide `x`（`X`）。
 pub(crate) const X: Icon = lucide(&X_DATA);
 static X_DATA: IconData = IconData { name: "lucide-x", shapes: EMPTY, svg: r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>"# };
@@ -95,6 +92,3 @@ static SEARCH_DATA: IconData = IconData { name: "lucide-search", shapes: EMPTY, 
 /// lucide `shield-alert`（`ShieldAlert`）。
 pub(crate) const SHIELD_ALERT: Icon = lucide(&SHIELD_ALERT_DATA);
 static SHIELD_ALERT_DATA: IconData = IconData { name: "lucide-shield-alert", shapes: EMPTY, svg: r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="M12 8v4"/><path d="M12 16h.01"/></svg>"# };
-/// lucide `chevron-down`（`ChevronDown`）。
-pub(crate) const CHEVRON_DOWN: Icon = lucide(&CHEVRON_DOWN_DATA);
-static CHEVRON_DOWN_DATA: IconData = IconData { name: "lucide-chevron-down", shapes: EMPTY, svg: r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>"# };

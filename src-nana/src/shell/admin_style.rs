@@ -10,7 +10,7 @@ use std::sync::Arc;
 use nana_ui::runtime::view::{widget, AnyView, IntoView};
 use nana_ui::runtime::{
     AlignSpec, BoxPaint, Button, IconGlyph, InteractionStyle, JustifySpec, LengthSpec, NodeStyle, PaintContext, Painter,
-    SemanticPaint, Stack, Text, TextHorizontalAlignment,
+    SemanticPaint, Stack, Text, TextHorizontalAlignment, TextInput,
 };
 use nana_ui_core::{
     Icon, LineHeightSpec, OverflowWrapSpec, RadiusTier, SemanticColorMix, SemanticColorRole as Role, ThemeMode,
@@ -45,7 +45,12 @@ pub(crate) fn label_px(value: impl Into<String>, size: f32, weight: u16, color: 
 
 /// 等宽文字，对应 Vue `font-family: var(--font-mono)`。
 pub(crate) fn mono(value: impl Into<String>, size: f32, weight: u16, color: Role) -> Text {
-    let mut text = label(value, size, weight, color);
+    mono_lh(value, size, weight, color, LINE)
+}
+
+/// 指定行高倍数的等宽文字，日志上下文的 `<pre>` 用 1.6。
+pub(crate) fn mono_lh(value: impl Into<String>, size: f32, weight: u16, color: Role, line: f32) -> Text {
+    let mut text = label_lh(value, size, weight, color, line);
     Arc::make_mut(&mut text.style.layout).font_family = Some(MONO_FAMILY.into());
     text
 }
@@ -95,28 +100,6 @@ pub(crate) enum Tone {
 /// Vue 原生 `<button>`：高 32、左右内边距 10、字 14/500、图标 14、间距 6、圆角 sm。
 /// 禁用时整体 45% 不透明，不换颜色。
 pub(crate) fn action(text: impl Into<String>, icon: Option<Icon>, tone: Tone, disabled: bool) -> Button {
-    sized_action(text, icon, tone, disabled, ActionSize::Native)
-}
-
-/// 按钮尺寸档。`Native` 是裸 `<button>`，`Small` 是 `.repository-add-popover__action` 一类的 30 高按钮。
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum ActionSize {
-    Native,
-    Compact,
-}
-
-/// 指定尺寸档的按钮。
-pub(crate) fn sized_action(
-    text: impl Into<String>,
-    icon: Option<Icon>,
-    tone: Tone,
-    disabled: bool,
-    size: ActionSize,
-) -> Button {
-    let (height, font) = match size {
-        ActionSize::Native => (32.0, 14.0),
-        ActionSize::Compact => (30.0, 14.0),
-    };
     let (foreground, background, hovered, pressed, weight) = match tone {
         Tone::Plain => (Role::Text, None, Some(Role::Hover), Some(Role::Active), 500),
         Tone::Primary => (Role::AccentOnSoft, Some(Role::AccentSoft), Some(Role::AccentSoftHover), Some(Role::AccentSoftPressed), 600),
@@ -139,14 +122,14 @@ pub(crate) fn sized_action(
     };
     {
         let layout = Arc::make_mut(&mut style.layout);
-        layout.height = Some(LengthSpec::Px(height));
-        layout.min_height = Some(LengthSpec::Px(height));
+        layout.height = Some(LengthSpec::Px(32.0));
+        layout.min_height = Some(LengthSpec::Px(32.0));
         layout.width = Some(LengthSpec::Shrink);
         layout.padding_left = Some(LengthSpec::Px(10.0));
         layout.padding_right = Some(LengthSpec::Px(10.0));
         layout.padding_top = Some(LengthSpec::Px(0.0));
         layout.padding_bottom = Some(LengthSpec::Px(0.0));
-        layout.font_size = Some(font);
+        layout.font_size = Some(14.0);
         layout.font_weight = Some(weight);
         layout.line_height = Some(LineHeightSpec::Relative(LINE));
         layout.white_space_nowrap = true;
