@@ -312,12 +312,12 @@ fn settings_editor(view_model: &ShellViewModel) -> Option<AnyView> {
                     vec![
                         widget(TextInput::new(cache_limit).label("缩略图缓存上限（MB）"))
                             .on_cx(|_, event: &TextChanged, cx| {
-                                cx.dispatch_program(ShellMessage::SettingsCacheLimitChanged(event.value.to_string()));
+                                cx.dispatch_program_all(ShellMessage::SettingsCacheLimitChanged(event.value.to_string()));
                             })
                             .into_any(),
                         widget(TextInput::new(player_id).label("默认播放器类型"))
                             .on_cx(|_, event: &TextChanged, cx| {
-                                cx.dispatch_program(ShellMessage::SettingsPlayerChanged(event.value.to_string()));
+                                cx.dispatch_program_all(ShellMessage::SettingsPlayerChanged(event.value.to_string()));
                             })
                             .into_any(),
                     ],
@@ -329,20 +329,20 @@ fn settings_editor(view_model: &ShellViewModel) -> Option<AnyView> {
                             text(format!("关闭行为：{}", close_label(&close_behavior))).key("settings-close-label"),
                             widget(Stack::spacer()),
                             button("确认后关闭").key("settings-close-confirm").on_cx(|_, _: &Activate, cx| {
-                                cx.dispatch_program(ShellMessage::SettingsCloseBehaviorChanged("confirm".into()));
+                                cx.dispatch_program_all(ShellMessage::SettingsCloseBehaviorChanged("confirm".into()));
                             }),
                             button("最小化到托盘").key("settings-close-tray").on_cx(|_, _: &Activate, cx| {
-                                cx.dispatch_program(ShellMessage::SettingsCloseBehaviorChanged("minimizeToTray".into()));
+                                cx.dispatch_program_all(ShellMessage::SettingsCloseBehaviorChanged("minimizeToTray".into()));
                             }),
                             button("直接退出").key("settings-close-quit").on_cx(|_, _: &Activate, cx| {
-                                cx.dispatch_program(ShellMessage::SettingsCloseBehaviorChanged("quit".into()));
+                                cx.dispatch_program_all(ShellMessage::SettingsCloseBehaviorChanged("quit".into()));
                             }),
                         ))
                         .into_any()],
                 ),
                 view_model.settings_error.clone().map(|error| text(format!("设置提示：{error}")).key("settings-error")),
                 button("保存应用设置").key("save-application-settings").on_cx(|_, _: &Activate, cx| {
-                    cx.dispatch_program(ShellMessage::SaveSettings);
+                    cx.dispatch_program_all(ShellMessage::SaveSettings);
                 }),
             ))
             .into_any(),

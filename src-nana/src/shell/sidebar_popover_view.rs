@@ -83,7 +83,7 @@ fn dismiss_layer(submitting: bool) -> AnyView {
         .key("repository-popover-dismiss")
         .on_cx(move |_, _: &Activate, cx| {
             if !submitting {
-                cx.dispatch_program(sidebar_message(SidebarMessage::CloseRepositoryPopover));
+                cx.dispatch_program_all(sidebar_message(SidebarMessage::CloseRepositoryPopover));
             }
         })
         .into_any()
@@ -144,7 +144,7 @@ fn switcher(model: &ShellViewModel) -> AnyView {
                 .content(content)
                 .key(format!("repository-switch-{repo_id}"))
                 .on_cx(move |_, _: &Activate, cx| {
-                    cx.dispatch_program(sidebar_message(SidebarMessage::SelectRepositoryFromSwitcher(repo_id.clone())));
+                    cx.dispatch_program_all(sidebar_message(SidebarMessage::SelectRepositoryFromSwitcher(repo_id.clone())));
                 })
                 .into_any()
         })
@@ -153,10 +153,10 @@ fn switcher(model: &ShellViewModel) -> AnyView {
     let actions = widget(top_divider(Stack::column(2.0), 6.0))
     .children((
         menu_item(Some(PLUS), "添加资源库", "repository-add", false, submitting, |cx| {
-            cx.dispatch_program(sidebar_message(SidebarMessage::ShowRepositoryAddMenu));
+            cx.dispatch_program_all(sidebar_message(SidebarMessage::ShowRepositoryAddMenu));
         }),
         menu_item(Some(TRASH), "删除当前资源库", "repository-delete", true, submitting || active_id.is_none(), |cx| {
-            cx.dispatch_program(sidebar_message(SidebarMessage::DeleteRepositoryFromSwitcher));
+            cx.dispatch_program_all(sidebar_message(SidebarMessage::DeleteRepositoryFromSwitcher));
         }),
     ))
     .into_any();
@@ -182,7 +182,7 @@ fn add_menu(model: &ShellViewModel, options: &[BackendOption]) -> AnyView {
         .map(|option| {
             let plugin_id = option.plugin_id.clone();
             menu_item(None, &option.label, "repository-backend", false, submitting || !option.enabled, move |cx| {
-                cx.dispatch_program(sidebar_message(SidebarMessage::SelectRepositoryBackend(plugin_id.clone())));
+                cx.dispatch_program_all(sidebar_message(SidebarMessage::SelectRepositoryBackend(plugin_id.clone())));
             })
         })
         .collect::<Vec<_>>();
@@ -240,7 +240,7 @@ fn backend_form(model: &ShellViewModel, options: &[BackendOption]) -> AnyView {
         widget(parts::label_text(title, 13.0, 700, Some(SemanticColorRole::Text))),
         widget(Stack::spacer()),
         widget(close.colors_from_style()).key("repository-form-close").on_cx(|_, _: &Activate, cx| {
-            cx.dispatch_program(sidebar_message(SidebarMessage::CloseRepositoryPopover));
+            cx.dispatch_program_all(sidebar_message(SidebarMessage::CloseRepositoryPopover));
         }),
     ));
     let mut summary_text = parts::label_text(summary, 12.0, 400, Some(SemanticColorRole::Muted)).line_height(17.0);
@@ -253,7 +253,7 @@ fn backend_form(model: &ShellViewModel, options: &[BackendOption]) -> AnyView {
         widget(Stack::column(6.0)).children((
             widget(parts::label_text(label, 12.0, 600, Some(SemanticColorRole::Muted))),
             widget(input).on_cx(move |_, event: &TextChanged, cx| {
-                cx.dispatch_program(sidebar_message(SidebarMessage::Gap(message(event.value.to_string()))));
+                cx.dispatch_program_all(sidebar_message(SidebarMessage::Gap(message(event.value.to_string()))));
             }),
         ))
     };
@@ -280,14 +280,14 @@ fn backend_form(model: &ShellViewModel, options: &[BackendOption]) -> AnyView {
     .children((
         widget(Stack::spacer()),
         widget(Button::new("返回").kind(ButtonKind::Ghost).disabled(submitting)).key("repository-form-back").on_cx(|_, _: &Activate, cx| {
-            cx.dispatch_program(sidebar_message(SidebarMessage::BackToAddMenu));
+            cx.dispatch_program_all(sidebar_message(SidebarMessage::BackToAddMenu));
         }),
         widget(Button::new("取消").kind(ButtonKind::Ghost).disabled(submitting)).key("repository-form-cancel").on_cx(|_, _: &Activate, cx| {
-            cx.dispatch_program(sidebar_message(SidebarMessage::CloseRepositoryPopover));
+            cx.dispatch_program_all(sidebar_message(SidebarMessage::CloseRepositoryPopover));
         }),
         widget(parts::primary_button(if submitting { "创建中" } else { "创建" }).disabled(blocked))
             .key("repository-form-submit")
-            .on_cx(|_, _: &Activate, cx| cx.dispatch_program(sidebar_message(SidebarMessage::Gap(GapMessage::SubmitBackend)))),
+            .on_cx(|_, _: &Activate, cx| cx.dispatch_program_all(sidebar_message(SidebarMessage::Gap(GapMessage::SubmitBackend)))),
     ));
     surface(
         10.0,

@@ -42,13 +42,13 @@ pub(super) fn title_bar(model: &ShellViewModel) -> impl IntoView + use<'_> {
         widget(chrome_button(sidebar_icon, sidebar_label, false))
             .key("sidebar-toggle")
             .on_cx(|_, _: &Activate, cx| {
-                cx.dispatch_program(ShellMessage::ToggleSidebar);
+                cx.dispatch_program_all(ShellMessage::ToggleSidebar);
             }),
     )
     .center(widget(Stack::row(4.0).align(AlignSpec::Center)).children((
         widget(search_field(query)).key("global-search").on_cx(|_, event: &TextChanged, cx| {
-            cx.dispatch_program(ShellMessage::SetWorkspacePanel(WorkspacePanel::Search));
-            cx.dispatch_program(ShellMessage::Inspect(InspectMessage::SetQuery(event.value.to_string())));
+            cx.dispatch_program_all(ShellMessage::SetWorkspacePanel(WorkspacePanel::Search));
+            cx.dispatch_program_all(ShellMessage::Inspect(InspectMessage::SetQuery(event.value.to_string())));
         }),
         filter_toggle(filter_label, filter_open || filter_count > 0, filter_count),
     )))
@@ -91,8 +91,8 @@ fn filter_toggle(label: &'static str, active: bool, count: usize) -> AnyView {
     }
     button.style = style;
     let toggle = widget(button.colors_from_style()).key("filter-toggle").on_cx(|_, _: &Activate, cx| {
-        cx.dispatch_program(ShellMessage::SetWorkspacePanel(WorkspacePanel::Search));
-        cx.dispatch_program(ShellMessage::Inspect(InspectMessage::ToggleFilterBar));
+        cx.dispatch_program_all(ShellMessage::SetWorkspacePanel(WorkspacePanel::Search));
+        cx.dispatch_program_all(ShellMessage::Inspect(InspectMessage::ToggleFilterBar));
     });
     if count == 0 {
         return toggle.into_any();
@@ -182,7 +182,7 @@ pub(super) fn bind_window_controls(document: &mut RuntimeDocument) -> Result<(),
             entity,
             "momobako-window",
             move |_, _: &Activate, cx| {
-                cx.dispatch_program(ShellMessage::WindowAction(action));
+                cx.dispatch_program_all(ShellMessage::WindowAction(action));
             },
         ) {
             eprintln!("Nana 窗口控件没有接上点击：{error}");

@@ -70,7 +70,7 @@ pub fn sidebar_switcher(model: &ShellViewModel) -> impl IntoView + use<'_> {
         .content(content)
         .key("repository-switcher")
         .on_cx(|_, _: &Activate, cx| {
-            cx.dispatch_program(sidebar_message(SidebarMessage::OpenRepositorySwitcher));
+            cx.dispatch_program_all(sidebar_message(SidebarMessage::OpenRepositorySwitcher));
         });
     let top = Stack::column(0.0).with_layout(|layout| {
         layout.padding_bottom = Some(LengthSpec::Px(8.0));
@@ -155,7 +155,7 @@ fn shortcut_group(model: &ShellViewModel, locked: bool) -> AnyView {
         .map(|(id, count, active)| {
             NavRow { label: id.label().into(), icon: Some(shortcut_icon(id)), count: Some(count.to_string()), active, disabled: locked }
                 .view(format!("shortcut-{}", shortcut_key(id)), move |cx| {
-                    cx.dispatch_program(sidebar_message(SidebarMessage::SelectShortcut(id)));
+                    cx.dispatch_program_all(sidebar_message(SidebarMessage::SelectShortcut(id)));
                 })
         })
         .collect::<Vec<_>>();
@@ -201,7 +201,7 @@ fn quick_access_group(model: &ShellViewModel, locked: bool) -> Option<AnyView> {
             };
             NavRow { label: shortcut.label.clone(), icon: Some(icon), count: None, active: false, disabled: locked }
                 .view(format!("quick-access-{id}"), move |cx| {
-                    cx.dispatch_program(sidebar_message(SidebarMessage::OpenQuickAccess(id.clone())));
+                    cx.dispatch_program_all(sidebar_message(SidebarMessage::OpenQuickAccess(id.clone())));
                 })
         })
         .collect::<Vec<_>>();
@@ -222,7 +222,7 @@ fn actions_group(model: &ShellViewModel, locked: bool) -> Option<AnyView> {
         active: model.workspace.panel == WorkspacePanel::Actions,
         disabled: locked,
     }
-    .view("sidebar-actions".into(), |cx| cx.dispatch_program(ShellMessage::SetWorkspacePanel(WorkspacePanel::Actions)));
+    .view("sidebar-actions".into(), |cx| cx.dispatch_program_all(ShellMessage::SetWorkspacePanel(WorkspacePanel::Actions)));
     Some(group(group_header(widget(group_title("动作")).into_any(), Vec::new(), "actions-header"), vec![
         widget(Stack::column(1.0)).children((row,)).into_any(),
     ]))
@@ -243,7 +243,7 @@ fn playlist_group(model: &ShellViewModel, locked: bool) -> AnyView {
     let create_locked = !has_repo || locked || model.playlist_players.is_empty();
     let title = playlist_title(count, expanded);
     let tools = vec![tree_action(PLUS, "新建播放集", "playlist-create", create_locked, |cx| {
-        cx.dispatch_program(ShellMessage::OpenPlaylistDialog);
+        cx.dispatch_program_all(ShellMessage::OpenPlaylistDialog);
     })];
     let mut body = Vec::new();
     if expanded {
@@ -280,7 +280,7 @@ fn playlist_title(count: usize, expanded: bool) -> AnyView {
     widget(ListItem::new(label).style(style))
         .content(content)
         .key("playlist-toggle")
-        .on_cx(|_, _: &Activate, cx| cx.dispatch_program(sidebar_message(SidebarMessage::TogglePlaylists)))
+        .on_cx(|_, _: &Activate, cx| cx.dispatch_program_all(sidebar_message(SidebarMessage::TogglePlaylists)))
         .into_any()
 }
 
@@ -317,17 +317,17 @@ fn playlist_list(model: &ShellViewModel) -> AnyView {
             .content(widget(Stack::column(0.0).width(LengthSpec::Fill)).children((widget(name), widget(meta))))
             .key(format!("playlist-open-{id}"))
             .on_cx(move |_, _: &Activate, cx| {
-                cx.dispatch_program(sidebar_message(SidebarMessage::OpenSidebarPlaylist(open_id.clone())));
+                cx.dispatch_program_all(sidebar_message(SidebarMessage::OpenSidebarPlaylist(open_id.clone())));
             });
         let playable = !super::player_view::playlist_plugin_missing(model, &playlist.player_type_id);
         let play_id = id.clone();
         let remove_id = id.clone();
         let actions = widget(Stack::row(2.0).align(AlignSpec::Center)).children((
             tree_action(PLAYER_PLAY, "播放播放集", "playlist-play", !playable, move |cx| {
-                cx.dispatch_program(sidebar_message(SidebarMessage::Gap(super::sidebar::GapMessage::PlayPlaylist(play_id.clone()))));
+                cx.dispatch_program_all(sidebar_message(SidebarMessage::Gap(super::sidebar::GapMessage::PlayPlaylist(play_id.clone()))));
             }),
             danger_tree_action(TRASH, "删除播放集", move |cx| {
-                cx.dispatch_program(sidebar_message(SidebarMessage::Gap(super::sidebar::GapMessage::RemovePlaylist(remove_id.clone()))));
+                cx.dispatch_program_all(sidebar_message(SidebarMessage::Gap(super::sidebar::GapMessage::RemovePlaylist(remove_id.clone()))));
             }),
         ));
         let item = Stack::bar(6.0).align(AlignSpec::Center).padding(4.0).radius(RadiusTier::Md);
@@ -359,16 +359,16 @@ pub fn sidebar_footer(model: &ShellViewModel) -> impl IntoView + use<'_> {
     let tasks_open = model.admin.popover_open;
     let task_count = model.active_tasks;
     let task_button = FooterButton { icon: CLIPBOARD_LIST, label: "任务", active: tasks_open, highlight: task_count > 0, rest_opacity: rest }
-        .view("footer-tasks", |cx| cx.dispatch_program(ShellMessage::Admin(super::admin::AdminMessage::ToggleTaskPopover)));
+        .view("footer-tasks", |cx| cx.dispatch_program_all(ShellMessage::Admin(super::admin::AdminMessage::ToggleTaskPopover)));
     let task = if task_count > 0 { with_badge(task_button, task_count) } else { task_button };
     widget(Stack::row(2.0).align(AlignSpec::Center)).key("sidebar-footer").children((
         FooterButton { icon: SETTINGS, label: "设置", active: settings, highlight: false, rest_opacity: rest }
-            .view("footer-settings", |cx| cx.dispatch_program(ShellMessage::Navigate(ShellPage::Settings))),
+            .view("footer-settings", |cx| cx.dispatch_program_all(ShellMessage::Navigate(ShellPage::Settings))),
         FooterButton { icon: PUZZLE, label: "拓展", active: extensions, highlight: false, rest_opacity: rest }
-            .view("footer-extensions", |cx| cx.dispatch_program(ShellMessage::SetWorkspacePanel(WorkspacePanel::Extensions))),
+            .view("footer-extensions", |cx| cx.dispatch_program_all(ShellMessage::SetWorkspacePanel(WorkspacePanel::Extensions))),
         task,
         FooterButton { icon: LOGS, label: "日志", active: logs, highlight: false, rest_opacity: rest }
-            .view("footer-logs", |cx| cx.dispatch_program(ShellMessage::SetWorkspacePanel(WorkspacePanel::Logs))),
+            .view("footer-logs", |cx| cx.dispatch_program_all(ShellMessage::SetWorkspacePanel(WorkspacePanel::Logs))),
     ))
 }
 
