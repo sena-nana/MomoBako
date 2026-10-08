@@ -21,7 +21,7 @@ fn cached_dest_pipeline(
             generation: policy.generation(),
             target_format: nana_gpu::__framework::format_from_wgpu(format),
             sample_count: 1,
-            shader: 0x6465_7374_7069_7065,
+            shader: 0x6465_7374_7069_7065 ^ super::corner_shape::cache_salt(),
             layout: layout_key,
             material,
             primitive: 0,
@@ -330,13 +330,13 @@ fn reading_blend_pipeline(
     });
     let group_blend_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("nana-ui.scene.group.blend.shader"),
-        source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(concat!(
+        source: wgpu::ShaderSource::Wgsl(super::corner_shape::specialize(concat!(
             include_str!("shader/color.wgsl"),
             "\n",
             include_str!("shader/layer.wgsl"),
             "\n",
             include_str!("shader/layer_blend.wgsl"),
-        ))),
+        ), super::corner_shape::corner_exponent())),
     });
     let group_blend_pipeline_layout =
         device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -684,11 +684,11 @@ impl DestTarget {
         }));
         let group_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("nana-ui.scene.group.shader"),
-            source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(concat!(
+            source: wgpu::ShaderSource::Wgsl(super::corner_shape::specialize(concat!(
                 include_str!("shader/color.wgsl"),
                 "\n",
                 include_str!("shader/layer.wgsl"),
-            ))),
+            ), super::corner_shape::corner_exponent())),
         });
         let group_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {

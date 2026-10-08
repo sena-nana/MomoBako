@@ -9,6 +9,7 @@ mod backdrop;
 mod buffer_upload;
 mod clip;
 mod color;
+mod corner_shape;
 mod dest;
 mod host_texture;
 mod icon;
@@ -52,6 +53,7 @@ pub use image_url::{
 };
 use validate::validate_scene;
 pub use validate::{HostTextureSceneResolver, ScenePaintError};
+pub use corner_shape::{corner_exponent, set_corner_exponent};
 
 use backdrop::BackdropPipeline;
 use clip::{
@@ -88,6 +90,8 @@ pub struct ScenePaintViewport {
 }
 
 pub struct SceneWgpuPainter {
+    /// 建着色器模块时用的圆角指数；全局值变了，宿主据此重建绘制器。
+    corner_exponent: f32,
     targets: std::collections::HashMap<RenderTargetId, TargetState>,
     prepared_batch: Option<PreparedBatch>,
     gpu: GpuContext,
@@ -254,6 +258,7 @@ impl SceneWgpuPainter {
     /// A painter for targets of `format` on `gpu`. Every frame it paints must
     /// come from the same device.
     pub fn new(gpu: &GpuContext, format: GpuTextureFormat) -> Self {
+        let corner_exponent = corner_shape::corner_exponent();
         let device = __framework::device(gpu);
         let queue = __framework::queue(gpu);
         let format = __framework::format_to_wgpu(format);
@@ -269,6 +274,7 @@ impl SceneWgpuPainter {
             motion_gpu_supported,
         );
         Self {
+            corner_exponent,
             targets: std::collections::HashMap::new(),
             prepared_batch: None,
             gpu: gpu.clone(),
@@ -391,6 +397,11 @@ impl SceneWgpuPainter {
     /// The hosted runtime decides this per window from the surface's alpha
     /// mode and [`SubpixelOrder::system`]; a host that owns its surface makes
     /// the same call.
+    /// 这个绘制器的着色器按哪个圆角指数编译。
+    pub fn corner_exponent(&self) -> f32 {
+        self.corner_exponent
+    }
+
     pub fn set_subpixel_text(&mut self, order: Option<SubpixelOrder>) {
         if self.text.set_subpixel(&self.device, order) {
             // The retained batch holds instances resolved under the old mode.
