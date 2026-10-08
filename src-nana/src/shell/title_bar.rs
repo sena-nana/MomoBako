@@ -15,7 +15,6 @@ use nana_ui::runtime::{
 };
 use nana_ui::{ControlSize, Icon};
 
-use super::inspect::SearchFilters;
 use super::sidebar_view::parts;
 use super::workspace::WorkspacePanel;
 use super::{InspectMessage, ShellMessage, ShellViewModel};
@@ -31,7 +30,7 @@ pub(super) fn title_bar(model: &ShellViewModel) -> impl IntoView + use<'_> {
     let sidebar_icon = if collapsed { LAYOUT_SIDEBAR_LEFT_EXPAND } else { LAYOUT_SIDEBAR_LEFT_COLLAPSE };
     let filter_open = model.inspect.filter_bar_open;
     let filter_label = if filter_open { "隐藏筛选栏" } else { "显示筛选栏" };
-    let filter_count = active_filter_count(&model.inspect.filters);
+    let filter_count = model.inspect.active_filter_count();
     let query = model.inspect.query.clone();
     widget(
         AppTitleBar::new("MomoBako")
@@ -120,24 +119,6 @@ fn filter_toggle(label: &'static str, active: bool, count: usize) -> AnyView {
     widget(Stack::row(0.0).with_layout(|layout| layout.position = nana_ui_core::PositionSpec::Relative))
         .children((toggle, badge))
         .into_any()
-}
-
-/// 筛选条件数，和 Vue `activeFilterCount` 一样逐项计数。
-fn active_filter_count(filters: &SearchFilters) -> usize {
-    filters.tags.len()
-        + filters.formats.len()
-        + filters.colors.len()
-        + filters.shapes.len()
-        + filters.exclude_tags.len()
-        + filters.exclude_formats.len()
-        + usize::from(!filters.metadata_filters.trim().is_empty())
-        + usize::from(!filters.exclude_metadata_filters.trim().is_empty())
-        + usize::from(!filters.number_filters.trim().is_empty())
-        + usize::from(!filters.date_filters.trim().is_empty())
-        + usize::from(filters.match_mode == super::inspect::MatchMode::Or)
-        + usize::from(!filters.sort_field.trim().is_empty())
-        + usize::from(filters.limit.is_some())
-        + usize::from(filters.min_rating.is_some())
 }
 
 /// 搜索框：`--bg-subtle` 底、无描边、左右 10px、文字和占位居中；悬停或聚焦换 `--bg-hover`。
