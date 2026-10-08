@@ -51,8 +51,8 @@ pub(super) fn page_bitmap(model: &ShellViewModel) -> Option<AnyView> {
     Some(widget(frame).key("inspect-native-page").into_any())
 }
 
-/// 滚动区：翻页在上，页纸在下。
-pub(super) fn page_scroller(page: AnyView, nav: Option<(usize, usize)>) -> AnyView {
+/// 滚动区：翻页在上，页纸在下。`key` 带文件和页码，翻页或换文件时回到顶部。
+pub(super) fn page_scroller(page: AnyView, nav: Option<(usize, usize)>, key: String) -> AnyView {
     let mut children = Vec::new();
     if let Some((index, total)) = nav {
         children.push(page_nav(index, total));
@@ -68,7 +68,7 @@ pub(super) fn page_scroller(page: AnyView, nav: Option<(usize, usize)>) -> AnyVi
         layout.min_height = Some(LengthSpec::Px(0.0));
         layout.width = Some(LengthSpec::Fill);
     }))
-    .key("inspect-page-scroll")
+    .key(key)
     .children((sheet,))
     .into_any()
 }
@@ -80,11 +80,11 @@ pub(super) fn page_nav(index: usize, total: usize) -> AnyView {
         .key("inspect-page-nav")
         .children((
             widget(page_button("上一页", index == 0)).key("inspect-page-prev").on_cx(|_, _: &Activate, cx| {
-                cx.dispatch_program(ShellMessage::Inspect(InspectMessage::TurnPage(-1)));
+                cx.dispatch_program_all(ShellMessage::Inspect(InspectMessage::TurnPage(-1)));
             }),
             widget(text(&format!("{} / {total}", index + 1), 14.0, 400, SemanticColorRole::Text, 21.7)).key("inspect-page-label"),
             widget(page_button("下一页", index + 1 >= total)).key("inspect-page-next").on_cx(|_, _: &Activate, cx| {
-                cx.dispatch_program(ShellMessage::Inspect(InspectMessage::TurnPage(1)));
+                cx.dispatch_program_all(ShellMessage::Inspect(InspectMessage::TurnPage(1)));
             }),
         ))
         .into_any()

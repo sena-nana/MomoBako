@@ -5,7 +5,7 @@
 //! 代次或当前项变了的结果直接丢弃。测试构建的出声仍不打开声卡。
 
 use super::super::inspect::{InspectState, PreviewBody};
-use super::wav_player::{self, Action};
+use super::wav_player::{self, Action, Output};
 use super::{PlayerEffect, PlayerState, QueueItem};
 
 const CLIP_EXTENSIONS: &[&str] = &["mp4", "mov", "mkv", "webm", "avi", "m4v", "m4a", "aac", "opus"];
@@ -41,8 +41,8 @@ pub(super) fn load_item(player: &mut PlayerState, item: &QueueItem) {
     player.still = None;
     player.outside_note = None;
     player.cursor_item = None;
-    // 换到播放列表条目时，预览装进游标的音频让位。
-    player.preview_armed = false;
+    player.loaded_item = None;
+    // 换到播放列表条目时，预览不再驱动当前项。
     player.preview_path.clear();
     player.session.repo_id = player.repo_id.clone().unwrap_or_default();
     player.session.playlist_id = item.playlist_id.clone();
@@ -185,12 +185,14 @@ fn install_clip(player: &mut PlayerState, parts: crate::shell::MediaParts) {
     player.session.error = None;
     player.session.current_time_ms = 0;
     player.session.status = parts.session.status;
+    player.loaded_item = player.current_id.clone();
     if let Some(pcm) = parts.pcm {
         player.wav.install_preview(pcm);
         player.cursor_item = player.current_id.clone();
+        player.apply_cursor_volume();
         if player.wants_playing {
             let session = player.session.clone();
-            let (session, error) = wav_player::drive(true, &player.wav, session, Action::Play);
+            let (session, error) = wav_player::drive(Output::Cursor, &player.wav, session, Action::Play);
             player.session = session;
             if let Some(error) = error {
                 eprintln!("Nana 播放列表当前项出声失败：{error}");
@@ -210,6 +212,7 @@ fn install_clip(player: &mut PlayerState, parts: crate::shell::MediaParts) {
 fn install_still(player: &mut PlayerState, item: &QueueItem, pixels: super::super::PreviewPixels) {
     player.session.status = if player.wants_playing { "playing" } else { "paused" }.into();
     player.can_play = true;
+    player.loaded_item = player.current_id.clone();
     player.still = Some(StillShow { path: item.path.clone(), frame: Some(pixels) });
 }
 
@@ -220,7 +223,12 @@ fn fail_still(player: &mut PlayerState, item: &QueueItem, error: &str) {
     player.fail_session("图片无法播放".into());
 }
 
+/// 预览页显示的正是当前项时，把会话和画面写回预览页；别的文件的预览不动。
 pub(super) fn publish_clip(player: &mut PlayerState, inspect: &mut InspectState) {
+    let shown = player.current_item().is_some_and(|item| inspect.target_path.as_deref() == Some(item.path.as_str()));
+    if !shown {
+        return;
+    }
     inspect.replace_shared_media(player.session.clone());
     if !player.clip_owned {
         return;

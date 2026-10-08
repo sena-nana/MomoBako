@@ -23,12 +23,35 @@ pub(super) mod paint;
 #[path = "player_bar.rs"]
 pub(super) mod bar;
 
+/// 拼进键的外部文本（条目编号、路径）：`/` 是键路径分隔符，`%` 和 `/` 转义成 `%25`、`%2F`，
+/// 不同的原文不会撞成同一个键。
+pub(crate) fn key_part(text: &str) -> String {
+    text.replace('%', "%25").replace('/', "%2F")
+}
+
 /// 文件页、预览页和播放集页共用的播放表面。播放集面板时是整页，其余是播放条。
+/// 文件预览页自己把播放条贴在页底（Vue `files-preview-page` 里的 `WorkspacePlayerBar`），
+/// 这时这里只给一个空位，不画第二条。
 pub(super) fn player_surface(model: &ShellViewModel) -> AnyView {
     if model.workspace.panel == super::workspace::WorkspacePanel::Playlist {
         return playlist_page(model);
     }
+    if preview_hosts_bar(model) {
+        return widget(Stack::column(0.0)).key("player-surface-in-preview").into_any();
+    }
+    hosted_bar(model)
+}
+
+/// 播放条，下载进行时下面多一行进度。预览页的页底也用它。
+pub(super) fn hosted_bar(model: &ShellViewModel) -> AnyView {
     with_download(model, bar::player_bar(model))
+}
+
+/// 文件面板正在显示文件预览页。
+fn preview_hosts_bar(model: &ShellViewModel) -> bool {
+    model.workspace.panel == super::workspace::WorkspacePanel::Files
+        && model.page == super::ShellPage::SelectedFile
+        && model.inspect.has_target()
 }
 
 /// 下载进度只在下载进行时写在播放条下面一行。
@@ -84,7 +107,7 @@ fn header(name: &str, subline: &str, has_player: bool) -> AnyView {
     ));
     let play = widget(toolbar_button("播放", icons::PLAY, ButtonKind::Ghost, !has_player, SemanticColorRole::Surface))
         .key("playlist-play")
-        .on_cx(|_, _: &Activate, cx| cx.dispatch_program(player_message(PlayerMessage::PlayListed { item_id: None })));
+        .on_cx(|_, _: &Activate, cx| cx.dispatch_program_all(player_message(PlayerMessage::PlayListed { item_id: None })));
     widget(Stack::bar(16.0).align(AlignSpec::Start))
         .children((titles, widget(Stack::row(8.0).align(AlignSpec::Center).grow(0.0).shrink(0.0)).children((play,))))
         .key("playlist-page-header")
@@ -116,7 +139,7 @@ fn playlist_items(model: &ShellViewModel, items: &[PlaylistItem], has_player: bo
         .key("playlist-reorder")
         .on_cx(|_, event: &ReorderListEvent, cx| {
             if let ReorderListEvent::Reorder { source, before } = event {
-                cx.dispatch_program(player_message(PlayerMessage::Reorder {
+                cx.dispatch_program_all(player_message(PlayerMessage::Reorder {
                     source: source.to_string(),
                     before: before.as_ref().map(|value| value.to_string()),
                 }));
@@ -131,10 +154,10 @@ fn playlist_row(item: &PlaylistItem, playlist_id: &str, has_player: bool) -> Any
     let id = item.playlist_item_id.clone();
     let ready = item.status == "ready";
     let detail = if ready {
-        widget(meta_line(&item.path, SemanticColorRole::Muted)).key(format!("playlist-item-path-{id}")).into_any()
+        widget(meta_line(&item.path, SemanticColorRole::Muted)).key(format!("playlist-item-path-{}", key_part(id.as_ref()))).into_any()
     } else {
         let reason = item.status_reason.clone().unwrap_or_else(|| item.status.clone());
-        widget(meta_line(&reason, SemanticColorRole::Danger)).key(format!("playlist-item-status-{id}")).into_any()
+        widget(meta_line(&reason, SemanticColorRole::Danger)).key(format!("playlist-item-status-{}", key_part(id.as_ref()))).into_any()
     };
     let meta = widget(Stack::column(4.0).width(LengthSpec::Shrink).min_width(LengthSpec::Px(0.0)).grow(1.0).shrink(1.0))
         .children((item_title(&id, &item.filename), detail));
@@ -143,14 +166,14 @@ fn playlist_row(item: &PlaylistItem, playlist_id: &str, has_player: bool) -> Any
     let remove_id = id.clone();
     let actions = widget(Stack::row(8.0).align(AlignSpec::Center).grow(0.0).shrink(0.0)).children((
         widget(toolbar_button("播放", icons::PLAY, ButtonKind::Ghost, !ready || !has_player, SemanticColorRole::Background))
-            .key(format!("playlist-item-play-{id}"))
+            .key(format!("playlist-item-play-{}", key_part(id.as_ref())))
             .on_cx(move |_, _: &Activate, cx| {
-                cx.dispatch_program(player_message(PlayerMessage::PlayListed { item_id: Some(play_id.clone()) }));
+                cx.dispatch_program_all(player_message(PlayerMessage::PlayListed { item_id: Some(play_id.clone()) }));
             }),
         widget(toolbar_button("移除", icons::TRASH_2, ButtonKind::Danger, false, SemanticColorRole::Background))
-            .key(format!("playlist-remove-{id}"))
+            .key(format!("playlist-remove-{}", key_part(id.as_ref())))
             .on_cx(move |_, _: &Activate, cx| {
-                cx.dispatch_program(ShellMessage::RemovePlaylistItem { playlist_id: remove_playlist.clone(), item_id: remove_id.clone() });
+                cx.dispatch_program_all(ShellMessage::RemovePlaylistItem { playlist_id: remove_playlist.clone(), item_id: remove_id.clone() });
             }),
     ));
     widget(
@@ -168,7 +191,7 @@ fn playlist_row(item: &PlaylistItem, playlist_id: &str, has_player: bool) -> Any
             }),
     )
     .children((drag_handle(&id), extension_mark(&id, &item.extension), meta, actions))
-    .key(format!("playlist-item-{id}"))
+    .key(format!("playlist-item-{}", key_part(id.as_ref())))
     .into_any()
 }
 
@@ -184,7 +207,7 @@ fn drag_handle(id: &str) -> AnyView {
             .shrink(0.0),
     )
     .children((widget(nana_ui::runtime::IconGlyph::new(icons::GRIP_VERTICAL).size(16.0).role(SemanticColorRole::Faint)),))
-    .key(format!("playlist-item-drag-{id}"))
+    .key(format!("playlist-item-drag-{}", key_part(id.as_ref())))
     .into_any()
 }
 
@@ -213,9 +236,9 @@ fn extension_mark(id: &str, extension: &str) -> AnyView {
     layout.padding_right = Some(LengthSpec::Px(0.0));
     let style = button.style.clone();
     widget(Button::new(button.label).style(style))
-        .key(format!("playlist-item-ext-{id}"))
+        .key(format!("playlist-item-ext-{}", key_part(id.as_ref())))
         .on_cx(move |_, _: &Activate, cx| {
-            cx.dispatch_program(player_message(PlayerMessage::OpenPreview { item_id: Some(item_id.clone()) }));
+            cx.dispatch_program_all(player_message(PlayerMessage::OpenPreview { item_id: Some(item_id.clone()) }));
         })
         .into_any()
 }
@@ -225,9 +248,9 @@ fn extension_mark(id: &str, extension: &str) -> AnyView {
 fn item_title(id: &str, title: &str) -> AnyView {
     let item_id = id.to_string();
     let hit = widget(bar::hit_area(title, false, 0.0, 6.0))
-        .key(format!("playlist-item-title-{id}"))
+        .key(format!("playlist-item-title-{}", key_part(id.as_ref())))
         .on_cx(move |_, _: &Activate, cx| {
-            cx.dispatch_program(player_message(PlayerMessage::OpenPreview { item_id: Some(item_id.clone()) }));
+            cx.dispatch_program_all(player_message(PlayerMessage::OpenPreview { item_id: Some(item_id.clone()) }));
         });
     let mut label = Text::new(title).color(SemanticColorRole::Text).font_size(14.0).font_weight(600).line_height(21.7).truncating();
     std::sync::Arc::make_mut(&mut label.style.layout).min_width = Some(LengthSpec::Px(0.0));

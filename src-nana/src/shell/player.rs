@@ -179,13 +179,13 @@ pub struct PlayerState {
     stored: BTreeMap<String, StoredSession>,
     effects: Vec<PlayerEffect>,
     wav: wav_player::WavPlayer,
-    preview_armed: bool,
+    /// 预览页刚接管当前项时是它的路径；离开预览页后清空，临时条目留作当前项。
     preview_path: String,
     /// 当前项解出的画面。没有当前项或不是视频时为空，不保留整队画面。
     clip_frames: Option<Vec<super::inspect::support::VideoFrame>>,
     /// 为真时，下一次发布才改预览画面。预览自己的帧不会被空的播放列表清掉。
     clip_owned: bool,
-    /// 图片幻灯片。没有帧时 `missing` 写明缺的像素，不编造画面。
+    /// 图片幻灯片的当前帧。读不到时没有帧，不编造画面。
     pub(crate) still: Option<StillShow>,
     /// 扩展名不在音视频会话里、也不是图片时的缺数据说明。
     pub(crate) outside_note: Option<String>,
@@ -193,6 +193,8 @@ pub struct PlayerState {
     load_generation: u64,
     /// PCM 正装在共用游标里的条目。播放、暂停、跳转和音量只在它是当前项时驱动游标。
     cursor_item: Option<String>,
+    /// 已经读好的条目（音视频或图片，有没有 PCM 都算）。是当前项时控制直接生效。
+    loaded_item: Option<String>,
 }
 
 impl Default for PlayerState {
@@ -226,7 +228,6 @@ impl Default for PlayerState {
             stored: BTreeMap::new(),
             effects: Vec::new(),
             wav: wav_player::WavPlayer::default(),
-            preview_armed: false,
             preview_path: String::new(),
             clip_frames: None,
             clip_owned: false,
@@ -234,6 +235,7 @@ impl Default for PlayerState {
             outside_note: None,
             load_generation: 0,
             cursor_item: None,
+            loaded_item: None,
         }
     }
 }
@@ -424,14 +426,7 @@ impl PlayerState {
         } else {
             extension.to_ascii_lowercase()
         };
-        let matched = find_player_for_extension(&extension, &self.candidates, &self.contributions);
-        let Some((player_type_id, label, file_class)) = (match matched {
-            Some(PlayerMatch::Native(candidate)) => Some((candidate.player_type_id.clone(), candidate.label.clone(), candidate.file_class.clone())),
-            Some(PlayerMatch::Contribution(contribution)) => {
-                Some((contribution.player_type_id.clone(), contribution.label.clone(), contribution.file_class.clone()))
-            }
-            None => None,
-        }) else {
+        let Some((player_type_id, label, file_class)) = self.entry_player(&extension) else {
             eprintln!("Nana 没有可用于播放此媒体的插件：{path}");
             self.activity = "没有可用于播放此媒体的插件".into();
             return;
@@ -446,20 +441,7 @@ impl PlayerState {
         }
         self.repo_id = Some(repo_id.to_string());
         let item = self.transient_item(path, filename, &extension, asset_id, &player_type_id, &label, &file_class);
-        let current = self.current_id.clone();
-        self.queue.retain(|queue_item| !queue_item.transient || queue_item.path != path);
-        if let Some(index) = current.as_ref().and_then(|id| self.queue.iter().position(|queue_item| &queue_item.id == id)) {
-            self.queue.insert(index + 1, item.clone());
-            if self.mode == PlaybackMode::Shuffle {
-                let mut order: Vec<String> = self.shuffle_order.iter().filter(|id| self.queue.iter().any(|queue_item| &queue_item.id == *id) || id.as_str() == item.id).cloned().collect();
-                if let Some(order_index) = order.iter().position(|id| Some(id) == current.as_ref()) {
-                    order.insert(order_index + 1, item.id.clone());
-                    self.shuffle_order = order;
-                }
-            }
-        } else {
-            self.queue.push(item.clone());
-        }
+        self.insert_transient(item.clone());
         self.play_item(&item.id, true);
         self.publish(inspect);
     }
@@ -534,10 +516,17 @@ impl PlayerState {
             // 还在读取：只记下意图，装载完成后按它决定是否出声。
             return;
         }
-        let use_wav = self.audible();
+        if !self.item_loaded() {
+            // 当前项没装好（停过、失败过或换过仓库）：要播放就重新读取，装好后按意图出声。
+            if let Some(id) = self.current_id.clone().filter(|_| playing) {
+                self.play_item(&id, true);
+                self.publish(inspect);
+            }
+            return;
+        }
         let session = self.session.clone();
         let action = if playing { wav_player::Action::Play } else { wav_player::Action::Pause };
-        let (session, error) = wav_player::drive(use_wav, &self.wav, session, action);
+        let (session, error) = wav_player::drive(self.output(), &self.wav, session, action);
         self.session = session;
         if let Some(error) = error {
             eprintln!("Nana 播放控制失败：{error}");
@@ -553,9 +542,12 @@ impl PlayerState {
             eprintln!("Nana 图片幻灯片不支持跳转");
             return;
         }
-        let use_wav = self.audible();
+        if !self.item_loaded() {
+            eprintln!("Nana 当前项还没装好，不能跳转");
+            return;
+        }
         let session = self.session.clone();
-        let (session, error) = wav_player::drive(use_wav, &self.wav, session, wav_player::Action::Seek(position_ms));
+        let (session, error) = wav_player::drive(self.output(), &self.wav, session, wav_player::Action::Seek(position_ms));
         self.session = session;
         if let Some(error) = error {
             eprintln!("Nana 播放进度失败：{error}");
@@ -570,9 +562,15 @@ impl PlayerState {
             return;
         }
         let volume = volume.clamp(0.0, 1.0);
-        let use_wav = self.audible();
+        if !self.item_loaded() {
+            // 还没有装好的条目：只记下音量，下一项装好时沿用。
+            self.session.volume = volume;
+            self.persist_if_needed();
+            self.publish(inspect);
+            return;
+        }
         let session = self.session.clone();
-        let (session, error) = wav_player::drive(use_wav, &self.wav, session, wav_player::Action::Volume(volume));
+        let (session, error) = wav_player::drive(self.output(), &self.wav, session, wav_player::Action::Volume(volume));
         self.session = session;
         if let Some(error) = error {
             eprintln!("Nana 播放音量失败：{error}");
@@ -629,6 +627,8 @@ impl PlayerState {
     fn stop_runtime(&mut self, clear_stored_session: bool, _inspect: &mut InspectState) {
         self.wav.clear();
         self.cursor_item = None;
+        self.loaded_item = None;
+        self.preview_path.clear();
         self.load_generation = self.load_generation.wrapping_add(1);
         self.drop_clip_frames();
         let previous_repo = self.repo_id.clone();
@@ -808,6 +808,9 @@ fn fresh_session(repo_id: &str) -> PlaybackSessionState {
 
 #[path = "player_reduce.rs"]
 mod reduce;
+#[path = "player_preview.rs"]
+mod preview;
+pub(crate) use preview::PreviewEntry;
 #[path = "player_library.rs"]
 mod library;
 pub(crate) use reduce::reduce_message;

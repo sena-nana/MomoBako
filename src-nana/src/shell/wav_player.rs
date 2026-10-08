@@ -294,17 +294,26 @@ pub(super) enum Action {
     Volume(f32),
 }
 
-/// 选中内置内存播放器时用游标，其它候选仍是缺失解码器。
+/// 控制落到哪里：PCM 在游标里就出声；装好了但没有声音（只有画面的视频）只走时钟；
+/// 都不是时按缺解码器报错。
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum Output {
+    Cursor,
+    Clock,
+    Missing,
+}
+
+/// 按 [`Output`] 驱动播放、暂停、跳转和音量，返回新的会话和可能的错误。
 pub(super) fn drive(
-    use_memory: bool,
+    output: Output,
     wav: &WavPlayer,
     session: PlaybackSessionState,
     action: Action,
 ) -> (PlaybackSessionState, Option<String>) {
-    if use_memory {
-        control(wav.clone(), session, action)
-    } else {
-        control(MissingDecoder, session, action)
+    match output {
+        Output::Cursor => control(wav.clone(), session, action),
+        Output::Clock => control(ClockOnly, session, action),
+        Output::Missing => control(MissingDecoder, session, action),
     }
 }
 
@@ -321,6 +330,33 @@ fn control<P: PlaybackMediaPlugin>(
         Action::Volume(volume) => controller.set_volume(volume).err(),
     };
     (controller.state().clone(), error)
+}
+
+/// 只有画面、没有 PCM 的条目：播放、暂停、跳转和音量都只改会话，由播放时钟往前拨。
+struct ClockOnly;
+
+impl PlaybackMediaPlugin for ClockOnly {
+    fn load(&mut self, _source: &str) -> Result<PlaybackMediaCapabilities, String> {
+        Err("只有画面的条目不重复装载".into())
+    }
+
+    fn play(&mut self) -> Result<(), String> {
+        Ok(())
+    }
+
+    fn pause(&mut self) -> Result<(), String> {
+        Ok(())
+    }
+
+    fn seek(&mut self, _position_ms: u64) -> Result<(), String> {
+        Ok(())
+    }
+
+    fn set_volume(&mut self, _volume: f32) -> Result<(), String> {
+        Ok(())
+    }
+
+    fn dispose(&mut self) {}
 }
 
 struct MissingDecoder;

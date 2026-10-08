@@ -24,7 +24,7 @@ pub(super) fn preview_page(model: &ShellViewModel, body: AnyView) -> AnyView {
     let radius = crate::theme_map::radius_2xl(model.admin.corner_radius as f32);
     let stacked = model.viewport_width <= STACK_BREAKPOINT;
     let mut rows = vec![header(model, stacked), main(model, body, stacked)];
-    rows.push(super::super::player_view::bar::player_bar(model));
+    rows.push(super::super::player_view::hosted_bar(model));
     widget(
         Stack::fill_column(0.0)
             .surface(SemanticColorRole::Surface)
@@ -61,19 +61,19 @@ fn header(model: &ShellViewModel, stacked: bool) -> AnyView {
     let reveal_path = absolute;
     let back = widget(action_button("返回", icons::ARROW_LEFT, 15.0, 34.0, !enabled))
         .key("inspect-back")
-        .on_cx(move |_, _: &Activate, cx| cx.dispatch_program(ShellMessage::OpenDirectory(directory.clone())));
+        .on_cx(move |_, _: &Activate, cx| cx.dispatch_program_all(ShellMessage::OpenDirectory(directory.clone())));
     let actions = widget(Stack::row(8.0).align(AlignSpec::Center).grow(0.0).shrink(0.0))
         .key("inspect-preview-actions")
         .children((
             widget(action_button("打开", icons::EYE, 14.0, 32.0, !can_open)).key("inspect-open").on_cx(move |_, _: &Activate, cx| {
-                cx.dispatch_program(ShellMessage::Input(super::super::input::InputMessage::OpenEntry {
+                cx.dispatch_program_all(ShellMessage::Input(super::super::input::InputMessage::OpenEntry {
                     has_repo,
                     absolute_path: open_path.clone(),
                 }));
             }),
             widget(action_button("定位", icons::FOLDER_OPEN, 14.0, 32.0, !can_reveal)).key("inspect-reveal").on_cx(
                 move |_, _: &Activate, cx| {
-                    cx.dispatch_program(ShellMessage::Input(super::super::input::InputMessage::RevealEntry {
+                    cx.dispatch_program_all(ShellMessage::Input(super::super::input::InputMessage::RevealEntry {
                         absolute_path: reveal_path.clone(),
                     }));
                 },
@@ -164,6 +164,7 @@ fn main(model: &ShellViewModel, body: AnyView, stacked: bool) -> AnyView {
     if !stacked {
         return content;
     }
+    let scroll_key = content_key(model, "preview-body");
     // 单列时正文整体滚动，事实卡不再限高。
     widget(ScrollView::new(ScrollAxes::Vertical).with_layout(|layout| {
         layout.flex_grow = Some(1.0);
@@ -173,8 +174,15 @@ fn main(model: &ShellViewModel, body: AnyView, stacked: bool) -> AnyView {
         layout.width = Some(LengthSpec::Fill);
     }))
     .children((content,))
-    .key("inspect-preview-scroll")
+    .key(scroll_key)
     .into_any()
+}
+
+/// 滚动区按显示的内容取键：换文件时回到顶部，同一个文件重挂时位置保持。
+pub(super) fn content_key(model: &ShellViewModel, kind: &str) -> String {
+    let repo = super::super::player_view::key_part(model.workspace.active_repo_id.as_deref().unwrap_or_default());
+    let path = super::super::player_view::key_part(model.inspect.target_path.as_deref().unwrap_or_default());
+    format!("{kind}-{repo}-{path}")
 }
 
 /// 预览框（铺满）、色板槽（至少 14px）和资源库扩展的预览面板，行距 10。
@@ -227,7 +235,8 @@ fn palette_slot(colors: &[String]) -> AnyView {
         .iter()
         .filter_map(|color| parse_hex(color).map(|rgba| (color.clone(), rgba)))
         .take(5)
-        .map(|(color, rgba)| {
+        .enumerate()
+        .map(|(index, (color, rgba))| {
             widget(
                 Stack::row(0.0)
                     .width(LengthSpec::Px(34.0))
@@ -238,7 +247,7 @@ fn palette_slot(colors: &[String]) -> AnyView {
                     .radius_px(999.0)
                     .with_layout(move |layout| layout.background = Some(rgba)),
             )
-            .key(format!("inspect-palette-{color}"))
+            .key(format!("inspect-palette-{index}-{}", color.trim_start_matches('#')))
             .into_any()
         })
         .collect::<Vec<_>>();
@@ -281,7 +290,7 @@ fn stats(model: &ShellViewModel, stacked: bool) -> AnyView {
     let mut style = card.style.clone();
     style.background = Some(SemanticColorRole::Background);
     style.radius = Some(RadiusTier::Xl);
-    widget(card.style(style)).children((rows,)).key("inspect-preview-stats").into_any()
+    widget(card.style(style)).children((rows,)).key(content_key(model, "preview-stats")).into_any()
 }
 
 /// 页头按钮：透明底、正文色，图标在字前，悬停铺 bg-hover。禁用时字和图标在面板底色上淡化。

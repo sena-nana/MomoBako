@@ -28,6 +28,9 @@ pub fn dispatch_inspect_effects(app: &mut MomoBakoApplication, context: &Runtime
             InspectEffect::LoadNative { repo_id, path, view_id, generation } => {
                 dispatch_native(app, context, repo_id, path, view_id, generation);
             }
+            InspectEffect::Autoplay { path, generation } => {
+                app.shell.reduce(ShellMessage::Inspect(InspectMessage::Autoplay { path, generation }));
+            }
             InspectEffect::LoadMedia { repo_id, path, generation } => {
                 dispatch_media(app, context, repo_id, path, generation);
             }

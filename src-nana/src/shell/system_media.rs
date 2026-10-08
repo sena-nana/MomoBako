@@ -56,11 +56,7 @@ pub fn command_message(command: MediaCommand, repo_id: Option<String>) -> Player
 /// 从当前播放项和元数据拼出系统控件要显示的标题、艺人和专辑。
 pub fn now_playing(player: &PlayerState, file_thumbnail: Option<&str>) -> MediaNowPlaying {
     let listed = listed_item(player);
-    let filename = player
-        .current_item()
-        .map(|item| item.filename.as_str())
-        .filter(|name| !name.is_empty())
-        .or_else(|| player.preview_audio_armed().then(|| file_name(player.preview_path())));
+    let filename = player.current_item().map(|item| item.filename.as_str()).filter(|name| !name.is_empty());
     let metadata = listed.and_then(|item| item.metadata.as_ref());
     let (title, artist, album) = media_text(filename, metadata);
     let thumbnail = listed
@@ -69,7 +65,7 @@ pub fn now_playing(player: &PlayerState, file_thumbnail: Option<&str>) -> MediaN
         .filter(|path| !path.is_empty())
         .map(str::to_string)
         .or_else(|| file_thumbnail.map(str::trim).filter(|path| !path.is_empty()).map(str::to_string));
-    let enabled = player.current_item().is_some() || player.preview_audio_armed();
+    let enabled = player.current_item().is_some();
     MediaNowPlaying {
         title,
         artist,
@@ -114,10 +110,6 @@ pub fn sync(window: &nana_ui::WindowHandle, shell: &ShellViewModel) {
 fn listed_item(player: &PlayerState) -> Option<&PlaylistItem> {
     let current = player.current_id.as_deref()?;
     player.listed.as_ref()?.items.iter().find(|item| item.playlist_item_id == current)
-}
-
-fn file_name(path: &str) -> &str {
-    path.rsplit(['/', '\\']).next().filter(|name| !name.is_empty()).unwrap_or("MomoBako")
 }
 
 /// 标题、艺人、专辑。艺人优先用数组，其次用单个字符串。
@@ -180,8 +172,7 @@ fn file_thumbnail(shell: &ShellViewModel) -> Option<String> {
         .current_item()
         .map(|item| item.path.as_str())
         .filter(|path| !path.is_empty())
-        .map(str::to_string)
-        .or_else(|| shell.player.preview_audio_armed().then(|| shell.player.preview_path().to_string()))?;
+        .map(str::to_string)?;
     shell
         .files
         .rows
