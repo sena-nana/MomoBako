@@ -94,6 +94,17 @@ fn options_merge_snapshot_results_and_folder_metadata() {
 }
 
 #[test]
+fn selected_values_stay_in_the_options_so_they_can_be_removed() {
+    let mut model = shell();
+    model.inspect.filters.colors = vec!["青色".into()];
+    model.inspect.filters.tags = vec!["待整理".into()];
+    let options = filter_options(&model);
+    assert_eq!(options.colors, ["青色"], "手动添加的颜色有芯片");
+    assert_eq!(options.tags, ["待整理"], "已选标签即使数据里没有也显示");
+    assert!(options.formats.is_empty() && options.shapes.is_empty());
+}
+
+#[test]
 fn swatches_take_hex_then_known_names_then_the_accent() {
     assert_eq!(swatch_color("#3FA796"), SwatchColor::Rgb([0x3f, 0xa7, 0x96]));
     assert_eq!(swatch_color(" #e05252 "), SwatchColor::Rgb([0xe0, 0x52, 0x52]));

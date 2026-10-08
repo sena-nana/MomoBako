@@ -13,7 +13,7 @@ use crate::backend::services::repository::{FileBrowserSnapshot, RepositorySnapsh
 
 use super::super::workspace::{LibraryCategory, WorkspacePanel};
 use super::super::workspace_refresh::SilentMessage;
-use super::super::{ShellMessage, ShellPage, ShellViewModel};
+use super::super::{FilesMessage, ShellMessage, ShellPage, ShellViewModel};
 use super::{InspectEffect, InspectMessage, InspectState};
 
 #[path = "search_request.rs"]
@@ -509,6 +509,7 @@ impl InspectState {
         self.filter_bar_open = false;
         self.searching = false;
         self.search_error.clear();
+        self.search_ui.reveal_hit = None;
     }
 }
 
@@ -526,6 +527,16 @@ pub(super) fn observe(model: &mut ShellViewModel, message: &ShellMessage) {
             }
         }
         ShellMessage::FileBrowserLoaded(result) => reveal_after_browse(model, result),
+        // 用户已经去了别处：等待中的命中不再打开，免得以后读到同一目录时突然跳进预览。
+        ShellMessage::OpenDirectory(_)
+        | ShellMessage::SelectFile { .. }
+        | ShellMessage::SetWorkspacePanel(_)
+        | ShellMessage::SetLibraryCategory(_)
+        | ShellMessage::Files(FilesMessage::OpenPath(_) | FilesMessage::OpenRow(_) | FilesMessage::ActivateRow(_)) => {
+            if model.inspect.search_ui.reveal_hit.take().is_some() {
+                eprintln!("Nana 打开搜索结果前已经切到别处，放弃等待中的命中");
+            }
+        }
         _ => {}
     }
 }

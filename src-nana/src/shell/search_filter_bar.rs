@@ -19,9 +19,11 @@ use super::super::{ShellMessage, ShellViewModel};
 use super::presenter::{self, RATING_OPTIONS};
 use super::widgets::{self, CONTROL_HEIGHT, INPUT_WIDTH};
 
-/// 高级区一个输入：字段、无障碍名称、占位文字和是否占两列。
+/// 高级区一个输入：字段、稳定键、无障碍名称、占位文字和是否占两列。
+/// 键只用 ASCII，重挂后按键路径找回焦点。
 struct AdvancedInput {
     field: AdvancedField,
+    key: &'static str,
     name: &'static str,
     placeholder: &'static str,
     wide: bool,
@@ -29,22 +31,23 @@ struct AdvancedInput {
 
 /// Vue 高级区输入的顺序和文案。排序方向下拉在「排序字段」之后，「结果数量」之前。
 const ADVANCED_INPUTS: [AdvancedInput; 11] = [
-    AdvancedInput { field: AdvancedField::ExcludeQuery, name: "排除关键词", placeholder: "排除关键词", wide: false },
-    AdvancedInput { field: AdvancedField::ExcludePaths, name: "排除路径", placeholder: "排除路径", wide: false },
-    AdvancedInput { field: AdvancedField::ExcludeTags, name: "排除标签", placeholder: "排除标签", wide: false },
-    AdvancedInput { field: AdvancedField::ExcludeFormats, name: "排除格式", placeholder: "排除格式", wide: false },
-    AdvancedInput { field: AdvancedField::Metadata, name: "元数据", placeholder: "libraryKind=audio", wide: true },
-    AdvancedInput { field: AdvancedField::ExcludeMetadata, name: "排除元数据", placeholder: "status=archived", wide: true },
-    AdvancedInput { field: AdvancedField::ExcludeNumber, name: "排除数值范围", placeholder: "排除 width=0..640", wide: true },
+    AdvancedInput { field: AdvancedField::ExcludeQuery, key: "exclude-query", name: "排除关键词", placeholder: "排除关键词", wide: false },
+    AdvancedInput { field: AdvancedField::ExcludePaths, key: "exclude-paths", name: "排除路径", placeholder: "排除路径", wide: false },
+    AdvancedInput { field: AdvancedField::ExcludeTags, key: "exclude-tags", name: "排除标签", placeholder: "排除标签", wide: false },
+    AdvancedInput { field: AdvancedField::ExcludeFormats, key: "exclude-formats", name: "排除格式", placeholder: "排除格式", wide: false },
+    AdvancedInput { field: AdvancedField::Metadata, key: "metadata", name: "元数据", placeholder: "libraryKind=audio", wide: true },
+    AdvancedInput { field: AdvancedField::ExcludeMetadata, key: "exclude-metadata", name: "排除元数据", placeholder: "status=archived", wide: true },
+    AdvancedInput { field: AdvancedField::ExcludeNumber, key: "exclude-number", name: "排除数值范围", placeholder: "排除 width=0..640", wide: true },
     AdvancedInput {
         field: AdvancedField::ExcludeDate,
+        key: "exclude-date",
         name: "排除日期范围",
         placeholder: "排除 fileCreatedAt=2024-01-01T00:00:00Z..",
         wide: true,
     },
-    AdvancedInput { field: AdvancedField::Number, name: "数值范围", placeholder: "width=1024..4096", wide: true },
-    AdvancedInput { field: AdvancedField::Date, name: "日期范围", placeholder: "fileCreatedAt=2024-01-01T00:00:00Z..", wide: true },
-    AdvancedInput { field: AdvancedField::SortField, name: "排序字段", placeholder: "排序字段", wide: false },
+    AdvancedInput { field: AdvancedField::Number, key: "number", name: "数值范围", placeholder: "width=1024..4096", wide: true },
+    AdvancedInput { field: AdvancedField::Date, key: "date", name: "日期范围", placeholder: "fileCreatedAt=2024-01-01T00:00:00Z..", wide: true },
+    AdvancedInput { field: AdvancedField::SortField, key: "sort-field", name: "排序字段", placeholder: "排序字段", wide: false },
 ];
 
 /// 筛选栏本身。壳层在有仓库且筛选栏打开时把它放在首页面板上方。
@@ -271,7 +274,7 @@ fn advanced_group(model: &ShellViewModel) -> AnyView {
         }
     }
     cells.push(advanced_input(
-        &AdvancedInput { field: AdvancedField::Limit, name: "结果数量", placeholder: "数量", wide: false },
+        &AdvancedInput { field: AdvancedField::Limit, key: "limit", name: "结果数量", placeholder: "数量", wide: false },
         draft.advanced(AdvancedField::Limit),
     ));
     cells.push(
@@ -308,12 +311,12 @@ fn advanced_input(input: &AdvancedInput, value: &str) -> AnyView {
     });
     widget(pill)
         .children((widget(widgets::pill_input(value, input.placeholder, input.name, None))
-            .key(format!("workspace-filter-advanced-{}-input", input.name))
+            .key(format!("workspace-filter-advanced-{}-input", input.key))
             .on_cx(move |_, event: &TextChanged, cx| {
                 cx.dispatch_program(message(InspectMessage::SetAdvanced { field, value: event.value.to_string() }));
             })
             .on_cx(|_, _: &TextSubmitted, cx| cx.dispatch_program(message(InspectMessage::ApplyAdvanced))),))
-        .key(format!("workspace-filter-advanced-{}", input.name))
+        .key(format!("workspace-filter-advanced-{}", input.key))
         .into_any()
 }
 
