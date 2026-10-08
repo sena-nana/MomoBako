@@ -29,6 +29,8 @@ pub(super) fn models() -> Vec<(&'static str, ShellViewModel)> {
 /// 15 页的播放集：点开了演示播放列表，详情还在读取，主区停在「选择一个播放集」。
 pub(super) fn seed_playlists(model: &mut ShellViewModel) {
     load_official_players(model);
+    // Vue 在打开新建对话框时才选默认播放器类型，页面上还没有选中值。
+    model.selected_new_playlist_player_type_id = None;
     open_playlist(model, &demo_summary(), None);
 }
 
