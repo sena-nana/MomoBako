@@ -313,6 +313,12 @@ pub(crate) fn on_window_event(
             app.host.windows.persist();
             RuntimeProgramUpdate::default()
         }
+        nana_ui_platform::WindowEvent::AppearanceChanged { id, appearance } => {
+            if crate::appearance::note_system_appearance(app, *appearance) {
+                return RuntimeProgramUpdate::redraw(*id);
+            }
+            RuntimeProgramUpdate::default()
+        }
         nana_ui_platform::WindowEvent::ReducedMotionChanged { reduced, .. } => {
             app.shell.motion.set_reduced(*reduced);
             RuntimeProgramUpdate::redraw(context.window_id())
