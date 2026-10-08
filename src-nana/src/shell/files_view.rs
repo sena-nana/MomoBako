@@ -130,7 +130,7 @@ fn load_more(model: &ShellViewModel) -> Option<AnyView> {
 pub(super) fn live_file_column(model: &ShellViewModel) -> AnyView {
     let previewing = model.page == super::ShellPage::SelectedFile && model.inspect.has_target();
     let on_file_list = model.page == super::ShellPage::FileList;
-    let filter = (!previewing && model.inspect.filter_bar_open).then(|| super::inspect_view::filter_bar(model));
+    let filter = (!previewing && model.inspect.filter_bar_open).then(|| super::inspect_search_view::filter_bar(model));
     // 文件列表的详情在右侧。其它带目标的页面仍挂完整预览，冲突和未保存标题才在。
     let show_inspect = previewing || model.inspect.filter_bar_open || (model.inspect.has_target() && !on_file_list);
     let inspect = show_inspect.then(|| {

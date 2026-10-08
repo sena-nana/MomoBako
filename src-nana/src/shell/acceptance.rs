@@ -204,8 +204,30 @@ fn track(id: &str, name: &str) -> PlaylistItem {
     }
 }
 
+#[path = "acceptance_shell.rs"]
+mod shell_scenes;
+#[path = "acceptance_files.rs"]
+mod files_scenes;
+#[path = "acceptance_player.rs"]
+mod player_scenes;
+#[path = "acceptance_admin.rs"]
+mod admin_scenes;
+#[path = "acceptance_search.rs"]
+mod search_scenes;
+
 /// 补上的表面，给离屏验收出画面。数字和像素都不编造。
+/// 各面板的对照场景放在各自的 `acceptance_*.rs` 里，这里只汇总。
 pub fn gap_models() -> Vec<(&'static str, ShellViewModel)> {
+    let mut scenes = base_gap_models();
+    scenes.extend(shell_scenes::models());
+    scenes.extend(files_scenes::models());
+    scenes.extend(player_scenes::models());
+    scenes.extend(admin_scenes::models());
+    scenes.extend(search_scenes::models());
+    scenes
+}
+
+fn base_gap_models() -> Vec<(&'static str, ShellViewModel)> {
     vec![
         ("downloader-settings", downloader_scene()),
         ("source-auth-gap", source_auth_scene()),
