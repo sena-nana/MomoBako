@@ -2,6 +2,7 @@
 //!
 //! 每个证据文件都来自生产 `RuntimeDocument` 和同一个 `RuntimeAgentSession`，
 //! 不创建第二棵 UI 树。
+use momobako_nana::appearance::{self, Appearance};
 use momobako_nana::theme_map::clear_matches_background;
 use momobako_nana::{
     acceptance_document_at_width, acceptance_document_for,
@@ -189,6 +190,15 @@ fn render_case(
     session
         .set_theme(viewport.theme)
         .map_err(|e| e.to_string())?;
+    let mode = match viewport.theme {
+        ThemeName::Light => nana_ui::ThemeMode::Light,
+        ThemeName::Dark => nana_ui::ThemeMode::Dark,
+    };
+    // 验收场景不改圆角设置，按默认半径装主题刻度，和产品窗口一致。
+    let appearance = Appearance::for_mode(&ShellViewModel::default(), mode);
+    if !appearance::install(session.document_mut(), appearance) {
+        return Err("外观安装失败".into());
+    }
     let theme = theme_name(viewport.theme);
     let clear = AgentSession::describe(&session).clear;
     if !clear_matches_background(theme, clear) {
@@ -277,6 +287,17 @@ fn special_models() -> Vec<(&'static str, ShellViewModel)> {
     ];
     scenes.extend(momobako_nana::shell::acceptance_gap_models());
     scenes
+}
+
+/// 页面名和补充场景名一起决定证据文件名，重名会互相覆盖，清单里也会出现重复 id。
+#[test]
+fn scene_ids_are_unique() {
+    let mut seen = std::collections::BTreeSet::new();
+    let pages = PAGES.iter().map(page_slug);
+    let specials = special_models().into_iter().map(|(name, _)| name);
+    for name in pages.chain(specials) {
+        assert!(seen.insert(name), "离屏场景名重复：{name}");
+    }
 }
 
 fn write_visual_review(root: &Path) -> Result<(), String> {
