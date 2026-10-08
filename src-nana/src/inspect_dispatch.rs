@@ -103,7 +103,7 @@ fn dispatch_media(
     if let Err(error) = context.run_task(Task::new(async move {
         let result = executor
             .block_on(query.read_file(FileReadRequest { repo_id, path: task_path.clone() }))
-            .and_then(|bytes| crate::shell::preview_media_session(&task_repo, &bytes));
+            .and_then(|bytes| crate::shell::preview_media_parts(&task_repo, &bytes));
         media_message(task_path, generation, result)
     })) {
         eprintln!("Nana 音视频预览任务提交失败：{error}");
@@ -157,7 +157,7 @@ fn dispatch_native(
     if let Err(error) = context.run_task(Task::new(async move {
         let result = executor
             .block_on(query.read_file(FileReadRequest { repo_id, path: task_path.clone() }))
-            .and_then(|bytes| crate::shell::read_native_preview(&view_id, &bytes));
+            .and_then(|bytes| crate::shell::load_native_preview(&view_id, &bytes));
         native_message(task_path, generation, result)
     })) {
         eprintln!("Nana 原生预览任务提交失败：{error}");
@@ -330,15 +330,15 @@ fn some_dates(values: Vec<DateBound>) -> Option<Vec<SearchDateFilter>> {
     (!values.is_empty()).then(|| values.into_iter().map(|bound| SearchDateFilter { key: bound.key, from: bound.from, to: bound.to }).collect())
 }
 
-fn media_message(
-    path: String,
-    generation: u64,
-    result: Result<crate::backend::services::repository::PlaybackSessionState, String>,
-) -> ShellMessage {
-    ShellMessage::Inspect(InspectMessage::MediaLoaded { path, generation, result })
+fn media_message(path: String, generation: u64, result: Result<crate::shell::MediaParts, String>) -> ShellMessage {
+    let (result, pcm, frames) = match result {
+        Ok(parts) => (Ok(parts.session), parts.pcm, parts.frames),
+        Err(error) => (Err(error), None, None),
+    };
+    ShellMessage::Inspect(InspectMessage::MediaLoaded { path, generation, result, pcm, frames })
 }
 
-fn native_message(path: String, generation: u64, result: Result<String, String>) -> ShellMessage {
+fn native_message(path: String, generation: u64, result: Result<crate::shell::NativeLoad, String>) -> ShellMessage {
     ShellMessage::Inspect(InspectMessage::NativeLoaded { path, generation, result })
 }
 

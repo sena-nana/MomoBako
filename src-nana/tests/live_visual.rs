@@ -12,11 +12,11 @@ use momobako_nana::backend::services::repository::{
 use momobako_nana::shell::{
     commit_interaction, mount_shell, ShellMessage, ShellViewModel, WorkspaceRepository,
 };
-use momobako_nana::acceptance_document_for_model;
+use momobako_nana::acceptance_document_at_width;
 use nana_ui::runtime::{Entity, StableNodeId, TextInput};
 use nana_ui_devtools::agent::{
     AccessibilityDumpNode, AgentSession, BoundsDump, RuntimeAgentSession,
-    protocol::{HitDump, ThemeName},
+    protocol::{HitDump, RectDump, ThemeName},
 };
 use nana_ui_devtools::offscreen;
 use nana_ui_platform::host::WindowCommand;
@@ -24,26 +24,15 @@ use nana_ui_platform::WindowId;
 
 const NAMES: [&str; 3] = ["photos", "audio", "cover.png"];
 const DISPLAY_MODES: [&str; 4] = ["自适应", "瀑布流", "网格", "列表"];
-const TOOLBAR: [&str; 10] = [
-    "新建文件夹",
-    "建文件",
-    "导入",
-    "从 ZIP 导入",
-    "复制导入",
-    "剪切导入",
-    "复制",
-    "移动",
-    "重命名",
-    "删除",
-];
-const PLAYER: [&str; 8] = [
+const FOOTER: [&str; 4] = ["设置", "拓展", "任务 2", "日志"];
+const TOOLBAR: [&str; 2] = ["建文件", "导入"];
+const PLAYER: [&str; 7] = [
     "未选择播放内容",
     "0:00 / 0:00",
     "列表循环",
     "上一首",
     "下一首",
     "当前队列",
-    "打开预览",
     "播放",
 ];
 
@@ -62,12 +51,13 @@ fn live_workspace_title_bar_layout_and_clicks_hold() {
     for (width, height, theme, save) in viewports {
         let model = live_files();
         let mut session = open_session(model, width, height, theme);
-        let nodes = session.accessibility_dump();
-        assert_title_bar(&nodes);
-        assert_file_layout(&session, &nodes);
+        // 先截图再断言，布局失败时也留下画面。
         let stats = session
             .screenshot_png(shot_path(theme, width, height))
             .expect("screenshot");
+        let nodes = session.accessibility_dump();
+        assert_title_bar(&nodes);
+        assert_file_layout(&session, &nodes, width >= 1200);
         assert_eq!(stats.width, width);
         assert_eq!(stats.height, height);
         assert!(stats.width > 0 && stats.height > 0);
@@ -167,9 +157,11 @@ fn assert_clicks() {
 
     click_label(&mut session, "显示筛选栏");
     let _ = pump(&mut session, &mut model);
+    let nodes = session.accessibility_dump();
+    assert!(has_label(&nodes, "当前资源库筛选"), "打开筛选后没有筛选栏");
     assert!(
-        session.accessibility_dump().iter().any(|node| node.role == "text-input" && node.label.as_deref() == Some("标签")),
-        "打开筛选后没有筛选输入"
+        nodes.iter().any(|node| node.role == "button" && node.label.as_deref() == Some("关闭筛选栏")),
+        "筛选栏缺少关闭按钮"
     );
 
     click_label(&mut session, "隐藏筛选栏");
@@ -181,10 +173,7 @@ fn assert_clicks() {
         "筛选开关被重复挂载"
     );
     assert!(nodes.iter().all(|node| node.label.as_deref() != Some("隐藏筛选栏")));
-    assert!(
-        nodes.iter().all(|node| !(node.role == "text-input" && node.label.as_deref() == Some("标签"))),
-        "关闭筛选后筛选输入还在"
-    );
+    assert!(!has_label(&nodes, "当前资源库筛选"), "关闭筛选后筛选栏还在");
 }
 
 fn assert_smart_folder_dialog() {
@@ -214,7 +203,7 @@ fn open_session(
     height: u32,
     theme: ThemeName,
 ) -> RuntimeAgentSession {
-    let document = acceptance_document_for_model(model).expect("production document");
+    let document = acceptance_document_at_width(model, width as f32).expect("production document");
     let mut session = RuntimeAgentSession::new(document, width, height).expect("agent session");
     session.set_theme(theme).expect("theme");
     session.flush().expect("layout");
@@ -237,6 +226,8 @@ fn shot_path(theme: ThemeName, width: u32, height: u32) -> PathBuf {
     let name = match theme {
         ThemeName::Light if width == 1200 => "live-files-light.png",
         ThemeName::Dark if width == 1200 => "live-files-dark.png",
+        ThemeName::Light if width == 960 => "live-files-light-960.png",
+        ThemeName::Dark if width == 960 => "live-files-dark-960.png",
         _ => "live-other.png",
     };
     let _ = height;
@@ -329,14 +320,16 @@ fn contains(outer: &BoundsDump, inner: &BoundsDump) -> bool {
         && inner.y + inner.height <= outer.y + outer.height + 0.5
 }
 
-fn assert_file_layout(session: &RuntimeAgentSession, nodes: &[AccessibilityDumpNode]) {
+/// 宽窗里文件名必须真的露在列表里；最小窗只要求看得到的部分不压在播放条下。
+fn assert_file_layout(session: &RuntimeAgentSession, nodes: &[AccessibilityDumpNode], expect_visible_names: bool) {
     let task = required(nodes, "任务 2");
-    let modes = buttons(nodes, &DISPLAY_MODES);
+    assert_footer_inside_sidebar(nodes);
+    let modes = vec![display_mode_select(nodes)];
     let tools = buttons(nodes, &TOOLBAR);
     let names = NAMES.map(|name| {
         nodes
             .iter()
-            .find(|node| node.role == "button" && node.label.as_deref() == Some(name))
+            .find(|node| matches!(node.role.as_str(), "button" | "list-item") && node.label.as_deref() == Some(name))
             .unwrap_or_else(|| panic!("缺少文件名 {name}"))
     });
     let player = nodes
@@ -359,16 +352,22 @@ fn assert_file_layout(session: &RuntimeAgentSession, nodes: &[AccessibilityDumpN
             assert!(!intersects(&mode.bounds, &tool.bounds), "展示方式与文件工具条相交");
         }
     }
+    let mut visible_names = 0;
     for name in &names {
+        let probe = AgentSession::scene_probe(session, name.id).unwrap_or_else(|| panic!("读不到文件名布局盒 {:?}", name.label));
+        // 滚动区外的卡片被裁掉，画面上看不到，不算和播放条重叠。
+        let Some(shown) = visible_part(&name.bounds, &probe.clips) else {
+            continue;
+        };
+        visible_names += 1;
         for bar in &player {
             assert!(
-                !intersects(&name.bounds, &bar.bounds),
+                !intersects(&shown, &bar.bounds),
                 "文件名 {:?} 与播放条 {:?} 相交",
                 name.label,
                 bar.label
             );
         }
-        let probe = AgentSession::scene_probe(session, name.id).unwrap_or_else(|| panic!("读不到文件名布局盒 {:?}", name.label));
         if let Some(hit) = probe.occluded_by {
             assert!(
                 !is_player(&hit),
@@ -378,6 +377,48 @@ fn assert_file_layout(session: &RuntimeAgentSession, nodes: &[AccessibilityDumpN
             );
         }
     }
+    assert!(!expect_visible_names || visible_names == names.len(), "宽窗里只露出 {visible_names} 个文件名");
+}
+
+/// 展示方式和 Vue 一样是一个下拉，读出的是当前值。
+fn display_mode_select(nodes: &[AccessibilityDumpNode]) -> &AccessibilityDumpNode {
+    assert!(has_label(nodes, "展示方式"), "缺少展示方式标签");
+    nodes
+        .iter()
+        .find(|node| node.role == "combo-box" && node.label.as_deref().is_some_and(|label| DISPLAY_MODES.contains(&label)))
+        .expect("缺少展示方式下拉")
+}
+
+/// 底部四个入口和 Vue 一样挤在侧栏里，不能被撑出侧栏画到文件列下面。
+fn assert_footer_inside_sidebar(nodes: &[AccessibilityDumpNode]) {
+    let sidebar = required(nodes, "resources");
+    for label in FOOTER {
+        let button = nodes
+            .iter()
+            .find(|node| node.role == "button" && node.label.as_deref() == Some(label))
+            .unwrap_or_else(|| panic!("缺少底部入口 {label}"));
+        assert!(
+            contains(&sidebar.bounds, &button.bounds),
+            "底部入口 {label} 不在侧栏内：{:?} / {:?}",
+            button.bounds,
+            sidebar.bounds
+        );
+    }
+}
+
+/// 布局盒和每层裁剪的交集。完全被裁掉时返回 `None`。
+fn visible_part(bounds: &BoundsDump, clips: &[RectDump]) -> Option<BoundsDump> {
+    let mut left = bounds.x;
+    let mut top = bounds.y;
+    let mut right = bounds.x + bounds.width;
+    let mut bottom = bounds.y + bounds.height;
+    for clip in clips {
+        left = left.max(clip.x);
+        top = top.max(clip.y);
+        right = right.min(clip.x + clip.width);
+        bottom = bottom.min(clip.y + clip.height);
+    }
+    (right - left > 0.5 && bottom - top > 0.5).then(|| BoundsDump { x: left, y: top, width: right - left, height: bottom - top })
 }
 
 fn is_player(hit: &HitDump) -> bool {

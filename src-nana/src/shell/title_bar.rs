@@ -11,6 +11,7 @@ use nana_ui::runtime::{
 };
 use nana_ui::{ControlSize, Icon};
 
+use super::workspace::WorkspacePanel;
 use super::{InspectMessage, ShellMessage, ShellViewModel};
 
 /// 左侧侧栏开关，中间全局搜索和筛选开关。窗口控件槽保持打开。
@@ -43,6 +44,7 @@ pub(super) fn title_bar(model: &ShellViewModel) -> impl IntoView + use<'_> {
         widget(search_field(query))
             .key("global-search")
             .on_cx(|_, event: &TextChanged, cx| {
+                cx.dispatch_program(ShellMessage::SetWorkspacePanel(WorkspacePanel::Search));
                 cx.dispatch_program(ShellMessage::Inspect(InspectMessage::SetQuery(
                     event.value.to_string(),
                 )));
@@ -50,6 +52,7 @@ pub(super) fn title_bar(model: &ShellViewModel) -> impl IntoView + use<'_> {
         widget(filter_button(filter_label))
             .key("filter-toggle")
             .on_cx(|_, _: &Activate, cx| {
+                cx.dispatch_program(ShellMessage::SetWorkspacePanel(WorkspacePanel::Search));
                 cx.dispatch_program(ShellMessage::Inspect(InspectMessage::ToggleFilterBar));
             }),
     )))

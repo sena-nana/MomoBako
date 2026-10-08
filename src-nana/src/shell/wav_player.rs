@@ -86,6 +86,31 @@ struct ParsedWav {
     pcm: Vec<u8>,
 }
 
+/// 预览装进内存游标的 PCM。正式 Windows 构建播放时才交给 winmm，测试构建不打开设备。
+#[derive(Clone, PartialEq)]
+pub struct PreviewPcm {
+    pub sample_rate: u32,
+    pub channels: u16,
+    pub bits_per_sample: u16,
+    pub frame_count: u64,
+    pub duration_ms: u64,
+    pub pcm: Vec<u8>,
+}
+
+impl std::fmt::Debug for PreviewPcm {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("PreviewPcm")
+            .field("sample_rate", &self.sample_rate)
+            .field("channels", &self.channels)
+            .field("bits_per_sample", &self.bits_per_sample)
+            .field("frame_count", &self.frame_count)
+            .field("duration_ms", &self.duration_ms)
+            .field("pcm_bytes", &self.pcm.len())
+            .finish()
+    }
+}
+
 struct FmtChunk {
     audio_format: u16,
     channels: u16,
@@ -106,6 +131,24 @@ impl WavPlayer {
     /// 丢掉已装载的 PCM 和播放头，并停掉正在播放的声音。
     pub(super) fn clear(&mut self) {
         PlaybackMediaPlugin::dispose(self);
+    }
+
+    /// 预览字节已经在内存里，直接装进和播放列表相同的游标。这里不出声。
+    pub(super) fn install_preview(&mut self, audio: PreviewPcm) {
+        self.clear();
+        *self.inner.borrow_mut() = Cursor::from_parsed(ParsedWav {
+            sample_rate: audio.sample_rate,
+            channels: audio.channels,
+            bits_per_sample: audio.bits_per_sample,
+            frame_count: audio.frame_count,
+            duration_ms: audio.duration_ms,
+            pcm: audio.pcm,
+        });
+    }
+
+    #[cfg(test)]
+    pub(super) fn is_playing(&self) -> bool {
+        self.inner.borrow().playing
     }
 }
 
@@ -313,9 +356,27 @@ impl PlaybackMediaPlugin for MissingDecoder {
     fn dispose(&mut self) {}
 }
 
-/// 预览只需要时长。坏文件返回错误，由调用方决定文案。
-pub(crate) fn wav_duration_ms(bytes: &[u8]) -> Result<u64, String> {
-    parse_wav(bytes).map(|parsed| parsed.duration_ms)
+/// WAV 优先。失败后再解 mp3、flac、ogg。两种都不是时返回错误，由调用方记日志。
+pub(crate) fn pcm_from_bytes(bytes: &[u8]) -> Result<PreviewPcm, String> {
+    let parsed = if let Ok(parsed) = parse_wav(bytes) {
+        parsed
+    } else {
+        parsed_from_decoded(crate::shell::audio_decode::decode_compressed(bytes)?)?
+    };
+    Ok(PreviewPcm {
+        sample_rate: parsed.sample_rate,
+        channels: parsed.channels,
+        bits_per_sample: parsed.bits_per_sample,
+        frame_count: parsed.frame_count,
+        duration_ms: parsed.duration_ms,
+        pcm: parsed.pcm,
+    })
+}
+
+/// 测试构建恒为 false：winmm 模块没有编进来。测试用它确认不会打开声卡。
+#[cfg(test)]
+pub(crate) fn sound_device_compiled_in() -> bool {
+    cfg!(all(windows, not(test)))
 }
 
 /// WAV 走原解析。mp3、flac、ogg 读入后解成 16-bit PCM，再装进同一游标。

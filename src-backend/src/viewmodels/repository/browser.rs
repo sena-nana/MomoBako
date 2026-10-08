@@ -2,7 +2,7 @@
 
 use crate::services::repository::{
     FileBrowserRequest, FileBrowserSnapshot, FileCreateRequest, FileRenameRequest,
-    RepositoryTreeSnapshot, TrashMutationRequest,
+    RepositoryTreeSnapshot, ThumbnailRequest, ThumbnailResponse, TrashMutationRequest,
 };
 use crate::services::runtime::RepositoryRuntime;
 
@@ -67,6 +67,16 @@ impl FileBrowserViewModel {
     ) -> Result<FileBrowserSnapshot, String> {
         self.runtime
             .run_write(move |state| state.mutate_trash(request))
+            .await
+    }
+
+    /// 保存、清除或恢复条目缩略图。写入走现有 `ensure_thumbnail`，不另建解码器。
+    pub async fn ensure_thumbnail(
+        &self,
+        request: ThumbnailRequest,
+    ) -> Result<ThumbnailResponse, String> {
+        self.runtime
+            .run_write(move |state| state.ensure_thumbnail(request))
             .await
     }
 }

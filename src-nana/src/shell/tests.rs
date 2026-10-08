@@ -18,7 +18,7 @@
         assert!(model.dirty);
         model.reduce(ShellMessage::PrimaryAction);
         assert!(model.dirty);
-        assert_eq!(model.detail, "该操作的领域服务尚未接通，数据未写入");
+        assert_eq!(model.detail, "当前没有可打开的预览");
     }
 
     #[test]

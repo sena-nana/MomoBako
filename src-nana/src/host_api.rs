@@ -158,10 +158,10 @@ pub struct FileDropRequest {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum HostInputRequest {
     FileDrop(FileDropRequest),
-    /// 把库内文件拖出窗口。Nana 没有 `start_drag`，只记录请求。
+    /// 把库内绝对路径拖出窗口。Windows 上由宿主调用系统拖放。
     DragOut { paths: Vec<String> },
     ConfirmClose { dirty: bool },
-    /// 关闭行为是最小化到托盘。Nana 没有托盘组件，只记录请求。
+    /// 关闭行为是最小化到托盘。宿主隐藏窗口，进程继续留在托盘里。
     MinimizeToTray,
     FocusMainWindow,
     RegisterShortcut { accelerator: String },

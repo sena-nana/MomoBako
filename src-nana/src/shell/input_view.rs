@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use nana_ui::runtime::view::{button, text, widget, AnyView, IntoView};
+use nana_ui::runtime::view::{text, widget, AnyView, IntoView};
 use nana_ui::runtime::{Activate, AlignSpec, ConfirmDialog, FileDropEvent, JustifySpec, LengthSpec, Stack};
 use super::{HostDragPhase, InputMessage};
 use crate::shell::{MainRegion, ShellMessage, ShellViewModel, WorkspacePanel};
@@ -99,7 +99,7 @@ pub(crate) fn drop_marker(kind: &str) -> AnyView {
 
 /// 有待确认的关闭时用确认对话框。只有说明、尚未进入确认时保留一行文字。
 pub(crate) fn close_prompt(model: &ShellViewModel) -> Option<AnyView> {
-    if model.acceptance_scene || (!model.input.pending_close && model.input.notice.is_empty()) {
+    if !model.input.pending_close && model.input.notice.is_empty() {
         return None;
     }
     if !model.input.pending_close {
@@ -112,10 +112,10 @@ pub(crate) fn close_prompt(model: &ShellViewModel) -> Option<AnyView> {
     };
     Some(
         widget(ConfirmDialog::new(notice.clone(), notice))
-            .cancel(button("取消").key("close-confirm-cancel").on_cx(|_, _: &Activate, cx| {
+            .cancel(widget(super::super::workbench::ghost_button("取消")).key("close-confirm-cancel").on_cx(|_, _: &Activate, cx| {
                 cx.dispatch_program(ShellMessage::Input(InputMessage::ConfirmCloseAnswer(false)));
             }))
-            .confirm(button("确认关闭").key("close-confirm-accept").on_cx(|_, _: &Activate, cx| {
+            .confirm(widget(super::super::workbench::primary_button("确认关闭")).key("close-confirm-accept").on_cx(|_, _: &Activate, cx| {
                 cx.dispatch_program(ShellMessage::Input(InputMessage::ConfirmCloseAnswer(true)));
             }))
             .into_any(),

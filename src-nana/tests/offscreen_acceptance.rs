@@ -4,7 +4,7 @@
 //! 不创建第二棵 UI 树。
 use momobako_nana::theme_map::clear_matches_background;
 use momobako_nana::{
-    acceptance_document_for, acceptance_document_for_model,
+    acceptance_document_at_width, acceptance_document_for,
     shell::{ShellPage, ShellViewModel},
 };
 use nana_ui_devtools::agent::{AgentSession, RuntimeAgentSession, protocol::ThemeName};
@@ -88,7 +88,8 @@ fn generates_versioned_offscreen_evidence() {
                     &root,
                     page_slug(&page),
                     page.clone(),
-                    acceptance_document_for(page.clone()).map_err(|e| e.to_string()),
+                    acceptance_document_at_width(ShellViewModel::for_page(page.clone()), viewport.width as f32)
+                        .map_err(|e| e.to_string()),
                     viewport,
                 )
             })) {
@@ -108,8 +109,8 @@ fn generates_versioned_offscreen_evidence() {
         for viewport in VIEWPORTS {
             let page = model.page.clone();
             match catch_unwind(AssertUnwindSafe(|| {
-                let document =
-                    acceptance_document_for_model(model.clone()).map_err(|e| e.to_string());
+                let document = acceptance_document_at_width(model.clone(), viewport.width as f32)
+                    .map_err(|e| e.to_string());
                 render_case(&root, scene_id, page.clone(), document, viewport)
             })) {
                 Ok(Ok(scene)) => scenes.push(scene),
@@ -151,17 +152,16 @@ fn native_actions_are_reachable_through_runtime_hit_testing() {
     }
     let document = acceptance_document_for(ShellPage::FileList).expect("acceptance document");
     let mut session = RuntimeAgentSession::new(document, 1200, 800).expect("agent session");
+    // Vue 文件夹加号的可见内容是图标，`aria-label` 和 `title` 都是「在当前目录新建文件夹」。
+    // 对话框标题才叫「新建文件夹」。命中测试点现在的无障碍名。
     for label in [
-        "资源库",
-        "插件",
+        "根目录",
+        "在当前目录新建文件夹",
         "设置",
-        "刷新状态",
+        "自适应",
         "Minimize",
         "Maximize",
         "Close",
-        "刷新列表",
-        "编辑内容",
-        "清理日志",
     ] {
         let node = session
             .accessibility_dump()
@@ -197,14 +197,17 @@ fn render_case(
         ));
     }
     let accessibility = session.accessibility_dump();
-    let title = page_title(&page);
+    let title = scene_title(scene_id, &page);
     if !accessibility
         .iter()
         .any(|node| node.label.as_deref() == Some("MomoBako"))
     {
         return Err("missing MomoBako accessibility root".into());
     }
-    if !accessibility
+    if scene_id == "unsaved-edit" {
+        // 画面上不放「未保存」这四个字。草稿留在注释里，按钮和状态也不能叫这个名字。
+        assert_unsaved_edit(&accessibility)?;
+    } else if !accessibility
         .iter()
         .any(|node| node.label.as_deref() == Some(title))
     {
@@ -266,12 +269,14 @@ fn special_models() -> Vec<(&'static str, ShellViewModel)> {
     let mut dense = ShellViewModel::for_page(ShellPage::TaskRunning);
     dense.active_task_ids = (0..12).map(|i| format!("task-{i:02}")).collect();
     dense.detail = "高密度任务列表 · 12 个运行中任务 · 24 个近期完成任务".into();
-    vec![
+    let mut scenes = vec![
         ("long-content", long),
         ("empty-list", empty),
         ("disabled-feedback", disabled),
         ("dense-list", dense),
-    ]
+    ];
+    scenes.extend(momobako_nana::shell::acceptance_gap_models());
+    scenes
 }
 
 fn write_visual_review(root: &Path) -> Result<(), String> {
@@ -321,22 +326,50 @@ fn theme_name(theme: ThemeName) -> &'static str {
         ThemeName::Dark => "dark",
     }
 }
+/// 插件设置和搜索结果不再沿用应用设置或文件列表的标题。
+/// 未保存编辑的可见行为：注释草稿还在，没有任何按钮或状态的无障碍名是「未保存」。
+fn assert_unsaved_edit(nodes: &[nana_ui_devtools::agent::AccessibilityDumpNode]) -> Result<(), String> {
+    let draft = nodes.iter().any(|node| node.value.as_deref() == Some("3 行未保存"));
+    if !draft {
+        return Err("未保存场景的注释草稿不在画面上".into());
+    }
+    let stamped = nodes.iter().any(|node| {
+        node.label.as_deref() == Some("未保存")
+            && (node.role == "button" || node.role == "status")
+    });
+    if stamped {
+        return Err("画面上出现了名为「未保存」的按钮或状态".into());
+    }
+    Ok(())
+}
+
+fn scene_title<'a>(scene_id: &str, page: &'a ShellPage) -> &'a str {
+    match scene_id {
+        "downloader-settings" => "aria2 运行状态",
+        "source-auth-gap" | "source-auth-methods" => "账号与仓库",
+        "office-convert" => "运行状态与缓存",
+        "search-results" => "搜索结果",
+        "still-playback" => "没有可绘制的画面",
+        _ => page_title(page),
+    }
+}
+
 fn page_title(page: &ShellPage) -> &'static str {
     match page {
-        ShellPage::Loading => "正在加载资源库",
-        ShellPage::EmptyRepository => "资源库为空",
-        ShellPage::Error => "资源库加载失败",
-        ShellPage::FileList => "文件列表",
+        ShellPage::Loading => "准备加载仓库",
+        ShellPage::EmptyRepository => "还没有可用资源库",
+        ShellPage::Error => "加载失败",
+        ShellPage::FileList => "当前目录",
         ShellPage::SelectedFile => "文件预览",
-        ShellPage::Playlists => "播放列表",
-        ShellPage::PluginSettings => "插件设置",
-        ShellPage::TaskRunning => "任务进行中",
-        ShellPage::PlaybackRunning => "播放进行中",
-        ShellPage::TaskCancelling => "任务取消中",
-        ShellPage::Conflict => "同步冲突",
-        ShellPage::UnsavedEdit => "编辑未保存",
-        ShellPage::Settings => "应用设置",
-        ShellPage::SettingsError => "设置校验失败",
+        ShellPage::Playlists => "选择一个播放集",
+        ShellPage::PluginSettings => "文件系统与插件",
+        ShellPage::TaskRunning => "扫描默认资源库",
+        ShellPage::PlaybackRunning => "演示播放列表",
+        ShellPage::TaskCancelling => "正在取消扫描",
+        ShellPage::Conflict => "远端修改时间较新，需要选择保留本地或远端版本",
+        ShellPage::UnsavedEdit => "未保存",
+        ShellPage::Settings => "保存应用设置",
+        ShellPage::SettingsError => "保存应用设置",
         ShellPage::Logs => "系统日志",
     }
 }

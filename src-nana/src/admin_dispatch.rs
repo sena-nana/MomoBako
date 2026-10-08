@@ -6,12 +6,13 @@
 use nana_ui::runtime::Task;
 use nana_ui::RuntimeProgramContext;
 
-use crate::backend::services::mutsuki_runner::PROTOCOL_REPOSITORY_ACTION_RUN;
+use crate::backend::services::mutsuki_runner::{PROTOCOL_REPOSITORY_ACTION_RUN, PROTOCOL_REPOSITORY_CREATE};
 use crate::backend::services::repository::{
     BinaryFileWriteRequest, FileBrowserRequest, PluginCallRequest, PluginConfigDeleteRequest, PluginConfigSetRequest,
     PluginEnabledRequest, PluginHookExecutionListRequest, PluginInstallRequest, RepositoryAction, RepositoryActionRunRequest,
+    RepositoryMutationRequest,
 };
-use crate::shell::admin::{AdminEffect, AdminMessage};
+use crate::shell::admin::{AdminEffect, AdminMessage, PluginCallOrigin};
 use crate::shell::ShellMessage;
 use crate::MomoBakoApplication;
 
@@ -39,7 +40,7 @@ fn dispatch_one(app: &mut MomoBakoApplication, context: &RuntimeProgramContext<S
             if !crate::host_bridge::copy_text(&text) {
                 eprintln!("Nana 宿主剪贴板写入失败");
                 app.shell.admin.external_message.clear();
-                app.shell.admin.external_error = "复制失败：宿主剪贴板尚未接通".into();
+                app.shell.admin.external_error = "复制失败：系统剪贴板写入失败".into();
             }
         }
         AdminEffect::RequestOpenDialog => app.shell.input.queue_plugin_dialog(),
@@ -56,38 +57,98 @@ fn dispatch_one(app: &mut MomoBakoApplication, context: &RuntimeProgramContext<S
         AdminEffect::RunAction { repo_id, action_id, paths } => run_action(app, context, repo_id, action_id, paths),
         AdminEffect::ReloadBrowser { repo_id } => reload_browser(app, context, repo_id),
         AdminEffect::WriteFile { path, bytes } => write_file(app, context, path, bytes),
-        AdminEffect::CallPlugin { plugin_id, method, payload } => call_source_auth(app, context, plugin_id, method, payload),
+        AdminEffect::CallPlugin { plugin_id, method, payload, repository_id, origin } => {
+            call_plugin(app, context, plugin_id, method, payload, repository_id, origin);
+        }
+        AdminEffect::CreateSourceRepository { repo_id, name, path, backend_plugin_id, backend_config } => {
+            create_source_repository(app, context, repo_id, name, path, backend_plugin_id, backend_config);
+        }
     }
 }
 
-fn call_source_auth(
+fn call_plugin(
     app: &mut MomoBakoApplication,
     context: &RuntimeProgramContext<ShellMessage>,
     plugin_id: String,
     method: String,
     payload: serde_json::Value,
+    repository_id: Option<String>,
+    origin: PluginCallOrigin,
 ) {
     let Some(services) = app.services.as_ref() else {
-        eprintln!("Nana 来源登录调用需要领域服务，当前服务未启动");
-        app.shell.admin.action_message.clear();
-        app.shell.admin.action_error = "领域服务未启动".into();
+        eprintln!("Nana 插件调用需要领域服务，当前服务未启动：{method}");
+        note_plugin_unavailable(app, origin, &method);
         return;
     };
     let plugin = services.plugin.clone();
     let executor = services.executor.clone();
     let called = method.clone();
+    let failed_method = method.clone();
     if let Err(error) = context.run_task(Task::new(async move {
         let result = executor.block_on(plugin.call_plugin(PluginCallRequest {
             plugin_id,
             method,
-            repository_id: None,
+            repository_id,
             payload,
         }));
-        admin(AdminMessage::SourceAuthFinished { method: called, result: result.map(|item| item.payload) })
+        let result = result.map(|item| item.payload);
+        match origin {
+            PluginCallOrigin::FileMenu => admin(AdminMessage::FilePluginFinished { method: called, result }),
+            PluginCallOrigin::Downloader => admin(AdminMessage::DownloaderStatusFinished { result }),
+            PluginCallOrigin::SourceAuth => admin(AdminMessage::SourceAuthFinished { method: called, result }),
+            PluginCallOrigin::Office => admin(AdminMessage::OfficeFinished { method: called, result }),
+        }
     })) {
-        eprintln!("Nana 来源登录调用任务提交失败：{error}");
-        app.shell.admin.action_message.clear();
-        app.shell.admin.action_error = format!("来源登录调用任务提交失败：{error}");
+        eprintln!("Nana 插件调用任务提交失败：{error}");
+        note_plugin_submit_failed(app, origin, &failed_method, &error.to_string());
+    }
+}
+
+fn note_plugin_unavailable(app: &mut MomoBakoApplication, origin: PluginCallOrigin, method: &str) {
+    match origin {
+        PluginCallOrigin::SourceAuth => {
+            app.shell.admin.action_message.clear();
+            app.shell.admin.action_error = "领域服务未启动".into();
+        }
+        PluginCallOrigin::FileMenu => {
+            app.shell.reduce(admin(AdminMessage::FilePluginFinished { method: method.to_string(), result: Err("领域服务未启动".into()) }));
+        }
+        PluginCallOrigin::Downloader => {
+            eprintln!("Nana 下载服务状态需要领域服务，当前服务未启动");
+            app.shell.reduce(admin(AdminMessage::DownloaderStatusFinished { result: Err("领域服务未启动".into()) }));
+        }
+        PluginCallOrigin::Office => {
+            eprintln!("Nana Office 转换设置需要领域服务，当前服务未启动");
+            app.shell.reduce(admin(AdminMessage::OfficeFinished { method: method.to_string(), result: Err("领域服务未启动".into()) }));
+        }
+    }
+}
+
+fn note_plugin_submit_failed(app: &mut MomoBakoApplication, origin: PluginCallOrigin, method: &str, error: &str) {
+    match origin {
+        PluginCallOrigin::SourceAuth => {
+            app.shell.admin.action_message.clear();
+            app.shell.admin.action_error = format!("来源登录调用任务提交失败：{error}");
+        }
+        PluginCallOrigin::FileMenu => {
+            app.shell.reduce(admin(AdminMessage::FilePluginFinished {
+                method: method.to_string(),
+                result: Err(format!("文件插件动作提交失败：{error}")),
+            }));
+        }
+        PluginCallOrigin::Downloader => {
+            eprintln!("Nana 下载服务状态任务提交失败：{error}");
+            app.shell.reduce(admin(AdminMessage::DownloaderStatusFinished {
+                result: Err(format!("下载服务状态提交失败：{error}")),
+            }));
+        }
+        PluginCallOrigin::Office => {
+            eprintln!("Nana Office 转换设置任务提交失败：{error}");
+            app.shell.reduce(admin(AdminMessage::OfficeFinished {
+                method: method.to_string(),
+                result: Err(format!("Office 转换调用提交失败：{error}")),
+            }));
+        }
     }
 }
 
@@ -326,4 +387,57 @@ fn write_file(app: &mut MomoBakoApplication, context: &RuntimeProgramContext<She
         eprintln!("Nana 外部连接导出任务提交失败：{error}");
         app.shell.reduce(admin(AdminMessage::WriteFinished(Err(format!("外部连接导出任务提交失败：{error}")))));
     }
+}
+
+/// 调用 `momobako.repository.create`。成功后刷新仓库列表，失败把宿主错误写回认证页。
+fn create_source_repository(
+    app: &mut MomoBakoApplication,
+    context: &RuntimeProgramContext<ShellMessage>,
+    repo_id: String,
+    name: String,
+    path: String,
+    backend_plugin_id: String,
+    backend_config: serde_json::Value,
+) {
+    let Some(services) = app.services.as_ref() else {
+        eprintln!("Nana 来源建仓需要领域服务，当前服务未启动");
+        app.shell.reduce(source_finished(Err("领域服务未启动".into())));
+        return;
+    };
+    let tasks = services.tasks.clone();
+    let executor = services.executor.clone();
+    let request = RepositoryMutationRequest {
+        repo_id: Some(repo_id),
+        name,
+        path,
+        backend_plugin_id: Some(backend_plugin_id),
+        backend_config: Some(backend_config),
+        skip_initial_sync: true,
+    };
+    if let Err(error) = context.run_task(Task::new(async move {
+        let result = executor
+            .block_on(tasks.execute(PROTOCOL_REPOSITORY_CREATE, request))
+            .map(|(output, _)| created_notice(&output));
+        source_finished(result)
+    })) {
+        eprintln!("Nana 来源建仓任务提交失败：{error}");
+        app.shell.reduce(source_finished(Err(format!("创建仓库任务提交失败：{error}"))));
+    }
+}
+
+fn source_finished(result: Result<String, String>) -> ShellMessage {
+    admin(AdminMessage::SourceRepositoryFinished { result })
+}
+
+/// 只用宿主返回的仓库名称、标识和路径。缺摘要时记日志，不编造成功。
+fn created_notice(value: &serde_json::Value) -> String {
+    let repository = value.get("repository");
+    let name = repository.and_then(|item| item.get("name")).and_then(|item| item.as_str()).unwrap_or("");
+    let repo_id = repository.and_then(|item| item.get("repoId")).and_then(|item| item.as_str()).unwrap_or("");
+    let path = repository.and_then(|item| item.get("path")).and_then(|item| item.as_str()).unwrap_or("");
+    if name.is_empty() && repo_id.is_empty() {
+        eprintln!("Nana 创建仓库返回没有仓库摘要：{value}");
+        return "创建仓库已返回，但没有仓库名称或标识。".into();
+    }
+    format!("已创建 {name}（{repo_id}）{path}")
 }

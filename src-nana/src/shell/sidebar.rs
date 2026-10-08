@@ -133,6 +133,8 @@ pub enum SidebarMessage {
     SidebarPlaylistPlayersLoaded { repo_id: String, result: Result<Vec<String>, String> },
     /// 文件夹对话框、智能文件夹编辑、播放、弹层夹取和 Escape。
     Gap(gap::GapMessage),
+    ClearRecent,
+    RecentCleared { repo_id: String, result: Result<usize, String> },
 }
 
 /// 侧栏归约后交给宿主的服务请求。
@@ -151,6 +153,7 @@ pub enum SidebarEffect {
     DeleteSmartFolder { repo_id: String, smart_folder_id: String },
     DeletePlaylist { repo_id: String, playlist_id: String },
     CreateBackendRepository { name: String, path: String, plugin_id: String },
+    ClearRecent { repo_id: String },
 }
 
 #[derive(Clone, Debug)]
@@ -958,6 +961,8 @@ pub(super) fn reduce_message(model: &mut super::ShellViewModel, message: super::
             model.sidebar.apply_playlist_players(&repo_id, result);
         }
         SidebarMessage::Gap(message) => gap::reduce(model, message),
+        SidebarMessage::ClearRecent => model.clear_recent_access(),
+        SidebarMessage::RecentCleared { repo_id, result } => model.note_recent_cleared(&repo_id, result),
     }
     None
 }

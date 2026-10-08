@@ -2,7 +2,7 @@
 //!
 //! 几何、父子路径和“拖到自己身上”的过滤都不碰窗口。阈值 72 与 Vue 相同。
 
-use nana_ui::{FileDialogKind, FileDialogRequest};
+use nana_ui::{FileDialogKind, FileDialogRequest, FileFilter};
 
 /// 内部拖放改走系统拖出的距离，对应 `externalDragSwitchDistance`。
 pub const EXTERNAL_DRAG_SWITCH_DISTANCE: f32 = 72.0;
@@ -14,6 +14,14 @@ pub const DIALOG_PLUGIN_ID: u64 = 2;
 pub const DIALOG_RELOCATE_ID: u64 = 3;
 /// 添加资源库的文件夹对话框。
 pub const DIALOG_ATTACH_ID: u64 = 4;
+/// 文件右键下载的目标目录。和导出、插件包、重定向、添加资源库的编号分开。
+pub const DIALOG_DOWNLOAD_ID: u64 = 5;
+/// 自定义缩略图选文件。和导出、插件包、重定向、添加资源库、下载目录的编号分开。
+pub const DIALOG_THUMBNAIL_ID: u64 = 6;
+/// 来源认证的缓存目录。和下载目录、添加资源库的编号分开。
+pub const DIALOG_SOURCE_CACHE_ID: u64 = 7;
+/// 资源库压缩包的保存路径。和外部连接 JSON 导出的编号分开。
+pub const DIALOG_REPOSITORY_EXPORT_ID: u64 = 8;
 
 /// 关闭按钮在三种设置下的决定。脏编辑只拦截真正退出。
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -22,7 +30,7 @@ pub enum CloseDecision {
     CloseNow,
     /// 先问用户。`dirty` 传给确认请求。
     Ask { dirty: bool },
-    /// 设置是最小化到托盘。没有托盘时保持窗口。
+    /// 设置是最小化到托盘。不退出进程，由宿主隐藏窗口。
     HoldForTray,
 }
 
@@ -209,4 +217,34 @@ pub fn pick_folder_request() -> FileDialogRequest {
 /// 选择一个本地文件夹来添加资源库。只构造请求，不打开系统对话框。
 pub fn attach_folder_request() -> FileDialogRequest {
     FileDialogRequest::new(DIALOG_ATTACH_ID, FileDialogKind::PickFolder).title("添加资源库")
+}
+
+/// 选择下载目标目录。只构造请求，不打开系统对话框。
+pub fn download_folder_request() -> FileDialogRequest {
+    FileDialogRequest::new(DIALOG_DOWNLOAD_ID, FileDialogKind::PickFolder).title("选择下载目录")
+}
+
+/// 选择来源缓存目录。只构造请求，不打开系统对话框。
+pub fn source_cache_folder_request() -> FileDialogRequest {
+    FileDialogRequest::new(DIALOG_SOURCE_CACHE_ID, FileDialogKind::PickFolder).title("选择缓存目录")
+}
+
+/// 选择资源库压缩包的保存路径。只构造请求，不打开系统对话框。
+pub fn repository_export_save_request(file_name: Option<String>, extension: &str) -> FileDialogRequest {
+    let mut request = FileDialogRequest::new(DIALOG_REPOSITORY_EXPORT_ID, FileDialogKind::SaveFile).title("导出资源库");
+    if let Some(name) = file_name.as_deref().map(str::trim).filter(|name| !name.is_empty()) {
+        request = request.file_name(name);
+    }
+    let extension = extension.trim();
+    if !extension.is_empty() {
+        request = request.filters([FileFilter::new("压缩包", [extension])]);
+    }
+    request
+}
+
+/// 选择一张图片作为自定义缩略图。只构造请求，不打开系统对话框。
+pub fn thumbnail_file_request() -> FileDialogRequest {
+    FileDialogRequest::new(DIALOG_THUMBNAIL_ID, FileDialogKind::OpenFile)
+        .title("选择自定义缩略图")
+        .filters([FileFilter::new("图片", ["png", "jpg", "jpeg", "webp", "bmp"])])
 }

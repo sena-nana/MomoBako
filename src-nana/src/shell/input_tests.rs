@@ -7,7 +7,8 @@ use super::support::{
     absolute_drag_paths, can_drag_entries, decide_close, filter_external_import_paths, internal_drag_distance,
     join_repository_path, normalize_filesystem_path, normalize_move_paths, normalize_workspace_path, resolve_drop_target,
     should_delegate_to_external_drag, workspace_parent_path, CloseDecision, DIALOG_EXPORT_ID, DIALOG_PLUGIN_ID,
-    DIALOG_ATTACH_ID, DIALOG_RELOCATE_ID, EXTERNAL_DRAG_SWITCH_DISTANCE,
+    DIALOG_ATTACH_ID, DIALOG_DOWNLOAD_ID, DIALOG_RELOCATE_ID, DIALOG_REPOSITORY_EXPORT_ID, DIALOG_THUMBNAIL_ID,
+    EXTERNAL_DRAG_SWITCH_DISTANCE,
 };
 use super::{begin_relocate_dialog, close_prompt, HostDragPhase, InputMessage, InternalSession};
 use nana_ui::FileDialogKind;
@@ -119,8 +120,8 @@ fn internal_drag_selects_moves_and_delegates_outside_the_window() {
         hover_folder: None,
         over_browser: false,
     });
-    assert_eq!(model.input.external_drag_result, Some(false));
-    assert_eq!(model.input.error, "拖出失败：宿主文件拖出尚未接通");
+    assert_eq!(model.input.external_drag_result, None);
+    assert!(model.input.error.is_empty());
     assert!(matches!(model.input.host_requests.last(), Some(HostRequest::Input(HostInputRequest::DragOut { paths })) if paths == &["C:\\repo\\a.png".to_string()]));
     assert!(model.input.session.is_none());
     send(&mut model, InputMessage::EntryDragEnd { hover_folder: Some("albums".into()), over_browser: true, has_pointer: true });
@@ -164,7 +165,8 @@ fn refused_drags_pointer_leave_and_delegated_end_do_not_move() {
     assert!(model.input.session.is_some());
     send(&mut model, InputMessage::WindowPointerLeave { x: 72.0, y: 0.0 });
     assert!(model.input.session.is_none());
-    assert_eq!(model.input.external_drag_result, Some(false));
+    assert_eq!(model.input.external_drag_result, None);
+    assert!(matches!(model.input.host_requests.last(), Some(HostRequest::Input(HostInputRequest::DragOut { .. }))));
 
     let mut model = ready("repo");
     send(&mut model, begin("a.png", &["a.png"], 0.0));
@@ -467,17 +469,18 @@ fn box_selection_open_reveal_and_external_drag_follow_the_vue_guards() {
     assert_eq!(model.input.host_requests.len(), 3);
     assert!(model.input.error.is_empty());
     send(&mut model, InputMessage::StartExternalDrag { paths: vec!["a.png".into()], trash: false, backend_kind: "filesystem".into(), repo_root: "C:\\repo".into() });
-    assert_eq!(model.input.error, "拖出失败：宿主文件拖出尚未接通");
-    assert_eq!(model.input.external_drag_result, Some(false));
+    assert!(model.input.error.is_empty());
+    assert_eq!(model.input.external_drag_result, None);
 
     model.input.external_active = true;
     model.input.dragging_files = true;
     model.input.dragging_repository_folder = true;
+    model.input.error = "保留".into();
     send(&mut model, InputMessage::ClearDrag);
     assert!(!model.input.external_active);
     assert!(!model.input.dragging_files);
     assert!(!model.input.dragging_repository_folder);
-    assert_eq!(model.input.error, "拖出失败：宿主文件拖出尚未接通");
+    assert_eq!(model.input.error, "保留");
 }
 
 #[test]
@@ -521,12 +524,15 @@ fn close_confirmation_and_file_dialogs_do_not_pretend_the_host_finished() {
     model.settings.close_behavior = "minimizeToTray".into();
     model.reduce(ShellMessage::WindowAction(crate::shell::WindowAction::Close));
     assert!(!model.input.pending_close);
-    assert_eq!(model.input.notice, "最小化到托盘尚未接通");
+    assert!(model.input.notice.is_empty());
     assert!(matches!(model.input.host_requests.last(), Some(HostRequest::Input(HostInputRequest::MinimizeToTray))));
     assert!(model.input.take_platform_commands(nana_ui_platform::WindowId(1), false).is_empty());
 
-    let acceptance = ShellViewModel::for_page(ShellPage::Settings);
+    let mut acceptance = ShellViewModel::for_page(ShellPage::Settings);
     assert!(close_prompt(&acceptance).is_none());
+    acceptance.input.pending_close = true;
+    acceptance.input.notice = "确认关闭 MomoBako？".into();
+    assert!(close_prompt(&acceptance).is_some());
 
     model.admin.external_message = "正在选择导出位置…".into();
     send(&mut model, InputMessage::FileDialogCompleted { request_id: DIALOG_EXPORT_ID, paths: Vec::new(), failed: None });
@@ -666,4 +672,162 @@ fn attach_folder_dialog_submits_a_chosen_path_and_ignores_cancel() {
         model.sidebar.take_effects().as_slice(),
         [SidebarEffect::AttachRepository { path }] if path == "D:/library"
     ));
+}
+
+#[test]
+fn download_folder_calls_plugin_only_after_a_directory_is_chosen() {
+    let mut model = ShellViewModel::default();
+    let begin = InputMessage::BeginDownloadFolder {
+        plugin_id: "momobako.netease.source".into(),
+        method: "media.downloadTrackPackage".into(),
+        payload: serde_json::json!({"songId": 9}),
+        repository_id: Some("repo".into()),
+    };
+    send(&mut model, begin.clone());
+    assert!(model.admin.take_effects().is_empty());
+    let commands = model.input.take_platform_commands(nana_ui_platform::WindowId(1), false);
+    assert!(matches!(
+        commands.as_slice(),
+        [nana_ui_platform::host::WindowCommand::OpenFileDialog { request, .. }]
+            if request.id == DIALOG_DOWNLOAD_ID
+                && request.kind == FileDialogKind::PickFolder
+                && request.title.as_deref() == Some("选择下载目录")
+    ));
+
+    send(&mut model, InputMessage::FileDialogCompleted { request_id: DIALOG_DOWNLOAD_ID, paths: Vec::new(), failed: None });
+    assert!(model.admin.take_effects().is_empty());
+    assert!(model.input.pending_download.is_none());
+
+    send(&mut model, begin);
+    send(
+        &mut model,
+        InputMessage::FileDialogCompleted { request_id: DIALOG_DOWNLOAD_ID, paths: vec!["D:/downloads".into()], failed: Some("Busy".into()) },
+    );
+    assert!(model.admin.take_effects().is_empty());
+    assert!(model.input.pending_download.is_none());
+
+    send(&mut model, InputMessage::BeginDownloadFolder {
+        plugin_id: "momobako.netease.source".into(),
+        method: "media.downloadTrackPackage".into(),
+        payload: serde_json::json!({"songId": 9}),
+        repository_id: Some("repo".into()),
+    });
+    send(
+        &mut model,
+        InputMessage::FileDialogCompleted { request_id: DIALOG_DOWNLOAD_ID, paths: vec!["D:/downloads".into()], failed: None },
+    );
+    match model.admin.take_effects().as_slice() {
+        [crate::shell::admin::AdminEffect::CallPlugin { method, payload, repository_id, origin, .. }] => {
+            assert_eq!(method, "media.downloadTrackPackage");
+            assert_eq!(payload["songId"], 9);
+            assert_eq!(payload["destination"]["kind"], "localFolder");
+            assert_eq!(payload["destination"]["path"], "D:/downloads");
+            assert_eq!(repository_id.as_deref(), Some("repo"));
+            assert_eq!(*origin, crate::shell::admin::PluginCallOrigin::FileMenu);
+        }
+        other => panic!("unexpected {other:?}"),
+    }
+}
+
+#[test]
+fn custom_thumbnail_dialog_is_id_six_and_writes_or_clears() {
+    assert_eq!(DIALOG_THUMBNAIL_ID, 6);
+    assert_ne!(DIALOG_REPOSITORY_EXPORT_ID, DIALOG_EXPORT_ID);
+    assert_ne!(DIALOG_REPOSITORY_EXPORT_ID, DIALOG_THUMBNAIL_ID);
+    assert_ne!(DIALOG_THUMBNAIL_ID, DIALOG_EXPORT_ID);
+    assert_ne!(DIALOG_THUMBNAIL_ID, DIALOG_PLUGIN_ID);
+    assert_ne!(DIALOG_THUMBNAIL_ID, DIALOG_RELOCATE_ID);
+    assert_ne!(DIALOG_THUMBNAIL_ID, DIALOG_ATTACH_ID);
+    assert_ne!(DIALOG_THUMBNAIL_ID, DIALOG_DOWNLOAD_ID);
+
+    let mut model = ready("repo");
+    send(&mut model, InputMessage::BeginThumbnailFile { repo_id: "repo".into(), path: "a.png".into(), kind: "file".into() });
+    let commands = model.input.take_platform_commands(nana_ui_platform::WindowId(1), false);
+    assert!(matches!(
+        commands.as_slice(),
+        [nana_ui_platform::host::WindowCommand::OpenFileDialog { request, .. }] if request.id == DIALOG_THUMBNAIL_ID
+    ));
+    send(&mut model, InputMessage::FileDialogCompleted { request_id: DIALOG_THUMBNAIL_ID, paths: Vec::new(), failed: None });
+    assert!(model.files.take_effects().is_empty());
+
+    send(&mut model, InputMessage::BeginThumbnailFile { repo_id: "repo".into(), path: "a.png".into(), kind: "file".into() });
+    let _ = model.input.take_platform_commands(nana_ui_platform::WindowId(1), false);
+    send(
+        &mut model,
+        InputMessage::FileDialogCompleted { request_id: DIALOG_THUMBNAIL_ID, paths: vec!["C:\\cover.png".into()], failed: None },
+    );
+    assert!(matches!(
+        model.files.take_effects().as_slice(),
+        [FilesEffect::MutateThumbnail { action, source_path, image_bytes, path, .. }]
+            if action == "save" && source_path.as_deref() == Some("C:\\cover.png") && image_bytes.is_none() && path == "a.png"
+    ));
+
+    crate::host_bridge::copy_text("C:\\clip.jpg");
+    send(&mut model, InputMessage::PasteThumbnail { repo_id: "repo".into(), path: "a.png".into(), kind: "file".into() });
+    assert!(matches!(
+        model.files.take_effects().as_slice(),
+        [FilesEffect::MutateThumbnail { action, source_path, .. }] if action == "save" && source_path.as_deref() == Some("C:\\clip.jpg")
+    ));
+
+    crate::host_bridge::copy_text("data:image/png;base64,AQID");
+    send(&mut model, InputMessage::PasteThumbnail { repo_id: "repo".into(), path: "a.png".into(), kind: "file".into() });
+    assert!(matches!(
+        model.files.take_effects().as_slice(),
+        [FilesEffect::MutateThumbnail { action, image_bytes, source_path, .. }]
+            if action == "save" && source_path.is_none() && image_bytes.as_deref() == Some(&[1, 2, 3][..])
+    ));
+
+    crate::host_bridge::copy_text("notes.txt");
+    send(&mut model, InputMessage::PasteThumbnail { repo_id: "repo".into(), path: "a.png".into(), kind: "file".into() });
+    assert!(model.files.take_effects().is_empty());
+    assert!(model.files.error.contains("剪贴板"));
+
+    send(&mut model, InputMessage::ClearThumbnail { repo_id: "repo".into(), path: "a.png".into(), kind: "file".into() });
+    assert!(matches!(
+        model.files.take_effects().as_slice(),
+        [FilesEffect::MutateThumbnail { action, source_path, image_bytes, .. }]
+            if action == "clear" && source_path.is_none() && image_bytes.is_none()
+    ));
+}
+
+#[test]
+fn source_playlist_name_is_required_before_the_plugin_call() {
+    let mut model = ShellViewModel::default();
+    send(&mut model, InputMessage::OpenSourcePlaylist {
+        plugin_id: "momobako.netease.source".into(),
+        method: "source.playlistFromDirectory".into(),
+        payload: serde_json::json!({"playlistId": 3}),
+        repository_id: Some("repo".into()),
+    });
+    assert!(model.input.source_playlist.is_some());
+    assert!(model.admin.take_effects().is_empty());
+    send(&mut model, InputMessage::SourcePlaylistDraft("   ".into()));
+    send(&mut model, InputMessage::SubmitSourcePlaylist);
+    assert!(model.admin.take_effects().is_empty());
+    assert!(model.input.source_playlist.is_some());
+    send(&mut model, InputMessage::CloseSourcePlaylist);
+    assert!(model.input.source_playlist.is_none());
+    assert!(model.admin.take_effects().is_empty());
+
+    send(&mut model, InputMessage::OpenSourcePlaylist {
+        plugin_id: "momobako.netease.source".into(),
+        method: "source.playlistFromDirectory".into(),
+        payload: serde_json::json!({"playlistId": 3}),
+        repository_id: Some("repo".into()),
+    });
+    send(&mut model, InputMessage::SourcePlaylistDraft("  夜曲  ".into()));
+    send(&mut model, InputMessage::SubmitSourcePlaylist);
+    assert!(model.input.source_playlist.is_none());
+    match model.admin.take_effects().as_slice() {
+        [crate::shell::admin::AdminEffect::CallPlugin { method, payload, repository_id, origin, .. }] => {
+            assert_eq!(method, "source.playlistFromDirectory");
+            assert_eq!(payload["name"], "夜曲");
+            assert_eq!(payload["playlistName"], "夜曲");
+            assert_eq!(payload["repositoryId"], "repo");
+            assert_eq!(payload["playlistId"], 3);
+            assert_eq!(repository_id.as_deref(), Some("repo"));
+            assert_eq!(*origin, crate::shell::admin::PluginCallOrigin::FileMenu);
+        }
+        other => panic!("unexpected {other:?}"),
+    }
 }

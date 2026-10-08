@@ -8,7 +8,7 @@ use nana_ui::{
 };
 
 use crate::shell::{thumbnail_slot, ThumbnailFrame};
-use crate::MomoBakoApplication;
+use crate::{MomoBakoApplication, NativePreviewGpu};
 
 pub(crate) struct ThumbnailGpu {
     pub(crate) slot: String,
@@ -91,3 +91,50 @@ impl MomoBakoApplication {
         }
     }
 }
+
+/// 图片幻灯片的 RGBA 帧。没有帧就卸掉纹理，不留上一张图。
+pub(crate) fn publish_still(
+        app: &mut MomoBakoApplication,
+        window: &mut ApplicationWindow,
+        context: &RuntimeProgramContext<crate::shell::ShellMessage>,
+    ) {
+        let Some((token, frame)) = app.slideshow_frame() else {
+            app.still_gpu = None;
+            window.textures.remove("player-still");
+            return;
+        };
+        let needs_upload = app.still_gpu.as_ref().is_none_or(|preview| {
+            preview.token != token || preview.width != frame.width || preview.height != frame.height
+        });
+        if needs_upload {
+            let Ok(texture) = context.gpu().create_texture(&GpuTextureDescriptor {
+                label: Some("momobako slideshow"),
+                width: frame.width,
+                height: frame.height,
+                format: GpuTextureFormat::RGBA8_UNORM_SRGB,
+                usage: GpuTextureUsages::SAMPLED | GpuTextureUsages::COPY_DST,
+            }) else {
+                eprintln!("Nana 图片幻灯片纹理创建失败：{}x{}", frame.width, frame.height);
+                return;
+            };
+            if let Err(error) = context.gpu().write_texture(
+                &texture,
+                GpuTextureRegion::full(frame.width, frame.height),
+                &frame.rgba,
+                frame.width.saturating_mul(4),
+            ) {
+                eprintln!("Nana 图片幻灯片纹理上传失败：{error}");
+                return;
+            }
+            app.still_gpu = Some(NativePreviewGpu { token, texture, width: frame.width, height: frame.height });
+        }
+        if let Some(preview) = app.still_gpu.as_ref() {
+            window.textures.register(
+                "player-still",
+                HostTexture::new(1, 1, &preview.texture),
+                preview.width,
+                preview.height,
+                HostTextureAlphaMode::Premultiplied,
+            );
+        }
+    }

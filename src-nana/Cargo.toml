@@ -20,6 +20,15 @@ nana-ui = { git = "https://github.com/sena-nana/NanaUI.git", rev = "ee94106746b1
 nana-ui-core = { git = "https://github.com/sena-nana/NanaUI.git", rev = "ee94106746b13f356af17586ed5e35ed78f9eb40" }
 nana-ui-platform = { git = "https://github.com/sena-nana/NanaUI.git", rev = "ee94106746b13f356af17586ed5e35ed78f9eb40", features = ["clipboard"] }
 
+[target.'cfg(windows)'.dependencies]
+# 与 Tauri `plugin:drag` 同一实现，把绝对路径拖出窗口。
+drag = "2.1.1"
+# 与 Tauri 托盘同一套 Win32 通知图标。
+tray-icon = { version = "0.21.3", default-features = false }
+raw-window-handle = "0.6.2"
+# 系统媒体传输控件。测试构建不调用注册函数。
+windows = { version = "0.62", features = ["Foundation", "Media", "Storage_Streams", "Win32_Foundation", "Win32_System_Com", "Win32_System_WinRT", "Win32_UI_Shell", "Win32_Media_MediaFoundation"] }
+
 [dev-dependencies]
 nana-ui-devtools = { git = "https://github.com/sena-nana/NanaUI.git", rev = "ee94106746b13f356af17586ed5e35ed78f9eb40", features = ["runtime-agent"] }
 

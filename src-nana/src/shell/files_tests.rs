@@ -516,6 +516,9 @@ fn directory_replace_opens_and_file_activation_loads_the_asset() {
     file.asset_id = Some("asset-1".into());
     state.rows = vec![row("photos", "photos", "directory"), file];
     state.reduce(&ctx, FilesMessage::ActivateRow("photos".into()));
+    assert_eq!(state.selected, vec!["photos".to_string()]);
+    assert!(state.effects.is_empty());
+    state.reduce(&ctx, FilesMessage::OpenRow("photos".into()));
     assert!(state.selected.is_empty());
     assert!(matches!(
         state.take_effects().as_slice(),
@@ -602,6 +605,69 @@ fn append_uses_the_larger_page_and_display_mode_persists() {
     state.reduce(&ctx, FilesMessage::SetDisplayMode(DisplayMode::List));
     assert_eq!(state.display_mode, DisplayMode::List);
     assert_eq!(state.take_effects(), vec![FilesEffect::PersistDisplayMode]);
+}
+
+#[test]
+fn custom_thumbnail_result_updates_the_row_and_decodes_the_file() {
+    let mut state = FilesState::default();
+    state.rows = vec![row("a.png", "a.png", "file")];
+    state.reduce(
+        &writable(),
+        FilesMessage::ThumbnailSaved { path: "a.png".into(), thumbnail_path: Some("thumbs/a.png".into()), custom: true },
+    );
+    assert_eq!(state.rows[0].thumbnail_path.as_deref(), Some("thumbs/a.png"));
+    assert!(state.rows[0].thumbnail_custom);
+    assert!(!state.rows[0].texture_ready);
+    assert!(matches!(
+        state.take_effects().as_slice(),
+        [FilesEffect::DecodeThumbnails { paths }] if paths == &["thumbs/a.png".to_string()]
+    ));
+
+    state.reduce(
+        &writable(),
+        FilesMessage::ThumbnailSaved { path: "a.png".into(), thumbnail_path: None, custom: false },
+    );
+    assert!(state.rows[0].thumbnail_path.is_none());
+    assert!(!state.rows[0].thumbnail_custom);
+    assert!(state.take_effects().is_empty());
+}
+
+#[test]
+fn export_archive_waits_for_a_real_path_and_git_uses_the_draft() {
+    let mut state = FilesState::default();
+    state.present_export();
+    state.reduce(&writable(), FilesMessage::SubmitExport);
+    assert!(state.take_effects().is_empty());
+    assert_eq!(state.export.error, "压缩包导出还没有输出路径。");
+    assert!(!state.export.busy);
+
+    state.reduce(&writable(), FilesMessage::SetExportField { field: "output".into(), value: "D:/out/lib.zip".into() });
+    state.reduce(&writable(), FilesMessage::SetExportField { field: "encrypt".into(), value: "1".into() });
+    state.reduce(&writable(), FilesMessage::SetExportField { field: "password".into(), value: "secret".into() });
+    state.reduce(&writable(), FilesMessage::SubmitExport);
+    assert!(matches!(
+        state.take_effects().as_slice(),
+        [FilesEffect::ExportArchive { repo_id, output_path, format, encrypt, password, .. }]
+            if repo_id == "repo" && output_path == "D:/out/lib.zip" && format == "zip" && *encrypt && password == "secret"
+    ));
+
+    state.reduce(&writable(), FilesMessage::ExportFinished(Err("磁盘已满".into())));
+    assert_eq!(state.export.error, "磁盘已满");
+    assert!(!state.export.busy);
+
+    state.reduce(&writable(), FilesMessage::SetExportField { field: "target".into(), value: "git".into() });
+    state.reduce(&writable(), FilesMessage::SetExportField { field: "remote".into(), value: "origin".into() });
+    state.reduce(&writable(), FilesMessage::SetExportField { field: "branch".into(), value: "main".into() });
+    state.reduce(&writable(), FilesMessage::SetExportField { field: "message".into(), value: "导出".into() });
+    state.reduce(&writable(), FilesMessage::SubmitExport);
+    assert!(matches!(
+        state.take_effects().as_slice(),
+        [FilesEffect::ExportGit { repo_id, remote, branch, message }]
+            if repo_id == "repo" && remote == "origin" && branch == "main" && message == "导出"
+    ));
+    state.reduce(&writable(), FilesMessage::ExportFinished(Ok("资源库已推送".into())));
+    assert_eq!(state.export.notice, "资源库已推送");
+    assert!(state.export.error.is_empty());
 }
 
 fn reduce_open(state: &mut FilesState, ctx: &FileContext, dialog: FileDialog) -> bool {

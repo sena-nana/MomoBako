@@ -1,0 +1,341 @@
+//! 预览出声、PDF 翻页和模型视角。
+//!
+//! 音视频预览和底部播放条共用一份会话，出声走播放列表那条内存游标。
+//! 测试构建不打开声卡。PDF 与网格画面留在这里，检查状态文件不再继续变长。
+
+use super::super::{PreviewPixels, ShellViewModel};
+use super::{InspectMessage, InspectState, PreviewBody};
+
+/// 一页画出来的画面。`error` 有值时不上传空白纹理。
+#[derive(Clone, Debug)]
+pub struct PageFrame {
+    pub width: u32,
+    pub height: u32,
+    pub rgba: Vec<u8>,
+    pub text: String,
+    pub error: Option<String>,
+}
+
+/// 可旋转的三角网格。FBX 和 BLEND 不会产生它。
+#[derive(Clone, Debug)]
+pub struct MeshData {
+    pub vertices: Vec<[f32; 3]>,
+    pub triangles: Vec<[u32; 3]>,
+}
+
+/// 原生预览读完后的文本、页面和可选网格。
+#[derive(Clone, Debug)]
+pub struct NativeLoad {
+    pub text: String,
+    pub frames: Vec<PageFrame>,
+    pub mesh: Option<MeshData>,
+    pub paged: bool,
+}
+
+impl NativeLoad {
+    pub fn text_only(text: impl Into<String>) -> Self {
+        Self { text: text.into(), frames: Vec::new(), mesh: None, paged: false }
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+pub(super) struct Deck {
+    index: usize,
+    frames: Vec<PageFrame>,
+    mesh: Option<MeshData>,
+    yaw: f32,
+    zoom: f32,
+    paged: bool,
+    video: Option<Vec<super::support::VideoFrame>>,
+}
+
+pub(super) enum Follow {
+    None,
+    Media { path: String, pcm: Option<super::super::player::PreviewPcm> },
+    Toggle,
+    Seek(u64),
+    Volume(f32),
+    Sync,
+}
+
+/// 在归约消费消息之前抄出随后要做的出声或换页。
+pub(super) fn follow(message: &InspectMessage) -> Follow {
+    match message {
+        InspectMessage::MediaLoaded { path, result: Ok(_), pcm, .. } => Follow::Media { path: path.clone(), pcm: pcm.clone() },
+        InspectMessage::MediaLoaded { path, result: Err(_), .. } => Follow::Media { path: path.clone(), pcm: None },
+        InspectMessage::PlayPause => Follow::Toggle,
+        InspectMessage::Seek(position) => Follow::Seek(*position),
+        InspectMessage::SetVolume(volume) => Follow::Volume(*volume),
+        InspectMessage::NativeLoaded { .. } | InspectMessage::TurnPage(_) | InspectMessage::Orbit { .. } => Follow::Sync,
+        _ => Follow::None,
+    }
+}
+
+/// 会话已经写好之后再出声、同步画面。过期的媒体结果不会装进游标。
+pub(super) fn apply(model: &mut ShellViewModel, follow: Follow) {
+    match follow {
+        Follow::None => {}
+        Follow::Media { path, pcm } => {
+            arm_media(model, &path, pcm);
+            show_video_frame(model);
+        }
+        Follow::Toggle => {
+            let playing = model.inspect.media_session().is_some_and(|session| session.status == "playing");
+            model.player.mirror_preview_playing(playing, &mut model.inspect);
+            show_video_frame(model);
+        }
+        Follow::Seek(position) => {
+            model.player.mirror_preview_seek(position, &mut model.inspect);
+            show_video_frame(model);
+        }
+        Follow::Volume(volume) => model.player.mirror_preview_volume(volume, &mut model.inspect),
+        Follow::Sync => sync_frame(model),
+    }
+}
+
+pub(super) fn clear_deck(state: &mut InspectState) {
+    state.deck = Deck::default();
+}
+
+pub(super) fn install(state: &mut InspectState, frames: Vec<PageFrame>, mesh: Option<MeshData>, paged: bool) {
+    state.deck = Deck { index: 0, frames, mesh, yaw: 0.0, zoom: 1.0, paged, video: None };
+}
+
+/// 换上这次视频解出的画面。没有画面时清掉上一份，避免旧帧留在新文件上。
+pub(super) fn install_video(state: &mut InspectState, frames: Option<Vec<super::support::VideoFrame>>) {
+    state.deck.video = frames.filter(|frames| !frames.is_empty());
+}
+
+/// 取不晚于播放头的那一帧。
+pub(super) fn video_frame(state: &InspectState, time_ms: u64) -> Option<&super::support::VideoFrame> {
+    let frames = state.deck.video.as_ref()?;
+    frames.iter().rev().find(|frame| frame.time_ms <= time_ms).or_else(|| frames.first())
+}
+
+/// 播放中的预览把会话时钟往前拨，并换上对应画面。底部播放条读的是同一份会话。
+pub(super) fn advance_playback(model: &mut super::super::ShellViewModel, step_ms: u64) -> bool {
+    let Some(mut session) = model.inspect.media_session().cloned() else {
+        return false;
+    };
+    if session.status != "playing" {
+        return false;
+    }
+    let duration = session.duration_ms.unwrap_or(0);
+    let next = session.current_time_ms.saturating_add(step_ms);
+    let ended = duration > 0 && next >= duration;
+    session.current_time_ms = if ended { duration } else { next };
+    if ended {
+        session.status = "paused".into();
+    }
+    model.inspect.replace_shared_media(session.clone());
+    model.player.adopt_session(session);
+    if ended && model.player.preview_audio_armed() {
+        model.player.mirror_preview_playing(false, &mut model.inspect);
+    }
+    show_video_frame(model);
+    true
+}
+
+/// 翻到相邻页。越界只记日志，不把空白页当成新内容。
+pub(super) fn turn(state: &mut InspectState, delta: i32) {
+    if !state.deck.paged || state.deck.frames.is_empty() {
+        eprintln!("Nana 当前预览不能翻页");
+        return;
+    }
+    let len = state.deck.frames.len() as i32;
+    let next = state.deck.index as i32 + delta;
+    if next < 0 || next >= len {
+        eprintln!("Nana PDF 页码越界：{next}");
+        return;
+    }
+    state.deck.index = next as usize;
+    write_page_text(state);
+}
+
+/// 绕竖直轴旋转，或按比例缩放。没有网格时不假装已经转过。
+pub(super) fn orbit(state: &mut InspectState, yaw: f32, zoom: f32) {
+    let Some(mesh) = state.deck.mesh.clone() else {
+        eprintln!("Nana 当前预览没有可旋转的网格");
+        return;
+    };
+    state.deck.yaw += yaw;
+    if zoom > 0.0 {
+        state.deck.zoom = (state.deck.zoom * zoom).clamp(0.25, 8.0);
+    }
+    let frame = super::native_preview::paint_mesh(&mesh, state.deck.yaw, state.deck.zoom);
+    if state.deck.frames.is_empty() {
+        state.deck.frames.push(frame);
+    } else {
+        state.deck.frames[0] = frame;
+    }
+    state.deck.index = 0;
+}
+
+impl InspectState {
+    pub(crate) fn showing_raster(&self) -> bool {
+        self.deck.frames.get(self.deck.index).is_some_and(|frame| frame.error.is_none() && !frame.rgba.is_empty())
+    }
+
+    pub(crate) fn raster_error(&self) -> Option<&str> {
+        self.deck.frames.get(self.deck.index).and_then(|frame| frame.error.as_deref())
+    }
+
+    /// 当前页和总页。第一页和最后一页用来禁用翻页按钮。
+    pub(crate) fn page_nav(&self) -> Option<(usize, usize)> {
+        if !self.deck.paged || self.deck.frames.is_empty() {
+            return None;
+        }
+        Some((self.deck.index, self.deck.frames.len()))
+    }
+
+    pub(crate) fn has_mesh(&self) -> bool {
+        self.deck.mesh.is_some()
+    }
+
+    pub(crate) fn raster_rgba(&self) -> Option<&[u8]> {
+        self.deck.frames.get(self.deck.index).map(|frame| frame.rgba.as_slice())
+    }
+
+    /// 当前页的宽、高和像素。空页和带错误的页不拿去画。
+    pub(crate) fn raster_frame(&self) -> Option<(u32, u32, &[u8])> {
+        if !self.showing_raster() {
+            return None;
+        }
+        let rgba = self.raster_rgba()?;
+        let frame = self.deck.frames.get(self.deck.index)?;
+        if frame.width == 0 || frame.height == 0 {
+            return None;
+        }
+        Some((frame.width, frame.height, rgba))
+    }
+}
+
+/// 把页位图编成 PNG data URL。离屏绘制走 `content_image`，不依赖未注册的宿主纹理槽。
+pub(crate) fn rgba_png_data_url(width: u32, height: u32, rgba: &[u8]) -> Option<String> {
+    let pixels = (width as usize).checked_mul(height as usize)?.checked_mul(4)?;
+    if rgba.len() < pixels {
+        eprintln!("Nana 页位图像素不够：{width}x{height}，字节 {}", rgba.len());
+        return None;
+    }
+    let mut png = std::io::Cursor::new(Vec::new());
+    let encoder = image::codecs::png::PngEncoder::new(&mut png);
+    if let Err(error) = image::ImageEncoder::write_image(
+        encoder,
+        &rgba[..pixels],
+        width,
+        height,
+        image::ExtendedColorType::Rgba8,
+    ) {
+        eprintln!("Nana 页位图编码 PNG 失败：{error}");
+        return None;
+    }
+    Some(format!("data:image/png;base64,{}", encode_base64(&png.into_inner())))
+}
+
+fn encode_base64(bytes: &[u8]) -> String {
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::new();
+    let mut index = 0;
+    while index + 3 <= bytes.len() {
+        let packed = ((bytes[index] as u32) << 16) | ((bytes[index + 1] as u32) << 8) | bytes[index + 2] as u32;
+        out.push(TABLE[((packed >> 18) & 63) as usize] as char);
+        out.push(TABLE[((packed >> 12) & 63) as usize] as char);
+        out.push(TABLE[((packed >> 6) & 63) as usize] as char);
+        out.push(TABLE[(packed & 63) as usize] as char);
+        index += 3;
+    }
+    match bytes.len() - index {
+        1 => {
+            let packed = (bytes[index] as u32) << 16;
+            out.push(TABLE[((packed >> 18) & 63) as usize] as char);
+            out.push(TABLE[((packed >> 12) & 63) as usize] as char);
+            out.push('=');
+            out.push('=');
+        }
+        2 => {
+            let packed = ((bytes[index] as u32) << 16) | ((bytes[index + 1] as u32) << 8);
+            out.push(TABLE[((packed >> 18) & 63) as usize] as char);
+            out.push(TABLE[((packed >> 12) & 63) as usize] as char);
+            out.push(TABLE[((packed >> 6) & 63) as usize] as char);
+            out.push('=');
+        }
+        _ => {}
+    }
+    out
+}
+
+fn arm_media(model: &mut ShellViewModel, path: &str, pcm: Option<super::super::player::PreviewPcm>) {
+    let current = model.inspect.media_session().is_some() && model.inspect.target_path.as_deref() == Some(path);
+    if !current {
+        return;
+    }
+    match pcm {
+        Some(pcm) => model.player.arm_preview_audio(path, pcm),
+        None => model.player.disarm_preview_audio(),
+    }
+}
+
+fn write_page_text(state: &mut InspectState) {
+    let Some(frame) = state.deck.frames.get(state.deck.index) else {
+        return;
+    };
+    let caption = page_caption(state.deck.index, state.deck.frames.len(), frame);
+    if let PreviewBody::Native { content, .. } = &mut state.body {
+        *content = caption;
+    }
+}
+
+pub(super) fn page_caption(index: usize, total: usize, frame: &PageFrame) -> String {
+    let head = format!("{} / {total}", index + 1);
+    if let Some(error) = &frame.error {
+        if frame.text.trim().is_empty() {
+            return format!("{head}\n{error}");
+        }
+    }
+    let body = frame.text.trim();
+    if body.is_empty() { head } else { format!("{head}\n{body}") }
+}
+
+fn show_video_frame(model: &mut ShellViewModel) {
+    let time = model.inspect.media_session().map(|session| session.current_time_ms).unwrap_or(0);
+    let Some(frame) = video_frame(&model.inspect, time) else {
+        if model.preview_token.as_deref().is_some_and(|token| token.starts_with("video:")) {
+            model.preview_pixels = None;
+            model.preview_token = None;
+        }
+        return;
+    };
+    let path = model.inspect.target_path.clone().unwrap_or_default();
+    let token = format!("video:{path}:{}:{}", frame.time_ms, frame.width);
+    if model.preview_token.as_deref() == Some(token.as_str()) {
+        return;
+    }
+    model.preview_pixels = Some(super::super::PreviewPixels {
+        width: frame.width,
+        height: frame.height,
+        rgba: frame.rgba.clone(),
+    });
+    model.preview_token = Some(token);
+}
+
+fn sync_frame(model: &mut ShellViewModel) {
+    let index = model.inspect.deck.index;
+    let frame = model.inspect.deck.frames.get(index);
+    let Some(frame) = frame else {
+        return;
+    };
+    if frame.error.is_some() || frame.rgba.is_empty() {
+        if model.preview_token.as_deref().is_some_and(|token| token.starts_with("native:")) {
+            model.preview_pixels = None;
+            model.preview_token = None;
+        }
+        return;
+    }
+    let path = model.inspect.target_path.clone().unwrap_or_default();
+    model.preview_pixels = Some(PreviewPixels {
+        width: frame.width,
+        height: frame.height,
+        rgba: frame.rgba.clone(),
+    });
+    model.preview_token = Some(format!("native:{path}:{index}"));
+}

@@ -1,9 +1,9 @@
-//! 内置原生预览。压缩包列文件，PDF 与 Office 抽文本，模型只做结构摘要。
+//! 内置原生预览。压缩包列文件，PDF 画页面，Office 抽文本，模型能解析的网格会光栅化。
 //!
-//! PDF 不画页面，只读未压缩内容流里的文字。Open XML 仍走 zip。
-//! 二进制 Office 只刮取连续的 UTF-16LE 文本，不还原版式。
-//! 3MF 只数对象和网格。VRM 与 glb 一样认 `glTF` 魔数。
-//! FBX 与 BLEND 只看文件头，不解析网格或 DNA。不嵌入 Three.js。
+//! PDF 按内容流翻页。解不开的滤镜记成该页失败，不假装成空白成功。
+//! Open XML 仍走 zip。二进制 Office 只刮取连续的 UTF-16LE 文本，不还原版式。
+//! OBJ、STL、glTF/GLB、3MF、VRM 能取出三角形就画进预览纹理。Nana GpuView 没有网格管线。
+//! FBX 与 BLEND 只看文件头。不嵌入 Three.js。
 //! 读不到的格式仍走升级提示。
 
 use std::io::{Cursor, Read};
@@ -13,10 +13,13 @@ use zip::ZipArchive;
 
 use crate::plugin_api::{NativeContributionKind, NativePluginContribution};
 
+use super::bridge::{MeshData, NativeLoad, PageFrame};
 use super::{InspectEffect, InspectState, PreviewBinding, PreviewBody};
 
 #[path = "native_preview_pdf.rs"]
 mod pdf;
+#[path = "native_preview_mesh.rs"]
+mod mesh;
 
 const ARCHIVE_VIEW: &str = "momobako.preview.archive";
 const PDF_VIEW: &str = "momobako.preview.pdf";
@@ -37,7 +40,8 @@ pub fn builtin_bindings() -> Vec<PreviewBinding> {
             "文档",
             OFFICE_VIEW,
             &[
-                "docx", "docm", "dotx", "xlsx", "xlsm", "pptx", "pptm", "doc", "xls", "ppt", "dot", "xlt", "pps",
+                "docx", "docm", "doc", "dotx", "dotm", "dot", "xlsx", "xlsm", "xlsb", "xls", "xltx", "xltm", "xlt",
+                "pptx", "pptm", "ppt", "ppsx", "ppsm", "pps", "potx", "potm", "pot",
             ],
             20,
         ),
@@ -51,10 +55,43 @@ pub fn builtin_bindings() -> Vec<PreviewBinding> {
     ]
 }
 
-/// 已知贡献开始读取文件。未知 view 只留下标签，不假装已经能画。
+/// 这个 view 会自己读文件并画出列表、页面或网格。
+pub fn renders_view(view_id: &str) -> bool {
+    renders(view_id)
+}
+
+/// 扩展名已经有内置绘制时返回它的 view。Vue 贡献不能画时用这一份。
+pub fn fallback_view(extension: &str) -> Option<(&'static str, &'static str)> {
+    let extension = extension.trim().trim_start_matches('.').to_ascii_lowercase();
+    if extension == "pdf" {
+        return Some((PDF_VIEW, "PDF"));
+    }
+    if matches!(extension.as_str(), "zip" | "cbz" | "7z" | "rar" | "cbr") {
+        return Some((ARCHIVE_VIEW, "压缩包"));
+    }
+    if matches!(
+        extension.as_str(),
+        "docx" | "docm" | "doc" | "dotx" | "dotm" | "dot" | "xlsx" | "xlsm" | "xlsb" | "xls" | "xltx" | "xltm" | "xlt"
+            | "pptx" | "pptm" | "ppt" | "ppsx" | "ppsm" | "pps" | "potx" | "potm" | "pot"
+    ) {
+        return Some((OFFICE_VIEW, "文档"));
+    }
+    if matches!(extension.as_str(), "fbx" | "obj" | "glb" | "gltf" | "vrm" | "stl" | "3mf" | "blend") {
+        return Some((MODEL_VIEW, "模型"));
+    }
+    None
+}
+
+/// 已知贡献开始读取文件。不能画、但扩展名已有内置表面时改走那一份。
 pub fn begin(state: &mut InspectState, repo_id: &str, path: &str, view_id: String, label: String) {
     state.error.clear();
     if !renders(&view_id) {
+        let extension = path.rsplit(['/', '\\']).next().unwrap_or(path).rsplit_once('.').map(|(_, suffix)| suffix).unwrap_or("");
+        if let Some((builtin, builtin_label)) = fallback_view(extension) {
+            eprintln!("Nana 预览贡献 {view_id} 不能绘制，改用 {builtin}：{path}");
+            begin(state, repo_id, path, builtin.to_string(), builtin_label.to_string());
+            return;
+        }
         state.loading = false;
         state.activity.clear();
         state.body = PreviewBody::Native {
@@ -75,13 +112,19 @@ pub fn begin(state: &mut InspectState, repo_id: &str, path: &str, view_id: Strin
     });
 }
 
-/// 按 view 把字节变成可显示的文本。
+/// 按 view 把字节变成可显示的文本。页面和网格在 `load` 里。
+#[cfg(test)]
 pub fn read(view_id: &str, bytes: &[u8]) -> Result<String, String> {
+    load(view_id, bytes).map(|item| item.text)
+}
+
+/// 文本、PDF 页面和可选网格一次读出。
+pub fn load(view_id: &str, bytes: &[u8]) -> Result<NativeLoad, String> {
     match view_id {
-        ARCHIVE_VIEW => list_archive(bytes),
-        PDF_VIEW => pdf::read(bytes),
-        OFFICE_VIEW => read_office(bytes),
-        MODEL_VIEW => read_model(bytes),
+        ARCHIVE_VIEW => list_archive(bytes).map(NativeLoad::text_only),
+        PDF_VIEW => pdf::load(bytes),
+        OFFICE_VIEW => read_office(bytes).map(NativeLoad::text_only),
+        MODEL_VIEW => mesh::load(bytes),
         other => {
             eprintln!("Nana 没有这个原生预览：{other}");
             Err(format!("没有原生预览 {other}"))
@@ -89,8 +132,13 @@ pub fn read(view_id: &str, bytes: &[u8]) -> Result<String, String> {
     }
 }
 
+/// 旋转或缩放之后重画网格。没有三角形时返回明确失败帧。
+pub(super) fn paint_mesh(mesh: &MeshData, yaw: f32, zoom: f32) -> PageFrame {
+    mesh::raster(mesh, yaw, zoom)
+}
+
 /// 代次或路径过期时保留当前预览。
-pub fn note_loaded(state: &mut InspectState, path: String, generation: u64, result: Result<String, String>) {
+pub fn note_loaded(state: &mut InspectState, path: String, generation: u64, result: Result<NativeLoad, String>) {
     if generation != state.generation || state.target_path.as_deref() != Some(path.as_str()) {
         eprintln!("Nana 忽略过期的原生预览：{path}");
         return;
@@ -98,10 +146,11 @@ pub fn note_loaded(state: &mut InspectState, path: String, generation: u64, resu
     state.loading = false;
     state.activity.clear();
     match result {
-        Ok(content) => {
+        Ok(loaded) => {
             if let PreviewBody::Native { content: slot, .. } = &mut state.body {
-                *slot = content;
+                *slot = loaded.text;
             }
+            super::bridge::install(state, loaded.frames, loaded.mesh, loaded.paged);
             state.error.clear();
         }
         Err(error) => {
@@ -308,7 +357,12 @@ fn finish_ole_run(run: &mut String, pieces: &mut Vec<String>) {
 
 fn plain_or_empty(text: &str, empty: &str) -> Result<String, String> {
     let trimmed = text.trim();
-    if trimmed.is_empty() { Ok(empty.into()) } else { Ok(limit_text(trimmed)) }
+    if trimmed.is_empty() {
+        eprintln!("Nana 文档没有抽出文本：{empty}");
+        Err(empty.into())
+    } else {
+        Ok(limit_text(trimmed))
+    }
 }
 
 fn zip_text(archive: &mut ZipArchive<Cursor<&[u8]>>, name: &str) -> Result<Option<String>, String> {
@@ -563,6 +617,7 @@ fn summarize_obj(bytes: &[u8]) -> Result<String, String> {
 mod tests {
     use std::io::Write;
 
+    use super::super::bridge::NativeLoad;
     use super::super::PreviewBody;
     use super::*;
 
@@ -679,9 +734,10 @@ mod tests {
         let extensions = |view: &str| {
             bindings.iter().find(|item| item.contribution.view_id == view).expect(view).extensions.clone()
         };
-        for extension in ["doc", "xls", "ppt", "dot", "xlt", "pps"] {
+        for extension in ["doc", "xls", "ppt", "dot", "xlt", "pps", "dotm", "xlsb", "xltx", "xltm", "ppsx", "ppsm", "potx", "potm", "pot"] {
             assert!(extensions(OFFICE_VIEW).iter().any(|item| item == extension), "{extension}");
         }
+        assert!(read(OFFICE_VIEW, &sample_zip(&[("a.txt", b"hi")])).is_err());
         for extension in ["vrm", "fbx", "blend"] {
             assert!(extensions(MODEL_VIEW).iter().any(|item| item == extension), "{extension}");
         }
@@ -717,9 +773,57 @@ mod tests {
             label: "压缩包".into(),
             content: String::new(),
         };
-        note_loaded(&mut state, "a.zip".into(), 2, Ok("压缩包 · 1 个文件".into()));
+        note_loaded(&mut state, "a.zip".into(), 2, Ok(NativeLoad::text_only("压缩包 · 1 个文件")));
         assert!(matches!(state.body, PreviewBody::Native { ref content, .. } if content.contains("1 个文件")));
-        note_loaded(&mut state, "old.zip".into(), 2, Ok("过期".into()));
+        note_loaded(&mut state, "old.zip".into(), 2, Ok(NativeLoad::text_only("过期")));
         assert!(matches!(state.body, PreviewBody::Native { ref content, .. } if !content.contains("过期")));
+    }
+
+    #[test]
+    fn pdf_pages_turn_and_unreadable_filters_fail() {
+        let pdf = b"%PDF-1.4\n<< /Length 12 >>\nstream\n(One) Tj\nendstream\n<< /Length 12 >>\nstream\n(Two) Tj\nendstream\n";
+        let loaded = super::load(PDF_VIEW, pdf).expect("pdf");
+        assert!(loaded.text.contains("1 / 2"), "{}", loaded.text);
+        assert!(loaded.text.contains("One"), "{}", loaded.text);
+        assert_eq!(loaded.frames.len(), 2);
+        assert!(loaded.frames[0].rgba.iter().any(|byte| *byte != 255));
+
+        let mut state = super::super::InspectState::default();
+        state.generation = 1;
+        state.target_path = Some("a.pdf".into());
+        state.body = PreviewBody::Native { view_id: PDF_VIEW.into(), label: "PDF".into(), content: String::new() };
+        note_loaded(&mut state, "a.pdf".into(), 1, Ok(loaded));
+        state.reduce(true, Some("repo"), super::super::InspectMessage::TurnPage(1));
+        assert!(matches!(state.body, PreviewBody::Native { ref content, .. } if content.contains("2 / 2") && content.contains("Two")));
+
+        let ascii85 = b"%PDF-1.4\n<< /Filter /ASCII85Decode >>\nstream\n-qJ&$+B3(_~>\nendstream\n";
+        let text = read(PDF_VIEW, ascii85).expect("ascii85");
+        assert!(text.contains("Hi"), "{text}");
+
+        let jpx = b"%PDF-1.4\n<< /Filter /JPXDecode /Length 4 >>\nstream\nxxxx\nendstream\n";
+        let error = read(PDF_VIEW, jpx).expect_err("jpx");
+        assert!(error.contains("无法解码 JPXDecode"), "{error}");
+    }
+
+    #[test]
+    fn obj_mesh_raster_can_orbit_and_fbx_stays_a_header() {
+        let obj = b"v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n";
+        let loaded = super::load(MODEL_VIEW, obj).expect("obj");
+        assert!(loaded.mesh.is_some());
+        assert!(loaded.text.contains("顶点 3"), "{}", loaded.text);
+        let before = loaded.frames[0].rgba.clone();
+        assert!(before.iter().any(|byte| *byte == 70), "没有画到三角形");
+
+        let mut state = super::super::InspectState::default();
+        state.generation = 1;
+        state.target_path = Some("a.obj".into());
+        state.body = PreviewBody::Native { view_id: MODEL_VIEW.into(), label: "模型".into(), content: loaded.text.clone() };
+        note_loaded(&mut state, "a.obj".into(), 1, Ok(loaded));
+        state.reduce(true, Some("repo"), super::super::InspectMessage::Orbit { yaw: 1.2, zoom: 1.0 });
+        assert!(state.has_mesh());
+        assert_ne!(state.raster_rgba(), Some(before.as_slice()));
+        let fbx = read(MODEL_VIEW, b"; FBX 7.4\nModel: \"Cube\"").expect("fbx");
+        assert!(fbx.contains("只报告文件头"), "{fbx}");
+        assert!(!fbx.contains("网格") && !fbx.contains("顶点"), "{fbx}");
     }
 }
