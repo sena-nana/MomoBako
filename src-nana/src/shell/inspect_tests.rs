@@ -1,4 +1,4 @@
-//! 预览、元数据和搜索状态机测试。
+//! 预览和元数据状态机测试。搜索与筛选的测试在 `search_tests.rs`。
 //!
 //! 这些分支来自 Vue 预览分派、元数据编辑和筛选栏。不启动仓库服务，也不写用户目录。
 
@@ -12,10 +12,7 @@ use crate::plugin_api::{NativeContributionKind, NativePluginContribution};
 
 use super::super::workspace::{WorkspacePanel, WorkspaceRepository};
 use super::super::{PreviewPixels, ShellMessage, ShellPage, ShellViewModel};
-use super::{
-    AdvancedField, FilterList, InspectEffect, InspectMessage, InspectState, MatchMode, PreviewBinding, PreviewBody,
-    PreviewKind, SearchRow, SortDirection,
-};
+use super::{InspectEffect, InspectMessage, InspectState, PreviewBinding, PreviewBody, PreviewKind};
 
 fn asset(path: &str, extension: &str, version: i64, virtual_asset: bool, metadata: Vec<MetadataEntry>) -> AssetDetail {
     let filename = path.rsplit(['/', '\\']).next().unwrap_or(path).to_string();
@@ -67,10 +64,6 @@ fn writable_shell() -> ShellViewModel {
     model
 }
 
-fn send(model: &mut ShellViewModel, message: InspectMessage) {
-    model.reduce(ShellMessage::Inspect(message));
-}
-
 fn preview_binding(kind: NativeContributionKind, extension: &str) -> PreviewBinding {
     PreviewBinding {
         extensions: vec![extension.into()],
@@ -88,16 +81,6 @@ fn source(path: &str) -> FilePreviewSourceResponse {
         media_type: "image/png".into(),
         size_bytes: 4,
         modified_at: None,
-    }
-}
-
-fn row(asset_id: &str, path: &str) -> SearchRow {
-    SearchRow {
-        repo_id: "repo-hit".into(),
-        asset_id: asset_id.into(),
-        path: path.into(),
-        filename: "cover.png".into(),
-        repo_name: "图库".into(),
     }
 }
 
@@ -418,132 +401,6 @@ fn virtual_clean_and_unrecognized_metadata_results_do_not_save() {
 }
 
 #[test]
-fn search_criteria_follow_the_vue_filter_rules() {
-    let mut state = InspectState::default();
-    state.results = vec![row("old", "old.png")];
-    state.reduce(true, Some("repo"), InspectMessage::RunSearch);
-    assert!(state.results.is_empty());
-    assert!(state.effects.is_empty());
-
-    state.reduce(true, Some("repo"), InspectMessage::SetQuery("peach".into()));
-    state.reduce(true, Some("repo"), InspectMessage::RunSearch);
-    let InspectEffect::Search { request, .. } = state.take_effects().pop().unwrap() else { panic!("没有搜索") };
-    assert_eq!(request.query, "peach");
-    assert!(request.repo_id.is_none());
-    assert!(request.match_mode.is_none());
-
-    state.reduce(true, Some("repo"), InspectMessage::ToggleFilter { key: FilterList::Colors, value: " red ".into() });
-    state.reduce(true, Some("repo"), InspectMessage::ToggleFilter { key: FilterList::Shapes, value: "square".into() });
-    state.reduce(true, Some("repo"), InspectMessage::SetMatchMode(MatchMode::Or));
-    let InspectEffect::Search { request, .. } = state.take_effects().pop().unwrap() else { panic!("没有筛选搜索") };
-    assert!(request.metadata_filters.iter().any(|(key, value)| key == "color" && value == "red"));
-    assert!(request.metadata_filters.iter().any(|(key, value)| key == "shape" && value == "square"));
-    assert_eq!(request.match_mode.as_deref(), Some("or"));
-    assert_eq!(request.repo_id.as_deref(), Some("repo"));
-
-    state.results = vec![row("kept", "kept.png")];
-    state.search_generation = 4;
-    state.reduce(true, None, InspectMessage::SearchFinished { generation: 3, result: Ok(Vec::new()) });
-    assert_eq!(state.results.len(), 1);
-    state.reduce(true, None, InspectMessage::SearchFinished { generation: 4, result: Err("搜索失败".into()) });
-    assert_eq!(state.results.len(), 1);
-    assert_eq!(state.search_error, "搜索失败");
-
-    let mut missing = InspectState::default();
-    missing.results = vec![row("kept", "kept.png")];
-    missing.reduce(true, None, InspectMessage::ToggleFilter { key: FilterList::Tags, value: "peach".into() });
-    assert!(missing.results.is_empty());
-    assert!(missing.effects.is_empty());
-
-    let mut locked = InspectState::default();
-    locked.reduce(false, Some("repo"), InspectMessage::ToggleFilter { key: FilterList::Tags, value: "peach".into() });
-    assert!(locked.filters.tags.is_empty());
-    assert!(locked.effects.is_empty());
-}
-
-#[test]
-fn filter_bar_clear_and_parsers_keep_query_and_drop_empty_bounds() {
-    let mut state = InspectState::default();
-    state.reduce(true, Some("repo"), InspectMessage::SetQuery("peach".into()));
-    state.reduce(true, Some("repo"), InspectMessage::ToggleFilterBar);
-    state.reduce(true, Some("repo"), InspectMessage::SetFilterInput { key: FilterList::Tags, value: "draft".into() });
-    assert!(state.filters.tags.is_empty());
-    state.reduce(true, Some("repo"), InspectMessage::SubmitFilterInput);
-    assert_eq!(state.filters.tags, ["draft"]);
-    state.take_effects();
-    state.reduce(true, Some("repo"), InspectMessage::ToggleFilterBar);
-    assert!(!state.filter_bar_open);
-    assert_eq!(state.filters.tags, ["draft"]);
-    state.reduce(true, Some("repo"), InspectMessage::ToggleFilterBar);
-    state.reduce(true, Some("repo"), InspectMessage::ClearFilters);
-    assert_eq!(state.query, "peach");
-    assert!(state.filter_bar_open);
-    assert!(state.filters.tags.is_empty());
-    let InspectEffect::Search { request, .. } = state.take_effects().pop().unwrap() else { panic!("清空后应重跑查询") };
-    assert_eq!(request.query, "peach");
-    assert!(request.repo_id.is_none());
-
-    state.reduce(true, Some("repo"), InspectMessage::SetAdvanced { field: AdvancedField::ExcludeQuery, value: "nope".into() });
-    state.reduce(true, Some("repo"), InspectMessage::SetAdvanced { field: AdvancedField::ExcludePaths, value: r"a\b,/c/".into() });
-    state.reduce(true, Some("repo"), InspectMessage::ApplyAdvanced);
-    let InspectEffect::Search { request, .. } = state.take_effects().pop().unwrap() else { panic!("排除条件也应搜索") };
-    assert_eq!(request.exclude_query.as_deref(), Some("nope"));
-    assert_eq!(request.exclude_path_prefixes, ["a/b", "c"]);
-    assert!(request.repo_id.is_none(), "排除关键词和排除路径不把搜索收进当前仓库");
-
-    state.reduce(true, Some("repo"), InspectMessage::SetAdvanced { field: AdvancedField::Metadata, value: "artist=momo, =x, key=".into() });
-    state.reduce(true, Some("repo"), InspectMessage::SetAdvanced { field: AdvancedField::Number, value: "rating=1..5,nan=foo..bar,width=..10".into() });
-    state.reduce(true, Some("repo"), InspectMessage::SetAdvanced { field: AdvancedField::Date, value: "added=2020-01-01..2021-01-01".into() });
-    state.reduce(true, Some("repo"), InspectMessage::SetAdvanced { field: AdvancedField::SortField, value: "name".into() });
-    state.reduce(true, Some("repo"), InspectMessage::SetSortDirection(SortDirection::Desc));
-    state.reduce(true, Some("repo"), InspectMessage::SetAdvanced { field: AdvancedField::Limit, value: "0".into() });
-    state.reduce(true, Some("repo"), InspectMessage::ApplyAdvanced);
-    let InspectEffect::Search { request, .. } = state.take_effects().pop().unwrap() else { panic!("没有高级筛选") };
-    assert_eq!(request.metadata_filters, [("artist".into(), "momo".into())]);
-    assert_eq!(request.number_filters.len(), 2);
-    assert_eq!(request.number_filters[0].min.as_deref(), Some("1"));
-    assert_eq!(request.number_filters[0].max.as_deref(), Some("5"));
-    assert_eq!(request.date_filters[0].from.as_deref(), Some("2020-01-01"));
-    assert_eq!(request.sort_field.as_deref(), Some("name"));
-    assert_eq!(request.sort_direction.as_deref(), Some("desc"));
-    assert!(request.limit.is_none());
-    assert_eq!(request.repo_id.as_deref(), Some("repo"));
-
-    state.reduce(true, Some("repo"), InspectMessage::SetMinimumRating(Some(0.0)));
-    state.take_effects();
-    state.reduce(true, Some("repo"), InspectMessage::SetMinimumRating(Some(1.0)));
-    let InspectEffect::Search { request, .. } = state.take_effects().pop().unwrap() else { panic!("没有评分筛选") };
-    assert_eq!(request.min_rating, Some(1.0));
-    assert_eq!(request.repo_id.as_deref(), Some("repo"));
-    state.reduce(false, Some("repo"), InspectMessage::ApplyShortcut {
-        metadata: "kind=book".into(),
-        sort_field: "added".into(),
-        sort_direction: SortDirection::Desc,
-    });
-    assert_eq!(state.filters.metadata_filters, "artist=momo, =x, key=");
-}
-
-#[test]
-fn opening_a_hit_loads_that_asset_and_empty_ids_stay_on_search() {
-    let mut model = writable_shell();
-    model.workspace.panel = WorkspacePanel::Search;
-    model.inspect.results = vec![row("asset-1", "pics/cover.png"), row("", "pics/empty.png")];
-    send(&mut model, InspectMessage::OpenHit("".into()));
-    assert_eq!(model.workspace.panel, WorkspacePanel::Search);
-    assert_eq!(model.inspect.search_error, "搜索结果没有素材 id");
-    assert!(model.inspect.effects.is_empty());
-
-    send(&mut model, InspectMessage::OpenHit("asset-1".into()));
-    assert_eq!(model.workspace.panel, WorkspacePanel::Files);
-    assert_eq!(model.selected_path.as_deref(), Some("pics/cover.png"));
-    assert_eq!(model.inspect.repo_id.as_deref(), Some("repo-hit"));
-    assert!(matches!(
-        model.inspect.effects.last(),
-        Some(InspectEffect::LoadAsset { repo_id, asset_id }) if repo_id == "repo-hit" && asset_id == "asset-1"
-    ));
-}
-
-#[test]
 fn primary_action_reopens_a_live_target_and_acceptance_keeps_the_old_detail() {
     let mut live = writable_shell();
     live.reduce(ShellMessage::AssetDetailLoaded(Ok(asset("pics/a.png", "png", 1, false, Vec::new()))));
@@ -645,20 +502,6 @@ fn inspect_surface_appears_only_after_startup_with_a_repository() {
     let selected = ShellViewModel::for_page(ShellPage::SelectedFile);
     assert!(selected.files_surface_visible());
     assert!(selected.inspect_surface_visible());
-}
-
-#[test]
-fn search_query_waits_250ms_before_running() {
-    let mut state = InspectState::default();
-    state.reduce(true, Some("repo"), InspectMessage::SetQuery("peach".into()));
-    assert!(state.effects.is_empty());
-    assert!(!state.poll_own(249, true, Some("repo")));
-    assert!(state.effects.is_empty());
-    assert!(state.poll_own(1, true, Some("repo")));
-    let InspectEffect::Search { request, .. } = state.take_effects().pop().unwrap() else {
-        panic!("没有搜索");
-    };
-    assert_eq!(request.query, "peach");
 }
 
 #[test]

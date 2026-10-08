@@ -23,10 +23,11 @@ mod preview_paint;
 /// 搜索面板或已选文件时的检视面：搜索在上，文件预览页在下。
 pub(super) fn inspect_surface(model: &ShellViewModel) -> AnyView {
     let inspect = &model.inspect;
-    let mut rows = Vec::new();
-    if model.workspace.panel == super::workspace::WorkspacePanel::Search || inspect.filter_bar_open {
-        rows.push(super::inspect_search_view::search_panel(model));
+    // 搜索面板独占主体，和 Vue 的 `SearchPanel` 一样不和预览叠在一起。筛选栏由壳层放置。
+    if model.workspace.panel == super::workspace::WorkspacePanel::Search {
+        return super::inspect_search_view::search_panel(model);
     }
+    let mut rows = Vec::new();
     if inspect.has_target() {
         rows.push(frame::preview_page(model, body::preview_body(model)));
     }

@@ -46,84 +46,12 @@ pub enum PreviewBody {
     Failed(String),
 }
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub enum MatchMode {
-    #[default]
-    And,
-    Or,
-}
-
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub enum SortDirection {
-    #[default]
-    Asc,
-    Desc,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum AdvancedField {
-    ExcludeQuery,
-    ExcludePaths,
-    ExcludeTags,
-    ExcludeFormats,
-    Metadata,
-    ExcludeMetadata,
-    Number,
-    ExcludeNumber,
-    Date,
-    ExcludeDate,
-    SortField,
-    Limit,
-}
-
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-struct AdvancedDraft {
-    exclude_query: String,
-    exclude_paths: String,
-    exclude_tags: String,
-    exclude_formats: String,
-    metadata: String,
-    exclude_metadata: String,
-    number: String,
-    exclude_number: String,
-    date: String,
-    exclude_date: String,
-    sort_field: String,
-    sort_direction: SortDirection,
-    limit: String,
-}
-
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct SearchFilters {
-    pub tags: Vec<String>,
-    pub formats: Vec<String>,
-    pub colors: Vec<String>,
-    pub shapes: Vec<String>,
-    pub exclude_tags: Vec<String>,
-    pub exclude_formats: Vec<String>,
-    pub exclude_query: String,
-    pub exclude_path_prefixes: String,
-    pub metadata_filters: String,
-    pub exclude_metadata_filters: String,
-    pub exclude_number_filters: String,
-    pub exclude_date_filters: String,
-    pub number_filters: String,
-    pub date_filters: String,
-    pub match_mode: MatchMode,
-    pub sort_field: String,
-    pub sort_direction: SortDirection,
-    pub limit: Option<usize>,
-    pub min_rating: Option<f64>,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct SearchRow {
-    pub repo_id: String,
-    pub asset_id: String,
-    pub path: String,
-    pub filename: String,
-    pub repo_name: String,
-}
+#[path = "inspect_search.rs"]
+mod search;
+pub use search::{
+    AdvancedField, AssetFacet, DateBound, FilterList, MatchMode, MetadataInput, NumberBound, SearchFilters,
+    SearchRequestDraft, SearchRow, SortDirection,
+};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 struct MetadataDraft {
@@ -151,44 +79,6 @@ pub enum InspectEffect {
     Redo { repo_id: String, asset_id: String },
     LoadAsset { repo_id: String, asset_id: String },
     Search { generation: u64, request: SearchRequestDraft },
-}
-
-/// 可克隆的搜索请求。派发时再转成领域服务的 `SearchRequest`。
-#[derive(Clone, Debug, PartialEq)]
-pub struct SearchRequestDraft {
-    pub query: String,
-    pub repo_id: Option<String>,
-    pub exclude_query: Option<String>,
-    pub tags: Vec<String>,
-    pub formats: Vec<String>,
-    pub metadata_filters: Vec<(String, String)>,
-    pub exclude_tags: Vec<String>,
-    pub exclude_formats: Vec<String>,
-    pub exclude_metadata_filters: Vec<(String, String)>,
-    pub exclude_path_prefixes: Vec<String>,
-    pub exclude_number_filters: Vec<NumberBound>,
-    pub exclude_date_filters: Vec<DateBound>,
-    pub number_filters: Vec<NumberBound>,
-    pub date_filters: Vec<DateBound>,
-    pub match_mode: Option<String>,
-    pub sort_field: Option<String>,
-    pub sort_direction: Option<String>,
-    pub limit: Option<usize>,
-    pub min_rating: Option<f64>,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct NumberBound {
-    pub key: String,
-    pub min: Option<String>,
-    pub max: Option<String>,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct DateBound {
-    pub key: String,
-    pub from: Option<String>,
-    pub to: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -223,11 +113,12 @@ pub enum InspectMessage {
     SetVolume(f32),
     SetQuery(String),
     ToggleFilterBar,
+    CloseFilterBar,
     ToggleFilter { key: FilterList, value: String },
     SetMatchMode(MatchMode),
     SetMinimumRating(Option<f64>),
-    SetFilterInput { key: FilterList, value: String },
-    SubmitFilterInput,
+    SetMetadataInput { key: MetadataInput, value: String },
+    SubmitMetadataInput(MetadataInput),
     SetAdvanced { field: AdvancedField, value: String },
     SetSortDirection(SortDirection),
     ApplyAdvanced,
@@ -235,20 +126,10 @@ pub enum InspectMessage {
     ApplyShortcut { metadata: String, sort_field: String, sort_direction: SortDirection },
     RunSearch,
     SearchFinished { generation: u64, result: Result<Vec<SearchRow>, String> },
-    OpenHit(String),
+    OpenHit { repo_id: String, asset_id: String },
     OpenTagMenu { x: f32, y: f32 },
     CloseTagMenu,
     ToggleTagGroup,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum FilterList {
-    Tags,
-    Formats,
-    Colors,
-    Shapes,
-    ExcludeTags,
-    ExcludeFormats,
 }
 
 /// 预览右侧的文件事实。空字符串在视图里写成「未知」或「未记录」。
@@ -289,10 +170,9 @@ pub struct InspectState {
     saving: bool,
     pub(super) query: String,
     pub(super) filters: SearchFilters,
-    advanced: AdvancedDraft,
+    /// 筛选栏草稿、仓库摘要候选和待打开的命中，见 `inspect_search`。
+    pub(super) search_ui: search::SearchUi,
     pub(super) filter_bar_open: bool,
-    filter_input_key: FilterList,
-    filter_input: String,
     pub(super) searching: bool,
     search_generation: u64,
     pub(super) results: Vec<SearchRow>,
@@ -333,10 +213,8 @@ impl Default for InspectState {
             saving: false,
             query: String::new(),
             filters: SearchFilters::default(),
-            advanced: AdvancedDraft::default(),
+            search_ui: search::SearchUi::default(),
             filter_bar_open: false,
-            filter_input_key: FilterList::Tags,
-            filter_input: String::new(),
             searching: false,
             search_generation: 0,
             results: Vec::new(),
@@ -596,74 +474,22 @@ impl InspectState {
             InspectMessage::PlayPause => self.transport_play_pause(),
             InspectMessage::Seek(position_ms) => self.transport_seek(position_ms),
             InspectMessage::SetVolume(volume) => self.transport_volume(volume),
-            InspectMessage::SetQuery(value) => self.query = value,
-            InspectMessage::ToggleFilterBar => self.filter_bar_open = !self.filter_bar_open,
-            InspectMessage::ToggleFilter { key, value } => {
-                if !writable {
-                    eprintln!("Nana 当前资源库不可写，忽略筛选");
-                    return;
-                }
-                support::toggle_filter(&mut self.filters, key, &value);
-                self.run_search(active_repo);
-            }
-            InspectMessage::SetMatchMode(mode) => {
-                if !writable {
-                    eprintln!("Nana 当前资源库不可写，忽略筛选");
-                    return;
-                }
-                self.filters.match_mode = mode;
-                self.run_search(active_repo);
-            }
-            InspectMessage::SetFilterInput { key, value } => {
-                self.filter_input_key = key;
-                self.filter_input = value;
-            }
-            InspectMessage::SubmitFilterInput => {
-                let key = self.filter_input_key;
-                let value = self.filter_input.clone();
-                self.filter_input.clear();
-                self.reduce(writable, active_repo, InspectMessage::ToggleFilter { key, value });
-            }
-            InspectMessage::SetMinimumRating(value) => {
-                if !writable {
-                    eprintln!("Nana 当前资源库不可写，忽略评分筛选");
-                    return;
-                }
-                self.filters.min_rating = value.filter(|rating| *rating > 0.0);
-                self.run_search(active_repo);
-            }
-            InspectMessage::SetAdvanced { field, value } => self.set_advanced(field, value),
-            InspectMessage::SetSortDirection(direction) => self.advanced.sort_direction = direction,
-            InspectMessage::ApplyAdvanced => {
-                if !writable {
-                    eprintln!("Nana 当前资源库不可写，忽略高级筛选");
-                    return;
-                }
-                self.commit_advanced();
-                self.run_search(active_repo);
-            }
-            InspectMessage::ClearFilters => {
-                if !writable {
-                    eprintln!("Nana 当前资源库不可写，忽略清空筛选");
-                    return;
-                }
-                self.filters = SearchFilters::default();
-                self.advanced = AdvancedDraft::default();
-                self.run_search(active_repo);
-            }
-            InspectMessage::ApplyShortcut { metadata, sort_field, sort_direction } => {
-                if !writable {
-                    eprintln!("Nana 当前资源库不可写，忽略快捷筛选");
-                    return;
-                }
-                self.filters.metadata_filters = metadata;
-                self.filters.sort_field = sort_field;
-                self.filters.sort_direction = sort_direction;
-                self.run_search(active_repo);
-            }
-            InspectMessage::RunSearch => self.run_search(active_repo),
-            InspectMessage::SearchFinished { generation, result } => self.note_search(generation, result),
-            InspectMessage::OpenHit(asset_id) => self.open_hit(&asset_id),
+            message @ (InspectMessage::SetQuery(_)
+            | InspectMessage::ToggleFilterBar
+            | InspectMessage::CloseFilterBar
+            | InspectMessage::ToggleFilter { .. }
+            | InspectMessage::SetMatchMode(_)
+            | InspectMessage::SetMinimumRating(_)
+            | InspectMessage::SetMetadataInput { .. }
+            | InspectMessage::SubmitMetadataInput(_)
+            | InspectMessage::SetAdvanced { .. }
+            | InspectMessage::SetSortDirection(_)
+            | InspectMessage::ApplyAdvanced
+            | InspectMessage::ClearFilters
+            | InspectMessage::ApplyShortcut { .. }
+            | InspectMessage::RunSearch
+            | InspectMessage::SearchFinished { .. }
+            | InspectMessage::OpenHit { .. }) => self.reduce_search(writable, active_repo, message),
             InspectMessage::OpenTagMenu { x, y } => self.open_tag_menu(x, y, 220.0, 280.0, 1280.0, 800.0),
             InspectMessage::CloseTagMenu => self.close_tag_menu(),
             InspectMessage::ToggleTagGroup => self.tags_expanded = !self.tags_expanded,
@@ -787,94 +613,6 @@ impl InspectState {
         }
     }
 
-    fn set_advanced(&mut self, field: AdvancedField, value: String) {
-        let draft = &mut self.advanced;
-        match field {
-            AdvancedField::ExcludeQuery => draft.exclude_query = value,
-            AdvancedField::ExcludePaths => draft.exclude_paths = value,
-            AdvancedField::ExcludeTags => draft.exclude_tags = value,
-            AdvancedField::ExcludeFormats => draft.exclude_formats = value,
-            AdvancedField::Metadata => draft.metadata = value,
-            AdvancedField::ExcludeMetadata => draft.exclude_metadata = value,
-            AdvancedField::Number => draft.number = value,
-            AdvancedField::ExcludeNumber => draft.exclude_number = value,
-            AdvancedField::Date => draft.date = value,
-            AdvancedField::ExcludeDate => draft.exclude_date = value,
-            AdvancedField::SortField => draft.sort_field = value,
-            AdvancedField::Limit => draft.limit = value,
-        }
-    }
-
-    fn commit_advanced(&mut self) {
-        let draft = &self.advanced;
-        self.filters.exclude_query = draft.exclude_query.trim().to_string();
-        self.filters.exclude_path_prefixes = draft.exclude_paths.trim().to_string();
-        self.filters.exclude_tags = support::split_list(&draft.exclude_tags);
-        self.filters.exclude_formats = support::split_list(&draft.exclude_formats);
-        self.filters.metadata_filters = draft.metadata.trim().to_string();
-        self.filters.exclude_metadata_filters = draft.exclude_metadata.trim().to_string();
-        self.filters.number_filters = draft.number.trim().to_string();
-        self.filters.exclude_number_filters = draft.exclude_number.trim().to_string();
-        self.filters.date_filters = draft.date.trim().to_string();
-        self.filters.exclude_date_filters = draft.exclude_date.trim().to_string();
-        self.filters.sort_field = draft.sort_field.trim().to_string();
-        self.filters.sort_direction = draft.sort_direction;
-        self.filters.limit = support::parse_limit(&draft.limit);
-    }
-
-    /// 没有查询条件时清空结果，不发请求。筛选生效且没有仓库时也不发请求。
-    fn run_search(&mut self, active_repo: Option<&str>) {
-        self.search_generation += 1;
-        let generation = self.search_generation;
-        let request = support::build_search_request(&self.query, &self.filters, active_repo);
-        if !request.has_criteria() {
-            self.results.clear();
-            self.searching = false;
-            self.search_error.clear();
-            return;
-        }
-        if request.repo_id.is_none() && self.filters.has_active_filters() && active_repo.is_none() {
-            eprintln!("Nana 筛选需要活动仓库");
-            self.results.clear();
-            self.searching = false;
-            return;
-        }
-        self.searching = true;
-        self.search_error.clear();
-        self.effects.push(InspectEffect::Search { generation, request });
-    }
-
-    fn note_search(&mut self, generation: u64, result: Result<Vec<SearchRow>, String>) {
-        if generation != self.search_generation {
-            eprintln!("Nana 忽略过期的搜索结果");
-            return;
-        }
-        self.searching = false;
-        match result {
-            Ok(rows) => {
-                self.results = rows;
-                self.search_error.clear();
-            }
-            Err(error) => {
-                eprintln!("Nana 搜索失败：{error}");
-                self.search_error = error;
-            }
-        }
-    }
-
-    fn open_hit(&mut self, asset_id: &str) {
-        let Some(row) = self.results.iter().find(|row| row.asset_id == asset_id).cloned() else {
-            eprintln!("Nana 搜索结果不存在：{asset_id}");
-            return;
-        };
-        if row.asset_id.is_empty() {
-            eprintln!("Nana 搜索结果没有素材 id：{}", row.path);
-            self.search_error = "搜索结果没有素材 id".into();
-            return;
-        }
-        self.pending_open = Some(row);
-    }
-
     pub(crate) fn media_session(&self) -> Option<&PlaybackSessionState> {
         match &self.body {
             PreviewBody::Media(session) => Some(session),
@@ -936,6 +674,7 @@ impl MetadataDraft {
 }
 
 pub(super) fn reduce_message(model: &mut ShellViewModel, message: super::ShellMessage) -> Option<super::ShellMessage> {
+    search::observe(model, &message);
     let super::ShellMessage::Inspect(message) = message else {
         return Some(message);
     };
@@ -949,13 +688,7 @@ pub(super) fn reduce_message(model: &mut ShellViewModel, message: super::ShellMe
         model.player.adopt_session(session);
     }
     bridge::apply(model, follow);
-    if let Some(row) = model.inspect.pending_open.take() {
-        model.workspace.panel = WorkspacePanel::Files;
-        model.selected_path = Some(row.path.clone());
-        model.inspect.begin_selection(&row.path);
-        model.inspect.repo_id = Some(row.repo_id.clone());
-        model.inspect.effects.push(InspectEffect::LoadAsset { repo_id: row.repo_id, asset_id: row.asset_id });
-    }
+    search::settle(model);
     None
 }
 
