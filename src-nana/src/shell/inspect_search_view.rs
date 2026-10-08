@@ -26,7 +26,10 @@ mod widgets;
 
 pub(super) use filter_bar_view::filter_bar;
 
-/// 搜索结果面板。占满页面主体的可见高度，内容更高时随页面一起滚动。
+/// 搜索结果面板，高度随内容，内容更高时随页面主体一起滚动。
+///
+/// Vue 的样式写了面板 `min-height: 100%`、空状态 `flex: 1`，但父级高度不定，实际渲染是内容高度。
+/// 撑满整页的大虚线框违背 DESIGN.md「避免装饰面板」的克制原则，这里保留实际的内容高度。
 pub(super) fn search_panel(model: &ShellViewModel) -> AnyView {
     let inspect = &model.inspect;
     let mut rows = vec![header(model)];
@@ -48,9 +51,7 @@ pub(super) fn search_panel(model: &ShellViewModel) -> AnyView {
             .padding(23.0)
             .surface(SemanticColorRole::Surface)
             .radius(RadiusTier::Xl)
-            .height(LengthSpec::Shrink)
-            .min_height(LengthSpec::MinContent)
-            .grow(1.0)
+            .grow(0.0)
             .shrink(0.0),
     )
     .children(rows)
@@ -121,16 +122,16 @@ fn state_box() -> Stack {
         })
 }
 
-/// Vue `.search-workbench__empty`：虚线框，`--bg-subtle` 底，标题 18px、说明 14px，占满面板剩余高度。
+/// Vue `.search-workbench__empty`：虚线框，`--bg-subtle` 底，标题 18px、说明 14px。
 fn empty_state(title: &str, message: &str) -> AnyView {
     widget(
         Stack::column(8.0)
             .justify(JustifySpec::Center)
-            .padding(25.0)
+            .padding(24.0)
             .surface(SemanticColorRole::Subtle)
             .outline(SemanticColorRole::BorderStrong, 1.0)
             .radius(RadiusTier::Xl)
-            .grow(1.0)
+            .grow(0.0)
             .shrink(0.0)
             .with_layout(|layout| {
                 layout.border_style = Some(BorderStyle::Dashed);

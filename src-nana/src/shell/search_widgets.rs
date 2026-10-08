@@ -12,7 +12,7 @@ use nana_ui::runtime::{
     AlignSpec, Button, IconButton, LengthSpec, NodePainter, NodeStyle, SemanticColorRole, SemanticPaint, Stack, Text,
     TextHorizontalAlignment, TextInput,
 };
-use nana_ui_core::{LineHeightSpec, RadiusTier};
+use nana_ui_core::{LineHeightSpec, RadiusTier, SemanticColorMix};
 
 use super::paint::SwatchChipPainter;
 use super::presenter::SwatchColor;
@@ -131,8 +131,12 @@ pub(crate) fn chip(content: &str, active: bool, swatch: Option<SwatchColor>) -> 
     button.style(style)
 }
 
+/// Vue `button:disabled` 的 45% 不透明度。
+const DISABLED_ALPHA: f32 = 0.45;
+
 /// Vue `.workspace-filter-bar__btn`：28px 高、左右 9px 的透明按钮，14px 中等字重正文色。
-/// 悬停是 `--bg-hover`。禁用时整体 45% 不透明度，颜色不变。
+/// 悬停是 `--bg-hover`。禁用时文字按 45% 混进筛选栏底色：Vue 的 `opacity` 在 sRGB 里合成，
+/// 直接给半透明文字会被渲染器按线性空间合成得更亮，所以先混成不透明色。
 pub(crate) fn bar_button(content: &str, disabled: bool) -> Button {
     let button = Button::new(content).disabled(disabled);
     let mut style = button.style.clone();
@@ -144,11 +148,14 @@ pub(crate) fn bar_button(content: &str, disabled: bool) -> Button {
         layout.font_size = Some(14.0);
         layout.font_weight = Some(500);
         layout.line_height = Some(LineHeightSpec::Relative(LINE_RATIO));
-        layout.opacity = disabled.then_some(0.45);
     }
     clear_control_metrics(&mut style);
     style.radius = Some(RadiusTier::Sm);
     ghost_paint(&mut style);
+    style.interaction.disabled = SemanticPaint {
+        foreground_mix: Some(SemanticColorMix::new(SemanticColorRole::Text, SemanticColorRole::Surface, DISABLED_ALPHA)),
+        ..SemanticPaint::default()
+    };
     button.style(style)
 }
 
@@ -252,8 +259,19 @@ pub(crate) fn pill_input(value: &str, placeholder: &str, name: &str, width: Opti
     input.style(style)
 }
 
-/// 胶囊右侧的「添加」：左边一条 `--border-soft` 分隔线，`--bg-subtle` 底，12px 次要字。
-/// 可用时悬停是柔和强调底、强调色字；输入为空时 45% 不透明度。
+/// 胶囊里输入框和「添加」之间的 1px `--border-soft` 分隔线。
+pub(crate) fn pill_divider() -> Stack {
+    Stack::row(0.0)
+        .width(LengthSpec::Px(1.0))
+        .min_width(LengthSpec::Px(1.0))
+        .height(LengthSpec::Fill)
+        .surface(SemanticColorRole::BorderSoft)
+        .grow(0.0)
+        .shrink(0.0)
+}
+
+/// 胶囊右侧的「添加」：`--bg-subtle` 底，12px 次要字，右端跟着胶囊的全圆角。
+/// 可用时悬停是柔和强调底、强调色字；输入为空时底和字都按 45% 混进胶囊底色。
 pub(crate) fn pill_button(content: &str, disabled: bool) -> Button {
     let button = Button::new(content).disabled(disabled);
     let mut style = button.style.clone();
@@ -263,14 +281,11 @@ pub(crate) fn pill_button(content: &str, disabled: bool) -> Button {
         layout.padding_left = Some(LengthSpec::Px(9.0));
         layout.padding_right = Some(LengthSpec::Px(9.0));
         layout.border_width = Some(0.0);
-        layout.border_left_width = Some(1.0);
         layout.font_size = Some(12.0);
         layout.font_weight = Some(500);
         layout.line_height = Some(LineHeightSpec::Relative(LINE_RATIO));
         layout.flex_grow = Some(0.0);
         layout.flex_shrink = Some(0.0);
-        layout.opacity = disabled.then_some(0.45);
-        // 右端跟着胶囊的全圆角，不露出方角。
         layout.paint.border_radii = Some([
             LengthSpec::Px(0.0),
             LengthSpec::Px(999.0),
@@ -281,21 +296,20 @@ pub(crate) fn pill_button(content: &str, disabled: bool) -> Button {
     clear_control_metrics(&mut style);
     style.foreground = Some(SemanticColorRole::Muted);
     style.background = Some(SemanticColorRole::Subtle);
-    style.border = Some(SemanticColorRole::BorderSoft);
+    style.border = None;
     style.radius = None;
     let accent = SemanticPaint {
         foreground: Some(SemanticColorRole::Accent),
         background: Some(SemanticColorRole::AccentSoft),
         ..SemanticPaint::default()
     };
-    if !disabled {
-        style.interaction.hovered = accent;
-        style.interaction.pressed = accent;
-    } else {
-        style.interaction.hovered = SemanticPaint::default();
-        style.interaction.pressed = SemanticPaint::default();
-    }
-    style.interaction.disabled = SemanticPaint::default();
+    style.interaction.hovered = accent;
+    style.interaction.pressed = accent;
+    style.interaction.disabled = SemanticPaint {
+        foreground_mix: Some(SemanticColorMix::new(SemanticColorRole::Muted, SemanticColorRole::Background, DISABLED_ALPHA)),
+        background_mix: Some(SemanticColorMix::new(SemanticColorRole::Subtle, SemanticColorRole::Background, DISABLED_ALPHA)),
+        ..SemanticPaint::default()
+    };
     button.style(style)
 }
 
@@ -318,12 +332,14 @@ pub(crate) fn hint_chip(content: &str, key: String) -> AnyView {
 }
 
 /// 固定高度：去掉控件尺寸档位推出的最小高和上下内边距。
+/// 宽度按文字量出来，不再按省略号截断，免得量宽和绘制的亚像素差把「添加」画成「…」。
 fn fixed_height(layout: &mut nana_ui_core::LayoutStyle, height: f32) {
     layout.height = Some(LengthSpec::Px(height));
     layout.min_height = Some(LengthSpec::Px(height));
     layout.max_height = Some(LengthSpec::Px(height));
     layout.padding_top = Some(LengthSpec::Px(0.0));
     layout.padding_bottom = Some(LengthSpec::Px(0.0));
+    layout.text_overflow_ellipsis = false;
 }
 
 /// 换成手写尺寸后，不再让控件尺寸档位改写高度和左右内边距。

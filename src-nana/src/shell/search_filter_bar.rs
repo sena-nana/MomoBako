@@ -210,7 +210,7 @@ fn metadata_group(model: &ShellViewModel, input: MetadataInput, options: &[Strin
         .on_cx(move |_, _: &Activate, cx| cx.dispatch_program(message(InspectMessage::SubmitMetadataInput(input))));
     children.push(
         widget(widgets::input_pill(false))
-            .children((field, add))
+            .children((field, widget(widgets::pill_divider()).key(format!("workspace-filter-{key}-divider")), add))
             .key(format!("workspace-filter-{key}-field"))
             .into_any(),
     );
@@ -296,7 +296,9 @@ fn advanced_group(model: &ShellViewModel) -> AnyView {
     group("高级", "高级筛选", "advanced", grid)
 }
 
-/// 高级区的输入胶囊。胶囊填满网格格子，输入框本身 120px，和 Vue 的内层网格一样。
+/// 高级区的输入胶囊，输入框填满整个格子。
+/// Vue 的内层网格把输入框卡在 120px，占两列的宽输入也只用左边 120px、长占位被截断，
+/// 这是给颜色形状输入写的列宽误用到了高级区，这里按设计意图让输入框用满格子。
 fn advanced_input(input: &AdvancedInput, value: &str) -> AnyView {
     let field = input.field;
     let pill = widgets::input_pill(true).with_layout(|layout| {
@@ -305,7 +307,7 @@ fn advanced_input(input: &AdvancedInput, value: &str) -> AnyView {
         }
     });
     widget(pill)
-        .children((widget(widgets::pill_input(value, input.placeholder, input.name, Some(INPUT_WIDTH)))
+        .children((widget(widgets::pill_input(value, input.placeholder, input.name, None))
             .key(format!("workspace-filter-advanced-{}-input", input.name))
             .on_cx(move |_, event: &TextChanged, cx| {
                 cx.dispatch_program(message(InspectMessage::SetAdvanced { field, value: event.value.to_string() }));
@@ -339,6 +341,7 @@ fn sort_direction_select(direction: SortDirection) -> AnyView {
         layout.padding_right = Some(LengthSpec::Px(8.0));
         layout.border_width = Some(0.0);
         layout.font_size = Some(12.0);
+        layout.font_weight = Some(400);
         layout.flex_grow = Some(1.0);
     }
     widget(widgets::input_pill(true))
