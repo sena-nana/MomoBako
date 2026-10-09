@@ -40,6 +40,7 @@ pub(super) fn models() -> Vec<(&'static str, ShellViewModel)> {
         ("preview-text", preview_text_scene()),
         ("preview-image", preview_image_scene()),
         ("preview-audio", preview_audio_scene()),
+        ("preview-audio-failed", preview_audio_failed_scene()),
     ]
 }
 
@@ -418,6 +419,24 @@ fn preview_audio_scene() -> ShellViewModel {
     let mut model = preview_scene("track-01.mp3", TONE_MP3.len() as i64);
     load_official_players(&mut model);
     answer_media(&mut model);
+    model
+}
+
+/// 音频预览解不开：`voice.opus` 的字节认不出容器，Nana 没有原生解码器。预览框里是失败浮层，写
+/// 「无法预览该音频」和原因。Vue 的文件预览把这类失败写在播放条上，预览框里仍是唱片，没有对照图。
+fn preview_audio_failed_scene() -> ShellViewModel {
+    const BROKEN_AUDIO: &[u8] = b"not an audio container";
+    let mut model = preview_scene("voice.opus", BROKEN_AUDIO.len() as i64);
+    load_official_players(&mut model);
+    let request = take_effect(&mut model, |effect| match effect {
+        InspectEffect::LoadMedia { path, generation, .. } => Some((path, generation)),
+        _ => None,
+    });
+    if let Some((path, generation)) = request {
+        // 和宿主一样经 `decode_media` 解码，失败原因来自真实的解码层。
+        let result = crate::shell::player::decode_media(REPO_ID, "opus", BROKEN_AUDIO).map(|parts| parts.session);
+        model.reduce(ShellMessage::Inspect(InspectMessage::MediaLoaded { path, generation, result, pcm: None, frames: None }));
+    }
     model
 }
 

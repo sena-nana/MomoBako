@@ -103,10 +103,12 @@ fn dispatch_media(
     let executor = services.executor.clone();
     let task_path = path.clone();
     let task_repo = repo_id.clone();
+    let extension = std::path::Path::new(&path).extension().and_then(|extension| extension.to_str()).unwrap_or_default().to_string();
     if let Err(error) = context.run_task(Task::new(async move {
+        // 和播放条装当前项走同一个解码：坏的 wav、mp3、flac、ogg 报它自己的原因，预览页写出来的和播放条一致。
         let result = executor
             .block_on(query.read_file(FileReadRequest { repo_id, path: task_path.clone() }))
-            .and_then(|bytes| crate::shell::preview_media_parts(&task_repo, &bytes));
+            .and_then(|bytes| crate::shell::player::decode_media(&task_repo, &extension, &bytes));
         media_message(task_path, generation, result)
     })) {
         eprintln!("Nana 音视频预览任务提交失败：{error}");

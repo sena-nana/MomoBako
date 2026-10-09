@@ -19,7 +19,7 @@ use super::ShellViewModel;
 mod support;
 #[path = "player_clip.rs"]
 mod clip;
-pub(crate) use clip::{decode_loaded, LoadedItem, StillShow};
+pub(crate) use clip::{decode_loaded, decode_media, LoadedItem, StillShow};
 #[cfg(test)]
 pub(crate) use clip::fulfill_loads;
 #[path = "wav_player.rs"]
