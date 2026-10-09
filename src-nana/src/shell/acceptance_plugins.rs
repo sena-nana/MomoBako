@@ -66,8 +66,17 @@ pub(super) fn players_of(plugins: &[PluginManifest]) -> Vec<PlaylistPlayerContri
 
 /// 一次读完设置包五份数据的应答，插件之外都和 Vue 模拟 IPC 的默认应答一致。
 pub(super) fn bundle_loaded(plugins: Vec<PluginManifest>) -> AdminMessage {
+    bundle_with(Ok(plugins))
+}
+
+/// 插件目录读取失败的设置包：其它四份照常应答。Vue 的 `Promise.all` 整批失败，这四份也不写入。
+pub(super) fn bundle_failed(error: &str) -> AdminMessage {
+    bundle_with(Err(error.to_string()))
+}
+
+fn bundle_with(plugins: Result<Vec<PluginManifest>, String>) -> AdminMessage {
     AdminMessage::SettingsBundleLoaded {
-        plugins: Ok(plugins),
+        plugins,
         hooks: Ok(Vec::new()),
         cache: Ok(cache_snapshot()),
         api: Ok(api_design()),
