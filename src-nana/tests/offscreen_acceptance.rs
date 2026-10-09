@@ -412,6 +412,8 @@ fn scene_labels(scene_id: &str, page: &ShellPage) -> &'static [&'static str] {
         "copy-dialog" => &["复制到文件夹", "目标目录"],
         // 图片幻灯片读不到文件：播放条写「图片无法播放」，停留时长照常可调。
         "still-playback" => &["图片无法播放", "图片停留时长"],
+        // 音频预览解不开：预览框里写失败标题和原因，不再只画唱片。
+        "preview-audio-failed" => &["无法预览该音频", "没有原生解码器"],
         "filter-bar" => &["当前资源库筛选", "格式筛选"],
         // 三个条件生效，结果是命中的 cover.png。
         "filter-bar-active" => &["3 个条件", "默认资源库 / cover.png"],

@@ -87,6 +87,19 @@ fn current_m4a_enters_the_session_without_a_sound_device() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
+/// 预览页和播放条共用一个音视频解码：坏的 mp3、wav 报自己格式的原因，不被视频容器的「没有原生解码器」顶替；
+/// 认不出的视频字节仍是没有原生解码器。
+#[test]
+fn media_decode_names_the_real_reason_for_each_format() {
+    let mp3 = super::decode_media("repo", "mp3", b"ID3 not really an mp3").expect_err("坏 mp3");
+    assert!(!mp3.contains("没有原生解码器"), "坏 mp3 不该说没有解码器：{mp3}");
+    let wav = super::decode_media("repo", "WAV", b"RIFF\x00\x00\x00\x00WAVE").expect_err("坏 wav");
+    assert!(!wav.contains("没有原生解码器"), "坏 wav 不该说没有解码器：{wav}");
+    let video = super::decode_media("repo", "mp4", b"not a container").expect_err("认不出的视频");
+    assert_eq!(video, "没有原生解码器");
+    assert!(super::decode_media("repo", "m4a", &pcm_wav()).is_ok(), "能解的字节照常解出");
+}
+
 #[test]
 fn still_png_uses_real_pixels_and_a_missing_file_fails_without_a_frame() {
     assert!(!super::wav_player::sound_device_compiled_in());

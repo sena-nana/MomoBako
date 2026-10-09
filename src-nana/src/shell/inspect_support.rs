@@ -255,6 +255,11 @@ fn normalize_extension(extension: &str) -> String {
     extension.trim().trim_start_matches('.').to_ascii_lowercase()
 }
 
+/// 扩展名是不是视频容器（Vue `isVideoExtension`）。音视频预览失败时按它选标题。
+pub(crate) fn is_video_extension(extension: &str) -> bool {
+    VIDEO_EXTENSIONS.contains(&normalize_extension(extension).as_str())
+}
+
 pub(super) fn metadata_string(metadata: &[MetadataEntry], key: &str) -> Option<String> {
     metadata.iter().find(|entry| entry.key == key).and_then(|entry| entry.value.as_str().map(str::to_string))
 }
