@@ -11,6 +11,17 @@ use super::super::inspect::InspectState;
 use super::wav_player::{self, Action, Output};
 use super::{find_player_for_extension, PlayerMatch, PlayerState, PreviewPcm, QueueItem};
 
+/// 播放时钟拨一帧的结果。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ClockStep {
+    /// 没在播放，时钟没动。
+    Idle,
+    /// 只是进度往前走，界面跟着热信号走，不用重挂。
+    Progressed,
+    /// 播放状态变了：到头切了下一项，或者画面出现、消失。
+    Changed,
+}
+
 /// 预览页正在显示的文件。扩展名为空时从路径取。
 pub(crate) struct PreviewEntry<'a> {
     pub repo_id: &'a str,
@@ -144,20 +155,20 @@ impl PlayerState {
     }
 
     /// 播放时钟：播放中每帧往前拨 `step_ms`，把新进度写回预览页。到头（音视频到时长、
-    /// 图片到停留时长）按自然结束切下一项，没有下一项就停在末尾。返回是否拨动了。
+    /// 图片到停留时长）按自然结束切下一项，没有下一项就停在末尾。返回这一帧是只往前走还是切了项。
     ///
     /// 算法：只有一份时钟。条目没装好、不在播放时不动；到头先把会话停在时长处并停掉游标，
     /// 再交给 `play_next(true)`，单曲循环、随机和列表循环的取舍都在那里。
-    pub(crate) fn advance_clock(&mut self, step_ms: u64, inspect: &mut InspectState) -> bool {
+    pub(crate) fn advance_clock(&mut self, step_ms: u64, inspect: &mut InspectState) -> ClockStep {
         if self.session.status != "playing" || !self.item_loaded() {
-            return false;
+            return ClockStep::Idle;
         }
         let duration = self.session.duration_ms.unwrap_or(0);
         let next = self.session.current_time_ms.saturating_add(step_ms);
         if duration == 0 || next < duration {
             self.session.current_time_ms = next;
             self.publish(inspect);
-            return true;
+            return ClockStep::Progressed;
         }
         self.session.current_time_ms = duration;
         if self.audible() {
@@ -170,7 +181,7 @@ impl PlayerState {
         }
         self.session.status = "paused".into();
         self.play_next(true, inspect);
-        true
+        ClockStep::Changed
     }
 
     /// 测试用：游标里当前项的声音是否在放。测试构建不打开声卡，只看游标状态。

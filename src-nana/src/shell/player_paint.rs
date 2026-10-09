@@ -10,7 +10,7 @@ use nana_ui::Icon;
 use nana_ui_core::SemanticColorMix;
 
 /// 进度轨：bg-subtle 胶囊，accent 填充从左边按比例铺开，被胶囊裁出圆头。
-pub(super) struct ProgressTrack {
+pub(crate) struct ProgressTrack {
     pub ratio: f32,
 }
 

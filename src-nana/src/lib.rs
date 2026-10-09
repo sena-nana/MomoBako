@@ -23,7 +23,7 @@ mod window_state;
 mod drag_out;
 mod tray;
 use shell::{
-    DeleteMode, ShellMessage, ShellPage, ShellViewModel,
+    DeleteMode, ShellMessage, ShellPage, ShellView, ShellViewModel,
     WorkspaceEffect, display_mode_path, mount_shell, sidebar_prefs_path,
 };
 
@@ -64,6 +64,8 @@ pub struct MomoBakoApplication {
     applied_appearance: Option<appearance::Appearance>,
     /// 宿主和文档当前用的主题，随外观同步更新。
     theme: std::sync::Arc<nana_ui::theme::CompiledTheme>,
+    /// 窗口文档里常驻的壳层视图。`build` 挂上，`update` 和 `prepare` 同步。
+    view: Option<ShellView>,
 }
 
 pub(crate) struct NativePreviewGpu {
@@ -95,6 +97,7 @@ impl Default for MomoBakoApplication {
             system_appearance: None,
             applied_appearance: None,
             theme: nana_ui::theme::builtin_theme_arc(nana_ui::theme::ThemeAppearance::Dark),
+            view: None,
         }
     }
 }
@@ -157,6 +160,7 @@ impl ApplicationState for MomoBakoApplication {
             system_appearance,
             applied_appearance: None,
             theme,
+            view: None,
         })
     }
 
@@ -168,7 +172,11 @@ impl ApplicationState for MomoBakoApplication {
         if self.services.is_some() && !self.repositories_load_scheduled {
             self.shell.workspace.prepare_initial_list();
         }
-        mount_shell(&mut window.document, &self.shell)?;
+        match self.view.as_mut().filter(|view| view.owns(&window.document)) {
+            Some(view) => view.sync(&mut window.document, &self.shell)?,
+            None => self.view = Some(ShellView::mount(&mut window.document, &self.shell)?),
+        }
+        self.shell.surface_dirty = false;
         self.applied_appearance = None;
         appearance::sync(self, &mut window.document);
         if !self.repositories_load_scheduled {
@@ -203,7 +211,7 @@ impl ApplicationState for MomoBakoApplication {
         if crate::shell::poll_timers(&mut self.shell) {
             inspect_dispatch::dispatch_inspect_effects(self, context);
         }
-        window_host::prepare_motion(&mut self.shell, window);
+        window_host::prepare_motion(&mut self.shell, self.view.as_mut(), window);
         for request in sidebar_dispatch::dispatch_prepared_browses(&mut self.shell) {
             sidebar_dispatch::dispatch_browse_request(self, context, request);
         }
@@ -250,11 +258,14 @@ impl ApplicationState for MomoBakoApplication {
         window_host::after_update(self, context);
         let maximized = context.geometry().maximized;
         let window_commands = self.shell.input.take_platform_commands(*id, maximized);
-        if let Err(error) = mount_shell(&mut window.document, &self.shell) {
-            eprintln!("Nana 壳层重建失败：{error}");
-            self.shell.page = ShellPage::Error;
-            self.shell.detail = "页面更新失败，请查看系统日志".into();
-            return RuntimeProgramUpdate { window_commands, ..RuntimeProgramUpdate::redraw(*id) };
+        if let Some(view) = self.view.as_mut() {
+            if let Err(error) = view.sync(&mut window.document, &self.shell) {
+                eprintln!("Nana 壳层同步失败：{error}");
+                self.shell.page = ShellPage::Error;
+                self.shell.detail = "页面更新失败，请查看系统日志".into();
+                return RuntimeProgramUpdate { window_commands, ..RuntimeProgramUpdate::redraw(*id) };
+            }
+            self.shell.surface_dirty = false;
         }
         RuntimeProgramUpdate { window_commands, ..RuntimeProgramUpdate::redraw(*id) }
     }

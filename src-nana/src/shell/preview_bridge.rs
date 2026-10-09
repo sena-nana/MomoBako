@@ -4,7 +4,7 @@
 //! 播放、暂停、跳转和音量都在播放条上，预览页只显示画面。测试构建不打开声卡。
 //! PDF 与网格画面留在这里，检查状态文件不再继续变长。
 
-use super::super::player::PreviewEntry;
+use super::super::player::{ClockStep, PreviewEntry};
 use super::super::{PreviewPixels, ShellViewModel};
 use super::{InspectEffect, InspectMessage, InspectState, PreviewBody};
 
@@ -117,12 +117,18 @@ pub(super) fn video_frame(state: &InspectState, time_ms: u64) -> Option<&super::
 }
 
 /// 播放时钟只有播放器一份：拨动后预览页拿到同一份会话，再换上对应的视频画面。
-pub(super) fn advance_playback(model: &mut super::super::ShellViewModel, step_ms: u64) -> bool {
-    if !model.player.advance_clock(step_ms, &mut model.inspect) {
-        return false;
+/// 换画面只换纹理；画面从无到有或从有到无时界面结构变了，按 `Changed` 报给调用方。
+pub(super) fn advance_playback(model: &mut super::super::ShellViewModel, step_ms: u64) -> ClockStep {
+    let step = model.player.advance_clock(step_ms, &mut model.inspect);
+    if step == ClockStep::Idle {
+        return step;
     }
+    let showed = model.preview_pixels.is_some();
     show_video_frame(model);
-    true
+    if model.preview_pixels.is_some() != showed {
+        return ClockStep::Changed;
+    }
+    step
 }
 
 /// 翻到相邻页。越界只记日志，不把空白页当成新内容。

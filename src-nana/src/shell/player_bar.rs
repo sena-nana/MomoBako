@@ -4,7 +4,7 @@
 //! 停留时长和适应 / 填充设置。窗口不宽于 1120px 时三栏拆成三行。当前队列浮在卡片右上方。
 //! 文件页、预览页和播放集页共用这一块。
 
-use nana_ui::runtime::view::{widget, AnyView, IntoView};
+use nana_ui::runtime::view::{fields, widget, AnyView, IntoView};
 use nana_ui::runtime::{
     Activate, AlignSpec, IconButton, JustifySpec, LengthSpec, RangeChanged, RangeField, SemanticColorRole, SizeChanged,
     Stack, Text, Thumbnail,
@@ -12,7 +12,7 @@ use nana_ui::runtime::{
 use nana_ui::{ContentFit, Icon};
 
 use super::super::player::{PlaybackMode, PlayerMessage, QueueItem};
-use super::super::{ShellMessage, ShellViewModel};
+use super::super::{hot, ShellMessage, ShellViewModel};
 use super::icons;
 use super::paint::{GlyphButton, Invisible, ProgressTrack};
 
@@ -108,14 +108,7 @@ impl BarProps {
     }
 
     pub(crate) fn time_text(&self) -> String {
-        format!("{} / {}", format_time(self.current_ms), format_time(self.duration_ms))
-    }
-
-    pub(crate) fn progress_ratio(&self) -> f32 {
-        if self.duration_ms == 0 {
-            return 0.0;
-        }
-        (self.current_ms as f32 / self.duration_ms as f32).clamp(0.0, 1.0)
+        clock_parts(self.current_ms, self.duration_ms).1
     }
 
     pub(crate) fn has_item(&self) -> bool {
@@ -186,6 +179,14 @@ fn format_time(ms: u64) -> String {
     format!("{}:{:02}", total / 60, total % 60)
 }
 
+/// 随播放时钟变的三个值：进度轨比例、「当前 / 总长」和拖动条位置。没有时长时比例为 0，
+/// 拖动条按 1 毫秒的总长夹住。挂载和逐帧同步共用这一份算法。
+pub(crate) fn clock_parts(current_ms: u64, duration_ms: u64) -> (f32, String, f64) {
+    let ratio = if duration_ms == 0 { 0.0 } else { (current_ms as f32 / duration_ms as f32).clamp(0.0, 1.0) };
+    let time = format!("{} / {}", format_time(current_ms), format_time(duration_ms));
+    (ratio, time, current_ms.min(duration_ms.max(1)) as f64)
+}
+
 /// Vue 禁用按钮的整体不透明度。
 pub(crate) const DISABLED_OPACITY: f32 = 0.45;
 
@@ -245,7 +246,8 @@ pub(crate) fn player_bar(model: &ShellViewModel) -> AnyView {
 fn progress(props: &BarProps) -> AnyView {
     let seekable = props.has_item() && props.duration_ms > 0 && props.supports_seek;
     let duration = props.duration_ms.max(1) as f64;
-    let mut range = RangeField::new(props.current_ms.min(props.duration_ms.max(1)) as f64, 0.0, duration, 100.0)
+    let (ratio, _, position) = clock_parts(props.current_ms, props.duration_ms);
+    let mut range = RangeField::new(position, 0.0, duration, 100.0)
         .label("播放进度")
         .show_label(false)
         .show_value(false)
@@ -262,16 +264,22 @@ fn progress(props: &BarProps) -> AnyView {
     layout.min_height = Some(LengthSpec::Px(22.0));
     layout.padding_left = Some(LengthSpec::Px(0.0));
     layout.padding_right = Some(LengthSpec::Px(0.0));
+    // 进度轨比例和拖动条位置随播放时钟逐帧走，绑在热信号上，播放推进不重挂播放条。
+    let seek = widget(range)
+        .prop::<f64, fields::slider::value>(hot::prop(|signals| signals.position, position))
+        .key("player-seek")
+        .on_cx(|_, event: &RangeChanged, cx| {
+            cx.dispatch_program_all(player_message(PlayerMessage::Seek(event.value.max(0.0) as u64)));
+        });
     widget(
         Stack::row(0.0)
             .width(LengthSpec::Fill)
             .height(LengthSpec::Px(8.0))
             .min_height(LengthSpec::Px(8.0))
-            .painter(ProgressTrack { ratio: props.progress_ratio() }),
+            .painter(ProgressTrack { ratio }),
     )
-    .children((widget(range).key("player-seek").on_cx(|_, event: &RangeChanged, cx| {
-        cx.dispatch_program_all(player_message(PlayerMessage::Seek(event.value.max(0.0) as u64)));
-    }),))
+    .prop::<f32, hot::TrackRatioField>(hot::prop(|signals| signals.progress, ratio))
+    .children((seek,))
     .key("player-progress")
     .into_any()
 }
@@ -416,13 +424,15 @@ pub(crate) fn glyph_button(icon: Icon, label: &str, icon_size: f32, box_size: f3
 
 /// 12px 弱色时间。窄列里可以在「/」后面折行。
 fn time(props: &BarProps) -> AnyView {
+    let text = props.time_text();
     widget(
-        Text::new(props.time_text())
+        Text::new(text.clone())
             .color(SemanticColorRole::Muted)
             .font_size(12.0)
             .line_height(18.6)
             .with_min_width_zero(),
     )
+    .prop::<String, fields::text::value>(hot::prop(|signals| signals.time, text))
     .key("player-time")
     .into_any()
 }

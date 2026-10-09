@@ -1,104 +1,71 @@
-//! 原生壳层的 Runtime 视图挂载；复用唯一文档与 GPU 上下文。
-
-use std::cell::RefCell;
+//! 壳层各块内容的视图函数：侧栏、主区路由和浮层，以及骨架里工作区的区域布局。
+//!
+//! 这些函数按 ViewModel 整块建出内容，由 `ShellView` 挂在骨架的槽位里；随动效和播放逐帧变的
+//! 字段经 `hot::prop` 绑到热信号上。
 
 use super::*;
 use crate::theme_map::{SIDEBAR_MAX_PX, SIDEBAR_MIN_PX};
 use nana_ui::runtime::view::{text, widget, AnyView, IntoView};
-use nana_ui::runtime::{
-    AppShell, FrameworkError, LengthSpec, MountedView, RadiusTier, RuntimeDocument, ScrollAxes, ScrollView, SemanticColorRole,
-    Stack, Workspace,
-};
+use nana_ui::runtime::{LengthSpec, RadiusTier, ScrollAxes, ScrollView, SemanticColorRole, Stack, Workspace};
 use nana_ui::{RegionId, RegionRole, RegionState, WorkspaceLayout, WorkspaceModel};
 
-thread_local! {
-    /// 上一次挂上的壳层。再次挂载前先卸掉，避免文档里叠多棵壳。
-    static SHELL_MOUNT: RefCell<Option<MountedView>> = const { RefCell::new(None) };
+use super::view_host::BodyMode;
+
+/// 侧栏：仓库头、分组和底部入口。放进工作区的资源区。
+pub(super) fn sidebar_view(model: &ShellViewModel) -> AnyView {
+    widget(super::sidebar_view::sidebar_frame())
+        .top(super::sidebar_view::sidebar_switcher(model))
+        .body(super::sidebar_view::sidebar_sections(model))
+        .footer(super::sidebar_view::sidebar_footer(model))
+        .into_any()
 }
 
-/// 在给定 Runtime 文档中挂载完整的 MomoBako 壳层。
-pub fn mount_shell(
-    document: &mut RuntimeDocument,
-    model: &ShellViewModel,
-) -> Result<(), FrameworkError> {
-    let document_id = document.document();
-    let view_model = model.clone();
-    // 卸掉旧树前记下焦点、选区和滚动位置，新树挂上后按键路径找回，
-    // 避免文本框每打一个字就失焦、滚动容器每次更新都回到顶部。
-    let kept = SHELL_MOUNT.with(|slot| {
-        let previous = slot.borrow_mut().take()?;
-        let live = previous
-            .roots()
-            .iter()
-            .any(|id| document.context().world().contains(*id));
-        if !live {
-            return None;
-        }
-        let kept = super::remount_state::capture(document, previous.roots());
-        if let Err(error) = previous.unmount(document.context_mut()) {
-            eprintln!("Nana 卸载上一棵壳层失败：{error}");
-        }
-        Some(kept)
-    });
-    let mounted = document
-        .context_mut()
-        .mount_view_root(document_id, move || {
-            // 标题栏、侧栏和主工作区共用同一套产品表面。验收页不再另挂按钮列表。
-            let stage = primary_stage(primary_route(&view_model));
-            let presented_sidebar = view_model.motion.sidebar_presented_width();
-            let show_sidebar = presented_sidebar > 0.5
-                && view_model.workspace.startup.status == StartupStatus::Ready;
-            let body = if show_sidebar {
-                let sidebar = widget(super::sidebar_view::sidebar_frame())
-                    .top(super::sidebar_view::sidebar_switcher(&view_model))
-                    .body(super::sidebar_view::sidebar_sections(&view_model))
-                    .footer(super::sidebar_view::sidebar_footer(&view_model))
-                    .into_any();
-                workbench(sidebar, stage, presented_sidebar)
-            } else {
-                // 启动和侧栏收起时主区独占一行，圆角外露出壳层的 --bg-elev。
-                widget(Stack::fill_column(0.0).surface(SemanticColorRole::Surface))
-                    .children((stage,))
-                    .into_any()
-            };
-            let title_bar = super::title_bar::title_bar(&view_model);
-            let mut shell = widget(AppShell::new()).title_bar(title_bar).body(body);
-            if let Some(dialog) = super::sidebar_view::folder_delete_dialog(&view_model) {
-                shell = shell.overlay(super::motion::paint_modal(dialog, &view_model.motion));
-            } else if let Some(dialog) = super::sidebar_view::smart_delete_dialog(&view_model) {
-                shell = shell.overlay(super::motion::paint_modal(dialog, &view_model.motion));
-            } else if let Some(dialog) = super::sidebar_view::repository_delete_dialog(&view_model) {
-                shell = shell.overlay(super::motion::paint_modal(dialog, &view_model.motion));
-            } else if let Some(dialog) = super::admin::plugin_delete_dialog(&view_model) {
-                shell = shell.overlay(super::motion::paint_modal(dialog, &view_model.motion));
-            } else if let Some(dialog) = super::input::playlist_name_dialog(&view_model) {
-                shell = shell.overlay(super::motion::paint_modal(dialog, &view_model.motion));
-            } else if let Some(dialog) = super::sidebar_view::playlist_create_dialog(&view_model) {
-                shell = shell.overlay(super::motion::paint_modal(dialog, &view_model.motion));
-            } else if let Some(dialog) = super::sidebar_view::folder_dialog(&view_model) {
-                shell = shell.overlay(super::motion::paint_modal(dialog, &view_model.motion));
-            } else if let Some(dialog) = super::sidebar_view::smart_folder_dialog(&view_model) {
-                shell = shell.overlay(super::motion::paint_modal(dialog, &view_model.motion));
-            } else if let Some(popover) = super::sidebar_view::repository_popover(&view_model) {
-                shell = shell.overlay(popover);
-            } else if let Some(menu) = super::sidebar_view::folder_menu(&view_model) {
-                shell = shell.overlay(menu);
-            } else if let Some(popover) = super::admin::task_popover(&view_model) {
-                shell = shell.overlay(super::motion::paint_panel(popover, &view_model.motion));
-            } else if let Some(menu) = super::files_view::entry_menu(&view_model) {
-                shell = shell.overlay(menu);
-            }
-            shell
-        })?;
-    super::title_bar::bind_window_controls(document)?;
-    crate::window_host::bind_escape(document);
-    crate::window_host::bind_file_drop(document);
-    super::sidebar_view::bind_field_labels(document);
-    if let Some(kept) = kept {
-        kept.restore(document, mounted.roots());
+/// 主区。有侧栏时放进工作区的主区；独占时外面再包一层壳层底色，圆角外露出 `--bg-elev`。
+pub(super) fn primary_view(model: &ShellViewModel, mode: BodyMode) -> AnyView {
+    let stage = primary_stage(primary_route(model));
+    match mode {
+        BodyMode::Workbench => stage,
+        BodyMode::Solo => widget(Stack::fill_column(0.0).surface(SemanticColorRole::Surface)).children((stage,)).into_any(),
     }
-    SHELL_MOUNT.with(|slot| *slot.borrow_mut() = Some(mounted));
-    Ok(())
+}
+
+/// 浮层：对话框、弹层和菜单，同一时刻最多一层，没有时为 `None`。对话框和任务弹层带开合动效。
+pub(super) fn overlay_view(model: &ShellViewModel) -> Option<AnyView> {
+    let modal = |dialog: AnyView| super::motion::paint_modal(dialog, &model.motion);
+    if let Some(dialog) = super::sidebar_view::folder_delete_dialog(model) {
+        return Some(modal(dialog));
+    }
+    if let Some(dialog) = super::sidebar_view::smart_delete_dialog(model) {
+        return Some(modal(dialog));
+    }
+    if let Some(dialog) = super::sidebar_view::repository_delete_dialog(model) {
+        return Some(modal(dialog));
+    }
+    if let Some(dialog) = super::admin::plugin_delete_dialog(model) {
+        return Some(modal(dialog));
+    }
+    if let Some(dialog) = super::input::playlist_name_dialog(model) {
+        return Some(modal(dialog));
+    }
+    if let Some(dialog) = super::sidebar_view::playlist_create_dialog(model) {
+        return Some(modal(dialog));
+    }
+    if let Some(dialog) = super::sidebar_view::folder_dialog(model) {
+        return Some(modal(dialog));
+    }
+    if let Some(dialog) = super::sidebar_view::smart_folder_dialog(model) {
+        return Some(modal(dialog));
+    }
+    if let Some(popover) = super::sidebar_view::repository_popover(model) {
+        return Some(popover);
+    }
+    if let Some(menu) = super::sidebar_view::folder_menu(model) {
+        return Some(menu);
+    }
+    if let Some(popover) = super::admin::task_popover(model) {
+        return Some(super::motion::paint_panel(popover, &model.motion));
+    }
+    super::files_view::entry_menu(model)
 }
 
 /// 窄窗逻辑宽。默认侧栏不随窗口缩小，主区下限要和它对得上。
@@ -243,16 +210,16 @@ fn scroll_view() -> ScrollView {
     })
 }
 
-/// 资源区加主区。主区圆角，不画常驻浅色分割条。
-/// 侧栏宽度仍用调用方给出的展开值，不改用户保存的折叠状态。
+/// 骨架里的工作区：资源区和主区，资源区宽度按侧栏呈现宽度给。主区圆角，不画常驻浅色分割条。
+/// 区域内容由 `ShellView` 挂好后放进来，宽度之后由绑定跟着侧栏呈现宽度走。
 ///
 /// Vue 的主区紧贴侧栏（侧栏 276 时主区从 x=276 起）。Nana 两条轨道之间多一条发丝间隙，
 /// 所以资源区少给一条间隙，侧栏右内边距也少一条（见 `sidebar_frame`），
 /// 侧栏看上去仍是 `width` 宽，内容盒和 Vue 一样。
-fn workbench(sidebar: AnyView, stage: AnyView, width: f32) -> AnyView {
+pub(super) fn workbench_workspace(width: f32) -> Workspace {
     let layout = WorkspaceLayout::new([
         RegionState::new(RegionId::Resources, RegionRole::Resources)
-            .size((width - WORKBENCH_GAP_PX).max(0.0))
+            .size(super::hot::resources_size(width))
             .min_size(SIDEBAR_MIN_PX - WORKBENCH_GAP_PX)
             .max_size(SIDEBAR_MAX_PX - WORKBENCH_GAP_PX)
             .collapsible(true)
@@ -262,10 +229,7 @@ fn workbench(sidebar: AnyView, stage: AnyView, width: f32) -> AnyView {
             .fill_priority(1),
     ])
     .expect("工作台只注册资源区和主区");
-    widget(Workspace::from_model(&WorkspaceModel::with_layout(layout), []))
-        .region(RegionId::Resources, sidebar)
-        .region(RegionId::Primary, stage)
-        .into_any()
+    Workspace::from_model(&WorkspaceModel::with_layout(layout), [])
 }
 
 /// 播放集页：播放表面，以及不能播放的条目。名称和当前目录不在这一页另开输入。

@@ -297,9 +297,13 @@ impl FooterButton {
         Arc::make_mut(&mut style.layout).opacity = Some(opacity);
         let mut button = IconButton::new(self.icon, self.label).size(ControlSize::Large).with_tooltip(self.label);
         button.style = style;
-        widget(button.colors_from_style())
-            .key(key)
-            .on_cx(move |_, _: &Activate, cx| on_activate(cx))
-            .into_any()
+        let button = widget(button.colors_from_style());
+        // 平时的半透明随底栏悬停淡入淡出，绑在热信号上；当前入口和有任务时常亮，不跟。
+        let button = if self.active || self.highlight {
+            button
+        } else {
+            button.prop::<f32, super::super::hot::OpacityField>(super::super::hot::prop(|signals| signals.footer, self.rest_opacity))
+        };
+        button.key(key).on_cx(move |_, _: &Activate, cx| on_activate(cx)).into_any()
     }
 }
