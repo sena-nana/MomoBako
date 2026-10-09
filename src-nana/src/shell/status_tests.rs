@@ -118,6 +118,22 @@ fn file_failures_give_way_to_the_file_list() {
     assert_eq!(StatusLine::project(&model), StatusLine::Failure("无法移动文件：目标已存在".into()));
 }
 
+/// 设置数据读不到（Vue 的设置包 `Promise.all` 整批失败）：设置页上没有就近的位置，状态区照 Vue 显示原文；
+/// 拓展页的插件面板和 API 调试页已经写着，状态区让位；重读成功、字段清掉时一起清。
+#[test]
+fn settings_data_failures_show_where_the_page_has_no_place_for_them() {
+    let mut model = ShellViewModel::for_page(ShellPage::SettingsError);
+    let error = "读取插件目录失败：拒绝访问。 (os error 5)";
+    assert_eq!(failure(&model), Some((FailureSource::SettingsData, error.to_string())));
+    assert_eq!(StatusLine::project(&model), StatusLine::Failure(error.into()), "设置页上要看得到");
+    model.page = ShellPage::FileList;
+    model.workspace.panel = WorkspacePanel::Extensions;
+    assert_eq!(StatusLine::project(&model), StatusLine::Hidden, "插件面板已经写着，状态区不重复");
+    model.admin.load_error.clear();
+    model.observe_failures();
+    assert_eq!(failure(&model), None, "重读成功以后一起清");
+}
+
 /// 状态区的顺序：失败 > 忙碌。选中文件读详情时是忙碌行，详情读不到时换成失败。
 #[test]
 fn busy_shows_while_loading_and_failures_win() {
