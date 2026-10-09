@@ -12,11 +12,17 @@ impl ShellViewModel {
             || self.workspace.active_repository().is_some_and(|repository| repository.status == "missing")
     }
 
-    /// 按当前活动仓库重新绑定侧栏。缺失和空仓库只清空，不发请求。
+    /// 按当前活动仓库重新绑定侧栏。缺失和空仓库只清空，不发请求。换到可用的仓库时照 Vue
+    /// `queueRepositoryBackgroundLoads` 在后台再读仓库动作（侧栏「动作」入口要用）和硬链接候选。
     pub(crate) fn bind_sidebar_repository(&mut self) {
         let missing = self.navigation_locked();
         let repo_id = self.workspace.active_repo_id.clone();
-        self.sidebar.bind_repository(repo_id.as_deref(), missing);
+        if self.sidebar.bind_repository(repo_id.as_deref(), missing)
+            && let Some(repo_id) = repo_id
+        {
+            self.admin.queue_actions(Some(repo_id.clone()));
+            self.files.check_hardlinks(&repo_id);
+        }
     }
 
     pub(crate) fn leave_settings_page(&mut self) {

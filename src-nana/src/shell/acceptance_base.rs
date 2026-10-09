@@ -16,7 +16,7 @@ use crate::backend::services::repository::{
     RepositoryBackendSummary, RepositoryOverview, RepositorySnapshot, RepositoryStructureCacheState, RepositorySummary,
 };
 
-use super::super::admin::AdminEffect;
+use super::super::admin::{AdminEffect, AdminMessage};
 use super::super::files::DisplayMode;
 use super::super::sidebar::SidebarTree;
 use super::super::{ShellMessage, ShellPage, ShellViewModel, SidebarMessage};
@@ -140,10 +140,17 @@ impl Base {
     }
 }
 
-/// 回答启动结束时排下的设置包读取，以及插件列表到了以后排下的播放器类型读取。
-/// 没排下的读取不编造应答，只记日志：说明产品启动已经不读它们了。
+/// 回答启动排下的管理读取：绑定仓库时的仓库动作（Vue 模拟 IPC 答空列表）、启动结束时的设置包，
+/// 以及插件列表到了以后的播放器类型。没排下的读取不编造应答，只记日志：说明产品启动已经不读它们了。
+/// 后台的硬链接候选和成员索引在夹具里都是空的，不回答也是同样的状态。
 fn answer_admin_reads(model: &mut ShellViewModel, players: &[PlaylistPlayerContribution]) {
-    if !model.admin.take_effects().iter().any(|effect| matches!(effect, AdminEffect::LoadSettingsBundle)) {
+    let effects = model.admin.take_effects();
+    for effect in &effects {
+        if let AdminEffect::LoadActions { repo_id } = effect {
+            model.reduce(ShellMessage::Admin(AdminMessage::ActionsLoaded { repo_id: repo_id.clone(), result: Ok(Vec::new()) }));
+        }
+    }
+    if !effects.iter().any(|effect| matches!(effect, AdminEffect::LoadSettingsBundle)) {
         eprintln!("Nana 验收底子：启动结束时没有读设置包");
         return;
     }

@@ -548,6 +548,12 @@ impl FilesState {
         }
     }
 
+    /// 启动和换仓库后在后台查一次硬链接候选，和 Vue 后台读 `listHardlinkCandidates` 一致：
+    /// 启动同步刚建出来的候选要让用户确认。
+    pub(super) fn check_hardlinks(&mut self, repo_id: &str) {
+        self.effects.push(FilesEffect::CheckHardlinks { repo_id: repo_id.to_string() });
+    }
+
     /// 结构更新静默重读硬链接候选。空仓库只记日志。
     /// 不打开对话框，不改加载态和页面错误。
     pub(super) fn refresh_hardlinks_silent(&mut self, repo_id: &str) {
