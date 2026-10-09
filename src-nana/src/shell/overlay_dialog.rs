@@ -11,19 +11,18 @@
 //! 这时激活。换下前经 [`OverlaySession::retire`] 让框架关掉对话框，焦点回到打开前的位置。
 //!
 //! 外观照 Vue `.modal-card` / `.dialog-card__*` 尽量靠近：宽度取最近的 `DialogSize` 档，危险对话框
-//! 的标题用错误色，NanaUI 的遮罩下面再铺一层补色，合起来和 Vue 的 45% 黑、2px 背景模糊一样；
-//! 分隔线、内边距、距顶 12vh 和卡片圆角由 NanaUI 决定，差异见 `docs/nana-vue-parity.md`。
+//! 的标题用错误色；遮罩、分隔线、内边距、距顶 12vh、卡片圆角和开合动效由主题配方决定
+//! （`appearance.rs`），差异见 `docs/nana-vue-parity.md`。
 
 use std::sync::Arc;
 
 use nana_ui::icons_tabler::{LOADER_2, X};
 use nana_ui::runtime::view::{
-    entity_ref, fields, on_mount, signal, when, widget, AnyView, El, EntityRef, FieldWrite, Implicit, IntoProp, IntoView,
-    Signal, StyledComponent,
+    entity_ref, fields, on_mount, signal, when, widget, AnyView, El, EntityRef, FieldWrite, IntoProp, IntoView, Signal,
 };
 use nana_ui::runtime::{
-    Activate, AlignSpec, AnimatableProperty, AppContext, Button, ConfirmDialog, ConfirmIntent, Dialog, DialogCloseRequested,
-    Easing, IconButton, IconGlyph, LengthSpec, ListItem, NodeStyle, OverlayHost, RadiusTier, SemanticColorRole, Stack, Text,
+    Activate, AlignSpec, AppContext, Button, ConfirmDialog, ConfirmIntent, Dialog, DialogCloseRequested, IconButton,
+    IconGlyph, LengthSpec, ListItem, NodeStyle, OverlayHost, RadiusTier, SemanticColorRole, Stack, Text,
 };
 use nana_ui::{ButtonKind, ControlSize};
 use nana_ui_core::{DialogClosePolicy, DialogSize};
@@ -153,7 +152,7 @@ impl DialogFrame {
         if close_button {
             element = element.close_action(close_affordance(busy));
         }
-        frame(key, placed, host, element.into_any(), activator(placed, move |cx| {
+        frame(key, host, element.into_any(), activator(placed, move |cx| {
             if let (Some(host), Some(surface)) = (host.get(), surface.get()) {
                 cx.activate_overlay(host, surface).map(|_| ())
             } else {
@@ -209,7 +208,7 @@ impl DialogFrame {
             })
             .cancel(cancel)
             .confirm(confirm);
-        frame(key, placed, host, element.into_any(), activator(placed, move |cx| {
+        frame(key, host, element.into_any(), activator(placed, move |cx| {
             if let (Some(host), Some(surface)) = (host.get(), surface.get()) {
                 cx.activate_overlay(host, surface).map(|_| ())
             } else {
@@ -227,9 +226,10 @@ fn apply_tone(style: &mut NodeStyle, tone: DialogTone) {
 }
 
 /// 浮层槽位里的一块：铺满的外层（AppShell 给它打铺满窗口的补丁，有子节点时挡住下面的点击，
-/// 在激活前也不会漏点），里面是遮罩补色、对话框的宿主和激活用的结构块。外层上不放绑定：AppShell
-/// 给它打的布局补丁只在自己投影时写，绑定重投影会把补丁冲掉。
-fn frame(key: &'static str, placed: Signal<bool>, host: EntityRef<OverlayHost>, surface: AnyView, activator: AnyView) -> AnyView {
+/// 在激活前也不会漏点），里面是对话框的宿主和激活用的结构块。遮罩的颜色、背景模糊和开合动效
+/// 归主题（`appearance.rs` 的效果令牌和对话框配方）。外层上不放绑定：AppShell 给它打的布局补丁
+/// 只在自己投影时写，绑定重投影会把补丁冲掉。
+fn frame(key: &'static str, host: EntityRef<OverlayHost>, surface: AnyView, activator: AnyView) -> AnyView {
     let mut style = NodeStyle::default();
     {
         let layout = Arc::make_mut(&mut style.layout);
@@ -238,55 +238,8 @@ fn frame(key: &'static str, placed: Signal<bool>, host: EntityRef<OverlayHost>, 
     }
     widget(Stack::column(0.0))
         .key(key)
-        .children((veil(placed), widget(OverlayHost::new().style(style)).entity_ref(host).key("dialog-host").children((surface,)), activator))
+        .children((widget(OverlayHost::new().style(style)).entity_ref(host).key("dialog-host").children((surface,)), activator))
         .into_any()
-}
-
-/// 遮罩补色，补 NanaUI 遮罩和 Vue `.modal-overlay` 的两处差别：
-///
-/// - 压暗：NanaUI 的遮罩是线性空间里的 45% 黑，只压到 Vue（sRGB 里的 45% 黑）的一部分。下面再铺
-///   一层 51.3% 的黑（不随主题变化），两层合起来把底色压到线性亮度的 `0.55 × 0.487 ≈ 0.55^2.2`。
-/// - 模糊：Vue 是 `blur(2px)`，NanaUI 的背景模糊和 CSS 一样把半径当高斯标准差，照写 2。
-///
-/// 对话框激活的那一帧（`placed` 置真）从透明淡入，时长和曲线跟框架给对话框表面的淡入一致，
-/// 两层一起出现。不挡点击：点外面仍由宿主变成关闭请求。NanaUI 补上遮罩的取色和模糊语义后删掉。
-fn veil(placed: Signal<bool>) -> AnyView {
-    let mut style = NodeStyle::default();
-    {
-        let layout = Arc::make_mut(&mut style.layout);
-        layout.background = Some([0.0, 0.0, 0.0, VEIL_ALPHA]);
-        layout.position = nana_ui_core::PositionSpec::Absolute;
-        layout.offset_top = Some(LengthSpec::Px(0.0));
-        layout.offset_left = Some(LengthSpec::Px(0.0));
-        layout.width = Some(LengthSpec::Percent(100.0));
-        layout.height = Some(LengthSpec::Percent(100.0));
-        layout.paint.backdrop_filter = Some(nana_ui_core::BackdropFilter { blur_radius: VEIL_BLUR, saturate: 1.0 });
-    }
-    widget(Stack::column(0.0).style(style))
-        .key("dialog-veil")
-        .prop::<f32, VeilOpacity>(move || if placed.get() { 1.0 } else { 0.0 })
-        .animate([Implicit::new(AnimatableProperty::Opacity, nana_ui_core::motion::OVERLAY_FADE).ease(Easing::EaseOutCubic)])
-        .into_any()
-}
-
-/// 补色层的不透明度：`1 - 0.55^2.2 / 0.55`。
-const VEIL_ALPHA: f32 = 0.513;
-/// 补色层的背景模糊：CSS `blur(2px)`，2px 是高斯标准差。
-const VEIL_BLUR: f32 = 2.0;
-
-/// 补色层的不透明度：对话框激活前是 0，激活后是 1，改动时按 [`veil`] 声明的过渡淡入。
-struct VeilOpacity;
-
-impl FieldWrite<Stack, f32> for VeilOpacity {
-    const FIELD: &'static str = "Stack.style.layout.opacity(veil)";
-
-    fn write(target: &mut Stack, value: f32) {
-        Arc::make_mut(&mut target.node_style_mut().layout).opacity = Some(value);
-    }
-
-    fn differs(target: &Stack, value: &f32) -> bool {
-        target.node_style().layout.opacity != Some(*value)
-    }
 }
 
 /// 浮层块置真 `placed` 以后的那次刷新里建出分支，分支挂上时宿主已经在树里，这时激活。

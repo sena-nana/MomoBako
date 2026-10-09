@@ -181,14 +181,13 @@ DialogFrame::new("folder-dialog", move || view.with(|view| view.title.to_string(
 - 关闭策略是 `DialogClosePolicy::requests_only()`：Escape、点外面、关闭位只在对话框上发一次 `DialogCloseRequested`，框架换成 `new` 给的关闭消息；处理中（`busy`）什么也不发。确认框的取消和确认由框架变成 `ConfirmIntent`，按钮自己不发消息。
 - 激活时机：浮层块把这一块挂成脱离树的内容，`ShellView` 之后才放进 AppShell 的槽位，挂载时的 `on_mount` 运行时宿主还不在树里。所以对话框旁边放 `when(placed, ..)`：浮层块挂好后调会话的 `placed()` 置真，下一次刷新建出分支，分支的 `on_mount` 激活。外层是普通 `Stack`，放进槽位时 AppShell 按「有子节点」挡住点击，激活前也不会漏点。
 - 换下前浮层块调会话的 `retire()`：`dismiss_overlay(host)` 让框架关掉对话框、把焦点还给打开前的位置，然后再卸掉这一块。
-- 外层里宿主下面还有一层补色（`veil`）：框架的遮罩在线性空间混合、也没有背景模糊，补色层再压暗一层、做背景模糊，合起来和 Vue `.modal-overlay` 一样。它随 `placed` 从透明淡入（`El::animate` 的隐式过渡，时长和曲线同框架的表面淡入），不挡点击。NanaUI 补上遮罩令牌和模糊语义后删掉（见 `docs/nana-vue-parity.md`「NanaUI 缺口」）。
 - 字段、按钮、底栏、错误行用框架里的 `text_field` / `text_area_field` / `select_field` / `two_columns` / `action` / `footer` / `error_line` / `busy_note`，照 Vue `.dialog-field` 和 `.dialog-card__actions`。
 
 **先后和 Escape。** `OverlayKey` 的顺序就是同时打开时谁显示：关闭确认最先；其后是原来浮层槽位里的对话框、弹层和菜单；文件页的导出和文件对话框原来画在主区、压在浮层槽位下面，排在最后。Escape 先关显示着的那一层：显示着的对话框已经激活，由运行时拿到 Escape、发自己的关闭请求（`prevent_default` 为真，全局 Escape 不再发）；显示着的是弹层或菜单时走全局 Escape，`escape_layer` 里弹层和菜单都排在文件页的导出和文件对话框前面，等着的对话框不会先被关掉。`escape_layer` 里文件夹菜单排在仓库弹层前面、和 `OverlayKey` 相反，但两者都由点击打开，开着一个时浮层槽位挡住另一个的入口，不会同时开着。
 
 **组合输入。** 浮层换块会换掉输入框，新开的对话框一激活还会把焦点从别处的输入框拿走，所以文档里任何获得焦点的输入框还有预编辑时，浮层块都把换块延后到组合结束（`composing`）。打开期间的变化只写信号，不受影响。
 
-**离屏截图。** 离屏会话没有帧时钟，激活的对话框和补色层停在开场动效的第一帧（透明度 0）。`scene_shots` 截图前在有激活的浮层时把动效走完；没有激活的浮层时什么也不做，别的场景的像素不受影响。
+**离屏截图。** 离屏会话没有帧时钟，激活的对话框停在开场动效的第一帧（透明度 0）。`scene_shots` 截图前在有激活的浮层时把动效走完；没有激活的浮层时什么也不做，别的场景的像素不受影响。
 
 ## 不再扫描文档补登
 
