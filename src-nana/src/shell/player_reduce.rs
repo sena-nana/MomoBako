@@ -91,6 +91,12 @@ fn reduce_player(model: &mut ShellViewModel, message: PlayerMessage) {
             model.player.effects.push(PlayerEffect::PersistSettings);
         }
         PlayerMessage::ToggleQueue => model.player.queue_open = !model.player.queue_open,
+        PlayerMessage::BarResized(width) => {
+            // 半像素以内的抖动不算变化，避免排版回报来回重建。
+            if width.is_finite() && (width - model.player.bar_width).abs() > 0.5 {
+                model.player.bar_width = width;
+            }
+        }
         PlayerMessage::Stop { repo_id, clear_stored } => model.player.stop_for(repo_id, clear_stored, &mut model.inspect),
         PlayerMessage::ToggleMembership { playlist_id, kind, extension, asset_id, is_virtual, path } => {
             model.player.toggle_membership(&playlist_id, &kind, &extension, &asset_id, is_virtual, &path, writable, repo_id.as_deref());

@@ -779,6 +779,20 @@ fn preview_and_player_share_one_media_session() {
     assert!(!model.player.system_media_supported());
 }
 
+/// 播放条量到的宽度只在真的变了时记下，半像素抖动和无效值不算。
+#[test]
+fn bar_width_feedback_ignores_half_pixel_jitter() {
+    let mut model = shell(true);
+    send(&mut model, PlayerMessage::BarResized(540.0));
+    assert_eq!(model.player.bar_width, 540.0);
+    send(&mut model, PlayerMessage::BarResized(540.4));
+    assert_eq!(model.player.bar_width, 540.0);
+    send(&mut model, PlayerMessage::BarResized(f32::NAN));
+    assert_eq!(model.player.bar_width, 540.0);
+    send(&mut model, PlayerMessage::BarResized(780.0));
+    assert_eq!(model.player.bar_width, 780.0);
+}
+
 #[test]
 fn acceptance_pages_use_the_player_surface() {
     assert!(ShellViewModel::for_page(ShellPage::PlaybackRunning).player_surface_visible());

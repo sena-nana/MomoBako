@@ -116,6 +116,8 @@ pub enum PlayerMessage {
     SetImageDuration(u32),
     SetObjectFit { cover: bool },
     ToggleQueue,
+    /// 播放条卡片排版后的宽度。窄于宽排版的下限时改成三行。
+    BarResized(f32),
     /// `repo_id` 为空时停止当前会话。仓库切换要带上被换掉的仓库。
     Stop { repo_id: Option<String>, clear_stored: bool },
     ToggleMembership { playlist_id: String, kind: String, extension: String, asset_id: String, is_virtual: bool, path: String },
@@ -160,6 +162,8 @@ pub struct PlayerState {
     pub wants_playing: bool,
     pub can_play: bool,
     pub queue_open: bool,
+    /// 播放条卡片的实际宽度，排版回报后才有；0 表示还没量到。只影响画面。
+    pub(crate) bar_width: f32,
     pub activity: String,
     pub notice: String,
     pub history: Vec<String>,
@@ -209,6 +213,7 @@ impl Default for PlayerState {
             wants_playing: false,
             can_play: false,
             queue_open: false,
+            bar_width: 0.0,
             activity: String::new(),
             notice: String::new(),
             history: Vec::new(),

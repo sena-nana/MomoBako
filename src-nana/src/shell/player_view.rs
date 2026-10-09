@@ -6,7 +6,7 @@
 
 use nana_ui::runtime::view::{widget, AnyView, IntoView};
 use nana_ui::runtime::{
-    Activate, AlignSpec, Button, IconButton, JustifySpec, LengthSpec, RadiusTier, ReorderItem, ReorderList, ReorderListEvent,
+    Activate, AlignSpec, Button, JustifySpec, LengthSpec, RadiusTier, ReorderItem, ReorderList, ReorderListEvent,
     SemanticColorRole, SemanticPaint, Stack, Text, TextHorizontalAlignment,
 };
 use nana_ui::{ButtonKind, Icon};
@@ -324,15 +324,6 @@ pub(super) fn playlist_plugin_missing(model: &ShellViewModel, player_type_id: &s
     let ready = model.player.candidates.iter().any(|candidate| candidate.player_type_id == player_type_id)
         || model.player.contributions.iter().any(|player| player.player_type_id == player_type_id);
     !ready
-}
-
-/// 侧栏播放图标和行上的「播放」同一档禁用：整颗 0.45 不透明。名字只给无障碍。
-pub(super) fn wash_disabled_icon(mut button: IconButton) -> IconButton {
-    if button.disabled {
-        let layout = std::sync::Arc::make_mut(&mut button.style.layout);
-        layout.opacity = Some(bar::DISABLED_OPACITY);
-    }
-    button
 }
 
 fn player_message(message: PlayerMessage) -> ShellMessage {

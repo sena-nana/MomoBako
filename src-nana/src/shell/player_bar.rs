@@ -6,8 +6,8 @@
 
 use nana_ui::runtime::view::{widget, AnyView, IntoView};
 use nana_ui::runtime::{
-    Activate, AlignSpec, IconButton, JustifySpec, LengthSpec, RangeChanged, RangeField, SemanticColorRole, Stack, Text,
-    Thumbnail,
+    Activate, AlignSpec, IconButton, JustifySpec, LengthSpec, RangeChanged, RangeField, SemanticColorRole, SizeChanged,
+    Stack, Text, Thumbnail,
 };
 use nana_ui::{ContentFit, Icon};
 
@@ -189,10 +189,23 @@ fn format_time(ms: u64) -> String {
 /// Vue 禁用按钮的整体不透明度。
 pub(crate) const DISABLED_OPACITY: f32 = 0.45;
 
+/// 宽排版放得下的最窄卡片：内边距 32、传输 188、两道栏距 36、时间音量至少 170、
+/// 媒体至少 134（58 封面 + 12 间距 + 约四个字），再加两侧 1px 边。
+const WIDE_MIN_WIDTH: f32 = 562.0;
+/// 媒体栏的下限：封面、间距和几个字，再窄就该换三行排版。
+const MEDIA_MIN_WIDTH: f32 = 134.0;
+
+/// 窗口不宽于 1120px（Vue 断点），或者卡片自己量出来比宽排版的下限还窄（放在文件列这类窄栏里），
+/// 就拆成三行。Vue 只看窗口宽度，窄栏里三栏会挤在一起互相盖住，这里不照抄。
+fn narrow_layout(model: &ShellViewModel) -> bool {
+    let width = model.player.bar_width;
+    model.narrow_viewport() || (width > 0.0 && width < WIDE_MIN_WIDTH)
+}
+
 /// 播放条。`narrow` 对应 Vue 的 `max-width: 1120px` 断点。
 pub(crate) fn player_bar(model: &ShellViewModel) -> AnyView {
     let props = BarProps::from_model(model);
-    let narrow = model.narrow_viewport();
+    let narrow = narrow_layout(model);
     let radius = crate::theme_map::radius_2xl(model.admin.corner_radius as f32);
     let mut rows: Vec<AnyView> = vec![progress(&props), body(&props, narrow)];
     if props.shows_settings() {
@@ -220,7 +233,11 @@ pub(crate) fn player_bar(model: &ShellViewModel) -> AnyView {
                 inset: false,
             }];
         });
-    widget(card).children(rows).key("player-card").into_any()
+    widget(card)
+        .children(rows)
+        .key("player-card")
+        .on_cx(|_, event: &SizeChanged, cx| cx.dispatch_program_all(player_message(PlayerMessage::BarResized(event.width))))
+        .into_any()
 }
 
 /// 8px 进度轨。上面盖一层透明拖动区，和 Vue 的透明 range 一样高 22px。
@@ -272,13 +289,13 @@ fn body(props: &BarProps, narrow: bool) -> AnyView {
             .key("player-body")
             .into_any();
     }
-    // 宽窗：媒体占 1 份、最少 220；时间和音量占 0.72 份、最少 170；传输按内容宽。
-    // 列太窄时先压媒体，不把音量挤出卡片（Vue 的网格在窄列里会溢出）。
+    // 宽排版：媒体占 1 份、时间和音量占 0.72 份（至少 170），传输按内容宽。媒体至少留出封面和几个字，
+    // 卡片窄到放不下时上面已经换成三行，不会让文字盖到传输按钮上。
     let media = widget(
         Stack::row(0.0)
             .grow(1.0)
             .shrink(1.0)
-            .min_width(LengthSpec::Px(0.0))
+            .min_width(LengthSpec::Px(MEDIA_MIN_WIDTH))
             .with_layout(|layout| layout.flex_basis = Some(LengthSpec::Px(0.0))),
     )
     .children((media,))
@@ -309,12 +326,13 @@ fn media(props: &BarProps) -> AnyView {
     let hit = widget(parts::hit_area(&title, !props.has_item(), 0.0, 6.0))
         .key("player-media")
         .on_cx(|_, _: &Activate, cx| cx.dispatch_program_all(player_message(PlayerMessage::OpenPreview { item_id: None })));
+    // 两行字的宽度来自剩下的空间（基准 0、可伸缩），超出时省略号收尾，和 Vue 的 nowrap + ellipsis 一致。
     let meta = widget(
         Stack::column(3.0)
-            .width(LengthSpec::Shrink)
             .min_width(LengthSpec::Px(0.0))
             .grow(1.0)
-            .shrink(1.0),
+            .shrink(1.0)
+            .with_layout(|layout| layout.flex_basis = Some(LengthSpec::Px(0.0))),
     )
     .children((
         widget(parts::dim_text(parts::line(title, 14.0, 700, SemanticColorRole::Text, 21.7), dim)).key("player-title"),
