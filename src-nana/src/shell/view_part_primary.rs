@@ -25,6 +25,8 @@ use nana_ui::runtime::{
 
 use super::hot::HotSignals;
 use super::remount_state::{self, KeptState};
+use super::route_empty::{EmptySignals, EmptyView};
+use super::route_missing::MissingSignals;
 use super::route_startup::{StartupSignals, StartupView};
 use super::view_part::{composing_under, first_root, mount_detached, BodyMode, PartCx, PartId, ShellPart, Swap};
 use super::{MainRegion, ShellPage, ShellViewModel, WorkspacePanel};
@@ -85,13 +87,15 @@ impl RouteKey {
 
 /// 常驻路由：分支只在进入时建一次，之后同步只写信号。
 fn resident(route: RouteKey) -> bool {
-    matches!(route, RouteKey::Startup)
+    matches!(route, RouteKey::Startup | RouteKey::Missing | RouteKey::Empty)
 }
 
 /// 常驻路由的分支。非常驻路由返回 `None`。
 fn resident_view(route: RouteKey, signals: RouteSignals, hot: HotSignals) -> Option<AnyView> {
     match route {
         RouteKey::Startup => Some(super::route_startup::view(signals.startup, hot)),
+        RouteKey::Missing => Some(super::route_missing::view(signals.missing)),
+        RouteKey::Empty => Some(super::route_empty::view(signals.empty)),
         _ => None,
     }
 }
@@ -106,8 +110,7 @@ fn legacy_view(route: RouteKey, model: &ShellViewModel) -> Option<AnyView> {
         RouteKey::EmptySearch => super::route_search::empty_library(model),
         RouteKey::Playlists => super::route_playlists::view(model),
         RouteKey::Logs | RouteKey::Extensions | RouteKey::Actions => super::route_admin::view(model),
-        RouteKey::Missing => super::route_missing::view(model),
-        RouteKey::Empty => super::route_empty::view(model),
+        RouteKey::Missing | RouteKey::Empty => return None,
         RouteKey::Blank => super::route_home::blank(model),
     };
     Some(view)
@@ -117,17 +120,25 @@ fn legacy_view(route: RouteKey, model: &ShellViewModel) -> Option<AnyView> {
 #[derive(Clone, Copy)]
 pub(crate) struct RouteSignals {
     startup: StartupSignals,
+    missing: MissingSignals,
+    empty: EmptySignals,
 }
 
 impl RouteSignals {
     fn new(model: &ShellViewModel) -> Self {
-        Self { startup: StartupSignals::new(model) }
+        Self { startup: StartupSignals::new(model), missing: MissingSignals::new(model), empty: EmptySignals::new(model) }
     }
 
     /// 只写当前路由的投影：别的常驻路由进来之前会先写一次再建分支。
     fn write(&self, route: RouteKey, model: &ShellViewModel) {
         if route == RouteKey::Startup {
             self.startup.write(StartupView::project(model));
+        }
+        if route == RouteKey::Missing {
+            self.missing.write(model);
+        }
+        if route == RouteKey::Empty {
+            self.empty.write(EmptyView::project(model));
         }
     }
 }
