@@ -4,10 +4,10 @@
 use crate::backend::services::repository::{
     ApiDesignSnapshot, CacheConfig, CacheSnapshot, FileBrowserSnapshot, PlaylistPlayerContribution, PlaylistSummary, PluginManifest,
     RepositoryBackendSummary, RepositoryLocalCacheStatus, RepositoryOverview, RepositorySnapshot, RepositoryStructureCacheState,
-    RepositorySummary,
+    RepositorySummary, SystemLogLocation, SystemLogPage, SystemLogRecord, SystemLogSource,
 };
 use crate::backend::services::runtime::ExternalApiConnectionStatus;
-use crate::shell::admin::{AdminEffect, AdminMessage};
+use crate::shell::admin::{AdminEffect, AdminMessage, LogsView};
 use crate::shell::player::PlayerEffect;
 use crate::shell::view_part_sidebar::project::SidebarView;
 use crate::shell::{
@@ -339,4 +339,50 @@ fn startup_restores_the_stored_session_after_players_arrive() {
     model.reduce(ShellMessage::PlaylistPlayersLoaded(Ok(vec![audio_player()])));
     assert_eq!(restores(&mut model), 1, "播放器类型读回以后读存下的播放集详情");
     let _ = std::fs::remove_dir_all(dir);
+}
+
+fn log_record(id: &str, timestamp: &str) -> SystemLogRecord {
+    SystemLogRecord {
+        id: id.into(),
+        timestamp: timestamp.into(),
+        level: "info".into(),
+        category: "repository".into(),
+        action: "sync".into(),
+        message: format!("日志 {id}"),
+        source: SystemLogSource { kind: "host".into(), label: None, plugin_id: None, repo_id: None },
+        location: SystemLogLocation::default(),
+        context: serde_json::json!({}),
+    }
+}
+
+/// 侧栏「日志」切到日志面板：每次都读最近 200 条历史日志（Vue `setActivePanel('logs')`）。
+/// 读的时候手上还没有日志就写「正在加载系统日志」，读回以后按时间再 id 降序整份换上。
+#[test]
+fn opening_the_logs_panel_reads_history() {
+    let mut model = started(REPO);
+    admin_effects(&mut model);
+    model.reduce(ShellMessage::SetWorkspacePanel(WorkspacePanel::Logs));
+    assert!(matches!(admin_effects(&mut model).as_slice(), [AdminEffect::LoadLogs]), "切到日志面板应读历史日志");
+    let view = LogsView::project(&model);
+    assert!(view.loading, "读的时候写正在加载");
+    assert!(view.empty.is_none(), "读的时候不写空状态");
+
+    let records = vec![
+        log_record("log-1", "2026-10-08T07:51:00Z"),
+        log_record("log-3", "2026-10-08T07:53:00Z"),
+        log_record("log-2", "2026-10-08T07:53:00Z"),
+    ];
+    model.reduce(ShellMessage::LogsLoaded(Ok(SystemLogPage { records, next_cursor: None })));
+    assert_eq!(model.admin.logs.iter().map(|record| record.id.as_str()).collect::<Vec<_>>(), ["log-3", "log-2", "log-1"]);
+    let view = LogsView::project(&model);
+    assert!(!view.loading);
+    assert_eq!(view.rows.len(), 3);
+
+    model.reduce(ShellMessage::SetWorkspacePanel(WorkspacePanel::Files));
+    model.reduce(ShellMessage::SetWorkspacePanel(WorkspacePanel::Logs));
+    assert!(matches!(admin_effects(&mut model).as_slice(), [AdminEffect::LoadLogs]), "再切回来再读一次");
+    assert!(!LogsView::project(&model).loading, "手上已经有日志时不挡住列表");
+    model.reduce(ShellMessage::LogsLoaded(Err("拒绝访问".into())));
+    assert!(!model.admin.logs_loading);
+    assert_eq!(model.admin.logs.len(), 3, "读失败保留手上的日志");
 }

@@ -26,6 +26,9 @@ pub(crate) fn reduce_message(model: &mut ShellViewModel, message: ShellMessage) 
             if panel == WorkspacePanel::Actions {
                 model.admin.queue_actions(model.repository_id.clone());
             }
+            if panel == WorkspacePanel::Logs {
+                model.admin.begin_logs_load();
+            }
             if panel == WorkspacePanel::Extensions && model.admin.plugins.is_empty() && !model.admin.loading_settings {
                 model.admin.begin_settings_load();
             }
@@ -68,17 +71,13 @@ fn consume_legacy(model: &mut ShellViewModel, message: ShellMessage) -> Option<S
             None
         }
         ShellMessage::LogsLoaded(Ok(page)) => {
-            model.admin.logs = page.records.clone();
-            model.admin.note_log_scroll();
-            model.log_entries = page
-                .records
-                .iter()
-                .map(|record| format!("{} · {} · {}", record.level, record.category, record.message))
-                .collect();
+            model.admin.logs_loading = false;
+            model.admin.replace_logs(page.records);
             None
         }
         ShellMessage::LogsLoaded(Err(error)) => {
             eprintln!("Nana 系统日志读取失败：{error}");
+            model.admin.logs_loading = false;
             model.status.fail(FailureSource::Logs, format!("无法读取系统日志：{error}"));
             model.detail = format!("无法读取系统日志：{error}");
             None

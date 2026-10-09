@@ -62,7 +62,7 @@ yarn tauri:dev               # Vue/Tauri 对照窗口，先构建、打包并暂
 - **播放**：播放条和预览共用一份 `PlaybackSessionState`，预览里解得开的音视频接管播放条（`player_preview.rs`）；Windows 非测试构建经 winmm 出声（`wav_player.rs`），并注册系统媒体传输控件（`system_media.rs`）。侧栏绑定仓库时读播放集列表，新建、删除以后换上返回的整份列表，侧栏和播放器共用这一份（`apply_playlist_list`）：播放器据此读成员索引（文件右键「加入播放列表」），存下的会话所在的播放集在列表里、播放器类型也认得时读它的详情来恢复；新建以后照 Vue 接着点开它。点开侧栏的播放集进播放集页，条目用 `each(..).container(ReorderList)` 建，可以拖动排序、移除；当前项只读、只解这一条（`player_clip.rs`、`src-nana/src/player_dispatch.rs`）；图片幻灯片有停留时长和适应 / 填充。会话写进 `playback-sessions.json`。见 `player*.rs`、`route_playlists.rs`。
 - **设置**：侧栏「设置」和缺失仓库的「打开来源设置」都进设置页（`ShellMessage::OpenSettings`、`admin::open_settings_page`），后者照 Vue `?plugin=` 展开来源插件的设置。设置页有音频播放、外观（主题、圆角，改了立即生效）、仓库服务、外部素材接入（复制连接信息、导出 `external-api.json`）、插件管理、缓存和 API 设计。主题写进 `settings.json`，圆角写进 `corners.json`。见 `route_settings.rs`、`admin_settings_view.rs`。
 - **插件**：启动结束时照 Vue `loadSettingsData` 读一次设置包（插件、钩子记录、缓存、API 设计和外部连接），打开设置页、插件面板「刷新」时再读；插件列表换新以后重读播放器类型（`list_playlist_players`），新建播放集的类型、播放器贡献和插件类型的播放集能不能播都从这里来。插件管理面板（设置页和拓展页都有）分组和搜索，能启停、从压缩包安装（编号 2 的文件对话框）、确认后删除、编辑和重置清单声明的设置字段、打开插件目录；来源插件的扫码登录画二维码（`source_auth_page.rs`）。拓展页的 API Playground、文件导入、Eagle 导入是原生页面。见 `admin_plugin*.rs`、`admin_gap.rs`、`tool_native.rs`、`api_playground*.rs`。
-- **日志**：日志页按级别、来源和关键字筛选，可以暂停追踪、清空；页头、工具条和筛选固定，列表自己滚动（`route_home::home_fixed`、`admin_logs_view.rs`）。列表里是启动后经宿主事件收到的记录，历史日志见下文「接线缺口」。
+- **日志**：日志页按级别、来源和关键字筛选，可以暂停追踪、清空；页头、工具条和筛选固定，列表自己滚动（`route_home::home_fixed`、`admin_logs_view.rs`）。每次切到日志面板照 Vue 读最近 200 条历史日志（读的时候手上没有日志就写「正在加载系统日志」），之后经宿主事件合并新记录。
 - **任务**：侧栏底部的「任务」打开任务弹层（`admin_view.rs`），列出当前的仓库操作（如刷新文件夹树）和运行中的任务，运行中的任务见下文「接线缺口」。弹层里没有取消按钮，Vue 的 `TaskPopover.vue` 也没有；`ShellMessage::CancelTask` 有派发分支，没有发送方。
 - **宿主操作**：标题栏的最小化、最大化、关闭；关闭行为按设置确认、退出或最小化到托盘（`src-nana/src/window_host.rs`）；托盘在 Windows 上用 `tray-icon`（`src-nana/src/tray.rs`）；主窗口几何下次启动恢复；打开和定位启动系统程序；拖出文件在 Windows 上用 `drag` crate（`src-nana/src/drag_out.rs`）；剪贴板读写系统剪贴板（`src-nana/src/host_bridge.rs`）；文件区和空库页接收系统文件拖入（`input::accept_file_drops`）；Escape 由运行时交给激活的对话框，其余按 `escape_layer` 关最上面一层。
 
@@ -72,7 +72,6 @@ yarn tauri:dev               # Vue/Tauri 对照窗口，先构建、打包并暂
 
 归约和服务派发已经写好、但产品界面触发不到的路径：
 
-- 日志页不读历史日志，只有之后经宿主事件收到的记录。
 - 任务弹层和侧栏「任务」的计数读不到运行中的任务，弹层里只会出现仓库操作那一行。
 - 播放集下载（`momobako.playlist.download`）的消息在状态机里，没有界面入口。
 - 元数据的撤销和重做、文件的切换和范围选择、筛选的「任一满足」有归约分支，没有界面入口。
