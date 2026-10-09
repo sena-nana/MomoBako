@@ -69,6 +69,7 @@
 | `useSmartFolderSidebarUi.ts` 树替换 | 列表到达 | `list_smart_folders` | 仓库不匹配则忽略；先剪掉无效展开，再展开当前项的祖先 | “还没有智能文件夹。”或树 | 已测试（未离屏） |
 | `usePlaylistSidebarUi.ts` 选择 | 有仓库 id 且 id 非空 | `get_playlist_detail` | 面板 playlist；播放集从列表消失时清空当前项，若面板仍是 playlist 则回到 files | 分组默认收起，只留标题“播放集”和个数；展开后每行是名称和「播放器 · N 项」，右侧是播放和删除 | 已测试（未离屏） |
 | `usePlaylistSidebarUi.ts` 可播放 | 播放器类型读回（插件列表换新以后读，见阶段 6） | `list_playlist_players` | 行上有「播放播放集」，播放器类型在内置候选或已读到的播放器贡献里才可点（`player_view::playlist_plugin_missing`）；读回之前「新建播放集」不可用，读回后对话框默认选第一个类型 | 展开后每行右侧的播放按钮，不可播放时禁用 | 已测试（`data_load_tests.rs`，未离屏） |
+| `usePlaylistSidebarUi.ts` `submitPlaylistDialog` | 新建播放集对话框的「创建」或回车 | `create_playlist`，没有替身 | 名称为空或没有类型时不建；请求在途时「创建」和「取消」禁用、遮罩和 Escape 不关、再提交不重复建；成功才关对话框，换上整份列表并点开新建的那个；失败对话框留着，原因写在对话框里，不进状态区（Vue 的失败没有界面反馈） | 左下角“处理中...”；失败时对话框里红字写原因 | 已测试（`data_load_tests.rs`、`tests.rs`，未离屏） |
 | `PlaylistDetailLoaded` | 侧栏已绑定的仓库与详情仓库不同 | 丢弃 | 未绑定仓库时仍应用详情，避免旧页面测试失效 | 保持当前页 | 已测试（未离屏） |
 | `useRepositorySwitcherUi.ts` 打开与选择 | 点击仓库名 | `select_repository` 后重新绑定侧栏 | 已经是切换列表或正在提交时忽略；选择后关闭弹层并离开设置页 | “资源库 · 名称” | 已测试（未离屏） |
 | `useRepositorySwitcherUi.ts` 删除 | 有活动仓库且未提交 | 打开已有删除对话框 | 没有活动仓库或正在提交时忽略 | “删除当前资源库” | 已离屏（`repo-delete-dialog`） |

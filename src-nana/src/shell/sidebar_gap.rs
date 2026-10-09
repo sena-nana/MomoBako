@@ -252,7 +252,7 @@ pub fn dismiss_top(model: &mut super::super::ShellViewModel) -> bool {
         EscapeLayer::SmartDialog => {
             model.sidebar.close_smart_dialog();
         }
-        EscapeLayer::PlaylistDialog => model.playlist_dialog_open = false,
+        EscapeLayer::PlaylistDialog => model.close_playlist_dialog(),
         EscapeLayer::SourcePlaylist => {
             model.reduce(super::super::ShellMessage::Input(super::super::input::InputMessage::CloseSourcePlaylist));
         }

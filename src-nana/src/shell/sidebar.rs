@@ -187,6 +187,8 @@ pub enum SidebarEffect {
     UpdateSmartFolder { repo_id: String },
     DeleteSmartFolder { repo_id: String, smart_folder_id: String },
     DeletePlaylist { repo_id: String, playlist_id: String },
+    /// 新建播放集对话框的「创建」。结果回 `ShellMessage::PlaylistCreated`。
+    CreatePlaylist { repo_id: String, name: String, player_type_id: String },
     /// `config` 是后端表单的 `backendConfig`；Eagle 这类只给目录的来源为 `None`。
     CreateBackendRepository { name: String, path: String, plugin_id: String, config: Option<serde_json::Value> },
     ClearRecent { repo_id: String },

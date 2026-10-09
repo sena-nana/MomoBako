@@ -293,7 +293,14 @@ fn a_created_playlist_is_listed_and_opened() {
 
     model.reduce(ShellMessage::NewPlaylistNameChanged("早晨".into()));
     model.reduce(ShellMessage::CreatePlaylist);
-    model.reduce(ShellMessage::PlaylistsLoaded { repo_id: REPO.into(), result: Ok(vec![playlist("pl-new")]), open: Some("pl-new".into()) });
+    assert!(model
+        .sidebar
+        .take_effects()
+        .iter()
+        .any(|effect| matches!(effect, SidebarEffect::CreatePlaylist { repo_id, name, .. } if repo_id == REPO && name == "早晨")));
+    assert!(model.playlist_dialog_open, "创建结果回来以前对话框留着");
+    model.reduce(ShellMessage::PlaylistCreated { repo_id: REPO.into(), result: Ok((vec![playlist("pl-new")], Some("pl-new".into()))) });
+    assert!(!model.playlist_dialog_open && !model.playlist_creating, "创建成功才关");
     assert_eq!(model.sidebar.playlists.iter().map(|item| item.id.as_str()).collect::<Vec<_>>(), ["pl-new"]);
     assert_eq!(model.player.playlists.len(), 1);
     assert_eq!(model.workspace.panel, WorkspacePanel::Playlist, "新建以后点开它");
@@ -303,13 +310,46 @@ fn a_created_playlist_is_listed_and_opened() {
         .iter()
         .any(|effect| matches!(effect, SidebarEffect::LoadPlaylistDetail { playlist_id, .. } if playlist_id == "pl-new")));
 
-    model.reduce(ShellMessage::PlaylistsLoaded { repo_id: REPO.into(), result: Ok(Vec::new()), open: None });
+    model.reduce(ShellMessage::PlaylistsLoaded { repo_id: REPO.into(), result: Ok(Vec::new()) });
     assert!(model.sidebar.playlists.is_empty());
     assert!(model.sidebar.active_playlist_id.is_none());
     assert_eq!(model.workspace.panel, WorkspacePanel::Files, "点开的播放集删掉以后回到文件面板");
 
-    model.reduce(ShellMessage::PlaylistsLoaded { repo_id: REPO.into(), result: Err("磁盘已满".into()), open: None });
+    model.reduce(ShellMessage::PlaylistsLoaded { repo_id: REPO.into(), result: Err("磁盘已满".into()) });
     assert_eq!(model.status.failure().map(|failure| failure.message.as_str()), Some("播放集操作失败：磁盘已满"));
+}
+
+/// 新建播放集失败：对话框留着，原因写在对话框里，不进状态区；处理中点取消、遮罩或 Escape 都不关，
+/// 失败以后可以改了再建，也可以取消。
+#[test]
+fn a_failed_playlist_creation_keeps_the_dialog_with_the_error() {
+    use crate::shell::view_part_overlay::OverlayKey;
+    let mut model = started(REPO);
+    model.reduce(ShellMessage::PlaylistPlayersLoaded(Ok(vec![audio_player()])));
+    model.reduce(ShellMessage::OpenPlaylistDialog);
+    model.reduce(ShellMessage::NewPlaylistNameChanged("早晨".into()));
+    model.reduce(ShellMessage::CreatePlaylist);
+    model.sidebar.take_effects();
+
+    model.reduce(ShellMessage::ClosePlaylistDialog);
+    model.reduce(ShellMessage::Sidebar(SidebarMessage::Gap(crate::shell::GapMessage::Escape)));
+    assert!(model.playlist_dialog_open, "处理中不能关");
+    model.reduce(ShellMessage::CreatePlaylist);
+    assert!(model.sidebar.take_effects().is_empty(), "处理中不重复提交");
+
+    model.reduce(ShellMessage::PlaylistCreated { repo_id: REPO.into(), result: Err("磁盘已满".into()) });
+    assert!(model.playlist_dialog_open && !model.playlist_creating, "失败时对话框留着");
+    assert_eq!(model.playlist_dialog_error, "磁盘已满");
+    assert!(model.status.failure().is_none(), "失败写在对话框里，不进状态区");
+    assert_eq!(OverlayKey::of(&model), Some(OverlayKey::PlaylistCreate));
+
+    model.reduce(ShellMessage::CreatePlaylist);
+    assert!(model.playlist_dialog_error.is_empty(), "再次提交时清掉上一次的原因");
+    model.reduce(ShellMessage::PlaylistCreated { repo_id: REPO.into(), result: Err("磁盘已满".into()) });
+    model.reduce(ShellMessage::ClosePlaylistDialog);
+    assert!(!model.playlist_dialog_open, "失败以后可以取消");
+    model.reduce(ShellMessage::OpenPlaylistDialog);
+    assert!(model.playlist_dialog_error.is_empty(), "重新打开时不带上一次的原因");
 }
 
 /// 启动时恢复存下的播放会话：播放集列表和播放器类型都读回以后才读它的详情。

@@ -254,6 +254,10 @@ pub(crate) struct PlaylistCreateView {
     pub selected: Option<String>,
     /// 名称为空或没有选类型时「创建」不可用。
     pub blocked: bool,
+    /// 新建请求在途：「创建」不可用，对话框处理中不能关，左下角写「处理中...」。
+    pub creating: bool,
+    /// 新建失败的原因，没有时为空。
+    pub error: String,
 }
 
 impl PlaylistCreateView {
@@ -270,6 +274,8 @@ impl PlaylistCreateView {
                 .collect(),
             blocked: model.new_playlist_name.trim().is_empty() || selected.is_none(),
             selected,
+            creating: model.playlist_creating,
+            error: model.playlist_dialog_error.clone(),
         })
     }
 }
@@ -298,15 +304,18 @@ pub fn playlist_create_dialog(model: &ShellViewModel) -> Option<AnyView> {
             false,
             ShellMessage::SelectPlaylistPlayer,
         ),
+        error_line(move || view.with(|view| view.error.clone()), "playlist-dialog-error"),
     ));
+    let creating = move || view.with(|view| view.creating);
     let buttons = vec![
-        action("取消", ButtonKind::Ghost, false, "playlist-dialog-cancel", || ShellMessage::ClosePlaylistDialog),
-        action("创建", ButtonKind::Primary, move || view.with(|view| view.blocked), "create-playlist", || ShellMessage::CreatePlaylist),
+        action("取消", ButtonKind::Ghost, creating, "playlist-dialog-cancel", || ShellMessage::ClosePlaylistDialog),
+        action("创建", ButtonKind::Primary, move || view.with(|view| view.blocked || view.creating), "create-playlist", || ShellMessage::CreatePlaylist),
     ];
     Some(
         DialogFrame::new("playlist-dialog", || "新建播放集".to_string(), || ShellMessage::ClosePlaylistDialog)
             .size(MODAL_CARD)
-            .dialog(body, footer(None, buttons)),
+            .busy(creating)
+            .dialog(body, footer(Some(busy_note(creating, "playlist-dialog-busy")), buttons)),
     )
 }
 
