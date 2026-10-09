@@ -14,6 +14,17 @@ use super::{MainRegion, ShellViewModel};
 pub(super) fn page(model: &ShellViewModel, body: AnyView) -> AnyView {
     let filter = (model.workspace.main_region() == MainRegion::HasRepository && model.inspect.filter_bar_open)
         .then(|| super::inspect_search_view::filter_bar(model));
+    frame(filter, body)
+}
+
+/// 常驻路由的首页：外框里一个纵向滚动的主体，滚动容器用固定键，只建一次，偏移自然留着。
+/// 缺失仓库和空库区域本来就不显示筛选栏，也不跟随日志末尾，和 [`page`] 加 [`scroll_body`] 建出的一样。
+pub(super) fn resident_page(panel: AnyView, scroll_key: &'static str) -> AnyView {
+    let body = widget(scroll_view().follow_end(false)).children((panel,)).key(scroll_key).into_any();
+    frame(None, body)
+}
+
+fn frame(filter: Option<AnyView>, body: AnyView) -> AnyView {
     widget(
         Stack::fill_column(0.0)
             .min_height(LengthSpec::Px(0.0))

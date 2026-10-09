@@ -20,7 +20,7 @@
 | 块 | 模块 | 切换 | 现状 |
 | --- | --- | --- | --- |
 | 侧栏 | `view_part_sidebar.rs`，投影在 `sidebar_project.rs` | 无 | 常驻：`SidebarSignals`（几个信号加播放集、文件夹树、智能文件夹树三份 Store）建在骨架作用域里，同步只写变了的；排法变了（收起再展开）才整块重挂 |
-| 主区 | `view_part_primary.rs`，路由在 `route_*.rs` | `dynamic(RouteSlot)`，按 `RouteKey` | 启动页常驻；其余路由的分支整块重挂 |
+| 主区 | `view_part_primary.rs`，路由在 `route_*.rs` | `dynamic(RouteSlot)`，按 `RouteKey` | 启动页、缺失仓库页、空库页常驻；其余路由的分支整块重挂 |
 | 浮层 | `view_part_overlay.rs` | 按 `OverlayKey` 换整块 | 各浮层整块重挂；没有浮层时槽位为空 |
 
 并行改区域时各改各的文件：
