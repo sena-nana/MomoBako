@@ -887,3 +887,5 @@ pub use render::mount_shell;
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+pub(crate) mod view_harness;
