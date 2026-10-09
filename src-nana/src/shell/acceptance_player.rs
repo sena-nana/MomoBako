@@ -1,9 +1,14 @@
 //! 预览与播放的对照场景：播放集页、底部播放条、当前队列和预览页。
 //!
 //! 场景名和 `tmp/vue-mock/scenes/player.ts` 同名，数据和 Vue 夹具保持一致：
-//! 演示播放列表、两首 `music/track-0N.mp3`、三个官方播放器贡献，侧栏播放集默认收起。
+//! 演示播放列表、两首 `music/track-0N.mp3`、内置插件清单登记的播放器，侧栏播放集默认收起。
+//! 工作区从 `acceptance_base.rs` 的共用底子起步，播放集也经侧栏的读取结果进来。
 //! 15 页里的「播放集」「播放中」也由这里填数据，状态都走产品归约，不手写会话字段。
 //! 预览场景的文件字节（`preview_fixtures/cover.png`、`audio_fixtures/tone.mp3`、文本）和 Vue 夹具逐字节相同。
+
+use std::collections::BTreeMap;
+
+use serde_json::Value;
 
 use crate::backend::services::repository::{
     AssetDetail, AssetSummary, FilePreviewSourceResponse, MetadataEntry, PlaylistDetail, PlaylistItem,
@@ -13,12 +18,10 @@ use crate::backend::services::repository::{
 use super::super::inspect::InspectMessage;
 use super::super::player::{PlayerEffect, PlayerMessage};
 use super::super::InspectEffect;
-use super::super::sidebar::{ShortcutAsset, SidebarPlaylist};
-use super::super::{ShellMessage, ShellPage, ShellViewModel, WorkspacePanel};
-use super::REPO_ID;
+use super::super::{ShellMessage, ShellPage, ShellViewModel, SidebarMessage};
+use super::base_scene::{playlist_players, tagged_file, Base, NOW, REPO_ID};
 
 const PLAYLIST_ID: &str = "playlist-demo";
-const NOW: &str = "2026-10-08T08:00:00Z";
 /// 文本预览的内容。Vue 场景的 `SETTINGS_JSON` 是同一段。
 const TEXT_FIXTURE: &str = "{\n  \"name\": \"MomoBako\",\n  \"theme\": \"light\",\n  \"corners\": \"smooth\"\n}\n";
 /// 图片预览的字节。Vue 场景的 `COVER_PNG` 解出来是同一份。
@@ -46,7 +49,7 @@ pub(super) fn models() -> Vec<(&'static str, ShellViewModel)> {
 
 /// 15 页的播放集：点开了演示播放列表，详情还在读取，主区停在「选择一个播放集」。
 pub(super) fn seed_playlists(model: &mut ShellViewModel) {
-    load_official_players(model);
+    demo_base().seed(model);
     // Vue 在打开新建对话框时才选默认播放器类型，页面上还没有选中值。
     model.selected_new_playlist_player_type_id = None;
     open_playlist(model, &demo_summary(), None);
@@ -55,7 +58,7 @@ pub(super) fn seed_playlists(model: &mut ShellViewModel) {
 /// 15 页的播放中：点开演示播放列表后双击第一条。`audio` 类型没有播放插件，
 /// 会话停在「缺少对应播放插件」，播放意图仍在，和 Vue 的 `isPlaying` 一致。
 pub(super) fn seed_playback(model: &mut ShellViewModel) {
-    load_official_players(model);
+    demo_base().seed(model);
     open_playlist(model, &demo_summary(), Some(demo_items()));
     play_first(model);
     model.page = ShellPage::PlaybackRunning;
@@ -63,10 +66,15 @@ pub(super) fn seed_playback(model: &mut ShellViewModel) {
 
 /// 只点开播放集，不开始播放。页面身份记成「播放中」，离屏验收按它找标题「演示播放列表」。
 fn playlist_open_scene() -> ShellViewModel {
-    let mut model = ShellViewModel::for_page(ShellPage::Playlists);
+    let mut model = demo_base().model();
     open_playlist(&mut model, &demo_summary(), Some(demo_items()));
     model.page = ShellPage::PlaybackRunning;
     model
+}
+
+/// Vue `playlistOpen()` 的底子：`base()` 加上演示播放列表。
+fn demo_base() -> Base {
+    Base { playlists: vec![demo_summary()], ..Base::default() }
 }
 
 /// 播放中打开当前队列浮层。
@@ -88,7 +96,9 @@ fn still_playback_scene() -> ShellViewModel {
         item_count: 1,
         ..demo_summary()
     };
-    single_item_playback(summary, "media/missing.png")
+    let mut model = single_item_playback(summary, "media/missing.png", playlist_players());
+    fail_pending_loads(&mut model);
+    model
 }
 
 /// 外部播放器贡献的 wma。Nana 没有对应运行时，播放条写明不支持，不编造时长。
@@ -101,24 +111,16 @@ fn outside_playback_scene() -> ShellViewModel {
         item_count: 1,
         ..demo_summary()
     };
-    let mut model = ShellViewModel::for_page(ShellPage::Playlists);
-    let mut players = official_players();
+    let mut players = playlist_players();
     players.push(foreign_player());
-    model.reduce(ShellMessage::PlaylistPlayersLoaded(Ok(players)));
-    open_playlist(&mut model, &summary, Some(vec![item(0, "media/voice.wma")]));
-    play_first(&mut model);
-    model.page = ShellPage::PlaybackRunning;
-    model
+    single_item_playback(summary, "media/voice.wma", players)
 }
 
-/// 只有一个条目的播放集，点开后播放第一条。验收仓库里没有这个文件，读取请求按仓库服务的
-/// 读失败送回，和 Vue 场景里准备播放源失败一致。
-fn single_item_playback(summary: PlaylistSummary, path: &str) -> ShellViewModel {
-    let mut model = ShellViewModel::for_page(ShellPage::Playlists);
-    load_official_players(&mut model);
+/// Vue `singleItemPlayback`：只有一个条目的播放集，点开后按页眉的「播放」从第一条开始。
+fn single_item_playback(summary: PlaylistSummary, path: &str, players: Vec<PlaylistPlayerContribution>) -> ShellViewModel {
+    let mut model = Base { playlists: vec![summary.clone()], players, ..Base::default() }.model();
     open_playlist(&mut model, &summary, Some(vec![item(0, path)]));
     play_first(&mut model);
-    fail_pending_loads(&mut model);
     model.page = ShellPage::PlaybackRunning;
     model
 }
@@ -137,23 +139,16 @@ fn fail_pending_loads(model: &mut ShellViewModel) {
     model.player.requeue_effects(kept);
 }
 
-/// 侧栏登记播放集并点开它；`items` 为空时详情还没回来。
+/// 点开侧栏里的播放集（Vue 侧栏的播放集默认收起，点的是收起态里那颗按钮），再按夹具送回详情；
+/// `items` 为空时详情还没回来。
 fn open_playlist(model: &mut ShellViewModel, summary: &PlaylistSummary, items: Option<Vec<PlaylistItem>>) {
-    model.sidebar.playlists = vec![SidebarPlaylist {
-        id: summary.playlist_id.clone(),
-        name: summary.name.clone(),
-        player_label: summary.player_label.clone(),
-        player_type_id: summary.player_type_id.clone(),
-        item_count: summary.item_count,
-    }];
-    // Vue 侧栏的播放集默认收起，点的是收起态里那颗按钮。
-    model.sidebar.playlists_expanded = false;
-    if !model.sidebar.select_playlist(&mut model.workspace, &summary.playlist_id) {
+    model.reduce(ShellMessage::Sidebar(SidebarMessage::OpenSidebarPlaylist(summary.playlist_id.clone())));
+    if model.sidebar.active_playlist_id.as_deref() != Some(summary.playlist_id.as_str()) {
         eprintln!("Nana 验收场景没有活动仓库，播放集未打开：{}", summary.playlist_id);
         return;
     }
-    model.reduce(ShellMessage::SelectPlaylist(summary.playlist_id.clone()));
-    model.workspace.panel = WorkspacePanel::Playlist;
+    // 详情请求在这里按夹具回答，宿主不会再派发。
+    model.sidebar.take_effects();
     if let Some(items) = items {
         let detail = PlaylistDetail { playlist: summary.clone(), items };
         model.reduce(ShellMessage::PlaylistDetailLoaded(Ok(detail)));
@@ -170,37 +165,17 @@ fn play_first(model: &mut ShellViewModel) {
     model.reduce(ShellMessage::Player(PlayerMessage::PlayListed { item_id: Some(first) }));
 }
 
-/// 三个官方插件登记的播放器：音频顺序播放、图片幻灯片、视频顺序播放。
-fn load_official_players(model: &mut ShellViewModel) {
-    model.reduce(ShellMessage::PlaylistPlayersLoaded(Ok(official_players())));
-}
-
-fn official_players() -> Vec<PlaylistPlayerContribution> {
-    let audio = ["mp3", "wav", "ogg", "flac", "m4a", "aac", "opus"];
-    let image = ["png", "jpg", "jpeg", "webp", "gif", "bmp", "avif", "svg"];
-    let video = ["mp4", "mov", "mkv", "webm", "avi", "m4v"];
-    vec![
-        contribution("momobako.playlist.audio-sequence", "音频顺序播放", "audio", &audio, true),
-        contribution("momobako.playlist.image-slideshow", "图片幻灯片", "image", &image, false),
-        contribution("momobako.playlist.video-sequence", "视频顺序播放", "video", &video, true),
-    ]
-}
-
 const FOREIGN_TYPE: &str = "momobako.playlist.foreign";
 
 /// 第三方插件登记的 wma 播放器。Vue 场景用同一份清单挂一个测试插件。
 fn foreign_player() -> PlaylistPlayerContribution {
-    contribution(FOREIGN_TYPE, "外部条目", "audio", &["wma"], false)
-}
-
-fn contribution(player_type_id: &str, label: &str, file_class: &str, extensions: &[&str], media: bool) -> PlaylistPlayerContribution {
     PlaylistPlayerContribution {
-        player_type_id: player_type_id.into(),
-        label: label.into(),
-        file_class: file_class.into(),
-        supported_extensions: extensions.iter().map(|extension| (*extension).to_string()).collect(),
-        supports_seek: media,
-        supports_volume: media,
+        player_type_id: FOREIGN_TYPE.into(),
+        label: "外部条目".into(),
+        file_class: "audio".into(),
+        supported_extensions: vec!["wma".into()],
+        supports_seek: false,
+        supports_volume: false,
         supports_preview_navigation: true,
         description: None,
     }
@@ -255,7 +230,6 @@ fn item(index: usize, path: &str) -> PlaylistItem {
 /// 页位图走宿主纹理槽，离屏会话没有 `Application::prepare` 上传，这里不挂空纹理。
 fn live_preview_scene() -> ShellViewModel {
     let mut model = ShellViewModel::for_page(ShellPage::SelectedFile);
-    super::seed_browser(&mut model);
     model.files.display_mode = super::super::files::DisplayMode::List;
     let path = "notes/page.pdf";
     model.inspect.begin_selection(path);
@@ -284,38 +258,24 @@ fn live_preview_scene() -> ShellViewModel {
 fn live_asmr_scene() -> ShellViewModel {
     let metadata = [("libraryKind", "asmr"), ("asmrEntryKind", "audio")];
     let mut model = preview_scene_with("voice.mp3", TONE_MP3.len() as i64, &metadata);
-    load_official_players(&mut model);
     answer_media(&mut model);
     model
 }
 
-/// 预览场景的起点：Vue `base()` 的根目录（缺的文件补一行），像双击一样选中它并读回素材详情。
-/// 之后的读取请求由各场景用夹具字节回答，和宿主派发后送回的消息一样走产品归约。
+/// 预览场景的起点：Vue `previewScene` 在 `base()` 的根目录里补上这个文件（仓库摘要的素材跟着多一条），
+/// 像双击一样选中它并读回素材详情。之后的读取请求由各场景用夹具字节回答，和宿主派发后送回的消息一样走产品归约。
 fn preview_scene(path: &str, size_bytes: i64) -> ShellViewModel {
     preview_scene_with(path, size_bytes, &[])
 }
 
-/// 同上，文件行和素材详情都带上给定的文本元数据（Vue 夹具里条目的 `metadata`）。
+/// 同上，文件条目和素材详情都带上给定的文本元数据（Vue 夹具里条目的 `metadata`）。
 fn preview_scene_with(path: &str, size_bytes: i64, metadata: &[(&str, &str)]) -> ShellViewModel {
-    let mut model = ShellViewModel::for_page(ShellPage::FileList);
-    super::seed_browser(&mut model);
-    if !model.files.rows.iter().any(|row| row.path == path) {
-        let mut row = super::file_row(path, "file");
-        for (key, value) in metadata {
-            row.metadata.insert((*key).into(), serde_json::Value::String((*value).into()));
-        }
-        model.files.rows.push(row);
-        model.files.total_entries = model.files.rows.len();
+    let mut base = Base::default();
+    if !base.entries.iter().any(|entry| entry.path == path) {
+        let metadata = metadata.iter().map(|(key, value)| ((*key).to_string(), Value::String((*value).into()))).collect::<BTreeMap<_, _>>();
+        base.entries.push(tagged_file(path, size_bytes, &[], metadata));
     }
-    // 侧栏快捷方式的计数跟着根目录的文件走，和 Vue 夹具里的素材数一致。
-    let assets = model
-        .files
-        .rows
-        .iter()
-        .filter(|row| row.kind == "file")
-        .map(|row| ShortcutAsset { path: row.path.clone(), untagged: row.tags.is_empty(), accessed: false, deleted: false })
-        .collect::<Vec<_>>();
-    model.sidebar.apply_snapshot(&assets, 0, Vec::new());
+    let mut model = base.model();
     let asset_id = path.replace('/', "-");
     let mut detail = preview_detail(path, size_bytes);
     detail.metadata = metadata
@@ -417,7 +377,6 @@ fn preview_image_scene() -> ShellViewModel {
 /// 截图停在 0:00 暂停，和 Vue 场景截图前把播放暂停到开头一致。
 fn preview_audio_scene() -> ShellViewModel {
     let mut model = preview_scene("track-01.mp3", TONE_MP3.len() as i64);
-    load_official_players(&mut model);
     answer_media(&mut model);
     model
 }
@@ -427,7 +386,6 @@ fn preview_audio_scene() -> ShellViewModel {
 fn preview_audio_failed_scene() -> ShellViewModel {
     const BROKEN_AUDIO: &[u8] = b"not an audio container";
     let mut model = preview_scene("voice.opus", BROKEN_AUDIO.len() as i64);
-    load_official_players(&mut model);
     let request = take_effect(&mut model, |effect| match effect {
         InspectEffect::LoadMedia { path, generation, .. } => Some((path, generation)),
         _ => None,
