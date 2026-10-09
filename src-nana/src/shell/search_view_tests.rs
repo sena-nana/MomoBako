@@ -141,10 +141,12 @@ fn clicking_chips_and_submitting_inputs_drive_the_search() {
     session.type_text("青色").expect("输入颜色");
     pump(&mut session, &mut model, "输入颜色");
     assert_eq!(model.inspect.search_ui.draft.color, "青色");
-    // 临时做法：mount_shell 现在每次更新整棵重挂，焦点会丢，回车前先重新点一次输入框。
-    // 修复在 render.rs 的 mount_shell（按键路径恢复焦点），合并后改成断言焦点自动恢复。
+    // mount_shell 重挂后按键路径恢复焦点，回车直接落在颜色输入框上。
     let color = node_id(&session, "输入文件颜色", "text-input");
-    assert!(session.click_node(color).expect("重新点颜色输入"));
+    assert!(
+        session.accessibility_dump().iter().any(|node| node.id == color && node.focused),
+        "重挂后颜色输入框应保持焦点"
+    );
     session.key_press("Enter", "Enter", Default::default()).expect("回车提交");
     pump(&mut session, &mut model, "回车提交");
     assert_eq!(model.inspect.filters.colors, ["青色"], "回车按「添加」提交颜色");
