@@ -346,23 +346,22 @@ fn special_models() -> Vec<(&'static str, ShellViewModel)> {
     // 设置保存被拒：状态区写出原因。
     let mut disabled = ShellViewModel::for_page(ShellPage::SettingsError);
     disabled.reduce(ShellMessage::SettingsSaved(Err("保存操作暂不可用".into())));
+    // 任务页自带的「扫描默认资源库」留在第一行，后面再跟 11 个运行中的任务，一共 12 行。
     let mut dense = ShellViewModel::for_page(ShellPage::TaskRunning);
-    dense.reduce(ShellMessage::TaskProgressLoaded(
-        (0..12u8)
-            .map(|i| TaskProgressSnapshot {
-                task_id: format!("task-{i:02}"),
-                protocol_id: "momobako.repository.sync".into(),
-                status: "running".into(),
-                phase: None,
-                label: Some(format!("扫描分区 {i:02}")),
-                current: None,
-                total: None,
-                percent: Some(f32::from(i) * 8.0),
-                error: None,
-                updated_at: i.to_string(),
-            })
-            .collect(),
-    ));
+    let mut tasks = dense.task_progress.clone();
+    tasks.extend((1..12u8).map(|i| TaskProgressSnapshot {
+        task_id: format!("task-{i:02}"),
+        protocol_id: "momobako.repository.sync".into(),
+        status: "running".into(),
+        phase: None,
+        label: Some(format!("扫描分区 {i:02}")),
+        current: None,
+        total: None,
+        percent: Some(f32::from(i) * 8.0),
+        error: None,
+        updated_at: "0".into(),
+    }));
+    dense.reduce(ShellMessage::TaskProgressLoaded(tasks));
     let mut scenes = vec![
         ("long-content", long),
         ("empty-list", empty),

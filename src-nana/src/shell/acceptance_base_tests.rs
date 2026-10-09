@@ -21,7 +21,8 @@ fn counts(model: &ShellViewModel) -> [usize; 5] {
     [counts.all, counts.uncategorized, counts.untagged, counts.recent, counts.trash]
 }
 
-/// 底子本身：启动走完、活动仓库是夹具仓库、目录树 assets → covers、根目录三条，启动结束时读到的插件清单在。
+/// 底子本身：启动走完、活动仓库是夹具仓库、目录树 assets → covers、根目录三条，启动结束时读到的插件清单在
+/// （设置读取失败的场景除外）。
 fn assert_base(name: &str, model: &mut ShellViewModel) {
     assert_eq!(model.workspace.startup.status, StartupStatus::Ready, "{name} 的启动没走完");
     assert_eq!(model.workspace.active_repo_id.as_deref(), Some(REPO_ID), "{name} 的活动仓库不对");
@@ -30,7 +31,9 @@ fn assert_base(name: &str, model: &mut ShellViewModel) {
     assert_eq!(tree, [("assets", 1)], "{name} 的目录树应是 assets → covers");
     let rows = model.files.rows.iter().map(|row| row.path.as_str()).collect::<Vec<_>>();
     assert_eq!(rows, ["assets", "cover.png", "notes/page.pdf"], "{name} 的根目录条目不对");
-    assert!(!model.admin.plugins.is_empty(), "{name} 应读到启动结束时的插件清单");
+    // Vue `settings-error` 场景的 `list_plugins` 一直失败，启动结束时也读不到插件。
+    let plugins_expected = name != "SettingsError";
+    assert_eq!(!model.admin.plugins.is_empty(), plugins_expected, "{name} 启动结束时读到的插件清单不对");
     assert!(!model.admin.loading_settings, "{name} 的设置包读取应已答完");
     assert!(model.workspace.take_effects().is_empty(), "{name} 的启动请求应已按夹具答完");
 }

@@ -15,7 +15,7 @@ use crate::backend::services::repository::{
 use super::super::admin::{AdminMessage, SourceStep};
 use super::super::{ShellMessage, ShellPage, ShellViewModel, WorkspacePanel};
 use super::base_scene::{summary, Base, NOW, REPO_ID, REPO_NAME};
-use super::plugin_fixtures::{api_design, bundle_loaded, bundled_plugins, cache_snapshot, external_status, players_of};
+use super::plugin_fixtures::{bundle_failed, bundle_loaded, bundled_plugins, players_of};
 use super::seed_base;
 /// 设置数据读取失败时 `list_plugins` 的报错，和 Vue 场景 `settings-error` 一致。
 pub(super) const LOAD_ERROR: &str = "读取插件目录失败：拒绝访问。 (os error 5)";
@@ -46,17 +46,12 @@ pub(super) fn seed_settings(model: &mut ShellViewModel) {
     load_bundle(model, bundled_plugins(|_| true));
 }
 
-/// `settings-error`：设置页数据读取失败。Vue 的 `Promise.all` 整批失败，其它四份应答照常返回但不写入。
+/// `settings-error`：设置页数据读取失败。Vue 场景让 `list_plugins` 一直失败：启动结束那次和打开设置页
+/// 那次都读不到，`Promise.all` 整批失败，其它四份应答照常返回但不写入，所以手上一直没有插件。
 pub(super) fn seed_settings_error(model: &mut ShellViewModel) {
-    seed_base(model);
+    Base { plugins_error: Some(LOAD_ERROR), ..Base::default() }.seed(model);
     model.admin.note_backends(&[local_summary()]);
-    model.reduce(ShellMessage::Admin(AdminMessage::SettingsBundleLoaded {
-        plugins: Err(LOAD_ERROR.into()),
-        hooks: Ok(Vec::new()),
-        cache: Ok(cache_snapshot()),
-        api: Ok(api_design()),
-        external: Ok(external_status()),
-    }));
+    model.reduce(ShellMessage::Admin(bundle_failed(LOAD_ERROR)));
     model.admin.take_effects();
 }
 
