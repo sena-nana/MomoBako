@@ -26,6 +26,9 @@ pub fn dispatch_sidebar_effects(app: &mut MomoBakoApplication, context: &Runtime
                 dispatch_delete_smart(app, context, repo_id, smart_folder_id);
             }
             SidebarEffect::DeletePlaylist { repo_id, playlist_id } => dispatch_delete_playlist(app, context, repo_id, playlist_id),
+            SidebarEffect::CreatePlaylist { repo_id, name, player_type_id } => {
+                dispatch_create_playlist(app, context, repo_id, name, player_type_id);
+            }
             SidebarEffect::CreateBackendRepository { name, path, plugin_id, config } => {
                 dispatch_create_backend(app, context, name, path, plugin_id, config);
             }
@@ -219,7 +222,7 @@ fn dispatch_delete_playlist(
 ) {
     let Some(services) = services(app) else {
         eprintln!("Nana 移除播放集需要领域服务，当前服务未启动");
-        app.shell.reduce(ShellMessage::PlaylistsLoaded { repo_id, result: Err("领域服务未启动".into()), open: None });
+        app.shell.reduce(ShellMessage::PlaylistsLoaded { repo_id, result: Err("领域服务未启动".into()) });
         return;
     };
     let interaction = services.repository_interaction.clone();
@@ -227,10 +230,45 @@ fn dispatch_delete_playlist(
     let task_repo = repo_id.clone();
     if let Err(error) = context.run_task(Task::new(async move {
         let result = executor.block_on(interaction.delete_playlist(task_repo.clone(), playlist_id)).map(|response| response.playlists);
-        ShellMessage::PlaylistsLoaded { repo_id: task_repo, result, open: None }
+        ShellMessage::PlaylistsLoaded { repo_id: task_repo, result }
     })) {
         eprintln!("Nana 移除播放集任务提交失败：{error}");
-        app.shell.reduce(ShellMessage::PlaylistsLoaded { repo_id, result: Err(format!("移除播放集任务提交失败：{error}")), open: None });
+        app.shell.reduce(ShellMessage::PlaylistsLoaded { repo_id, result: Err(format!("移除播放集任务提交失败：{error}")) });
+    }
+}
+
+/// 新建播放集。成功时带上整份列表和新播放集的编号，归约照 Vue `createPlaylistInWorkspace` 接着点开它；
+/// 服务没起来或任务提交失败时当场按失败写回，对话框不会停在处理中。
+fn dispatch_create_playlist(
+    app: &mut MomoBakoApplication,
+    context: &RuntimeProgramContext<ShellMessage>,
+    repo_id: String,
+    name: String,
+    player_type_id: String,
+) {
+    let Some(services) = services(app) else {
+        eprintln!("Nana 新建播放集需要领域服务，当前服务未启动");
+        app.shell.reduce(ShellMessage::PlaylistCreated { repo_id, result: Err("领域服务未启动".into()) });
+        return;
+    };
+    let interaction = services.repository_interaction.clone();
+    let executor = services.executor.clone();
+    let task_repo = repo_id.clone();
+    let request = crate::backend::services::repository::PlaylistMutationRequest {
+        repo_id: repo_id.clone(),
+        playlist_id: None,
+        name,
+        player_type_id,
+    };
+    if let Err(error) = context.run_task(Task::new(async move {
+        let result = executor.block_on(interaction.create_playlist(request)).map(|response| {
+            let open = response.playlist.as_ref().map(|playlist| playlist.playlist_id.clone());
+            (response.playlists, open)
+        });
+        ShellMessage::PlaylistCreated { repo_id: task_repo, result }
+    })) {
+        eprintln!("Nana 新建播放集任务提交失败：{error}");
+        app.shell.reduce(ShellMessage::PlaylistCreated { repo_id, result: Err(format!("新建播放集任务提交失败：{error}")) });
     }
 }
 

@@ -87,8 +87,10 @@ pub enum ShellMessage {
     PluginConfigLoaded(Result<PluginConfigSnapshot, String>),
     LogsLoaded(Result<SystemLogPage, String>),
     ClearLogs,
-    /// 新建或删除播放集以后这个仓库的整份播放集列表。`open` 是新建出来、要接着点开的播放集。
-    PlaylistsLoaded { repo_id: String, result: Result<Vec<PlaylistSummary>, String>, open: Option<String> },
+    /// 删除播放集以后这个仓库的整份播放集列表。
+    PlaylistsLoaded { repo_id: String, result: Result<Vec<PlaylistSummary>, String> },
+    /// 新建播放集的结果：成功时是整份列表和新建出来、要接着点开的播放集。
+    PlaylistCreated { repo_id: String, result: Result<(Vec<PlaylistSummary>, Option<String>), String> },
     PlaylistPlayersLoaded(Result<Vec<PlaylistPlayerContribution>, String>),
     NewPlaylistNameChanged(String),
     SelectPlaylistPlayer(String),
@@ -217,6 +219,10 @@ pub struct ShellViewModel {
     pub playlist_players: Vec<PlaylistPlayerContribution>,
     pub selected_new_playlist_player_type_id: Option<String>,
     pub playlist_dialog_open: bool,
+    /// 新建播放集的请求在途：对话框留着，「创建」禁用，处理中不能关（Vue 等 `createPlaylistInWorkspace` 返回才关）。
+    pub playlist_creating: bool,
+    /// 新建播放集失败的原因，写在对话框里；重新打开或再次提交时清掉。
+    pub playlist_dialog_error: String,
     pub playlist_item_ids: Vec<String>,
     pub playlist_item_status: String,
     /// 运行中的任务，任务弹层和侧栏「任务」的计数读它。
@@ -265,6 +271,8 @@ impl Default for ShellViewModel {
             playlist_players: Vec::new(),
             selected_new_playlist_player_type_id: None,
             playlist_dialog_open: false,
+            playlist_creating: false,
+            playlist_dialog_error: String::new(),
             playlist_item_ids: Vec::new(),
             playlist_item_status: String::new(),
             task_progress: Vec::new(),
@@ -517,13 +525,14 @@ impl ShellViewModel {
                 self.preview_token = Some(source.token);
                 self.preview_pixels = pixels.ok();
             }
-            ShellMessage::PlaylistsLoaded { repo_id, result: Ok(playlists), open } => {
-                self.apply_playlist_list(&repo_id, &playlists, open);
+            ShellMessage::PlaylistsLoaded { repo_id, result: Ok(playlists) } => {
+                self.apply_playlist_list(&repo_id, &playlists, None);
             }
             ShellMessage::PlaylistsLoaded { result: Err(error), .. } => {
-                eprintln!("Nana 播放集新建或删除失败：{error}");
+                eprintln!("Nana 播放集删除失败：{error}");
                 self.status.fail(status::FailureSource::Playlist, format!("播放集操作失败：{error}"));
             }
+            ShellMessage::PlaylistCreated { repo_id, result } => self.note_playlist_created(&repo_id, result),
             ShellMessage::PlaylistPlayersLoaded(Ok(mut players)) => {
                 // 照 Vue `listRegisteredPlaylistPlayers` 按名称的 zh-CN 顺序排，新建播放集默认选第一项。
                 players.sort_by(|left, right| {
@@ -547,18 +556,8 @@ impl ShellViewModel {
                 self.selected_new_playlist_player_type_id = Some(player_type_id);
             }
             ShellMessage::OpenPlaylistDialog => self.open_playlist_dialog(),
-            ShellMessage::ClosePlaylistDialog => {
-                self.playlist_dialog_open = false;
-            }
-            // 名称为空或没有选类型时「创建」禁用，回车提交也不建（Vue `playlistDialogDisabled`）；
-            // 提交由 `app_dispatch::dispatch_playlists` 按同样的条件发出。
-            ShellMessage::CreatePlaylist => {
-                if self.new_playlist_name.trim().is_empty() || self.selected_new_playlist_player_type_id.is_none() {
-                    eprintln!("Nana 新建播放集缺少名称或播放类型，不提交");
-                } else {
-                    self.playlist_dialog_open = false;
-                }
-            }
+            ShellMessage::ClosePlaylistDialog => self.close_playlist_dialog(),
+            ShellMessage::CreatePlaylist => self.submit_playlist_dialog(),
             ShellMessage::PlaylistDetailLoaded(Ok(detail)) => {
                 if self.sidebar.bound_repo_id().is_some_and(|repo_id| repo_id != detail.playlist.repo_id.as_str()) {
                     eprintln!("Nana 忽略过期的播放集详情：{}", detail.playlist.playlist_id);

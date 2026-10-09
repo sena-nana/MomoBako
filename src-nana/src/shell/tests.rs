@@ -10,20 +10,26 @@
         assert!(model.close_is_dirty());
     }
 
-    /// 和 Vue `playlistDialogDisabled` 一样，名称为空或没有选类型时提交（含回车）不建、对话框留着。
+    /// 和 Vue `playlistDialogDisabled` 一样，名称为空或没有选类型时提交（含回车）不建、对话框留着；
+    /// 能建时排下请求，对话框也留着，等结果回来再关（Vue `submitPlaylistDialog`）。
     #[test]
     fn playlist_creation_requires_name_and_player_type() {
+        let created = |model: &mut ShellViewModel| {
+            model.sidebar.take_effects().into_iter().filter(|effect| matches!(effect, super::SidebarEffect::CreatePlaylist { .. })).count()
+        };
         let mut model = ShellViewModel::for_page(ShellPage::Playlists);
-        model.playlist_dialog_open = true;
+        model.reduce(ShellMessage::OpenPlaylistDialog);
         model.selected_new_playlist_player_type_id = None;
         model.reduce(ShellMessage::CreatePlaylist);
         assert!(model.playlist_dialog_open, "名称为空不提交");
         model.reduce(ShellMessage::NewPlaylistNameChanged("我的列表".into()));
         model.reduce(ShellMessage::CreatePlaylist);
         assert!(model.playlist_dialog_open, "没有播放类型不提交");
+        assert_eq!(created(&mut model), 0);
         model.reduce(ShellMessage::SelectPlaylistPlayer("momobako.playlist.audio-sequence".into()));
         model.reduce(ShellMessage::CreatePlaylist);
-        assert!(!model.playlist_dialog_open);
+        assert_eq!(created(&mut model), 1);
+        assert!(model.playlist_dialog_open && model.playlist_creating, "等创建结果回来才关");
     }
 
     /// 设置页只有主题会写设置文件。读回和保存结果整份替换设置，缓存上限和关闭行为照旧留给缓存和关窗流程；

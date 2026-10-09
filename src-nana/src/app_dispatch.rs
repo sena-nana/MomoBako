@@ -1,6 +1,6 @@
 //! 按壳层消息派发领域服务任务。
 //!
-//! `MomoBakoApplication::update` 在归约之前调用 [`dispatch_services`]：播放集条目移除和新建、
+//! `MomoBakoApplication::update` 在归约之前调用 [`dispatch_services`]：播放集条目移除、
 //! 打开目录和读文件元数据这些消息各自提交一个后台任务，结果再作为新消息回到 `update`。页面数据的读取不在这里，
 //! 由归约排出副作用，再由各 `*_dispatch` 交给领域服务。
 
@@ -54,8 +54,7 @@ fn run(context: &RuntimeProgramContext<ShellMessage>, what: &str, task: Task<She
     }
 }
 
-/// 播放集页移除条目，以及新建播放集对话框的「创建」。新建成功后带上新播放集的编号，
-/// 归约照 Vue `createPlaylistInWorkspace` 接着点开它。
+/// 播放集页移除条目。
 fn dispatch_playlists(
     app: &MomoBakoApplication,
     message: &ShellMessage,
@@ -76,26 +75,6 @@ fn dispatch_playlists(
             ShellMessage::PlaylistDetailLoaded(
                 executor.block_on(interaction.remove_playlist_item(request)),
             )
-        }));
-    }
-    if matches!(message, ShellMessage::CreatePlaylist)
-        && let Some(repository_id) = app.shell.repository_id.clone()
-        && let Some(player_type_id) = app.shell.selected_new_playlist_player_type_id.clone()
-        && !app.shell.new_playlist_name.trim().is_empty()
-        && let Some(services) = app.services.as_ref()
-    {
-        let interaction = services.repository_interaction.clone();
-        let executor = services.executor.clone();
-        let request = crate::backend::services::repository::PlaylistMutationRequest {
-            repo_id: repository_id.clone(),
-            playlist_id: None,
-            name: app.shell.new_playlist_name.trim().to_string(),
-            player_type_id,
-        };
-        run(context, "播放列表创建", Task::new(async move {
-            let result = executor.block_on(interaction.create_playlist(request));
-            let open = result.as_ref().ok().and_then(|response| response.playlist.as_ref()).map(|playlist| playlist.playlist_id.clone());
-            ShellMessage::PlaylistsLoaded { repo_id: repository_id, result: result.map(|response| response.playlists), open }
         }));
     }
 }

@@ -139,7 +139,56 @@ impl ShellViewModel {
         }
         self.new_playlist_name.clear();
         self.selected_new_playlist_player_type_id = self.playlist_players.first().map(|player| player.player_type_id.clone());
+        self.playlist_dialog_error.clear();
         self.playlist_dialog_open = true;
+    }
+
+    /// 新建播放集的「取消」、遮罩和 Escape。请求在途时不关，和别的对话框「处理中不能关」一致。
+    pub(crate) fn close_playlist_dialog(&mut self) {
+        if self.playlist_creating {
+            eprintln!("Nana 新建播放集处理中，不能关闭对话框");
+            return;
+        }
+        self.playlist_dialog_open = false;
+        self.playlist_dialog_error.clear();
+    }
+
+    /// 新建播放集的「创建」和回车。名称为空或没有选类型时不建（Vue `playlistDialogDisabled`），
+    /// 请求在途时不重复提交；对话框等结果回来再关（Vue `submitPlaylistDialog` 等 `createPlaylistInWorkspace`）。
+    pub(crate) fn submit_playlist_dialog(&mut self) {
+        let name = self.new_playlist_name.trim().to_string();
+        let Some(player_type_id) = self.selected_new_playlist_player_type_id.clone().filter(|_| !name.is_empty()) else {
+            eprintln!("Nana 新建播放集缺少名称或播放类型，不提交");
+            return;
+        };
+        if self.playlist_creating {
+            eprintln!("Nana 新建播放集已在处理中，不重复提交");
+            return;
+        }
+        let Some(repo_id) = self.workspace.active_repo_id.clone() else {
+            eprintln!("Nana 新建播放集没有活动仓库");
+            return;
+        };
+        self.playlist_creating = true;
+        self.playlist_dialog_error.clear();
+        self.sidebar.effects.push(SidebarEffect::CreatePlaylist { repo_id, name, player_type_id });
+    }
+
+    /// 新建播放集的结果。成功关掉对话框、换上整份列表并照 Vue 接着点开新建的那个；失败留着对话框，
+    /// 原因写在对话框里（Vue 这里的失败没有界面反馈）。
+    pub(crate) fn note_playlist_created(&mut self, repo_id: &str, result: Result<(Vec<PlaylistSummary>, Option<String>), String>) {
+        self.playlist_creating = false;
+        match result {
+            Ok((playlists, open)) => {
+                self.playlist_dialog_open = false;
+                self.playlist_dialog_error.clear();
+                self.apply_playlist_list(repo_id, &playlists, open);
+            }
+            Err(error) => {
+                eprintln!("Nana 新建播放集失败：{error}");
+                self.playlist_dialog_error = error;
+            }
+        }
     }
 
     pub(crate) fn apply_snapshot_sidebar(&mut self, snapshot: &crate::backend::services::repository::RepositorySnapshot) {
