@@ -1,9 +1,7 @@
-//! 侧栏投影的回归：取值对、同一状态两次投影相等；哪些消息只改哪一块，和侧栏无关的消息一块都不改；
-//! 按键对照写 Store 列表时删、插、改、排都落到和新列表一样的结果。
+//! 侧栏投影的回归：取值对、同一状态两次投影相等；哪些消息只改哪一块，和侧栏无关的消息一块都不改。
+//! 按键对照写 Store 列表的回归在 `row_sync_tests.rs`。
 
-use nana_ui::runtime::view::{store, StorePath};
-
-use super::{sync_rows, FolderRow, FooterView, SidebarView};
+use super::{FolderRow, FooterView, SidebarView};
 use crate::shell::sidebar::SidebarTree;
 use crate::shell::{ShellMessage, ShellPage, ShellViewModel, SidebarMessage, ThumbnailFrame};
 use crate::backend::services::repository::FileTreeNode;
@@ -143,25 +141,3 @@ fn unrelated_messages_leave_the_projection_alone() {
     }
 }
 
-/// 删、插、改、排混在一起，写完的列表和新列表一样；新列表里重复的键只留第一行。
-#[test]
-fn sync_rows_matches_the_new_list() {
-    fn key(row: &(u32, &'static str)) -> u32 {
-        row.0
-    }
-    let list = store(vec![(1, "一"), (2, "二"), (3, "三"), (4, "四")]);
-    let cases: [Vec<(u32, &'static str)>; 5] = [
-        vec![(1, "一"), (5, "五"), (2, "二"), (3, "三"), (4, "四")],
-        vec![(1, "一"), (2, "贰"), (4, "四")],
-        vec![(4, "四"), (2, "贰"), (1, "一"), (6, "六")],
-        vec![(6, "六"), (6, "重复"), (1, "壹")],
-        Vec::new(),
-    ];
-    for rows in cases {
-        let mut expected = rows.clone();
-        let mut seen = std::collections::HashSet::new();
-        expected.retain(|row| seen.insert(row.0));
-        sync_rows(list, key, rows);
-        assert_eq!(list.get_untracked(), expected);
-    }
-}
