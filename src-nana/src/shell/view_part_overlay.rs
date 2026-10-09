@@ -213,7 +213,7 @@ pub(crate) struct OverlayPart {
 
 impl OverlayPart {
     /// 每帧收尾（和每次整体同步）调用：卸掉放完退场的块；现在这块照 ViewModel 该开着，宿主自己
-    /// 关掉了对话框时重新声明打开。卸不掉的块记日志，留到下一帧再试。
+    /// 关掉了对话框时重新声明打开。
     pub(crate) fn sweep(&mut self, context: &mut AppContext) {
         self.drop_settled(context);
         if let Some(current) = &mut self.current {
@@ -223,7 +223,8 @@ impl OverlayPart {
         }
     }
 
-    /// 卸掉放完退场的块：卸载把它们从浮层层里删掉，AppShell 跟着重新判断挡不挡点击。
+    /// 卸掉放完退场的块：卸载把它们从浮层层里删掉，AppShell 跟着重新判断挡不挡点击。卸载失败只记
+    /// 日志，这块不再留着。
     fn drop_settled(&mut self, context: &mut AppContext) {
         let mut index = 0;
         while index < self.leaving.len() {
