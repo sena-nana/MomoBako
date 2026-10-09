@@ -391,6 +391,39 @@ fn opening_the_logs_panel_reads_history() {
     assert_eq!(model.admin.logs.len(), 3, "读失败保留手上的日志");
 }
 
+/// 日志页「清空日志」：点下去以后按钮禁用并换成加载图标，只清空持久化文件；成功后照 Vue
+/// `clearSystemLogsInWorkspace` 直接把手上的日志清空，不再重读。失败时日志留着，原因写进状态区。
+#[test]
+fn clearing_logs_empties_the_list_without_reading_again() {
+    let mut model = started(REPO);
+    model.reduce(ShellMessage::SetWorkspacePanel(WorkspacePanel::Logs));
+    admin_effects(&mut model);
+    let records = vec![log_record("log-1", "2026-10-08T07:51:00Z"), log_record("log-2", "2026-10-08T07:52:00Z")];
+    model.reduce(ShellMessage::LogsLoaded(Ok(SystemLogPage { records, next_cursor: None })));
+    assert!(!LogsView::project(&model).toolbar.clear_disabled, "有日志时可以清空");
+
+    model.reduce(ShellMessage::ClearLogs);
+    assert!(matches!(admin_effects(&mut model).as_slice(), [AdminEffect::ClearLogs]), "只排下清空，不排读取");
+    let toolbar = LogsView::project(&model).toolbar;
+    assert!(toolbar.clear_disabled && toolbar.clearing, "清空中按钮禁用、换成加载图标");
+    model.reduce(ShellMessage::ClearLogs);
+    assert!(admin_effects(&mut model).is_empty(), "清空中再点不重复清空");
+
+    model.reduce(ShellMessage::Admin(AdminMessage::LogsCleared(Err("拒绝访问".into()))));
+    assert_eq!(model.admin.logs.len(), 2, "清空失败保留手上的日志");
+    assert_eq!(model.status.failure().map(|failure| failure.message.as_str()), Some("清空系统日志失败：拒绝访问"));
+    assert!(!LogsView::project(&model).toolbar.clearing);
+
+    model.reduce(ShellMessage::ClearLogs);
+    admin_effects(&mut model);
+    model.reduce(ShellMessage::Admin(AdminMessage::LogsCleared(Ok(()))));
+    assert!(model.admin.logs.is_empty(), "清空成功直接清掉列表");
+    assert!(admin_effects(&mut model).is_empty(), "清空成功不再读历史日志");
+    let view = LogsView::project(&model);
+    assert!(view.toolbar.clear_disabled, "没有日志时不能再清空");
+    assert_eq!(view.empty.map(|(title, _)| title), Some("还没有系统日志"));
+}
+
 /// 宿主观察到的运行中任务整份换上：任务弹层的行是仓库操作加这些任务，侧栏「任务」的计数是行数
 /// （Vue `activeTaskCount = tasks.length`）；任务结束后宿主交来空列表，计数回到只剩仓库操作。
 #[test]

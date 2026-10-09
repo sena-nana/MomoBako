@@ -81,8 +81,16 @@ fn consume_legacy(model: &mut ShellViewModel, message: ShellMessage) -> Option<S
             model.status.fail(FailureSource::Logs, format!("无法读取系统日志：{error}"));
             None
         }
-        // 清理请求由 `app_dispatch` 发出，结果回来以前日志页不变。
-        ShellMessage::ClearLogs => None,
+        // Vue `clearSystemLogsInWorkspace`：清空中按钮禁用，结果回来以前日志页不变。
+        ShellMessage::ClearLogs => {
+            if model.admin.logs_clearing {
+                eprintln!("Nana 系统日志正在清空，忽略重复点击");
+            } else {
+                model.admin.logs_clearing = true;
+                model.admin.push_effect(AdminEffect::ClearLogs);
+            }
+            None
+        }
         ShellMessage::TaskProgressLoaded(progress) => {
             model.task_progress = progress;
             None
@@ -232,6 +240,7 @@ fn reduce_admin(model: &mut ShellViewModel, message: AdminMessage) {
                 model.admin.log_context_open.insert(id);
             }
         }
+        AdminMessage::LogsCleared(result) => note_logs_cleared(model, result),
         AdminMessage::ToggleTaskPopover => model.admin.popover_open = !model.admin.popover_open,
         AdminMessage::CloseTaskPopover => model.admin.popover_open = false,
         AdminMessage::SetOperation(operation) => model.admin.operation = operation,
@@ -538,6 +547,19 @@ fn external_json(model: &ShellViewModel) -> String {
         return String::new();
     };
     support::connection_json(&connection.base_url, &connection.token, &connection.version, &connection.started_at)
+}
+
+/// 清空系统日志的结果。成功照 Vue 把手上的日志清空、不再重读（之后的新记录照常经宿主事件合并进来）；
+/// 失败时日志留着，原因写进状态区。Vue 这里的失败没有界面反馈，不照抄。
+fn note_logs_cleared(model: &mut ShellViewModel, result: Result<(), String>) {
+    model.admin.logs_clearing = false;
+    match result {
+        Ok(()) => model.admin.replace_logs(Vec::new()),
+        Err(error) => {
+            eprintln!("Nana 清空系统日志失败：{error}");
+            model.status.fail(FailureSource::Logs, format!("清空系统日志失败：{error}"));
+        }
+    }
 }
 
 fn finish_file_plugin(model: &mut ShellViewModel, method: &str, result: Result<serde_json::Value, String>) {

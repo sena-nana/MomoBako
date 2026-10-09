@@ -30,8 +30,10 @@ pub(crate) struct LogsToolbar {
     pub paused: bool,
     /// 没有生效的筛选时「重置筛选」禁用。
     pub no_filters: bool,
-    /// 没有日志时「清空日志」禁用。
-    pub no_logs: bool,
+    /// 「清空日志」禁用：正在清空，或者手上没有日志也不在读（Vue `isClearing || (!records.length && !isLoading)`）。
+    pub clear_disabled: bool,
+    /// 正在清空：按钮图标换成加载图标。
+    pub clearing: bool,
 }
 
 /// 空状态的标题和说明；有命中时为 `None`。
@@ -136,7 +138,8 @@ impl LogsView {
                 repo: admin.log_repo_id.clone(),
                 paused: admin.log_paused,
                 no_filters: active == 0,
-                no_logs: admin.logs.is_empty() && !admin.logs_loading,
+                clear_disabled: admin.logs_clearing || (admin.logs.is_empty() && !admin.logs_loading),
+                clearing: admin.logs_clearing,
             },
             search: admin.log_search.clone(),
             levels: admin.log_levels.clone(),
