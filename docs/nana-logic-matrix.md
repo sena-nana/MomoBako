@@ -125,7 +125,7 @@
 | 未知扩展名 | 没有内置类型，也没有 Preview 贡献 | 无 | 失败，不显示空图片 | “无法预览此类型” | 已测试（未离屏） |
 | 过期预览 | 文本代次或图片路径与当前目标不同 | 丢弃 | 保留当前预览体 | 仍是当前目标 | 已测试（未离屏） |
 | `FileMetadataEditor.vue` 草稿 | 评分、注释、链接、标签、自定义字段 | 无，直到保存 | 评分 0–5，相同值回到 0；空白和重复标签忽略；保留键不能当自定义字段；注释没有时回退 note。自定义行跳过编辑器自己画的通用字段，以及后端给每个素材种下的 title、type、favorite、color | “元数据 · 未保存” / “评分 N” | 已测试（未离屏） |
-| `FileMetadataEditor.vue` 保存 | 草稿已脏，且不是虚拟素材、不是保存中 | `update_asset_metadata`，`source` 为 desktop，没有替身 | 请求带 `expected_version` 和 `tagGroups`；虚拟、未脏或保存中不发请求；错误保留草稿。脏草稿再等 260 毫秒自动保存，换选前先保存上一份 | “正在保存元数据…” / “保存元数据” | 已测试（未离屏） |
+| `FileMetadataEditor.vue` 保存 | 草稿已脏，且不是虚拟素材、不是保存中 | `update_asset_metadata`，`source` 为 desktop，没有替身 | 请求带 `expected_version`，以及评分、注释、链接和 `tagGroups`；自定义字段只写这次改过的，没动过的不回写，数字、布尔和数组不会被改存成字符串；虚拟、未脏或保存中不发请求；错误保留草稿。脏草稿再等 260 毫秒自动保存，换选前先保存上一份 | “正在保存元数据…” / “保存元数据” | 已测试（未离屏） |
 | `FileMetadataEditor.vue` 冲突 | 结果是 conflict | 不覆盖草稿，`expected_version` 不变 | 采用服务器版本后才替换草稿和版本 | “版本冲突，未写入” / “采用服务器版本” | 已测试（未离屏） |
 | `FileMetadataEditor.vue` 撤销和重做 | 草稿不脏 | `undo_last_revision` / `redo_last_revision`，没有替身 | 有未保存编辑时拒绝并记日志 | “撤销” / “重做” | 已测试（未离屏） |
 | `search.ts` 空条件 | 查询和筛选都为空 | 不调用 `search_assets` | 清空结果，结果区回到等条件 | “等待搜索条件” | 已测试（未离屏） |
