@@ -210,7 +210,7 @@
 | `RepositoryActionsPanel.vue` 列表 | 切到动作面板，或过期仓库 | `list_repository_actions`，没有替身 | 过期仓库忽略；当前仓库读失败保留旧列表；没有选中时用第一项 | “正在加载动作” / “当前仓库没有导入动作。” | 已测试（未离屏） |
 | `RepositoryActionsPanel.vue` 执行 | 点击执行 | `momobako.repository.action.run`，没有替身 | 需要 ready、启用、多选路径且不在执行中；选中动作同时切到动作面板；成功后刷新文件列表 | “不支持” / “执行” | 已测试（未离屏） |
 | `ExtensionsPanel.vue` 工具页 | 工具页列表变化 | 文件导入和 Eagle 导入派发已有的 `OpenDialog` / `OpenEagle`，并回到文件页把对话框画出来；API Playground 只列已有快照 | 三个内置 id 不再显示升级。没有仓库、只读、回收站或虚拟视图时按钮禁用。其它非原生页仍提示升级 | “当前没有可用仓库。” / “多个路径用分号分隔” / “还没有 API 设计快照” | 已测试；导入对话框由实况点击覆盖 |
-| 管理表面 | 设置、插件、日志或任务页 | 无 | 验收页挂同一套表面，键是 `admin-surface`、`clear-logs`、`admin-task-cancel-{id}` | “保存应用设置” / “系统日志” / “扫描默认资源库” | 已测试（未离屏） |
+| 管理表面 | 设置、插件、日志或任务页 | 无 | 验收页挂同一套表面，键是 `admin-surface`、`clear-logs`、`admin-task-cancel-{id}` | “音频播放” / “系统日志” / “扫描默认资源库” | 已测试（未离屏） |
 
 ## Phase 7 宿主输入
 

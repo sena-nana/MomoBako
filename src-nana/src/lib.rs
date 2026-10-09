@@ -131,7 +131,6 @@ impl ApplicationState for MomoBakoApplication {
             // 主题等应用设置启动时就要生效，不能等打开设置页才读。
             match services.load_settings() {
                 Ok((settings, diagnostic)) => {
-                    shell.settings_cache_limit_draft = settings.thumbnail_cache_limit_mb.to_string();
                     shell.settings = settings;
                     shell.settings_error = diagnostic;
                 }
@@ -292,21 +291,6 @@ impl ApplicationState for MomoBakoApplication {
             && let Some(services) = self.services.as_ref()
         {
             schedule_settings_load(services, context);
-        }
-        if matches!(&message, ShellMessage::SaveSettings)
-            && let Some(services) = self.services.as_ref()
-        {
-            let settings = self.shell.settings.clone();
-            let settings_service = services.settings.clone();
-            let executor = services.executor.clone();
-            if let Err(error) = context.run_task(Task::new(async move {
-                ShellMessage::SettingsSaved(executor.block_on(async move {
-                    settings.validate()?;
-                    settings_service.save(&settings).map(|()| settings)
-                }))
-            })) {
-                eprintln!("Nana 应用设置保存任务提交失败：{error}");
-            }
         }
         if let ShellMessage::SelectPlugin(plugin_id) = &message
             && let Some(services) = self.services.as_ref()

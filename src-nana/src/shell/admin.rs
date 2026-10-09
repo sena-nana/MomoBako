@@ -145,8 +145,6 @@ pub enum AdminMessage {
     SetSourceCachePath(String),
     /// 来源登录流程里一步结束。
     SourceStepFinished { step: SourceStep, result: Result<serde_json::Value, String> },
-    /// 设置写盘结果之外，主题改动后立即保存设置。
-    SaveSettingsNow,
 }
 
 /// 插件调用从哪来。登录结果和文件菜单结果不能混在一起。

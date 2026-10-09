@@ -95,24 +95,28 @@
         assert!(model.detail.contains("40%"));
     }
 
+    /// 设置页只有主题会写设置文件。读回和保存结果整份替换设置，缓存上限和关闭行为照旧留给缓存和关窗流程；
+    /// 校验失败只写错误，不切页面。
     #[test]
-    fn settings_changes_are_validated_before_save_feedback() {
+    fn settings_results_keep_the_fields_without_a_settings_card() {
         let mut model = ShellViewModel::for_page(ShellPage::Settings);
-        model.reduce(ShellMessage::SettingsCacheLimitChanged("32".into()));
-        model.reduce(ShellMessage::SaveSettings);
-        assert_eq!(model.settings_cache_limit_draft, "32");
+        let loaded = crate::settings::ApplicationSettings {
+            theme: "dark".into(),
+            thumbnail_cache_limit_mb: 512,
+            default_playlist_player_type_id: Some("momobako.playlist.audio-sequence".into()),
+            close_behavior: "minimizeToTray".into(),
+        };
+        model.reduce(ShellMessage::SettingsLoaded(Ok((loaded.clone(), None))));
+        assert_eq!(model.settings, loaded);
+        model.reduce(ShellMessage::SettingsThemeChanged("light".into()));
         model.reduce(ShellMessage::SettingsSaved(Err("缩略图缓存上限必须在 64–16384 MB 之间".into())));
         assert_eq!(model.page, ShellPage::Settings);
         assert!(model.settings_error.is_some());
-        model.reduce(ShellMessage::SettingsCacheLimitChanged("512".into()));
-        model.reduce(ShellMessage::SettingsSaved(Ok(crate::settings::ApplicationSettings {
-            theme: "dark".into(),
-            thumbnail_cache_limit_mb: 512,
-            default_playlist_player_type_id: None,
-            close_behavior: "confirm".into(),
-        })));
+        let saved = crate::settings::ApplicationSettings { theme: "light".into(), ..loaded };
+        model.reduce(ShellMessage::SettingsSaved(Ok(saved.clone())));
         assert_eq!(model.page, ShellPage::Settings);
-        assert_eq!(model.settings.thumbnail_cache_limit_mb, 512);
+        assert_eq!(model.settings, saved);
+        assert!(model.settings_error.is_none());
         assert_eq!(model.detail, "应用设置已保存");
     }
 
