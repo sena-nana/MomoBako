@@ -5,9 +5,10 @@
 use nana_ui::runtime::{SemanticColorRole, StableNodeId};
 
 use super::project::tests::tree_loaded;
-use crate::shell::sidebar::{SidebarPlaylist, SidebarShortcut, SidebarSmartFolder};
+use crate::backend::services::repository::PlaylistSummary;
+use crate::shell::sidebar::{SidebarShortcut, SidebarSmartFolder};
 use crate::shell::view_harness::ShellHarness;
-use crate::shell::{ShellMessage, ShellPage, ShellViewModel, SidebarMessage, ThumbnailFrame};
+use crate::shell::{ShellMessage, ShellViewModel, SidebarMessage, ThumbnailFrame};
 
 fn scene(name: &str) -> ShellViewModel {
     crate::shell::acceptance_gap_models()
@@ -77,7 +78,7 @@ fn routine_updates_keep_every_sidebar_node() {
 
     let settings = harness.keyed("footer-settings").expect("设置入口");
     assert_eq!(background(&harness, settings), None);
-    apply_keeping_nodes(&mut harness, ShellMessage::Navigate(ShellPage::Settings), "进设置页");
+    apply_keeping_nodes(&mut harness, ShellMessage::OpenSettings, "进设置页");
     assert_eq!(background(&harness, settings), Some(SemanticColorRole::AccentSoft), "设置入口没有亮起来");
 
     assert!(!selected(&harness, "folder-row-assets%2Fcovers"));
@@ -101,7 +102,8 @@ fn routine_updates_keep_every_sidebar_node() {
         }]),
         ShellMessage::Player(crate::shell::player::PlayerMessage::SetVolume(0.5)),
         ShellMessage::Inspect(crate::shell::InspectMessage::SetQuery("封面".into())),
-        ShellMessage::Navigate(ShellPage::FileList),
+        // 侧栏点「全部」离开设置页，和 Vue 侧栏导航离开 `/settings` 一样。
+        sidebar(SidebarMessage::SelectShortcut(crate::shell::ShortcutId::All)),
     ];
     for message in unrelated {
         apply_keeping_nodes(&mut harness, message, "无关更新");
@@ -147,14 +149,20 @@ fn playlist_rows_follow_the_list_by_id() {
     harness.apply(sidebar(SidebarMessage::TogglePlaylists));
     harness.flush();
     let repo_id = harness.model.workspace.active_repo_id.clone().expect("场景有仓库");
-    let playlist = |id: &str, name: &str| SidebarPlaylist {
-        id: id.into(),
+    let playlist = |id: &str, name: &str| PlaylistSummary {
+        playlist_id: id.into(),
+        repo_id: repo_id.clone(),
         name: name.into(),
-        player_label: "音频播放器".into(),
         player_type_id: "momobako.playlist.audio".into(),
+        player_plugin_id: "momobako.player.audio".into(),
+        player_label: "音频播放器".into(),
+        file_class: "audio".into(),
         item_count: 2,
+        sort_order: 0,
+        created_at: String::new(),
+        updated_at: String::new(),
     };
-    let loaded = |playlists: Vec<SidebarPlaylist>| {
+    let loaded = |playlists: Vec<PlaylistSummary>| {
         sidebar(SidebarMessage::SidebarPlaylistsLoaded { repo_id: repo_id.clone(), result: Ok(playlists) })
     };
     harness.apply(loaded(vec![playlist("a", "晨间"), playlist("b", "夜晚")]));
@@ -207,7 +215,7 @@ fn collapsing_and_expanding_keeps_the_sidebar() {
     assert_eq!(harness.keyed("repository-switcher"), Some(switcher), "侧栏里的节点不该换");
     assert!(harness.keyed("folder-row-assets%2Fcovers").is_some(), "收起期间展开的目录要跟上");
     harness.assert_same_as_fresh_mount();
-    apply_keeping_nodes(&mut harness, ShellMessage::Navigate(ShellPage::Settings), "展开后进设置页");
+    apply_keeping_nodes(&mut harness, ShellMessage::OpenSettings, "展开后进设置页");
 }
 
 /// 智能文件夹树：读回两层，展开只新增子级；点开子级时它成为当前项、父级换成打开的图标，节点不换；

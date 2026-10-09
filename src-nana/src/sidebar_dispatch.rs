@@ -6,7 +6,7 @@ use nana_ui::RuntimeProgramContext;
 use crate::backend::services::mutsuki_runner::PROTOCOL_REPOSITORY_ATTACH;
 use crate::backend::services::repository::{FileBrowserRequest, RecentAccessHistoryClearRequest, RepositoryFolderRequest};
 use crate::shell::{
-    FileRow, ShellMessage, SidebarEffect, SidebarMessage, SidebarPlaylist, SidebarSmartFolder, SidebarTree,
+    FileRow, ShellMessage, SidebarEffect, SidebarMessage, SidebarSmartFolder, SidebarTree,
     VirtualQuery,
 };
 use crate::MomoBakoApplication;
@@ -30,7 +30,6 @@ pub fn dispatch_sidebar_effects(app: &mut MomoBakoApplication, context: &Runtime
                 dispatch_create_backend(app, context, name, path, plugin_id, config);
             }
             SidebarEffect::LoadPlaylists { repo_id } => dispatch_playlists(app, context, repo_id),
-            SidebarEffect::LoadPlaylistPlayers { repo_id } => dispatch_players(app, context, repo_id),
             SidebarEffect::LoadPlaylistDetail { repo_id, playlist_id } => {
                 dispatch_playlist_detail(app, context, repo_id, playlist_id);
             }
@@ -220,19 +219,18 @@ fn dispatch_delete_playlist(
 ) {
     let Some(services) = services(app) else {
         eprintln!("Nana 移除播放集需要领域服务，当前服务未启动");
-        app.shell.reduce(ShellMessage::PlaylistsLoaded(Err("领域服务未启动".into())));
+        app.shell.reduce(ShellMessage::PlaylistsLoaded { repo_id, result: Err("领域服务未启动".into()), open: None });
         return;
     };
     let interaction = services.repository_interaction.clone();
     let executor = services.executor.clone();
+    let task_repo = repo_id.clone();
     if let Err(error) = context.run_task(Task::new(async move {
-        let result = executor.block_on(async {
-            interaction.delete_playlist(repo_id.clone(), playlist_id).await?;
-            interaction.list_playlists(repo_id).await
-        });
-        ShellMessage::PlaylistsLoaded(result)
+        let result = executor.block_on(interaction.delete_playlist(task_repo.clone(), playlist_id)).map(|response| response.playlists);
+        ShellMessage::PlaylistsLoaded { repo_id: task_repo, result, open: None }
     })) {
         eprintln!("Nana 移除播放集任务提交失败：{error}");
+        app.shell.reduce(ShellMessage::PlaylistsLoaded { repo_id, result: Err(format!("移除播放集任务提交失败：{error}")), open: None });
     }
 }
 
@@ -320,41 +318,13 @@ fn dispatch_playlists(app: &mut MomoBakoApplication, context: &RuntimeProgramCon
     let executor = services.executor.clone();
     let task_repo = repo_id.clone();
     if let Err(error) = context.run_task(Task::new(async move {
-        let result = executor.block_on(interaction.list_playlists(task_repo.clone())).map(|playlists| {
-            playlists.iter().map(SidebarPlaylist::from_summary).collect()
-        });
+        let result = executor.block_on(interaction.list_playlists(task_repo.clone()));
         sidebar_message(SidebarMessage::SidebarPlaylistsLoaded { repo_id: task_repo, result })
     })) {
         eprintln!("Nana 播放集列表任务提交失败：{error}");
         app.shell.reduce(sidebar_message(SidebarMessage::SidebarPlaylistsLoaded {
             repo_id,
             result: Err(format!("播放集列表任务提交失败：{error}")),
-        }));
-    }
-}
-
-fn dispatch_players(app: &mut MomoBakoApplication, context: &RuntimeProgramContext<ShellMessage>, repo_id: String) {
-    let Some(services) = services(app) else {
-        eprintln!("Nana 播放器类型需要领域服务，当前服务未启动");
-        app.shell.reduce(sidebar_message(SidebarMessage::SidebarPlaylistPlayersLoaded {
-            repo_id,
-            result: Err("领域服务未启动".into()),
-        }));
-        return;
-    };
-    let plugin = services.plugin.clone();
-    let executor = services.executor.clone();
-    let task_repo = repo_id.clone();
-    if let Err(error) = context.run_task(Task::new(async move {
-        let result = executor.block_on(plugin.list_playlist_players()).map(|players| {
-            players.into_iter().map(|player| player.player_type_id).collect()
-        });
-        sidebar_message(SidebarMessage::SidebarPlaylistPlayersLoaded { repo_id: task_repo, result })
-    })) {
-        eprintln!("Nana 播放器类型任务提交失败：{error}");
-        app.shell.reduce(sidebar_message(SidebarMessage::SidebarPlaylistPlayersLoaded {
-            repo_id,
-            result: Err(format!("播放器类型任务提交失败：{error}")),
         }));
     }
 }

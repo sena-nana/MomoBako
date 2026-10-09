@@ -17,7 +17,7 @@ use super::support::{
     AUDIO_CAPABILITY, AUDIO_SEQUENCE_TYPE, OFFICIAL_AUDIO_PLUGIN,
 };
 use super::super::workspace::{LibraryCategory, WorkspacePanel, WorkspaceRepository};
-use super::super::{InspectEffect, InspectMessage, ShellMessage, ShellPage, ShellViewModel};
+use super::super::{InspectEffect, InspectMessage, ShellMessage, ShellPage, ShellViewModel, SidebarMessage};
 use super::{PlaybackMode, PlayerCandidate, PlayerEffect, PlayerMessage, QueueItem};
 
 fn shell(writable: bool) -> ShellViewModel {
@@ -35,6 +35,15 @@ fn shell(writable: bool) -> ShellViewModel {
     });
     model.workspace.active_repo_id = Some("repo".into());
     model
+}
+
+/// 侧栏读回仓库 `repo` 的播放集列表。侧栏还没绑到这个仓库时先照产品绑上。
+fn load_list(model: &mut ShellViewModel, playlists: Vec<PlaylistSummary>) {
+    if model.sidebar.bound_repo_id() != Some("repo") {
+        model.bind_sidebar_repository();
+        model.sidebar.take_effects();
+    }
+    model.reduce(ShellMessage::Sidebar(SidebarMessage::SidebarPlaylistsLoaded { repo_id: "repo".into(), result: Ok(playlists) }));
 }
 
 /// 发一条播放消息。当前项的读取请求像 `player_dispatch` 一样当场读文件送回。
@@ -292,7 +301,7 @@ fn player_resolution_keeps_audio_off_unselected_third_parties() {
 fn membership_follows_kind_extension_and_write_permission() {
     let mut model = shell(true);
     model.reduce(ShellMessage::PlaylistPlayersLoaded(Ok(vec![contribution("audio", "audio", &["mp3"])])));
-    model.reduce(ShellMessage::PlaylistsLoaded(Ok(vec![summary("repo", "pl", "audio", "audio")])));
+    load_list(&mut model, vec![summary("repo", "pl", "audio", "audio")]);
     assert!(matches!(model.player.take_effects().last(), Some(PlayerEffect::LoadMemberships { repo_id }) if repo_id == "repo"));
 
     send(&mut model, PlayerMessage::ToggleMembership {
@@ -368,12 +377,12 @@ fn membership_follows_kind_extension_and_write_permission() {
     assert!(model.player.memberships.is_empty());
 
     model.player.memberships.insert("asset-1".into(), vec!["pl".into()]);
-    model.reduce(ShellMessage::PlaylistsLoaded(Ok(Vec::new())));
+    load_list(&mut model, Vec::new());
     assert!(model.player.memberships.is_empty());
     assert!(model.player.take_effects().is_empty());
 
     let mut readonly = shell(false);
-    readonly.reduce(ShellMessage::PlaylistsLoaded(Ok(vec![summary("repo", "pl", "audio", "audio")])));
+    load_list(&mut readonly, vec![summary("repo", "pl", "audio", "audio")]);
     readonly.reduce(ShellMessage::PlaylistPlayersLoaded(Ok(vec![contribution("audio", "audio", &["mp3"])])));
     readonly.player.take_effects();
     send(&mut readonly, PlayerMessage::ToggleMembership {
@@ -657,7 +666,7 @@ fn restore_accepts_a_ready_known_item_and_rejects_the_rest() {
     let mut model = shell(true);
     model.player.load_files(&dir.join("missing-settings.json"), &sessions, &dir.join("missing-prefs.json"));
     model.player.candidates = vec![candidate("native.audio", "audio", "audio", &["mp3"])];
-    model.reduce(ShellMessage::PlaylistsLoaded(Ok(vec![summary("repo", "pl", "audio", "audio")])));
+    load_list(&mut model, vec![summary("repo", "pl", "audio", "audio")]);
     assert!(matches!(
         model.player.take_effects().iter().find(|effect| matches!(effect, PlayerEffect::RestoreDetail { .. })),
         Some(PlayerEffect::RestoreDetail { playlist_id, .. }) if playlist_id == "pl"
@@ -673,8 +682,9 @@ fn restore_accepts_a_ready_known_item_and_rejects_the_rest() {
 
     let mut rejected = shell(true);
     rejected.player.stored.insert("repo".into(), model.player.stored["repo"].clone());
-    rejected.reduce(ShellMessage::PlaylistsLoaded(Ok(vec![summary("repo", "pl", "audio", "audio")])));
-    rejected.player.take_effects();
+    rejected.player.candidates = vec![candidate("native.audio", "audio", "audio", &["mp3"])];
+    load_list(&mut rejected, vec![summary("repo", "pl", "audio", "audio")]);
+    assert!(rejected.player.take_effects().iter().any(|effect| matches!(effect, PlayerEffect::RestoreDetail { .. })));
     send(&mut rejected, PlayerMessage::RestoreDetail(Ok(detail("repo", "pl", "audio", "audio", vec![item("a", "missing")]))));
     assert!(!rejected.player.stored.contains_key("repo"));
     assert!(rejected.player.current_id.is_none());
@@ -697,9 +707,51 @@ fn restore_accepts_a_ready_known_item_and_rejects_the_rest() {
     assert!(!mismatch.player.stored.contains_key("repo"));
 
     model.player.repo_id = Some("repo".into());
-    model.reduce(ShellMessage::PlaylistsLoaded(Ok(vec![summary("repo", "pl", "audio", "audio")])));
+    load_list(&mut model, vec![summary("repo", "pl", "audio", "audio")]);
     assert!(!model.player.take_effects().iter().any(|effect| matches!(effect, PlayerEffect::RestoreDetail { .. })));
     let _ = std::fs::remove_dir_all(dir);
+}
+
+/// 插件登记的播放器类型要先读回才认得：读回之前不读详情也不丢会话；读回了认得就读详情，
+/// 读回了还不认得就丢掉会话（Vue 找不到播放器时 `clearSession`）。顺序反过来也一样。
+#[test]
+fn restore_waits_for_plugin_player_types() {
+    let stored = super::support::StoredSession {
+        repo_id: "repo".into(),
+        playlist_id: "pl".into(),
+        player_type_id: "plugin.audio".into(),
+        current_item_id: "a".into(),
+        current_time_ms: 900,
+        duration_ms: 4000,
+        mode: PlaybackMode::ListLoop,
+        volume: 0.5,
+        is_playing: false,
+    };
+    let restores = |model: &mut ShellViewModel| model.player.take_effects().into_iter().filter(|effect| matches!(effect, PlayerEffect::RestoreDetail { .. })).count();
+
+    let mut model = shell(true);
+    model.player.stored.insert("repo".into(), stored.clone());
+    load_list(&mut model, vec![summary("repo", "pl", "plugin.audio", "audio")]);
+    assert_eq!(restores(&mut model), 0, "播放器类型读回之前不读详情");
+    assert!(model.player.stored.contains_key("repo"), "也不丢会话");
+    model.reduce(ShellMessage::PlaylistPlayersLoaded(Ok(vec![contribution("plugin.audio", "audio", &["mp3"])])));
+    assert_eq!(restores(&mut model), 1, "读回认得的类型以后读详情");
+    model.reduce(ShellMessage::PlaylistPlayersLoaded(Ok(vec![contribution("plugin.audio", "audio", &["mp3"])])));
+    assert_eq!(restores(&mut model), 0, "详情在读时不重复读");
+
+    let mut players_first = shell(true);
+    players_first.player.stored.insert("repo".into(), stored.clone());
+    players_first.reduce(ShellMessage::PlaylistPlayersLoaded(Ok(vec![contribution("plugin.audio", "audio", &["mp3"])])));
+    assert_eq!(restores(&mut players_first), 0, "还没有播放集列表");
+    load_list(&mut players_first, vec![summary("repo", "pl", "plugin.audio", "audio")]);
+    assert_eq!(restores(&mut players_first), 1);
+
+    let mut gone = shell(true);
+    gone.player.stored.insert("repo".into(), stored);
+    load_list(&mut gone, vec![summary("repo", "pl", "plugin.audio", "audio")]);
+    gone.reduce(ShellMessage::PlaylistPlayersLoaded(Ok(Vec::new())));
+    assert_eq!(restores(&mut gone), 0);
+    assert!(!gone.player.stored.contains_key("repo"), "读回了还不认得的类型就丢掉会话");
 }
 
 #[test]

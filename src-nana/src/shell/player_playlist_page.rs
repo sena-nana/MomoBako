@@ -154,13 +154,13 @@ impl PlaylistPageSignals {
 }
 
 /// 播放集页：没点开或详情还没读回时是虚线空框；点开后是 bg-elev 面板，里面是页眉、条目（或空框）和
-/// `player_bar`。两块都留着，按是否点开互换；`surface` 为假（不在播放集面板）时两块都藏起来。
-pub(crate) fn view(signals: PlaylistPageSignals, surface: Signal<bool>, player_bar: AnyView) -> AnyView {
+/// `player_bar`。两块都留着，按是否点开互换。
+pub(crate) fn view(signals: PlaylistPageSignals, player_bar: AnyView) -> AnyView {
     let head = signals.head;
     let order = signals.order;
     let initial = head.get_untracked();
     let unlisted = dashed_empty("选择一个播放集", "在左侧播放集区选择要查看或播放的列表。", "playlist-page-empty")
-        .visible(move || surface.get() && !head.with(|head| head.listed));
+        .visible(move || !head.with(|head| head.listed));
     let no_items = dashed_empty(
         "播放集还是空的",
         "在文件浏览区右键文件，使用“加入播放列表”把内容加入这里。",
@@ -169,7 +169,7 @@ pub(crate) fn view(signals: PlaylistPageSignals, surface: Signal<bool>, player_b
     .visible(move || order.with(Vec::is_empty));
     let panel = widget(Stack::column(16.0).padding(18.0).surface(SemanticColorRole::Surface).radius_px(initial.radius))
         .prop::<f32, PanelRadius>(move || head.with(|head| head.radius))
-        .visible(move || surface.get() && head.with(|head| head.listed))
+        .visible(move || head.with(|head| head.listed))
         .children((header(head), no_items, item_list(signals), player_bar))
         .key("playlist-page");
     (unlisted, panel).into_any()

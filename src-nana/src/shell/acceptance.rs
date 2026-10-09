@@ -68,6 +68,8 @@ use files_scenes::PAGE_PDF;
 
 #[path = "acceptance_base.rs"]
 mod base_scene;
+#[path = "acceptance_plugins.rs"]
+mod plugin_fixtures;
 #[path = "acceptance_shell.rs"]
 mod shell_scenes;
 #[path = "acceptance_files.rs"]

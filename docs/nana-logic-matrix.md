@@ -13,7 +13,7 @@
 | 文件显示 | adaptive、masonry、grid、list |
 | 筛选 | `WorkspaceFilterState` 的标签、格式、颜色、形状、排除条件、元数据、数值、日期、AND/OR、排序、条数、最低评分 |
 
-这些面板和启动、加载错误、缺失仓库、空库（`MainRegion`）以及浮层正交。`ShellPage` 还在用：设置页、播放集页、选中文件和预览页靠它区分，离屏验收的 15 页也按它起名。
+这些面板和启动、加载错误、缺失仓库、空库（`MainRegion`）以及浮层正交。`ShellPage` 还在用：设置页、选中文件和预览页靠它区分，离屏验收的 15 页也按它起名；主区走哪条路由由区域和面板决定，播放集页、插件设置页、任务页这些页面身份不再触发导航或读取。
 
 ## Phase 1 壳层
 
@@ -39,13 +39,13 @@
 | `useMissingRepositoryActions.ts` 刷新 | 缺失仓库且不忙 | `RefreshRepositories` | 忙（重定向或删除中）时忽略 | “刷新”不可再次提交 | 已测试（未离屏） |
 | `useMissingRepositoryActions.ts` 选择路径 | 有仓库且不忙 | `OpenFileDialog`，`PickFolder`，编号 3 | 排队文件夹对话框并清错误；没有仓库或忙时不排队；取消、空白或对话框失败不重定向 | “重定向”；失败时“文件夹选择失败：…” | 已测试（未离屏） |
 | `useMissingRepositoryActions.ts` 提交路径 | 对话框返回去空白后非空的路径 | `RelocateRepository`，没有替身 | 成功后刷新列表；失败写入缺失错误并解除忙状态 | 忙时“重定向中...” | 已测试（未离屏） |
-| `MissingRepositoryState.vue` 来源缓存 | `localCache.required` 且缓存不是 ready | `OpenSourceSettings` | 不打开路径框 | 主按钮为“打开来源设置” | 已测试（未离屏） |
+| `MissingRepositoryState.vue` 来源缓存 | `localCache.required` 且缓存不是 ready | 照 Vue `/settings?plugin=` 进设置页：读设置包和应用设置，展开来源插件的设置（读它的配置） | 不打开路径框；忙着或不是缓存问题时不打开 | 主按钮为“打开来源设置” | 已测试（未离屏） |
 | `RepositoryDeleteDialog.vue` | 打开、取消、确认 | `DeleteRepository` | 缺失的本地仓库只能“只删除记录”；删除中不能关闭或再次确认；没有删除标记的成功结果不关对话框；成功后移除记录并选剩余第一项或空仓库 | “删除资源库”标题和三个删除方式；删除中对话框左下角写“处理中...”（缺失页的删除按钮写“删除中...”） | 已测试（未离屏） |
 | `state.ts` 面板与分类 | 启动进度推进 | 无 | 面板保留；空列表把分类重置为全部 | 面板枚举不随步骤丢失 | 已测试（未离屏） |
 
 ## Phase 2 侧栏
 
-这些行由 `src-nana/src/shell/sidebar_tests.rs`、`tests.rs` 的 `stale_playlist_detail_keeps_the_bound_repository_screen` 和刷新文件夹树的 `tree_sync_tests.rs` 覆盖状态机。宿主在归约后把副作用交给领域服务：目录树用 `FileBrowserViewModel::get_repository_tree`，智能文件夹用 `list_smart_folders` 和 `query_smart_folder`，播放集用 `list_playlists`、`list_playlist_players` 和 `get_playlist_detail`，目录浏览用 `get_file_browser`，附加本地文件夹用 `PROTOCOL_REPOSITORY_ATTACH`，Eagle Library 和表单类来源用 `PROTOCOL_REPOSITORY_CREATE`。协议调用没有替身测试。侧栏在启动就绪后挂一次：`SidebarFrame` 里是 `ListItem` 行，文件夹树和智能文件夹树是按显示顺序展开的扁平行，放在 Store 里用带键的 `each` 建，不用 `TreeView`；验收场景走同一个 `ShellView::mount`。标了「已离屏」的行写明场景。同一仓库且缺失标记不变时，再次绑定不重复请求目录树、智能文件夹、播放集和播放器类型。
+这些行由 `src-nana/src/shell/sidebar_tests.rs`、`tests.rs` 的 `stale_playlist_detail_keeps_the_bound_repository_screen` 和刷新文件夹树的 `tree_sync_tests.rs` 覆盖状态机。宿主在归约后把副作用交给领域服务：目录树用 `FileBrowserViewModel::get_repository_tree`，智能文件夹用 `list_smart_folders` 和 `query_smart_folder`，播放集用 `list_playlists` 和 `get_playlist_detail`（播放器类型跟插件列表走，见阶段 6），目录浏览用 `get_file_browser`，附加本地文件夹用 `PROTOCOL_REPOSITORY_ATTACH`，Eagle Library 和表单类来源用 `PROTOCOL_REPOSITORY_CREATE`。协议调用没有替身测试。侧栏在启动就绪后挂一次：`SidebarFrame` 里是 `ListItem` 行，文件夹树和智能文件夹树是按显示顺序展开的扁平行，放在 Store 里用带键的 `each` 建，不用 `TreeView`；验收场景走同一个 `ShellView::mount`。标了「已离屏」的行写明场景。同一仓库且缺失标记不变时，再次绑定不重复请求目录树、智能文件夹和播放集。
 
 快捷方式计数在摘要到达时立即计算，没有移植 Vue 的 200ms idle 调度。文件快捷访问会先把 `\` 收成 `/`，再打开父目录并选中该路径。
 
@@ -68,7 +68,7 @@
 | `useSmartFolderSidebarUi.ts` 查询结果 | 仓库或当前 id 已变化 | 丢弃 | 返回 false，不改详情；匹配的错误只写入智能文件夹错误，不把整页改成 Error | 错误留在侧栏 | 已测试（未离屏） |
 | `useSmartFolderSidebarUi.ts` 树替换 | 列表到达 | `list_smart_folders` | 仓库不匹配则忽略；先剪掉无效展开，再展开当前项的祖先 | “还没有智能文件夹。”或树 | 已测试（未离屏） |
 | `usePlaylistSidebarUi.ts` 选择 | 有仓库 id 且 id 非空 | `get_playlist_detail` | 面板 playlist；播放集从列表消失时清空当前项，若面板仍是 playlist 则回到 files | 分组默认收起，只留标题“播放集”和个数；展开后每行是名称和「播放器 · N 项」，右侧是播放和删除 | 已测试（未离屏） |
-| `usePlaylistSidebarUi.ts` 可播放 | 播放器类型已加载 | `list_playlist_players` | 行上有「播放播放集」，播放器类型在内置候选或已读到的播放器贡献里才可点（`player_view::playlist_plugin_missing`）；侧栏读到的类型 id 只给测试用的 `playlist_playable` | 展开后每行右侧的播放按钮，不可播放时禁用 | 已记账（测试只覆盖 `playlist_playable`） |
+| `usePlaylistSidebarUi.ts` 可播放 | 播放器类型读回（插件列表换新以后读，见阶段 6） | `list_playlist_players` | 行上有「播放播放集」，播放器类型在内置候选或已读到的播放器贡献里才可点（`player_view::playlist_plugin_missing`）；读回之前「新建播放集」不可用，读回后对话框默认选第一个类型 | 展开后每行右侧的播放按钮，不可播放时禁用 | 已测试（`data_load_tests.rs`，未离屏） |
 | `PlaylistDetailLoaded` | 侧栏已绑定的仓库与详情仓库不同 | 丢弃 | 未绑定仓库时仍应用详情，避免旧页面测试失效 | 保持当前页 | 已测试（未离屏） |
 | `useRepositorySwitcherUi.ts` 打开与选择 | 点击仓库名 | `select_repository` 后重新绑定侧栏 | 已经是切换列表或正在提交时忽略；选择后关闭弹层并离开设置页 | “资源库 · 名称” | 已测试（未离屏） |
 | `useRepositorySwitcherUi.ts` 删除 | 有活动仓库且未提交 | 打开已有删除对话框 | 没有活动仓库或正在提交时忽略 | “删除当前资源库” | 已离屏（`repo-delete-dialog`） |
@@ -146,7 +146,7 @@
 
 这些行由 `src-nana/src/shell/player_tests.rs`（含 `player_wav_tests.rs`）和 `player_clip_tests.rs` 覆盖状态机，播放集页和路由由 `player_playlist_page_tests.rs`、`route_playlists_tests.rs` 覆盖，系统媒体键的测试在 `system_media.rs`。成员走 `RepositoryInteractionViewModel` 的 `list_playlist_memberships` 和 `set_playlist_membership`；目录和不能切换的条目走已有的 `add_playlist_items_by_paths`；排序走已有的 `reorder_playlist_items`；移除条目走 `remove_playlist_item`；恢复详情走 `get_playlist_detail`；当前项的字节走 `read_file`；下载走 `MutsukiTaskViewModel::execute` 的 `momobako.playlist.download`。这些调用没有替身测试。播放条和预览共用一份 `PlaybackSessionState`。预览里的 WAV、mp3、flac、ogg，以及 Windows 上媒体基础解出的 m4a、aac、opus，会把 PCM 装进同一游标；Windows 非测试构建用 winmm 出声，单元测试构建不开设备。播放列表的当前项（音频、视频、图片）只读、只解这一条：先置 loading，字节经仓库服务读出，在任务里解码，用 `ItemLoaded` 装进现有会话；画面 16 MiB、PCM 32 MiB 的上限沿用预览；没有当前项不解码。没有候选也没有贡献时写「缺少对应播放插件」或回退提示；只有贡献、扩展名又不是音视频会话或图片时写「暂不支持播放 {扩展名} 文件」；都不会变成 playing。播放集页的条目放在 `ReorderList` 里，行内只有「播放」「移除」，没有上移、下移；验收场景渲染的就是这一页。标了「已离屏」的行写明场景。
 
-播放条在启动就绪、主区有仓库，且面板是文件或播放列表时出现；预览页底部的播放条在预览打开时就出现。会话写到设置目录的 `playback-sessions.json`，只保存非临时条目。生产环境的原生播放候选只有内置解码器：WAV、MP3 / FLAC / Ogg，Windows 上还有交给媒体基础的 M4A / AAC / Opus；播放器贡献在产品里没有读取，见 [迁移边界](./nana-migration.md) 的「接线缺口」。Windows 非测试构建注册系统媒体传输控件；单元测试构建不注册，也不打开真系统会话。
+播放条在启动就绪、主区有仓库，且面板是文件或播放列表时出现；预览页底部的播放条在预览打开时就出现。会话写到设置目录的 `playback-sessions.json`，只保存非临时条目。生产环境的原生播放候选只有内置解码器：WAV、MP3 / FLAC / Ogg，Windows 上还有交给媒体基础的 M4A / AAC / Opus；插件登记的播放器贡献在插件列表换新以后读回（见阶段 6）。播放器的播放集列表和侧栏是同一份：侧栏绑定仓库时读，新建、删除以后换上返回的整份列表。Windows 非测试构建注册系统媒体传输控件；单元测试构建不注册，也不打开真系统会话。
 
 下载（`momobako.playlist.download`）目前没有界面入口，只有状态机和测试：有任务编号之后取消下载记下「正在取消下载…」，编号返回前是「下载任务还没有可取消的句柄」；`DownloadProgress` 可以在整批结果返回前更新「正在下载 N / N，失败 N」，下载进行时这一行画在播放条下面。设置页播放器选择在阶段 6。
 
@@ -174,7 +174,7 @@
 | `usePlaylistPlayer.ts` 临时项 | 从文件插播（产品里由预览接管触发，`PlayEntry` 没有界面发送方），或自然结束 | 无 | 相同路径的旧临时项去掉；自然结束后清掉已经不是当前项的临时项；活动列表详情保留当前项和历史里的临时项 | “当前队列” / “N 项” | 已测试（未离屏） |
 | `usePlaylistPlayer.ts` 跨仓库插播 | 当前仓库不同 | `stop(false)`，不删存储 | 先确认有播放器，再停运行时；临时项不写入会话文件 | 会话仍是 failed | 已测试（未离屏） |
 | `usePlaylistPlayer.ts` 会话 | 非临时项开始播放，或停止 | 写入 `playback-sessions.json` | 坏 JSON 或缺文件回到默认；不完整会话忽略；停止把状态写成 ended，时间归零，保留当前 id；切仓库的停止还删掉该仓库的存储，系统媒体键的停止不删 | “0:00 / 0:00” | 已测试（未离屏） |
-| `AppShell.vue` 恢复 | 播放列表里有存储的列表，且播放器仓库还不是该仓库 | `get_playlist_detail`，没有替身 | 类型须是候选或贡献，条目须就绪且列表一致；否则清掉该仓库会话。恢复后重新装载当前项（先 loading），音量保留，存下的进度在装载时清零 | 音量保留，进度从 0:00 开始 | 已测试（未离屏） |
+| `AppShell.vue` 恢复 | 播放集列表（侧栏读回、新建或删除以后）里有存储的列表，播放器仓库还不是该仓库，且播放器类型认得：内置候选当场认得，插件类型等播放器类型读回；读回了还不认得就清掉会话 | `get_playlist_detail`，没有替身；详情在读时不重复读 | 类型须是候选或贡献，条目须就绪且列表一致；否则清掉该仓库会话。恢复后重新装载当前项（先 loading），音量保留，存下的进度在装载时清零 | 音量保留，进度从 0:00 开始 | 已测试（未离屏） |
 | `AppShell.vue` 切仓库 | 播放另一个仓库的列表，或停止指定仓库 | 清掉被换下仓库的会话 | 即使当前播放仓库已经不同，也删除被指定仓库的存储；只停止仍属于该仓库的运行时 | 被停止的会话是 ended | 已测试（未离屏） |
 | `WorkspacePlayerBar.vue` 共用会话 | 预览读到音视频，或播放条改音量 | 与预览共用 `PlaybackSessionState` 和同一 WAV 游标 | 图片预览不覆盖播放条；WAV、mp3、flac、ogg、解出的视频，以及没有画面的 m4a、aac、opus 会装入会话，播放条的播放、跳转和音量在有音轨时于 Windows 非测试构建出声，单元测试构建不开设备；解不开的媒体停在 failed；播放条失败时预览里的会话一起停在 failed 或 ended | “没有原生解码器” / “解码失败” | 已测试（未离屏） |
 | `usePlaylistPlayer.ts` 打开预览 | 当前有条目 | 有素材 id 时 `get_asset_detail`，没有替身 | 切到文件面板和全部分类，并选中路径 | 点播放集条目的标题或扩展名方块，或播放条左侧的封面和两行字 | 已测试（未离屏） |
@@ -185,7 +185,7 @@
 
 ## Phase 6 设置、插件、日志和任务
 
-这些行由 `src-nana/src/shell/admin_tests.rs` 覆盖状态机。设置包一次读五项：`PluginViewModel` 的 `list_plugins`、`list_plugin_hook_executions`、`get_cache_snapshot`、`get_api_design_snapshot`，加 `SystemViewModel::get_external_api_connection_status`。安装、删除、启停、配置读写和数据目录走同一个 `PluginViewModel`。外部连接导出走 `SystemViewModel::write_binary_file`。仓库动作列表走 `RepositoryInteractionViewModel::list_repository_actions`，执行走 `MutsukiTaskViewModel::execute` 的 `momobako.repository.action.run`，完成后用 `FileBrowserViewModel::get_file_browser` 刷新当前目录。这些调用没有替身测试。圆角写到设置目录旁边的 `corners.json`，缺文件或坏 JSON 用平台默认，用户改过才写回。音频播放器偏好仍走阶段 5 的偏好文件，不写入 `ApplicationSettings.default_playlist_player_type_id`。日志页打开时不读历史日志：读取分支挂在没有发送方的 `Navigate(ShellPage::Logs)` 上，见 [迁移边界](./nana-migration.md) 的「接线缺口」。标了「已离屏」的行写明场景。
+这些行由 `src-nana/src/shell/admin_tests.rs` 覆盖状态机，读取时机由 `data_load_tests.rs` 从启动消息和用户操作出发覆盖。设置包一次读五项：`PluginViewModel` 的 `list_plugins`、`list_plugin_hook_executions`、`get_cache_snapshot`、`get_api_design_snapshot`，加 `SystemViewModel::get_external_api_connection_status`；照 Vue `loadSettingsData` 的时机读：启动结束时（有仓库、空库和缺失仓库都读）、打开设置页、插件面板「刷新」，拓展页还没有插件列表时也补读一次。插件列表换新（设置包读回，或安装、删除、启停之后）就用 `list_playlist_players` 重读播放器类型，和 Vue 同步前端插件注册表的时机一致。打开设置页还读一次设置目录里的应用设置（`SettingsLoaded`）。安装、删除、启停、配置读写和数据目录走同一个 `PluginViewModel`。外部连接导出走 `SystemViewModel::write_binary_file`。仓库动作列表走 `RepositoryInteractionViewModel::list_repository_actions`，执行走 `MutsukiTaskViewModel::execute` 的 `momobako.repository.action.run`，完成后用 `FileBrowserViewModel::get_file_browser` 刷新当前目录。这些调用没有替身测试。圆角写到设置目录旁边的 `corners.json`，缺文件或坏 JSON 用平台默认，用户改过才写回。音频播放器偏好仍走阶段 5 的偏好文件，不写入 `ApplicationSettings.default_playlist_player_type_id`。日志页打开时不读历史日志：读取分支挂在没有发送方的 `Navigate(ShellPage::Logs)` 上，见 [迁移边界](./nana-migration.md) 的「接线缺口」。标了「已离屏」的行写明场景。
 
 设置页在页面是设置或设置错误时出现。动作、工具页和日志还要求启动就绪且主区有仓库；任务弹层只要侧栏在。工具页从空列表开始，读到插件清单后按清单里的工具页声明填上。剪贴板写入系统剪贴板，插件目录定位交给宿主。保存对话框和打开对话框会发出 Nana 的 `OpenFileDialog`，系统对话框的结果仍要设备验证。插件页的安装、删除和启停都经 `PluginsReplaced` 回写列表，不切页。设置页读到插件配置时留在设置页。非法数字不提交。日志里的插件和仓库选项按字典序。
 
@@ -197,7 +197,7 @@
 | `useCornerStyle` 圆角 | 样式或半径 | 写入 `corners.json` | 只接受 smooth 和 round；半径钳在 0–20；未知样式和坏数字忽略；缺文件不立刻写回 | “平滑” / “普通” | 已测试（未离屏） |
 | `Settings.vue` 后端计数 | 仓库列表成功 | 无 | 按后端插件累计，保留首次出现的顺序 | “本地 (2)” / “无” | 已测试（未离屏） |
 | `Settings.vue` 外部连接 | 复制或导出 | 有路径时 `write_binary_file`，没有替身；复制交给宿主剪贴板；导出先发 `OpenFileDialog` | 空值不复制；令牌取前 10 和后 6 位；取消导出不写文件；写出成功后记文件名；剪贴板写入失败才显示失败文案 | “Token 已复制。” / “复制失败：系统剪贴板写入失败” / “external-api.json 已导出。” / “导出失败：{原因}” | 已测试（未离屏） |
-| `Settings.vue` 设置包 | 打开设置页，或拓展页还没有插件列表 | 五项读取（插件、钩子记录、缓存、API 设计、外部连接），没有替身 | 任一失败则五份都不写入，保留上一份 | 插件管理面板的错误条写原文，例如“读取插件目录失败：拒绝访问。 (os error 5)” | 已离屏（`settings-error`，只走全败分支） |
+| `Settings.vue` 设置包 | 启动结束、打开设置页、插件面板「刷新」，或拓展页还没有插件列表 | 五项读取（插件、钩子记录、缓存、API 设计、外部连接），没有替身；读回后重读播放器类型 | 任一失败则五份都不写入，保留上一份 | 插件管理面板的错误条写原文，例如“读取插件目录失败：拒绝访问。 (os error 5)” | 已离屏（`settings-error`，只走全败分支） |
 | `repository.select` | 插件事件带来仓库 id | 非空白时走现有仓库选择 | 空白忽略，当前仓库不变 | 当前仓库不变 | 已记账（`AdminMessage::SelectRepository` 没有发送方，也没有测试） |
 | `PluginManagerPanel.vue` 分组和搜索 | 插件列表或关键词 | 无 | 分类顺序是来源、库类型、解析、预览、服务、未分类；未知分类进未分类；搜索不区分大小写 | “3 个插件” | 已测试（未离屏） |
 | `PluginManagerPanel.vue` 删除 | 用户插件确认，或非用户插件 | `delete_plugin`，没有替身 | 先进入待确认，取消不请求；非用户插件忽略；成功文案在列表替换后出现 | 确认框标题“删除插件”，按钮“删除”（忙时“删除中...”） / “插件已删除。” | 已测试（未离屏） |

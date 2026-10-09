@@ -63,8 +63,8 @@ pub(crate) enum RouteKey {
 }
 
 impl RouteKey {
-    /// 按 ViewModel 取当前路由。有仓库时按面板分：文件、回收站和智能文件夹是文件路由，停在播放集页时
-    /// 其余面板都显示播放集路由。
+    /// 按 ViewModel 取当前路由。有仓库时按面板分：文件、回收站和智能文件夹是文件路由，其余面板各是
+    /// 一条路由。页面身份只区分设置页，其余的（播放集页、插件设置页、任务页）只给验收场景起名用。
     pub(crate) fn of(model: &ShellViewModel) -> Self {
         let settings_page = matches!(model.page, ShellPage::Settings | ShellPage::SettingsError);
         let panel = model.workspace.panel;
@@ -76,7 +76,6 @@ impl RouteKey {
             MainRegion::EmptyRepository => Self::Empty,
             MainRegion::HasRepository => match panel {
                 WorkspacePanel::Files | WorkspacePanel::Trash | WorkspacePanel::SmartFolder => Self::Files,
-                _ if model.page == ShellPage::Playlists => Self::Playlists,
                 WorkspacePanel::Playlist => Self::Playlists,
                 WorkspacePanel::Logs => Self::Logs,
                 WorkspacePanel::Extensions => Self::Extensions,

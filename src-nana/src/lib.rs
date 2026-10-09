@@ -241,11 +241,7 @@ impl ApplicationState for MomoBakoApplication {
                 ..RuntimeProgramUpdate::default()
             };
         }
-        match app_dispatch::dispatch_services(self, &message, context) {
-            app_dispatch::Route::Reduce => {}
-            app_dispatch::Route::Replace(next) => return self.update(next, windows, context),
-            app_dispatch::Route::Stop => return RuntimeProgramUpdate::redraw(*id),
-        }
+        app_dispatch::dispatch_services(self, &message, context);
         let snapshot_repo_id = app_dispatch::snapshot_repo(&message);
         self.shell.reduce(message);
         app_dispatch::after_snapshot(self, snapshot_repo_id, context);
@@ -453,15 +449,6 @@ fn dispatch_workspace_effects(
                         "资源库删除任务提交失败：{error}"
                     ))));
                 }
-            }
-            WorkspaceEffect::OpenSourceSettings => {
-                let Some(services) = app.services.as_ref() else {
-                    eprintln!("Nana 来源设置需要领域服务，当前服务未启动");
-                    app.shell
-                        .reduce(ShellMessage::SystemStatusLoaded(Err("领域服务未启动".into())));
-                    continue;
-                };
-                app_dispatch::schedule_settings_load(services, context);
             }
             WorkspaceEffect::RefreshRepositoriesSilent => {
                 shell::workspace_refresh::dispatch_silent_list(app, context);

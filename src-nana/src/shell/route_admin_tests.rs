@@ -422,7 +422,7 @@ fn switching_between_resident_routes_matches_a_fresh_mount() {
         harness.flush();
         harness.assert_same_as_fresh_mount();
     }
-    harness.apply(ShellMessage::Navigate(ShellPage::Settings));
+    harness.apply(ShellMessage::OpenSettings);
     harness.model.admin.take_effects();
     harness.flush();
     assert!(harness.keyed("settings-scroll").is_some(), "没有进设置页");
