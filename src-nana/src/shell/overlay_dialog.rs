@@ -246,8 +246,7 @@ fn frame(key: &'static str, placed: Signal<bool>, host: EntityRef<OverlayHost>, 
 ///
 /// - 压暗：NanaUI 的遮罩是线性空间里的 45% 黑，只压到 Vue（sRGB 里的 45% 黑）的一部分。下面再铺
 ///   一层 51.3% 的黑（不随主题变化），两层合起来把底色压到线性亮度的 `0.55 × 0.487 ≈ 0.55^2.2`。
-/// - 模糊：Vue 是 `blur(2px)`，CSS 里 2px 是高斯的标准差；NanaUI 背景模糊的着色器取 `半径 / 3`
-///   作标准差，所以半径写 6。
+/// - 模糊：Vue 是 `blur(2px)`，NanaUI 的背景模糊和 CSS 一样把半径当高斯标准差，照写 2。
 ///
 /// 对话框激活的那一帧（`placed` 置真）从透明淡入，时长和曲线跟框架给对话框表面的淡入一致，
 /// 两层一起出现。不挡点击：点外面仍由宿主变成关闭请求。NanaUI 补上遮罩的取色和模糊语义后删掉。
@@ -272,8 +271,8 @@ fn veil(placed: Signal<bool>) -> AnyView {
 
 /// 补色层的不透明度：`1 - 0.55^2.2 / 0.55`。
 const VEIL_ALPHA: f32 = 0.513;
-/// 补色层的背景模糊半径：标准差 2px（`blur(2px)`）的三倍。
-const VEIL_BLUR: f32 = 6.0;
+/// 补色层的背景模糊：CSS `blur(2px)`，2px 是高斯标准差。
+const VEIL_BLUR: f32 = 2.0;
 
 /// 补色层的不透明度：对话框激活前是 0，激活后是 1，改动时按 [`veil`] 声明的过渡淡入。
 struct VeilOpacity;
