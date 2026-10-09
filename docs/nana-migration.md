@@ -36,13 +36,13 @@ cargo test -p momobako-nana --test offscreen_acceptance -- --nocapture
 - 内容分三块，各在自己的模块里，实现同一个接口 `ShellPart`（挂载、同步、是否需要重挂、组合延后）：侧栏 `view_part_sidebar.rs`，主区 `view_part_primary.rs`，浮层 `view_part_overlay.rs`。有侧栏时侧栏和主区放进工作区的资源区和主区，工作区是 AppShell 的 body；主区独占时主区自己是 body；浮层是 AppShell 的 overlay。
 - 侧栏仍整块重挂，但只在 `SidebarProjection`（侧栏视图读到的全部状态）变了时才重挂。
 - 主区外框常驻，里面用 `dynamic` 按 `RouteKey`（启动、设置、文件、搜索、播放集、日志、拓展、动作、丢失、空库……）切换路由分支，每个路由的入口在自己的 `route_*.rs`。启动页已改成常驻（`route_startup.rs`），是改常驻的样板；其余路由仍由旧视图函数建出，ViewModel 版本变了只重挂当前分支：同一路由里当场换掉路由容器里的内容，换路由时同步挂好新内容、下一次刷新换出新分支时交接。
-- 浮层按 `OverlayKey`（哪个对话框、弹层或右键菜单）换整块，没有浮层时槽位为空。
+- 浮层按 `OverlayIdentity`（哪个对话框、弹层或右键菜单，加上它结构上的变化）换块，身份不变时常驻、只经会话写信号，没有浮层时槽位为空。所有对话框（侧栏、文件页、导出、插件删除、关闭确认）都走统一对话框框架：NanaUI `Dialog` / `ConfirmDialog` 挂在 `OverlayHost` 下、由框架激活，关闭手势只发关闭消息，开合由归约决定。
 - 重挂前后在各块的根下面记下并找回焦点、选区和滚动。焦点在某块里而且输入法还有预编辑时，这块延后重挂，`prepare` 每帧检查，组合结束后按最新状态补挂。
 - `ShellViewModel::revision` 是状态版本：每次归约加一，归约之外改了界面要读的状态、标脏（`mark_surface_dirty`）时也加一，整块重挂的内容按它判断要不要重挂。
 - 动效时钟、播放进度和侧栏淡入的投影在 `src-nana/src/shell/hot.rs`，结果写进信号，内容里的节点绑定这些信号。`prepare` 里只有动效帧和播放推进时只写信号、不重挂；这一帧经过归约、标了脏或者工作台排法要换时才整体同步，指针手势进行中不重挂。
-- 组合控件给槽位根节点打的布局补丁只在它自己投影时写，所以槽位根节点上不放绑定：浮层动效绑在铺满浮层根的内层上；侧栏宽度由 `ShellView` 直接写进工作区，写完让 AppShell 重新投影一次。
+- 组合控件给槽位根节点打的布局补丁只在它自己投影时写，所以槽位根节点上不放绑定：弹层动效绑在铺满浮层根的内层上，对话框的开合动效由 NanaUI 自己播（遮罩补色层用隐式过渡跟着淡入）；侧栏宽度由 `ShellView` 直接写进工作区，写完让 AppShell 重新投影一次。
 - `update` 和 `prepare` 里只写信号，不调用 `flush_reactive`；刷新由输入路由和帧开头完成。
-- Escape 走 `ApplicationState::input_event`：运行时没处理掉的 Escape 按下，按 ViewModel 里还开着的层（`escape_layer`）发一条关闭消息，焦点在哪都一样。系统文件拖放目标在视图里用 `on_mount` 登记，对话框下拉框的无障碍名用 `.labelled_by` 声明，挂载后不再扫描文档补登。
+- Escape：激活的对话框由运行时直接拿到、发自己的关闭请求；其余的层走 `ApplicationState::input_event`：运行时没处理掉的 Escape 按下，按 ViewModel 里还开着的层（`escape_layer`）发一条关闭消息，焦点在哪都一样。系统文件拖放目标在视图里用 `on_mount` 登记，对话框下拉框的无障碍名用 `.labelled_by` 声明，挂载后不再扫描文档补登。
 
 `mount_shell` 留给验收文档和测试：文档里已经有它挂过的壳层就整体同步，否则新挂一棵。
 
