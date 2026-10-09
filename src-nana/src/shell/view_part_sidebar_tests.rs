@@ -187,21 +187,24 @@ fn playlist_rows_follow_the_list_by_id() {
     harness.assert_same_as_fresh_mount();
 }
 
-/// 收起侧栏再展开：侧栏整块重挂一次，按当前状态建，信号不重建，之后照常只改字段。
+/// 收起侧栏再展开：侧栏不重建，收起时跟着工作区停放、照常写信号，展开后原样回来、跟上收起期间的变化。
 #[test]
-fn collapsing_and_expanding_rebuilds_from_the_signals() {
+fn collapsing_and_expanding_keeps_the_sidebar() {
     let mut harness = ShellHarness::mount(scene("live-files-plain"));
+    let root = harness.sidebar_root().expect("工作台里有侧栏");
+    let switcher = harness.keyed("repository-switcher").expect("仓库头");
     harness.apply(ShellMessage::ToggleSidebar);
     for _ in 0..30 {
         harness.frame();
     }
-    assert!(harness.sidebar_root().is_none(), "收起后没有侧栏");
+    assert!(harness.keyed("repository-switcher").is_none(), "收起后侧栏不在文档里");
     harness.apply(sidebar(SidebarMessage::ToggleFolder("assets".into())));
     harness.apply(ShellMessage::ToggleSidebar);
     for _ in 0..30 {
         harness.frame();
     }
-    assert!(harness.sidebar_root().is_some(), "展开后侧栏回来");
+    assert_eq!(harness.sidebar_root(), Some(root), "展开后还是原来的侧栏");
+    assert_eq!(harness.keyed("repository-switcher"), Some(switcher), "侧栏里的节点不该换");
     assert!(harness.keyed("folder-row-assets%2Fcovers").is_some(), "收起期间展开的目录要跟上");
     harness.assert_same_as_fresh_mount();
     apply_keeping_nodes(&mut harness, ShellMessage::Navigate(ShellPage::Settings), "展开后进设置页");

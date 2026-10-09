@@ -1,7 +1,7 @@
 //! 主区块的回归：路由键怎么取、路由容器和整列填充一样排、换路由只换主区当前分支，
 //! 侧栏、浮层和主区外框都不动。
 
-use nana_ui::runtime::Stack;
+use nana_ui::runtime::{Entity, ScrollOffset, ScrollView, Stack};
 
 use super::RouteKey;
 use crate::shell::view_harness::ShellHarness;
@@ -86,22 +86,50 @@ fn switching_routes_rebuilds_only_the_current_primary_branch() {
     harness.assert_same_as_fresh_mount();
 }
 
-/// 收起侧栏换成主区独占：外框整块重挂，外面多一层壳层底色；再展开回到工作台。每步都和新挂的一样。
+/// 收起侧栏换成主区独占、再展开回到工作台：主区外框挪进壳层底色又挪回工作区，外框、分支、输入框和
+/// 侧栏一个都不重建，滚动位置和输入框的焦点留着；每一步都和新挂的一样。
 #[test]
-fn a_layout_change_remounts_the_primary_frame() {
-    let mut harness = ShellHarness::mount(scene("live-files-plain"));
+fn a_layout_change_moves_the_frame_without_rebuilding() {
+    let mut harness = ShellHarness::mount(ShellViewModel::for_page(ShellPage::Settings));
     let (_, stage) = harness.content_roots();
-    harness.apply(ShellMessage::ToggleSidebar);
-    for _ in 0..30 {
-        harness.frame();
+    let stage = stage.expect("主区外框");
+    let sidebar = harness.sidebar_root().expect("工作台里有侧栏");
+    let branch = harness.route_branch();
+    let input = harness.input_within("admin-plugin-keyword");
+    let scroll = Entity::<ScrollView>::from_stable_id(harness.keyed("settings-scroll").expect("设置页滚动区"));
+    harness.focus(input);
+    harness.window.document.context_mut().scroll_to(scroll, ScrollOffset { x: 0.0, y: 200.0 }).expect("滚动");
+    harness.flush();
+    let scrolled = |harness: &ShellHarness| harness.document().context().world().scroll_offset(scroll.stable_id()).map_or(0.0, |offset| offset.y);
+    let offset = scrolled(&harness);
+    assert!(offset > 100.0, "设置页要能滚：{offset}");
+    let remounts = harness.view_stats().remounts;
+
+    for expanded in [false, true] {
+        harness.apply(ShellMessage::ToggleSidebar);
+        for _ in 0..30 {
+            harness.frame();
+        }
+        let solo = harness.content_roots().1.expect("主区槽位里的根");
+        if expanded {
+            assert_eq!(solo, stage, "展开后外框自己回到工作区的主区");
+            assert_eq!(harness.sidebar_root(), Some(sidebar), "展开后侧栏原样回来，不重建");
+            assert!(harness.keyed("repository-switcher").is_some());
+        } else {
+            assert_ne!(solo, stage, "主区独占时槽位里是壳层底色");
+            let world = harness.document().context().world();
+            assert_eq!(world.parent_id(stage), Some(solo), "外框挪进壳层底色");
+            assert!(harness.keyed("repository-switcher").is_none(), "收起后侧栏不在文档里");
+        }
+        assert_eq!(harness.route_branch(), branch, "换排法不该重建路由分支");
+        assert_eq!(harness.input_within("admin-plugin-keyword"), input, "换排法不该重建输入框");
+        assert_eq!(harness.focused(), Some(input), "换排法以后焦点回到原来的输入框");
+        assert!((scrolled(&harness) - offset).abs() < 0.5, "换排法以后滚动位置留着");
+        assert_eq!(harness.view_stats().remounts, remounts, "换排法不该重挂任何内容");
+        // 滚动位置是界面状态，新挂的文档在顶上：滚回顶上和新挂的比，再滚回去接着换排法。
+        harness.window.document.context_mut().scroll_to(scroll, ScrollOffset { x: 0.0, y: 0.0 }).expect("滚回顶上");
+        harness.assert_same_as_fresh_mount();
+        harness.window.document.context_mut().scroll_to(scroll, ScrollOffset { x: 0.0, y: offset }).expect("滚回原处");
+        harness.flush();
     }
-    assert!(harness.sidebar_root().is_none(), "收起后没有侧栏");
-    assert_ne!(harness.content_roots().1, stage, "排法变了外框要重挂");
-    harness.assert_same_as_fresh_mount();
-    harness.apply(ShellMessage::ToggleSidebar);
-    for _ in 0..30 {
-        harness.frame();
-    }
-    assert!(harness.sidebar_root().is_some(), "展开后侧栏回来");
-    harness.assert_same_as_fresh_mount();
 }
