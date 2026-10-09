@@ -4,12 +4,13 @@
 //! 都不能换掉输入框节点、打断预编辑；组合结束后延后的浮层按最新状态补挂，焦点回到输入框。
 //! 二是热路径：动效帧和播放推进只改绑定的字段，内容一次都不重挂。
 //! 三是一致性：一串消息增量同步之后，文档和同一 ViewModel 新挂的文档无障碍树相同。
+//! 四是收敛：视图量到尺寸后发回的消息归约、同步几轮就停，不在每帧重建。
 
 use crate::backend::services::repository::{SystemLogLocation, SystemLogRecord, SystemLogSource, TaskProgressSnapshot};
 use crate::shell::host_events::HostMessage;
 use crate::shell::player::{PlayerMessage, QueueItem};
 use crate::shell::view_harness::ShellHarness;
-use crate::shell::{GapMessage, InspectMessage, ShellMessage, ShellViewModel, SidebarMessage, ThumbnailFrame};
+use crate::shell::{GapMessage, InspectMessage, ShellMessage, ShellPage, ShellViewModel, SidebarMessage, ThumbnailFrame};
 
 fn scene(name: &str) -> ShellViewModel {
     crate::shell::acceptance_gap_models()
@@ -323,5 +324,47 @@ fn wav_item(path: &std::path::Path) -> QueueItem {
         player_label: "WAV".into(),
         file_class: "audio".into(),
         thumbnail_path: None,
+    }
+}
+
+/// 视图量到尺寸后发回的消息（播放条宽、文件列表宽）归约、同步以后就该停下：真窗口每帧都在量，
+/// 停不下来就是每帧在重建。播放集页曾经按状态版本整页重挂，播放条一回报宽度就整页重来，再回报一次。
+/// 每个验收场景挂好后三轮之内没有新的回报。
+#[test]
+fn size_feedback_settles_in_every_scene() {
+    let pages = [
+        ShellPage::Loading,
+        ShellPage::EmptyRepository,
+        ShellPage::Error,
+        ShellPage::FileList,
+        ShellPage::SelectedFile,
+        ShellPage::Playlists,
+        ShellPage::PluginSettings,
+        ShellPage::TaskRunning,
+        ShellPage::PlaybackRunning,
+        ShellPage::TaskCancelling,
+        ShellPage::Conflict,
+        ShellPage::UnsavedEdit,
+        ShellPage::Settings,
+        ShellPage::SettingsError,
+        ShellPage::Logs,
+    ];
+    let mut scenes = pages.map(|page| (format!("{page:?}"), ShellViewModel::for_page(page))).to_vec();
+    scenes.extend(crate::shell::acceptance_gap_models().into_iter().map(|(name, model)| (name.to_string(), model)));
+    for (name, model) in scenes {
+        let mut harness = ShellHarness::mount(model);
+        let mut rounds = 0;
+        loop {
+            let messages = harness.take_messages();
+            if messages.is_empty() {
+                break;
+            }
+            rounds += 1;
+            assert!(rounds <= 3, "{name}：尺寸回报三轮还没停，视图在反复重建");
+            for message in messages {
+                harness.apply(message);
+            }
+            harness.flush();
+        }
     }
 }
