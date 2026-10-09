@@ -176,6 +176,7 @@ pub(super) fn finish_load(player: &mut PlayerState, item_id: &str, generation: u
             player.fail_session(error);
         }
     }
+    player.resume = None;
     player.persist_if_needed();
 }
 
@@ -189,10 +190,19 @@ fn install_clip(player: &mut PlayerState, parts: crate::shell::MediaParts) {
     player.session.current_time_ms = 0;
     player.session.status = parts.session.status;
     player.loaded_item = player.current_id.clone();
+    let resume = take_resume(player);
     if let Some(pcm) = parts.pcm {
         player.wav.install_preview(pcm);
         player.cursor_item = player.current_id.clone();
         player.apply_cursor_volume();
+        if let Some(position) = resume {
+            let session = player.session.clone();
+            let (session, error) = wav_player::drive(Output::Cursor, &player.wav, session, Action::Seek(position));
+            player.session = session;
+            if let Some(error) = error {
+                eprintln!("Nana 恢复播放进度失败：{error}");
+            }
+        }
         if player.wants_playing {
             let session = player.session.clone();
             let (session, error) = wav_player::drive(Output::Cursor, &player.wav, session, Action::Play);
@@ -204,6 +214,9 @@ fn install_clip(player: &mut PlayerState, parts: crate::shell::MediaParts) {
         }
     } else {
         player.wav.clear();
+        if let Some(position) = resume {
+            player.session.current_time_ms = position;
+        }
         if player.wants_playing {
             player.session.status = "playing".into();
         }
@@ -211,8 +224,20 @@ fn install_clip(player: &mut PlayerState, parts: crate::shell::MediaParts) {
     player.can_play = player.session.status != "failed";
 }
 
-/// 解得出就留下真实宽高。
+/// 恢复会话时等着的位置：正是装好的这一项、能跳转时取出来，夹在时长以内。用过或不适用都作废。
+/// 和 Vue `loadCurrentItem` 一样，播放器不支持跳转时从头放。
+fn take_resume(player: &mut PlayerState) -> Option<u64> {
+    let (item_id, position) = player.resume.take()?;
+    if player.current_id.as_deref() != Some(item_id.as_str()) || !player.session.can_seek {
+        return None;
+    }
+    let position = player.session.duration_ms.map_or(position, |duration| position.min(duration));
+    (position > 0).then_some(position)
+}
+
+/// 解得出就留下真实宽高。图片幻灯片不能跳转，恢复会话时从头放，和 Vue 一样。
 fn install_still(player: &mut PlayerState, item: &QueueItem, pixels: super::super::PreviewPixels) {
+    player.resume = None;
     player.session.status = if player.wants_playing { "playing" } else { "paused" }.into();
     player.can_play = true;
     player.loaded_item = player.current_id.clone();

@@ -205,6 +205,8 @@ pub struct PlayerState {
     cursor_item: Option<String>,
     /// 已经读好的条目（音视频或图片，有没有 PCM 都算）。是当前项时控制直接生效。
     loaded_item: Option<String>,
+    /// 恢复会话时要接着放的条目和位置。这一项装好、又能跳转时跳过去，换了条目就作废。
+    resume: Option<(String, u64)>,
 }
 
 impl Default for PlayerState {
@@ -250,6 +252,7 @@ impl Default for PlayerState {
             load_generation: 0,
             cursor_item: None,
             loaded_item: None,
+            resume: None,
         }
     }
 }
@@ -406,10 +409,16 @@ impl PlayerState {
         self.mode = stored.mode;
         self.wants_playing = stored.is_playing;
         self.session.volume = stored.volume;
-        self.session.current_time_ms = stored.current_time_ms;
-        self.session.duration_ms = Some(stored.duration_ms);
         self.queue = detail.items.iter().map(|item| queue_item_from_playlist(item, &detail.playlist)).collect();
         self.play_item(&stored.current_item_id, stored.is_playing);
+        // Vue `setActivePlaylist(.., { restore: true })` 沿用存下的进度和时长，装好以后能跳转就跳过去；
+        // 装载期间播放条显示的也是存下的进度，会话文件不被装载清零。
+        self.session.current_time_ms = stored.current_time_ms;
+        self.session.duration_ms = (stored.duration_ms > 0).then_some(stored.duration_ms);
+        if stored.current_time_ms > 0 && self.session.status == "loading" {
+            self.resume = Some((stored.current_item_id.clone(), stored.current_time_ms));
+        }
+        self.persist_if_needed();
     }
 
     fn session_can_restore(&self, stored: &StoredSession, detail: &PlaylistDetail) -> bool {
@@ -459,6 +468,7 @@ impl PlayerState {
             self.activity = "当前没有可播放条目".into();
             return;
         };
+        self.resume = None;
         self.current_id = Some(item.id.clone());
         if self.history.last().map(String::as_str) != Some(item.id.as_str()) {
             self.history.push(item.id.clone());
