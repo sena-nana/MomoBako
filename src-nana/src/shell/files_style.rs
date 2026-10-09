@@ -301,6 +301,11 @@ pub(crate) fn hex_rgba(hex: &str) -> Option<[f32; 4]> {
     Some([channel(0)?, channel(2)?, channel(4)?, 1.0])
 }
 
+/// 色板里有没有能画出来的颜色：一个都没有时色板整行不占位，和建色块时跳过不合法颜色同一规则。
+pub(crate) fn any_color(colors: &[String]) -> bool {
+    colors.iter().any(|color| hex_rgba(color).is_some())
+}
+
 /// 拼进组装键的用户文本。NanaUI 用 `/` 连接键路径，键里带 `/` 会让整棵树挂载失败；
 /// 反斜杠一并换成 `∕`，和条目键的写法一致。
 pub(crate) fn key_part(text: &str) -> String {

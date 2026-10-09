@@ -5,7 +5,7 @@
 
 use std::collections::BTreeMap;
 
-use nana_ui::runtime::view::{text, widget, AnyView, IntoView};
+use nana_ui::runtime::view::{fields, text, untrack, widget, AnyView, IntoView, Signal};
 use nana_ui::runtime::{AlignSpec, EmptyState, LabeledValue, LengthSpec, List, ListItem, RadiusTier, SemanticColorRole, SettingsCard, Stack, Text};
 
 use super::ShellViewModel;
@@ -105,32 +105,45 @@ pub(super) fn ready_page_label(total: usize) -> String {
     format!("{total} 页 PDF")
 }
 
-/// 预览列上方的种类、扩展名和页数。页数用已经算出的总页数，写成「N 页 PDF」。
-pub(super) fn document_toolbar(model: &ShellViewModel, kind: &str) -> Option<AnyView> {
-    let kind = kind.trim();
+/// PDF 和 Office 预览列上方那条顶栏的内容：种类、扩展名和页数。
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub(super) struct DocumentBar {
+    kind: String,
+    extension: String,
+    pages: Option<String>,
+}
+
+/// 预览列上方的种类、扩展名和页数。页数用已经算出的总页数，写成「N 页 PDF」。三样都没有时没有顶栏。
+pub(super) fn document_bar(model: &ShellViewModel, kind: &str) -> Option<DocumentBar> {
+    let kind = kind.trim().to_string();
     let extension = document_extension(model);
     let pages = model.inspect.page_nav().map(|(_, total)| ready_page_label(total));
     if kind.is_empty() && extension.is_empty() && pages.is_none() {
         return None;
     }
+    Some(DocumentBar { kind, extension, pages })
+}
+
+/// 顶栏：一排描边小标签，第一枚是种类，正文色半粗。
+pub(super) fn document_toolbar_view(bar: &DocumentBar) -> AnyView {
     let mut chips = Vec::new();
-    if !kind.is_empty() {
-        chips.push(toolbar_chip(kind, "inspect-doc-kind", true));
+    if !bar.kind.is_empty() {
+        chips.push(toolbar_chip(&bar.kind, "inspect-doc-kind", true));
     }
-    if !extension.is_empty() {
-        chips.push(toolbar_chip(&extension, "inspect-doc-ext", false));
+    if !bar.extension.is_empty() {
+        chips.push(toolbar_chip(&bar.extension, "inspect-doc-ext", false));
     }
-    if let Some(pages) = pages {
-        chips.push(toolbar_chip(&pages, "inspect-doc-pages", false));
+    if let Some(pages) = &bar.pages {
+        chips.push(toolbar_chip(pages, "inspect-doc-pages", false));
     }
-    let bar = super::workbench::with_bottom_divider(
+    let row = super::workbench::with_bottom_divider(
         Stack::row(8.0)
             .align(AlignSpec::Center)
             .padding_xy(0.0, 8.0)
             .width(LengthSpec::Fill)
             .min_width(LengthSpec::Px(0.0)),
     );
-    Some(widget(bar).key("inspect-doc-toolbar").children(chips).into_any())
+    widget(row).key("inspect-doc-toolbar").children(chips).into_any()
 }
 
 fn document_extension(model: &ShellViewModel) -> String {
@@ -185,30 +198,53 @@ pub(super) fn archive_list(content: &str) -> AnyView {
     widget(Stack::column(8.0)).children(rows).into_any()
 }
 
-/// 预览右侧的类型、大小、硬链接和修改时间。标签在上，数值在下。
-/// Vue 统计没有「文件」标题，页数在翻页控件里，尺寸只留在标签组后面。
-pub(super) fn fact_column(facts: &FileFacts) -> AnyView {
-    let extension = if facts.extension.trim().is_empty() { "文件".to_string() } else { facts.extension.clone() };
-    let size = if facts.size_label.trim().is_empty() { "未知".to_string() } else { facts.size_label.clone() };
-    let modified = super::files::local_time::format_or(&facts.modified_at, "未记录");
-    let mut rows = vec![
-        stacked_value("类型", extension, "inspect-stat-type", false),
-        stacked_value("大小", size, "inspect-stat-size", true),
-    ];
-    let hardlink = hardlink_label(facts.hardlink_state.as_deref());
-    if !hardlink.is_empty() {
-        rows.push(stacked_value("硬链接", hardlink.to_string(), "inspect-stat-hardlink", true));
+/// 预览右侧事实卡的四行：类型、大小、硬链接（空时不占位）和修改时间。
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(super) struct FactsView {
+    extension: String,
+    size: String,
+    hardlink: String,
+    modified: String,
+}
+
+impl FactsView {
+    /// 从文件事实取四行的文字。
+    pub(super) fn of(facts: &FileFacts) -> Self {
+        Self {
+            extension: if facts.extension.trim().is_empty() { "文件".to_string() } else { facts.extension.clone() },
+            size: if facts.size_label.trim().is_empty() { "未知".to_string() } else { facts.size_label.clone() },
+            hardlink: hardlink_label(facts.hardlink_state.as_deref()).to_string(),
+            modified: super::files::local_time::format_or(&facts.modified_at, "未记录"),
+        }
     }
-    rows.push(stacked_value("修改时间", modified, "inspect-stat-modified", true));
+}
+
+/// 预览右侧的类型、大小、硬链接和修改时间。标签在上，数值在下，数值按字段绑定。
+/// Vue 统计没有「文件」标题，页数在翻页控件里，尺寸只留在标签组后面。
+pub(super) fn fact_column(facts: Signal<FactsView>) -> AnyView {
+    let read = move |pick: fn(&FactsView) -> String| move || facts.with(|view| pick(view));
     widget(Stack::column(12.0).width(LengthSpec::Fill).min_width(LengthSpec::Px(0.0)))
-        .children(rows)
+        .children((
+            stacked_value("类型", read(|view| view.extension.clone()), "inspect-stat-type", false, || true),
+            stacked_value("大小", read(|view| view.size.clone()), "inspect-stat-size", true, || true),
+            stacked_value("硬链接", read(|view| view.hardlink.clone()), "inspect-stat-hardlink", true, move || {
+                facts.with(|view| !view.hardlink.is_empty())
+            }),
+            stacked_value("修改时间", read(|view| view.modified.clone()), "inspect-stat-modified", true, || true),
+        ))
         .key("inspect-file-facts")
         .into_any()
 }
 
 /// Vue `asset-meta__row`：标签在上（11px 粗体弱色、字距 0.4），数值在下（14px 正文色，长值随处折行），
-/// 两者间距 6。`divided` 时行顶一条 border-soft 发丝线，线下留 12px。
-fn stacked_value(label: &str, value: String, key: &str, divided: bool) -> AnyView {
+/// 两者间距 6。`divided` 时行顶一条 border-soft 发丝线，线下留 12px；`shown` 为假时不占位。
+fn stacked_value(
+    label: &str,
+    value: impl Fn() -> String + Send + Clone + 'static,
+    key: &str,
+    divided: bool,
+    shown: impl Fn() -> bool + Send + 'static,
+) -> AnyView {
     let key = key.to_string();
     let mut column = Stack::column(6.0).width(LengthSpec::Fill).min_width(LengthSpec::Px(0.0));
     if divided {
@@ -221,15 +257,19 @@ fn stacked_value(label: &str, value: String, key: &str, divided: bool) -> AnyVie
     }
     let mut name = Text::new(label).color(SemanticColorRole::Faint).font_size(11.0).font_weight(700).line_height(17.05);
     std::sync::Arc::make_mut(&mut name.style.layout).letter_spacing = Some(0.4);
-    let mut shown = Text::new(value).color(SemanticColorRole::Text).font_size(14.0).line_height(21.7);
+    let mut text = Text::new(untrack(&value)).color(SemanticColorRole::Text).font_size(14.0).line_height(21.7);
     {
-        let layout = std::sync::Arc::make_mut(&mut shown.style.layout);
+        let layout = std::sync::Arc::make_mut(&mut text.style.layout);
         layout.min_width = Some(LengthSpec::Px(0.0));
         layout.overflow_wrap = Some(nana_ui_core::OverflowWrapSpec::Anywhere);
     }
     widget(column)
+        .visible(shown)
         .key(key.clone())
-        .children((widget(name).key(format!("{key}-label")), widget(shown).key(format!("{key}-value"))))
+        .children((
+            widget(name).key(format!("{key}-label")),
+            widget(text).prop::<String, fields::text::value>(value).key(format!("{key}-value")),
+        ))
         .into_any()
 }
 
@@ -260,9 +300,24 @@ fn plain_number(value: f64) -> String {
     if value.fract() == 0.0 { format!("{value:.0}") } else { value.to_string() }
 }
 
+/// 资源库扩展的一个区块：作品信息或歌词。元数据变了时整块按新内容重建。
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub(super) struct LibrarySection {
+    pub title: &'static str,
+    pub key: &'static str,
+    pub rows: Vec<LibraryRow>,
+}
+
+/// 区块里的一行：标签和值，或者一段正文（歌词）。
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub(super) enum LibraryRow {
+    Value { key: String, label: &'static str, value: String },
+    Body(String),
+}
+
 /// 作品字段、歌词状态或收听进度都画出 Vue 同名区块。
 /// 匹配到 ASMR 但没有歌词状态时写「未检测」，不补歌词正文。
-pub(super) fn library_sections(custom: &BTreeMap<String, String>) -> Vec<AnyView> {
+pub(super) fn library_sections(custom: &BTreeMap<String, String>) -> Vec<LibrarySection> {
     let asmr = matches_asmr(custom);
     if !asmr && !has_lyric_or_progress(custom) && !has_work_field(custom) {
         return Vec::new();
@@ -292,35 +347,35 @@ pub(super) fn library_sections(custom: &BTreeMap<String, String>) -> Vec<AnyView
         if shown.is_empty() {
             continue;
         }
-        rows.push(widget(LabeledValue::new(*label, shown)).key(format!("inspect-asmr-{key}")).into_any());
+        rows.push(LibraryRow::Value { key: (*key).to_string(), label, value: shown });
     }
     if asmr && present(custom, "lyricStatus").is_none() {
-        rows.push(widget(LabeledValue::new("歌词", "未检测")).key("inspect-asmr-lyricStatus").into_any());
+        rows.push(LibraryRow::Value { key: "lyricStatus".into(), label: "歌词", value: "未检测".into() });
     }
     if let Some(status) = listening_line(custom) {
-        rows.push(widget(LabeledValue::new("收听状态", status)).key("inspect-asmr-listeningStatus").into_any());
+        rows.push(LibraryRow::Value { key: "listeningStatus".into(), label: "收听状态", value: status });
     }
     if !rows.is_empty() {
-        sections.push(section("ASMR Metadata", "作品信息", "inspect-asmr-works", rows));
+        sections.push(LibrarySection { title: "作品信息", key: "inspect-asmr-works", rows });
     }
     if let Some(body) = lyric_body(custom) {
-        sections.push(section(
-            "ASMR Metadata",
-            "歌词",
-            "inspect-asmr-lyric",
-            vec![text(body).key("inspect-asmr-lyric-body").into_any()],
-        ));
+        sections.push(LibrarySection { title: "歌词", key: "inspect-asmr-lyric", rows: vec![LibraryRow::Body(body)] });
     }
     sections
 }
 
-fn section(eyebrow: &str, title: &str, key: &str, rows: Vec<AnyView>) -> AnyView {
+/// 一个资源库区块：眉题、标题和各行，放在设置卡片里。
+pub(super) fn library_card(section: LibrarySection) -> AnyView {
+    let key = section.key;
     let mut body = vec![
-        text(eyebrow.to_string()).key(format!("{key}-eyebrow")).into_any(),
-        text(title.to_string()).key(format!("{key}-title")).into_any(),
+        text("ASMR Metadata".to_string()).key(format!("{key}-eyebrow")).into_any(),
+        text(section.title.to_string()).key(format!("{key}-title")).into_any(),
     ];
-    body.extend(rows);
-    widget(SettingsCard::new(title.to_string())).children(body).key(key.to_string()).into_any()
+    body.extend(section.rows.into_iter().map(|row| match row {
+        LibraryRow::Value { key, label, value } => widget(LabeledValue::new(label, value)).key(format!("inspect-asmr-{key}")).into_any(),
+        LibraryRow::Body(body) => text(body).key("inspect-asmr-lyric-body").into_any(),
+    }));
+    widget(SettingsCard::new(section.title)).children(body).key(key).into_any()
 }
 
 /// 和 Vue `matchAsmrEntry` 一样：库类型、作品 ID 或 RJ 号任一存在。

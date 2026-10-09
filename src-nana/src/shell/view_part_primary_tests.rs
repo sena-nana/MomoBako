@@ -87,9 +87,10 @@ fn switching_routes_rebuilds_only_the_current_primary_branch() {
 }
 
 /// 旧视图路由里内容变了：只重挂当前分支，主区外框和侧栏不动；没变时什么都不重挂。
+/// 文件路由已经常驻，这里用仍是旧视图的搜索结果路由。
 #[test]
 fn a_legacy_route_update_remounts_only_its_branch() {
-    let mut harness = ShellHarness::mount(scene("live-files-plain"));
+    let mut harness = ShellHarness::mount(scene("search-results"));
     let sidebar = harness.sidebar_root();
     let (_, stage) = harness.content_roots();
     let branch = harness.route_branch();
