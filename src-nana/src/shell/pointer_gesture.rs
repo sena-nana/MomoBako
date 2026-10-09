@@ -29,7 +29,7 @@ pub fn observe_live_pointer(model: &mut ShellViewModel, document: &RuntimeDocume
     let world = context.world();
     let pressed = world.pointer_press(document_id, POINTER_ID);
     let position = context.pointer_position(document_id, POINTER_ID);
-    note_chrome_hover(model, world, document_id);
+    note_chrome_hover(model, world, document_id, position);
     if pressed.is_none() {
         release_gesture(model, world, document_id, position);
         return false;
@@ -175,8 +175,16 @@ fn directory_at(rows: &[RowMark], x: f32, y: f32, exclude: &str) -> Option<Strin
         .map(|row| row.path.clone())
 }
 
-fn note_chrome_hover(model: &mut ShellViewModel, world: &UiWorld, document_id: nana_ui::runtime::DocumentId) {
-    let hover = world.pointer_hover(document_id, POINTER_ID);
+fn note_chrome_hover(
+    model: &mut ShellViewModel,
+    world: &UiWorld,
+    document_id: nana_ui::runtime::DocumentId,
+    position: Option<(f32, f32)>,
+) {
+    // 整棵重挂后悬停目标随旧节点一起没了，指针不动就不会重新命中：按最后一次指针位置补命中。
+    let hover = world
+        .pointer_hover(document_id, POINTER_ID)
+        .or_else(|| position.and_then(|(x, y)| world.hit_test(document_id, x, y)));
     let over_tools = hover.is_some_and(|id| label_in(world, id, &["快捷方式", "快捷访问", "文件夹", "智能文件夹", "播放集"]));
     let over_footer = hover.is_some_and(|id| label_in(world, id, &["设置", "拓展", "日志"]) || footer_task(world, id));
     model.motion.set_tools_hover(over_tools);
@@ -186,10 +194,8 @@ fn note_chrome_hover(model: &mut ShellViewModel, world: &UiWorld, document_id: n
 fn label_in(world: &UiWorld, id: StableNodeId, labels: &[&str]) -> bool {
     let mut current = Some(id);
     while let Some(node) = current {
-        if let Some(text) = world.text(node) {
-            if labels.iter().any(|label| text == *label) {
-                return true;
-            }
+        if node_names(world, node).any(|name| labels.contains(&name)) {
+            return true;
         }
         current = world.parent_id(node);
     }
@@ -199,12 +205,20 @@ fn label_in(world: &UiWorld, id: StableNodeId, labels: &[&str]) -> bool {
 fn footer_task(world: &UiWorld, id: StableNodeId) -> bool {
     let mut current = Some(id);
     while let Some(node) = current {
-        if world.text(node).is_some_and(|text| text == "任务" || text.starts_with("任务 ")) {
+        if node_names(world, node).any(|name| name == "任务" || name.starts_with("任务 ")) {
             return true;
         }
         current = world.parent_id(node);
     }
     false
+}
+
+/// 节点的文字和无障碍名称。图标按钮没有文字，名称只在无障碍状态里。
+fn node_names(world: &UiWorld, node: StableNodeId) -> impl Iterator<Item = &str> {
+    world
+        .text(node)
+        .into_iter()
+        .chain(world.accessibility(node).and_then(|state| state.label.as_deref()))
 }
 
 /// 文件表面已经挂上时，行里应该有路径标记。
@@ -507,6 +521,22 @@ mod tests {
             .into_iter()
             .find(|(x, y)| contains(list, *x, *y) && rows.iter().all(|row| !contains(row.bounds, *x, *y)))
             .unwrap_or_else(|| panic!("列表里没有空白点：{list:?} {:?}", rows.iter().map(|row| row.bounds).collect::<Vec<_>>()))
+    }
+
+    /// Vue `.workspace-sidebar__footer:hover`：悬停任一底部入口，整排从半透明变成不透明。
+    #[test]
+    fn hovering_a_footer_button_lights_up_the_whole_footer() {
+        let mut model = files_model();
+        let mut window = mounted(&model);
+        let mut input = bind(&mut window);
+        assert!(model.motion.footer_opacity() < 1.0, "底部入口平时半透明");
+        let settings = labeled_center(&window, "设置");
+        pointer(&mut window, &mut input, PointerPhase::Move, settings.0, settings.1);
+        for _ in 0..40 {
+            prepare_motion(&mut model, &mut window);
+            window.document.flush(LayoutViewport::new(1200.0, 800.0), &mut NanaTextShaper::default()).expect("布局");
+        }
+        assert_eq!(model.motion.footer_opacity(), 1.0, "悬停底部入口时整排不透明");
     }
 
     #[test]
