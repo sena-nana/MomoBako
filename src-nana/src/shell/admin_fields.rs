@@ -36,11 +36,13 @@ fn field_row(model: &ShellViewModel, plugin: &PluginManifest, field: &ConfigFiel
     let plugin_id = plugin.plugin_id.as_str();
     let fkey = format!("{}-{key}", style::key_part(plugin_id));
     let boolean = field.field_type == "boolean";
+    // 不用 `style::capped`：中间列有 180 的下限，第一列权重过大时同一轮会把中间列冻在下限。
+    // 两列等权重，宽度够时第一列先停在 220，余下都给中间列。
     let columns = if boolean {
-        vec![style::capped(140.0, 220.0), GridTrack::Auto, GridTrack::Auto]
+        vec![GridTrack::MinMax { min_px: 140.0, fr: 1.0, max_px: Some(220.0) }, GridTrack::Auto, GridTrack::Auto]
     } else {
         vec![
-            style::capped(140.0, 220.0),
+            GridTrack::MinMax { min_px: 140.0, fr: 1.0, max_px: Some(220.0) },
             GridTrack::MinMax { min_px: 180.0, fr: 1.0, max_px: None },
             GridTrack::Auto,
         ]
@@ -96,12 +98,8 @@ fn control(model: &ShellViewModel, plugin_id: &str, field: &ConfigField, fkey: &
     match field.field_type.as_str() {
         "boolean" => {
             let checked = current.is_some_and(truthy);
-            let mut checkbox = Checkbox::new("", checked).disabled(disabled);
-            {
-                let layout = Arc::make_mut(&mut checkbox.style.layout);
-                layout.width = Some(LengthSpec::Px(18.0));
-                layout.height = Some(LengthSpec::Px(18.0));
-            }
+            // `.plugin-manager__settings-field input[type=checkbox]` 是 18 见方。
+            let checkbox = style::native_checkbox(Checkbox::new("", checked).disabled(disabled), 18.0);
             widget(checkbox)
                 .key(format!("admin-field-bool-{fkey}"))
                 .on_cx(move |_, event: &ToggleChanged, cx| {
