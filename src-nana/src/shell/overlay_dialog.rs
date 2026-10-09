@@ -5,9 +5,9 @@
 //! `DialogClosePolicy::requests_only()`：Escape、点外面和关闭位只在对话框上发一次
 //! `DialogCloseRequested`，这里把它换成调用方给的关闭消息，处理中（busy）时不发，开合由归约决定。
 //!
-//! 激活的时机：浮层块把内容挂成脱离树的一块，`ShellView` 之后才把它放进 AppShell 的浮层槽位，
-//! 挂载时的 `on_mount` 运行时宿主还不在树里。所以对话框旁边放一个 `when(placed, ..)`：浮层块挂好后
-//! 经 [`OverlaySession::placed`] 置真，下一次刷新建出分支，分支的 `on_mount` 运行时宿主已经在树里，
+//! 激活的时机：浮层块把内容挂成脱离树的一块，之后才把它放进浮层层，挂载时的 `on_mount` 运行时
+//! 宿主还不在树里。所以对话框旁边放一个 `when(placed, ..)`：浮层块放好后经
+//! [`OverlaySession::placed`] 置真，下一次刷新建出分支，分支的 `on_mount` 运行时宿主已经在树里，
 //! 这时激活。换下前经 [`OverlaySession::retire`] 让框架关掉对话框，焦点回到打开前的位置。
 //!
 //! 外观照 Vue `.modal-card` / `.dialog-card__*`：每个对话框照自己的宽度类给 CSS 宽度，危险对话框用
@@ -22,7 +22,7 @@ use nana_ui::runtime::view::{
 };
 use nana_ui::runtime::{
     Activate, AlignSpec, AppContext, Button, ConfirmDialog, ConfirmIntent, Dialog, DialogCloseRequested, IconButton,
-    IconGlyph, LengthSpec, ListItem, NodeStyle, OverlayHost, RadiusTier, SemanticColorRole, Stack, Text,
+    IconGlyph, LengthSpec, ListItem, NodeStyle, OverlayHost, PositionSpec, RadiusTier, SemanticColorRole, Stack, Text,
 };
 use nana_ui::{ButtonKind, ControlSize, Icon};
 use nana_ui_core::{DialogClosePolicy, DialogSize};
@@ -211,20 +211,26 @@ fn title_icon(icon: Icon, danger: bool) -> AnyView {
     widget(IconGlyph::new(icon).size(TITLE_ICON_SIZE).role(role)).key("dialog-icon").into_any()
 }
 
-/// 浮层槽位里的一块：铺满的外层（AppShell 给它打铺满窗口的补丁，有子节点时挡住下面的点击，
-/// 在激活前也不会漏点），里面是对话框的宿主和激活用的结构块。遮罩的颜色、背景模糊和开合动效
-/// 归主题（`appearance.rs` 的效果令牌和对话框配方）。外层上不放绑定：AppShell 给它打的布局补丁
-/// 只在自己投影时写，绑定重投影会把补丁冲掉。
+/// 浮层层里的一块：绝对定位铺满浮层层（浮层层有块时挡住下面的点击，在激活前也不会漏点），里面是
+/// 对话框的宿主和激活用的结构块。遮罩的颜色、背景模糊和开合动效归主题（`appearance.rs` 的效果令牌
+/// 和对话框配方）。
 fn frame(key: &'static str, host: EntityRef<OverlayHost>, surface: AnyView, activator: AnyView) -> AnyView {
-    let mut style = NodeStyle::default();
+    let mut fill = NodeStyle::default();
     {
-        let layout = Arc::make_mut(&mut style.layout);
+        let layout = Arc::make_mut(&mut fill.layout);
         layout.width = Some(LengthSpec::Fill);
         layout.height = Some(LengthSpec::Fill);
     }
-    widget(Stack::column(0.0))
+    let block = Stack::column(0.0).with_layout(|layout| {
+        layout.position = PositionSpec::Absolute;
+        layout.offset_top = Some(LengthSpec::Px(0.0));
+        layout.offset_left = Some(LengthSpec::Px(0.0));
+        layout.width = Some(LengthSpec::Percent(100.0));
+        layout.height = Some(LengthSpec::Percent(100.0));
+    });
+    widget(block)
         .key(key)
-        .children((widget(OverlayHost::new().style(style)).entity_ref(host).key("dialog-host").children((surface,)), activator))
+        .children((widget(OverlayHost::new().style(fill)).entity_ref(host).key("dialog-host").children((surface,)), activator))
         .into_any()
 }
 

@@ -1,16 +1,19 @@
-//! 浮层块：对话框、弹层和右键菜单，放进 AppShell 的 overlay 槽位，同一时刻最多一层。
+//! 浮层块：对话框、弹层和右键菜单，同一时刻最多一层。
+//!
+//! 浮层层（[`layer`]）在骨架挂载时直接交给 AppShell 的 `.overlay(..)`，之后一直在；各块是它的
+//! 子节点。AppShell 盯着它的子节点：有没隐藏的子节点时挡住下面的点击，空了就放开，增删子节点
+//! 不用重新装配。
 //!
 //! 按 [`OverlayIdentity`] 换块：身份是「现在是哪一种浮层」加上这种浮层结构上的变化（文件对话框的
 //! 种类、仓库弹层的页、右键菜单的目标和落点）。身份不变时浮层常驻：打开期间内容变了，只经各浮层
-//! 登记的会话（[`session::OverlaySession`]）写信号、改绑定的字段，不重挂。没有浮层时槽位为空，
-//! AppShell 不再挡住下面的点击。
+//! 登记的会话（[`session::OverlaySession`]）写信号、改绑定的字段，不重挂。
 //!
 //! 对话框都从统一框架 [`dialog`] 建：NanaUI `Dialog` / `ConfirmDialog` 挂在自己的 `OverlayHost`
 //! 下，开合、焦点和无障碍交给框架，关闭手势只发关闭消息。每种浮层的入口函数在 [`overlay_branch`]
 //! 里登记。
 
-use nana_ui::runtime::view::AnyView;
-use nana_ui::runtime::{FrameworkError, MountedView, RuntimeDocument, StableNodeId};
+use nana_ui::runtime::view::{widget, AnyView, IntoView, NodeRef};
+use nana_ui::runtime::{AppContext, FrameworkError, MountedView, RuntimeDocument, Stack, StableNodeId};
 
 use super::remount_state;
 use super::sidebar::PopoverMode;
@@ -148,7 +151,7 @@ fn entry_menu_structure(model: &ShellViewModel) -> String {
 
 /// 一种浮层的内容。弹层带开合动效，对话框的开合动效由框架负责；入口函数在自己的模块里，
 /// 建的时候把会话登记给 [`session::register`]。文件右键菜单的条目已经不在列表里时没有内容，
-/// 浮层槽位保持空着。
+/// 浮层层保持空着。
 pub(crate) fn overlay_branch(key: OverlayKey, model: &ShellViewModel) -> Option<AnyView> {
     match key {
         OverlayKey::CloseConfirm => super::input::close_prompt(model),
@@ -171,22 +174,45 @@ pub(crate) fn overlay_branch(key: OverlayKey, model: &ShellViewModel) -> Option<
     }
 }
 
+/// 浮层层：AppShell overlay 槽位里常驻的容器，各块是它的子节点。AppShell 给它打铺满窗口的
+/// 布局补丁，有没隐藏的子节点时让它挡住下面的点击；补丁只在 AppShell 投影时写，所以它上面
+/// 不放绑定。各块自己铺满它（对话框绝对定位铺满，弹层是撑满的一列）。
+pub(crate) fn layer(node: NodeRef) -> AnyView {
+    widget(Stack::column(0.0)).node_ref(node).key("shell-overlay").into_any()
+}
+
 /// 浮层块。
 pub(crate) struct OverlayPart {
+    layer: NodeRef,
     identity: Option<OverlayIdentity>,
     view: Option<MountedView>,
     /// 现在这块浮层登记的会话，随浮层一起换下。
     sessions: Vec<Box<dyn OverlaySession>>,
 }
 
+impl OverlayPart {
+    /// 把现在这块放进浮层层。省掉的子节点（换下来的块）由 `reconcile_children` 停放，随后卸掉。
+    fn place(&self, context: &mut AppContext) -> Result<(), FrameworkError> {
+        let Some(layer) = self.layer.get_untracked() else {
+            eprintln!("Nana 浮层层还没有挂上，浮层块放不进去");
+            return Err(FrameworkError::InvalidInput);
+        };
+        let children = self.view.as_ref().map(|view| view.roots().to_vec()).unwrap_or_default();
+        context.reconcile_children(layer, &children).map(|_| ())
+    }
+}
+
 impl ShellPart for OverlayPart {
     const ID: PartId = PartId::Overlay;
-    type Signals = ();
+    /// 浮层层的节点引用，在骨架的挂载闭包里建，骨架挂好后指向 AppShell 的 overlay 槽位。
+    type Signals = NodeRef;
 
-    fn signals(_: &ShellViewModel) -> Self::Signals {}
+    fn signals(_: &ShellViewModel) -> Self::Signals {
+        nana_ui::runtime::view::node_ref()
+    }
 
-    fn new(_: Self::Signals) -> Self {
-        Self { identity: None, view: None, sessions: Vec::new() }
+    fn new(layer: Self::Signals) -> Self {
+        Self { layer, identity: None, view: None, sessions: Vec::new() }
     }
 
     fn root(&self) -> Option<StableNodeId> {
@@ -210,7 +236,7 @@ impl ShellPart for OverlayPart {
         OverlayIdentity::of(model) != self.identity
     }
 
-    /// 换块：先让旧的对话框经框架关掉、交还焦点，再挂新的一块，挂好后告诉它的会话。
+    /// 换块：先让旧的对话框经框架关掉、交还焦点，再挂新的一块、放进浮层层，放好后告诉它的会话。
     fn remount(&mut self, cx: &mut PartCx<'_>, model: &ShellViewModel) -> Result<Swap, FrameworkError> {
         let identity = OverlayIdentity::of(model);
         for session in &mut self.sessions {
@@ -230,15 +256,17 @@ impl ShellPart for OverlayPart {
         if fresh.is_none() {
             sessions.clear();
         }
-        for session in &mut sessions {
-            session.placed();
-        }
         if self.view.is_some() || fresh.is_some() {
             cx.stats.remounts += 1;
         }
         let old = std::mem::replace(&mut self.view, fresh);
         self.identity = identity;
         self.sessions = sessions;
+        let placed = self.place(cx.document.context_mut());
+        for session in &mut self.sessions {
+            session.placed();
+        }
+        placed?;
         Ok(Swap::replace(old, kept, self.view.as_ref()))
     }
 
