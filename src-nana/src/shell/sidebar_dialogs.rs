@@ -429,7 +429,8 @@ pub fn repository_delete_dialog(model: &ShellViewModel) -> Option<AnyView> {
     let repository = model.workspace.repositories.iter().find(|item| item.repo_id == dialog.repo_id);
     let deleting = model.workspace.deleting_mode.is_some();
     let summary = repository.map(|item| {
-        let mut node = parts::label_text(format!("资源库“{}”位于 {}。下面每个操作都会移除当前注册记录。", item.name, item.path), 12.0, 400, Some(SemanticColorRole::Muted)).line_height(19.0);
+        // `.repository-delete-dialog__summary`：12px、行高 1.6，颜色继承正文。
+        let mut node = parts::label_text(format!("资源库“{}”位于 {}。下面每个操作都会移除当前注册记录。", item.name, item.path), 12.0, 400, Some(SemanticColorRole::Text)).line_height(19.2);
         {
             let layout = Arc::make_mut(&mut node.style.layout);
             layout.width = Some(LengthSpec::Fill);
