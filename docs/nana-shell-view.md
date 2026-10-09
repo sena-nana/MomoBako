@@ -20,7 +20,7 @@
 | 块 | 模块 | 切换 | 现状 |
 | --- | --- | --- | --- |
 | 侧栏 | `view_part_sidebar.rs`，投影在 `sidebar_project.rs` | 无 | 常驻：`SidebarSignals`（几个信号加播放集、文件夹树、智能文件夹树三份 Store）建在骨架作用域里，同步只写变了的；排法变了（收起再展开）才整块重挂 |
-| 主区 | `view_part_primary.rs`，路由在 `route_*.rs` | `dynamic(RouteSlot)`，按 `RouteKey` | 所有路由（启动、文件、缺失仓库、空库、搜索含空库搜索、设置、日志、拓展、动作和播放集页）都常驻；文件页和播放集页里的播放条是旧视图岛 |
+| 主区 | `view_part_primary.rs`，路由在 `route_*.rs` | `dynamic(RouteKey)` | 所有路由（启动、文件、缺失仓库、空库、搜索含空库搜索、设置、日志、拓展、动作和播放集页）都常驻；文件页和播放集页里的播放条是旧视图岛 |
 | 浮层 | `view_part_overlay.rs` | 按 `OverlayIdentity` 换块 | 常驻：身份不变时只经会话写信号；对话框走统一框架；没有浮层时槽位为空 |
 
 并行改区域时各改各的文件：
@@ -29,17 +29,14 @@
 - 文件页和详情：`route_files.rs` 和 `files_*.rs`、`inspect_*.rs`。
 - 侧栏和其余路由：`view_part_sidebar.rs`、`sidebar_*.rs`，以及 `route_search.rs`、`route_playlists.rs`、`route_settings.rs`、`route_admin.rs`、`route_startup.rs`、`route_missing.rs`、`route_empty.rs`；首页外框和滚动主体在 `route_home.rs`。
 
-`view_host.rs` 和 `view_part.rs` 不必动。`view_part_primary.rs` 里只改自己路由那一行：`resident`、`resident_view`、`legacy_view` 和 `RouteSignals`。
+`view_host.rs` 和 `view_part.rs` 不必动。`view_part_primary.rs` 里只改自己路由那一行：`route_view`、`islands` 和 `RouteSignals`。
 
 ## 主区的路由键和分支
 
-`RouteKey` 是身份键：启动状态、设置页、区域（有仓库、丢失、空库）和工作区面板合起来决定主区显示哪种页面。`dynamic` 的键是 `RouteSlot { route, version }`：
+`RouteKey` 是身份键：启动状态、设置页、区域（有仓库、丢失、空库）和工作区面板合起来决定主区显示哪种页面，它本身就是 `dynamic` 的键。所有路由都常驻：
 
-- 常驻路由的 `version` 固定为 0。分支只在进入路由时建一次，之后 `sync` 只写 `RouteSignals` 里它的信号。分支在刷新时由 `dynamic` 建，拿不到 `&ShellViewModel`，只能读信号；热信号要显式传进去（`hot::prop` 只在旧视图挂载期间有值）。
-- 旧视图路由的内容都在本线程挂成脱离树的一块（建的时候在自己的作用域里，旧视图里建的信号有归属）。
-  - 留在同一个路由里、ViewModel 版本变了：`remount` 当场把新内容放进路由容器，`ShellView` 收尾时卸掉旧内容、找回焦点、选区和滚动，和改动前一样同步完成，紧接着的按键落在新节点上。
-  - 换到旧视图路由：新内容放进交接处，版本号加一写进键；下一次刷新 `dynamic` 换出空分支，分支的 `on_mount` 把这块内容放进路由容器、卸掉上一块，再找回状态。
-  - 两种情况下主区外框、路由容器、侧栏和浮层都不动。
+- 分支只在进入路由时建一次，之后 `sync` 只写 `RouteSignals` 里它的信号。分支在刷新时由 `dynamic` 建，拿不到 `&ShellViewModel`，只能读信号；热信号要显式传进去（`hot::prop` 只在旧视图挂载期间有值）。
+- 换路由时同步只把新路由写进键（新路由的岛先挂好等着），下一次刷新 `dynamic` 换出新分支，分支的 `on_mount` 把岛放进占位节点。主区外框、路由容器、侧栏和浮层都不动。换走又在刷新前换回来时把键写回去，分支不换。
 
 路由容器（键 `primary-route`）夹在外框和分支之间，`css!` 写成和 `Stack::fill_column(0)` 一样的排版，分支的样子和直接放在外框里一样。
 
@@ -56,7 +53,7 @@
 1. **投影**：写一个 `XxxView::project(model) -> Self`，`#[derive(Clone, Debug, PartialEq)]`，只放视图要读的值，按视图要显示的样子算好（文案、拼好的字符串、列表）。给 `project` 写单测：取值对，同一状态两次投影相等。
 2. **信号**：投影按「谁一起变、谁读它」拆成几个信号，`XxxSignals::new(model)` 建在本块的 `signals()` 里（主区路由放进 `RouteSignals`），`write(view)` 对每个信号用 `try_set_if_changed`，值没变不触发绑定。
 3. **视图只建一次**：文字和样式字段用 `.prop::<T, W>(信号或闭包)` 绑定；可有可无的一块用 `.visible(..)`，节点留着、不占布局，不改兄弟之间的间距（`when` 会多一个容器，空着也占一个间距）；结构真的要换时才用 `when` / `dynamic`。初值可以 `get_untracked()` 取，绑定在挂载时会再写一次同样的值。
-4. **去掉整块重挂**：本块（或本路由）的 `needs_remount` 不再看 ViewModel 版本，只在结构变了时返回真；主区路由在 `resident` 里登记。
+4. **去掉整块重挂**：本块的 `needs_remount` 不看 ViewModel 版本，只在结构变了时返回真；主区路由在 `route_view` 里登记分支。
 5. **测试**：见下文。
 
 ### Signal 还是 Store
@@ -164,7 +161,7 @@ DialogFrame::new("folder-dialog", move || view.with(|view| view.title.to_string(
 
 这次搭底座时遇到、在 MomoBako 里绕开的：
 
-- `dynamic` 没有同步重建单个结构块的公开入口（`run_structural_now` 是 crate 内部的），分支只能在下一次刷新时换，而 `update` 里又不能刷新。换到旧视图路由时因此「同步挂好、刷新时交接」；同一路由里的更新不经过 `dynamic`，直接换路由容器里的内容。
+- `dynamic` 没有同步重建单个结构块的公开入口（`run_structural_now` 是 crate 内部的），分支只能在下一次刷新时换，而 `update` 里又不能刷新。换路由时因此只写键，岛先挂好、分支挂好时再放进占位节点。
 - 结构块的容器只收 `class` / `class_when` / `css` / `visible`，不能给一个现成的 `Stack` 或 `node_ref`。路由容器的排版只好开 `view-macro` 写 `css!`，找容器靠键。
 - `mount_view_detached` 挂出的根不在装配键表里，根节点的键路径是父节点的路径，自己的键不出现。`remount_state` 对根节点按父路径加类型找回，能用，但根的键（例如 `settings-scroll`）查不到。
 - `activate_overlay` 要求宿主已经在树里：在脱离树的挂载里激活，框架算不出初始焦点（候选必须已挂上），开场动效也不播。浮层块因此借 `when(placed, ..)` 在放进槽位后的那次刷新里激活；视图层没有「挂进树时」的钩子，也没有声明式的 `open`。
