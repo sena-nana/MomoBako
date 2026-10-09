@@ -8,13 +8,14 @@
 //! 分组三块按面板状态显隐；分组按分类、卡片按插件 id 做键（卡片在 `admin_plugin_card.rs`）。
 //! 筛选框受控，组合输入中不被打断。
 
+use nana_ui::icons_tabler::ALERT_TRIANGLE;
 use nana_ui::runtime::view::{signal, widget, AnyView, IntoView, Item, Store, StoreList, StorePath};
 use nana_ui::runtime::{Activate, AlignSpec, LengthSpec, TextChanged, TextInput};
 use nana_ui::ButtonKind;
 use nana_ui_core::SemanticColorRole as Role;
 
 use super::super::hot::ModelField;
-use super::super::view_part_overlay::dialog::{intent_button, DialogFrame};
+use super::super::view_part_overlay::dialog::{intent_button, DialogFrame, MODAL_CARD};
 use super::super::view_part_overlay::session::Projected;
 use super::super::{ShellMessage, ShellViewModel};
 use super::bind::{row_text, ActionDisabled};
@@ -170,8 +171,9 @@ impl PluginDeleteView {
     }
 }
 
-/// 删除确认浮层。Vue 的 `ConfirmDialog`：标题「删除插件」，确认「删除」，忙时「删除中...」。
-/// 外壳走统一对话框框架，常驻，忙碌和文案按字段原地改。
+/// 删除确认浮层。Vue 的 Lilia `ConfirmDialog`（`danger`）：标题「删除插件」前一个警告三角、用危险色，
+/// 确认「删除」，忙时「删除中...」，`min(520px, 92vw)` 宽。外壳走统一对话框框架，常驻，忙碌和文案
+/// 按字段原地改。
 pub(crate) fn delete_dialog(model: &ShellViewModel) -> Option<AnyView> {
     let view = signal(PluginDeleteView::project(model)?);
     Projected::register(view, PluginDeleteView::project);
@@ -185,6 +187,9 @@ pub(crate) fn delete_dialog(model: &ShellViewModel) -> Option<AnyView> {
     );
     Some(
         DialogFrame::new("admin-plugin-delete-dialog", || "删除插件".to_string(), || ShellMessage::Admin(AdminMessage::CancelDelete))
+            .size(MODAL_CARD)
+            .danger(true)
+            .title_icon(ALERT_TRIANGLE)
             .busy(busy)
             .confirm(move || view.with(|view| view.message.clone()), cancel, confirm, || ShellMessage::Admin(AdminMessage::ConfirmDelete)),
     )

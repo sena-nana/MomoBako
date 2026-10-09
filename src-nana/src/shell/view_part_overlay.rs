@@ -256,5 +256,8 @@ impl ShellPart for OverlayPart {
 #[path = "overlay_dialog_tests.rs"]
 mod dialog_tests;
 #[cfg(test)]
+#[path = "overlay_dialog_look_tests.rs"]
+mod look_tests;
+#[cfg(test)]
 #[path = "overlay_popover_tests.rs"]
 mod popover_tests;

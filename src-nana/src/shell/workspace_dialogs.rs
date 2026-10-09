@@ -9,13 +9,14 @@
 
 use std::sync::Arc;
 
+use nana_ui::icons_tabler::{ARCHIVE, COPY, FILE_PLUS, FOLDER_OPEN, FOLDER_PLUS, PENCIL};
 use nana_ui::runtime::view::{fields, signal, widget, AnyView, IntoView, Signal};
 use nana_ui::runtime::{LengthSpec, RadiusTier, SemanticColorRole, Stack};
-use nana_ui::ButtonKind;
+use nana_ui::{ButtonKind, DialogSize, Icon};
 
 use super::files::{FileDialog, FilesMessage, FilesState};
 use super::files_view::style;
-use super::view_part_overlay::dialog::{action, footer, text_field, wrapping_text, DialogFrame, DialogWidth};
+use super::view_part_overlay::dialog::{action, footer, text_field, wrapping_text, DialogFrame, MODAL_CARD};
 use super::view_part_overlay::session::{Draft, Projected};
 use super::{ShellMessage, ShellViewModel};
 
@@ -27,10 +28,11 @@ fn file_message(message: FilesMessage) -> ShellMessage {
     ShellMessage::Files(message)
 }
 
-/// 一种文本对话框：标题、宽度、字段标签、占位、主按钮文案，以及它改的是哪一份草稿。
+/// 一种文本对话框：标题、宽度、标题图标、字段标签、占位、主按钮文案，以及它改的是哪一份草稿。
 struct TextDialog {
     title: Title,
-    width: DialogWidth,
+    size: DialogSize,
+    icon: Icon,
     label: &'static str,
     placeholder: &'static str,
     submit: &'static str,
@@ -64,21 +66,43 @@ fn import_draft(files: &FilesState) -> &str {
     &files.import_draft
 }
 
+/// `.workspace-rename-dialog { width: min(460px, 92vw) }`。
+const RENAME_DIALOG: DialogSize = DialogSize::capped(460.0, 92.0);
+
 /// 文本对话框的配置。硬链接确认和关着的时候是 `None`。
+///
+/// 宽度和标题图标照 Vue：重命名是 `PencilLine`、460 宽，复制是 `CopyTargetDialog` 的 `Copy`，其余
+/// `.modal-card` 宽。建文件、新建文件夹、移动和三种导入 Vue 里没有对话框（工具栏输入框、拖放和原生
+/// 选择器），图标按动作取，和文件页别的对话框一样标题前都有图标。
 fn text_dialog_spec(dialog: FileDialog) -> Option<TextDialog> {
-    let spec = |title, width, label, placeholder, submit, draft| TextDialog { title, width, label, placeholder, submit, draft };
-    let normal = DialogWidth::Normal;
+    let spec = |title, size, icon, label, placeholder, submit, draft| TextDialog { title, size, icon, label, placeholder, submit, draft };
     Some(match dialog {
-        FileDialog::Rename => spec(Title::Fixed("重命名文件"), DialogWidth::Narrow, "新名称", "输入新的文件名", "保存", name_draft),
-        FileDialog::CreateFile => spec(Title::Fixed("建文件"), normal, "文件名", "新建空文件，例如 note.txt", "创建", name_draft),
-        FileDialog::CreateDirectory => spec(Title::Fixed("新建文件夹"), normal, "文件夹名称", "输入文件夹名称", "创建", name_draft),
-        FileDialog::Copy => spec(Title::Fixed("复制到文件夹"), normal, "目标目录", "留空表示根目录", "复制", target_draft),
-        FileDialog::Move => spec(Title::Fixed("移动到文件夹"), normal, "目标目录", "留空表示根目录", "移动", target_draft),
-        FileDialog::Import => {
-            spec(Title::Fixed("从文件夹导入"), normal, "多个路径用分号分隔", "D:/素材/图片; D:/素材/参考", "导入", import_draft)
+        FileDialog::Rename => spec(Title::Fixed("重命名文件"), RENAME_DIALOG, PENCIL, "新名称", "输入新的文件名", "保存", name_draft),
+        FileDialog::CreateFile => {
+            spec(Title::Fixed("建文件"), MODAL_CARD, FILE_PLUS, "文件名", "新建空文件，例如 note.txt", "创建", name_draft)
         }
-        FileDialog::ImportArchive => spec(Title::Fixed("从 ZIP 导入"), normal, "压缩包路径", "D:/素材/归档.zip", "导入", import_draft),
-        FileDialog::ImportEagle => spec(Title::Eagle, normal, "Eagle 资源库路径", "D:/素材/示例.library", "导入", import_draft),
+        FileDialog::CreateDirectory => {
+            spec(Title::Fixed("新建文件夹"), MODAL_CARD, FOLDER_PLUS, "文件夹名称", "输入文件夹名称", "创建", name_draft)
+        }
+        FileDialog::Copy => spec(Title::Fixed("复制到文件夹"), MODAL_CARD, COPY, "目标目录", "留空表示根目录", "复制", target_draft),
+        FileDialog::Move => {
+            spec(Title::Fixed("移动到文件夹"), MODAL_CARD, FOLDER_OPEN, "目标目录", "留空表示根目录", "移动", target_draft)
+        }
+        FileDialog::Import => spec(
+            Title::Fixed("从文件夹导入"),
+            MODAL_CARD,
+            FOLDER_OPEN,
+            "多个路径用分号分隔",
+            "D:/素材/图片; D:/素材/参考",
+            "导入",
+            import_draft,
+        ),
+        FileDialog::ImportArchive => {
+            spec(Title::Fixed("从 ZIP 导入"), MODAL_CARD, ARCHIVE, "压缩包路径", "D:/素材/归档.zip", "导入", import_draft)
+        }
+        FileDialog::ImportEagle => {
+            spec(Title::Eagle, MODAL_CARD, FOLDER_OPEN, "Eagle 资源库路径", "D:/素材/示例.library", "导入", import_draft)
+        }
         FileDialog::Hardlink | FileDialog::Closed => return None,
     })
 }
@@ -138,7 +162,8 @@ fn text_dialog(model: &ShellViewModel, dialog: FileDialog) -> Option<AnyView> {
     ];
     Some(
         DialogFrame::new("file-dialog", move || view.with(|view| view.title.clone()), close)
-            .width(spec.width)
+            .size(spec.size)
+            .title_icon(spec.icon)
             .busy(busy)
             .dialog(body, footer(None, buttons)),
     )
@@ -198,7 +223,13 @@ fn hardlink_dialog(model: &ShellViewModel) -> Option<AnyView> {
             file_message(FilesMessage::ConfirmHardlink)
         }),
     ];
-    Some(DialogFrame::new("hardlink-dialog", || "加入硬链接关联".to_string(), skip).busy(busy).dialog(body, footer(None, buttons)))
+    Some(
+        DialogFrame::new("hardlink-dialog", || "加入硬链接关联".to_string(), skip)
+            .size(MODAL_CARD)
+            .title_icon(COPY)
+            .busy(busy)
+            .dialog(body, footer(None, buttons)),
+    )
 }
 
 /// 路径框里的一行：12px 弱色、任意处折行。

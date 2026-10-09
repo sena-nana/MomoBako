@@ -14,7 +14,7 @@ use crate::shell::player::PlayerMessage;
 use crate::shell::view_harness::ShellHarness;
 use crate::shell::{AdminMessage, GapMessage, InspectMessage, ShellMessage, ShellPage, ShellViewModel, SidebarMessage, ThumbnailFrame};
 
-fn scene(name: &str) -> ShellViewModel {
+pub(super) fn scene(name: &str) -> ShellViewModel {
     crate::shell::acceptance_gap_models()
         .into_iter()
         .find(|(scene, _)| *scene == name)
@@ -62,8 +62,8 @@ fn background_messages() -> Vec<ShellMessage> {
 }
 
 /// 一个对话框的用例。
-struct Case {
-    name: &'static str,
+pub(super) struct Case {
+    pub name: &'static str,
     model: fn() -> ShellViewModel,
     key: OverlayKey,
     /// 这个对话框的关闭消息。
@@ -84,7 +84,7 @@ fn gap(message: GapMessage) -> ShellMessage {
     ShellMessage::Sidebar(SidebarMessage::Gap(message))
 }
 
-fn cases() -> Vec<Case> {
+pub(super) fn cases() -> Vec<Case> {
     vec![
         Case {
             name: "folder-create-dialog",
@@ -226,7 +226,7 @@ fn within_dialog(harness: &ShellHarness, label: &str) -> StableNodeId {
 /// 窗口左下角：在任何对话框卡片外面。
 const OUTSIDE: (f32, f32) = (8.0, 792.0);
 
-fn mounted(case: &Case) -> ShellHarness {
+pub(super) fn mounted(case: &Case) -> ShellHarness {
     let harness = ShellHarness::mount((case.model)());
     assert_eq!(OverlayKey::of(&harness.model), Some(case.key), "{}：场景里应该开着这个对话框", case.name);
     let host = harness.keyed("dialog-host").unwrap_or_else(|| panic!("{}：对话框没有挂在宿主下", case.name));
