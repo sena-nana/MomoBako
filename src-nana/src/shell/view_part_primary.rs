@@ -11,6 +11,9 @@
 //! 内容变了只重挂当前分支，外框、侧栏和浮层都不动。每个路由的入口函数在自己的 `route_*.rs` 里；
 //! 把某个路由改成常驻时，在 [`resident`]、[`resident_view`] 和 [`legacy_view`] 里改它自己那一行，
 //! 状态放进 [`RouteSignals`]。
+//!
+//! 常驻路由里还嵌着别的模块的旧视图（筛选栏、播放条、对话框）时，分支里给它们留占位节点，登记成
+//! [`Island`]：进路由时随分支一起挂好，之后岛的版本变了才当场换掉占位节点里的内容，常驻的部分不动。
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -29,6 +32,7 @@ use super::remount_state::{self, KeptState};
 use super::route_admin::AdminSignals;
 use super::route_empty::{EmptySignals, EmptyView};
 use super::route_missing::MissingSignals;
+use super::route_files::FilesRouteSignals;
 use super::route_startup::{StartupSignals, StartupView};
 use super::view_part::{composing_under, first_root, mount_detached, BodyMode, PartCx, PartId, ShellPart, Swap};
 use super::{MainRegion, ShellPage, ShellViewModel, WorkspacePanel};
@@ -92,6 +96,7 @@ fn resident(route: RouteKey) -> bool {
     matches!(
         route,
         RouteKey::Startup
+            | RouteKey::Files
             | RouteKey::Missing
             | RouteKey::Empty
             | RouteKey::Search
@@ -115,6 +120,7 @@ fn resident_view(route: RouteKey, signals: RouteSignals, hot: HotSignals) -> Opt
         RouteKey::Logs => Some(super::route_admin::logs(signals.filter, signals.admin)),
         RouteKey::Extensions => Some(super::route_admin::extensions(signals.filter, signals.admin)),
         RouteKey::Actions => Some(super::route_admin::actions(signals.filter, signals.admin)),
+        RouteKey::Files => Some(super::route_files::view(signals.files, hot)),
         _ => None,
     }
 }
@@ -123,6 +129,7 @@ fn resident_view(route: RouteKey, signals: RouteSignals, hot: HotSignals) -> Opt
 fn legacy_view(route: RouteKey, model: &ShellViewModel) -> Option<AnyView> {
     let view = match route {
         RouteKey::Startup
+        | RouteKey::Files
         | RouteKey::Missing
         | RouteKey::Empty
         | RouteKey::Search
@@ -131,7 +138,6 @@ fn legacy_view(route: RouteKey, model: &ShellViewModel) -> Option<AnyView> {
         | RouteKey::Logs
         | RouteKey::Extensions
         | RouteKey::Actions => return None,
-        RouteKey::Files => super::route_files::view(model),
         RouteKey::Playlists => super::route_playlists::view(model),
         RouteKey::Blank => super::route_home::blank(model),
     };
@@ -150,6 +156,7 @@ pub(crate) struct RouteSignals {
     search: SearchPanelSignals,
     /// 设置、日志、拓展和动作页。
     admin: AdminSignals,
+    files: FilesRouteSignals,
 }
 
 impl RouteSignals {
@@ -161,6 +168,7 @@ impl RouteSignals {
             filter: FilterBarSignals::new(),
             search: SearchPanelSignals::new(),
             admin: AdminSignals::new(),
+            files: FilesRouteSignals::new(model),
         }
     }
 
@@ -176,13 +184,44 @@ impl RouteSignals {
             RouteKey::Logs => self.admin.write_logs(model),
             RouteKey::Extensions => self.admin.write_extensions(model),
             RouteKey::Actions => self.admin.write_actions(model),
-            RouteKey::Files | RouteKey::Playlists | RouteKey::Blank => {}
+            RouteKey::Files => self.files.write(model),
+            RouteKey::Playlists | RouteKey::Blank => {}
         }
         // 筛选栏只在有仓库的首页上出现：启动、设置、缺失和空库页都不写。
         if !matches!(route, RouteKey::Startup | RouteKey::Settings | RouteKey::Missing | RouteKey::Empty) {
             self.filter.write(FilterBarView::project(model));
         }
     }
+}
+
+/// 常驻路由里嵌着的一块旧视图（岛）：分支里有个占位节点，里面的内容仍由别的模块的旧视图函数
+/// 整块建出。内容在主区块同步时挂成脱离树的一块放进占位节点，`stamp` 变了才换。
+#[derive(Clone, Copy)]
+pub(crate) struct Island {
+    /// 占位节点，分支建好以后才有值。
+    pub slot: NodeRef,
+    /// 岛里的内容；没有内容时为 `None`。
+    pub build: fn(&ShellViewModel) -> Option<AnyView>,
+    /// 内容的版本：和上次建内容时不同才重建。
+    pub stamp: fn(&ShellViewModel) -> u64,
+}
+
+/// 常驻路由的岛，顺序就是分支里占位节点的先后。
+fn islands(route: RouteKey, signals: &RouteSignals) -> Vec<Island> {
+    match route {
+        RouteKey::Files => super::route_files::islands(signals.files),
+        _ => Vec::new(),
+    }
+}
+
+/// 岛里现在的内容。
+struct IslandView {
+    island: Island,
+    /// 内容建好时的版本。
+    stamp: u64,
+    content: Option<MountedView>,
+    /// 已经放进占位节点；还没放的等分支挂好时放。
+    placed: bool,
 }
 
 /// `dynamic` 的键：路由加上旧视图分支的版本。常驻路由的版本固定是 0，换到旧视图路由时加一。
@@ -220,6 +259,8 @@ struct LegacySlot {
     pending: Option<Pending>,
     /// `dynamic` 现在显示的路由，分支挂好时写。还没刷新的切换不算。
     shown: Option<RouteKey>,
+    /// 常驻路由的岛。进路由时先挂好内容，分支挂好时放进占位节点。
+    islands: Vec<IslandView>,
 }
 
 thread_local! {
@@ -279,6 +320,7 @@ impl ShellPart for PrimaryPart {
     fn mount(&mut self, cx: &mut PartCx<'_>, model: &ShellViewModel, mode: BodyMode) -> Result<Swap, FrameworkError> {
         let kept = self.capture_attached(cx.document);
         let route = RouteKey::of(model);
+        let kept_islands = if route == self.route { self.capture_islands(cx.document) } else { Vec::new() };
         self.signals.routes.write(route, model);
         self.stage_branch(cx, model, route, None)?;
         let document_id = cx.document.document();
@@ -288,6 +330,11 @@ impl ShellPart for PrimaryPart {
         if let (Some(kept), Some(roots)) = (kept, self.attached_roots()) {
             swap.merge(Swap::restore(kept, roots));
         }
+        for (index, kept) in kept_islands {
+            if let Some(roots) = self.island_roots(index) {
+                swap.merge(Swap::restore(kept, roots));
+            }
+        }
         Ok(swap)
     }
 
@@ -295,15 +342,29 @@ impl ShellPart for PrimaryPart {
         self.signals.routes.write(RouteKey::of(model), model);
     }
 
+    /// 换了路由要重挂；旧视图路由看 ViewModel 版本，常驻路由只看岛的版本。
     fn needs_remount(&self, model: &ShellViewModel) -> bool {
         let route = RouteKey::of(model);
-        route != self.route || (!resident(route) && model.revision != self.revision)
+        if route != self.route {
+            return true;
+        }
+        if resident(route) { self.islands_stale(model) } else { model.revision != self.revision }
     }
 
     /// 换路由时写新的键，旧视图路由先把新内容挂好等着，真正换分支在下一次刷新；
-    /// 留在同一个旧视图路由里时当场换掉路由容器里的内容。
+    /// 留在同一个旧视图路由里时当场换掉路由容器里的内容。常驻分支还在时只换岛。
     fn remount(&mut self, cx: &mut PartCx<'_>, model: &ShellViewModel) -> Result<Swap, FrameworkError> {
         let route = RouteKey::of(model);
+        if resident(route) && self.slot.borrow().shown == Some(route) {
+            // 同一路由里岛的版本变了，或者换走又在刷新前换了回来：撤掉等着挂上的旧视图内容、把键写回来。
+            self.revoke_pending(cx);
+            if self.route != route {
+                self.signals.slot.set(RouteSlot { route, version: 0 });
+                self.route = route;
+            }
+            self.revision = model.revision;
+            return self.refresh_islands(cx, model);
+        }
         let in_place = {
             let slot = self.slot.borrow();
             !resident(route) && slot.shown == Some(route) && slot.pending.is_none()
@@ -388,12 +449,8 @@ impl PrimaryPart {
         } else {
             mount_detached(cx.document, cx.hot, Self::ID, || legacy_view(route, model))?
         };
-        let stale = self.slot.borrow_mut().pending.take();
-        if let Some(stale) = stale
-            && let Err(error) = stale.content.unmount(cx.document.context_mut())
-        {
-            eprintln!("Nana 卸掉没来得及挂上的主区内容失败：{error}");
-        }
+        self.revoke_pending(cx);
+        self.stage_islands(cx, model, route)?;
         let version = match content {
             Some(content) => {
                 self.version += 1;
@@ -407,6 +464,108 @@ impl PrimaryPart {
         self.revision = model.revision;
         cx.stats.remounts += 1;
         Ok(())
+    }
+
+    /// 卸掉还没来得及挂上就被顶替的旧视图内容。
+    fn revoke_pending(&mut self, cx: &mut PartCx<'_>) {
+        let stale = self.slot.borrow_mut().pending.take();
+        if let Some(stale) = stale
+            && let Err(error) = stale.content.unmount(cx.document.context_mut())
+        {
+            eprintln!("Nana 卸掉没来得及挂上的主区内容失败：{error}");
+        }
+    }
+
+    /// 换到 `route` 时准备它的岛：卸掉上一批，按当前 ViewModel 挂好新内容，等分支挂好时放进占位节点。
+    fn stage_islands(&mut self, cx: &mut PartCx<'_>, model: &ShellViewModel, route: RouteKey) -> Result<(), FrameworkError> {
+        let old = std::mem::take(&mut self.slot.borrow_mut().islands);
+        for view in old {
+            if let Some(content) = view.content {
+                discard(cx.document.context_mut(), content);
+            }
+        }
+        for island in islands(route, &self.signals.routes) {
+            let content = mount_detached(cx.document, cx.hot, Self::ID, || (island.build)(model))?;
+            let stamp = (island.stamp)(model);
+            self.slot.borrow_mut().islands.push(IslandView { island, stamp, content, placed: false });
+        }
+        Ok(())
+    }
+
+    /// 有岛的版本和 ViewModel 对不上。
+    fn islands_stale(&self, model: &ShellViewModel) -> bool {
+        let slot = self.slot.borrow();
+        let wanted = islands(self.route, &self.signals.routes).len();
+        slot.islands.len() != wanted || slot.islands.iter().any(|view| view.stamp != (view.island.stamp)(model))
+    }
+
+    /// 分支还在时换岛：版本变了（或者还没放进去）的岛按当前 ViewModel 重建，当场放进占位节点；
+    /// 旧内容和要找回的焦点、滚动交给调度方收尾。离开又回到路由时岛已经卸掉，这里按登记重建。
+    fn refresh_islands(&mut self, cx: &mut PartCx<'_>, model: &ShellViewModel) -> Result<Swap, FrameworkError> {
+        let wanted = islands(self.route, &self.signals.routes);
+        if self.slot.borrow().islands.len() != wanted.len() {
+            let old = std::mem::take(&mut self.slot.borrow_mut().islands);
+            for content in old.into_iter().filter_map(|view| view.content) {
+                discard(cx.document.context_mut(), content);
+            }
+            let fresh = wanted.into_iter().map(|island| IslandView { island, stamp: 0, content: None, placed: false });
+            self.slot.borrow_mut().islands.extend(fresh);
+        }
+        let mut swap = Swap::default();
+        let count = self.slot.borrow().islands.len();
+        for index in 0..count {
+            let (island, stale) = {
+                let slot = self.slot.borrow();
+                let view = &slot.islands[index];
+                (view.island, !view.placed || view.stamp != (view.island.stamp)(model))
+            };
+            if stale {
+                swap.merge(self.refresh_island(cx, model, index, island)?);
+            }
+        }
+        Ok(swap)
+    }
+
+    /// 重建第 `index` 个岛，放进占位节点。占位节点不在时只记日志，下次同步再放。
+    fn refresh_island(&mut self, cx: &mut PartCx<'_>, model: &ShellViewModel, index: usize, island: Island) -> Result<Swap, FrameworkError> {
+        let Some(target) = island.slot.get_untracked().filter(|id| cx.document.context().world().contains(*id)) else {
+            eprintln!("Nana 主区岛的占位节点不在，岛 {index} 下次同步再放");
+            return Ok(Swap::default());
+        };
+        let document_id = cx.document.document();
+        let kept = self.island_roots(index).map(|roots| remount_state::capture(cx.document.context(), document_id, &roots));
+        let fresh = mount_detached(cx.document, cx.hot, Self::ID, || (island.build)(model))?;
+        if let Some(fresh) = &fresh
+            && !place(cx.document.context_mut(), target, fresh)
+        {
+            discard(cx.document.context_mut(), fresh.clone());
+            return Ok(Swap::default());
+        }
+        let mut slot = self.slot.borrow_mut();
+        let view = &mut slot.islands[index];
+        view.stamp = (island.stamp)(model);
+        view.placed = true;
+        let old = std::mem::replace(&mut view.content, fresh);
+        if old.is_some() || view.content.is_some() {
+            cx.stats.remounts += 1;
+        }
+        Ok(Swap::replace(old, kept, view.content.as_ref()))
+    }
+
+    /// 第 `index` 个岛现在内容的根。
+    fn island_roots(&self, index: usize) -> Option<Vec<StableNodeId>> {
+        self.slot.borrow().islands.get(index).and_then(|view| view.content.as_ref()).map(|content| content.roots().to_vec())
+    }
+
+    /// 记下各岛里的焦点、选区和滚动，按岛的序号。
+    fn capture_islands(&self, document: &RuntimeDocument) -> Vec<(usize, KeptState)> {
+        let count = self.slot.borrow().islands.len();
+        (0..count)
+            .filter_map(|index| {
+                let roots = self.island_roots(index)?;
+                Some((index, remount_state::capture(document.context(), document.document(), &roots)))
+            })
+            .collect()
     }
 }
 
@@ -440,7 +599,7 @@ fn branch(slot: RouteSlot, signals: PrimarySignals, hot: HotSignals, id: u64) ->
 }
 
 /// 新分支放好以后：记下现在显示的路由；版本对上的待挂内容挂进路由容器，找回状态；
-/// 卸掉上一块旧视图内容（换分支时它已被挪出容器）。常驻分支只卸掉上一块。
+/// 卸掉上一块旧视图内容（换分支时它已被挪出容器）。常驻分支卸掉上一块，再把岛放进占位节点。
 fn settle(cx: &mut AppContext, id: u64, shown: RouteSlot, stage: NodeRef) {
     let Some(slot) = SLOTS.with(|slots| slots.borrow().get(&id).cloned()) else {
         eprintln!("Nana 主区路由分支找不到所属的主区块：{id}");
@@ -457,6 +616,38 @@ fn settle(cx: &mut AppContext, id: u64, shown: RouteSlot, stage: NodeRef) {
         && let Err(error) = old.unmount(cx)
     {
         eprintln!("Nana 卸掉换下来的主区内容失败：{error}");
+    }
+    if resident(shown.route) {
+        place_islands(cx, &mut slot.islands);
+    }
+}
+
+/// 常驻分支挂好后把还没放的岛放进各自的占位节点。占位节点不在时记日志，下次同步再放。
+fn place_islands(cx: &mut AppContext, islands: &mut [IslandView]) {
+    for (index, view) in islands.iter_mut().enumerate().filter(|(_, view)| !view.placed) {
+        let Some(target) = view.island.slot.get_untracked().filter(|id| cx.world().contains(*id)) else {
+            eprintln!("Nana 常驻分支里没有岛 {index} 的占位节点");
+            continue;
+        };
+        view.placed = match &view.content {
+            Some(content) => place(cx, target, content),
+            None => true,
+        };
+    }
+}
+
+/// 把一块内容的根放进 `target`，排在已有子节点后面。放不进去时记日志，返回 `false`。
+fn place(cx: &mut AppContext, target: StableNodeId, content: &MountedView) -> bool {
+    let mut mutations = MutationQueue::new();
+    for root in content.roots() {
+        mutations.insert(target, *root, None);
+    }
+    match cx.commit_mutations(mutations) {
+        Ok(_) => true,
+        Err(error) => {
+            eprintln!("Nana 岛的内容放不进占位节点：{error}");
+            false
+        }
     }
 }
 

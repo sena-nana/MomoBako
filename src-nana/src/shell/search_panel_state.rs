@@ -124,11 +124,6 @@ impl SearchPanelSignals {
         Self { head: signal(SearchHead::default()), status: signal(SearchStatus::default()), hits: store(Vec::new()) }
     }
 
-    /// 按这一刻的投影建一份信号：旧视图整块重挂时每次新建，不再写入。
-    pub(crate) fn of(view: SearchPanelView) -> Self {
-        Self { head: signal(view.head), status: signal(view.status), hits: store(view.hits) }
-    }
-
     /// 写入投影，只写变了的。结果行按键写差异：留下的行节点不动，只有内容变了的行字段重写。
     pub(crate) fn write(&self, view: SearchPanelView) {
         self.head.try_set_if_changed(view.head);

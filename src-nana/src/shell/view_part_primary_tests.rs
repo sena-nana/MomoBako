@@ -87,9 +87,12 @@ fn switching_routes_rebuilds_only_the_current_primary_branch() {
 }
 
 /// 旧视图路由里内容变了：只重挂当前分支，主区外框和侧栏不动；没变时什么都不重挂。
+/// 文件和搜索路由都已常驻，这里用仍是旧视图的播放集页，内容变化是打开筛选栏。
 #[test]
 fn a_legacy_route_update_remounts_only_its_branch() {
-    let mut harness = ShellHarness::mount(scene("live-files-plain"));
+    let model = ShellViewModel::for_page(ShellPage::Playlists);
+    assert_eq!(RouteKey::of(&model), RouteKey::Playlists);
+    let mut harness = ShellHarness::mount(model);
     let sidebar = harness.sidebar_root();
     let (_, stage) = harness.content_roots();
     let branch = harness.route_branch();
@@ -100,7 +103,7 @@ fn a_legacy_route_update_remounts_only_its_branch() {
     assert_eq!(harness.view_stats().remounts, remounts, "ViewModel 没变时不该重挂");
     assert_eq!(harness.route_branch(), branch);
 
-    harness.apply(ShellMessage::Inspect(InspectMessage::SetQuery("封面".into())));
+    harness.apply(ShellMessage::Inspect(InspectMessage::ToggleFilterBar));
     harness.flush();
     assert_ne!(harness.route_branch(), branch, "内容变了分支要重挂");
     assert_eq!(harness.content_roots().1, stage, "主区外框不该重挂");

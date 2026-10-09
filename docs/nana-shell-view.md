@@ -20,7 +20,7 @@
 | 块 | 模块 | 切换 | 现状 |
 | --- | --- | --- | --- |
 | 侧栏 | `view_part_sidebar.rs`，投影在 `sidebar_project.rs` | 无 | 常驻：`SidebarSignals`（几个信号加播放集、文件夹树、智能文件夹树三份 Store）建在骨架作用域里，同步只写变了的；排法变了（收起再展开）才整块重挂 |
-| 主区 | `view_part_primary.rs`，路由在 `route_*.rs` | `dynamic(RouteSlot)`，按 `RouteKey` | 启动页、缺失仓库页、空库页、搜索（含空库搜索）、设置、日志、拓展和动作页常驻；播放集页已写成投影加绑定（`player_playlist_page.rs`），路由仍是旧视图，接上播放条的旧视图岛后再登记常驻；其余路由的分支整块重挂 |
+| 主区 | `view_part_primary.rs`，路由在 `route_*.rs` | `dynamic(RouteSlot)`，按 `RouteKey` | 启动、文件、缺失仓库、空库、搜索（含空库搜索）、设置、日志、拓展和动作页常驻；文件页里的筛选栏和播放条是旧视图岛；播放集页已写成投影加绑定（`player_playlist_page.rs`），路由仍是旧视图，接上播放条的旧视图岛后再登记常驻；空首页整块重挂 |
 | 浮层 | `view_part_overlay.rs` | 按 `OverlayIdentity` 换块 | 常驻：身份不变时只经会话写信号；对话框走统一框架；没有浮层时槽位为空 |
 
 并行改区域时各改各的文件：
@@ -89,15 +89,25 @@
 - 发意图消息，参数是建节点时就确定、之后不会变的值（行的 id、常量），由归约按当时的 ViewModel 决定怎么做；或者
 - 用 `sig.get_untracked()` 现读信号里的值。
 
-不要在处理器里捕获建视图那一刻从 ViewModel 抄来的、之后会变的值。旧视图里的拖放标志（`file_drop_flags`）就是这样抄下来的，它能用是因为内容每次都整块重挂；改常驻时要换成意图消息或者读信号。设置页的复制按钮、日志的暂停、插件卡片的启用和动作页的执行都是点下去时现读信号。
+不要在处理器里捕获建视图那一刻从 ViewModel 抄来的、之后会变的值。旧视图里的拖放标志（`file_drop_flags`）就是这样抄下来的，它能用是因为内容每次都整块重挂；改常驻时要换成意图消息或者读信号。文件列的拖放现在发 `FilesMessage::HostDrop`，归约时按当时的仓库条件收成宿主拖放消息。设置页的复制按钮、日志的暂停、插件卡片的启用和动作页的执行都是点下去时现读信号。
 
 `style::action` 按钮禁用时整体 45% 不透明。绑定禁用用 `admin::bind::ActionDisabled`，禁用标志和透明度一起写；只绑 `fields::button::disabled` 会留着建按钮时的透明度。
+
+### 常驻路由里的旧视图岛
+
+常驻路由里还嵌着别的模块的旧视图时（文件页里的筛选栏、播放条），分支里给它留一个占位节点（`NodeRef`），在 `view_part_primary.rs` 的 `islands` 里按路由登记成 `Island { slot, build, stamp }`：
+
+- 进路由时主区块按当前 ViewModel 把岛的内容挂成脱离树的一块，分支挂好（`on_mount`）时放进占位节点；
+- 之后 `stamp(model)` 变了才当场重建这一块，记下并找回岛里的焦点、选区和滚动，常驻部分不动；焦点在主区、输入法还在组合时照常延后；
+- `stamp` 默认用 `model.revision`（和整块重挂一样）。内容会自己发消息的岛（播放条量到宽度就发 `BarResized`）要按它真正读到的值算版本，否则每次重建都量一次、发一次，变成每帧重建；
+- 占位节点要排成和原来直接放在那里一样（`Stack::column(0)` 高度随内容），不能放进会自己重建的结构块里：结构块换分支时占位节点跟着换，岛要到下一次同步才放得回去。要显隐时用 `.visible`；
+- 岛是过渡办法：那块改成常驻（或者对话框挪进浮层块）以后删掉登记。
 
 ### 测试
 
 - 投影的单测：取值、相等性，以及哪些消息改投影、哪些不改（`view_part_sidebar_tests.rs`）。
 - 用 `view_harness::ShellHarness`：
-  - `assert_same_as_fresh_mount()`：增量更新后的文档和同一 ViewModel 新挂的文档按无障碍树逐个比较（角色、名称、值、布局盒），每一步更新后都调。
+  - `assert_same_as_fresh_mount()`：增量更新后的文档和同一 ViewModel 新挂的文档按无障碍树逐个比较（角色、名称、值、布局盒），每一步更新后都调。它不比样式和选中、禁用这类状态；绑了整份样式或状态的区域再按节点比组装路径、整份样式和无障碍状态（`route_files_tests.rs` 的 `assert_same_structure_as_fresh_mount`）。
   - 「N 次无关更新后节点 id 不变」：用 `harness.keyed("键")` 记下节点，`apply` 几条无关消息并 `flush` 后再取，应该是同一个节点；相关更新后绑定的字段原地变，结构变了的那一行才换（`route_startup_tests.rs`）。
   - `view_stats().remounts` 不变：动效帧、播放推进和常驻区域的更新都不该重挂。
   - `route_branch()`、`sidebar_root()`、`content_roots()` 判断哪一块换了（`view_part_primary_tests.rs`）。
@@ -171,3 +181,12 @@ DialogFrame::new("folder-dialog", move || view.with(|view| view.title.to_string(
 - `css!` 的 `min-width: 0` 除了 `min_width` 还写 `allow_shrink`，和构建器的 `min_width(Px(0))` 字段不完全相同；现在布局不读它，画面一样。
 - `StorePath` 没有 `with_untracked`，同步里比较 Store 的现值用 `untrack(|| store.with(..))`。
 - `layout.hidden` 的子树要等排版以后才退出无障碍投影，没刷新的文档投影出来还带着藏起的节点。
+
+文件页改常驻时遇到的：
+
+- `each` 的容器只有 `Stack::column(n)` 和 `Stack::row(n)`，换行的药丸行（面包屑、标签片）要再写 `css! { flex-wrap: wrap; row-gap: 8px; }`；一行里「标签片 + 末尾的加号」只好把加号也当成一项。
+- `each` / `each_virtual` 的数据源要 `Readable`，闭包不行，派生的列表要包一层 `computed`。
+- `El<C, K>` 的子节点类型写在类型参数里，带子节点的元素没法在函数之间传递后再 `.visible(..)`，只好把显隐当参数传进去。
+- 无障碍树在布局之前不认 `layout.hidden`（`resolved.visible` 要排过版才算），不排版就查标签的测试会看到藏着的节点。
+- `Store` 没有不追踪的 `try_with`，建视图时取初值要 `untrack`。`Icon` 没有 `PartialEq`，比较要用 `as_ptr`。
+- 每个新建的节点第一次布局都会发 `SizeChanged`。监听它、再发消息改状态的旧视图要是每次归约都整块重挂，就会量了又建、建了又量（文件列表的 `ListResized`、播放条的 `BarResized`）。

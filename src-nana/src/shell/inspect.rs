@@ -8,7 +8,6 @@ use crate::backend::services::repository::{AssetDetail, PlaybackSessionState};
 use crate::plugin_api::{NativeContributionKind, NativePluginContribution};
 
 use super::files::repository_is_writable;
-use super::workspace::WorkspacePanel;
 use super::ShellViewModel;
 
 #[path = "native_preview.rs"]
@@ -257,10 +256,6 @@ pub(crate) use tags::poll_timers;
 impl InspectState {
     pub fn take_effects(&mut self) -> Vec<InspectEffect> {
         std::mem::take(&mut self.effects)
-    }
-
-    pub(super) fn has_target(&self) -> bool {
-        self.target_path.is_some()
     }
 
     pub(super) fn dirty(&self) -> bool {
@@ -711,14 +706,6 @@ pub(super) fn reduce_message(model: &mut ShellViewModel, message: super::ShellMe
     bridge::apply(model, follow);
     search::settle(model);
     None
-}
-
-impl super::ShellViewModel {
-    pub(super) fn inspect_surface_visible(&self) -> bool {
-        self.workspace.startup.status == super::workspace::StartupStatus::Ready
-            && self.workspace.main_region() == super::workspace::MainRegion::HasRepository
-            && (self.workspace.panel == WorkspacePanel::Search || self.inspect.has_target())
-    }
 }
 
 #[path = "inspect_support.rs"]

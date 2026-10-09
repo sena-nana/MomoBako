@@ -12,6 +12,7 @@ use crate::plugin_api::{NativeContributionKind, NativePluginContribution};
 
 use super::super::workspace::{WorkspacePanel, WorkspaceRepository};
 use super::super::player::PlayerMessage;
+use super::super::view_part_primary::RouteKey;
 use super::super::{PreviewPixels, ShellMessage, ShellPage, ShellViewModel};
 use super::{InspectEffect, InspectMessage, InspectState, PreviewBinding, PreviewBody, PreviewKind};
 
@@ -470,7 +471,7 @@ fn primary_action_reopens_a_live_target_and_acceptance_keeps_the_old_detail() {
     assert!(matches!(live.inspect.effects.last(), Some(InspectEffect::LoadImage { .. })));
 
     let mut acceptance = ShellViewModel::for_page(ShellPage::SelectedFile);
-    assert!(acceptance.inspect_surface_visible());
+    assert_eq!(RouteKey::of(&acceptance), RouteKey::Files);
     acceptance.reduce(ShellMessage::PrimaryAction);
     assert_eq!(acceptance.detail, "当前没有可打开的预览");
     assert!(acceptance.inspect.effects.is_empty());
@@ -480,10 +481,10 @@ fn primary_action_reopens_a_live_target_and_acceptance_keeps_the_old_detail() {
 }
 
 #[test]
-fn inspect_surface_appears_only_after_startup_with_a_repository() {
+fn search_route_appears_only_after_startup_with_a_repository() {
     let mut model = ShellViewModel::default();
     model.workspace.panel = WorkspacePanel::Search;
-    assert!(!model.inspect_surface_visible());
+    assert_eq!(RouteKey::of(&model), RouteKey::Startup);
 
     model.reduce(ShellMessage::RepositoriesLoaded(Ok(vec![RepositorySummary {
         repo_id: "repo".into(),
@@ -553,14 +554,14 @@ fn inspect_surface_appears_only_after_startup_with_a_repository() {
         entries: Vec::new(),
     })));
     model.workspace.panel = WorkspacePanel::Search;
-    assert!(model.inspect_surface_visible());
+    assert_eq!(RouteKey::of(&model), RouteKey::Search);
     model.workspace.panel = WorkspacePanel::Files;
-    assert!(!model.inspect_surface_visible());
+    assert_eq!(RouteKey::of(&model), RouteKey::Files);
     model.reduce(ShellMessage::SelectFile { path: "pics/a.png".into(), asset_id: None });
-    assert!(model.inspect_surface_visible());
+    assert_eq!(RouteKey::of(&model), RouteKey::Files);
     let selected = ShellViewModel::for_page(ShellPage::SelectedFile);
     assert!(selected.files_surface_visible());
-    assert!(selected.inspect_surface_visible());
+    assert_eq!(RouteKey::of(&selected), RouteKey::Files);
 }
 
 #[test]
