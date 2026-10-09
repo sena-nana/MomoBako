@@ -1,14 +1,17 @@
-//! 侧栏零件：导航行、分组标题、标题工具、空状态说明和底部入口。
+//! 侧栏零件：导航行、分组标题、标题工具、空状态说明和底部入口，以及常驻侧栏按信号改字段用的写入器。
 //!
 //! 尺寸、字号和状态色照 Vue `shell.css` 里 `workspace-*` 类声明的设计值：导航行 28px、
 //! 分组标题 24px、标题工具 22px、底部入口 26px。Lilia 全局 `button { height: 32px }` 会把
 //! 只写了 `min-height` 的导航行顶成 32px，这里按组件自己声明的 28px 画。
 //! 颜色只写语义角色，行里的图标和文字继承行的前景色，悬停和当前态由行的交互样式整体切换，
 //! 和 Vue 的 `color` 继承一致。
+//!
+//! 侧栏常驻以后，导航行、标题工具和底部入口的当前态、禁用和计数都按信号绑定：建一次，之后只改
+//! 那几个字段。绑定的取值函数是可复制的闭包，同一行的几个字段各绑一份。
 
 use std::sync::Arc;
 
-use nana_ui::runtime::view::{widget, AnyView, IntoView};
+use nana_ui::runtime::view::{fields, widget, AnyView, El, FieldWrite, IntoProp, IntoView, Signal};
 use nana_ui::runtime::{
     Activate, AlignSpec, Button, IconButton, IconGlyph, InteractionStyle, LengthSpec, ListItem, NodeStyle, RadiusTier,
     SemanticColorRole, SemanticPaint, Stack, Text, ViewContext,
@@ -117,51 +120,65 @@ pub(crate) fn label_text(value: impl Into<String>, size: f32, weight: u16, color
 
 /// 占满剩余宽度、超出时省略的单行文字。
 pub(crate) fn fill_label(value: impl Into<String>, size: f32, weight: u16) -> AnyView {
+    widget(fill_text(value, size, weight)).into_any()
+}
+
+/// [`fill_label`] 的文字节点本身，常驻视图拿它再绑定文字。
+pub(crate) fn fill_text(value: impl Into<String>, size: f32, weight: u16) -> Text {
     let mut node = label_text(value, size, weight, None).truncating();
     let layout = Arc::make_mut(&mut node.style.layout);
     layout.flex_grow = Some(1.0);
     layout.flex_shrink = Some(1.0);
     layout.min_width = Some(LengthSpec::Px(0.0));
-    widget(node).into_any()
+    node
+}
+
+/// 导航行随状态变的部分：当前态、禁用和右侧计数。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct NavLook {
+    pub active: bool,
+    pub disabled: bool,
+    /// 右侧计数；`None` 的行没有计数这一格。
+    pub count: Option<usize>,
 }
 
 /// 快捷方式这类导航行：图标、名称，右侧计数。对应 `.workspace-shortcuts__item`。
-pub(crate) struct NavRow {
-    pub label: String,
-    pub icon: Option<Icon>,
-    pub count: Option<String>,
-    pub active: bool,
-    pub disabled: bool,
-}
-
-impl NavRow {
-    /// 挂上点击。行本身是可聚焦的列表项，无障碍名是行文字。
-    pub(crate) fn view(self, key: String, on_activate: impl Fn(&mut ViewContext<ListItem>) + Send + 'static) -> AnyView {
-        let mut parts: Vec<AnyView> = Vec::new();
-        if let Some(icon) = self.icon {
-            parts.push(widget(inherit_icon(icon, 15.0)).into_any());
-        }
-        parts.push(fill_label(self.label.clone(), 13.0, 500));
-        if let Some(count) = self.count {
-            parts.push(widget(label_text(count, 12.0, 600, Some(SemanticColorRole::Muted))).into_any());
-        }
-        let content = widget(Stack::fill_row(8.0).align(AlignSpec::Center)).children(parts);
-        let disabled = self.disabled;
-        widget(
-            ListItem::new(self.label)
-                .selected(self.active)
-                .disabled(disabled)
-                .style(row_style(NAV_ROW_HEIGHT, 8.0, 8.0, 8.0, ActiveTone::Accent, disabled)),
-        )
-        .content(content)
-        .key(key)
-        .on_cx(move |_, _: &Activate, cx| {
-            if !disabled {
-                on_activate(cx);
-            }
-        })
-        .into_any()
+///
+/// 行本身是可聚焦的列表项，无障碍名是行文字。`look` 现读信号，当前态、禁用（连同 0.45 透明度）
+/// 和计数各自绑定；有没有计数这一格按建行时的取值定。禁用的列表项收不到激活，处理器不再判断。
+pub(crate) fn nav_row(
+    label: &str,
+    icon: Option<Icon>,
+    look: impl Fn() -> NavLook + Copy + Send + 'static,
+    key: String,
+    on_activate: impl Fn(&mut ViewContext<ListItem>) + Send + 'static,
+) -> AnyView {
+    let initial = look();
+    let mut parts: Vec<AnyView> = Vec::new();
+    if let Some(icon) = icon {
+        parts.push(widget(inherit_icon(icon, 15.0)).into_any());
     }
+    parts.push(fill_label(label, 13.0, 500));
+    if let Some(count) = initial.count {
+        parts.push(
+            widget(label_text(count.to_string(), 12.0, 600, Some(SemanticColorRole::Muted)))
+                .prop::<String, fields::text::value>(move || look().count.unwrap_or_default().to_string())
+                .into_any(),
+        );
+    }
+    let content = widget(Stack::fill_row(8.0).align(AlignSpec::Center)).children(parts);
+    widget(
+        ListItem::new(label)
+            .selected(initial.active)
+            .disabled(initial.disabled)
+            .style(row_style(NAV_ROW_HEIGHT, 8.0, 8.0, 8.0, ActiveTone::Accent, initial.disabled)),
+    )
+    .prop::<bool, fields::list_item::selected>(move || look().active)
+    .prop::<bool, DimmedRow>(move || look().disabled)
+    .content(content)
+    .key(key)
+    .on_cx(move |_, _: &Activate, cx| on_activate(cx))
+    .into_any()
 }
 
 /// 分组标题：11px 粗体弱色字，右侧工具。对应 `.workspace-group__header`。
@@ -191,19 +208,20 @@ pub(crate) fn group_title(value: &str) -> Text {
 }
 
 /// 分组标题右侧的小图标按钮。对应 `.workspace-tree-action`：22×22、`--radius-xs`、弱色 13px 图标。
+/// 禁用（连同 0.45 透明度）按 `disabled` 绑定，常量也行；返回元素本身，调用方还能再绑图标。
 pub(crate) fn tree_action(
     icon: Icon,
     label: &'static str,
     key: &'static str,
-    disabled: bool,
+    disabled: impl IntoProp<bool>,
     on_activate: impl Fn(&mut ViewContext<IconButton>) + Send + 'static,
-) -> AnyView {
-    let mut button = IconButton::new(icon, label).size(ControlSize::Medium).disabled(disabled).with_tooltip(label);
-    button.style = icon_button_style(TREE_ACTION_EDGE, RadiusTier::Xs, SemanticColorRole::Faint, None, disabled);
+) -> El<IconButton> {
+    let mut button = IconButton::new(icon, label).size(ControlSize::Medium).with_tooltip(label);
+    button.style = icon_button_style(TREE_ACTION_EDGE, RadiusTier::Xs, SemanticColorRole::Faint, None, false);
     widget(button.colors_from_style())
+        .prop::<bool, DimmedTool>(disabled)
         .key(key)
         .on_cx(move |_, _: &Activate, cx| on_activate(cx))
-        .into_any()
 }
 
 /// 方形图标按钮的样式：常态透明，悬停换 `--bg-hover` 和正文色，禁用整体 0.45。
@@ -233,17 +251,12 @@ pub(crate) fn icon_button_style(
     style.radius = Some(radius);
     style.foreground = Some(foreground);
     style.background = background;
-    let hover = SemanticPaint {
-        background: Some(SemanticColorRole::Hover),
-        foreground: Some(SemanticColorRole::Text),
-        ..SemanticPaint::default()
-    };
     style.interaction = InteractionStyle {
-        hovered: hover,
-        pressed: hover,
+        hovered: hover_paint(),
+        pressed: hover_paint(),
         focused: SemanticPaint {
             border: Some(SemanticColorRole::Accent),
-            ..hover
+            ..hover_paint()
         },
         ..InteractionStyle::default()
     };
@@ -252,58 +265,158 @@ pub(crate) fn icon_button_style(
     style
 }
 
+/// 图标按钮悬停和按下时的 `--bg-hover` 底、正文色。
+fn hover_paint() -> SemanticPaint {
+    SemanticPaint {
+        background: Some(SemanticColorRole::Hover),
+        foreground: Some(SemanticColorRole::Text),
+        ..SemanticPaint::default()
+    }
+}
+
 /// 分组里的空状态说明。对应 `.workspace-empty--compact` + `.workspace-empty__text`：
 /// 内边距 6px 8px，12px 弱色，行高 1.5。
 pub(crate) fn empty_hint(copy: &str, key: impl Into<String>) -> AnyView {
-    let mut node = label_text(copy, 12.0, 400, Some(SemanticColorRole::Faint)).line_height(18.0);
-    {
-        let layout = Arc::make_mut(&mut node.style.layout);
-        layout.width = Some(LengthSpec::Fill);
-        layout.min_width = Some(LengthSpec::Px(0.0));
-        layout.overflow_wrap = Some(nana_ui_core::OverflowWrapSpec::Anywhere);
-    }
     widget(Stack::column(0.0).padding_xy(8.0, 6.0))
-        .children((widget(node).key(key.into()),))
+        .children((widget(hint_text(copy)).key(key.into()),))
         .into_any()
+}
+
+/// 常驻分组的空状态说明：`copy` 现读信号，有说明时显示并改字，没有时藏起来、不占布局。
+pub(crate) fn bound_hint(copy: impl Fn() -> Option<&'static str> + Copy + Send + 'static, key: &'static str) -> AnyView {
+    widget(Stack::column(0.0).padding_xy(8.0, 6.0))
+        .visible(move || copy().is_some())
+        .children((widget(hint_text(copy().unwrap_or_default()))
+            .prop::<String, fields::text::value>(move || copy().unwrap_or_default().to_string())
+            .key(key),))
+        .into_any()
+}
+
+/// 空状态说明的文字：12px 弱色、行高 18px，可在任意位置折行。
+fn hint_text(copy: &str) -> Text {
+    let mut node = label_text(copy, 12.0, 400, Some(SemanticColorRole::Faint)).line_height(18.0);
+    let layout = Arc::make_mut(&mut node.style.layout);
+    layout.width = Some(LengthSpec::Fill);
+    layout.min_width = Some(LengthSpec::Px(0.0));
+    layout.overflow_wrap = Some(nana_ui_core::OverflowWrapSpec::Anywhere);
+    node
+}
+
+/// 底部入口的状态：当前入口，以及任务入口有任务时的强调（Vue `.task-button.has-tasks`）。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct FooterLook {
+    pub active: bool,
+    pub highlight: bool,
 }
 
 /// 底部入口按钮。对应 `.workspace-footer__btn`：26×26、14px 图标、`--text-muted`；
 /// 当前入口 `--accent-soft` 底、强调色，其余按 `rest` 透明度（悬停底栏时为 1）。
-pub(crate) struct FooterButton {
-    pub icon: Icon,
-    pub label: &'static str,
-    pub active: bool,
-    /// 任务入口在有任务时强调色、满不透明（Vue `.task-button.has-tasks`）。
-    pub highlight: bool,
-    pub rest_opacity: f32,
+///
+/// 颜色按 `look` 绑定；平时的半透明随底栏悬停淡入淡出，绑在热信号 `rest` 上，当前入口和有任务时
+/// 常亮，不读它。
+pub(crate) fn footer_button(
+    icon: Icon,
+    label: &'static str,
+    key: &'static str,
+    look: impl Fn() -> FooterLook + Copy + Send + 'static,
+    rest: Signal<f32>,
+    on_activate: impl Fn(&mut ViewContext<IconButton>) + Send + 'static,
+) -> AnyView {
+    let mut button = IconButton::new(icon, label).size(ControlSize::Large).with_tooltip(label);
+    button.style = icon_button_style(FOOTER_BUTTON_EDGE, RadiusTier::Sm, SemanticColorRole::Muted, None, false);
+    widget(button.colors_from_style())
+        .prop::<FooterLook, FooterPaint>(look)
+        .prop::<f32, super::super::hot::OpacityField>(move || {
+            let look = look();
+            if look.active || look.highlight { 1.0 } else { rest.get() }
+        })
+        .key(key)
+        .on_cx(move |_, _: &Activate, cx| on_activate(cx))
+        .into_any()
 }
 
-impl FooterButton {
-    pub(crate) fn view(self, key: &'static str, on_activate: impl Fn(&mut ViewContext<IconButton>) + Send + 'static) -> AnyView {
-        let foreground = if self.active || self.highlight { SemanticColorRole::Accent } else { SemanticColorRole::Muted };
-        let background = self.active.then_some(SemanticColorRole::AccentSoft);
-        let mut style = icon_button_style(FOOTER_BUTTON_EDGE, RadiusTier::Sm, foreground, background, false);
-        if self.active {
-            // 当前入口悬停也保持强调色底，和 `.is-active` 压过 `:hover` 一致。
-            let current = SemanticPaint {
-                background: Some(SemanticColorRole::AccentSoft),
-                foreground: Some(SemanticColorRole::Accent),
-                ..SemanticPaint::default()
-            };
-            style.interaction.hovered = current;
-            style.interaction.pressed = current;
-        }
-        let opacity = if self.active || self.highlight { 1.0 } else { self.rest_opacity };
-        Arc::make_mut(&mut style.layout).opacity = Some(opacity);
-        let mut button = IconButton::new(self.icon, self.label).size(ControlSize::Large).with_tooltip(self.label);
-        button.style = style;
-        let button = widget(button.colors_from_style());
-        // 平时的半透明随底栏悬停淡入淡出，绑在热信号上；当前入口和有任务时常亮，不跟。
-        let button = if self.active || self.highlight {
-            button
-        } else {
-            button.prop::<f32, super::super::hot::OpacityField>(super::super::hot::prop(|signals| signals.footer, self.rest_opacity))
+/// 底部入口的前景、底色和悬停按下的样子。当前入口悬停也保持强调色底，和 `.is-active` 压过
+/// `:hover` 一致。
+fn footer_paint(look: FooterLook) -> (SemanticColorRole, Option<SemanticColorRole>, SemanticPaint) {
+    let foreground = if look.active || look.highlight { SemanticColorRole::Accent } else { SemanticColorRole::Muted };
+    if look.active {
+        let current = SemanticPaint {
+            background: Some(SemanticColorRole::AccentSoft),
+            foreground: Some(SemanticColorRole::Accent),
+            ..SemanticPaint::default()
         };
-        button.key(key).on_cx(move |_, _: &Activate, cx| on_activate(cx)).into_any()
+        return (foreground, Some(SemanticColorRole::AccentSoft), current);
+    }
+    (foreground, None, hover_paint())
+}
+
+/// 底部入口按状态换颜色：前景、底色、悬停和按下。透明度另由 `OpacityField` 绑。
+pub(crate) struct FooterPaint;
+
+impl FieldWrite<IconButton, FooterLook> for FooterPaint {
+    const FIELD: &'static str = "IconButton.style.foreground+background+interaction.hovered+pressed";
+
+    fn write(target: &mut IconButton, look: FooterLook) {
+        let (foreground, background, hover) = footer_paint(look);
+        target.style.foreground = Some(foreground);
+        target.style.background = background;
+        target.style.interaction.hovered = hover;
+        target.style.interaction.pressed = hover;
+    }
+
+    fn differs(target: &IconButton, look: &FooterLook) -> bool {
+        let (foreground, background, hover) = footer_paint(*look);
+        let style = &target.style;
+        style.foreground != Some(foreground)
+            || style.background != background
+            || style.interaction.hovered != hover
+            || style.interaction.pressed != hover
+    }
+}
+
+/// 列表项的禁用：不可点，整行 0.45 透明度（Vue `button:disabled`）。
+pub(crate) struct DimmedRow;
+
+impl FieldWrite<ListItem, bool> for DimmedRow {
+    const FIELD: &'static str = "ListItem.disabled+style.layout.opacity";
+
+    fn write(target: &mut ListItem, disabled: bool) {
+        target.disabled = disabled;
+        Arc::make_mut(&mut target.style.layout).opacity = disabled.then_some(DISABLED_OPACITY);
+    }
+
+    fn differs(target: &ListItem, disabled: &bool) -> bool {
+        target.disabled != *disabled || target.style.layout.opacity != disabled.then_some(DISABLED_OPACITY)
+    }
+}
+
+/// 图标按钮的禁用：不可点，整颗 0.45 透明度。
+pub(crate) struct DimmedTool;
+
+impl FieldWrite<IconButton, bool> for DimmedTool {
+    const FIELD: &'static str = "IconButton.disabled+style.layout.opacity";
+
+    fn write(target: &mut IconButton, disabled: bool) {
+        target.disabled = disabled;
+        Arc::make_mut(&mut target.style.layout).opacity = disabled.then_some(DISABLED_OPACITY);
+    }
+
+    fn differs(target: &IconButton, disabled: &bool) -> bool {
+        target.disabled != *disabled || target.style.layout.opacity != disabled.then_some(DISABLED_OPACITY)
+    }
+}
+
+/// 图标字形本身，文件夹开合这类随状态换图标的地方用。
+pub(crate) struct GlyphIcon;
+
+impl FieldWrite<IconGlyph, Icon> for GlyphIcon {
+    const FIELD: &'static str = "IconGlyph.icon";
+
+    fn write(target: &mut IconGlyph, icon: Icon) {
+        target.icon = icon;
+    }
+
+    fn differs(target: &IconGlyph, icon: &Icon) -> bool {
+        target.icon != *icon
     }
 }
