@@ -433,23 +433,70 @@ fn repository_backends_and_audio_player_choices() {
     assert_eq!(support::backend_summary(&model.admin.backends), "本地 (2) / WebDAV (1)");
     assert_eq!(support::backend_summary(&[]), "无");
 
-    let names = |plugin_id: &str| (plugin_id == "momobako.player.audio").then(|| "官方音频播放器".to_string());
+    // 原生候选登记了音频能力时照 Vue：插件名从清单里找，偏好不可用时回退到官方实现；什么都没有才报缺失。
+    let mut official = plugin("momobako.player.audio", "builtin", "preview", "preview");
+    official.name = "官方音频播放器".into();
+    let plugins = [official];
     let mut preferences = BTreeMap::new();
-    let view = support::audio_view(&[candidate("momobako.player.audio", "音频顺序播放")], &preferences, &names);
-    assert_eq!(view.choices.iter().map(|choice| choice.label.as_str()).collect::<Vec<_>>(), ["官方音频播放器 · momobako.player.audio"]);
+    let view = support::audio_view(&[candidate("momobako.player.audio", "音频顺序播放")], &plugins, &preferences);
+    assert_eq!(audio_labels(&view), ["官方音频播放器 · momobako.player.audio"]);
     assert_eq!(view.selected, "momobako.player.audio");
-    assert!(view.notice.is_none());
+    assert!(view.selectable && view.notice.is_none());
     preferences.insert(AUDIO_CAPABILITY.to_string(), "missing.player".to_string());
-    let view = support::audio_view(&[candidate("momobako.player.audio", "音频顺序播放")], &preferences, &names);
+    let view = support::audio_view(&[candidate("momobako.player.audio", "音频顺序播放")], &plugins, &preferences);
     assert_eq!(view.choices[0].label, "missing.player（不可用）");
     assert_eq!(view.notice, Some(("所选播放器当前不可用，已回退到 官方音频播放器。".into(), false)));
-    let view = support::audio_view(&[], &BTreeMap::new(), &names);
-    assert!(view.choices.is_empty());
+    let view = support::audio_view(&[], &[], &BTreeMap::new());
+    assert!(view.choices.is_empty() && !view.selectable);
     assert_eq!(view.notice, Some(("官方音频播放器未启用或缺失，音频播放暂不可用。".into(), true)));
 
     model.player.candidates = vec![candidate("momobako.player.audio", "音频顺序播放")];
     send(&mut model, AdminMessage::SetAudioPlayer(Some(" momobako.player.audio ".into())));
     assert_eq!(model.player.preferences.get(AUDIO_CAPABILITY).map(String::as_str), Some("momobako.player.audio"));
+}
+
+/// 生产里的原生候选只有内置解码器，音频能力的实现来自插件清单：装了官方音频播放器就和 Vue 一样显示它；
+/// 没装、停用或只有没选的第三方实现时，音频由内置解码器播放，下拉框如实写出它，不报缺失。
+#[test]
+fn audio_card_reads_plugin_players_and_falls_back_to_the_builtin_decoder() {
+    let builtin = ShellViewModel::default().player.candidates;
+    let official: PluginManifest =
+        serde_json::from_str(include_str!("../../../External/Plugins/player-audio/manifest.json")).expect("官方音频播放器清单");
+
+    let view = support::audio_view(&builtin, std::slice::from_ref(&official), &BTreeMap::new());
+    assert_eq!(audio_labels(&view), ["Audio Player · momobako.player.audio"]);
+    assert_eq!(view.selected, "momobako.player.audio");
+    assert!(view.selectable && view.notice.is_none());
+
+    let none = support::audio_view(&builtin, &[], &BTreeMap::new());
+    assert_eq!(audio_labels(&none), ["内置解码器 · WAV / MP3 / FLAC / Ogg"]);
+    assert_eq!(none.selected, "");
+    assert!(!none.selectable && none.notice.is_none(), "内置解码器能放音频，不报缺失");
+    let mut disabled = official.clone();
+    disabled.enabled = false;
+    assert_eq!(support::audio_view(&builtin, &[disabled], &BTreeMap::new()), none, "停用的插件不算实现");
+
+    let preferences = BTreeMap::from([(AUDIO_CAPABILITY.to_string(), "momobako.player.audio".to_string())]);
+    let gone = support::audio_view(&builtin, &[], &preferences);
+    assert_eq!(audio_labels(&gone), ["momobako.player.audio（不可用）"]);
+    assert_eq!(gone.notice, Some(("所选播放器当前不可用，已回退到 内置解码器。".into(), false)));
+
+    let mut third = official.clone();
+    third.plugin_id = "user.player.lyric".into();
+    third.name = "Lyric Player".into();
+    let view = support::audio_view(&builtin, &[third], &BTreeMap::new());
+    assert_eq!(audio_labels(&view), ["内置解码器 · WAV / MP3 / FLAC / Ogg", "Lyric Player · user.player.lyric"]);
+    assert_eq!(view.selected, "", "没选的第三方实现不接管音频");
+    assert!(view.selectable && view.notice.is_none());
+
+    let mut model = ShellViewModel::default();
+    model.player.preferences = preferences;
+    send(&mut model, AdminMessage::SetAudioPlayer(Some(String::new())));
+    assert!(model.player.preferences.get(AUDIO_CAPABILITY).is_none(), "选内置解码器等于清掉偏好");
+}
+
+fn audio_labels(view: &support::AudioView) -> Vec<String> {
+    view.choices.iter().map(|choice| choice.label.clone()).collect()
 }
 
 #[test]
