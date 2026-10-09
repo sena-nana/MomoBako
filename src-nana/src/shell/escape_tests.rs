@@ -41,15 +41,25 @@ fn escape_closes_a_dialog_from_its_own_input() {
     }
 }
 
-/// 删除资源库对话框不归 Escape 管，只能点取消：按了也还开着。
+/// 删除资源库对话框和别的对话框一样由框架把 Escape 交给它：没在删除时关掉，删除进行中不关。
 #[test]
-fn escape_leaves_the_repository_delete_dialog_open() {
+fn escape_closes_the_repository_delete_dialog_unless_deleting() {
     let mut harness = ShellHarness::mount(scene("repo-delete-dialog"));
+    harness.model.workspace.deleting_mode = Some(crate::shell::workspace::DeleteMode::RecordOnly);
+    harness.sync();
+    harness.flush();
+    assert!(!harness.press_escape(), "删除进行中 Escape 不该发关闭消息");
+    assert!(harness.model.workspace.delete_dialog_open(), "删除进行中对话框不该被 Escape 关掉");
+    assert!(harness.content_roots().0.is_some());
+
+    harness.model.workspace.deleting_mode = None;
+    harness.sync();
+    harness.flush();
     let cancel = harness.node("取消");
     harness.focus(cancel);
-    harness.press_escape();
-    assert!(harness.model.workspace.delete_dialog_open(), "删除资源库对话框不该被 Escape 关掉");
-    assert!(harness.content_roots().0.is_some());
+    assert!(harness.press_escape());
+    assert!(!harness.model.workspace.delete_dialog_open(), "Escape 应该关掉删除资源库对话框");
+    assert!(harness.content_roots().0.is_none());
     harness.assert_same_as_fresh_mount();
 }
 
@@ -128,11 +138,20 @@ fn escape_consumed_by_a_select_leaves_the_popover_open() {
     assert!(harness.model.admin.popover_open, "任务弹层不该跟着关");
 }
 
-/// 新做法：焦点不在按钮或输入框上（这里没有焦点）时 Escape 也关掉最上面一层。
+/// 焦点不在按钮或输入框上（这里没有焦点）时 Escape 也关掉最上面一层；对话框打开时框架把焦点
+/// 放进对话框，Escape 交给它。
 #[test]
 fn escape_closes_the_top_layer_without_focus() {
-    let mut harness = ShellHarness::mount(scene("folder-create-dialog"));
+    let mut harness = ShellHarness::mount(scene("repo-switcher"));
     assert_eq!(harness.focused(), None);
+    assert!(harness.press_escape());
+    assert_eq!(harness.model.sidebar.popover, Default::default());
+    assert!(!harness.press_escape(), "没有能关的层时不发消息");
+
+    let mut harness = ShellHarness::mount(scene("folder-create-dialog"));
+    let dialog = harness.content_roots().0.expect("对话框在浮层里");
+    let focused = harness.focused().expect("框架应该把焦点放进对话框");
+    assert!(harness.document().context().world().is_descendant_or_self(focused, dialog), "初始焦点不在对话框里");
     assert!(harness.press_escape());
     assert!(!harness.model.sidebar.folder_dialog.open);
     assert!(!harness.press_escape(), "没有能关的层时不发消息");

@@ -723,7 +723,13 @@ mod tests {
         };
         let payload = nana_ui::InputPayload::Key(escape.clone());
         let outcome = input.press(window.document.context_mut(), escape, None, None).expect("Escape");
-        if let Some(message) = crate::window_host::escape_message(model, &payload, outcome.disposition().prevent_default) {
+        // 排着的消息（激活的对话框在路由时发的关闭请求）和生产一样先归约，再走全局 Escape。
+        let routed = window.document.context_mut().take_program_messages();
+        let global = crate::window_host::escape_message(model, &payload, outcome.disposition().prevent_default);
+        for message in routed {
+            model.reduce(*message.downcast::<ShellMessage>().expect("壳层消息"));
+        }
+        if let Some(message) = global {
             model.reduce(message);
         }
     }

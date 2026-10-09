@@ -12,6 +12,7 @@
 
 use std::fs;
 use std::path::PathBuf;
+use std::time::Duration;
 
 use momobako_nana::acceptance_document_at_width;
 use momobako_nana::appearance::{self, Appearance};
@@ -78,6 +79,7 @@ fn shoot(model: ShellViewModel, width: u32, height: u32, theme: ThemeName, dir: 
     session.set_theme(theme).expect("主题");
     assert!(appearance::install(session.document_mut(), appearance).is_some(), "外观安装失败");
     session.flush().expect("布局");
+    settle_dialogs(&mut session);
     session.screenshot_png(dir.join(format!("{stem}.png"))).expect("截图");
     let nodes = session
         .accessibility_dump()
@@ -99,6 +101,26 @@ fn shoot(model: ShellViewModel, width: u32, height: u32, theme: ThemeName, dir: 
         .join("\n");
     fs::write(dir.join(format!("{stem}.nodes.txt")), nodes).expect("节点清单");
     let _ = AgentSession::describe(&session);
+}
+
+/// 框架激活的对话框开着时，把它的进场动效走完再截图。离屏会话没有帧时钟，不推进就截到透明度
+/// 为 0 的对话框；没有激活的浮层时什么也不做，别的场景的像素不受影响。
+fn settle_dialogs(session: &mut RuntimeAgentSession) {
+    let document_id = session.document().document();
+    let context = session.document_mut().context_mut();
+    if context.active_runtime_overlay(document_id).is_none() {
+        return;
+    }
+    for _ in 0..64 {
+        let Some(deadline) = context.next_animation_deadline() else {
+            break;
+        };
+        if deadline > Duration::from_secs(2) {
+            break;
+        }
+        context.advance_animations(deadline);
+    }
+    session.flush().expect("动效走完后的布局");
 }
 
 fn list(key: &str, default: &str) -> Vec<String> {

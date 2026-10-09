@@ -19,6 +19,8 @@ pub(crate) struct ShellHarness {
     input: HeadlessInput,
     shaper: NanaTextShaper,
     viewport: LayoutViewport,
+    /// 按 Escape 之前已经排着的消息：不算这次按键发的，留给下一次 [`Self::take_messages`]。
+    held: Vec<ShellMessage>,
 }
 
 impl ShellHarness {
@@ -43,6 +45,7 @@ impl ShellHarness {
             input,
             shaper: NanaTextShaper::default(),
             viewport: LayoutViewport::new(width, height),
+            held: Vec::new(),
         };
         harness.flush();
         harness
@@ -189,9 +192,21 @@ impl ShellHarness {
         self.document().context().world().node(container).map(|node| node.children.to_vec()).unwrap_or_default()
     }
 
-    /// 按一下 Escape：先经运行时路由（控件自己处理掉的会标 `prevent_default`），再照生产
-    /// `input_event` 走全局 Escape；发出的消息立即归约并同步，再刷新一帧。返回是否发了消息。
+    /// 按一下 Escape：先经运行时路由（控件自己处理掉的会标 `prevent_default`，激活的对话框在这时
+    /// 发关闭请求），再照生产 `input_event` 走全局 Escape。路由时发出的消息先归约、全局 Escape 的
+    /// 后归约，和生产的先后一样，每条归约后同步，最后刷新一帧。返回是否发了消息。
     pub fn press_escape(&mut self) -> bool {
+        let messages = self.escape_messages();
+        let sent = !messages.is_empty();
+        for message in messages {
+            self.apply(message);
+        }
+        self.flush();
+        sent
+    }
+
+    /// 按一下 Escape，返回这次按键发出的消息（路由时控件发的在前，全局 Escape 的在后），不归约。
+    pub fn escape_messages(&mut self) -> Vec<ShellMessage> {
         let escape = nana_ui::KeyInput {
             physical: nana_ui_platform::PhysicalKey("Escape".into()),
             logical: nana_ui_platform::LogicalKey("Escape".into()),
@@ -200,14 +215,30 @@ impl ShellHarness {
             modifiers: nana_ui::InputModifiers::default(),
         };
         let payload = nana_ui::InputPayload::Key(escape.clone());
+        // 之前排着的消息不算这次按键发的，留给调用方下一次取。
+        let earlier = self.take_messages();
+        self.held = earlier;
         let outcome = self.input.press(self.window.document.context_mut(), escape, None, None).expect("Escape");
-        let message = crate::window_host::escape_message(&self.model, &payload, outcome.disposition().prevent_default);
-        let sent = message.is_some();
-        if let Some(message) = message {
-            self.apply(message);
-        }
-        self.flush();
-        sent
+        let mut messages = self.queued();
+        messages.extend(crate::window_host::escape_message(&self.model, &payload, outcome.disposition().prevent_default));
+        messages
+    }
+
+    /// 在 `(x, y)` 按下再松开主键，返回这次点击发出的消息，不归约。之前排着的消息留给调用方。
+    pub fn click_messages(&mut self, x: f32, y: f32) -> Vec<ShellMessage> {
+        let earlier = self.take_messages();
+        self.held = earlier;
+        let context = self.window.document.context_mut();
+        self.input.pointer(context, nana_ui::PointerPhase::Down, x, y).expect("按下");
+        let context = self.window.document.context_mut();
+        self.input.pointer(context, nana_ui::PointerPhase::Up, x, y).expect("松开");
+        self.queued()
+    }
+
+    /// 节点的布局盒中心。
+    pub fn center(&self, id: StableNodeId) -> (f32, f32) {
+        let bounds = self.document().context().world().layout_box(id).unwrap_or_else(|| panic!("节点 {} 没有布局盒", id.get()));
+        (bounds.x + bounds.width / 2.0, bounds.y + bounds.height / 2.0)
     }
 
     fn route(&mut self, composition: CompositionInput) {
@@ -226,6 +257,13 @@ impl ShellHarness {
 
     /// 视图发给程序的消息，按发出顺序。
     pub fn take_messages(&mut self) -> Vec<ShellMessage> {
+        let mut messages = std::mem::take(&mut self.held);
+        messages.extend(self.queued());
+        messages
+    }
+
+    /// 文档里排着的程序消息。
+    fn queued(&mut self) -> Vec<ShellMessage> {
         self.window
             .document
             .context_mut()
