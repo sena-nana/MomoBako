@@ -105,6 +105,42 @@ fn search_criteria_follow_the_vue_filter_rules() {
     assert!(locked.effects.is_empty());
 }
 
+/// 跑完的带条件搜索哪怕没有命中也记为已搜索；清空条件、筛选缺仓库或切换资源库后回到等条件。
+#[test]
+fn finished_search_without_hits_is_not_waiting_for_criteria() {
+    let finish = |state: &mut InspectState, result: Result<Vec<SearchRow>, String>| {
+        let generation = state.search_generation;
+        state.reduce(true, Some("repo"), InspectMessage::SearchFinished { generation, result });
+    };
+    let mut state = InspectState::default();
+    assert!(!state.searched);
+    state.reduce(true, Some("repo"), InspectMessage::SetQuery("不存在的文件".into()));
+    state.reduce(true, Some("repo"), InspectMessage::RunSearch);
+    assert!(state.searching && !state.searched, "请求还没返回");
+    finish(&mut state, Ok(Vec::new()));
+    assert!(state.searched && state.results.is_empty(), "跑完没有命中");
+
+    state.reduce(true, Some("repo"), InspectMessage::RunSearch);
+    finish(&mut state, Err("索引损坏".into()));
+    assert_eq!(state.search_error, "索引损坏");
+
+    state.reduce(true, Some("repo"), InspectMessage::SetQuery(String::new()));
+    state.reduce(true, Some("repo"), InspectMessage::RunSearch);
+    assert!(!state.searched && state.search_error.is_empty(), "没有条件时回到等条件");
+
+    state.reduce(true, Some("repo"), InspectMessage::SetQuery("封面".into()));
+    state.reduce(true, Some("repo"), InspectMessage::RunSearch);
+    finish(&mut state, Ok(Vec::new()));
+    state.reduce(true, None, InspectMessage::ToggleFilter { key: FilterList::Tags, value: "参考".into() });
+    assert!(!state.searched, "筛选缺活动仓库时没有发请求");
+
+    state.reduce(true, Some("repo"), InspectMessage::RunSearch);
+    finish(&mut state, Ok(Vec::new()));
+    assert!(state.searched);
+    state.reset_search();
+    assert!(!state.searched, "切换资源库清空搜索");
+}
+
 #[test]
 fn toggling_checks_the_raw_value_and_stores_the_trimmed_one() {
     let mut state = InspectState::default();

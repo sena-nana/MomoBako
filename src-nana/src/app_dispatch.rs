@@ -134,19 +134,6 @@ fn dispatch_admin_pages(
     {
         schedule_settings_load(services, context);
     }
-    if matches!(message, ShellMessage::SaveSettings)
-        && let Some(services) = app.services.as_ref()
-    {
-        let settings = app.shell.settings.clone();
-        let settings_service = services.settings.clone();
-        let executor = services.executor.clone();
-        run(context, "应用设置保存", Task::new(async move {
-            ShellMessage::SettingsSaved(executor.block_on(async move {
-                settings.validate()?;
-                settings_service.save(&settings).map(|()| settings)
-            }))
-        }));
-    }
     if matches!(message, ShellMessage::ClearLogs)
         && let Some(services) = app.services.as_ref()
     {

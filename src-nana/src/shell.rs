@@ -112,10 +112,6 @@ pub enum ShellMessage {
     SystemStatusLoaded(Result<crate::backend::services::runtime::ExternalApiConnectionStatus, String>),
     SettingsLoaded(Result<(ApplicationSettings, Option<String>), String>),
     SettingsThemeChanged(String),
-    SettingsCacheLimitChanged(String),
-    SettingsPlayerChanged(String),
-    SettingsCloseBehaviorChanged(String),
-    SaveSettings,
     SettingsSaved(Result<ApplicationSettings, String>),
     TaskSnapshotLoaded { active: usize, completed: usize },
     TaskProgressLoaded(Vec<TaskProgressSnapshot>),
@@ -253,7 +249,6 @@ pub struct ShellViewModel {
     pub task_progress: Vec<TaskProgressSnapshot>,
     pub system_status: Option<String>,
     pub settings: ApplicationSettings,
-    pub settings_cache_limit_draft: String,
     pub settings_error: Option<String>,
     pub selected_plugin_id: Option<String>,
     pub plugin_config_keys: Vec<String>,
@@ -317,7 +312,6 @@ impl Default for ShellViewModel {
             task_progress: Vec::new(),
             system_status: None,
             settings: ApplicationSettings::default(),
-            settings_cache_limit_draft: "1024".into(),
             settings_error: None,
             selected_plugin_id: None,
             plugin_config_keys: Vec::new(),
@@ -741,10 +735,6 @@ impl ShellViewModel {
             | ShellMessage::SystemStatusLoaded(_)
             | ShellMessage::SettingsLoaded(_)
             | ShellMessage::SettingsThemeChanged(_)
-            | ShellMessage::SettingsCacheLimitChanged(_)
-            | ShellMessage::SettingsPlayerChanged(_)
-            | ShellMessage::SettingsCloseBehaviorChanged(_)
-            | ShellMessage::SaveSettings
             | ShellMessage::SettingsSaved(_)
             | ShellMessage::TaskSnapshotLoaded { .. }
             | ShellMessage::TaskProgressLoaded(_)

@@ -468,8 +468,14 @@ fn audio_card_reads_plugin_players_and_falls_back_to_the_builtin_decoder() {
     assert_eq!(view.selected, "momobako.player.audio");
     assert!(view.selectable && view.notice.is_none());
 
+    // 媒体基础只在 Windows 上有，内置解码器在那里多出 M4A / AAC / Opus。
+    let builtin_label = if cfg!(windows) {
+        "内置解码器 · WAV / MP3 / FLAC / Ogg / M4A / AAC / Opus"
+    } else {
+        "内置解码器 · WAV / MP3 / FLAC / Ogg"
+    };
     let none = support::audio_view(&builtin, &[], &BTreeMap::new());
-    assert_eq!(audio_labels(&none), ["内置解码器 · WAV / MP3 / FLAC / Ogg"]);
+    assert_eq!(audio_labels(&none), [builtin_label]);
     assert_eq!(none.selected, "");
     assert!(!none.selectable && none.notice.is_none(), "内置解码器能放音频，不报缺失");
     let mut disabled = official.clone();
@@ -485,7 +491,7 @@ fn audio_card_reads_plugin_players_and_falls_back_to_the_builtin_decoder() {
     third.plugin_id = "user.player.lyric".into();
     third.name = "Lyric Player".into();
     let view = support::audio_view(&builtin, &[third], &BTreeMap::new());
-    assert_eq!(audio_labels(&view), ["内置解码器 · WAV / MP3 / FLAC / Ogg", "Lyric Player · user.player.lyric"]);
+    assert_eq!(audio_labels(&view), [builtin_label, "Lyric Player · user.player.lyric"]);
     assert_eq!(view.selected, "", "没选的第三方实现不接管音频");
     assert!(view.selectable && view.notice.is_none());
 
