@@ -2,6 +2,7 @@
 //!
 //! 结构照 Vue `SecondaryPanel.vue`：仓库头 → 状态 → 快捷方式 → 快捷访问 → 动作 → 播放集 →
 //! 文件夹 → 智能文件夹，底部是设置、拓展、任务和日志。文件夹树、仓库弹层和对话框在子模块里。
+//! 状态是全局状态区（`status.rs`）：最近一次失败，没有失败时是忙碌行。
 //!
 //! 侧栏常驻：树只建一次，文字、当前态、禁用和计数按 [`SidebarSignals`] 绑定；可有可无的分组、
 //! 说明和角标用 `.visible`，节点留着、不占布局；列表用带键的 `each`。事件处理器只发意图消息，
@@ -19,7 +20,8 @@ use nana_ui::runtime::{
 };
 use nana_ui::{ButtonKind, ControlSize, Icon};
 
-use super::hot::HotSignals;
+use super::hot::{HotSignals, SpinField};
+use super::status::StatusLine;
 use super::player_view::key_part;
 use super::sidebar::ShortcutId;
 use super::view_part_sidebar::project::{
@@ -73,7 +75,7 @@ pub fn sidebar_frame() -> SidebarFrame {
 pub(crate) fn sidebar(signals: SidebarSignals, hot: HotSignals) -> AnyView {
     widget(sidebar_frame())
         .top(sidebar_switcher(signals.head))
-        .body(sidebar_sections(signals))
+        .body(sidebar_sections(signals, hot.spinner))
         .footer(sidebar_footer(signals.footer, hot.footer))
         .into_any()
 }
@@ -112,14 +114,14 @@ fn sidebar_switcher(head: Signal<HeadView>) -> AnyView {
 }
 
 /// 文件管理区：状态、快捷方式、快捷访问、动作、播放集、文件夹和智能文件夹，分组间 10px。
-/// 没有内容的分组藏起来，不占间距。
-fn sidebar_sections(signals: SidebarSignals) -> AnyView {
+/// 没有内容的分组藏起来，不占间距。忙碌行的转圈读热信号 `spin`。
+fn sidebar_sections(signals: SidebarSignals, spin: Signal<f32>) -> AnyView {
     let head = signals.head;
     widget(Stack::column(10.0).with_layout(|layout| {
         layout.padding_right = Some(LengthSpec::Px(2.0));
     }))
     .children((
-        status_line(head),
+        status_line(signals.status, spin),
         shortcut_group(signals.nav),
         quick_access_group(signals.quick, signals.nav),
         actions_group(signals.nav),
@@ -130,29 +132,63 @@ fn sidebar_sections(signals: SidebarSignals) -> AnyView {
     .into_any()
 }
 
-/// 侧栏顶部的错误条：目录树或智能文件夹读取失败时显示，对应 `.workspace-state--error`。
-fn status_line(head: Signal<HeadView>) -> AnyView {
-    let mut copy = parts::label_text(head.with_untracked(|head| head.error.clone()), 12.0, 400, Some(SemanticColorRole::Danger))
-        .line_height(18.0);
+/// 侧栏顶部的全局状态区，对应 `WorkspaceSidebarStatus.vue`：有失败时是错误条（`.workspace-state--error`），
+/// 没有失败、在读资源库或素材详情时是忙碌行（`.workspace-state`：转圈加「正在同步仓库状态」），
+/// 都没有时整块藏起来、不占间距。两块都留着，按投影互换。
+fn status_line(status: Signal<StatusLine>, spin: Signal<f32>) -> AnyView {
+    let failure = move || status.with(|status| match status {
+        StatusLine::Failure(message) => message.clone(),
+        _ => String::new(),
+    });
+    let mut copy = parts::label_text(failure(), 12.0, 400, Some(SemanticColorRole::Danger)).line_height(18.0);
     {
         let layout = Arc::make_mut(&mut copy.style.layout);
         layout.width = Some(LengthSpec::Fill);
         layout.overflow_wrap = Some(nana_ui_core::OverflowWrapSpec::Anywhere);
     }
-    widget(
+    let error = widget(
         Stack::column(0.0)
             .padding_xy(8.0, 6.0)
             .min_height(LengthSpec::Px(30.0))
             .justify(nana_ui::runtime::JustifySpec::Center)
             .radius(RadiusTier::Sm)
-            .painter(super::shell_tint::SoftFill::err()),
+            .painter(super::shell_tint::SoftFill::err())
+            .with_layout(state_margin),
     )
-    .visible(move || head.with(|head| !head.error.is_empty()))
-    .children((widget(copy)
-        .prop::<String, fields::text::value>(move || head.with(|head| head.error.clone()))
-        .key("sidebar-status-error"),))
-    .key("sidebar-status")
+    .visible(move || status.with(|status| matches!(status, StatusLine::Failure(_))))
+    .children((widget(copy).prop::<String, fields::text::value>(failure).key("sidebar-status-error"),))
+    .key("sidebar-status");
+    (error, busy_line(status, spin)).into_any()
+}
+
+/// 忙碌行：`--bg-subtle` 底、弱色 12px 字，前面一个 16px 的转圈，宽度随内容。转圈的角度读热信号。
+fn busy_line(status: Signal<StatusLine>, spin: Signal<f32>) -> AnyView {
+    let mut glyph = nana_ui::runtime::IconGlyph::new(LOADER_2).size(16.0).role(SemanticColorRole::Muted);
+    Arc::make_mut(&mut glyph.style.layout).transform = Some(super::motion::spin_transform(spin.get_untracked()));
+    widget(
+        Stack::row(8.0)
+            .align(AlignSpec::Center)
+            .width(LengthSpec::Shrink)
+            .min_height(LengthSpec::Px(30.0))
+            .padding_xy(8.0, 0.0)
+            .radius(RadiusTier::Sm)
+            .surface(SemanticColorRole::Subtle)
+            .with_layout(state_margin),
+    )
+    .visible(move || status.with(|status| *status == StatusLine::Busy))
+    .children((
+        widget(glyph).prop::<f32, SpinField>(spin).key("sidebar-status-spinner"),
+        widget(parts::label_text("正在同步仓库状态", 12.0, 400, Some(SemanticColorRole::Muted)).line_height(18.0))
+            .key("sidebar-status-busy-text"),
+    ))
+    .key("sidebar-status-busy")
     .into_any()
+}
+
+/// `.workspace-state` 的 `margin: 2px 0`。
+fn state_margin(layout: &mut nana_ui_core::LayoutStyle) {
+    layout.margin_top = Some(LengthSpec::Px(2.0));
+    layout.margin_bottom = Some(LengthSpec::Px(2.0));
 }
 
 /// 五个快捷方式，无标题。当前项 `--accent-soft` 底、强调色，缺失仓库时整组禁用。

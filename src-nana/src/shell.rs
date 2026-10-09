@@ -266,6 +266,8 @@ pub struct ShellViewModel {
     pub admin: admin::AdminState,
     pub input: input::InputState,
     pub motion: motion::MotionState,
+    /// 全局状态区：最近一次失败和它的来源，见 `status.rs`。
+    pub status: status::StatusState,
     /// 窗口逻辑宽。Vue 唯一按窗口宽度切换的断点在播放条，见 [`NARROW_VIEWPORT_PX`]。
     pub viewport_width: f32,
     /// 对话框、弹层或打开文件夹之后，手势松开时要重建树。
@@ -329,6 +331,7 @@ impl Default for ShellViewModel {
             admin: admin::AdminState::default(),
             input: input::InputState::default(),
             motion: motion::MotionState::default(),
+            status: status::StatusState::default(),
             viewport_width: DEFAULT_VIEWPORT_PX,
             surface_dirty: false,
             revision: 0,
@@ -382,9 +385,11 @@ impl ShellViewModel {
     /// 在 ViewModel 边界集中处理导航和页面动作，避免控件闭包直接修改领域状态。
     pub fn reduce(&mut self, message: ShellMessage) {
         self.revision = self.revision.wrapping_add(1);
+        let (before, seq, started) = (status::Activity::of(self), self.status.seq(), status::starts_operation(&message));
         self.reduce_inner(message);
         self.flush_folder_mutations();
         self.settle_sidebar_dialogs();
+        self.settle_status(&before, seq, started);
         self.follow_motion();
     }
 
@@ -414,7 +419,7 @@ impl ShellViewModel {
         let panel_open = self.sidebar.popover != sidebar::PopoverMode::Closed || self.admin.popover_open;
         let startup = f32::from(self.workspace.startup.percent);
         let operation = self.files.operation_percent();
-        let spinner = self.sidebar.tree_loading || self.sidebar.submitting || self.sidebar.smart_draft.busy || self.files.mutating;
+        let spinner = self.sidebar.tree_loading || self.sidebar.submitting || self.sidebar.smart_draft.busy || self.files.mutating || status::busy(self);
         if self.motion.set_panel_open(panel_open) {
             self.surface_dirty = true;
         }
@@ -489,6 +494,9 @@ impl ShellViewModel {
                 self.apply_snapshot_sidebar(&snapshot);
             }
             ShellMessage::RepositorySnapshotLoaded(Err(error)) => {
+                if self.workspace.startup.status == StartupStatus::Ready {
+                    self.status.fail(status::FailureSource::Repository, format!("无法读取资源库摘要：{error}"));
+                }
                 if let Some(repo_id) = self.workspace.active_repo_id.clone() {
                     self.workspace.note_index_finished(&repo_id, Err(error.clone()));
                 }
@@ -521,6 +529,9 @@ impl ShellViewModel {
                 if self.files.note_load_failed(&error) {
                     self.detail = format!("无法读取文件列表：{error}");
                     return;
+                }
+                if self.workspace.startup.status == StartupStatus::Ready {
+                    self.status.fail(status::FailureSource::Directory, format!("无法读取文件列表：{error}"));
                 }
                 self.workspace.note_first_screen_finished(Err(error.clone()));
                 self.page = ShellPage::Error;
@@ -561,6 +572,7 @@ impl ShellViewModel {
                 }
             }
             ShellMessage::AssetDetailLoaded(Err(error)) => {
+                self.status.fail(status::FailureSource::Asset, format!("无法读取文件元数据：{error}"));
                 self.page = ShellPage::Error;
                 self.detail = format!("无法读取文件元数据：{error}");
                 self.inspect.note_detail_error(&error);
@@ -608,6 +620,7 @@ impl ShellViewModel {
                 self.detail = format!("{} 个播放列表", playlists.len());
             }
             ShellMessage::PlaylistsLoaded(Err(error)) => {
+                self.status.fail(status::FailureSource::Playlist, format!("播放集操作失败：{error}"));
                 self.page = ShellPage::Error;
                 self.detail = format!("无法读取播放列表：{error}");
             }
@@ -622,6 +635,7 @@ impl ShellViewModel {
                 self.detail = format!("可用播放器 {} 个", self.playlist_players.len());
             }
             ShellMessage::PlaylistPlayersLoaded(Err(error)) => {
+                self.status.fail(status::FailureSource::Playlist, format!("无法读取播放器类型：{error}"));
                 self.detail = format!("无法读取播放器类型：{error}");
             }
             ShellMessage::NewPlaylistNameChanged(value) => {
@@ -683,6 +697,7 @@ impl ShellViewModel {
                 self.detail = format!("{} · {} 个项目", detail.playlist.name, detail.items.len());
             }
             ShellMessage::PlaylistDetailLoaded(Err(error)) => {
+                self.status.fail(status::FailureSource::Playlist, format!("播放集操作失败：{error}"));
                 self.page = ShellPage::Error;
                 self.detail = format!("无法读取播放列表详情：{error}");
             }
@@ -831,7 +846,12 @@ impl ShellViewModel {
             Ok(items) => Ok(items.iter().map(WorkspaceRepository::from_summary).collect()),
             Err(error) => Err(error),
         };
-        self.workspace.apply_repository_list(generation, mapped);
+        // 启动以后重读列表失败：缺失仓库页会就近显示，别的区域进状态区。
+        let failed = mapped.as_ref().err().filter(|_| self.workspace.startup.status == StartupStatus::Ready).cloned();
+        let applied = self.workspace.apply_repository_list(generation, mapped);
+        if let Some(error) = failed.filter(|_| applied && self.workspace.main_region() != MainRegion::MissingRepository) {
+            self.status.fail(status::FailureSource::Repository, format!("无法读取资源库列表：{error}"));
+        }
         self.repository_id = self.workspace.active_repo_id.clone();
         if let Some(repository) = self.workspace.active_repository() {
             self.repository_name = repository.name.clone();
@@ -873,6 +893,7 @@ mod interaction;
 mod render;
 mod remount_state;
 mod row_sync;
+pub(crate) mod status;
 mod shell_tint;
 mod startup_view;
 mod workbench;

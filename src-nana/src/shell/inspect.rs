@@ -258,6 +258,16 @@ impl InspectState {
         std::mem::take(&mut self.effects)
     }
 
+    /// 在保存元数据、撤销或重做。
+    pub(super) fn saving(&self) -> bool {
+        self.saving
+    }
+
+    /// 选中了文件、详情还没读回（Vue `isLoadingAssetDetail`）。
+    pub(super) fn detail_loading(&self) -> bool {
+        self.loading && self.kind.is_none() && self.target_path.is_some()
+    }
+
     pub(super) fn dirty(&self) -> bool {
         self.draft != self.baseline
     }
@@ -702,7 +712,19 @@ pub(super) fn reduce_message(model: &mut ShellViewModel, message: super::ShellMe
     });
     let repo_id = model.workspace.active_repo_id.clone();
     let follow = bridge::follow(&message);
+    // 元数据保存、撤销和重做的失败没有就近显示，交给状态区。
+    let revising = match &message {
+        InspectMessage::MetadataSaved(_) => Some("保存元数据失败"),
+        InspectMessage::RevisionLoaded(_) => Some("撤销或重做失败"),
+        _ => None,
+    };
     model.inspect.reduce(writable, repo_id.as_deref(), message);
+    if let Some(what) = revising
+        && !model.inspect.error.is_empty()
+    {
+        let failure = format!("{what}：{}", model.inspect.error);
+        model.status.fail(super::status::FailureSource::Metadata, failure);
+    }
     bridge::apply(model, follow);
     search::settle(model);
     None

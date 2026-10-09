@@ -120,7 +120,7 @@ impl PlayerState {
             }
             Err(error) => {
                 eprintln!("Nana 更新播放列表成员失败：{error}");
-                self.activity = error;
+                self.note_failure(format!("更新播放集成员失败：{error}"));
             }
         }
     }

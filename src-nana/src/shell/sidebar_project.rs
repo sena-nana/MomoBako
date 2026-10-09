@@ -10,11 +10,14 @@ use nana_ui::runtime::view::{signal, store, Signal, Store};
 
 use super::super::row_sync::sync_rows;
 use super::super::sidebar::{SidebarFolder, SidebarSmartFolder};
+use super::super::status::StatusLine;
 use super::super::{LibraryCategory, ShellPage, ShellViewModel, WorkspacePanel};
 
 /// 侧栏要显示的东西。
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct SidebarView {
+    /// 顶部的全局状态区：最近一次失败，或者忙碌行。
+    pub status: StatusLine,
     pub head: HeadView,
     pub nav: NavView,
     pub quick: Vec<QuickRow>,
@@ -27,13 +30,11 @@ pub(crate) struct SidebarView {
     pub footer: FooterView,
 }
 
-/// 仓库头和顶部错误条，以及文件夹分组在不在。
+/// 仓库头，以及文件夹分组在不在。
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct HeadView {
     /// 仓库头的名字，没有仓库时是「无资源库」。
     pub name: String,
-    /// 目录树或智能文件夹读取失败时的错误，先看目录树；空时不显示错误条。
-    pub error: String,
     /// 虚拟条目来源没有真实目录，不显示文件夹分组（Vue `showFolderSidebar`）。
     pub folders_visible: bool,
 }
@@ -170,13 +171,9 @@ impl SidebarView {
         let trash = panel == WorkspacePanel::Trash || sidebar.browsing_trash;
         let loading = sidebar.tree_loading;
         Self {
+            status: StatusLine::project(model),
             head: HeadView {
                 name: repository.map(|item| item.name.clone()).unwrap_or_else(|| "无资源库".into()),
-                error: [&sidebar.tree_error, &sidebar.smart_error]
-                    .into_iter()
-                    .find(|error| !error.is_empty())
-                    .cloned()
-                    .unwrap_or_default(),
                 folders_visible: repository
                     .is_none_or(|item| !item.capabilities.iter().any(|capability| capability == "virtual-entries")),
             },
@@ -370,6 +367,7 @@ pub(crate) fn smart_key(row: &SmartRow) -> (String, u16, bool) {
 /// 常驻侧栏的信号。句柄是 `Copy` 的 id，值在骨架的挂载作用域里，侧栏整块重挂（收起再展开）时不重建。
 #[derive(Clone, Copy)]
 pub(crate) struct SidebarSignals {
+    pub status: Signal<StatusLine>,
     pub head: Signal<HeadView>,
     pub nav: Signal<NavView>,
     pub quick: Signal<Vec<QuickRow>>,
@@ -386,6 +384,7 @@ impl SidebarSignals {
     /// 在当前作用域里建信号，初值是 `view`。只在骨架的挂载闭包里调用。
     pub(crate) fn new(view: SidebarView) -> Self {
         Self {
+            status: signal(view.status),
             head: signal(view.head),
             nav: signal(view.nav),
             quick: signal(view.quick),
@@ -410,6 +409,7 @@ impl SidebarSignals {
             eprintln!("Nana 侧栏信号已随骨架回收，跳过写入");
             return;
         }
+        self.status.try_set_if_changed(view.status);
         self.head.try_set_if_changed(view.head);
         self.nav.try_set_if_changed(view.nav);
         self.quick.try_set_if_changed(view.quick);

@@ -112,6 +112,43 @@
 - 藏起（`.visible(false)`）的块排过一次版才退出无障碍树，取节点前先 `flush`（`ShellHarness::mount` 已经排过）。
 - 改完跑 `scene_shots` 出全部场景，和改动前逐字节比较。
 
+## 全局状态区
+
+侧栏顶部的状态条对应 Vue `WorkspaceSidebarStatus.vue`。状态在 `status.rs`：`ShellViewModel::status` 只有一个槽位，记最近一次失败（来源 `FailureSource` 加文案），后记的顶替先记的。投影 `StatusLine` 放进侧栏投影（`SidebarView::status`），顺序照 Vue：失败 > 忙碌 > 同步进度。视图里错误条和忙碌行两块都留着，按投影 `.visible` 互换，侧栏不重挂。
+
+**记什么。** 只记没有就近显示的失败：
+
+| 来源 | 失败 | 在哪里记 |
+| --- | --- | --- |
+| `Host` | 打开、定位、拖出文件（原 `input.error`，已删） | `host_bridge::perform`、`drag_out::apply_result` |
+| `Tray` | 最小化到托盘（原来借 `input.notice`，关闭确认框以外没有显示位）；收进托盘成功时作废 | `host_bridge::perform` |
+| `Repository` | 启动以后读资源库列表、读仓库摘要失败；添加资源库时的文件夹选择失败（弹层已关） | `shell.rs` 归约、`input_reduce.rs` |
+| `Directory` | 文件区以外发起的目录读取失败（文件区自己的写在文件列表里） | `shell.rs` 归约 |
+| `Asset` | 读素材详情失败 | `shell.rs` 归约 |
+| `Metadata` | 保存元数据、撤销、重做失败 | `inspect::reduce_message` |
+| `Playlist` | 播放集的读写、条目增删排序、播放器类型 | `shell.rs` 归约 |
+| `Player` | 播放控制、播放集成员写入 | `PlayerState::note_failure`，归约结束时取走 |
+| `Settings`、`Logs` | 读写应用设置、系统服务状态；读系统日志 | `admin_reduce.rs` |
+| `SmartFolder` | 智能文件夹删除失败（编辑对话框没开着）；查询、读列表失败 | `sidebar.rs` 归约；`sidebar.smart_error` |
+| `FolderTree` | 文件夹树读取失败 | `sidebar.tree_error` |
+| `Files` | 文件操作失败 | `files.error` |
+
+文案先写失败的对象（「定位失败：」「无法读取文件元数据：」），后接系统返回的原因。`files.error`、`sidebar.tree_error`、`sidebar.smart_error` 三个字段被盯着（`observe_failures`）：新写一次记一次，字段清掉时它记下的那一条一起清。宿主在归约以外写下的失败（服务派发、拖出结果）在 `update` 同步视图之前、`prepare` 里收进来。
+
+对话框错误行、搜索面板、缺失仓库页、空库页、启动页、插件面板、导出对话框、预览和播放条这些已经就近显示的失败不进状态区。文件操作失败写在文件列表的状态框里，列表显示着（文件路由、不在预览页）时状态区让位，换到别的面板时状态区显示它。
+
+**什么时候清。** 照 Vue `error.value = null` 的时机：用户开始一个会写全局错误的操作时清掉上一次失败，成功不专门清（托盘例外）。开始的迹象：
+
+- 消息本身（`status::starts_operation`）：打开、定位、拖出（过了 Vue 的守卫：有仓库、有路径、能拖出），换仓库、刷新资源库列表、重试启动，刷新文件夹树、打开智能文件夹；
+- 忙碌标志由假变真、换了文件（`status::Activity`）：读目录（非静默）、文件变更、保存元数据（也包括撤销重做，Vue 这两样不清）、搜索、导出、智能文件夹增改删、插件操作、执行仓库动作，以及选中别的文件（Vue `selectAsset`）。
+- 后台的静默刷新不清。Vue 结构更新后的静默刷新会经 `refreshRepositoryActions` 顺带清掉错误，用户还没看到的失败就被抹掉了，这里不照抄。
+
+清只作用在归约开始时已经记下的失败上：同一次归约里新记的失败按序号留着。
+
+**忙碌。** Vue `isBusy`：启动以后在读资源库列表（`workspace.list_loading`）、读仓库摘要（`workspace.snapshot_loading`）或读素材详情（`inspect.detail_loading`）。显示「正在同步仓库状态」，前面的转圈读热信号。启动中由启动页显示进度。
+
+**同步进度。** Vue 的第三档是仓库同步的进度（文件夹树的「刷新」会同步整个仓库）。Nana 启动以后没有仓库同步，文件夹树的刷新只重读树，所以没有这一档。
+
 ## 浮层：常驻和统一的对话框
 
 浮层块（`view_part_overlay.rs`）按 `OverlayIdentity` 换块：身份是 `OverlayKey`（哪一种浮层）加上它结构上的变化（文件对话框的种类、仓库弹层的页、右键菜单的目标和落点）。身份不变时浮层常驻，同一时刻最多一块，没有浮层时槽位为空。

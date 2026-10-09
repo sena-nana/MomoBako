@@ -163,6 +163,10 @@ pub struct WorkspaceState {
     pub stop_playback: bool,
     /// 列表和同步请求的代次。重试或新的刷新会使旧结果失效。
     pub list_generation: u64,
+    /// 启动以后在重读资源库列表（Vue `isLoadingRepositories`），对上代次的结果到达时放下。
+    pub list_loading: bool,
+    /// 在读仓库摘要（Vue `isLoadingSnapshot`），摘要结果到达时放下。
+    pub snapshot_loading: bool,
     pub effects: Vec<WorkspaceEffect>,
 }
 
@@ -186,6 +190,8 @@ impl Default for WorkspaceState {
             dialogs: Vec::new(),
             stop_playback: false,
             list_generation: 0,
+            list_loading: false,
+            snapshot_loading: false,
             effects: Vec::new(),
         }
     }
@@ -252,17 +258,19 @@ impl WorkspaceState {
 
     pub fn request_repository_refresh(&mut self) {
         self.list_generation = self.list_generation.saturating_add(1);
+        self.list_loading = true;
         self.effects.push(WorkspaceEffect::RefreshRepositories { generation: self.list_generation });
     }
 
-    /// 应用一轮仓库列表。`generation` 不匹配时保留当前步骤和已选仓库。
-    pub fn apply_repository_list(&mut self, generation: Option<u64>, result: Result<Vec<WorkspaceRepository>, String>) {
+    /// 应用一轮仓库列表，返回是否应用了。`generation` 不匹配时保留当前步骤和已选仓库。
+    pub fn apply_repository_list(&mut self, generation: Option<u64>, result: Result<Vec<WorkspaceRepository>, String>) -> bool {
         if let Some(generation) = generation
             && generation != self.list_generation
         {
             eprintln!("Nana 忽略过期的资源库列表结果：代次 {generation}，当前 {}", self.list_generation);
-            return;
+            return false;
         }
+        self.list_loading = false;
         let startup_open = self.startup.status != StartupStatus::Ready;
         match result {
             Err(error) => {
@@ -278,6 +286,7 @@ impl WorkspaceState {
             }
             Ok(items) => self.apply_repository_items(items, startup_open),
         }
+        true
     }
 
     pub fn note_sync_finished(&mut self, generation: u64, result: Result<(), String>) {
@@ -296,7 +305,7 @@ impl WorkspaceState {
                         "读取资源库摘要、素材索引和默认预览对象。",
                     );
                     self.startup.log("info", "首屏启动开始读取资源库摘要。", &[("step", Some("3"))]);
-                    self.effects.push(WorkspaceEffect::LoadSnapshot { repo_id });
+                    self.load_snapshot(repo_id);
                 } else {
                     self.fail_startup("同步完成时没有活动资源库");
                 }
@@ -308,7 +317,9 @@ impl WorkspaceState {
         }
     }
 
+    /// 仓库摘要的结果到了：放下读摘要的忙碌；启动中再推进或结束启动步骤。
     pub fn note_index_finished(&mut self, repo_id: &str, result: Result<(), String>) {
+        self.snapshot_loading = false;
         if self.startup.status != StartupStatus::Loading || self.startup.current_step < 3 {
             return;
         }
@@ -370,7 +381,7 @@ impl WorkspaceState {
             self.begin_sync(repository.repo_id);
         } else if self.startup.status == StartupStatus::Ready {
             self.last_active_repo_id = Some(repository.repo_id.clone());
-            self.effects.push(WorkspaceEffect::LoadSnapshot { repo_id: repository.repo_id });
+            self.load_snapshot(repository.repo_id);
         }
     }
 
@@ -700,7 +711,7 @@ impl WorkspaceState {
             self.begin_sync(next_id);
         } else {
             self.last_active_repo_id = Some(next_id.clone());
-            self.effects.push(WorkspaceEffect::LoadSnapshot { repo_id: next_id });
+            self.load_snapshot(next_id);
         }
     }
 
@@ -709,6 +720,12 @@ impl WorkspaceState {
         self.startup.set_progress(2, "扫描资源库文件", "同步文件变化，更新新增、移动和删除记录。");
         self.startup.log("info", "首屏启动开始同步文件变化。", &[("step", Some("2"))]);
         self.effects.push(WorkspaceEffect::SyncRepository { repo_id, generation: self.list_generation });
+    }
+
+    /// 读仓库摘要，结果到达前算忙碌。
+    fn load_snapshot(&mut self, repo_id: String) {
+        self.snapshot_loading = true;
+        self.effects.push(WorkspaceEffect::LoadSnapshot { repo_id });
     }
 
     fn assign_active(&mut self, next: Option<String>) {
@@ -744,7 +761,7 @@ impl WorkspaceState {
                 self.presence = if missing { RepositoryPresence::Missing } else { RepositoryPresence::Ready };
                 self.last_active_repo_id = Some(next_id.clone());
                 if !missing {
-                    self.effects.push(WorkspaceEffect::LoadSnapshot { repo_id: next_id });
+                    self.load_snapshot(next_id);
                 }
             }
             None => {

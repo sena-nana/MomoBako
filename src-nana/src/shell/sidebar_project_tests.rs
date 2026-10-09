@@ -48,7 +48,7 @@ fn projection_reads_the_sidebar_state() {
     let model = scene("live-files-plain");
     let view = SidebarView::project(&model);
     assert_eq!(view.head.name, "默认资源库");
-    assert!(view.head.error.is_empty());
+    assert_eq!(view.status, crate::shell::status::StatusLine::Hidden);
     assert!(view.head.folders_visible);
     assert!(!view.nav.locked);
     assert_eq!(view.nav.shortcuts[0], (2, true), "全部：两个文件，文件面板的全部分类是当前项");

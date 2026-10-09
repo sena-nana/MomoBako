@@ -196,7 +196,7 @@ fn install_clip(player: &mut PlayerState, parts: crate::shell::MediaParts) {
             player.session = session;
             if let Some(error) = error {
                 eprintln!("Nana 播放列表当前项出声失败：{error}");
-                player.activity = error;
+                player.note_failure(format!("播放控制失败：{error}"));
             }
         }
     } else {

@@ -5,6 +5,7 @@
 
 use crate::backend::services::repository::{PluginConfigSnapshot, PluginManifest, RepositoryAction};
 
+use super::super::status::FailureSource;
 use super::super::workspace_refresh::SilentMessage;
 use super::super::{ShellMessage, ShellPage, ShellViewModel, WorkspacePanel};
 use super::support::{self, FieldChange};
@@ -114,6 +115,7 @@ fn consume_legacy(model: &mut ShellViewModel, message: ShellMessage) -> Option<S
         }
         ShellMessage::LogsLoaded(Err(error)) => {
             eprintln!("Nana 系统日志读取失败：{error}");
+            model.status.fail(FailureSource::Logs, format!("无法读取系统日志：{error}"));
             model.detail = format!("无法读取系统日志：{error}");
             None
         }
@@ -144,6 +146,7 @@ fn consume_legacy(model: &mut ShellViewModel, message: ShellMessage) -> Option<S
         }
         ShellMessage::SystemStatusLoaded(Err(error)) => {
             eprintln!("Nana 外部 API 连接状态读取失败：{error}");
+            model.status.fail(FailureSource::Settings, format!("无法读取系统服务状态：{error}"));
             model.detail = format!("无法读取系统服务状态：{error}");
             None
         }
@@ -155,6 +158,7 @@ fn consume_legacy(model: &mut ShellViewModel, message: ShellMessage) -> Option<S
         }
         ShellMessage::SettingsLoaded(Err(error)) => {
             eprintln!("Nana 应用设置读取失败：{error}");
+            model.status.fail(FailureSource::Settings, format!("无法读取应用设置：{error}"));
             model.detail = format!("无法读取应用设置：{error}");
             model.settings_error = Some(error);
             None
@@ -178,6 +182,7 @@ fn consume_legacy(model: &mut ShellViewModel, message: ShellMessage) -> Option<S
         }
         ShellMessage::SettingsSaved(Err(error)) => {
             eprintln!("Nana 应用设置保存失败：{error}");
+            model.status.fail(FailureSource::Settings, format!("保存应用设置失败：{error}"));
             model.detail = format!("设置校验失败：{error}");
             model.settings_error = Some(error);
             None
