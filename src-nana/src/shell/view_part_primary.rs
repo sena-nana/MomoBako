@@ -123,7 +123,7 @@ fn resident_view(route: RouteKey, signals: RouteSignals, hot: HotSignals) -> Opt
         RouteKey::Logs => Some(super::route_admin::logs(signals.filter, signals.admin)),
         RouteKey::Extensions => Some(super::route_admin::extensions(signals.filter, signals.admin)),
         RouteKey::Actions => Some(super::route_admin::actions(signals.filter, signals.admin)),
-        RouteKey::Files => Some(super::route_files::view(signals.files, hot)),
+        RouteKey::Files => Some(super::route_files::view(signals.filter, signals.files, hot)),
         RouteKey::Playlists => Some(super::route_playlists::view(signals.filter, signals.playlists)),
         _ => None,
     }

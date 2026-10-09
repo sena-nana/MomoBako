@@ -20,7 +20,7 @@
 | 块 | 模块 | 切换 | 现状 |
 | --- | --- | --- | --- |
 | 侧栏 | `view_part_sidebar.rs`，投影在 `sidebar_project.rs` | 无 | 常驻：`SidebarSignals`（几个信号加播放集、文件夹树、智能文件夹树三份 Store）建在骨架作用域里，同步只写变了的；排法变了（收起再展开）才整块重挂 |
-| 主区 | `view_part_primary.rs`，路由在 `route_*.rs` | `dynamic(RouteSlot)`，按 `RouteKey` | 启动、文件、缺失仓库、空库、搜索（含空库搜索）、设置、日志、拓展、动作和播放集页常驻；文件页里的筛选栏，以及文件页和播放集页里的播放条是旧视图岛；空首页整块重挂 |
+| 主区 | `view_part_primary.rs`，路由在 `route_*.rs` | `dynamic(RouteSlot)`，按 `RouteKey` | 启动、文件、缺失仓库、空库、搜索（含空库搜索）、设置、日志、拓展、动作和播放集页常驻；文件页和播放集页里的播放条是旧视图岛；空首页整块重挂 |
 | 浮层 | `view_part_overlay.rs` | 按 `OverlayIdentity` 换块 | 常驻：身份不变时只经会话写信号；对话框走统一框架；没有浮层时槽位为空 |
 
 并行改区域时各改各的文件：
@@ -47,7 +47,7 @@
 
 ### 首页筛选栏
 
-筛选栏属于首页外框，有仓库的首页路由都可能显示它。信号 `FilterBarSignals` 在 `RouteSignals::filter`，除启动页和设置页以外每次同步都写（关着时不算候选和库类型快捷方式）。常驻首页路由在外框里嵌 `inspect_search_view::resident_filter_bar(signals.filter)`，显隐跟「有仓库且筛选栏打开」走 `.visible`；旧视图路由的 `route_home::page` 仍调 `filter_bar(model)`，它用这一刻的投影建一份一次性的信号，再建同一个视图。常驻首页路由的外框和滚动主体暂用 `route_search::{home_page, home_scroll}`，排版和 `route_home::page`、`scroll_body` 相同。
+筛选栏属于首页外框，有仓库的首页路由都可能显示它。信号 `FilterBarSignals` 在 `RouteSignals::filter`，除启动页和设置页以外每次同步都写（关着时不算候选和库类型快捷方式）。常驻首页路由（文件、搜索、播放集、日志、拓展和动作页）在外框里嵌 `inspect_search_view::resident_filter_bar(signals.filter)`，显隐跟「有仓库且筛选栏打开」走 `.visible`；文件页的 `FilesRouteSignals` 不另存筛选栏的状态，读的是同一份 `RouteSignals::filter`；旧视图路由的 `route_home::page` 仍调 `filter_bar(model)`，它用这一刻的投影建一份一次性的信号，再建同一个视图。常驻首页路由的外框和滚动主体暂用 `route_search::{home_page, home_scroll}`，排版和 `route_home::page`、`scroll_body` 相同。
 
 ## 改成常驻的步骤
 
@@ -95,7 +95,7 @@
 
 ### 常驻路由里的旧视图岛
 
-常驻路由里还嵌着别的模块的旧视图时（文件页里的筛选栏、文件页和播放集页里的播放条），分支里给它留一个占位节点（`NodeRef`），在 `view_part_primary.rs` 的 `islands` 里按路由登记成 `Island { slot, build, stamp }`：
+常驻路由里还嵌着别的模块的旧视图时（文件页和播放集页里的播放条），分支里给它留一个占位节点（`NodeRef`），在 `view_part_primary.rs` 的 `islands` 里按路由登记成 `Island { slot, build, stamp }`：
 
 - 进路由时主区块按当前 ViewModel 把岛的内容挂成脱离树的一块，分支挂好（`on_mount`）时放进占位节点；
 - 之后 `stamp(model)` 变了才当场重建这一块，记下并找回岛里的焦点、选区和滚动，常驻部分不动；焦点在主区、输入法还在组合时照常延后；
