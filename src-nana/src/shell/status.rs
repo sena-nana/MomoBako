@@ -6,11 +6,13 @@
 //!   文件区以外发起的目录读取，素材详情，元数据保存、撤销、重做，播放集读写，设置和系统日志，
 //!   智能文件夹删除，添加资源库时的文件夹选择；
 //! - 播放控制和播放集成员这类写在播放器内部的失败，由播放器排进待取的失败，归约结束时取走；
-//! - 文件操作（`files.error`）、文件夹树（`sidebar.tree_error`）和智能文件夹（`sidebar.smart_error`）
-//!   三个领域字段：新写了一次就记一次，字段清掉时它记下的那一条一起清。文件操作失败本来就写在文件列表里，
-//!   列表显示着的时候状态区不重复显示（[`StatusLine::project`]）。
+//! - 文件操作（`files.error`）、文件夹树（`sidebar.tree_error`）、智能文件夹（`sidebar.smart_error`）
+//!   和设置数据（`admin.load_error`：插件、钩子、缓存、API 契约和外部连接的读取）四个领域字段：新写了一次
+//!   就记一次，字段清掉时它记下的那一条一起清。文件操作失败本来就写在文件列表里，设置数据的失败写在拓展页的
+//!   插件面板和 API 调试页里，显示着的时候状态区不重复显示（[`StatusLine::project`]）；在设置页上没有就近的
+//!   位置，状态区显示，和 Vue 一样。
 //!
-//! 对话框里的错误行、搜索面板、缺失仓库页、空库页、启动页、插件面板、导出对话框、预览和播放条这些已经
+//! 对话框里的错误行、搜索面板、缺失仓库页、空库页、启动页、插件操作、导出对话框、预览和播放条这些已经
 //! 就近显示的失败不进这里。
 //!
 //! **什么时候清。** 照 Vue `error.value = null` 的时机：用户开始一个会写全局错误的操作时清掉上一次失败，
@@ -55,6 +57,8 @@ pub enum FailureSource {
     Player,
     /// 应用设置和系统服务状态。
     Settings,
+    /// 设置数据（`admin.load_error`）：插件、钩子、缓存、API 契约和外部连接的读取。
+    SettingsData,
     /// 系统日志。
     Logs,
 }
@@ -70,7 +74,8 @@ pub struct Failure {
 }
 
 /// 被盯着的领域错误字段：新写一次就记一次失败，清掉时它记下的那一条一起清。
-const WATCHED: [FailureSource; 3] = [FailureSource::Files, FailureSource::FolderTree, FailureSource::SmartFolder];
+const WATCHED: [FailureSource; 4] =
+    [FailureSource::Files, FailureSource::FolderTree, FailureSource::SmartFolder, FailureSource::SettingsData];
 
 /// 全局状态区的状态。
 #[derive(Clone, Debug, Default)]
@@ -79,7 +84,7 @@ pub struct StatusState {
     /// 一共记过几次失败。
     seq: u64,
     /// [`WATCHED`] 各字段上次看到的值。
-    watched: [String; 3],
+    watched: [String; 4],
 }
 
 impl StatusState {
@@ -200,7 +205,12 @@ impl ShellViewModel {
         for message in self.player.take_failures() {
             self.status.fail(FailureSource::Player, message);
         }
-        let current = [self.files.error.clone(), self.sidebar.tree_error.clone(), self.sidebar.smart_error.clone()];
+        let current = [
+            self.files.error.clone(),
+            self.sidebar.tree_error.clone(),
+            self.sidebar.smart_error.clone(),
+            self.admin.load_error.clone(),
+        ];
         for (index, now) in current.into_iter().enumerate() {
             if self.status.watched[index] == now {
                 continue;
@@ -247,10 +257,18 @@ impl StatusLine {
     }
 }
 
-/// 失败已经在面板里就近显示着：文件操作失败写在文件列表的状态框里，列表显示着（文件路由、不在预览页）时
-/// 状态区不重复显示。
+/// 失败已经在面板里就近显示着，状态区不重复显示：文件操作失败写在文件列表的状态框里（文件路由、不在预览页）；
+/// 设置数据的失败写在拓展页（插件面板的提示行和 API 调试页的状态行）。插件面板先显示操作的结果，
+/// 有操作结果时读取失败让给状态区。
 fn shown_in_place(model: &ShellViewModel, source: FailureSource) -> bool {
-    source == FailureSource::Files && RouteKey::of(model) == RouteKey::Files && !super::files_view::previewing(model)
+    match source {
+        FailureSource::Files => RouteKey::of(model) == RouteKey::Files && !super::files_view::previewing(model),
+        FailureSource::SettingsData => {
+            let admin = &model.admin;
+            RouteKey::of(model) == RouteKey::Extensions && admin.action_error.is_empty() && admin.action_message.is_empty()
+        }
+        _ => false,
+    }
 }
 
 /// Vue `isBusy`：在读资源库列表、仓库摘要或素材详情。启动阶段由启动页显示进度，不算在这里。
