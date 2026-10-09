@@ -8,22 +8,37 @@ import {
 } from "../src/composables/menuMotion";
 
 /**
- * Vue 侧的对照原文。Nana 壳层测试断言同一批时长和文案。
+ * Vue 界面与 Nana 原生壳层共用的时长、阈值和文案对照。
+ *
+ * 每一项先确认 Vue 侧的参照值还在，再确认 Nana 侧同名用途的命名常量取同一个值。
+ * 只对照命名常量，不读 Rust 测试里的断言原文：行为由 Rust 单测负责，这里只防两边的数各改各的。
  */
 const read = (path: string) => readFileSync(resolve(path), "utf8");
 const shellCss = read("src/styles/shell.css");
 const workspaceCss = read("src/styles/pages/workspace.css");
 const folderUi = read("src/layouts/useFolderSidebarUi.ts");
 const smartUi = read("src/layouts/useSmartFolderSidebarUi.ts");
-const fileOps = read("src/composables/workspace/fileOperations.ts");
 const files = read("src/composables/workspace/files.ts");
 const liliaWorkspace = read("node_modules/@lilia/theme/src/styles/workspace.css");
+const motion = read("src-nana/src/shell/motion.rs");
+
+/** 取 Rust 源码里 `const NAME: 类型 = 值;` 的值。找不到时返回 undefined，让断言写清是哪一个。 */
+const rustConst = (source: string, name: string) =>
+  new RegExp(String.raw`const ${name}: [A-Za-z0-9]+ = (-?[0-9.]+);`).exec(source)?.[1];
+
+/** 取 Rust 源码里 `const NAME: &str = "文字";` 的文字。 */
+const rustStr = (source: string, name: string) =>
+  new RegExp(String.raw`const ${name}: &str = "([^"]*)";`).exec(source)?.[1];
 
 describe("nana parity motion", () => {
-  it("modal_matches_vue_endpoints_and_survives_the_next_reduce", () => {
+  it("modal_uses_the_vue_timings_and_endpoints", () => {
     expect(shellCss).toContain("opacity 0.16s ease");
-    expect(shellCss).toContain("translateY(-8px) scale(0.98)");
     expect(shellCss).toContain("transform 0.18s cubic-bezier(0.2, 0.8, 0.2, 1)");
+    expect(shellCss).toContain("translateY(-8px) scale(0.98)");
+    expect(rustConst(motion, "MODAL_OVERLAY_MS")).toBe("160");
+    expect(rustConst(motion, "MODAL_CARD_MS")).toBe("180");
+    expect(rustConst(motion, "MODAL_CARD_SHIFT")).toBe("-8.0");
+    expect(rustConst(motion, "MODAL_CARD_SCALE")).toBe("0.98");
   });
 
   it("panel_progress_spinner_and_sidebar_use_the_vue_durations", () => {
@@ -36,24 +51,36 @@ describe("nana parity motion", () => {
     expect(workspaceCss).toContain("progress-pulse 1.15s ease-in-out infinite");
     expect(workspaceCss).toContain("media-preview-progress-sweep 1.05s ease-in-out infinite");
     expect(liliaWorkspace).toContain("grid-template-columns 0.24s var(--lilia-workspace-easing)");
-    expect(liliaWorkspace).toContain("cubic-bezier(0.2, 0.8, 0.2, 1)");
+    expect(rustConst(motion, "PANEL_OPACITY_MS")).toBe("140");
+    expect(rustConst(motion, "PANEL_RISE_MS")).toBe("160");
+    expect(rustConst(motion, "PANEL_SHIFT")).toBe("-4.0");
+    expect(rustConst(motion, "PROGRESS_WIDTH_MS")).toBe("180");
+    expect(rustConst(motion, "SPINNER_MS")).toBe("800");
+    expect(rustConst(motion, "SIDEBAR_TOOL_FADE_MS")).toBe("120");
+    expect(rustConst(motion, "FOOTER_FADE_MS")).toBe("350");
+    expect(rustConst(motion, "PULSE_MS")).toBe("1150");
+    expect(rustConst(motion, "SWEEP_MS")).toBe("1050");
+    expect(rustConst(motion, "SIDEBAR_COLLAPSE_MS")).toBe("240");
   });
 });
 
 describe("nana parity sidebar", () => {
-  it("folder_dialogs_use_the_vue_titles_and_escape_closes_the_top_one", () => {
+  it("folder_and_smart_folder_dialogs_use_the_vue_titles", () => {
     expect(folderUi).toContain('folderDialogMode.value === "create" ? "新建文件夹" : "重命名文件夹"');
-  });
-
-  it("hover_opens_after_450ms_and_playlists_hide_when_the_repository_is_missing", () => {
-    expect(folderUi).toContain("}, 450);");
-  });
-
-  it("smart_edit_popover_clamp_and_playlist_play_match_vue", () => {
     expect(smartUi).toContain('smartFolderDialogMode.value === "create" ? "新建智能文件夹" : "编辑智能文件夹"');
+    const gap = read("src-nana/src/shell/sidebar_gap.rs");
+    expect(rustStr(gap, "FOLDER_CREATE_TITLE")).toBe("新建文件夹");
+    expect(rustStr(gap, "FOLDER_RENAME_TITLE")).toBe("重命名文件夹");
+    expect(rustStr(gap, "SMART_EDIT_TITLE")).toBe("编辑智能文件夹");
+    expect(gap).toContain('"新建智能文件夹"');
   });
 
-  it("live_popover_clamps_to_the_measured_viewport", () => {
+  it("folder_hover_opens_after_450ms", () => {
+    expect(folderUi).toContain("}, 450);");
+    expect(rustConst(motion, "FOLDER_HOVER_MS")).toBe("450");
+  });
+
+  it("popover_clamps_to_the_viewport_with_the_vue_edge_padding", () => {
     const previousWidth = window.innerWidth;
     const previousHeight = window.innerHeight;
     Object.defineProperty(window, "innerWidth", { configurable: true, value: 400 });
@@ -64,90 +91,24 @@ describe("nana parity sidebar", () => {
     expect(SB_MENU_EDGE_PADDING).toBe(4);
     expect(placed.x).toBe(4);
     expect(placed.y).toBe(196);
-    const gap = read("src-nana/src/shell/sidebar_gap.rs");
-    expect(gap).toContain("assert_eq!(model.sidebar.popover_x, 4.0);");
-    expect(gap).toContain("assert_eq!(model.sidebar.popover_y, 196.0);");
-    const live = read("src-nana/src/shell/pointer_gesture.rs");
-    expect(live).toContain("assert_ne!((model.sidebar.popover_x, model.sidebar.popover_y), (8.0, 48.0));");
-    expect(live).toContain("model.sidebar.popover_x >= 4.0 && model.sidebar.popover_y >= 4.0");
-  });
-
-  it("live_folder_hover_opens_after_the_idle_clock_reaches_450ms", () => {
-    expect(folderUi).toContain("ensureFolderExpanded(path);");
-    expect(folderUi).toContain("openFolder(path);");
-    expect(folderUi).toContain("loadFileBrowserForDirectory(path, { silent: true });");
-    expect(folderUi).toContain("clearFolderHoverTimer();");
-    expect(folderUi).toContain("}, 450);");
-    const motion = read("src-nana/src/shell/motion.rs");
-    expect(motion).toContain("pub const FOLDER_HOVER_MS: u64 = 450;");
-    const live = read("src-nana/src/shell/pointer_gesture.rs");
-    expect(live).toContain('assert_eq!(model.current_directory, "photos");');
-    expect(live).toContain('tree_shows_directory(&window, "photos")');
-    expect(live).toContain("目录浏览已提交");
-    expect(live).toContain('model.files.current_path, "photos"');
-    expect(live).toContain("离开后再进入不应立刻打开");
-  });
-
-  it("live_folder_button_escape_and_prefetch_use_the_shell_path", () => {
-    const switcher = read("src/layouts/useRepositorySwitcherUi.ts");
-    expect(switcher).toContain('if (event.key === "Escape" && addRepositoryPopoverMode.value !== "closed")');
-    expect(switcher).toContain("closeAddRepositoryPopover();");
-    const live = read("src-nana/src/shell/pointer_gesture.rs");
-    expect(live).toContain('labeled_id(&window, "文件夹名称")');
-    expect(live).toContain("焦点在对话框输入框时 Escape 应该关掉它");
-    const host = read("src-nana/src/window_host.rs");
-    expect(host).toContain("fn escape_message");
-    expect(host).toContain("GapMessage::Escape");
+    expect(rustConst(read("src-nana/src/shell/sidebar_gap.rs"), "POPOVER_PADDING")).toBe("4.0");
   });
 });
 
 describe("nana parity pointer", () => {
-  it("live_file_drop_imports_and_empty_drop_attaches", () => {
-    const drag = read("src/pages/workspace/useWorkspaceDragDrop.ts");
-    expect(drag).toContain("currentWindow.onDragDropEvent");
-    expect(drag).toContain("void handleExternalPathsDrop(payload.paths)");
-    expect(drag).toContain("void createRepositoryFromFolder(payload.paths[0])");
-    const live = read("src-nana/src/shell/pointer_gesture.rs");
-    expect(live).toContain("外部放下应该导入");
-    expect(live).toContain("空库放下应该附加文件夹");
-    expect(live).toContain('sources == &["D:\\\\other\\\\c.png".to_string()]');
-    expect(live).toContain('path == "C:\\\\library"');
-  });
-
-  it("live_pointer_drag_and_box_select_follow_the_vue_thresholds", () => {
+  it("entry_drag_and_box_select_follow_the_vue_thresholds", () => {
     const panel = read("src/pages/workspace/files/useFileBrowserPanelViewModel.ts");
     expect(panel).toContain("const dragStartThreshold = 7");
     expect(panel).toContain("Math.abs(selection.currentX - selection.startX) > 3");
-    expect(panel).toContain('selection.additive ? "append" : "replace"');
-    expect(panel).toContain('options.emit("selectEntries", [], "replace")');
+    const gesture = read("src-nana/src/shell/pointer_gesture.rs");
+    expect(rustConst(gesture, "ENTRY_DRAG_PX")).toBe("7.0");
+    expect(rustConst(gesture, "BOX_DRAG_PX")).toBe("3.0");
   });
 });
 
 describe("nana parity files", () => {
-  it("copy_and_move_submit_the_stored_sources", () => {
-    expect(fileOps).toContain('updateOperationProgress(progressId, { detail: "创建硬链接或复制文件", value: 32 })');
-    expect(fileOps).toContain('updateOperationProgress(progressId, { detail: "刷新文件索引", value: 84 })');
-  });
-
   it("thumbnail_prefetch_waits_for_the_vue_idle_gap", () => {
     expect(files).toContain("}, 420);");
-  });
-});
-
-describe("nana parity host", () => {
-  it("frozen host strings stay on the nana failure path", () => {
-    const inputTests = read("src-nana/src/shell/input_tests.rs");
-    const adminTests = read("src-nana/src/shell/admin_tests.rs");
-    const frozen = [
-      "拖出失败：宿主文件拖出尚未接通",
-      "最小化到托盘尚未接通",
-    ];
-    expect(inputTests).toContain('request.reveal && request.target == "C:\\\\a.png"');
-    expect(adminTests).toContain('Token 已复制。');
-    expect(read("src-nana/src/host_bridge.rs")).toContain("定位失败：宿主目录揭示尚未接通");
-    for (const line of frozen) {
-      expect(inputTests.includes(line) || adminTests.includes(line), line).toBe(true);
-    }
-    expect(fileOps).toContain('detail: "创建硬链接或复制文件"');
+    expect(rustConst(motion, "PREFETCH_IDLE_MS")).toBe("420");
   });
 });
