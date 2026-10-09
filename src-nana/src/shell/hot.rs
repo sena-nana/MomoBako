@@ -198,27 +198,31 @@ fn filter_look(view: &TitleBarView) -> FilterLook {
 ///
 /// ViewModel 的值没变时不回写：用户刚打的字已经由 `.model` 写进了信号，对应的消息可能还排在
 /// 后台消息后面没归约。这时把 ViewModel 里较旧的草稿写回信号，下一次刷新就会把刚打的字回滚。
+///
+/// `projected` 也放在信号里（只在同步时不追踪地读写，不驱动绑定），整个结构是 `Copy` 的句柄，
+/// 能放进各块常驻的信号结构，也能在列表行里建。
+#[derive(Clone, Copy)]
 pub(crate) struct ModelField {
     signal: Signal<String>,
-    projected: String,
+    projected: Signal<String>,
 }
 
 impl ModelField {
-    /// 在骨架的挂载闭包里建信号，初值是 ViewModel 当前的值。
+    /// 在当前作用域里建信号，初值是 ViewModel 当前的值。
     pub(crate) fn new(value: &str) -> Self {
-        Self { signal: signal(value.to_owned()), projected: value.to_owned() }
+        Self { signal: signal(value.to_owned()), projected: signal(value.to_owned()) }
     }
 
     pub(crate) fn signal(&self) -> Signal<String> {
         self.signal
     }
 
-    /// ViewModel 的值相对上次投影变了才写进信号。返回是否写了。
-    pub(crate) fn sync(&mut self, value: &str) -> bool {
-        if self.projected == value {
+    /// ViewModel 的值相对上次投影变了才写进信号。返回是否写了；信号已随作用域回收时不写。
+    pub(crate) fn sync(&self, value: &str) -> bool {
+        if self.projected.defined_at().is_none() || self.projected.with_untracked(|projected| projected == value) {
             return false;
         }
-        value.clone_into(&mut self.projected);
+        self.projected.update(|projected| value.clone_into(projected));
         self.signal.try_set_if_changed(value.to_owned())
     }
 }

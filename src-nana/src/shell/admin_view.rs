@@ -1,31 +1,17 @@
-//! 首页的日志、拓展和动作面板入口，以及任务弹层。
+//! 任务弹层。首页的日志、拓展和动作面板是常驻路由，见 `route_admin.rs`。
 //!
-//! 面板根节点是普通竖排，滚动和页边距由壳层主区提供。任务弹层照 `TaskPopover.vue`：
-//! 340 宽，贴在侧栏底部任务按钮上方；每个任务一块，来源加进度条（标签、细节、百分比）。
+//! 任务弹层照 `TaskPopover.vue`：340 宽，贴在侧栏底部任务按钮上方；每个任务一块，
+//! 来源加进度条（标签、细节、百分比）。
 
 use nana_ui::runtime::view::{widget, AnyView, IntoView};
 use nana_ui::runtime::{Activate, AlignSpec, IconButton, JustifySpec, LengthSpec, ScrollAxes, ScrollView, Stack};
 use nana_ui_core::{RadiusTier, SemanticColorRole as Role};
 
-use super::super::{ShellMessage, ShellViewModel, WorkspacePanel};
+use super::super::{ShellMessage, ShellViewModel};
 use super::icons;
-use super::style::{self, action, column, label, pad, row, wrapping, Tone};
-use super::support::{action_can_run, action_status_label, PopoverRow};
+use super::style::{self, column, label, pad, row};
+use super::support::PopoverRow;
 use super::AdminMessage;
-
-/// 当前首页面板：日志、拓展或仓库动作。设置页走 [`super::settings_page`]。
-pub(crate) fn admin_surface(model: &ShellViewModel) -> AnyView {
-    if model.admin_workspace_visible(WorkspacePanel::Logs) {
-        return super::logs_view::logs_panel(model);
-    }
-    if model.admin_workspace_visible(WorkspacePanel::Extensions) {
-        return super::tools::extensions_page(model);
-    }
-    if model.admin_workspace_visible(WorkspacePanel::Actions) {
-        return actions_panel(model);
-    }
-    widget(column(0.0)).key("admin-surface").into_any()
-}
 
 /// Vue 定位弹层用的高度估计：`min(360, max(180, 96 + 任务数 × 70))`。
 fn estimated_height(count: usize) -> f32 {
@@ -145,145 +131,5 @@ fn progress_bar(task: &PopoverRow, id: &str) -> AnyView {
     }
     widget(column(7.0))
         .children((track, widget(row(8.0).width(LengthSpec::Fill)).children(meta).into_any()))
-        .into_any()
-}
-
-/// 仓库动作面板，照 `RepositoryActionsPanel.vue`。
-fn actions_panel(model: &ShellViewModel) -> AnyView {
-    let admin = &model.admin;
-    let header = widget(style::spread(12.0, AlignSpec::Center))
-        .children((
-            widget(column(0.0)).children((
-                widget(style::eyebrow_text("动作")).key("admin-actions-eyebrow"),
-                widget(style::label_lh("仓库动作", 18.0, 700, Role::Text, 1.25)).key("admin-actions-title"),
-            )),
-            style::hint_chip(format!("{} 项", admin.actions.len()), "admin-actions-count"),
-        ))
-        .into_any();
-    let mut body = vec![header];
-    if admin.actions_loading {
-        body.push(style::state_notice("正在加载动作".into(), false, "admin-actions-loading"));
-    } else if admin.actions.is_empty() {
-        body.push(style::state_notice("当前仓库没有导入动作。".into(), false, "admin-actions-empty"));
-    } else {
-        body.push(action_body(model));
-    }
-    if !admin.actions_error.is_empty() {
-        body.push(style::state_notice(admin.actions_error.clone(), true, "admin-actions-error"));
-    }
-    widget(pad(column(12.0), 18.0, 18.0, 18.0, 18.0)).children(body).key("admin-actions").into_any()
-}
-
-/// 左边动作列表（220–300 宽），右边选中动作的详情和步骤。
-fn action_body(model: &ShellViewModel) -> AnyView {
-    let admin = &model.admin;
-    let active = admin.actions.iter().find(|action| Some(action.action_id.as_str()) == admin.active_action_id.as_deref()).or(admin.actions.first());
-    let keys = style::unique_keys(admin.actions.iter().map(|action| action.action_id.as_str()));
-    let items = admin
-        .actions
-        .iter()
-        .zip(&keys)
-        .map(|(item, key)| {
-            let id = item.action_id.clone();
-            let selected = active.is_some_and(|current| current.action_id == item.action_id);
-            let mut node = nana_ui::runtime::NodeStyle {
-                background: selected.then_some(Role::Hover),
-                interaction: nana_ui::runtime::InteractionStyle {
-                    hovered: nana_ui::runtime::SemanticPaint { background: Some(Role::Hover), ..Default::default() },
-                    ..Default::default()
-                },
-                ..Default::default()
-            };
-            {
-                let layout = std::sync::Arc::make_mut(&mut node.layout);
-                layout.width = Some(LengthSpec::Fill);
-                layout.min_height = Some(LengthSpec::Px(54.0));
-                layout.padding_top = Some(LengthSpec::Px(10.0));
-                layout.padding_bottom = Some(LengthSpec::Px(10.0));
-                layout.padding_left = Some(LengthSpec::Px(12.0));
-                layout.padding_right = Some(LengthSpec::Px(12.0));
-                layout.direction = Some(nana_ui_core::FlexDirection::Row);
-                layout.align_items = AlignSpec::Center;
-                layout.justify_content = JustifySpec::SpaceBetween;
-                layout.gap = Some(LengthSpec::Px(10.0));
-            }
-            let mut children = vec![widget(Stack::column(3.0).width(LengthSpec::Shrink).grow(1.0).shrink(1.0).min_width(LengthSpec::Px(0.0)))
-                .children((
-                    widget(label(item.name.clone(), 13.0, 600, Role::Text)),
-                    widget(wrapping(label(
-                        format!("{} · {} 步 · {}", item.source, item.steps.len(), action_status_label(&item.status, item.enabled)),
-                        12.0,
-                        400,
-                        Role::Muted,
-                    ))),
-                ))
-                .into_any()];
-            if item.status != "ready" {
-                children.push(widget(style::glyph(icons::SHIELD_ALERT, 14.0, Role::Text)).into_any());
-            }
-            widget(style::bottom_rule(Stack::row(10.0).style(node)).hittable())
-                .children(children)
-                .key(format!("admin-action-{key}"))
-                .on_cx(move |_, _: &Activate, cx| cx.dispatch_program_all(ShellMessage::Admin(AdminMessage::SelectAction(id.clone()))))
-                .into_any()
-        })
-        .collect::<Vec<_>>();
-    let list = widget(column(0.0).surface(Role::Surface).outline(Role::BorderSoft, 1.0).radius(RadiusTier::Md)).children(items).key("admin-action-list").into_any();
-    let detail = active.map(|current| action_detail(model, current)).unwrap_or_else(|| widget(column(0.0)).into_any());
-    let grid = Stack::from_layout(nana_ui_core::LayoutStyle::default()).with_layout(|layout| {
-        layout.display = Some(nana_ui_core::DisplaySpec::Grid);
-        layout.grid_columns = Some(vec![
-            style::capped(220.0, 300.0),
-            nana_ui_core::GridTrack::MinMax { min_px: 0.0, fr: 1.0, max_px: None },
-        ]);
-        layout.gap = Some(LengthSpec::Px(12.0));
-        layout.width = Some(LengthSpec::Fill);
-        layout.align_items = AlignSpec::Start;
-    });
-    widget(grid).children((list, detail)).into_any()
-}
-
-fn action_detail(model: &ShellViewModel, current: &crate::backend::services::repository::RepositoryAction) -> AnyView {
-    let admin = &model.admin;
-    let selected = model.files.selected_paths().len();
-    let can_run = action_can_run(&current.status, current.enabled, selected, admin.actions_running);
-    let action_id = current.action_id.clone();
-    let last = current.last_run.as_ref().map(|run| run.status.clone()).unwrap_or_else(|| "无".into());
-    let run_icon = if admin.actions_running { icons::LOADER_CIRCLE } else { icons::PLAY };
-    let mut body = vec![widget(style::spread(12.0, AlignSpec::Center))
-        .children((
-            widget(column(4.0)).children((
-                widget(style::label_lh(current.name.clone(), 18.0, 700, Role::Text, 1.25)),
-                widget(label(format!("{} · 最近运行 {last}", action_status_label(&current.status, current.enabled)), 12.0, 400, Role::Muted)).key("admin-action-detail"),
-            )),
-            widget(action("执行", Some(run_icon), Tone::Primary, !can_run)).key("admin-action-run").on_cx(move |_, _: &Activate, cx| {
-                cx.dispatch_program_all(ShellMessage::Admin(AdminMessage::RunAction(Some(action_id.clone()))));
-            }),
-        ))
-        .into_any()];
-    if let Some(reason) = current.unsupported_reason.clone() {
-        body.push(style::state_notice(reason, true, "admin-action-unsupported"));
-    }
-    let steps = current
-        .steps
-        .iter()
-        .map(|step| {
-            let mut children = vec![widget(column(3.0).shrink(1.0)).children((
-                widget(label(step.label.clone(), 13.0, 600, Role::Text)),
-                widget(label(format!("{} · {}", step.step_kind, step.status), 12.0, 400, Role::Muted)),
-            ))
-            .into_any()];
-            if let Some(reason) = step.unsupported_reason.clone() {
-                children.push(widget(style::align_end(label(reason, 12.0, 400, Role::Danger))).into_any());
-            }
-            widget(pad(style::spread(10.0, AlignSpec::Start), 10.0, 10.0, 10.0, 10.0).surface(Role::Subtle).outline(Role::BorderSoft, 1.0).radius(RadiusTier::Sm))
-                .children(children)
-                .into_any()
-        })
-        .collect::<Vec<_>>();
-    body.push(widget(pad(column(8.0), 12.0, 0.0, 0.0, 0.0)).children(steps).into_any());
-    widget(pad(column(0.0), 14.0, 14.0, 14.0, 14.0).surface(Role::Surface).outline(Role::BorderSoft, 1.0).radius(RadiusTier::Md))
-        .children(body)
-        .key("admin-action-detail-card")
         .into_any()
 }

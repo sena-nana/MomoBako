@@ -1,18 +1,19 @@
 //! 搜索面板和筛选栏挂到生产壳层后的语义节点：分组名、芯片、输入框名称、禁用态和文案。
+//! 常驻视图里藏起的块节点还在，布局以后才退出无障碍树，所以都先排一次版再取节点。
 
 use nana_ui::runtime::{AccessibilityNode, AccessibilityRole};
 
 use super::super::acceptance_gap_models;
+use super::super::view_harness::ShellHarness;
 
-/// 挂载同名对照场景，取出全部语义节点。
+/// 挂载同名对照场景并排版，取出全部语义节点。
 fn nodes(scene: &str) -> Vec<AccessibilityNode> {
     let model = acceptance_gap_models()
         .into_iter()
         .find(|(name, _)| *name == scene)
         .map(|(_, model)| model)
         .unwrap_or_else(|| panic!("没有对照场景 {scene}"));
-    let document = crate::acceptance_document_for_model(model).expect("生产文档");
-    document.context().world().project_accessibility(document.document())
+    ShellHarness::mount(model).nodes()
 }
 
 fn find<'a>(nodes: &'a [AccessibilityNode], label: &str) -> Vec<&'a AccessibilityNode> {
@@ -204,8 +205,7 @@ fn failed_search_shows_only_the_error() {
         generation,
         result: Err("搜索失败：索引损坏".into()),
     }));
-    let document = crate::acceptance_document_for_model(model).expect("生产文档");
-    let nodes = document.context().world().project_accessibility(document.document());
+    let nodes = ShellHarness::mount(model).nodes();
     assert!(has(&nodes, "搜索失败：索引损坏"));
     assert!(!has(&nodes, "没有匹配的文件"));
     assert!(!has(&nodes, "等待搜索条件"));
