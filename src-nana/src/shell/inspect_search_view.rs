@@ -16,7 +16,7 @@ use nana_ui::runtime::{
 use nana_ui_core::BorderStyle;
 
 use super::inspect::InspectMessage;
-use super::{ShellMessage, ShellViewModel};
+use super::ShellMessage;
 
 #[path = "search_filter_bar.rs"]
 mod filter_bar_view;
@@ -63,11 +63,6 @@ pub(crate) fn resident_search_panel(signals: SearchPanelSignals) -> AnyView {
     .children((header(signals.head), error_state(status), searching_state(status), empty_state(status), results))
     .key("search-workbench-panel")
     .into_any()
-}
-
-/// 旧视图路由用的搜索面板：按这一刻的投影建一份一次性的信号，再建同一个视图。
-pub(super) fn search_panel(model: &ShellViewModel) -> AnyView {
-    resident_search_panel(SearchPanelSignals::of(SearchPanelView::project(model)))
 }
 
 /// 页头：左边眉题、标题和摘要，右边仓库数和结果数。

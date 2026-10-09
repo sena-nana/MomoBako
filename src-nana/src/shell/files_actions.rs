@@ -830,6 +830,12 @@ pub(super) fn reduce_message(model: &mut super::ShellViewModel, message: super::
     let super::ShellMessage::Files(message) = message else {
         return Some(message);
     };
+    // 拖放的意图按此刻的仓库条件（有没有仓库、可写、在文件面板）收成宿主拖放消息，交给输入归约。
+    if let FilesMessage::HostDrop(event) = &message {
+        let flags = super::input::file_drop_flags(model);
+        let host = super::input::file_drop_message(&flags, event);
+        return super::input::reduce_message(model, host);
+    }
     // 压缩包导出还没有保存位置时，先弹系统保存对话框，不把空路径交给导出协议。
     let export = &model.files.export;
     let archive_without_path = export.target != "git" && export.output_path.trim().is_empty() && !export.busy;

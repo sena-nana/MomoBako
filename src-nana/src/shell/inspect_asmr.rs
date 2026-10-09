@@ -2,15 +2,15 @@
 //!
 //! 作品队列、播放列表和候选都来自已经在元数据或当前目录里的条目。
 //! 没有歌词正文、封面像素、时间戳或任务数时不补。
+//!
+//! 这里只出投影（[`AsmrPanels`]、[`CandidatesView`]）和按投影建的小块；预览页按投影整块重建作品队列，
+//! 元数据列里的「补全候选」常驻，输入框受控，见 `inspect_metadata_view.rs`。
 
 use std::collections::BTreeMap;
 
-use nana_ui::runtime::view::{text, widget, AnyView, IntoView};
-use nana_ui::runtime::{
-    Activate, AlignSpec, Button, LengthSpec, RadiusTier, Select, SelectChanged, SelectOption, SemanticColorRole, SettingsCard, Stack,
-    Text, TextChanged, TextInput,
-};
-use nana_ui::{ButtonKind, ControlSize};
+use nana_ui::runtime::view::{fields, text, widget, AnyView, IntoView};
+use nana_ui::runtime::{Activate, AlignSpec, Button, LengthSpec, RadiusTier, SelectOption, SemanticColorRole, Stack, Text};
+use nana_ui::ButtonKind;
 use serde_json::Value;
 
 use super::inspect::InspectMessage;
@@ -146,103 +146,136 @@ pub(super) fn display_custom(model: &ShellViewModel) -> BTreeMap<String, String>
     map
 }
 
-/// 预览列下方的作品队列和播放列表。不是 ASMR，或两边都空，就不占位。
-pub(super) fn preview_panels(model: &ShellViewModel) -> Option<AnyView> {
+/// 预览列下方作品队列和播放列表要显示的东西。内容变了整块按新内容重建。
+#[derive(Clone, Debug, PartialEq)]
+pub(super) struct AsmrPanels {
+    /// 同一作品目录里的其它音轨：「N 轨」和每轨的路径、文字。
+    queue: Option<(String, Vec<(String, String)>)>,
+    playlist: Option<PlaylistPanel>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct PlaylistPanel {
+    count: String,
+    /// 当前文件是 ASMR 音频，能加入作品或随机。
+    audio: bool,
+    /// 队列里的条目：路径和文字（当前项前面写「当前」）。
+    items: Vec<(String, String)>,
+}
+
+/// 预览列下方的作品队列和播放列表。不是 ASMR，或两边都空，就没有。
+pub(super) fn preview_panels(model: &ShellViewModel) -> Option<AsmrPanels> {
     let custom = display_custom(model);
     if !super::inspect_library::matches_asmr(&custom) {
         return None;
     }
+    let panels = AsmrPanels { queue: work_queue(model, &custom), playlist: playlist_panel(model, &custom) };
+    (panels.queue.is_some() || panels.playlist.is_some()).then_some(panels)
+}
+
+/// 作品队列和播放列表两张卡片，行距 12。
+pub(super) fn panels_view(panels: &AsmrPanels) -> AnyView {
     let mut rows = Vec::new();
-    if let Some(queue) = work_queue(model, &custom) {
-        rows.push(queue);
+    if let Some((count, items)) = &panels.queue {
+        let mut card = vec![queue_head("作品队列", count, "inspect-asmr-queue-head")];
+        card.extend(items.iter().map(|(path, label)| open_button(label.clone(), "inspect-asmr-queue", path)));
+        rows.push(queue_card("inspect-asmr-queue", card));
     }
-    if let Some(playlist) = playlist_card(model, &custom) {
-        rows.push(playlist);
+    if let Some(playlist) = &panels.playlist {
+        rows.push(playlist_view(playlist));
     }
-    if rows.is_empty() {
-        return None;
-    }
-    Some(widget(Stack::column(12.0).width(LengthSpec::Fill).min_width(LengthSpec::Px(0.0))).key("inspect-asmr-preview").children(rows).into_any())
+    widget(Stack::column(12.0).width(LengthSpec::Fill).min_width(LengthSpec::Px(0.0))).key("inspect-asmr-preview").children(rows).into_any()
+}
+
+/// 队列里的一条：点了打开这个文件。键里的路径换掉分隔符，带子目录的路径也能挂上。
+fn open_button(label: String, prefix: &str, path: &str) -> AnyView {
+    let target = path.to_string();
+    widget(Button::new(label).kind(ButtonKind::Ghost))
+        .key(format!("{prefix}-{}", super::files_view::style::key_part(path)))
+        .on_cx(move |_, _: &Activate, cx| cx.dispatch_program_all(ShellMessage::Asmr(AsmrMessage::Open(target.clone()))))
+        .into_any()
+}
+
+/// 元数据列里「补全候选」要显示的东西：只有 ASMR 条目才有这一块。
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(super) struct CandidatesView {
+    pub shown: bool,
+    /// 当前文件不能导入或应用候选。
+    pub locked: bool,
+    pub import_open: bool,
+    /// 下拉框里的来源，没选过时是 DLsite。
+    pub provider: String,
+    pub import_error: String,
+    pub candidates: Vec<CandidateCard>,
+}
+
+/// 一条候选。按序号和内容认，内容变了整张重建。
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub(super) struct CandidateCard {
+    pub index: usize,
+    pub title: String,
+    pub fields: Vec<(String, String)>,
+    pub skipped: Vec<String>,
+}
+
+/// 下拉框的两个来源。
+pub(super) fn provider_options() -> Vec<SelectOption> {
+    vec![SelectOption::new(DLSITE, "DLsite"), SelectOption::new(ASMR_ONE, "ASMR One")]
 }
 
 /// 元数据列里的补全候选。没有候选就写「暂无候选」，不造一条来源。
-pub(super) fn candidate_section(model: &ShellViewModel, custom: &BTreeMap<String, String>) -> Vec<AnyView> {
+pub(super) fn candidates_view(model: &ShellViewModel, custom: &BTreeMap<String, String>) -> CandidatesView {
     if !super::inspect_library::matches_asmr(custom) {
-        return Vec::new();
+        return CandidatesView::default();
     }
-    let locked = !asmr_can_edit(model);
-    let mut rows = vec![
-        text("ASMR Provider").key("inspect-asmr-provider-eyebrow").into_any(),
-        text("补全候选").key("inspect-asmr-provider-title").into_any(),
-        widget(Button::new("导入").kind(ButtonKind::Ghost).disabled(locked))
-            .key("inspect-asmr-import")
-            .on_cx(|_, _: &Activate, cx| cx.dispatch_program_all(ShellMessage::Asmr(AsmrMessage::ToggleImport)))
-            .into_any(),
-    ];
-    if model.asmr.import_open {
-        rows.push(import_form(model, custom, locked));
+    let candidates = listed_candidates(model)
+        .into_iter()
+        .enumerate()
+        .map(|(index, candidate)| CandidateCard {
+            index,
+            title: if candidate.confidence.is_empty() {
+                candidate.source.clone()
+            } else {
+                format!("{} {}", candidate.source, candidate.confidence)
+            },
+            fields: candidate.fields,
+            skipped: candidate.skipped,
+        })
+        .collect();
+    CandidatesView {
+        shown: true,
+        locked: !asmr_can_edit(model),
+        import_open: model.asmr.import_open,
+        provider: if model.asmr.lookup_provider.is_empty() { DLSITE.to_string() } else { model.asmr.lookup_provider.clone() },
+        import_error: model.asmr.import_error.clone(),
+        candidates,
     }
-    let candidates = listed_candidates(model);
-    if candidates.is_empty() {
-        if !model.asmr.import_open {
-            rows.push(text("暂无候选").key("inspect-asmr-candidate-empty").into_any());
-        }
-    } else {
-        for (index, candidate) in candidates.into_iter().enumerate() {
-            rows.push(candidate_card(candidate, index, locked));
-        }
-    }
-    vec![widget(SettingsCard::new("补全候选")).key("inspect-asmr-candidates").children(rows).into_any()]
 }
 
-fn import_form(model: &ShellViewModel, custom: &BTreeMap<String, String>, locked: bool) -> AnyView {
-    let provider = if model.asmr.lookup_provider.is_empty() { DLSITE.to_string() } else { model.asmr.lookup_provider.clone() };
-    let lookup_id = if model.asmr.lookup_id.is_empty() {
+/// 作品 ID 输入框里显示的值：没填过时取元数据里的作品 ID 或 RJ 号。
+pub(super) fn lookup_id_shown(model: &ShellViewModel, custom: &BTreeMap<String, String>) -> String {
+    if model.asmr.lookup_id.is_empty() {
         custom.get("workId").or_else(|| custom.get("rjCode")).cloned().unwrap_or_default()
     } else {
         model.asmr.lookup_id.clone()
-    };
-    let options = vec![SelectOption::new(DLSITE, "DLsite"), SelectOption::new(ASMR_ONE, "ASMR One")];
-    let select = Select::new(Some(provider)).options(options).placeholder("ASMR Provider").size(ControlSize::Small).disabled(locked);
-    let mut body = vec![
-        widget(select).key("inspect-asmr-provider").on_cx(|_, event: &SelectChanged, cx| {
-            cx.dispatch_program_all(ShellMessage::Asmr(AsmrMessage::SetProvider(event.value.to_string())));
-        }).into_any(),
-        widget(TextInput::new(lookup_id).placeholder("RJ123456").size(ControlSize::Small).disabled(locked))
-            .key("inspect-asmr-work-id")
-            .on_cx(|_, event: &TextChanged, cx| cx.dispatch_program_all(ShellMessage::Asmr(AsmrMessage::SetLookupId(event.value.to_string()))))
-            .into_any(),
-        widget(Button::new("抓取候选").kind(ButtonKind::Ghost).disabled(locked)).key("inspect-asmr-lookup").on_cx(|_, _: &Activate, cx| {
-            cx.dispatch_program_all(ShellMessage::Asmr(AsmrMessage::Lookup));
-        }).into_any(),
-        widget(TextInput::new(model.asmr.import_draft.clone()).placeholder("ASMR 候选 JSON").disabled(locked))
-            .key("inspect-asmr-import-json")
-            .on_cx(|_, event: &TextChanged, cx| cx.dispatch_program_all(ShellMessage::Asmr(AsmrMessage::SetImportDraft(event.value.to_string()))))
-            .into_any(),
-    ];
-    if !model.asmr.import_error.is_empty() {
-        body.push(text(model.asmr.import_error.clone()).key("inspect-asmr-import-error").into_any());
     }
-    body.push(
-        widget(Button::new("导入候选").kind(ButtonKind::Ghost).disabled(locked)).key("inspect-asmr-import-submit").on_cx(|_, _: &Activate, cx| {
-            cx.dispatch_program_all(ShellMessage::Asmr(AsmrMessage::ImportCandidate));
-        }).into_any(),
-    );
-    widget(Stack::column(8.0)).key("inspect-asmr-import-form").children(body).into_any()
 }
 
-fn candidate_card(candidate: Candidate, index: usize, locked: bool) -> AnyView {
-    let title = if candidate.confidence.is_empty() {
-        candidate.source.clone()
-    } else {
-        format!("{} {}", candidate.source, candidate.confidence)
-    };
-    let mut rows = vec![text(title).key(format!("inspect-asmr-candidate-{index}")).into_any()];
-    let apply_index = index;
+/// 导入框里的候选 JSON 草稿。
+pub(super) fn import_draft(model: &ShellViewModel) -> &str {
+    &model.asmr.import_draft
+}
+
+/// 一条候选：来源和置信度、「应用」，下面是要写入的字段和跳过的字段。
+pub(super) fn candidate_card(candidate: CandidateCard, apply_disabled: impl Fn() -> bool + Send + 'static) -> AnyView {
+    let index = candidate.index;
+    let empty = candidate.fields.is_empty();
+    let mut rows = vec![text(candidate.title).key(format!("inspect-asmr-candidate-{index}")).into_any()];
     rows.push(
-        widget(Button::new("应用").kind(ButtonKind::Ghost).disabled(locked || candidate.fields.is_empty()))
+        widget(Button::new("应用").kind(ButtonKind::Ghost).disabled(true))
+            .prop::<bool, fields::button::disabled>(move || empty || apply_disabled())
             .key(format!("inspect-asmr-apply-{index}"))
-            .on_cx(move |_, _: &Activate, cx| cx.dispatch_program_all(ShellMessage::Asmr(AsmrMessage::Apply(apply_index))))
+            .on_cx(move |_, _: &Activate, cx| cx.dispatch_program_all(ShellMessage::Asmr(AsmrMessage::Apply(index))))
             .into_any(),
     );
     for (key, value) in &candidate.fields {
@@ -254,36 +287,47 @@ fn candidate_card(candidate: Candidate, index: usize, locked: bool) -> AnyView {
     widget(Stack::column(4.0)).key(format!("inspect-asmr-candidate-card-{index}")).children(rows).into_any()
 }
 
-fn work_queue(model: &ShellViewModel, custom: &BTreeMap<String, String>) -> Option<AnyView> {
+fn work_queue(model: &ShellViewModel, custom: &BTreeMap<String, String>) -> Option<(String, Vec<(String, String)>)> {
     let current = model.inspect.target_path.as_deref().unwrap_or("");
     let siblings = work_audio(model, custom).into_iter().filter(|row| row.path != current).collect::<Vec<_>>();
     if siblings.is_empty() {
         return None;
     }
-    let count = siblings.len() + 1;
-    let mut rows = vec![queue_head("作品队列", &format!("{count} 轨"), "inspect-asmr-queue-head")];
-    for row in siblings {
-        let path = row.path.clone();
-        let title = meta_text(row, custom, "trackTitle").unwrap_or_else(|| row.name.clone());
-        let status = meta_text(row, custom, "listeningStatus").unwrap_or_else(|| "unlistened".into());
-        rows.push(
-            widget(Button::new(format!("{title} {status}")).kind(ButtonKind::Ghost))
-                .key(format!("inspect-asmr-queue-{path}"))
-                .on_cx(move |_, _: &Activate, cx| cx.dispatch_program_all(ShellMessage::Asmr(AsmrMessage::Open(path.clone()))))
-                .into_any(),
-        );
-    }
-    Some(queue_card("inspect-asmr-queue", rows))
+    let count = format!("{} 轨", siblings.len() + 1);
+    let items = siblings
+        .into_iter()
+        .map(|row| {
+            let title = meta_text(row, custom, "trackTitle").unwrap_or_else(|| row.name.clone());
+            let status = meta_text(row, custom, "listeningStatus").unwrap_or_else(|| "unlistened".into());
+            (row.path.clone(), format!("{title} {status}"))
+        })
+        .collect();
+    Some((count, items))
 }
 
-fn playlist_card(model: &ShellViewModel, custom: &BTreeMap<String, String>) -> Option<AnyView> {
+fn playlist_panel(model: &ShellViewModel, custom: &BTreeMap<String, String>) -> Option<PlaylistPanel> {
     let audio = current_row(model).is_some_and(|row| is_audio(row, custom));
     let repo = repo_id(model);
-    let items = model.asmr.playlist.iter().filter(|item| item.repo_id == repo).cloned().collect::<Vec<_>>();
+    let items = model.asmr.playlist.iter().filter(|item| item.repo_id == repo).collect::<Vec<_>>();
     if !audio && items.is_empty() {
         return None;
     }
-    let mut rows = vec![queue_head("播放列表", &format!("{} 项", items.len()), "inspect-asmr-playlist-head")];
+    let current = model.inspect.target_path.clone().unwrap_or_default();
+    let items = items
+        .into_iter()
+        .map(|item| {
+            let note = if item.status.is_empty() { item.work_title.clone() } else { item.status.clone() };
+            let label = if note.is_empty() { item.title.clone() } else { format!("{} {note}", item.title) };
+            let label = if item.path == current { format!("当前 {label}") } else { label };
+            (item.path.clone(), label)
+        })
+        .collect::<Vec<_>>();
+    Some(PlaylistPanel { count: format!("{} 项", items.len()), audio, items })
+}
+
+fn playlist_view(playlist: &PlaylistPanel) -> AnyView {
+    let audio = playlist.audio;
+    let mut rows = vec![queue_head("播放列表", &playlist.count, "inspect-asmr-playlist-head")];
     rows.push(
         widget(Stack::row(8.0).align(AlignSpec::Center))
             .key("inspect-asmr-playlist-actions")
@@ -294,30 +338,18 @@ fn playlist_card(model: &ShellViewModel, custom: &BTreeMap<String, String>) -> O
                 widget(Button::new("随机").kind(ButtonKind::Ghost).disabled(!audio)).key("inspect-asmr-random").on_cx(|_, _: &Activate, cx| {
                     cx.dispatch_program_all(ShellMessage::Asmr(AsmrMessage::AddRandom));
                 }),
-                widget(Button::new("清空").kind(ButtonKind::Ghost).disabled(items.is_empty())).key("inspect-asmr-clear").on_cx(|_, _: &Activate, cx| {
+                widget(Button::new("清空").kind(ButtonKind::Ghost).disabled(playlist.items.is_empty())).key("inspect-asmr-clear").on_cx(|_, _: &Activate, cx| {
                     cx.dispatch_program_all(ShellMessage::Asmr(AsmrMessage::ClearPlaylist));
                 }),
             ))
             .into_any(),
     );
-    if items.is_empty() {
-        rows.push(text("暂无播放队列").key("inspect-asmr-playlist-empty").into_any());
+    if playlist.items.is_empty() {
+        rows.push(text("暂无播放队列".to_string()).key("inspect-asmr-playlist-empty").into_any());
     } else {
-        let current = model.inspect.target_path.clone().unwrap_or_default();
-        for item in items {
-            let path = item.path.clone();
-            let note = if item.status.is_empty() { item.work_title.clone() } else { item.status.clone() };
-            let label = if note.is_empty() { item.title.clone() } else { format!("{} {note}", item.title) };
-            let active = path == current;
-            rows.push(
-                widget(Button::new(if active { format!("当前 {label}") } else { label }).kind(ButtonKind::Ghost))
-                    .key(format!("inspect-asmr-playlist-{path}"))
-                    .on_cx(move |_, _: &Activate, cx| cx.dispatch_program_all(ShellMessage::Asmr(AsmrMessage::Open(path.clone()))))
-                    .into_any(),
-            );
-        }
+        rows.extend(playlist.items.iter().map(|(path, label)| open_button(label.clone(), "inspect-asmr-playlist", path)));
     }
-    Some(queue_card("inspect-asmr-playlist", rows))
+    queue_card("inspect-asmr-playlist", rows)
 }
 
 fn queue_head(label: &str, count: &str, key: &str) -> AnyView {
@@ -672,8 +704,11 @@ mod tests {
         let custom = display_custom(&model);
         assert!(super::super::inspect_library::matches_asmr(&custom));
         assert!(super::super::inspect_library::library_sections(&custom).len() == 1);
-        assert!(preview_panels(&model).is_some());
-        assert_eq!(candidate_section(&model, &custom).len(), 1);
+        let panels = preview_panels(&model).expect("音频有播放列表外壳");
+        assert!(panels.queue.is_none(), "没有作品目录时不排作品队列");
+        assert!(panels.playlist.as_ref().is_some_and(|playlist| playlist.audio && playlist.items.is_empty()));
+        let candidates = candidates_view(&model, &custom);
+        assert!(candidates.shown && candidates.candidates.is_empty(), "ASMR 条目有补全候选这一块，但不造候选");
         assert!(model.asmr.playlist.is_empty());
         assert!(model.asmr.imported.is_empty());
     }
