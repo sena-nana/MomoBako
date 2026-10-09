@@ -125,8 +125,10 @@ fn toolbar(signals: LogsSignals) -> AnyView {
         .key("admin-log-reset")
         .on_cx(|_, _: &Activate, cx| cx.dispatch_program_all(ShellMessage::Admin(AdminMessage::ResetLogFilters)))
         .into_any();
+    let clearing = move || toolbar.with(|toolbar| toolbar.clearing);
     let clear = widget(action("清空日志", Some(icons::TRASH2), Tone::Plain, false))
-        .prop::<bool, ActionDisabled>(move || toolbar.with(|toolbar| toolbar.no_logs))
+        .prop::<bool, ActionDisabled>(move || toolbar.with(|toolbar| toolbar.clear_disabled))
+        .prop::<Option<nana_ui_core::Icon>, ButtonIcon>(move || Some(if clearing() { icons::LOADER_CIRCLE } else { icons::TRASH2 }))
         .key("clear-logs")
         .on_cx(|_, _: &Activate, cx| cx.dispatch_program_all(ShellMessage::ClearLogs))
         .into_any();

@@ -123,6 +123,8 @@ pub enum AdminMessage {
     SetLogPaused(bool),
     /// 展开或收起一条日志的上下文。
     ToggleLogContext(String),
+    /// 清空系统日志的结果。成功照 Vue `clearSystemLogsInWorkspace` 直接把手上的日志清空，不再重读。
+    LogsCleared(Result<(), String>),
     ToggleTaskPopover,
     /// 弹层头部的关闭按钮和弹层外的点击层。Escape 走全局的 [`crate::shell::escape_layer`]。
     CloseTaskPopover,
@@ -196,6 +198,8 @@ pub enum AdminEffect {
     LoadSettingsBundle,
     /// 读最近 200 条系统日志。每次切到日志面板都读，和 Vue `setActivePanel('logs')` 一致。
     LoadLogs,
+    /// 清空系统日志的持久化文件，结果回 [`AdminMessage::LogsCleared`]。
+    ClearLogs,
     /// 读设置目录里的应用设置（主题、缓存上限、关闭行为）。打开设置页时读一次。
     LoadAppSettings,
     /// 读插件登记的播放器类型。插件列表换新以后读，和 Vue 同步前端插件注册表的时机一致。
@@ -269,6 +273,8 @@ pub struct AdminState {
     pub logs: Vec<SystemLogRecord>,
     /// 在读历史日志（Vue `isLoadingLogs`）。
     pub logs_loading: bool,
+    /// 在清空系统日志（Vue `isClearingLogs`）：「清空日志」禁用并换成加载图标。
+    pub logs_clearing: bool,
     pub log_levels: Vec<String>,
     pub log_kinds: Vec<String>,
     pub log_plugin_id: String,
@@ -323,6 +329,7 @@ impl Default for AdminState {
             repository_summaries: Vec::new(),
             logs: Vec::new(),
             logs_loading: false,
+            logs_clearing: false,
             log_levels: Vec::new(),
             log_kinds: Vec::new(),
             log_plugin_id: String::new(),

@@ -57,6 +57,7 @@ fn dispatch_one(app: &mut MomoBakoApplication, context: &RuntimeProgramContext<S
         AdminEffect::RequestSaveDialog { .. } => app.shell.input.queue_save_dialog(),
         AdminEffect::LoadSettingsBundle => load_bundle(app, context),
         AdminEffect::LoadLogs => load_logs(app, context),
+        AdminEffect::ClearLogs => clear_logs(app, context),
         AdminEffect::LoadAppSettings => load_app_settings(app, context),
         AdminEffect::LoadPlaylistPlayers => load_players(app, context),
         AdminEffect::Install(path) => plugins_task(app, context, "插件安装", move |plugin, executor| {
@@ -286,6 +287,23 @@ fn load_logs(app: &mut MomoBakoApplication, context: &RuntimeProgramContext<Shel
     })) {
         eprintln!("Nana 系统日志任务提交失败：{error}");
         app.shell.reduce(ShellMessage::LogsLoaded(Err(format!("系统日志任务提交失败：{error}"))));
+    }
+}
+
+/// 清空系统日志的持久化文件。结果回 `LogsCleared`，成功后不再重读（Vue `clearSystemLogsInWorkspace`）。
+fn clear_logs(app: &mut MomoBakoApplication, context: &RuntimeProgramContext<ShellMessage>) {
+    let Some(services) = app.services.as_ref() else {
+        eprintln!("Nana 清空系统日志需要领域服务，当前服务未启动");
+        app.shell.reduce(admin(AdminMessage::LogsCleared(Err(NO_SERVICES.into()))));
+        return;
+    };
+    let system = services.system.clone();
+    let executor = services.executor.clone();
+    if let Err(error) = context.run_task(Task::new(async move {
+        admin(AdminMessage::LogsCleared(executor.block_on(system.clear_system_logs())))
+    })) {
+        eprintln!("Nana 清空系统日志任务提交失败：{error}");
+        app.shell.reduce(admin(AdminMessage::LogsCleared(Err(format!("清空系统日志任务提交失败：{error}")))));
     }
 }
 

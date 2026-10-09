@@ -1,6 +1,6 @@
 //! 按壳层消息派发领域服务任务。
 //!
-//! `MomoBakoApplication::update` 在归约之前调用 [`dispatch_services`]：清理日志、播放集条目移除和新建、
+//! `MomoBakoApplication::update` 在归约之前调用 [`dispatch_services`]：播放集条目移除和新建、
 //! 打开目录和读文件元数据这些消息各自提交一个后台任务，结果再作为新消息回到 `update`。页面数据的读取不在这里，
 //! 由归约排出副作用，再由各 `*_dispatch` 交给领域服务。
 
@@ -17,7 +17,6 @@ pub(crate) fn dispatch_services(
     message: &ShellMessage,
     context: &RuntimeProgramContext<ShellMessage>,
 ) {
-    dispatch_clear_logs(app, message, context);
     dispatch_playlists(app, message, context);
     dispatch_browse_and_preview(app, message, context);
 }
@@ -52,31 +51,6 @@ pub(crate) fn after_snapshot(
 fn run(context: &RuntimeProgramContext<ShellMessage>, what: &str, task: Task<ShellMessage>) {
     if let Err(error) = context.run_task(task) {
         eprintln!("Nana {what}任务提交失败：{error}");
-    }
-}
-
-/// 清理系统日志后重读一页。
-fn dispatch_clear_logs(
-    app: &MomoBakoApplication,
-    message: &ShellMessage,
-    context: &RuntimeProgramContext<ShellMessage>,
-) {
-    if matches!(message, ShellMessage::ClearLogs)
-        && let Some(services) = app.services.as_ref()
-    {
-        let system = services.system.clone();
-        let executor = services.executor.clone();
-        let query = crate::backend::services::repository::SystemLogQuery {
-            limit: Some(100),
-            ..Default::default()
-        };
-        run(context, "系统日志清理", Task::new(async move {
-            let result = executor.block_on(async {
-                system.clear_system_logs().await?;
-                system.list_system_logs(Some(query)).await
-            });
-            ShellMessage::LogsLoaded(result)
-        }));
     }
 }
 
