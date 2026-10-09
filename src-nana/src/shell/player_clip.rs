@@ -113,7 +113,6 @@ pub(super) fn load_item(player: &mut PlayerState, item: &QueueItem) {
 fn begin_load(player: &mut PlayerState, item: &QueueItem, still: bool) {
     player.drop_clip_frames();
     player.wav.clear();
-    player.activity.clear();
     player.load_generation = player.load_generation.wrapping_add(1);
     player.can_play = false;
     player.session.status = "loading".into();

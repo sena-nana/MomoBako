@@ -79,28 +79,24 @@ fn consume_legacy(model: &mut ShellViewModel, message: ShellMessage) -> Option<S
             eprintln!("Nana 系统日志读取失败：{error}");
             model.admin.logs_loading = false;
             model.status.fail(FailureSource::Logs, format!("无法读取系统日志：{error}"));
-            model.detail = format!("无法读取系统日志：{error}");
             None
         }
-        ShellMessage::ClearLogs => {
-            model.detail = "正在清理系统日志…".into();
-            None
-        }
+        // 清理请求由 `app_dispatch` 发出，结果回来以前日志页不变。
+        ShellMessage::ClearLogs => None,
         ShellMessage::TaskProgressLoaded(progress) => {
             model.task_progress = progress;
             None
         }
         ShellMessage::SettingsLoaded(Ok((settings, diagnostic))) => {
+            if let Some(diagnostic) = diagnostic {
+                eprintln!("Nana {diagnostic}");
+            }
             model.settings = settings;
-            model.detail = diagnostic.clone().unwrap_or_else(|| "应用设置已加载".into());
-            model.settings_error = diagnostic;
             None
         }
         ShellMessage::SettingsLoaded(Err(error)) => {
             eprintln!("Nana 应用设置读取失败：{error}");
             model.status.fail(FailureSource::Settings, format!("无法读取应用设置：{error}"));
-            model.detail = format!("无法读取应用设置：{error}");
-            model.settings_error = Some(error);
             None
         }
         ShellMessage::SettingsThemeChanged(theme) => {
@@ -109,22 +105,17 @@ fn consume_legacy(model: &mut ShellViewModel, message: ShellMessage) -> Option<S
                 return None;
             }
             model.settings.theme = theme;
-            model.settings_error = None;
             model.admin.push_effect(AdminEffect::SaveSettings);
             None
         }
         // 主题改动后宿主直接写设置文件，这里只收结果；结果不切页面。
         ShellMessage::SettingsSaved(Ok(settings)) => {
             model.settings = settings;
-            model.settings_error = None;
-            model.detail = "应用设置已保存".into();
             None
         }
         ShellMessage::SettingsSaved(Err(error)) => {
             eprintln!("Nana 应用设置保存失败：{error}");
             model.status.fail(FailureSource::Settings, format!("保存应用设置失败：{error}"));
-            model.detail = format!("设置校验失败：{error}");
-            model.settings_error = Some(error);
             None
         }
         other => Some(other),
@@ -551,9 +542,10 @@ fn external_json(model: &ShellViewModel) -> String {
 
 fn finish_file_plugin(model: &mut ShellViewModel, method: &str, result: Result<serde_json::Value, String>) {
     match result {
+        // 和 Vue 来源动作完成后的 `context.refreshRepo()` 一样重读资源库列表，再按当前仓库重读摘要和目录。
         Ok(_) => {
             model.files.error.clear();
-            model.files.activity = format!("已调用 {method}。");
+            model.workspace.request_repository_refresh();
         }
         Err(error) => {
             eprintln!("Nana 文件插件动作失败：{method}：{error}");

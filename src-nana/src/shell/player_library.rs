@@ -53,7 +53,6 @@ impl PlayerState {
         if membership_can_toggle(kind, asset_id, is_virtual) {
             let current = self.memberships.get(asset_id).cloned().unwrap_or_default();
             let playlist_ids = next_membership_ids(&current, playlist_id);
-            self.activity = "正在更新播放列表成员…".into();
             self.effects.push(PlayerEffect::SetMembership(PlaylistMembershipRequest {
                 repo_id: repo_id.to_string(),
                 asset_id: asset_id.to_string(),
@@ -65,7 +64,6 @@ impl PlayerState {
             eprintln!("Nana 没有可加入播放列表的路径");
             return;
         }
-        self.activity = "正在按路径加入播放列表…".into();
         self.effects.push(PlayerEffect::AddByPaths(PlaylistItemsByPathsAddRequest {
             repo_id: repo_id.to_string(),
             playlist_id: playlist_id.to_string(),
@@ -79,20 +77,16 @@ impl PlayerState {
             return;
         }
         match result {
-            Ok(memberships) => {
-                self.memberships = memberships;
-                self.activity.clear();
-            }
+            Ok(memberships) => self.memberships = memberships,
+            // 和 Vue `syncPlaylistMemberships` 一样读不到就当没有成员，不提示。
             Err(error) => {
                 eprintln!("Nana 读取播放列表成员失败：{error}");
                 self.memberships.clear();
-                self.activity = error;
             }
         }
     }
 
     pub(super) fn note_membership_saved(&mut self, result: Result<PlaylistMembershipSnapshot, String>) {
-        self.activity.clear();
         match result {
             Ok(snapshot) => {
                 self.memberships.insert(snapshot.asset_id, snapshot.playlist_ids);
@@ -120,7 +114,6 @@ impl PlayerState {
         let Some(item_ids) = reorder_before(ids, source, before) else {
             return;
         };
-        self.activity = "正在保存播放列表顺序…".into();
         self.effects.push(PlayerEffect::Reorder(PlaylistItemsOrderRequest {
             repo_id: repo_id.to_string(),
             playlist_id: playlist_id.to_string(),

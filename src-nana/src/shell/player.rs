@@ -146,7 +146,6 @@ pub struct PlayerState {
     pub queue_open: bool,
     /// 播放条卡片的实际宽度，排版回报后才有；0 表示还没量到。只影响画面。
     pub(crate) bar_width: f32,
-    pub activity: String,
     pub notice: String,
     pub history: Vec<String>,
     pub shuffle_order: Vec<String>,
@@ -201,7 +200,6 @@ impl Default for PlayerState {
             can_play: false,
             queue_open: false,
             bar_width: 0.0,
-            activity: String::new(),
             notice: String::new(),
             history: Vec::new(),
             shuffle_order: Vec::new(),
@@ -238,9 +236,8 @@ impl PlayerState {
         std::mem::take(&mut self.effects)
     }
 
-    /// 记下一次没有就近显示的失败：活动文案写原因，失败排着等状态区取走。
+    /// 记下一次没有就近显示的失败，排着等状态区取走。
     pub(super) fn note_failure(&mut self, message: String) {
-        self.activity = message.clone();
         self.failures.push(message);
     }
 
@@ -407,11 +404,11 @@ impl PlayerState {
 
     fn play_listed(&mut self, item_id: Option<String>, inspect: &mut InspectState) {
         let Some(detail) = self.listed.clone() else {
-            self.activity = "选择一个播放集".into();
+            eprintln!("Nana 没有点开的播放集，不能播放");
             return;
         };
         if detail.items.is_empty() {
-            self.activity = "播放集还是空的".into();
+            eprintln!("Nana 播放集还是空的：{}", detail.playlist.playlist_id);
             return;
         }
         let repo_id = detail.playlist.repo_id.clone();
@@ -426,7 +423,7 @@ impl PlayerState {
             .or_else(|| detail.items.iter().find(|item| item.status == "ready").map(|item| item.playlist_item_id.clone()))
             .or_else(|| detail.items.first().map(|item| item.playlist_item_id.clone()));
         let Some(start) = start else {
-            self.activity = "播放集还是空的".into();
+            eprintln!("Nana 播放集没有可以开始的条目：{}", detail.playlist.playlist_id);
             return;
         };
         if self.mode == PlaybackMode::Shuffle {
@@ -441,7 +438,6 @@ impl PlayerState {
     fn play_item(&mut self, item_id: &str, auto_play: bool) {
         let Some(item) = self.queue.iter().find(|item| item.id == item_id).cloned() else {
             eprintln!("Nana 播放队列没有这个条目：{item_id}");
-            self.activity = "当前没有可播放条目".into();
             return;
         };
         self.resume = None;
@@ -645,7 +641,6 @@ impl PlayerState {
         self.queue_open = false;
         self.history.clear();
         self.shuffle_order.clear();
-        self.activity.clear();
         self.notice.clear();
         if let Some(detail) = self.listed.clone() {
             self.queue = detail.items.iter().map(|item| queue_item_from_playlist(item, &detail.playlist)).collect();
@@ -697,15 +692,13 @@ impl PlayerState {
     fn fail_session(&mut self, message: String) {
         self.can_play = false;
         self.session.status = "failed".into();
-        self.session.error = Some(message.clone());
-        self.activity = message;
+        self.session.error = Some(message);
     }
 
     fn set_preference(&mut self, capability_id: String, plugin_id: Option<String>) {
         let capability_id = capability_id.trim().to_string();
         if capability_id.is_empty() {
             eprintln!("Nana 播放器能力标识不能为空");
-            self.activity = "播放器能力标识不能为空".into();
             return;
         }
         match plugin_id.map(|value| value.trim().to_string()).filter(|value| !value.is_empty()) {

@@ -63,7 +63,7 @@ yarn tauri:dev               # Vue/Tauri 对照窗口，先构建、打包并暂
 - **设置**：侧栏「设置」和缺失仓库的「打开来源设置」都进设置页（`ShellMessage::OpenSettings`、`admin::open_settings_page`），后者照 Vue `?plugin=` 展开来源插件的设置。设置页有音频播放、外观（主题、圆角，改了立即生效）、仓库服务、外部素材接入（复制连接信息、导出 `external-api.json`）、插件管理、缓存和 API 设计。主题写进 `settings.json`，圆角写进 `corners.json`。见 `route_settings.rs`、`admin_settings_view.rs`。
 - **插件**：启动结束时照 Vue `loadSettingsData` 读一次设置包（插件、钩子记录、缓存、API 设计和外部连接），打开设置页、插件面板「刷新」时再读；插件列表换新以后重读播放器类型（`list_playlist_players`），新建播放集的类型、播放器贡献和插件类型的播放集能不能播都从这里来。插件管理面板（设置页和拓展页都有）分组和搜索，能启停、从压缩包安装（编号 2 的文件对话框）、确认后删除、编辑和重置清单声明的设置字段、打开插件目录；来源插件的扫码登录画二维码（`source_auth_page.rs`）。拓展页的 API Playground、文件导入、Eagle 导入是原生页面。见 `admin_plugin*.rs`、`admin_gap.rs`、`tool_native.rs`、`api_playground*.rs`。
 - **日志**：日志页按级别、来源和关键字筛选，可以暂停追踪、清空；页头、工具条和筛选固定，列表自己滚动（`route_home::home_fixed`、`admin_logs_view.rs`）。每次切到日志面板照 Vue 读最近 200 条历史日志（读的时候手上没有日志就写「正在加载系统日志」），之后经宿主事件合并新记录。
-- **任务**：侧栏底部的「任务」打开任务弹层（`admin_view.rs`），列出当前的仓库操作（如刷新文件夹树）和宿主观察到的运行中任务（排队、运行和取消中，结束就拿掉）；「任务」右上角的计数是弹层的行数，和 Vue 的 `activeTaskCount` 一样。弹层里没有取消按钮，Vue 的 `TaskPopover.vue` 也没有；点弹层外面、头部的关闭按钮和 Escape 都关掉它。
+- **任务**：侧栏底部的「任务」打开任务弹层（`admin_view.rs`），列出当前的仓库操作（刷新文件夹树，或复制、移动、导入、多选删除和还原这些文件变更，`operation_row_tests.rs`）和宿主观察到的运行中任务（排队、运行和取消中，结束就拿掉）；「任务」右上角的计数是弹层的行数，和 Vue 的 `activeTaskCount` 一样。弹层里没有取消按钮，Vue 的 `TaskPopover.vue` 也没有；点弹层外面、头部的关闭按钮和 Escape 都关掉它。
 - **宿主操作**：标题栏的最小化、最大化、关闭；关闭行为按设置确认、退出或最小化到托盘（`src-nana/src/window_host.rs`）；托盘在 Windows 上用 `tray-icon`（`src-nana/src/tray.rs`）；主窗口几何下次启动恢复；打开和定位启动系统程序；拖出文件在 Windows 上用 `drag` crate（`src-nana/src/drag_out.rs`）；剪贴板读写系统剪贴板（`src-nana/src/host_bridge.rs`）；文件区和空库页接收系统文件拖入（`input::accept_file_drops`）；Escape 由运行时交给激活的对话框，其余按 `escape_layer` 关最上面一层。
 
 ## 还没做或要靠设备验证的部分
@@ -72,6 +72,7 @@ yarn tauri:dev               # Vue/Tauri 对照窗口，先构建、打包并暂
 
 归约和服务派发已经写好、但产品界面触发不到的路径：
 
+- 任务弹层的仓库操作行只接了刷新文件夹树和文件变更。Vue 读目录（`读取目录 / 读取回收站 / 读取文件树`）、加载资源库、同步资源库、导入和挂载资源库、重定向资源库、来源下载时也在这一行出进度，Nana 这些路径不出。
 - `ShellMessage::Refresh`（重读资源库列表）有归约和派发，没有发送方，只有测试在用。
 - `ShellMessage::SetSidebarWidth`、`CommitSidebarWidth` 和 `SetLibraryCategory` 没有发送方：侧栏宽度由宿主在准备帧里直接写进工作台（`window_host::sync_sidebar_resize`），分类视图由侧栏快捷方式直接切换。
 

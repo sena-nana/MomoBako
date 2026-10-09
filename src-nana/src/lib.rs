@@ -130,17 +130,17 @@ impl ApplicationState for MomoBakoApplication {
             // 不走验收种子：验收的启动失败页带着夹具仓库和日志，不能出现在真实窗口里。
             let mut shell = ShellViewModel::default();
             shell.page = ShellPage::Error;
-            let message = "领域服务启动失败，请检查服务目录和端口配置";
-            shell.detail = message.into();
-            shell.workspace.startup.fail(message);
+            shell.workspace.startup.fail("领域服务启动失败，请检查服务目录和端口配置");
             shell
         };
         if let Some(services) = services.as_ref() {
             // 主题等应用设置启动时就要生效，不能等打开设置页才读。
             match services.load_settings() {
                 Ok((settings, diagnostic)) => {
+                    if let Some(diagnostic) = diagnostic {
+                        eprintln!("Nana {diagnostic}");
+                    }
                     shell.settings = settings;
-                    shell.settings_error = diagnostic;
                 }
                 Err(error) => eprintln!("Nana 启动时读取应用设置失败，先用默认值：{error}"),
             }
@@ -264,7 +264,6 @@ impl ApplicationState for MomoBakoApplication {
             if let Err(error) = view.sync(&mut window.document, &self.shell) {
                 eprintln!("Nana 壳层同步失败：{error}");
                 self.shell.page = ShellPage::Error;
-                self.shell.detail = "页面更新失败，请查看系统日志".into();
                 return RuntimeProgramUpdate { window_commands, ..RuntimeProgramUpdate::redraw(*id) };
             }
             self.shell.surface_dirty = false;

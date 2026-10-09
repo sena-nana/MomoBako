@@ -162,7 +162,6 @@ pub struct InspectState {
     pub(super) kind: Option<PreviewKind>,
     pub(super) body: PreviewBody,
     pub(super) loading: bool,
-    pub(super) activity: String,
     pub(super) error: String,
     pub(super) conflict: String,
     pub(super) target_path: Option<String>,
@@ -205,7 +204,6 @@ impl Default for InspectState {
             kind: None,
             body: PreviewBody::Empty,
             loading: false,
-            activity: String::new(),
             error: String::new(),
             conflict: String::new(),
             target_path: None,
@@ -298,7 +296,6 @@ impl InspectState {
         self.kind = None;
         self.body = PreviewBody::Empty;
         self.loading = true;
-        self.activity = "正在读取文件元数据…".into();
         self.error.clear();
         bridge::clear_deck(self);
         self.conflict.clear();
@@ -314,7 +311,6 @@ impl InspectState {
         self.kind = None;
         self.body = PreviewBody::Empty;
         self.loading = false;
-        self.activity.clear();
         self.error.clear();
         self.asset_id = None;
         self.palette.clear();
@@ -358,7 +354,6 @@ impl InspectState {
     pub(super) fn note_detail_error(&mut self, error: &str) {
         eprintln!("Nana 读取文件元数据失败：{error}");
         self.loading = false;
-        self.activity.clear();
         self.body = PreviewBody::Failed(error.to_string());
         self.error = error.to_string();
     }
@@ -370,7 +365,6 @@ impl InspectState {
             return false;
         }
         self.loading = false;
-        self.activity.clear();
         if pixels_ok {
             self.body = PreviewBody::Image;
             self.error.clear();
@@ -385,18 +379,15 @@ impl InspectState {
 
     fn start_preview(&mut self, repo_id: &str, path: &str, kind: PreviewKind) {
         self.loading = false;
-        self.activity.clear();
         match kind {
             PreviewKind::Image => {
                 self.loading = true;
-                self.activity = "正在准备图片预览…".into();
                 self.body = PreviewBody::Empty;
                 self.effects.push(InspectEffect::LoadImage { repo_id: repo_id.to_string(), path: path.to_string() });
             }
             PreviewKind::Markdown | PreviewKind::Text => {
                 let markdown = matches!(kind, PreviewKind::Markdown);
                 self.loading = true;
-                self.activity = "正在读取文本…".into();
                 self.body = PreviewBody::Empty;
                 self.effects.push(InspectEffect::LoadText {
                     repo_id: repo_id.to_string(),
@@ -509,7 +500,6 @@ impl InspectState {
         let asset_id = self.asset_id.clone().unwrap_or_default();
         self.saving = true;
         self.error.clear();
-        self.activity = "正在保存元数据…".into();
         self.effects.push(InspectEffect::SaveMetadata {
             repo_id,
             asset_id,
@@ -533,7 +523,6 @@ impl InspectState {
 
     fn note_metadata_result(&mut self, outcome: &str, detail: AssetDetail) {
         self.saving = false;
-        self.activity.clear();
         if outcome == "conflict" {
             eprintln!("Nana 元数据版本冲突：{}", detail.summary.asset_id);
             self.conflict = "版本冲突，未写入".into();
@@ -561,7 +550,6 @@ impl InspectState {
     fn note_metadata_error(&mut self, error: String) {
         eprintln!("Nana 保存元数据失败：{error}");
         self.saving = false;
-        self.activity.clear();
         self.error = error;
     }
 
@@ -571,7 +559,6 @@ impl InspectState {
             return;
         }
         self.loading = false;
-        self.activity.clear();
         match result {
             Ok(read) => {
                 self.body = PreviewBody::Document { markdown, text: read.text, truncated_at: read.truncated_at };

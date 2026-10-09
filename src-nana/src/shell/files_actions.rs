@@ -253,7 +253,7 @@ impl FilesState {
             return false;
         };
         let repo_id = ctx.repo_id.clone().unwrap_or_default();
-        self.begin("正在重命名…");
+        self.begin(None);
         self.effects.push(FilesEffect::Rename { repo_id, path, new_name: name });
         true
     }
@@ -269,7 +269,7 @@ impl FilesState {
         let repo_id = ctx.repo_id.clone().unwrap_or_default();
         let parent = parent_path(&normalize_path(&self.target_draft));
         let sources = self.copy_sources.clone();
-        self.begin("正在复制…");
+        self.begin(Some(FileOperation::step("复制文件", "创建硬链接或复制文件", 32.0, Some(84.0))));
         self.effects.push(FilesEffect::Copy { repo_id, sources, parent });
         true
     }
@@ -285,7 +285,7 @@ impl FilesState {
         }
         let repo_id = ctx.repo_id.clone().unwrap_or_default();
         let parent = parent_path(&self.current_path);
-        self.begin("正在导入…");
+        self.begin(Some(FileOperation::import()));
         self.effects.push(FilesEffect::Import { repo_id, parent, sources });
         true
     }
@@ -301,7 +301,7 @@ impl FilesState {
         }
         let repo_id = ctx.repo_id.clone().unwrap_or_default();
         let parent = parent_path(&self.current_path);
-        self.begin("正在导入压缩包…");
+        self.begin(Some(FileOperation::step("导入 ZIP", "预检压缩包条目", 24.0, Some(84.0))));
         self.effects.push(FilesEffect::ImportArchive { repo_id, parent, archive_path });
         true
     }
@@ -322,7 +322,8 @@ impl FilesState {
         let repo_id = ctx.repo_id.clone().unwrap_or_default();
         let parent = parent_path(&self.current_path);
         let mode = self.eagle_mode.clone();
-        self.begin("正在导入 Eagle…");
+        let label = if mode == "move" { "剪切导入 Eagle" } else { "复制导入 Eagle" };
+        self.begin(Some(FileOperation::step(label, "转换 EagleLibrary", 24.0, Some(84.0))));
         self.effects.push(FilesEffect::ImportEagle { repo_id, parent, library_path, mode });
         true
     }
@@ -338,7 +339,9 @@ impl FilesState {
         let repo_id = ctx.repo_id.clone().unwrap_or_default();
         let paths = self.selected.clone();
         let mode = if ctx.trash { Some("permanentDelete".to_string()) } else { None };
-        self.begin(if ctx.trash { "正在永久删除…" } else { "正在删除…" });
+        // Vue 只有多选删除走 `deleteWorkspaceEntries` 出进度行，单条删除不出。
+        let operation = (paths.len() > 1).then(|| FileOperation::step("删除文件", format!("准备处理 {} 个条目", paths.len()), 10.0, None));
+        self.begin(operation);
         self.effects.push(FilesEffect::Delete { repo_id, paths, mode });
         true
     }
@@ -347,17 +350,21 @@ impl FilesState {
         if self.selected.is_empty() {
             return false;
         }
-        self.mutate_trash(ctx, "restore", self.selected.clone(), "正在还原…")
+        // 和删除一样，Vue 只有多选还原（`restoreTrashEntries`）出进度行。
+        let count = self.selected.len();
+        let operation = (count > 1).then(|| FileOperation::step("还原文件", format!("准备还原 {count} 个条目"), 10.0, None));
+        self.mutate_trash(ctx, "restore", self.selected.clone(), operation)
     }
 
-    pub(super) fn mutate_trash(&mut self, ctx: &FileContext, action: &str, paths: Vec<String>, activity: &str) -> bool {
+    /// 回收站的还原、全部还原和清空。`operation` 是任务弹层里的进度行，Vue 不出的传 `None`。
+    pub(super) fn mutate_trash(&mut self, ctx: &FileContext, action: &str, paths: Vec<String>, operation: Option<FileOperation>) -> bool {
         let allowed = if action == "restore" { self.can_restore(ctx) } else { self.can_empty_trash(ctx) };
         if !allowed {
             eprintln!("Nana 当前视图不能执行回收站操作：{action}");
             return false;
         }
         let repo_id = ctx.repo_id.clone().unwrap_or_default();
-        self.begin(activity);
+        self.begin(operation);
         self.effects.push(FilesEffect::MutateTrash { repo_id, action: action.to_string(), paths });
         true
     }
@@ -374,7 +381,7 @@ impl FilesState {
             eprintln!("Nana 确认硬链接没有活动仓库");
             return false;
         };
-        self.begin("正在确认硬链接…");
+        self.begin(None);
         self.effects.push(FilesEffect::ConfirmHardlink { repo_id, candidate_id: prompt.id });
         true
     }
@@ -398,7 +405,6 @@ impl FilesState {
     /// 变更成功的快照。`created_name` 只有工具栏建文件带：建成了清空输入框，选择里有东西时选中新文件。
     pub(super) fn apply_mutation_snapshot(&mut self, ctx: &FileContext, snapshot: FileBrowserSnapshot, created_name: Option<String>) {
         self.mutating = false;
-        self.activity.clear();
         if created_name.is_some() {
             self.create_name.clear();
         }
@@ -439,21 +445,25 @@ impl FilesState {
     pub(super) fn note_mutation_failed(&mut self, error: String) {
         eprintln!("Nana 文件变更失败：{error}");
         self.mutating = false;
-        self.activity.clear();
+        self.operation = None;
         self.error = error;
     }
 
+    /// 协议变更的结果。成功且要重读目录时进度行走到 Vue「刷新文件索引」那一步，目录读回来才收起。
     pub(super) fn note_protocol_finished(&mut self, ctx: &FileContext, result: Result<(), String>, reload: bool, hardlinks: bool) {
         self.mutating = false;
-        self.activity.clear();
         match result {
             Ok(()) => {
                 self.finish_dialog_success();
-                if reload {
-                    let path = self.current_path.clone();
-                    self.queue_browse(ctx, &path, false, true, true);
-                    self.operation = Some(FileOperation { value: 84.0, indeterminate: false, detail: "刷新文件索引".into() });
-                    self.activity = "刷新文件索引".into();
+                let path = self.current_path.clone();
+                if reload && self.queue_browse(ctx, &path, false, true, true) {
+                    if let Some(operation) = self.operation.as_mut()
+                        && let Some(value) = operation.refresh_value
+                    {
+                        operation.detail = "刷新文件索引".into();
+                        operation.value = value;
+                        operation.updated_at_ms = super::tree_sync::now_ms();
+                    }
                 } else {
                     self.operation = None;
                 }
@@ -469,25 +479,6 @@ impl FilesState {
                 self.operation = None;
             }
         }
-    }
-
-    fn operation_for_activity(activity: &str) -> Option<FileOperation> {
-        let value = match activity {
-            "正在复制…" => 32.0,
-            "正在移动…" => 32.0,
-            "正在导入…" | "正在导入压缩包…" | "正在导入 Eagle…" => 24.0,
-            "正在删除…" | "正在永久删除…" | "正在还原…" | "正在清空回收站…" => 32.0,
-            _ => return None,
-        };
-        let detail = match activity {
-            "正在复制…" => "创建硬链接或复制文件",
-            "正在移动…" => "移动文件",
-            "正在导入…" => "导入文件到当前资源库",
-            "正在导入压缩包…" => "预检压缩包条目",
-            "正在导入 Eagle…" => "转换 EagleLibrary",
-            _ => "正在处理",
-        };
-        Some(FileOperation { value, indeterminate: false, detail: detail.into() })
     }
 
     pub(super) fn note_hardlinks(&mut self, result: Result<Vec<HardlinkPrompt>, String>) {
@@ -553,7 +544,6 @@ impl FilesState {
 
     pub(super) fn note_hardlink_confirmed(&mut self, result: Result<String, String>) {
         self.mutating = false;
-        self.activity.clear();
         match result {
             Ok(id) => {
                 self.hardlinks.retain(|prompt| prompt.id != id);
@@ -571,11 +561,12 @@ impl FilesState {
         }
     }
 
-    fn begin(&mut self, activity: &str) {
+    /// 开始一次文件变更：标进行中、清掉上一次的错误。`operation` 是这次变更在任务弹层里的进度行，
+    /// Vue 不出进度的变更（建文件、重命名、单条删除和还原、全部还原、清空回收站、确认硬链接）传 `None`。
+    fn begin(&mut self, operation: Option<FileOperation>) {
         self.mutating = true;
         self.error.clear();
-        self.activity = activity.to_string();
-        self.operation = Self::operation_for_activity(activity);
+        self.operation = operation;
     }
 
     fn finish_dialog_success(&mut self) {
@@ -778,7 +769,7 @@ impl FilesState {
         }
         let repo_id = ctx.repo_id.clone().unwrap_or_default();
         let parent = parent_path(&self.current_path);
-        self.begin("正在新建文件…");
+        self.begin(None);
         self.effects.push(FilesEffect::CreateFile { repo_id, parent, name });
         true
     }

@@ -93,7 +93,6 @@ pub fn begin(state: &mut InspectState, repo_id: &str, path: &str, view_id: Strin
             return;
         }
         state.loading = false;
-        state.activity.clear();
         state.body = PreviewBody::Native {
             content: format!("原生预览 · {label} · {view_id}"),
             view_id,
@@ -102,7 +101,6 @@ pub fn begin(state: &mut InspectState, repo_id: &str, path: &str, view_id: Strin
         return;
     }
     state.loading = true;
-    state.activity = format!("正在读取{label}…");
     state.body = PreviewBody::Native { view_id: view_id.clone(), label, content: String::new() };
     state.effects.push(InspectEffect::LoadNative {
         repo_id: repo_id.to_string(),
@@ -144,7 +142,6 @@ pub fn note_loaded(state: &mut InspectState, path: String, generation: u64, resu
         return;
     }
     state.loading = false;
-    state.activity.clear();
     match result {
         Ok(loaded) => {
             if let PreviewBody::Native { content: slot, .. } = &mut state.body {

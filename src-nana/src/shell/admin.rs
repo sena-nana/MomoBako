@@ -526,8 +526,17 @@ impl ShellViewModel {
 
     /// 任务弹层的行：仓库操作加运行中的任务，按更新时间降序。侧栏「任务」的计数也是这些行的个数，
     /// 和 Vue `TaskPopover.vue` 的 `activeTaskCount` 一样。
+    ///
+    /// Vue 的仓库操作只有一个槽位（`operationProgress`）：文件变更进行中时是它，否则是刷新文件夹树。
     pub(crate) fn task_rows(&self) -> Vec<support::PopoverRow> {
-        support::popover_rows(&self.task_progress, self.admin.operation.as_ref())
+        let files = self.files.operation.as_ref().map(|operation| OperationProgress {
+            label: operation.label.clone(),
+            detail: operation.detail.clone(),
+            value: f64::from(operation.value),
+            indeterminate: operation.indeterminate,
+            updated_at_ms: operation.updated_at_ms,
+        });
+        support::popover_rows(&self.task_progress, files.as_ref().or(self.admin.operation.as_ref()))
     }
 
     pub(crate) fn set_audio_preference(&mut self, plugin_id: Option<String>) {

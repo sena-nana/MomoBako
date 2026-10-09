@@ -1,7 +1,7 @@
 //! 按壳层消息派发领域服务任务。
 //!
 //! `MomoBakoApplication::update` 在归约之前调用 [`dispatch_services`]：清理日志、播放集条目移除和新建、
-//! 目录和预览这些消息各自提交一个后台任务，结果再作为新消息回到 `update`。页面数据的读取不在这里，
+//! 打开目录和读文件元数据这些消息各自提交一个后台任务，结果再作为新消息回到 `update`。页面数据的读取不在这里，
 //! 由归约排出副作用，再由各 `*_dispatch` 交给领域服务。
 
 use nana_ui::runtime::Task;
@@ -126,7 +126,7 @@ fn dispatch_playlists(
     }
 }
 
-/// 打开目录、选中文件读元数据，以及验收场景的预览源和原生图片解码。
+/// 打开目录、选中文件读元数据。
 fn dispatch_browse_and_preview(
     app: &MomoBakoApplication,
     message: &ShellMessage,

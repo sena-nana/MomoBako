@@ -811,8 +811,10 @@ fn file_plugin_call_keeps_repository_and_writes_activity() {
         }
         other => panic!("unexpected {other:?}"),
     }
+    // Vue 来源动作完成后 `context.refreshRepo()`：重读资源库列表。
+    model.workspace.take_effects();
     send(&mut model, AdminMessage::FilePluginFinished { method: "media.clearTrackCache".into(), result: Ok(json!({})) });
-    assert_eq!(model.files.activity, "已调用 media.clearTrackCache。");
+    assert!(matches!(model.workspace.take_effects().as_slice(), [crate::shell::WorkspaceEffect::RefreshRepositories { .. }]));
     send(&mut model, AdminMessage::FilePluginFinished { method: "media.clearTrackCache".into(), result: Err(String::new()) });
     assert_eq!(model.files.error, "media.clearTrackCache 调用失败。");
 }

@@ -507,7 +507,6 @@ fn open_path(model: &mut ShellViewModel, path: &str) {
     model.files.set_drag_selection(vec![path.to_string()], Some(path.to_string()), Some(path.to_string()));
     model.inspect.begin_selection(path);
     model.inspect.loading = false;
-    model.inspect.activity.clear();
 }
 
 fn listed_candidates(model: &ShellViewModel) -> Vec<Candidate> {

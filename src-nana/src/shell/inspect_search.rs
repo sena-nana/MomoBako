@@ -559,7 +559,6 @@ fn open_hit(model: &mut ShellViewModel, row: SearchRow) {
     model.page = ShellPage::FileList;
     model.player.disarm_preview_audio();
     model.selected_path = None;
-    model.preview_url = None;
     model.preview_token = None;
     model.preview_pixels = None;
     model.inspect.clear();

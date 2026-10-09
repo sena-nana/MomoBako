@@ -98,7 +98,6 @@ fn reduce_player(model: &mut ShellViewModel, message: PlayerMessage) {
                 model.player.clear_stored(&repo_id);
             }
             model.player.restore_playlist_id = None;
-            model.player.activity = error;
         }
     }
 }
