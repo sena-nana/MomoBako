@@ -1,12 +1,13 @@
 //! 文件夹树「刷新」的回归：照 Vue `refreshFileBrowserTree` 开始时清掉失败、进度走过扫描、写入、刷新三步、
 //! 同步完重读摘要、硬链接候选和目录树再读当前目录，任何一段失败写进状态区；缺失仓库、回收站、虚拟视图、
-//! 换仓库和过期结果各走各的分支；侧栏状态区原地显示同步进度，刷新按钮转圈并禁用。
+//! 换仓库和过期结果各走各的分支；侧栏状态区原地显示同步进度（失败和忙碌优先），刷新按钮转圈并禁用。
 
 use crate::backend::services::repository::{
-    AssetSummary, FileBrowserSnapshot, FileTreeNode, RepositoryBackendSummary, RepositoryOverview, RepositorySnapshot,
-    RepositoryStructureCacheState, RepositorySummary,
+    AssetDetail, AssetSummary, FileBrowserSnapshot, FileTreeNode, RepositoryBackendSummary, RepositoryOverview,
+    RepositorySnapshot, RepositoryStructureCacheState, RepositorySummary,
 };
 use crate::shell::files::{FileDialog, FilesEffect, HardlinkPrompt};
+use crate::shell::input::InputMessage;
 use crate::shell::sidebar::{ShortcutId, SidebarMessage, SidebarTree};
 use crate::shell::status::{FailureSource, StatusLine};
 use crate::shell::view_harness::ShellHarness;
@@ -42,9 +43,10 @@ fn refreshed(model: &mut ShellViewModel, token: u64, result: TreeSyncRefresh) {
     model.reduce(ShellMessage::TreeSync(TreeSyncMessage::Refreshed { token, result }));
 }
 
-fn progress(model: &ShellViewModel) -> (SyncPhase, String, u8, u8) {
+/// 同步进度：（阶段，文案，第几步，一共几步，百分比）。
+fn progress(model: &ShellViewModel) -> (SyncPhase, String, u8, u8, u8) {
     let progress = &model.tree_sync.progress;
-    (progress.phase, progress.label.clone(), progress.current, progress.percent)
+    (progress.phase, progress.label.clone(), progress.current, progress.total, progress.percent)
 }
 
 fn failure(model: &ShellViewModel) -> Option<(FailureSource, String)> {
@@ -166,10 +168,11 @@ fn browses(model: &mut ShellViewModel) -> Vec<(String, bool)> {
         .collect()
 }
 
-/// Vue `setSyncProgress` 的百分比：1/3、2/3、3/3 四舍五入。
+/// Vue `createInitialSyncProgress` 的初值和 `setSyncProgress` 的百分比：一共 3 步，1/3、2/3、3/3 四舍五入。
 #[test]
 fn progress_percent_rounds_like_vue() {
     let mut progress = SyncProgress::default();
+    assert_eq!((progress.phase, progress.current, progress.total, progress.percent), (SyncPhase::Idle, 0, 3, 0));
     assert_eq!(progress.shown(), None, "空闲时状态区不显示进度");
     for (phase, label, current, percent) in [
         (SyncPhase::Scanning, "扫描文件夹结构", 1, 33),
@@ -177,7 +180,7 @@ fn progress_percent_rounds_like_vue() {
         (SyncPhase::Refreshing, "刷新文件夹树", 3, 100),
     ] {
         progress.set(phase, label, current);
-        assert_eq!(progress.percent, percent);
+        assert_eq!((progress.current, progress.total, progress.percent), (current, 3, percent));
         assert_eq!(progress.shown(), Some((label, percent)), "{label} 要在状态区显示");
     }
     progress.set(SyncPhase::Complete, "刷新完成", 3);
@@ -194,7 +197,7 @@ fn starting_a_refresh_clears_the_failure_and_shows_the_first_step() {
     let token = click_refresh(&mut model);
     assert!(model.tree_sync.running());
     assert_eq!(failure(&model), None, "刷新开始时清掉上一次失败");
-    assert_eq!(progress(&model), (SyncPhase::Scanning, "扫描文件夹结构".into(), 1, 33));
+    assert_eq!(progress(&model), (SyncPhase::Scanning, "扫描文件夹结构".into(), 1, 3, 33));
     assert_eq!(StatusLine::project(&model), StatusLine::Progress { label: "扫描文件夹结构".into(), percent: 33 });
     let operation = model.admin.operation.clone().expect("操作进度");
     assert_eq!((operation.label.as_str(), operation.detail.as_str(), operation.value), ("刷新文件树", "同步并读取目录结构", 12.0));
@@ -214,7 +217,7 @@ fn a_successful_refresh_reloads_the_workspace_then_completes() {
     let mut model = scene("live-files-plain");
     let token = click_refresh(&mut model);
     synced(&mut model, token, Ok(3));
-    assert_eq!(progress(&model), (SyncPhase::Refreshing, "刷新文件夹树".into(), 3, 100));
+    assert_eq!(progress(&model), (SyncPhase::Refreshing, "刷新文件夹树".into(), 3, 3, 100));
     let operation = model.admin.operation.clone().expect("操作进度");
     assert_eq!((operation.detail.as_str(), operation.value), ("已扫描 3 个文件", 58.0));
     assert_eq!(model.tree_sync.take_effects(), vec![TreeSyncEffect::Refresh { token, repo_id: REPO_ID.into(), tree: true }]);
@@ -229,7 +232,7 @@ fn a_successful_refresh_reloads_the_workspace_then_completes() {
 
     model.reduce(ShellMessage::FileBrowserLoaded(Ok(root_browser(false))));
     assert!(!model.tree_sync.running());
-    assert_eq!(progress(&model), (SyncPhase::Complete, "刷新完成".into(), 3, 100));
+    assert_eq!(progress(&model), (SyncPhase::Complete, "刷新完成".into(), 3, 3, 100));
     assert!(model.admin.operation.is_none(), "完成后操作进度收起");
     assert_eq!(StatusLine::project(&model), StatusLine::Hidden);
     assert!(!SidebarView::project(&model).folders.refresh_disabled, "刷新完按钮可以再点");
@@ -243,7 +246,7 @@ fn a_failed_sync_lands_in_the_status_area() {
     synced(&mut model, token, Err("拒绝访问。".into()));
     assert_eq!(failure(&model), Some((FailureSource::Sync, "刷新文件夹树失败：拒绝访问。".into())));
     assert_eq!(StatusLine::project(&model), StatusLine::Failure("刷新文件夹树失败：拒绝访问。".into()));
-    assert_eq!(progress(&model), (SyncPhase::Error, "拒绝访问。".into(), 3, 100));
+    assert_eq!(progress(&model), (SyncPhase::Error, "拒绝访问。".into(), 3, 3, 100));
     assert!(!model.tree_sync.running());
     assert!(model.admin.operation.is_none());
     assert!(model.tree_sync.take_effects().is_empty(), "失败后不再重读");
@@ -322,10 +325,41 @@ fn stale_results_and_switched_repositories_are_dropped() {
     model.workspace.active_repo_id = Some("other-repo".into());
     synced(&mut model, token, Ok(9));
     assert!(!model.tree_sync.running(), "换了仓库，这一轮作废");
-    assert_eq!(progress(&model).0, SyncPhase::Idle);
+    assert_eq!(progress(&model), (SyncPhase::Idle, String::new(), 0, 3, 0), "进度回到 Vue 的初值");
     assert!(model.admin.operation.is_none());
     assert!(model.tree_sync.take_effects().is_empty());
     assert_eq!(failure(&model), None);
+}
+
+/// 状态区的顺序照 Vue：失败 > 忙碌 > 同步进度。同步途中读素材详情时是忙碌行，定位失败时是错误条；
+/// 详情读完、下一次定位开始清掉失败以后，回到同步进度，刷新本身不受打断。
+#[test]
+fn sync_progress_ranks_after_failures_and_busy() {
+    let mut model = scene("live-files-plain");
+    let token = click_refresh(&mut model);
+    let scanning = StatusLine::Progress { label: "扫描文件夹结构".into(), percent: 33 };
+    assert_eq!(StatusLine::project(&model), scanning);
+
+    model.reduce(ShellMessage::SelectFile { path: "cover.png".into(), asset_id: None });
+    assert_eq!(StatusLine::project(&model), StatusLine::Busy, "读素材详情的忙碌行排在同步进度前面");
+    reveal(&mut model, Err("拒绝访问。".into()));
+    let failed = StatusLine::Failure("定位失败：拒绝访问。".into());
+    assert_eq!(StatusLine::project(&model), failed, "失败排在忙碌前面");
+    let detail = AssetDetail { summary: asset("cover.png"), metadata: Vec::new(), revisions: Vec::new() };
+    model.reduce(ShellMessage::AssetDetailLoaded(Ok(detail)));
+    assert_eq!(StatusLine::project(&model), failed, "忙碌过去以后失败仍排在同步进度前面");
+
+    reveal(&mut model, Ok(()));
+    assert_eq!(StatusLine::project(&model), scanning, "下一次定位开始时清掉失败，回到同步进度");
+    assert!(model.tree_sync.running(), "别的操作不打断刷新");
+    synced(&mut model, token, Ok(3));
+    assert_eq!(StatusLine::project(&model), StatusLine::Progress { label: "刷新文件夹树".into(), percent: 100 });
+}
+
+/// 在文件管理器里定位 cover.png，宿主按 `result` 回话。
+fn reveal(model: &mut ShellViewModel, result: Result<(), String>) {
+    model.reduce(ShellMessage::Input(InputMessage::RevealEntry { absolute_path: "C:/acceptance/cover.png".into() }));
+    crate::host_bridge::perform(model, |_, _| result.clone(), |_| Ok(()), || Ok(()));
 }
 
 /// 侧栏状态区原地显示同步进度：扫描 33%、刷新 100%，失败时换成错误条；侧栏不重挂，每一步和新挂的一样。

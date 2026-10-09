@@ -37,20 +37,29 @@ pub enum SyncPhase {
     Error,
 }
 
-/// Vue `syncProgress`：阶段、文案、第几步和四舍五入的百分比。
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+/// Vue `syncProgress`（`RepositorySyncProgress`）：阶段、文案、第几步、一共几步和四舍五入的百分比。
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SyncProgress {
     pub phase: SyncPhase,
     pub label: String,
     pub current: u8,
+    pub total: u8,
     pub percent: u8,
 }
 
+impl Default for SyncProgress {
+    /// Vue `createInitialSyncProgress`：空闲，0 / 3 步。
+    fn default() -> Self {
+        Self { phase: SyncPhase::Idle, label: String::new(), current: 0, total: SYNC_TOTAL_STEPS, percent: 0 }
+    }
+}
+
 impl SyncProgress {
-    /// Vue `setSyncProgress`：百分比是 `round(current / 3 * 100)`。
+    /// Vue `setSyncProgress`：一共 [`SYNC_TOTAL_STEPS`] 步，百分比是 `round(current / total * 100)`。
     fn set(&mut self, phase: SyncPhase, label: impl Into<String>, current: u8) {
-        let percent = (f32::from(current) / f32::from(SYNC_TOTAL_STEPS) * 100.0).round() as u8;
-        *self = Self { phase, label: label.into(), current, percent };
+        let total = SYNC_TOTAL_STEPS;
+        let percent = (f32::from(current) / f32::from(total) * 100.0).round() as u8;
+        *self = Self { phase, label: label.into(), current, total, percent };
     }
 
     /// 扫描、写入、刷新三档在状态区显示（Vue `isShowingSyncProgress`），返回文案和百分比。
