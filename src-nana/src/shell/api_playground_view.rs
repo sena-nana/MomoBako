@@ -193,12 +193,8 @@ fn request_column(model: &ShellViewModel) -> AnyView {
     );
     body.push(field("Target", widget(target).key("admin-api-target").on_cx(|_, event: &TextChanged, cx| cx.dispatch_program_all(api(ApiMessage::SetTarget(event.value.to_string())))).into_any()));
     if is_http {
-        let mut checkbox = Checkbox::new("", state.include_auth);
-        {
-            let layout = Arc::make_mut(&mut checkbox.style.layout);
-            layout.width = Some(LengthSpec::Px(16.0));
-            layout.height = Some(LengthSpec::Px(16.0));
-        }
+        // `.api-playground__check input` 是 16 见方。
+        let checkbox = style::native_checkbox(Checkbox::new("", state.include_auth), 16.0);
         body.push(
             widget(row(8.0))
                 .children((
@@ -264,6 +260,8 @@ fn response_column(model: &ShellViewModel) -> AnyView {
     }
     let grid = Stack::from_layout(nana_ui_core::LayoutStyle::default()).with_layout(|layout| {
         layout.display = Some(nana_ui_core::DisplaySpec::Grid);
+        // CSS 只写了行轨道，隐式的一列会拉满宽度；Nana 网格要写明。
+        layout.grid_columns = Some(vec![GridTrack::Fr(1.0)]);
         layout.grid_rows = Some(vec![
             GridTrack::MinMax { min_px: 120.0, fr: 0.34, max_px: None },
             GridTrack::MinMax { min_px: 180.0, fr: 1.0, max_px: None },

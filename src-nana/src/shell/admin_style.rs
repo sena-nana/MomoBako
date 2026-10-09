@@ -427,6 +427,27 @@ pub(crate) fn native_input(input: TextInput) -> TextInput {
     input.style(native_field_style(32.0))
 }
 
+/// Vue 原生勾选框的配色：主背景、`border-strong` 边线；选中后 `accent-soft` 底、
+/// `accent-strong` 边线、强调色标记。尺寸由调用方的布局给，不吃主题的控件最小高。
+/// NanaUI 勾选框的选中标记固定是「✓」，Vue 是 7 见方的小方块，形状差异留着。
+pub(crate) fn native_checkbox(mut checkbox: nana_ui::runtime::Checkbox, size: f32) -> nana_ui::runtime::Checkbox {
+    let selected = SemanticPaint { background: Some(Role::AccentSoft), border: Some(Role::AccentStrong), foreground: Some(Role::Accent), ..SemanticPaint::default() };
+    let style = &mut checkbox.style;
+    style.control_height = None;
+    style.background = Some(Role::Background);
+    style.border = Some(Role::BorderStrong);
+    style.interaction.selected = selected.clone();
+    style.interaction.selected_hovered = selected.clone();
+    style.interaction.selected_pressed = selected;
+    let layout = Arc::make_mut(&mut style.layout);
+    layout.width = Some(LengthSpec::Px(size));
+    layout.height = Some(LengthSpec::Px(size));
+    layout.min_width = Some(LengthSpec::Px(size));
+    layout.min_height = Some(LengthSpec::Px(size));
+    layout.flex_shrink = Some(0.0);
+    checkbox
+}
+
 /// 原生输入框和文本域共用的外形。`height` 给单行高度，文本域另设最小高。
 pub(crate) fn native_field_style(height: f32) -> NodeStyle {
     let mut style = NodeStyle {
