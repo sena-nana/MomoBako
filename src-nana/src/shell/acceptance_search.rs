@@ -55,7 +55,7 @@ fn search_results_scene() -> ShellViewModel {
 }
 
 /// 查询没有命中：在标题栏搜索框输入，等过 250ms 的搜索延时，搜索应答是空结果。
-/// 筛选栏关闭，结果区是等待搜索条件。
+/// 筛选栏关闭，结果区写明全部资源库里没有匹配的文件。
 fn search_empty_scene() -> ShellViewModel {
     let mut model = search_page(false);
     model.reduce(ShellMessage::Inspect(InspectMessage::SetQuery("不存在的文件".into())));

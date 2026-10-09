@@ -187,6 +187,8 @@ pub struct InspectState {
     pub(super) search_ui: search::SearchUi,
     pub(super) filter_bar_open: bool,
     pub(super) searching: bool,
+    /// 结果来自一次跑完的带条件搜索。为假时还没有条件，结果区等条件；为真且没有结果时是没有命中。
+    pub(super) searched: bool,
     search_generation: u64,
     pub(super) results: Vec<SearchRow>,
     pub(super) search_error: String,
@@ -229,6 +231,7 @@ impl Default for InspectState {
             search_ui: search::SearchUi::default(),
             filter_bar_open: false,
             searching: false,
+            searched: false,
             search_generation: 0,
             results: Vec::new(),
             search_error: String::new(),

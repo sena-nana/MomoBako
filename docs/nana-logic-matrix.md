@@ -128,8 +128,8 @@
 | `FileMetadataEditor.vue` 保存 | 草稿已脏，且不是虚拟素材、不是保存中 | `update_asset_metadata`，`source` 为 desktop，没有替身 | 请求带 `expected_version` 和 `tagGroups`；虚拟、未脏或保存中不发请求；错误保留草稿。脏草稿再等 260 毫秒自动保存，换选前先保存上一份 | “正在保存元数据…” / “保存元数据” | 已测试（未离屏） |
 | `FileMetadataEditor.vue` 冲突 | 结果是 conflict | 不覆盖草稿，`expected_version` 不变 | 采用服务器版本后才替换草稿和版本 | “版本冲突，未写入” / “采用服务器版本” | 已测试（未离屏） |
 | `FileMetadataEditor.vue` 撤销和重做 | 草稿不脏 | `undo_last_revision` / `redo_last_revision`，没有替身 | 有未保存编辑时拒绝并记日志 | “撤销” / “重做” | 已测试（未离屏） |
-| `search.ts` 空条件 | 查询和筛选都为空 | 不调用 `search_assets` | 清空结果 | “没有搜索结果” | 已测试（未离屏） |
-| `search.ts` 查询 | 有关键词或筛选条件 | `search_assets`，没有替身 | 标题栏改查询后等 250 毫秒再搜。AND 不传 `matchMode`；错误保留上一份结果；过期代次忽略成功和失败 | “当前查询: …” / “当前资源库筛选: …” | 已测试（未离屏） |
+| `search.ts` 空条件 | 查询和筛选都为空 | 不调用 `search_assets` | 清空结果，结果区回到等条件 | “等待搜索条件” | 已测试（未离屏） |
+| `search.ts` 查询 | 有关键词或筛选条件 | `search_assets`，没有替身 | 标题栏改查询后等 250 毫秒再搜。AND 不传 `matchMode`；错误保留上一份结果；过期代次忽略成功和失败。跑完没有命中时空状态按页头范围写明哪里没有匹配的文件；失败时只写错误，不另写空状态 | “当前查询: …” / “当前资源库筛选: …” / “没有匹配的文件” | 已测试（未离屏） |
 | `WorkspaceFilterBar.vue` 筛选 | 标签、格式、颜色、形状、评分、高级条件 | `search_assets`，没有替身 | 颜色和形状变成 color、shape 元数据筛选；只有 OR 传 `matchMode`；排序字段为空不传排序；limit ≤ 0 为空；minRating ≤ 0 为空 | “全部满足” / “任一满足” / “1 星+” | 已测试（未离屏） |
 | `selectors.ts` `hasActiveFilters` | 只有排除关键词、排除路径、排除数值或排除日期 | 不设置 `repoId` | 这些条件本身仍然会发起搜索 | 摘要保持“当前查询” | 已测试（未离屏） |
 | `search.ts` 缺少仓库 | 活动筛选需要仓库，但没有活动仓库 | 不请求 | 清空结果并记日志 | 结果被清空 | 已测试（未离屏） |
