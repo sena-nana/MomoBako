@@ -12,7 +12,7 @@ use nana_ui::runtime::{
     Gradient, ImageFit, LayoutBox, LengthSpec, PaintContext, Painter, RadiusTier, SemanticColorRole, Stack, Text,
     TextHorizontalAlignment,
 };
-use nana_ui_core::{BoxShadowSpec, Icon, ThemeMode};
+use nana_ui_core::{BoxShadowSpec, Icon, ThemeAppearance};
 
 /// Vue 正文行高 1.55。
 const LINE_BODY: f32 = 1.55;
@@ -108,7 +108,15 @@ pub(crate) fn bottom_rule(stack: Stack) -> Stack {
 
 /// CSS `box-shadow` 的一层，颜色是固定的 RGBA。
 pub(crate) fn shadow(offset_y: f32, blur: f32, spread: f32, alpha: f32) -> BoxShadowSpec {
-    BoxShadowSpec { offset_x: 0.0, offset_y, blur_radius: blur, spread_radius: spread, color: [0.0, 0.0, 0.0, alpha], inset: false }
+    BoxShadowSpec {
+        paint_color: None,
+        offset_x: 0.0,
+        offset_y,
+        blur_radius: blur,
+        spread_radius: spread,
+        color: [0.0, 0.0, 0.0, alpha],
+        inset: false,
+    }
 }
 
 /// 给容器挂上一组阴影。
@@ -217,10 +225,11 @@ pub(crate) struct PreviewPainter {
 }
 
 /// Vue `--thumbnail-placeholder-bg`：浅色 #d8dce2，深色 #3a3a3a。
-fn placeholder_rgba(mode: ThemeMode) -> [f32; 4] {
-    match mode {
-        ThemeMode::Light => [216.0 / 255.0, 220.0 / 255.0, 226.0 / 255.0, 1.0],
-        ThemeMode::Dark => [58.0 / 255.0, 58.0 / 255.0, 58.0 / 255.0, 1.0],
+fn placeholder_rgba(appearance: ThemeAppearance) -> [f32; 4] {
+    if crate::theme_map::is_dark(appearance) {
+        [58.0 / 255.0, 58.0 / 255.0, 58.0 / 255.0, 1.0]
+    } else {
+        [216.0 / 255.0, 220.0 / 255.0, 226.0 / 255.0, 1.0]
     }
 }
 
@@ -247,7 +256,7 @@ impl Painter for PreviewPainter {
         let radius = self.radius;
         match self.tone {
             Tone::Placeholder => {
-                let fill = placeholder_rgba(cx.theme_mode());
+                let fill = placeholder_rgba(cx.theme_appearance());
                 cx.rounded_rect(bounds, radius, nana_ui::runtime::BoxPaint::fill(fill));
             }
             Tone::Folder => {

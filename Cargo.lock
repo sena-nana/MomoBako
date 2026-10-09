@@ -21,17 +21,15 @@ checksum = "366ffbaa4442f4684d91e2cd7c5ea7c4ed8add41959a31447066e279e432b618"
 [[package]]
 name = "accesskit"
 version = "0.25.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ad442f58ee04714aaa0ba0a2768c1ea1935b29507bb22ddece8cbbc76db02932"
+source = "git+https://github.com/sena-nana/accesskit?rev=29f2ec503e98f1afcbbd1a26d11a1986b5198d5e#29f2ec503e98f1afcbbd1a26d11a1986b5198d5e"
 dependencies = [
  "uuid",
 ]
 
 [[package]]
 name = "accesskit_atspi_common"
-version = "0.20.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c9d47ad644916f6cb7e432a5ca0dbd7cc78281a9772881057bb72d4aadb93257"
+version = "0.21.0"
+source = "git+https://github.com/sena-nana/accesskit?rev=29f2ec503e98f1afcbbd1a26d11a1986b5198d5e#29f2ec503e98f1afcbbd1a26d11a1986b5198d5e"
 dependencies = [
  "accesskit",
  "accesskit_consumer",
@@ -44,8 +42,7 @@ dependencies = [
 [[package]]
 name = "accesskit_consumer"
 version = "0.39.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8a45e2bb300bea6d5f33a82c3e051c3ddc6f41c209750f68a0acbe991a284344"
+source = "git+https://github.com/sena-nana/accesskit?rev=29f2ec503e98f1afcbbd1a26d11a1986b5198d5e#29f2ec503e98f1afcbbd1a26d11a1986b5198d5e"
 dependencies = [
  "accesskit",
  "hashbrown 0.17.1",
@@ -54,8 +51,7 @@ dependencies = [
 [[package]]
 name = "accesskit_macos"
 version = "0.27.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5701624bf6a11efb6d4c8e922bf44126ed96250e5faa9a7a0468c979635839a4"
+source = "git+https://github.com/sena-nana/accesskit?rev=29f2ec503e98f1afcbbd1a26d11a1986b5198d5e#29f2ec503e98f1afcbbd1a26d11a1986b5198d5e"
 dependencies = [
  "accesskit",
  "accesskit_consumer",
@@ -67,9 +63,8 @@ dependencies = [
 
 [[package]]
 name = "accesskit_unix"
-version = "0.23.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "665c9079b7325a8168a6793437a172dda44b19a05af8ed52d7e32abaada996fe"
+version = "0.24.0"
+source = "git+https://github.com/sena-nana/accesskit?rev=29f2ec503e98f1afcbbd1a26d11a1986b5198d5e#29f2ec503e98f1afcbbd1a26d11a1986b5198d5e"
 dependencies = [
  "accesskit",
  "accesskit_atspi_common",
@@ -86,8 +81,7 @@ dependencies = [
 [[package]]
 name = "accesskit_windows"
 version = "0.35.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ce63f35d6bdcf59f26b76b3379063f738e6412cef46999cc772d46aa3de35adb"
+source = "git+https://github.com/sena-nana/accesskit?rev=29f2ec503e98f1afcbbd1a26d11a1986b5198d5e#29f2ec503e98f1afcbbd1a26d11a1986b5198d5e"
 dependencies = [
  "accesskit",
  "accesskit_consumer",
@@ -4239,7 +4233,7 @@ dependencies = [
 [[package]]
 name = "nana-app-icon"
 version = "0.1.0"
-source = "git+https://github.com/sena-nana/NanaUI.git?rev=ee94106746b13f356af17586ed5e35ed78f9eb40#ee94106746b13f356af17586ed5e35ed78f9eb40"
+source = "git+https://github.com/sena-nana/NanaUI.git?rev=9dd590a53dee822a2e4cfb8ab37070fa6ca5b19f#9dd590a53dee822a2e4cfb8ab37070fa6ca5b19f"
 dependencies = [
  "flate2",
  "image",
@@ -4249,7 +4243,7 @@ dependencies = [
 [[package]]
 name = "nana-diagnostics"
 version = "0.1.0"
-source = "git+https://github.com/sena-nana/NanaUI.git?rev=ee94106746b13f356af17586ed5e35ed78f9eb40#ee94106746b13f356af17586ed5e35ed78f9eb40"
+source = "git+https://github.com/sena-nana/NanaUI.git?rev=9dd590a53dee822a2e4cfb8ab37070fa6ca5b19f#9dd590a53dee822a2e4cfb8ab37070fa6ca5b19f"
 dependencies = [
  "windows-sys 0.61.2",
 ]
@@ -4257,7 +4251,7 @@ dependencies = [
 [[package]]
 name = "nana-frame-exchange"
 version = "0.1.0"
-source = "git+https://github.com/sena-nana/NanaUI.git?rev=ee94106746b13f356af17586ed5e35ed78f9eb40#ee94106746b13f356af17586ed5e35ed78f9eb40"
+source = "git+https://github.com/sena-nana/NanaUI.git?rev=9dd590a53dee822a2e4cfb8ab37070fa6ca5b19f#9dd590a53dee822a2e4cfb8ab37070fa6ca5b19f"
 dependencies = [
  "nana-gpu",
  "wgpu",
@@ -4266,7 +4260,7 @@ dependencies = [
 [[package]]
 name = "nana-gpu"
 version = "0.1.0"
-source = "git+https://github.com/sena-nana/NanaUI.git?rev=ee94106746b13f356af17586ed5e35ed78f9eb40#ee94106746b13f356af17586ed5e35ed78f9eb40"
+source = "git+https://github.com/sena-nana/NanaUI.git?rev=9dd590a53dee822a2e4cfb8ab37070fa6ca5b19f#9dd590a53dee822a2e4cfb8ab37070fa6ca5b19f"
 dependencies = [
  "nana-diagnostics",
  "wgpu",
@@ -4275,7 +4269,7 @@ dependencies = [
 [[package]]
 name = "nana-icons-tabler"
 version = "0.1.0"
-source = "git+https://github.com/sena-nana/NanaUI.git?rev=ee94106746b13f356af17586ed5e35ed78f9eb40#ee94106746b13f356af17586ed5e35ed78f9eb40"
+source = "git+https://github.com/sena-nana/NanaUI.git?rev=9dd590a53dee822a2e4cfb8ab37070fa6ca5b19f#9dd590a53dee822a2e4cfb8ab37070fa6ca5b19f"
 dependencies = [
  "nana-ui-core",
 ]
@@ -4283,7 +4277,7 @@ dependencies = [
 [[package]]
 name = "nana-js-engine"
 version = "0.1.0"
-source = "git+https://github.com/sena-nana/NanaUI.git?rev=ee94106746b13f356af17586ed5e35ed78f9eb40#ee94106746b13f356af17586ed5e35ed78f9eb40"
+source = "git+https://github.com/sena-nana/NanaUI.git?rev=9dd590a53dee822a2e4cfb8ab37070fa6ca5b19f#9dd590a53dee822a2e4cfb8ab37070fa6ca5b19f"
 dependencies = [
  "serde_json",
 ]
@@ -4291,7 +4285,7 @@ dependencies = [
 [[package]]
 name = "nana-svg-raster"
 version = "0.1.0"
-source = "git+https://github.com/sena-nana/NanaUI.git?rev=ee94106746b13f356af17586ed5e35ed78f9eb40#ee94106746b13f356af17586ed5e35ed78f9eb40"
+source = "git+https://github.com/sena-nana/NanaUI.git?rev=9dd590a53dee822a2e4cfb8ab37070fa6ca5b19f#9dd590a53dee822a2e4cfb8ab37070fa6ca5b19f"
 dependencies = [
  "resvg",
  "tiny-skia",
@@ -4300,7 +4294,7 @@ dependencies = [
 [[package]]
 name = "nana-text"
 version = "0.1.0"
-source = "git+https://github.com/sena-nana/NanaUI.git?rev=ee94106746b13f356af17586ed5e35ed78f9eb40#ee94106746b13f356af17586ed5e35ed78f9eb40"
+source = "git+https://github.com/sena-nana/NanaUI.git?rev=9dd590a53dee822a2e4cfb8ab37070fa6ca5b19f#9dd590a53dee822a2e4cfb8ab37070fa6ca5b19f"
 dependencies = [
  "fontdb 0.24.0",
  "harfrust",
@@ -4317,6 +4311,7 @@ dependencies = [
 [[package]]
 name = "nana-ui"
 version = "0.1.0"
+source = "git+https://github.com/sena-nana/NanaUI.git?rev=9dd590a53dee822a2e4cfb8ab37070fa6ca5b19f#9dd590a53dee822a2e4cfb8ab37070fa6ca5b19f"
 dependencies = [
  "accesskit",
  "accesskit_macos",
@@ -4352,7 +4347,7 @@ dependencies = [
 [[package]]
 name = "nana-ui-core"
 version = "0.1.0"
-source = "git+https://github.com/sena-nana/NanaUI.git?rev=ee94106746b13f356af17586ed5e35ed78f9eb40#ee94106746b13f356af17586ed5e35ed78f9eb40"
+source = "git+https://github.com/sena-nana/NanaUI.git?rev=9dd590a53dee822a2e4cfb8ab37070fa6ca5b19f#9dd590a53dee822a2e4cfb8ab37070fa6ca5b19f"
 dependencies = [
  "nana-diagnostics",
  "serde",
@@ -4362,7 +4357,7 @@ dependencies = [
 [[package]]
 name = "nana-ui-devtools"
 version = "0.1.0"
-source = "git+https://github.com/sena-nana/NanaUI.git?rev=ee94106746b13f356af17586ed5e35ed78f9eb40#ee94106746b13f356af17586ed5e35ed78f9eb40"
+source = "git+https://github.com/sena-nana/NanaUI.git?rev=9dd590a53dee822a2e4cfb8ab37070fa6ca5b19f#9dd590a53dee822a2e4cfb8ab37070fa6ca5b19f"
 dependencies = [
  "image",
  "nana-gpu",
@@ -4371,6 +4366,7 @@ dependencies = [
  "nana-ui-core",
  "nana-ui-platform",
  "nana-ui-scene",
+ "png 0.18.1",
  "pollster",
  "serde",
  "serde_json",
@@ -4380,7 +4376,7 @@ dependencies = [
 [[package]]
 name = "nana-ui-input"
 version = "0.1.0"
-source = "git+https://github.com/sena-nana/NanaUI.git?rev=ee94106746b13f356af17586ed5e35ed78f9eb40#ee94106746b13f356af17586ed5e35ed78f9eb40"
+source = "git+https://github.com/sena-nana/NanaUI.git?rev=9dd590a53dee822a2e4cfb8ab37070fa6ca5b19f#9dd590a53dee822a2e4cfb8ab37070fa6ca5b19f"
 dependencies = [
  "nana-diagnostics",
  "nana-ui-core",
@@ -4389,7 +4385,7 @@ dependencies = [
 [[package]]
 name = "nana-ui-platform"
 version = "0.1.0"
-source = "git+https://github.com/sena-nana/NanaUI.git?rev=ee94106746b13f356af17586ed5e35ed78f9eb40#ee94106746b13f356af17586ed5e35ed78f9eb40"
+source = "git+https://github.com/sena-nana/NanaUI.git?rev=9dd590a53dee822a2e4cfb8ab37070fa6ca5b19f#9dd590a53dee822a2e4cfb8ab37070fa6ca5b19f"
 dependencies = [
  "arboard",
  "jni 0.21.1",
@@ -4406,6 +4402,7 @@ dependencies = [
 [[package]]
 name = "nana-ui-runtime"
 version = "0.1.0"
+source = "git+https://github.com/sena-nana/NanaUI.git?rev=9dd590a53dee822a2e4cfb8ab37070fa6ca5b19f#9dd590a53dee822a2e4cfb8ab37070fa6ca5b19f"
 dependencies = [
  "fancy-regex 0.16.2",
  "futures-core",
@@ -4431,24 +4428,25 @@ dependencies = [
 [[package]]
 name = "nana-ui-scene"
 version = "0.1.0"
-source = "git+https://github.com/sena-nana/NanaUI.git?rev=ee94106746b13f356af17586ed5e35ed78f9eb40#ee94106746b13f356af17586ed5e35ed78f9eb40"
+source = "git+https://github.com/sena-nana/NanaUI.git?rev=9dd590a53dee822a2e4cfb8ab37070fa6ca5b19f#9dd590a53dee822a2e4cfb8ab37070fa6ca5b19f"
 dependencies = [
  "i_overlay",
  "lyon_tessellation",
  "nana-diagnostics",
  "nana-ui-core",
  "nana-ui-runtime",
+ "unicode-segmentation",
 ]
 
 [[package]]
 name = "nana-ui-view-schema"
 version = "0.1.0"
-source = "git+https://github.com/sena-nana/NanaUI.git?rev=ee94106746b13f356af17586ed5e35ed78f9eb40#ee94106746b13f356af17586ed5e35ed78f9eb40"
+source = "git+https://github.com/sena-nana/NanaUI.git?rev=9dd590a53dee822a2e4cfb8ab37070fa6ca5b19f#9dd590a53dee822a2e4cfb8ab37070fa6ca5b19f"
 
 [[package]]
 name = "nana-window"
 version = "0.1.0"
-source = "git+https://github.com/sena-nana/NanaUI.git?rev=ee94106746b13f356af17586ed5e35ed78f9eb40#ee94106746b13f356af17586ed5e35ed78f9eb40"
+source = "git+https://github.com/sena-nana/NanaUI.git?rev=9dd590a53dee822a2e4cfb8ab37070fa6ca5b19f#9dd590a53dee822a2e4cfb8ab37070fa6ca5b19f"
 dependencies = [
  "ashpd",
  "async-channel",
@@ -4467,8 +4465,10 @@ dependencies = [
  "raw-window-handle",
  "url",
  "wayland-backend",
+ "webview2-com 0.39.1",
  "window-vibrancy 0.8.1",
  "windows 0.62.2",
+ "windows-numerics 0.3.1",
  "windows-sys 0.61.2",
  "x11-dl",
  "zbus",
@@ -4707,7 +4707,7 @@ version = "0.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "680998035259dcfcafe653688bf2aa6d3e2dc05e98be6ab46afb089dc84f1df8"
 dependencies = [
- "proc-macro-crate 3.5.0",
+ "proc-macro-crate 1.3.1",
  "proc-macro2",
  "quote",
  "syn 2.0.119",
@@ -7523,7 +7523,7 @@ dependencies = [
  "tray-icon 0.24.2",
  "url",
  "webkit2gtk",
- "webview2-com",
+ "webview2-com 0.38.2",
  "window-vibrancy 0.6.0",
  "windows 0.61.3",
 ]
@@ -7722,7 +7722,7 @@ dependencies = [
  "thiserror 2.0.20",
  "url",
  "webkit2gtk",
- "webview2-com",
+ "webview2-com 0.38.2",
  "windows 0.61.3",
 ]
 
@@ -7747,7 +7747,7 @@ dependencies = [
  "tauri-utils",
  "url",
  "webkit2gtk",
- "webview2-com",
+ "webview2-com 0.38.2",
  "windows 0.61.3",
  "wry",
 ]
@@ -8947,11 +8947,23 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7130243a7a5b33c54a444e54842e6a9e133de08b5ad7b5861cd8ed9a6a5bc96a"
 dependencies = [
  "webview2-com-macros",
- "webview2-com-sys",
+ "webview2-com-sys 0.38.2",
  "windows 0.61.3",
  "windows-core 0.61.2",
  "windows-implement 0.60.2",
  "windows-interface 0.59.3",
+]
+
+[[package]]
+name = "webview2-com"
+version = "0.39.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3f89fca7a704cee10dcb3654c1dbb8941d1783132f1917358af75bec37a7d7e6"
+dependencies = [
+ "webview2-com-macros",
+ "webview2-com-sys 0.39.1",
+ "windows 0.62.2",
+ "windows-core 0.62.2",
 ]
 
 [[package]]
@@ -8974,6 +8986,17 @@ dependencies = [
  "thiserror 2.0.20",
  "windows 0.61.3",
  "windows-core 0.61.2",
+]
+
+[[package]]
+name = "webview2-com-sys"
+version = "0.39.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b3a07132775117d6065853d9d1178157b8c90e228de47129d6bce2c7edebedfb"
+dependencies = [
+ "thiserror 2.0.20",
+ "windows 0.62.2",
+ "windows-core 0.62.2",
 ]
 
 [[package]]
@@ -10060,7 +10083,7 @@ dependencies = [
  "url",
  "webkit2gtk",
  "webkit2gtk-sys",
- "webview2-com",
+ "webview2-com 0.38.2",
  "windows 0.61.3",
  "windows-core 0.61.2",
  "windows-version",
@@ -10530,9 +10553,9 @@ dependencies = [
 
 [[package]]
 name = "zvariant"
-version = "5.14.0"
+version = "5.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b5e28c25bd8bb8da5a1f3e7065d0c156b9ee9a7973adf78b0e35eaefdf3b1b5c"
+checksum = "c1d34c27cc6cdd1f458427519dd6b8612f7b7e3f7b9a0b2355d041dda9869147"
 dependencies = [
  "endi",
  "enumflags2",
@@ -10546,9 +10569,9 @@ dependencies = [
 
 [[package]]
 name = "zvariant_derive"
-version = "5.14.0"
+version = "5.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d496a145685283b67e232bd9e47377f6b60ad9d51e3601b23867f77c42477f96"
+checksum = "864155e69b4352db0c7f374917bf45d1e0c8d17659c8b3dbf9795f3673f8c497"
 dependencies = [
  "proc-macro-crate 3.5.0",
  "proc-macro2",
@@ -10559,9 +10582,9 @@ dependencies = [
 
 [[package]]
 name = "zvariant_utils"
-version = "4.0.0"
+version = "4.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "629d80ece222cad20fe0e8741be493c4ab166acf3b85341bdc2cdbcfd8f3c2d6"
+checksum = "bad0294361a320b694a328460dc73add56c306150f5cb6bfafc44446120008a3"
 dependencies = [
  "proc-macro2",
  "quote",

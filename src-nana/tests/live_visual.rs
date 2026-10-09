@@ -168,14 +168,14 @@ fn assert_clicks() {
         "侧栏开关没有切换"
     );
 
-    click_label(&mut session, "Minimize");
+    click_label(&mut session, "最小化");
     let commands = pump(&mut session, &mut model);
     assert!(
         commands.iter().any(|command| matches!(command, WindowCommand::SetMinimized { minimized: true, .. })),
         "最小化没有排队宿主命令：{commands:?}"
     );
 
-    click_label(&mut session, "Maximize");
+    click_label(&mut session, "最大化");
     let commands = pump(&mut session, &mut model);
     assert!(
         commands.iter().any(|command| matches!(command, WindowCommand::SetMaximized { maximized: true, .. })),
@@ -183,7 +183,7 @@ fn assert_clicks() {
     );
 
     // 默认关闭行为和 Vue/Tauri 一致：没有未保存的修改时直接关窗，不弹确认。
-    click_label(&mut session, "Close");
+    click_label(&mut session, "关闭");
     let commands = pump(&mut session, &mut model);
     assert!(
         commands.iter().any(|command| matches!(command, WindowCommand::Close(_))),
@@ -300,10 +300,14 @@ fn assert_title_bar(nodes: &[AccessibilityDumpNode]) {
     assert!(has_label(nodes, "折叠侧边栏"), "缺少侧栏开关");
     assert!(has_label(nodes, "全局搜索"), "缺少全局搜索");
     assert!(has_label(nodes, "显示筛选栏"), "缺少筛选开关");
-    assert!(has_label(nodes, "Minimize"));
-    assert!(has_label(nodes, "Maximize"));
-    assert!(has_label(nodes, "Close"));
-    for banned in ["最小化", "最大化", "关闭", "资源库工作区"] {
+    // 窗口按钮的名称来自 Nana 的框架文案表，默认中文。
+    for control in ["最小化", "最大化", "关闭"] {
+        assert!(
+            nodes.iter().any(|node| node.label.as_deref() == Some(control) && node.role == "button"),
+            "缺少窗口按钮 {control}"
+        );
+    }
+    for banned in ["资源库工作区"] {
         assert!(
             nodes.iter().all(|node| node.label.as_deref() != Some(banned)),
             "标题栏仍是占位文案 {banned}"

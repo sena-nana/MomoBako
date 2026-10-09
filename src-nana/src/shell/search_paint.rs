@@ -67,6 +67,7 @@ impl Painter for SwatchChipPainter {
 /// 图标块自己用 `Lg` 圆角，渐变跟着圆角裁剪。
 pub(crate) fn hit_tile_background() -> BackgroundImage {
     let stop = |position: f32, [red, green, blue]: [u8; 3]| GradientStop {
+        paint_color: None,
         position,
         color: [f32::from(red) / 255.0, f32::from(green) / 255.0, f32::from(blue) / 255.0, 1.0],
     };

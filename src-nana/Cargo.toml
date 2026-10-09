@@ -16,9 +16,9 @@ symphonia = { version = "0.6.1", default-features = false, features = ["mp3", "f
 zip = { version = "8.6", default-features = false, features = ["deflate"] }
 unarc-rs = "0.6.1"
 momobako-backend = { path = "../src-backend" }
-nana-ui = { git = "https://github.com/sena-nana/NanaUI.git", rev = "ee94106746b13f356af17586ed5e35ed78f9eb40", features = ["hosted", "bundled-fonts", "components", "icons-tabler"] }
-nana-ui-core = { git = "https://github.com/sena-nana/NanaUI.git", rev = "ee94106746b13f356af17586ed5e35ed78f9eb40" }
-nana-ui-platform = { git = "https://github.com/sena-nana/NanaUI.git", rev = "ee94106746b13f356af17586ed5e35ed78f9eb40", features = ["clipboard"] }
+nana-ui = { git = "https://github.com/sena-nana/NanaUI.git", rev = "9dd590a53dee822a2e4cfb8ab37070fa6ca5b19f", features = ["hosted", "bundled-fonts", "components", "icons-tabler"] }
+nana-ui-core = { git = "https://github.com/sena-nana/NanaUI.git", rev = "9dd590a53dee822a2e4cfb8ab37070fa6ca5b19f" }
+nana-ui-platform = { git = "https://github.com/sena-nana/NanaUI.git", rev = "9dd590a53dee822a2e4cfb8ab37070fa6ca5b19f", features = ["clipboard"] }
 
 [target.'cfg(windows)'.dependencies]
 # 与 Tauri `plugin:drag` 同一实现，把绝对路径拖出窗口。
@@ -30,7 +30,7 @@ raw-window-handle = "0.6.2"
 windows = { version = "0.62", features = ["Foundation", "Media", "Storage_Streams", "Win32_Foundation", "Win32_System_Com", "Win32_System_WinRT", "Win32_UI_Shell", "Win32_Media_MediaFoundation"] }
 
 [dev-dependencies]
-nana-ui-devtools = { git = "https://github.com/sena-nana/NanaUI.git", rev = "ee94106746b13f356af17586ed5e35ed78f9eb40", features = ["runtime-agent"] }
+nana-ui-devtools = { git = "https://github.com/sena-nana/NanaUI.git", rev = "9dd590a53dee822a2e4cfb8ab37070fa6ca5b19f", features = ["runtime-agent"] }
 
 [[bin]]
 name = "momobako-nana"

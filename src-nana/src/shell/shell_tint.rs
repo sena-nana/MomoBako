@@ -5,7 +5,7 @@
 //! 圆角写主题档位，形状交给渲染层。
 
 use nana_ui::runtime::{BoxPaint, PaintContext, Painter, Radius};
-use nana_ui_core::{RadiusTier, SemanticColorMix, SemanticColorRole, ThemeMode};
+use nana_ui_core::{RadiusTier, SemanticColorMix, SemanticColorRole, ThemeAppearance};
 
 /// 一块浅色语义底，可带同色系描边。
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -44,12 +44,12 @@ impl SoftFill {
         PillFill(self)
     }
 
-    fn alpha(&self, mode: ThemeMode) -> f32 {
-        if mode == ThemeMode::Dark { self.dark_alpha } else { self.light_alpha }
+    fn alpha(&self, appearance: ThemeAppearance) -> f32 {
+        if crate::theme_map::is_dark(appearance) { self.dark_alpha } else { self.light_alpha }
     }
 
     fn paint_with(&self, cx: &mut PaintContext<'_>, radius: Radius) {
-        let alpha = self.alpha(cx.theme_mode());
+        let alpha = self.alpha(cx.theme_appearance());
         let mut paint = BoxPaint::fill(SemanticColorMix::alpha(self.role, alpha));
         if let Some((role, width)) = self.border {
             paint = paint.border(role, width);

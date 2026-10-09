@@ -174,8 +174,8 @@ pub(crate) fn bind_escape(document: &mut nana_ui::runtime::RuntimeDocument) {
     }
 }
 
-fn note_escape_key(key: &nana_ui::runtime::KeyInput) -> bool {
-    if key.pressed && !key.repeat && key.key.as_ref() == "Escape" {
+fn note_escape_key(key: &nana_ui::KeyInput) -> bool {
+    if key.state == nana_ui::KeyState::Pressed && !key.repeat && key.logical.0 == "Escape" {
         ESCAPE_KEY.with(|flag| flag.set(true));
         return true;
     }
@@ -220,14 +220,13 @@ fn sync_sidebar_resize(shell: &mut ShellViewModel, document: &nana_ui::runtime::
     }
 }
 
-/// 系统关闭、几何变化和文件对话框都从这里进壳层。
+/// 几何变化、外观和文件对话框从这里进壳层。关窗请求由 `close_requested` 回答。
 pub(crate) fn on_window_event(
     app: &mut MomoBakoApplication,
     event: &nana_ui_platform::WindowEvent,
     context: &RuntimeProgramContext<ShellMessage>,
 ) -> RuntimeProgramUpdate {
     match event {
-        nana_ui_platform::WindowEvent::CloseRequested { id } => answer_close(app, *id, context),
         nana_ui_platform::WindowEvent::Ready { id, geometry } => {
             app.shell.set_viewport_width(geometry.logical_size.0);
             let window_commands = app.host.windows.on_ready(*id);

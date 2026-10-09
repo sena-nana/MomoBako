@@ -17,7 +17,7 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-const NANA_REVISION: &str = "ee94106746b13f356af17586ed5e35ed78f9eb40";
+const NANA_REVISION: &str = "9dd590a53dee822a2e4cfb8ab37070fa6ca5b19f";
 const EVIDENCE_SCHEMA: &str = "momobako.nana.offscreen/v1";
 
 #[derive(Debug, Clone, Copy)]
@@ -160,9 +160,9 @@ fn native_actions_are_reachable_through_runtime_hit_testing() {
         "在当前目录新建文件夹",
         "设置",
         "自适应",
-        "Minimize",
-        "Maximize",
-        "Close",
+        "最小化",
+        "最大化",
+        "关闭",
     ] {
         let node = session
             .accessibility_dump()
@@ -191,12 +191,12 @@ fn render_case(
         .set_theme(viewport.theme)
         .map_err(|e| e.to_string())?;
     let mode = match viewport.theme {
-        ThemeName::Light => nana_ui::ThemeMode::Light,
-        ThemeName::Dark => nana_ui::ThemeMode::Dark,
+        ThemeName::Light => nana_ui::theme::ThemeAppearance::Light,
+        ThemeName::Dark => nana_ui::theme::ThemeAppearance::Dark,
     };
     // 验收场景不改圆角设置，按默认半径装主题刻度，和产品窗口一致。
     let appearance = Appearance::for_mode(&ShellViewModel::default(), mode);
-    if !appearance::install(session.document_mut(), appearance) {
+    if appearance::install(session.document_mut(), appearance).is_none() {
         return Err("外观安装失败".into());
     }
     let theme = theme_name(viewport.theme);

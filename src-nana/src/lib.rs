@@ -61,6 +61,8 @@ pub struct MomoBakoApplication {
     system_appearance: Option<nana_ui_platform::SystemAppearance>,
     /// 已装进文档的外观。设置变了才重新安装。
     applied_appearance: Option<appearance::Appearance>,
+    /// 宿主和文档当前用的主题，随外观同步更新。
+    theme: std::sync::Arc<nana_ui::theme::CompiledTheme>,
 }
 
 pub(crate) struct NativePreviewGpu {
@@ -91,6 +93,7 @@ impl Default for MomoBakoApplication {
             host: window_host::HostSession::default(),
             system_appearance: None,
             applied_appearance: None,
+            theme: nana_ui::theme::builtin_theme_arc(nana_ui::theme::ThemeAppearance::Dark),
         }
     }
 }
@@ -139,6 +142,8 @@ impl ApplicationState for MomoBakoApplication {
         shell.files.load_display_mode_file(&display_mode_path());
         shell.player.load_default_files();
         shell.admin.load_default_file();
+        let system_appearance = context.system_appearance();
+        let theme = appearance::initial_theme(appearance::Appearance::from_shell(&shell, system_appearance));
         Ok(Self {
             services,
             shell,
@@ -148,8 +153,9 @@ impl ApplicationState for MomoBakoApplication {
             thumbnail_gpu: Vec::new(),
             pending_thumbs: Vec::new(),
             host: window_host::HostSession::default(),
-            system_appearance: context.system_appearance(),
+            system_appearance,
             applied_appearance: None,
+            theme,
         })
     }
 
@@ -184,8 +190,8 @@ impl ApplicationState for MomoBakoApplication {
         Ok(())
     }
 
-    fn theme_mode(&self) -> nana_ui::ThemeMode {
-        appearance::Appearance::from_shell(&self.shell, self.system_appearance).mode
+    fn theme(&self) -> std::sync::Arc<nana_ui::theme::CompiledTheme> {
+        self.theme.clone()
     }
 
     fn prepare(
@@ -705,6 +711,16 @@ impl ApplicationState for MomoBakoApplication {
         context: &RuntimeProgramContext<Self::Message>,
     ) -> RuntimeProgramUpdate {
         window_host::on_window_event(self, event, context)
+    }
+
+    /// 系统或标题栏请求关窗：按关闭设置回答，确认和收到托盘时不带关闭命令。
+    fn close_requested(
+        &mut self,
+        id: nana_ui_platform::WindowId,
+        _windows: &mut std::collections::HashMap<nana_ui_platform::WindowId, ApplicationWindow>,
+        context: &RuntimeProgramContext<Self::Message>,
+    ) -> RuntimeProgramUpdate {
+        window_host::answer_close(self, id, context)
     }
 }
 

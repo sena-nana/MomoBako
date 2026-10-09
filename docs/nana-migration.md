@@ -1,7 +1,7 @@
 # NanaUI 原生迁移边界
 
 MomoBako 的原生 UI 入口位于 `src-nana`。该 crate 固定使用 NanaUI 提交
-`ee94106746b13f356af17586ed5e35ed78f9eb40`，依赖来自 Git revision，不读取本地
+`9dd590a53dee822a2e4cfb8ab37070fa6ca5b19f`，依赖来自 Git revision，不读取本地
 NanaUI 工作树的未提交文件。
 
 ## 渲染与验收路径
@@ -66,8 +66,8 @@ Nana `ApplicationState::initialize` 现在启动共享 `RepositoryRuntime`，窗
 预览；图片字节读取和解码在服务任务中完成，上传沿用窗口唯一的 GPU 上下文。PDF 页面和能抽出三角形的网格先软件光栅，再送到同一预览纹理槽。解出的视频画面也进这个预览纹理槽。解不开的具体文件仍失败，不把截断画面当成成功。
 
 启动就绪后，搜索面板和已选文件使用预览与元数据表面；验收页里选中文件时也挂同一块表面。文件页在选中文件或打开筛选栏时把这块表面挂到列表上。标题栏输入先进入搜索，250 毫秒后再查。元数据草稿变脏后 260 毫秒自动保存。Markdown 用
-`NativeMarkdown`，纯文本仍用 `SelectableRichText`。代码类扩展名按 `RichSpan.color` 标语义角色：关键字 `Keyword`（可保留 strong），字符串 `Success`，注释 `Muted`。颜色来自语义角色，不是外部高亮库。txt、log、csv 和未知扩展名保持一段无色文本。超过 768KiB 失败，不截断。产品构建仍钉 Nana Git 修订 `ee94106746b13f356af17586ed5e35ed78f9eb40`。根 `Cargo.toml` 的 `[patch]` 把 `nana-ui` 指到 `vendor/nana-ui`，并把 `nana-ui-runtime` 指到 `vendor/nana-ui-runtime`。runtime 副本的基线就是该修订，只增加 `RichSpan.color` 和 overlay 投影；`nana-ui-core` 与 `nana-ui-scene` 继续用同一 Git 修订，不另做副本。不把整页换成 TextArea，也不打开 syntax-highlighting 当开关。WAV、mp3、flac、ogg 预览与底部播放条共用游标，正式 Windows 构建用 winmm 出声，测试构建不开设备。未压缩和 MJPEG 的 AVI 用纯 Rust 解出画面和 PCM；其余认得出的容器在 Windows 上用媒体基础源读取器。没有画面的 m4a、aac、opus 只解音轨成 PCM，进入同一 `PlaybackSessionState`。解不开返回「解码失败」。认不出的字节仍是「没有原生解码器」。
-ZIP/CBZ/7z/RAR/CBR、按内容流分页绘制的 PDF、Open XML 和 OLE 文档文本，以及 OBJ/glTF/GLB/STL/3MF/VRM 的网格光栅或结构摘要、FBX/BLEND 文件头，已由内置原生预览读取。Office 扩展名含 pot、ppsx、xlsb、xltx、dotm 等；抽不出文本是错误态。解不开的 PDF 流是该页失败。抽不出三角形的模型保留摘要。文件导入、Eagle 导入和 API Playground 已是原生工具页。来源账号按钮会调用插件登录方法。成功文案仍是「已调用 {method}。」；qrurl 一类地址会画成二维码，登录状态另显示，credentialRef 不显示。有字段的插件设置，以及能从 `provider.settings` 映射成字段的官方设置，可以编辑、重置并打开数据目录。映射不出字段的 Vue 设置页仍只显示升级文案。ASMR 库类型快捷方式会出现在筛选栏。素材元数据里已有的 `lyricStatus`、`listeningProgress` 等非保留字段按「键 = 值」显示；没有歌词正文，所以不另嵌歌词面板。文件右键里能直接调用的来源动作会调用插件。下载先用编号 5 的文件夹对话框，选中目录后把 `localFolder` 放进载荷再调用，取消不调用。创建来源播放列表先问名称，空白不提交，确认后带上名称和当前仓库再调用。自定义缩略图用编号 6 的选文件对话框、文本剪贴板或 `clear`，写入现有 `ensure_thumbnail`。日志画出过滤后的记录，任务行可以取消。播放集条目可以移除。播放列表内置 PCM WAV；当前正在播的视频、m4a、aac、opus 只解这一条并进入同一会话。正式 Windows 构建用 winmm 出声，测试构建不开设备。正式 Windows 构建还会注册系统媒体控件，把播放、暂停、上一首、下一首、跳转和停止写回播放条；测试构建不注册真会话。自适应和瀑布流已按视口虚拟化，行高可测、列宽均分，还不是 CSS column 瀑布流。`ImageViewer` 仍未替换行内 `GpuTextureView`：它是全窗模态，接上会更重。代码颜色走 `RichSpan` 的语义角色，经 `SelectableRichText` 的 overlay 进入已有文本 span，不嵌入外部高亮库。不嵌入 Chromium。这批状态有单测，还没有新的离屏场景。
+`NativeMarkdown`。纯文本和 Vue `text-preview` 一致：等宽原文、不着色，只取前 768 KiB，超出时标「仅显示前 …」；按 BOM 识别 UTF-8 / UTF-16，其余按 UTF-8 宽松解码。MomoBako 不保留 NanaUI 副本，也没有 `[patch]`。WAV、mp3、flac、ogg 预览与底部播放条共用游标，正式 Windows 构建用 winmm 出声，测试构建不开设备。未压缩和 MJPEG 的 AVI 用纯 Rust 解出画面和 PCM；其余认得出的容器在 Windows 上用媒体基础源读取器。没有画面的 m4a、aac、opus 只解音轨成 PCM，进入同一 `PlaybackSessionState`。解不开返回「解码失败」。认不出的字节仍是「没有原生解码器」。
+ZIP/CBZ/7z/RAR/CBR、按内容流分页绘制的 PDF、Open XML 和 OLE 文档文本，以及 OBJ/glTF/GLB/STL/3MF/VRM 的网格光栅或结构摘要、FBX/BLEND 文件头，已由内置原生预览读取。Office 扩展名含 pot、ppsx、xlsb、xltx、dotm 等；抽不出文本是错误态。解不开的 PDF 流是该页失败。抽不出三角形的模型保留摘要。文件导入、Eagle 导入和 API Playground 已是原生工具页。来源账号按钮会调用插件登录方法。成功文案仍是「已调用 {method}。」；qrurl 一类地址会画成二维码，登录状态另显示，credentialRef 不显示。有字段的插件设置，以及能从 `provider.settings` 映射成字段的官方设置，可以编辑、重置并打开数据目录。映射不出字段的 Vue 设置页仍只显示升级文案。ASMR 库类型快捷方式会出现在筛选栏。素材元数据里已有的 `lyricStatus`、`listeningProgress` 等非保留字段按「键 = 值」显示；没有歌词正文，所以不另嵌歌词面板。文件右键里能直接调用的来源动作会调用插件。下载先用编号 5 的文件夹对话框，选中目录后把 `localFolder` 放进载荷再调用，取消不调用。创建来源播放列表先问名称，空白不提交，确认后带上名称和当前仓库再调用。自定义缩略图用编号 6 的选文件对话框、文本剪贴板或 `clear`，写入现有 `ensure_thumbnail`。日志画出过滤后的记录，任务行可以取消。播放集条目可以移除。播放列表内置 PCM WAV；当前正在播的视频、m4a、aac、opus 只解这一条并进入同一会话。正式 Windows 构建用 winmm 出声，测试构建不开设备。正式 Windows 构建还会注册系统媒体控件，把播放、暂停、上一首、下一首、跳转和停止写回播放条；测试构建不注册真会话。自适应和瀑布流已按视口虚拟化，行高可测、列宽均分，还不是 CSS column 瀑布流。`ImageViewer` 仍未替换行内 `GpuTextureView`：它是全窗模态，接上会更重。不嵌入 Chromium。这批状态有单测，还没有新的离屏场景。
 
 仍未宣称完成的能力包括 PDF.js/Office/Three.js 嵌入和
 Windows UIA/AccessKit 服务桥接；播放列表排序/添加、成员资格、下载进度、播放器回退、会话持久化、

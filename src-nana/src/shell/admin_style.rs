@@ -13,7 +13,7 @@ use nana_ui::runtime::{
     SemanticPaint, Stack, Text, TextHorizontalAlignment, TextInput,
 };
 use nana_ui_core::{
-    Icon, LineHeightSpec, OverflowWrapSpec, RadiusTier, SemanticColorMix, SemanticColorRole as Role, ThemeMode,
+    Icon, LineHeightSpec, OverflowWrapSpec, RadiusTier, SemanticColorMix, SemanticColorRole as Role,
 };
 
 /// Vue `:root { line-height: 1.55 }`。
@@ -517,7 +517,7 @@ impl SoftFill {
     }
 
     fn resolve(&self, cx: &PaintContext<'_>) -> [f32; 4] {
-        let dark = cx.theme_mode() == ThemeMode::Dark;
+        let dark = crate::theme_map::is_dark(cx.theme_appearance());
         match self.soft {
             Soft::Success => cx.color(SemanticColorMix::alpha(Role::Success, if dark { 0.14 } else { 0.10 })),
             Soft::Danger => cx.color(SemanticColorMix::alpha(Role::Danger, if dark { 0.14 } else { 0.10 })),
