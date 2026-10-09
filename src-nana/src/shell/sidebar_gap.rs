@@ -279,12 +279,6 @@ impl SidebarState {
         !self.smart_delete_id.is_empty()
     }
 
-    /// 侧栏发起的对话框有没有打开：文件夹新建或重命名、处理文件夹、智能文件夹编辑和删除。
-    /// 对话框的遮罩和卡片动效跟着它走。
-    pub fn modal_open(&self) -> bool {
-        self.folder_dialog.open || self.folder_delete_open() || self.smart_draft.open || self.smart_delete_open()
-    }
-
     /// 同一路径停满 450ms 时返回该路径，由 `apply_open_folder` 打开。离开后再进来重新计时。
     fn hover_folder(&mut self, path: String, now_ms: u64, dragging: bool, locked: bool) -> Option<String> {
         if locked || !dragging || path.is_empty() {

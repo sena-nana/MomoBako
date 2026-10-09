@@ -411,18 +411,11 @@ impl ShellViewModel {
     }
 
     fn follow_motion(&mut self) {
-        let modal_open = self.files.dialog_open()
-            || self.workspace.delete_dialog_open()
-            || self.playlist_dialog_open
-            || self.input.source_playlist.is_some()
-            || self.sidebar.modal_open()
-            || self.input.pending_close
-            || self.admin.pending_delete.is_some();
         let panel_open = self.sidebar.popover != sidebar::PopoverMode::Closed || self.admin.popover_open;
         let startup = f32::from(self.workspace.startup.percent);
         let operation = self.files.operation_percent();
         let spinner = self.sidebar.tree_loading || self.sidebar.submitting || self.sidebar.smart_draft.busy || self.files.mutating;
-        if self.motion.set_modal_open(modal_open) || self.motion.set_panel_open(panel_open) {
+        if self.motion.set_panel_open(panel_open) {
             self.surface_dirty = true;
         }
         self.motion.set_startup_percent(startup);
