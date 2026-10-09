@@ -644,7 +644,28 @@ fn relocate_folder_dialog_queues_pick_folder_and_submits_only_a_chosen_path() {
 #[test]
 fn attach_folder_dialog_submits_a_chosen_path_and_ignores_cancel() {
     let mut model = ShellViewModel::default();
+    // 和 Vue 一样先打开添加菜单，选「本地文件夹」后才弹系统文件夹对话框。
+    model.admin.plugins = vec![serde_json::from_value(serde_json::json!({
+        "pluginId": "momobako.local-filesystem",
+        "name": "本地文件夹",
+        "version": "1.0.0",
+        "kind": "source",
+        "category": "source",
+        "description": "",
+        "capabilities": ["localRootPath"],
+        "enabled": true,
+        "sdk": "backend",
+        "entry": null,
+        "source": "builtin",
+        "runtime": "native-dylib",
+        "permissions": [],
+        "compat": {"sdkVersion": "1"},
+        "status": "ready"
+    }))
+    .expect("本地文件夹插件清单")];
     model.reduce(ShellMessage::Sidebar(super::super::SidebarMessage::ShowRepositoryAddMenu));
+    assert!(model.input.take_platform_commands(nana_ui_platform::WindowId(1), false).is_empty(), "添加菜单本身不弹对话框");
+    model.reduce(ShellMessage::Sidebar(super::super::SidebarMessage::SelectRepositoryBackend("momobako.local-filesystem".into())));
     let commands = model.input.take_platform_commands(nana_ui_platform::WindowId(1), false);
     assert!(matches!(
         commands.as_slice(),

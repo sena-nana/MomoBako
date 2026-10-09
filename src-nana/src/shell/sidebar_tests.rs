@@ -107,13 +107,13 @@ fn folder_expansion_follows_current_directory_and_prunes_stale_paths() {
     assert_eq!(sidebar.expanded_folders, ["photos", "photos/trips"]);
     sidebar.toggle_folder("photos");
     assert!(!sidebar.expanded_folders.iter().any(|path| path == "photos"));
-    sidebar.apply_tree("other", Ok(vec![]));
+    sidebar.apply_tree("other", Ok(Vec::new().into()));
     assert_eq!(sidebar.expanded_folders, ["photos/trips"]);
     sidebar.apply_tree("repo", Ok(vec![SidebarFolder {
         path: "photos/trips".into(),
         label: "trips".into(),
         children: Vec::new(),
-    }]));
+    }].into()));
     assert_eq!(sidebar.expanded_folders, ["photos/trips"]);
     assert!(!sidebar.tree_loading);
     assert!(sidebar.refresh_tree(Some("repo"), false));
