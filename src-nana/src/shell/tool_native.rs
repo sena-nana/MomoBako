@@ -1,51 +1,90 @@
-//! 三个内置工具页的原生表面，以及来源登录按钮。
+//! 拓展页里的文件导入和 Eagle 导入工具页。
 //!
-//! 文件导入和 Eagle 导入只派发文件状态机已有的对话框消息。
-//! API Playground 只列出已加载的设计快照，不发请求，也不调用插件。
-//! 来源登录按钮按认证声明派发插件调用，不解析二维码。
-//! 设置页把有登录方法的插件收成一张顶部卡片，没有方法时不占位。
+//! 内容照 `External/Plugins/{file-manager,eagle-importer}/src/register.js`：眉题、插件名标题、
+//! 说明、目标仓库和目录、不能导入的原因、导入按钮和备注。Vue 的 `.tool-page-shell` 没有任何
+//! 样式（内容贴着面板边、标题是浏览器默认 2em），这里按 API Playground 的版式画：内边距 18、
+//! 22 号标题、卡片包住目标信息。导入走文件面板已有的导入对话框和状态机。
 
-use nana_ui::runtime::view::{text, widget, AnyView, IntoView};
-use nana_ui::runtime::{Activate, Button, Stack};
+use nana_ui::runtime::view::{widget, AnyView, IntoView};
+use nana_ui::runtime::{Activate, AlignSpec, LengthSpec, Stack};
+use nana_ui_core::{RadiusTier, SemanticColorRole as Role};
 
 use super::super::files::{FileContext, FileDialog, FilesMessage};
 use super::super::{ShellMessage, ShellViewModel};
-use super::support::{TOOL_API_PLAYGROUND, TOOL_EAGLE_IMPORTER, TOOL_FILE_MANAGER};
-use super::{AdminMessage, SourceAuthCall, ToolPageEntry};
-use crate::backend::services::repository::{ApiDesignSnapshot, PluginManifest};
+use super::style::{self, action, column, label, mono, pad, row, wrapping, Tone};
+use super::support::{TOOL_EAGLE_IMPORTER, TOOL_FILE_MANAGER};
+use super::ToolPageEntry;
 
-/// 工具页上的一个导入按钮。禁用时不派发消息。
+/// 工具页上的一个按钮。禁用时不派发消息。
 pub struct ImportAction {
     pub id: &'static str,
     pub label: &'static str,
+    pub tone: Tone,
     pub enabled: bool,
     pub message: FilesMessage,
 }
 
-/// 内置工具页。其它 id 打日志并留空。
-pub fn tool_surface(model: &ShellViewModel, page: &ToolPageEntry) -> AnyView {
-    let body = match page.id.as_str() {
-        TOOL_FILE_MANAGER => import_page(
-            model,
-            page,
-            "文件导入",
-            "目标固定为当前工作区的当前目录。",
-            "ZIP 只接受 .zip，解压后保留目录结构。",
-        ),
-        TOOL_EAGLE_IMPORTER => import_page(
-            model,
-            page,
-            "Eagle 导入",
-            "导入目标固定为当前工作区的当前目录。",
-            "库路径在接下来的导入对话框里填写。",
-        ),
-        TOOL_API_PLAYGROUND => api_page(model, page),
-        other => {
-            eprintln!("Nana 工具页没有原生界面：{other}");
-            Vec::new()
-        }
+/// 内置的文件导入或 Eagle 导入页。
+pub(super) fn import_page(model: &ShellViewModel, page: &ToolPageEntry) -> AnyView {
+    let id = page.id.as_str();
+    let (eyebrow, subline) = if id == TOOL_EAGLE_IMPORTER {
+        ("Eagle 导入", "导入目标固定为当前工作区的当前目录。")
+    } else {
+        ("文件导入", "目标固定为当前工作区的当前目录。")
     };
-    widget(Stack::column(8.0)).children(body).key(format!("admin-tool-native-{}", page.id)).into_any()
+    let title = plugin_name(model, id).unwrap_or_else(|| if id == TOOL_EAGLE_IMPORTER { "Eagle Importer".into() } else { "File Manager".into() });
+    let (repository, directory) = import_target(model);
+    let mut body = vec![
+        widget(column(0.0))
+            .children((
+                widget(style::eyebrow_text(eyebrow)).key(format!("admin-tool-eyebrow-{id}")),
+                widget(pad(column(0.0), 4.0, 0.0, 0.0, 0.0)).children((widget(style::label_lh(title, 22.0, 700, Role::Text, 1.25)).key(format!("admin-tool-title-{id}")),)),
+                widget(pad(column(0.0), 8.0, 0.0, 0.0, 0.0)).children((widget(wrapping(label(subline, 13.0, 400, Role::Muted))).key(format!("admin-tool-subline-{id}")),)),
+            ))
+            .into_any(),
+        target_card(vec![
+            target_row("目标仓库", widget(label(repository, 14.0, 600, Role::Text)).key(format!("admin-tool-repo-{id}")).into_any()),
+            target_row("目标目录", code(directory, format!("admin-tool-dir-{id}"))),
+        ]),
+    ];
+    if let Some(reason) = import_block_reason(model) {
+        body.push(style::state_notice(reason.into(), false, "admin-tool-reason"));
+    }
+    if !model.files.error.is_empty() {
+        body.push(style::state_notice(model.files.error.clone(), true, "admin-tool-error"));
+    }
+    if id == TOOL_EAGLE_IMPORTER {
+        body.push(target_card(vec![
+            target_row("EagleLibrary", code("尚未选择".into(), "admin-tool-eagle-path".into())),
+            action_row(model, id),
+        ]));
+    } else {
+        body.push(action_row(model, id));
+        body.push(widget(wrapping(label("ZIP 首版固定支持 .zip，并按解压导入保留内部目录结构。", 12.0, 400, Role::Muted))).key(format!("admin-tool-note-{id}")).into_any());
+    }
+    widget(pad(column(14.0), 18.0, 18.0, 18.0, 18.0)).children(body).key(format!("admin-tool-native-{id}")).into_any()
+}
+
+fn plugin_name(model: &ShellViewModel, tool_id: &str) -> Option<String> {
+    model.admin.plugins.iter().find(|plugin| plugin.plugin_id == tool_id).map(|plugin| plugin.name.clone())
+}
+
+/// 目标卡片：主背景、`border-soft` 边线、md 圆角，内边距 12/14，行间 8。
+fn target_card(rows: Vec<AnyView>) -> AnyView {
+    widget(pad(column(8.0), 12.0, 14.0, 12.0, 14.0).surface(Role::Background).outline(Role::BorderSoft, 1.0).radius(RadiusTier::Md))
+        .children(rows)
+        .into_any()
+}
+
+fn target_row(name: &str, value: AnyView) -> AnyView {
+    widget(row(8.0).wrap(true)).children((widget(label(name, 13.0, 400, Role::Muted)), value)).into_any()
+}
+
+/// 行内代码：等宽 12 号、`bg-subtle`、`border-soft` 边线、xs 圆角。
+fn code(text: String, key: String) -> AnyView {
+    widget(pad(row(0.0), 1.0, 6.0, 1.0, 6.0).surface(Role::Subtle).outline(Role::BorderSoft, 1.0).radius(RadiusTier::Xs))
+        .children((widget(mono(text, 12.0, 400, Role::Text)).key(key),))
+        .into_any()
 }
 
 /// 不能导入时返回和 Vue 相同的原因。能否导入仍走文件状态机的 `can_import`。
@@ -71,35 +110,15 @@ pub fn import_block_reason(model: &ShellViewModel) -> Option<&'static str> {
 
 /// 文件导入和 Eagle 导入的按钮。只携带已有的文件消息。
 pub fn import_actions(model: &ShellViewModel, page_id: &str) -> Vec<ImportAction> {
-    let enabled = import_block_reason(model).is_none();
+    let enabled = import_block_reason(model).is_none() && !model.files.mutating;
     match page_id {
         TOOL_FILE_MANAGER => vec![
-            ImportAction {
-                id: "folder",
-                label: "从文件夹导入",
-                enabled,
-                message: FilesMessage::OpenDialog(FileDialog::Import),
-            },
-            ImportAction {
-                id: "zip",
-                label: "从 ZIP 导入",
-                enabled,
-                message: FilesMessage::OpenDialog(FileDialog::ImportArchive),
-            },
+            ImportAction { id: "folder", label: "从文件夹导入", tone: Tone::Primary, enabled, message: FilesMessage::OpenDialog(FileDialog::Import) },
+            ImportAction { id: "zip", label: "从 ZIP 导入", tone: Tone::Plain, enabled, message: FilesMessage::OpenDialog(FileDialog::ImportArchive) },
         ],
         TOOL_EAGLE_IMPORTER => vec![
-            ImportAction {
-                id: "copy",
-                label: "复制导入",
-                enabled,
-                message: FilesMessage::OpenEagle("copy".into()),
-            },
-            ImportAction {
-                id: "move",
-                label: "剪切导入",
-                enabled,
-                message: FilesMessage::OpenEagle("move".into()),
-            },
+            ImportAction { id: "copy", label: "复制导入", tone: Tone::Primary, enabled, message: FilesMessage::OpenEagle("copy".into()) },
+            ImportAction { id: "move", label: "剪切导入", tone: Tone::Plain, enabled, message: FilesMessage::OpenEagle("move".into()) },
         ],
         other => {
             eprintln!("Nana 工具页没有导入按钮：{other}");
@@ -117,25 +136,6 @@ pub fn import_message(enabled: bool, message: FilesMessage) -> Option<ShellMessa
     Some(ShellMessage::Files(message))
 }
 
-/// 只列出快照里的方法、路径和摘要。没有快照或端点为空时给同一句空状态。
-pub fn api_lines(snapshot: Option<&ApiDesignSnapshot>) -> Vec<String> {
-    let Some(snapshot) = snapshot.filter(|item| !item.endpoints.is_empty()) else {
-        return vec!["还没有 API 设计快照".into()];
-    };
-    snapshot
-        .endpoints
-        .iter()
-        .map(|endpoint| {
-            let summary = endpoint.summary.trim();
-            if summary.is_empty() {
-                format!("{} {}", endpoint.method, endpoint.path)
-            } else {
-                format!("{} {} · {summary}", endpoint.method, endpoint.path)
-            }
-        })
-        .collect()
-}
-
 fn import_target(model: &ShellViewModel) -> (String, String) {
     let repository = model
         .workspace
@@ -143,132 +143,26 @@ fn import_target(model: &ShellViewModel) -> (String, String) {
         .map(|item| item.name.trim().to_string())
         .filter(|name| !name.is_empty())
         .unwrap_or_else(|| "未选择仓库".into());
-    let directory = {
-        let path = model.files.current_path.trim();
-        if path.is_empty() { "/".into() } else { path.to_string() }
-    };
+    let path = model.files.current_path.trim();
+    let directory = if path.is_empty() { "/".to_string() } else { path.to_string() };
     (repository, directory)
-}
-
-fn import_page(model: &ShellViewModel, page: &ToolPageEntry, eyebrow: &'static str, subline: &'static str, note: &'static str) -> Vec<AnyView> {
-    let (repository, directory) = import_target(model);
-    let id = page.id.as_str();
-    let mut rows = vec![
-        text(eyebrow).key(format!("admin-tool-eyebrow-{id}")).into_any(),
-        text(page.label.clone()).key(format!("admin-tool-title-{id}")).into_any(),
-        text(subline).key(format!("admin-tool-subline-{id}")).into_any(),
-        text(format!("目标仓库 {repository}")).key(format!("admin-tool-repo-{id}")).into_any(),
-        text(format!("目标目录 {directory}")).key(format!("admin-tool-dir-{id}")).into_any(),
-    ];
-    if let Some(reason) = import_block_reason(model) {
-        rows.push(text(reason).key(format!("admin-tool-reason-{id}")).into_any());
-    }
-    rows.push(action_row(model, id));
-    if !note.is_empty() {
-        rows.push(text(note).key(format!("admin-tool-note-{id}")).into_any());
-    }
-    rows
 }
 
 fn action_row(model: &ShellViewModel, page_id: &str) -> AnyView {
     let buttons = import_actions(model, page_id)
         .into_iter()
-        .map(|action| {
-            let enabled = action.enabled;
-            let message = action.message;
-            let id = action.id;
-            widget(Button::new(action.label).disabled(!enabled))
-                .key(format!("admin-tool-action-{page_id}-{id}"))
+        .map(|item| {
+            let enabled = item.enabled;
+            let message = item.message;
+            widget(action(item.label, None, item.tone, !enabled))
+                .key(format!("admin-tool-action-{page_id}-{}", item.id))
                 .on_cx(move |_, _: &Activate, cx| {
                     if let Some(outgoing) = import_message(enabled, message.clone()) {
-                        cx.dispatch_program(outgoing);
+                        cx.dispatch_program_all(outgoing);
                     }
                 })
                 .into_any()
         })
         .collect::<Vec<_>>();
-    widget(Stack::row(8.0).wrap(true)).children(buttons).into_any()
-}
-
-/// 来源登录的一个按钮。没有对应方法名时不出现。
-pub struct SourceAuthAction {
-    pub id: &'static str,
-    pub label: &'static str,
-    pub slot: SourceAuthCall,
-}
-
-const SOURCE_AUTH_BUTTONS: &[(&str, &str, &str, SourceAuthCall)] = &[
-    ("create", "创建登录会话", "createSessionMethod", SourceAuthCall::CreateSession),
-    ("status", "查询登录状态", "statusMethod", SourceAuthCall::Status),
-    ("clear", "退出登录", "clearMethod", SourceAuthCall::Clear),
-];
-
-/// 当前插件认证对象里实际声明了的登录按钮。
-pub fn source_auth_actions(plugin: &PluginManifest) -> Vec<SourceAuthAction> {
-    SOURCE_AUTH_BUTTONS
-        .iter()
-        .filter(|(_, _, key, _)| super::support::named_auth_method(plugin, key).is_some())
-        .map(|(id, label, _, slot)| SourceAuthAction { id, label, slot: *slot })
-        .collect()
-}
-
-/// 有登录方法的插件。没有方法名的不进设置页顶部卡片。
-pub fn source_login_plugin_ids(plugins: &[PluginManifest]) -> Vec<String> {
-    plugins
-        .iter()
-        .filter(|plugin| !source_auth_actions(plugin).is_empty())
-        .map(|plugin| plugin.plugin_id.clone())
-        .collect()
-}
-
-/// 设置页顶部的来源登录卡片。一个都没有时不占位。
-pub fn source_login_card(plugins: &[PluginManifest]) -> Option<AnyView> {
-    let mut rows = Vec::new();
-    for plugin in plugins {
-        let Some(buttons) = source_auth_row(plugin) else {
-            continue;
-        };
-        if let Some(summary) = super::support::source_account_summary(plugin) {
-            rows.push(text(summary).key(format!("admin-source-summary-{}", plugin.plugin_id)).into_any());
-        }
-        rows.push(buttons);
-    }
-    if rows.is_empty() {
-        return None;
-    }
-    Some(super::super::workbench::section_card("来源登录", rows))
-}
-
-/// 登录按钮行。一个方法都没有时不占位。
-pub fn source_auth_row(plugin: &PluginManifest) -> Option<AnyView> {
-    let actions = source_auth_actions(plugin);
-    if actions.is_empty() {
-        return None;
-    }
-    let plugin_id = plugin.plugin_id.clone();
-    let buttons = actions
-        .into_iter()
-        .map(|action| {
-            let id = plugin_id.clone();
-            let slot = action.slot;
-            widget(Button::new(action.label))
-                .key(format!("admin-source-auth-{}-{plugin_id}", action.id))
-                .on_cx(move |_, _: &Activate, cx| {
-                    cx.dispatch_program(ShellMessage::Admin(AdminMessage::CallSourceAuth { plugin_id: id.clone(), slot }));
-                })
-                .into_any()
-        })
-        .collect::<Vec<_>>();
-    Some(widget(Stack::row(8.0).wrap(true)).children(buttons).key(format!("admin-source-auth-{plugin_id}")).into_any())
-}
-
-fn api_page(model: &ShellViewModel, page: &ToolPageEntry) -> Vec<AnyView> {
-    let mut rows = vec![
-        text("API Playground").key("admin-tool-api-eyebrow").into_any(),
-        text(page.label.clone()).key("admin-tool-api-title").into_any(),
-    ];
-    for (index, line) in api_lines(model.admin.api_design.as_ref()).into_iter().enumerate() {
-        rows.push(text(line).key(format!("admin-tool-api-line-{index}")).into_any());
-    }
-    rows
+    widget(Stack::row(8.0).wrap(true).align(AlignSpec::Center).width(LengthSpec::Fill)).children(buttons).into_any()
 }

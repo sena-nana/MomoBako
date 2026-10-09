@@ -6,11 +6,12 @@ use std::fs;
 use std::path::PathBuf;
 
 use momobako_nana::backend::services::repository::{
-    AssetDetail, AssetSummary, PlaybackSessionState, PluginManifest,
+    AssetDetail, AssetSummary, PlaybackSessionState, PluginConfigSnapshot, PluginManifest, SystemLogLocation, SystemLogPage,
+    SystemLogRecord, SystemLogSource,
 };
 use momobako_nana::shell::{
-    commit_interaction, mount_shell, InspectEffect, InspectMessage, ShellMessage, ShellViewModel,
-    ToolPageEntry, WorkspacePanel, WorkspaceRepository,
+    commit_interaction, mount_shell, AdminMessage, InspectEffect, InspectMessage, ShellMessage, ShellViewModel,
+    SourceStep, ToolPageEntry, WorkspacePanel, WorkspaceRepository,
 };
 use nana_ui_devtools::agent::{AgentSession, RuntimeAgentSession, protocol::ThemeName};
 use nana_ui_devtools::offscreen;
@@ -23,6 +24,7 @@ fn preview_tool_and_login_surfaces_paint_and_respond() {
     assert_wav_preview();
     assert_import_tool();
     assert_source_login();
+    assert_logs_follow();
 }
 
 fn assert_wav_preview() {
@@ -71,21 +73,77 @@ fn assert_import_tool() {
     let _ = shot(&mut session, "import-tool-dialog");
 }
 
+/// 来源账号区照 `SourceAuthenticationSettings.vue`：点「连接新账号」先建扫码会话，
+/// 会话回来后出现二维码、提示和「检查登录结果」。
 fn assert_source_login() {
     let mut model = login_settings();
     let mut session = open(&model, 1200, 800, ThemeName::Light);
-    for label in ["创建登录会话", "查询登录状态", "退出登录"] {
+    for label in ["账号与仓库", "认证由 Source 插件处理，宿主只保存安全凭据引用。", "连接新账号"] {
         assert!(has(&session.accessibility_dump(), label), "缺少 {label}");
     }
     let stats = shot(&mut session, "source-login-light");
     assert!(stats.nonclear_ratio > 0.01, "登录设置页几乎是空的");
-    click(&mut session, "创建登录会话");
+    click(&mut session, "连接新账号");
     let _ = pump(&mut session, &mut model);
-    assert!(
-        has(&session.accessibility_dump(), "正在调用 auth.createQrSession…"),
-        "点击登录没有出现调用文案"
-    );
-    let _ = shot(&mut session, "source-login-calling");
+    let calls = format!("{:?}", model.admin.take_effects());
+    assert!(calls.contains("auth.createQrSession"), "点击连接新账号没有建扫码会话：{calls}");
+    model.reduce(ShellMessage::Admin(AdminMessage::SourceStepFinished {
+        step: SourceStep::CreateSession,
+        result: Ok(serde_json::json!({ "unikey": "key-1", "qrurl": "https://music.163.com/login?codekey=key-1" })),
+    }));
+    mount_shell(session.document_mut(), &model).expect("重建");
+    session.flush().expect("重新布局");
+    let nodes = session.accessibility_dump();
+    for label in ["请扫码并在手机端确认，然后检查登录结果。", "扫码登录二维码", "刷新二维码", "检查登录结果"] {
+        assert!(has(&nodes, label), "扫码会话缺少 {label}");
+    }
+    let after = shot(&mut session, "source-login-session");
+    assert!(after.nonclear_ratio > 0.01, "扫码会话画面几乎是空的");
+}
+
+/// 日志面板追踪时主区停在末尾，最后一条在视口里；暂停后新记录进来不跟随，页头留在视口里。
+fn assert_logs_follow() {
+    let mut model = ready_library();
+    model.workspace.panel = WorkspacePanel::Logs;
+    model.reduce(ShellMessage::LogsLoaded(Ok(SystemLogPage { records: (0..30).map(log_record).collect(), next_cursor: None })));
+    let mut session = open(&model, 1200, 800, ThemeName::Light);
+    session.flush().expect("跟随后的布局");
+    let nodes = session.accessibility_dump();
+    assert!(visible(&nodes, "第 29 条日志", 800.0), "追踪时最后一条日志不在视口里");
+    assert!(!visible(&nodes, "统一查看宿主、插件与辅助进程的实时日志流。", 800.0), "追踪时主区没有滚到末尾");
+    let _ = shot(&mut session, "logs-follow");
+
+    let mut paused = ready_library();
+    paused.workspace.panel = WorkspacePanel::Logs;
+    paused.reduce(ShellMessage::LogsLoaded(Ok(SystemLogPage { records: (0..30).map(log_record).collect(), next_cursor: None })));
+    paused.reduce(ShellMessage::Admin(AdminMessage::SetLogPaused(true)));
+    let mut session = open(&paused, 1200, 800, ThemeName::Light);
+    session.flush().expect("暂停后的布局");
+    let nodes = session.accessibility_dump();
+    assert!(visible(&nodes, "统一查看宿主、插件与辅助进程的实时日志流。", 800.0), "暂停后主区不该跟随到末尾");
+    assert!(!visible(&nodes, "第 29 条日志", 800.0), "暂停后不该滚到最后一条");
+}
+
+/// 标签等于 `label` 的节点有一部分落在 `[0, height)` 的视口里。
+fn visible(nodes: &[nana_ui_devtools::agent::AccessibilityDumpNode], label: &str, height: f32) -> bool {
+    nodes
+        .iter()
+        .filter(|node| node.label.as_deref() == Some(label))
+        .any(|node| node.bounds.y < height && node.bounds.y + node.bounds.height > 0.0)
+}
+
+fn log_record(index: u32) -> SystemLogRecord {
+    SystemLogRecord {
+        id: format!("log-{index:02}"),
+        timestamp: format!("2026-10-08T07:{index:02}:00Z"),
+        level: "info".into(),
+        category: "repository".into(),
+        action: "sync".into(),
+        message: format!("第 {index} 条日志"),
+        source: SystemLogSource { kind: "host".into(), label: Some("MomoBako".into()), plugin_id: None, repo_id: Some("repo".into()) },
+        location: SystemLogLocation::default(),
+        context: serde_json::json!({}),
+    }
 }
 
 fn wav_preview() -> ShellViewModel {
@@ -134,9 +192,10 @@ fn import_tool() -> ShellViewModel {
     model
 }
 
+/// 拓展页插件管理里只有一个来源插件，并已展开它的设置。
 fn login_settings() -> ShellViewModel {
     let mut model = ready_library();
-    model.page = momobako_nana::shell::ShellPage::Settings;
+    model.workspace.panel = WorkspacePanel::Extensions;
     let plugin: PluginManifest = serde_json::from_value(serde_json::json!({
         "pluginId": "netease",
         "name": "网易云",
@@ -165,6 +224,14 @@ fn login_settings() -> ShellViewModel {
     }))
     .expect("插件清单");
     model.admin.plugins = vec![plugin];
+    model.reduce(ShellMessage::Admin(AdminMessage::ToggleSettings("netease".into())));
+    model.reduce(ShellMessage::PluginConfigLoaded(Ok(PluginConfigSnapshot {
+        plugin_id: "netease".into(),
+        data_directory: "C:/plugins/netease".into(),
+        schema: serde_json::Value::Null,
+        values: Default::default(),
+    })));
+    let _ = model.admin.take_effects();
     model
 }
 

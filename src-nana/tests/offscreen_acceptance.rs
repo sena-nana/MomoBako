@@ -366,9 +366,11 @@ fn assert_unsaved_edit(nodes: &[nana_ui_devtools::agent::AccessibilityDumpNode])
 
 fn scene_title<'a>(scene_id: &str, page: &'a ShellPage) -> &'a str {
     match scene_id {
-        "downloader-settings" => "aria2 运行状态",
+        "extensions" => "文件系统与插件",
+        "downloader-settings" => "下载服务",
         "source-auth-gap" | "source-auth-methods" => "账号与仓库",
-        "office-convert" => "运行状态与缓存",
+        "office-convert" => "Office 转换",
+        "foreign-tool" => "自定义工具",
         "search-results" => "搜索结果",
         "still-playback" => "没有可绘制的画面",
         _ => page_title(page),
@@ -389,8 +391,8 @@ fn page_title(page: &ShellPage) -> &'static str {
         ShellPage::TaskCancelling => "正在取消扫描",
         ShellPage::Conflict => "远端修改时间较新，需要选择保留本地或远端版本",
         ShellPage::UnsavedEdit => "未保存",
-        ShellPage::Settings => "保存应用设置",
-        ShellPage::SettingsError => "保存应用设置",
+        ShellPage::Settings => "管理仓库服务、插件、缓存与 API 契约。",
+        ShellPage::SettingsError => "读取插件目录失败：拒绝访问。 (os error 5)",
         ShellPage::Logs => "系统日志",
     }
 }
