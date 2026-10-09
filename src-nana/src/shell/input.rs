@@ -182,7 +182,7 @@ pub struct InputState {
     pub dragged_paths: Vec<String>,
     pub drop_effect: String,
     pub empty_repository_error: String,
-    pub error: String,
+    /// 关闭确认框的文案。
     pub notice: String,
     pub pending_attach: bool,
     pub pending_close: bool,

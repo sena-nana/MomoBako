@@ -257,6 +257,8 @@ impl ApplicationState for MomoBakoApplication {
         window_host::after_update(self, context);
         let maximized = context.geometry().maximized;
         let window_commands = self.shell.input.take_platform_commands(*id, maximized);
+        // 服务派发和宿主请求可能在归约以外写下失败，同步视图之前收进状态区。
+        self.shell.observe_failures();
         if let Some(view) = self.view.as_mut() {
             if let Err(error) = view.sync(&mut window.document, &self.shell) {
                 eprintln!("Nana 壳层同步失败：{error}");

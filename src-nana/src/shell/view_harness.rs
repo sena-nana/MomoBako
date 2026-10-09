@@ -63,8 +63,9 @@ impl ShellHarness {
         self.sync();
     }
 
-    /// 把视图整体同步到当前 ViewModel，不刷新绑定、不布局。
+    /// 把视图整体同步到当前 ViewModel，不刷新绑定、不布局。和生产一样，同步前先把归约以外写下的失败收进状态区。
     pub fn sync(&mut self) {
+        self.model.observe_failures();
         self.view.sync(&mut self.window.document, &self.model).expect("同步壳层");
         self.model.surface_dirty = false;
     }
