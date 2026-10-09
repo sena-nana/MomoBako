@@ -438,11 +438,12 @@ pub(crate) fn native_input(input: TextInput) -> TextInput {
     input.style(native_field_style(32.0))
 }
 
-/// Vue 原生勾选框的配色：主背景、`border-strong` 边线；选中后 `accent-soft` 底、
-/// `accent-strong` 边线、强调色标记。尺寸由调用方的布局给，不吃主题的控件最小高。
-/// NanaUI 勾选框的选中标记固定是「✓」，Vue 是 7 见方的小方块，形状差异留着。
+/// Vue 原生勾选框的配色：主背景、`border-strong` 边线。尺寸由调用方的布局给，不吃主题的控件最小高。
+///
+/// 选中后 NanaUI 画「✓」，颜色取主题勾选框配方的选中字色（强调色上的字色），不读这里给的前景，
+/// 所以选中底用强调色，勾才看得见。Vue 是 `accent-soft` 底上强调色的 7 见方小方块，底色和形状的差异留着。
 pub(crate) fn native_checkbox(mut checkbox: nana_ui::runtime::Checkbox, size: f32) -> nana_ui::runtime::Checkbox {
-    let selected = SemanticPaint { background: Some(Role::AccentSoft), border: Some(Role::AccentStrong), foreground: Some(Role::Accent), ..SemanticPaint::default() };
+    let selected = SemanticPaint { background: Some(Role::Accent), border: Some(Role::Accent), ..SemanticPaint::default() };
     let style = &mut checkbox.style;
     style.control_height = None;
     style.background = Some(Role::Background);
