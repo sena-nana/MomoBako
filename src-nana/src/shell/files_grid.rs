@@ -1,32 +1,30 @@
 //! 文件卡片的列表区，对应 Vue `.files-list` 和读取、处理、出错三种状态框。
 //!
 //! 列表纵向滚动，内边距 16 / 20 / 20。文件夹一组、分隔线、文件一组，各段保持自身高度、段间距 14，
-//! 内容比列表高时由列表滚动。Vue 把这三段放进 CSS grid 的自动行，内容矮时行被拉伸、内容高时
-//! 行被压扁让卡片盖到分隔线上，这两种怪癖都不照抄。
+//! 内容比列表高时由列表滚动。两组卡片都走虚拟列表（见 `files_virtual.rs`），只建视口附近的行。
+//! Vue 把这三段放进 CSS grid 的自动行，内容矮时行被拉伸、内容高时行被压扁让卡片盖到分隔线上，
+//! 这两种怪癖都不照抄。
 
 use std::cell::RefCell;
 use std::sync::Arc;
 use std::time::Instant;
 
 use nana_ui::icons_tabler::LOADER_2;
-use nana_ui::runtime::view::{widget, AnyView, IntoView};
+use nana_ui::runtime::view::{node_ref, widget, AnyView, IntoView, NodeRef};
 use nana_ui::runtime::{
     Activate, AlignSpec, LengthSpec, RadiusTier, ScrollAxes, ScrollView, SemanticColorRole, SizeChanged, Stack,
 };
 
-use super::super::files::{DisplayMode, FileContext, FileRow, FilesMessage};
+use super::super::files::{FileContext, FileRow, FilesMessage};
 use super::super::workspace::{LibraryCategory, WorkspacePanel};
 use super::super::ShellViewModel;
-use super::cards::{self, CardState};
+use super::cards::CardState;
 use super::file_message;
 use super::style;
+use super::virtual_rows::{self, CardSpec, GAP, MASONRY_COLUMN};
 
 /// 列表区左右内边距。
 const LIST_PADDING_X: f32 = 20.0;
-/// 组内和组间的间距。
-const GAP: f32 = 14.0;
-/// Vue 瀑布流的 `column-width`。
-const MASONRY_COLUMN: f32 = 164.0;
 
 thread_local! {
     static LAST_ROW_CLICK: RefCell<Option<(String, Instant)>> = const { RefCell::new(None) };
@@ -97,6 +95,7 @@ fn state_box(label: String, error: bool, spinner: bool, model: &ShellViewModel) 
 }
 
 /// 分组列表。宽度按实际布局回报；还没回报时按窗口宽估算，保证首帧就是对的列数。
+/// 两组卡片都跟着这个滚动区虚拟化，滚动区的引用交给它们。
 fn list(model: &ShellViewModel) -> AnyView {
     let ctx = FileContext::from_model(model);
     let rows = model.files.visible_rows(&ctx);
@@ -110,23 +109,40 @@ fn list(model: &ShellViewModel) -> AnyView {
     let width = model.files.list_width.unwrap_or_else(|| estimated_list_width(model));
     let picked = picked_paths(&model.files);
     let drop_folder = (model.input.internal_active || model.input.dragging_files).then(|| model.input.hover_folder.clone()).flatten();
-    let state = |row: &FileRow| CardState {
-        selected: picked.iter().any(|path| path == &row.path),
-        drop_target: row.kind == "directory" && drop_folder.as_deref() == Some(row.path.as_str()),
+    let specs = |rows: Vec<FileRow>| {
+        rows.into_iter()
+            .map(|row| {
+                let state = CardState {
+                    selected: picked.iter().any(|path| path == &row.path),
+                    drop_target: row.kind == "directory" && drop_folder.as_deref() == Some(row.path.as_str()),
+                };
+                CardSpec { row, state }
+            })
+            .collect::<Vec<_>>()
     };
+    let scroll = node_ref();
+    let has_directories = !directories.is_empty();
+    let has_files = !files.is_empty();
     let mut sections = Vec::new();
-    if !directories.is_empty() {
-        sections.push(section(group(&directories, mode, width, &state), "file-group-directories"));
+    if has_directories {
+        let group = virtual_rows::group(specs(directories), mode, width, scroll, "file-virtual-directories");
+        sections.push(section(group, "file-group-directories"));
     }
-    if !directories.is_empty() && !files.is_empty() {
+    if has_directories && has_files {
         sections.push(section(divider(), "file-group-divider"));
     }
-    if !files.is_empty() {
-        sections.push(section(group(&files, mode, width, &state), "file-group-files"));
+    if has_files {
+        let group = virtual_rows::group(specs(files), mode, width, scroll, "file-virtual-files");
+        sections.push(section(group, "file-group-files"));
     }
     if let Some(sentinel) = load_more(model) {
         sections.push(section(sentinel, "file-group-more"));
     }
+    scroller(model, sections, scroll)
+}
+
+/// 列表滚动区和里面的内容列。内容列回报实际宽度，网格换行和瀑布流列数按它算。
+fn scroller(model: &ShellViewModel, sections: Vec<AnyView>, scroll: NodeRef) -> AnyView {
     let content = widget(
         Stack::column(GAP)
             .width(LengthSpec::Fill)
@@ -154,6 +170,7 @@ fn list(model: &ShellViewModel) -> AnyView {
         layout.min_width = Some(LengthSpec::Px(0.0));
         layout.width = Some(LengthSpec::Fill);
     }))
+    .node_ref(scroll)
     .children((content,))
     .key(list_scroll_key(model))
     .into_any()
@@ -197,116 +214,6 @@ fn divider() -> AnyView {
     widget(line).key("file-list-divider").into_any()
 }
 
-/// 一组条目，按展示方式排。
-fn group(rows: &[FileRow], mode: DisplayMode, width: f32, state: &dyn Fn(&FileRow) -> CardState) -> AnyView {
-    match mode {
-        DisplayMode::List => {
-            let cards = rows.iter().map(|row| cards::card(row, mode, cards::LIST_BOX, state(row))).collect::<Vec<_>>();
-            widget(Stack::column(8.0).width(LengthSpec::Fill).min_width(LengthSpec::Px(0.0))).children(cards).into_any()
-        }
-        DisplayMode::Grid => wrap(rows.iter().map(|row| cards::card(row, mode, cards::GRID_BOX, state(row))).collect()),
-        DisplayMode::Adaptive => wrap(rows.iter().map(|row| cards::card(row, mode, cards::adaptive_box(row), state(row))).collect()),
-        DisplayMode::Masonry => masonry(rows, width, state),
-    }
-}
-
-/// 网格和自适应：按卡片自身宽度换行，行列间距 14，靠左排。
-fn wrap(cards: Vec<AnyView>) -> AnyView {
-    widget(
-        Stack::row(GAP)
-            .wrap(true)
-            .align(AlignSpec::Start)
-            .width(LengthSpec::Fill)
-            .min_width(LengthSpec::Px(0.0))
-            .with_layout(|layout| layout.row_gap = Some(LengthSpec::Px(GAP))),
-    )
-    .children(cards)
-    .into_any()
-}
-
-/// 瀑布流：和 CSS `column-width: 164px; column-gap: 14px` 一样定列数和列宽，条目按顺序竖着装进各列。
-fn masonry(rows: &[FileRow], width: f32, state: &dyn Fn(&FileRow) -> CardState) -> AnyView {
-    let (count, column_width) = masonry_columns(width);
-    let heights = rows.iter().map(|row| cards::masonry_height(row, column_width) + GAP).collect::<Vec<_>>();
-    let split = balanced_columns(&heights, count);
-    let mut columns = Vec::new();
-    let mut start = 0;
-    for end in split {
-        let cards = rows[start..end]
-            .iter()
-            .map(|row| {
-                widget(Stack::column(0.0).width(LengthSpec::Fill).with_layout(|layout| layout.margin_bottom = Some(LengthSpec::Px(GAP))))
-                    .children((cards::card(row, DisplayMode::Masonry, cards::masonry_box(row, column_width), state(row)),))
-                    .into_any()
-            })
-            .collect::<Vec<_>>();
-        columns.push(
-            widget(Stack::column(0.0).width(LengthSpec::Px(column_width)).grow(0.0).shrink(0.0))
-                .children(cards)
-                .into_any(),
-        );
-        start = end;
-    }
-    widget(Stack::row(GAP).align(AlignSpec::Start).width(LengthSpec::Fill).min_width(LengthSpec::Px(0.0)))
-        .children(columns)
-        .into_any()
-}
-
-/// CSS 多列的列数和列宽：能放下几列 164 宽（含 14 间距）就放几列，至少一列，再把宽度均分。
-pub(super) fn masonry_columns(width: f32) -> (usize, f32) {
-    let width = width.max(1.0);
-    let count = (((width + GAP) / (MASONRY_COLUMN + GAP)).floor() as usize).max(1);
-    let column = ((width - GAP * (count - 1) as f32) / count as f32).max(1.0);
-    (count, column)
-}
-
-/// 按顺序把条目切成至多 `count` 列，让最高的一列尽量矮（CSS 多列的列平衡）。
-///
-/// 算法：最矮的可能列高至少是最高的单条；从这里起，逐个候选高度（各前缀和）尝试
-/// 顺序装填，第一个能在 `count` 列内装下的高度就是平衡高度。返回每列的结束下标。
-pub(super) fn balanced_columns(heights: &[f32], count: usize) -> Vec<usize> {
-    if heights.is_empty() {
-        return Vec::new();
-    }
-    let count = count.max(1);
-    let tallest = heights.iter().copied().fold(0.0_f32, f32::max);
-    let mut candidates = Vec::new();
-    for start in 0..heights.len() {
-        let mut total = 0.0;
-        for height in &heights[start..] {
-            total += height;
-            if total >= tallest - 0.01 {
-                candidates.push(total);
-            }
-        }
-    }
-    candidates.sort_by(f32::total_cmp);
-    for limit in candidates {
-        if let Some(split) = pack(heights, count, limit) {
-            return split;
-        }
-    }
-    vec![heights.len()]
-}
-
-/// 在 `limit` 高度内顺序装填，装得下就返回各列结束下标。
-fn pack(heights: &[f32], count: usize, limit: f32) -> Option<Vec<usize>> {
-    let mut split = Vec::new();
-    let mut used = 0.0;
-    for (index, height) in heights.iter().enumerate() {
-        if used > 0.0 && used + height > limit + 0.01 {
-            split.push(index);
-            used = 0.0;
-            if split.len() >= count {
-                return None;
-            }
-        }
-        used += height;
-    }
-    split.push(heights.len());
-    Some(split)
-}
-
 /// 还没有布局回报时，按窗口宽估算列表内容宽：减去侧栏、主区左右 24、详情 300 和间距 18、
 /// 卡片描边和列表左右内边距。窗口不超过 900 时详情排到下面，不再减详情宽。
 fn estimated_list_width(model: &ShellViewModel) -> f32 {
@@ -348,27 +255,4 @@ fn load_more(model: &ShellViewModel) -> Option<AnyView> {
             .on_cx(|_, _: &Activate, cx| cx.dispatch_program_all(file_message(FilesMessage::LoadMore)))
             .into_any(),
     )
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn masonry_columns_follow_css_column_width() {
-        assert_eq!(masonry_columns(516.0).0, 2);
-        assert!((masonry_columns(516.0).1 - 251.0).abs() < 0.01);
-        assert_eq!(masonry_columns(276.0).0, 1);
-        assert_eq!(masonry_columns(534.0).0, 3);
-        assert_eq!(masonry_columns(10.0).0, 1);
-    }
-
-    #[test]
-    fn balanced_columns_keep_order_and_minimize_the_tallest() {
-        assert_eq!(balanced_columns(&[100.0, 100.0], 2), vec![1, 2]);
-        assert_eq!(balanced_columns(&[100.0], 3), vec![1]);
-        assert_eq!(balanced_columns(&[50.0, 50.0, 100.0], 2), vec![2, 3]);
-        assert_eq!(balanced_columns(&[10.0, 10.0, 10.0], 2), vec![2, 3]);
-        assert!(balanced_columns(&[], 2).is_empty());
-    }
 }
