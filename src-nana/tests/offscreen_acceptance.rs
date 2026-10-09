@@ -3,10 +3,11 @@
 //! 每个证据文件都来自生产 `RuntimeDocument` 和同一个 `RuntimeAgentSession`，
 //! 不创建第二棵 UI 树。
 use momobako_nana::appearance::{self, Appearance};
+use momobako_nana::backend::services::repository::TaskProgressSnapshot;
 use momobako_nana::theme_map::clear_matches_background;
 use momobako_nana::{
     acceptance_document_at_width, acceptance_document_for,
-    shell::{ShellPage, ShellViewModel},
+    shell::{ShellMessage, ShellPage, ShellViewModel},
 };
 use nana_ui_devtools::agent::{AgentSession, RuntimeAgentSession, protocol::ThemeName};
 use nana_ui_devtools::offscreen;
@@ -295,7 +296,22 @@ fn special_models() -> Vec<(&'static str, ShellViewModel)> {
     let mut disabled = ShellViewModel::for_page(ShellPage::SettingsError);
     disabled.settings_error = Some("设置校验失败：保存操作暂不可用".into());
     let mut dense = ShellViewModel::for_page(ShellPage::TaskRunning);
-    dense.active_task_ids = (0..12).map(|i| format!("task-{i:02}")).collect();
+    dense.reduce(ShellMessage::TaskProgressLoaded(
+        (0..12u8)
+            .map(|i| TaskProgressSnapshot {
+                task_id: format!("task-{i:02}"),
+                protocol_id: "momobako.repository.sync".into(),
+                status: "running".into(),
+                phase: None,
+                label: Some(format!("扫描分区 {i:02}")),
+                current: None,
+                total: None,
+                percent: Some(f32::from(i) * 8.0),
+                error: None,
+                updated_at: i.to_string(),
+            })
+            .collect(),
+    ));
     dense.detail = "高密度任务列表 · 12 个运行中任务 · 24 个近期完成任务".into();
     let mut scenes = vec![
         ("long-content", long),
