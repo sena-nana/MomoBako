@@ -1,4 +1,4 @@
-//! 重挂保留滚动位置的回归：文件列表和设置页滚到中间后整棵重挂，偏移和视口里的行都不变。
+//! 重挂保留滚动位置的回归：文件列表滚到中间后整棵重挂、常驻的设置页同步之后，偏移和视口里的行都不变。
 
 use nana_ui::runtime::{component_descriptors, Entity, LayoutViewport, RuntimeDocument, ScrollOffset, ScrollView, StableNodeId};
 use nana_ui::NanaTextShaper;
@@ -192,12 +192,13 @@ fn settings_page_keeps_its_scroll_across_a_remount() {
     layout(&mut document, 420.0);
     assert_eq!(offset(&document, scroll).y, 160.0, "设置页要能滚到 160");
 
+    // 设置页是常驻路由：无关更新不重挂，滚动容器还是原来那个，偏移自然留着。
     unrelated_update(&mut model);
-    mount_shell(&mut document, &model).expect("重挂");
+    mount_shell(&mut document, &model).expect("同步");
     layout(&mut document, 420.0);
-    let remounted = route_root(&document);
-    assert_ne!(remounted, scroll, "无关更新后设置页分支应该整块重挂");
-    assert_eq!(offset(&document, remounted).y, 160.0, "重挂后设置页回到了顶部");
+    let kept = route_root(&document);
+    assert_eq!(kept, scroll, "无关更新后设置页分支不该重挂");
+    assert_eq!(offset(&document, kept).y, 160.0, "同步后设置页回到了顶部");
 
     // 换到首页：主体是另一个滚动容器，不继承设置页的偏移。
     model.page = ShellPage::FileList;

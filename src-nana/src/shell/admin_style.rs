@@ -7,7 +7,7 @@
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
-use nana_ui::runtime::view::{widget, AnyView, IntoView};
+use nana_ui::runtime::view::{fields, widget, AnyView, El, IntoProp, IntoView};
 use nana_ui::runtime::{
     AlignSpec, BoxPaint, Button, IconGlyph, InteractionStyle, JustifySpec, LengthSpec, NodeStyle, PaintContext, Painter,
     SemanticPaint, Stack, Text, TextHorizontalAlignment, TextInput,
@@ -22,6 +22,11 @@ pub(crate) const LINE: f32 = 1.55;
 pub(crate) const MONO_FAMILY: &str = "Cascadia Mono";
 /// `border-radius: var(--radius-pill)`。
 pub(crate) const PILL: f32 = 999.0;
+
+/// 绑定文字：`value` 是常量、信号或闭包，其余版式照 `node`。
+pub(crate) fn bound(node: Text, value: impl IntoProp<String>) -> El<Text> {
+    widget(node).prop::<String, fields::text::value>(value)
+}
 
 /// 一段文字：字号、字重、颜色，行高按 Vue 默认的 1.55 倍。
 pub(crate) fn label(value: impl Into<String>, size: f32, weight: u16, color: Role) -> Text {
@@ -97,8 +102,11 @@ pub(crate) enum Tone {
     Danger,
 }
 
+/// 禁用按钮的整体不透明度。
+pub(crate) const DISABLED_OPACITY: f32 = 0.45;
+
 /// Vue 原生 `<button>`：高 32、左右内边距 10、字 14/500、图标 14、间距 6、圆角 sm。
-/// 禁用时整体 45% 不透明，不换颜色。
+/// 禁用时整体 45% 不透明，不换颜色。要绑定禁用时用 `bind::ActionDisabled`，透明度一起换。
 pub(crate) fn action(text: impl Into<String>, icon: Option<Icon>, tone: Tone, disabled: bool) -> Button {
     let (foreground, background, hovered, pressed, weight) = match tone {
         Tone::Plain => (Role::Text, None, Some(Role::Hover), Some(Role::Active), 500),
@@ -136,7 +144,7 @@ pub(crate) fn action(text: impl Into<String>, icon: Option<Icon>, tone: Tone, di
         layout.flex_grow = Some(0.0);
         layout.flex_shrink = Some(0.0);
         if disabled {
-            layout.opacity = Some(0.45);
+            layout.opacity = Some(DISABLED_OPACITY);
         }
     }
     let mut button = Button::new(text).icon_gap(6.0).disabled(disabled).style(style);
@@ -252,20 +260,20 @@ pub(crate) fn rounded(stack: Stack, tier: Option<RadiusTier>) -> Stack {
     }
 }
 
-/// `.asset-stat`：高 26、左右 10、药丸、主背景、弱色 12/500。
-pub(crate) fn stat(text: impl Into<String>, key: impl Into<String>) -> AnyView {
+/// `.asset-stat`：高 26、左右 10、药丸、主背景、弱色 12/500。文字可以绑定。
+pub(crate) fn stat(text: impl IntoProp<String>, key: impl Into<String>) -> AnyView {
     let body = fixed(row(0.0), None, Some(26.0));
     widget(rounded(pad(body, 0.0, 10.0, 0.0, 10.0), None).surface(Role::Background))
-        .children((widget(label(text, 12.0, 500, Role::Muted)).key(key.into()),))
+        .children((bound(label(String::new(), 12.0, 500, Role::Muted), text).key(key.into()),))
         .into_any()
 }
 
-/// `.workspace-hints__chip`：高 28、左右 10、药丸、主背景、1px 边线、弱色 12/500。
-pub(crate) fn hint_chip(text: impl Into<String>, key: impl Into<String>) -> AnyView {
+/// `.workspace-hints__chip`：高 28、左右 10、药丸、主背景、1px 边线、弱色 12/500。文字可以绑定；
+/// 返回元素，调用方还能再绑显隐。
+pub(crate) fn hint_chip(text: impl IntoProp<String>, key: impl Into<String>) -> El<Stack, (El<Text>,)> {
     let body = fixed(row(0.0), None, Some(28.0));
     widget(rounded(pad(body, 0.0, 10.0, 0.0, 10.0), None).surface(Role::Background).outline(Role::Border, 1.0))
-        .children((widget(label(text, 12.0, 500, Role::Muted)).key(key.into()),))
-        .into_any()
+        .children((bound(label(String::new(), 12.0, 500, Role::Muted), text).key(key.into()),))
 }
 
 /// `.asset-card__pill` 的四种语气。
@@ -281,16 +289,15 @@ pub(crate) enum PillTone {
     Warning,
 }
 
-/// `.asset-card__pill`：高 24、左右 8、药丸、11/600。
-pub(crate) fn pill(text: impl Into<String>, tone: PillTone, key: impl Into<String>) -> AnyView {
+/// `.asset-card__pill` 的外框和字色：高 24、左右 8、药丸，底色按语气。
+pub(crate) fn pill_look(tone: PillTone) -> (Stack, Role) {
     let body = rounded(pad(fixed(row(0.0), None, Some(24.0)), 0.0, 8.0, 0.0, 8.0), None);
-    let (body, color) = match tone {
+    match tone {
         PillTone::Accent => (body.surface(Role::AccentSoft), Role::Accent),
         PillTone::Ghost => (body.surface(Role::Subtle), Role::Muted),
         PillTone::Danger => (body.painter(SoftFill::new(Soft::Danger, None)), Role::Danger),
         PillTone::Warning => (body.painter(SoftFill::new(Soft::Alpha { role: Role::Accent, alpha: 0.14 }, None)), Role::Accent),
-    };
-    widget(body).children((widget(label(text, 11.0, 600, color)).key(key.into()),)).into_any()
+    }
 }
 
 /// `.search-workbench__panel`：`bg-elev` 底、1px 透明边加 22 内边距、竖排间距 16，
@@ -346,9 +353,12 @@ pub(crate) fn eyebrow_text(value: &str) -> Text {
     text
 }
 
+/// 提示块外层：外边距 16/20/0，内容靠左。
+pub(crate) type NoticeEl = El<Stack, (El<Stack, (El<Text>,)>,)>;
+
 /// `.asset-browser__state`：外边距 16/20/0、内边距 10/12、xl 圆角、1px 边线、弱色字。
-/// 错误时换成危险色柔和底和危险色字。
-pub(crate) fn state_notice(text: String, error: bool, key: &'static str) -> AnyView {
+/// 错误时换成危险色柔和底和危险色字。文字可以绑定；返回元素，调用方还能再绑显隐。
+pub(crate) fn state_notice(text: impl IntoProp<String>, error: bool, key: impl Into<String>) -> NoticeEl {
     let body = pad(row(8.0), 10.0, 12.0, 10.0, 12.0);
     let (body, color) = if error {
         (body.painter(SoftFill::new(Soft::Danger, Some(RadiusTier::Xl)).bordered(Role::Danger, 1.0)), Role::Danger)
@@ -360,13 +370,15 @@ pub(crate) fn state_notice(text: String, error: bool, key: &'static str) -> AnyV
         layout.max_width = Some(LengthSpec::Fill);
     });
     widget(pad(column(0.0), 16.0, 20.0, 0.0, 20.0).align(AlignSpec::Start))
-        .children((widget(body).children((widget(wrapping(label(text, 14.0, 400, color))).key(key),)),))
-        .into_any()
+        .children((widget(body).children((bound(wrapping(label(String::new(), 14.0, 400, color)), text).key(key.into()),)),))
 }
 
+/// 虚线空状态：标题和说明。
+pub(crate) type EmptyEl = El<Stack, (El<Text>, El<Text>)>;
+
 /// `.search-workbench__empty`：虚线 `border-strong`、xl 圆角、内边距 24、`bg-subtle`，
-/// 18 号粗体标题和弱色说明竖排，间距 8，竖直居中并占满剩余高度。
-pub(crate) fn dashed_empty(title: &str, message: &str, key: &'static str) -> AnyView {
+/// 18 号粗体标题和弱色说明竖排，间距 8，竖直居中并占满剩余高度。文字可以绑定。
+pub(crate) fn dashed_empty(title: impl IntoProp<String>, message: impl IntoProp<String>, key: &'static str) -> EmptyEl {
     let frame = pad(Stack::fill_column(8.0), 24.0, 24.0, 24.0, 24.0)
         .justify(JustifySpec::Center)
         .surface(Role::Subtle)
@@ -379,11 +391,10 @@ pub(crate) fn dashed_empty(title: &str, message: &str, key: &'static str) -> Any
         });
     widget(frame)
         .children((
-            widget(label(title, 18.0, 700, Role::Text)).key(format!("{key}-title")),
-            widget(wrapping(label(message, 14.0, 400, Role::Muted))).key(format!("{key}-detail")),
+            bound(label(String::new(), 18.0, 700, Role::Text), title).key(format!("{key}-title")),
+            bound(wrapping(label(String::new(), 14.0, 400, Role::Muted)), message).key(format!("{key}-detail")),
         ))
         .key(key)
-        .into_any()
 }
 
 /// `.search-workbench__field`：主背景、1px 边线、lg 圆角，最小高 38，左右 12，间距 8，弱色。

@@ -19,7 +19,7 @@ use super::super::workspace::{WorkspacePanel, WorkspaceRepository};
 use super::super::{ShellMessage, ShellViewModel};
 use super::api::{ApiMessage, HttpResponse};
 use super::support::{self, action_can_run};
-use super::tool_native::{self, ImportAction};
+use super::tool_native::{self, ImportButton, ImportView};
 use super::{AdminEffect, AdminMessage, OperationProgress, PluginCallOrigin, ToolPageEntry};
 
 fn send(model: &mut ShellViewModel, message: AdminMessage) {
@@ -684,32 +684,34 @@ fn attach_repository(model: &mut ShellViewModel, capabilities: Vec<String>) {
     }];
 }
 
-fn import_action<'a>(actions: &'a [ImportAction], id: &str) -> &'a ImportAction {
-    actions.iter().find(|item| item.id == id).unwrap_or_else(|| panic!("missing {id}"))
+fn import_button(buttons: &[ImportButton], id: &str) -> FilesMessage {
+    buttons.iter().find(|item| item.id == id).map(|item| item.message.clone()).unwrap_or_else(|| panic!("missing {id}"))
 }
 
 #[test]
 fn builtin_import_pages_follow_the_file_machine() {
     let mut model = ShellViewModel::default();
-    let blocked = tool_native::import_actions(&model, support::TOOL_FILE_MANAGER);
-    let folder = import_action(&blocked, "folder");
-    assert!(!folder.enabled);
+    let buttons = tool_native::import_buttons(support::TOOL_FILE_MANAGER);
+    let blocked = ImportView::project(&model, support::TOOL_FILE_MANAGER);
+    assert!(!blocked.enabled);
+    assert_eq!(blocked.reason, Some("当前没有可用仓库。"));
     assert_eq!(tool_native::import_block_reason(&model), Some("当前没有可用仓库。"));
-    assert!(tool_native::import_message(folder.enabled, folder.message.clone()).is_none());
+    assert!(tool_native::import_message(blocked.enabled, import_button(&buttons, "folder")).is_none());
 
     attach_repository(&mut model, vec!["write".into()]);
-    let open = tool_native::import_actions(&model, support::TOOL_FILE_MANAGER);
-    let folder = import_action(&open, "folder");
-    assert!(folder.enabled);
+    let open = ImportView::project(&model, support::TOOL_FILE_MANAGER);
+    assert!(open.enabled);
     assert!(tool_native::import_block_reason(&model).is_none());
-    assert!(matches!(&folder.message, FilesMessage::OpenDialog(FileDialog::Import)));
-    model.reduce(tool_native::import_message(folder.enabled, folder.message.clone()).expect("folder"));
+    let folder = import_button(&buttons, "folder");
+    assert!(matches!(&folder, FilesMessage::OpenDialog(FileDialog::Import)));
+    model.reduce(tool_native::import_message(open.enabled, folder).expect("folder"));
     assert!(matches!(model.files.dialog, FileDialog::Import));
 
-    let eagle = tool_native::import_actions(&model, support::TOOL_EAGLE_IMPORTER);
-    let copy = import_action(&eagle, "copy");
-    assert!(matches!(&copy.message, FilesMessage::OpenEagle(mode) if mode == "copy"));
-    model.reduce(tool_native::import_message(copy.enabled, copy.message.clone()).expect("copy"));
+    let eagle = tool_native::import_buttons(support::TOOL_EAGLE_IMPORTER);
+    let copy = import_button(&eagle, "copy");
+    assert!(matches!(&copy, FilesMessage::OpenEagle(mode) if mode == "copy"));
+    let enabled = ImportView::project(&model, support::TOOL_EAGLE_IMPORTER).enabled;
+    model.reduce(tool_native::import_message(enabled, copy).expect("copy"));
     assert_eq!(model.files.eagle_mode, "copy");
 
     model.workspace.repositories[0].capabilities.clear();
