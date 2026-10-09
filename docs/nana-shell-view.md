@@ -21,11 +21,11 @@
 | --- | --- | --- | --- |
 | 侧栏 | `view_part_sidebar.rs` | 无 | 整块重挂；`SidebarProjection` 列出侧栏视图读到的全部状态，相等时不重挂 |
 | 主区 | `view_part_primary.rs`，路由在 `route_*.rs` | `dynamic(RouteSlot)`，按 `RouteKey` | 启动页常驻；其余路由的分支整块重挂 |
-| 浮层 | `view_part_overlay.rs` | 按 `OverlayKey` 换整块 | 各浮层整块重挂；没有浮层时槽位为空 |
+| 浮层 | `view_part_overlay.rs` | 按 `OverlayIdentity` 换块 | 常驻：身份不变时只经会话写信号；对话框走统一框架；没有浮层时槽位为空 |
 
 并行改区域时各改各的文件：
 
-- 浮层和对话框：`view_part_overlay.rs`（只改自己那种浮层在 `overlay_branch` 里的分支和 `needs_remount`），以及 `sidebar_dialogs.rs`、`sidebar_popover_view.rs`、`sidebar_tree_view.rs` 的菜单、`admin_view.rs` 的任务弹层、`source_prompt.rs`、`files_menu.rs` 等浮层视图。
+- 浮层和对话框：`view_part_overlay.rs`（`overlay_branch` 里自己那种浮层的分支，身份的结构见 `OverlayIdentity`），对话框框架 `overlay_dialog.rs`、`overlay_dialog_fields.rs`，会话 `overlay_session.rs`，以及 `sidebar_dialogs.rs`、`sidebar_smart_dialog.rs`、`sidebar_popover_view.rs`、`sidebar_tree_view.rs` 的菜单、`admin_view.rs` 的任务弹层、`source_prompt.rs`、`files_menu.rs`、`workspace_dialogs.rs`、`workspace_export_dialog.rs` 等浮层视图。
 - 文件页和详情：`route_files.rs` 和 `files_*.rs`、`inspect_*.rs`。
 - 侧栏和其余路由：`view_part_sidebar.rs`、`sidebar_*.rs`，以及 `route_search.rs`、`route_playlists.rs`、`route_settings.rs`、`route_admin.rs`、`route_startup.rs`、`route_missing.rs`、`route_empty.rs`。
 
@@ -91,13 +91,50 @@
   - `route_branch()`、`sidebar_root()`、`content_roots()` 判断哪一块换了（`view_part_primary_tests.rs`）。
 - 改完跑 `scene_shots` 出全部场景，和改动前逐字节比较。
 
+## 浮层：常驻和统一的对话框
+
+浮层块（`view_part_overlay.rs`）按 `OverlayIdentity` 换块：身份是 `OverlayKey`（哪一种浮层）加上它结构上的变化（文件对话框的种类、仓库弹层的页、右键菜单的目标和落点）。身份不变时浮层常驻，同一时刻最多一块，没有浮层时槽位为空。
+
+**会话。** 浮层视图的签名不变（`fn(&ShellViewModel) -> Option<AnyView>`），建的时候把同步要用的东西交给 `session::register`，浮层块挂这一块时用 `session::collect` 收下：
+
+- `Projected::register(signal, project)`：一个投影放在一个信号里，每次整体同步按 ViewModel 重算，变了才写；浮层已关、取不到投影时不写。
+- `Draft::register(model, read)`：输入框的草稿信号，按 `ModelField` 的规矩回写，给 `.model(..)` 用。
+- 对话框框架自己登记激活和交还焦点的会话（见下）。
+
+信号建在这一块的挂载作用域里，随浮层一起回收。列表行按内容做键（变了的行重建）或按编号做键、字段从投影里取（任务进度只改字段）。
+
+**对话框框架**（`overlay_dialog.rs`）。所有对话框都用 `DialogFrame`：
+
+```rust
+DialogFrame::new("folder-dialog", move || view.with(|view| view.title.to_string()), || close_message())
+    .danger()                        // 标题用错误色
+    .width(DialogWidth::Normal)      // Narrow 460 / Normal 520 / Export 560 / Wide 720，取最近的 DialogSize
+    .busy(move || view.with(|view| view.busy))
+    .close_button()                  // 标题右侧的关闭位（导出）
+    .dialog(body, footer(None, vec![action(..), action(..)]))
+// 确认框：.confirm(message, intent_button(..), intent_button(..), || confirm_message())
+```
+
+- 对话框是 NanaUI `Dialog` / `ConfirmDialog`，挂在自己的 `OverlayHost` 下，`activate_overlay` 打开；焦点陷阱、焦点归还、无障碍角色、初始焦点和开合动效都归框架。
+- 关闭策略是 `DialogClosePolicy::requests_only()`：Escape、点外面、关闭位只在对话框上发一次 `DialogCloseRequested`，框架换成 `new` 给的关闭消息；处理中（`busy`）什么也不发。确认框的取消和确认由框架变成 `ConfirmIntent`，按钮自己不发消息。
+- 激活时机：浮层块把这一块挂成脱离树的内容，`ShellView` 之后才放进 AppShell 的槽位，挂载时的 `on_mount` 运行时宿主还不在树里。所以对话框旁边放 `when(placed, ..)`：浮层块挂好后调会话的 `placed()` 置真，下一次刷新建出分支，分支的 `on_mount` 激活。外层是普通 `Stack`，放进槽位时 AppShell 按「有子节点」挡住点击，激活前也不会漏点。
+- 换下前浮层块调会话的 `retire()`：`dismiss_overlay(host)` 让框架关掉对话框、把焦点还给打开前的位置，然后再卸掉这一块。
+- 外层里宿主下面还有一层补色（`veil`）：框架的遮罩在线性空间混合、也没有背景模糊，补色层再压暗一层、做背景模糊，合起来和 Vue `.modal-overlay` 一样。它随 `placed` 从透明淡入（`El::animate` 的隐式过渡，时长和曲线同框架的表面淡入），不挡点击。NanaUI 补上遮罩令牌和模糊语义后删掉（见 `docs/nana-vue-parity.md`「NanaUI 缺口」）。
+- 字段、按钮、底栏、错误行用框架里的 `text_field` / `text_area_field` / `select_field` / `two_columns` / `action` / `footer` / `error_line` / `busy_note`，照 Vue `.dialog-field` 和 `.dialog-card__actions`。
+
+**先后和 Escape。** `OverlayKey` 的顺序就是同时打开时谁显示：关闭确认最先；其后是原来浮层槽位里的对话框、弹层和菜单；文件页的导出和文件对话框原来画在主区、压在浮层槽位下面，排在最后。Escape 先关显示着的那一层：显示着的对话框已经激活，由运行时拿到 Escape、发自己的关闭请求（`prevent_default` 为真，全局 Escape 不再发）；显示着的是弹层或菜单时走全局 Escape，`escape_layer` 里弹层和菜单都排在文件页的导出和文件对话框前面，等着的对话框不会先被关掉。`escape_layer` 里文件夹菜单排在仓库弹层前面、和 `OverlayKey` 相反，但两者都由点击打开，开着一个时浮层槽位挡住另一个的入口，不会同时开着。
+
+**组合输入。** 浮层换块会换掉输入框，新开的对话框一激活还会把焦点从别处的输入框拿走，所以文档里任何获得焦点的输入框还有预编辑时，浮层块都把换块延后到组合结束（`composing`）。打开期间的变化只写信号，不受影响。
+
+**离屏截图。** 离屏会话没有帧时钟，激活的对话框和补色层停在开场动效的第一帧（透明度 0）。`scene_shots` 截图前在有激活的浮层时把动效走完；没有激活的浮层时什么也不做，别的场景的像素不受影响。
+
 ## 不再扫描文档补登
 
 树常驻以后，后来才建出来的节点不会再被「挂载后扫一遍」补登，下面三件事都改成了声明式或全局：
 
-- **Escape**：`MomoBakoApplication::input_event` 收到运行时没处理掉的 Escape 按下（`prevent_default` 为假）时，按 `escape_layer(model)` 判断还有没有能关的层，有就发 `GapMessage::Escape`，归约时 `dismiss_top` 照同一个顺序关掉最上面一层。焦点在哪都一样。下拉框收起选项这类控件自己处理的 Escape 不会再关别的层。新的可关闭层加进 `EscapeLayer`。
+- **Escape**：激活的对话框由运行时直接拿到 Escape、发自己的关闭请求（见上一节）。其余的层：`MomoBakoApplication::input_event` 收到运行时没处理掉的 Escape 按下（`prevent_default` 为假）时，按 `escape_layer(model)` 判断还有没有能关的层，有就发 `GapMessage::Escape`，归约时 `dismiss_top` 照同一个顺序关掉最上面一层。焦点在哪都一样。下拉框收起选项这类控件自己处理的 Escape 不会再关别的层。新的可关闭层加进 `EscapeLayer`。
 - **系统文件拖放**：在建拖放目标的视图里给它一个 `node_ref`，调用 `input::accept_file_drops(node_ref)`，挂上后由 `on_mount` 登记。
-- **字段的无障碍名**：标题和控件分开写的字段，标题加 `.node_ref(caption)`，下拉框这类没有自己名称的控件加 `.labelled_by(caption)`（`sidebar_dialogs.rs` 的 `select_field`）。没有可见标题时写控件自己的 `label`。
+- **字段的无障碍名**：标题和控件分开写的字段，标题加 `.node_ref(caption)`，下拉框这类没有自己名称的控件加 `.labelled_by(caption)`（对话框框架 `overlay_dialog_fields.rs` 的 `select_field`）。没有可见标题时写控件自己的 `label`。
 
 ## NanaUI 缺口
 
@@ -106,6 +143,6 @@
 - `dynamic` 没有同步重建单个结构块的公开入口（`run_structural_now` 是 crate 内部的），分支只能在下一次刷新时换，而 `update` 里又不能刷新。换到旧视图路由时因此「同步挂好、刷新时交接」；同一路由里的更新不经过 `dynamic`，直接换路由容器里的内容。
 - 结构块的容器只收 `class` / `class_when` / `css` / `visible`，不能给一个现成的 `Stack` 或 `node_ref`。路由容器的排版只好开 `view-macro` 写 `css!`，找容器靠键。
 - `mount_view_detached` 挂出的根不在装配键表里，根节点的键路径是父节点的路径，自己的键不出现。`remount_state` 对根节点按父路径加类型找回，能用，但根的键（例如 `settings-scroll`）查不到。
-- 不挂在 `OverlayHost` 下的 `Dialog` 收不到 Escape 和点外面的关闭请求（`DialogCloseRequested` 只发给 `activate_overlay` 打开的对话框），壳层的 Escape 全局处理。
+- `activate_overlay` 要求宿主已经在树里：在脱离树的挂载里激活，框架算不出初始焦点（候选必须已挂上），开场动效也不播。浮层块因此借 `when(placed, ..)` 在放进槽位后的那次刷新里激活；视图层没有「挂进树时」的钩子，也没有声明式的 `open`。
 - 元素上没有声明式的拖放目标，要靠 `on_mount` 调 `set_drop_target_node`。
-- AppShell 只在自己投影时按「有没有子节点」决定 overlay 槽位挡不挡点击；槽位里的内容由结构块在刷新时换，它不会跟着重新判断。所以浮层块在没有浮层时把槽位清空，不用常驻的浮层根。
+- AppShell 只在自己投影时按「有没有子节点」决定 overlay 槽位挡不挡点击；槽位里的内容由结构块在刷新时换，它不会跟着重新判断（槽位根是 `OverlayHost` 时由宿主按激活的浮层决定，但弹层不是框架的浮层种类，放不进宿主）。所以浮层块按身份换块，没有浮层时把槽位清空，不用常驻的浮层根。
