@@ -23,16 +23,28 @@ mod time;
 pub(crate) mod style;
 #[path = "admin_icons.rs"]
 pub(crate) mod icons;
+#[path = "admin_bind.rs"]
+pub(crate) mod bind;
 #[path = "admin_reduce.rs"]
 mod reduce;
 #[path = "admin_view.rs"]
 mod view;
+#[path = "admin_settings_state.rs"]
+mod settings_state;
 #[path = "admin_settings_view.rs"]
 mod settings_view;
+#[path = "admin_plugins_state.rs"]
+mod plugins_state;
 #[path = "admin_plugins_view.rs"]
 mod plugins_view;
+#[path = "admin_plugin_card.rs"]
+mod plugin_card;
+#[path = "admin_logs_state.rs"]
+mod logs_state;
 #[path = "admin_logs_view.rs"]
 mod logs_view;
+#[path = "admin_actions_view.rs"]
+mod actions_view;
 #[path = "admin_gap.rs"]
 mod tools;
 #[path = "tool_native.rs"]
@@ -44,12 +56,18 @@ mod source_page;
 #[path = "source_provision.rs"]
 pub(crate) mod source_provision;
 
+pub(crate) use actions_view::{actions_panel, ActionsSignals, ActionsView};
+pub(crate) use logs_state::{LogsSignals, LogsView};
+pub(crate) use logs_view::logs_panel;
+pub(crate) use plugins_state::{PluginPanelSignals, PluginPanelView};
 pub(crate) use plugins_view::delete_dialog as plugin_delete_dialog;
 pub(crate) use reduce::reduce_message;
+pub(crate) use settings_state::{SettingsSignals, SettingsView};
 pub(crate) use settings_view::settings_page;
 pub(crate) use source_provision::SourceAuthState;
 pub use source_provision::SourceStep;
-pub(crate) use view::{admin_surface, task_popover};
+pub(crate) use tools::{extensions_page, ToolsSignals};
+pub(crate) use view::task_popover;
 
 #[cfg(test)]
 #[path = "admin_tests.rs"]

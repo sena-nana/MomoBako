@@ -2,7 +2,7 @@
 //!
 //! 外框是白底 `Lg` 圆角的一层（主区独占时外面再包一层壳层底色），放进工作区的主区或 AppShell 的
 //! body。外框里只有一个结构块 `dynamic(RouteSlot)`：
-//! - 常驻路由（现在是启动页）的分支只在进入路由时建一次，之后同步只写它的信号；
+//! - 常驻路由（启动页、搜索、设置、日志、拓展和动作页）的分支只在进入路由时建一次，之后同步只写它的信号；
 //! - 其余路由仍由旧视图函数整块建出。换到这种路由时，同步在本线程把新内容挂成脱离树的一块放进
 //!   交接处，把路由和版本号写进键；下一次刷新 `dynamic` 换出新分支，分支的 `on_mount` 把这块内容
 //!   挂进路由容器、卸掉上一块，再找回焦点、选区和滚动。留在同一个旧视图路由里、内容变了时不经过
@@ -24,7 +24,9 @@ use nana_ui::runtime::{
 };
 
 use super::hot::HotSignals;
+use super::inspect_search_view::{FilterBarSignals, FilterBarView, SearchPanelSignals, SearchPanelView};
 use super::remount_state::{self, KeptState};
+use super::route_admin::AdminSignals;
 use super::route_empty::{EmptySignals, EmptyView};
 use super::route_missing::MissingSignals;
 use super::route_startup::{StartupSignals, StartupView};
@@ -87,7 +89,18 @@ impl RouteKey {
 
 /// 常驻路由：分支只在进入时建一次，之后同步只写信号。
 fn resident(route: RouteKey) -> bool {
-    matches!(route, RouteKey::Startup | RouteKey::Missing | RouteKey::Empty)
+    matches!(
+        route,
+        RouteKey::Startup
+            | RouteKey::Missing
+            | RouteKey::Empty
+            | RouteKey::Search
+            | RouteKey::EmptySearch
+            | RouteKey::Settings
+            | RouteKey::Logs
+            | RouteKey::Extensions
+            | RouteKey::Actions
+    )
 }
 
 /// 常驻路由的分支。非常驻路由返回 `None`。
@@ -96,6 +109,12 @@ fn resident_view(route: RouteKey, signals: RouteSignals, hot: HotSignals) -> Opt
         RouteKey::Startup => Some(super::route_startup::view(signals.startup, hot)),
         RouteKey::Missing => Some(super::route_missing::view(signals.missing)),
         RouteKey::Empty => Some(super::route_empty::view(signals.empty)),
+        RouteKey::Search => Some(super::route_search::view(signals.filter, signals.search)),
+        RouteKey::EmptySearch => Some(super::route_search::empty_library(signals.search)),
+        RouteKey::Settings => Some(super::route_settings::view(signals.admin)),
+        RouteKey::Logs => Some(super::route_admin::logs(signals.filter, signals.admin)),
+        RouteKey::Extensions => Some(super::route_admin::extensions(signals.filter, signals.admin)),
+        RouteKey::Actions => Some(super::route_admin::actions(signals.filter, signals.admin)),
         _ => None,
     }
 }
@@ -103,14 +122,17 @@ fn resident_view(route: RouteKey, signals: RouteSignals, hot: HotSignals) -> Opt
 /// 整块重挂的路由内容。常驻路由返回 `None`。
 fn legacy_view(route: RouteKey, model: &ShellViewModel) -> Option<AnyView> {
     let view = match route {
-        RouteKey::Startup => return None,
-        RouteKey::Settings => super::route_settings::view(model),
+        RouteKey::Startup
+        | RouteKey::Missing
+        | RouteKey::Empty
+        | RouteKey::Search
+        | RouteKey::EmptySearch
+        | RouteKey::Settings
+        | RouteKey::Logs
+        | RouteKey::Extensions
+        | RouteKey::Actions => return None,
         RouteKey::Files => super::route_files::view(model),
-        RouteKey::Search => super::route_search::view(model),
-        RouteKey::EmptySearch => super::route_search::empty_library(model),
         RouteKey::Playlists => super::route_playlists::view(model),
-        RouteKey::Logs | RouteKey::Extensions | RouteKey::Actions => super::route_admin::view(model),
-        RouteKey::Missing | RouteKey::Empty => return None,
         RouteKey::Blank => super::route_home::blank(model),
     };
     Some(view)
@@ -122,23 +144,43 @@ pub(crate) struct RouteSignals {
     startup: StartupSignals,
     missing: MissingSignals,
     empty: EmptySignals,
+    /// 首页筛选栏：启动页和设置页以外每次同步都写，常驻首页路由用 `resident_filter_bar` 嵌进外框。
+    filter: FilterBarSignals,
+    /// 搜索面板，有仓库和没有资源库的两条搜索路由共用。
+    search: SearchPanelSignals,
+    /// 设置、日志、拓展和动作页。
+    admin: AdminSignals,
 }
 
 impl RouteSignals {
     fn new(model: &ShellViewModel) -> Self {
-        Self { startup: StartupSignals::new(model), missing: MissingSignals::new(model), empty: EmptySignals::new(model) }
+        Self {
+            startup: StartupSignals::new(model),
+            missing: MissingSignals::new(model),
+            empty: EmptySignals::new(model),
+            filter: FilterBarSignals::new(),
+            search: SearchPanelSignals::new(),
+            admin: AdminSignals::new(),
+        }
     }
 
-    /// 只写当前路由的投影：别的常驻路由进来之前会先写一次再建分支。
+    /// 只写当前路由的投影：别的常驻路由进来之前会先写一次再建分支。筛选栏属于首页外框，
+    /// 首页各路由都写。
     fn write(&self, route: RouteKey, model: &ShellViewModel) {
-        if route == RouteKey::Startup {
-            self.startup.write(StartupView::project(model));
+        match route {
+            RouteKey::Startup => self.startup.write(StartupView::project(model)),
+            RouteKey::Missing => self.missing.write(model),
+            RouteKey::Empty => self.empty.write(EmptyView::project(model)),
+            RouteKey::Search | RouteKey::EmptySearch => self.search.write(SearchPanelView::project(model)),
+            RouteKey::Settings => self.admin.write_settings(model),
+            RouteKey::Logs => self.admin.write_logs(model),
+            RouteKey::Extensions => self.admin.write_extensions(model),
+            RouteKey::Actions => self.admin.write_actions(model),
+            RouteKey::Files | RouteKey::Playlists | RouteKey::Blank => {}
         }
-        if route == RouteKey::Missing {
-            self.missing.write(model);
-        }
-        if route == RouteKey::Empty {
-            self.empty.write(EmptyView::project(model));
+        // 筛选栏只在有仓库的首页上出现：启动、设置、缺失和空库页都不写。
+        if !matches!(route, RouteKey::Startup | RouteKey::Settings | RouteKey::Missing | RouteKey::Empty) {
+            self.filter.write(FilterBarView::project(model));
         }
     }
 }
