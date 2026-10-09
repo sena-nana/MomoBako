@@ -3,7 +3,7 @@
 //! 时钟留在 `ShellViewModel` 上。界面按 `hot::MotionFrame` 取样，逐帧只改绑定的字段；
 //! 内容重挂后进行中的轨道还在，按已经走过的时间取样，不会从 0 重新开始。减少动效时全部立刻停在终点。
 
-use nana_ui::runtime::view::{widget, AnyView, IntoView, PropSource};
+use nana_ui::runtime::view::{widget, AnyView, IntoView};
 
 use super::hot::{LayerPaint, LayerPaintField};
 
@@ -485,19 +485,13 @@ impl Track {
     }
 }
 
-/// 对话框遮罩透明度和卡片的上移、缩放。逐帧的值绑在热信号上，开合动效不重挂浮层。
-pub fn paint_modal(view: impl IntoView, motion: &MotionState) -> AnyView {
-    paint_layer(view, super::hot::prop(|signals| signals.modal, LayerPaint::modal(motion)))
-}
-
-/// 弹层透明度和 4px 上移。
-pub fn paint_panel(view: impl IntoView, motion: &MotionState) -> AnyView {
-    paint_layer(view, super::hot::prop(|signals| signals.panel, LayerPaint::panel(motion)))
-}
-
+/// 弹层透明度和 4px 上移。逐帧的值绑在热信号上，开合动效不重挂浮层。对话框的开合动效由
+/// NanaUI 在激活和关闭时自己播。
+///
 /// 外层是 AppShell 浮层槽位的根，AppShell 给它打铺满窗口的布局补丁并让它挡住下面的点击；
 /// 它自己不带绑定。透明度和变换绑在铺满外层的内层上：绑定逐帧重投影的是内层，冲不掉外层的补丁。
-fn paint_layer(view: impl IntoView, paint: PropSource<LayerPaint>) -> AnyView {
+pub fn paint_panel(view: impl IntoView, motion: &MotionState) -> AnyView {
+    let paint = super::hot::prop(|signals| signals.panel, LayerPaint::panel(motion));
     let layer = widget(nana_ui::runtime::Stack::fill_column(0.0))
         .prop::<LayerPaint, LayerPaintField>(paint)
         .children((view.into_any(),));

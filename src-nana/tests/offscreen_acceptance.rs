@@ -227,6 +227,7 @@ fn render_case(
         .scene_probe(root_node.id)
         .ok_or("missing root scene probe")?;
     let hits = session.hit_test(20.0, 20.0);
+    settle_dialogs(&mut session)?;
     let png = root.join(format!("{stem}.png"));
     let stats = session.screenshot_png(&png).map_err(|e| e.to_string())?;
     if stats.width != viewport.width
@@ -259,6 +260,26 @@ fn render_case(
         "viewport": {"width": viewport.width, "height": viewport.height},
         "artifacts": paths.into_iter().map(|path| json!({"path": path.file_name().unwrap().to_string_lossy(), "sha256": sha256(&path).unwrap_or_else(|e| format!("error:{e}")), "bytes": fs::metadata(&path).map(|m| m.len()).unwrap_or(0)})).collect::<Vec<_>>(),
     }))
+}
+
+/// 框架激活的对话框开着时，把它的进场动效走完再截图。离屏会话没有帧时钟，不推进就截到透明度
+/// 为 0 的对话框；没有激活的浮层时什么也不做。
+fn settle_dialogs(session: &mut RuntimeAgentSession) -> Result<(), String> {
+    let document_id = session.document().document();
+    let context = session.document_mut().context_mut();
+    if context.active_runtime_overlay(document_id).is_none() {
+        return Ok(());
+    }
+    for _ in 0..64 {
+        let Some(deadline) = context.next_animation_deadline() else {
+            break;
+        };
+        if deadline > std::time::Duration::from_secs(2) {
+            break;
+        }
+        context.advance_animations(deadline);
+    }
+    session.flush().map(|_| ()).map_err(|e| e.to_string())
 }
 
 fn special_models() -> Vec<(&'static str, ShellViewModel)> {

@@ -80,6 +80,7 @@ fn title_bar_search_keeps_its_preedit_through_messages_and_frames() {
         harness.frame();
         assert_composing(&harness, "全局搜索", search, "zhong", "动效帧");
     }
+    assert!(harness.content_roots().0.is_none(), "组合中开对话框会抢走焦点，要等组合结束");
     harness.commit("中");
     for message in harness.take_messages() {
         harness.apply(message);
@@ -88,6 +89,9 @@ fn title_bar_search_keeps_its_preedit_through_messages_and_frames() {
     assert_eq!(harness.input("全局搜索"), search);
     assert_eq!(harness.value(search), "中");
     assert_eq!(harness.model.inspect.query, "中");
+    let dialog = harness.content_roots().0.expect("组合结束后对话框打开");
+    let focused = harness.focused().expect("焦点");
+    assert!(harness.document().context().world().is_descendant_or_self(focused, dialog), "对话框打开后焦点在对话框里");
 }
 
 /// 受控输入的回滚竞态：按键的消息还排在后台消息后面没归约时，同步不能把 ViewModel 里较旧的
@@ -115,33 +119,41 @@ fn search_draft_survives_a_background_message_ahead_of_its_keystroke() {
     assert_eq!(harness.model.inspect.query, "ab");
 }
 
+/// 对话框常驻以后，组合中的输入框不再等重挂：后台消息、对话框自己的状态变化和动效帧都只改
+/// 绑定的字段，输入框节点、预编辑和焦点一直不动；取消或提交后也还是同一个输入框。
 #[test]
-fn dialog_input_defers_its_remount_until_the_composition_ends() {
+fn dialog_input_keeps_its_node_and_preedit_while_composing() {
     let mut harness = ShellHarness::mount(scene("folder-create-dialog"));
     let field = harness.input("文件夹名称");
     harness.focus(field);
     harness.compose("wenjian");
-    let deferred = harness.view_stats().deferred;
+    let overlay = harness.content_roots().0.expect("对话框在浮层里");
+    let surface = harness.keyed("dialog-surface").expect("对话框");
     for message in background_messages() {
         harness.apply(message);
         harness.flush();
         assert_composing(&harness, "文件夹名称", field, "wenjian", "后台消息");
     }
+    harness.model.sidebar.folder_dialog.error = "名称已存在".into();
+    harness.sync();
+    harness.flush();
+    assert_composing(&harness, "文件夹名称", field, "wenjian", "对话框出错");
+    assert!(harness.find("名称已存在").is_some(), "错误没有原地显示出来");
     for _ in 0..12 {
         harness.frame();
         assert_composing(&harness, "文件夹名称", field, "wenjian", "动效帧");
     }
-    assert!(harness.view_stats().deferred > deferred, "组合中的对话框应该延后重挂");
+    assert_eq!(harness.content_roots().0, Some(overlay), "常驻对话框不该重挂");
+    assert_eq!(harness.keyed("dialog-surface"), Some(surface));
 
-    // 输入法取消：没有新文字，下一帧按最新状态补挂，焦点和空草稿回到新的输入框上。
+    // 输入法取消：没有新文字，输入框和焦点都还在原处。
     harness.cancel_composition();
     harness.frame();
-    let remounted = harness.input("文件夹名称");
-    assert_ne!(remounted, field, "组合结束后对话框应该补挂");
-    assert_eq!(harness.focused(), Some(remounted), "补挂后焦点没有回到输入框");
+    assert_eq!(harness.input("文件夹名称"), field);
+    assert_eq!(harness.focused(), Some(field));
     harness.assert_same_as_fresh_mount();
 
-    // 再组合一次并提交：文字进草稿，对话框重挂后输入框里是提交的文字。
+    // 再组合一次并提交：文字进草稿，还是同一个输入框。
     harness.compose("wenjian");
     harness.commit("文件");
     for message in harness.take_messages() {
@@ -149,37 +161,33 @@ fn dialog_input_defers_its_remount_until_the_composition_ends() {
     }
     harness.flush();
     assert_eq!(harness.model.sidebar.folder_dialog.value, "文件");
-    let committed = harness.input("文件夹名称");
-    assert_eq!(harness.value(committed), "文件");
-    assert_eq!(harness.focused(), Some(committed));
+    assert_eq!(harness.input("文件夹名称"), field);
+    assert_eq!(harness.value(field), "文件");
+    assert_eq!(harness.focused(), Some(field));
+    assert_eq!(harness.content_roots().0, Some(overlay), "提交草稿不该重挂对话框");
     harness.assert_same_as_fresh_mount();
 }
 
-/// 对话框打开动效：遮罩透明度逐帧变大，浮层和主区一次都不重挂，浮层根节点不换。
+/// 对话框打开：挂在自己的宿主下、由框架激活，开合动效归框架；壳层的动效帧不重挂浮层和主区，
+/// 浮层根节点不换。
 #[test]
-fn modal_frames_only_touch_the_bound_layer() {
+fn dialog_opens_through_the_framework_and_frames_do_not_remount() {
     let mut harness = ShellHarness::mount(scene("live-files-plain"));
     harness.apply(ShellMessage::Sidebar(SidebarMessage::Gap(GapMessage::OpenFolderCreate(String::new()))));
     harness.flush();
     let (overlay, primary) = harness.content_roots();
     let overlay = overlay.expect("对话框在浮层里");
+    let host = harness.keyed("dialog-host").expect("对话框宿主");
+    let dialog = harness.keyed("dialog-surface").expect("对话框");
+    let active = |harness: &ShellHarness| harness.document().context().world().overlay_host(host).and_then(|state| state.active);
+    assert_eq!(active(&harness), Some(dialog), "对话框应该是宿主激活的浮层");
     let remounts = harness.view_stats().remounts;
-    // 浮层根下面铺满它的那一层带透明度和变换。
-    let layer = harness.document().context().world().node(overlay).and_then(|node| node.children.first().copied()).expect("浮层内层");
-    let opacity = |harness: &ShellHarness| {
-        harness.document().context().world().node_style(layer).and_then(|style| style.layout.opacity).expect("浮层内层有透明度")
-    };
-    let mut seen = vec![opacity(&harness)];
     for _ in 0..14 {
         harness.frame();
-        seen.push(opacity(&harness));
+        assert_eq!(active(&harness), Some(dialog));
     }
     assert_eq!(harness.view_stats().remounts, remounts, "动效帧重挂了内容");
     assert_eq!(harness.content_roots(), (Some(overlay), primary), "动效帧换掉了内容根节点");
-    assert_eq!(seen.first().copied(), Some(0.0), "打开时遮罩从 0 开始");
-    assert_eq!(seen.last().copied(), Some(1.0), "动效走完遮罩不透明");
-    assert!(seen.windows(2).all(|pair| pair[0] <= pair[1]), "遮罩透明度应逐帧变大：{seen:?}");
-    assert!(seen.windows(2).filter(|pair| pair[0] < pair[1]).count() >= 5, "透明度没有逐帧变化：{seen:?}");
     harness.assert_same_as_fresh_mount();
 }
 
