@@ -1,6 +1,7 @@
 //! 播放集页常驻写法的回归。播放集路由现在还是旧视图路由，这里把页面单独挂在一份文档里，信号常驻，
 //! 照常驻路由的样子写投影：只有当前播放或页眉变了时列表不重建、字段原地改；重排和增删时整个列表
-//! 重建，焦点回到原来那个条目的同一个按钮上；没点开到点开时空框和面板原地互换。
+//! 重建，焦点回到原来那个条目的同一个按钮上；没点开到点开时空框和面板原地互换。每次写完都和
+//! 同一 ViewModel 新挂的页面按无障碍树比一次。
 
 use nana_ui::runtime::view::{widget, IntoView};
 use nana_ui::runtime::{DocumentId, Entity, LayoutViewport, MountedView, ReorderList, RuntimeDocument, Stack, StableNodeId};
@@ -48,10 +49,12 @@ impl PageHarness {
         harness
     }
 
-    /// 写入这份 ViewModel 的投影，再刷新绑定和布局。
+    /// 写入这份 ViewModel 的投影，再刷新绑定和布局；写完和同一 ViewModel 新挂的页面比一次。
     fn write(&mut self, model: &ShellViewModel) {
         self.signals.write(PlaylistPageView::project(model));
         self.flush();
+        let fresh = Self::mount(model);
+        assert_eq!(semantic_lines(&self.document), semantic_lines(&fresh.document), "增量更新后的页面和新挂的不一样");
     }
 
     fn flush(&mut self) {
@@ -99,6 +102,29 @@ impl PageHarness {
             .read(Entity::<ReorderList>::from_stable_id(list), |list| list.selected_value().map(|value| value.to_string()))
             .expect("读条目列表")
     }
+}
+
+/// 文档的无障碍树：角色、名称、值和布局盒（取到 0.1 像素），节点编号不比。
+fn semantic_lines(document: &RuntimeDocument) -> Vec<String> {
+    document
+        .context()
+        .world()
+        .project_accessibility(document.document())
+        .into_iter()
+        .map(|node| {
+            let bounds = node.bounds;
+            format!(
+                "{:?} {:?} {:?} {:.1},{:.1} {:.1}x{:.1}",
+                node.role,
+                node.label.as_deref().unwrap_or(""),
+                node.value.as_ref().map(|value| value.as_str()).unwrap_or(""),
+                bounds.x,
+                bounds.y,
+                bounds.width,
+                bounds.height
+            )
+        })
+        .collect()
 }
 
 #[test]

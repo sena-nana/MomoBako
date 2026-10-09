@@ -77,6 +77,30 @@ fn unrelated_updates_keep_every_missing_node() {
     harness.assert_same_as_fresh_mount();
 }
 
+/// 刚打的字还没归约，先到了一条后台消息：同步写回的是 ViewModel 里较旧的草稿，但草稿相对上次投影
+/// 没变，不该写回信号把刚打的字冲掉。
+#[test]
+fn a_background_message_does_not_roll_back_typed_text() {
+    let mut harness = ShellHarness::mount(missing());
+    harness.model.workspace.choose_missing_path();
+    harness.sync();
+    harness.flush();
+    let field = harness.input("资源库新位置");
+    harness.focus(field);
+    harness.type_text("E:");
+    let typed = harness.take_messages();
+    harness.apply(ShellMessage::Player(crate::shell::player::PlayerMessage::SetVolume(0.4)));
+    harness.flush();
+    assert_eq!(harness.value(field), "E:", "后台消息把刚打的字冲掉了");
+    for message in typed {
+        harness.apply(message);
+    }
+    harness.flush();
+    assert_eq!(harness.value(field), "E:");
+    assert_eq!(harness.model.workspace.path_draft, "E:");
+    harness.assert_same_as_fresh_mount();
+}
+
 /// 重定向输入：出现后打两个字，消息归约同步以后字还在、还是同一个输入框；提交后按钮禁用、
 /// 主按钮写「重定向中...」、输入藏起来；失败后错误条出现，按钮恢复。
 #[test]
