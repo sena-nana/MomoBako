@@ -47,7 +47,7 @@ yarn tauri:dev               # Vue/Tauri 对照窗口，先构建、打包并暂
 - `NativeServices::start`（`src-nana/src/services.rs`）启动一份 `RepositoryRuntime`，把资源库查询、文件浏览、交互、管理、插件、系统和 Mutsuki 任务 ViewModel 都绑在它上面。壳层只经这些 ViewModel 调服务，不调 Tauri command。启动失败时窗口进错误页（`initialize`），`NativeServices` 销毁时关掉 Runtime 的辅助进程。
 - 归约留下的副作用由 `src-nana/src/*_dispatch.rs` 交给 `RuntimeProgramContext::run_task`，结果作为 `ShellMessage` 回到归约。
 - 宿主事件边界在 `src-backend/src/services/host_events.rs`：`HostEvent`（日志记录、资源库结构更新）和 `HostEventSink`。Tauri 入口（`src-tauri/src/app_shell.rs`）按原事件名 `system://log-recorded`、`repository://structure-updated` 和原 JSON 负载转给前端。Nana 用 `host_event_channel` 接收，`NativeServices::pump_host_events` 在独立线程里把事件转成 `ShellMessage::Host`。日志合并、启动日志和结构更新后的静默重读见逻辑矩阵的「宿主事件」。
-- 宿主请求在 `src-nana/src/host_api.rs`。外部打开和目录揭示（`OpenExternal`）、拖出和最小化到托盘（`HostInputRequest`）由 `host_bridge::perform` 执行；窗口最小化、最大化和关闭经 `host_api::WindowCommand` 换成 Nana 平台命令。系统文件对话框直接排成 Nana 平台的 `WindowCommand::OpenFileDialog`，编号 1–8 在 `src-nana/src/shell/input_support.rs`。
+- 宿主请求在 `src-nana/src/host_api.rs`。外部打开和目录揭示（`OpenExternal`）、拖出和最小化到托盘（`HostInputRequest`）由 `host_bridge::perform` 执行，每次执行都清空队列，执行不了的请求记日志后丢掉；关闭确认是浮层里的确认框，只看 `InputState::pending_close`，不经宿主请求；窗口最小化、最大化和关闭经 `host_api::WindowCommand` 换成 Nana 平台命令。系统文件对话框直接排成 Nana 平台的 `WindowCommand::OpenFileDialog`，编号 1–8 在 `src-nana/src/shell/input_support.rs`。
 
 ## 已经接通的能力
 
