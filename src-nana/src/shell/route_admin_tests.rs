@@ -124,6 +124,124 @@ fn new_logs_append_rows_without_rebuilding_the_list() {
     harness.assert_same_as_fresh_mount();
 }
 
+/// 日志列表滚动区和日志页主体的键。
+const LOG_SCROLL: &str = "admin-log-scroll";
+const LOGS_BODY: &str = "workspace-page-body-HasRepository-Logs";
+
+/// 最小窗口（960×600）的日志面板，再收到第 5..=`last` 条实时日志，多到一屏放不下。
+fn crowded_logs(last: u32) -> ShellHarness {
+    let mut harness = ShellHarness::mount_at(ShellViewModel::for_page(ShellPage::Logs), 960.0, 600.0);
+    for index in 5..=last {
+        harness.apply(log(index));
+    }
+    harness.flush();
+    harness
+}
+
+/// 滚动区现在的纵向偏移。
+fn scroll_y(harness: &ShellHarness, key: &str) -> f32 {
+    let id = harness.keyed(key).unwrap_or_else(|| panic!("缺少滚动区 {key}"));
+    harness.document().context().world().scroll_offset(id).unwrap_or_default().y
+}
+
+/// 滚动区能滚到的最远纵向偏移。
+fn scroll_end(harness: &ShellHarness, key: &str) -> f32 {
+    let id = harness.keyed(key).unwrap_or_else(|| panic!("缺少滚动区 {key}"));
+    let metrics = harness.document().context().world().scroll_metrics(id).unwrap_or_else(|| panic!("{key} 没有滚动尺寸"));
+    (metrics.content_height - metrics.viewport_height).max(0.0)
+}
+
+/// 把滚动区滚到 `y`。
+fn scroll_list_to(harness: &mut ShellHarness, key: &str, y: f32) {
+    let id = harness.keyed(key).unwrap_or_else(|| panic!("缺少滚动区 {key}"));
+    harness.window.document.context_mut().scroll_to(Entity::<ScrollView>::from_stable_id(id), ScrollOffset { x: 0.0, y }).expect("滚动");
+    harness.flush();
+}
+
+/// 节点的布局盒。
+fn bounds(harness: &ShellHarness, key: &str) -> nana_ui::runtime::LayoutBox {
+    let id = harness.keyed(key).unwrap_or_else(|| panic!("缺少 {key}"));
+    harness.document().context().world().layout_box(id).unwrap_or_else(|| panic!("{key} 没有布局盒"))
+}
+
+/// 列表停在末尾。
+fn at_end(harness: &ShellHarness) -> bool {
+    (scroll_y(harness, LOG_SCROLL) - scroll_end(harness, LOG_SCROLL)).abs() < 0.5
+}
+
+/// 最小窗口下日志多到放不下：日志页主体不是滚动区，面板正好收在主体里，页头、工具条和筛选留在视口里；
+/// 日志列表在筛选下面占满剩下的高度、自己滚，追踪时停在末尾。
+#[test]
+fn log_list_scrolls_under_a_fixed_header() {
+    let harness = crowded_logs(12);
+    let body = harness.keyed(LOGS_BODY).expect("日志页主体");
+    assert!(harness.document().context().world().scroll_metrics(body).is_none(), "日志页主体不该是滚动区");
+    let (body_box, panel) = (bounds(&harness, LOGS_BODY), bounds(&harness, "admin-log-panel"));
+    assert!(panel.y + panel.height <= body_box.y + body_box.height + 0.5, "面板超出了主体：{panel:?} / {body_box:?}");
+    for key in ["admin-log-title", "admin-log-toolbar", "admin-log-filters"] {
+        let node = bounds(&harness, key);
+        assert!(node.y >= panel.y && node.y + node.height <= 600.0, "{key} 不在视口里：{node:?}");
+    }
+    let (filters, list) = (bounds(&harness, "admin-log-filters"), bounds(&harness, LOG_SCROLL));
+    assert!(list.y >= filters.y + filters.height, "列表要在筛选下面：{list:?}");
+    assert!(list.height >= 150.0, "最小窗口下列表至少放得下一张卡片：{list:?}");
+    assert!((panel.y + panel.height - 23.0 - (list.y + list.height)).abs() < 0.5, "列表要占满面板剩下的高度：{list:?} / {panel:?}");
+    assert!(scroll_end(&harness, LOG_SCROLL) > 0.0, "日志多到放不下时列表要能滚");
+    assert!(at_end(&harness), "追踪时列表停在末尾");
+}
+
+/// 暂停追踪：滚到中间后新日志到达，列表停在原位；恢复追踪后下一条日志到达时回到末尾。
+#[test]
+fn paused_log_list_holds_its_position() {
+    let mut harness = crowded_logs(12);
+    harness.apply(ShellMessage::Admin(AdminMessage::SetLogPaused(true)));
+    harness.flush();
+    scroll_list_to(&mut harness, LOG_SCROLL, 100.0);
+    let scroll = harness.keyed(LOG_SCROLL).expect("列表");
+    let title = bounds(&harness, "admin-log-title");
+    for index in 13..=14 {
+        harness.apply(log(index));
+        harness.flush();
+        assert_eq!(harness.keyed(LOG_SCROLL), Some(scroll), "新日志到达换掉了列表的滚动区");
+        assert_eq!(scroll_y(&harness, LOG_SCROLL), 100.0, "暂停时新日志把列表滚走了");
+        assert_eq!(bounds(&harness, "admin-log-title"), title, "页头跟着动了");
+    }
+    harness.apply(ShellMessage::Admin(AdminMessage::SetLogPaused(false)));
+    harness.flush();
+    assert_eq!(scroll_y(&harness, LOG_SCROLL), 100.0, "恢复追踪本身不滚动，等下一条日志");
+    harness.apply(log(15));
+    harness.flush();
+    assert!(at_end(&harness), "恢复追踪后新日志没有把列表带到末尾");
+    harness.assert_same_as_fresh_mount();
+}
+
+/// 换到别的面板再回来：日志分支重建，列表从顶部开始，追踪时再跟到末尾；暂停时停在顶部。
+/// 和改动前主区滚动区按键重建的规则一样。
+#[test]
+fn returning_to_logs_restarts_the_list_by_tracking_state() {
+    for paused in [false, true] {
+        let mut harness = crowded_logs(12);
+        if paused {
+            harness.apply(ShellMessage::Admin(AdminMessage::SetLogPaused(true)));
+        }
+        scroll_list_to(&mut harness, LOG_SCROLL, 100.0);
+        let list = harness.keyed(LOG_SCROLL).expect("列表");
+        for panel in [WorkspacePanel::Extensions, WorkspacePanel::Logs] {
+            harness.apply(ShellMessage::SetWorkspacePanel(panel));
+            harness.model.admin.take_effects();
+            harness.flush();
+            harness.flush();
+        }
+        assert_ne!(harness.keyed(LOG_SCROLL), Some(list), "回来时日志分支应该重建");
+        if paused {
+            assert_eq!(scroll_y(&harness, LOG_SCROLL), 0.0, "暂停时回到日志面板应从顶部开始");
+        } else {
+            assert!(scroll_end(&harness, LOG_SCROLL) > 0.0);
+            assert!(at_end(&harness), "追踪时回到日志面板应停在末尾");
+        }
+    }
+}
+
 /// 日志筛选：换级别筛选时留下的行不重建，筛掉的行不在无障碍树里。
 #[test]
 fn log_filters_keep_the_rows_they_still_show() {
@@ -137,12 +255,10 @@ fn log_filters_keep_the_rows_they_still_show() {
 }
 
 /// 插件筛选框和日志搜索框正在组合输入：后台消息不换输入框节点、不断预编辑；提交后字落在原节点上。
+/// 日志搜索框在固定的页头里，聚焦不滚动任何东西。
 #[test]
 fn admin_inputs_keep_their_preedit_through_updates() {
-    for (page, label, scroll) in [
-        (ShellPage::Settings, "筛选插件", "settings-scroll"),
-        (ShellPage::Logs, "搜索日志", "workspace-page-scroll-HasRepository-Logs"),
-    ] {
+    for (page, label, scroll) in [(ShellPage::Settings, "筛选插件", Some("settings-scroll")), (ShellPage::Logs, "搜索日志", None)] {
         let mut harness = ShellHarness::mount(ShellViewModel::for_page(page));
         let input = harness.input(label);
         harness.focus(input);
@@ -163,7 +279,9 @@ fn admin_inputs_keep_their_preedit_through_updates() {
         harness.flush();
         assert_eq!(harness.input(label), input);
         assert_eq!(harness.value(input), "查");
-        scroll_to_top(&mut harness, scroll);
+        if let Some(scroll) = scroll {
+            scroll_to_top(&mut harness, scroll);
+        }
         harness.assert_same_as_fresh_mount();
     }
 }

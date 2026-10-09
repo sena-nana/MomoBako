@@ -202,8 +202,8 @@ fn settings_page_keeps_its_scroll_across_a_remount() {
 
     // 换到首页：主体是另一个滚动容器，不继承设置页的偏移。
     model.page = ShellPage::FileList;
-    model.workspace.panel = crate::shell::WorkspacePanel::Logs;
+    model.workspace.panel = crate::shell::WorkspacePanel::Extensions;
     mount_shell(&mut document, &model).expect("重挂");
     layout(&mut document, 420.0);
-    assert_eq!(offset(&document, scroll_keyed(&document, "workspace-page-scroll-HasRepository-Logs")).y, 0.0);
+    assert_eq!(offset(&document, scroll_keyed(&document, "workspace-page-scroll-HasRepository-Extensions")).y, 0.0);
 }

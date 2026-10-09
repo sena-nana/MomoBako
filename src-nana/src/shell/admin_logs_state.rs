@@ -105,7 +105,7 @@ pub(crate) struct LogsView {
     pub kinds: Vec<String>,
     pub empty: LogsEmpty,
     pub rows: Vec<LogRowView>,
-    /// 追踪模式下主区跟随末尾。
+    /// 追踪模式下日志列表跟随末尾。
     pub follow_end: bool,
 }
 

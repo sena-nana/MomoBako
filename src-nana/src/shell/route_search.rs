@@ -11,12 +11,12 @@ use super::route_home::{home_page, home_scroll};
 /// 有仓库时的搜索结果：筛选栏常驻在上，下面是纵向滚动的搜索面板。
 pub(super) fn view(filter: FilterBarSignals, search: SearchPanelSignals) -> AnyView {
     let panel = super::workbench::page(vec![resident_search_panel(search)]);
-    home_page(Some(resident_filter_bar(filter)), home_scroll("workspace-page-scroll-HasRepository-Search", false, panel))
+    home_page(Some(resident_filter_bar(filter)), home_scroll("workspace-page-scroll-HasRepository-Search", panel))
 }
 
 /// 没有资源库时标题栏搜索也会切到搜索面板，由搜索面板画「还没有可搜索的资源库」。没有仓库就没有筛选栏。
 pub(super) fn empty_library(search: SearchPanelSignals) -> AnyView {
-    home_page(None, home_scroll("workspace-page-scroll-EmptyRepository-Search", false, resident_search_panel(search)))
+    home_page(None, home_scroll("workspace-page-scroll-EmptyRepository-Search", resident_search_panel(search)))
 }
 
 #[cfg(test)]

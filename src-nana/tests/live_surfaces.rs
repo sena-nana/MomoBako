@@ -101,16 +101,20 @@ fn assert_source_login() {
     assert!(after.nonclear_ratio > 0.01, "扫码会话画面几乎是空的");
 }
 
-/// 日志面板追踪时主区停在末尾，最后一条在视口里；暂停后新记录进来不跟随，页头留在视口里。
+/// 日志面板的页头和筛选固定，日志列表自己滚动：追踪时列表停在末尾，最后一条在列表里、第一条滚出去了；
+/// 暂停后列表停在顶部。两种情况页头都留在视口里。
 fn assert_logs_follow() {
+    const SUBLINE: &str = "统一查看宿主、插件与辅助进程的实时日志流。";
     let mut model = ready_library();
     model.workspace.panel = WorkspacePanel::Logs;
     model.reduce(ShellMessage::LogsLoaded(Ok(SystemLogPage { records: (0..30).map(log_record).collect(), next_cursor: None })));
     let mut session = open(&model, 1200, 800, ThemeName::Light);
     session.flush().expect("跟随后的布局");
     let nodes = session.accessibility_dump();
-    assert!(visible(&nodes, "第 29 条日志", 800.0), "追踪时最后一条日志不在视口里");
-    assert!(!visible(&nodes, "统一查看宿主、插件与辅助进程的实时日志流。", 800.0), "追踪时主区没有滚到末尾");
+    assert!(visible(&nodes, SUBLINE, 0.0, 800.0), "追踪时页头被滚走了");
+    let top = list_top(&nodes);
+    assert!(visible(&nodes, "第 29 条日志", top, 800.0), "追踪时最后一条日志不在列表里");
+    assert!(!visible(&nodes, "第 0 条日志", top, 800.0), "追踪时列表没有滚到末尾");
     let _ = shot(&mut session, "logs-follow");
 
     let mut paused = ready_library();
@@ -120,16 +124,24 @@ fn assert_logs_follow() {
     let mut session = open(&paused, 1200, 800, ThemeName::Light);
     session.flush().expect("暂停后的布局");
     let nodes = session.accessibility_dump();
-    assert!(visible(&nodes, "统一查看宿主、插件与辅助进程的实时日志流。", 800.0), "暂停后主区不该跟随到末尾");
-    assert!(!visible(&nodes, "第 29 条日志", 800.0), "暂停后不该滚到最后一条");
+    assert!(visible(&nodes, SUBLINE, 0.0, 800.0), "暂停后页头不在视口里");
+    let top = list_top(&nodes);
+    assert!(visible(&nodes, "第 0 条日志", top, 800.0), "暂停后列表应停在顶部");
+    assert!(!visible(&nodes, "第 29 条日志", top, 800.0), "暂停后不该滚到最后一条");
 }
 
-/// 标签等于 `label` 的节点有一部分落在 `[0, height)` 的视口里。
-fn visible(nodes: &[nana_ui_devtools::agent::AccessibilityDumpNode], label: &str, height: f32) -> bool {
+/// 日志列表视口的上沿：来源筛选最后一枚芯片的下沿，列表就在它下面。
+fn list_top(nodes: &[nana_ui_devtools::agent::AccessibilityDumpNode]) -> f32 {
+    let chip = nodes.iter().find(|node| node.label.as_deref() == Some("辅助进程")).expect("来源筛选芯片");
+    chip.bounds.y + chip.bounds.height
+}
+
+/// 标签等于 `label` 的节点有一部分落在纵向 `[top, bottom)` 里。
+fn visible(nodes: &[nana_ui_devtools::agent::AccessibilityDumpNode], label: &str, top: f32, bottom: f32) -> bool {
     nodes
         .iter()
         .filter(|node| node.label.as_deref() == Some(label))
-        .any(|node| node.bounds.y < height && node.bounds.y + node.bounds.height > 0.0)
+        .any(|node| node.bounds.y < bottom && node.bounds.y + node.bounds.height > top)
 }
 
 fn log_record(index: u32) -> SystemLogRecord {

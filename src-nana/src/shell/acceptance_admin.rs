@@ -118,7 +118,7 @@ pub(super) fn seed_task(model: &mut ShellViewModel, cancelling: bool) {
     model.motion.advance(60_000);
 }
 
-/// `logs-paused`：日志面板点了「暂停追踪」，主区不跟随末尾，停在顶部。
+/// `logs-paused`：日志面板点了「暂停追踪」，日志列表不跟随末尾，停在顶部。
 /// Vue 的跟随实际不滚动，这个场景用来和 Vue 对照版式。
 fn logs_paused_scene() -> ShellViewModel {
     let mut model = ShellViewModel::for_page(ShellPage::Logs);

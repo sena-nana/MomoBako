@@ -48,7 +48,7 @@
 
 ### 首页筛选栏
 
-筛选栏属于首页外框，有仓库的首页路由都可能显示它。信号 `FilterBarSignals` 在 `RouteSignals::filter`，除启动页和设置页以外每次同步都写（关着时不算候选和库类型快捷方式）。常驻首页路由（文件、搜索、播放集、日志、拓展和动作页）在外框里嵌 `inspect_search_view::resident_filter_bar(signals.filter)`，显隐跟「有仓库且筛选栏打开」走 `.visible`；文件页的 `FilesRouteSignals` 不另存筛选栏的状态，读的是同一份 `RouteSignals::filter`。首页外框和纵向滚动主体只有一套：`route_home::{home_page, home_scroll}`，缺失仓库和空库页也用它（不嵌筛选栏）；设置和启动页的整页滚动是 `route_home::scroll_route`。
+筛选栏属于首页外框，有仓库的首页路由都可能显示它。信号 `FilterBarSignals` 在 `RouteSignals::filter`，除启动页和设置页以外每次同步都写（关着时不算候选和库类型快捷方式）。常驻首页路由（文件、搜索、播放集、日志、拓展和动作页）在外框里嵌 `inspect_search_view::resident_filter_bar(signals.filter)`，显隐跟「有仓库且筛选栏打开」走 `.visible`；文件页的 `FilesRouteSignals` 不另存筛选栏的状态，读的是同一份 `RouteSignals::filter`。首页外框和纵向滚动主体只有一套：`route_home::{home_page, home_scroll}`，缺失仓库和空库页也用它（不嵌筛选栏）；设置和启动页的整页滚动是 `route_home::scroll_route`。日志页的主体是不滚的裁剪盒 `route_home::home_fixed`：面板（`admin::style::fill_panel`）撑满主体，页头、工具条和筛选固定，日志列表占满剩下的高度、自己滚动，追踪时 `follow_end` 绑在列表上。滚动区里不要再套滚动区，原因见文末「NanaUI 缺口」。
 
 ## 改成常驻的步骤
 
@@ -215,7 +215,8 @@ DialogFrame::new("folder-dialog", move || view.with(|view| view.title.to_string(
 
 搜索、设置和管理页改常驻时遇到的：
 
-- 控件表里没有的可绑定字段要自己写 `FieldWrite`：`ScrollView.follow_end`（`route_search::FollowEnd`）、`TextInput.read_only`、`Button.icon`、整份 `NodeStyle`（`admin::bind`），以及按地址重新编码的 `QrCode`（`source_auth_page::QrPayload`）。
+- 控件表里没有的可绑定字段要自己写 `FieldWrite`：`ScrollView.follow_end`、`TextInput.read_only`、`Button.icon`、整份 `NodeStyle`（都在 `admin::bind`），以及按地址重新编码的 `QrCode`（`source_auth_page::QrPayload`）。
+- 滚动范围（`scroll_content_extent`）是全部后代布局盒的并集，不在里层的滚动区或裁剪盒处停下。滚动区里再套一个滚动区时，里层溢出的内容会撑出外层的滚动范围，外层能滚进一片空白。日志页因此不用 `home_scroll`，改用不滚的 `home_fixed`，只有日志列表一层滚动。
 - `css!` 的 `min-width: 0` 除了 `min_width` 还写 `allow_shrink`，和构建器的 `min_width(Px(0))` 字段不完全相同；现在布局不读它，画面一样。
 - `StorePath` 没有 `with_untracked`，同步里比较 Store 的现值用 `untrack(|| store.with(..))`。
 - `layout.hidden` 的子树要等排版以后才退出无障碍投影，没刷新的文档投影出来还带着藏起的节点。

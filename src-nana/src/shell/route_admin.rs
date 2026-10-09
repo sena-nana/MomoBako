@@ -1,16 +1,16 @@
 //! 管理路由（常驻）：首页里的日志、拓展和仓库动作面板，以及它们和设置页共用的信号。
 //!
 //! 三个面板各是一条路由，分支只在进入时建一次，之后同步只写 [`AdminSignals`] 里当前面板的那份。
-//! 首页外框上方是常驻筛选栏，主体是纵向滚动：日志追踪时滚动跟随末尾。设置页和拓展页都有插件
-//! 管理面板，共用同一份插件信号。
+//! 首页外框上方是常驻筛选栏。拓展和动作页的主体是纵向滚动；日志页的主体不滚，面板撑满主体，页头和
+//! 筛选固定，日志列表自己滚动、追踪时跟随末尾。设置页和拓展页都有插件管理面板，共用同一份插件信号。
 
-use nana_ui::runtime::view::{AnyView, Signal};
+use nana_ui::runtime::view::AnyView;
 
 use super::admin::{
     ActionsSignals, ActionsView, LogsSignals, LogsView, PluginPanelSignals, PluginPanelView, SettingsSignals, SettingsView, ToolsSignals,
 };
 use super::inspect_search_view::{resident_filter_bar, FilterBarSignals};
-use super::route_home::{home_page, home_scroll};
+use super::route_home::{home_fixed, home_page, home_scroll};
 use super::ShellViewModel;
 
 /// 设置、日志、拓展和动作页的常驻信号，在主区块的骨架作用域里建，进出路由都不重建。
@@ -58,26 +58,26 @@ impl AdminSignals {
     }
 }
 
-/// 日志面板：追踪时主区滚动跟随末尾。
+/// 日志面板：主体不滚，面板撑满主体，页头和筛选固定，日志列表自己滚动、追踪时跟随末尾。
 pub(super) fn logs(filter: FilterBarSignals, signals: AdminSignals) -> AnyView {
-    let follow: Signal<bool> = signals.logs.follow_end;
-    panel(filter, "workspace-page-scroll-HasRepository-Logs", follow, super::admin::logs_panel(signals.logs))
+    let page = super::workbench::page(vec![super::admin::logs_panel(signals.logs)]);
+    home_page(Some(resident_filter_bar(filter)), home_fixed("workspace-page-body-HasRepository-Logs", page))
 }
 
 /// 拓展页。
 pub(super) fn extensions(filter: FilterBarSignals, signals: AdminSignals) -> AnyView {
-    panel(filter, "workspace-page-scroll-HasRepository-Extensions", false, super::admin::extensions_page(signals.tools, signals.plugins))
+    panel(filter, "workspace-page-scroll-HasRepository-Extensions", super::admin::extensions_page(signals.tools, signals.plugins))
 }
 
 /// 仓库动作面板。
 pub(super) fn actions(filter: FilterBarSignals, signals: AdminSignals) -> AnyView {
-    panel(filter, "workspace-page-scroll-HasRepository-Actions", false, super::admin::actions_panel(signals.actions))
+    panel(filter, "workspace-page-scroll-HasRepository-Actions", super::admin::actions_panel(signals.actions))
 }
 
 /// 首页外框：常驻筛选栏在上，下面是纵向滚动的面板。
-fn panel(filter: FilterBarSignals, key: &'static str, follow_end: impl nana_ui::runtime::view::IntoProp<bool>, body: AnyView) -> AnyView {
+fn panel(filter: FilterBarSignals, key: &'static str, body: AnyView) -> AnyView {
     let page = super::workbench::page(vec![body]);
-    home_page(Some(resident_filter_bar(filter)), home_scroll(key, follow_end, page))
+    home_page(Some(resident_filter_bar(filter)), home_scroll(key, page))
 }
 
 #[cfg(test)]
