@@ -1,6 +1,7 @@
 //! 大目录下文件列表的虚拟化测试：挂上完整壳层，数实际建出来的卡片。
 //!
-//! 五千条的目录里，列表和网格模式挂载后只建视口附近的行；滚到中间后，视口里正好是中间那几条。
+//! 五千条的目录里，列表和网格模式挂载后只建视口附近的行；滚到中间后，视口里正好是中间那几条；
+//! 再来一次无关的更新（选中一张卡片）整棵重挂，滚动位置和可见行都不变。
 //! 瀑布流每列各自虚拟化，同样有上限。另有一个默认跳过的计时测试，量两千条时整棵重挂的耗时。
 
 use std::collections::BTreeMap;
@@ -10,9 +11,9 @@ use nana_ui::runtime::{component_descriptors, Entity, LayoutBox, LayoutViewport,
 use nana_ui::{ApplicationWindow, NanaTextShaper};
 
 use crate::backend::services::repository::FileBrowserEntry;
-use crate::shell::ShellViewModel;
+use crate::shell::{ShellMessage, ShellViewModel};
 
-use super::{DisplayMode, FileRow};
+use super::{DisplayMode, FileRow, FilesMessage};
 
 const MARK: &str = "momobako-entry:";
 
@@ -191,6 +192,28 @@ fn grid_mode_builds_only_the_rows_near_the_viewport() {
     check_mode(DisplayMode::Grid);
 }
 
+/// 壳层每次更新都整棵重挂：卸载前记下滚动位置，挂好后用 `scroll_to` 写回，虚拟列表按写回的视口挂行。
+#[test]
+fn an_unrelated_update_keeps_the_scroll_position_and_the_visible_rows() {
+    let mut model = bulk_model(DisplayMode::List, 5000);
+    let mut window = settled(&model);
+    let (scroll, viewport) = list_scroll(&window);
+    window.document.context_mut().scroll_to(scroll, ScrollOffset { x: 0.0, y: 2500.0 * 82.0 }).expect("滚动");
+    settle(&mut window);
+    let before_offset = scrolled(&window, scroll);
+    let before = visible(&built_cards(&window), viewport, before_offset);
+    assert!(before.first().is_some_and(|first| *first > 2000), "先滚到中间：{before:?}");
+
+    model.reduce(ShellMessage::Files(FilesMessage::ActivateRow(format!("file-{:05}.png", before[1]))));
+    crate::shell::mount_shell(&mut window.document, &model).expect("重挂壳层");
+    settle(&mut window);
+    let (scroll, viewport) = list_scroll(&window);
+    let after_offset = scrolled(&window, scroll);
+    let after = visible(&built_cards(&window), viewport, after_offset);
+    assert!((after_offset - before_offset).abs() < 0.5, "重挂后滚动位置不变：{before_offset} → {after_offset}");
+    assert_eq!(after, before, "重挂后视口里还是同一批卡片");
+}
+
 #[test]
 fn masonry_columns_are_windowed_too() {
     let model = bulk_model(DisplayMode::Masonry, 2000);
@@ -202,19 +225,25 @@ fn masonry_columns_are_windowed_too() {
     assert!(visible(&cards, viewport, 0.0).contains(&0), "第一列从第一条开始");
 }
 
-/// 两千条时整棵重挂的耗时。默认跳过：`cargo test -p momobako-nana --lib remount_timing -- --ignored --nocapture`。
+/// 整棵重挂一次（卸载、挂载、排两遍版）的耗时，八十条和两千条对比。默认跳过：
+/// `cargo test -p momobako-nana --lib remount_timing -- --ignored --nocapture`。
 #[test]
 #[ignore]
 fn remount_timing_with_two_thousand_entries() {
-    for mode in [DisplayMode::List, DisplayMode::Grid, DisplayMode::Adaptive, DisplayMode::Masonry] {
-        let model = bulk_model(mode, 2000);
-        let _ = settled(&model);
-        let started = Instant::now();
-        let rounds = 5;
-        for _ in 0..rounds {
-            let _ = settled(&model);
+    for count in [80, 2000] {
+        for mode in [DisplayMode::List, DisplayMode::Grid, DisplayMode::Adaptive, DisplayMode::Masonry] {
+            let model = bulk_model(mode, count);
+            let mut window = settled(&model);
+            let rounds = 10;
+            let started = Instant::now();
+            for _ in 0..rounds {
+                crate::shell::mount_shell(&mut window.document, &model).expect("重挂壳层");
+                for _ in 0..2 {
+                    window.document.flush(LayoutViewport::new(1200.0, 800.0), &mut NanaTextShaper::default()).expect("排版");
+                }
+            }
+            let cards = built_cards(&window).len();
+            eprintln!("Nana 文件页 {count} 条 {mode:?}：重挂一次平均 {:?}，建了 {cards} 张卡片", started.elapsed() / rounds);
         }
-        let average = started.elapsed() / rounds;
-        eprintln!("Nana 文件页两千条 {mode:?} 重挂一次平均 {average:?}");
     }
 }

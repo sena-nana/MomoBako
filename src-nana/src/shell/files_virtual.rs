@@ -3,8 +3,9 @@
 //! Nana 每次更新都整棵重挂，把上千张卡片全建出来会让选中、缩略图到达这类小更新都变慢。
 //! 这里把一组条目先排成「行」再交给 `each_virtual`：列表模式一张卡片一行；网格和自适应按列表
 //! 宽度把卡片装进一行（行内、行间都隔 14）；瀑布流先按 CSS 多列的规则分好列，每列各自虚拟化。
-//! 所有虚拟列表都跟着同一个列表滚动区滚动（`within`），行高按内容量（`measured`），
-//! 估算值取卡片的设计尺寸，所以没量过的行也几乎在正确位置上。
+//! 所有虚拟列表都跟着同一个列表滚动区滚动（`within`），行高按内容量（`measured`）。
+//! 每一行下面都带组内间距，行高就等于估算值（卡片设计尺寸 + 间距），量过以后位置也不跳；
+//! 最后一行多出来的间距由外层的负下边距抵掉。
 
 use std::sync::Arc;
 
@@ -40,46 +41,35 @@ struct CardCell {
     state: CardState,
 }
 
-/// 虚拟列表的一行：键（第一张卡片的条目键）、上方留白（第一行为 0，之后是组内间距）和卡片。
+/// 虚拟列表的一行：键（第一张卡片的条目键）和卡片。
 /// 虚拟列表每次同步都会克隆全部行，所以行放在 `Arc` 里，克隆只加引用计数。
 struct CardLine {
     key: Arc<str>,
-    lead: f32,
     cells: Vec<CardCell>,
 }
 
 impl CardLine {
-    fn new(lead: f32, cells: Vec<CardCell>) -> Arc<Self> {
+    fn new(cells: Vec<CardCell>) -> Arc<Self> {
         let key = cells.first().map(|cell| cell.row.key()).unwrap_or_default();
-        Arc::new(Self { key: key.into(), lead, cells })
+        Arc::new(Self { key: key.into(), cells })
     }
 }
 
 /// 一组条目的虚拟列表。`key` 是这组列表在内容里的名字，`width` 是列表内容宽。
 pub(super) fn group(specs: Vec<CardSpec>, mode: DisplayMode, width: f32, scroll: NodeRef, key: &'static str) -> AnyView {
     match mode {
-        DisplayMode::List => virtual_lines(list_lines(specs), mode, LIST_CARD_HEIGHT + LIST_GAP, scroll, key.to_string()),
-        DisplayMode::Grid => {
-            let lines = wrap_lines(specs, width, |_| cards::GRID_BOX);
-            virtual_lines(lines, mode, cards::GRID_BOX.height + GAP, scroll, key.to_string())
-        }
-        DisplayMode::Adaptive => {
-            let lines = wrap_lines(specs, width, cards::adaptive_box);
-            virtual_lines(lines, mode, ADAPTIVE_CARD_HEIGHT + GAP, scroll, key.to_string())
-        }
+        DisplayMode::List => virtual_lines(list_lines(specs), mode, LIST_CARD_HEIGHT, LIST_GAP, scroll, key),
+        DisplayMode::Grid => virtual_lines(wrap_lines(specs, width, |_| cards::GRID_BOX), mode, cards::GRID_BOX.height, GAP, scroll, key),
+        DisplayMode::Adaptive => virtual_lines(wrap_lines(specs, width, cards::adaptive_box), mode, ADAPTIVE_CARD_HEIGHT, GAP, scroll, key),
         DisplayMode::Masonry => masonry(specs, width, scroll, key),
     }
 }
 
-/// 列表模式：一张卡片一行，卡片之间隔 8。
+/// 列表模式：一张卡片一行。
 fn list_lines(specs: Vec<CardSpec>) -> Vec<Arc<CardLine>> {
     specs
         .into_iter()
-        .enumerate()
-        .map(|(index, spec)| {
-            let lead = if index == 0 { 0.0 } else { LIST_GAP };
-            CardLine::new(lead, vec![CardCell { row: spec.row, geometry: cards::LIST_BOX, state: spec.state }])
-        })
+        .map(|spec| CardLine::new(vec![CardCell { row: spec.row, geometry: cards::LIST_BOX, state: spec.state }]))
         .collect()
 }
 
@@ -104,29 +94,31 @@ fn wrap_lines(specs: Vec<CardSpec>, width: f32, geometry: impl Fn(&FileRow) -> C
             cells.push(CardCell { row: spec.row, geometry: card, state: spec.state });
         }
     }
-    rows.into_iter()
-        .enumerate()
-        .map(|(index, cells)| CardLine::new(if index == 0 { 0.0 } else { GAP }, cells))
-        .collect()
+    rows.into_iter().map(CardLine::new).collect()
 }
 
-/// 把行交给 `each_virtual`：跟外层列表滚动，按内容量行高。
-fn virtual_lines(lines: Vec<Arc<CardLine>>, mode: DisplayMode, estimate: f32, scroll: NodeRef, key: String) -> AnyView {
-    each_virtual(signal(lines), |line: &Arc<CardLine>| line.key.clone(), estimate, move |line| line_view(&line, mode))
+/// 把行交给 `each_virtual`：跟外层列表滚动，按内容量行高。每行下面带 `gap`，估算行高是
+/// 卡片高加间距；外层用 `-gap` 的下边距抵掉最后一行多出的间距，和不虚拟化时的排法一样。
+fn virtual_lines(lines: Vec<Arc<CardLine>>, mode: DisplayMode, card_height: f32, gap: f32, scroll: NodeRef, key: &'static str) -> AnyView {
+    let list = each_virtual(signal(lines), |line: &Arc<CardLine>| line.key.clone(), card_height + gap, move |line| line_view(&line, mode, gap))
         .measured()
         .overscan(OVERSCAN)
         .within(scroll)
-        .key(key)
-        .into_any()
+        .key(key);
+    widget(Stack::column(0.0).width(LengthSpec::Fill).min_width(LengthSpec::Px(0.0)).with_layout(move |layout| {
+        layout.margin_bottom = Some(LengthSpec::Px(-gap));
+    }))
+    .children((list,))
+    .key(format!("{key}-frame"))
+    .into_any()
 }
 
-/// 一行卡片。列表模式竖排（只有一张），其余横排靠左、顶端对齐。
-fn line_view(line: &CardLine, mode: DisplayMode) -> AnyView {
-    let lead = line.lead;
+/// 一行卡片，下面留 `gap`。列表模式竖排（只有一张），其余横排靠左、顶端对齐。
+fn line_view(line: &CardLine, mode: DisplayMode, gap: f32) -> AnyView {
     let frame = if mode.is_list() { Stack::column(0.0) } else { Stack::row(GAP).align(AlignSpec::Start) };
     let cards = line.cells.iter().map(|cell| cards::card(&cell.row, mode, cell.geometry, cell.state)).collect::<Vec<_>>();
     widget(frame.width(LengthSpec::Fill).min_width(LengthSpec::Px(0.0)).with_layout(move |layout| {
-        layout.padding_top = Some(LengthSpec::Px(lead));
+        layout.padding_bottom = Some(LengthSpec::Px(gap));
     }))
     .children(cards)
     .into_any()
@@ -148,7 +140,7 @@ fn masonry(specs: Vec<CardSpec>, width: f32, scroll: NodeRef, key: &'static str)
             .take(end - start)
             .map(|spec| {
                 let geometry = cards::masonry_box(&spec.row, column_width);
-                CardLine::new(0.0, vec![CardCell { row: spec.row, geometry, state: spec.state }])
+                CardLine::new(vec![CardCell { row: spec.row, geometry, state: spec.state }])
             })
             .collect::<Vec<_>>();
         let list = each_virtual(signal(lines), |line: &Arc<CardLine>| line.key.clone(), estimate, |line| masonry_cell(&line))
@@ -322,7 +314,6 @@ mod tests {
     fn grid_lines_fill_left_to_right_like_auto_fill() {
         let lines = wrap_lines(specs(7), 516.0, |_| cards::GRID_BOX);
         assert_eq!(lines.iter().map(|line| line.cells.len()).collect::<Vec<_>>(), vec![3, 3, 1]);
-        assert_eq!(lines.iter().map(|line| line.lead).collect::<Vec<_>>(), vec![0.0, GAP, GAP]);
         assert_eq!(&*lines[1].key, "file:3.png", "行键是这一行第一张卡片的条目键");
         let narrow = wrap_lines(specs(2), 100.0, |_| cards::GRID_BOX);
         assert_eq!(narrow.len(), 2, "放不下一张时每张单独成行");
@@ -343,8 +334,7 @@ mod tests {
     fn list_lines_put_one_card_on_each_line() {
         let lines = list_lines(specs(3));
         assert_eq!(lines.len(), 3);
-        assert_eq!(lines[0].lead, 0.0);
-        assert_eq!(lines[2].lead, LIST_GAP);
+        assert!(lines.iter().all(|line| line.cells.len() == 1));
         assert_eq!(&*lines[1].key, "file:1.png");
     }
 }
