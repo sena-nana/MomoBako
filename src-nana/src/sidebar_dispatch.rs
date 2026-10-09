@@ -6,7 +6,7 @@ use nana_ui::RuntimeProgramContext;
 use crate::backend::services::mutsuki_runner::PROTOCOL_REPOSITORY_ATTACH;
 use crate::backend::services::repository::{FileBrowserRequest, RecentAccessHistoryClearRequest, RepositoryFolderRequest};
 use crate::shell::{
-    FileRow, ShellMessage, SidebarEffect, SidebarFolder, SidebarMessage, SidebarPlaylist, SidebarSmartFolder,
+    FileRow, ShellMessage, SidebarEffect, SidebarMessage, SidebarPlaylist, SidebarSmartFolder, SidebarTree,
     VirtualQuery,
 };
 use crate::MomoBakoApplication;
@@ -26,8 +26,8 @@ pub fn dispatch_sidebar_effects(app: &mut MomoBakoApplication, context: &Runtime
                 dispatch_delete_smart(app, context, repo_id, smart_folder_id);
             }
             SidebarEffect::DeletePlaylist { repo_id, playlist_id } => dispatch_delete_playlist(app, context, repo_id, playlist_id),
-            SidebarEffect::CreateBackendRepository { name, path, plugin_id } => {
-                dispatch_create_backend(app, context, name, path, plugin_id);
+            SidebarEffect::CreateBackendRepository { name, path, plugin_id, config } => {
+                dispatch_create_backend(app, context, name, path, plugin_id, config);
             }
             SidebarEffect::LoadPlaylists { repo_id } => dispatch_playlists(app, context, repo_id),
             SidebarEffect::LoadPlaylistPlayers { repo_id } => dispatch_players(app, context, repo_id),
@@ -88,9 +88,9 @@ fn dispatch_tree(app: &mut MomoBakoApplication, context: &RuntimeProgramContext<
     let executor = services.executor.clone();
     let task_repo = repo_id.clone();
     if let Err(error) = context.run_task(Task::new(async move {
-        let result = executor.block_on(browser.get_repository_tree(task_repo.clone())).map(|snapshot| {
-            snapshot.tree.iter().map(SidebarFolder::from_file_node).collect()
-        });
+        let result = executor
+            .block_on(browser.get_repository_tree(task_repo.clone()))
+            .map(|snapshot| SidebarTree::from_nodes(&snapshot.tree));
         sidebar_message(SidebarMessage::SidebarTreeLoaded { repo_id: task_repo, result })
     })) {
         eprintln!("Nana 目录树任务提交失败：{error}");
@@ -242,6 +242,7 @@ fn dispatch_create_backend(
     name: String,
     path: String,
     plugin_id: String,
+    config: Option<serde_json::Value>,
 ) {
     let Some(services) = services(app) else {
         eprintln!("Nana 创建资源库需要领域服务，当前服务未启动");
@@ -255,7 +256,7 @@ fn dispatch_create_backend(
         name,
         path,
         backend_plugin_id: Some(plugin_id),
-        backend_config: None,
+        backend_config: config,
         skip_initial_sync: false,
     };
     if let Err(error) = context.run_task(Task::new(async move {

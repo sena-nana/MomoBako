@@ -17,15 +17,12 @@ const REPO_ID: &str = "acceptance-repo";
 /// 按页面填上对应的产品表面。加载页保持启动步骤，其余页面进入已有仓库或空库。
 pub(super) fn seed(model: &mut ShellViewModel) {
     match model.page {
-        ShellPage::Loading => {}
+        ShellPage::Loading => shell_scenes::seed_loading(model),
         ShellPage::EmptyRepository => {
             model.detail = "可从文件夹或拖放导入资源".into();
-            model.workspace.present_empty();
+            shell_scenes::seed_empty(model);
         }
-        ShellPage::Error => {
-            model.detail = "无法读取仓库目录，请检查路径和权限".into();
-            model.workspace.startup.fail(model.detail.clone());
-        }
+        ShellPage::Error => shell_scenes::seed_error(model),
         ShellPage::FileList => {
             model.detail = "12 个文件 · 按名称排序".into();
             present_repository(model);
