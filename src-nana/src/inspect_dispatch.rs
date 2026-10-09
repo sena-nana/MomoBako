@@ -28,6 +28,9 @@ pub fn dispatch_inspect_effects(app: &mut MomoBakoApplication, context: &Runtime
             InspectEffect::LoadNative { repo_id, path, view_id, generation } => {
                 dispatch_native(app, context, repo_id, path, view_id, generation);
             }
+            InspectEffect::Autoplay { path, generation } => {
+                app.shell.reduce(ShellMessage::Inspect(InspectMessage::Autoplay { path, generation }));
+            }
             InspectEffect::LoadMedia { repo_id, path, generation } => {
                 dispatch_media(app, context, repo_id, path, generation);
             }
@@ -121,7 +124,7 @@ fn dispatch_text(
 ) {
     let Some(services) = app.services.as_ref() else {
         eprintln!("Nana 文本预览需要领域服务，当前服务未启动");
-        app.shell.reduce(body_message(path, markdown, generation, Err("领域服务未启动".into())));
+        app.shell.reduce(body_error(path, markdown, generation, "领域服务未启动".into()));
         return;
     };
     let query = services.repository_query.clone();
@@ -130,11 +133,14 @@ fn dispatch_text(
     if let Err(error) = context.run_task(Task::new(async move {
         let result = executor
             .block_on(query.read_file(FileReadRequest { repo_id, path: task_path.clone() }))
-            .and_then(|bytes| prepare_preview_text(&bytes));
-        body_message(task_path, markdown, generation, result)
+            .map(|bytes| prepare_preview_text(&bytes));
+        if let Err(error) = &result {
+            eprintln!("Nana 读取文本预览失败：{task_path}：{error}");
+        }
+        ShellMessage::Inspect(InspectMessage::BodyLoaded { path: task_path, markdown, generation, result })
     })) {
         eprintln!("Nana 文本预览任务提交失败：{error}");
-        app.shell.reduce(body_message(path, markdown, generation, Err(format!("文本预览任务提交失败：{error}"))));
+        app.shell.reduce(body_error(path, markdown, generation, format!("文本预览任务提交失败：{error}")));
     }
 }
 
@@ -332,8 +338,8 @@ fn native_message(path: String, generation: u64, result: Result<crate::shell::Na
     ShellMessage::Inspect(InspectMessage::NativeLoaded { path, generation, result })
 }
 
-fn body_message(path: String, markdown: bool, generation: u64, result: Result<String, String>) -> ShellMessage {
-    ShellMessage::Inspect(InspectMessage::BodyLoaded { path, markdown, generation, result })
+fn body_error(path: String, markdown: bool, generation: u64, error: String) -> ShellMessage {
+    ShellMessage::Inspect(InspectMessage::BodyLoaded { path, markdown, generation, result: Err(error) })
 }
 
 fn saved_message(result: Result<(String, crate::backend::services::repository::AssetDetail), String>) -> ShellMessage {

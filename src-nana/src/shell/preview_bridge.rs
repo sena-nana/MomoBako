@@ -1,10 +1,12 @@
-//! 预览出声、PDF 翻页和模型视角。
+//! 预览接管播放条、PDF 翻页和模型视角。
 //!
-//! 音视频预览和底部播放条共用一份会话，出声走播放列表那条内存游标。
-//! 测试构建不打开声卡。PDF 与网格画面留在这里，检查状态文件不再继续变长。
+//! 音视频预览读好后交给播放器：插成临时条目接管播放条，或者正是当前项时跟着播放条走。
+//! 播放、暂停、跳转和音量都在播放条上，预览页只显示画面。测试构建不打开声卡。
+//! PDF 与网格画面留在这里，检查状态文件不再继续变长。
 
+use super::super::player::PreviewEntry;
 use super::super::{PreviewPixels, ShellViewModel};
-use super::{InspectMessage, InspectState, PreviewBody};
+use super::{InspectEffect, InspectMessage, InspectState, PreviewBody};
 
 /// 一页画出来的画面。`error` 有值时不上传空白纹理。
 #[derive(Clone, Debug)]
@@ -52,45 +54,47 @@ pub(super) struct Deck {
 pub(super) enum Follow {
     None,
     Media { path: String, pcm: Option<super::super::player::PreviewPcm> },
-    Toggle,
-    Seek(u64),
-    Volume(f32),
+    Autoplay { path: String, generation: u64 },
     Sync,
 }
 
-/// 在归约消费消息之前抄出随后要做的出声或换页。
+/// 在归约消费消息之前抄出随后要做的接管、自动播放或换页。
 pub(super) fn follow(message: &InspectMessage) -> Follow {
     match message {
         InspectMessage::MediaLoaded { path, result: Ok(_), pcm, .. } => Follow::Media { path: path.clone(), pcm: pcm.clone() },
-        InspectMessage::MediaLoaded { path, result: Err(_), .. } => Follow::Media { path: path.clone(), pcm: None },
-        InspectMessage::PlayPause => Follow::Toggle,
-        InspectMessage::Seek(position) => Follow::Seek(*position),
-        InspectMessage::SetVolume(volume) => Follow::Volume(*volume),
+        InspectMessage::Autoplay { path, generation } => Follow::Autoplay { path: path.clone(), generation: *generation },
         InspectMessage::NativeLoaded { .. } | InspectMessage::TurnPage(_) | InspectMessage::Orbit { .. } => Follow::Sync,
         _ => Follow::None,
     }
 }
 
-/// 会话已经写好之后再出声、同步画面。过期的媒体结果不会装进游标。
+/// 会话已经写好之后再交给播放器、同步画面。过期的媒体结果不会装进游标。
 pub(super) fn apply(model: &mut ShellViewModel, follow: Follow) {
     match follow {
         Follow::None => {}
         Follow::Media { path, pcm } => {
-            arm_media(model, &path, pcm);
+            hand_media_to_player(model, &path, pcm);
             show_video_frame(model);
         }
-        Follow::Toggle => {
-            let playing = model.inspect.media_session().is_some_and(|session| session.status == "playing");
-            model.player.mirror_preview_playing(playing, &mut model.inspect);
-            show_video_frame(model);
-        }
-        Follow::Seek(position) => {
-            model.player.mirror_preview_seek(position, &mut model.inspect);
-            show_video_frame(model);
-        }
-        Follow::Volume(volume) => model.player.mirror_preview_volume(volume, &mut model.inspect),
+        Follow::Autoplay { path, generation } => autoplay(model, &path, generation),
         Follow::Sync => sync_frame(model),
     }
+}
+
+/// 和 Vue 预览页挂载后 `playEntry` 一样开始播放。只在预览仍是这个文件、播放器仍在放它、
+/// 而且停着的时候生效；用户在此之前已经点过播放或换了文件就不再动。
+fn autoplay(model: &mut ShellViewModel, path: &str, generation: u64) {
+    let current = generation == model.inspect.generation && model.inspect.target_path.as_deref() == Some(path);
+    let repo_id = model.inspect.repo_id.clone().or_else(|| model.workspace.active_repo_id.clone());
+    if !current || !model.player.mirrors_preview(repo_id.as_deref(), Some(path)) {
+        eprintln!("Nana 预览已经换掉，不再自动播放：{path}");
+        return;
+    }
+    if model.player.session.status != "paused" {
+        return;
+    }
+    model.player.play_from_preview(&mut model.inspect);
+    show_video_frame(model);
 }
 
 pub(super) fn clear_deck(state: &mut InspectState) {
@@ -112,25 +116,10 @@ pub(super) fn video_frame(state: &InspectState, time_ms: u64) -> Option<&super::
     frames.iter().rev().find(|frame| frame.time_ms <= time_ms).or_else(|| frames.first())
 }
 
-/// 播放中的预览把会话时钟往前拨，并换上对应画面。底部播放条读的是同一份会话。
+/// 播放时钟只有播放器一份：拨动后预览页拿到同一份会话，再换上对应的视频画面。
 pub(super) fn advance_playback(model: &mut super::super::ShellViewModel, step_ms: u64) -> bool {
-    let Some(mut session) = model.inspect.media_session().cloned() else {
+    if !model.player.advance_clock(step_ms, &mut model.inspect) {
         return false;
-    };
-    if session.status != "playing" {
-        return false;
-    }
-    let duration = session.duration_ms.unwrap_or(0);
-    let next = session.current_time_ms.saturating_add(step_ms);
-    let ended = duration > 0 && next >= duration;
-    session.current_time_ms = if ended { duration } else { next };
-    if ended {
-        session.status = "paused".into();
-    }
-    model.inspect.replace_shared_media(session.clone());
-    model.player.adopt_session(session);
-    if ended && model.player.preview_audio_armed() {
-        model.player.mirror_preview_playing(false, &mut model.inspect);
     }
     show_video_frame(model);
     true
@@ -264,14 +253,22 @@ fn encode_base64(bytes: &[u8]) -> String {
     out
 }
 
-fn arm_media(model: &mut ShellViewModel, path: &str, pcm: Option<super::super::player::PreviewPcm>) {
-    let current = model.inspect.media_session().is_some() && model.inspect.target_path.as_deref() == Some(path);
-    if !current {
+/// 预览的音视频读好了：交给播放器接管播放条（或者正是当前项时跟着它走）。
+/// 真的接管了才排一次自动播放，由宿主派发，测试和离屏截图不会出声。
+fn hand_media_to_player(model: &mut ShellViewModel, path: &str, pcm: Option<super::super::player::PreviewPcm>) {
+    let Some(session) = model.inspect.media_session().cloned() else {
+        return;
+    };
+    if model.inspect.target_path.as_deref() != Some(path) {
         return;
     }
-    match pcm {
-        Some(pcm) => model.player.arm_preview_audio(path, pcm),
-        None => model.player.disarm_preview_audio(),
+    let repo_id = model.inspect.repo_id.clone().or_else(|| model.workspace.active_repo_id.clone()).unwrap_or_default();
+    let asset_id = model.inspect.asset_id.clone().unwrap_or_default();
+    let extension = model.inspect.facts.extension.clone();
+    let entry = PreviewEntry { repo_id: &repo_id, path, extension: &extension, asset_id: &asset_id };
+    if model.player.take_over_preview(entry, session, pcm, &mut model.inspect) {
+        let generation = model.inspect.generation;
+        model.inspect.effects.push(InspectEffect::Autoplay { path: path.to_string(), generation });
     }
 }
 
@@ -296,7 +293,8 @@ pub(super) fn page_caption(index: usize, total: usize, frame: &PageFrame) -> Str
     if body.is_empty() { head } else { format!("{head}\n{body}") }
 }
 
-fn show_video_frame(model: &mut ShellViewModel) {
+/// 按预览会话的进度换上对应的视频画面；不是视频时清掉留下的视频帧。
+pub(super) fn show_video_frame(model: &mut ShellViewModel) {
     let time = model.inspect.media_session().map(|session| session.current_time_ms).unwrap_or(0);
     let Some(frame) = video_frame(&model.inspect, time) else {
         if model.preview_token.as_deref().is_some_and(|token| token.starts_with("video:")) {

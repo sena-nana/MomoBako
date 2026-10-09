@@ -3,10 +3,7 @@
 //! 菜单坐标夹取和侧栏弹层用同一条规则。搜索等待 250 毫秒，元数据等待 260 毫秒。
 //! 时钟只在还有到期项时前进，避免空闲时把窗口钉在连续帧上。
 
-use crate::backend::services::repository::PlaybackSessionState;
-use crate::host_api::PlaybackSessionController;
-
-use super::{InspectMessage, InspectState, PreviewBody};
+use super::{InspectMessage, InspectState};
 
 const SEARCH_DELAY_MS: u64 = 250;
 const METADATA_DELAY_MS: u64 = 260;
@@ -124,47 +121,6 @@ impl InspectState {
 
     pub(crate) fn timers_pending(&self) -> bool {
         self.timers.pending()
-    }
-
-    pub(super) fn transport_play_pause(&mut self) {
-        let PreviewBody::Media(session) = &self.body else {
-            eprintln!("Nana 当前预览不是音视频");
-            return;
-        };
-        let playing = session.status == "playing";
-        let mut controller = PlaybackSessionController::new(super::support::transport_plugin(session), session.clone());
-        let result = if playing { controller.pause() } else { controller.play() };
-        if let Err(error) = result {
-            eprintln!("Nana 播放控制失败：{error}");
-        }
-        self.store_session(controller.state().clone());
-    }
-
-    pub(super) fn transport_seek(&mut self, position_ms: u64) {
-        let PreviewBody::Media(session) = &self.body else {
-            return;
-        };
-        let mut controller = PlaybackSessionController::new(super::support::transport_plugin(session), session.clone());
-        if let Err(error) = controller.seek(position_ms) {
-            eprintln!("Nana 播放进度失败：{error}");
-        }
-        self.store_session(controller.state().clone());
-    }
-
-    pub(super) fn transport_volume(&mut self, volume: f32) {
-        let PreviewBody::Media(session) = &self.body else {
-            return;
-        };
-        let mut controller = PlaybackSessionController::new(super::support::transport_plugin(session), session.clone());
-        if let Err(error) = controller.set_volume(volume) {
-            eprintln!("Nana 播放音量失败：{error}");
-        }
-        self.store_session(controller.state().clone());
-    }
-
-    fn store_session(&mut self, session: PlaybackSessionState) {
-        self.error = session.error.clone().unwrap_or_default();
-        self.body = PreviewBody::Media(session);
     }
 }
 

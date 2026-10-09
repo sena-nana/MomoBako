@@ -1,13 +1,16 @@
-//! PDF 页纸。翻页在页图上方，页宽按比例撑开，超出视口时滚动。
+//! PDF / Office 的页纸，对齐 office-preview 的 `office-preview__viewer`。
+//!
+//! 滚动区 18px 内边距，底部一层 bg-subtle 渐变；上面一行翻页（上一页、页码、下一页），
+//! 下面是一张白纸：border-soft 细边、大投影，宽度铺满滚动区，高度按页面比例。一次只显示一页。
 
-use nana_ui::runtime::view::{button, text, widget, AnyView, IntoView};
-use nana_ui::runtime::{Activate, AlignSpec, LengthSpec, ScrollAxes, ScrollView, SemanticColorRole, Stack};
+use nana_ui::runtime::view::{widget, AnyView, IntoView};
+use nana_ui::runtime::{Activate, AlignSpec, Button, LengthSpec, ScrollAxes, ScrollView, SemanticColorRole, Stack};
 
 use super::super::inspect::InspectMessage;
-use super::super::{ShellViewModel};
-use super::inspect_message;
+use super::super::{ShellMessage, ShellViewModel};
+use super::frame::text;
 
-/// 用页位图按页宽撑开。高度跟宽高比走，不把页底裁在视口外。
+/// 用页位图画白纸。高度跟宽高比走，超出时滚动区滚动，不裁掉页底。
 pub(super) fn page_bitmap(model: &ShellViewModel) -> Option<AnyView> {
     let (width, height, rgba) = model.inspect.raster_frame()?;
     if width == 0 || height == 0 {
@@ -29,11 +32,12 @@ pub(super) fn page_bitmap(model: &ShellViewModel) -> Option<AnyView> {
         .min_width(LengthSpec::Px(0.0))
         .grow(0.0)
         .shrink(0.0)
-        .surface(SemanticColorRole::Background)
-        .outline(SemanticColorRole::Border, 1.0)
+        .outline(SemanticColorRole::BorderSoft, 1.0)
         .with_layout(|layout| {
             layout.aspect_ratio = Some(aspect);
-            // 与 `.office-preview__viewer--pdf canvas` 的投影一致。
+            // 纸张在深浅主题里都是白的，和 `.office-preview__viewer--pdf canvas` 一致。
+            layout.background = Some([1.0, 1.0, 1.0, 1.0]);
+            layout.margin_bottom = Some(LengthSpec::Px(14.0));
             layout.paint.box_shadows = vec![nana_ui_core::BoxShadowSpec {
                 offset_x: 0.0,
                 offset_y: 18.0,
@@ -47,43 +51,72 @@ pub(super) fn page_bitmap(model: &ShellViewModel) -> Option<AnyView> {
     Some(widget(frame).key("inspect-native-page").into_any())
 }
 
-/// 预览列可滚动。18px 内边距里，翻页在上，页纸在下，页纸不被翻页盖住。
-pub(super) fn page_scroller(page: AnyView, nav: Option<(usize, usize)>) -> AnyView {
+/// 滚动区：翻页在上，页纸在下。`key` 带文件和页码，翻页或换文件时回到顶部。
+pub(super) fn page_scroller(page: AnyView, nav: Option<(usize, usize)>, key: String) -> AnyView {
     let mut children = Vec::new();
     if let Some((index, total)) = nav {
         children.push(page_nav(index, total));
     }
     children.push(page);
-    let sheet = widget(
-        Stack::column(8.0)
-            .padding_xy(18.0, 18.0)
-            .width(LengthSpec::Fill)
-            .min_width(LengthSpec::Px(0.0)),
-    )
-    .key("inspect-page-sheet")
-    .children(children);
-    widget(ScrollView::new(ScrollAxes::Vertical).with_layout(|layout| {
+    let sheet = widget(Stack::column(0.0).padding(18.0).width(LengthSpec::Fill).min_width(LengthSpec::Px(0.0)))
+        .key("inspect-page-sheet")
+        .children(children);
+    let scroll = widget(ScrollView::new(ScrollAxes::Vertical).with_layout(|layout| {
         layout.flex_grow = Some(1.0);
         layout.flex_shrink = Some(1.0);
         layout.flex_basis = Some(LengthSpec::Px(0.0));
         layout.min_height = Some(LengthSpec::Px(0.0));
         layout.width = Some(LengthSpec::Fill);
     }))
-    .key("inspect-page-scroll")
-    .children((sheet,))
+    .key(key)
+    .children((sheet,));
+    // 滚动区背后一层 `office-preview__viewer--pdf` 的底：bg 上从底边往上 34% 淡出的 bg-subtle。
+    widget(
+        Stack::fill_column(0.0)
+            .min_height(LengthSpec::Px(0.0))
+            .painter(super::preview_paint::PageViewerBackdrop)
+            .with_layout(|layout| layout.flex_basis = Some(LengthSpec::Px(0.0))),
+    )
+    .children((scroll,))
+    .key("inspect-page-viewer")
     .into_any()
 }
 
-/// PDF 插件把上一页、页码和下一页放在页图上方，写在页面之内。
+/// 上一页、「当前 / 总数」、下一页。首页和末页时对应按钮禁用。
 pub(super) fn page_nav(index: usize, total: usize) -> AnyView {
-    let row = Stack::row(8.0).align(AlignSpec::Center);
-    widget(row).key("inspect-page-nav").children((
-        button("上一页").key("inspect-page-prev").disabled(index == 0).on_cx(|_, _: &Activate, cx| {
-            cx.dispatch_program(inspect_message(InspectMessage::TurnPage(-1)));
-        }),
-        text(format!("{} / {total}", index + 1)).key("inspect-page-label"),
-        button("下一页").key("inspect-page-next").disabled(index + 1 >= total).on_cx(|_, _: &Activate, cx| {
-            cx.dispatch_program(inspect_message(InspectMessage::TurnPage(1)));
-        }),
-    )).into_any()
+    let total = total.max(1);
+    widget(Stack::row(0.0).align(AlignSpec::Center))
+        .key("inspect-page-nav")
+        .children((
+            widget(page_button("上一页", index == 0)).key("inspect-page-prev").on_cx(|_, _: &Activate, cx| {
+                cx.dispatch_program_all(ShellMessage::Inspect(InspectMessage::TurnPage(-1)));
+            }),
+            widget(text(&format!("{} / {total}", index + 1), 14.0, 400, SemanticColorRole::Text, 21.7)).key("inspect-page-label"),
+            widget(page_button("下一页", index + 1 >= total)).key("inspect-page-next").on_cx(|_, _: &Activate, cx| {
+                cx.dispatch_program_all(ShellMessage::Inspect(InspectMessage::TurnPage(1)));
+            }),
+        ))
+        .into_any()
+}
+
+/// 翻页按钮是基础按钮：32px 高、透明底、正文色。禁用时在页纸底色上淡化。
+fn page_button(label: &str, disabled: bool) -> Button {
+    let mut button = Button::new(label).kind(nana_ui::ButtonKind::Ghost).disabled(disabled);
+    button.style.interaction.disabled = nana_ui::runtime::SemanticPaint::default();
+    if disabled {
+        button.style.interaction.base.foreground_mix = Some(nana_ui_core::SemanticColorMix::new(
+            SemanticColorRole::Text,
+            SemanticColorRole::Background,
+            super::super::player_view::bar::DISABLED_OPACITY,
+        ));
+    }
+    let layout = std::sync::Arc::make_mut(&mut button.style.layout);
+    layout.height = Some(LengthSpec::Px(32.0));
+    layout.min_height = Some(LengthSpec::Px(32.0));
+    layout.padding_left = Some(LengthSpec::Px(10.0));
+    layout.padding_right = Some(LengthSpec::Px(10.0));
+    layout.font_size = Some(14.0);
+    layout.font_weight = Some(500);
+    layout.width = Some(LengthSpec::Shrink);
+    button
 }

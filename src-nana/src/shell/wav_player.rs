@@ -48,11 +48,6 @@ pub(super) fn builtin_candidates() -> Vec<PlayerCandidate> {
     vec![builtin_candidate(), compressed_candidate()]
 }
 
-/// WAV 和已解码的压缩音频都走这份内存游标。其它候选仍是缺失解码器。
-pub(super) fn is_memory_candidate(candidate: &PlayerCandidate) -> bool {
-    candidate.plugin_id == PLUGIN_ID || candidate.plugin_id == COMPRESSED_PLUGIN_ID
-}
-
 /// 一次装载后的内存游标。克隆只复制句柄，播放头仍是同一份。
 #[derive(Clone)]
 pub(super) struct WavPlayer {
@@ -293,24 +288,32 @@ impl Cursor {
 }
 
 pub(super) enum Action {
-    Load(String),
     Play,
     Pause,
     Seek(u64),
     Volume(f32),
 }
 
-/// 选中内置内存播放器时用游标，其它候选仍是缺失解码器。
+/// 控制落到哪里：PCM 在游标里就出声；装好了但没有声音（只有画面的视频）只走时钟；
+/// 都不是时按缺解码器报错。
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum Output {
+    Cursor,
+    Clock,
+    Missing,
+}
+
+/// 按 [`Output`] 驱动播放、暂停、跳转和音量，返回新的会话和可能的错误。
 pub(super) fn drive(
-    use_memory: bool,
+    output: Output,
     wav: &WavPlayer,
     session: PlaybackSessionState,
     action: Action,
 ) -> (PlaybackSessionState, Option<String>) {
-    if use_memory {
-        control(wav.clone(), session, action)
-    } else {
-        control(MissingDecoder, session, action)
+    match output {
+        Output::Cursor => control(wav.clone(), session, action),
+        Output::Clock => control(ClockOnly, session, action),
+        Output::Missing => control(MissingDecoder, session, action),
     }
 }
 
@@ -321,13 +324,39 @@ fn control<P: PlaybackMediaPlugin>(
 ) -> (PlaybackSessionState, Option<String>) {
     let mut controller = PlaybackSessionController::new(plugin, session);
     let error = match action {
-        Action::Load(path) => controller.load(&path).err(),
         Action::Play => controller.play().err(),
         Action::Pause => controller.pause().err(),
         Action::Seek(position) => controller.seek(position).err(),
         Action::Volume(volume) => controller.set_volume(volume).err(),
     };
     (controller.state().clone(), error)
+}
+
+/// 只有画面、没有 PCM 的条目：播放、暂停、跳转和音量都只改会话，由播放时钟往前拨。
+struct ClockOnly;
+
+impl PlaybackMediaPlugin for ClockOnly {
+    fn load(&mut self, _source: &str) -> Result<PlaybackMediaCapabilities, String> {
+        Err("只有画面的条目不重复装载".into())
+    }
+
+    fn play(&mut self) -> Result<(), String> {
+        Ok(())
+    }
+
+    fn pause(&mut self) -> Result<(), String> {
+        Ok(())
+    }
+
+    fn seek(&mut self, _position_ms: u64) -> Result<(), String> {
+        Ok(())
+    }
+
+    fn set_volume(&mut self, _volume: f32) -> Result<(), String> {
+        Ok(())
+    }
+
+    fn dispose(&mut self) {}
 }
 
 struct MissingDecoder;
@@ -371,6 +400,24 @@ pub(crate) fn pcm_from_bytes(bytes: &[u8]) -> Result<PreviewPcm, String> {
         duration_ms: parsed.duration_ms,
         pcm: parsed.pcm,
     })
+}
+
+/// 按扩展名说明解不开的原因：wav 报 WAV 头的问题，mp3、flac、ogg 报压缩音频解码的问题。
+/// 其它扩展名不归这里管，返回 `None`。
+pub(crate) fn pcm_error_for_extension(extension: &str, bytes: &[u8]) -> Option<String> {
+    let extension = extension.trim().to_ascii_lowercase();
+    if extension == "wav" {
+        return parse_wav(bytes).err();
+    }
+    if COMPRESSED_EXTENSIONS.contains(&extension.as_str()) {
+        return crate::shell::audio_decode::decode_compressed(bytes).err();
+    }
+    None
+}
+
+/// WAV 和已解码的压缩音频都走这份内存游标。其它候选仍是缺失解码器。
+pub(super) fn is_memory_candidate(candidate: &PlayerCandidate) -> bool {
+    candidate.plugin_id == PLUGIN_ID || candidate.plugin_id == COMPRESSED_PLUGIN_ID
 }
 
 /// 测试构建恒为 false：winmm 模块没有编进来。测试用它确认不会打开声卡。
