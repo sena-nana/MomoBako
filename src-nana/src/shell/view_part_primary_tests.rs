@@ -5,7 +5,7 @@ use nana_ui::runtime::Stack;
 
 use super::RouteKey;
 use crate::shell::view_harness::ShellHarness;
-use crate::shell::{InspectMessage, ShellMessage, ShellPage, ShellViewModel, WorkspacePanel};
+use crate::shell::{ShellMessage, ShellPage, ShellViewModel, WorkspacePanel};
 
 fn scene(name: &str) -> ShellViewModel {
     crate::shell::acceptance_gap_models()
@@ -83,58 +83,6 @@ fn switching_routes_rebuilds_only_the_current_primary_branch() {
     harness.flush();
     assert_eq!(RouteKey::of(&harness.model), RouteKey::Search);
     assert_eq!(harness.sidebar_root(), Some(sidebar), "换回来侧栏也不该重挂");
-    harness.assert_same_as_fresh_mount();
-}
-
-/// 旧视图路由里内容变了：只重挂当前分支，主区外框和侧栏不动；没变时什么都不重挂。
-/// 文件和搜索路由都已常驻，这里用仍是旧视图的播放集页，内容变化是打开筛选栏。
-#[test]
-fn a_legacy_route_update_remounts_only_its_branch() {
-    let model = ShellViewModel::for_page(ShellPage::Playlists);
-    assert_eq!(RouteKey::of(&model), RouteKey::Playlists);
-    let mut harness = ShellHarness::mount(model);
-    let sidebar = harness.sidebar_root();
-    let (_, stage) = harness.content_roots();
-    let branch = harness.route_branch();
-    let remounts = harness.view_stats().remounts;
-
-    harness.sync();
-    harness.flush();
-    assert_eq!(harness.view_stats().remounts, remounts, "ViewModel 没变时不该重挂");
-    assert_eq!(harness.route_branch(), branch);
-
-    harness.apply(ShellMessage::Inspect(InspectMessage::ToggleFilterBar));
-    harness.flush();
-    assert_ne!(harness.route_branch(), branch, "内容变了分支要重挂");
-    assert_eq!(harness.content_roots().1, stage, "主区外框不该重挂");
-    assert_eq!(harness.sidebar_root(), sidebar, "侧栏不该重挂");
-    harness.assert_same_as_fresh_mount();
-}
-
-/// 旧视图路由里的输入框：按一个键、消息归约同步以后不等刷新，焦点已经在当场重挂出来的新输入框上，
-/// 紧接着的按键落在新节点上，字不丢、光标不回跳。搜索路由已经常驻，这里用播放集页上打开的筛选栏。
-#[test]
-fn the_next_key_after_a_legacy_remount_lands_on_the_new_input() {
-    let mut model = ShellViewModel::for_page(ShellPage::Playlists);
-    model.inspect.filter_bar_open = true;
-    assert_eq!(RouteKey::of(&model), RouteKey::Playlists);
-    let mut harness = ShellHarness::mount(model);
-    let field = harness.input_within("workspace-filter-bar");
-    harness.focus(field);
-    harness.type_text("a");
-    for message in harness.take_messages() {
-        harness.apply(message);
-    }
-    let focused = harness.focused().expect("焦点还在输入框上");
-    assert_ne!(focused, field, "同一路由里内容变了，输入框应当场重挂");
-    assert_eq!(harness.value(focused), "a");
-    harness.type_text("b");
-    for message in harness.take_messages() {
-        harness.apply(message);
-    }
-    harness.flush();
-    let focused = harness.focused().expect("焦点还在输入框上");
-    assert_eq!(harness.value(focused), "ab", "第二个键丢了或者落在了旧节点上");
     harness.assert_same_as_fresh_mount();
 }
 

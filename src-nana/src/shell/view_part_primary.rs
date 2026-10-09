@@ -2,7 +2,8 @@
 //!
 //! 外框是白底 `Lg` 圆角的一层（主区独占时外面再包一层壳层底色），放进工作区的主区或 AppShell 的
 //! body。外框里只有一个结构块 `dynamic(RouteSlot)`：
-//! - 常驻路由（启动页、搜索、设置、日志、拓展和动作页）的分支只在进入路由时建一次，之后同步只写它的信号；
+//! - 常驻路由（启动、文件、缺失、空库、搜索、设置、日志、拓展、动作和播放集页）的分支只在进入路由时建一次，
+//!   之后同步只写它的信号；
 //! - 其余路由仍由旧视图函数整块建出。换到这种路由时，同步在本线程把新内容挂成脱离树的一块放进
 //!   交接处，把路由和版本号写进键；下一次刷新 `dynamic` 换出新分支，分支的 `on_mount` 把这块内容
 //!   挂进路由容器、卸掉上一块，再找回焦点、选区和滚动。留在同一个旧视图路由里、内容变了时不经过
@@ -33,6 +34,7 @@ use super::route_admin::AdminSignals;
 use super::route_empty::{EmptySignals, EmptyView};
 use super::route_missing::MissingSignals;
 use super::route_files::FilesRouteSignals;
+use super::route_playlists::PlaylistRouteSignals;
 use super::route_startup::{StartupSignals, StartupView};
 use super::view_part::{composing_under, first_root, mount_detached, BodyMode, PartCx, PartId, ShellPart, Swap};
 use super::{MainRegion, ShellPage, ShellViewModel, WorkspacePanel};
@@ -105,6 +107,7 @@ fn resident(route: RouteKey) -> bool {
             | RouteKey::Logs
             | RouteKey::Extensions
             | RouteKey::Actions
+            | RouteKey::Playlists
     )
 }
 
@@ -121,6 +124,7 @@ fn resident_view(route: RouteKey, signals: RouteSignals, hot: HotSignals) -> Opt
         RouteKey::Extensions => Some(super::route_admin::extensions(signals.filter, signals.admin)),
         RouteKey::Actions => Some(super::route_admin::actions(signals.filter, signals.admin)),
         RouteKey::Files => Some(super::route_files::view(signals.files, hot)),
+        RouteKey::Playlists => Some(super::route_playlists::view(signals.filter, signals.playlists)),
         _ => None,
     }
 }
@@ -137,8 +141,8 @@ fn legacy_view(route: RouteKey, model: &ShellViewModel) -> Option<AnyView> {
         | RouteKey::Settings
         | RouteKey::Logs
         | RouteKey::Extensions
-        | RouteKey::Actions => return None,
-        RouteKey::Playlists => super::route_playlists::view(model),
+        | RouteKey::Actions
+        | RouteKey::Playlists => return None,
         RouteKey::Blank => super::route_home::blank(model),
     };
     Some(view)
@@ -157,6 +161,7 @@ pub(crate) struct RouteSignals {
     /// 设置、日志、拓展和动作页。
     admin: AdminSignals,
     files: FilesRouteSignals,
+    playlists: PlaylistRouteSignals,
 }
 
 impl RouteSignals {
@@ -169,6 +174,7 @@ impl RouteSignals {
             search: SearchPanelSignals::new(),
             admin: AdminSignals::new(),
             files: FilesRouteSignals::new(model),
+            playlists: PlaylistRouteSignals::new(model),
         }
     }
 
@@ -185,7 +191,8 @@ impl RouteSignals {
             RouteKey::Extensions => self.admin.write_extensions(model),
             RouteKey::Actions => self.admin.write_actions(model),
             RouteKey::Files => self.files.write(model),
-            RouteKey::Playlists | RouteKey::Blank => {}
+            RouteKey::Playlists => self.playlists.write(model),
+            RouteKey::Blank => {}
         }
         // 筛选栏只在有仓库的首页上出现：启动、设置、缺失和空库页都不写。
         if !matches!(route, RouteKey::Startup | RouteKey::Settings | RouteKey::Missing | RouteKey::Empty) {
@@ -210,6 +217,7 @@ pub(crate) struct Island {
 fn islands(route: RouteKey, signals: &RouteSignals) -> Vec<Island> {
     match route {
         RouteKey::Files => super::route_files::islands(signals.files),
+        RouteKey::Playlists => super::route_playlists::islands(signals.playlists),
         _ => Vec::new(),
     }
 }
