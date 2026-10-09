@@ -4,7 +4,8 @@
 //! 滚动区按显示的内容取键（换目录、换选中项回顶，同一内容重挂保持位置）；
 //! 二是浮层的指针行为：点在导入菜单、右键菜单外面就收起，回收站的「彻底删除」要点两次，
 //! 点对话框遮罩等于取消，点卡片里面不取消；
-//! 三是元数据保存冲突：冲突说明紧挨注释、草稿保留，点「采用服务器版本」换成服务器内容。
+//! 三是元数据保存冲突：冲突说明紧挨注释、草稿保留，点「采用服务器版本」换成服务器内容；
+//! 四是预览页只有预览框架贴在页底的那一条播放条，页底不再多出间距。
 
 use nana_ui::runtime::LayoutViewport;
 use nana_ui::{ApplicationWindow, HeadlessInput, NanaTextShaper, PointerPhase};
@@ -272,6 +273,42 @@ fn scroll_areas_are_keyed_by_what_they_show() {
     model.files.current_path = String::new();
     model.workspace.panel = WorkspacePanel::Trash;
     assert_ne!(scroll_keys(&model).0, list, "进回收站时列表回顶");
+}
+
+/// 预览页只有框架贴在页底的那一条播放条，预览面板一直铺到主区内容的底边，下面不再空出一格间距。
+#[test]
+fn preview_page_keeps_its_own_player_bar_without_a_trailing_slot() {
+    let window = laid_out(&scene("preview-audio"));
+    let document = window.document.document();
+    let context = window.document.context();
+    let world = context.world();
+    let bars = world
+        .project_accessibility(document)
+        .into_iter()
+        .filter(|node| node.label.as_deref() == Some("播放进度"))
+        .collect::<Vec<_>>();
+    assert_eq!(bars.len(), 1, "预览页只有一条播放条");
+    let mut ancestors = Vec::new();
+    let mut cursor = world.parent_id(bars[0].id);
+    while let Some(id) = cursor {
+        ancestors.push((context.assembly_path(id).unwrap_or_default(), world.layout_box(id)));
+        cursor = world.parent_id(id);
+    }
+    let boxed = |key: &str| {
+        ancestors
+            .iter()
+            .find(|(path, _)| path.rsplit('/').next() == Some(key))
+            .and_then(|(_, bounds)| *bounds)
+            .unwrap_or_else(|| panic!("播放条不在 {key} 里"))
+    };
+    let page = boxed("inspect-preview-page");
+    let body = boxed("workspace-page-body");
+    assert!(
+        (page.y + page.height - (body.y + body.height)).abs() < 0.5,
+        "预览面板底边 {} 应贴着主区内容底边 {}",
+        page.y + page.height,
+        body.y + body.height
+    );
 }
 
 /// 输入框里的值等于 `value` 的节点在不在。
