@@ -1,7 +1,7 @@
 //! 常驻文件路由的回归：五千条目录里缩略图到达、选中和后台消息只改该改的那一张卡片，别的卡片节点和
-//! 滚动位置都不动；元数据输入框在组合输入中不被别的更新打断；一串更新以后的文档和同一 ViewModel
-//! 新挂的一样（无障碍树、组装路径、整份样式和选中禁用等状态）；外部拖放按归约时的面板决定；
-//! 播放条岛不因为自己量出的宽度反复重建。
+//! 滚动位置都不动；元数据输入框和筛选栏输入框在组合输入中不被别的更新打断；一串更新以后的文档和
+//! 同一 ViewModel 新挂的一样（无障碍树、组装路径、整份样式和选中禁用等状态）；外部拖放按归约时的
+//! 面板决定；播放条岛不因为自己量出的宽度反复重建。
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
@@ -318,6 +318,44 @@ fn metadata_draft_survives_a_background_message_ahead_of_its_keystroke() {
     harness.flush();
     assert_eq!(harness.model.inspect.draft_comment(), format!("{before}a"));
     assert_eq!(harness.input_within("inspect-comment"), comment);
+}
+
+/// 文件页上的常驻筛选栏：颜色输入框组合输入中，后台消息、缩略图和音量都不换输入框、不断预编辑，
+/// 主区一次都不重挂；提交后字落在原节点上。改筛选条件会切到搜索面板，那是换路由，不在这里。
+#[test]
+fn filter_bar_on_the_files_route_keeps_its_input_through_updates() {
+    let mut harness = ShellHarness::mount(scene("live-files-plain"));
+    settle(&mut harness);
+    harness.apply(ShellMessage::Inspect(InspectMessage::ToggleFilterBar));
+    settle(&mut harness);
+    let bar = harness.keyed("workspace-filter-bar").expect("筛选栏");
+    let input = harness.input("输入文件颜色");
+    harness.focus(input);
+    harness.compose("hong");
+    let remounts = harness.view_stats().remounts;
+    let updates = vec![
+        log_message(),
+        ShellMessage::ThumbnailPixels(vec![thumbnail("cover.png")]),
+        ShellMessage::Player(PlayerMessage::SetVolume(0.4)),
+    ];
+    for message in updates {
+        harness.apply(message);
+        harness.flush();
+        assert_eq!(harness.input("输入文件颜色"), input, "更新换掉了筛选栏的颜色输入框");
+        assert_eq!(harness.preedit(input).as_deref(), Some("hong"), "更新打断了预编辑");
+        assert_eq!(harness.focused(), Some(input), "更新让颜色输入框失焦");
+    }
+    assert_eq!(harness.keyed("workspace-filter-bar"), Some(bar), "筛选栏不该重建");
+    assert_eq!(harness.view_stats().remounts, remounts, "常驻筛选栏不该让主区重挂");
+    harness.commit("红");
+    for message in harness.take_messages() {
+        harness.apply(message);
+    }
+    harness.flush();
+    assert_eq!(crate::shell::view_part_primary::RouteKey::of(&harness.model), crate::shell::view_part_primary::RouteKey::Files);
+    assert_eq!(harness.input("输入文件颜色"), input);
+    assert_eq!(harness.value(input), "红");
+    harness.assert_same_as_fresh_mount();
 }
 
 /// 一步操作：归约一条消息，或者在归约之外改 ViewModel 再同步（拖动中的放置态、加载更多、窄窗口、圆角）。
