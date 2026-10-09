@@ -536,7 +536,7 @@ impl InspectState {
             repo_id,
             asset_id,
             expected_version: self.expected_version,
-            metadata: self.draft.to_metadata_map(),
+            metadata: self.draft.to_metadata_map(&self.baseline),
         });
     }
 
@@ -675,14 +675,18 @@ impl MetadataDraft {
         }
     }
 
-    fn to_metadata_map(&self) -> BTreeMap<String, Value> {
+    /// 保存请求的元数据。编辑器的评分、注释、链接和标签组照 Vue 每次都写；自定义字段只写和 `baseline`
+    /// 不同的，也就是这次改过的。后端按键覆盖写入，没动过的字段若按文本回写，数字、布尔和数组都会变成字符串。
+    fn to_metadata_map(&self, baseline: &MetadataDraft) -> BTreeMap<String, Value> {
         let mut metadata = BTreeMap::new();
         metadata.insert("rating".into(), Value::from(self.rating));
         metadata.insert("comment".into(), Value::String(self.comment.trim().to_string()));
         metadata.insert("link".into(), Value::String(self.link.trim().to_string()));
         metadata.insert("tagGroups".into(), Value::Array(self.tags.iter().cloned().map(Value::String).collect()));
         for (key, value) in &self.custom {
-            metadata.insert(key.clone(), Value::String(value.clone()));
+            if baseline.custom.get(key) != Some(value) {
+                metadata.insert(key.clone(), Value::String(value.clone()));
+            }
         }
         metadata
     }
