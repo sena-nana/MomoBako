@@ -5,13 +5,16 @@
 //! 二是浮层的指针行为：点在导入菜单、右键菜单外面就收起，回收站的「彻底删除」要点两次，
 //! 点对话框遮罩等于取消，点卡片里面不取消；
 //! 三是元数据保存冲突：冲突说明紧挨注释、草稿保留，点「采用服务器版本」换成服务器内容；
-//! 四是预览页只有预览框架贴在页底的那一条播放条，页底不再多出间距。
+//! 四是预览页只有预览框架贴在页底的那一条播放条，页底不再多出间距；
+//! 五是音视频预览失败时预览框里写出标题和原因，不再只画唱片舞台。
 
 use nana_ui::runtime::LayoutViewport;
 use nana_ui::{ApplicationWindow, HeadlessInput, NanaTextShaper, PointerPhase};
 
-use crate::shell::inspect::InspectMessage;
-use crate::shell::{ShellMessage, ShellPage, ShellViewModel, WorkspacePanel};
+use crate::backend::services::repository::{AssetDetail, AssetSummary};
+use crate::shell::inspect::{InspectMessage, PreviewBody};
+use crate::shell::status::StatusLine;
+use crate::shell::{InspectEffect, ShellMessage, ShellPage, ShellViewModel, WorkspacePanel};
 
 use super::{FileDialog, FilesMessage};
 
@@ -340,4 +343,99 @@ fn conflict_notice_sits_above_the_fields_and_adopts_the_server_version() {
     let window = laid_out(&model);
     assert!(!has_label(&window, "版本冲突，未写入"), "采用后冲突说明收起");
     assert!(has_value(&window, "封面定稿，沿用冷色版本。"), "注释框换成服务器上的注释");
+}
+
+/// 文档里有没有键路径最后一段是 `key` 的节点。
+fn has_key(window: &ApplicationWindow, key: &str) -> bool {
+    let document = window.document.document();
+    let context = window.document.context();
+    context.world().document_order(document).into_iter().any(|id| context.assembly_path(id).is_some_and(|path| path.rsplit('/').next() == Some(key)))
+}
+
+/// 音视频文件的素材详情：和 Vue 夹具 `file()` 一样只有基本字段。
+fn media_detail(path: &str) -> AssetDetail {
+    let filename = path.rsplit('/').next().unwrap_or(path).to_string();
+    let extension = filename.rsplit_once('.').map(|(_, extension)| extension.to_string()).unwrap_or_default();
+    AssetDetail {
+        summary: AssetSummary {
+            asset_id: path.replace('/', "-"),
+            repo_id: "acceptance-repo".into(),
+            path: path.into(),
+            filename,
+            extension,
+            size_bytes: 1_820,
+            size_label: "1820 B".into(),
+            status: "ready".into(),
+            modified_at: String::new(),
+            last_accessed_at: None,
+            version: 1,
+            tags: Vec::new(),
+            thumbnail_path: None,
+            hardlink_group_id: None,
+            hardlink_state: None,
+            is_virtual: false,
+            provider_id: None,
+            provider_item_id: None,
+            source_payload: None,
+            local_absolute_path: None,
+        },
+        metadata: Vec::new(),
+        revisions: Vec::new(),
+    }
+}
+
+/// 打开 `path` 的预览，宿主读完文件后解码以 `error` 失败，和 `inspect_dispatch` 送回的消息一样。
+fn failed_media_preview(path: &str, error: &str) -> ShellViewModel {
+    let mut model = scene("live-files-plain");
+    model.reduce(ShellMessage::SelectFile { path: path.into(), asset_id: Some(path.replace('/', "-")) });
+    model.reduce(ShellMessage::AssetDetailLoaded(Ok(media_detail(path))));
+    let (path, generation) = model
+        .inspect
+        .take_effects()
+        .into_iter()
+        .find_map(|effect| match effect {
+            InspectEffect::LoadMedia { path, generation, .. } => Some((path, generation)),
+            _ => None,
+        })
+        .expect("预览排下了音视频读取");
+    model.reduce(ShellMessage::Inspect(InspectMessage::MediaLoaded { path, generation, result: Err(error.into()), pcm: None, frames: None }));
+    model
+}
+
+/// 音视频预览失败就近写在预览框里：照 Vue 预览插件的失败浮层替换唱片舞台，红色标题下一行原因。
+/// Nana 自己的「没有原生解码器」和某格式「解码失败」都这样；视频的标题是「无法预览该媒体」。
+/// 这类失败不进侧栏的全局状态区。
+#[test]
+fn media_preview_failures_show_their_reason_in_place() {
+    for (path, error, title) in [
+        ("music/track-01.mp3", "没有原生解码器", "无法预览该音频"),
+        ("music/track-02.flac", "无法识别压缩音频：end of stream", "无法预览该音频"),
+        ("movies/clip.mp4", "MP4 解码失败：没有解出画面", "无法预览该媒体"),
+        ("movies/clip.webm", "没有原生解码器", "无法预览该媒体"),
+    ] {
+        let model = failed_media_preview(path, error);
+        let window = laid_out(&model);
+        assert!(has_label(&window, title), "{path} 失败时没有标题 {title}");
+        assert!(has_label(&window, error), "{path} 失败时没有写出原因 {error}");
+        assert!(has_key(&window, "inspect-failed"), "{path} 失败时没有失败浮层");
+        assert!(!has_key(&window, "inspect-audio-stage"), "{path} 失败时不该还画唱片舞台");
+        assert_eq!(StatusLine::project(&model), StatusLine::Hidden, "{path} 的预览失败不进全局状态区");
+    }
+}
+
+/// 播放条装不上预览中的同一个文件、把失败会话写回预览页：唱片舞台换成失败浮层；会话没带原因时写 Vue
+/// 运行时的「音频无法播放」。
+#[test]
+fn player_failures_written_back_replace_the_audio_stage() {
+    let mut model = scene("preview-audio");
+    assert!(has_key(&laid_out(&model), "inspect-audio-stage"), "能播的音频预览是唱片舞台");
+    let PreviewBody::Media(session) = &model.inspect.body else { panic!("预览不是音视频") };
+    let mut failed = session.clone();
+    failed.status = "failed".into();
+    failed.error = None;
+    model.inspect.replace_shared_media(failed);
+    let window = laid_out(&model);
+    assert!(has_label(&window, "无法预览该音频"), "写回失败后没有失败标题");
+    assert!(has_label(&window, "音频无法播放"), "没有原因时没有写 Vue 的默认原因");
+    assert!(!has_key(&window, "inspect-audio-stage"), "写回失败后不该还画唱片舞台");
 }

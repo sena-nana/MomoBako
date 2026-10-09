@@ -70,7 +70,7 @@ pub(super) fn view(filter: FilterBarSignals, signals: PlaylistRouteSignals) -> A
         .into_any();
     let page = super::player_view::playlist::view(signals.page, signals.surface, bar);
     let body = super::workbench::page(vec![page, status]);
-    home_page(Some(resident_filter_bar(filter)), home_scroll("workspace-page-scroll-HasRepository-Playlist", false, body))
+    home_page(Some(resident_filter_bar(filter)), home_scroll("workspace-page-scroll-HasRepository-Playlist", body))
 }
 
 #[cfg(test)]

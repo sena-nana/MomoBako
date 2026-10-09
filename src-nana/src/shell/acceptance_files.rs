@@ -2,24 +2,20 @@
 //!
 //! 场景名和 `tmp/vue-mock/scenes/files.ts` 的 Vue 场景同名，数据和 Vue 夹具 `fixtures.base()` 一致：
 //! 资源库「默认资源库」，根目录下 assets 文件夹、cover.png（2400000 B）和 notes/page.pdf（1820 B），
-//! 修改时间都是 2026-10-08T08:00:00Z，目录树 assets → covers 不展开，默认网格展示。
+//! 修改时间都是 2026-10-08T08:00:00Z，目录树 assets → covers 不展开，默认网格展示。工作区从
+//! `acceptance_base.rs` 的共用底子起步。
 //! 15 页里的「冲突」「未保存」也在这里，都在同一个文件页上走单击选中、读回详情和编辑注释的产品归约。
 
 use std::collections::BTreeMap;
 
 use serde_json::Value;
 
-use crate::backend::services::repository::{AssetDetail, AssetSummary, FileBrowserEntry, MetadataEntry};
+use crate::backend::services::repository::{AssetDetail, AssetSummary, MetadataEntry};
 
 use super::super::files::{DisplayMode, EntryMenu, FileRow, HardlinkPrompt};
 use super::super::inspect::InspectMessage;
-use super::super::sidebar::SidebarFolder;
-use super::super::workspace::WorkspaceRepository;
 use super::super::{InspectEffect, ShellMessage, ShellPage, ShellViewModel};
-
-const REPO_ID: &str = "acceptance-repo";
-/// Vue 夹具 `NOW`。
-const NOW: &str = "2026-10-08T08:00:00Z";
+use super::base_scene::{tagged_file, Base, NOW, REPO_ID};
 /// Vue `scenes/files.ts` 的右键落点。
 const MENU_POINT: (f32, f32) = (400.0, 470.0);
 /// 「未保存」页注释框里还没自动保存的草稿。离屏验收按这段文字找注释输入框。
@@ -50,23 +46,14 @@ pub(super) fn models() -> Vec<(&'static str, ShellViewModel)> {
 }
 
 /// 与 Vue `base()` 相同的文件页：网格、根目录、没有选择。
-pub(super) fn files_base_scene() -> ShellViewModel {
-    let mut model = ShellViewModel::for_page(ShellPage::FileList);
-    seed_files_base(&mut model);
-    model
-}
-
-/// 在给定模型上铺 Vue `base()` 的文件页。15 页的种子拿到的是已经定好页面身份的模型。
-fn seed_files_base(model: &mut ShellViewModel) {
-    present_vue_repository(model);
-    seed_browser(model);
-    model.files.display_mode = DisplayMode::Grid;
+fn files_base_scene() -> ShellViewModel {
+    Base::default().model()
 }
 
 /// 15 页的「未保存」：单击选中 notes/page.pdf、读回详情，再在注释框里输入草稿。
 /// 自动保存还在 260ms 的等待里，草稿和读回的详情不同。
 pub(super) fn seed_unsaved_edit(model: &mut ShellViewModel) {
-    seed_files_base(model);
+    Base::default().seed(model);
     select_entry(model, "notes/page.pdf");
     model.reduce(ShellMessage::Inspect(InspectMessage::SetComment(UNSAVED_COMMENT.into())));
     model.page = ShellPage::UnsavedEdit;
@@ -76,7 +63,7 @@ pub(super) fn seed_unsaved_edit(model: &mut ShellViewModel) {
 /// 另一端已经把它存成下一版，保存应答 `conflict` 带回服务器上的详情。
 /// 本地草稿留在注释框里，元数据区写出冲突并给出「采用服务器版本」。
 pub(super) fn seed_conflict(model: &mut ShellViewModel) {
-    seed_files_base(model);
+    Base::default().seed(model);
     select_entry(model, "cover.png");
     model.reduce(ShellMessage::Inspect(InspectMessage::SetComment(LOCAL_COMMENT.into())));
     let saved = super::await_inspect_effect(model, |effect| match effect {
@@ -123,19 +110,14 @@ fn selected_scene(path: &str) -> ShellViewModel {
     model
 }
 
-/// 带完整元数据的 cover.png：色板、注释、链接、评分、标签组、尺寸、时间和索引标签。
+/// 带完整元数据的 cover.png：色板、注释、链接、评分、标签组、尺寸、时间和索引标签。和 Vue 一样
+/// cover.png 有标签「封面」，仓库摘要里它不算未标签。
 fn metadata_scene() -> ShellViewModel {
-    let mut model = files_base_scene();
-    let metadata = cover_metadata();
-    if let Some(row) = model.files.rows.iter_mut().find(|row| row.path == "cover.png") {
-        row.metadata = metadata.clone();
-        row.palette = super::super::palette::from_metadata_map(&metadata);
-        row.tags = vec!["封面".into()];
+    let mut base = Base::default();
+    for entry in base.entries.iter_mut().filter(|entry| entry.path == "cover.png") {
+        *entry = tagged_file("cover.png", 2_400_000, &["封面"], cover_metadata());
     }
-    if let Some(entry) = model.browser_entries.iter_mut().find(|entry| entry.path == "cover.png") {
-        entry.metadata = metadata;
-        entry.tags = vec!["封面".into()];
-    }
+    let mut model = base.model();
     select_entry(&mut model, "cover.png");
     model
 }
@@ -181,82 +163,6 @@ fn mode_scene(mode: DisplayMode) -> ShellViewModel {
     let mut model = files_base_scene();
     model.files.display_mode = mode;
     model
-}
-
-/// 和 Vue 夹具 `repository()` 一致的本地文件系统仓库。
-fn present_vue_repository(model: &mut ShellViewModel) {
-    model.repository_id = Some(REPO_ID.into());
-    model.repository_name = "默认资源库".into();
-    model.workspace.present_repository(WorkspaceRepository {
-        repo_id: REPO_ID.into(),
-        name: "默认资源库".into(),
-        path: "C:/acceptance".into(),
-        status: "ready".into(),
-        backend_plugin_id: "momobako.source.local-filesystem".into(),
-        capabilities: ["write", "localRootPath", "list", "read", "move", "delete", "watch"].map(String::from).to_vec(),
-        cache_required: false,
-        cache_status: String::new(),
-    });
-}
-
-/// Vue `base()` 的目录条目、目录树和侧栏计数。其他面板的场景也用它铺文件列表。
-pub(super) fn seed_browser(model: &mut ShellViewModel) {
-    let entries = vec![
-        entry("assets", "directory", None),
-        entry("cover.png", "file", Some(2_400_000)),
-        entry("notes/page.pdf", "file", Some(1_820)),
-    ];
-    model.files.rows = entries.iter().map(FileRow::from_entry).collect();
-    model.files.total_entries = entries.len();
-    model.file_entries = model.files.entry_names();
-    model.browser_entries = entries;
-    model.sidebar.folders = vec![SidebarFolder {
-        path: "assets".into(),
-        label: "assets".into(),
-        children: vec![SidebarFolder { path: "assets/covers".into(), label: "covers".into(), children: Vec::new() }],
-    }];
-    model.sidebar.expanded_folders = Vec::new();
-    model.sidebar.counts.all = 2;
-    model.sidebar.counts.uncategorized = 1;
-    model.sidebar.counts.untagged = 2;
-}
-
-/// 只有路径和类型的行。其他面板的场景需要自己补元数据时用它。
-pub(super) fn file_row(path: &str, kind: &str) -> FileRow {
-    let mut row = FileRow::from_entry(&entry(path, kind, None));
-    row.modified_at.clear();
-    row
-}
-
-/// Vue 夹具 `dir()` / `file()` 的条目。文件的大小文案是「字节数 B」，素材 id 把 `/` 换成 `-`。
-fn entry(path: &str, kind: &str, size_bytes: Option<i64>) -> FileBrowserEntry {
-    let name = path.rsplit('/').next().unwrap_or(path).to_string();
-    let file = kind == "file";
-    let extension = if file { name.rsplit_once('.').map(|(_, ext)| ext.to_ascii_lowercase()) } else { None };
-    FileBrowserEntry {
-        path: path.into(),
-        name,
-        kind: kind.into(),
-        extension,
-        size_bytes,
-        size_label: size_bytes.map(|bytes| format!("{bytes} B")),
-        modified_at: Some(NOW.into()),
-        asset_id: file.then(|| path.replace('/', "-")),
-        status: file.then(|| "ready".to_string()),
-        thumbnail_path: None,
-        thumbnail_custom: false,
-        hardlink_group_id: None,
-        hardlink_state: None,
-        tags: Vec::new(),
-        alias_paths: Vec::new(),
-        folder_metadata: None,
-        metadata: BTreeMap::new(),
-        is_virtual: false,
-        provider_id: None,
-        provider_item_id: None,
-        source_payload: None,
-        local_absolute_path: None,
-    }
 }
 
 /// `files.ts` 的 `metadataScene` 写在 cover.png 上的元数据。

@@ -489,8 +489,8 @@ impl AdminState {
 }
 
 impl ShellViewModel {
-    /// 日志面板在追踪模式下让主区滚动跟随末尾：新记录进来滚到底，暂停后停在原位。
-    /// Vue 的跟随滚的是不定高的日志列表本身，列表不会出现滚动，实际没有效果；这里按设计意图滚主区。
+    /// 日志面板在追踪模式下让日志列表跟随末尾：新记录进来滚到底，暂停后停在原位。
+    /// Vue 的跟随滚的是不定高的日志列表本身，列表不会出现滚动，实际没有效果；这里给列表定高再跟随。
     pub(super) fn admin_logs_follow_end(&self) -> bool {
         self.admin_workspace_visible(WorkspacePanel::Logs) && self.admin.log_would_scroll && !self.admin.log_paused
     }

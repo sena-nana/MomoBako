@@ -1,18 +1,17 @@
 //! 搜索与筛选的对照场景：搜索面板和资源筛选栏。
 //!
 //! 场景名和 `tmp/vue-mock/scenes/search.ts` 的 Vue 场景同名，数据和 Vue 夹具保持一致：
-//! 仓库「默认资源库」，根目录有 `assets/`、`cover.png` 和 `notes/page.pdf`。
-//! 带标签的夹具里 cover.png 是「封面、参考」、红色横版，page.pdf 是「文档」、#3fa796 竖版；
-//! 搜索固定命中 cover.png，元数据带 4 星评分。
+//! 仓库「默认资源库」，根目录有 `assets/`、`cover.png` 和 `notes/page.pdf`（`acceptance_base.rs` 的底子）。
+//! 带标签的夹具里 cover.png 是「封面、参考」、红色横版，page.pdf 是「文档」、#3fa796 竖版，标签和扩展名
+//! 候选经仓库摘要进来；搜索固定命中 cover.png，元数据带 4 星评分。
 
 use std::collections::BTreeMap;
 
 use serde_json::Value;
 
-use super::super::files::FileRow;
-use super::super::inspect::{AssetFacet, InspectMessage, SearchRow};
-use super::super::{InspectEffect, ShellMessage, ShellPage, ShellViewModel, WorkspacePanel};
-use super::REPO_ID;
+use super::super::inspect::{InspectMessage, SearchRow};
+use super::super::{InspectEffect, ShellMessage, ShellViewModel, WorkspacePanel};
+use super::base_scene::{dir, tagged_file, Base, REPO_ID};
 
 /// 本面板的离屏对照场景。
 pub(super) fn models() -> Vec<(&'static str, ShellViewModel)> {
@@ -70,31 +69,23 @@ fn search_empty_scene() -> ShellViewModel {
     model
 }
 
-/// 文件列表页切到搜索面板，挂上仓库摘要的标签和扩展名，以及根目录的三条条目。
+/// 文件列表页切到搜索面板。`tagged` 时用 Vue `tagged()` 的夹具，标签、颜色和形状经仓库摘要和根目录
+/// 条目进来，筛选栏的候选由它们算出。
 fn search_page(tagged: bool) -> ShellViewModel {
-    let mut model = ShellViewModel::for_page(ShellPage::FileList);
-    model.workspace.panel = WorkspacePanel::Search;
-    let (cover_tags, cover_meta, page_tags, page_meta) = if tagged {
-        (
-            vec!["封面".to_string(), "参考".to_string()],
-            meta(&[("color", "红色"), ("shape", "横版")]),
-            vec!["文档".to_string()],
-            meta(&[("color", "#3fa796"), ("shape", "竖版")]),
-        )
+    let base = if tagged {
+        Base {
+            entries: vec![
+                dir("assets"),
+                tagged_file("cover.png", 2_400_000, &["封面", "参考"], meta(&[("color", "红色"), ("shape", "横版")])),
+                tagged_file("notes/page.pdf", 1_820, &["文档"], meta(&[("color", "#3fa796"), ("shape", "竖版")])),
+            ],
+            ..Base::default()
+        }
     } else {
-        (Vec::new(), BTreeMap::new(), Vec::new(), BTreeMap::new())
+        Base::default()
     };
-    model.inspect.search_ui.facets_repo = Some(REPO_ID.into());
-    model.inspect.search_ui.facets = vec![
-        AssetFacet { tags: cover_tags.clone(), extension: "png".into() },
-        AssetFacet { tags: page_tags.clone(), extension: "pdf".into() },
-    ];
-    model.files.rows = vec![
-        row("assets", "directory", Vec::new(), BTreeMap::new()),
-        row("cover.png", "file", cover_tags, cover_meta),
-        row("notes/page.pdf", "file", page_tags, page_meta),
-    ];
-    model.files.total_entries = model.files.rows.len();
+    let mut model = base.model();
+    model.workspace.panel = WorkspacePanel::Search;
     model
 }
 
@@ -115,32 +106,4 @@ fn cover_hit(model: &ShellViewModel) -> SearchRow {
 
 fn meta(pairs: &[(&str, &str)]) -> BTreeMap<String, Value> {
     pairs.iter().map(|(key, value)| (key.to_string(), Value::String(value.to_string()))).collect()
-}
-
-fn row(path: &str, kind: &str, tags: Vec<String>, metadata: BTreeMap<String, Value>) -> FileRow {
-    let name = path.rsplit('/').next().unwrap_or(path).to_string();
-    let extension = (kind == "file").then(|| name.rsplit_once('.').map(|(_, ext)| ext.to_string())).flatten();
-    FileRow {
-        path: path.into(),
-        name,
-        kind: kind.into(),
-        asset_id: (kind == "file").then(|| path.replace('/', "-")),
-        is_virtual: false,
-        thumbnail_path: None,
-        hardlink_state: None,
-        extension,
-        pixel_width: 0,
-        pixel_height: 0,
-        texture_ready: false,
-        thumbnail_rgba: None,
-        page_rgba: None,
-        palette: Vec::new(),
-        size_label: String::new(),
-        modified_at: String::new(),
-        tags,
-        thumbnail_custom: false,
-        provider_id: None,
-        source_payload: None,
-        metadata,
-    }
 }

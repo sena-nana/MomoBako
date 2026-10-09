@@ -105,7 +105,7 @@ impl MissingSignals {
 /// 缺失仓库页：首页外框里纵向滚动的一节，内容在可见高度里居中。
 pub(super) fn view(signals: MissingSignals) -> AnyView {
     let section = widget(fill_section()).children((panel(signals),)).key("missing-repository-page").into_any();
-    super::route_home::home_page(None, super::route_home::home_scroll("workspace-missing-scroll", false, section))
+    super::route_home::home_page(None, super::route_home::home_scroll("workspace-missing-scroll", section))
 }
 
 /// 给一个节点套上外边距。Vue 用 `margin` 微调的几处间距照搬。

@@ -1,12 +1,14 @@
 //! 主区路由共用的页面外框：首页（`Home.vue` 的 `.workspace-page`）和整页滚动。
 //!
 //! 首页各路由（文件、搜索、播放集、管理面板、缺失和空库）都放在同一个外框里（[`home_page`]）：有仓库的
-//! 首页路由在上面嵌常驻筛选栏，下面是主体。文件面板主体固定高度，由面板内部自己滚；其余面板的主体是
-//! 纵向滚动（[`home_scroll`]）。设置和启动页是整页滚动（[`scroll_route`]），内边距跟着内容一起滚。
+//! 首页路由在上面嵌常驻筛选栏，下面是主体。文件面板主体固定高度，由面板内部自己滚；日志面板的主体也
+//! 不滚（[`home_fixed`]），面板撑满主体、日志列表自己滚；其余面板的主体是纵向滚动（[`home_scroll`]）。
+//! 设置和启动页是整页滚动（[`scroll_route`]），内边距跟着内容一起滚。
 //! 外框和滚动容器都常驻，只建一次，滚动偏移自然留着。
 
-use nana_ui::runtime::view::{widget, AnyView, FieldWrite, IntoProp, IntoView};
+use nana_ui::runtime::view::{widget, AnyView, IntoView};
 use nana_ui::runtime::{LengthSpec, ScrollAxes, ScrollView, Stack};
+use nana_ui_core::OverflowSpec;
 
 use super::render::{PRIMARY_INSET_X, PRIMARY_INSET_Y};
 
@@ -24,9 +26,21 @@ pub(super) fn home_page(filter: Option<AnyView>, body: AnyView) -> AnyView {
 }
 
 /// 首页的纵向滚动主体（`.workspace-page__body` 的 `overflow: auto`）。`key` 写区域和面板，换面板时
-/// 从顶部开始；`follow_end` 可以绑定，日志追踪时跟随末尾。
-pub(super) fn home_scroll(key: &'static str, follow_end: impl IntoProp<bool>, panel: AnyView) -> AnyView {
-    widget(scroll_view()).prop::<bool, FollowEnd>(follow_end).children((panel,)).key(key).into_any()
+/// 从顶部开始。
+pub(super) fn home_scroll(key: &'static str, panel: AnyView) -> AnyView {
+    widget(scroll_view()).children((panel,)).key(key).into_any()
+}
+
+/// 首页的固定主体：占满筛选栏以下的高度，自身不滚动，放不下的部分裁掉。给里面自己安排滚动的面板用
+/// （日志列表）。不套在 [`home_scroll`] 里：NanaUI 的滚动范围按全部后代的盒子合并，里层滚动区溢出的
+/// 内容会撑出外层的滚动范围，外层能滚进一片空白。
+pub(super) fn home_fixed(key: &'static str, panel: AnyView) -> AnyView {
+    let body = Stack::column(0.0).with_layout(|layout| {
+        fill_rest(layout);
+        layout.overflow_x = OverflowSpec::Hidden;
+        layout.overflow_y = OverflowSpec::Hidden;
+    });
+    widget(body).children((panel,)).key(key).into_any()
 }
 
 /// 主区内容层的 `overflow: auto`：内边距在滚动内容里，随内容一起滚动。
@@ -40,26 +54,14 @@ pub(super) fn scroll_route(content: AnyView, key: &'static str) -> AnyView {
 
 /// 占满剩余高度的纵向滚动。
 fn scroll_view() -> ScrollView {
-    ScrollView::new(ScrollAxes::Vertical).with_layout(|layout| {
-        layout.flex_grow = Some(1.0);
-        layout.flex_shrink = Some(1.0);
-        layout.min_height = Some(LengthSpec::Px(0.0));
-        layout.height = Some(LengthSpec::Fill);
-        layout.flex_basis = Some(LengthSpec::Px(0.0));
-    })
+    ScrollView::new(ScrollAxes::Vertical).with_layout(fill_rest)
 }
 
-/// 滚动容器是否跟随末尾。写成真时运行时当场滚到底，之后内容变长也跟着。
-pub(super) struct FollowEnd;
-
-impl FieldWrite<ScrollView, bool> for FollowEnd {
-    const FIELD: &'static str = "ScrollView.follow_end";
-
-    fn write(target: &mut ScrollView, follow: bool) {
-        target.follow_end = follow;
-    }
-
-    fn differs(target: &ScrollView, follow: &bool) -> bool {
-        target.follow_end != *follow
-    }
+/// 占满父级竖排里剩下的高度，内容再多也不把自己撑高。
+fn fill_rest(layout: &mut nana_ui_core::LayoutStyle) {
+    layout.flex_grow = Some(1.0);
+    layout.flex_shrink = Some(1.0);
+    layout.min_height = Some(LengthSpec::Px(0.0));
+    layout.height = Some(LengthSpec::Fill);
+    layout.flex_basis = Some(LengthSpec::Px(0.0));
 }

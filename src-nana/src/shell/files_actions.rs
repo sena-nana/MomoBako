@@ -558,6 +558,22 @@ impl FilesState {
         self.effects.push(FilesEffect::RefreshHardlinks { repo_id: repo_id.to_string() });
     }
 
+    /// 刷新文件夹树同步以后重读的候选：换掉列表，跳过的留着；没有别的对话框开着时，有候选就弹出确认。
+    /// Vue 的确认框按「第一个没跳过的候选」算出来，候选一到就出现。
+    pub(super) fn note_hardlinks_synced(&mut self, prompts: Vec<HardlinkPrompt>) {
+        self.hardlinks = prompts;
+        if self.dialog == FileDialog::Closed && self.current_hardlink().is_some() {
+            self.dialog = FileDialog::Hardlink;
+        }
+    }
+
+    /// 非静默地重读当前目录（回收站面板读回收站），选择留着、读完按新列表修剪。返回是否排下了读取：
+    /// 文件正在变更、虚拟视图或没有仓库时不读。刷新文件夹树同步以后用，对应 Vue `loadFileBrowserForDirectory`。
+    pub(super) fn reload_current(&mut self, ctx: &FileContext) -> bool {
+        let path = self.current_path.clone();
+        self.queue_browse(ctx, &path, false, true, false)
+    }
+
     /// 静默替换硬链接候选。成功只换列表；失败只记日志。
     /// 不改对话框、已跳过候选和页面错误。
     pub(super) fn note_hardlinks_silent(&mut self, result: Result<Vec<HardlinkPrompt>, String>) {

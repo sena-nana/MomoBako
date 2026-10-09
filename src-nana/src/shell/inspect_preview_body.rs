@@ -195,6 +195,7 @@ fn resolve(model: &ShellViewModel) -> (ContentRef<'_>, bool) {
             (ContentRef::Text { markdown: *markdown, text, truncated_at: *truncated_at, extension }, true)
         }
         PreviewBody::Image => (image_ref(model), true),
+        PreviewBody::Media(session) if session.status == "failed" => (media_failed_ref(model, session.error.as_deref()), false),
         PreviewBody::Media(_) => (media_ref(model), false),
         PreviewBody::Native { view_id, label, content } => (native_ref(model, view_id, label, content), true),
         PreviewBody::Failed(message) => match kind {
@@ -229,6 +230,17 @@ fn image_ref(model: &ShellViewModel) -> ContentRef<'_> {
         (_, Some(pixels)) => ContentRef::ImagePixels(PixelsRef { width: pixels.width, height: pixels.height, rgba: &pixels.rgba }),
         (_, None) => loading_ref(model, &PreviewKind::Image),
     }
+}
+
+/// 音视频读不出、解不开，或者播放器装不上同一个文件：照 Vue 预览插件的失败浮层（`.media-preview__overlay--error`）
+/// 替换唱片舞台，红色标题下一行原因。标题音频照 `audioPreview.js`「无法预览该音频」，视频照 `media-preview`
+/// 「无法预览该媒体」；原因是解码层或播放器写下的原文（没有原生解码器、某格式解码失败……），没有原文时用
+/// Vue 运行时的「音频无法播放」「视频无法播放」。这类失败就近显示，不进全局状态区。
+fn media_failed_ref<'a>(model: &'a ShellViewModel, error: Option<&'a str>) -> ContentRef<'a> {
+    let video = super::super::inspect::support::is_video_extension(&model.inspect.facts.extension);
+    let (title, fallback) = if video { ("无法预览该媒体", "视频无法播放") } else { ("无法预览该音频", "音频无法播放") };
+    let message = error.map(str::trim).filter(|error| !error.is_empty()).unwrap_or(fallback);
+    ContentRef::Failed { title, message, toolbar: None, document: false }
 }
 
 /// 播放器挂载：视频是画面，音频是唱片舞台。

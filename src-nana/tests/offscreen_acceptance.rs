@@ -154,12 +154,13 @@ fn native_actions_are_reachable_through_runtime_hit_testing() {
     let document = acceptance_document_for(ShellPage::FileList).expect("acceptance document");
     let mut session = RuntimeAgentSession::new(document, 1200, 800).expect("agent session");
     // Vue 文件夹加号的可见内容是图标，`aria-label` 和 `title` 都是「在当前目录新建文件夹」。
-    // 对话框标题才叫「新建文件夹」。命中测试点现在的无障碍名。
+    // 对话框标题才叫「新建文件夹」。命中测试点现在的无障碍名。展示方式下拉框读出当前值，
+    // 文件页和 Vue `base()` 一样是网格。
     for label in [
         "根目录",
         "在当前目录新建文件夹",
         "设置",
-        "自适应",
+        "网格",
         "最小化",
         "最大化",
         "关闭",
@@ -412,6 +413,10 @@ fn scene_labels(scene_id: &str, page: &ShellPage) -> &'static [&'static str] {
         "copy-dialog" => &["复制到文件夹", "目标目录"],
         // 图片幻灯片读不到文件：播放条写「图片无法播放」，停留时长照常可调。
         "still-playback" => &["图片无法播放", "图片停留时长"],
+        // 音频预览解不开：预览框里写失败标题和原因，不再只画唱片。
+        "preview-audio-failed" => &["无法预览该音频", "没有原生解码器"],
+        // 刷新文件夹树时仓库还在同步：侧栏状态区写第一步和百分比。
+        "folder-tree-refresh" => &["扫描文件夹结构", "33%"],
         "filter-bar" => &["当前资源库筛选", "格式筛选"],
         // 三个条件生效，结果是命中的 cover.png。
         "filter-bar-active" => &["3 个条件", "默认资源库 / cover.png"],
