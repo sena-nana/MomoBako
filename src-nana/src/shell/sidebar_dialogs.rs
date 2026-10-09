@@ -17,7 +17,7 @@ use nana_ui::ButtonKind;
 use super::super::sidebar::{FolderDeleteMode, GapMessage};
 use super::super::view_part_overlay::dialog::{
     action, busy_note, error_line, footer, paragraph, select_field, text_field, wrapping_text, Choices, DialogFrame,
-    DimmedDisabled,
+    DimmedDisabled, MODAL_CARD,
 };
 use super::super::view_part_overlay::session::{Draft, Projected};
 use super::super::workspace::{DeleteMode, WorkspaceDialog};
@@ -93,6 +93,7 @@ pub fn folder_dialog(model: &ShellViewModel) -> Option<AnyView> {
     ];
     Some(
         DialogFrame::new("folder-dialog", move || view.with(|view| view.title.to_string()), || gap(GapMessage::CloseFolderDialog))
+            .size(MODAL_CARD)
             .busy(busy)
             .dialog(body, footer(None, buttons)),
     )
@@ -153,7 +154,8 @@ pub fn folder_delete_dialog(model: &ShellViewModel) -> Option<AnyView> {
         DialogFrame::new("folder-delete-dialog", || super::super::sidebar::FOLDER_DELETE_TITLE.to_string(), || {
             gap(GapMessage::CloseFolderDelete)
         })
-        .danger()
+        .size(MODAL_CARD)
+        .danger(true)
         .busy(busy)
         .dialog(body, footer(None, buttons)),
     )
@@ -238,7 +240,8 @@ pub fn smart_delete_dialog(model: &ShellViewModel) -> Option<AnyView> {
     ];
     Some(
         DialogFrame::new("smart-delete-dialog", move || view.with(|view| view.title.to_string()), || gap(GapMessage::CloseSmartDelete))
-            .danger()
+            .size(MODAL_CARD)
+            .danger(true)
             .busy(busy)
             .dialog(paragraph(move || view.with(|view| view.copy.clone()), false, "smart-delete-copy"), footer(None, buttons)),
     )
@@ -300,7 +303,11 @@ pub fn playlist_create_dialog(model: &ShellViewModel) -> Option<AnyView> {
         action("取消", ButtonKind::Ghost, false, "playlist-dialog-cancel", || ShellMessage::ClosePlaylistDialog),
         action("创建", ButtonKind::Primary, move || view.with(|view| view.blocked), "create-playlist", || ShellMessage::CreatePlaylist),
     ];
-    Some(DialogFrame::new("playlist-dialog", || "新建播放集".to_string(), || ShellMessage::ClosePlaylistDialog).dialog(body, footer(None, buttons)))
+    Some(
+        DialogFrame::new("playlist-dialog", || "新建播放集".to_string(), || ShellMessage::ClosePlaylistDialog)
+            .size(MODAL_CARD)
+            .dialog(body, footer(None, buttons)),
+    )
 }
 
 /// 删除资源库要显示的东西。
@@ -362,7 +369,8 @@ pub fn repository_delete_dialog(model: &ShellViewModel) -> Option<AnyView> {
     let buttons = vec![action("取消", ButtonKind::Ghost, deleting, "delete-dialog-cancel", || ShellMessage::MissingCloseDelete)];
     Some(
         DialogFrame::new("repository-delete-dialog", || "删除资源库".to_string(), || ShellMessage::MissingCloseDelete)
-            .danger()
+            .size(MODAL_CARD)
+            .danger(true)
             .busy(deleting)
             .dialog(body, footer(Some(busy_note(deleting, "delete-dialog-busy")), buttons)),
     )

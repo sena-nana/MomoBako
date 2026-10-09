@@ -10,9 +10,9 @@
 //! 经 [`OverlaySession::placed`] 置真，下一次刷新建出分支，分支的 `on_mount` 运行时宿主已经在树里，
 //! 这时激活。换下前经 [`OverlaySession::retire`] 让框架关掉对话框，焦点回到打开前的位置。
 //!
-//! 外观照 Vue `.modal-card` / `.dialog-card__*` 尽量靠近：宽度取最近的 `DialogSize` 档，危险对话框
-//! 的标题用错误色；遮罩、分隔线、内边距、距顶 12vh、卡片圆角和开合动效由主题配方决定
-//! （`appearance.rs`），差异见 `docs/nana-vue-parity.md`。
+//! 外观照 Vue `.modal-card` / `.dialog-card__*`：每个对话框照自己的宽度类给 CSS 宽度，危险对话框用
+//! NanaUI 的危险口气，Vue 标题前有图标的放进标题图标槽；遮罩、分隔线、内边距、距顶 12vh、卡片圆角
+//! 和开合动效由主题配方决定（`appearance.rs`），差异见 `docs/nana-vue-parity.md`。
 
 use std::sync::Arc;
 
@@ -24,7 +24,7 @@ use nana_ui::runtime::{
     Activate, AlignSpec, AppContext, Button, ConfirmDialog, ConfirmIntent, Dialog, DialogCloseRequested, IconButton,
     IconGlyph, LengthSpec, ListItem, NodeStyle, OverlayHost, RadiusTier, SemanticColorRole, Stack, Text,
 };
-use nana_ui::{ButtonKind, ControlSize};
+use nana_ui::{ButtonKind, ControlSize, Icon};
 use nana_ui_core::{DialogClosePolicy, DialogSize};
 
 use super::session::{register, OverlaySession};
@@ -39,45 +39,19 @@ pub(crate) type BusyFn = Arc<dyn Fn() -> bool + Send + Sync>;
 /// 现做一条壳层消息。`ShellMessage` 不能克隆，每次手势现做。
 pub(crate) type MessageFn = Arc<dyn Fn() -> ShellMessage + Send + Sync>;
 
-/// 对话框的口气：危险操作（删除资源库、处理文件夹、删除智能文件夹）标题用错误色，
-/// 对应 Vue `.dialog-card__header--danger`。
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum DialogTone {
-    Normal,
-    Danger,
-}
+/// `.modal-card { width: min(520px, 92vw) }`：没有自己宽度类的对话框都这么宽。
+pub(crate) const MODAL_CARD: DialogSize = DialogSize::capped(520.0, 92.0);
 
-/// 对话框宽度。Vue 写的是像素，NanaUI 只有几档尺寸，取最近的一档，差异写在对照文档里。
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum DialogWidth {
-    /// 重命名文件（`.workspace-rename-dialog`，460）。
-    Narrow,
-    /// 普通对话框（`.modal-card`，520）。
-    Normal,
-    /// 导出资源库（`.repository-export-dialog`，560）。
-    Export,
-    /// 智能文件夹（`.smart-folder-dialog`，720）。
-    Wide,
-}
+/// 标题前的图标：Vue 头部的图标都是 14px。
+const TITLE_ICON_SIZE: f32 = 14.0;
 
-impl DialogWidth {
-    /// 和 Vue 宽度最近的 NanaUI 尺寸档：460→420、520→520、560→600、720→680。
-    pub(crate) const fn size(self) -> DialogSize {
-        match self {
-            Self::Narrow => DialogSize::Compact,
-            Self::Normal => DialogSize::Default,
-            Self::Export => DialogSize::Medium,
-            Self::Wide => DialogSize::Wide,
-        }
-    }
-}
-
-/// 一个对话框的外壳：键、标题、口气、宽度、处理中和关闭时发的消息。
+/// 一个对话框的外壳：键、标题、口气、宽度、标题图标、处理中和关闭时发的消息。
 pub(crate) struct DialogFrame {
     key: &'static str,
     title: Box<dyn Fn() -> String + Send>,
-    tone: DialogTone,
-    width: DialogWidth,
+    danger: bool,
+    size: DialogSize,
+    icon: Option<Icon>,
     busy: BusyFn,
     close: MessageFn,
     close_button: bool,
@@ -93,22 +67,31 @@ impl DialogFrame {
         Self {
             key,
             title: Box::new(title),
-            tone: DialogTone::Normal,
-            width: DialogWidth::Normal,
+            danger: false,
+            size: MODAL_CARD,
+            icon: None,
             busy: Arc::new(|| false),
             close: Arc::new(close),
             close_button: false,
         }
     }
 
-    /// 危险对话框：标题用错误色。
-    pub(crate) fn danger(mut self) -> Self {
-        self.tone = DialogTone::Danger;
+    /// 危险口气（Vue `.dialog-card__header--danger`）：标题和标题前的图标用主题的危险色，正文不变。
+    pub(crate) fn danger(mut self, danger: bool) -> Self {
+        self.danger = danger;
         self
     }
 
-    pub(crate) fn width(mut self, width: DialogWidth) -> Self {
-        self.width = width;
+    /// 卡片宽度，照 Vue 这个对话框的宽度类写成 CSS 长度，例如 `min(560px, 92vw)` 是
+    /// `DialogSize::capped(560.0, 92.0)`。
+    pub(crate) fn size(mut self, size: DialogSize) -> Self {
+        self.size = size;
+        self
+    }
+
+    /// 标题前的图标（Vue 标题前的 Lucide 图标换成对应的 Tabler 图标）。
+    pub(crate) fn title_icon(mut self, icon: Icon) -> Self {
+        self.icon = Some(icon);
         self
     }
 
@@ -126,13 +109,12 @@ impl DialogFrame {
 
     /// 普通对话框：标题下面是 `body`，底栏是 `footer`（一般是 [`footer`] 建的按钮行）。
     pub(crate) fn dialog(self, body: impl IntoView, footer_view: impl IntoView) -> AnyView {
-        let Self { key, title, tone, width, busy, close, close_button } = self;
+        let Self { key, title, danger, size, icon, busy, close, close_button } = self;
         let host = entity_ref::<OverlayHost>();
         let surface = entity_ref::<Dialog>();
         let placed = signal(false);
         register(Activation { placed, host });
-        let mut dialog = Dialog::new(title()).size(width.size()).close_policy(DialogClosePolicy::requests_only());
-        apply_tone(&mut dialog.style, tone);
+        let dialog = Dialog::new(title()).size(size).danger(danger).close_policy(DialogClosePolicy::requests_only());
         let mut element = widget(dialog)
             .entity_ref(surface)
             .key("dialog-surface")
@@ -149,6 +131,9 @@ impl DialogFrame {
             })
             .body(body)
             .footer(footer_view);
+        if let Some(icon) = icon {
+            element = element.title_icon(title_icon(icon, danger));
+        }
         if close_button {
             element = element.close_action(close_affordance(busy));
         }
@@ -170,16 +155,15 @@ impl DialogFrame {
         confirm: impl IntoView,
         on_confirm: impl Fn() -> ShellMessage + Send + Sync + 'static,
     ) -> AnyView {
-        let Self { key, title, tone, width, busy, close, close_button: _ } = self;
+        let Self { key, title, danger, size, icon, busy, close, close_button: _ } = self;
         let host = entity_ref::<OverlayHost>();
         let surface = entity_ref::<ConfirmDialog>();
         let placed = signal(false);
         register(Activation { placed, host });
-        let mut dialog = ConfirmDialog::new(title(), message()).size(width.size()).close_policy(DialogClosePolicy::requests_only());
-        apply_tone(&mut dialog.style, tone);
+        let dialog = ConfirmDialog::new(title(), message()).size(size).danger(danger).close_policy(DialogClosePolicy::requests_only());
         let gesture_close = close.clone();
         let gesture_busy = busy.clone();
-        let element = widget(dialog)
+        let mut element = widget(dialog)
             .entity_ref(surface)
             .key("dialog-surface")
             .prop::<String, ConfirmTitle>(title)
@@ -208,6 +192,9 @@ impl DialogFrame {
             })
             .cancel(cancel)
             .confirm(confirm);
+        if let Some(icon) = icon {
+            element = element.title_icon(title_icon(icon, danger));
+        }
         frame(key, host, element.into_any(), activator(placed, move |cx| {
             if let (Some(host), Some(surface)) = (host.get(), surface.get()) {
                 cx.activate_overlay(host, surface).map(|_| ())
@@ -218,11 +205,10 @@ impl DialogFrame {
     }
 }
 
-/// 危险口气：对话框节点的文字色换成错误色，NanaUI 用它画标题。正文里的文字都写了自己的颜色。
-fn apply_tone(style: &mut NodeStyle, tone: DialogTone) {
-    if tone == DialogTone::Danger {
-        style.foreground = Some(SemanticColorRole::Danger);
-    }
+/// 标题前的图标：14px，颜色跟着标题走（Vue 的图标继承头部的文字色，危险口气时是 `--err`）。
+fn title_icon(icon: Icon, danger: bool) -> AnyView {
+    let role = if danger { SemanticColorRole::Danger } else { SemanticColorRole::Text };
+    widget(IconGlyph::new(icon).size(TITLE_ICON_SIZE).role(role)).key("dialog-icon").into_any()
 }
 
 /// 浮层槽位里的一块：铺满的外层（AppShell 给它打铺满窗口的补丁，有子节点时挡住下面的点击，
