@@ -65,29 +65,28 @@ pub(crate) enum RouteKey {
     Missing,
     /// 还没有资源库。
     Empty,
-    /// 首页没有可显示的面板。
-    Blank,
 }
 
 impl RouteKey {
-    /// 按 ViewModel 取当前路由。
+    /// 按 ViewModel 取当前路由。有仓库时按面板分：文件、回收站和智能文件夹是文件路由，停在播放集页时
+    /// 其余面板都显示播放集路由。
     pub(crate) fn of(model: &ShellViewModel) -> Self {
         let settings_page = matches!(model.page, ShellPage::Settings | ShellPage::SettingsError);
         let panel = model.workspace.panel;
         match model.workspace.main_region() {
             MainRegion::Startup | MainRegion::LoadError => Self::Startup,
             _ if settings_page => Self::Settings,
-            _ if model.files_surface_visible() => Self::Files,
             MainRegion::MissingRepository => Self::Missing,
             MainRegion::EmptyRepository if panel == WorkspacePanel::Search => Self::EmptySearch,
             MainRegion::EmptyRepository => Self::Empty,
-            MainRegion::HasRepository if model.page == ShellPage::Playlists || panel == WorkspacePanel::Playlist => Self::Playlists,
             MainRegion::HasRepository => match panel {
+                WorkspacePanel::Files | WorkspacePanel::Trash | WorkspacePanel::SmartFolder => Self::Files,
+                _ if model.page == ShellPage::Playlists => Self::Playlists,
+                WorkspacePanel::Playlist => Self::Playlists,
                 WorkspacePanel::Logs => Self::Logs,
                 WorkspacePanel::Extensions => Self::Extensions,
                 WorkspacePanel::Actions => Self::Actions,
                 WorkspacePanel::Search => Self::Search,
-                _ => Self::Blank,
             },
         }
     }
@@ -125,27 +124,12 @@ fn resident_view(route: RouteKey, signals: RouteSignals, hot: HotSignals) -> Opt
         RouteKey::Actions => Some(super::route_admin::actions(signals.filter, signals.admin)),
         RouteKey::Files => Some(super::route_files::view(signals.filter, signals.files, hot)),
         RouteKey::Playlists => Some(super::route_playlists::view(signals.filter, signals.playlists)),
-        _ => None,
     }
 }
 
-/// 整块重挂的路由内容。常驻路由返回 `None`。
-fn legacy_view(route: RouteKey, model: &ShellViewModel) -> Option<AnyView> {
-    let view = match route {
-        RouteKey::Startup
-        | RouteKey::Files
-        | RouteKey::Missing
-        | RouteKey::Empty
-        | RouteKey::Search
-        | RouteKey::EmptySearch
-        | RouteKey::Settings
-        | RouteKey::Logs
-        | RouteKey::Extensions
-        | RouteKey::Actions
-        | RouteKey::Playlists => return None,
-        RouteKey::Blank => super::route_home::blank(model),
-    };
-    Some(view)
+/// 整块重挂的路由内容。所有路由都已常驻，不再有旧视图路由；交接处随后拆掉。
+fn legacy_view(_: RouteKey, _: &ShellViewModel) -> Option<AnyView> {
+    None
 }
 
 /// 常驻路由的信号，在骨架作用域里建，进出路由都不重建。
@@ -192,7 +176,6 @@ impl RouteSignals {
             RouteKey::Actions => self.admin.write_actions(model),
             RouteKey::Files => self.files.write(model),
             RouteKey::Playlists => self.playlists.write(model),
-            RouteKey::Blank => {}
         }
         // 筛选栏只在有仓库的首页上出现：启动、设置、缺失和空库页都不写。
         if !matches!(route, RouteKey::Startup | RouteKey::Settings | RouteKey::Missing | RouteKey::Empty) {

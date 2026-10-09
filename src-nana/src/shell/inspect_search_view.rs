@@ -31,7 +31,7 @@ mod presenter;
 #[path = "search_widgets.rs"]
 mod widgets;
 
-pub(crate) use filter_bar_view::{filter_bar, resident_filter_bar};
+pub(crate) use filter_bar_view::resident_filter_bar;
 pub(crate) use filter_state::{FilterBarSignals, FilterBarView};
 pub(crate) use panel_state::{SearchPanelSignals, SearchPanelView};
 use panel_state::{HitChip, HitRow, SearchHead, SearchStatus};
