@@ -182,15 +182,16 @@ fn assert_clicks() {
         "最大化没有排队宿主命令：{commands:?}"
     );
 
+    // 默认关闭行为和 Vue/Tauri 一致：没有未保存的修改时直接关窗，不弹确认。
     click_label(&mut session, "Close");
     let commands = pump(&mut session, &mut model);
     assert!(
-        commands.iter().all(|command| !matches!(command, WindowCommand::Close(_))),
-        "关闭跳过了确认：{commands:?}"
+        commands.iter().any(|command| matches!(command, WindowCommand::Close(_))),
+        "关闭没有排队关窗命令：{commands:?}"
     );
     assert!(
-        session.accessibility_dump().iter().any(|node| node.label.as_deref() == Some("确认关闭 MomoBako？")),
-        "关闭没有进入确认"
+        session.accessibility_dump().iter().all(|node| node.label.as_deref() != Some("确认关闭 MomoBako？")),
+        "没有未保存的修改时不该弹关闭确认"
     );
 
     click_label(&mut session, "全局搜索");

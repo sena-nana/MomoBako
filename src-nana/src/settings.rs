@@ -66,12 +66,13 @@ pub fn default_path() -> PathBuf {
 }
 
 impl Default for ApplicationSettings {
+    /// 关闭默认直接退出，和 Vue/Tauri 版一致；有未保存的修改时 `decide_close` 仍会先确认。
     fn default() -> Self {
         Self {
             theme: "system".into(),
             thumbnail_cache_limit_mb: 1024,
             default_playlist_player_type_id: None,
-            close_behavior: "confirm".into(),
+            close_behavior: "quit".into(),
         }
     }
 }
