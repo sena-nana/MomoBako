@@ -1,23 +1,21 @@
 //! 常驻文件路由的回归：五千条目录里缩略图到达、选中和后台消息只改该改的那一张卡片，别的卡片节点和
 //! 滚动位置都不动；元数据输入框和筛选栏输入框在组合输入中不被别的更新打断；一串更新以后的文档和
-//! 同一 ViewModel 新挂的一样（无障碍树、组装路径、整份样式和选中禁用等状态）；外部拖放按归约时的
-//! 面板决定；播放条岛不因为自己量出的宽度反复重建。
+//! 同一 ViewModel 新挂的一样（`assert_same_as_fresh_mount` 比无障碍树，也比组装路径、整份样式和选中
+//! 禁用等状态）；外部拖放按归约时的面板决定；播放条岛不因为自己量出的宽度反复重建。
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 use std::time::Instant;
 
-use nana_ui::runtime::{
-    component_descriptors, DocumentId, Entity, LayoutViewport, RuntimeDocument, ScrollOffset, ScrollView, StableNodeId,
-};
-use nana_ui::{FileDragInput, FileDragKind, HeadlessInput, InputModifiers, InputPayload, NanaTextShaper};
+use nana_ui::runtime::{component_descriptors, Entity, ScrollOffset, ScrollView, StableNodeId};
+use nana_ui::{FileDragInput, FileDragKind, HeadlessInput, InputModifiers, InputPayload};
 
 use crate::backend::services::repository::{FileBrowserEntry, SystemLogLocation, SystemLogRecord, SystemLogSource};
 use crate::shell::files::{DisplayMode, FileRow, FilesEffect, FilesMessage};
 use crate::shell::host_events::HostMessage;
 use crate::shell::player::PlayerMessage;
 use crate::shell::view_harness::ShellHarness;
-use crate::shell::{InspectMessage, ShellMessage, ShellView, ShellViewModel, ThumbnailFrame, WorkspacePanel};
+use crate::shell::{InspectMessage, ShellMessage, ShellViewModel, ThumbnailFrame, WorkspacePanel};
 
 fn scene(name: &str) -> ShellViewModel {
     crate::shell::acceptance_gap_models()
@@ -135,55 +133,6 @@ fn thumbnail(path: &str) -> ThumbnailFrame {
     ThumbnailFrame { path: format!("thumbs/{path}"), natural_width: 100, natural_height: 100, width: 2, height: 2, rgba: vec![255; 16] }
 }
 
-/// 文档里每个节点的组装路径、无障碍状态（禁用、选中、勾选、忙、无效）和整份样式（含显隐和画笔键），按文档顺序。
-fn structure(document: &RuntimeDocument) -> Vec<String> {
-    let context = document.context();
-    let world = context.world();
-    let states = world
-        .project_accessibility(document.document())
-        .into_iter()
-        .map(|node| {
-            let state = format!(
-                "disabled={} selected={:?} checked={:?} busy={} invalid={}",
-                node.disabled, node.selected, node.checked, node.busy, node.invalid
-            );
-            (node.id, state)
-        })
-        .collect::<HashMap<_, _>>();
-    world
-        .document_order(document.document())
-        .into_iter()
-        .map(|id| {
-            let path = context.assembly_path(id).unwrap_or_default();
-            let style = world.node_style(id).map(|style| format!("{style:?}")).unwrap_or_default();
-            format!("{path} {} {style}", states.get(&id).map_or("", String::as_str))
-        })
-        .collect()
-}
-
-/// 增量文档和同一 ViewModel 新挂的文档逐个节点比较组装路径、无障碍状态和整份样式。
-/// `assert_same_as_fresh_mount` 只比角色、名称、值和布局盒；绑在样式、选中和禁用上的字段在这里比。
-fn assert_same_structure_as_fresh_mount(harness: &mut ShellHarness) {
-    harness.flush();
-    let ours = structure(harness.document());
-    assert!(ours.iter().any(|line| line.contains("NodeStyle {")), "没有取到节点样式，结构比较不起作用");
-    let mut fresh = RuntimeDocument::new(DocumentId::new(1).expect("文档编号"));
-    let _view = ShellView::mount(&mut fresh, &harness.model).expect("新挂对照文档");
-    fresh.flush(LayoutViewport::new(1200.0, 800.0), &mut NanaTextShaper::default()).expect("对照文档布局");
-    let theirs = structure(&fresh);
-    if ours == theirs {
-        return;
-    }
-    let first = ours.iter().zip(&theirs).position(|(a, b)| a != b).unwrap_or(ours.len().min(theirs.len()));
-    panic!(
-        "增量文档和新挂的结构不一样（{} 对 {} 个节点，第 {first} 个起不同）\n增量：{}\n新挂：{}",
-        ours.len(),
-        theirs.len(),
-        ours.get(first).map_or("-", String::as_str),
-        theirs.get(first).map_or("-", String::as_str)
-    );
-}
-
 /// 五千条的目录滚到中间：一张缩略图到达、选中一行、一条无关的后台消息之后，建出来的卡片一张都不换，
 /// 滚动位置不动，主区分支也不重挂；变了的字段在原节点上改。
 #[test]
@@ -229,7 +178,6 @@ fn five_thousand_rows_keep_their_nodes_and_scroll_through_updates() {
     harness.window.document.context_mut().scroll_to(scroll, ScrollOffset { x: 0.0, y: 0.0 }).expect("滚回顶上");
     settle(&mut harness);
     harness.assert_same_as_fresh_mount();
-    assert_same_structure_as_fresh_mount(&mut harness);
 }
 
 /// 一批缩略图到达的耗时：五千条里两百张同时到，只有到达的卡片重算。打印耗时，只拦明显的退化。
@@ -422,7 +370,6 @@ fn incremental_files_route_matches_a_fresh_mount_step_by_step() {
         settle(&mut harness);
         eprintln!("Nana 逐步对照第 {index} 步");
         harness.assert_same_as_fresh_mount();
-        assert_same_structure_as_fresh_mount(&mut harness);
     }
 }
 
