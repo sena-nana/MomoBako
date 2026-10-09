@@ -91,6 +91,27 @@ fn slashes_in_tags_and_repeated_palette_colors_still_mount() {
     assert!(has_input(&paths, "inspect-tag-draft"), "标签菜单应在：{paths:?}");
 }
 
+/// 标签菜单铺在元数据的标签区里，不按坐标夹进写死的 1280×800：960×600 的窗口里打开，菜单整块落在
+/// 右侧详情卡片里，也在窗口里面；窄到详情卡片叠到列表下面（800 宽）时同样落在卡片里。
+#[test]
+fn tag_menu_stays_inside_the_detail_card_in_other_window_sizes() {
+    for (width, height) in [(960.0, 600.0), (800.0, 600.0)] {
+        let mut model = scene("files-selected-metadata");
+        model.reduce(ShellMessage::Files(FilesMessage::ToggleTagMenu));
+        assert!(model.inspect.tag_menu_open(), "{width}×{height} 打开标签菜单");
+        let harness = crate::shell::view_harness::ShellHarness::mount_at(model, width, height);
+        let layout = |key: &str| {
+            let id = harness.keyed(key).unwrap_or_else(|| panic!("{width}×{height} 缺少 {key}"));
+            harness.document().context().world().layout_box(id).unwrap_or_else(|| panic!("{key} 没有布局盒"))
+        };
+        let panel = layout("inspect-tag-menu-panel");
+        let card = layout("file-detail");
+        assert!(panel.width > 0.0 && panel.height > 0.0, "{width}×{height} 菜单要排出来：{panel:?}");
+        assert!(panel.x >= card.x - 0.5 && panel.x + panel.width <= card.x + card.width + 0.5, "{width}×{height} 菜单横向落在详情卡片里：{panel:?} / {card:?}");
+        assert!(panel.x >= 0.0 && panel.x + panel.width <= width + 0.5, "{width}×{height} 菜单不出窗口：{panel:?}");
+    }
+}
+
 /// 按 1200×800 挂载并排版。首帧布局回报的消息（列表宽度等）在实况里早一帧就送走了，这里先取掉。
 fn laid_out(model: &ShellViewModel) -> ApplicationWindow {
     let mut window = ApplicationWindow::new();

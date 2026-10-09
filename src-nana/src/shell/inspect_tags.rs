@@ -1,7 +1,7 @@
 //! 标签菜单、搜索延时和元数据自动保存。
 //!
-//! 菜单坐标夹取和侧栏弹层用同一条规则。搜索等待 250 毫秒，元数据等待 260 毫秒。
-//! 时钟只在还有到期项时前进，避免空闲时把窗口钉在连续帧上。
+//! 标签菜单铺在元数据的标签区里，开合只是一个标志，位置由卡片排版决定，和窗口大小无关。
+//! 搜索等待 250 毫秒，元数据等待 260 毫秒。时钟只在还有到期项时前进，避免空闲时把窗口钉在连续帧上。
 
 use super::super::player::ClockStep;
 use super::{InspectMessage, InspectState};
@@ -49,21 +49,13 @@ impl InspectState {
         self.tag_menu = false;
     }
 
-    pub fn open_tag_menu(&mut self, x: f32, y: f32, width: f32, height: f32, viewport_w: f32, viewport_h: f32) {
+    /// 打开标签菜单。虚拟素材、保存中或没有素材时不开（Vue `openTagMenu` 的 `canEdit` 和 `isSaving`）。
+    pub fn open_tag_menu(&mut self) {
         if self.virtual_asset || self.saving || self.asset_id.is_none() {
             eprintln!("Nana 当前不能打开标签菜单");
             return;
         }
-        let (x, y) = super::super::sidebar::clamp_anchored(x, y, width, height, viewport_w, viewport_h);
         self.tag_menu = true;
-        self.tag_menu_x = x;
-        self.tag_menu_y = y;
-    }
-
-    pub fn dismiss_tag_menu_outside(&mut self, inside: bool) {
-        if self.tag_menu && !inside {
-            self.tag_menu = false;
-        }
     }
 
     pub(super) fn apply_clock(&mut self, hint: ClockHint) {
@@ -156,17 +148,20 @@ pub(crate) fn poll_timers(model: &mut super::super::ShellViewModel) -> bool {
 mod tests {
     use super::InspectState;
 
+    /// 有素材才开得了；保存中和虚拟素材不开。
     #[test]
-    fn tag_menu_clamps_like_vue_and_closes_on_an_outside_click() {
+    fn tag_menu_opens_only_for_an_editable_asset() {
         let mut state = InspectState::default();
+        state.open_tag_menu();
+        assert!(!state.tag_menu_open(), "没有素材不开");
         state.asset_id = Some("asset".into());
-        state.open_tag_menu(-10.0, 900.0, 180.0, 80.0, 400.0, 300.0);
+        state.saving = true;
+        state.open_tag_menu();
+        assert!(!state.tag_menu_open(), "保存中不开");
+        state.saving = false;
+        state.open_tag_menu();
         assert!(state.tag_menu_open());
-        assert_eq!(state.tag_menu_x, 4.0);
-        assert_eq!(state.tag_menu_y, 216.0);
-        state.dismiss_tag_menu_outside(true);
-        assert!(state.tag_menu_open());
-        state.dismiss_tag_menu_outside(false);
+        state.close_tag_menu();
         assert!(!state.tag_menu_open());
     }
 }

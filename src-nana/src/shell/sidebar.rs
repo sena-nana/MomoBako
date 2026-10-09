@@ -102,7 +102,7 @@ mod bind;
 mod popover;
 
 pub use smart::{SmartFolderDraft, SmartFolderField};
-pub use gap::{clamp_anchored, escape_layer, FolderDeleteMode, FolderMenu, FolderMutation, GapMessage, FOLDER_DELETE_TITLE};
+pub use gap::{escape_layer, FolderDeleteMode, FolderMenu, FolderMutation, GapMessage, FOLDER_DELETE_TITLE};
 pub use popover::{backend_options, BackendOption, BackendRoute};
 
 /// 一次目录树读取：树本身和每个目录的直属文件数（Vue `FileTreeNode.fileCount`）。
