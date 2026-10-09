@@ -7,7 +7,7 @@
 
 use nana_ui::runtime::view::{signal, store, Signal, Store};
 
-use super::super::admin::bind::sync_rows;
+use super::super::row_sync::sync_rows;
 use super::super::admin::style::key_part;
 use super::super::inspect::SearchRow;
 use super::super::ShellViewModel;

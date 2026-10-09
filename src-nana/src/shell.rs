@@ -879,6 +879,7 @@ impl ShellViewModel {
 mod interaction;
 mod render;
 mod remount_state;
+mod row_sync;
 mod shell_tint;
 mod startup_view;
 mod workbench;

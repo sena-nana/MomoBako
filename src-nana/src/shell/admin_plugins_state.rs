@@ -324,10 +324,10 @@ impl PluginPanelSignals {
         self.notice.try_set_if_changed(view.notice);
         self.keyword.sync(&view.keyword);
         self.state.try_set_if_changed(view.state);
-        super::bind::sync_rows(self.groups, PluginGroupView::key, view.groups);
+        super::super::row_sync::sync_rows(self.groups, PluginGroupView::key, view.groups);
         self.settings.try_set_if_changed(view.settings);
         self.source.try_set_if_changed(view.source);
-        super::bind::sync_rows(self.source_repos, SourceRepoRow::key, view.source_repos);
-        super::bind::sync_rows(self.fields, FieldRowView::key, view.fields);
+        super::super::row_sync::sync_rows(self.source_repos, SourceRepoRow::key, view.source_repos);
+        super::super::row_sync::sync_rows(self.fields, FieldRowView::key, view.fields);
     }
 }

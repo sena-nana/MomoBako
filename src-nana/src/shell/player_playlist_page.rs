@@ -29,7 +29,7 @@ use crate::backend::services::repository::PlaylistItem;
 
 use super::super::player::PlayerMessage;
 use super::super::remount_state::{self, KeptState};
-use super::super::view_part_sidebar::project::sync_rows;
+use super::super::row_sync::sync_rows;
 use super::super::{ShellMessage, ShellViewModel};
 use super::{bar, icons, key_part, playlist_plugin_missing, player_message};
 
