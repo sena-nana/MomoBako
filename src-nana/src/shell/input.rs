@@ -202,7 +202,8 @@ pub struct InputState {
 }
 
 impl InputState {
-    /// 按关闭设置记录确认、托盘或真正关闭。重复确认不叠加请求。
+    /// 按关闭设置记录确认、托盘或真正关闭。确认框是浮层里的 `ConfirmDialog`，只看 `pending_close`
+    /// 和文案，不排宿主请求；已经在问时再关不重复问。
     pub(crate) fn apply_close(&mut self, decision: CloseDecision, dirty: bool) {
         match decision {
             CloseDecision::CloseNow => {
@@ -220,7 +221,6 @@ impl InputState {
                 } else {
                     "确认关闭 MomoBako？".into()
                 };
-                self.host_requests.push(HostRequest::Input(HostInputRequest::ConfirmClose { dirty }));
             }
             CloseDecision::HoldForTray => {
                 self.pending_close = false;

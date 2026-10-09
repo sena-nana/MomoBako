@@ -50,7 +50,8 @@ pub fn read_clipboard_text() -> Option<String> {
     }
 }
 
-/// 执行已经记下的打开、拖出和托盘请求。其它请求留在队列里。
+/// 执行已经记下的打开、拖出和托盘请求。队列每次都清空：宿主是它唯一的消费方，
+/// 执行不了的请求记日志后丢掉，不留下来越积越多。
 pub fn perform(
     shell: &mut ShellViewModel,
     mut open: impl FnMut(&str, bool) -> Result<(), String>,
@@ -59,7 +60,6 @@ pub fn perform(
 ) {
     crate::drag_out::apply_result(shell);
     let requests = std::mem::take(&mut shell.input.host_requests);
-    let mut kept = Vec::new();
     for request in requests {
         match request {
             HostRequest::OpenExternal(ExternalOpenRequest { target, reveal }) => {
@@ -85,10 +85,9 @@ pub fn perform(
                     }
                 }
             }
-            other => kept.push(other),
+            other => eprintln!("Nana 宿主不执行这个请求，已丢弃：{other:?}"),
         }
     }
-    shell.input.host_requests = kept;
 }
 
 /// 正式窗口用系统程序打开、拖出文件，或隐藏到托盘。
@@ -245,5 +244,38 @@ mod tests {
         perform(&mut model, |_, _| Ok(()), |_| Ok(()), || Ok(()));
         assert_eq!(failure(&model), None, "收进托盘成功以后托盘失败作废");
         assert!(model.input.take_platform_commands(nana_ui_platform::WindowId(1), false).is_empty());
+    }
+
+    /// 关闭要确认时，每次 `update` 后宿主都跑一遍 `perform`：问、取消、再问、再取消，队列一直是空的，
+    /// 关闭确认只由 `pending_close` 驱动，确认后才排关窗命令。
+    #[test]
+    fn repeated_close_confirmations_leave_no_host_requests_behind() {
+        let mut model = ShellViewModel::default();
+        model.settings.close_behavior = "confirm".into();
+        for _ in 0..3 {
+            model.reduce(ShellMessage::WindowAction(crate::shell::WindowAction::Close));
+            perform(&mut model, |_, _| Ok(()), |_| Ok(()), || Ok(()));
+            assert!(model.input.pending_close);
+            assert!(model.input.host_requests.is_empty(), "关闭确认不进宿主请求队列");
+            model.reduce(ShellMessage::Input(InputMessage::ConfirmCloseAnswer(false)));
+            perform(&mut model, |_, _| Ok(()), |_| Ok(()), || Ok(()));
+            assert!(!model.input.pending_close);
+            assert!(model.input.take_platform_commands(nana_ui_platform::WindowId(1), false).is_empty(), "取消不关窗");
+        }
+        model.reduce(ShellMessage::WindowAction(crate::shell::WindowAction::Close));
+        model.reduce(ShellMessage::Input(InputMessage::ConfirmCloseAnswer(true)));
+        perform(&mut model, |_, _| Ok(()), |_| Ok(()), || Ok(()));
+        assert!(model.input.host_requests.is_empty());
+        let commands = model.input.take_platform_commands(nana_ui_platform::WindowId(1), false);
+        assert!(matches!(commands.as_slice(), [nana_ui_platform::host::WindowCommand::Close(_)]));
+    }
+
+    /// 宿主执行不了的请求也从队列里拿掉，只记日志。
+    #[test]
+    fn perform_drains_requests_it_cannot_execute() {
+        let mut model = ShellViewModel::default();
+        model.input.host_requests.push(HostRequest::Input(HostInputRequest::FocusMainWindow));
+        perform(&mut model, |_, _| Ok(()), |_| Ok(()), || Ok(()));
+        assert!(model.input.host_requests.is_empty());
     }
 }

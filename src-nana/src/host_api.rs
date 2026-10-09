@@ -154,13 +154,12 @@ pub struct FileDropRequest {
     pub paths: Vec<String>,
 }
 
-/// Native input and close-confirmation requests kept outside the Runtime widget tree.
+/// 交给宿主执行的输入请求。关闭确认是浮层里的确认框，由 `InputState::pending_close` 驱动，不经宿主。
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum HostInputRequest {
     FileDrop(FileDropRequest),
     /// 把库内绝对路径拖出窗口。Windows 上由宿主调用系统拖放。
     DragOut { paths: Vec<String> },
-    ConfirmClose { dirty: bool },
     /// 关闭行为是最小化到托盘。宿主隐藏窗口，进程继续留在托盘里。
     MinimizeToTray,
     FocusMainWindow,
@@ -256,7 +255,7 @@ mod tests {
     }
 
     #[test]
-    fn host_input_keeps_drop_paths_and_close_state() {
+    fn host_input_keeps_drop_paths() {
         assert_eq!(
             HostRequest::Input(HostInputRequest::FileDrop(FileDropRequest {
                 paths: vec!["C:/assets/a.png".into()],
@@ -264,10 +263,6 @@ mod tests {
             HostRequest::Input(HostInputRequest::FileDrop(FileDropRequest {
                 paths: vec!["C:/assets/a.png".into()],
             }))
-        );
-        assert_eq!(
-            HostInputRequest::ConfirmClose { dirty: true },
-            HostInputRequest::ConfirmClose { dirty: true }
         );
     }
 

@@ -492,9 +492,9 @@ fn close_confirmation_and_file_dialogs_do_not_pretend_the_host_finished() {
     model.reduce(ShellMessage::WindowAction(crate::shell::WindowAction::Close));
     assert!(model.input.pending_close);
     assert_eq!(model.input.notice, "确认关闭 MomoBako？");
-    assert!(matches!(model.input.host_requests.last(), Some(HostRequest::Input(HostInputRequest::ConfirmClose { dirty: false }))));
+    assert!(model.input.host_requests.is_empty(), "确认框由浮层画，不排宿主请求");
     model.reduce(ShellMessage::WindowAction(crate::shell::WindowAction::Close));
-    assert_eq!(model.input.host_requests.len(), 1);
+    assert!(model.input.host_requests.is_empty());
     assert!(close_prompt(&model).is_some());
     send(&mut model, InputMessage::ConfirmCloseAnswer(false));
     assert!(!model.input.pending_close);
@@ -511,7 +511,7 @@ fn close_confirmation_and_file_dialogs_do_not_pretend_the_host_finished() {
 
     model.dirty = true;
     model.reduce(ShellMessage::WindowAction(crate::shell::WindowAction::Close));
-    assert!(matches!(model.input.host_requests.last(), Some(HostRequest::Input(HostInputRequest::ConfirmClose { dirty: true }))));
+    assert!(model.input.pending_close);
     assert_eq!(model.input.notice, "有未保存的修改，确认关闭？");
     send(&mut model, InputMessage::ConfirmCloseAnswer(true));
     assert!(!model.input.take_platform_commands(nana_ui_platform::WindowId(1), false).is_empty());
