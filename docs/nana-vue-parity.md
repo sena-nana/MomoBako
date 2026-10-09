@@ -11,7 +11,7 @@ Vue 的缺陷、死代码和意外的层叠效果不照抄，按设计意图实�
 ## 对照方法
 
 - Vue 侧：用 `@tauri-apps/api/mocks` 模拟 IPC，在无头 Edge（与 WebView2 同内核）里截图。场景数据与 Nana 验收场景同名。
-- Nana 侧：`NANA_SCENES=… NANA_SIZES=1200x800,960x600 NANA_THEMES=light,dark cargo test -p momobako-nana --test scene_shots -- --nocapture`。场景定义在 `src-nana/src/shell/acceptance_*.rs`，输出 PNG 和节点清单。
+- Nana 侧：`NANA_SCENES=… NANA_SIZES=1200x800,960x600 NANA_THEMES=light,dark cargo test -p momobako-nana --test scene_shots -- --nocapture`。场景定义在 `src-nana/src/shell/acceptance_*.rs`，输出 PNG 和节点清单。截图前先把视图量到尺寸后发回的消息（播放条宽、文件列表宽）归约几轮，截到的是稳定后的画面。
 - 两边逐场景出差异热图和差异像素比例。比例只用来发现问题，不作为通过标准。
 
 ## 全局取舍
@@ -68,6 +68,7 @@ Vue 的缺陷、死代码和意外的层叠效果不照抄，按设计意图实�
 - 播放条的宽排版网格在窄栏里溢出，断点只看窗口宽度；Nana 按播放条自身宽度切换三行排版。
 - 播放集条目标题被全局按钮样式居中。
 - 自动播放失败后，图标仍显示「暂停」。
+- 在 ASMR 资源库里打开音频预览，文件工作台和预览页上下同时出现，工作台里的播放条还显示「未选择播放内容」；Nana 只显示预览页。
 
 ### 设置、插件与日志
 - 日志追踪滚动的是不定高的列表本身，实际不会滚动；Nana 让主区跟随末尾。
