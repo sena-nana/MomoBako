@@ -239,6 +239,40 @@ impl ShellHarness {
         self.queued()
     }
 
+    /// 在 `from` 按下主键，分几步挪到 `to` 再松开，返回这次拖动发出的消息，不归约。之前排着的消息
+    /// 留给调用方。
+    pub fn drag_messages(&mut self, from: (f32, f32), to: (f32, f32)) -> Vec<ShellMessage> {
+        const STEPS: usize = 6;
+        let earlier = self.take_messages();
+        self.held = earlier;
+        let context = self.window.document.context_mut();
+        self.input.pointer(context, nana_ui::PointerPhase::Down, from.0, from.1).expect("按下");
+        for step in 1..=STEPS {
+            let t = step as f32 / STEPS as f32;
+            let (x, y) = (from.0 + (to.0 - from.0) * t, from.1 + (to.1 - from.1) * t);
+            let context = self.window.document.context_mut();
+            self.input.pointer(context, nana_ui::PointerPhase::Move, x, y).expect("拖动");
+        }
+        let context = self.window.document.context_mut();
+        self.input.pointer(context, nana_ui::PointerPhase::Up, to.0, to.1).expect("松开");
+        self.queued()
+    }
+
+    /// 按一下名为 `key` 的键（例如 `"Enter"`），返回控件因此发出的消息，不归约，不走全局 Escape。
+    pub fn key_messages(&mut self, key: &'static str) -> Vec<ShellMessage> {
+        let input = nana_ui::KeyInput {
+            physical: nana_ui_platform::PhysicalKey(key.into()),
+            logical: nana_ui_platform::LogicalKey(key.into()),
+            state: nana_ui::KeyState::Pressed,
+            repeat: false,
+            modifiers: nana_ui::InputModifiers::default(),
+        };
+        let earlier = self.take_messages();
+        self.held = earlier;
+        self.input.press(self.window.document.context_mut(), input, None, None).expect("按键");
+        self.queued()
+    }
+
     /// 节点的布局盒中心。
     pub fn center(&self, id: StableNodeId) -> (f32, f32) {
         let bounds = self.document().context().world().layout_box(id).unwrap_or_else(|| panic!("节点 {} 没有布局盒", id.get()));
