@@ -267,10 +267,21 @@ fn collect_rows(world: &UiWorld, document_id: nana_ui::runtime::DocumentId) -> V
     rows
 }
 
+/// 文件列表的滚动区：从任意一张卡片往上找到的第一个 `ScrollView`。
+/// 卡片在虚拟行、分组和内容列里套了好几层，按组件类型找，不按层数猜。
 fn list_bounds(world: &UiWorld, rows: &[RowMark]) -> Option<LayoutBox> {
-    let content = world.parent_id(rows.first()?.node)?;
-    let host = world.parent_id(content).unwrap_or(content);
-    world.layout_box(host).filter(|bounds| bounds.width > 0.0 && bounds.height > 0.0)
+    let mut cursor = world.parent_id(rows.first()?.node);
+    while let Some(node) = cursor {
+        let scroll = world
+            .component_type(node)
+            .is_some_and(|kind| std::borrow::Borrow::<str>::borrow(kind) == nana_ui::runtime::component_descriptors::SCROLL_VIEW.type_id);
+        if scroll {
+            return world.layout_box(node).filter(|bounds| bounds.width > 0.0 && bounds.height > 0.0);
+        }
+        cursor = world.parent_id(node);
+    }
+    eprintln!("Nana 文件卡片上面没有找到列表滚动区");
+    None
 }
 
 /// 指针落在行盒子里，即使命中被父级列表吃掉也算这一行。
@@ -494,14 +505,15 @@ mod tests {
         (row.bounds.x + row.bounds.width / 2.0, row.bounds.y + row.bounds.height / 2.0)
     }
 
+    /// 列表滚动区里不压在卡片上的一点。先试上方两角（内容上边距里），从那里拖到卡片会扫过第一行。
     fn empty_list_point(window: &ApplicationWindow) -> (f32, f32) {
         let rows = marks(window);
         let list = list_bounds(window.document.context().world(), &rows).expect("文件列表");
         let candidates = [
-            (list.x + 2.0, list.y + list.height - 2.0),
-            (list.x + list.width - 2.0, list.y + list.height - 2.0),
             (list.x + list.width - 2.0, list.y + 2.0),
             (list.x + 2.0, list.y + 2.0),
+            (list.x + list.width - 2.0, list.y + list.height - 2.0),
+            (list.x + 2.0, list.y + list.height - 2.0),
         ];
         candidates
             .into_iter()
