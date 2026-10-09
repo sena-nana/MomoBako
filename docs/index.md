@@ -11,6 +11,7 @@ MomoBako 是一个桌面资源库工作台，面向本地素材管理、文件�
 - [Nana 组件对应](./nana-component-map.md)：当前构建的 Nana 组件、主题角色、图标和宿主缺口。
 - [Nana 逻辑矩阵](./nana-logic-matrix.md)：从 Vue 分支迁到原生壳层的记账表。
 - [Nana 迁移边界](./nana-migration.md)：默认原生启动、服务边界和尚未完成的宿主能力。
+- [Nana 与 Vue 对照](./nana-vue-parity.md)：对照方法、全局取舍、没照抄的 Vue 缺陷、已知差异和 NanaUI 缺口。
 
 ## 本地开发
 
