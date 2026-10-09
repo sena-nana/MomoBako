@@ -1,15 +1,16 @@
-//! 设置、插件、日志和任务消息归约。
+//! 设置、插件、日志、任务和来源登录的消息归约。
 //!
-//! 已经存在的页面文案留在这里，避免壳层匹配再涨过 1000 行。
-//! 新分支只改 `admin` 状态；验收场景不读取这些实况字段。
+//! 规则照 Vue 对应组件：插件操作的提示文案、字段规范化、日志筛选、任务弹层的开关、
+//! 主题和圆角的即时保存。只改状态并排副作用，真正的服务调用在 `admin_dispatch`。
 
 use crate::backend::services::repository::{PluginConfigSnapshot, PluginManifest, RepositoryAction};
 
+use super::super::workspace_refresh::SilentMessage;
 use super::super::{ShellMessage, ShellPage, ShellViewModel, WorkspacePanel};
 use super::support::{self, FieldChange};
-use super::{AdminEffect, AdminMessage, PluginCallOrigin, SourceAuthCall};
+use super::{source_provision as flow, AdminEffect, AdminMessage, PluginCallOrigin};
 
-/// 处理实况管理消息，并吃掉原来写在壳层里的插件、日志、设置和任务分支。
+/// 处理管理消息，并吃掉壳层里属于设置、插件、日志和任务的分支。
 pub(crate) fn reduce_message(model: &mut ShellViewModel, message: ShellMessage) -> Option<ShellMessage> {
     match message {
         ShellMessage::Admin(message) => {
@@ -23,6 +24,9 @@ pub(crate) fn reduce_message(model: &mut ShellViewModel, message: ShellMessage) 
         ShellMessage::SetWorkspacePanel(panel) => {
             if panel == WorkspacePanel::Actions {
                 model.admin.queue_actions(model.repository_id.clone());
+            }
+            if panel == WorkspacePanel::Extensions && model.admin.plugins.is_empty() && !model.admin.loading_settings {
+                model.admin.begin_settings_load();
             }
             Some(ShellMessage::SetWorkspacePanel(panel))
         }
@@ -40,6 +44,10 @@ pub(crate) fn reduce_message(model: &mut ShellViewModel, message: ShellMessage) 
             model.admin.note_backends(&items);
             Some(ShellMessage::WorkspaceListLoaded { generation, result: Ok(items) })
         }
+        ShellMessage::SilentWorkspace(SilentMessage::Repositories(Ok(items))) => {
+            model.admin.note_backends(&items);
+            Some(ShellMessage::SilentWorkspace(SilentMessage::Repositories(Ok(items))))
+        }
         other => consume_legacy(model, other),
     }
 }
@@ -47,37 +55,30 @@ pub(crate) fn reduce_message(model: &mut ShellViewModel, message: ShellMessage) 
 fn consume_legacy(model: &mut ShellViewModel, message: ShellMessage) -> Option<ShellMessage> {
     match message {
         ShellMessage::PluginsLoaded(Ok(plugins)) => {
-            publish_plugins(model, &plugins, true);
+            publish_plugins(model, &plugins);
             model.admin.store_plugins(plugins);
             model.admin.managing = false;
             model.admin.apply_success();
             None
         }
         ShellMessage::PluginsLoaded(Err(error)) => {
-            model.page = ShellPage::Error;
-            model.detail = format!("无法读取插件列表：{error}");
+            eprintln!("Nana 插件列表读取失败：{error}");
             model.admin.managing = false;
+            model.admin.load_error = error.clone();
             model.admin.apply_failure(&error);
             None
         }
+        // 这三条旧消息由宿主直接调服务，界面改走 `AdminMessage`，这里只记一笔。
         ShellMessage::SelectPlugin(plugin_id) => {
-            model.page = ShellPage::PluginSettings;
-            model.detail = format!("正在读取插件 {plugin_id} 的原生设置…");
+            model.detail = format!("正在读取插件 {plugin_id} 的设置…");
             None
         }
         ShellMessage::TogglePlugin { plugin_id, enabled } => {
             model.detail = format!("正在{}插件 {plugin_id}…", if enabled { "启用" } else { "停用" });
-            model.admin.reset_action();
-            model.admin.remember_outcome(
-                if enabled { "插件已启用。" } else { "插件已禁用。" },
-                "插件状态更新失败。",
-            );
             None
         }
         ShellMessage::DeletePlugin(plugin_id) => {
             model.detail = format!("正在删除插件 {plugin_id}…");
-            model.admin.reset_action();
-            model.admin.remember_outcome("插件已删除。", "插件删除失败。");
             None
         }
         ShellMessage::PluginConfigLoaded(Ok(config)) => {
@@ -87,8 +88,7 @@ fn consume_legacy(model: &mut ShellViewModel, message: ShellMessage) -> Option<S
             None
         }
         ShellMessage::PluginConfigLoaded(Err(error)) => {
-            model.page = ShellPage::Error;
-            model.detail = format!("无法读取插件设置：{error}");
+            eprintln!("Nana 插件设置读取或保存失败：{error}");
             model.admin.managing = false;
             model.admin.apply_failure(&error);
             None
@@ -101,12 +101,8 @@ fn consume_legacy(model: &mut ShellViewModel, message: ShellMessage) -> Option<S
             model.plugin_config_drafts.insert(key, value);
             None
         }
-        ShellMessage::SavePluginConfig { key, .. } => {
-            model.detail = format!("正在保存插件配置 {key}…");
-            None
-        }
+        ShellMessage::SavePluginConfig { .. } => None,
         ShellMessage::LogsLoaded(Ok(page)) => {
-            model.page = ShellPage::Logs;
             model.admin.logs = page.records.clone();
             model.admin.note_log_scroll();
             model.log_entries = page
@@ -114,11 +110,10 @@ fn consume_legacy(model: &mut ShellViewModel, message: ShellMessage) -> Option<S
                 .iter()
                 .map(|record| format!("{} · {} · {}", record.level, record.category, record.message))
                 .collect();
-            model.detail = format!("最近日志 · {} 条记录", page.records.len());
             None
         }
         ShellMessage::LogsLoaded(Err(error)) => {
-            model.page = ShellPage::Error;
+            eprintln!("Nana 系统日志读取失败：{error}");
             model.detail = format!("无法读取系统日志：{error}");
             None
         }
@@ -127,12 +122,11 @@ fn consume_legacy(model: &mut ShellViewModel, message: ShellMessage) -> Option<S
             None
         }
         ShellMessage::TaskSnapshotLoaded { active, completed } => {
-            model.page = ShellPage::TaskRunning;
             model.active_tasks = active;
             model.completed_tasks = completed;
-            model.detail = format!("{active} 个运行中任务 · {completed} 个近期完成任务");
             None
         }
+        // 状态行写第一个运行中或取消中的任务；任务弹层另读完整列表。
         ShellMessage::TaskProgressLoaded(progress) => {
             model.task_progress = progress;
             if let Some(snapshot) = model.task_progress.iter().find(|snapshot| snapshot.status == "running" || snapshot.status == "cancelling") {
@@ -143,34 +137,37 @@ fn consume_legacy(model: &mut ShellViewModel, message: ShellMessage) -> Option<S
             None
         }
         ShellMessage::SystemStatusLoaded(Ok(status)) => {
-            model.page = ShellPage::Settings;
             model.admin.external = Some(status.clone());
             model.system_status = Some(format!("{} · {}", if status.ready { "服务已就绪" } else { "服务未就绪" }, status.base_url));
             model.detail = model.system_status.clone().unwrap_or_default();
             None
         }
         ShellMessage::SystemStatusLoaded(Err(error)) => {
-            model.page = ShellPage::Error;
+            eprintln!("Nana 外部 API 连接状态读取失败：{error}");
             model.detail = format!("无法读取系统服务状态：{error}");
             None
         }
         ShellMessage::SettingsLoaded(Ok((settings, diagnostic))) => {
-            model.page = ShellPage::Settings;
             model.settings_cache_limit_draft = settings.thumbnail_cache_limit_mb.to_string();
             model.settings = settings;
+            model.detail = diagnostic.clone().unwrap_or_else(|| "应用设置已加载".into());
             model.settings_error = diagnostic;
-            model.detail = model.settings_error.clone().unwrap_or_else(|| "应用设置已加载".into());
             None
         }
         ShellMessage::SettingsLoaded(Err(error)) => {
-            model.page = ShellPage::SettingsError;
-            model.settings_error = Some(error.clone());
+            eprintln!("Nana 应用设置读取失败：{error}");
             model.detail = format!("无法读取应用设置：{error}");
+            model.settings_error = Some(error);
             None
         }
         ShellMessage::SettingsThemeChanged(theme) => {
+            if theme != "light" && theme != "dark" && theme != "system" {
+                eprintln!("Nana 忽略未知主题：{theme}");
+                return None;
+            }
             model.settings.theme = theme;
             model.settings_error = None;
+            model.admin.push_effect(AdminEffect::SaveSettings);
             None
         }
         ShellMessage::SettingsCacheLimitChanged(value) => {
@@ -192,12 +189,12 @@ fn consume_legacy(model: &mut ShellViewModel, message: ShellMessage) -> Option<S
             model.settings_error = None;
             None
         }
+        // 保存由宿主直接写设置文件，这里只更新状态行；结果不切页面。
         ShellMessage::SaveSettings => {
             model.detail = "正在保存应用设置…".into();
             None
         }
         ShellMessage::SettingsSaved(Ok(settings)) => {
-            model.page = ShellPage::Settings;
             model.settings_cache_limit_draft = settings.thumbnail_cache_limit_mb.to_string();
             model.settings = settings;
             model.settings_error = None;
@@ -205,9 +202,9 @@ fn consume_legacy(model: &mut ShellViewModel, message: ShellMessage) -> Option<S
             None
         }
         ShellMessage::SettingsSaved(Err(error)) => {
-            model.page = ShellPage::SettingsError;
-            model.settings_error = Some(error.clone());
+            eprintln!("Nana 应用设置保存失败：{error}");
             model.detail = format!("设置校验失败：{error}");
+            model.settings_error = Some(error);
             None
         }
         ShellMessage::CancelTask(task_id) => {
@@ -225,7 +222,7 @@ fn reduce_admin(model: &mut ShellViewModel, message: AdminMessage) {
             model.admin.reset_action();
             model.admin.managing = true;
             model.admin.remember_outcome(if enabled { "插件已启用。" } else { "插件已禁用。" }, "插件状态更新失败。");
-            model.admin.effects.push(AdminEffect::SetEnabled { plugin_id, enabled });
+            model.admin.push_effect(AdminEffect::SetEnabled { plugin_id, enabled });
         }
         AdminMessage::RequestDelete(plugin_id) => request_delete(model, &plugin_id),
         AdminMessage::CancelDelete => model.admin.pending_delete = None,
@@ -233,6 +230,9 @@ fn reduce_admin(model: &mut ShellViewModel, message: AdminMessage) {
         AdminMessage::ToggleSettings(plugin_id) => open_settings(model, &plugin_id),
         AdminMessage::RoutePlugin(plugin_id) => open_route(model, &plugin_id),
         AdminMessage::ConfigInput { plugin_id, key, text, checked } => apply_field(model, &plugin_id, &key, &text, checked),
+        AdminMessage::FieldDraft { plugin_id, key, value } => {
+            model.admin.field_drafts.entry(plugin_id).or_default().insert(key, value);
+        }
         AdminMessage::JsonDraft { plugin_id, key, value } => {
             model.admin.json_drafts.entry(plugin_id).or_default().insert(key, value);
         }
@@ -244,10 +244,7 @@ fn reduce_admin(model: &mut ShellViewModel, message: AdminMessage) {
         }
         AdminMessage::ChooseArchive => {
             model.admin.reset_action();
-            model.admin.effects.push(AdminEffect::RequestOpenDialog);
-            if support::open_dialog_available() {
-                model.admin.action_message = "正在选择插件包…".into();
-            }
+            model.admin.push_effect(AdminEffect::RequestOpenDialog);
         }
         AdminMessage::InstallArchive(path) => install_archive(model, path),
         AdminMessage::PluginsReplaced(result) => replace_plugins(model, result),
@@ -261,19 +258,19 @@ fn reduce_admin(model: &mut ShellViewModel, message: AdminMessage) {
                 .find(|plugin| plugin.plugin_id == plugin_id)
                 .map(|plugin| plugin.name.clone())
                 .unwrap_or_else(|| plugin_id.clone());
-            model.admin.effects.push(AdminEffect::OpenDataDirectory { plugin_id, name });
+            model.admin.push_effect(AdminEffect::OpenDataDirectory { plugin_id, name });
         }
         AdminMessage::DataDirectoryFinished { name, result } => finish_directory(model, &name, result),
         AdminMessage::HooksLoaded(Ok(records)) => model.admin.hook_executions = records,
         AdminMessage::HooksLoaded(Err(error)) => {
             eprintln!("Nana 插件钩子记录读取失败：{error}");
-            model.admin.action_error = error;
+            model.admin.load_error = error;
         }
         AdminMessage::CacheLoaded(Ok(snapshot)) => model.admin.cache = Some(snapshot),
         AdminMessage::CacheLoaded(Err(error)) => eprintln!("Nana 缓存快照读取失败：{error}"),
         AdminMessage::ApiDesignLoaded(Ok(snapshot)) => model.admin.api_design = Some(snapshot),
         AdminMessage::ApiDesignLoaded(Err(error)) => eprintln!("Nana API 设计快照读取失败：{error}"),
-        AdminMessage::SettingsBundleLoaded { plugins, hooks, cache, api } => apply_bundle(model, plugins, hooks, cache, api),
+        AdminMessage::SettingsBundleLoaded { plugins, hooks, cache, api, external } => apply_bundle(model, plugins, hooks, cache, api, external),
         AdminMessage::SetCornerStyle(style) => set_corner_style(model, &style),
         AdminMessage::SetCornerRadius(value) => set_corner_radius(model, &value),
         AdminMessage::CopyExternal { label, value } => copy_external(model, &label, &value),
@@ -284,21 +281,17 @@ fn reduce_admin(model: &mut ShellViewModel, message: AdminMessage) {
             model.admin.external_message = "external-api.json 已导出。".into();
         }
         AdminMessage::WriteFinished(Err(error)) => {
+            eprintln!("Nana 外部连接导出失败：{error}");
             model.admin.external_message.clear();
             model.admin.external_error = format!("导出失败：{error}");
         }
         AdminMessage::SelectRepository(repo_id) => {
             let repo_id = repo_id.trim();
-            if repo_id.is_empty() {
-                return;
+            if !repo_id.is_empty() {
+                model.reduce(ShellMessage::SelectWorkspaceRepository(repo_id.to_string()));
             }
-            let repo_id = repo_id.to_string();
-            model.reduce(ShellMessage::SelectWorkspaceRepository(repo_id));
         }
         AdminMessage::SetAudioPlayer(plugin_id) => model.set_audio_preference(plugin_id),
-        AdminMessage::MarkVueSettings(plugin_id) => {
-            model.admin.vue_settings.insert(plugin_id);
-        }
         AdminMessage::ToggleLogLevel(level) => {
             model.admin.log_levels = support::toggle_value(&model.admin.log_levels, &level);
             model.admin.note_log_scroll();
@@ -333,13 +326,14 @@ fn reduce_admin(model: &mut ShellViewModel, message: AdminMessage) {
                 model.admin.log_would_scroll = false;
             }
         }
-        AdminMessage::ToggleTaskPopover => model.admin.popover_open = !model.admin.popover_open,
-        AdminMessage::CloseTaskPopover | AdminMessage::TaskUnmount => model.admin.popover_open = false,
-        AdminMessage::TaskEscape => {
-            if model.admin.popover_open {
-                model.admin.popover_open = false;
+        AdminMessage::ToggleLogContext(id) => {
+            if !model.admin.log_context_open.remove(&id) {
+                model.admin.log_context_open.insert(id);
             }
         }
+        AdminMessage::ToggleTaskPopover => model.admin.popover_open = !model.admin.popover_open,
+        AdminMessage::CloseTaskPopover | AdminMessage::TaskUnmount => model.admin.popover_open = false,
+        AdminMessage::TaskEscape => model.admin.popover_open = false,
         AdminMessage::TaskOutside { inside } => {
             if !inside {
                 model.admin.popover_open = false;
@@ -362,44 +356,38 @@ fn reduce_admin(model: &mut ShellViewModel, message: AdminMessage) {
                 model.admin.active_tool_page_id = Some(page_id);
             }
         }
-        AdminMessage::CallSourceAuth { plugin_id, slot } => queue_source_auth(model, &plugin_id, slot),
-        AdminMessage::SourceAuthFinished { method, result } => finish_source_auth(model, &method, result),
+        AdminMessage::Api(message) => super::api::reduce(model, message),
         AdminMessage::CallFilePlugin { plugin_id, method, payload, repository_id } => {
-            queue_file_plugin(model, plugin_id, method, payload, repository_id);
+            if plugin_id.trim().is_empty() || method.trim().is_empty() {
+                eprintln!("Nana 文件插件动作缺少方法");
+                return;
+            }
+            model.admin.push_effect(AdminEffect::CallPlugin { plugin_id, method, payload, repository_id, origin: PluginCallOrigin::FileMenu });
         }
         AdminMessage::FilePluginFinished { method, result } => finish_file_plugin(model, &method, result),
-        AdminMessage::RefreshDownloader => super::gap::queue_downloader(model),
-        AdminMessage::DownloaderStatusFinished { result } => super::gap::finish_downloader(model, result),
-        AdminMessage::DismissSourceAuth => {
-            model.admin.source_auth = super::support::SourceAuthView::default();
-            model.admin.source_auth_plugin_id.clear();
-            if model.admin.action_message.starts_with("已调用") || model.admin.action_message.starts_with("正在调用") {
-                model.admin.action_message.clear();
+        AdminMessage::BeginSourceAuth { plugin_id, repo_id } => flow::begin(model, &plugin_id, repo_id),
+        AdminMessage::CheckSourceAuth { plugin_id, repo_id } => flow::refresh_status(model, &plugin_id, &repo_id),
+        AdminMessage::ClearSourceAuth { plugin_id, repo_id } => flow::clear(model, &plugin_id, &repo_id),
+        AdminMessage::CancelSourceAuth => flow::cancel(model),
+        AdminMessage::PollSourceAuth { plugin_id } => flow::poll(model, &plugin_id),
+        AdminMessage::ChooseSourceCache => {
+            if !model.admin.source_auth.busy {
+                model.input.queue_source_cache_dialog();
             }
         }
-        AdminMessage::SetSourceCachePath(path) => model.admin.source_cache_path = path,
-        AdminMessage::ChooseSourceCache => model.input.queue_source_cache_dialog(),
-        AdminMessage::SetSourceRepoName(name) => model.admin.source_repo_name = name,
-        AdminMessage::SetSourceRepoPath(path) => model.admin.source_repo_path = path,
-        AdminMessage::SubmitSourceRepository => super::source_provision::submit(model),
-        AdminMessage::SourceRepositoryFinished { result } => super::source_provision::finish(model, result),
-        AdminMessage::RunOffice(action) => super::office::queue_office(model, action),
-        AdminMessage::OfficeFinished { method, result } => super::office::finish_office(model, &method, result),
-        AdminMessage::SelectOfficeRepository(repo_id) => {
-            if model.workspace.repositories.iter().any(|repository| repository.repo_id == repo_id) {
-                model.admin.office_repo_id = repo_id;
-            } else {
-                eprintln!("Nana Office 清理缓存找不到资源库：{repo_id}");
+        AdminMessage::SetSourceCachePath(path) => {
+            let path = path.trim().to_string();
+            if !path.is_empty() {
+                model.admin.source_auth.cache_path = path;
             }
         }
+        AdminMessage::SourceStepFinished { step, result } => flow::finish(model, step, result),
+        AdminMessage::SaveSettingsNow => model.admin.push_effect(AdminEffect::SaveSettings),
     }
 }
 
-fn publish_plugins(model: &mut ShellViewModel, plugins: &[PluginManifest], switch_page: bool) {
-    if switch_page {
-        model.page = ShellPage::PluginSettings;
-        model.detail = format!("{} 个插件 · 原生贡献接口优先", plugins.len());
-    }
+/// 插件列表换新后同步壳层上旧页面读的列表和文件右键快捷方式。
+fn publish_plugins(model: &mut ShellViewModel, plugins: &[PluginManifest]) {
     model.plugin_entries = plugins.iter().map(|plugin| format!("{} {} · {}", plugin.name, plugin.version, plugin.status)).collect();
     model.plugin_entry_ids = plugins.iter().map(|plugin| plugin.plugin_id.clone()).collect();
     model.plugin_enabled = plugins.iter().map(|plugin| plugin.enabled).collect();
@@ -407,9 +395,6 @@ fn publish_plugins(model: &mut ShellViewModel, plugins: &[PluginManifest], switc
 }
 
 fn apply_config(model: &mut ShellViewModel, config: &PluginConfigSnapshot) {
-    if !matches!(model.page, ShellPage::Settings | ShellPage::SettingsError) {
-        model.page = ShellPage::PluginSettings;
-    }
     model.selected_plugin_id = Some(config.plugin_id.clone());
     model.plugin_config_keys = config.values.keys().cloned().collect();
     model.plugin_config_drafts = config
@@ -418,9 +403,7 @@ fn apply_config(model: &mut ShellViewModel, config: &PluginConfigSnapshot) {
         .map(|(key, value)| (key.clone(), value.as_str().map_or_else(|| value.to_string(), str::to_owned)))
         .collect();
     model.plugin_config_string_values = config.values.iter().filter(|(_, value)| value.is_string()).map(|(key, _)| key.clone()).collect();
-    model.detail = format!("插件 {} · 已加载 {} 项配置", config.plugin_id, config.values.len());
     model.admin.config_snapshots.insert(config.plugin_id.clone(), config.clone());
-    model.admin.active_settings_plugin_id = Some(config.plugin_id.clone());
     model.admin.sync_json_drafts(&config.plugin_id);
 }
 
@@ -435,115 +418,37 @@ fn request_delete(model: &mut ShellViewModel, plugin_id: &str) {
     model.admin.pending_delete = Some(plugin.plugin_id);
 }
 
+/// 确认删除。成功后对话框关闭；失败时对话框保留，提示写在面板上。
 fn confirm_delete(model: &mut ShellViewModel) {
     let Some(plugin_id) = model.admin.pending_delete.clone() else {
         return;
     };
     model.admin.reset_action();
-    model.admin.pending_delete = None;
     model.admin.managing = true;
     model.admin.remember_outcome("插件已删除。", "插件删除失败。");
-    model.detail = format!("正在删除插件 {plugin_id}…");
-    model.admin.effects.push(AdminEffect::DeletePlugin(plugin_id));
+    model.admin.push_effect(AdminEffect::DeletePlugin(plugin_id));
 }
 
-fn queue_source_auth(model: &mut ShellViewModel, plugin_id: &str, slot: SourceAuthCall) {
-    let plugin_id = plugin_id.trim();
-    if plugin_id.is_empty() {
-        eprintln!("Nana 来源登录调用缺少插件");
-        return;
-    }
-    let Some(plugin) = model.admin.plugins.iter().find(|plugin| plugin.plugin_id == plugin_id) else {
-        eprintln!("Nana 来源登录调用缺少插件：{plugin_id}");
-        return;
-    };
-    let key = match slot {
-        SourceAuthCall::CreateSession => "createSessionMethod",
-        SourceAuthCall::Status => "statusMethod",
-        SourceAuthCall::Clear => "clearMethod",
-        SourceAuthCall::Poll => "pollSessionMethod",
-    };
-    let Some(method) = support::named_auth_method(plugin, key) else {
-        eprintln!("Nana 来源登录调用缺少方法名");
-        return;
-    };
-    model.admin.reset_action();
-    model.admin.source_auth = support::SourceAuthView::default();
-    model.admin.source_auth_plugin_id = plugin_id.to_string();
-    model.admin.action_message = format!("正在调用 {method}…");
-    model.admin.effects.push(AdminEffect::CallPlugin {
-        plugin_id: plugin_id.to_string(),
-        method,
-        payload: serde_json::json!({}),
-        repository_id: None,
-        origin: PluginCallOrigin::SourceAuth,
-    });
-}
-
-fn finish_source_auth(model: &mut ShellViewModel, method: &str, result: Result<serde_json::Value, String>) {
-    match result {
-        Ok(payload) => {
-            model.admin.action_error.clear();
-            model.admin.action_message = support::source_auth_called_message(method, &payload);
-            let mut view = support::source_auth_view(&payload);
-            view.plugin_id = model.admin.source_auth_plugin_id.clone();
-            view.payload = Some(payload);
-            model.admin.source_auth = view;
-        }
-        Err(error) => {
-            eprintln!("Nana 来源登录调用失败：{error}");
-            model.admin.action_message.clear();
-            model.admin.source_auth = support::SourceAuthView::default();
-            model.admin.action_error = if error.is_empty() { "来源登录调用失败。".into() } else { error };
-        }
-    }
-}
-
-fn queue_file_plugin(model: &mut ShellViewModel, plugin_id: String, method: String, payload: serde_json::Value, repository_id: Option<String>) {
-    if plugin_id.trim().is_empty() || method.trim().is_empty() {
-        eprintln!("Nana 文件插件动作缺少方法");
-        return;
-    }
-    model.admin.effects.push(AdminEffect::CallPlugin {
-        plugin_id,
-        method,
-        payload,
-        repository_id,
-        origin: PluginCallOrigin::FileMenu,
-    });
-}
-
-fn finish_file_plugin(model: &mut ShellViewModel, method: &str, result: Result<serde_json::Value, String>) {
-    match result {
-        Ok(_) => {
-            model.files.error.clear();
-            model.files.activity = format!("已调用 {method}。");
-        }
-        Err(error) => {
-            eprintln!("Nana 文件插件动作失败：{method}：{error}");
-            model.files.error = if error.is_empty() { format!("{method} 调用失败。") } else { error };
-        }
-    }
-}
-
+/// 打开或收起插件设置。打开时读一次配置；换插件时来源登录状态重置。
 fn open_settings(model: &mut ShellViewModel, plugin_id: &str) {
     model.admin.reset_action();
     if model.admin.active_settings_plugin_id.as_deref() == Some(plugin_id) {
         model.admin.active_settings_plugin_id = None;
+        flow::bind_plugin(model, None);
         return;
     }
     model.admin.active_settings_plugin_id = Some(plugin_id.to_string());
+    flow::bind_plugin(model, Some(plugin_id));
     model.admin.managing = true;
+    model.admin.pending_notice = None;
     model.admin.pending_failure = Some("插件设置读取失败。".into());
-    model.admin.effects.push(AdminEffect::LoadConfig(plugin_id.to_string()));
+    model.admin.push_effect(AdminEffect::LoadConfig(plugin_id.to_string()));
 }
 
+/// 路由带插件标识时打开它的设置；已经打开并有快照就不重复读。
 fn open_route(model: &mut ShellViewModel, plugin_id: &str) {
     let plugin_id = plugin_id.trim();
-    if plugin_id.is_empty() {
-        return;
-    }
-    if !model.admin.plugins.iter().any(|plugin| plugin.plugin_id == plugin_id) {
+    if plugin_id.is_empty() || !model.admin.plugins.iter().any(|plugin| plugin.plugin_id == plugin_id) {
         return;
     }
     if model.admin.active_settings_plugin_id.as_deref() == Some(plugin_id) && model.admin.config_snapshots.contains_key(plugin_id) {
@@ -569,7 +474,7 @@ fn apply_field(model: &mut ShellViewModel, plugin_id: &str, key: &str, text: &st
         FieldChange::Set(value) => {
             model.admin.managing = true;
             model.admin.remember_outcome("插件设置已保存。", "插件设置保存失败。");
-            model.admin.effects.push(AdminEffect::SetConfig { plugin_id: plugin_id.to_string(), key: key.to_string(), value });
+            model.admin.push_effect(AdminEffect::SetConfig { plugin_id: plugin_id.to_string(), key: key.to_string(), value });
         }
     }
 }
@@ -578,8 +483,7 @@ fn reset_config(model: &mut ShellViewModel, plugin_id: &str, key: &str) {
     model.admin.reset_action();
     model.admin.managing = true;
     model.admin.remember_outcome("插件设置已重置。", "插件设置重置失败。");
-    model.detail = format!("正在删除插件 {plugin_id} 的配置 {key}…");
-    model.admin.effects.push(AdminEffect::DeleteConfig { plugin_id: plugin_id.to_string(), key: key.to_string() });
+    model.admin.push_effect(AdminEffect::DeleteConfig { plugin_id: plugin_id.to_string(), key: key.to_string() });
 }
 
 fn save_json(model: &mut ShellViewModel, plugin_id: &str, key: &str) {
@@ -597,7 +501,7 @@ fn save_json(model: &mut ShellViewModel, plugin_id: &str, key: &str) {
         Ok(value) => {
             model.admin.managing = true;
             model.admin.remember_outcome("插件设置已保存。", "插件设置保存失败。");
-            model.admin.effects.push(AdminEffect::SetConfig { plugin_id: plugin_id.to_string(), key: key.to_string(), value });
+            model.admin.push_effect(AdminEffect::SetConfig { plugin_id: plugin_id.to_string(), key: key.to_string(), value });
         }
         Err(error) => model.admin.action_error = error,
     }
@@ -610,19 +514,23 @@ fn install_archive(model: &mut ShellViewModel, path: Option<String>) {
     model.admin.reset_action();
     model.admin.managing = true;
     model.admin.remember_outcome("插件已安装。", "插件安装失败。");
-    model.admin.effects.push(AdminEffect::Install(path));
+    model.admin.push_effect(AdminEffect::Install(path));
 }
 
+/// 安装、删除、启停之后的新列表。删除成功时收起确认框。
 fn replace_plugins(model: &mut ShellViewModel, result: Result<Vec<PluginManifest>, String>) {
     model.admin.managing = false;
-    model.admin.loading_settings = false;
     match result {
         Ok(plugins) => {
-            publish_plugins(model, &plugins, false);
+            publish_plugins(model, &plugins);
             model.admin.store_plugins(plugins);
+            model.admin.pending_delete = None;
             model.admin.apply_success();
         }
-        Err(error) => model.admin.apply_failure(&error),
+        Err(error) => {
+            eprintln!("Nana 插件操作失败：{error}");
+            model.admin.apply_failure(&error);
+        }
     }
 }
 
@@ -643,26 +551,33 @@ fn finish_directory(model: &mut ShellViewModel, name: &str, result: Result<Strin
     }
 }
 
+/// 设置页五份数据。任何一份失败整批不写，只记下错误，和 Vue 的 `Promise.all` 一致。
 fn apply_bundle(
     model: &mut ShellViewModel,
     plugins: Result<Vec<PluginManifest>, String>,
     hooks: Result<Vec<crate::backend::services::repository::PluginHookExecutionRecord>, String>,
     cache: Result<crate::backend::services::repository::CacheSnapshot, String>,
     api: Result<crate::backend::services::repository::ApiDesignSnapshot, String>,
+    external: Result<crate::backend::services::runtime::ExternalApiConnectionStatus, String>,
 ) {
     model.admin.loading_settings = false;
-    let error = plugins.as_ref().err().or(hooks.as_ref().err()).or(cache.as_ref().err()).or(api.as_ref().err()).cloned();
-    if let Some(error) = error {
-        eprintln!("Nana 设置页数据读取失败：{error}");
-        model.admin.action_error = error;
-        return;
-    }
-    if let (Ok(plugins), Ok(hooks), Ok(cache), Ok(api)) = (plugins, hooks, cache, api) {
-        publish_plugins(model, &plugins, false);
-        model.admin.store_plugins(plugins);
-        model.admin.hook_executions = hooks;
-        model.admin.cache = Some(cache);
-        model.admin.api_design = Some(api);
+    match (plugins, hooks, cache, api, external) {
+        (Ok(plugins), Ok(hooks), Ok(cache), Ok(api), Ok(external)) => {
+            publish_plugins(model, &plugins);
+            model.admin.store_plugins(plugins);
+            model.admin.hook_executions = hooks;
+            model.admin.cache = Some(cache);
+            model.admin.api_design = Some(api);
+            model.admin.external = Some(external);
+            model.admin.load_error.clear();
+            // API Playground 挂载时选中第一个端点并带出方法、目标和请求体，契约换新后同样重选。
+            let _ = super::api::selected(model);
+        }
+        (plugins, hooks, cache, api, external) => {
+            let error = [plugins.err(), hooks.err(), cache.err(), api.err(), external.err()].into_iter().flatten().next().unwrap_or_default();
+            eprintln!("Nana 设置页数据读取失败：{error}");
+            model.admin.load_error = error;
+        }
     }
 }
 
@@ -672,7 +587,7 @@ fn set_corner_style(model: &mut ShellViewModel, style: &str) {
         return;
     }
     model.admin.corner_style = style.to_string();
-    model.admin.effects.push(AdminEffect::PersistCorners);
+    model.admin.push_effect(AdminEffect::PersistCorners);
 }
 
 fn set_corner_radius(model: &mut ShellViewModel, value: &str) {
@@ -685,7 +600,7 @@ fn set_corner_radius(model: &mut ShellViewModel, value: &str) {
         return;
     };
     model.admin.corner_radius = radius;
-    model.admin.effects.push(AdminEffect::PersistCorners);
+    model.admin.push_effect(AdminEffect::PersistCorners);
 }
 
 fn copy_external(model: &mut ShellViewModel, label: &str, value: &str) {
@@ -695,12 +610,7 @@ fn copy_external(model: &mut ShellViewModel, label: &str, value: &str) {
         model.admin.external_error = format!("{label} 尚未加载。");
         return;
     }
-    if !support::clipboard_available() {
-        eprintln!("Nana 系统剪贴板不可用");
-        model.admin.external_error = "复制失败：系统剪贴板不可用".into();
-        return;
-    }
-    model.admin.effects.push(AdminEffect::CopyText(value.to_string()));
+    model.admin.push_effect(AdminEffect::CopyText(value.to_string()));
     model.admin.external_message = format!("{label} 已复制。");
 }
 
@@ -712,13 +622,7 @@ fn export_external(model: &mut ShellViewModel) {
         model.admin.external_error = "连接 JSON 尚未加载。".into();
         return;
     }
-    if !support::save_dialog_available() {
-        eprintln!("Nana 系统保存对话框不可用");
-        model.admin.external_error = "导出失败：系统保存对话框不可用".into();
-        return;
-    }
-    model.admin.effects.push(AdminEffect::RequestSaveDialog { content });
-    model.admin.external_message = "正在选择导出位置…".into();
+    model.admin.push_effect(AdminEffect::RequestSaveDialog { content });
 }
 
 fn complete_export(model: &mut ShellViewModel, path: Option<String>) {
@@ -730,7 +634,7 @@ fn complete_export(model: &mut ShellViewModel, path: Option<String>) {
         model.admin.external_error = "连接 JSON 尚未加载。".into();
         return;
     }
-    model.admin.effects.push(AdminEffect::WriteFile { path, bytes: content.into_bytes() });
+    model.admin.push_effect(AdminEffect::WriteFile { path, bytes: content.into_bytes() });
 }
 
 fn external_json(model: &ShellViewModel) -> String {
@@ -738,6 +642,19 @@ fn external_json(model: &ShellViewModel) -> String {
         return String::new();
     };
     support::connection_json(&connection.base_url, &connection.token, &connection.version, &connection.started_at)
+}
+
+fn finish_file_plugin(model: &mut ShellViewModel, method: &str, result: Result<serde_json::Value, String>) {
+    match result {
+        Ok(_) => {
+            model.files.error.clear();
+            model.files.activity = format!("已调用 {method}。");
+        }
+        Err(error) => {
+            eprintln!("Nana 文件插件动作失败：{method}：{error}");
+            model.files.error = if error.is_empty() { format!("{method} 调用失败。") } else { error };
+        }
+    }
 }
 
 fn selected_action<'a>(model: &'a ShellViewModel, action_id: &Option<String>) -> Option<&'a RepositoryAction> {
@@ -762,7 +679,7 @@ fn run_action(model: &mut ShellViewModel, action_id: Option<String>) {
     let paths = model.files.selected_paths().to_vec();
     model.admin.actions_running = true;
     model.admin.actions_error.clear();
-    model.admin.effects.push(AdminEffect::RunAction { repo_id, action_id: action.action_id, paths });
+    model.admin.push_effect(AdminEffect::RunAction { repo_id, action_id: action.action_id, paths });
 }
 
 fn apply_actions(model: &mut ShellViewModel, repo_id: &str, result: Result<Vec<RepositoryAction>, String>) {
@@ -798,7 +715,7 @@ fn finish_action(model: &mut ShellViewModel, result: Result<RepositoryAction, St
             if let Some(current) = model.admin.actions.iter_mut().find(|item| item.action_id == action.action_id) {
                 *current = action;
             }
-            model.admin.effects.push(AdminEffect::ReloadBrowser { repo_id });
+            model.admin.push_effect(AdminEffect::ReloadBrowser { repo_id });
         }
         Err(error) => {
             eprintln!("Nana 仓库动作执行失败：{error}");

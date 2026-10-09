@@ -1,267 +1,184 @@
-//! 有方法名的来源认证页。
+//! 来源账号与仓库设置区。
 //!
-//! 对齐 `SourceAuthenticationSettings.vue`：账号与仓库、扫码、缓存目录、
-//! 轮询和建仓说明。二维码用已有的 `QrCode` 画进这一页，不另留一行「已调用」。
+//! 照 `SourceAuthenticationSettings.vue`：页头「账号与仓库」和「连接新账号」，下面每个来源仓库
+//! 一行（名称、登录状态和路径，检查、重新登录、退出），扫码会话打开时多一块流程区（缓存目录、
+//! 二维码、取消、刷新二维码、检查登录结果），最后是提示或错误。插件设置区展开时挂在设置头下面。
 
-use nana_ui::runtime::view::{text, widget, AnyView, IntoView};
-use nana_ui::runtime::{
-    Activate, BrowseRequested, Button, EmptyState, LabeledValue, List, ListItem, PathField, QrCode, SettingsCard, Stack, TextChanged,
-    TextInput, ValidationIntent, ValidationMessage,
-};
+use nana_ui::runtime::view::{widget, AnyView, IntoView};
+use nana_ui::runtime::{Activate, AlignSpec, LengthSpec, QrCode, Stack};
+use nana_ui_core::{RadiusTier, SemanticColorRole as Role};
 
-use super::super::workbench;
 use super::super::{ShellMessage, ShellViewModel};
-use super::{AdminMessage, SourceAuthCall};
+use super::icons;
+use super::source_provision::{self as flow};
+use super::style::{self, action, column, label, pad, row, wrapping, Tone};
+use super::AdminMessage;
 use crate::backend::services::repository::PluginManifest;
 
-/// 声明了登录方法时的账号页。没有方法名的仍走缺口卡片。
-pub(super) fn source_auth_page(model: &ShellViewModel, plugin: &PluginManifest) -> AnyView {
-    let plugin_id = plugin.plugin_id.as_str();
-    let mut rows = vec![
-        widget(workbench::meta("认证由 Source 插件处理，宿主只保存安全凭据引用。"))
-            .key(format!("admin-source-page-note-{plugin_id}"))
-            .into_any(),
-        action_row(model, plugin),
-    ];
-    rows.push(repository_block(model, plugin));
-    rows.push(session_flow(model, plugin));
-    rows.push(provision_form(model, plugin));
-    if let Some(notice) = notice(model) {
-        rows.push(notice);
+/// 整个账号与仓库区，竖排间距 12。
+pub(super) fn source_auth_settings(model: &ShellViewModel, plugin: &PluginManifest) -> AnyView {
+    let plugin_id = plugin.plugin_id.clone();
+    let state = &model.admin.source_auth;
+    let own = state.plugin_id == plugin_id;
+    let busy = own && state.busy;
+    let mut body = vec![head(&plugin_id, busy)];
+    let repositories = flow::source_repositories(model, plugin);
+    if !repositories.is_empty() {
+        let rows = repositories.iter().map(|repository| repository_row(model, &plugin_id, repository, busy)).collect::<Vec<_>>();
+        body.push(widget(column(12.0)).children(rows).key(format!("admin-source-repos-{}", style::key_part(&plugin_id))).into_any());
     }
-    widget(SettingsCard::new("账号与仓库")).children(rows).key(format!("admin-source-page-{plugin_id}")).into_any()
-}
-
-/// 连接、取消、刷新和检查登录结果排成一排，对应 Vue 页头和会话操作。
-fn action_row(model: &ShellViewModel, plugin: &PluginManifest) -> AnyView {
-    let plugin_id = plugin.plugin_id.clone();
-    widget(Stack::row(8.0).wrap(true))
-        .children((
-            connect_button(plugin),
-            widget(Button::new("取消")).key(format!("admin-source-auth-cancel-{plugin_id}")).on_cx(|_, _: &Activate, cx| {
-                cx.dispatch_program(ShellMessage::Admin(AdminMessage::DismissSourceAuth));
-            }),
-            widget(Button::new("刷新二维码")).key(format!("admin-source-auth-refresh-{plugin_id}")).on_cx({
-                let plugin_id = plugin_id.clone();
-                move |_, _: &Activate, cx| cx.dispatch_program(auth_message(plugin_id.clone(), SourceAuthCall::CreateSession))
-            }),
-            poll_button(model, plugin),
-        ))
-        .key(format!("admin-source-actions-{plugin_id}"))
-        .into_any()
-}
-
-fn connect_button(plugin: &PluginManifest) -> AnyView {
-    let plugin_id = plugin.plugin_id.clone();
-    let enabled = super::support::named_auth_method(plugin, "createSessionMethod").is_some();
-    widget(Button::new("连接新账号").disabled(!enabled))
-        .key(format!("admin-source-auth-create-{plugin_id}"))
-        .on_cx(move |_, _: &Activate, cx| {
-            cx.dispatch_program(auth_message(plugin_id.clone(), SourceAuthCall::CreateSession));
-        })
-        .into_any()
-}
-
-fn repository_block(model: &ShellViewModel, plugin: &PluginManifest) -> AnyView {
-    let repositories = source_repositories(model, plugin);
-    if repositories.is_empty() {
-        return widget(EmptyState::new("还没有这个来源的仓库").message("连接新账号后，登录成功会按插件声明创建或更新仓库。").compact(true))
-            .key(format!("admin-source-page-empty-{}", plugin.plugin_id))
-            .into_any();
+    if own && state.session.is_some() {
+        body.push(session_flow(model, plugin));
     }
-    let plugin_id = plugin.plugin_id.clone();
-    let items = repositories
-        .iter()
-        .enumerate()
-        .map(|(index, repository)| repository_row(&plugin_id, index, repository))
-        .collect::<Vec<_>>();
-    widget(List::new()).children(items).key(format!("admin-source-page-list-{}", plugin.plugin_id)).into_any()
+    if own && !state.error.is_empty() {
+        body.push(notice(state.error.clone(), true, &plugin_id));
+    } else if own && !state.message.is_empty() {
+        body.push(notice(state.message.clone(), false, &plugin_id));
+    }
+    widget(column(12.0)).children(body).key(format!("admin-source-auth-{}", style::key_part(&plugin_id))).into_any()
 }
 
-fn repository_row(plugin_id: &str, index: usize, repository: &super::super::workspace::WorkspaceRepository) -> AnyView {
-    let path = repository.path.trim();
-    let path = if path.is_empty() { "未返回路径" } else { path };
-    let plugin_id = plugin_id.to_string();
-    widget(Stack::column(6.0))
-        .key(format!("admin-source-page-repo-{plugin_id}-{index}"))
+/// 页头：标题和说明在左，「连接新账号」在右。
+fn head(plugin_id: &str, busy: bool) -> AnyView {
+    let id = plugin_id.to_string();
+    widget(style::spread(10.0, AlignSpec::Center))
         .children((
-            widget(ListItem::new(repository.name.clone()).detail(format!("未检查 · {path}"))),
-            widget(Stack::row(8.0).wrap(true)).children((
-                auth_button("检查", &plugin_id, index, "status", SourceAuthCall::Status),
-                auth_button("重新登录", &plugin_id, index, "relogin", SourceAuthCall::CreateSession),
-                auth_button("退出", &plugin_id, index, "clear", SourceAuthCall::Clear),
+            widget(Stack::column(4.0).width(LengthSpec::Shrink).min_width(LengthSpec::Px(0.0)).grow(1.0).shrink(1.0)).children((
+                widget(label("账号与仓库", 14.0, 700, Role::Text)).key(format!("admin-source-title-{}", style::key_part(&plugin_id))),
+                widget(wrapping(label("认证由 Source 插件处理，宿主只保存安全凭据引用。", 12.0, 400, Role::Muted))),
             )),
+            widget(action("连接新账号", Some(icons::KEY_ROUND), Tone::Primary, busy))
+                .key(format!("admin-source-connect-{}", style::key_part(&plugin_id)))
+                .on_cx(move |_, _: &Activate, cx| {
+                    cx.dispatch_program_all(ShellMessage::Admin(AdminMessage::BeginSourceAuth { plugin_id: id.clone(), repo_id: None }));
+                }),
         ))
         .into_any()
 }
 
-fn auth_button(label: &str, plugin_id: &str, index: usize, slot_name: &str, slot: SourceAuthCall) -> AnyView {
-    let plugin_id = plugin_id.to_string();
-    widget(Button::new(label))
-        .key(format!("admin-source-auth-{slot_name}-{plugin_id}-{index}"))
-        .on_cx(move |_, _: &Activate, cx| cx.dispatch_program(auth_message(plugin_id.clone(), slot)))
+/// `.source-auth-settings__repository`：内边距 12、`border-soft` 边线、md 圆角、`bg-subtle`。
+fn repository_row(model: &ShellViewModel, plugin_id: &str, repository: &super::super::WorkspaceRepository, busy: bool) -> AnyView {
+    let repo_id = repository.repo_id.clone();
+    let status = flow::status_label(model, &repo_id);
+    let path = flow::display_path(model, repository);
+    let button = |text: &'static str, icon, tone, message: AdminMessage, key: String| {
+        widget(action(text, icon, tone, busy))
+            .key(key)
+            .on_cx(move |_, _: &Activate, cx| cx.dispatch_program_all(ShellMessage::Admin(message.clone())))
+            .into_any()
+    };
+    let actions = vec![
+        button(
+            "检查",
+            Some(icons::REFRESH_CW),
+            Tone::Plain,
+            AdminMessage::CheckSourceAuth { plugin_id: plugin_id.into(), repo_id: repo_id.clone() },
+            format!("admin-source-check-{}", style::key_part(&repo_id)),
+        ),
+        button(
+            "重新登录",
+            None,
+            Tone::Plain,
+            AdminMessage::BeginSourceAuth { plugin_id: plugin_id.into(), repo_id: Some(repo_id.clone()) },
+            format!("admin-source-relogin-{}", style::key_part(&repo_id)),
+        ),
+        button(
+            "退出",
+            Some(icons::LOG_OUT),
+            Tone::Danger,
+            AdminMessage::ClearSourceAuth { plugin_id: plugin_id.into(), repo_id: repo_id.clone() },
+            format!("admin-source-clear-{}", style::key_part(&repo_id)),
+        ),
+    ];
+    let frame = pad(style::spread(10.0, AlignSpec::Center), 12.0, 12.0, 12.0, 12.0)
+        .surface(Role::Subtle)
+        .outline(Role::BorderSoft, 1.0)
+        .radius(RadiusTier::Md);
+    widget(frame)
+        .children((
+            widget(Stack::column(2.0).width(LengthSpec::Shrink).min_width(LengthSpec::Px(0.0)).grow(1.0).shrink(1.0)).children((
+                widget(label(repository.name.clone(), 14.0, 700, Role::Text)).key(format!("admin-source-repo-{}", style::key_part(&repo_id))),
+                widget(wrapping(label(format!("{status} · {path}"), 12.0, 400, Role::Muted))).key(format!("admin-source-repo-status-{}", style::key_part(&repo_id))),
+            )),
+            widget(row(10.0).wrap(true).justify(nana_ui::runtime::JustifySpec::End)).children(actions),
+        ))
+        .key(format!("admin-source-repo-row-{}", style::key_part(&repo_id)))
         .into_any()
 }
 
-fn poll_button(model: &ShellViewModel, plugin: &PluginManifest) -> AnyView {
-    let plugin_id = plugin.plugin_id.clone();
-    let needs_cache = requires_local_cache(plugin);
-    let can_poll = super::support::named_auth_method(plugin, "pollSessionMethod").is_some()
-        && (!needs_cache || !model.admin.source_cache_path.trim().is_empty());
-    widget(Button::new("检查登录结果").disabled(!can_poll))
-        .key(format!("admin-source-auth-poll-{plugin_id}"))
-        .on_cx(move |_, _: &Activate, cx| cx.dispatch_program(auth_message(plugin_id.clone(), SourceAuthCall::Poll)))
-        .into_any()
-}
-
-/// 扫码和缓存目录。有方法名时缓存目录用选目录，不只有文本框。
+/// 扫码流程区：缓存目录、二维码和三个操作。
 fn session_flow(model: &ShellViewModel, plugin: &PluginManifest) -> AnyView {
     let plugin_id = plugin.plugin_id.clone();
-    let mut rows = vec![widget(workbench::section_title("扫码登录")).key(format!("admin-source-flow-title-{plugin_id}")).into_any()];
-    if requires_local_cache(plugin) {
-        rows.push(cache_picker(&plugin_id, &model.admin.source_cache_path));
+    let state = &model.admin.source_auth;
+    let busy = state.busy;
+    let mut rows = Vec::new();
+    if flow::requires_local_cache(plugin) {
+        let text = if state.cache_path.is_empty() { "选择缓存目录" } else { "重新选择缓存目录" };
+        // 流程区是网格，Vue 的按钮被拉满整行，文字居中。
+        let mut button = action(text, None, Tone::Plain, busy);
+        std::sync::Arc::make_mut(&mut button.style.layout).width = Some(LengthSpec::Fill);
+        rows.push(
+            widget(button)
+                .key(format!("admin-source-cache-{}", style::key_part(&plugin_id)))
+                .on_cx(|_, _: &Activate, cx| cx.dispatch_program_all(ShellMessage::Admin(AdminMessage::ChooseSourceCache)))
+                .into_any(),
+        );
     }
-    rows.push(qr_row(&model.admin.source_auth));
-    rows.extend(status_lines(&model.admin.source_auth));
-    widget(Stack::column(8.0)).children(rows).key(format!("admin-source-flow-{plugin_id}")).into_any()
-}
-
-/// 路径框旁边是选目录。点浏览或按钮都排队文件夹对话框，取消不写路径。
-fn cache_picker(plugin_id: &str, cache: &str) -> AnyView {
-    let label = if cache.trim().is_empty() { "选择缓存目录" } else { "重新选择缓存目录" };
-    widget(Stack::row(8.0).align(nana_ui::runtime::AlignSpec::Center).wrap(true))
-        .children((
-            widget(PathField::new(cache.to_string()).label("缓存目录").placeholder("选择缓存目录"))
-                .key(format!("admin-source-cache-{plugin_id}"))
-                .on_cx(|_, event: &TextChanged, cx| {
-                    cx.dispatch_program(ShellMessage::Admin(AdminMessage::SetSourceCachePath(event.value.to_string())));
-                })
-                .on_cx(|_, _: &BrowseRequested, cx| {
-                    cx.dispatch_program(ShellMessage::Admin(AdminMessage::ChooseSourceCache));
+    if !state.cache_path.is_empty() {
+        rows.push(widget(wrapping(label(state.cache_path.clone(), 12.0, 400, Role::Muted))).key(format!("admin-source-cache-path-{}", style::key_part(&plugin_id))).into_any());
+    }
+    if let Some(code) = qr_code(state.session.as_ref()) {
+        rows.push(widget(row(0.0).width(LengthSpec::Fill).justify(nana_ui::runtime::JustifySpec::Center)).children((code,)).into_any());
+    }
+    let poll_id = plugin_id.clone();
+    let refresh_id = plugin_id.clone();
+    let target = state.target_repo_id.clone();
+    let can_poll = state.can_poll(flow::requires_local_cache(plugin));
+    let poll_icon = if busy { Some(icons::LOADER_CIRCLE) } else { None };
+    rows.push(
+        widget(row(10.0).wrap(true).width(LengthSpec::Fill).justify(nana_ui::runtime::JustifySpec::End))
+            .children((
+                widget(action("取消", None, Tone::Plain, busy)).key(format!("admin-source-cancel-{}", style::key_part(&plugin_id))).on_cx(|_, _: &Activate, cx| {
+                    cx.dispatch_program_all(ShellMessage::Admin(AdminMessage::CancelSourceAuth));
                 }),
-            widget(Button::new(label)).key(format!("admin-source-cache-browse-{plugin_id}")).on_cx(|_, _: &Activate, cx| {
-                cx.dispatch_program(ShellMessage::Admin(AdminMessage::ChooseSourceCache));
-            }),
-        ))
-        .key(format!("admin-source-cache-row-{plugin_id}"))
-        .into_any()
-}
-
-/// 建仓要有名称和路径。没有宿主登录结果、名称或路径时禁用提交，并在按钮旁说明缺什么。
-fn provision_form(model: &ShellViewModel, plugin: &PluginManifest) -> AnyView {
-    let plugin_id = plugin.plugin_id.as_str();
-    let name = model.admin.source_repo_name.clone();
-    let path = model.admin.source_repo_path.clone();
-    let missing = provision_missing(model);
-    let blocked = !missing.is_empty();
-    widget(Stack::column(8.0))
-        .children((
-            widget(workbench::section_title("创建仓库")).key(format!("admin-source-provision-title-{plugin_id}")),
-            widget(TextInput::new(name).label("名称").placeholder("仓库名称")).key(format!("admin-source-repo-name-{plugin_id}")).on_cx(
-                |_, event: &TextChanged, cx| {
-                    cx.dispatch_program(ShellMessage::Admin(AdminMessage::SetSourceRepoName(event.value.to_string())));
-                },
-            ),
-            widget(TextInput::new(path).label("路径").placeholder("仓库路径")).key(format!("admin-source-repo-path-{plugin_id}")).on_cx(
-                |_, event: &TextChanged, cx| {
-                    cx.dispatch_program(ShellMessage::Admin(AdminMessage::SetSourceRepoPath(event.value.to_string())));
-                },
-            ),
-            widget(Stack::row(8.0).align(nana_ui::runtime::AlignSpec::Center).wrap(true)).children((
-                widget(Button::new("创建仓库").disabled(blocked)).key(format!("admin-source-provision-submit-{plugin_id}")).on_cx(|_, _: &Activate, cx| {
-                    cx.dispatch_program(ShellMessage::Admin(AdminMessage::SubmitSourceRepository));
+                widget(action("刷新二维码", None, Tone::Plain, busy)).key(format!("admin-source-refresh-{}", style::key_part(&plugin_id))).on_cx(move |_, _: &Activate, cx| {
+                    cx.dispatch_program_all(ShellMessage::Admin(AdminMessage::BeginSourceAuth { plugin_id: refresh_id.clone(), repo_id: target.clone() }));
                 }),
-                blocked.then(|| {
-                    widget(ValidationMessage::new(missing.join("，"), ValidationIntent::Danger)).key(format!("admin-source-provision-missing-{plugin_id}"))
+                widget(action("检查登录结果", poll_icon, Tone::Primary, !can_poll)).key(format!("admin-source-poll-{}", style::key_part(&plugin_id))).on_cx(move |_, _: &Activate, cx| {
+                    cx.dispatch_program_all(ShellMessage::Admin(AdminMessage::PollSourceAuth { plugin_id: poll_id.clone() }));
                 }),
-            )),
-        ))
-        .key(format!("admin-source-provision-{plugin_id}"))
-        .into_any()
+            ))
+            .into_any(),
+    );
+    let frame = pad(column(12.0), 12.0, 12.0, 12.0, 12.0).surface(Role::Subtle).outline(Role::BorderSoft, 1.0).radius(RadiusTier::Md);
+    widget(frame).children(rows).key(format!("admin-source-flow-{}", style::key_part(&plugin_id))).into_any()
 }
 
-/// 缺的条件写在提交按钮旁边。登录结果缺插件、账号配置、名称或路径时不能创建。
-fn provision_missing(model: &ShellViewModel) -> Vec<&'static str> {
-    super::source_provision::missing_labels(model)
-}
-
-fn qr_row(view: &super::support::SourceAuthView) -> AnyView {
-    let Some(data) = view.qr_text.as_deref() else {
-        return widget(EmptyState::new("还没有可绘制的二维码").message("创建会话返回 qrurl 或 qrUrl 后，用现有二维码控件画在这里。图片 data URL 不会再编一次。").compact(true))
-            .key("admin-source-qr-empty")
-            .into_any();
+/// 二维码。Vue 画会话里的二维码图片；Nana 用同一会话的扫码地址重新编码，内容一致，
+/// 180 见方、白底。会话只有图片没有地址时不画，并记日志。
+fn qr_code(session: Option<&serde_json::Value>) -> Option<AnyView> {
+    let session = session?;
+    let url = ["qrUrl", "qrurl"]
+        .into_iter()
+        .find_map(|key| session.get(key).and_then(|item| item.as_str()).map(str::trim).filter(|text| !text.is_empty() && !text.starts_with("data:")));
+    let Some(url) = url else {
+        if session.get("qrImage").or_else(|| session.get("qrimg")).is_some_and(|item| !item.is_null()) {
+            eprintln!("Nana 扫码会话只有二维码图片，没有扫码地址，无法原生绘制");
+        }
+        return None;
     };
-    match QrCode::encode(data, 180.0) {
-        Ok(code) => widget(code.label("扫码登录二维码")).key("admin-source-qr").into_any(),
+    match QrCode::encode(url, 180.0) {
+        Ok(code) => Some(widget(code.label("扫码登录二维码")).key("admin-source-qr").into_any()),
         Err(error) => {
             eprintln!("Nana 登录二维码编码失败：{error}");
-            text("登录二维码无法编码。").key("admin-source-qr-error").into_any()
+            None
         }
     }
 }
 
-fn status_lines(view: &super::support::SourceAuthView) -> Vec<AnyView> {
-    view.lines
-        .iter()
-        .enumerate()
-        .map(|(index, line)| {
-            let (label, value) = labeled(line);
-            widget(LabeledValue::new(label, value)).key(format!("admin-source-auth-line-{index}")).into_any()
-        })
-        .collect()
-}
-
-fn labeled(line: &str) -> (&'static str, String) {
-    if line == "已登录" || line == "未登录" {
-        return ("登录", line.to_string());
-    }
-    if line == "登录已过期" {
-        return ("登录", "已过期".into());
-    }
-    if let Some(rest) = line.strip_prefix("账号 ") {
-        return ("账号", rest.to_string());
-    }
-    if let Some(rest) = line.strip_prefix("资料 ") {
-        return ("资料", rest.to_string());
-    }
-    ("状态", line.to_string())
-}
-
-/// 「已调用」只留在状态里给归约测试看，不铺到认证页上。
-fn notice(model: &ShellViewModel) -> Option<AnyView> {
-    if !model.admin.action_error.is_empty() {
-        return Some(text(model.admin.action_error.clone()).key("admin-source-page-error").into_any());
-    }
-    let message = model.admin.action_message.trim();
-    if message.is_empty() || message.starts_with("已调用") || message.starts_with("正在调用") {
-        return None;
-    }
-    Some(text(message.to_string()).key("admin-source-page-message").into_any())
-}
-
-fn requires_local_cache(plugin: &PluginManifest) -> bool {
-    plugin
-        .contributes
-        .get("source")
-        .and_then(|item| item.get("authentication"))
-        .and_then(|item| item.get("repositoryProvisioning"))
-        .and_then(|item| item.get("requiresLocalCache"))
-        .and_then(|item| item.as_bool())
-        == Some(true)
-}
-
-fn source_repositories<'a>(model: &'a ShellViewModel, plugin: &PluginManifest) -> Vec<&'a super::super::workspace::WorkspaceRepository> {
-    let mut accepted = vec![plugin.plugin_id.as_str()];
-    accepted.extend(plugin.legacy_plugin_ids.iter().map(String::as_str));
-    accepted.extend(plugin.compat.legacy_plugin_ids.iter().map(String::as_str));
-    model
-        .workspace
-        .repositories
-        .iter()
-        .filter(|repository| accepted.iter().any(|id| repository.backend_plugin_id == *id))
-        .collect()
-}
-
-fn auth_message(plugin_id: String, slot: SourceAuthCall) -> ShellMessage {
-    ShellMessage::Admin(AdminMessage::CallSourceAuth { plugin_id, slot })
+/// 提示行：12 号，错误用危险色。
+fn notice(text: String, error: bool, plugin_id: &str) -> AnyView {
+    widget(pad(column(0.0), 4.0, 0.0, 0.0, 0.0))
+        .children((widget(wrapping(label(text, 12.0, 400, if error { Role::Danger } else { Role::Muted }))).key(format!("admin-source-notice-{}", style::key_part(&plugin_id))),))
+        .into_any()
 }

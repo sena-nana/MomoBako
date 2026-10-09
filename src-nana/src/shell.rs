@@ -34,7 +34,7 @@ mod inspect_search_view;
 pub(crate) mod audio_decode;
 pub(crate) mod player;
 pub(crate) mod admin;
-pub use admin::{AdminMessage, ToolPageEntry};
+pub use admin::{AdminMessage, SourceStep, ToolPageEntry};
 pub use acceptance::gap_models as acceptance_gap_models;
 pub(crate) mod input;
 pub mod host_events;
@@ -432,7 +432,8 @@ impl ShellViewModel {
             || self.playlist_dialog_open
             || self.input.source_playlist.is_some()
             || self.sidebar.modal_open()
-            || self.input.pending_close;
+            || self.input.pending_close
+            || self.admin.pending_delete.is_some();
         let panel_open = self.sidebar.popover != sidebar::PopoverMode::Closed || self.admin.popover_open;
         let startup = f32::from(self.workspace.startup.percent);
         let operation = self.files.operation_percent();
