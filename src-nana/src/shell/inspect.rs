@@ -60,9 +60,12 @@ pub enum PreviewBody {
 #[path = "inspect_search.rs"]
 mod search;
 pub use search::{
-    AdvancedField, AssetFacet, DateBound, FilterList, MatchMode, MetadataInput, NumberBound, SearchFilters,
-    SearchRequestDraft, SearchRow, SortDirection,
+    AdvancedField, DateBound, FilterList, MatchMode, MetadataInput, NumberBound, SearchFilters, SearchRequestDraft, SearchRow,
+    SortDirection,
 };
+/// 搜索候选只从仓库摘要算出，测试直接造候选时用它。
+#[cfg(test)]
+pub(crate) use search::AssetFacet;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 struct MetadataDraft {

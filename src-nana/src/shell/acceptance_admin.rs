@@ -1,8 +1,8 @@
 //! 设置、插件与日志的对照场景：设置页、插件管理、来源登录、拓展工具页、日志和任务。
 //!
-//! 场景名和 `tmp/vue-mock/scenes/admin.ts` 的 Vue 场景同名，数据和 Vue 夹具一致：插件清单读
-//! `External/Plugins/*/manifest.json` 的真实内容，按 Vue 模拟 IPC 的口径改成已启用、依赖就绪；
-//! 缓存、API 设计、外部连接和日志照 `tmp/vue-mock/ipc.ts` 与 `fixtures.ts` 的应答。
+//! 场景名和 `tmp/vue-mock/scenes/admin.ts` 的 Vue 场景同名，数据和 Vue 夹具一致：工作区是 `base()`
+//! （`acceptance_base.rs`），插件清单读 `External/Plugins/*/manifest.json` 的真实内容，按 Vue 模拟 IPC 的
+//! 口径改成已启用、依赖就绪；缓存、API 设计、外部连接和日志照 `tmp/vue-mock/ipc.ts` 与 `fixtures.ts` 的应答。
 //! 状态一律经过真实消息归约，不直接拼界面字段。
 
 use std::fs;
@@ -18,12 +18,9 @@ use crate::backend::services::repository::{
 use crate::backend::services::runtime::ExternalApiConnectionStatus;
 
 use super::super::admin::{AdminMessage, SourceStep};
-use super::super::workspace::WorkspaceRepository;
 use super::super::{ShellMessage, ShellPage, ShellViewModel, WorkspacePanel};
-use super::{present_repository, REPO_ID};
-
-/// Vue 夹具的固定时间 `FIXED_NOW`。
-const NOW: &str = "2026-10-08T08:00:00Z";
+use super::base_scene::{summary, Base, NOW, REPO_ID, REPO_NAME};
+use super::seed_base;
 /// 设置数据读取失败时 `list_plugins` 的报错，和 Vue 场景 `settings-error` 一致。
 pub(super) const LOAD_ERROR: &str = "读取插件目录失败：拒绝访问。 (os error 5)";
 const LOCAL_FILESYSTEM: &str = "momobako.local-filesystem";
@@ -48,15 +45,15 @@ pub(super) fn models() -> Vec<(&'static str, ShellViewModel)> {
 
 /// `settings`：设置页，全部内置插件，缓存、API 设计和外部连接都读到。
 pub(super) fn seed_settings(model: &mut ShellViewModel) {
-    present_repository(model);
-    model.admin.note_backends(&[local_summary(model)]);
+    seed_base(model);
+    model.admin.note_backends(&[local_summary()]);
     load_bundle(model, bundled_plugins(|_| true));
 }
 
 /// `settings-error`：设置页数据读取失败。Vue 的 `Promise.all` 整批失败，其它四份应答照常返回但不写入。
 pub(super) fn seed_settings_error(model: &mut ShellViewModel) {
-    present_repository(model);
-    model.admin.note_backends(&[local_summary(model)]);
+    seed_base(model);
+    model.admin.note_backends(&[local_summary()]);
     model.reduce(ShellMessage::Admin(AdminMessage::SettingsBundleLoaded {
         plugins: Err(LOAD_ERROR.into()),
         hooks: Ok(Vec::new()),
@@ -69,7 +66,7 @@ pub(super) fn seed_settings_error(model: &mut ShellViewModel) {
 
 /// `logs`：日志面板，四条记录和 Vue 夹具 `logRecord(1..4)` 一致。
 pub(super) fn seed_logs(model: &mut ShellViewModel) {
-    present_repository(model);
+    seed_base(model);
     model.workspace.panel = WorkspacePanel::Logs;
     let records = vec![
         log_record(1, "info", "workspace.startup", "startupStart", "首屏启动流程开始。"),
@@ -83,8 +80,8 @@ pub(super) fn seed_logs(model: &mut ShellViewModel) {
 /// `plugin-settings`：拓展页的插件管理里展开本地文件系统插件的设置。
 /// 插件只留这一个，工具区不出现，设置区在首屏里。
 pub(super) fn seed_plugin_settings(model: &mut ShellViewModel) {
-    present_repository(model);
-    model.admin.note_backends(&[local_summary(model)]);
+    seed_base(model);
+    model.admin.note_backends(&[local_summary()]);
     model.workspace.panel = WorkspacePanel::Extensions;
     load_bundle(model, bundled_plugins(|id| id == LOCAL_FILESYSTEM));
     open_plugin_settings(model, LOCAL_FILESYSTEM);
@@ -93,7 +90,7 @@ pub(super) fn seed_plugin_settings(model: &mut ShellViewModel) {
 /// `task-running` 和 `task-cancelling`：任务弹层打开，里面一个任务。
 /// Vue 弹层不分运行和取消，取消中只是细节文字不同、进度不定。
 pub(super) fn seed_task(model: &mut ShellViewModel, cancelling: bool) {
-    present_repository(model);
+    seed_base(model);
     model.active_tasks = 1;
     let (task_id, status, label, phase, percent) = if cancelling {
         ("task-cancelling", "cancelling", "正在取消扫描", "等待 worker 退出", None)
@@ -129,7 +126,7 @@ fn logs_paused_scene() -> ShellViewModel {
 /// `extensions`：拓展页，全部内置插件。工具页来自前端插件的 `toolPages`。
 fn extensions_scene() -> ShellViewModel {
     let mut model = ShellViewModel::for_page(ShellPage::FileList);
-    model.admin.note_backends(&[local_summary(&model)]);
+    model.admin.note_backends(&[local_summary()]);
     model.workspace.panel = WorkspacePanel::Extensions;
     load_bundle(&mut model, bundled_plugins(|_| true));
     model
@@ -138,28 +135,17 @@ fn extensions_scene() -> ShellViewModel {
 /// 拓展页插件管理里只有一个插件，并展开它的设置。下载服务、Office 转换和网易云来源都走这里。
 fn plugin_settings_scene(plugin_id: &str) -> ShellViewModel {
     let mut model = ShellViewModel::for_page(ShellPage::FileList);
-    model.admin.note_backends(&[local_summary(&model)]);
+    model.admin.note_backends(&[local_summary()]);
     model.workspace.panel = WorkspacePanel::Extensions;
     load_bundle(&mut model, bundled_plugins(|id| id == plugin_id));
     open_plugin_settings(&mut model, plugin_id);
     model
 }
 
-/// `source-auth-methods`：已有一个登录中的网易云仓库，再点「连接新账号」建好扫码会话。
+/// `source-auth-methods`：资源库列表里还有一个登录中的网易云仓库，再点「连接新账号」建好扫码会话。
 fn source_auth_methods_scene() -> ShellViewModel {
-    let mut model = ShellViewModel::for_page(ShellPage::FileList);
-    model.workspace.repositories.push(WorkspaceRepository {
-        repo_id: NETEASE_REPO_ID.into(),
-        name: "Netease Cloud Music Source 10086".into(),
-        path: "netease-cloud-music://account/10086".into(),
-        status: "ready".into(),
-        backend_plugin_id: NETEASE.into(),
-        capabilities: vec!["read".into(), "list".into()],
-        cache_required: true,
-        cache_status: "ready".into(),
-    });
-    let local = local_summary(&model);
-    model.admin.note_backends(&[local, netease_summary()]);
+    let mut model = Base { others: vec![netease_summary()], ..Base::default() }.model();
+    model.admin.note_backends(&[local_summary(), netease_summary()]);
     model.workspace.panel = WorkspacePanel::Extensions;
     load_bundle(&mut model, bundled_plugins(|id| id == NETEASE));
     open_plugin_settings(&mut model, NETEASE);
@@ -291,23 +277,8 @@ fn external_status() -> ExternalApiConnectionStatus {
 }
 
 /// 当前仓库的完整摘要，和 Vue 夹具 `repository("默认资源库")` 一致。
-fn local_summary(model: &ShellViewModel) -> RepositorySummary {
-    RepositorySummary {
-        repo_id: REPO_ID.into(),
-        name: model.repository_name.clone(),
-        path: "C:/acceptance".into(),
-        backend: RepositoryBackendSummary {
-            plugin_id: "momobako.source.local-filesystem".into(),
-            kind: "local-filesystem".into(),
-            name: "本地文件系统".into(),
-            capabilities: ["write", "localRootPath", "list", "read", "move", "delete", "watch"].map(String::from).to_vec(),
-        },
-        status: "ready".into(),
-        asset_count: 2,
-        updated_at: NOW.into(),
-        local_cache: None,
-        authentication: None,
-    }
+fn local_summary() -> RepositorySummary {
+    summary(REPO_NAME, "ready")
 }
 
 /// 已登录的网易云仓库，缓存放在本地目录。

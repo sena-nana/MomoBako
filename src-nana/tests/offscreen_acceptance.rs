@@ -154,12 +154,13 @@ fn native_actions_are_reachable_through_runtime_hit_testing() {
     let document = acceptance_document_for(ShellPage::FileList).expect("acceptance document");
     let mut session = RuntimeAgentSession::new(document, 1200, 800).expect("agent session");
     // Vue 文件夹加号的可见内容是图标，`aria-label` 和 `title` 都是「在当前目录新建文件夹」。
-    // 对话框标题才叫「新建文件夹」。命中测试点现在的无障碍名。
+    // 对话框标题才叫「新建文件夹」。命中测试点现在的无障碍名。展示方式下拉框读出当前值，
+    // 文件页和 Vue `base()` 一样是网格。
     for label in [
         "根目录",
         "在当前目录新建文件夹",
         "设置",
-        "自适应",
+        "网格",
         "最小化",
         "最大化",
         "关闭",

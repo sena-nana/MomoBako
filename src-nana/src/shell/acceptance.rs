@@ -1,11 +1,10 @@
 //! 15 个验收页使用和产品窗口同一套表面。
 //!
-//! 只填已经存在的仓库、预览、播放和任务状态，不发新的领域请求。
+//! 只填已经存在的仓库、预览、播放和任务状态，不发新的领域请求。有仓库的页面都从 Vue 夹具 `base()`
+//! 的工作区起步（`acceptance_base.rs`），状态经过真实消息归约。
 
-use super::workspace::WorkspaceRepository;
-use super::{InspectEffect, ShellPage, ShellViewModel, WorkspacePanel};
+use super::{InspectEffect, ShellPage, ShellViewModel};
 
-const REPO_ID: &str = "acceptance-repo";
 /// 等检视延时最多推进的帧数。一帧 16ms，产品的搜索等 250ms、自动保存等 260ms。
 const TIMER_FRAMES: usize = 64;
 
@@ -19,28 +18,24 @@ pub(super) fn seed(model: &mut ShellViewModel) {
         }
         ShellPage::Error => shell_scenes::seed_error(model),
         ShellPage::FileList => {
+            seed_base(model);
             model.detail = "12 个文件 · 按名称排序".into();
-            present_repository(model);
         }
         ShellPage::SelectedFile => {
+            seed_base(model);
             model.selected_path = Some("assets/cover.png".into());
             model.detail = "PNG 图片 · 1920 × 1080 · 2.4 MB".into();
-            present_repository(model);
             model.inspect.begin_selection("assets/cover.png");
         }
         ShellPage::Playlists => {
-            model.detail = "正在加载播放列表".into();
-            present_repository(model);
-            model.workspace.panel = WorkspacePanel::Playlist;
             player_scenes::seed_playlists(model);
+            model.detail = "正在加载播放列表".into();
         }
         ShellPage::PluginSettings => admin_scenes::seed_plugin_settings(model),
         ShellPage::TaskRunning => admin_scenes::seed_task(model, false),
         ShellPage::PlaybackRunning => {
-            model.detail = "正在播放 · track-01.mp3".into();
-            present_repository(model);
-            model.workspace.panel = WorkspacePanel::Playlist;
             player_scenes::seed_playback(model);
+            model.detail = "正在播放 · track-01.mp3".into();
         }
         ShellPage::TaskCancelling => admin_scenes::seed_task(model, true),
         ShellPage::Conflict => files_scenes::seed_conflict(model),
@@ -51,19 +46,9 @@ pub(super) fn seed(model: &mut ShellViewModel) {
     }
 }
 
-/// 进入一个可写的本地仓库，侧栏和文件表面按产品规则显示。
-fn present_repository(model: &mut ShellViewModel) {
-    model.repository_id = Some(REPO_ID.into());
-    model.workspace.present_repository(WorkspaceRepository {
-        repo_id: REPO_ID.into(),
-        name: model.repository_name.clone(),
-        path: "C:/acceptance".into(),
-        status: "ready".into(),
-        backend_plugin_id: "filesystem".into(),
-        capabilities: vec!["write".into()],
-        cache_required: false,
-        cache_status: String::new(),
-    });
+/// 铺上 Vue `base()` 的工作区：默认资源库、根目录三条、目录树 assets → covers、网格展示。
+fn seed_base(model: &mut ShellViewModel) {
+    Base::default().seed(model);
 }
 
 /// 按产品帧时钟推进搜索和自动保存的延时，直到排下 `pick` 认得的请求。
@@ -78,8 +63,11 @@ fn await_inspect_effect<T>(model: &mut ShellViewModel, pick: impl Fn(InspectEffe
     None
 }
 
-use files_scenes::{file_row, seed_browser, PAGE_PDF};
+use base_scene::Base;
+use files_scenes::PAGE_PDF;
 
+#[path = "acceptance_base.rs"]
+mod base_scene;
 #[path = "acceptance_shell.rs"]
 mod shell_scenes;
 #[path = "acceptance_files.rs"]

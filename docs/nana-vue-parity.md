@@ -12,6 +12,7 @@ Vue 的缺陷、死代码和意外的层叠效果不照抄，按设计意图实�
 
 - Vue 侧：用 `@tauri-apps/api/mocks` 模拟 IPC，在无头 Edge（与 WebView2 同内核）里截图。场景数据与 Nana 验收场景同名。
 - Nana 侧：`NANA_SCENES=… NANA_SIZES=1200x800,960x600 NANA_THEMES=light,dark cargo test -p momobako-nana --test scene_shots -- --nocapture`。场景定义在 `src-nana/src/shell/acceptance_*.rs`，输出 PNG 和节点清单。截图前先把视图量到尺寸后发回的消息（播放条宽、文件列表宽）归约几轮，截到的是稳定后的画面。
+- 有仓库的场景都从 `acceptance_base.rs` 的共用底子起步，对应 Vue 夹具 `base()`：照产品启动依次送回资源库列表、同步、仓库摘要、首屏目录和侧栏的读取结果，侧栏计数、目录树和文件列表都由这些结果算出。场景要别的条目、目录树、播放集、播放器或仓库时改底子的字段，和 Vue 场景改 `scene.entries`、`scene.playlists` 一样。
 - 两边逐场景出差异热图和差异像素比例。比例只用来发现问题，不作为通过标准。
 
 ## 全局取舍
