@@ -2,10 +2,10 @@
 //!
 //! - [`row_text`]、[`row_flag`]：列表行里的字段绑定，行已经删掉时读默认值；
 //! - [`row_draft`]：列表行里受控输入框的草稿，行里的 ViewModel 值相对上次投影变了才写回；
-//! - [`StyleField`]、[`ButtonIcon`]、[`ReadOnly`]：控件表里没有的可绑定字段。
+//! - [`StyleField`]、[`ButtonIcon`]、[`ReadOnly`]、[`FollowEnd`]：控件表里没有的可绑定字段。
 
 use nana_ui::runtime::view::{untrack, watch_effect, FieldWrite, StorePath, StyledComponent};
-use nana_ui::runtime::{Button, NodeStyle, TextInput};
+use nana_ui::runtime::{Button, NodeStyle, ScrollView, TextInput};
 use nana_ui_core::Icon;
 
 use super::super::hot::ModelField;
@@ -94,5 +94,21 @@ impl FieldWrite<TextInput, bool> for ReadOnly {
 
     fn differs(target: &TextInput, read_only: &bool) -> bool {
         target.read_only != *read_only
+    }
+}
+
+/// 滚动区是否跟随末尾：日志列表追踪时为真。写成真时运行时当场滚到底，之后内容变长也跟着；
+/// 写成假时停在原位。
+pub(crate) struct FollowEnd;
+
+impl FieldWrite<ScrollView, bool> for FollowEnd {
+    const FIELD: &'static str = "ScrollView.follow_end";
+
+    fn write(target: &mut ScrollView, follow: bool) {
+        target.follow_end = follow;
+    }
+
+    fn differs(target: &ScrollView, follow: &bool) -> bool {
+        target.follow_end != *follow
     }
 }
