@@ -86,19 +86,8 @@ fn consume_legacy(model: &mut ShellViewModel, message: ShellMessage) -> Option<S
             model.detail = "正在清理系统日志…".into();
             None
         }
-        ShellMessage::TaskSnapshotLoaded { active, completed } => {
-            model.active_tasks = active;
-            model.completed_tasks = completed;
-            None
-        }
-        // 状态行写第一个运行中或取消中的任务；任务弹层另读完整列表。
         ShellMessage::TaskProgressLoaded(progress) => {
             model.task_progress = progress;
-            if let Some(snapshot) = model.task_progress.iter().find(|snapshot| snapshot.status == "running" || snapshot.status == "cancelling") {
-                let label = snapshot.label.clone().unwrap_or_else(|| snapshot.protocol_id.clone());
-                let percent = snapshot.percent.map(|value| format!("{value:.0}%")).unwrap_or_else(|| "处理中".into());
-                model.detail = format!("{label} · {percent}");
-            }
             None
         }
         ShellMessage::SettingsLoaded(Ok((settings, diagnostic))) => {

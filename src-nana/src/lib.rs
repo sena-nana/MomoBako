@@ -18,6 +18,7 @@ mod player_dispatch;
 mod admin_dispatch;
 mod sidebar_dispatch;
 mod sync_dispatch;
+mod task_watch;
 mod window_host;
 mod host_bridge;
 mod window_state;
@@ -110,10 +111,12 @@ impl ApplicationState for MomoBakoApplication {
     fn initialize(context: &RuntimeProgramContext<Self::Message>) -> Result<Self, Self::Error> {
         let services = match services::NativeServices::start() {
             Ok(services) => {
-                let context = context.clone();
+                let events = context.clone();
                 services.pump_host_events(move |event| {
-                    context.dispatch(ShellMessage::Host(shell::host_events::HostMessage::from_event(event)));
+                    events.dispatch(ShellMessage::Host(shell::host_events::HostMessage::from_event(event)));
                 });
+                let tasks = context.clone();
+                services.watch_tasks(move |active| tasks.dispatch(ShellMessage::TaskProgressLoaded(active)));
                 Some(services)
             }
             Err(error) => {

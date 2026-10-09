@@ -87,13 +87,11 @@ pub(super) fn seed_plugin_settings(model: &mut ShellViewModel) {
 /// Vue 弹层不分运行和取消，取消中只是细节文字不同、进度不定。
 pub(super) fn seed_task(model: &mut ShellViewModel, cancelling: bool) {
     seed_base(model);
-    model.active_tasks = 1;
     let (task_id, status, label, phase, percent) = if cancelling {
         ("task-cancelling", "cancelling", "正在取消扫描", "等待 worker 退出", None)
     } else {
         ("task-scan", "running", "扫描默认资源库", "已扫描 1,284 / 3,040 个文件", Some(42.0))
     };
-    model.active_task_ids = vec![task_id.into()];
     model.reduce(ShellMessage::TaskProgressLoaded(vec![TaskProgressSnapshot {
         task_id: task_id.into(),
         protocol_id: "momobako.sync".into(),

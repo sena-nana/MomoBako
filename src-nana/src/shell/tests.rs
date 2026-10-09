@@ -1,7 +1,6 @@
 //! 壳层 ViewModel 状态转换回归测试。
 
     use super::{ShellMessage, ShellPage, ShellViewModel};
-    use crate::backend::services::repository::TaskProgressSnapshot;
 
     #[test]
     fn shell_messages_reduce_to_user_visible_states() {
@@ -28,40 +27,6 @@
         model.reduce(ShellMessage::NewPlaylistNameChanged("我的列表".into()));
         model.reduce(ShellMessage::CreatePlaylist);
         assert_eq!(model.detail, "请先选择播放器类型");
-    }
-
-    #[test]
-    fn task_progress_updates_running_detail_and_retains_terminal_rows() {
-        let mut model = ShellViewModel::for_page(ShellPage::TaskRunning);
-        model.reduce(ShellMessage::TaskProgressLoaded(vec![
-            TaskProgressSnapshot {
-                task_id: "task-1".into(),
-                protocol_id: "momobako.sync".into(),
-                status: "running".into(),
-                phase: Some("scanning".into()),
-                label: Some("扫描文件".into()),
-                current: Some(4),
-                total: Some(10),
-                percent: Some(40.0),
-                error: None,
-                updated_at: "now".into(),
-            },
-            TaskProgressSnapshot {
-                task_id: "task-2".into(),
-                protocol_id: "momobako.sync".into(),
-                status: "cancelled".into(),
-                phase: None,
-                label: Some("旧任务".into()),
-                current: None,
-                total: None,
-                percent: None,
-                error: Some("用户取消".into()),
-                updated_at: "now".into(),
-            },
-        ]));
-        assert_eq!(model.task_progress.len(), 2);
-        assert!(model.detail.contains("扫描文件"));
-        assert!(model.detail.contains("40%"));
     }
 
     /// 设置页只有主题会写设置文件。读回和保存结果整份替换设置，缓存上限和关闭行为照旧留给缓存和关窗流程；

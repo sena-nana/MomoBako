@@ -46,7 +46,7 @@ yarn tauri:dev               # Vue/Tauri 对照窗口，先构建、打包并暂
 - 领域代码在 `src-backend`（crate `momobako-backend`，含 `models`、`services`、`viewmodels`）。Nana 宿主、Tauri 窗口壳和 Eagle 来源插件（`External/Plugins/source-eagle-library`）都依赖它，领域代码不依赖 Tauri。
 - `NativeServices::start`（`src-nana/src/services.rs`）启动一份 `RepositoryRuntime`，把资源库查询、文件浏览、交互、管理、插件、系统和 Mutsuki 任务 ViewModel 都绑在它上面。壳层只经这些 ViewModel 调服务，不调 Tauri command。启动失败时窗口进错误页（`initialize`），`NativeServices` 销毁时关掉 Runtime 的辅助进程。
 - 归约留下的副作用由 `src-nana/src/*_dispatch.rs` 交给 `RuntimeProgramContext::run_task`，结果作为 `ShellMessage` 回到归约。
-- 宿主事件边界在 `src-backend/src/services/host_events.rs`：`HostEvent`（日志记录、资源库结构更新）和 `HostEventSink`。Tauri 入口（`src-tauri/src/app_shell.rs`）按原事件名 `system://log-recorded`、`repository://structure-updated` 和原 JSON 负载转给前端。Nana 用 `host_event_channel` 接收，`NativeServices::pump_host_events` 在独立线程里把事件转成 `ShellMessage::Host`。日志合并、启动日志和结构更新后的静默重读见逻辑矩阵的「宿主事件」。
+- 宿主事件边界在 `src-backend/src/services/host_events.rs`：`HostEvent`（日志记录、资源库结构更新）和 `HostEventSink`。Tauri 入口（`src-tauri/src/app_shell.rs`）按原事件名 `system://log-recorded`、`repository://structure-updated` 和原 JSON 负载转给前端。Nana 用 `host_event_channel` 接收，`NativeServices::pump_host_events` 在独立线程里把事件转成 `ShellMessage::Host`。Mutsuki 任务运行时只存快照、不发变化通知，`NativeServices::watch_tasks` 另起一个线程每 250 ms 读一次（`src-nana/src/task_watch.rs`），排队、运行和取消中的任务有变化才发 `ShellMessage::TaskProgressLoaded`，服务销毁时线程退出。日志合并、启动日志和结构更新后的静默重读见逻辑矩阵的「宿主事件」。
 - 宿主请求在 `src-nana/src/host_api.rs`。外部打开和目录揭示（`OpenExternal`）、拖出和最小化到托盘（`HostInputRequest`）由 `host_bridge::perform` 执行，每次执行都清空队列，执行不了的请求记日志后丢掉；关闭确认是浮层里的确认框，只看 `InputState::pending_close`，不经宿主请求；窗口最小化、最大化和关闭经 `host_api::WindowCommand` 换成 Nana 平台命令。系统文件对话框直接排成 Nana 平台的 `WindowCommand::OpenFileDialog`，编号 1–8 在 `src-nana/src/shell/input_support.rs`。
 
 ## 已经接通的能力
@@ -63,7 +63,7 @@ yarn tauri:dev               # Vue/Tauri 对照窗口，先构建、打包并暂
 - **设置**：侧栏「设置」和缺失仓库的「打开来源设置」都进设置页（`ShellMessage::OpenSettings`、`admin::open_settings_page`），后者照 Vue `?plugin=` 展开来源插件的设置。设置页有音频播放、外观（主题、圆角，改了立即生效）、仓库服务、外部素材接入（复制连接信息、导出 `external-api.json`）、插件管理、缓存和 API 设计。主题写进 `settings.json`，圆角写进 `corners.json`。见 `route_settings.rs`、`admin_settings_view.rs`。
 - **插件**：启动结束时照 Vue `loadSettingsData` 读一次设置包（插件、钩子记录、缓存、API 设计和外部连接），打开设置页、插件面板「刷新」时再读；插件列表换新以后重读播放器类型（`list_playlist_players`），新建播放集的类型、播放器贡献和插件类型的播放集能不能播都从这里来。插件管理面板（设置页和拓展页都有）分组和搜索，能启停、从压缩包安装（编号 2 的文件对话框）、确认后删除、编辑和重置清单声明的设置字段、打开插件目录；来源插件的扫码登录画二维码（`source_auth_page.rs`）。拓展页的 API Playground、文件导入、Eagle 导入是原生页面。见 `admin_plugin*.rs`、`admin_gap.rs`、`tool_native.rs`、`api_playground*.rs`。
 - **日志**：日志页按级别、来源和关键字筛选，可以暂停追踪、清空；页头、工具条和筛选固定，列表自己滚动（`route_home::home_fixed`、`admin_logs_view.rs`）。每次切到日志面板照 Vue 读最近 200 条历史日志（读的时候手上没有日志就写「正在加载系统日志」），之后经宿主事件合并新记录。
-- **任务**：侧栏底部的「任务」打开任务弹层（`admin_view.rs`），列出当前的仓库操作（如刷新文件夹树）和运行中的任务，运行中的任务见下文「接线缺口」。弹层里没有取消按钮，Vue 的 `TaskPopover.vue` 也没有；`ShellMessage::CancelTask` 有派发分支，没有发送方。
+- **任务**：侧栏底部的「任务」打开任务弹层（`admin_view.rs`），列出当前的仓库操作（如刷新文件夹树）和宿主观察到的运行中任务（排队、运行和取消中，结束就拿掉）；「任务」右上角的计数是弹层的行数，和 Vue 的 `activeTaskCount` 一样。弹层里没有取消按钮，Vue 的 `TaskPopover.vue` 也没有；`ShellMessage::CancelTask` 有派发分支，没有发送方。
 - **宿主操作**：标题栏的最小化、最大化、关闭；关闭行为按设置确认、退出或最小化到托盘（`src-nana/src/window_host.rs`）；托盘在 Windows 上用 `tray-icon`（`src-nana/src/tray.rs`）；主窗口几何下次启动恢复；打开和定位启动系统程序；拖出文件在 Windows 上用 `drag` crate（`src-nana/src/drag_out.rs`）；剪贴板读写系统剪贴板（`src-nana/src/host_bridge.rs`）；文件区和空库页接收系统文件拖入（`input::accept_file_drops`）；Escape 由运行时交给激活的对话框，其余按 `escape_layer` 关最上面一层。
 
 ## 还没做或要靠设备验证的部分
@@ -72,7 +72,6 @@ yarn tauri:dev               # Vue/Tauri 对照窗口，先构建、打包并暂
 
 归约和服务派发已经写好、但产品界面触发不到的路径：
 
-- 任务弹层和侧栏「任务」的计数读不到运行中的任务，弹层里只会出现仓库操作那一行。
 - 播放集下载（`momobako.playlist.download`）的消息在状态机里，没有界面入口。
 - 元数据的撤销和重做、文件的切换和范围选择、筛选的「任一满足」有归约分支，没有界面入口。
 

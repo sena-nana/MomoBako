@@ -527,7 +527,9 @@ impl ShellViewModel {
             && self.workspace.panel == panel
     }
 
-    fn task_rows(&self) -> Vec<support::PopoverRow> {
+    /// 任务弹层的行：仓库操作加运行中的任务，按更新时间降序。侧栏「任务」的计数也是这些行的个数，
+    /// 和 Vue `TaskPopover.vue` 的 `activeTaskCount` 一样。
+    pub(crate) fn task_rows(&self) -> Vec<support::PopoverRow> {
         support::popover_rows(&self.task_progress, self.admin.operation.as_ref())
     }
 
