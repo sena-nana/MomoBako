@@ -4,8 +4,10 @@
 use crate::backend::services::repository::{
     ApiDesignSnapshot, CacheConfig, CacheSnapshot, FileBrowserSnapshot, PlaylistPlayerContribution, PlaylistSummary, PluginManifest,
     RepositoryBackendSummary, RepositoryLocalCacheStatus, RepositoryOverview, RepositorySnapshot, RepositoryStructureCacheState,
-    RepositorySummary, SystemLogLocation, SystemLogPage, SystemLogRecord, SystemLogSource,
+    RepositoryAction, RepositorySummary, SystemLogLocation, SystemLogPage, SystemLogRecord, SystemLogSource,
 };
+use crate::shell::files::FileDialog;
+use crate::shell::{FilesEffect, FilesMessage, HardlinkPrompt};
 use crate::backend::services::runtime::ExternalApiConnectionStatus;
 use crate::shell::admin::{AdminEffect, AdminMessage, LogsView};
 use crate::shell::player::PlayerEffect;
@@ -92,12 +94,14 @@ pub(super) fn start(model: &mut ShellViewModel, repo_id: &str) {
         ShellMessage::StartupSyncFinished { generation, result: Ok(()) },
         ShellMessage::RepositorySnapshotLoaded(Ok(snapshot(repo_id))),
     ];
+    let mut early = Vec::new();
     for message in steps {
         model.reduce(message);
-        assert!(
-            !model.admin.take_effects().iter().any(|effect| matches!(effect, AdminEffect::LoadSettingsBundle)),
-            "启动还没结束就读了设置包"
-        );
+        early.extend(model.admin.take_effects());
+    }
+    assert!(!early.iter().any(|effect| matches!(effect, AdminEffect::LoadSettingsBundle)), "启动还没结束就读了设置包");
+    for effect in early {
+        model.admin.push_effect(effect);
     }
     model.reduce(ShellMessage::FileBrowserLoaded(Ok(browser(repo_id))));
     assert_eq!(model.workspace.startup.status, StartupStatus::Ready);
@@ -416,4 +420,48 @@ fn running_tasks_feed_the_popover_and_the_footer_count() {
 
     model.reduce(ShellMessage::TaskProgressLoaded(Vec::new()));
     assert_eq!(SidebarView::project(&model).footer.tasks, 1, "任务结束后只剩仓库操作");
+}
+
+fn repository_action(action_id: &str) -> RepositoryAction {
+    RepositoryAction {
+        action_id: action_id.into(),
+        repo_id: REPO.into(),
+        source: "eagle".into(),
+        source_action_id: None,
+        name: "整理导入".into(),
+        status: "ready".into(),
+        enabled: true,
+        raw: serde_json::Value::Null,
+        unsupported_reason: None,
+        sort_order: 0,
+        created_at: String::new(),
+        updated_at: String::new(),
+        steps: Vec::new(),
+        last_run: None,
+    }
+}
+
+/// 启动或换仓库绑定侧栏时，照 Vue `queueRepositoryBackgroundLoads` 在后台读仓库动作和硬链接候选：
+/// 读回的动作让侧栏多出「动作」入口；候选在没有别的对话框时弹出确认，后台读取失败只记日志。
+/// 同一个仓库再绑一次不重读。
+#[test]
+fn binding_a_repository_reads_actions_and_hardlinks() {
+    let mut model = started(REPO);
+    let admin = admin_effects(&mut model);
+    assert!(admin.iter().any(|effect| matches!(effect, AdminEffect::LoadActions { repo_id } if repo_id == REPO)), "绑定仓库要读动作：{admin:?}");
+    let files = model.files.take_effects();
+    assert!(files.iter().any(|effect| matches!(effect, FilesEffect::CheckHardlinks { repo_id } if repo_id == REPO)), "绑定仓库要查硬链接候选");
+
+    assert_eq!(SidebarView::project(&model).nav.actions, 0);
+    model.reduce(ShellMessage::Admin(AdminMessage::ActionsLoaded { repo_id: REPO.into(), result: Ok(vec![repository_action("act-1")]) }));
+    assert_eq!(SidebarView::project(&model).nav.actions, 1, "读回动作后侧栏有「动作」入口");
+
+    model.reduce(ShellMessage::Files(FilesMessage::HardlinksChecked(Err("索引被占用".into()))));
+    assert!(model.files.error.is_empty(), "后台读取失败不写进文件列表");
+    let prompt = HardlinkPrompt { id: "c-1".into(), new_path: "b.png".into(), existing_path: "a.png".into(), size_label: "1 KB".into() };
+    model.reduce(ShellMessage::Files(FilesMessage::HardlinksChecked(Ok(vec![prompt]))));
+    assert_eq!(model.files.dialog, FileDialog::Hardlink, "有候选就弹出确认");
+
+    model.reduce(ShellMessage::RepositorySnapshotLoaded(Ok(snapshot(REPO))));
+    assert!(!admin_effects(&mut model).iter().any(|effect| matches!(effect, AdminEffect::LoadActions { .. })), "同一个仓库的摘要不重读动作");
 }

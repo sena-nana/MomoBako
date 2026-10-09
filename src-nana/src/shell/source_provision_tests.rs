@@ -144,6 +144,13 @@ fn poll(model: &mut ShellViewModel, result: Value) {
     finish(model, step, Ok(result));
 }
 
+/// 登录完成：后台同步来源仓库，并切到它；切过去时照 Vue 后台读它的仓库动作。
+fn assert_synced_and_switched(model: &mut ShellViewModel) {
+    let effects = model.admin.take_effects();
+    assert!(effects.iter().any(|effect| matches!(effect, AdminEffect::SyncRepository { repo_id } if repo_id == REPO)), "{effects:?}");
+    assert!(effects.iter().all(|effect| matches!(effect, AdminEffect::SyncRepository { .. } | AdminEffect::LoadActions { .. })), "{effects:?}");
+}
+
 #[test]
 fn new_account_waits_for_a_cache_directory_before_polling() {
     let mut model = model();
@@ -234,7 +241,7 @@ fn new_account_creates_the_repository_without_secrets_then_syncs() {
     assert!(!model.admin.source_auth.busy);
     assert!(model.workspace.repositories.iter().any(|item| item.repo_id == REPO && item.cache_required));
     assert!(model.workspace.take_effects().iter().any(|effect| matches!(effect, WorkspaceEffect::RefreshRepositories { .. })));
-    assert!(matches!(model.admin.take_effects().as_slice(), [AdminEffect::SyncRepository { repo_id }] if repo_id == REPO));
+    assert_synced_and_switched(&mut model);
 
     finish(&mut model, SourceStep::Sync { repo_id: REPO.into() }, Err("网络断开".into()));
     assert_eq!(model.admin.source_auth.error, "后台同步失败：网络断开");
@@ -275,7 +282,7 @@ fn existing_account_updates_the_config_then_the_cache_directory() {
     };
     finish(&mut model, cache, Ok(json!({})));
     assert_eq!(model.admin.source_auth.message, "已更新 桃子的网易云 的登录状态，正在同步。");
-    assert!(matches!(model.admin.take_effects().as_slice(), [AdminEffect::SyncRepository { repo_id }] if repo_id == REPO));
+    assert_synced_and_switched(&mut model);
 }
 
 #[test]

@@ -332,22 +332,23 @@ impl SidebarState {
     }
 
     /// 活动仓库变化时清空旧树，并在仓库可用时请求目录、智能文件夹和播放集。
-    /// 播放器类型跟插件列表走，不按仓库读。
-    pub fn bind_repository(&mut self, repo_id: Option<&str>, missing: bool) {
+    /// 播放器类型跟插件列表走，不按仓库读。返回是否换到了一个可用的仓库。
+    pub fn bind_repository(&mut self, repo_id: Option<&str>, missing: bool) -> bool {
         if self.bound_repo_id.as_deref() == repo_id && self.bound_missing == missing {
-            return;
+            return false;
         }
         self.bound_repo_id = repo_id.map(str::to_owned);
         self.bound_missing = missing;
         self.clear_repository_content();
         if missing || repo_id.is_none() {
-            return;
+            return false;
         }
         let repo_id = repo_id.expect("ready repository id").to_string();
         self.tree_loading = true;
         self.effects.push(SidebarEffect::LoadTree { repo_id: repo_id.clone() });
         self.effects.push(SidebarEffect::LoadSmartFolders { repo_id: repo_id.clone() });
         self.effects.push(SidebarEffect::LoadPlaylists { repo_id });
+        true
     }
 
     /// 用摘要重算快捷方式。同一仓库的后续摘要不重新请求目录树。

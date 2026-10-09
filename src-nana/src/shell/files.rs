@@ -289,6 +289,8 @@ pub enum FilesEffect {
     LoadHardlinks { repo_id: String },
     /// 结构更新静默重读候选。不打开对话框，失败不写入页面错误。
     RefreshHardlinks { repo_id: String },
+    /// 启动和换仓库后在后台查一次候选（Vue `queueRepositoryBackgroundLoads`）。失败只记日志。
+    CheckHardlinks { repo_id: String },
     ConfirmHardlink { repo_id: String, candidate_id: String },
     LoadAsset { repo_id: String, asset_id: String },
     PersistDisplayMode,
@@ -360,6 +362,8 @@ pub enum FilesMessage {
     HardlinksLoaded(Result<Vec<HardlinkPrompt>, String>),
     /// 静默刷新结果。只替换候选，不改对话框和页面错误。
     HardlinksRefreshed(Result<Vec<HardlinkPrompt>, String>),
+    /// 启动和换仓库后查到的候选：换掉列表，没有别的对话框时有候选就弹出确认。
+    HardlinksChecked(Result<Vec<HardlinkPrompt>, String>),
     HardlinkConfirmed(Result<String, String>),
     NoteError(String),
     /// 缩略图已经写入。路径是缓存文件，用来重新解码纹理。
@@ -857,6 +861,8 @@ impl FilesState {
             }
             FilesMessage::HardlinksLoaded(result) => self.note_hardlinks(result),
             FilesMessage::HardlinksRefreshed(result) => self.note_hardlinks_silent(result),
+            FilesMessage::HardlinksChecked(Ok(prompts)) => self.note_hardlinks_synced(prompts),
+            FilesMessage::HardlinksChecked(Err(error)) => eprintln!("Nana 后台读取硬链接候选失败：{error}"),
             FilesMessage::HardlinkConfirmed(result) => self.note_hardlink_confirmed(result),
             FilesMessage::NoteError(error) => self.note_error(error),
             FilesMessage::ThumbnailSaved { path, thumbnail_path, custom } => self.note_custom_thumbnail(&path, thumbnail_path, custom),

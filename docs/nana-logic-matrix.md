@@ -100,7 +100,7 @@
 | `fileOperations.ts` 协议结果 | 复制、移动、导入、压缩包、Eagle 或删除返回 | 成功后重新 `get_file_browser` | 成功不改当前行，保留选择并允许分类视图重读；智能文件夹不按目录重读；复制成功再列硬链接候选；失败保留原列表和对话框 | 对话框在成功后关闭 | 已测试（未离屏） |
 | `fileOperations.ts` 删除 | 有选择且可写 | `PROTOCOL_ENTRY_DELETE` | 回收站 mode 为 `permanentDelete`，普通删除 mode 为空；失败保留原列表和对话框 | 文件列显示“正在处理文件”；回收站里“彻底删除”要点两次 | 已测试（未离屏） |
 | `fileOperations.ts` 回收站 | 还原、还原全部、清空 | `mutate_trash` | 还原只在回收站；清空和还原全部不要求当前选择 | 文件列显示“正在处理文件” | 已测试（未离屏） |
-| `HardlinkCandidateDialog.vue` | 候选到达、跳过、确认 | 确认用 `confirm_hardlink_candidate`；跳过无请求 | 跳过只记本地 id 并显示下一条；确认失败保留该条；确认成功按 id 移除，没有剩余则关闭 | “确认后会将新文件加入硬链接关联。”；跳过 / 加入关联 | 已测试（未离屏） |
+| `HardlinkCandidateDialog.vue` | 候选到达（复制以后；刷新文件夹树以后；启动和换仓库绑定侧栏时照 Vue 后台读 `list_hardlink_candidates`）、跳过、确认 | 确认用 `confirm_hardlink_candidate`；跳过无请求；后台读取失败只记日志 | 跳过只记本地 id 并显示下一条；确认失败保留该条；确认成功按 id 移除，没有剩余则关闭 | “确认后会将新文件加入硬链接关联。”；跳过 / 加入关联 | 已测试（未离屏） |
 | `files.ts` 展示方式 | 切换或读取 `file-display.json` | `PersistDisplayMode` | 值是 adaptive、masonry、grid、list，也接受中文标签；未知、损坏或文件缺失回到自适应；只在切换时写入。四种都用 `each_virtual` 按视口虚拟化，行高按内容量；瀑布流照 CSS 多列分列 | “自适应 / 瀑布流 / 网格 / 列表” | 已测试（未离屏） |
 | `files.ts` 重命名草稿 | 选择变成多项，或主选变化 | 无 | 清掉重命名路径和草稿，并关闭重命名框 | 重命名框消失 | 已测试（未离屏） |
 | Eagle 导入 | 模式为 copy 或 move，库路径非空 | `PROTOCOL_EAGLE_IMPORT` | 其他模式不打开对话框；空白路径不提交 | 对话框主按钮写“处理中...”并禁用 | 已测试（未离屏） |
@@ -210,7 +210,7 @@
 | `logs.ts` `loadSystemLogsInWorkspace` | 切到日志面板，每次都读 | `list_system_logs`，limit 200，没有替身 | 读回整份换上，按时间再 id 降序；读的时候手上没有日志就写正在加载、不写空状态，「清空日志」照 Vue 可点；读失败保留手上的日志，状态区写「无法读取系统日志：…」 | “正在加载系统日志” | 已测试（`data_load_tests.rs`、`route_admin_tests.rs`，未离屏） |
 | `WorkspaceLogsPanel.vue` 筛选 | 级别、来源、搜索、暂停 | 不把条件写进 `SystemLogQuery` | 客户端排序是时间再 id；筛选变空时不滚动；暂停后签名变化也不滚动；记录本身不删。实况页画出过滤后的时间、级别和消息 | “2 条缓存” / “2 条命中”；按钮“暂停追踪 / 恢复追踪”；空态“当前筛选没有命中” | 已测试（未离屏） |
 | `TaskPopover.vue` | 任务和仓库操作 | 宿主线程每 250 ms 读 Mutsuki 任务快照（`task_watch.rs`），排队、运行和取消中的任务变了才发 `TaskProgressLoaded`；弹层没有取消按钮（Vue 也没有） | 合成行 id 是 `workspace-operation`，来源是资源库，所有行按更新时间降序；任务结束就从列表里拿掉；「任务」的计数是行数（仓库操作也算）；点弹层外的透明层关闭，Escape 走全局 Escape | “任务” / “当前没有运行中的任务。” | 已测试（`task_watch.rs`、`data_load_tests.rs`，未离屏） |
-| `RepositoryActionsPanel.vue` 列表 | 切到动作面板，或过期仓库 | `list_repository_actions`，没有替身 | 过期仓库忽略；当前仓库读失败保留旧列表；没有选中时用第一项 | “正在加载动作” / “当前仓库没有导入动作。” | 已测试（未离屏） |
+| `RepositoryActionsPanel.vue` 列表 | 启动和换仓库绑定侧栏时（Vue `queueRepositoryBackgroundLoads`）、结构更新、切到动作面板，或过期仓库 | `list_repository_actions`，没有替身 | 过期仓库忽略；当前仓库读失败保留旧列表；没有选中时用第一项；读回有动作时侧栏多出「动作」入口 | “正在加载动作” / “当前仓库没有导入动作。” | 已测试（`data_load_tests.rs`，未离屏） |
 | `RepositoryActionsPanel.vue` 执行 | 点击执行 | `momobako.repository.action.run`，没有替身 | 需要 ready、启用、已选路径且不在执行中；选中动作同时切到动作面板；成功后刷新文件列表 | “不支持” / “执行” | 已测试（未离屏） |
 | `ExtensionsPanel.vue` 工具页 | 工具页列表变化 | 文件导入和 Eagle 导入派发已有的 `OpenDialog` / `OpenEagle`，并回到文件页把对话框画出来；API Playground 的契约来自 API 设计快照，快照为空时用三个外部 API 兜底 | 三个内置 id 画原生页面。没有仓库、只读、回收站或虚拟视图时按钮禁用。其它工具页只画页头和一句说明 | “当前没有可用仓库。” / “多个路径用分号分隔” / “这个工具页由插件的前端组件绘制，Nana 原生界面不能运行它。” | 已测试；导入对话框由实况点击覆盖，第三方页另有离屏场景 `foreign-tool` |
 | 设置页、拓展页、日志页和任务弹层 | 设置、插件、日志或任务 | 无 | 验收页走同一棵树；键是 `admin-settings`、`admin-extensions`、`admin-log-panel`、`clear-logs`、`admin-task-popover` | “音频播放” / “系统日志” / “扫描默认资源库” | 已离屏（`settings`、`plugin-settings`、`logs`、`task-running`） |
