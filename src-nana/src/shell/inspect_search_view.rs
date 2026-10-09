@@ -211,7 +211,7 @@ fn result_row(row: &SearchRow) -> AnyView {
         .content(body)
         .trailing(tags)
         .on_cx(move |_, _: &Activate, cx| {
-            cx.dispatch_program(ShellMessage::Inspect(InspectMessage::OpenHit {
+            cx.dispatch_program_all(ShellMessage::Inspect(InspectMessage::OpenHit {
                 repo_id: repo_id.clone(),
                 asset_id: asset_id.clone(),
             }));

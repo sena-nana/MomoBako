@@ -98,9 +98,40 @@ mod smart;
 mod gap;
 #[path = "sidebar_bind.rs"]
 mod bind;
+#[path = "sidebar_popover.rs"]
+mod popover;
 
 pub use smart::{SmartFolderDraft, SmartFolderField};
-pub use gap::{clamp_anchored, FolderMutation, GapMessage};
+pub use gap::{clamp_anchored, FolderDeleteMode, FolderMenu, FolderMutation, GapMessage, FOLDER_DELETE_TITLE};
+pub use popover::{backend_options, BackendOption, BackendRoute};
+
+/// 一次目录树读取：树本身和每个目录的直属文件数（Vue `FileTreeNode.fileCount`）。
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SidebarTree {
+    pub folders: Vec<SidebarFolder>,
+    pub counts: std::collections::BTreeMap<String, usize>,
+}
+
+impl From<Vec<SidebarFolder>> for SidebarTree {
+    fn from(folders: Vec<SidebarFolder>) -> Self {
+        Self { folders, counts: Default::default() }
+    }
+}
+
+impl SidebarTree {
+    /// 把服务返回的目录节点收成侧栏树，同时记下每个目录的文件数。
+    pub fn from_nodes(nodes: &[crate::backend::services::repository::FileTreeNode]) -> Self {
+        fn walk(nodes: &[crate::backend::services::repository::FileTreeNode], counts: &mut std::collections::BTreeMap<String, usize>) {
+            for node in nodes {
+                counts.insert(node.path.clone(), node.file_count);
+                walk(&node.children, counts);
+            }
+        }
+        let mut counts = std::collections::BTreeMap::new();
+        walk(nodes, &mut counts);
+        Self { folders: nodes.iter().map(SidebarFolder::from_file_node).collect(), counts }
+    }
+}
 
 /// 侧栏交互。壳层只保留一个 `ShellMessage::Sidebar`，避免主归约重复列出这些分支。
 pub enum SidebarMessage {
@@ -112,6 +143,8 @@ pub enum SidebarMessage {
     ToggleSmartFolder(String),
     OpenSmartFolder(String),
     OpenSmartFolderDialog,
+    /// 智能文件夹行上的「新建子智能文件夹」，带父级 id。
+    OpenSmartFolderChild(String),
     CloseSmartFolderDialog,
     SetSmartFolderField { field: SmartFolderField, value: String },
     SubmitSmartFolder,
@@ -120,13 +153,17 @@ pub enum SidebarMessage {
     OpenSidebarPlaylist(String),
     OpenRepositorySwitcher,
     ShowRepositoryAddMenu,
+    /// 添加菜单里选了一个来源后端（插件 id）。
+    SelectRepositoryBackend(String),
+    /// 后端表单的「返回」。
+    BackToAddMenu,
     CloseRepositoryPopover,
     SelectRepositoryFromSwitcher(String),
     DeleteRepositoryFromSwitcher,
     RepositoryAttachPathChanged(String),
     SubmitRepositoryAttach,
     RepositoryAttachFinished(Result<(), String>),
-    SidebarTreeLoaded { repo_id: String, result: Result<Vec<SidebarFolder>, String> },
+    SidebarTreeLoaded { repo_id: String, result: Result<SidebarTree, String> },
     SidebarSmartFoldersLoaded { repo_id: String, result: Result<Vec<SidebarSmartFolder>, String> },
     SidebarSmartFolderQueried { repo_id: String, smart_folder_id: String, result: Result<super::files::VirtualQuery, String> },
     SidebarPlaylistsLoaded { repo_id: String, result: Result<Vec<SidebarPlaylist>, String> },
@@ -152,7 +189,8 @@ pub enum SidebarEffect {
     UpdateSmartFolder { repo_id: String },
     DeleteSmartFolder { repo_id: String, smart_folder_id: String },
     DeletePlaylist { repo_id: String, playlist_id: String },
-    CreateBackendRepository { name: String, path: String, plugin_id: String },
+    /// `config` 是后端表单的 `backendConfig`；Eagle 这类只给目录的来源为 `None`。
+    CreateBackendRepository { name: String, path: String, plugin_id: String, config: Option<serde_json::Value> },
     ClearRecent { repo_id: String },
 }
 
@@ -161,7 +199,11 @@ pub struct SidebarState {
     pub counts: ShortcutCounts,
     pub quick_access: Vec<SidebarShortcut>,
     pub folders: Vec<SidebarFolder>,
+    /// 每个目录的直属文件数，树行右侧的计数。
+    pub folder_counts: std::collections::BTreeMap<String, usize>,
     pub expanded_folders: Vec<String>,
+    /// 文件夹行的右键菜单。
+    pub folder_menu: Option<FolderMenu>,
     pub current_directory: String,
     pub browsing_trash: bool,
     pub tree_loading: bool,
@@ -185,6 +227,10 @@ pub struct SidebarState {
     pub folder_dialog: gap::FolderDialog,
     pub folder_delete_path: String,
     pub folder_delete_label: String,
+    /// 处理文件夹失败时的错误，留在对话框里。
+    pub folder_delete_error: String,
+    /// 处理文件夹已交给文件服务，等结果。
+    pub folder_delete_submitting: bool,
     pub hover_folder: Option<String>,
     pub hover_since_ms: Option<u64>,
     /// 拖放悬停用的空闲时钟。动效时钟在没有轨道时不前进。
@@ -192,17 +238,17 @@ pub struct SidebarState {
     pub smart_delete_id: String,
     pub smart_delete_label: String,
     pub pending_play: Option<String>,
-    pub popover_x: f32,
-    pub popover_y: f32,
     pub backend_name: String,
     pub backend_url: String,
     pub backend_user: String,
     pub backend_password: String,
     pub backend_root: String,
     pub backend_plugin_id: String,
+    /// 下一次系统文件夹对话框的结果按 Eagle Library 建仓，而不是附加本地文件夹。
+    pub(crate) attach_eagle: bool,
     pending_folder_create: Option<(String, String, String)>,
     pending_folder_rename: Option<(String, String, String)>,
-    pending_folder_delete: Option<(String, String)>,
+    pending_folder_delete: Option<(String, String, FolderDeleteMode)>,
     bound_repo_id: Option<String>,
     bound_missing: bool,
     effects: Vec<SidebarEffect>,
@@ -214,7 +260,9 @@ impl Default for SidebarState {
             counts: ShortcutCounts::default(),
             quick_access: Vec::new(),
             folders: Vec::new(),
+            folder_counts: std::collections::BTreeMap::new(),
             expanded_folders: Vec::new(),
+            folder_menu: None,
             current_directory: String::new(),
             browsing_trash: false,
             tree_loading: false,
@@ -238,20 +286,21 @@ impl Default for SidebarState {
             folder_dialog: gap::FolderDialog::default(),
             folder_delete_path: String::new(),
             folder_delete_label: String::new(),
+            folder_delete_error: String::new(),
+            folder_delete_submitting: false,
             hover_folder: None,
             hover_since_ms: None,
             hover_clock: 0,
             smart_delete_id: String::new(),
             smart_delete_label: String::new(),
             pending_play: None,
-            popover_x: 0.0,
-            popover_y: 0.0,
             backend_name: String::new(),
             backend_url: String::new(),
             backend_user: String::new(),
             backend_password: String::new(),
             backend_root: String::new(),
             backend_plugin_id: String::new(),
+            attach_eagle: false,
             pending_folder_create: None,
             pending_folder_rename: None,
             pending_folder_delete: None,
@@ -437,15 +486,16 @@ impl SidebarState {
         true
     }
 
-    pub fn apply_tree(&mut self, repo_id: &str, result: Result<Vec<SidebarFolder>, String>) {
+    pub fn apply_tree(&mut self, repo_id: &str, result: Result<SidebarTree, String>) {
         if self.bound_repo_id.as_deref() != Some(repo_id) {
             eprintln!("Nana 忽略过期的目录树：{repo_id}");
             return;
         }
         self.tree_loading = false;
         match result {
-            Ok(folders) => {
-                self.folders = folders;
+            Ok(tree) => {
+                self.folders = tree.folders;
+                self.folder_counts = tree.counts;
                 self.tree_error.clear();
                 let valid = folder_paths(&self.folders);
                 self.expanded_folders.retain(|path| path.is_empty() || valid.contains(path));
@@ -588,18 +638,6 @@ impl SidebarState {
         })
     }
 
-    pub fn popover_is_open(&self) -> bool {
-        self.popover != PopoverMode::Closed
-    }
-
-    pub fn open_switcher(&mut self) {
-        if self.submitting || self.popover == PopoverMode::Switcher {
-            return;
-        }
-        self.popover_error.clear();
-        self.popover = PopoverMode::Switcher;
-    }
-
     /// 拖放还按着，或悬停还没结算时，把悬停时钟向前拨一帧。
     pub fn tick_hover(&mut self, step_ms: u64) {
         self.hover_clock = self.hover_clock.saturating_add(step_ms);
@@ -609,91 +647,12 @@ impl SidebarState {
         self.hover_clock
     }
 
-    /// 提交附加时保持当前弹层，避免附加过程中再打开菜单。
-    pub fn show_add_menu(&mut self) -> bool {
-        if self.submitting {
-            return false;
-        }
-        self.attach_path.clear();
-        self.popover_error.clear();
-        self.popover = PopoverMode::AddMenu;
-        true
-    }
-
-    pub fn close_popover(&mut self) -> bool {
-        if self.submitting {
-            return false;
-        }
-        self.popover = PopoverMode::Closed;
-        true
-    }
-
-    /// 选择后关闭弹层。提交中保持打开，避免附加过程中换仓库。
-    pub fn select_from_switcher(&mut self, _repo_id: &str) -> bool {
-        if self.submitting {
-            return false;
-        }
-        self.popover = PopoverMode::Closed;
-        true
-    }
-
-    pub fn delete_from_switcher(&mut self, active_repo_id: Option<&str>) -> bool {
-        if active_repo_id.is_none() || self.submitting {
-            return false;
-        }
-        self.popover_error.clear();
-        self.popover = PopoverMode::Closed;
-        true
-    }
-
-    pub fn set_attach_path(&mut self, path: String) {
-        self.attach_path = path;
-    }
-
-    /// 空白路径不提交，和本地文件夹选择取消一样。
-    pub fn submit_attach(&mut self) -> bool {
-        if self.submitting {
-            return false;
-        }
-        let path = self.attach_path.trim().to_string();
-        if path.is_empty() {
-            return false;
-        }
-        self.submitting = true;
-        self.popover_error.clear();
-        self.effects.push(SidebarEffect::AttachRepository { path });
-        true
-    }
-
-    /// 空库拖放附加。空白路径不提交，也不打开添加菜单。
-    pub(crate) fn queue_attach(&mut self, path: String) {
-        let path = path.trim().to_string();
-        if path.is_empty() {
-            return;
-        }
-        self.effects.push(SidebarEffect::AttachRepository { path });
-    }
-
-    pub fn note_attach_finished(&mut self, result: Result<(), String>) {
-        self.submitting = false;
-        match result {
-            Ok(()) => {
-                self.popover = PopoverMode::Closed;
-                self.attach_path.clear();
-                self.popover_error.clear();
-            }
-            Err(error) => {
-                eprintln!("Nana 附加资源库失败：{error}");
-                self.popover_error = error;
-                self.popover = PopoverMode::AddMenu;
-            }
-        }
-    }
-
     fn clear_repository_content(&mut self) {
         self.counts = ShortcutCounts::default();
         self.quick_access.clear();
         self.folders.clear();
+        self.folder_counts.clear();
+        self.folder_menu = None;
         self.expanded_folders.clear();
         self.current_directory.clear();
         self.browsing_trash = false;
@@ -881,7 +840,14 @@ pub(super) fn reduce_message(model: &mut super::ShellViewModel, message: super::
             if model.navigation_locked() || model.workspace.active_repo_id.is_none() {
                 eprintln!("Nana 当前不能新建智能文件夹");
             } else {
-                model.sidebar.open_smart_dialog();
+                model.sidebar.open_smart_dialog(None);
+            }
+        }
+        SidebarMessage::OpenSmartFolderChild(parent_id) => {
+            if model.navigation_locked() || model.workspace.active_repo_id.is_none() {
+                eprintln!("Nana 当前不能新建子智能文件夹");
+            } else {
+                model.sidebar.open_smart_dialog(Some(parent_id));
             }
         }
         SidebarMessage::CloseSmartFolderDialog => model.sidebar.close_smart_dialog(),
@@ -894,10 +860,10 @@ pub(super) fn reduce_message(model: &mut super::ShellViewModel, message: super::
         SidebarMessage::OpenSidebarPlaylist(id) => model.apply_playlist(id),
         SidebarMessage::OpenRepositorySwitcher => model.sidebar.open_switcher(),
         SidebarMessage::ShowRepositoryAddMenu => {
-            if model.sidebar.show_add_menu() {
-                model.input.queue_attach_dialog();
-            }
+            model.sidebar.show_add_menu();
         }
+        SidebarMessage::SelectRepositoryBackend(plugin_id) => model.apply_repository_backend(&plugin_id),
+        SidebarMessage::BackToAddMenu => model.sidebar.back_to_add_menu(),
         SidebarMessage::CloseRepositoryPopover => {
             model.sidebar.close_popover();
         }
