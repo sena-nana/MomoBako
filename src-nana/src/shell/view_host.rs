@@ -11,7 +11,8 @@
 //!
 //! 数据流：`ShellMessage → reduce → 服务副作用 → ShellView::sync`。同步先写热信号和标题栏字段，
 //! 再让每一块写自己的信号、按需重挂。焦点在某块里、输入法还有预编辑时，这块的重挂延后，`prepare`
-//! 每帧经 [`ShellView::retry_deferred`] 检查，组合结束后补挂。动效帧和播放推进只走
+//! 每帧经 [`ShellView::retry_deferred`] 检查，组合结束后补挂；`prepare` 每帧还经
+//! [`ShellView::settle_overlays`] 卸掉放完退场的对话框。动效帧和播放推进只走
 //! [`ShellView::sync_hot`]。这里只写信号，不刷新绑定，刷新由输入路由和帧开头完成。
 
 use std::cell::RefCell;
@@ -182,8 +183,21 @@ impl ShellView {
             absorb(&mut swap, &mut error, PartId::Overlay, step(&mut self.overlay, &mut cx, model, &mut self.deferred));
         }
         self.settle(document, mode, swap, error)?;
+        self.overlay.sweep(document.context_mut());
         self.revision = model.revision;
         Ok(())
+    }
+
+    /// 每帧收尾：卸掉放完退场的对话框，现在显示的对话框照 ViewModel 该开着。只碰浮层块。
+    pub(crate) fn settle_overlays(&mut self, document: &mut RuntimeDocument) {
+        if self.alive() {
+            self.overlay.sweep(document.context_mut());
+        }
+    }
+
+    /// 还有对话框在放退场：准备帧要一直要帧，放完以后才卸得掉。
+    pub(crate) fn overlay_leaving(&self) -> bool {
+        self.overlay.leaving()
     }
 
     /// 只同步热信号和侧栏宽度：动效帧和播放推进走这里，不重挂内容。排法要换时由调用方整体同步。
