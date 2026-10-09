@@ -1,9 +1,9 @@
-//! 播放集页常驻写法的回归。播放集路由现在还是旧视图路由，这里把页面单独挂在一份文档里，信号常驻，
-//! 照常驻路由的样子写投影：只有当前播放或页眉变了时列表不重建、字段原地改；重排和增删时整个列表
-//! 重建，焦点回到原来那个条目的同一个按钮上；没点开到点开时空框和面板原地互换。每次写完都和
-//! 同一 ViewModel 新挂的页面按无障碍树比一次。
+//! 播放集页的回归：把页面单独挂在一份文档里，信号常驻，照主区块同步的样子写投影：只有当前播放或
+//! 页眉变了时列表不重建、字段原地改；重排和增删时整个列表重建，焦点回到原来那个条目的同一个按钮上；
+//! 没点开到点开时空框和面板原地互换。每次写完都和同一 ViewModel 新挂的页面按无障碍树比一次。
+//! 整条路由（筛选栏、播放条岛、不可播放项目）的回归在 `route_playlists_tests.rs`。
 
-use nana_ui::runtime::view::{widget, IntoView};
+use nana_ui::runtime::view::{signal, widget, IntoView};
 use nana_ui::runtime::{DocumentId, Entity, LayoutViewport, MountedView, ReorderList, RuntimeDocument, Stack, StableNodeId};
 use nana_ui::NanaTextShaper;
 
@@ -41,7 +41,7 @@ impl PageHarness {
             .mount_view_root(document_id, || {
                 let signals = PlaylistPageSignals::new(PlaylistPageView::project(model));
                 made = Some(signals);
-                widget(Stack::column(0.0)).children((super::view(signals, ().into_any()),))
+                widget(Stack::column(0.0)).children((super::view(signals, signal(true), ().into_any()),))
             })
             .expect("挂载播放集页");
         let mut harness = Self { document, signals: made.expect("挂载闭包已经运行"), shaper: NanaTextShaper::default(), _view: view };

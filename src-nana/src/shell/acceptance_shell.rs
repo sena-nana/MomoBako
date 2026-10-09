@@ -9,6 +9,7 @@ use crate::backend::services::repository::{
 };
 
 use super::super::files::DisplayMode;
+use super::super::input::InputMessage;
 use super::super::sidebar::{GapMessage, ShortcutAsset, SidebarTree};
 use super::super::workspace::WorkspaceRepository;
 use super::super::{ShellMessage, ShellViewModel, SidebarMessage};
@@ -20,6 +21,8 @@ const BACKEND_PLUGIN_ID: &str = "momobako.source.local-filesystem";
 const FIXED_CLOCK: &str = "16:00:00";
 /// Vue `error` 场景里同步命令抛出的错误。
 const SYNC_ERROR: &str = "无法读取仓库目录，请检查路径和权限";
+/// `status-error` 场景里系统文件管理器起不来时的原因。
+const REVEAL_ERROR: &str = "系统找不到指定的文件。";
 /// 内置插件清单里声明的播放器。Vue 对照页按真实清单加载插件，播放器列表也从这里来。
 const PLAYER_MANIFESTS: [&str; 2] = [
     include_str!("../../../External/Plugins/media-preview/manifest.json"),
@@ -37,6 +40,7 @@ pub(super) fn models() -> Vec<(&'static str, ShellViewModel)> {
         ("folder-create-dialog", folder_create_dialog()),
         ("smart-folder-dialog", smart_folder_dialog()),
         ("playlist-create-dialog", playlist_create_dialog()),
+        ("status-error", status_error()),
     ]
 }
 
@@ -127,6 +131,16 @@ fn smart_folder_dialog() -> ShellViewModel {
 fn playlist_create_dialog() -> ShellViewModel {
     let mut model = live_files_plain();
     model.reduce(ShellMessage::OpenPlaylistDialog);
+    settle(&mut model);
+    model
+}
+
+/// 在文件管理器里定位 cover.png 失败：系统程序起不来，失败显示在侧栏顶部的全局状态区，文件列表照常显示。
+fn status_error() -> ShellViewModel {
+    let mut model = live_files_plain();
+    let target = format!("{REPO_PATH}/cover.png");
+    model.reduce(ShellMessage::Input(InputMessage::RevealEntry { absolute_path: target }));
+    crate::host_bridge::perform(&mut model, |_, _| Err(REVEAL_ERROR.into()), |_| Ok(()), || Ok(()));
     settle(&mut model);
     model
 }

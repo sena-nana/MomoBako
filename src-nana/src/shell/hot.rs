@@ -20,7 +20,7 @@ use nana_ui_core::PaintTransform;
 use super::motion::{shift_scale, spin_transform, MotionState};
 use super::ShellViewModel;
 
-/// 一层浮层外框的透明度和变换：对话框遮罩和卡片，或弹层的淡入上移。
+/// 弹层外框的透明度和变换：淡入上移。
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct LayerPaint {
     pub opacity: f32,
@@ -28,12 +28,6 @@ pub(crate) struct LayerPaint {
 }
 
 impl LayerPaint {
-    /// 对话框：遮罩透明度，卡片上移和缩放。
-    pub(crate) fn modal(motion: &MotionState) -> Self {
-        let frame = motion.modal_frame();
-        Self { opacity: frame.overlay_opacity, transform: shift_scale(frame.card_shift, frame.card_scale) }
-    }
-
     /// 弹层：透明度和 4px 上移。
     pub(crate) fn panel(motion: &MotionState) -> Self {
         let frame = motion.panel_frame();
@@ -44,7 +38,6 @@ impl LayerPaint {
 /// 动效时钟这一刻在界面上的样子。
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct MotionFrame {
-    pub modal: LayerPaint,
     pub panel: LayerPaint,
     /// 启动进度条填充的百分比。
     pub startup_percent: f32,
@@ -61,7 +54,6 @@ impl MotionFrame {
     pub(crate) fn project(model: &ShellViewModel) -> Self {
         let motion = &model.motion;
         Self {
-            modal: LayerPaint::modal(motion),
             panel: LayerPaint::panel(motion),
             startup_percent: motion.startup_percent(),
             spinner_degrees: motion.spinner_degrees(),
@@ -114,7 +106,6 @@ impl TitleBarView {
 /// 热投影的信号。句柄是 `Copy` 的 id，值在骨架的挂载作用域里，骨架卸载时一起回收。
 #[derive(Clone, Copy)]
 pub(crate) struct HotSignals {
-    pub modal: Signal<LayerPaint>,
     pub panel: Signal<LayerPaint>,
     pub startup: Signal<f32>,
     pub spinner: Signal<f32>,
@@ -128,7 +119,6 @@ impl HotSignals {
     /// 在当前作用域里建信号，初值是这一刻的投影。只在骨架的挂载闭包里调用，否则信号会留到线程结束。
     pub(crate) fn new(motion: MotionFrame, playback: &PlaybackView) -> Self {
         Self {
-            modal: signal(motion.modal),
             panel: signal(motion.panel),
             startup: signal(motion.startup_percent),
             spinner: signal(motion.spinner_degrees),
@@ -141,12 +131,11 @@ impl HotSignals {
 
     /// 骨架还在：信号所在的作用域没有被回收。
     pub(crate) fn alive(&self) -> bool {
-        self.modal.defined_at().is_some()
+        self.panel.defined_at().is_some()
     }
 
     /// 写入这一帧的投影，只写变了的。信号可能已经随文档回收，回收了就不写。
     pub(crate) fn write(&self, motion: MotionFrame, playback: &PlaybackView) {
-        self.modal.try_set_if_changed(motion.modal);
         self.panel.try_set_if_changed(motion.panel);
         self.startup.try_set_if_changed(motion.startup_percent);
         self.spinner.try_set_if_changed(motion.spinner_degrees);
@@ -254,7 +243,7 @@ pub(crate) fn prop<T: Clone + 'static>(pick: impl FnOnce(&HotSignals) -> Signal<
     }
 }
 
-/// `Stack` 的透明度和变换，浮层外框用。
+/// `Stack` 的透明度和变换，弹层外框用。
 pub(crate) struct LayerPaintField;
 
 impl FieldWrite<Stack, LayerPaint> for LayerPaintField {

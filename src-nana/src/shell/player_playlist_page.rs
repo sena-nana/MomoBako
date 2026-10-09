@@ -1,12 +1,11 @@
-//! 播放集页（常驻写法）：投影、信号和只建一次的视图，对齐 Vue `WorkspacePlaylistPage`。
+//! 播放集页（常驻）：投影、信号和只建一次的视图，对齐 Vue `WorkspacePlaylistPage`。
 //!
 //! [`PlaylistPageView`] 是投影；[`PlaylistPageSignals`] 里页眉一个信号，条目放进按编号对照的 Store，
 //! 另有条目顺序。页眉的标题、状态行、「播放」的禁用和面板圆角按字段绑定；条目行的文件名、路径或原因、
 //! 能不能播放原地改；没点开时的虚线空框和面板用 `.visible` 互换。
 //!
-//! 播放集路由目前还是旧视图路由：每次重挂时在挂载作用域里按投影新建这些信号（[`page`]），播放条由
-//! 旧视图函数建好传进来。改成常驻路由时把 [`PlaylistPageSignals`] 放进 `RouteSignals`、同步时
-//! [`PlaylistPageSignals::write`]，播放条换成旧视图岛，再调 [`view`]。
+//! 信号放在播放集路由的常驻信号里（`route_playlists.rs`），主区块同步时 [`PlaylistPageSignals::write`]；
+//! 播放条是那边登记的旧视图岛，这里只收它的占位节点。
 //!
 //! 条目列表放在 `ReorderList` 里：它按自己的直接子节点取行的盒子来拖动排序，`each` 总会多一层容器，
 //! 所以条目没法用带键的 `each`（NanaUI 缺口）。列表改用按条目顺序做键的 `dynamic`：增删、重排时整个
@@ -30,7 +29,7 @@ use crate::backend::services::repository::PlaylistItem;
 
 use super::super::player::PlayerMessage;
 use super::super::remount_state::{self, KeptState};
-use super::super::view_part_sidebar::project::sync_rows;
+use super::super::row_sync::sync_rows;
 use super::super::{ShellMessage, ShellViewModel};
 use super::{bar, icons, key_part, playlist_plugin_missing, player_message};
 
@@ -153,8 +152,6 @@ impl PlaylistPageSignals {
     }
 
     /// 写入投影：页眉值没变不写，条目按编号对照着改，顺序变了写进顺序。作用域已回收时只记日志。
-    /// 播放集路由改成常驻、主区块同步时调它；在那之前只有测试调。
-    #[cfg_attr(not(test), expect(dead_code, reason = "播放集路由接上播放条岛改成常驻后由主区块同步调用"))]
     pub(crate) fn write(&self, view: PlaylistPageView) {
         if self.head.defined_at().is_none() {
             eprintln!("Nana 播放集页的信号已随作用域回收，跳过写入");
@@ -167,20 +164,15 @@ impl PlaylistPageSignals {
     }
 }
 
-/// 旧视图路由里的播放集页：在挂载作用域里按投影建信号，播放条由调用方建好传进来。
-pub(super) fn page(model: &ShellViewModel, player_bar: AnyView) -> AnyView {
-    view(PlaylistPageSignals::new(PlaylistPageView::project(model)), player_bar)
-}
-
 /// 播放集页：没点开或详情还没读回时是虚线空框；点开后是 bg-elev 面板，里面是页眉、条目（或空框）和
-/// `player_bar`。两块都留着，按是否点开互换。
-pub(crate) fn view(signals: PlaylistPageSignals, player_bar: AnyView) -> AnyView {
+/// `player_bar`。两块都留着，按是否点开互换；`surface` 为假（不在播放集面板）时两块都藏起来。
+pub(crate) fn view(signals: PlaylistPageSignals, surface: Signal<bool>, player_bar: AnyView) -> AnyView {
     follow_order(signals);
     let head = signals.head;
     let shown = signals.shown;
     let initial = head.get_untracked();
     let unlisted = dashed_empty("选择一个播放集", "在左侧播放集区选择要查看或播放的列表。", "playlist-page-empty")
-        .visible(move || !head.with(|head| head.listed));
+        .visible(move || surface.get() && !head.with(|head| head.listed));
     let no_items = dashed_empty(
         "播放集还是空的",
         "在文件浏览区右键文件，使用“加入播放列表”把内容加入这里。",
@@ -190,7 +182,7 @@ pub(crate) fn view(signals: PlaylistPageSignals, player_bar: AnyView) -> AnyView
     let items = dynamic(shown, move |ids: &Vec<String>| item_list(ids, signals)).visible(move || !shown.with(Vec::is_empty));
     let panel = widget(Stack::column(16.0).padding(18.0).surface(SemanticColorRole::Surface).radius_px(initial.radius))
         .prop::<f32, PanelRadius>(move || head.with(|head| head.radius))
-        .visible(move || head.with(|head| head.listed))
+        .visible(move || surface.get() && head.with(|head| head.listed))
         .children((header(head), no_items, items, player_bar))
         .key("playlist-page");
     (unlisted, panel).into_any()

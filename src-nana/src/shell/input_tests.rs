@@ -13,6 +13,7 @@ use super::support::{
 use super::{begin_relocate_dialog, close_prompt, HostDragPhase, InputMessage, InternalSession};
 use nana_ui::FileDialogKind;
 use crate::host_api::{HostInputRequest, HostRequest};
+use crate::shell::status::FailureSource;
 use crate::shell::InspectMessage;
 
 fn send(model: &mut ShellViewModel, message: InputMessage) {
@@ -121,7 +122,7 @@ fn internal_drag_selects_moves_and_delegates_outside_the_window() {
         over_browser: false,
     });
     assert_eq!(model.input.external_drag_result, None);
-    assert!(model.input.error.is_empty());
+    assert!(model.status.failure().is_none());
     assert!(matches!(model.input.host_requests.last(), Some(HostRequest::Input(HostInputRequest::DragOut { paths })) if paths == &["C:\\repo\\a.png".to_string()]));
     assert!(model.input.session.is_none());
     send(&mut model, InputMessage::EntryDragEnd { hover_folder: Some("albums".into()), over_browser: true, has_pointer: true });
@@ -446,19 +447,20 @@ fn box_selection_open_reveal_and_external_drag_follow_the_vue_guards() {
     assert_eq!(model.files.primary.as_deref(), Some("c.png"));
     assert_eq!(model.files.anchor.as_deref(), Some("c.png"));
 
-    let before = model.input.error.clone();
+    // 守卫拦下的请求不清状态区里的失败，真正开始的打开才清。
+    model.status.fail(FailureSource::Host, "定位失败：上一次");
     send(&mut model, InputMessage::OpenEntry { has_repo: false, absolute_path: "C:\\a.png".into() });
     send(&mut model, InputMessage::OpenEntry { has_repo: true, absolute_path: " ".into() });
     send(&mut model, InputMessage::RevealEntry { absolute_path: " ".into() });
     send(&mut model, InputMessage::OpenExternalUrl { url: " ".into() });
-    assert_eq!(model.input.error, before);
+    assert!(model.status.failure().is_some(), "守卫拦下的请求不该清掉上一次失败");
     assert!(model.input.host_requests.is_empty());
     send(&mut model, InputMessage::OpenEntry { has_repo: true, absolute_path: "C:\\a.png".into() });
-    assert!(model.input.error.is_empty());
+    assert!(model.status.failure().is_none());
     send(&mut model, InputMessage::RevealEntry { absolute_path: "C:\\a.png".into() });
     assert!(matches!(model.input.host_requests.last(), Some(crate::host_api::HostRequest::OpenExternal(request)) if request.reveal && request.target == "C:\\a.png"));
     send(&mut model, InputMessage::OpenExternalUrl { url: "https://momobako.local".into() });
-    assert!(model.input.error.is_empty());
+    assert!(model.status.failure().is_none());
     assert_eq!(model.input.host_requests.len(), 3);
 
     send(&mut model, InputMessage::StartExternalDrag { paths: vec!["a.png".into()], trash: true, backend_kind: "filesystem".into(), repo_root: "C:\\repo".into() });
@@ -467,20 +469,20 @@ fn box_selection_open_reveal_and_external_drag_follow_the_vue_guards() {
     send(&mut model, InputMessage::StartExternalDrag { paths: vec!["a.png".into()], trash: false, backend_kind: "webdav".into(), repo_root: "C:\\repo".into() });
     send(&mut model, InputMessage::StartExternalDrag { paths: vec![" ".into()], trash: false, backend_kind: "filesystem".into(), repo_root: "C:\\repo".into() });
     assert_eq!(model.input.host_requests.len(), 3);
-    assert!(model.input.error.is_empty());
+    model.status.fail(FailureSource::Host, "拖出失败：上一次");
     send(&mut model, InputMessage::StartExternalDrag { paths: vec!["a.png".into()], trash: false, backend_kind: "filesystem".into(), repo_root: "C:\\repo".into() });
-    assert!(model.input.error.is_empty());
+    assert!(model.status.failure().is_none(), "拖出开始时清掉上一次失败");
     assert_eq!(model.input.external_drag_result, None);
 
     model.input.external_active = true;
     model.input.dragging_files = true;
     model.input.dragging_repository_folder = true;
-    model.input.error = "保留".into();
+    model.status.fail(FailureSource::Host, "保留");
     send(&mut model, InputMessage::ClearDrag);
     assert!(!model.input.external_active);
     assert!(!model.input.dragging_files);
     assert!(!model.input.dragging_repository_folder);
-    assert_eq!(model.input.error, "保留");
+    assert_eq!(model.status.failure().map(|failure| failure.message.as_str()), Some("保留"));
 }
 
 #[test]
@@ -682,7 +684,8 @@ fn attach_folder_dialog_submits_a_chosen_path_and_ignores_cancel() {
         &mut model,
         InputMessage::FileDialogCompleted { request_id: DIALOG_ATTACH_ID, paths: vec!["D:/library".into()], failed: Some("Busy".into()) },
     );
-    assert_eq!(model.sidebar.popover_error, "文件夹选择失败：Busy");
+    let failure = model.status.failure().expect("弹层已经关了，文件夹选择失败进状态区");
+    assert_eq!((failure.source, failure.message.as_str()), (FailureSource::Repository, "文件夹选择失败：Busy"));
     assert!(model.sidebar.take_effects().is_empty());
 
     send(

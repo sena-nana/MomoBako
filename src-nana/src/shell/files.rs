@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 use crate::backend::services::repository::{FileBrowserEntry, FileBrowserSnapshot};
 use crate::settings;
 
-use super::workspace::{LibraryCategory, MainRegion, StartupStatus, WorkspacePanel};
+use super::workspace::{LibraryCategory, WorkspacePanel};
 
 /// 首屏分页，对应 `FILE_BROWSER_INITIAL_PAGE_SIZE`。
 pub const INITIAL_PAGE_SIZE: usize = 80;
@@ -436,10 +436,6 @@ pub struct FilesState {
 }
 
 impl FilesState {
-    pub(super) fn dialog_open(&self) -> bool {
-        self.export.open || !matches!(self.dialog, FileDialog::Closed)
-    }
-
     pub(super) fn operation_percent(&self) -> Option<f32> {
         self.operation.as_ref().map(|operation| operation.value)
     }
@@ -958,19 +954,6 @@ impl FilesState {
         self.pending = None;
         self.activity.clear();
         self.operation = None;
-    }
-
-}
-
-
-impl super::ShellViewModel {
-    pub(super) fn files_surface_visible(&self) -> bool {
-        self.workspace.startup.status == StartupStatus::Ready
-            && self.workspace.main_region() == MainRegion::HasRepository
-            && matches!(
-                self.workspace.panel,
-                WorkspacePanel::Files | WorkspacePanel::Trash | WorkspacePanel::SmartFolder
-            )
     }
 }
 

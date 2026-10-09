@@ -560,7 +560,6 @@ fn search_route_appears_only_after_startup_with_a_repository() {
     model.reduce(ShellMessage::SelectFile { path: "pics/a.png".into(), asset_id: None });
     assert_eq!(RouteKey::of(&model), RouteKey::Files);
     let selected = ShellViewModel::for_page(ShellPage::SelectedFile);
-    assert!(selected.files_surface_visible());
     assert_eq!(RouteKey::of(&selected), RouteKey::Files);
 }
 

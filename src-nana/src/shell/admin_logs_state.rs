@@ -177,7 +177,7 @@ impl LogsSignals {
         self.search.sync(&view.search);
         self.filters.try_set_if_changed((view.levels, view.kinds));
         self.empty.try_set_if_changed(view.empty);
-        super::bind::sync_rows(self.rows, LogRowView::key, view.rows);
+        super::super::row_sync::sync_rows(self.rows, LogRowView::key, view.rows);
         self.follow_end.try_set_if_changed(view.follow_end);
     }
 }

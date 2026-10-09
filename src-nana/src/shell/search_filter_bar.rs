@@ -22,8 +22,8 @@ use super::super::admin::style::key_part;
 use super::super::hot::ModelField;
 use super::super::inspect::{AdvancedField, FilterList, InspectMessage, MetadataInput, SortDirection};
 use super::super::inspect_shortcuts::SearchShortcut;
-use super::super::{ShellMessage, ShellViewModel};
-use super::filter_state::{FilterBarSignals, FilterBarView, FilterSelection};
+use super::super::ShellMessage;
+use super::filter_state::{FilterBarSignals, FilterSelection};
 use super::presenter::{self, RATING_OPTIONS};
 use super::widgets::{self, ChipActive, CONTROL_HEIGHT, INPUT_WIDTH};
 
@@ -91,12 +91,6 @@ pub(crate) fn resident_filter_bar(signals: FilterBarSignals) -> AnyView {
     ))
     .key("workspace-filter-bar")
     .into_any()
-}
-
-/// 旧视图路由用的筛选栏：按这一刻的投影建一份一次性的信号，再建同一个视图。
-/// 壳层只在有仓库且筛选栏打开时调用。
-pub(crate) fn filter_bar(model: &ShellViewModel) -> AnyView {
-    resident_filter_bar(FilterBarSignals::of(FilterBarView::project(model)))
 }
 
 /// 头部：左边眉题和仓库名，右边条件数、清除和关闭。

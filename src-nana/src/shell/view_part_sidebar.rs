@@ -2,12 +2,11 @@
 //!
 //! 信号在骨架的挂载作用域里建（[`SidebarSignals`]），侧栏视图只建一次，之后每次同步只把
 //! [`SidebarView`] 投影写进信号：路由切换、换目录、后台读回只改绑定的字段和变了的那几行，
-//! 节点不换。整块重挂只发生在工作台排法变了的时候（侧栏收起再展开），由 `mount` 完成。
+//! 节点不换。第一次排成工作台时挂；之后收起侧栏（主区独占）时它留在停放的工作区里，展开时原样回来。
 
 use nana_ui::runtime::{FrameworkError, MountedView, RuntimeDocument, StableNodeId};
 
-use super::remount_state;
-use super::view_part::{composing_under, first_root, mount_detached, BodyMode, PartCx, PartId, ShellPart, Swap};
+use super::view_part::{first_root, mount_detached, BodyMode, PartCx, PartId, ShellPart, Swap};
 use super::ShellViewModel;
 
 #[path = "sidebar_project.rs"]
@@ -15,10 +14,9 @@ pub(super) mod project;
 
 use project::{SidebarSignals, SidebarView};
 
-/// 侧栏块。主区独占时没有内容。
+/// 侧栏块。第一次排成工作台之前没有内容。
 pub(crate) struct SidebarPart {
     signals: SidebarSignals,
-    present: bool,
     view: Option<MountedView>,
 }
 
@@ -31,18 +29,20 @@ impl ShellPart for SidebarPart {
     }
 
     fn new(signals: Self::Signals) -> Self {
-        Self { signals, present: false, view: None }
+        Self { signals, view: None }
     }
 
     fn root(&self) -> Option<StableNodeId> {
         first_root(self.view.as_ref())
     }
 
-    /// 排法变了：有侧栏时按当前投影建一份，主区独占时卸掉。
+    /// 排法变了：第一次排成工作台时按当前投影建侧栏；之后不重建，收起时留在停放的工作区里。
     fn mount(&mut self, cx: &mut PartCx<'_>, model: &ShellViewModel, mode: BodyMode) -> Result<Swap, FrameworkError> {
-        self.present = mode == BodyMode::Workbench;
         self.sync(model);
-        self.remount(cx, model)
+        if mode == BodyMode::Workbench && self.view.is_none() {
+            return self.remount(cx, model);
+        }
+        Ok(Swap::default())
     }
 
     fn sync(&mut self, model: &ShellViewModel) {
@@ -54,22 +54,17 @@ impl ShellPart for SidebarPart {
         false
     }
 
+    /// 建侧栏。只在第一次排成工作台时由 [`Self::mount`] 调。
     fn remount(&mut self, cx: &mut PartCx<'_>, _: &ShellViewModel) -> Result<Swap, FrameworkError> {
-        let document_id = cx.document.document();
-        let kept = self.view.as_ref().map(|view| remount_state::capture(cx.document.context(), document_id, view.roots()));
-        let fresh = if self.present {
-            let (signals, hot) = (self.signals, cx.hot);
-            mount_detached(cx.document, cx.hot, Self::ID, move || Some(super::sidebar_view::sidebar(signals, hot)))?
-        } else {
-            None
-        };
+        let (signals, hot) = (self.signals, cx.hot);
+        self.view = mount_detached(cx.document, cx.hot, Self::ID, move || Some(super::sidebar_view::sidebar(signals, hot)))?;
         cx.stats.remounts += 1;
-        let old = std::mem::replace(&mut self.view, fresh);
-        Ok(Swap::replace(old, kept, self.view.as_ref()))
+        Ok(Swap::default())
     }
 
-    fn composing(&self, document: &RuntimeDocument) -> bool {
-        self.view.as_ref().is_some_and(|view| composing_under(document, view.roots()))
+    /// 侧栏没有要重挂的变化，组合输入不用等。
+    fn composing(&self, _: &RuntimeDocument) -> bool {
+        false
     }
 }
 

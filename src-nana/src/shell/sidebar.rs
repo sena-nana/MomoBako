@@ -855,7 +855,14 @@ pub(super) fn reduce_message(model: &mut super::ShellViewModel, message: super::
         SidebarMessage::SubmitSmartFolder => {
             model.sidebar.submit_smart_folder(model.workspace.active_repo_id.as_deref());
         }
-        SidebarMessage::SmartFolderSaved { repo_id, result } => model.sidebar.note_smart_saved(&repo_id, result),
+        SidebarMessage::SmartFolderSaved { repo_id, result } => {
+            model.sidebar.note_smart_saved(&repo_id, result);
+            let draft = &model.sidebar.smart_draft;
+            if !draft.open && !draft.error.is_empty() {
+                let failure = format!("智能文件夹操作失败：{}", draft.error);
+                model.status.fail(super::status::FailureSource::SmartFolder, failure);
+            }
+        }
         SidebarMessage::TogglePlaylists => model.sidebar.toggle_playlists(),
         SidebarMessage::OpenSidebarPlaylist(id) => model.apply_playlist(id),
         SidebarMessage::OpenRepositorySwitcher => model.sidebar.open_switcher(),

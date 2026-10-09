@@ -489,7 +489,6 @@ fn open_entry(model: &mut ShellViewModel, has_repo: bool, absolute_path: &str) {
     if !has_repo || absolute_path.trim().is_empty() {
         return;
     }
-    model.input.error.clear();
     model.input.remember_external(absolute_path, false);
 }
 
@@ -497,7 +496,6 @@ fn reveal_entry(model: &mut ShellViewModel, absolute_path: &str) {
     if absolute_path.trim().is_empty() {
         return;
     }
-    model.input.error.clear();
     model.input.remember_external(absolute_path, true);
 }
 
@@ -505,7 +503,6 @@ fn open_url(model: &mut ShellViewModel, url: &str) {
     if url.trim().is_empty() {
         return;
     }
-    model.input.error.clear();
     model.input.remember_external(url, false);
 }
 
@@ -520,7 +517,6 @@ fn start_external_drag(input: &mut InputState, paths: &[String], trash: bool, ba
         input.external_drag_result = Some(false);
         return;
     }
-    input.error.clear();
     input.external_drag_result = None;
     input.host_requests.push(HostRequest::Input(HostInputRequest::DragOut { paths: absolute }));
 }
@@ -537,7 +533,7 @@ fn complete_dialog(model: &mut ShellViewModel, request_id: u64, paths: &[String]
         } else if request_id == DIALOG_RELOCATE_ID {
             model.workspace.missing_error = format!("文件夹选择失败：{error}");
         } else if request_id == DIALOG_ATTACH_ID {
-            model.sidebar.popover_error = format!("文件夹选择失败：{error}");
+            model.status.fail(crate::shell::status::FailureSource::Repository, format!("文件夹选择失败：{error}"));
         } else if request_id == DIALOG_DOWNLOAD_ID {
             eprintln!("Nana 下载目录选择失败：{error}");
             model.input.pending_download = None;
