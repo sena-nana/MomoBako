@@ -988,3 +988,6 @@ mod ui_tests;
 #[cfg(test)]
 #[path = "files_mount_tests.rs"]
 mod mount_tests;
+#[cfg(test)]
+#[path = "files_virtual_tests.rs"]
+mod virtual_tests;
