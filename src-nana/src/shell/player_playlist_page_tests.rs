@@ -1,7 +1,7 @@
 //! 播放集页的回归：把页面单独挂在一份文档里，信号常驻，照主区块同步的样子写投影：只有当前播放或
-//! 页眉变了时列表不重建、字段原地改；重排和增删时整个列表重建，焦点回到原来那个条目的同一个按钮上；
+//! 页眉变了时列表不重建、字段原地改；重排和增删时列表和留下的行都不重建，焦点留在原来的按钮上；
 //! 没点开到点开时空框和面板原地互换。每次写完都和同一 ViewModel 新挂的页面按无障碍树比一次。
-//! 整条路由（筛选栏、播放条岛、不可播放项目）的回归在 `route_playlists_tests.rs`。
+//! 整条路由（筛选栏、播放条岛、不可播放项目、拖动排序和移除）的回归在 `route_playlists_tests.rs`。
 
 use nana_ui::runtime::view::{signal, widget, IntoView};
 use nana_ui::runtime::{DocumentId, Entity, LayoutViewport, MountedView, ReorderList, RuntimeDocument, Stack, StableNodeId};
@@ -69,10 +69,6 @@ impl PageHarness {
             .document_order(self.document.document())
             .into_iter()
             .find(|id| context.assembly_path(*id).is_some_and(|path| path.rsplit('/').next() == Some(key)))
-    }
-
-    fn key_of(&self, id: StableNodeId) -> Option<String> {
-        self.document.context().assembly_path(id).and_then(|path| path.rsplit('/').next().map(str::to_string))
     }
 
     fn focused(&self) -> Option<StableNodeId> {
@@ -167,35 +163,44 @@ fn a_current_item_change_keeps_the_list() {
     assert_eq!(harness.text("playlist-item-status-item-01"), "文件不存在");
 }
 
-/// 重排：整个列表重建，焦点回到原来那个条目的「移除」上，哪怕它挪了位置。
+/// 条目列表里各行的节点，按显示顺序。行直接是列表的子节点，中间没有别的容器。
+fn rows(harness: &PageHarness) -> Vec<StableNodeId> {
+    let list = harness.keyed("playlist-reorder").expect("条目列表");
+    harness.document.context().world().node(list).map(|node| node.children.to_vec()).unwrap_or_default()
+}
+
+/// 重排、加一条、删一条：列表和留下的行都是原来的节点，只按新顺序挪位置；焦点一直在原来那个按钮上。
 #[test]
-fn a_reorder_rebuilds_the_list_and_keeps_focus_on_the_item() {
+fn reordering_adding_and_removing_keep_the_remaining_rows() {
     let mut model = listed();
     let mut harness = PageHarness::mount(&model);
     let list = harness.keyed("playlist-reorder").expect("条目列表");
+    let [first, second] = ["playlist-item-item-01", "playlist-item-item-02"].map(|key| harness.keyed(key).expect("条目行"));
+    assert_eq!(rows(&harness), [first, second], "行直接建在列表里");
     let remove = harness.keyed("playlist-remove-item-02").expect("第二条的移除");
     harness.focus(remove);
-    assert_eq!(harness.focused(), Some(remove));
 
     model.player.listed.as_mut().expect("详情").items.reverse();
     harness.write(&model);
-    assert_ne!(harness.keyed("playlist-reorder"), Some(list), "重排要重建列表");
-    let focused = harness.focused().expect("重排后焦点应该找回来");
-    assert_ne!(focused, remove, "焦点应在新列表的节点上");
-    assert_eq!(harness.key_of(focused).as_deref(), Some("playlist-remove-item-02"), "焦点没回到原来那个条目上");
-    let world = harness.document.context().world();
-    let new_list = harness.keyed("playlist-reorder").expect("新列表");
-    let first = world.node(new_list).and_then(|node| node.children.first().copied()).expect("第一行");
-    assert_eq!(harness.key_of(first).as_deref(), Some("playlist-item-item-02"), "行要按新顺序排");
+    assert_eq!(harness.keyed("playlist-reorder"), Some(list), "重排不该重建列表");
+    assert_eq!(rows(&harness), [second, first], "行按新顺序挪位置，节点不换");
+    assert_eq!(harness.focused(), Some(remove), "焦点留在原来那个按钮上");
 
-    let mut added = model.clone();
-    let mut extra = added.player.listed.as_ref().expect("详情").items[0].clone();
+    let mut extra = model.player.listed.as_ref().expect("详情").items[0].clone();
     extra.playlist_item_id = "item-03".into();
     extra.filename = "track-03.mp3".into();
-    added.player.listed.as_mut().expect("详情").items.push(extra);
-    harness.write(&added);
-    assert!(harness.keyed("playlist-item-item-03").is_some(), "新条目没有建出来");
-    assert_eq!(harness.key_of(harness.focused().expect("焦点")).as_deref(), Some("playlist-remove-item-02"), "加一条以后焦点要留在原条目上");
+    model.player.listed.as_mut().expect("详情").items.push(extra);
+    harness.write(&model);
+    let third = harness.keyed("playlist-item-item-03").expect("新条目没有建出来");
+    assert_eq!(rows(&harness), [second, first, third], "加一条只建新的一行");
+    assert_eq!(harness.focused(), Some(remove), "加一条以后焦点留在原条目上");
+
+    model.player.listed.as_mut().expect("详情").items.retain(|item| item.playlist_item_id != "item-01");
+    harness.write(&model);
+    assert_eq!(rows(&harness), [second, third], "删一条只拿掉那一行");
+    assert!(!harness.document.context().world().contains(first), "删掉的行回收");
+    assert_eq!(harness.focused(), Some(remove));
+    assert_eq!(harness.keyed("playlist-reorder"), Some(list));
 }
 
 /// 没点开到点开：空框和面板原地互换，列表按条目建出来；再清空条目时换成「还是空的」空框。

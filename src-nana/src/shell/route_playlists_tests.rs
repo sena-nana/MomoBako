@@ -1,6 +1,8 @@
 //! 常驻播放集路由的回归：无关更新一个节点都不换、不重挂；换当前播放只改字段、播放条岛按它读到的值重建；
-//! 详情读回时空框和面板原地互换，播放条岛这时才有内容；不可播放项目那一行按字段显隐；动效帧不重挂；
-//! 每一步都和同一 ViewModel 新挂的文档一样。
+//! 详情读回时空框和面板原地互换，播放条岛这时才有内容；不可播放项目那一行按字段显隐；拖动排序和移除
+//! （点击、回车）只动变了的行；动效帧不重挂；每一步都和同一 ViewModel 新挂的文档一样。
+
+use nana_ui::runtime::StableNodeId;
 
 use crate::backend::services::repository::{SystemLogLocation, SystemLogRecord, SystemLogSource};
 use crate::shell::host_events::HostMessage;
@@ -135,6 +137,79 @@ fn unplayable_items_toggle_their_status_line_in_place() {
     assert_eq!(harness.keyed("playlist-item-status"), Some(line));
     assert!(harness.find("不可播放项目：track-01.mp3: 文件不存在").is_none(), "都能播放时状态行藏起来");
     harness.assert_same_as_fresh_mount();
+}
+
+/// 条目列表里各行的节点，按显示顺序。
+fn item_rows(harness: &ShellHarness) -> Vec<StableNodeId> {
+    let list = harness.keyed("playlist-reorder").expect("条目列表");
+    harness.document().context().world().node(list).map(|node| node.children.to_vec()).unwrap_or_default()
+}
+
+/// 壳层存好以后读回的详情：照 `edit` 改过的条目。
+fn reload(harness: &mut ShellHarness, edit: impl FnOnce(&mut Vec<crate::backend::services::repository::PlaylistItem>)) {
+    let mut detail = harness.model.player.listed.clone().expect("详情");
+    edit(&mut detail.items);
+    harness.apply(ShellMessage::PlaylistDetailLoaded(Ok(detail)));
+    harness.flush();
+}
+
+/// 拖动排序：按住第二条的拖动柄拖到第一条上面，列表发排序消息；读回新顺序以后两行都是原来的节点，
+/// 只换了位置，列表也不重建。
+#[test]
+fn dragging_an_item_moves_its_row_without_rebuilding() {
+    let mut harness = listed();
+    let list = harness.keyed("playlist-reorder").expect("条目列表");
+    let [first, second] = ["playlist-item-item-01", "playlist-item-item-02"].map(|key| harness.keyed(key).expect("条目行"));
+    assert_eq!(item_rows(&harness), [first, second]);
+    harness.take_messages();
+    let grip = harness.center(harness.keyed("playlist-item-drag-item-02").expect("拖动柄"));
+    let top = harness.document().context().world().layout_box(first).expect("第一条的盒子").y + 4.0;
+    let messages = harness.drag_messages(grip, (grip.0, top));
+    let reorder = messages.iter().any(|message| {
+        matches!(message, ShellMessage::Player(PlayerMessage::Reorder { source, before })
+            if source == "item-02" && before.as_deref() == Some("item-01"))
+    });
+    assert!(reorder, "拖到第一条上面应该发排序消息：{} 条消息", messages.len());
+
+    reload(&mut harness, |items| items.reverse());
+    assert_eq!(harness.keyed("playlist-reorder"), Some(list), "排序不该重建列表");
+    assert_eq!(item_rows(&harness), [second, first], "两行只换位置，节点不换");
+    harness.assert_same_as_fresh_mount();
+}
+
+/// 行里的按钮不被拖动手势抓走：点标题打开预览。移除：点第一条的「移除」、焦点在第二条的「移除」上
+/// 按回车，都发移除消息；读回以后只拿掉那一行，留下的行和按钮还是原来的节点。
+#[test]
+fn removing_items_by_click_and_keyboard_keeps_the_other_rows() {
+    let mut harness = listed();
+    let second = harness.keyed("playlist-item-item-02").expect("第二条");
+    harness.take_messages();
+    let title = harness.center(harness.keyed("playlist-item-title-item-02").expect("第二条的标题"));
+    let messages = harness.click_messages(title.0, title.1);
+    assert!(
+        matches!(messages.as_slice(), [ShellMessage::Player(PlayerMessage::OpenPreview { item_id: Some(id) })] if id == "item-02"),
+        "点标题应该打开这一条的预览：{} 条消息",
+        messages.len()
+    );
+    let remove_first = harness.center(harness.keyed("playlist-remove-item-01").expect("第一条的移除"));
+    let messages = harness.click_messages(remove_first.0, remove_first.1);
+    assert!(
+        matches!(messages.as_slice(), [ShellMessage::RemovePlaylistItem { item_id, .. }] if item_id == "item-01"),
+        "点「移除」应该只发一条移除消息：{} 条消息",
+        messages.len()
+    );
+    reload(&mut harness, |items| items.retain(|item| item.playlist_item_id != "item-01"));
+    assert_eq!(item_rows(&harness), [second], "只拿掉被移除的那一行");
+    harness.assert_same_as_fresh_mount();
+
+    let remove_second = harness.keyed("playlist-remove-item-02").expect("第二条的移除");
+    harness.focus(remove_second);
+    let messages = harness.key_messages("Enter");
+    assert!(
+        matches!(messages.as_slice(), [ShellMessage::RemovePlaylistItem { item_id, .. }] if item_id == "item-02"),
+        "焦点在「移除」上按回车应该发移除消息：{} 条消息",
+        messages.len()
+    );
 }
 
 /// 换到文件面板再回来：分支重建，回来以后条目、播放条岛和新挂的一样；停在播放集页、面板换成别的时只剩外框。

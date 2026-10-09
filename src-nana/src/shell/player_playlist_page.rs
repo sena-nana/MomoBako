@@ -7,28 +7,27 @@
 //! 信号放在播放集路由的常驻信号里（`route_playlists.rs`），主区块同步时 [`PlaylistPageSignals::write`]；
 //! 播放条是那边登记的旧视图岛，这里只收它的占位节点。
 //!
-//! 条目列表放在 `ReorderList` 里：它按自己的直接子节点取行的盒子来拖动排序，`each` 总会多一层容器，
-//! 所以条目没法用带键的 `each`（NanaUI 缺口）。列表改用按条目顺序做键的 `dynamic`：增删、重排时整个
-//! 列表重建，当前播放这类字段原地改。换列表要分两步：顺序变了先在挂载回调里记下旧列表里的焦点（那时
-//! 旧列表还在），再把顺序写进 `dynamic` 的键；新列表挂上后按键路径找回焦点。行和控件的键都带条目编号，
-//! 条目挪了位置也找得到原来那个按钮。
+//! 条目列表放在 `ReorderList` 里：它按自己的直接子节点取行的盒子来拖动排序。条目用 Store 的
+//! `keyed(..).each(..)` 建，`.container(..)` 把行直接建进 `ReorderList`，不多一层容器：增删、重排时
+//! 按编号保留各行的节点，留下的行一个都不重建，焦点、按钮和行里的状态都还是原来的；当前播放、文件名
+//! 这类字段原地改。每行可点的那一段登记成列表条目的 `tools`，按钮的点击不会被拖动手势抓走。
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use nana_ui::runtime::view::{
-    dynamic, fields, node_ref, on_mount, signal, store, watch_effect, widget, AnyView, FieldWrite, IntoView, Item, NodeRef,
-    Signal, Store, StoreList, StorePath, StyledComponent,
+    fields, node_ref, on_cleanup, on_mount, signal, store, widget, AnyView, FieldWrite, IntoView, Item, NodeRef, Signal,
+    Store, StoreList, StorePath, StyledComponent,
 };
 use nana_ui::runtime::{
     Activate, AlignSpec, Button, JustifySpec, LengthSpec, RadiusTier, ReorderItem, ReorderList, ReorderListEvent,
-    SemanticColorRole, SemanticPaint, Stack, Text, TextHorizontalAlignment,
+    SemanticColorRole, SemanticPaint, Stack, StableNodeId, Text, TextHorizontalAlignment,
 };
 use nana_ui::{ButtonKind, Icon};
 
 use crate::backend::services::repository::PlaylistItem;
 
 use super::super::player::PlayerMessage;
-use super::super::remount_state::{self, KeptState};
 use super::super::row_sync::sync_rows;
 use super::super::{ShellMessage, ShellViewModel};
 use super::{bar, icons, key_part, playlist_plugin_missing, player_message};
@@ -127,28 +126,18 @@ type EntryItem = Item<Store<Vec<PlaylistEntry>>, String, PlaylistEntry>;
 pub(crate) struct PlaylistPageSignals {
     head: Signal<PageHead>,
     entries: Store<Vec<PlaylistEntry>>,
-    /// 投影里的条目顺序。
+    /// 投影里的条目顺序：拖动排序用的条目和「还是空的」空框读它，和 Store 里的顺序一致。
     order: Signal<Vec<String>>,
-    /// 列表现在按哪个顺序建：顺序变了以后，记下焦点才跟上。
-    shown: Signal<Vec<String>>,
-    /// 现在的条目列表节点。
-    list: NodeRef,
-    /// 换列表之前记下的焦点和滚动，新列表挂上后取走。
-    kept: Signal<Option<KeptState>>,
+    /// 每一行可点的那一段（扩展名方块、标题、播放和移除）的节点，按条目编号。行挂上时登记、回收时
+    /// 去掉。拖动排序的条目带上它：按在这一段上不开始拖动，按钮照常接点击。
+    tools: Signal<BTreeMap<String, StableNodeId>>,
 }
 
 impl PlaylistPageSignals {
     /// 在当前作用域里建信号，初值是 `view`。
     pub(crate) fn new(view: PlaylistPageView) -> Self {
         let order = view.items.iter().map(entry_key).collect::<Vec<_>>();
-        Self {
-            head: signal(view.head),
-            entries: store(view.items),
-            order: signal(order.clone()),
-            shown: signal(order),
-            list: node_ref(),
-            kept: signal(None),
-        }
+        Self { head: signal(view.head), entries: store(view.items), order: signal(order), tools: signal(BTreeMap::new()) }
     }
 
     /// 写入投影：页眉值没变不写，条目按编号对照着改，顺序变了写进顺序。作用域已回收时只记日志。
@@ -167,9 +156,8 @@ impl PlaylistPageSignals {
 /// 播放集页：没点开或详情还没读回时是虚线空框；点开后是 bg-elev 面板，里面是页眉、条目（或空框）和
 /// `player_bar`。两块都留着，按是否点开互换；`surface` 为假（不在播放集面板）时两块都藏起来。
 pub(crate) fn view(signals: PlaylistPageSignals, surface: Signal<bool>, player_bar: AnyView) -> AnyView {
-    follow_order(signals);
     let head = signals.head;
-    let shown = signals.shown;
+    let order = signals.order;
     let initial = head.get_untracked();
     let unlisted = dashed_empty("选择一个播放集", "在左侧播放集区选择要查看或播放的列表。", "playlist-page-empty")
         .visible(move || surface.get() && !head.with(|head| head.listed));
@@ -178,64 +166,41 @@ pub(crate) fn view(signals: PlaylistPageSignals, surface: Signal<bool>, player_b
         "在文件浏览区右键文件，使用“加入播放列表”把内容加入这里。",
         "playlist-page-no-items",
     )
-    .visible(move || shown.with(Vec::is_empty));
-    let items = dynamic(shown, move |ids: &Vec<String>| item_list(ids, signals)).visible(move || !shown.with(Vec::is_empty));
+    .visible(move || order.with(Vec::is_empty));
     let panel = widget(Stack::column(16.0).padding(18.0).surface(SemanticColorRole::Surface).radius_px(initial.radius))
         .prop::<f32, PanelRadius>(move || head.with(|head| head.radius))
         .visible(move || surface.get() && head.with(|head| head.listed))
-        .children((header(head), no_items, items, player_bar))
+        .children((header(head), no_items, item_list(signals), player_bar))
         .key("playlist-page");
     (unlisted, panel).into_any()
 }
 
-/// 条目顺序变了：先在挂载回调里记下旧列表里的焦点和滚动（那时旧列表还在），再把顺序写进列表的键。
-/// 回调排在这一轮结构更新之后，写进键的顺序在下一轮换出新列表，新列表的挂载回调再把状态找回来。
-fn follow_order(signals: PlaylistPageSignals) {
-    let PlaylistPageSignals { order, shown, list, kept, .. } = signals;
-    watch_effect(move || {
-        let next = order.get();
-        on_mount(move |cx| {
-            if shown.with_untracked(|shown| *shown == next) {
-                return;
-            }
-            if let Some(root) = list.get_untracked()
-                && let Some(document) = cx.world().node(root).map(|node| node.document)
-            {
-                kept.set(Some(remount_state::capture(cx, document, &[root])));
-            }
-            shown.set(next);
-        });
-    });
-}
-
-/// 条目列表。整行可拖动排序，排序结果交回壳层持久化；当前播放的条目和文件名按字段绑在列表的条目上。
-fn item_list(ids: &[String], signals: PlaylistPageSignals) -> AnyView {
-    let PlaylistPageSignals { head, entries, shown, list, kept, .. } = signals;
+/// 条目列表。从拖动柄（和行的留白）拖动排序，排序结果交回壳层持久化；行按编号建在 `ReorderList` 里，
+/// 增删、重排只动变了的行。列表的条目（拖动命中用的编号和名字、当前播放、不开始拖动的可点区域）
+/// 跟着顺序和字段原地换。
+fn item_list(signals: PlaylistPageSignals) -> AnyView {
+    let PlaylistPageSignals { head, entries, order, tools } = signals;
     let keyed = entries.keyed(entry_key);
     let reorder = move || {
         let current = head.with(|head| head.current.clone());
-        shown.with(|ids| {
-            ids.iter()
-                .filter_map(|id| keyed.at(id).try_with(|entry| entry.filename.clone()).map(|name| (id, name)))
-                .map(|(id, name)| ReorderItem::new(id.clone(), name).selected(current.as_deref() == Some(id.as_str())))
-                .collect::<Vec<_>>()
+        tools.with(|tools| {
+            order.with(|ids| {
+                ids.iter()
+                    .filter_map(|id| keyed.at(id).try_with(|entry| entry.filename.clone()).map(|name| (id, name)))
+                    .map(|(id, name)| {
+                        let item = ReorderItem::new(id.clone(), name).selected(current.as_deref() == Some(id.as_str()));
+                        match tools.get(id) {
+                            Some(cluster) => item.tools(*cluster),
+                            None => item,
+                        }
+                    })
+                    .collect::<Vec<_>>()
+            })
         })
     };
-    on_mount(move |cx| {
-        let mut state = None;
-        kept.try_update(|slot| state = slot.take());
-        let (Some(state), Some(root)) = (state, list.get_untracked()) else {
-            return;
-        };
-        match cx.world().node(root).map(|node| node.document) {
-            Some(document) => state.restore(cx, document, &[root]),
-            None => eprintln!("Nana 播放集条目列表不在文档里，换列表前的焦点不再找回"),
-        }
-    });
-    let rows = ids.iter().map(|id| entry_row(keyed.at(id), head)).collect::<Vec<_>>();
-    widget(ReorderList::new(reorder()).live_rows(true).spacing(10.0).label("播放集条目"))
+    let list = widget(ReorderList::new(reorder()).live_rows(true).spacing(10.0).label("播放集条目"))
         .prop::<Vec<ReorderItem>, fields::reorder_list::items>(reorder)
-        .node_ref(list)
+        .visible(move || !order.with(Vec::is_empty))
         .key("playlist-reorder")
         .on_cx(|_, event: &ReorderListEvent, cx| {
             if let ReorderListEvent::Reorder { source, before } = event {
@@ -244,9 +209,8 @@ fn item_list(ids: &[String], signals: PlaylistPageSignals) -> AnyView {
                     before: before.as_ref().map(|value| value.to_string()),
                 }));
             }
-        })
-        .children(rows)
-        .into_any()
+        });
+    keyed.each(move |item| entry_row(item, head, tools)).container(list).into_any()
 }
 
 /// 眉题、22px 标题、13px 状态行；右上角是播放整张列表。
@@ -281,9 +245,12 @@ fn spaced(mut text: Text, margin: f32) -> Text {
     text
 }
 
-/// 一条：拖动柄、扩展名方块、文件名和路径、播放与移除。不可播放的条目整行变淡，次行写原因，
-/// 两种次行都留着、按能不能播放互换。
-fn entry_row(item: EntryItem, head: Signal<PageHead>) -> AnyView {
+/// 一条：拖动柄，后面是可点的一段（扩展名方块、文件名和路径、播放与移除）。不可播放的条目整行变淡，
+/// 次行写原因，两种次行都留着、按能不能播放互换。
+///
+/// 可点的一段包成一个节点，挂上时登记进 `tools`：列表按下行就开始拖动手势、把指针抓走，按钮收不到
+/// 点击；登记过的这一段不开始拖动。所以从拖动柄（和行的留白）拖，按钮照常点。
+fn entry_row(item: EntryItem, head: Signal<PageHead>, tools: Signal<BTreeMap<String, StableNodeId>>) -> AnyView {
     let entry = item.get_untracked();
     let id = entry.item_id.clone();
     let ready = move || item.try_with(|entry| entry.ready).unwrap_or(false);
@@ -314,6 +281,12 @@ fn entry_row(item: EntryItem, head: Signal<PageHead>) -> AnyView {
                 cx.dispatch_program_all(ShellMessage::RemovePlaylistItem { playlist_id, item_id: remove_id.clone() });
             }),
     ));
+    let cluster = node_ref();
+    register_tools(tools, id.clone(), cluster);
+    let clickable = widget(Stack::row(12.0).align(AlignSpec::Center).width(LengthSpec::Shrink).min_width(LengthSpec::Px(0.0)).grow(1.0).shrink(1.0))
+        .node_ref(cluster)
+        .children((extension_mark(item, &id, &entry.mark), meta, actions))
+        .key(format!("playlist-item-tools-{}", key_part(&id)));
     let row = Stack::row(12.0)
         .align(AlignSpec::Center)
         .width(LengthSpec::Fill)
@@ -327,12 +300,28 @@ fn entry_row(item: EntryItem, head: Signal<PageHead>) -> AnyView {
         });
     widget(row)
         .prop::<bool, RowDim>(move || !ready())
-        .children((drag_handle(&id), extension_mark(item, &id, &entry.mark), meta, actions))
+        .children((drag_handle(&id), clickable))
         .key(format!("playlist-item-{}", key_part(&id)))
         .into_any()
 }
 
-/// 拖动柄：32px 方块里一枚弱色竖握把。整行都能拖，柄只是提示。
+/// 行挂上以后把可点那一段的节点登记进 `tools`，行回收时去掉。页面先回收时登记表已经没了，什么也不做。
+fn register_tools(tools: Signal<BTreeMap<String, StableNodeId>>, id: String, cluster: NodeRef) {
+    let mounted = id.clone();
+    on_mount(move |_| match cluster.get_untracked() {
+        Some(node) => tools.update(|tools| {
+            tools.insert(mounted, node);
+        }),
+        None => eprintln!("Nana 播放集条目 {mounted} 可点的一段没有建出来，按钮会被拖动手势盖住"),
+    });
+    on_cleanup(move || {
+        tools.try_update(|tools| {
+            tools.remove(&id);
+        });
+    });
+}
+
+/// 拖动柄：32px 方块里一枚弱色竖握把。从这里（和行的留白）拖动排序。
 fn drag_handle(id: &str) -> AnyView {
     widget(
         Stack::column(0.0)

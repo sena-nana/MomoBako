@@ -1,31 +1,28 @@
 //! 统一的对话框框架：侧栏、文件页、导出、插件删除和关闭确认的对话框都从这里建，和消息类型无关。
 //!
-//! 行为交给 NanaUI：对话框是 `Dialog` / `ConfirmDialog`，挂在自己的 `OverlayHost` 下，用
-//! `activate_overlay` 打开，焦点陷阱、焦点归还、无障碍角色和初始焦点都由框架负责。关闭策略是
+//! 行为交给 NanaUI：对话框是 `Dialog` / `ConfirmDialog`，常驻在自己的 `OverlayHost` 下，焦点陷阱、
+//! 焦点归还、无障碍角色、初始焦点和开合动效都由框架负责。关闭策略是
 //! `DialogClosePolicy::requests_only()`：Escape、点外面和关闭位只在对话框上发一次
 //! `DialogCloseRequested`，这里把它换成调用方给的关闭消息，处理中（busy）时不发，开合由归约决定。
 //!
-//! 激活的时机：浮层块把内容挂成脱离树的一块，`ShellView` 之后才把它放进 AppShell 的浮层槽位，
-//! 挂载时的 `on_mount` 运行时宿主还不在树里。所以对话框旁边放一个 `when(placed, ..)`：浮层块挂好后
-//! 经 [`OverlaySession::placed`] 置真，下一次刷新建出分支，分支的 `on_mount` 运行时宿主已经在树里，
-//! 这时激活。换下前经 [`OverlaySession::retire`] 让框架关掉对话框，焦点回到打开前的位置。
+//! 开合是声明式的：对话框用 `.model(open)` 绑一个开合信号，由浮层块经会话（[`Presence`]）写。
+//! 这块放进浮层层以后写真，宿主在它、宿主和插槽都在树上时打开；换下时写假，宿主连退场一起关上，
+//! 这块留在浮层层里直到退场放完再卸。宿主自己关掉它（停放、被顶替）时 `.model` 把信号写回假，
+//! 不同步回 ViewModel：开合只听归约，ViewModel 还要它开着时下一帧照样写真、重新打开。
 //!
-//! 外观照 Vue `.modal-card` / `.dialog-card__*` 尽量靠近：宽度取最近的 `DialogSize` 档，危险对话框
-//! 的标题用错误色，NanaUI 的遮罩下面再铺一层补色，合起来和 Vue 的 45% 黑、2px 背景模糊一样；
-//! 分隔线、内边距、距顶 12vh 和卡片圆角由 NanaUI 决定，差异见 `docs/nana-vue-parity.md`。
+//! 外观照 Vue `.modal-card` / `.dialog-card__*`：每个对话框照自己的宽度类给 CSS 宽度，危险对话框用
+//! NanaUI 的危险口气，Vue 标题前有图标的放进标题图标槽；遮罩、分隔线、内边距、距顶 12vh、卡片圆角
+//! 和开合动效由主题配方决定（`appearance.rs`），差异见 `docs/nana-vue-parity.md`。
 
 use std::sync::Arc;
 
 use nana_ui::icons_tabler::{LOADER_2, X};
-use nana_ui::runtime::view::{
-    entity_ref, fields, on_mount, signal, when, widget, AnyView, El, EntityRef, FieldWrite, Implicit, IntoProp, IntoView,
-    Signal, StyledComponent,
-};
+use nana_ui::runtime::view::{entity_ref, fields, signal, widget, AnyView, El, EntityRef, FieldWrite, IntoProp, IntoView, Signal};
 use nana_ui::runtime::{
-    Activate, AlignSpec, AnimatableProperty, AppContext, Button, ConfirmDialog, ConfirmIntent, Dialog, DialogCloseRequested,
-    Easing, IconButton, IconGlyph, LengthSpec, ListItem, NodeStyle, OverlayHost, RadiusTier, SemanticColorRole, Stack, Text,
+    Activate, AlignSpec, AppContext, Button, ConfirmDialog, ConfirmIntent, Dialog, DialogCloseRequested, IconButton,
+    IconGlyph, LengthSpec, ListItem, NodeStyle, OverlayHost, PositionSpec, RadiusTier, SemanticColorRole, Stack, Text,
 };
-use nana_ui::{ButtonKind, ControlSize};
+use nana_ui::{ButtonKind, ControlSize, Icon};
 use nana_ui_core::{DialogClosePolicy, DialogSize};
 
 use super::session::{register, OverlaySession};
@@ -40,45 +37,19 @@ pub(crate) type BusyFn = Arc<dyn Fn() -> bool + Send + Sync>;
 /// 现做一条壳层消息。`ShellMessage` 不能克隆，每次手势现做。
 pub(crate) type MessageFn = Arc<dyn Fn() -> ShellMessage + Send + Sync>;
 
-/// 对话框的口气：危险操作（删除资源库、处理文件夹、删除智能文件夹）标题用错误色，
-/// 对应 Vue `.dialog-card__header--danger`。
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum DialogTone {
-    Normal,
-    Danger,
-}
+/// `.modal-card { width: min(520px, 92vw) }`：没有自己宽度类的对话框都这么宽。
+pub(crate) const MODAL_CARD: DialogSize = DialogSize::capped(520.0, 92.0);
 
-/// 对话框宽度。Vue 写的是像素，NanaUI 只有几档尺寸，取最近的一档，差异写在对照文档里。
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum DialogWidth {
-    /// 重命名文件（`.workspace-rename-dialog`，460）。
-    Narrow,
-    /// 普通对话框（`.modal-card`，520）。
-    Normal,
-    /// 导出资源库（`.repository-export-dialog`，560）。
-    Export,
-    /// 智能文件夹（`.smart-folder-dialog`，720）。
-    Wide,
-}
+/// 标题前的图标：Vue 头部的图标都是 14px。
+const TITLE_ICON_SIZE: f32 = 14.0;
 
-impl DialogWidth {
-    /// 和 Vue 宽度最近的 NanaUI 尺寸档：460→420、520→520、560→600、720→680。
-    pub(crate) const fn size(self) -> DialogSize {
-        match self {
-            Self::Narrow => DialogSize::Compact,
-            Self::Normal => DialogSize::Default,
-            Self::Export => DialogSize::Medium,
-            Self::Wide => DialogSize::Wide,
-        }
-    }
-}
-
-/// 一个对话框的外壳：键、标题、口气、宽度、处理中和关闭时发的消息。
+/// 一个对话框的外壳：键、标题、口气、宽度、标题图标、处理中和关闭时发的消息。
 pub(crate) struct DialogFrame {
     key: &'static str,
     title: Box<dyn Fn() -> String + Send>,
-    tone: DialogTone,
-    width: DialogWidth,
+    danger: bool,
+    size: DialogSize,
+    icon: Option<Icon>,
     busy: BusyFn,
     close: MessageFn,
     close_button: bool,
@@ -94,22 +65,31 @@ impl DialogFrame {
         Self {
             key,
             title: Box::new(title),
-            tone: DialogTone::Normal,
-            width: DialogWidth::Normal,
+            danger: false,
+            size: MODAL_CARD,
+            icon: None,
             busy: Arc::new(|| false),
             close: Arc::new(close),
             close_button: false,
         }
     }
 
-    /// 危险对话框：标题用错误色。
-    pub(crate) fn danger(mut self) -> Self {
-        self.tone = DialogTone::Danger;
+    /// 危险口气（Vue `.dialog-card__header--danger`）：标题和标题前的图标用主题的危险色，正文不变。
+    pub(crate) fn danger(mut self, danger: bool) -> Self {
+        self.danger = danger;
         self
     }
 
-    pub(crate) fn width(mut self, width: DialogWidth) -> Self {
-        self.width = width;
+    /// 卡片宽度，照 Vue 这个对话框的宽度类写成 CSS 长度，例如 `min(560px, 92vw)` 是
+    /// `DialogSize::capped(560.0, 92.0)`。
+    pub(crate) fn size(mut self, size: DialogSize) -> Self {
+        self.size = size;
+        self
+    }
+
+    /// 标题前的图标（Vue 标题前的 Lucide 图标换成对应的 Tabler 图标）。
+    pub(crate) fn title_icon(mut self, icon: Icon) -> Self {
+        self.icon = Some(icon);
         self
     }
 
@@ -127,16 +107,13 @@ impl DialogFrame {
 
     /// 普通对话框：标题下面是 `body`，底栏是 `footer`（一般是 [`footer`] 建的按钮行）。
     pub(crate) fn dialog(self, body: impl IntoView, footer_view: impl IntoView) -> AnyView {
-        let Self { key, title, tone, width, busy, close, close_button } = self;
+        let Self { key, title, danger, size, icon, busy, close, close_button } = self;
         let host = entity_ref::<OverlayHost>();
-        let surface = entity_ref::<Dialog>();
-        let placed = signal(false);
-        register(Activation { placed, host });
-        let mut dialog = Dialog::new(title()).size(width.size()).close_policy(DialogClosePolicy::requests_only());
-        apply_tone(&mut dialog.style, tone);
+        let open = Presence::register(host);
+        let dialog = Dialog::new(title()).size(size).danger(danger).close_policy(DialogClosePolicy::requests_only());
         let mut element = widget(dialog)
-            .entity_ref(surface)
             .key("dialog-surface")
+            .model(open)
             .prop::<String, DialogTitle>(title)
             .on_cx({
                 let busy = busy.clone();
@@ -150,16 +127,13 @@ impl DialogFrame {
             })
             .body(body)
             .footer(footer_view);
+        if let Some(icon) = icon {
+            element = element.title_icon(title_icon(icon, danger));
+        }
         if close_button {
             element = element.close_action(close_affordance(busy));
         }
-        frame(key, placed, host, element.into_any(), activator(placed, move |cx| {
-            if let (Some(host), Some(surface)) = (host.get(), surface.get()) {
-                cx.activate_overlay(host, surface).map(|_| ())
-            } else {
-                Err(missing())
-            }
-        }))
+        frame(key, host, element.into_any())
     }
 
     /// 确认框：标题、一句说明、取消和确认两个按钮（调用方建好，按钮自己不发消息，点击由框架
@@ -171,18 +145,15 @@ impl DialogFrame {
         confirm: impl IntoView,
         on_confirm: impl Fn() -> ShellMessage + Send + Sync + 'static,
     ) -> AnyView {
-        let Self { key, title, tone, width, busy, close, close_button: _ } = self;
+        let Self { key, title, danger, size, icon, busy, close, close_button: _ } = self;
         let host = entity_ref::<OverlayHost>();
-        let surface = entity_ref::<ConfirmDialog>();
-        let placed = signal(false);
-        register(Activation { placed, host });
-        let mut dialog = ConfirmDialog::new(title(), message()).size(width.size()).close_policy(DialogClosePolicy::requests_only());
-        apply_tone(&mut dialog.style, tone);
+        let open = Presence::register(host);
+        let dialog = ConfirmDialog::new(title(), message()).size(size).danger(danger).close_policy(DialogClosePolicy::requests_only());
         let gesture_close = close.clone();
         let gesture_busy = busy.clone();
-        let element = widget(dialog)
-            .entity_ref(surface)
+        let mut element = widget(dialog)
             .key("dialog-surface")
+            .model(open)
             .prop::<String, ConfirmTitle>(title)
             .prop::<String, ConfirmMessage>(message)
             .prop::<bool, ConfirmBusy>({
@@ -209,124 +180,74 @@ impl DialogFrame {
             })
             .cancel(cancel)
             .confirm(confirm);
-        frame(key, placed, host, element.into_any(), activator(placed, move |cx| {
-            if let (Some(host), Some(surface)) = (host.get(), surface.get()) {
-                cx.activate_overlay(host, surface).map(|_| ())
-            } else {
-                Err(missing())
-            }
-        }))
+        if let Some(icon) = icon {
+            element = element.title_icon(title_icon(icon, danger));
+        }
+        frame(key, host, element.into_any())
     }
 }
 
-/// 危险口气：对话框节点的文字色换成错误色，NanaUI 用它画标题。正文里的文字都写了自己的颜色。
-fn apply_tone(style: &mut NodeStyle, tone: DialogTone) {
-    if tone == DialogTone::Danger {
-        style.foreground = Some(SemanticColorRole::Danger);
-    }
+/// 标题前的图标：14px，颜色跟着标题走（Vue 的图标继承头部的文字色，危险口气时是 `--err`）。
+fn title_icon(icon: Icon, danger: bool) -> AnyView {
+    let role = if danger { SemanticColorRole::Danger } else { SemanticColorRole::Text };
+    widget(IconGlyph::new(icon).size(TITLE_ICON_SIZE).role(role)).key("dialog-icon").into_any()
 }
 
-/// 浮层槽位里的一块：铺满的外层（AppShell 给它打铺满窗口的补丁，有子节点时挡住下面的点击，
-/// 在激活前也不会漏点），里面是遮罩补色、对话框的宿主和激活用的结构块。外层上不放绑定：AppShell
-/// 给它打的布局补丁只在自己投影时写，绑定重投影会把补丁冲掉。
-fn frame(key: &'static str, placed: Signal<bool>, host: EntityRef<OverlayHost>, surface: AnyView, activator: AnyView) -> AnyView {
-    let mut style = NodeStyle::default();
+/// 浮层层里的一块：铺满浮层层（换下的对话框放退场时和新的一块叠在一起），里面是对话框的宿主。
+/// 遮罩的颜色、背景模糊和开合动效归主题（`appearance.rs` 的效果令牌和对话框配方）。
+fn frame(key: &'static str, host: EntityRef<OverlayHost>, surface: AnyView) -> AnyView {
+    let mut fill = NodeStyle::default();
     {
-        let layout = Arc::make_mut(&mut style.layout);
+        let layout = Arc::make_mut(&mut fill.layout);
         layout.width = Some(LengthSpec::Fill);
         layout.height = Some(LengthSpec::Fill);
     }
-    widget(Stack::column(0.0))
-        .key(key)
-        .children((veil(placed), widget(OverlayHost::new().style(style)).entity_ref(host).key("dialog-host").children((surface,)), activator))
-        .into_any()
-}
-
-/// 遮罩补色，补 NanaUI 遮罩和 Vue `.modal-overlay` 的两处差别：
-///
-/// - 压暗：NanaUI 的遮罩是线性空间里的 45% 黑，只压到 Vue（sRGB 里的 45% 黑）的一部分。下面再铺
-///   一层 51.3% 的黑（不随主题变化），两层合起来把底色压到线性亮度的 `0.55 × 0.487 ≈ 0.55^2.2`。
-/// - 模糊：Vue 是 `blur(2px)`，CSS 里 2px 是高斯的标准差；NanaUI 背景模糊的着色器取 `半径 / 3`
-///   作标准差，所以半径写 6。
-///
-/// 对话框激活的那一帧（`placed` 置真）从透明淡入，时长和曲线跟框架给对话框表面的淡入一致，
-/// 两层一起出现。不挡点击：点外面仍由宿主变成关闭请求。NanaUI 补上遮罩的取色和模糊语义后删掉。
-fn veil(placed: Signal<bool>) -> AnyView {
-    let mut style = NodeStyle::default();
-    {
-        let layout = Arc::make_mut(&mut style.layout);
-        layout.background = Some([0.0, 0.0, 0.0, VEIL_ALPHA]);
-        layout.position = nana_ui_core::PositionSpec::Absolute;
+    let block = Stack::column(0.0).with_layout(|layout| {
+        layout.position = PositionSpec::Absolute;
         layout.offset_top = Some(LengthSpec::Px(0.0));
         layout.offset_left = Some(LengthSpec::Px(0.0));
         layout.width = Some(LengthSpec::Percent(100.0));
         layout.height = Some(LengthSpec::Percent(100.0));
-        layout.paint.backdrop_filter = Some(nana_ui_core::BackdropFilter { blur_radius: VEIL_BLUR, saturate: 1.0 });
-    }
-    widget(Stack::column(0.0).style(style))
-        .key("dialog-veil")
-        .prop::<f32, VeilOpacity>(move || if placed.get() { 1.0 } else { 0.0 })
-        .animate([Implicit::new(AnimatableProperty::Opacity, nana_ui_core::motion::OVERLAY_FADE).ease(Easing::EaseOutCubic)])
+    });
+    widget(block)
+        .key(key)
+        .children((widget(OverlayHost::new().style(fill)).entity_ref(host).key("dialog-host").children((surface,)),))
         .into_any()
 }
 
-/// 补色层的不透明度：`1 - 0.55^2.2 / 0.55`。
-const VEIL_ALPHA: f32 = 0.513;
-/// 补色层的背景模糊半径：标准差 2px（`blur(2px)`）的三倍。
-const VEIL_BLUR: f32 = 6.0;
-
-/// 补色层的不透明度：对话框激活前是 0，激活后是 1，改动时按 [`veil`] 声明的过渡淡入。
-struct VeilOpacity;
-
-impl FieldWrite<Stack, f32> for VeilOpacity {
-    const FIELD: &'static str = "Stack.style.layout.opacity(veil)";
-
-    fn write(target: &mut Stack, value: f32) {
-        Arc::make_mut(&mut target.node_style_mut().layout).opacity = Some(value);
-    }
-
-    fn differs(target: &Stack, value: &f32) -> bool {
-        target.node_style().layout.opacity != Some(*value)
-    }
-}
-
-/// 浮层块置真 `placed` 以后的那次刷新里建出分支，分支挂上时宿主已经在树里，这时激活。
-fn activator(placed: Signal<bool>, activate: impl Fn(&mut AppContext) -> Result<(), nana_ui::runtime::FrameworkError> + Send + Sync + 'static) -> AnyView {
-    let activate = Arc::new(activate);
-    when(placed, move || {
-        let activate = activate.clone();
-        on_mount(move |cx| {
-            if let Err(error) = activate(cx) {
-                eprintln!("Nana 对话框激活失败：{error}");
-            }
-        });
-        widget(Stack::column(0.0)).key("dialog-activated")
-    })
-    .into_any()
-}
-
-fn missing() -> nana_ui::runtime::FrameworkError {
-    nana_ui::runtime::FrameworkError::InvalidInput
-}
-
-/// 对话框的会话：挂好后置真 `placed`，换下前让框架关掉对话框、交还焦点。
-struct Activation {
-    placed: Signal<bool>,
+/// 对话框的开合会话。`open` 是对话框 `.model(..)` 的信号：浮层块写它来开合，宿主自己做的开合
+/// 也写回它，所以它一直说的是对话框现在开没开着。
+struct Presence {
+    open: Signal<bool>,
     host: EntityRef<OverlayHost>,
 }
 
-impl OverlaySession for Activation {
-    fn placed(&mut self) {
-        self.placed.try_set_if_changed(true);
+impl Presence {
+    /// 在对话框的挂载作用域里建开合信号并登记会话，返回给 `.model(..)` 用的信号。建出来是关着的，
+    /// 这块放进浮层层以后才写真：先写真的话插进树的那一刻就打开，排在换下的对话框退场之前。
+    fn register(host: EntityRef<OverlayHost>) -> Signal<bool> {
+        let open = signal(false);
+        register(Self { open, host });
+        open
+    }
+}
+
+impl OverlaySession for Presence {
+    fn show(&mut self) {
+        self.open.try_set_if_changed(true);
     }
 
-    fn retire(&mut self, context: &mut AppContext) {
+    fn hide(&mut self) -> bool {
+        self.open.try_set_if_changed(false);
+        true
+    }
+
+    /// 宿主已经没有激活的浮层：对话框关好了（或者一直没打开过）。退场放完时框架才清掉宿主的激活。
+    fn settled(&self, context: &AppContext) -> bool {
         let Some(host) = self.host.get() else {
-            return;
+            return true;
         };
-        if let Err(error) = context.dismiss_overlay(host) {
-            eprintln!("Nana 换下对话框时没能交还焦点：{error}");
-        }
+        context.world().overlay_host(host.stable_id()).is_none_or(|state| state.active.is_none())
     }
 }
 

@@ -7,19 +7,19 @@
 
 use std::sync::Arc;
 
-use nana_ui::icons_tabler::{ARCHIVE, GIT_BRANCH};
+use nana_ui::icons_tabler::{ARCHIVE, DOWNLOAD, GIT_BRANCH};
 use nana_ui::runtime::view::{fields, signal, widget, AnyView, FieldWrite, IntoView, Signal};
 use nana_ui::runtime::{
     AlignSpec, BrowseRequested, Button, Checkbox, LengthSpec, PathField, RadiusTier, SemanticColorRole, Stack, TextChanged,
     ToggleChanged,
 };
-use nana_ui::ButtonKind;
+use nana_ui::{ButtonKind, DialogSize};
 use nana_ui_core::Icon;
 
 use crate::shell::files::FilesMessage;
 use crate::shell::files_view::style::{self, ButtonLook};
 use crate::shell::view_part_overlay::dialog::{
-    action, action_button, footer, select_field, text_field, two_columns, wrapping_text, Choices, DialogFrame, DialogWidth,
+    action, action_button, footer, select_field, text_field, two_columns, wrapping_text, Choices, DialogFrame,
 };
 use crate::shell::view_part_overlay::session::{Draft, Projected};
 use crate::shell::{ShellMessage, ShellViewModel};
@@ -154,7 +154,8 @@ pub(crate) fn export_dialog(model: &ShellViewModel) -> Option<AnyView> {
     ];
     Some(
         DialogFrame::new("export-dialog", || "导出资源库".to_string(), close)
-            .width(DialogWidth::Export)
+            .size(DialogSize::capped(560.0, 92.0))
+            .title_icon(DOWNLOAD)
             .busy(busy)
             .close_button()
             .dialog(body, footer(None, buttons)),

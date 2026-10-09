@@ -17,9 +17,9 @@ zip = { version = "8.6", default-features = false, features = ["deflate"] }
 unarc-rs = "0.6.1"
 momobako-backend = { path = "../src-backend" }
 # view-macro：结构块容器的 `css!` 和 `#[derive(Store)]`，绑定式视图要用。
-nana-ui = { git = "https://github.com/sena-nana/NanaUI.git", rev = "e2780d929bb452182a34d266e459958378bf363d", features = ["hosted", "bundled-fonts", "components", "icons-tabler", "view-macro"] }
-nana-ui-core = { git = "https://github.com/sena-nana/NanaUI.git", rev = "e2780d929bb452182a34d266e459958378bf363d" }
-nana-ui-platform = { git = "https://github.com/sena-nana/NanaUI.git", rev = "e2780d929bb452182a34d266e459958378bf363d", features = ["clipboard"] }
+nana-ui = { git = "https://github.com/sena-nana/NanaUI.git", rev = "c6dc1086bb1b21406ee5e20a40ac6207c664913b", features = ["hosted", "bundled-fonts", "components", "icons-tabler", "view-macro"] }
+nana-ui-core = { git = "https://github.com/sena-nana/NanaUI.git", rev = "c6dc1086bb1b21406ee5e20a40ac6207c664913b" }
+nana-ui-platform = { git = "https://github.com/sena-nana/NanaUI.git", rev = "c6dc1086bb1b21406ee5e20a40ac6207c664913b", features = ["clipboard"] }
 
 [target.'cfg(windows)'.dependencies]
 # 与 Tauri `plugin:drag` 同一实现，把绝对路径拖出窗口。
@@ -31,7 +31,7 @@ raw-window-handle = "0.6.2"
 windows = { version = "0.62", features = ["Foundation", "Media", "Storage_Streams", "Win32_Foundation", "Win32_System_Com", "Win32_System_WinRT", "Win32_UI_Shell", "Win32_Media_MediaFoundation"] }
 
 [dev-dependencies]
-nana-ui-devtools = { git = "https://github.com/sena-nana/NanaUI.git", rev = "e2780d929bb452182a34d266e459958378bf363d", features = ["runtime-agent"] }
+nana-ui-devtools = { git = "https://github.com/sena-nana/NanaUI.git", rev = "c6dc1086bb1b21406ee5e20a40ac6207c664913b", features = ["runtime-agent"] }
 
 [[bin]]
 name = "momobako-nana"

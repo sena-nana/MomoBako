@@ -10,7 +10,7 @@ use nana_ui::ButtonKind;
 use serde_json::Value;
 
 use super::super::admin::AdminMessage;
-use super::super::view_part_overlay::dialog::{action, footer, text_field, DialogFrame};
+use super::super::view_part_overlay::dialog::{action, footer, text_field, DialogFrame, MODAL_CARD};
 use super::super::view_part_overlay::session::{Draft, Projected};
 use super::super::{ShellMessage, ShellViewModel};
 use super::InputMessage;
@@ -126,5 +126,5 @@ pub(crate) fn playlist_name_dialog(model: &ShellViewModel) -> Option<AnyView> {
         action("取消", ButtonKind::Ghost, false, "source-playlist-cancel", close),
         action("确认", ButtonKind::Primary, move || view.with(|view| view.blank), "source-playlist-submit", submit),
     ];
-    Some(DialogFrame::new("source-playlist-dialog", || "创建来源播放列表".to_string(), close).dialog(body, footer(None, buttons)))
+    Some(DialogFrame::new("source-playlist-dialog", || "创建来源播放列表".to_string(), close).size(MODAL_CARD).dialog(body, footer(None, buttons)))
 }

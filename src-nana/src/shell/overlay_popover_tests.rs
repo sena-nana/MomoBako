@@ -1,11 +1,12 @@
 //! 弹层和右键菜单常驻的回归：打开期间无关更新不换节点；任务进度、仓库列表、子菜单展开和
-//! 文件服务忙这些相关变化只改绑定的字段或变了的那一行；点外面只发一条关闭消息。
+//! 文件服务忙这些相关变化只改绑定的字段或变了的那一行；点外面只发一条关闭消息。浮层层常驻在
+//! AppShell 的 overlay 槽位里，有块时挡点击、空了放开，增删块不用重新装配；右键菜单不靠显式层级。
 
-use nana_ui::runtime::{ContextMenu, Entity, StableNodeId};
+use nana_ui::runtime::{component_descriptors, AppShell, ContextMenu, Entity, PositionSpec, StableNodeId};
 
 use super::OverlayKey;
 use crate::backend::services::repository::TaskProgressSnapshot;
-use crate::shell::files::FilesMessage;
+use crate::shell::files::{FileDialog, FilesMessage};
 use crate::shell::player::PlayerMessage;
 use crate::shell::view_harness::ShellHarness;
 use crate::shell::workspace::WorkspaceRepository;
@@ -58,6 +59,69 @@ fn subtree(harness: &ShellHarness, root: StableNodeId) -> Vec<StableNodeId> {
         }
     }
     nodes
+}
+
+/// 文档里的 AppShell 和它的 overlay 槽位（浮层层）。
+pub(super) fn shell_and_layer(harness: &ShellHarness) -> (StableNodeId, StableNodeId) {
+    let document = harness.document();
+    let world = document.context().world();
+    let shell = world
+        .document_order(document.document())
+        .into_iter()
+        .find(|id| world.component_type(*id).is_some_and(|kind| kind.as_str() == component_descriptors::APP_SHELL.type_id))
+        .expect("文档里有 AppShell");
+    let layer = document.context().read(Entity::<AppShell>::from_stable_id(shell), |shell| shell.overlay).expect("AppShell");
+    (shell, layer.expect("AppShell 的 overlay 槽位是浮层层"))
+}
+
+/// 浮层层现在的子节点（各块的根）。
+pub(super) fn blocks(harness: &ShellHarness) -> Vec<StableNodeId> {
+    let (_, layer) = shell_and_layer(harness);
+    harness.document().context().world().node(layer).map(|node| node.children.to_vec()).unwrap_or_default()
+}
+
+/// 浮层层挡不挡下面的点击（AppShell 按有没有没隐藏的块决定）。
+pub(super) fn layer_takes_pointer(harness: &ShellHarness) -> bool {
+    let (_, layer) = shell_and_layer(harness);
+    harness.document().context().world().interaction(layer).is_some_and(|interaction| interaction.pointer_events)
+}
+
+/// 浮层层一直是 AppShell 的 overlay 槽位：弹层和菜单开了又关，槽位不换、AppShell 不重新装配；
+/// 有块时挡点击，块卸掉以后点击落到下面。
+#[test]
+fn the_overlay_layer_follows_its_blocks_without_reassembly() {
+    let mut harness = ShellHarness::mount(scene("live-files-plain"));
+    let (shell, layer) = shell_and_layer(&harness);
+    assert!(blocks(&harness).is_empty());
+    assert!(!layer_takes_pointer(&harness), "没有浮层时点击落到下面");
+
+    harness.apply(ShellMessage::Admin(AdminMessage::ToggleTaskPopover));
+    harness.flush();
+    assert_eq!(blocks(&harness).len(), 1);
+    assert!(layer_takes_pointer(&harness), "弹层开着时浮层层挡点击");
+    harness.apply(ShellMessage::Admin(AdminMessage::CloseTaskPopover));
+    harness.flush();
+    assert!(blocks(&harness).is_empty(), "弹层没有退场，换下就卸");
+    assert!(!layer_takes_pointer(&harness));
+
+    harness.apply(ShellMessage::Sidebar(SidebarMessage::Gap(GapMessage::OpenFolderMenu {
+        path: "assets".into(),
+        label: "assets".into(),
+        x: 120.0,
+        y: 200.0,
+    })));
+    harness.flush();
+    assert!(layer_takes_pointer(&harness), "菜单开着时浮层层挡点击");
+    harness.apply(ShellMessage::Sidebar(SidebarMessage::Gap(GapMessage::CloseFolderMenu)));
+    harness.flush();
+    assert!(!layer_takes_pointer(&harness));
+    harness.take_messages();
+    let trash = harness.node("回收站");
+    let (x, y) = harness.center(trash);
+    assert!(!harness.click_messages(x, y).is_empty(), "浮层层空着时点得到侧栏");
+
+    assert_eq!(shell_and_layer(&harness), (shell, layer), "浮层层一直是同一个节点，AppShell 没有换 overlay 槽位");
+    harness.assert_same_as_fresh_mount();
 }
 
 fn text(harness: &ShellHarness, key: &str) -> String {
@@ -165,6 +229,36 @@ fn entry_menu_toggles_its_submenu_without_rebuilding_rows() {
     let messages = harness.click_messages(1100.0, 760.0);
     assert_eq!(messages.len(), 1, "点菜单外面应该只发一条消息");
     assert!(matches!(messages[0], ShellMessage::Files(FilesMessage::CloseEntryMenu)));
+}
+
+/// 右键菜单这一层相对浮层层绝对定位，不再靠固定定位加显式层级压过壳层浮层根：菜单层、透明底和
+/// 菜单都不写层级，点菜单项照样发它的消息，点菜单外只关菜单。
+#[test]
+fn entry_menu_takes_clicks_without_a_z_index() {
+    let mut harness = ShellHarness::mount(scene("live-menu"));
+    harness.take_messages();
+    // 菜单层是浮层块的根：脱离树挂出的根不在键表里，按根找。
+    let layer = harness.content_roots().0.expect("右键菜单在浮层里");
+    let parts = [("菜单层", Some(layer)), ("透明底", harness.keyed("file-context-backdrop")), ("菜单", harness.keyed("file-context-menu"))];
+    for (name, id) in parts {
+        let id = id.unwrap_or_else(|| panic!("缺少{name}"));
+        let style = harness.document().context().world().node_style(id).unwrap_or_else(|| panic!("{name}没有样式"));
+        assert_eq!(style.layout.z_index, None, "{name}不该再写层级");
+        assert_ne!(style.layout.position, PositionSpec::Fixed, "{name}不该再固定定位");
+    }
+    let rename = harness.keyed("file-menu-rename").expect("重命名");
+    let (x, y) = harness.center(rename);
+    let messages = harness.click_messages(x, y);
+    assert!(
+        matches!(
+            messages.as_slice(),
+            [ShellMessage::Files(FilesMessage::CloseEntryMenu), ShellMessage::Files(FilesMessage::OpenDialog(FileDialog::Rename))]
+        ),
+        "点菜单项应该关菜单并打开重命名：{} 条消息",
+        messages.len()
+    );
+    let messages = harness.click_messages(1100.0, 760.0);
+    assert!(matches!(messages.as_slice(), [ShellMessage::Files(FilesMessage::CloseEntryMenu)]), "点菜单外只关菜单");
 }
 
 #[test]

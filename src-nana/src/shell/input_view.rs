@@ -7,7 +7,7 @@ use nana_ui::runtime::FileDropEvent;
 use nana_ui::ButtonKind;
 use nana_ui_core::{DropAccepts, DropEffect};
 use super::{HostDragPhase, InputMessage};
-use crate::shell::view_part_overlay::dialog::{intent_button, DialogFrame};
+use crate::shell::view_part_overlay::dialog::{intent_button, DialogFrame, MODAL_CARD};
 use crate::shell::view_part_overlay::session::Projected;
 use crate::shell::{MainRegion, ShellMessage, ShellViewModel, WorkspacePanel};
 
@@ -106,7 +106,7 @@ pub(crate) fn close_prompt(model: &ShellViewModel) -> Option<AnyView> {
     Projected::register(view, CloseConfirmView::project);
     let cancel = intent_button("取消", ButtonKind::Ghost, false, "close-confirm-cancel");
     let confirm = intent_button("确认关闭", ButtonKind::Primary, false, "close-confirm-accept");
-    Some(DialogFrame::new("close-confirm", || "关闭 MomoBako".to_string(), || answer(false)).confirm(
+    Some(DialogFrame::new("close-confirm", || "关闭 MomoBako".to_string(), || answer(false)).size(MODAL_CARD).confirm(
         move || view.with(|view| view.notice.clone()),
         cancel,
         confirm,
