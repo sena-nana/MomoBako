@@ -10,7 +10,7 @@ use super::admin::{
     ActionsSignals, ActionsView, LogsSignals, LogsView, PluginPanelSignals, PluginPanelView, SettingsSignals, SettingsView, ToolsSignals,
 };
 use super::inspect_search_view::{resident_filter_bar, FilterBarSignals};
-use super::route_search::{home_page, home_scroll};
+use super::route_home::{home_page, home_scroll};
 use super::ShellViewModel;
 
 /// 设置、日志、拓展和动作页的常驻信号，在主区块的骨架作用域里建，进出路由都不重建。

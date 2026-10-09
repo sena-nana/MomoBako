@@ -74,7 +74,7 @@ pub(crate) struct FilterSelection {
 }
 
 impl FilterBarView {
-    /// 从 ViewModel 取筛选栏的投影。显示条件和旧视图 `route_home::page` 一致。
+    /// 从 ViewModel 取筛选栏的投影。有仓库且筛选栏打开时显示。
     pub(crate) fn project(model: &ShellViewModel) -> Self {
         let inspect = &model.inspect;
         let filters = &inspect.filters;
@@ -150,8 +150,8 @@ impl FilterBarSignals {
         })
     }
 
-    /// 按这一刻的投影建一份信号。旧视图整块重挂时每次新建，不再写入。
-    pub(crate) fn of(view: FilterBarView) -> Self {
+    /// 按投影建一份信号。
+    fn of(view: FilterBarView) -> Self {
         let draft = &view.draft;
         Self {
             open: signal(view.open),

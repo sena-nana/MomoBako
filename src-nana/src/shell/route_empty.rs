@@ -57,7 +57,7 @@ impl EmptySignals {
 
 /// 空库页：首页外框里纵向滚动的一节，内容在可见高度里居中。
 pub(super) fn view(signals: EmptySignals) -> AnyView {
-    super::route_home::resident_page(panel(signals.view), "workspace-empty-scroll")
+    super::route_home::home_page(None, super::route_home::home_scroll("workspace-empty-scroll", false, panel(signals.view)))
 }
 
 /// 拖入引导：标题、说明和错误条。整节都是拖放目标，悬停和放下走同一条宿主拖放消息。

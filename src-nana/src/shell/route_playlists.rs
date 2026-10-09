@@ -11,7 +11,7 @@ use nana_ui::runtime::{LengthSpec, Stack};
 
 use super::inspect_search_view::{resident_filter_bar, FilterBarSignals};
 use super::player_view::playlist::{PlaylistPageSignals, PlaylistPageView};
-use super::route_search::{home_page, home_scroll};
+use super::route_home::{home_page, home_scroll};
 use super::view_part_primary::Island;
 use super::ShellViewModel;
 

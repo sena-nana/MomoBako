@@ -20,14 +20,14 @@
 | 块 | 模块 | 切换 | 现状 |
 | --- | --- | --- | --- |
 | 侧栏 | `view_part_sidebar.rs`，投影在 `sidebar_project.rs` | 无 | 常驻：`SidebarSignals`（几个信号加播放集、文件夹树、智能文件夹树三份 Store）建在骨架作用域里，同步只写变了的；排法变了（收起再展开）才整块重挂 |
-| 主区 | `view_part_primary.rs`，路由在 `route_*.rs` | `dynamic(RouteSlot)`，按 `RouteKey` | 启动、文件、缺失仓库、空库、搜索（含空库搜索）、设置、日志、拓展、动作和播放集页常驻；文件页和播放集页里的播放条是旧视图岛；空首页整块重挂 |
+| 主区 | `view_part_primary.rs`，路由在 `route_*.rs` | `dynamic(RouteSlot)`，按 `RouteKey` | 所有路由（启动、文件、缺失仓库、空库、搜索含空库搜索、设置、日志、拓展、动作和播放集页）都常驻；文件页和播放集页里的播放条是旧视图岛 |
 | 浮层 | `view_part_overlay.rs` | 按 `OverlayIdentity` 换块 | 常驻：身份不变时只经会话写信号；对话框走统一框架；没有浮层时槽位为空 |
 
 并行改区域时各改各的文件：
 
 - 浮层和对话框：`view_part_overlay.rs`（`overlay_branch` 里自己那种浮层的分支，身份的结构见 `OverlayIdentity`），对话框框架 `overlay_dialog.rs`、`overlay_dialog_fields.rs`，会话 `overlay_session.rs`，以及 `sidebar_dialogs.rs`、`sidebar_smart_dialog.rs`、`sidebar_popover_view.rs`、`sidebar_tree_view.rs` 的菜单、`admin_view.rs` 的任务弹层、`source_prompt.rs`、`files_menu.rs`、`workspace_dialogs.rs`、`workspace_export_dialog.rs` 等浮层视图。
 - 文件页和详情：`route_files.rs` 和 `files_*.rs`、`inspect_*.rs`。
-- 侧栏和其余路由：`view_part_sidebar.rs`、`sidebar_*.rs`，以及 `route_search.rs`、`route_playlists.rs`、`route_settings.rs`、`route_admin.rs`、`route_startup.rs`、`route_missing.rs`、`route_empty.rs`。
+- 侧栏和其余路由：`view_part_sidebar.rs`、`sidebar_*.rs`，以及 `route_search.rs`、`route_playlists.rs`、`route_settings.rs`、`route_admin.rs`、`route_startup.rs`、`route_missing.rs`、`route_empty.rs`；首页外框和滚动主体在 `route_home.rs`。
 
 `view_host.rs` 和 `view_part.rs` 不必动。`view_part_primary.rs` 里只改自己路由那一行：`resident`、`resident_view`、`legacy_view` 和 `RouteSignals`。
 
@@ -47,7 +47,7 @@
 
 ### 首页筛选栏
 
-筛选栏属于首页外框，有仓库的首页路由都可能显示它。信号 `FilterBarSignals` 在 `RouteSignals::filter`，除启动页和设置页以外每次同步都写（关着时不算候选和库类型快捷方式）。常驻首页路由（文件、搜索、播放集、日志、拓展和动作页）在外框里嵌 `inspect_search_view::resident_filter_bar(signals.filter)`，显隐跟「有仓库且筛选栏打开」走 `.visible`；文件页的 `FilesRouteSignals` 不另存筛选栏的状态，读的是同一份 `RouteSignals::filter`；旧视图路由的 `route_home::page` 仍调 `filter_bar(model)`，它用这一刻的投影建一份一次性的信号，再建同一个视图。常驻首页路由的外框和滚动主体暂用 `route_search::{home_page, home_scroll}`，排版和 `route_home::page`、`scroll_body` 相同。
+筛选栏属于首页外框，有仓库的首页路由都可能显示它。信号 `FilterBarSignals` 在 `RouteSignals::filter`，除启动页和设置页以外每次同步都写（关着时不算候选和库类型快捷方式）。常驻首页路由（文件、搜索、播放集、日志、拓展和动作页）在外框里嵌 `inspect_search_view::resident_filter_bar(signals.filter)`，显隐跟「有仓库且筛选栏打开」走 `.visible`；文件页的 `FilesRouteSignals` 不另存筛选栏的状态，读的是同一份 `RouteSignals::filter`。首页外框和纵向滚动主体只有一套：`route_home::{home_page, home_scroll}`，缺失仓库和空库页也用它（不嵌筛选栏）；设置和启动页的整页滚动是 `route_home::scroll_route`。
 
 ## 改成常驻的步骤
 

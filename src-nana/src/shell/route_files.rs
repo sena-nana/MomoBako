@@ -15,7 +15,7 @@ use super::hot::HotSignals;
 use super::inspect_metadata_view::MetadataSignals;
 use super::inspect_search_view::{resident_filter_bar, FilterBarSignals};
 use super::inspect_view::PreviewSignals;
-use super::route_search::home_page;
+use super::route_home::home_page;
 use super::view_part_primary::Island;
 use super::ShellViewModel;
 
