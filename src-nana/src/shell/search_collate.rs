@@ -1,4 +1,4 @@
-//! 筛选候选的排序，对应 Vue `localeCompare(…, "zh-CN")`。
+//! 按 zh-CN 排序，对应 Vue 的 `localeCompare`：筛选候选和播放器类型都按它排。
 //!
 //! WebView2 的 `localeCompare` 走 ICU 的 zh 排序：标点符号在前，数字其次，汉字按拼音，
 //! 然后才是拉丁字母（大小写不敏感、小写在前）。Windows 10 1903 起系统自带同一套 ICU
