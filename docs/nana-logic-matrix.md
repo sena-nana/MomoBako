@@ -49,7 +49,7 @@
 
 快捷方式计数在摘要到达时立即计算，没有移植 Vue 的 200ms idle 调度。文件快捷访问会先把 `\` 收成 `/`，再打开父目录并选中该路径。
 
-文件夹悬停 450ms、新建/重命名/删除、智能文件夹编辑和删除、播放集播放和移除、弹层夹取、云盘/Eagle 表单、Escape 和缺失仓库隐藏播放集由 `shell::sidebar::gap::tests` 覆盖。实况路径另由 `live_folder_hover_opens_after_the_idle_clock_reaches_450ms`、`live_popover_clamps_to_the_measured_viewport` 和 `live_folder_button_escape_and_prefetch_use_the_shell_path` 覆盖：悬停满 450ms 走 `apply_open_folder`，`prepare` 帧把 `Browse` 提交成目录请求，文件列表路径改成该目录并显示「正在读取目录…」，按着指针时不拆树，松手后选中该文件夹；离开行清掉计时，回来要重新等 450ms。弹层按锚点和视口夹取，边距 4，样例 `(-20, 900)` 在 `400×300` 里落到 `(4, 196)`。焦点在「文件夹名称」时 Escape 关掉最上层。系统文件夹对话框的操作系统结果仍要设备验证。侧栏刷新旋转走动效时钟。
+文件夹悬停 450ms、新建/重命名/删除、智能文件夹编辑和删除、播放集播放和移除、弹层夹取、云盘/Eagle 表单、Escape 和缺失仓库隐藏播放集由 `shell::sidebar::gap::tests` 覆盖。实况路径另由 `live_folder_hover_opens_after_the_idle_clock_reaches_450ms`、`live_popover_clamps_to_the_measured_viewport` 和 `live_folder_button_escape_and_prefetch_use_the_shell_path` 覆盖：悬停满 450ms 走 `apply_open_folder`，`prepare` 帧把 `Browse` 提交成目录请求，文件列表路径改成该目录并显示「正在读取目录…」，按着指针时不拆树，松手后选中该文件夹；离开行清掉计时，回来要重新等 450ms。弹层按锚点和视口夹取，边距 4，样例 `(-20, 900)` 在 `400×300` 里落到 `(4, 196)`。焦点在「文件夹名称」时 Escape 关掉最上层。Escape 走全局输入处理，运行时没处理掉的按下按 `escape_layer` 关掉最上层，焦点不在按钮或输入框上也关；对话框、弹层、右键菜单和筛选栏上的行为由 `shell::escape_tests` 覆盖。系统文件夹对话框的操作系统结果仍要设备验证。侧栏刷新旋转走动效时钟。
 
 | 来源 | 触发 | 服务 | 结果 | 可见性 | 状态 |
 | --- | --- | --- | --- | --- | --- |
@@ -229,7 +229,7 @@
 | `useWorkspaceDragDrop.ts` 导入 | 外部文件放到文件区或文件夹 | `momobako.entry.import`，没有替身 | 文件区会丢掉落到自身绝对路径上的文件；文件夹放下不做这层过滤；不可写、回收站、没有快照或空白路径不导入 | 无新文案 | 已测试（未离屏） |
 | `useWorkspaceDragDrop.ts` 悬停 | dragover、dragleave 或文件夹悬停 | 无 | 不可写或不在文件面板时不改放置效果；内部是 move，外部是 copy；嵌套离开和内部拖放离开不清除外部状态；回收站忽略文件夹悬停 | 放置效果 | 已测试（未离屏） |
 | `useWorkspaceDragDrop.ts` 空库 | 拖入一个文件夹 | `momobako.repository.attach`，没有替身 | 已有活动 id 或已有仓库时忽略；只用第一条非空路径；失败写入空库错误，没有进行中的附加时忽略后续结果 | 空库错误文本 | 已测试（未离屏） |
-| `useWorkspaceDragDrop.ts` 宿主拖放 | enter、over、leave 或 drop | 附加或导入，没有替身 | 没有仓库且不是丢失仓库时按空库附加；有仓库时要可写并且在文件面板，离开会清悬停 | 拖放标记 | 已测试（未离屏） |
+| `useWorkspaceDragDrop.ts` 宿主拖放 | enter、over、leave 或 drop | 附加或导入，没有替身 | 没有仓库且不是丢失仓库时按空库附加；有仓库时要可写并且在文件面板，离开会清悬停 | 文件区和空库页挂上时登记的拖放目标 | 已测试（未离屏） |
 | `useWorkspaceDragDrop.ts` 框选 | 追加或替换 | 无 | 追加时空列表不变并按原顺序并上新路径；替换空列表清空；主选和锚点用已有主选，否则用第一项 | 选择路径 | 已测试（未离屏） |
 | `core.ts` 打开和揭示 | 打开条目、网址或在目录中定位 | 宿主启动系统程序，失败才写文案 | 没有仓库或路径为空则不动；否则记录带 `reveal` 的 `OpenExternal` | 成功不写失败文案；失败为“打开失败：{错误}” / “定位失败：{错误}” | 已测试（未离屏） |
 | `core.ts` 拖出 | 把选中路径拖出窗口 | Windows 上 `drag::start_drag`，复制效果 | 回收站、非 filesystem 或没有绝对路径时失败且不记请求；其余记录 `DragOut`，系统调用失败才写文案 | 成功不写失败文案；失败为“拖出失败：…” | 已测试（未离屏） |

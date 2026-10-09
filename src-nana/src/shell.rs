@@ -59,6 +59,7 @@ pub use sidebar::{
     FolderMutation, GapMessage, SidebarEffect, SidebarFolder, SidebarMessage, SidebarPlaylist, SidebarSmartFolder,
     SidebarTree, ShortcutId,
 };
+pub(crate) use sidebar::escape_layer;
 pub use workspace::{
     sidebar_prefs_path, DeleteMode, LibraryCategory, MainRegion, StartupStatus, WorkspaceEffect,
     WorkspacePanel, WorkspaceRepository, WorkspaceState,
@@ -269,7 +270,8 @@ pub struct ShellViewModel {
     pub viewport_width: f32,
     /// 对话框、弹层或打开文件夹之后，手势松开时要重建树。
     pub surface_dirty: bool,
-    /// 归约次数。视图据此判断上次整体同步之后状态有没有经过归约。
+    /// 状态版本：每次归约加一，归约之外改了界面要读的状态、标脏时也加一。视图据此判断上次整体
+    /// 同步之后状态有没有变过，整块重挂的内容按它决定要不要重挂。
     pub(crate) revision: u64,
     /// `prepare` 里产生的目录浏览。这一帧就要提交，不能等下一次 `update`。
     pub(crate) staged_browses: Vec<sidebar::SidebarEffect>,
@@ -361,9 +363,15 @@ impl ShellViewModel {
         let crossed = self.narrow_viewport() != (width <= NARROW_VIEWPORT_PX);
         self.viewport_width = width;
         if crossed {
-            self.surface_dirty = true;
+            self.mark_surface_dirty();
         }
         crossed
+    }
+
+    /// 归约之外改了界面要读的状态：标脏，并让状态版本加一，整块重挂的内容随后按新状态重挂。
+    pub(crate) fn mark_surface_dirty(&mut self) {
+        self.surface_dirty = true;
+        self.revision = self.revision.wrapping_add(1);
     }
 
     /// 窗口是否落在 Vue 的窄屏断点内。
@@ -877,12 +885,27 @@ mod workbench;
 mod title_bar;
 mod hot;
 mod view_host;
+mod view_part;
+mod view_part_sidebar;
+mod view_part_primary;
+mod view_part_overlay;
+mod route_home;
+mod route_startup;
+mod route_settings;
+mod route_files;
+mod route_search;
+mod route_playlists;
+mod route_admin;
+mod route_missing;
+mod route_empty;
 pub use interaction::commit_interaction;
 pub(crate) use interaction::window_action_commands;
 pub use view_host::mount_shell;
-pub(crate) use view_host::{components_under, ShellView};
+pub(crate) use view_host::ShellView;
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod escape_tests;
 #[cfg(test)]
 pub(crate) mod view_harness;

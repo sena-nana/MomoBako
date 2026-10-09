@@ -32,7 +32,7 @@ pub(crate) use view::close_prompt;
 pub(super) fn repository_absolute(root: &str, relative: &str) -> String {
     support::join_repository_path(root, relative, None)
 }
-pub(crate) use view::{drop_marker, empty_repository_panel, file_drop_flags, file_drop_message};
+pub(crate) use view::{accept_file_drops, empty_repository_panel, file_drop_flags, file_drop_message};
 
 #[cfg(test)]
 #[path = "input_tests.rs"]

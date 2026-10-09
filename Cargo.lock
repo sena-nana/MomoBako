@@ -4355,6 +4355,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "nana-ui-css"
+version = "0.1.0"
+source = "git+https://github.com/sena-nana/NanaUI.git?rev=e2780d929bb452182a34d266e459958378bf363d#e2780d929bb452182a34d266e459958378bf363d"
+dependencies = [
+ "nana-ui-core",
+ "serde_json",
+]
+
+[[package]]
 name = "nana-ui-devtools"
 version = "0.1.0"
 source = "git+https://github.com/sena-nana/NanaUI.git?rev=e2780d929bb452182a34d266e459958378bf363d#e2780d929bb452182a34d266e459958378bf363d"
@@ -4412,6 +4421,7 @@ dependencies = [
  "nana-text",
  "nana-ui-core",
  "nana-ui-input",
+ "nana-ui-view-macros",
  "nana-ui-view-schema",
  "pulldown-cmark",
  "qrcode",
@@ -4436,6 +4446,32 @@ dependencies = [
  "nana-ui-core",
  "nana-ui-runtime",
  "unicode-segmentation",
+]
+
+[[package]]
+name = "nana-ui-view-codegen"
+version = "0.1.0"
+source = "git+https://github.com/sena-nana/NanaUI.git?rev=e2780d929bb452182a34d266e459958378bf363d#e2780d929bb452182a34d266e459958378bf363d"
+dependencies = [
+ "nana-ui-core",
+ "nana-ui-css",
+ "nana-ui-view-schema",
+ "proc-macro2",
+ "quote",
+ "serde_json",
+ "syn 2.0.119",
+]
+
+[[package]]
+name = "nana-ui-view-macros"
+version = "0.1.0"
+source = "git+https://github.com/sena-nana/NanaUI.git?rev=e2780d929bb452182a34d266e459958378bf363d#e2780d929bb452182a34d266e459958378bf363d"
+dependencies = [
+ "nana-ui-view-codegen",
+ "proc-macro-crate 3.5.0",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
 ]
 
 [[package]]

@@ -19,6 +19,11 @@ fn mounted(model: &ShellViewModel, height: f32) -> RuntimeDocument {
     document
 }
 
+/// 和界面无关的一次归约：状态版本变了，主区当前的旧视图分支随下一次同步整块重挂。
+fn unrelated_update(model: &mut ShellViewModel) {
+    model.reduce(ShellMessage::ThumbnailPixels(Vec::new()));
+}
+
 /// 有一个可写仓库、根目录里有 `count` 个文件的工作区。
 fn files_model(count: usize) -> ShellViewModel {
     let mut model = ShellViewModel::default();
@@ -112,6 +117,18 @@ fn scroll_keyed(document: &RuntimeDocument, key: &str) -> StableNodeId {
         .unwrap_or_else(|| panic!("没有键为 {key} 的滚动容器"))
 }
 
+/// 主区路由容器里当前分支的根。设置页的根就是整页滚动容器；它挂进路由容器时不带自己的键。
+fn route_root(document: &RuntimeDocument) -> StableNodeId {
+    let context = document.context();
+    let world = context.world();
+    let container = world
+        .document_order(document.document())
+        .into_iter()
+        .find(|id| context.assembly_path(*id).is_some_and(|path| path.ends_with("primary-route")))
+        .expect("主区路由容器");
+    world.node(container).and_then(|node| node.children.first().copied()).expect("路由分支")
+}
+
 fn offset(document: &RuntimeDocument, id: StableNodeId) -> ScrollOffset {
     document.context().world().scroll_offset(id).unwrap_or_default()
 }
@@ -154,6 +171,7 @@ fn file_list_keeps_its_scroll_and_rows_across_a_remount() {
     assert!(!rows.is_empty(), "滚动后视口里要有行");
     assert!(!rows.iter().any(|row| row.starts_with("file-000")), "滚动后视口里不该还是第一行：{rows:?}");
 
+    unrelated_update(&mut model);
     mount_shell(&mut document, &model).expect("重挂");
     layout(&mut document, 800.0);
     let scroll = scroll_around(&document, rows.first().expect("滚动后有行"));
@@ -166,7 +184,7 @@ fn settings_page_keeps_its_scroll_across_a_remount() {
     let mut model = files_model(3);
     model.page = ShellPage::Settings;
     let mut document = mounted(&model, 420.0);
-    let scroll = scroll_keyed(&document, "settings-scroll");
+    let scroll = route_root(&document);
     document
         .context_mut()
         .scroll_to(Entity::<ScrollView>::from_stable_id(scroll), ScrollOffset { x: 0.0, y: 160.0 })
@@ -174,9 +192,12 @@ fn settings_page_keeps_its_scroll_across_a_remount() {
     layout(&mut document, 420.0);
     assert_eq!(offset(&document, scroll).y, 160.0, "设置页要能滚到 160");
 
+    unrelated_update(&mut model);
     mount_shell(&mut document, &model).expect("重挂");
     layout(&mut document, 420.0);
-    assert_eq!(offset(&document, scroll_keyed(&document, "settings-scroll")).y, 160.0, "重挂后设置页回到了顶部");
+    let remounted = route_root(&document);
+    assert_ne!(remounted, scroll, "无关更新后设置页分支应该整块重挂");
+    assert_eq!(offset(&document, remounted).y, 160.0, "重挂后设置页回到了顶部");
 
     // 换到首页：主体是另一个滚动容器，不继承设置页的偏移。
     model.page = ShellPage::FileList;

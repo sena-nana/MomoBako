@@ -7,11 +7,10 @@
 
 use std::sync::Arc;
 
-use nana_ui::runtime::view::{widget, AnyView, IntoView};
+use nana_ui::runtime::view::{node_ref, widget, AnyView, IntoView, NodeRef};
 use nana_ui::runtime::{
-    component_descriptors, Activate, AlignSpec, Button, Dialog, LengthSpec, ListItem, MutationQueue, RadiusTier,
-    RuntimeDocument, Select, SelectChanged, SelectOption, SemanticColorRole, Stack, StableNodeId, TextArea, TextChanged,
-    TextInput,
+    Activate, AlignSpec, Button, Dialog, LengthSpec, ListItem, RadiusTier, Select, SelectChanged, SelectOption,
+    SemanticColorRole, Stack, TextArea, TextChanged, TextInput,
 };
 use nana_ui::{ButtonKind, ControlSize};
 
@@ -63,51 +62,29 @@ fn error_line(copy: &str, key: &'static str) -> Option<AnyView> {
     Some(widget(node).key(key).into_any())
 }
 
-/// 字段容器的键前缀。挂载后按它找到字段，给没有自身名称的下拉框补上标签名。
-const FIELD_KEY_PREFIX: &str = "dialog-field-";
-
 /// 字段：上面 12px 粗体次要色标签，下面控件，间距 6px。对应 `.dialog-field`。
 fn field(label: &'static str, control: AnyView) -> AnyView {
-    widget(Stack::column(6.0).width(LengthSpec::Fill).min_width(LengthSpec::Px(0.0)))
-        .children((widget(parts::label_text(label, 12.0, 600, Some(SemanticColorRole::Muted))), control))
-        .key(format!("{FIELD_KEY_PREFIX}{label}"))
+    widget(field_column()).children((widget(field_label(label)), control)).key(format!("dialog-field-{label}")).into_any()
+}
+
+/// 放下拉框的字段：`control` 拿到标签节点，用 `.labelled_by` 以字段名给下拉框命名。
+///
+/// Vue 里 `<label>` 包着 `<select>`，读屏读到的是字段名；Nana 的 `Select` 没有自己的名称，
+/// 不命名时只读出当前选项。
+fn select_field(label: &'static str, control: impl FnOnce(NodeRef) -> AnyView) -> AnyView {
+    let caption = node_ref();
+    widget(field_column())
+        .children((widget(field_label(label)).node_ref(caption), control(caption)))
+        .key(format!("dialog-field-{label}"))
         .into_any()
 }
 
-/// 用字段标签给对话框里的下拉框命名。
-///
-/// Vue 里 `<label>` 包着 `<select>`，读屏读到的是字段名；Nana 的 `Select` 没有自己的名称，
-/// 不命名时只读出当前选项。这里在挂载后找出 `roots` 下面放在对话框字段里的下拉框，把字段标签登记为它的名称。
-pub fn bind_field_labels(document: &mut RuntimeDocument, roots: &[StableNodeId]) {
-    let document_id = document.document();
-    let mut queue = MutationQueue::new();
-    {
-        let context = document.context();
-        let world = context.world();
-        for select in super::super::components_under(world, document_id, component_descriptors::SELECT.type_id, roots) {
-            let Some(field) = world.parent_id(select) else {
-                continue;
-            };
-            let in_field = context
-                .assembly_path(field)
-                .is_some_and(|path| path.rsplit('/').next().is_some_and(|key| key.starts_with(FIELD_KEY_PREFIX)));
-            if !in_field {
-                continue;
-            }
-            let Some(label) = world.node(field).and_then(|node| node.children.first().copied()) else {
-                continue;
-            };
-            if label != select && world.labelled_by(select) != Some(label) {
-                queue.set_labelled_by(select, Some(label));
-            }
-        }
-    }
-    if queue.is_empty() {
-        return;
-    }
-    if let Err(error) = document.context_mut().commit_mutations(queue) {
-        eprintln!("Nana 对话框下拉框没有接上字段名：{error}");
-    }
+fn field_column() -> Stack {
+    Stack::column(6.0).width(LengthSpec::Fill).min_width(LengthSpec::Px(0.0))
+}
+
+fn field_label(label: &'static str) -> nana_ui::runtime::Text {
+    parts::label_text(label, 12.0, 600, Some(SemanticColorRole::Muted))
 }
 
 /// 新建或重命名文件夹。名称为空或文件服务忙时主按钮不可用，提交后等结果再关。
@@ -270,13 +247,15 @@ pub fn smart_folder_dialog(model: &ShellViewModel) -> Option<AnyView> {
             .size(ControlSize::Medium);
         control.disabled = busy;
         Arc::make_mut(&mut control.style.layout).width = Some(LengthSpec::Fill);
-        let control = widget(control)
-            .key(format!("smart-field-{label}"))
-            .on_cx(move |_, event: &SelectChanged, cx| {
-                cx.dispatch_program_all(sidebar_message(SidebarMessage::SetSmartFolderField { field, value: event.value.to_string() }));
-            })
-            .into_any();
-        self::field(label, control)
+        select_field(label, move |caption| {
+            widget(control)
+                .key(format!("smart-field-{label}"))
+                .labelled_by(caption)
+                .on_cx(move |_, event: &SelectChanged, cx| {
+                    cx.dispatch_program_all(sidebar_message(SidebarMessage::SetSmartFolderField { field, value: event.value.to_string() }));
+                })
+                .into_any()
+        })
     };
     // `.smart-folder-dialog__grid`：两列等宽（`repeat(2, minmax(0, 1fr))`），行列间距 12px。
     let grid = |cells: Vec<AnyView>| -> AnyView {
@@ -405,13 +384,16 @@ pub fn playlist_create_dialog(model: &ShellViewModel) -> Option<AnyView> {
         .key("playlist-dialog-name")
         .on_cx(|_, event: &TextChanged, cx| cx.dispatch_program_all(ShellMessage::NewPlaylistNameChanged(event.value.to_string())))
         .into_any();
-    let type_select = widget(select)
-        .key("playlist-dialog-type")
-        .on_cx(|_, event: &SelectChanged, cx| cx.dispatch_program_all(ShellMessage::SelectPlaylistPlayer(event.value.to_string())))
-        .into_any();
+    let type_select = select_field("播放类型", move |caption| {
+        widget(select)
+            .key("playlist-dialog-type")
+            .labelled_by(caption)
+            .on_cx(|_, event: &SelectChanged, cx| cx.dispatch_program_all(ShellMessage::SelectPlaylistPlayer(event.value.to_string())))
+            .into_any()
+    });
     Some(
         widget(Dialog::new("新建播放集"))
-            .body(widget(Stack::column(12.0)).children((field("名称", name_input), field("播放类型", type_select))))
+            .body(widget(Stack::column(12.0)).children((field("名称", name_input), type_select)))
             .footer(actions(None, vec![
                 widget(ghost_button("取消")).key("playlist-dialog-cancel").on_cx(|_, _: &Activate, cx| {
                     cx.dispatch_program_all(ShellMessage::ClosePlaylistDialog);

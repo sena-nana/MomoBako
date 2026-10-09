@@ -402,7 +402,7 @@ mod tests {
         let field = labeled_input_id(&window, "文件夹名称");
         let document_id = window.document.document();
         window.document.context_mut().focus_node(document_id, field).expect("焦点");
-        press_escape(&mut window, &mut input);
+        press_escape(&mut model, &mut window, &mut input);
         prepare_motion(&mut model, &mut window);
         assert!(!model.sidebar.folder_dialog.open, "焦点在对话框输入框时 Escape 应该关掉它");
 
@@ -675,12 +675,21 @@ mod tests {
         model
     }
 
+    /// 拖放目标的中心：文件区是 `file-column`，空库页是 `empty-repository-page`。
     fn drop_point(window: &ApplicationWindow, kind: &str) -> (f32, f32) {
-        let mark = format!("momobako-drop:{kind}");
+        let key = match kind {
+            "files" => "file-column",
+            "empty" => "empty-repository-page",
+            other => panic!("没有拖放目标 {other}"),
+        };
         let document = window.document.document();
-        let world = window.document.context().world();
-        let marker = world.document_order(document).into_iter().find(|id| world.text(*id) == Some(mark.as_str())).unwrap_or_else(|| panic!("没有拖放标记 {kind}"));
-        let host = world.parent_id(marker).unwrap_or(marker);
+        let context = window.document.context();
+        let world = context.world();
+        let host = world
+            .document_order(document)
+            .into_iter()
+            .find(|id| context.assembly_path(*id).is_some_and(|path| path.rsplit('/').next() == Some(key)))
+            .unwrap_or_else(|| panic!("没有拖放目标 {kind}"));
         let bounds = world.layout_box(host).unwrap_or_else(|| panic!("拖放目标没有布局"));
         assert!(bounds.width >= 40.0 && bounds.height >= 40.0, "拖放目标太小：{bounds:?}");
         (bounds.x + bounds.width / 2.0, bounds.y + bounds.height / 2.0)
@@ -703,7 +712,8 @@ mod tests {
             .any(|node| node.label.as_deref() == Some(label) && node.selected == Some(true))
     }
 
-    fn press_escape(window: &mut ApplicationWindow, input: &mut HeadlessInput) {
+    /// 按一下 Escape：先经运行时路由，再照生产 `input_event` 走全局 Escape，发出的消息直接归约。
+    fn press_escape(model: &mut ShellViewModel, window: &mut ApplicationWindow, input: &mut HeadlessInput) {
         let escape = nana_ui::KeyInput {
             physical: nana_ui_platform::PhysicalKey("Escape".into()),
             logical: nana_ui_platform::LogicalKey("Escape".into()),
@@ -711,7 +721,11 @@ mod tests {
             repeat: false,
             modifiers: nana_ui::InputModifiers::default(),
         };
-        input.press(window.document.context_mut(), escape, None, None).expect("Escape");
+        let payload = nana_ui::InputPayload::Key(escape.clone());
+        let outcome = input.press(window.document.context_mut(), escape, None, None).expect("Escape");
+        if let Some(message) = crate::window_host::escape_message(model, &payload, outcome.disposition().prevent_default) {
+            model.reduce(message);
+        }
     }
 
     fn labeled_center(window: &ApplicationWindow, label: &str) -> (f32, f32) {
