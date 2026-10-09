@@ -398,8 +398,14 @@ fn external_file_drops_follow_the_current_panel() {
     let bounds = harness.nodes().into_iter().find(|node| node.id == column).expect("文件列的布局盒").bounds;
     let point = (bounds.x + bounds.width / 2.0, bounds.y + bounds.height / 2.0);
     let document = harness.window.document.document();
-    // 另起一路无头输入送拖放事件；它接管输入源，这个测试之后不再用支撑自带的输入。
-    let mut input = HeadlessInput::bind(harness.window.document.context_mut(), document);
+    // 另起一路输入源送拖放事件，支撑自带的输入源不受影响。
+    let mut input = HeadlessInput::bind_source(
+        harness.window.document.context_mut(),
+        nana_ui_platform::InputSourceId(7),
+        nana_ui_platform::EndpointGeneration(1),
+        document,
+    )
+    .expect("拖放输入源");
     let mut drag = |harness: &mut ShellHarness, kind: FileDragKind| {
         let payload = InputPayload::FileDrag(FileDragInput {
             kind,
