@@ -29,8 +29,7 @@ mod popover;
 mod dialogs;
 
 pub use dialogs::{
-    bind_field_labels, folder_delete_dialog, folder_dialog, playlist_create_dialog, repository_delete_dialog, smart_delete_dialog,
-    smart_folder_dialog,
+    folder_delete_dialog, folder_dialog, playlist_create_dialog, repository_delete_dialog, smart_delete_dialog, smart_folder_dialog,
 };
 pub use popover::repository_popover;
 pub use tree::folder_menu;

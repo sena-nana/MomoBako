@@ -94,7 +94,7 @@ pub fn poll(shell: &mut ShellViewModel) {
         let repo_id = shell.player.repo_id.clone();
         shell.reduce(super::ShellMessage::Player(command_message(command, repo_id)));
     }
-    shell.surface_dirty = true;
+    shell.mark_surface_dirty();
 }
 
 /// 把当前曲目推给系统控件。测试构建直接返回。

@@ -157,6 +157,59 @@ impl ShellHarness {
         self.view.content_roots()
     }
 
+    /// 侧栏内容的根节点。
+    pub fn sidebar_root(&self) -> Option<StableNodeId> {
+        self.view.sidebar_root()
+    }
+
+    /// 键路径最后一段是 `key` 的第一个节点（按文档顺序）。
+    pub fn keyed(&self, key: &str) -> Option<StableNodeId> {
+        let context = self.document().context();
+        context
+            .world()
+            .document_order(self.document().document())
+            .into_iter()
+            .find(|id| context.assembly_path(*id).is_some_and(|path| path.rsplit('/').next() == Some(key)))
+    }
+
+    /// 键路径里带 `key` 的第一个输入框（按无障碍树的顺序），找某一块里的输入框用。
+    pub fn input_within(&self, key: &str) -> StableNodeId {
+        let context = self.document().context();
+        self.nodes()
+            .into_iter()
+            .filter(|node| node.role == AccessibilityRole::TextInput)
+            .find(|node| context.assembly_path(node.id).is_some_and(|path| path.contains(key)))
+            .unwrap_or_else(|| panic!("{key} 里没有输入框"))
+            .id
+    }
+
+    /// 主区路由容器里现在的分支根节点。
+    pub fn route_branch(&self) -> Vec<StableNodeId> {
+        let container = self.keyed("primary-route").expect("主区路由容器");
+        self.document().context().world().node(container).map(|node| node.children.to_vec()).unwrap_or_default()
+    }
+
+    /// 按一下 Escape：先经运行时路由（控件自己处理掉的会标 `prevent_default`），再照生产
+    /// `input_event` 走全局 Escape；发出的消息立即归约并同步，再刷新一帧。返回是否发了消息。
+    pub fn press_escape(&mut self) -> bool {
+        let escape = nana_ui::KeyInput {
+            physical: nana_ui_platform::PhysicalKey("Escape".into()),
+            logical: nana_ui_platform::LogicalKey("Escape".into()),
+            state: nana_ui::KeyState::Pressed,
+            repeat: false,
+            modifiers: nana_ui::InputModifiers::default(),
+        };
+        let payload = nana_ui::InputPayload::Key(escape.clone());
+        let outcome = self.input.press(self.window.document.context_mut(), escape, None, None).expect("Escape");
+        let message = crate::window_host::escape_message(&self.model, &payload, outcome.disposition().prevent_default);
+        let sent = message.is_some();
+        if let Some(message) = message {
+            self.apply(message);
+        }
+        self.flush();
+        sent
+    }
+
     fn route(&mut self, composition: CompositionInput) {
         self.input.composition(self.window.document.context_mut(), composition).expect("输入法事件");
     }

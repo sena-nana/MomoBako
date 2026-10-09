@@ -277,6 +277,21 @@ impl ApplicationState for MomoBakoApplication {
         window_host::on_window_event(self, event, context)
     }
 
+    /// 运行时路由完的每个输入。Escape 没被控件处理掉、ViewModel 里还有能关的层时，
+    /// 发一条消息关掉最上面一层，和别的消息一样经 `update` 归约。
+    fn input_event(
+        &mut self,
+        _id: nana_ui_platform::WindowId,
+        input: nana_ui::RoutedInput<'_>,
+        _windows: &mut std::collections::HashMap<nana_ui_platform::WindowId, ApplicationWindow>,
+        context: &RuntimeProgramContext<Self::Message>,
+    ) -> Result<RuntimeProgramUpdate, FrameworkError> {
+        if let Some(message) = window_host::escape_message(&self.shell, &input.event.payload, input.disposition.prevent_default) {
+            context.dispatch(message);
+        }
+        Ok(RuntimeProgramUpdate::default())
+    }
+
     /// 系统或标题栏请求关窗：按关闭设置回答，确认和收到托盘时不带关闭命令。
     fn close_requested(
         &mut self,
