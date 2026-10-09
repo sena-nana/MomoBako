@@ -66,14 +66,13 @@ fn current_m4a_enters_the_session_without_a_sound_device() {
     send(&mut model, PlayerMessage::PlayItem { item_id: "missing".into() });
     assert_eq!(model.player.session.status, "idle");
     assert!(model.player.session.error.is_none());
-    assert_eq!(model.player.activity, "当前没有可播放条目");
+    assert!(model.player.current_id.is_none(), "队列里没有的条目不当成当前项");
 
     send(&mut model, PlayerMessage::PlayItem { item_id: "tone".into() });
     assert_eq!(model.player.session.status, "playing");
     assert!(model.player.session.duration_ms.unwrap_or(0) > 0);
     assert!(model.player.session.can_seek && model.player.session.can_volume);
     assert!(model.player.session.error.is_none());
-    assert!(!model.player.activity.contains(other));
 
     let bad = dir.join("bad.m4a");
     std::fs::write(&bad, b"\x00\x00\x00\x18ftypM4A \x00\x00\x00\x00M4A mp42").unwrap();
@@ -122,7 +121,6 @@ fn still_png_uses_real_pixels_and_a_missing_file_fails_without_a_frame() {
     assert!(model.player.session.error.is_none());
     let frame = model.player.still.as_ref().and_then(|item| item.frame.as_ref()).expect("画面");
     assert_eq!((frame.width, frame.height), (2, 3));
-    assert!(!model.player.activity.contains("需要升级"));
 
     model.player.queue = vec![still_item("gone", "pics/missing.png")];
     send(&mut model, PlayerMessage::PlayItem { item_id: "gone".into() });

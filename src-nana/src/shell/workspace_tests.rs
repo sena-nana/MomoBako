@@ -253,8 +253,8 @@ fn source_cache_issue_requests_settings_instead_of_a_path() {
     state.repositories = vec![repository];
     state.active_repo_id = Some("remote".into());
     assert_eq!(state.missing_primary_label(), "打开来源设置");
-    state.open_source_settings();
-    assert!(state.effects.contains(&WorkspaceEffect::OpenSourceSettings));
+    assert_eq!(state.open_source_settings().as_deref(), Some("filesystem"));
+    assert!(state.effects.is_empty(), "打开设置页由壳层归约完成，不再经宿主副作用");
     assert!(!state.path_prompt);
 }
 

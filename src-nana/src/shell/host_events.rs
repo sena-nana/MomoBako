@@ -141,6 +141,7 @@ mod tests {
         model.sidebar.take_effects();
         model.sidebar.tree_loading = false;
         model.admin.take_effects();
+        model.files.take_effects();
         model
     }
 

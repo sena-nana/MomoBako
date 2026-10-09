@@ -1,8 +1,10 @@
 //! 侧栏消息落到壳层页面上的那一层。
 
+use crate::backend::services::repository::PlaylistSummary;
+
 use super::super::workspace::{LibraryCategory, MainRegion, WorkspaceEffect};
 use super::super::{ShellPage, ShellViewModel};
-use super::{ShortcutAsset, ShortcutId, SidebarEffect, SidebarShortcut, WorkspacePanel};
+use super::{ShortcutAsset, ShortcutId, SidebarEffect, SidebarPlaylist, SidebarShortcut, WorkspacePanel};
 
 impl ShellViewModel {
     pub(crate) fn navigation_locked(&self) -> bool {
@@ -10,11 +12,17 @@ impl ShellViewModel {
             || self.workspace.active_repository().is_some_and(|repository| repository.status == "missing")
     }
 
-    /// 按当前活动仓库重新绑定侧栏。缺失和空仓库只清空，不发请求。
+    /// 按当前活动仓库重新绑定侧栏。缺失和空仓库只清空，不发请求。换到可用的仓库时照 Vue
+    /// `queueRepositoryBackgroundLoads` 在后台再读仓库动作（侧栏「动作」入口要用）和硬链接候选。
     pub(crate) fn bind_sidebar_repository(&mut self) {
         let missing = self.navigation_locked();
         let repo_id = self.workspace.active_repo_id.clone();
-        self.sidebar.bind_repository(repo_id.as_deref(), missing);
+        if self.sidebar.bind_repository(repo_id.as_deref(), missing)
+            && let Some(repo_id) = repo_id
+        {
+            self.admin.queue_actions(Some(repo_id.clone()));
+            self.files.check_hardlinks(&repo_id);
+        }
     }
 
     pub(crate) fn leave_settings_page(&mut self) {
@@ -27,11 +35,6 @@ impl ShellViewModel {
         let locked = self.navigation_locked();
         if self.sidebar.select_shortcut(&mut self.workspace, id, locked) {
             self.leave_settings_page();
-            self.detail = if self.workspace.panel == WorkspacePanel::Trash {
-                "正在读取回收站…".into()
-            } else {
-                format!("当前分类 {}", id.label())
-            };
         }
     }
 
@@ -41,7 +44,6 @@ impl ShellViewModel {
             self.leave_settings_page();
             self.selected_path = self.sidebar.selected_path.clone();
             self.current_directory = self.sidebar.current_directory.clone();
-            self.detail = self.sidebar.selected_path.clone().unwrap_or_else(|| self.current_directory.clone());
         }
     }
 
@@ -49,7 +51,6 @@ impl ShellViewModel {
     pub(crate) fn note_sidebar_browse(&mut self, path: &str) {
         self.files.current_path = path.to_string();
         self.files.loading = true;
-        self.files.activity = "正在读取目录…".into();
     }
 
     /// 悬停打开发生在 `prepare`。松手会先写下移动文案，拆树前要把目录加载盖回去。
@@ -69,7 +70,6 @@ impl ShellViewModel {
         if self.sidebar.open_folder(&mut self.workspace, &path, locked) {
             self.leave_settings_page();
             self.current_directory = self.sidebar.current_directory.clone();
-            self.detail = format!("正在读取目录 {path}…");
             self.mark_surface_dirty();
         }
     }
@@ -78,7 +78,6 @@ impl ShellViewModel {
         let locked = self.navigation_locked();
         if self.sidebar.select_smart_folder(&mut self.workspace, &smart_folder_id, locked) {
             self.leave_settings_page();
-            self.detail = format!("正在查询智能文件夹 {smart_folder_id}…");
         }
     }
 
@@ -95,8 +94,7 @@ impl ShellViewModel {
                 self.input.queue_attach_dialog();
             }
             Some(super::BackendRoute::OpenSettings(plugin_id)) => {
-                self.page = ShellPage::Settings;
-                self.reduce(super::super::ShellMessage::Admin(super::super::AdminMessage::RoutePlugin(plugin_id)));
+                super::super::admin::open_settings_page(self, Some(&plugin_id));
             }
             Some(super::BackendRoute::Form) => {}
             None => eprintln!("Nana 来源后端当前不可用：{plugin_id}"),
@@ -112,9 +110,36 @@ impl ShellViewModel {
     pub(crate) fn apply_playlist(&mut self, playlist_id: String) {
         if self.sidebar.select_playlist(&mut self.workspace, &playlist_id) {
             self.leave_settings_page();
-            self.selected_playlist_id = Some(playlist_id.clone());
-            self.detail = format!("正在读取播放集 {playlist_id}…");
+            self.selected_playlist_id = Some(playlist_id);
         }
+    }
+
+    /// 仓库的一份新播放集列表（侧栏读取、新建或删除以后）。侧栏和播放器换上同一份：播放器据此读成员、
+    /// 恢复存下的会话，文件右键的「加入播放列表」也从这里来，和 Vue 共用一份 `playlists` 一样。
+    /// 换了仓库的旧结果不写。`open` 是新建出来的播放集，照 Vue `createPlaylistInWorkspace` 接着点开它。
+    pub(crate) fn apply_playlist_list(&mut self, repo_id: &str, playlists: &[PlaylistSummary], open: Option<String>) {
+        if self.sidebar.bound_repo_id() != Some(repo_id) {
+            eprintln!("Nana 忽略其他仓库的播放集列表：{repo_id}");
+            return;
+        }
+        let rows = playlists.iter().map(SidebarPlaylist::from_summary).collect();
+        self.sidebar.apply_playlists(&mut self.workspace, repo_id, Ok(rows));
+        self.player.note_playlists(repo_id, playlists);
+        if let Some(playlist_id) = open {
+            self.apply_playlist(playlist_id);
+        }
+    }
+
+    /// 侧栏「新建播放集」。和 Vue `openPlaylistDialog` 一样：没有仓库或仓库丢失时不开；
+    /// 每次打开都清空名称，类型默认选第一个可用的播放器类型。
+    pub(crate) fn open_playlist_dialog(&mut self) {
+        if self.workspace.active_repo_id.is_none() || self.navigation_locked() {
+            eprintln!("Nana 当前不能新建播放集");
+            return;
+        }
+        self.new_playlist_name.clear();
+        self.selected_new_playlist_player_type_id = self.playlist_players.first().map(|player| player.player_type_id.clone());
+        self.playlist_dialog_open = true;
     }
 
     pub(crate) fn apply_snapshot_sidebar(&mut self, snapshot: &crate::backend::services::repository::RepositorySnapshot) {
@@ -162,9 +187,8 @@ impl ShellViewModel {
             return;
         }
         match result {
-            Ok(count) => {
+            Ok(_) => {
                 self.sidebar.counts.recent = 0;
-                self.files.activity = format!("已清空最近使用 {count} 条。");
                 self.workspace.effects.push(WorkspaceEffect::LoadSnapshotSilent { repo_id: repo_id.to_string() });
             }
             Err(error) => {

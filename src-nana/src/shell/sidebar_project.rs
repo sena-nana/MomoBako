@@ -256,7 +256,7 @@ impl SidebarView {
                 extensions: !settings && panel == WorkspacePanel::Extensions,
                 logs: !settings && panel == WorkspacePanel::Logs,
                 tasks_open: model.admin.popover_open,
-                tasks: model.active_tasks,
+                tasks: model.task_rows().len(),
             },
         }
     }

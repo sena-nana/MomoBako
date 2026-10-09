@@ -5,8 +5,9 @@
 use super::super::super::{InspectEffect, InspectMessage, ShellMessage};
 use super::super::support::{builtin_audio_formats, find_player_for_extension};
 use super::super::wav_player::{builtin_candidates, candidates_for, SYSTEM_PLAYER_TYPE_ID};
-use super::super::{PlayerMessage, QueueItem};
-use super::{asset, queue_item, send, shell, temp_dir};
+use super::super::support::StoredSession;
+use super::super::{PlaybackMode, PlayerEffect, PlayerMessage, QueueItem};
+use super::{asset, detail, item, load_list, queue_item, send, shell, summary, temp_dir};
 
 /// 8-bit 单声道 PCM。`data` 里每个字节是一个样本。
 fn pcm_wav(sample_rate: u32, channels: u16, bits: u16, data: &[u8]) -> Vec<u8> {
@@ -239,7 +240,8 @@ fn m4a_preview_takes_over_the_bar_without_the_audio_plugin() {
     let bare = preview(false);
     assert!(!bare.player.preview_owns_bar());
     assert!(bare.player.current_item().is_none());
-    assert_eq!(bare.player.activity, "没有可用于播放此媒体的插件");
+    let bar = super::super::super::player_view::bar::BarProps::from_model(&bare);
+    assert_eq!(bar.subtitle(), "没有可用于播放此媒体的插件", "和 Vue 一样写在播放条次行，没有条目时也写");
 }
 
 /// 播放时钟只有一份：每帧往前拨，到头按自然结束切到下一项并接着放。
@@ -266,5 +268,54 @@ fn the_clock_advances_and_a_natural_end_moves_to_the_next_item() {
     assert_eq!(model.player.session.current_time_ms, 0);
     send(&mut model, PlayerMessage::SetPlaying(false));
     assert!(!crate::shell::poll_timers(&mut model), "暂停时时钟不动");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// 存下的播放会话照 Vue `setActivePlaylist(.., { restore: true })` 恢复：装载期间播放条显示存下的进度，
+/// 会话文件不被装载清零；装好以后能跳转就跳到存下的位置（超过时长时夹到结尾），不在播放就停在那里。
+#[test]
+fn restoring_a_session_resumes_at_the_stored_position() {
+    let dir = temp_dir("wav-restore");
+    let path = dir.join("tone.wav");
+    std::fs::write(&path, pcm_wav(8_000, 1, 8, &[128u8; 8_000])).unwrap();
+    let mut tone = item("tone", "ready");
+    tone.path = path.display().to_string();
+    tone.filename = "tone.wav".into();
+    tone.extension = "wav".into();
+    let playlist = detail("repo", "pl", "momobako.playlist.wav", "audio", vec![tone]);
+    let stored = |position: u64| StoredSession {
+        repo_id: "repo".into(),
+        playlist_id: "pl".into(),
+        player_type_id: "momobako.playlist.wav".into(),
+        current_item_id: "tone".into(),
+        current_time_ms: position,
+        duration_ms: 1_000,
+        mode: PlaybackMode::ListLoop,
+        volume: 0.4,
+        is_playing: false,
+    };
+
+    let mut model = shell(true);
+    model.player.stored.insert("repo".into(), stored(600));
+    load_list(&mut model, vec![summary("repo", "pl", "momobako.playlist.wav", "audio")]);
+    assert!(model.player.take_effects().iter().any(|effect| matches!(effect, PlayerEffect::RestoreDetail { .. })));
+    model.reduce(ShellMessage::Player(PlayerMessage::RestoreDetail(Ok(playlist.clone()))));
+    assert_eq!(model.player.session.status, "loading");
+    assert_eq!(model.player.time_text(), "0:00 / 0:01", "装载期间显示存下的进度和时长");
+    assert_eq!(model.player.session.current_time_ms, 600);
+    assert_eq!(model.player.stored["repo"].current_time_ms, 600, "装载不能把存下的进度清零");
+    super::super::fulfill_loads(&mut model);
+    assert_eq!(model.player.session.status, "paused", "存下时没在播放");
+    assert_eq!(model.player.session.current_time_ms, 600, "装好以后接着存下的位置");
+    assert_eq!(model.player.session.volume, 0.4);
+    send(&mut model, PlayerMessage::SetPlaying(true));
+    assert_eq!(model.player.session.status, "playing");
+
+    let mut beyond = shell(true);
+    beyond.player.stored.insert("repo".into(), stored(5_000));
+    load_list(&mut beyond, vec![summary("repo", "pl", "momobako.playlist.wav", "audio")]);
+    beyond.player.take_effects();
+    send(&mut beyond, PlayerMessage::RestoreDetail(Ok(playlist)));
+    assert_eq!(beyond.player.session.current_time_ms, 1_000, "超过时长时夹到结尾");
     let _ = std::fs::remove_dir_all(dir);
 }

@@ -1,102 +1,33 @@
 //! 壳层 ViewModel 状态转换回归测试。
 
     use super::{ShellMessage, ShellPage, ShellViewModel};
-    use crate::backend::services::repository::TaskProgressSnapshot;
 
+    /// 「未保存」页的脏状态来自注释草稿，关窗时按脏处理。
     #[test]
-    fn shell_messages_reduce_to_user_visible_states() {
-        let mut model = ShellViewModel::for_page(ShellPage::Loading);
-        model.reduce(ShellMessage::PrimaryAction);
-        assert_eq!(model.page, ShellPage::Loading);
-
-        model.reduce(ShellMessage::Navigate(ShellPage::PluginSettings));
-        assert_eq!(model.detail, "正在读取页面数据…");
-
-        // 「未保存」页的脏状态来自注释草稿：编辑动作只报告草稿还在，主按钮重开预览也不丢草稿。
-        model = ShellViewModel::for_page(ShellPage::UnsavedEdit);
-        model.reduce(ShellMessage::EditAction);
+    fn unsaved_edit_page_keeps_the_draft_dirty() {
+        let model = ShellViewModel::for_page(ShellPage::UnsavedEdit);
         assert_eq!(model.page, ShellPage::UnsavedEdit);
-        assert_eq!(model.detail, "未保存的修改留在当前草稿");
         assert!(model.close_is_dirty());
-        model.reduce(ShellMessage::PrimaryAction);
-        assert!(model.close_is_dirty());
-        assert!(matches!(model.inspect.take_effects().as_slice(), [super::InspectEffect::LoadNative { path, .. }] if path == "notes/page.pdf"));
     }
 
-    #[test]
-    fn navigation_preserves_repository_and_task_context() {
-        let mut model = ShellViewModel::default();
-        model.repository_id = Some("repo-real".into());
-        model.file_entries = vec!["cover.png".into()];
-        model.active_task_ids = vec!["task-real".into()];
-        model.reduce(ShellMessage::TaskSnapshotLoaded { active: 1, completed: 2 });
-        model.reduce(ShellMessage::Navigate(ShellPage::TaskRunning));
-        assert_eq!(model.repository_id.as_deref(), Some("repo-real"));
-        assert_eq!(model.file_entries, ["cover.png"]);
-        assert_eq!(model.active_task_ids, ["task-real"]);
-        assert_eq!(model.detail, "1 个运行中任务 · 2 个近期完成任务");
-        model.reduce(ShellMessage::Navigate(ShellPage::Playlists));
-        assert_eq!(model.repository_id.as_deref(), Some("repo-real"));
-    }
-
+    /// 和 Vue `playlistDialogDisabled` 一样，名称为空或没有选类型时提交（含回车）不建、对话框留着。
     #[test]
     fn playlist_creation_requires_name_and_player_type() {
         let mut model = ShellViewModel::for_page(ShellPage::Playlists);
+        model.playlist_dialog_open = true;
+        model.selected_new_playlist_player_type_id = None;
         model.reduce(ShellMessage::CreatePlaylist);
-        assert_eq!(model.detail, "播放列表名称不能为空");
+        assert!(model.playlist_dialog_open, "名称为空不提交");
         model.reduce(ShellMessage::NewPlaylistNameChanged("我的列表".into()));
         model.reduce(ShellMessage::CreatePlaylist);
-        assert_eq!(model.detail, "请先选择播放器类型");
-    }
-
-    #[test]
-    fn playlist_reorder_keeps_item_ids_and_labels_aligned() {
-        let mut model = ShellViewModel::for_page(ShellPage::Playlists);
-        model.selected_playlist_id = Some("playlist-1".into());
-        model.playlist_item_ids = vec!["a".into(), "b".into()];
-        model.playlist_item_entries = vec!["A".into(), "B".into()];
-        model.reduce(ShellMessage::MovePlaylistItem { item_id: "b".into(), direction: -1 });
-        assert_eq!(model.playlist_item_ids, ["b", "a"]);
-        assert_eq!(model.playlist_item_entries, ["B", "A"]);
-        assert!(model.detail.contains("正在保存播放列表顺序"));
-    }
-
-    #[test]
-    fn task_progress_updates_running_detail_and_retains_terminal_rows() {
-        let mut model = ShellViewModel::for_page(ShellPage::TaskRunning);
-        model.reduce(ShellMessage::TaskProgressLoaded(vec![
-            TaskProgressSnapshot {
-                task_id: "task-1".into(),
-                protocol_id: "momobako.sync".into(),
-                status: "running".into(),
-                phase: Some("scanning".into()),
-                label: Some("扫描文件".into()),
-                current: Some(4),
-                total: Some(10),
-                percent: Some(40.0),
-                error: None,
-                updated_at: "now".into(),
-            },
-            TaskProgressSnapshot {
-                task_id: "task-2".into(),
-                protocol_id: "momobako.sync".into(),
-                status: "cancelled".into(),
-                phase: None,
-                label: Some("旧任务".into()),
-                current: None,
-                total: None,
-                percent: None,
-                error: Some("用户取消".into()),
-                updated_at: "now".into(),
-            },
-        ]));
-        assert_eq!(model.task_progress.len(), 2);
-        assert!(model.detail.contains("扫描文件"));
-        assert!(model.detail.contains("40%"));
+        assert!(model.playlist_dialog_open, "没有播放类型不提交");
+        model.reduce(ShellMessage::SelectPlaylistPlayer("momobako.playlist.audio-sequence".into()));
+        model.reduce(ShellMessage::CreatePlaylist);
+        assert!(!model.playlist_dialog_open);
     }
 
     /// 设置页只有主题会写设置文件。读回和保存结果整份替换设置，缓存上限和关闭行为照旧留给缓存和关窗流程；
-    /// 校验失败只写错误，不切页面。
+    /// 校验失败进状态区，不切页面。
     #[test]
     fn settings_results_keep_the_fields_without_a_settings_card() {
         let mut model = ShellViewModel::for_page(ShellPage::Settings);
@@ -111,13 +42,11 @@
         model.reduce(ShellMessage::SettingsThemeChanged("light".into()));
         model.reduce(ShellMessage::SettingsSaved(Err("缩略图缓存上限必须在 64–16384 MB 之间".into())));
         assert_eq!(model.page, ShellPage::Settings);
-        assert!(model.settings_error.is_some());
+        assert!(model.status.failure().is_some_and(|failure| failure.message.starts_with("保存应用设置失败")));
         let saved = crate::settings::ApplicationSettings { theme: "light".into(), ..loaded };
         model.reduce(ShellMessage::SettingsSaved(Ok(saved.clone())));
         assert_eq!(model.page, ShellPage::Settings);
         assert_eq!(model.settings, saved);
-        assert!(model.settings_error.is_none());
-        assert_eq!(model.detail, "应用设置已保存");
     }
 
     fn playlist_detail(repo_id: &str, playlist_id: &str) -> crate::backend::services::repository::PlaylistDetail {
@@ -140,26 +69,24 @@
         }
     }
 
+    /// 播放集详情只写播放集的状态，不改页面身份：主区走哪条路由由面板决定。
     #[test]
     fn stale_playlist_detail_keeps_the_bound_repository_screen() {
         let mut model = ShellViewModel::default();
         model.reduce(ShellMessage::PlaylistDetailLoaded(Ok(playlist_detail("repo-b", "pl"))));
-        assert_eq!(model.page, ShellPage::Playlists);
+        assert_eq!(model.page, ShellPage::Loading);
         assert_eq!(model.selected_playlist_id.as_deref(), Some("pl"));
 
         let mut model = ShellViewModel::default();
         model.page = ShellPage::FileList;
-        model.detail = "保持".into();
         model.sidebar.bind_repository(Some("repo-a"), false);
         model.reduce(ShellMessage::PlaylistDetailLoaded(Ok(playlist_detail("repo-b", "pl"))));
         assert_eq!(model.page, ShellPage::FileList);
-        assert_eq!(model.detail, "保持");
         assert!(model.selected_playlist_id.is_none());
 
         model.reduce(ShellMessage::PlaylistDetailLoaded(Ok(playlist_detail("repo-a", "pl"))));
-        assert_eq!(model.page, ShellPage::Playlists);
+        assert_eq!(model.page, ShellPage::FileList);
         assert_eq!(model.selected_playlist_id.as_deref(), Some("pl"));
-        assert_eq!(model.detail, "早晨 · 0 个项目");
     }
 
     /// 壳层视图只发一种 `ShellMessage`，`dispatch_program` 同帧同类型只留最后一条，会吞掉操作。

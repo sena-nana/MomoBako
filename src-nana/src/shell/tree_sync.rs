@@ -292,7 +292,7 @@ fn fail(model: &mut ShellViewModel, error: String) {
 }
 
 /// 操作进度的更新时间：墙钟毫秒。任务中心的条目按它排先后。
-fn now_ms() -> i64 {
+pub(super) fn now_ms() -> i64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|elapsed| elapsed.as_millis() as i64).unwrap_or_default()
 }
 

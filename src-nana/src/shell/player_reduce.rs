@@ -1,6 +1,6 @@
 //! 播放消息归约。
 //!
-//! 播放列表加载仍交回壳层更新标签。过期详情在这里先跳过，避免播放条切到别的仓库。
+//! 播放集列表由壳层的 `apply_playlist_list` 同时交给侧栏和这里。过期详情在这里先跳过，避免播放条切到别的仓库。
 
 use super::super::files::repository_is_writable;
 use super::super::{ShellMessage, ShellViewModel};
@@ -13,12 +13,6 @@ pub(crate) fn reduce_message(model: &mut ShellViewModel, message: ShellMessage) 
             reduce_player(model, message);
             super::super::inspect::sync_preview_frame(model);
             None
-        }
-        ShellMessage::PlaylistsLoaded(Ok(playlists)) => {
-            if let Some(repo_id) = model.workspace.active_repo_id.clone().or(model.repository_id.clone()) {
-                model.player.note_playlists(&repo_id, &playlists);
-            }
-            Some(ShellMessage::PlaylistsLoaded(Ok(playlists)))
         }
         ShellMessage::PlaylistPlayersLoaded(Ok(players)) => {
             model.player.note_players(players.clone());
@@ -39,30 +33,6 @@ pub(crate) fn reduce_message(model: &mut ShellViewModel, message: ShellMessage) 
     }
 }
 
-impl super::PlayerState {
-    pub(super) fn note_download_task(&mut self, task_id: String) {
-        if task_id.is_empty() {
-            eprintln!("Nana 下载任务编号是空的");
-            return;
-        }
-        self.download_task_id = Some(task_id);
-    }
-
-    pub(super) fn cancel_download(&mut self) {
-        let Some(task_id) = self.download_task_id.clone() else {
-            eprintln!("Nana 下载任务还没有可取消的句柄");
-            self.activity = "下载任务还没有可取消的句柄".into();
-            return;
-        };
-        self.activity = "正在取消下载…".into();
-        self.effects.push(super::PlayerEffect::CancelDownload { task_id });
-    }
-
-    pub(super) fn apply_download_progress(&mut self, event: super::DownloaderPlaylistProgressEvent) {
-        self.apply_download(event);
-    }
-}
-
 fn reduce_player(model: &mut ShellViewModel, message: PlayerMessage) {
     let writable = model.workspace.active_repository().is_some_and(|repository| repository_is_writable(&repository.status, &repository.capabilities));
     let repo_id = model.workspace.active_repo_id.clone();
@@ -75,9 +45,6 @@ fn reduce_player(model: &mut ShellViewModel, message: PlayerMessage) {
         PlayerMessage::PlayItem { item_id } => {
             model.player.play_item(&item_id, true);
             model.player.publish(&mut model.inspect);
-        }
-        PlayerMessage::PlayEntry { repo_id, kind, extension, asset_id, is_virtual: _, path, filename } => {
-            model.player.play_entry(&repo_id, &kind, &extension, &asset_id, &path, &filename, &mut model.inspect);
         }
         PlayerMessage::PlayNext { natural_end } => model.player.play_next(natural_end, &mut model.inspect),
         PlayerMessage::PlayPrevious => model.player.play_previous(&mut model.inspect),
@@ -105,14 +72,6 @@ fn reduce_player(model: &mut ShellViewModel, message: PlayerMessage) {
             model.player.note_memberships(&repo_id, result, model.workspace.active_repo_id.as_deref());
         }
         PlayerMessage::MembershipSaved(result) => model.player.note_membership_saved(result),
-        PlayerMessage::StartDownload(request) => model.player.start_download(request),
-        PlayerMessage::DownloadCompleted(result) => model.player.finish_download(result),
-        PlayerMessage::CancelDownload => model.player.cancel_download(),
-        PlayerMessage::NoteDownloadTask(task_id) => model.player.note_download_task(task_id),
-        PlayerMessage::DownloadProgress(event) => {
-            model.player.apply_download_progress(event);
-            model.player.activity = model.player.download_text();
-        }
         PlayerMessage::Reorder { source, before } => {
             model.player.reorder(&source, before.as_deref(), playlist_id.as_deref(), &item_ids, writable, repo_id.as_deref());
         }
@@ -139,7 +98,6 @@ fn reduce_player(model: &mut ShellViewModel, message: PlayerMessage) {
                 model.player.clear_stored(&repo_id);
             }
             model.player.restore_playlist_id = None;
-            model.player.activity = error;
         }
     }
 }

@@ -128,7 +128,6 @@ fn trim_partial_utf8(bytes: &[u8]) -> &[u8] {
 /// 音视频预览先排队读文件。可解码音频成功后才允许播放控制。
 pub(super) fn begin_media(state: &mut super::InspectState, repo_id: &str, path: &str) {
     state.loading = true;
-    state.activity = "正在读取媒体…".into();
     state.body = super::PreviewBody::Empty;
     state.error.clear();
     state.effects.push(super::InspectEffect::LoadMedia {
@@ -151,7 +150,6 @@ pub(super) fn note_media(
         return;
     }
     state.loading = false;
-    state.activity.clear();
     match result {
         Ok(session) => {
             state.error.clear();
@@ -164,7 +162,6 @@ pub(super) fn note_media(
             let repo_id = state.repo_id.clone().unwrap_or_default();
             state.body = super::PreviewBody::Media(failed_session(&repo_id, error.clone()));
             state.error = error;
-            state.activity = state.error.clone();
         }
     }
 }

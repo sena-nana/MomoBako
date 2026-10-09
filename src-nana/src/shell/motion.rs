@@ -16,8 +16,6 @@ pub const PANEL_RISE_MS: u64 = 160;
 pub const PROGRESS_WIDTH_MS: u64 = 180;
 /// 不确定进度呼吸。`progress-pulse 1.15s ease-in-out`。
 pub const PULSE_MS: u64 = 1150;
-/// 媒体下载扫光。`media-preview-progress-sweep 1.05s ease-in-out`。
-pub const SWEEP_MS: u64 = 1050;
 /// 忙指示旋转。`.spin` 的 `spin 0.8s linear`。
 pub const SPINNER_MS: u64 = 800;
 /// 侧栏分组工具。`.sb-section__tools` 的 `opacity 0.12s ease`。
@@ -66,7 +64,6 @@ pub struct MotionState {
     startup: Option<Track>,
     operation: Option<Track>,
     pulse: Option<Track>,
-    sweep: Option<Track>,
     spinner: Option<Track>,
     tools: Option<Track>,
     footer: Option<Track>,
@@ -76,7 +73,6 @@ pub struct MotionState {
     footer_hover: bool,
     spinner_on: bool,
     pulse_on: bool,
-    sweep_on: bool,
     sidebar_collapsed: bool,
     sidebar_expanded_width: f32,
 }
@@ -90,7 +86,6 @@ impl Default for MotionState {
             startup: None,
             operation: None,
             pulse: None,
-            sweep: None,
             spinner: None,
             tools: None,
             footer: None,
@@ -100,7 +95,6 @@ impl Default for MotionState {
             footer_hover: false,
             spinner_on: false,
             pulse_on: false,
-            sweep_on: false,
             sidebar_collapsed: false,
             sidebar_expanded_width: crate::theme_map::SIDEBAR_DEFAULT_PX,
         }
@@ -142,7 +136,7 @@ impl MotionState {
         if self.reduced {
             return false;
         }
-        [&self.panel, &self.startup, &self.operation, &self.pulse, &self.sweep, &self.spinner, &self.tools, &self.footer, &self.sidebar]
+        [&self.panel, &self.startup, &self.operation, &self.pulse, &self.spinner, &self.tools, &self.footer, &self.sidebar]
             .into_iter()
             .any(|track| track.as_ref().is_some_and(|track| !track.finished(self.now_ms)))
     }
@@ -205,11 +199,6 @@ impl MotionState {
     pub fn set_pulse(&mut self, on: bool) {
         self.pulse_on = on;
         self.pulse = on.then(|| track(self.now_ms, 0.0, 1.0, PULSE_MS, EasingKind::EaseInOut, !self.reduced));
-    }
-
-    pub fn set_sweep(&mut self, on: bool) {
-        self.sweep_on = on;
-        self.sweep = on.then(|| track(self.now_ms, 0.0, 1.0, SWEEP_MS, EasingKind::EaseInOut, !self.reduced));
     }
 
     pub fn set_tools_hover(&mut self, hover: bool) {
@@ -290,10 +279,6 @@ impl MotionState {
         self.tools_hover || self.tools.as_ref().is_some_and(|track| track.value(self.now_ms) > 0.01)
     }
 
-    pub fn sweep_on(&self) -> bool {
-        self.sweep_on && !self.reduced
-    }
-
     pub fn spinner_degrees(&self) -> f32 {
         if !self.spinner_on || self.reduced {
             return 0.0;
@@ -312,15 +297,6 @@ impl MotionState {
         } else {
             lerp(1.0, PULSE_LOW, ease_in_out((progress - 0.5) / 0.5))
         }
-    }
-
-    /// 扫光平移，单位是轨道宽度的百分比。关键帧从 -120 到 250。
-    pub fn sweep_percent(&self) -> f32 {
-        if !self.sweep_on || self.reduced {
-            return 0.0;
-        }
-        let progress = self.sweep.as_ref().map(|track| ease_in_out(track.loop_progress(self.now_ms))).unwrap_or(0.0);
-        lerp(-120.0, 250.0, progress)
     }
 
     pub fn tools_opacity(&self) -> f32 {
@@ -357,7 +333,6 @@ impl MotionState {
         }
         self.spinner = None;
         self.pulse = None;
-        self.sweep = None;
         if let Some(track) = &mut self.tools {
             *track = track_done(if self.tools_hover { 1.0 } else { 0.0 });
         }
@@ -534,7 +509,6 @@ mod tests {
         motion.set_operation_percent(Some(32.0));
         motion.set_spinner(true);
         motion.set_pulse(true);
-        motion.set_sweep(true);
         motion.set_tools_hover(true);
         motion.set_footer_hover(true);
         motion.set_sidebar_collapsed(true, 276.0);
@@ -546,7 +520,6 @@ mod tests {
         assert_eq!(motion.operation_percent(), Some(32.0));
         assert_eq!(motion.spinner_degrees(), 0.0);
         assert_eq!(motion.pulse_opacity(), 1.0);
-        assert_eq!(motion.sweep_percent(), 0.0);
         assert_eq!(motion.tools_opacity(), 1.0);
         assert_eq!(motion.footer_opacity(), 1.0);
         assert_eq!(motion.sidebar_presented_width(), 0.0);
@@ -589,12 +562,8 @@ mod tests {
         motion.advance(motion.now_ms() + SIDEBAR_COLLAPSE_MS);
         assert_eq!(motion.sidebar_presented_width(), 0.0);
         motion.set_pulse(true);
-        motion.set_sweep(true);
         assert_eq!(motion.pulse_opacity(), PULSE_LOW);
-        assert_eq!(motion.sweep_percent(), -120.0);
         let looped = motion.now_ms();
-        motion.advance(looped + SWEEP_MS);
-        assert_eq!(motion.sweep_percent(), -120.0);
         motion.advance(looped + PULSE_MS);
         assert_eq!(motion.pulse_opacity(), PULSE_LOW);
     }

@@ -247,3 +247,20 @@ fn a_search_hit_on_the_clicked_file_still_opens_the_preview() {
     model.reduce(ShellMessage::AssetDetailLoaded(Ok(bare_detail("notes/page.pdf"))));
     assert!(model.files.preview_open(model.inspect.target_path.as_deref()), "搜索结果读回同一个文件后进入预览");
 }
+
+/// 单击文件以后再单击文件夹，列表不换成那个文件的预览页；文件的详情还没读回来时点文件夹也一样。
+#[test]
+fn clicking_a_folder_after_a_file_keeps_the_list() {
+    let (_, mut model) = crate::shell::acceptance_gap_models()
+        .into_iter()
+        .find(|(name, _)| *name == "live-files-selected")
+        .expect("单击选中 notes/page.pdf 的场景");
+    model.reduce(ShellMessage::Files(FilesMessage::ActivateRow("assets".into())));
+    assert_eq!(model.files.selected_paths(), ["assets".to_string()]);
+    assert!(!super::super::files_view::previewing(&model), "单击文件夹不打开上一个文件的预览");
+
+    model.reduce(ShellMessage::Files(FilesMessage::ActivateRow("cover.png".into())));
+    model.reduce(ShellMessage::Files(FilesMessage::ActivateRow("assets".into())));
+    model.reduce(ShellMessage::AssetDetailLoaded(Ok(bare_detail("cover.png"))));
+    assert!(!super::super::files_view::previewing(&model), "单击读取晚到也只在右侧详情里看");
+}

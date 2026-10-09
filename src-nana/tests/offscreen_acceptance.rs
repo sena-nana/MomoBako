@@ -3,10 +3,13 @@
 //! 每个证据文件都来自生产 `RuntimeDocument` 和同一个 `RuntimeAgentSession`，
 //! 不创建第二棵 UI 树。
 use momobako_nana::appearance::{self, Appearance};
+use momobako_nana::backend::services::repository::{
+    FileBrowserEntry, FileBrowserSnapshot, RepositoryStructureCacheState, TaskProgressSnapshot,
+};
 use momobako_nana::theme_map::clear_matches_background;
 use momobako_nana::{
     acceptance_document_at_width, acceptance_document_for,
-    shell::{ShellPage, ShellViewModel},
+    shell::{ShellMessage, ShellPage, ShellViewModel},
 };
 use nana_ui_devtools::agent::{AgentSession, RuntimeAgentSession, protocol::ThemeName};
 use nana_ui_devtools::offscreen;
@@ -283,20 +286,82 @@ fn settle_dialogs(session: &mut RuntimeAgentSession) -> Result<(), String> {
     session.flush().map(|_| ()).map_err(|e| e.to_string())
 }
 
+/// 根目录读回 `entries` 的结果，仓库是模型当前的活动仓库。
+fn root_listing(model: &ShellViewModel, entries: Vec<FileBrowserEntry>) -> ShellMessage {
+    ShellMessage::FileBrowserLoaded(Ok(FileBrowserSnapshot {
+        repo_id: model.workspace.active_repo_id.clone().unwrap_or_default(),
+        root_path: "C:/acceptance".into(),
+        backend_plugin_id: "momobako.local-filesystem".into(),
+        backend_kind: "filesystem".into(),
+        cache_state: RepositoryStructureCacheState::Ready,
+        indexed_at: None,
+        current_path: String::new(),
+        total_entries: entries.len(),
+        loaded_count: entries.len(),
+        next_offset: None,
+        has_more: false,
+        special_location: None,
+        tree: None,
+        entries,
+    }))
+}
+
+/// 根目录下的一个文件条目。
+fn file_entry(name: &str) -> FileBrowserEntry {
+    FileBrowserEntry {
+        path: name.into(),
+        name: name.into(),
+        kind: "file".into(),
+        extension: name.rsplit_once('.').map(|(_, extension)| extension.to_string()),
+        size_bytes: Some(2_048),
+        size_label: Some("2 KB".into()),
+        modified_at: None,
+        asset_id: None,
+        status: None,
+        thumbnail_path: None,
+        thumbnail_custom: false,
+        hardlink_group_id: None,
+        hardlink_state: None,
+        tags: Vec::new(),
+        alias_paths: Vec::new(),
+        folder_metadata: None,
+        metadata: Default::default(),
+        is_virtual: false,
+        provider_id: None,
+        provider_item_id: None,
+        source_payload: None,
+        local_absolute_path: None,
+    }
+}
+
 fn special_models() -> Vec<(&'static str, ShellViewModel)> {
+    // 根目录只有一个超长文件名：卡片标题要截断，不撑开列表。
     let mut long = ShellViewModel::for_page(ShellPage::FileList);
-    long.file_entries = vec!["这是一个用于验证截断行为的超长文件名——项目资料——最终版本——2026-10-02——带有更多扩展信息.png".into()];
-    long.detail =
-        "这是一个用于验证长状态消息不会挤出主内容区域的状态描述：同步索引仍在后台运行，请稍候…"
-            .into();
+    let listing = root_listing(&long, vec![file_entry("这是一个用于验证截断行为的超长文件名——项目资料——最终版本——2026-10-02——带有更多扩展信息.png")]);
+    long.reduce(listing);
+    // 根目录读回来是空的：文件列表显示空目录。
     let mut empty = ShellViewModel::for_page(ShellPage::FileList);
-    empty.file_entries.clear();
-    empty.detail = "当前目录为空，可以从文件夹或拖放导入资源".into();
+    let listing = root_listing(&empty, Vec::new());
+    empty.reduce(listing);
+    // 设置保存被拒：状态区写出原因。
     let mut disabled = ShellViewModel::for_page(ShellPage::SettingsError);
-    disabled.settings_error = Some("设置校验失败：保存操作暂不可用".into());
+    disabled.reduce(ShellMessage::SettingsSaved(Err("保存操作暂不可用".into())));
+    // 任务页自带的「扫描默认资源库」留在第一行，后面再跟 11 个运行中的任务，一共 12 行。
     let mut dense = ShellViewModel::for_page(ShellPage::TaskRunning);
-    dense.active_task_ids = (0..12).map(|i| format!("task-{i:02}")).collect();
-    dense.detail = "高密度任务列表 · 12 个运行中任务 · 24 个近期完成任务".into();
+    let mut tasks = dense.task_progress.clone();
+    tasks.extend((1..12u8).map(|i| TaskProgressSnapshot {
+        task_id: format!("task-{i:02}"),
+        protocol_id: "momobako.repository.sync".into(),
+        status: "running".into(),
+        phase: None,
+        label: Some(format!("扫描分区 {i:02}")),
+        current: None,
+        total: None,
+        percent: Some(f32::from(i) * 8.0),
+        error: None,
+        updated_at: "0".into(),
+    }));
+    dense.reduce(ShellMessage::TaskProgressLoaded(tasks));
     let mut scenes = vec![
         ("long-content", long),
         ("empty-list", empty),

@@ -46,8 +46,9 @@ pub fn dispatch_files_effects(app: &mut MomoBakoApplication, context: &RuntimePr
             }
             FilesEffect::Delete { repo_id, paths, mode } => dispatch_delete(app, context, repo_id, paths, mode),
             FilesEffect::MutateTrash { repo_id, action, paths } => dispatch_trash(app, context, repo_id, action, paths),
-            FilesEffect::LoadHardlinks { repo_id } => dispatch_hardlinks(app, context, repo_id, false),
-            FilesEffect::RefreshHardlinks { repo_id } => dispatch_hardlinks(app, context, repo_id, true),
+            FilesEffect::LoadHardlinks { repo_id } => dispatch_hardlinks(app, context, repo_id, HardlinkRead::Load),
+            FilesEffect::RefreshHardlinks { repo_id } => dispatch_hardlinks(app, context, repo_id, HardlinkRead::Refresh),
+            FilesEffect::CheckHardlinks { repo_id } => dispatch_hardlinks(app, context, repo_id, HardlinkRead::Check),
             FilesEffect::ConfirmHardlink { repo_id, candidate_id } => {
                 dispatch_confirm_hardlink(app, context, repo_id, candidate_id);
             }
@@ -429,16 +430,27 @@ fn dispatch_trash(
     }
 }
 
-/// 拉取硬链接候选。`silent` 为真时结果是 `HardlinksRefreshed`，失败不经 `note_hardlinks` 写入页面错误。
+/// 硬链接候选是为什么读的，结果按它交回不同的消息。
+#[derive(Clone, Copy)]
+enum HardlinkRead {
+    /// 复制以后：弹出确认，失败写进文件列表。
+    Load,
+    /// 结构更新的静默重读：只换列表。
+    Refresh,
+    /// 启动和换仓库后的后台读取：没有别的对话框时弹出确认，失败只记日志。
+    Check,
+}
+
+/// 拉取硬链接候选，结果按 `read` 交回。
 fn dispatch_hardlinks(
     app: &mut MomoBakoApplication,
     context: &RuntimeProgramContext<ShellMessage>,
     repo_id: String,
-    silent: bool,
+    read: HardlinkRead,
 ) {
     let Some(services) = app.services.as_ref() else {
         eprintln!("Nana 硬链接候选需要领域服务，当前服务未启动");
-        app.shell.reduce(hardlinks_message(silent, Err("领域服务未启动".into())));
+        app.shell.reduce(hardlinks_message(read, Err("领域服务未启动".into())));
         return;
     };
     let interaction = services.repository_interaction.clone();
@@ -452,18 +464,18 @@ fn dispatch_hardlinks(
                 size_label: candidate.size_label,
             }).collect()
         });
-        hardlinks_message(silent, result)
+        hardlinks_message(read, result)
     })) {
         eprintln!("Nana 硬链接候选任务提交失败：{error}");
-        app.shell.reduce(hardlinks_message(silent, Err(format!("硬链接候选任务提交失败：{error}"))));
+        app.shell.reduce(hardlinks_message(read, Err(format!("硬链接候选任务提交失败：{error}"))));
     }
 }
 
-fn hardlinks_message(silent: bool, result: Result<Vec<HardlinkPrompt>, String>) -> ShellMessage {
-    files_message(if silent {
-        FilesMessage::HardlinksRefreshed(result)
-    } else {
-        FilesMessage::HardlinksLoaded(result)
+fn hardlinks_message(read: HardlinkRead, result: Result<Vec<HardlinkPrompt>, String>) -> ShellMessage {
+    files_message(match read {
+        HardlinkRead::Load => FilesMessage::HardlinksLoaded(result),
+        HardlinkRead::Refresh => FilesMessage::HardlinksRefreshed(result),
+        HardlinkRead::Check => FilesMessage::HardlinksChecked(result),
     })
 }
 

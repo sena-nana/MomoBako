@@ -18,7 +18,7 @@ yarn test:nana:offscreen
 
 - 15 页：`ShellPage` 的每一种，经 `ShellViewModel::for_page` → `acceptance::seed` 铺数据。
 - 42 个补充场景：`acceptance_gap_models()`，定义在 `src-nana/src/shell/acceptance_*.rs` 各自的 `models()`。
-- 4 个压力场景，只在这个测试里：长文件名和长状态、空列表、禁用和失败反馈、高密度任务列表。它们改的字段（`file_entries`、`detail`、`settings_error`、`active_task_ids`）没有视图读取，画出来和 `file-list`、`settings-error`、`task-running` 一样。
+- 4 个压力场景，只在这个测试里：`long-content` 根目录读回一个超长文件名，`empty-list` 根目录读回空列表，`disabled-feedback` 在设置错误页上保存设置被拒（状态区写原因），`dense-list` 任务弹层里 12 个运行中任务。都经真实消息归约。
 
 有仓库的场景都从 `acceptance_base.rs` 的共用底子起步：照产品启动依次归约资源库列表、同步、仓库摘要、首屏目录和侧栏的读取结果，数据和 Vue 夹具 `base()` 一致。场景要别的条目、目录树、播放集、播放器或仓库时改底子的字段。
 

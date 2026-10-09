@@ -15,7 +15,7 @@ use crate::backend::services::repository::{
 use super::super::super::workspace::{LibraryCategory, WorkspacePanel, WorkspaceRepository};
 use super::super::super::{FilesEffect, ShellMessage, ShellPage, ShellViewModel};
 use super::super::{InspectEffect, InspectMessage, InspectState};
-use super::{AdvancedField, FilterList, MatchMode, MetadataInput, SearchRow, SortDirection};
+use super::{AdvancedField, FilterList, MetadataInput, SearchRow, SortDirection};
 
 fn row(repo_id: &str, asset_id: &str, path: &str) -> SearchRow {
     SearchRow {
@@ -74,15 +74,12 @@ fn search_criteria_follow_the_vue_filter_rules() {
     let request = last_search(&mut state);
     assert_eq!(request.query, "peach");
     assert!(request.repo_id.is_none(), "只有查询时是全局搜索");
-    assert!(request.match_mode.is_none());
 
     state.reduce(true, Some("repo"), InspectMessage::ToggleFilter { key: FilterList::Colors, value: " red ".into() });
     state.reduce(true, Some("repo"), InspectMessage::ToggleFilter { key: FilterList::Shapes, value: "square".into() });
-    state.reduce(true, Some("repo"), InspectMessage::SetMatchMode(MatchMode::Or));
     let request = last_search(&mut state);
     assert!(request.metadata_filters.iter().any(|(key, value)| key == "color" && value == "red"));
     assert!(request.metadata_filters.iter().any(|(key, value)| key == "shape" && value == "square"));
-    assert_eq!(request.match_mode.as_deref(), Some("or"));
     assert_eq!(request.repo_id.as_deref(), Some("repo"), "筛选生效时收进当前仓库");
 
     state.results = vec![row("repo", "kept", "kept.png")];

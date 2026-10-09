@@ -88,7 +88,8 @@ impl PlayerState {
         }
         let Some(item) = self.preview_item(&entry) else {
             eprintln!("Nana 没有可用于播放此媒体的插件：{}", entry.path);
-            self.activity = "没有可用于播放此媒体的插件".into();
+            // Vue `playEntry` 的 `setError`：播放条的次行写原因，下一次装载成功或停止时清掉。
+            self.session.error = Some("没有可用于播放此媒体的插件".into());
             return false;
         };
         if self.repo_id.as_deref().is_some_and(|current| current != entry.repo_id) {
@@ -131,7 +132,6 @@ impl PlayerState {
         self.apply_cursor_volume();
         self.wants_playing = self.session.status == "playing";
         self.can_play = self.session.status != "failed";
-        self.activity.clear();
         self.publish(inspect);
         true
     }

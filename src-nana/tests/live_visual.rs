@@ -7,7 +7,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use momobako_nana::backend::services::repository::{
-    FileBrowserEntry, FileBrowserSnapshot, RepositoryStructureCacheState,
+    FileBrowserEntry, FileBrowserSnapshot, RepositoryStructureCacheState, TaskProgressSnapshot,
 };
 use momobako_nana::shell::{
     commit_interaction, mount_shell, ShellMessage, ShellViewModel, WorkspaceRepository,
@@ -545,8 +545,24 @@ fn live_files() -> ShellViewModel {
         .workspace
         .apply_repository_list(None, Ok(vec![repository("ready")]));
     model.reduce(ShellMessage::FileBrowserLoaded(Ok(snapshot())));
-    model.active_tasks = 2;
+    model.reduce(ShellMessage::TaskProgressLoaded(vec![running_task("task-1"), running_task("task-2")]));
     model
+}
+
+/// 宿主观察到的一个运行中任务，让侧栏「任务」带上计数。
+fn running_task(task_id: &str) -> TaskProgressSnapshot {
+    TaskProgressSnapshot {
+        task_id: task_id.into(),
+        protocol_id: "momobako.repository.sync".into(),
+        status: "running".into(),
+        phase: None,
+        label: None,
+        current: None,
+        total: None,
+        percent: None,
+        error: None,
+        updated_at: "0".into(),
+    }
 }
 
 fn repository(status: &str) -> WorkspaceRepository {

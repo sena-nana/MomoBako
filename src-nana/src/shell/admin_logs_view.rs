@@ -37,6 +37,7 @@ type LogItem = Item<Store<Vec<LogRowView>>, String, LogRowView>;
 pub(crate) fn logs_panel(signals: LogsSignals) -> AnyView {
     let head = signals.head;
     let empty = signals.empty;
+    let loading = signals.loading;
     let rows = signals.rows;
     let follow = signals.follow_end;
     let list = rows.keyed(LogRowView::key).each(log_item).gap(10.0).css(css! { padding-right: 4px; }).key("admin-log-list");
@@ -53,6 +54,7 @@ pub(crate) fn logs_panel(signals: LogsSignals) -> AnyView {
         ),
         toolbar(signals),
         filters(signals.filters),
+        style::state_notice("正在加载系统日志", false, "admin-log-loading").visible(move || loading.get()).into_any(),
         style::dashed_empty(
             move || empty.with(|empty| empty.map(|(title, _)| title.to_string()).unwrap_or_default()),
             move || empty.with(|empty| empty.map(|(_, detail)| detail.to_string()).unwrap_or_default()),

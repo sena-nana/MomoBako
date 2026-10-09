@@ -5,7 +5,7 @@
 
 use crate::backend::services::repository::{
     AssetDetail, FileBrowserEntry, FileBrowserSnapshot, FilePreviewSourceResponse, RepositorySnapshot,
-    PluginManifest, PlaylistSummary, RepositorySummary, SystemLogPage,
+    PlaylistSummary, RepositorySummary, SystemLogPage,
     PluginConfigSnapshot, PlaylistDetail, PlaylistPlayerContribution, TaskProgressSnapshot,
 };
 use crate::settings::ApplicationSettings;
@@ -69,10 +69,9 @@ pub use workspace::{
 
 /// Nana Runtime 传递给应用状态的壳层交互消息。
 pub enum ShellMessage {
-    Navigate(ShellPage),
+    /// 打开设置页：读设置包和应用设置，和 Vue `Settings.vue` 挂载时的 `loadSettingsData` 一致。
+    OpenSettings,
     Refresh,
-    PrimaryAction,
-    EditAction,
     RepositoriesLoaded(Result<Vec<RepositorySummary>, String>),
     RepositorySnapshotLoaded(Result<RepositorySnapshot, String>),
     FileBrowserLoaded(Result<FileBrowserSnapshot, String>),
@@ -81,44 +80,28 @@ pub enum ShellMessage {
     SelectFile { path: String, asset_id: Option<String> },
     OpenDirectory(String),
     AssetDetailLoaded(Result<AssetDetail, String>),
-    PreviewSourceLoaded(Result<FilePreviewSourceResponse, String>),
     PreviewPixelsLoaded {
         source: FilePreviewSourceResponse,
         pixels: Result<PreviewPixels, String>,
     },
-    PluginsLoaded(Result<Vec<PluginManifest>, String>),
-    SelectPlugin(String),
-    TogglePlugin { plugin_id: String, enabled: bool },
-    DeletePlugin(String),
     PluginConfigLoaded(Result<PluginConfigSnapshot, String>),
-    DeletePluginConfig { plugin_id: String, key: String },
-    PluginConfigDraftChanged { key: String, value: String },
-    SavePluginConfig { plugin_id: String, key: String },
     LogsLoaded(Result<SystemLogPage, String>),
     ClearLogs,
-    PlaylistsLoaded(Result<Vec<PlaylistSummary>, String>),
+    /// 新建或删除播放集以后这个仓库的整份播放集列表。`open` 是新建出来、要接着点开的播放集。
+    PlaylistsLoaded { repo_id: String, result: Result<Vec<PlaylistSummary>, String>, open: Option<String> },
     PlaylistPlayersLoaded(Result<Vec<PlaylistPlayerContribution>, String>),
     NewPlaylistNameChanged(String),
     SelectPlaylistPlayer(String),
     OpenPlaylistDialog,
     ClosePlaylistDialog,
     CreatePlaylist,
-    SelectPlaylist(String),
-    DeletePlaylist(String),
     PlaylistDetailLoaded(Result<PlaylistDetail, String>),
     RemovePlaylistItem { playlist_id: String, item_id: String },
-    ReorderPlaylistItems { playlist_id: String, item_ids: Vec<String> },
-    MovePlaylistItem { item_id: String, direction: i8 },
-    AddPlaylistItemsByPaths { playlist_id: String, paths: Vec<String> },
-    PlaylistNameDraftChanged(String),
-    SavePlaylistName,
-    SystemStatusLoaded(Result<crate::backend::services::runtime::ExternalApiConnectionStatus, String>),
     SettingsLoaded(Result<(ApplicationSettings, Option<String>), String>),
     SettingsThemeChanged(String),
     SettingsSaved(Result<ApplicationSettings, String>),
-    TaskSnapshotLoaded { active: usize, completed: usize },
+    /// 宿主观察到的运行中任务（排队、运行、取消中），整份换上。
     TaskProgressLoaded(Vec<TaskProgressSnapshot>),
-    CancelTask(String),
     WindowAction(WindowAction),
     /// 带代次的仓库列表结果。代次不匹配时保留当前启动步骤。
     WorkspaceListLoaded {
@@ -224,41 +207,21 @@ pub struct ShellViewModel {
     pub repository_name: String,
     pub repository_id: Option<String>,
     pub selected_path: Option<String>,
-    pub detail: String,
     pub dirty: bool,
-    pub file_entries: Vec<String>,
     pub browser_entries: Vec<FileBrowserEntry>,
     pub current_directory: String,
-    pub preview_url: Option<String>,
     pub preview_token: Option<String>,
     pub preview_pixels: Option<PreviewPixels>,
-    pub plugin_entries: Vec<String>,
-    pub plugin_entry_ids: Vec<String>,
-    pub plugin_enabled: Vec<bool>,
-    pub log_entries: Vec<String>,
-    pub playlist_entries: Vec<String>,
-    pub playlist_entry_ids: Vec<String>,
     pub selected_playlist_id: Option<String>,
-    pub selected_playlist_player_type_id: Option<String>,
-    pub playlist_name_draft: String,
     pub new_playlist_name: String,
     pub playlist_players: Vec<PlaylistPlayerContribution>,
     pub selected_new_playlist_player_type_id: Option<String>,
     pub playlist_dialog_open: bool,
-    pub playlist_item_entries: Vec<String>,
     pub playlist_item_ids: Vec<String>,
     pub playlist_item_status: String,
-    pub active_tasks: usize,
-    pub completed_tasks: usize,
-    pub active_task_ids: Vec<String>,
+    /// 运行中的任务，任务弹层和侧栏「任务」的计数读它。
     pub task_progress: Vec<TaskProgressSnapshot>,
-    pub system_status: Option<String>,
     pub settings: ApplicationSettings,
-    pub settings_error: Option<String>,
-    pub selected_plugin_id: Option<String>,
-    pub plugin_config_keys: Vec<String>,
-    pub plugin_config_drafts: std::collections::BTreeMap<String, String>,
-    pub plugin_config_string_values: std::collections::BTreeSet<String>,
     /// 标记 `for_page` 造出的验收模型。界面和产品窗口共用同一套表面。
     pub acceptance_scene: bool,
     pub workspace: WorkspaceState,
@@ -292,41 +255,20 @@ impl Default for ShellViewModel {
             repository_name: "默认资源库".into(),
             repository_id: None,
             selected_path: None,
-            detail: "等待资源库服务响应".into(),
             dirty: false,
-            file_entries: Vec::new(),
             browser_entries: Vec::new(),
             current_directory: String::new(),
-            preview_url: None,
             preview_token: None,
             preview_pixels: None,
-            plugin_entries: Vec::new(),
-            plugin_entry_ids: Vec::new(),
-            plugin_enabled: Vec::new(),
-            log_entries: Vec::new(),
-            playlist_entries: Vec::new(),
-            playlist_entry_ids: Vec::new(),
             selected_playlist_id: None,
-            selected_playlist_player_type_id: None,
-            playlist_name_draft: String::new(),
             new_playlist_name: String::new(),
             playlist_players: Vec::new(),
             selected_new_playlist_player_type_id: None,
             playlist_dialog_open: false,
-            playlist_item_entries: Vec::new(),
             playlist_item_ids: Vec::new(),
             playlist_item_status: String::new(),
-            active_tasks: 0,
-            completed_tasks: 0,
-            active_task_ids: Vec::new(),
             task_progress: Vec::new(),
-            system_status: None,
             settings: ApplicationSettings::default(),
-            settings_error: None,
-            selected_plugin_id: None,
-            plugin_config_keys: Vec::new(),
-            plugin_config_drafts: std::collections::BTreeMap::new(),
-            plugin_config_string_values: std::collections::BTreeSet::new(),
             acceptance_scene: false,
             workspace: WorkspaceState::default(),
             sidebar: sidebar::SidebarState::default(),
@@ -393,7 +335,13 @@ impl ShellViewModel {
     pub fn reduce(&mut self, message: ShellMessage) {
         self.revision = self.revision.wrapping_add(1);
         let (before, seq, started) = (status::Activity::of(self), self.status.seq(), status::starts_operation(&message));
+        let startup_open = self.workspace.startup.status != StartupStatus::Ready;
         self.reduce_inner(message);
+        if startup_open && self.workspace.startup.status == StartupStatus::Ready {
+            // Vue 启动流程在结束前 `loadSettingsData`：插件、钩子记录、缓存、API 设计和外部连接。
+            // 没有仓库、仓库丢失的启动也读，添加资源库的来源列表要用插件清单。
+            self.admin.begin_settings_load();
+        }
         self.flush_folder_mutations();
         self.settle_sidebar_dialogs();
         tree_sync::settle(self);
@@ -440,7 +388,6 @@ impl ShellViewModel {
         self.motion.set_operation_percent(operation);
         self.motion.set_spinner(spinner);
         self.motion.set_pulse(self.files.operation_indeterminate());
-        self.motion.set_sweep(self.player.download_indeterminate());
         self.motion.set_sidebar_collapsed(self.workspace.sidebar_collapsed, self.workspace.sidebar_width);
     }
 
@@ -476,16 +423,6 @@ impl ShellViewModel {
             return;
         };
         match message {
-            ShellMessage::Navigate(page) => {
-                self.page = page;
-                self.detail = match self.page {
-                    ShellPage::TaskRunning => format!(
-                        "{} 个运行中任务 · {} 个近期完成任务",
-                        self.active_tasks, self.completed_tasks
-                    ),
-                    _ => "正在读取页面数据…".into(),
-                };
-            }
             ShellMessage::RepositoriesLoaded(result) => self.apply_loaded_repositories(None, result),
             ShellMessage::WorkspaceListLoaded { generation, result } => {
                 self.apply_loaded_repositories(Some(generation), result);
@@ -501,23 +438,17 @@ impl ShellViewModel {
                 self.page = ShellPage::FileList;
                 self.repository_name = snapshot.repository.name.clone();
                 self.repository_id = Some(snapshot.repository.repo_id.clone());
-                self.detail = format!(
-                    "{} 个文件 · {} 个文件夹 · {}",
-                    snapshot.overview.file_count,
-                    snapshot.overview.folder_count,
-                    snapshot.repository.status
-                );
                 self.apply_snapshot_sidebar(&snapshot);
             }
             ShellMessage::RepositorySnapshotLoaded(Err(error)) => {
+                eprintln!("Nana 读取资源库摘要失败：{error}");
                 if self.workspace.startup.status == StartupStatus::Ready {
                     self.status.fail(status::FailureSource::Repository, format!("无法读取资源库摘要：{error}"));
                 }
                 if let Some(repo_id) = self.workspace.active_repo_id.clone() {
-                    self.workspace.note_index_finished(&repo_id, Err(error.clone()));
+                    self.workspace.note_index_finished(&repo_id, Err(error));
                 }
                 self.page = ShellPage::Error;
-                self.detail = format!("无法读取资源库文件列表：{error}");
             }
             ShellMessage::FileBrowserLoaded(Ok(browser)) => {
                 let virtual_view = files::FileContext::from_model(self).is_virtual();
@@ -526,16 +457,11 @@ impl ShellViewModel {
                 }
                 self.workspace.note_first_screen_finished(Ok(()));
                 self.page = ShellPage::FileList;
-                self.file_entries = self.files.entry_names();
                 self.browser_entries = browser.entries;
                 self.current_directory = browser.current_path.clone();
                 self.sidebar.note_directory(
                     &browser.current_path,
                     browser.special_location.as_deref() == Some("trash"),
-                );
-                self.detail = format!(
-                    "{} 个条目 · 当前目录 {}",
-                    browser.total_entries, browser.current_path
                 );
             }
             ShellMessage::ThumbnailPixels(frames) => {
@@ -543,32 +469,27 @@ impl ShellViewModel {
             }
             ShellMessage::FileBrowserLoaded(Err(error)) => {
                 if self.files.note_load_failed(&error) {
-                    self.detail = format!("无法读取文件列表：{error}");
                     return;
                 }
+                eprintln!("Nana 读取首屏目录失败：{error}");
                 if self.workspace.startup.status == StartupStatus::Ready {
                     self.status.fail(status::FailureSource::Directory, format!("无法读取文件列表：{error}"));
                 }
-                self.workspace.note_first_screen_finished(Err(error.clone()));
+                self.workspace.note_first_screen_finished(Err(error));
                 self.page = ShellPage::Error;
-                self.detail = format!("无法读取文件列表：{error}");
             }
             ShellMessage::SelectFile { path, .. } => {
                 self.page = ShellPage::SelectedFile;
                 self.player.disarm_preview_audio();
                 self.inspect.begin_selection(&path);
                 self.selected_path = Some(path);
-                self.preview_url = None;
                 self.preview_token = None;
                 self.preview_pixels = None;
-                self.detail = "正在读取文件元数据…".into();
             }
-            ShellMessage::OpenDirectory(path) => {
+            ShellMessage::OpenDirectory(_) => {
                 self.page = ShellPage::FileList;
                 self.player.disarm_preview_audio();
-                self.detail = format!("正在读取目录 {path}…");
                 self.selected_path = None;
-                self.preview_url = None;
                 self.preview_token = None;
                 self.preview_pixels = None;
                 self.inspect.clear();
@@ -576,12 +497,6 @@ impl ShellViewModel {
             ShellMessage::AssetDetailLoaded(Ok(detail)) => {
                 self.page = ShellPage::SelectedFile;
                 self.selected_path = Some(detail.summary.path.clone());
-                self.detail = format!(
-                    "{} · {} 个元数据字段 · {} 个修订",
-                    detail.summary.size_label,
-                    detail.metadata.len(),
-                    detail.revisions.len()
-                );
                 self.inspect.note_detail(&detail);
                 if let Some(session) = self.inspect.media_session().cloned() {
                     self.player.adopt_session(session);
@@ -590,21 +505,7 @@ impl ShellViewModel {
             ShellMessage::AssetDetailLoaded(Err(error)) => {
                 self.status.fail(status::FailureSource::Asset, format!("无法读取文件元数据：{error}"));
                 self.page = ShellPage::Error;
-                self.detail = format!("无法读取文件元数据：{error}");
                 self.inspect.note_detail_error(&error);
-            }
-            ShellMessage::PreviewSourceLoaded(Ok(source)) => {
-                self.page = ShellPage::SelectedFile;
-                self.preview_url = source.source_url;
-                self.preview_token = Some(source.token);
-                self.detail = format!(
-                    "{} · {} · {} 字节",
-                    source.media_type, source.path, source.size_bytes
-                );
-            }
-            ShellMessage::PreviewSourceLoaded(Err(error)) => {
-                self.page = ShellPage::Error;
-                self.detail = format!("无法打开预览源：{error}");
             }
             ShellMessage::PreviewPixelsLoaded { source, pixels } => {
                 let pixels_ok = pixels.is_ok();
@@ -613,32 +514,15 @@ impl ShellViewModel {
                     return;
                 }
                 self.page = ShellPage::SelectedFile;
-                self.preview_url = source.source_url;
                 self.preview_token = Some(source.token);
-                match pixels {
-                    Ok(pixels) => {
-                        self.preview_pixels = Some(pixels);
-                        self.detail = format!("原生图片预览已加载 · {}", source.media_type);
-                    }
-                    Err(error) => {
-                        self.preview_pixels = None;
-                        self.detail = format!("预览源已准备，但图片解码失败：{error}");
-                    }
-                }
+                self.preview_pixels = pixels.ok();
             }
-            ShellMessage::PlaylistsLoaded(Ok(playlists)) => {
-                self.page = ShellPage::Playlists;
-                self.playlist_entries = playlists
-                    .iter()
-                    .map(|playlist| format!("{} · {} 项", playlist.name, playlist.item_count))
-                    .collect();
-                self.playlist_entry_ids = playlists.iter().map(|playlist| playlist.playlist_id.clone()).collect();
-                self.detail = format!("{} 个播放列表", playlists.len());
+            ShellMessage::PlaylistsLoaded { repo_id, result: Ok(playlists), open } => {
+                self.apply_playlist_list(&repo_id, &playlists, open);
             }
-            ShellMessage::PlaylistsLoaded(Err(error)) => {
+            ShellMessage::PlaylistsLoaded { result: Err(error), .. } => {
+                eprintln!("Nana 播放集新建或删除失败：{error}");
                 self.status.fail(status::FailureSource::Playlist, format!("播放集操作失败：{error}"));
-                self.page = ShellPage::Error;
-                self.detail = format!("无法读取播放列表：{error}");
             }
             ShellMessage::PlaylistPlayersLoaded(Ok(mut players)) => {
                 // 照 Vue `listRegisteredPlaylistPlayers` 按名称的 zh-CN 顺序排，新建播放集默认选第一项。
@@ -652,11 +536,9 @@ impl ShellViewModel {
                         .first()
                         .map(|player| player.player_type_id.clone());
                 }
-                self.detail = format!("可用播放器 {} 个", self.playlist_players.len());
             }
             ShellMessage::PlaylistPlayersLoaded(Err(error)) => {
                 self.status.fail(status::FailureSource::Playlist, format!("无法读取播放器类型：{error}"));
-                self.detail = format!("无法读取播放器类型：{error}");
             }
             ShellMessage::NewPlaylistNameChanged(value) => {
                 self.new_playlist_name = value;
@@ -664,44 +546,25 @@ impl ShellViewModel {
             ShellMessage::SelectPlaylistPlayer(player_type_id) => {
                 self.selected_new_playlist_player_type_id = Some(player_type_id);
             }
-            ShellMessage::OpenPlaylistDialog => {
-                self.playlist_dialog_open = true;
-            }
+            ShellMessage::OpenPlaylistDialog => self.open_playlist_dialog(),
             ShellMessage::ClosePlaylistDialog => {
                 self.playlist_dialog_open = false;
             }
+            // 名称为空或没有选类型时「创建」禁用，回车提交也不建（Vue `playlistDialogDisabled`）；
+            // 提交由 `app_dispatch::dispatch_playlists` 按同样的条件发出。
             ShellMessage::CreatePlaylist => {
-                if self.new_playlist_name.trim().is_empty() {
-                    self.detail = "播放列表名称不能为空".into();
-                } else if self.selected_new_playlist_player_type_id.is_none() {
-                    self.detail = "请先选择播放器类型".into();
+                if self.new_playlist_name.trim().is_empty() || self.selected_new_playlist_player_type_id.is_none() {
+                    eprintln!("Nana 新建播放集缺少名称或播放类型，不提交");
                 } else {
-                    self.detail = "正在创建播放列表…".into();
                     self.playlist_dialog_open = false;
                 }
-            }
-            ShellMessage::SelectPlaylist(playlist_id) => {
-                self.page = ShellPage::Playlists;
-                self.selected_playlist_id = Some(playlist_id.clone());
-                self.detail = format!("正在读取播放列表 {playlist_id}…");
-            }
-            ShellMessage::DeletePlaylist(playlist_id) => {
-                self.detail = format!("正在删除播放列表 {playlist_id}…");
             }
             ShellMessage::PlaylistDetailLoaded(Ok(detail)) => {
                 if self.sidebar.bound_repo_id().is_some_and(|repo_id| repo_id != detail.playlist.repo_id.as_str()) {
                     eprintln!("Nana 忽略过期的播放集详情：{}", detail.playlist.playlist_id);
                     return;
                 }
-                self.page = ShellPage::Playlists;
                 self.selected_playlist_id = Some(detail.playlist.playlist_id.clone());
-                self.selected_playlist_player_type_id = Some(detail.playlist.player_type_id.clone());
-                self.playlist_name_draft = detail.playlist.name.clone();
-                self.playlist_item_entries = detail
-                    .items
-                    .iter()
-                    .map(|item| format!("{} · {}", item.filename, item.status))
-                    .collect();
                 self.playlist_item_ids = detail
                     .items
                     .iter()
@@ -714,90 +577,34 @@ impl ShellViewModel {
                     .map(|item| format!("{}: {}", item.filename, item.status_reason.clone().unwrap_or_else(|| item.status.clone())))
                     .collect::<Vec<_>>()
                     .join(" · ");
-                self.detail = format!("{} · {} 个项目", detail.playlist.name, detail.items.len());
             }
             ShellMessage::PlaylistDetailLoaded(Err(error)) => {
+                eprintln!("Nana 播放集详情读取或条目修改失败：{error}");
                 self.status.fail(status::FailureSource::Playlist, format!("播放集操作失败：{error}"));
-                self.page = ShellPage::Error;
-                self.detail = format!("无法读取播放列表详情：{error}");
             }
-            ShellMessage::RemovePlaylistItem { item_id, .. } => {
-                self.detail = format!("正在移除播放列表项目 {item_id}…");
-            }
-            ShellMessage::ReorderPlaylistItems { .. } => {
-                self.detail = "正在保存播放列表顺序…".into();
-            }
-            ShellMessage::MovePlaylistItem { item_id, direction } => {
-                if let Some(index) = self.playlist_item_ids.iter().position(|id| id == &item_id) {
-                    let target = if direction < 0 { index.checked_sub(1) } else { (index + 1 < self.playlist_item_ids.len()).then_some(index + 1) };
-                    if let Some(target) = target {
-                        self.playlist_item_ids.swap(index, target);
-                        self.playlist_item_entries.swap(index, target);
-                        if let Some(playlist_id) = self.selected_playlist_id.clone() {
-                            self.detail = format!("正在保存播放列表顺序：{}", playlist_id);
-                        }
-                    }
-                }
-            }
-            ShellMessage::AddPlaylistItemsByPaths { paths, .. } => {
-                self.detail = if paths.is_empty() {
-                    "没有可添加的文件路径".into()
-                } else {
-                    format!("正在添加 {} 个播放列表项目…", paths.len())
-                };
-            }
-            ShellMessage::PlaylistNameDraftChanged(value) => {
-                self.playlist_name_draft = value;
-            }
-            ShellMessage::SavePlaylistName => {
-                self.detail = if self.selected_playlist_id.is_none() {
-                    "请先选择一个播放列表".into()
-                } else if self.playlist_name_draft.trim().is_empty() {
-                    "播放列表名称不能为空".into()
-                } else {
-                    "正在保存播放列表名称…".into()
-                };
-            }
-            ShellMessage::PluginsLoaded(_)
-            | ShellMessage::SelectPlugin(_)
-            | ShellMessage::TogglePlugin { .. }
-            | ShellMessage::DeletePlugin(_)
+            ShellMessage::OpenSettings
+            | ShellMessage::RemovePlaylistItem { .. }
             | ShellMessage::PluginConfigLoaded(_)
-            | ShellMessage::DeletePluginConfig { .. }
-            | ShellMessage::PluginConfigDraftChanged { .. }
-            | ShellMessage::SavePluginConfig { .. }
             | ShellMessage::LogsLoaded(_)
             | ShellMessage::ClearLogs
-            | ShellMessage::SystemStatusLoaded(_)
             | ShellMessage::SettingsLoaded(_)
             | ShellMessage::SettingsThemeChanged(_)
             | ShellMessage::SettingsSaved(_)
-            | ShellMessage::TaskSnapshotLoaded { .. }
             | ShellMessage::TaskProgressLoaded(_)
-            | ShellMessage::CancelTask(_)
             | ShellMessage::Admin(_) => {}
             ShellMessage::WindowAction(_) => {}
-            ShellMessage::Refresh => {
-                self.detail = "正在刷新资源库…".into();
-                self.workspace.request_repository_refresh();
-            }
+            ShellMessage::Refresh => self.workspace.request_repository_refresh(),
             ShellMessage::StartupSyncFinished { generation, result } => {
                 self.workspace.note_sync_finished(generation, result);
-                self.detail = self.workspace.startup.step_label.clone();
                 if self.workspace.main_region() == MainRegion::LoadError {
                     self.page = ShellPage::Error;
-                    if let Some(error) = &self.workspace.startup.error {
-                        self.detail = format!("无法同步资源库：{error}");
-                    }
                 }
             }
             ShellMessage::ToggleSidebar => self.workspace.toggle_sidebar(),
             ShellMessage::SetSidebarWidth(width) => self.workspace.set_sidebar_width(width),
             ShellMessage::CommitSidebarWidth => self.workspace.commit_sidebar_width(),
             ShellMessage::StartupRetry => {
-                if self.workspace.retry_startup() {
-                    self.detail = self.workspace.startup.step_label.clone();
-                }
+                self.workspace.retry_startup();
             }
             ShellMessage::MissingRefresh => self.workspace.refresh_missing(),
             ShellMessage::MissingChoosePath => input::begin_relocate_dialog(self),
@@ -817,14 +624,11 @@ impl ShellViewModel {
                 } else if self.workspace.main_region() == MainRegion::EmptyRepository {
                     self.page = ShellPage::EmptyRepository;
                     self.repository_name = "默认资源库".into();
-                    self.detail = "还没有可用资源库".into();
                 }
             }
             ShellMessage::MissingOpenSourceSettings => {
-                self.workspace.open_source_settings();
-                if self.workspace.effects.iter().any(|effect| matches!(effect, WorkspaceEffect::OpenSourceSettings)) {
-                    self.page = ShellPage::Settings;
-                    self.detail = "正在打开来源设置…".into();
+                if let Some(plugin_id) = self.workspace.open_source_settings() {
+                    admin::open_settings_page(self, Some(&plugin_id));
                 }
             }
             ShellMessage::SelectWorkspaceRepository(repo_id) => {
@@ -837,18 +641,6 @@ impl ShellViewModel {
             }
             ShellMessage::SetWorkspacePanel(panel) => self.workspace.panel = panel,
             ShellMessage::SetLibraryCategory(category) => self.workspace.library_category = category,
-            ShellMessage::PrimaryAction => {
-                if !self.inspect.request_open() {
-                    self.detail = "当前没有可打开的预览".into();
-                }
-            }
-            ShellMessage::EditAction => {
-                self.detail = if self.dirty || self.inspect.dirty() {
-                    "未保存的修改留在当前草稿".into()
-                } else {
-                    "当前没有未保存的修改".into()
-                };
-            }
             ShellMessage::Sidebar(_) => {}
             ShellMessage::Files(_) => {}
             ShellMessage::Inspect(_) => {}
@@ -878,33 +670,16 @@ impl ShellViewModel {
             self.repository_name = repository.name.clone();
         }
         match self.workspace.main_region() {
-            MainRegion::LoadError => {
-                self.page = ShellPage::Error;
-                self.detail = format!(
-                    "无法读取资源库：{}",
-                    self.workspace.startup.error.clone().unwrap_or_else(|| "未知错误".into())
-                );
-            }
+            MainRegion::LoadError => self.page = ShellPage::Error,
             MainRegion::EmptyRepository => {
                 self.page = ShellPage::EmptyRepository;
                 self.repository_id = None;
                 self.repository_name = "默认资源库".into();
-                self.detail = "还没有可用资源库".into();
-                self.file_entries.clear();
                 self.browser_entries.clear();
             }
-            MainRegion::MissingRepository => {
-                self.detail = "资源库丢失".into();
-                self.file_entries.clear();
-                self.browser_entries.clear();
-            }
-            MainRegion::HasRepository => {
-                self.page = ShellPage::FileList;
-                self.detail = format!("{} 个资源库 · 已加载文件列表", self.workspace.repositories.len());
-            }
-            MainRegion::Startup => {
-                self.detail = self.workspace.startup.step_label.clone();
-            }
+            MainRegion::MissingRepository => self.browser_entries.clear(),
+            MainRegion::HasRepository => self.page = ShellPage::FileList,
+            MainRegion::Startup => {}
         }
         self.bind_sidebar_repository();
     }
@@ -943,5 +718,9 @@ pub(crate) use view_host::ShellView;
 mod tests;
 #[cfg(test)]
 mod escape_tests;
+#[cfg(test)]
+mod data_load_tests;
+#[cfg(test)]
+mod operation_row_tests;
 #[cfg(test)]
 pub(crate) mod view_harness;

@@ -5,7 +5,7 @@
 use nana_ui::runtime::{Entity, ScrollOffset, ScrollView};
 
 use crate::backend::services::repository::{
-    RepositoryAction, RepositoryActionStep, SystemLogLocation, SystemLogRecord, SystemLogSource,
+    RepositoryAction, RepositoryActionStep, SystemLogLocation, SystemLogPage, SystemLogRecord, SystemLogSource,
 };
 use crate::shell::admin::AdminMessage;
 use crate::shell::host_events::HostMessage;
@@ -422,9 +422,31 @@ fn switching_between_resident_routes_matches_a_fresh_mount() {
         harness.flush();
         harness.assert_same_as_fresh_mount();
     }
-    harness.apply(ShellMessage::Navigate(ShellPage::Settings));
+    harness.apply(ShellMessage::OpenSettings);
     harness.model.admin.take_effects();
     harness.flush();
     assert!(harness.keyed("settings-scroll").is_some(), "没有进设置页");
+    harness.assert_same_as_fresh_mount();
+}
+
+/// 从文件面板切到日志面板：历史日志还在读、手上没有日志时写「正在加载系统日志」，不写空状态；
+/// 读回以后换成日志列表。每一步都和新挂的一样。
+#[test]
+fn the_logs_panel_shows_loading_until_history_arrives() {
+    let mut harness = ShellHarness::mount(scene("live-files-plain"));
+    harness.apply(ShellMessage::SetWorkspacePanel(WorkspacePanel::Logs));
+    harness.model.admin.take_effects();
+    harness.flush();
+    assert!(harness.find("正在加载系统日志").is_some(), "读历史日志时要写正在加载");
+    assert!(harness.find("还没有系统日志").is_none(), "读的时候不写空状态");
+    harness.assert_same_as_fresh_mount();
+
+    let ShellMessage::Host(HostMessage::LogRecorded(record)) = log(1) else {
+        unreachable!("log 只造日志广播");
+    };
+    harness.apply(ShellMessage::LogsLoaded(Ok(SystemLogPage { records: vec![record], next_cursor: None })));
+    harness.flush();
+    assert!(harness.find("正在加载系统日志").is_none());
+    assert!(harness.find("第 1 条后台日志").is_some(), "读回的历史日志要画出来");
     harness.assert_same_as_fresh_mount();
 }

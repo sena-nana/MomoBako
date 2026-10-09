@@ -3,7 +3,7 @@
 
 use super::{FolderRow, FooterView, SidebarView};
 use crate::shell::sidebar::SidebarTree;
-use crate::shell::{ShellMessage, ShellPage, ShellViewModel, SidebarMessage, ThumbnailFrame};
+use crate::shell::{ShellMessage, ShellViewModel, SidebarMessage, ThumbnailFrame};
 use crate::backend::services::repository::FileTreeNode;
 
 fn scene(name: &str) -> ShellViewModel {
@@ -78,7 +78,7 @@ fn each_message_changes_only_its_part() {
     let before = SidebarView::project(&model);
 
     let mut settings = model.clone();
-    settings.reduce(ShellMessage::Navigate(ShellPage::Settings));
+    settings.reduce(ShellMessage::OpenSettings);
     let after = SidebarView::project(&settings);
     assert!(after.footer.settings);
     assert_eq!(SidebarView { footer: before.footer, ..after }, before, "进设置页只该改底部入口");
@@ -116,7 +116,7 @@ fn each_message_changes_only_its_part() {
     assert_eq!(SidebarView { folder_rows: rows, ..after }, reference, "计数变了只该改计数");
 }
 
-/// 缩略图、播放音量、搜索词，以及只换主区的路由，一块都不改。
+/// 缩略图、播放音量和搜索词，一块都不改。
 #[test]
 fn unrelated_messages_leave_the_projection_alone() {
     let mut model = scene("search-results");
@@ -132,8 +132,6 @@ fn unrelated_messages_leave_the_projection_alone() {
         }]),
         ShellMessage::Player(crate::shell::player::PlayerMessage::SetVolume(0.5)),
         ShellMessage::Inspect(crate::shell::InspectMessage::SetQuery("封面".into())),
-        ShellMessage::Navigate(ShellPage::Playlists),
-        ShellMessage::Navigate(ShellPage::FileList),
     ];
     for message in unrelated {
         model.reduce(message);

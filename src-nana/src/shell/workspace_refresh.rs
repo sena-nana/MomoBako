@@ -86,12 +86,6 @@ pub(super) fn apply_snapshot(model: &mut ShellViewModel, result: Result<Reposito
     }
     model.repository_name = snapshot.repository.name.clone();
     model.repository_id = Some(snapshot.repository.repo_id.clone());
-    model.detail = format!(
-        "{} 个文件 · {} 个文件夹 · {}",
-        snapshot.overview.file_count,
-        snapshot.overview.folder_count,
-        snapshot.repository.status
-    );
     let assets = snapshot
         .assets
         .iter()
@@ -259,8 +253,6 @@ mod tests {
         model.workspace.take_effects();
         model.repository_name = "库".into();
         model.repository_id = Some("repo".into());
-        model.file_entries = vec!["keep.png".into()];
-        model.detail = "保持".into();
         model.sidebar.tree_loading = false;
         model
     }
@@ -278,8 +270,7 @@ mod tests {
         assert!(failed.workspace.missing_error.is_empty());
         assert_eq!(failed.page, ShellPage::FileList);
         assert_eq!(failed.workspace.startup.status, StartupStatus::Ready);
-        assert_eq!(failed.file_entries, vec!["keep.png".to_string()]);
-        assert_eq!(failed.detail, "保持");
+        assert!(failed.workspace.effects.is_empty());
 
         let mut loading = ready_shell();
         loading.workspace.startup.begin();
@@ -312,8 +303,6 @@ mod tests {
         assert_eq!(model.page, ShellPage::FileList);
         assert_eq!(model.workspace.startup.status, StartupStatus::Ready);
         assert_eq!(model.workspace.list_generation, generation);
-        assert_eq!(model.file_entries, vec!["keep.png".to_string()]);
-        assert_eq!(model.detail, "保持");
         assert_eq!(model.workspace.main_region(), MainRegion::HasRepository);
     }
 
@@ -328,8 +317,6 @@ mod tests {
         assert_eq!(missing.page, ShellPage::FileList);
         assert_eq!(missing.workspace.main_region(), region);
         assert_eq!(missing.workspace.main_region(), MainRegion::HasRepository);
-        assert_eq!(missing.file_entries, vec!["keep.png".to_string()]);
-        assert_eq!(missing.detail, "保持");
         assert!(missing.navigation_locked());
         assert!(missing.workspace.effects.is_empty());
 
@@ -338,14 +325,13 @@ mod tests {
         assert_eq!(absent.workspace.repositories[0].repo_id, "other");
         assert_eq!(absent.workspace.active_repo_id.as_deref(), Some("repo"));
         assert_eq!(absent.repository_name, "库");
-        assert_eq!(absent.file_entries, vec!["keep.png".to_string()]);
         assert_eq!(absent.page, ShellPage::FileList);
         assert_eq!(absent.workspace.main_region(), MainRegion::HasRepository);
         assert!(absent.workspace.effects.is_empty());
     }
 
     #[test]
-    fn silent_snapshot_updates_detail_without_loading_tree() {
+    fn silent_snapshot_updates_counts_without_loading_tree() {
         let mut model = ready_shell();
         model.sidebar.folders.push(crate::shell::SidebarFolder {
             path: "photos".into(),
@@ -353,7 +339,6 @@ mod tests {
             children: Vec::new(),
         });
         model.reduce(ShellMessage::SilentWorkspace(SilentMessage::Snapshot(Ok(snapshot("repo", "新库")))));
-        assert_eq!(model.detail, "4 个文件 · 1 个文件夹 · ready");
         assert_eq!(model.repository_name, "新库");
         assert_eq!(model.repository_id.as_deref(), Some("repo"));
         assert_eq!(model.sidebar.counts.all, 1);
@@ -378,11 +363,9 @@ mod tests {
         model.reduce(ShellMessage::SilentWorkspace(SilentMessage::Snapshot(Err("摘要不可用".into()))));
         assert_eq!(model.page, ShellPage::FileList);
         assert_ne!(model.page, ShellPage::Error);
-        assert_eq!(model.detail, "保持");
         assert_eq!(model.sidebar.counts.all, 0);
 
         model.reduce(ShellMessage::SilentWorkspace(SilentMessage::Snapshot(Ok(snapshot("other", "别处")))));
-        assert_eq!(model.detail, "保持");
         assert_eq!(model.repository_name, "库");
         assert_eq!(model.sidebar.counts.all, 0);
         assert!(model.sidebar.quick_access.is_empty());
@@ -391,14 +374,13 @@ mod tests {
 
         model.workspace.startup.begin();
         model.reduce(ShellMessage::SilentWorkspace(SilentMessage::Snapshot(Ok(snapshot("repo", "新库")))));
-        assert_eq!(model.detail, "保持");
+        assert_eq!(model.repository_name, "库");
         assert_eq!(model.workspace.startup.status, StartupStatus::Loading);
         assert_eq!(model.page, ShellPage::FileList);
 
         model.workspace.startup.finish();
         model.workspace.repositories[0].status = "missing".into();
         model.reduce(ShellMessage::SilentWorkspace(SilentMessage::Snapshot(Ok(snapshot("repo", "新库")))));
-        assert_eq!(model.detail, "保持");
         assert_eq!(model.repository_name, "库");
         assert!(!model.sidebar.tree_loading);
         assert_eq!(model.sidebar.counts.all, 0);

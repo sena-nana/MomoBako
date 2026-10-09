@@ -138,7 +138,6 @@ pub enum WorkspaceEffect {
     LoadSnapshotSilent { repo_id: String },
     RelocateRepository { repo_id: String, path: String },
     DeleteRepository { repo_id: String, mode: DeleteMode },
-    OpenSourceSettings,
     PersistSidebar,
     StopPlayback { previous_repo_id: String },
 }
@@ -496,14 +495,17 @@ impl WorkspaceState {
         }
     }
 
-    pub fn open_source_settings(&mut self) {
+    /// 来源缓存没就绪时「打开来源设置」：返回要打开设置的来源插件。忙着或不是缓存问题时不打开。
+    pub fn open_source_settings(&mut self) -> Option<String> {
         if self.missing_busy() {
-            return;
+            return None;
         }
-        if self.active_repository().is_some_and(|repository| repository.is_source_cache_issue()) {
-            self.missing_error.clear();
-            self.effects.push(WorkspaceEffect::OpenSourceSettings);
-        }
+        let plugin_id = self
+            .active_repository()
+            .filter(|repository| repository.is_source_cache_issue())
+            .map(|repository| repository.backend_plugin_id.clone())?;
+        self.missing_error.clear();
+        Some(plugin_id)
     }
 
     pub fn delete_dialog_open(&self) -> bool {

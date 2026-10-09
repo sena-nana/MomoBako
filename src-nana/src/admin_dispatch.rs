@@ -12,7 +12,7 @@ use crate::backend::services::repository::{
     BinaryFileWriteRequest, FileBrowserRequest, NeteaseRepositoryCacheConfigureRequest, PluginCallRequest, PluginConfigDeleteRequest,
     PluginConfigSetRequest, PluginConfigSnapshot, PluginEnabledRequest, PluginHookExecutionListRequest, PluginInstallRequest,
     PluginManifest, RepositoryAction, RepositoryActionRunRequest, RepositoryBackendConfigUpdateRequest, RepositoryMutationRequest,
-    SyncRequest,
+    SyncRequest, SystemLogQuery,
 };
 use crate::backend::viewmodels::PluginViewModel;
 use crate::shell::admin::api::{self, ApiMessage, HttpRequest};
@@ -56,6 +56,9 @@ fn dispatch_one(app: &mut MomoBakoApplication, context: &RuntimeProgramContext<S
         AdminEffect::RequestOpenDialog => app.shell.input.queue_plugin_dialog(),
         AdminEffect::RequestSaveDialog { .. } => app.shell.input.queue_save_dialog(),
         AdminEffect::LoadSettingsBundle => load_bundle(app, context),
+        AdminEffect::LoadLogs => load_logs(app, context),
+        AdminEffect::LoadAppSettings => load_app_settings(app, context),
+        AdminEffect::LoadPlaylistPlayers => load_players(app, context),
         AdminEffect::Install(path) => plugins_task(app, context, "插件安装", move |plugin, executor| {
             executor.block_on(plugin.install_plugin_from_archive(PluginInstallRequest { package_path: path })).map(|response| response.plugins)
         }),
@@ -262,6 +265,58 @@ fn load_bundle(app: &mut MomoBakoApplication, context: &RuntimeProgramContext<Sh
     })) {
         eprintln!("Nana 设置页数据任务提交失败：{error}");
         app.shell.reduce(admin(failed_bundle(&format!("设置页数据任务提交失败：{error}"))));
+    }
+}
+
+/// 历史日志一次读的条数，和 Vue `loadSystemLogsInWorkspace(limit = 200)` 一致。
+const LOG_PAGE_LIMIT: usize = 200;
+
+/// 读最近一页系统日志。结果回 `LogsLoaded`。
+fn load_logs(app: &mut MomoBakoApplication, context: &RuntimeProgramContext<ShellMessage>) {
+    let Some(services) = app.services.as_ref() else {
+        eprintln!("Nana 系统日志需要领域服务，当前服务未启动");
+        app.shell.reduce(ShellMessage::LogsLoaded(Err(NO_SERVICES.into())));
+        return;
+    };
+    let system = services.system.clone();
+    let executor = services.executor.clone();
+    let query = SystemLogQuery { limit: Some(LOG_PAGE_LIMIT), ..Default::default() };
+    if let Err(error) = context.run_task(Task::new(async move {
+        ShellMessage::LogsLoaded(executor.block_on(system.list_system_logs(Some(query))))
+    })) {
+        eprintln!("Nana 系统日志任务提交失败：{error}");
+        app.shell.reduce(ShellMessage::LogsLoaded(Err(format!("系统日志任务提交失败：{error}"))));
+    }
+}
+
+/// 读设置目录里的应用设置。结果回 `SettingsLoaded`。
+fn load_app_settings(app: &mut MomoBakoApplication, context: &RuntimeProgramContext<ShellMessage>) {
+    let Some(services) = app.services.as_ref() else {
+        eprintln!("Nana 应用设置需要领域服务，当前服务未启动");
+        app.shell.reduce(ShellMessage::SettingsLoaded(Err(NO_SERVICES.into())));
+        return;
+    };
+    let settings = services.settings.clone();
+    if let Err(error) = context.run_task(Task::new(async move { ShellMessage::SettingsLoaded(settings.load_or_recover()) })) {
+        eprintln!("Nana 应用设置读取任务提交失败：{error}");
+        app.shell.reduce(ShellMessage::SettingsLoaded(Err(format!("应用设置读取任务提交失败：{error}"))));
+    }
+}
+
+/// 读插件登记的播放器类型。结果回 `PlaylistPlayersLoaded`，播放集侧栏、播放器和新建对话框共用。
+fn load_players(app: &mut MomoBakoApplication, context: &RuntimeProgramContext<ShellMessage>) {
+    let Some(services) = app.services.as_ref() else {
+        eprintln!("Nana 播放器类型需要领域服务，当前服务未启动");
+        app.shell.reduce(ShellMessage::PlaylistPlayersLoaded(Err(NO_SERVICES.into())));
+        return;
+    };
+    let plugin = services.plugin.clone();
+    let executor = services.executor.clone();
+    if let Err(error) = context.run_task(Task::new(async move {
+        ShellMessage::PlaylistPlayersLoaded(executor.block_on(plugin.list_playlist_players()))
+    })) {
+        eprintln!("Nana 播放器类型任务提交失败：{error}");
+        app.shell.reduce(ShellMessage::PlaylistPlayersLoaded(Err(format!("播放器类型任务提交失败：{error}"))));
     }
 }
 
