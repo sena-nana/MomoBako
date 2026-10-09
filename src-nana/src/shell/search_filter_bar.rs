@@ -99,13 +99,13 @@ fn head(model: &ShellViewModel) -> AnyView {
     actions.push(
         widget(widgets::bar_button("清除", clear_disabled))
             .key("workspace-filter-clear")
-            .on_cx(|_, _: &Activate, cx| cx.dispatch_program(message(InspectMessage::ClearFilters)))
+            .on_cx(|_, _: &Activate, cx| cx.dispatch_program_all(message(InspectMessage::ClearFilters)))
             .into_any(),
     );
     actions.push(
         widget(widgets::close_button("关闭筛选栏"))
             .key("workspace-filter-close")
-            .on_cx(|_, _: &Activate, cx| cx.dispatch_program(message(InspectMessage::CloseFilterBar)))
+            .on_cx(|_, _: &Activate, cx| cx.dispatch_program_all(message(InspectMessage::CloseFilterBar)))
             .into_any(),
     );
     let title = widget(Stack::column(3.0).width(LengthSpec::Shrink).min_width(LengthSpec::Px(0.0)).grow(1.0).shrink(1.0))
@@ -181,7 +181,7 @@ fn toggle_chip(list: FilterList, key: &str, value: &str, active: bool, swatch: O
     widget(widgets::chip(value, active, swatch))
         .key(format!("workspace-filter-{key}-{value}"))
         .on_cx(move |_, _: &Activate, cx| {
-            cx.dispatch_program(message(InspectMessage::ToggleFilter { key: list, value: toggled.clone() }));
+            cx.dispatch_program_all(message(InspectMessage::ToggleFilter { key: list, value: toggled.clone() }));
         })
         .into_any()
 }
@@ -205,12 +205,12 @@ fn metadata_group(model: &ShellViewModel, input: MetadataInput, options: &[Strin
     let field = widget(widgets::pill_input(&draft, placeholder, field_name, Some(INPUT_WIDTH)))
         .key(format!("workspace-filter-{key}-input"))
         .on_cx(move |_, event: &TextChanged, cx| {
-            cx.dispatch_program(message(InspectMessage::SetMetadataInput { key: input, value: event.value.to_string() }));
+            cx.dispatch_program_all(message(InspectMessage::SetMetadataInput { key: input, value: event.value.to_string() }));
         })
-        .on_cx(move |_, _: &TextSubmitted, cx| cx.dispatch_program(message(InspectMessage::SubmitMetadataInput(input))));
+        .on_cx(move |_, _: &TextSubmitted, cx| cx.dispatch_program_all(message(InspectMessage::SubmitMetadataInput(input))));
     let add = widget(widgets::pill_button("添加", empty))
         .key(format!("workspace-filter-{key}-add"))
-        .on_cx(move |_, _: &Activate, cx| cx.dispatch_program(message(InspectMessage::SubmitMetadataInput(input))));
+        .on_cx(move |_, _: &Activate, cx| cx.dispatch_program_all(message(InspectMessage::SubmitMetadataInput(input))));
     children.push(
         widget(widgets::input_pill(false))
             .children((field, widget(widgets::pill_divider()).key(format!("workspace-filter-{key}-divider")), add))
@@ -224,7 +224,7 @@ fn metadata_group(model: &ShellViewModel, input: MetadataInput, options: &[Strin
 fn rating_group(min_rating: Option<f64>) -> AnyView {
     let mut chips = vec![widget(widgets::chip("全部", min_rating.is_none(), None))
         .key("workspace-filter-rating-all")
-        .on_cx(|_, _: &Activate, cx| cx.dispatch_program(message(InspectMessage::SetMinimumRating(None))))
+        .on_cx(|_, _: &Activate, cx| cx.dispatch_program_all(message(InspectMessage::SetMinimumRating(None))))
         .into_any()];
     for rating in RATING_OPTIONS {
         let value = f64::from(rating);
@@ -232,7 +232,7 @@ fn rating_group(min_rating: Option<f64>) -> AnyView {
             widget(widgets::chip(&format!("{rating} 星+"), min_rating == Some(value), None))
                 .key(format!("workspace-filter-rating-{rating}"))
                 .on_cx(move |_, _: &Activate, cx| {
-                    cx.dispatch_program(message(InspectMessage::SetMinimumRating(Some(value))));
+                    cx.dispatch_program_all(message(InspectMessage::SetMinimumRating(Some(value))));
                 })
                 .into_any(),
         );
@@ -251,7 +251,7 @@ fn shortcut_group(shortcuts: &[SearchShortcut]) -> AnyView {
             widget(widgets::chip(&shortcut.label, false, None))
                 .key(format!("workspace-filter-shortcut-{}-{}", shortcut.plugin_id, shortcut.id))
                 .on_cx(move |_, _: &Activate, cx| {
-                    cx.dispatch_program(message(InspectMessage::ApplyShortcut {
+                    cx.dispatch_program_all(message(InspectMessage::ApplyShortcut {
                         metadata: metadata.clone(),
                         sort_field: sort_field.clone(),
                         sort_direction,
@@ -280,7 +280,7 @@ fn advanced_group(model: &ShellViewModel) -> AnyView {
     cells.push(
         widget(widgets::bar_button("应用", false))
             .key("workspace-filter-apply")
-            .on_cx(|_, _: &Activate, cx| cx.dispatch_program(message(InspectMessage::ApplyAdvanced)))
+            .on_cx(|_, _: &Activate, cx| cx.dispatch_program_all(message(InspectMessage::ApplyAdvanced)))
             .into_any(),
     );
     let grid = widget(Stack::column(0.0).width(LengthSpec::Fill).min_width(LengthSpec::Px(0.0)).grow(1.0).shrink(1.0).with_layout(|layout| {
@@ -313,9 +313,9 @@ fn advanced_input(input: &AdvancedInput, value: &str) -> AnyView {
         .children((widget(widgets::pill_input(value, input.placeholder, input.name, None))
             .key(format!("workspace-filter-advanced-{}-input", input.key))
             .on_cx(move |_, event: &TextChanged, cx| {
-                cx.dispatch_program(message(InspectMessage::SetAdvanced { field, value: event.value.to_string() }));
+                cx.dispatch_program_all(message(InspectMessage::SetAdvanced { field, value: event.value.to_string() }));
             })
-            .on_cx(|_, _: &TextSubmitted, cx| cx.dispatch_program(message(InspectMessage::ApplyAdvanced))),))
+            .on_cx(|_, _: &TextSubmitted, cx| cx.dispatch_program_all(message(InspectMessage::ApplyAdvanced))),))
         .key(format!("workspace-filter-advanced-{}", input.key))
         .into_any()
 }
@@ -349,7 +349,7 @@ fn sort_direction_select(direction: SortDirection) -> AnyView {
     }
     widget(widgets::input_pill(true))
         .children((widget(select).key("workspace-filter-sort-direction").on_cx(|_, event: &SelectChanged, cx| {
-            cx.dispatch_program(message(InspectMessage::SetSortDirection(SortDirection::parse(&event.value))));
+            cx.dispatch_program_all(message(InspectMessage::SetSortDirection(SortDirection::parse(&event.value))));
         }),))
         .key("workspace-filter-sort-direction-field")
         .into_any()
