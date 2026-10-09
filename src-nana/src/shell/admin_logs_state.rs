@@ -104,6 +104,8 @@ pub(crate) struct LogsView {
     pub levels: Vec<String>,
     pub kinds: Vec<String>,
     pub empty: LogsEmpty,
+    /// 在读历史日志、手上还没有日志时写「正在加载系统日志」，这时不写空状态。
+    pub loading: bool,
     pub rows: Vec<LogRowView>,
     /// 追踪模式下日志列表跟随末尾。
     pub follow_end: bool,
@@ -114,7 +116,10 @@ impl LogsView {
     pub(crate) fn project(model: &ShellViewModel) -> Self {
         let admin = &model.admin;
         let filtered = admin.filtered_logs();
-        let empty = if admin.logs.is_empty() {
+        let loading = admin.logs_loading && admin.logs.is_empty();
+        let empty = if loading {
+            None
+        } else if admin.logs.is_empty() {
             Some(("还没有系统日志", "宿主、插件和辅助进程产生的关键操作会在这里持续汇总。"))
         } else if filtered.is_empty() {
             Some(("当前筛选没有命中", "保留最近日志缓存，调整级别、来源或关键字后可以继续查看。"))
@@ -131,12 +136,13 @@ impl LogsView {
                 repo: admin.log_repo_id.clone(),
                 paused: admin.log_paused,
                 no_filters: active == 0,
-                no_logs: admin.logs.is_empty(),
+                no_logs: admin.logs.is_empty() && !admin.logs_loading,
             },
             search: admin.log_search.clone(),
             levels: admin.log_levels.clone(),
             kinds: admin.log_kinds.clone(),
             empty,
+            loading,
             rows: filtered.iter().map(|record| LogRowView::project(model, record)).collect(),
             follow_end: model.admin_logs_follow_end(),
         }
@@ -152,6 +158,7 @@ pub(crate) struct LogsSignals {
     /// 选中的级别和来源：`(级别, 来源)`。
     pub(crate) filters: Signal<(Vec<String>, Vec<String>)>,
     pub(crate) empty: Signal<LogsEmpty>,
+    pub(crate) loading: Signal<bool>,
     pub(crate) rows: Store<Vec<LogRowView>>,
     pub(crate) follow_end: Signal<bool>,
 }
@@ -165,6 +172,7 @@ impl LogsSignals {
             search: ModelField::new(""),
             filters: signal((Vec::new(), Vec::new())),
             empty: signal(None),
+            loading: signal(false),
             rows: store(Vec::new()),
             follow_end: signal(false),
         }
@@ -177,6 +185,7 @@ impl LogsSignals {
         self.search.sync(&view.search);
         self.filters.try_set_if_changed((view.levels, view.kinds));
         self.empty.try_set_if_changed(view.empty);
+        self.loading.try_set_if_changed(view.loading);
         super::super::row_sync::sync_rows(self.rows, LogRowView::key, view.rows);
         self.follow_end.try_set_if_changed(view.follow_end);
     }

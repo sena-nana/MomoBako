@@ -197,6 +197,8 @@ pub struct ToolPageEntry {
 #[derive(Clone, Debug)]
 pub enum AdminEffect {
     LoadSettingsBundle,
+    /// 读最近 200 条系统日志。每次切到日志面板都读，和 Vue `setActivePanel('logs')` 一致。
+    LoadLogs,
     /// 读设置目录里的应用设置（主题、缓存上限、关闭行为）。打开设置页时读一次。
     LoadAppSettings,
     /// 读插件登记的播放器类型。插件列表换新以后读，和 Vue 同步前端插件注册表的时机一致。
@@ -268,6 +270,8 @@ pub struct AdminState {
     /// 最近一次仓库列表的完整摘要。来源认证页要读登录状态和本地缓存路径。
     pub repository_summaries: Vec<RepositorySummary>,
     pub logs: Vec<SystemLogRecord>,
+    /// 在读历史日志（Vue `isLoadingLogs`）。
+    pub logs_loading: bool,
     pub log_levels: Vec<String>,
     pub log_kinds: Vec<String>,
     pub log_plugin_id: String,
@@ -321,6 +325,7 @@ impl Default for AdminState {
             source_auth: SourceAuthState::default(),
             repository_summaries: Vec::new(),
             logs: Vec::new(),
+            logs_loading: false,
             log_levels: Vec::new(),
             log_kinds: Vec::new(),
             log_plugin_id: String::new(),
@@ -476,10 +481,21 @@ impl AdminState {
         } else {
             self.logs.push(record);
         }
-        self.logs.sort_by(|left, right| {
-            right.timestamp.cmp(&left.timestamp).then_with(|| right.id.cmp(&left.id))
-        });
+        sort_logs(&mut self.logs);
         self.logs.truncate(500);
+        self.note_log_scroll();
+    }
+
+    /// 切到日志面板：读最近 200 条历史日志（Vue `loadSystemLogsInWorkspace`）。
+    pub(super) fn begin_logs_load(&mut self) {
+        self.logs_loading = true;
+        self.effects.push(AdminEffect::LoadLogs);
+    }
+
+    /// 历史日志读回：整份换掉，照 Vue `sortSystemLogs` 按时间再 id 降序。
+    pub(super) fn replace_logs(&mut self, mut records: Vec<SystemLogRecord>) {
+        sort_logs(&mut records);
+        self.logs = records;
         self.note_log_scroll();
     }
 
@@ -490,6 +506,11 @@ impl AdminState {
     pub fn grouped_plugins(&self) -> Vec<(String, Vec<String>)> {
         support::grouped_plugin_ids(&self.plugins, &self.keyword, &self.hook_executions)
     }
+}
+
+/// 日志按时间再 id 降序，和 Vue `sortSystemLogs` 一致。
+fn sort_logs(records: &mut [SystemLogRecord]) {
+    records.sort_by(|left, right| right.timestamp.cmp(&left.timestamp).then_with(|| right.id.cmp(&left.id)));
 }
 
 impl ShellViewModel {
