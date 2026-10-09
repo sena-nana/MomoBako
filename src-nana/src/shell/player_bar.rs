@@ -225,6 +225,7 @@ pub(crate) fn player_bar(model: &ShellViewModel) -> AnyView {
             layout.padding_bottom = Some(LengthSpec::Px(16.0));
             layout.padding_left = Some(LengthSpec::Px(16.0));
             layout.paint.box_shadows = vec![nana_ui_core::BoxShadowSpec {
+                paint_color: None,
                 offset_x: 0.0,
                 offset_y: 14.0,
                 blur_radius: 34.0,

@@ -3,15 +3,17 @@
 //! 结构照 Vue `AppShell.vue` 和 `WorkspaceTitleBarSearch.vue`：左侧折叠侧栏按钮，中间是全局搜索
 //! 和筛选开关。搜索框 `--bg-subtle` 底、无描边、占位文字居中，悬停或聚焦换 `--bg-hover`；
 //! 筛选开关 28×28，筛选栏打开或有筛选条件时 `--accent-soft` 底、强调色，并在右上角显示条件数。
-//! 窗口按钮用 `AppTitleBar` 自带的自定义控件槽，点击后再送进现有的最小化、最大化切换和关闭确认。
+//! 窗口按钮用 `AppTitleBar` 自带的自定义控件：指针点击由 Nana 宿主执行（关闭经 `close_requested`
+//! 走关闭确认），键盘和读屏的激活由这里接到同一套窗口动作。
 
 use std::sync::Arc;
 
 use nana_ui::icons_tabler::{ADJUSTMENTS_HORIZONTAL, LAYOUT_SIDEBAR_LEFT_COLLAPSE, LAYOUT_SIDEBAR_LEFT_EXPAND};
 use nana_ui::runtime::view::{widget, AnyView, IntoView};
 use nana_ui::runtime::{
-    Activate, AlignSpec, AppTitleBar, Entity, IconButton, JustifySpec, LengthSpec, RadiusTier, RuntimeDocument,
-    SemanticColorRole, SemanticPaint, Stack, TextChanged, TextHorizontalAlignment, TextInput,
+    component_descriptors, Activate, AlignSpec, AppTitleBar, AppTitleBarControls, Entity, IconButton, JustifySpec,
+    LengthSpec, RadiusTier, RuntimeDocument, SemanticColorRole, SemanticPaint, Stack, StableNodeId, TextChanged,
+    TextHorizontalAlignment, TextInput,
 };
 use nana_ui::{ControlSize, Icon};
 
@@ -139,31 +141,18 @@ fn search_field(query: String) -> TextInput {
     field.style(style)
 }
 
-/// 把组件生成的 Minimize / Maximize / Close 接上现有窗口动作。
+/// 把标题栏的三个窗口按钮接上窗口动作，供键盘和读屏激活。
 ///
-/// 这些按钮由 Nana 在组装标题栏时创建，视图闭包里拿不到它们的节点。
-/// 无障碍点击走 `Activate`，所以要在挂载后再登记。
+/// 指针点击由 Nana 宿主直接执行；这里发出的是同一套绝对命令（最大化按当前窗口状态取最大化或还原），
+/// 和宿主重复时结果不变。按钮由 Nana 在组装标题栏时创建，视图闭包里拿不到节点，所以挂载后按按钮组的
+/// 次序登记：最小化、最大化/还原、关闭，和宿主的映射一致；不按会随框架文案表变化的无障碍名称匹配。
 pub(super) fn bind_window_controls(document: &mut RuntimeDocument) -> Result<(), nana_ui::runtime::FrameworkError> {
-    let document_id = document.document();
-    let found: Vec<_> = document
-        .context()
-        .world()
-        .project_accessibility(document_id)
-        .into_iter()
-        .filter_map(|node| {
-            let action = match node.label.as_deref() {
-                Some("Minimize") => super::WindowAction::Minimize,
-                Some("Maximize" | "Restore") => super::WindowAction::ToggleMaximize,
-                Some("Close") => super::WindowAction::Close,
-                _ => return None,
-            };
-            Some((node.id, action))
-        })
-        .collect();
-    if found.len() < 3 {
-        eprintln!("Nana 标题栏窗口控件不足：{}", found.len());
+    let buttons = window_control_buttons(document);
+    if buttons.iter().any(Option::is_none) {
+        eprintln!("Nana 标题栏窗口控件不全：{buttons:?}");
     }
-    for (id, action) in found {
+    let actions = [super::WindowAction::Minimize, super::WindowAction::ToggleMaximize, super::WindowAction::Close];
+    for (id, action) in buttons.into_iter().zip(actions).filter_map(|(id, action)| Some((id?, action))) {
         let entity = Entity::<IconButton>::from_stable_id(id);
         if let Err(error) = document.context_mut().on_keyed(
             entity,
@@ -176,4 +165,28 @@ pub(super) fn bind_window_controls(document: &mut RuntimeDocument) -> Result<(),
         }
     }
     Ok(())
+}
+
+/// 标题栏按钮组里的最小化、最大化/还原、关闭三个按钮。
+///
+/// 按钮组写明了节点就用它，否则按子节点次序取，和 Nana 宿主认按钮的规则一致。找不到的位置是 `None`。
+fn window_control_buttons(document: &RuntimeDocument) -> [Option<StableNodeId>; 3] {
+    let context = document.context();
+    let world = context.world();
+    let Some(bar) = world.nodes_of_component(document.document(), component_descriptors::APP_TITLE_BAR.type_id).next() else {
+        eprintln!("Nana 文档里没有标题栏，窗口按钮没有接上");
+        return [None; 3];
+    };
+    let Some(controls) = context.read(Entity::<AppTitleBar>::from_stable_id(bar), |bar| bar.controls).ok().flatten() else {
+        eprintln!("Nana 标题栏还没有窗口按钮组");
+        return [None; 3];
+    };
+    let explicit = context
+        .read(Entity::<AppTitleBarControls>::from_stable_id(controls), |group| [group.minimize, group.maximize, group.close])
+        .unwrap_or([None; 3]);
+    if explicit.iter().any(Option::is_some) {
+        return explicit;
+    }
+    let children = world.node(controls).map(|node| node.children).unwrap_or_default();
+    [children.first().copied(), children.get(1).copied(), children.get(2).copied()]
 }

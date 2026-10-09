@@ -11,7 +11,7 @@ use nana_ui::runtime::{
     RangeChanged, RangeField, Select, SelectChanged, SelectOption, SemanticPaint, Stack, TextHorizontalAlignment,
     TextVerticalAlignment,
 };
-use nana_ui_core::{GridTrack, Icon, RadiusTier, SemanticColorRole as Role, ThemeMode};
+use nana_ui_core::{GridTrack, Icon, RadiusTier, SemanticColorRole as Role, ThemeAppearance};
 
 use super::super::{ShellMessage, ShellViewModel};
 use super::icons;
@@ -131,7 +131,7 @@ fn audio_card(model: &ShellViewModel) -> AnyView {
 /// 外观：主题、圆角样式和圆角半径。
 fn appearance_card(model: &ShellViewModel) -> AnyView {
     let theme = segmented(
-        vec![theme_segment(ThemeMode::Dark, icons::MOON, "暗色"), theme_segment(ThemeMode::Light, icons::SUN, "浅色")],
+        vec![theme_segment(ThemeAppearance::Dark, icons::MOON, "暗色"), theme_segment(ThemeAppearance::Light, icons::SUN, "浅色")],
         "admin-theme",
     );
     let corner = model.admin.corner_style.as_str();
@@ -212,8 +212,8 @@ fn corner_segment(value: &'static str, icon: Icon, text: &'static str, active: b
 
 /// 主题分段。Vue 只有暗色和浅色两档，选中的是当前生效的主题，
 /// 所以选中态在绘制时按主题解析，而不是读构建期的设置值。
-fn theme_segment(mode: ThemeMode, icon: Icon, text: &'static str) -> AnyView {
-    let value = if mode == ThemeMode::Dark { "dark" } else { "light" };
+fn theme_segment(mode: ThemeAppearance, icon: Icon, text: &'static str) -> AnyView {
+    let value = if mode == ThemeAppearance::Dark { "dark" } else { "light" };
     let mut style = segment_style(false);
     style.foreground = None;
     style.interaction = InteractionStyle::default();
@@ -237,14 +237,14 @@ fn theme_segment(mode: ThemeMode, icon: Icon, text: &'static str) -> AnyView {
 /// 主题分段的绘制：当前主题就是选中态，`bg-active` 底、正文色；否则弱色。
 #[derive(Clone, Copy)]
 struct ThemeSegment {
-    mode: ThemeMode,
+    mode: ThemeAppearance,
     icon: Icon,
     text: &'static str,
 }
 
 impl Painter for ThemeSegment {
     fn paint(&self, cx: &mut PaintContext<'_>) {
-        let active = cx.theme_mode() == self.mode;
+        let active = crate::theme_map::is_dark(cx.theme_appearance()) == crate::theme_map::is_dark(self.mode);
         let state = cx.state();
         let bounds = cx.bounds();
         let background = if active {
@@ -269,7 +269,7 @@ impl Painter for ThemeSegment {
     }
 
     fn paint_key(&self) -> u64 {
-        let mode = if self.mode == ThemeMode::Dark { 1 } else { 2 };
+        let mode = if self.mode == ThemeAppearance::Dark { 1 } else { 2 };
         mode * 1_000_003 + self.text.len() as u64
     }
 }

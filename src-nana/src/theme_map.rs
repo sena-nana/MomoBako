@@ -3,7 +3,7 @@
 //! 壳层只消费这里的角色，不在按钮或文本上写死 RGB。Nana 调色板的具体数值
 //! 由 `SemanticPalette` 持有；本模块只锁住角色、字号和侧栏尺寸的对应关系。
 
-use nana_ui::theme::{SemanticPalette, ThemeMetrics, ThemeMode, UI_METRICS, type_scale};
+use nana_ui::theme::{SemanticPalette, ThemeAppearance, ThemeMetrics, UI_METRICS, type_scale};
 
 /// 一条 CSS 变量到 Nana 调色板字段的对应。
 pub struct ColorRole {
@@ -172,17 +172,22 @@ pub fn clamp_corner_radius(radius: f32) -> f32 {
     radius.clamp(*CORNER_RADIUS_RANGE.start(), *CORNER_RADIUS_RANGE.end())
 }
 
+/// 外观是不是深色。设置只给出浅色和深色，自定义外观按默认的深色处理。
+pub fn is_dark(appearance: ThemeAppearance) -> bool {
+    appearance != ThemeAppearance::Light
+}
+
 /// 指定主题的主工作区背景，供离屏清屏色比对。
-pub fn background_rgba(mode: ThemeMode) -> [f32; 4] {
-    let color = SemanticPalette::for_mode(mode).background;
+pub fn background_rgba(appearance: ThemeAppearance) -> [f32; 4] {
+    let color = SemanticPalette::for_appearance(appearance).background;
     [color.r, color.g, color.b, color.a]
 }
 
 /// 离屏清屏色是否等于该主题的 `background` 角色，而不是按钮上的写死颜色。
 pub fn clear_matches_background(theme: &str, clear: [f32; 4]) -> bool {
     let mode = match theme {
-        "light" => ThemeMode::Light,
-        "dark" => ThemeMode::Dark,
+        "light" => ThemeAppearance::Light,
+        "dark" => ThemeAppearance::Dark,
         _ => return false,
     };
     let expected = background_rgba(mode);
@@ -198,8 +203,8 @@ mod tests {
 
     #[test]
     fn light_and_dark_backgrounds_follow_distinct_palette_roles() {
-        let light = background_rgba(ThemeMode::Light);
-        let dark = background_rgba(ThemeMode::Dark);
+        let light = background_rgba(ThemeAppearance::Light);
+        let dark = background_rgba(ThemeAppearance::Dark);
         let luma = |color: [f32; 4]| color[0] + color[1] + color[2];
         assert!(luma(dark) < luma(light));
         assert!(clear_matches_background("light", light));

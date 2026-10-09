@@ -233,6 +233,7 @@ pub(super) fn queue_popover(props: &BarProps) -> AnyView {
                 });
                 layout.max_height = Some(LengthSpec::Px(QUEUE_MAX_HEIGHT));
                 layout.paint.box_shadows = vec![nana_ui_core::BoxShadowSpec {
+                    paint_color: None,
                     offset_x: 0.0,
                     offset_y: 14.0,
                     blur_radius: 34.0,

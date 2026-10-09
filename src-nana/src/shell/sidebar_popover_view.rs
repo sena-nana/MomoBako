@@ -99,6 +99,7 @@ fn surface(padding: f32, gap: f32, children: Vec<AnyView>, label_key: &'static s
             .radius(RadiusTier::Md)
             .with_layout(|layout| {
                 layout.paint.box_shadows = vec![nana_ui_core::BoxShadowSpec {
+                    paint_color: None,
                     offset_x: 0.0,
                     offset_y: 12.0,
                     blur_radius: 32.0,

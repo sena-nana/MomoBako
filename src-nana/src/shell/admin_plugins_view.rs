@@ -412,8 +412,8 @@ pub(crate) fn delete_dialog(model: &ShellViewModel) -> Option<AnyView> {
     let mut dialog = ConfirmDialog::new("删除插件", format!("删除插件“{name}”后将移除其 .momoplug 安装包。"));
     dialog.danger = true;
     dialog.busy = model.admin.managing;
-    dialog.confirm_label = Arc::from(if model.admin.managing { "删除中..." } else { "删除" });
-    dialog.cancel_label = Arc::from("取消");
+    dialog.confirm_label = Some(Arc::from(if model.admin.managing { "删除中..." } else { "删除" }));
+    dialog.cancel_label = Some(Arc::from("取消"));
     Some(
         widget(dialog)
             .cancel(widget(action("取消", None, Tone::Plain, model.admin.managing)).key("admin-plugin-cancel-delete").on_cx(|_, _: &Activate, cx| {

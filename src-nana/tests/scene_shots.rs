@@ -76,7 +76,7 @@ fn shoot(model: ShellViewModel, width: u32, height: u32, theme: ThemeName, dir: 
     let document = acceptance_document_at_width(model, width as f32).expect("文档");
     let mut session = RuntimeAgentSession::new(document, width, height).expect("会话");
     session.set_theme(theme).expect("主题");
-    assert!(appearance::install(session.document_mut(), appearance), "外观安装失败");
+    assert!(appearance::install(session.document_mut(), appearance).is_some(), "外观安装失败");
     session.flush().expect("布局");
     session.screenshot_png(dir.join(format!("{stem}.png"))).expect("截图");
     let nodes = session
@@ -115,10 +115,10 @@ fn parse_size(size: &str) -> (u32, u32) {
     (width.parse().expect("宽"), height.parse().expect("高"))
 }
 
-fn mode_of(theme: ThemeName) -> nana_ui::ThemeMode {
+fn mode_of(theme: ThemeName) -> nana_ui::theme::ThemeAppearance {
     match theme {
-        ThemeName::Light => nana_ui::ThemeMode::Light,
-        ThemeName::Dark => nana_ui::ThemeMode::Dark,
+        ThemeName::Light => nana_ui::theme::ThemeAppearance::Light,
+        ThemeName::Dark => nana_ui::theme::ThemeAppearance::Dark,
     }
 }
 

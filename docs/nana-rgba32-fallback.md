@@ -21,8 +21,8 @@
    和目标 PNG 不受影响。
 4. 支持 `Rgba16Float` 且 shader 契约明确兼容时才可作为 GPU 候选，否则直接 CPU 回退。
 
-本仓库已将修复后的 Nana painter 纳入 `vendor/nana-ui`，通过 Cargo patch 接入现有
-固定 revision 的其余 Nana crates；产品仍只持有一棵 Runtime/UI 树。
+NanaUI 上游已按这个边界修好：05d2de49d 加了格式探测，ba441adc3 改成只在回读测试时
+才建求值管线。MomoBako 直接用上游修订，不保留副本；产品仍只持有一棵 Runtime/UI 树。
 
 ## 验收要求
 

@@ -2,7 +2,7 @@
 
 本文锁定 `momobako-nana` 当前构建能用的 Nana 组件、和旧 Tauri/Vue 工作台的对应关系，以及还没有现成组件的宿主缺口。稳定 id 以 `src-nana/src/capability.rs` 的 `COMPILED_COMPONENT_IDS` 为准；目录变化时测试会失败。
 
-构建 feature 是 `hosted`、`bundled-fonts`、`components`、`icons-tabler`。`components` 打开 calendar、charts、controls、graph-canvas、image-viewer、rich-text。`hosted` 带上 GPU 和 AccessKit。未启用 `syntax-highlighting` 和 `packaged-resources`。Nana 修订仍是 `ee94106746b13f356af17586ed5e35ed78f9eb40`，本地 `vendor/nana-ui` 只补 RGBA32 motion 回退。
+构建 feature 是 `hosted`、`bundled-fonts`、`components`、`icons-tabler`。`components` 打开 calendar、charts、controls、graph-canvas、image-viewer、rich-text。`hosted` 带上 GPU 和 AccessKit。未启用 `syntax-highlighting` 和 `packaged-resources`。Nana 修订是 `9dd590a53dee822a2e4cfb8ab37070fa6ca5b19f`，不保留本地副本。
 
 ## 已编译组件
 

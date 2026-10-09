@@ -116,13 +116,14 @@ impl KeptScroll {
 }
 
 impl KeptFocus {
-    /// 重新聚焦；文本框再用 `select_focused_text_range` 恢复选区，偏移超出新文本时由它钳到合法的字符边界。
+    /// 原地重新聚焦（不滚动，刚写回的滚动偏移不被冲掉）；文本框再用 `select_focused_text_range`
+    /// 恢复选区，偏移超出新文本时由它钳到合法的字符边界。
     fn restore(self, document: &mut RuntimeDocument, roots: &[StableNodeId]) {
         let document_id = document.document();
         let Some(target) = self.identity.find(document, roots, "焦点") else {
             return;
         };
-        if let Err(error) = document.context_mut().focus_node(document_id, target) {
+        if let Err(error) = document.context_mut().focus_node_in_place(document_id, target) {
             eprintln!("Nana 重挂后恢复焦点失败：{} {error}", self.identity.path);
             return;
         }
