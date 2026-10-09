@@ -109,10 +109,13 @@ fn a_legacy_route_update_remounts_only_its_branch() {
 }
 
 /// 旧视图路由里的输入框：按一个键、消息归约同步以后不等刷新，焦点已经在当场重挂出来的新输入框上，
-/// 紧接着的按键落在新节点上，字不丢、光标不回跳。
+/// 紧接着的按键落在新节点上，字不丢、光标不回跳。搜索路由已经常驻，这里用播放集页上打开的筛选栏。
 #[test]
 fn the_next_key_after_a_legacy_remount_lands_on_the_new_input() {
-    let mut harness = ShellHarness::mount(scene("filter-bar"));
+    let mut model = ShellViewModel::for_page(ShellPage::Playlists);
+    model.inspect.filter_bar_open = true;
+    assert_eq!(RouteKey::of(&model), RouteKey::Playlists);
+    let mut harness = ShellHarness::mount(model);
     let field = harness.input_within("workspace-filter-bar");
     harness.focus(field);
     harness.type_text("a");

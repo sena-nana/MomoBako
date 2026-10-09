@@ -7,7 +7,7 @@
 use std::sync::Arc;
 
 use nana_ui::icons_tabler::X;
-use nana_ui::runtime::view::{widget, AnyView, IntoView};
+use nana_ui::runtime::view::{fields, widget, AnyView, El, FieldWrite, IntoProp, IntoView};
 use nana_ui::runtime::{
     AlignSpec, Button, IconButton, LengthSpec, NodePainter, NodeStyle, SemanticColorRole, SemanticPaint, Stack, Text,
     TextHorizontalAlignment, TextInput,
@@ -64,8 +64,14 @@ pub(crate) fn eyebrow(content: impl Into<String>) -> Text {
     node
 }
 
-/// Vue `.asset-stat`：26px 高的计数胶囊，主表面底、12px 次要文字。
-pub(crate) fn stat(content: impl Into<String>, key: impl Into<String>) -> AnyView {
+/// 绑定文字：`value` 是常量、信号或闭包，其余版式照 `node`。
+pub(crate) fn bound(node: Text, value: impl IntoProp<String>) -> El<Text> {
+    widget(node).prop::<String, fields::text::value>(value)
+}
+
+/// Vue `.asset-stat`：26px 高的计数胶囊，主表面底、12px 次要文字。文字可以绑定，
+/// 返回元素，调用方还能再绑显隐。
+pub(crate) fn stat(content: impl IntoProp<String>, key: impl Into<String>) -> El<Stack, (El<Text>,)> {
     let key = key.into();
     widget(
         Stack::row(0.0)
@@ -77,9 +83,8 @@ pub(crate) fn stat(content: impl Into<String>, key: impl Into<String>) -> AnyVie
             .grow(0.0)
             .shrink(0.0),
     )
-    .children((widget(label(content, 12.0, 500, SemanticColorRole::Muted)).key(format!("{key}-text")),))
+    .children((bound(label(String::new(), 12.0, 500, SemanticColorRole::Muted), content).key(format!("{key}-text")),))
     .key(key)
-    .into_any()
 }
 
 /// Vue `.workspace-filter-chip`：26px 胶囊，1px 边框。未选是主表面底、次要字；
@@ -112,15 +117,7 @@ pub(crate) fn chip(content: &str, active: bool, swatch: Option<SwatchColor>) -> 
         border: Some(SemanticColorRole::Accent),
         ..SemanticPaint::default()
     };
-    if active {
-        style.foreground = accent.foreground;
-        style.background = accent.background;
-        style.border = accent.border;
-    } else {
-        style.foreground = Some(SemanticColorRole::Muted);
-        style.background = Some(SemanticColorRole::Background);
-        style.border = Some(SemanticColorRole::Border);
-    }
+    (style.foreground, style.background, style.border) = chip_roles(active);
     style.interaction.hovered = accent;
     style.interaction.pressed = accent;
     style.interaction.disabled = SemanticPaint::default();
@@ -129,6 +126,30 @@ pub(crate) fn chip(content: &str, active: bool, swatch: Option<SwatchColor>) -> 
         style.painter = Some(NodePainter::new(SwatchChipPainter { color, inset: 1.0 + CHIP_PADDING }));
     }
     button.style(style)
+}
+
+/// 芯片常态的字色、底色和描边：选中是强调色，未选是主表面底、次要字。
+fn chip_roles(active: bool) -> (Option<SemanticColorRole>, Option<SemanticColorRole>, Option<SemanticColorRole>) {
+    if active {
+        (Some(SemanticColorRole::Accent), Some(SemanticColorRole::AccentSoft), Some(SemanticColorRole::Accent))
+    } else {
+        (Some(SemanticColorRole::Muted), Some(SemanticColorRole::Background), Some(SemanticColorRole::Border))
+    }
+}
+
+/// 芯片的选中态，绑到 [`chip`] 建出的按钮上：只改常态的三个颜色，悬停和按下的强调色不变。
+pub(crate) struct ChipActive;
+
+impl FieldWrite<Button, bool> for ChipActive {
+    const FIELD: &'static str = "Button.style.{foreground,background,border}(chip)";
+
+    fn write(target: &mut Button, active: bool) {
+        (target.style.foreground, target.style.background, target.style.border) = chip_roles(active);
+    }
+
+    fn differs(target: &Button, active: &bool) -> bool {
+        (target.style.foreground, target.style.background, target.style.border) != chip_roles(*active)
+    }
 }
 
 /// Vue `button:disabled` 的 45% 不透明度。
@@ -171,7 +192,6 @@ pub(crate) fn close_button(name: &str) -> IconButton {
         layout.flex_grow = Some(0.0);
         layout.flex_shrink = Some(0.0);
     }
-    style.square = None;
     style.control_padding_x = None;
     style.radius = Some(RadiusTier::Sm);
     ghost_paint(&mut style);
