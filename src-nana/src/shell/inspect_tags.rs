@@ -3,6 +3,7 @@
 //! 菜单坐标夹取和侧栏弹层用同一条规则。搜索等待 250 毫秒，元数据等待 260 毫秒。
 //! 时钟只在还有到期项时前进，避免空闲时把窗口钉在连续帧上。
 
+use super::super::player::ClockStep;
 use super::{InspectMessage, InspectState};
 
 const SEARCH_DELAY_MS: u64 = 250;
@@ -134,18 +135,21 @@ impl LiveTimers {
     }
 }
 
-/// 准备阶段拨一帧。触发搜索或保存时标脏，让随后的挂载画上新结果。
+/// 准备阶段拨一帧，返回计时器或播放时钟有没有动。
+///
+/// 搜索、保存这类计时器触发和播放切项会改界面结构，标脏让随后整体同步；只是播放进度往前走时
+/// 不标脏，进度和时间由热信号跟上。
 pub(crate) fn poll_timers(model: &mut super::super::ShellViewModel) -> bool {
     let writable = model.workspace.active_repository().is_some_and(|repository| {
         super::super::files::repository_is_writable(&repository.status, &repository.capabilities)
     });
     let repo_id = model.workspace.active_repo_id.clone();
     let fired = model.inspect.poll_own(16, writable, repo_id.as_deref());
-    let video = super::bridge::advance_playback(model, 16);
-    if fired || video {
+    let playback = super::bridge::advance_playback(model, 16);
+    if fired || playback == ClockStep::Changed {
         model.surface_dirty = true;
     }
-    fired || video
+    fired || playback != ClockStep::Idle
 }
 
 #[cfg(test)]

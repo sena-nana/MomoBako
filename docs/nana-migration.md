@@ -24,6 +24,22 @@ cargo run -p momobako-nana
 cargo test -p momobako-nana --test offscreen_acceptance -- --nocapture
 ```
 
+## 壳层视图同步
+
+`ShellViewModel` 和 `reduce` 是唯一状态源。数据流是
+`ShellMessage → reduce → 服务副作用 → ShellView::sync`，`ShellView` 在
+`src-nana/src/shell/view_host.rs`。
+
+- 骨架只在窗口文档建好时挂一次：AppShell、标题栏、工作区，以及一个停放在树外、用来认出这棵骨架的隐藏标记。
+  标题栏的侧栏开关、筛选开关和角标按字段绑定；全局搜索用 `.model(Signal<String>)` 受控，ViewModel 的查询相对上次投影变了才回写信号，排在后台消息后面的按键不会被旧草稿冲掉。
+- 侧栏、主区和浮层仍由现有视图函数整块建出，挂好后放进骨架组合控件的槽位：有侧栏时放进工作区的资源区和主区，工作区是 AppShell 的 body；主区独占时它自己是 body；浮层是 AppShell 的 overlay。整体同步时这三块重挂，重挂前后在各自的根下面记下并找回焦点、选区和滚动。
+- 焦点在某块里而且输入法还有预编辑时，这块延后重挂，`prepare` 每帧检查，组合结束后按最新状态补挂。
+- 动效时钟、播放进度和侧栏淡入的投影在 `src-nana/src/shell/hot.rs`，结果写进信号，内容里的节点绑定这些信号。`prepare` 里只有动效帧和播放推进时只写信号、不重挂；这一帧经过归约、标了脏或者工作台排法要换时才整体同步，指针手势进行中不重挂。
+- 组合控件给槽位根节点打的布局补丁只在它自己投影时写，所以槽位根节点上不放绑定：浮层动效绑在铺满浮层根的内层上；侧栏宽度由 `ShellView` 直接写进工作区，写完让 AppShell 重新投影一次。
+- `update` 和 `prepare` 里只写信号，不调用 `flush_reactive`；刷新由输入路由和帧开头完成。
+
+`mount_shell` 留给验收文档和测试：文档里已经有它挂过的壳层就整体同步，否则新挂一棵。
+
 ## 服务事件边界
 
 `src-tauri/src/services/host_events.rs` 定义宿主无关的 `HostEvent` 和

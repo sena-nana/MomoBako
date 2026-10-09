@@ -374,7 +374,7 @@ mod tests {
     use nana_ui::runtime::LayoutViewport;
 
     use crate::acceptance_document_for_model;
-    use crate::window_host::prepare_motion;
+    use crate::shell::view_host::prepare_registered as prepare_motion;
 
     #[test]
     fn live_folder_button_escape_and_prefetch_use_the_shell_path() {
