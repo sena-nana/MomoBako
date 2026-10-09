@@ -6,9 +6,6 @@
 //! 别的模块的旧视图在这里登记成岛（见 `view_part_primary::Island`）：筛选栏、关闭确认、文件对话框、
 //! 导出对话框和两处播放条。岛的内容仍由它们的旧视图函数整块建出，版本变了才换，常驻部分不动。
 
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
-
 use nana_ui::runtime::view::{node_ref, signal, widget, AnyView, IntoView, NodeRef, Signal};
 use nana_ui::runtime::{LengthSpec, Stack};
 
@@ -64,8 +61,8 @@ pub(super) fn islands(signals: FilesRouteSignals) -> Vec<Island> {
     let slots = signals.slots;
     vec![
         Island { slot: signals.filter, build: filter_bar, stamp: revision },
-        Island { slot: slots.player, build: workbench_player, stamp: player_stamp },
-        Island { slot: slots.preview_bar, build: preview_player, stamp: player_stamp },
+        Island { slot: slots.player, build: workbench_player, stamp: super::player_view::bar_stamp },
+        Island { slot: slots.preview_bar, build: preview_player, stamp: super::player_view::bar_stamp },
     ]
 }
 
@@ -80,43 +77,12 @@ fn filter_bar(model: &ShellViewModel) -> Option<AnyView> {
 
 /// 工作台左列底下的播放条：预览页打开时由预览页自己放。
 fn workbench_player(model: &ShellViewModel) -> Option<AnyView> {
-    (!files_view::previewing(model) && model.player_surface_visible()).then(|| super::player_view::player_surface(model))
+    (!files_view::previewing(model) && model.player_surface_visible()).then(|| super::player_view::hosted_bar(model))
 }
 
 /// 预览页底部的播放条。
 fn preview_player(model: &ShellViewModel) -> Option<AnyView> {
     files_view::previewing(model).then(|| super::player_view::hosted_bar(model))
-}
-
-/// 播放条岛的版本：播放条读到的状态（`player_bar.rs` 的 `BarProps`、窄排法、圆角、下载进度）和岛该不该有内容。
-///
-/// 播放条量到自己的宽度后会发 `BarResized`，每次归约都重建会量了又建、建了又量，所以这里不按 ViewModel
-/// 版本，只按它真正读到的值。播放进度和时间走热信号，不在里面。播放条改读别的字段时这里跟着加。
-fn player_stamp(model: &ShellViewModel) -> u64 {
-    let mut hasher = DefaultHasher::new();
-    let player = &model.player;
-    let session = &player.session;
-    (files_view::previewing(model), model.player_surface_visible()).hash(&mut hasher);
-    (player.download_text(), &player.current_id, player.can_play, player.queue_open, &player.repo_id).hash(&mut hasher);
-    format!("{:?}", player.mode).hash(&mut hasher);
-    (player.settings.image_duration_ms, player.settings.object_fit_cover).hash(&mut hasher);
-    (&session.status, &session.error, session.volume.to_bits(), session.duration_ms).hash(&mut hasher);
-    player.listed.as_ref().map(|detail| &detail.playlist.playlist_id).hash(&mut hasher);
-    for item in &player.queue {
-        (&item.id, &item.playlist_id, &item.asset_id, &item.path, &item.filename, &item.extension, &item.status).hash(&mut hasher);
-        (&item.status_reason, item.transient, &item.player_type_id, &item.player_label, &item.file_class, &item.thumbnail_path).hash(&mut hasher);
-    }
-    if let Some(item) = player.current_item() {
-        let contribution = player.contributions.iter().find(|entry| entry.player_type_id == item.player_type_id);
-        contribution.map(|entry| (&entry.file_class, entry.supports_seek, entry.supports_volume)).hash(&mut hasher);
-        let candidate = player.candidates.iter().find(|entry| entry.player_type_id == item.player_type_id);
-        candidate.map(|entry| (&entry.file_class, entry.supports_seek, entry.supports_volume)).hash(&mut hasher);
-        let thumbnail = item.thumbnail_path.as_deref();
-        let ready = model.files.rows.iter().any(|row| row.texture_ready && row.thumbnail_path.as_deref() == thumbnail);
-        (thumbnail, ready).hash(&mut hasher);
-    }
-    (player.bar_width.to_bits(), model.narrow_viewport(), model.admin.corner_radius.to_bits()).hash(&mut hasher);
-    hasher.finish()
 }
 
 /// 文件路由的分支：首页外框（左右 24、上下 20），筛选栏在上，下面是固定高度的主体。
