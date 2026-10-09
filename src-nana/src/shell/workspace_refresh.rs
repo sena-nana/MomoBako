@@ -63,8 +63,8 @@ fn apply_repositories(model: &mut ShellViewModel, result: Result<Vec<RepositoryS
     model.repository_id = Some(current.repo_id.clone());
 }
 
-/// 就绪且仍是当前仓库时更新名称、摘要和快捷计数。
-fn apply_snapshot(model: &mut ShellViewModel, result: Result<RepositorySnapshot, String>) {
+/// 就绪且仍是当前仓库时更新名称、摘要和快捷计数。文件夹树刷新重读的摘要也走这里。
+pub(super) fn apply_snapshot(model: &mut ShellViewModel, result: Result<RepositorySnapshot, String>) {
     let snapshot = match result {
         Err(error) => {
             eprintln!("Nana 静默刷新仓库摘要失败：{error}");

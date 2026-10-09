@@ -472,20 +472,6 @@ impl SidebarState {
         }
     }
 
-    /// 正在读取目录树时忽略重复刷新。
-    pub fn refresh_tree(&mut self, repo_id: Option<&str>, locked: bool) -> bool {
-        if locked || self.tree_loading {
-            return false;
-        }
-        let Some(repo_id) = repo_id else {
-            return false;
-        };
-        self.tree_loading = true;
-        self.tree_error.clear();
-        self.effects.push(SidebarEffect::LoadTree { repo_id: repo_id.to_string() });
-        true
-    }
-
     pub fn apply_tree(&mut self, repo_id: &str, result: Result<SidebarTree, String>) {
         if self.bound_repo_id.as_deref() != Some(repo_id) {
             eprintln!("Nana 忽略过期的目录树：{repo_id}");
@@ -831,9 +817,7 @@ pub(super) fn reduce_message(model: &mut super::ShellViewModel, message: super::
         SidebarMessage::OpenQuickAccess(id) => model.apply_quick_access(id),
         SidebarMessage::ToggleFolder(path) => model.sidebar.toggle_folder(&path),
         SidebarMessage::OpenFolder(path) => model.apply_open_folder(path),
-        SidebarMessage::RefreshFolderTree => {
-            model.sidebar.refresh_tree(model.workspace.active_repo_id.as_deref(), model.navigation_locked());
-        }
+        SidebarMessage::RefreshFolderTree => super::tree_sync::begin(model),
         SidebarMessage::ToggleSmartFolder(id) => model.sidebar.toggle_smart_folder(&id),
         SidebarMessage::OpenSmartFolder(id) => model.apply_smart_folder(id),
         SidebarMessage::OpenSmartFolderDialog => {

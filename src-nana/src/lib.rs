@@ -17,6 +17,7 @@ mod inspect_dispatch;
 mod player_dispatch;
 mod admin_dispatch;
 mod sidebar_dispatch;
+mod sync_dispatch;
 mod window_host;
 mod host_bridge;
 mod window_state;
@@ -252,6 +253,7 @@ impl ApplicationState for MomoBakoApplication {
         player_dispatch::dispatch_player_effects(self, context);
         admin_dispatch::dispatch_admin_effects(self, context);
         sidebar_dispatch::dispatch_sidebar_effects(self, context);
+        sync_dispatch::dispatch_tree_sync_effects(self, context);
         files_dispatch::dispatch_files_effects(self, context);
         inspect_dispatch::dispatch_inspect_effects(self, context);
         window_host::after_update(self, context);

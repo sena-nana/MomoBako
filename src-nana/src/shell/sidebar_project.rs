@@ -169,7 +169,8 @@ impl SidebarView {
         let counts = sidebar.counts;
         let no_players = model.playlist_players.is_empty();
         let trash = panel == WorkspacePanel::Trash || sidebar.browsing_trash;
-        let loading = sidebar.tree_loading;
+        // 刷新按钮转圈：目录树在读，或者照 Vue `isLoadingFileBrowser` 在读目录、在刷新文件夹树。
+        let loading = sidebar.tree_loading || super::super::tree_sync::loading_file_browser(model);
         Self {
             status: StatusLine::project(model),
             head: HeadView {
@@ -221,7 +222,7 @@ impl SidebarView {
             playlist_rows: playlist_rows(model),
             folders: FolderGroup {
                 create_disabled: !has_repo || locked || model.files.mutating || trash,
-                refresh_disabled: !has_repo || locked || loading,
+                refresh_disabled: super::super::tree_sync::refresh_blocked(model),
                 loading,
                 parent: sidebar.current_directory.clone(),
                 hint: if !has_repo {
