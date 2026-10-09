@@ -1,7 +1,7 @@
 # NanaUI 原生迁移边界
 
 MomoBako 的原生 UI 入口位于 `src-nana`。该 crate 固定使用 NanaUI 提交
-`9dd590a53dee822a2e4cfb8ab37070fa6ca5b19f`，依赖来自 Git revision，不读取本地
+`e2780d929bb452182a34d266e459958378bf363d`，依赖来自 Git revision，不读取本地
 NanaUI 工作树的未提交文件。
 
 ## 渲染与验收路径
