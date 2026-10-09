@@ -361,7 +361,7 @@ pub enum FilesMessage {
 }
 
 /// 文件变更在任务弹层里的进度行，照 Vue `startOperationProgress` / `updateOperationProgress`：
-/// 种类、当前阶段和百分比。宽度过渡由壳层动效时钟绘制。
+/// 种类、当前阶段和百分比。
 #[derive(Clone, Debug, PartialEq)]
 pub(super) struct FileOperation {
     pub label: String,
