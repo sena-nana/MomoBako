@@ -20,11 +20,11 @@ use nana_ui_devtools::agent::{
 };
 use nana_ui_devtools::offscreen;
 use nana_ui_platform::host::WindowCommand;
-use nana_ui_platform::WindowId;
+use nana_ui_platform::{InputModifiers, WindowId};
 
 const NAMES: [&str; 3] = ["photos", "audio", "cover.png"];
 const DISPLAY_MODES: [&str; 4] = ["自适应", "瀑布流", "网格", "列表"];
-const FOOTER: [&str; 4] = ["设置", "拓展", "任务 2", "日志"];
+const FOOTER: [&str; 4] = ["设置", "拓展", "任务", "日志"];
 const TOOLBAR: [&str; 2] = ["建文件", "导入"];
 const PLAYER: [&str; 7] = [
     "未选择播放内容",
@@ -67,6 +67,54 @@ fn live_workspace_title_bar_layout_and_clicks_hold() {
     assert_missing();
     assert_clicks();
     assert_smart_folder_dialog();
+}
+
+/// 每次更新都整棵重挂。两次按键之间重挂，第二个字仍要进同一个输入框。
+#[test]
+fn typing_survives_a_remount_between_keys() {
+    let mut model = live_files();
+    let mut session = open_session(model.clone(), 1200, 800, ThemeName::Light);
+    click_input(&mut session, "全局搜索");
+    session.type_text("a").expect("输入 a");
+    let _ = pump(&mut session, &mut model);
+    session.type_text("b").expect("输入 b");
+    let _ = pump(&mut session, &mut model);
+    assert_eq!(input_value(&session, "全局搜索"), "ab", "重挂后第二个字没有进搜索框");
+
+    // 对话框里的输入框在浮层里，键路径要经过壳层的浮层槽位。
+    click_label(&mut session, "新建智能文件夹");
+    let _ = pump(&mut session, &mut model);
+    click_input(&mut session, "名称");
+    session.type_text("高").expect("输入 高");
+    let _ = pump(&mut session, &mut model);
+    session.type_text("评").expect("输入 评");
+    let _ = pump(&mut session, &mut model);
+    assert_eq!(input_value(&session, "名称"), "高评", "重挂后对话框输入框失焦");
+}
+
+/// 光标在文字中间时重挂，光标要留在原处，后面的字接着插在中间。
+#[test]
+fn remount_restores_the_caret_inside_the_text() {
+    let mut model = live_files();
+    let mut session = open_session(model.clone(), 1200, 800, ThemeName::Light);
+    click_input(&mut session, "全局搜索");
+    session.type_text("ab").expect("输入 ab");
+    let _ = pump(&mut session, &mut model);
+    session.key_press("ArrowLeft", "ArrowLeft", InputModifiers::default()).expect("光标左移");
+    session.type_text("x").expect("输入 x");
+    let _ = pump(&mut session, &mut model);
+    session.type_text("y").expect("输入 y");
+    let _ = pump(&mut session, &mut model);
+    assert_eq!(input_value(&session, "全局搜索"), "axyb", "重挂后光标跳到了末尾");
+}
+
+fn input_value(session: &RuntimeAgentSession, label: &str) -> String {
+    session
+        .accessibility_dump()
+        .into_iter()
+        .find(|node| node.role == "text-input" && node.label.as_deref() == Some(label))
+        .and_then(|node| node.value)
+        .unwrap_or_else(|| panic!("读不到输入 {label} 的值"))
 }
 
 fn assert_startup() {
@@ -182,8 +230,16 @@ fn assert_smart_folder_dialog() {
     click_label(&mut session, "新建智能文件夹");
     let _ = pump(&mut session, &mut model);
     let nodes = session.accessibility_dump();
-    for label in ["新建智能文件夹", "已选 顶层智能文件夹", "全部匹配", "任一匹配", "取消", "创建"] {
+    for label in ["新建智能文件夹", "名称", "父级", "匹配方式", "取消", "创建"] {
         assert!(has_label(&nodes, label), "新建智能文件夹缺少 {label}");
+    }
+    // 下拉框由字段名命名，值是当前选项，和 Vue `<label>` 包着 `<select>` 一致。
+    for (label, value) in [("父级", "顶层智能文件夹"), ("匹配方式", "全部匹配")] {
+        let combo = nodes
+            .iter()
+            .find(|node| node.role == "combo-box" && node.label.as_deref() == Some(label))
+            .unwrap_or_else(|| panic!("下拉框 {label} 没有字段名"));
+        assert_eq!(combo.value.as_deref(), Some(value), "下拉框 {label} 的当前值");
     }
     assert_eq!(input_placeholder(&session, "名称"), "例如 高评分 PSD");
     let dialog_shot = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target/nana-live-visual/smart-folder-dialog.png");
@@ -194,7 +250,12 @@ fn assert_smart_folder_dialog() {
     let _ = pump(&mut session, &mut model);
     click_label(&mut session, "创建");
     let _ = pump(&mut session, &mut model);
-    assert!(has_label(&session.accessibility_dump(), "正在保存…"), "创建没有进入提交");
+    let submit = session
+        .accessibility_dump()
+        .into_iter()
+        .find(|node| node.role == "button" && node.label.as_deref() == Some("创建"))
+        .expect("创建按钮");
+    assert!(submit.busy, "创建没有进入提交");
 }
 
 fn open_session(
@@ -322,7 +383,7 @@ fn contains(outer: &BoundsDump, inner: &BoundsDump) -> bool {
 
 /// 宽窗里文件名必须真的露在列表里；最小窗只要求看得到的部分不压在播放条下。
 fn assert_file_layout(session: &RuntimeAgentSession, nodes: &[AccessibilityDumpNode], expect_visible_names: bool) {
-    let task = required(nodes, "任务 2");
+    let task = required(nodes, "任务");
     assert_footer_inside_sidebar(nodes);
     let modes = vec![display_mode_select(nodes)];
     let tools = buttons(nodes, &TOOLBAR);
