@@ -48,16 +48,27 @@ pub(super) fn metadata_panel(model: &ShellViewModel) -> AnyView {
     let claimed = !library.is_empty();
     rows.extend(library);
     rows.extend(super::inspect_asmr::candidate_section(model, &custom));
-    let extra = custom
-        .iter()
-        .filter(|(key, _)| !(claimed && super::inspect_library::claimed_metadata_keys().contains(&key.as_str())))
-        .map(|(key, value)| fact(key, value.clone(), &format!("inspect-custom-{}", style::key_part(key)), false))
-        .collect::<Vec<_>>();
+    let extra = custom_rows(&custom, claimed);
     if !extra.is_empty() {
         rows.push(widget(Stack::column(12.0).width(LengthSpec::Fill)).children(extra).key("inspect-custom").into_any());
     }
     let panel = style::top_rule(Stack::column(12.0).width(LengthSpec::Fill).min_width(LengthSpec::Px(0.0)), 12.0);
     widget(panel).children(rows).key("inspect-metadata").into_any()
+}
+
+/// 自定义字段行，按键名排序。上面已经画过的通用字段、后端种下的系统字段，以及作品信息区块认领的键都不再重复。
+fn custom_rows(custom: &BTreeMap<String, String>, claimed: bool) -> Vec<AnyView> {
+    custom_fields(custom, claimed)
+        .map(|(key, value)| fact(key, value.clone(), &format!("inspect-custom-{}", style::key_part(key)), false))
+        .collect()
+}
+
+/// 自定义行要画的键值。`claimed` 为真时作品信息区块已经画出它认领的键。
+fn custom_fields(custom: &BTreeMap<String, String>, claimed: bool) -> impl Iterator<Item = (&String, &String)> {
+    custom.iter().filter(move |(key, _)| {
+        !super::inspect::is_reserved_metadata(key)
+            && !(claimed && super::inspect_library::claimed_metadata_keys().contains(&key.as_str()))
+    })
 }
 
 /// 自动保存撞上服务器的新版本：警告色写明冲突，右边是「采用服务器版本」。没有冲突时不占位。
@@ -566,7 +577,56 @@ fn inspect_message(message: InspectMessage) -> ShellMessage {
 
 #[cfg(test)]
 mod tests {
-    use super::openable_link;
+    use std::collections::BTreeMap;
+
+    use serde_json::Value;
+
+    use super::{custom_fields, openable_link};
+
+    /// 通用字段、后端种下的系统字段都不进自定义行；作品信息认领的键只在区块画出来时才让出。
+    #[test]
+    fn custom_rows_skip_reserved_and_seeded_keys() {
+        let mut custom = BTreeMap::new();
+        for key in [
+            "comment", "note", "link", "rating", "tagGroups", "width", "height", "originalSizeBytes", "addedToLibraryAt",
+            "fileCreatedAt", "fileModifiedAt", "palette", "thumbnailPalette", "originTitle", "sourceUrl", "title", "type",
+            "favorite", "color", "artist", "workTitle",
+        ] {
+            custom.insert(key.to_string(), "x".to_string());
+        }
+        let shown = |claimed| custom_fields(&custom, claimed).map(|(key, _)| key.as_str()).collect::<Vec<_>>();
+        assert_eq!(shown(false), ["artist", "workTitle"]);
+        assert_eq!(shown(true), ["artist"]);
+    }
+
+    /// 选中带完整元数据的 cover.png：评分、注释、尺寸这些只在各自的行里出现一次，不再按原始键名重复；
+    /// 后端种下的标题、类型、收藏和主色也不出现，真正的自定义字段照常列出。
+    #[test]
+    fn selected_metadata_lists_each_reserved_field_once() {
+        let mut model = crate::shell::acceptance_gap_models()
+            .into_iter()
+            .find(|(name, _)| *name == "files-selected-metadata")
+            .map(|(_, model)| model)
+            .expect("files-selected-metadata 场景");
+        let row = model.files.rows.iter_mut().find(|row| row.path == "cover.png").expect("cover.png");
+        for (key, value) in [("title", "cover.png"), ("type", "png"), ("color", "#c7a566"), ("artist", "Momo")] {
+            row.metadata.insert(key.into(), Value::String(value.into()));
+        }
+        row.metadata.insert("favorite".into(), Value::Bool(false));
+        let document = crate::acceptance_document_for_model(model).expect("生产文档");
+        let nodes = document.context().world().project_accessibility(document.document());
+        let labelled = |label: &str| nodes.iter().filter(|node| node.label.as_deref() == Some(label)).count();
+        for key in [
+            "comment", "link", "rating", "width", "height", "originalSizeBytes", "addedToLibraryAt", "fileCreatedAt", "title",
+            "type", "favorite", "color",
+        ] {
+            assert_eq!(labelled(key), 0, "保留字段 {key} 不该按原始键名再列一行");
+        }
+        assert_eq!(labelled("尺寸"), 1);
+        assert_eq!(labelled("1920 × 1080"), 1);
+        assert_eq!(labelled("artist"), 1, "真正的自定义字段照常列出");
+        assert_eq!(labelled("Momo"), 1);
+    }
 
     #[test]
     fn only_real_protocols_can_be_opened() {

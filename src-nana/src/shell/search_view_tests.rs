@@ -175,11 +175,38 @@ fn session_nodes(session: &nana_ui_devtools::agent::RuntimeAgentSession) -> Vec<
     session.document().context().world().project_accessibility(session.document().document())
 }
 
+/// 查询跑完没有命中：空状态写明全部资源库里没有匹配的文件，不再写「等待搜索条件」。
 #[test]
 fn empty_search_keeps_the_filter_bar_closed() {
     let nodes = nodes("search-empty");
-    assert!(has(&nodes, "等待搜索条件"));
+    assert!(has(&nodes, "没有匹配的文件"));
+    assert!(has(&nodes, "全部资源库里没有符合当前条件的文件。调整关键词、标签或评分条件后再试。"));
+    assert!(!has(&nodes, "等待搜索条件"), "搜索已经跑完");
     assert!(has(&nodes, "当前查询: 不存在的文件"));
     assert!(has(&nodes, "0 条结果"));
     assert!(!has(&nodes, "当前资源库筛选"), "筛选栏关闭");
+}
+
+/// 搜索失败且没有上一批结果：只写错误，不说成没有命中，也不说成在等条件。
+#[test]
+fn failed_search_shows_only_the_error() {
+    let mut model = acceptance_gap_models()
+        .into_iter()
+        .find(|(name, _)| *name == "search-empty")
+        .map(|(_, model)| model)
+        .expect("search-empty 场景");
+    model.reduce(super::super::ShellMessage::Inspect(super::super::inspect::InspectMessage::RunSearch));
+    let generation = match model.inspect.take_effects().pop() {
+        Some(super::super::InspectEffect::Search { generation, .. }) => generation,
+        other => panic!("没有搜索请求：{other:?}"),
+    };
+    model.reduce(super::super::ShellMessage::Inspect(super::super::inspect::InspectMessage::SearchFinished {
+        generation,
+        result: Err("搜索失败：索引损坏".into()),
+    }));
+    let document = crate::acceptance_document_for_model(model).expect("生产文档");
+    let nodes = document.context().world().project_accessibility(document.document());
+    assert!(has(&nodes, "搜索失败：索引损坏"));
+    assert!(!has(&nodes, "没有匹配的文件"));
+    assert!(!has(&nodes, "等待搜索条件"));
 }

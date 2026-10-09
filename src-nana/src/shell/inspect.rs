@@ -18,10 +18,22 @@ mod bridge;
 pub use bridge::NativeLoad;
 pub(super) use bridge::rgba_png_data_url;
 
-const RESERVED_METADATA: &[&str] = &[
+/// 元数据编辑器自己画的通用字段，即 Vue `FileMetadataEditor.vue` 读的键，覆盖 `docs/api-design.md` 的
+/// Generic file metadata keys：评分、注释（含旧键 note）、链接和标签组四个输入，以及入库、创建、修改时间、
+/// 尺寸、原始大小、调色板、来源标题和来源链接的只读行。自定义草稿不收这些键，免得和编辑器字段互相覆盖。
+const EDITOR_METADATA: &[&str] = &[
     "rating", "comment", "note", "link", "tagGroups", "addedToLibraryAt", "fileCreatedAt", "fileModifiedAt", "width",
     "height", "originalSizeBytes", "thumbnailPalette", "palette", "originTitle", "sourceUrl",
 ];
+
+/// 后端给每个素材种下、编辑器不单独画的系统字段（`sync_metadata.rs::ensure_default_metadata` 和 Eagle 导入种子）：
+/// 标题是文件名，类型是扩展名，主色是调色板第一色，收藏是 Eagle 的旧标记。插件补全仍可写入，只是不另起一行。
+const SEEDED_METADATA: &[&str] = &["title", "type", "favorite", "color"];
+
+/// 元数据区自定义行跳过的保留字段：编辑器自己画的通用字段，加上后端种下的系统字段。
+pub(super) fn is_reserved_metadata(key: &str) -> bool {
+    EDITOR_METADATA.contains(&key) || SEEDED_METADATA.contains(&key)
+}
 
 /// 预览分派结果。原生贡献只保留 view_id，不携带 Vue 组件。
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -175,6 +187,8 @@ pub struct InspectState {
     pub(super) search_ui: search::SearchUi,
     pub(super) filter_bar_open: bool,
     pub(super) searching: bool,
+    /// 结果来自一次跑完的带条件搜索。为假时还没有条件，结果区等条件；为真且没有结果时是没有命中。
+    pub(super) searched: bool,
     search_generation: u64,
     pub(super) results: Vec<SearchRow>,
     pub(super) search_error: String,
@@ -217,6 +231,7 @@ impl Default for InspectState {
             search_ui: search::SearchUi::default(),
             filter_bar_open: false,
             searching: false,
+            searched: false,
             search_generation: 0,
             results: Vec::new(),
             search_error: String::new(),
@@ -446,7 +461,7 @@ impl InspectState {
             InspectMessage::RemoveTag(tag) => self.draft.tags.retain(|item| item != &tag),
             InspectMessage::SetCustom { key, value } => {
                 let key = key.trim().to_string();
-                if key.is_empty() || RESERVED_METADATA.contains(&key.as_str()) {
+                if key.is_empty() || EDITOR_METADATA.contains(&key.as_str()) {
                     eprintln!("Nana 忽略无效的自定义字段：{key}");
                     return;
                 }
@@ -521,7 +536,7 @@ impl InspectState {
             repo_id,
             asset_id,
             expected_version: self.expected_version,
-            metadata: self.draft.to_metadata_map(),
+            metadata: self.draft.to_metadata_map(&self.baseline),
         });
     }
 
@@ -654,20 +669,24 @@ impl MetadataDraft {
             tags: support::metadata_tags(metadata).unwrap_or_else(|| detail.summary.tags.clone()),
             custom: metadata
                 .iter()
-                .filter(|entry| !RESERVED_METADATA.contains(&entry.key.as_str()))
+                .filter(|entry| !EDITOR_METADATA.contains(&entry.key.as_str()))
                 .map(|entry| (entry.key.clone(), support::value_text(&entry.value)))
                 .collect(),
         }
     }
 
-    fn to_metadata_map(&self) -> BTreeMap<String, Value> {
+    /// 保存请求的元数据。编辑器的评分、注释、链接和标签组照 Vue 每次都写；自定义字段只写和 `baseline`
+    /// 不同的，也就是这次改过的。后端按键覆盖写入，没动过的字段若按文本回写，数字、布尔和数组都会变成字符串。
+    fn to_metadata_map(&self, baseline: &MetadataDraft) -> BTreeMap<String, Value> {
         let mut metadata = BTreeMap::new();
         metadata.insert("rating".into(), Value::from(self.rating));
         metadata.insert("comment".into(), Value::String(self.comment.trim().to_string()));
         metadata.insert("link".into(), Value::String(self.link.trim().to_string()));
         metadata.insert("tagGroups".into(), Value::Array(self.tags.iter().cloned().map(Value::String).collect()));
         for (key, value) in &self.custom {
-            metadata.insert(key.clone(), Value::String(value.clone()));
+            if baseline.custom.get(key) != Some(value) {
+                metadata.insert(key.clone(), Value::String(value.clone()));
+            }
         }
         metadata
     }

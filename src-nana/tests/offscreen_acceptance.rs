@@ -394,8 +394,8 @@ fn scene_labels(scene_id: &str, page: &ShellPage) -> &'static [&'static str] {
         "filter-bar" => &["当前资源库筛选", "格式筛选"],
         // 三个条件生效，结果是命中的 cover.png。
         "filter-bar-active" => &["3 个条件", "默认资源库 / cover.png"],
-        // 查询跑完没有命中。
-        "search-empty" => &["当前查询: 不存在的文件", "0 条结果"],
+        // 查询跑完没有命中：空状态写明全部资源库里没有匹配的文件。
+        "search-empty" => &["当前查询: 不存在的文件", "0 条结果", "没有匹配的文件"],
         _ => page_labels(page),
     }
 }

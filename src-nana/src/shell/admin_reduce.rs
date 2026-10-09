@@ -148,7 +148,6 @@ fn consume_legacy(model: &mut ShellViewModel, message: ShellMessage) -> Option<S
             None
         }
         ShellMessage::SettingsLoaded(Ok((settings, diagnostic))) => {
-            model.settings_cache_limit_draft = settings.thumbnail_cache_limit_mb.to_string();
             model.settings = settings;
             model.detail = diagnostic.clone().unwrap_or_else(|| "应用设置已加载".into());
             model.settings_error = diagnostic;
@@ -170,32 +169,8 @@ fn consume_legacy(model: &mut ShellViewModel, message: ShellMessage) -> Option<S
             model.admin.push_effect(AdminEffect::SaveSettings);
             None
         }
-        ShellMessage::SettingsCacheLimitChanged(value) => {
-            model.settings_cache_limit_draft = value.clone();
-            model.settings_error = None;
-            match value.parse::<u32>() {
-                Ok(limit) => model.settings.thumbnail_cache_limit_mb = limit,
-                Err(_) => model.settings_error = Some("缩略图缓存上限必须是整数".into()),
-            }
-            None
-        }
-        ShellMessage::SettingsPlayerChanged(player) => {
-            model.settings.default_playlist_player_type_id = if player.trim().is_empty() { None } else { Some(player) };
-            model.settings_error = None;
-            None
-        }
-        ShellMessage::SettingsCloseBehaviorChanged(behavior) => {
-            model.settings.close_behavior = behavior;
-            model.settings_error = None;
-            None
-        }
-        // 保存由宿主直接写设置文件，这里只更新状态行；结果不切页面。
-        ShellMessage::SaveSettings => {
-            model.detail = "正在保存应用设置…".into();
-            None
-        }
+        // 主题改动后宿主直接写设置文件，这里只收结果；结果不切页面。
         ShellMessage::SettingsSaved(Ok(settings)) => {
-            model.settings_cache_limit_draft = settings.thumbnail_cache_limit_mb.to_string();
             model.settings = settings;
             model.settings_error = None;
             model.detail = "应用设置已保存".into();
@@ -382,7 +357,6 @@ fn reduce_admin(model: &mut ShellViewModel, message: AdminMessage) {
             }
         }
         AdminMessage::SourceStepFinished { step, result } => flow::finish(model, step, result),
-        AdminMessage::SaveSettingsNow => model.admin.push_effect(AdminEffect::SaveSettings),
     }
 }
 

@@ -366,6 +366,39 @@ fn metadata_draft_tracks_edits_and_refuses_invalid_saves() {
     assert!(state.error.contains("磁盘错误"));
 }
 
+/// 只改注释时，保存只写编辑器的四个字段和这次改过的自定义字段；元数据里原有的布尔、数字和数组
+/// 不回写，免得被改存成字符串。和 Vue 只提交评分、注释、链接、标签组一致。
+#[test]
+fn saving_leaves_untouched_custom_fields_alone() {
+    let mut state = InspectState::default();
+    state.note_detail(&asset(
+        "voice/a.mp3",
+        "mp3",
+        2,
+        false,
+        vec![
+            meta("favorite", json!(false)),
+            meta("trackDurationMs", json!(125000)),
+            meta("voiceActors", json!(["甲", "乙"])),
+            meta("circle", json!("社团")),
+        ],
+    ));
+    state.take_effects();
+    state.reduce(true, Some("repo"), InspectMessage::SetComment("夜里听".into()));
+    state.reduce(true, Some("repo"), InspectMessage::SetCustom { key: "circle".into(), value: "新社团".into() });
+    state.reduce(true, Some("repo"), InspectMessage::SaveMetadata);
+    let InspectEffect::SaveMetadata { metadata, .. } = state.take_effects().pop().unwrap() else {
+        panic!("没有保存请求");
+    };
+    assert_eq!(metadata.get("comment"), Some(&json!("夜里听")));
+    assert_eq!(metadata.get("rating"), Some(&json!(0)));
+    assert_eq!(metadata.get("tagGroups"), Some(&json!(["summary-tag"])));
+    assert_eq!(metadata.get("circle"), Some(&json!("新社团")), "改过的自定义字段照常保存");
+    for key in ["favorite", "trackDurationMs", "voiceActors"] {
+        assert!(!metadata.contains_key(key), "没改的 {key} 不回写：{metadata:?}");
+    }
+}
+
 #[test]
 fn conflict_keeps_the_draft_until_the_server_version_is_adopted() {
     let mut state = InspectState::default();

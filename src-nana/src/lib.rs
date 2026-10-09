@@ -135,7 +135,6 @@ impl ApplicationState for MomoBakoApplication {
             // 主题等应用设置启动时就要生效，不能等打开设置页才读。
             match services.load_settings() {
                 Ok((settings, diagnostic)) => {
-                    shell.settings_cache_limit_draft = settings.thumbnail_cache_limit_mb.to_string();
                     shell.settings = settings;
                     shell.settings_error = diagnostic;
                 }
