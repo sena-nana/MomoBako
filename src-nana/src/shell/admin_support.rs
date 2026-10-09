@@ -712,7 +712,12 @@ pub struct PopoverRow {
     pub updated_at_ms: i64,
 }
 
-/// 资源库操作放第一，其余按更新时间倒序。
+/// Vue 进度条没有标题时的读屏名（`ProgressBar.vue` 的 `label || '进度'`）。任务快照没有标题时
+/// 标题位写它，不把协议 id 露给用户。
+pub const TASK_LABEL_FALLBACK: &str = "进度";
+
+/// 仓库操作和运行中的任务一起按更新时间倒序，和 Vue `TaskPopover.vue` 的排序一样。任务快照的更新时间
+/// 是 RFC 3339，换成毫秒再比；读不出的排在最后。
 pub fn popover_rows(tasks: &[TaskProgressSnapshot], operation: Option<&super::OperationProgress>) -> Vec<PopoverRow> {
     let mut rows = Vec::new();
     if let Some(operation) = operation {
@@ -728,12 +733,15 @@ pub fn popover_rows(tasks: &[TaskProgressSnapshot], operation: Option<&super::Op
     }
     rows.extend(tasks.iter().map(|task| PopoverRow {
         id: task.task_id.clone(),
-        label: task.label.clone().unwrap_or_else(|| task.protocol_id.clone()),
+        label: task.label.clone().filter(|label| !label.trim().is_empty()).unwrap_or_else(|| TASK_LABEL_FALLBACK.into()),
         detail: task.error.clone().or(task.phase.clone()).unwrap_or_default(),
         value: f64::from(task.percent.unwrap_or(0.0)),
         indeterminate: task.percent.is_none(),
         source: "任务".into(),
-        updated_at_ms: task.updated_at.parse().unwrap_or(0),
+        updated_at_ms: super::time::parse_rfc3339_millis(&task.updated_at).unwrap_or_else(|| {
+            eprintln!("Nana 任务快照的更新时间读不出，排在最后：{} {}", task.task_id, task.updated_at);
+            0
+        }),
     }));
     rows.sort_by(|left, right| right.updated_at_ms.cmp(&left.updated_at_ms));
     rows

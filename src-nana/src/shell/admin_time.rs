@@ -60,6 +60,16 @@ fn local_parts(timestamp: &str) -> Option<Parts> {
 
 /// 解析 `YYYY-MM-DDTHH:MM:SS[.frac](Z|±HH:MM)`，返回 UTC 秒。
 pub(crate) fn parse_rfc3339(text: &str) -> Option<i64> {
+    parse_rfc3339_parts(text).map(|(seconds, _)| seconds)
+}
+
+/// 同 [`parse_rfc3339`]，带上小数秒，返回 UTC 毫秒。任务快照的更新时间按它排先后。
+pub(crate) fn parse_rfc3339_millis(text: &str) -> Option<i64> {
+    parse_rfc3339_parts(text).map(|(seconds, millis)| seconds * 1000 + millis)
+}
+
+/// 解析出 UTC 秒和小数秒里的毫秒（只取前三位，多出的精度舍去）。
+fn parse_rfc3339_parts(text: &str) -> Option<(i64, i64)> {
     let text = text.trim();
     if text.len() < 19 {
         return None;
@@ -75,8 +85,12 @@ pub(crate) fn parse_rfc3339(text: &str) -> Option<i64> {
         return None;
     }
     let mut rest = &text[19..];
+    let mut millis = 0;
     if let Some(stripped) = rest.strip_prefix('.') {
         let digits = stripped.find(|ch: char| !ch.is_ascii_digit()).unwrap_or(stripped.len());
+        // 「.25」是 250 毫秒：补足三位再取整数。
+        let fraction = format!("{:0<3}", &stripped[..digits.min(3)]);
+        millis = fraction.parse::<i64>().ok()?;
         rest = &stripped[digits..];
     }
     let offset = match rest {
@@ -92,7 +106,7 @@ pub(crate) fn parse_rfc3339(text: &str) -> Option<i64> {
             sign * (hours.parse::<i64>().ok()? * 3600 + minutes.parse::<i64>().ok()? * 60)
         }
     };
-    Some(days_from_civil(year, month as u32, day as u32) * 86_400 + hour * 3600 + minute * 60 + second - offset)
+    Some((days_from_civil(year, month as u32, day as u32) * 86_400 + hour * 3600 + minute * 60 + second - offset, millis))
 }
 
 /// 公历日期到 1970-01-01 起的天数（Howard Hinnant 的算法）。
@@ -182,6 +196,15 @@ mod tests {
         assert_eq!(parse_rfc3339("2026-10-08T15:51:00+08:00"), Some(1_791_445_860));
         assert_eq!(parse_rfc3339("2026-10-08T07:51:00.250Z"), Some(1_791_445_860));
         assert_eq!(parse_rfc3339("昨天"), None);
+    }
+
+    /// 任务快照的更新时间带纳秒小数：取到毫秒，缺位补零。
+    #[test]
+    fn parses_milliseconds() {
+        assert_eq!(parse_rfc3339_millis("2026-10-08T07:51:00Z"), Some(1_791_445_860_000));
+        assert_eq!(parse_rfc3339_millis("2026-10-08T07:51:00.25Z"), Some(1_791_445_860_250));
+        assert_eq!(parse_rfc3339_millis("2026-10-08T07:51:00.123456789Z"), Some(1_791_445_860_123));
+        assert_eq!(parse_rfc3339_millis("7"), None);
     }
 
     #[test]
