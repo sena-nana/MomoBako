@@ -21,7 +21,7 @@ fn counts(model: &ShellViewModel) -> [usize; 5] {
     [counts.all, counts.uncategorized, counts.untagged, counts.recent, counts.trash]
 }
 
-/// 底子本身：启动走完、活动仓库是夹具仓库、目录树 assets → covers、根目录三条。
+/// 底子本身：启动走完、活动仓库是夹具仓库、目录树 assets → covers、根目录三条，启动结束时读到的插件清单在。
 fn assert_base(name: &str, model: &mut ShellViewModel) {
     assert_eq!(model.workspace.startup.status, StartupStatus::Ready, "{name} 的启动没走完");
     assert_eq!(model.workspace.active_repo_id.as_deref(), Some(REPO_ID), "{name} 的活动仓库不对");
@@ -30,6 +30,8 @@ fn assert_base(name: &str, model: &mut ShellViewModel) {
     assert_eq!(tree, [("assets", 1)], "{name} 的目录树应是 assets → covers");
     let rows = model.files.rows.iter().map(|row| row.path.as_str()).collect::<Vec<_>>();
     assert_eq!(rows, ["assets", "cover.png", "notes/page.pdf"], "{name} 的根目录条目不对");
+    assert!(!model.admin.plugins.is_empty(), "{name} 应读到启动结束时的插件清单");
+    assert!(!model.admin.loading_settings, "{name} 的设置包读取应已答完");
     assert!(model.workspace.take_effects().is_empty(), "{name} 的启动请求应已按夹具答完");
 }
 
@@ -98,7 +100,8 @@ fn scene_specific_data_arrives_through_the_same_messages() {
         assert_eq!(model.sidebar.active_playlist_id.as_deref(), Some("playlist-demo"), "{name} 应点开了它");
     }
     let outside = scene("outside-playback");
-    assert!(outside.sidebar.playlist_player_type_ids.iter().any(|id| id == "momobako.playlist.foreign"), "外部播放器要登记进侧栏");
+    assert!(outside.playlist_players.iter().any(|player| player.player_type_id == "momobako.playlist.foreign"), "外部播放器要经播放器类型的读取进来");
+    assert!(outside.player.contributions.iter().any(|player| player.player_type_id == "momobako.playlist.foreign"), "播放器也要认得外部播放器");
     let methods = scene("source-auth-methods");
     let repositories = methods.workspace.repositories.iter().map(|item| item.repo_id.as_str()).collect::<Vec<_>>();
     assert_eq!(repositories, [REPO_ID, "netease-cloud-music-10086"]);

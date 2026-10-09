@@ -238,8 +238,8 @@ fn incremental_sync_matches_a_fresh_mount_step_by_step() {
         ShellMessage::Sidebar(SidebarMessage::Gap(GapMessage::CloseFolderDialog)),
         ShellMessage::ToggleSidebar,
         ShellMessage::ToggleSidebar,
-        ShellMessage::Navigate(crate::shell::ShellPage::Settings),
-        ShellMessage::Navigate(crate::shell::ShellPage::FileList),
+        ShellMessage::OpenSettings,
+        ShellMessage::Sidebar(SidebarMessage::SelectShortcut(crate::shell::ShortcutId::All)),
     ];
     for message in steps {
         harness.apply(message);

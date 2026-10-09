@@ -5,7 +5,7 @@
 
 use crate::backend::services::repository::{
     AssetDetail, FileBrowserEntry, FileBrowserSnapshot, FilePreviewSourceResponse, RepositorySnapshot,
-    PluginManifest, PlaylistSummary, RepositorySummary, SystemLogPage,
+    PlaylistSummary, RepositorySummary, SystemLogPage,
     PluginConfigSnapshot, PlaylistDetail, PlaylistPlayerContribution, TaskProgressSnapshot,
 };
 use crate::settings::ApplicationSettings;
@@ -69,7 +69,8 @@ pub use workspace::{
 
 /// Nana Runtime 传递给应用状态的壳层交互消息。
 pub enum ShellMessage {
-    Navigate(ShellPage),
+    /// 打开设置页：读设置包和应用设置，和 Vue `Settings.vue` 挂载时的 `loadSettingsData` 一致。
+    OpenSettings,
     Refresh,
     PrimaryAction,
     EditAction,
@@ -86,33 +87,19 @@ pub enum ShellMessage {
         source: FilePreviewSourceResponse,
         pixels: Result<PreviewPixels, String>,
     },
-    PluginsLoaded(Result<Vec<PluginManifest>, String>),
-    SelectPlugin(String),
-    TogglePlugin { plugin_id: String, enabled: bool },
-    DeletePlugin(String),
     PluginConfigLoaded(Result<PluginConfigSnapshot, String>),
-    DeletePluginConfig { plugin_id: String, key: String },
-    PluginConfigDraftChanged { key: String, value: String },
-    SavePluginConfig { plugin_id: String, key: String },
     LogsLoaded(Result<SystemLogPage, String>),
     ClearLogs,
-    PlaylistsLoaded(Result<Vec<PlaylistSummary>, String>),
+    /// 新建或删除播放集以后这个仓库的整份播放集列表。`open` 是新建出来、要接着点开的播放集。
+    PlaylistsLoaded { repo_id: String, result: Result<Vec<PlaylistSummary>, String>, open: Option<String> },
     PlaylistPlayersLoaded(Result<Vec<PlaylistPlayerContribution>, String>),
     NewPlaylistNameChanged(String),
     SelectPlaylistPlayer(String),
     OpenPlaylistDialog,
     ClosePlaylistDialog,
     CreatePlaylist,
-    SelectPlaylist(String),
-    DeletePlaylist(String),
     PlaylistDetailLoaded(Result<PlaylistDetail, String>),
     RemovePlaylistItem { playlist_id: String, item_id: String },
-    ReorderPlaylistItems { playlist_id: String, item_ids: Vec<String> },
-    MovePlaylistItem { item_id: String, direction: i8 },
-    AddPlaylistItemsByPaths { playlist_id: String, paths: Vec<String> },
-    PlaylistNameDraftChanged(String),
-    SavePlaylistName,
-    SystemStatusLoaded(Result<crate::backend::services::runtime::ExternalApiConnectionStatus, String>),
     SettingsLoaded(Result<(ApplicationSettings, Option<String>), String>),
     SettingsThemeChanged(String),
     SettingsSaved(Result<ApplicationSettings, String>),
@@ -232,33 +219,20 @@ pub struct ShellViewModel {
     pub preview_url: Option<String>,
     pub preview_token: Option<String>,
     pub preview_pixels: Option<PreviewPixels>,
-    pub plugin_entries: Vec<String>,
-    pub plugin_entry_ids: Vec<String>,
-    pub plugin_enabled: Vec<bool>,
     pub log_entries: Vec<String>,
-    pub playlist_entries: Vec<String>,
-    pub playlist_entry_ids: Vec<String>,
     pub selected_playlist_id: Option<String>,
-    pub selected_playlist_player_type_id: Option<String>,
-    pub playlist_name_draft: String,
     pub new_playlist_name: String,
     pub playlist_players: Vec<PlaylistPlayerContribution>,
     pub selected_new_playlist_player_type_id: Option<String>,
     pub playlist_dialog_open: bool,
-    pub playlist_item_entries: Vec<String>,
     pub playlist_item_ids: Vec<String>,
     pub playlist_item_status: String,
     pub active_tasks: usize,
     pub completed_tasks: usize,
     pub active_task_ids: Vec<String>,
     pub task_progress: Vec<TaskProgressSnapshot>,
-    pub system_status: Option<String>,
     pub settings: ApplicationSettings,
     pub settings_error: Option<String>,
-    pub selected_plugin_id: Option<String>,
-    pub plugin_config_keys: Vec<String>,
-    pub plugin_config_drafts: std::collections::BTreeMap<String, String>,
-    pub plugin_config_string_values: std::collections::BTreeSet<String>,
     /// 标记 `for_page` 造出的验收模型。界面和产品窗口共用同一套表面。
     pub acceptance_scene: bool,
     pub workspace: WorkspaceState,
@@ -300,33 +274,20 @@ impl Default for ShellViewModel {
             preview_url: None,
             preview_token: None,
             preview_pixels: None,
-            plugin_entries: Vec::new(),
-            plugin_entry_ids: Vec::new(),
-            plugin_enabled: Vec::new(),
             log_entries: Vec::new(),
-            playlist_entries: Vec::new(),
-            playlist_entry_ids: Vec::new(),
             selected_playlist_id: None,
-            selected_playlist_player_type_id: None,
-            playlist_name_draft: String::new(),
             new_playlist_name: String::new(),
             playlist_players: Vec::new(),
             selected_new_playlist_player_type_id: None,
             playlist_dialog_open: false,
-            playlist_item_entries: Vec::new(),
             playlist_item_ids: Vec::new(),
             playlist_item_status: String::new(),
             active_tasks: 0,
             completed_tasks: 0,
             active_task_ids: Vec::new(),
             task_progress: Vec::new(),
-            system_status: None,
             settings: ApplicationSettings::default(),
             settings_error: None,
-            selected_plugin_id: None,
-            plugin_config_keys: Vec::new(),
-            plugin_config_drafts: std::collections::BTreeMap::new(),
-            plugin_config_string_values: std::collections::BTreeSet::new(),
             acceptance_scene: false,
             workspace: WorkspaceState::default(),
             sidebar: sidebar::SidebarState::default(),
@@ -393,7 +354,13 @@ impl ShellViewModel {
     pub fn reduce(&mut self, message: ShellMessage) {
         self.revision = self.revision.wrapping_add(1);
         let (before, seq, started) = (status::Activity::of(self), self.status.seq(), status::starts_operation(&message));
+        let startup_open = self.workspace.startup.status != StartupStatus::Ready;
         self.reduce_inner(message);
+        if startup_open && self.workspace.startup.status == StartupStatus::Ready {
+            // Vue 启动流程在结束前 `loadSettingsData`：插件、钩子记录、缓存、API 设计和外部连接。
+            // 没有仓库、仓库丢失的启动也读，添加资源库的来源列表要用插件清单。
+            self.admin.begin_settings_load();
+        }
         self.flush_folder_mutations();
         self.settle_sidebar_dialogs();
         tree_sync::settle(self);
@@ -476,16 +443,6 @@ impl ShellViewModel {
             return;
         };
         match message {
-            ShellMessage::Navigate(page) => {
-                self.page = page;
-                self.detail = match self.page {
-                    ShellPage::TaskRunning => format!(
-                        "{} 个运行中任务 · {} 个近期完成任务",
-                        self.active_tasks, self.completed_tasks
-                    ),
-                    _ => "正在读取页面数据…".into(),
-                };
-            }
             ShellMessage::RepositoriesLoaded(result) => self.apply_loaded_repositories(None, result),
             ShellMessage::WorkspaceListLoaded { generation, result } => {
                 self.apply_loaded_repositories(Some(generation), result);
@@ -626,19 +583,12 @@ impl ShellViewModel {
                     }
                 }
             }
-            ShellMessage::PlaylistsLoaded(Ok(playlists)) => {
-                self.page = ShellPage::Playlists;
-                self.playlist_entries = playlists
-                    .iter()
-                    .map(|playlist| format!("{} · {} 项", playlist.name, playlist.item_count))
-                    .collect();
-                self.playlist_entry_ids = playlists.iter().map(|playlist| playlist.playlist_id.clone()).collect();
-                self.detail = format!("{} 个播放列表", playlists.len());
+            ShellMessage::PlaylistsLoaded { repo_id, result: Ok(playlists), open } => {
+                self.apply_playlist_list(&repo_id, &playlists, open);
             }
-            ShellMessage::PlaylistsLoaded(Err(error)) => {
+            ShellMessage::PlaylistsLoaded { result: Err(error), .. } => {
+                eprintln!("Nana 播放集新建或删除失败：{error}");
                 self.status.fail(status::FailureSource::Playlist, format!("播放集操作失败：{error}"));
-                self.page = ShellPage::Error;
-                self.detail = format!("无法读取播放列表：{error}");
             }
             ShellMessage::PlaylistPlayersLoaded(Ok(mut players)) => {
                 // 照 Vue `listRegisteredPlaylistPlayers` 按名称的 zh-CN 顺序排，新建播放集默认选第一项。
@@ -664,9 +614,7 @@ impl ShellViewModel {
             ShellMessage::SelectPlaylistPlayer(player_type_id) => {
                 self.selected_new_playlist_player_type_id = Some(player_type_id);
             }
-            ShellMessage::OpenPlaylistDialog => {
-                self.playlist_dialog_open = true;
-            }
+            ShellMessage::OpenPlaylistDialog => self.open_playlist_dialog(),
             ShellMessage::ClosePlaylistDialog => {
                 self.playlist_dialog_open = false;
             }
@@ -680,28 +628,12 @@ impl ShellViewModel {
                     self.playlist_dialog_open = false;
                 }
             }
-            ShellMessage::SelectPlaylist(playlist_id) => {
-                self.page = ShellPage::Playlists;
-                self.selected_playlist_id = Some(playlist_id.clone());
-                self.detail = format!("正在读取播放列表 {playlist_id}…");
-            }
-            ShellMessage::DeletePlaylist(playlist_id) => {
-                self.detail = format!("正在删除播放列表 {playlist_id}…");
-            }
             ShellMessage::PlaylistDetailLoaded(Ok(detail)) => {
                 if self.sidebar.bound_repo_id().is_some_and(|repo_id| repo_id != detail.playlist.repo_id.as_str()) {
                     eprintln!("Nana 忽略过期的播放集详情：{}", detail.playlist.playlist_id);
                     return;
                 }
-                self.page = ShellPage::Playlists;
                 self.selected_playlist_id = Some(detail.playlist.playlist_id.clone());
-                self.selected_playlist_player_type_id = Some(detail.playlist.player_type_id.clone());
-                self.playlist_name_draft = detail.playlist.name.clone();
-                self.playlist_item_entries = detail
-                    .items
-                    .iter()
-                    .map(|item| format!("{} · {}", item.filename, item.status))
-                    .collect();
                 self.playlist_item_ids = detail
                     .items
                     .iter()
@@ -717,58 +649,17 @@ impl ShellViewModel {
                 self.detail = format!("{} · {} 个项目", detail.playlist.name, detail.items.len());
             }
             ShellMessage::PlaylistDetailLoaded(Err(error)) => {
+                eprintln!("Nana 播放集详情读取或条目修改失败：{error}");
                 self.status.fail(status::FailureSource::Playlist, format!("播放集操作失败：{error}"));
-                self.page = ShellPage::Error;
                 self.detail = format!("无法读取播放列表详情：{error}");
             }
             ShellMessage::RemovePlaylistItem { item_id, .. } => {
                 self.detail = format!("正在移除播放列表项目 {item_id}…");
             }
-            ShellMessage::ReorderPlaylistItems { .. } => {
-                self.detail = "正在保存播放列表顺序…".into();
-            }
-            ShellMessage::MovePlaylistItem { item_id, direction } => {
-                if let Some(index) = self.playlist_item_ids.iter().position(|id| id == &item_id) {
-                    let target = if direction < 0 { index.checked_sub(1) } else { (index + 1 < self.playlist_item_ids.len()).then_some(index + 1) };
-                    if let Some(target) = target {
-                        self.playlist_item_ids.swap(index, target);
-                        self.playlist_item_entries.swap(index, target);
-                        if let Some(playlist_id) = self.selected_playlist_id.clone() {
-                            self.detail = format!("正在保存播放列表顺序：{}", playlist_id);
-                        }
-                    }
-                }
-            }
-            ShellMessage::AddPlaylistItemsByPaths { paths, .. } => {
-                self.detail = if paths.is_empty() {
-                    "没有可添加的文件路径".into()
-                } else {
-                    format!("正在添加 {} 个播放列表项目…", paths.len())
-                };
-            }
-            ShellMessage::PlaylistNameDraftChanged(value) => {
-                self.playlist_name_draft = value;
-            }
-            ShellMessage::SavePlaylistName => {
-                self.detail = if self.selected_playlist_id.is_none() {
-                    "请先选择一个播放列表".into()
-                } else if self.playlist_name_draft.trim().is_empty() {
-                    "播放列表名称不能为空".into()
-                } else {
-                    "正在保存播放列表名称…".into()
-                };
-            }
-            ShellMessage::PluginsLoaded(_)
-            | ShellMessage::SelectPlugin(_)
-            | ShellMessage::TogglePlugin { .. }
-            | ShellMessage::DeletePlugin(_)
+            ShellMessage::OpenSettings
             | ShellMessage::PluginConfigLoaded(_)
-            | ShellMessage::DeletePluginConfig { .. }
-            | ShellMessage::PluginConfigDraftChanged { .. }
-            | ShellMessage::SavePluginConfig { .. }
             | ShellMessage::LogsLoaded(_)
             | ShellMessage::ClearLogs
-            | ShellMessage::SystemStatusLoaded(_)
             | ShellMessage::SettingsLoaded(_)
             | ShellMessage::SettingsThemeChanged(_)
             | ShellMessage::SettingsSaved(_)
@@ -821,10 +712,8 @@ impl ShellViewModel {
                 }
             }
             ShellMessage::MissingOpenSourceSettings => {
-                self.workspace.open_source_settings();
-                if self.workspace.effects.iter().any(|effect| matches!(effect, WorkspaceEffect::OpenSourceSettings)) {
-                    self.page = ShellPage::Settings;
-                    self.detail = "正在打开来源设置…".into();
+                if let Some(plugin_id) = self.workspace.open_source_settings() {
+                    admin::open_settings_page(self, Some(&plugin_id));
                 }
             }
             ShellMessage::SelectWorkspaceRepository(repo_id) => {
@@ -943,5 +832,7 @@ pub(crate) use view_host::ShellView;
 mod tests;
 #[cfg(test)]
 mod escape_tests;
+#[cfg(test)]
+mod data_load_tests;
 #[cfg(test)]
 pub(crate) mod view_harness;

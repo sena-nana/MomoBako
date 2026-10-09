@@ -67,7 +67,7 @@ fn switching_routes_rebuilds_only_the_current_primary_branch() {
     let switcher = harness.keyed("repository-switcher").expect("仓库头");
     assert!(overlay.is_none(), "场景里不该有浮层");
 
-    harness.apply(ShellMessage::Navigate(ShellPage::Playlists));
+    harness.apply(ShellMessage::SetWorkspacePanel(WorkspacePanel::Playlist));
     assert_eq!(RouteKey::of(&harness.model), RouteKey::Playlists);
     harness.flush();
 
@@ -79,7 +79,7 @@ fn switching_routes_rebuilds_only_the_current_primary_branch() {
     assert_eq!(harness.input("全局搜索"), search, "标题栏不该动");
     harness.assert_same_as_fresh_mount();
 
-    harness.apply(ShellMessage::Navigate(ShellPage::FileList));
+    harness.apply(ShellMessage::SetWorkspacePanel(WorkspacePanel::Search));
     harness.flush();
     assert_eq!(RouteKey::of(&harness.model), RouteKey::Search);
     assert_eq!(harness.sidebar_root(), Some(sidebar), "换回来侧栏也不该重挂");

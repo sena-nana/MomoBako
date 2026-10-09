@@ -18,9 +18,9 @@ pub(crate) fn reduce_message(model: &mut ShellViewModel, message: ShellMessage) 
             reduce_admin(model, message);
             None
         }
-        ShellMessage::Navigate(ShellPage::Settings) => {
-            model.admin.begin_settings_load();
-            Some(ShellMessage::Navigate(ShellPage::Settings))
+        ShellMessage::OpenSettings => {
+            open_settings_page(model, None);
+            None
         }
         ShellMessage::SetWorkspacePanel(panel) => {
             if panel == WorkspacePanel::Actions {
@@ -55,33 +55,6 @@ pub(crate) fn reduce_message(model: &mut ShellViewModel, message: ShellMessage) 
 
 fn consume_legacy(model: &mut ShellViewModel, message: ShellMessage) -> Option<ShellMessage> {
     match message {
-        ShellMessage::PluginsLoaded(Ok(plugins)) => {
-            publish_plugins(model, &plugins);
-            model.admin.store_plugins(plugins);
-            model.admin.managing = false;
-            model.admin.apply_success();
-            None
-        }
-        ShellMessage::PluginsLoaded(Err(error)) => {
-            eprintln!("Nana 插件列表读取失败：{error}");
-            model.admin.managing = false;
-            model.admin.load_error = error.clone();
-            model.admin.apply_failure(&error);
-            None
-        }
-        // 这三条旧消息由宿主直接调服务，界面改走 `AdminMessage`，这里只记一笔。
-        ShellMessage::SelectPlugin(plugin_id) => {
-            model.detail = format!("正在读取插件 {plugin_id} 的设置…");
-            None
-        }
-        ShellMessage::TogglePlugin { plugin_id, enabled } => {
-            model.detail = format!("正在{}插件 {plugin_id}…", if enabled { "启用" } else { "停用" });
-            None
-        }
-        ShellMessage::DeletePlugin(plugin_id) => {
-            model.detail = format!("正在删除插件 {plugin_id}…");
-            None
-        }
         ShellMessage::PluginConfigLoaded(Ok(config)) => {
             apply_config(model, &config);
             model.admin.apply_success();
@@ -94,15 +67,6 @@ fn consume_legacy(model: &mut ShellViewModel, message: ShellMessage) -> Option<S
             model.admin.apply_failure(&error);
             None
         }
-        ShellMessage::DeletePluginConfig { plugin_id, key } => {
-            model.detail = format!("正在删除插件 {plugin_id} 的配置 {key}…");
-            None
-        }
-        ShellMessage::PluginConfigDraftChanged { key, value } => {
-            model.plugin_config_drafts.insert(key, value);
-            None
-        }
-        ShellMessage::SavePluginConfig { .. } => None,
         ShellMessage::LogsLoaded(Ok(page)) => {
             model.admin.logs = page.records.clone();
             model.admin.note_log_scroll();
@@ -136,18 +100,6 @@ fn consume_legacy(model: &mut ShellViewModel, message: ShellMessage) -> Option<S
                 let percent = snapshot.percent.map(|value| format!("{value:.0}%")).unwrap_or_else(|| "处理中".into());
                 model.detail = format!("{label} · {percent}");
             }
-            None
-        }
-        ShellMessage::SystemStatusLoaded(Ok(status)) => {
-            model.admin.external = Some(status.clone());
-            model.system_status = Some(format!("{} · {}", if status.ready { "服务已就绪" } else { "服务未就绪" }, status.base_url));
-            model.detail = model.system_status.clone().unwrap_or_default();
-            None
-        }
-        ShellMessage::SystemStatusLoaded(Err(error)) => {
-            eprintln!("Nana 外部 API 连接状态读取失败：{error}");
-            model.status.fail(FailureSource::Settings, format!("无法读取系统服务状态：{error}"));
-            model.detail = format!("无法读取系统服务状态：{error}");
             None
         }
         ShellMessage::SettingsLoaded(Ok((settings, diagnostic))) => {
@@ -365,25 +317,27 @@ fn reduce_admin(model: &mut ShellViewModel, message: AdminMessage) {
     }
 }
 
-/// 插件列表换新后同步壳层上旧页面读的列表和文件右键快捷方式。
+/// 插件列表换新：重算筛选栏的库类型快捷方式，再重读插件登记的播放器类型。
+/// Vue 每次拿到新列表都同步前端插件注册表（`syncPreviewPlugins`），播放器跟着换。
 fn publish_plugins(model: &mut ShellViewModel, plugins: &[PluginManifest]) {
-    model.plugin_entries = plugins.iter().map(|plugin| format!("{} {} · {}", plugin.name, plugin.version, plugin.status)).collect();
-    model.plugin_entry_ids = plugins.iter().map(|plugin| plugin.plugin_id.clone()).collect();
-    model.plugin_enabled = plugins.iter().map(|plugin| plugin.enabled).collect();
     model.inspect.shortcuts = super::super::inspect_shortcuts::shortcuts_from_plugins(plugins);
+    model.admin.push_effect(AdminEffect::LoadPlaylistPlayers);
 }
 
 fn apply_config(model: &mut ShellViewModel, config: &PluginConfigSnapshot) {
-    model.selected_plugin_id = Some(config.plugin_id.clone());
-    model.plugin_config_keys = config.values.keys().cloned().collect();
-    model.plugin_config_drafts = config
-        .values
-        .iter()
-        .map(|(key, value)| (key.clone(), value.as_str().map_or_else(|| value.to_string(), str::to_owned)))
-        .collect();
-    model.plugin_config_string_values = config.values.iter().filter(|(_, value)| value.is_string()).map(|(key, _)| key.clone()).collect();
     model.admin.config_snapshots.insert(config.plugin_id.clone(), config.clone());
     model.admin.sync_json_drafts(&config.plugin_id);
+}
+
+/// 打开设置页：读设置包（Vue `Settings.vue` 挂载时的 `loadSettingsData`）和应用设置。
+/// 带插件时照 Vue 路由的 `?plugin=` 展开它的设置，插件列表里还没有它时不展开。
+pub(crate) fn open_settings_page(model: &mut ShellViewModel, plugin_id: Option<&str>) {
+    model.page = ShellPage::Settings;
+    model.admin.begin_settings_load();
+    model.admin.push_effect(AdminEffect::LoadAppSettings);
+    if let Some(plugin_id) = plugin_id {
+        open_route(model, plugin_id);
+    }
 }
 
 fn request_delete(model: &mut ShellViewModel, plugin_id: &str) {

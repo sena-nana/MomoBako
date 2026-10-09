@@ -61,7 +61,7 @@ pub(crate) use logs_state::{LogsSignals, LogsView};
 pub(crate) use logs_view::logs_panel;
 pub(crate) use plugins_state::{PluginPanelSignals, PluginPanelView};
 pub(crate) use plugins_view::delete_dialog as plugin_delete_dialog;
-pub(crate) use reduce::reduce_message;
+pub(crate) use reduce::{open_settings_page, reduce_message};
 pub(crate) use settings_state::{SettingsSignals, SettingsView};
 pub(crate) use settings_view::settings_page;
 pub(crate) use source_provision::SourceAuthState;
@@ -197,6 +197,10 @@ pub struct ToolPageEntry {
 #[derive(Clone, Debug)]
 pub enum AdminEffect {
     LoadSettingsBundle,
+    /// 读设置目录里的应用设置（主题、缓存上限、关闭行为）。打开设置页时读一次。
+    LoadAppSettings,
+    /// 读插件登记的播放器类型。插件列表换新以后读，和 Vue 同步前端插件注册表的时机一致。
+    LoadPlaylistPlayers,
     Install(String),
     DeletePlugin(String),
     SetEnabled { plugin_id: String, enabled: bool },

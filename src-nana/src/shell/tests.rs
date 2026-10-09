@@ -9,9 +9,6 @@
         model.reduce(ShellMessage::PrimaryAction);
         assert_eq!(model.page, ShellPage::Loading);
 
-        model.reduce(ShellMessage::Navigate(ShellPage::PluginSettings));
-        assert_eq!(model.detail, "正在读取页面数据…");
-
         // 「未保存」页的脏状态来自注释草稿：编辑动作只报告草稿还在，主按钮重开预览也不丢草稿。
         model = ShellViewModel::for_page(ShellPage::UnsavedEdit);
         model.reduce(ShellMessage::EditAction);
@@ -24,22 +21,6 @@
     }
 
     #[test]
-    fn navigation_preserves_repository_and_task_context() {
-        let mut model = ShellViewModel::default();
-        model.repository_id = Some("repo-real".into());
-        model.file_entries = vec!["cover.png".into()];
-        model.active_task_ids = vec!["task-real".into()];
-        model.reduce(ShellMessage::TaskSnapshotLoaded { active: 1, completed: 2 });
-        model.reduce(ShellMessage::Navigate(ShellPage::TaskRunning));
-        assert_eq!(model.repository_id.as_deref(), Some("repo-real"));
-        assert_eq!(model.file_entries, ["cover.png"]);
-        assert_eq!(model.active_task_ids, ["task-real"]);
-        assert_eq!(model.detail, "1 个运行中任务 · 2 个近期完成任务");
-        model.reduce(ShellMessage::Navigate(ShellPage::Playlists));
-        assert_eq!(model.repository_id.as_deref(), Some("repo-real"));
-    }
-
-    #[test]
     fn playlist_creation_requires_name_and_player_type() {
         let mut model = ShellViewModel::for_page(ShellPage::Playlists);
         model.reduce(ShellMessage::CreatePlaylist);
@@ -47,18 +28,6 @@
         model.reduce(ShellMessage::NewPlaylistNameChanged("我的列表".into()));
         model.reduce(ShellMessage::CreatePlaylist);
         assert_eq!(model.detail, "请先选择播放器类型");
-    }
-
-    #[test]
-    fn playlist_reorder_keeps_item_ids_and_labels_aligned() {
-        let mut model = ShellViewModel::for_page(ShellPage::Playlists);
-        model.selected_playlist_id = Some("playlist-1".into());
-        model.playlist_item_ids = vec!["a".into(), "b".into()];
-        model.playlist_item_entries = vec!["A".into(), "B".into()];
-        model.reduce(ShellMessage::MovePlaylistItem { item_id: "b".into(), direction: -1 });
-        assert_eq!(model.playlist_item_ids, ["b", "a"]);
-        assert_eq!(model.playlist_item_entries, ["B", "A"]);
-        assert!(model.detail.contains("正在保存播放列表顺序"));
     }
 
     #[test]
@@ -140,11 +109,12 @@
         }
     }
 
+    /// 播放集详情只写播放集的状态，不改页面身份：主区走哪条路由由面板决定。
     #[test]
     fn stale_playlist_detail_keeps_the_bound_repository_screen() {
         let mut model = ShellViewModel::default();
         model.reduce(ShellMessage::PlaylistDetailLoaded(Ok(playlist_detail("repo-b", "pl"))));
-        assert_eq!(model.page, ShellPage::Playlists);
+        assert_eq!(model.page, ShellPage::Loading);
         assert_eq!(model.selected_playlist_id.as_deref(), Some("pl"));
 
         let mut model = ShellViewModel::default();
@@ -157,7 +127,7 @@
         assert!(model.selected_playlist_id.is_none());
 
         model.reduce(ShellMessage::PlaylistDetailLoaded(Ok(playlist_detail("repo-a", "pl"))));
-        assert_eq!(model.page, ShellPage::Playlists);
+        assert_eq!(model.page, ShellPage::FileList);
         assert_eq!(model.selected_playlist_id.as_deref(), Some("pl"));
         assert_eq!(model.detail, "早晨 · 0 个项目");
     }

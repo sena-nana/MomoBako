@@ -170,7 +170,11 @@ pub struct PlayerState {
     pub shuffle_order: Vec<String>,
     pub shuffle_seed: u64,
     pub playlists: Vec<PlaylistSummary>,
+    /// `playlists` 属于哪个仓库。恢复会话按它找存下的会话。
+    playlists_repo_id: Option<String>,
     pub contributions: Vec<PlaylistPlayerContribution>,
+    /// 插件登记的播放器类型读回过一次。读回之前认不出插件类型，不能据此丢掉存下的会话。
+    players_loaded: bool,
     pub candidates: Vec<PlayerCandidate>,
     pub preferences: BTreeMap<String, String>,
     pub memberships: BTreeMap<String, Vec<String>>,
@@ -222,7 +226,9 @@ impl Default for PlayerState {
             shuffle_order: Vec::new(),
             shuffle_seed: 1,
             playlists: Vec::new(),
+            playlists_repo_id: None,
             contributions: Vec::new(),
+            players_loaded: false,
             candidates: wav_player::builtin_candidates(),
             preferences: BTreeMap::new(),
             memberships: BTreeMap::new(),
@@ -317,27 +323,57 @@ impl PlayerState {
         self.queue.iter().find(|item| Some(&item.id) == self.current_id.as_ref())
     }
 
-    fn note_playlists(&mut self, repo_id: &str, playlists: &[PlaylistSummary]) {
+    /// 换上这个仓库的播放集列表：读成员索引，再看存下的会话能不能恢复。
+    pub(super) fn note_playlists(&mut self, repo_id: &str, playlists: &[PlaylistSummary]) {
         self.playlists = playlists.to_vec();
+        self.playlists_repo_id = Some(repo_id.to_string());
         if playlists.is_empty() {
             self.memberships.clear();
             return;
         }
         self.effects.push(PlayerEffect::LoadMemberships { repo_id: repo_id.to_string() });
-        let Some(stored) = self.stored.get(repo_id).cloned() else {
-            return;
-        };
-        if self.repo_id.as_deref() == Some(repo_id) {
-            return;
-        }
-        if playlists.iter().any(|playlist| playlist.playlist_id == stored.playlist_id) {
-            self.restore_playlist_id = Some(stored.playlist_id.clone());
-            self.effects.push(PlayerEffect::RestoreDetail { repo_id: repo_id.to_string(), playlist_id: stored.playlist_id });
-        }
+        self.queue_restore();
     }
 
+    /// 插件登记的播放器类型读回：换上贡献，再看存下的会话能不能恢复。
     fn note_players(&mut self, players: Vec<PlaylistPlayerContribution>) {
         self.contributions = players;
+        self.players_loaded = true;
+        self.queue_restore();
+    }
+
+    /// 照 Vue `AppShell.vue` 监听 `[activeRepoId, playlists]` 的恢复：存下的会话所在的播放集在列表里、
+    /// 播放器还没在放这个仓库时读它的详情，详情回来再由 [`Self::restore`] 决定恢复还是丢弃。
+    /// 播放器类型要先认得：内置候选当场认得，插件类型等播放器类型读回；读回了还不认得就丢掉会话，
+    /// 和 Vue 找不到播放器时 `clearSession` 一致。已经在读的详情不重复读。
+    fn queue_restore(&mut self) {
+        let Some(repo_id) = self.playlists_repo_id.clone() else {
+            return;
+        };
+        if self.restore_playlist_id.is_some() || self.repo_id.as_deref() == Some(repo_id.as_str()) {
+            return;
+        }
+        let Some(stored) = self.stored.get(&repo_id).cloned() else {
+            return;
+        };
+        if !self.playlists.iter().any(|playlist| playlist.playlist_id == stored.playlist_id) {
+            return;
+        }
+        if !self.player_type_known(&stored.player_type_id) {
+            if self.players_loaded {
+                eprintln!("Nana 存下的播放会话用的播放器已经不在：{}", stored.player_type_id);
+                self.clear_stored(&repo_id);
+            }
+            return;
+        }
+        self.restore_playlist_id = Some(stored.playlist_id.clone());
+        self.effects.push(PlayerEffect::RestoreDetail { repo_id, playlist_id: stored.playlist_id });
+    }
+
+    /// 内置候选或插件登记的播放器里有这个类型。
+    fn player_type_known(&self, player_type_id: &str) -> bool {
+        self.candidates.iter().any(|candidate| candidate.player_type_id == player_type_id)
+            || self.contributions.iter().any(|contribution| contribution.player_type_id == player_type_id)
     }
 
     fn note_detail(&mut self, detail: &PlaylistDetail) {
@@ -380,10 +416,8 @@ impl PlayerState {
         if detail.playlist.playlist_id != stored.playlist_id {
             return false;
         }
-        let known = self.candidates.iter().any(|candidate| candidate.player_type_id == stored.player_type_id)
-            || self.contributions.iter().any(|contribution| contribution.player_type_id == stored.player_type_id);
         let ready = detail.items.iter().any(|item| item.playlist_item_id == stored.current_item_id && item.status == "ready");
-        known && ready
+        self.player_type_known(&stored.player_type_id) && ready
     }
 
     fn play_listed(&mut self, item_id: Option<String>, inspect: &mut InspectState) {

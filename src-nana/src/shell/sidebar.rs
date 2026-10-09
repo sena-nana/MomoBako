@@ -166,8 +166,7 @@ pub enum SidebarMessage {
     SidebarTreeLoaded { repo_id: String, result: Result<SidebarTree, String> },
     SidebarSmartFoldersLoaded { repo_id: String, result: Result<Vec<SidebarSmartFolder>, String> },
     SidebarSmartFolderQueried { repo_id: String, smart_folder_id: String, result: Result<super::files::VirtualQuery, String> },
-    SidebarPlaylistsLoaded { repo_id: String, result: Result<Vec<SidebarPlaylist>, String> },
-    SidebarPlaylistPlayersLoaded { repo_id: String, result: Result<Vec<String>, String> },
+    SidebarPlaylistsLoaded { repo_id: String, result: Result<Vec<crate::backend::services::repository::PlaylistSummary>, String> },
     /// 文件夹对话框、智能文件夹编辑、播放、弹层夹取和 Escape。
     Gap(gap::GapMessage),
     ClearRecent,
@@ -182,7 +181,6 @@ pub enum SidebarEffect {
     QuerySmartFolder { repo_id: String, smart_folder_id: String },
     CreateSmartFolder { repo_id: String },
     LoadPlaylists { repo_id: String },
-    LoadPlaylistPlayers { repo_id: String },
     LoadPlaylistDetail { repo_id: String, playlist_id: String },
     Browse { repo_id: String, path: String, trash: bool },
     AttachRepository { path: String },
@@ -218,7 +216,6 @@ pub struct SidebarState {
     pub playlists: Vec<SidebarPlaylist>,
     pub playlists_expanded: bool,
     pub active_playlist_id: Option<String>,
-    pub playlist_player_type_ids: Vec<String>,
     pub popover: PopoverMode,
     pub submitting: bool,
     pub attach_path: String,
@@ -277,7 +274,6 @@ impl Default for SidebarState {
             playlists: Vec::new(),
             playlists_expanded: false,
             active_playlist_id: None,
-            playlist_player_type_ids: Vec::new(),
             popover: PopoverMode::Closed,
             submitting: false,
             attach_path: String::new(),
@@ -336,6 +332,7 @@ impl SidebarState {
     }
 
     /// 活动仓库变化时清空旧树，并在仓库可用时请求目录、智能文件夹和播放集。
+    /// 播放器类型跟插件列表走，不按仓库读。
     pub fn bind_repository(&mut self, repo_id: Option<&str>, missing: bool) {
         if self.bound_repo_id.as_deref() == repo_id && self.bound_missing == missing {
             return;
@@ -350,8 +347,7 @@ impl SidebarState {
         self.tree_loading = true;
         self.effects.push(SidebarEffect::LoadTree { repo_id: repo_id.clone() });
         self.effects.push(SidebarEffect::LoadSmartFolders { repo_id: repo_id.clone() });
-        self.effects.push(SidebarEffect::LoadPlaylists { repo_id: repo_id.clone() });
-        self.effects.push(SidebarEffect::LoadPlaylistPlayers { repo_id });
+        self.effects.push(SidebarEffect::LoadPlaylists { repo_id });
     }
 
     /// 用摘要重算快捷方式。同一仓库的后续摘要不重新请求目录树。
@@ -607,23 +603,6 @@ impl SidebarState {
         }
     }
 
-    pub fn apply_playlist_players(&mut self, repo_id: &str, result: Result<Vec<String>, String>) {
-        if self.bound_repo_id.as_deref() != Some(repo_id) {
-            eprintln!("Nana 忽略过期的播放器类型：{repo_id}");
-            return;
-        }
-        match result {
-            Ok(ids) => self.playlist_player_type_ids = ids,
-            Err(error) => eprintln!("Nana 读取播放器类型失败：{error}"),
-        }
-    }
-
-    pub fn playlist_playable(&self, playlist_id: &str) -> bool {
-        self.playlists.iter().any(|playlist| {
-            playlist.id == playlist_id && self.playlist_player_type_ids.iter().any(|id| id == &playlist.player_type_id)
-        })
-    }
-
     /// 拖放还按着，或悬停还没结算时，把悬停时钟向前拨一帧。
     pub fn tick_hover(&mut self, step_ms: u64) {
         self.hover_clock = self.hover_clock.saturating_add(step_ms);
@@ -653,7 +632,6 @@ impl SidebarState {
         self.smart_result_count = None;
         self.playlists.clear();
         self.active_playlist_id = None;
-        self.playlist_player_type_ids.clear();
         self.selected_path = None;
     }
 
@@ -907,15 +885,11 @@ pub(super) fn reduce_message(model: &mut super::ShellViewModel, message: super::
                 }
             }
         }
-        SidebarMessage::SidebarPlaylistsLoaded { repo_id, result } => {
-            model.sidebar.apply_playlists(&mut model.workspace, &repo_id, result);
-            model.playlist_entries = model.sidebar.playlists.iter().map(|playlist| {
-                format!("{} · {} 项", playlist.name, playlist.item_count)
-            }).collect();
-            model.playlist_entry_ids = model.sidebar.playlists.iter().map(|playlist| playlist.id.clone()).collect();
+        SidebarMessage::SidebarPlaylistsLoaded { repo_id, result: Ok(playlists) } => {
+            model.apply_playlist_list(&repo_id, &playlists, None);
         }
-        SidebarMessage::SidebarPlaylistPlayersLoaded { repo_id, result } => {
-            model.sidebar.apply_playlist_players(&repo_id, result);
+        SidebarMessage::SidebarPlaylistsLoaded { repo_id, result: Err(error) } => {
+            model.sidebar.apply_playlists(&mut model.workspace, &repo_id, Err(error));
         }
         SidebarMessage::Gap(message) => gap::reduce(model, message),
         SidebarMessage::ClearRecent => model.clear_recent_access(),

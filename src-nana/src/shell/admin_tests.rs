@@ -179,6 +179,7 @@ fn api_design() -> ApiDesignSnapshot {
 }
 
 /// 一次成功的设置页数据。
+/// 送回一次成功的设置包。插件列表换新以后排下的播放器类型读取在这里取走。
 fn load_bundle(model: &mut ShellViewModel, plugins: Vec<PluginManifest>) {
     send(model, AdminMessage::SettingsBundleLoaded {
         plugins: Ok(plugins),
@@ -187,12 +188,14 @@ fn load_bundle(model: &mut ShellViewModel, plugins: Vec<PluginManifest>) {
         api: Ok(api_design()),
         external: Ok(connection()),
     });
+    let effects = model.admin.take_effects();
+    assert!(matches!(effects.as_slice(), [AdminEffect::LoadPlaylistPlayers]), "插件列表换新后应只排下播放器类型的读取：{effects:?}");
 }
 
 #[test]
 fn settings_bundle_is_all_or_nothing_and_success_clears_the_error() {
     let mut model = ShellViewModel::default();
-    model.reduce(ShellMessage::Navigate(super::super::ShellPage::Settings));
+    model.reduce(ShellMessage::OpenSettings);
     assert!(model.admin.loading_settings);
     assert!(model.admin.take_effects().iter().any(|effect| matches!(effect, AdminEffect::LoadSettingsBundle)));
     send(&mut model, AdminMessage::SettingsBundleLoaded {

@@ -154,7 +154,6 @@ fn smart_folder_query_ignores_stale_results_and_expands_ancestors() {
 fn playlist_selection_clears_when_the_list_drops_the_active_id() {
     let mut sidebar = SidebarState::default();
     sidebar.bind_repository(Some("repo"), false);
-    sidebar.apply_playlist_players("repo", Ok(vec!["audio".into()]));
     let mut workspace = workspace_with("repo");
     assert!(!sidebar.select_playlist(&mut workspace, ""));
     assert!(sidebar.select_playlist(&mut workspace, "pl-1"));
@@ -166,7 +165,6 @@ fn playlist_selection_clears_when_the_list_drops_the_active_id() {
         player_type_id: "audio".into(),
         item_count: 2,
     }];
-    assert!(sidebar.playlist_playable("pl-1"));
     sidebar.apply_playlists(&mut workspace, "repo", Ok(vec![]));
     assert!(sidebar.active_playlist_id.is_none());
     assert_eq!(workspace.panel, WorkspacePanel::Files);

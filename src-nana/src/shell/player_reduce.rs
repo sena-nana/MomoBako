@@ -1,6 +1,6 @@
 //! 播放消息归约。
 //!
-//! 播放列表加载仍交回壳层更新标签。过期详情在这里先跳过，避免播放条切到别的仓库。
+//! 播放集列表由壳层的 `apply_playlist_list` 同时交给侧栏和这里。过期详情在这里先跳过，避免播放条切到别的仓库。
 
 use super::super::files::repository_is_writable;
 use super::super::{ShellMessage, ShellViewModel};
@@ -13,12 +13,6 @@ pub(crate) fn reduce_message(model: &mut ShellViewModel, message: ShellMessage) 
             reduce_player(model, message);
             super::super::inspect::sync_preview_frame(model);
             None
-        }
-        ShellMessage::PlaylistsLoaded(Ok(playlists)) => {
-            if let Some(repo_id) = model.workspace.active_repo_id.clone().or(model.repository_id.clone()) {
-                model.player.note_playlists(&repo_id, &playlists);
-            }
-            Some(ShellMessage::PlaylistsLoaded(Ok(playlists)))
         }
         ShellMessage::PlaylistPlayersLoaded(Ok(players)) => {
             model.player.note_players(players.clone());
