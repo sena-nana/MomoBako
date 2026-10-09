@@ -144,7 +144,11 @@ fn chip(label: &str, emphasis: bool, key: &str) -> AnyView {
 /// 图片：按原比例装进预览框。宿主已经上传纹理时用纹理槽，离屏只有像素时画成内容图。
 fn image_view(model: &ShellViewModel) -> AnyView {
     if model.preview_token.is_some() && model.preview_pixels.is_some() {
-        return widget(GpuTextureView::new("file-preview").contain()).key("inspect-image").into_any();
+        // `.media-preview { background: var(--bg) }`：留白处是 bg，不透出预览框的插件光晕。
+        return widget(Stack::fill_column(0.0).surface(SemanticColorRole::Background))
+            .children((widget(GpuTextureView::new("file-preview").contain()).key("inspect-image"),))
+            .key("inspect-image-frame")
+            .into_any();
     }
     let Some(pixels) = model.preview_pixels.as_ref() else {
         return loading_view(model, &PreviewKind::Image);
@@ -229,7 +233,11 @@ fn native_view(model: &ShellViewModel, view_id: &str, label: &str, content: &str
                 .into_any(),
         );
     }
-    widget(Stack::fill_column(0.0).min_height(LengthSpec::Px(0.0))).children(rows).key("inspect-native-view").into_any()
+    // `.office-preview { background: var(--bg) }`：插件根自带 bg 底，盖住预览框的插件光晕。
+    widget(Stack::fill_column(0.0).min_height(LengthSpec::Px(0.0)).surface(SemanticColorRole::Background))
+        .children(rows)
+        .key("inspect-native-view")
+        .into_any()
 }
 
 /// PDF 和 Office 才有种类、扩展名和页数这条顶栏；别的插件视图没有。
