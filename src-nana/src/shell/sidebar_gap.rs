@@ -185,58 +185,85 @@ pub(super) fn reduce(model: &mut super::super::ShellViewModel, message: GapMessa
     }
 }
 
+/// Escape 能关掉的一层，按关闭的先后排。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EscapeLayer {
+    /// 关闭确认。
+    CloseConfirm,
+    FolderMenu,
+    FolderDelete,
+    FolderDialog,
+    SmartDelete,
+    SmartDialog,
+    PlaylistDialog,
+    SourcePlaylist,
+    RepositoryPopover,
+    TaskPopover,
+    TagMenu,
+    /// 文件页的浮层：右键菜单 → 导入菜单 → 导出对话框 → 硬链接确认 → 文件对话框，文件操作进行中不关。
+    Files(super::super::files::FilesLayer),
+}
+
+/// 现在按 Escape 会关掉哪一层；没有能关的为 `None`。全局 Escape 据此决定要不要发消息。
+pub fn escape_layer(model: &super::super::ShellViewModel) -> Option<EscapeLayer> {
+    let sidebar = &model.sidebar;
+    let layer = if model.input.pending_close {
+        EscapeLayer::CloseConfirm
+    } else if sidebar.folder_menu.is_some() {
+        EscapeLayer::FolderMenu
+    } else if !sidebar.folder_delete_path.is_empty() {
+        EscapeLayer::FolderDelete
+    } else if sidebar.folder_dialog.open {
+        EscapeLayer::FolderDialog
+    } else if !sidebar.smart_delete_id.is_empty() {
+        EscapeLayer::SmartDelete
+    } else if sidebar.smart_draft.open {
+        EscapeLayer::SmartDialog
+    } else if model.playlist_dialog_open {
+        EscapeLayer::PlaylistDialog
+    } else if model.input.source_playlist.is_some() {
+        EscapeLayer::SourcePlaylist
+    } else if sidebar.popover != super::PopoverMode::Closed {
+        EscapeLayer::RepositoryPopover
+    } else if model.admin.popover_open {
+        EscapeLayer::TaskPopover
+    } else if model.inspect.tag_menu_open() {
+        EscapeLayer::TagMenu
+    } else {
+        EscapeLayer::Files(model.files.escape_layer()?)
+    };
+    Some(layer)
+}
+
 /// 关掉最上面的一层。没有弹层时返回 false。
 pub fn dismiss_top(model: &mut super::super::ShellViewModel) -> bool {
+    let Some(layer) = escape_layer(model) else {
+        return false;
+    };
     let mutating = model.files.mutating;
-    if model.input.pending_close {
-        model.input.answer_close(false);
-        return true;
+    match layer {
+        EscapeLayer::CloseConfirm => {
+            model.input.answer_close(false);
+        }
+        EscapeLayer::FolderMenu => model.sidebar.folder_menu = None,
+        EscapeLayer::FolderDelete => model.sidebar.close_folder_delete(mutating),
+        EscapeLayer::FolderDialog => model.sidebar.close_folder_dialog(mutating),
+        EscapeLayer::SmartDelete => model.sidebar.close_smart_delete(),
+        EscapeLayer::SmartDialog => {
+            model.sidebar.close_smart_dialog();
+        }
+        EscapeLayer::PlaylistDialog => model.playlist_dialog_open = false,
+        EscapeLayer::SourcePlaylist => {
+            model.reduce(super::super::ShellMessage::Input(super::super::input::InputMessage::CloseSourcePlaylist));
+        }
+        EscapeLayer::RepositoryPopover => {
+            model.sidebar.close_popover();
+        }
+        EscapeLayer::TaskPopover => model.admin.popover_open = false,
+        EscapeLayer::TagMenu => model.inspect.close_tag_menu(),
+        EscapeLayer::Files(_) => return model.files.dismiss_overlay(),
     }
-    if model.sidebar.folder_menu.is_some() {
-        model.sidebar.folder_menu = None;
-        return true;
-    }
-    if !model.sidebar.folder_delete_path.is_empty() {
-        model.sidebar.close_folder_delete(mutating);
-        return true;
-    }
-    if model.sidebar.folder_dialog.open {
-        model.sidebar.close_folder_dialog(mutating);
-        return true;
-    }
-    if !model.sidebar.smart_delete_id.is_empty() {
-        model.sidebar.close_smart_delete();
-        return true;
-    }
-    if model.sidebar.smart_draft.open {
-        model.sidebar.close_smart_dialog();
-        return true;
-    }
-    if model.playlist_dialog_open {
-        model.playlist_dialog_open = false;
-        return true;
-    }
-    if model.input.source_playlist.is_some() {
-        model.reduce(super::super::ShellMessage::Input(super::super::input::InputMessage::CloseSourcePlaylist));
-        return true;
-    }
-    if model.sidebar.popover != super::PopoverMode::Closed {
-        model.sidebar.close_popover();
-        return true;
-    }
-    if model.admin.popover_open {
-        model.admin.popover_open = false;
-        return true;
-    }
-    if model.inspect.tag_menu_open() {
-        model.inspect.close_tag_menu();
-        return true;
-    }
-    // 文件页的浮层：右键菜单 → 导入菜单 → 导出对话框 → 硬链接确认 → 文件对话框，文件操作进行中不关。
-    if model.files.dismiss_overlay() {
-        return true;
-    }
-    false
+    true
 }
 
 impl SidebarState {

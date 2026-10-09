@@ -30,7 +30,7 @@ pub fn apply_result(shell: &mut ShellViewModel) {
             shell.input.external_drag_result = Some(false);
         }
     }
-    shell.surface_dirty = true;
+    shell.mark_surface_dirty();
 }
 
 /// 在窗口线程上发起系统拖放。排队成功只表示请求已交给宿主，结果稍后由 `apply_result` 写回。

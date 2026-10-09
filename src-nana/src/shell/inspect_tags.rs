@@ -147,7 +147,7 @@ pub(crate) fn poll_timers(model: &mut super::super::ShellViewModel) -> bool {
     let fired = model.inspect.poll_own(16, writable, repo_id.as_deref());
     let playback = super::bridge::advance_playback(model, 16);
     if fired || playback == ClockStep::Changed {
-        model.surface_dirty = true;
+        model.mark_surface_dirty();
     }
     fired || playback != ClockStep::Idle
 }

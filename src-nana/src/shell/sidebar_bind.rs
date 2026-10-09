@@ -70,7 +70,7 @@ impl ShellViewModel {
             self.leave_settings_page();
             self.current_directory = self.sidebar.current_directory.clone();
             self.detail = format!("正在读取目录 {path}…");
-            self.surface_dirty = true;
+            self.mark_surface_dirty();
         }
     }
 
