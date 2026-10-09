@@ -1,9 +1,11 @@
 //! Vue 样式表里真正绘制的过渡。
 //!
-//! 时钟留在 `ShellViewModel` 上。下一次归约会拆掉控件树，但进行中的轨道还在，
-//! 下一帧按已经走过的时间取样，不会从 0 重新开始。减少动效时全部立刻停在终点。
+//! 时钟留在 `ShellViewModel` 上。界面按 `hot::MotionFrame` 取样，逐帧只改绑定的字段；
+//! 内容重挂后进行中的轨道还在，按已经走过的时间取样，不会从 0 重新开始。减少动效时全部立刻停在终点。
 
-use nana_ui::runtime::view::{widget, AnyView, IntoView};
+use nana_ui::runtime::view::{widget, AnyView, IntoView, PropSource};
+
+use super::hot::{LayerPaint, LayerPaintField};
 
 /// 对话框遮罩。`shell.css` `.modal-enter-active` 的 `opacity 0.16s ease`。
 pub const MODAL_OVERLAY_MS: u64 = 160;
@@ -483,25 +485,23 @@ impl Track {
     }
 }
 
-/// 对话框遮罩透明度和卡片的上移、缩放。
+/// 对话框遮罩透明度和卡片的上移、缩放。逐帧的值绑在热信号上，开合动效不重挂浮层。
 pub fn paint_modal(view: impl IntoView, motion: &MotionState) -> AnyView {
-    let frame = motion.modal_frame();
-    paint_layer(view, frame.overlay_opacity, shift_scale(frame.card_shift, frame.card_scale))
+    paint_layer(view, super::hot::prop(|signals| signals.modal, LayerPaint::modal(motion)))
 }
 
 /// 弹层透明度和 4px 上移。
 pub fn paint_panel(view: impl IntoView, motion: &MotionState) -> AnyView {
-    let frame = motion.panel_frame();
-    paint_layer(view, frame.opacity, shift_scale(frame.shift, 1.0))
+    paint_layer(view, super::hot::prop(|signals| signals.panel, LayerPaint::panel(motion)))
 }
 
-fn paint_layer(view: impl IntoView, opacity: f32, transform: nana_ui_core::PaintTransform) -> AnyView {
-    widget(nana_ui::runtime::Stack::column(0.0).with_layout(|layout| {
-        layout.opacity = Some(opacity);
-        layout.transform = Some(transform);
-    }))
-    .children((view.into_any(),))
-    .into_any()
+/// 外层是 AppShell 浮层槽位的根，AppShell 给它打铺满窗口的布局补丁并让它挡住下面的点击；
+/// 它自己不带绑定。透明度和变换绑在铺满外层的内层上：绑定逐帧重投影的是内层，冲不掉外层的补丁。
+fn paint_layer(view: impl IntoView, paint: PropSource<LayerPaint>) -> AnyView {
+    let layer = widget(nana_ui::runtime::Stack::fill_column(0.0))
+        .prop::<LayerPaint, LayerPaintField>(paint)
+        .children((view.into_any(),));
+    widget(nana_ui::runtime::Stack::column(0.0)).children((layer,)).into_any()
 }
 
 /// 把平移动效写成绘制矩阵。`shift_y` 向下为正，缩放绕控件中心。

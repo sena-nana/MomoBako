@@ -84,9 +84,13 @@ fn state_box(label: String, error: bool, spinner: bool, model: &ShellViewModel) 
     Arc::make_mut(&mut node_style.layout).border_width = Some(1.0);
     frame = frame.style(node_style);
     let icon = spinner.then(|| {
+        let degrees = model.motion.spinner_degrees();
         let mut glyph = nana_ui::runtime::IconGlyph::new(LOADER_2).size(16.0).role(color);
-        Arc::make_mut(&mut glyph.style.layout).transform = Some(super::super::motion::spin_transform(model.motion.spinner_degrees()));
-        widget(glyph).key("file-state-spinner")
+        Arc::make_mut(&mut glyph.style.layout).transform = Some(super::super::motion::spin_transform(degrees));
+        // 旋转角逐帧走，绑在热信号上，不重挂文件列。
+        widget(glyph)
+            .prop::<f32, super::super::hot::SpinField>(super::super::hot::prop(|signals| signals.spinner, degrees))
+            .key("file-state-spinner")
     });
     widget(frame)
         .children((icon, widget(style::text(label, 14.0, 400, color, 21.7)).key("file-state-text")))

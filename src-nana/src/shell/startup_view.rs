@@ -143,13 +143,13 @@ fn startup_panel(model: &ShellViewModel) -> AnyView {
     .into_any()
 }
 
-/// 6px 进度条：`--bg-subtle` 胶囊轨道，强调色填充，最少露出 4px。
+/// 6px 进度条：`--bg-subtle` 胶囊轨道，强调色填充，最少露出 4px。填充宽度绑在热信号上，逐帧走动效。
 fn progress_bar(percent: f32) -> AnyView {
-    let fill = Stack::row(0.0).surface(SemanticColorRole::Accent).radius_px(999.0).with_layout(move |layout| {
-        layout.width = Some(LengthSpec::Percent(percent.clamp(0.0, 100.0)));
+    let fill = widget(Stack::row(0.0).surface(SemanticColorRole::Accent).radius_px(999.0).with_layout(|layout| {
         layout.min_width = Some(LengthSpec::Px(4.0));
         layout.height = Some(LengthSpec::Fill);
-    });
+    }))
+    .prop::<f32, super::hot::FillPercentField>(super::hot::prop(|signals| signals.startup, percent));
     widget(
         Stack::row(0.0)
             .width(LengthSpec::Fill)
@@ -161,7 +161,7 @@ fn progress_bar(percent: f32) -> AnyView {
                 layout.align_items = AlignSpec::Stretch;
             }),
     )
-    .children((widget(fill),))
+    .children((fill,))
     .key("startup-progress")
     .into_any()
 }

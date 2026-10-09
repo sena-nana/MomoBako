@@ -10,7 +10,8 @@ use std::sync::Arc;
 use nana_ui::runtime::view::{widget, AnyView, IntoView};
 use nana_ui::runtime::{
     component_descriptors, Activate, AlignSpec, Button, Dialog, LengthSpec, ListItem, MutationQueue, RadiusTier,
-    RuntimeDocument, Select, SelectChanged, SelectOption, SemanticColorRole, Stack, TextArea, TextChanged, TextInput,
+    RuntimeDocument, Select, SelectChanged, SelectOption, SemanticColorRole, Stack, StableNodeId, TextArea, TextChanged,
+    TextInput,
 };
 use nana_ui::{ButtonKind, ControlSize};
 
@@ -76,14 +77,14 @@ fn field(label: &'static str, control: AnyView) -> AnyView {
 /// 用字段标签给对话框里的下拉框命名。
 ///
 /// Vue 里 `<label>` 包着 `<select>`，读屏读到的是字段名；Nana 的 `Select` 没有自己的名称，
-/// 不命名时只读出当前选项。这里在挂载后找出放在对话框字段里的下拉框，把字段标签登记为它的名称。
-pub fn bind_field_labels(document: &mut RuntimeDocument) {
+/// 不命名时只读出当前选项。这里在挂载后找出 `roots` 下面放在对话框字段里的下拉框，把字段标签登记为它的名称。
+pub fn bind_field_labels(document: &mut RuntimeDocument, roots: &[StableNodeId]) {
     let document_id = document.document();
     let mut queue = MutationQueue::new();
     {
         let context = document.context();
         let world = context.world();
-        for select in world.nodes_of_component(document_id, component_descriptors::SELECT.type_id) {
+        for select in super::super::components_under(world, document_id, component_descriptors::SELECT.type_id, roots) {
             let Some(field) = world.parent_id(select) else {
                 continue;
             };
