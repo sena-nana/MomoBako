@@ -50,12 +50,7 @@ pub(super) fn live_file_column(model: &ShellViewModel) -> AnyView {
                 cx.dispatch_program_all(super::input::file_drop_message(&flags, event));
             }
         })
-        .children((
-            super::input::close_prompt(model),
-            body,
-            super::workspace_dialogs::file_dialog(model),
-            super::workspace_dialogs::export_dialog(model),
-        ))
+        .children((body,))
         .key("file-column")
         .into_any()
 }

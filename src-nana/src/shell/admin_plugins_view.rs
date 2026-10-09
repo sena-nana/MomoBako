@@ -4,12 +4,13 @@
 //! 安装）、提示、筛选框、按分类分组的插件卡片，卡片里可展开插件设置。设置页和拓展页
 //! 共用，只换标题文案。删除确认是壳层浮层，见 [`delete_dialog`]。
 
-use std::sync::Arc;
-
-use nana_ui::runtime::view::{widget, AnyView, IntoView};
-use nana_ui::runtime::{Activate, AlignSpec, ConfirmDialog, LengthSpec, Stack, TextChanged, TextInput};
+use nana_ui::runtime::view::{signal, widget, AnyView, IntoView};
+use nana_ui::runtime::{Activate, AlignSpec, LengthSpec, Stack, TextChanged, TextInput};
+use nana_ui::ButtonKind;
 use nana_ui_core::{RadiusTier, SemanticColorRole as Role};
 
+use super::super::view_part_overlay::dialog::{intent_button, DialogFrame};
+use super::super::view_part_overlay::session::Projected;
 use super::super::{ShellMessage, ShellViewModel};
 use super::icons;
 use super::style::{self, action, column, label, pad, row, wrapping, PillTone, Soft, SoftFill, Tone};
@@ -399,34 +400,44 @@ fn settings_section(model: &ShellViewModel, plugin: &PluginManifest) -> AnyView 
         .into_any()
 }
 
+/// 删除确认要显示的东西。
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct PluginDeleteView {
+    pub message: String,
+    /// 插件操作进行中：按钮禁用、确认写「删除中...」，三种关闭手势都不关。
+    pub managing: bool,
+}
+
+impl PluginDeleteView {
+    pub(crate) fn project(model: &ShellViewModel) -> Option<Self> {
+        let plugin_id = model.admin.pending_delete.as_ref()?;
+        let name = model
+            .admin
+            .plugins
+            .iter()
+            .find(|plugin| &plugin.plugin_id == plugin_id)
+            .map(|plugin| plugin.name.clone())
+            .unwrap_or_else(|| plugin_id.clone());
+        Some(Self { message: format!("删除插件“{name}”后将移除其 .momoplug 安装包。"), managing: model.admin.managing })
+    }
+}
+
 /// 删除确认浮层。Vue 的 `ConfirmDialog`：标题「删除插件」，确认「删除」，忙时「删除中...」。
+/// 外壳走统一对话框框架，常驻，忙碌和文案按字段原地改。
 pub(crate) fn delete_dialog(model: &ShellViewModel) -> Option<AnyView> {
-    let plugin_id = model.admin.pending_delete.as_ref()?;
-    let name = model
-        .admin
-        .plugins
-        .iter()
-        .find(|plugin| &plugin.plugin_id == plugin_id)
-        .map(|plugin| plugin.name.clone())
-        .unwrap_or_else(|| plugin_id.clone());
-    let mut dialog = ConfirmDialog::new("删除插件", format!("删除插件“{name}”后将移除其 .momoplug 安装包。"));
-    dialog.danger = true;
-    dialog.busy = model.admin.managing;
-    dialog.confirm_label = Some(Arc::from(if model.admin.managing { "删除中..." } else { "删除" }));
-    dialog.cancel_label = Some(Arc::from("取消"));
+    let view = signal(PluginDeleteView::project(model)?);
+    Projected::register(view, PluginDeleteView::project);
+    let busy = move || view.with(|view| view.managing);
+    let cancel = intent_button("取消", ButtonKind::Ghost, busy, "admin-plugin-cancel-delete");
+    let confirm = intent_button(
+        move || if busy() { "删除中..." } else { "删除" }.to_string(),
+        ButtonKind::Danger,
+        busy,
+        "admin-plugin-confirm-delete",
+    );
     Some(
-        widget(dialog)
-            .cancel(widget(action("取消", None, Tone::Plain, model.admin.managing)).key("admin-plugin-cancel-delete").on_cx(|_, _: &Activate, cx| {
-                cx.dispatch_program_all(ShellMessage::Admin(AdminMessage::CancelDelete));
-            }))
-            .confirm(
-                widget(action(if model.admin.managing { "删除中..." } else { "删除" }, None, Tone::Danger, model.admin.managing))
-                    .key("admin-plugin-confirm-delete")
-                    .on_cx(|_, _: &Activate, cx| {
-                        cx.dispatch_program_all(ShellMessage::Admin(AdminMessage::ConfirmDelete));
-                    }),
-            )
-            .key("admin-plugin-delete-dialog")
-            .into_any(),
+        DialogFrame::new("admin-plugin-delete-dialog", || "删除插件".to_string(), || ShellMessage::Admin(AdminMessage::CancelDelete))
+            .busy(busy)
+            .confirm(move || view.with(|view| view.message.clone()), cancel, confirm, || ShellMessage::Admin(AdminMessage::ConfirmDelete)),
     )
 }
