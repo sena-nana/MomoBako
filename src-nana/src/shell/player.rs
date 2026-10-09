@@ -29,7 +29,7 @@ pub(crate) use wav_player::pcm_from_bytes;
 pub(crate) use wav_player::sound_device_compiled_in;
 pub use wav_player::PreviewPcm;
 pub use support::{preferences_path, sessions_path, settings_path};
-pub(crate) use support::{resolution_notice, resolve_player, AUDIO_CAPABILITY, AUDIO_SEQUENCE_TYPE};
+pub(crate) use support::{builtin_audio_formats, capability_id, resolution_notice, resolve_player, AUDIO_CAPABILITY, AUDIO_SEQUENCE_TYPE};
 use support::{
     PlayerMatch, StoredSession, cycle_mode, default_settings, find_player_for_extension, format_time, mode_label,
     next_ready_id, preferences_json, previous_ready_id, queue_item_from_playlist, read_preferences_file,
