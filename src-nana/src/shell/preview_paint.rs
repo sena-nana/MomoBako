@@ -14,16 +14,39 @@ impl Painter for PluginGlow {
         let rect = LayoutBox { x: 0.0, y: 0.0, width, height };
         let radius = cx.radius(nana_ui_core::RadiusTier::Xl);
         cx.rounded_rect(rect, radius, BoxPaint::fill(SemanticColorRole::Background));
-        // CSS 圆形渐变默认到最远角：从顶边中点到底角的距离。
-        let reach = ((width / 2.0).powi(2) + height.powi(2)).sqrt().max(1.0);
-        let glow = Gradient::radial([width / 2.0, 0.0], reach)
+        // 预览框有 1px 透明边，CSS 渐变按内边距盒定位：圆心在内边距盒顶边中点，到最远角为止；
+        // 边框那 1px 落在重复图块的透明尾部，只剩 bg。
+        let inner = LayoutBox { x: 1.0, y: 1.0, width: (width - 2.0).max(0.0), height: (height - 2.0).max(0.0) };
+        let reach = ((inner.width / 2.0).powi(2) + inner.height.powi(2)).sqrt().max(1.0);
+        let glow = Gradient::radial([width / 2.0, 1.0], reach)
             .stop(0.0, SemanticColorRole::AccentSoft)
             .stop(0.38, PaintColor::Rgba([0.0, 0.0, 0.0, 0.0]));
-        cx.rounded_rect(rect, radius, BoxPaint::fill(glow));
+        cx.rounded_rect(inner, (radius - 1.0).max(0.0), BoxPaint::fill(glow));
     }
 
     fn paint_key(&self) -> u64 {
         1
+    }
+}
+
+/// PDF 页纸滚动区的底：bg 铺满，底边往上 34% 是 bg-subtle 82% 淡到透明。
+/// 对应 `linear-gradient(0deg, color-mix(in srgb, var(--bg-subtle) 82%, transparent), transparent 34%), var(--bg)`。
+pub(super) struct PageViewerBackdrop;
+
+impl Painter for PageViewerBackdrop {
+    fn paint(&self, cx: &mut PaintContext<'_>) {
+        let [width, height] = cx.size();
+        let rect = LayoutBox { x: 0.0, y: 0.0, width, height };
+        cx.rounded_rect(rect, 0.0, BoxPaint::fill(SemanticColorRole::Background));
+        let subtle = cx.color(SemanticColorRole::Subtle);
+        let fade = Gradient::linear([0.0, height], [0.0, 0.0])
+            .stop(0.0, PaintColor::Rgba([subtle[0], subtle[1], subtle[2], subtle[3] * 0.82]))
+            .stop(0.34, PaintColor::Rgba([subtle[0], subtle[1], subtle[2], 0.0]));
+        cx.rounded_rect(rect, 0.0, BoxPaint::fill(fade));
+    }
+
+    fn paint_key(&self) -> u64 {
+        4
     }
 }
 

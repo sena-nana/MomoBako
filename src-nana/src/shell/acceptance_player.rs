@@ -6,14 +6,14 @@
 //! 预览场景的文件字节（`preview_fixtures/cover.png`、`audio_fixtures/tone.mp3`、文本）和 Vue 夹具逐字节相同。
 
 use crate::backend::services::repository::{
-    AssetDetail, AssetSummary, FilePreviewSourceResponse, PlaylistDetail, PlaylistItem, PlaylistPlayerContribution,
-    PlaylistSummary,
+    AssetDetail, AssetSummary, FilePreviewSourceResponse, MetadataEntry, PlaylistDetail, PlaylistItem,
+    PlaylistPlayerContribution, PlaylistSummary,
 };
 
 use super::super::inspect::InspectMessage;
 use super::super::player::{PlayerEffect, PlayerMessage};
 use super::super::InspectEffect;
-use super::super::sidebar::SidebarPlaylist;
+use super::super::sidebar::{ShortcutAsset, SidebarPlaylist};
 use super::super::{ShellMessage, ShellPage, ShellViewModel, WorkspacePanel};
 use super::REPO_ID;
 
@@ -278,37 +278,57 @@ fn live_preview_scene() -> ShellViewModel {
     model
 }
 
-/// ASMR 音频预览。只有库类型和条目类型，不写歌词、时长、封面或色板。
+/// ASMR 音频预览：根目录的 voice.mp3，元数据里只有库类型和条目类型，不写歌词、时长、封面或色板。
+/// 和音频预览一样读好后接管播放条；资源库扩展在预览框下面画作品队列。
 fn live_asmr_scene() -> ShellViewModel {
-    let mut model = ShellViewModel::for_page(ShellPage::SelectedFile);
-    let path = "works/voice.mp3";
-    let mut row = super::file_row(path, "file");
-    row.metadata.insert("libraryKind".into(), serde_json::Value::String("asmr".into()));
-    row.metadata.insert("asmrEntryKind".into(), serde_json::Value::String("audio".into()));
-    model.files.rows = vec![row];
-    model.files.total_entries = 1;
-    model.files.set_drag_selection(vec![path.into()], Some(path.into()), Some(path.into()));
-    model.selected_path = Some(path.into());
-    model.detail = path.into();
-    model.inspect.begin_selection(path);
-    model.inspect.loading = false;
-    model.inspect.activity.clear();
-    model.inspect.facts.extension = "mp3".into();
+    let metadata = [("libraryKind", "asmr"), ("asmrEntryKind", "audio")];
+    let mut model = preview_scene_with("voice.mp3", TONE_MP3.len() as i64, &metadata);
+    load_official_players(&mut model);
+    answer_media(&mut model);
     model
 }
 
 /// 预览场景的起点：Vue `base()` 的根目录（缺的文件补一行），像双击一样选中它并读回素材详情。
 /// 之后的读取请求由各场景用夹具字节回答，和宿主派发后送回的消息一样走产品归约。
 fn preview_scene(path: &str, size_bytes: i64) -> ShellViewModel {
+    preview_scene_with(path, size_bytes, &[])
+}
+
+/// 同上，文件行和素材详情都带上给定的文本元数据（Vue 夹具里条目的 `metadata`）。
+fn preview_scene_with(path: &str, size_bytes: i64, metadata: &[(&str, &str)]) -> ShellViewModel {
     let mut model = ShellViewModel::for_page(ShellPage::FileList);
     super::seed_browser(&mut model);
     if !model.files.rows.iter().any(|row| row.path == path) {
-        model.files.rows.push(super::file_row(path, "file"));
+        let mut row = super::file_row(path, "file");
+        for (key, value) in metadata {
+            row.metadata.insert((*key).into(), serde_json::Value::String((*value).into()));
+        }
+        model.files.rows.push(row);
         model.files.total_entries = model.files.rows.len();
     }
+    // 侧栏快捷方式的计数跟着根目录的文件走，和 Vue 夹具里的素材数一致。
+    let assets = model
+        .files
+        .rows
+        .iter()
+        .filter(|row| row.kind == "file")
+        .map(|row| ShortcutAsset { path: row.path.clone(), untagged: row.tags.is_empty(), accessed: false, deleted: false })
+        .collect::<Vec<_>>();
+    model.sidebar.apply_snapshot(&assets, 0, Vec::new());
     let asset_id = path.replace('/', "-");
+    let mut detail = preview_detail(path, size_bytes);
+    detail.metadata = metadata
+        .iter()
+        .map(|(key, value)| MetadataEntry {
+            key: (*key).into(),
+            value_type: "string".into(),
+            value: serde_json::Value::String((*value).into()),
+            version: 1,
+            updated_at: NOW.into(),
+        })
+        .collect();
     model.reduce(ShellMessage::SelectFile { path: path.into(), asset_id: Some(asset_id) });
-    model.reduce(ShellMessage::AssetDetailLoaded(Ok(preview_detail(path, size_bytes))));
+    model.reduce(ShellMessage::AssetDetailLoaded(Ok(detail)));
     model
 }
 
@@ -397,12 +417,18 @@ fn preview_image_scene() -> ShellViewModel {
 fn preview_audio_scene() -> ShellViewModel {
     let mut model = preview_scene("track-01.mp3", TONE_MP3.len() as i64);
     load_official_players(&mut model);
-    let request = take_effect(&mut model, |effect| match effect {
+    answer_media(&mut model);
+    model
+}
+
+/// 用音频夹具回答预览排下的音视频读取，和宿主读完解码后送回的消息一样。
+fn answer_media(model: &mut ShellViewModel) {
+    let request = take_effect(model, |effect| match effect {
         InspectEffect::LoadMedia { path, generation, .. } => Some((path, generation)),
         _ => None,
     });
     let Some((path, generation)) = request else {
-        return model;
+        return;
     };
     match crate::shell::preview_media_parts(REPO_ID, TONE_MP3) {
         Ok(parts) => model.reduce(ShellMessage::Inspect(InspectMessage::MediaLoaded {
@@ -414,5 +440,4 @@ fn preview_audio_scene() -> ShellViewModel {
         })),
         Err(error) => eprintln!("Nana 验收音频夹具解不开：{error}"),
     }
-    model
 }

@@ -61,7 +61,7 @@ pub(super) fn page_scroller(page: AnyView, nav: Option<(usize, usize)>, key: Str
     let sheet = widget(Stack::column(0.0).padding(18.0).width(LengthSpec::Fill).min_width(LengthSpec::Px(0.0)))
         .key("inspect-page-sheet")
         .children(children);
-    widget(ScrollView::new(ScrollAxes::Vertical).with_layout(|layout| {
+    let scroll = widget(ScrollView::new(ScrollAxes::Vertical).with_layout(|layout| {
         layout.flex_grow = Some(1.0);
         layout.flex_shrink = Some(1.0);
         layout.flex_basis = Some(LengthSpec::Px(0.0));
@@ -69,7 +69,16 @@ pub(super) fn page_scroller(page: AnyView, nav: Option<(usize, usize)>, key: Str
         layout.width = Some(LengthSpec::Fill);
     }))
     .key(key)
-    .children((sheet,))
+    .children((sheet,));
+    // 滚动区背后一层 `office-preview__viewer--pdf` 的底：bg 上从底边往上 34% 淡出的 bg-subtle。
+    widget(
+        Stack::fill_column(0.0)
+            .min_height(LengthSpec::Px(0.0))
+            .painter(super::preview_paint::PageViewerBackdrop)
+            .with_layout(|layout| layout.flex_basis = Some(LengthSpec::Px(0.0))),
+    )
+    .children((scroll,))
+    .key("inspect-page-viewer")
     .into_any()
 }
 
