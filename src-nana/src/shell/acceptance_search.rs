@@ -10,8 +10,8 @@ use std::collections::BTreeMap;
 use serde_json::Value;
 
 use super::super::files::FileRow;
-use super::super::inspect::{AssetFacet, SearchRow};
-use super::super::{ShellPage, ShellViewModel, WorkspacePanel};
+use super::super::inspect::{AssetFacet, InspectMessage, SearchRow};
+use super::super::{InspectEffect, ShellMessage, ShellPage, ShellViewModel, WorkspacePanel};
 use super::REPO_ID;
 
 /// 本面板的离屏对照场景。
@@ -54,10 +54,19 @@ fn search_results_scene() -> ShellViewModel {
     model
 }
 
-/// 查询没有命中：筛选栏关闭，结果区是等待搜索条件。
+/// 查询没有命中：在标题栏搜索框输入，等过 250ms 的搜索延时，搜索应答是空结果。
+/// 筛选栏关闭，结果区是等待搜索条件。
 fn search_empty_scene() -> ShellViewModel {
     let mut model = search_page(false);
-    model.inspect.query = "不存在的文件".into();
+    model.reduce(ShellMessage::Inspect(InspectMessage::SetQuery("不存在的文件".into())));
+    let request = super::await_inspect_effect(&mut model, |effect| match effect {
+        InspectEffect::Search { generation, .. } => Some(generation),
+        _ => None,
+    });
+    match request {
+        Some(generation) => model.reduce(ShellMessage::Inspect(InspectMessage::SearchFinished { generation, result: Ok(Vec::new()) })),
+        None => eprintln!("Nana 搜索场景没有等到搜索请求：{}", model.inspect.query),
+    }
     model
 }
 

@@ -3,6 +3,7 @@
 //! 场景名和 `tmp/vue-mock/scenes/files.ts` 的 Vue 场景同名，数据和 Vue 夹具 `fixtures.base()` 一致：
 //! 资源库「默认资源库」，根目录下 assets 文件夹、cover.png（2400000 B）和 notes/page.pdf（1820 B），
 //! 修改时间都是 2026-10-08T08:00:00Z，目录树 assets → covers 不展开，默认网格展示。
+//! 15 页里的「冲突」「未保存」也在这里，都在同一个文件页上走单击选中、读回详情和编辑注释的产品归约。
 
 use std::collections::BTreeMap;
 
@@ -11,15 +12,22 @@ use serde_json::Value;
 use crate::backend::services::repository::{AssetDetail, AssetSummary, FileBrowserEntry, MetadataEntry};
 
 use super::super::files::{DisplayMode, EntryMenu, FileRow, HardlinkPrompt};
+use super::super::inspect::InspectMessage;
 use super::super::sidebar::SidebarFolder;
 use super::super::workspace::WorkspaceRepository;
-use super::super::{ShellMessage, ShellPage, ShellViewModel};
+use super::super::{InspectEffect, ShellMessage, ShellPage, ShellViewModel};
 
 const REPO_ID: &str = "acceptance-repo";
 /// Vue 夹具 `NOW`。
 const NOW: &str = "2026-10-08T08:00:00Z";
 /// Vue `scenes/files.ts` 的右键落点。
 const MENU_POINT: (f32, f32) = (400.0, 470.0);
+/// 「未保存」页注释框里还没自动保存的草稿。离屏验收按这段文字找注释输入框。
+const UNSAVED_COMMENT: &str = "第 2 页的表格还要核对。";
+/// 「冲突」页本地改写的注释。
+const LOCAL_COMMENT: &str = "封面改用暖色版本。";
+/// 「冲突」页另一端已经存进服务器的注释。
+const SERVER_COMMENT: &str = "封面定稿，沿用冷色版本。";
 
 /// 验收用的最小 PDF。文本是解析器从流里读出的 `MomoBako`。
 pub(super) const PAGE_PDF: &[u8] = b"%PDF-1.4\n1 0 obj\n<< /Length 14 >>\nstream\n(MomoBako) Tj\nendstream\nendobj\n%%EOF\n";
@@ -44,10 +52,60 @@ pub(super) fn models() -> Vec<(&'static str, ShellViewModel)> {
 /// 与 Vue `base()` 相同的文件页：网格、根目录、没有选择。
 pub(super) fn files_base_scene() -> ShellViewModel {
     let mut model = ShellViewModel::for_page(ShellPage::FileList);
-    present_vue_repository(&mut model);
-    seed_browser(&mut model);
-    model.files.display_mode = DisplayMode::Grid;
+    seed_files_base(&mut model);
     model
+}
+
+/// 在给定模型上铺 Vue `base()` 的文件页。15 页的种子拿到的是已经定好页面身份的模型。
+fn seed_files_base(model: &mut ShellViewModel) {
+    present_vue_repository(model);
+    seed_browser(model);
+    model.files.display_mode = DisplayMode::Grid;
+}
+
+/// 15 页的「未保存」：单击选中 notes/page.pdf、读回详情，再在注释框里输入草稿。
+/// 自动保存还在 260ms 的等待里，草稿和读回的详情不同。
+pub(super) fn seed_unsaved_edit(model: &mut ShellViewModel) {
+    seed_files_base(model);
+    select_entry(model, "notes/page.pdf");
+    model.reduce(ShellMessage::Inspect(InspectMessage::SetComment(UNSAVED_COMMENT.into())));
+    model.page = ShellPage::UnsavedEdit;
+}
+
+/// 15 页的「冲突」：单击选中 cover.png、读回第 1 版详情，改写注释后等自动保存。
+/// 另一端已经把它存成下一版，保存应答 `conflict` 带回服务器上的详情。
+/// 本地草稿留在注释框里，元数据区写出冲突并给出「采用服务器版本」。
+pub(super) fn seed_conflict(model: &mut ShellViewModel) {
+    seed_files_base(model);
+    select_entry(model, "cover.png");
+    model.reduce(ShellMessage::Inspect(InspectMessage::SetComment(LOCAL_COMMENT.into())));
+    let saved = super::await_inspect_effect(model, |effect| match effect {
+        InspectEffect::SaveMetadata { expected_version, .. } => Some(expected_version),
+        _ => None,
+    });
+    match saved.and_then(|expected_version| server_detail(model, "cover.png", expected_version + 1)) {
+        Some(server) => model.reduce(ShellMessage::Inspect(InspectMessage::MetadataSaved(Ok(("conflict".into(), server))))),
+        None => eprintln!("Nana 冲突场景没有等到 cover.png 的自动保存"),
+    }
+    model.page = ShellPage::Conflict;
+}
+
+/// 服务器上被另一端写成 `version` 版之后的素材详情：注释是另一端写入的内容。
+fn server_detail(model: &ShellViewModel, path: &str, version: i64) -> Option<AssetDetail> {
+    let Some(row) = model.files.rows.iter().find(|row| row.path == path) else {
+        eprintln!("Nana 冲突场景找不到文件行：{path}");
+        return None;
+    };
+    let mut detail = asset_detail(row);
+    detail.summary.version = version;
+    detail.metadata = vec![MetadataEntry {
+        key: "comment".into(),
+        value_type: "string".into(),
+        value: Value::String(SERVER_COMMENT.into()),
+        version,
+        updated_at: NOW.into(),
+    }];
+    Some(detail)
 }
 
 /// 导入菜单展开，Eagle 的复制和剪切也展开。

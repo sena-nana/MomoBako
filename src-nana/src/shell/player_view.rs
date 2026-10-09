@@ -2,7 +2,7 @@
 //!
 //! 播放集页是一张 bg-elev 面板：眉题、标题、「播放器 · N 项」和右上角播放；下面每条是
 //! 白底圆角行（拖动柄、扩展名方块、文件名和路径、播放与移除），最后是播放条。
-//! 没点开播放集时只有虚线空框。文件页和预览页只挂播放条。排序用 `ReorderList`。
+//! 没点开播放集时只有虚线空框。文件页只挂播放条，预览页的播放条由预览框架放。排序用 `ReorderList`。
 
 use nana_ui::runtime::view::{widget, AnyView, IntoView};
 use nana_ui::runtime::{
@@ -29,15 +29,11 @@ pub(crate) fn key_part(text: &str) -> String {
     text.replace('%', "%25").replace('/', "%2F")
 }
 
-/// 文件页、预览页和播放集页共用的播放表面。播放集面板时是整页，其余是播放条。
-/// 文件预览页自己把播放条贴在页底（Vue `files-preview-page` 里的 `WorkspacePlayerBar`），
-/// 这时这里只给一个空位，不画第二条。
+/// 文件页和播放集页共用的播放表面。播放集面板时是整页，其余是播放条。
+/// 文件预览页不经过这里：预览框架自己把播放条贴在页底（Vue `files-preview-page` 里的 `WorkspacePlayerBar`）。
 pub(super) fn player_surface(model: &ShellViewModel) -> AnyView {
     if model.workspace.panel == super::workspace::WorkspacePanel::Playlist {
         return playlist_page(model);
-    }
-    if preview_hosts_bar(model) {
-        return widget(Stack::column(0.0)).key("player-surface-in-preview").into_any();
     }
     hosted_bar(model)
 }
@@ -45,14 +41,6 @@ pub(super) fn player_surface(model: &ShellViewModel) -> AnyView {
 /// 播放条，下载进行时下面多一行进度。预览页的页底也用它。
 pub(super) fn hosted_bar(model: &ShellViewModel) -> AnyView {
     with_download(model, bar::player_bar(model))
-}
-
-/// 文件面板正在显示文件预览页（和文件列的 `previewing` 同一判定：单击只选中时不算）。
-fn preview_hosts_bar(model: &ShellViewModel) -> bool {
-    model.workspace.panel == super::workspace::WorkspacePanel::Files
-        && model.page == super::ShellPage::SelectedFile
-        && model.inspect.has_target()
-        && model.files.preview_open(model.inspect.target_path.as_deref())
 }
 
 /// 下载进度只在下载进行时写在播放条下面一行。
