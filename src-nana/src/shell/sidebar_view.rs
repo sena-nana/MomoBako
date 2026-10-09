@@ -2,7 +2,7 @@
 //!
 //! 结构照 Vue `SecondaryPanel.vue`：仓库头 → 状态 → 快捷方式 → 快捷访问 → 动作 → 播放集 →
 //! 文件夹 → 智能文件夹，底部是设置、拓展、任务和日志。文件夹树、仓库弹层和对话框在子模块里。
-//! 状态是全局状态区（`status.rs`）：最近一次失败，没有失败时是忙碌行。
+//! 状态是全局状态区（`status.rs`）：最近一次失败，没有失败时是忙碌行，再没有时是刷新文件夹树的同步进度。
 //!
 //! 侧栏常驻：树只建一次，文字、当前态、禁用和计数按 [`SidebarSignals`] 绑定；可有可无的分组、
 //! 说明和角标用 `.visible`，节点留着、不占布局；列表用带键的 `each`。事件处理器只发意图消息，
@@ -134,7 +134,8 @@ fn sidebar_sections(signals: SidebarSignals, spin: Signal<f32>) -> AnyView {
 
 /// 侧栏顶部的全局状态区，对应 `WorkspaceSidebarStatus.vue`：有失败时是错误条（`.workspace-state--error`），
 /// 没有失败、在读资源库或素材详情时是忙碌行（`.workspace-state`：转圈加「正在同步仓库状态」），
-/// 都没有时整块藏起来、不占间距。两块都留着，按投影互换。
+/// 再没有时是刷新文件夹树的同步进度（`.workspace-state--progress`），都没有时整块藏起来、不占间距。
+/// 三块都留着，按投影互换。
 fn status_line(status: Signal<StatusLine>, spin: Signal<f32>) -> AnyView {
     let failure = move || status.with(|status| match status {
         StatusLine::Failure(message) => message.clone(),
@@ -158,7 +159,48 @@ fn status_line(status: Signal<StatusLine>, spin: Signal<f32>) -> AnyView {
     .visible(move || status.with(|status| matches!(status, StatusLine::Failure(_))))
     .children((widget(copy).prop::<String, fields::text::value>(failure).key("sidebar-status-error"),))
     .key("sidebar-status");
-    (error, busy_line(status, spin)).into_any()
+    (error, busy_line(status, spin), progress_line(status, spin)).into_any()
+}
+
+/// 同步进度（`.workspace-state--progress`）：和忙碌行同一副底色和转圈，占满一行，左边是这一步的文案，
+/// 右边是弱色的百分比（`.workspace-state__percent` 的 `margin-left: auto`）。
+fn progress_line(status: Signal<StatusLine>, spin: Signal<f32>) -> AnyView {
+    let progress = move || {
+        status.with(|status| match status {
+            StatusLine::Progress { label, percent } => (label.clone(), format!("{percent}%")),
+            _ => (String::new(), String::new()),
+        })
+    };
+    let (label, percent) = progress();
+    let mut glyph = nana_ui::runtime::IconGlyph::new(LOADER_2).size(16.0).role(SemanticColorRole::Muted);
+    Arc::make_mut(&mut glyph.style.layout).transform = Some(super::motion::spin_transform(spin.get_untracked()));
+    let mut text = parts::label_text(label, 12.0, 400, Some(SemanticColorRole::Muted)).line_height(18.0);
+    {
+        let layout = Arc::make_mut(&mut text.style.layout);
+        layout.flex_grow = Some(1.0);
+        layout.flex_shrink = Some(1.0);
+        layout.min_width = Some(LengthSpec::Px(0.0));
+    }
+    widget(
+        Stack::row(8.0)
+            .align(AlignSpec::Center)
+            .width(LengthSpec::Fill)
+            .min_height(LengthSpec::Px(30.0))
+            .padding_xy(8.0, 0.0)
+            .radius(RadiusTier::Sm)
+            .surface(SemanticColorRole::Subtle)
+            .with_layout(state_margin),
+    )
+    .visible(move || status.with(|status| matches!(status, StatusLine::Progress { .. })))
+    .children((
+        widget(glyph).prop::<f32, SpinField>(spin).key("sidebar-status-progress-spinner"),
+        widget(text).prop::<String, fields::text::value>(move || progress().0).key("sidebar-status-progress-label"),
+        widget(parts::label_text(percent, 12.0, 400, Some(SemanticColorRole::Faint)).line_height(18.0))
+            .prop::<String, fields::text::value>(move || progress().1)
+            .key("sidebar-status-progress-percent"),
+    ))
+    .key("sidebar-status-progress")
+    .into_any()
 }
 
 /// 忙碌行：`--bg-subtle` 底、弱色 12px 字，前面一个 16px 的转圈，宽度随内容。转圈的角度读热信号。

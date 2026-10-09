@@ -1,5 +1,5 @@
 //! 全局状态区：最近一次失败和它的来源，对齐 Vue `WorkspaceSidebarStatus` 读的全局 `error`，
-//! 以及没有失败时的忙碌行（Vue `isBusy`）。显示在侧栏顶部，见 `sidebar_view::status_line`。
+//! 以及没有失败时的忙碌行（Vue `isBusy`）和同步进度。显示在侧栏顶部，见 `sidebar_view::status_line`。
 //!
 //! **记什么。** 只有一个槽位，后记的失败顶替先记的。记的是没有就近显示的失败：
 //! - 各领域在失败处直接 [`StatusState::fail`]：宿主打开、定位、拖出，最小化到托盘，资源库列表和摘要，
@@ -15,9 +15,11 @@
 //!
 //! **什么时候清。** 照 Vue `error.value = null` 的时机：用户开始一个会写全局错误的操作时清掉上一次失败，
 //! 成功不专门清。开始的迹象有两种（[`starts_operation`]、[`Activity`]）：打开、定位、拖出，换仓库、
-//! 刷新资源库列表、重试启动，刷新文件夹树、打开智能文件夹这几条消息；以及读目录、文件变更、选中别的文件、
+//! 刷新资源库列表、重试启动、打开智能文件夹这几条消息；以及读目录、文件变更、刷新文件夹树、选中别的文件、
 //! 保存元数据、搜索、导出、智能文件夹增改删、插件操作和执行仓库动作这些操作的忙碌标志由假变真。后台的
 //! 静默刷新不算。同一次归约里新记的失败不会被这次清掉。
+//!
+//! 没有失败时依次是忙碌行和同步进度（文件夹树刷新时的扫描、写入、刷新三档）。
 
 use super::input::InputMessage;
 use super::sidebar::SidebarMessage;
@@ -37,6 +39,8 @@ pub enum FailureSource {
     Directory,
     /// 侧栏文件夹树读取。
     FolderTree,
+    /// 文件夹树的「刷新」：同步仓库，再重读摘要、硬链接候选和目录树。
+    Sync,
     /// 智能文件夹的读取、查询和删除。
     SmartFolder,
     /// 素材详情读取。
@@ -125,7 +129,7 @@ impl StatusState {
 /// 一个操作（Vue 在这些操作开始时 `error.value = null`）。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct Activity {
-    busy: [bool; 8],
+    busy: [bool; 9],
     /// 正在看的文件：换成别的文件对应 Vue `selectAsset`。
     selection: Option<String>,
 }
@@ -134,9 +138,10 @@ impl Activity {
     pub(super) fn of(model: &ShellViewModel) -> Self {
         Self {
             busy: [
-                // 读目录（非静默）、文件变更。
+                // 读目录（非静默）、文件变更、刷新文件夹树（同步仓库）。
                 model.files.loading,
                 model.files.mutating,
+                model.tree_sync.running(),
                 // 保存元数据、搜索、导出。
                 model.inspect.saving(),
                 model.inspect.searching,
@@ -159,9 +164,9 @@ impl Activity {
     }
 }
 
-/// 不靠忙碌标志、由消息本身表示的操作开始：打开、定位、拖出，换仓库、刷新资源库列表、重试启动，
-/// 刷新文件夹树和打开智能文件夹。打开、定位和拖出照 Vue 先过守卫（有仓库、有路径、能拖出），
-/// 守卫拦下的请求不清。
+/// 不靠忙碌标志、由消息本身表示的操作开始：打开、定位、拖出，换仓库、刷新资源库列表、重试启动和打开
+/// 智能文件夹。打开、定位和拖出照 Vue 先过守卫（有仓库、有路径、能拖出），守卫拦下的请求不清。
+/// 刷新文件夹树看忙碌标志（[`Activity`]），被拦下的点击不清。
 pub(super) fn starts_operation(message: &ShellMessage) -> bool {
     let filled = |text: &str| !text.trim().is_empty();
     match message {
@@ -174,7 +179,7 @@ pub(super) fn starts_operation(message: &ShellMessage) -> bool {
         ShellMessage::SelectWorkspaceRepository(_)
         | ShellMessage::Refresh
         | ShellMessage::StartupRetry
-        | ShellMessage::Sidebar(SidebarMessage::RefreshFolderTree | SidebarMessage::OpenSmartFolder(_)) => true,
+        | ShellMessage::Sidebar(SidebarMessage::OpenSmartFolder(_)) => true,
         _ => false,
     }
 }
@@ -211,8 +216,8 @@ impl ShellViewModel {
     }
 }
 
-/// 状态区显示什么。顺序照 Vue：失败 > 忙碌 > 同步进度。Nana 启动以后没有仓库同步（启动时的同步进度在
-/// 启动页上），所以没有同步进度这一档。
+/// 状态区显示什么。顺序照 Vue：失败 > 忙碌 > 同步进度。同步进度来自文件夹树的「刷新」（`tree_sync.rs`），
+/// 启动时的同步进度在启动页上。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum StatusLine {
     Hidden,
@@ -220,10 +225,12 @@ pub(crate) enum StatusLine {
     Failure(String),
     /// 「正在同步仓库状态」：读资源库列表、读仓库摘要或读素材详情时。
     Busy,
+    /// 同步进度：这一步的文案和百分比（扫描、写入、刷新三档）。
+    Progress { label: String, percent: u8 },
 }
 
 impl StatusLine {
-    /// 从 ViewModel 取状态区的投影。最近一次失败正在别处就近显示时让位给忙碌行。
+    /// 从 ViewModel 取状态区的投影。最近一次失败正在别处就近显示时让位给忙碌行和同步进度。
     pub(crate) fn project(model: &ShellViewModel) -> Self {
         if let Some(failure) = model.status.failure()
             && !shown_in_place(model, failure.source)
@@ -233,7 +240,10 @@ impl StatusLine {
         if busy(model) {
             return Self::Busy;
         }
-        Self::Hidden
+        match model.tree_sync.progress.shown() {
+            Some((label, percent)) => Self::Progress { label: label.to_string(), percent },
+            None => Self::Hidden,
+        }
     }
 }
 

@@ -41,6 +41,7 @@ pub(super) fn models() -> Vec<(&'static str, ShellViewModel)> {
         ("smart-folder-dialog", smart_folder_dialog()),
         ("playlist-create-dialog", playlist_create_dialog()),
         ("status-error", status_error()),
+        ("folder-tree-refresh", folder_tree_refresh()),
     ]
 }
 
@@ -141,6 +142,16 @@ fn status_error() -> ShellViewModel {
     let target = format!("{REPO_PATH}/cover.png");
     model.reduce(ShellMessage::Input(InputMessage::RevealEntry { absolute_path: target }));
     crate::host_bridge::perform(&mut model, |_, _| Err(REVEAL_ERROR.into()), |_| Ok(()), || Ok(()));
+    settle(&mut model);
+    model
+}
+
+/// 点了文件夹分组的「刷新文件夹树」，仓库同步还在跑：侧栏状态区显示同步进度「扫描文件夹结构 33%」，
+/// 刷新按钮转圈并禁用。Vue 模拟的同步当场返回，截不到这一刻，没有对照图。
+fn folder_tree_refresh() -> ShellViewModel {
+    let mut model = live_files_plain();
+    model.reduce(ShellMessage::Sidebar(SidebarMessage::RefreshFolderTree));
+    model.tree_sync.take_effects();
     settle(&mut model);
     model
 }
