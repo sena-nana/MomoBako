@@ -274,6 +274,8 @@ pub struct ShellViewModel {
     pub viewport_width: f32,
     /// 对话框、弹层或打开文件夹之后，手势松开时要重建树。
     pub surface_dirty: bool,
+    /// 归约次数。视图据此判断上次整体同步之后状态有没有经过归约。
+    pub(crate) revision: u64,
     /// `prepare` 里产生的目录浏览。这一帧就要提交，不能等下一次 `update`。
     pub(crate) staged_browses: Vec<sidebar::SidebarEffect>,
 }
@@ -333,6 +335,7 @@ impl Default for ShellViewModel {
             motion: motion::MotionState::default(),
             viewport_width: DEFAULT_VIEWPORT_PX,
             surface_dirty: false,
+            revision: 0,
             staged_browses: Vec::new(),
         }
     }
@@ -376,6 +379,7 @@ impl ShellViewModel {
 
     /// 在 ViewModel 边界集中处理导航和页面动作，避免控件闭包直接修改领域状态。
     pub fn reduce(&mut self, message: ShellMessage) {
+        self.revision = self.revision.wrapping_add(1);
         self.reduce_inner(message);
         self.flush_folder_mutations();
         self.settle_sidebar_dialogs();
@@ -881,9 +885,14 @@ mod shell_tint;
 mod startup_view;
 mod workbench;
 mod title_bar;
+mod hot;
+mod view_host;
 pub use interaction::commit_interaction;
 pub(crate) use interaction::window_action_commands;
-pub use render::mount_shell;
+pub use view_host::mount_shell;
+pub(crate) use view_host::{components_under, ShellView};
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+pub(crate) mod view_harness;

@@ -815,7 +815,7 @@ fn fresh_session(repo_id: &str) -> PlaybackSessionState {
 mod reduce;
 #[path = "player_preview.rs"]
 mod preview;
-pub(crate) use preview::PreviewEntry;
+pub(crate) use preview::{ClockStep, PreviewEntry};
 #[path = "player_library.rs"]
 mod library;
 pub(crate) use reduce::reduce_message;

@@ -2,11 +2,11 @@
 
 use std::cell::Cell;
 
-use nana_ui::runtime::{component_descriptors, Entity, Workspace};
+use nana_ui::runtime::{component_descriptors, Entity, StableNodeId, Workspace};
 use nana_ui_core::{DropAccepts, DropEffect};
 use nana_ui::{ApplicationWindow, RegionId, RuntimeProgramContext, RuntimeProgramUpdate};
 
-use crate::shell::{ShellMessage, ShellViewModel, WindowAction};
+use crate::shell::{ShellMessage, ShellView, ShellViewModel, WindowAction};
 use crate::{host_api, MomoBakoApplication};
 
 thread_local! {
@@ -51,8 +51,9 @@ pub(crate) fn after_update(app: &mut MomoBakoApplication, context: &RuntimeProgr
 
 /// 动效还在走时按 30 帧继续画，并把工作区拖动后的宽度写回壳层。
 ///
-/// 指针手势先读当前文档。手势进行中不拆树，否则按下目标会随节点一起消失。
-pub(crate) fn prepare_motion(shell: &mut ShellViewModel, window: &mut ApplicationWindow) {
+/// 指针手势先读当前文档。动效和播放推进只同步热信号，不重挂；这一帧里有过归约、标了脏
+/// 或者工作台排法要换时才整体同步，手势进行中不重挂，否则按下目标会随节点一起消失。
+pub(crate) fn prepare_motion(shell: &mut ShellViewModel, view: Option<&mut ShellView>, window: &mut ApplicationWindow) {
     crate::shell::poll_media_keys(shell);
     crate::drag_out::apply_result(shell);
     take_escape(shell);
@@ -66,11 +67,18 @@ pub(crate) fn prepare_motion(shell: &mut ShellViewModel, window: &mut Applicatio
     if shell.motion.active() {
         shell.motion.advance(shell.motion.now_ms().saturating_add(16));
     }
-    let refresh = shell.motion.active() || shell.surface_dirty;
-    if refresh && !tracking {
-        shell.surface_dirty = false;
-        if let Err(error) = crate::shell::mount_shell(&mut window.document, shell) {
-            eprintln!("Nana 动效帧重建失败：{error}");
+    if let Some(view) = view {
+        let structural = shell.surface_dirty || view.stale(shell);
+        let synced = if tracking {
+            view.sync_hot(&mut window.document, shell)
+        } else if structural {
+            shell.surface_dirty = false;
+            view.sync(&mut window.document, shell)
+        } else {
+            view.sync_hot(&mut window.document, shell).and_then(|()| view.retry_deferred(&mut window.document, shell))
+        };
+        if let Err(error) = synced {
+            eprintln!("Nana 准备帧同步壳层失败：{error}");
         }
     }
     window.demand = if shell.motion.active() || tracking || shell.files.prefetch_pending() || shell.inspect.timers_pending() {
@@ -122,13 +130,12 @@ fn dialog_layer_open(shell: &ShellViewModel) -> bool {
         || shell.workspace.delete_dialog_open()
 }
 
-/// 文件区或空库标记的父节点接受系统文件拖放。事件由视图收成 `HostDrag`。
-pub(crate) fn bind_file_drop(document: &mut nana_ui::runtime::RuntimeDocument) {
+/// `roots` 下面文件区或空库标记的父节点接受系统文件拖放。事件由视图收成 `HostDrag`。
+pub(crate) fn bind_file_drop(document: &mut nana_ui::runtime::RuntimeDocument, roots: &[StableNodeId]) {
     let document_id = document.document();
     let hosts: Vec<_> = {
         let world = document.context().world();
-        world
-            .document_order(document_id)
+        crate::shell::components_under(world, document_id, component_descriptors::TEXT.type_id, roots)
             .into_iter()
             .filter_map(|id| {
                 let text = world.text(id)?;
@@ -148,18 +155,16 @@ fn drop_host(world: &nana_ui::runtime::UiWorld, marker: nana_ui::runtime::Stable
 }
 
 /// 焦点在按钮或输入框上时，Escape 关掉最上面一层。对话框遮罩会先吞掉按键，由 `note_dismissed_dialog` 补上。
-pub(crate) fn bind_escape(document: &mut nana_ui::runtime::RuntimeDocument) {
+/// 只登记 `roots` 下面新挂的节点；常驻节点在骨架挂好时登记一次。
+pub(crate) fn bind_escape(document: &mut nana_ui::runtime::RuntimeDocument, roots: &[StableNodeId]) {
     let document_id = document.document();
-    let inputs: Vec<_> = document
-        .context()
-        .world()
-        .nodes_of_component(document_id, component_descriptors::TEXT_INPUT.type_id)
-        .collect();
-    let buttons: Vec<_> = document
-        .context()
-        .world()
-        .nodes_of_component(document_id, component_descriptors::BUTTON.type_id)
-        .collect();
+    let (inputs, buttons) = {
+        let world = document.context().world();
+        (
+            crate::shell::components_under(world, document_id, component_descriptors::TEXT_INPUT.type_id, roots),
+            crate::shell::components_under(world, document_id, component_descriptors::BUTTON.type_id, roots),
+        )
+    };
     for id in inputs {
         let entity = Entity::<nana_ui::runtime::TextInput>::from_stable_id(id);
         if let Err(error) = document.context_mut().on_key(entity, note_escape_key) {
@@ -186,10 +191,11 @@ fn note_escape_key(key: &nana_ui::KeyInput) -> bool {
 fn sync_sidebar_resize(shell: &mut ShellViewModel, document: &nana_ui::runtime::RuntimeDocument) {
     let context = document.context();
     let document_id = document.document();
+    // 主区独占时工作区停放在树外，它的区域尺寸不是侧栏宽度。
     let Some(node) = context
         .world()
         .nodes_of_component(document_id, component_descriptors::WORKSPACE.type_id)
-        .next()
+        .find(|node| context.world().is_mounted(*node))
     else {
         return;
     };

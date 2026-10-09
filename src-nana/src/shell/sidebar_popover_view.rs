@@ -49,14 +49,14 @@ pub fn repository_popover(model: &ShellViewModel) -> Option<AnyView> {
     let max_left = (model.viewport_width - width - VIEWPORT_MARGIN).max(VIEWPORT_MARGIN);
     let left = ANCHOR_LEFT.clamp(VIEWPORT_MARGIN, max_left);
     let top = ANCHOR_TOP + ANCHOR_HEIGHT + ANCHOR_GAP;
-    let frame = model.motion.panel_frame();
+    // 淡入和上移逐帧走，绑在热信号上，开合动效不重挂弹层。
+    let paint = super::super::hot::LayerPaint::panel(&model.motion);
     let positioned = widget(Stack::column(0.0).width(LengthSpec::Px(width)).with_layout(move |layout| {
         layout.position = nana_ui_core::PositionSpec::Absolute;
         layout.offset_left = Some(LengthSpec::Px(left));
         layout.offset_top = Some(LengthSpec::Px(top));
-        layout.opacity = Some(frame.opacity);
-        layout.transform = Some(super::super::motion::shift_scale(frame.shift, 1.0));
     }))
+    .prop::<super::super::hot::LayerPaint, super::super::hot::LayerPaintField>(super::super::hot::prop(|signals| signals.panel, paint))
     .children((panel,))
     .into_any();
     Some(

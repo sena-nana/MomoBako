@@ -1,7 +1,8 @@
-//! 整棵壳层重挂时保住焦点、文本选区和滚动位置。
+//! 壳层内容重挂时保住焦点、文本选区和滚动位置。
 //!
-//! 每次更新后 `mount_shell` 先卸掉旧树再挂新树，旧节点上的运行时状态随之消失：文本框打完一个字
-//! 就失焦，滚动容器回到顶部。这里在卸载前记下这些状态，新树挂上后按同一套规则找回对应节点再写回。
+//! 骨架常驻，侧栏、主区和浮层三块内容仍在同步时整块重挂，旧节点上的运行时状态随之消失：文本框
+//! 打完一个字就失焦，滚动容器回到顶部。这里在卸掉一块之前，只在这块的根下面记下这些状态，新内容
+//! 挂上后按同一套规则在新根下面找回对应节点再写回。
 //!
 //! 找回规则：节点的组件类型和 Nana 键路径（`assembly_path`）都相同才算同一个节点；键路径相同的
 //! 候选不止一个时，再比它在壳层树里的位置（从根往下每层的子节点序号）。节点被删、换了类型或
@@ -47,13 +48,11 @@ pub(super) fn capture(document: &RuntimeDocument, roots: &[StableNodeId]) -> Kep
     KeptState { focus: capture_focus(document, roots), scrolls: capture_scrolls(document, roots) }
 }
 
+/// 焦点在这块内容里才记。焦点在别的内容或常驻骨架上时不归这次重挂管。
 fn capture_focus(document: &RuntimeDocument, roots: &[StableNodeId]) -> Option<KeptFocus> {
     let world = document.context().world();
     let focused = world.focused(document.document())?;
-    let Some(position) = world_position(world, roots, focused) else {
-        eprintln!("Nana 重挂前的焦点不在壳层树里，重挂后不再恢复：{}", focused.get());
-        return None;
-    };
+    let position = world_position(world, roots, focused)?;
     let identity = identify(document, focused, position, "焦点")?;
     Some(KeptFocus { identity, selection: world.text_input(focused).map(|view| view.selection) })
 }
