@@ -158,8 +158,8 @@ impl ShellView {
         model.revision != self.revision || body_mode(model) != self.mode
     }
 
-    /// 整体同步：写热信号和标题栏；排法变了时侧栏和主区从头挂；再让每一块写信号、按需重挂。
-    /// 正在组合输入的块延后重挂，排法变了则不再等。
+    /// 整体同步：写热信号和标题栏；排法变了时侧栏和主区挪到新槽位（第一次排成工作台时才建侧栏）；
+    /// 再让每一块写信号、按需重挂。正在组合输入的块延后重挂。
     pub(crate) fn sync(&mut self, document: &mut RuntimeDocument, model: &ShellViewModel) -> Result<(), FrameworkError> {
         if !self.alive() {
             eprintln!("Nana 壳层骨架已随文档回收，跳过同步");
@@ -172,10 +172,6 @@ impl ShellView {
         {
             let mut cx = PartCx { document: &mut *document, hot: self.hot, stats: &mut self.stats };
             if mode != self.mode {
-                if !self.deferred.is_empty() {
-                    eprintln!("Nana 工作台排法变了，正在组合输入的内容也一起重挂：{:?}", self.deferred);
-                    self.deferred.clear();
-                }
                 absorb(&mut swap, &mut error, PartId::Sidebar, self.sidebar.mount(&mut cx, model, mode));
                 absorb(&mut swap, &mut error, PartId::Primary, self.primary.mount(&mut cx, model, mode));
             }
@@ -265,7 +261,8 @@ impl ShellView {
         }
     }
 
-    /// 把三块内容的根放进槽位。有侧栏时工作区是 body；主区独占时清空工作区的区域，主区自己是 body。
+    /// 把三块内容的根放进槽位。有侧栏时工作区是 body；主区独占时主区外框挪进壳层底色，底色是 body，
+    /// 侧栏留在停放的工作区里。
     fn place(&self, context: &mut AppContext, mode: BodyMode) -> Result<(), FrameworkError> {
         let (sidebar, primary, overlay) = (self.sidebar.root(), self.primary.root(), self.overlay.root());
         match mode {
@@ -280,8 +277,11 @@ impl ShellView {
                 Ok(())
             }
             BodyMode::Solo => {
-                place_shell(context, self.shell, primary, overlay)?;
-                place_regions(context, self.workspace, None, None).map(|_| ())
+                // 工作区先放下主区外框（侧栏留在工作区里，跟着工作区一起停放），外框再进壳层底色，
+                // 最后底色当 body。外框挪位置时不重建，焦点和滚动由 `Swap` 收尾时找回。
+                place_regions(context, self.workspace, sidebar, None)?;
+                self.primary.hold_solo(context)?;
+                place_shell(context, self.shell, primary, overlay).map(|_| ())
             }
         }
     }

@@ -1,9 +1,11 @@
 //! 主区块：主区外框常驻，里面用 `dynamic` 按 [`RouteKey`] 切换路由分支。
 //!
-//! 外框是白底 `Lg` 圆角的一层（主区独占时外面再包一层壳层底色），放进工作区的主区或 AppShell 的
-//! body。外框里只有一个结构块 `dynamic(route)`：每条路由的分支只在进入时建一次，之后同步只写它在
-//! [`RouteSignals`] 里的信号。换路由时同步只把新路由写进键，下一次刷新 `dynamic` 换出新分支；外框、
-//! 侧栏和浮层都不动。每个路由的入口函数在自己的 `route_*.rs` 里，状态放进 [`RouteSignals`]。
+//! 外框是白底 `Lg` 圆角的一层，只挂一次：有侧栏时它自己放进工作区的主区，主区独占时放进一层壳层底色
+//! （第一次独占时挂，之后留着），底色当 AppShell 的 body。换排法只挪外框的位置，分支、岛和里面的
+//! 滚动都留着（[`PrimaryPart::hold_solo`]）。外框里只有一个结构块 `dynamic(route)`：每条路由的分支
+//! 只在进入时建一次，之后同步只写它在 [`RouteSignals`] 里的信号。换路由时同步只把新路由写进键，
+//! 下一次刷新 `dynamic` 换出新分支；外框、侧栏和浮层都不动。每个路由的入口函数在自己的 `route_*.rs`
+//! 里，状态放进 [`RouteSignals`]。
 //!
 //! 路由里还嵌着别的模块的旧视图（播放条）时，分支里给它留占位节点，登记成 [`Island`]：进路由时先按
 //! 当前 ViewModel 把内容挂成脱离树的一块，分支挂好时放进占位节点；之后岛的版本变了才当场换掉，
@@ -16,13 +18,13 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use nana_ui::runtime::view::{css, dynamic, on_mount, signal, widget, AnyView, IntoView, NodeRef, Signal};
 use nana_ui::runtime::{
-    AppContext, FrameworkError, LengthSpec, MountedView, MutationQueue, RadiusTier, RuntimeDocument, SemanticColorRole,
-    Stack, StableNodeId,
+    AppContext, Entity, FrameworkError, LengthSpec, MountedView, MutationQueue, RadiusTier, RuntimeDocument,
+    SemanticColorRole, Stack, StableNodeId,
 };
 
 use super::hot::HotSignals;
 use super::inspect_search_view::{FilterBarSignals, FilterBarView, SearchPanelSignals, SearchPanelView};
-use super::remount_state::{self, KeptState};
+use super::remount_state;
 use super::route_admin::AdminSignals;
 use super::route_empty::{EmptySignals, EmptyView};
 use super::route_files::FilesRouteSignals;
@@ -218,8 +220,12 @@ pub(crate) struct PrimaryPart {
     id: u64,
     signals: PrimarySignals,
     handoff: Rc<RefCell<Handoff>>,
-    /// 外框的挂载；排法变了时整块重挂。
-    root: Option<MountedView>,
+    /// 外框的挂载：第一次挂载时建，之后换排法也不重建。
+    stage: Option<MountedView>,
+    /// 主区独占时包在外框外面的壳层底色：第一次独占时建，之后留着。
+    solo: Option<MountedView>,
+    /// 现在的排法，决定放进槽位的是外框还是壳层底色。
+    mode: BodyMode,
     /// 最近写进键的路由。
     route: RouteKey,
 }
@@ -244,30 +250,37 @@ impl ShellPart for PrimaryPart {
         let handoff = Rc::new(RefCell::new(Handoff::default()));
         HANDOFFS.with(|handoffs| handoffs.borrow_mut().insert(id, handoff.clone()));
         let route = signals.route.get_untracked();
-        Self { id, signals, handoff, root: None, route }
+        Self { id, signals, handoff, stage: None, solo: None, mode: BodyMode::Workbench, route }
     }
 
+    /// 放进槽位的根：有侧栏时是外框，主区独占时是包着外框的壳层底色。
     fn root(&self) -> Option<StableNodeId> {
-        first_root(self.root.as_ref())
+        match self.mode {
+            BodyMode::Workbench => first_root(self.stage.as_ref()),
+            BodyMode::Solo => first_root(self.solo.as_ref()),
+        }
     }
 
-    /// 挂外框和当前路由的分支。分支在外框挂载时同步建好，岛随即放进占位节点；
-    /// 换下来的旧外框和要找回的岛里的状态交给调度方在新外框放进槽位以后处理。
+    /// 第一次挂载：挂外框和当前路由的分支，分支在外框挂载时同步建好，岛随即放进占位节点。
+    /// 之后排法变了：外框、分支和岛都不重建，只在挪位置之前记下外框里的焦点、选区和滚动
+    /// （外框离开工作区时会被停放，焦点随之清掉），交给调度方放好以后找回。
     fn mount(&mut self, cx: &mut PartCx<'_>, model: &ShellViewModel, mode: BodyMode) -> Result<Swap, FrameworkError> {
+        self.mode = mode;
+        let document_id = cx.document.document();
+        if mode == BodyMode::Solo && self.solo.is_none() {
+            self.solo = Some(cx.document.context_mut().mount_view_detached(document_id, solo_frame)?);
+        }
+        if let Some(stage) = &self.stage {
+            let roots = stage.roots().to_vec();
+            let kept = remount_state::capture(cx.document.context(), document_id, &roots);
+            return Ok(Swap::restore(kept, roots));
+        }
         let route = RouteKey::of(model);
-        let kept_islands = if route == self.route { self.capture_islands(cx.document) } else { Vec::new() };
         self.signals.routes.write(route, model);
         self.enter(cx, model, route)?;
-        let document_id = cx.document.document();
         let (signals, hot, id) = (self.signals, cx.hot, self.id);
-        let root = cx.document.context_mut().mount_view_detached(document_id, move || frame(mode, signals, hot, id))?;
-        let mut swap = Swap::replace(self.root.replace(root), None, None);
-        for (index, kept) in kept_islands {
-            if let Some(roots) = self.island_roots(index) {
-                swap.merge(Swap::restore(kept, roots));
-            }
-        }
-        Ok(swap)
+        self.stage = Some(cx.document.context_mut().mount_view_detached(document_id, move || stage_frame(signals, hot, id))?);
+        Ok(Swap::default())
     }
 
     fn sync(&mut self, model: &ShellViewModel) {
@@ -295,11 +308,29 @@ impl ShellPart for PrimaryPart {
     }
 
     fn composing(&self, document: &RuntimeDocument) -> bool {
-        self.root.as_ref().is_some_and(|root| composing_under(document, root.roots()))
+        self.stage.as_ref().is_some_and(|stage| composing_under(document, stage.roots()))
     }
 }
 
 impl PrimaryPart {
+    /// 主区独占时把外框放进壳层底色。外框刚从工作区的主区挪出来（工作区已经把它停放）时还带着区域给它打的
+    /// 样式和无障碍补丁，重新投影一次换回自己的。已经在底色里时什么都不做。调度方在工作区放下外框之后、
+    /// 把底色放进 body 之前调。
+    pub(crate) fn hold_solo(&self, context: &mut AppContext) -> Result<(), FrameworkError> {
+        let (Some(stage), Some(solo)) = (first_root(self.stage.as_ref()), first_root(self.solo.as_ref())) else {
+            eprintln!("Nana 主区独占时外框或壳层底色还没挂，跳过");
+            return Ok(());
+        };
+        if context.world().parent_id(stage) == Some(solo) {
+            return Ok(());
+        }
+        let mut mutations = MutationQueue::new();
+        mutations.insert(solo, stage, None);
+        context.commit_mutations(mutations)?;
+        context.reproject_component(Entity::<Stack>::from_stable_id(stage))?;
+        Ok(())
+    }
+
     /// 进 `route`：按当前 ViewModel 挂好它的岛，把路由写进键。分支在外框挂载或下一次刷新时建出，
     /// 挂好时把岛放进占位节点。
     fn enter(&mut self, cx: &mut PartCx<'_>, model: &ShellViewModel, route: RouteKey) -> Result<(), FrameworkError> {
@@ -396,26 +427,14 @@ impl PrimaryPart {
     fn island_roots(&self, index: usize) -> Option<Vec<StableNodeId>> {
         self.handoff.borrow().islands.get(index).and_then(|view| view.content.as_ref()).map(|content| content.roots().to_vec())
     }
-
-    /// 记下各岛里的焦点、选区和滚动，按岛的序号。
-    fn capture_islands(&self, document: &RuntimeDocument) -> Vec<(usize, KeptState)> {
-        let count = self.handoff.borrow().islands.len();
-        (0..count)
-            .filter_map(|index| {
-                let roots = self.island_roots(index)?;
-                Some((index, remount_state::capture(document.context(), document.document(), &roots)))
-            })
-            .collect()
-    }
 }
 
-/// 主区外框。有侧栏时它自己放进工作区的主区；独占时外面再包一层壳层底色，圆角外露出 `--bg-elev`。
-/// 外框里的路由容器占满外框，样式和 `Stack::fill_column(0)` 相同。
-fn frame(mode: BodyMode, signals: PrimarySignals, hot: HotSignals, id: u64) -> AnyView {
+/// 主区外框：白底 `Lg` 圆角。里面的路由容器占满外框，样式和 `Stack::fill_column(0)` 相同。
+fn stage_frame(signals: PrimarySignals, hot: HotSignals, id: u64) -> AnyView {
     let routes = dynamic(signals.route, move |route: &RouteKey| branch(*route, signals, hot, id))
         .key(ROUTE_CONTAINER)
         .css(css! { height: 100%; min-height: 0; flex-grow: 1; flex-shrink: 1; });
-    let stage = widget(
+    widget(
         Stack::fill_column(0.0)
             .min_height(LengthSpec::Px(0.0))
             .surface(SemanticColorRole::Background)
@@ -423,11 +442,12 @@ fn frame(mode: BodyMode, signals: PrimarySignals, hot: HotSignals, id: u64) -> A
     )
     .children((routes,))
     .key("workspace-body")
-    .into_any();
-    match mode {
-        BodyMode::Workbench => stage,
-        BodyMode::Solo => widget(Stack::fill_column(0.0).surface(SemanticColorRole::Surface)).children((stage,)).into_any(),
-    }
+    .into_any()
+}
+
+/// 主区独占时外框外面的壳层底色，圆角外露出 `--bg-elev`。外框由 [`PrimaryPart::hold_solo`] 放进来。
+fn solo_frame() -> AnyView {
+    widget(Stack::fill_column(0.0).surface(SemanticColorRole::Surface)).into_any()
 }
 
 /// 一个路由分支。挂好以后由 [`settle`] 记下显示的路由、把岛放进占位节点。
