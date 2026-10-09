@@ -1,8 +1,10 @@
-//! 内置 WAV 和压缩音频的播放会话测试。
+//! 内置 WAV、压缩音频和媒体基础音频候选的认领与播放会话测试。
 //!
 //! 只解内存里的 PCM，测试构建不打开声卡。辅助构造沿用上层 `tests` 模块。
 
 use super::super::super::{InspectEffect, InspectMessage, ShellMessage};
+use super::super::support::{builtin_audio_formats, find_player_for_extension};
+use super::super::wav_player::{builtin_candidates, candidates_for, SYSTEM_PLAYER_TYPE_ID};
 use super::super::{PlayerMessage, QueueItem};
 use super::{asset, queue_item, send, shell, temp_dir};
 
@@ -50,7 +52,7 @@ fn wav_session_loads_and_plays_then_pauses_seeks_and_sets_volume() {
     let expected_ms = (samples.len() as u64) * 1000 / 8_000;
 
     let mut model = shell(true);
-    assert_eq!(model.player.candidates.len(), 2);
+    assert_eq!(model.player.candidates, candidates_for(cfg!(windows)), "生产列表是本平台的内置候选");
     let builtin = &model.player.candidates[0];
     assert_eq!(builtin.plugin_id, "momobako.player.wav");
     assert_eq!(builtin.player_type_id, "momobako.playlist.wav");
@@ -186,6 +188,58 @@ fn preview_play_drives_the_shared_cursor_without_opening_a_device() {
     assert!(!model.player.preview_owns_bar());
     assert!(model.player.cursor_playing());
     assert_eq!(model.player.current_item().map(|item| item.path.as_str()), Some("audio/a.wav"));
+}
+
+/// 本平台 Nana 自己能解的音频格式都有内置候选认领；没有媒体基础的平台不认领 m4a、aac、opus，
+/// 设置页的内置解码器也只写出真能解的格式。
+#[test]
+fn builtin_candidates_claim_what_the_platform_decodes() {
+    let claims = |media_foundation: bool, extension: &str| {
+        let candidates = candidates_for(media_foundation);
+        find_player_for_extension(extension, &candidates, &[]).is_some()
+    };
+    for extension in ["wav", "mp3", "flac", "ogg"] {
+        assert!(claims(true, extension) && claims(false, extension), "{extension} 各平台都由内置解码器认领");
+    }
+    for extension in ["m4a", "aac", "opus"] {
+        assert!(claims(true, extension), "有媒体基础时认领 {extension}");
+        assert!(!claims(false, extension), "没有媒体基础时不认领 {extension}");
+    }
+    assert_eq!(builtin_audio_formats(&candidates_for(false)).as_deref(), Some("WAV / MP3 / FLAC / Ogg"));
+    assert_eq!(builtin_audio_formats(&candidates_for(true)).as_deref(), Some("WAV / MP3 / FLAC / Ogg / M4A / AAC / Opus"));
+    assert_eq!(builtin_candidates(), candidates_for(cfg!(windows)), "媒体基础只在 Windows 上有");
+}
+
+/// 没装音频插件时，m4a 预览解出音轨后由内置候选接管播放条，播放落在同一游标上；
+/// 没有媒体基础的平台没有候选认领它，预览不接管播放条，写明没有可用的播放器。
+#[test]
+fn m4a_preview_takes_over_the_bar_without_the_audio_plugin() {
+    // 媒体基础解出的音轨同样是交错 PCM；这里用同形的 WAV 字节代替，测试不依赖系统解码器。
+    let bytes = pcm_wav(8_000, 1, 8, &[0, 255, 0, 255, 0, 255, 0, 255]);
+    let preview = |media_foundation: bool| {
+        let parts = crate::shell::preview_media_parts("repo", &bytes).expect("预览");
+        let mut model = shell(true);
+        model.player.candidates = candidates_for(media_foundation);
+        assert!(model.player.contributions.is_empty(), "没装音频插件");
+        model.reduce(ShellMessage::AssetDetailLoaded(Ok(asset("audio/voice.m4a", "m4a"))));
+        let InspectEffect::LoadMedia { path, generation, .. } = model.inspect.take_effects().pop().unwrap() else {
+            panic!("没有音视频请求");
+        };
+        let loaded = InspectMessage::MediaLoaded { path, generation, result: Ok(parts.session), pcm: parts.pcm, frames: None };
+        model.reduce(ShellMessage::Inspect(loaded));
+        model
+    };
+    let mut model = preview(true);
+    assert!(model.player.preview_owns_bar());
+    assert_eq!(model.player.current_item().map(|item| item.player_type_id.as_str()), Some(SYSTEM_PLAYER_TYPE_ID));
+    send(&mut model, PlayerMessage::SetPlaying(true));
+    assert!(model.player.cursor_playing());
+    assert!(!super::super::wav_player::sound_device_compiled_in());
+
+    let bare = preview(false);
+    assert!(!bare.player.preview_owns_bar());
+    assert!(bare.player.current_item().is_none());
+    assert_eq!(bare.player.activity, "没有可用于播放此媒体的插件");
 }
 
 /// 播放时钟只有一份：每帧往前拨，到头按自然结束切到下一项并接着放。

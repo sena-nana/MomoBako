@@ -492,8 +492,9 @@ pub struct AudioView {
 /// 标签是「插件名 · 插件标识」。实现取自已启用插件清单的 `playlistPlayers`（Vue 注册表的来源，
 /// Nana 用自己的音视频会话播放这些类型），以及登记了音频能力的原生候选。
 ///
-/// 和 Vue 不同的一点：Nana 自带内存解码器（WAV、MP3、FLAC、Ogg），没有选中也没有官方实现时音频由它播放。
-/// 这时下拉框写内置解码器、回退提示指向它，不报「音频播放暂不可用」；连内置解码器都没有才照 Vue 报缺失。
+/// 和 Vue 不同的一点：Nana 自带内存解码器（WAV、MP3、FLAC、Ogg，Windows 上还有媒体基础解的 M4A、AAC、Opus），
+/// 没有选中也没有官方实现时音频由它播放。这时下拉框写内置解码器、回退提示指向它，不报「音频播放暂不可用」；
+/// 连内置解码器都没有才照 Vue 报缺失。
 pub fn audio_view(
     candidates: &[PlayerCandidate],
     plugins: &[PluginManifest],

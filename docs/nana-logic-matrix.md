@@ -142,9 +142,9 @@
 
 ## Phase 5 播放列表
 
-这些行由 `src-nana/src/shell/player_tests.rs` 覆盖状态机。成员走 `RepositoryInteractionViewModel` 的 `list_playlist_memberships` 和 `set_playlist_membership`；目录和不能切换的条目走已有的 `add_playlist_items_by_paths`；排序走已有的 `reorder_playlist_items`；恢复详情走 `get_playlist_detail`；下载走 `MutsukiTaskViewModel::execute` 的 `momobako.playlist.download`。这些调用没有替身测试。播放条和预览共用一份 `PlaybackSessionState`。预览里的 WAV、mp3、flac、ogg 会把 PCM 装进同一游标；正式 Windows 构建用 winmm 出声，测试构建不开设备。播放列表里除内置 PCM WAV 以外，当前正在播的视频、m4a、aac、opus 只解这一条并进入现有会话，沿用预览的画面和 PCM 内存上限；没有当前项不解码，解不开返回「解码失败」。其它没有原生候选的类型仍按回退或升级文案失败，或停在“没有原生解码器”，不会变成 playing。播放列表用 `ReorderList`。验收场景的播放页也用重排和「移除」，不再放上移、下移按钮。下面每一行都未离屏。
+这些行由 `src-nana/src/shell/player_tests.rs` 覆盖状态机。成员走 `RepositoryInteractionViewModel` 的 `list_playlist_memberships` 和 `set_playlist_membership`；目录和不能切换的条目走已有的 `add_playlist_items_by_paths`；排序走已有的 `reorder_playlist_items`；恢复详情走 `get_playlist_detail`；下载走 `MutsukiTaskViewModel::execute` 的 `momobako.playlist.download`。这些调用没有替身测试。播放条和预览共用一份 `PlaybackSessionState`。预览里的 WAV、mp3、flac、ogg，以及 Windows 上媒体基础解出的 m4a、aac、opus，会把 PCM 装进同一游标；正式 Windows 构建用 winmm 出声，测试构建不开设备。播放列表里除内置 PCM WAV 以外，当前正在播的视频、m4a、aac、opus 只解这一条并进入现有会话，沿用预览的画面和 PCM 内存上限；没有当前项不解码，解不开返回「解码失败」。其它没有原生候选的类型仍按回退或升级文案失败，或停在“没有原生解码器”，不会变成 playing。播放列表用 `ReorderList`。验收场景的播放页也用重排和「移除」，不再放上移、下移按钮。下面每一行都未离屏。
 
-播放表面在启动就绪、主区有仓库，且面板是文件或播放列表时出现。验收页的播放列表和播放进行中也出现。会话写到设置目录的 `playback-sessions.json`，只保存非临时条目。生产环境的原生播放候选从空列表开始。正式 Windows 构建注册系统媒体传输控件，测试构建不注册，也不打开真系统会话。
+播放表面在启动就绪、主区有仓库，且面板是文件或播放列表时出现。验收页的播放列表和播放进行中也出现。会话写到设置目录的 `playback-sessions.json`，只保存非临时条目。生产环境的原生播放候选只有内置解码器：WAV、MP3 / FLAC / Ogg，Windows 上还有交给媒体基础的 M4A / AAC / Opus。正式 Windows 构建注册系统媒体传输控件，测试构建不注册，也不打开真系统会话。
 
 有任务编号之后取消下载会记下「正在取消下载…」。编号返回前仍是「下载任务还没有可取消的句柄」。`DownloadProgress` 可以在整批结果返回前更新「正在下载 N / N，失败 N」。Vue 播放运行时保持失败文案。预览里解出的视频和播放条共用同一会话。设置页播放器选择在阶段 6。
 
@@ -164,6 +164,7 @@
 | `usePlaylistPlayer.ts` 缺少插件 | 播放列表项就绪，但没有候选也没有贡献 | 不调用解码器 | 状态 failed，不是 playing | “缺少对应播放插件” | 已测试（未离屏） |
 | `usePlaylistPlayer.ts` Vue 贡献 | 只有贡献，没有原生候选 | 不调用解码器 | 状态 failed。测试会先清掉内置 WAV 候选 | “播放运行时仍是 Vue 插件，需要升级为 Nana 原生播放贡献” | 已测试（未离屏） |
 | 内置 WAV | 候选是 `momobako.player.wav`，文件是 PCM WAV | 从路径解析。正式 Windows 构建用 winmm `PlaySoundW` 异步播放；测试构建不开设备 | load 后 paused；play 后 playing；seek 写入 `current_time_ms`；pause 回到 paused；设备失败只记日志，会话不因此变成 failed | 会话 `playing` | 已测试（未离屏） |
+| 内置音频候选认领 | 预览或插播的扩展名没有插件贡献 | 无 | 各平台由内置候选认领 wav、mp3、flac、ogg；Windows 上再由 `momobako.player.system-audio` 认领 m4a、aac、opus（媒体基础解音轨），其他平台不认领。认领后预览接管播放条，PCM 进同一游标；没有候选时不接管 | “没有可用于播放此媒体的插件” | 已测试（未离屏） |
 | `usePlaylistPlayer.ts` 解码失败 | 已解析到非 WAV、且不是视频或 m4a/aac/opus 的原生候选 | `PlaybackSessionController`，`load` 返回“没有原生解码器” | 播放、暂停、跳转和音量仍是 failed；音量和进度不被失败改写 | “没有原生解码器” | 已测试（未离屏） |
 | 播放列表当前项 | 当前条目扩展名是 mp4、mov、mkv、webm、avi、m4v、m4a、aac、opus | 只读这一条，走 `preview_media_parts` 和现有画面、PCM 上限 | 没有当前项不解码。有 PCM 时进入现有播放会话；正式 Windows 构建出声，测试构建不开设备。解不开是 failed，文案含「解码失败」。队列里其它路径不打开 | “解码失败” | 已测试（未离屏） |
 | `usePlayerUi.ts` 图片停留和适配 | 当前项是图片，或切换适应 / 填充 | 写入 `playback-settings.json` | 停留钳在 2000–30000，坏数字回到 5000；只有 cover 是填充 | “适应” / “填充” | 已测试（未离屏） |
@@ -190,7 +191,7 @@
 
 | 来源 | 触发 | 服务 | 结果 | 可见性 | 状态 |
 | --- | --- | --- | --- | --- | --- |
-| `Settings.vue` 音频播放器 | 选择一个实现，或空白 | 阶段 5 的偏好写入，没有替身 | 只认 `momobako.player.audio`；实现取自启用且状态不是 error 的插件清单 `playlistPlayers`（和后端登记播放器类型同一口径），加上登记了该能力的原生候选；空白清除偏好；缺失项显示但不可选；解析仍用音频序列类型。没有选中也没有官方实现时，音频由内置解码器（WAV / MP3 / FLAC / Ogg）播放：下拉框写它，回退提示指向它，只有连内置解码器都没有才报缺失 | “Audio Player · momobako.player.audio” / “内置解码器 · WAV / MP3 / FLAC / Ogg” / “所选播放器当前不可用，已回退到 …” | 已测试（未离屏） |
+| `Settings.vue` 音频播放器 | 选择一个实现，或空白 | 阶段 5 的偏好写入，没有替身 | 只认 `momobako.player.audio`；实现取自启用且状态不是 error 的插件清单 `playlistPlayers`（和后端登记播放器类型同一口径），加上登记了该能力的原生候选；空白清除偏好；缺失项显示但不可选；解析仍用音频序列类型。没有选中也没有官方实现时，音频由内置解码器（WAV / MP3 / FLAC / Ogg，Windows 上加 M4A / AAC / Opus）播放：下拉框按本平台实际能解的格式写它，回退提示指向它，只有连内置解码器都没有才报缺失 | “Audio Player · momobako.player.audio” / “内置解码器 · WAV / MP3 / FLAC / Ogg / M4A / AAC / Opus”（其他平台没有后三项） / “所选播放器当前不可用，已回退到 …” | 已测试（未离屏） |
 | `useCornerStyle` 圆角 | 样式或半径 | 写入 `corners.json` | 只接受 smooth 和 round；半径钳在 0–20；未知样式和坏数字忽略；缺文件不立刻写回 | “平滑” / “普通” | 已测试（未离屏） |
 | `Settings.vue` 后端计数 | 仓库列表成功 | 无 | 按后端插件累计，保留首次出现的顺序 | “本地 (2)” / “无” | 已测试（未离屏） |
 | `Settings.vue` 外部连接 | 复制或导出 | 有路径时 `write_binary_file`，没有替身；复制交给宿主剪贴板；导出先发 `OpenFileDialog` | 空值不复制；令牌取前 10 和后 6 位；取消导出不写文件；写出成功后记文件名；剪贴板写入失败才显示失败文案 | “Token 已复制。” / “复制失败：系统剪贴板写入失败” / “正在选择导出位置…” / “external-api.json 已导出。” | 已测试（未离屏） |
