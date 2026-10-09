@@ -2,6 +2,10 @@
 //!
 //! 结构照 Vue `SecondaryPanel.vue`：仓库头 → 状态 → 快捷方式 → 快捷访问 → 动作 → 播放集 →
 //! 文件夹 → 智能文件夹，底部是设置、拓展、任务和日志。文件夹树、仓库弹层和对话框在子模块里。
+//!
+//! 侧栏常驻：树只建一次，文字、当前态、禁用和计数按 [`SidebarSignals`] 绑定；可有可无的分组、
+//! 说明和角标用 `.visible`，节点留着、不占布局；列表用带键的 `each`。事件处理器只发意图消息，
+//! 参数是建行时就定下的编号，或者点击时现读的信号。
 
 use std::sync::Arc;
 
@@ -9,15 +13,21 @@ use nana_ui::icons_tabler::{
     ARCHIVE, BOOKMARK, CLIPBOARD_LIST, CLOCK_HOUR_3, FILE, LIST_TREE, LOADER_2, LOGS, PLAYER_PLAY, PLUS, PUZZLE, REFRESH,
     SELECTOR, SETTINGS, TAG, TRASH,
 };
-use nana_ui::runtime::view::{widget, AnyView, IntoView};
+use nana_ui::runtime::view::{each, fields, widget, AnyView, El, IntoView, Item, Signal, Store, StoreList, StorePath};
 use nana_ui::runtime::{
     Activate, AlignSpec, IconButton, LengthSpec, ListItem, RadiusTier, SemanticColorRole, SidebarFrame, Stack,
 };
 use nana_ui::{ButtonKind, ControlSize, Icon};
 
+use super::hot::HotSignals;
+use super::player_view::key_part;
 use super::sidebar::ShortcutId;
+use super::view_part_sidebar::project::{
+    playlist_key, FooterView, HeadView, NavView, PlaylistGroup, PlaylistRow, PlaylistRowStoreFields, QuickRow, QuickTarget,
+    SidebarSignals,
+};
 use super::SidebarMessage;
-use super::{LibraryCategory, ShellMessage, ShellPage, ShellViewModel, WorkspacePanel};
+use super::{ShellMessage, ShellPage, WorkspacePanel};
 
 #[path = "sidebar_parts.rs"]
 pub(super) mod parts;
@@ -34,7 +44,14 @@ pub use dialogs::{
 pub use popover::repository_popover;
 pub use tree::folder_menu;
 
-use parts::{empty_hint, group_header, group_title, tree_action, FooterButton, NavRow};
+use parts::{bound_hint, footer_button, group_header, group_title, nav_row, tree_action, FooterLook, NavLook};
+
+/// 五个快捷方式，顺序同 Vue，也是 [`NavView::shortcuts`] 的顺序。
+const SHORTCUTS: [ShortcutId; 5] =
+    [ShortcutId::All, ShortcutId::Uncategorized, ShortcutId::Untagged, ShortcutId::Recent, ShortcutId::Trash];
+
+/// 播放集 Store 里的一行。
+type PlaylistItem = Item<Store<Vec<PlaylistRow>>, String, PlaylistRow>;
 
 /// 实况侧栏。Vue `.workspace-sidebar` 的内边距是 10px 8px，各块之间没有额外间距。
 /// 资源区比侧栏宽度少一条发丝间隙（见 `render::workbench`），右内边距同样扣掉这一条，
@@ -49,23 +66,35 @@ pub fn sidebar_frame() -> SidebarFrame {
     frame
 }
 
-/// 仓库头：当前仓库名加上下箭头，点开切换弹层。对应 `WorkspaceSidebarRepoHeader.vue`。
+/// 常驻侧栏：仓库头、分组和底部入口，放进工作区的资源区。底部入口平时的透明度读热信号。
 ///
-/// 无障碍名写成「资源库 · 仓库名」：Vue 的 `aria-label` 只有「资源库」，读屏听不到当前是哪个库，
+/// 三个槽位的根节点（仓库头外框、分组外的滚动区、底部入口行）上不放绑定：侧栏外框装配时给它们
+/// 打布局补丁，带绑定的根节点重投影会把补丁冲掉。
+pub(crate) fn sidebar(signals: SidebarSignals, hot: HotSignals) -> AnyView {
+    widget(sidebar_frame())
+        .top(sidebar_switcher(signals.head))
+        .body(sidebar_sections(signals))
+        .footer(sidebar_footer(signals.footer, hot.footer))
+        .into_any()
+}
+
+/// 仓库头的无障碍名：「资源库 · 仓库名」。Vue 的 `aria-label` 只有「资源库」，读屏听不到当前是哪个库，
 /// 这里把仓库名一起读出来。
-pub fn sidebar_switcher(model: &ShellViewModel) -> impl IntoView + use<'_> {
-    let name = model
-        .workspace
-        .active_repository()
-        .map(|repository| repository.name.clone())
-        .unwrap_or_else(|| "无资源库".into());
+fn switcher_label(name: &str) -> String {
+    format!("资源库 · {name}")
+}
+
+/// 仓库头：当前仓库名加上下箭头，点开切换弹层。对应 `WorkspaceSidebarRepoHeader.vue`。
+fn sidebar_switcher(head: Signal<HeadView>) -> AnyView {
+    let name = head.with_untracked(|head| head.name.clone());
     let mut style = parts::row_style(28.0, 8.0, 8.0, 6.0, parts::ActiveTone::Accent, false);
     Arc::make_mut(&mut style.layout).font_weight = Some(600);
     let content = widget(Stack::fill_row(6.0).align(AlignSpec::Center)).children((
-        parts::fill_label(name.clone(), 13.0, 600),
+        widget(parts::fill_text(name.clone(), 13.0, 600)).prop::<String, fields::text::value>(move || head.with(|head| head.name.clone())),
         widget(parts::inherit_icon(SELECTOR, 13.0)),
     ));
-    let switcher = widget(ListItem::new(format!("资源库 · {name}")).style(style))
+    let switcher = widget(ListItem::new(switcher_label(&name)).style(style))
+        .prop::<String, fields::list_item::label>(move || head.with(|head| switcher_label(&head.name)))
         .content(content)
         .key("repository-switcher")
         .on_cx(|_, _: &Activate, cx| {
@@ -77,85 +106,70 @@ pub fn sidebar_switcher(model: &ShellViewModel) -> impl IntoView + use<'_> {
     });
     let mut top_style = top.node_style();
     top_style.border = Some(SemanticColorRole::BorderSoft);
-    widget(top.style(top_style)).children((widget(Stack::column(0.0).padding_xy(2.0, 0.0)).children((switcher,)),))
+    widget(top.style(top_style))
+        .children((widget(Stack::column(0.0).padding_xy(2.0, 0.0)).children((switcher,)),))
+        .into_any()
 }
 
 /// 文件管理区：状态、快捷方式、快捷访问、动作、播放集、文件夹和智能文件夹，分组间 10px。
-pub fn sidebar_sections(model: &ShellViewModel) -> impl IntoView + use<'_> {
-    let locked = model.navigation_locked();
-    let mut sections = Vec::new();
-    if let Some(status) = status_line(model) {
-        sections.push(status);
-    }
-    sections.push(shortcut_group(model, locked));
-    if let Some(group) = quick_access_group(model, locked) {
-        sections.push(group);
-    }
-    if let Some(group) = actions_group(model, locked) {
-        sections.push(group);
-    }
-    sections.push(playlist_group(model, locked));
-    if folder_sidebar_visible(model) {
-        sections.push(tree::folder_group(model, locked));
-    }
-    sections.push(tree::smart_group(model, locked));
+/// 没有内容的分组藏起来，不占间距。
+fn sidebar_sections(signals: SidebarSignals) -> AnyView {
+    let head = signals.head;
     widget(Stack::column(10.0).with_layout(|layout| {
         layout.padding_right = Some(LengthSpec::Px(2.0));
     }))
-    .children(sections)
-}
-
-/// Vue `showFolderSidebar`：虚拟条目来源没有真实目录，不显示文件夹分组。
-fn folder_sidebar_visible(model: &ShellViewModel) -> bool {
-    model
-        .workspace
-        .active_repository()
-        .is_none_or(|repository| !repository.capabilities.iter().any(|capability| capability == "virtual-entries"))
+    .children((
+        status_line(head),
+        shortcut_group(signals.nav),
+        quick_access_group(signals.quick, signals.nav),
+        actions_group(signals.nav),
+        playlist_group(signals.playlists, signals.playlist_rows),
+        tree::folder_group(signals.folders, signals.folder_rows, move || head.with(|head| head.folders_visible)),
+        tree::smart_group(signals.smart, signals.smart_rows),
+    ))
+    .into_any()
 }
 
 /// 侧栏顶部的错误条：目录树或智能文件夹读取失败时显示，对应 `.workspace-state--error`。
-fn status_line(model: &ShellViewModel) -> Option<AnyView> {
-    let error = [&model.sidebar.tree_error, &model.sidebar.smart_error].into_iter().find(|error| !error.is_empty())?;
-    let mut copy = parts::label_text(error.clone(), 12.0, 400, Some(SemanticColorRole::Danger)).line_height(18.0);
+fn status_line(head: Signal<HeadView>) -> AnyView {
+    let mut copy = parts::label_text(head.with_untracked(|head| head.error.clone()), 12.0, 400, Some(SemanticColorRole::Danger))
+        .line_height(18.0);
     {
         let layout = Arc::make_mut(&mut copy.style.layout);
         layout.width = Some(LengthSpec::Fill);
         layout.overflow_wrap = Some(nana_ui_core::OverflowWrapSpec::Anywhere);
     }
-    Some(
-        widget(
-            Stack::column(0.0)
-                .padding_xy(8.0, 6.0)
-                .min_height(LengthSpec::Px(30.0))
-                .justify(nana_ui::runtime::JustifySpec::Center)
-                .radius(RadiusTier::Sm)
-                .painter(super::shell_tint::SoftFill::err()),
-        )
-        .children((widget(copy).key("sidebar-status-error"),))
-        .key("sidebar-status")
-        .into_any(),
+    widget(
+        Stack::column(0.0)
+            .padding_xy(8.0, 6.0)
+            .min_height(LengthSpec::Px(30.0))
+            .justify(nana_ui::runtime::JustifySpec::Center)
+            .radius(RadiusTier::Sm)
+            .painter(super::shell_tint::SoftFill::err()),
     )
+    .visible(move || head.with(|head| !head.error.is_empty()))
+    .children((widget(copy)
+        .prop::<String, fields::text::value>(move || head.with(|head| head.error.clone()))
+        .key("sidebar-status-error"),))
+    .key("sidebar-status")
+    .into_any()
 }
 
 /// 五个快捷方式，无标题。当前项 `--accent-soft` 底、强调色，缺失仓库时整组禁用。
-fn shortcut_group(model: &ShellViewModel, locked: bool) -> AnyView {
-    let counts = model.sidebar.counts;
-    let files = model.workspace.panel == WorkspacePanel::Files;
-    let category = model.workspace.library_category;
-    let items = [
-        (ShortcutId::All, counts.all, files && category == LibraryCategory::All),
-        (ShortcutId::Uncategorized, counts.uncategorized, files && category == LibraryCategory::Uncategorized),
-        (ShortcutId::Untagged, counts.untagged, files && category == LibraryCategory::Untagged),
-        (ShortcutId::Recent, counts.recent, files && category == LibraryCategory::Recent),
-        (ShortcutId::Trash, counts.trash, model.workspace.panel == WorkspacePanel::Trash),
-    ];
-    let rows = items
+fn shortcut_group(nav: Signal<NavView>) -> AnyView {
+    let rows = SHORTCUTS
         .into_iter()
-        .map(|(id, count, active)| {
-            NavRow { label: id.label().into(), icon: Some(shortcut_icon(id)), count: Some(count.to_string()), active, disabled: locked }
-                .view(format!("shortcut-{}", shortcut_key(id)), move |cx| {
-                    cx.dispatch_program_all(sidebar_message(SidebarMessage::SelectShortcut(id)));
+        .enumerate()
+        .map(|(index, id)| {
+            let look = move || {
+                nav.with(|nav| {
+                    let (count, active) = nav.shortcuts[index];
+                    NavLook { active, disabled: nav.locked, count: Some(count) }
                 })
+            };
+            nav_row(id.label(), Some(shortcut_icon(id)), look, format!("shortcut-{}", shortcut_key(id)), move |cx| {
+                cx.dispatch_program_all(sidebar_message(SidebarMessage::SelectShortcut(id)));
+            })
         })
         .collect::<Vec<_>>();
     widget(Stack::column(1.0)).children(rows).key("sidebar-shortcuts").into_any()
@@ -183,90 +197,76 @@ fn shortcut_key(id: ShortcutId) -> &'static str {
 }
 
 /// 快捷访问：仓库摘要里的书签。智能文件夹用书签图标，文件用文件图标，其余用目录图标。
-fn quick_access_group(model: &ShellViewModel, locked: bool) -> Option<AnyView> {
-    if model.sidebar.quick_access.is_empty() {
-        return None;
-    }
-    let rows = model
-        .sidebar
-        .quick_access
-        .iter()
-        .map(|shortcut| {
-            let id = shortcut.id.clone();
-            let icon = match shortcut.target_kind.as_str() {
-                "smartFolder" => BOOKMARK,
-                "file" => FILE,
-                _ => LIST_TREE,
-            };
-            NavRow { label: shortcut.label.clone(), icon: Some(icon), count: None, active: false, disabled: locked }
-                .view(format!("quick-access-{id}"), move |cx| {
-                    cx.dispatch_program_all(sidebar_message(SidebarMessage::OpenQuickAccess(id.clone())));
-                })
+/// 没有书签时整组藏起来。
+fn quick_access_group(quick: Signal<Vec<QuickRow>>, nav: Signal<NavView>) -> AnyView {
+    let rows = each(quick, QuickRow::clone, move |row: QuickRow| {
+        let icon = match row.target {
+            QuickTarget::SmartFolder => BOOKMARK,
+            QuickTarget::File => FILE,
+            QuickTarget::Folder => LIST_TREE,
+        };
+        let look = move || nav.with(|nav| NavLook { active: false, disabled: nav.locked, count: None });
+        let id = row.id.clone();
+        nav_row(&row.label, Some(icon), look, format!("quick-access-{}", key_part(&row.id)), move |cx| {
+            cx.dispatch_program_all(sidebar_message(SidebarMessage::OpenQuickAccess(id.clone())));
         })
-        .collect::<Vec<_>>();
-    Some(group(group_header(widget(group_title("快捷访问")).into_any(), Vec::new(), "quick-access-header"), vec![
-        widget(Stack::column(1.0)).children(rows).into_any(),
-    ]))
+    })
+    .gap(1.0);
+    group(group_header(widget(group_title("快捷访问")).into_any(), Vec::new(), "quick-access-header"), vec![rows.into_any()])
+        .visible(move || quick.with(|rows| !rows.is_empty()))
+        .into_any()
 }
 
 /// 仓库动作入口。有动作时才出现，右侧是动作数量。
-fn actions_group(model: &ShellViewModel, locked: bool) -> Option<AnyView> {
-    if model.admin.actions.is_empty() {
-        return None;
-    }
-    let row = NavRow {
-        label: "动作".into(),
-        icon: Some(CLIPBOARD_LIST),
-        count: Some(model.admin.actions.len().to_string()),
-        active: model.workspace.panel == WorkspacePanel::Actions,
-        disabled: locked,
-    }
-    .view("sidebar-actions".into(), |cx| cx.dispatch_program_all(ShellMessage::SetWorkspacePanel(WorkspacePanel::Actions)));
-    Some(group(group_header(widget(group_title("动作")).into_any(), Vec::new(), "actions-header"), vec![
+fn actions_group(nav: Signal<NavView>) -> AnyView {
+    let look = move || nav.with(|nav| NavLook { active: nav.actions_active, disabled: nav.locked, count: Some(nav.actions) });
+    let row = nav_row("动作", Some(CLIPBOARD_LIST), look, "sidebar-actions".into(), |cx| {
+        cx.dispatch_program_all(ShellMessage::SetWorkspacePanel(WorkspacePanel::Actions));
+    });
+    group(group_header(widget(group_title("动作")).into_any(), Vec::new(), "actions-header"), vec![
         widget(Stack::column(1.0)).children((row,)).into_any(),
-    ]))
+    ])
+    .visible(move || nav.with(|nav| nav.actions > 0))
+    .into_any()
 }
 
-/// 一个侧栏分组：标题和正文，间距 4px。对应 `.workspace-group`。
-pub(super) fn group(header: AnyView, body: Vec<AnyView>) -> AnyView {
+/// 一个侧栏分组：标题和正文，间距 4px。对应 `.workspace-group`。正文里藏起来的块不占间距。
+pub(super) fn group(header: AnyView, body: Vec<AnyView>) -> El<Stack, Vec<AnyView>> {
     let mut children = vec![header];
     children.extend(body);
-    widget(Stack::column(4.0)).children(children).into_any()
+    widget(Stack::column(4.0)).children(children)
 }
 
 /// 播放集分组。标题可点开合，默认收起；收起时只留标题。对应 `WorkspaceSidebarPlaylists.vue`。
-fn playlist_group(model: &ShellViewModel, locked: bool) -> AnyView {
-    let has_repo = model.workspace.active_repo_id.is_some();
-    let expanded = model.sidebar.playlists_expanded;
-    let count = model.sidebar.playlists.len();
-    let create_locked = !has_repo || locked || model.playlist_players.is_empty();
-    let title = playlist_title(count, expanded);
-    let tools = vec![tree_action(PLUS, "新建播放集", "playlist-create", create_locked, |cx| {
+fn playlist_group(state: Signal<PlaylistGroup>, rows: Store<Vec<PlaylistRow>>) -> AnyView {
+    let tools = vec![tree_action(PLUS, "新建播放集", "playlist-create", move || state.with(|state| state.create_locked), |cx| {
         cx.dispatch_program_all(ShellMessage::OpenPlaylistDialog);
-    })];
-    let mut body = Vec::new();
-    if expanded {
-        body.push(if !has_repo {
-            empty_hint("先选择或添加一个资源库。", "playlist-empty")
-        } else if locked {
-            empty_hint("资源库修复后可继续使用播放集。", "playlist-missing")
-        } else if !model.sidebar.playlists.is_empty() {
-            playlist_list(model)
-        } else if model.playlist_players.is_empty() {
-            empty_hint("当前没有可用的播放插件类型。", "playlist-no-player")
-        } else {
-            empty_hint("还没有播放集。", "playlist-none")
-        });
-    }
-    group(group_header(title, tools, "playlist-header"), body)
+    })
+    .into_any()];
+    let hint = bound_hint(move || state.with(|state| state.hint.filter(|_| state.expanded)), "playlist-hint");
+    let list = rows
+        .keyed(playlist_key)
+        .each(playlist_row)
+        .gap(6.0)
+        .key("playlist-list")
+        .visible(move || state.with(|state| state.expanded && state.hint.is_none()));
+    group(group_header(playlist_title(state), tools, "playlist-header"), vec![hint, list.into_any()]).into_any()
 }
 
-/// 「播放集」标题按钮：标题加个数，点一下展开或收起。无障碍名说明下一步动作。
-fn playlist_title(count: usize, expanded: bool) -> AnyView {
-    let label = if expanded { "收起播放集" } else { "展开播放集" };
-    let mut count_text = parts::label_text(count.to_string(), 11.0, 700, Some(SemanticColorRole::Muted));
+/// 「播放集」标题按钮的无障碍名：说明下一步动作。
+fn playlist_toggle_label(expanded: bool) -> &'static str {
+    if expanded { "收起播放集" } else { "展开播放集" }
+}
+
+/// 「播放集」标题按钮：标题加个数，点一下展开或收起。
+fn playlist_title(state: Signal<PlaylistGroup>) -> AnyView {
+    let initial = state.get_untracked();
+    let mut count_text = parts::label_text(initial.count.to_string(), 11.0, 700, Some(SemanticColorRole::Muted));
     Arc::make_mut(&mut count_text.style.layout).letter_spacing = Some(0.0);
-    let content = widget(Stack::row(6.0).align(AlignSpec::Center)).children((widget(group_title("播放集")), widget(count_text)));
+    let content = widget(Stack::row(6.0).align(AlignSpec::Center)).children((
+        widget(group_title("播放集")),
+        widget(count_text).prop::<String, fields::text::value>(move || state.with(|state| state.count.to_string())),
+    ));
     let mut style = parts::row_style(24.0, 0.0, 0.0, 6.0, parts::ActiveTone::Accent, false);
     {
         let layout = Arc::make_mut(&mut style.layout);
@@ -276,64 +276,60 @@ fn playlist_title(count: usize, expanded: bool) -> AnyView {
     style.foreground = Some(SemanticColorRole::Faint);
     style.interaction.hovered.foreground = Some(SemanticColorRole::Faint);
     style.interaction.pressed.foreground = Some(SemanticColorRole::Faint);
-    widget(ListItem::new(label).style(style))
+    widget(ListItem::new(playlist_toggle_label(initial.expanded)).style(style))
+        .prop::<String, fields::list_item::label>(move || state.with(|state| playlist_toggle_label(state.expanded).to_string()))
         .content(content)
         .key("playlist-toggle")
         .on_cx(|_, _: &Activate, cx| cx.dispatch_program_all(sidebar_message(SidebarMessage::TogglePlaylists)))
         .into_any()
 }
 
-/// 展开后的播放集：名称、「播放器 · N 项」，右侧播放和删除。当前播放集 `--accent-soft` 底。
-fn playlist_list(model: &ShellViewModel) -> AnyView {
-    let mut rows = Vec::new();
-    for playlist in &model.sidebar.playlists {
-        let id = playlist.id.clone();
-        let active = model.workspace.panel == WorkspacePanel::Playlist && model.sidebar.active_playlist_id.as_deref() == Some(playlist.id.as_str());
-        let item_count = model
-            .player
-            .listed
-            .as_ref()
-            .filter(|detail| detail.playlist.playlist_id == playlist.id)
-            .map(|detail| detail.items.len() as i64)
-            .unwrap_or(playlist.item_count);
-        let mut name = parts::label_text(playlist.name.clone(), 13.0, 600, Some(SemanticColorRole::Text)).truncating();
-        Arc::make_mut(&mut name.style.layout).width = Some(LengthSpec::Fill);
-        let mut meta = parts::label_text(format!("{} · {} 项", playlist.player_label, item_count), 11.0, 400, Some(SemanticColorRole::Muted)).truncating();
-        Arc::make_mut(&mut meta.style.layout).width = Some(LengthSpec::Fill);
-        let mut main_style = parts::row_style(42.0, 8.0, 8.0, 0.0, parts::ActiveTone::Accent, false);
-        {
-            let layout = Arc::make_mut(&mut main_style.layout);
-            layout.direction = Some(nana_ui_core::FlexDirection::Column);
-            layout.align_items = AlignSpec::Start;
-            layout.justify_content = nana_ui::runtime::JustifySpec::Center;
-            layout.flex_grow = Some(1.0);
-            layout.flex_shrink = Some(1.0);
-            layout.width = Some(LengthSpec::Px(0.0));
-        }
-        main_style.interaction.selected = main_style.interaction.hovered;
-        let open_id = id.clone();
-        let main = widget(ListItem::new(playlist.name.clone()).style(main_style))
-            .content(widget(Stack::column(0.0).width(LengthSpec::Fill)).children((widget(name), widget(meta))))
-            .key(format!("playlist-open-{id}"))
-            .on_cx(move |_, _: &Activate, cx| {
-                cx.dispatch_program_all(sidebar_message(SidebarMessage::OpenSidebarPlaylist(open_id.clone())));
-            });
-        let playable = !super::player_view::playlist_plugin_missing(model, &playlist.player_type_id);
-        let play_id = id.clone();
-        let remove_id = id.clone();
-        let actions = widget(Stack::row(2.0).align(AlignSpec::Center)).children((
-            tree_action(PLAYER_PLAY, "播放播放集", "playlist-play", !playable, move |cx| {
-                cx.dispatch_program_all(sidebar_message(SidebarMessage::Gap(super::sidebar::GapMessage::PlayPlaylist(play_id.clone()))));
-            }),
-            danger_tree_action(TRASH, "删除播放集", move |cx| {
-                cx.dispatch_program_all(sidebar_message(SidebarMessage::Gap(super::sidebar::GapMessage::RemovePlaylist(remove_id.clone()))));
-            }),
-        ));
-        let item = Stack::bar(6.0).align(AlignSpec::Center).padding(4.0).radius(RadiusTier::Md);
-        let item = if active { item.surface(SemanticColorRole::AccentSoft) } else { item };
-        rows.push(widget(item).children((main, actions)).key(format!("playlist-item-{id}")).into_any());
+/// 展开后的一个播放集：名称、「播放器 · N 项」，右侧播放和删除。当前播放集 `--accent-soft` 底。
+/// 名称、项数、当前态和能否播放按这一行的 Store 字段原地改。
+fn playlist_row(item: PlaylistItem) -> AnyView {
+    let row = item.get_untracked();
+    let id = row.playlist_id;
+    let mut name = parts::label_text(row.name.clone(), 13.0, 600, Some(SemanticColorRole::Text)).truncating();
+    Arc::make_mut(&mut name.style.layout).width = Some(LengthSpec::Fill);
+    let mut meta = parts::label_text(row.meta, 11.0, 400, Some(SemanticColorRole::Muted)).truncating();
+    Arc::make_mut(&mut meta.style.layout).width = Some(LengthSpec::Fill);
+    let mut main_style = parts::row_style(42.0, 8.0, 8.0, 0.0, parts::ActiveTone::Accent, false);
+    {
+        let layout = Arc::make_mut(&mut main_style.layout);
+        layout.direction = Some(nana_ui_core::FlexDirection::Column);
+        layout.align_items = AlignSpec::Start;
+        layout.justify_content = nana_ui::runtime::JustifySpec::Center;
+        layout.flex_grow = Some(1.0);
+        layout.flex_shrink = Some(1.0);
+        layout.width = Some(LengthSpec::Px(0.0));
     }
-    widget(Stack::column(6.0)).children(rows).key("playlist-list").into_any()
+    main_style.interaction.selected = main_style.interaction.hovered;
+    let open_id = id.clone();
+    let main = widget(ListItem::new(row.name).style(main_style))
+        .prop::<String, fields::list_item::label>(item.name())
+        .content(widget(Stack::column(0.0).width(LengthSpec::Fill)).children((
+            widget(name).prop::<String, fields::text::value>(item.name()),
+            widget(meta).prop::<String, fields::text::value>(item.meta()),
+        )))
+        .key(format!("playlist-open-{}", key_part(&id)))
+        .on_cx(move |_, _: &Activate, cx| {
+            cx.dispatch_program_all(sidebar_message(SidebarMessage::OpenSidebarPlaylist(open_id.clone())));
+        });
+    let play_id = id.clone();
+    let remove_id = id.clone();
+    let actions = widget(Stack::row(2.0).align(AlignSpec::Center)).children((
+        tree_action(PLAYER_PLAY, "播放播放集", "playlist-play", move || !item.playable().get(), move |cx| {
+            cx.dispatch_program_all(sidebar_message(SidebarMessage::Gap(super::sidebar::GapMessage::PlayPlaylist(play_id.clone()))));
+        }),
+        danger_tree_action(TRASH, "删除播放集", move |cx| {
+            cx.dispatch_program_all(sidebar_message(SidebarMessage::Gap(super::sidebar::GapMessage::RemovePlaylist(remove_id.clone()))));
+        }),
+    ));
+    widget(Stack::bar(6.0).align(AlignSpec::Center).padding(4.0).radius(RadiusTier::Md))
+        .background(move || item.active().get().then_some(SemanticColorRole::AccentSoft))
+        .children((main, actions))
+        .key(format!("playlist-item-{}", key_part(&id)))
+        .into_any()
 }
 
 /// 危险的标题工具：悬停换浅红底。对应 `.workspace-tree-action--danger`。
@@ -350,30 +346,37 @@ pub(super) fn danger_tree_action(
 }
 
 /// 设置、拓展、任务和日志。当前入口 `--accent-soft` 底，其余平时 0.44 透明度，悬停底栏时为 1。
-pub fn sidebar_footer(model: &ShellViewModel) -> impl IntoView + use<'_> {
-    let settings = matches!(model.page, ShellPage::Settings | ShellPage::SettingsError);
-    let extensions = !settings && model.workspace.panel == WorkspacePanel::Extensions;
-    let logs = !settings && model.workspace.panel == WorkspacePanel::Logs;
-    let rest = model.motion.footer_opacity();
-    let tasks_open = model.admin.popover_open;
-    let task_count = model.active_tasks;
-    let task_button = FooterButton { icon: CLIPBOARD_LIST, label: "任务", active: tasks_open, highlight: task_count > 0, rest_opacity: rest }
-        .view("footer-tasks", |cx| cx.dispatch_program_all(ShellMessage::Admin(super::admin::AdminMessage::ToggleTaskPopover)));
-    let task = if task_count > 0 { with_badge(task_button, task_count) } else { task_button };
-    widget(Stack::row(2.0).align(AlignSpec::Center)).key("sidebar-footer").children((
-        FooterButton { icon: SETTINGS, label: "设置", active: settings, highlight: false, rest_opacity: rest }
-            .view("footer-settings", |cx| cx.dispatch_program_all(ShellMessage::Navigate(ShellPage::Settings))),
-        FooterButton { icon: PUZZLE, label: "拓展", active: extensions, highlight: false, rest_opacity: rest }
-            .view("footer-extensions", |cx| cx.dispatch_program_all(ShellMessage::SetWorkspacePanel(WorkspacePanel::Extensions))),
-        task,
-        FooterButton { icon: LOGS, label: "日志", active: logs, highlight: false, rest_opacity: rest }
-            .view("footer-logs", |cx| cx.dispatch_program_all(ShellMessage::SetWorkspacePanel(WorkspacePanel::Logs))),
-    ))
+/// 任务入口外面套一层定位用的行，有任务时右上角显示数量角标，没有时角标藏起来。
+fn sidebar_footer(footer: Signal<FooterView>, rest: Signal<f32>) -> AnyView {
+    let look = move |active: fn(&FooterView) -> bool| move || footer.with(|footer| FooterLook { active: active(footer), highlight: false });
+    let tasks = move || footer.with(|footer| FooterLook { active: footer.tasks_open, highlight: footer.tasks > 0 });
+    let task = widget(Stack::row(0.0).with_layout(|layout| layout.position = nana_ui_core::PositionSpec::Relative)).children((
+        footer_button(CLIPBOARD_LIST, "任务", "footer-tasks", tasks, rest, |cx| {
+            cx.dispatch_program_all(ShellMessage::Admin(super::admin::AdminMessage::ToggleTaskPopover));
+        }),
+        task_badge(footer),
+    ));
+    widget(Stack::row(2.0).align(AlignSpec::Center))
+        .key("sidebar-footer")
+        .children((
+            footer_button(SETTINGS, "设置", "footer-settings", look(|footer| footer.settings), rest, |cx| {
+                cx.dispatch_program_all(ShellMessage::Navigate(ShellPage::Settings));
+            }),
+            footer_button(PUZZLE, "拓展", "footer-extensions", look(|footer| footer.extensions), rest, |cx| {
+                cx.dispatch_program_all(ShellMessage::SetWorkspacePanel(WorkspacePanel::Extensions));
+            }),
+            task,
+            footer_button(LOGS, "日志", "footer-logs", look(|footer| footer.logs), rest, |cx| {
+                cx.dispatch_program_all(ShellMessage::SetWorkspacePanel(WorkspacePanel::Logs));
+            }),
+        ))
+        .into_any()
 }
 
 /// 任务入口右上角的数量角标。对应 `.task-button__badge`：12px 高、强调色底、9px 粗体。
-fn with_badge(button: AnyView, count: usize) -> AnyView {
-    let badge = widget(
+fn task_badge(footer: Signal<FooterView>) -> AnyView {
+    let count = footer.with_untracked(|footer| footer.tasks);
+    widget(
         Stack::row(0.0)
             .align(AlignSpec::Center)
             .justify(nana_ui::runtime::JustifySpec::Center)
@@ -390,11 +393,11 @@ fn with_badge(button: AnyView, count: usize) -> AnyView {
                 layout.pointer_events = Some(nana_ui_core::PointerEventsSpec::None);
             }),
     )
-    .children((widget(parts::label_text(count.to_string(), 9.0, 700, Some(SemanticColorRole::AccentText)).line_height(12.0)),))
-    .key("footer-task-badge");
-    widget(Stack::row(0.0).with_layout(|layout| layout.position = nana_ui_core::PositionSpec::Relative))
-        .children((button, badge))
-        .into_any()
+    .visible(move || footer.with(|footer| footer.tasks > 0))
+    .children((widget(parts::label_text(count.to_string(), 9.0, 700, Some(SemanticColorRole::AccentText)).line_height(12.0))
+        .prop::<String, fields::text::value>(move || footer.with(|footer| footer.tasks.to_string())),))
+    .key("footer-task-badge")
+    .into_any()
 }
 
 /// 加载中的刷新按钮换成转圈图标。
