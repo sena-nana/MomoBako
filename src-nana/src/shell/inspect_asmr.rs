@@ -176,7 +176,7 @@ pub(super) fn candidate_section(model: &ShellViewModel, custom: &BTreeMap<String
         text("补全候选").key("inspect-asmr-provider-title").into_any(),
         widget(Button::new("导入").kind(ButtonKind::Ghost).disabled(locked))
             .key("inspect-asmr-import")
-            .on_cx(|_, _: &Activate, cx| cx.dispatch_program(ShellMessage::Asmr(AsmrMessage::ToggleImport)))
+            .on_cx(|_, _: &Activate, cx| cx.dispatch_program_all(ShellMessage::Asmr(AsmrMessage::ToggleImport)))
             .into_any(),
     ];
     if model.asmr.import_open {
@@ -206,18 +206,18 @@ fn import_form(model: &ShellViewModel, custom: &BTreeMap<String, String>, locked
     let select = Select::new(Some(provider)).options(options).placeholder("ASMR Provider").size(ControlSize::Small).disabled(locked);
     let mut body = vec![
         widget(select).key("inspect-asmr-provider").on_cx(|_, event: &SelectChanged, cx| {
-            cx.dispatch_program(ShellMessage::Asmr(AsmrMessage::SetProvider(event.value.to_string())));
+            cx.dispatch_program_all(ShellMessage::Asmr(AsmrMessage::SetProvider(event.value.to_string())));
         }).into_any(),
         widget(TextInput::new(lookup_id).placeholder("RJ123456").size(ControlSize::Small).disabled(locked))
             .key("inspect-asmr-work-id")
-            .on_cx(|_, event: &TextChanged, cx| cx.dispatch_program(ShellMessage::Asmr(AsmrMessage::SetLookupId(event.value.to_string()))))
+            .on_cx(|_, event: &TextChanged, cx| cx.dispatch_program_all(ShellMessage::Asmr(AsmrMessage::SetLookupId(event.value.to_string()))))
             .into_any(),
         widget(Button::new("抓取候选").kind(ButtonKind::Ghost).disabled(locked)).key("inspect-asmr-lookup").on_cx(|_, _: &Activate, cx| {
-            cx.dispatch_program(ShellMessage::Asmr(AsmrMessage::Lookup));
+            cx.dispatch_program_all(ShellMessage::Asmr(AsmrMessage::Lookup));
         }).into_any(),
         widget(TextInput::new(model.asmr.import_draft.clone()).placeholder("ASMR 候选 JSON").disabled(locked))
             .key("inspect-asmr-import-json")
-            .on_cx(|_, event: &TextChanged, cx| cx.dispatch_program(ShellMessage::Asmr(AsmrMessage::SetImportDraft(event.value.to_string()))))
+            .on_cx(|_, event: &TextChanged, cx| cx.dispatch_program_all(ShellMessage::Asmr(AsmrMessage::SetImportDraft(event.value.to_string()))))
             .into_any(),
     ];
     if !model.asmr.import_error.is_empty() {
@@ -225,7 +225,7 @@ fn import_form(model: &ShellViewModel, custom: &BTreeMap<String, String>, locked
     }
     body.push(
         widget(Button::new("导入候选").kind(ButtonKind::Ghost).disabled(locked)).key("inspect-asmr-import-submit").on_cx(|_, _: &Activate, cx| {
-            cx.dispatch_program(ShellMessage::Asmr(AsmrMessage::ImportCandidate));
+            cx.dispatch_program_all(ShellMessage::Asmr(AsmrMessage::ImportCandidate));
         }).into_any(),
     );
     widget(Stack::column(8.0)).key("inspect-asmr-import-form").children(body).into_any()
@@ -242,7 +242,7 @@ fn candidate_card(candidate: Candidate, index: usize, locked: bool) -> AnyView {
     rows.push(
         widget(Button::new("应用").kind(ButtonKind::Ghost).disabled(locked || candidate.fields.is_empty()))
             .key(format!("inspect-asmr-apply-{index}"))
-            .on_cx(move |_, _: &Activate, cx| cx.dispatch_program(ShellMessage::Asmr(AsmrMessage::Apply(apply_index))))
+            .on_cx(move |_, _: &Activate, cx| cx.dispatch_program_all(ShellMessage::Asmr(AsmrMessage::Apply(apply_index))))
             .into_any(),
     );
     for (key, value) in &candidate.fields {
@@ -269,7 +269,7 @@ fn work_queue(model: &ShellViewModel, custom: &BTreeMap<String, String>) -> Opti
         rows.push(
             widget(Button::new(format!("{title} {status}")).kind(ButtonKind::Ghost))
                 .key(format!("inspect-asmr-queue-{path}"))
-                .on_cx(move |_, _: &Activate, cx| cx.dispatch_program(ShellMessage::Asmr(AsmrMessage::Open(path.clone()))))
+                .on_cx(move |_, _: &Activate, cx| cx.dispatch_program_all(ShellMessage::Asmr(AsmrMessage::Open(path.clone()))))
                 .into_any(),
         );
     }
@@ -289,13 +289,13 @@ fn playlist_card(model: &ShellViewModel, custom: &BTreeMap<String, String>) -> O
             .key("inspect-asmr-playlist-actions")
             .children((
                 widget(Button::new("加入作品").kind(ButtonKind::Ghost).disabled(!audio)).key("inspect-asmr-add-work").on_cx(|_, _: &Activate, cx| {
-                    cx.dispatch_program(ShellMessage::Asmr(AsmrMessage::AddWork));
+                    cx.dispatch_program_all(ShellMessage::Asmr(AsmrMessage::AddWork));
                 }),
                 widget(Button::new("随机").kind(ButtonKind::Ghost).disabled(!audio)).key("inspect-asmr-random").on_cx(|_, _: &Activate, cx| {
-                    cx.dispatch_program(ShellMessage::Asmr(AsmrMessage::AddRandom));
+                    cx.dispatch_program_all(ShellMessage::Asmr(AsmrMessage::AddRandom));
                 }),
                 widget(Button::new("清空").kind(ButtonKind::Ghost).disabled(items.is_empty())).key("inspect-asmr-clear").on_cx(|_, _: &Activate, cx| {
-                    cx.dispatch_program(ShellMessage::Asmr(AsmrMessage::ClearPlaylist));
+                    cx.dispatch_program_all(ShellMessage::Asmr(AsmrMessage::ClearPlaylist));
                 }),
             ))
             .into_any(),
@@ -312,7 +312,7 @@ fn playlist_card(model: &ShellViewModel, custom: &BTreeMap<String, String>) -> O
             rows.push(
                 widget(Button::new(if active { format!("当前 {label}") } else { label }).kind(ButtonKind::Ghost))
                     .key(format!("inspect-asmr-playlist-{path}"))
-                    .on_cx(move |_, _: &Activate, cx| cx.dispatch_program(ShellMessage::Asmr(AsmrMessage::Open(path.clone()))))
+                    .on_cx(move |_, _: &Activate, cx| cx.dispatch_program_all(ShellMessage::Asmr(AsmrMessage::Open(path.clone()))))
                     .into_any(),
             );
         }

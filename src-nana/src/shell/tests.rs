@@ -155,3 +155,30 @@
         assert_eq!(model.selected_playlist_id.as_deref(), Some("pl"));
         assert_eq!(model.detail, "早晨 · 0 个项目");
     }
+
+    /// 壳层视图只发一种 `ShellMessage`，`dispatch_program` 同帧同类型只留最后一条，会吞掉操作。
+    /// 所有视图一律用 `dispatch_program_all`。
+    #[test]
+    fn views_never_use_the_coalescing_dispatch() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut pending = vec![root];
+        let mut offenders = Vec::new();
+        while let Some(dir) = pending.pop() {
+            for entry in std::fs::read_dir(&dir).expect("读源码目录") {
+                let path = entry.expect("读目录项").path();
+                if path.is_dir() {
+                    pending.push(path);
+                } else if path.extension().is_some_and(|ext| ext == "rs") {
+                    let text = std::fs::read_to_string(&path).expect("读源码");
+                    let needle = concat!(".dispatch_program", "(");
+                    offenders.extend(
+                        text.lines()
+                            .enumerate()
+                            .filter(|(_, line)| line.contains(needle))
+                            .map(|(index, _)| format!("{}:{}", path.display(), index + 1)),
+                    );
+                }
+            }
+        }
+        assert!(offenders.is_empty(), "改用 dispatch_program_all：{offenders:?}");
+    }
