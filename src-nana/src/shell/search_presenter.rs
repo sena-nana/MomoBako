@@ -13,8 +13,7 @@ use super::super::inspect::SearchRow;
 use super::super::inspect_shortcuts::{matches_entry, SearchShortcut};
 use super::super::ShellViewModel;
 
-#[path = "search_collate.rs"]
-mod collate;
+use super::super::search_collate as collate;
 
 /// 评分芯片「1 星+」到「5 星+」。
 pub(crate) const RATING_OPTIONS: [u8; 5] = [1, 2, 3, 4, 5];

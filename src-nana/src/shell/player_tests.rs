@@ -869,3 +869,20 @@ fn acceptance_pages_use_the_player_surface() {
 
 #[path = "player_wav_tests.rs"]
 mod wav;
+
+/// 新建播放集默认选的播放类型：照 Vue `listRegisteredPlaylistPlayers` 按名称的 zh-CN 顺序排
+/// （拼音：视频 < 图片 < 音频），取第一项。宿主给的顺序不算数。
+#[cfg(windows)]
+#[test]
+fn playlist_players_follow_the_vue_name_order() {
+    let mut model = shell(true);
+    let player = |id: &str, label: &str| PlaylistPlayerContribution { label: label.into(), ..contribution(id, id, &[]) };
+    model.reduce(ShellMessage::PlaylistPlayersLoaded(Ok(vec![
+        player("image", "图片幻灯片"),
+        player("audio", "音频顺序播放"),
+        player("video", "视频顺序播放"),
+    ])));
+    let order = model.playlist_players.iter().map(|player| player.player_type_id.as_str()).collect::<Vec<_>>();
+    assert_eq!(order, ["video", "image", "audio"]);
+    assert_eq!(model.selected_new_playlist_player_type_id.as_deref(), Some("video"));
+}

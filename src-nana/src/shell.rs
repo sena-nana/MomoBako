@@ -31,6 +31,7 @@ mod inspect_asmr;
 mod inspect_view;
 mod inspect_metadata_view;
 mod inspect_search_view;
+pub(crate) mod search_collate;
 pub(crate) mod audio_decode;
 pub(crate) mod player;
 pub(crate) mod admin;
@@ -639,7 +640,11 @@ impl ShellViewModel {
                 self.page = ShellPage::Error;
                 self.detail = format!("无法读取播放列表：{error}");
             }
-            ShellMessage::PlaylistPlayersLoaded(Ok(players)) => {
+            ShellMessage::PlaylistPlayersLoaded(Ok(mut players)) => {
+                // 照 Vue `listRegisteredPlaylistPlayers` 按名称的 zh-CN 顺序排，新建播放集默认选第一项。
+                players.sort_by(|left, right| {
+                    search_collate::compare_zh(&left.label, &right.label).then_with(|| left.player_type_id.cmp(&right.player_type_id))
+                });
                 self.playlist_players = players;
                 if self.selected_new_playlist_player_type_id.is_none() {
                     self.selected_new_playlist_player_type_id = self
