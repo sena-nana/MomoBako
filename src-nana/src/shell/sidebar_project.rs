@@ -3,19 +3,21 @@
 //! [`SidebarView`] 是从 ViewModel 算出的侧栏要显示的全部东西，文案和列表都按显示的样子算好。
 //! [`SidebarSignals`] 按「谁一起变、谁读它」拆开：仓库头、导航、快捷访问、三个分组的头部和底部入口
 //! 各是一个信号；播放集、文件夹树和智能文件夹树的行放进按键对照的 Store，改一行只重跑读这一行的
-//! 绑定。同步时只写变了的信号；列表只删掉没了的行、插入新行、整行改写内容变了的行，顺序变了再排。
+//! 绑定。同步时只写变了的信号；列表经 `row_sync::sync_rows` 只删掉没了的行、插入新行、整行改写内容变了
+//! 的行，顺序变了再排。
 
-use std::collections::{HashMap, HashSet};
-use std::hash::Hash;
+use nana_ui::runtime::view::{signal, store, Signal, Store};
 
-use nana_ui::runtime::view::{signal, store, Signal, Store, StoreList, StorePath};
-
+use super::super::row_sync::sync_rows;
 use super::super::sidebar::{SidebarFolder, SidebarSmartFolder};
+use super::super::status::StatusLine;
 use super::super::{LibraryCategory, ShellPage, ShellViewModel, WorkspacePanel};
 
 /// 侧栏要显示的东西。
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct SidebarView {
+    /// 顶部的全局状态区：最近一次失败，或者忙碌行。
+    pub status: StatusLine,
     pub head: HeadView,
     pub nav: NavView,
     pub quick: Vec<QuickRow>,
@@ -28,13 +30,11 @@ pub(crate) struct SidebarView {
     pub footer: FooterView,
 }
 
-/// 仓库头和顶部错误条，以及文件夹分组在不在。
+/// 仓库头，以及文件夹分组在不在。
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct HeadView {
     /// 仓库头的名字，没有仓库时是「无资源库」。
     pub name: String,
-    /// 目录树或智能文件夹读取失败时的错误，先看目录树；空时不显示错误条。
-    pub error: String,
     /// 虚拟条目来源没有真实目录，不显示文件夹分组（Vue `showFolderSidebar`）。
     pub folders_visible: bool,
 }
@@ -171,13 +171,9 @@ impl SidebarView {
         let trash = panel == WorkspacePanel::Trash || sidebar.browsing_trash;
         let loading = sidebar.tree_loading;
         Self {
+            status: StatusLine::project(model),
             head: HeadView {
                 name: repository.map(|item| item.name.clone()).unwrap_or_else(|| "无资源库".into()),
-                error: [&sidebar.tree_error, &sidebar.smart_error]
-                    .into_iter()
-                    .find(|error| !error.is_empty())
-                    .cloned()
-                    .unwrap_or_default(),
                 folders_visible: repository
                     .is_none_or(|item| !item.capabilities.iter().any(|capability| capability == "virtual-entries")),
             },
@@ -371,6 +367,7 @@ pub(crate) fn smart_key(row: &SmartRow) -> (String, u16, bool) {
 /// 常驻侧栏的信号。句柄是 `Copy` 的 id，值在骨架的挂载作用域里，侧栏整块重挂（收起再展开）时不重建。
 #[derive(Clone, Copy)]
 pub(crate) struct SidebarSignals {
+    pub status: Signal<StatusLine>,
     pub head: Signal<HeadView>,
     pub nav: Signal<NavView>,
     pub quick: Signal<Vec<QuickRow>>,
@@ -387,6 +384,7 @@ impl SidebarSignals {
     /// 在当前作用域里建信号，初值是 `view`。只在骨架的挂载闭包里调用。
     pub(crate) fn new(view: SidebarView) -> Self {
         Self {
+            status: signal(view.status),
             head: signal(view.head),
             nav: signal(view.nav),
             quick: signal(view.quick),
@@ -411,6 +409,7 @@ impl SidebarSignals {
             eprintln!("Nana 侧栏信号已随骨架回收，跳过写入");
             return;
         }
+        self.status.try_set_if_changed(view.status);
         self.head.try_set_if_changed(view.head);
         self.nav.try_set_if_changed(view.nav);
         self.quick.try_set_if_changed(view.quick);
@@ -421,43 +420,6 @@ impl SidebarSignals {
         self.smart.try_set_if_changed(view.smart);
         sync_rows(self.smart_rows, smart_key, view.smart_rows);
         self.footer.try_set_if_changed(view.footer);
-    }
-}
-
-/// 把 `rows` 写进按 `key` 对照的 Store 列表。侧栏的三份列表和播放集页的条目共用。
-///
-/// 算法：键重复的只留第一行；和现在的列表相同就什么都不写。否则先删掉新列表里没有的行，再按新顺序
-/// 把没有的行插到它的位置上，已有的行内容变了才整行改写（只重跑读这一行的绑定）；最后顺序和新列表
-/// 不同时按新位置排一次。删、插、排都只触发列表本身，已有的行一个绑定都不重跑。
-/// 只在同步时调用（不在副作用里），读列表不会建立依赖。
-pub(crate) fn sync_rows<T, K>(list: Store<Vec<T>>, key: fn(&T) -> K, rows: Vec<T>)
-where
-    T: Clone + PartialEq + 'static,
-    K: Hash + Eq + Clone + 'static,
-{
-    let mut seen = HashSet::with_capacity(rows.len());
-    let rows = rows.into_iter().filter(|row| seen.insert(key(row))).collect::<Vec<_>>();
-    if list.with(|current| *current == rows) {
-        return;
-    }
-    let current = list.get_untracked();
-    let old = current.iter().map(|row| (key(row), row)).collect::<HashMap<_, _>>();
-    if current.iter().any(|row| !seen.contains(&key(row))) {
-        list.retain(|row| seen.contains(&key(row)));
-    }
-    let keyed = list.keyed(key);
-    for (index, row) in rows.iter().enumerate() {
-        let id = key(row);
-        match old.get(&id) {
-            None => list.insert(index, row.clone()),
-            Some(previous) if *previous != row => keyed.at(&id).set(row.clone()),
-            Some(_) => {}
-        }
-    }
-    let order = rows.iter().map(key).collect::<Vec<_>>();
-    if list.with(|items| items.iter().map(key).ne(order.iter().cloned())) {
-        let position = order.into_iter().enumerate().map(|(index, id)| (id, index)).collect::<HashMap<_, _>>();
-        list.sort_by_key(|row| position.get(&key(row)).copied().unwrap_or(usize::MAX));
     }
 }
 

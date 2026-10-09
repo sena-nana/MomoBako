@@ -6,27 +6,23 @@
 
 use std::cell::RefCell;
 
+use crate::shell::status::FailureSource;
 use crate::shell::ShellViewModel;
 
 thread_local! {
     static RESULT: RefCell<Option<Result<(), String>>> = const { RefCell::new(None) };
 }
 
-/// 把上一次系统拖放的结果写回壳层。成功不写失败文案。
+/// 把上一次系统拖放的结果写回壳层。失败写进状态区；拖出开始时状态区已经清掉了上一次失败，成功不用再清。
 pub fn apply_result(shell: &mut ShellViewModel) {
     let Some(result) = RESULT.with(|slot| slot.borrow_mut().take()) else {
         return;
     };
     match result {
-        Ok(()) => {
-            shell.input.external_drag_result = Some(true);
-            if shell.input.error.starts_with("拖出失败：") {
-                shell.input.error.clear();
-            }
-        }
+        Ok(()) => shell.input.external_drag_result = Some(true),
         Err(error) => {
             eprintln!("Nana 文件拖出失败：{error}");
-            shell.input.error = format!("拖出失败：{error}");
+            shell.status.fail(FailureSource::Host, format!("拖出失败：{error}"));
             shell.input.external_drag_result = Some(false);
         }
     }
@@ -92,16 +88,24 @@ mod tests {
         assert_eq!(file_list(&["C:\\a.png".into()]).unwrap().len(), 1);
     }
 
+    /// 失败写进状态区；成功只记结果，上一次失败由下一次拖出开始时清掉。
     #[test]
-    fn apply_result_writes_failure_and_clears_it_after_success() {
+    fn apply_result_records_failures_in_the_status_area() {
         RESULT.with(|slot| *slot.borrow_mut() = Some(Err("OLE".into())));
         let mut shell = ShellViewModel::default();
         apply_result(&mut shell);
-        assert_eq!(shell.input.error, "拖出失败：OLE");
+        let failure = shell.status.failure().expect("拖出失败要进状态区");
+        assert_eq!((failure.source, failure.message.as_str()), (FailureSource::Host, "拖出失败：OLE"));
         assert_eq!(shell.input.external_drag_result, Some(false));
         RESULT.with(|slot| *slot.borrow_mut() = Some(Ok(())));
         apply_result(&mut shell);
-        assert!(shell.input.error.is_empty());
         assert_eq!(shell.input.external_drag_result, Some(true));
+        shell.reduce(crate::shell::ShellMessage::Input(crate::shell::input::InputMessage::StartExternalDrag {
+            paths: vec!["C:\\repo\\a.png".into()],
+            trash: false,
+            backend_kind: "filesystem".into(),
+            repo_root: "C:\\repo".into(),
+        }));
+        assert!(shell.status.failure().is_none(), "拖出开始时清掉上一次失败");
     }
 }

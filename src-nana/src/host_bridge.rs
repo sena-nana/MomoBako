@@ -6,6 +6,7 @@
 use std::process::Command;
 
 use crate::host_api::{ExternalOpenRequest, HostInputRequest, HostRequest};
+use crate::shell::status::FailureSource;
 use crate::shell::ShellViewModel;
 
 #[cfg(test)]
@@ -64,26 +65,24 @@ pub fn perform(
             HostRequest::OpenExternal(ExternalOpenRequest { target, reveal }) => {
                 if let Err(error) = open(&target, reveal) {
                     eprintln!("Nana 外部打开失败：{target}：{error}");
-                    shell.input.error = if reveal {
-                        format!("定位失败：{error}")
-                    } else {
-                        format!("打开失败：{error}")
-                    };
+                    let what = if reveal { "定位失败" } else { "打开失败" };
+                    shell.status.fail(FailureSource::Host, format!("{what}：{error}"));
                 }
             }
             HostRequest::Input(HostInputRequest::DragOut { paths }) => {
                 if let Err(error) = drag(&paths) {
                     eprintln!("Nana 文件拖出失败：{error}");
-                    shell.input.error = format!("拖出失败：{error}");
+                    shell.status.fail(FailureSource::Host, format!("拖出失败：{error}"));
                     shell.input.external_drag_result = Some(false);
                 }
             }
             HostRequest::Input(HostInputRequest::MinimizeToTray) => {
-                if let Err(error) = hide_to_tray() {
-                    eprintln!("Nana 最小化到托盘失败：{error}");
-                    shell.input.notice = format!("最小化到托盘失败：{error}");
-                } else {
-                    shell.input.notice.clear();
+                match hide_to_tray() {
+                    Ok(()) => shell.status.resolve(FailureSource::Tray),
+                    Err(error) => {
+                        eprintln!("Nana 最小化到托盘失败：{error}");
+                        shell.status.fail(FailureSource::Tray, format!("最小化到托盘失败：{error}"));
+                    }
                 }
             }
             other => kept.push(other),
@@ -162,7 +161,13 @@ fn reveal_command(target: &str) -> Command {
 mod tests {
     use super::*;
     use crate::shell::input::InputMessage;
-    use crate::shell::ShellMessage;
+    use crate::shell::status::FailureSource;
+    use crate::shell::{ShellMessage, ShellViewModel};
+
+    /// 状态区现在的失败：来源和文案。
+    fn failure(model: &ShellViewModel) -> Option<(FailureSource, &str)> {
+        model.status.failure().map(|failure| (failure.source, failure.message.as_str()))
+    }
 
     #[test]
     fn perform_opens_and_reveals_without_spawning() {
@@ -186,7 +191,7 @@ mod tests {
             || Ok(()),
         );
         assert_eq!(seen, [("C:\\a.png".into(), false), ("C:\\a.png".into(), true)]);
-        assert!(model.input.error.is_empty());
+        assert_eq!(failure(&model), None);
         assert!(model.input.host_requests.is_empty());
         assert!(copy_text("token"));
         COPIED.with(|slot| assert_eq!(slot.borrow().as_deref(), Some("token")));
@@ -199,7 +204,9 @@ mod tests {
             absolute_path: "C:\\missing.png".into(),
         }));
         perform(&mut model, |_, _| Err("spawn failed".into()), |_| Ok(()), || Ok(()));
-        assert_eq!(model.input.error, "定位失败：spawn failed");
+        assert_eq!(failure(&model), Some((FailureSource::Host, "定位失败：spawn failed")));
+        model.reduce(ShellMessage::Input(InputMessage::RevealEntry { absolute_path: "C:\\b.png".into() }));
+        assert_eq!(failure(&model), None, "下一次定位开始时清掉上一次失败");
     }
 
     #[test]
@@ -212,7 +219,7 @@ mod tests {
             repo_root: "C:\\repo".into(),
         }));
         perform(&mut model, |_, _| Ok(()), |_| Err("OLE".into()), || Ok(()));
-        assert_eq!(model.input.error, "拖出失败：OLE");
+        assert_eq!(failure(&model), Some((FailureSource::Host, "拖出失败：OLE")));
         assert_eq!(model.input.external_drag_result, Some(false));
         assert!(model.input.host_requests.is_empty());
 
@@ -222,20 +229,21 @@ mod tests {
             backend_kind: "filesystem".into(),
             repo_root: "C:\\repo".into(),
         }));
-        model.input.error.clear();
+        assert_eq!(failure(&model), None, "拖出开始时清掉上一次失败");
         perform(&mut model, |_, _| Ok(()), |_| Ok(()), || Ok(()));
-        assert!(model.input.error.is_empty());
+        assert_eq!(failure(&model), None);
         assert!(model.input.host_requests.is_empty());
 
         model.settings.close_behavior = "minimizeToTray".into();
         model.reduce(crate::shell::ShellMessage::WindowAction(crate::shell::WindowAction::Close));
         perform(&mut model, |_, _| Ok(()), |_| Ok(()), || Err("系统托盘没有建起来".into()));
-        assert_eq!(model.input.notice, "最小化到托盘失败：系统托盘没有建起来");
+        assert_eq!(failure(&model), Some((FailureSource::Tray, "最小化到托盘失败：系统托盘没有建起来")));
+        assert!(model.input.notice.is_empty(), "关闭确认框的文案不再借来写托盘失败");
         assert!(model.input.take_platform_commands(nana_ui_platform::WindowId(1), false).is_empty());
 
         model.reduce(crate::shell::ShellMessage::WindowAction(crate::shell::WindowAction::Close));
         perform(&mut model, |_, _| Ok(()), |_| Ok(()), || Ok(()));
-        assert!(model.input.notice.is_empty());
+        assert_eq!(failure(&model), None, "收进托盘成功以后托盘失败作废");
         assert!(model.input.take_platform_commands(nana_ui_platform::WindowId(1), false).is_empty());
     }
 }

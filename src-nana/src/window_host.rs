@@ -55,6 +55,10 @@ pub(crate) fn prepare_motion(shell: &mut ShellViewModel, view: Option<&mut Shell
     }
     let tracking = crate::shell::observe_live_pointer(shell, &window.document);
     shell.stage_browses();
+    // 拖出结果这类归约以外写下的失败收进状态区，状态区变了要整体同步。
+    if shell.observe_failures() {
+        shell.mark_surface_dirty();
+    }
     if shell.motion.active() {
         shell.motion.advance(shell.motion.now_ms().saturating_add(16));
     }

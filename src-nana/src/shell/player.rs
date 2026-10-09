@@ -182,6 +182,8 @@ pub struct PlayerState {
     restore_playlist_id: Option<String>,
     stored: BTreeMap<String, StoredSession>,
     effects: Vec<PlayerEffect>,
+    /// 没有就近显示的失败（播放控制、播放集成员），归约结束时交给状态区。
+    failures: Vec<String>,
     wav: wav_player::WavPlayer,
     /// 预览页刚接管当前项时是它的路径；离开预览页后清空，临时条目留作当前项。
     preview_path: String,
@@ -232,6 +234,7 @@ impl Default for PlayerState {
             restore_playlist_id: None,
             stored: BTreeMap::new(),
             effects: Vec::new(),
+            failures: Vec::new(),
             wav: wav_player::WavPlayer::default(),
             preview_path: String::new(),
             clip_frames: None,
@@ -248,6 +251,17 @@ impl Default for PlayerState {
 impl PlayerState {
     pub fn take_effects(&mut self) -> Vec<PlayerEffect> {
         std::mem::take(&mut self.effects)
+    }
+
+    /// 记下一次没有就近显示的失败：活动文案写原因，失败排着等状态区取走。
+    pub(super) fn note_failure(&mut self, message: String) {
+        self.activity = message.clone();
+        self.failures.push(message);
+    }
+
+    /// 取走排着的失败。
+    pub(crate) fn take_failures(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.failures)
     }
 
     /// 取走后没有处理的副作用放回队首，顺序不变。
@@ -535,7 +549,7 @@ impl PlayerState {
         self.session = session;
         if let Some(error) = error {
             eprintln!("Nana 播放控制失败：{error}");
-            self.activity = error;
+            self.note_failure(format!("播放控制失败：{error}"));
         }
         self.can_play = self.session.status != "failed" && self.current_item().is_some();
         self.persist_if_needed();
