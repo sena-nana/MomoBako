@@ -1,16 +1,15 @@
-//! 播放列表成员、按路径加入、排序和下载进度。
+//! 播放列表成员、按路径加入和排序。
 //!
 //! 这些只改播放器状态并留下副作用请求，真正的读写由 `player_dispatch` 交给仓库服务。
 
 use std::collections::BTreeMap;
 
 use crate::backend::services::repository::{
-    DownloaderPlaylistProgressEvent, DownloaderPlaylistRequest, PlaylistItemsByPathsAddRequest, PlaylistItemsOrderRequest,
-    PlaylistMembershipRequest, PlaylistMembershipSnapshot,
+    PlaylistItemsByPathsAddRequest, PlaylistItemsOrderRequest, PlaylistMembershipRequest, PlaylistMembershipSnapshot,
 };
 
 use super::support::{compatible_playlist_ids, membership_can_toggle, next_membership_ids, reorder_before};
-use super::{DownloadProgress, MembershipAction, PlayerEffect, PlayerState};
+use super::{MembershipAction, PlayerEffect, PlayerState};
 
 impl PlayerState {
     pub fn membership_actions(&self, kind: &str, extension: &str, asset_id: &str, is_virtual: bool) -> Vec<MembershipAction> {
@@ -25,26 +24,6 @@ impl PlayerState {
                 Some(MembershipAction { playlist_id, label, checked, toggle })
             })
             .collect()
-    }
-
-    pub fn download_indeterminate(&self) -> bool {
-        self.download.phase == "submitting" && self.download.total == 0
-    }
-
-    pub fn download_text(&self) -> String {
-        match self.download.phase.as_str() {
-            "idle" | "" => String::new(),
-            "submitting" => "正在提交播放列表下载…".into(),
-            "start" | "track" => format!(
-                "正在下载 {} / {}，失败 {}",
-                self.download.completed,
-                self.download.total,
-                self.download.failed
-            ),
-            "complete" => format!("下载完成，成功 {}，失败 {}", self.download.completed, self.download.failed),
-            "error" => self.download.error.clone().unwrap_or_else(|| "播放列表下载失败".into()),
-            other => format!("下载 {other}"),
-        }
     }
 
     pub(super) fn toggle_membership(
@@ -122,54 +101,6 @@ impl PlayerState {
                 eprintln!("Nana 更新播放列表成员失败：{error}");
                 self.note_failure(format!("更新播放集成员失败：{error}"));
             }
-        }
-    }
-
-    pub(super) fn start_download(&mut self, request: DownloaderPlaylistRequest) {
-        self.download_playlist_id = Some(request.playlist_id);
-        self.download = DownloadProgress { phase: "submitting".into(), ..DownloadProgress::default() };
-        self.activity = "正在提交播放列表下载…".into();
-        self.effects.push(PlayerEffect::Download(request));
-    }
-
-    pub(super) fn finish_download(&mut self, result: Result<(serde_json::Value, Vec<serde_json::Value>), String>) {
-        match result {
-            Ok((_output, events)) => {
-                for event in events {
-                    match serde_json::from_value::<DownloaderPlaylistProgressEvent>(event) {
-                        Ok(event) => self.apply_download(event),
-                        Err(error) => eprintln!("Nana 播放列表下载进度无法解析：{error}"),
-                    }
-                }
-                if self.download.phase == "submitting" {
-                    self.download.phase = "complete".into();
-                    self.download_playlist_id = None;
-                }
-                self.activity = self.download_text();
-            }
-            Err(error) => {
-                eprintln!("Nana 播放列表下载失败：{error}");
-                self.download.phase = "error".into();
-                self.download.error = Some(error.clone());
-                self.download_playlist_id = None;
-                self.activity = error;
-            }
-        }
-    }
-
-    pub(super) fn apply_download(&mut self, event: DownloaderPlaylistProgressEvent) {
-        if self.download_playlist_id != Some(event.playlist_id) {
-            eprintln!("Nana 忽略过期的播放列表下载进度：{}", event.playlist_id);
-            return;
-        }
-        self.download.phase = event.phase.clone();
-        self.download.total = event.total;
-        self.download.completed = event.completed;
-        self.download.failed = event.failed;
-        self.download.current_song_name = event.current_song_name;
-        self.download.error = event.error;
-        if event.phase == "complete" {
-            self.download_playlist_id = None;
         }
     }
 

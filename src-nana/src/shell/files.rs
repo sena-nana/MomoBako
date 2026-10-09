@@ -192,7 +192,7 @@ impl DisplayMode {
     }
 }
 
-/// 点击行时使用的选择方式。Nana 点击没有修饰键，所以由按钮显式指定。
+/// 点击行时的选择方式，由点下去时按着的修饰键决定（`input::HeldModifiers`）。
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum SelectionMode {
     #[default]
@@ -201,26 +201,14 @@ pub enum SelectionMode {
     Range,
 }
 
-impl SelectionMode {
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Replace => "替换",
-            Self::Toggle => "切换",
-            Self::Range => "范围",
-        }
-    }
-}
-
 /// 文件表面的对话框。删除不弹框，回收站和普通删除只用请求里的 mode 区分。
+/// 建文件走工具栏输入框，新建文件夹走侧栏文件夹对话框，移动走拖放，都不在这里。
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum FileDialog {
     #[default]
     Closed,
-    CreateDirectory,
-    CreateFile,
     Rename,
     Copy,
-    Move,
     Import,
     ImportArchive,
     ImportEagle,
@@ -310,7 +298,7 @@ pub enum FilesEffect {
 #[derive(Clone, Debug)]
 pub enum FilesMessage {
     SetDisplayMode(DisplayMode),
-    SetSelectionMode(SelectionMode),
+    /// 单击一行。选择方式按点下去时的修饰键：Shift 范围、Ctrl / Meta 切换，否则替换。
     ActivateRow(String),
     /// 双击：目录进入，文件打开预览。
     OpenRow(String),
@@ -398,7 +386,6 @@ pub struct FilesState {
     pub(super) selected: Vec<String>,
     pub(super) primary: Option<String>,
     pub(super) anchor: Option<String>,
-    pub(super) selection_mode: SelectionMode,
     pub(super) dialog: FileDialog,
     /// 导出对话框。默认关闭，首页不提供入口。
     pub(super) export: ExportDraft,
@@ -406,7 +393,7 @@ pub struct FilesState {
     prefetch_due_ms: Option<u64>,
     prefetch_clock: u64,
     pub(super) name_draft: String,
-    /// 工具栏里的新建文件名。不占用对话框草稿。
+    /// 工具栏里的新建文件名。不占用对话框草稿，建成以后才清空（Vue `handleCreateFile`）。
     pub(super) create_name: String,
     pub(super) target_draft: String,
     pub(super) import_draft: String,
@@ -768,11 +755,8 @@ impl FilesState {
                 self.display_mode = mode;
                 self.effects.push(FilesEffect::PersistDisplayMode);
             }
-            FilesMessage::SetSelectionMode(mode) => self.selection_mode = mode,
             FilesMessage::ActivateRow(path) => {
-                if self.select_row(ctx, &path) {
-                    self.note_selected_only(&path);
-                }
+                self.activate_row(ctx, &path, SelectionMode::Replace);
             }
             FilesMessage::OpenRow(path) => {
                 self.select_only = None;
@@ -984,3 +968,6 @@ mod mount_tests;
 #[cfg(test)]
 #[path = "files_virtual_tests.rs"]
 mod virtual_tests;
+#[cfg(test)]
+#[path = "files_select_tests.rs"]
+mod select_tests;

@@ -113,7 +113,6 @@ pub enum AdminMessage {
     ExportExternal,
     CompleteExport(Option<String>),
     WriteFinished(Result<(), String>),
-    SelectRepository(String),
     SetAudioPlayer(Option<String>),
     ToggleLogLevel(String),
     ToggleLogKind(String),
@@ -125,10 +124,8 @@ pub enum AdminMessage {
     /// 展开或收起一条日志的上下文。
     ToggleLogContext(String),
     ToggleTaskPopover,
+    /// 弹层头部的关闭按钮和弹层外的点击层。Escape 走全局的 [`crate::shell::escape_layer`]。
     CloseTaskPopover,
-    TaskEscape,
-    TaskOutside { inside: bool },
-    TaskUnmount,
     SetOperation(Option<OperationProgress>),
     SelectAction(String),
     RunAction(Option<String>),

@@ -588,17 +588,14 @@ fn task_popover_merges_repository_operation_and_closes() {
     let rows = model.task_rows();
     assert_eq!((rows[0].id.as_str(), rows[0].source.as_str()), ("workspace-operation", "资源库"));
     assert_eq!((rows[1].id.as_str(), rows[1].source.as_str(), rows[1].detail.as_str()), ("task-1", "任务", "scanning"));
+    // 弹层外的点击层和关闭按钮发 `CloseTaskPopover`；Escape 走全局那一条，关最上面一层。
     send(&mut model, AdminMessage::ToggleTaskPopover);
     assert!(model.admin.popover_open);
-    send(&mut model, AdminMessage::TaskOutside { inside: true });
-    assert!(model.admin.popover_open);
-    send(&mut model, AdminMessage::TaskOutside { inside: false });
+    send(&mut model, AdminMessage::CloseTaskPopover);
     assert!(!model.admin.popover_open);
     send(&mut model, AdminMessage::ToggleTaskPopover);
-    send(&mut model, AdminMessage::TaskEscape);
-    assert!(!model.admin.popover_open);
-    send(&mut model, AdminMessage::ToggleTaskPopover);
-    send(&mut model, AdminMessage::TaskUnmount);
+    assert!(crate::shell::escape_layer(&model).is_some(), "任务弹层是 Escape 能关的一层");
+    model.reduce(ShellMessage::Sidebar(crate::shell::SidebarMessage::Gap(crate::shell::GapMessage::Escape)));
     assert!(!model.admin.popover_open);
     model.admin.operation = None;
     model.task_progress.clear();

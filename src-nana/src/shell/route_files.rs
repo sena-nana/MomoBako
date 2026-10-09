@@ -58,12 +58,12 @@ pub(super) fn islands(signals: FilesRouteSignals) -> Vec<Island> {
 
 /// 工作台左列底下的播放条：预览页打开时由预览页自己放。
 fn workbench_player(model: &ShellViewModel) -> Option<AnyView> {
-    (!files_view::previewing(model) && model.player_surface_visible()).then(|| super::player_view::hosted_bar(model))
+    (!files_view::previewing(model) && model.player_surface_visible()).then(|| super::player_view::bar::player_bar(model))
 }
 
 /// 预览页底部的播放条。
 fn preview_player(model: &ShellViewModel) -> Option<AnyView> {
-    files_view::previewing(model).then(|| super::player_view::hosted_bar(model))
+    files_view::previewing(model).then(|| super::player_view::bar::player_bar(model))
 }
 
 /// 文件路由的分支：首页外框（左右 24、上下 20），常驻筛选栏在上，下面是固定高度的主体。

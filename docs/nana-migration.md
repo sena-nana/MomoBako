@@ -55,7 +55,7 @@ yarn tauri:dev               # Vue/Tauri 对照窗口，先构建、打包并暂
 
 - **启动**：四步依次读资源库列表、同步仓库（`PROTOCOL_REPOSITORY_SYNC`）、读仓库摘要、读首屏目录；缺失仓库和空列表不进同步。失败停在当前步，保留已完成的步骤，给「重试」；启动页显示最近 8 条加载日志。见 `workspace.rs`、`workspace_startup.rs`、`route_startup.rs`。
 - **侧栏**：仓库切换弹层（切换、添加资源库、删除当前资源库）；快捷方式（全部、未分类、未标签、最近使用、回收站）带计数，以及快捷访问；文件夹树和智能文件夹树是按显示顺序展开的扁平行，文件夹悬停 450 ms 打开；文件夹新建、重命名、删除，智能文件夹新建、编辑、删除，播放集新建、打开、播放、删除（新建对话框的类型和「播放」能不能点看读回的播放器类型）；「刷新文件夹树」同步整个仓库再重读（`tree_sync.rs`、`src-nana/src/sync_dispatch.rs`）；顶部的全局状态区显示没有就近显示的失败、读取中和同步进度（`status.rs`）；折叠和宽度（220–480，默认 276）写进 `sidebar.json`；启动和换仓库绑定侧栏时照 Vue 在后台读仓库动作和硬链接候选，有仓库动作时多一个「动作」入口，有没确认的硬链接候选时弹出确认。见 `sidebar*.rs`、`view_part_sidebar.rs`。
-- **文件**：文件页用 `each_virtual` 按视口建行，列表、网格、自适应、瀑布流四种展示写进 `file-display.json`。单击选中，右侧详情看元数据；双击或右键「预览」进预览页。工具栏有「建文件」和导入（文件夹、ZIP、Eagle 复制或剪切），回收站里有「还原所有项目」「清空回收站」；右键菜单有预览、打开、定位、还原、复制到、加入播放列表、缩略图（刷新、自定义）、重命名、删除和来源插件的条目动作（`entry_actions.rs`）；条目可以拖进文件夹移动，可以框选；有硬链接候选时弹出确认。仓库导出对话框能提交压缩包和 Git 导出，和 Vue 一样首页没有入口。见 `route_files.rs`、`files_*.rs`。
+- **文件**：文件页用 `each_virtual` 按视口建行，列表、网格、自适应、瀑布流四种展示写进 `file-display.json`。单击选中，Shift 单击从锚点选一段，Ctrl / Meta 单击切换（Vue `selectionModeFromEvent`；修饰键由宿主在输入路由完以后记下，`window_host::note_modifiers`），右侧详情跟着主选中项看元数据；双击或右键「预览」进预览页。工具栏有「建文件」和导入（文件夹、ZIP、Eagle 复制或剪切），回收站里有「还原所有项目」「清空回收站」；右键菜单有预览、打开、定位、还原、复制到、加入播放列表、缩略图（刷新、自定义）、重命名、删除和来源插件的条目动作（`entry_actions.rs`）；条目可以拖进文件夹移动，可以框选（按下时按着 Ctrl / Meta 并进原来的选择）；有硬链接候选时弹出确认。仓库导出对话框能提交压缩包和 Git 导出，和 Vue 一样首页没有入口。见 `route_files.rs`、`files_*.rs`。
 - **预览**：预览页按扩展名分派（`inspect_support.rs`）。图片在产品窗口里经宿主纹理槽 `file-preview` 用 `GpuTextureView` 显示；文本和 Markdown 都按等宽原文显示前 768 KiB；WAV 用自有解析，MP3、FLAC、Ogg 用 symphonia，Windows 上 M4A、AAC、Opus 和其余视频容器用媒体基础（`video_mf.rs`），未压缩和 MJPEG 的 AVI 用纯 Rust（`video_avi.rs`），视频画面进同一个纹理槽；压缩包（zip、cbz、7z、rar、cbr）最多列 200 条；PDF 按内容流画页、可翻页；Office 的 Open XML 和 OLE 文件抽文本；OBJ、glTF、GLB、STL、3MF、VRM 能取出三角形时软件光栅、可旋转缩放，FBX、BLEND 只报文件头（`native_preview*.rs`）。PDF 页、模型光栅和图片幻灯片的帧编码成 PNG 画进预览框（`inspect_preview_page.rs`、`inspect_preview_body.rs`）。读不出、解不开时预览框里写失败标题和原因。
 - **元数据**：右侧详情和预览页共用一块元数据编辑：注释、链接、评分和标签可以改，自定义字段只读显示；草稿变脏 260 ms 后自动保存（`update_asset_metadata`，带 `expected_version`），换选前先存上一份，画面上没有保存按钮；版本冲突时保留本地草稿，给「采用服务器版本」。见 `files_detail.rs`、`inspect_metadata_*.rs`、`inspect.rs`。
 - **搜索**：标题栏输入先切到搜索面板（`route_search.rs`），250 ms 后调 `search_assets`；首页筛选栏（格式、标签、颜色、形状、评分和高级条件）常驻在文件、搜索、播放集、日志、拓展和动作页；插件登记的库类型快捷方式（ASMR 等）进筛选栏（`inspect_shortcuts.rs`）；跑完没有命中时写明哪里没有匹配的文件；点结果回到文件页并选中。见 `inspect_search*.rs`、`search_*.rs`。
@@ -63,7 +63,7 @@ yarn tauri:dev               # Vue/Tauri 对照窗口，先构建、打包并暂
 - **设置**：侧栏「设置」和缺失仓库的「打开来源设置」都进设置页（`ShellMessage::OpenSettings`、`admin::open_settings_page`），后者照 Vue `?plugin=` 展开来源插件的设置。设置页有音频播放、外观（主题、圆角，改了立即生效）、仓库服务、外部素材接入（复制连接信息、导出 `external-api.json`）、插件管理、缓存和 API 设计。主题写进 `settings.json`，圆角写进 `corners.json`。见 `route_settings.rs`、`admin_settings_view.rs`。
 - **插件**：启动结束时照 Vue `loadSettingsData` 读一次设置包（插件、钩子记录、缓存、API 设计和外部连接），打开设置页、插件面板「刷新」时再读；插件列表换新以后重读播放器类型（`list_playlist_players`），新建播放集的类型、播放器贡献和插件类型的播放集能不能播都从这里来。插件管理面板（设置页和拓展页都有）分组和搜索，能启停、从压缩包安装（编号 2 的文件对话框）、确认后删除、编辑和重置清单声明的设置字段、打开插件目录；来源插件的扫码登录画二维码（`source_auth_page.rs`）。拓展页的 API Playground、文件导入、Eagle 导入是原生页面。见 `admin_plugin*.rs`、`admin_gap.rs`、`tool_native.rs`、`api_playground*.rs`。
 - **日志**：日志页按级别、来源和关键字筛选，可以暂停追踪、清空；页头、工具条和筛选固定，列表自己滚动（`route_home::home_fixed`、`admin_logs_view.rs`）。每次切到日志面板照 Vue 读最近 200 条历史日志（读的时候手上没有日志就写「正在加载系统日志」），之后经宿主事件合并新记录。
-- **任务**：侧栏底部的「任务」打开任务弹层（`admin_view.rs`），列出当前的仓库操作（如刷新文件夹树）和宿主观察到的运行中任务（排队、运行和取消中，结束就拿掉）；「任务」右上角的计数是弹层的行数，和 Vue 的 `activeTaskCount` 一样。弹层里没有取消按钮，Vue 的 `TaskPopover.vue` 也没有；`ShellMessage::CancelTask` 有派发分支，没有发送方。
+- **任务**：侧栏底部的「任务」打开任务弹层（`admin_view.rs`），列出当前的仓库操作（如刷新文件夹树）和宿主观察到的运行中任务（排队、运行和取消中，结束就拿掉）；「任务」右上角的计数是弹层的行数，和 Vue 的 `activeTaskCount` 一样。弹层里没有取消按钮，Vue 的 `TaskPopover.vue` 也没有；点弹层外面、头部的关闭按钮和 Escape 都关掉它。
 - **宿主操作**：标题栏的最小化、最大化、关闭；关闭行为按设置确认、退出或最小化到托盘（`src-nana/src/window_host.rs`）；托盘在 Windows 上用 `tray-icon`（`src-nana/src/tray.rs`）；主窗口几何下次启动恢复；打开和定位启动系统程序；拖出文件在 Windows 上用 `drag` crate（`src-nana/src/drag_out.rs`）；剪贴板读写系统剪贴板（`src-nana/src/host_bridge.rs`）；文件区和空库页接收系统文件拖入（`input::accept_file_drops`）；Escape 由运行时交给激活的对话框，其余按 `escape_layer` 关最上面一层。
 
 ## 还没做或要靠设备验证的部分
@@ -72,8 +72,8 @@ yarn tauri:dev               # Vue/Tauri 对照窗口，先构建、打包并暂
 
 归约和服务派发已经写好、但产品界面触发不到的路径：
 
-- 播放集下载（`momobako.playlist.download`）的消息在状态机里，没有界面入口。
-- 元数据的撤销和重做、文件的切换和范围选择、筛选的「任一满足」有归约分支，没有界面入口。
+- `ShellMessage::Refresh`（重读资源库列表）有归约和派发，没有发送方，只有测试在用。
+- `ShellMessage::SetSidebarWidth`、`CommitSidebarWidth` 和 `SetLibraryCategory` 没有发送方：侧栏宽度由宿主在准备帧里直接写进工作台（`window_host::sync_sidebar_resize`），分类视图由侧栏快捷方式直接切换。
 
 ### 设备验证和其它
 
