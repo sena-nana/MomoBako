@@ -849,7 +849,7 @@ pub(super) fn reduce_message(model: &mut super::ShellViewModel, message: super::
             let next = if model.inspect.tag_menu_open() {
                 super::inspect::InspectMessage::CloseTagMenu
             } else {
-                super::inspect::InspectMessage::OpenTagMenu { x: 0.0, y: 0.0 }
+                super::inspect::InspectMessage::OpenTagMenu
             };
             return Some(super::ShellMessage::Inspect(next));
         }

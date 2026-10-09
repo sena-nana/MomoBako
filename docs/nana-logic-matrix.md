@@ -112,7 +112,7 @@
 
 搜索面板在启动就绪后、面板是搜索时出现：有仓库是 `RouteKey::Search`，没有资源库是 `EmptySearch`。预览页在 `page == SelectedFile` 且不是单击选中时整块替换文件工作台（`files_view::previewing`，页面在 `inspect_preview_frame.rs`）：双击、右键「预览」，以及从搜索结果或播放集打开的文件会进；单击只选中，右侧 300px 详情卡显示缩略图、事实和元数据。标题栏输入先切到搜索面板，查询在 250 毫秒后才跑；在筛选栏里改条件也切到搜索面板。画面上没有保存按钮：草稿变脏后 260 毫秒自动保存，换选前先写完上一份。版本冲突保留本地草稿和原来的 `expected_version`。生产环境从内置的压缩包、PDF、文档和模型贡献开始。库类型快捷方式在插件加载前是空的；加载后，对象形式的 searchShortcuts，以及 ASMR 官方字符串 id，在当前文件或搜索结果里有该库类型的条目时出现在筛选栏。未知字符串记日志并跳过。后登记的同扩展名预览贡献优先。
 
-标签候选是元数据区里铺开的面板，由「添加标签」和「+」开合，加了标签或按 Escape 关闭；候选取自当前目录各行的标签，按输入过滤，最多 18 个（`inspect_metadata_view.rs`）。`inspect_tags.rs` 里按视口夹取、点外面关闭的标签菜单状态只有测试在用。筛选芯片可以再点一次取消。图片走 `GpuTextureView::new("file-preview")`，没用全窗模态的 `ImageViewer`。资源库扩展认领 `lyricStatus`、`listeningStatus`、`listeningProgress`、`lastListenedAt` 等键，画进「作品信息」区块，有歌词正文键时多一个「歌词」区块（`inspect_library.rs`）；音频舞台右侧是歌词面板，没有正文时写「暂无歌词」（`inspect_audio_stage.rs`）。Vue 库类型注册表本身不进生产树，已经能用筛选数据表达的快捷方式会进筛选栏。
+标签候选是元数据区里铺开的面板，由「添加标签」和「+」开合，加了标签或按 Escape 关闭；候选取自当前目录各行的标签，按输入过滤，最多 18 个（`inspect_metadata_view.rs`）。面板跟着元数据卡片排版，不按坐标定位，也就不按窗口尺寸夹取（`files_mount_tests.rs` 在 960×600 和 800×600 下断言面板落在详情卡片里）；Vue 的浮层菜单点外面会关，Nana 铺开的面板没有接点外面关闭。筛选芯片可以再点一次取消。图片走 `GpuTextureView::new("file-preview")`，没用全窗模态的 `ImageViewer`。资源库扩展认领 `lyricStatus`、`listeningStatus`、`listeningProgress`、`lastListenedAt` 等键，画进「作品信息」区块，有歌词正文键时多一个「歌词」区块（`inspect_library.rs`）；音频舞台右侧是歌词面板，没有正文时写「暂无歌词」（`inspect_audio_stage.rs`）。Vue 库类型注册表本身不进生产树，已经能用筛选数据表达的快捷方式会进筛选栏。
 
 | 来源 | 触发 | 服务 | 结果 | 可见性 | 状态 |
 | --- | --- | --- | --- | --- | --- |

@@ -12,7 +12,6 @@ pub const FOLDER_RENAME_TITLE: &str = "重命名文件夹";
 pub const FOLDER_DELETE_TITLE: &str = "处理文件夹";
 pub const SMART_EDIT_TITLE: &str = "编辑智能文件夹";
 pub const SMART_DELETE_TITLE: &str = "删除智能文件夹";
-const POPOVER_PADDING: f32 = 4.0;
 
 /// 文件夹新建或重命名。
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -120,13 +119,6 @@ pub enum GapMessage {
     SetBackendPassword(String),
     SubmitBackend,
     Escape,
-}
-
-/// 和 `menuMotion.ts` 一样把弹层夹进视口，锚点留给动效原点。
-pub fn clamp_anchored(x: f32, y: f32, width: f32, height: f32, viewport_w: f32, viewport_h: f32) -> (f32, f32) {
-    let max_x = (viewport_w - width - POPOVER_PADDING).max(POPOVER_PADDING);
-    let max_y = (viewport_h - height - POPOVER_PADDING).max(POPOVER_PADDING);
-    (x.clamp(POPOVER_PADDING, max_x), y.clamp(POPOVER_PADDING, max_y))
 }
 
 pub(super) fn reduce(model: &mut super::super::ShellViewModel, message: GapMessage) {

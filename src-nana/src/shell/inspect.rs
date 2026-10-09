@@ -136,7 +136,8 @@ pub enum InspectMessage {
     RunSearch,
     SearchFinished { generation: u64, result: Result<Vec<SearchRow>, String> },
     OpenHit { repo_id: String, asset_id: String },
-    OpenTagMenu { x: f32, y: f32 },
+    /// 打开元数据里的标签菜单。菜单铺在标签区里，跟着元数据卡片排版，不按坐标定位。
+    OpenTagMenu,
     CloseTagMenu,
 }
 
@@ -189,8 +190,6 @@ pub struct InspectState {
     effects: Vec<InspectEffect>,
     pending_open: Option<SearchRow>,
     pub(super) tag_menu: bool,
-    pub(super) tag_menu_x: f32,
-    pub(super) tag_menu_y: f32,
     pub(super) palette: Vec<String>,
     pub(super) facts: FileFacts,
     pub(super) shortcuts: Vec<super::inspect_shortcuts::SearchShortcut>,
@@ -229,8 +228,6 @@ impl Default for InspectState {
             effects: Vec::new(),
             pending_open: None,
             tag_menu: false,
-            tag_menu_x: 0.0,
-            tag_menu_y: 0.0,
             palette: Vec::new(),
             facts: FileFacts::default(),
             shortcuts: Vec::new(),
@@ -475,7 +472,7 @@ impl InspectState {
             | InspectMessage::RunSearch
             | InspectMessage::SearchFinished { .. }
             | InspectMessage::OpenHit { .. }) => self.reduce_search(writable, active_repo, message),
-            InspectMessage::OpenTagMenu { x, y } => self.open_tag_menu(x, y, 220.0, 280.0, 1280.0, 800.0),
+            InspectMessage::OpenTagMenu => self.open_tag_menu(),
             InspectMessage::CloseTagMenu => self.close_tag_menu(),
         }
         self.apply_clock(hint);
