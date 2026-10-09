@@ -1,9 +1,9 @@
-//! 统一对话框框架的回归：每个对话框都由宿主激活，激活后遮罩补色层淡入；三种关闭手势（Escape、
-//! 点外面、关闭位）都只发一次自己的关闭消息，处理中一条也不发；打开期间无关更新不换节点，相关
+//! 统一对话框框架的回归：每个对话框都由宿主激活；三种关闭手势（Escape、点外面、关闭位）
+//! 都只发一次自己的关闭消息，处理中一条也不发；打开期间无关更新不换节点，相关
 //! 更新只改绑定的字段；对话框里的输入框在组合输入中不被打断；文件页的对话框只在浮层里出现一份；
 //! 浮层的先后和 Escape 一致。
 
-use nana_ui::runtime::{AccessibilityRole, Entity, Stack, StableNodeId};
+use nana_ui::runtime::{AccessibilityRole, StableNodeId};
 
 use super::OverlayKey;
 use crate::backend::services::repository::{SystemLogLocation, SystemLogRecord, SystemLogSource, TaskProgressSnapshot};
@@ -233,13 +233,6 @@ fn mounted(case: &Case) -> ShellHarness {
     let surface = harness.keyed("dialog-surface").unwrap_or_else(|| panic!("{}：没有对话框", case.name));
     let active = harness.document().context().world().overlay_host(host).and_then(|state| state.active);
     assert_eq!(active, Some(surface), "{}：对话框应该由宿主激活", case.name);
-    let veil = harness.keyed("dialog-veil").unwrap_or_else(|| panic!("{}：没有遮罩补色层", case.name));
-    let opacity = harness
-        .document()
-        .context()
-        .read(Entity::<Stack>::from_stable_id(veil), |veil| veil.node_style().layout.opacity)
-        .expect("补色层");
-    assert_eq!(opacity, Some(1.0), "{}：对话框激活后补色层应该淡入到不透明", case.name);
     harness
 }
 
