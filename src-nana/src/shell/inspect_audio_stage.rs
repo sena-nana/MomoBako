@@ -1,14 +1,15 @@
 //! 音频预览的播放器挂载，对齐 player-audio 运行时的 `media-preview--audio` 外壳。
 //!
 //! 左边是唱片舞台（唱片、封面圆、标题和「音频」标签），右边是歌词面板。播放、暂停、跳转和音量
-//! 都在底部播放条上，这里没有控件。唱片按舞台宽度缩放，最大 380px，不按视口算到溢出预览框。
+//! 都在底部播放条上，这里没有控件。唱片占满标题以外的空间，按宽高里较小的一边画正圆，最大 380px；
+//! Vue 按视口定死尺寸，预览框小时唱片被裁成方块，这里不照抄。
 
 use nana_ui::runtime::view::{widget, AnyView, IntoView};
 use nana_ui::runtime::{AlignSpec, JustifySpec, LengthSpec, RadiusTier, SemanticColorRole, Stack, TextHorizontalAlignment};
 
 use super::super::ShellViewModel;
 use super::frame::text;
-use super::preview_paint::{RecordArt, VinylRecord};
+use super::preview_paint::VinylRecord;
 
 /// 唱片最大直径，对应 `--audio-record-size` 的上限。
 const RECORD_MAX: f32 = 380.0;
@@ -89,19 +90,9 @@ pub(super) fn audio_stage(model: &ShellViewModel) -> AnyView {
         .into_any()
 }
 
-/// 唱片：正圆，宽度跟舞台走，最大 380px。中间 58% 的封面圆写「音频」。
+/// 唱片：占满舞台里标题以外的空间（最大 380×380），自绘按较小的一边画正圆，
+/// 中间 58% 的封面圆也由同一个自绘画出；「音频」标签居中。
 fn record() -> AnyView {
-    let art = widget(
-        Stack::column(0.0)
-            .align(AlignSpec::Center)
-            .justify(JustifySpec::Center)
-            .width(LengthSpec::Percent(58.0))
-            .painter(RecordArt)
-            .with_layout(|layout| layout.aspect_ratio = Some(1.0)),
-    )
-    .children((pill("音频", true, "inspect-audio-chip"),))
-    .key("inspect-audio-art")
-    .into_any();
     widget(
         Stack::column(0.0)
             .align(AlignSpec::Center)
@@ -109,11 +100,15 @@ fn record() -> AnyView {
             .width(LengthSpec::Fill)
             .max_width(RECORD_MAX)
             .painter(VinylRecord)
-            .grow(0.0)
+            .grow(1.0)
             .shrink(1.0)
-            .with_layout(|layout| layout.aspect_ratio = Some(1.0)),
+            .with_layout(|layout| {
+                layout.flex_basis = Some(LengthSpec::Px(0.0));
+                layout.min_height = Some(LengthSpec::Px(0.0));
+                layout.max_height = Some(LengthSpec::Px(RECORD_MAX));
+            }),
     )
-    .children((art,))
+    .children((pill("音频", true, "inspect-audio-chip"),))
     .key("inspect-audio-record")
     .into_any()
 }
