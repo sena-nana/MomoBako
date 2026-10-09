@@ -4,20 +4,23 @@
 //! 暂停追踪、重置筛选、清空日志，下面是级别和来源两组筛选芯片，再下面是日志卡片列表。
 //! 每条日志一张主背景卡片：级别徽章、来源芯片、时间、动作、消息、上下文标签和可展开的上下文。
 //!
+//! 页头、工具条和筛选固定，日志列表（`.logs-workbench__list`）占满面板剩余高度、自己滚动：追踪时
+//! 跟随末尾，暂停后停在原位。Vue 的列表不定高、实际滚不起来，这里按它的意图给列表定高。
+//!
 //! 面板只建一次，只读 [`LogsSignals`]：计数、下拉框、按钮和芯片的选中态按字段绑定；日志卡片按
 //! 日志 id 做键，卡片里的文字、可有可无的芯片和上下文都是绑定和显隐，新日志到达只多建一张卡片。
 
 use std::sync::Arc;
 
-use nana_ui::runtime::view::{fields, node_ref, widget, AnyView, IntoView, Item, Signal, Store, StoreList, StorePath};
+use nana_ui::runtime::view::{css, fields, node_ref, widget, AnyView, IntoView, Item, Signal, Store, StoreList, StorePath};
 use nana_ui::runtime::{
-    Activate, AlignSpec, Button, JustifySpec, LengthSpec, NodeStyle, Select, SelectChanged, SelectOption, Stack, Text, TextChanged,
-    TextInput,
+    Activate, AlignSpec, Button, JustifySpec, LengthSpec, NodeStyle, ScrollAxes, ScrollView, Select, SelectChanged, SelectOption,
+    Stack, Text, TextChanged, TextInput,
 };
 use nana_ui_core::{RadiusTier, SemanticColorMix, SemanticColorRole as Role};
 
 use super::super::ShellMessage;
-use super::bind::{row_flag, row_text, ActionDisabled, ButtonIcon, StyleField};
+use super::bind::{row_flag, row_text, ActionDisabled, ButtonIcon, FollowEnd, StyleField};
 use super::icons;
 use super::logs_state::{LogRowView, LogsSignals, LogsToolbar};
 use super::style::{self, action, column, label, mono, pad, row, wrapping, Soft, SoftFill, Tone};
@@ -35,6 +38,8 @@ pub(crate) fn logs_panel(signals: LogsSignals) -> AnyView {
     let head = signals.head;
     let empty = signals.empty;
     let rows = signals.rows;
+    let follow = signals.follow_end;
+    let list = rows.keyed(LogRowView::key).each(log_item).gap(10.0).css(css! { padding-right: 4px; }).key("admin-log-list");
     let body = vec![
         style::workbench_header(
             "Logs",
@@ -55,15 +60,27 @@ pub(crate) fn logs_panel(signals: LogsSignals) -> AnyView {
         )
         .visible(move || empty.with(Option::is_some))
         .into_any(),
-        rows.keyed(LogRowView::key)
-            .each(log_item)
-            .gap(10.0)
-            .css(nana_ui::runtime::view::css! { min-height: 360px; })
+        widget(list_scroll())
+            .prop::<bool, FollowEnd>(follow)
+            .children((list,))
             .visible(move || !rows.is_empty())
-            .key("admin-log-list")
+            .key("admin-log-scroll")
             .into_any(),
     ];
-    style::workbench_panel(body, "admin-log-panel")
+    style::fill_panel(body, "admin-log-panel")
+}
+
+/// 日志列表的滚动区：分走面板里页头、工具条和筛选以外的高度。不设最小高（Vue 写的 360 建立在列表
+/// 不定高上）：窗口矮到放不下时列表先让出高度，滚动区始终整个落在面板里，跟随末尾时最新一条看得见。
+fn list_scroll() -> ScrollView {
+    ScrollView::new(ScrollAxes::Vertical).with_layout(|layout| {
+        layout.width = Some(LengthSpec::Fill);
+        layout.height = Some(LengthSpec::Fill);
+        layout.flex_basis = Some(LengthSpec::Px(0.0));
+        layout.flex_grow = Some(1.0);
+        layout.flex_shrink = Some(1.0);
+        layout.min_height = Some(LengthSpec::Px(0.0));
+    })
 }
 
 /// 工具条：放不下时折行，搜索框基准 320 并伸展。搜索框受控。

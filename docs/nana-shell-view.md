@@ -48,7 +48,7 @@
 
 ### 首页筛选栏
 
-筛选栏属于首页外框，有仓库的首页路由都可能显示它。信号 `FilterBarSignals` 在 `RouteSignals::filter`，除启动页和设置页以外每次同步都写（关着时不算候选和库类型快捷方式）。常驻首页路由（文件、搜索、播放集、日志、拓展和动作页）在外框里嵌 `inspect_search_view::resident_filter_bar(signals.filter)`，显隐跟「有仓库且筛选栏打开」走 `.visible`；文件页的 `FilesRouteSignals` 不另存筛选栏的状态，读的是同一份 `RouteSignals::filter`。首页外框和纵向滚动主体只有一套：`route_home::{home_page, home_scroll}`，缺失仓库和空库页也用它（不嵌筛选栏）；设置和启动页的整页滚动是 `route_home::scroll_route`。
+筛选栏属于首页外框，有仓库的首页路由都可能显示它。信号 `FilterBarSignals` 在 `RouteSignals::filter`，除启动页和设置页以外每次同步都写（关着时不算候选和库类型快捷方式）。常驻首页路由（文件、搜索、播放集、日志、拓展和动作页）在外框里嵌 `inspect_search_view::resident_filter_bar(signals.filter)`，显隐跟「有仓库且筛选栏打开」走 `.visible`；文件页的 `FilesRouteSignals` 不另存筛选栏的状态，读的是同一份 `RouteSignals::filter`。首页外框和纵向滚动主体只有一套：`route_home::{home_page, home_scroll}`，缺失仓库和空库页也用它（不嵌筛选栏）；设置和启动页的整页滚动是 `route_home::scroll_route`。日志页的主体是不滚的裁剪盒 `route_home::home_fixed`：面板（`admin::style::fill_panel`）撑满主体，页头、工具条和筛选固定，日志列表占满剩下的高度、自己滚动，追踪时 `follow_end` 绑在列表上。滚动区里不要再套滚动区，原因见文末「NanaUI 缺口」。
 
 ## 改成常驻的步骤
 
@@ -118,7 +118,7 @@
 
 ## 全局状态区
 
-侧栏顶部的状态条对应 Vue `WorkspaceSidebarStatus.vue`。状态在 `status.rs`：`ShellViewModel::status` 只有一个槽位，记最近一次失败（来源 `FailureSource` 加文案），后记的顶替先记的。投影 `StatusLine` 放进侧栏投影（`SidebarView::status`），顺序照 Vue：失败 > 忙碌 > 同步进度。视图里错误条和忙碌行两块都留着，按投影 `.visible` 互换，侧栏不重挂。
+侧栏顶部的状态条对应 Vue `WorkspaceSidebarStatus.vue`。状态在 `status.rs`：`ShellViewModel::status` 只有一个槽位，记最近一次失败（来源 `FailureSource` 加文案），后记的顶替先记的。投影 `StatusLine` 放进侧栏投影（`SidebarView::status`），顺序照 Vue：失败 > 忙碌 > 同步进度。视图里错误条、忙碌行和同步进度三块都留着，按投影 `.visible` 互换，侧栏不重挂。
 
 **记什么。** 只记没有就近显示的失败：
 
@@ -135,6 +135,7 @@
 | `Settings`、`Logs` | 读写应用设置、系统服务状态；读系统日志 | `admin_reduce.rs` |
 | `SmartFolder` | 智能文件夹删除失败（编辑对话框没开着）；查询、读列表失败 | `sidebar.rs` 归约；`sidebar.smart_error` |
 | `FolderTree` | 文件夹树读取失败 | `sidebar.tree_error` |
+| `Sync` | 刷新文件夹树：同步仓库，或之后重读摘要、硬链接候选、目录树失败 | `tree_sync.rs` |
 | `Files` | 文件操作失败 | `files.error` |
 
 文案先写失败的对象（「定位失败：」「无法读取文件元数据：」），后接系统返回的原因。`files.error`、`sidebar.tree_error`、`sidebar.smart_error` 三个字段被盯着（`observe_failures`）：新写一次记一次，字段清掉时它记下的那一条一起清。宿主在归约以外写下的失败（服务派发、拖出结果）在 `update` 同步视图之前、`prepare` 里收进来。
@@ -143,15 +144,19 @@
 
 **什么时候清。** 照 Vue `error.value = null` 的时机：用户开始一个会写全局错误的操作时清掉上一次失败，成功不专门清（托盘例外）。开始的迹象：
 
-- 消息本身（`status::starts_operation`）：打开、定位、拖出（过了 Vue 的守卫：有仓库、有路径、能拖出），换仓库、刷新资源库列表、重试启动，刷新文件夹树、打开智能文件夹；
-- 忙碌标志由假变真、换了文件（`status::Activity`）：读目录（非静默）、文件变更、保存元数据（也包括撤销重做，Vue 这两样不清）、搜索、导出、智能文件夹增改删、插件操作、执行仓库动作，以及选中别的文件（Vue `selectAsset`）。
+- 消息本身（`status::starts_operation`）：打开、定位、拖出（过了 Vue 的守卫：有仓库、有路径、能拖出），换仓库、刷新资源库列表、重试启动、打开智能文件夹；
+- 忙碌标志由假变真、换了文件（`status::Activity`）：读目录（非静默）、文件变更、刷新文件夹树（按钮禁用时被拦下的点击不算）、保存元数据（也包括撤销重做，Vue 这两样不清）、搜索、导出、智能文件夹增改删、插件操作、执行仓库动作，以及选中别的文件（Vue `selectAsset`）。
 - 后台的静默刷新不清。Vue 结构更新后的静默刷新会经 `refreshRepositoryActions` 顺带清掉错误，用户还没看到的失败就被抹掉了，这里不照抄。
 
 清只作用在归约开始时已经记下的失败上：同一次归约里新记的失败按序号留着。
 
 **忙碌。** Vue `isBusy`：启动以后在读资源库列表（`workspace.list_loading`）、读仓库摘要（`workspace.snapshot_loading`）或读素材详情（`inspect.detail_loading`）。显示「正在同步仓库状态」，前面的转圈读热信号。启动中由启动页显示进度。
 
-**同步进度。** Vue 的第三档是仓库同步的进度（文件夹树的「刷新」会同步整个仓库）。Nana 启动以后没有仓库同步，文件夹树的刷新只重读树，所以没有这一档。
+**同步进度。** 第三档是仓库同步的进度。文件夹分组的「刷新」照 Vue `refreshFileBrowserTree` 同步整个仓库（`tree_sync.rs`，请求在 `sync_dispatch.rs`，同步走启动时同一条 `PROTOCOL_REPOSITORY_SYNC`）：
+- 进度依次是「扫描文件夹结构」1/3 → 「写入索引结果」2/3 → 「刷新文件夹树」3/3 → 「刷新完成」，前三档在状态区显示：转圈、文案、右边弱色的百分比，占满一行。失败和忙碌优先。
+- 同步完一起重读仓库摘要、硬链接候选和目录树（回收站面板不读树），都成功后非静默地重读当前目录，读完才算完成；虚拟视图不读目录。任务弹层里同时有一条「刷新文件树」的操作进度。
+- 任何一段失败写进状态区（来源 `Sync`，「刷新文件夹树失败：」接原因），重读里成功的几份照样写进去。刷新途中换了仓库，这一轮作废。
+- 刷新期间按钮转圈并禁用：条件是 Vue 的「正在读目录」（`tree_sync::loading_file_browser`：非静默读目录或正在刷新），加上目录树自己在读。按钮的禁用和归约的拦截读同一个 `tree_sync::refresh_blocked`。
 
 ## 浮层：常驻和统一的对话框
 
@@ -215,7 +220,8 @@ DialogFrame::new("folder-dialog", move || view.with(|view| view.title.to_string(
 
 搜索、设置和管理页改常驻时遇到的：
 
-- 控件表里没有的可绑定字段要自己写 `FieldWrite`：`ScrollView.follow_end`（`route_search::FollowEnd`）、`TextInput.read_only`、`Button.icon`、整份 `NodeStyle`（`admin::bind`），以及按地址重新编码的 `QrCode`（`source_auth_page::QrPayload`）。
+- 控件表里没有的可绑定字段要自己写 `FieldWrite`：`ScrollView.follow_end`、`TextInput.read_only`、`Button.icon`、整份 `NodeStyle`（都在 `admin::bind`），以及按地址重新编码的 `QrCode`（`source_auth_page::QrPayload`）。
+- 滚动范围（`scroll_content_extent`）是全部后代布局盒的并集，不在里层的滚动区或裁剪盒处停下。滚动区里再套一个滚动区时，里层溢出的内容会撑出外层的滚动范围，外层能滚进一片空白。日志页因此不用 `home_scroll`，改用不滚的 `home_fixed`，只有日志列表一层滚动。
 - `css!` 的 `min-width: 0` 除了 `min_width` 还写 `allow_shrink`，和构建器的 `min_width(Px(0))` 字段不完全相同；现在布局不读它，画面一样。
 - `StorePath` 没有 `with_untracked`，同步里比较 Store 的现值用 `untrack(|| store.with(..))`。
 - `layout.hidden` 的子树要等排版以后才退出无障碍投影，没刷新的文档投影出来还带着藏起的节点。

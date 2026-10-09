@@ -116,10 +116,6 @@ fn folder_expansion_follows_current_directory_and_prunes_stale_paths() {
     }].into()));
     assert_eq!(sidebar.expanded_folders, ["photos/trips"]);
     assert!(!sidebar.tree_loading);
-    assert!(sidebar.refresh_tree(Some("repo"), false));
-    assert!(sidebar.tree_loading);
-    sidebar.tree_loading = true;
-    assert!(!sidebar.refresh_tree(Some("repo"), false));
 }
 
 #[test]

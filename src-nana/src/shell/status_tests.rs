@@ -1,5 +1,6 @@
-//! 全局状态区的回归：各领域的失败怎么记进来、什么时候清，状态区按「失败 > 忙碌」显示，文件操作失败
-//! 在文件列表显示着时不重复显示；侧栏顶部的状态条原地换内容、侧栏不重挂，和新挂的文档一致。
+//! 全局状态区的回归：各领域的失败怎么记进来、什么时候清，状态区按「失败 > 忙碌 > 同步进度」显示，文件
+//! 操作失败在文件列表显示着时不重复显示；侧栏顶部的状态条原地换内容、侧栏不重挂，和新挂的文档一致。
+//! 文件夹树刷新本身的流程在 `tree_sync_tests.rs`。
 
 use crate::shell::player::PlayerMessage;
 use crate::shell::sidebar::SidebarMessage;
@@ -220,6 +221,20 @@ fn starts_follow_the_vue_guards() {
     assert!(!starts(drag(true, "filesystem")), "回收站里不能拖出，不算开始");
     assert!(!starts(drag(false, "webdav")), "不是本地文件系统，不算开始");
     assert!(starts(drag(false, "filesystem")));
-    assert!(super::starts_operation(&ShellMessage::Sidebar(SidebarMessage::RefreshFolderTree)));
+    assert!(!super::starts_operation(&ShellMessage::Sidebar(SidebarMessage::RefreshFolderTree)), "刷新文件夹树看忙碌标志");
     assert!(!super::starts_operation(&ShellMessage::Navigate(ShellPage::Logs)));
+}
+
+/// 刷新文件夹树真的开始（同步排下、忙碌由假变真）才清掉上一次失败；按钮禁用时被拦下的点击不清。
+#[test]
+fn folder_tree_refresh_clears_only_when_it_starts() {
+    let mut model = files_page();
+    reveal_fails(&mut model, "系统找不到指定的文件。");
+    model.reduce(ShellMessage::Sidebar(SidebarMessage::RefreshFolderTree));
+    assert!(model.tree_sync.running(), "刷新开始了");
+    assert_eq!(failure(&model), None, "刷新开始时清掉上一次失败");
+
+    model.status.fail(FailureSource::Host, "刷新期间的失败");
+    model.reduce(ShellMessage::Sidebar(SidebarMessage::RefreshFolderTree));
+    assert_eq!(failure(&model), Some((FailureSource::Host, "刷新期间的失败".into())), "刷新进行中再点被拦下，不清失败");
 }

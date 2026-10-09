@@ -141,14 +141,17 @@ fn begin_load(player: &mut PlayerState, item: &QueueItem, still: bool) {
 }
 
 /// 读出的字节解成当前项。读文件由调用方经仓库服务完成，这里只解码。
-/// wav、mp3、flac、ogg 解不开时报对应格式的原因，不拿视频容器的报错顶替。
 pub(crate) fn decode_loaded(repo_id: &str, still: bool, extension: &str, bytes: &[u8]) -> Result<LoadedItem, String> {
     if still {
         return crate::shell::decode_preview_pixels(bytes).map(LoadedItem::Still);
     }
-    crate::shell::preview_media_parts(repo_id, bytes)
-        .map(LoadedItem::Media)
-        .map_err(|error| wav_player::pcm_error_for_extension(extension, bytes).unwrap_or(error))
+    decode_media(repo_id, extension, bytes).map(LoadedItem::Media)
+}
+
+/// 音视频字节解成会话、音轨和画面，播放条和预览页共用。wav、mp3、flac、ogg 解不开时报对应格式的原因
+/// （WAV 头不对、压缩音频解码失败），不拿视频容器的「没有原生解码器」顶替。
+pub(crate) fn decode_media(repo_id: &str, extension: &str, bytes: &[u8]) -> Result<crate::shell::MediaParts, String> {
+    crate::shell::preview_media_parts(repo_id, bytes).map_err(|error| wav_player::pcm_error_for_extension(extension, bytes).unwrap_or(error))
 }
 
 /// 装进读取结果。过期的代次或已经换掉的条目不装。`still` 是请求时的类别，失败时据此写说明。

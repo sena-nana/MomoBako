@@ -43,6 +43,7 @@ mod sidebar;
 mod sidebar_view;
 mod workspace;
 pub(crate) mod workspace_refresh;
+pub(crate) mod tree_sync;
 pub use files::{display_mode_path, FileRow, FilesEffect, FilesMessage, HardlinkPrompt, VirtualQuery};
 pub(crate) use thumbs::{decode_preview_pixels, decode_thumbnail_file, thumbnail_slot, ThumbnailFrame};
 pub(crate) use inspect::poll_timers;
@@ -159,6 +160,8 @@ pub enum ShellMessage {
     Host(host_events::HostMessage),
     /// 结构更新后的静默仓库列表和摘要。具体分支在 `workspace_refresh::reduce_message` 里归约。
     SilentWorkspace(workspace_refresh::SilentMessage),
+    /// 刷新文件夹树时的同步和重读结果。具体分支在 `tree_sync::reduce_message` 里归约。
+    TreeSync(tree_sync::TreeSyncMessage),
 }
 
 /// 已解码的 RGBA 预览帧；解码在服务任务中完成，窗口线程只负责上传 GPU 纹理。
@@ -268,6 +271,8 @@ pub struct ShellViewModel {
     pub motion: motion::MotionState,
     /// 全局状态区：最近一次失败和它的来源，见 `status.rs`。
     pub status: status::StatusState,
+    /// 文件夹树的「刷新」：同步仓库再刷新工作区，见 `tree_sync.rs`。
+    pub tree_sync: tree_sync::TreeSyncState,
     /// 窗口逻辑宽。Vue 唯一按窗口宽度切换的断点在播放条，见 [`NARROW_VIEWPORT_PX`]。
     pub viewport_width: f32,
     /// 对话框、弹层或打开文件夹之后，手势松开时要重建树。
@@ -332,6 +337,7 @@ impl Default for ShellViewModel {
             input: input::InputState::default(),
             motion: motion::MotionState::default(),
             status: status::StatusState::default(),
+            tree_sync: tree_sync::TreeSyncState::default(),
             viewport_width: DEFAULT_VIEWPORT_PX,
             surface_dirty: false,
             revision: 0,
@@ -389,6 +395,7 @@ impl ShellViewModel {
         self.reduce_inner(message);
         self.flush_folder_mutations();
         self.settle_sidebar_dialogs();
+        tree_sync::settle(self);
         self.settle_status(&before, seq, started);
         self.follow_motion();
     }
@@ -419,7 +426,12 @@ impl ShellViewModel {
         let panel_open = self.sidebar.popover != sidebar::PopoverMode::Closed || self.admin.popover_open;
         let startup = f32::from(self.workspace.startup.percent);
         let operation = self.files.operation_percent();
-        let spinner = self.sidebar.tree_loading || self.sidebar.submitting || self.sidebar.smart_draft.busy || self.files.mutating || status::busy(self);
+        let spinner = self.sidebar.tree_loading
+            || self.sidebar.submitting
+            || self.sidebar.smart_draft.busy
+            || self.files.mutating
+            || self.tree_sync.running()
+            || status::busy(self);
         if self.motion.set_panel_open(panel_open) {
             self.surface_dirty = true;
         }
@@ -457,6 +469,9 @@ impl ShellViewModel {
             return;
         };
         let Some(message) = workspace_refresh::reduce_message(self, message) else {
+            return;
+        };
+        let Some(message) = tree_sync::reduce_message(self, message) else {
             return;
         };
         match message {
@@ -836,6 +851,7 @@ impl ShellViewModel {
             ShellMessage::Input(_) => {}
             ShellMessage::Host(_) => {}
             ShellMessage::SilentWorkspace(_) => {}
+            ShellMessage::TreeSync(_) => {}
             ShellMessage::Asmr(_) => {}
         }
     }

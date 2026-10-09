@@ -315,6 +315,19 @@ pub(crate) fn workbench_panel(body: Vec<AnyView>, key: &'static str) -> AnyView 
     widget(panel).children(body).key(key).into_any()
 }
 
+/// 外观同 [`workbench_panel`]，高度不随内容长：正好撑满不滚动的主体，里面自己滚动的那一块（日志列表）
+/// 分走剩下的高度。窗口矮到页头等固定块都放不下时，超出面板的部分裁在面板里。
+pub(crate) fn fill_panel(body: Vec<AnyView>, key: &'static str) -> AnyView {
+    let panel = pad(Stack::fill_column(16.0), 23.0, 23.0, 23.0, 23.0)
+        .surface(Role::Surface)
+        .radius(RadiusTier::Xl)
+        .with_layout(|layout| {
+            layout.overflow_x = nana_ui_core::OverflowSpec::Hidden;
+            layout.overflow_y = nana_ui_core::OverflowSpec::Hidden;
+        });
+    widget(panel).children(body).key(key).into_any()
+}
+
 /// `.search-workbench__header`：左边眉题、24/700 标题和说明，右边统计和操作，顶对齐。
 pub(crate) fn workbench_header(
     eyebrow: &str,

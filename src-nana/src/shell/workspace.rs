@@ -624,7 +624,8 @@ impl WorkspaceState {
         std::mem::take(&mut self.effects)
     }
 
-    /// 验收页直接进入已有仓库的产品表面，不排队同步或快照。
+    /// 测试直接进入已有仓库，不排队同步或快照。验收场景走真实的启动消息（`acceptance_base.rs`）。
+    #[cfg(test)]
     pub(crate) fn present_repository(&mut self, repository: WorkspaceRepository) {
         self.active_repo_id = Some(repository.repo_id.clone());
         self.last_active_repo_id = self.active_repo_id.clone();
