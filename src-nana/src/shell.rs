@@ -216,28 +216,6 @@ pub enum ShellPage {
     Logs,
 }
 
-impl ShellPage {
-    fn title(&self) -> &'static str {
-        match self {
-            Self::Loading => "正在加载资源库",
-            Self::EmptyRepository => "资源库为空",
-            Self::Error => "资源库加载失败",
-            Self::FileList => "文件列表",
-            Self::SelectedFile => "文件预览",
-            Self::Playlists => "播放列表",
-            Self::PluginSettings => "插件设置",
-            Self::TaskRunning => "任务进行中",
-            Self::PlaybackRunning => "播放进行中",
-            Self::TaskCancelling => "任务取消中",
-            Self::Conflict => "同步冲突",
-            Self::UnsavedEdit => "编辑未保存",
-            Self::Settings => "应用设置",
-            Self::SettingsError => "设置校验失败",
-            Self::Logs => "系统日志",
-        }
-    }
-}
-
 /// 壳层所需的宿主无关页面状态。
 #[derive(Clone, Debug)]
 pub struct ShellViewModel {
