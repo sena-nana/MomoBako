@@ -426,16 +426,15 @@ impl Track {
 }
 
 /// 弹层透明度和 4px 上移。逐帧的值绑在热信号上，开合动效不重挂浮层。对话框的开合动效由
-/// NanaUI 在激活和关闭时自己播。
+/// NanaUI 照主题配方播。
 ///
-/// 外层是 AppShell 浮层槽位的根，AppShell 给它打铺满窗口的布局补丁并让它挡住下面的点击；
-/// 它自己不带绑定。透明度和变换绑在铺满外层的内层上：绑定逐帧重投影的是内层，冲不掉外层的补丁。
+/// 弹层撑满浮层层（AppShell 的 overlay 槽位是浮层层，不是这一块），透明度和变换直接绑在这一层上。
 pub fn paint_panel(view: impl IntoView, motion: &MotionState) -> AnyView {
     let paint = super::hot::prop(|signals| signals.panel, LayerPaint::panel(motion));
-    let layer = widget(nana_ui::runtime::Stack::fill_column(0.0))
+    widget(nana_ui::runtime::Stack::fill_column(0.0))
         .prop::<LayerPaint, LayerPaintField>(paint)
-        .children((view.into_any(),));
-    widget(nana_ui::runtime::Stack::column(0.0)).children((layer,)).into_any()
+        .children((view.into_any(),))
+        .into_any()
 }
 
 /// 把平移动效写成绘制矩阵。`shift_y` 向下为正，缩放绕控件中心。

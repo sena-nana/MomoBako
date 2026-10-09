@@ -21,7 +21,7 @@
 | --- | --- | --- | --- |
 | 侧栏 | `view_part_sidebar.rs`，投影在 `sidebar_project.rs` | 无 | 常驻：`SidebarSignals`（几个信号加播放集、文件夹树、智能文件夹树三份 Store）建在骨架作用域里，同步只写变了的；第一次排成工作台时建，收起时跟着工作区停放，展开时原样回来 |
 | 主区 | `view_part_primary.rs`，路由在 `route_*.rs` | `dynamic(RouteKey)` | 所有路由（启动、文件、缺失仓库、空库、搜索含空库搜索、设置、日志、拓展、动作和播放集页）都常驻；文件页和播放集页里的播放条是旧视图岛 |
-| 浮层 | `view_part_overlay.rs` | 按 `OverlayIdentity` 换块 | 常驻：身份不变时只经会话写信号；对话框走统一框架；没有浮层时槽位为空 |
+| 浮层 | `view_part_overlay.rs` | 按 `OverlayIdentity` 换块 | 常驻：浮层层一直在 AppShell 的 overlay 槽位里，各块按身份换进换出；身份不变时只经会话写信号；对话框走统一框架 |
 
 并行改区域时各改各的文件：
 
@@ -155,7 +155,13 @@
 
 ## 浮层：常驻和统一的对话框
 
-浮层块（`view_part_overlay.rs`）按 `OverlayIdentity` 换块：身份是 `OverlayKey`（哪一种浮层）加上它结构上的变化（文件对话框的种类、仓库弹层的页、右键菜单的目标和落点）。身份不变时浮层常驻，同一时刻最多一块，没有浮层时槽位为空。
+浮层块（`view_part_overlay.rs`）按 `OverlayIdentity` 换块：身份是 `OverlayKey`（哪一种浮层）加上它结构上的变化（文件对话框的种类、仓库弹层的页、右键菜单的目标和落点）。身份不变时浮层常驻，同一时刻最多显示一块。
+
+**浮层层。** 骨架挂载时把一个空容器（`view_part_overlay::layer`，键 `shell-overlay`）直接交给 AppShell 的 `.overlay(..)`，之后一直在。浮层块把各块挂成脱离树的内容，再用 `reconcile_children` 放进浮层层；换下来的块被省掉、停放，随这次换块卸掉。AppShell 盯着浮层层的子节点：有没隐藏的子节点时挡住下面的点击，空了就放开，增删子节点不重新装配，`place_shell` 只管 body。
+
+- 浮层层上不放绑定（AppShell 的布局补丁只在它投影时写）。各块的根不是槽位根，可以带绑定：任务弹层的淡入和上移直接绑在弹层根上。
+- 各块自己铺满浮层层：对话框的外层绝对定位铺满，弹层是撑满的一列，右键菜单是铺满的叠层。
+- 块里的定位相对浮层层（它铺满窗口），用绝对定位，不用固定定位：固定定位的节点按自己的层级参与整窗排序，不写层级就排在浮层层（层级 1）下面，点击被浮层层吞掉；绝对定位的节点留在浮层层里，按先后叠放，不用写层级。右键菜单的透明底和菜单因此不再写层级。
 
 **会话。** 浮层视图的签名不变（`fn(&ShellViewModel) -> Option<AnyView>`），建的时候把同步要用的东西交给 `session::register`，浮层块挂这一块时用 `session::collect` 收下：
 
@@ -179,7 +185,7 @@ DialogFrame::new("folder-dialog", move || view.with(|view| view.title.to_string(
 
 - 对话框是 NanaUI `Dialog` / `ConfirmDialog`，挂在自己的 `OverlayHost` 下，`activate_overlay` 打开；焦点陷阱、焦点归还、无障碍角色、初始焦点和开合动效都归框架。
 - 关闭策略是 `DialogClosePolicy::requests_only()`：Escape、点外面、关闭位只在对话框上发一次 `DialogCloseRequested`，框架换成 `new` 给的关闭消息；处理中（`busy`）什么也不发。确认框的取消和确认由框架变成 `ConfirmIntent`，按钮自己不发消息。
-- 激活时机：浮层块把这一块挂成脱离树的内容，`ShellView` 之后才放进 AppShell 的槽位，挂载时的 `on_mount` 运行时宿主还不在树里。所以对话框旁边放 `when(placed, ..)`：浮层块挂好后调会话的 `placed()` 置真，下一次刷新建出分支，分支的 `on_mount` 激活。外层是普通 `Stack`，放进槽位时 AppShell 按「有子节点」挡住点击，激活前也不会漏点。
+- 激活时机：浮层块把这一块挂成脱离树的内容，再放进浮层层，挂载时的 `on_mount` 运行时宿主还不在树里。所以对话框旁边放 `when(placed, ..)`：浮层块放好后调会话的 `placed()` 置真，下一次刷新建出分支，分支的 `on_mount` 激活。浮层层有块时 AppShell 让它挡住点击，激活前也不会漏点。
 - 换下前浮层块调会话的 `retire()`：`dismiss_overlay(host)` 让框架关掉对话框、把焦点还给打开前的位置，然后再卸掉这一块。
 - 字段、按钮、底栏、错误行用框架里的 `text_field` / `text_area_field` / `select_field` / `two_columns` / `action` / `footer` / `error_line` / `busy_note`，照 Vue `.dialog-field` 和 `.dialog-card__actions`。
 
@@ -206,7 +212,7 @@ DialogFrame::new("folder-dialog", move || view.with(|view| view.title.to_string(
 - `mount_view_detached` 挂出的根不在装配键表里，根节点的键路径是父节点的路径，自己的键不出现。`remount_state` 对根节点按父路径加类型找回，能用，但根的键（例如 `settings-scroll`）查不到。
 - `activate_overlay` 要求宿主已经在树里：在脱离树的挂载里激活，框架算不出初始焦点（候选必须已挂上），开场动效也不播。浮层块因此借 `when(placed, ..)` 在放进槽位后的那次刷新里激活；视图层没有「挂进树时」的钩子，也没有声明式的 `open`。
 - 元素上没有声明式的拖放目标，要靠 `on_mount` 调 `set_drop_target_node`。
-- AppShell 只在自己投影时按「有没有子节点」决定 overlay 槽位挡不挡点击；槽位里的内容由结构块在刷新时换，它不会跟着重新判断（槽位根是 `OverlayHost` 时由宿主按激活的浮层决定，但弹层不是框架的浮层种类，放不进宿主）。所以浮层块按身份换块，没有浮层时把槽位清空，不用常驻的浮层根。
+- （已补）AppShell 原来只在自己投影时按「有没有子节点」决定 overlay 槽位挡不挡点击，浮层块只好每次换块都换掉 overlay 槽位、重新装配。现在 AppShell 盯着槽位的子节点（增删、显隐都重新判断，隐藏的不算），浮层层改成常驻的槽位内容。
 - `TreeView` 是一个自绘节点：`nodes` 只能整份绑定，展开、计数变了都整树重投影；行不是节点，放不了行内按钮、右侧计数、右键菜单和行级无障碍。侧栏的文件夹树和智能文件夹树改成按显示顺序展开的扁平行，放进按键对照的 Store，用 `keyed(..).each` 建：展开只插子级，三角、当前目录和计数原地改。
 - `ReorderList` 拖动时按自己的直接子节点取行的盒子（`reorder_row_boxes`），`each` 总会多一层容器，也没有把行直接放进现成控件的入口（只有 `each_virtual` 有 `.within`），所以条目放不进带键的 `each`。播放集页改用按条目顺序做键的 `dynamic`：增删、重排时整个列表重建，当前播放和条目字段原地绑定。
 - `#[derive(Store)]` 给每个字段生成同名访问器，但 `Item` 自己有 `id()`（键的哈希），名叫 `id` 的字段在行上读不到，行结构里的编号字段要换个名字（`playlist_id`、`item_id`）。

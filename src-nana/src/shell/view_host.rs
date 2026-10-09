@@ -1,12 +1,13 @@
 //! 常驻的壳层视图 `ShellView`：只做调度。
 //!
-//! 骨架只挂一次：AppShell、标题栏（字段绑定，搜索框受控）、工作区（资源区宽度跟侧栏呈现宽度）
-//! 和一个认出这棵骨架的隐藏标记。内容分三块，各在自己的模块里：侧栏（`view_part_sidebar.rs`）、
-//! 主区（`view_part_primary.rs`，按路由键切换分支）和浮层（`view_part_overlay.rs`，按浮层键切换）。
-//! 三块实现同一个接口 [`ShellPart`]：挂载、同步、是否需要重挂、组合延后。这里按同一套流程调它们，
-//! 再把各块的根放进骨架组合控件的槽位：有侧栏时侧栏和主区放进工作区的资源区和主区，工作区是
-//! AppShell 的 body；主区独占时它自己是 body；浮层是 AppShell 的 overlay。组合控件只在自己投影时
-//! 给槽位根节点打补丁，所以槽位根节点上不放绑定。
+//! 骨架只挂一次：AppShell、标题栏（字段绑定，搜索框受控）、浮层层（AppShell 的 overlay 槽位）、
+//! 工作区（资源区宽度跟侧栏呈现宽度）和一个认出这棵骨架的隐藏标记。内容分三块，各在自己的模块里：
+//! 侧栏（`view_part_sidebar.rs`）、主区（`view_part_primary.rs`，按路由键切换分支）和浮层
+//! （`view_part_overlay.rs`，按浮层身份换块）。三块实现同一个接口 [`ShellPart`]：挂载、同步、是否
+//! 需要重挂、组合延后。这里按同一套流程调它们，再把侧栏和主区的根放进骨架组合控件的槽位：有侧栏时
+//! 放进工作区的资源区和主区，工作区是 AppShell 的 body；主区独占时它自己是 body。浮层块自己把各块
+//! 放进浮层层，AppShell 不用重新装配。组合控件只在自己投影时给槽位根节点打补丁，所以槽位根节点上
+//! 不放绑定。
 //!
 //! 数据流：`ShellMessage → reduce → 服务副作用 → ShellView::sync`。同步先写热信号和标题栏字段，
 //! 再让每一块写自己的信号、按需重挂。焦点在某块里、输入法还有预编辑时，这块的重挂延后，`prepare`
@@ -87,6 +88,7 @@ impl ShellView {
                 detached(widget(super::render::workbench_workspace(motion.sidebar_width)).entity_ref(workspace)),
                 widget(AppShell::new())
                     .title_bar(super::title_bar::title_bar(title, query.signal(), &title_view.query))
+                    .overlay(super::view_part_overlay::layer(parts.2))
                     .entity_ref(shell),
             );
             made = Some((hot, title, query, parts));
@@ -261,14 +263,14 @@ impl ShellView {
         }
     }
 
-    /// 把三块内容的根放进槽位。有侧栏时工作区是 body；主区独占时主区外框挪进壳层底色，底色是 body，
-    /// 侧栏留在停放的工作区里。
+    /// 把侧栏和主区的根放进槽位。有侧栏时工作区是 body；主区独占时主区外框挪进壳层底色，底色是
+    /// body，侧栏留在停放的工作区里。浮层块自己把各块放进常驻的浮层层，不经这里。
     fn place(&self, context: &mut AppContext, mode: BodyMode) -> Result<(), FrameworkError> {
-        let (sidebar, primary, overlay) = (self.sidebar.root(), self.primary.root(), self.overlay.root());
+        let (sidebar, primary) = (self.sidebar.root(), self.primary.root());
         match mode {
             BodyMode::Workbench => {
                 let regions = place_regions(context, self.workspace, sidebar, primary)?;
-                let shell = place_shell(context, self.shell, Some(self.workspace.stable_id()), overlay)?;
+                let shell = place_shell(context, self.shell, Some(self.workspace.stable_id()))?;
                 // 换区域内容时工作区重投影，冲掉了 AppShell 给 body 打的布局补丁；AppShell 自己
                 // 重新装配时会补上，没装配就让它重新投影一次。
                 if regions && !shell {
@@ -281,7 +283,7 @@ impl ShellView {
                 // 最后底色当 body。外框挪位置时不重建，焦点和滚动由 `Swap` 收尾时找回。
                 place_regions(context, self.workspace, sidebar, None)?;
                 self.primary.hold_solo(context)?;
-                place_shell(context, self.shell, primary, overlay).map(|_| ())
+                place_shell(context, self.shell, primary).map(|_| ())
             }
         }
     }
@@ -340,21 +342,13 @@ fn place_regions(
     Ok(true)
 }
 
-/// AppShell 的 body 和 overlay。没变时不动，返回 `false`；变了以后重新装配（装配最后会重新投影），
-/// 换下来的节点由装配停放。
-fn place_shell(
-    context: &mut AppContext,
-    shell: Entity<AppShell>,
-    body: Option<StableNodeId>,
-    overlay: Option<StableNodeId>,
-) -> Result<bool, FrameworkError> {
-    if context.read(shell, |current| current.body == body && current.overlay == overlay)? {
+/// AppShell 的 body。没变时不动，返回 `false`；变了以后重新装配（装配最后会重新投影），换下来的
+/// 节点由装配停放。overlay 槽位是骨架挂载时交给它的浮层层，一直不换。
+fn place_shell(context: &mut AppContext, shell: Entity<AppShell>, body: Option<StableNodeId>) -> Result<bool, FrameworkError> {
+    if context.read(shell, |current| current.body == body)? {
         return Ok(false);
     }
-    context.update_component(shell, |current, _| {
-        current.body = body;
-        current.overlay = overlay;
-    })?;
+    context.update_component(shell, |current, _| current.body = body)?;
     context.assemble_app_shell(shell)?;
     Ok(true)
 }

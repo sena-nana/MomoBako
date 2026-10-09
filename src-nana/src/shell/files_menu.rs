@@ -36,8 +36,6 @@ const ITEM_HEIGHT: f32 = 28.0;
 const ITEM_GAP: f32 = 1.0;
 /// 菜单离窗口边至少 4px（`SB_MENU_EDGE_PADDING`）。
 const EDGE: f32 = 4.0;
-/// Vue 右键菜单的层级（`SB_LAYER_Z_INDEX.contextMenu`）。浮层根比它低 1，点菜单外的透明底和它同层。
-const MENU_Z: i32 = 2000;
 
 /// 点菜单项时发的消息，存成数据：能比较（按调试文本），条目变了就知道。`ShellMessage` 不能克隆，
 /// 每次点击现做一条。
@@ -167,36 +165,31 @@ pub(super) fn entry_menu(model: &ShellViewModel) -> Option<AnyView> {
     let entries = computed(move || view.with(|view| view.entries.clone()));
     let rows = each(entries, |entry: &MenuEntry| format!("{entry:?}"), move |entry: MenuEntry| slot(view, entry)).gap(ITEM_GAP);
     let (x, y) = (menu.x, menu.y);
+    // 菜单这一层铺满浮层层（浮层层铺满窗口），透明底和菜单都相对它绝对定位，画在浮层层之上、
+    // 按先后叠放，不用给层级。叠层默认不接指针（给弹幕、HUD 用），这里清掉，让透明底和菜单接点击。
     let surface = Stack::column(0.0)
         .padding(MENU_PADDING)
         .surface(SemanticColorRole::Surface)
         .outline(SemanticColorRole::BorderStrong, 1.0)
         .radius(RadiusTier::Md)
-        .with_layout(move |layout| {
-            layout.position = PositionSpec::Fixed;
-            layout.z_index = Some(MENU_Z + 1);
-        });
+        .with_layout(move |layout| layout.position = PositionSpec::Absolute);
     let surface = style::with_shadows(surface, vec![style::shadow(10.0, 28.0, -10.0, 0.55)]);
     Some(
-        widget(Stack::overlay_layer().with_layout(|layout| {
-            layout.position = PositionSpec::Fixed;
-            layout.pointer_events = None;
-            layout.z_index = Some(MENU_Z - 1);
-        }))
-        .children((
-            backdrop(),
-            widget(surface)
-                .prop::<(f32, f32, f32, f32), MenuPlacement>(move || view.with(|view| (x, y, view.width, view.height)))
-                .children((rows,))
-                .key("file-context-menu"),
-        ))
-        .key("file-context-layer")
-        .into_any(),
+        widget(Stack::overlay_layer().with_layout(|layout| layout.pointer_events = None))
+            .children((
+                backdrop(),
+                widget(surface)
+                    .prop::<(f32, f32, f32, f32), MenuPlacement>(move || view.with(|view| (x, y, view.width, view.height)))
+                    .children((rows,))
+                    .key("file-context-menu"),
+            ))
+            .key("file-context-layer")
+            .into_any(),
     )
 }
 
 /// 菜单左上角和宽：落点和「窗口边减去菜单尺寸再留 4」取小，放不下时贴着右边或下边。
-/// 固定定位的包含块是窗口，百分比就是窗口宽高。值是（落点 x、落点 y、宽、高）。
+/// 包含块是铺满窗口的菜单层，百分比就是窗口宽高。值是（落点 x、落点 y、宽、高）。
 struct MenuPlacement;
 
 impl MenuPlacement {
@@ -227,13 +220,11 @@ impl FieldWrite<Stack, (f32, f32, f32, f32)> for MenuPlacement {
 fn backdrop() -> AnyView {
     let mut style = NodeStyle::default();
     let layout = Arc::make_mut(&mut style.layout);
-    layout.position = PositionSpec::Fixed;
+    layout.position = PositionSpec::Absolute;
     layout.offset_top = Some(LengthSpec::Px(0.0));
     layout.offset_left = Some(LengthSpec::Px(0.0));
     layout.width = Some(LengthSpec::Percent(100.0));
     layout.height = Some(LengthSpec::Percent(100.0));
-    // 固定定位的节点按自己的层级参与整窗排序；不给层级就排在壳层浮层根之下，点不到。
-    layout.z_index = Some(MENU_Z);
     widget(ListItem::new("关闭菜单").style(style))
         .content(widget(Stack::column(0.0)))
         .key("file-context-backdrop")
