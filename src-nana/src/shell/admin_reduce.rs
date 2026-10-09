@@ -127,10 +127,6 @@ fn consume_legacy(model: &mut ShellViewModel, message: ShellMessage) -> Option<S
             model.settings_error = Some(error);
             None
         }
-        ShellMessage::CancelTask(task_id) => {
-            model.detail = format!("已请求取消任务 {task_id}");
-            None
-        }
         other => Some(other),
     }
 }
@@ -205,12 +201,6 @@ fn reduce_admin(model: &mut ShellViewModel, message: AdminMessage) {
             model.admin.external_message.clear();
             model.admin.external_error = format!("导出失败：{error}");
         }
-        AdminMessage::SelectRepository(repo_id) => {
-            let repo_id = repo_id.trim();
-            if !repo_id.is_empty() {
-                model.reduce(ShellMessage::SelectWorkspaceRepository(repo_id.to_string()));
-            }
-        }
         AdminMessage::SetAudioPlayer(plugin_id) => model.set_audio_preference(plugin_id),
         AdminMessage::ToggleLogLevel(level) => {
             model.admin.log_levels = support::toggle_value(&model.admin.log_levels, &level);
@@ -252,13 +242,7 @@ fn reduce_admin(model: &mut ShellViewModel, message: AdminMessage) {
             }
         }
         AdminMessage::ToggleTaskPopover => model.admin.popover_open = !model.admin.popover_open,
-        AdminMessage::CloseTaskPopover | AdminMessage::TaskUnmount => model.admin.popover_open = false,
-        AdminMessage::TaskEscape => model.admin.popover_open = false,
-        AdminMessage::TaskOutside { inside } => {
-            if !inside {
-                model.admin.popover_open = false;
-            }
-        }
+        AdminMessage::CloseTaskPopover => model.admin.popover_open = false,
         AdminMessage::SetOperation(operation) => model.admin.operation = operation,
         AdminMessage::SelectAction(action_id) => {
             model.admin.active_action_id = Some(action_id);

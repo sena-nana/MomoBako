@@ -9,7 +9,7 @@ use nana_ui::RuntimeProgramContext;
 use serde_json::Value;
 
 use crate::backend::services::repository::{
-    FileReadRequest, MetadataUpdateRequest, RevisionActionRequest, SearchDateFilter, SearchMetadataFilter,
+    FileReadRequest, MetadataUpdateRequest, SearchDateFilter, SearchMetadataFilter,
     SearchNumberFilter, SearchRequest, SearchSort,
 };
 use crate::shell::{
@@ -37,8 +37,6 @@ pub fn dispatch_inspect_effects(app: &mut MomoBakoApplication, context: &Runtime
             InspectEffect::SaveMetadata { repo_id, asset_id, expected_version, metadata } => {
                 dispatch_save(app, context, repo_id, asset_id, expected_version, metadata);
             }
-            InspectEffect::Undo { repo_id, asset_id } => dispatch_revision(app, context, repo_id, asset_id, true),
-            InspectEffect::Redo { repo_id, asset_id } => dispatch_revision(app, context, repo_id, asset_id, false),
             InspectEffect::LoadAsset { repo_id, asset_id } => dispatch_asset(app, context, repo_id, asset_id),
             InspectEffect::Search { generation, request } => dispatch_search(app, context, generation, request),
         }
@@ -205,34 +203,6 @@ fn dispatch_save(
     }
 }
 
-fn dispatch_revision(
-    app: &mut MomoBakoApplication,
-    context: &RuntimeProgramContext<ShellMessage>,
-    repo_id: String,
-    asset_id: String,
-    undo: bool,
-) {
-    let Some(services) = app.services.as_ref() else {
-        eprintln!("Nana 元数据修订需要领域服务，当前服务未启动");
-        app.shell.reduce(revision_message(Err("领域服务未启动".into())));
-        return;
-    };
-    let interaction = services.repository_interaction.clone();
-    let executor = services.executor.clone();
-    if let Err(error) = context.run_task(Task::new(async move {
-        let request = RevisionActionRequest { repo_id, asset_id };
-        let result = if undo {
-            executor.block_on(interaction.undo_last_revision(request))
-        } else {
-            executor.block_on(interaction.redo_last_revision(request))
-        };
-        revision_message(result.map(|response| (response.outcome, response.asset)))
-    })) {
-        eprintln!("Nana 元数据修订任务提交失败：{error}");
-        app.shell.reduce(revision_message(Err(format!("元数据修订任务提交失败：{error}"))));
-    }
-}
-
 fn dispatch_asset(app: &mut MomoBakoApplication, context: &RuntimeProgramContext<ShellMessage>, repo_id: String, asset_id: String) {
     let Some(services) = app.services.as_ref() else {
         eprintln!("Nana 打开搜索结果需要领域服务，当前服务未启动");
@@ -294,7 +264,8 @@ fn to_service_request(request: SearchRequestDraft) -> SearchRequest {
         date_filters: some_dates(request.date_filters),
         formats: some_list(request.formats),
         min_rating: request.min_rating,
-        match_mode: request.match_mode,
+        // 筛选栏和 Vue 一样没有匹配方式开关，多个条件总是全部满足，不传 `matchMode`。
+        match_mode: None,
         sort: request.sort_field.map(|field| SearchSort {
             field,
             direction: request.sort_direction.unwrap_or_else(|| "asc".into()),
@@ -346,10 +317,6 @@ fn body_error(path: String, markdown: bool, generation: u64, error: String) -> S
 
 fn saved_message(result: Result<(String, crate::backend::services::repository::AssetDetail), String>) -> ShellMessage {
     ShellMessage::Inspect(InspectMessage::MetadataSaved(result))
-}
-
-fn revision_message(result: Result<(String, crate::backend::services::repository::AssetDetail), String>) -> ShellMessage {
-    ShellMessage::Inspect(InspectMessage::RevisionLoaded(result))
 }
 
 fn search_message(generation: u64, result: Result<Vec<SearchRow>, String>) -> ShellMessage {

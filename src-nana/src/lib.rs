@@ -280,7 +280,7 @@ impl ApplicationState for MomoBakoApplication {
         window_host::on_window_event(self, event, context)
     }
 
-    /// 运行时路由完的每个输入。Escape 没被控件处理掉、ViewModel 里还有能关的层时，
+    /// 运行时路由完的每个输入。先记下按着的修饰键；Escape 没被控件处理掉、ViewModel 里还有能关的层时，
     /// 发一条消息关掉最上面一层，和别的消息一样经 `update` 归约。
     fn input_event(
         &mut self,
@@ -289,6 +289,7 @@ impl ApplicationState for MomoBakoApplication {
         _windows: &mut std::collections::HashMap<nana_ui_platform::WindowId, ApplicationWindow>,
         context: &RuntimeProgramContext<Self::Message>,
     ) -> Result<RuntimeProgramUpdate, FrameworkError> {
+        window_host::note_modifiers(&mut self.shell, &input.event.payload);
         if let Some(message) = window_host::escape_message(&self.shell, &input.event.payload, input.disposition.prevent_default) {
             context.dispatch(message);
         }

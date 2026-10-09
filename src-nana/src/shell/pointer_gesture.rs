@@ -47,7 +47,8 @@ pub fn observe_live_pointer(model: &mut ShellViewModel, document: &RuntimeDocume
     let hit = pressed.expect("按下目标");
     let on_row = row_at(world, hit, &rows).or_else(|| row_at_point(&rows, x, y));
     let (width, height) = viewport_size(world, document_id);
-    let append = additive_modifiers();
+    // Vue 框选的 `additive`：按下时按着 Ctrl 或 Meta。
+    let append = model.input.modifiers.command;
 
     if model.input.live_gesture.is_none() {
         if on_row.is_none() && !over_browser {
@@ -239,11 +240,6 @@ fn drag_backend_kind(repository: &WorkspaceRepository) -> String {
     } else {
         repository.backend_plugin_id.clone()
     }
-}
-
-/// 路由之后文档不保留 Ctrl / Meta。没有修饰键时框选是替换，和 Vue 松开这些键相同。
-fn additive_modifiers() -> bool {
-    false
 }
 
 fn pointer_distance(x0: f32, y0: f32, x1: f32, y1: f32) -> f32 {

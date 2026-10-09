@@ -1,13 +1,12 @@
-//! 把播放列表副作用交给已有的仓库交互和下载协议。
+//! 把播放列表副作用交给已有的仓库交互。
 //!
-//! 成员、排序、按路径添加和下载都没有替身。当前项的字节经仓库服务读取后在任务里解码，
+//! 成员、排序和按路径添加都没有替身。当前项的字节经仓库服务读取后在任务里解码，
 //! 条目里的相对路径不直接拿去读盘。服务没启动或任务提交失败时写回错误，
 //! 避免界面停在“正在提交”或“读取中”。
 
 use nana_ui::runtime::Task;
 use nana_ui::RuntimeProgramContext;
 
-use crate::backend::services::mutsuki_runner::PROTOCOL_PLAYLIST_DOWNLOAD;
 use crate::backend::services::repository::FileReadRequest;
 use crate::shell::player::{
     decode_loaded, PlayerEffect, PlayerMessage, preferences_path, sessions_path, settings_path,
@@ -26,12 +25,6 @@ pub fn dispatch_player_effects(app: &mut MomoBakoApplication, context: &RuntimeP
             PlayerEffect::SetMembership(request) => dispatch_set_membership(app, context, request),
             PlayerEffect::AddByPaths(request) => dispatch_add_paths(app, context, request),
             PlayerEffect::Reorder(request) => dispatch_reorder(app, context, request),
-            PlayerEffect::Download(request) => dispatch_download(app, context, request),
-            PlayerEffect::CancelDownload { task_id } => {
-                if app.services.as_ref().is_none_or(|services| !services.tasks.cancel(&task_id)) {
-                    eprintln!("Nana 取消下载没有找到任务：{task_id}");
-                }
-            }
             PlayerEffect::RestoreDetail { repo_id, playlist_id } => dispatch_restore(app, context, repo_id, playlist_id),
             PlayerEffect::LoadItem { repo_id, item_id, path, extension, still, generation } => {
                 dispatch_load_item(app, context, LoadRequest { repo_id, item_id, path, extension, still, generation });
@@ -123,26 +116,6 @@ fn dispatch_reorder(
     })) {
         eprintln!("Nana 播放列表排序任务提交失败：{error}");
         app.shell.reduce(ShellMessage::PlaylistDetailLoaded(Err(format!("播放列表排序任务提交失败：{error}"))));
-    }
-}
-
-fn dispatch_download(
-    app: &mut MomoBakoApplication,
-    context: &RuntimeProgramContext<ShellMessage>,
-    request: crate::backend::services::repository::DownloaderPlaylistRequest,
-) {
-    let Some(services) = app.services.as_ref() else {
-        eprintln!("Nana 播放列表下载需要领域服务，当前服务未启动");
-        app.shell.reduce(player(PlayerMessage::DownloadCompleted(Err("领域服务未启动".into()))));
-        return;
-    };
-    let tasks = services.tasks.clone();
-    let executor = services.executor.clone();
-    if let Err(error) = context.run_task(Task::new(async move {
-        player(PlayerMessage::DownloadCompleted(executor.block_on(tasks.execute(PROTOCOL_PLAYLIST_DOWNLOAD, request))))
-    })) {
-        eprintln!("Nana 播放列表下载任务提交失败：{error}");
-        app.shell.reduce(player(PlayerMessage::DownloadCompleted(Err(format!("播放列表下载任务提交失败：{error}")))));
     }
 }
 

@@ -359,8 +359,6 @@ fn metadata_draft_tracks_edits_and_refuses_invalid_saves() {
     assert_eq!(metadata.get("artist"), Some(&json!("momo")));
     assert!(state.saving);
 
-    state.reduce(true, Some("repo"), InspectMessage::Undo);
-    assert!(state.effects.is_empty());
     state.reduce(true, Some("repo"), InspectMessage::MetadataSaved(Err("磁盘错误".into())));
     assert!(!state.saving);
     assert_eq!(state.draft.comment, "hi");
@@ -460,21 +458,13 @@ fn virtual_clean_and_unrecognized_metadata_results_do_not_save() {
     assert_eq!(clean.draft.comment, "x");
 }
 
+/// 文件元数据读回以后有预览目标；打开目录时预览目标跟着清掉。
 #[test]
-fn primary_action_reopens_a_live_target_and_acceptance_keeps_the_old_detail() {
+fn opening_a_directory_drops_the_preview_target() {
     let mut live = writable_shell();
     live.reduce(ShellMessage::AssetDetailLoaded(Ok(asset("pics/a.png", "png", 1, false, Vec::new()))));
-    live.inspect.take_effects();
-    live.detail = "保持".into();
-    live.reduce(ShellMessage::PrimaryAction);
-    assert_eq!(live.detail, "保持");
     assert!(matches!(live.inspect.effects.last(), Some(InspectEffect::LoadImage { .. })));
-
-    let mut acceptance = ShellViewModel::for_page(ShellPage::SelectedFile);
-    assert_eq!(RouteKey::of(&acceptance), RouteKey::Files);
-    acceptance.reduce(ShellMessage::PrimaryAction);
-    assert_eq!(acceptance.detail, "当前没有可打开的预览");
-    assert!(acceptance.inspect.effects.is_empty());
+    assert_eq!(live.inspect.target_path.as_deref(), Some("pics/a.png"));
 
     live.reduce(ShellMessage::OpenDirectory("folder".into()));
     assert!(live.inspect.target_path.is_none());

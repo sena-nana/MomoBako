@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 use crate::backend::services::repository::{
-    DownloaderPlaylistProgressEvent, DownloaderPlaylistRequest, PlaybackSessionState, PlaylistDetail,
+    PlaybackSessionState, PlaylistDetail,
     PlaylistItemsByPathsAddRequest, PlaylistItemsOrderRequest, PlaylistMembershipRequest, PlaylistMembershipSnapshot,
     PlaylistPlayerContribution, PlaylistSummary,
 };
@@ -83,16 +83,6 @@ pub struct QueueItem {
     pub thumbnail_path: Option<String>,
 }
 
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct DownloadProgress {
-    pub phase: String,
-    pub total: usize,
-    pub completed: usize,
-    pub failed: usize,
-    pub current_song_name: Option<String>,
-    pub error: Option<String>,
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MembershipAction {
     pub playlist_id: String,
@@ -106,7 +96,6 @@ pub enum PlayerMessage {
     SetPreference { capability_id: String, plugin_id: Option<String> },
     PlayListed { item_id: Option<String> },
     PlayItem { item_id: String },
-    PlayEntry { repo_id: String, kind: String, extension: String, asset_id: String, is_virtual: bool, path: String, filename: String },
     PlayNext { natural_end: bool },
     PlayPrevious,
     CycleMode,
@@ -123,11 +112,6 @@ pub enum PlayerMessage {
     ToggleMembership { playlist_id: String, kind: String, extension: String, asset_id: String, is_virtual: bool, path: String },
     MembershipsLoaded { repo_id: String, result: Result<BTreeMap<String, Vec<String>>, String> },
     MembershipSaved(Result<PlaylistMembershipSnapshot, String>),
-    StartDownload(DownloaderPlaylistRequest),
-    DownloadCompleted(Result<(serde_json::Value, Vec<serde_json::Value>), String>),
-    CancelDownload,
-    NoteDownloadTask(String),
-    DownloadProgress(DownloaderPlaylistProgressEvent),
     Reorder { source: String, before: Option<String> },
     OpenPreview { item_id: Option<String> },
     RestoreDetail(Result<PlaylistDetail, String>),
@@ -144,8 +128,6 @@ pub enum PlayerEffect {
     SetMembership(PlaylistMembershipRequest),
     AddByPaths(PlaylistItemsByPathsAddRequest),
     Reorder(PlaylistItemsOrderRequest),
-    Download(DownloaderPlaylistRequest),
-    CancelDownload { task_id: String },
     RestoreDetail { repo_id: String, playlist_id: String },
     /// 经仓库服务读出当前项的字节。`still` 为真时按图片解码，否则按音视频。
     LoadItem { repo_id: String, item_id: String, path: String, extension: String, still: bool, generation: u64 },
@@ -179,9 +161,6 @@ pub struct PlayerState {
     pub preferences: BTreeMap<String, String>,
     pub memberships: BTreeMap<String, Vec<String>>,
     pub listed: Option<PlaylistDetail>,
-    pub download: DownloadProgress,
-    download_playlist_id: Option<i64>,
-    download_task_id: Option<String>,
     transient_seq: u64,
     restore_playlist_id: Option<String>,
     stored: BTreeMap<String, StoredSession>,
@@ -235,9 +214,6 @@ impl Default for PlayerState {
             preferences: BTreeMap::new(),
             memberships: BTreeMap::new(),
             listed: None,
-            download: DownloadProgress { phase: "idle".into(), ..DownloadProgress::default() },
-            download_playlist_id: None,
-            download_task_id: None,
             transient_seq: 0,
             restore_playlist_id: None,
             stored: BTreeMap::new(),
@@ -476,37 +452,6 @@ impl PlayerState {
         self.wants_playing = auto_play;
         clip::load_item(self, &item);
         self.persist_if_needed();
-    }
-
-    fn play_entry(&mut self, repo_id: &str, kind: &str, extension: &str, asset_id: &str, path: &str, filename: &str, inspect: &mut InspectState) {
-        if kind == "directory" {
-            eprintln!("Nana 目录不能作为临时播放项：{path}");
-            self.activity = "没有可用于播放此媒体的插件".into();
-            return;
-        }
-        let extension = if extension.trim().is_empty() {
-            filename.rsplit('.').next().unwrap_or("").to_ascii_lowercase()
-        } else {
-            extension.to_ascii_lowercase()
-        };
-        let Some((player_type_id, label, file_class)) = self.entry_player(&extension) else {
-            eprintln!("Nana 没有可用于播放此媒体的插件：{path}");
-            self.activity = "没有可用于播放此媒体的插件".into();
-            return;
-        };
-        if self.repo_id.as_ref().is_some_and(|current| current != repo_id) {
-            self.stop_runtime(false, inspect);
-            self.listed = None;
-            self.current_id = None;
-            self.queue.clear();
-            self.history.clear();
-            self.shuffle_order.clear();
-        }
-        self.repo_id = Some(repo_id.to_string());
-        let item = self.transient_item(path, filename, &extension, asset_id, &player_type_id, &label, &file_class);
-        self.insert_transient(item.clone());
-        self.play_item(&item.id, true);
-        self.publish(inspect);
     }
 
     fn play_next(&mut self, natural_end: bool, inspect: &mut InspectState) {

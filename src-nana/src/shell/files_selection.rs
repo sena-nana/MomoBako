@@ -76,24 +76,22 @@ impl FilesState {
         self.anchor = Some(path.to_string());
     }
 
+    /// Vue `selectWorkspaceEntry` 的 `toggle`：没选中的加进来并成为主选中项和锚点；选中的拿掉，
+    /// 拿掉的是主选中项时由剩下的第一项接替，否则主选中项不变；锚点被拿掉时跟主选中项。
     pub(in crate::shell) fn toggle_selection(&mut self, path: &str) {
-        if let Some(index) = self.selected.iter().position(|item| item == path) {
-            self.selected.remove(index);
-        } else {
+        let Some(index) = self.selected.iter().position(|item| item == path) else {
             self.selected.push(path.to_string());
-        }
-        if self.selected.iter().any(|item| item == path) {
             self.primary = Some(path.to_string());
             self.anchor = Some(path.to_string());
-        } else {
+            return;
+        };
+        self.selected.remove(index);
+        let kept = |item: &Option<String>| item.as_ref().is_some_and(|item| self.selected.contains(item));
+        if !kept(&self.primary) {
             self.primary = self.selected.first().cloned();
-            if self.anchor.as_deref() == Some(path) {
-                self.anchor = self.primary.clone();
-            }
         }
-        if self.selected.is_empty() {
-            self.primary = None;
-            self.anchor = None;
+        if !kept(&self.anchor) {
+            self.anchor = self.primary.clone();
         }
     }
 

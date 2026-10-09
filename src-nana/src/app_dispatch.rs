@@ -8,8 +8,8 @@ use nana_ui::runtime::Task;
 use nana_ui::RuntimeProgramContext;
 
 use crate::backend::services::repository::FileBrowserRequest;
-use crate::shell::{ShellMessage, ShellPage, StartupStatus};
-use crate::{decode_preview_pixels, services, MomoBakoApplication};
+use crate::shell::{ShellMessage, StartupStatus};
+use crate::{services, MomoBakoApplication};
 
 /// 归约前提交这条消息需要的服务任务。服务没启动时不提交，任务提交失败只记日志。
 pub(crate) fn dispatch_services(
@@ -19,12 +19,6 @@ pub(crate) fn dispatch_services(
 ) {
     dispatch_clear_logs(app, message, context);
     dispatch_playlists(app, message, context);
-    if let ShellMessage::CancelTask(task_id) = message
-        && let Some(services) = app.services.as_ref()
-        && !services.tasks.cancel(task_id)
-    {
-        eprintln!("Nana 任务取消请求未找到任务：{task_id}");
-    }
     dispatch_browse_and_preview(app, message, context);
 }
 
@@ -166,53 +160,6 @@ fn dispatch_browse_and_preview(
             ShellMessage::AssetDetailLoaded(
                 executor.block_on(query.get_asset_detail(repository_id, asset_id)),
             )
-        }));
-    }
-    if matches!(message, ShellMessage::PrimaryAction)
-        && app.shell.acceptance_scene
-        && app.shell.page == ShellPage::SelectedFile
-        && let (Some(repository_id), Some(path), Some(services)) = (
-            app.shell.repository_id.clone(),
-            app.shell.selected_path.clone(),
-            app.services.as_ref(),
-        )
-    {
-        let query = services.repository_query.clone();
-        let executor = services.executor.clone();
-        let request = crate::backend::services::repository::FileReadRequest { repo_id: repository_id, path };
-        run(context, "预览源", Task::new(async move {
-            ShellMessage::PreviewSourceLoaded(
-                executor.block_on(query.prepare_preview_file_source(request)),
-            )
-        }));
-    }
-    if let ShellMessage::PreviewSourceLoaded(Ok(source)) = message
-        && let Some(services) = app.services.as_ref()
-    {
-        let query = services.repository_query.clone();
-        let executor = services.executor.clone();
-        let source = crate::backend::services::repository::FilePreviewSourceResponse {
-            repo_id: source.repo_id.clone(),
-            path: source.path.clone(),
-            token: source.token.clone(),
-            source_url: source.source_url.clone(),
-            local_path: source.local_path.clone(),
-            media_type: source.media_type.clone(),
-            size_bytes: source.size_bytes,
-            modified_at: source.modified_at.clone(),
-        };
-        let request = crate::backend::services::repository::FileReadRequest {
-            repo_id: source.repo_id.clone(),
-            path: source.path.clone(),
-        };
-        run(context, "原生图片预览", Task::new(async move {
-            let pixels = executor.block_on(query.read_file(request)).and_then(|bytes| {
-                if !source.media_type.starts_with("image/") {
-                    return Err(format!("原生纹理预览暂不支持 {}", source.media_type));
-                }
-                decode_preview_pixels(&bytes)
-            });
-            ShellMessage::PreviewPixelsLoaded { source, pixels }
         }));
     }
 }

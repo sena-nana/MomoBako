@@ -49,7 +49,7 @@ pub(super) fn islands(signals: PlaylistRouteSignals) -> Vec<Island> {
 
 /// 播放集面板底部的播放条：显示着播放表面、点开了播放集才有。
 fn player_bar(model: &ShellViewModel) -> Option<AnyView> {
-    (model.player_surface_visible() && model.player.listed.is_some()).then(|| super::player_view::hosted_bar(model))
+    (model.player_surface_visible() && model.player.listed.is_some()).then(|| super::player_view::bar::player_bar(model))
 }
 
 /// 播放集路由的分支：首页外框里常驻筛选栏在上，下面是纵向滚动的播放集页和「不可播放项目」。

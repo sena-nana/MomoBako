@@ -81,7 +81,7 @@
 
 文件表面自己发起的首页是 80 条、继续加载是 160 条。侧栏目录、启动首屏和预览页「返回」（`OpenDirectory`）各读 200 条。四种展示都用 `each_virtual`，只建视口上下各 240px 以内的行，行高按内容量（`files_virtual.rs`）：列表一卡一行，卡片至少 72 高；网格卡片固定 148×190，按列表宽靠左装行；自适应卡片宽 `clamp(118, 120×宽高比+16, 300)`、缩略图高 120；瀑布流照 CSS 多列定列（列宽 164 起、列距 14、列宽均分），条目按顺序装列并平衡列高，不是最短列优先。缩略图纹理登记好（`texture_ready`）以后显示 Nana `Thumbnail`，否则卡片里画类型图标。
 
-复制进行中，状态机记「创建硬链接或复制文件」32%，成功后重读目录时记「刷新文件索引」84%；界面不显示这两条（`FilesState::operation_label` 没有调用方），变更进行中文件列显示「正在处理文件」。点击一律替换选择；切换和范围只在状态机里（`SelectionMode`），界面没有入口。单击只改选择；400 毫秒内再点同一条才进入目录或打开预览。预览是文件页里单独的一页（`files_view::previewing`）：双击、右键「预览」或别处读回同一文件时整块换成预览页；单击只在右侧详情里看元数据。筛选栏常驻在文件页顶部，开合由 `filter_bar_open` 决定。实况树在 `prepare` 里把指针拖动和框选送进同一套输入归约：条目拖动 7px 起步，框选任一轴超过 3px，从空白处按下、松手没拖动则清空选择，拖到文件夹上则移进该文件夹。本地插件按 filesystem 拖放。缩略图预取由 `prepare` 拨空闲时钟，满 420ms 才解码。侧栏新建、重命名、删除、编辑、播放、移除和 Escape 走同一套缺口消息。预览页页头和右键菜单的「打开」「定位」走 `OpenEntry` / `RevealEntry`，由宿主启动系统程序；系统调用失败时状态区写「打开失败：{错误}」「定位失败：{错误}」。最近使用视图可以「清空记录」，成功后计数归零并静默重读摘要，不把当前目录列表清空。右键菜单有预览、打开（目录是「进入」）、定位、复制到…、加入播放列表、来源插件动作、缩略图（选择文件、从剪贴板、取消自定义、刷新）、重命名、删除；回收站多「还原」，「彻底删除」要点两次。来源 entryActions 里的 clear-cache 和 refresh-playback 调用 call_plugin 并带上当前仓库。下载先打开编号 5 的文件夹对话框，选中目录后把 `destination.kind` 为 `localFolder` 的路径放进载荷再调用；取消或失败不调用。创建来源播放列表弹出名称输入，空白不提交，确认后载荷带上名称和当前仓库再调用。自定义缩略图「选文件」打开编号 6 的 `OpenFileDialog`，「剪贴板」读已有文本剪贴板里的图片路径或 `data:image` base64，「取消自定义」写入 `clear`。保存和取消都进现有 `ensure_thumbnail`；文件取消后没有剩余路径时再 `refresh`。对话框取消不写入。认不出的剪贴板记失败，不假装已经有图。色板最多五枚 `#RRGGBB` 文本。
+复制进行中，状态机记「创建硬链接或复制文件」32%，成功后重读目录时记「刷新文件索引」84%；界面不显示这两条（`FilesState::operation_label` 没有调用方），变更进行中文件列显示「正在处理文件」。单击照 Vue `selectionModeFromEvent`：Shift 是从锚点到这一条的范围，Ctrl / Meta 是切换（拿掉主选中项时由剩下的第一项接替），否则替换；路由以后文档不保留修饰键，宿主在 `input_event` 里先记下（`window_host::note_modifiers`），单击消息归约时读它。右侧详情跟着主选中项走。单击只改选择；400 毫秒内再点同一条才进入目录或打开预览。预览是文件页里单独的一页（`files_view::previewing`）：双击、右键「预览」或别处读回同一文件时整块换成预览页；单击只在右侧详情里看元数据。筛选栏常驻在文件页顶部，开合由 `filter_bar_open` 决定。实况树在 `prepare` 里把指针拖动和框选送进同一套输入归约：条目拖动 7px 起步，框选任一轴超过 3px，从空白处按下、松手没拖动则清空选择，按下时按着 Ctrl / Meta 的框选并进原来的选择，拖到文件夹上则移进该文件夹。本地插件按 filesystem 拖放。缩略图预取由 `prepare` 拨空闲时钟，满 420ms 才解码。侧栏新建、重命名、删除、编辑、播放、移除和 Escape 走同一套缺口消息。预览页页头和右键菜单的「打开」「定位」走 `OpenEntry` / `RevealEntry`，由宿主启动系统程序；系统调用失败时状态区写「打开失败：{错误}」「定位失败：{错误}」。最近使用视图可以「清空记录」，成功后计数归零并静默重读摘要，不把当前目录列表清空。右键菜单有预览、打开（目录是「进入」）、定位、复制到…、加入播放列表、来源插件动作、缩略图（选择文件、从剪贴板、取消自定义、刷新）、重命名、删除；回收站多「还原」，「彻底删除」要点两次。来源 entryActions 里的 clear-cache 和 refresh-playback 调用 call_plugin 并带上当前仓库。下载先打开编号 5 的文件夹对话框，选中目录后把 `destination.kind` 为 `localFolder` 的路径放进载荷再调用；取消或失败不调用。创建来源播放列表弹出名称输入，空白不提交，确认后载荷带上名称和当前仓库再调用。自定义缩略图「选文件」打开编号 6 的 `OpenFileDialog`，「剪贴板」读已有文本剪贴板里的图片路径或 `data:image` base64，「取消自定义」写入 `clear`。保存和取消都进现有 `ensure_thumbnail`；文件取消后没有剩余路径时再 `refresh`。对话框取消不写入。认不出的剪贴板记失败，不假装已经有图。色板最多五枚 `#RRGGBB` 文本。
 
 | 来源 | 触发 | 服务 | 结果 | 可见性 | 状态 |
 | --- | --- | --- | --- | --- | --- |
@@ -95,8 +95,8 @@
 | `files.ts` 打开条目 | 双击文件夹 | `get_file_browser` | 单击只选中；双击进入该目录并清空选择；切换或范围下单击只选中，不进入 | 面包屑“根目录”和路径段 | 已测试（未离屏） |
 | `files.ts` 打开文件 | 单击带 `asset_id` 的文件 | `get_asset_detail` | 选中并读取素材；右侧详情显示元数据，列表留着、不进预览页；双击或右键「预览」才换成预览页 | 选中该文件，右侧详情写出路径、大小和元数据 | 已离屏（`live-files-selected`、`files-selected-metadata`） |
 | `fileOperations.ts` 空白提交 | 名称去空白后为空，或导入来源拆行和分号后为空 | 无 | 不进入变更中，不发请求 | 对话框保持打开 | 已测试（未离屏） |
-| `fileOperations.ts` 新建和重命名 | 名称非空 | `create_directory` / `create_file` / `rename_entry` | 成功只采用返回快照里的名字；分类视图路径不一致时保留原列表并关闭对话框；失败保留原列表和对话框 | 变更进行中文件列显示“正在处理文件”，对话框主按钮写“处理中...”并禁用 | 已测试（未离屏） |
-| `CopyTargetDialog.vue` 复制和移动 | 已有选择，目标路径由页内输入 | `PROTOCOL_ENTRY_COPY` / `PROTOCOL_ENTRY_MOVE` | 复制父目录为空表示根；移动父目录用空字符串表示根；路径里的 `\` 收成 `/` | 文件列显示“正在处理文件”，对话框主按钮写“处理中...”并禁用；复制入口是右键“复制到…”，移动走拖放 | 已测试（未离屏） |
+| `fileOperations.ts` 新建和重命名 | 名称非空；建文件在工具栏输入框，新建文件夹在侧栏文件夹对话框，重命名在对话框 | `create_directory` / `create_file` / `rename_entry` | 成功只采用返回快照里的名字；建文件成功后清空输入框，失败留着名字（Vue `handleCreateFile`）；分类视图路径不一致时保留原列表并关闭对话框；失败保留原列表和对话框 | 变更进行中文件列显示“正在处理文件”，对话框主按钮写“处理中...”并禁用 | 已测试（未离屏） |
+| `CopyTargetDialog.vue` 复制和移动 | 已有选择；复制的目标路径在对话框里输入，移动的目标是拖放落下的文件夹 | `PROTOCOL_ENTRY_COPY` / `PROTOCOL_ENTRY_MOVE` | 复制父目录为空表示根；移动父目录用空字符串表示根；路径里的 `\` 收成 `/` | 文件列显示“正在处理文件”，对话框主按钮写“处理中...”并禁用；复制入口是右键“复制到…”，移动走拖放 | 已测试（未离屏） |
 | `fileOperations.ts` 协议结果 | 复制、移动、导入、压缩包、Eagle 或删除返回 | 成功后重新 `get_file_browser` | 成功不改当前行，保留选择并允许分类视图重读；智能文件夹不按目录重读；复制成功再列硬链接候选；失败保留原列表和对话框 | 对话框在成功后关闭 | 已测试（未离屏） |
 | `fileOperations.ts` 删除 | 有选择且可写 | `PROTOCOL_ENTRY_DELETE` | 回收站 mode 为 `permanentDelete`，普通删除 mode 为空；失败保留原列表和对话框 | 文件列显示“正在处理文件”；回收站里“彻底删除”要点两次 | 已测试（未离屏） |
 | `fileOperations.ts` 回收站 | 还原、还原全部、清空 | `mutate_trash` | 还原只在回收站；清空和还原全部不要求当前选择 | 文件列显示“正在处理文件” | 已测试（未离屏） |
@@ -107,7 +107,7 @@
 
 ## Phase 4 预览、元数据和搜索
 
-预览和元数据由 `src-nana/src/shell/inspect_tests.rs` 覆盖状态机，搜索和筛选由 `search_tests.rs` 覆盖，解码和内置预览的单测在各自模块里（`native_preview.rs`、`video_preview.rs`、`audio_decode.rs`）。浏览、详情和文本字节走 `RepositoryQueryViewModel` 的 `get_asset_detail`、`read_file`、`prepare_preview_file_source`；元数据保存走 `update_asset_metadata`；搜索走 `search_assets`；撤销和重做走 `RepositoryInteractionViewModel` 的 `undo_last_revision`、`redo_last_revision`。这些调用没有替身测试。预览按扩展名分派（`inspect_support.rs`）：图片在产品窗口经宿主纹理槽 `file-preview` 用 `GpuTextureView` 显示；Markdown 和纯文本同走等宽原文，顶栏多一枚「Markdown」标签；文件预览里的 WAV、mp3、flac 和 ogg 读出 PCM 后与底部播放条共用游标，未压缩和 MJPEG 的 AVI 用纯 Rust 解出画面和 PCM，其余认得出的容器在 Windows 上用系统媒体基础源读取器解画面和音轨，不打开窗口、不拉起播放器；没有画面的 m4a、aac、opus 只解音轨。Windows 非测试构建用 winmm 出声，单元测试构建不开设备。ZIP、CBZ、7z、RAR、CBR 列出文件。PDF 按内容流画出页面并可翻页，文案是「当前页 / 总页」，只留前 32 页；ASCII85、LZW、Flate 和 DCTDecode 会解，解不开的流是该页失败，全部页失败则整份失败。Open XML（含 pot、ppsx、xlsb、xltx、dotm 等）以及 OLE 文档里的 UTF-16 片段会抽出文本；抽不出文本是错误态。OBJ、glTF、GLB、STL、3MF 和 VRM 能抽出三角形时软件光栅，可旋转、缩放；抽不出时保留结构摘要。FBX 和 BLEND 只看文件头。PDF 页和模型光栅编码成 PNG 画进预览框；Nana `GpuView` 没有网格管线，网格不走 `GpuView`。不嵌入 pdf.js、Three.js 或 Chromium。播放列表当前项的装载在阶段 5。标了「已离屏」的行写明场景。
+预览和元数据由 `src-nana/src/shell/inspect_tests.rs` 覆盖状态机，搜索和筛选由 `search_tests.rs` 覆盖，解码和内置预览的单测在各自模块里（`native_preview.rs`、`video_preview.rs`、`audio_decode.rs`）。浏览、详情和文本字节走 `RepositoryQueryViewModel` 的 `get_asset_detail`、`read_file`、`prepare_preview_file_source`；元数据保存走 `update_asset_metadata`；搜索走 `search_assets`。这些调用没有替身测试。Vue `assetMetadata.ts` 的撤销和重做只在 composable 里导出、没有界面入口，Nana 不做。预览按扩展名分派（`inspect_support.rs`）：图片在产品窗口经宿主纹理槽 `file-preview` 用 `GpuTextureView` 显示；Markdown 和纯文本同走等宽原文，顶栏多一枚「Markdown」标签；文件预览里的 WAV、mp3、flac 和 ogg 读出 PCM 后与底部播放条共用游标，未压缩和 MJPEG 的 AVI 用纯 Rust 解出画面和 PCM，其余认得出的容器在 Windows 上用系统媒体基础源读取器解画面和音轨，不打开窗口、不拉起播放器；没有画面的 m4a、aac、opus 只解音轨。Windows 非测试构建用 winmm 出声，单元测试构建不开设备。ZIP、CBZ、7z、RAR、CBR 列出文件。PDF 按内容流画出页面并可翻页，文案是「当前页 / 总页」，只留前 32 页；ASCII85、LZW、Flate 和 DCTDecode 会解，解不开的流是该页失败，全部页失败则整份失败。Open XML（含 pot、ppsx、xlsb、xltx、dotm 等）以及 OLE 文档里的 UTF-16 片段会抽出文本；抽不出文本是错误态。OBJ、glTF、GLB、STL、3MF 和 VRM 能抽出三角形时软件光栅，可旋转、缩放；抽不出时保留结构摘要。FBX 和 BLEND 只看文件头。PDF 页和模型光栅编码成 PNG 画进预览框；Nana `GpuView` 没有网格管线，网格不走 `GpuView`。不嵌入 pdf.js、Three.js 或 Chromium。播放列表当前项的装载在阶段 5。标了「已离屏」的行写明场景。
 
 搜索面板在启动就绪后、面板是搜索时出现：有仓库是 `RouteKey::Search`，没有资源库是 `EmptySearch`。预览页在 `page == SelectedFile` 且不是单击选中时整块替换文件工作台（`files_view::previewing`，页面在 `inspect_preview_frame.rs`）：双击、右键「预览」，以及从搜索结果或播放集打开的文件会进；单击只选中，右侧 300px 详情卡显示缩略图、事实和元数据。标题栏输入先切到搜索面板，查询在 250 毫秒后才跑；在筛选栏里改条件也切到搜索面板。画面上没有保存按钮：草稿变脏后 260 毫秒自动保存，换选前先写完上一份。版本冲突保留本地草稿和原来的 `expected_version`。生产环境从内置的压缩包、PDF、文档和模型贡献开始。库类型快捷方式在插件加载前是空的；加载后，对象形式的 searchShortcuts，以及 ASMR 官方字符串 id，在当前文件或搜索结果里有该库类型的条目时出现在筛选栏。未知字符串记日志并跳过。后登记的同扩展名预览贡献优先。
 
@@ -128,27 +128,25 @@
 | `FileMetadataEditor.vue` 草稿 | 评分、注释、链接、标签；自定义字段只有 ASMR 候选应用会写 | 无，直到保存 | 评分 0–5，相同值回到 0；空白和重复标签忽略；保留键不能当自定义字段；注释没有时回退 note。自定义行只读，跳过编辑器自己画的通用字段，以及后端给每个素材种下的 title、type、favorite、color | 注释、链接输入框里是草稿；评分是五颗星（无障碍名“1 星”…“5 星”） | 已测试（未离屏） |
 | `FileMetadataEditor.vue` 保存 | 草稿已脏，且不是虚拟素材、不是保存中 | `update_asset_metadata`，`source` 为 desktop，没有替身 | 请求带 `expected_version`，以及评分、注释、链接和 `tagGroups`；自定义字段只写这次改过的，没动过的不回写，数字、布尔和数组不会被改存成字符串；虚拟、未脏或保存中不发请求；错误保留草稿。脏草稿再等 260 毫秒自动保存，换选前先保存上一份 | 画面上没有保存按钮；保存中评分、注释、链接和标签控件禁用；失败写进状态区“保存元数据失败：…” | 已测试（未离屏） |
 | `FileMetadataEditor.vue` 冲突 | 结果是 conflict | 不覆盖草稿，`expected_version` 不变 | 采用服务器版本后才替换草稿和版本 | “版本冲突，未写入” / “采用服务器版本” | 已离屏（`conflict`） |
-| `assetMetadata.ts` 撤销和重做 | 草稿不脏 | `undo_last_revision` / `redo_last_revision`，没有替身 | 有未保存编辑时拒绝并记日志 | 没有界面入口（Vue 也只在 composable 里导出） | 已测试（未离屏） |
 | `search.ts` 空条件 | 查询和筛选都为空 | 不调用 `search_assets` | 清空结果，结果区回到等条件 | “等待搜索条件” | 已测试（未离屏） |
-| `search.ts` 查询 | 有关键词或筛选条件 | `search_assets`，没有替身 | 标题栏改查询后等 250 毫秒再搜。AND 不传 `matchMode`；错误保留上一份结果；过期代次忽略成功和失败。跑完没有命中时空状态按页头范围写明哪里没有匹配的文件；失败时只写错误，不另写空状态 | “当前查询: …” / “当前资源库筛选: …” / “没有匹配的文件” | 已离屏（`search-empty`，只走空结果） |
-| `WorkspaceFilterBar.vue` 筛选 | 标签、格式、颜色、形状、评分、高级条件 | `search_assets`，没有替身 | 颜色和形状变成 color、shape 元数据筛选；只有 OR 传 `matchMode`；排序字段为空不传排序；limit ≤ 0 为空；minRating ≤ 0 为空 | 评分芯片“全部”“1 星+”…“5 星+”；筛选栏没有匹配方式开关 | 已测试（未离屏） |
+| `search.ts` 查询 | 有关键词或筛选条件 | `search_assets`，没有替身 | 标题栏改查询后等 250 毫秒再搜。不传 `matchMode`（Vue 工作区筛选的 `matchMode` 没有界面能改成 or）；错误保留上一份结果；过期代次忽略成功和失败。跑完没有命中时空状态按页头范围写明哪里没有匹配的文件；失败时只写错误，不另写空状态 | “当前查询: …” / “当前资源库筛选: …” / “没有匹配的文件” | 已离屏（`search-empty`，只走空结果） |
+| `WorkspaceFilterBar.vue` 筛选 | 标签、格式、颜色、形状、评分、高级条件 | `search_assets`，没有替身 | 颜色和形状变成 color、shape 元数据筛选；排序字段为空不传排序；limit ≤ 0 为空；minRating ≤ 0 为空 | 评分芯片“全部”“1 星+”…“5 星+”；筛选栏没有匹配方式开关 | 已测试（未离屏） |
 | `selectors.ts` `hasActiveFilters` | 只有排除关键词、排除路径、排除数值或排除日期 | 不设置 `repoId` | 这些条件本身仍然会发起搜索 | 摘要保持“当前查询” | 已测试（未离屏） |
 | `search.ts` 缺少仓库 | 活动筛选需要仓库，但没有活动仓库 | 不请求 | 清空结果并记日志 | 结果被清空 | 已测试（未离屏） |
 | `useSearchUi.ts` 筛选栏 | 开关、清空、不可写 | 清空后按剩余查询重跑 | 开关不清筛选；清空回到初始筛选，不关栏也不清查询；资源库不可写时忽略筛选变更 | 标题栏开关“显示筛选栏 / 隐藏筛选栏”（提示“筛选”）；栏内“清除”“关闭筛选栏” | 已测试（未离屏） |
 | `filterInputs.ts` 解析 | `key=value`、`key=min..max`、`key=from..to`、路径 | 无 | 空键或空值丢掉；数值要有一个有限边界；`\` 收成 `/` 并去掉首尾斜杠 | 高级筛选输入 | 已测试（未离屏） |
 | `SearchPanel.vue` 打开结果 | 点击一条结果 | `get_asset_detail`，没有替身 | 切到文件面板，选中路径，用结果自己的仓库 id；空素材 id 报错，不假装成功 | “搜索结果没有素材 id” | 已测试（未离屏） |
 | `WorkspaceFilterBar.vue` 库类型快捷方式 | `ApplyShortcut` | 无 | 插件加载后登记对象快捷方式和 ASMR 的 works、lyrics、continue、random，当前文件或搜索结果里有该库类型的条目时才显示；点按钮写入已有筛选和排序。未知字符串跳过。不可写时忽略 | “ASMR 作品” / “含歌词” / “继续收听” / “随机一首” | 已测试（未离屏） |
-| 主按钮 | 已经有预览目标 | 按当前类型重新打开 | 没有目标时写「当前没有可打开的预览」，且不重复拉取预览；`ShellMessage::PrimaryAction` 没有界面发送方，文字写进没有视图读的 `detail` | 没有界面入口 | 已测试（未离屏） |
 | 预览页 | `page == SelectedFile`，且不是单击选中（`files_view::previewing`） | 无 | 整块替换文件工作台，眉题键 `inspect-preview-eyebrow`；双击、右键「预览」，以及从搜索结果或播放集打开的文件会进，单击不进 | “文件预览” | 已离屏（`selected-file`、`live-preview`、`preview-text`、`preview-image`、`preview-audio`） |
 | 搜索面板 | 启动就绪后面板是搜索 | 无 | 有仓库是 `RouteKey::Search`；没有资源库是 `EmptySearch`，写「还没有可搜索的资源库」 | “输入关键词、标签或评分条件后，这里会展示跨仓库结果。” | 已离屏（有仓库：`filter-bar`、`search-empty`） |
 
 ## Phase 5 播放列表
 
-这些行由 `src-nana/src/shell/player_tests.rs`（含 `player_wav_tests.rs`）和 `player_clip_tests.rs` 覆盖状态机，播放集页和路由由 `player_playlist_page_tests.rs`、`route_playlists_tests.rs` 覆盖，系统媒体键的测试在 `system_media.rs`。成员走 `RepositoryInteractionViewModel` 的 `list_playlist_memberships` 和 `set_playlist_membership`；目录和不能切换的条目走已有的 `add_playlist_items_by_paths`；排序走已有的 `reorder_playlist_items`；移除条目走 `remove_playlist_item`；恢复详情走 `get_playlist_detail`；当前项的字节走 `read_file`；下载走 `MutsukiTaskViewModel::execute` 的 `momobako.playlist.download`。这些调用没有替身测试。播放条和预览共用一份 `PlaybackSessionState`。预览里的 WAV、mp3、flac、ogg，以及 Windows 上媒体基础解出的 m4a、aac、opus，会把 PCM 装进同一游标；Windows 非测试构建用 winmm 出声，单元测试构建不开设备。播放列表的当前项（音频、视频、图片）只读、只解这一条：先置 loading，字节经仓库服务读出，在任务里解码，用 `ItemLoaded` 装进现有会话；画面 16 MiB、PCM 32 MiB 的上限沿用预览；没有当前项不解码。没有候选也没有贡献时写「缺少对应播放插件」或回退提示；只有贡献、扩展名又不是音视频会话或图片时写「暂不支持播放 {扩展名} 文件」；都不会变成 playing。播放集页的条目放在 `ReorderList` 里，行内只有「播放」「移除」，没有上移、下移；验收场景渲染的就是这一页。标了「已离屏」的行写明场景。
+这些行由 `src-nana/src/shell/player_tests.rs`（含 `player_wav_tests.rs`）和 `player_clip_tests.rs` 覆盖状态机，播放集页和路由由 `player_playlist_page_tests.rs`、`route_playlists_tests.rs` 覆盖，系统媒体键的测试在 `system_media.rs`。成员走 `RepositoryInteractionViewModel` 的 `list_playlist_memberships` 和 `set_playlist_membership`；目录和不能切换的条目走已有的 `add_playlist_items_by_paths`；排序走已有的 `reorder_playlist_items`；移除条目走 `remove_playlist_item`；恢复详情走 `get_playlist_detail`；当前项的字节走 `read_file`；这些调用没有替身测试。播放条和预览共用一份 `PlaybackSessionState`。预览里的 WAV、mp3、flac、ogg，以及 Windows 上媒体基础解出的 m4a、aac、opus，会把 PCM 装进同一游标；Windows 非测试构建用 winmm 出声，单元测试构建不开设备。播放列表的当前项（音频、视频、图片）只读、只解这一条：先置 loading，字节经仓库服务读出，在任务里解码，用 `ItemLoaded` 装进现有会话；画面 16 MiB、PCM 32 MiB 的上限沿用预览；没有当前项不解码。没有候选也没有贡献时写「缺少对应播放插件」或回退提示；只有贡献、扩展名又不是音视频会话或图片时写「暂不支持播放 {扩展名} 文件」；都不会变成 playing。播放集页的条目放在 `ReorderList` 里，行内只有「播放」「移除」，没有上移、下移；验收场景渲染的就是这一页。标了「已离屏」的行写明场景。
 
 播放条在启动就绪、主区有仓库，且面板是文件或播放列表时出现；预览页底部的播放条在预览打开时就出现。会话写到设置目录的 `playback-sessions.json`，只保存非临时条目。生产环境的原生播放候选只有内置解码器：WAV、MP3 / FLAC / Ogg，Windows 上还有交给媒体基础的 M4A / AAC / Opus；插件登记的播放器贡献在插件列表换新以后读回（见阶段 6）。播放器的播放集列表和侧栏是同一份：侧栏绑定仓库时读，新建、删除以后换上返回的整份列表。Windows 非测试构建注册系统媒体传输控件；单元测试构建不注册，也不打开真系统会话。
 
-下载（`momobako.playlist.download`）目前没有界面入口，只有状态机和测试：有任务编号之后取消下载记下「正在取消下载…」，编号返回前是「下载任务还没有可取消的句柄」；`DownloadProgress` 可以在整批结果返回前更新「正在下载 N / N，失败 N」，下载进行时这一行画在播放条下面。设置页播放器选择在阶段 6。
+播放集下载（`momobako.playlist.download`）在 Vue 里只经前端插件 SDK 的 `downloadPlaylistWithProgress` 发起，宿主界面没有入口；Nana 不运行前端插件，不做。设置页播放器选择在阶段 6。
 
 | 来源 | 触发 | 服务 | 结果 | 可见性 | 状态 |
 | --- | --- | --- | --- | --- | --- |
@@ -171,17 +169,15 @@
 | 播放列表当前项 | 当前条目扩展名是 mp4、mov、mkv、webm、avi、m4v、m4a、aac、opus | 只读这一条：`read_file` 后经 `decode_media` 解码，沿用预览的画面和 PCM 上限 | 没有当前项不解码。有 PCM 时进入现有播放会话；Windows 非测试构建出声，单元测试构建不开设备。解不开是 failed，文案含「解码失败」。队列里其它路径不打开 | “解码失败” | 已测试（未离屏） |
 | `usePlayerUi.ts` 图片停留和适配 | 当前项是图片，或切换适应 / 填充 | 写入 `playback-settings.json` | 停留钳在 2000–30000，坏数字回到 5000；只有 cover 是填充 | “适应” / “填充” | 已测试（未离屏） |
 | `usePlaylistPlayer.ts` 模式 | 循环、随机、单曲，以及自然结束 | 无 | 单曲自然结束留在当前项；手动到末尾停止；随机缺序列时重建后取后继，走到末尾时重建后取新序列第一项 | “列表循环” / “随机播放” / “单曲循环” | 已测试（未离屏） |
-| `usePlaylistPlayer.ts` 临时项 | 从文件插播（产品里由预览接管触发，`PlayEntry` 没有界面发送方），或自然结束 | 无 | 相同路径的旧临时项去掉；自然结束后清掉已经不是当前项的临时项；活动列表详情保留当前项和历史里的临时项 | “当前队列” / “N 项” | 已测试（未离屏） |
+| `usePlaylistPlayer.ts` 临时项 | 预览接管播放条时从文件插播，或自然结束 | 无 | 相同路径的旧临时项去掉；自然结束后清掉已经不是当前项的临时项；活动列表详情保留当前项和历史里的临时项 | “当前队列” / “N 项” | 已测试（未离屏） |
 | `usePlaylistPlayer.ts` 跨仓库插播 | 当前仓库不同 | `stop(false)`，不删存储 | 先确认有播放器，再停运行时；临时项不写入会话文件 | 会话仍是 failed | 已测试（未离屏） |
 | `usePlaylistPlayer.ts` 会话 | 非临时项开始播放，或停止 | 写入 `playback-sessions.json` | 坏 JSON 或缺文件回到默认；不完整会话忽略；停止把状态写成 ended，时间归零，保留当前 id；切仓库的停止还删掉该仓库的存储，系统媒体键的停止不删 | “0:00 / 0:00” | 已测试（未离屏） |
 | `AppShell.vue` 恢复 | 播放集列表（侧栏读回、新建或删除以后）里有存储的列表，播放器仓库还不是该仓库，且播放器类型认得：内置候选当场认得，插件类型等播放器类型读回；读回了还不认得就清掉会话 | `get_playlist_detail`，没有替身；详情在读时不重复读 | 类型须是候选或贡献，条目须就绪且列表一致；否则清掉该仓库会话。照 Vue `setActivePlaylist(.., { restore: true })`：重新装载当前项（先 loading），模式、音量、播放意图沿用存下的；装载期间进度和时长显示存下的值、会话文件不被清零；装好以后能跳转就跳到存下的位置（超过时长夹到结尾），图片幻灯片不能跳转、从头放；装载失败保留存下的进度 | 音量保留，进度从存下的位置接着 | 已测试（`player_wav_tests.rs`，未离屏） |
 | `AppShell.vue` 切仓库 | 播放另一个仓库的列表，或停止指定仓库 | 清掉被换下仓库的会话 | 即使当前播放仓库已经不同，也删除被指定仓库的存储；只停止仍属于该仓库的运行时 | 被停止的会话是 ended | 已测试（未离屏） |
 | `WorkspacePlayerBar.vue` 共用会话 | 预览读到音视频，或播放条改音量 | 与预览共用 `PlaybackSessionState` 和同一 WAV 游标 | 图片预览不覆盖播放条；WAV、mp3、flac、ogg、解出的视频，以及没有画面的 m4a、aac、opus 会装入会话，播放条的播放、跳转和音量在有音轨时于 Windows 非测试构建出声，单元测试构建不开设备；解不开的媒体停在 failed；播放条失败时预览里的会话一起停在 failed 或 ended | “没有原生解码器” / “解码失败” | 已测试（未离屏） |
 | `usePlaylistPlayer.ts` 打开预览 | 当前有条目 | 有素材 id 时 `get_asset_detail`，没有替身 | 切到文件面板和全部分类，并选中路径 | 点播放集条目的标题或扩展名方块，或播放条左侧的封面和两行字 | 已测试（未离屏） |
-| `momobako.playlist.download` | 插件提交下载请求（当前没有界面入口） | `MutsukiTaskViewModel::execute`，没有替身 | 提交阶段是 submitting；返回的进度按顺序应用；其他列表的事件忽略；空结果记为 complete；失败记为 error | “正在提交播放列表下载…” / “正在下载 N / N，失败 N” | 已测试（未离屏） |
-| `momobako.playlist.download` 取消 | 任务编号还没有返回 | 不调用 `cancel` | 记日志，并写进 `PlayerState.activity`（界面不显示） | “下载任务还没有可取消的句柄” | 已测试（未离屏） |
 | `useSystemMediaSession.ts` | 播放、暂停、上一首、下一首、跳转、停止 | 无。动作写回现有播放条消息 | Windows 非测试构建 `system_media_session_available` 为真，并向当前窗口注册系统媒体控件。播放、暂停、上一首、下一首、跳转和停止分别写成 `SetPlaying`、`PlayPrevious`、`PlayNext`、`Seek`、`Stop`，停止不删除已存储会话。标题用元数据 title，否则用文件名；艺人优先用 artists 数组。封面优先用播放列表缩略图。单元测试构建恒为假，不注册真会话 | “夜曲” / 测试构建没有系统会话 | 已测试（未离屏）。测试不注册真系统会话 |
-| 播放条 | 启动就绪、主区有仓库，且面板是文件或播放列表；预览页底部的播放条在预览打开时就出现 | 无 | 文件路由的工作台和预览页、播放集路由各有一个播放条岛；播放条根键 `player-card`，下载进行时外面多一层 `player-surface` | “未选择播放内容” / “0:00 / 0:00” / “列表循环” | 已离屏（`file-list`、`playback-running`、`preview-audio`） |
+| 播放条 | 启动就绪、主区有仓库，且面板是文件或播放列表；预览页底部的播放条在预览打开时就出现 | 无 | 文件路由的工作台和预览页、播放集路由各有一个播放条岛；播放条根键 `player-card` | “未选择播放内容” / “0:00 / 0:00” / “列表循环” | 已离屏（`file-list`、`playback-running`、`preview-audio`） |
 
 ## Phase 6 设置、插件、日志和任务
 
@@ -198,7 +194,7 @@
 | `Settings.vue` 后端计数 | 仓库列表成功 | 无 | 按后端插件累计，保留首次出现的顺序 | “本地 (2)” / “无” | 已测试（未离屏） |
 | `Settings.vue` 外部连接 | 复制或导出 | 有路径时 `write_binary_file`，没有替身；复制交给宿主剪贴板；导出先发 `OpenFileDialog` | 空值不复制；令牌取前 10 和后 6 位；取消导出不写文件；写出成功后记文件名；剪贴板写入失败才显示失败文案 | “Token 已复制。” / “复制失败：系统剪贴板写入失败” / “external-api.json 已导出。” / “导出失败：{原因}” | 已测试（未离屏） |
 | `Settings.vue` 设置包 | 启动结束、打开设置页、插件面板「刷新」，或拓展页还没有插件列表 | 五项读取（插件、钩子记录、缓存、API 设计、外部连接），没有替身；读回后重读播放器类型 | 任一失败则五份都不写入，保留上一份 | 插件管理面板的错误条写原文，例如“读取插件目录失败：拒绝访问。 (os error 5)” | 已离屏（`settings-error`，只走全败分支） |
-| `repository.select` | 插件事件带来仓库 id | 非空白时走现有仓库选择 | 空白忽略，当前仓库不变 | 当前仓库不变 | 已记账（`AdminMessage::SelectRepository` 没有发送方，也没有测试） |
+| `repository.select` | Vue 设置页监听前端插件 SDK 的插件事件 | 无 | Nana 不运行前端插件，没有这条事件，不做 | 无 | 不做 |
 | `PluginManagerPanel.vue` 分组和搜索 | 插件列表或关键词 | 无 | 分类顺序是来源、库类型、解析、预览、服务、未分类；未知分类进未分类；搜索不区分大小写 | “3 个插件” | 已测试（未离屏） |
 | `PluginManagerPanel.vue` 删除 | 用户插件确认，或非用户插件 | `delete_plugin`，没有替身 | 先进入待确认，取消不请求；非用户插件忽略；成功文案在列表替换后出现 | 确认框标题“删除插件”，按钮“删除”（忙时“删除中...”） / “插件已删除。” | 已测试（未离屏） |
 | `PluginManagerPanel.vue` 字段 | 数字、选择、布尔、JSON | `set_plugin_config_value` 或 `delete_plugin_config_value`，没有替身 | 空数字或空选项是重置；非法 JSON 不请求；空 JSON 文本按 null 保存 | “原始 不是有效 JSON。” / “插件设置已保存。” | 已测试（未离屏） |

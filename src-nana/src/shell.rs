@@ -72,7 +72,6 @@ pub enum ShellMessage {
     /// 打开设置页：读设置包和应用设置，和 Vue `Settings.vue` 挂载时的 `loadSettingsData` 一致。
     OpenSettings,
     Refresh,
-    PrimaryAction,
     EditAction,
     RepositoriesLoaded(Result<Vec<RepositorySummary>, String>),
     RepositorySnapshotLoaded(Result<RepositorySnapshot, String>),
@@ -82,7 +81,6 @@ pub enum ShellMessage {
     SelectFile { path: String, asset_id: Option<String> },
     OpenDirectory(String),
     AssetDetailLoaded(Result<AssetDetail, String>),
-    PreviewSourceLoaded(Result<FilePreviewSourceResponse, String>),
     PreviewPixelsLoaded {
         source: FilePreviewSourceResponse,
         pixels: Result<PreviewPixels, String>,
@@ -105,7 +103,6 @@ pub enum ShellMessage {
     SettingsSaved(Result<ApplicationSettings, String>),
     /// 宿主观察到的运行中任务（排队、运行、取消中），整份换上。
     TaskProgressLoaded(Vec<TaskProgressSnapshot>),
-    CancelTask(String),
     WindowAction(WindowAction),
     /// 带代次的仓库列表结果。代次不匹配时保留当前启动步骤。
     WorkspaceListLoaded {
@@ -400,7 +397,6 @@ impl ShellViewModel {
         self.motion.set_operation_percent(operation);
         self.motion.set_spinner(spinner);
         self.motion.set_pulse(self.files.operation_indeterminate());
-        self.motion.set_sweep(self.player.download_indeterminate());
         self.motion.set_sidebar_collapsed(self.workspace.sidebar_collapsed, self.workspace.sidebar_width);
     }
 
@@ -543,19 +539,6 @@ impl ShellViewModel {
                 self.detail = format!("无法读取文件元数据：{error}");
                 self.inspect.note_detail_error(&error);
             }
-            ShellMessage::PreviewSourceLoaded(Ok(source)) => {
-                self.page = ShellPage::SelectedFile;
-                self.preview_url = source.source_url;
-                self.preview_token = Some(source.token);
-                self.detail = format!(
-                    "{} · {} · {} 字节",
-                    source.media_type, source.path, source.size_bytes
-                );
-            }
-            ShellMessage::PreviewSourceLoaded(Err(error)) => {
-                self.page = ShellPage::Error;
-                self.detail = format!("无法打开预览源：{error}");
-            }
             ShellMessage::PreviewPixelsLoaded { source, pixels } => {
                 let pixels_ok = pixels.is_ok();
                 let error_text = pixels.as_ref().err().cloned();
@@ -657,7 +640,6 @@ impl ShellViewModel {
             | ShellMessage::SettingsThemeChanged(_)
             | ShellMessage::SettingsSaved(_)
             | ShellMessage::TaskProgressLoaded(_)
-            | ShellMessage::CancelTask(_)
             | ShellMessage::Admin(_) => {}
             ShellMessage::WindowAction(_) => {}
             ShellMessage::Refresh => {
@@ -718,11 +700,6 @@ impl ShellViewModel {
             }
             ShellMessage::SetWorkspacePanel(panel) => self.workspace.panel = panel,
             ShellMessage::SetLibraryCategory(category) => self.workspace.library_category = category,
-            ShellMessage::PrimaryAction => {
-                if !self.inspect.request_open() {
-                    self.detail = "当前没有可打开的预览".into();
-                }
-            }
             ShellMessage::EditAction => {
                 self.detail = if self.dirty || self.inspect.dirty() {
                     "未保存的修改留在当前草稿".into()
