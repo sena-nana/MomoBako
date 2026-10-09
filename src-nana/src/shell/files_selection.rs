@@ -9,9 +9,15 @@ use super::{FileContext, FileDialog, FileRow, FilesState, SelectionMode};
 
 impl FilesState {
     /// 单击选中的是文件时记下它：素材详情回来后仍留在列表，不切到预览页。
+    ///
+    /// 单击文件夹两项都不动：右侧详情停在哪个文件、还在读哪个文件都照旧，列表不会因此换成那个文件的
+    /// 预览页。Vue 单击只改选择，预览只由双击、「预览」这些显式入口打开（`previewFileEntry`）。
     pub(in crate::shell) fn note_selected_only(&mut self, path: &str) {
         let file = self.rows.iter().chain(self.virtual_rows.iter()).any(|row| row.path == path && row.kind != "directory");
-        self.select_only = file.then(|| path.to_string());
+        if !file {
+            return;
+        }
+        self.select_only = Some(path.to_string());
         self.click_load = self.select_only.clone();
     }
 
