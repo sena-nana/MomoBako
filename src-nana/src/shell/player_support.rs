@@ -193,6 +193,17 @@ pub fn default_capability(player_type_id: &str) -> String {
     }
 }
 
+/// Nana 自带的内存解码器能放的音频格式，按候选登记顺序连成「WAV / MP3 / FLAC / Ogg」。
+/// 这些候选的 PCM 装进同一个游标出声，不依赖任何插件；一个都没有时为空。
+pub fn builtin_audio_formats(candidates: &[PlayerCandidate]) -> Option<String> {
+    let labels = candidates
+        .iter()
+        .filter(|candidate| candidate.file_class == "audio" && super::wav_player::is_memory_candidate(candidate))
+        .map(|candidate| candidate.label.as_str())
+        .collect::<Vec<_>>();
+    (!labels.is_empty()).then(|| labels.join(" / "))
+}
+
 /// 按显式选择、官方默认的顺序解析。音频不会被未选择的第三方实现接管。
 pub fn resolve_player(
     player_type_id: &str,

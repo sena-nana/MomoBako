@@ -1,7 +1,7 @@
 //! 文件页工作区，对应 Vue `WorkspaceFilesSurface.vue` 和 `FileBrowserPanel.vue`。
 //!
 //! 版式和 `.files-workbench` 一致：左列 `.files-workbench__main` 竖排文件卡片和播放条（间距 18），
-//! 右列是 300px 宽的详情卡片。双击或「预览」打开预览页时，整块换成预览和播放条。
+//! 右列是 300px 宽的详情卡片。双击或「预览」打开预览页时，整块换成预览页，播放条在预览页底部。
 //! 外边距由壳层主区统一给，这里只负责两列本身；面板固定高度，列表和详情各自滚动。
 
 use nana_ui::runtime::view::{widget, AnyView, IntoView};
@@ -58,20 +58,11 @@ pub(super) fn live_file_column(model: &ShellViewModel) -> AnyView {
         .into_any()
 }
 
-/// 预览页：预览和元数据在上，播放条固定在下面，不把高度挤出窗口。
+/// 预览页：整块交给预览框架。播放条由框架贴在页底（Vue `files-preview-page` 里的
+/// `WorkspacePlayerBar`），这里不再另挂播放条位置，页底不多出间距。
 fn preview_page(model: &ShellViewModel) -> AnyView {
-    let inspect = widget(
-        Stack::fill_column(0.0)
-            .min_width(LengthSpec::Px(0.0))
-            .min_height(LengthSpec::Px(0.0))
-            .with_layout(|layout| layout.flex_basis = Some(LengthSpec::Px(0.0))),
-    )
-    .children((super::inspect_view::inspect_surface(model),))
-    .key("file-preview-inspect")
-    .into_any();
-    let player = model.player_surface_visible().then(|| player_slot(model));
-    widget(Stack::fill_column(DETAIL_GAP).min_width(LengthSpec::Px(0.0)).min_height(LengthSpec::Px(0.0)))
-        .children((inspect, player))
+    widget(Stack::fill_column(0.0).min_width(LengthSpec::Px(0.0)).min_height(LengthSpec::Px(0.0)))
+        .children((super::inspect_view::inspect_surface(model),))
         .key("file-preview-page")
         .into_any()
 }

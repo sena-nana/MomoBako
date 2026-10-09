@@ -3,6 +3,7 @@
 //! 顺序和 Vue 一致：注释、链接两行带图标的输入，评分五颗星，可折叠的标签组，然后是
 //! 添加到资源库、创建时间、文件修改时间、尺寸、原始大小、调色板、索引标签、多归属位置、
 //! 来源标题和来源链接。改动先进草稿，260ms 后自动保存；画面上不放保存按钮。
+//! 自动保存撞上服务器的新版本时，注释前面先写出冲突和「采用服务器版本」，草稿留在输入框里。
 //! 文件详情和预览页共用这一块。
 
 use std::collections::BTreeMap;
@@ -34,13 +35,14 @@ pub(super) fn metadata_panel(model: &ShellViewModel) -> AnyView {
     let inspect = &model.inspect;
     let row = target_row(model);
     let locked = !inspect.can_edit();
-    let mut rows = vec![
+    let mut rows: Vec<AnyView> = conflict_notice(&inspect.conflict).into_iter().collect();
+    rows.extend([
         inline_field("注释", MESSAGE, "inspect-comment", inspect.draft_comment(), "记录这个文件的用途、状态或上下文。", locked, true, InspectMessage::SetComment),
         inline_field("链接", LINK, "inspect-link", inspect.draft_link(), "https://example.com", locked, false, InspectMessage::SetLink),
         rating_row(inspect.draft_rating(), locked),
         tags_row(model, locked),
         recorded_grid(model, row.as_ref()),
-    ];
+    ]);
     let custom = super::inspect_asmr::display_custom(model);
     let library = super::inspect_library::library_sections(&custom);
     let claimed = !library.is_empty();
@@ -54,17 +56,26 @@ pub(super) fn metadata_panel(model: &ShellViewModel) -> AnyView {
     if !extra.is_empty() {
         rows.push(widget(Stack::column(12.0).width(LengthSpec::Fill)).children(extra).key("inspect-custom").into_any());
     }
-    if !inspect.conflict.is_empty() {
-        rows.push(widget(ValidationMessage::new(inspect.conflict.clone(), ValidationIntent::Danger)).key("inspect-conflict").into_any());
-        rows.push(
-            widget(style::styled_button("采用服务器版本", None, ButtonLook::TOOLBAR))
-                .key("inspect-adopt")
-                .on_cx(|_, _: &Activate, cx| cx.dispatch_program_all(inspect_message(InspectMessage::AdoptConflict)))
-                .into_any(),
-        );
-    }
     let panel = style::top_rule(Stack::column(12.0).width(LengthSpec::Fill).min_width(LengthSpec::Px(0.0)), 12.0);
     widget(panel).children(rows).key("inspect-metadata").into_any()
+}
+
+/// 自动保存撞上服务器的新版本：警告色写明冲突，右边是「采用服务器版本」。没有冲突时不占位。
+/// 放在注释前面，紧挨着被拒绝写入的字段，不沉到只读事实下面（DESIGN.md：冲突必须靠近字段出现）。
+fn conflict_notice(conflict: &str) -> Option<AnyView> {
+    if conflict.is_empty() {
+        return None;
+    }
+    let notice = Stack::bar(8.0).align(AlignSpec::Center).justify(JustifySpec::SpaceBetween).width(LengthSpec::Fill).min_width(LengthSpec::Px(0.0));
+    let view = widget(notice)
+        .children((
+            widget(ValidationMessage::new(conflict.to_string(), ValidationIntent::Warning)).key("inspect-conflict"),
+            widget(style::styled_button("采用服务器版本", None, ButtonLook::TOOLBAR))
+                .key("inspect-adopt")
+                .on_cx(|_, _: &Activate, cx| cx.dispatch_program_all(inspect_message(InspectMessage::AdoptConflict))),
+        ))
+        .key("inspect-conflict-row");
+    Some(view.into_any())
 }
 
 /// 当前检视目标在文件列表里的那一行。预览页从播放集打开时可能不在列表里。

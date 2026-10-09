@@ -91,14 +91,12 @@ fn notice(text: String, error: bool, key: &'static str) -> AnyView {
         .into_any()
 }
 
-/// 音频播放：喇叭图标加下拉框。没有可选播放器时下拉框禁用。
+/// 音频播放：喇叭图标加下拉框。实现音频能力的插件从插件清单里找；一个都没有时下拉框禁用，
+/// 写出实际播放音频的内置解码器。
 fn audio_card(model: &ShellViewModel) -> AnyView {
-    let names = |plugin_id: &str| {
-        model.admin.plugins.iter().find(|plugin| plugin.plugin_id == plugin_id).map(|plugin| plugin.name.clone())
-    };
-    let audio = support::audio_view(&model.player.candidates, &model.player.preferences, &names);
+    let audio = support::audio_view(&model.player.candidates, &model.admin.plugins, &model.player.preferences);
     let options = audio.choices.iter().map(|choice| SelectOption::new(choice.plugin_id.clone(), choice.label.clone()));
-    let mut select = Select::new(Some(audio.selected.clone())).options(options).disabled(audio.choices.iter().all(|choice| choice.unavailable));
+    let mut select = Select::new(Some(audio.selected.clone())).options(options).disabled(!audio.selectable);
     {
         let layout = Arc::make_mut(&mut select.style.layout);
         layout.width = Some(LengthSpec::Shrink);

@@ -3,13 +3,15 @@
 //! 一是输入框的键路径在打字时不变（壳层重挂后按键路径找回焦点），用户文本拼进键也不会让挂载失败，
 //! 滚动区按显示的内容取键（换目录、换选中项回顶，同一内容重挂保持位置）；
 //! 二是浮层的指针行为：点在导入菜单、右键菜单外面就收起，回收站的「彻底删除」要点两次，
-//! 点对话框遮罩等于取消，点卡片里面不取消。
+//! 点对话框遮罩等于取消，点卡片里面不取消；
+//! 三是元数据保存冲突：冲突说明紧挨注释、草稿保留，点「采用服务器版本」换成服务器内容；
+//! 四是预览页只有预览框架贴在页底的那一条播放条，页底不再多出间距。
 
 use nana_ui::runtime::LayoutViewport;
 use nana_ui::{ApplicationWindow, HeadlessInput, NanaTextShaper, PointerPhase};
 
 use crate::shell::inspect::InspectMessage;
-use crate::shell::{ShellMessage, ShellViewModel, WorkspacePanel};
+use crate::shell::{ShellMessage, ShellPage, ShellViewModel, WorkspacePanel};
 
 use super::{FileDialog, FilesMessage};
 
@@ -271,4 +273,71 @@ fn scroll_areas_are_keyed_by_what_they_show() {
     model.files.current_path = String::new();
     model.workspace.panel = WorkspacePanel::Trash;
     assert_ne!(scroll_keys(&model).0, list, "进回收站时列表回顶");
+}
+
+/// 预览页只有框架贴在页底的那一条播放条，预览面板一直铺到主区内容的底边，下面不再空出一格间距。
+#[test]
+fn preview_page_keeps_its_own_player_bar_without_a_trailing_slot() {
+    let window = laid_out(&scene("preview-audio"));
+    let document = window.document.document();
+    let context = window.document.context();
+    let world = context.world();
+    let bars = world
+        .project_accessibility(document)
+        .into_iter()
+        .filter(|node| node.label.as_deref() == Some("播放进度"))
+        .collect::<Vec<_>>();
+    assert_eq!(bars.len(), 1, "预览页只有一条播放条");
+    let mut ancestors = Vec::new();
+    let mut cursor = world.parent_id(bars[0].id);
+    while let Some(id) = cursor {
+        ancestors.push((context.assembly_path(id).unwrap_or_default(), world.layout_box(id)));
+        cursor = world.parent_id(id);
+    }
+    let boxed = |key: &str| {
+        ancestors
+            .iter()
+            .find(|(path, _)| path.rsplit('/').next() == Some(key))
+            .and_then(|(_, bounds)| *bounds)
+            .unwrap_or_else(|| panic!("播放条不在 {key} 里"))
+    };
+    let page = boxed("inspect-preview-page");
+    let body = boxed("workspace-page-body");
+    assert!(
+        (page.y + page.height - (body.y + body.height)).abs() < 0.5,
+        "预览面板底边 {} 应贴着主区内容底边 {}",
+        page.y + page.height,
+        body.y + body.height
+    );
+}
+
+/// 输入框里的值等于 `value` 的节点在不在。
+fn has_value(window: &ApplicationWindow, value: &str) -> bool {
+    let document = window.document.document();
+    window
+        .document
+        .context()
+        .world()
+        .project_accessibility(document)
+        .iter()
+        .any(|node| node.value.as_ref().is_some_and(|text| text.as_str() == value))
+}
+
+/// 15 页的「冲突」：冲突说明排在注释前面、落在 800 高的窗口里，本地草稿还在注释框；
+/// 点「采用服务器版本」换成服务器上的注释，冲突说明收起。
+#[test]
+fn conflict_notice_sits_above_the_fields_and_adopts_the_server_version() {
+    let mut model = ShellViewModel::for_page(ShellPage::Conflict);
+    let mut window = laid_out(&model);
+    let (_, notice_y) = labeled_center(&window, "版本冲突，未写入");
+    let (_, comment_y) = labeled_center(&window, "注释");
+    assert!(notice_y < comment_y && notice_y < 800.0, "冲突说明应在注释前面、在窗口里：{notice_y} / {comment_y}");
+    assert!(has_value(&window, "封面改用暖色版本。"), "冲突时本地草稿留在注释框");
+    let (x, y) = labeled_center(&window, "采用服务器版本");
+    for message in click(&mut window, x, y) {
+        model.reduce(message);
+    }
+    let window = laid_out(&model);
+    assert!(!has_label(&window, "版本冲突，未写入"), "采用后冲突说明收起");
+    assert!(has_value(&window, "封面定稿，沿用冷色版本。"), "注释框换成服务器上的注释");
 }
