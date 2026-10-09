@@ -576,7 +576,7 @@ fn task_popover_merges_repository_operation_and_closes() {
         total: None,
         percent: Some(10.0),
         error: None,
-        updated_at: "20".into(),
+        updated_at: "1970-01-01T00:00:00.020Z".into(),
     }]));
     send(&mut model, AdminMessage::SetOperation(Some(OperationProgress {
         label: "导入".into(),

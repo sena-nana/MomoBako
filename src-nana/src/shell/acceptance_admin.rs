@@ -97,7 +97,7 @@ pub(super) fn seed_task(model: &mut ShellViewModel, cancelling: bool) {
         total: None,
         percent,
         error: None,
-        updated_at: "0".into(),
+        updated_at: NOW.into(),
     }]));
     model.reduce(ShellMessage::Admin(AdminMessage::ToggleTaskPopover));
     // 离屏会话不走帧时钟，把弹层的出现动效拨到结束，截图里是停稳的样子。

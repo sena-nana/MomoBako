@@ -480,11 +480,25 @@ fn running_tasks_feed_the_popover_and_the_footer_count() {
         total: None,
         percent: None,
         error: None,
-        updated_at: "7".into(),
+        updated_at: "2026-10-08T08:00:00.100Z".into(),
     };
-    model.reduce(ShellMessage::TaskProgressLoaded(vec![task]));
-    assert_eq!(model.task_rows().len(), 1);
+    model.reduce(ShellMessage::TaskProgressLoaded(vec![task.clone()]));
+    let rows = model.task_rows();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].label, "进度", "没有标题时照 Vue 进度条的回退文案，不露协议 id");
     assert_eq!(SidebarView::project(&model).footer.tasks, 1, "计数是弹层的行数");
+
+    // 后更新的任务排在前面：快照的更新时间是 RFC 3339，按毫秒比。
+    let later = crate::backend::services::repository::TaskProgressSnapshot {
+        task_id: "momobako.task.8".into(),
+        label: Some("同步资源库".into()),
+        updated_at: "2026-10-08T08:00:00.250Z".into(),
+        ..task.clone()
+    };
+    model.reduce(ShellMessage::TaskProgressLoaded(vec![task, later]));
+    let labels = model.task_rows().into_iter().map(|row| row.label).collect::<Vec<_>>();
+    assert_eq!(labels, ["同步资源库", "进度"]);
+    model.reduce(ShellMessage::TaskProgressLoaded(model.task_progress[..1].to_vec()));
 
     model.reduce(ShellMessage::Sidebar(SidebarMessage::SidebarTreeLoaded { repo_id: REPO.into(), result: Ok(Default::default()) }));
     model.reduce(ShellMessage::Sidebar(SidebarMessage::RefreshFolderTree));
