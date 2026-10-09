@@ -2,7 +2,9 @@
 //!
 //! 挂一棵和生产窗口相同的壳层，归约消息后按生产 `update` 末尾那一步同步视图，按生产 `prepare`
 //! 跑准备帧；按无障碍名找节点，往聚焦的输入框注入输入法预编辑，读响应式计数和视图的同步计数，
-//! 并把增量更新后的文档和同一 ViewModel 新挂的文档按无障碍树比对。
+//! 并把增量更新后的文档和同一 ViewModel 新挂的文档逐个节点比对（无障碍树、组装路径、状态和整份样式）。
+
+use std::collections::HashMap;
 
 use nana_ui::runtime::view::{reactive_stats, ReactiveStats};
 use nana_ui::runtime::{AccessibilityNode, AccessibilityRole, DocumentId, LayoutViewport, RuntimeDocument, StableNodeId};
@@ -278,27 +280,82 @@ impl ShellHarness {
         reactive_stats()
     }
 
-    /// 增量同步后的文档和同一 ViewModel 新挂的文档逐个比较无障碍节点：角色、名称、值和布局盒。
+    /// 增量同步后的文档和同一 ViewModel 新挂的文档逐个节点比较，每一步更新后都调：
+    /// - 无障碍树：角色、名称、值和布局盒，管文字和排版；
+    /// - 文档里每个节点（含不进无障碍树的容器）的组装路径、无障碍状态（禁用、选中、勾选、忙、无效）和
+    ///   整份样式（含显隐、画笔和交互态的样式），管只绑在样式和状态上的字段。
+    ///
+    /// 滚动偏移、焦点和悬停这类运行时状态不比：新挂的文档在顶上、没有焦点。
     pub fn assert_same_as_fresh_mount(&mut self) {
         self.flush();
-        let ours = semantic_lines(&self.nodes());
         let mut fresh = RuntimeDocument::new(DocumentId::new(1).expect("文档编号"));
         let _view = ShellView::mount(&mut fresh, &self.model).expect("新挂对照文档");
         fresh.flush(self.viewport, &mut self.shaper).expect("对照文档布局");
         let theirs = semantic_lines(&fresh.context().world().project_accessibility(fresh.document()));
-        if ours == theirs {
-            return;
-        }
-        let first = ours.iter().zip(&theirs).position(|(a, b)| a != b).unwrap_or(ours.len().min(theirs.len()));
-        let window = |lines: &[String]| lines[first.saturating_sub(3)..(first + 4).min(lines.len())].join("\n");
-        panic!(
-            "增量同步后的无障碍树和新挂的不一样（{} 对 {} 个节点，第 {first} 个起不同）\n增量：\n{}\n新挂：\n{}",
-            ours.len(),
-            theirs.len(),
-            window(&ours),
-            window(&theirs)
-        );
+        assert_lines_match("无障碍树", &semantic_lines(&self.nodes()), &theirs);
+        let ours = structure_lines(self.document());
+        assert!(ours.iter().any(|line| line.contains("NodeStyle {")), "没有取到节点样式，结构比较不起作用");
+        assert_lines_match("组装路径、状态和样式", &ours, &structure_lines(&fresh));
     }
+}
+
+/// 两份逐行描述一样；不一样时报出第一处不同的行，长行只截不同处前后一段。
+fn assert_lines_match(what: &str, ours: &[String], theirs: &[String]) {
+    if ours == theirs {
+        return;
+    }
+    let first = ours.iter().zip(theirs).position(|(a, b)| a != b).unwrap_or(ours.len().min(theirs.len()));
+    let (a, b) = (ours.get(first).map_or("-", String::as_str), theirs.get(first).map_or("-", String::as_str));
+    let at = a.char_indices().zip(b.chars()).find(|((_, x), y)| x != y).map_or(a.len().min(b.len()), |((index, _), _)| index);
+    let excerpt = |line: &str| {
+        let start = line.floor_char_boundary(at.saturating_sub(160));
+        let end = line.ceil_char_boundary((at + 240).min(line.len()));
+        let head = line.split(" NodeStyle").next().unwrap_or(line);
+        let head = &head[..head.ceil_char_boundary(head.len().min(200))];
+        format!("{head} …{}…", &line[start..end])
+    };
+    panic!(
+        "增量同步后的{what}和新挂的不一样（{} 对 {} 行，第 {first} 行第 {at} 字节起不同）\n增量：{}\n新挂：{}",
+        ours.len(),
+        theirs.len(),
+        excerpt(a),
+        excerpt(b)
+    );
+}
+
+/// 文档里每个节点的组装路径、无障碍状态和整份样式，按文档顺序。节点编号不比。
+///
+/// 路径只留显式写的键：`#v0`、`#adopt-1` 这类段是视图层按建出时的位置自动起的名字，同一棵树先挂后插
+/// 的行和一次建出的行会不一样，不代表结构不同。节点的先后和个数照样逐行比。
+fn structure_lines(document: &RuntimeDocument) -> Vec<String> {
+    let context = document.context();
+    let world = context.world();
+    let states = world
+        .project_accessibility(document.document())
+        .into_iter()
+        .map(|node| {
+            let state = format!(
+                "disabled={} selected={:?} checked={:?} busy={} invalid={}",
+                node.disabled, node.selected, node.checked, node.busy, node.invalid
+            );
+            (node.id, state)
+        })
+        .collect::<HashMap<_, _>>();
+    world
+        .document_order(document.document())
+        .into_iter()
+        .map(|id| {
+            let path = context.assembly_path(id).map(|path| explicit_keys(&path)).unwrap_or_default();
+            let kind = world.component_type(id).map_or("", |kind| kind.as_str());
+            let style = world.node_style(id).map(|style| format!("{style:?}")).unwrap_or_default();
+            format!("{path} <{kind}> {} {style}", states.get(&id).map_or("", String::as_str))
+        })
+        .collect()
+}
+
+/// 去掉组装路径里自动起名的段（以 `#` 开头），只留显式写的键。
+fn explicit_keys(path: &str) -> String {
+    path.split('/').filter(|segment| !segment.starts_with('#')).collect::<Vec<_>>().join("/")
 }
 
 /// 一个节点的可比较部分。盒子取到 0.1 像素，节点编号不比。

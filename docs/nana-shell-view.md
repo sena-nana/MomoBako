@@ -107,7 +107,7 @@
 
 - 投影的单测：取值、相等性，以及哪些消息改投影、哪些不改（`view_part_sidebar_tests.rs`）。
 - 用 `view_harness::ShellHarness`：
-  - `assert_same_as_fresh_mount()`：增量更新后的文档和同一 ViewModel 新挂的文档按无障碍树逐个比较（角色、名称、值、布局盒），每一步更新后都调。它不比样式和选中、禁用这类状态；绑了整份样式或状态的区域再按节点比组装路径、整份样式和无障碍状态（`route_files_tests.rs` 的 `assert_same_structure_as_fresh_mount`）。
+  - `assert_same_as_fresh_mount()`：增量更新后的文档和同一 ViewModel 新挂的文档逐个比较，每一步更新后都调。先比无障碍树（角色、名称、值、布局盒），再按文档顺序比每个节点（含不进无障碍树的容器）的组装路径、组件类型、无障碍状态（禁用、选中、勾选、忙、无效）和整份样式，只绑在样式和状态上的字段也比得到。路径里 `#v0`、`#adopt-1` 这类自动起名的段不比：先挂后插的行和一次建出的行名字不同，结构一样。滚动偏移、焦点和悬停不比。
   - 「N 次无关更新后节点 id 不变」：用 `harness.keyed("键")` 记下节点，`apply` 几条无关消息并 `flush` 后再取，应该是同一个节点；相关更新后绑定的字段原地变，结构变了的那一行才换（`route_startup_tests.rs`）。
   - `view_stats().remounts` 不变：动效帧、播放推进和常驻区域的更新都不该重挂。
   - `route_branch()`、`sidebar_root()`、`content_roots()` 判断哪一块换了（`view_part_primary_tests.rs`）。
