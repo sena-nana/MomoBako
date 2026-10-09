@@ -12,13 +12,15 @@
         model.reduce(ShellMessage::Navigate(ShellPage::PluginSettings));
         assert_eq!(model.detail, "正在读取页面数据…");
 
+        // 「未保存」页的脏状态来自注释草稿：编辑动作只报告草稿还在，主按钮重开预览也不丢草稿。
         model = ShellViewModel::for_page(ShellPage::UnsavedEdit);
         model.reduce(ShellMessage::EditAction);
         assert_eq!(model.page, ShellPage::UnsavedEdit);
-        assert!(model.dirty);
+        assert_eq!(model.detail, "未保存的修改留在当前草稿");
+        assert!(model.close_is_dirty());
         model.reduce(ShellMessage::PrimaryAction);
-        assert!(model.dirty);
-        assert_eq!(model.detail, "当前没有可打开的预览");
+        assert!(model.close_is_dirty());
+        assert!(matches!(model.inspect.take_effects().as_slice(), [super::InspectEffect::LoadNative { path, .. }] if path == "notes/page.pdf"));
     }
 
     #[test]

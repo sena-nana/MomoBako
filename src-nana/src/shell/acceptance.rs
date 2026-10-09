@@ -2,11 +2,12 @@
 //!
 //! 只填已经存在的仓库、预览、播放和任务状态，不发新的领域请求。
 
-use super::inspect::InspectMessage;
 use super::workspace::WorkspaceRepository;
-use super::{ShellPage, ShellViewModel, WorkspacePanel};
+use super::{InspectEffect, ShellPage, ShellViewModel, WorkspacePanel};
 
 const REPO_ID: &str = "acceptance-repo";
+/// 等检视延时最多推进的帧数。一帧 16ms，产品的搜索等 250ms、自动保存等 260ms。
+const TIMER_FRAMES: usize = 64;
 
 /// 按页面填上对应的产品表面。加载页保持启动步骤，其余页面进入已有仓库或空库。
 pub(super) fn seed(model: &mut ShellViewModel) {
@@ -42,21 +43,8 @@ pub(super) fn seed(model: &mut ShellViewModel) {
             player_scenes::seed_playback(model);
         }
         ShellPage::TaskCancelling => admin_scenes::seed_task(model, true),
-        ShellPage::Conflict => {
-            model.selected_path = Some("assets/cover.png".into());
-            model.detail = "远端修改时间较新，需要选择保留本地或远端版本".into();
-            present_repository(model);
-            model.inspect.begin_selection("assets/cover.png");
-            model.inspect.conflict = model.detail.clone();
-        }
-        ShellPage::UnsavedEdit => {
-            model.selected_path = Some("notes/readme.md".into());
-            model.dirty = true;
-            model.detail = "Markdown · 3 行未保存 · 最后保存于 2 分钟前".into();
-            present_repository(model);
-            model.inspect.begin_selection("notes/readme.md");
-            model.inspect.reduce(true, Some(REPO_ID), InspectMessage::SetComment("3 行未保存".into()));
-        }
+        ShellPage::Conflict => files_scenes::seed_conflict(model),
+        ShellPage::UnsavedEdit => files_scenes::seed_unsaved_edit(model),
         ShellPage::Settings => admin_scenes::seed_settings(model),
         ShellPage::SettingsError => admin_scenes::seed_settings_error(model),
         ShellPage::Logs => admin_scenes::seed_logs(model),
@@ -76,6 +64,18 @@ fn present_repository(model: &mut ShellViewModel) {
         cache_required: false,
         cache_status: String::new(),
     });
+}
+
+/// 按产品帧时钟推进搜索和自动保存的延时，直到排下 `pick` 认得的请求。
+/// 同一批里别的请求和场景无关，一起丢掉。等满 `TIMER_FRAMES` 帧还没有就返回空。
+fn await_inspect_effect<T>(model: &mut ShellViewModel, pick: impl Fn(InspectEffect) -> Option<T>) -> Option<T> {
+    for _ in 0..TIMER_FRAMES {
+        super::poll_timers(model);
+        if let Some(found) = model.inspect.take_effects().into_iter().find_map(&pick) {
+            return Some(found);
+        }
+    }
+    None
 }
 
 use files_scenes::{file_row, seed_browser, PAGE_PDF};

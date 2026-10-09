@@ -207,22 +207,18 @@ fn render_case(
         ));
     }
     let accessibility = session.accessibility_dump();
-    let title = scene_title(scene_id, &page);
     if !accessibility
         .iter()
         .any(|node| node.label.as_deref() == Some("MomoBako"))
     {
         return Err("missing MomoBako accessibility root".into());
     }
+    let labels = scene_labels(scene_id, &page);
+    assert_scene_drawn(&accessibility, labels, scene_values(scene_id))?;
     if scene_id == "unsaved-edit" {
-        // 画面上不放「未保存」这四个字。草稿留在注释里，按钮和状态也不能叫这个名字。
-        assert_unsaved_edit(&accessibility)?;
-    } else if !accessibility
-        .iter()
-        .any(|node| node.label.as_deref() == Some(title))
-    {
-        return Err(format!("missing page title {title}"));
+        assert_no_unsaved_stamp(&accessibility)?;
     }
+    let title = labels[0];
     let root_node = accessibility
         .iter()
         .find(|node| node.label.as_deref() == Some("MomoBako"))
@@ -347,13 +343,23 @@ fn theme_name(theme: ThemeName) -> &'static str {
         ThemeName::Dark => "dark",
     }
 }
-/// 插件设置和搜索结果不再沿用应用设置或文件列表的标题。
-/// 未保存编辑的可见行为：注释草稿还在，没有任何按钮或状态的无障碍名是「未保存」。
-fn assert_unsaved_edit(nodes: &[nana_ui_devtools::agent::AccessibilityDumpNode]) -> Result<(), String> {
-    let draft = nodes.iter().any(|node| node.value.as_deref() == Some("3 行未保存"));
-    if !draft {
-        return Err("未保存场景的注释草稿不在画面上".into());
+/// 场景画出了它名字所说的状态：`labels` 每一项都是某个节点的无障碍名，`values` 每一项都是某个输入框里的值。
+fn assert_scene_drawn(
+    nodes: &[nana_ui_devtools::agent::AccessibilityDumpNode],
+    labels: &[&str],
+    values: &[&str],
+) -> Result<(), String> {
+    if let Some(label) = labels.iter().find(|label| !nodes.iter().any(|node| node.label.as_deref() == Some(**label))) {
+        return Err(format!("missing label {label}"));
     }
+    if let Some(value) = values.iter().find(|value| !nodes.iter().any(|node| node.value.as_deref() == Some(**value))) {
+        return Err(format!("missing input value {value}"));
+    }
+    Ok(())
+}
+
+/// 未保存编辑不在画面上盖「未保存」：没有任何按钮或状态的无障碍名是这四个字，草稿只留在注释框里。
+fn assert_no_unsaved_stamp(nodes: &[nana_ui_devtools::agent::AccessibilityDumpNode]) -> Result<(), String> {
     let stamped = nodes.iter().any(|node| {
         node.label.as_deref() == Some("未保存")
             && (node.role == "button" || node.role == "status")
@@ -364,36 +370,64 @@ fn assert_unsaved_edit(nodes: &[nana_ui_devtools::agent::AccessibilityDumpNode])
     Ok(())
 }
 
-fn scene_title<'a>(scene_id: &str, page: &'a ShellPage) -> &'a str {
+/// 场景必须画出的无障碍名。第一项写进清单当标题，其余一起证明场景画出了它名字所说的状态。
+/// 插件设置和搜索结果不再沿用应用设置或文件列表的标题。
+fn scene_labels(scene_id: &str, page: &ShellPage) -> &'static [&'static str] {
     match scene_id {
-        "extensions" => "文件系统与插件",
-        "downloader-settings" => "下载服务",
-        "source-auth-gap" | "source-auth-methods" => "账号与仓库",
-        "office-convert" => "Office 转换",
-        "foreign-tool" => "自定义工具",
-        "search-results" => "搜索结果",
-        "still-playback" => "没有可绘制的画面",
-        _ => page_title(page),
+        "extensions" => &["文件系统与插件"],
+        "downloader-settings" => &["下载服务"],
+        "source-auth-gap" | "source-auth-methods" => &["账号与仓库"],
+        "office-convert" => &["Office 转换"],
+        "foreign-tool" => &["自定义工具"],
+        "search-results" => &["搜索结果"],
+        // 唯一的资源库目录丢失：缺失页的眉题和重定向入口。
+        "missing" => &["资源库丢失", "重定向"],
+        // 单击只选中、留在文件列表：右侧详情写出这个文件的路径和大小。
+        "live-files-selected" => &["notes/page.pdf", "1820 B"],
+        // 右侧详情读回 cover.png 的注释和链接。
+        "files-selected-metadata" => &["封面候选，等待确认配色。", "https://example.com/cover"],
+        // 右键菜单开在 cover.png 上，带复制和重命名。
+        "live-menu" => &["复制到…", "重命名"],
+        "copy-dialog" => &["复制到文件夹", "目标目录"],
+        // 图片幻灯片读不到文件：播放条写「图片无法播放」，停留时长照常可调。
+        "still-playback" => &["图片无法播放", "图片停留时长"],
+        "filter-bar" => &["当前资源库筛选", "格式筛选"],
+        // 三个条件生效，结果是命中的 cover.png。
+        "filter-bar-active" => &["3 个条件", "默认资源库 / cover.png"],
+        // 查询跑完没有命中。
+        "search-empty" => &["当前查询: 不存在的文件", "0 条结果"],
+        _ => page_labels(page),
     }
 }
 
-fn page_title(page: &ShellPage) -> &'static str {
+/// 输入框里必须有的值：未保存和冲突的注释草稿都留在注释框里。
+fn scene_values(scene_id: &str) -> &'static [&'static str] {
+    match scene_id {
+        "unsaved-edit" => &["第 2 页的表格还要核对。"],
+        "conflict" => &["封面改用暖色版本。"],
+        _ => &[],
+    }
+}
+
+fn page_labels(page: &ShellPage) -> &'static [&'static str] {
     match page {
-        ShellPage::Loading => "扫描资源库文件",
-        ShellPage::EmptyRepository => "还没有可用资源库",
-        ShellPage::Error => "加载失败",
-        ShellPage::FileList => "当前目录",
-        ShellPage::SelectedFile => "文件预览",
-        ShellPage::Playlists => "选择一个播放集",
-        ShellPage::PluginSettings => "文件系统与插件",
-        ShellPage::TaskRunning => "扫描默认资源库",
-        ShellPage::PlaybackRunning => "演示播放列表",
-        ShellPage::TaskCancelling => "正在取消扫描",
-        ShellPage::Conflict => "远端修改时间较新，需要选择保留本地或远端版本",
-        ShellPage::UnsavedEdit => "未保存",
-        ShellPage::Settings => "管理仓库服务、插件、缓存与 API 契约。",
-        ShellPage::SettingsError => "读取插件目录失败：拒绝访问。 (os error 5)",
-        ShellPage::Logs => "系统日志",
+        ShellPage::Loading => &["扫描资源库文件"],
+        ShellPage::EmptyRepository => &["还没有可用资源库"],
+        ShellPage::Error => &["加载失败"],
+        ShellPage::FileList => &["当前目录"],
+        ShellPage::SelectedFile => &["文件预览"],
+        ShellPage::Playlists => &["选择一个播放集"],
+        ShellPage::PluginSettings => &["文件系统与插件"],
+        ShellPage::TaskRunning => &["扫描默认资源库"],
+        ShellPage::PlaybackRunning => &["演示播放列表"],
+        ShellPage::TaskCancelling => &["正在取消扫描"],
+        // 自动保存撞上服务器的新版本：冲突提示和采用服务器版本的入口。
+        ShellPage::Conflict => &["版本冲突，未写入", "采用服务器版本"],
+        // 右侧详情是选中的 notes/page.pdf，草稿由 `scene_values` 检查。
+        ShellPage::UnsavedEdit => &["notes/page.pdf"],
+        ShellPage::Settings => &["管理仓库服务、插件、缓存与 API 契约。"],
+        ShellPage::SettingsError => &["读取插件目录失败：拒绝访问。 (os error 5)"],
+        ShellPage::Logs => &["系统日志"],
     }
 }
 fn page_slug(page: &ShellPage) -> &'static str {
