@@ -84,7 +84,7 @@ fn shoot(mut model: ShellViewModel, width: u32, height: u32, theme: ThemeName, d
         eprintln!("{stem}：尺寸回报四轮后还没停，视图可能在反复重建");
     }
     settle_dialogs(&mut session);
-    session.screenshot_png(dir.join(format!("{stem}.png"))).expect("截图");
+    write_png(&mut session, &dir.join(format!("{stem}.png")));
     let nodes = session
         .accessibility_dump()
         .into_iter()
@@ -105,6 +105,20 @@ fn shoot(mut model: ShellViewModel, width: u32, height: u32, theme: ThemeName, d
         .join("\n");
     fs::write(dir.join(format!("{stem}.nodes.txt")), nodes).expect("节点清单");
     let _ = AgentSession::describe(&session);
+}
+
+/// 写出截图。别的进程同时占着显卡时偶尔读不回像素、写出空文件：重新布局再截，三次都空就失败，
+/// 不让空图混进对照。
+fn write_png(session: &mut RuntimeAgentSession, path: &std::path::Path) {
+    for attempt in 1..=3 {
+        session.screenshot_png(path.to_path_buf()).expect("截图");
+        if fs::metadata(path).is_ok_and(|meta| meta.len() > 0) {
+            return;
+        }
+        eprintln!("{} 第 {attempt} 次截到空图，重截", path.display());
+        session.flush().expect("重截前的布局");
+    }
+    panic!("{} 三次都截到空图", path.display());
 }
 
 /// 视图量到自己的尺寸后发给程序的消息（播放条宽、文件列表宽）在真窗口里下一帧就归约、重排；
