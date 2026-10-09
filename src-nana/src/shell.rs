@@ -103,7 +103,7 @@ pub enum ShellMessage {
     SettingsLoaded(Result<(ApplicationSettings, Option<String>), String>),
     SettingsThemeChanged(String),
     SettingsSaved(Result<ApplicationSettings, String>),
-    TaskSnapshotLoaded { active: usize, completed: usize },
+    /// 宿主观察到的运行中任务（排队、运行、取消中），整份换上。
     TaskProgressLoaded(Vec<TaskProgressSnapshot>),
     CancelTask(String),
     WindowAction(WindowAction),
@@ -226,9 +226,7 @@ pub struct ShellViewModel {
     pub playlist_dialog_open: bool,
     pub playlist_item_ids: Vec<String>,
     pub playlist_item_status: String,
-    pub active_tasks: usize,
-    pub completed_tasks: usize,
-    pub active_task_ids: Vec<String>,
+    /// 运行中的任务，任务弹层和侧栏「任务」的计数读它。
     pub task_progress: Vec<TaskProgressSnapshot>,
     pub settings: ApplicationSettings,
     pub settings_error: Option<String>,
@@ -280,9 +278,6 @@ impl Default for ShellViewModel {
             playlist_dialog_open: false,
             playlist_item_ids: Vec::new(),
             playlist_item_status: String::new(),
-            active_tasks: 0,
-            completed_tasks: 0,
-            active_task_ids: Vec::new(),
             task_progress: Vec::new(),
             settings: ApplicationSettings::default(),
             settings_error: None,
@@ -661,7 +656,6 @@ impl ShellViewModel {
             | ShellMessage::SettingsLoaded(_)
             | ShellMessage::SettingsThemeChanged(_)
             | ShellMessage::SettingsSaved(_)
-            | ShellMessage::TaskSnapshotLoaded { .. }
             | ShellMessage::TaskProgressLoaded(_)
             | ShellMessage::CancelTask(_)
             | ShellMessage::Admin(_) => {}

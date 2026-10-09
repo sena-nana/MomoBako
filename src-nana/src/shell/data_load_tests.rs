@@ -386,3 +386,34 @@ fn opening_the_logs_panel_reads_history() {
     assert!(!model.admin.logs_loading);
     assert_eq!(model.admin.logs.len(), 3, "读失败保留手上的日志");
 }
+
+/// 宿主观察到的运行中任务整份换上：任务弹层的行是仓库操作加这些任务，侧栏「任务」的计数是行数
+/// （Vue `activeTaskCount = tasks.length`）；任务结束后宿主交来空列表，计数回到只剩仓库操作。
+#[test]
+fn running_tasks_feed_the_popover_and_the_footer_count() {
+    let mut model = started(REPO);
+    assert_eq!(SidebarView::project(&model).footer.tasks, 0);
+    let task = crate::backend::services::repository::TaskProgressSnapshot {
+        task_id: "momobako.task.7".into(),
+        protocol_id: "momobako.entry.copy".into(),
+        status: "running".into(),
+        phase: None,
+        label: None,
+        current: None,
+        total: None,
+        percent: None,
+        error: None,
+        updated_at: "7".into(),
+    };
+    model.reduce(ShellMessage::TaskProgressLoaded(vec![task]));
+    assert_eq!(model.task_rows().len(), 1);
+    assert_eq!(SidebarView::project(&model).footer.tasks, 1, "计数是弹层的行数");
+
+    model.reduce(ShellMessage::Sidebar(SidebarMessage::SidebarTreeLoaded { repo_id: REPO.into(), result: Ok(Default::default()) }));
+    model.reduce(ShellMessage::Sidebar(SidebarMessage::RefreshFolderTree));
+    assert!(model.admin.operation.is_some(), "刷新文件夹树是一行仓库操作");
+    assert_eq!(SidebarView::project(&model).footer.tasks, 2, "仓库操作也算一行");
+
+    model.reduce(ShellMessage::TaskProgressLoaded(Vec::new()));
+    assert_eq!(SidebarView::project(&model).footer.tasks, 1, "任务结束后只剩仓库操作");
+}

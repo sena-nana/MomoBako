@@ -209,7 +209,7 @@
 | `PluginManagerPanel.vue` 依赖 | 依赖状态为空或有状态 | 无 | 状态列表为空时用 requires 和 optional 的数量 | “必需 2 / 可选 0” / “缺失” / “已启用” | 已测试（未离屏） |
 | `logs.ts` `loadSystemLogsInWorkspace` | 切到日志面板，每次都读 | `list_system_logs`，limit 200，没有替身 | 读回整份换上，按时间再 id 降序；读的时候手上没有日志就写正在加载、不写空状态，「清空日志」照 Vue 可点；读失败保留手上的日志，状态区写「无法读取系统日志：…」 | “正在加载系统日志” | 已测试（`data_load_tests.rs`、`route_admin_tests.rs`，未离屏） |
 | `WorkspaceLogsPanel.vue` 筛选 | 级别、来源、搜索、暂停 | 不把条件写进 `SystemLogQuery` | 客户端排序是时间再 id；筛选变空时不滚动；暂停后签名变化也不滚动；记录本身不删。实况页画出过滤后的时间、级别和消息 | “2 条缓存” / “2 条命中”；按钮“暂停追踪 / 恢复追踪”；空态“当前筛选没有命中” | 已测试（未离屏） |
-| `TaskPopover.vue` | 任务和仓库操作 | 无；弹层没有取消按钮（Vue 也没有），`CancelTask` 没有发送方 | 合成行 id 是 `workspace-operation`，来源是资源库，所有行按更新时间降序；点弹层外的透明层关闭，Escape 走全局 Escape | “任务” / “当前没有运行中的任务。” | 已测试（未离屏） |
+| `TaskPopover.vue` | 任务和仓库操作 | 宿主线程每 250 ms 读 Mutsuki 任务快照（`task_watch.rs`），排队、运行和取消中的任务变了才发 `TaskProgressLoaded`；弹层没有取消按钮（Vue 也没有） | 合成行 id 是 `workspace-operation`，来源是资源库，所有行按更新时间降序；任务结束就从列表里拿掉；「任务」的计数是行数（仓库操作也算）；点弹层外的透明层关闭，Escape 走全局 Escape | “任务” / “当前没有运行中的任务。” | 已测试（`task_watch.rs`、`data_load_tests.rs`，未离屏） |
 | `RepositoryActionsPanel.vue` 列表 | 切到动作面板，或过期仓库 | `list_repository_actions`，没有替身 | 过期仓库忽略；当前仓库读失败保留旧列表；没有选中时用第一项 | “正在加载动作” / “当前仓库没有导入动作。” | 已测试（未离屏） |
 | `RepositoryActionsPanel.vue` 执行 | 点击执行 | `momobako.repository.action.run`，没有替身 | 需要 ready、启用、已选路径且不在执行中；选中动作同时切到动作面板；成功后刷新文件列表 | “不支持” / “执行” | 已测试（未离屏） |
 | `ExtensionsPanel.vue` 工具页 | 工具页列表变化 | 文件导入和 Eagle 导入派发已有的 `OpenDialog` / `OpenEagle`，并回到文件页把对话框画出来；API Playground 的契约来自 API 设计快照，快照为空时用三个外部 API 兜底 | 三个内置 id 画原生页面。没有仓库、只读、回收站或虚拟视图时按钮禁用。其它工具页只画页头和一句说明 | “当前没有可用仓库。” / “多个路径用分号分隔” / “这个工具页由插件的前端组件绘制，Nana 原生界面不能运行它。” | 已测试；导入对话框由实况点击覆盖，第三方页另有离屏场景 `foreign-tool` |
