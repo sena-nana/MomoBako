@@ -230,14 +230,16 @@ impl ShellView {
     }
 
     /// 资源区宽度跟着侧栏呈现宽度，只在投影值变了时写，拖动中的区域尺寸不会被旧值拉回。
-    /// 工作区重投影会冲掉 AppShell 给 body 打的布局补丁，工作区是 body 时写完让 AppShell 重新投影补回。
+    ///
+    /// 工作区每次 `update_component` 都会重投影（哪怕夹到上下限以后区域尺寸没变），冲掉 AppShell 给 body
+    /// 打的布局补丁，所以工作区是 body 时写完总让 AppShell 重新投影补回。
     fn sync_sidebar_width(&mut self, context: &mut AppContext, width: f32) -> Result<(), FrameworkError> {
         if self.sidebar_width == width {
             return Ok(());
         }
         self.sidebar_width = width;
-        let changed = context.update_component(self.workspace, |workspace, _| hot::set_resources_width(workspace, width))?;
-        if changed && self.mode == BodyMode::Workbench {
+        context.update_component(self.workspace, |workspace, _| hot::set_resources_width(workspace, width))?;
+        if self.mode == BodyMode::Workbench {
             context.reproject_component(self.shell)?;
         }
         Ok(())
