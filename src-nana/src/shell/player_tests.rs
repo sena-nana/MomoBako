@@ -330,7 +330,6 @@ fn membership_follows_kind_extension_and_write_permission() {
     let saved = model.player.memberships.clone();
     send(&mut model, PlayerMessage::MembershipSaved(Err("写入失败".into())));
     assert_eq!(model.player.memberships, saved);
-    assert_eq!(model.player.activity, "更新播放集成员失败：写入失败");
     let failure = model.status.failure().expect("成员写入失败要进状态区");
     assert_eq!(failure.message, "更新播放集成员失败：写入失败");
 

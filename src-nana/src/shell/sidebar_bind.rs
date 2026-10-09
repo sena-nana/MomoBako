@@ -35,11 +35,6 @@ impl ShellViewModel {
         let locked = self.navigation_locked();
         if self.sidebar.select_shortcut(&mut self.workspace, id, locked) {
             self.leave_settings_page();
-            self.detail = if self.workspace.panel == WorkspacePanel::Trash {
-                "正在读取回收站…".into()
-            } else {
-                format!("当前分类 {}", id.label())
-            };
         }
     }
 
@@ -49,7 +44,6 @@ impl ShellViewModel {
             self.leave_settings_page();
             self.selected_path = self.sidebar.selected_path.clone();
             self.current_directory = self.sidebar.current_directory.clone();
-            self.detail = self.sidebar.selected_path.clone().unwrap_or_else(|| self.current_directory.clone());
         }
     }
 
@@ -57,7 +51,6 @@ impl ShellViewModel {
     pub(crate) fn note_sidebar_browse(&mut self, path: &str) {
         self.files.current_path = path.to_string();
         self.files.loading = true;
-        self.files.activity = "正在读取目录…".into();
     }
 
     /// 悬停打开发生在 `prepare`。松手会先写下移动文案，拆树前要把目录加载盖回去。
@@ -77,7 +70,6 @@ impl ShellViewModel {
         if self.sidebar.open_folder(&mut self.workspace, &path, locked) {
             self.leave_settings_page();
             self.current_directory = self.sidebar.current_directory.clone();
-            self.detail = format!("正在读取目录 {path}…");
             self.mark_surface_dirty();
         }
     }
@@ -86,7 +78,6 @@ impl ShellViewModel {
         let locked = self.navigation_locked();
         if self.sidebar.select_smart_folder(&mut self.workspace, &smart_folder_id, locked) {
             self.leave_settings_page();
-            self.detail = format!("正在查询智能文件夹 {smart_folder_id}…");
         }
     }
 
@@ -119,8 +110,7 @@ impl ShellViewModel {
     pub(crate) fn apply_playlist(&mut self, playlist_id: String) {
         if self.sidebar.select_playlist(&mut self.workspace, &playlist_id) {
             self.leave_settings_page();
-            self.selected_playlist_id = Some(playlist_id.clone());
-            self.detail = format!("正在读取播放集 {playlist_id}…");
+            self.selected_playlist_id = Some(playlist_id);
         }
     }
 
@@ -197,9 +187,8 @@ impl ShellViewModel {
             return;
         }
         match result {
-            Ok(count) => {
+            Ok(_) => {
                 self.sidebar.counts.recent = 0;
-                self.files.activity = format!("已清空最近使用 {count} 条。");
                 self.workspace.effects.push(WorkspaceEffect::LoadSnapshotSilent { repo_id: repo_id.to_string() });
             }
             Err(error) => {

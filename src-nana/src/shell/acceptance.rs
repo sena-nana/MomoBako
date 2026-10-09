@@ -12,31 +12,18 @@ const TIMER_FRAMES: usize = 64;
 pub(super) fn seed(model: &mut ShellViewModel) {
     match model.page {
         ShellPage::Loading => shell_scenes::seed_loading(model),
-        ShellPage::EmptyRepository => {
-            model.detail = "可从文件夹或拖放导入资源".into();
-            shell_scenes::seed_empty(model);
-        }
+        ShellPage::EmptyRepository => shell_scenes::seed_empty(model),
         ShellPage::Error => shell_scenes::seed_error(model),
-        ShellPage::FileList => {
-            seed_base(model);
-            model.detail = "12 个文件 · 按名称排序".into();
-        }
+        ShellPage::FileList => seed_base(model),
         ShellPage::SelectedFile => {
             seed_base(model);
             model.selected_path = Some("assets/cover.png".into());
-            model.detail = "PNG 图片 · 1920 × 1080 · 2.4 MB".into();
             model.inspect.begin_selection("assets/cover.png");
         }
-        ShellPage::Playlists => {
-            player_scenes::seed_playlists(model);
-            model.detail = "正在加载播放列表".into();
-        }
+        ShellPage::Playlists => player_scenes::seed_playlists(model),
         ShellPage::PluginSettings => admin_scenes::seed_plugin_settings(model),
         ShellPage::TaskRunning => admin_scenes::seed_task(model, false),
-        ShellPage::PlaybackRunning => {
-            player_scenes::seed_playback(model);
-            model.detail = "正在播放 · track-01.mp3".into();
-        }
+        ShellPage::PlaybackRunning => player_scenes::seed_playback(model),
         ShellPage::TaskCancelling => admin_scenes::seed_task(model, true),
         ShellPage::Conflict => files_scenes::seed_conflict(model),
         ShellPage::UnsavedEdit => files_scenes::seed_unsaved_edit(model),

@@ -66,7 +66,8 @@ impl BarProps {
             volume: session.volume.clamp(0.0, 1.0),
             image_seconds: (player.settings.image_duration_ms as f32 / 1000.0).round() as u32,
             cover: player.settings.object_fit_cover,
-            error: error.filter(|_| item.is_some()),
+            // Vue `WorkspacePlayerBar.vue` 有错误就写在次行，没有条目时也写。
+            error,
             queue_open: player.queue_open && item.is_some(),
             queue: player.queue.clone(),
             queue_key: format!(

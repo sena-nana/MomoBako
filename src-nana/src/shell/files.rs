@@ -360,12 +360,37 @@ pub enum FilesMessage {
     HostDrop(nana_ui::runtime::FileDropEvent),
 }
 
-/// 文件操作进度。宽度过渡由壳层动效时钟绘制。
+/// 文件变更在任务弹层里的进度行，照 Vue `startOperationProgress` / `updateOperationProgress`：
+/// 种类、当前阶段和百分比。宽度过渡由壳层动效时钟绘制。
 #[derive(Clone, Debug, PartialEq)]
 pub(super) struct FileOperation {
+    pub label: String,
+    pub detail: String,
     pub value: f32,
     pub indeterminate: bool,
-    pub detail: String,
+    /// 变更完成、重读目录时 Vue「刷新文件索引」那一步的百分比。删除和还原没有这一步。
+    pub refresh_value: Option<f32>,
+    /// 上一次变化的时间（毫秒），任务弹层按它和运行中的任务一起排序。
+    pub updated_at_ms: i64,
+}
+
+impl FileOperation {
+    /// Vue 文件变更开始以后的第一步：种类、阶段说明和百分比。
+    pub(super) fn step(label: impl Into<String>, detail: impl Into<String>, value: f32, refresh_value: Option<f32>) -> Self {
+        Self {
+            label: label.into(),
+            detail: detail.into(),
+            value,
+            indeterminate: false,
+            refresh_value,
+            updated_at_ms: super::tree_sync::now_ms(),
+        }
+    }
+
+    /// 从文件夹导入，对话框和拖入都是（Vue `importEntriesToWorkspace`）。
+    pub(super) fn import() -> Self {
+        Self::step("导入文件", "导入文件到当前资源库", 24.0, Some(84.0))
+    }
 }
 
 /// 目录条目、选择、对话框和进行中的变更。
@@ -382,7 +407,6 @@ pub struct FilesState {
     pub(super) loading_more: bool,
     pub(super) error: String,
     pub(super) mutating: bool,
-    pub(super) activity: String,
     pub(super) selected: Vec<String>,
     pub(super) primary: Option<String>,
     pub(super) anchor: Option<String>,
@@ -429,10 +453,6 @@ pub struct FilesState {
 impl FilesState {
     pub(super) fn operation_percent(&self) -> Option<f32> {
         self.operation.as_ref().map(|operation| operation.value)
-    }
-
-    pub fn operation_label(&self) -> Option<String> {
-        self.operation.as_ref().map(|item| format!("{} · {}%", item.detail, item.value as i32))
     }
 
     pub(super) fn operation_indeterminate(&self) -> bool {
@@ -484,7 +504,7 @@ impl FilesState {
             eprintln!("Nana 拖放移动缺少仓库");
             return;
         }
-        self.begin("正在移动…");
+        self.begin(Some(FileOperation::step("移动文件", "移动到目标文件夹", 36.0, Some(82.0))));
         self.effects.push(FilesEffect::Move { repo_id, sources, parent });
     }
 
@@ -497,7 +517,7 @@ impl FilesState {
             eprintln!("Nana 拖放导入缺少仓库");
             return;
         }
-        self.begin("正在导入…");
+        self.begin(Some(FileOperation::import()));
         self.effects.push(FilesEffect::Import { repo_id, parent, sources });
     }
 
@@ -825,10 +845,10 @@ impl FilesState {
                 self.restore_selected(ctx);
             }
             FilesMessage::RestoreAll => {
-                self.mutate_trash(ctx, "restoreAll", Vec::new(), "正在还原…");
+                self.mutate_trash(ctx, "restoreAll", Vec::new(), None);
             }
             FilesMessage::EmptyTrash => {
-                self.mutate_trash(ctx, "empty", Vec::new(), "正在清空回收站…");
+                self.mutate_trash(ctx, "empty", Vec::new(), None);
             }
             FilesMessage::SkipHardlink => {
                 self.skip_hardlink();
@@ -926,7 +946,6 @@ impl FilesState {
             }
         }
         self.error.clear();
-        self.activity = "正在读取目录…".into();
         self.effects.push(FilesEffect::Browse {
             repo_id,
             path,
@@ -942,7 +961,6 @@ impl FilesState {
         self.loading = false;
         self.loading_more = false;
         self.pending = None;
-        self.activity.clear();
         self.operation = None;
     }
 }

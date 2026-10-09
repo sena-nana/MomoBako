@@ -240,7 +240,8 @@ fn m4a_preview_takes_over_the_bar_without_the_audio_plugin() {
     let bare = preview(false);
     assert!(!bare.player.preview_owns_bar());
     assert!(bare.player.current_item().is_none());
-    assert_eq!(bare.player.activity, "没有可用于播放此媒体的插件");
+    let bar = super::super::super::player_view::bar::BarProps::from_model(&bare);
+    assert_eq!(bar.subtitle(), "没有可用于播放此媒体的插件", "和 Vue 一样写在播放条次行，没有条目时也写");
 }
 
 /// 播放时钟只有一份：每帧往前拨，到头按自然结束切到下一项并接着放。

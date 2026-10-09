@@ -873,17 +873,7 @@ pub(super) fn reduce_message(model: &mut super::ShellViewModel, message: super::
                 Err(error) => Err(error.clone()),
             };
             if model.sidebar.note_smart_query(&repo_id, &smart_folder_id, counted) {
-                match result {
-                    Ok(query) => {
-                        let count = query.count;
-                        model.files.set_virtual_rows(query.rows);
-                        model.detail = format!("智能文件夹 · {count} 个结果");
-                    }
-                    Err(error) => {
-                        model.files.set_virtual_rows(Vec::new());
-                        model.detail = format!("无法查询智能文件夹：{error}");
-                    }
-                }
+                model.files.set_virtual_rows(result.map(|query| query.rows).unwrap_or_default());
             }
         }
         SidebarMessage::SidebarPlaylistsLoaded { repo_id, result: Ok(playlists) } => {

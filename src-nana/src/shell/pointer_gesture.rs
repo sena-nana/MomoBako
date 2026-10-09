@@ -597,7 +597,7 @@ mod tests {
             "浏览请求不能继续留在侧栏队列"
         );
         assert_eq!(model.files.current_path, "photos");
-        assert_eq!(model.files.activity, "正在读取目录…");
+        assert!(model.files.loading, "目录读回来以前文件列表显示读取中");
         assert_eq!(model.current_directory, "photos");
         assert!(tree_selects_folder(&window, "照片"), "松手后的树应选中 photos");
 

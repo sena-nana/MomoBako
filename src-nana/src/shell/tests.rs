@@ -2,28 +2,32 @@
 
     use super::{ShellMessage, ShellPage, ShellViewModel};
 
+    /// 「未保存」页的脏状态来自注释草稿，关窗时按脏处理。
     #[test]
-    fn shell_messages_reduce_to_user_visible_states() {
-        // 「未保存」页的脏状态来自注释草稿：编辑动作只报告草稿还在。
-        let mut model = ShellViewModel::for_page(ShellPage::UnsavedEdit);
-        model.reduce(ShellMessage::EditAction);
+    fn unsaved_edit_page_keeps_the_draft_dirty() {
+        let model = ShellViewModel::for_page(ShellPage::UnsavedEdit);
         assert_eq!(model.page, ShellPage::UnsavedEdit);
-        assert_eq!(model.detail, "未保存的修改留在当前草稿");
         assert!(model.close_is_dirty());
     }
 
+    /// 和 Vue `playlistDialogDisabled` 一样，名称为空或没有选类型时提交（含回车）不建、对话框留着。
     #[test]
     fn playlist_creation_requires_name_and_player_type() {
         let mut model = ShellViewModel::for_page(ShellPage::Playlists);
+        model.playlist_dialog_open = true;
+        model.selected_new_playlist_player_type_id = None;
         model.reduce(ShellMessage::CreatePlaylist);
-        assert_eq!(model.detail, "播放列表名称不能为空");
+        assert!(model.playlist_dialog_open, "名称为空不提交");
         model.reduce(ShellMessage::NewPlaylistNameChanged("我的列表".into()));
         model.reduce(ShellMessage::CreatePlaylist);
-        assert_eq!(model.detail, "请先选择播放器类型");
+        assert!(model.playlist_dialog_open, "没有播放类型不提交");
+        model.reduce(ShellMessage::SelectPlaylistPlayer("momobako.playlist.audio-sequence".into()));
+        model.reduce(ShellMessage::CreatePlaylist);
+        assert!(!model.playlist_dialog_open);
     }
 
     /// 设置页只有主题会写设置文件。读回和保存结果整份替换设置，缓存上限和关闭行为照旧留给缓存和关窗流程；
-    /// 校验失败只写错误，不切页面。
+    /// 校验失败进状态区，不切页面。
     #[test]
     fn settings_results_keep_the_fields_without_a_settings_card() {
         let mut model = ShellViewModel::for_page(ShellPage::Settings);
@@ -38,13 +42,11 @@
         model.reduce(ShellMessage::SettingsThemeChanged("light".into()));
         model.reduce(ShellMessage::SettingsSaved(Err("缩略图缓存上限必须在 64–16384 MB 之间".into())));
         assert_eq!(model.page, ShellPage::Settings);
-        assert!(model.settings_error.is_some());
+        assert!(model.status.failure().is_some_and(|failure| failure.message.starts_with("保存应用设置失败")));
         let saved = crate::settings::ApplicationSettings { theme: "light".into(), ..loaded };
         model.reduce(ShellMessage::SettingsSaved(Ok(saved.clone())));
         assert_eq!(model.page, ShellPage::Settings);
         assert_eq!(model.settings, saved);
-        assert!(model.settings_error.is_none());
-        assert_eq!(model.detail, "应用设置已保存");
     }
 
     fn playlist_detail(repo_id: &str, playlist_id: &str) -> crate::backend::services::repository::PlaylistDetail {
@@ -77,17 +79,14 @@
 
         let mut model = ShellViewModel::default();
         model.page = ShellPage::FileList;
-        model.detail = "保持".into();
         model.sidebar.bind_repository(Some("repo-a"), false);
         model.reduce(ShellMessage::PlaylistDetailLoaded(Ok(playlist_detail("repo-b", "pl"))));
         assert_eq!(model.page, ShellPage::FileList);
-        assert_eq!(model.detail, "保持");
         assert!(model.selected_playlist_id.is_none());
 
         model.reduce(ShellMessage::PlaylistDetailLoaded(Ok(playlist_detail("repo-a", "pl"))));
         assert_eq!(model.page, ShellPage::FileList);
         assert_eq!(model.selected_playlist_id.as_deref(), Some("pl"));
-        assert_eq!(model.detail, "早晨 · 0 个项目");
     }
 
     /// 壳层视图只发一种 `ShellMessage`，`dispatch_program` 同帧同类型只留最后一条，会吞掉操作。
