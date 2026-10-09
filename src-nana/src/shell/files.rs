@@ -192,7 +192,7 @@ impl DisplayMode {
     }
 }
 
-/// 点击行时使用的选择方式。Nana 点击没有修饰键，所以由按钮显式指定。
+/// 点击行时的选择方式，由点下去时按着的修饰键决定（`input::HeldModifiers`）。
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum SelectionMode {
     #[default]
@@ -201,26 +201,14 @@ pub enum SelectionMode {
     Range,
 }
 
-impl SelectionMode {
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Replace => "替换",
-            Self::Toggle => "切换",
-            Self::Range => "范围",
-        }
-    }
-}
-
 /// 文件表面的对话框。删除不弹框，回收站和普通删除只用请求里的 mode 区分。
+/// 建文件走工具栏输入框，新建文件夹走侧栏文件夹对话框，移动走拖放，都不在这里。
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum FileDialog {
     #[default]
     Closed,
-    CreateDirectory,
-    CreateFile,
     Rename,
     Copy,
-    Move,
     Import,
     ImportArchive,
     ImportEagle,
@@ -289,6 +277,8 @@ pub enum FilesEffect {
     LoadHardlinks { repo_id: String },
     /// 结构更新静默重读候选。不打开对话框，失败不写入页面错误。
     RefreshHardlinks { repo_id: String },
+    /// 启动和换仓库后在后台查一次候选（Vue `queueRepositoryBackgroundLoads`）。失败只记日志。
+    CheckHardlinks { repo_id: String },
     ConfirmHardlink { repo_id: String, candidate_id: String },
     LoadAsset { repo_id: String, asset_id: String },
     PersistDisplayMode,
@@ -308,7 +298,7 @@ pub enum FilesEffect {
 #[derive(Clone, Debug)]
 pub enum FilesMessage {
     SetDisplayMode(DisplayMode),
-    SetSelectionMode(SelectionMode),
+    /// 单击一行。选择方式按点下去时的修饰键：Shift 范围、Ctrl / Meta 切换，否则替换。
     ActivateRow(String),
     /// 双击：目录进入，文件打开预览。
     OpenRow(String),
@@ -360,6 +350,8 @@ pub enum FilesMessage {
     HardlinksLoaded(Result<Vec<HardlinkPrompt>, String>),
     /// 静默刷新结果。只替换候选，不改对话框和页面错误。
     HardlinksRefreshed(Result<Vec<HardlinkPrompt>, String>),
+    /// 启动和换仓库后查到的候选：换掉列表，没有别的对话框时有候选就弹出确认。
+    HardlinksChecked(Result<Vec<HardlinkPrompt>, String>),
     HardlinkConfirmed(Result<String, String>),
     NoteError(String),
     /// 缩略图已经写入。路径是缓存文件，用来重新解码纹理。
@@ -368,12 +360,37 @@ pub enum FilesMessage {
     HostDrop(nana_ui::runtime::FileDropEvent),
 }
 
-/// 文件操作进度。宽度过渡由壳层动效时钟绘制。
+/// 文件变更在任务弹层里的进度行，照 Vue `startOperationProgress` / `updateOperationProgress`：
+/// 种类、当前阶段和百分比。
 #[derive(Clone, Debug, PartialEq)]
 pub(super) struct FileOperation {
+    pub label: String,
+    pub detail: String,
     pub value: f32,
     pub indeterminate: bool,
-    pub detail: String,
+    /// 变更完成、重读目录时 Vue「刷新文件索引」那一步的百分比。删除和还原没有这一步。
+    pub refresh_value: Option<f32>,
+    /// 上一次变化的时间（毫秒），任务弹层按它和运行中的任务一起排序。
+    pub updated_at_ms: i64,
+}
+
+impl FileOperation {
+    /// Vue 文件变更开始以后的第一步：种类、阶段说明和百分比。
+    pub(super) fn step(label: impl Into<String>, detail: impl Into<String>, value: f32, refresh_value: Option<f32>) -> Self {
+        Self {
+            label: label.into(),
+            detail: detail.into(),
+            value,
+            indeterminate: false,
+            refresh_value,
+            updated_at_ms: super::tree_sync::now_ms(),
+        }
+    }
+
+    /// 从文件夹导入，对话框和拖入都是（Vue `importEntriesToWorkspace`）。
+    pub(super) fn import() -> Self {
+        Self::step("导入文件", "导入文件到当前资源库", 24.0, Some(84.0))
+    }
 }
 
 /// 目录条目、选择、对话框和进行中的变更。
@@ -390,11 +407,9 @@ pub struct FilesState {
     pub(super) loading_more: bool,
     pub(super) error: String,
     pub(super) mutating: bool,
-    pub(super) activity: String,
     pub(super) selected: Vec<String>,
     pub(super) primary: Option<String>,
     pub(super) anchor: Option<String>,
-    pub(super) selection_mode: SelectionMode,
     pub(super) dialog: FileDialog,
     /// 导出对话框。默认关闭，首页不提供入口。
     pub(super) export: ExportDraft,
@@ -402,7 +417,7 @@ pub struct FilesState {
     prefetch_due_ms: Option<u64>,
     prefetch_clock: u64,
     pub(super) name_draft: String,
-    /// 工具栏里的新建文件名。不占用对话框草稿。
+    /// 工具栏里的新建文件名。不占用对话框草稿，建成以后才清空（Vue `handleCreateFile`）。
     pub(super) create_name: String,
     pub(super) target_draft: String,
     pub(super) import_draft: String,
@@ -438,10 +453,6 @@ pub struct FilesState {
 impl FilesState {
     pub(super) fn operation_percent(&self) -> Option<f32> {
         self.operation.as_ref().map(|operation| operation.value)
-    }
-
-    pub fn operation_label(&self) -> Option<String> {
-        self.operation.as_ref().map(|item| format!("{} · {}%", item.detail, item.value as i32))
     }
 
     pub(super) fn operation_indeterminate(&self) -> bool {
@@ -493,7 +504,7 @@ impl FilesState {
             eprintln!("Nana 拖放移动缺少仓库");
             return;
         }
-        self.begin("正在移动…");
+        self.begin(Some(FileOperation::step("移动文件", "移动到目标文件夹", 36.0, Some(82.0))));
         self.effects.push(FilesEffect::Move { repo_id, sources, parent });
     }
 
@@ -506,7 +517,7 @@ impl FilesState {
             eprintln!("Nana 拖放导入缺少仓库");
             return;
         }
-        self.begin("正在导入…");
+        self.begin(Some(FileOperation::import()));
         self.effects.push(FilesEffect::Import { repo_id, parent, sources });
     }
 
@@ -764,11 +775,8 @@ impl FilesState {
                 self.display_mode = mode;
                 self.effects.push(FilesEffect::PersistDisplayMode);
             }
-            FilesMessage::SetSelectionMode(mode) => self.selection_mode = mode,
             FilesMessage::ActivateRow(path) => {
-                if self.select_row(ctx, &path) {
-                    self.note_selected_only(&path);
-                }
+                self.activate_row(ctx, &path, SelectionMode::Replace);
             }
             FilesMessage::OpenRow(path) => {
                 self.select_only = None;
@@ -837,10 +845,10 @@ impl FilesState {
                 self.restore_selected(ctx);
             }
             FilesMessage::RestoreAll => {
-                self.mutate_trash(ctx, "restoreAll", Vec::new(), "正在还原…");
+                self.mutate_trash(ctx, "restoreAll", Vec::new(), None);
             }
             FilesMessage::EmptyTrash => {
-                self.mutate_trash(ctx, "empty", Vec::new(), "正在清空回收站…");
+                self.mutate_trash(ctx, "empty", Vec::new(), None);
             }
             FilesMessage::SkipHardlink => {
                 self.skip_hardlink();
@@ -857,6 +865,8 @@ impl FilesState {
             }
             FilesMessage::HardlinksLoaded(result) => self.note_hardlinks(result),
             FilesMessage::HardlinksRefreshed(result) => self.note_hardlinks_silent(result),
+            FilesMessage::HardlinksChecked(Ok(prompts)) => self.note_hardlinks_synced(prompts),
+            FilesMessage::HardlinksChecked(Err(error)) => eprintln!("Nana 后台读取硬链接候选失败：{error}"),
             FilesMessage::HardlinkConfirmed(result) => self.note_hardlink_confirmed(result),
             FilesMessage::NoteError(error) => self.note_error(error),
             FilesMessage::ThumbnailSaved { path, thumbnail_path, custom } => self.note_custom_thumbnail(&path, thumbnail_path, custom),
@@ -936,7 +946,6 @@ impl FilesState {
             }
         }
         self.error.clear();
-        self.activity = "正在读取目录…".into();
         self.effects.push(FilesEffect::Browse {
             repo_id,
             path,
@@ -952,7 +961,6 @@ impl FilesState {
         self.loading = false;
         self.loading_more = false;
         self.pending = None;
-        self.activity.clear();
         self.operation = None;
     }
 }
@@ -978,3 +986,6 @@ mod mount_tests;
 #[cfg(test)]
 #[path = "files_virtual_tests.rs"]
 mod virtual_tests;
+#[cfg(test)]
+#[path = "files_select_tests.rs"]
+mod select_tests;

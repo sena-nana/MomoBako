@@ -98,6 +98,17 @@ fn drive_prefetch(shell: &mut ShellViewModel) {
     shell.files.poll_thumbnail_prefetch(now, &paths);
 }
 
+/// 记下这次输入按着的修饰键。运行时路由以后文档不保留修饰键，点选条目（切换、范围）和
+/// 框选（追加）要用；输入在消息归约之前到这里，单击消息归约时读到的就是点下去那一刻的。
+pub(crate) fn note_modifiers(shell: &mut ShellViewModel, payload: &InputPayload) {
+    let modifiers = match payload {
+        InputPayload::Pointer(pointer) => pointer.modifiers,
+        InputPayload::Key(key) => key.modifiers,
+        _ => return,
+    };
+    shell.input.modifiers = crate::shell::input::HeldModifiers { shift: modifiers.shift, command: modifiers.control || modifiers.meta };
+}
+
 /// 运行时路由完一个输入事件以后的全局 Escape：按下、不是连发、控件没有自己处理掉（`consumed`
 /// 为假），而且 ViewModel 里还有能关的一层时，发一条关掉最上面一层的消息。
 ///

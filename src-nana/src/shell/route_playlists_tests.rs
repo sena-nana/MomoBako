@@ -212,7 +212,8 @@ fn removing_items_by_click_and_keyboard_keeps_the_other_rows() {
     );
 }
 
-/// 换到文件面板再回来：分支重建，回来以后条目、播放条岛和新挂的一样；停在播放集页、面板换成别的时只剩外框。
+/// 换到文件面板再回来：分支重建，回来以后条目、播放条岛和新挂的一样；换到别的面板就是别的路由，
+/// 播放集页这个页面身份不再把主区留在播放集路由上。
 #[test]
 fn leaving_and_returning_rebuilds_a_matching_branch() {
     let mut harness = listed();
@@ -227,11 +228,11 @@ fn leaving_and_returning_rebuilds_a_matching_branch() {
     assert!(harness.keyed("player-title").is_some(), "回来以后播放条岛要放回去");
     harness.assert_same_as_fresh_mount();
 
+    harness.model.page = ShellPage::Playlists;
     harness.apply(ShellMessage::SetWorkspacePanel(WorkspacePanel::Search));
-    harness.apply(ShellMessage::Navigate(ShellPage::Playlists));
     harness.flush();
-    assert_eq!(RouteKey::of(&harness.model), RouteKey::Playlists, "停在播放集页");
+    assert_eq!(RouteKey::of(&harness.model), RouteKey::Search, "面板是搜索就是搜索路由");
     assert!(harness.find("演示播放列表").is_none(), "不在播放集面板时不显示播放表面");
-    assert!(harness.keyed("player-title").is_none(), "不在播放集面板时岛里没有播放条");
+    assert!(harness.keyed("player-title").is_none(), "不在播放集面板时没有播放条");
     harness.assert_same_as_fresh_mount();
 }

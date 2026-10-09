@@ -18,13 +18,16 @@ pub(crate) fn reduce_message(model: &mut ShellViewModel, message: ShellMessage) 
             reduce_admin(model, message);
             None
         }
-        ShellMessage::Navigate(ShellPage::Settings) => {
-            model.admin.begin_settings_load();
-            Some(ShellMessage::Navigate(ShellPage::Settings))
+        ShellMessage::OpenSettings => {
+            open_settings_page(model, None);
+            None
         }
         ShellMessage::SetWorkspacePanel(panel) => {
             if panel == WorkspacePanel::Actions {
                 model.admin.queue_actions(model.repository_id.clone());
+            }
+            if panel == WorkspacePanel::Logs {
+                model.admin.begin_logs_load();
             }
             if panel == WorkspacePanel::Extensions && model.admin.plugins.is_empty() && !model.admin.loading_settings {
                 model.admin.begin_settings_load();
@@ -55,33 +58,6 @@ pub(crate) fn reduce_message(model: &mut ShellViewModel, message: ShellMessage) 
 
 fn consume_legacy(model: &mut ShellViewModel, message: ShellMessage) -> Option<ShellMessage> {
     match message {
-        ShellMessage::PluginsLoaded(Ok(plugins)) => {
-            publish_plugins(model, &plugins);
-            model.admin.store_plugins(plugins);
-            model.admin.managing = false;
-            model.admin.apply_success();
-            None
-        }
-        ShellMessage::PluginsLoaded(Err(error)) => {
-            eprintln!("Nana 插件列表读取失败：{error}");
-            model.admin.managing = false;
-            model.admin.load_error = error.clone();
-            model.admin.apply_failure(&error);
-            None
-        }
-        // 这三条旧消息由宿主直接调服务，界面改走 `AdminMessage`，这里只记一笔。
-        ShellMessage::SelectPlugin(plugin_id) => {
-            model.detail = format!("正在读取插件 {plugin_id} 的设置…");
-            None
-        }
-        ShellMessage::TogglePlugin { plugin_id, enabled } => {
-            model.detail = format!("正在{}插件 {plugin_id}…", if enabled { "启用" } else { "停用" });
-            None
-        }
-        ShellMessage::DeletePlugin(plugin_id) => {
-            model.detail = format!("正在删除插件 {plugin_id}…");
-            None
-        }
         ShellMessage::PluginConfigLoaded(Ok(config)) => {
             apply_config(model, &config);
             model.admin.apply_success();
@@ -94,73 +70,33 @@ fn consume_legacy(model: &mut ShellViewModel, message: ShellMessage) -> Option<S
             model.admin.apply_failure(&error);
             None
         }
-        ShellMessage::DeletePluginConfig { plugin_id, key } => {
-            model.detail = format!("正在删除插件 {plugin_id} 的配置 {key}…");
-            None
-        }
-        ShellMessage::PluginConfigDraftChanged { key, value } => {
-            model.plugin_config_drafts.insert(key, value);
-            None
-        }
-        ShellMessage::SavePluginConfig { .. } => None,
         ShellMessage::LogsLoaded(Ok(page)) => {
-            model.admin.logs = page.records.clone();
-            model.admin.note_log_scroll();
-            model.log_entries = page
-                .records
-                .iter()
-                .map(|record| format!("{} · {} · {}", record.level, record.category, record.message))
-                .collect();
+            model.admin.logs_loading = false;
+            model.admin.replace_logs(page.records);
             None
         }
         ShellMessage::LogsLoaded(Err(error)) => {
             eprintln!("Nana 系统日志读取失败：{error}");
+            model.admin.logs_loading = false;
             model.status.fail(FailureSource::Logs, format!("无法读取系统日志：{error}"));
-            model.detail = format!("无法读取系统日志：{error}");
             None
         }
-        ShellMessage::ClearLogs => {
-            model.detail = "正在清理系统日志…".into();
-            None
-        }
-        ShellMessage::TaskSnapshotLoaded { active, completed } => {
-            model.active_tasks = active;
-            model.completed_tasks = completed;
-            None
-        }
-        // 状态行写第一个运行中或取消中的任务；任务弹层另读完整列表。
+        // 清理请求由 `app_dispatch` 发出，结果回来以前日志页不变。
+        ShellMessage::ClearLogs => None,
         ShellMessage::TaskProgressLoaded(progress) => {
             model.task_progress = progress;
-            if let Some(snapshot) = model.task_progress.iter().find(|snapshot| snapshot.status == "running" || snapshot.status == "cancelling") {
-                let label = snapshot.label.clone().unwrap_or_else(|| snapshot.protocol_id.clone());
-                let percent = snapshot.percent.map(|value| format!("{value:.0}%")).unwrap_or_else(|| "处理中".into());
-                model.detail = format!("{label} · {percent}");
-            }
-            None
-        }
-        ShellMessage::SystemStatusLoaded(Ok(status)) => {
-            model.admin.external = Some(status.clone());
-            model.system_status = Some(format!("{} · {}", if status.ready { "服务已就绪" } else { "服务未就绪" }, status.base_url));
-            model.detail = model.system_status.clone().unwrap_or_default();
-            None
-        }
-        ShellMessage::SystemStatusLoaded(Err(error)) => {
-            eprintln!("Nana 外部 API 连接状态读取失败：{error}");
-            model.status.fail(FailureSource::Settings, format!("无法读取系统服务状态：{error}"));
-            model.detail = format!("无法读取系统服务状态：{error}");
             None
         }
         ShellMessage::SettingsLoaded(Ok((settings, diagnostic))) => {
+            if let Some(diagnostic) = diagnostic {
+                eprintln!("Nana {diagnostic}");
+            }
             model.settings = settings;
-            model.detail = diagnostic.clone().unwrap_or_else(|| "应用设置已加载".into());
-            model.settings_error = diagnostic;
             None
         }
         ShellMessage::SettingsLoaded(Err(error)) => {
             eprintln!("Nana 应用设置读取失败：{error}");
             model.status.fail(FailureSource::Settings, format!("无法读取应用设置：{error}"));
-            model.detail = format!("无法读取应用设置：{error}");
-            model.settings_error = Some(error);
             None
         }
         ShellMessage::SettingsThemeChanged(theme) => {
@@ -169,26 +105,17 @@ fn consume_legacy(model: &mut ShellViewModel, message: ShellMessage) -> Option<S
                 return None;
             }
             model.settings.theme = theme;
-            model.settings_error = None;
             model.admin.push_effect(AdminEffect::SaveSettings);
             None
         }
         // 主题改动后宿主直接写设置文件，这里只收结果；结果不切页面。
         ShellMessage::SettingsSaved(Ok(settings)) => {
             model.settings = settings;
-            model.settings_error = None;
-            model.detail = "应用设置已保存".into();
             None
         }
         ShellMessage::SettingsSaved(Err(error)) => {
             eprintln!("Nana 应用设置保存失败：{error}");
             model.status.fail(FailureSource::Settings, format!("保存应用设置失败：{error}"));
-            model.detail = format!("设置校验失败：{error}");
-            model.settings_error = Some(error);
-            None
-        }
-        ShellMessage::CancelTask(task_id) => {
-            model.detail = format!("已请求取消任务 {task_id}");
             None
         }
         other => Some(other),
@@ -265,12 +192,6 @@ fn reduce_admin(model: &mut ShellViewModel, message: AdminMessage) {
             model.admin.external_message.clear();
             model.admin.external_error = format!("导出失败：{error}");
         }
-        AdminMessage::SelectRepository(repo_id) => {
-            let repo_id = repo_id.trim();
-            if !repo_id.is_empty() {
-                model.reduce(ShellMessage::SelectWorkspaceRepository(repo_id.to_string()));
-            }
-        }
         AdminMessage::SetAudioPlayer(plugin_id) => model.set_audio_preference(plugin_id),
         AdminMessage::ToggleLogLevel(level) => {
             model.admin.log_levels = support::toggle_value(&model.admin.log_levels, &level);
@@ -312,13 +233,7 @@ fn reduce_admin(model: &mut ShellViewModel, message: AdminMessage) {
             }
         }
         AdminMessage::ToggleTaskPopover => model.admin.popover_open = !model.admin.popover_open,
-        AdminMessage::CloseTaskPopover | AdminMessage::TaskUnmount => model.admin.popover_open = false,
-        AdminMessage::TaskEscape => model.admin.popover_open = false,
-        AdminMessage::TaskOutside { inside } => {
-            if !inside {
-                model.admin.popover_open = false;
-            }
-        }
+        AdminMessage::CloseTaskPopover => model.admin.popover_open = false,
         AdminMessage::SetOperation(operation) => model.admin.operation = operation,
         AdminMessage::SelectAction(action_id) => {
             model.admin.active_action_id = Some(action_id);
@@ -365,25 +280,27 @@ fn reduce_admin(model: &mut ShellViewModel, message: AdminMessage) {
     }
 }
 
-/// 插件列表换新后同步壳层上旧页面读的列表和文件右键快捷方式。
+/// 插件列表换新：重算筛选栏的库类型快捷方式，再重读插件登记的播放器类型。
+/// Vue 每次拿到新列表都同步前端插件注册表（`syncPreviewPlugins`），播放器跟着换。
 fn publish_plugins(model: &mut ShellViewModel, plugins: &[PluginManifest]) {
-    model.plugin_entries = plugins.iter().map(|plugin| format!("{} {} · {}", plugin.name, plugin.version, plugin.status)).collect();
-    model.plugin_entry_ids = plugins.iter().map(|plugin| plugin.plugin_id.clone()).collect();
-    model.plugin_enabled = plugins.iter().map(|plugin| plugin.enabled).collect();
     model.inspect.shortcuts = super::super::inspect_shortcuts::shortcuts_from_plugins(plugins);
+    model.admin.push_effect(AdminEffect::LoadPlaylistPlayers);
 }
 
 fn apply_config(model: &mut ShellViewModel, config: &PluginConfigSnapshot) {
-    model.selected_plugin_id = Some(config.plugin_id.clone());
-    model.plugin_config_keys = config.values.keys().cloned().collect();
-    model.plugin_config_drafts = config
-        .values
-        .iter()
-        .map(|(key, value)| (key.clone(), value.as_str().map_or_else(|| value.to_string(), str::to_owned)))
-        .collect();
-    model.plugin_config_string_values = config.values.iter().filter(|(_, value)| value.is_string()).map(|(key, _)| key.clone()).collect();
     model.admin.config_snapshots.insert(config.plugin_id.clone(), config.clone());
     model.admin.sync_json_drafts(&config.plugin_id);
+}
+
+/// 打开设置页：读设置包（Vue `Settings.vue` 挂载时的 `loadSettingsData`）和应用设置。
+/// 带插件时照 Vue 路由的 `?plugin=` 展开它的设置，插件列表里还没有它时不展开。
+pub(crate) fn open_settings_page(model: &mut ShellViewModel, plugin_id: Option<&str>) {
+    model.page = ShellPage::Settings;
+    model.admin.begin_settings_load();
+    model.admin.push_effect(AdminEffect::LoadAppSettings);
+    if let Some(plugin_id) = plugin_id {
+        open_route(model, plugin_id);
+    }
 }
 
 fn request_delete(model: &mut ShellViewModel, plugin_id: &str) {
@@ -625,9 +542,10 @@ fn external_json(model: &ShellViewModel) -> String {
 
 fn finish_file_plugin(model: &mut ShellViewModel, method: &str, result: Result<serde_json::Value, String>) {
     match result {
+        // 和 Vue 来源动作完成后的 `context.refreshRepo()` 一样重读资源库列表，再按当前仓库重读摘要和目录。
         Ok(_) => {
             model.files.error.clear();
-            model.files.activity = format!("已调用 {method}。");
+            model.workspace.request_repository_refresh();
         }
         Err(error) => {
             eprintln!("Nana 文件插件动作失败：{method}：{error}");

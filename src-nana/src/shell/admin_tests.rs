@@ -179,6 +179,7 @@ fn api_design() -> ApiDesignSnapshot {
 }
 
 /// 一次成功的设置页数据。
+/// 送回一次成功的设置包。插件列表换新以后排下的播放器类型读取在这里取走。
 fn load_bundle(model: &mut ShellViewModel, plugins: Vec<PluginManifest>) {
     send(model, AdminMessage::SettingsBundleLoaded {
         plugins: Ok(plugins),
@@ -187,12 +188,14 @@ fn load_bundle(model: &mut ShellViewModel, plugins: Vec<PluginManifest>) {
         api: Ok(api_design()),
         external: Ok(connection()),
     });
+    let effects = model.admin.take_effects();
+    assert!(matches!(effects.as_slice(), [AdminEffect::LoadPlaylistPlayers]), "插件列表换新后应只排下播放器类型的读取：{effects:?}");
 }
 
 #[test]
 fn settings_bundle_is_all_or_nothing_and_success_clears_the_error() {
     let mut model = ShellViewModel::default();
-    model.reduce(ShellMessage::Navigate(super::super::ShellPage::Settings));
+    model.reduce(ShellMessage::OpenSettings);
     assert!(model.admin.loading_settings);
     assert!(model.admin.take_effects().iter().any(|effect| matches!(effect, AdminEffect::LoadSettingsBundle)));
     send(&mut model, AdminMessage::SettingsBundleLoaded {
@@ -585,17 +588,14 @@ fn task_popover_merges_repository_operation_and_closes() {
     let rows = model.task_rows();
     assert_eq!((rows[0].id.as_str(), rows[0].source.as_str()), ("workspace-operation", "资源库"));
     assert_eq!((rows[1].id.as_str(), rows[1].source.as_str(), rows[1].detail.as_str()), ("task-1", "任务", "scanning"));
+    // 弹层外的点击层和关闭按钮发 `CloseTaskPopover`；Escape 走全局那一条，关最上面一层。
     send(&mut model, AdminMessage::ToggleTaskPopover);
     assert!(model.admin.popover_open);
-    send(&mut model, AdminMessage::TaskOutside { inside: true });
-    assert!(model.admin.popover_open);
-    send(&mut model, AdminMessage::TaskOutside { inside: false });
+    send(&mut model, AdminMessage::CloseTaskPopover);
     assert!(!model.admin.popover_open);
     send(&mut model, AdminMessage::ToggleTaskPopover);
-    send(&mut model, AdminMessage::TaskEscape);
-    assert!(!model.admin.popover_open);
-    send(&mut model, AdminMessage::ToggleTaskPopover);
-    send(&mut model, AdminMessage::TaskUnmount);
+    assert!(crate::shell::escape_layer(&model).is_some(), "任务弹层是 Escape 能关的一层");
+    model.reduce(ShellMessage::Sidebar(crate::shell::SidebarMessage::Gap(crate::shell::GapMessage::Escape)));
     assert!(!model.admin.popover_open);
     model.admin.operation = None;
     model.task_progress.clear();
@@ -811,8 +811,10 @@ fn file_plugin_call_keeps_repository_and_writes_activity() {
         }
         other => panic!("unexpected {other:?}"),
     }
+    // Vue 来源动作完成后 `context.refreshRepo()`：重读资源库列表。
+    model.workspace.take_effects();
     send(&mut model, AdminMessage::FilePluginFinished { method: "media.clearTrackCache".into(), result: Ok(json!({})) });
-    assert_eq!(model.files.activity, "已调用 media.clearTrackCache。");
+    assert!(matches!(model.workspace.take_effects().as_slice(), [crate::shell::WorkspaceEffect::RefreshRepositories { .. }]));
     send(&mut model, AdminMessage::FilePluginFinished { method: "media.clearTrackCache".into(), result: Err(String::new()) });
     assert_eq!(model.files.error, "media.clearTrackCache 调用失败。");
 }

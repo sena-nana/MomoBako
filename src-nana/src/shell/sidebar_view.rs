@@ -29,7 +29,7 @@ use super::view_part_sidebar::project::{
     SidebarSignals,
 };
 use super::SidebarMessage;
-use super::{ShellMessage, ShellPage, WorkspacePanel};
+use super::{ShellMessage, WorkspacePanel};
 
 #[path = "sidebar_parts.rs"]
 pub(super) mod parts;
@@ -438,7 +438,7 @@ fn sidebar_footer(footer: Signal<FooterView>, rest: Signal<f32>) -> AnyView {
         .key("sidebar-footer")
         .children((
             footer_button(SETTINGS, "设置", "footer-settings", look(|footer| footer.settings), rest, |cx| {
-                cx.dispatch_program_all(ShellMessage::Navigate(ShellPage::Settings));
+                cx.dispatch_program_all(ShellMessage::OpenSettings);
             }),
             footer_button(PUZZLE, "拓展", "footer-extensions", look(|footer| footer.extensions), rest, |cx| {
                 cx.dispatch_program_all(ShellMessage::SetWorkspacePanel(WorkspacePanel::Extensions));

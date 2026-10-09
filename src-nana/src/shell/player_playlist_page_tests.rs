@@ -3,7 +3,7 @@
 //! 没点开到点开时空框和面板原地互换。每次写完都和同一 ViewModel 新挂的页面按无障碍树比一次。
 //! 整条路由（筛选栏、播放条岛、不可播放项目、拖动排序和移除）的回归在 `route_playlists_tests.rs`。
 
-use nana_ui::runtime::view::{signal, widget, IntoView};
+use nana_ui::runtime::view::{widget, IntoView};
 use nana_ui::runtime::{DocumentId, Entity, LayoutViewport, MountedView, ReorderList, RuntimeDocument, Stack, StableNodeId};
 use nana_ui::NanaTextShaper;
 
@@ -41,7 +41,7 @@ impl PageHarness {
             .mount_view_root(document_id, || {
                 let signals = PlaylistPageSignals::new(PlaylistPageView::project(model));
                 made = Some(signals);
-                widget(Stack::column(0.0)).children((super::view(signals, signal(true), ().into_any()),))
+                widget(Stack::column(0.0)).children((super::view(signals, ().into_any()),))
             })
             .expect("挂载播放集页");
         let mut harness = Self { document, signals: made.expect("挂载闭包已经运行"), shaper: NanaTextShaper::default(), _view: view };

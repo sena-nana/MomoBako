@@ -4,7 +4,7 @@
 //! 和 `filterInputs.ts` 的各个解析函数：逗号、全角逗号和换行都是分隔符，
 //! 空键、空值和两端都为空的范围直接丢掉，不向服务发半截条件。
 
-use super::{DateBound, FilterList, MatchMode, NumberBound, SearchFilters, SearchRequestDraft, SortDirection};
+use super::{DateBound, FilterList, NumberBound, SearchFilters, SearchRequestDraft, SortDirection};
 
 /// 按当前查询和筛选组装请求。只有筛选生效时才把搜索收进当前资源库。
 pub(crate) fn build_search_request(query: &str, filters: &SearchFilters, active_repo: Option<&str>) -> SearchRequestDraft {
@@ -28,7 +28,6 @@ pub(crate) fn build_search_request(query: &str, filters: &SearchFilters, active_
         exclude_date_filters: parse_dates(&filters.exclude_date_filters),
         number_filters: parse_numbers(&filters.number_filters),
         date_filters: parse_dates(&filters.date_filters),
-        match_mode: (filters.match_mode == MatchMode::Or).then(|| "or".to_string()),
         sort_field: (!sort_field.is_empty()).then(|| sort_field.to_string()),
         sort_direction: (!sort_field.is_empty()).then(|| match filters.sort_direction {
             SortDirection::Asc => "asc".to_string(),
@@ -191,7 +190,6 @@ impl SearchFilters {
             + usize::from(!self.exclude_metadata_filters.trim().is_empty())
             + usize::from(!self.number_filters.trim().is_empty())
             + usize::from(!self.date_filters.trim().is_empty())
-            + usize::from(self.match_mode == MatchMode::Or)
             + usize::from(!self.sort_field.trim().is_empty())
             + usize::from(self.limit.is_some())
             + usize::from(self.min_rating.is_some())

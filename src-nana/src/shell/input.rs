@@ -158,6 +158,28 @@ struct InternalSession {
     backend_kind: String,
 }
 
+/// 最近一次指针或按键事件按着的修饰键。运行时路由完输入以后由宿主记下（文档不保留修饰键），
+/// 点选条目和框选照 Vue 的 `shiftKey`、`ctrlKey || metaKey` 读它。
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct HeldModifiers {
+    pub shift: bool,
+    /// Ctrl 或 Meta。
+    pub command: bool,
+}
+
+impl HeldModifiers {
+    /// Vue `selectionModeFromEvent`：Shift 是范围选择，Ctrl / Meta 是切换，否则替换。
+    pub(crate) fn selection_mode(self) -> super::files::SelectionMode {
+        if self.shift {
+            super::files::SelectionMode::Range
+        } else if self.command {
+            super::files::SelectionMode::Toggle
+        } else {
+            super::files::SelectionMode::Replace
+        }
+    }
+}
+
 /// 实况树上还没松手的指针。`row` 为空时是框选。
 #[derive(Clone, Debug)]
 pub struct LiveGesture {
@@ -191,6 +213,8 @@ pub struct InputState {
     pub sidebar_dragging: bool,
     pub sidebar_resize_dirty: bool,
     pub live_gesture: Option<LiveGesture>,
+    /// 最近一次输入按着的修饰键。
+    pub modifiers: HeldModifiers,
     /// 下载菜单已经点过，正在等目录对话框。
     pub pending_download: Option<source_prompt::PendingDownload>,
     /// 来源播放列表正在问名称。
@@ -202,7 +226,8 @@ pub struct InputState {
 }
 
 impl InputState {
-    /// 按关闭设置记录确认、托盘或真正关闭。重复确认不叠加请求。
+    /// 按关闭设置记录确认、托盘或真正关闭。确认框是浮层里的 `ConfirmDialog`，只看 `pending_close`
+    /// 和文案，不排宿主请求；已经在问时再关不重复问。
     pub(crate) fn apply_close(&mut self, decision: CloseDecision, dirty: bool) {
         match decision {
             CloseDecision::CloseNow => {
@@ -220,7 +245,6 @@ impl InputState {
                 } else {
                     "确认关闭 MomoBako？".into()
                 };
-                self.host_requests.push(HostRequest::Input(HostInputRequest::ConfirmClose { dirty }));
             }
             CloseDecision::HoldForTray => {
                 self.pending_close = false;

@@ -1,4 +1,4 @@
-//! 文件页的对话框：重命名、新建、复制 / 移动到文件夹、导入路径和硬链接确认，导出资源库在
+//! 文件页的对话框：重命名、复制到文件夹、导入路径和硬链接确认，导出资源库在
 //! `workspace_export_dialog.rs`。它们是浮层槽位里的一块（`OverlayKey::FileDialog` /
 //! `OverlayKey::ExportDialog`），外壳走统一对话框框架：文件变更进行中三种关闭手势都不关，
 //! 点外面等于取消，硬链接确认点外面等于跳过（Vue `@click.self`）。
@@ -9,7 +9,7 @@
 
 use std::sync::Arc;
 
-use nana_ui::icons_tabler::{ARCHIVE, COPY, FILE_PLUS, FOLDER_OPEN, FOLDER_PLUS, PENCIL};
+use nana_ui::icons_tabler::{ARCHIVE, COPY, FOLDER_OPEN, PENCIL};
 use nana_ui::runtime::view::{fields, signal, widget, AnyView, IntoView, Signal};
 use nana_ui::runtime::{LengthSpec, RadiusTier, SemanticColorRole, Stack};
 use nana_ui::{ButtonKind, DialogSize, Icon};
@@ -72,22 +72,13 @@ const RENAME_DIALOG: DialogSize = DialogSize::capped(460.0, 92.0);
 /// 文本对话框的配置。硬链接确认和关着的时候是 `None`。
 ///
 /// 宽度和标题图标照 Vue：重命名是 `PencilLine`、460 宽，复制是 `CopyTargetDialog` 的 `Copy`，其余
-/// `.modal-card` 宽。建文件、新建文件夹、移动和三种导入 Vue 里没有对话框（工具栏输入框、拖放和原生
-/// 选择器），图标按动作取，和文件页别的对话框一样标题前都有图标。
+/// `.modal-card` 宽。三种导入 Vue 里没有对话框（原生选择器），图标按动作取，和文件页别的对话框一样
+/// 标题前都有图标。
 fn text_dialog_spec(dialog: FileDialog) -> Option<TextDialog> {
     let spec = |title, size, icon, label, placeholder, submit, draft| TextDialog { title, size, icon, label, placeholder, submit, draft };
     Some(match dialog {
         FileDialog::Rename => spec(Title::Fixed("重命名文件"), RENAME_DIALOG, PENCIL, "新名称", "输入新的文件名", "保存", name_draft),
-        FileDialog::CreateFile => {
-            spec(Title::Fixed("建文件"), MODAL_CARD, FILE_PLUS, "文件名", "新建空文件，例如 note.txt", "创建", name_draft)
-        }
-        FileDialog::CreateDirectory => {
-            spec(Title::Fixed("新建文件夹"), MODAL_CARD, FOLDER_PLUS, "文件夹名称", "输入文件夹名称", "创建", name_draft)
-        }
         FileDialog::Copy => spec(Title::Fixed("复制到文件夹"), MODAL_CARD, COPY, "目标目录", "留空表示根目录", "复制", target_draft),
-        FileDialog::Move => {
-            spec(Title::Fixed("移动到文件夹"), MODAL_CARD, FOLDER_OPEN, "目标目录", "留空表示根目录", "移动", target_draft)
-        }
         FileDialog::Import => spec(
             Title::Fixed("从文件夹导入"),
             MODAL_CARD,

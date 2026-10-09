@@ -238,7 +238,7 @@ fn starts_follow_the_vue_guards() {
     assert!(!starts(drag(false, "webdav")), "不是本地文件系统，不算开始");
     assert!(starts(drag(false, "filesystem")));
     assert!(!super::starts_operation(&ShellMessage::Sidebar(SidebarMessage::RefreshFolderTree)), "刷新文件夹树看忙碌标志");
-    assert!(!super::starts_operation(&ShellMessage::Navigate(ShellPage::Logs)));
+    assert!(!super::starts_operation(&ShellMessage::OpenSettings));
 }
 
 /// 刷新文件夹树真的开始（同步排下、忙碌由假变真）才清掉上一次失败；按钮禁用时被拦下的点击不清。

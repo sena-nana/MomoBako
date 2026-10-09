@@ -18,6 +18,7 @@ mod player_dispatch;
 mod admin_dispatch;
 mod sidebar_dispatch;
 mod sync_dispatch;
+mod task_watch;
 mod window_host;
 mod host_bridge;
 mod window_state;
@@ -110,10 +111,12 @@ impl ApplicationState for MomoBakoApplication {
     fn initialize(context: &RuntimeProgramContext<Self::Message>) -> Result<Self, Self::Error> {
         let services = match services::NativeServices::start() {
             Ok(services) => {
-                let context = context.clone();
+                let events = context.clone();
                 services.pump_host_events(move |event| {
-                    context.dispatch(ShellMessage::Host(shell::host_events::HostMessage::from_event(event)));
+                    events.dispatch(ShellMessage::Host(shell::host_events::HostMessage::from_event(event)));
                 });
+                let tasks = context.clone();
+                services.watch_tasks(move |active| tasks.dispatch(ShellMessage::TaskProgressLoaded(active)));
                 Some(services)
             }
             Err(error) => {
@@ -127,17 +130,17 @@ impl ApplicationState for MomoBakoApplication {
             // 不走验收种子：验收的启动失败页带着夹具仓库和日志，不能出现在真实窗口里。
             let mut shell = ShellViewModel::default();
             shell.page = ShellPage::Error;
-            let message = "领域服务启动失败，请检查服务目录和端口配置";
-            shell.detail = message.into();
-            shell.workspace.startup.fail(message);
+            shell.workspace.startup.fail("领域服务启动失败，请检查服务目录和端口配置");
             shell
         };
         if let Some(services) = services.as_ref() {
             // 主题等应用设置启动时就要生效，不能等打开设置页才读。
             match services.load_settings() {
                 Ok((settings, diagnostic)) => {
+                    if let Some(diagnostic) = diagnostic {
+                        eprintln!("Nana {diagnostic}");
+                    }
                     shell.settings = settings;
-                    shell.settings_error = diagnostic;
                 }
                 Err(error) => eprintln!("Nana 启动时读取应用设置失败，先用默认值：{error}"),
             }
@@ -241,11 +244,7 @@ impl ApplicationState for MomoBakoApplication {
                 ..RuntimeProgramUpdate::default()
             };
         }
-        match app_dispatch::dispatch_services(self, &message, context) {
-            app_dispatch::Route::Reduce => {}
-            app_dispatch::Route::Replace(next) => return self.update(next, windows, context),
-            app_dispatch::Route::Stop => return RuntimeProgramUpdate::redraw(*id),
-        }
+        app_dispatch::dispatch_services(self, &message, context);
         let snapshot_repo_id = app_dispatch::snapshot_repo(&message);
         self.shell.reduce(message);
         app_dispatch::after_snapshot(self, snapshot_repo_id, context);
@@ -265,7 +264,6 @@ impl ApplicationState for MomoBakoApplication {
             if let Err(error) = view.sync(&mut window.document, &self.shell) {
                 eprintln!("Nana 壳层同步失败：{error}");
                 self.shell.page = ShellPage::Error;
-                self.shell.detail = "页面更新失败，请查看系统日志".into();
                 return RuntimeProgramUpdate { window_commands, ..RuntimeProgramUpdate::redraw(*id) };
             }
             self.shell.surface_dirty = false;
@@ -281,7 +279,7 @@ impl ApplicationState for MomoBakoApplication {
         window_host::on_window_event(self, event, context)
     }
 
-    /// 运行时路由完的每个输入。Escape 没被控件处理掉、ViewModel 里还有能关的层时，
+    /// 运行时路由完的每个输入。先记下按着的修饰键；Escape 没被控件处理掉、ViewModel 里还有能关的层时，
     /// 发一条消息关掉最上面一层，和别的消息一样经 `update` 归约。
     fn input_event(
         &mut self,
@@ -290,6 +288,7 @@ impl ApplicationState for MomoBakoApplication {
         _windows: &mut std::collections::HashMap<nana_ui_platform::WindowId, ApplicationWindow>,
         context: &RuntimeProgramContext<Self::Message>,
     ) -> Result<RuntimeProgramUpdate, FrameworkError> {
+        window_host::note_modifiers(&mut self.shell, &input.event.payload);
         if let Some(message) = window_host::escape_message(&self.shell, &input.event.payload, input.disposition.prevent_default) {
             context.dispatch(message);
         }
@@ -453,15 +452,6 @@ fn dispatch_workspace_effects(
                         "资源库删除任务提交失败：{error}"
                     ))));
                 }
-            }
-            WorkspaceEffect::OpenSourceSettings => {
-                let Some(services) = app.services.as_ref() else {
-                    eprintln!("Nana 来源设置需要领域服务，当前服务未启动");
-                    app.shell
-                        .reduce(ShellMessage::SystemStatusLoaded(Err("领域服务未启动".into())));
-                    continue;
-                };
-                app_dispatch::schedule_settings_load(services, context);
             }
             WorkspaceEffect::RefreshRepositoriesSilent => {
                 shell::workspace_refresh::dispatch_silent_list(app, context);

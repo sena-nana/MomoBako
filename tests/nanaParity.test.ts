@@ -53,7 +53,6 @@ describe("nana parity motion", () => {
     expect(workspaceCss).toContain("opacity 0.12s ease");
     expect(shellCss).toContain("opacity 0.35s ease");
     expect(workspaceCss).toContain("progress-pulse 1.15s ease-in-out infinite");
-    expect(workspaceCss).toContain("media-preview-progress-sweep 1.05s ease-in-out infinite");
     expect(liliaWorkspace).toContain("grid-template-columns 0.24s var(--lilia-workspace-easing)");
     expect(rustConst(motion, "PANEL_OPACITY_MS")).toBe("140");
     expect(rustConst(motion, "PANEL_RISE_MS")).toBe("160");
@@ -63,7 +62,6 @@ describe("nana parity motion", () => {
     expect(rustConst(motion, "SIDEBAR_TOOL_FADE_MS")).toBe("120");
     expect(rustConst(motion, "FOOTER_FADE_MS")).toBe("350");
     expect(rustConst(motion, "PULSE_MS")).toBe("1150");
-    expect(rustConst(motion, "SWEEP_MS")).toBe("1050");
     expect(rustConst(motion, "SIDEBAR_COLLAPSE_MS")).toBe("240");
   });
 });

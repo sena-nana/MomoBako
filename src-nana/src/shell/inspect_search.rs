@@ -20,14 +20,6 @@ use super::{InspectEffect, InspectMessage, InspectState};
 mod request;
 pub(crate) use request::{build_search_request, parse_limit, split_list, toggle_filter};
 
-/// 多个条件之间的匹配方式。筛选栏不提供切换，保留给已有调用。
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub enum MatchMode {
-    #[default]
-    And,
-    Or,
-}
-
 /// 排序方向，对应筛选栏的「升序 / 降序」下拉。
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum SortDirection {
@@ -121,7 +113,6 @@ pub struct SearchFilters {
     pub exclude_date_filters: String,
     pub number_filters: String,
     pub date_filters: String,
-    pub match_mode: MatchMode,
     pub sort_field: String,
     pub sort_direction: SortDirection,
     pub limit: Option<usize>,
@@ -172,7 +163,6 @@ pub struct SearchRequestDraft {
     pub exclude_date_filters: Vec<DateBound>,
     pub number_filters: Vec<NumberBound>,
     pub date_filters: Vec<DateBound>,
-    pub match_mode: Option<String>,
     pub sort_field: Option<String>,
     pub sort_direction: Option<String>,
     pub limit: Option<usize>,
@@ -307,14 +297,6 @@ impl InspectState {
             InspectMessage::ToggleFilterBar => self.filter_bar_open = !self.filter_bar_open,
             InspectMessage::CloseFilterBar => self.filter_bar_open = false,
             InspectMessage::ToggleFilter { key, value } => self.toggle_search_filter(writable, active_repo, key, &value),
-            InspectMessage::SetMatchMode(mode) => {
-                if !writable {
-                    eprintln!("Nana 当前资源库不可写，忽略匹配方式");
-                    return;
-                }
-                self.filters.match_mode = mode;
-                self.run_filtered_search(active_repo);
-            }
             InspectMessage::SetMinimumRating(value) => {
                 if !writable {
                     eprintln!("Nana 当前资源库不可写，忽略评分筛选");
@@ -577,7 +559,6 @@ fn open_hit(model: &mut ShellViewModel, row: SearchRow) {
     model.page = ShellPage::FileList;
     model.player.disarm_preview_audio();
     model.selected_path = None;
-    model.preview_url = None;
     model.preview_token = None;
     model.preview_pixels = None;
     model.inspect.clear();

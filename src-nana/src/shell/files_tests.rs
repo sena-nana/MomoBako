@@ -149,11 +149,11 @@ fn virtual_views_reject_mutations_and_choose_their_rows() {
     state.primary = Some("file".into());
     let smart = smart_ctx();
     let category = category_ctx();
-    assert!(!reduce_open(&mut state, &smart, FileDialog::CreateDirectory));
+    assert!(!create_file_for(&mut state, &smart, "note.txt"));
     assert!(!reduce_open(&mut state, &smart, FileDialog::Import));
     assert!(!state.can_rename(&smart));
     assert!(!delete_selected_for(&mut state, &smart));
-    assert!(!reduce_open(&mut state, &category, FileDialog::CreateFile));
+    assert!(!create_file_for(&mut state, &category, "note.txt"));
     assert!(!state.can_import(&category));
     assert!(state.can_rename(&category));
     assert!(state.can_delete(&category));
@@ -171,7 +171,7 @@ fn trash_delete_is_permanent_and_trash_rejects_create_and_copy() {
     state.selected = vec!["gone".into()];
     state.primary = Some("gone".into());
     let trash = trash_ctx();
-    assert!(!reduce_open(&mut state, &trash, FileDialog::CreateFile));
+    assert!(!create_file_for(&mut state, &trash, "note.txt"));
     assert!(!reduce_open(&mut state, &trash, FileDialog::Copy));
     assert!(delete_selected_for(&mut state, &trash));
     assert!(matches!(
@@ -187,10 +187,7 @@ fn trash_delete_is_permanent_and_trash_rejects_create_and_copy() {
 fn blank_name_and_blank_import_do_not_mutate() {
     let mut state = FilesState::default();
     let ctx = writable();
-    assert!(reduce_open(&mut state, &ctx, FileDialog::CreateFile));
-    state.reduce(&ctx, FilesMessage::DraftChanged("  ".into()));
-    assert!(!submit_for(&mut state, &ctx));
-    assert!(!state.mutating);
+    assert!(!create_file_for(&mut state, &ctx, "  "));
     assert!(state.effects.is_empty());
     assert!(reduce_open(&mut state, &ctx, FileDialog::Import));
     state.reduce(&ctx, FilesMessage::DraftChanged(" \n; ".into()));
@@ -198,19 +195,30 @@ fn blank_name_and_blank_import_do_not_mutate() {
     assert!(!state.mutating);
 }
 
+/// 工具栏建文件失败时输入框里的名字留着；对话框里的变更失败时对话框和草稿都留着。
 #[test]
 fn mutation_failure_keeps_names_and_dialog() {
     let mut state = FilesState::default();
     let ctx = writable();
     state.rows = vec![row("keep", "keep", "file")];
-    state.dialog = FileDialog::CreateFile;
-    state.name_draft = "draft.txt".into();
-    state.mutating = true;
+    assert!(create_file_for(&mut state, &ctx, " draft.txt "));
+    assert!(matches!(
+        state.take_effects().as_slice(),
+        [FilesEffect::CreateFile { name, parent: None, .. }] if name == "draft.txt"
+    ));
     state.reduce(&ctx, FilesMessage::MutationSnapshot { result: Err("写入失败".into()), created_name: Some("draft.txt".into()) });
     assert_eq!(state.entry_names(), vec!["keep".to_string()]);
     assert!(!state.mutating);
-    assert_eq!(state.dialog, FileDialog::CreateFile);
+    assert_eq!(state.create_name, " draft.txt ");
     assert_eq!(state.error, "写入失败");
+
+    state.dialog = FileDialog::Rename;
+    state.name_draft = "draft".into();
+    state.mutating = true;
+    state.reduce(&ctx, FilesMessage::MutationSnapshot { result: Err("改名失败".into()), created_name: None });
+    assert_eq!(state.dialog, FileDialog::Rename);
+    assert_eq!(state.name_draft, "draft");
+    assert_eq!(state.error, "改名失败");
 }
 
 #[test]
@@ -220,13 +228,12 @@ fn mutation_success_uses_snapshot_names_and_category_mismatch_keeps_the_list() {
     state.rows = vec![row("old", "old", "file")];
     state.selected = vec!["old".into()];
     state.primary = Some("old".into());
-    state.dialog = FileDialog::CreateFile;
-    state.mutating = true;
+    assert!(create_file_for(&mut state, &ctx, "draft.txt"));
     let snap = snapshot("photos", 1, vec![entry("photos/server.txt", "server.txt", "file")]);
     state.reduce(&ctx, FilesMessage::MutationSnapshot { result: Ok(snap), created_name: Some("draft.txt".into()) });
     assert_eq!(state.entry_names(), vec!["server.txt".to_string()]);
     assert!(state.selected.is_empty());
-    assert_eq!(state.dialog, FileDialog::Closed);
+    assert!(state.create_name.is_empty(), "建成以后清空输入框");
     assert!(!state.mutating);
 
     let mut category = FilesState::default();
@@ -266,6 +273,53 @@ fn selection_replace_toggle_range_and_snapshot_prune() {
     assert_eq!(state.selected, vec!["a".to_string()]);
     assert_eq!(state.primary.as_deref(), Some("a"));
     assert_eq!(state.anchor.as_deref(), Some("a"));
+}
+
+/// Ctrl 点选照 Vue `selectWorkspaceEntry` 的 `toggle`，右侧详情跟着主选中项：拿掉别的项时主选中项和
+/// 详情都不动；拿掉主选中项时由剩下的第一项接替，详情跟过去并读它的素材；全拿掉时不跟。
+#[test]
+fn toggling_rows_keeps_or_hands_over_the_primary_like_vue() {
+    let mut state = FilesState::default();
+    let ctx = writable();
+    state.rows = ["a.png", "b.png", "c.png"]
+        .into_iter()
+        .map(|path| {
+            let mut file = entry(path, path, "file");
+            file.asset_id = Some(format!("asset-{path}"));
+            FileRow::from_entry(&file)
+        })
+        .collect();
+    let loads = |state: &mut FilesState| {
+        state
+            .take_effects()
+            .into_iter()
+            .filter_map(|effect| match effect {
+                FilesEffect::LoadAsset { asset_id, .. } => Some(asset_id),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+
+    assert_eq!(state.activate_row(&ctx, "a.png", SelectionMode::Replace).as_deref(), Some("a.png"));
+    assert_eq!(loads(&mut state), ["asset-a.png"]);
+    assert_eq!(state.activate_row(&ctx, "b.png", SelectionMode::Toggle).as_deref(), Some("b.png"));
+    assert_eq!(loads(&mut state), ["asset-b.png"]);
+
+    assert_eq!(state.activate_row(&ctx, "a.png", SelectionMode::Toggle), None, "拿掉的不是主选中项，详情不动");
+    assert_eq!((state.selected.as_slice(), state.primary.as_deref()), (&["b.png".to_string()][..], Some("b.png")));
+    assert!(loads(&mut state).is_empty());
+
+    state.activate_row(&ctx, "c.png", SelectionMode::Toggle);
+    loads(&mut state);
+    assert_eq!(state.activate_row(&ctx, "c.png", SelectionMode::Toggle).as_deref(), Some("b.png"), "主选中项被拿掉，由剩下的第一项接替");
+    assert_eq!((state.primary.as_deref(), state.anchor.as_deref()), (Some("b.png"), Some("b.png")));
+    assert_eq!(loads(&mut state), ["asset-b.png"]);
+    assert_eq!(state.select_only.as_deref(), Some("b.png"), "接替的文件只在右侧详情里看");
+
+    assert_eq!(state.activate_row(&ctx, "b.png", SelectionMode::Toggle), None);
+    assert!(state.selected.is_empty());
+    assert_eq!((state.primary.as_deref(), state.anchor.as_deref()), (None, None));
+    assert!(loads(&mut state).is_empty());
 }
 
 #[test]
@@ -435,15 +489,15 @@ fn protocol_failure_keeps_rows_and_dialog() {
     let mut state = FilesState::default();
     let ctx = writable();
     state.rows = vec![row("keep", "keep", "file")];
-    state.dialog = FileDialog::Move;
+    state.dialog = FileDialog::Copy;
     state.mutating = true;
     state.reduce(
         &ctx,
-        FilesMessage::ProtocolFinished { result: Err("移动失败".into()), reload: false, hardlinks: false },
+        FilesMessage::ProtocolFinished { result: Err("复制失败".into()), reload: false, hardlinks: false },
     );
     assert_eq!(state.entry_names(), vec!["keep".to_string()]);
-    assert_eq!(state.dialog, FileDialog::Move);
-    assert_eq!(state.error, "移动失败");
+    assert_eq!(state.dialog, FileDialog::Copy);
+    assert_eq!(state.error, "复制失败");
     assert!(!state.mutating);
     assert!(state.effects.is_empty());
 }
@@ -481,7 +535,7 @@ fn thumbnail_prefetch_waits_for_the_vue_idle_gap() {
 }
 
 #[test]
-fn copy_and_move_submit_the_stored_sources() {
+fn copy_submits_the_stored_sources() {
     let mut state = FilesState::default();
     let ctx = writable();
     state.rows = vec![row("a", "a", "file"), row("b", "b", "file")];
@@ -496,15 +550,6 @@ fn copy_and_move_submit_the_stored_sources() {
         state.take_effects().as_slice(),
         [FilesEffect::Copy { sources, parent: Some(parent), .. }]
             if sources == &["a".to_string(), "b".to_string()] && parent == "album/nested"
-    ));
-    state.mutating = false;
-    state.dialog = FileDialog::Closed;
-    assert!(reduce_open(&mut state, &ctx, FileDialog::Move));
-    state.reduce(&ctx, FilesMessage::DraftChanged("  ".into()));
-    assert!(submit_for(&mut state, &ctx));
-    assert!(matches!(
-        state.take_effects().as_slice(),
-        [FilesEffect::Move { parent, .. }] if parent.is_empty()
     ));
 }
 
@@ -526,12 +571,10 @@ fn directory_replace_opens_and_file_activation_loads_the_asset() {
     ));
     state.loading = false;
     state.pending = None;
-    state.reduce(&ctx, FilesMessage::SetSelectionMode(SelectionMode::Toggle));
-    state.reduce(&ctx, FilesMessage::ActivateRow("photos".into()));
+    state.activate_row(&ctx, "photos", SelectionMode::Toggle);
     assert_eq!(state.selected, vec!["photos".to_string()]);
     assert!(state.effects.is_empty());
-    state.reduce(&ctx, FilesMessage::SetSelectionMode(SelectionMode::Replace));
-    state.reduce(&ctx, FilesMessage::ActivateRow("photos/a.png".into()));
+    state.activate_row(&ctx, "photos/a.png", SelectionMode::Replace);
     assert!(matches!(
         state.take_effects().as_slice(),
         [FilesEffect::LoadAsset { asset_id, .. }] if asset_id == "asset-1"
@@ -674,6 +717,14 @@ fn reduce_open(state: &mut FilesState, ctx: &FileContext, dialog: FileDialog) ->
     let before = state.dialog;
     state.reduce(ctx, FilesMessage::OpenDialog(dialog));
     state.dialog != before && state.dialog == dialog
+}
+
+/// 在工具栏输入框里写下名字再点「建文件」，返回是否开始变更。
+fn create_file_for(state: &mut FilesState, ctx: &FileContext, name: &str) -> bool {
+    state.reduce(ctx, FilesMessage::SetCreateName(name.into()));
+    let before = state.mutating;
+    state.reduce(ctx, FilesMessage::SubmitCreateFile);
+    state.mutating && !before
 }
 
 fn submit_for(state: &mut FilesState, ctx: &FileContext) -> bool {

@@ -1,5 +1,5 @@
 // 文件变更对话框和变更结果。
-// 新建、重命名、复制、移动、导入、删除和硬链接确认都从这里提交。
+// 工具栏建文件、重命名、复制、导入、删除和硬链接确认都从这里提交。
 // 空白名称和空白来源直接返回，不会把状态标成进行中。
 
 /// 导出对话框草稿。首页不打开它。
@@ -50,13 +50,6 @@ impl FilesState {
             return false;
         }
         match dialog {
-            FileDialog::CreateDirectory | FileDialog::CreateFile => {
-                if !self.can_create(ctx) {
-                    eprintln!("Nana 当前视图不能新建");
-                    return false;
-                }
-                self.name_draft.clear();
-            }
             FileDialog::Rename => {
                 if !self.can_rename(ctx) {
                     eprintln!("Nana 当前选择不能重命名");
@@ -66,9 +59,9 @@ impl FilesState {
                 self.name_draft = self.row_name(&path);
                 self.rename_path = Some(path);
             }
-            FileDialog::Copy | FileDialog::Move => {
+            FileDialog::Copy => {
                 if !self.can_transfer(ctx) {
-                    eprintln!("Nana 当前选择不能转移");
+                    eprintln!("Nana 当前选择不能复制");
                     return false;
                 }
                 self.copy_sources = self.selected.clone();
@@ -224,8 +217,8 @@ impl FilesState {
 
     pub(super) fn set_draft(&mut self, value: String) {
         match self.dialog {
-            FileDialog::CreateDirectory | FileDialog::CreateFile | FileDialog::Rename => self.name_draft = value,
-            FileDialog::Copy | FileDialog::Move => self.target_draft = value,
+            FileDialog::Rename => self.name_draft = value,
+            FileDialog::Copy => self.target_draft = value,
             FileDialog::Import | FileDialog::ImportArchive | FileDialog::ImportEagle => self.import_draft = value,
             FileDialog::Closed | FileDialog::Hardlink => {}
         }
@@ -237,37 +230,14 @@ impl FilesState {
             return false;
         }
         match self.dialog {
-            FileDialog::CreateDirectory => self.submit_named(ctx, true),
-            FileDialog::CreateFile => self.submit_named(ctx, false),
             FileDialog::Rename => self.submit_rename(ctx),
             FileDialog::Copy => self.submit_copy(ctx),
-            FileDialog::Move => self.submit_move(ctx),
             FileDialog::Import => self.submit_import(ctx),
             FileDialog::ImportArchive => self.submit_archive(ctx),
             FileDialog::ImportEagle => self.submit_eagle(ctx),
             FileDialog::Hardlink => self.confirm_hardlink(ctx),
             FileDialog::Closed => false,
         }
-    }
-
-    fn submit_named(&mut self, ctx: &FileContext, directory: bool) -> bool {
-        let name = self.name_draft.trim().to_string();
-        if name.is_empty() {
-            return false;
-        }
-        if !self.can_create(ctx) {
-            eprintln!("Nana 当前视图不能新建");
-            return false;
-        }
-        let repo_id = ctx.repo_id.clone().unwrap_or_default();
-        let parent = parent_path(&self.current_path);
-        self.begin(if directory { "正在新建文件夹…" } else { "正在新建文件…" });
-        self.effects.push(if directory {
-            FilesEffect::CreateDirectory { repo_id, parent, name }
-        } else {
-            FilesEffect::CreateFile { repo_id, parent, name }
-        });
-        true
     }
 
     fn submit_rename(&mut self, ctx: &FileContext) -> bool {
@@ -283,7 +253,7 @@ impl FilesState {
             return false;
         };
         let repo_id = ctx.repo_id.clone().unwrap_or_default();
-        self.begin("正在重命名…");
+        self.begin(None);
         self.effects.push(FilesEffect::Rename { repo_id, path, new_name: name });
         true
     }
@@ -299,24 +269,8 @@ impl FilesState {
         let repo_id = ctx.repo_id.clone().unwrap_or_default();
         let parent = parent_path(&normalize_path(&self.target_draft));
         let sources = self.copy_sources.clone();
-        self.begin("正在复制…");
+        self.begin(Some(FileOperation::step("复制文件", "创建硬链接或复制文件", 32.0, Some(84.0))));
         self.effects.push(FilesEffect::Copy { repo_id, sources, parent });
-        true
-    }
-
-    fn submit_move(&mut self, ctx: &FileContext) -> bool {
-        if self.copy_sources.is_empty() {
-            return false;
-        }
-        if !self.can_transfer(ctx) {
-            eprintln!("Nana 当前选择不能移动");
-            return false;
-        }
-        let repo_id = ctx.repo_id.clone().unwrap_or_default();
-        let parent = normalize_path(&self.target_draft);
-        let sources = self.copy_sources.clone();
-        self.begin("正在移动…");
-        self.effects.push(FilesEffect::Move { repo_id, sources, parent });
         true
     }
 
@@ -331,7 +285,7 @@ impl FilesState {
         }
         let repo_id = ctx.repo_id.clone().unwrap_or_default();
         let parent = parent_path(&self.current_path);
-        self.begin("正在导入…");
+        self.begin(Some(FileOperation::import()));
         self.effects.push(FilesEffect::Import { repo_id, parent, sources });
         true
     }
@@ -347,7 +301,7 @@ impl FilesState {
         }
         let repo_id = ctx.repo_id.clone().unwrap_or_default();
         let parent = parent_path(&self.current_path);
-        self.begin("正在导入压缩包…");
+        self.begin(Some(FileOperation::step("导入 ZIP", "预检压缩包条目", 24.0, Some(84.0))));
         self.effects.push(FilesEffect::ImportArchive { repo_id, parent, archive_path });
         true
     }
@@ -368,7 +322,8 @@ impl FilesState {
         let repo_id = ctx.repo_id.clone().unwrap_or_default();
         let parent = parent_path(&self.current_path);
         let mode = self.eagle_mode.clone();
-        self.begin("正在导入 Eagle…");
+        let label = if mode == "move" { "剪切导入 Eagle" } else { "复制导入 Eagle" };
+        self.begin(Some(FileOperation::step(label, "转换 EagleLibrary", 24.0, Some(84.0))));
         self.effects.push(FilesEffect::ImportEagle { repo_id, parent, library_path, mode });
         true
     }
@@ -384,7 +339,9 @@ impl FilesState {
         let repo_id = ctx.repo_id.clone().unwrap_or_default();
         let paths = self.selected.clone();
         let mode = if ctx.trash { Some("permanentDelete".to_string()) } else { None };
-        self.begin(if ctx.trash { "正在永久删除…" } else { "正在删除…" });
+        // Vue 只有多选删除走 `deleteWorkspaceEntries` 出进度行，单条删除不出。
+        let operation = (paths.len() > 1).then(|| FileOperation::step("删除文件", format!("准备处理 {} 个条目", paths.len()), 10.0, None));
+        self.begin(operation);
         self.effects.push(FilesEffect::Delete { repo_id, paths, mode });
         true
     }
@@ -393,17 +350,21 @@ impl FilesState {
         if self.selected.is_empty() {
             return false;
         }
-        self.mutate_trash(ctx, "restore", self.selected.clone(), "正在还原…")
+        // 和删除一样，Vue 只有多选还原（`restoreTrashEntries`）出进度行。
+        let count = self.selected.len();
+        let operation = (count > 1).then(|| FileOperation::step("还原文件", format!("准备还原 {count} 个条目"), 10.0, None));
+        self.mutate_trash(ctx, "restore", self.selected.clone(), operation)
     }
 
-    pub(super) fn mutate_trash(&mut self, ctx: &FileContext, action: &str, paths: Vec<String>, activity: &str) -> bool {
+    /// 回收站的还原、全部还原和清空。`operation` 是任务弹层里的进度行，Vue 不出的传 `None`。
+    pub(super) fn mutate_trash(&mut self, ctx: &FileContext, action: &str, paths: Vec<String>, operation: Option<FileOperation>) -> bool {
         let allowed = if action == "restore" { self.can_restore(ctx) } else { self.can_empty_trash(ctx) };
         if !allowed {
             eprintln!("Nana 当前视图不能执行回收站操作：{action}");
             return false;
         }
         let repo_id = ctx.repo_id.clone().unwrap_or_default();
-        self.begin(activity);
+        self.begin(operation);
         self.effects.push(FilesEffect::MutateTrash { repo_id, action: action.to_string(), paths });
         true
     }
@@ -420,7 +381,7 @@ impl FilesState {
             eprintln!("Nana 确认硬链接没有活动仓库");
             return false;
         };
-        self.begin("正在确认硬链接…");
+        self.begin(None);
         self.effects.push(FilesEffect::ConfirmHardlink { repo_id, candidate_id: prompt.id });
         true
     }
@@ -441,9 +402,12 @@ impl FilesState {
         true
     }
 
+    /// 变更成功的快照。`created_name` 只有工具栏建文件带：建成了清空输入框，选择里有东西时选中新文件。
     pub(super) fn apply_mutation_snapshot(&mut self, ctx: &FileContext, snapshot: FileBrowserSnapshot, created_name: Option<String>) {
         self.mutating = false;
-        self.activity.clear();
+        if created_name.is_some() {
+            self.create_name.clear();
+        }
         let can_apply = !ctx.category_virtual || normalize_path(&self.current_path) == normalize_path(&snapshot.current_path);
         if !can_apply {
             eprintln!(
@@ -481,21 +445,25 @@ impl FilesState {
     pub(super) fn note_mutation_failed(&mut self, error: String) {
         eprintln!("Nana 文件变更失败：{error}");
         self.mutating = false;
-        self.activity.clear();
+        self.operation = None;
         self.error = error;
     }
 
+    /// 协议变更的结果。成功且要重读目录时进度行走到 Vue「刷新文件索引」那一步，目录读回来才收起。
     pub(super) fn note_protocol_finished(&mut self, ctx: &FileContext, result: Result<(), String>, reload: bool, hardlinks: bool) {
         self.mutating = false;
-        self.activity.clear();
         match result {
             Ok(()) => {
                 self.finish_dialog_success();
-                if reload {
-                    let path = self.current_path.clone();
-                    self.queue_browse(ctx, &path, false, true, true);
-                    self.operation = Some(FileOperation { value: 84.0, indeterminate: false, detail: "刷新文件索引".into() });
-                    self.activity = "刷新文件索引".into();
+                let path = self.current_path.clone();
+                if reload && self.queue_browse(ctx, &path, false, true, true) {
+                    if let Some(operation) = self.operation.as_mut()
+                        && let Some(value) = operation.refresh_value
+                    {
+                        operation.detail = "刷新文件索引".into();
+                        operation.value = value;
+                        operation.updated_at_ms = super::tree_sync::now_ms();
+                    }
                 } else {
                     self.operation = None;
                 }
@@ -513,25 +481,6 @@ impl FilesState {
         }
     }
 
-    fn operation_for_activity(activity: &str) -> Option<FileOperation> {
-        let value = match activity {
-            "正在复制…" => 32.0,
-            "正在移动…" => 32.0,
-            "正在导入…" | "正在导入压缩包…" | "正在导入 Eagle…" => 24.0,
-            "正在删除…" | "正在永久删除…" | "正在还原…" | "正在清空回收站…" => 32.0,
-            _ => return None,
-        };
-        let detail = match activity {
-            "正在复制…" => "创建硬链接或复制文件",
-            "正在移动…" => "移动文件",
-            "正在导入…" => "导入文件到当前资源库",
-            "正在导入压缩包…" => "预检压缩包条目",
-            "正在导入 Eagle…" => "转换 EagleLibrary",
-            _ => "正在处理",
-        };
-        Some(FileOperation { value, indeterminate: false, detail: detail.into() })
-    }
-
     pub(super) fn note_hardlinks(&mut self, result: Result<Vec<HardlinkPrompt>, String>) {
         match result {
             Ok(prompts) => {
@@ -546,6 +495,12 @@ impl FilesState {
                 self.error = error;
             }
         }
+    }
+
+    /// 启动和换仓库后在后台查一次硬链接候选，和 Vue 后台读 `listHardlinkCandidates` 一致：
+    /// 启动同步刚建出来的候选要让用户确认。
+    pub(super) fn check_hardlinks(&mut self, repo_id: &str) {
+        self.effects.push(FilesEffect::CheckHardlinks { repo_id: repo_id.to_string() });
     }
 
     /// 结构更新静默重读硬链接候选。空仓库只记日志。
@@ -589,7 +544,6 @@ impl FilesState {
 
     pub(super) fn note_hardlink_confirmed(&mut self, result: Result<String, String>) {
         self.mutating = false;
-        self.activity.clear();
         match result {
             Ok(id) => {
                 self.hardlinks.retain(|prompt| prompt.id != id);
@@ -607,11 +561,12 @@ impl FilesState {
         }
     }
 
-    fn begin(&mut self, activity: &str) {
+    /// 开始一次文件变更：标进行中、清掉上一次的错误。`operation` 是这次变更在任务弹层里的进度行，
+    /// Vue 不出进度的变更（建文件、重命名、单条删除和还原、全部还原、清空回收站、确认硬链接）传 `None`。
+    fn begin(&mut self, operation: Option<FileOperation>) {
         self.mutating = true;
         self.error.clear();
-        self.activity = activity.to_string();
-        self.operation = Self::operation_for_activity(activity);
+        self.operation = operation;
     }
 
     fn finish_dialog_success(&mut self) {
@@ -632,25 +587,40 @@ impl FilesState {
             .unwrap_or_default()
     }
 
-    /// 单击只改选择。文件顺便读取素材，目录不进入。
-    pub(super) fn select_row(&mut self, ctx: &FileContext, path: &str) -> bool {
+    /// 单击一行（Vue `handleEntryClick`）：按选择方式改选择，记下详情跟去的那一项是单击只选中。
+    /// 返回详情要跟去的那一项。
+    pub(super) fn activate_row(&mut self, ctx: &FileContext, path: &str, mode: SelectionMode) -> Option<String> {
+        let follow = self.select_row(ctx, path, mode)?;
+        self.note_selected_only(&follow);
+        Some(follow)
+    }
+
+    /// 单击只改选择，目录不进入。右侧详情跟着主选中项走（Vue `currentFileEntry`），返回它跟去的那一项：
+    /// 点中的这一行成了主选中项就是它；Ctrl 点掉主选中项、接替的是文件时是接替的那一项；主选中项
+    /// 没变、接替的是目录或选择空了时不跟，详情原样留着。跟去的是文件时顺便读取素材。
+    pub(super) fn select_row(&mut self, ctx: &FileContext, path: &str, mode: SelectionMode) -> Option<String> {
         if self.mutating {
             eprintln!("Nana 文件变更进行中，不能选择条目");
-            return false;
+            return None;
         }
-        let Some(row) = self.visible_rows(ctx).into_iter().find(|row| row.path == path) else {
+        if !self.visible_rows(ctx).iter().any(|row| row.path == path) {
             eprintln!("Nana 找不到要点选的文件：{path}");
-            return false;
-        };
-        let kind = row.kind.clone();
-        let asset_id = row.asset_id.clone();
-        self.select_visible(ctx, &row.path, self.selection_mode);
-        if kind != "directory" {
-            if let (Some(repo_id), Some(asset_id)) = (ctx.repo_id.clone(), asset_id) {
+            return None;
+        }
+        let previous = self.primary.clone();
+        self.select_visible(ctx, path, mode);
+        let primary = self.primary.clone()?;
+        let row = self.visible_rows(ctx).into_iter().find(|row| row.path == primary)?;
+        let directory = row.kind == "directory";
+        if primary != path && (previous.as_deref() == Some(primary.as_str()) || directory) {
+            return None;
+        }
+        if !directory {
+            if let (Some(repo_id), Some(asset_id)) = (ctx.repo_id.clone(), row.asset_id) {
                 self.effects.push(FilesEffect::LoadAsset { repo_id, asset_id });
             }
         }
-        true
+        Some(primary)
     }
 
     /// 双击进入非虚拟目录，或打开文件预览。
@@ -685,11 +655,7 @@ impl FilesState {
             return;
         }
         if !self.selected.iter().any(|item| item == path) {
-            let mode = std::mem::replace(&mut self.selection_mode, SelectionMode::Replace);
-            if self.select_row(ctx, path) {
-                self.note_selected_only(path);
-            }
-            self.selection_mode = mode;
+            self.activate_row(ctx, path, SelectionMode::Replace);
         }
         self.menu_branch = None;
         self.menu_pending = None;
@@ -785,18 +751,26 @@ impl FilesState {
         self.eagle_open = !self.eagle_open;
     }
 
-    /// 用工具栏里的文件名直接新建，不再弹出另一层名称框。
+    /// 用工具栏里的文件名在当前目录建空文件（Vue `handleCreateFile`）。回收站和虚拟视图不建；
+    /// 输入框等结果回来、建成了才清空，失败时名字留着。
     pub(super) fn submit_inline_file(&mut self, ctx: &FileContext) -> bool {
+        if self.mutating {
+            eprintln!("Nana 文件变更进行中，不能新建文件");
+            return false;
+        }
         let name = self.create_name.trim().to_string();
         if name.is_empty() {
             eprintln!("Nana 新建文件名是空的");
             return false;
         }
-        self.name_draft = name;
-        if !self.submit_named(ctx, false) {
+        if !self.can_create(ctx) {
+            eprintln!("Nana 当前视图不能新建");
             return false;
         }
-        self.create_name.clear();
+        let repo_id = ctx.repo_id.clone().unwrap_or_default();
+        let parent = parent_path(&self.current_path);
+        self.begin(None);
+        self.effects.push(FilesEffect::CreateFile { repo_id, parent, name });
         true
     }
 }
@@ -895,11 +869,18 @@ pub(super) fn reduce_message(model: &mut super::ShellViewModel, message: super::
         FilesMessage::OpenDialog(FileDialog::Import | FileDialog::ImportArchive | FileDialog::ImportEagle)
             | FilesMessage::OpenEagle(_)
     );
-    let preview_path = match &message {
-        FilesMessage::ActivateRow(path) | FilesMessage::OpenRow(path) | FilesMessage::OpenEntryMenu { path, .. } => Some(path.clone()),
-        _ => None,
+    let preview_path = match message {
+        FilesMessage::ActivateRow(path) => model.files.activate_row(&context, &path, model.input.modifiers.selection_mode()),
+        FilesMessage::OpenRow(ref path) | FilesMessage::OpenEntryMenu { ref path, .. } => {
+            let path = path.clone();
+            model.files.reduce(&context, message);
+            Some(path)
+        }
+        message => {
+            model.files.reduce(&context, message);
+            None
+        }
     };
-    model.files.reduce(&context, message);
     if let Some(path) = preview_path {
         let file = model.files.visible_rows(&context).into_iter().find(|row| row.path == path && row.kind != "directory");
         if let Some(row) = file {

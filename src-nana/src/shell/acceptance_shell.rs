@@ -43,7 +43,6 @@ pub(super) fn seed_loading(model: &mut ShellViewModel) {
 pub(super) fn seed_error(model: &mut ShellViewModel) {
     let generation = begin_sync(model, "默认资源库");
     model.workspace.note_sync_finished(generation, Err(SYNC_ERROR.into()));
-    model.detail = SYNC_ERROR.into();
     settle(model);
 }
 

@@ -3,6 +3,7 @@
 //! 每个 ViewModel 都由同一个 `RepositoryRuntime` 构造，保证读写锁、事件 sink、
 //! 预览服务和任务 runner 只有一份所有权；页面层只持有这个组合，不直接接触 Tauri。
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 
@@ -28,6 +29,8 @@ pub struct NativeServices {
     pub tasks: MutsukiTaskViewModel,
     pub settings: SettingsStore,
     host_events: Mutex<Option<mpsc::Receiver<crate::backend::services::host_events::HostEvent>>>,
+    /// 任务观察线程的停止标记，服务销毁时置真。
+    task_watch_stop: Arc<AtomicBool>,
 }
 
 impl NativeServices {
@@ -63,6 +66,7 @@ impl NativeServices {
             settings: SettingsStore::new(settings::default_path()),
             runtime,
             host_events: Mutex::new(Some(receiver)),
+            task_watch_stop: Arc::new(AtomicBool::new(false)),
         })
     }
 
@@ -82,6 +86,14 @@ impl NativeServices {
         }) {
             eprintln!("Nana 宿主事件线程启动失败：{error}");
         }
+    }
+
+    /// 在独立线程里观察运行中的任务，有变化就把活动任务交给界面，见 `task_watch`。
+    pub fn watch_tasks<F>(&self, dispatch: F)
+    where
+        F: Fn(Vec<crate::backend::services::repository::TaskProgressSnapshot>) + Send + 'static,
+    {
+        crate::task_watch::spawn(self.tasks.clone(), Arc::clone(&self.task_watch_stop), dispatch);
     }
 
     /// 取出宿主事件接收端。通道只交给一个消费线程。
@@ -108,6 +120,7 @@ impl NativeServices {
 
 impl Drop for NativeServices {
     fn drop(&mut self) {
+        self.task_watch_stop.store(true, Ordering::Release);
         self.runtime.shutdown_helpers();
     }
 }

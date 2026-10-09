@@ -5,21 +5,17 @@
 //! 口径改成已启用、依赖就绪；缓存、API 设计、外部连接和日志照 `tmp/vue-mock/ipc.ts` 与 `fixtures.ts` 的应答。
 //! 状态一律经过真实消息归约，不直接拼界面字段。
 
-use std::fs;
-use std::path::PathBuf;
-
-use serde_json::{json, Map, Value};
+use serde_json::{json, Value};
 
 use crate::backend::services::repository::{
-    ApiDesignSnapshot, CacheConfig, CacheSnapshot, PluginConfigSnapshot, PluginManifest, RepositoryAuthenticationStatus,
-    RepositoryBackendSummary, RepositoryLocalCacheStatus, RepositorySummary, SystemLogLocation, SystemLogPage, SystemLogRecord,
-    SystemLogSource, TaskProgressSnapshot,
+    PluginConfigSnapshot, PluginManifest, RepositoryAuthenticationStatus, RepositoryBackendSummary, RepositoryLocalCacheStatus,
+    RepositorySummary, SystemLogLocation, SystemLogPage, SystemLogRecord, SystemLogSource, TaskProgressSnapshot,
 };
-use crate::backend::services::runtime::ExternalApiConnectionStatus;
 
 use super::super::admin::{AdminMessage, SourceStep};
 use super::super::{ShellMessage, ShellPage, ShellViewModel, WorkspacePanel};
 use super::base_scene::{summary, Base, NOW, REPO_ID, REPO_NAME};
+use super::plugin_fixtures::{bundle_failed, bundle_loaded, bundled_plugins, players_of};
 use super::seed_base;
 /// 设置数据读取失败时 `list_plugins` 的报错，和 Vue 场景 `settings-error` 一致。
 pub(super) const LOAD_ERROR: &str = "读取插件目录失败：拒绝访问。 (os error 5)";
@@ -50,17 +46,12 @@ pub(super) fn seed_settings(model: &mut ShellViewModel) {
     load_bundle(model, bundled_plugins(|_| true));
 }
 
-/// `settings-error`：设置页数据读取失败。Vue 的 `Promise.all` 整批失败，其它四份应答照常返回但不写入。
+/// `settings-error`：设置页数据读取失败。Vue 场景让 `list_plugins` 一直失败：启动结束那次和打开设置页
+/// 那次都读不到，`Promise.all` 整批失败，其它四份应答照常返回但不写入，所以手上一直没有插件。
 pub(super) fn seed_settings_error(model: &mut ShellViewModel) {
-    seed_base(model);
+    Base { plugins_error: Some(LOAD_ERROR), ..Base::default() }.seed(model);
     model.admin.note_backends(&[local_summary()]);
-    model.reduce(ShellMessage::Admin(AdminMessage::SettingsBundleLoaded {
-        plugins: Err(LOAD_ERROR.into()),
-        hooks: Ok(Vec::new()),
-        cache: Ok(cache_snapshot()),
-        api: Ok(api_design()),
-        external: Ok(external_status()),
-    }));
+    model.reduce(ShellMessage::Admin(bundle_failed(LOAD_ERROR)));
     model.admin.take_effects();
 }
 
@@ -91,13 +82,11 @@ pub(super) fn seed_plugin_settings(model: &mut ShellViewModel) {
 /// Vue 弹层不分运行和取消，取消中只是细节文字不同、进度不定。
 pub(super) fn seed_task(model: &mut ShellViewModel, cancelling: bool) {
     seed_base(model);
-    model.active_tasks = 1;
     let (task_id, status, label, phase, percent) = if cancelling {
         ("task-cancelling", "cancelling", "正在取消扫描", "等待 worker 退出", None)
     } else {
         ("task-scan", "running", "扫描默认资源库", "已扫描 1,284 / 3,040 个文件", Some(42.0))
     };
-    model.active_task_ids = vec![task_id.into()];
     model.reduce(ShellMessage::TaskProgressLoaded(vec![TaskProgressSnapshot {
         task_id: task_id.into(),
         protocol_id: "momobako.sync".into(),
@@ -171,16 +160,13 @@ fn foreign_tool_scene() -> ShellViewModel {
     model
 }
 
-/// 一次写入设置页五份数据，和 Vue 模拟 IPC 的默认应答一致。
+/// 一次写入设置页五份数据，和 Vue 模拟 IPC 的默认应答一致；插件列表换新后照产品重读播放器类型，
+/// 只剩这几个插件时播放器也只剩它们登记的。
 fn load_bundle(model: &mut ShellViewModel, plugins: Vec<PluginManifest>) {
-    model.reduce(ShellMessage::Admin(AdminMessage::SettingsBundleLoaded {
-        plugins: Ok(plugins),
-        hooks: Ok(Vec::new()),
-        cache: Ok(cache_snapshot()),
-        api: Ok(api_design()),
-        external: Ok(external_status()),
-    }));
+    let players = players_of(&plugins);
+    model.reduce(ShellMessage::Admin(bundle_loaded(plugins)));
     model.admin.take_effects();
+    model.reduce(ShellMessage::PlaylistPlayersLoaded(Ok(players)));
 }
 
 /// 点插件卡片的「设置」，再交回 `get_plugin_config` 的模拟应答（没有保存过的值）。
@@ -193,87 +179,6 @@ fn open_plugin_settings(model: &mut ShellViewModel, plugin_id: &str) {
         schema: Value::Null,
         values: Default::default(),
     })));
-}
-
-/// 读仓库自带的插件清单，按目录名排序（Vite `import.meta.glob` 的顺序），改成已启用、
-/// 依赖就绪的内置插件。读不到或解析失败的清单记日志后跳过。
-fn bundled_plugins(keep: impl Fn(&str) -> bool) -> Vec<PluginManifest> {
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../External/Plugins");
-    let mut manifests = match fs::read_dir(&root) {
-        Ok(entries) => entries.filter_map(Result::ok).map(|entry| entry.path().join("manifest.json")).filter(|path| path.is_file()).collect::<Vec<_>>(),
-        Err(error) => {
-            eprintln!("Nana 验收读不到插件目录 {}：{error}", root.display());
-            return Vec::new();
-        }
-    };
-    manifests.sort();
-    manifests
-        .into_iter()
-        .filter_map(|path| {
-            let text = fs::read_to_string(&path).map_err(|error| eprintln!("Nana 验收读不到插件清单 {}：{error}", path.display())).ok()?;
-            let mut manifest: Map<String, Value> =
-                serde_json::from_str(&text).map_err(|error| eprintln!("Nana 验收插件清单不是 JSON {}：{error}", path.display())).ok()?;
-            let plugin_id = manifest.get("pluginId").and_then(Value::as_str)?.to_string();
-            if !keep(&plugin_id) {
-                return None;
-            }
-            mock_install(&mut manifest);
-            serde_json::from_value(Value::Object(manifest))
-                .map_err(|error| eprintln!("Nana 验收插件清单字段不全 {plugin_id}：{error}"))
-                .ok()
-        })
-        .collect()
-}
-
-/// 照 `tmp/vue-mock/ipc.ts` 的 `realPlugins`：已启用、就绪、内置来源、依赖全部可用。
-fn mock_install(manifest: &mut Map<String, Value>) {
-    let version = manifest.get("version").and_then(Value::as_str).unwrap_or("0").to_string();
-    let dependencies = |key: &str| {
-        manifest
-            .get(key)
-            .and_then(Value::as_array)
-            .map(|items| {
-                items
-                    .iter()
-                    .filter_map(Value::as_str)
-                    .map(|id| json!({ "pluginId": id, "name": null, "status": "ready", "enabled": true, "available": true }))
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default()
-    };
-    let status = json!({
-        "required": dependencies("requires"),
-        "optional": dependencies("optional"),
-        "missingRequired": [],
-        "missingOptional": [],
-        "disabledRequired": [],
-        "disabledOptional": [],
-    });
-    manifest.insert("enabled".into(), Value::Bool(true));
-    manifest.insert("status".into(), Value::String("ready".into()));
-    manifest.entry("source").or_insert_with(|| Value::String("builtin".into()));
-    manifest.insert("provenance".into(), Value::String("bundled".into()));
-    manifest.insert("packageHash".into(), Value::String(format!("mock-{version}")));
-    manifest.insert("dependencyStatus".into(), status);
-}
-
-fn cache_snapshot() -> CacheSnapshot {
-    CacheSnapshot { config: CacheConfig { metadata_capacity: 512, thumbnail_capacity: 1024, query_capacity: 256 }, entries: Vec::new() }
-}
-
-fn api_design() -> ApiDesignSnapshot {
-    ApiDesignSnapshot { transport: "tauri-ipc".into(), endpoints: Vec::new() }
-}
-
-fn external_status() -> ExternalApiConnectionStatus {
-    ExternalApiConnectionStatus {
-        base_url: "http://127.0.0.1:41595".into(),
-        token: "mock-token".into(),
-        version: "0.1.0".into(),
-        started_at: NOW.into(),
-        ready: true,
-        connection_file_path: "C:/Users/acceptance/AppData/Roaming/com.momobako.desktop/external-api.json".into(),
-    }
 }
 
 /// 当前仓库的完整摘要，和 Vue 夹具 `repository("默认资源库")` 一致。

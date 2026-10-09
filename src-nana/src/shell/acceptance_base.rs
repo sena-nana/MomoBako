@@ -2,8 +2,9 @@
 //!
 //! 资源库「默认资源库」在 `C:/acceptance`，根目录有 assets 文件夹、cover.png（2400000 B）和 notes/page.pdf
 //! （1820 B，和 Vue 模拟一样也列在根目录），目录树 assets → covers，网格展示；侧栏计数是全部 2、未分类 1、
-//! 未标签 2。起步照产品启动走真实消息：读资源库列表、同步、读仓库摘要、读首屏目录，再让侧栏读完目录树、
-//! 智能文件夹、播放集和播放器，所有应答都和 Vue 模拟 IPC（`ipc.ts`）的一致。场景要别的条目、目录树、
+//! 未标签 2。起步照产品启动走真实消息：读资源库列表、同步、读仓库摘要、读首屏目录，启动结束时读设置包、
+//! 插件列表到了再读播放器类型，再让侧栏读完目录树、智能文件夹和播放集，所有应答都和 Vue 模拟 IPC
+//! （`ipc.ts`）的一致：插件是全部内置插件（`pluginFilter: () => true`）。场景要别的条目、目录树、
 //! 播放集、播放器或仓库时改 [`Base`] 里对应的字段。
 
 use std::collections::BTreeMap;
@@ -15,9 +16,11 @@ use crate::backend::services::repository::{
     RepositoryBackendSummary, RepositoryOverview, RepositorySnapshot, RepositoryStructureCacheState, RepositorySummary,
 };
 
+use super::super::admin::{AdminEffect, AdminMessage};
 use super::super::files::DisplayMode;
-use super::super::sidebar::{SidebarPlaylist, SidebarTree};
+use super::super::sidebar::SidebarTree;
 use super::super::{ShellMessage, ShellPage, ShellViewModel, SidebarMessage};
+use super::plugin_fixtures::{bundle_failed, bundle_loaded, bundled_plugins};
 
 pub(super) const REPO_ID: &str = "acceptance-repo";
 pub(super) const REPO_NAME: &str = "默认资源库";
@@ -47,6 +50,8 @@ pub(super) struct Base {
     pub players: Vec<PlaylistPlayerContribution>,
     /// 资源库列表里当前仓库以外的仓库。
     pub others: Vec<RepositorySummary>,
+    /// 读插件目录的报错。有值时设置包每次都读失败（启动结束那次也是），也就不读播放器类型。
+    pub plugins_error: Option<&'static str>,
 }
 
 impl Default for Base {
@@ -59,6 +64,7 @@ impl Default for Base {
             playlists: Vec::new(),
             players: playlist_players(),
             others: Vec::new(),
+            plugins_error: None,
         }
     }
 }
@@ -86,15 +92,13 @@ impl Base {
         model.reduce(ShellMessage::StartupSyncFinished { generation, result: Ok(()) });
         model.reduce(ShellMessage::RepositorySnapshotLoaded(Ok(self.snapshot())));
         model.reduce(ShellMessage::FileBrowserLoaded(Ok(browser(self.entries.clone()))));
-        model.reduce(ShellMessage::PlaylistPlayersLoaded(Ok(self.players.clone())));
+        answer_admin_reads(model, &self.players, self.plugins_error);
         let repo_id = REPO_ID.to_string();
-        let player_ids = self.players.iter().map(|player| player.player_type_id.clone()).collect();
-        let playlists = self.playlists.iter().map(SidebarPlaylist::from_summary).collect();
+        let playlists = self.playlists.clone();
         for message in [
             SidebarMessage::SidebarTreeLoaded { repo_id: repo_id.clone(), result: Ok(SidebarTree::from_nodes(&self.tree)) },
             SidebarMessage::SidebarSmartFoldersLoaded { repo_id: repo_id.clone(), result: Ok(Vec::new()) },
-            SidebarMessage::SidebarPlaylistsLoaded { repo_id: repo_id.clone(), result: Ok(playlists) },
-            SidebarMessage::SidebarPlaylistPlayersLoaded { repo_id, result: Ok(player_ids) },
+            SidebarMessage::SidebarPlaylistsLoaded { repo_id, result: Ok(playlists) },
         ] {
             model.reduce(ShellMessage::Sidebar(message));
         }
@@ -137,6 +141,34 @@ impl Base {
             assets,
         }
     }
+}
+
+/// 回答启动排下的管理读取：绑定仓库时的仓库动作（Vue 模拟 IPC 答空列表）、启动结束时的设置包，
+/// 以及插件列表到了以后的播放器类型。`plugins_error` 有值时设置包读失败，插件列表没到也就不读播放器类型。
+/// 没排下的读取不编造应答，只记日志：说明产品启动已经不读它们了。
+/// 后台的硬链接候选和成员索引在夹具里都是空的，不回答也是同样的状态。
+fn answer_admin_reads(model: &mut ShellViewModel, players: &[PlaylistPlayerContribution], plugins_error: Option<&str>) {
+    let effects = model.admin.take_effects();
+    for effect in &effects {
+        if let AdminEffect::LoadActions { repo_id } = effect {
+            model.reduce(ShellMessage::Admin(AdminMessage::ActionsLoaded { repo_id: repo_id.clone(), result: Ok(Vec::new()) }));
+        }
+    }
+    if !effects.iter().any(|effect| matches!(effect, AdminEffect::LoadSettingsBundle)) {
+        eprintln!("Nana 验收底子：启动结束时没有读设置包");
+        return;
+    }
+    if let Some(error) = plugins_error {
+        model.reduce(ShellMessage::Admin(bundle_failed(error)));
+        model.admin.take_effects();
+        return;
+    }
+    model.reduce(ShellMessage::Admin(bundle_loaded(bundled_plugins(|_| true))));
+    if !model.admin.take_effects().iter().any(|effect| matches!(effect, AdminEffect::LoadPlaylistPlayers)) {
+        eprintln!("Nana 验收底子：插件列表到了以后没有读播放器类型");
+        return;
+    }
+    model.reduce(ShellMessage::PlaylistPlayersLoaded(Ok(players.to_vec())));
 }
 
 /// 验收用的空白壳层：上次打开的是夹具仓库，和 Vue 的 `lastActiveRepositoryId` 一致。

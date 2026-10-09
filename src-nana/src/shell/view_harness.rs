@@ -223,6 +223,7 @@ impl ShellHarness {
         let earlier = self.take_messages();
         self.held = earlier;
         let outcome = self.input.press(self.window.document.context_mut(), escape, None, None).expect("Escape");
+        crate::window_host::note_modifiers(&mut self.model, &payload);
         let mut messages = self.queued();
         messages.extend(crate::window_host::escape_message(&self.model, &payload, outcome.disposition().prevent_default));
         messages
@@ -230,13 +231,24 @@ impl ShellHarness {
 
     /// 在 `(x, y)` 按下再松开主键，返回这次点击发出的消息，不归约。之前排着的消息留给调用方。
     pub fn click_messages(&mut self, x: f32, y: f32) -> Vec<ShellMessage> {
+        self.click_with(x, y, nana_ui::InputModifiers::default())
+    }
+
+    /// 按着 `modifiers` 在 `(x, y)` 点一下，返回这次点击发出的消息，不归约。之前排着的消息留给调用方。
+    pub fn click_with(&mut self, x: f32, y: f32, modifiers: nana_ui::InputModifiers) -> Vec<ShellMessage> {
         let earlier = self.take_messages();
         self.held = earlier;
-        let context = self.window.document.context_mut();
-        self.input.pointer(context, nana_ui::PointerPhase::Down, x, y).expect("按下");
-        let context = self.window.document.context_mut();
-        self.input.pointer(context, nana_ui::PointerPhase::Up, x, y).expect("松开");
+        self.pointer(nana_ui::PointerPhase::Down, x, y, modifiers);
+        self.pointer(nana_ui::PointerPhase::Up, x, y, modifiers);
         self.queued()
+    }
+
+    /// 按着 `modifiers` 路由一个主键指针事件，再照生产 `input_event` 记下修饰键：消息归约时读到的
+    /// 是这一下按着的键。发出的消息留在队列里。
+    pub fn pointer(&mut self, phase: nana_ui::PointerPhase, x: f32, y: f32, modifiers: nana_ui::InputModifiers) {
+        let payload = nana_ui::InputPayload::Pointer(nana_ui::PointerInput { modifiers, ..nana_ui::PointerInput::mouse(phase, x, y) });
+        self.input.route(self.window.document.context_mut(), payload.clone()).expect("指针");
+        crate::window_host::note_modifiers(&mut self.model, &payload);
     }
 
     /// 在 `from` 按下主键，分几步挪到 `to` 再松开，返回这次拖动发出的消息，不归约。之前排着的消息
@@ -245,16 +257,14 @@ impl ShellHarness {
         const STEPS: usize = 6;
         let earlier = self.take_messages();
         self.held = earlier;
-        let context = self.window.document.context_mut();
-        self.input.pointer(context, nana_ui::PointerPhase::Down, from.0, from.1).expect("按下");
+        let plain = nana_ui::InputModifiers::default();
+        self.pointer(nana_ui::PointerPhase::Down, from.0, from.1, plain);
         for step in 1..=STEPS {
             let t = step as f32 / STEPS as f32;
             let (x, y) = (from.0 + (to.0 - from.0) * t, from.1 + (to.1 - from.1) * t);
-            let context = self.window.document.context_mut();
-            self.input.pointer(context, nana_ui::PointerPhase::Move, x, y).expect("拖动");
+            self.pointer(nana_ui::PointerPhase::Move, x, y, plain);
         }
-        let context = self.window.document.context_mut();
-        self.input.pointer(context, nana_ui::PointerPhase::Up, to.0, to.1).expect("松开");
+        self.pointer(nana_ui::PointerPhase::Up, to.0, to.1, plain);
         self.queued()
     }
 
@@ -269,7 +279,9 @@ impl ShellHarness {
         };
         let earlier = self.take_messages();
         self.held = earlier;
+        let payload = nana_ui::InputPayload::Key(input.clone());
         self.input.press(self.window.document.context_mut(), input, None, None).expect("按键");
+        crate::window_host::note_modifiers(&mut self.model, &payload);
         self.queued()
     }
 

@@ -1,4 +1,4 @@
-//! 播放列表成员、下载、回退、会话和共用播放条的状态机测试。
+//! 播放列表成员、回退、会话和共用播放条的状态机测试。
 //!
 //! 这些分支来自 Vue 播放列表和播放条。不启动仓库服务，也不写用户目录。
 
@@ -6,8 +6,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use crate::backend::services::repository::{
-    AssetDetail, AssetSummary, DownloaderDestinationRequest, DownloaderPlaylistProgressEvent, DownloaderPlaylistRequest,
-    FileBrowserSnapshot, PlaylistDetail, PlaylistItem, PlaylistMembershipSnapshot, PlaylistPlayerContribution, PlaylistSummary,
+    AssetDetail, AssetSummary, FileBrowserSnapshot, PlaylistDetail, PlaylistItem, PlaylistMembershipSnapshot, PlaylistPlayerContribution, PlaylistSummary,
     RepositoryBackendSummary, RepositoryOverview, RepositorySnapshot, RepositoryStructureCacheState, RepositorySummary,
 };
 
@@ -17,7 +16,7 @@ use super::support::{
     AUDIO_CAPABILITY, AUDIO_SEQUENCE_TYPE, OFFICIAL_AUDIO_PLUGIN,
 };
 use super::super::workspace::{LibraryCategory, WorkspacePanel, WorkspaceRepository};
-use super::super::{InspectEffect, InspectMessage, ShellMessage, ShellPage, ShellViewModel};
+use super::super::{InspectEffect, InspectMessage, ShellMessage, ShellPage, ShellViewModel, SidebarMessage};
 use super::{PlaybackMode, PlayerCandidate, PlayerEffect, PlayerMessage, QueueItem};
 
 fn shell(writable: bool) -> ShellViewModel {
@@ -35,6 +34,15 @@ fn shell(writable: bool) -> ShellViewModel {
     });
     model.workspace.active_repo_id = Some("repo".into());
     model
+}
+
+/// 侧栏读回仓库 `repo` 的播放集列表。侧栏还没绑到这个仓库时先照产品绑上。
+fn load_list(model: &mut ShellViewModel, playlists: Vec<PlaylistSummary>) {
+    if model.sidebar.bound_repo_id() != Some("repo") {
+        model.bind_sidebar_repository();
+        model.sidebar.take_effects();
+    }
+    model.reduce(ShellMessage::Sidebar(SidebarMessage::SidebarPlaylistsLoaded { repo_id: "repo".into(), result: Ok(playlists) }));
 }
 
 /// 发一条播放消息。当前项的读取请求像 `player_dispatch` 一样当场读文件送回。
@@ -172,39 +180,6 @@ fn asset(path: &str, extension: &str) -> AssetDetail {
     }
 }
 
-fn download_request(playlist_id: i64) -> DownloaderPlaylistRequest {
-    DownloaderPlaylistRequest {
-        source_repository_id: Some("repo".into()),
-        playlist_id,
-        playlist_name: Some("早晨".into()),
-        tracks: Vec::new(),
-        destination: DownloaderDestinationRequest {
-            kind: "library".into(),
-            path: None,
-            repo_id: Some("repo".into()),
-            parent_path: None,
-        },
-        managed_cache_root: None,
-        source_payload: None,
-        level: None,
-    }
-}
-
-fn progress(playlist_id: i64, phase: &str, total: usize, completed: usize) -> serde_json::Value {
-    serde_json::to_value(DownloaderPlaylistProgressEvent {
-        phase: phase.into(),
-        playlist_id,
-        playlist_name: None,
-        total,
-        completed,
-        failed: 0,
-        current_song_id: None,
-        current_song_name: Some("歌曲".into()),
-        error: None,
-    })
-    .expect("进度事件")
-}
-
 #[test]
 fn duration_object_fit_and_corrupt_files_fall_back_to_defaults() {
     assert_eq!(normalize_image_duration_ms(Some(f64::NAN)), 5000);
@@ -292,7 +267,7 @@ fn player_resolution_keeps_audio_off_unselected_third_parties() {
 fn membership_follows_kind_extension_and_write_permission() {
     let mut model = shell(true);
     model.reduce(ShellMessage::PlaylistPlayersLoaded(Ok(vec![contribution("audio", "audio", &["mp3"])])));
-    model.reduce(ShellMessage::PlaylistsLoaded(Ok(vec![summary("repo", "pl", "audio", "audio")])));
+    load_list(&mut model, vec![summary("repo", "pl", "audio", "audio")]);
     assert!(matches!(model.player.take_effects().last(), Some(PlayerEffect::LoadMemberships { repo_id }) if repo_id == "repo"));
 
     send(&mut model, PlayerMessage::ToggleMembership {
@@ -355,7 +330,6 @@ fn membership_follows_kind_extension_and_write_permission() {
     let saved = model.player.memberships.clone();
     send(&mut model, PlayerMessage::MembershipSaved(Err("写入失败".into())));
     assert_eq!(model.player.memberships, saved);
-    assert_eq!(model.player.activity, "更新播放集成员失败：写入失败");
     let failure = model.status.failure().expect("成员写入失败要进状态区");
     assert_eq!(failure.message, "更新播放集成员失败：写入失败");
 
@@ -368,12 +342,12 @@ fn membership_follows_kind_extension_and_write_permission() {
     assert!(model.player.memberships.is_empty());
 
     model.player.memberships.insert("asset-1".into(), vec!["pl".into()]);
-    model.reduce(ShellMessage::PlaylistsLoaded(Ok(Vec::new())));
+    load_list(&mut model, Vec::new());
     assert!(model.player.memberships.is_empty());
     assert!(model.player.take_effects().is_empty());
 
     let mut readonly = shell(false);
-    readonly.reduce(ShellMessage::PlaylistsLoaded(Ok(vec![summary("repo", "pl", "audio", "audio")])));
+    load_list(&mut readonly, vec![summary("repo", "pl", "audio", "audio")]);
     readonly.reduce(ShellMessage::PlaylistPlayersLoaded(Ok(vec![contribution("audio", "audio", &["mp3"])])));
     readonly.player.take_effects();
     send(&mut readonly, PlayerMessage::ToggleMembership {
@@ -560,10 +534,11 @@ fn listed_playback_distinguishes_missing_plugin_upgrade_and_decoder_failure() {
     assert_eq!(decoded.player.mode_text(), "列表循环");
 }
 
+/// 预览里的音视频接管播放条（Vue `FilePreviewPane` 调 `playEntry`）：播放器正放着别的仓库时先停掉那边的
+/// 运行时，但不删那个仓库存下的会话；预览的文件插成临时条目，临时条目不写会话文件。
 #[test]
-fn entry_playback_keeps_the_other_repository_session() {
+fn preview_takeover_keeps_the_other_repository_session() {
     let mut model = shell(true);
-    model.player.candidates = vec![candidate("native.audio", "audio", "audio", &["mp3"])];
     model.player.repo_id = Some("repo-a".into());
     model.player.stored.insert("repo-a".into(), super::support::StoredSession {
         repo_id: "repo-a".into(),
@@ -576,46 +551,18 @@ fn entry_playback_keeps_the_other_repository_session() {
         volume: 1.0,
         is_playing: true,
     });
-    send(&mut model, PlayerMessage::PlayEntry {
-        repo_id: "repo-b".into(),
-        kind: "file".into(),
-        extension: "mp3".into(),
-        asset_id: "asset-b".into(),
-        is_virtual: false,
-        path: "b.mp3".into(),
-        filename: "b.mp3".into(),
-    });
-    assert!(model.player.stored.contains_key("repo-a"));
-    assert!(model.player.current_item().is_some_and(|item| item.transient));
-    assert!(model.player.session.error.as_deref().unwrap_or_default().contains("没有原生解码器"));
-    assert!(!model.player.take_effects().iter().any(|effect| matches!(effect, PlayerEffect::PersistSessions)));
-
-    let before = model.player.queue.len();
-    send(&mut model, PlayerMessage::PlayEntry {
-        repo_id: "repo-b".into(),
-        kind: "directory".into(),
-        extension: String::new(),
-        asset_id: String::new(),
-        is_virtual: false,
-        path: "folder".into(),
-        filename: "folder".into(),
-    });
-    assert_eq!(model.player.queue.len(), before);
-    assert_eq!(model.player.activity, "没有可用于播放此媒体的插件");
+    let mut session = super::fresh_session("repo-b");
+    session.status = "paused".into();
+    let entry = super::PreviewEntry { repo_id: "repo-b", path: "b.mp3", extension: "mp3", asset_id: "asset-b" };
+    assert!(model.player.take_over_preview(entry, session, None, &mut model.inspect), "有能放 mp3 的内置候选时接管");
+    assert!(model.player.stored.contains_key("repo-a"), "不删别的仓库存下的会话");
+    assert_eq!(model.player.repo_id.as_deref(), Some("repo-b"));
+    assert!(model.player.current_item().is_some_and(|item| item.transient && item.path == "b.mp3"));
+    assert!(!model.player.take_effects().iter().any(|effect| matches!(effect, PlayerEffect::PersistSessions)), "临时条目不写会话");
 
     model.player.candidates.clear();
-    model.player.contributions = vec![contribution("vue-audio", "audio", &["mp3"])];
-    send(&mut model, PlayerMessage::PlayEntry {
-        repo_id: "repo-b".into(),
-        kind: "file".into(),
-        extension: String::new(),
-        asset_id: "asset-b".into(),
-        is_virtual: false,
-        path: "nested/song.mp3".into(),
-        filename: "song.mp3".into(),
-    });
-    assert!(model.player.session.error.as_deref().unwrap_or_default().contains("无法读取当前项"));
-    assert!(!model.player.session.error.as_deref().unwrap_or_default().contains("需要升级"));
+    let entry = super::PreviewEntry { repo_id: "repo-b", path: "c.mp3", extension: "mp3", asset_id: "asset-c" };
+    assert!(!model.player.take_over_preview(entry, super::fresh_session("repo-b"), None, &mut model.inspect), "没有播放器时不接管");
 }
 
 #[test]
@@ -657,7 +604,7 @@ fn restore_accepts_a_ready_known_item_and_rejects_the_rest() {
     let mut model = shell(true);
     model.player.load_files(&dir.join("missing-settings.json"), &sessions, &dir.join("missing-prefs.json"));
     model.player.candidates = vec![candidate("native.audio", "audio", "audio", &["mp3"])];
-    model.reduce(ShellMessage::PlaylistsLoaded(Ok(vec![summary("repo", "pl", "audio", "audio")])));
+    load_list(&mut model, vec![summary("repo", "pl", "audio", "audio")]);
     assert!(matches!(
         model.player.take_effects().iter().find(|effect| matches!(effect, PlayerEffect::RestoreDetail { .. })),
         Some(PlayerEffect::RestoreDetail { playlist_id, .. }) if playlist_id == "pl"
@@ -673,8 +620,9 @@ fn restore_accepts_a_ready_known_item_and_rejects_the_rest() {
 
     let mut rejected = shell(true);
     rejected.player.stored.insert("repo".into(), model.player.stored["repo"].clone());
-    rejected.reduce(ShellMessage::PlaylistsLoaded(Ok(vec![summary("repo", "pl", "audio", "audio")])));
-    rejected.player.take_effects();
+    rejected.player.candidates = vec![candidate("native.audio", "audio", "audio", &["mp3"])];
+    load_list(&mut rejected, vec![summary("repo", "pl", "audio", "audio")]);
+    assert!(rejected.player.take_effects().iter().any(|effect| matches!(effect, PlayerEffect::RestoreDetail { .. })));
     send(&mut rejected, PlayerMessage::RestoreDetail(Ok(detail("repo", "pl", "audio", "audio", vec![item("a", "missing")]))));
     assert!(!rejected.player.stored.contains_key("repo"));
     assert!(rejected.player.current_id.is_none());
@@ -697,42 +645,51 @@ fn restore_accepts_a_ready_known_item_and_rejects_the_rest() {
     assert!(!mismatch.player.stored.contains_key("repo"));
 
     model.player.repo_id = Some("repo".into());
-    model.reduce(ShellMessage::PlaylistsLoaded(Ok(vec![summary("repo", "pl", "audio", "audio")])));
+    load_list(&mut model, vec![summary("repo", "pl", "audio", "audio")]);
     assert!(!model.player.take_effects().iter().any(|effect| matches!(effect, PlayerEffect::RestoreDetail { .. })));
     let _ = std::fs::remove_dir_all(dir);
 }
 
+/// 插件登记的播放器类型要先读回才认得：读回之前不读详情也不丢会话；读回了认得就读详情，
+/// 读回了还不认得就丢掉会话（Vue 找不到播放器时 `clearSession`）。顺序反过来也一样。
 #[test]
-fn download_applies_returned_events_and_ignores_other_playlists() {
-    let mut model = shell(true);
-    send(&mut model, PlayerMessage::StartDownload(download_request(7)));
-    assert_eq!(model.player.download.phase, "submitting");
-    assert!(matches!(model.player.take_effects().pop(), Some(PlayerEffect::Download(_))));
-    send(&mut model, PlayerMessage::DownloadCompleted(Ok((serde_json::Value::Null, vec![
-        progress(7, "start", 3, 0),
-        progress(9, "track", 9, 9),
-        progress(7, "track", 3, 1),
-    ]))));
-    assert_eq!(model.player.download.phase, "track");
-    assert_eq!(model.player.download.total, 3);
-    assert_eq!(model.player.download.completed, 1);
-    assert!(model.player.download_text().contains("正在下载"));
+fn restore_waits_for_plugin_player_types() {
+    let stored = super::support::StoredSession {
+        repo_id: "repo".into(),
+        playlist_id: "pl".into(),
+        player_type_id: "plugin.audio".into(),
+        current_item_id: "a".into(),
+        current_time_ms: 900,
+        duration_ms: 4000,
+        mode: PlaybackMode::ListLoop,
+        volume: 0.5,
+        is_playing: false,
+    };
+    let restores = |model: &mut ShellViewModel| model.player.take_effects().into_iter().filter(|effect| matches!(effect, PlayerEffect::RestoreDetail { .. })).count();
 
-    send(&mut model, PlayerMessage::StartDownload(download_request(7)));
-    send(&mut model, PlayerMessage::DownloadCompleted(Ok((serde_json::Value::Null, Vec::new()))));
-    assert_eq!(model.player.download.phase, "complete");
-    send(&mut model, PlayerMessage::DownloadCompleted(Err("下载失败".into())));
-    assert_eq!(model.player.download.phase, "error");
-    assert_eq!(model.player.activity, "下载失败");
-    send(&mut model, PlayerMessage::CancelDownload);
-    assert!(model.player.activity.contains("还没有可取消的句柄"));
-    send(&mut model, PlayerMessage::StartDownload(download_request(7)));
-    send(&mut model, PlayerMessage::DownloadProgress(serde_json::from_value(progress(7, "track", 4, 1)).expect("进度")));
-    assert!(model.player.activity.contains("正在下载 1 / 4，失败"));
-    send(&mut model, PlayerMessage::NoteDownloadTask("task-9".into()));
-    send(&mut model, PlayerMessage::CancelDownload);
-    assert_eq!(model.player.activity, "正在取消下载…");
-    assert!(matches!(model.player.take_effects().pop(), Some(PlayerEffect::CancelDownload { task_id }) if task_id == "task-9"));
+    let mut model = shell(true);
+    model.player.stored.insert("repo".into(), stored.clone());
+    load_list(&mut model, vec![summary("repo", "pl", "plugin.audio", "audio")]);
+    assert_eq!(restores(&mut model), 0, "播放器类型读回之前不读详情");
+    assert!(model.player.stored.contains_key("repo"), "也不丢会话");
+    model.reduce(ShellMessage::PlaylistPlayersLoaded(Ok(vec![contribution("plugin.audio", "audio", &["mp3"])])));
+    assert_eq!(restores(&mut model), 1, "读回认得的类型以后读详情");
+    model.reduce(ShellMessage::PlaylistPlayersLoaded(Ok(vec![contribution("plugin.audio", "audio", &["mp3"])])));
+    assert_eq!(restores(&mut model), 0, "详情在读时不重复读");
+
+    let mut players_first = shell(true);
+    players_first.player.stored.insert("repo".into(), stored.clone());
+    players_first.reduce(ShellMessage::PlaylistPlayersLoaded(Ok(vec![contribution("plugin.audio", "audio", &["mp3"])])));
+    assert_eq!(restores(&mut players_first), 0, "还没有播放集列表");
+    load_list(&mut players_first, vec![summary("repo", "pl", "plugin.audio", "audio")]);
+    assert_eq!(restores(&mut players_first), 1);
+
+    let mut gone = shell(true);
+    gone.player.stored.insert("repo".into(), stored);
+    load_list(&mut gone, vec![summary("repo", "pl", "plugin.audio", "audio")]);
+    gone.reduce(ShellMessage::PlaylistPlayersLoaded(Ok(Vec::new())));
+    assert_eq!(restores(&mut gone), 0);
+    assert!(!gone.player.stored.contains_key("repo"), "读回了还不认得的类型就丢掉会话");
 }
 
 #[test]
