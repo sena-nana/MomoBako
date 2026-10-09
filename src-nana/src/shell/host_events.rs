@@ -176,19 +176,20 @@ mod tests {
         let mut model = ShellViewModel::default();
         model.workspace.startup.begin();
         model.workspace.active_repo_id = Some("repo".into());
+        let begun = vec!["首屏启动流程开始。"];
+        let messages = |model: &ShellViewModel| {
+            model.workspace.startup.logs.iter().map(|item| item.message.clone()).collect::<Vec<_>>()
+        };
         send(&mut model, HostMessage::LogRecorded(record("1", "2020", "plugin", "repo", "插件")));
-        assert!(model.workspace.startup.logs.is_empty());
+        assert_eq!(messages(&model), begun);
         send(&mut model, HostMessage::LogRecorded(record("2", "2020", SYNC_LOG_CATEGORY, "other", "别处")));
-        assert!(model.workspace.startup.logs.is_empty());
+        assert_eq!(messages(&model), begun);
         send(&mut model, HostMessage::LogRecorded(record("3", "2020", SYNC_LOG_CATEGORY, "", "没有仓库")));
         send(&mut model, HostMessage::LogRecorded(record("4", "2020", SYNC_LOG_CATEGORY, "repo", "当前库")));
-        assert_eq!(
-            model.workspace.startup.logs.iter().map(|item| item.message.as_str()).collect::<Vec<_>>(),
-            vec!["没有仓库", "当前库"]
-        );
+        assert_eq!(messages(&model), vec!["首屏启动流程开始。", "没有仓库", "当前库"]);
         model.workspace.startup.finish();
         send(&mut model, HostMessage::LogRecorded(record("5", "2020", SYNC_LOG_CATEGORY, "repo", "完成后")));
-        assert_eq!(model.workspace.startup.logs.len(), 2);
+        assert_eq!(model.workspace.startup.logs.len(), 3);
         assert_eq!(model.admin.logs.len(), 5);
     }
 

@@ -377,7 +377,7 @@ fn scene_title<'a>(scene_id: &str, page: &'a ShellPage) -> &'a str {
 
 fn page_title(page: &ShellPage) -> &'static str {
     match page {
-        ShellPage::Loading => "准备加载仓库",
+        ShellPage::Loading => "扫描资源库文件",
         ShellPage::EmptyRepository => "还没有可用资源库",
         ShellPage::Error => "加载失败",
         ShellPage::FileList => "当前目录",
