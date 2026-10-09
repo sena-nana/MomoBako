@@ -5,7 +5,7 @@
 use nana_ui::runtime::{SemanticColorRole, StableNodeId};
 
 use super::project::tests::tree_loaded;
-use crate::shell::sidebar::SidebarPlaylist;
+use crate::shell::sidebar::{SidebarPlaylist, SidebarShortcut, SidebarSmartFolder};
 use crate::shell::view_harness::ShellHarness;
 use crate::shell::{ShellMessage, ShellPage, ShellViewModel, SidebarMessage, ThumbnailFrame};
 
@@ -205,4 +205,82 @@ fn collapsing_and_expanding_rebuilds_from_the_signals() {
     assert!(harness.keyed("folder-row-assets%2Fcovers").is_some(), "收起期间展开的目录要跟上");
     harness.assert_same_as_fresh_mount();
     apply_keeping_nodes(&mut harness, ShellMessage::Navigate(ShellPage::Settings), "展开后进设置页");
+}
+
+/// 智能文件夹树：读回两层，展开只新增子级；点开子级时它成为当前项、父级换成打开的图标，节点不换；
+/// 提交中时行上的编辑原地禁用。
+#[test]
+fn smart_folder_rows_patch_in_place() {
+    let mut harness = ShellHarness::mount(scene("live-files-plain"));
+    let repo_id = harness.model.workspace.active_repo_id.clone().expect("场景有仓库");
+    let folder = |id: &str, name: &str, children: Vec<SidebarSmartFolder>| SidebarSmartFolder {
+        id: id.into(),
+        parent_id: None,
+        name: name.into(),
+        filter: Default::default(),
+        children,
+    };
+    let tree = vec![folder("root", "高评分", vec![folder("child", "本周", Vec::new())])];
+    harness.apply(sidebar(SidebarMessage::SidebarSmartFoldersLoaded { repo_id, result: Ok(tree) }));
+    harness.flush();
+    harness.assert_same_as_fresh_mount();
+    let root = harness.keyed("smart-row-root").expect("顶层智能文件夹");
+    assert!(harness.keyed("smart-row-child").is_none(), "收起时没有子级");
+    let caret = harness.node("展开智能文件夹");
+
+    let before = sidebar_nodes(&harness);
+    harness.apply(sidebar(SidebarMessage::ToggleSmartFolder("root".into())));
+    harness.flush();
+    assert_eq!(harness.node("收起智能文件夹"), caret, "开合三角应原地换说明");
+    let after = sidebar_nodes(&harness);
+    assert!(before.iter().all(|id| after.contains(id)), "展开换掉了已有节点");
+    assert!(harness.keyed("smart-row-child").is_some(), "展开后有子级");
+    harness.assert_same_as_fresh_mount();
+
+    apply_keeping_nodes(&mut harness, sidebar(SidebarMessage::OpenSmartFolder("child".into())), "点开智能文件夹");
+    assert!(selected(&harness, "smart-row-child"));
+    assert!(!selected(&harness, "smart-row-root"));
+    assert_eq!(harness.keyed("smart-row-root"), Some(root));
+
+    harness.model.sidebar.smart_draft.busy = true;
+    harness.sync();
+    harness.flush();
+    let world = harness.document().context().world();
+    let edits = harness
+        .nodes()
+        .into_iter()
+        .filter(|node| node.label.as_deref() == Some("编辑智能文件夹"))
+        .map(|node| world.accessibility(node.id).is_some_and(|state| state.disabled))
+        .collect::<Vec<_>>();
+    assert_eq!(edits, [true, true], "提交中时每一行的编辑都该禁用");
+    harness.assert_same_as_fresh_mount();
+}
+
+/// 快捷访问：有书签时整组出现，书签内容变了只换那一行。
+#[test]
+fn quick_access_rows_follow_the_snapshot() {
+    let mut harness = ShellHarness::mount(scene("live-files-plain"));
+    assert!(harness.find("快捷访问").is_none(), "没有书签时不显示快捷访问");
+    let shortcut = |id: &str, label: &str, kind: &str| SidebarShortcut {
+        id: id.into(),
+        label: label.into(),
+        target_kind: kind.into(),
+        target_path: Some("assets".into()),
+        target_id: None,
+    };
+    harness.model.sidebar.quick_access = vec![shortcut("a", "素材", "directory"), shortcut("b", "封面", "file")];
+    harness.sync();
+    harness.flush();
+    assert!(harness.find("快捷访问").is_some(), "有书签时显示快捷访问");
+    let first = harness.keyed("quick-access-a").expect("第一个书签");
+    let second = harness.keyed("quick-access-b").expect("第二个书签");
+    harness.assert_same_as_fresh_mount();
+
+    harness.model.sidebar.quick_access[1].label = "封面图".into();
+    harness.sync();
+    harness.flush();
+    assert_eq!(harness.keyed("quick-access-a"), Some(first), "没变的书签不该重建");
+    assert_ne!(harness.keyed("quick-access-b"), Some(second), "改了名字的书签整行重建");
+    assert!(harness.find("封面图").is_some());
+    harness.assert_same_as_fresh_mount();
 }

@@ -424,11 +424,12 @@ impl SidebarSignals {
     }
 }
 
-/// 把 `rows` 写进按 `key` 对照的 Store 列表。
+/// 把 `rows` 写进按 `key` 对照的 Store 列表。侧栏的三份列表和播放集页的条目共用。
 ///
-/// 算法：键重复的只留第一行；先删掉新列表里没有的行，再按新顺序把没有的行插到它的位置上，
-/// 已有的行内容变了才整行改写（只重跑读这一行的绑定）；最后顺序和新列表不同时按新位置排一次。
-/// 删、插、排都只触发列表本身，已有的行一个绑定都不重跑。
+/// 算法：键重复的只留第一行；和现在的列表相同就什么都不写。否则先删掉新列表里没有的行，再按新顺序
+/// 把没有的行插到它的位置上，已有的行内容变了才整行改写（只重跑读这一行的绑定）；最后顺序和新列表
+/// 不同时按新位置排一次。删、插、排都只触发列表本身，已有的行一个绑定都不重跑。
+/// 只在同步时调用（不在副作用里），读列表不会建立依赖。
 pub(crate) fn sync_rows<T, K>(list: Store<Vec<T>>, key: fn(&T) -> K, rows: Vec<T>)
 where
     T: Clone + PartialEq + 'static,
@@ -436,10 +437,10 @@ where
 {
     let mut seen = HashSet::with_capacity(rows.len());
     let rows = rows.into_iter().filter(|row| seen.insert(key(row))).collect::<Vec<_>>();
-    let current = list.get_untracked();
-    if current == rows {
+    if list.with(|current| *current == rows) {
         return;
     }
+    let current = list.get_untracked();
     let old = current.iter().map(|row| (key(row), row)).collect::<HashMap<_, _>>();
     if current.iter().any(|row| !seen.contains(&key(row))) {
         list.retain(|row| seen.contains(&key(row)));
