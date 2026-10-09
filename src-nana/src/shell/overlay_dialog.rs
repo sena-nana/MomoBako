@@ -1,14 +1,14 @@
 //! 统一的对话框框架：侧栏、文件页、导出、插件删除和关闭确认的对话框都从这里建，和消息类型无关。
 //!
-//! 行为交给 NanaUI：对话框是 `Dialog` / `ConfirmDialog`，挂在自己的 `OverlayHost` 下，用
-//! `activate_overlay` 打开，焦点陷阱、焦点归还、无障碍角色和初始焦点都由框架负责。关闭策略是
+//! 行为交给 NanaUI：对话框是 `Dialog` / `ConfirmDialog`，常驻在自己的 `OverlayHost` 下，焦点陷阱、
+//! 焦点归还、无障碍角色、初始焦点和开合动效都由框架负责。关闭策略是
 //! `DialogClosePolicy::requests_only()`：Escape、点外面和关闭位只在对话框上发一次
 //! `DialogCloseRequested`，这里把它换成调用方给的关闭消息，处理中（busy）时不发，开合由归约决定。
 //!
-//! 激活的时机：浮层块把内容挂成脱离树的一块，之后才把它放进浮层层，挂载时的 `on_mount` 运行时
-//! 宿主还不在树里。所以对话框旁边放一个 `when(placed, ..)`：浮层块放好后经
-//! [`OverlaySession::placed`] 置真，下一次刷新建出分支，分支的 `on_mount` 运行时宿主已经在树里，
-//! 这时激活。换下前经 [`OverlaySession::retire`] 让框架关掉对话框，焦点回到打开前的位置。
+//! 开合是声明式的：对话框用 `.model(open)` 绑一个开合信号，由浮层块经会话（[`Presence`]）写。
+//! 这块放进浮层层以后写真，宿主在它、宿主和插槽都在树上时打开；换下时写假，宿主连退场一起关上，
+//! 这块留在浮层层里直到退场放完再卸。宿主自己关掉它（停放、被顶替）时 `.model` 把信号写回假，
+//! 不同步回 ViewModel：开合只听归约，ViewModel 还要它开着时下一帧照样写真、重新打开。
 //!
 //! 外观照 Vue `.modal-card` / `.dialog-card__*`：每个对话框照自己的宽度类给 CSS 宽度，危险对话框用
 //! NanaUI 的危险口气，Vue 标题前有图标的放进标题图标槽；遮罩、分隔线、内边距、距顶 12vh、卡片圆角
@@ -17,9 +17,7 @@
 use std::sync::Arc;
 
 use nana_ui::icons_tabler::{LOADER_2, X};
-use nana_ui::runtime::view::{
-    entity_ref, fields, on_mount, signal, when, widget, AnyView, El, EntityRef, FieldWrite, IntoProp, IntoView, Signal,
-};
+use nana_ui::runtime::view::{entity_ref, fields, signal, widget, AnyView, El, EntityRef, FieldWrite, IntoProp, IntoView, Signal};
 use nana_ui::runtime::{
     Activate, AlignSpec, AppContext, Button, ConfirmDialog, ConfirmIntent, Dialog, DialogCloseRequested, IconButton,
     IconGlyph, LengthSpec, ListItem, NodeStyle, OverlayHost, PositionSpec, RadiusTier, SemanticColorRole, Stack, Text,
@@ -111,13 +109,11 @@ impl DialogFrame {
     pub(crate) fn dialog(self, body: impl IntoView, footer_view: impl IntoView) -> AnyView {
         let Self { key, title, danger, size, icon, busy, close, close_button } = self;
         let host = entity_ref::<OverlayHost>();
-        let surface = entity_ref::<Dialog>();
-        let placed = signal(false);
-        register(Activation { placed, host });
+        let open = Presence::register(host);
         let dialog = Dialog::new(title()).size(size).danger(danger).close_policy(DialogClosePolicy::requests_only());
         let mut element = widget(dialog)
-            .entity_ref(surface)
             .key("dialog-surface")
+            .model(open)
             .prop::<String, DialogTitle>(title)
             .on_cx({
                 let busy = busy.clone();
@@ -137,13 +133,7 @@ impl DialogFrame {
         if close_button {
             element = element.close_action(close_affordance(busy));
         }
-        frame(key, host, element.into_any(), activator(placed, move |cx| {
-            if let (Some(host), Some(surface)) = (host.get(), surface.get()) {
-                cx.activate_overlay(host, surface).map(|_| ())
-            } else {
-                Err(missing())
-            }
-        }))
+        frame(key, host, element.into_any())
     }
 
     /// 确认框：标题、一句说明、取消和确认两个按钮（调用方建好，按钮自己不发消息，点击由框架
@@ -157,15 +147,13 @@ impl DialogFrame {
     ) -> AnyView {
         let Self { key, title, danger, size, icon, busy, close, close_button: _ } = self;
         let host = entity_ref::<OverlayHost>();
-        let surface = entity_ref::<ConfirmDialog>();
-        let placed = signal(false);
-        register(Activation { placed, host });
+        let open = Presence::register(host);
         let dialog = ConfirmDialog::new(title(), message()).size(size).danger(danger).close_policy(DialogClosePolicy::requests_only());
         let gesture_close = close.clone();
         let gesture_busy = busy.clone();
         let mut element = widget(dialog)
-            .entity_ref(surface)
             .key("dialog-surface")
+            .model(open)
             .prop::<String, ConfirmTitle>(title)
             .prop::<String, ConfirmMessage>(message)
             .prop::<bool, ConfirmBusy>({
@@ -195,13 +183,7 @@ impl DialogFrame {
         if let Some(icon) = icon {
             element = element.title_icon(title_icon(icon, danger));
         }
-        frame(key, host, element.into_any(), activator(placed, move |cx| {
-            if let (Some(host), Some(surface)) = (host.get(), surface.get()) {
-                cx.activate_overlay(host, surface).map(|_| ())
-            } else {
-                Err(missing())
-            }
-        }))
+        frame(key, host, element.into_any())
     }
 }
 
@@ -211,10 +193,9 @@ fn title_icon(icon: Icon, danger: bool) -> AnyView {
     widget(IconGlyph::new(icon).size(TITLE_ICON_SIZE).role(role)).key("dialog-icon").into_any()
 }
 
-/// 浮层层里的一块：绝对定位铺满浮层层（浮层层有块时挡住下面的点击，在激活前也不会漏点），里面是
-/// 对话框的宿主和激活用的结构块。遮罩的颜色、背景模糊和开合动效归主题（`appearance.rs` 的效果令牌
-/// 和对话框配方）。
-fn frame(key: &'static str, host: EntityRef<OverlayHost>, surface: AnyView, activator: AnyView) -> AnyView {
+/// 浮层层里的一块：铺满浮层层（换下的对话框放退场时和新的一块叠在一起），里面是对话框的宿主。
+/// 遮罩的颜色、背景模糊和开合动效归主题（`appearance.rs` 的效果令牌和对话框配方）。
+fn frame(key: &'static str, host: EntityRef<OverlayHost>, surface: AnyView) -> AnyView {
     let mut fill = NodeStyle::default();
     {
         let layout = Arc::make_mut(&mut fill.layout);
@@ -230,47 +211,43 @@ fn frame(key: &'static str, host: EntityRef<OverlayHost>, surface: AnyView, acti
     });
     widget(block)
         .key(key)
-        .children((widget(OverlayHost::new().style(fill)).entity_ref(host).key("dialog-host").children((surface,)), activator))
+        .children((widget(OverlayHost::new().style(fill)).entity_ref(host).key("dialog-host").children((surface,)),))
         .into_any()
 }
 
-/// 浮层块置真 `placed` 以后的那次刷新里建出分支，分支挂上时宿主已经在树里，这时激活。
-fn activator(placed: Signal<bool>, activate: impl Fn(&mut AppContext) -> Result<(), nana_ui::runtime::FrameworkError> + Send + Sync + 'static) -> AnyView {
-    let activate = Arc::new(activate);
-    when(placed, move || {
-        let activate = activate.clone();
-        on_mount(move |cx| {
-            if let Err(error) = activate(cx) {
-                eprintln!("Nana 对话框激活失败：{error}");
-            }
-        });
-        widget(Stack::column(0.0)).key("dialog-activated")
-    })
-    .into_any()
-}
-
-fn missing() -> nana_ui::runtime::FrameworkError {
-    nana_ui::runtime::FrameworkError::InvalidInput
-}
-
-/// 对话框的会话：挂好后置真 `placed`，换下前让框架关掉对话框、交还焦点。
-struct Activation {
-    placed: Signal<bool>,
+/// 对话框的开合会话。`open` 是对话框 `.model(..)` 的信号：浮层块写它来开合，宿主自己做的开合
+/// 也写回它，所以它一直说的是对话框现在开没开着。
+struct Presence {
+    open: Signal<bool>,
     host: EntityRef<OverlayHost>,
 }
 
-impl OverlaySession for Activation {
-    fn placed(&mut self) {
-        self.placed.try_set_if_changed(true);
+impl Presence {
+    /// 在对话框的挂载作用域里建开合信号并登记会话，返回给 `.model(..)` 用的信号。建出来是关着的，
+    /// 这块放进浮层层以后才写真：先写真的话插进树的那一刻就打开，排在换下的对话框退场之前。
+    fn register(host: EntityRef<OverlayHost>) -> Signal<bool> {
+        let open = signal(false);
+        register(Self { open, host });
+        open
+    }
+}
+
+impl OverlaySession for Presence {
+    fn show(&mut self) {
+        self.open.try_set_if_changed(true);
     }
 
-    fn retire(&mut self, context: &mut AppContext) {
+    fn hide(&mut self) -> bool {
+        self.open.try_set_if_changed(false);
+        true
+    }
+
+    /// 宿主已经没有激活的浮层：对话框关好了（或者一直没打开过）。退场放完时框架才清掉宿主的激活。
+    fn settled(&self, context: &AppContext) -> bool {
         let Some(host) = self.host.get() else {
-            return;
+            return true;
         };
-        if let Err(error) = context.dismiss_overlay(host) {
-            eprintln!("Nana 换下对话框时没能交还焦点：{error}");
-        }
+        context.world().overlay_host(host.stable_id()).is_none_or(|state| state.active.is_none())
     }
 }
 

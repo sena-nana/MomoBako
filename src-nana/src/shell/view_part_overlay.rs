@@ -1,4 +1,4 @@
-//! 浮层块：对话框、弹层和右键菜单，同一时刻最多一层。
+//! 浮层块：对话框、弹层和右键菜单，同一时刻最多显示一层。
 //!
 //! 浮层层（[`layer`]）在骨架挂载时直接交给 AppShell 的 `.overlay(..)`，之后一直在；各块是它的
 //! 子节点。AppShell 盯着它的子节点：有没隐藏的子节点时挡住下面的点击，空了就放开，增删子节点
@@ -8,9 +8,12 @@
 //! 种类、仓库弹层的页、右键菜单的目标和落点）。身份不变时浮层常驻：打开期间内容变了，只经各浮层
 //! 登记的会话（[`session::OverlaySession`]）写信号、改绑定的字段，不重挂。
 //!
-//! 对话框都从统一框架 [`dialog`] 建：NanaUI `Dialog` / `ConfirmDialog` 挂在自己的 `OverlayHost`
-//! 下，开合、焦点和无障碍交给框架，关闭手势只发关闭消息。每种浮层的入口函数在 [`overlay_branch`]
-//! 里登记。
+//! 对话框都从统一框架 [`dialog`] 建：NanaUI `Dialog` / `ConfirmDialog` 常驻在自己的 `OverlayHost`
+//! 下，靠 `open` 开合，焦点和无障碍交给框架，关闭手势只发关闭消息。换块时旧的一块经会话写
+//! `open = false`，留在浮层层里放退场，放完（宿主清掉激活）以后由 [`OverlayPart::sweep`] 卸掉；
+//! 新的一块同时放进来、写 `open = true`。旧块先写、新块后写，刷新时先关旧的再开新的，新对话框
+//! 记下的「打开前的焦点」是旧对话框还回去的那一个。弹层和菜单没有退场，换下就卸。每种浮层的
+//! 入口函数在 [`overlay_branch`] 里登记。
 
 use nana_ui::runtime::view::{widget, AnyView, IntoView, NodeRef};
 use nana_ui::runtime::{AppContext, FrameworkError, MountedView, RuntimeDocument, Stack, StableNodeId};
@@ -181,23 +184,73 @@ pub(crate) fn layer(node: NodeRef) -> AnyView {
     widget(Stack::column(0.0)).node_ref(node).key("shell-overlay").into_any()
 }
 
+/// 浮层层里的一块：挂出来的内容和它登记的会话。
+struct Block {
+    view: MountedView,
+    sessions: Vec<Box<dyn OverlaySession>>,
+}
+
+impl Block {
+    /// 要换下：告诉每个会话，有会话要放退场时返回真。每个会话都要通知到。
+    fn hide(&mut self) -> bool {
+        self.sessions.iter_mut().fold(false, |waits, session| session.hide() || waits)
+    }
+
+    fn settled(&self, context: &AppContext) -> bool {
+        self.sessions.iter().all(|session| session.settled(context))
+    }
+}
+
 /// 浮层块。
 pub(crate) struct OverlayPart {
     layer: NodeRef,
     identity: Option<OverlayIdentity>,
-    view: Option<MountedView>,
-    /// 现在这块浮层登记的会话，随浮层一起换下。
-    sessions: Vec<Box<dyn OverlaySession>>,
+    /// 现在显示的这块。
+    current: Option<Block>,
+    /// 换下来还在放退场的对话框，按换下的先后；放完由 [`Self::sweep`] 卸掉。
+    leaving: Vec<Block>,
 }
 
 impl OverlayPart {
-    /// 把现在这块放进浮层层。省掉的子节点（换下来的块）由 `reconcile_children` 停放，随后卸掉。
+    /// 每帧收尾（和每次整体同步）调用：卸掉放完退场的块；现在这块照 ViewModel 该开着，宿主自己
+    /// 关掉了对话框时重新声明打开。卸不掉的块记日志，留到下一帧再试。
+    pub(crate) fn sweep(&mut self, context: &mut AppContext) {
+        self.drop_settled(context);
+        if let Some(current) = &mut self.current {
+            for session in &mut current.sessions {
+                session.show();
+            }
+        }
+    }
+
+    /// 卸掉放完退场的块：卸载把它们从浮层层里删掉，AppShell 跟着重新判断挡不挡点击。
+    fn drop_settled(&mut self, context: &mut AppContext) {
+        let mut index = 0;
+        while index < self.leaving.len() {
+            if !self.leaving[index].settled(context) {
+                index += 1;
+                continue;
+            }
+            let block = self.leaving.remove(index);
+            if let Err(error) = block.view.unmount(context) {
+                eprintln!("Nana 卸掉放完退场的浮层失败：{error}");
+            }
+        }
+    }
+
+    /// 还有换下来、没放完退场的块。准备帧据此一直要帧，直到卸掉它们。
+    pub(crate) fn leaving(&self) -> bool {
+        !self.leaving.is_empty()
+    }
+
+    /// 浮层层的子节点排成：还在放退场的块在前，现在这块在最后、画在最上面。省掉的子节点（换下就卸的
+    /// 弹层）由 `reconcile_children` 停放，随后卸掉。
     fn place(&self, context: &mut AppContext) -> Result<(), FrameworkError> {
         let Some(layer) = self.layer.get_untracked() else {
             eprintln!("Nana 浮层层还没有挂上，浮层块放不进去");
             return Err(FrameworkError::InvalidInput);
         };
-        let children = self.view.as_ref().map(|view| view.roots().to_vec()).unwrap_or_default();
+        let children = self.leaving.iter().chain(&self.current).flat_map(|block| block.view.roots().iter().copied()).collect::<Vec<_>>();
         context.reconcile_children(layer, &children).map(|_| ())
     }
 }
@@ -212,11 +265,11 @@ impl ShellPart for OverlayPart {
     }
 
     fn new(layer: Self::Signals) -> Self {
-        Self { layer, identity: None, view: None, sessions: Vec::new() }
+        Self { layer, identity: None, current: None, leaving: Vec::new() }
     }
 
     fn root(&self) -> Option<StableNodeId> {
-        first_root(self.view.as_ref())
+        first_root(self.current.as_ref().map(|block| &block.view))
     }
 
     /// 浮层不跟工作台排法走。
@@ -224,10 +277,12 @@ impl ShellPart for OverlayPart {
         self.remount(cx, model)
     }
 
-    /// 打开期间的变化都经会话写进信号。
+    /// 打开期间的变化都经会话写进信号。换下的块不再跟着 ViewModel 走。
     fn sync(&mut self, model: &ShellViewModel) {
-        for session in &mut self.sessions {
-            session.write(model);
+        if let Some(current) = &mut self.current {
+            for session in &mut current.sessions {
+                session.write(model);
+            }
         }
     }
 
@@ -236,14 +291,13 @@ impl ShellPart for OverlayPart {
         OverlayIdentity::of(model) != self.identity
     }
 
-    /// 换块：先让旧的对话框经框架关掉、交还焦点，再挂新的一块、放进浮层层，放好后告诉它的会话。
+    /// 换块：先挂好新的一块；旧的一块声明关上，要放退场的留在浮层层里，别的随这次换块卸掉；
+    /// 新块放进浮层层以后再声明打开。旧块的焦点和滚动按键路径在新块里找回。
     fn remount(&mut self, cx: &mut PartCx<'_>, model: &ShellViewModel) -> Result<Swap, FrameworkError> {
         let identity = OverlayIdentity::of(model);
-        for session in &mut self.sessions {
-            session.retire(cx.document.context_mut());
-        }
+        self.drop_settled(cx.document.context_mut());
         let document_id = cx.document.document();
-        let kept = self.view.as_ref().map(|view| remount_state::capture(cx.document.context(), document_id, view.roots()));
+        let kept = self.current.as_ref().map(|block| remount_state::capture(cx.document.context(), document_id, block.view.roots()));
         let mut sessions = Vec::new();
         let fresh = match &identity {
             Some(identity) => mount_detached(cx.document, cx.hot, Self::ID, || {
@@ -253,25 +307,31 @@ impl ShellPart for OverlayPart {
             })?,
             None => None,
         };
-        if fresh.is_none() {
-            sessions.clear();
-        }
-        if self.view.is_some() || fresh.is_some() {
+        if self.current.is_some() || fresh.is_some() {
             cx.stats.remounts += 1;
         }
-        let old = std::mem::replace(&mut self.view, fresh);
+        let mut retired = None;
+        if let Some(mut old) = self.current.take() {
+            if old.hide() {
+                self.leaving.push(old);
+            } else {
+                retired = Some(old.view);
+            }
+        }
+        self.current = fresh.map(|view| Block { view, sessions });
         self.identity = identity;
-        self.sessions = sessions;
         let placed = self.place(cx.document.context_mut());
-        for session in &mut self.sessions {
-            session.placed();
+        if let Some(current) = &mut self.current {
+            for session in &mut current.sessions {
+                session.show();
+            }
         }
         placed?;
-        Ok(Swap::replace(old, kept, self.view.as_ref()))
+        Ok(Swap::replace(retired, kept, self.current.as_ref().map(|block| &block.view)))
     }
 
     /// 浮层换块要等组合结束的情形比别的块多一种：焦点在浮层里时换块会换掉输入框；焦点在别处
-    /// （标题栏搜索框）时，新开的对话框一激活就把焦点拿走，同样打断组合。所以文档里任何一个
+    /// （标题栏搜索框）时，新开的对话框一打开就把焦点拿走，同样打断组合。所以文档里任何一个
     /// 获得焦点的输入框还有预编辑时都延后，组合结束后的下一帧按最新状态换块。打开期间的变化
     /// 只写信号，不受影响。
     fn composing(&self, document: &RuntimeDocument) -> bool {
@@ -286,6 +346,9 @@ mod dialog_tests;
 #[cfg(test)]
 #[path = "overlay_dialog_look_tests.rs"]
 mod look_tests;
+#[cfg(test)]
+#[path = "overlay_motion_tests.rs"]
+mod motion_tests;
 #[cfg(test)]
 #[path = "overlay_popover_tests.rs"]
 mod popover_tests;

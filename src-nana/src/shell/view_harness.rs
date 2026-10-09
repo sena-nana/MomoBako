@@ -5,6 +5,7 @@
 //! 并把增量更新后的文档和同一 ViewModel 新挂的文档逐个节点比对（无障碍树、组装路径、状态和整份样式）。
 
 use std::collections::HashMap;
+use std::time::Duration;
 
 use nana_ui::runtime::view::{reactive_stats, ReactiveStats};
 use nana_ui::runtime::{AccessibilityNode, AccessibilityRole, DocumentId, LayoutViewport, RuntimeDocument, StableNodeId};
@@ -281,22 +282,51 @@ impl ShellHarness {
         reactive_stats()
     }
 
+    /// 把开合动效走完：离屏没有帧时钟，换下的对话框停在退场开头、一直留在浮层层里。这里先刷新，让
+    /// 同步写下的开合落到对话框上，再把动画推到放完，照生产准备帧的收尾卸掉放完退场的块，刷新一帧。
+    pub fn finish_motion(&mut self) {
+        self.flush();
+        finish_animations(&mut self.window.document);
+        self.view.settle_overlays(&mut self.window.document);
+        self.flush();
+    }
+
+    /// 还有换下的对话框在放退场。
+    pub fn overlay_leaving(&self) -> bool {
+        self.view.overlay_leaving()
+    }
+
     /// 增量同步后的文档和同一 ViewModel 新挂的文档逐个节点比较，每一步更新后都调：
     /// - 无障碍树：角色、名称、值和布局盒，管文字和排版；
     /// - 文档里每个节点（含不进无障碍树的容器）的组装路径、无障碍状态（禁用、选中、勾选、忙、无效）和
     ///   整份样式（含显隐、画笔和交互态的样式），管只绑在样式和状态上的字段。
     ///
-    /// 滚动偏移、焦点和悬停这类运行时状态不比：新挂的文档在顶上、没有焦点。
+    /// 滚动偏移、焦点和悬停这类运行时状态不比：新挂的文档在顶上、没有焦点。比之前两边的开合动效都
+    /// 走完：换下的对话框放完退场才卸，新挂的文档里没有它。
     pub fn assert_same_as_fresh_mount(&mut self) {
-        self.flush();
+        self.finish_motion();
         let mut fresh = RuntimeDocument::new(DocumentId::new(1).expect("文档编号"));
         let _view = ShellView::mount(&mut fresh, &self.model).expect("新挂对照文档");
+        fresh.flush(self.viewport, &mut self.shaper).expect("对照文档布局");
+        finish_animations(&mut fresh);
         fresh.flush(self.viewport, &mut self.shaper).expect("对照文档布局");
         let theirs = semantic_lines(&fresh.context().world().project_accessibility(fresh.document()));
         assert_lines_match("无障碍树", &semantic_lines(&self.nodes()), &theirs);
         let ours = structure_lines(self.document());
         assert!(ours.iter().any(|line| line.contains("NodeStyle {")), "没有取到节点样式，结构比较不起作用");
         assert_lines_match("组装路径、状态和样式", &ours, &structure_lines(&fresh));
+    }
+}
+
+/// 把文档里有尽头的动画推到放完：从最近的一个截止时刻再往后推两秒，开合动效（不到 200ms）都放完了，
+/// 转圈这类循环动画照转。放完时框架接着做的收尾（清掉宿主的激活）也在推进里完成。
+fn finish_animations(document: &mut RuntimeDocument) {
+    let context = document.context_mut();
+    for _ in 0..2 {
+        let Some(deadline) = context.next_animation_deadline() else {
+            return;
+        };
+        context.advance_animations(deadline + Duration::from_secs(2));
     }
 }
 

@@ -62,6 +62,7 @@ pub(crate) fn prepare_motion(shell: &mut ShellViewModel, view: Option<&mut Shell
     if shell.motion.active() {
         shell.motion.advance(shell.motion.now_ms().saturating_add(16));
     }
+    let mut overlay_leaving = false;
     if let Some(view) = view {
         let structural = shell.surface_dirty || view.stale(shell);
         let synced = if tracking {
@@ -75,8 +76,12 @@ pub(crate) fn prepare_motion(shell: &mut ShellViewModel, view: Option<&mut Shell
         if let Err(error) = synced {
             eprintln!("Nana 准备帧同步壳层失败：{error}");
         }
+        // 换下的对话框放完退场才卸，卸掉以前浮层层还挡着点击，所以放退场期间一直要帧。
+        view.settle_overlays(&mut window.document);
+        overlay_leaving = view.overlay_leaving();
     }
-    window.demand = if shell.motion.active() || tracking || shell.files.prefetch_pending() || shell.inspect.timers_pending() {
+    let busy = shell.motion.active() || tracking || overlay_leaving;
+    window.demand = if busy || shell.files.prefetch_pending() || shell.inspect.timers_pending() {
         nana_ui::FrameDemand::Continuous(std::num::NonZeroU32::new(30).expect("30"))
     } else {
         nana_ui::FrameDemand::OnDemand
