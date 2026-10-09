@@ -37,8 +37,10 @@ fn shell(writable: bool) -> ShellViewModel {
     model
 }
 
+/// 发一条播放消息。当前项的读取请求像 `player_dispatch` 一样当场读文件送回。
 fn send(model: &mut ShellViewModel, message: PlayerMessage) {
     model.reduce(ShellMessage::Player(message));
+    super::fulfill_loads(model);
 }
 
 fn summary(repo_id: &str, playlist_id: &str, player_type_id: &str, file_class: &str) -> PlaylistSummary {
@@ -509,7 +511,8 @@ fn listed_playback_distinguishes_missing_plugin_upgrade_and_decoder_failure() {
     upgrade.player.contributions = vec![contribution("audio", "audio", &["mp3"])];
     load_playlist(&mut upgrade, "repo", vec![item("a", "ready")]);
     send(&mut upgrade, PlayerMessage::PlayListed { item_id: None });
-    assert!(upgrade.player.session.error.as_deref().unwrap_or_default().contains("解码失败"));
+    // 条目路径是仓库内相对路径，经仓库服务读取；这里读不到就写明读取失败。
+    assert!(upgrade.player.session.error.as_deref().unwrap_or_default().contains("无法读取当前项"));
     assert!(!upgrade.player.session.error.as_deref().unwrap_or_default().contains("需要升级"));
     assert_ne!(upgrade.player.session.status, "playing");
 
@@ -519,12 +522,13 @@ fn listed_playback_distinguishes_missing_plugin_upgrade_and_decoder_failure() {
     send(&mut decoded, PlayerMessage::PlayListed { item_id: None });
     assert_eq!(decoded.player.session.status, "failed");
     assert!(decoded.player.session.error.as_deref().unwrap_or_default().contains("没有原生解码器"));
-    let volume = decoded.player.session.volume;
     let time = decoded.player.session.current_time_ms;
+    // 和 Vue 一样，音量先记下来留给下一项；跳转在没装好的条目上不动，也不改掉原来的错误。
     send(&mut decoded, PlayerMessage::SetVolume(0.2));
     send(&mut decoded, PlayerMessage::Seek(1_500));
-    assert_eq!(decoded.player.session.volume, volume);
+    assert_eq!(decoded.player.session.volume, 0.2);
     assert_eq!(decoded.player.session.current_time_ms, time);
+    assert!(decoded.player.session.error.as_deref().unwrap_or_default().contains("没有原生解码器"));
     assert_ne!(decoded.player.session.status, "playing");
 
     let mut image = shell(true);
@@ -608,7 +612,7 @@ fn entry_playback_keeps_the_other_repository_session() {
         path: "nested/song.mp3".into(),
         filename: "song.mp3".into(),
     });
-    assert!(model.player.session.error.as_deref().unwrap_or_default().contains("解码失败"));
+    assert!(model.player.session.error.as_deref().unwrap_or_default().contains("无法读取当前项"));
     assert!(!model.player.session.error.as_deref().unwrap_or_default().contains("需要升级"));
 }
 
@@ -748,16 +752,18 @@ fn preview_and_player_share_one_media_session() {
         pcm: None,
         frames: None,
     }));
-    assert_eq!(model.player.session.status, "failed");
-    assert!(model.player.session.error.as_deref().unwrap_or_default().contains("没有原生解码器"));
+    // 读不出来的预览不接管播放条，播放器那份会话不受影响；预览页只显示自己的失败。
     assert_eq!(model.inspect.media_session().map(|session| session.status.as_str()), Some("failed"));
+    assert!(model.player.current_item().is_none());
+    assert_ne!(model.player.session.status, "failed");
     send(&mut model, PlayerMessage::SetVolume(0.2));
-    assert_eq!(model.player.session.volume, 1.0);
+    assert_eq!(model.player.session.volume, 0.2);
     assert_eq!(model.inspect.media_session().map(|session| session.volume), Some(1.0));
     assert_ne!(model.player.session.status, "playing");
+    // 播放器没在这个仓库里放东西，停止不改它；预览页的失败也留着。
     send(&mut model, PlayerMessage::Stop { repo_id: Some("repo".into()), clear_stored: true });
-    assert_eq!(model.player.session.status, "ended");
-    assert_eq!(model.inspect.media_session().map(|session| session.status.as_str()), Some("ended"));
+    assert_eq!(model.player.session.status, "idle");
+    assert_eq!(model.inspect.media_session().map(|session| session.status.as_str()), Some("failed"));
 
     model.player.candidates = vec![candidate("native.audio", "audio", "audio", &["mp3"])];
     load_playlist(&mut model, "repo", vec![item("a", "ready")]);
@@ -771,6 +777,20 @@ fn preview_and_player_share_one_media_session() {
         Some(InspectEffect::LoadAsset { asset_id, .. }) if asset_id == "asset-a"
     ));
     assert!(!model.player.system_media_supported());
+}
+
+/// 播放条量到的宽度只在真的变了时记下，半像素抖动和无效值不算。
+#[test]
+fn bar_width_feedback_ignores_half_pixel_jitter() {
+    let mut model = shell(true);
+    send(&mut model, PlayerMessage::BarResized(540.0));
+    assert_eq!(model.player.bar_width, 540.0);
+    send(&mut model, PlayerMessage::BarResized(540.4));
+    assert_eq!(model.player.bar_width, 540.0);
+    send(&mut model, PlayerMessage::BarResized(f32::NAN));
+    assert_eq!(model.player.bar_width, 540.0);
+    send(&mut model, PlayerMessage::BarResized(780.0));
+    assert_eq!(model.player.bar_width, 780.0);
 }
 
 #[test]

@@ -39,7 +39,8 @@ pub enum PreviewKind {
 pub enum PreviewBody {
     Empty,
     Image,
-    Document { markdown: bool, text: String },
+    /// `truncated_at` 有值时只显示了文件开头这么多字节。
+    Document { markdown: bool, text: String, truncated_at: Option<u64> },
     Media(PlaybackSessionState),
     Native { view_id: String, label: String, content: String },
     Failed(String),
@@ -78,6 +79,8 @@ pub enum InspectEffect {
     Redo { repo_id: String, asset_id: String },
     LoadAsset { repo_id: String, asset_id: String },
     Search { generation: u64, request: SearchRequestDraft },
+    /// 预览的音视频接管了播放条，宿主派发后开始播放（Vue 预览页挂载即播放）。
+    Autoplay { path: String, generation: u64 },
 }
 
 #[derive(Clone, Debug)]
@@ -96,7 +99,7 @@ pub enum InspectMessage {
     Redo,
     RevisionLoaded(Result<(String, AssetDetail), String>),
     MetadataSaved(Result<(String, AssetDetail), String>),
-    BodyLoaded { path: String, markdown: bool, generation: u64, result: Result<String, String> },
+    BodyLoaded { path: String, markdown: bool, generation: u64, result: Result<support::PreviewText, String> },
     NativeLoaded { path: String, generation: u64, result: Result<bridge::NativeLoad, String> },
     MediaLoaded {
         path: String,
@@ -107,9 +110,8 @@ pub enum InspectMessage {
     },
     TurnPage(i32),
     Orbit { yaw: f32, zoom: f32 },
-    PlayPause,
-    Seek(u64),
-    SetVolume(f32),
+    /// 宿主派发的自动播放。代次或文件对不上就不动。
+    Autoplay { path: String, generation: u64 },
     SetQuery(String),
     ToggleFilterBar,
     CloseFilterBar,
@@ -470,9 +472,8 @@ impl InspectState {
             InspectMessage::MediaLoaded { path, generation, result, frames, .. } => support::note_media(self, path, generation, result, frames),
             InspectMessage::TurnPage(delta) => bridge::turn(self, delta),
             InspectMessage::Orbit { yaw, zoom } => bridge::orbit(self, yaw, zoom),
-            InspectMessage::PlayPause => self.transport_play_pause(),
-            InspectMessage::Seek(position_ms) => self.transport_seek(position_ms),
-            InspectMessage::SetVolume(volume) => self.transport_volume(volume),
+            // 播放归播放器管，由 `bridge::apply` 交过去；预览状态本身不变。
+            InspectMessage::Autoplay { .. } => {}
             message @ (InspectMessage::SetQuery(_)
             | InspectMessage::ToggleFilterBar
             | InspectMessage::CloseFilterBar
@@ -592,7 +593,7 @@ impl InspectState {
         self.error = error;
     }
 
-    fn note_body(&mut self, path: String, markdown: bool, generation: u64, result: Result<String, String>) {
+    fn note_body(&mut self, path: String, markdown: bool, generation: u64, result: Result<support::PreviewText, String>) {
         if generation != self.generation || self.target_path.as_deref() != Some(path.as_str()) {
             eprintln!("Nana 忽略过期的文本预览：{path}");
             return;
@@ -600,8 +601,8 @@ impl InspectState {
         self.loading = false;
         self.activity.clear();
         match result {
-            Ok(text) => {
-                self.body = PreviewBody::Document { markdown, text };
+            Ok(read) => {
+                self.body = PreviewBody::Document { markdown, text: read.text, truncated_at: read.truncated_at };
                 self.error.clear();
             }
             Err(error) => {
@@ -672,6 +673,11 @@ impl MetadataDraft {
     }
 }
 
+/// 播放器改了进度或状态后，预览页的视频换到对应画面。
+pub(crate) fn sync_preview_frame(model: &mut ShellViewModel) {
+    bridge::show_video_frame(model);
+}
+
 pub(super) fn reduce_message(model: &mut ShellViewModel, message: super::ShellMessage) -> Option<super::ShellMessage> {
     search::observe(model, &message);
     let super::ShellMessage::Inspect(message) = message else {
@@ -683,9 +689,6 @@ pub(super) fn reduce_message(model: &mut ShellViewModel, message: super::ShellMe
     let repo_id = model.workspace.active_repo_id.clone();
     let follow = bridge::follow(&message);
     model.inspect.reduce(writable, repo_id.as_deref(), message);
-    if let Some(session) = model.inspect.media_session().cloned() {
-        model.player.adopt_session(session);
-    }
     bridge::apply(model, follow);
     search::settle(model);
     None

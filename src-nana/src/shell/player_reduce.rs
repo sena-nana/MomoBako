@@ -11,6 +11,7 @@ pub(crate) fn reduce_message(model: &mut ShellViewModel, message: ShellMessage) 
     match message {
         ShellMessage::Player(message) => {
             reduce_player(model, message);
+            super::super::inspect::sync_preview_frame(model);
             None
         }
         ShellMessage::PlaylistsLoaded(Ok(playlists)) => {
@@ -39,74 +40,6 @@ pub(crate) fn reduce_message(model: &mut ShellViewModel, message: ShellMessage) 
 }
 
 impl super::PlayerState {
-    /// 播放列表里的内存候选，或预览刚刚装进同一游标。
-    pub(super) fn audible(&self) -> bool {
-        self.preview_armed || self.uses_wav()
-    }
-
-    pub(crate) fn preview_audio_armed(&self) -> bool {
-        self.preview_armed
-    }
-
-    #[cfg(test)]
-    pub(crate) fn preview_cursor_playing(&self) -> bool {
-        self.preview_armed && self.wav.is_playing()
-    }
-
-    pub(crate) fn preview_path(&self) -> &str {
-        &self.preview_path
-    }
-
-    /// 把预览 PCM 装进播放列表用的同一游标。装载本身不出声。
-    pub(crate) fn arm_preview_audio(&mut self, path: &str, audio: super::PreviewPcm) {
-        self.wav.install_preview(audio);
-        self.preview_armed = true;
-        self.preview_path = path.to_string();
-    }
-
-    /// 换文件或预览失败时停声，避免上一份预览继续响。
-    pub(crate) fn disarm_preview_audio(&mut self) {
-        if !self.preview_armed && self.preview_path.is_empty() {
-            return;
-        }
-        self.wav.clear();
-        self.preview_armed = false;
-        self.preview_path.clear();
-    }
-
-    pub(crate) fn mirror_preview_playing(&mut self, playing: bool, inspect: &mut super::InspectState) {
-        let action = if playing { super::wav_player::Action::Play } else { super::wav_player::Action::Pause };
-        self.mirror_preview(action, inspect);
-    }
-
-    pub(crate) fn mirror_preview_seek(&mut self, position_ms: u64, inspect: &mut super::InspectState) {
-        self.mirror_preview(super::wav_player::Action::Seek(position_ms), inspect);
-    }
-
-    pub(crate) fn mirror_preview_volume(&mut self, volume: f32, inspect: &mut super::InspectState) {
-        self.mirror_preview(super::wav_player::Action::Volume(volume), inspect);
-    }
-
-    /// 预览条已经改过会话。这里只驱动同一游标，让正式 Windows 构建出声。
-    fn mirror_preview(&mut self, action: super::wav_player::Action, inspect: &mut super::InspectState) {
-        if !self.preview_armed {
-            return;
-        }
-        match &action {
-            super::wav_player::Action::Play => self.wants_playing = true,
-            super::wav_player::Action::Pause => self.wants_playing = false,
-            _ => {}
-        }
-        let session = self.session.clone();
-        let (session, error) = super::wav_player::drive(true, &self.wav, session, action);
-        self.session = session;
-        if let Some(error) = error {
-            eprintln!("Nana 预览出声失败：{error}");
-            self.activity = error;
-        }
-        self.publish(inspect);
-    }
-
     pub(super) fn note_download_task(&mut self, task_id: String) {
         if task_id.is_empty() {
             eprintln!("Nana 下载任务编号是空的");
@@ -158,6 +91,12 @@ fn reduce_player(model: &mut ShellViewModel, message: PlayerMessage) {
             model.player.effects.push(PlayerEffect::PersistSettings);
         }
         PlayerMessage::ToggleQueue => model.player.queue_open = !model.player.queue_open,
+        PlayerMessage::BarResized(width) => {
+            // 半像素以内的抖动不算变化，避免排版回报来回重建。
+            if width.is_finite() && (width - model.player.bar_width).abs() > 0.5 {
+                model.player.bar_width = width;
+            }
+        }
         PlayerMessage::Stop { repo_id, clear_stored } => model.player.stop_for(repo_id, clear_stored, &mut model.inspect),
         PlayerMessage::ToggleMembership { playlist_id, kind, extension, asset_id, is_virtual, path } => {
             model.player.toggle_membership(&playlist_id, &kind, &extension, &asset_id, is_virtual, &path, writable, repo_id.as_deref());
@@ -185,6 +124,10 @@ fn reduce_player(model: &mut ShellViewModel, message: PlayerMessage) {
                 &mut model.selected_path,
                 &mut model.inspect,
             );
+        }
+        PlayerMessage::ItemLoaded { item_id, generation, still, result } => {
+            super::clip::finish_load(&mut model.player, &item_id, generation, still, result);
+            model.player.publish(&mut model.inspect);
         }
         PlayerMessage::RestoreDetail(Ok(detail)) => {
             model.player.note_detail(&detail);
