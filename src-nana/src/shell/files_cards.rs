@@ -13,7 +13,7 @@ use nana_ui::runtime::{
     Activate, AlignSpec, ContentFit, JustifySpec, LengthSpec, ListItem, NodeStyle, RadiusTier, SecondaryPress,
     SemanticColorRole, SemanticPaint, Stack, Thumbnail,
 };
-use nana_ui_core::{Icon, SemanticColorMix};
+use nana_ui_core::{Icon, LengthAtom, SemanticColorMix};
 
 use super::super::files::{hardlink_label, DisplayMode, FileRow, FilesMessage};
 use super::file_message;
@@ -66,6 +66,9 @@ pub(super) fn masonry_height(row: &FileRow, column_width: f32) -> f32 {
 
 /// 列表：撑满一行，至少 72 高。
 pub(super) const LIST_BOX: CardBox = CardBox { width: 0.0, height: 0.0, preview_width: 56.0, preview_height: 56.0 };
+/// 列表元信息列的宽度下限（`minmax(220px, 1fr)`）和窄卡片里标题列至少保留的宽度。
+const LIST_META_MIN: f32 = 220.0;
+const LIST_TITLE_MIN: f32 = 80.0;
 
 /// 条目卡片。单击选中、连点进入或预览、右键打开菜单都挂在卡片上。
 pub(super) fn card(row: &FileRow, mode: DisplayMode, geometry: CardBox, state: CardState) -> AnyView {
@@ -157,6 +160,9 @@ fn tile_content(row: &FileRow, mode: DisplayMode, geometry: CardBox) -> AnyView 
 ///
 /// 三栏宽度按 `56px | minmax(0, 1.5fr) | minmax(220px, 1fr)` 分：标题列和元信息列 3:2 分剩余宽，
 /// 元信息列不足 220 时取 220，其余归标题列。
+///
+/// 卡片窄到放不下 220 的元信息列时，Vue 的网格把标题列压成 0、内容溢出卡片；这里元信息列的下限
+/// 改成 `min(220, 卡片内容宽 - 缩略图 - 两个间距 - 80)`，标题至少留 80 宽，元信息在自己的列里换行或截断。
 fn list_content(row: &FileRow, geometry: CardBox) -> AnyView {
     let body = widget(
         Stack::column(4.0)
@@ -178,7 +184,10 @@ fn list_content(row: &FileRow, geometry: CardBox) -> AnyView {
             .align(AlignSpec::Center)
             .grow(1.0)
             .shrink(1.0)
-            .min_width(LengthSpec::Px(220.0))
+            .min_width(LengthSpec::Min2(
+                LengthAtom::Px(LIST_META_MIN),
+                LengthAtom::CalcPercent { percent: 100.0, offset_px: -(geometry.preview_width + 12.0 * 2.0 + LIST_TITLE_MIN) },
+            ))
             .width(LengthSpec::Px(0.0))
             .with_layout(|layout| {
                 layout.flex_basis = Some(LengthSpec::Px(0.0));
@@ -189,7 +198,14 @@ fn list_content(row: &FileRow, geometry: CardBox) -> AnyView {
         list_meta(row)
             .into_iter()
             .enumerate()
-            .map(|(index, text)| widget(style::small_muted(text).truncating()).key(format!("{}-{index}", view_key("file-meta", row))).into_any())
+            .map(|(index, text)| {
+                // 一行放不下时每段可以缩到 0，用省略号截断，不伸出元信息列。
+                let mut node = style::small_muted(text).truncating();
+                let layout = Arc::make_mut(&mut node.style.layout);
+                layout.min_width = Some(LengthSpec::Px(0.0));
+                layout.flex_shrink = Some(1.0);
+                widget(node).key(format!("{}-{index}", view_key("file-meta", row))).into_any()
+            })
             .collect::<Vec<_>>(),
     )
     .into_any();

@@ -17,6 +17,8 @@ mod header;
 mod grid;
 #[path = "files_cards.rs"]
 mod cards;
+#[path = "files_virtual.rs"]
+mod virtual_rows;
 #[path = "files_detail.rs"]
 mod detail;
 #[path = "files_menu.rs"]
