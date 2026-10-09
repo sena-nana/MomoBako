@@ -1,4 +1,4 @@
-//! 内置 WAV 播放贡献，以及解成 PCM 后共用同一游标的 mp3、flac、ogg。
+//! 内置 WAV 播放贡献，以及解成 PCM 后共用同一游标的 mp3、flac、ogg；Windows 上还有媒体基础解出的 m4a、aac、opus。
 //!
 //! WAV 只解析标准 PCM（RIFF/WAVE、`fmt `、`data`，8-bit 或 16-bit，单声道或双声道）。
 //! 压缩格式先解成 16-bit 小端 PCM，再放进这份游标。播放头和音量留在内存里。
@@ -21,6 +21,11 @@ const COMPRESSED_EXTENSIONS: &[&str] = &["mp3", "flac", "ogg"];
 pub(super) const COMPRESSED_PLUGIN_ID: &str = "momobako.player.compressed-audio";
 pub(super) const COMPRESSED_PLAYER_TYPE_ID: &str = "momobako.playlist.compressed-audio";
 
+/// 交给系统媒体基础解音轨的格式。媒体基础只在 Windows 上有。
+const SYSTEM_EXTENSIONS: &[&str] = &["m4a", "aac", "opus"];
+pub(super) const SYSTEM_PLUGIN_ID: &str = "momobako.player.system-audio";
+pub(super) const SYSTEM_PLAYER_TYPE_ID: &str = "momobako.playlist.system-audio";
+
 /// 生产列表里的 WAV 候选。
 pub(super) fn builtin_candidate() -> PlayerCandidate {
     audio_candidate(PLUGIN_ID, PLAYER_TYPE_ID, "WAV", &["wav"])
@@ -29,6 +34,11 @@ pub(super) fn builtin_candidate() -> PlayerCandidate {
 /// mp3、flac、ogg 共用一个候选。装载时解进和 WAV 相同的内存游标。
 pub(super) fn compressed_candidate() -> PlayerCandidate {
     audio_candidate(COMPRESSED_PLUGIN_ID, COMPRESSED_PLAYER_TYPE_ID, "MP3 / FLAC / Ogg", COMPRESSED_EXTENSIONS)
+}
+
+/// m4a、aac、opus 共用一个候选。媒体基础把音轨解成 PCM 后，同样装进 WAV 的内存游标。
+pub(super) fn system_candidate() -> PlayerCandidate {
+    audio_candidate(SYSTEM_PLUGIN_ID, SYSTEM_PLAYER_TYPE_ID, "M4A / AAC / Opus", SYSTEM_EXTENSIONS)
 }
 
 fn audio_candidate(plugin_id: &str, player_type_id: &str, label: &str, extensions: &[&str]) -> PlayerCandidate {
@@ -44,8 +54,18 @@ fn audio_candidate(plugin_id: &str, player_type_id: &str, label: &str, extension
     }
 }
 
+/// 本平台 Nana 自己能解的音频格式各有一个候选认领。没有媒体基础的平台不认领 m4a、aac、opus。
 pub(super) fn builtin_candidates() -> Vec<PlayerCandidate> {
-    vec![builtin_candidate(), compressed_candidate()]
+    candidates_for(cfg!(windows))
+}
+
+/// 内置候选。`media_foundation` 为真时再登记交给媒体基础的格式。
+pub(super) fn candidates_for(media_foundation: bool) -> Vec<PlayerCandidate> {
+    let mut candidates = vec![builtin_candidate(), compressed_candidate()];
+    if media_foundation {
+        candidates.push(system_candidate());
+    }
+    candidates
 }
 
 /// 一次装载后的内存游标。克隆只复制句柄，播放头仍是同一份。
@@ -415,9 +435,9 @@ pub(crate) fn pcm_error_for_extension(extension: &str, bytes: &[u8]) -> Option<S
     None
 }
 
-/// WAV 和已解码的压缩音频都走这份内存游标。其它候选仍是缺失解码器。
+/// WAV、已解码的压缩音频和媒体基础解出的音轨都走这份内存游标。其它候选仍是缺失解码器。
 pub(super) fn is_memory_candidate(candidate: &PlayerCandidate) -> bool {
-    candidate.plugin_id == PLUGIN_ID || candidate.plugin_id == COMPRESSED_PLUGIN_ID
+    [PLUGIN_ID, COMPRESSED_PLUGIN_ID, SYSTEM_PLUGIN_ID].contains(&candidate.plugin_id.as_str())
 }
 
 /// 测试构建恒为 false：winmm 模块没有编进来。测试用它确认不会打开声卡。

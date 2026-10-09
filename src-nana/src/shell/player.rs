@@ -53,7 +53,7 @@ pub struct PlaybackSettings {
     pub object_fit_cover: bool,
 }
 
-/// 已登记的播放器实现。内置 WAV，以及解成 PCM 后共用游标的 mp3/flac/ogg。
+/// 已登记的播放器实现。内置 WAV，以及解成 PCM 后共用游标的 mp3/flac/ogg 和 Windows 上的 m4a/aac/opus。
 #[derive(Clone, Debug, PartialEq)]
 pub struct PlayerCandidate {
     pub plugin_id: String,
