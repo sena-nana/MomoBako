@@ -4,11 +4,15 @@
 //! 行高 28、13px/500、13px 图标；「加入播放列表」「缩略图」带 › 并展开子菜单，子菜单贴在
 //! 这一行右边 4px。菜单按指针落点放置，靠右或靠下放不下时夹回窗口内 4px。
 //! 回收站里的「彻底删除」要点两次：第一次只把这一行变成待确认。点菜单外关闭。
+//!
+//! 菜单常驻：同一个目标、同一个落点的菜单打开期间，条目按内容做键，变了的那一行才重建；
+//! 展开哪个子菜单只切换子菜单的显隐。点条目发的消息是条目数据的一部分（[`MenuAction`]），
+//! 条目变了行就重建，处理器不会拿着过期的值。
 
 use std::sync::Arc;
 
 use nana_ui::icons_tabler::{CHECK, CLIPBOARD, EYE, FILES, FOLDER_OPEN, PENCIL, PHOTO, PHOTO_OFF, PHOTO_PLUS, REFRESH, ROTATE, TRASH};
-use nana_ui::runtime::view::{widget, AnyView, IntoView};
+use nana_ui::runtime::view::{computed, each, signal, widget, AnyView, FieldWrite, IntoView, Signal, StyledComponent};
 use nana_ui::runtime::{
     Activate, AlignSpec, IconGlyph, LengthSpec, ListItem, NodeStyle, PositionSpec, RadiusTier, SecondaryPress,
     SemanticColorRole, SemanticPaint, Stack,
@@ -20,6 +24,7 @@ use super::super::entry_actions::{self, FilePluginAction, FilePluginDispatch};
 use super::super::files::{FileContext, FileDialog, FileRow, FilesMessage};
 use super::super::input::{repository_absolute, InputMessage};
 use super::super::player::PlayerMessage;
+use super::super::view_part_overlay::session::Projected;
 use super::super::workspace::WorkspacePanel;
 use super::super::{ShellMessage, ShellViewModel};
 use super::style;
@@ -34,34 +39,63 @@ const EDGE: f32 = 4.0;
 /// Vue 右键菜单的层级（`SB_LAYER_Z_INDEX.contextMenu`）。浮层根比它低 1，点菜单外的透明底和它同层。
 const MENU_Z: i32 = 2000;
 
-/// 点菜单项时生成的壳层消息。`ShellMessage` 不能克隆，每次点击现做一条。
-type Action = Arc<dyn Fn() -> ShellMessage + Send + Sync>;
-
-fn files(message: FilesMessage) -> Action {
-    Arc::new(move || ShellMessage::Files(message.clone()))
+/// 点菜单项时发的消息，存成数据：能比较（按调试文本），条目变了就知道。`ShellMessage` 不能克隆，
+/// 每次点击现做一条。
+#[derive(Clone, Debug)]
+pub(crate) enum MenuAction {
+    Files(FilesMessage),
+    Input(InputMessage),
+    Admin(AdminMessage),
+    /// 切换播放列表成员。
+    Membership { playlist_id: String, kind: String, extension: String, asset_id: String, is_virtual: bool, path: String },
 }
 
-fn input(message: InputMessage) -> Action {
-    Arc::new(move || ShellMessage::Input(message.clone()))
+impl MenuAction {
+    fn message(&self) -> ShellMessage {
+        match self.clone() {
+            Self::Files(message) => ShellMessage::Files(message),
+            Self::Input(message) => ShellMessage::Input(message),
+            Self::Admin(message) => ShellMessage::Admin(message),
+            Self::Membership { playlist_id, kind, extension, asset_id, is_virtual, path } => {
+                ShellMessage::Player(PlayerMessage::ToggleMembership { playlist_id, kind, extension, asset_id, is_virtual, path })
+            }
+        }
+    }
 }
 
-fn admin(message: AdminMessage) -> Action {
-    Arc::new(move || ShellMessage::Admin(message.clone()))
+impl PartialEq for MenuAction {
+    fn eq(&self, other: &Self) -> bool {
+        format!("{self:?}") == format!("{other:?}")
+    }
+}
+
+fn files(message: FilesMessage) -> MenuAction {
+    MenuAction::Files(message)
+}
+
+fn input(message: InputMessage) -> MenuAction {
+    MenuAction::Input(message)
+}
+
+fn admin(message: AdminMessage) -> MenuAction {
+    MenuAction::Admin(message)
 }
 
 /// 菜单里的一行。`children` 非空时是带 › 的分组，点它只展开子菜单。
-#[derive(Clone)]
-struct MenuEntry {
-    id: String,
-    label: String,
-    icon: Option<Icon>,
-    checked: bool,
-    disabled: bool,
-    danger: bool,
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct MenuEntry {
+    pub id: String,
+    pub label: String,
+    pub icon: Option<Icon>,
+    pub checked: bool,
+    pub disabled: bool,
+    pub danger: bool,
     /// 二次确认时第一次点击后显示的文案。
-    confirm_label: Option<&'static str>,
-    message: Option<Action>,
-    children: Vec<MenuEntry>,
+    pub confirm_label: Option<&'static str>,
+    /// 已经点过一次、等第二次确认。
+    pub pending: bool,
+    pub action: Option<MenuAction>,
+    pub children: Vec<MenuEntry>,
 }
 
 impl MenuEntry {
@@ -74,7 +108,8 @@ impl MenuEntry {
             disabled: false,
             danger: false,
             confirm_label: None,
-            message: None,
+            pending: false,
+            action: None,
             children: Vec::new(),
         }
     }
@@ -84,37 +119,61 @@ impl MenuEntry {
         self
     }
 
-    fn message(mut self, message: Action) -> Self {
-        self.message = Some(message);
+    fn message(mut self, action: MenuAction) -> Self {
+        self.action = Some(action);
         self
     }
 }
 
-/// 右键打开的条目菜单。没有目标时不占浮层。
+/// 右键菜单要显示的东西：条目、展开的子菜单和菜单尺寸。
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct EntryMenuView {
+    pub entries: Vec<MenuEntry>,
+    /// 展开着的分组。
+    pub branch: Option<String>,
+    pub width: f32,
+    pub height: f32,
+}
+
+impl EntryMenuView {
+    /// 目标条目已经不在列表里时为 `None`。
+    pub(crate) fn project(model: &ShellViewModel) -> Option<Self> {
+        let menu = model.files.entry_menu.as_ref()?;
+        let ctx = FileContext::from_model(model);
+        let row = model.files.visible_rows(&ctx).into_iter().find(|row| row.path == menu.path)?;
+        let mut entries = menu_entries(model, &row);
+        let pending = model.files.menu_pending.as_deref();
+        for entry in &mut entries {
+            entry.pending = entry.confirm_label.is_some() && pending == Some(entry.id.as_str());
+        }
+        Some(Self {
+            width: menu_width(&entries),
+            height: menu_height(entries.len()),
+            branch: model.files.menu_branch.clone(),
+            entries,
+        })
+    }
+}
+
+/// 右键打开的条目菜单。没有目标或目标已不在列表里时不占浮层。
 pub(super) fn entry_menu(model: &ShellViewModel) -> Option<AnyView> {
     let menu = model.files.entry_menu.clone()?;
-    let ctx = FileContext::from_model(model);
-    let Some(row) = model.files.visible_rows(&ctx).into_iter().find(|row| row.path == menu.path) else {
+    let Some(initial) = EntryMenuView::project(model) else {
         eprintln!("Nana 右键菜单的条目已经不在列表里：{}", menu.path);
         return None;
     };
-    let entries = menu_entries(model, &row);
-    let width = menu_width(&entries);
-    let height = menu_height(entries.len());
-    let rows = entries
-        .iter()
-        .map(|entry| slot(model, entry, width))
-        .collect::<Vec<_>>();
-    let surface = Stack::column(ITEM_GAP)
-        .width(LengthSpec::Px(width))
+    let view = signal(initial);
+    Projected::register(view, EntryMenuView::project);
+    let entries = computed(move || view.with(|view| view.entries.clone()));
+    let rows = each(entries, |entry: &MenuEntry| format!("{entry:?}"), move |entry: MenuEntry| slot(view, entry)).gap(ITEM_GAP);
+    let (x, y) = (menu.x, menu.y);
+    let surface = Stack::column(0.0)
         .padding(MENU_PADDING)
         .surface(SemanticColorRole::Surface)
         .outline(SemanticColorRole::BorderStrong, 1.0)
         .radius(RadiusTier::Md)
         .with_layout(move |layout| {
             layout.position = PositionSpec::Fixed;
-            layout.offset_left = Some(clamped(menu.x, width));
-            layout.offset_top = Some(clamped(menu.y, height));
             layout.z_index = Some(MENU_Z + 1);
         });
     let surface = style::with_shadows(surface, vec![style::shadow(10.0, 28.0, -10.0, 0.55)]);
@@ -124,16 +183,44 @@ pub(super) fn entry_menu(model: &ShellViewModel) -> Option<AnyView> {
             layout.pointer_events = None;
             layout.z_index = Some(MENU_Z - 1);
         }))
-        .children((backdrop(), widget(surface).children(rows).key("file-context-menu")))
+        .children((
+            backdrop(),
+            widget(surface)
+                .prop::<(f32, f32, f32, f32), MenuPlacement>(move || view.with(|view| (x, y, view.width, view.height)))
+                .children((rows,))
+                .key("file-context-menu"),
+        ))
         .key("file-context-layer")
         .into_any(),
     )
 }
 
-/// 菜单左上角：落点和「窗口边减去菜单尺寸再留 4」取小，放不下时贴着右边或下边。
-/// 固定定位的包含块是窗口，百分比就是窗口宽高。
-fn clamped(anchor: f32, extent: f32) -> LengthSpec {
-    LengthSpec::Min2(LengthAtom::Px(anchor.max(EDGE)), LengthAtom::CalcPercent { percent: 100.0, offset_px: -(extent + EDGE) })
+/// 菜单左上角和宽：落点和「窗口边减去菜单尺寸再留 4」取小，放不下时贴着右边或下边。
+/// 固定定位的包含块是窗口，百分比就是窗口宽高。值是（落点 x、落点 y、宽、高）。
+struct MenuPlacement;
+
+impl MenuPlacement {
+    fn clamped(anchor: f32, extent: f32) -> LengthSpec {
+        LengthSpec::Min2(LengthAtom::Px(anchor.max(EDGE)), LengthAtom::CalcPercent { percent: 100.0, offset_px: -(extent + EDGE) })
+    }
+}
+
+impl FieldWrite<Stack, (f32, f32, f32, f32)> for MenuPlacement {
+    const FIELD: &'static str = "Stack.style.layout.offset+width(menu)";
+
+    fn write(target: &mut Stack, (x, y, width, height): (f32, f32, f32, f32)) {
+        let layout = Arc::make_mut(&mut target.node_style_mut().layout);
+        layout.offset_left = Some(Self::clamped(x, width));
+        layout.offset_top = Some(Self::clamped(y, height));
+        layout.width = Some(LengthSpec::Px(width));
+    }
+
+    fn differs(target: &Stack, (x, y, width, height): &(f32, f32, f32, f32)) -> bool {
+        let layout = &target.node_style().layout;
+        layout.offset_left != Some(Self::clamped(*x, *width))
+            || layout.offset_top != Some(Self::clamped(*y, *height))
+            || layout.width != Some(LengthSpec::Px(*width))
+    }
 }
 
 /// 铺满窗口的透明底，点在菜单外就关闭，和 Vue 的全局 pointerdown 一样。
@@ -159,37 +246,53 @@ fn close() -> ShellMessage {
     ShellMessage::Files(FilesMessage::CloseEntryMenu)
 }
 
-/// 一行和它的子菜单。子菜单相对这一行绝对定位在右边 4px。
-fn slot(model: &ShellViewModel, entry: &MenuEntry, width: f32) -> AnyView {
-    let open = !entry.children.is_empty() && model.files.menu_branch.as_deref() == Some(entry.id.as_str());
-    let pending = entry.confirm_label.is_some() && model.files.menu_pending.as_deref() == Some(entry.id.as_str());
-    let submenu = open.then(|| {
+/// 一行和它的子菜单。子菜单相对这一行绝对定位在右边 4px，展开哪个分组只切换显隐。
+fn slot(view: Signal<EntryMenuView>, entry: MenuEntry) -> AnyView {
+    let submenu = (!entry.children.is_empty()).then(|| {
+        let id = entry.id.clone();
         let child_width = menu_width(&entry.children);
-        let rows = entry.children.iter().map(|child| item(model, child, false)).collect::<Vec<_>>();
+        let rows = entry.children.iter().map(item).collect::<Vec<_>>();
         let panel = Stack::column(ITEM_GAP)
             .width(LengthSpec::Px(child_width))
             .padding(MENU_PADDING)
             .surface(SemanticColorRole::Surface)
             .outline(SemanticColorRole::BorderStrong, 1.0)
             .radius(RadiusTier::Md)
-            .with_layout(move |layout| {
+            .with_layout(|layout| {
                 layout.position = PositionSpec::Absolute;
                 layout.offset_top = Some(LengthSpec::Px(0.0));
-                layout.offset_left = Some(LengthSpec::Px(width - MENU_PADDING * 2.0 - 2.0 + 4.0));
                 layout.z_index = Some(1);
             });
         widget(style::with_shadows(panel, vec![style::shadow(10.0, 28.0, -10.0, 0.55)]))
+            .visible(move || view.with(|view| view.branch.as_deref() == Some(id.as_str())))
+            .prop::<f32, OffsetLeft>(move || view.with(|view| view.width - MENU_PADDING * 2.0 - 2.0 + 4.0))
             .children(rows)
             .key(format!("file-menu-sub-{}", entry.id))
             .into_any()
     });
     widget(Stack::column(0.0).width(LengthSpec::Fill).with_layout(|layout| layout.position = PositionSpec::Relative))
-        .children((item(model, entry, pending), submenu))
+        .children((item(&entry), submenu))
         .into_any()
 }
 
+/// 子菜单离这一行左边的距离：父菜单宽减去内边距和描边，再右移 4。
+struct OffsetLeft;
+
+impl FieldWrite<Stack, f32> for OffsetLeft {
+    const FIELD: &'static str = "Stack.style.layout.offset_left";
+
+    fn write(target: &mut Stack, left: f32) {
+        Arc::make_mut(&mut target.node_style_mut().layout).offset_left = Some(LengthSpec::Px(left));
+    }
+
+    fn differs(target: &Stack, left: &f32) -> bool {
+        target.node_style().layout.offset_left != Some(LengthSpec::Px(*left))
+    }
+}
+
 /// `.ctx-menu__item`：图标、文字、分组的 ›。危险项是错误色，待确认时浅红底、600 字重。
-fn item(_model: &ShellViewModel, entry: &MenuEntry, pending: bool) -> AnyView {
+fn item(entry: &MenuEntry) -> AnyView {
+    let pending = entry.pending;
     let foreground = if entry.danger || pending { SemanticColorRole::Danger } else { SemanticColorRole::Text };
     let mut style = NodeStyle::default();
     style.radius = Some(RadiusTier::Sm);
@@ -237,15 +340,15 @@ fn item(_model: &ShellViewModel, entry: &MenuEntry, pending: bool) -> AnyView {
         } else if entry.confirm_label.is_some() && !pending {
             Some(files(FilesMessage::ArmMenuConfirm(entry.id.clone())))
         } else {
-            entry.message.clone()
+            entry.action.clone()
         };
         let close_after = entry.children.is_empty() && (entry.confirm_label.is_none() || pending);
         node = node.on_cx(move |_, _: &Activate, cx| {
             if close_after {
                 cx.dispatch_program_all(close());
             }
-            if let Some(make) = &action {
-                cx.dispatch_program_all(make());
+            if let Some(action) = &action {
+                cx.dispatch_program_all(action.message());
             }
         });
     }
@@ -356,18 +459,14 @@ fn playlist_entries(model: &ShellViewModel, row: &FileRow) -> Vec<MenuEntry> {
                 .find(|playlist| playlist.playlist_id == action.playlist_id)
                 .map(|playlist| playlist.name.clone())
                 .unwrap_or_else(|| action.label.clone());
-            let (playlist_id, kind, extension, asset_id, is_virtual, path) =
-                (action.playlist_id.clone(), row.kind.clone(), extension.clone(), asset_id.clone(), row.is_virtual, row.path.clone());
-            let toggle: Action = Arc::new(move || {
-                ShellMessage::Player(PlayerMessage::ToggleMembership {
-                    playlist_id: playlist_id.clone(),
-                    kind: kind.clone(),
-                    extension: extension.clone(),
-                    asset_id: asset_id.clone(),
-                    is_virtual,
-                    path: path.clone(),
-                })
-            });
+            let toggle = MenuAction::Membership {
+                playlist_id: action.playlist_id.clone(),
+                kind: row.kind.clone(),
+                extension: extension.clone(),
+                asset_id: asset_id.clone(),
+                is_virtual: row.is_virtual,
+                path: row.path.clone(),
+            };
             let mut entry = MenuEntry::new(&format!("playlist-{}", style::key_part(&action.playlist_id)), name, None).message(toggle);
             entry.checked = action.checked;
             entry
@@ -404,7 +503,7 @@ fn plugin_entry(action: &FilePluginAction, repository_id: Option<String>) -> Men
 fn thumbnail_entries(row: &FileRow, repo_id: Option<String>) -> Vec<MenuEntry> {
     let path = row.path.clone();
     let kind = row.kind.clone();
-    let custom = |build: fn(String, String, String) -> InputMessage| -> Action {
+    let custom = |build: fn(String, String, String) -> InputMessage| -> MenuAction {
         match repo_id.clone() {
             Some(repo_id) => input(build(repo_id, path.clone(), kind.clone())),
             None => {

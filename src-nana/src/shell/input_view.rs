@@ -1,15 +1,17 @@
-//! 关闭确认、系统文件拖放和空库页。验收场景不挂关闭条，避免改掉旧的命中目标。
+//! 关闭确认、系统文件拖放和空库页。关闭确认是浮层槽位里的确认框，走统一对话框框架。
 
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use nana_ui::runtime::view::{node_ref, on_mount, text, widget, AnyView, IntoView, NodeRef};
+use nana_ui::runtime::view::{node_ref, on_mount, signal, widget, AnyView, IntoView, NodeRef};
 use nana_ui::runtime::{
-    Activate, AlignSpec, ConfirmDialog, FileDropEvent, JustifySpec, LengthSpec, RadiusTier, SemanticColorRole, Stack,
-    Text, TextHorizontalAlignment,
+    AlignSpec, FileDropEvent, JustifySpec, LengthSpec, RadiusTier, SemanticColorRole, Stack, Text, TextHorizontalAlignment,
 };
+use nana_ui::ButtonKind;
 use nana_ui_core::{DropAccepts, DropEffect};
 use super::{HostDragPhase, InputMessage};
+use crate::shell::view_part_overlay::dialog::{intent_button, DialogFrame};
+use crate::shell::view_part_overlay::session::Projected;
 use crate::shell::{MainRegion, ShellMessage, ShellViewModel, WorkspacePanel};
 
 /// 挂上拖放时从壳层抄下来的仓库条件。事件回调里不再借壳层。
@@ -141,27 +143,37 @@ pub(crate) fn accept_file_drops(target: NodeRef) {
     });
 }
 
-/// 有待确认的关闭时用确认对话框。只有说明、尚未进入确认时保留一行文字。
+/// 关闭确认要显示的说明。
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct CloseConfirmView {
+    pub notice: String,
+}
+
+impl CloseConfirmView {
+    pub(crate) fn project(model: &ShellViewModel) -> Option<Self> {
+        if !model.input.pending_close {
+            return None;
+        }
+        let notice = if model.input.notice.is_empty() { "确认关闭 MomoBako？".to_string() } else { model.input.notice.clone() };
+        Some(Self { notice })
+    }
+}
+
+fn answer(accept: bool) -> ShellMessage {
+    ShellMessage::Input(InputMessage::ConfirmCloseAnswer(accept))
+}
+
+/// 有待确认的关闭时用确认框，放在浮层槽位最上面，停在哪个页面都看得到。取消和三种关闭手势
+/// 都是「不关」，「确认关闭」才关窗口。
 pub(crate) fn close_prompt(model: &ShellViewModel) -> Option<AnyView> {
-    if !model.input.pending_close && model.input.notice.is_empty() {
-        return None;
-    }
-    if !model.input.pending_close {
-        return Some(text(model.input.notice.clone()).key("close-confirm-notice").into_any());
-    }
-    let notice = if model.input.notice.is_empty() {
-        "确认关闭 MomoBako？".to_string()
-    } else {
-        model.input.notice.clone()
-    };
-    Some(
-        widget(ConfirmDialog::new(notice.clone(), notice))
-            .cancel(widget(super::super::workbench::ghost_button("取消")).key("close-confirm-cancel").on_cx(|_, _: &Activate, cx| {
-                cx.dispatch_program_all(ShellMessage::Input(InputMessage::ConfirmCloseAnswer(false)));
-            }))
-            .confirm(widget(super::super::workbench::primary_button("确认关闭")).key("close-confirm-accept").on_cx(|_, _: &Activate, cx| {
-                cx.dispatch_program_all(ShellMessage::Input(InputMessage::ConfirmCloseAnswer(true)));
-            }))
-            .into_any(),
-    )
+    let view = signal(CloseConfirmView::project(model)?);
+    Projected::register(view, CloseConfirmView::project);
+    let cancel = intent_button("取消", ButtonKind::Ghost, false, "close-confirm-cancel");
+    let confirm = intent_button("确认关闭", ButtonKind::Primary, false, "close-confirm-accept");
+    Some(DialogFrame::new("close-confirm", || "关闭 MomoBako".to_string(), || answer(false)).confirm(
+        move || view.with(|view| view.notice.clone()),
+        cancel,
+        confirm,
+        || answer(true),
+    ))
 }

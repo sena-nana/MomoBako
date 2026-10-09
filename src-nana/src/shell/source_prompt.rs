@@ -1,13 +1,17 @@
 //! 来源插件还缺的目录和名称。
 //!
 //! 下载先排队系统文件夹对话框，选中后再 `call_plugin`。取消不调用。
-//! 创建来源播放列表弹出名称输入，空白不提交，确认后带上名称和当前仓库。
+//! 创建来源播放列表弹出名称输入（统一对话框框架，常驻、输入框受控），空白不提交，确认后带上名称和当前仓库。
 
-use nana_ui::runtime::view::{widget, AnyView, IntoView};
-use nana_ui::runtime::{Activate, Dialog, Stack, TextChanged, TextInput};
+use std::sync::Arc;
+
+use nana_ui::runtime::view::{signal, AnyView};
+use nana_ui::ButtonKind;
 use serde_json::Value;
 
 use super::super::admin::AdminMessage;
+use super::super::view_part_overlay::dialog::{action, footer, text_field, DialogFrame};
+use super::super::view_part_overlay::session::{Draft, Projected};
 use super::super::{ShellMessage, ShellViewModel};
 use super::InputMessage;
 
@@ -83,28 +87,44 @@ pub(super) fn submit_source_playlist(model: &mut ShellViewModel) {
     }));
 }
 
-/// 名称对话框。没有提示时不占浮层。空白时确认按钮不可用。
+/// 名称对话框要显示的东西。名称草稿不在这里，见 [`Draft`]。
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct SourcePlaylistView {
+    /// 名称去掉空白后为空：「确认」不可用。
+    pub blank: bool,
+}
+
+impl SourcePlaylistView {
+    pub(crate) fn project(model: &ShellViewModel) -> Option<Self> {
+        let prompt = model.input.source_playlist.as_ref()?;
+        Some(Self { blank: prompt.draft.trim().is_empty() })
+    }
+}
+
+fn input_message(message: InputMessage) -> ShellMessage {
+    ShellMessage::Input(message)
+}
+
+/// 名称对话框。没有提示时不占浮层。空白时确认按钮不可用，回车和确认都提交，归约里再挡一次空白。
 pub(crate) fn playlist_name_dialog(model: &ShellViewModel) -> Option<AnyView> {
-    let prompt = model.input.source_playlist.as_ref()?;
-    let blank = prompt.draft.trim().is_empty();
-    Some(
-        widget(Dialog::new("创建来源播放列表"))
-            .key("source-playlist-dialog")
-            .body(
-                widget(TextInput::new(prompt.draft.clone()).label("播放列表名称"))
-                    .key("source-playlist-name")
-                    .on_cx(|_, event: &TextChanged, cx| {
-                        cx.dispatch_program_all(ShellMessage::Input(InputMessage::SourcePlaylistDraft(event.value.to_string())));
-                    }),
-            )
-            .footer(widget(Stack::row(8.0)).children((
-                widget(super::super::workbench::ghost_button("取消")).key("source-playlist-cancel").on_cx(|_, _: &Activate, cx| {
-                    cx.dispatch_program_all(ShellMessage::Input(InputMessage::CloseSourcePlaylist));
-                }),
-                widget(super::super::workbench::primary_button("确认")).key("source-playlist-submit").disabled(blank).on_cx(|_, _: &Activate, cx| {
-                    cx.dispatch_program_all(ShellMessage::Input(InputMessage::SubmitSourcePlaylist));
-                }),
-            )))
-            .into_any(),
-    )
+    let view = signal(SourcePlaylistView::project(model)?);
+    Projected::register(view, SourcePlaylistView::project);
+    let draft = Draft::register(model, |model| model.input.source_playlist.as_ref().map(|prompt| prompt.draft.clone()));
+    let submit = || input_message(InputMessage::SubmitSourcePlaylist);
+    let close = || input_message(InputMessage::CloseSourcePlaylist);
+    let body = text_field(
+        "播放列表名称",
+        "source-playlist-name",
+        draft,
+        "",
+        false,
+        false,
+        |value| input_message(InputMessage::SourcePlaylistDraft(value)),
+        Some(Arc::new(submit)),
+    );
+    let buttons = vec![
+        action("取消", ButtonKind::Ghost, false, "source-playlist-cancel", close),
+        action("确认", ButtonKind::Primary, move || view.with(|view| view.blank), "source-playlist-submit", submit),
+    ];
+    Some(DialogFrame::new("source-playlist-dialog", || "创建来源播放列表".to_string(), close).dialog(body, footer(None, buttons)))
 }
