@@ -515,11 +515,6 @@ pub fn spin_transform(degrees: f32) -> nana_ui_core::PaintTransform {
     nana_ui_core::PaintTransform { a: cos, b: sin, c: -sin, d: cos, e: 0.0, f: 0.0 }
 }
 
-/// 水平平移，扫光用轨道宽度的百分比。
-pub fn shift_x(x: f32) -> nana_ui_core::PaintTransform {
-    nana_ui_core::PaintTransform { a: 1.0, b: 0.0, c: 0.0, d: 1.0, e: x, f: 0.0 }
-}
-
 fn lerp(from: f32, to: f32, progress: f32) -> f32 {
     from + (to - from) * progress
 }

@@ -61,19 +61,6 @@ fn chrome_button(icon: Icon, label: &'static str, disabled: bool) -> IconButton 
     button.colors_from_style()
 }
 
-/// 28 像素图标按钮。文字只作无障碍名称，不画在按钮上。缺失仓库页的警示图标也用它。
-pub(super) fn shell_icon(icon: Icon, label: impl Into<Arc<str>>, disabled: bool) -> IconButton {
-    let mut button = IconButton::new(icon, label).size(ControlSize::Small).disabled(disabled);
-    let layout = Arc::make_mut(&mut button.style.layout);
-    layout.width = Some(LengthSpec::Px(CONTROL_EDGE));
-    layout.height = Some(LengthSpec::Px(CONTROL_EDGE));
-    layout.min_width = Some(LengthSpec::Px(CONTROL_EDGE));
-    layout.min_height = Some(LengthSpec::Px(CONTROL_EDGE));
-    layout.flex_grow = Some(0.0);
-    layout.flex_shrink = Some(0.0);
-    button
-}
-
 /// 筛选开关。打开或有条件时强调色底；条件数大于 0 时右上角 14px 角标。对应 `.titlebar__filter-btn`。
 fn filter_toggle(label: &'static str, active: bool, count: usize) -> AnyView {
     let mut button = IconButton::new(ADJUSTMENTS_HORIZONTAL, label).size(ControlSize::Large).with_tooltip("筛选");
