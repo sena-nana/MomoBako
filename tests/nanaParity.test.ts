@@ -30,17 +30,8 @@ const rustConst = (source: string, name: string) =>
 const rustStr = (source: string, name: string) =>
   new RegExp(String.raw`const ${name}: &str = "([^"]*)";`).exec(source)?.[1];
 
+// 对话框的开合动效由 NanaUI 对话框框架自己播，Nana 侧没有对应的命名常量，不在这里对照。
 describe("nana parity motion", () => {
-  it("modal_uses_the_vue_timings_and_endpoints", () => {
-    expect(shellCss).toContain("opacity 0.16s ease");
-    expect(shellCss).toContain("transform 0.18s cubic-bezier(0.2, 0.8, 0.2, 1)");
-    expect(shellCss).toContain("translateY(-8px) scale(0.98)");
-    expect(rustConst(motion, "MODAL_OVERLAY_MS")).toBe("160");
-    expect(rustConst(motion, "MODAL_CARD_MS")).toBe("180");
-    expect(rustConst(motion, "MODAL_CARD_SHIFT")).toBe("-8.0");
-    expect(rustConst(motion, "MODAL_CARD_SCALE")).toBe("0.98");
-  });
-
   it("panel_progress_spinner_and_sidebar_use_the_vue_durations", () => {
     expect(shellCss).toContain("opacity 0.14s ease, transform 0.16s ease");
     expect(shellCss).toContain("translateY(-4px)");

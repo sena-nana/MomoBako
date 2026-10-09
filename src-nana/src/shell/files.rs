@@ -436,10 +436,6 @@ pub struct FilesState {
 }
 
 impl FilesState {
-    pub(super) fn dialog_open(&self) -> bool {
-        self.export.open || !matches!(self.dialog, FileDialog::Closed)
-    }
-
     pub(super) fn operation_percent(&self) -> Option<f32> {
         self.operation.as_ref().map(|operation| operation.value)
     }

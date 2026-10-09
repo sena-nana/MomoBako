@@ -2,15 +2,12 @@
 //!
 //! 时钟留在 `ShellViewModel` 上。界面按 `hot::MotionFrame` 取样，逐帧只改绑定的字段；
 //! 内容重挂后进行中的轨道还在，按已经走过的时间取样，不会从 0 重新开始。减少动效时全部立刻停在终点。
+//! 对话框的开合动效由 NanaUI 的对话框框架自己播，这里没有对话框的轨道。
 
 use nana_ui::runtime::view::{widget, AnyView, IntoView};
 
 use super::hot::{LayerPaint, LayerPaintField};
 
-/// 对话框遮罩。`shell.css` `.modal-enter-active` 的 `opacity 0.16s ease`。
-pub const MODAL_OVERLAY_MS: u64 = 160;
-/// 对话框卡片。`transform 0.18s cubic-bezier(0.2, 0.8, 0.2, 1)`。
-pub const MODAL_CARD_MS: u64 = 180;
 /// 面板透明度。`.panel-enter-active` 的 `opacity 0.14s ease`。
 pub const PANEL_OPACITY_MS: u64 = 140;
 /// 面板上移。同一条规则里的 `transform 0.16s ease`，距离 4px。
@@ -34,8 +31,6 @@ pub const FOLDER_HOVER_MS: u64 = 450;
 /// 虚拟列表缩略图空闲预取。
 pub const PREFETCH_IDLE_MS: u64 = 420;
 
-const MODAL_CARD_SHIFT: f32 = -8.0;
-const MODAL_CARD_SCALE: f32 = 0.98;
 const PANEL_SHIFT: f32 = -4.0;
 const FOOTER_REST: f32 = 0.44;
 const PULSE_LOW: f32 = 0.42;
@@ -57,7 +52,7 @@ enum EasingKind {
     Ease,
     /// CSS `ease-in-out`。
     EaseInOut,
-    /// `cubic-bezier(0.2, 0.8, 0.2, 1)`，对话框卡片和侧栏宽度用它。
+    /// `cubic-bezier(0.2, 0.8, 0.2, 1)`，侧栏宽度用它。
     Emphasis,
     Linear,
 }
@@ -67,7 +62,6 @@ enum EasingKind {
 pub struct MotionState {
     now_ms: u64,
     reduced: bool,
-    modal: Option<Track>,
     panel: Option<Track>,
     startup: Option<Track>,
     operation: Option<Track>,
@@ -77,7 +71,6 @@ pub struct MotionState {
     tools: Option<Track>,
     footer: Option<Track>,
     sidebar: Option<Track>,
-    modal_wants_open: bool,
     panel_wants_open: bool,
     tools_hover: bool,
     footer_hover: bool,
@@ -93,7 +86,6 @@ impl Default for MotionState {
         Self {
             now_ms: 0,
             reduced: false,
-            modal: None,
             panel: None,
             startup: None,
             operation: None,
@@ -103,7 +95,6 @@ impl Default for MotionState {
             tools: None,
             footer: None,
             sidebar: None,
-            modal_wants_open: false,
             panel_wants_open: false,
             tools_hover: false,
             footer_hover: false,
@@ -114,15 +105,6 @@ impl Default for MotionState {
             sidebar_expanded_width: crate::theme_map::SIDEBAR_DEFAULT_PX,
         }
     }
-}
-
-/// 对话框当前画面。
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct ModalFrame {
-    pub overlay_opacity: f32,
-    pub card_shift: f32,
-    pub card_scale: f32,
-    pub visible: bool,
 }
 
 /// 面板当前画面。
@@ -160,26 +142,9 @@ impl MotionState {
         if self.reduced {
             return false;
         }
-        [&self.modal, &self.panel, &self.startup, &self.operation, &self.pulse, &self.sweep, &self.spinner, &self.tools, &self.footer, &self.sidebar]
+        [&self.panel, &self.startup, &self.operation, &self.pulse, &self.sweep, &self.spinner, &self.tools, &self.footer, &self.sidebar]
             .into_iter()
             .any(|track| track.as_ref().is_some_and(|track| !track.finished(self.now_ms)))
-    }
-
-    /// 开关有变化时返回 true，调用方据此把界面标成待重建。
-    pub fn set_modal_open(&mut self, open: bool) -> bool {
-        if open == self.modal_wants_open && self.modal.is_some() {
-            return false;
-        }
-        let changed = open != self.modal_wants_open;
-        self.modal_wants_open = open;
-        self.modal = Some(if self.reduced {
-            settled_modal(open)
-        } else if open {
-            track(self.now_ms, 0.0, 1.0, MODAL_CARD_MS, EasingKind::Emphasis, false)
-        } else {
-            track(self.now_ms, 1.0, 0.0, MODAL_CARD_MS, EasingKind::Emphasis, false)
-        });
-        changed
     }
 
     /// 开关有变化时返回 true，调用方据此把界面标成待重建。
@@ -294,21 +259,6 @@ impl MotionState {
         });
     }
 
-    pub fn modal_frame(&self) -> ModalFrame {
-        let progress = self.modal.as_ref().map(|track| track.value(self.now_ms)).unwrap_or(0.0);
-        let overlay = if self.reduced {
-            if self.modal_wants_open { 1.0 } else { 0.0 }
-        } else {
-            scalar_at(self.modal.as_ref(), self.now_ms, MODAL_OVERLAY_MS)
-        };
-        ModalFrame {
-            overlay_opacity: overlay,
-            card_shift: MODAL_CARD_SHIFT * (1.0 - progress),
-            card_scale: MODAL_CARD_SCALE + (1.0 - MODAL_CARD_SCALE) * progress,
-            visible: self.modal_wants_open || self.modal.as_ref().is_some_and(|track| !track.finished(self.now_ms) && track.value(self.now_ms) > 0.01),
-        }
-    }
-
     pub fn panel_frame(&self) -> PanelFrame {
         let progress = self.panel.as_ref().map(|track| track.value(self.now_ms)).unwrap_or(0.0);
         let opacity = if self.reduced {
@@ -396,9 +346,6 @@ impl MotionState {
     }
 
     fn snap_all(&mut self) {
-        if let Some(track) = &mut self.modal {
-            *track = settled_modal(self.modal_wants_open);
-        }
         if let Some(track) = &mut self.panel {
             *track = settled_scalar(self.panel_wants_open);
         }
@@ -423,17 +370,10 @@ impl MotionState {
     }
 
     fn drop_finished(&mut self) {
-        if self.modal.as_ref().is_some_and(|track| track.finished(self.now_ms) && !self.modal_wants_open) {
-            self.modal = None;
-        }
         if self.panel.as_ref().is_some_and(|track| track.finished(self.now_ms) && !self.panel_wants_open) {
             self.panel = None;
         }
     }
-}
-
-fn settled_modal(open: bool) -> Track {
-    track_done(if open { 1.0 } else { 0.0 })
 }
 
 fn settled_scalar(open: bool) -> Track {
@@ -586,52 +526,10 @@ pub fn note_sidebar_resize(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::shell::{ShellMessage, ShellViewModel};
-
-    #[test]
-    fn modal_matches_vue_endpoints_and_survives_the_next_reduce() {
-        let mut model = writable_shell();
-        model.reduce(ShellMessage::Files(super::super::files::FilesMessage::OpenDialog(
-            super::super::files::FileDialog::CreateDirectory,
-        )));
-        let opened = model.motion.modal_frame();
-        assert_eq!(opened.overlay_opacity, 0.0);
-        assert_eq!(opened.card_shift, MODAL_CARD_SHIFT);
-        assert_eq!(opened.card_scale, MODAL_CARD_SCALE);
-        model.motion.advance(MODAL_OVERLAY_MS);
-        let mid = model.motion.modal_frame().overlay_opacity;
-        assert_eq!(mid, 1.0);
-        model.reduce(ShellMessage::Refresh);
-        assert_eq!(model.motion.modal_frame().overlay_opacity, mid);
-        model.motion.advance(MODAL_CARD_MS);
-        let frame = model.motion.modal_frame();
-        assert_eq!(frame.overlay_opacity, 1.0);
-        assert_eq!(frame.card_shift, 0.0);
-        assert_eq!(frame.card_scale, 1.0);
-        assert!(frame.visible);
-    }
-
-    fn writable_shell() -> ShellViewModel {
-        let mut model = ShellViewModel::default();
-        model.repository_id = Some("repo".into());
-        model.workspace.active_repo_id = Some("repo".into());
-        model.workspace.repositories.push(super::super::workspace::WorkspaceRepository {
-            repo_id: "repo".into(),
-            name: "库".into(),
-            path: "C:/repo".into(),
-            status: "ready".into(),
-            backend_plugin_id: "filesystem".into(),
-            capabilities: vec!["write".into()],
-            cache_required: false,
-            cache_status: String::new(),
-        });
-        model
-    }
 
     #[test]
     fn reduced_motion_snaps_every_painted_track() {
         let mut motion = MotionState::default();
-        motion.set_modal_open(true);
         motion.set_panel_open(true);
         motion.set_startup_percent(40.0);
         motion.set_operation_percent(Some(32.0));
@@ -643,8 +541,6 @@ mod tests {
         motion.set_sidebar_collapsed(true, 276.0);
         motion.advance(40);
         motion.set_reduced(true);
-        assert_eq!(motion.modal_frame().overlay_opacity, 1.0);
-        assert_eq!(motion.modal_frame().card_scale, 1.0);
         assert_eq!(motion.panel_frame().opacity, 1.0);
         assert_eq!(motion.panel_frame().shift, 0.0);
         assert_eq!(motion.startup_percent(), 40.0);
