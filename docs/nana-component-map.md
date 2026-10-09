@@ -2,7 +2,7 @@
 
 本文锁定 `momobako-nana` 当前构建能用的 Nana 组件、和旧 Tauri/Vue 工作台的对应关系，以及还没有现成组件的宿主缺口。稳定 id 以 `src-nana/src/capability.rs` 的 `COMPILED_COMPONENT_IDS` 为准；目录变化时测试会失败。
 
-构建 feature 是 `hosted`、`bundled-fonts`、`components`、`icons-tabler`。`components` 打开 calendar、charts、controls、graph-canvas、image-viewer、rich-text。`hosted` 带上 GPU 和 AccessKit。未启用 `syntax-highlighting` 和 `packaged-resources`。Nana 修订是 `e2780d929bb452182a34d266e459958378bf363d`，不保留本地副本。
+构建 feature 是 `hosted`、`bundled-fonts`、`components`、`icons-tabler`。`components` 打开 calendar、charts、controls、graph-canvas、image-viewer、rich-text。`hosted` 带上 GPU 和 AccessKit。未启用 `syntax-highlighting` 和 `packaged-resources`。Nana 修订是 `c6dc1086bb1b21406ee5e20a40ac6207c664913b`，不保留本地副本。
 
 ## 已编译组件
 
@@ -14,7 +14,7 @@
 
 内容、预览和设置：`text`、`card`、`thumbnail`、`avatar`、`labeled-value`、`image-viewer`、`native-markdown`、`selectable-rich-text`、`gpu-view`、`gpu-texture-view`、`settings`、`settings-collapsible-card`、`appearance-section`、`about-section`。
 
-仅在插件贡献声明了对应视图时使用：`calendar-heatmap`、`donut-chart`、`time-series-chart`、`graph-canvas`、`graph-minimap`、`qr-code`。缓存和任务不做成装饰图表。
+仅在插件贡献声明了对应视图时使用：`calendar-heatmap`、`chart`（折线、面积、柱状、环形等都由它画）、`graph-canvas`、`graph-minimap`、`qr-code`。缓存和任务不做成装饰图表。
 
 ## 探针结论
 

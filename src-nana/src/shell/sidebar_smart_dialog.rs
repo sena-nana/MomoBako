@@ -7,13 +7,18 @@
 use crate::shell::sidebar::{SidebarSmartFolder, SmartFolderField};
 use crate::shell::view_part_overlay::dialog::{
     action, action_button, error_line, footer, select_field, text_area_field, text_field, two_columns, Choices, DialogFrame,
-    DialogWidth,
 };
 use crate::shell::view_part_overlay::session::{Draft, Projected};
 use crate::shell::{ShellMessage, ShellViewModel, SidebarMessage};
 use nana_ui::runtime::view::{fields, signal, widget, AnyView, IntoView, Signal};
-use nana_ui::runtime::{LengthSpec, ScrollAxes, ScrollView, Stack};
-use nana_ui::ButtonKind;
+use nana_ui::runtime::{LengthAtom, LengthSpec, ScrollAxes, ScrollView, Stack, ViewportAxis};
+use nana_ui::{ButtonKind, DialogSize};
+
+/// `.smart-folder-dialog { width: min(720px, calc(100vw - 40px)) }`。
+const SMART_FOLDER_DIALOG: DialogSize = DialogSize::Width(LengthSpec::Min2(
+    LengthAtom::Px(720.0),
+    LengthAtom::CalcViewport { axis: ViewportAxis::Width, value: 100.0, offset_px: -40.0 },
+));
 
 /// 智能文件夹对话框要显示的东西。各输入框的草稿不在这里，见 [`Draft`]。
 #[derive(Clone, Debug, PartialEq)]
@@ -171,7 +176,7 @@ pub fn smart_folder_dialog(model: &ShellViewModel) -> Option<AnyView> {
     ];
     Some(
         DialogFrame::new("smart-folder-dialog", move || view.with(|view| view.title.to_string()), close)
-            .width(DialogWidth::Wide)
+            .size(SMART_FOLDER_DIALOG)
             .busy(busy)
             .dialog(scroll, footer(None, buttons)),
     )

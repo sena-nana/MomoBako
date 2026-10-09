@@ -17,7 +17,7 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-const NANA_REVISION: &str = "e2780d929bb452182a34d266e459958378bf363d";
+const NANA_REVISION: &str = "c6dc1086bb1b21406ee5e20a40ac6207c664913b";
 const EVIDENCE_SCHEMA: &str = "momobako.nana.offscreen/v1";
 
 #[derive(Debug, Clone, Copy)]
