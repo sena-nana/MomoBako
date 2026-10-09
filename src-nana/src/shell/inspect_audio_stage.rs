@@ -7,7 +7,6 @@
 use nana_ui::runtime::view::{widget, AnyView, IntoView};
 use nana_ui::runtime::{AlignSpec, JustifySpec, LengthSpec, RadiusTier, SemanticColorRole, Stack, TextHorizontalAlignment};
 
-use super::super::ShellViewModel;
 use super::frame::text;
 use super::preview_paint::VinylRecord;
 
@@ -16,14 +15,12 @@ const RECORD_MAX: f32 = 380.0;
 /// Vue `@media (max-width: 820px)`：舞台和歌词改成上下排。
 const STACK_BREAKPOINT: f32 = 820.0;
 
-/// 音频舞台。没有封面时唱片中间写「音频」，副标题写「通用音频」。
-pub(super) fn audio_stage(model: &ShellViewModel) -> AnyView {
-    let viewport = model.viewport_width.max(1.0);
+/// 音频舞台。`name` 是文件名，`viewport` 是窗口宽。没有封面时唱片中间写「音频」，副标题写「通用音频」。
+pub(super) fn audio_stage(name: &str, viewport: f32) -> AnyView {
+    let viewport = viewport.max(1.0);
     let stacked = viewport <= STACK_BREAKPOINT;
-    let path = model.inspect.target_path.clone().unwrap_or_default();
-    let name = path.rsplit(['/', '\\']).next().unwrap_or(&path).to_string();
     let extension = name.rsplit_once('.').map(|(_, ext)| ext.to_string()).unwrap_or_default();
-    let title = super::super::player_view::bar::display_title(&name, &extension);
+    let title = super::super::player_view::bar::display_title(name, &extension);
     // h2 字号 clamp(17px, 1.8vw, 22px)。
     let title_size = (viewport * 0.018).clamp(17.0, 22.0);
     let mut heading = text(&title, title_size, 700, SemanticColorRole::Text, title_size * 1.24).truncating();
@@ -133,10 +130,8 @@ fn pill(label: &str, strong: bool, key: &'static str) -> AnyView {
 }
 
 /// 准备卡：读取或解码时居中显示文件名、「准备音频」和一条进度。
-pub(super) fn loading_card(model: &ShellViewModel) -> AnyView {
-    let path = model.inspect.target_path.clone().unwrap_or_default();
-    let name = path.rsplit(['/', '\\']).next().unwrap_or(&path).to_string();
-    let name = if name.is_empty() { "准备播放".to_string() } else { name };
+pub(super) fn loading_card(name: &str) -> AnyView {
+    let name = if name.is_empty() { "准备播放".to_string() } else { name.to_string() };
     let card = widget(
         Stack::column(10.0)
             .padding(14.0)

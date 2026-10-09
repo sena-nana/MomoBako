@@ -7,16 +7,17 @@ use nana_ui::runtime::view::{widget, AnyView, IntoView};
 use nana_ui::runtime::{Activate, AlignSpec, Button, LengthSpec, ScrollAxes, ScrollView, SemanticColorRole, Stack};
 
 use super::super::inspect::InspectMessage;
-use super::super::{ShellMessage, ShellViewModel};
+use super::super::ShellMessage;
+use super::body::Pixels;
 use super::frame::text;
 
-/// 用页位图画白纸。高度跟宽高比走，超出时滚动区滚动，不裁掉页底。
-pub(super) fn page_bitmap(model: &ShellViewModel) -> Option<AnyView> {
-    let (width, height, rgba) = model.inspect.raster_frame()?;
-    if width == 0 || height == 0 {
-        return None;
-    }
-    let url = super::super::inspect::rgba_png_data_url(width, height, rgba)?;
+/// 用页位图画白纸。高度跟宽高比走，超出时滚动区滚动，不裁掉页底。编码失败时是一张空白的纸位。
+pub(super) fn page_bitmap(raster: &Pixels) -> AnyView {
+    let (width, height) = raster.size();
+    let Some(url) = super::super::inspect::rgba_png_data_url(width, height, raster.rgba()) else {
+        eprintln!("Nana 页位图编码失败：{width}x{height}");
+        return widget(Stack::column(0.0)).key("inspect-native-page").into_any();
+    };
     let image = nana_ui_core::BackgroundImage::Url {
         url,
         fit: nana_ui_core::BackgroundImageFit::Length,
@@ -49,7 +50,7 @@ pub(super) fn page_bitmap(model: &ShellViewModel) -> Option<AnyView> {
             }];
             layout.paint.content_image = Some(image);
         });
-    Some(widget(frame).key("inspect-native-page").into_any())
+    widget(frame).key("inspect-native-page").into_any()
 }
 
 /// 滚动区：翻页在上，页纸在下。`key` 带文件和页码，翻页或换文件时回到顶部。

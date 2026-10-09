@@ -364,6 +364,8 @@ pub enum FilesMessage {
     NoteError(String),
     /// 缩略图已经写入。路径是缓存文件，用来重新解码纹理。
     ThumbnailSaved { path: String, thumbnail_path: Option<String>, custom: bool },
+    /// 外部文件拖到文件列上：悬停、放下或离开。能不能放、放进哪个仓库由归约按当时的 ViewModel 决定。
+    HostDrop(nana_ui::runtime::FileDropEvent),
 }
 
 /// 文件操作进度。宽度过渡由壳层动效时钟绘制。
@@ -862,6 +864,8 @@ impl FilesState {
             FilesMessage::HardlinkConfirmed(result) => self.note_hardlink_confirmed(result),
             FilesMessage::NoteError(error) => self.note_error(error),
             FilesMessage::ThumbnailSaved { path, thumbnail_path, custom } => self.note_custom_thumbnail(&path, thumbnail_path, custom),
+            // 要读仓库和面板，在 `reduce_message` 里转成宿主拖放消息。
+            FilesMessage::HostDrop(_) => {}
         }
     }
 

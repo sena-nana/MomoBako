@@ -3,10 +3,14 @@
 //! 预览页的外框在 `inspect_preview_frame`，预览框里的内容在 `inspect_preview_body`，
 //! 音频舞台在 `inspect_audio_stage`，PDF 页纸在 `inspect_preview_page`。播放、暂停、跳转和音量
 //! 只在底部播放条上，预览页里不另放一套传输控件。
+//!
+//! 文件预览页常驻在文件路由里（[`preview_page`]），读 [`PreviewSignals`]；搜索路由仍由旧视图函数
+//! [`inspect_surface`] 整块建出。
 
-use nana_ui::runtime::view::{widget, AnyView, IntoView};
+use nana_ui::runtime::view::{widget, AnyView, IntoView, NodeRef};
 use nana_ui::runtime::{LengthSpec, Stack};
 
+use super::inspect_metadata_view::MetadataSignals;
 use super::ShellViewModel;
 
 #[path = "inspect_preview_frame.rs"]
@@ -20,17 +24,22 @@ mod page;
 #[path = "preview_paint.rs"]
 mod preview_paint;
 
-/// 检视面：搜索面板时只有搜索，已选文件时是文件预览页。
+pub(crate) use frame::PreviewSignals;
+
+/// 搜索路由的检视面：搜索面板独占主体，和 Vue 的 `SearchPanel` 一样不和预览叠在一起。筛选栏由壳层放置。
+/// 搜索路由只在搜索面板时出现；文件预览页常驻在文件路由里，不经过这里，见 [`preview_page`]。
 pub(super) fn inspect_surface(model: &ShellViewModel) -> AnyView {
-    let inspect = &model.inspect;
-    // 搜索面板独占主体，和 Vue 的 `SearchPanel` 一样不和预览叠在一起。筛选栏由壳层放置。
-    if model.workspace.panel == super::workspace::WorkspacePanel::Search {
-        return super::inspect_search_view::search_panel(model);
-    }
-    let mut rows = Vec::new();
-    if inspect.has_target() {
-        rows.push(frame::preview_page(model, body::preview_body(model)));
-    }
+    super::inspect_search_view::search_panel(model)
+}
+
+/// 文件预览页：预览框架铺满文件列，播放条由框架贴在页底（Vue `files-preview-page` 里的
+/// `WorkspacePlayerBar`）。`bar` 是播放条的占位节点。
+pub(super) fn preview_page(signals: PreviewSignals, metadata: MetadataSignals, bar: NodeRef) -> AnyView {
+    surface(vec![frame::preview_page(signals, metadata, bar)])
+}
+
+/// 检视面的外框：占满剩余高度，行距 8。
+fn surface(rows: Vec<AnyView>) -> AnyView {
     widget(
         Stack::fill_column(8.0)
             .min_height(LengthSpec::Px(0.0))
